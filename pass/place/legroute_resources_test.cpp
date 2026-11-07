@@ -1,5 +1,6 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include <set>
+#include <tuple>
 
 #include "gtest/gtest.h"
 #include "legroute_internal.hpp"
@@ -95,6 +96,58 @@ void expect_capacity_parity(const Grid& grid) {
       EXPECT_EQ(resource.represented_capacity(t), expected);
     }
   }
+}
+
+void paired_design(Fixture& f) {
+  f.options.paired_pin_reserve = f.options.legal_boxes = true;
+  f.options.final_skip_clock                           = true;
+  f.options.clock_spine                                = false;
+  f.options.reserved_tracks                            = 0;
+  f.options.box_reserve = "M2:9,M3:9";  // The opt-in paired rule replaces, rather than adds to, uniform reservations.
+  auto& master          = f.tech.macros.at("dff");
+  for (const auto* name : {"D0", "D1", "Q0", "Q1"}) {
+    master.pins[name] = {name[0] == 'Q' ? "OUTPUT" : "INPUT", "SIGNAL", {{"M1", {.04, .05, .06, .2}}}};
+  }
+  for (const auto& [name, x, y] : {
+           std::tuple{"ff1", 400, 250},
+           std::tuple{"ff2", 800,   0}
+  }) {
+    Ann_place pose(x, y, 400, 250);
+    pose.status      = ph::Status::PLACED;
+    pose.orientation = y ? ph::Orientation::FS : ph::Orientation::N;
+    f.fp.components.push_back({name, "dff", pose});
+  }
+  f.fp.terminals.push_back(
+      {"io", "external_io", "INPUT", 25, 525, ph::Orientation::N, ph::Status::FIXED, {{"M4", {-10, -10, 10, 10}}}});
+  f.fp.nets.push_back({
+      "external_many",
+      {{"ff", "Q0"}, {"ff", "D0"}, {"ff1", "D0"}, {"ff2", "D0"}}
+  });
+  f.fp.nets.push_back({
+      "external_io",
+      {{"ff1", "Q0"}, {"PIN", "io"}}
+  });
+  f.fp.nets.push_back({
+      "internal",
+      {{"ff", "Q1"}, {"ff1", "D1"}}
+  });
+  f.fp.nets.push_back({
+      "external_other",
+      {{"ff", "D1"}, {"ff2", "Q0"}}
+  });
+  f.fp.nets.push_back({
+      "clk",
+      {{"ff", "CLK"}, {"ff1", "CLK"}},
+      {},
+      "CLOCK"
+  });
+}
+
+void uniform_paired_design(Fixture& f) {
+  paired_design(f);
+  f.options.paired_pin_cap        = 16;
+  f.fp.components[2].place.status = ph::Status::FIXED;  // External endpoint, outside the single movable cellbox.
+  std::erase_if(f.fp.nets, [](const auto& net) { return net.name == "external_other"; });
 }
 }  // namespace
 
@@ -281,5 +334,492 @@ TEST(LegrouteResources, RejectsInvalidCoordinatesAndCapacityMismatch) {
   bad = catalog;
   bad.layers[0].exclude(0, 3, Track_exclusion::power_metal);
   EXPECT_THROW(bad.finalize(), std::logic_error);
+}
+
+TEST(LegrouteResources, UsableSupplyPrecedesBoxBudgetAndConservativelyKeepsAnonymousHeadroomPerRow) {
+  Track_resource_catalog catalog;
+  catalog.anonymous_clock_h = catalog.anonymous_clock_v = {0};
+  Track_resource_layer resource;
+  resource.name  = "M2";
+  resource.bands = {
+      {-75, -25, 25, 75}
+  };
+  resource.tiles.resize(1);
+  resource.tiles[0].anonymous_headroom = 1;
+  resource.tiles[0].cellbox_budget     = 1;
+  resource.tiles[0].coarse_capacity    = 1;
+  resource.exclude(0, 0, Track_exclusion::power_metal);
+  resource.exclude(0, 0, Track_exclusion::region_obstacle);
+  catalog.layers.push_back(resource);
+  ASSERT_NO_THROW(catalog.finalize());
+  const auto& resolved = catalog.layers[0];
+  EXPECT_EQ(resolved.usable_capacity(0), 2);
+  EXPECT_EQ(resolved.usable_capacity(0, -100, 0), 0);  // The remaining lower-row coordinate cannot stand in for anonymous headroom.
+  EXPECT_EQ(resolved.usable_capacity(0, 0, 100), 1);
+  EXPECT_EQ(resolved.represented_capacity(0), 1);
+}
+
+TEST(LegrouteResources, PairedReservationCountsExternalPinsAndReplacesUniformBudgetExactlyOnce) {
+  Fixture f;
+  paired_design(f);
+  const auto d     = build_design(f.tech, f.fp, f.timing, f.options, nullptr);
+  auto       g     = build_grid(d, {});
+  const auto boxes = build_boxes(d, g);
+  ASSERT_EQ(boxes.boxes.size(), 2u);
+  const auto base_cap     = g.cap;
+  const auto base_box_cap = g.box_cap;
+  resolve_paired_pin_reservations(d, g, boxes);
+  ASSERT_EQ(g.paired_pin_reservations.size(), 2u);
+  const auto& first = g.paired_pin_reservations[0];
+  EXPECT_EQ(first.cells, (std::vector<int>{0, 1}));
+  EXPECT_EQ(first.internal_nets, (std::vector<int>{2}));
+  EXPECT_EQ(first.external_pins.size(), 5u);  // Three external nets, but five individual pin obligations.
+  EXPECT_EQ(first.external_rows, (std::array<unsigned, 2>{3, 2}));
+  EXPECT_EQ(first.horizontal_tracks, (std::array<unsigned, 2>{1, 1}));
+  EXPECT_EQ(first.vertical_tracks, 3u);
+  EXPECT_EQ(first.actual_pairs, 3u);
+  EXPECT_FALSE(first.grouping_invalid);  // cap=0 retains the previous odd/imbalanced count-control behavior.
+  EXPECT_EQ(first.internal_vertical_estimate, 1u);
+  EXPECT_EQ(first.internal_horizontal_estimate, 1u);
+  EXPECT_FALSE(first.short_supply);
+  EXPECT_TRUE(
+      std::ranges::any_of(first.external_pins, [](const auto& pin) { return pin.net == 1 && pin.pin == 0 && pin.row == 1; }));
+  EXPECT_EQ(g.paired_pin_reservations[1].external_pins.size(), 2u);
+  EXPECT_EQ(g.paired_pin_reservations[1].vertical_tracks, 1u);
+  for (size_t t = 0; t < g.size(); ++t) {
+    const int index = g.paired_pin_reservation_of_tile[t];
+    EXPECT_EQ(g.box_cap[t], base_box_cap[t] - (index >= 0 ? 2 : 0));
+    const auto budget = index >= 0 ? g.paired_pin_reservations[size_t(index)].vertical_tracks
+                                         + g.paired_pin_reservations[size_t(index)].internal_vertical_estimate
+                                   : 0;
+    EXPECT_EQ(g.cap[size_t(first.vertical_layer)][t], base_cap[size_t(first.vertical_layer)][t] - int(budget));
+    EXPECT_EQ(layer(g, "M3").tiles[t].cellbox_budget, budget);
+  }
+  const auto once    = g.paired_pin_reservations;
+  const auto cap     = g.cap;
+  const auto box_cap = g.box_cap;
+  resolve_paired_pin_reservations(d, g, boxes);
+  EXPECT_EQ(g.paired_pin_reservations, once);
+  EXPECT_EQ(g.cap, cap);
+  EXPECT_EQ(g.box_cap, box_cap);
+  EXPECT_NO_THROW(validate_paired_pin_reservations(d, g, boxes));
+  expect_capacity_parity(g);
+
+  auto stale = boxes;
+  stale.boxes[0].cells.pop_back();
+  EXPECT_THROW(validate_paired_pin_reservations(d, g, stale), std::logic_error);
+  f.fp.components[1].place.y           = 0;
+  f.fp.components[1].place.orientation = ph::Orientation::N;
+  EXPECT_THROW(validate_paired_pin_reservations(d, g, boxes), std::logic_error);
+  resolve_paired_pin_reservations(d, g, boxes);  // Same membership, new row obligations: never widen ceil(P/2) for imbalance.
+  EXPECT_EQ(g.paired_pin_reservations[0].external_rows, (std::array<unsigned, 2>{5, 0}));
+  EXPECT_EQ(g.paired_pin_reservations[0].vertical_tracks, 3u);
+  EXPECT_NO_THROW(validate_paired_pin_reservations(d, g, boxes));
+}
+
+TEST(LegrouteResources, PairedReservationRequiresOnePhysicalM2TrackInEachRow) {
+  Fixture f;
+  paired_design(f);
+  std::erase_if(f.fp.tracks, [](const auto& track) { return track.layer == "M2"; });
+  f.fp.tracks.push_back({"Y", "M2", 25, 2, 50});  // Two tracks total, both in the lower physical row.
+  const auto d     = build_design(f.tech, f.fp, f.timing, f.options, nullptr);
+  auto       g     = build_grid(d, {});
+  const auto boxes = build_boxes(d, g);
+  resolve_paired_pin_reservations(d, g, boxes);
+  const auto& reservation = g.paired_pin_reservations[0];
+  EXPECT_EQ(reservation.horizontal_usable, (std::array<unsigned, 2>{2, 0}));
+  EXPECT_EQ(reservation.horizontal_tracks, (std::array<unsigned, 2>{1, 1}));
+  EXPECT_EQ(reservation.vertical_tracks, 3u);
+  EXPECT_TRUE(reservation.short_supply);
+  EXPECT_TRUE(g.box_short[size_t(reservation.tile)]);
+  EXPECT_FALSE(box_fits(d, g, boxes.boxes[0], reservation.tile));
+  const auto keys = g.keys.size();
+  resolve_paired_pin_reservations(d, g, boxes);
+  EXPECT_EQ(g.keys.size(), keys);
+  EXPECT_NO_THROW(validate_paired_pin_reservations(d, g, boxes));
+  expect_capacity_parity(g);
+}
+
+TEST(LegrouteResources, PairedReservationSubtractsOverlappingPowerExclusionsOnlyOnce) {
+  Fixture f;
+  paired_design(f);
+  ph::Net power;
+  power.name = "VDD";
+  power.use  = "POWER";
+  const ph::Route_path rail{
+      "M3",
+      20,
+      {},
+      {ph::Route_point{75, 0, {}}, ph::Route_point{75, 2000, {}}},
+      {}
+  };
+  power.wires.push_back({
+      "FIXED",
+      {rail, rail}
+  });
+  f.fp.special_nets.push_back(power);
+  Legroute_regions regions;
+  regions.obstacles.push_back({
+      "M3",
+      {65, 0, 85, 2000}
+  });
+  const auto  d     = build_design(f.tech, f.fp, f.timing, f.options, nullptr);
+  auto        g     = build_grid(d, regions);
+  const auto  boxes = build_boxes(d, g);
+  const int   tile  = boxes.boxes[0].tile;
+  const auto& m3    = layer(g, "M3");
+  ASSERT_EQ(m3.tiles[size_t(tile)].exclusions.size(), 1u);
+  const auto supply = int(m3.bands[m3.tiles[size_t(tile)].band].size()) - 1;
+  resolve_paired_pin_reservations(d, g, boxes);
+  const auto& reservation = g.paired_pin_reservations[0];
+  EXPECT_EQ(reservation.vertical_usable, unsigned(supply));
+  EXPECT_EQ(g.cap[size_t(reservation.vertical_layer)][size_t(tile)],
+            supply - int(reservation.vertical_tracks + reservation.internal_vertical_estimate));
+  EXPECT_EQ(reasons_at(layer(g, "M3"), tile, 75),
+            uint8_t(Track_exclusion::power_metal) | uint8_t(Track_exclusion::region_obstacle));
+  expect_capacity_parity(g);
+}
+
+TEST(LegrouteResources, PairedReservationDoesNotInventM2SupplyWithoutSupportedDefTracks) {
+  for (const bool masked_pattern : {false, true}) {
+    SCOPED_TRACE(masked_pattern);
+    Fixture f;
+    paired_design(f);
+    std::erase_if(f.fp.tracks, [](const auto& track) { return track.layer == "M2"; });
+    if (masked_pattern) {
+      f.fp.tracks.push_back({"Y", "M2", 25, 40, 50, 1});
+    }
+    const auto d     = build_design(f.tech, f.fp, f.timing, f.options, nullptr);
+    auto       g     = build_grid(d, {});
+    const auto boxes = build_boxes(d, g);
+    resolve_paired_pin_reservations(d, g, boxes);
+    ASSERT_FALSE(g.paired_pin_reservations.empty());
+    for (const auto& reservation : g.paired_pin_reservations) {
+      EXPECT_EQ(reservation.horizontal_usable, (std::array<unsigned, 2>{0, 0}));
+      EXPECT_TRUE(reservation.short_supply);
+      EXPECT_TRUE(g.box_short[size_t(reservation.tile)]);
+    }
+    EXPECT_NO_THROW(validate_paired_pin_reservations(d, g, boxes));
+    expect_capacity_parity(g);
+
+    f.options.paired_pin_reserve = false;
+    const auto legacy            = build_grid(d, {});
+    EXPECT_FALSE(layer(legacy, "M2").bands[0].empty());  // The uniform policy keeps its existing LEF fallback.
+  }
+}
+
+TEST(LegrouteResources, PairedReservationRejectsMovableAndAmbiguousRowContracts) {
+  Fixture f;
+  paired_design(f);
+  const auto d         = build_design(f.tech, f.fp, f.timing, f.options, nullptr);
+  auto       g         = build_grid(d, {});
+  auto       boxes     = build_boxes(d, g);
+  boxes.boxes[0].fixed = false;
+  EXPECT_THROW(resolve_paired_pin_reservations(d, g, boxes), std::invalid_argument);
+  EXPECT_TRUE(g.paired_pin_reservations.empty());
+  boxes.boxes[0].fixed       = true;
+  f.fp.components[0].place.y = 1;
+  EXPECT_THROW(resolve_paired_pin_reservations(d, g, boxes), std::logic_error);
+  EXPECT_TRUE(g.paired_pin_reservations.empty());
+}
+
+TEST(LegrouteResources, PairedReservationRejectsRoutedResetEvenWhenFinalWouldSkipIt) {
+  for (const auto* skip : {"", "reset"}) {
+    SCOPED_TRACE(skip);
+    Fixture f;
+    paired_design(f);
+    f.options.final_skip_nets           = skip;
+    f.tech.macros.at("dff").pins["RST"] = {"INPUT", "SIGNAL", {{"M1", {.04, .05, .06, .2}}}};
+    f.fp.nets.push_back({
+        "async_reset",
+        {{"ff", "Q0"}, {"ff1", "RST"}}
+    });
+    const auto d = build_design(f.tech, f.fp, f.timing, f.options, nullptr);
+    ASSERT_TRUE(d.nets.back().routed && d.nets.back().reset);
+    auto       g      = build_grid(d, {});
+    const auto boxes  = build_boxes(d, g);
+    const auto before = g.cap;
+    try {
+      resolve_paired_pin_reservations(d, g, boxes);
+      FAIL() << "routed reset was silently omitted from paired obligations";
+    } catch (const std::invalid_argument& error) {
+      EXPECT_NE(std::string(error.what()).find("async_reset"), std::string::npos);
+      EXPECT_NE(std::string(error.what()).find("routed reset"), std::string::npos);
+    }
+    EXPECT_TRUE(g.paired_pin_reservations.empty());
+    EXPECT_EQ(g.cap, before);
+  }
+}
+
+TEST(LegrouteResources, PairedReservationRejectsCaseInsensitiveSkippedRoutedSignal) {
+  Fixture f;
+  paired_design(f);
+  f.options.final_skip_nets = "TERNAL_MA";  // Case-insensitive search matches external_many.
+  const auto d              = build_design(f.tech, f.fp, f.timing, f.options, nullptr);
+  auto       g              = build_grid(d, {});
+  const auto boxes          = build_boxes(d, g);
+  try {
+    resolve_paired_pin_reservations(d, g, boxes);
+    FAIL() << "Final-only skip silently removed a routed signal's paired obligations";
+  } catch (const std::invalid_argument& error) {
+    EXPECT_NE(std::string(error.what()).find("external_many"), std::string::npos);
+    EXPECT_NE(std::string(error.what()).find("final_skip_nets"), std::string::npos);
+  }
+  EXPECT_TRUE(g.paired_pin_reservations.empty());
+  f.options.final_skip_nets = "missing_net";
+  EXPECT_NO_THROW(resolve_paired_pin_reservations(d, g, boxes));
+  ASSERT_EQ(g.paired_pin_reservations.size(), 2u);
+  EXPECT_EQ(g.paired_pin_reservations[0].external_pins.size(), 5u);
+}
+
+TEST(LegrouteResources, PairedReservationRequiresExplicitClockExclusion) {
+  Fixture f;
+  paired_design(f);
+  f.options.final_skip_clock = false;
+  f.options.final_skip_nets  = "clk";  // A name skip does not establish the ordinary-only clock contract.
+  const auto d               = build_design(f.tech, f.fp, f.timing, f.options, nullptr);
+  auto       g               = build_grid(d, {});
+  const auto boxes           = build_boxes(d, g);
+  try {
+    resolve_paired_pin_reservations(d, g, boxes);
+    FAIL() << "required clock was silently omitted without final_skip_clock";
+  } catch (const std::invalid_argument& error) {
+    EXPECT_NE(std::string(error.what()).find("clk"), std::string::npos);
+    EXPECT_NE(std::string(error.what()).find("final_skip_clock"), std::string::npos);
+  }
+  EXPECT_TRUE(g.paired_pin_reservations.empty());
+  f.options.final_skip_clock = true;
+  EXPECT_NO_THROW(resolve_paired_pin_reservations(d, g, boxes));
+}
+
+TEST(LegrouteResources, PairedReservationReportsVerticalShortageWithoutChangingTheNominalRule) {
+  Fixture f;
+  paired_design(f);
+  Legroute_regions regions;
+  regions.obstacles.push_back({
+      "M3",
+      {0, 0, 700, 2000}
+  });
+  const auto d     = build_design(f.tech, f.fp, f.timing, f.options, nullptr);
+  auto       g     = build_grid(d, regions);
+  const auto boxes = build_boxes(d, g);
+  resolve_paired_pin_reservations(d, g, boxes);
+  const auto& reservation = g.paired_pin_reservations[0];
+  EXPECT_EQ(reservation.vertical_usable, 2u);
+  EXPECT_EQ(reservation.vertical_tracks, 3u);
+  EXPECT_TRUE(reservation.short_supply);
+  EXPECT_EQ(g.cap[size_t(reservation.vertical_layer)][size_t(reservation.tile)], 0);
+  EXPECT_EQ(layer(g, "M3").tiles[size_t(reservation.tile)].cellbox_budget, 4u);
+  EXPECT_NO_THROW(validate_paired_pin_reservations(d, g, boxes));
+  expect_capacity_parity(g);
+}
+
+TEST(LegrouteResources, PairedReservationRetainsSeparateInternalDemandWhenExternalPinCountIsZero) {
+  Fixture f;
+  paired_design(f);
+  std::erase_if(f.fp.nets, [](const auto& net) { return net.name != "internal"; });
+  const auto d     = build_design(f.tech, f.fp, f.timing, f.options, nullptr);
+  auto       g     = build_grid(d, {});
+  const auto boxes = build_boxes(d, g);
+  resolve_paired_pin_reservations(d, g, boxes);
+  const auto& reservation = g.paired_pin_reservations[0];
+  EXPECT_TRUE(reservation.external_pins.empty());
+  EXPECT_EQ(reservation.vertical_tracks, 0u);
+  EXPECT_EQ(reservation.horizontal_tracks, (std::array<unsigned, 2>{1, 1}));
+  EXPECT_EQ(reservation.internal_nets, (std::vector<int>{0}));
+  EXPECT_EQ(reservation.internal_vertical_estimate, 1u);
+  EXPECT_EQ(reservation.internal_horizontal_estimate, 1u);
+  EXPECT_EQ(layer(g, "M3").tiles[size_t(reservation.tile)].cellbox_budget, 1u);
+  EXPECT_EQ(g.cap[size_t(reservation.vertical_layer)][size_t(reservation.tile)], int(reservation.vertical_usable) - 1);
+  EXPECT_FALSE(reservation.short_supply);
+  EXPECT_NO_THROW(validate_paired_pin_reservations(d, g, boxes));
+  expect_capacity_parity(g);
+}
+
+TEST(LegrouteResources, PairedInternalHorizontalEstimateUsesWholeM2SupplyAndReportsExcess) {
+  Fixture f;
+  paired_design(f);
+  std::erase_if(f.fp.nets, [](const auto& net) { return net.name != "internal"; });
+  auto& master      = f.tech.macros.at("dff");
+  master.pins["D2"] = master.pins.at("D1");
+  master.pins["Q2"] = master.pins.at("Q1");
+  f.fp.nets.push_back({
+      "internal_2",
+      {{"ff", "Q0"}, {"ff1", "D0"}}
+  });
+  f.fp.nets.push_back({
+      "internal_3",
+      {{"ff", "Q2"}, {"ff1", "D2"}}
+  });
+  std::erase_if(f.fp.tracks, [](const auto& track) { return track.layer == "M2"; });
+  f.fp.tracks.push_back({"Y", "M2", 25, 2, 250});
+  for (bool excess : {true, false}) {
+    const auto d     = build_design(f.tech, f.fp, f.timing, f.options, nullptr);
+    auto       g     = build_grid(d, {});
+    const auto boxes = build_boxes(d, g);
+    resolve_paired_pin_reservations(d, g, boxes);
+    const auto& reservation = g.paired_pin_reservations[0];
+    EXPECT_EQ(reservation.horizontal_usable, (std::array<unsigned, 2>{1, 1}));
+    EXPECT_EQ(reservation.horizontal_tracks, (std::array<unsigned, 2>{1, 1}));
+    EXPECT_EQ(reservation.vertical_tracks, 0u);
+    EXPECT_EQ(reservation.internal_horizontal_estimate, excess ? 3u : 2u);
+    EXPECT_EQ(reservation.short_supply, excess);
+    EXPECT_EQ(g.box_cap[size_t(reservation.tile)], 0);  // Internal demand may use the protected tracks too.
+    EXPECT_NO_THROW(validate_paired_pin_reservations(d, g, boxes));
+    f.fp.nets.pop_back();
+  }
+}
+
+TEST(LegrouteResources, PairedUpperSupplyExcludesMissingFiniteDefTracksWithoutChargingPowerTwice) {
+  Fixture f;
+  paired_design(f);
+  std::erase_if(f.fp.tracks, [](const auto& track) { return track.layer == "M3"; });
+  f.fp.tracks.push_back({"X", "M3", 25, 3, 50});  // Only x=75 and125 are also on the interior Local lattice.
+  f.fp.tracks.push_back({"X", "M3", 90, 2, 50});  // Additional off-lattice tracks remain conservatively unrepresented.
+  ph::Net power;
+  power.name = "VDD";
+  power.use  = "POWER";
+  const ph::Route_path rail{
+      "M3",
+      20,
+      {},
+      {ph::Route_point{175, 0, {}}, ph::Route_point{175, 2000, {}}},
+      {}
+  };
+  power.wires.push_back({
+      "FIXED",
+      {rail, rail}
+  });
+  f.fp.special_nets.push_back(power);
+  const auto  d    = build_design(f.tech, f.fp, f.timing, f.options, nullptr);
+  auto        g    = build_grid(d, {});
+  const auto& m3   = layer(g, "M3");
+  const int   tile = g.tile(0, 0);
+  EXPECT_EQ(m3.usable_capacity(size_t(tile)), 2);
+  EXPECT_EQ(g.cap[size_t(m3.grid_layer)][size_t(tile)], 2);
+  EXPECT_EQ(reasons_at(m3, tile, 75), 0);
+  EXPECT_EQ(reasons_at(m3, tile, 175), uint8_t(Track_exclusion::missing_def_track) | uint8_t(Track_exclusion::power_metal));
+  const auto boxes = build_boxes(d, g);
+  resolve_paired_pin_reservations(d, g, boxes);
+  EXPECT_EQ(g.paired_pin_reservations[0].vertical_usable, 2u);
+  EXPECT_TRUE(g.paired_pin_reservations[0].short_supply);
+  expect_capacity_parity(g);
+
+  f.options.paired_pin_reserve = false;
+  f.options.box_reserve.clear();
+  const auto  legacy = build_grid(d, {});
+  const auto& old_m3 = layer(legacy, "M3");
+  EXPECT_GT(old_m3.usable_capacity(size_t(tile)), 2);
+  EXPECT_FALSE(reasons_at(old_m3, tile, 175) & uint8_t(Track_exclusion::missing_def_track));
+}
+
+TEST(LegrouteResources, CriticalUpperSupplyUnionsMissingTracksAndPowerBeforeReservingBudget) {
+  Fixture f;
+  f.options.critical_cellboxes = true;
+  f.options.reserved_tracks    = 0;
+  f.options.clock_spine        = false;
+  std::erase_if(f.fp.tracks, [](const auto& track) { return track.layer == "M3"; });
+  f.fp.tracks.push_back({"X", "M3", 25, 3, 50});
+  f.fp.tracks.push_back({"X", "M3", 225, 60, 50});  // Native x=175 is absent.
+  ph::Net power;
+  power.name = "VDD";
+  power.use  = "POWER";
+  const ph::Route_path rail{
+      "M3",
+      20,
+      {},
+      {ph::Route_point{175, 0, {}}, ph::Route_point{175, 2000, {}}},
+      {}
+  };
+  power.wires.push_back({
+      "FIXED",
+      {rail, rail}
+  });
+  f.fp.special_nets.push_back(power);
+  const auto  g    = f.grid();
+  const auto& m3   = layer(g, "M3");
+  const auto  tile = size_t(g.tile(0, 0));
+  ASSERT_EQ(g.tile_w, 1100);
+  ASSERT_EQ(g.rows_per_tile, 4u);
+  EXPECT_EQ(m3.usable_capacity(tile), 20);
+  EXPECT_EQ(m3.tiles[tile].cellbox_budget, 20u);
+  EXPECT_EQ(g.cap[size_t(m3.grid_layer)][tile], 0);
+  EXPECT_FALSE(g.box_short[tile]);  // Exactly enough supply; do not charge the absent PG track twice.
+  EXPECT_EQ(reasons_at(m3, int(tile), 175), uint8_t(Track_exclusion::missing_def_track) | uint8_t(Track_exclusion::power_metal));
+  expect_capacity_parity(g);
+}
+
+TEST(LegrouteResources, UniformPairedCapChargesAllEightTracksEvenWithUnusedPairs) {
+  for (bool no_external : {false, true}) {
+    SCOPED_TRACE(no_external);
+    Fixture f;
+    uniform_paired_design(f);
+    if (no_external) {
+      std::erase_if(f.fp.nets, [](const auto& net) { return net.name != "internal"; });
+    }
+    const auto d     = build_design(f.tech, f.fp, f.timing, f.options, nullptr);
+    auto       g     = build_grid(d, {});
+    const auto boxes = build_boxes(d, g);
+    ASSERT_EQ(boxes.boxes.size(), 1u);
+    const auto before = transit_capacity(g);
+    resolve_paired_pin_reservations(d, g, boxes);
+    const auto reservation = g.paired_pin_reservations[0];
+    EXPECT_EQ(reservation.external_pins.size(), no_external ? 0u : 4u);
+    EXPECT_EQ(reservation.external_rows, (no_external ? std::array<unsigned, 2>{0, 0} : std::array<unsigned, 2>{2, 2}));
+    EXPECT_EQ(reservation.actual_pairs, no_external ? 0u : 2u);
+    EXPECT_EQ(reservation.vertical_tracks, 8u);
+    EXPECT_EQ(reservation.internal_vertical_estimate, 1u);
+    EXPECT_FALSE(reservation.grouping_invalid);
+    EXPECT_FALSE(reservation.short_supply);
+    EXPECT_EQ(layer(g, "M3").tiles[size_t(reservation.tile)].cellbox_budget, 9u);
+    const auto uniform = transit_capacity(g);
+    EXPECT_EQ(uniform.second[size_t(reservation.tile)], before.second[size_t(reservation.tile)] - 9);
+    EXPECT_FALSE(paired_pin_supply_gate(d, g).requires_replan());
+    EXPECT_NO_THROW(validate_paired_pin_reservations(d, g, boxes));
+
+    f.options.paired_pin_cap = 0;
+    resolve_paired_pin_reservations(d, g, boxes);
+    const auto count_control = transit_capacity(g);
+    EXPECT_EQ(count_control.second[size_t(reservation.tile)] - uniform.second[size_t(reservation.tile)],
+              8 - int(reservation.actual_pairs));
+    f.options.paired_pin_cap = 16;
+    resolve_paired_pin_reservations(d, g, boxes);
+    EXPECT_EQ(transit_capacity(g), uniform);  // Re-resolution never releases or accumulates the unused uniform lanes.
+    EXPECT_NO_THROW(validate_paired_pin_reservations(d, g, boxes));
+    expect_capacity_parity(g);
+  }
+}
+
+TEST(LegrouteResources, UniformPairedCapReportsGroupingDeficienciesWithoutChangingItsCharge) {
+  for (const auto* deficiency : {"cap", "odd", "rows"}) {
+    SCOPED_TRACE(deficiency);
+    Fixture f;
+    uniform_paired_design(f);
+    if (std::string_view(deficiency) == "cap") {
+      f.options.paired_pin_cap = 2;
+    } else if (std::string_view(deficiency) == "odd") {
+      std::erase_if(f.fp.nets, [](const auto& net) { return net.name == "external_io"; });
+    } else {
+      f.fp.components[1].place.y           = 0;
+      f.fp.components[1].place.orientation = ph::Orientation::N;
+    }
+    const auto d     = build_design(f.tech, f.fp, f.timing, f.options, nullptr);
+    auto       g     = build_grid(d, {});
+    const auto boxes = build_boxes(d, g);
+    ASSERT_EQ(boxes.boxes.size(), 1u);
+    EXPECT_NO_THROW(resolve_paired_pin_reservations(d, g, boxes));
+    const auto& reservation = g.paired_pin_reservations[0];
+    EXPECT_TRUE(reservation.grouping_invalid);
+    EXPECT_FALSE(reservation.short_supply);  // Group construction failed despite enough physical supply.
+    EXPECT_EQ(reservation.actual_pairs, reservation.external_pins.size() / 2);
+    EXPECT_EQ(reservation.vertical_tracks, f.options.paired_pin_cap / 2);
+    EXPECT_EQ(layer(g, "M3").tiles[size_t(reservation.tile)].cellbox_budget,
+              f.options.paired_pin_cap / 2 + reservation.internal_vertical_estimate);
+    const auto gate = paired_pin_supply_gate(d, g);
+    EXPECT_TRUE(gate.requires_replan());
+    EXPECT_EQ(gate.unfittable_boxes, 1u);
+    EXPECT_NO_THROW(validate_paired_pin_reservations(d, g, boxes));
+    expect_capacity_parity(g);
+  }
 }
 }  // namespace livehd::placement::lr

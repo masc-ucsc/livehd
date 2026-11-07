@@ -277,8 +277,8 @@ TEST(CgenLlvm, SelectsOnOneConditionShareOneBranch) {
   ASSERT_TRUE(objects.load(object.string(), error)) << error;
   const auto fn = objects.lookup("fused_regions", error);
   ASSERT_NE(fn, nullptr) << error;
-  const auto ref = [](uint64_t x, uint64_t y, uint64_t k) {
-    uint64_t v = x * k ^ y;
+  const auto ref = [](uint64_t lhs, uint64_t rhs, uint64_t k) {
+    uint64_t v = lhs * k ^ rhs;
     v          = v + (v >> 7);
     return v * (k + 2);
   };

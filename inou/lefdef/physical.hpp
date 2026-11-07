@@ -98,6 +98,14 @@ struct Macro {
   std::set<std::string>      conservative_obstructions;
   std::set<std::string>      blocked_layers;  // OBS layers; routability uses conservative full-footprint blocking
 };
+// LEF 5.8 `CLASS BLOCK SOFT`: a soft block, the region of a standard-cell
+// cluster. Placement moves it in global placement with its full area in
+// density and its pins (or center) in wirelength, but it is not a hard macro:
+// no macro legalization, halo, channel, track alignment or overlap check, and
+// no row legalization. `CLASS BLOCK` and `CLASS BLOCK BLACKBOX` stay hard.
+inline bool soft_block(const Macro& m) { return m.klass == "BLOCK SOFT"; }
+// A non-CORE master that is not a soft block: the hard-macro placement rules apply.
+inline bool hard_macro(const Macro& m) { return !m.klass.starts_with("CORE") && !soft_block(m); }
 // A row orientation the master's LEF SYMMETRY permits: N always, FS with X,
 // FN with Y and S with both.
 inline bool orientation_allowed(const Macro& m, Orientation o) {

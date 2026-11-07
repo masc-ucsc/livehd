@@ -649,7 +649,15 @@ TEST(Placement, UnknownSatSearchDoesNotGrowAGeneratedCore) {
   EXPECT_EQ(failed["sat_unsat_regions"].GetUint64(), 0u);
   EXPECT_EQ(failed["global_unrouted"].GetUint64(), 0u);
   EXPECT_EQ(failed["global_overflow_tracks"].GetUint64(), 0u);
-  const auto plan = read_report(options.output_dir + "/legroute_plan0/plan.json");
+  const auto selection = read_report(options.output_dir + "/legroute_plan_selection.json");
+  ASSERT_FALSE(selection.HasParseError());
+  ASSERT_TRUE(selection.HasMember("selected_round"));
+  ASSERT_TRUE(selection["selected_round"].IsUint());
+  EXPECT_FALSE(selection["requires_replan"].GetBool());
+  // Earlier measured rounds may need pressure recovery. The bounded Local
+  // search consumes the selected passing Plan, not necessarily round zero.
+  const auto plan
+      = read_report(options.output_dir + "/legroute_plan" + std::to_string(selection["selected_round"].GetUint()) + "/plan.json");
   ASSERT_FALSE(plan.HasParseError());
   EXPECT_FALSE(plan["pre_sat"]["requires_replan"].GetBool());
   EXPECT_FALSE(std::filesystem::exists(options.output_dir + "/out.def"));
@@ -1855,6 +1863,713 @@ TEST(Placement, MacroCellWorkCanBeDeferredWithoutSkippingGpTimingOrFinalLegaliza
     EXPECT_EQ(before->place.y, after->place.y);
     EXPECT_EQ(before->place.orientation, after->place.orientation);
   }
+}
+// The macro channel is a clear spacing between macro bodies, rounded up only to the manufacturing grid.
+TEST(Placement, MacroChannelLegalityUsesManufacturingGridClearance) {
+  auto            tech = physical::read_lef({"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"});
+  physical::Macro block;
+  block.klass  = "BLOCK";
+  block.width  = 1.38;
+  block.height = 2.72;
+  tech.macros.emplace("channel_ram", block);
+  const auto          sw = std::llround(tech.sites.at("unithd").width * tech.dbu);
+  const auto          rh = std::llround(tech.sites.at("unithd").height * tech.dbu);
+  physical::Floorplan fp;
+  for (int r = 0; r < 6; ++r) {
+    fp.rows.push_back(
+        {"r" + std::to_string(r), "unithd", 0, r * rh, 20, sw, r % 2 ? Ann_place::Orientation::FS : Ann_place::Orientation::N});
+  }
+  // Two bodies dx/dy DBU apart: side by side (stacked=false) or stacked.
+  const auto pair = [&](bool stacked, int64_t gap) {
+    fp.components.clear();
+    for (int i = 0; i < 2; ++i) {
+      physical::Component c;
+      c.name         = "m" + std::to_string(i);
+      c.macro        = "channel_ram";
+      c.place        = Ann_place(sw + (stacked ? 0 : i * (1380 + gap)), rh + (stacked ? i * (2720 + gap) : 0), 1380, 2720);
+      c.place.status = Ann_place::Status::PLACED;
+      fp.components.push_back(c);
+    }
+  };
+  tech.manufacturing_grid = 0;  // one-DBU grid: 0.001 um is one DBU exactly
+  for (const bool stacked : {true, false}) {
+    pair(stacked, 1);
+    EXPECT_NO_THROW(check_legality(tech, fp, 0, 0, .001, .001));
+    pair(stacked, 0);
+    EXPECT_THROW(check_legality(tech, fp, 0, 0, .001, .001), std::runtime_error);
+    EXPECT_NO_THROW(check_legality(tech, fp));  // the low-level default still has no channel
+  }
+  // Halos still dominate when both exceed the channel.
+  pair(true, 1);
+  EXPECT_THROW(check_legality(tech, fp, .46, 2.72, .001, .001), std::runtime_error);
+  pair(true, 2 * rh);
+  EXPECT_NO_THROW(check_legality(tech, fp, .46, 2.72, .001, .001));
+  // A larger y channel never forces a full row: 0.1 um stacked is legal at exactly 100 DBU.
+  pair(true, 100);
+  EXPECT_NO_THROW(check_legality(tech, fp, 0, 0, .001, .1));
+  pair(true, 99);
+  EXPECT_THROW(check_legality(tech, fp, 0, 0, .001, .1), std::runtime_error);
+  // Options-level auto: no obstructed layer, so one manufacturing grid; touching macros are illegal.
+  auto options   = plain_options();
+  options.halo_x = options.halo_y = 0;
+  pair(true, 0);
+  EXPECT_THROW(check_legality(tech, fp, options), std::runtime_error);
+  pair(true, 1);
+  EXPECT_NO_THROW(check_legality(tech, fp, options));
+  // Explicit channels round up to the LEF manufacturing grid only.
+  tech.manufacturing_grid = .005;
+  options.macro_channel   = std::pair{.001, .001};
+  pair(true, 4);
+  EXPECT_THROW(check_legality(tech, fp, options), std::runtime_error);
+  pair(true, 5);
+  EXPECT_NO_THROW(check_legality(tech, fp, options));
+}
+// Placement keeps two macros apart by the channel without rounding it to a row.
+TEST(Placement, MacroChannelSeparatesPlacedMacros) {
+  const auto root = std::filesystem::path(std::getenv("TEST_TMPDIR")) / "macro_channel";
+  std::filesystem::create_directories(root);
+  const auto    lef = root / "macros.lef";
+  std::ofstream output(lef);
+  output << "VERSION 5.8 ;\n";
+  for (const auto* name : {"lower_ram", "upper_ram"}) {
+    output << "MACRO " << name << R"(
+ CLASS BLOCK ; ORIGIN 0 0 ; SIZE 1.38 BY 2.72 ; SYMMETRY X Y ;
+ PIN A
+ DIRECTION INPUT ; PORT LAYER li1 ; RECT 0.1 0.1 1.2 2.6 ; END
+ END A
+ PIN Y
+ DIRECTION OUTPUT ; PORT LAYER li1 ; RECT 0.1 0.1 1.2 2.6 ; END
+ END Y
+ OBS LAYER met1 ; RECT 0 0 1.38 2.72 ; END
+END )" << name
+           << '\n';
+  }
+  output << "END LIBRARY\n";
+  output.close();
+  struct Case {
+    const char*                              name;
+    std::optional<std::pair<double, double>> channel;
+    int64_t                                  expected_dbu;
+  };
+  // auto: met1 obstruction, whose minimum spacing is 0.14 um; 0.001 rounds up to the 0.005 um grid.
+  for (const auto& [name, channel, expected] : {
+           Case{    "auto",          std::nullopt, 140},
+           Case{"explicit", std::pair{.001, .001},   5}
+  }) {
+    hhds::GraphLibrary source;
+    auto               io = source.create_io("macro_channel");
+    io->add_input("a", 0);
+    io->set_bits("a", 1);
+    io->add_output("y", 0);
+    io->set_bits("y", 1);
+    auto graph  = io->create_graph();
+    auto signal = graph->get_input_pin("a");
+    gu::set_bits(signal, 1);
+    for (const auto* master_name : {"lower_ram", "upper_ram"}) {
+      auto master = source.create_io(master_name);
+      master->add_input("A", 0);
+      master->add_output("Y", 0);
+      auto cell = gu::create_typed_node(*graph, Ntype_op::Sub);
+      cell.set_subnode(master);
+      cell.set_name(master_name);
+      cell.create_sink_pin("A").connect_driver(signal);
+      signal = cell.create_driver_pin("Y");
+      gu::set_bits(signal, 1);
+    }
+    graph->get_output_pin("y").connect_driver(signal);
+    auto options          = plain_options();
+    options.lefs          = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef", lef.string()};
+    options.output_dir    = (root / name).string();
+    // Six sites by three rows: the macros only separate in y, and any legal y gap is below one row.
+    options.core          = {0, 0, 2.76, 8.16};
+    options.iterations    = 100;
+    options.bins          = 8;
+    options.macro_channel = channel;
+    hhds::GraphLibrary placed;
+    const auto         result = place(*graph, placed, options);
+    const auto         tech   = physical::read_lef(options.lefs);
+    EXPECT_NO_THROW(check_legality(tech, result.floorplan, options)) << name;
+    rapidjson::Document qor;
+    qor.Parse(result.qor.c_str());
+    ASSERT_TRUE(qor.HasMember("macro_channel")) << name;
+    EXPECT_EQ(qor["macro_channel"]["x_dbu"].GetInt64(), expected) << name;
+    EXPECT_EQ(qor["macro_channel"]["y_dbu"].GetInt64(), expected) << name;
+    EXPECT_EQ(qor["macro_channel"]["auto"].GetBool(), !channel) << name;
+    std::vector<Ann_place> macros;
+    for (const auto& c : result.floorplan.components) {
+      if (c.macro.ends_with("_ram")) {
+        macros.push_back(c.place);
+      }
+    }
+    ASSERT_EQ(macros.size(), 2u);
+    const auto& a     = macros[0];
+    const auto& b     = macros[1];
+    const auto  gap_x = std::max(b.x - (a.x + a.width), a.x - (b.x + b.width));
+    const auto  gap_y = std::max(b.y - (a.y + a.height), a.y - (b.y + b.height));
+    const auto  rh    = std::llround(tech.sites.at("unithd").height * tech.dbu);
+    // The core is too narrow for a side-by-side channel, so y separates them (stacked or diagonal).
+    EXPECT_LE(gap_x, 0) << name;
+    EXPECT_GE(gap_y, expected) << name;
+    EXPECT_LT(gap_y, rh) << name;
+  }
+}
+// LEF CLASS BLOCK SOFT blocks only have to be placed inside the core: they may
+// overlap each other and hard macros, and take no halo or macro channel.
+TEST(Placement, SoftBlockLegalityIsCoreContainmentOnly) {
+  auto            tech = physical::read_lef({"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"});
+  physical::Macro block;
+  block.width            = 1.38;
+  block.height           = 2.72;
+  block.klass            = "BLOCK";
+  tech.macros["ram"]     = block;
+  block.klass            = "BLOCK SOFT";
+  tech.macros["cluster"] = block;
+  physical::Floorplan fp;
+  const auto          rh = std::llround(tech.sites.at("unithd").height * tech.dbu);
+  const auto          sw = std::llround(tech.sites.at("unithd").width * tech.dbu);
+  for (int row = 0; row < 10; ++row) {
+    fp.rows.push_back({"ROW_" + std::to_string(row), "unithd", 0, row * rh, 40, sw});
+  }
+  const auto add = [&](const char* name, const char* master, int64_t x, int64_t y) {
+    Ann_place place(x, y, 1380, 2720);
+    place.status = Ann_place::Status::PLACED;
+    fp.components.push_back({name, master, place});
+  };
+  add("ram", "ram", 4600, 5440);
+  add("soft0", "cluster", 4607, 5453);  // overlaps the macro, off the site/row grid
+  add("soft1", "cluster", 4609, 5455);  // overlaps the other soft block
+  EXPECT_NO_THROW(check_legality(tech, fp, 2, 2, 1, 1));
+  fp.components.back().place.x = 40 * sw - 1379;  // one DBU outside the core
+  EXPECT_THROW(check_legality(tech, fp, 0, 0), std::runtime_error);
+  fp.components.back().place.x      = 4609;
+  fp.components.back().place.status = Ann_place::Status::UNPLACED;
+  EXPECT_THROW(check_legality(tech, fp, 0, 0), std::runtime_error);
+  // The soft master is not a hard macro, so it does not set the automatic channel.
+  fp.components.back().place.status = Ann_place::Status::PLACED;
+  add("ram2", "ram", 4600 + 1381, 5440);  // one DBU from the first macro: still a hard-macro channel violation
+  EXPECT_THROW(check_legality(tech, fp, 0, 0, .1, .1), std::runtime_error);
+}
+// Soft blocks move in macro-planning GP with the hard macros, are not
+// legalized, halo'd or channel-spaced, and are written placed inside the core.
+TEST(Placement, SoftBlocksMoveInMacroPlanningWithoutLegalization) {
+  const auto root = std::filesystem::path(std::getenv("TEST_TMPDIR")) / "soft_blocks";
+  std::filesystem::create_directories(root);
+  const auto    lef = root / "blocks.lef";
+  std::ofstream output(lef);
+  output << "VERSION 5.8 ;\n";
+  for (const auto* name : {"ram0", "ram1", "cluster0", "cluster1", "cluster2"}) {
+    const bool soft = std::string_view(name).starts_with("cluster");
+    output << "MACRO " << name << "\n CLASS " << (soft ? "BLOCK SOFT" : "BLOCK") << " ; ORIGIN 0 0 ; SIZE "
+           << (!soft                                  ? "1.38 BY 2.72"
+               : std::string_view(name) == "cluster1" ? "7 BY 7"
+                                                      : "2.5 BY 2.5")
+           << " ; SYMMETRY X Y ;\n";
+    // cluster2 defines its pins without geometry: its connections use the block center.
+    if (std::string_view(name) == "cluster2") {
+      output << " PIN A\n DIRECTION INPUT ;\n END A\n PIN Y\n DIRECTION OUTPUT ;\n END Y\n";
+    } else {
+      output << R"( PIN A
+ DIRECTION INPUT ; PORT LAYER met1 ; RECT 0.1 0.1 0.2 0.2 ; END
+ END A
+ PIN Y
+ DIRECTION OUTPUT ; PORT LAYER met1 ; RECT 1.1 1.1 1.2 1.2 ; END
+ END Y
+)";
+    }
+    output << (soft ? "" : " OBS LAYER met1 ; RECT 0 0 1.38 2.72 ; END\n") << "END " << name << '\n';
+  }
+  output << "END LIBRARY\n";
+  output.close();
+  const auto build = [](hhds::GraphLibrary& source) {
+    auto io = source.create_io("soft_blocks");
+    io->add_input("a", 0);
+    io->set_bits("a", 1);
+    io->add_output("y", 0);
+    io->set_bits("y", 1);
+    auto graph  = io->create_graph();
+    auto signal = graph->get_input_pin("a");
+    gu::set_bits(signal, 1);
+    for (const auto* master_name : {"cluster0", "ram0", "cluster1", "ram1", "cluster2"}) {
+      auto master = source.create_io(master_name);
+      master->add_input("A", 0);
+      master->add_output("Y", 0);
+      auto cell = gu::create_typed_node(*graph, Ntype_op::Sub);
+      cell.set_subnode(master);
+      cell.set_name(master_name);
+      cell.create_sink_pin("A").connect_driver(signal);
+      signal = cell.create_driver_pin("Y");
+      gu::set_bits(signal, 1);
+    }
+    graph->get_output_pin("y").connect_driver(signal);
+    return graph;
+  };
+  auto options       = plain_options();
+  options.lefs       = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef", lef.string()};
+  options.core       = {0, 0, 9.2, 8.16};
+  options.iterations = 100;
+  options.bins       = 8;
+  options.halo_x = options.halo_y = 1;
+  const auto tech                 = physical::read_lef(options.lefs);
+  // The default macro stage row-legalizes movable cells, which cannot pack a soft block.
+  {
+    hhds::GraphLibrary source, placed;
+    auto               graph = build(source);
+    options.output_dir       = (root / "legalizing").string();
+    EXPECT_THROW(place(*graph, placed, options), std::invalid_argument);
+  }
+  options.macro_legalize_cells = false;
+  options.macro_detailed_place = false;
+  options.output_dir           = (root / "macro_only").string();
+  hhds::GraphLibrary source, placed;
+  auto               graph  = build(source);
+  const auto         result = place(*graph, placed, options);
+  EXPECT_NO_THROW(check_legality(tech, result.floorplan, options));
+  const auto             sw   = std::llround(tech.sites.at("unithd").width * tech.dbu);
+  const auto             rh   = std::llround(tech.sites.at("unithd").height * tech.dbu);
+  int                    soft = 0, off_grid = 0, overlaps_halo = 0;
+  std::vector<Ann_place> rams;
+  for (const auto& c : result.floorplan.components) {
+    if (c.macro.starts_with("ram")) {
+      rams.push_back(c.place);
+    }
+  }
+  ASSERT_EQ(rams.size(), 2u);
+  for (const auto& c : result.floorplan.components) {
+    if (!c.macro.starts_with("cluster")) {
+      continue;
+    }
+    ++soft;
+    const auto& p = c.place;
+    EXPECT_EQ(p.status, Ann_place::Status::PLACED) << c.name;
+    EXPECT_EQ(p.width, c.macro == "cluster1" ? 7000 : 2500) << c.name;  // physical size, no halo padding
+    EXPECT_GE(p.x, 0) << c.name;
+    EXPECT_GE(p.y, 0) << c.name;
+    EXPECT_LE(p.x + p.width, 9200) << c.name;
+    EXPECT_LE(p.y + p.height, 8160) << c.name;
+    off_grid += p.x % sw != 0 || p.y % rh != 0;
+    for (const auto& r : rams) {
+      // The 1 um macro halo keeps cells out, not soft blocks.
+      overlaps_halo
+          += p.x < r.x + r.width + 1000 && r.x - 1000 < p.x + p.width && p.y < r.y + r.height + 1000 && r.y - 1000 < p.y + p.height;
+    }
+  }
+  EXPECT_EQ(soft, 3);
+  EXPECT_GT(off_grid, 0);  // GP positions, not row-legalized
+  // Anywhere in the 9.2 x 8.16 um core, the 7 x 7 um soft block covers [2.2, 7] x [1.16, 7], which no
+  // 1.38 um wide macro with a 1 um halo can avoid: soft blocks take no halo or macro clearance.
+  EXPECT_GE(overlaps_halo, 2);
+}
+// The staged final cell pass moves soft blocks in final GP like cells of their
+// area, legalizes only the standard cells (and keeps the fixed hard macros),
+// and writes each soft block at its final GP pose clamped inside the core.
+TEST(Placement, SoftBlocksJoinFinalGpButSkipCellLegalization) {
+  const auto root = std::filesystem::path(std::getenv("TEST_TMPDIR")) / "soft_blocks_final";
+  std::filesystem::create_directories(root);
+  const auto    lef = root / "blocks.lef";
+  std::ofstream output(lef);
+  output << "VERSION 5.8 ;\n";
+  for (const auto* name : {"ram0", "cluster0", "cluster1"}) {
+    const bool soft = std::string_view(name).starts_with("cluster");
+    output << "MACRO " << name << "\n CLASS " << (soft ? "BLOCK SOFT" : "BLOCK") << " ; ORIGIN 0 0 ; SIZE "
+           << (soft ? "3 BY 3" : "1.38 BY 2.72") << " ; SYMMETRY X Y ;\n"
+           << R"( PIN A
+ DIRECTION INPUT ; PORT LAYER met1 ; RECT 0.1 0.1 0.2 0.2 ; END
+ END A
+ PIN Y
+ DIRECTION OUTPUT ; PORT LAYER met1 ; RECT 1.1 1.1 1.2 1.2 ; END
+ END Y
+)" << (soft ? "" : " OBS LAYER met1 ; RECT 0 0 1.38 2.72 ; END\n")
+           << "END " << name << '\n';
+  }
+  output << "END LIBRARY\n";
+  output.close();
+  hhds::GraphLibrary source, placed;
+  auto               io = source.create_io("soft_blocks_final");
+  io->add_input("a", 0);
+  io->set_bits("a", 1);
+  io->add_output("y", 0);
+  io->set_bits("y", 1);
+  auto graph  = io->create_graph();
+  auto signal = graph->get_input_pin("a");
+  gu::set_bits(signal, 1);
+  int index = 0;
+  for (const auto* master_name : {"cluster0", "sky130_fd_sc_hd__buf_1", "ram0", "sky130_fd_sc_hd__buf_1", "cluster1"}) {
+    const bool buffer = std::string_view(master_name).starts_with("sky130");
+    auto       master = source.find_io(master_name);
+    if (!master) {
+      master = source.create_io(master_name);
+      master->add_input("A", 0);
+      master->add_output(buffer ? "X" : "Y", 0);
+    }
+    auto cell = gu::create_typed_node(*graph, Ntype_op::Sub);
+    cell.set_subnode(master);
+    cell.set_name(std::string(buffer ? "buf" : master_name) + std::to_string(index++));
+    cell.create_sink_pin("A").connect_driver(signal);
+    signal = cell.create_driver_pin(buffer ? "X" : "Y");
+    gu::set_bits(signal, 1);
+  }
+  graph->get_output_pin("y").connect_driver(signal);
+  auto options                 = plain_options();
+  options.optimization_pending = false;  // the final cell pass ends in terminal legalization
+  options.final_cells          = true;
+  options.density              = .7;  // below the terminal legalizer's default 0.8 bin cap
+  options.lefs                 = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef", lef.string()};
+  options.core                 = {0, 0, 11.04, 10.88};
+  options.iterations           = 100;
+  options.bins                 = 8;
+  options.output_dir           = (root / "final").string();
+  const auto tech              = physical::read_lef(options.lefs);
+  const auto result            = place(*graph, placed, options);
+  EXPECT_NO_THROW(check_legality(tech, result.floorplan, options));
+  const auto sw   = std::llround(tech.sites.at("unithd").width * tech.dbu);
+  const auto rh   = std::llround(tech.sites.at("unithd").height * tech.dbu);
+  int        soft = 0, buffers = 0, rams = 0;
+  for (const auto& c : result.floorplan.components) {
+    const auto& p = c.place;
+    if (c.macro.starts_with("cluster")) {
+      ++soft;
+      EXPECT_EQ(p.status, Ann_place::Status::PLACED) << c.name;
+      EXPECT_EQ(p.width, 3000) << c.name;
+      EXPECT_GE(p.x, 0) << c.name;
+      EXPECT_GE(p.y, 0) << c.name;
+      EXPECT_LE(p.x + p.width, 11040) << c.name;
+      EXPECT_LE(p.y + p.height, 10880) << c.name;
+    } else if (c.macro == "ram0") {
+      ++rams;
+      EXPECT_EQ(p.status, Ann_place::Status::FIXED);
+    } else if (c.macro == "sky130_fd_sc_hd__buf_1") {
+      ++buffers;
+      EXPECT_EQ(p.x % sw, 0) << c.name;  // row-legalized standard cells
+      EXPECT_EQ(p.y % rh, 0) << c.name;
+    }
+  }
+  EXPECT_EQ(soft, 2);
+  EXPECT_EQ(rams, 1);
+  EXPECT_EQ(buffers, 2);
+  rapidjson::Document qor;
+  qor.Parse(result.qor.c_str());
+  EXPECT_TRUE(qor["legal"].GetBool());
+  // The staged macro pass deferred its cell legalization for the soft blocks.
+  std::ifstream       flow(options.output_dir + "/flow.json");
+  rapidjson::Document report;
+  report.Parse(std::string(std::istreambuf_iterator<char>(flow), {}).c_str());
+  EXPECT_FALSE(report["macro_legalize_cells"].GetBool());
+}
+// The macro competition features are on by default since 2026-11 (user-approved); plain_options() pins them off.
+TEST(Placement, MacroCompetitionFeaturesPreserveOptInDefaults) {
+  const Options o;
+  EXPECT_FALSE(o.macro_edge_snap.has_value());
+  EXPECT_FALSE(o.macro_dead_space.has_value());
+  EXPECT_FALSE(o.macro_channel.has_value());  // auto
+  EXPECT_EQ(o.macro_refine_rounds, 0u);
+  EXPECT_EQ(o.macro_refine_iterations, 30u);
+  const auto& a = o.macro_anchor;
+  EXPECT_FALSE(a.enabled);
+  EXPECT_EQ(a.select, "edge+random");
+  EXPECT_EQ(a.edge_weight, 4);
+  EXPECT_EQ(a.random_weight, 1);
+  EXPECT_EQ(a.random_fraction, .25);
+  EXPECT_TRUE(a.edge_chain);
+  EXPECT_FALSE(a.edge_gate);
+  EXPECT_EQ(a.gate, 1);
+  EXPECT_EQ(a.spring_length, .1);
+  EXPECT_EQ(a.target_hysteresis, .5);
+  EXPECT_EQ(a.start_overflow, .3);
+  EXPECT_TRUE(a.final_targets);
+  EXPECT_FALSE(a.swaps);
+  EXPECT_TRUE(a.swap_jump);
+  EXPECT_EQ(a.refresh_interval, 30);
+  EXPECT_EQ(a.ramp, 3);
+  EXPECT_EQ(a.settle, 20);
+  EXPECT_EQ(a.max_refreshes, 40);
+  EXPECT_EQ(a.milestones, (std::vector<double>{.15, .1}));
+  EXPECT_EQ(a.dead_space_refreshes, 2);
+  EXPECT_NO_THROW(validate_macro_anchor_options(a));
+  const auto legacy = plain_options();
+  EXPECT_FALSE(legacy.macro_edge_snap.has_value());
+  EXPECT_FALSE(legacy.macro_dead_space.has_value());
+  EXPECT_EQ(legacy.macro_refine_rounds, 0u);
+  EXPECT_FALSE(legacy.macro_anchor.enabled);
+}
+// macro.edge_snap slides legalized macros across small slivers to the core edges.
+TEST(Placement, MacroEdgeSnapMovesMacrosToCoreEdges) {
+  const auto root = std::filesystem::path(std::getenv("TEST_TMPDIR")) / "macro_edge_snap";
+  std::filesystem::create_directories(root);
+  const auto    lef = root / "macros.lef";
+  std::ofstream output(lef);
+  output << "VERSION 5.8 ;\n";
+  for (const auto* name : {"left_ram", "right_ram"}) {
+    output << "MACRO " << name << R"(
+ CLASS BLOCK ; ORIGIN 0 0 ; SIZE 1.38 BY 2.72 ; SYMMETRY X Y ;
+ PIN A
+ DIRECTION INPUT ; PORT LAYER li1 ; RECT 0.1 0.1 1.2 2.6 ; END
+ END A
+ PIN Y
+ DIRECTION OUTPUT ; PORT LAYER li1 ; RECT 0.1 0.1 1.2 2.6 ; END
+ END Y
+ OBS LAYER met1 ; RECT 0 0 1.38 2.72 ; END
+END )" << name
+           << '\n';
+  }
+  output << "END LIBRARY\n";
+  output.close();
+  struct Run {
+    int64_t worst_gap = 0;
+    int64_t moved     = 0;
+    bool    reported  = false;
+  };
+  const auto run = [&](const char* name, std::optional<std::pair<double, double>> edge) {
+    hhds::GraphLibrary source, placed;
+    auto               io = source.create_io("macro_edge_snap");
+    io->add_input("a", 0);
+    io->set_bits("a", 1);
+    io->add_output("y", 0);
+    io->set_bits("y", 1);
+    auto graph  = io->create_graph();
+    auto signal = graph->get_input_pin("a");
+    gu::set_bits(signal, 1);
+    for (const auto* master_name : {"left_ram", "right_ram"}) {
+      auto master = source.create_io(master_name);
+      master->add_input("A", 0);
+      master->add_output("Y", 0);
+      auto cell = gu::create_typed_node(*graph, Ntype_op::Sub);
+      cell.set_subnode(master);
+      cell.set_name(master_name);
+      cell.create_sink_pin("A").connect_driver(signal);
+      signal = cell.create_driver_pin("Y");
+      gu::set_bits(signal, 1);
+    }
+    graph->get_output_pin("y").connect_driver(signal);
+    auto options            = plain_options();
+    options.lefs            = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef", lef.string()};
+    options.output_dir      = (root / name).string();
+    options.core            = {0, 0, 16.56, 16.32};
+    options.iterations      = 100;
+    options.bins            = 8;
+    options.macro_edge_snap = edge;
+    const auto result       = place(*graph, placed, options);
+    const auto tech         = physical::read_lef(options.lefs);
+    EXPECT_NO_THROW(check_legality(tech, result.floorplan, options)) << name;
+    Run r;
+    for (const auto& c : result.floorplan.components) {
+      if (c.macro.ends_with("_ram")) {
+        const auto& p  = c.place;
+        const auto  gx = std::min(p.x, 16560 - p.x - p.width);
+        const auto  gy = std::min(p.y, 16320 - p.y - p.height);
+        r.worst_gap    = std::max(r.worst_gap, std::min(gx, gy));  // each macro's nearest core edge
+      }
+    }
+    rapidjson::Document qor;
+    qor.Parse(result.qor.c_str());
+    if (qor.HasMember("macro_edge_snap")) {
+      r.reported = true;
+      r.moved    = qor["macro_edge_snap"]["moved_macros"].GetInt64();
+      EXPECT_EQ(qor["macro_edge_snap"]["auto_x"].GetBool(), edge && edge->first < 0) << name;
+    }
+    return r;
+  };
+  const auto off = run("off", std::nullopt);
+  EXPECT_FALSE(off.reported);
+  // auto: one tenth of the core extent (about 1.6 um) may not reach every sliver; 20 um reaches them all.
+  const auto automatic = run("auto", std::pair{-1.0, -1.0});
+  EXPECT_TRUE(automatic.reported);
+  const auto wide = run("wide", std::pair{20.0, 20.0});
+  EXPECT_TRUE(wide.reported);
+  EXPECT_GT(wide.moved, 0);
+  // Every macro reaches a core edge; track alignment may shift its origin by less than one routing pitch.
+  EXPECT_LE(wide.worst_gap, 460);
+  EXPECT_LE(wide.worst_gap, off.worst_gap);
+}
+// macro.dead_space and macro.refine_rounds (on by default, off in plain_options()): off reports nothing, metric leaves placement
+// unchanged, and collapse plus refinement keep the macro frame legal.
+TEST(Placement, MacroDeadSpaceAndRefineAreOptIn) {
+  const auto root = std::filesystem::path(std::getenv("TEST_TMPDIR")) / "macro_dead_space";
+  std::filesystem::create_directories(root);
+  const auto    lef = root / "macros.lef";
+  std::ofstream output(lef);
+  output << "VERSION 5.8 ;\n";
+  for (const auto* name : {"a_ram", "b_ram", "c_ram"}) {
+    output << "MACRO " << name << R"(
+ CLASS BLOCK ; ORIGIN 0 0 ; SIZE 1.38 BY 2.72 ; SYMMETRY X Y ;
+ PIN A
+ DIRECTION INPUT ; PORT LAYER li1 ; RECT 0.1 0.1 1.2 2.6 ; END
+ END A
+ PIN Y
+ DIRECTION OUTPUT ; PORT LAYER li1 ; RECT 0.1 0.1 1.2 2.6 ; END
+ END Y
+ OBS LAYER met1 ; RECT 0 0 1.38 2.72 ; END
+END )" << name
+           << '\n';
+  }
+  output << "END LIBRARY\n";
+  output.close();
+  struct Run {
+    std::vector<Ann_place> macros;
+    bool                   dead = false, refine = false;
+    size_t                 refine_rounds = 0;
+  };
+  const auto run = [&](const char* name, const char* dead, unsigned rounds) {
+    hhds::GraphLibrary source, placed;
+    auto               io = source.create_io("macro_dead_space");
+    io->add_input("a", 0);
+    io->set_bits("a", 1);
+    io->add_output("y", 0);
+    io->set_bits("y", 1);
+    auto graph  = io->create_graph();
+    auto signal = graph->get_input_pin("a");
+    gu::set_bits(signal, 1);
+    for (const auto* master_name : {"a_ram", "b_ram", "c_ram"}) {
+      auto master = source.create_io(master_name);
+      master->add_input("A", 0);
+      master->add_output("Y", 0);
+      auto cell = gu::create_typed_node(*graph, Ntype_op::Sub);
+      cell.set_subnode(master);
+      cell.set_name(master_name);
+      cell.create_sink_pin("A").connect_driver(signal);
+      signal = cell.create_driver_pin("Y");
+      gu::set_bits(signal, 1);
+    }
+    graph->get_output_pin("y").connect_driver(signal);
+    auto options                    = plain_options();
+    options.lefs                    = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef", lef.string()};
+    options.output_dir              = (root / name).string();
+    options.core                    = {0, 0, 16.56, 16.32};
+    options.iterations              = 100;
+    options.bins                    = 8;
+    options.macro_edge_snap         = std::pair{-1.0, -1.0};
+    options.macro_dead_space        = parse_dead_space_options(dead);
+    options.macro_refine_rounds     = rounds;
+    options.macro_refine_iterations = 10;
+    const auto result               = place(*graph, placed, options);
+    const auto tech                 = physical::read_lef(options.lefs);
+    EXPECT_NO_THROW(check_legality(tech, result.floorplan, options)) << name;
+    Run r;
+    for (const auto& c : result.floorplan.components) {
+      if (c.macro.ends_with("_ram")) {
+        r.macros.push_back(c.place);
+      }
+    }
+    rapidjson::Document qor;
+    qor.Parse(result.qor.c_str());
+    r.dead   = qor.HasMember("macro_dead_space");
+    r.refine = qor.HasMember("macro_refine");
+    if (r.dead) {
+      const auto& d = qor["macro_dead_space"];
+      EXPECT_GE(d["free_um2"].GetDouble(), d["dead_um2"].GetDouble()) << name;
+      EXPECT_EQ(d["collapse"].GetBool(), std::string(dead) != "metric") << name;
+    }
+    if (r.refine) {
+      r.refine_rounds = qor["macro_refine"]["history"].Size();
+    }
+    return r;
+  };
+  const auto off = run("off", "off", 0);
+  EXPECT_FALSE(off.dead);
+  EXPECT_FALSE(off.refine);
+  const auto metric = run("metric", "metric", 0);
+  EXPECT_TRUE(metric.dead);
+  ASSERT_EQ(metric.macros.size(), off.macros.size());
+  for (size_t i = 0; i < off.macros.size(); ++i) {
+    EXPECT_EQ(metric.macros[i].x, off.macros[i].x);
+    EXPECT_EQ(metric.macros[i].y, off.macros[i].y);
+  }
+  const auto refined = run("refine", "auto", 1);
+  EXPECT_TRUE(refined.dead);
+  EXPECT_TRUE(refined.refine);
+  EXPECT_EQ(refined.refine_rounds, 1u);
+}
+// macro.anchor: legalized-target anchors during macro GP keep the final placement legal and report the final snap.
+TEST(Placement, MacroAnchorsRefreshLegalTargetsDuringGp) {
+  const auto root = std::filesystem::path(std::getenv("TEST_TMPDIR")) / "macro_anchor";
+  std::filesystem::create_directories(root);
+  const auto    lef = root / "macros.lef";
+  std::ofstream output(lef);
+  output << "VERSION 5.8 ;\n";
+  for (const auto* name : {"left_ram", "right_ram"}) {
+    output << "MACRO " << name << R"(
+ CLASS BLOCK ; ORIGIN 0 0 ; SIZE 1.38 BY 2.72 ; SYMMETRY X Y ;
+ PIN A
+ DIRECTION INPUT ; PORT LAYER li1 ; RECT 0.1 0.1 1.2 2.6 ; END
+ END A
+ PIN Y
+ DIRECTION OUTPUT ; PORT LAYER li1 ; RECT 0.1 0.1 1.2 2.6 ; END
+ END Y
+ OBS LAYER met1 ; RECT 0 0 1.38 2.72 ; END
+END )" << name
+           << '\n';
+  }
+  output << "END LIBRARY\n";
+  output.close();
+  const auto run = [&](const char* name, bool anchors, bool dead = false) {
+    hhds::GraphLibrary source, placed;
+    auto               io = source.create_io("macro_anchor");
+    io->add_input("a", 0);
+    io->set_bits("a", 1);
+    io->add_output("y", 0);
+    io->set_bits("y", 1);
+    auto graph  = io->create_graph();
+    auto signal = graph->get_input_pin("a");
+    gu::set_bits(signal, 1);
+    for (const auto* master_name : {"left_ram", "right_ram"}) {
+      auto master = source.create_io(master_name);
+      master->add_input("A", 0);
+      master->add_output("Y", 0);
+      auto cell = gu::create_typed_node(*graph, Ntype_op::Sub);
+      cell.set_subnode(master);
+      cell.set_name(master_name);
+      cell.create_sink_pin("A").connect_driver(signal);
+      signal = cell.create_driver_pin("Y");
+      gu::set_bits(signal, 1);
+    }
+    graph->get_output_pin("y").connect_driver(signal);
+    auto options                 = plain_options();
+    options.lefs                 = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef", lef.string()};
+    options.output_dir           = (root / name).string();
+    options.core                 = {0, 0, 16.56, 16.32};
+    options.iterations           = 120;
+    options.bins                 = 8;
+    options.macro_edge_snap      = std::pair{-1.0, -1.0};
+    options.macro_anchor.enabled = anchors;
+    options.macro_anchor.start_overflow   = 1;  // first GP sample
+    options.macro_anchor.refresh_interval = 20;
+    options.macro_anchor.settle           = 10;
+    options.macro_anchor.swaps            = true;
+    options.macro_anchor.inflate          = .04;
+    if (dead) {
+      // The dead-space collapse joins every target run (dead_space_refreshes=-1) through the shared chain.
+      options.macro_dead_space                  = parse_dead_space_options("auto");
+      options.macro_anchor.dead_space_refreshes = -1;
+    }
+    const auto result = place(*graph, placed, options);
+    const auto tech   = physical::read_lef(options.lefs);
+    EXPECT_NO_THROW(check_legality(tech, result.floorplan, options)) << name;
+    std::optional<std::filesystem::path> report;
+    for (const auto& entry : std::filesystem::recursive_directory_iterator(options.output_dir)) {
+      if (entry.path().filename() == "macro_anchor.json") {
+        report = entry.path();
+      }
+    }
+    return report;
+  };
+  EXPECT_FALSE(run("off", false).has_value());
+  const auto report = run("on", true);
+  ASSERT_TRUE(report.has_value());
+  std::ifstream       in(*report);
+  rapidjson::Document json;
+  json.Parse(std::string(std::istreambuf_iterator<char>(in), {}).c_str());
+  ASSERT_FALSE(json.HasParseError());
+  EXPECT_EQ(json["macros"].GetInt(), 2);
+  EXPECT_GE(json["refresh_count"].GetInt(), 1);
+  EXPECT_TRUE(json["final_snap"]["measured"].GetBool());
+  EXPECT_GE(json["final_snap"]["mean_um"].GetDouble(), 0);
+  const auto dead = run("dead", true, true);
+  ASSERT_TRUE(dead.has_value());
+  std::ifstream       dead_in(*dead);
+  rapidjson::Document dead_json;
+  dead_json.Parse(std::string(std::istreambuf_iterator<char>(dead_in), {}).c_str());
+  ASSERT_FALSE(dead_json.HasParseError());
+  ASSERT_GE(dead_json["refreshes"].Size(), 1u);
+  EXPECT_TRUE(dead_json["refreshes"][0]["late"].GetBool());
 }
 TEST(Placement, GlobalMagnetStageExpandsMembersBeforeTheFixedMacroHandoff) {
   const auto root = std::filesystem::path(std::getenv("TEST_TMPDIR")) / "global_magnet_stage";

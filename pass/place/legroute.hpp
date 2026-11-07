@@ -19,6 +19,18 @@ namespace livehd::placement {
 // inside each box and connects their pins to physical metal. Coarse feasibility alone is not final signal/clock
 // closure; legal_boxes and plan.handoff provide separate legalized witness modes.
 struct Legroute_options {
+  // Opt-in Plan admission. Physical widths, endpoints and the core stay fixed.
+  bool                     critical_cellboxes = false;
+  unsigned                 cellbox_sites = 22, cellbox_rows = 4;
+  unsigned                 cellbox_external_pins = 28, cellbox_connections = 10;
+  unsigned                 cellbox_critical_choices = 4, cellbox_other_choices = 8;
+  bool                     cellbox_wide_exceptions = true;
+  bool                     cellbox_far_fallback    = false;
+  // Runtime retry-controller signal only: never inferred by fixed replay.
+  bool                     cellbox_final_retry     = false;
+  // Runtime native pre-CTS trace in the exact measured Floorplan::nets order.
+  // Derived from control_ports/Liberty roles, never inferred from missing STA.
+  std::vector<bool>        cellbox_ignored_nets;
   // L2 cell-boxes (variant c1_T20_pa_cd4 of the prototype)
   double      box_fill         = 1;    // fill cap of each box row (the measured fill lands near 0.8)
   unsigned    box_net_max      = 10;   // nets with more pins never drive a merge
@@ -221,6 +233,10 @@ struct Legroute_options {
   // out of coarse capacity, the same in plan, global and local; Final allocates the actual tracks. The box layer
   // entry comes off the box-layer capacity, upper layers off their own (layer identity is preserved).
   std::string              box_reserve;  // lhd default "M2:1,M3:1"; empty here so unit fixtures keep their tiny capacities
+  // Experimental fixed legal-box policy: replace box_reserve with ceil(external pin obligations / 2) tracks
+  // on the lowest vertical layer and one box-layer track per physical row. This is a budget, not a pin-access proof.
+  bool                     paired_pin_reserve = false;
+  unsigned                 paired_pin_cap     = 0;  // positive even: require balanced even P<=cap and charge cap/2 V uniformly
   // Diagnostic: tiles "col:row;col:row..." (or "all": every placed box) whose box is exported after F1 (output_dir/box_dump: a full
   // post-F1 DEF with the planned PG merged, and one JSON per box: cells, free row segments, incident nets, pins and the L5 metal
   // reaching the tile, marked valid or a failed fallback proposal). Empty: off.
@@ -241,6 +257,7 @@ struct Legroute_options {
   // Opt-in L5 diagnostic: a contribution ledger of every track occupancy plus a shadow occupancy without the FALLBACK
   // contributions; every failed pick is re-run with the same predicates on the shadow (assignment is unchanged).
   bool                     l5_fallback_shadow           = false;
+  unsigned                 l5_repair_ms                 = 0;  // opt-in shared budget for bounded H track reassignment; <60 s
   // Opt-in L5 experiment: limit the conservative end envelope against signal neighbors to the track offsets where the
   // exact rules find an illegal nominal-width pair (hard/reserved neighbors keep the full query reach).
   bool                     l5_rule_reach                = false;
@@ -310,17 +327,29 @@ struct Legroute_step {
   double      seconds = 0;
 };
 struct Legroute_report {
-  size_t                        box_route_seed_attempts = 0, box_route_seed_successes = 0;
-  int64_t                       tile_w = 0, tile_h = 0;
-  size_t                        cols = 0, rows = 0, regions = 0, tiles_free = 0;
-  size_t                        cells = 0, boxes = 0, internal_nets = 0, external_nets = 0, max_cells_per_box = 0;
-  double                        fill = 0, mean_cells_per_box = 0, displacement_um = 0, max_displacement_um = 0;
+  size_t  box_route_seed_attempts = 0, box_route_seed_successes = 0;
+  int64_t tile_w = 0, tile_h = 0;
+  size_t  cols = 0, rows = 0, regions = 0, tiles_free = 0;
+  size_t  cells = 0, boxes = 0, internal_nets = 0, external_nets = 0, max_cells_per_box = 0;
+  double  fill = 0, mean_cells_per_box = 0, displacement_um = 0, max_displacement_um = 0;
   // displacement_um / max_displacement_um above are box-centre to selected-tile moves (after any fit_first anchor).
   // These are actual movable-cell moves from the poses legroute was given to the poses it leaves (Manhattan, um).
-  double                        cell_max_displacement_um = 0, cell_p95_displacement_um = 0;
-  size_t                        cells_moved     = 0;
-  size_t                        spilled_regions = 0;
-  size_t                        connections = 0, critical_connections = 0, unassigned_segments = 0;
+  double  cell_max_displacement_um = 0, cell_p95_displacement_um = 0;
+  size_t  cells_moved     = 0;
+  size_t  spilled_regions = 0;
+  size_t  connections = 0, critical_connections = 0, unassigned_segments = 0;
+  // A successful metal-only audit does not certify vias or complete net connectivity; a failed audit rejects the handoff.
+  bool    local_metal_audit_attempted = false, local_metal_audit_complete = false;
+  size_t  local_metal_conflict_shapes = 0, local_metal_unknown_shapes = 0;
+  bool    local_join_probe_attempted = false, local_join_probe_complete = false;
+  bool    local_metal_rejected() const {
+    return local_metal_audit_attempted
+           && (!local_metal_audit_complete || local_metal_conflict_shapes || local_metal_unknown_shapes);
+  }
+  bool local_handoff_rejected() const {
+    return local_metal_rejected() || (local_join_probe_attempted && !local_join_probe_complete);
+  }
+  size_t                        l5_repair_attempts = 0, l5_repair_successes = 0, l5_repair_unknown = 0, l5_repair_unsat = 0;
   std::map<std::string, size_t> track_failures;         // assignment failures by wire/attachment kind
   std::map<std::string, size_t> track_pick_rejections;  // L5 failed pick attempts by LAYER:filter stage
   std::map<std::string, size_t> track_fallback_shadow;  // l5_fallback_shadow: LAYER:kind:{failed,shadow_free} counts
@@ -418,36 +447,36 @@ struct Legroute_report {
     int    status = 0;
     size_t boxes = 0, tiles = 0;
   };
-  std::vector<Region_stat>      region_stats;
-  std::vector<size_t>           unroutable_components;
-  std::vector<int>              unroutable_regions;  // per unroutable component: its region
-  double                        sat_seconds = 0, sat_seconds_max = 0;
-  size_t                        clock_domains = 0, clock_ribs = 0;
+  std::vector<Region_stat> region_stats;
+  std::vector<size_t>      unroutable_components;
+  std::vector<int>         unroutable_regions;  // per unroutable component: its region
+  double                   sat_seconds = 0, sat_seconds_max = 0;
+  size_t                   clock_domains = 0, clock_ribs = 0;
   // tiles (and tracks) where the built clock tree takes more than local reserved for it before SAT moved boxes
-  size_t                        clock_excess_tiles = 0, clock_excess_tracks = 0;
+  size_t                   clock_excess_tiles = 0, clock_excess_tracks = 0;
   // legacy fixed-IO path: SAT rounds whose published boundary crossings exceeded the density policy
   // Final: each clock net's first planned-metal conflict per pass, in full (phase, offending shape, blocker, rule)
-  std::vector<std::string>      clock_conflicts;
-  size_t                        crossing_over_policy          = 0;
+  std::vector<std::string> clock_conflicts;
+  size_t                   crossing_over_policy          = 0;
   // after L5: (tile, budgeted layer) pairs where shared metal left fewer usable tracks than the cellbox budget
-  size_t                        cellbox_allowance_short_tiles = 0, cellbox_allowance_short_tracks = 0;
-  bool                          crossing_policy_invalid = false;  // then the result does not meet density_ceiling
-  double                        wire_um = 0, critical_wire_um = 0;
-  size_t                        vias          = 0;
+  size_t                   cellbox_allowance_short_tiles = 0, cellbox_allowance_short_tracks = 0;
+  bool                     crossing_policy_invalid = false;  // then the result does not meet density_ceiling
+  double                   wire_um = 0, critical_wire_um = 0;
+  size_t                   vias          = 0;
   // legroute.final routing (the shared physical router). All or nothing: signal and clock jobs must all connect;
   // otherwise neither signal nor clock wires are written. Clock connectivity does not imply CTS or skew closure.
-  bool                          wires_emitted = false;
-  size_t                        route_passes  = 0;  // the routing pass whose result is kept
-  size_t                        routed_nets = 0, local_nets = 0, joins = 0, taps = 0, connected_nets = 0, unchecked_nets = 0;
+  bool                     wires_emitted = false;
+  size_t                   route_passes  = 0;  // the routing pass whose result is kept
+  size_t                   routed_nets = 0, local_nets = 0, joins = 0, taps = 0, connected_nets = 0, unchecked_nets = 0;
   // Clock counters are subsets of the corresponding total net counts, including bounded-prefix unchecked jobs.
-  size_t                        clock_required_nets = 0, clock_connected_nets = 0, clock_failed_nets = 0, clock_unchecked_nets = 0;
+  size_t                   clock_required_nets = 0, clock_connected_nets = 0, clock_failed_nets = 0, clock_unchecked_nets = 0;
   // global_conflict_nets and tree_fallbacks were routed whole by the router; failed_nets did not close at all
-  size_t                        failed_nets = 0, global_conflict_nets = 0, join_failures = 0, tap_failures = 0, tree_fallbacks = 0;
+  size_t                   failed_nets = 0, global_conflict_nets = 0, join_failures = 0, tap_failures = 0, tree_fallbacks = 0;
   // Candidate events across all detailed-route passes, including discarded
   // passes. Search avoidance is distinct from the two transactional backstops.
-  size_t                        final_prior_cut_rejections = 0, final_pending_cut_rejections = 0, final_union_cut_rejections = 0;
-  size_t                        final_precommit_disconnected = 0;
-  size_t                        final_skipped_nets
+  size_t                   final_prior_cut_rejections = 0, final_pending_cut_rejections = 0, final_union_cut_rejections = 0;
+  size_t                   final_precommit_disconnected = 0;
+  size_t                   final_skipped_nets
       = 0;  // final_skip_clock / final_skip_nets diagnostic  // opt-in final_precommit_connectivity rejections
   size_t                        disconnected_nets = 0;
   std::map<std::string, size_t> failure_reasons;        // reason -> nets
@@ -519,7 +548,7 @@ void            write_legroute_report(const Legroute_report&, const std::string&
 // this distinction; none of these modes certifies detailed routability.
 struct Legroute_plan_report {
   bool box_route_seed_attempted = false, box_route_seed_accepted = false;
-  enum class Route_skip_reason { none, physical_density, window_density };
+  enum class Route_skip_reason { none, physical_density, window_density, paired_pin_supply, paired_pin_grouping };
   Legroute_gate_report gates;
   std::string          endpoint_basis    = "physical_pins";
   // A whole-core physical-density rejection precedes route construction. Its
@@ -541,9 +570,11 @@ struct Legroute_plan_report {
   bool                 pg_missing = false;
   size_t      fit_movable_boxes = 0, fit_free_tiles = 0;  // count | budget | domains | far (see lr::Fit_match), empty when it fits
   const char* route_skip_name() const {
-    return route_skip_reason == Route_skip_reason::physical_density ? "physical_density"
-           : route_skip_reason == Route_skip_reason::window_density ? "window_density"
-                                                                    : "none";
+    return route_skip_reason == Route_skip_reason::physical_density      ? "physical_density"
+           : route_skip_reason == Route_skip_reason::window_density      ? "window_density"
+           : route_skip_reason == Route_skip_reason::paired_pin_supply   ? "paired_pin_supply"
+           : route_skip_reason == Route_skip_reason::paired_pin_grouping ? "paired_pin_grouping"
+                                                                         : "none";
   }
   struct Failure {
     size_t      net_index = 0;  // original floorplan net index, not request order

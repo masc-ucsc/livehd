@@ -24,6 +24,9 @@ public:
   bool                    consider(unsigned round, size_t routing_score, const timing::Feedback&);
   const Sample&           last() const { return samples.back(); }
   std::optional<unsigned> selected_round() const { return selected; }
+  // Rejection controls incumbent ownership. Critical-cellbox recovery may
+  // still use that trial's pressure until the fixed retry budget is spent.
+  std::string             recovery_stop_reason(bool continue_rejected, unsigned last_round, bool plan_pass) const;
   void                    write(std::ostream&) const;
 
 private:

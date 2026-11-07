@@ -197,6 +197,33 @@ TEST(Physical, PolygonExtensionsOutsideCellRemainBlocked) {
     }
   }
 }
+TEST(Physical, LefBlockSoftAndBlackboxClasses) {
+  const auto        path = routing_lef();
+  std::ifstream     input(path);
+  const std::string original((std::istreambuf_iterator<char>(input)), {});
+  input.close();
+  auto text = original;
+  text.insert(text.find("END LIBRARY"),
+              "MACRO cluster\n CLASS BLOCK SOFT ; ORIGIN 0 0 ; SIZE 2 BY 3 ;\n"
+              " PIN A\n DIRECTION INPUT ;\n PORT\n LAYER M2 ; RECT 0.5 0.5 0.6 0.6 ;\n END\n END A\nEND cluster\n"
+              "MACRO box\n CLASS BLOCK BLACKBOX ; ORIGIN 0 0 ; SIZE 2 BY 3 ;\nEND box\n"
+              "MACRO ram\n CLASS BLOCK ; ORIGIN 0 0 ; SIZE 2 BY 3 ;\nEND ram\n");
+  {
+    std::ofstream output(path);
+    output << text;
+  }
+  const auto tech = read_lef({path.string()});
+  EXPECT_EQ(tech.macros.at("cluster").klass, "BLOCK SOFT");
+  EXPECT_TRUE(soft_block(tech.macros.at("cluster")));
+  EXPECT_FALSE(hard_macro(tech.macros.at("cluster")));
+  EXPECT_EQ(tech.macros.at("cluster").pins.size(), 1);
+  EXPECT_EQ(tech.macros.at("box").klass, "BLOCK BLACKBOX");
+  EXPECT_FALSE(soft_block(tech.macros.at("box")));
+  EXPECT_TRUE(hard_macro(tech.macros.at("box")));
+  EXPECT_TRUE(hard_macro(tech.macros.at("ram")));
+  EXPECT_FALSE(soft_block(tech.macros.at("inv")));
+  EXPECT_FALSE(hard_macro(tech.macros.at("inv")));
+}
 TEST(Physical, LefConflictingViaCannotReplaceGeometry) {
   const auto base  = routing_lef();
   const auto extra = base.parent_path() / "extra_via.lef";

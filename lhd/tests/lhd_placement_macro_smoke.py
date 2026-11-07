@@ -134,6 +134,13 @@ endmodule
 common=['--set','synth.place.fp.iterations=20','--set','synth.place.fp.minimum=1000','--set','synth.place.fp.min_copies=2','--set','lhd.incremental=false','--set','synth.place.iterations=20','--set','synth.place.grid.density=32','--set','synth.place.io_iterations=10','--set','synth.place.snapshots=true']
 run('centroid_baseline',common+['--set','synth.place.macro=none'])
 baseline_frame=json.loads((root/'W/synth/place/gp.json').read_text())
+competition=['macro_edge_snap','macro_dead_space','macro_refine','macro_anchor']
+qor=json.loads((root/'W/synth/place/qor.json').read_text())
+assert not [k for k in competition if k in qor],qor.keys()  # the default values leave every optional feature off
+# Explicit opt-ins exercise every optional feature.
+run('competition_opt_in',common+['--set','synth.place.macro=none','--set','synth.place.macro.edge_snap=auto','--set','synth.place.macro.dead_space=auto','--set','synth.place.macro.refine_rounds=1','--set','synth.place.macro.anchor=true'])
+qor=json.loads((root/'W/synth/place/qor.json').read_text())
+assert all(k in qor for k in competition),qor.keys()
 # Floorplan GP and snap are independent of the legacy macro experiment mode.
 run('fp_snap',common+['--set','synth.place.macro=none','--set','synth.place.fp=true','--set','synth.place.fp.iterations=20'])
 fp=json.loads((root/'W/synth/place/fp_place.json').read_text())

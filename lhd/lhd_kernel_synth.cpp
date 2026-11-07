@@ -429,6 +429,40 @@ livehd::placement::Options placement_options(const Options& opts) {
     }
     livehd::placement::validate_warp_options(policy);
   }
+  {
+    auto& anchor            = out.macro_anchor;
+    anchor.enabled          = truthy(synth_set(opts, "place.macro.anchor", "false"));
+    anchor.weight           = number("place.macro.anchor.weight", "0.5");
+    anchor.gate             = number("place.macro.anchor.gate", "1");
+    anchor.start_overflow   = number("place.macro.anchor.start_overflow", "0.3");
+    anchor.refresh_interval = static_cast<int>(integer("place.macro.anchor.refresh_interval", "30"));
+    anchor.ramp             = static_cast<int>(integer("place.macro.anchor.ramp", "3"));
+    anchor.max_refreshes    = static_cast<int>(integer("place.macro.anchor.max_refreshes", "40"));
+    anchor.final_weight     = number("place.macro.anchor.final_weight", "2");
+    anchor.settle           = static_cast<int>(integer("place.macro.anchor.settle", "20"));
+    anchor.swaps            = truthy(synth_set(opts, "place.macro.anchor.swaps", "false"));
+    anchor.swap_tolerance   = number("place.macro.anchor.swap_tolerance", "0.05");
+    anchor.swap_lock        = static_cast<int>(integer("place.macro.anchor.swap_lock", "2"));
+    anchor.inflate          = number("place.macro.anchor.inflate", "0");
+    anchor.swap_jump        = truthy(synth_set(opts, "place.macro.anchor.swap_jump", "true"));
+    anchor.dead_space_refreshes
+        = parse_macro_anchor_dead_space_refreshes(synth_set(opts, "place.macro.anchor.dead_space_refreshes", "2"));
+    anchor.select            = synth_set(opts, "place.macro.anchor.select", "edge+random");
+    anchor.edge_weight       = number("place.macro.anchor.edge_weight", "4");
+    anchor.random_weight     = number("place.macro.anchor.random_weight", "1");
+    anchor.random_fraction   = number("place.macro.anchor.random_fraction", "0.25");
+    anchor.edge_gate         = truthy(synth_set(opts, "place.macro.anchor.edge_gate", "false"));
+    anchor.edge_chain        = truthy(synth_set(opts, "place.macro.anchor.edge_chain", "true"));
+    anchor.final_targets     = truthy(synth_set(opts, "place.macro.anchor.final_targets", "true"));
+    anchor.spring_length     = number("place.macro.anchor.spring_length", "0.1");
+    anchor.target_hysteresis = number("place.macro.anchor.target_hysteresis", "0.5");
+    anchor.milestones        = parse_macro_anchor_milestones(synth_set(opts, "place.macro.anchor.milestones", "0.15,0.1"));
+    try {
+      livehd::placement::validate_macro_anchor_options(anchor);
+    } catch (const std::invalid_argument& error) {
+      throw Lhd_error{"usage", error.what(), ""};
+    }
+  }
   out.region.max_cells = integer("place.region.max_cells", "10000");
   out.mesh_variant     = integer("place.mesh_variant", "0");  // legroute push-back state (set by the restart loop)
   out.mesh_variants    = integer("place.mesh_variants", "0");
@@ -477,7 +511,26 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.legroute_options.steiner_min      = integer("place.legroute.steiner_min", "3");
   out.legroute_options.reserved_tracks          = integer("place.legroute.reserved_tracks", "1");
   out.legroute_options.box_reserve              = synth_set(opts, "place.legroute.box_reserve", "M2:1,M3:1");
+  out.legroute_options.critical_cellboxes       = truthy(synth_set(opts, "place.legroute.critical_cellboxes", "false"));
+  out.legroute_options.cellbox_sites            = integer("place.legroute.cellbox_sites", "22");
+  out.legroute_options.cellbox_rows             = integer("place.legroute.cellbox_rows", "4");
+  out.legroute_options.cellbox_external_pins    = integer("place.legroute.cellbox_external_pins", "28");
+  out.legroute_options.cellbox_connections      = integer("place.legroute.cellbox_connections", "10");
+  out.legroute_options.cellbox_critical_choices = integer("place.legroute.cellbox_critical_choices", "4");
+  out.legroute_options.cellbox_other_choices    = integer("place.legroute.cellbox_other_choices", "8");
+  out.legroute_options.cellbox_wide_exceptions  = truthy(synth_set(opts, "place.legroute.cellbox_wide_exceptions", "true"));
+  out.legroute_options.cellbox_far_fallback     = truthy(synth_set(opts, "place.legroute.cellbox_far_fallback", "false"));
+  if (out.legroute_options.critical_cellboxes) {
+    out.legroute_options.box_reserve = "M2:20,M3:20";
+  }
+  out.legroute_options.paired_pin_reserve       = truthy(synth_set(opts, "place.legroute.paired_pin_reserve", "false"));
+  out.legroute_options.paired_pin_cap           = integer("place.legroute.paired_pin_cap", "0");
+  out.legroute_options.l5_repair_ms             = integer("place.legroute.l5_repair_ms", "0");
   out.legroute_options.reserved_tracks_per_um   = number("place.legroute.reserved_tracks_per_um", "-1");
+  if (out.legroute_options.critical_cellboxes) {
+    out.legroute_options.reserved_tracks        = 0;
+    out.legroute_options.reserved_tracks_per_um = -1;
+  }
   out.legroute_options.reserved_layers          = synth_set(opts, "place.legroute.reserved_layers", "");
   out.legroute_options.hop_share                = number("place.legroute.hop_share", "0.5");
   out.legroute_options.reserve_share            = number("place.legroute.reserve_share", "0.5");
@@ -556,6 +609,13 @@ livehd::placement::Options placement_options(const Options& opts) {
   }
   out.legroute_plan.handoff            = truthy(synth_set(opts, "place.legroute.plan.handoff", "false"));
   out.legroute_plan.rounds             = integer("place.legroute.plan.rounds", "3");
+  if (out.legroute_options.critical_cellboxes && out.legroute_plan.rounds > 3) {
+    throw Lhd_error{"usage", "critical_cellboxes permits at most three legroute.plan.rounds", ""};
+  }
+  if (out.legroute_options.cellbox_far_fallback
+      && (!out.legroute_options.critical_cellboxes || !out.legroute_plan.enabled || out.legroute_plan.rounds != 3)) {
+    throw Lhd_error{"usage", "cellbox_far_fallback requires critical_cellboxes and legroute.plan with exactly three rounds", ""};
+  }
   out.legroute_plan.iterations         = integer("place.legroute.plan.iterations", "100");
   out.legroute_plan.min_iterations     = integer("place.legroute.plan.min_iterations", "0");
   out.legroute_plan.timing_interval    = integer("place.legroute.plan.timing_interval", "0");
@@ -572,9 +632,11 @@ livehd::placement::Options placement_options(const Options& opts) {
           || !std::isfinite(out.legroute_plan.max_inflate) || out.legroute_plan.max_inflate <= 1)) {
     throw Lhd_error{"usage", "legroute.plan requires legroute, positive budgets, max_inflate > 1 and probe=false", ""};
   }
-  if (out.legroute_plan.enabled && (!out.legroute_options.partition_cells || out.legroute_options.region_pins)) {
+  if (out.legroute_plan.enabled
+      && ((!out.legroute_options.critical_cellboxes && !out.legroute_options.partition_cells)
+          || out.legroute_options.region_pins)) {
     throw Lhd_error{"usage",
-                    "legroute.plan requires partition_cells > 0 and region_pins=false so cuts follow the planned placement",
+                    "legroute.plan requires region_pins=false and partition_cells > 0 outside critical_cellboxes mode",
                     ""};
   }
   if (out.legroute_probe.enabled
@@ -654,6 +716,27 @@ livehd::placement::Options placement_options(const Options& opts) {
   if (!(out.area_step > 0 && out.area_step < 1)) {
     throw Lhd_error{"usage", "synth.place.area_step must be in (0, 1)", ""};
   }
+  {
+    const auto area = synth_set(opts, "place.area", "fixed");
+    if (area != "fixed" && area != "auto") {
+      throw Lhd_error{"usage", "synth.place.area must be fixed or auto", ""};
+    }
+    auto& fit           = out.area_fit;
+    fit.enabled         = area == "auto";
+    fit.min_fraction    = number("place.area.min_fraction", "0.5");
+    fit.max_utilization = number("place.area.max_utilization", "0.9");
+    fit.tolerance       = number("place.area.tolerance", "0.03");
+    fit.probes          = static_cast<unsigned>(integer("place.area.probes", "4"));
+    fit.overflow_slack  = number("place.area.overflow_slack", "0.05");
+    fit.overflow_floor  = number("place.area.overflow_floor", "0.001");
+    fit.anchor          = synth_set(opts, "place.area.anchor", "io");
+    fit.oracle          = synth_set(opts, "place.area.oracle", "legroute");
+    try {
+      livehd::placement::validate_area_fit_options(fit);
+    } catch (const std::invalid_argument& e) {
+      throw Lhd_error{"usage", std::string("synth.") + e.what(), ""};
+    }
+  }
   out.aspect      = number("place.aspect", "1");
   for (const auto& [key, frame] : {
            std::pair<const char*, std::vector<double>*>{ "place.die",  &out.die},
@@ -685,6 +768,12 @@ livehd::placement::Options placement_options(const Options& opts) {
   }
   // nested placement calls (repair, timing trials) start from a previous frame: the user's frame decides core growth
   out.generated_core        = out.floorplan.empty() && out.die.empty() && out.core.empty();
+  if (out.area_fit.enabled && out.floorplan.empty()) {
+    std::fprintf(stderr,
+                 "lhd synth: synth.place.area=auto applies to an imported synth.place.floorplan; %s\n",
+                 out.generated_core ? "a generated core is sized by synth.place.utilization (0: the routability search)"
+                                    : "synth.place.die/core frames place in the whole core");
+  }
   out.density               = number("place.density", "0.5");
   // utilization 0: the driver searches for the core by bisection (synth_command); this run is its first point
   if (out.utilization <= 0) {
@@ -980,6 +1069,31 @@ livehd::placement::Options placement_options(const Options& opts) {
     const auto halo = parse_halo(halo_text, "place.halo");
     out.halo_x      = halo.first;
     out.halo_y      = halo.second;
+  }
+  const auto channel_text = synth_set(opts, "place.macro.channel", "auto");
+  if (channel_text != "auto") {
+    out.macro_channel = parse_halo(channel_text, "place.macro.channel");
+  }
+  const auto edge_snap_text = synth_set(opts, "place.macro.edge_snap", "off");
+  if (edge_snap_text == "auto") {
+    out.macro_edge_snap = std::pair{-1.0, -1.0};
+  } else if (edge_snap_text == "off") {
+    out.macro_edge_snap.reset();
+  } else {
+    out.macro_edge_snap = parse_halo(edge_snap_text, "place.macro.edge_snap");
+  }
+  out.macro_dead_space = livehd::placement::parse_dead_space_options(synth_set(opts, "place.macro.dead_space", "off"));
+  for (const auto& [key, fallback, target] : {
+           std::tuple{    "place.macro.refine_rounds",  "0",     &out.macro_refine_rounds},
+           std::tuple{"place.macro.refine_iterations", "30", &out.macro_refine_iterations}
+  }) {
+    const auto text         = synth_set(opts, key, fallback);
+    unsigned   value        = 0;
+    const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
+    if (error != std::errc{} || end != text.data() + text.size()) {
+      throw Lhd_error{"usage", std::string("synth.") + key + " expects a nonnegative integer", ""};
+    }
+    *target = value;
   }
   const auto cell_halo = synth_set(opts, "place.cell_halo", "");
   if (!cell_halo.empty()) {
@@ -1379,6 +1493,36 @@ void purge_synth_products(const std::string& root, const std::string& lg_dir, co
 }
 
 }  // namespace
+
+int parse_macro_anchor_dead_space_refreshes(std::string_view text) {
+  int value               = 0;
+  const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
+  if (error != std::errc{} || end != text.data() + text.size() || value < -1 || value > 1000000) {
+    throw Lhd_error{"usage", "invalid synth.place.macro.anchor.dead_space_refreshes", "expected an integer in [-1,1000000]"};
+  }
+  return value;
+}
+
+std::vector<double> parse_macro_anchor_milestones(std::string_view text) {
+  std::vector<double> values;
+  if (text.empty()) {
+    return values;
+  }
+  for (size_t start = 0;;) {
+    const auto        end = std::min(text.find(',', start), text.size());
+    const std::string item(text.substr(start, end - start));
+    char*             parsed_end = nullptr;
+    const double      value      = std::strtod(item.c_str(), &parsed_end);
+    if (parsed_end == item.c_str() || parsed_end != item.c_str() + item.size() || !std::isfinite(value)) {
+      throw Lhd_error{"usage", "invalid synth.place.macro.anchor.milestones", "expected comma-separated finite overflows"};
+    }
+    values.push_back(value);
+    if (end == text.size()) {
+      return values;
+    }
+    start = end + 1;
+  }
+}
 
 // `--set synth.<flag>` value, else `def` (kSynthSetOptions validated the name).
 std::string synth_set(const Options& opts, std::string_view flag, std::string_view def) {

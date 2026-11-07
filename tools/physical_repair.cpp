@@ -240,6 +240,22 @@ int main(int argc, char** argv) {
         value = config[key].GetInt();
       }
     };
+    const auto unsigned_option = [&](const char* key, unsigned& value) {
+      if (config.HasMember(key)) {
+        if (!config[key].IsUint()) {
+          throw std::invalid_argument(std::string(key) + " requires a nonnegative integer");
+        }
+        value = config[key].GetUint();
+      }
+    };
+    const auto string_option = [&](const char* key, std::string& value) {
+      if (config.HasMember(key)) {
+        if (!config[key].IsString()) {
+          throw std::invalid_argument(std::string(key) + " requires a string");
+        }
+        value = config[key].GetString();
+      }
+    };
     const auto boolean_option = [&](const char* key, bool& value) {
       if (config.HasMember(key)) {
         if (!config[key].IsBool()) {
@@ -293,6 +309,24 @@ int main(int argc, char** argv) {
       sizing_forest = scope == "sizing_forest";
     }
     number_option("density", options.density);
+    // Routability-driven area sizing of the imported core (pass/place/area_fit.hpp): "fixed" (default) or "auto".
+    if (config.HasMember("area")) {
+      const auto area = text("area");
+      if (area != "fixed" && area != "auto") {
+        throw std::invalid_argument("area requires fixed or auto");
+      }
+      options.area_fit.enabled = area == "auto";
+    }
+    number_option("area_min_fraction", options.area_fit.min_fraction);
+    number_option("area_max_utilization", options.area_fit.max_utilization);
+    number_option("area_tolerance", options.area_fit.tolerance);
+    unsigned_option("area_probes", options.area_fit.probes);
+    number_option("area_overflow_slack", options.area_fit.overflow_slack);
+    number_option("area_overflow_floor", options.area_fit.overflow_floor);
+    string_option("area_anchor", options.area_fit.anchor);
+    string_option("area_oracle", options.area_fit.oracle);
+    unsigned_option("area_net_pops", options.area_fit.net_pops);
+    pl::validate_area_fit_options(options.area_fit);
     if (config.HasMember("density_weight_seed")) {
       double seed = 0;
       number_option("density_weight_seed", seed);
@@ -369,7 +403,8 @@ int main(int argc, char** argv) {
     options.retain_placement    = config.HasMember("timing_only") && config["timing_only"].GetBool();
     options.density_upper_bound = config.HasMember("density_upper_bound") && config["density_upper_bound"].GetBool();
     options.exact_cell_density  = config.HasMember("exact_cell_density") && config["exact_cell_density"].GetBool();
-    options.min_iterations      = config.HasMember("min_iterations") ? config["min_iterations"].GetInt() : 40;
+    integer_option("min_iterations", options.min_iterations);
+    integer_option("iterations", options.iterations);
     if (config.HasMember("post_density_factor")) {
       options.post_density_factor = config["post_density_factor"].GetDouble();
     }
@@ -400,6 +435,172 @@ int main(int argc, char** argv) {
     boolean_option("legroute_clock_spine", options.legroute_options.clock_spine);
     number_option("legroute_box_fill", options.legroute_options.box_fill);
     number_option("legroute_merge_cost", options.legroute_options.merge_cost);
+    auto& lr = options.legroute_options;
+    boolean_option("critical_cellboxes", lr.critical_cellboxes);
+    unsigned_option("cellbox_sites", lr.cellbox_sites);
+    unsigned_option("cellbox_rows", lr.cellbox_rows);
+    unsigned_option("cellbox_external_pins", lr.cellbox_external_pins);
+    unsigned_option("cellbox_connections", lr.cellbox_connections);
+    unsigned_option("cellbox_critical_choices", lr.cellbox_critical_choices);
+    unsigned_option("cellbox_other_choices", lr.cellbox_other_choices);
+    boolean_option("cellbox_wide_exceptions", lr.cellbox_wide_exceptions);
+    boolean_option("cellbox_far_fallback", lr.cellbox_far_fallback);
+    if (config.HasMember("cellbox_final_retry")) {
+      throw std::invalid_argument("cellbox_final_retry is runtime-only and cannot be configured");
+    }
+    boolean_option("legroute_global_route", lr.global_route);
+    boolean_option("legroute_global_all", lr.global_all);
+    boolean_option("legroute_global_keep", lr.global_keep);
+    boolean_option("legroute_global_pattern", lr.global_pattern);
+    boolean_option("legroute_region_pins", lr.region_pins);
+    boolean_option("legroute_legal_boxes", lr.legal_boxes);
+    boolean_option("legroute_paired_pin_reserve", lr.paired_pin_reserve);
+    boolean_option("legroute_box_route_seed", lr.box_route_seed);
+    boolean_option("legroute_fit_first", lr.fit_first);
+    unsigned_option("legroute_partition_cells", lr.partition_cells);
+    unsigned_option("legroute_global_rounds", lr.global_rounds);
+    unsigned_option("legroute_global_net_pops", lr.global_net_pops);
+    unsigned_option("legroute_reserved_tracks", lr.reserved_tracks);
+    number_option("legroute_reserved_tracks_per_um", lr.reserved_tracks_per_um);
+    unsigned_option("legroute_threads", lr.threads);
+    number_option("legroute_global_share", lr.global_share);
+    number_option("legroute_density_ceiling", lr.density_ceiling);
+    string_option("legroute_box_reserve", lr.box_reserve);
+    string_option("pg", options.pg);
+    boolean_option("allow_increase_area", options.allow_increase_area);
+    auto& plan = options.legroute_plan;
+    boolean_option("legroute_plan", plan.enabled);
+    boolean_option("legroute_plan_handoff", plan.handoff);
+    boolean_option("legroute_plan_export_coarse", plan.export_coarse);
+    string_option("legroute_plan_route_model", plan.route_model);
+    unsigned_option("legroute_plan_route_interval", plan.route_interval);
+    unsigned_option("legroute_plan_route_net_pops", plan.route_net_pops);
+    unsigned_option("legroute_plan_local_tiles", plan.local_tiles);
+    unsigned_option("legroute_plan_rounds", plan.rounds);
+    unsigned_option("legroute_plan_iterations", plan.iterations);
+    unsigned_option("legroute_plan_min_iterations", plan.min_iterations);
+    unsigned_option("legroute_plan_timing_interval", plan.timing_interval);
+    unsigned_option("legroute_plan_net_pops", plan.net_pops);
+    number_option("legroute_plan_max_inflate", plan.max_inflate);
+    number_option("legroute_plan_max_degradation_ps", plan.max_degradation_ps);
+    if (plan.enabled) {
+      if (!options.legroute || !plan.rounds || !plan.iterations || plan.min_iterations > plan.iterations || !plan.net_pops
+          || !std::isfinite(plan.max_inflate) || plan.max_inflate <= 1 || lr.region_pins
+          || (!lr.critical_cellboxes && !lr.partition_cells) || !std::isfinite(plan.max_degradation_ps)
+          || (plan.max_degradation_ps < 0 && plan.max_degradation_ps != -1)) {
+        throw std::invalid_argument(
+            "legroute_plan requires legroute, valid positive budgets, max_inflate > 1, "
+            "region_pins=false and partition_cells > 0 outside critical_cellboxes");
+      }
+      options.placement_session = std::make_shared<pl::Placement_session>();
+    }
+    if (lr.cellbox_far_fallback && (!lr.critical_cellboxes || !plan.enabled || plan.rounds != 3)) {
+      throw std::invalid_argument("cellbox_far_fallback requires critical_cellboxes and legroute_plan with exactly three rounds");
+    }
+    if (lr.critical_cellboxes) {
+      bool source_def = false, cell_place = false, timing_driven = true;
+      boolean_option("source_def", source_def);
+      boolean_option("cell_place", cell_place);
+      boolean_option("timing_driven", timing_driven);
+      if (!source_def || !cell_place || !timing_driven || floorplan_mode || !plan.enabled || plan.rounds > 3 || plan.handoff
+          || lr.legal_boxes || options.pg != "none" || options.iterations < 0 || options.min_iterations < 0
+          || options.final_iterations < 0) {
+        throw std::invalid_argument(
+            "critical_cellboxes requires source_def, cell_place, timing_driven, "
+            "legroute_plan with at most three retries, pg=none, no floorplan_place/legal_boxes/handoff");
+      }
+      for (const auto* key : {"resize", "fp_resize", "remove_synthesis_buffers", "allow_increase_area"}) {
+        bool forbidden = false;
+        boolean_option(key, forbidden);
+        if (forbidden) {
+          throw std::invalid_argument(std::string("critical_cellboxes forbids ") + key);
+        }
+      }
+      unsigned timing_rounds = 0;
+      unsigned_option("timing_rounds", timing_rounds);
+      if (timing_rounds) {
+        throw std::invalid_argument("critical_cellboxes uses only legroute_plan_rounds, not timing_rounds");
+      }
+      lr.box_reserve              = "M2:20,M3:20";
+      lr.reserved_tracks          = 0;
+      lr.reserved_tracks_per_um   = -1;
+      options.allow_increase_area = false;
+    }
+    pl::validate_legroute_options(lr);
+    if (lr.critical_cellboxes) {
+      rapidjson::StringBuffer                    buffer;
+      rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+      writer.StartObject();
+      const auto emit_bool = [&](const char* key, bool value) {
+        writer.Key(key);
+        writer.Bool(value);
+      };
+      const auto emit_uint = [&](const char* key, unsigned value) {
+        writer.Key(key);
+        writer.Uint(value);
+      };
+      const auto emit_number = [&](const char* key, double value) {
+        writer.Key(key);
+        writer.Double(value);
+      };
+      const auto emit_string = [&](const char* key, const std::string& value) {
+        writer.Key(key);
+        writer.String(value.c_str());
+      };
+      emit_bool("critical_cellboxes", lr.critical_cellboxes);
+      emit_uint("cellbox_sites", lr.cellbox_sites);
+      emit_uint("cellbox_rows", lr.cellbox_rows);
+      emit_uint("cellbox_external_pins", lr.cellbox_external_pins);
+      emit_uint("cellbox_connections", lr.cellbox_connections);
+      emit_uint("cellbox_critical_choices", lr.cellbox_critical_choices);
+      emit_uint("cellbox_other_choices", lr.cellbox_other_choices);
+      emit_bool("cellbox_wide_exceptions", lr.cellbox_wide_exceptions);
+      emit_bool("cellbox_far_fallback", lr.cellbox_far_fallback);
+      emit_bool("legroute", options.legroute);
+      emit_bool("legroute_final", lr.final);
+      emit_bool("legroute_clock_spine", lr.clock_spine);
+      emit_bool("legroute_global_route", lr.global_route);
+      emit_bool("legroute_global_all", lr.global_all);
+      emit_bool("legroute_global_keep", lr.global_keep);
+      emit_bool("legroute_global_pattern", lr.global_pattern);
+      emit_bool("legroute_region_pins", lr.region_pins);
+      emit_bool("legroute_legal_boxes", lr.legal_boxes);
+      emit_bool("legroute_paired_pin_reserve", lr.paired_pin_reserve);
+      emit_bool("legroute_box_route_seed", lr.box_route_seed);
+      emit_bool("legroute_fit_first", lr.fit_first);
+      emit_uint("legroute_partition_cells", lr.partition_cells);
+      emit_uint("legroute_global_rounds", lr.global_rounds);
+      emit_uint("legroute_global_net_pops", lr.global_net_pops);
+      emit_uint("legroute_reserved_tracks", lr.reserved_tracks);
+      emit_number("legroute_reserved_tracks_per_um", lr.reserved_tracks_per_um);
+      emit_uint("legroute_threads", lr.threads);
+      emit_number("legroute_global_share", lr.global_share);
+      emit_number("legroute_density_ceiling", lr.density_ceiling);
+      emit_string("legroute_box_reserve", lr.box_reserve);
+      emit_string("pg", options.pg);
+      emit_bool("allow_increase_area", options.allow_increase_area);
+      emit_uint("iterations", unsigned(options.iterations));
+      emit_uint("min_iterations", unsigned(options.min_iterations));
+      emit_uint("final_iterations", unsigned(options.final_iterations));
+      emit_bool("legroute_plan", plan.enabled);
+      emit_bool("legroute_plan_handoff", plan.handoff);
+      emit_bool("legroute_plan_export_coarse", plan.export_coarse);
+      emit_string("legroute_plan_route_model", plan.route_model);
+      emit_uint("legroute_plan_route_interval", plan.route_interval);
+      emit_uint("legroute_plan_route_net_pops", plan.route_net_pops);
+      emit_uint("legroute_plan_local_tiles", plan.local_tiles);
+      emit_uint("legroute_plan_rounds", plan.rounds);
+      emit_uint("legroute_plan_iterations", plan.iterations);
+      emit_uint("legroute_plan_min_iterations", plan.min_iterations);
+      emit_uint("legroute_plan_timing_interval", plan.timing_interval);
+      emit_uint("legroute_plan_net_pops", plan.net_pops);
+      emit_number("legroute_plan_max_inflate", plan.max_inflate);
+      emit_number("legroute_plan_max_degradation_ps", plan.max_degradation_ps);
+      writer.EndObject();
+      if (!(std::ofstream(root + "/critical_cellbox_options.json") << buffer.GetString() << '\n')) {
+        throw std::runtime_error("cannot write effective critical cellbox options");
+      }
+    }
     auto& terminal_options = options.terminal_legalize_options;
     boolean_option("legalize_joint_minimize_total", terminal_options.joint_minimize_total);
     number_option("legalize_remainder_wire_weight", terminal_options.remainder_wire_weight);
@@ -589,6 +790,46 @@ int main(int argc, char** argv) {
     number_option("fp_warp_seconds", options.fp_warp.seconds);
     number_option("macro_warp_seconds", options.macro_warp.seconds);
     number_option("macro_warp_warmup", options.macro_warp.warmup);
+    // macro.anchor: legalized-target soft anchors inside macro GP (pass/place/macro_anchor.hpp); opt-in.
+    boolean_option("macro_anchor", options.macro_anchor.enabled);
+    number_option("macro_anchor_weight", options.macro_anchor.weight);
+    number_option("macro_anchor_start_overflow", options.macro_anchor.start_overflow);
+    if (config.HasMember("macro_anchor_milestones")) {
+      if (!config["macro_anchor_milestones"].IsArray()) {
+        throw std::invalid_argument("macro_anchor_milestones requires an array of numbers");
+      }
+      options.macro_anchor.milestones.clear();
+      for (const auto& m : config["macro_anchor_milestones"].GetArray()) {
+        if (!m.IsNumber()) {
+          throw std::invalid_argument("macro_anchor_milestones requires an array of numbers");
+        }
+        options.macro_anchor.milestones.push_back(m.GetDouble());
+      }
+    }
+    integer_option("macro_anchor_refresh_interval", options.macro_anchor.refresh_interval);
+    integer_option("macro_anchor_ramp", options.macro_anchor.ramp);
+    number_option("macro_anchor_gate", options.macro_anchor.gate);
+    number_option("macro_anchor_stable_fraction", options.macro_anchor.stable_fraction);
+    number_option("macro_anchor_stable_distance", options.macro_anchor.stable_distance);
+    integer_option("macro_anchor_max_refreshes", options.macro_anchor.max_refreshes);
+    integer_option("macro_anchor_settle", options.macro_anchor.settle);
+    boolean_option("macro_anchor_swaps", options.macro_anchor.swaps);
+    number_option("macro_anchor_swap_tolerance", options.macro_anchor.swap_tolerance);
+    integer_option("macro_anchor_swap_neighbors", options.macro_anchor.swap_neighbors);
+    integer_option("macro_anchor_swap_lock", options.macro_anchor.swap_lock);
+    number_option("macro_anchor_inflate", options.macro_anchor.inflate);
+    number_option("macro_anchor_final_weight", options.macro_anchor.final_weight);
+    boolean_option("macro_anchor_swap_jump", options.macro_anchor.swap_jump);
+    integer_option("macro_anchor_dead_space_refreshes", options.macro_anchor.dead_space_refreshes);
+    string_option("macro_anchor_select", options.macro_anchor.select);
+    number_option("macro_anchor_edge_weight", options.macro_anchor.edge_weight);
+    number_option("macro_anchor_random_weight", options.macro_anchor.random_weight);
+    number_option("macro_anchor_random_fraction", options.macro_anchor.random_fraction);
+    boolean_option("macro_anchor_edge_gate", options.macro_anchor.edge_gate);
+    boolean_option("macro_anchor_edge_chain", options.macro_anchor.edge_chain);
+    boolean_option("macro_anchor_final_targets", options.macro_anchor.final_targets);
+    number_option("macro_anchor_spring_length", options.macro_anchor.spring_length);
+    number_option("macro_anchor_target_hysteresis", options.macro_anchor.target_hysteresis);
 
     options.liberty       = text("liberty");
     options.control_ports = config.HasMember("control_ports") ? text("control_ports") : "";
@@ -621,7 +862,68 @@ int main(int argc, char** argv) {
       options.detailed_iterations = config["detailed_iterations"].GetInt();
     }
     if (config.HasMember("halo")) {
-      options.halo_x = options.halo_y = config["halo"].GetDouble();
+      const auto& halo = config["halo"];
+      if (halo.IsNumber()) {
+        options.halo_x = options.halo_y = halo.GetDouble();
+      } else if (halo.IsArray() && halo.Size() == 2 && halo[0].IsNumber() && halo[1].IsNumber()) {
+        options.halo_x = halo[0].GetDouble();
+        options.halo_y = halo[1].GetDouble();
+      } else {
+        throw std::invalid_argument("halo requires nonnegative microns: number or [x,y]");
+      }
+    }
+    if (config.HasMember("macro_channel")) {
+      // Minimum clear spacing between macro bodies in microns: number or [x,y]; absent keeps the technology default.
+      const auto& channel = config["macro_channel"];
+      if (channel.IsNumber()) {
+        options.macro_channel = std::pair{channel.GetDouble(), channel.GetDouble()};
+      } else if (channel.IsArray() && channel.Size() == 2 && channel[0].IsNumber() && channel[1].IsNumber()) {
+        options.macro_channel = std::pair{channel[0].GetDouble(), channel[1].GetDouble()};
+      } else {
+        throw std::invalid_argument("macro_channel requires nonnegative microns: number or [x,y]");
+      }
+      if (!std::isfinite(options.macro_channel->first) || !std::isfinite(options.macro_channel->second)
+          || options.macro_channel->first < 0 || options.macro_channel->second < 0) {
+        throw std::invalid_argument("macro_channel requires finite nonnegative microns");
+      }
+    }
+    if (config.HasMember("macro_edge_snap")) {
+      // Edge snap sliver limit: "auto", a number or [x,y] microns; absent or "off" disables it.
+      const auto& edge = config["macro_edge_snap"];
+      if (edge.IsString() && std::string(edge.GetString()) == "auto") {
+        options.macro_edge_snap = std::pair{-1.0, -1.0};
+      } else if (edge.IsString() && std::string(edge.GetString()) == "off") {
+        options.macro_edge_snap.reset();
+      } else if (edge.IsNumber()) {
+        options.macro_edge_snap = std::pair{edge.GetDouble(), edge.GetDouble()};
+      } else if (edge.IsArray() && edge.Size() == 2 && edge[0].IsNumber() && edge[1].IsNumber()) {
+        options.macro_edge_snap = std::pair{edge[0].GetDouble(), edge[1].GetDouble()};
+      } else {
+        throw std::invalid_argument("macro_edge_snap requires \"auto\", \"off\", or microns: number or [x,y]");
+      }
+      if ((edge.IsNumber() || edge.IsArray())
+          && (!std::isfinite(options.macro_edge_snap->first) || !std::isfinite(options.macro_edge_snap->second)
+              || options.macro_edge_snap->first < 0 || options.macro_edge_snap->second < 0)) {
+        throw std::invalid_argument("macro_edge_snap requires finite nonnegative microns");
+      }
+    }
+    for (const auto* key : {"macro_refine_rounds", "macro_refine_iterations"}) {
+      if (config.HasMember(key)) {
+        // Macro-stage GP burst + macro re-legalization rounds (default 0, off) and GP steps per burst (default 30).
+        if (!config[key].IsUint()) {
+          throw std::invalid_argument(std::string(key) + " requires a nonnegative integer");
+        }
+        (std::string_view(key) == "macro_refine_rounds" ? options.macro_refine_rounds : options.macro_refine_iterations)
+            = config[key].GetUint();
+      }
+    }
+    if (config.HasMember("macro_dead_space")) {
+      // Dead-space metric/collapse: "off" (the default), "metric", "auto" or "key=value,..." (see synth.place.macro.dead_space).
+      const auto& dead = config["macro_dead_space"];
+      if (!dead.IsString()) {
+        throw std::invalid_argument("macro_dead_space requires a string: off, metric, auto or key=value,...");
+      }
+      options.macro_dead_space = livehd::placement::parse_dead_space_options(dead.GetString());
     }
     if (config.HasMember("cell_halo")) {
       const auto& halo = config["cell_halo"];
@@ -758,9 +1060,6 @@ int main(int argc, char** argv) {
       options.snapshots = true;
       if (config.HasMember("route_model")) {
         options.route_model = text("route_model");
-      }
-      if (config.HasMember("iterations")) {
-        options.iterations = config["iterations"].GetInt();
       }
       if (floorplan_mode) {
         options.fp_place = options.final_cells = options.macro_snap = true;

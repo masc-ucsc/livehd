@@ -17,6 +17,7 @@ enum class Track_exclusion : uint8_t {
   region_obstacle     = 4,
   macro_footprint     = 8,
   blocked_tile        = 16,
+  missing_def_track   = 32,  // paired opt-in: the selected upper lattice coordinate is absent from finite DEF patterns
 };
 struct Track_resource_exclusion {
   size_t  track   = 0;  // index into this tile's band's physical coordinate array
@@ -43,6 +44,10 @@ struct Track_resource_layer {
 
   void exclude(size_t tile, size_t track, Track_exclusion);
   void exclude_all(size_t tile, Track_exclusion);
+  // Physical supply after deduplicated exclusions and anonymous headroom, before any cellbox budget.
+  int  usable_capacity(size_t tile) const;
+  // Supply inside [begin, end). Anonymous headroom has no coordinates, so subtract all of it conservatively.
+  int  usable_capacity(size_t tile, int64_t begin, int64_t end) const;
   // Number of represented track slots left by these coarse exclusions and
   // anonymous headroom. The latter does not identify which track is unavailable.
   int  represented_capacity(size_t tile) const;

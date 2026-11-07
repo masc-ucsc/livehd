@@ -171,7 +171,28 @@ Box box(const ph::Technology& tech, const ph::Component& c, int64_t hx, int64_t 
   }
   return {c.place.x - hx, c.place.y - hy, c.place.x + c.place.width + hx, c.place.y + c.place.height + hy};
 }
-bool intersects(const Box& a, const Box& b) { return a.xl < b.xh && b.xl < a.xh && a.yl < b.yh && b.yl < a.yh; }
+// Clearance between two objects: halos keep cells out; two non-CORE bodies also keep the macro channel, so their
+// clear spacing per axis is max(channel, 2 * halo). With a zero channel this is exactly the halo-box test.
+struct Clearance {
+  int64_t hx, hy, sx, sy;
+  Clearance(int64_t halo_x, int64_t halo_y, int64_t channel_x, int64_t channel_y)
+      : hx(halo_x), hy(halo_y), sx(std::max(channel_x, 2 * halo_x)), sy(std::max(channel_y, 2 * halo_y)) {}
+};
+bool is_macro(const ph::Technology& tech, const ph::Component& c) { return !tech.macros.at(c.macro).klass.starts_with("CORE"); }
+// Body spacing two objects must keep along each axis.
+std::pair<int64_t, int64_t> spacing(const ph::Technology& tech, const ph::Component& a, const ph::Component& b,
+                                    const Clearance& k) {
+  const bool ma = is_macro(tech, a), mb = is_macro(tech, b);
+  if (ma && mb) {
+    return {k.sx, k.sy};
+  }
+  return {ma || mb ? k.hx : 0, ma || mb ? k.hy : 0};
+}
+bool conflicts(const ph::Technology& tech, const ph::Component& a, const ph::Component& b, const Clearance& k) {
+  const auto [sx, sy] = spacing(tech, a, b, k);
+  const auto &p = a.place, &q = b.place;
+  return p.x < q.x + q.width + sx && q.x < p.x + p.width + sx && p.y < q.y + q.height + sy && q.y < p.y + p.height + sy;
+}
 struct Candidate {
   int64_t     value;
   unsigned    misses;
@@ -224,8 +245,9 @@ std::vector<Candidate> candidates(const Profile& p, int axis, int64_t old, int64
 // phases. Every pair retains one original separating axis. Forward/backward
 // difference bounds make compact strips move together instead of blocking one
 // another; the original frame is changed only after the complete proof passes.
-bool coherent_macro_tracks(const ph::Technology& tech, const ph::Floorplan& layout, std::vector<ph::Component>& cells, int64_t hx,
-                           int64_t hy) {
+bool coherent_macro_tracks(const ph::Technology& tech, const ph::Floorplan& layout, std::vector<ph::Component>& cells,
+                           const Clearance& k) {
+  const auto hx = k.hx, hy = k.hy;
   if (cells.empty() || cells.size() > 4096 || layout.rows.empty()) {
     return false;
   }
@@ -283,10 +305,8 @@ bool coherent_macro_tracks(const ph::Technology& tech, const ph::Floorplan& layo
       const int     axis = xgap >= ygap ? 0 : 1;
       const size_t  from = (axis == 0 ? left : bottom) ? i : j, to = from == i ? j : i;
       const auto&   f        = cells[from].place;
-      const auto&   t        = cells[to].place;
-      const auto&   fb       = boxes[from];
-      const auto&   tb       = boxes[to];
-      const int64_t distance = axis == 0 ? fb.xh - f.x + t.x - tb.xl : fb.yh - f.y + t.y - tb.yl;
+      const auto [sx, sy]    = spacing(tech, cells[from], cells[to], k);
+      const int64_t distance = axis == 0 ? f.width + sx : f.height + sy;
       edges[axis].push_back({from, to, distance});
     }
   }
@@ -324,8 +344,8 @@ bool coherent_macro_tracks(const ph::Technology& tech, const ph::Floorplan& layo
         if (first > last) {
           continue;
         }
-        const auto k     = std::clamp<int64_t>(std::llround(double(target - phase.value) / p.period[axis]), first, last);
-        const auto value = phase.value + k * p.period[axis];
+        const auto n     = std::clamp<int64_t>(std::llround(double(target - phase.value) / p.period[axis]), first, last);
+        const auto value = phase.value + n * p.period[axis];
         if (!best || std::pair{std::abs(value - target), value} < std::pair{std::abs(*best - target), *best}) {
           best = value;
         }
@@ -382,7 +402,7 @@ bool coherent_macro_tracks(const ph::Technology& tech, const ph::Floorplan& layo
     }
     for (size_t j = 0; j < i; ++j) {
       if (!fixed(i) || !fixed(j)) {
-        valid &= !intersects(box(tech, cells[i], hx, hy), box(tech, cells[j], hx, hy));
+        valid &= !conflicts(tech, cells[i], cells[j], k);
       }
     }
   }
@@ -491,7 +511,8 @@ std::function<bool(const std::vector<ph::Component>&)> make_rigid_macro_track_ch
 }
 
 void legalize_macro_tracks_impl(const ph::Technology& tech, const ph::Floorplan& layout, std::vector<ph::Component>& cells,
-                                int64_t halo_x, int64_t halo_y, bool move_macros, bool repack) {
+                                const Clearance& k, bool move_macros, bool repack) {
+  const auto halo_x = k.hx, halo_y = k.hy;
   if (layout.rows.empty()) {
     return;
   }
@@ -527,7 +548,13 @@ void legalize_macro_tracks_impl(const ph::Technology& tech, const ph::Floorplan&
     if (m.klass.starts_with("CORE") || (!move_macros && !fixed(c))) {
       return false;
     }
-    return !(profile_of(c).pins.empty() && grid == 1);
+    if (!(profile_of(c).pins.empty() && grid == 1)) {
+      return true;
+    }
+    // A pinless body on a unit grid has no phase to correct; it still moves when it violates a clearance.
+    return !fixed(c) && std::any_of(blockers.begin(), blockers.end(), [&](size_t j) {
+      return &cells[j] != &c && conflicts(tech, c, cells[j], k);
+    });
   };
   // Repack ignores later movable blockers because they are placed after this
   // macro. Fixed geometry and pinless bodies remain obstacles.
@@ -561,11 +588,12 @@ void legalize_macro_tracks_impl(const ph::Technology& tech, const ph::Floorplan&
       if (j == i || (j > i && repacked[j])) {
         continue;
       }
-      const auto obstacle = box(tech, cells[j], halo_x, halo_y);
-      x_edges.push_back(obstacle.xl - c.place.width - halo_x);
-      x_edges.push_back(obstacle.xh + halo_x);
-      y_edges.push_back(obstacle.yl - c.place.height - halo_y);
-      y_edges.push_back(obstacle.yh + halo_y);
+      const auto& o       = cells[j].place;
+      const auto [sx, sy] = spacing(tech, c, cells[j], k);
+      x_edges.push_back(o.x - sx - c.place.width);
+      x_edges.push_back(o.x + o.width + sx);
+      y_edges.push_back(o.y - sy - c.place.height);
+      y_edges.push_back(o.y + o.height + sy);
     }
     for (int pass = 0; pass < 2 && !placed; ++pass) {
       const auto xs = candidates(p, 0, original.x, core.xl + halo_x, core.xh - c.place.width - halo_x, pass ? &x_edges : nullptr);
@@ -596,15 +624,14 @@ void legalize_macro_tracks_impl(const ph::Technology& tech, const ph::Floorplan&
         if (inaccessible(p, candidate.x, candidate.y)) {
           continue;
         }
-        c.place.x          = candidate.x;
-        c.place.y          = candidate.y;
-        const auto area    = box(tech, c, halo_x, halo_y);
-        bool       blocked = false;
+        c.place.x    = candidate.x;
+        c.place.y    = candidate.y;
+        bool blocked = false;
         for (size_t j : blockers) {
           if (j == i || (j > i && repacked[j])) {
             continue;
           }
-          if (intersects(area, box(tech, cells[j], halo_x, halo_y))) {
+          if (conflicts(tech, c, cells[j], k)) {
             blocked = true;
             break;
           }
@@ -622,21 +649,25 @@ void legalize_macro_tracks_impl(const ph::Technology& tech, const ph::Floorplan&
   }
 }
 void legalize_macro_tracks(const ph::Technology& tech, const ph::Floorplan& layout, std::vector<ph::Component>& cells,
-                           int64_t halo_x, int64_t halo_y, bool move_macros) {
-  const auto original = cells;
+                           int64_t halo_x, int64_t halo_y, bool move_macros, int64_t channel_x, int64_t channel_y) {
+  if (halo_x < 0 || halo_y < 0 || channel_x < 0 || channel_y < 0) {
+    throw std::invalid_argument("macro halo and channel must be nonnegative");
+  }
+  const Clearance k(halo_x, halo_y, channel_x, channel_y);
+  const auto      original = cells;
   try {
     // Validate every immutable macro before an early movable failure can enter
     // a recovery path. Recovery treats fixed geometry solely as obstacles.
     if (move_macros) {
-      legalize_macro_tracks_impl(tech, layout, cells, halo_x, halo_y, false, false);
+      legalize_macro_tracks_impl(tech, layout, cells, k, false, false);
     }
-    legalize_macro_tracks_impl(tech, layout, cells, halo_x, halo_y, move_macros, false);
+    legalize_macro_tracks_impl(tech, layout, cells, k, move_macros, false);
   } catch (const std::runtime_error& failure) {
     cells = original;
     if (!move_macros || !std::string(failure.what()).starts_with("no legal macro routing-track alignment near ")) {
       throw;
     }
-    if (coherent_macro_tracks(tech, layout, cells, halo_x, halo_y)) {
+    if (coherent_macro_tracks(tech, layout, cells, k)) {
       return;
     }
     cells = original;
@@ -644,7 +675,7 @@ void legalize_macro_tracks(const ph::Technology& tech, const ph::Floorplan& layo
     // movable macro remains an obstacle. Repack transactionally against fixed
     // geometry and completed macros; preserve the original frame on failure.
     try {
-      legalize_macro_tracks_impl(tech, layout, cells, halo_x, halo_y, move_macros, true);
+      legalize_macro_tracks_impl(tech, layout, cells, k, move_macros, true);
     } catch (...) {
       cells = original;
       throw;
@@ -653,7 +684,8 @@ void legalize_macro_tracks(const ph::Technology& tech, const ph::Floorplan& layo
 }
 
 void legalize_rigid_macro_tracks(const ph::Technology& tech, const ph::Floorplan& layout, std::vector<ph::Component>& cells,
-                                 const std::vector<uint64_t>& ids, int64_t hx, int64_t hy, bool move) {
+                                 const std::vector<uint64_t>& ids, int64_t hx, int64_t hy, bool move, int64_t channel_x,
+                                 int64_t channel_y) {
   if (ids.size() != cells.size()) {
     throw std::invalid_argument("rigid track group id size mismatch");
   }
@@ -734,7 +766,7 @@ void legalize_rigid_macro_tracks(const ph::Technology& tech, const ph::Floorplan
     proxy.place.orientation = ph::Orientation::N;
   }
   const auto before = proxies;
-  legalize_macro_tracks(proxy_tech, layout, proxies, hx, hy, move);
+  legalize_macro_tracks(proxy_tech, layout, proxies, hx, hy, move, channel_x, channel_y);
   auto result = cells;
   for (size_t j = 0; j < proxies.size(); ++j) {
     const int64_t dx = proxies[j].place.x - before[j].place.x;
@@ -750,7 +782,7 @@ void legalize_rigid_macro_tracks(const ph::Technology& tech, const ph::Floorplan
   for (auto& c : audit) {
     c.place.status = ph::Status::FIXED;
   }
-  legalize_macro_tracks(tech, layout, audit, hx, hy, false);
+  legalize_macro_tracks(tech, layout, audit, hx, hy, false, channel_x, channel_y);
   cells = std::move(result);
 }
 

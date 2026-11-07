@@ -11,10 +11,14 @@ std::function<bool(const std::vector<physical::Component>&)> make_rigid_macro_tr
                                                                                             const physical::Floorplan&);
 // Adjust movable BLOCK origins before row packing. Explicit FIXED/LOCKED objects
 // are immutable and diagnosed when their signal pins miss known routing tracks.
+// Halos keep CORE cells out; two non-CORE bodies keep max(channel, 2 * halo) of clear
+// spacing per axis (DBU). Moved origins never land closer than that to another macro.
 void legalize_macro_tracks(const physical::Technology& tech, const physical::Floorplan& layout,
-                           std::vector<physical::Component>& cells, int64_t halo_x, int64_t halo_y, bool move_macros);
+                           std::vector<physical::Component>& cells, int64_t halo_x, int64_t halo_y, bool move_macros,
+                           int64_t channel_x = 0, int64_t channel_y = 0);
 // Diagnostic group ids describe rigid translations only during macro_plan.
 // Each group is profiled/placed as one union rectangle with all member pins.
 void legalize_rigid_macro_tracks(const physical::Technology&, const physical::Floorplan&, std::vector<physical::Component>&,
-                                 const std::vector<uint64_t>& group_ids, int64_t halo_x, int64_t halo_y, bool move_macros);
+                                 const std::vector<uint64_t>& group_ids, int64_t halo_x, int64_t halo_y, bool move_macros,
+                                 int64_t channel_x = 0, int64_t channel_y = 0);
 }  // namespace livehd::placement

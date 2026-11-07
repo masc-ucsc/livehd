@@ -617,6 +617,10 @@ void        harvest_abc_incremental(Result& res);
 // pass.opentimer's STA reuse counters, from the `sta` qor object (its own
 // report, or the `sta` member of a fused synth envelope) into res.sta_incr.
 void        harvest_sta_incremental(Result& res, std::string_view sta_json);
+// Parse signed and list-valued macro-anchor settings without losing the -1 sentinel
+// or accepting a numeric prefix of a malformed value.
+int                 parse_macro_anchor_dead_space_refreshes(std::string_view text);
+std::vector<double> parse_macro_anchor_milestones(std::string_view text);
 // `lhd synth`: compile -> pass.color reduce -> pass.color synth -> pass.abc ->
 // pass.opentimer over
 // ONE in-memory design (lhd_kernel_synth.cpp).

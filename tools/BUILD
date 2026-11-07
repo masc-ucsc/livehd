@@ -152,6 +152,13 @@ cc_binary(
 )
 
 cc_binary(
+    name = "area_fit_route",
+    srcs = ["area_fit_route.cpp"],
+    copts = COPTS,
+    deps = ["//pass/place", "//inou/lefdef:inou_lefdef"],
+)
+
+cc_binary(
     name = "legroute_replay",
     srcs = ["legroute_replay.cpp"],
     copts = COPTS,

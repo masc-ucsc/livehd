@@ -24,6 +24,10 @@ namespace {
 namespace dp                       = DreamPlace::native;
 namespace fs                       = std::filesystem;
 using Json                         = rapidjson::Value;
+// Bytes of pass/place/uroute/pretrained/manifest.json, embedded at build time.
+constexpr std::string_view uroute_pretrained_manifest =
+#include "pass/place/uroute_pretrained_manifest.inc"
+    ;
 // Input size limits, mirrored by the offline tools.
 constexpr std::uintmax_t map_limit = 8ULL << 20, manifest_limit = 64ULL << 20, weights_limit = 256ULL << 20, lef_limit = 1ULL << 30;
 std::string              digest(llvm::SHA256& hash) {
@@ -214,18 +218,32 @@ Uroute_pool::Uroute_pool(Uroute_options options) {
     return;
   }
   try {
-    const fs::path root(o.dir), manifest = root / "manifest.json";
-    if (!fs::is_regular_file(manifest)) {
-      d->skipped = "manifest.json is missing";
-      return;
-    }
-    if (fs::file_size(manifest) > manifest_limit) {
-      throw std::runtime_error("oversized URoute manifest");
-    }
-    std::ifstream     in(manifest, std::ios::binary);
-    const std::string bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-    if (!in.eof() && !in) {
-      throw std::runtime_error("cannot read URoute manifest");
+    // @pretrained is compiled in, so binaries need no data files at runtime.
+    const bool     bundled = o.dir == uroute_pretrained_dir;
+    const fs::path base(bundled ? fs::path() : fs::path(o.dir));
+    const auto     root = [&]() -> const fs::path& {
+      if (bundled) {
+        throw std::runtime_error("bundled @pretrained URoute manifest cannot reference external files");
+      }
+      return base;
+    };
+    std::string bytes;
+    if (bundled) {
+      bytes = uroute_pretrained_manifest;
+    } else {
+      const auto manifest = base / "manifest.json";
+      if (!fs::is_regular_file(manifest)) {
+        d->skipped = "manifest.json is missing";
+        return;
+      }
+      if (fs::file_size(manifest) > manifest_limit) {
+        throw std::runtime_error("oversized URoute manifest");
+      }
+      std::ifstream in(manifest, std::ios::binary);
+      bytes.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+      if (!in.eof() && !in) {
+        throw std::runtime_error("cannot read URoute manifest");
+      }
     }
     d->manifest_sha256 = sha(bytes);
     d->identity        = sha(d->identity + ":" + d->manifest_sha256);
@@ -270,7 +288,7 @@ Uroute_pool::Uroute_pool(Uroute_options options) {
           if (!record.HasMember("calibration_sha256")) {
             continue;
           }
-          const auto path = inside(inside(root, text(record, "directory")), "calibration.json");
+          const auto path = inside(inside(root(), text(record, "directory")), "calibration.json");
           if (file_sha(path, manifest_limit) != text(record, "calibration_sha256")) {
             throw std::runtime_error("URoute calibration digest mismatch");
           }
@@ -299,7 +317,7 @@ Uroute_pool::Uroute_pool(Uroute_options options) {
         throw std::runtime_error("URoute created_at must be an integer timestamp");
       }
       sample.created       = created.GetUint64();
-      const auto directory = inside(root, text(record, "directory"));
+      const auto directory = inside(root(), text(record, "directory"));
       const auto features = inside(directory, "features.bin"), labels = inside(directory, "labels.bin");
       const auto fh = file_sha(features, map_limit), lh = file_sha(labels, map_limit);
       if (fh != text(record, "features_sha256") || lh != text(record, "labels_sha256")) {
@@ -328,7 +346,7 @@ Uroute_pool::Uroute_pool(Uroute_options options) {
       d->skipped = "manifest has no trained weights";
       return;
     }
-    const auto path   = inside(root, text(weights, "file"));
+    const auto path   = inside(root(), text(weights, "file"));
     const auto hash   = file_sha(path, weights_limit);
     d->weights_sha256 = hash;
     d->identity       = sha(d->identity + ":" + hash);

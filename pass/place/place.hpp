@@ -9,6 +9,7 @@
 #include <utility>
 #include <vector>
 
+#include "area_fit.hpp"
 #include "boundary_pins.hpp"
 #include "busorder.hpp"
 #include "cell_jump.hpp"
@@ -24,6 +25,8 @@
 #include "inou/lefdef/physical.hpp"
 #include "inou/lefdef/row_access.hpp"
 #include "legroute.hpp"
+#include "macro_anchor.hpp"
+#include "macro_dead_space.hpp"
 #include "multirow.hpp"
 #include "multirow_eco.hpp"
 #include "placement_session.hpp"
@@ -149,6 +152,8 @@ struct Options {
   std::string                                               liberty, tech_rc_file, tracks_file;
   std::string                                               macro_mode = "none";
   Warp_options                      fp_warp{.weight = 1}, macro_warp{.weight = .7, .start_stability = .2, .refresh_interval = 25};
+  // macro.anchor: moving legalized-target soft anchors inside macro GP (macro_anchor.hpp); off by default.
+  Macro_anchor_options                  macro_anchor;
   DreamPlace::native::MagnetOptions macro_magnet;
   bool                              fp_place = false, fp_snap_enabled = true;
   bool                              fp_colors           = false;  // eligible color leaves; never independently centroid-snapped
@@ -331,6 +336,8 @@ struct Options {
   // place.utilization=0: the driver bisects the utilization; placement never retries in place, every failure goes
   // back to the driver as a failed point
   bool                                     area_search    = false;
+  // place.area=auto: an imported (fixed) core places in the smallest region that still routes (area_fit.hpp)
+  Area_fit_options                                           area_fit;
   unsigned                                 mesh_variants  = 0;  // region meshes tried at the same core before it grows (0..2)
   // legroute push-back: a region without a routable answer first tries other region meshes at the same core (1:
   // regions a quarter larger, 2: a fifth smaller), then the core grows; the driver scales region.max_cells by it
@@ -346,6 +353,26 @@ struct Options {
   double                                   halo_x = -1, halo_y = -1;
   // Unset preserves the macro halo for cells. Applied only after the macro frame is fixed.
   std::optional<std::pair<double, double>> cell_halo;
+  // macro.channel: minimum clear spacing between two macro bodies, {x, y} microns rounded up to the manufacturing
+  // grid only. Unset (auto) derives it from the technology: the largest minimum metal spacing of the routing layers
+  // the macros obstruct, at least one manufacturing grid. Two macros keep max(channel, 2 * halo) per axis.
+  std::optional<std::pair<double, double>> macro_channel;
+  // macro.edge_snap: after native macro legalization, slide a movable macro toward its nearest core edge when the
+  // clear sliver between it and that edge (or an edge-anchored macro) is at most {x, y} microns. Unset (`off`)
+  // disables it (the default); a negative axis is `auto`: one tenth of the core extent on that axis (OpenROAD mpl's
+  // notch threshold).
+  std::optional<std::pair<double, double>> macro_edge_snap;
+  // macro.dead_space: unset (off, the default) changes nothing. Set: QoR
+  // reports the dead-space metric of the final macro frame (`macro_dead_space`), and with `collapse` the native macro
+  // flow runs the collapse pass after the edge snap and before routing-track alignment. See macro_dead_space.hpp and
+  // README "Macro dead space".
+  std::optional<Dead_space_options>        macro_dead_space;
+  // macro.refine_rounds / refine_iterations: after the native macro-stage GP and its macro legalization (with edge
+  // snap and dead-space collapse), resume GP for `macro_refine_iterations` steps from the legalized pose with the
+  // macros movable again, then legalize (snap, collapse, track alignment) again; `macro_refine_rounds` times.
+  // Zero rounds (the default) changes nothing.
+  unsigned                                 macro_refine_rounds     = 0;
+  unsigned                                 macro_refine_iterations = 30;
   bool                       cell_stage = false;  // internal explicit final/placed context; never inferred from an ECO frame
   bool                       scale_macro_density       = true;
   bool                       dynamic_bins              = false;
@@ -482,7 +509,12 @@ Options      final_cell_options(const Options& options);
 // its movable CORE legality is deferred to local SAT. check_legality always
 // checks the complete physical frame independently of that stage policy.
 void         check_placed_legality(const Result& result, const Options& options);
+// Raw critical-cellbox Plan output: real dimensions/core bounds and fixed/
+// macro legality, with movable CORE row/site/overlap deferred to Local.
+void         check_critical_plan_frame(const physical::Technology&, const physical::Floorplan&, const Options&);
 // Independent physical check against the LEF/DEF model, after DBU rounding.
-void         check_legality(const physical::Technology& tech, const physical::Floorplan& fp, double halo_x = 0, double halo_y = 0);
+// channel_x/y (microns, rounded up to the manufacturing grid) is the minimum clear spacing between non-CORE bodies.
+void         check_legality(const physical::Technology& tech, const physical::Floorplan& fp, double halo_x = 0, double halo_y = 0,
+                            double channel_x = 0, double channel_y = 0);
 void         check_legality(const physical::Technology& tech, const physical::Floorplan& fp, const Options& options);
 }  // namespace livehd::placement

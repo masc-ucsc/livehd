@@ -68,7 +68,7 @@ features = read(export / "features.bin")
 assert (features.channels, features.bins_x, features.bins_y) == (4, 256, 256)
 assert metadata["route_grid"] == [8, 8] and metadata["capacity_h"] > 0 and metadata["capacity_v"] > 0
 assert metadata["features_sha256"] == hashlib.sha256((export / "features.bin").read_bytes()).hexdigest()
-assert Path(options["uroute"]["dir"]).name == "pretrained", options
+assert options["uroute"]["dir"] == "@pretrained", options
 pool = root / "pool"
 area = 256 * 256
 labels = Maps(3, 256, 256, False, [2.] * area + [0.] * area + [1.] * area, [(2., 2.), (0., 0.), (1., 1.)])

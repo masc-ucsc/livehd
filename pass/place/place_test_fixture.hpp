@@ -29,6 +29,11 @@ inline Options plain_options() {
   o.scale_macro_density = o.exact_macro_density = o.adaptive_density = o.routability = false;
   o.macro_overlap_weight = o.macro_jitter = 0;
   o.schedule_iterations = o.io_iterations = 0;
+  // The pre-2026-11 macro_plan flow (pass/place/README.md): the macro competition features are on by default now.
+  o.macro_edge_snap.reset();
+  o.macro_dead_space.reset();
+  o.macro_refine_rounds  = 0;
+  o.macro_anchor.enabled = false;
   return o;
 }
 

@@ -18,11 +18,158 @@
 
 #include "core/json_util.hpp"
 #include "inou/lefdef/routing_geometry.hpp"
+#include "inou/lefdef/routing_occupancy.hpp"
 #include "inou/lefdef/routing_rules.hpp"
 #include "legroute_internal.hpp"
 
 namespace livehd::placement {
 namespace lr {
+Legroute_gate_report paired_pin_supply_gate(const Design& d, const Grid& g) {
+  Legroute_gate_report gate;
+  gate.density_limit = d.opt.density_ceiling;
+  std::set<int>    regions;
+  std::set<size_t> components;
+  for (const auto& reserve : g.paired_pin_reservations) {
+    if (!reserve.short_supply && !reserve.grouping_invalid) {
+      continue;
+    }
+    ++gate.unfittable_boxes;
+    regions.insert(g.region.at(size_t(reserve.tile)));
+    for (int cell : reserve.cells) {
+      components.insert(size_t(d.movable.at(size_t(cell))));
+    }
+    const auto x = double(g.left(g.col(reserve.tile))), y = double(g.bottom(g.row(reserve.tile)));
+    gate.hotspots.push_back({x, y, x + g.tile_w, y + g.tile_h});
+  }
+  gate.unfittable_regions = regions.size();
+  gate.affected_components.assign(components.begin(), components.end());
+  return gate;
+}
+
+void write_paired_pin_reservations(const Design& d, const Grid& g, const std::string& filename) {
+  std::filesystem::create_directories(std::filesystem::path(filename).parent_path());
+  std::ofstream out(filename);
+  out << "{\"schema_version\":1,\"policy\":\"paired_external_pins\",\"pin_cap\":" << d.opt.paired_pin_cap << ','
+      << "\"scope\":\"ordinary_required_pins\",\"fixed_boxes\":true,"
+         "\"certificate\":\"anonymous_reservation_counts_only\",\"boxes\":[";
+  bool first = true;
+  for (const auto& reserve : g.paired_pin_reservations) {
+    out << (first ? "" : ",")
+        << std::format(
+               R"({{"box":{},"tile":{},"external_pins":{},"external_rows":[{},{}],"vertical_layer":"{}",)"
+               R"("vertical_reserved":{},"vertical_usable":{},"internal_vertical_estimate":{},"internal_horizontal_estimate":{},"horizontal_layer":"{}",)"
+               R"("horizontal_reserved":[{},{}],"horizontal_usable":[{},{}],"opposite_row_pair_deficit":{},)"
+               R"("short_supply":{},"grouping_invalid":{},"actual_pairs":{},"cells":[)",
+               reserve.box,
+               reserve.tile,
+               reserve.external_pins.size(),
+               reserve.external_rows[0],
+               reserve.external_rows[1],
+               json_util::escape(g.layers.at(size_t(reserve.vertical_layer)).name),
+               reserve.vertical_tracks,
+               reserve.vertical_usable,
+               reserve.internal_vertical_estimate,
+               reserve.internal_horizontal_estimate,
+               json_util::escape(g.box_layer),
+               reserve.horizontal_tracks[0],
+               reserve.horizontal_tracks[1],
+               reserve.horizontal_usable[0],
+               reserve.horizontal_usable[1],
+               std::max(reserve.external_rows[0], reserve.external_rows[1]) > reserve.vertical_tracks
+                   ? std::max(reserve.external_rows[0], reserve.external_rows[1]) - reserve.vertical_tracks
+                   : 0,
+               reserve.short_supply,
+               reserve.grouping_invalid,
+               reserve.actual_pairs);
+    first = false;
+    for (size_t i = 0; i < reserve.cells.size(); ++i) {
+      const auto  comp = size_t(d.movable.at(size_t(reserve.cells[i])));
+      const auto& cell = d.fp.components.at(comp);
+      out << (i ? "," : "")
+          << std::format(R"({{"component":{},"name":"{}","x":{},"y":{}}})",
+                         comp,
+                         json_util::escape(cell.name),
+                         cell.place.x,
+                         cell.place.y);
+    }
+    out << "],\"internal_nets\":[";
+    for (size_t i = 0; i < reserve.internal_nets.size(); ++i) {
+      out << (i ? "," : "") << d.nets.at(size_t(reserve.internal_nets[i])).frame;
+    }
+    out << "],\"pin_obligations\":[";
+    for (size_t i = 0; i < reserve.external_pins.size(); ++i) {
+      const auto& obligation = reserve.external_pins[i];
+      const auto& net        = d.nets.at(size_t(obligation.net));
+      const auto& pin        = net.pins.at(size_t(obligation.pin));
+      out << (i ? "," : "")
+          << std::format(R"({{"net_index":{},"net":"{}","pin_index":{},"component":{},"pin":"{}","row":{}}})",
+                         net.frame,
+                         json_util::escape(d.fp.nets.at(net.frame).name),
+                         obligation.pin,
+                         pin.comp,
+                         json_util::escape(pin.name),
+                         obligation.row);
+    }
+    out << "],\"layers\":[";
+    for (size_t l = 0; l < g.resources.layers.size(); ++l) {
+      const auto& layer = g.resources.layers[l];
+      const auto& tile  = layer.tiles.at(size_t(reserve.tile));
+      out << (l ? "," : "")
+          << std::format(R"({{"layer":"{}","usable":{},"protected":{},"remaining_coarse_capacity":{}}})",
+                         json_util::escape(layer.name),
+                         layer.usable_capacity(size_t(reserve.tile)),
+                         tile.cellbox_budget,
+                         tile.coarse_capacity);
+    }
+    out << "]}";
+  }
+  out << "]}\n";
+  if (!out) {
+    throw std::runtime_error("cannot write paired-pin reservation report: " + filename);
+  }
+}
+
+void write_local_track_requests(const Design& d, const Grid& g, const Routing& routing, const std::string& directory) {
+  std::filesystem::create_directories(directory);
+  std::ofstream segments(directory + "/local_segments.tsv"), nodes(directory + "/local_nodes.tsv"),
+      resources(directory + "/local_resources.tsv");
+  segments << "segment\tnet_index\tnet\tlayer\tband\tlo_tile\thi_tile\ttrack\tcoordinate_dbu\tstate\tnode_lo\tnode_hi"
+              "\tjog_lo_layer\tjog_lo_track\tjog_lo_state\tjog_hi_layer\tjog_hi_track\tjog_hi_state\n";
+  for (size_t i = 0; i < routing.segments.size(); ++i) {
+    const auto& s     = routing.segments[i];
+    const auto& net   = d.nets.at(size_t(s.net));
+    const auto& layer = g.layers.at(size_t(s.layer));
+    segments << i << '\t' << net.frame << '\t' << json_util::escape(d.fp.nets.at(net.frame).name) << '\t' << layer.name << '\t'
+             << s.band << '\t' << s.lo << '\t' << s.hi << '\t' << s.track << '\t'
+             << (s.track < 0 ? -1 : g.track_coord(s.layer, s.track)) << '\t' << int(s.track_state) << '\t' << s.node_lo << '\t'
+             << s.node_hi << '\t' << s.jog_lo_layer << '\t' << s.jog_lo << '\t' << int(s.jog_lo_state) << '\t' << s.jog_hi_layer
+             << '\t' << s.jog_hi << '\t' << int(s.jog_hi_state) << '\n';
+  }
+  nodes << "net_index\tnode\ttile\tbox\tterminal\triser_layer\triser_track\triser_state\tstub_layer\tstub_track\tstub_state"
+           "\tstub_access_state\n";
+  for (size_t n = 0; n < routing.trees.size(); ++n) {
+    for (size_t i = 0; i < routing.trees[n].nodes.size(); ++i) {
+      const auto& p = routing.trees[n].nodes[i];
+      nodes << d.nets.at(n).frame << '\t' << i << '\t' << p.tile << '\t' << p.box << '\t' << p.term << '\t' << p.riser_layer << '\t'
+            << p.riser_track << '\t' << int(p.riser_state) << '\t' << p.stub_layer << '\t' << p.stub_track << '\t'
+            << int(p.stub_state) << '\t' << int(p.stub_access_state) << '\n';
+    }
+  }
+  resources << "layer_index\tlayer\thorizontal\ttile\tcol\trow\tband\tphysical_slots\tusable\tbox_budget\tcoarse_capacity\n";
+  for (size_t l = 0; l < g.resources.layers.size(); ++l) {
+    const auto& layer = g.resources.layers[l];
+    for (size_t t = 0; t < layer.tiles.size(); ++t) {
+      const auto& tile = layer.tiles[t];
+      resources << l << '\t' << layer.name << '\t' << layer.horizontal << '\t' << t << '\t' << g.col(int(t)) << '\t'
+                << g.row(int(t)) << '\t' << tile.band << '\t' << layer.bands.at(tile.band).size() << '\t'
+                << layer.usable_capacity(t) << '\t' << tile.cellbox_budget << '\t' << tile.coarse_capacity << '\n';
+    }
+  }
+  if (!segments || !nodes || !resources) {
+    throw std::runtime_error("cannot write Local track diagnostics in " + directory);
+  }
+}
+
 Legroute_options sat_alt_options(const Legroute_options& base) {
   auto             o = base;
   std::string_view rest(base.sat_alt);
@@ -104,6 +251,18 @@ std::vector<std::string> tier_names(const std::string& tiers) {
 
 void validate_legroute_options(const Legroute_options& o) {
   const auto fail = [](const char* what) { throw std::invalid_argument(std::string("legroute: ") + what); };
+  if (o.paired_pin_reserve && (!o.legal_boxes || o.legal_window || o.legal_shuffle)) {
+    fail("paired_pin_reserve currently requires fixed legal_boxes (legal_window=0 and legal_shuffle=0)");
+  }
+  if (o.paired_pin_cap && (!o.paired_pin_reserve || o.paired_pin_cap % 2)) {
+    fail("paired_pin_cap must be even and requires paired_pin_reserve");
+  }
+  if (o.paired_pin_reserve && o.clock_spine) {
+    fail("paired_pin_reserve currently requires ordinary-net scope with clock_spine=false");
+  }
+  if (o.paired_pin_reserve && o.cap_scale < lr::admission_share(o)) {
+    fail("paired_pin_reserve requires cap_scale at least the Plan admission share");
+  }
   if (!std::isfinite(o.reserved_tracks_per_um) || (o.reserved_tracks_per_um < 0 && o.reserved_tracks_per_um != -1)) {
     fail("reserved_tracks_per_um must be -1 (per-tile count) or a nonnegative finite density");
   }
@@ -316,7 +475,7 @@ void dump_final_boxes(const lr::Design& d, const lr::Grid& g, const lr::Boxes& b
     }
     // nets: the box's incident nets with their pins; metal: every net's L5 metal over the tile and a one-tile halo
     // (foreign transit included), each with its provenance
-    int low_h = 0;  // the jogs' and stubs' layer: the lowest horizontal routing layer
+    int low_h = 0;  // legacy jogs/stubs without an explicit layer use the lowest horizontal routing layer
     while (low_h + 1 < int(g.layers.size()) && !g.layers[size_t(low_h)].horizontal) {
       ++low_h;
     }
@@ -352,8 +511,9 @@ void dump_final_boxes(const lr::Design& d, const lr::Grid& g, const lr::Boxes& b
         if (node.tile != tile) {
           continue;
         }
+        const int stub_layer = node.stub_layer >= 0 ? node.stub_layer : node.stub_track >= 0 ? low_h : -1;
         out << std::format(R"({}{{"node":{},"box":{},"term":{},"vpin":{},"riser_layer":{},"riser_coord":{},"riser_state":{},)"
-                           R"("stub_coord":{},"stub_state":{}}})",
+                           R"("stub_layer":{},"stub_coord":{},"stub_state":{}}})",
                            m++ ? "," : "",
                            v,
                            node.box,
@@ -362,7 +522,8 @@ void dump_final_boxes(const lr::Design& d, const lr::Grid& g, const lr::Boxes& b
                            q(node.riser_layer >= 0 ? g.layers[size_t(node.riser_layer)].name : ""),
                            node.riser_layer >= 0 && node.riser_track >= 0 ? g.track_coord(node.riser_layer, node.riser_track) : -1,
                            q(state(node.riser_state)),
-                           node.stub_track >= 0 ? g.track_coord(low_h, node.stub_track) : -1,
+                           q(stub_layer >= 0 ? g.layers[size_t(stub_layer)].name : ""),
+                           node.stub_track >= 0 ? g.track_coord(stub_layer, node.stub_track) : -1,
                            q(state(node.stub_state)));
       }
       // the net's planned metal near the tile (tile plus one-tile halo): exact rectangles and joins
@@ -403,27 +564,32 @@ void dump_final_boxes(const lr::Design& d, const lr::Grid& g, const lr::Boxes& b
       if (std::abs(sg.band - band) > 1 || along < sg.lo - 1 || along > sg.hi + 1) {
         continue;
       }
-      out << std::format(R"({}{{"segment":{},"net":{},"incident":{},"layer":{},"horizontal":{},"band":{},"tiles":[{},{}],)"
-                         R"("track_coord":{},"state":{},"clock":{},"node_lo":{},"node_hi":{},)"
-                         R"("jog_lo_coord":{},"jog_lo_state":{},"jog_hi_coord":{},"jog_hi_state":{}}})",
-                         k++ ? "," : "",
-                         si,
-                         sg.net,
-                         int(incident.contains(sg.net)),
-                         q(L.name),
-                         int(L.horizontal),
-                         sg.band,
-                         sg.lo,
-                         sg.hi,
-                         sg.track >= 0 ? g.track_coord(sg.layer, sg.track) : -1,
-                         q(state(sg.track_state)),
-                         int(sg.clock),
-                         sg.node_lo,
-                         sg.node_hi,
-                         sg.jog_lo >= 0 ? g.track_coord(low_h, sg.jog_lo) : -1,
-                         q(state(sg.jog_lo_state)),
-                         sg.jog_hi >= 0 ? g.track_coord(low_h, sg.jog_hi) : -1,
-                         q(state(sg.jog_hi_state)));
+      const int jog_lo_layer = sg.jog_lo_layer >= 0 ? sg.jog_lo_layer : sg.jog_lo >= 0 ? low_h : -1;
+      const int jog_hi_layer = sg.jog_hi_layer >= 0 ? sg.jog_hi_layer : sg.jog_hi >= 0 ? low_h : -1;
+      out << std::format(
+          R"({}{{"segment":{},"net":{},"incident":{},"layer":{},"horizontal":{},"band":{},"tiles":[{},{}],)"
+          R"("track_coord":{},"state":{},"clock":{},"node_lo":{},"node_hi":{},)"
+          R"("jog_lo_layer":{},"jog_lo_coord":{},"jog_lo_state":{},"jog_hi_layer":{},"jog_hi_coord":{},"jog_hi_state":{}}})",
+          k++ ? "," : "",
+          si,
+          sg.net,
+          int(incident.contains(sg.net)),
+          q(L.name),
+          int(L.horizontal),
+          sg.band,
+          sg.lo,
+          sg.hi,
+          sg.track >= 0 ? g.track_coord(sg.layer, sg.track) : -1,
+          q(state(sg.track_state)),
+          int(sg.clock),
+          sg.node_lo,
+          sg.node_hi,
+          q(jog_lo_layer >= 0 ? g.layers[size_t(jog_lo_layer)].name : ""),
+          sg.jog_lo >= 0 ? g.track_coord(jog_lo_layer, sg.jog_lo) : -1,
+          q(state(sg.jog_lo_state)),
+          q(jog_hi_layer >= 0 ? g.layers[size_t(jog_hi_layer)].name : ""),
+          sg.jog_hi >= 0 ? g.track_coord(jog_hi_layer, sg.jog_hi) : -1,
+          q(state(sg.jog_hi_state)));
     }
     // every other net's planned metal over the tile and its one-tile halo, grown by the largest routing pitch so that
     // spacing context at the halo edge is kept (exact rectangles, with track states)
@@ -520,6 +686,9 @@ void dump_final_boxes(const lr::Design& d, const lr::Grid& g, const lr::Boxes& b
 
 Legroute_report legroute(const physical::Technology& tech, physical::Floorplan& fp, const timing::Feedback& timing,
                          const Legroute_options& options, const Legroute_regions& regions, const physical::Tech_profile* profile) {
+  if (options.critical_cellboxes) {
+    throw std::invalid_argument("critical_cellboxes currently exports a Plan handoff; legacy Local/Final cannot consume it");
+  }
   validate_legroute_options(options);
   const auto      start = lr::Clock::now();
   Legroute_report rep;
@@ -559,7 +728,17 @@ Legroute_report legroute(const physical::Technology& tech, physical::Floorplan& 
       rep.tiles_free += !b;
     }
     step("L1 grid");
-    auto boxes   = lr::build_boxes(d, g);
+    auto boxes = lr::build_boxes(d, g);
+    if (opt.paired_pin_reserve) {
+      lr::resolve_paired_pin_reservations(d, g, boxes);
+      if (!options.output_dir.empty()) {
+        lr::write_paired_pin_reservations(d, g, options.output_dir + "/local_paired_pin_reservations.json");
+      }
+      auto supply = lr::paired_pin_supply_gate(d, g);
+      if (supply.requires_replan()) {
+        throw Legroute_replan(std::move(supply));
+      }
+    }
     rep.cells    = d.movable.size();
     rep.boxes    = boxes.boxes.size();
     double sites = 0;
@@ -598,12 +777,17 @@ Legroute_report legroute(const physical::Technology& tech, physical::Floorplan& 
       // detailed routing cannot turn this partial model into a valid result.
       step("L3 SAT placement");
       rep.failure_sample.push_back("required SAT failed; clock, track and detailed routing skipped");
-      for (const auto& net : d.nets) {
-        if (net.requires_final_route()) {
+      lr::Final_net_scope scope;
+      if (opt.final) {
+        scope                  = lr::final_net_scope(d);
+        rep.final_skipped_nets = scope.skipped;
+      }
+      for (size_t n = 0; n < d.nets.size(); ++n) {
+        if (opt.final ? scope.required[n] : d.nets[n].requires_final_route()) {
           ++rep.routed_nets;
           ++rep.unchecked_nets;
-          rep.clock_required_nets  += net.clock;
-          rep.clock_unchecked_nets += net.clock;
+          rep.clock_required_nets  += d.nets[n].clock;
+          rep.clock_unchecked_nets += d.nets[n].clock;
         }
       }
       rep.seconds = lr::seconds_since(start);
@@ -614,6 +798,9 @@ Legroute_report legroute(const physical::Technology& tech, physical::Floorplan& 
       return rep;
     }
     lr::box_demand(d, g, boxes, R);
+    if (opt.paired_pin_reserve) {
+      lr::validate_paired_pin_reservations(d, g, boxes);
+    }
     for (const auto& b : boxes.boxes) {
       if (b.placed && b.tile == g.tile_of(b.cx, b.cy)) {  // legal_boxes: on its legal tile, nothing moved
         continue;
@@ -624,6 +811,9 @@ Legroute_report legroute(const physical::Technology& tech, physical::Floorplan& 
     }
     step("L3 SAT placement");
     lr::pack_cells(d, g, boxes);
+    if (opt.paired_pin_reserve) {
+      lr::validate_paired_pin_reservations(d, g, boxes);
+    }
     if (opt.clock_spine) {
       lr::clock_spines(d, g, boxes, R);
     }
@@ -655,7 +845,7 @@ Legroute_report legroute(const physical::Technology& tech, physical::Floorplan& 
     step("L4 clock spines");
     lr::assign_layers(d, g, R);
     lr::assign_tracks(d, g, R, opt.threads);
-    {
+    if (!opt.paired_pin_reserve) {
       // The cellbox allowance after L5: per budgeted routing layer and free tile, the usable physical tracks (after
       // PG/obstacle exclusions) minus the distinct tracks shared metal took there (transit segments, clock, and the
       // risers of non-box nodes; a box's own riser on its tile spends its own allowance, not a foreign one).
@@ -703,7 +893,16 @@ Legroute_report legroute(const physical::Technology& tech, physical::Floorplan& 
                      rep.cellbox_allowance_short_tracks);
       }
     }
-    rep.unassigned_segments = R.unassigned;
+    if (opt.paired_pin_reserve) {
+      rep.cellbox_allowance_short_tiles  = R.paired_allowance_short_tiles;
+      rep.cellbox_allowance_short_tracks = R.paired_allowance_short_tracks;
+      lr::validate_paired_pin_reservations(d, g, boxes);
+    }
+    rep.unassigned_segments   = R.unassigned;
+    rep.l5_repair_attempts    = R.l5_repair_attempts;
+    rep.l5_repair_successes   = R.l5_repair_successes;
+    rep.l5_repair_unknown     = R.l5_repair_unknown;
+    rep.l5_repair_unsat       = R.l5_repair_unsat;
     rep.track_failures        = R.track_failures;
     rep.track_pick_rejections = R.track_pick_rejections;
     rep.track_fallback_shadow = R.track_fallback_shadow;
@@ -715,6 +914,205 @@ Legroute_report legroute(const physical::Technology& tech, physical::Floorplan& 
                  R.layer_overflow_tiles,
                  R.unassigned);
     step("L5 layers, tracks");
+    if (opt.l5_fallback_shadow && !options.output_dir.empty()) {
+      rep.local_metal_audit_attempted = true;
+      // Clear older successful join witnesses even when this candidate never qualifies for the probe below.
+      std::filesystem::remove(options.output_dir + "/local_backbone_join_probe.def");
+      std::filesystem::remove(options.output_dir + "/local_backbone_join_probe.json");
+      lr::write_local_track_requests(d, g, R, options.output_dir);
+      // Pure Local backbone geometry: no cell-pin routing or via selection is performed here. Keep unresolved
+      // joins explicit so an assigned track count cannot be mistaken for a physically connected handoff.
+      const auto planned          = lr::final_planned_geometry(d, g, boxes, R);
+      const auto scope            = lr::final_net_scope(d);
+      // Audit one immutable snapshot containing every required backbone simultaneously. Original signal routes
+      // are replaced, while native occupancy retains real pins, macro obstructions and decoded PG geometry.
+      // This is a metal-only diagnostic: unresolved join vias and signal connectivity are deliberately absent.
+      const auto audit_deadline   = lr::Clock::now() + std::chrono::seconds(55);
+      const auto audit_checkpoint = [&] {
+        if (lr::Clock::now() >= audit_deadline) {
+          throw std::runtime_error("Local backbone metal audit exceeded 55s budget");
+        }
+      };
+      auto work = fp;
+      for (auto& net : work.nets) {
+        if (net.use != "POWER" && net.use != "GROUND") {
+          net.wires.clear();
+        }
+      }
+      for (size_t n = 0; n < d.nets.size(); ++n) {
+        const auto& net = d.nets[n];
+        for (const auto& pin : net.pins) {
+          if (pin.term >= 0) {
+            work.terminals[size_t(pin.term)].net = work.nets.at(net.frame).name;
+          }
+        }
+        if (scope.required[n]) {
+          work.nets.at(net.frame).wires.push_back({"ROUTED", planned.paths[n]});
+        }
+      }
+      work.special_nets.insert(work.special_nets.end(), regions.power_nets.begin(), regions.power_nets.end());
+      work.vias.insert(work.vias.end(), regions.power_vias.begin(), regions.power_vias.end());
+      std::optional<physical::Routing_occupancy> occupancy;
+      std::string                                audit_error;
+      try {
+        occupancy.emplace(physical::routing_occupancy(tech, work, work.dbu, audit_checkpoint));
+        if (regions.power_nets.empty()) {
+          for (const auto& obstacle : regions.obstacles) {
+            audit_checkpoint();
+            occupancy->insert({obstacle, {}, false});
+          }
+        }
+        audit_checkpoint();
+      } catch (const std::exception& error) {
+        audit_error = error.what();
+        occupancy.reset();  // No partially imported scene may certify even a single shape.
+      }
+      const physical::Signal_metal_rules metal_rules(tech, work);
+      size_t                             total_metal_conflicts = 0, total_metal_unknown = 0;
+      bool                               metal_audit_complete = audit_error.empty();
+      std::ofstream                      geometry_out(options.output_dir + "/local_backbone_geometry.json");
+      geometry_out << "{\"schema_version\":1,\"physical_certificate\":false,"
+                      "\"scope\":\"required_backbone_without_selected_join_vias\","
+                      "\"metal_audit_scope\":\"all_required_backbones_and_static_pins_obstructions_pg_excluding_own_net\","
+                      "\"nets\":[";
+      bool first_net = true;
+      for (size_t n = 0; n < d.nets.size(); ++n) {
+        if (!scope.required[n]) {
+          continue;
+        }
+        const auto&                  net = work.nets.at(d.nets[n].frame);
+        std::vector<physical::Shape> shapes;
+        std::string                  geometry_error;
+        try {
+          shapes = physical::route_geometry(tech, work, net);
+        } catch (const std::exception& error) {
+          geometry_error = error.what();
+        }
+        size_t      metal_conflicts = 0, metal_unknown = 0;
+        std::string first_conflict, first_unknown;
+        if (!geometry_error.empty() || !audit_error.empty()) {
+          metal_unknown = shapes.size();
+          first_unknown = geometry_error.empty() ? audit_error : geometry_error;
+        } else {
+          for (size_t k = 0; k < shapes.size(); ++k) {
+            const auto& shape    = shapes[k];
+            const auto  describe = [&](const std::string& reason) {
+              return std::format("shape {} {} [{},{},{},{}]: {}",
+                                 k,
+                                 shape.layer,
+                                 shape.rect.xl,
+                                 shape.rect.yl,
+                                 shape.rect.xh,
+                                 shape.rect.yh,
+                                 reason);
+            };
+            try {
+              audit_checkpoint();
+              std::string conflict;
+              if (!work.die.contains(shape.rect)) {
+                conflict = "outside die";
+              } else if (const auto clearance = metal_rules.clearance(shape.layer); !clearance) {
+                ++metal_unknown;
+                if (first_unknown.empty()) {
+                  const auto check = metal_rules.rectangle(shape);
+                  first_unknown    = describe("unsupported or unavailable metal rules: " + check.reason);
+                }
+                continue;
+              } else if (const auto check = metal_rules.rectangle(shape); !check.legal) {
+                conflict = check.reason;
+              } else {
+                for (const auto id : occupancy->query(shape.layer, shape.rect, *clearance, net.name)) {
+                  audit_checkpoint();
+                  const auto other = occupancy->at(id);
+                  if (const auto spacing_check = metal_rules.spacing(shape, other.shape); !spacing_check.legal) {
+                    conflict = std::format("{} against {} '{}' [{},{},{},{}]",
+                                           spacing_check.reason,
+                                           other.net.empty() ? "blockage"
+                                           : other.routed    ? "routed metal"
+                                                             : "pin",
+                                           other.net,
+                                           other.shape.rect.xl,
+                                           other.shape.rect.yl,
+                                           other.shape.rect.xh,
+                                           other.shape.rect.yh);
+                    break;
+                  }
+                }
+              }
+              if (!conflict.empty()) {
+                ++metal_conflicts;  // Each candidate shape counts once, regardless of how many neighbors conflict.
+                if (first_conflict.empty()) {
+                  first_conflict = describe(conflict);
+                }
+              }
+            } catch (const std::exception& error) {
+              audit_error    = error.what();
+              metal_unknown += shapes.size() - k;
+              if (first_unknown.empty()) {
+                first_unknown = audit_error;
+              }
+              break;
+            }
+          }
+        }
+        const bool net_audit_complete  = geometry_error.empty() && first_unknown.empty();
+        metal_audit_complete          &= net_audit_complete;
+        total_metal_conflicts         += metal_conflicts;
+        total_metal_unknown           += metal_unknown;
+        geometry_out << (first_net ? "" : ",")
+                     << std::format(R"({{"net":"{}","net_index":{},"metal_conflict_shapes":{},)"
+                                    R"("first_metal_conflict":"{}","metal_unknown_shapes":{},"first_metal_unknown":"{}",)"
+                                    R"("metal_audit_complete":{},"geometry_error":"{}","shapes":[)",
+                                    json_util::escape(net.name),
+                                    d.nets[n].frame,
+                                    metal_conflicts,
+                                    json_util::escape(first_conflict),
+                                    metal_unknown,
+                                    json_util::escape(first_unknown),
+                                    net_audit_complete,
+                                    json_util::escape(geometry_error));
+        first_net = false;
+        for (size_t k = 0; k < shapes.size(); ++k) {
+          const auto& shape = shapes[k];
+          geometry_out << (k ? "," : "")
+                       << std::format(R"(["{}",{},{},{},{}])",
+                                      json_util::escape(shape.layer),
+                                      shape.rect.xl,
+                                      shape.rect.yl,
+                                      shape.rect.xh,
+                                      shape.rect.yh);
+        }
+        geometry_out << "],\"path_states\":[";
+        for (size_t k = 0; k < planned.path_state[n].size(); ++k) {
+          geometry_out << (k ? "," : "") << unsigned(planned.path_state[n][k]);
+        }
+        geometry_out << "],\"unresolved_joins\":[";
+        for (size_t k = 0; k < planned.joins[n].size(); ++k) {
+          const auto& [from, to, x, y] = planned.joins[n][k];
+          geometry_out << (k ? "," : "")
+                       << std::format(R"(["{}","{}",{},{}])", json_util::escape(from), json_util::escape(to), x, y);
+        }
+        geometry_out << "],\"io_stub_failure\":\"" << json_util::escape(planned.io_stub_failure[n]) << "\"}";
+      }
+      geometry_out << std::format(R"(],"metal_conflict_shapes":{},"metal_unknown_shapes":{},)"
+                                  R"("metal_audit_complete":{},"metal_audit_error":"{}"}})"
+                                  "\n",
+                                  total_metal_conflicts,
+                                  total_metal_unknown,
+                                  metal_audit_complete,
+                                  json_util::escape(audit_error));
+      if (!geometry_out) {
+        throw std::runtime_error("cannot write Local backbone geometry diagnostic");
+      }
+      rep.local_metal_audit_complete  = metal_audit_complete;
+      rep.local_metal_conflict_shapes = total_metal_conflicts;
+      rep.local_metal_unknown_shapes  = total_metal_unknown;
+      if (!R.unassigned && metal_audit_complete && !total_metal_conflicts && !total_metal_unknown && occupancy) {
+        rep.local_join_probe_attempted = true;
+        rep.local_join_probe_complete
+            = lr::write_local_join_probe(d, g, planned, work, *occupancy, options.output_dir, audit_deadline);
+      }
+    }
     if (!options.output_dir.empty() && !opt.dump_regions.empty()) {
       lr::dump_regions(d, g, boxes, R, regions, rep, options.output_dir, opt.dump_regions);
       // legroute_wires.json: every assigned segment as a wire on its layer and track, between the centres of its end
@@ -845,6 +1243,31 @@ Legroute_report legroute(const physical::Technology& tech, physical::Floorplan& 
         rep.critical_delay_ps = std::max(rep.critical_delay_ps, lr::net_delay_ps(d, g, boxes, R, n));
       }
     }
+    if (opt.final
+        && (rep.unassigned_segments || rep.cellbox_allowance_short_tiles || rep.crossing_policy_invalid
+            || rep.local_handoff_rejected())) {
+      // Final connects cell pins to a completed Local route. It must not hide a failed physical handoff by
+      // attempting to reconstruct the interbox routing. Keep the legal SAT placement for planning feedback,
+      // but do not emit any of the partial Local routing as connected wires.
+      rep.failure_sample.push_back(rep.local_handoff_rejected()
+                                       ? "required Local metal audit or join probe failed or remained unknown; Final skipped"
+                                       : "required Local track assignment or reservation failed; Final skipped");
+      const auto scope       = lr::final_net_scope(d);
+      rep.final_skipped_nets = scope.skipped;
+      for (size_t n = 0; n < d.nets.size(); ++n) {
+        if (scope.required[n]) {
+          ++rep.routed_nets;
+          ++rep.unchecked_nets;
+          rep.clock_required_nets  += d.nets[n].clock;
+          rep.clock_unchecked_nets += d.nets[n].clock;
+        }
+      }
+      rep.seconds = lr::seconds_since(start);
+      if (!options.output_dir.empty()) {
+        write_legroute_report(rep, options.output_dir + "/legroute.json");
+      }
+      return rep;
+    }
     if (opt.final) {
       lr::final_place(d, g, boxes, R, opt.threads);
       step("F1 in-box placement");
@@ -901,6 +1324,7 @@ void write_legroute_report(const Legroute_report& r, const std::string& path) {
       R"("global_pattern_attempts":{},"global_pattern_completed":{},"global_pattern_fallbacks":{},"global_pattern_work":{},"global_pattern_work_limited":{},)"
       R"("sat_seconds":{:.3f},"sat_seconds_max":{:.3f},)"
       R"("connections":{},"critical_connections":{},"unassigned_segments":{},)"
+      R"("l5_repair_attempts":{},"l5_repair_successes":{},"l5_repair_unknown":{},"l5_repair_unsat":{},)"
       R"("clock_domains":{},"clock_ribs":{},"clock_excess_tiles":{},"clock_excess_tracks":{},"crossing_over_policy":{},"crossing_policy_invalid":{},"cellbox_allowance_short_tiles":{},"cellbox_allowance_short_tracks":{},"wire_um":{:.1f},"critical_wire_um":{:.1f},"vias":{},"wires_emitted":{},"route_passes":{},"routed_nets":{},"local_nets":{},"joins":{},"taps":{},)"
       R"("connected_nets":{},"unchecked_nets":{},"failed_nets":{},"global_conflict_nets":{},"join_failures":{},"tap_failures":{},)"
       R"("tree_fallbacks":{},"clock_required_nets":{},"clock_connected_nets":{},"clock_failed_nets":{},"clock_unchecked_nets":{},)"
@@ -1026,6 +1450,10 @@ void write_legroute_report(const Legroute_report& r, const std::string& path) {
       r.connections,
       r.critical_connections,
       r.unassigned_segments,
+      r.l5_repair_attempts,
+      r.l5_repair_successes,
+      r.l5_repair_unknown,
+      r.l5_repair_unsat,
       r.clock_domains,
       r.clock_ribs,
       r.clock_excess_tiles,
@@ -1066,10 +1494,18 @@ void write_legroute_report(const Legroute_report& r, const std::string& path) {
     out << std::format(R"({}{{"step":"{}","seconds":{:.3f}}})", k ? "," : "", r.steps[k].name, r.steps[k].seconds);
   }
   out << std::format(
-      R"(],"partition_timeout_rounds":{},"partition_timeout_regions":{},"sat_reused_regions":{},"track_failures":{{)",
+      R"(],"partition_timeout_rounds":{},"partition_timeout_regions":{},"sat_reused_regions":{},)"
+      R"("local_metal_audit_attempted":{},"local_metal_audit_complete":{},"local_metal_conflict_shapes":{},"local_metal_unknown_shapes":{},)"
+      R"("local_join_probe_attempted":{},"local_join_probe_complete":{},"track_failures":{{)",
       r.partition_timeout_rounds,
       r.partition_timeout_regions,
-      r.sat_reused_regions);
+      r.sat_reused_regions,
+      r.local_metal_audit_attempted,
+      r.local_metal_audit_complete,
+      r.local_metal_conflict_shapes,
+      r.local_metal_unknown_shapes,
+      r.local_join_probe_attempted,
+      r.local_join_probe_complete);
   size_t k = 0;
   for (const auto& [kind, n] : r.track_failures) {
     out << (k++ ? "," : "") << quote(kind) << ':' << n;

@@ -12,6 +12,8 @@
 
 #include "gtest/gtest.h"
 #include "inou/lefdef/routing_connectivity.hpp"
+#include "inou/lefdef/routing_geometry.hpp"
+#include "inou/lefdef/routing_occupancy.hpp"
 #include "legroute_internal.hpp"
 
 namespace livehd::placement {
@@ -101,6 +103,30 @@ struct Fixture {
     for (int y = 0; y < rows; ++y) {
       fp.rows.push_back({"r" + std::to_string(y), "site", 0, y * 250, sites, 50, y % 2 ? ph::Orientation::FS : ph::Orientation::N});
     }
+  }
+  // These SAT/cut/spill fixtures need the horizontal supply historically attributed to M2 transit. Provide it
+  // on a real upper layer instead: M2 remains exclusively available for in-box wiring. The synthetic stack may
+  // have adjacent horizontal layers; their default via and both physical track lattices are explicit.
+  void add_horizontal_transit_layer(int64_t pitch_dbu = 50) {
+    auto& layer = tech.layers["M7"] = tech.layers.at("M2");
+    layer.pitch_x = layer.pitch_y = double(pitch_dbu) / tech.dbu;
+    layer.offset_x = layer.offset_y = double(pitch_dbu / 2) / tech.dbu;
+    tech.routing_layers.push_back("M7");
+    auto tracks  = *std::ranges::find(fp.tracks, std::string("M2"), &ph::Track::layer);
+    tracks.layer = "M7";
+    tracks.start = pitch_dbu / 2;
+    tracks.step  = pitch_dbu;
+    tracks.count = (int64_t(fp.die.yh) - 1 - tracks.start) / tracks.step + 1;
+    fp.tracks.push_back(std::move(tracks));
+    tech.cut_layers["V6"].width   = .02;
+    tech.cut_layers["V6"].spacing = {.02};
+    auto& via                     = tech.vias["V6_DEF"];
+    via.is_default                = true;
+    via.shapes                    = {
+        {"M6", {-.02, -.01, .02, .01}},
+        {"V6", {-.01, -.01, .01, .01}},
+        {"M7", {-.02, -.01, .02, .01}}
+    };
   }
   size_t cell(const std::string& master, int64_t x, int64_t y) {
     const auto& m = tech.macros.at(master);
@@ -205,6 +231,184 @@ struct Fixture {
   }
 };
 }  // namespace
+
+TEST(Legroute, LocalJoinProbeCommitsOnlyCompleteTrialNetsWithoutChangingInput) {
+  for (int mode = 0; mode < 3; ++mode) {
+    SCOPED_TRACE(mode);
+    Fixture f;
+    f.fp.design  = "local_join_probe";
+    const auto a = f.cell("inv", 0, 0), b = f.cell("inv", 500, 0);
+    f.net({
+        {a, "Y"},
+        {b, "A"}
+    });
+    Legroute_options options;
+    options.final                      = false;
+    const auto                 profile = Fixture::profile();
+    auto                       design  = lr::build_design(f.tech, f.fp, f.timing, options, &profile);
+    const auto                 grid    = lr::build_grid(design, {});
+    lr::Final_planned_geometry planned;
+    planned.paths.resize(1);
+    planned.path_state.resize(1);
+    planned.joins.resize(1);
+    planned.io_stub_failure.resize(1);
+    planned.paths[0] = {
+        ph::flush_wire_path({"M3", {215, 125, 235, 325}},
+        false),
+        ph::flush_wire_path({"M4", {125, 215, 325, 235}},
+        true)
+    };
+    planned.joins[0] = {
+        {"M3", "M4", 225, 225}
+    };
+    if (mode == 1) {
+      planned.joins[0].emplace_back("M3", "M4", 725, 225);  // Missing retained endpoint after one feasible join.
+    }
+    auto work = f.fp;
+    work.nets[0].wires.push_back({"ROUTED", planned.paths[0]});
+    const auto saved_wires = work.nets[0].wires;
+    const auto occupancy   = ph::routing_occupancy(f.tech, work, work.dbu);
+    const auto occupied    = occupancy.size();
+    const auto directory   = "local_join_probe_" + std::to_string(mode);
+    std::filesystem::remove_all(directory);
+    std::filesystem::create_directories(directory);
+    if (mode != 0) {
+      std::ofstream(directory + "/local_backbone_join_probe.def") << "stale successful witness\n";
+    }
+    const auto deadline = lr::Clock::now() + std::chrono::milliseconds(mode == 2 ? 0 : 1000);
+    lr::write_local_join_probe(design, grid, planned, work, occupancy, directory, deadline);
+    EXPECT_EQ(work.nets[0].wires, saved_wires);
+    EXPECT_EQ(occupancy.size(), occupied);
+    EXPECT_TRUE(f.fp.nets[0].wires.empty());
+    std::ifstream     input(directory + "/local_backbone_join_probe.json");
+    const std::string report{std::istreambuf_iterator<char>(input), {}};
+    EXPECT_NE(report.find("\"physical_certificate\":false"), std::string::npos);
+    EXPECT_NE(report.find(mode == 0 ? "\"all_join_requests_witnessed\":true" : "\"all_join_requests_witnessed\":false"),
+              std::string::npos)
+        << report;
+    EXPECT_EQ(std::filesystem::exists(directory + "/local_backbone_join_probe.def"), mode == 0);
+    if (mode == 1) {
+      EXPECT_NE(report.find("\"witnessed_before_rollback\":1"), std::string::npos) << report;
+      EXPECT_NE(report.find("\"accepted_joins\":0"), std::string::npos) << report;
+    }
+    if (mode == 2) {
+      EXPECT_NE(report.find("\"timed_out\":true"), std::string::npos) << report;
+    }
+    std::filesystem::remove_all(directory);
+  }
+}
+
+TEST(Legroute, FinalNetScopeCountsOnlyRequiredExcludedNetsWithoutChangingWires) {
+  Fixture          f;
+  Legroute_options opt;
+  lr::Design       d{f.tech, f.fp, opt};
+  const auto       add = [&](const std::string& name, bool routed, bool clock, bool power, size_t pins) {
+    const auto frame = f.fp.nets.size();
+    f.fp.nets.push_back({name, {}});
+    lr::Net net;
+    net.frame  = frame;
+    net.routed = routed;
+    net.clock  = clock;
+    net.power  = power;
+    net.pins.resize(pins);
+    d.nets.push_back(std::move(net));
+  };
+  add("top/data", true, false, false, 2);
+  add("CLK_MAIN", false, true, false, 2);
+  add("top/SoFt_ReSeT_N", true, false, false, 2);
+  add("top/reset_clk", false, true, false, 2);
+  add("reset_vdd", false, false, true, 2);
+  add("reset_unused", false, false, false, 1);
+  add("reset_unused_clk", false, true, false, 1);
+  f.fp.nets[0].wires.push_back({"ROUTED", {}});
+  const auto original = f.fp.nets;
+  const auto all      = lr::final_net_scope(d);
+  EXPECT_EQ(all.required, (std::vector<char>{1, 1, 1, 1, 0, 0, 0}));
+  EXPECT_EQ(all.skipped, 0u);
+
+  opt.final_skip_clock = true;
+  opt.final_skip_nets  = "reset";  // Case-insensitive substring search, including one clock already excluded above.
+  const auto ordinary  = lr::final_net_scope(d);
+  EXPECT_EQ(ordinary.required, (std::vector<char>{1, 0, 0, 0, 0, 0, 0}));
+  EXPECT_EQ(ordinary.skipped, 3u);  // Count the overlap once; power and single-pin nets were never required.
+  opt.final_skip_clock = false;
+  const auto named     = lr::final_net_scope(d);
+  EXPECT_EQ(named.required, (std::vector<char>{1, 1, 0, 0, 0, 0, 0}));
+  EXPECT_EQ(named.skipped, 2u);
+  EXPECT_EQ(f.fp.nets, original);
+}
+
+TEST(Legroute, PairedPinPlanAndLocalResolveIdenticalFixedBoxBudgets) {
+  Fixture    f(32, 2);
+  const auto a = f.cell("dff", 0, 0), b = f.cell("dff", 800, 250);
+  f.net({
+      {a, "Q"},
+      {b, "D"}
+  });
+  Legroute_options opt;
+  opt.threads     = 1;
+  opt.clock_spine = opt.region_pins = opt.final = false;
+  opt.legal_boxes = opt.global_route = opt.global_all = opt.global_keep = true;
+  opt.reserved_tracks                                                   = 0;
+  opt.spill_rounds                                                      = 0;
+  opt.box_reserve        = "M2:100,M3:100";  // The experimental policy replaces, rather than adds, the uniform control.
+  opt.paired_pin_reserve = true;
+  opt.output_dir         = (std::filesystem::path(testing::TempDir()) / "paired_fixed_budget").string();
+  const auto original    = f.fp;
+  const auto plan        = legroute_plan(f.tech, f.fp, f.timing, opt);
+  ASSERT_FALSE(plan.gates.requires_replan());
+  EXPECT_EQ(plan.endpoint_basis, "box_centroids");
+  const auto report = legroute(f.tech, f.fp, f.timing, opt);
+  EXPECT_EQ(report.sat_unsat_regions + report.sat_unknown_regions, 0u);
+  EXPECT_EQ(report.unassigned_segments, 0u);
+  EXPECT_EQ(report.cellbox_allowance_short_tiles, 0u);
+  EXPECT_EQ(report.route_passes, 0u);
+  EXPECT_EQ(f.fp.components, original.components);
+  EXPECT_EQ(f.fp.nets, original.nets);
+  const auto read = [](const std::string& path) {
+    std::ifstream input(path);
+    EXPECT_TRUE(input.good()) << path;
+    return std::string(std::istreambuf_iterator<char>(input), {});
+  };
+  EXPECT_EQ(read(opt.output_dir + "/plan_paired_pin_reservations.json"),
+            read(opt.output_dir + "/local_paired_pin_reservations.json"));
+  std::filesystem::remove_all(opt.output_dir);
+}
+
+TEST(Legroute, PairedPinMissingSecondRowSupplyStopsBeforeGlobalAndSat) {
+  Fixture    f(32, 2);
+  const auto a = f.cell("dff", 0, 0), b = f.cell("dff", 800, 0);
+  f.net({
+      {a, "Q"},
+      {b, "D"}
+  });
+  for (auto& track : f.fp.tracks) {
+    if (track.layer == "M2") {
+      track.count = 5;  // Five real tracks, all in the bottom row: total supply alone is insufficient.
+    }
+  }
+  Legroute_options opt;
+  opt.clock_spine = opt.region_pins = opt.final = false;
+  opt.legal_boxes = opt.global_route = opt.global_all = opt.global_keep = true;
+  opt.reserved_tracks                                                   = 0;
+  opt.paired_pin_reserve                                                = true;
+  const auto original                                                   = f.fp;
+  const auto plan                                                       = legroute_plan(f.tech, f.fp, f.timing, opt);
+  EXPECT_FALSE(plan.route_attempted);
+  EXPECT_EQ(plan.route_skip_reason, Legroute_plan_report::Route_skip_reason::paired_pin_supply);
+  EXPECT_TRUE(plan.gates.requires_replan());
+  EXPECT_GT(plan.gates.unfittable_boxes, 0u);
+  EXPECT_THROW(legroute(f.tech, f.fp, f.timing, opt), Legroute_replan);
+  EXPECT_EQ(f.fp.components, original.components);
+  EXPECT_EQ(f.fp.nets, original.nets);
+  opt.legal_window = 1;
+  EXPECT_THROW(validate_legroute_options(opt), std::invalid_argument);
+  opt.legal_window = 0;
+  opt.cap_scale    = .1;
+  EXPECT_THROW(validate_legroute_options(opt), std::invalid_argument);
+  opt.global_share = .1;
+  EXPECT_NO_THROW(validate_legroute_options(opt));
+}
 
 TEST(Legroute, PackSegmentsWidestFirstIntoRoomiestSegment) {
   EXPECT_EQ(lr::pack_segments({3, 2, 1}, {4, 3}), (std::vector<int>{0, 1, 0}));
@@ -466,7 +670,7 @@ TEST(Legroute, BoxesMergeConnectedNeighborsAndStopAtTheCostCap) {
   });
   Legroute_options opt;
   const auto       d     = lr::build_design(f.tech, f.fp, f.timing, opt, nullptr);
-  auto       g     = lr::build_grid(d, {});
+  auto             g     = lr::build_grid(d, {});
   const auto       boxes = lr::build_boxes(d, g);
   EXPECT_EQ(boxes.box_of[d.cell[a]], boxes.box_of[d.cell[b]]);
   EXPECT_NE(boxes.box_of[d.cell[a]], boxes.box_of[d.cell[far]]);  // 100+ tile widths away: above the cost cap
@@ -825,9 +1029,6 @@ TEST(Legroute, MovableRouteCutsSharePlanningBoxesAndConnectMovedEndpoints) {
     for (size_t t = 0; t < g.size(); ++t) {
       (g.layers[l].horizontal ? cap_h : cap_v)[t] += g.cap[l][t];
     }
-  }
-  for (size_t t = 0; t < g.size(); ++t) {
-    cap_h[t] += g.box_cap[t];
   }
   const auto      coarse = lr::route_all_signals(d, g, boxes, cap_h, cap_v);
   lr::Routing     routing;
@@ -1207,7 +1408,7 @@ TEST(Legroute, MovableCoarseCorridorJointlyLegalizesCoincidentBoxesAndRoutesThei
     for (const auto& [edge, nets] : edge_nets) {
       const auto [t, h] = edge;
       const int q       = t + (h ? 1 : g.cols);
-      int       ct = h ? g.box_cap[t] : 0, cq = h ? g.box_cap[q] : 0;
+      int       ct = 0, cq = 0;
       for (size_t layer = 0; layer < g.layers.size(); ++layer) {
         if (g.layers[layer].horizontal == bool(h)) {
           ct += g.cap[layer][t];
@@ -1327,7 +1528,7 @@ TEST(Legroute, OptionalBoxRouteSeedKeepsOriginalDomainsAndCommitsOnlyValidatedMo
     for (const auto& [edge, nets] : edge_nets) {
       const auto [t, horizontal] = edge;
       const int q                = t + (horizontal ? 1 : g.cols);
-      int       ct = horizontal ? g.box_cap[t] : 0, cq = horizontal ? g.box_cap[q] : 0;
+      int       ct = 0, cq = 0;
       for (size_t layer = 0; layer < g.layers.size(); ++layer) {
         if (g.layers[layer].horizontal == bool(horizontal)) {
           ct += g.cap[layer][t];
@@ -1401,11 +1602,13 @@ TEST(Legroute, PassThroughPartKeepsItsZWhileSiblingMovesAndSharesCapacity) {
     vertical(5, 0, 2, 3);
     vertical(5, 3, 3, 2);
     vertical(6, 0, 4, 3);
-    g.box_cap.assign(h.begin(), h.end());
-    bool vertical_layer = false;
+    bool horizontal_layer = false, vertical_layer = false;
     for (size_t l = 0; l < g.layers.size(); ++l) {
       g.cap[l].assign(g.size(), 0);
-      if (!g.layers[l].horizontal && !vertical_layer) {
+      if (g.layers[l].horizontal && !horizontal_layer) {
+        g.cap[l].assign(h.begin(), h.end());
+        horizontal_layer = true;
+      } else if (!g.layers[l].horizontal && !vertical_layer) {
         g.cap[l].assign(v.begin(), v.end());
         vertical_layer = true;
       }
@@ -1926,7 +2129,6 @@ TEST(Legroute, RetainedBranchesPreserveEveryEdgeAndPinAttachment) {
   auto             boxes = lr::build_boxes(d, g);
   std::vector<int> cap_h(g.size()), cap_v(g.size());
   for (size_t t = 0; t < g.size(); ++t) {
-    cap_h[t] = g.box_cap[t];
     for (size_t l = 0; l < g.layers.size(); ++l) {
       (g.layers[l].horizontal ? cap_h : cap_v)[t] += g.cap[l][t];
     }
@@ -1962,6 +2164,236 @@ TEST(Legroute, RetainedBranchesPreserveEveryEdgeAndPinAttachment) {
       }
     }
     EXPECT_EQ(pins, d.nets[n].pins.size());
+  }
+}
+
+TEST(Legroute, BoxLayerCapacityCannotAdmitTransitWithoutAnAssignableHorizontalLayer) {
+  for (bool m4_available : {false, true}) {
+    SCOPED_TRACE(m4_available);
+    Fixture    f(32, 2);
+    const auto a = f.cell("dff", 0, 0), b = f.cell("dff", 800, 0);
+    f.net({
+        {a, "Q"},
+        {b, "D"}
+    });
+    Legroute_options opt;
+    opt.threads     = 1;
+    opt.clock_spine = opt.region_pins = opt.final = false;
+    opt.legal_boxes = opt.global_route = opt.global_all = opt.global_keep = true;
+    opt.reserved_tracks                                                   = 0;
+    opt.spill_rounds                                                      = 0;
+    Legroute_regions regions;
+    regions.obstacles.push_back({"M6", f.fp.die});
+    if (!m4_available) {
+      regions.obstacles.push_back({"M4", f.fp.die});
+    }
+    const auto plan = legroute_plan(f.tech, f.fp, f.timing, opt, regions, nullptr, 100000, true);
+    auto       d    = lr::build_design(f.tech, f.fp, f.timing, opt, nullptr);
+    auto       g    = lr::build_grid(d, regions);
+    ASSERT_EQ(g.cols, 2);
+    ASSERT_EQ(g.rows, 1);
+    const auto [h, v] = lr::transit_capacity(g);
+    for (size_t t = 0; t < g.size(); ++t) {
+      EXPECT_GT(g.box_cap[t], 0);  // M2 remains available for Final in both cases.
+      EXPECT_GT(v[t], 0);
+      if (m4_available) {
+        EXPECT_GT(h[t], 0);
+      } else {
+        EXPECT_EQ(h[t], 0);
+      }
+    }
+    auto            boxes = lr::build_boxes(d, g);
+    lr::Routing     routes;
+    Legroute_report report;
+    if (!m4_available) {
+      EXPECT_TRUE(plan.gates.requires_replan());
+      EXPECT_EQ(plan.unrouted, 1u);
+      EXPECT_EQ(plan.topology_disconnected, 1u);
+      EXPECT_THROW(lr::sat_place(d, g, boxes, regions, routes, report), Legroute_replan);
+      EXPECT_EQ(report.sat_regions, 0u);
+      EXPECT_EQ(report.sat_solves, 0u);
+      continue;
+    }
+    ASSERT_FALSE(plan.gates.requires_replan()) << legroute_gate_json(plan.gates);
+    EXPECT_EQ(plan.unrouted, 0u);
+    lr::sat_place(d, g, boxes, regions, routes, report);
+    ASSERT_EQ(report.sat_unsat_regions + report.sat_unknown_regions, 0u);
+    lr::pack_cells(d, g, boxes);
+    lr::box_demand(d, g, boxes, routes);
+    EXPECT_EQ(routes.cap_h, h);  // The box layer absorbs the pin stubs, not the interbox route.
+    lr::assign_layers(d, g, routes);
+    lr::assign_tracks(d, g, routes, 1);
+    EXPECT_EQ(routes.unassigned, 0u);
+    size_t horizontal_segments = 0;
+    for (const auto& segment : routes.segments) {
+      if (g.layers[size_t(segment.layer)].horizontal) {
+        ++horizontal_segments;
+        EXPECT_EQ(g.layers[size_t(segment.layer)].name, "M4");
+        EXPECT_EQ(segment.track_state, uint8_t(lr::Track_state::checked));
+      }
+    }
+    EXPECT_GT(horizontal_segments, 0u);
+    std::fill(g.box_cap.begin(), g.box_cap.end(), 0);
+    EXPECT_EQ(lr::transit_capacity(g).first, h);
+    lr::Routing without_box_room;
+    lr::box_demand(d, g, boxes, without_box_room);
+    for (const auto& box : boxes.boxes) {
+      EXPECT_EQ(without_box_room.cap_h[size_t(box.tile)], h[size_t(box.tile)] - 1);
+    }
+  }
+}
+
+TEST(Legroute, FailedPhysicalLocalMetalAuditSkipsFinalEvenWithAllTracksAssigned) {
+  Fixture f(64, 4);
+  f.fp.design  = "local_unknown_rules";
+  const auto a = f.cell("dff", 0, 0), b = f.cell("dff", 1600, 0);
+  f.net({
+      {a, "Q"},
+      {b, "D"}
+  });
+  for (const auto* layer : {"M4", "M6"}) {
+    f.tech.layers[layer].rules.unsupported.insert("UNSUPPORTED_TEST_RULE");
+  }
+  Legroute_options opt;
+  opt.threads     = 1;
+  opt.clock_spine = opt.region_pins = false;
+  opt.legal_boxes = opt.global_route = opt.global_all = opt.global_keep = true;
+  opt.reserved_tracks                                                   = 0;
+  opt.spill_rounds                                                      = 0;
+  opt.final              = true;  // The known-unknown metal audit must prevent entry into Final.
+  opt.l5_fallback_shadow = true;
+  opt.output_dir         = "local_unknown_rules";
+  std::filesystem::remove_all(opt.output_dir);
+  std::filesystem::create_directories(opt.output_dir);
+  const auto original = f.fp;
+  const auto plan     = legroute_plan(f.tech, f.fp, f.timing, opt, {}, nullptr, 100000, true);
+  ASSERT_FALSE(plan.gates.requires_replan());
+  const auto report = legroute(f.tech, f.fp, f.timing, opt, {});
+  EXPECT_EQ(report.sat_unsat_regions + report.sat_unknown_regions, 0u);
+  EXPECT_EQ(report.unassigned_segments, 0u);
+  EXPECT_TRUE(report.local_metal_audit_attempted);
+  EXPECT_GT(report.local_metal_unknown_shapes, 0u);
+  EXPECT_TRUE(report.local_metal_rejected());
+  EXPECT_EQ(report.route_passes, 0u);
+  EXPECT_FALSE(report.wires_emitted);
+  EXPECT_EQ(report.unchecked_nets, 1u);
+  ASSERT_FALSE(report.steps.empty());
+  EXPECT_EQ(report.steps.back().name, "L5 layers, tracks");
+  EXPECT_EQ(f.fp.nets, original.nets);
+  std::ifstream     input(opt.output_dir + "/legroute.json");
+  const std::string json{std::istreambuf_iterator<char>(input), {}};
+  EXPECT_NE(json.find("\"local_metal_audit_attempted\":true"), std::string::npos);
+  std::filesystem::remove_all(opt.output_dir);
+}
+
+TEST(Legroute, FailedPhysicalLocalHandoffSkipsFinalAndKeepsLegalPlacement) {
+  Fixture    f(32, 2);
+  const auto a = f.cell("dff", 0, 0), b = f.cell("dff", 800, 0);
+  f.net({
+      {a, "Q"},
+      {b, "D"}
+  });
+  f.tech.layers["M4"].rules.properties["LEF58_EOLKEEPOUT"] = {"EOLKEEPOUT .020 EXTENSION .020 .500 .020 CORNERONLY ;"};
+  Legroute_options opt;
+  opt.threads     = 1;
+  opt.clock_spine = opt.region_pins = false;
+  opt.legal_boxes = opt.global_route = opt.global_all = opt.global_keep = true;
+  opt.reserved_tracks                                                   = 0;
+  opt.spill_rounds                                                      = 0;
+  opt.final                                                             = true;
+  Legroute_regions regions;
+  regions.obstacles.push_back({"M6", f.fp.die});
+  regions.obstacles.push_back({
+      "M4",
+      {0, 125, f.fp.die.xh, 145}
+  });
+  const auto original = f.fp;
+  const auto plan     = legroute_plan(f.tech, f.fp, f.timing, opt, regions, nullptr, 100000, true);
+  ASSERT_FALSE(plan.gates.requires_replan());
+  const auto report = legroute(f.tech, f.fp, f.timing, opt, regions);
+  EXPECT_EQ(report.sat_unsat_regions + report.sat_unknown_regions, 0u);
+  EXPECT_GT(report.unassigned_segments, 0u);
+  EXPECT_EQ(report.route_passes, 0u);
+  EXPECT_FALSE(report.wires_emitted);
+  EXPECT_EQ(report.routed_nets, 1u);
+  EXPECT_EQ(report.unchecked_nets, report.routed_nets);
+  ASSERT_FALSE(report.steps.empty());
+  EXPECT_EQ(report.steps.back().name, "L5 layers, tracks");
+  f.expect_legal();
+  EXPECT_EQ(f.fp.nets, original.nets);
+}
+
+TEST(Legroute, RequiredStageFailureReportsTheSameClockAndNameExclusionsAsFinal) {
+  for (bool expire_sat : {false, true}) {
+    SCOPED_TRACE(expire_sat);
+    Fixture    f(32, 2);
+    const auto a = f.cell("dff", 0, 0), b = f.cell("dff", 800, 0);
+    f.net({
+        {a, "Q"},
+        {b, "D"}
+    });
+    f.net({
+        {b, "Q"},
+        {a, "D"}
+    });
+    f.fp.nets.back().name = "top/SoFt_ReSeT_N";
+    f.net(
+        {
+            {a, "CLK"},
+            {b, "CLK"}
+    },
+        0,
+        "CLOCK");
+    f.tech.layers["M4"].rules.properties["LEF58_EOLKEEPOUT"] = {"EOLKEEPOUT .020 EXTENSION .020 .500 .020 CORNERONLY ;"};
+    Legroute_options opt;
+    opt.threads     = 1;
+    opt.clock_spine = opt.region_pins = false;
+    opt.legal_boxes = opt.global_route = opt.global_all = opt.global_keep = true;
+    opt.reserved_tracks                                                   = 0;
+    opt.spill_rounds                                                      = 0;
+    opt.final                                                             = true;
+    opt.final_skip_clock                                                  = true;
+    opt.final_skip_nets                                                   = "reset";
+    if (expire_sat) {
+      opt.sat_ms = 0;
+    }
+    Legroute_regions regions;
+    regions.obstacles.push_back({"M6", f.fp.die});
+    regions.obstacles.push_back({
+        "M4",
+        {0, 125, f.fp.die.xh, 145}
+    });
+    const auto original = f.fp;
+    const auto report   = legroute(f.tech, f.fp, f.timing, opt, regions);
+    if (expire_sat) {
+      EXPECT_GT(report.sat_unknown_regions, 0u);
+      EXPECT_EQ(report.sat_unsat_regions, 0u);
+    } else {
+      EXPECT_EQ(report.sat_unsat_regions + report.sat_unknown_regions, 0u);
+      EXPECT_GT(report.unassigned_segments, 0u);
+    }
+    EXPECT_EQ(report.route_passes, 0u);
+    EXPECT_FALSE(report.wires_emitted);
+    EXPECT_EQ(report.routed_nets, 1u);
+    EXPECT_EQ(report.unchecked_nets, 1u);
+    EXPECT_EQ(report.final_skipped_nets, 2u);
+    EXPECT_EQ(report.clock_required_nets, 0u);
+    EXPECT_EQ(report.clock_unchecked_nets, 0u);
+    ASSERT_FALSE(report.steps.empty());
+    EXPECT_EQ(report.steps.back().name, expire_sat ? "L3 SAT placement" : "L5 layers, tracks");
+    EXPECT_EQ(f.fp.nets, original.nets);
+    if (expire_sat) {
+      opt.final             = false;
+      const auto local_only = legroute(f.tech, f.fp, f.timing, opt, regions);
+      EXPECT_GT(local_only.sat_unknown_regions, 0u);
+      EXPECT_EQ(local_only.routed_nets, 3u);
+      EXPECT_EQ(local_only.unchecked_nets, 3u);
+      EXPECT_EQ(local_only.final_skipped_nets, 0u);
+      EXPECT_EQ(local_only.clock_required_nets, 1u);
+      EXPECT_EQ(local_only.clock_unchecked_nets, 1u);
+      EXPECT_EQ(local_only.route_passes, 0u);
+      EXPECT_EQ(f.fp.nets, original.nets);
+    }
   }
 }
 
@@ -2001,7 +2433,9 @@ TEST(Legroute, GlobalCapacityAndDisconnectionReturnToPlanningBeforeSat) {
       for (auto& cap : g.cap) {
         std::fill(cap.begin(), cap.end(), 0);
       }
-      std::fill(g.box_cap.begin(), g.box_cap.end(), tracks);
+      const auto horizontal = std::ranges::find(g.layers, true, &lr::Layer::horizontal);
+      ASSERT_NE(horizontal, g.layers.end());
+      std::fill(g.cap[size_t(horizontal - g.layers.begin())].begin(), g.cap[size_t(horizontal - g.layers.begin())].end(), tracks);
       auto            boxes = lr::build_boxes(d, g);
       lr::Routing     routes;
       Legroute_report rep;
@@ -2083,7 +2517,11 @@ TEST(Legroute, CongestionAndEveryOversizedPartitionReturnToPlanningBeforeSat) {
       for (auto& cap : g.cap) {
         std::fill(cap.begin(), cap.end(), 0);
       }
-      std::fill(g.box_cap.begin(), g.box_cap.end(), test.tracks);
+      const auto horizontal = std::ranges::find(g.layers, true, &lr::Layer::horizontal);
+      ASSERT_NE(horizontal, g.layers.end());
+      std::fill(g.cap[size_t(horizontal - g.layers.begin())].begin(),
+                g.cap[size_t(horizontal - g.layers.begin())].end(),
+                test.tracks);
       auto                   boxes = lr::build_boxes(d, g);
       const std::vector<int> cap_h(g.size(), test.tracks), cap_v(g.size(), 0);
       const auto             coarse = lr::route_all_signals(d, g, boxes, cap_h, cap_v);
@@ -2195,6 +2633,7 @@ TEST(Legroute, FailureLeavesTheFloorplanUnchanged) {
 TEST(Legroute, SatPlacementFitsTheTracks) {
   for (unsigned reserved : {1u, 7u}) {  // 7 of the fixture's 8-10 tracks per layer reserved: the capacity binds
     Fixture f;
+    f.add_horizontal_transit_layer();
     f.random_design(12, 4, 3);
     Legroute_options opt;
     opt.threads           = 1;
@@ -2202,7 +2641,7 @@ TEST(Legroute, SatPlacementFitsTheTracks) {
     opt.clock_spine       = false;
     opt.global_share      = .95;
     const auto      d     = lr::build_design(f.tech, f.fp, f.timing, opt, nullptr);
-    auto      g     = lr::build_grid(d, {});
+    auto            g     = lr::build_grid(d, {});
     auto            boxes = lr::build_boxes(d, g);
     lr::Routing     R;
     Legroute_report rep;
@@ -2232,7 +2671,7 @@ TEST(Legroute, SatPlacementFitsTheTracks) {
       }
     }
     const auto tracks = [&](int t, bool h) {
-      int cap = h ? g.box_cap[t] : 0;  // the box layer's tracks count as H
+      int cap = 0;  // only layers that L5 can assign carry transit
       for (size_t l = 0; l < g.layers.size(); ++l) {
         cap += g.layers[l].horizontal == h ? g.cap[l][t] : 0;
       }
@@ -2250,7 +2689,8 @@ TEST(Legroute, SatPlacementFitsTheTracks) {
 // region unsat before any solving. Raw physical capacity passes the coarse screen;
 // a deliberately conservative SAT calibration creates the regional cut deficit.
 TEST(Legroute, CutBoundIsUnsatBeforeSolving) {
-  Fixture             f(240, 4);  // a 12 um strip: 15 tile columns of 0.8 um, 2 tile rows
+  Fixture f(240, 4);  // a 12 um strip: 15 tile columns of 0.8 um, 2 tile rows
+  f.add_horizontal_transit_layer();
   std::vector<size_t> left, right;
   for (int row = 0; row < 4; ++row) {
     for (int k = 0; k < 4; ++k) {
@@ -2271,7 +2711,7 @@ TEST(Legroute, CutBoundIsUnsatBeforeSolving) {
   opt.clock_spine       = false;
   opt.merge_cost        = 2;  // a flop never joins its partner's box across the strip (cost 8); neighbors pack as usual
   const auto      d     = lr::build_design(f.tech, f.fp, f.timing, opt, nullptr);
-  auto      g     = lr::build_grid(d, {});
+  auto            g     = lr::build_grid(d, {});
   auto            boxes = lr::build_boxes(d, g);
   lr::Routing     R;
   Legroute_report rep;
@@ -2346,7 +2786,8 @@ TEST(Legroute, TwoRowCellsPlaceAsTileTallBoxes) {
     const auto  w = std::llround(f.tech.macros.at(c.macro).width * 1000), h = std::llround(f.tech.macros.at(c.macro).height * 1000);
     if (h > 250) {
       EXPECT_EQ((c.place.y - g.y0) % g.tile_h, 0) << c.name << " starts at a tile's bottom row";
-      EXPECT_EQ(c.place.orientation, g.row_orient[size_t(2 * g.row(g.tile_of(double(c.place.x + 1), double(c.place.y + 1))))]) << c.name;
+      EXPECT_EQ(c.place.orientation, g.row_orient[size_t(2 * g.row(g.tile_of(double(c.place.x + 1), double(c.place.y + 1))))])
+          << c.name;
     }
     for (const auto& [x0, y0, x1, y1] : rects) {
       EXPECT_FALSE(c.place.x < x1 && x0 < c.place.x + w && c.place.y < y1 && y0 < c.place.y + h) << c.name << " overlaps a cell";
@@ -2359,16 +2800,20 @@ TEST(Legroute, TwoRowCellsPlaceAsTileTallBoxes) {
 // the second wave's fixed endpoints; both regions still have an answer and the report counts the waves and free hops.
 TEST(Legroute, HopChoiceSolvesInTwoWaves) {
   Fixture f(400, 8);  // a 20 x 2 um core: two regions of 10 um
+  f.add_horizontal_transit_layer();
   f.random_design(24, 4, 5);
   Legroute_options opt;
-  opt.threads     = 1;
-  opt.clock_spine = false;
-  opt.hop_choice  = 2;
+  opt.threads        = 1;
+  opt.clock_spine    = false;
+  opt.hop_choice     = 2;
   opt.global_share   = .95;
   const auto       d = lr::build_design(f.tech, f.fp, f.timing, opt, nullptr);
   Legroute_regions regions;
-  regions.rects = {{0, 0, 10000, 2000}, {10000, 0, 20000, 2000}};
-  auto      g     = lr::build_grid(d, regions);
+  regions.rects = {
+      {    0, 0, 10000, 2000},
+      {10000, 0, 20000, 2000}
+  };
+  auto            g     = lr::build_grid(d, regions);
   auto            boxes = lr::build_boxes(d, g);
   lr::Routing     R;
   Legroute_report rep;
@@ -2477,9 +2922,6 @@ TEST(Legroute, FixedInterfaceRerouteMustPassGlobalAdmissionBeforeSat) {
         (grid.layers[layer].horizontal ? h : v)[tile] += grid.cap[layer][tile];
       }
     }
-    for (size_t tile = 0; tile < grid.size(); ++tile) {
-      h[tile] += grid.box_cap[tile];
-    }
     const auto prepass = lr::route_all_signals(design, grid, boxes, h, v);
     ASSERT_EQ(prepass.unrouted, 0u);
     ASSERT_FALSE(lr::assess_legroute_gates(design, grid, &boxes, prepass, {}, h, v, true).requires_replan());
@@ -2550,19 +2992,15 @@ TEST(Legroute, FixedInterfaceOvercapacityStopsBeforeSatAndCountsEachNetOnce) {
     auto             grid   = lr::build_grid(design, regions);
     auto             boxes  = lr::build_boxes(design, grid);
     std::vector<int> h(grid.size()), v(grid.size());
+    const auto       horizontal = std::ranges::find(grid.layers, true, &lr::Layer::horizontal);
+    ASSERT_NE(horizontal, grid.layers.end());
     for (size_t layer = 0; layer < grid.layers.size(); ++layer) {
       for (size_t tile = 0; tile < grid.size(); ++tile) {
         if (grid.layers[layer].horizontal && grid.row(int(tile)) == 3) {
-          grid.cap[layer][tile] = 0;
+          grid.cap[layer][tile] = layer == size_t(horizontal - grid.layers.begin()) ? tracks : 0;
         }
         (grid.layers[layer].horizontal ? h : v)[tile] += grid.cap[layer][tile];
       }
-    }
-    for (size_t tile = 0; tile < grid.size(); ++tile) {
-      if (grid.row(int(tile)) == 3) {
-        grid.box_cap[tile] = tracks;
-      }
-      h[tile] += grid.box_cap[tile];
     }
     const auto prepass = lr::route_all_signals(design, grid, boxes, h, v);
     ASSERT_EQ(prepass.unrouted, 0u);
@@ -2607,6 +3045,8 @@ TEST(Legroute, FixedInterfaceOvercapacityStopsBeforeSatAndCountsEachNetOnce) {
 // failing boundary fixture, including the eventual routable answer after boxes move to the neighbouring region.
 TEST(Legroute, LocalWindowRetriesReuseCrossingsUntilBoxesSpill) {
   Fixture f(400, 8);
+  // The 47 DBU pitch keeps 20 DBU width/spacing legal and restores the outer-band track lost to die-edge clipping.
+  f.add_horizontal_transit_layer(47);
   for (int col = 0; col < 6; ++col) {
     for (int row = 0; row < 4; ++row) {
       const auto a                    = f.cell("dff", 800 * col + 200, 500 * row);
@@ -2652,7 +3092,9 @@ TEST(Legroute, LocalWindowRetriesReuseCrossingsUntilBoxesSpill) {
 // tracks) until the spill rounds push boxes out: min cuts inside the failing region (VieCut) pick the boxes and the
 // neighbour they go to (the one their nets reach), and the regions that changed solve again.
 TEST(Legroute, SpillRoundsPushAFailingRegionsBoxesOut) {
-  Fixture             f(400, 8);  // a 20 x 2 um core: two regions of 10 um (96 and 104 tiles), a 4-tile boundary
+  Fixture f(400, 8);  // a 20 x 2 um core: two regions of 10 um (96 and 104 tiles), a 4-tile boundary
+  // The 47 DBU pitch keeps 20 DBU width/spacing legal and restores the outer-band track lost to die-edge clipping.
+  f.add_horizontal_transit_layer(47);
   std::vector<size_t> movable, fixed;
   for (int col = 0; col < 6; ++col) {
     for (int row = 0; row < 4; ++row) {
@@ -2701,7 +3143,9 @@ TEST(Legroute, SpillRoundsPushAFailingRegionsBoxesOut) {
 // The same failure, mended by moving the boundary: the failing region hands the tile strip next to the neighbour its
 // nets reach to it, boxes included, so those nets' endpoints become the neighbour's without touching its fill.
 TEST(Legroute, SpillShiftMovesTheBoundaryWithItsBoxes) {
-  Fixture             f(400, 8);
+  Fixture f(400, 8);
+  // The 47 DBU pitch keeps 20 DBU width/spacing legal and restores the outer-band track lost to die-edge clipping.
+  f.add_horizontal_transit_layer(47);
   std::vector<size_t> movable, fixed;
   for (int col = 6; col < 12; ++col) {  // the left region's flops sit next to the boundary
     for (int row = 0; row < 4; ++row) {
@@ -2752,6 +3196,7 @@ TEST(Legroute, SpillShiftMovesTheBoundaryWithItsBoxes) {
 // lists; the other repair must wait for fresh crossings and verdicts, leaving its region untouched this round.
 TEST(Legroute, MeshRepairDefersOverlappingPairs) {
   Fixture f(400, 24);
+  f.add_horizontal_transit_layer();
   for (int region = 0; region < 3; ++region) {
     for (int col = 0; col < 6; ++col) {
       for (int row = 0; row < 4; ++row) {
@@ -2798,7 +3243,9 @@ TEST(Legroute, MeshRepairDefersOverlappingPairs) {
 // The failing region first tries alternative placements of its boxes (noise, anchors, the orthogonal drawing), solved
 // in parallel; whichever routes is adopted, else the spill goes on.
 TEST(Legroute, AlternativePlacementsRunBeforeTheSpill) {
-  Fixture             f(400, 8);
+  Fixture f(400, 8);
+  // The 47 DBU pitch keeps 20 DBU width/spacing legal and restores the outer-band track lost to die-edge clipping.
+  f.add_horizontal_transit_layer(47);
   std::vector<size_t> movable, fixed;
   for (int col = 0; col < 6; ++col) {
     for (int row = 0; row < 4; ++row) {
@@ -2844,7 +3291,8 @@ TEST(Legroute, AlternativePlacementsRunBeforeTheSpill) {
 // The checker alternative: a relaxed model (no capacity on a checkerboard of tiles, wide windows) finds far tiles the
 // windows of two never reach, and the full model from its answer routes the region the cut bound rejected.
 TEST(Legroute, CheckerAlternativeReachesFarTiles) {
-  Fixture             f(400, 8);
+  Fixture f(400, 8);
+  f.add_horizontal_transit_layer();
   std::vector<size_t> movable, fixed;
   for (int col = 0; col < 6; ++col) {
     for (int row = 0; row < 4; ++row) {

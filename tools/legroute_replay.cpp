@@ -142,6 +142,23 @@ int main(int argc, char** argv) {
     }
     options.region_pins = false;
     boolean("final", options.final);
+    boolean("critical_cellboxes", options.critical_cellboxes);
+    integer("cellbox_sites", options.cellbox_sites);
+    integer("cellbox_rows", options.cellbox_rows);
+    integer("cellbox_external_pins", options.cellbox_external_pins);
+    integer("cellbox_connections", options.cellbox_connections);
+    integer("cellbox_critical_choices", options.cellbox_critical_choices);
+    integer("cellbox_other_choices", options.cellbox_other_choices);
+    boolean("cellbox_wide_exceptions", options.cellbox_wide_exceptions);
+    boolean("cellbox_far_fallback", options.cellbox_far_fallback);
+    if (config.HasMember("cellbox_final_retry")) {
+      throw std::invalid_argument("cellbox_final_retry is runtime-only and cannot be configured");
+    }
+    if (options.cellbox_far_fallback) {
+      throw std::invalid_argument("cellbox_far_fallback requires native Plan retries; fixed legroute_replay cannot activate it");
+    }
+    boolean("paired_pin_reserve", options.paired_pin_reserve);
+    integer("paired_pin_cap", options.paired_pin_cap);
     boolean("global_keep", options.global_keep);
     boolean("global_pattern", options.global_pattern);
     boolean("box_route_seed", options.box_route_seed);
@@ -161,6 +178,9 @@ int main(int argc, char** argv) {
       }
       options.box_reserve = it->value.GetString();
     }
+    if (options.critical_cellboxes) {
+      options.box_reserve = "M2:20,M3:20";
+    }
     integer("fit_window", options.fit_window);
     integer("window_tiles", options.window_tiles);
     boolean("clock_spine", options.clock_spine);
@@ -175,6 +195,7 @@ int main(int argc, char** argv) {
     integer("route_access_per_pin", options.route_access_per_pin);
     boolean("final_drop_fallback_planned", options.final_drop_fallback_planned);
     boolean("l5_fallback_shadow", options.l5_fallback_shadow);
+    integer("l5_repair_ms", options.l5_repair_ms);
     boolean("l5_rule_reach", options.l5_rule_reach);
     boolean("final_clock_first", options.final_clock_first);
     boolean("final_precommit_connectivity", options.final_precommit_connectivity);
@@ -208,6 +229,10 @@ int main(int argc, char** argv) {
     number("merge_cost", options.merge_cost);
     number("global_astar_weight", options.global_astar_weight);
     number("partition_critical_cost", options.partition_critical_cost);
+    if (options.critical_cellboxes) {
+      options.reserved_tracks        = 0;
+      options.reserved_tracks_per_um = -1;
+    }
     pl::validate_legroute_options(options);
     for (const auto& member : config.GetObject()) {  // an unread key would silently not vary anything
       if (!known.contains(member.name.GetString())) {
@@ -221,6 +246,26 @@ int main(int argc, char** argv) {
     fs::create_directories(output);
     options.output_dir = output;
     fs::copy_file(argv[1], fs::path(output) / "config.json");
+    // Record effective typed values as well as the caller's original config;
+    // the opt-in preset normalizes the reservation independently of its input spelling.
+    std::ofstream effective(output + "/cellbox_options.json");
+    effective << std::format(
+        R"({{"critical_cellboxes":{},"cellbox_sites":{},"cellbox_rows":{},"cellbox_external_pins":{},"cellbox_connections":{},"cellbox_critical_choices":{},"cellbox_other_choices":{},"cellbox_wide_exceptions":{},"cellbox_far_fallback":{},"reserved_tracks":{},"reserved_tracks_per_um":{}}})",
+        options.critical_cellboxes,
+        options.cellbox_sites,
+        options.cellbox_rows,
+        options.cellbox_external_pins,
+        options.cellbox_connections,
+        options.cellbox_critical_choices,
+        options.cellbox_other_choices,
+        options.cellbox_wide_exceptions,
+        options.cellbox_far_fallback,
+        options.reserved_tracks,
+        options.reserved_tracks_per_um)
+              << '\n';
+    if (!effective) {
+      throw std::runtime_error("cannot write effective cellbox options");
+    }
     if (config.HasMember("power_grid")) {
       auto pg_profile                       = pl::power_grid_profile(string("power_grid"), tech);
       pg_profile.tolerate_macro_pin_overlap = pg_tolerate_macro_pin_overlap;
@@ -347,6 +392,7 @@ int main(int argc, char** argv) {
               << "; topology-disconnected signals " << report.global_topology_disconnected << "; search-limited attempts "
               << report.global_search_limited << "; seconds " << report.seconds << '\n';
     return report.sat_unsat_regions || report.sat_unknown_regions || report.crossing_policy_invalid
+                   || report.local_handoff_rejected()
                    || (options.final ? !report.wires_emitted
                                      : report.unassigned_segments || report.global_unrouted || report.global_overflow_tracks)
                ? 1

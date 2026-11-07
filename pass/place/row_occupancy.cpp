@@ -107,6 +107,9 @@ Frame_role frame_role(const ph::Technology& tech, const ph::Component& c) {
     return Frame_role::ignored;
   }
   const auto& m = tech.macros.at(c.macro);
+  if (ph::soft_block(m)) {
+    return Frame_role::ignored;  // a soft block keeps its GP pose: neither legalized nor an obstacle
+  }
   if (!m.klass.starts_with("CORE") || fixed_physical_cell(c, m)) {
     return Frame_role::obstacle;
   }

@@ -369,6 +369,8 @@ filegroup(
     name = "place_srcs",
     srcs = [
         "//core:metadata_srcs",
+        "area_fit.cpp",
+        "area_fit.hpp",
         "handoff_rows.cpp",
         "handoff_rows.hpp",
         "repeater_wire_filter.cpp",
@@ -418,6 +420,12 @@ filegroup(
         "h2d.hpp",
         "io_timing.cpp",
         "io_timing.hpp",
+        "macro_dead_space.cpp",
+        "macro_dead_space.hpp",
+        "macro_anchor.cpp",
+        "macro_anchor.hpp",
+        "macro_edge.cpp",
+        "macro_edge.hpp",
         "macro_snap.cpp",
         "macro_tracks.cpp",
         "macro_snap.hpp",
@@ -483,6 +491,7 @@ filegroup(
         "legroute.cpp",
         "legroute.hpp",
         "legroute_boxes.cpp",
+        "legroute_admission.cpp",
         "legroute_box_domains.cpp",
         "legroute_box_seed.cpp",
         "legroute_coalesce.cpp",
@@ -685,6 +694,7 @@ cc_library(
 cc_library(
     name = "place",
     srcs = [
+        "area_fit.cpp",
         "cell_jump.cpp",
         "placement_session.cpp",
         "planning_selection.cpp",
@@ -694,6 +704,9 @@ cc_library(
         "color_centroids.cpp",
         "h2d.cpp",
         "io_timing.cpp",
+        "macro_dead_space.cpp",
+        "macro_anchor.cpp",
+        "macro_edge.cpp",
         "macro_snap.cpp",
         "macro_tracks.cpp",
         "magnet_report.cpp",
@@ -714,6 +727,7 @@ cc_library(
         "timing_place.cpp",
     ],
     hdrs = [
+        "area_fit.hpp",
         "cell_jump.hpp",
         "placement_session.hpp",
         "planning_selection.hpp",
@@ -722,6 +736,9 @@ cc_library(
         "color_centroids.hpp",
         "h2d.hpp",
         "io_timing.hpp",
+        "macro_dead_space.hpp",
+        "macro_anchor.hpp",
+        "macro_edge.hpp",
         "macro_snap.hpp",
         "macro_tracks.hpp",
         "magnet_report.hpp",
@@ -743,7 +760,6 @@ cc_library(
         ":place_salt",
     ],
     copts = COPTS,
-    data = [":uroute_pretrained"],
     visibility = ["//visibility:public"],
     deps = [
         ":uroute",
@@ -784,7 +800,6 @@ cc_library(
         "@dreamplace//:macro_report",
         "@dreamplace//thirdparty/flute",
         "@rapidjson",
-        "@rules_cc//cc/runfiles",
     ],
 )
 
@@ -908,6 +923,42 @@ cc_test(
 )
 
 cc_test(
+    name = "macro_dead_space_test",
+    size = "small",
+    srcs = ["macro_dead_space_test.cpp"],
+    copts = COPTS,
+    deps = [":place", "@googletest//:gtest_main"],
+)
+
+cc_test(
+    name = "macro_anchor_test",
+    size = "small",
+    srcs = ["macro_anchor_test.cpp"],
+    copts = COPTS,
+    deps = [":place", "@googletest//:gtest_main"],
+)
+
+cc_test(
+    name = "area_fit_test",
+    size = "small",
+    srcs = [
+        "area_fit_test.cpp",
+        "place_test_fixture.hpp",
+    ],
+    copts = COPTS,
+    data = ["//inou/lefdef:test_data"],
+    deps = [":place", "@googletest//:gtest_main"],
+)
+
+cc_test(
+    name = "macro_edge_test",
+    size = "small",
+    srcs = ["macro_edge_test.cpp"],
+    copts = COPTS,
+    deps = [":place", "@googletest//:gtest_main"],
+)
+
+cc_test(
     name = "macro_snap_test",
     srcs = ["macro_snap_test.cpp"],
     copts = COPTS,
@@ -982,6 +1033,7 @@ cc_library(
     name = "legroute",
     srcs = [
         "legroute.cpp",
+        "legroute_admission.cpp",
         "legroute_boxes.cpp",
         "legroute_box_domains.cpp",
         "legroute_box_seed.cpp",
@@ -1005,6 +1057,7 @@ cc_library(
     copts = COPTS,
     visibility = ["//visibility:public"],
     deps = [
+        ":cell_criticality",
         ":fast_route_pattern",
         ":row_occupancy",
         ":sat_solver",
@@ -1071,6 +1124,13 @@ cc_test(
     srcs = ["legroute_boxes_test.cpp", "legroute_internal.hpp"],
     copts = COPTS,
     deps = [":legroute", "@googletest//:gtest_main"],
+)
+cc_test(
+    name = "legroute_admission_test",
+    size = "small",
+    srcs = ["legroute_admission_test.cpp", "legroute_internal.hpp"],
+    copts = COPTS,
+    deps = [":legroute", ":prects_networks", "@googletest//:gtest_main"],
 )
 cc_test(
     name = "legroute_partition_test",
@@ -1211,7 +1271,7 @@ cc_library(
     hdrs = ["steiner_topology.hpp"],
     copts = COPTS,
     visibility = ["//visibility:public"],
-    deps = ["//inou/lefdef:index_union_find", "@dreamplace//thirdparty/flute", "@rules_cc//cc/runfiles"],
+    deps = ["//inou/lefdef:index_union_find", "@dreamplace//thirdparty/flute"],
 )
 
 cc_library(
@@ -1244,20 +1304,25 @@ cc_test(
     deps = [":signal_router", "@googletest//:gtest_main"],
 )
 
+# The bundled @pretrained manifest as a C++ raw string literal, so binaries do
+# not depend on locating runfiles.
+genrule(
+    name = "uroute_pretrained_manifest",
+    srcs = ["uroute/pretrained/manifest.json"],
+    outs = ["uroute_pretrained_manifest.inc"],
+    cmd = "{ printf 'R\"lhd_manifest('; cat $<; printf ')lhd_manifest\"\\n'; } > $@",
+)
+
 cc_library(
     name = "uroute",
     srcs = ["uroute.cpp"],
     hdrs = ["uroute.hpp"],
+    textual_hdrs = [":uroute_pretrained_manifest"],
     copts = COPTS,
     visibility = ["//visibility:public"],
     deps = ["@dreamplace//dreamplace/native:placer", "@rapidjson", "@llvm-project//llvm:Support"],
 )
 
-filegroup(
-    name = "uroute_pretrained",
-    srcs = glob(["uroute/pretrained/*"]),
-    visibility = ["//visibility:public"],
-)
 
 cc_test(
     name = "placement_technology_test",

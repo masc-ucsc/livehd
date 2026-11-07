@@ -13,6 +13,7 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#include "inou/lefdef/routing_occupancy.hpp"
 #include "inou/lefdef/routing_rules.hpp"
 #include "legroute_internal.hpp"
 #include "steiner_topology.hpp"
@@ -128,18 +129,14 @@ int add_conn(Routing& R, int net, int a, int b, const Net& N) {
 }  // namespace
 
 void box_demand(const Design& d, const Grid& g, const Boxes& boxes, Routing& R) {
-  R.cap_h.assign(g.size(), 0);
-  R.cap_v.assign(g.size(), 0);
+  auto [cap_h, cap_v] = transit_capacity(g);
+  R.cap_h             = std::move(cap_h);
+  R.cap_v             = std::move(cap_v);
   R.dem_h.assign(g.size(), 0);
   R.dem_v.assign(g.size(), 0);
   R.hist_h.assign(g.size(), 0);
   R.hist_v.assign(g.size(), 0);
   R.layer_dem.assign(g.layers.size(), std::vector<int32_t>(g.size(), 0));
-  for (size_t l = 0; l < g.layers.size(); ++l) {
-    for (size_t t = 0; t < g.size(); ++t) {
-      (g.layers[l].horizontal ? R.cap_h : R.cap_v)[t] += g.cap[l][t];
-    }
-  }
   // in-box demand per box tile, for the layer assignment: a pin of a net leaving the box taps up to its net's metal
   // over the box (half a box-layer track and a quarter of a vertical one, plus half a vertical track for the riser).
   // The box layer absorbs what fits; the rest, and the vertical part, take routed tracks. The SAT placement already
@@ -150,6 +147,9 @@ void box_demand(const Design& d, const Grid& g, const Boxes& boxes, Routing& R) 
   }
   R.box_dem_h.assign(g.size(), 0);
   R.box_dem_v.assign(g.size(), 0);
+  if (d.opt.paired_pin_reserve) {
+    return;  // The shared per-box resolver already charged the exact experimental M2/M3 allowance.
+  }
   for (size_t n = 0; n < d.nets.size(); ++n) {
     const auto& N = d.nets[n];
     if (!N.routed || N.clock || N.power) {
@@ -513,8 +513,10 @@ void assign_layers(const Design&, const Grid& g, Routing& R) {
 
 // ---------------------------------------------------------------- L7 tracks
 namespace {
-using Spans = std::map<int64_t, int64_t>;
-void merge_span(Spans& spans, int64_t lo, int64_t hi) {
+using Spans                  = std::map<int64_t, int64_t>;
+constexpr int kObstacleOwner = -1;
+constexpr int kReservedOwner = -2;
+void          merge_span(Spans& spans, int64_t lo, int64_t hi) {
   auto it = spans.lower_bound(lo);
   if (it != spans.begin() && std::prev(it)->second >= lo) {
     --it;
@@ -528,7 +530,7 @@ void merge_span(Spans& spans, int64_t lo, int64_t hi) {
 }
 struct Track {
   Spans                all;
-  std::map<int, Spans> owners;  // net -> union of its spans; -1 is an unshareable obstacle
+  std::map<int, Spans> owners;  // net -> union of its spans; negative owners distinguish metal from empty reservations
   void                 occupy(int net, int64_t lo, int64_t hi) {
     merge_span(all, lo, hi);
     merge_span(owners[net], lo, hi);
@@ -537,15 +539,24 @@ struct Track {
 struct Band {
   std::vector<int>         segs;
   std::map<int64_t, Track> busy;
-  std::map<int64_t, Spans> hard;              // power metal and macros (never shared)
-  Band*                    shadow = nullptr;  // l5_fallback_shadow: every contribution except FALLBACK ones
-  Band*                    ledger = nullptr;  // l5_fallback_shadow: every contribution (checked against busy)
+  std::map<int64_t, Spans> hard;  // power metal, macros and reserved tracks (never shared)
+  int                      layer = -1, index = -1;
+  bool                     shadow_view = false;
+  Band*                    shadow      = nullptr;  // l5_fallback_shadow: every contribution except FALLBACK ones
+  Band*                    ledger      = nullptr;  // l5_fallback_shadow: every contribution (checked against busy)
   struct Contribution {
     int     net;
     int64_t lo, hi;
-    uint8_t state;  // Track_state; 255 marks hard/reserved initialization
+    uint8_t state;         // Track_state; 255 marks hard/reserved initialization
+    int     request = -1;  // regular H identity, or immutable background (-1) / IO transaction (<= -2)
   };
-  std::map<int64_t, std::vector<Contribution>> contributions;  // l5_fallback_shadow ledger only: per track, in order
+  std::map<int64_t, std::vector<Contribution>> contributions;  // shadow ledger, or opt-in H repair provenance
+  struct Request {
+    int     segment, net;
+    int64_t lo, hi, track;
+    uint8_t state;
+  };
+  std::vector<Request> requests;  // opt-in repair only; exact regular H requests, including immutable fallbacks
 };
 bool free_on(const Spans& m, int64_t lo, int64_t hi) {
   auto it = m.upper_bound(lo);
@@ -571,7 +582,6 @@ bool free_on(const Track& track, int64_t lo, int64_t hi, int net) {
 }  // namespace
 
 void assign_tracks(const Design& d, const Grid& g, Routing& R, unsigned threads) {
-  const int                low_v = v_layer(g, 0);
   const Track_reservations reservations(d.opt, d.tech, g.dbu);
   // span of a segment end along its axis: a node's riser (H) / bend partner track (H), else the whole tile
   const auto tile_lo = [&](const Segment& s, int k) { return g.layers[s.layer].horizontal ? g.left(k) : g.bottom(k); };
@@ -593,6 +603,127 @@ void assign_tracks(const Design& d, const Grid& g, Routing& R, unsigned threads)
       }
     }
   }
+  using Destinations = std::array<int, 2>;  // actual endpoint box identities, never all boxes incident to a net
+  struct Allowance_state {
+    std::vector<int64_t>      physical, eligible;
+    unsigned                  required = 0;  // authoritative catalog budget: nominal paired tracks plus separate internal estimate
+    std::set<int>             destination_nets;
+    std::map<int64_t, size_t> foreign, shadow_foreign;
+  };
+  std::vector<Allowance_state> allowance(d.opt.paired_pin_reserve ? g.paired_pin_reservations.size() : 0);
+  for (size_t i = 0; i < allowance.size(); ++i) {
+    const auto& reservation = g.paired_pin_reservations[i];
+    const auto& catalog     = g.resources.layers.at(size_t(reservation.vertical_layer));
+    const auto& tile        = catalog.tiles.at(size_t(reservation.tile));
+    auto&       state       = allowance[i];
+    state.physical          = catalog.bands.at(tile.band);
+    state.required          = tile.cellbox_budget;
+    if (!tile.whole_band_exclusions) {
+      const auto& coordinates = catalog.bands.at(tile.band);
+      for (size_t k = 0; k < coordinates.size(); ++k) {
+        if (std::ranges::none_of(tile.exclusions, [&](const auto& exclusion) { return exclusion.track == k; })) {
+          state.eligible.push_back(coordinates[k]);
+        }
+      }
+    }
+    for (const auto& pin : reservation.external_pins) {
+      state.destination_nets.insert(pin.net);
+    }
+    state.destination_nets.insert(reservation.internal_nets.begin(), reservation.internal_nets.end());
+  }
+  const auto segment_destinations = [&](const Segment& segment) {
+    Destinations out{-1, -1};
+    if (!d.opt.paired_pin_reserve) {
+      return out;
+    }
+    for (int e = 0; e < 2; ++e) {
+      const int node = e ? segment.node_hi : segment.node_lo;
+      if (node < 0) {
+        continue;
+      }
+      const auto& endpoint = R.trees[segment.net].nodes[node];
+      const int   along    = e ? segment.hi : segment.lo;
+      const int   tile     = g.layers[segment.layer].horizontal ? g.tile(along, segment.band) : g.tile(segment.band, along);
+      if (endpoint.tile == tile) {
+        out[e] = endpoint.box;  // this piece terminates inside the named box; passing through the tile is insufficient
+      }
+    }
+    return out;
+  };
+  enum class Allowance_slot { unrepresented, excluded, destination, foreign };
+  const auto visit_allowance
+      = [&](int layer, int band, int64_t track, int64_t lo, int64_t hi, int net, Destinations destinations, const auto& visit) {
+          if (!d.opt.paired_pin_reserve || track < 0 || g.layers[layer].horizontal) {
+            return;
+          }
+          const auto coordinate = g.track_coord(layer, track);
+          const int  first = g.row_of(lo), last = g.row_of(hi > lo ? hi - 1 : hi);
+          for (int row = first; row <= last; ++row) {
+            const int tile = g.tile(band, row);
+            const int id   = g.paired_pin_reservation_of_tile.at(size_t(tile));
+            if (id < 0) {
+              continue;
+            }
+            const auto& reservation = g.paired_pin_reservations[size_t(id)];
+            const auto& state       = allowance[size_t(id)];
+            if (reservation.vertical_layer != layer) {
+              continue;
+            }
+            Allowance_slot slot = Allowance_slot::foreign;
+            if (!std::ranges::binary_search(state.physical, coordinate)) {
+              slot = Allowance_slot::unrepresented;  // Grid::tracks must not extrapolate beyond the finite catalog.
+            } else if (!std::ranges::binary_search(state.eligible, coordinate)) {
+              slot = Allowance_slot::excluded;  // reject the choice, but never deduct an already excluded PG track twice
+            } else if ((destinations[0] == reservation.box || destinations[1] == reservation.box)
+                       && state.destination_nets.contains(net)) {
+              slot = Allowance_slot::destination;
+            }
+            visit(size_t(id), coordinate, slot);
+          }
+        };
+  const auto allowance_free = [&](const Band& band, int64_t track, int64_t lo, int64_t hi, int net, Destinations destinations) {
+    if (d.opt.paired_pin_reserve && track >= 0) {
+      // Enforce the represented physical universe even on transit-only tiles and upper H/V layers.
+      const auto& catalog    = g.resources.layers.at(size_t(band.layer));
+      const bool  horizontal = g.layers[band.layer].horizontal;
+      const auto  coordinate = g.track_coord(band.layer, track);
+      const int   first      = horizontal ? g.col_of(lo) : g.row_of(lo);
+      const int   last       = horizontal ? g.col_of(hi > lo ? hi - 1 : hi) : g.row_of(hi > lo ? hi - 1 : hi);
+      for (int along = first; along <= last; ++along) {
+        const auto  tile        = size_t(horizontal ? g.tile(along, band.index) : g.tile(band.index, along));
+        const auto& resource    = catalog.tiles.at(tile);
+        const auto& coordinates = catalog.bands.at(resource.band);
+        const auto  at          = std::ranges::lower_bound(coordinates, coordinate);
+        if (resource.whole_band_exclusions || at == coordinates.end() || *at != coordinate) {
+          return false;
+        }
+        const auto index = size_t(at - coordinates.begin());
+        if (std::ranges::any_of(resource.exclusions, [&](const auto& exclusion) { return exclusion.track == index; })) {
+          return false;
+        }
+      }
+    }
+    bool free = true;
+    visit_allowance(band.layer,
+                    band.index,
+                    track,
+                    lo,
+                    hi,
+                    net,
+                    destinations,
+                    [&](size_t id, int64_t coordinate, Allowance_slot slot) {
+                      if (slot != Allowance_slot::foreign) {
+                        free &= slot == Allowance_slot::destination;
+                        return;
+                      }
+                      const auto& reservation  = g.paired_pin_reservations[id];
+                      const auto& used         = band.shadow_view ? allowance[id].shadow_foreign : allowance[id].foreign;
+                      const auto  after        = used.size() + !used.contains(coordinate);
+                      free                    &= reservation.vertical_usable >= allowance[id].required
+                                                 && after <= reservation.vertical_usable - allowance[id].required;
+                    });
+    return free;
+  };
   // per layer and band
   std::vector<std::map<int, Band>> bands(g.layers.size());
   const bool                       shadow_on = d.opt.l5_fallback_shadow;
@@ -600,29 +731,44 @@ void assign_tracks(const Design& d, const Grid& g, Routing& R, unsigned threads)
   const auto                       band_of = [&](int l, int b) -> Band& {
     auto [it, fresh] = bands[l].try_emplace(b);
     if (fresh) {
+      it->second.layer  = l;
+      it->second.index  = b;
       const auto& L     = g.layers[l];
       const auto [a, e] = g.tracks(l, b);
       for (auto t = a; t <= e; ++t) {
         auto&      m = it->second.busy[t];
         const auto x = g.track_coord(l, t);
         if (reservations.selected(L.name, x, x - L.pitch, t - a)) {
-          m.occupy(-1, std::numeric_limits<int64_t>::min() / 2, std::numeric_limits<int64_t>::max() / 2);
+          // An empty reserved track excludes this choice, but has no metal/EOL geometry on adjacent tracks.
+          m.occupy(kReservedOwner, std::numeric_limits<int64_t>::min() / 2, std::numeric_limits<int64_t>::max() / 2);
           it->second.hard[t] = m.all;
-          continue;
         }
+        // Real metal on a reserved track still constrains its neighbors; keep its spans independently.
         for (int oi : g.obstacle_band[l][b]) {
           const auto&  r  = g.obstacles[l][oi];
           const double c0 = L.horizontal ? r.yl : r.xl, c1 = L.horizontal ? r.yh : r.xh;
           if (x > c0 - L.pitch / 2.0 - L.width && x < c1 + L.pitch / 2.0 + L.width) {
             const auto lo = int64_t(L.horizontal ? r.xl : r.yl), hi = int64_t(L.horizontal ? r.xh : r.yh);
-            m.occupy(-1, lo, hi);
+            m.occupy(kObstacleOwner, lo, hi);
             merge_span(it->second.hard[t], lo, hi);
+          }
+        }
+      }
+      if (d.opt.l5_repair_ms && L.horizontal) {
+        for (const auto& [t, track] : it->second.busy) {
+          for (const auto& [owner, spans] : track.owners) {
+            for (const auto& [lo, hi] : spans) {
+              it->second.contributions[t].push_back({owner, lo, hi, 255});
+            }
           }
         }
       }
       if (shadow_on) {  // hard and reserved contributions are in both
         auto& S = shadows[l][b];
         auto& G = ledgers[l][b];
+        S.layer = G.layer = l;
+        S.index = G.index = b;
+        S.shadow_view     = true;
         S.busy = G.busy = it->second.busy;
         S.hard = G.hard = it->second.hard;
         for (const auto& [t, track] : it->second.busy) {
@@ -657,7 +803,7 @@ void assign_tracks(const Design& d, const Grid& g, Routing& R, unsigned threads)
     }
   }
   // per layer: the reach of its spacing rules (end of line included) from a wire edge
-  std::vector<int64_t> keep(g.layers.size());
+  std::vector<int64_t>               keep(g.layers.size());
   std::vector<char>                  ordinary_spacing(g.layers.size(), 0);
   const physical::Signal_metal_rules rules(d.tech, d.fp);
   for (size_t l = 0; l < g.layers.size(); ++l) {
@@ -675,7 +821,7 @@ void assign_tracks(const Design& d, const Grid& g, Routing& R, unsigned threads)
   // Opt-in l5_rule_reach: the end envelope against signal neighbors only scans the track offsets whose edge gap is
   // below Signal_metal_rules::lateral_reach (the largest across-track extent of any rule branch on the layer, every
   // PRL row/length included; a gap equal to a rule distance is legal). A sampled exact-checker scan of nominal pairs
-  // can only widen it (a cross-check, never a narrowing). Hard/reserved neighbors keep the full query-radius reach.
+  // can only widen it (a cross-check, never a narrowing). Physical obstacles keep the full query-radius reach.
   // This bounds straight nominal-width wires only: wider via/pin landings and same-net unions are Final's to check.
   std::vector<int64_t> signal_reach(g.layers.size(), std::numeric_limits<int64_t>::max());
   if (d.opt.l5_rule_reach) {
@@ -739,6 +885,9 @@ void assign_tracks(const Design& d, const Grid& g, Routing& R, unsigned threads)
               }
               // Same-net sharing is only collinear on this track. Parallel shapes still obey line-end rules.
               for (const auto& [owner, m] : it->second.owners) {
+                if (owner == kReservedOwner) {
+                  continue;
+                }
                 auto q = m.upper_bound(a0 - k - ext);
                 if (q != m.begin()) {
                   --q;
@@ -777,15 +926,23 @@ void assign_tracks(const Design& d, const Grid& g, Routing& R, unsigned threads)
           }
           return true;
         };
-  std::vector<std::array<std::atomic<size_t>, 5>> rejects(g.layers.size());
-  const auto pick = [&](Band& B, int l, int64_t lo, int64_t hi, int net, bool critical, int64_t pref, bool telemetry = true)
-      -> std::pair<int64_t, bool> {
+  std::vector<std::array<std::atomic<size_t>, 6>> rejects(g.layers.size());
+  const auto                                      pick = [&](Band&        B,
+                                                             int          l,
+                                                             int64_t      lo,
+                                                             int64_t      hi,
+                                                             int          net,
+                                                             bool         critical,
+                                                             int64_t      pref,
+                                                             bool         telemetry    = true,
+                                                             Destinations destinations = {-1, -1}) -> std::pair<int64_t, bool> {
     const auto&                       L      = g.layers[l];
     const auto                        margin = std::max(L.pitch, keep[l] + 2 * L.width);
     int64_t                           best   = -1;
     std::tuple<int, int64_t, int64_t> key{1 << 30, 0, 0};
     for (auto& [t, m] : B.busy) {
-      if (!free_on(m, lo - margin, hi + margin, net) || !ends_free(B, l, t, lo, hi)) {
+      if (!free_on(m, lo - margin, hi + margin, net) || !ends_free(B, l, t, lo, hi)
+          || !allowance_free(B, t, lo, hi, net, destinations)) {
         continue;
       }
       int     nb   = 0;
@@ -802,8 +959,10 @@ void assign_tracks(const Design& d, const Grid& g, Routing& R, unsigned threads)
       // Collinear sharing with the same net's existing span costs no new track: prefer it first.
       const auto                              mine  = net >= 0 ? m.owners.find(net) : m.owners.end();
       const bool                              share = mine != m.owners.end() && !free_on(mine->second, lo, hi);
+      // Pack legal neighbors before opening a gap: preferring distance three over legal distance two can leave
+      // two empty tracks that the wires' end envelopes prevent later wires from using. This is a packing heuristic.
       const std::tuple<int, int64_t, int64_t> k{share ? -1 : nb * (critical ? 10 : 1),
-                                                -std::min<int64_t>(near, 3),
+                                                std::min<int64_t>(near, 3),
                                                 std::abs(t - pref)};
       if (k < key) {
         key  = k;
@@ -817,22 +976,27 @@ void assign_tracks(const Design& d, const Grid& g, Routing& R, unsigned threads)
       return {-1, false};
     }
     {
-      // telemetry: the most permissive rejection among the band's tracks (0 no track, 1 obstacle on the span,
-      // 2 another net on the span, 3 only the end margin, 4 only a neighbor's line-end rule)
+      // telemetry: the most permissive rejection among the band's tracks (0 no track, 1 obstacle/reserved span,
+      // 2 another net on the span, 3 only the end margin, 4 neighbor spacing, 5 only the destination allowance)
       int cls = 0;
       for (const auto& [t, m] : B.busy) {
-        const auto ob = m.owners.find(-1);
-        const int  c  = ob != m.owners.end() && !free_on(ob->second, lo, hi) ? 1
-                        : !free_on(m, lo, hi, net)                           ? 2
-                        : !free_on(m, lo - margin, hi + margin, net)         ? 3
-                                                                             : 4;
+        const auto ob = B.hard.find(t);
+        const int  c  = ob != B.hard.end() && !free_on(ob->second, lo, hi) ? 1
+                        : !free_on(m, lo, hi, net)                         ? 2
+                        : !free_on(m, lo - margin, hi + margin, net)       ? 3
+                        : !ends_free(B, l, t, lo, hi)                      ? 4
+                        : !allowance_free(B, t, lo, hi, net, destinations) ? 5
+                                                                           : 4;
         cls           = std::max(cls, c);
       }
       ++rejects[size_t(l)][size_t(cls)];
     }
-    // no free track: the least-overlapping one clear of power metal and macros (counted as unassigned)
+    // no free track: the least-overlapping one clear of hard obstacles/reservations (counted as unassigned)
     size_t least = SIZE_MAX;
     for (auto& [t, m] : B.busy) {
+      if (!allowance_free(B, t, lo, hi, net, destinations)) {
+        continue;  // A fallback proposal must not consume another box's promised destination headroom.
+      }
       if (const auto h = B.hard.find(t); h != B.hard.end() && !free_on(h->second, lo - margin, hi + margin)) {
         continue;
       }
@@ -858,25 +1022,59 @@ void assign_tracks(const Design& d, const Grid& g, Routing& R, unsigned threads)
   };
   std::atomic<size_t>                unassigned = 0;
   std::array<std::atomic<size_t>, 6> failures{};  // fixed, riser, vertical, horizontal, jog, IO stub
-  const auto                         occupy = [](Band& B, int64_t t, int64_t lo, int64_t hi, int net, uint8_t state) {
+  const auto                         occupy = [&](Band&        B,
+                                                  int64_t      t,
+                                                  int64_t      lo,
+                                                  int64_t      hi,
+                                                  int          net,
+                                                  uint8_t      state,
+                                                  Destinations destinations = {-1, -1},
+                                                  int          request      = -1) {
     if (t >= 0) {
+      visit_allowance(B.layer, B.index, t, lo, hi, net, destinations, [&](size_t id, int64_t coordinate, Allowance_slot slot) {
+        if (slot != Allowance_slot::foreign) {
+          return;
+        }
+        ++allowance[id].foreign[coordinate];
+        if (state != uint8_t(Track_state::fallback)) {
+          ++allowance[id].shadow_foreign[coordinate];
+        }
+      });
       B.busy[t].occupy(net, lo, hi);
+      if (d.opt.l5_repair_ms && g.layers[B.layer].horizontal) {
+        B.contributions[t].push_back({net, lo, hi, state, request});
+      }
       if (B.ledger) {
         B.ledger->busy[t].occupy(net, lo, hi);
-        B.ledger->contributions[t].push_back({net, lo, hi, state});
+        B.ledger->contributions[t].push_back({net, lo, hi, state, request});
       }
       if (B.shadow && state != uint8_t(Track_state::fallback)) {
         B.shadow->busy[t].occupy(net, lo, hi);
       }
     }
   };
+  const auto occupy_segment = [&](Band& B, int si, int64_t lo, int64_t hi) {
+    const auto& segment = R.segments[si];
+    if (d.opt.l5_repair_ms && g.layers[B.layer].horizontal) {
+      B.requests.push_back({si, segment.net, lo, hi, segment.track, segment.track_state});
+    }
+    occupy(B, segment.track, lo, hi, segment.net, segment.track_state, segment_destinations(segment), si);
+  };
   // l5_fallback_shadow: after a failed pick (before its proposal is inserted), rerun the same predicates on the shadow
   std::mutex shadow_mutex;
-  const auto probe = [&](Band& B, int l, int64_t lo, int64_t hi, int net, bool critical, int64_t pref, const char* kind) {
+  const auto probe = [&](Band&        B,
+                         int          l,
+                         int64_t      lo,
+                         int64_t      hi,
+                         int          net,
+                         bool         critical,
+                         int64_t      pref,
+                         const char*  kind,
+                         Destinations destinations = {-1, -1}) {
     if (!B.shadow) {
       return;
     }
-    const bool  ok            = pick(*B.shadow, l, lo, hi, net, critical, pref, false).second;
+    const bool  ok            = pick(*B.shadow, l, lo, hi, net, critical, pref, false, destinations).second;
     // the same real band: is some track rejected only by the end envelope, would it pass the exact rules, and does
     // the first envelope blocker share an end with the request (coincident provisional ends)
     const auto& L             = g.layers[l];
@@ -916,7 +1114,14 @@ void assign_tracks(const Design& d, const Grid& g, Routing& R, unsigned threads)
     }
   };
   std::map<std::string, int> sampled;
-  const auto sample = [&](Band& B, int l, int64_t lo, int64_t hi, int net, const char* kind, const std::string& ends) {
+  const auto                 sample = [&](Band&              B,
+                                          int                l,
+                                          int64_t            lo,
+                                          int64_t            hi,
+                                          int                net,
+                                          const char*        kind,
+                                          const std::string& ends,
+                                          Destinations       destinations = {-1, -1}) {
     if (!B.ledger || sampled[std::format("{}:{}", g.layers[l].name, kind)]++ >= 6) {
       return;
     }
@@ -961,7 +1166,7 @@ void assign_tracks(const Design& d, const Grid& g, Routing& R, unsigned threads)
           }
           why = std::format("{} t{:+} {} [{},{}] {}", e.rules ? "rules" : "envelope", e.track - t, e.owner, e.a, e.b, states);
         } else {
-          why = "free";
+          why = allowance_free(B, t, lo, hi, net, destinations) ? "free" : "cellbox destination allowance";
         }
       } else if (why.empty()) {
         why = "blocked (merged)";
@@ -971,6 +1176,450 @@ void assign_tracks(const Design& d, const Grid& g, Routing& R, unsigned threads)
     std::lock_guard lock(shadow_mutex);
     R.track_failure_samples.push_back(std::move(out));
   };
+  struct Track_choice {
+    int     layer   = -1;
+    int64_t track   = -1;
+    bool    checked = false;
+  };
+  // Check each compatible layer without inserting failed proposals. The lowest layer remains preferred;
+  // only the final choice is published and occupied, so a failed lower-layer attempt cannot block a retry.
+  const auto choose_direction = [&](bool    horizontal,
+                                    int     band,
+                                    int64_t lo,
+                                    int64_t hi,
+                                    int     net,
+                                    std::optional<int64_t>
+                                                       preferred_coordinate,
+                                    const char*        kind,
+                                    const std::string& ends,
+                                    Destinations       destinations = {-1, -1}) -> Track_choice {
+    Track_choice fallback;
+    for (int l = 0; l < int(g.layers.size()); ++l) {
+      const auto& L = g.layers[l];
+      if (L.horizontal != horizontal) {
+        continue;
+      }
+      auto& B           = band_of(l, band);
+      const auto [a, b] = g.tracks(l, band);
+      const auto pref
+          = preferred_coordinate ? int64_t(std::lround(double(*preferred_coordinate - L.offset) / L.pitch)) : (a + b) / 2;
+      const auto [t, ok] = pick(B, l, lo, hi, net, false, pref, true, destinations);
+      if (ok) {
+        return {l, t, true};
+      }
+      if (fallback.layer < 0) {
+        fallback = {l, t, false};
+      }
+      probe(B, l, lo, hi, net, false, pref, kind, destinations);
+    }
+    if (fallback.layer < 0) {
+      throw std::logic_error("legroute: attachment has no compatible routing layer");
+    }
+    sample(band_of(fallback.layer, band), fallback.layer, lo, hi, net, kind, ends, destinations);
+    return fallback;
+  };
+  std::optional<Clock::time_point>     repair_deadline;
+  std::map<int, Planned_wire_geometry> repair_geometry;
+  // First test stable H endpoint geometry, then search a small closure with the original conservative predicates.
+  // Fixed hops, auxiliary wires and fallback proposals stay immutable. Exhaustion is conditional on that domain.
+  const auto                           repair_horizontal = [&](Band& home, int target, int64_t lo, int64_t hi) {
+    if (!d.opt.l5_repair_ms) {
+      return false;
+    }
+    if (!repair_deadline) {
+      repair_deadline = Clock::now() + std::chrono::milliseconds(std::min(d.opt.l5_repair_ms, 55000u));
+    }
+    ++R.l5_repair_attempts;
+    bool       cutoff   = false;
+    size_t     explored = 0;
+    const auto expired  = [&] {
+      cutoff |= Clock::now() >= *repair_deadline;
+      return cutoff;
+    };
+    const auto unknown = [&] {
+      ++R.l5_repair_unknown;
+      return false;
+    };
+    if (expired() || home.busy.size() > 64) {
+      return unknown();
+    }
+    std::vector<int> candidate_layers{home.layer};
+    bool             exact_layers_complete = true;
+    for (int layer = 0; layer < int(g.layers.size()); ++layer) {
+      if (layer != home.layer && g.layers[layer].horizontal) {
+        candidate_layers.push_back(layer);
+      }
+    }
+    std::stable_sort(candidate_layers.begin() + 1, candidate_layers.end(), [&](int a, int b) {
+      return std::pair{std::abs(a - home.layer), a} < std::pair{std::abs(b - home.layer), b};
+    });
+    // The failed request has not occupied its original band. An alternate H layer changes only the new
+    // piece and its join requirements; its risers and the Plan's tile path remain fixed throughout the trial.
+    for (int candidate_layer : candidate_layers) {
+      auto& B = band_of(candidate_layer, home.index);
+      if (expired()) {
+        return unknown();
+      }
+      if (B.busy.size() > 64) {
+        exact_layers_complete = false;
+        continue;
+      }
+      const auto& layer   = g.layers[B.layer];
+      const auto  margin  = std::max(layer.pitch, keep[B.layer] + 2 * layer.width);
+      // A known H piece has final endpoints already fixed by its two risers. Check its canonical emitted
+      // rectangle, not the longer provisional envelope used by the diagnostic exact-mode probe. This is only
+      // straight-wire allocation: the selected via landing footprints remain an explicit later obligation.
+      auto        profile = repair_geometry.find(B.layer);
+      if (profile == repair_geometry.end()) {
+        profile = repair_geometry.emplace(B.layer, planned_wire_geometry(d.tech, g.dbu, g.die, layer.name)).first;
+      }
+      const auto stable_shape = [&](int segment, int64_t a, int64_t b, int64_t track) -> std::optional<physical::Shape> {
+        const auto& s = R.segments[segment];
+        if (s.clock || !g.layers[s.layer].horizontal || (segment != target && s.layer != B.layer) || s.band != B.index
+            || s.node_lo < 0 || s.node_hi < 0) {
+          return {};
+        }
+        std::array<int64_t, 2> ends;
+        for (int e = 0; e < 2; ++e) {
+          const auto& node = R.trees[s.net].nodes[e ? s.node_hi : s.node_lo];
+          if (node.riser_track < 0
+              || (node.riser_state != uint8_t(Track_state::checked) && node.riser_state != uint8_t(Track_state::prescribed))) {
+            return {};
+          }
+          ends[e] = g.track_coord(node.riser_layer, node.riser_track);
+        }
+        if (std::min(ends[0], ends[1]) != a || std::max(ends[0], ends[1]) != b) {
+          return {};
+        }
+        const auto shape = planned_wire_shape(profile->second, true, a, b, g.track_coord(B.layer, track));
+        // Keep the existing same-track/unknown-background envelope conservative even for minimum-area or
+        // die-edge adjustments. Larger extensions require a separate occupancy model and are not repaired here.
+        if (shape.rect.xl < a - layer.width || shape.rect.xh > b + layer.width || shape.rect.yh - shape.rect.yl != layer.width
+            || !rules.rectangle(shape).legal) {
+          return {};
+        }
+        return shape;
+      };
+      const auto first_track = g.tracks(B.layer, B.index).first;
+      if (stable_shape(target, lo, hi, first_track)) {
+        Band unknown_background;
+        unknown_background.layer = B.layer;
+        unknown_background.index = B.index;
+        unknown_background.hard  = B.hard;
+        struct Known_wire {
+          int             net;
+          int64_t         track;
+          physical::Shape shape;
+        };
+        std::vector<Known_wire> known;
+        size_t                  contribution_count = 0;
+        for (const auto& [track, occupancy] : B.busy) {
+          (void)occupancy;
+          unknown_background.busy.try_emplace(track);
+        }
+        for (const auto& [track, contributions] : B.contributions) {
+          for (const auto& contribution : contributions) {
+            if (expired() || ++contribution_count > 4096) {
+              return unknown();
+            }
+            const auto shape = contribution.request >= 0 && contribution.state == uint8_t(Track_state::checked)
+                                   ? stable_shape(contribution.request, contribution.lo, contribution.hi, track)
+                                   : std::nullopt;
+            if (shape) {
+              known.push_back({contribution.net, track, *shape});
+            } else if (contribution.net != kObstacleOwner || g.obstacles[B.layer].empty()) {
+              unknown_background.busy[track].occupy(contribution.net, contribution.lo, contribution.hi);
+            }
+            // Real fixed-metal rectangles are checked below at their physical coordinates. Their projections onto
+            // neighboring nominal tracks are conservative occupancy, not additional metal with fabricated ends.
+          }
+        }
+        for (const auto& [track, occupancy] : B.busy) {
+          if (expired()) {
+            return unknown();
+          }
+          const auto shape = stable_shape(target, lo, hi, track);
+          if (!shape || !free_on(occupancy, lo - margin, hi + margin, R.segments[target].net)
+              || !ends_free(unknown_background, B.layer, track, lo, hi)
+              || !allowance_free(B, track, lo, hi, R.segments[target].net, segment_destinations(R.segments[target]))) {
+            continue;
+          }
+          bool legal = true;
+          for (const auto& obstacle : g.obstacles[B.layer]) {
+            if (expired()) {
+              return unknown();
+            }
+            if (!rules.spacing(*shape, {layer.name, obstacle}).legal) {
+              legal = false;
+              break;
+            }
+          }
+          if (!legal) {
+            continue;
+          }
+          for (const auto& wire : known) {
+            if (expired()) {
+              return unknown();
+            }
+            if (wire.track == track && wire.net == R.segments[target].net) {
+              continue;  // Existing collinear same-net sharing; parallel same-net pieces still obey spacing.
+            }
+            if (!rules.spacing(*shape, wire.shape).legal) {
+              legal = false;
+              break;
+            }
+          }
+          if (!legal) {
+            continue;
+          }
+          // Prepare every view before publishing. Existing pieces never move or disappear in this branch.
+          const auto net           = R.segments[target].net;
+          const auto state         = uint8_t(Track_state::checked);
+          auto       busy          = B.busy;
+          auto       contributions = B.contributions;
+          auto       requests      = B.requests;
+          busy.at(track).occupy(net, lo, hi);
+          contributions[track].push_back({net, lo, hi, state, target});
+          requests.push_back({target, net, lo, hi, track, state});
+          auto shadow = B.shadow ? B.shadow->busy : std::map<int64_t, Track>{};
+          if (B.shadow) {
+            shadow.at(track).occupy(net, lo, hi);
+          }
+          auto    ledger_busy          = B.ledger ? busy : std::map<int64_t, Track>{};
+          auto    ledger_contributions = B.ledger ? contributions : decltype(contributions){};
+          auto&   wire_only_repairs    = R.track_fallback_shadow["repair:stable_h_wire_only"];
+          size_t* other_layer_repairs  = B.layer != home.layer ? &R.track_fallback_shadow["repair:stable_h_other_layer"] : nullptr;
+          if (expired()) {
+            return unknown();
+          }
+          B.busy.swap(busy);
+          B.contributions.swap(contributions);
+          B.requests.swap(requests);
+          if (B.shadow) {
+            B.shadow->busy.swap(shadow);
+          }
+          if (B.ledger) {
+            B.ledger->busy.swap(ledger_busy);
+            B.ledger->contributions.swap(ledger_contributions);
+          }
+          R.segments[target].layer       = B.layer;
+          R.segments[target].track       = track;
+          R.segments[target].track_state = state;
+          ++R.l5_repair_successes;
+          ++wire_only_repairs;
+          if (other_layer_repairs) {
+            ++*other_layer_repairs;
+          }
+          return true;
+        }
+      }
+    }
+    auto&                      B      = home;
+    const auto&                layer  = g.layers[B.layer];
+    const auto                 margin = std::max(layer.pitch, keep[B.layer] + 2 * layer.width);
+    std::vector<Band::Request> moving{
+        {target, R.segments[target].net, lo, hi, -1, uint8_t(Track_state::checked)}
+    };
+    std::set<int> selected{target};
+    int64_t       left = lo, right = hi;
+    bool          changed = true;
+    while (changed) {
+      changed = false;
+      for (const auto& request : B.requests) {
+        if (expired()) {
+          return unknown();
+        }
+        if (request.state != uint8_t(Track_state::checked) || selected.contains(request.segment) || request.lo >= right + margin
+            || request.hi <= left - margin) {
+          continue;
+        }
+        selected.insert(request.segment);
+        moving.push_back(request);
+        left    = std::min(left, request.lo);
+        right   = std::max(right, request.hi);
+        changed = true;
+        if (moving.size() > 6) {
+          return unknown();
+        }
+      }
+    }
+    // Rebuild from exact contributions: subtracting a merged net span would erase retained same-net pieces.
+    Band base;
+    base.layer = B.layer;
+    base.index = B.index;
+    base.hard  = B.hard;
+    for (const auto& [track, occupancy] : B.busy) {
+      (void)occupancy;
+      base.busy.try_emplace(track);
+    }
+    std::set<int> moving_nets;
+    bool          complete_domain = true;
+    for (const auto& request : moving) {
+      complete_domain &= moving_nets.insert(request.net).second;
+    }
+    for (const auto& [track, entries] : B.contributions) {
+      for (const auto& contribution : entries) {
+        if (expired()) {
+          return unknown();
+        }
+        if (contribution.request < 0 || !selected.contains(contribution.request)) {
+          base.busy[track].occupy(contribution.net, contribution.lo, contribution.hi);
+          complete_domain &= !moving_nets.contains(contribution.net);
+        }
+      }
+    }
+    // Same-net merging can change an endpoint envelope nonmonotonically. Such a search may find a validated
+    // repair, but exhausting its incremental domains is only unknown, never a conditional infeasibility claim.
+    const auto legal = [&](const Band& trial, const Band::Request& request, int64_t track) {
+      return free_on(trial.busy.at(track), request.lo - margin, request.hi + margin, request.net)
+             && ends_free(trial, B.layer, track, request.lo, request.hi)
+             && allowance_free(trial,
+                               track,
+                               request.lo,
+                               request.hi,
+                               request.net,
+                               segment_destinations(R.segments[request.segment]));
+    };
+    std::vector<std::vector<int64_t>> domains(moving.size());
+    const auto [first, last] = g.tracks(B.layer, B.index);
+    const auto preferred     = (first + last) / 2;
+    for (size_t i = 0; i < moving.size(); ++i) {
+      for (const auto& [track, occupancy] : base.busy) {
+        (void)occupancy;
+        if (expired()) {
+          return unknown();
+        }
+        if (legal(base, moving[i], track)) {
+          domains[i].push_back(track);
+        }
+      }
+      std::ranges::stable_sort(domains[i], [&](int64_t a, int64_t b) {
+        return std::tuple{a != moving[i].track, std::abs(a - preferred), a}
+               < std::tuple{b != moving[i].track, std::abs(b - preferred), b};
+      });
+    }
+    std::vector<size_t> order(moving.size());
+    std::iota(order.begin(), order.end(), 0);
+    std::ranges::stable_sort(order, [&](size_t a, size_t b) {
+      return std::pair{domains[a].size(), moving[a].segment} < std::pair{domains[b].size(), moving[b].segment};
+    });
+    Band trial;
+    trial.layer = B.layer;
+    trial.index = B.index;
+    trial.hard  = B.hard;
+    trial.busy  = base.busy;  // shadow/ledger pointers intentionally remain null in every trial
+    std::vector<int64_t> chosen(moving.size(), -1);
+    const auto           search = [&](auto&& self, size_t depth) -> bool {
+      if (expired() || ++explored > 4096) {
+        cutoff = true;
+        return false;
+      }
+      if (depth == order.size()) {
+        for (size_t i = 0; i < moving.size(); ++i) {
+          Band check;
+          check.layer = B.layer;
+          check.index = B.index;
+          check.hard  = B.hard;
+          check.busy  = base.busy;
+          for (size_t j = 0; j < moving.size(); ++j) {
+            if (j != i) {
+              check.busy.at(chosen[j]).occupy(moving[j].net, moving[j].lo, moving[j].hi);
+            }
+          }
+          if (expired() || !legal(check, moving[i], chosen[i])) {
+            return false;
+          }
+        }
+        return true;
+      }
+      const auto  index   = order[depth];
+      const auto& request = moving[index];
+      for (int64_t track : domains[index]) {
+        if (expired()) {
+          return false;
+        }
+        if (!legal(trial, request, track)) {
+          continue;
+        }
+        auto before = trial.busy.at(track);
+        trial.busy.at(track).occupy(request.net, request.lo, request.hi);
+        chosen[index] = track;
+        if (self(self, depth + 1)) {
+          return true;
+        }
+        trial.busy.at(track) = std::move(before);
+        chosen[index]        = -1;
+        if (cutoff) {
+          return false;
+        }
+      }
+      return false;
+    };
+    if (!search(search, 0)) {
+      if (cutoff || !complete_domain || !exact_layers_complete) {
+        return unknown();
+      }
+      ++R.l5_repair_unsat;
+      return false;
+    }
+    auto contributions = B.contributions;
+    for (auto& [track, entries] : contributions) {
+      (void)track;
+      std::erase_if(entries, [&](const auto& entry) { return entry.request >= 0 && selected.contains(entry.request); });
+    }
+    auto requests = B.requests;
+    for (size_t i = 0; i < moving.size(); ++i) {
+      auto request  = moving[i];
+      request.track = chosen[i];
+      contributions[request.track].push_back({request.net, request.lo, request.hi, request.state, request.segment});
+      const auto old = std::ranges::find(requests, request.segment, &Band::Request::segment);
+      if (old == requests.end()) {
+        requests.push_back(request);
+      } else {
+        *old = request;
+      }
+    }
+    std::map<int64_t, Track> rebuilt, shadow;
+    for (const auto& [track, occupancy] : B.busy) {
+      (void)occupancy;
+      rebuilt.try_emplace(track);
+      shadow.try_emplace(track);
+    }
+    for (const auto& [track, entries] : contributions) {
+      for (const auto& entry : entries) {
+        if (expired()) {
+          return unknown();
+        }
+        rebuilt[track].occupy(entry.net, entry.lo, entry.hi);
+        if (entry.state != uint8_t(Track_state::fallback)) {
+          shadow[track].occupy(entry.net, entry.lo, entry.hi);
+        }
+      }
+    }
+    auto ledger_busy          = B.ledger ? rebuilt : std::map<int64_t, Track>{};
+    auto ledger_contributions = B.ledger ? contributions : decltype(contributions){};
+    if (expired()) {
+      return unknown();
+    }
+    // Publish only after the entire proposal passes. All following swaps/primitive assignments are nonthrowing.
+    B.busy.swap(rebuilt);
+    B.contributions.swap(contributions);
+    B.requests.swap(requests);
+    if (B.shadow) {
+      B.shadow->busy.swap(shadow);
+    }
+    if (B.ledger) {
+      B.ledger->busy.swap(ledger_busy);
+      B.ledger->contributions.swap(ledger_contributions);
+    }
+    for (size_t i = 0; i < moving.size(); ++i) {
+      auto& segment       = R.segments[moving[i].segment];
+      segment.track       = chosen[i];
+      segment.track_state = uint8_t(Track_state::checked);
+    }
+    ++R.l5_repair_successes;
+    return true;
+  };
   // phase 1: fixed tracks (virtual pin hops) and the clock spine, every band
   for (auto& s : R.segments) {
     if (s.track < 0 && !s.clock) {
@@ -979,19 +1628,40 @@ void assign_tracks(const Design& d, const Grid& g, Routing& R, unsigned threads)
     auto&      B  = band_of(s.layer, s.band);
     const auto lo = tile_lo(s, s.lo), hi = tile_hi(s, s.hi);
     if (s.track < 0) {
-      const auto [t, ok]
-          = pick(B, s.layer, lo, hi, s.net, true, (g.tracks(s.layer, s.band).first + g.tracks(s.layer, s.band).second) / 2);
+      const auto [t, ok] = pick(B,
+                                s.layer,
+                                lo,
+                                hi,
+                                s.net,
+                                true,
+                                (g.tracks(s.layer, s.band).first + g.tracks(s.layer, s.band).second) / 2,
+                                true,
+                                segment_destinations(s));
       if (!ok) {
-        probe(B, s.layer, lo, hi, s.net, true, (g.tracks(s.layer, s.band).first + g.tracks(s.layer, s.band).second) / 2, "fixed");
+        probe(B,
+              s.layer,
+              lo,
+              hi,
+              s.net,
+              true,
+              (g.tracks(s.layer, s.band).first + g.tracks(s.layer, s.band).second) / 2,
+              "fixed",
+              segment_destinations(s));
       }
       s.track        = t;
       s.track_state  = track_state(ok);
       unassigned    += !ok;
       failures[0]   += !ok;
     } else {
-      s.track_state = uint8_t(Track_state::prescribed);  // a virtual pin hop's fixed track: not checked by pick
+      const bool allowed  = allowance_free(B, s.track, lo, hi, s.net, segment_destinations(s));
+      s.track_state       = allowed ? uint8_t(Track_state::prescribed) : uint8_t(Track_state::fallback);
+      unassigned         += !allowed;
+      failures[0]        += !allowed;  // Prescribed geometry is immutable, but cannot claim a passing allowance.
+      if (!allowed) {
+        sample(B, s.layer, lo, hi, s.net, "fixed", "prescribed", segment_destinations(s));
+      }
     }
-    occupy(B, s.track, lo, hi, s.net, s.track_state);
+    occupy(B, s.track, lo, hi, s.net, s.track_state, segment_destinations(s));
   }
   // a vertical arrival is its node's riser
   const auto set_riser = [&](int si) {
@@ -1015,6 +1685,32 @@ void assign_tracks(const Design& d, const Grid& g, Routing& R, unsigned threads)
   for (int si = 0; si < int(R.segments.size()); ++si) {
     set_riser(si);
   }
+  // Independent risers settle before any horizontal endpoint is bound. Keep the retries sequential so
+  // inserting another layer/band cannot race the parallel vertical-segment pass below.
+  for (const auto& r : risers) {
+    auto&     node = R.trees[r.net].nodes[r.node];
+    const int col = g.col(node.tile), row = g.row(node.tile);
+    int64_t   px = g.cx(col);
+    for (int pi : node.pins) {
+      const auto& p = d.nets[r.net].pins[pi];
+      if (p.term >= 0) {
+        px = std::llround(physical_pin_access(d, g, p).x);
+        break;
+      }
+      if (p.comp >= 0 && pi == node.pins.front()) {
+        px = d.cell[p.comp] >= 0 ? d.fp.components[p.comp].place.x + std::llround(d.macro[p.comp]->width * g.dbu / 2)
+                                 : std::llround(physical_pin_access(d, g, p).x);
+      }
+    }
+    const auto lo = g.bottom(row), hi = lo + g.tile_h;
+    const auto choice  = choose_direction(false, col, lo, hi, r.net, px, "riser", "tile", {node.box, -1});
+    node.riser_layer   = choice.layer;
+    node.riser_track   = choice.track;
+    node.riser_state   = track_state(choice.checked);
+    unassigned        += !choice.checked;
+    failures[1]       += !choice.checked;
+    occupy(band_of(choice.layer, col), choice.track, lo, hi, r.net, node.riser_state, {node.box, -1});
+  }
   std::mutex                                     failed_mutex;
   std::vector<std::tuple<int, int64_t, int64_t>> failed;  // (segment, lo, hi) with no free track on its layer
   // phase 2: vertical segments (whole end tiles), critical and long first, bands in parallel
@@ -1031,64 +1727,14 @@ void assign_tracks(const Design& d, const Grid& g, Routing& R, unsigned threads)
     for (auto& [lb, v] : by_band) {
       band_of(lb.first, lb.second);  // create before the parallel phase (map insertion is not thread safe)
     }
-    if (!horizontal) {
-      for (const auto& r : risers) {
-        band_of(low_v, g.col(R.trees[r.net].nodes[r.node].tile));
-      }
-    }
     std::vector<std::pair<int, int>> keys;
     for (auto& [lb, v] : by_band) {
       keys.push_back(lb);
     }
-    if (!horizontal) {  // bands holding only risers
-      for (const auto& r : risers) {
-        const std::pair<int, int> lb{low_v, g.col(R.trees[r.net].nodes[r.node].tile)};
-        if (!by_band.contains(lb)) {
-          by_band[lb];
-          keys.push_back(lb);
-        }
-      }
-    }
-    std::map<std::pair<int, int>, std::vector<int>> risers_in;
-    if (!horizontal) {
-      for (int k = 0; k < int(risers.size()); ++k) {
-        risers_in[{low_v, g.col(R.trees[risers[k].net].nodes[risers[k].node].tile)}].push_back(k);
-      }
-    }
     parallel(keys.size(), threads, [&](size_t k) {
       const auto [l, b] = keys[k];
       auto& B           = bands[l].at(b);
-      // risers first (short, one tile, near the net's pins)
-      if (const auto it = risers_in.find(keys[k]); it != risers_in.end()) {
-        for (int ri : it->second) {
-          auto&     node = R.trees[risers[ri].net].nodes[risers[ri].node];
-          const int row  = g.row(node.tile);
-          int64_t   px   = g.cx(g.col(node.tile));
-          for (int pi : node.pins) {  // a die IO pin first: its riser lands right at the pin
-            const auto& p = d.nets[risers[ri].net].pins[pi];
-            if (p.term >= 0) {
-              px = std::llround(physical_pin_access(d, g, p).x);
-              break;
-            }
-            if (p.comp >= 0 && pi == node.pins.front()) {
-              px = d.cell[p.comp] >= 0 ? d.fp.components[p.comp].place.x + std::llround(d.macro[p.comp]->width * g.dbu / 2)
-                                       : std::llround(physical_pin_access(d, g, p).x);
-            }
-          }
-          const auto pref    = int64_t(std::lround(double(px - g.layers[l].offset) / g.layers[l].pitch));
-          const auto [t, ok] = pick(B, l, g.bottom(row), g.bottom(row) + g.tile_h, risers[ri].net, false, pref);
-          if (!ok) {
-            probe(B, l, g.bottom(row), g.bottom(row) + g.tile_h, risers[ri].net, false, pref, "riser");
-          }
-          node.riser_layer    = l;
-          node.riser_track    = t;
-          node.riser_state     = track_state(ok);
-          unassigned         += !ok;
-          failures[1]         += !ok;
-          occupy(B, t, g.bottom(row), g.bottom(row) + g.tile_h, risers[ri].net, node.riser_state);
-        }
-      }
-      auto segs = by_band.at(keys[k]);
+      auto  segs        = by_band.at(keys[k]);
       std::ranges::stable_sort(segs, [&](int a, int e) {
         const auto& A = R.segments[a];
         const auto& E = R.segments[e];
@@ -1124,16 +1770,16 @@ void assign_tracks(const Design& d, const Grid& g, Routing& R, unsigned threads)
           }
         }
         const auto mid     = (g.tracks(l, b).first + g.tracks(l, b).second) / 2;
-        const auto [t, ok] = pick(B, l, lo, hi, s.net, s.critical, mid);
+        const auto [t, ok] = pick(B, l, lo, hi, s.net, s.critical, mid, true, segment_destinations(s));
         if (!ok) {  // retried on the other layers of its direction after this pass
-          probe(B, l, lo, hi, s.net, s.critical, mid, "segment_first");
+          probe(B, l, lo, hi, s.net, s.critical, mid, "segment_first", segment_destinations(s));
           std::lock_guard lock(failed_mutex);
           failed.push_back({si, lo, hi});
           continue;
         }
         s.track       = t;
         s.track_state = uint8_t(Track_state::checked);
-        occupy(B, t, lo, hi, s.net, s.track_state);
+        occupy_segment(B, si, lo, hi);
         set_riser(si);
       }
     });
@@ -1153,23 +1799,26 @@ void assign_tracks(const Design& d, const Grid& g, Routing& R, unsigned threads)
       for (int l : others) {
         auto& B            = band_of(l, s.band);
         const auto [a, e]  = g.tracks(l, s.band);
-        const auto [t, ok] = pick(B, l, lo, hi, s.net, s.critical, (a + e) / 2);
+        const auto [t, ok] = pick(B, l, lo, hi, s.net, s.critical, (a + e) / 2, true, segment_destinations(s));
         if (ok) {
           s.layer       = l;
           s.track       = t;
           s.track_state = uint8_t(Track_state::checked);
-          occupy(B, t, lo, hi, s.net, s.track_state);
+          occupy_segment(B, si, lo, hi);
           placed = true;
           break;
         }
-        probe(B, l, lo, hi, s.net, s.critical, (a + e) / 2, "segment_other_layer");
+        probe(B, l, lo, hi, s.net, s.critical, (a + e) / 2, "segment_other_layer", segment_destinations(s));
+      }
+      if (!placed && horizontal && d.opt.l5_repair_ms) {
+        placed = repair_horizontal(band_of(s.layer, s.band), si, lo, hi);
       }
       if (!placed) {
         auto& B            = band_of(s.layer, s.band);
         const auto [a, e]  = g.tracks(s.layer, s.band);
-        const auto [t, ok] = pick(B, s.layer, lo, hi, s.net, s.critical, (a + e) / 2);
+        const auto [t, ok] = pick(B, s.layer, lo, hi, s.net, s.critical, (a + e) / 2, true, segment_destinations(s));
         if (!ok) {
-          probe(B, s.layer, lo, hi, s.net, s.critical, (a + e) / 2, "segment_final");
+          probe(B, s.layer, lo, hi, s.net, s.critical, (a + e) / 2, "segment_final", segment_destinations(s));
           if (B.ledger) {
             std::string ends = "tile";
             if (horizontal) {  // where the exact ends came from: a node riser, a bend partner, or the tile edge
@@ -1185,23 +1834,22 @@ void assign_tracks(const Design& d, const Grid& g, Routing& R, unsigned threads)
                 }
               }
             }
-            sample(B, s.layer, lo, hi, s.net, "segment_final", ends);
+            sample(B, s.layer, lo, hi, s.net, "segment_final", ends, segment_destinations(s));
           }
         }
         s.track                       = t;
         s.track_state                 = track_state(ok);
         unassigned                   += !ok;
         failures[horizontal ? 3 : 2] += !ok;
-        occupy(B, t, lo, hi, s.net, s.track_state);
+        occupy_segment(B, si, lo, hi);
       }
       set_riser(si);
     }
     failed.clear();
   };
   run_phase(false);
-  // a vertical arrival that is not its node's riser joins it through a jog on the lowest horizontal layer inside
-  // the node tile, on a checked track (horizontal segments see it)
-  const int low_h = h_layer(g, 0);
+  // A vertical arrival that is not its node's riser joins it through a checked horizontal jog inside
+  // the node tile. Try the lowest horizontal layer first; subsequent horizontal segments see the chosen jog.
   for (int si = 0; si < int(R.segments.size()); ++si) {
     auto& s = R.segments[si];
     if (g.layers[s.layer].horizontal || s.track < 0) {
@@ -1217,62 +1865,566 @@ void assign_tracks(const Design& d, const Grid& g, Routing& R, unsigned threads)
         continue;
       }
       const int  row = g.row(nd.tile);
-      auto&      B   = band_of(low_h, row);
       const auto xv = g.track_coord(s.layer, s.track), xr = g.track_coord(nd.riser_layer, nd.riser_track);
-      const auto [a, b]   = g.tracks(low_h, row);
-      const auto [t, ok]  = pick(B, low_h, std::min(xv, xr), std::max(xv, xr), s.net, false, (a + b) / 2);
-      if (!ok) {
-        probe(B, low_h, std::min(xv, xr), std::max(xv, xr), s.net, false, (a + b) / 2, "jog");
-        sample(B,
-               low_h,
-               std::min(xv, xr),
-               std::max(xv, xr),
-               s.net,
-               "jog",
-               std::format("seg-{}/riser-{}", state_name(s.track_state), state_name(nd.riser_state)));
-      }
-      unassigned         += !ok;
-      failures[4]        += !ok;
-      occupy(B, t, std::min(xv, xr), std::max(xv, xr), s.net, track_state(ok));
-      (e ? s.jog_hi : s.jog_lo)             = t;
-      (e ? s.jog_hi_state : s.jog_lo_state) = track_state(ok);
+      const auto lo = std::min(xv, xr), hi = std::max(xv, xr);
+      const auto choice = choose_direction(true,
+                                           row,
+                                           lo,
+                                           hi,
+                                           s.net,
+                                           {},
+                                           "jog",
+                                           std::format("seg-{}/riser-{}", state_name(s.track_state), state_name(nd.riser_state)));
+      (e ? s.jog_hi_layer : s.jog_lo_layer)  = choice.layer;
+      (e ? s.jog_hi : s.jog_lo)              = choice.track;
+      (e ? s.jog_hi_state : s.jog_lo_state)  = track_state(choice.checked);
+      unassigned                            += !choice.checked;
+      failures[4]                           += !choice.checked;
+      occupy(band_of(choice.layer, row), choice.track, lo, hi, s.net, track_state(choice.checked));
     }
   }
-  // die IO and fixed-cell pins reach their node's riser along a checked track of the lowest horizontal layer near
-  // the pin (F joins the pin to it with a short vertical piece)
+  // Admit a node's H stub and every IO pin-to-stub V stem together. The shared access/shape helpers define
+  // exactly the geometry materialization emits; selected via landings remain a separate obligation.
+  struct Io_piece {
+    int     layer, band;
+    int64_t track, lo, hi;
+  };
+  struct Io_choice {
+    int                                 layer   = -1;
+    int64_t                             track   = -1;
+    bool                                checked = false;
+    std::vector<Io_piece>               pieces;
+    std::vector<physical::Shape>        shapes;
+    std::map<std::pair<int, int>, Band> trial;
+  };
+  struct Pending_io {
+    int                          net, node, request;
+    std::vector<Io_piece>        pieces;
+    std::vector<physical::Shape> shapes;
+  };
+  std::vector<Pending_io> pending_io;
+  int                     next_io_request = -2;
   for (int n = 0; n < int(R.trees.size()); ++n) {
-    for (auto& nd : R.trees[n].nodes) {
+    for (int node = 0; node < int(R.trees[n].nodes.size()); ++node) {
+      auto& nd = R.trees[n].nodes[node];
       if (nd.riser_track < 0) {
         continue;
       }
+      struct Access {
+        int64_t x, y;
+        int     vertical_layer = -1;
+        bool    terminal       = false;
+      };
+      std::vector<Access> accesses;
+      const auto          xr = g.track_coord(nd.riser_layer, nd.riser_track);
+      int64_t             lo = xr, hi = xr;
+      bool                access_ok = true, terminals_only = true;
       for (int pi : nd.pins) {
         const auto& p = d.nets[n].pins[pi];
         if (p.comp >= 0 && d.cell[p.comp] >= 0) {
           continue;
         }
-        const auto   access = physical_pin_access(d, g, p);
-        const double px = access.x, py = access.y;
-        const int    row = g.row_of(py);
-        auto&        B   = band_of(low_h, row);
-        const auto   xr  = g.track_coord(nd.riser_layer, nd.riser_track);
-        const auto lo = std::min(int64_t(px), xr), hi = std::max(int64_t(px), xr);
-        const auto pref     = int64_t(std::lround((py - g.layers[low_h].offset) / g.layers[low_h].pitch));
-        const auto [t, ok]    = pick(B, low_h, lo, hi, n, false, pref);
-        if (!ok) {
-          probe(B, low_h, lo, hi, n, false, pref, "io_stub");
-          sample(B, low_h, lo, hi, n, "io_stub", std::format("pin/riser-{}", state_name(nd.riser_state)));
+        Access access;
+        if (p.term >= 0) {
+          const auto physical_access = planned_terminal_access(d, g, d.fp.terminals[size_t(p.term)]);
+          if (!physical_access) {
+            access_ok = false;
+            break;
+          }
+          access.x         = physical_access->x;
+          access.y         = physical_access->y;
+          access.terminal  = true;
+          const auto layer = std::ranges::find(g.layers, physical_access->access_layer, &Layer::name);
+          if (layer != g.layers.end() && !layer->horizontal) {
+            access.vertical_layer = int(layer - g.layers.begin());
+          }
+        } else {
+          terminals_only             = false;
+          const auto physical_access = physical_pin_access(d, g, p);
+          access.x                   = std::llround(physical_access.x);
+          access.y                   = std::llround(physical_access.y);
         }
-        unassigned         += !ok;
-        failures[5]        += !ok;
-        occupy(B, t, lo, hi, n, track_state(ok));
-        nd.stub_track = t;
-        nd.stub_state = track_state(ok);
-        break;  // one stub per node: the node's other non-box pins share it
+        lo = std::min(lo, access.x);
+        hi = std::max(hi, access.x);
+        accesses.push_back(access);
+      }
+      if (!access_ok) {
+        nd.stub_layer = -1;
+        nd.stub_track = -1;
+        nd.stub_state = nd.stub_access_state = uint8_t(Track_state::fallback);
+        ++unassigned;
+        ++failures[5];
+        if (shadow_on && sampled["io_stub_access"]++ < 6) {
+          R.track_failure_samples.push_back(std::format("IO stub net {}: no explicit preferred track inside a terminal pin", n));
+        }
+        continue;
+      }
+      if (accesses.empty()) {
+        continue;
+      }
+      const int                row         = g.row_of(accesses.front().y);
+      int                      first_layer = -1;
+      std::optional<Io_choice> selected, fallback;
+      for (int layer = 0; layer < int(g.layers.size()) && !selected; ++layer) {
+        const auto& horizontal = g.layers[layer];
+        if (!horizontal.horizontal) {
+          continue;
+        }
+        if (first_layer < 0) {
+          first_layer = layer;
+        }
+        auto&                hband = band_of(layer, row);
+        std::vector<int64_t> candidates;
+        for (const auto& [track, occupancy] : hband.busy) {
+          (void)occupancy;
+          candidates.push_back(track);
+        }
+        // Short access stems avoid consuming whole pin-side columns merely to compact the H tracks.
+        const auto access_length = [&](int64_t track) {
+          const auto y     = g.track_coord(layer, track);
+          int64_t    total = 0;
+          for (const auto& access : accesses) {
+            total += std::abs(y - access.y);
+          }
+          return total;
+        };
+        std::ranges::stable_sort(candidates, [&](int64_t a, int64_t b) {
+          return std::pair{access_length(a), a} < std::pair{access_length(b), b};
+        });
+        for (int64_t track : candidates) {
+          Io_choice candidate;
+          candidate.layer                          = layer;
+          candidate.track                          = track;
+          bool                                safe = true, legal = true;
+          std::map<size_t, std::set<int64_t>> new_foreign;
+          const auto                          add_piece = [&](const Io_piece& piece) {
+            auto [at, fresh] = candidate.trial.try_emplace({piece.layer, piece.band});
+            auto& trial      = at->second;
+            if (fresh) {
+              const auto& real = band_of(piece.layer, piece.band);
+              trial.layer      = piece.layer;
+              trial.index      = piece.band;
+              trial.busy       = real.busy;
+              trial.hard       = real.hard;  // No shadow or ledger pointers escape into a trial.
+            }
+            const auto occupied = trial.busy.find(piece.track);
+            if (occupied == trial.busy.end()) {
+              safe = false;
+              return;
+            }
+            const auto& metal  = g.layers[piece.layer];
+            const auto  margin = std::max(metal.pitch, keep[piece.layer] + 2 * metal.width);
+            if (const auto hard = trial.hard.find(piece.track);
+                hard != trial.hard.end() && !free_on(hard->second, piece.lo - margin, piece.hi + margin)) {
+              safe = false;
+            }
+            safe &= allowance_free(trial, piece.track, piece.lo, piece.hi, n, {-1, -1});
+            visit_allowance(piece.layer,
+                            piece.band,
+                            piece.track,
+                            piece.lo,
+                            piece.hi,
+                            n,
+                            {-1, -1},
+                            [&](size_t id, int64_t coordinate, Allowance_slot slot) {
+                              if (slot == Allowance_slot::foreign && !allowance[id].foreign.contains(coordinate)) {
+                                new_foreign[id].insert(coordinate);
+                              }
+                            });
+            legal &= free_on(occupied->second, piece.lo - margin, piece.hi + margin, n)
+                     && ends_free(trial, piece.layer, piece.track, piece.lo, piece.hi);
+            occupied->second.occupy(n, piece.lo, piece.hi);
+            candidate.pieces.push_back(piece);
+          };
+          const auto canonical = [&](int l, bool h, int64_t a, int64_t b, int64_t at) {
+            auto profile = repair_geometry.find(l);
+            if (profile == repair_geometry.end()) {
+              profile = repair_geometry.emplace(l, planned_wire_geometry(d.tech, g.dbu, g.die, g.layers[l].name)).first;
+            }
+            return planned_wire_shape(profile->second, h, a, b, at);
+          };
+          const auto y    = g.track_coord(layer, track);
+          int64_t    h_lo = lo, h_hi = hi;
+          for (const auto& access : accesses) {
+            const auto hshape = canonical(layer, true, access.x, xr, y);
+            if (d.opt.l5_repair_ms) {
+              candidate.shapes.push_back(hshape);
+            }
+            safe  &= hshape.rect.yh - hshape.rect.yl == horizontal.width;
+            legal &= g.die.contains(hshape.rect) && rules.rectangle(hshape).legal;
+            // Expand the reserved centerline interval when minimum area extends a short piece beyond the
+            // normal width-sized envelope. The exact emitted footprint always lies inside this reservation.
+            h_lo   = std::min(h_lo, int64_t(std::floor(hshape.rect.xl)) + horizontal.width);
+            h_hi   = std::max(h_hi, int64_t(std::ceil(hshape.rect.xh)) - horizontal.width);
+            if (!access.terminal || access.y == y) {
+              continue;
+            }
+            if (access.vertical_layer < 0) {
+              safe = false;
+              continue;
+            }
+            const auto& vertical = g.layers[access.vertical_layer];
+            if ((access.x - vertical.offset) % vertical.pitch != 0) {
+              safe = false;  // A finite DEF access on another lattice is not a represented Local track.
+              continue;
+            }
+            const auto vtrack = (access.x - vertical.offset) / vertical.pitch;
+            const auto vshape = canonical(access.vertical_layer, false, access.y, y, access.x);
+            if (d.opt.l5_repair_ms) {
+              candidate.shapes.push_back(vshape);
+            }
+            safe            &= vshape.rect.xh - vshape.rect.xl == vertical.width;
+            legal           &= g.die.contains(vshape.rect) && rules.rectangle(vshape).legal;
+            const auto v_lo  = std::min(std::min(access.y, y), int64_t(std::floor(vshape.rect.yl)) + vertical.width);
+            const auto v_hi  = std::max(std::max(access.y, y), int64_t(std::ceil(vshape.rect.yh)) - vertical.width);
+            add_piece({access.vertical_layer, g.col_of(access.x), vtrack, v_lo, v_hi});
+          }
+          add_piece({layer, row, track, h_lo, h_hi});
+          for (const auto& [id, coordinates] : new_foreign) {
+            const auto& reservation = g.paired_pin_reservations[id];
+            safe &= reservation.vertical_usable >= allowance[id].required
+                    && allowance[id].foreign.size() + coordinates.size() <= reservation.vertical_usable - allowance[id].required;
+          }
+          if (!safe) {
+            continue;
+          }
+          candidate.checked = legal;
+          if (legal) {
+            selected = std::move(candidate);
+            break;
+          }
+          if (!fallback) {
+            fallback = std::move(candidate);  // Keep an explicit proposal only if every hard/reserved resource is safe.
+          }
+        }
+      }
+      if (!selected && fallback) {
+        selected = std::move(fallback);
+      }
+      const bool checked    = selected && selected->checked;
+      const auto state      = track_state(checked);
+      const int  io_request = d.opt.l5_repair_ms ? next_io_request-- : -1;
+      if (selected) {
+        struct Commit {
+          Band*                                              real;
+          std::map<int64_t, Track>                           busy, shadow, ledger_busy;
+          std::map<int64_t, std::vector<Band::Contribution>> contributions, ledger_contributions;
+        };
+        std::map<std::pair<int, int>, Commit>                                             commits;
+        std::map<size_t, std::pair<std::map<int64_t, size_t>, std::map<int64_t, size_t>>> foreign;
+        for (auto& [key, trial] : selected->trial) {
+          auto&  real = band_of(key.first, key.second);
+          Commit commit;
+          commit.real          = &real;
+          commit.busy          = std::move(trial.busy);
+          commit.contributions = real.contributions;
+          if (real.shadow) {
+            commit.shadow = real.shadow->busy;
+          }
+          if (real.ledger) {
+            commit.ledger_busy          = commit.busy;
+            commit.ledger_contributions = real.ledger->contributions;
+          }
+          commits.emplace(key, std::move(commit));
+        }
+        for (const auto& piece : selected->pieces) {
+          auto& commit = commits.at({piece.layer, piece.band});
+          if (d.opt.l5_repair_ms && g.layers[piece.layer].horizontal) {
+            commit.contributions[piece.track].push_back({n, piece.lo, piece.hi, state, io_request});
+          }
+          if (commit.real->ledger) {
+            commit.ledger_contributions[piece.track].push_back({n, piece.lo, piece.hi, state, io_request});
+          }
+          if (checked && commit.real->shadow) {
+            commit.shadow[piece.track].occupy(n, piece.lo, piece.hi);
+          }
+          visit_allowance(piece.layer,
+                          piece.band,
+                          piece.track,
+                          piece.lo,
+                          piece.hi,
+                          n,
+                          {-1, -1},
+                          [&](size_t id, int64_t coordinate, Allowance_slot slot) {
+                            if (slot != Allowance_slot::foreign) {
+                              return;
+                            }
+                            auto [at, fresh] = foreign.try_emplace(id);
+                            if (fresh) {
+                              at->second = {allowance[id].foreign, allowance[id].shadow_foreign};
+                            }
+                            ++at->second.first[coordinate];
+                            if (checked) {
+                              ++at->second.second[coordinate];
+                            }
+                          });
+        }
+        // The complete H/V proposal and all accounting views are ready. Publish without allocating or rerouting.
+        for (auto& [key, commit] : commits) {
+          (void)key;
+          commit.real->busy.swap(commit.busy);
+          commit.real->contributions.swap(commit.contributions);
+          if (commit.real->shadow) {
+            commit.real->shadow->busy.swap(commit.shadow);
+          }
+          if (commit.real->ledger) {
+            commit.real->ledger->busy.swap(commit.ledger_busy);
+            commit.real->ledger->contributions.swap(commit.ledger_contributions);
+          }
+        }
+        for (auto& [id, counts] : foreign) {
+          allowance[id].foreign.swap(counts.first);
+          allowance[id].shadow_foreign.swap(counts.second);
+        }
+      }
+      if (d.opt.l5_repair_ms && selected && !checked && terminals_only) {
+        pending_io.push_back({n, node, io_request, std::move(selected->pieces), std::move(selected->shapes)});
+      }
+      nd.stub_layer = selected ? selected->layer : first_layer;
+      nd.stub_track = selected ? selected->track : -1;
+      nd.stub_state = nd.stub_access_state  = state;
+      unassigned                           += !checked;
+      failures[5]                          += !checked;
+      if (!checked && shadow_on && sampled["io_stub_joint"]++ < 6) {
+        R.track_failure_samples.push_back(std::format("IO stub net {}: no jointly checked H stub and V pin access", n));
       }
     }
   }
   run_phase(true);
-  R.unassigned = unassigned;
+  // An early IO stem can meet a whole-tile riser envelope even though the settled riser metal ends well
+  // before it. Recheck only already reserved, immutable H/V proposals, after every non-IO request passed.
+  // This is a metal-only check: no cell access or selected join-via geometry is certified. Clock spines
+  // need the caller's actual Boxes; this narrow signal-only repair deliberately leaves them untouched.
+  if (d.opt.l5_repair_ms && !pending_io.empty()) {
+    if (!repair_deadline) {
+      repair_deadline = Clock::now() + std::chrono::milliseconds(std::min(d.opt.l5_repair_ms, 55000u));
+    }
+    const auto checkpoint = [&] {
+      if (Clock::now() >= *repair_deadline) {
+        throw std::runtime_error("shared Local repair deadline");
+      }
+    };
+    const auto unknown_sample = [&](const std::string& reason) {
+      if (sampled["io_exact_unknown"]++ < 6 && R.track_failure_samples.size() < 64) {
+        R.track_failure_samples.push_back("IO exact recheck unknown: " + reason.substr(0, 256));
+      }
+    };
+    try {
+      checkpoint();
+      size_t nodes = 0;
+      for (const auto& tree : R.trees) {
+        nodes += tree.nodes.size();
+      }
+      // Bound pure materialization, which has no cancellation callback. Other failures can leave omitted
+      // backbone geometry; do not use such an incomplete scene to upgrade an IO proposal.
+      if (!R.spines.empty() || unassigned != pending_io.size() || R.segments.size() > 4096 || d.nets.size() > 4096
+          || nodes > 8192) {
+        throw std::runtime_error("late IO exact scene outside bounded complete signal-backbone domain");
+      }
+      const auto planned = final_planned_geometry(d, g, {}, R);
+      checkpoint();
+      auto work = d.fp;
+      for (auto& net : work.nets) {
+        if (net.use != "POWER" && net.use != "GROUND") {
+          net.wires.clear();
+        }
+      }
+      for (size_t n = 0; n < d.nets.size(); ++n) {
+        checkpoint();
+        const auto& net   = d.nets[n];
+        auto&       frame = work.nets.at(net.frame);
+        if (frame.name.empty()) {
+          throw std::runtime_error("late IO exact scene has an unnamed net");
+        }
+        for (const auto& pin : net.pins) {
+          if (pin.term >= 0) {
+            work.terminals.at(size_t(pin.term)).net = frame.name;
+          }
+        }
+        if (!planned.io_stub_failure[n].empty() && planned.paths[n].empty()) {
+          throw std::runtime_error("late IO exact scene has missing terminal geometry");
+        }
+        if (!net.power) {
+          frame.wires.push_back({"ROUTED", planned.paths[n]});
+        }
+      }
+      auto occupancy = physical::routing_occupancy(d.tech, work, work.dbu, checkpoint);
+      // Region PG may exist only in the Grid rather than the imported floorplan. Include every real
+      // rectangle; duplicate PG in the native index remains a conservative, harmless second check.
+      for (size_t layer = 0; layer < g.obstacles.size(); ++layer) {
+        for (const auto& obstacle : g.obstacles[layer]) {
+          checkpoint();
+          occupancy.insert({
+              {g.layers[layer].name, obstacle},
+              {},
+              false
+          });
+        }
+      }
+      checkpoint();
+      const physical::Signal_metal_rules metal_rules(d.tech, work);
+      for (const auto& pending : pending_io) {
+        checkpoint();
+        ++R.track_fallback_shadow["repair:io_exact_attempts"];
+        bool        legal = true, supported = true;
+        const auto& name = work.nets.at(d.nets[pending.net].frame).name;
+        for (const auto& shape : pending.shapes) {
+          checkpoint();
+          const auto clearance = metal_rules.clearance(shape.layer);
+          if (!clearance) {
+            supported = false;
+            unknown_sample("unsupported metal rules on " + shape.layer + ": " + metal_rules.rectangle(shape).reason);
+            break;
+          }
+          if (!g.die.contains(shape.rect) || !metal_rules.rectangle(shape).legal) {
+            legal = false;
+            break;
+          }
+          for (auto id : occupancy.query(shape.layer, shape.rect, *clearance, name)) {
+            checkpoint();
+            if (!metal_rules.spacing(shape, occupancy.at(id).shape).legal) {
+              legal = false;
+              break;
+            }
+          }
+          if (!legal) {
+            break;
+          }
+        }
+        if (!supported || !legal) {
+          ++R.track_fallback_shadow[supported ? "repair:io_exact_conflicts" : "repair:io_exact_unknown"];
+          continue;
+        }
+        struct Checked_io_commit {
+          Band*                                              real;
+          std::map<int64_t, Track>                           shadow;
+          std::map<int64_t, std::vector<Band::Contribution>> contributions, ledger_contributions;
+        };
+        std::map<std::pair<int, int>, Checked_io_commit> commits;
+        std::map<size_t, std::map<int64_t, size_t>>      shadow_foreign;
+        for (const auto& piece : pending.pieces) {
+          checkpoint();
+          auto& real = band_of(piece.layer, piece.band);
+          if (!allowance_free(real, piece.track, piece.lo, piece.hi, pending.net, {-1, -1})) {
+            legal = false;
+            break;
+          }
+          auto [at, fresh] = commits.try_emplace({piece.layer, piece.band});
+          auto& commit     = at->second;
+          if (fresh) {
+            commit.real          = &real;
+            commit.contributions = real.contributions;
+            if (real.shadow) {
+              commit.shadow = real.shadow->busy;
+            }
+            if (real.ledger) {
+              commit.ledger_contributions = real.ledger->contributions;
+            }
+          }
+          if (real.shadow) {
+            commit.shadow[piece.track].occupy(pending.net, piece.lo, piece.hi);
+          }
+          visit_allowance(piece.layer,
+                          piece.band,
+                          piece.track,
+                          piece.lo,
+                          piece.hi,
+                          pending.net,
+                          {-1, -1},
+                          [&](size_t id, int64_t coordinate, Allowance_slot slot) {
+                            if (slot == Allowance_slot::foreign) {
+                              auto [entry, inserted] = shadow_foreign.try_emplace(id);
+                              if (inserted) {
+                                entry->second = allowance[id].shadow_foreign;
+                              }
+                              ++entry->second[coordinate];
+                            }
+                          });
+        }
+        if (!legal) {
+          ++R.track_fallback_shadow["repair:io_exact_conflicts"];
+          continue;
+        }
+        for (auto& [key, commit] : commits) {
+          (void)key;
+          for (auto* contributions : {&commit.contributions, &commit.ledger_contributions}) {
+            for (auto& [track, pieces] : *contributions) {
+              (void)track;
+              checkpoint();
+              for (auto& piece : pieces) {
+                if (piece.request == pending.request) {
+                  piece.state = uint8_t(Track_state::checked);
+                }
+              }
+            }
+          }
+        }
+        auto samples             = R.track_failure_samples;
+        bool another_failed_node = false;
+        for (size_t node = 0; node < R.trees[pending.net].nodes.size(); ++node) {
+          another_failed_node
+              |= int(node) != pending.node && R.trees[pending.net].nodes[node].stub_state == uint8_t(Track_state::fallback);
+        }
+        if (!another_failed_node) {
+          std::erase(samples, std::format("IO stub net {}: no jointly checked H stub and V pin access", pending.net));
+        }
+        auto& successes = R.track_fallback_shadow["repair:io_exact_wire_only"];
+        checkpoint();
+        // Real busy/foreign and ledger busy already contain these exact accepted H/V reservations. Keep
+        // them intact; publish provenance, checked-only occupancy and both node states in one transaction.
+        for (auto& [key, commit] : commits) {
+          (void)key;
+          commit.real->contributions.swap(commit.contributions);
+          if (commit.real->shadow) {
+            commit.real->shadow->busy.swap(commit.shadow);
+          }
+          if (commit.real->ledger) {
+            commit.real->ledger->contributions.swap(commit.ledger_contributions);
+          }
+        }
+        for (auto& [id, counts] : shadow_foreign) {
+          allowance[id].shadow_foreign.swap(counts);
+        }
+        auto& node      = R.trees[pending.net].nodes[pending.node];
+        node.stub_state = node.stub_access_state = uint8_t(Track_state::checked);
+        R.track_failure_samples.swap(samples);
+        --unassigned;
+        --failures[5];
+        ++successes;
+      }
+    } catch (const std::exception& error) {
+      ++R.track_fallback_shadow["repair:io_exact_unknown"];
+      unknown_sample(error.what());
+    }
+  }
+  R.unassigned                    = unassigned;
+  R.paired_allowance_short_tiles  = 0;
+  R.paired_allowance_short_tracks = 0;
+  for (size_t id = 0; id < allowance.size(); ++id) {
+    const auto& reservation          = g.paired_pin_reservations[id];
+    const auto  used                 = allowance[id].foreign.size();
+    const auto  left                 = reservation.vertical_usable > used ? reservation.vertical_usable - used : size_t(0);
+    const auto  missing              = allowance[id].required > left ? allowance[id].required - left : size_t(0);
+    R.paired_allowance_short_tiles  += missing != 0;
+    R.paired_allowance_short_tracks += missing;
+    size_t horizontal_missing        = 0;
+    for (int row = 0; row < 2; ++row) {
+      horizontal_missing += reservation.horizontal_tracks[row] > reservation.horizontal_usable[row]
+                                ? reservation.horizontal_tracks[row] - reservation.horizontal_usable[row]
+                                : 0;
+    }
+    if (reservation.internal_horizontal_estimate) {
+      const auto& catalog    = g.resources.layers.back();
+      const auto& tile       = catalog.tiles.at(size_t(reservation.tile));
+      const auto represented = tile.whole_band_exclusions ? size_t(0) : catalog.bands.at(tile.band).size() - tile.exclusions.size();
+      const auto usable      = represented > tile.anonymous_headroom ? represented - tile.anonymous_headroom : size_t(0);
+      const auto internal_missing
+          = reservation.internal_horizontal_estimate > usable ? reservation.internal_horizontal_estimate - usable : size_t(0);
+      horizontal_missing = std::max(horizontal_missing, internal_missing);
+    }
+    R.paired_allowance_short_tiles  += horizontal_missing != 0;
+    R.paired_allowance_short_tracks += horizontal_missing;
+  }
   if (shadow_on) {  // the ledger must reproduce the real occupancy exactly (every occupy call went through it)
     size_t bands_checked = 0, mismatched = 0;
     for (size_t l = 0; l < bands.size(); ++l) {
@@ -1295,7 +2447,12 @@ void assign_tracks(const Design& d, const Grid& g, Routing& R, unsigned threads)
   }
   // failed pick attempts by the deepest filter any candidate reached (not final segments: one segment can be
   // rejected on several layers and still be rescued)
-  const std::array<const char*, 5> classes{"no_track", "hard_or_reserved", "other_net", "end_margin", "neighbor_spacing"};
+  const std::array<const char*, 6> classes{"no_track",
+                                           "hard_or_reserved",
+                                           "other_net",
+                                           "end_margin",
+                                           "neighbor_spacing",
+                                           "cellbox_allowance"};
   for (size_t l = 0; l < g.layers.size(); ++l) {
     for (size_t c = 0; c < classes.size(); ++c) {
       if (const auto n = rejects[l][c].load()) {

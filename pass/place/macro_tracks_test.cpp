@@ -74,6 +74,27 @@ TEST(Placement, MacroTrackAlignmentUsesOrientedPinsAndImportedTrackPhase) {
   }
 }
 
+// Track alignment never leaves two macro bodies closer than the macro channel, even with zero halos.
+TEST(Placement, MacroTrackAlignmentKeepsTheMacroChannel) {
+  const auto [tech, fp] = track_fixture();
+  for (const int64_t channel : {0, 5}) {
+    auto right    = track_macro();
+    right.name    = "ram1";
+    right.place.x = 30 + 11;  // abutting on the right
+    std::vector<physical::Component> cells{track_macro(), right};
+    legalize_macro_tracks(tech, fp, cells, 0, 0, true, channel, channel);
+    const auto& a     = cells[0].place;
+    const auto& b     = cells[1].place;
+    const auto  gap_x = std::max(b.x - (a.x + a.width), a.x - (b.x + b.width));
+    const auto  gap_y = std::max(b.y - (a.y + a.height), a.y - (b.y + b.height));
+    EXPECT_GE(std::max(gap_x, gap_y), channel) << gap_x << ' ' << gap_y;
+    if (channel) {
+      // Exact clearance on the track lattice: at most one track period (4 in x, 6 in y) beyond the channel.
+      EXPECT_TRUE((gap_x >= channel && gap_x < channel + 4) || (gap_y >= channel && gap_y < channel + 6)) << gap_x << ' ' << gap_y;
+    }
+  }
+}
+
 TEST(Placement, VirtualMemoryTrackAlignmentPreservesExplicitFixedOrigins) {
   auto [tech, fp]                     = track_fixture();
   tech.macros.at("ram").virtual_proxy = true;

@@ -151,6 +151,133 @@ TEST(PlanningSelection, DisabledGuardRetainsRoutingSelectionAndRejectsInvalidLim
   EXPECT_THROW(guard.consider(0, 1, invalid), std::runtime_error);
 }
 
+TEST(PlanningSelection, CriticalRecoveryContinuesRejectedTrialsAndRetainsBestMeasuredSnapshot) {
+  namespace dp = DreamPlace::native;
+  dp::Design d;
+  d.layout       = {0, 0, 80, 40, 1, 1};
+  d.num_movable  = 2;
+  d.node_x       = {10, 40};
+  d.node_y       = {10, 20};
+  d.node_size_x  = {2, 2};
+  d.node_size_y  = {1, 1};
+  d.pin2node     = {0, 1};
+  d.pin_offset_x = d.pin_offset_y = {0, 0};
+  d.flat_net2pin                  = {0, 1};
+  d.flat_net2pin_start            = {0, 2};
+  d.build_maps();
+  dp::Options ctl;
+  ctl.max_iterations = 2;
+  ctl.min_iterations = 0;
+  ctl.num_threads    = 1;
+  ctl.bins_x = ctl.bins_y = 8;
+  ctl.filler_max_count    = 16;
+  ctl.legalize = ctl.detailed_place = false;
+  Placement_session              session;
+  const std::vector<std::string> names{"cell:a", "cell:b"};
+  session.advance(d, ctl, names, "initial", 2);
+  const auto                                 real_widths = d.node_size_x;
+  Planning_selection                         selection(25);
+  std::optional<Placement_session::Snapshot> chosen;
+  const size_t                               scores[] = {5, 9, 3, 0};
+  unsigned                                   measured = 0;
+  for (unsigned round = 0; round <= 3; ++round) {
+    ++measured;
+    if (selection.consider(round, scores[round], feedback(-100))) {
+      chosen = session.snapshot();
+    }
+    const auto stop = selection.recovery_stop_reason(true, 3, scores[round] == 0);
+    if (round == 1) {
+      EXPECT_FALSE(selection.last().accepted);
+      EXPECT_EQ(selection.last().reason, "routing_worse");
+      EXPECT_EQ(selection.selected_round(), 0u);
+      EXPECT_TRUE(stop.empty());
+      EXPECT_EQ(selection.recovery_stop_reason(false, 3, false), "candidate_rejected_routing_worse");
+    }
+    if (!stop.empty()) {
+      EXPECT_EQ(stop, "plan_pass");
+      break;
+    }
+    auto pressured                   = session.snapshot();
+    pressured.optimizer.inflation[0] = 1.5;
+    session.restore(pressured);
+    session.advance(d, ctl, names, "plan_rebalance", 2, {}, false, true);
+    EXPECT_TRUE(session.history().back().routing_inflation_reset);
+    EXPECT_TRUE(session.history().back().density_reset);
+    EXPECT_DOUBLE_EQ(session.snapshot().optimizer.inflation[0], 1);
+    EXPECT_EQ(d.node_size_x, real_widths);
+  }
+  ASSERT_TRUE(chosen);
+  EXPECT_EQ(measured, 4u);
+  EXPECT_EQ(selection.selected_round(), 3u);
+  d = chosen->physical;
+  session.restore(*chosen);
+  EXPECT_EQ(d.node_x, session.snapshot().physical.node_x);
+  EXPECT_EQ(session.spent_iterations(), 8u);
+}
+
+TEST(PlanningSelection, CriticalRetryBudgetAndTimingGuardHaveSeparateOwnership) {
+  Planning_selection selection(25);
+  ASSERT_TRUE(selection.consider(0, 5, feedback(-100)));
+  for (unsigned round = 1; round <= 3; ++round) {
+    EXPECT_FALSE(selection.consider(round, 5 + round, feedback(-100)));
+    EXPECT_EQ(selection.selected_round(), 0u);
+    EXPECT_EQ(selection.recovery_stop_reason(true, 3, false), round < 3 ? "" : "retry_budget_exhausted");
+  }
+  Planning_selection timing(25);
+  ASSERT_TRUE(timing.consider(0, 5, feedback(-100)));
+  EXPECT_FALSE(timing.consider(1, 0, feedback(-200)));
+  EXPECT_EQ(timing.last().reason, "timing_degraded");
+  EXPECT_TRUE(timing.recovery_stop_reason(true, 3, true).empty());
+  EXPECT_TRUE(timing.consider(2, 0, feedback(-110)));
+  EXPECT_EQ(timing.recovery_stop_reason(true, 3, true), "plan_pass");
+}
+
+TEST(PlanningSelection, RawCriticalPlanDefersOnlyMovableCoreLegalization) {
+  namespace ph = physical;
+  ph::Technology tech;
+  tech.dbu   = 1000;
+  auto& site = tech.sites["site"];
+  site.width = site.height = .010;
+  auto& macro              = tech.macros["cell"];
+  macro.klass              = "CORE";
+  macro.width = macro.height = .010;
+  macro.symmetry_x = macro.symmetry_y = true;
+  ph::Floorplan frame;
+  frame.dbu = 1000;
+  frame.die = {0, 0, 100, 40};
+  for (int y = 0; y < 40; y += 10) {
+    frame.rows.push_back({"r" + std::to_string(y), "site", 0, y, 10, 10, ph::Orientation::N});
+  }
+  Ann_place fixed(0, 0, 10, 10);
+  fixed.status = ph::Status::FIXED;
+  Ann_place raw(15, 3, 10, 10);
+  raw.status       = ph::Status::PLACED;
+  raw.orientation  = ph::Orientation::FS;
+  frame.components = {
+      { "fixed", "cell", fixed},
+      {"moving", "cell",   raw}
+  };
+  Options options;
+  options.legroute_plan.enabled               = true;
+  options.legroute_options.critical_cellboxes = true;
+  EXPECT_THROW(check_legality(tech, frame, options), std::runtime_error);
+  EXPECT_NO_THROW(check_critical_plan_frame(tech, frame, options));
+  auto bad                  = frame;
+  bad.components[0].place.x = -1;
+  EXPECT_THROW(check_critical_plan_frame(tech, bad, options), std::runtime_error);
+  bad                       = frame;
+  bad.components[1].place.x = 95;
+  EXPECT_THROW(check_critical_plan_frame(tech, bad, options), std::runtime_error);
+  bad                           = frame;
+  bad.components[1].place.width = 11;
+  EXPECT_THROW(check_critical_plan_frame(tech, bad, options), std::runtime_error);
+  bad = frame;
+  bad.components.push_back({"fixed_overlap", "cell", fixed});
+  EXPECT_THROW(check_critical_plan_frame(tech, bad, options), std::runtime_error);
+  options.legroute_options.critical_cellboxes = false;
+  EXPECT_THROW(check_critical_plan_frame(tech, frame, options), std::invalid_argument);
+}
+
 TEST(PlanningSelection, PowerAwareIoPoseDrivesTimingAndOptimizerRollback) {
   namespace dp = DreamPlace::native;
   namespace ph = physical;

@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstdio>
 #include <exception>
+#include <filesystem>
 #include <format>
 #include <fstream>
 #include <iomanip>
@@ -24,6 +25,7 @@
 #include <tuple>
 #include <unordered_map>
 
+#include "core/json_util.hpp"
 #include "inou/lefdef/cut_rules.hpp"
 #include "inou/lefdef/routing_connectivity.hpp"
 #include "inou/lefdef/routing_geometry.hpp"
@@ -37,6 +39,56 @@
 
 namespace livehd::placement::lr {
 namespace ph = livehd::physical;
+
+Planned_wire_geometry planned_wire_geometry(const ph::Technology& tech, int64_t dbu, const ph::Rect& die,
+                                            const std::string& layer) {
+  Planned_wire_geometry out;
+  const auto&           l     = tech.layers.at(layer);
+  const auto            width = ph::wire_width_dbu(l, dbu);
+  out.layer                   = layer;
+  out.width                   = width ? *width : std::max<int64_t>(2, std::llround(l.width * dbu) / 2 * 2);
+  out.area                    = l.rules.area;
+  out.dbu                     = dbu;
+  out.die                     = die;
+  if (const auto grid = ph::manufacturing_grid_dbu(tech, dbu)) {
+    out.grid = *grid;
+  }
+  return out;
+}
+
+ph::Shape planned_wire_shape(const Planned_wire_geometry& geometry, bool horizontal, int64_t a, int64_t b, int64_t at) {
+  if (a > b) {
+    std::swap(a, b);
+  }
+  const int64_t w   = geometry.width;
+  int64_t       ext = w / 2;
+  // Minimum area: extend symmetrically on the manufacturing grid, exactly as the emitted wire does.
+  if (const double area = geometry.area; area > 0) {
+    const auto need = int64_t(std::ceil(area * double(geometry.dbu) * geometry.dbu / w));
+    if (b - a + 2 * ext < need) {
+      const auto half = (need - (b - a) + 1) / 2;
+      ext             = (half + geometry.grid - 1) / geometry.grid * geometry.grid;
+    }
+  }
+  // An extension past the die grows inward instead.
+  int64_t      lo = a - ext, hi = b + ext;
+  const double dl = horizontal ? geometry.die.xl : geometry.die.yl;
+  const double dh = horizontal ? geometry.die.xh : geometry.die.yh;
+  if (double(hi) > dh) {
+    lo -= hi - int64_t(std::floor(dh));
+    hi  = int64_t(std::floor(dh));
+  }
+  if (double(lo) < dl) {
+    hi += int64_t(std::ceil(dl)) - lo;
+    lo  = int64_t(std::ceil(dl));
+  }
+  return {
+      geometry.layer,
+      horizontal ? ph::Rect{        double(lo), double(at - w / 2),         double(hi), double(at + w / 2)}
+                 : ph::Rect{double(at - w / 2),         double(lo), double(at + w / 2),         double(hi)}
+  };
+}
+
 namespace {
 // Riser x of each (box, net): where the net's metal over the box comes down to the box layer.
 std::vector<std::unordered_map<int, int64_t>> box_risers(const Grid& g, const Boxes& boxes, const Routing& R) {
@@ -61,23 +113,14 @@ std::vector<std::unordered_map<int, int64_t>> box_risers(const Grid& g, const Bo
 
 // The metal stack bottom-up and the via between adjacent metals.
 struct Stack {
-  std::vector<std::string>       metals;
-  std::map<std::string, int>     index;
-  std::map<std::string, int64_t> width;
-  std::map<std::string, double>  area;  // um^2
-  int64_t                        grid = 1, dbu = 1000;
-  ph::Rect                       die{-1e18, -1e18, 1e18, 1e18};
-  Stack(const ph::Technology& tech, int64_t dbu_, const ph::Rect& die_) : dbu(dbu_), die(die_) {
+  std::vector<std::string>                     metals;
+  std::map<std::string, int>                   index;
+  std::map<std::string, Planned_wire_geometry> geometry;
+  Stack(const ph::Technology& tech, int64_t dbu, const ph::Rect& die) {
     metals = tech.routing_layers;
     for (size_t k = 0; k < metals.size(); ++k) {
       index[metals[k]] = int(k);
-      const auto& L    = tech.layers.at(metals[k]);
-      auto        w    = ph::wire_width_dbu(L, dbu);
-      width[metals[k]] = w ? *w : std::max<int64_t>(2, std::llround(L.width * dbu) / 2 * 2);
-      area[metals[k]]  = L.rules.area;
-    }
-    if (const auto gr = ph::manufacturing_grid_dbu(tech, dbu)) {
-      grid = *gr;
+      geometry.emplace(metals[k], planned_wire_geometry(tech, dbu, die, metals[k]));
     }
   }
 };
@@ -91,38 +134,8 @@ struct Geo {
   size_t                      vias = 0;
   explicit Geo(const Stack& s) : st(s) {}
   void wire_on(const std::string& layer, bool horizontal, int64_t a, int64_t b, int64_t at) {
-    if (a > b) {
-      std::swap(a, b);
-    }
-    const int64_t w   = st.width.at(layer);
-    int64_t       ext = w / 2;
-    // minimum area: stretch short pieces symmetrically, on the manufacturing grid
-    if (const double area = st.area.at(layer); area > 0) {
-      const auto need = int64_t(std::ceil(area * double(st.dbu) * st.dbu / w));
-      if (b - a + 2 * ext < need) {
-        const auto half = (need - (b - a) + 1) / 2;  // rounded up, then onto the manufacturing grid
-        ext             = (half + st.grid - 1) / st.grid * st.grid;
-      }
-    }
-    // an extension past the die grows inward instead
-    int64_t      lo = a - ext, hi = b + ext;
-    const double dl = horizontal ? st.die.xl : st.die.yl, dh = horizontal ? st.die.xh : st.die.yh;
-    if (double(hi) > dh) {
-      lo -= hi - int64_t(std::floor(dh));
-      hi  = int64_t(std::floor(dh));
-    }
-    if (double(lo) < dl) {
-      hi += int64_t(std::ceil(dl)) - lo;
-      lo  = int64_t(std::ceil(dl));
-    }
-    ph::Shape s;
-    s.layer = layer;
-    if (horizontal) {
-      s.rect = {double(lo), double(at - w / 2), double(hi), double(at + w / 2)};
-    } else {
-      s.rect = {double(at - w / 2), double(lo), double(at + w / 2), double(hi)};
-    }
-    paths.push_back(ph::flush_wire_path(s, horizontal));
+    const auto shape = planned_wire_shape(st.geometry.at(layer), horizontal, a, b, at);
+    paths.push_back(ph::flush_wire_path(shape, horizontal));
     path_state.push_back(state);
   }
   // a connection between two layers at (x, y): the shared router makes it (vias checked against everything placed)
@@ -210,6 +223,182 @@ std::string Final_cut_state::add(std::span<const ph::Route_path> paths) {
   }
   state_.swap(next);
   return {};
+}
+
+bool write_local_join_probe(const Design& d, const Grid& g, const Final_planned_geometry& planned, const ph::Floorplan& frame,
+                            const ph::Routing_occupancy& base, const std::string& directory, Clock::time_point deadline) {
+  // A failed rerun must never leave a successful witness from an older candidate in this directory.
+  std::filesystem::remove(directory + "/local_backbone_join_probe.def");
+  std::filesystem::remove(directory + "/local_backbone_join_probe.json");
+  struct Result {
+    std::string                   net, reason;
+    size_t                        joins = 0, witnessed = 0;
+    bool                          accepted = false, timed_out = false;
+    std::vector<Signal_route_via> vias;
+  };
+  auto                work      = frame;
+  auto                occupancy = base;
+  const auto          scope     = final_net_scope(d);
+  std::vector<Result> results;
+  size_t              joins_total = 0, joins_witnessed = 0;
+  bool                complete = true;
+  for (size_t n = 0; n < d.nets.size(); ++n) {
+    if (!scope.required[n] || planned.joins[n].empty()) {
+      continue;
+    }
+    auto joins = planned.joins[n];
+    for (auto& [from, to, x, y] : joins) {
+      (void)x;
+      (void)y;
+      if (from > to) {
+        std::swap(from, to);
+      }
+    }
+    std::ranges::sort(joins);
+    joins.erase(std::unique(joins.begin(), joins.end()), joins.end());
+    Result result;
+    result.net    = work.nets.at(d.nets[n].frame).name;
+    result.joins  = joins.size();
+    joins_total  += joins.size();
+    if (!d.profile) {
+      result.reason = "no technology routing profile";
+    } else if (!planned.io_stub_failure[n].empty()) {
+      result.reason = planned.io_stub_failure[n];
+    } else if (Clock::now() >= deadline) {
+      result.reason    = "shared Local diagnostic deadline";
+      result.timed_out = true;
+    } else {
+      // Whole-net transaction: rejected joins leave no new shapes, cuts, width rules or paths in later nets' scene.
+      auto                        trial_frame = work;
+      auto                        trial_occ   = occupancy;
+      Final_cut_state             cuts(d.tech, trial_frame);
+      std::vector<ph::Route_path> added_paths;
+      try {
+        const ph::Signal_metal_rules rules(d.tech, trial_frame);
+        Signal_router                router(d.tech, trial_frame, trial_occ, rules, signal_route_profile(*d.profile, d.tech));
+        auto                         metal = ph::route_geometry(d.tech, trial_frame, trial_frame.nets.at(d.nets[n].frame));
+        for (const auto& [from, to, x, y] : joins) {
+          if (Clock::now() >= deadline) {
+            result.reason    = "shared Local diagnostic deadline";
+            result.timed_out = true;
+            break;
+          }
+          const auto at = [&](const std::string& layer) {
+            std::vector<ph::Shape> found;
+            for (const auto& shape : metal) {
+              if (Clock::now() >= deadline) {
+                result.timed_out = true;
+                return found;
+              }
+              if (shape.layer == layer && shape.rect.xl <= x && shape.rect.xh >= x && shape.rect.yl <= y && shape.rect.yh >= y) {
+                found.push_back(shape);
+              }
+            }
+            // Die IO pins may be one side of a join; movable cell pins are deliberately never routed by this probe.
+            for (const auto& pin : d.nets[n].pins) {
+              if (Clock::now() >= deadline) {
+                result.timed_out = true;
+                return found;
+              }
+              if (pin.term < 0) {
+                continue;
+              }
+              const auto access = planned_terminal_access(d, g, d.fp.terminals[size_t(pin.term)]);
+              if (access && access->shape.layer == layer && access->shape.rect.xl <= x && access->shape.rect.xh >= x
+                  && access->shape.rect.yl <= y && access->shape.rect.yh >= y) {
+                found.push_back(access->shape);
+              }
+            }
+            return found;
+          };
+          auto sources = at(from), anchors = at(to);
+          if (result.timed_out) {
+            result.reason = "shared Local diagnostic deadline";
+            break;
+          }
+          if (sources.empty() || anchors.empty()) {
+            result.reason = std::format("join {}>{} at {},{} has no retained endpoint metal", from, to, x, y);
+            break;
+          }
+          const auto piece_deadline = std::min(deadline, Clock::now() + std::chrono::milliseconds(50));
+          const auto prior          = cuts.vias();
+          auto       proposal
+              = router.propose_join({result.net, {}, {}, "SIGNAL"}, {64, 2048, piece_deadline}, sources, anchors, {}, prior);
+          if (!proposal.geometry) {
+            result.reason    = proposal.reason.empty() ? "no join witness in bounded domain" : proposal.reason;
+            result.timed_out = proposal.timed_out;
+            break;
+          }
+          const auto& geometry = *proposal.geometry;
+          if (auto reason = cuts.add(geometry.paths); !reason.empty()) {
+            result.reason = std::move(reason);
+            break;
+          }
+          apply_signal_route_rules(trial_frame, geometry);
+          ph::Net piece;
+          piece.name = result.net;
+          piece.wires.push_back({"ROUTED", geometry.paths});
+          const auto shapes = ph::route_geometry(d.tech, trial_frame, piece);
+          for (const auto& shape : shapes) {
+            trial_occ.insert({shape, result.net, true});
+          }
+          metal.insert(metal.end(), shapes.begin(), shapes.end());
+          added_paths.insert(added_paths.end(), geometry.paths.begin(), geometry.paths.end());
+          ++result.witnessed;
+        }
+        if (result.witnessed == result.joins && result.reason.empty()) {
+          result.vias = cuts.vias();
+          trial_frame.nets.at(d.nets[n].frame).wires.push_back({"ROUTED", std::move(added_paths)});
+          if (Clock::now() >= deadline) {
+            result.reason    = "shared Local diagnostic deadline";
+            result.timed_out = true;
+            result.vias.clear();
+          } else {
+            work             = std::move(trial_frame);
+            occupancy        = std::move(trial_occ);
+            joins_witnessed += result.joins;
+            result.accepted  = true;
+          }
+        }
+      } catch (const std::exception& error) {
+        result.accepted = false;
+        result.reason   = error.what();
+      }
+    }
+    complete &= result.accepted;
+    results.push_back(std::move(result));
+  }
+  std::ofstream out(directory + "/local_backbone_join_probe.json");
+  out << std::format(R"({{"physical_certificate":false,"scope":"backbone_joins_only_no_cell_pin_taps",)"
+                     R"("all_join_requests_witnessed":{},"joins":{},"accepted_joins":{},"per_join_ms":50,"nets":[)",
+                     complete,
+                     joins_total,
+                     joins_witnessed);
+  for (size_t n = 0; n < results.size(); ++n) {
+    const auto& result = results[n];
+    out << (n ? "," : "")
+        << std::format(R"({{"net":"{}","joins":{},"witnessed_before_rollback":{},"accepted":{},)"
+                       R"("timed_out":{},"reason":"{}","vias":[)",
+                       json_util::escape(result.net),
+                       result.joins,
+                       result.witnessed,
+                       result.accepted,
+                       result.timed_out,
+                       json_util::escape(result.reason));
+    for (size_t v = 0; v < result.vias.size(); ++v) {
+      const auto& via = result.vias[v];
+      out << (v ? "," : "") << std::format(R"(["{}",{},{}])", json_util::escape(via.via.name), via.x, via.y);
+    }
+    out << "]}";
+  }
+  out << "]}\n";
+  if (!out) {
+    throw std::runtime_error("cannot write Local backbone join probe");
+  }
+  if (complete) {
+    ph::write_def(work, directory + "/local_backbone_join_probe.def");
+  }
+  return complete;
 }
 
 void final_place(const Design& d, const Grid& g, const Boxes& boxes, const Routing& R, unsigned threads) {
@@ -404,18 +593,38 @@ void final_place(const Design& d, const Grid& g, const Boxes& boxes, const Routi
   });
 }
 
+std::optional<Planned_terminal_access> planned_terminal_access(const Design& d, const Grid& g, const ph::Terminal& terminal) {
+  const auto vertical = std::ranges::find(g.layers, false, &Layer::horizontal);
+  if (vertical == g.layers.end()) {
+    return {};
+  }
+  const auto grid = ph::manufacturing_grid_dbu(d.tech, d.fp.dbu).value_or(1);
+  for (const auto& shape : terminal.shapes) {
+    if (std::ranges::find(d.tech.routing_layers, shape.layer) == d.tech.routing_layers.end()) {
+      continue;
+    }
+    const auto  rect         = ph::orient_rect(shape.rect, 0, 0, terminal.orientation).translated(terminal.x, terminal.y);
+    const bool  horizontal   = d.tech.layers.at(shape.layer).direction == "HORIZONTAL";
+    const auto& access_layer = horizontal ? vertical->name : shape.layer;
+    const auto  px           = pin_track(d.fp, access_layer, false, rect);
+    const auto  py           = horizontal ? pin_track(d.fp, shape.layer, true, rect)
+                                          : std::optional<int64_t>{snap(std::llround((rect.yl + rect.yh) / 2), grid)};
+    if (px && py && *py >= rect.yl && *py <= rect.yh) {
+      return Planned_terminal_access{
+          {shape.layer, rect},
+          *px,
+          *py,
+          access_layer
+      };
+    }
+  }
+  return {};
+}
+
 Final_planned_geometry final_planned_geometry(const Design& d, const Grid& g, const Boxes& boxes, const Routing& R) {
   (void)boxes;
   const Stack st(d.tech, d.fp.dbu, d.fp.die);
-  const int   low_v = [&] {
-    for (int l = 0; l < int(g.layers.size()); ++l) {
-      if (!g.layers[l].horizontal) {
-        return l;
-      }
-    }
-    return 0;
-  }();
-  const int low_h = [&] {
+  const int   low_h = [&] {
     for (int l = 0; l < int(g.layers.size()); ++l) {
       if (g.layers[l].horizontal) {
         return l;
@@ -492,16 +701,17 @@ Final_planned_geometry final_planned_geometry(const Design& d, const Grid& g, co
             ends[e] = g.cy(g.row(tile));  // the riser itself: it spans the node tile
             rch[node].push_back(ends[e]);
           } else {
-            // the jog L7 put on the lowest horizontal layer of the node tile
+            // The jog uses the horizontal layer L7 selected; old fixtures omit it and retain the lowest-H interpretation.
             const auto jt = e ? s.jog_hi : s.jog_lo;
-            const auto yj = g.track_coord(low_h, jt >= 0 ? jt : g.tracks(low_h, g.row(tile)).first);
+            const int  jl = (e ? s.jog_hi_layer : s.jog_lo_layer) >= 0 ? (e ? s.jog_hi_layer : s.jog_lo_layer) : low_h;
+            const auto yj = g.track_coord(jl, jt >= 0 ? jt : g.tracks(jl, g.row(tile)).first);
             ends[e]       = yj;
             // the recorded provenance, also when the pick failed (track -1, fallback): the default track drawn here is not checked
             geo.state = (e ? s.jog_hi_state : s.jog_lo_state) != uint8_t(Track_state::none) ? (e ? s.jog_hi_state : s.jog_lo_state)
                                                                                             : uint8_t(Track_state::none);
-            geo.wire_on(lname(low_h), true, at, riser_x(node), yj);
-            geo.stack(lname(s.layer), lname(low_h), at, yj);
-            geo.stack(lname(low_h), lname(T.nodes[node].riser_layer), riser_x(node), yj);
+            geo.wire_on(lname(jl), true, at, riser_x(node), yj);
+            geo.stack(lname(s.layer), lname(jl), at, yj);
+            geo.stack(lname(jl), lname(T.nodes[node].riser_layer), riser_x(node), yj);
             rch[node].push_back(yj);
           }
         } else if (const auto p = partner(s, si, k)) {
@@ -533,26 +743,8 @@ Final_planned_geometry final_planned_geometry(const Design& d, const Grid& g, co
         if (p.comp >= 0) {
           continue;
         }
-        std::optional<ph::Shape> s;
-        std::optional<int64_t>   px, py;
-        if (p.term >= 0) {
-          const auto& t = d.fp.terminals[p.term];
-          for (const auto& sh : t.shapes) {
-            if (!st.index.contains(sh.layer)) {
-              continue;
-            }
-            const auto rect       = ph::orient_rect(sh.rect, 0, 0, t.orientation).translated(t.x, t.y);
-            px                    = pin_track(d.fp, lname(low_v), false, rect);
-            const bool horizontal = d.tech.layers.at(sh.layer).direction == "HORIZONTAL";
-            py                    = horizontal ? pin_track(d.fp, sh.layer, true, rect)
-                                               : std::optional<int64_t>{snap(std::llround((rect.yl + rect.yh) / 2), st.grid)};
-            if (px && py && *py >= rect.yl && *py <= rect.yh) {
-              s = ph::Shape{sh.layer, rect};
-              break;
-            }
-          }
-        }
-        if (!s) {
+        const auto access = p.term >= 0 ? planned_terminal_access(d, g, d.fp.terminals[p.term]) : std::nullopt;
+        if (!access) {
           // No partial stub may enter occupancy. The ordinary whole-net router
           // can try a different access topology, with the original pin intact.
           io_stub_failure[n] = "die IO stub: no explicit preferred track inside the pin";
@@ -561,22 +753,29 @@ Final_planned_geometry final_planned_geometry(const Design& d, const Grid& g, co
           geo.path_state.clear();
           return;
         }
+        const auto& s  = access->shape;
+        const auto  px = access->x, py = access->y;
         const auto  rx = riser_x(k);
-        // pin -> lowest vertical layer -> up or down to the stub track (L7) -> across on the lowest horizontal layer
+        // pin -> selected vertical access layer -> up or down to the stub track (L7) -> across on the selected horizontal layer
         // -> the riser
-        const auto  ys = node.stub_track >= 0 ? g.track_coord(low_h, node.stub_track) : *py;
-        const auto& hl = lname(low_h);
-        const auto& vl = lname(low_v);
-        if (ys != *py) {
-          geo.stack(s->layer, vl, *px, *py);
-          geo.state = uint8_t(Track_state::none);  // derived here, never picked by L5 (only the horizontal stub is)
-          geo.wire_on(vl, false, *py, ys, *px);
-          geo.stack(vl, hl, *px, ys);
+        const int   sl = node.stub_layer >= 0 ? node.stub_layer : low_h;
+        const auto  ys = node.stub_track >= 0 ? g.track_coord(sl, node.stub_track) : py;
+        const auto& hl = lname(sl);
+        const auto& vl = access->access_layer;
+        if (node.stub_state == uint8_t(Track_state::fallback)
+            || (ys != py && node.stub_access_state == uint8_t(Track_state::fallback))) {
+          io_stub_failure[n] = "die IO stub: H stub or V pin access remains an unchecked fallback";
+        }
+        if (ys != py) {
+          geo.stack(s.layer, vl, px, py);
+          geo.state = node.stub_access_state;  // Local admits all pin-to-stub vertical pieces together with the H stub.
+          geo.wire_on(vl, false, py, ys, px);
+          geo.stack(vl, hl, px, ys);
         } else {
-          geo.stack(s->layer, hl, *px, ys);  // no vertical piece: the pin joins the stub directly (none if same layer)
+          geo.stack(s.layer, hl, px, ys);  // no vertical piece: the pin joins the stub directly (none if same layer)
         }
         geo.state = node.stub_state;
-        geo.wire_on(hl, true, *px, rx, ys);
+        geo.wire_on(hl, true, px, rx, ys);
         geo.stack(hl, lname(node.riser_layer), rx, ys);
         rch[k].push_back(ys);
       }
@@ -600,8 +799,8 @@ Final_planned_geometry final_planned_geometry(const Design& d, const Grid& g, co
         if (trunk.track < 0) {
           continue;
         }
-        const auto tx  = coord(trunk);
-        int64_t    ylo = INT64_MAX, yhi = INT64_MIN;
+        const auto                           tx  = coord(trunk);
+        int64_t                              ylo = INT64_MAX, yhi = INT64_MIN;
         std::vector<std::pair<int, int64_t>> trunk_joins;  // (rib layer, rib y): made only if the trunk wire exists
         for (int ri : sp->ribs) {
           const auto& rib = R.segments[ri];
@@ -682,6 +881,27 @@ Final_planned_geometry final_planned_geometry(const Design& d, const Grid& g, co
   return out;
 }
 
+Final_net_scope final_net_scope(const Design& d) {
+  Final_net_scope scope;
+  scope.required.resize(d.nets.size());
+  std::optional<std::regex> skip_re;
+  if (!d.opt.final_skip_nets.empty()) {
+    skip_re.emplace(d.opt.final_skip_nets, std::regex::ECMAScript | std::regex::icase);
+  }
+  for (size_t n = 0; n < d.nets.size(); ++n) {
+    const auto& net = d.nets[n];
+    if (!net.requires_final_route()) {
+      continue;
+    }
+    if ((d.opt.final_skip_clock && net.clock) || (skip_re && std::regex_search(d.fp.nets[net.frame].name, *skip_re))) {
+      ++scope.skipped;
+    } else {
+      scope.required[n] = 1;
+    }
+  }
+  return scope;
+}
+
 void final_wires(const Design& d, const Grid& g, const Boxes& boxes, const Routing& R, const Legroute_regions& regions,
                  Legroute_report& rep) {
   // Steiner topologies need the FLUTE tables: a missing runtime file is an experiment/packaging failure, never
@@ -727,32 +947,25 @@ void final_wires(const Design& d, const Grid& g, const Boxes& boxes, const Routi
                  "legroute final: %zu planned paths on L5 fallback tracks not admitted (final_drop_fallback_planned)\n",
                  dropped_fallback);
   }
-  const auto                io_stub_failure = std::move(planned.io_stub_failure);
+  const auto               io_stub_failure = std::move(planned.io_stub_failure);
   // ---- routing with the shared signal router (satlegalize.route) on the placed cells. The global metal goes in
   // first and is checked against the cells, the power grid and each other; then, critical nets first, every box pin
   // of a routed net taps onto its net's metal (the low layers weigh more, so a tap climbs early instead of running
   // over other pins) and every local net is routed whole on the low layers. All or nothing: when any net stays open
   // no signal or clock wire is written, so closure never means a partially connected clock network.
-  const auto               saved_rules = d.fp.nondefault_rules;
+  const auto               saved_rules     = d.fp.nondefault_rules;
   std::vector<std::string> why(d.nets.size());
-  std::vector<char>        job(d.nets.size(), 0);
+  const auto               scope    = final_net_scope(d);
+  const auto&              job      = scope.required;
   const auto               is_local = [&](size_t n) { return n < R.local.size() && R.local[n]; };
   // Opt-in diagnostic: leave clock nets and/or the nets matching final_skip_nets out of Final entirely (no planned
   // metal admitted, no detail, not counted), to measure what the remaining nets can close without them.
-  std::optional<std::regex> skip_re;
-  if (!d.opt.final_skip_nets.empty()) {
-    skip_re.emplace(d.opt.final_skip_nets, std::regex::ECMAScript | std::regex::icase);
-  }
-  size_t skipped = 0;
   for (size_t n = 0; n < d.nets.size(); ++n) {
     const auto& N = d.nets[n];
     // Coarse signal planning excludes clocks; final physical closure must include them, even with spines disabled.
-    job[n]        = N.requires_final_route();
-    if (job[n]) {
+    if (N.requires_final_route()) {
       d.fp.nets[N.frame].wires.clear();
-      if ((d.opt.final_skip_clock && N.clock) || (skip_re && std::regex_search(d.fp.nets[N.frame].name, *skip_re))) {
-        job[n] = 0;
-        ++skipped;
+      if (!job[n]) {
         std::fprintf(stderr,
                      "legroute final: skipping %s%s (diagnostic)\n",
                      d.fp.nets[N.frame].name.c_str(),
@@ -760,7 +973,7 @@ void final_wires(const Design& d, const Grid& g, const Boxes& boxes, const Routi
       }
     }
   }
-  rep.final_skipped_nets = skipped;
+  rep.final_skipped_nets = scope.skipped;
   for (size_t n = 0; n < d.nets.size(); ++n) {
     rep.routed_nets         += job[n];
     rep.clock_required_nets += job[n] && d.nets[n].clock;
@@ -875,7 +1088,7 @@ void final_wires(const Design& d, const Grid& g, const Boxes& boxes, const Routi
     }
     work.special_nets.insert(work.special_nets.end(), regions.power_nets.begin(), regions.power_nets.end());
     work.vias.insert(work.vias.end(), regions.power_vias.begin(), regions.power_vias.end());
-    ph::Routing_occupancy occ = ph::routing_occupancy(d.tech, work, work.dbu);
+    ph::Routing_occupancy      occ = ph::routing_occupancy(d.tech, work, work.dbu);
     const ph::Route_components work_comps(work);  // opt-in precommit connectivity: cell lookup on this pass's frame
     if (regions.power_nets.empty()) {
       for (const auto& sh : regions.obstacles) {
@@ -1123,7 +1336,7 @@ void final_wires(const Design& d, const Grid& g, const Boxes& boxes, const Routi
           return std::string("precommit connectivity: ") + e.what();
         }
       }
-      const auto  esc  = escapes->check(pend.shapes, name);
+      const auto esc = escapes->check(pend.shapes, name);
       if (!esc.legal) {
         return "escape: " + esc.reason;
       }
@@ -1291,9 +1504,9 @@ void final_wires(const Design& d, const Grid& g, const Boxes& boxes, const Routi
           continue;
         }
         Signal_route_request req;
-        req.anchors    = std::move(anchors);
-        req.layer_cost = tap_cost;
-        req.try_hard   = !N.critical;
+        req.anchors           = std::move(anchors);
+        req.layer_cost        = tap_cost;
+        req.try_hard          = !N.critical;
         const size_t tap_from = pend.paths.size();
         if (auto w = piece(n, {fn.name, {{d.fp.components[p.comp].name, std::string(p.name)}}, {}, "SIGNAL"}, req, pend);
             !w.empty()) {

@@ -1112,7 +1112,7 @@ std::vector<Fixed_tree> place_trees(const Design& d, const Legroute_options& o, 
       for (int i = wv[0]; i <= wv[1]; ++i) {
         for (int j = wv[2]; j <= wv[3]; ++j) {
           auto& tp = top[g.tile(i, j)];
-          tp       = {std::max(tp[0], dem_v[b]), std::max(tp[1], dem_h[b])};
+          tp       = {std::max(tp[0], dem_v[b]), std::max(tp[1], std::max(0, dem_h[b] - g.box_cap[g.tile(i, j)]))};
         }
       }
     }
@@ -1137,8 +1137,9 @@ std::vector<Fixed_tree> place_trees(const Design& d, const Legroute_options& o, 
       return e.box < 0 ? e.tile : boxes.boxes[e.box].fixed ? boxes.boxes[e.box].tile : home(e.box);
     };
     for (size_t b = 0; b < boxes.boxes.size(); ++b) {
-      rho_h[size_t(at({int(b), -1}))] += dem_h[b];
-      rho_v[size_t(at({int(b), -1}))] += dem_v[b];
+      const auto tile  = size_t(at({int(b), -1}));
+      rho_h[tile]     += std::max(0, dem_h[b] - g.box_cap[tile]);
+      rho_v[tile]     += dem_v[b];
     }
     for (const auto& E : ends) {
       for (const auto& [r, list] : E.per_region) {
@@ -1253,7 +1254,7 @@ std::vector<Fixed_tree> place_trees(const Design& d, const Legroute_options& o, 
       for (int b : B) {
         if (boxes.boxes[b].fixed) {
           pinned_here.push_back(b);
-          fixed_h[boxes.boxes[b].tile] += dem_h[b];
+          fixed_h[boxes.boxes[b].tile] += std::max(0, dem_h[b] - g.box_cap[boxes.boxes[b].tile]);
           fixed_v[boxes.boxes[b].tile] += dem_v[b];
         }
       }
@@ -1440,7 +1441,7 @@ std::vector<Fixed_tree> place_trees(const Design& d, const Legroute_options& o, 
           if (fixed[i] < 0) {
             moved.push_back(list[i].box);
             at[list[i].box]          = best_tiles[i];
-            add[{best_tiles[i], 1}] += dem_h[list[i].box];
+            add[{best_tiles[i], 1}]  += std::max(0, dem_h[list[i].box] - g.box_cap[best_tiles[i]]);
             add[{best_tiles[i], 0}] += dem_v[list[i].box];
           }
         }
@@ -1608,7 +1609,7 @@ void repair_forced(const Design& d, const Legroute_options& o, const Grid& g, Bo
     for (int b = 0; b < int(boxes.boxes.size()); ++b) {
       if (boxes.boxes[b].fixed) {
         for (int h : {1, 0}) {
-          forced[{boxes.boxes[b].tile, h}] += (h ? dem_h : dem_v)[b];
+          forced[{boxes.boxes[b].tile, h}] += h ? std::max(0, dem_h[b] - g.box_cap[boxes.boxes[b].tile]) : dem_v[b];
           who[{boxes.boxes[b].tile, h}].push_back(b);
         }
       }
@@ -6173,10 +6174,14 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
     rep.fit_matched_boxes = match.applied;
     rep.fit_max_move      = match.max_move;
   }
-  // per box: in-box demand per direction, approximate (refined from legroute.final's results later): taps of the
-  // external pins and the internal nets that leave the box layer
+  // Per box: approximate in-box demand (refined from legroute.final's results later). Horizontal demand first
+  // consumes the destination tile's separate box layer; tree-placement heuristics charge only its excess to
+  // upper-layer transit capacity. Keep it unadjusted here because candidate tiles can have different box capacity.
   std::vector<int> dem_h(boxes.boxes.size(), 0), dem_v(boxes.boxes.size(), 0);
   for (size_t b = 0; b < boxes.boxes.size(); ++b) {
+    if (d.opt.paired_pin_reserve) {
+      continue;  // Exact nominal per-box budgets were already deducted from their physical layers.
+    }
     std::map<int, int> per_net;
     for (int c : boxes.boxes[b].cells) {
       for (int n : d.nets_of[c]) {
@@ -6219,15 +6224,7 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
   }
   // per tile and direction: summed tracks of the routed layers, less the clock spine (a vertical tap and trunk
   // anywhere, a rib every rib_tiles rows)
-  std::vector<int> cap_h(g.size(), 0), cap_v(g.size(), 0);
-  for (size_t l = 0; l < g.layers.size(); ++l) {
-    for (size_t t = 0; t < g.size(); ++t) {
-      (g.layers[l].horizontal ? cap_h : cap_v)[t] += g.cap[l][t];
-    }
-  }
-  for (size_t t = 0; t < g.size(); ++t) {  // no layer is reserved for the boxes: the box layer's tracks are H too
-    cap_h[t] += g.box_cap[t];
-  }
+  auto [cap_h, cap_v] = transit_capacity(g);
   if (d.opt.clock_spine) {  // the same clock budget as planning: the flat floor and the L4 tree estimate
     const auto clock = clock_tree_charge(d, g, &boxes, d.opt.rib_tiles);
     R.clock_reserved_h.clear();
@@ -6295,8 +6292,8 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
     // Existing seed regions may be replaced by a feasible route-driven mesh.
     const bool unfit_only = allow_unfit && gates.unfittable_regions && !gates.oversized_regions && !gates.cell_dense_regions
                             && !gates.routing_dense_edges && !gates.overflow_tracks && !gates.unrouted;
-    const bool blocked    = regions_ready ? gates.requires_replan() && !unfit_only
-                                          : gates.unrouted || gates.routing_dense_edges || gates.overflow_tracks;
+    const bool blocked = regions_ready ? gates.requires_replan() && !unfit_only
+                                       : gates.unrouted || gates.routing_dense_edges || gates.overflow_tracks;
     if (!d.opt.output_dir.empty()) {
       std::filesystem::create_directories(d.opt.output_dir);
       std::ofstream report(d.opt.output_dir + "/pre_sat.json");

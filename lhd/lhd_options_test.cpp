@@ -566,6 +566,12 @@ TEST(LhdOptions, RecommendedSharedDefaults) {
            {                          "synth.place.halo",   "auto"},
            {                 "synth.place.fp.pin_adjust",   "true"},
            {              "synth.place.macro.pin_adjust",   "true"},
+           {               "synth.place.macro.edge_snap",    "off"},
+           {              "synth.place.macro.dead_space",    "off"},
+           {           "synth.place.macro.refine_rounds",      "0"},
+           {                  "synth.place.macro.anchor",  "false"},
+           {   "synth.place.macro.anchor.start_overflow",    "0.3"},
+           {            "synth.place.macro.anchor.swaps",  "false"},
            {            "synth.place.final.timing_start",    "200"},
            {         "synth.place.final.timing_schedule",  "fixed"},
            {                     "synth.place.resize.gp",   "true"},
@@ -594,6 +600,143 @@ TEST(LhdOptions, WarpspaceStagesAreIndependentAndOptIn) {
     const auto found = std::find_if(options.begin(), options.end(), [&](const auto& option) { return option.name == name; });
     ASSERT_NE(found, options.end());
     EXPECT_EQ(found->default_value, "false");
+  }
+}
+
+TEST(LhdOptions, CriticalCellboxOptionsAreTypedAndOptIn) {
+  const auto   listed = lhd::list_set_options();
+  lhd::Options opts;
+  opts.command = "synth";
+  for (const auto& [suffix, value] : std::vector<std::pair<std::string, std::string>>{
+           {      "critical_cellboxes", "false"},
+           {           "cellbox_sites",    "22"},
+           {            "cellbox_rows",     "4"},
+           {   "cellbox_external_pins",    "28"},
+           {     "cellbox_connections",    "10"},
+           {"cellbox_critical_choices",     "4"},
+           {   "cellbox_other_choices",     "8"},
+           { "cellbox_wide_exceptions",  "true"},
+           {    "cellbox_far_fallback", "false"},
+  }) {
+    const auto key = "synth.place.legroute." + suffix;
+    SCOPED_TRACE(key);
+    const auto found = std::find_if(listed.begin(), listed.end(), [&](const auto& option) { return option.name == key; });
+    ASSERT_NE(found, listed.end());
+    EXPECT_EQ(found->default_value, value);
+    opts.sets = {
+        {key, value}
+    };
+    EXPECT_NO_THROW(lhd::check_known_set_passes(opts));
+    const bool boolean = suffix == "critical_cellboxes" || suffix == "cellbox_wide_exceptions" || suffix == "cellbox_far_fallback";
+    for (const auto* bad : {"-1", "1.5", "invalid"}) {
+      opts.sets = {
+          {key, bad}
+      };
+      EXPECT_THROW(lhd::check_known_set_passes(opts), lhd::Lhd_error);
+    }
+    if (boolean) {
+      opts.sets = {
+          {key, "false"}
+      };
+      EXPECT_NO_THROW(lhd::check_known_set_passes(opts));
+      opts.sets = {
+          {key, "true"}
+      };
+      EXPECT_NO_THROW(lhd::check_known_set_passes(opts));
+    }
+  }
+  // Enabling a separate preset must not rewrite the advertised legacy defaults.
+  for (const auto& [key, value] : std::vector<std::pair<std::string, std::string>>{
+           {           "synth.place.legroute.box_reserve", "M2:1,M3:1"},
+           {       "synth.place.legroute.reserved_tracks",         "1"},
+           {"synth.place.legroute.reserved_tracks_per_um",        "-1"},
+           {           "synth.place.legroute.plan.rounds",         "3"},
+  }) {
+    const auto found = std::find_if(listed.begin(), listed.end(), [&](const auto& option) { return option.name == key; });
+    ASSERT_NE(found, listed.end());
+    EXPECT_EQ(found->default_value, value);
+  }
+}
+
+// Macro-placement refinements and area sizing remain opt-in. Sub-options keep their values for explicitly enabled features.
+TEST(LhdOptions, MacroPlacementRefinementsRemainOptIn) {
+  const auto listed = lhd::list_set_options();
+  for (const auto& [key, value] : std::vector<std::pair<std::string, std::string>>{
+           {                    "synth.place.macro.channel",        "auto"},
+           {                  "synth.place.macro.edge_snap",         "off"},
+           {                 "synth.place.macro.dead_space",         "off"},
+           {              "synth.place.macro.refine_rounds",           "0"},
+           {          "synth.place.macro.refine_iterations",          "30"},
+           {                     "synth.place.macro.anchor",       "false"},
+           {              "synth.place.macro.anchor.select", "edge+random"},
+           {         "synth.place.macro.anchor.edge_weight",           "4"},
+           {       "synth.place.macro.anchor.random_weight",           "1"},
+           {     "synth.place.macro.anchor.random_fraction",        "0.25"},
+           {          "synth.place.macro.anchor.edge_chain",        "true"},
+           {           "synth.place.macro.anchor.edge_gate",       "false"},
+           {                "synth.place.macro.anchor.gate",           "1"},
+           {       "synth.place.macro.anchor.spring_length",         "0.1"},
+           {   "synth.place.macro.anchor.target_hysteresis",         "0.5"},
+           {      "synth.place.macro.anchor.start_overflow",         "0.3"},
+           {       "synth.place.macro.anchor.final_targets",        "true"},
+           {               "synth.place.macro.anchor.swaps",       "false"},
+           {           "synth.place.macro.anchor.swap_jump",        "true"},
+           {    "synth.place.macro.anchor.refresh_interval",          "30"},
+           {                "synth.place.macro.anchor.ramp",           "3"},
+           {              "synth.place.macro.anchor.settle",          "20"},
+           {       "synth.place.macro.anchor.max_refreshes",          "40"},
+           {          "synth.place.macro.anchor.milestones",    "0.15,0.1"},
+           {"synth.place.macro.anchor.dead_space_refreshes",           "2"},
+           {                             "synth.place.area",       "fixed"},
+           {                             "synth.place.halo",        "auto"},
+  }) {
+    const auto option = std::find_if(listed.begin(), listed.end(), [&](const auto& o) { return o.name == key; });
+    ASSERT_NE(option, listed.end()) << key;
+    EXPECT_EQ(option->default_value, value) << key;
+  }
+  // Explicit off values and the opt-in combination both remain accepted.
+  lhd::Options opts;
+  opts.command = "synth";
+  opts.sets    = {
+      {    "synth.place.macro.edge_snap",   "off"},
+      {   "synth.place.macro.dead_space",   "off"},
+      {"synth.place.macro.refine_rounds",     "0"},
+      {       "synth.place.macro.anchor", "false"},
+  };
+  EXPECT_NO_THROW(lhd::check_known_set_passes(opts));
+  opts.sets = {
+      {    "synth.place.macro.edge_snap", "auto"},
+      {   "synth.place.macro.dead_space", "auto"},
+      {"synth.place.macro.refine_rounds",    "1"},
+      {       "synth.place.macro.anchor", "true"},
+  };
+  EXPECT_NO_THROW(lhd::check_known_set_passes(opts));
+}
+
+TEST(LhdOptions, MacroAnchorRefreshesAcceptTheDocumentedAlwaysSentinel) {
+  lhd::Options opts;
+  opts.command = "synth";
+  for (const auto* text : {"-1", "0", "2", "1000000"}) {
+    SCOPED_TRACE(text);
+    opts.sets = {
+        {"synth.place.macro.anchor.dead_space_refreshes", text}
+    };
+    EXPECT_NO_THROW(lhd::check_known_set_passes(opts));
+    EXPECT_EQ(lhd::parse_macro_anchor_dead_space_refreshes(text), std::stoi(text));
+  }
+  for (const auto* text : {"-2", "1000001", "2147483648", "", "1.5", "2junk"}) {
+    SCOPED_TRACE(text);
+    EXPECT_THROW(lhd::parse_macro_anchor_dead_space_refreshes(text), lhd::Lhd_error);
+  }
+}
+
+TEST(LhdOptions, MacroAnchorMilestonesRequireCompleteFiniteTokens) {
+  EXPECT_EQ(lhd::parse_macro_anchor_milestones("0.15,0.1"), (std::vector<double>{.15, .1}));
+  EXPECT_EQ(lhd::parse_macro_anchor_milestones("1e-1,0"), (std::vector<double>{.1, 0}));
+  EXPECT_TRUE(lhd::parse_macro_anchor_milestones("").empty());
+  for (const auto* text : {"0.15junk,0.1", "0.15,0.1junk", "0.15,,0.1", ",0.1", "0.15,", "nan", "inf", "1e999"}) {
+    SCOPED_TRACE(text);
+    EXPECT_THROW(lhd::parse_macro_anchor_milestones(text), lhd::Lhd_error);
   }
 }
 

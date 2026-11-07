@@ -17,8 +17,11 @@ struct Options;
 struct RudyResult;
 }  // namespace DreamPlace::native
 namespace livehd::placement {
+// Selects the manifest compiled from pass/place/uroute/pretrained (no files are
+// read at runtime); any other non-empty dir is a project directory.
+inline constexpr std::string_view uroute_pretrained_dir = "@pretrained";
 struct Uroute_options {
-  std::string dir             = "@pretrained";
+  std::string dir             = std::string(uroute_pretrained_dir);
   bool        export_features = true;
   int         shots = 5, min_shots = 1;
   std::string fallback     = "nearest";

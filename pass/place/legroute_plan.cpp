@@ -1,21 +1,128 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include <algorithm>
 #include <cmath>
+#include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <limits>
 #include <numeric>
 #include <optional>
 #include <set>
 
+#include "core/json_util.hpp"
 #include "legroute_internal.hpp"
 
 namespace livehd::placement {
+namespace {
+// Observe the final selected forest, including an accepted box-route seed. The
+// capacity and rounding here match assess_legroute_gates; no route is modified.
+void write_plan_residual_edges(const lr::Design& d, const lr::Grid& g, const lr::Global_routes& routes,
+                               const std::vector<lr::Global_net>& nets, const std::vector<int>& cap_h,
+                               const std::vector<int>& cap_v, const Legroute_plan_report& report) {
+  if (d.opt.output_dir.empty() || !d.opt.l5_fallback_shadow) {
+    return;
+  }
+  struct Edge {
+    int                 a, b, physical_available, admitted;
+    bool                horizontal;
+    size_t              demand;
+    std::vector<size_t> requests;
+  };
+  std::vector<Edge> edges;
+  size_t            overflow_tracks = 0;
+  const double      share           = lr::admission_share(d.opt);
+  if (report.route_attempted) {
+    std::vector<size_t> demand_h(g.size()), demand_v(g.size());
+    for (const auto& tree : routes.trees) {
+      for (const auto& [a, b] : tree.edges) {
+        ++(g.row(a) == g.row(b) ? demand_h : demand_v).at(size_t(std::min(a, b)));
+      }
+    }
+    std::vector<int> edge_h(g.size(), -1), edge_v(g.size(), -1);
+    for (size_t t = 0; t < g.size(); ++t) {
+      for (bool horizontal : {true, false}) {
+        if (horizontal ? g.col(int(t)) + 1 >= g.cols : g.row(int(t)) + 1 >= g.rows) {
+          continue;
+        }
+        const size_t q         = t + (horizontal ? 1 : size_t(g.cols));
+        const auto&  cap       = horizontal ? cap_h : cap_v;
+        const int    available = std::max(0, std::min(cap.at(t), cap.at(q)));
+        const int    admitted  = std::max(0, int(std::floor(share * available)));
+        const size_t demand    = (horizontal ? demand_h : demand_v)[t];
+        if (demand <= size_t(admitted)) {
+          continue;
+        }
+        (horizontal ? edge_h : edge_v)[t] = int(edges.size());
+        edges.push_back({int(t), int(q), available, admitted, horizontal, demand, {}});
+        overflow_tracks += demand - size_t(admitted);
+      }
+    }
+    // Store contributors only for residual edges, not every edge of every net.
+    // Repeated uses remain counted just as they are in the gate's demand.
+    for (size_t n = 0; n < routes.trees.size(); ++n) {
+      for (const auto& [a, b] : routes.trees[n].edges) {
+        const int edge = (g.row(a) == g.row(b) ? edge_h : edge_v).at(size_t(std::min(a, b)));
+        if (edge >= 0) {
+          edges[size_t(edge)].requests.push_back(n);
+        }
+      }
+    }
+  }
+  std::filesystem::create_directories(d.opt.output_dir);
+  const auto    filename = d.opt.output_dir + "/plan_residual_edges.json";
+  std::ofstream out(filename);
+  out << std::boolalpha << std::setprecision(std::numeric_limits<double>::max_digits10)
+      << "{\"schema_version\":1,\"scope\":\"selected_plan_routes\",\"route_attempted\":" << report.route_attempted
+      << ",\"endpoint_basis\":\"" << json_util::escape(report.endpoint_basis)
+      << "\",\"capacity_basis\":\"directional_transit_after_reservations_and_clock_budget\","
+         "\"demand_basis\":\"selected_tree_edge_occurrences\",\"physical_certificate\":false,\"admission_share\":"
+      << share << ",\"density_ceiling\":" << d.opt.density_ceiling << ",\"grid\":{\"cols\":" << g.cols << ",\"rows\":" << g.rows
+      << ",\"x0_dbu\":" << g.x0 << ",\"y0_dbu\":" << g.y0 << ",\"tile_width_dbu\":" << g.tile_w
+      << ",\"tile_height_dbu\":" << g.tile_h << ",\"dbu\":" << g.dbu << "},\"unrouted\":" << routes.unrouted
+      << ",\"search_limited\":" << routes.search_limited << ",\"overflow_edges\":" << edges.size()
+      << ",\"overflow_tracks\":" << overflow_tracks << ",\"route_reported_overflow_edges\":" << routes.overflow_edges
+      << ",\"route_reported_overflow_tracks\":" << routes.overflow_tracks << ",\"edges\":[";
+  for (size_t i = 0; i < edges.size(); ++i) {
+    const auto& edge = edges[i];
+    out << (i ? "," : "") << "{\"tile_a\":" << edge.a << ",\"tile_b\":" << edge.b << ",\"orientation\":\""
+        << (edge.horizontal ? 'H' : 'V') << "\",\"demand\":" << edge.demand
+        << ",\"physical_available_capacity\":" << edge.physical_available << ",\"strict_admitted_capacity\":" << edge.admitted
+        << ",\"overflow\":" << edge.demand - size_t(edge.admitted) << ",\"contributors\":[";
+    for (size_t begin = 0; begin < edge.requests.size();) {
+      const size_t request = edge.requests[begin];
+      size_t       end     = begin + 1;
+      while (end < edge.requests.size() && edge.requests[end] == request) {
+        ++end;
+      }
+      const int   net_index = nets.at(request).net;
+      const auto& net       = d.nets.at(size_t(net_index));
+      out << (begin ? "," : "") << "{\"route_request_index\":" << request << ",\"design_net_index\":" << net_index
+          << ",\"net_index\":" << net.frame << ",\"net_name\":\"" << json_util::escape(d.fp.nets.at(net.frame).name)
+          << "\",\"demand\":" << end - begin << '}';
+      begin = end;
+    }
+    out << "]}";
+  }
+  out << "]}\n";
+  if (!out) {
+    throw std::runtime_error("cannot write legroute planning residual edge report: " + filename);
+  }
+}
+}  // namespace
+
 Legroute_plan_report legroute_plan(const physical::Technology& tech, physical::Floorplan& fp, const timing::Feedback& timing,
                                    const Legroute_options& options, const Legroute_regions& regions,
                                    const physical::Tech_profile* profile, size_t net_pops, bool boxed_handoff,
                                    Legroute_congestion* congestion, bool measure_only) {
   const auto start = lr::Clock::now();
   validate_legroute_options(options);
+  if (options.critical_cellboxes
+      && (options.cellbox_sites != 22 || options.cellbox_rows != 4 || options.legal_boxes || options.paired_pin_reserve
+          || !options.cellbox_critical_choices || options.cellbox_critical_choices > 4 || !options.cellbox_other_choices
+          || options.cellbox_other_choices > 8)) {
+    throw std::invalid_argument(
+        "critical cellboxes require movable 22-site four-row boxes, no paired policy and choices 1..4/1..8");
+  }
   if (boxed_handoff && !options.legal_boxes) {
     throw std::invalid_argument("boxed_handoff diagnostic requires legal_boxes");
   }
@@ -25,11 +132,16 @@ Legroute_plan_report legroute_plan(const physical::Technology& tech, physical::F
   auto resources = regions;
   resources.pins.clear();
   auto      g            = lr::build_grid(d, resources);
+  if (options.critical_cellboxes) {
+    g.regions = 1;
+    g.region.assign(g.size(), 0);
+    return lr::critical_cellbox_plan(d, g, timing, net_pops, congestion);
+  }
   auto      seed_regions = g.region;
   const int seed_count   = g.regions;
   g.regions              = 1;
   g.region.assign(g.size(), 0);
-  const bool           box_endpoints = boxed_handoff || lr::movable_route_partition(options);
+  const bool           box_endpoints = boxed_handoff || lr::movable_route_partition(options) || options.paired_pin_reserve;
   Legroute_plan_report out;
   out.endpoint_basis = box_endpoints ? "box_centroids" : "physical_pins";
   if (congestion) {
@@ -50,6 +162,39 @@ Legroute_plan_report legroute_plan(const physical::Technology& tech, physical::F
   std::optional<lr::Boxes> boxes;
   if (box_endpoints) {
     boxes.emplace(lr::build_boxes(d, g));
+  }
+  if (options.paired_pin_reserve) {
+    lr::resolve_paired_pin_reservations(d, g, *boxes);
+    if (!options.output_dir.empty()) {
+      lr::write_paired_pin_reservations(d, g, options.output_dir + "/plan_paired_pin_reservations.json");
+    }
+    auto supply = lr::paired_pin_supply_gate(d, g);
+    if (supply.requires_replan()) {
+      out.gates             = std::move(supply);
+      out.route_skip_reason = std::ranges::any_of(g.paired_pin_reservations, [](const auto& box) { return box.grouping_invalid; })
+                                  ? Legroute_plan_report::Route_skip_reason::paired_pin_grouping
+                                  : Legroute_plan_report::Route_skip_reason::paired_pin_supply;
+      out.component_pressure.assign(fp.components.size(), 1);
+      out.component_hot_distance.assign(fp.components.size(), std::numeric_limits<unsigned>::max());
+      for (size_t c : out.gates.affected_components) {
+        out.component_pressure[c]     = 1.1;
+        out.component_hot_distance[c] = 0;
+      }
+      for (const auto& net : d.nets) {
+        if (net.routed && !net.clock) {
+          ++out.signals;
+          out.timed_signals += std::isfinite(net.slack);
+        }
+      }
+      out.unchecked_signals   = out.signals;
+      out.hot_tiles           = out.gates.unfittable_boxes;
+      out.tile_width_dbu      = g.tile_w;
+      out.tile_height_dbu     = g.tile_h;
+      out.global_astar_weight = options.global_astar_weight;
+      out.seconds             = lr::seconds_since(start);
+      write_plan_residual_edges(d, g, {}, {}, {}, {}, out);
+      return out;
+    }
   }
   if (!measure_only) {
     // This whole-core area bound is independent of box grouping, placement
@@ -78,6 +223,7 @@ Legroute_plan_report legroute_plan(const physical::Technology& tech, physical::F
       out.tile_height_dbu     = g.tile_h;
       out.global_astar_weight = options.global_astar_weight;
       out.seconds             = lr::seconds_since(start);
+      write_plan_residual_edges(d, g, {}, {}, {}, {}, out);
       return out;
     }
     // The cells must fit at the route's own granularity before the route can mean anything: a coarse window
@@ -202,22 +348,17 @@ Legroute_plan_report legroute_plan(const physical::Technology& tech, physical::F
         out.tile_height_dbu     = g.tile_h;
         out.global_astar_weight = options.global_astar_weight;
         out.seconds             = lr::seconds_since(start);
+        write_plan_residual_edges(d, g, {}, {}, {}, {}, out);
         return out;
       }
     }
   }
-  std::vector<int> cap_h(g.size()), cap_v(g.size());
-  for (size_t l = 0; l < g.layers.size(); ++l) {
-    for (size_t t = 0; t < g.size(); ++t) {
-      (g.layers[l].horizontal ? cap_h : cap_v)[t] += g.cap[l][t];
-    }
-  }
+  auto [cap_h, cap_v] = lr::transit_capacity(g);
   // The clock budget: at least the old flat reservation (a spine track per tile, a rib track every rib_tiles rows), and the tree
   // L4 would build from the boxes where it takes more
-  const auto clock = options.clock_spine ? lr::clock_tree_charge(d, g, boxes ? &*boxes : nullptr, options.rib_tiles)
-                                         : lr::Clock_charge{std::vector<int>(g.size(), 0), std::vector<int>(g.size(), 0)};
+  const auto clock    = options.clock_spine ? lr::clock_tree_charge(d, g, boxes ? &*boxes : nullptr, options.rib_tiles)
+                                            : lr::Clock_charge{std::vector<int>(g.size(), 0), std::vector<int>(g.size(), 0)};
   for (size_t t = 0; t < g.size(); ++t) {
-    cap_h[t] += g.box_cap[t];
     if (options.clock_spine) {
       cap_v[t] -= std::max(1, clock.v[t]);
       cap_h[t] -= std::max(int(g.row(int(t)) % std::max(1u, options.rib_tiles) == 0), clock.h[t]);
@@ -474,6 +615,7 @@ Legroute_plan_report legroute_plan(const physical::Technology& tech, physical::F
   out.topology_disconnected = routes.topology_disconnected;
   out.global_astar_weight   = options.global_astar_weight;
   out.seconds               = lr::seconds_since(start);
+  write_plan_residual_edges(d, g, routes, nets, cap_h, cap_v, out);
   return out;
 }
 

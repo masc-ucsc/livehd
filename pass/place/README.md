@@ -458,6 +458,173 @@ capacity for padded macro occupancy at the target density, so a large halo
 cannot consume the entire frame and strand the standard cells. Explicit
 die/core or imported outlines remain authoritative and may still be infeasible.
 
+`synth.place.macro.channel` is the minimum clear spacing between two macro
+bodies, separate from the halo (as OpenROAD separates `rtl_macro_placer
+-min_channel_size` from the per-macro cell keep-out). `auto` (the default)
+derives it from the technology: the largest minimum metal spacing (plain
+`SPACING`, or the first `SPACINGTABLE` entry) of the routing layers the placed
+macros obstruct, so two macro obstructions stay DRC-clean. Without such a
+spacing it is one manufacturing grid. `X` or `X,Y` microns are honoured exactly,
+rounded up only to the LEF `MANUFACTURINGGRID` (else one DBU), never to a site
+width or row height; for example `0.001` keeps a 0.001 µm gap. Two macros keep
+`max(channel, 2 * halo)` per axis; the halo alone still keeps standard cells
+out. Macro legalization, routing-track and tile snapping, memory-proxy packing,
+padded occupancy for generated cores (half the channel per side when that
+exceeds the halo), cache reuse and the independent legality checks all use the
+same clearance, and QoR records the resolved `macro_channel` in microns and
+DBU. Snapping only accepts origins that keep the channel. With the default
+`halo=auto` the halos already exceed the channel, so placement is unchanged.
+With an explicit `halo=0`, macros previously could touch; the channel now keeps
+them apart. This is a legality fix, not a default change: touching macros were
+never legal. The `tools/physical_repair` JSON config takes `"macro_channel"` as
+a number or `[x, y]`, and its `"halo"` also accepts `[x, y]`.
+
+While macros are still movable, the native solver pads each movable hard macro
+by its *planning pad* per side: the halo, or half the channel rounded down to
+whole sites/rows when that is larger. Macro GP density and the native macro
+legalizer therefore already keep (most of) the channel, and the track alignment
+only opens the sub-site remainder; without it a dense frame of abutting
+macros cannot be opened locally ("no legal macro routing-track alignment").
+A channel below one site/row per side adds no padding, and with the default
+`halo=auto` the halo dominates, so default runs are unchanged. Once the macro
+frame is fixed, only the halo keeps standard cells out: cells (wires, buffers)
+may use the channel in final placement, as OpenROAD's macro channel. The
+planning pad also keeps a movable macro that far from the core edge.
+
+`synth.place.macro.edge_snap` (default `off`) removes slivers between macros
+and the core boundary after native macro legalization (ordinary native macro
+flow; H2D is unaffected). Each movable, ungrouped hard macro is assigned to the
+half of the core holding its center, per axis. Nearest first, it slides toward
+that edge until it meets the core edge (minus its planning pad) or the spacing
+of an object in its path; it moves only when that object is the core edge or a
+macro already anchored to the edge (so a chain of macros packs against the
+boundary, while an interior cluster stays), and only when the clear sliver it
+removes is positive and at most the limit. x is processed first, then y.
+Movement toward the edge never reduces any pairwise clearance; fixed macros and
+fixed non-CORE geometry are obstacles; soft blocks and movable cells are not
+(cells are legalized afterwards). The routing-track alignment then runs as
+usual. Values: `off`; `auto`, one tenth of the core extent per axis (the notch
+threshold of OpenROAD's `rtl_macro_placer`, which also pulls macros to the
+boundary with `-boundary_weight`); or `X` / `X,Y` microns. QoR
+`macro_edge_snap` records the resolved limits, `moved_macros`, `axis_moves`
+and `distance_um` (in the macro stage QoR, `macro/qor.json`, of staged runs).
+`physical_repair` takes `"macro_edge_snap": "auto" | "off" | X | [X, Y]`.
+
+#### Macro dead space (`synth.place.macro.dead_space`)
+
+Macro planning can leave free core area that standard cells cannot use well:
+empty corners, pockets enclosed by macro arrays, and notches between macros or
+along an edge. `synth.place.macro.dead_space` (default `off`: nothing is
+computed and placement is unchanged) measures it and, optionally, collapses it.
+`physical_repair` takes the same text as `"macro_dead_space"`.
+
+*Metric* (`macro_dead_space` in QoR; the macro-stage QoR of staged runs
+measures the planned frame, the final QoR the fixed frame). The core minus the
+hard macro bodies grown by their halo is rasterized on square cells of a whole
+number of placement rows (the fewest rows that keep at most `grid=512` cells
+per axis; NG45 1.4 um rows on a 1436 um core give 4.2 um). A cell is free
+when its center is outside every obstacle; soft blocks and movable cells are
+not obstacles. For each free cell the horizontal and vertical free run through
+it (between obstacles or the core edge) classifies it:
+
+- *channel*: a run no wider than the macro channel plus one pitch. Channels
+  are free and never dead, but they do not connect two free regions.
+- *open*: both runs at least `narrow` (default one tenth of the core extent per
+  axis, the notch threshold of OpenROAD's `rtl_macro_placer`, as `edge_snap=auto`).
+- otherwise *narrow*: a notch or sliver wider than a channel and narrower than
+  `narrow` (between macros, or a macro and the core edge) — **dead (notch)**.
+
+Open cells form 4-connected regions; every other free cell joins the nearest
+region through free cells. A region holding less than `pocket=0.25` of the free
+area (the largest region always stays) is a pocket reached only through
+notches or channels: its non-channel cells are **dead (pocket)**. A connected
+free island (channels included) smaller than `cells=200` average movable
+standard cells (one row height squared each when the design has none) is
+**dead (island)**. QoR records the thresholds, `free_um2`, `dead_um2`,
+`dead_pct` (of the free area), the area per kind, `stranded_um2` (below),
+`count`, `largest`, and the
+64 largest 4-connected dead components with their bounding box and raster
+outline (`rects_um`).
+
+*Collapse* (`auto`, or any `key=value` list without `metric`). In the native
+macro flow it runs after native macro legalization and the edge snap and
+before routing-track alignment (H2D is unaffected). It minimizes the
+*stranded* area (`stranded_um2`): the dead area plus the non-channel area of
+any kept region other than the largest, so a move cannot "remove" a pocket by
+growing it past the pocket fraction. Each round measures the raster and
+evaluates two kinds of moves against the 8 largest dead components:
+
+- *translation*: for every movable hard macro whose face borders such a
+  component (within one channel), translate into it (a) the macro, (b) its
+  aligned line — the macros of equal extent along the move axis chained across
+  it at array spacing (a column for x moves, a row for y moves) — or (c) the
+  block slice behind that line, each as far as legality allows or just across
+  the dead depth. Members move rigidly (internal spacing kept; macros sharing
+  a native group id move together; fixed macros never move).
+- *relocation*: a single movable macro on the rim of the main region (one of
+  its faces sees main open cells within a channel) jumps into a corner of such
+  a component that it fits, packed against the walls there.
+
+Legality is the edge snap's: the planning pad (halo or half the channel) stays
+inside the core and macro pairs keep `max(channel, 2 * pad)`; moves are whole
+manufacturing grids. The move that removes the most stranded area (at least
+four raster cells) is applied — ties prefer a translation toward the group's
+nearest core edge, then less wirelength — and the loop repeats until no move
+improves or `moves=64` moves. A move must keep the wirelength estimate within
+budget: the HPWL of the moved macros' nets at the current global cell
+positions may grow by at most `move_hpwl=0.005` per move and `hpwl=0.02`
+summed over the pass, both as fractions of the initial HPWL of all nets
+touching a movable macro. Track alignment then runs as usual. QoR
+`macro_dead_space.collapse_report` records the first and last stage-internal
+measurement (dead and stranded area), `moves`, `moved_macros`, `distance_um`,
+`hpwl_delta_um` and `candidates`. Dead regions that cannot be closed are only
+reported; they are not turned into cell blockages.
+
+Values: `off`; `metric` (report only, placement byte-identical to `off`);
+`auto` (metric and collapse with the defaults above); or comma separated
+`metric`, `collapse`, `narrow=<um>|auto`, `pocket=<fraction>`, `cells=<N>`,
+`hpwl=<fraction>`, `move_hpwl=<fraction>`, `moves=<N>`, `grid=<cells per axis>`.
+
+#### Macro refine rounds (`synth.place.macro.refine_rounds`, `refine_iterations`)
+
+`synth.place.macro.refine_rounds=R` (default `0`: unchanged) alternates, after
+the native macro-stage GP and its macro legalization hook (edge snap,
+dead-space collapse, routing-track alignment), a short GP burst of
+`synth.place.macro.refine_iterations=K` steps (default 30) with the macros
+movable again, starting from the legalized/snapped/collapsed pose, followed by
+the same macro legalization hook; R times. Cells adapt to the moved macros
+during the burst, so the next legalization, snap and collapse land on an
+updated arrangement; the last round's macros are legal (the hook ends with the
+track alignment's channel/halo/core check). The burst is a warm restart, as
+the legroute area resume: the previous solve's density weight seeds the
+penalty, smoothing starts at its final value, the step is at most 0.05 bin,
+fillers start in the free space and the overflow is held where it is
+(`hold_overflow`). It is not a `GpState` continuation: that would resume the
+optimizer's pre-legalization pose and discard the macro edits. Each round
+re-applies the edge snap and the dead-space collapse (each with its own HPWL
+budget). It runs only in the ordinary native macro flow (no live legroute
+session, no terminal stage). Per round, stderr and QoR `macro_refine.history`
+record GP steps, HPWL, overflow, density weight, the collapse's dead area,
+and the macros moved with their summed displacement. `physical_repair` takes
+`"macro_refine_rounds"` and `"macro_refine_iterations"` (integers).
+
+#### Optional macro planning refinements
+
+The macro edge snap, dead-space collapse, refinement rounds and moving
+anchors remain opt-in. To enable all four explicitly:
+
+```
+--set synth.place.macro.edge_snap=auto --set synth.place.macro.dead_space=auto \
+--set synth.place.macro.refine_rounds=1 --set synth.place.macro.anchor=true
+```
+
+`physical_repair` accepts the equivalent `"macro_edge_snap": "auto"`,
+`"macro_dead_space": "auto"`, `"macro_refine_rounds": 1` and
+`"macro_anchor": true`. Native `Options` and the CLI default to all four
+features off. `macro.channel=auto`, `halo=auto` and `area=fixed` are unchanged.
+Anchor sub-options apply only after enabling anchors; their controls are
+listed below.
+
 `synth.place.cell_halo=H` or `X,Y` optionally selects a separate clearance for
 standard cells around fixed macros during final cell placement and subsequent
 placed-design repair. Its default is empty: inherit `synth.place.halo` exactly.
@@ -1823,7 +1990,8 @@ The pinned DREAMPlace source includes the row-overlap fix for zero-area IO
 points on core edges and the native legalization hooks. Both independent and
 upstream checks remain enabled. Fixes to DREAMPlace belong in `../DREAMPlace`,
 with LiveHD consuming a published commit rather than a local dependency patch.
-FLUTE's lookup tables are runfiles of the standalone binary and test targets.
+FLUTE's lookup tables are compiled into the library (`flute::readLUT_embedded`),
+so `lhd` and the placement tools run without a runfiles tree.
 
 ### Opt-in repulsion and routability experiments
 
@@ -3347,6 +3515,40 @@ using their DEF orientation. Missing, unplaced, duplicate or malformed terminals
 fail explicitly; IO nets are no longer accepted as unchecked. Connectivity is
 separate from the independent detailed DRC check.
 
+## Routability-driven area sizing of a fixed core (place.area)
+
+`synth.place.area=fixed|auto` (physical_repair: `"area": "fixed"|"auto"`; default `fixed`, byte-identical).
+With `auto` an **imported** floorplan (`synth.place.floorplan`, the benchmark DEF that fixes die, core and rows)
+is placed in the smallest sub-rectangle of its core that still routes ("fake die reduction"); the die, the IO
+pins and the output rows stay the real ones. Implementation: `area_fit.{hpp,cpp}`, hooked at the top of
+`place()` (`area_fit_applies`: imported floorplan, fresh full placement; timing seeds, ECO/previous frames,
+restart seeds and the staged final pass never search).
+
+- **Fence**: the region keeps the core aspect ratio, each side rounded up to whole sites/rows and at least the
+  largest macro, centered at the IO-pin centroid (`area.anchor=io`, the default: pins on one die edge pull the
+  region against that edge; `center` uses the core center), slid inside the core and grown over every FIXED
+  component. The rows of the floorplan are clipped to it (`area_fit_fence`), so FP, macro planning, GP and
+  legalization all see the fence as their core; the placement returns with the original rows.
+- **Oracle**: `legroute_plan(..., measure_only=true)` on the legalized placement, over the whole core's
+  tile grid (wires may use the tracks above the trimmed area), physical-pin endpoints, no timing; RUDY
+  (`area.oracle=rudy`, or automatically when legroute throws) as the fallback. A probe routes when
+  `unrouted <= ref + floor` and `overflow_tracks <= ref * (1 + area.overflow_slack) + floor` against the
+  full-core reference probe, `floor = area.overflow_floor * signal nets`. The legroute model has no PG
+  budget when the DEF has none and is pessimistic in absolute terms on NG45 (thousands of overflow tracks
+  on placements ORFS routes): use it relatively.
+- **Search**: probe 0 is the given core (it also measures cell/macro area). The densest candidate is
+  `max(area.min_fraction, (cells / area.max_utilization + macros) / core)`; it is tried first, then the
+  fraction is bisected between the last failure and the smallest routable region, at most `area.probes`
+  placements, stopping when they are `area.tolerance` apart. A probe that throws (macro legalization,
+  FP snap, legalization) counts as not routable. In a probe the GP target density and the legalizer bin
+  cap rise to `cell utilization + .05` / `+ .10` when the user's are lower. The chosen region is placed
+  once more into the caller's library (each placement needs its own library).
+- **Report**: `<output_dir>/area_fit.json` and `qor.area_fit`: core and region (um), area fraction,
+  trimmed area, utilization (total and cell-in-free-space), density used, reference and final route
+  measurements, every probe. `tools/area_fit_route placed.def lef...` runs the same oracle on any DEF.
+- **Generated cores** are sized by `synth.place.utilization` (0: the existing legroute `area_search`
+  bisection); `area=auto` only prints a note there, as for `die/core` frames.
+
 ## Terminal legalization
 
 Terminal legalization is mandatory for the final cell handoff. After GP and enabled sizing/buffer repair, the terminal
@@ -4567,6 +4769,199 @@ Final-cell controls (cell halo, cell jumps, memory transparency, GP A/B search)
 are rejected in this mode. Rebuild row cuts and physical tapcells around the new
 macro positions before preparing a separate fixed-frame final-cell solve.
 
+### Moving macro anchors during macro GP (`synth.place.macro.anchor`, opt-in)
+
+`synth.place.macro.anchor=true` (default `false`; byte-identical when off) turns
+the end-of-plan discrete macro decisions into moving soft anchors inside the
+macro-stage GP, so cells settle around the macros' final positions and the
+final hard pass becomes a correction. It reuses existing machinery:
+
+- **Target generator.** Each refresh copies the current GP snapshot and runs
+  the stage's own end-of-plan macro legalization on the copy: the native
+  macro-only legalizer on the halo/planning-pad padded design, with the macro
+  snap (`macro.snap`) constraints when enabled, then the host
+  `after_macro_legalize` chain (`macro.edge_snap`, routing-track snap, and any
+  later pass added to that chain). The chain receives a `late` flag: only
+  refreshes inside the last `dead_space_refreshes` refresh windows before the
+  GP iteration cap are late, and only late target runs execute expensive
+  passes such as the `macro.dead_space` collapse (slow on IBM-size designs);
+  earlier targets skip them (dead-space QoR counters, like the edge-snap
+  counters, describe only the final pass). `macro.refine_rounds` bursts run
+  after the anchored GP without pulls. The legal macro
+  centers are the targets; nothing is applied to GP and the final hard pass is
+  the same code. Edge-snap counters in QoR describe only the final pass. A
+  failed target run (e.g. no legal track alignment) keeps the previous pulls.
+- **Anchor force.** Targets are the native virtual macro pulls already used by
+  `macro.warpspace` (`macro_pull_update`: optimizer-only absolute centers,
+  preconditioner-compensated, relative to the mean ordinary macro force;
+  momentum restarts at every refresh). Each movable hard macro's weight is
+  `weight / (1 + gate * max(0, g.u) / median|g|)`, where `g` is its HPWL
+  subgradient over its nets (each net weighted `1/(degree-1)`; a macro that is
+  not the strict extreme of a net on an axis feels no pull from it) and `u`
+  points to its target: a macro whose move toward the target lengthens its nets
+  is held more weakly, a macro inside its net boxes is free to follow.
+  `macro.anchor` and `macro.warpspace`/`macro.magnet` are exclusive.
+- **Schedule.** The first refresh happens at GP overflow `start_overflow`
+  (native progress samples, every 20 iterations), then every
+  `refresh_interval` iterations and when overflow crosses each `milestones`
+  value, until fewer than `stable_fraction` of the macros move their target
+  by more than `stable_distance` of their smaller side (and no swap/lock is
+  pending), or `max_refreshes`. The weight ramps to `weight` over `ramp`
+  refreshes. With `final_weight > weight`, refreshes continue after the
+  targets stabilize and the weight ramps to `final_weight` over `ramp` more
+  refreshes, so macros converge onto their targets. GP keeps at least
+  `settle` iterations after each refresh, and no refresh starts within
+  `settle` iterations of the cap.
+- **Swaps** (`swaps=true`). For each macro, the `swap_neighbors` nearest
+  macros of the same width and height (within `swap_tolerance`) whose HPWL
+  descent directions point at each other are candidates; the exact HPWL change
+  over only the nets incident to the two macros, with both at the exchanged
+  targets and everything else at its GP position, decides. Accepted pairs
+  (best gain first, disjoint) exchange their *targets*; GP carries macros and
+  cells. A swapped pair holds its exchanged targets for `swap_lock` refreshes,
+  and a pair is never exchanged twice. With `swap_jump=true` (default) the
+  exchange also moves the two macros to each other's GP position at that
+  refresh (DREAMPlace `MacroPull::jump`); with `false` only the targets swap
+  and GP must carry the macros across each other, which in practice rarely
+  happens: the next refresh re-derives the old targets and the pair churns
+  (hundreds of swaps per run, worse proxy on ibm03/ibm12).
+  Orientation flips are not attempted: the challenge's evaluator placement
+  carries no orientation, so they cannot change its score.
+- **Inflation** (`inflate=f`). Until the first refresh, each movable macro's
+  density footprint is its padded size (planning pad = half the channel) grown
+  by `f` per side, with the margin ramped linearly with GP overflow from the
+  first sample down to exactly zero at `start_overflow` (the first refresh).
+  It uses the DREAMPlace `macro_density_margin` hook (density only; geometry,
+  overlap and legalization unchanged).
+
+| `synth.place.macro.anchor.*` | Default | `physical_repair` key |
+|---|---:|---|
+| (enable) `macro.anchor` | false | `macro_anchor` |
+| `weight` (0..8, x mean macro force; 0 = measure only) | 0.5 | `macro_anchor_weight` |
+| `final_weight` (0..8; <= weight: off) | 2 | `macro_anchor_final_weight` |
+| `gate` | 1 | `macro_anchor_gate` |
+| `start_overflow` | 0.3 | `macro_anchor_start_overflow` |
+| `milestones` | 0.15,0.1 | `macro_anchor_milestones` (array) |
+| `refresh_interval` | 30 | `macro_anchor_refresh_interval` |
+| `ramp` | 3 | `macro_anchor_ramp` |
+| `max_refreshes` | 40 | `macro_anchor_max_refreshes` |
+| `settle` | 20 | `macro_anchor_settle` |
+| (internal) `stable_fraction`, `stable_distance` | 0.05, 0.05 | `macro_anchor_stable_fraction`, `macro_anchor_stable_distance` |
+| `swaps`, `swap_tolerance`, `swap_lock` | false, 0.05, 2 | `macro_anchor_swaps`, `macro_anchor_swap_tolerance`, `macro_anchor_swap_lock` |
+| `swap_jump` | true | `macro_anchor_swap_jump` |
+| (internal) `swap_neighbors` | 8 | `macro_anchor_swap_neighbors` |
+| `inflate` (0..0.25) | 0 | `macro_anchor_inflate` |
+| `dead_space_refreshes` (-1 = all) | 2 | `macro_anchor_dead_space_refreshes` |
+| `select` (`edge+random` \| `all`) | edge+random | `macro_anchor_select` |
+| `edge_weight`, `random_weight` (0..64) | 4, 1 | `macro_anchor_edge_weight`, `macro_anchor_random_weight` |
+| `random_fraction` | 0.25 | `macro_anchor_random_fraction` |
+| `edge_chain`, `edge_gate` | true, false | `macro_anchor_edge_chain`, `macro_anchor_edge_gate` |
+| `spring_length` (0..4; 0 = native 1) | 0.1 | `macro_anchor_spring_length` |
+| `target_hysteresis` (0..1) | 0.5 | `macro_anchor_target_hysteresis` |
+| `final_targets` | true | `macro_anchor_final_targets` |
+
+**Anchor strength.** The native pull's preconditioned step is
+`weight * reference * min(1, distance / length)`: `reference` is the mean
+preconditioned ordinary (wirelength + density) force of the pulled macros and
+`length` the mean macro `max(width, height)`. The DREAMPlace preconditioner is
+`pins + lambda * area`, and on the challenge designs `lambda * area` stays
+below 0.1 x pins through the anchor phase, so it is effectively the pin count;
+the pull multiplies by the preconditioner and is size-independent. A macro's
+own preconditioned density force grows with its area (and with lambda) and
+dominates its wirelength force 2-15x late in GP. With `select=all`
+(`weight` 0.5..2, `length` = one macro), macros settle where the softened pull
+balances that force, typically a third to a whole macro length (30-60 um) from
+their targets, which the final hard pass then has to cover. The round-6
+controls fix it:
+
+- `spring_length=f`: the pull saturates at `f` x the mean macro side
+  (e.g. 0.1) instead of a full macro length, so it stays at its cap until the
+  macro is close.
+- `select=edge+random`: each refresh classifies the targets. *Edge* macros
+  (target box within one channel + halo + one site/row of a core side, or, with
+  `edge_chain`, facing an edge macro of that side across at most the macro
+  spacing, in that half of the core, as `macro.edge_snap` chains them) get
+  `edge_weight` (ungated unless `edge_gate`); a fresh deterministic
+  `random_fraction` sample of the other macros gets `random_weight` (gated);
+  the rest are free for that window. Weights ramp over `ramp` refreshes;
+  `weight`/`final_weight` are not used, and refreshes continue every
+  `refresh_interval` (fresh sample). `select=all` keeps the round-4 behavior
+  (every macro, `weight`/`final_weight`). With legalized, edge-snapped targets most
+  macros sit in edge-chained arrays (all on ariane, 90-100% on IBM), so this
+  mode is mostly "strong anchors on every arrayed macro".
+- Size-proportional pulls (weight x macro area / median area, full or sqrt,
+  on all or only the random anchors) and a per-macro far cap at the macro's own
+  ordinary force were tried in round 6 and removed: area-scaled strong anchors
+  made big IBM macros yank and their targets stop converging (IBM macro-flow
+  final proxy 1.59 vs 1.39 unscaled), the own-force cap was no better (1.49).
+- `target_hysteresis=h` legalizes targets from GP centers moved `h` of the way
+  toward the previous targets, so a macro that has reached its target keeps
+  it (targets stop flipping between edge positions).
+- `final_targets=true`: the final hard macro pass starts from the last legal
+  target set (the generator's output at the last successful refresh, before
+  swaps/locks) instead of the raw GP pose, and after the native macro
+  legalization keeps those targets instead of rerunning the host chain (edge
+  snap, dead space, track snap) on them, since they are already its output.
+  With strong anchors the GP pose sits within a few µm of the targets, but that
+  residual overlap between abutting macros made the hard pass fail (routing-track
+  alignment, macro LP) on 1-2 of 17 IBM designs, and rerunning the chain on
+  its own output is not idempotent (edge snap re-slides macros the track snap
+  shifted). `final_snap` still measures GP pose vs legal result.
+
+`macro_anchor.json` then also records per refresh the edge/random anchor
+counts and, per anchor kind at the last refresh, the mean final-snap
+displacement (`final_snap_by_kind`: free, edge, random, all).
+
+Weights above one lift the native pull cap (`Options::macro_pull_max_weight`).
+`<stage output>/macro_anchor.json` (macro stage: `macro/macro_anchor.json` in
+staged runs) records every refresh (iteration, overflow, reason, changed
+targets, swaps, locked macros, base/mean weight, mean/max macro-to-target
+distance, seconds), the accepted swaps, and the final hard-pass displacement:
+macro centers entering the final legalization versus the legal result
+(`final_snap` mean/max/total µm) and the final distance to the last targets.
+`weight=0` runs the targets and this report without changing GP (a baseline
+for the final-snap displacement). The final-cell stage never carries anchors.
+
+### Soft blocks (LEF `CLASS BLOCK SOFT`)
+
+A LEF 5.8 master with `CLASS BLOCK SOFT` is a soft block: the region of a
+standard-cell cluster represented as one movable rectangle, as RePlAce and the
+Circuit-Training/ICCAD04 macro-placement evaluators model soft macros. The LEF
+reader keeps the class text (`ph::soft_block`); `CLASS BLOCK` and `CLASS BLOCK
+BLACKBOX` stay hard macros (`ph::hard_macro`). Designs without soft masters are
+unchanged.
+
+- Global placement (FP and macro planning) moves a soft block with its full
+  LEF area in density and its pins at their LEF offsets in wirelength; a
+  soft-master PIN defined without PORT geometry connects at the block center. It is a native non-macro node, so it takes
+  no macro legalization, routing-track or tile snapping, rigid/alignment or
+  magnet terms, halo, macro channel or routability inflation, and it does not
+  set the automatic channel.
+- In centroid FP it is an ordinary movable logic node of that area: it
+  contributes its area to centroid groups and placement colors like a cell.
+- It is not row-legalized. The pose written to the graph/DEF is its GP
+  position rounded to DBU and clamped inside the placement core, `PLACED` in
+  its supplied orientation. Soft blocks may overlap each other, hard macros
+  and cells; legality checks require only that a soft block is placed inside
+  the core, and hard-macro halo/channel/overlap checks ignore it. FIXED soft
+  blocks count in density but are not placement exclusions or obstacles.
+- Final placement (the staged flow with `final_cells=true`): the macro stage
+  automatically defers its cell legalization/detail (`macro_legalize_cells` and
+  `macro_detailed_place` become false when the design instantiates a soft
+  master; `flow.json` records it). The fixed-macro handoff fixes only hard
+  macros; soft blocks stay movable and are seeded at their macro-stage poses.
+  Final GP moves them like movable cells of their full area (density and pin
+  wirelength). Terminal legalization ignores them (`Frame_role::ignored`: not
+  packed into rows and not obstacles), so standard cells legalize as usual and
+  may overlap a soft block; the soft block keeps its final GP pose clamped in
+  the core. Native legality (`qor.legal`) is checked without the soft blocks.
+- Any other call that would legalize cells with soft blocks — the macro stage
+  with cell legalization, a single-pass run with movable macros, or legroute —
+  still rejects them (`std::invalid_argument`). Macro-only runs use
+  `physical_repair` `macro_only=true`, `final_cells=false`
+  (`completed_stage=macro`, `macro_legalize_cells=false`). Timing seeds,
+  retained placements and GP-only runs accept them.
+
 ## Placement RC pessimism
 
 `synth.place.rc_pessimism` (diagnostic JSON: `rc_pessimism`) defaults to `1` and
@@ -4645,7 +5040,8 @@ bounded feedback on failure; `true` remains an RSMT probe. Macro channel forces
 and H2D abstract search use RSMT. Learned measurements expand physical macro
 members before extracting features.
 
-The bundled `@pretrained` directory currently records training as pending and
+The bundled `@pretrained` manifest is compiled into the binary (it cannot
+reference sample or weight files); it currently records training as pending and
 contains no weights. Empty/incompatible pools report `uroute_skipped` and use
 RSMT. A project directory is read-only to LiveHD; the offline publisher owns
 atomic manifest updates. Final physical features and geometry/grid metadata are

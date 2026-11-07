@@ -6,6 +6,22 @@
 #include <stdexcept>
 
 namespace livehd::placement::lr {
+namespace {
+size_t excluded_tracks(const Track_resource_tile& resource, size_t count, size_t first, size_t last) {
+  std::vector<size_t> excluded;
+  for (const auto& exclusion : resource.exclusions) {
+    if (exclusion.track >= count || !exclusion.reasons) {
+      throw std::logic_error("legroute resource catalog has an invalid track exclusion");
+    }
+    if (exclusion.track >= first && exclusion.track < last) {
+      excluded.push_back(exclusion.track);
+    }
+  }
+  std::ranges::sort(excluded);
+  return size_t(std::unique(excluded.begin(), excluded.end()) - excluded.begin());
+}
+}  // namespace
+
 void Track_resource_layer::exclude(size_t tile, size_t track, Track_exclusion reason) {
   tiles.at(tile).exclusions.push_back({track, static_cast<uint8_t>(reason)});
 }
@@ -14,19 +30,34 @@ void Track_resource_layer::exclude_all(size_t tile, Track_exclusion reason) {
   tiles.at(tile).whole_band_exclusions |= static_cast<uint8_t>(reason);
 }
 
-int Track_resource_layer::represented_capacity(size_t tile) const {
+int Track_resource_layer::usable_capacity(size_t tile) const {
   const auto& resource = tiles.at(tile);
   if (resource.whole_band_exclusions) {
     return 0;
   }
   const auto count = bands.at(resource.band).size();
-  // finalize() validates unique, in-range exclusions before this calculation.
-  if (resource.exclusions.size() > count) {
-    throw std::logic_error("legroute resource catalog has too many track exclusions");
-  }
-  const auto remaining = count - resource.exclusions.size();
-  const auto kept      = size_t(resource.anonymous_headroom) + resource.cellbox_budget;
+  const auto remaining = count - excluded_tracks(resource, count, 0, count);
+  const auto kept      = size_t(resource.anonymous_headroom);
   return remaining <= kept ? 0 : int(remaining - kept);
+}
+
+int Track_resource_layer::usable_capacity(size_t tile, int64_t begin, int64_t end) const {
+  const auto& resource = tiles.at(tile);
+  if (resource.whole_band_exclusions || begin >= end) {
+    return 0;
+  }
+  const auto& coordinates = bands.at(resource.band);
+  const auto  first       = std::lower_bound(coordinates.begin(), coordinates.end(), begin);
+  const auto  last        = std::lower_bound(first, coordinates.end(), end);
+  size_t      remaining   = size_t(last - first);
+  const auto  first_index = size_t(first - coordinates.begin()), last_index = size_t(last - coordinates.begin());
+  remaining -= excluded_tracks(resource, coordinates.size(), first_index, last_index);
+  return remaining <= resource.anonymous_headroom ? 0 : int(remaining - resource.anonymous_headroom);
+}
+
+int Track_resource_layer::represented_capacity(size_t tile) const {
+  const auto available = usable_capacity(tile);
+  return size_t(available) <= tiles.at(tile).cellbox_budget ? 0 : available - int(tiles.at(tile).cellbox_budget);
 }
 
 void Track_resource_catalog::finalize() {

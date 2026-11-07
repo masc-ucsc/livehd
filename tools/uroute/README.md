@@ -301,7 +301,8 @@ scoring stay on RSMT after a learned probe. Rigid macro groups are likewise
 expanded before feature extraction. Probe exports retain the measured physical
 geometry rather than group reservation rectangles.
 
-The directory defaults to `@pretrained`, resolved through declared runfiles.
+The directory defaults to `@pretrained`, the bundled manifest compiled into the
+binary (no runtime files).
 An empty `uroute.dir` disables both import and feature exports. `uroute.export=true` writes
 `W/synth/place/uroute_export/features.bin` and `metadata.json`, including core,
 route/network grids, track capacities, geometry identity, DBU scale, top,

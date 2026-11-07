@@ -105,6 +105,9 @@ std::pair<int64_t, int64_t> Grid::tracks(int l, int band) const {
 Design build_design(const ph::Technology& tech, ph::Floorplan& fp, const timing::Feedback& timing, const Legroute_options& opt,
                     const ph::Tech_profile* profile) {
   Design                                    d{tech, fp, opt, profile};
+  if (opt.critical_cellboxes && !opt.cellbox_ignored_nets.empty() && opt.cellbox_ignored_nets.size() != fp.nets.size()) {
+    throw std::invalid_argument("critical cellbox control scope does not match the measured frame net identities");
+  }
   const auto                                row_h = row_height(tech, fp);
   std::unordered_map<std::string_view, int> comp_of, term_of;
   d.macro.resize(fp.components.size());
@@ -146,6 +149,7 @@ Design build_design(const ph::Technology& tech, ph::Floorplan& fp, const timing:
     const auto& fn = fp.nets[n];
     Net         net;
     net.frame = n;
+    net.control_scope = opt.critical_cellboxes && !opt.cellbox_ignored_nets.empty() && opt.cellbox_ignored_nets[n];
     net.clock = fn.use == "CLOCK";
     net.power = power_use(fn.use);
     for (const auto& c : fn.connections) {
@@ -186,7 +190,7 @@ Design build_design(const ph::Technology& tech, ph::Floorplan& fp, const timing:
     if (net.driver < 0 && !net.pins.empty()) {
       net.driver = 0;
     }
-    net.routed = !net.clock && !net.power && net.pins.size() >= 2;
+    net.routed = !net.clock && !net.power && !net.control_scope && net.pins.size() >= 2;
     if (net.routed && !net.reset) {
       for (const auto& p : net.pins) {
         // full or ranking-only feedback alike
@@ -461,17 +465,18 @@ Grid build_grid(const Design& d, const Legroute_regions& regions) {
     }
   }
   const auto widest = std::max({2 * d.flop_w, d.widest, g.site});
-  g.tile_w          = (widest + g.site - 1) / g.site * g.site;
-  g.tile_h          = 2 * g.row_h;
+  g.rows_per_tile   = d.opt.critical_cellboxes ? d.opt.cellbox_rows : 2;
+  g.tile_w          = d.opt.critical_cellboxes ? int64_t(d.opt.cellbox_sites) * g.site : (widest + g.site - 1) / g.site * g.site;
+  g.tile_h          = g.rows_per_tile * g.row_h;
   g.sites           = int(g.tile_w / g.site);
   g.die             = fp.die;
   g.cols            = int((xh - g.x0 + g.tile_w - 1) / g.tile_w);
   const int prow    = int((yh - g.y0) / g.row_h);
-  g.rows            = (prow + 1) / 2;
-  g.row_orient.assign(2 * g.rows, ph::Orientation::N);
-  g.row_present.assign(2 * g.rows, 0);
+  g.rows            = (prow + int(g.rows_per_tile) - 1) / int(g.rows_per_tile);
+  g.row_orient.assign(g.rows_per_tile * g.rows, ph::Orientation::N);
+  g.row_present.assign(g.rows_per_tile * g.rows, 0);
   // free sites per placement row, absolute site index from x0
-  std::vector<std::vector<std::pair<int64_t, int64_t>>> free(2 * g.rows);
+  std::vector<std::vector<std::pair<int64_t, int64_t>>> free(g.rows_per_tile * g.rows);
   for (const auto& r : rows) {
     const auto k      = (r.y - g.y0) / g.row_h;
     g.row_orient[k]   = fp.rows[r.source].orientation;
@@ -488,7 +493,7 @@ Grid build_grid(const Design& d, const Legroute_regions& regions) {
     for (const auto& [a, b] : free[k]) {
       for (int64_t c = a / g.sites; c * g.sites < b; ++c) {
         const auto lo = std::max(a, c * g.sites), hi = std::min(b, (c + 1) * g.sites);
-        g.placeable_sites[size_t(g.tile(int(c), int(k / 2)))] += hi - lo;
+        g.placeable_sites[size_t(g.tile(int(c), int(k / g.rows_per_tile)))] += hi - lo;
       }
     }
   }
@@ -532,8 +537,8 @@ Grid build_grid(const Design& d, const Legroute_regions& regions) {
     for (int c = 0; c < g.cols; ++c) {
       std::vector<Seg> segs;
       const int64_t    lo = int64_t(c) * g.sites, hi = lo + g.sites;
-      for (int k = 0; k < 2; ++k) {
-        for (auto [a, b] : free[2 * r + k]) {
+      for (unsigned k = 0; k < g.rows_per_tile; ++k) {
+        for (auto [a, b] : free[g.rows_per_tile * r + k]) {
           const auto s = std::max(a, lo), e = std::min(b, hi);
           if (s < e) {
             segs.push_back({uint8_t(k), int32_t(s - lo), int32_t(e - lo)});
@@ -667,10 +672,21 @@ Grid build_grid(const Design& d, const Legroute_regions& regions) {
       for (auto k = a; k <= b; ++k) {
         const auto coordinate  = g.track_coord(int(l), k);
         const bool reserved    = reservations.selected(layer.name, coordinate, coordinate - layer.pitch, k - a);
-        count                 += !reserved;
+        const bool missing_def
+            = (d.opt.paired_pin_reserve || d.opt.critical_cellboxes) && std::ranges::none_of(fp.tracks, [&](const auto& track) {
+                if (track.layer != layer.name || !track.supported() || track.axis != (layer.horizontal ? "Y" : "X")) {
+                  return false;
+                }
+                const auto delta = coordinate - track.start;
+                return delta >= 0 && delta % track.step == 0 && delta / track.step < track.count;
+              });
+        count += !reserved && !missing_def;
         resource.bands[size_t(band)].push_back(coordinate);
         if (reserved) {
           band_exclusions[size_t(band)].push_back({size_t(k - a), uint8_t(Track_exclusion::generic_reservation)});
+        }
+        if (missing_def) {
+          band_exclusions[size_t(band)].push_back({size_t(k - a), uint8_t(Track_exclusion::missing_def_track)});
         }
       }
       band_capacity[band] = int16_t(count);
@@ -791,7 +807,7 @@ Grid build_grid(const Design& d, const Legroute_regions& regions) {
       }
     }
     const auto box = tech.layers.find(g.box_layer);
-    if (ys_all.empty() && box != tech.layers.end()) {
+    if (ys_all.empty() && box != tech.layers.end() && !d.opt.paired_pin_reserve && !d.opt.critical_cellboxes) {
       const auto& L     = box->second;
       const auto  pitch = std::llround((L.pitch_y > 0 ? L.pitch_y : L.pitch_x) * fp.dbu);
       const auto  off   = L.has_offset ? std::llround(L.offset_y * fp.dbu) : pitch / 2;
@@ -874,13 +890,27 @@ Grid build_grid(const Design& d, const Legroute_regions& regions) {
       }
     }
   }
+  if (d.opt.critical_cellboxes) {
+    // Missing finite DEF tracks and PG can exclude the same coordinate. Rebuild
+    // their union before checking the local budget, so an absent PG track does
+    // not create a false shortage or inconsistent coarse resource identities.
+    for (size_t l = 0; l < g.layers.size(); ++l) {
+      for (size_t t = 0; t < g.size(); ++t) {
+        const auto capacity = g.resources.layers[l].usable_capacity(t);
+        if (capacity > std::numeric_limits<int16_t>::max()) {
+          throw std::overflow_error("critical_cellboxes capacity exceeds the grid representation");
+        }
+        g.cap[l][t] = int16_t(capacity);
+      }
+    }
+  }
   // The per-cellbox budget: every free tile keeps these usable tracks for Final (counted after PG and obstacles,
   // so a PG-occupied track never stands in for a promised one). Shared by every stage through this grid. A tile
   // that cannot keep its budget cannot host a box (box_fits); it gets its own segment-pattern key so key-based fit
   // caches stay exact.
   g.box_short.assign(g.size(), 0);
-  if (!d.opt.box_reserve.empty()) {
-    std::string_view spec = d.opt.box_reserve;
+  if (d.opt.critical_cellboxes || (!d.opt.paired_pin_reserve && !d.opt.box_reserve.empty())) {
+    std::string_view spec = d.opt.critical_cellboxes ? "M2:20,M3:20" : std::string_view(d.opt.box_reserve);
     while (!spec.empty()) {
       const auto comma = spec.find(',');
       const auto item  = spec.substr(0, comma);
@@ -965,8 +995,271 @@ Grid build_grid(const Design& d, const Legroute_regions& regions) {
       g.resources.anonymous_clock_h[t] = g.row(int(t)) % std::max(1u, d.opt.rib_tiles) == 0;
     }
   }
+  if (d.opt.paired_pin_reserve) {
+    // PG and missing-DEF exclusions can name the same coordinate. Reconstruct the paired arm's capacities
+    // from their union instead of subtracting a PG track a second time from the already narrowed finite supply.
+    for (auto& layer : g.resources.layers) {
+      for (size_t t = 0; t < g.size(); ++t) {
+        const auto capacity = layer.represented_capacity(t);
+        if (capacity > std::numeric_limits<int16_t>::max()) {
+          throw std::overflow_error("paired_pin_reserve capacity exceeds the grid representation");
+        }
+        layer.tiles[t].coarse_capacity                                             = capacity;
+        (layer.grid_layer < 0 ? g.box_cap[t] : g.cap[size_t(layer.grid_layer)][t]) = int16_t(capacity);
+      }
+    }
+  }
   g.resources.finalize();
   return g;
+}
+
+namespace {
+std::vector<Paired_pin_box_reservation> paired_pin_obligations(const Design& d, const Grid& g, const Boxes& boxes) {
+  if (!d.opt.legal_boxes || d.opt.legal_window || d.opt.legal_shuffle) {
+    throw std::invalid_argument("paired_pin_reserve requires fixed legal boxes without shuffling");
+  }
+  if (d.opt.paired_pin_cap % 2) {
+    throw std::invalid_argument("paired_pin_cap must be zero or a positive even pin count");
+  }
+  const auto scope = final_net_scope(d);
+  for (size_t n = 0; n < d.nets.size(); ++n) {
+    const auto& net    = d.nets[n];
+    const char* reason = nullptr;
+    if (net.routed && net.reset) {
+      reason = "routed reset requires an ordinary-net projection";
+    } else if (net.routed && !scope.required[n]) {
+      reason = "final_skip_nets excludes a signal that Plan still routes";
+    } else if (net.clock && net.requires_final_route() && !d.opt.final_skip_clock) {
+      reason = "clock net requires explicit final_skip_clock";
+    }
+    if (reason) {
+      throw std::invalid_argument("paired_pin_reserve net " + d.fp.nets.at(size_t(net.frame)).name + ": " + reason);
+    }
+  }
+  const auto vertical = std::ranges::find(g.layers, false, &Layer::horizontal);
+  if (vertical == g.layers.end() || g.row_h <= 0 || g.tile_h != 2 * g.row_h || g.resources.layers.size() != g.layers.size() + 1
+      || g.resources.layers.back().name != g.box_layer) {
+    throw std::invalid_argument("paired_pin_reserve requires a two-row box and explicit horizontal/vertical resource catalogs");
+  }
+  const int                               vertical_layer = int(vertical - g.layers.begin());
+  const auto&                             horizontal     = g.resources.layers.back();
+  const auto&                             vresource      = g.resources.layers[size_t(vertical_layer)];
+  std::vector<Paired_pin_box_reservation> result(boxes.boxes.size());
+  std::vector<int>                        owner(d.movable.size(), -1), row(d.movable.size(), -1), tile_owner(g.size(), -1);
+  if (boxes.box_of.size() != d.movable.size()) {
+    throw std::logic_error("paired_pin_reserve: stale box membership map");
+  }
+  for (size_t b = 0; b < boxes.boxes.size(); ++b) {
+    const auto& box = boxes.boxes[b];
+    if (!box.fixed || !box.placed || box.cells.empty() || box.tile < 0 || size_t(box.tile) >= g.size()) {
+      throw std::invalid_argument("paired_pin_reserve requires every box to have a fixed legal tile");
+    }
+    if (tile_owner[size_t(box.tile)] >= 0) {
+      throw std::logic_error("paired_pin_reserve: two boxes occupy the same tile");
+    }
+    tile_owner[size_t(box.tile)] = int(b);
+    auto& reservation            = result[b];
+    reservation.box              = int(b);
+    reservation.tile             = box.tile;
+    reservation.vertical_layer   = vertical_layer;
+    reservation.cells            = box.cells;
+    std::ranges::sort(reservation.cells);
+    const int64_t bottom = g.bottom(g.row(box.tile)), left = g.left(g.col(box.tile));
+    for (int c : box.cells) {
+      if (c < 0 || size_t(c) >= d.movable.size() || owner[size_t(c)] >= 0 || boxes.box_of[size_t(c)] != int(b)) {
+        throw std::logic_error("paired_pin_reserve: stale or duplicate box membership");
+      }
+      const auto& component = d.fp.components[size_t(d.movable[size_t(c)])];
+      const auto& pose      = component.place;
+      const auto& master    = *d.macro[size_t(d.movable[size_t(c)])];
+      if (d.tall[size_t(c)] || ph::swaps_axes(pose.orientation) || std::llround(master.height * g.dbu) != g.row_h) {
+        throw std::invalid_argument("paired_pin_reserve does not support ambiguous multi-row cell " + component.name);
+      }
+      const auto dy = pose.y - bottom;
+      const auto cx = pose.x + d.width[size_t(c)] / 2.;
+      if (dy < 0 || dy >= g.tile_h || dy % g.row_h || cx < left || cx >= left + g.tile_w) {
+        throw std::logic_error("paired_pin_reserve: cell pose does not match its fixed box tile");
+      }
+      owner[size_t(c)] = int(b);
+      row[size_t(c)]   = int(dy / g.row_h);
+    }
+    reservation.vertical_usable = unsigned(vresource.usable_capacity(size_t(box.tile)));
+    for (size_t r = 0; r < 2; ++r) {
+      const auto begin                 = bottom + int64_t(r) * g.row_h;
+      reservation.horizontal_usable[r] = unsigned(horizontal.usable_capacity(size_t(box.tile), begin, begin + g.row_h));
+      if (size_t(2 * g.row(box.tile)) + r >= g.row_present.size() || !g.row_present[size_t(2 * g.row(box.tile)) + r]) {
+        reservation.horizontal_usable[r] = 0;
+      }
+    }
+  }
+  if (std::ranges::find(owner, -1) != owner.end()) {
+    throw std::logic_error("paired_pin_reserve: movable cell missing from box membership");
+  }
+  for (size_t n = 0; n < d.nets.size(); ++n) {
+    const auto& net = d.nets[n];
+    if (!scope.required[n] || net.power || net.clock || net.reset) {
+      continue;
+    }
+    std::map<int, std::vector<Paired_pin_obligation>> inside;
+    for (size_t pi = 0; pi < net.pins.size(); ++pi) {
+      const auto& pin = net.pins[pi];
+      if (pin.comp < 0 || d.cell[size_t(pin.comp)] < 0) {
+        continue;  // IO and fixed cells remain outside every movable cellbox.
+      }
+      const auto c = size_t(d.cell[size_t(pin.comp)]);
+      inside[owner[c]].push_back({int(n), int(pi), row[c]});
+    }
+    if (inside.size() == 1 && inside.begin()->second.size() == net.pins.size()) {
+      result[size_t(inside.begin()->first)].internal_nets.push_back(int(n));
+      continue;
+    }
+    for (const auto& [b, pins] : inside) {
+      auto& reservation = result[size_t(b)];
+      for (const auto& pin : pins) {
+        reservation.external_pins.push_back(pin);
+        ++reservation.external_rows[size_t(pin.row)];
+      }
+    }
+  }
+  for (auto& reservation : result) {
+    if (reservation.external_pins.size() > 2 * size_t(std::numeric_limits<unsigned>::max()) - 1) {
+      throw std::overflow_error("paired_pin_reserve external pin count exceeds the resource representation");
+    }
+    const auto external_count                = reservation.external_pins.size();
+    reservation.actual_pairs                 = unsigned((external_count + (d.opt.paired_pin_cap ? 0 : 1)) / 2);
+    reservation.vertical_tracks              = d.opt.paired_pin_cap ? d.opt.paired_pin_cap / 2 : reservation.actual_pairs;
+    reservation.grouping_invalid             = d.opt.paired_pin_cap
+                                               && (external_count > d.opt.paired_pin_cap || external_count % 2
+                                                   || reservation.external_rows[0] != reservation.external_rows[1]);
+    reservation.internal_vertical_estimate   = unsigned((reservation.internal_nets.size() + 1) / 2);
+    reservation.internal_horizontal_estimate = unsigned(reservation.internal_nets.size());
+    if (d.opt.inbox_span) {
+      std::vector<std::pair<int64_t, int>> ends;
+      for (int n : reservation.internal_nets) {
+        int64_t lo = std::numeric_limits<int64_t>::max(), hi = std::numeric_limits<int64_t>::min();
+        for (const auto& pin : d.nets[size_t(n)].pins) {
+          const auto x = d.fp.components[size_t(pin.comp)].place.x + d.width[size_t(d.cell[size_t(pin.comp)])] / 2;
+          lo           = std::min(lo, x);
+          hi           = std::max(hi, x);
+        }
+        ends.emplace_back(lo, 1);
+        ends.emplace_back(hi + 1, -1);
+      }
+      std::ranges::sort(ends);
+      int depth                                = 0;
+      reservation.internal_horizontal_estimate = 0;
+      for (const auto& [_, change] : ends) {
+        depth                                    += change;
+        reservation.internal_horizontal_estimate  = std::max(reservation.internal_horizontal_estimate, unsigned(depth));
+      }
+    }
+    const auto total_vertical = size_t(reservation.vertical_tracks) + reservation.internal_vertical_estimate;
+    if (total_vertical > std::numeric_limits<unsigned>::max()) {
+      throw std::overflow_error("paired_pin_reserve combined vertical demand exceeds the resource representation");
+    }
+    // Internal H metal may use the full usable box layer, including the two protected row tracks. This fixed
+    // first arm reports an estimate shortage instead of silently spilling excess onto upper horizontal layers.
+    reservation.short_supply
+        = g.blocked[size_t(reservation.tile)] || reservation.vertical_usable < total_vertical
+          || unsigned(horizontal.usable_capacity(size_t(reservation.tile))) < reservation.internal_horizontal_estimate;
+    for (size_t r = 0; r < 2; ++r) {
+      reservation.short_supply |= reservation.horizontal_usable[r] < reservation.horizontal_tracks[r];
+    }
+  }
+  return result;
+}
+}  // namespace
+
+void resolve_paired_pin_reservations(const Design& d, Grid& g, const Boxes& boxes) {
+  if (!d.opt.paired_pin_reserve) {
+    return;
+  }
+  auto       resolved       = paired_pin_obligations(d, g, boxes);
+  const auto previous_short = g.box_short;
+  g.box_short.assign(g.size(), 0);
+  g.paired_pin_reservation_of_tile.assign(g.size(), -1);
+  // Reconstruct from physical exclusions and anonymous headroom, never from an already deducted capacity.
+  for (auto& layer : g.resources.layers) {
+    for (auto& tile : layer.tiles) {
+      tile.cellbox_budget = 0;
+    }
+  }
+  for (size_t i = 0; i < resolved.size(); ++i) {
+    const auto& reservation                              = resolved[i];
+    const auto  tile                                     = size_t(reservation.tile);
+    g.paired_pin_reservation_of_tile[tile]               = int(i);
+    g.resources.layers.back().tiles[tile].cellbox_budget = reservation.horizontal_tracks[0] + reservation.horizontal_tracks[1];
+    g.resources.layers[size_t(reservation.vertical_layer)].tiles[tile].cellbox_budget
+        = reservation.vertical_tracks + reservation.internal_vertical_estimate;
+    g.box_short[tile] = reservation.short_supply;
+    if (reservation.short_supply && (tile >= previous_short.size() || !previous_short[tile])) {
+      auto pattern = g.keys[g.key[tile]];
+      g.key[tile]  = uint32_t(g.keys.size());
+      g.keys.push_back(std::move(pattern));
+    }
+  }
+  for (auto& layer : g.resources.layers) {
+    for (size_t t = 0; t < g.size(); ++t) {
+      const auto capacity = layer.represented_capacity(t);
+      if (capacity > std::numeric_limits<int16_t>::max()) {
+        throw std::overflow_error("paired_pin_reserve capacity exceeds the grid representation");
+      }
+      layer.tiles[t].coarse_capacity                                             = capacity;
+      (layer.grid_layer < 0 ? g.box_cap[t] : g.cap[size_t(layer.grid_layer)][t]) = int16_t(capacity);
+    }
+  }
+  g.paired_pin_reservations = std::move(resolved);
+  g.resources.finalize();
+}
+
+void validate_paired_pin_reservations(const Design& d, const Grid& g, const Boxes& boxes) {
+  if (!d.opt.paired_pin_reserve) {
+    return;
+  }
+  const auto expected = paired_pin_obligations(d, g, boxes);
+  if (expected != g.paired_pin_reservations || g.paired_pin_reservation_of_tile.size() != g.size()) {
+    throw std::logic_error("paired_pin_reserve: membership, pose or resource supply changed after resolution");
+  }
+  std::vector<int> owner(g.size(), -1);
+  for (size_t i = 0; i < expected.size(); ++i) {
+    owner[size_t(expected[i].tile)] = int(i);
+  }
+  if (owner != g.paired_pin_reservation_of_tile) {
+    throw std::logic_error("paired_pin_reserve: stale tile-to-reservation map");
+  }
+  for (size_t t = 0; t < g.size(); ++t) {
+    const bool shortage = owner[t] >= 0 && expected[size_t(owner[t])].short_supply;
+    if (t >= g.box_short.size() || bool(g.box_short[t]) != shortage) {
+      throw std::logic_error("paired_pin_reserve: stale tile shortage flag");
+    }
+  }
+  for (size_t l = 0; l < g.resources.layers.size(); ++l) {
+    const auto& layer = g.resources.layers[l];
+    for (size_t t = 0; t < g.size(); ++t) {
+      unsigned budget = 0;
+      if (owner[t] >= 0) {
+        const auto& reservation = expected[size_t(owner[t])];
+        budget = l == g.layers.size()                   ? 2
+                 : int(l) == reservation.vertical_layer ? reservation.vertical_tracks + reservation.internal_vertical_estimate
+                                                        : 0;
+      }
+      const int capacity = layer.grid_layer < 0 ? g.box_cap[t] : g.cap[size_t(layer.grid_layer)][t];
+      if (layer.tiles[t].cellbox_budget != budget || layer.tiles[t].coarse_capacity != capacity
+          || layer.represented_capacity(t) != capacity) {
+        throw std::logic_error("paired_pin_reserve: stale resolved capacity or budget");
+      }
+    }
+  }
+}
+
+std::pair<std::vector<int>, std::vector<int>> transit_capacity(const Grid& g) {
+  std::vector<int> h(g.size()), v(g.size());
+  for (size_t l = 0; l < g.layers.size(); ++l) {
+    for (size_t t = 0; t < g.size(); ++t) {
+      (g.layers[l].horizontal ? h : v)[t] += g.cap[l][t];
+    }
+  }
+  return {std::move(h), std::move(v)};
 }
 }  // namespace lr
 
