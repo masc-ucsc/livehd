@@ -116,7 +116,7 @@ http_archive(
 )
 bazel_dep(name = "mimalloc", version = "3.5.3.bcr.1")
 
-bazel_dep(name = "libffi", version = "3.4.7.bcr.5")
+bazel_dep(name = "libffi", version = "3.8.0")
 
 # GMP -- cvc5's bignum backend. cvc5's non-GPL prebuilt static libs leave the
 # GMP symbols undefined (they are not bundled, to avoid the LGPL libgmp.a); they
