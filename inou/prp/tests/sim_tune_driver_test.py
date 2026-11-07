@@ -286,8 +286,10 @@ def main():
             check(False, 'zero fill writes a raw run file')
 
         # ---- the `--set` key classes ----
-        # the binary was generated with the defaults (dirty on): equal is accepted, different refused
-        for kv, want in (('sim.tune.dirty=on', 0), ('sim.tune.dirty=auto', 0), ('sim.tune.dirty=off', 2),
+        # the binary was generated with the defaults: unpinned dirty/fence and no
+        # tuner, so the generator's auto-dirty rule merged this small design
+        # (dirty off): equal is accepted, different refused
+        for kv, want in (('sim.tune.dirty=off', 0), ('sim.tune.dirty=auto', 0), ('sim.tune.dirty=on', 2),
                          ('sim.tune.live_words=0', 2), ('lhd.jobs=8', 0), ('sim.tune.file=/nope', 0),
                          ('compile.cgen.backend=llvm', 2), ('sim.color_dirty=true', 2), ('sim.tune.profile=maybe', 2),
                          ('lhd.seed=7', 0), ('sim.init_zero=true', 0)):

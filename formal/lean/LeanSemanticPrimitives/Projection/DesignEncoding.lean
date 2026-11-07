@@ -61,6 +61,62 @@ theorem decListG_encListG {α : Type} {e : α → Val} {d : Val → Option α}
   | []      => rfl
   | x :: xs => by simp [encListG, decListG, h x, decListG_encListG h xs]
 
+/-! ### Tail-recursive copies for the compiled code
+
+`encListG` and `decListG` recurse once per list element, and a memory image is
+one list of `2 ^ aw` words: SoomRV's ExternalBusMem (aw 24) is a 16,777,216-word
+list, and decoding it overflowed the task stack ("Stack overflow detected",
+`decListG` in the backtrace).  These copies walk the list with an accumulator;
+`@[csimp]` makes the compiled code use them, and every proof keeps the
+structural definitions above. -/
+
+def encListGTR {α : Type} (e : α → Val) (xs : List α) : Val :=
+  xs.reverse.foldl (fun acc x => .cons (e x) acc) .nil
+
+theorem encListGTR_eq {α : Type} (e : α → Val) :
+    ∀ xs : List α, encListGTR e xs = encListG e xs
+  | []      => rfl
+  | x :: xs => by
+      simp only [encListGTR] at *
+      rw [List.reverse_cons, List.foldl_append, List.foldl_cons, List.foldl_nil]
+      exact congrArg (Val.cons (e x)) (encListGTR_eq e xs)
+
+@[csimp] theorem encListG_eq_encListGTR : @encListG = @encListGTR := by
+  funext α e xs
+  exact (encListGTR_eq e xs).symm
+
+/-- The decoder's loop: `acc` holds the elements decoded so far, in order. -/
+def decListGTR.go {α : Type} (d : Val → Option α) : Val → Array α → Option (List α)
+  | .nil,      acc => some acc.toList
+  | .cons a b, acc =>
+    match d a with
+    | some x => decListGTR.go d b (acc.push x)
+    | none   => none
+  | _,         _   => none
+
+def decListGTR {α : Type} (d : Val → Option α) (v : Val) : Option (List α) :=
+  decListGTR.go d v #[]
+
+theorem decListGTR_go_eq {α : Type} (d : Val → Option α) :
+    ∀ (v : Val) (acc : Array α), decListGTR.go d v acc = (decListG d v).map (fun xs => acc.toList ++ xs)
+  | .nil,      acc => by simp [decListGTR.go, decListG]
+  | .cons a b, acc => by
+      rw [decListGTR.go, decListG]
+      cases h : d a with
+      | none   => simp
+      | some x =>
+        dsimp only
+        rw [decListGTR_go_eq d b (acc.push x)]
+        cases decListG d b <;> simp
+  | .int _,    acc => by simp [decListGTR.go, decListG]
+  | .bool _,   acc => by simp [decListGTR.go, decListG]
+  | .ctor _ _, acc => by simp [decListGTR.go, decListG]
+
+@[csimp] theorem decListG_eq_decListGTR : @decListG = @decListGTR := by
+  funext α d v
+  rw [decListGTR, decListGTR_go_eq]
+  cases decListG d v <;> simp
+
 /-! ### Canonicality
 
 Round tripping says `dec (enc x) = some x`.  The CONVERSE -- that `enc x` is the

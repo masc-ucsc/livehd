@@ -186,8 +186,19 @@ open Residual
 
 /-- Read a ref as a bit vector. -/
 @[inline] def refBV (env : SlotEnv) (r : ResidualRef) : BV := (denoteRef env r).asBV
-/-- Read a ref as a memory image. -/
-@[inline] def refMem (env : SlotEnv) (r : ResidualRef) : Int → BV := (denoteRef env r).asMem
+/-- Read a ref as a memory image.
+
+`@[macro_inline]`, not `@[inline]` (and not `@[noinline]`): a definition of type
+`Int → BV` is eta-expanded by the compiler, so a call site `refMem env m`
+became the closure `fun y => (denoteRef env m).asMem y`, which keeps the whole
+`env` alive.  A memory write stores that closure in its new image and the image
+goes into `env`, so every later `push` in `runBindings` found `env` shared and
+copied it, and every copy stayed reachable: SoomRV's IFetch grew by about
+1 GB/s and was killed at 100 GB before its first cycle (finding AO).  Expanded
+at the call site, `(denoteRef env m).asMem` computes the slot value first and
+captures only that value.  Compilation only: the definition and every proof
+about it are unchanged. -/
+@[macro_inline] def refMem (env : SlotEnv) (r : ResidualRef) : Int → BV := (denoteRef env r).asMem
 
 @[inline] def refBVs (env : SlotEnv) (rs : Array ResidualRef) : List BV :=
   rs.toList.map (refBV env)

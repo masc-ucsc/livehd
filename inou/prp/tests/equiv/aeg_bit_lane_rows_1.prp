@@ -1,0 +1,9 @@
+/*
+:name: aeg_bit_lane_rows_1
+:type: lec
+:set: compile.cprop.engine=aegraph compile.aegraph.cost=sim compile.unroll=true
+:compile_grep: aegraph-bit-lanes runs=[1-9][0-9]* lanes=[1-9][0-9]*
+*/
+// HEADER-ONLY variant: aeg_bit_lane_rows.prp compiled by the e-graph engine under the `sim` cost profile, whose post
+// steps run Cprop::vectorize_bit_lanes: the matrix rows and the per-lane-select Mux become word writes
+// (aegraph-bit-lanes runs > 0). The result must still prove equal to the classic reference.

@@ -102,6 +102,7 @@ livehd::aegraph::Options graph_options(livehd::aegraph::Options options, bool lo
 namespace livehd::aegraph {
 Stats optimize_body(Cprop& cp, const std::shared_ptr<hhds::Graph>& g, const Options& options) {
   cp.set_hotmux_trees(options.cost != Options::Cost::sim);
+  cp.set_bit_lanes(options.cost == Options::Cost::sim);
   const auto stats = optimize(g, [&](const std::vector<hhds::Node_class>& cyclic) { cp.do_scalar(g, cyclic); }, options);
   livehd::aegraph_profile::Timer post(livehd::aegraph_profile::post);
   if (stats.refused != 0) {
@@ -145,6 +146,7 @@ void Pass_aegraph::optimize(Eprp_var& var) {
   // exactly like pass.cprop's; publication order is untouched.
   std::mutex                 stats_mutex;
   livehd::aegraph::Stats     total;
+  std::pair<size_t, size_t>  bit_lanes{0, 0};  // vectorize_bit_lanes: word writes, 1-bit lanes replaced
   const auto one = [&](Cprop& cp, size_t index) {
     const auto& g = var.graphs[index];
     if (!g) {
@@ -155,12 +157,16 @@ void Pass_aegraph::optimize(Eprp_var& var) {
     livehd::aegraph_profile::Invocation profile(name);
     livehd::cprop_summary::Probe        probe(*g, want_stats);
     const auto                          per_graph = graph_options(options, loop_bodies.contains(g->get_gid()), low_lanes);
+    const auto                          lanes0    = cp.bit_lane_counts();
     const auto                          stats     = livehd::aegraph::optimize_body(cp, g, per_graph);
+    const auto                          lanes1    = cp.bit_lane_counts();
     if (want_stats) {
       records[index] = probe.finish(*g, name, stats.rules_fired, stats.aeg_bytes, stats.aeg_cap_bytes);
     }
     const std::lock_guard<std::mutex> lock(stats_mutex);
     total += stats;
+    bit_lanes.first  += lanes1.first - lanes0.first;
+    bit_lanes.second += lanes1.second - lanes0.second;
   };
   const auto report = [&] {
     for (const auto& r : records) {
@@ -170,6 +176,13 @@ void Pass_aegraph::optimize(Eprp_var& var) {
     }
     if (!want_stats) {
       return;
+    }
+    if (options.cost == livehd::aegraph::Options::Cost::sim) {
+      livehd::diag::info("pass.aegraph", "aegraph-bit-lanes", "progress")
+          .msg("aegraph-bit-lanes runs={} lanes={}", bit_lanes.first, bit_lanes.second)
+          .attr("runs", std::to_string(bit_lanes.first))
+          .attr("lanes", std::to_string(bit_lanes.second))
+          .emit();
     }
     // The census: one aegraph-rule record per rule that ran, summed over the graphs.
     auto& reg = livehd::aegraph::rt::Registry::instance();

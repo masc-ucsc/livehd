@@ -41,6 +41,12 @@
 
 set -euo pipefail
 
+# These fixtures test the inline ICG fold (an enable latch next to the flop it
+# gates). The LLVM backend now materializes a plain latch gate as a Clock_cell
+# (no latch left to split), so keep the fold here; Clock_cell gating has its
+# own coverage.
+export LHD_SIM_LLVM_INLINE_GATES=1
+
 LHD="${LHD:-lhd/lhd}"
 work="${TEST_TMPDIR:-/tmp/lhd_sim_live_words_invariance_$$}"
 mkdir -p "$work"

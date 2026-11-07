@@ -353,7 +353,7 @@ http_archive(
     sha256 = "69fbe16a8bc5032d55b5f1ddc8437b73e083c538043999a137add530e697a789",
     strip_prefix = "yosys-435977e97008578a4532da60e70f75b5e88d076d",
     build_file = "//packages:yosys.BUILD",
-    patches = ["//packages:yosys.patch", "//packages:yosys_lexer.patch"],
+    patches = ["//packages:yosys.patch"],
 )
 
 # cvc5 1.4.2 -- source-built SMT libraries, native C++ API. Bazel fetches

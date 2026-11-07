@@ -34,7 +34,7 @@ EOF
 "$LHD" sim "$W/shadow.prp"  --workdir "$W/w" -q \
   || fail "a repeated child whose first instance shadows the module type did not simulate"
 
-grep -q 'struct shadow_leaf leaf;' "$W/w/sim/shadow.top.hpp" \
+grep -Eq 'struct shadow_leaf leaf(\{[^}]*\})?;' "$W/w/sim/shadow.top.hpp" \
   || fail "generated child declaration does not protect the C++ type tag from member-name shadowing"
 
 echo "PASS: cgen_sim child type/member shadowing"

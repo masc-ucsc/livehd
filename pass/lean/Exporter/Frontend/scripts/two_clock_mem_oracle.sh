@@ -14,7 +14,7 @@ set -euo pipefail
 #
 # Checks:
 #   export   the certificate carries the commit table (Lean literal and DCERT3).
-#   IR, TV   cert_trace equals iverilog on every step, under the random
+#   IR, VC   cert_trace equals iverilog on every step, under the random
 #            schedule and with both clocks every step.
 #   legacy   the legacy model, with its proof bridge (`_next_refines_fast`,
 #            elaborated without sorry), equals iverilog under the random
@@ -149,18 +149,18 @@ ct() { # <dcert> <name> <opts...>
      > "$OUT/$n.txt" 2> "$OUT/$n.err") || { cat "$OUT/$n.err"; echo "FAIL: cert_trace $n"; exit 1; }
 }
 
-# ---- IR and TV ------------------------------------------------------------------
+# ---- IR and VC ------------------------------------------------------------------
 ct "$D" ir edges:file:"$OUT/edges.txt"
-ct "$D" tv edges:file:"$OUT/edges.txt" route:tv
+ct "$D" vc edges:file:"$OUT/edges.txt" route:vc
 ct "$D" ir_all edges:file:"$OUT/edges_all.txt"
-ct "$D" tv_all edges:file:"$OUT/edges_all.txt" route:tv
-for n in ir tv; do
+ct "$D" vc_all edges:file:"$OUT/edges_all.txt" route:vc
+for n in ir vc; do
   diff "$OUT/rtl_tb.txt" "$OUT/$n.txt" > "$OUT/diff_$n.txt" \
     || { head -4 "$OUT/diff_$n.txt"; echo "FAIL: $n differs from the source under the random schedule"; exit 1; }
   diff "$OUT/rtl_tb_all.txt" "$OUT/${n}_all.txt" > "$OUT/diff_${n}_all.txt" \
     || { head -4 "$OUT/diff_${n}_all.txt"; echo "FAIL: $n differs from the source with both clocks every step"; exit 1; }
 done
-echo "ok: IR and TV equal iverilog on all $STEPS steps, under the random schedule and with both clocks every step"
+echo "ok: IR and VC equal iverilog on all $STEPS steps, under the random schedule and with both clocks every step"
 n=$(diff "$OUT/ir.txt" "$OUT/ir_all.txt" | grep -c '^<' || true)
 [[ $n -gt 0 ]] || { echo "FAIL: the random schedule gave the same trace as both clocks every step"; exit 1; }
 echo "ok: control -- the random schedule differs from both clocks every step on $n steps"

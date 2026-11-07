@@ -6,7 +6,7 @@ under a supplied stimulus. The oracle side of an RTL differential: the same
 traces are compared line by line.
 
     lean --run Futamura_Projection_Scripts/cert_trace.lean <cert> <cycles> <stim>
-         [edges:all|edges:third|edges:file:<path>] [init:reset|init:zero] [route:ir|route:tv]
+         [edges:all|edges:third|edges:file:<path>] [init:reset|init:zero] [route:ir|route:vc]
 
 `stim v1` is the dcert2_memroute format, restricted to what an RTL testbench
 can replay: `in <ordinal> <width> <value>` (every cycle) and
@@ -24,7 +24,8 @@ Output: one line per step, `STEP <k> <out0> <out1> ...`, each output as its
 unsigned value (`bv_uint`). Runs the SPEC, not a residual: the FP drivers
 separately check their residual against this same `interpretDesign`.
 
-`route:tv` runs the translation-validation compiler instead: `compileDesign`
+`route:vc` runs the VERIFIED COMPILER instead (`route:tv` is the old name and is still
+accepted; it is not D3's translation validation): `compileDesign`
 once, then its straight-line program (`denoteResidual`) every step -- the
 program `compileDesign_correct` proves equal to `interpretDesign`. Same stimulus,
 same output format, so the two routes' traces compare line for line. A
@@ -128,7 +129,7 @@ def main (args : List String) : IO UInt32 := do
     let some cycles := cyc.toNat? | IO.eprintln s!"cycles {repr cyc} is not a number"; return 2
     let mut third := false
     let mut zeroInit := false
-    let mut tv := false
+    let mut vc := false
     let mut schedPath : Option String := none
     for opt in rest do
       if opt.startsWith "edges:file:" then
@@ -139,8 +140,9 @@ def main (args : List String) : IO UInt32 := do
         | "edges:third" => third := true
         | "init:reset" => zeroInit := false
         | "init:zero" => zeroInit := true
-        | "route:ir" => tv := false
-        | "route:tv" => tv := true
+        | "route:ir" => vc := false
+        | "route:vc" => vc := true
+        | "route:tv" => vc := true   -- the old name of route:vc
         | _ => do IO.eprintln s!"unknown option {opt}"; return 2
     let (_, D) ← Projection.CertLoadAny.loadAny cert
     let st ← match parseStim (← IO.FS.readFile stimPath) with
@@ -152,7 +154,7 @@ def main (args : List String) : IO UInt32 := do
         | .ok rows => pure (some rows)
         | .error e => do IO.eprintln s!"edges: {e}"; return 2
     let mut s := if zeroInit then zeroState D else resetState D
-    if tv then
+    if vc then
       match compileDesign D with
       | .error e => do IO.eprintln s!"compileDesign refused: {repr e}"; return 1
       | .ok R =>
@@ -175,5 +177,5 @@ def main (args : List String) : IO UInt32 := do
       s := r.nextState
     return 0
   | _ =>
-    IO.eprintln "usage: cert_trace <cert> <cycles> <stim> [edges:all|edges:third] [init:reset|init:zero] [route:ir|route:tv]"
+    IO.eprintln "usage: cert_trace <cert> <cycles> <stim> [edges:all|edges:third] [init:reset|init:zero] [route:ir|route:vc]"
     return 2

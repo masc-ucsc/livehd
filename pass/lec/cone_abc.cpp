@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cerrno>
 #include <chrono>
 #include <cstddef>
@@ -1338,6 +1339,20 @@ std::string model_text(const Lit_model& m) {
   return s;
 }
 
+std::string unesc_name(std::string_view s) {  // inverse of esc_name
+  std::string o;
+  for (size_t i = 0; i < s.size(); ++i) {
+    if (s[i] == '%' && i + 2 < s.size() && std::isxdigit(static_cast<unsigned char>(s[i + 1]))
+        && std::isxdigit(static_cast<unsigned char>(s[i + 2]))) {
+      o += static_cast<char>(std::stoi(std::string{s.substr(i + 1, 2)}, nullptr, 16));
+      i += 2;
+    } else {
+      o += s[i];
+    }
+  }
+  return o;
+}
+
 bool model_parse(const std::string& s, Lit_model& m) {
   std::istringstream in{s};
   std::string        tag;
@@ -1353,9 +1368,11 @@ bool model_parse(const std::string& s, Lit_model& m) {
   m.ands.resize(na);
   for (auto& p : m.pis) {
     in >> p;
+    p = unesc_name(p);
   }
   for (size_t i = 0; i < nr; ++i) {
     in >> m.regs[i] >> m.next[i];
+    m.regs[i] = unesc_name(m.regs[i]);
   }
   for (auto& a : m.ands) {
     in >> a[0] >> a[1];

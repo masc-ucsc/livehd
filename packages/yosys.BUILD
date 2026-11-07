@@ -243,14 +243,13 @@ cc_library(
         #"@edu_berkeley_abc//:abc-lib",
         "@libffi//:libffi",
         #"@tk_tcl_tcl//:tcl",
-    ] + select({
-        # On macOS the SDK ships a size_t-signature FlexLexer.h, which Yosys's
-        # verilog_lexer.h __APPLE__ branch (and the Darwin sed in
-        # yosys_utils.bzl) expect; the hermetic vanilla-2.6.4 header uses int
-        # signatures and would clash, so only use it off-Darwin.
-        "@platforms//os:osx": [],
-        "//conditions:default": ["@flex//:headers"],
-    }),
+        # Hermetic flex 2.6.4 header on every platform (int LexerInput/LexerOutput,
+        # same as upstream yosys and as the flex binary that generates
+        # verilog_lexer.cc). Do NOT fall back to the toolchain FlexLexer.h: Xcode,
+        # CommandLineTools and Homebrew each ship a different LexerInput
+        # signature (ssize_t / size_t / int), which breaks the override.
+        "@flex//:headers",
+    ],
     linkopts = ["-ldl"],
     alwayslink = True,
 )

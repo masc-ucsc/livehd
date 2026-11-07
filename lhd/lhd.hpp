@@ -230,8 +230,12 @@ struct Options {
     bool     resolved   = false;
     bool     dirty      = true;  // the built-in L1 vector (sim_tune_vector.hpp kTuneDefault*)
     int64_t  fence      = 16;    // std::numeric_limits<int64_t>::max() = no fences ("none")
-    uint64_t live_words = 256;
+    uint64_t live_words = 512;  // kTuneDefaultLiveWords
     bool     llvm       = true;  // an unset sim.tune.backend is llvm (kTuneDefaultLlvm)
+    // Neither dirty nor fence is pinned by any source: inou.cgen.sim receives
+    // `auto` and picks the pair from the design's dirty partition (LLVM only,
+    // Cgen auto-dirty rule); `dirty`/`fence` above then name the request.
+    bool     partition_auto = false;
   } sim_tune;
 
   Diag_fmt diag_fmt = default_diag_fmt();

@@ -294,7 +294,7 @@ To drive real vectors, generate with `--stim`. The driver then reads a
 `stim v1` file named on its own command line -- the format
 `formal/lean/Futamura_Projection_Scripts/cert_trace.lean` reads -- and prints
 `STEP <k> <out0> <out1> ...`, cert_trace's own format, so the legacy trace and
-the IR (`cert_trace`) or TV (`cert_trace ... route:tv`) trace compare line for
+the IR (`cert_trace`) or verified-compiler (`cert_trace ... route:vc`) trace compare line for
 line:
 
 ```bash

@@ -11,6 +11,7 @@
 #include <exception>
 #include <filesystem>
 #include <format>
+#include <fstream>
 #include <map>
 #include <set>
 
@@ -233,7 +234,19 @@ struct Applied_file {
   bool        regen            = false;
   bool        unknown_zero_set = false;
   bool        unknown_zero     = false;
+  bool        partition_auto   = false;  // dirty/fence were picked by the generator (auto-dirty rule)
 };
+
+// The generator's auto-dirty verdict for the tree in `simdir`
+// (inou.cgen.sim writes <odir>/tune-auto.txt: `<root key> on|off <big colors>`).
+std::optional<bool> read_partition_verdict(const std::string& simdir) {
+  std::ifstream in(simdir + "/tune-auto.txt");
+  std::string   key, verdict;
+  if (!(in >> key >> verdict) || (verdict != "on" && verdict != "off")) {
+    return std::nullopt;
+  }
+  return verdict == "on";
+}
 
 std::optional<Applied_file> read_applied(const std::string& simdir) {
   const auto text = tune::read_file(simdir + "/tune_applied.json");
@@ -264,6 +277,7 @@ std::optional<Applied_file> read_applied(const std::string& simdir) {
   a.regen            = read_bool(d, "regen");
   a.unknown_zero_set = read_bool(d, "unknown_zero_set");
   a.unknown_zero     = read_bool(d, "unknown_zero");
+  a.partition_auto   = read_bool(d, "partition_auto");
   return a;
 }
 
@@ -411,20 +425,26 @@ std::optional<std::pair<std::string, std::string>> renamed_sim_set(std::string_v
 
 std::vector<std::pair<std::string, std::string>> sim_tune_codegen_labels(const Options& opts, Result& res) {
   Tune_vector v;
+  bool        partition_auto = false;
   if (opts.sim_tune.resolved) {
-    v = Tune_vector{opts.sim_tune.dirty, opts.sim_tune.fence, opts.sim_tune.live_words, opts.sim_tune.llvm};
+    v              = Tune_vector{opts.sim_tune.dirty, opts.sim_tune.fence, opts.sim_tune.live_words, opts.sim_tune.llvm};
+    partition_auto = opts.sim_tune.partition_auto;
     // The session already read the file; the compile phase reset the inputs.
     for (const auto& path : opts.metadata_files) {
       add_input(res, path);
     }
   } else {
     // `lhd compile --emit-dir sim:`: no workdir tune store; explicit > file > default.
-    const auto f = load_tune_file(opts, res);
-    v            = sim_tune::resolve(explicit_pins(opts), f ? f->pins : sim_tune::Pins{}, std::nullopt).v;
+    const auto f   = load_tune_file(opts, res);
+    const auto r   = sim_tune::resolve(explicit_pins(opts), f ? f->pins : sim_tune::Pins{}, std::nullopt);
+    v              = r.v;
+    partition_auto = r.dirty == sim_tune::Source::dflt && r.fence == sim_tune::Source::dflt;
   }
+  // Unpinned dirty and fence: the generator decides from the design's
+  // dirty partition (inou.cgen.sim auto-dirty rule).
   return {
-      {"color_dirty", v.dirty ? "true" : "false"},
-      {"fence_ratio",              v.fence_str()},
+      {"color_dirty", partition_auto ? "auto" : (v.dirty ? "true" : "false")},
+      {"fence_ratio",              partition_auto ? "auto" : v.fence_str()},
       { "live_words",         v.live_words_str()},
       {    "backend",            v.backend_str()},
   };
@@ -1115,7 +1135,21 @@ struct Sim_tune_session::Impl {
     } else {
       std::error_code ec;
       const auto      ap = read_applied(sh.simdir);
-      regen              = !fs::exists(sh.simdir + "/gen_digests.json", ec) || !ap || ap->vector != applied.v.tv1();
+      // An auto-dirty tree holds the generator's dirty/fence pick: compare the
+      // knobs the session decided (live_words, backend) and the auto request.
+      const bool auto_now  = partition_auto_request();
+      const auto same_tree = [&] {
+        if (!ap) {
+          return false;
+        }
+        if (auto_now || ap->partition_auto) {
+          const auto held = Tune_vector::parse(ap->vector);
+          return auto_now == ap->partition_auto && held && held->live_words == applied.v.live_words
+                 && held->llvm == applied.v.llvm;
+        }
+        return ap->vector == applied.v.tv1();
+      };
+      regen = !fs::exists(sh.simdir + "/gen_digests.json", ec) || !same_tree();
       // This setup is about to regenerate the tree: drop its label first, so a
       // setup that dies half way never leaves a tree claiming the old vector
       // (after_generate writes the new label).
@@ -1125,7 +1159,12 @@ struct Sim_tune_session::Impl {
       regenerating = true;
     }
 
-    opts.sim_tune = Options::Sim_tune{true, applied.v.dirty, applied.v.fence, applied.v.live_words, applied.v.llvm};
+    opts.sim_tune = Options::Sim_tune{true,
+                                      applied.v.dirty,
+                                      applied.v.fence,
+                                      applied.v.live_words,
+                                      applied.v.llvm,
+                                      partition_auto_request()};
 
     // Does this run sample? Converged `auto` reuses the decision for free.
     if (enabled && !sh.setup_only && !sh.compile_only && !refused && !foreign_tree) {
@@ -1138,6 +1177,13 @@ struct Sim_tune_session::Impl {
       }
     }
     write_envelope();
+  }
+
+  // Neither dirty nor fence pinned and no tuner driving this setup: the
+  // generator picks them from the design's dirty partition. A running tuner
+  // keeps owning the pair (its ladder starts from the built-in default).
+  [[nodiscard]] bool partition_auto_request() const {
+    return !enabled && applied.dirty == sim_tune::Source::dflt && applied.fence == sim_tune::Source::dflt;
   }
 
   // A --run-only runs whatever its tree holds, so the tree must be one the
@@ -1369,6 +1415,15 @@ void Sim_tune_session::after_compile() { p_->compiled = true; }
 
 void Sim_tune_session::after_generate() {
   auto& p = *p_;
+  // An auto-dirty setup reports (and labels the tree with) the pair the
+  // generator picked, not the request.
+  const bool partition_auto = p.opts.sim_tune.partition_auto;
+  if (partition_auto) {
+    if (const auto on = read_partition_verdict(p.sh.simdir)) {
+      p.applied.v.dirty = *on;
+      p.applied.v.fence = *on ? livehd::sim::kTuneDefaultFenceRatio : livehd::sim::kTuneNoFences;
+    }
+  }
   if (!p.sh.user_workdir) {
     return;
   }
@@ -1406,6 +1461,8 @@ void Sim_tune_session::after_generate() {
   w.Bool(p.sh.unknown_zero_set);
   w.Key("unknown_zero");
   w.Bool(p.sh.unknown_zero);
+  w.Key("partition_auto");
+  w.Bool(partition_auto);
   w.EndObject();
   std::string why;
   (void)tune::write_file_atomic(p.sh.simdir + "/tune_applied.json", std::string{sb.GetString()} + "\n", why);

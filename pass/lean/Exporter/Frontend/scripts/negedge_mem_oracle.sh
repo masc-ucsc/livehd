@@ -11,8 +11,8 @@ set -euo pipefail
 # Lean step 2p is the RISE sub-step of source period p and step 2p+1 its FALL
 # sub-step; both take period p's inputs. single_edge promises the state at
 # PERIOD BOUNDARIES (step 2p, just before a rise), so those must match; the
-# mid-period steps are reported. IR is cert_trace (interpretDesign), TV is
-# cert_trace route:tv (compileDesign), every clock firing.
+# mid-period steps are reported. IR is cert_trace (interpretDesign), VC is
+# cert_trace route:vc (compileDesign), every clock firing.
 #
 # Designs:
 #   negmem   a 4 x 8 memory written on `negedge clk`, read asynchronously
@@ -150,8 +150,8 @@ for d in "${DESIGNS[@]}"; do
     sim "$R" "$OUT/$src" rtl
     grep -q x "$R/rtl.txt" && { grep -m3 x "$R/rtl.txt"; echo "FAIL: the source produced x"; exit 1; }
     [[ $(wc -l < "$R/rtl.txt") -eq $STEPS ]] || { echo "FAIL: the source run did not produce $STEPS steps"; exit 1; }
-    for route in ir tv; do
-      opts=(edges:all); [[ $route == tv ]] && opts+=(route:tv)
+    for route in ir vc; do
+      opts=(edges:all); [[ $route == vc ]] && opts+=(route:vc)
       (ulimit -s unlimited && LEAN_PATH="$LP" lean --tstack=1048576 --run Futamura_Projection_Scripts/cert_trace.lean \
          "$R/vc/$top.dcert" "$STEPS" "$R/stim.txt" "${opts[@]}" > "$R/$route.txt" 2> "$R/$route.err") \
         || { cat "$R/$route.err"; echo "FAIL: cert_trace $route"; exit 1; }
@@ -160,7 +160,7 @@ for d in "${DESIGNS[@]}"; do
       mid=$(diff "$R/rtl.txt" "$R/$route.txt" | grep -c '^<' || true)
       echo "ok: $top ($reader) $route == source at all $PERIODS period boundaries ($mid of $PERIODS mid-period steps differ)"
     done
-    cmp -s "$R/ir.txt" "$R/tv.txt" || { echo "FAIL: $top ($reader) TV != IR"; exit 1; }
+    cmp -s "$R/ir.txt" "$R/vc.txt" || { echo "FAIL: $top ($reader) VC != IR"; exit 1; }
     sim "$R" "$OUT/$ctl" ctl
     n=$(diff "$R/ctl.txt" "$R/ir.txt" | grep -c '^<' || true)
     nb=$(diff <(even "$R/ctl.txt") <(even "$R/ir.txt") | grep -c '^<' || true)

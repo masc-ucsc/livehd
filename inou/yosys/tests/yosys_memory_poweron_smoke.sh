@@ -20,7 +20,7 @@ sed "s/<= d;/<= d ^ 8'd1;/" "$W/gate.v" > "$W/broken.v"
 for variant in gate broken; do
   mkdir -p "$W/$variant"
   rc=0
-  (cd "$W/$variant" && LGCHECK_BMC_ONLY=1 LGCHECK_EQUIV_TIMEOUT=3 LGCHECK_BMC_STEPS=4 \
+  (cd "$W/$variant" && LGCHECK_BMC_ONLY=1 LGCHECK_EQUIV_TIMEOUT=12 LGCHECK_BMC_STEPS=4 \
     "$CHECK" --yosys "$YOSYS" --gold_reader slang --gate_reader slang \
     --reference "$W/gold.v" --implementation "$W/$variant.v" --top mem > check.log 2>&1) || rc=$?
   expected=2

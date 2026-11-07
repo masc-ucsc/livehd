@@ -11,7 +11,7 @@ set -euo pipefail
 #
 # Checks:
 #   rom      a 16 x 8 ROM, registered and asynchronous read, loaded from an
-#            image with comments and OUT-OF-ORDER `@` blocks: IR and TV
+#            image with comments and OUT-OF-ORDER `@` blocks: IR and VC
 #            (cert_trace) equal iverilog on the source for every step.
 #            Control: iverilog with an image that differs in one entry.
 #   partial  an image that names entries 0-11 only: those match iverilog, and
@@ -21,7 +21,7 @@ set -euo pipefail
 #   ram      a WRITABLE memory loaded from the same image (written back with
 #            its own registered read every cycle): the file's words are its
 #            POWER-ON image (DCERT3 `MemoryDesc.init`, decision #5), and IR and
-#            TV equal iverilog on every step, FP (`initStateOf`) equals IR, and
+#            VC equal iverilog on every step, FP (`initStateOf`) equals IR, and
 #            the legacy model (`initState`) equals iverilog. Control: the RAM
 #            loaded from the one-entry-changed image differs.
 #
@@ -113,11 +113,11 @@ PY
 sim "$R"
 grep -q x "$R/rtl.txt" && { echo "FAIL: the source read x"; exit 1; }
 ct "$R" ir edges:all
-ct "$R" tv edges:all route:tv
-for n in ir tv; do
+ct "$R" vc edges:all route:vc
+for n in ir vc; do
   diff "$R/rtl.txt" "$R/$n.txt" > "$R/diff_$n.txt" || { head -4 "$R/diff_$n.txt"; echo "FAIL: $n differs from the source"; exit 1; }
 done
-echo "ok: rom -- IR and TV equal iverilog on all $STEPS steps (registered and async read, out-of-order @ blocks)"
+echo "ok: rom -- IR and VC equal iverilog on all $STEPS steps (registered and async read, out-of-order @ blocks)"
 C="$OUT/rom_alt"
 mkdir -p "$C"; cp "$OUT/alt.hex" "$C/rom.hex"; cp "$OUT/rom_file.v" "$C/"
 sim "$C"
@@ -170,15 +170,15 @@ simram() { # <dir> -> <dir>/rtl.txt
 }
 simram "$W"
 grep -q x "$W/rtl.txt" && { echo "FAIL: the RAM source read x"; exit 1; }
-for route in ir tv; do
-  opts=(edges:all); [[ $route == tv ]] && opts+=(route:tv)
+for route in ir vc; do
+  opts=(edges:all); [[ $route == vc ]] && opts+=(route:vc)
   (cd "$ROOT/formal/lean" && ulimit -s unlimited && LEAN_PATH="$LP" lean --tstack=1048576 --run \
      Futamura_Projection_Scripts/cert_trace.lean "$W/vc/ram_file.dcert" "$STEPS" "$OUT/stim.txt" "${opts[@]}" \
      > "$W/$route.txt" 2> "$W/$route.err") || { cat "$W/$route.err"; echo "FAIL: cert_trace $route (ram)"; exit 1; }
   diff "$W/rtl.txt" "$W/$route.txt" > "$W/diff_$route.txt" \
     || { head -4 "$W/diff_$route.txt"; echo "FAIL: ram $route differs from the source"; exit 1; }
 done
-echo "ok: ram -- a writable memory starts from the file's words: IR and TV equal iverilog on all $STEPS steps"
+echo "ok: ram -- a writable memory starts from the file's words: IR and VC equal iverilog on all $STEPS steps"
 # FP starts from `initStateOf`; its `edges:all` leaves every third step quiet,
 # so it is compared with cert_trace `edges:third`.
 (cd "$ROOT/formal/lean" && ulimit -s unlimited && LEAN_PATH="$LP" lean --tstack=1048576 --run \

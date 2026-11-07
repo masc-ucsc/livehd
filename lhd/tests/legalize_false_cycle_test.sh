@@ -20,8 +20,9 @@
 #        chain, `s` / `!s`, and two slices of one selector -- `x[1:0] == 0`
 #        and `x[1]` -- that must stay correlated): compile, every hold-arm
 #        cycle unrolled by pass.legalize
-#   ic   a SPARSE case -- its hold arm IS reachable (the RTL holds): still
-#        refused as `comb-loop`, never unrolled
+#   ic   a SPARSE case -- its hold arm IS reachable, so `y` is a latch (IEEE: it
+#        keeps its value; simulators hold it): the reader builds the latch
+#        (lhd_comb_latch), never an unrolled cycle
 #
 # With LHD_EXTERNAL_SIM=1: iverilog RTL vs the emitted graph of fc and ec on
 # every selector value with random data, each with a swapped-arm RTL as the
@@ -119,10 +120,10 @@ n="$(grep -oE 'unrolled [0-9]+ combinational cycle\(s\)' <<<"$out" | awk '{s += 
 echo "ok: three exhaustive else-if chains compile; $n hold-arm cycles proven inactive and unrolled"
 
 out="$(compile ic)"
-[ $? -ne 0 ] || fail "a SPARSE case (reachable hold) compiled -- its cycle was unrolled"
-grep -q '"code":"comb-loop"' <<<"$out" || { echo "$out" | grep -o '"message":"[^"]*' | head -2; fail "the sparse case was refused for the wrong reason"; }
+[ $? -eq 0 ] || { echo "$out" | grep -o '"message":"[^"]*' | head -2; fail "a SPARSE case (reachable hold: a latch) was refused"; }
+grep -q 'Latch inferred for signal .*\\y' <<<"$out" || { echo "$out" | grep -i latch | head -3; fail "the sparse case did not become a latch"; }
 grep -q 'unrolled' <<<"$out" && fail "the sparse case reports an unrolled cycle"
-echo "ok: a sparse case (its hold arm is reachable) is still refused as comb-loop"
+echo "ok: a sparse case (its hold arm is reachable) compiles with a latch, never an unrolled cycle"
 
 if [ -z "${LHD_EXTERNAL_SIM:-}" ]; then
   echo "note: external-simulator leg skipped (set LHD_EXTERNAL_SIM=1)"

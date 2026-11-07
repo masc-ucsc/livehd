@@ -98,7 +98,7 @@ printf '[sim.tune]\ndirty = "on"\nfence = 0\nprofile = "off"\nbackend = "auto"\n
 python3 - "$W/cfg.json" <<'PY' || fail "[sim.tune] config not applied: $(cat "$W/cfg.json")"
 import json, sys
 t = json.load(open(sys.argv[1]))["sim_tune"]
-assert t["applied"]["vector"] == "tv1:d=on;f=0;lw=256;be=slop", t
+assert t["applied"]["vector"] == "tv1:d=on;f=0;lw=512;be=slop", t
 assert t["source"]["dirty"] == "explicit" and t["source"]["fence"] == "explicit", t
 assert t["source"]["backend"] == "default", t
 assert t["mode"] == "off" and t["enabled"] is False and t["reason"] == "mode-off", t
@@ -121,7 +121,9 @@ python3 - "$W/nowd.json" <<'PY' || fail "sim_tune without --workdir: $(cat "$W/n
 import json, sys
 t = json.load(open(sys.argv[1]))["sim_tune"]
 assert t["enabled"] is False and t["reason"] == "no-workdir", t
-assert t["applied"]["vector"] == "tv1:d=on;f=16;lw=256;be=llvm", t
+# Unpinned dirty/fence with no tuner: the generator picks them from the dirty
+# partition (no color of >= 4k GE in this tiny design -> merged, dirty off).
+assert t["applied"]["vector"] == "tv1:d=off;f=none;lw=512;be=llvm", t
 assert t["source"]["dirty"] == "default" and t["source"]["backend"] == "default", t
 PY
 "$LHD" sim "$PRP" -q --set sim.tune.profile=on --result-json "$W/nowd_on.json" 2>"$W/nowd_on.err" || fail "profile=on without workdir failed"
@@ -135,7 +137,7 @@ for f in "$W"/es/*.cpp; do
   grep -qF "\"$b\"" "$W/es/BUILD" || fail "--emit-dir sim: BUILD does not compile $b"
 done
 if ls "$W"/es/*.tune-id.cpp >/dev/null 2>&1; then
-  grep -q 'tv1:d=off;f=none;lw=256;be=llvm' "$W"/es/*.tune-id.cpp || fail "--emit-dir sim: did not bake the explicit vector"
+  grep -q 'tv1:d=off;f=none;lw=512;be=llvm' "$W"/es/*.tune-id.cpp || fail "--emit-dir sim: did not bake the explicit vector"
 fi
 
 grep -q "alwayslink = True" "$W/es/BUILD" || fail "--emit-dir sim: BUILD must alwayslink the sim library (tune-id identity)"
@@ -177,7 +179,7 @@ echo '[{"class":"livehd.sim.tuning","schema":"lhd-sim-tune-file-1","knobs":{"dir
 "$LHD" compile "$PRP" --emit-dir "sim:$W/et" "$W/tf_json.json" --depfile "$W/et.d" -q \
   --result-json "$W/et.json" 2>/dev/null || fail "a JSON-typed tune file was rejected: $(cat "$W/et.json")"
 if ls "$W"/et/*.tune-id.cpp >/dev/null 2>&1; then
-  grep -q 'tv1:d=on;f=0;lw=256;be=llvm' "$W"/et/*.tune-id.cpp || fail "the JSON bool/int tune file was not applied"
+  grep -q 'tv1:d=on;f=0;lw=512;be=llvm' "$W"/et/*.tune-id.cpp || fail "the JSON bool/int tune file was not applied"
 fi
 grep -q "tf_json.json" "$W/et.d" || fail "the tune file is not in the --depfile: $(cat "$W/et.d")"
 grep -q "tf_json.json" "$W/et.json" || fail "the tune file is not an envelope input"

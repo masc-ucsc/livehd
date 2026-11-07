@@ -2970,6 +2970,15 @@ std::optional<Icg_def_match> match_icg_driver(hhds::Pin_class inner, bool& abort
   if (!scan_enable(latch_enable, 0, saw_clock_phase) || !saw_clock_phase) {
     return std::nullopt;
   }
+  // A latch reset (`if (force) en_l = 1; else if (!clk) en_l = en;`) changes
+  // the latched enable while the clock is HIGH -- an extra edge on the gated
+  // clock that a Clock_cell, which samples its enable at the reference edge
+  // only, cannot express. Such a latch keeps its ordinary (exact) model.
+  if (const auto reset = gu::get_driver_of_sink_name(latch_node, "reset_pin");
+      !reset.is_invalid() && !(reset.is_const() && reset.is_known_false())) {
+    abort = true;
+    return std::nullopt;
+  }
   auto arm = latch_transparent_arm(latch_node);
   if (arm.is_invalid()) {
     arm = gu::get_driver_of_sink_name(latch_node, "din");  // raw yosys D/EN shape
@@ -3487,6 +3496,9 @@ int canonicalize_inverted_clock_gates(hhds::Graph* g) {
       continue;
     }
     const auto cnames = clock_port_names(def.get(), 0);
+    if (livehd::debug::env<"LHD_SIM_CLK_DEBUG">() != nullptr) {
+      std::fprintf(stderr, "[icgdbg] %s: child %s clock ports=%zu\n", std::string{g->get_name()}.c_str(), gu::debug_name(n).c_str(), cnames.size());
+    }
     if (cnames.empty()) {
       continue;
     }
@@ -3576,10 +3588,23 @@ int materialize_inline_clock_gates(hhds::Graph* g, std::string_view from_pass) {
     for (int hops = 0; hops < 8 && !d.is_invalid() && !d.is_const() && !gu::is_graph_input_pin(d); ++hops) {
       auto       dn  = d.get_master_node();
       const auto dop = gu::type_op_of(dn);
+      if (livehd::debug::env<"LHD_SIM_CLK_DEBUG">() != nullptr) {
+        std::fprintf(stderr, "[icgdbg] %s:   hop %d %s\n", std::string{g->get_name()}.c_str(), hops, gu::debug_name(dn).c_str());
+      }
       chain.push_back(dn.get_class_index());
       if (dop == Ntype_op::And || dop == Ntype_op::Or) {
         bool abort = false;
-        if (auto m = match_icg_driver(d, abort); m && !abort && gu::is_graph_input_pin(m->clk_in)) {
+        auto m = match_icg_driver(d, abort);
+        if (livehd::debug::env<"LHD_SIM_CLK_DEBUG">() != nullptr) {
+          std::fprintf(stderr,
+                       "[icgdbg] %s: inline gate %s match=%d abort=%d clk_input=%d\n",
+                       std::string{g->get_name()}.c_str(),
+                       gu::debug_name(dn).c_str(),
+                       m.has_value() ? 1 : 0,
+                       abort ? 1 : 0,
+                       m.has_value() && gu::is_graph_input_pin(m->clk_in) ? 1 : 0);
+        }
+        if (m && !abort && gu::is_graph_input_pin(m->clk_in)) {
           hits.push_back({sink, driver, dn, *m});
           path_nodes.insert(chain.begin(), chain.end());
         }
@@ -3610,6 +3635,9 @@ int materialize_inline_clock_gates(hhds::Graph* g, std::string_view from_pass) {
       continue;
     }
     const auto cnames = clock_port_names(def.get(), 0);
+    if (livehd::debug::env<"LHD_SIM_CLK_DEBUG">() != nullptr) {
+      std::fprintf(stderr, "[icgdbg] %s: child %s clock ports=%zu\n", std::string{g->get_name()}.c_str(), gu::debug_name(n).c_str(), cnames.size());
+    }
     if (cnames.empty()) {
       continue;
     }

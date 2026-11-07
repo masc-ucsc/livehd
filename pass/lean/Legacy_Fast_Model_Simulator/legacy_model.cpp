@@ -53,6 +53,10 @@ void emit_legacy_model(const DesignScan& design, const CertificateIR& cert, cons
     out << "import LeanSemanticPrimitives.Translation.LegacyCertWF\n\nopen OpBridge\n\n";
   } else if (names.memory_values || options.emit_fast_bridge) {
     out << "import LeanSemanticPrimitives.Translation.OpBridge\n\nopen OpBridge\n\n";
+  } else if (options.emit_cert && legacy_cert_large(cert)) {
+    // A large certificate part looks its sources and nodes up in `OpBridge.BT` trees, and nothing above
+    // imports them here; they live in a Mathlib-free module (without it: "Unknown identifier `BT.find`").
+    out << "import LeanSemanticPrimitives.Translation.LookupTree\nimport LeanSemanticPrimitives\n\nopen OpBridge\n\n";
   } else {
     out << "import LeanSemanticPrimitives\n\n";
   }

@@ -7,7 +7,7 @@ stuttering, and the spec's own facts.
   sym_refmap specfacts <file.refmap> [jobs:<n>] [sf:<n>] [wf:<n>] [emit:[f1:|f2:]<file>]
                     [cache] [solver:<cadical>] [work:<dir>]
   sym_refmap judge <file.refmap> trace:<file.tsv> | random:<steps>,<runs>[,<seed>]
-                    [sim:fp|ir|tv] [check:<steps>] [sf:<n>] [wf:<n>] [work:<dir>] [label:<name>]
+                    [sim:fp|ir|vc] [check:<steps>] [sf:<n>] [wf:<n>] [work:<dir>] [label:<name>]
 
 `judge` decides, on concrete runs from the all-zero state, whether ANY stuttering alignment of
 the spec matches the implementation (`Kit.Judge`): no map, no invariant, no solver. It reads only
@@ -29,9 +29,10 @@ stall choice fails, if it does), `ENVIRONMENT VIOLATED at step n` (exit 3: a ran
 `asm`). The simulator route (`sim:`), each with its theorem relating it to `interpretDesign`:
 `fp` the projection's specialized residual (`runMemSim`, `runMemSim_correct`; the default), `ir`
 the post-lowering IR stepped directly (`directStepRaw` after one `checkDesign`,
-`directStepRaw_correct`), `tv` the translation-validation compiler's straight-line program
-(`compileDesign` once, `denoteResidual` every step, `compileDesign_correct`). `ir` and `tv` need a
-memory-free certificate. With `ir` or `tv` every run is also cross-checked against `fp` on its
+`directStepRaw_correct`), `vc` the verified compiler's straight-line program (`sim:tv` is the
+old name and is still accepted)
+(`compileDesign` once, `denoteResidual` every step, `compileDesign_correct`). `ir` and `vc` need a
+memory-free certificate. With `ir` or `vc` every run is also cross-checked against `fp` on its
 first `check:` steps (default 4; outputs and next state), and a NO MATCH is re-run on `fp` alone
 before it is reported, so the verdict always rests on `runMemSim` (a different answer on fp is
 ROUTE DISAGREES, exit 5). The implementation is simulated one step ahead of the search, so a run
@@ -1057,7 +1058,7 @@ def judgeMain (path : String) (rest : List String) : IO UInt32 := do
   say s!"  contract: {J.slot.obs.length} observed words, {J.xfer.length} xfer, maxstall {J.maxStall}; random inputs change at steps n % {period} = {phase}"
   let fpS : Judge.Sim := fun i st => runMemSim simS (edgesAll DS) i st
   let fpI : Judge.Sim := fun i st => runMemSim simI (edgesAll DI) i st
-  let route := (opt "sim").getD "fp"
+  let route := match (opt "sim").getD "fp" with | "tv" => "vc" | r => r   -- `tv`: the old name of `vc`
   let check := ((opt "check").bind (·.toNat?)).getD 4
   let ofRT (r : RuntimeResult) : StateM.ResultM := { nextState := { flops := r.nextState.flops, mems := #[] }, outputs := r.outputs }
   let mkRoute (D : DesignCert) (fp : Judge.Sim) : IO (Option Judge.Sim) := do
@@ -1070,11 +1071,11 @@ def judgeMain (path : String) (rest : List String) : IO UInt32 := do
           match Compiler.Direct.checkRuntime D (edgesAll D) i (StateM.denote st) with
           | .ok _ => some (ofRT (Compiler.Direct.directStepRaw D (edgesAll D) i (StateM.denote st)))
           | .error _ => none
-    if route == "tv" then
+    if route == "vc" then
       match compileDesign D with
-      | .error e => say s!"  route tv: compileDesign refused the certificate: {repr e}"; return none
+      | .error e => say s!"  route vc: compileDesign refused the certificate: {repr e}"; return none
       | .ok R => return some fun i st => some (ofRT (denoteResidual R (edgesAll D) i (StateM.denote st)))
-    say s!"  sim:{route} is not one of fp | ir | tv"; return none
+    say s!"  sim:{route} is not one of fp | ir | vc"; return none
   let tr0 ← IO.monoMsNow
   let some stepS ← mkRoute DS fpS | return 2
   let some stepI ← mkRoute DI fpI | return 2

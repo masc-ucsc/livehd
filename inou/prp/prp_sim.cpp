@@ -4375,6 +4375,10 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
   o << "template<int N, int M> static inline void __prp_poke(Slop_u<N>& d, const Slop<M>& v){ "
        "constexpr int S = M == 64 ? 64 : (M > N ? M : N); d = Slop_u<N>{Slop<S>(v).template zext_to<N,N+1>()}; }\n";
   o << "template<int N, int M> static inline void __prp_poke(Slop_u<N>& d, const Slop_u<M>& v){ d = Slop_u<N>{v}; }\n";
+  // A native simulator register (__lhd_nat, the LLVM backend's two-state
+  // storage): poke its Slop view, then store it back.
+  o << "template<class D, class M, class = typename D::S> static inline void __prp_poke(D& d, const M& v){ "
+       "typename D::S t = d.get(); __prp_poke(t, v); d = t; }\n";
   // `{val:spec}` puts interpolation for PLAIN locals: grammar
   // `[width][b/o/x/X/d][s]` — width zero-pads, `s` groups digits `_`-separated
   // every 4 (mirrors the comptime __fmt fold in upass/constprop).

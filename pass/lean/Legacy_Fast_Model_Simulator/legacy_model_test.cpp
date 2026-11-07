@@ -1,6 +1,7 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "legacy_model.hpp"
 
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -221,6 +222,97 @@ TEST(LegacyModel, WholeArrayMemoryUsesLoadAndToBus) {
 // A memory nothing reads has no certificate driver, but it keeps a state
 // field; both next-state functions must hold it, or the record literal is
 // missing a field and the model does not compile (mem_write_only).
+// A let chain longer than one part (finding AI): the fast model is cut into
+// `@[noinline]` parts, each passing on exactly the values a later part or the
+// result reads; the main definition calls part 0. A short chain is one def.
+TEST(LegacyModel, LongLetChainIsSplitIntoParts) {
+  DesignScan d;
+  d.name         = "chain";
+  d.inputs       = {
+      {"a", 2000000000, 8, {}}
+  };
+  const uint32_t len = 4100;
+  for (uint32_t k = 0; k < len; ++k) {
+    const PinRef prev = k == 0 ? input(2000000000, 8) : PinRef{PinKind::Node, 10 + k - 1, 0, 8, 0, {}};
+    d.nodes.push_back({10 + k, ScanOp::Sum, 8, false, {{0, 0, prev}, {1, 1, input(2000000000, 8)}}});
+  }
+  d.outputs = {
+      {"y", 0, 8, PinRef{PinKind::Node, 10 + len - 1, 0, 8, 0, {}}},
+      {"z", 1, 8,                 PinRef{PinKind::Node, 15, 0, 8, 0, {}}}
+  };
+  const auto        c = build_certificate(d, {});
+  LegacyEmitOptions o;
+  o.emit_cert = false;
+  std::ostringstream out;
+  ASSERT_NO_THROW(emit_legacy_model(d, c, o, out));
+  const auto text = out.str();
+  EXPECT_NE(text.find("@[noinline] def chain_comb_p2 "), std::string::npos) << text.substr(0, 2000);
+  EXPECT_EQ(text.find("chain_comb_p3"), std::string::npos);
+  EXPECT_NE(text.find(" :=\n  chain_comb_p0 i"), std::string::npos);
+  // n_15 is read only by the result, so parts 1 and 2 both receive it; part 0 passes it on.
+  for (const auto* part : {"@[noinline] def chain_comb_p1 ", "@[noinline] def chain_comb_p2 "}) {
+    const auto at = text.find(part);
+    ASSERT_NE(at, std::string::npos);
+    EXPECT_NE(text.substr(at, text.find('\n', at) - at).find("(n_15 : BitVec 8)"), std::string::npos) << part;
+  }
+  EXPECT_NE(text.find("  chain_comb_p1 i n_15 "), std::string::npos);
+
+  // The same design 100 nodes long stays one definition.
+  d.nodes.resize(100);
+  d.outputs = {
+      {"y", 0, 8, PinRef{PinKind::Node, 109, 0, 8, 0, {}}}
+  };
+  std::ostringstream short_out;
+  ASSERT_NO_THROW(emit_legacy_model(d, build_certificate(d, {}), o, short_out));
+  EXPECT_EQ(short_out.str().find("_p0"), std::string::npos);
+}
+// Above 2,000 nodes or sources the certificate part takes the form that scales
+// (finding AK): lookup trees for the sources and nodes, written a subtree per
+// line, with closed-term extraction off for the large literals. A small design
+// keeps the `if n = ..` source chain and the node list.
+TEST(LegacyModel, LargeCertificateUsesLookupTrees) {
+  DesignScan d;
+  d.name   = "big";
+  d.inputs = {
+      {"a", 2000000000, 8, {}}
+  };
+  for (uint32_t k = 0; k < 2100; ++k) {
+    const PinRef prev = k == 0 ? input(2000000000, 8) : PinRef{PinKind::Node, 10 + k - 1, 0, 8, 0, {}};
+    d.nodes.push_back({10 + k, ScanOp::Sum, 8, false, {{0, 0, prev}, {1, 1, input(2000000000, 8)}}});
+  }
+  d.outputs = {
+      {"y", 0, 8, PinRef{PinKind::Node, 10 + 2099, 0, 8, 0, {}}}
+  };
+  std::ostringstream big;
+  ASSERT_NO_THROW(emit_legacy_model(d, build_certificate(d, {}), {}, big));
+  const auto text = big.str();
+  EXPECT_NE(text.find("def big_srcTree : BT"), std::string::npos);
+  EXPECT_NE(text.find("nodes := big_nodesFn"), std::string::npos);
+  EXPECT_EQ(text.find("nodes_of_list"), std::string::npos);
+  EXPECT_EQ(text.find("if n = "), std::string::npos);
+  EXPECT_NE(text.find("set_option compiler.extract_closed false in\ndef big_nodesTree"), std::string::npos);
+  // No bridge proofs and no memory values: nothing else imports `OpBridge.BT`.
+  EXPECT_NE(text.find("import LeanSemanticPrimitives.Translation.LookupTree\n"), std::string::npos);
+  EXPECT_NE(text.find("open OpBridge"), std::string::npos);
+  size_t longest = 0;
+  for (size_t at = 0, end; at < text.size(); at = end + 1) {
+    end     = text.find('\n', at);
+    end     = end == std::string::npos ? text.size() : end;
+    longest = std::max(longest, end - at);
+  }
+  EXPECT_LT(longest, 20000u) << "a literal was written on one long line";
+
+  d.nodes.resize(100);
+  d.outputs = {
+      {"y", 0, 8, PinRef{PinKind::Node, 109, 0, 8, 0, {}}}
+  };
+  std::ostringstream small;
+  ASSERT_NO_THROW(emit_legacy_model(d, build_certificate(d, {}), {}, small));
+  EXPECT_NE(small.str().find("nodes := nodes_of_list big_nodeCerts"), std::string::npos);
+  EXPECT_NE(small.str().find("if n = "), std::string::npos);
+  EXPECT_EQ(small.str().find("extract_closed"), std::string::npos);
+  EXPECT_EQ(small.str().find("LookupTree"), std::string::npos);
+}
 TEST(LegacyModel, UnreadMemoryHoldsItsField) {
   DesignScan d;
   d.name   = "wro";
