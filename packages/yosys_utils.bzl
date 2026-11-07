@@ -124,13 +124,7 @@ def _yosys_flex_impl(ctx):
         command = """
 set -e
 "$1" "${@:4}"
-if [ "$(uname)" = "Darwin" ]; then
-  sed -e 's/int yyFlexLexer::LexerInput( char\\* buf, int/size_t yyFlexLexer::LexerInput( char* buf, size_t/' \
-      -e 's/void yyFlexLexer::LexerOutput( const char\\* buf, int size/void yyFlexLexer::LexerOutput( const char* buf, size_t size/' \
-      "$2" > "$3"
-else
-  cp "$2" "$3"
-fi
+cp "$2" "$3"
 rm "$2"
 """,
         arguments = [ctx.executable.flex.path, out_tmp, out.path, args],
