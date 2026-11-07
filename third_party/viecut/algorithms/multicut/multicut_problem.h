@@ -106,7 +106,7 @@ struct multicut_problem {
         NodeID max = std::max(a, b);
 
         NodeID combined = min * numOriginalTerminals + max;
-        finished_blockpairs.extract(combined);
+        finished_blockpairs.erase(combined);
     }
 
     bool isPairFinished(NodeID a, NodeID b, NodeID numOriginalTerminals) {
