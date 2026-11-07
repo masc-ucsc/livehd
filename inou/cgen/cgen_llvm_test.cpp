@@ -265,9 +265,8 @@ TEST(CgenLlvm, SelectsOnOneConditionShareOneBranch) {
   size_t branches = 0, selects = 0;
   for (const auto& block : *(*module)->getFunction("fused_regions")) {
     for (const auto& instruction : block) {
-      const auto* br  = llvm::dyn_cast<llvm::BranchInst>(&instruction);
-      branches       += br != nullptr && br->isConditional();
-      selects        += llvm::isa<llvm::SelectInst>(instruction) && instruction.getType()->isIntegerTy(64);
+      branches += llvm::isa<llvm::CondBrInst>(instruction);
+      selects  +=llvm::isa<llvm::SelectInst>(instruction) && instruction.getType()->isIntegerTy(64);
     }
   }
   EXPECT_EQ(branches, 2u);  // one per condition level, shared by both outputs
