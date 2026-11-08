@@ -5929,8 +5929,26 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     // one, or the one after its forwarded prefix -- for the array and for its
     // knowledge state alike.
     auto         rd_snapshot = [&](size_t r, const auto& cur, const auto& next, const auto& after) -> const auto& {
-      if (mc.is_comb || mc.is_whole || n_wr == 0) {
-        return mc.is_comb ? next : ((mc.fwd && !mc.fwd->is_known_false()) ? next : cur);
+      if (mc.is_comb) {
+        // A clockless array resolves in program order over its base contents
+        // (a_after[0]: the `update` bus or the power-on contents): row r is
+        // the prefix of write ports that precede read r.
+        if (n_wr == 0 || !mc.fwd) {
+          return next;  // no matrix: every write is seen
+        }
+        size_t seen = 0;
+        while (seen < n_wr && fwd_bit(r, seen)) {
+          ++seen;
+        }
+        for (size_t w = seen; w < n_wr; ++w) {
+          if (fwd_bit(r, w)) {
+            return next;  // not a prefix: the coarse (fully written) read
+          }
+        }
+        return after[applied_upto[seen]];
+      }
+      if (mc.is_whole || n_wr == 0) {
+        return (mc.fwd && !mc.fwd->is_known_false()) ? next : cur;
       }
       size_t forwarded_writes = 0;
       while (forwarded_writes < n_wr && fwd_bit(r, forwarded_writes)) {

@@ -1,0 +1,66 @@
+/*
+:name: array_program_order
+:type: simulation
+*/
+
+// A `mut` array is a clockless memory that resolves in program order: a read
+// sees exactly the element writes that textually precede it, never a later
+// one. `t` reads before the (conditional) write, `o` after it.
+pub mod array_program_order(a:U2, b:U2, x:U8, c:Bool, v:[4]U8) -> (t:U8@[0], o:U8@[0], q:[4]U8@[0]) {
+  mut m:[4]U8 = 0
+  m[1] = 7
+  t = m[a]
+  if c { m[b] = x ^ m[a] }
+  o = m[a] ^ v[b]
+  q = m
+}
+
+// Non-byte entries (the simulator stores them one per byte) and reads whose
+// write prefixes are 0, 1 and 2 with dependent writes in between.
+pub mod array_program_order_u3(a:U3, b:U3, x:U3) -> (n0:U3@[0], n1:U3@[0], n2:U3@[0]) {
+  mut n:[8]U3 = 0
+  n0 = n[a]
+  n[b] = x
+  n1 = n[a]
+  n[a] = (n1 + 1)#[0..<3]
+  n2 = n[b]
+}
+
+test array_program_order_u3.check {
+  mut dut = array_program_order_u3
+  tick 64 {
+    const av = clock#[0..<3]
+    const bv = (clock >> 3)#[0..<3]
+    const xv = (clock * 5)#[0..<3]
+    dut.a = av
+    dut.b = bv
+    dut.x = xv
+    step
+    assert(dut.n0 == 0)
+    const e1 = if av == bv { xv } else { 0 }
+    assert(dut.n1 == e1)
+    const e2 = if av == bv { (e1 + 1) & 7 } else { xv }
+    assert(dut.n2 == e2)
+  }
+}
+
+test array_program_order.check {
+  mut dut = array_program_order
+  tick 16 {
+    const av = clock#[0..<2]
+    const bv = (clock >> 1)#[0..<2]
+    const cv = clock#[2] == 1
+    const xv = (clock * 37)#[0..<8]
+    dut.a = av
+    dut.b = bv
+    dut.c = cv
+    dut.x = xv
+    dut.v = 0x04030201
+    step
+    const base = if av == 1 { 7 } else { 0 }
+    assert(dut.t == base)
+    const after = if cv and bv == av { xv ^ base } else { base }
+    const vb = bv + 1
+    assert(dut.o == (after ^ vb))
+  }
+}

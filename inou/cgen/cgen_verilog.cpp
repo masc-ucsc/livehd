@@ -1594,6 +1594,55 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
       fout->append("end\n");
     }
 
+    // A clockless array resolves in program order: read r sees the write
+    // ports its `fwd` row selects (a prefix) over the cycle's BASE contents
+    // (the `update` bus, else the power-on contents). A read whose row is not
+    // every write reads the base array topped by its forwarding chain; a full
+    // row reads the post-write array.
+    bool comb_partial = false;
+    if (!registered && mem_type == 2) {
+      int r = 0;
+      for (const auto& rp : port_vector) {
+        if (!rp.rdport) {
+          continue;
+        }
+        int w = 0;
+        for (const auto& wp : port_vector) {
+          if (wp.rdport) {
+            continue;
+          }
+          const int bit = r * n_wr_ports + w;
+          ++w;
+          if (wp.addr.is_invalid() || wp.din.is_invalid()) {
+            continue;
+          }
+          if (!mem_fwd_dpin.is_invalid() && !const_of(mem_fwd_dpin).bit_test(bit)) {  // no matrix: every write
+            comb_partial = true;
+          }
+        }
+        ++r;
+      }
+    }
+    const auto basename = absl::StrCat(aname, "_base");
+    if (comb_partial) {
+      fout->append(absl::StrCat("reg [", mem_size - 1, ":0][", mem_bits - 1, ":0] ", basename, ";\n"));
+      fout->append("always_comb begin\n");
+      if (has_update) {
+        fout->append(absl::StrCat("  ", basename, " = ", updbus, ";\n"));
+      } else {
+        for (int i = 0; i < mem_size; ++i) {
+          fout->append(absl::StrCat("  ",
+                                    basename,
+                                    "[",
+                                    i,
+                                    "] = ",
+                                    init_entries.empty() ? absl::StrCat(mem_bits, "'b0") : init_entries[i],
+                                    ";\n"));
+        }
+      }
+      fout->append("end\n");
+    }
+
     // Async reads: per-entry douts (read port N => pid n_wr_ports+N) + read_all.
     // Match create_locals: type 2 douts are variables, type 0/1 douts are
     // nets. A clockless ROM can still have type 0, so clock presence does
@@ -1628,8 +1677,9 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
       // index unknown. Spell that result directly: a constant unknown
       // selector is diagnosed as an invalid element by slang before lowering.
       const auto  raddr     = get_wire_or_const(p.addr, mem_addr_bits, true);
-      std::string rhs       = invalid_const_addr(p.addr) ? unknown_entry() : absl::StrCat(aname, "[", raddr, "]");
-      if (registered && !has_update) {
+      std::string rhs       = invalid_const_addr(p.addr) ? unknown_entry()
+                                                         : absl::StrCat(comb_partial ? basename : aname, "[", raddr, "]");
+      if ((registered && !has_update) || comb_partial) {
         // Same-cycle forwarding chain from the cell's per-(read,write) FWD /
         // UNDEF matrices (bit r*n_wr + w, graph/cell.cpp): a later write port
         // overrides an earlier one (last writer wins, matching the nonblocking
@@ -1661,7 +1711,14 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
               for (int l = 0; l < lanes; ++l) {
                 lane_rhs.push_back(invalid_const_addr(p.addr)
                                        ? absl::StrCat(lane_w, "'b", std::string(static_cast<size_t>(lane_w), '?'))
-                                       : absl::StrCat(aname, "[", raddr, "][", (l + 1) * lane_w - 1, ":", l * lane_w, "]"));
+                                       : absl::StrCat(comb_partial ? basename : aname,
+                                                      "[",
+                                                      raddr,
+                                                      "][",
+                                                      (l + 1) * lane_w - 1,
+                                                      ":",
+                                                      l * lane_w,
+                                                      "]"));
               }
             }
             const auto addr_hit = absl::StrCat("(", get_wire_or_const(it->addr, mem_addr_bits, true), " == ", raddr, ")");
@@ -2023,7 +2080,10 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
       fout->append("end\n");
     }
 
-    // Writes first (array has forwarding semantics)
+    // Program order: read r sees the writes its `fwd` row selects, a PREFIX
+    // of the write ports (upass.tolg mints the read ports in program order,
+    // so the prefixes never shrink). Interleave each read after its prefix.
+    std::vector<std::string> write_stmts;
     for (auto& p : port_vector) {
       if (p.rdport) {
         continue;
@@ -2036,15 +2096,13 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
       auto din_name   = get_wire_or_const(p.din, mem_bits, true);
       auto write_stmt = absl::StrCat(aname, "[", get_wire_or_const(p.addr, mem_addr_bits, true), "] = ", din_name, ";\n");
       if (p.enable.is_invalid()) {
-        fout->append("  ", write_stmt);
+        write_stmts.emplace_back(absl::StrCat("  ", write_stmt));
       } else {
-        fout->append("  if (", get_wire_or_const(p.enable, 1, true), ") begin \n");
-        fout->append("    ", write_stmt);
-        fout->append("end\n");
+        write_stmts.emplace_back(absl::StrCat("  if (", get_wire_or_const(p.enable, 1, true), ") begin \n    ", write_stmt, "end\n"));
       }
     }
-
-    auto n_rd_pos = 0;
+    size_t emitted  = 0;
+    auto   n_rd_pos = 0;
     for (auto& p : port_vector) {
       if (!p.rdport) {
         continue;
@@ -2053,6 +2111,19 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
         livehd::diag::err("inou.cgen", "mem-malformed", "internal")
             .msg("array {} read port is not correctly configured", debug_name(node))
             .fatal();
+      }
+      size_t prefix = mem_fwd_dpin.is_invalid() ? write_stmts.size() : 0;  // no matrix: every write is seen
+      while (prefix < write_stmts.size()
+             && const_of(mem_fwd_dpin).bit_test(static_cast<int>(static_cast<size_t>(n_rd_pos) * write_stmts.size() + prefix))) {
+        ++prefix;
+      }
+      if (prefix < emitted) {
+        livehd::diag::err("inou.cgen", "mem-ordering", "unsupported")
+            .msg("array {} read port {} sees fewer writes than an earlier read port (not program order)", debug_name(node), n_rd_pos)
+            .fatal();
+      }
+      for (; emitted < prefix; ++emitted) {
+        fout->append(write_stmts[emitted]);
       }
       // Same dout convention as type 0/1: read port N drives pid (n_wr_ports + N).
       const auto dout_pid = static_cast<uint32_t>(n_wr_ports + n_rd_pos);
@@ -2071,6 +2142,9 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
         fout->append("    ", read_stmt);
         fout->append("end\n");
       }
+    }
+    for (; emitted < write_stmts.size(); ++emitted) {
+      fout->append(write_stmts[emitted]);
     }
 
     fout->append("end\n");

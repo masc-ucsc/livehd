@@ -141,6 +141,17 @@ public:
     size_t   warn_site          = no_site;
   };
   static constexpr size_t no_site = ~size_t{0};
+  // A clockless (type=2) array as a kernel-local std::array: entries are
+  // stored at their natural width (8/16/32/64 bits, wider ones in whole
+  // 64-bit words), so an array of 8/16/32/64-bit entries has exactly the
+  // layout of its packed value. It holds no state: a read sequence seeds it
+  // with the cycle's base contents, applies the writes that precede the read
+  // in program order, and loads.
+  [[nodiscard]] size_t    array_create(uint32_t bits, uint64_t size);
+  bool                    array_seed(size_t array, Value base);
+  bool                    array_write(size_t array, Value enable, Value address, Value data);
+  [[nodiscard]] Value     array_read(size_t array, Value address, uint32_t result_width, bool result_unsign);
+  [[nodiscard]] Value     array_read_all(size_t array, uint32_t result_width, bool result_unsign);
   void                    bind_memory(std::string_view symbol, const Memory& memory);
   [[nodiscard]] Value     memory_read(std::string_view symbol, Value address, uint32_t result_width, bool result_unsign);
   [[nodiscard]] Value     memory_read_all(std::string_view symbol, uint32_t result_width, bool result_unsign);
@@ -243,9 +254,20 @@ public:
     // Zero leaves the general signed/wrapping index representation intact.
     uint32_t                               index_bits = 0;
     std::vector<std::pair<size_t, size_t>> carries;  // input, output indices
+    // A STATEFUL body (per-trip resource tables): trip `ordinal` runs the body
+    // with resource table `tables[ordinal]` (the lane's own state, slots and
+    // runtime flags), so state stays in each lane's storage while the loop
+    // ports (index, carries, invariants) stay SSA values. `bindings` then
+    // covers only the body's PACKED inputs, in input order: a storage-bound
+    // input (a register read) has no loop port.
+    bool                                   trip_tables = false;
+    // The entry's `outputs`: one word run per listed (packed) body output, in
+    // this order. Empty: every packed output, in output order.
+    std::vector<size_t>                    entry_outputs;
   };
   // void entry(const uint64_t* inputs, uint64_t* outputs,
-  //            uint64_t count, int64_t first, int64_t step)
+  //            uint64_t count, int64_t first, int64_t step
+  //            [, void* const* tables])   -- the last one with trip_tables
   bool add_loop(std::string_view entry, const Loop_layout& layout, std::string& error, bool track_changed = true);
 
   // A sealed, resource-free color can be embedded in a larger body without
@@ -269,13 +291,20 @@ public:
   // are replaced by the loop itself); `outputs` receives one Value per body
   // output, a carry output being the retained carry, exactly as add_loop
   // publishes it.
+  // With `layout.trip_tables`, `tables_resource` is the resource of THIS
+  // kernel holding the `void* const*` array of per-trip tables (the inner
+  // wrapper's lanes), and `body.inputs` lists only the body's packed inputs.
   bool inline_loop(const Inline_body& body, const Loop_layout& layout, uint64_t count, int64_t first, int64_t step,
-                   const std::vector<Value>& inputs, std::vector<Value>& outputs, std::string& error);
+                   const std::vector<Value>& inputs, std::vector<Value>& outputs, std::string& error,
+                   std::optional<size_t> tables_resource = std::nullopt);
 
   // Finalize the ABI and return exact bitcode with the color and optional loop
   // entry symbols normalized. Equal keys can share code; mutable instance storage is still
   // supplied separately. Do not add operations after requesting this key.
   std::string sharing_key(std::string& error, bool track_changed = true);
+  // The finalized module's bitcode alone (no reset-split annotation): what an
+  // Inline_body carries. The standalone object keeps its speculation.
+  std::string inline_bitcode(std::string& error, bool track_changed = true);
 
   // Verify, optimize, and emit a self-contained native object. The module
   // exports:

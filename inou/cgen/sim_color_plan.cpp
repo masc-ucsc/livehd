@@ -3821,7 +3821,12 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
       const bool comb_read_all = !registered && consumer_site.output_port == Ntype::Memory_readall_pid;
       int        prefix        = 0;
       if (type != 1) {
-        if (!registered && (target != nullptr || comb_read_all)) {
+        if (!registered && target != nullptr) {
+          // A clockless array resolves in program order: an element read
+          // depends only on the writes that precede it (its `fwd` row), so a
+          // later write fed by the read is no cycle.
+          prefix = fwd_matrix.is_invalid() ? writes : row_prefix(fwd_matrix, target->rdidx);  // no matrix: every write
+        } else if (comb_read_all) {
           prefix = writes;  // every settle phase recomputes combinational contents
         } else if (target != nullptr && consumer_site.version == State_version::pre_rise) {
           prefix = std::max(row_prefix(fwd_matrix, target->rdidx), row_prefix(undef_matrix, target->rdidx));
@@ -3838,6 +3843,9 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
         if (whole && !registered && (consumer_site.output_port == Ntype::Memory_readall_pid || target != nullptr)) {
           used = name == "update" || name == "update_enable" || name == "reset" || name == "initial";
         }
+        // A clockless array's base contents without an `update` bus are its
+        // `initial` contents: every read re-seeds from them.
+        used |= !registered && !whole && type == 2 && name == "initial" && (target != nullptr || comb_read_all);
         if ((target != nullptr || comb_read_all) && type != 1 && port < ports.size()) {
           const auto& shape        = ports[port];
           const bool  port_enable  = name != "update_enable" && name.ends_with("enable");

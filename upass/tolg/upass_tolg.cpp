@@ -935,6 +935,13 @@ public:
     // all stores and per-reg attr overrides have been seen.
     finalize_regs();
     cur_color_ = 0;  // the last reg's region must not leak into mem/output glue
+    // An output array built entry by entry is its memory's whole read.
+    for (const auto& name : output_array_mems_) {
+      if (!pin_map_.contains(name)) {
+        const auto& mi = mem_map_.at(name);
+        record(name, resolve(name), static_cast<int32_t>(mi.size * mi.elem_mw));
+      }
+    }
     // Sanity-check the per-memory port allocation.
     {
       const auto saved_srcid = cur_srcid_;  // finalize_mems anchors at each memory's declare
@@ -1203,10 +1210,28 @@ private:
       mit = mem_map_.find(std::string(name_in));
     }
     if (mit != mem_map_.end()) {
-      auto& mi  = mit->second;
-      auto  pin = get_or_make_read_all(mi);
+      auto& mi = mit->second;
+      if (mi.is_array && mi.n_user_wr == 0) {
+        // No element write, ever: the whole array IS its base contents. A
+        // pass-through (`v = in; out = v`) or a read-only array needs no cell
+        // for its whole value.
+        Pin base;
+        if (mi.has_update) {
+          base = mi.update_val;
+        } else if (auto init = driven_sink_at(mi.node, static_cast<uint64_t>(Ntype::get_sink_pid(Ntype_op::Memory, "initial")));
+                   !init.is_invalid()) {
+          base = init.get_driver_pin();
+        } else {
+          base = create_const(*g_, *Dlop::create_integer(0));
+        }
+        mw_map_[key] = static_cast<int32_t>(mi.size * mi.elem_mw);
+        return base;
+      }
+      auto pin = get_or_make_read_all(mi);
       if (!mi.is_array) {
         pin = make_read_all_site(mi, pin);  // forward_read_all replays this cycle's writes over it
+      } else {
+        mi.array_whole_reads.push_back(mi.wr_next);
       }
       mw_map_[key] = static_cast<int32_t>(mi.size * mi.elem_mw);
       return pin;
@@ -3103,6 +3128,17 @@ private:
         return;
       }
 
+      // An output array built entry by entry is a clockless memory: its
+      // element writes are write ports and the port is its whole-array read.
+      if (const std::string okey{canon_io_name(lhs_text)}; !pin_map_.contains(okey) && is_output_port(okey)) {
+        const auto out_view = view;
+        array_scalar_views_.erase(ait);
+        auto& mi = make_output_array_mem(okey, out_view);
+        lower_mem_store(lhs, okey, mi);
+        note_output_lane_write(okey, mi, rhs, next);
+        return;
+      }
+
       // store(lhs, idx..., value): one index per dimension (a multi-dimensional
       // port picks its lane row-major, pick_array_lane).
       std::vector<Lnast_nid> idxs{rhs};
@@ -3174,9 +3210,16 @@ private:
     // the 2-child whole-array form is the mut/const array initializer.
     if (auto mit = mem_map_.find(std::string(lnast_->get_name(lhs))); mit != mem_map_.end()) {
       if (lnast_->get_sibling_next(rhs).is_invalid()) {
+        if (output_array_mems_.contains(mit->first)) {
+          error_here("upass.tolg: output array '{}' is assigned as a whole after an element write", lhs_text);
+          return;
+        }
         lower_mem_init_store(rhs, lnast_->get_name(lhs), mit->second);
       } else {
         lower_mem_store(lhs, lnast_->get_name(lhs), mit->second);
+        if (output_array_mems_.contains(mit->first)) {
+          note_output_lane_write(mit->first, mit->second, rhs, lnast_->get_sibling_next(rhs));
+        }
       }
       return;
     }
@@ -3466,22 +3509,12 @@ private:
         comptime_array_names_.insert(std::string(lnast_->get_name(name_nid)));
         return;
       }
-      if (is_reg) {
-        lower_mem_declare(name_nid, type_nid, mode_nid, /*is_array=*/false);
-      } else {
-        const auto elem_nid         = lnast_->get_first_child(type_nid);
-        const bool multidimensional = !elem_nid.is_invalid() && Lnast_ntype::is_comp_type_array(lnast_->get_type(elem_nid));
-        const bool has_inline_init  = !lnast_->get_sibling_next(mode_nid).is_invalid();
-        if (multidimensional || has_inline_init) {
-          // Slang ROM/array initializers are children of the declaration, and
-          // nested arrays retain row-major address semantics. Keep those as a
-          // Memory cell; the scalar view is for one-dimensional, store-driven
-          // combinational arrays only.
-          lower_mem_declare(name_nid, type_nid, mode_nid, /*is_array=*/true);
-        } else {
-          lower_comb_array_declare(name_nid, type_nid);
-        }
-      }
+      // Every runtime array is a Memory cell: a `reg` array is persistent
+      // (type=0), a mut/const array is clockless (type=2, no state across
+      // cycles, reads and writes in program order). A multi-dimensional array
+      // is one flat row-major memory either way. Arrays never lower to packed
+      // bit operations or lane muxes.
+      lower_mem_declare(name_nid, type_nid, mode_nid, /*is_array=*/!is_reg);
       return;
     }
 
@@ -3842,6 +3875,14 @@ private:
     };
     std::vector<Read_all_site>       read_all_sites;
     std::vector<std::pair<int, int>> ra_replay;  // per read_all site, like rd_replay
+    // type=2 array only: the program position (writes lowered before it) of
+    // every whole-array read. The cell's read_all is the post-write contents,
+    // so a whole read that a later indexed write follows is refused.
+    std::vector<int>                 array_whole_reads;
+    // type=2 array only: the comptime declaration contents (the `initial`
+    // constant), so the frontend's per-entry restatement of a broadcast
+    // initializer (`store(m, k, 0)` after `store(m, 0)`) mints no write port.
+    std::optional<Dlop>              array_init_const;
   };
 
   // One compiler temp on the old-value chain of a memory PARTIAL write: the
@@ -4269,6 +4310,7 @@ private:
   // repeated this full recursive walk once per memory declaration.
   void index_mem_write_sites() {
     mem_write_site_counts_.clear();
+    mem_write_sites_by_name_.clear();
     masked_pw_gets_.clear();
     masked_pw_bases_.clear();
     masked_pw_vals_.clear();
@@ -4306,6 +4348,7 @@ private:
             // lowering (which ignores it) — skip type-tailed stores.
             if (!c2.is_invalid() && !Lnast_ntype::is_type(lnast_->get_type(c2))) {
               ++mem_write_site_counts_[lnast_->get_name_id(c0)];
+              ++mem_write_sites_by_name_[std::string(canon_io_name(lnast_->get_name(c0)))];
             }
           }
         }
@@ -4487,6 +4530,12 @@ private:
   //    reads is a ROM (init + read ports only).
   void lower_mem_declare(const Lnast_nid& name_nid, const Lnast_nid& type_nid, const Lnast_nid& mode_nid, bool is_array) {
     auto name     = lnast_->get_name(name_nid);
+    // The same array name declared again (a sibling scope): a fresh memory,
+    // taking over the write sites the earlier one did not lower.
+    int inherited_sites = -1;
+    if (is_array && mem_map_.contains(std::string(name)) && mem_map_.at(std::string(name)).is_array) {
+      inherited_sites = retire_array_mem(std::string(name));
+    }
     auto elem_nid = lnast_->get_first_child(type_nid);
     auto len_nid  = elem_nid.is_invalid() ? elem_nid : lnast_->get_sibling_next(elem_nid);
     if (elem_nid.is_invalid() || len_nid.is_invalid()) {
@@ -4664,7 +4713,7 @@ private:
       return;
     }
 
-    const int user_sites      = count_mem_write_sites(name_nid);
+    const int user_sites      = inherited_sites >= 0 ? inherited_sites : count_mem_write_sites(name_nid);
     // Same-cycle ordering: the `fwd` sink is a per-(read,write) MATRIX that
     // finalize_mems() builds once every port is minted and each read port's
     // program position is known (`rd_wr_before`). The `ordering` attr is read
@@ -4686,10 +4735,9 @@ private:
         }
       }
     }
-    // A `mut`/`const` array (type=2) has no clock: tolg lowers it
-    // writes-before-reads (a read after a write is a hard error), so every
-    // write is visible to every read and the matrix is irrelevant — the comb
-    // encoders read the post-write array unconditionally.
+    // Provisional: finalize_mems drives the real per-(read,write) matrix once
+    // every port is minted (a type=2 array: program order, row r = the writes
+    // that textually precede read r).
     int64_t fwd_mask = is_array ? 1 : (int64_t{1} << user_sites) - 1;
     if (has_legacy_fwd) {
       fwd_mask = legacy_fwd_mask;
@@ -4710,7 +4758,7 @@ private:
         mem_base.resize(p);
       }
       if (!mem_base.empty()) {
-        mem.set_name(std::string(canon_io_name(mem_base)));
+        mem.set_name(unique_mem_name(canon_io_name(mem_base)));
       }
     }
     setup_sink_by_name(mem, "bits").connect_driver(create_const(*g_, *Dlop::create_integer(elem_mw)));
@@ -4891,6 +4939,12 @@ private:
           name);
       return {};
     }
+    if (mi.dims.size() == 1
+        && std::ranges::any_of(tit->second.elems, [&](const auto& e) { return !Lnast_ntype::is_const(lnast_->get_type(e)); })) {
+      // Runtime entries: pack them (entry 0 in the low lane) into the bus.
+      const Array_scalar_view view{.size = mi.size, .dims = mi.dims, .elem_mw = mi.elem_mw, .elem_signed = mi.elem_signed};
+      return whole_array_value(rhs, view, name).pin;
+    }
     std::vector<spool_ptr<Dlop>> entries;
     if (!flatten_init_values(tit->second, mi.dims, 0, name, mi.elem_mw, entries)) {
       return {};  // flatten_init_values reported
@@ -4948,6 +5002,16 @@ private:
         }
       }
     }
+    if (mi.is_array && (mi.wr_next > 0 || mi.rd_next > 0 || !mi.array_whole_reads.empty())) {
+      // A clockless array's `update` bus is the cycle's BASE contents, under
+      // every indexed access. A whole-array value stored after one is not
+      // that base.
+      error_here(
+          "upass.tolg: array '{}' is assigned as a whole after an indexed access — a whole-array value must come before "
+          "the element reads and writes of the array",
+          name);
+      return;
+    }
     auto en = current_path_cond();  // invalid => unconditional
     mi.bulk_sites.push_back({.val = v, .en = en, .wr_before = mi.wr_next});
     if (!mi.has_update) {
@@ -4958,6 +5022,9 @@ private:
       mi.has_update = true;
       mi.update_val = v;
       mi.update_en  = en;
+      if (mi.is_array) {
+        return;  // finalize_mems builds the program-order `fwd` matrix
+      }
       // The cell itself forwards nothing on a whole-array memory: the clocked
       // bulk update is a next-state, and cgen emits `assign dout = data[addr]`
       // for every read port. Force fwd=0 so the cvc5 encoder reads a_cur,
@@ -5006,8 +5073,110 @@ private:
     }
   }
 
+  // A new version of clockless array `name` (array SSA): a whole-array store
+  // after the array already holds a value starts a fresh type=2 memory whose
+  // base (`update`) is the stored value. The old version keeps its accesses
+  // so far; its write slots this version takes over become disabled ports,
+  // which keeps every read port's pid. Returns the new version.
+  // A Memory node name unique in this module: the same array name may be
+  // declared in sibling scopes or versioned (version_array_mem), and every
+  // backend derives its storage name from the node name.
+  [[nodiscard]] std::string unique_mem_name(std::string_view base) {
+    std::string name{base};
+    for (int k = 1; !mem_node_names_.insert(name).second; ++k) {
+      name = absl::StrCat(base, "_v", k);
+    }
+    return name;
+  }
+
+  // Retire the current memory of array `name` under a version key: its
+  // unused write slots become disabled ports. Returns the write sites the
+  // next memory of that name takes over.
+  int retire_array_mem(const std::string& name) {
+    const auto old_key   = absl::StrCat("__array_ver_", array_versions_++, "_", name);
+    int        remaining = 0;
+    {
+      auto& old = mem_map_.at(name);
+      remaining     = old.n_user_wr - old.wr_next;
+      const int now = old.wr_next;
+      for (auto& w : old.array_whole_reads) {
+        if (w == now) {
+          w = old.n_user_wr;  // the disabled ports below write nothing
+        }
+      }
+      for (; old.wr_next < old.n_user_wr; ++old.wr_next) {
+        const auto base = old.wr_next * kMemPortStride;
+        const auto zero = create_const(*g_, *Dlop::create_integer(0));
+        livehd::graph_util::setup_sink_pid(old.node, static_cast<hhds::Port_id>(base + 0)).connect_driver(zero);   // addr
+        livehd::graph_util::setup_sink_pid(old.node, static_cast<hhds::Port_id>(base + 3)).connect_driver(zero);   // din
+        livehd::graph_util::setup_sink_pid(old.node, static_cast<hhds::Port_id>(base + 4)).connect_driver(zero);   // enable
+        livehd::graph_util::setup_sink_pid(old.node, static_cast<hhds::Port_id>(base + 10)).connect_driver(zero);  // write
+      }
+      Mem_info moved = std::move(old);
+      mem_map_.erase(name);
+      mem_map_.emplace(old_key, std::move(moved));
+    }
+    for (auto& k : mem_order_) {
+      if (k == name) {
+        k = old_key;
+        break;
+      }
+    }
+    last_retired_key_ = old_key;
+    return remaining;
+  }
+
+  Mem_info& version_array_mem(const std::string& name) {
+    const int   remaining = retire_array_mem(name);
+    const auto& prev      = mem_map_.at(last_retired_key_);
+    auto        mem  = make_node(Ntype_op::Memory);
+    mem.set_name(unique_mem_name(canon_io_name(name)));
+    setup_sink_by_name(mem, "bits").connect_driver(create_const(*g_, *Dlop::create_integer(prev.elem_mw)));
+    setup_sink_by_name(mem, "size").connect_driver(create_const(*g_, *Dlop::create_integer(prev.size)));
+    setup_sink_by_name(mem, "type").connect_driver(create_const(*g_, *Dlop::create_integer(2)));
+    setup_sink_by_name(mem, "fwd").connect_driver(create_const(*g_, *Dlop::create_integer(1)));
+    setup_sink_by_name(mem, "wensize").connect_driver(create_const(*g_, *Dlop::create_integer(1)));
+    Mem_info info;
+    info.node        = mem;
+    info.decl_nid    = prev.decl_nid;
+    info.size        = prev.size;
+    info.dims        = prev.dims;
+    info.elem_mw     = prev.elem_mw;
+    info.elem_signed = prev.elem_signed;
+    info.is_array    = true;
+    info.init_wired  = true;
+    info.n_user_wr   = remaining;
+    mem_order_.emplace_back(name);
+    return mem_map_.emplace(name, std::move(info)).first->second;
+  }
+
   void lower_mem_init_store(const Lnast_nid& rhs, std::string_view name, Mem_info& mi) {
     const auto rt = lnast_->get_type(rhs);
+    if (mi.is_array && (mi.wr_next > 0 || mi.rd_next > 0 || !mi.array_whole_reads.empty() || mi.has_update || mi.init_wired)) {
+      // The array already holds a value: the store starts a new version. A
+      // conditional store keeps the old contents where its path is not taken.
+      auto value = mem_whole_value_pin(rhs, name, mi);  // before versioning: `m = f(m)` reads the old version
+      if (value.is_invalid()) {
+        return;
+      }
+      const std::string key{name};
+      const auto        busw = static_cast<int32_t>(mi.size * mi.elem_mw);
+      if (const auto en = current_path_cond(); !en.is_invalid()) {
+        const auto old_all = resolve(key);
+        auto       mux     = make_node(Ntype_op::Mux);
+        livehd::graph_util::setup_sink_pid(mux, 0).connect_driver(en);
+        livehd::graph_util::setup_sink_pid(mux, 1).connect_driver(old_all);
+        livehd::graph_util::setup_sink_pid(mux, 2).connect_driver(value);
+        value = mux.create_driver_pin(0);
+        set_ubits(value, busw);
+      }
+      auto& nv = version_array_mem(key);
+      setup_sink_by_name(nv.node, "update").connect_driver(value);
+      nv.has_update = true;
+      nv.update_val = value;
+      nv.bulk_sites.push_back({.val = value, .en = {}, .wr_before = 0});
+      return;
+    }
     // A registered (`reg`) memory has NO declaration initializer through this
     // path — its declared init rides lower_mem_declare. Every whole-array store
     // to it is therefore a CONDITIONAL bulk write (a reset arm, a flush arm, a
@@ -5060,7 +5229,8 @@ private:
         init = init->or_op(*entry->shl_op(*Dlop::create_integer(i * mi.elem_mw)));
       }
       setup_sink_by_name(mi.node, "initial").connect_driver(create_const(*g_, *init));
-      mi.init_wired = true;
+      mi.init_wired       = true;
+      mi.array_init_const = *init;
       return;
     }
     auto tit = tuple_recs_.find(std::string(lnast_->get_name(rhs)));
@@ -5068,12 +5238,20 @@ private:
       error_here("upass.tolg: array '{}' initializer must be a comptime tuple literal", name);
       return;
     }
+    if (std::ranges::any_of(tit->second.elems, [&](const auto& e) { return !Lnast_ntype::is_const(lnast_->get_type(e)); })) {
+      // A tuple literal of runtime values (`const a:[4]U8 = [r0, r1, r2, r3]`)
+      // is a runtime whole-array value: it rides the `update` bus.
+      lower_mem_update_store(rhs, name, mi);
+      return;
+    }
     std::vector<spool_ptr<Dlop>> entries;
     if (!flatten_init_values(tit->second, mi.dims, 0, name, mi.elem_mw, entries)) {
       return;  // flatten_init_values reported
     }
-    setup_sink_by_name(mi.node, "initial").connect_driver(create_const(*g_, *pack_entries(entries, mi.elem_mw)));
-    mi.init_wired = true;
+    auto init = pack_entries(entries, mi.elem_mw);
+    setup_sink_by_name(mi.node, "initial").connect_driver(create_const(*g_, *init));
+    mi.init_wired       = true;
+    mi.array_init_const = *init;
   }
 
   // Flatten an init tuple literal to per-entry masked constants, ROW-MAJOR,
@@ -5552,19 +5730,42 @@ private:
     if (addr.is_invalid()) {
       return;  // flatten_mem_addr reported
     }
-    if (mi.wr_next >= mi.n_user_wr) {
-      error_here("upass.tolg: internal — memory '{}' write-site pre-scan undercounted", lhs_name);
+    if (mi.is_array && !mi.array_whole_reads.empty() && mi.array_whole_reads.back() == mi.wr_next && !output_array_mems_.contains(std::string(lhs_name))) {
+      // The array was read whole at this point and is written again: the
+      // whole read keeps the contents so far, and a new version (seeded with
+      // them) takes this write and the rest.
+      const std::string key{lhs_name};
+      const auto        seed = mi.read_all_pin;
+      auto&             nv   = version_array_mem(key);
+      setup_sink_by_name(nv.node, "update").connect_driver(seed);
+      nv.has_update = true;
+      nv.update_val = seed;
+      nv.bulk_sites.push_back({.val = seed, .en = {}, .wr_before = 0});
+      lower_mem_store(lhs, lhs_name, nv);
       return;
     }
-    if (mi.is_array && mi.rd_next > 0) {
-      // A type=2 array is lowered writes-before-reads (forwarding), so a
-      // source-order read placed BEFORE this write would wrongly see it.
-      // reg memories are exempt: fwd semantics are order-free by contract.
-      error_here(
-          "upass.tolg: array '{}' is written after being read — "
-          "same-cycle order is not preserved for "
-          "mut/const arrays; reorder the accesses or use a `reg` memory",
-          lhs_name);
+    if (mi.is_array && chunk < 0 && mi.wr_next == 0 && mi.rd_next == 0 && mi.array_whole_reads.empty() && !mi.has_update
+        && mi.array_init_const && current_path_cond().is_invalid() && addr.is_const() && Lnast_ntype::is_const(lnast_->get_type(val))) {
+      // The frontend restates a broadcast initializer entry by entry
+      // (`store(m, 0)` then `store(m, k, 0)` for every k). An entry already
+      // holding that value is no write: drop the pre-counted port. No read
+      // port exists yet, so the port layout is still open.
+      const auto& a = livehd::graph_util::const_of(addr);
+      auto        v = whole_array_const(lnast_->get_name(val));
+      if (a.is_just_i64() && v && v->is_integer() && a.to_just_i64() >= 0 && a.to_just_i64() < mi.size) {
+        const auto mask  = Dlop::get_mask_value(mi.elem_mw);
+        const auto entry = mi.array_init_const->sra_op(*Dlop::create_integer(a.to_just_i64() * mi.elem_mw))->and_op(*mask);
+        if (entry->eq_op(*v->and_op(*mask))->is_known_true()) {
+          --mi.n_user_wr;
+          return;
+        }
+      }
+    }
+    if (mi.is_array) {
+      assert_array_indices(mi, idxs, lhs);
+    }
+    if (mi.wr_next >= mi.n_user_wr) {
+      error_here("upass.tolg: internal — memory '{}' write-site pre-scan undercounted", lhs_name);
       return;
     }
     const auto           base   = mi.wr_next * kMemPortStride;
@@ -5854,47 +6055,123 @@ private:
     record(name, out, base.mw);
   }
 
-  // Read lane `lane` (or the runtime lane `dyn`) of the packed bus `packed`.
+  // The clockless (type=2) memory holding the array value `packed` (a port,
+  // an instance output, a whole-array copy): read-only, its `update` bus is
+  // the value. One memory per packed value, shared by every element read of
+  // it, so an array is read through memory ports, never bit operations.
+  Mem_info& snapshot_array_mem(const Pin& packed, const Array_scalar_view& view, std::string_view what) {
+    if (auto it = snapshot_mems_.find(packed); it != snapshot_mems_.end()) {
+      for (const auto& key : it->second) {  // one memory per (value, shape): a bus may be read as two array types
+        auto& mi = mem_map_.at(key);
+        if (mi.size == view.size && mi.elem_mw == view.elem_mw && mi.elem_signed == view.elem_signed) {
+          return mi;
+        }
+      }
+    }
+    auto mem = make_node(Ntype_op::Memory);
+    {
+      std::string base{what};
+      if (auto p = base.find("___ssa_"); p != std::string::npos) {
+        base.resize(p);
+      }
+      // Always named: an anonymous state cell has no stable identity (the
+      // graph digest of the compile cache refuses it).
+      mem.set_name(unique_mem_name(!base.empty() && !Lnast::is_tmp(base) ? std::string(canon_io_name(base)) : std::string("__array_view")));
+    }
+    setup_sink_by_name(mem, "bits").connect_driver(create_const(*g_, *Dlop::create_integer(view.elem_mw)));
+    setup_sink_by_name(mem, "size").connect_driver(create_const(*g_, *Dlop::create_integer(view.size)));
+    setup_sink_by_name(mem, "type").connect_driver(create_const(*g_, *Dlop::create_integer(2)));
+    setup_sink_by_name(mem, "fwd").connect_driver(create_const(*g_, *Dlop::create_integer(0)));
+    setup_sink_by_name(mem, "wensize").connect_driver(create_const(*g_, *Dlop::create_integer(1)));
+    setup_sink_by_name(mem, "update").connect_driver(packed);
+    Mem_info info;
+    info.node        = mem;
+    info.decl_nid    = lnast_->get_root();
+    info.size        = view.size;
+    info.dims        = {view.size};  // the flat row-major view
+    info.elem_mw     = view.elem_mw;
+    info.elem_signed = view.elem_signed;
+    info.is_array    = true;
+    info.has_update  = true;
+    info.update_val  = packed;
+    info.bulk_sites.push_back({.val = packed, .en = {}, .wr_before = 0});
+    auto key = absl::StrCat("__array_view_", snapshot_count_++, "_", what);
+    snapshot_mems_[packed].push_back(key);
+    mem_order_.emplace_back(key);
+    return mem_map_.emplace(key, std::move(info)).first->second;
+  }
+
+  // An output array `name` (shape `view`) written entry by entry: a
+  // clockless memory, nil (zero) based, every element write of the body a
+  // write port; the output reads it whole once the body is lowered.
+  Mem_info& make_output_array_mem(const std::string& name, const Array_scalar_view& view) {
+    auto mem = make_node(Ntype_op::Memory);
+    mem.set_name(unique_mem_name(name));
+    setup_sink_by_name(mem, "bits").connect_driver(create_const(*g_, *Dlop::create_integer(view.elem_mw)));
+    setup_sink_by_name(mem, "size").connect_driver(create_const(*g_, *Dlop::create_integer(view.size)));
+    setup_sink_by_name(mem, "type").connect_driver(create_const(*g_, *Dlop::create_integer(2)));
+    setup_sink_by_name(mem, "fwd").connect_driver(create_const(*g_, *Dlop::create_integer(1)));
+    setup_sink_by_name(mem, "wensize").connect_driver(create_const(*g_, *Dlop::create_integer(1)));
+    Mem_info info;
+    info.node        = mem;
+    info.decl_nid    = lnast_->get_root();
+    info.size        = view.size;
+    info.dims        = view.dims;
+    info.elem_mw     = view.elem_mw;
+    info.elem_signed = view.elem_signed;
+    info.is_array    = true;
+    info.init_wired  = true;
+    if (auto it = mem_write_sites_by_name_.find(name); it != mem_write_sites_by_name_.end()) {
+      info.n_user_wr = it->second;
+    }
+    nil_array_output_lanes_.try_emplace(name, static_cast<size_t>(view.size), false);
+    output_array_mems_.insert(name);
+    mem_order_.emplace_back(name);
+    return mem_map_.emplace(name, std::move(info)).first->second;
+  }
+
+  // Lane coverage (check_nil_array_outputs) of an element write `name[idx…]`:
+  // a constant index drives its lane, a runtime one proves none.
+  void note_output_lane_write(const std::string& name, const Mem_info& mi, const Lnast_nid& first_idx, const Lnast_nid& after) {
+    auto it = nil_array_output_lanes_.find(name);
+    if (it == nil_array_output_lanes_.end()) {
+      return;
+    }
+    int64_t flat = 0;
+    size_t  d    = 0;
+    (void)after;
+    for (auto ix = first_idx; !ix.is_invalid() && d < mi.dims.size(); ix = lnast_->get_sibling_next(ix), ++d) {
+      if (!Lnast_ntype::is_const(lnast_->get_type(ix))) {
+        return;
+      }
+      const auto ci = Dlop::from_pyrope(lnast_->get_name(ix));
+      if (!ci || !ci->is_just_i64()) {
+        return;
+      }
+      flat = flat * mi.dims[d] + ci->to_just_i64();
+    }
+    if (d == mi.dims.size() && flat >= 0 && flat < static_cast<int64_t>(it->second.size())) {
+      it->second[static_cast<size_t>(flat)] = true;
+    }
+  }
+
+  // Read lane `lane` (or the runtime lane `dyn`) of the array value `packed`:
+  // one read port of its clockless memory (snapshot_array_mem).
   void read_array_lane(std::string_view dst_name, const Val& packed, std::optional<int64_t> lane, const Val& dyn,
                        const Array_scalar_view& view) {
-    Pin offset;
-    if (lane) {
-      offset = create_const(*g_, *Dlop::create_integer(*lane * view.elem_mw));
-    } else {
-      auto mult = make_node(Ntype_op::Mult);
-      setup_sink_by_name(mult, "as").connect_driver(dyn.pin);
-      setup_sink_by_name(mult, "as").connect_driver(create_const(*g_, *Dlop::create_integer(view.elem_mw)));
-      offset = mult.create_driver_pin(0);
-      set_ubits(offset, std::max<int32_t>(dyn.mw + std::bit_width(static_cast<uint32_t>(view.elem_mw)), 1));
-    }
+    auto&      mi   = snapshot_array_mem(packed.pin, view, {});
+    const auto addr = lane ? create_const(*g_, *Dlop::create_integer(*lane)) : dyn.pin;
+    const auto dout = mint_mem_read(mi, addr, 0, 1);
+    record(dst_name, dout, view.elem_mw);
+  }
 
-    auto sra = make_node(Ntype_op::SRA);
-    setup_sink_by_name(sra, "a").connect_driver(packed.pin);
-    setup_sink_by_name(sra, "b").connect_driver(offset);
-    auto shifted = sra.create_driver_pin(0);
-    set_ubits(shifted, packed.mw);
-
-    auto gm = make_node(Ntype_op::Get_mask);
-    livehd::graph_util::connect_mask_operands(gm, shifted, 0, view.elem_mw);
-    auto out = gm.create_driver_pin(0);
-    if (view.elem_signed) {
-      // A Get_mask is UNSIGNED by construction: stamping the sign on its
-      // driver does not survive cprop's constant-slice fold (the read of a
-      // comptime index folds straight onto the packed lane and came back
-      // zero-extended — MEASURED `mut a:[2]s8; a[0] = -3; y:s12 = a[0]` read
-      // 253, while a runtime index, a `reg` array and a same-width consumer
-      // were all fine). Ride a same-width Sext, the abc read-back idiom: its
-      // `b` is the kept bit COUNT, the result is a signed elem_mw-bit value.
-      set_ubits(out, view.elem_mw);  // the lane itself: an unsigned elem_mw-bit pattern (an unsized pin emits as ONE bit)
-      auto sx = make_node(Ntype_op::Sext);
-      setup_sink_by_name(sx, "a").connect_driver(out);
-      setup_sink_by_name(sx, "b").connect_driver(create_const(*g_, *Dlop::create_integer(view.elem_mw)));
-      auto sout = sx.create_driver_pin(0);
-      set_bits(sout, view.elem_mw);
-      set_sign(sout);
-      record(dst_name, sout, view.elem_mw);
-    } else {
-      bind_result(dst_name, out, view.elem_mw);
+  // A clockless array keeps the bounds check of every runtime index (one per
+  // dimension), exactly as an element pick does.
+  void assert_array_indices(const Mem_info& mi, const std::vector<Lnast_nid>& idxs, const Lnast_nid& loc) {
+    for (size_t d = 0; d < idxs.size() && d < mi.dims.size(); ++d) {
+      if (!Lnast_ntype::is_const(lnast_->get_type(idxs[d]))) {
+        lower_array_index_assert(leaf(idxs[d]), mi.dims[d], loc);
+      }
     }
   }
 
@@ -6113,6 +6390,9 @@ private:
                lnast_->get_name(src),
                lnast_->get_name(src));
     }
+    if (output_array_mems_.contains(src_name)) {
+      check_nil_array_output_read(nid, src_name, idx);
+    }
     auto&                  mi = it->second;
     // Gather the full index chain (tuple_get(dst, mem, i, j, …) is FLAT).
     std::vector<Lnast_nid> idxs;
@@ -6122,6 +6402,9 @@ private:
     auto addr = flatten_mem_addr(mi, idxs, lnast_->get_name(src));
     if (addr.is_invalid()) {
       return;  // flatten_mem_addr reported
+    }
+    if (mi.is_array) {
+      assert_array_indices(mi, idxs, nid);
     }
     // The old-value read of a partial write the memory takes as a write-MASKED
     // port (index_mem_write_sites): no read port. The temp is the all-zero
@@ -6629,9 +6912,8 @@ private:
       //                        UNDEFINED — the parallel `undef` matrix below,
       //                        which is the only thing that distinguishes it
       //                        from "old" (a zero `fwd` row cannot)
-      // A type=2 array keeps its legacy single-bit value: it has no clock and
-      // is lowered writes-before-reads, so every encoder reads the post-write
-      // array unconditionally and the matrix is unused.
+      // A type=2 array has no clock and no committed state: a row prefix is
+      // the writes over the cycle's base contents (`update`, else `initial`).
       // (A whole-array cell has already forced fwd=0 and leaves the matrix
       // alone: its same-cycle reads are replayed in logic, forward_mem_read.)
       auto ordering = Mem_info::Mem_order::program;  // Pyrope default
@@ -6676,7 +6958,26 @@ private:
       if (!mi.bulk_sites.empty() && mi.n_user_wr > 0) {
         gate_mem_writes_by_later_bulk(mi);
       }
-      if (!mi.is_array && !mi.has_legacy_fwd && !mi.has_update && mi.n_user_wr > 0) {
+      if (mi.is_array && mi.rd_next == 0 && mi.read_all_pin.is_invalid() && !mi.is_pub) {
+        // A clockless array no one reads has no observable effect: no cell.
+        mi.node.del_node();
+        continue;
+      }
+      if (mi.is_array) {
+        for (const int wr_before : mi.array_whole_reads) {
+          if (wr_before != mi.n_user_wr) {
+            error_here(
+                "upass.tolg: array '{}' is read as a whole before a later element write — a whole-array read must come "
+                "after the element writes of the array",
+                name);
+            break;
+          }
+        }
+      }
+      // A type=2 array always resolves in program order (no ordering attr, no
+      // replay): read r sees exactly the writes that textually precede it,
+      // over the cycle's base contents (`update` when stored, else `initial`).
+      if ((mi.is_array || (!mi.has_legacy_fwd && !mi.has_update)) && mi.n_user_wr > 0) {
         // Row-major bit string, MSB first: bit (r*n_wr + w) sits at index
         // n_bits-1-(r*n_wr+w). Built as TEXT so a wide matrix stays exact — a
         // whole-array expansion easily reaches 9rd x 8wr = 72 bits, and every
@@ -6693,7 +6994,10 @@ private:
           int undef_upto = 0;
           // A partial write's old-value read reads the committed entry: the
           // writes it must see are replayed by forward_mem_read.
-          switch (mi.rd_is_rmw[static_cast<size_t>(r)] ? Mem_info::Mem_order::old : ordering) {
+          const auto row_order = mi.is_array                         ? Mem_info::Mem_order::program
+                                 : mi.rd_is_rmw[static_cast<size_t>(r)] ? Mem_info::Mem_order::old
+                                                                        : ordering;
+          switch (row_order) {
             case Mem_info::Mem_order::program: fwd_upto = mi.rd_wr_before[static_cast<size_t>(r)]; break;
             case Mem_info::Mem_order::fwd    : fwd_upto = mi.n_user_wr; break;
             case Mem_info::Mem_order::old    : fwd_upto = 0; break;
@@ -12562,9 +12866,16 @@ private:
   bool                                                lifted_loop_body_ = false;
   absl::flat_hash_map<Pin, std::pair<int64_t, int64_t>> loop_index_ranges_;  // their published ranges
   absl::flat_hash_map<std::string, Array_scalar_view> array_scalar_views_;
+  absl::flat_hash_map<Pin, std::vector<std::string>>  snapshot_mems_;  // packed array value -> its type=2 memories (one per shape)
+  int                                                 snapshot_count_ = 0;
+  absl::flat_hash_set<std::string>                    output_array_mems_;  // output arrays built entry by entry
+  int                                                 array_versions_ = 0;  // version_array_mem ordinal
+  std::string                                         last_retired_key_;    // retire_array_mem's last version key
+  absl::flat_hash_set<std::string>                    mem_node_names_;      // unique_mem_name  // packed array value -> its type=2 memory
   absl::flat_hash_set<std::string>                    comptime_array_names_;
   absl::flat_hash_set<std::string>                    comptime_scalar_names_;
   absl::flat_hash_map<int32_t, int>                   mem_write_site_counts_;
+  absl::flat_hash_map<std::string, int>               mem_write_sites_by_name_;  // same count, by canonical name
   std::vector<std::string>                            mem_order_;
   // Path-condition stack: one entry per enclosing branch arm, UNMATERIALIZED
   // (see current_path_cond). `path_folded_[i]` caches the fold of terms[0..i]

@@ -235,7 +235,10 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, hhds::Port_id 
                                    // bit-identically to the old per-write-port mask. Built
                                    // from the Pyrope `ordering` attr: "program" => row r is
                                    // the PREFIX of writes preceding read r in program order;
-                                   // "fwd" => all ones; "none" => all zeros.
+                                   // "fwd" => all ones; "none" => all zeros. A clockless
+                                   // array (type 2) is always "program": a zero row reads the
+                                   // cycle's BASE contents (`update` when driven, else
+                                   // `initial`), not committed state (it has none).
         case 6: return "posclk";   // comptime x 1
         case 7: return "type";     // comptime x 1 (0:async, 1:sync: 2:array)
         case 8: return "wensize";  // comptime x 1  -- number of Write Enable bits

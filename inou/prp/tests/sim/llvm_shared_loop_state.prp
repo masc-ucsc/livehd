@@ -1,0 +1,47 @@
+/*
+:name: llvm_shared_loop_state
+:type: simulation
+*/
+// A definition used by both an ordinary instance and a compact loop has one
+// shared storage layout. LLVM must use that layout at both call sites.
+mod shared_loop_lane(a:U8) -> (q:U128@[0]) {
+  reg acc:U128 = 0
+  wrap acc = acc + a
+  q = acc
+}
+
+mod llvm_shared_straight(a:U8) -> (q:U128@[0]) {
+  const lane = shared_loop_lane::[name=lane](a=a)
+  q = (lane * 13) ^ (lane << 7)
+}
+
+test llvm_shared_straight.shared_layout {
+  mut dut = llvm_shared_straight
+  tick 4 {
+    dut.a = 1
+    step
+    const count = clock + 1
+    assert(dut.q == (count * 13) ^ (count << 7))
+  }
+}
+
+mod llvm_shared_loop_state(a:U8) -> (single:U128@[0], total:U128@[0]) {
+  const lone = shared_loop_lane::[name=lone](a=a)
+  single = lone
+  mut sum:U128 = 0
+  for i in 0..<3 {
+    const lane = shared_loop_lane::[name=lane](a=(a + i)#[0..<8])
+    wrap sum = sum + lane
+  }
+  total = sum
+}
+
+test llvm_shared_loop_state.shared_layout {
+  mut dut = llvm_shared_loop_state
+  tick 4 {
+    dut.a = 1
+    step
+    assert(dut.single == clock + 1, "ordinary instance advances once")
+    assert(dut.total == 6 * (clock + 1), "compact instances have independent state")
+  }
+}

@@ -16,7 +16,7 @@
 #    LEC of each against the golden verilog0.
 
 
-load("//tools:regression.bzl", "sh_test")
+load("//tools:regression.bzl", "py_test", "sh_test")
 load("//tools:lhd.bzl", "lhd_verilog")
 
 # The technology mappers `lhd synth --set synth.mapper=` / `lhd pass <mapper>`
@@ -30,6 +30,24 @@ _MAPPERS = [
     ("", "abc"),
     ("_usyn", "usyn"),
 ]
+
+py_test(
+    name = "sim_bazel_scaffold_smoke",
+    srcs = ["sim_bazel_scaffold_smoke.py"],
+    args = [
+        "$(location //lhd)",
+        "$(location //:MODULE.bazel)",
+        "$(location //:.bazelrc)",
+        "$(location //:.bazelversion)",
+    ],
+    data = [
+        "//:.bazelrc",
+        "//:.bazelversion",
+        "//:MODULE.bazel",
+        "//lhd",
+    ],
+    legacy_create_init = 0,
+)
 
 sh_test(
     name = "lhd_unate_smoke",

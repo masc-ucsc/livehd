@@ -8,7 +8,11 @@ sh_test(
     data = ["scripts/regression.py"],
 )
 
-exports_files(["MODULE.bazel"])
+exports_files([
+    "MODULE.bazel",
+    ".bazelrc",
+    ".bazelversion",
+])
 
 # Keep the normal build unchanged; the native USYN CLI also builds without
 # optional ABC-backed tools, even when the ABC package/repository is absent.

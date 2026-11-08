@@ -1,0 +1,67 @@
+/*
+:name: loop_carry_wide_ref
+:type: simulation
+*/
+
+// A cell with state, so every loop lane owns a register and the compact
+// wrapper keeps one callee per ordinal (no shared scratch lane). The output is
+// combinational in `a`, so the mesh's left-to-right chain settles in one walk.
+mod wide_ref_cell(a:U32, b:U32) -> (q:U32@[0]) {
+  reg st:U32 = 0
+  wrap st = a + b
+  q = st ^ a
+}
+
+// A 2x3 mesh written as a nested rolled loop. `v` (6 x 32 = 192 bits) and `w`
+// (128 bits) are wider than a machine word, so under the LLVM backend each lane
+// reads the previous lane's carry-out IN PLACE (Cgen_sim::ref_carry_inputs)
+// instead of a per-ordinal copy. Lane i reads v[i-1] (left) and v[i-3] (up),
+// elements written by earlier lanes of the same walk, and writes only v[i].
+// `k` (96 bits) is a loop invariant: every lane reads the wrapper's copy in
+// place and gates on its version counter, and the outer body forwards it to
+// the inner loop.
+pub mod loop_carry_wide_ref(x:U32, k:U96) -> (o:U192@[0], s:U128@[0]) {
+  mut v:[6]U32 = 0
+  mut w:U128 = 0
+  for r in 0..<2 {
+    for c in 0..<3 {
+      const i = (r * 3) + c
+      const a = if c == 0 { x } else { v[(i + 5) % 6] }
+      const b = if r == 0 { k#[(c * 32)..<((c * 32) + 32)] } else { v[(i + 3) % 6] }
+      const q = wide_ref_cell(a=a, b=b)
+      v[i] = q
+      w = w ^ (q << (i * 16))
+    }
+  }
+  o = (v[5] << 160) | (v[4] << 128) | (v[3] << 96) | (v[2] << 64) | (v[1] << 32) | v[0]
+  s = w
+}
+
+// The same mesh spelled out flat: the golden the rolled form must match.
+pub mod loop_carry_wide_ref_flat(x:U32, k:U96) -> (o:U192@[0], s:U128@[0]) {
+  const q0 = wide_ref_cell(a=x, b=k#[0..<32])
+  const q1 = wide_ref_cell(a=q0, b=k#[32..<64])
+  const q2 = wide_ref_cell(a=q1, b=k#[64..<96])
+  const q3 = wide_ref_cell(a=x, b=q0)
+  const q4 = wide_ref_cell(a=q3, b=q1)
+  const q5 = wide_ref_cell(a=q4, b=q2)
+  o = (q5 << 160) | (q4 << 128) | (q3 << 96) | (q2 << 64) | (q1 << 32) | q0
+  s = q0 ^ (q1 << 16) ^ (q2 << 32) ^ (q3 << 48) ^ (q4 << 64) ^ (q5 << 80)
+}
+
+test loop_carry_wide_ref.matches_flat {
+  mut dut  = loop_carry_wide_ref
+  mut gold = loop_carry_wide_ref_flat
+  tick 12 {
+    const xv = (clock * 0x01010101) + 7
+    // k changes only every other cycle, so a lane must also see it hold.
+    const kv = ((clock >> 1) * 0x123456789abcdef1) + 0x55
+    dut.x  = xv#[0..<32]
+    gold.x = xv#[0..<32]
+    dut.k  = kv#[0..<96]
+    gold.k = kv#[0..<96]
+    step
+    assert(dut.o == gold.o)
+    assert(dut.s == gold.s)
+  }
+}

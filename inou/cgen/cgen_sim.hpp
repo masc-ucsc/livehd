@@ -190,12 +190,25 @@ public:
     std::vector<hhds::Port_id>             input_ports;   // layout.inputs[i]'s declared port
     std::vector<hhds::Port_id>             output_ports;  // body.outputs[i]'s declared port
   };
+  // The two phase bodies of a STATEFUL native loop (advance, publish), kept
+  // for the module that calls the loop: its LLVM color embeds them with
+  // Cgen_llvm::inline_loop and per-trip tables (the inner wrapper's lanes).
+  // `body.inputs`/`outputs` list only the packed (port) values; layout carries
+  // index those packed outputs; output_ports[i] names packed output i's port
+  // (or ~0 when it is not this phase's port value).
+  struct State_loop_ir {
+    std::array<Cgen_llvm::Inline_body, 2>          body;
+    std::array<Cgen_llvm::Loop_layout, 2>          layout;
+    std::array<std::vector<hhds::Port_id>, 2>      output_ports;
+    std::vector<hhds::Port_id>                     input_ports;  // layout.inputs[i]'s declared port
+  };
   struct Generation_index {
     // Compact-loop definitions and their descendants: they keep Slop members
     // (no native frame), and a framed parent must not give them a slice.
     absl::flat_hash_set<const hhds::Graph*>                             compact_defs;
     absl::flat_hash_map<const hhds::Graph*, std::optional<Native_loop>> native_loops;
     absl::flat_hash_map<const hhds::Graph*, Native_loop_ir>             native_loop_ir;
+    absl::flat_hash_map<const hhds::Graph*, State_loop_ir>              state_loop_ir;
     bool                                          incremental = true;  // forwarded from the single lhd.incremental switch
     std::shared_ptr<livehd::sim::Compile_workers> object_workers;
     absl::flat_hash_map<std::string, Gen_record>  digests;
@@ -228,6 +241,51 @@ private:
   void                                          save_gen_digests(bool now = false);
   absl::flat_hash_map<std::string, Gen_record>  gen_digests_;
   Generation_index*                             shared_gen_ = nullptr;
+  // Inputs of the compact-loop body `body` that a lane reads BY REFERENCE
+  // instead of through its own `__in` copy (LLVM backend only; the Slop backend
+  // keeps every input by value so it stays the easy-to-debug reference). Only
+  // inputs wider than one machine word qualify: a copy of <= 64 bits is cheaper
+  // than the indirection.
+  //   carries:    the lane reads the previous lane's carry-out in place; the
+  //               carry-out must have the same storage type.
+  //   invariants: every lane reads the wrapper's own `__in` field, and gates
+  //               on the wrapper's version counter instead of a shadow copy.
+  // The body emits a `__ref_<field>` pointer that defaults to its own `__in`
+  // field, so a wrapper that keeps copying (a shared scratch lane, an
+  // activation loop) needs no other form. Both the body and every wrapper that
+  // walks it ask this one function, so they agree.
+  struct Ref_loop_inputs {
+    absl::flat_hash_set<uint32_t> carries;
+    absl::flat_hash_set<uint32_t> invariants;
+    [[nodiscard]] bool            contains(uint32_t port) const { return carries.contains(port) || invariants.contains(port); }
+    [[nodiscard]] bool            empty() const { return carries.empty() && invariants.empty(); }
+  };
+  [[nodiscard]] Ref_loop_inputs ref_loop_inputs(const hhds::Graph* body) const;
+  // What the compact-loop WRAPPER of `loop_sub` actually walks by reference:
+  // ref_loop_inputs(body) narrowed by the wrapper's own shape (a shared scratch
+  // lane, used for a stateless leaf body, and an activation loop keep copying).
+  // Pure function of the loop node, so the module that emits the wrapper and
+  // any color root that reads it through a fused hierarchy agree on which
+  // outputs are pointers. `carries` maps carry-in port -> carry-out port.
+  struct Wrapper_ref_plan {
+    absl::flat_hash_map<uint32_t, uint32_t> carries;
+    absl::flat_hash_set<uint32_t>           invariants;
+    [[nodiscard]] bool                      out_by_ref(uint32_t out_port) const {
+      for (const auto& [in, out] : carries) {
+        if (out == out_port) {
+          return true;
+        }
+      }
+      return false;
+    }
+  };
+  [[nodiscard]] Wrapper_ref_plan wrapper_ref_plan(const hhds::Node_class& loop_sub) const;
+  struct Loop_body_shape {
+    bool stateless   = true;
+    bool nested_loop = false;
+  };
+  [[nodiscard]] Loop_body_shape loop_body_shape(const hhds::Graph* body) const;
+  mutable absl::flat_hash_map<const hhds::Graph*, Loop_body_shape> loop_body_shape_memo_;
   absl::flat_hash_map<std::string, Gen_record>& digests() { return shared_gen_ != nullptr ? shared_gen_->digests : gen_digests_; }
   bool&                    digests_loaded() { return shared_gen_ != nullptr ? shared_gen_->loaded : gen_digests_loaded_; }
   // Regular-file basenames of odir starting with `prefix` (the shared snapshot when one is installed).

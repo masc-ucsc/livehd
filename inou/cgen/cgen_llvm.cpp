@@ -1739,6 +1739,14 @@ public:
     return buffer;
   }
 
+  struct Array_local {
+    uint32_t          bits       = 0;  // entry width
+    uint32_t          store_bits = 0;  // natural storage width of one entry
+    uint64_t          size       = 0;
+    llvm::AllocaInst* storage    = nullptr;
+  };
+  std::vector<Array_local> arrays;
+
   llvm::Value* packed_alloca(llvm::Value* value, uint32_t width, llvm::StringRef name) {
     auto* words = local_words(word_count(width), name);
     store_packed(value, words, 0, width);
@@ -2455,6 +2463,102 @@ Cgen_llvm::Value Cgen_llvm::lut(Value table, Value address, uint32_t result_widt
   auto* bit   = impl_->builder.CreateTrunc(impl_->builder.CreateLShr(bits, shift), impl_->builder.getInt1Ty());
   bit         = impl_->builder.CreateSelect(out_of_range, llvm::ConstantInt::getFalse(impl_->context), bit);
   return impl_->remember(cast_integer(impl_->builder, bit, result_width, true), result_width, result_unsign);
+}
+
+size_t Cgen_llvm::array_create(uint32_t bits, uint64_t size) {
+  Impl::Array_local a;
+  a.bits       = std::max<uint32_t>(bits, 1);
+  a.store_bits = a.bits <= 8 ? 8 : a.bits <= 16 ? 16 : a.bits <= 32 ? 32 : static_cast<uint32_t>(word_count(a.bits) * 64);
+  a.size       = std::max<uint64_t>(size, 1);
+  auto&             entry = impl_->builder.GetInsertBlock()->getParent()->getEntryBlock();
+  llvm::IRBuilder<> allocations(&entry, entry.getFirstInsertionPt());
+  a.storage = allocations.CreateAlloca(llvm::ArrayType::get(impl_->builder.getIntNTy(a.store_bits), a.size), nullptr, "array");
+  a.storage->setAlignment(llvm::Align(a.store_bits >= 64 ? 8 : a.store_bits / 8));
+  impl_->arrays.push_back(a);
+  return impl_->arrays.size() - 1;
+}
+
+bool Cgen_llvm::array_seed(size_t array, Value base) {
+  if (array >= impl_->arrays.size() || base.width == 0) {
+    return false;
+  }
+  const auto& a     = impl_->arrays[array];
+  auto&       b     = impl_->builder;
+  auto*       value = impl_->get(base);
+  if (value == nullptr) {
+    return false;
+  }
+  const auto whole = static_cast<uint32_t>(a.bits * a.size);
+  value            = cast_integer(b, value, whole, base.unsign);
+  if (a.store_bits == a.bits) {
+    // Entry i sits at bits [i*bits, (i+1)*bits) of the packed value, which is
+    // exactly its little-endian place in the array: one wide store.
+    b.CreateAlignedStore(value, a.storage, llvm::Align(1));
+    return true;
+  }
+  for (uint64_t i = 0; i < a.size; ++i) {
+    auto* entry = b.CreateLShr(value, llvm::ConstantInt::get(value->getType(), i * a.bits));
+    entry       = cast_integer(b, cast_integer(b, entry, a.bits, true), a.store_bits, true);
+    b.CreateStore(entry, b.CreateConstInBoundsGEP2_64(a.storage->getAllocatedType(), a.storage, 0, i));
+  }
+  return true;
+}
+
+bool Cgen_llvm::array_write(size_t array, Value enable, Value address, Value data) {
+  if (array >= impl_->arrays.size() || enable.width == 0 || address.width == 0 || data.width == 0) {
+    return false;
+  }
+  const auto& a     = impl_->arrays[array];
+  auto&       b     = impl_->builder;
+  auto*       wen   = impl_->get(enable);
+  auto*       value = impl_->get(data);  // materialized before the branch: later uses must be dominated
+  auto*       index = cast_integer(b, impl_->get(address), 64, address.unsign);
+  if (wen == nullptr || value == nullptr) {
+    return false;
+  }
+  auto* valid = b.CreateAnd(impl_->valid_address(address, a.size), b.CreateICmpNE(wen, llvm::ConstantInt::get(wen->getType(), 0)));
+  auto* entry = cast_integer(b, cast_integer(b, value, a.bits, data.unsign), a.store_bits, true);
+  impl_->when(valid, [&] {
+    b.CreateStore(entry, b.CreateInBoundsGEP(a.storage->getAllocatedType(), a.storage, {b.getInt64(0), index}));
+  });
+  return true;
+}
+
+Cgen_llvm::Value Cgen_llvm::array_read(size_t array, Value address, uint32_t result_width, bool result_unsign) {
+  if (array >= impl_->arrays.size() || address.width == 0 || result_width == 0) {
+    return {};
+  }
+  const auto& a     = impl_->arrays[array];
+  auto&       b     = impl_->builder;
+  auto*       valid = impl_->valid_address(address, a.size);
+  auto*       index = b.CreateSelect(valid, cast_integer(b, impl_->get(address), 64, address.unsign), b.getInt64(0));
+  llvm::Value* value
+      = b.CreateLoad(b.getIntNTy(a.store_bits), b.CreateInBoundsGEP(a.storage->getAllocatedType(), a.storage, {b.getInt64(0), index}));
+  value = cast_integer(b, value, a.bits, true);
+  value = b.CreateSelect(valid, value, llvm::ConstantInt::get(value->getType(), 0));  // out of range reads 0
+  return impl_->remember(cast_integer(b, value, result_width, result_unsign), result_width, result_unsign);
+}
+
+Cgen_llvm::Value Cgen_llvm::array_read_all(size_t array, uint32_t result_width, bool result_unsign) {
+  if (array >= impl_->arrays.size() || result_width == 0) {
+    return {};
+  }
+  const auto&  a     = impl_->arrays[array];
+  auto&        b     = impl_->builder;
+  const auto   whole = static_cast<uint32_t>(a.bits * a.size);
+  llvm::Value* value = nullptr;
+  if (a.store_bits == a.bits) {
+    value = b.CreateAlignedLoad(b.getIntNTy(whole), a.storage, llvm::Align(1));
+  } else {
+    value = llvm::ConstantInt::get(b.getIntNTy(whole), 0);
+    for (uint64_t i = 0; i < a.size; ++i) {
+      llvm::Value* entry
+          = b.CreateLoad(b.getIntNTy(a.store_bits), b.CreateConstInBoundsGEP2_64(a.storage->getAllocatedType(), a.storage, 0, i));
+      entry = cast_integer(b, cast_integer(b, entry, a.bits, true), whole, true);
+      value = b.CreateOr(value, b.CreateShl(entry, llvm::ConstantInt::get(entry->getType(), i * a.bits)));
+    }
+  }
+  return impl_->remember(cast_integer(b, value, result_width, result_unsign), result_width, result_unsign);
 }
 
 void Cgen_llvm::bind_memory(std::string_view symbol, const Memory& memory) { impl_->memories.emplace(symbol, memory); }
@@ -3240,9 +3344,14 @@ bool Cgen_llvm::inline_body(const Inline_body& body, const std::vector<Value>& i
 }
 
 bool Cgen_llvm::inline_loop(const Inline_body& body, const Loop_layout& layout, uint64_t count, int64_t first, int64_t step,
-                            const std::vector<Value>& inputs, std::vector<Value>& outputs, std::string& error) {
+                            const std::vector<Value>& inputs, std::vector<Value>& outputs, std::string& error,
+                            std::optional<size_t> tables_resource) {
   if (inputs.size() != layout.inputs.size() || layout.bindings.size() != body.inputs.size()) {
     error = "inline loop input count mismatch";
+    return false;
+  }
+  if (layout.trip_tables != tables_resource.has_value() || (layout.trip_tables && (body.scalar || impl_->owner == nullptr))) {
+    error = "inline loop per-trip tables need a resource of a packed-ABI kernel";
     return false;
   }
   const auto input_valid = [&](std::optional<size_t> input) { return !input || *input < layout.inputs.size(); };
@@ -3346,6 +3455,12 @@ bool Cgen_llvm::inline_loop(const Inline_body& body, const Loop_layout& layout, 
       impl_->store_field(bound(i, initial[input]), packed_in, in_fields[i], body.inputs[i].first);
     }
   }
+  // A stateful body's per-trip tables: loaded once, ahead of the loop.
+  llvm::Value* trip_tables = nullptr;
+  if (tables_resource) {
+    auto* slot  = b.CreateConstInBoundsGEP1_64(ptr, impl_->owner, *tables_resource);
+    trip_tables = b.CreateLoad(ptr, slot, "trip.tables");
+  }
   auto* start  = b.GetInsertBlock();
   auto* header = llvm::BasicBlock::Create(context, "inline.loop", fn);
   auto* bodyb  = llvm::BasicBlock::Create(context, "inline.body", fn);
@@ -3392,7 +3507,11 @@ bool Cgen_llvm::inline_loop(const Inline_body& body, const Loop_layout& layout, 
     }
     args.push_back(llvm::ConstantPointerNull::get(ptr));
   } else {
-    args = {packed_in, packed_out, changed, llvm::ConstantPointerNull::get(ptr)};
+    llvm::Value* owner = llvm::ConstantPointerNull::get(ptr);
+    if (trip_tables != nullptr) {
+      owner = b.CreateLoad(ptr, b.CreateInBoundsGEP(ptr, trip_tables, ordinal), "trip.owner");
+    }
+    args = {packed_in, packed_out, changed, owner};
   }
   auto* call = b.CreateCall(callee, args);
   if (body.scalar) {
@@ -3467,9 +3586,17 @@ bool Cgen_llvm::inline_loop(const Inline_body& body, const Loop_layout& layout, 
 bool Cgen_llvm::add_loop(std::string_view entry, const Loop_layout& layout, std::string& error, bool track_changed) {
   const bool storage = std::ranges::any_of(impl_->input_storage, [](const auto& s) { return s.has_value(); })
                        || std::ranges::any_of(impl_->output_values, [](const auto& o) { return o.dest.has_value(); });
-  if (impl_->state_abi || impl_->loop_function || !impl_->memories.empty() || storage
-      || layout.bindings.size() != impl_->input_types.size()) {
-    error = "native loop requires a stateless body and a complete input binding";
+  // The body inputs a loop port feeds: every input of a stateless body; the
+  // packed ones (not storage-bound) of a stateful one.
+  std::vector<size_t> bound_inputs;
+  for (size_t i = 0; i < impl_->input_types.size(); ++i) {
+    if (!(i < impl_->input_storage.size() && impl_->input_storage[i].has_value())) {
+      bound_inputs.push_back(i);
+    }
+  }
+  if (impl_->state_abi || impl_->loop_function || layout.bindings.size() != bound_inputs.size()
+      || (!layout.trip_tables && (!impl_->memories.empty() || storage)) || (layout.trip_tables && impl_->scalar_abi)) {
+    error = "native loop requires a stateless body (or per-trip tables) and a complete input binding";
     return false;
   }
   if (!seal(error, track_changed)) {
@@ -3495,7 +3622,7 @@ bool Cgen_llvm::add_loop(std::string_view entry, const Loop_layout& layout, std:
   std::vector<bool> carry_inputs(layout.inputs.size(), false), carry_outputs(impl_->output_values.size(), false);
   for (const auto& [input, output] : layout.carries) {
     if (input >= layout.inputs.size() || output >= impl_->output_values.size() || carry_inputs[input] || carry_outputs[output]
-        || layout.index == input || layout.activation == input) {
+        || layout.index == input || layout.activation == input || impl_->output_values[output].dest) {
       error = "native loop has an invalid or overlapping carry binding";
       return false;
     }
@@ -3512,7 +3639,11 @@ bool Cgen_llvm::add_loop(std::string_view entry, const Loop_layout& layout, std:
   auto& context        = impl_->context;
   auto* ptr            = llvm::PointerType::getUnqual(context);
   auto* i64            = b.getInt64Ty();
-  auto* type           = llvm::FunctionType::get(b.getVoidTy(), {ptr, ptr, i64, i64, i64}, false);
+  std::vector<llvm::Type*> params{ptr, ptr, i64, i64, i64};
+  if (layout.trip_tables) {
+    params.push_back(ptr);
+  }
+  auto* type           = llvm::FunctionType::get(b.getVoidTy(), params, false);
   auto* fn             = llvm::Function::Create(type, llvm::Function::ExternalLinkage, llvm::StringRef(entry), *impl_->module);
   impl_->loop_function = fn;
   fn->addParamAttr(0, llvm::Attribute::NoAlias);
@@ -3552,17 +3683,22 @@ bool Cgen_llvm::add_loop(std::string_view entry, const Loop_layout& layout, std:
     impl_->store_field(cast_integer(b, initial[input], width, layout.inputs[input].second), packed_out, out_fields[output], width);
   }
   // Pack invariant ports once. Mutable ports are SSA values across iterations.
+  // Binding `i` feeds body input bound_inputs[i].
   const auto bound = [&](size_t i, llvm::Value* value) {
     const auto& binding = layout.bindings[i];
     if (binding.bit) {
       value = b.CreateLShr(value, binding.bit);
     }
-    return cast_integer(b, value, impl_->input_types[i].first, layout.inputs[binding.input].second);
+    return cast_integer(b, value, impl_->input_types[bound_inputs[i]].first, layout.inputs[binding.input].second);
+  };
+  const auto store_bound = [&](size_t i, llvm::Value* value) {
+    const auto in = bound_inputs[i];
+    impl_->store_field(bound(i, value), packed_in, in_fields[in], impl_->input_types[in].first);
   };
   for (size_t i = 0; i < layout.bindings.size(); ++i) {
     const auto input = layout.bindings[i].input;
     if (!carry_inputs[input] && layout.index != input && layout.activation != input) {
-      impl_->store_field(bound(i, initial[input]), packed_in, in_fields[i], impl_->input_types[i].first);
+      store_bound(i, initial[input]);
     }
   }
   b.CreateBr(header);
@@ -3596,7 +3732,7 @@ bool Cgen_llvm::add_loop(std::string_view entry, const Loop_layout& layout, std:
   for (size_t i = 0; i < layout.bindings.size(); ++i) {
     const auto input = layout.bindings[i].input;
     if (carry_inputs[input] || layout.index == input || layout.activation == input) {
-      impl_->store_field(bound(i, values[input]), packed_in, in_fields[i], impl_->input_types[i].first);
+      store_bound(i, values[input]);
     }
   }
   llvm::SmallVector<llvm::Value*> args;
@@ -3606,7 +3742,11 @@ bool Cgen_llvm::add_loop(std::string_view entry, const Loop_layout& layout, std:
     }
     args.push_back(llvm::ConstantPointerNull::get(ptr));
   } else {
-    args = {packed_in, packed_out, changed, llvm::ConstantPointerNull::get(ptr)};
+    llvm::Value* owner = llvm::ConstantPointerNull::get(ptr);
+    if (layout.trip_tables) {
+      owner = b.CreateLoad(ptr, b.CreateInBoundsGEP(ptr, fn->getArg(5), ordinal), "trip.owner");
+    }
+    args = {packed_in, packed_out, changed, owner};
   }
   auto* call = b.CreateCall(impl_->function, args);
   if (impl_->scalar_abi) {
@@ -3661,8 +3801,22 @@ bool Cgen_llvm::add_loop(std::string_view entry, const Loop_layout& layout, std:
   loop_id->replaceOperandWith(0, loop_id);
   backedge->setMetadata(llvm::LLVMContext::MD_loop, loop_id);
   b.SetInsertPoint(done);
+  // A storage-bound output (a register, a runtime slot) was published in its
+  // lane during the trip; only packed outputs cross the entry.
+  std::vector<size_t> published = layout.entry_outputs;
+  if (published.empty()) {
+    for (size_t i = 0; i < impl_->output_values.size(); ++i) {
+      if (!impl_->output_values[i].dest) {
+        published.push_back(i);
+      }
+    }
+  }
   size_t entry_word = 0;
-  for (size_t i = 0; i < impl_->output_values.size(); ++i) {
+  for (const size_t i : published) {
+    if (i >= impl_->output_values.size() || impl_->output_values[i].dest) {
+      error = "native loop entry output is not a packed body output";
+      return false;
+    }
     const auto width = impl_->output_values[i].value.width;
     impl_->store_packed(impl_->load_field(packed_out, out_fields[i], width, "result"), outputs, entry_word, width);
     entry_word += word_count(width);
@@ -3700,6 +3854,26 @@ std::string Cgen_llvm::sharing_key(std::string& error, bool track_changed) {
   for (const auto& [input, inactive] : impl_->speculations) {  // write_module splits on these
     stream << "|speculate:" << input << '=' << inactive;
   }
+  impl_->function->setName(name);
+  if (impl_->loop_function) {
+    impl_->loop_function->setName(loop_name);
+  }
+  return {bytes.data(), bytes.size()};
+}
+
+std::string Cgen_llvm::inline_bitcode(std::string& error, bool track_changed) {
+  if (!seal(error, track_changed)) {
+    return {};
+  }
+  const std::string name = impl_->function->getName().str();
+  impl_->function->setName("__lhd_shared_color");
+  const auto loop_name = impl_->loop_function ? impl_->loop_function->getName().str() : std::string{};
+  if (impl_->loop_function) {
+    impl_->loop_function->setName("__lhd_shared_loop");
+  }
+  llvm::SmallVector<char, 0> bytes;
+  llvm::raw_svector_ostream  stream(bytes);
+  llvm::WriteBitcodeToFile(*impl_->module, stream);
   impl_->function->setName(name);
   if (impl_->loop_function) {
     impl_->loop_function->setName(loop_name);

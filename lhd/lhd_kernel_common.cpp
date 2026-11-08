@@ -2808,7 +2808,28 @@ std::vector<std::string> sim_into(Options& opts, Result& res, Eprp_var& var, con
     // basename cgen actually wrote.
     names.emplace_back(livehd::unit_file_stem(gn));
   }
+  // Simulator-private loop fusion/specialization can emit definitions absent
+  // from var.graphs: `<graph>__k<key>` bodies of a graph compiled in THIS run.
+  // Their iface sidecars identify module bodies, unlike an arbitrary user .cpp
+  // or the separately collected evaluator shards. Only a specialization of a
+  // current graph counts: a sidecar a previous run left for a module that no
+  // longer exists must not enter the build.
+  const absl::flat_hash_set<std::string> current(names.begin(), names.end());
+  for (const auto& entry : fs::directory_iterator(odir)) {
+    const auto filename = entry.path().filename().string();
+    if (!entry.is_regular_file() || !filename.ends_with(".iface.json")) {
+      continue;
+    }
+    const auto stem = filename.substr(0, filename.size() - std::string_view{".iface.json"}.size());
+    for (auto k = stem.find("__k"); k != std::string::npos; k = stem.find("__k", k + 1)) {
+      if (current.contains(stem.substr(0, k))) {
+        names.push_back(stem);
+        break;
+      }
+    }
+  }
   std::sort(names.begin(), names.end());
+  names.erase(std::unique(names.begin(), names.end()), names.end());
   for (const auto& n : names) {
     // `iface.json` is the per-module manifest prp_sim reads to learn the DUT
     // interface (2f-sim B0). Checking it here turns a missing/failed manifest
@@ -3108,7 +3129,9 @@ void emit_sim_outputs(Options& opts, Result& res, Eprp_var& var) {
   {
     std::ofstream ofs(std::format("{}/MODULE.bazel", dir));
     ofs << "module(name = \"sim\", version = \"0.0.0\")\n\n";
-    ofs << "bazel_dep(name = \"rules_cc\", version = \"0.2.19\")\n";
+    ofs << "bazel_dep(name = \"rules_cc\", version = \"0.2.27\")\n";
+    ofs << "bazel_dep(name = \"platforms\", version = \"1.1.0\")\n";
+    ofs << "bazel_dep(name = \"apple_support\", version = \"2.11.0\", repo_name = \"build_bazel_apple_support\")\n";
     ofs << "bazel_dep(name = \"hlop\", version = \"0.2.0\")\n";
     ofs << std::format("local_path_override(module_name = \"hlop\", path = \"{}\")\n\n", hlop);
     ofs << "bazel_dep(name = \"iassert\", version = \"0.1.1\")\n";
@@ -3120,14 +3143,28 @@ void emit_sim_outputs(Options& opts, Result& res, Eprp_var& var) {
            ")\n";
   }
 
-  // The standalone root does not inherit LiveHD's .bazelrc. Match its macOS
-  // deployment target: Slop uses libc++ APIs unavailable at Bazel's older
-  // default target. Apply this to dependencies and the driver as well.
+  // The standalone root does not inherit LiveHD's Bazel version or .bazelrc.
+  // Keep the toolchain settings aligned, including exec tools and dependencies.
+  // The scaffold smoke check catches drift when the root configuration changes.
+  {
+    std::ofstream ofs(std::format("{}/.bazelversion", dir));
+    ofs << "9.3.1\n";
+  }
   {
     std::ofstream ofs(std::format("{}/.bazelrc", dir));
     ofs << "# Match the C++ library requirements of LiveHD and Slop.\n"
+           "build --repo_env=BAZEL_CONLYOPTS=\"-std=gnu17\"\n"
+           "build --cxxopt=\"-std=c++23\"\n"
+           "build --action_env=BAZEL_CXXOPTS=\"-std=c++23\"\n"
            "build --enable_platform_specific_config\n"
+           "build:darwin --config=macos\n"
+           "build:macos --xcode_version_config=//:command_line_tools\n"
+           "build:macos --features=-layering_check\n"
+           "build:macos --host_features=-layering_check\n"
+           "build:macos --macos_minimum_os=26.0\n"
+           "build:macos --host_macos_minimum_os=26.0\n"
            "build:macos --copt=-mmacosx-version-min=26.0\n"
+           "build:macos --cxxopt=-mmacosx-version-min=26.0\n"
            "build:macos --linkopt=-mmacosx-version-min=26.0\n"
            "build:macos --host_copt=-mmacosx-version-min=26.0\n"
            "build:macos --host_linkopt=-mmacosx-version-min=26.0\n";
@@ -3147,7 +3184,10 @@ void emit_sim_outputs(Options& opts, Result& res, Eprp_var& var) {
   // can consume them directly without a version-matched LLVM tool.
   {
     std::ofstream ofs(std::format("{}/BUILD", dir));
-    ofs << "load(\"@rules_cc//cc:defs.bzl\", \"cc_library\")\n\n";
+    ofs << "load(\"@rules_cc//cc:defs.bzl\", \"cc_library\")\n";
+    ofs << "load(\"@build_bazel_apple_support//xcode:xcode_config.bzl\", \"xcode_config\")\n\n";
+    ofs << "# An empty version list selects Command Line Tools, as in LiveHD.\n"
+           "xcode_config(name = \"command_line_tools\")\n\n";
     ofs << "cc_library(\n    name = \"sim\",\n    srcs = [\n";
     for (const auto& n : names) {
       ofs << std::format("        \"{}.cpp\",\n", n);
