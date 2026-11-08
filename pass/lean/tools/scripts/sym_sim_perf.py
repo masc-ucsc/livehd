@@ -51,11 +51,15 @@ OUTPUT, in --out:
 
 Usage:
     sym_sim_perf.py <run file> --out <dir> [--sims fp,ir,vc] [--reps 3] [--cpus 0-7]
-                    [--mem 48G] [--timeout 6h] [--only <bench>[:<run>]] [--dry-run]
+                    [--mem 48G] [--timeout 6h] [--only <bench>[:<run>]] [--dry-run] [--keep-work]
+
+Each run's work directory (its CNF and LRAT files, gigabytes on a large design) is deleted
+once the run's numbers are read from its log; --keep-work keeps them. The logs stay.
 """
 import argparse
 import hashlib
 import os
+import shutil
 import re
 import shlex
 import statistics
@@ -194,6 +198,8 @@ def main():
     ap.add_argument("--timeout", default="6h", help="per repetition, as for `timeout`")
     ap.add_argument("--only", default=None)
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--keep-work", action="store_true",
+                    help="keep each run's work directory (CNF and LRAT files); deleted by default")
     a = ap.parse_args()
 
     runfile = a.runfile.resolve()
@@ -260,6 +266,9 @@ def main():
                 rawf.flush()
                 print(f"    exit {rc}, {fmt(wall, 'wall_s')} s, {fmt(rss, 'rss_mb')} MB, "
                       f"{m['verdict']} (load average before: {load1:.1f})", flush=True)
+                # the numbers are read: drop the run's SAT problems and proofs (GBs per run)
+                if not a.keep_work:
+                    shutil.rmtree(work, ignore_errors=True)
     rawf.close()
     if a.dry_run:
         return
