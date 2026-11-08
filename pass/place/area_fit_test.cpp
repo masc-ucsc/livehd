@@ -98,6 +98,24 @@ TEST(AreaFit, AreasSplitCellsFromMacros) {
   EXPECT_EQ(areas.max_macro_h, 40000);
 }
 
+TEST(AreaFit, AreasSkipPadsAndCountSoftBlocksAsCells) {
+  Frame f;
+  auto  pad              = f.tech.macros.at("RAM");
+  pad.klass              = "PAD INOUT";
+  f.tech.macros["IOPAD"] = pad;
+  auto soft              = f.tech.macros.at("RAM");
+  soft.klass             = "BLOCK SOFT";
+  f.tech.macros["SOFT"]  = soft;
+  f.add("u0", "INV", 10000, 10000);
+  f.add("p0", "IOPAD", 0, 0, ph::Status::FIXED);
+  f.add("s0", "SOFT", 50000, 50000);
+  const auto areas = pl::area_fit_areas(f.tech, f.fp);
+  EXPECT_DOUBLE_EQ(areas.macros, 0);                                   // the pad is not macro area
+  EXPECT_DOUBLE_EQ(areas.cells, 1000.0 * 2000.0 + 40000.0 * 60000.0);  // the soft block is cell area
+  EXPECT_EQ(areas.max_macro_w, 40000);                                 // the region still holds its body
+  EXPECT_EQ(areas.max_macro_h, 60000);
+}
+
 TEST(AreaFit, RegionKeepsAspectSnapsAndCentersAtTheAnchor) {
   Frame      f;
   const auto core   = pl::area_fit_core(f.tech, f.fp);

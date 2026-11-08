@@ -14,6 +14,7 @@
 #include "inou/lefdef/routing_connectivity.hpp"
 #include "inou/lefdef/routing_geometry.hpp"
 #include "inou/lefdef/routing_occupancy.hpp"
+#include "inou/lefdef/routing_rules.hpp"
 #include "legroute_internal.hpp"
 
 namespace livehd::placement {
@@ -66,11 +67,14 @@ struct Fixture {
       }
     }
     const auto master = [&](const std::string& name, double w, std::vector<std::pair<std::string, double>> pins, bool flop) {
-      auto& m  = tech.macros[name];
-      m.width  = w;
-      m.height = .25;
-      m.klass  = "CORE";
-      m.site   = "site";
+      auto& m      = tech.macros[name];
+      m.width      = w;
+      m.height     = .25;
+      m.klass      = "CORE";
+      m.site       = "site";
+      // These masters' pin rectangles are invariant under the X reflection
+      // required by the explicitly alternating N/FS placement rows.
+      m.symmetry_x = true;
       for (const auto& [pin, x] : pins) {
         const bool out = pin == "Y" || pin == "Q";
         m.pins[pin]    = {out ? "OUTPUT" : "INPUT", flop && pin == "CLK" ? "CLOCK" : "SIGNAL", {{"M1", {x, .05, x + .02, .2}}}};
@@ -731,6 +735,7 @@ TEST(Legroute, EndToEndLegalRoutedAndConnected) {
 
 TEST(Legroute, FinalClosureEmitsAndConnectsExistingClockTopology) {
   for (bool spines : {false, true}) {
+    SCOPED_TRACE(spines);
     Fixture    f;
     const auto sink0 = f.cell("dff", 1000, 0);
     const auto sink1 = f.cell("dff", 2500, 500);
@@ -741,6 +746,39 @@ TEST(Legroute, FinalClosureEmitsAndConnectsExistingClockTopology) {
         "clk",
         {{"PIN", "clk"}, {f.fp.components[sink0].name, "CLK"}, {f.fp.components[sink1].name, "CLK"}}
     });
+    // This test supplies an existing upstream clock conductor, not merely
+    // logical connectivity. Both sinks still require their own in-box routes.
+    // The three native-width wires cover the exact V4_DEF outer plates.
+    ph::Wire ingress;
+    ingress.paths = {
+        ph::flush_wire_path({"M4", {115, 1015, 170, 1035}},
+        true),
+        ph::flush_wire_path({"M5",  {140, 105, 160, 1045}},
+        false),
+        ph::flush_wire_path({"M4",  {130, 115, 2670, 135}},
+        true),
+        ph::via_path("M4", 150, 1025, "V4_DEF"),
+        ph::via_path("M4", 150, 125, "V4_DEF")
+    };
+    f.fp.nets[0].wires.push_back(ingress);
+    const ph::Signal_metal_rules rules(f.tech, f.fp);
+    for (const auto& shape : ph::route_geometry(f.tech, f.fp, f.fp.nets[0])) {
+      ASSERT_TRUE(f.fp.die.contains(shape.rect));
+      if (f.tech.layers.contains(shape.layer)) {
+        const auto check = rules.rectangle(shape);
+        ASSERT_TRUE(check.legal) << shape.layer << ": " << check.reason;
+      }
+    }
+    lr::Final_cut_state cuts(f.tech, f.fp);
+    ASSERT_TRUE(cuts.add(ingress.paths).empty());
+    const std::vector<ph::Shape> source_pin{
+        {"M4", {115, 1015, 135, 1035}}
+    };
+    const auto source_connected = ph::check_conductor_connectivity(f.tech, f.fp, ingress.paths, source_pin, {});
+    ASSERT_TRUE(source_connected.connected) << source_connected.reason;
+    // The supplied topology reaches the IO but intentionally has no M1 access
+    // to either sink: Final must connect all three real endpoints itself.
+    ASSERT_FALSE(ph::check_route_connectivity(f.tech, f.fp, f.fp.nets[0]).connected);
     Legroute_options opt;
     opt.threads        = 1;
     opt.clock_spine    = spines;
@@ -752,13 +790,40 @@ TEST(Legroute, FinalClosureEmitsAndConnectsExistingClockTopology) {
     EXPECT_EQ(r.clock_connected_nets, 1u);
     EXPECT_EQ(r.clock_failed_nets, 0u);
     EXPECT_EQ(r.clock_unchecked_nets, 0u);
-    ASSERT_TRUE(r.wires_emitted) << "spines " << spines << " failures "
-                                 << (r.failure_sample.empty() ? "" : r.failure_sample.back());
+    ASSERT_TRUE(r.wires_emitted) << "spines " << spines << " failures " << testing::PrintToString(r.failure_sample);
     ASSERT_FALSE(f.fp.nets[0].wires.empty());
+    EXPECT_EQ(f.fp.nets[0].wires.front(), ingress);
     const auto connected = ph::check_route_connectivity(f.tech, f.fp, f.fp.nets[0]);
     EXPECT_TRUE(connected.connected) << connected.reason;
     EXPECT_EQ(r.clock_domains > 0, spines);
   }
+}
+
+TEST(Legroute, MissingClockIngressKeepsBothSinksRequiredAndPublishesNoRoutes) {
+  Fixture    f;
+  const auto sink0 = f.cell("dff", 1000, 0);
+  const auto sink1 = f.cell("dff", 2500, 500);
+  f.fp.terminals.push_back({"clk", "clk", "INPUT", 125, 1025, ph::Orientation::N, ph::Status::FIXED, {{"M4", {-10, -10, 10, 10}}}});
+  f.fp.nets.push_back({
+      "clk",
+      {{"PIN", "clk"}, {f.fp.components[sink0].name, "CLK"}, {f.fp.components[sink1].name, "CLK"}}
+  });
+  const auto       endpoints = f.fp.nets[0].connections;
+  Legroute_options opt;
+  opt.threads        = 1;
+  opt.clock_spine    = false;
+  const auto profile = Fixture::profile();
+  const auto report  = legroute(f.tech, f.fp, f.timing, opt, {}, &profile);
+  EXPECT_EQ(report.routed_nets, 1u);
+  EXPECT_EQ(report.clock_required_nets, 1u);
+  EXPECT_EQ(report.clock_connected_nets, 0u);
+  EXPECT_EQ(report.clock_failed_nets, 1u);
+  EXPECT_EQ(report.clock_unchecked_nets, 0u);
+  EXPECT_FALSE(report.wires_emitted);
+  EXPECT_TRUE(f.fp.nets[0].wires.empty());
+  EXPECT_EQ(f.fp.nets[0].connections, endpoints);
+  EXPECT_EQ(f.fp.terminals.size(), 1u);
+  EXPECT_EQ(f.fp.components.size(), 2u);
 }
 
 TEST(Legroute, LegalBoxesRouteTheGivenPlacementUnmoved) {
@@ -1418,7 +1483,22 @@ TEST(Legroute, MovableCoarseCorridorJointlyLegalizesCoincidentBoxesAndRoutesThei
       EXPECT_LE(int(nets.size()), int(std::floor(std::min(ct, cq) * opt.cap_scale)));
     }
     lr::pack_cells(d, g, boxes);
-    lr::final_place(d, g, boxes, routes, 1);
+    lr::validate_final_membership(d, g, boxes);
+    ph::Tech_profile profile;
+    profile.route.access        = {"M1", "M2", "V1"};
+    profile.route.branch_layer  = "M3";
+    profile.route.branch_cut    = "V2";
+    profile.route.signal_layers = {"M2", "M3", "M4", "M5", "M6"};
+    d.profile                   = &profile;
+    opt.route_ms                = 3000;
+    lr::box_demand(d, g, boxes, routes);
+    lr::assign_layers(d, g, routes);
+    lr::assign_tracks(d, g, routes, 1);
+    Legroute_report detailed;
+    lr::final_wires(d, g, boxes, routes, {}, detailed);
+    ASSERT_TRUE(detailed.wires_emitted) << testing::PrintToString(detailed.failure_sample);
+    const auto connected = ph::check_route_connectivity(f.tech, f.fp, f.fp.nets[0]);
+    EXPECT_TRUE(connected.connected) << connected.reason;
     const auto& pa = f.fp.components[a].place;
     const auto& pb = f.fp.components[b].place;
     EXPECT_TRUE(pa.x + 100 <= pb.x || pb.x + 100 <= pa.x || pa.y + 250 <= pb.y || pb.y + 250 <= pa.y)

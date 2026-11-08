@@ -1,5 +1,7 @@
 #include "macro_tracks.hpp"
 
+#include <algorithm>
+
 #include "dreamplace/native/placement.hpp"
 #include "gtest/gtest.h"
 
@@ -472,5 +474,82 @@ TEST(Placement, CoherentRecoveryCannotBypassALaterFixedMacroPinFailure) {
   const auto fixed     = cells.back();
   EXPECT_NO_THROW(legalize_macro_tracks(tech, fp, cells, 2, 2, true));
   EXPECT_EQ(cells.back(), fixed);
+}
+}  // namespace livehd::placement
+
+namespace livehd::placement {
+// macro.pdn: a strap lattice on y moves the macro onto an admitted edge that is also on its routing phase; an
+// unsatisfiable lattice falls back to the routing-track alignment alone and reports it.
+TEST(Placement, MacroTrackAlignmentFollowsThePowerGridLattice) {
+  const auto [tech, fp] = track_fixture();
+  Pg_edge_lattice lattice;
+  lattice.period  = 30;
+  lattice.channel = 12;
+  lattice.margin  = 1;
+  lattice.groups  = {{{3, 8}}};
+  Pg_macro_alignment pdn;
+  pdn.axis[1] = lattice;
+  std::vector<physical::Component> plain{track_macro()};
+  legalize_macro_tracks(tech, fp, plain, 2, 2, true);
+  std::vector<physical::Component> cells{track_macro()};
+  bool                             aligned = false;
+  legalize_macro_tracks(tech, fp, cells, 2, 2, true, 0, 0, &pdn, &aligned);
+  EXPECT_TRUE(aligned);
+  const auto& p = cells.front().place;
+  EXPECT_TRUE(lattice.allows(p.y, p.y + p.height, 0, 100)) << p.y;
+  EXPECT_EQ((p.y + 3 - 2) % 6, 0);
+  EXPECT_EQ(p.x, plain.front().place.x);  // the x axis has no lattice
+  EXPECT_NE(p.y, plain.front().place.y);  // the plain alignment lands off the lattice here
+  // A group wider than the channel admits no edge: keep the plain alignment, report the fallback.
+  pdn.axis[1]->groups = {{{0, 20}}};
+  cells               = {track_macro()};
+  legalize_macro_tracks(tech, fp, cells, 2, 2, true, 0, 0, &pdn, &aligned);
+  EXPECT_FALSE(aligned);
+  EXPECT_EQ(cells.front().place, plain.front().place);
+  // Fixed macros are never moved or checked against the lattice.
+  cells                      = {track_macro()};
+  cells.front().place        = plain.front().place;
+  cells.front().place.status = Ann_place::Status::FIXED;
+  legalize_macro_tracks(tech, fp, cells, 2, 2, false, 0, 0, &pdn, &aligned);
+  EXPECT_FALSE(aligned);
+  EXPECT_EQ(cells.front().place.x, plain.front().place.x);
+  EXPECT_EQ(cells.front().place.y, plain.front().place.y);
+}
+// macro.pdn with rigid macro groups: the lattice must admit every member macro's edges, not only the group's
+// bounding box. Admitted low edges here are y = 9..14 (mod 30); on the routing phase only y = 11 (mod 30).
+TEST(Placement, RigidMacroGroupsAlignEveryMemberToThePowerGridLattice) {
+  const auto [tech, fp] = track_fixture();
+  Pg_edge_lattice lattice;
+  lattice.period  = 30;
+  lattice.channel = 12;
+  lattice.margin  = 1;
+  lattice.groups  = {{{3, 8}}};
+  Pg_macro_alignment pdn;
+  pdn.axis[1]        = lattice;
+  const auto stacked = [&](int64_t pitch) {
+    auto a = track_macro(), b = track_macro();
+    b.name     = "ram1";
+    b.place.y += pitch;  // a whole number of routing periods: one phase for the group
+    return std::vector<physical::Component>{a, b};
+  };
+  const auto members_ok = [&](const std::vector<physical::Component>& cells) {
+    return std::all_of(cells.begin(), cells.end(), [&](const auto& c) {
+      return lattice.allows(c.place.y, c.place.y + c.place.height, 0, 100);
+    });
+  };
+  // Pitch 30: both members land on admitted edges together.
+  auto aligned_cells = stacked(30);
+  bool aligned       = false;
+  legalize_rigid_macro_tracks(tech, fp, aligned_cells, {1, 1}, 2, 2, true, 0, 0, &pdn, &aligned);
+  EXPECT_TRUE(aligned);
+  EXPECT_TRUE(members_ok(aligned_cells));
+  EXPECT_EQ(aligned_cells[1].place.y - aligned_cells[0].place.y, 30);
+  // Pitch 18: when the lower member is admitted the upper one (18 above) never is, so no lattice frame exists even
+  // though the group's bounding box (the lower member's low edge) can be admitted: report the fallback.
+  auto cells = stacked(18);
+  legalize_rigid_macro_tracks(tech, fp, cells, {1, 1}, 2, 2, true, 0, 0, &pdn, &aligned);
+  EXPECT_FALSE(aligned);
+  EXPECT_FALSE(members_ok(cells));
+  EXPECT_EQ(cells[1].place.y - cells[0].place.y, 18);
 }
 }  // namespace livehd::placement

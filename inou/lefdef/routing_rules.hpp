@@ -1,6 +1,7 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 #include <functional>
+#include <span>
 
 #include "physical.hpp"
 
@@ -50,6 +51,8 @@ class Signal_metal_rules {
   Technology                       rules_;
   int64_t                          dbu_;
   std::map<std::string, Extension> extensions_;
+  Rule_check                       spacing_context(const Shape&, const Shape&, std::span<const Shape>, std::span<const Shape>,
+                                                   const std::function<bool(const Rect&)>&) const;
 
 public:
   Signal_metal_rules(const Technology&, const Floorplan&);
@@ -59,6 +62,14 @@ public:
   // still requires rectangle()/spacing() validation.
   std::vector<int64_t>   candidate_widths(const std::string& layer) const;
   Rule_check             spacing(const Shape&, const Shape&) const;
+  // The caller supplies actual same-owner metal (or one physical source pin /
+  // one member's obstruction union), never foreign geometry or a bounding hull.
+  // Nonempty contexts must exactly cover the corresponding queried rectangle.
+  // Only directional LEF58 EOL/keepout edges use the exposed union contour;
+  // ordinary/PRL spacing and conservative corner checks are unchanged. Empty
+  // context retains the rectangular check. This grants no connectivity rights.
+  Rule_check             spacing_with_union(const Shape&, const Shape&, std::span<const Shape> source_union = {},
+                                            std::span<const Shape> target_union = {}) const;
   // Existing-source metal has no independent EOL at an interior via-pad edge.
   // The caller must prove the source is contained in its original pin metal
   // and that every supplied target footprint was also already present. Each

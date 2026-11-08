@@ -198,7 +198,7 @@ inline livehd::placement::Options public_placement_options(Fixture& f, const std
   o.liberty    = lib.string();
   o.floorplan  = def.string();
   o.output_dir = output.string();
-  o.fp_place = o.final_cells = o.macro_snap = false;
+  o.fp_place = o.final_cells = o.macro_snap = o.fp_auto = false;
   o.fp_pin_adjust = o.macro_pin_adjust = false;
   o.halo_x = o.halo_y      = 0;
   o.optimization_pending   = true;

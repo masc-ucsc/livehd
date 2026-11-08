@@ -15115,7 +15115,8 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         const auto& local_clocks = local_clocks_for(site.node.get_graph());
         // The body's guard ports: state clocked on the port, through a gate
         // rooted at it, or forwarded into a child's guard port.
-        const auto& body_clocks  = clock_guard_ports(site.node.base_node().get_subnode_graph(), port_cache);
+        const auto  body_graph   = site.node.base_node().get_subnode_graph();
+        const auto& body_clocks  = clock_guard_ports(body_graph, port_cache);
         for (size_t input = 0; input < definition_inputs.size(); ++input) {
           const auto& driver = definition_inputs[input].driver;
           const bool  clockish
@@ -16552,15 +16553,15 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                                    : memory->order == Mem::Order::program        ? memory->fwd_upto[rport->rdidx]
                                                                                  : 0;
                 const auto whole_bits = static_cast<uint32_t>(memory->bits * memory->size);
-                Cgen_llvm::Value base;
+                Cgen_llvm::Value array_base;
                 if (memory->is_whole()) {
-                  base = memory_operand(std::nullopt, "update");
+                  array_base = memory_operand(std::nullopt, "update");
                 } else if (!memory->init.is_invalid()) {
-                  base = memory_operand(std::nullopt, "initial");
+                  array_base = memory_operand(std::nullopt, "initial");
                 } else {
-                  base = llvm_kernel.constant(whole_bits, 0, true);
+                  array_base = llvm_kernel.constant(whole_bits, 0, true);
                 }
-                if (base.width == 0) {
+                if (array_base.width == 0) {
                   return reject("array has no base contents value");
                 }
                 auto [ait, fresh] = llvm_arrays.try_emplace(version.base_site);
@@ -16574,7 +16575,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                 const bool   undo_read
                     = !whole_read && state.applied > prefix && static_cast<int>(state.undo.size()) >= state.applied;
                 if (state.applied < 0 || (state.applied > prefix && !undo_read)) {
-                  if (!llvm_kernel.array_seed(array, llvm_kernel.resize(base, whole_bits, memory->unsign))) {
+                  if (!llvm_kernel.array_seed(array, llvm_kernel.resize(array_base, whole_bits, memory->unsign))) {
                     return reject("array seed construction failed");
                   }
                   state.applied = 0;
@@ -16814,9 +16815,11 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                   // clockless array's BASE contents for every later
                   // program-order read.
                   const auto base_bits = static_cast<uint32_t>(memory->bits * memory->size);
-                  auto       base      = memory_operand(std::nullopt, memory->is_whole() ? "update" : "initial");
-                  base = base.width == 0 ? llvm_kernel.constant(base_bits, 0, true) : llvm_kernel.resize(base, base_bits, memory->unsign);
-                  if (!llvm_kernel.memory_apply(emit_llvm_memory_apply_helper(color_plan_->sites()[version.base_site], *memory), base)
+                  auto       restore_base = memory_operand(std::nullopt, memory->is_whole() ? "update" : "initial");
+                  restore_base            = restore_base.width == 0 ? llvm_kernel.constant(base_bits, 0, true)
+                                                                    : llvm_kernel.resize(restore_base, base_bits, memory->unsign);
+                  if (!llvm_kernel.memory_apply(emit_llvm_memory_apply_helper(color_plan_->sites()[version.base_site], *memory),
+                                                restore_base)
                       || !llvm_kernel.memory_clear(emit_llvm_memory_clear_helper(color_plan_->sites()[version.base_site]))) {
                     return reject("combinational memory base restore construction failed");
                   }

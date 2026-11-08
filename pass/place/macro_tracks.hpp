@@ -3,6 +3,7 @@
 #include <functional>
 
 #include "inou/lefdef/physical.hpp"
+#include "power_grid_rules.hpp"
 namespace livehd::placement {
 // Cached periodic feasibility, independent of absolute origin, core bounds and
 // obstacles. Every original member keeps its standalone supported-pin profile.
@@ -13,12 +14,18 @@ std::function<bool(const std::vector<physical::Component>&)> make_rigid_macro_tr
 // are immutable and diagnosed when their signal pins miss known routing tracks.
 // Halos keep CORE cells out; two non-CORE bodies keep max(channel, 2 * halo) of clear
 // spacing per axis (DBU). Moved origins never land closer than that to another macro.
+// With `pdn`, movable macro origins also land where the power-grid strap lattice admits their edges
+// (Pg_edge_lattice::allows against the row core). When no such frame exists, the alignment is retried without
+// the lattice and *pdn_aligned (when given) reports false; fixed macros are never checked against it.
 void legalize_macro_tracks(const physical::Technology& tech, const physical::Floorplan& layout,
                            std::vector<physical::Component>& cells, int64_t halo_x, int64_t halo_y, bool move_macros,
-                           int64_t channel_x = 0, int64_t channel_y = 0);
+                           int64_t channel_x = 0, int64_t channel_y = 0, const Pg_macro_alignment* pdn = nullptr,
+                           bool* pdn_aligned = nullptr);
 // Diagnostic group ids describe rigid translations only during macro_plan.
-// Each group is profiled/placed as one union rectangle with all member pins.
+// Each group is profiled/placed as one union rectangle with all member pins; with `pdn` a group position is
+// lattice-aligned only when every member macro's edges are admitted (not just the union rectangle's).
 void legalize_rigid_macro_tracks(const physical::Technology&, const physical::Floorplan&, std::vector<physical::Component>&,
                                  const std::vector<uint64_t>& group_ids, int64_t halo_x, int64_t halo_y, bool move_macros,
-                                 int64_t channel_x = 0, int64_t channel_y = 0);
+                                 int64_t channel_x = 0, int64_t channel_y = 0, const Pg_macro_alignment* pdn = nullptr,
+                                 bool* pdn_aligned = nullptr);
 }  // namespace livehd::placement

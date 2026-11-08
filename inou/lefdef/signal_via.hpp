@@ -27,9 +27,12 @@ Signal_via_intrinsic_check check_signal_via_intrinsics(const Technology&, int64_
 // and cuts; callers must also check against other new vias of the trial net.
 // Supports single-cut LEF58 classes, all-DEFAULT spacing tables and the modeled
 // enclosure forms. Other qualified rules fail closed.
+// Optional exact same-owner union supplies the exposed landing contour only;
+// rectangle, enclosure, cut, track and die checks remain unchanged. The caller
+// must prove ownership of every supplied shape, as for spacing_with_union().
 Rule_check check_signal_via(const Technology&, const Floorplan&, const Signal_metal_rules&, const Routing_occupancy&,
                             const Route_via&, int64_t x, int64_t y, const std::array<Shape, 2>& landings,
-                            const std::string& own_net);
+                            const std::string& own_net, std::span<const Shape> owner_union = {});
 // Cuts of the new vias in one routing proposal. Access and landing checks only
 // cover existing cuts; new cuts must also keep signal cut spacing to each other,
 // even on one net. Technology and frame must outlive this set.

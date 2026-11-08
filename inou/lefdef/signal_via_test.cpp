@@ -81,6 +81,51 @@ TEST(SignalVia, ChecksBothMetalsAndSameNetCuts) {
   });  // Exactly 18 DBU cut gap.
   EXPECT_TRUE(f.check().legal) << f.check().reason;
 }
+TEST(SignalVia, ExactOwnerContourRemovesOnlyCoveredLandingEol) {
+  Fixture f;
+  f.tech.layers["M3"].rules.properties["LEF58_EOLKEEPOUT"] = {"EOLKEEPOUT .01825 EXTENSION 0 0 .031 ;"};
+  f.landings[1].rect                                       = {991, 891, 1009, 1109};
+  const Shape cap{
+      "M3",
+      {959, 1091, 1009, 1109}
+  };
+  const Shape rail{
+      "M3",
+      {900, 1127, 1200, 1145}
+  };
+  f.occupancy.insert({rail, "VDD"});
+  const std::vector<Shape> owner{f.landings[0], f.landings[1], cap};
+  const auto               check = [&](std::span<const Shape> context) {
+    return check_signal_via(f.tech,
+                            f.fp,
+                            Signal_metal_rules(f.tech, f.fp),
+                            f.occupancy,
+                            {"VIA23"},
+                            1000,
+                            1000,
+                            f.landings,
+                            "self",
+                            context);
+  };
+  ASSERT_EQ(f.check().reason, "LEF58 EOL keepout");
+  EXPECT_TRUE(check(owner).legal) << check(owner).reason;
+  EXPECT_FALSE(check(f.landings).legal);  // Exposed source end, no admitted cap.
+  auto uncovered       = owner;
+  uncovered[1].rect.yl = 900;
+  EXPECT_EQ(check(uncovered).reason, "invalid native metal union context");
+  f.occupancy.insert({
+      {{"M3"}, {991, 1080, 1009, 1100}},
+      "foreign"
+  });
+  EXPECT_FALSE(check(owner).legal);  // The context cannot waive a real short.
+  f.occupancy = Routing_occupancy(64);
+  f.occupancy.insert({rail, "VDD"});
+  f.occupancy.insert({
+      {{"V2"}, {991, 1010, 1009, 1028}},
+      "self"
+  });
+  EXPECT_EQ(check(owner).reason, "signal cut spacing");
+}
 TEST(SignalVia, NewCutSetKeepsSpacingBetweenProposalCuts) {
   Fixture        f;
   Signal_cut_set cuts(f.tech, f.fp);

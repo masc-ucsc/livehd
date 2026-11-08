@@ -398,7 +398,7 @@ int main(int argc, char** argv) {
     number_option("macro_cell_density_weight", options.macro_cell_density_weight);
     number_option("macro_density_pull_weight", options.macro_density_pull_weight);
     number_option("macro_density_pull_range", options.macro_density_pull_range);
-    options.fp_place = options.final_cells = options.macro_snap = false;
+    options.fp_place = options.final_cells = options.macro_snap = options.fp_auto = false;
     options.legalize_cells                                      = true;
     options.retain_placement    = config.HasMember("timing_only") && config["timing_only"].GetBool();
     options.density_upper_bound = config.HasMember("density_upper_bound") && config["density_upper_bound"].GetBool();
@@ -911,6 +911,25 @@ int main(int argc, char** argv) {
         throw std::invalid_argument("macro_channel requires finite nonnegative microns");
       }
     }
+    if (config.HasMember("macro_pdn")) {
+      // Power-grid aware macro spacing/alignment: "auto" (default), "align", "gap" or "off".
+      if (!config["macro_pdn"].IsString()
+          || !std::set<std::string>{"auto", "align", "gap", "off"}.contains(config["macro_pdn"].GetString())) {
+        throw std::invalid_argument("macro_pdn requires \"auto\", \"align\", \"gap\" or \"off\"");
+      }
+      options.macro_pdn = config["macro_pdn"].GetString();
+    }
+    if (config.HasMember("macro_pdn_origin")) {
+      // Strap grid origin [x, y] microns for macro_pdn alignment; "core" (default) is the row core's corner.
+      const auto& origin = config["macro_pdn_origin"];
+      if (origin.IsString() && std::string(origin.GetString()) == "core") {
+        options.macro_pdn_origin.reset();
+      } else if (origin.IsArray() && origin.Size() == 2 && origin[0].IsNumber() && origin[1].IsNumber()) {
+        options.macro_pdn_origin = std::pair{origin[0].GetDouble(), origin[1].GetDouble()};
+      } else {
+        throw std::invalid_argument("macro_pdn_origin requires \"core\" or [x, y] microns");
+      }
+    }
     if (config.HasMember("macro_edge_snap")) {
       // Edge snap sliver limit: "auto", a number or [x,y] microns; absent or "off" disables it.
       const auto& edge = config["macro_edge_snap"];
@@ -1086,8 +1105,10 @@ int main(int argc, char** argv) {
         options.route_model = text("route_model");
       }
       if (floorplan_mode) {
-        options.fp_place = options.final_cells = options.macro_snap = true;
-        options.fp_colors                                           = true;
+        // fp_place defaults to "auto" (synth.place.fp's default); true/false force it.
+        options.fp_auto = options.final_cells = options.macro_snap = true;
+        options.fp_place                                           = false;
+        options.fp_colors                                          = true;
         boolean_option("fp_snap", options.fp_snap_enabled);
         // Request the production macro-to-cell handoff even when the
         // diagnostic disables centroid FP. No resynthesis restart is needed.
@@ -1113,8 +1134,23 @@ int main(int argc, char** argv) {
           options.macro_snap_mode = text("macro_snap_mode");
         }
         if (config.HasMember("fp_place")) {
-          options.fp_place = config["fp_place"].GetBool();
+          // true/false, or "auto": run the floorplan stage only for repeated hierarchy (fp_repetition.hpp).
+          if (config["fp_place"].IsString() && text("fp_place") == "auto") {
+            options.fp_place = false;
+            options.fp_auto  = true;
+          } else if (config["fp_place"].IsBool()) {
+            options.fp_place = config["fp_place"].GetBool();
+            options.fp_auto  = false;
+          } else {
+            throw std::invalid_argument("fp_place requires true, false or \"auto\"");
+          }
         }
+        number_option("fp_auto_share", options.fp_auto_options.share);
+        integer_option("fp_auto_min_copies", options.fp_auto_options.min_copies);
+        number_option("fp_auto_min_copy_share", options.fp_auto_options.min_copy_share);
+        boolean_option("fp_auto_candidates", options.fp_auto_options.candidates);
+        number_option("fp_auto_tolerance", options.fp_auto_options.tolerance);
+        options.fp_auto_options.validate();
         if (config.HasMember("fp_colors")) {
           options.fp_colors = config["fp_colors"].GetBool();
         }

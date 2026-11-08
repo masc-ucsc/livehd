@@ -183,4 +183,82 @@ TEST(RoutingConnectivity, DieTerminalRequiresUniquePlacedRectangularGeometry) {
   f.fp.terminals[0].shapes.clear();
   EXPECT_FALSE(check_route_connectivity(f.tech, f.fp, f.net).connected);
 }
+
+TEST(RoutingConnectivity, ConductorsRequireEveryRealIncomingComponent) {
+  Fixture                  f;
+  auto                     paths = f.net.wires.front().paths;
+  const std::vector<Shape> incoming{
+      {"M1",    {90, 90, 110, 110}},
+      {"M1", {1090, 90, 1110, 110}}
+  };
+  EXPECT_TRUE(check_conductor_connectivity(f.tech, f.fp, paths, incoming, {}).connected);
+  // Omitting a landing cannot earn credit merely because both pieces have
+  // the same owner. Every immutable conductor remains an obligation.
+  paths.erase(paths.begin() + 1);
+  EXPECT_FALSE(check_conductor_connectivity(f.tech, f.fp, paths, incoming, {}).connected);
+  paths = f.net.wires.front().paths;
+  paths.push_back({
+      "M2",
+      {},
+      {},
+      {Route_point{300, 300, 0}, Route_point{400, 300, 0}}
+  });
+  EXPECT_FALSE(check_conductor_connectivity(f.tech, f.fp, paths, incoming, {}).connected);
+  // The existing whole-net API still requires its original source endpoints.
+  f.net.connections.clear();
+  EXPECT_EQ(check_route_connectivity(f.tech, f.fp, f.net).reason, "missing endpoints or route");
+}
+
+TEST(RoutingConnectivity, ConductorLayersNeedAnActualNativeVia) {
+  Fixture                  f;
+  const std::vector<Shape> incoming{
+      {"M1", {90, 90, 110, 110}},
+      {"M2", {90, 90, 110, 110}}
+  };
+  EXPECT_FALSE(check_conductor_connectivity(f.tech, f.fp, {}, incoming, {}).connected);
+  const std::vector<Route_path> via{f.net.wires.front().paths.front()};
+  EXPECT_TRUE(check_conductor_connectivity(f.tech, f.fp, via, incoming, {}).connected);
+  f.tech.vias["via"].shapes[1].rect = {.02, .02, .03, .03};
+  EXPECT_EQ(check_conductor_connectivity(f.tech, f.fp, via, incoming, {}).reason, "cut does not contact both via landings");
+}
+
+TEST(RoutingConnectivity, OnlyActualPhysicalPinsHaveIntrinsicShapeEquivalence) {
+  Fixture                  f;
+  const std::vector<Shape> pieces{
+      {"M1",    {90, 90, 110, 110}},
+      {"M1", {1090, 90, 1110, 110}}
+  };
+  EXPECT_FALSE(check_conductor_connectivity(f.tech, f.fp, {}, pieces, {}).connected);
+  const std::vector<std::vector<Shape>> one_pin{pieces};
+  EXPECT_TRUE(check_conductor_connectivity(f.tech, f.fp, {}, {}, one_pin).connected);
+  const std::vector<std::vector<Shape>> two_pins{{pieces[0]}, {pieces[1]}};
+  EXPECT_FALSE(check_conductor_connectivity(f.tech, f.fp, {}, {}, two_pins).connected);
+  EXPECT_TRUE(check_conductor_connectivity(f.tech, f.fp, f.net.wires.front().paths, {}, two_pins).connected);
+}
+
+TEST(RoutingConnectivity, ConductorInputMustBeNonemptyNativeMetal) {
+  Fixture f;
+  EXPECT_FALSE(check_conductor_connectivity(f.tech, f.fp, {}, {}, {}).connected);
+  const std::vector<std::vector<Shape>> empty_pin(1);
+  EXPECT_FALSE(check_conductor_connectivity(f.tech, f.fp, {}, {}, empty_pin).connected);
+  std::vector<Shape> metal{
+      {"M1", {10, 10, 20, 20}}
+  };
+  EXPECT_TRUE(check_conductor_connectivity(f.tech, f.fp, {}, metal, {}).connected);
+  metal.push_back({
+      "M1",
+      {20, 10, 30, 20}
+  });
+  EXPECT_TRUE(check_conductor_connectivity(f.tech, f.fp, {}, metal, {}).connected);
+  metal.back().rect = {20, 20, 30, 30};
+  EXPECT_FALSE(check_conductor_connectivity(f.tech, f.fp, {}, metal, {}).connected);
+  metal.resize(1);
+  metal.front().rect.xl = 10.5;
+  EXPECT_FALSE(check_conductor_connectivity(f.tech, f.fp, {}, metal, {}).connected);
+  metal.front() = {
+      "V1",
+      {10, 10, 20, 20}
+  };
+  EXPECT_FALSE(check_conductor_connectivity(f.tech, f.fp, {}, metal, {}).connected);
+}
 }  // namespace livehd::physical

@@ -11,6 +11,50 @@
 <main>
 <h1><strong class="item-id">2l-legroute</strong> Native routing closure in two steps</h1>
 
+<section id="artifact-recovery"><h2>November 8 artifact recovery</h2>
+<p>The saved <code>legroute_runs/</code> experiment tree was deleted during disk cleanup while the new
+SAT Final pilot and regressions were active. Historical tables below retain their recorded values, but their
+linked local artifacts are currently unavailable. The source checkout and isolated build cache survived.
+Recovered validation and source snapshots are being stored separately under
+<code>/lscratch/renau/sat_final_recovery_20261108</code>.</p>
+<p>The frozen round-8 source passed all 3,989 optimized tests; complete debug validation is running.
+The SHA3 pilot reached Final but made no SAT calls: incoming admission incorrectly checked original M1
+cell-pin fragments against PG before choosing cell poses. A caller correction and native source-contour
+checks are in progress. This pilot does not establish SAT routability or complete native routing, and the
+latest source corrections have not yet completed validation.</p></section>
+
+<section id="sat-final-replacement"><h2>Replacing Final with joint cellbox SAT placement and routing</h2>
+<p><strong>In progress.</strong> The native-v9 Final below did not use the successful cellbox SAT experiment:
+it retained the Plan cell poses and searched routes sequentially. Its failure counts and runtime therefore
+do not measure the earlier SAT cellbox method. The user requested deletion of that legacy Final placer/router
+and replacement with a native SAT solution per cellbox.</p>
+<p>The replacement must jointly select legal cell positions, compatible complete internal-net routes,
+and finite extensions/taps from actual incoming metal. Cellbox membership, footprint, source pins and exact
+reserved track coordinates stay fixed. Distinct incoming conductor components are separate required roots;
+matching net labels alone do not connect them. Fixed Local joins must be physically realized and checked
+before the box solve, or reported as upstream failures.</p>
+<p>Acceptance requires independent native geometry, reservation/ownership and connectivity checks before
+atomically committing the chosen placement and metal. The old fixed-pose sequential cellbox route is not a
+fallback. Tests must require cell movement, competing route choices, internal shared-pin connectivity,
+incoming extension and failure rollback. Report actual SAT time separately from generation/validation and
+average total cost over every attempted box. The earlier isolated matrix's free external taps remain a
+different input contract from actual Local arrivals; neither finite-pool UNSAT nor a timeout proves physical
+infeasibility. Plan timing describes the pre-SAT placement until Final timing is remeasured.</p>
+<p><strong>November 8 implementation checkpoint (not yet published).</strong> The replacement uses
+CaDiCaL through the native SAT wrapper. The old Final placer and sequential routing fallback have been
+removed. SAT selects legal cell poses and compatible complete-net route candidates, followed by native
+physical connectivity and ownership checks. Fixed Local joins consume the exact producer-selected native
+via chain. Focused round 7 passes all 12 routing test targets, including 13 cellbox SAT, 31 Final and
+70 end-to-end Legroute cases. The updated master exposed three GCC simulator diagnostics; minimal source
+corrections are included in the next validation round. The complete optimized/debug suites and three-design SAT measurements are still pending.</p>
+<p>The nine completed OpenROAD reference runs have been independently reconciled against their source
+netlists and saved routed artifacts. The audit verifies 277 references and explains nine rewritten global
+route checkpoints through their recorded guide-refresh stages. These baselines are ready for comparison
+once native routing completes; incomplete native metal is not a completed-route wirelength result.
+<a href="../../../legroute_runs/20261107-sat-cellbox-final/audit/openroad_baselines.json">Baseline audit</a> ·
+<a href="../../../legroute_runs/20261107-sat-cellbox-final/validation/round6_cache/status.json">Focused checkpoint</a>.</p>
+</section>
+
 <!-- native-full-flow:start -->
 <section id="native-full-flow"><h2>Native Plan, Local and Final: measured incomplete flow</h2>
 <p>The initial integration was published as <code>5021ff47e</code>, with DREAMPlace pinned to

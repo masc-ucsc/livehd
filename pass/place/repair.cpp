@@ -2360,7 +2360,7 @@ static Options zero_gp_options(const Options& requested, const Result& initial) 
   options.gp_resize       = false;
   options.completed_stage = Placement_stage::final;
   options.cell_stage      = true;
-  options.fp_place = options.final_cells = options.timing_seed = options.retain_placement = false;
+  options.fp_place = options.final_cells = options.timing_seed = options.retain_placement = options.fp_auto = false;
   options.macro_mode                                                                      = "none";
   options.macro_snap                                                                      = false;
   options.macro_align_weight = options.macro_cell_density_weight = options.macro_density_pull_weight = 0;

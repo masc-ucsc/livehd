@@ -1,5 +1,7 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
+#include <algorithm>
+#include <array>
 #include <cstdint>
 #include <functional>
 #include <optional>
@@ -104,6 +106,7 @@ struct Macro_anchor_refresh {
   int         changed = 0, swaps = 0, locked = 0, macros = 0;
   int         edge = 0, random = 0;  // select=edge+random: anchored edge / random macros
   double      base_weight = 0, mean_weight = 0, mean_distance = 0, max_distance = 0, seconds = 0;
+  double      motion = -1;  // RMS GP macro motion over the last window / macro max side (-1: not measured yet)
   bool        late = false;
   std::string reason, status;
 };
@@ -112,12 +115,16 @@ class Macro_anchor {
 public:
   Macro_anchor(Macro_anchor_options, std::vector<int> macros, int iteration_budget, Macro_target_generator generator,
                std::string report);
+  // A new solve on a re-indexed design (e.g. the GP retry after cache reuse re-sorts the nodes): forgets every
+  // target, refresh, lock and swap and anchors `macros` (node ids of the new design) as if newly constructed.
+  void restart(std::vector<int> macros);
   // The native GP overflow of the latest progress sample (the metric GP stops on).
   void observe_overflow(double overflow) {
     if (initial_overflow < 0) {
       initial_overflow = overflow;
     }
-    gp_overflow = overflow;
+    gp_overflow   = overflow;
+    peak_overflow = std::max(peak_overflow, overflow);
   }
   // Native macro_density_margin schedule (o.inflate ramped by overflow toward start_overflow, then 0).
   double                                                    density_margin() const;
@@ -140,11 +147,12 @@ private:
   Macro_anchor_options                       o;
   std::vector<int>                           macros;
   int                                        budget      = 0;
-  double                                     gp_overflow = -1, initial_overflow = -1;
+  double                                     gp_overflow = -1, initial_overflow = -1, peak_overflow = -1;
   Macro_target_generator                     generator;
   std::string                                report;
   std::vector<std::pair<double, double>>     targets;        // per macros[] entry, center
   std::vector<std::pair<double, double>>     legal_targets;  // the generator's legal centers at the last ok refresh
+  bool                                       legal_targets_late = false;  // that refresh ran the late passes
   std::vector<int>                           lock;           // refreshes left holding a swapped target
   std::vector<std::pair<double, double>>     pre_legal;
   std::vector<Macro_anchor_refresh>          history;
@@ -156,6 +164,14 @@ private:
   bool                                       seeded           = false;  // final pass started from the last targets
   bool                                       override_pending = false, overridden = false;
   int                                        converge = 0;  // refreshes since the targets first stabilized
+  std::vector<std::pair<double, double>>     motion_ref;    // GP macro centers at the start of the motion window
+  int                                        motion_iter = -1;
+  double                                     motion      = -1;
+  std::vector<int>                           steady;        // per macros[]: consecutive refreshes with an unchanged target
+  std::string                                final_choice;  // which macro set the final hard pass used
+  double                                     final_cost_last = -1, final_cost_fresh = -1;
+  std::vector<std::array<double, 4>>         motion_trace;  // (iteration, overflow, rms motion, median motion)
+  double                                     motion_rms = -1;
   std::vector<DreamPlace::native::MacroPull> pulls;
   std::vector<int>                           kind;  // per macros[] entry at the last refresh: 0 free, 1 edge, 2 random, 3 all
 };

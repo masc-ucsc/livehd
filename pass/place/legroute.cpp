@@ -699,8 +699,8 @@ Legroute_report legroute(const physical::Technology& tech, physical::Floorplan& 
   const auto      start = lr::Clock::now();
   Legroute_report rep;
   rep.final_diagnostic_only = options.cellbox_diagnostic_final;
-  rep.global_astar_weight = options.global_astar_weight;
-  auto opt                = options;
+  rep.global_astar_weight   = options.global_astar_weight;
+  auto opt                  = options;
   if (!opt.threads) {
     opt.threads = std::max(1u, std::thread::hardware_concurrency());
   }
@@ -1205,7 +1205,7 @@ Legroute_report legroute(const physical::Technology& tech, physical::Floorplan& 
             }
           }
         }
-        const bool net_audit_complete  = geometry_error.empty() && first_unknown.empty();
+        const bool net_audit_complete = geometry_error.empty() && first_unknown.empty();
         if (opt.cellbox_diagnostic_final) {
           auto& reason      = R.final_local_rejected[n];
           reason            = local_structural_rejections[n];
@@ -1224,9 +1224,9 @@ Legroute_report legroute(const physical::Technology& tech, physical::Floorplan& 
             reason = "Local native metal audit incomplete or rejected";
           }
         }
-        metal_audit_complete          &= net_audit_complete;
-        total_metal_conflicts         += metal_conflicts;
-        total_metal_unknown           += metal_unknown;
+        metal_audit_complete  &= net_audit_complete;
+        total_metal_conflicts += metal_conflicts;
+        total_metal_unknown   += metal_unknown;
         geometry_out << (first_net ? "" : ",")
                      << std::format(R"({{"net":"{}","net_index":{},"metal_conflict_shapes":{},)"
                                     R"("first_metal_conflict":"{}","metal_unknown_shapes":{},"first_metal_unknown":"{}",)"
@@ -1468,12 +1468,13 @@ Legroute_report legroute(const physical::Technology& tech, physical::Floorplan& 
       return rep;
     }
     if (opt.final) {
-      lr::final_place(d, g, boxes, R, opt.threads);
-      step("F1 in-box placement");
+      lr::validate_final_membership(d, g, boxes);
+      step("F1 fixed cellbox membership validation");
       if (!opt.final_box_dump.empty() && !options.output_dir.empty()) {
         dump_final_boxes(d, g, boxes, R, regions, options.output_dir + "/box_dump");
         if (opt.final_box_dump_stop) {
-          rep.failure_sample.push_back("final_box_dump_stop: Final stopped after the F1 box dump (diagnostic)");
+          rep.failure_sample.push_back(
+              "final_box_dump_stop: stopped at admitted input before joint placement/routing SAT (diagnostic)");
           rep.seconds = lr::seconds_since(start);
           if (!options.output_dir.empty()) {
             write_legroute_report(rep, options.output_dir + "/legroute.json");
@@ -1491,7 +1492,7 @@ Legroute_report legroute(const physical::Technology& tech, physical::Floorplan& 
           }
         }
       }
-      step("F2-F4 routes, taps, wires");
+      step("F2-F4 joint cellbox SAT placement, routing and atomic assembly");
     }
     {  // actual cell motion against the given poses (not the box-centre metric)
       std::vector<double> moves;

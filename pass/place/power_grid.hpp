@@ -30,6 +30,9 @@ struct Pg_metal {
   std::string    net, layer;
   physical::Rect rect;  // integer floorplan DBU
   bool           followpin = false;
+  // A macro-grid strap: dropped from the export when it makes no via connection, as pdngen removes floating
+  // straps (an edge strap may only graze the macro's pins). Core straps and rails must connect.
+  bool           optional  = false;
 };
 struct Power_grid_plan {
   physical::Rect                 core;
@@ -38,7 +41,8 @@ struct Power_grid_plan {
   std::map<std::string, double>  channel_removed_length_um;
 };
 // Geometry planning stage of the native generator. Rails merge at shared row
-// boundaries; stripes are clipped on macro-obstructed layers around their halos. No vias, trimming, pins,
+// boundaries; stripes are clipped on macro-obstructed layers around the halo of
+// the macro's grid (Pg_strategy::macro_grid); macro-grid straps cover each macro. No vias, trimming, pins,
 // or connectivity verdict yet: this plan must NOT be exported as a complete PDN.
 Power_grid_plan                 plan_power_grid(const physical::Technology&, const physical::Floorplan&, const Pg_profile&);
 // Experimental PG export including fixed macro pin contacts. Constructs via stacks,

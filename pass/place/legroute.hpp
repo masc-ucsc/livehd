@@ -42,9 +42,9 @@ struct Legroute_options {
   std::vector<bool>                                   cellbox_ignored_nets;
   // L2 cell-boxes (variant c1_T20_pa_cd4 of the prototype)
   double                                              box_fill = 1;  // fill cap of each box row (the measured fill lands near 0.8)
-  unsigned                                            box_net_max   = 10;      // nets with more pins never drive a merge
-  double                                              merge_cost    = 20;      // no merge above this cost
-  double                                              crit_fraction = .2;      // top slack-rank fraction that counts as critical
+  unsigned                                            box_net_max   = 10;  // nets with more pins never drive a merge
+  double                                              merge_cost    = 20;  // no merge above this cost
+  double                                              crit_fraction = .2;  // top slack-rank fraction that counts as critical
   double      crit_window_ps   = 200;  // nets this close to WNS get timing weight (1 + 8 crit^2)
   // legroute.local: the SAT placement per region (CaDiCaL) and the tracks it routes on
   unsigned    sat_conflicts    = 10000000;  // per solver call
@@ -274,9 +274,9 @@ struct Legroute_options {
   bool                     final_clock_first            = false;
   // Opt-in: Final checks the complete net's connectivity (retained + pending metal) before committing it.
   bool                     final_precommit_connectivity = false;
-  // Opt-in: when > 0, every Final router call for a clock net uses this wall budget (ms) instead of route_ms.
+  // Opt-in: when > 0, a joint Final cellbox containing an included clock net uses this shared wall budget (ms).
   unsigned                 final_clock_route_ms         = 0;
-  // Opt-in: when > 0, every Final router call for a clock net uses this search-node budget instead of route_patterns.
+  // Opt-in: when > 0, candidate routing in a joint cellbox containing an included clock uses this search-node budget.
   unsigned                 final_clock_route_patterns   = 0;
   // Opt-in diagnostic: Final writes final_boxes.tsv, final_box_events.tsv and final_box_usage.tsv (retained pass).
   bool                     final_box_report             = false;

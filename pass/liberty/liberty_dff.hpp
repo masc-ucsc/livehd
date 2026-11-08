@@ -193,6 +193,12 @@ std::vector<Icg_cell> scan_icg_cells(const std::string& lib_files);
 // Geometry estimates do not require the register mapper's narrower semantics.
 std::optional<double> smallest_flop_area(const std::string& lib_files);
 
+// Every cell with an `ff`, `latch`, `ff_bank` or `latch_bank` group, dont_use
+// included (an imported netlist may instantiate one). Integrated clock gates
+// (`clock_gating_integrated_cell`) are not state elements and stay out.
+std::set<std::string> sequential_cell_names(const std::string& lib_files);
+std::set<std::string> sequential_cell_names_text(const std::string& contents);
+
 // Every plain POSEDGE D-flop in the whitespace-separated Liberty file list: a
 // cell with an `ff(){}` group whose `clocked_on` is a bare pin (posedge, not
 // `!CLK` -- that is what keeps ASAP7's negedge DFFLQ* / sky130's dfrtn out),

@@ -21,19 +21,57 @@ double pad(const std::vector<double>& halo, size_t i, double pitch) {
 std::pair<double, double> center(const dp::Design& d, int i) {
   return {d.node_x[i] + d.node_size_x[i] / 2, d.node_y[i] + d.node_size_y[i] / 2};
 }
+// Total (net-weighted) HPWL with the listed macros centered at `centers`, every other node at its design pose.
+double hpwl_with(const dp::Design& d, const std::vector<int>& macros, const std::vector<std::pair<double, double>>& centers) {
+  std::vector<int> slot(d.node_x.size(), -1);
+  for (size_t k = 0; k < macros.size(); ++k) {
+    slot[macros[k]] = int(k);
+  }
+  const int  nets    = int(d.flat_net2pin_start.size()) - 1;
+  double     total   = 0;
+  const bool weights = int(d.net_weights.size()) == nets;
+  for (int net = 0; net < nets; ++net) {
+    if (!d.net_mask.empty() && !d.net_mask[net]) {
+      continue;
+    }
+    const int begin = d.flat_net2pin_start[net], end = d.flat_net2pin_start[net + 1];
+    if (end - begin < 2) {
+      continue;
+    }
+    double xl = INFINITY, xh = -INFINITY, yl = INFINITY, yh = -INFINITY;
+    for (int k = begin; k < end; ++k) {
+      const int p = d.flat_net2pin[k];
+      const int v = d.pin2node[p];
+      double    x = d.node_x[v], y = d.node_y[v];
+      if (slot[v] >= 0) {
+        x = centers[slot[v]].first - d.node_size_x[v] / 2;
+        y = centers[slot[v]].second - d.node_size_y[v] / 2;
+      }
+      x  += d.pin_offset_x[p];
+      y  += d.pin_offset_y[p];
+      xl  = std::min(xl, x);
+      xh  = std::max(xh, x);
+      yl  = std::min(yl, y);
+      yh  = std::max(yh, y);
+    }
+    total += (weights ? d.net_weights[net] : 1.0) * (xh - xl + yh - yl);
+  }
+  return total;
+}
 }  // namespace
 
 void validate_macro_anchor_options(const Macro_anchor_options& o) {
   const auto unit = [](double v) { return std::isfinite(v) && v >= 0 && v <= 1; };
-  bool   ok = std::isfinite(o.weight) && o.weight >= 0 && o.weight <= 8 && std::isfinite(o.final_weight) && o.final_weight >= 0
-              && o.final_weight <= 8 && std::isfinite(o.inflate) && o.inflate >= 0 && o.inflate <= .25 && unit(o.start_overflow)
-              && std::isfinite(o.gate) && o.gate >= 0 && unit(o.stable_fraction) && std::isfinite(o.stable_distance)
-              && o.stable_distance >= 0 && o.refresh_interval > 0 && o.ramp >= 1 && o.max_refreshes >= 1 && o.settle >= 0
-              && unit(o.swap_tolerance) && o.swap_neighbors >= 1 && o.swap_lock >= 0 && o.dead_space_refreshes >= -1
-              && std::isfinite(o.dbu_per_um) && o.dbu_per_um > 0 && (o.select == "all" || o.select == "edge+random")
-              && std::isfinite(o.edge_weight) && o.edge_weight >= 0 && o.edge_weight <= 64 && std::isfinite(o.random_weight)
-              && o.random_weight >= 0 && o.random_weight <= 64 && unit(o.random_fraction) && std::isfinite(o.spring_length)
-              && o.spring_length >= 0 && o.spring_length <= 4 && unit(o.target_hysteresis) && o.channel_x >= 0 && o.channel_y >= 0;
+  bool       ok = std::isfinite(o.weight) && o.weight >= 0 && o.weight <= 8 && std::isfinite(o.final_weight) && o.final_weight >= 0
+            && o.final_weight <= 8 && std::isfinite(o.inflate) && o.inflate >= 0 && o.inflate <= .25 && unit(o.start_overflow)
+            && std::isfinite(o.gate) && o.gate >= 0 && unit(o.stable_fraction) && std::isfinite(o.stable_distance)
+            && o.stable_distance >= 0 && o.refresh_interval > 0 && o.ramp >= 1 && o.max_refreshes >= 1 && o.settle >= 0
+            && unit(o.swap_tolerance) && o.swap_neighbors >= 1 && o.swap_lock >= 0 && o.dead_space_refreshes >= -1
+            && std::isfinite(o.dbu_per_um) && o.dbu_per_um > 0
+            && (o.select == "all" || o.select == "edge+random" || o.select == "edge+stable") && std::isfinite(o.edge_weight)
+            && o.edge_weight >= 0 && o.edge_weight <= 64 && std::isfinite(o.random_weight) && o.random_weight >= 0
+            && o.random_weight <= 64 && unit(o.random_fraction) && std::isfinite(o.spring_length) && o.spring_length >= 0
+            && o.spring_length <= 4 && unit(o.target_hysteresis) && o.channel_x >= 0 && o.channel_y >= 0;
   double previous = std::numeric_limits<double>::infinity();
   for (double m : o.milestones) {
     ok       = ok && unit(m) && m < previous;
@@ -45,7 +83,7 @@ void validate_macro_anchor_options(const Macro_anchor_options& o) {
         "swap_tolerance in [0,1]; gate, stable_distance >= "
         "0; refresh_interval, ramp, max_refreshes, swap_neighbors >= 1; settle, swap_lock >= 0; dead_space_refreshes >= -1; "
         "milestones "
-        "strictly descending in [0,1]; select all|edge+random; edge_weight, random_weight in [0,64]; random_fraction, "
+        "strictly descending in [0,1]; select all|edge+random|edge+stable; edge_weight, random_weight in [0,64]; random_fraction, "
         "target_hysteresis in [0,1]; spring_length in [0,4]");
   }
 }
@@ -314,6 +352,14 @@ Macro_anchor::Macro_anchor(Macro_anchor_options options, std::vector<int> ids, i
     : o(std::move(options)), macros(std::move(ids)), budget(iteration_budget), generator(std::move(gen)), report(std::move(path)) {
   validate_macro_anchor_options(o);
   lock.assign(macros.size(), 0);
+  steady.assign(macros.size(), 0);
+}
+
+void Macro_anchor::restart(std::vector<int> ids) {
+  auto keep_options   = std::move(o);
+  auto keep_generator = std::move(generator);
+  auto keep_report    = std::move(report);
+  *this = Macro_anchor(std::move(keep_options), std::move(ids), budget, std::move(keep_generator), std::move(keep_report));
 }
 
 double Macro_anchor::density_margin() const {
@@ -327,18 +373,58 @@ double Macro_anchor::density_margin() const {
 }
 
 std::optional<std::vector<dp::MacroPull>> Macro_anchor::update(const dp::Design& d, int iteration) {
-  if (macros.empty() || int(history.size()) >= o.max_refreshes || iteration + o.settle >= budget || iteration == last) {
+  if (macros.empty()) {
+    return std::nullopt;
+  }
+  // GP macro motion per refresh window (RMS center displacement / macro max side).
+  if (motion_ref.size() != macros.size() || iteration - motion_iter >= o.refresh_interval) {
+    if (motion_ref.size() == macros.size() && iteration > motion_iter) {
+      double              sum = 0, length = 0;
+      std::vector<double> moved(macros.size());
+      for (size_t k = 0; k < macros.size(); ++k) {
+        const int  i    = macros[k];
+        const auto c    = center(d, i);
+        moved[k]        = std::hypot(c.first - motion_ref[k].first, c.second - motion_ref[k].second);
+        const double m  = moved[k] / std::max({d.node_size_x[i], d.node_size_y[i], 1e-9});
+        sum            += m * m;
+        length         += std::max(d.node_size_x[i], d.node_size_y[i]);
+      }
+      length             /= double(macros.size());
+      const double scale  = o.refresh_interval / double(iteration - motion_iter);
+      motion_rms          = std::sqrt(sum / double(macros.size())) * scale;
+      std::nth_element(moved.begin(), moved.begin() + moved.size() / 2, moved.end());
+      // Reported only: the median motion in units of the mean macro side.
+      const double median = moved[moved.size() / 2] / std::max(length, 1e-9) * scale;
+      motion              = motion_rms;
+      motion_trace.push_back({double(iteration), gp_overflow, motion_rms, median});
+    }
+    motion_ref.resize(macros.size());
+    for (size_t k = 0; k < macros.size(); ++k) {
+      motion_ref[k] = center(d, macros[k]);
+    }
+    motion_iter = iteration;
+  }
+  if (int(history.size()) >= o.max_refreshes || iteration + o.settle >= budget || iteration == last) {
     return std::nullopt;
   }
   if (gp_overflow < 0) {
     return std::nullopt;  // no GP progress sample yet
   }
   const bool  converging = o.final_weight > o.weight && o.weight > 0;
-  const bool  selective  = o.select == "edge+random";
+  const bool  selective  = o.select == "edge+random" || o.select == "edge+stable";
   const bool  periodic   = !history.empty() && (!stable || converging || selective) && iteration - last >= o.refresh_interval;
   std::string reason;
   if (history.empty()) {
     if (gp_overflow > o.start_overflow) {
+      return std::nullopt;
+    }
+    // When the GP overflow never rose above 2x start_overflow (sparse macro stages start below it), the overflow
+    // says nothing about convergence: targets legalized from a GP pose whose macros still move by more than the
+    // spring length per refresh window are stale before the next refresh. Wait (at most half the budget) until the
+    // RMS macro motion per window, in units of each macro's own size, is within the spring length.
+    const double settled       = o.spring_length > 0 ? o.spring_length : .1;
+    const bool   uninformative = o.start_overflow < 1 && peak_overflow <= 2 * o.start_overflow;  // 1: start at once
+    if (uninformative && (motion < 0 || motion > settled) && 2 * iteration < budget) {
       return std::nullopt;
     }
     reason = "start";
@@ -375,6 +461,7 @@ void Macro_anchor::refresh(const dp::Design& d, int iteration, double overflow, 
   r.overflow       = overflow;
   r.reason         = reason;
   r.macros         = int(macros.size());
+  r.motion         = motion;
   last             = iteration;
   dp::Design legal = d;
   if (o.target_hysteresis > 0 && targets.size() == macros.size()) {
@@ -406,6 +493,7 @@ void Macro_anchor::refresh(const dp::Design& d, int iteration, double overflow, 
   for (size_t k = 0; k < macros.size(); ++k) {
     legal_targets[k] = center(legal, macros[k]);  // swaps/locks may change targets, not this legal set
   }
+  legal_targets_late = r.late;
   std::vector<std::pair<double, double>> next(macros.size());
   for (size_t k = 0; k < macros.size(); ++k) {
     const int i = macros[k];
@@ -425,6 +513,12 @@ void Macro_anchor::refresh(const dp::Design& d, int iteration, double overflow, 
     }
   } else {
     r.changed = int(macros.size());
+  }
+  for (size_t k = 0; k < macros.size(); ++k) {
+    const int    i     = macros[k];
+    const double limit = o.stable_distance * std::min(d.node_size_x[i], d.node_size_y[i]);
+    const bool same = !targets.empty() && std::hypot(next[k].first - targets[k].first, next[k].second - targets[k].second) <= limit;
+    steady[k]       = same ? steady[k] + 1 : 0;
   }
   const auto gradients = macro_wire_gradients(d, macros);
   if (o.swaps) {
@@ -528,7 +622,7 @@ void Macro_anchor::refresh(const dp::Design& d, int iteration, double overflow, 
     r.base_weight = o.weight + (o.final_weight - o.weight) * std::min(1.0, double(converge) / o.ramp);
   }
   const double ramp_factor = std::min(1.0, double(ok_refreshes) / o.ramp);
-  const bool   selective   = o.select == "edge+random";
+  const bool   selective   = o.select == "edge+random" || o.select == "edge+stable";
   kind.assign(macros.size(), selective ? 0 : 3);
   if (selective) {
     const auto       edge = edge_anchored_macros(d, macros, targets, o.channel_x, o.channel_y, o.edge_chain);
@@ -541,13 +635,24 @@ void Macro_anchor::refresh(const dp::Design& d, int iteration, double overflow, 
         rest.push_back(int(k));
       }
     }
-    // Fresh deterministic sample per refresh (seeded by the refresh count).
-    std::mt19937 rng(0x5eed + 7919 * unsigned(history.size()));
-    std::shuffle(rest.begin(), rest.end(), rng);
-    const auto take = size_t(std::llround(o.random_fraction * double(rest.size())));
-    for (size_t j = 0; j < take && j < rest.size(); ++j) {
-      kind[rest[j]] = 2;
-      ++r.random;
+    if (o.select == "edge+stable") {
+      // The weak anchors go to the interior macros whose legal target held since the previous refresh; macros whose
+      // target still jumps stay free until their GP position settles.
+      for (int k : rest) {
+        if (steady[k] > 0) {
+          kind[k] = 2;
+          ++r.random;
+        }
+      }
+    } else {
+      // Fresh deterministic sample per refresh (seeded by the refresh count).
+      std::mt19937 rng(0x5eed + 7919 * unsigned(history.size()));
+      std::shuffle(rest.begin(), rest.end(), rng);
+      const auto take = size_t(std::llround(o.random_fraction * double(rest.size())));
+      for (size_t j = 0; j < take && j < rest.size(); ++j) {
+        kind[rest[j]] = 2;
+        ++r.random;
+      }
     }
     r.base_weight = o.edge_weight * ramp_factor;
   }
@@ -567,13 +672,15 @@ void Macro_anchor::refresh(const dp::Design& d, int iteration, double overflow, 
     r.mean_distance       += distance;
     r.max_distance         = std::max(r.max_distance, distance);
     double w               = 0;
+    // A macro's pull ramps with its own target stability: a jumping target restarts its ramp.
+    const double own_ramp         = std::min(1.0, double(steady[k] + 1) / o.ramp);
     if (kind[k] == 3) {
       w = gated_anchor_weight(r.base_weight, o.gate, gradients[k], dx, dy, reference);
     } else if (kind[k] == 1) {
-      w = o.edge_gate ? gated_anchor_weight(o.edge_weight * ramp_factor, o.gate, gradients[k], dx, dy, reference)
-                      : o.edge_weight * ramp_factor;
+      w = o.edge_gate ? gated_anchor_weight(o.edge_weight * own_ramp, o.gate, gradients[k], dx, dy, reference)
+                      : o.edge_weight * own_ramp;
     } else if (kind[k] == 2) {
-      w = gated_anchor_weight(o.random_weight * ramp_factor, o.gate, gradients[k], dx, dy, reference);
+      w = gated_anchor_weight(o.random_weight * own_ramp, o.gate, gradients[k], dx, dy, reference);
     }
     weight_sum += w;
     dp::MacroPull pull{i, targets[k].first, targets[k].second, w, k < jump.size() && jump[k]};
@@ -597,13 +704,45 @@ void Macro_anchor::before_legalize(dp::Design& d) {
   if (o.final_targets && legal_targets.size() == macros.size() && !history.empty()) {
     const auto last_ok = std::find_if(history.rbegin(), history.rend(), [](const auto& h) { return h.status == "ok"; });
     if (last_ok != history.rend()) {
+      // GP kept moving after the last refresh. Legalize the final GP pose once more (same chain, hysteresis
+      // toward the last targets) and keep whichever legal set gives the lower HPWL against the final cell pose.
+      // The final pass skips the host chain, so a last set from an early refresh (which skipped the late
+      // passes, e.g. the dead-space collapse) is not comparable: the fresh late set replaces it outright.
+      const bool must_refresh = o.dead_space_refreshes != 0 && !legal_targets_late;
+      final_cost_last         = hpwl_with(d, macros, legal_targets);
+      final_choice            = "last";
+      dp::Design fresh = d;
+      for (size_t k = 0; k < macros.size(); ++k) {
+        const int  i     = macros[k];
+        const auto c     = center(d, i);
+        fresh.node_x[i] += o.target_hysteresis * (targets[k].first - c.first);
+        fresh.node_y[i] += o.target_hysteresis * (targets[k].second - c.second);
+      }
+      try {
+        generator(fresh, true);
+        std::vector<std::pair<double, double>> candidate(macros.size());
+        for (size_t k = 0; k < macros.size(); ++k) {
+          candidate[k] = center(fresh, macros[k]);
+        }
+        final_cost_fresh = hpwl_with(d, macros, candidate);
+        if (must_refresh || final_cost_fresh < final_cost_last) {
+          legal_targets      = std::move(candidate);
+          legal_targets_late = true;
+          final_choice       = must_refresh ? "fresh (last not late)" : "fresh";
+        }
+      } catch (const std::exception&) {
+        final_choice = "last (fresh failed)";
+      }
+    }
+    if (last_ok != history.rend()) {
       for (size_t k = 0; k < macros.size(); ++k) {
         const int i = macros[k];
         d.node_x[i] = legal_targets[k].first - d.node_size_x[i] / 2;
         d.node_y[i] = legal_targets[k].second - d.node_size_y[i] / 2;
       }
       seeded           = true;
-      override_pending = true;
+      // An early set the late passes never saw seeds the hard pass, but the host chain must still run on it.
+      override_pending = o.dead_space_refreshes == 0 || legal_targets_late;
     }
   }
 }
@@ -676,7 +815,7 @@ void Macro_anchor::finish(const dp::Design& d, int iterations) {
     const auto& h = history[k];
     out << (k ? "," : "")
         << std::format(
-               R"({{"iteration":{},"overflow":{},"late":{},"reason":"{}","status":"{}","changed":{},"swaps":{},"locked":{},"base_weight":{},"mean_weight":{},"mean_distance_um":{},"max_distance_um":{},"seconds":{},"edge":{},"random":{}}})",
+               R"({{"iteration":{},"overflow":{},"late":{},"reason":"{}","status":"{}","changed":{},"swaps":{},"locked":{},"base_weight":{},"mean_weight":{},"mean_distance_um":{},"max_distance_um":{},"seconds":{},"edge":{},"random":{},"motion":{}}})",
                h.iteration,
                h.overflow,
                h.late,
@@ -691,7 +830,8 @@ void Macro_anchor::finish(const dp::Design& d, int iterations) {
                h.max_distance / um,
                h.seconds,
                h.edge,
-               h.random);
+               h.random,
+               h.motion);
   }
   out << std::format(
       R"(],"select":"{}","edge_chain":{},"final_targets_seeded":{},"final_targets_kept":{},"final_snap_by_kind":{{"free":[{},{}],"edge":[{},{}],"random":[{},{}],"all":[{},{}]}})",
@@ -707,6 +847,15 @@ void Macro_anchor::finish(const dp::Design& d, int iterations) {
       kind_count[2] ? kind_snap[2] / kind_count[2] : 0.0,
       kind_count[3],
       kind_count[3] ? kind_snap[3] / kind_count[3] : 0.0);
+  out << std::format(R"(,"final_choice":"{}","final_cost_last":{},"final_cost_fresh":{},"motion_trace":[)",
+                     final_choice,
+                     final_cost_last,
+                     final_cost_fresh);
+  for (size_t k = 0; k < motion_trace.size(); ++k) {
+    out << (k ? "," : "")
+        << std::format("[{},{:.4f},{:.4f},{:.4f}]", motion_trace[k][0], motion_trace[k][1], motion_trace[k][2], motion_trace[k][3]);
+  }
+  out << "]";
   out << ",\"swapped_pairs\":[";
   for (size_t k = 0; k < swapped_pairs.size(); ++k) {
     out << (k ? "," : "") << std::format("[{},{}]", swapped_pairs[k].first, swapped_pairs[k].second);

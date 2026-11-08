@@ -1731,6 +1731,7 @@ TEST(Placement, MacroCellWorkCanBeDeferredWithoutSkippingGpTimingOrFinalLegaliza
     }
     options.bins     = 2;
     options.fp_place = options.fp_colors = fp;
+    options.fp_auto                      = false;
     options.fp_color_minimum             = 0;
     options.fp_iterations                = 20;
     options.fp_timing_interval           = 10;
@@ -2011,6 +2012,153 @@ END )" << name
     EXPECT_LE(gap_x, 0) << name;
     EXPECT_GE(gap_y, expected) << name;
     EXPECT_LT(gap_y, rh) << name;
+  }
+}
+// macro.pdn=auto never turns a power-grid channel the core cannot hold into a failure. A NanGate45-like stack (the
+// nangate45 power-grid profile is detected from the site) needs 6.79 um between macros side by side and 35.94 um
+// (any phase) / 23.94 um (aligned) between stacked ones. A wide and a tall macro in a 40 x 119 um core pass the
+// necessary area/axis check at the gap level, yet with the gap channel they fit neither side by side nor stacked:
+// macro legalization fails, auto retries with the aligned channel (where the pair can stack) and then the metal
+// channel, and reports the degradation.
+// Shrinking the core so neither PDN level can fit skips them without a legalization attempt. An explicit
+// macro.pdn=gap keeps the requirement and fails with a message naming it.
+TEST(Placement, MacroPdnAutoDegradesWhenTheChannelCannotBeLegalized) {
+  const auto root = std::filesystem::path(std::getenv("TEST_TMPDIR")) / "macro_pdn_degrade";
+  std::filesystem::create_directories(root);
+  const auto    lef = root / "ng45_like.lef";
+  std::ofstream output(lef);
+  output << "VERSION 5.8 ;\nUNITS\n DATABASE MICRONS 2000 ;\nEND UNITS\nMANUFACTURINGGRID 0.005 ;\n";
+  for (int i = 1; i <= 7; ++i) {
+    const auto spacing = i == 7 ? .4 : (i >= 4 ? .27 : .07);
+    output << std::format(
+        "LAYER metal{0}\n TYPE ROUTING ;\n DIRECTION {1} ;\n PITCH {2} ;\n WIDTH {3} ;\n SPACING {3} ;\nEND metal{0}\n",
+        i,
+        i % 2 ? "HORIZONTAL" : "VERTICAL",
+        4 * spacing,
+        spacing);
+  }
+  output << "SITE FreePDK45_38x28_10R_NP_162NW_34O\n CLASS CORE ; SYMMETRY Y ; SIZE 0.19 BY 1.4 ;\nEND "
+            "FreePDK45_38x28_10R_NP_162NW_34O\n";
+  for (const auto& [name, w, h] : {
+           std::tuple{"wide_ram", 24., 20.},
+           std::tuple{"tall_ram",  6., 40.}
+  }) {
+    output << std::format(R"(MACRO {0}
+ CLASS BLOCK ; ORIGIN 0 0 ; SIZE {1} BY {2} ; SYMMETRY X Y ;
+ PIN A
+  DIRECTION INPUT ; PORT LAYER metal2 ; RECT 0.1 0.1 0.3 0.3 ; END
+ END A
+ PIN Y
+  DIRECTION OUTPUT ; PORT LAYER metal2 ; RECT 0.5 0.1 0.7 0.3 ; END
+ END Y
+ PIN VDD
+  DIRECTION INOUT ; USE POWER ; PORT LAYER metal4 ; RECT 3.64 2.1 3.92 {3} ; END
+ END VDD
+ PIN VSS
+  DIRECTION INOUT ; USE GROUND ; PORT LAYER metal4 ; RECT 1.96 2.1 2.24 {3} ; END
+ END VSS
+ OBS LAYER metal1 ; RECT 0 0 {1} {2} ; LAYER metal2 ; RECT 0 0.5 {1} {2} ; LAYER metal3 ; RECT 0 0 {1} {2} ; END
+END {0}
+)",
+                          name,
+                          w,
+                          h,
+                          h - 2.1);
+  }
+  output << "END LIBRARY\n";
+  output.close();
+  const auto run = [&](const std::string& name, const std::string& pdn, double core_h) {
+    hhds::GraphLibrary source;
+    auto               io = source.create_io("macro_pdn");
+    io->add_input("a", 0);
+    io->set_bits("a", 1);
+    io->add_output("y", 0);
+    io->set_bits("y", 1);
+    auto graph  = io->create_graph();
+    auto signal = graph->get_input_pin("a");
+    gu::set_bits(signal, 1);
+    for (const auto* master_name : {"wide_ram", "tall_ram"}) {
+      auto master = source.create_io(master_name);
+      master->add_input("A", 0);
+      master->add_output("Y", 0);
+      auto cell = gu::create_typed_node(*graph, Ntype_op::Sub);
+      cell.set_subnode(master);
+      cell.set_name(master_name);
+      cell.create_sink_pin("A").connect_driver(signal);
+      signal = cell.create_driver_pin("Y");
+      gu::set_bits(signal, 1);
+    }
+    graph->get_output_pin("y").connect_driver(signal);
+    auto options              = plain_options();
+    options.lefs              = {lef.string()};
+    options.output_dir        = (root / name).string();
+    options.core              = {0, 0, 40, core_h};
+    options.iterations        = 100;
+    options.bins              = 8;
+    options.macro_pdn         = pdn;
+    // The synthetic stack has no layer RC.
+    options.resistance_ohm_um = 1;
+    options.capacitance_ff_um = .2;
+    hhds::GraphLibrary placed;
+    auto               result = place(*graph, placed, options);
+    EXPECT_NO_THROW(check_legality(physical::read_lef(options.lefs), result.floorplan, options)) << name;
+    rapidjson::Document qor;
+    qor.Parse(result.qor.c_str());
+    return qor;
+  };
+  const auto levels = [](const rapidjson::Document& qor) {
+    std::vector<std::pair<std::string, std::string>> out;
+    for (const auto& a : qor["macro_pdn"]["attempts"].GetArray()) {
+      out.emplace_back(a["level"].GetString(), a["result"].GetString());
+    }
+    return out;
+  };
+  using Attempts = std::vector<std::pair<std::string, std::string>>;
+  {
+    const auto qor = run("retry", "auto", 119);
+    ASSERT_TRUE(qor.HasMember("macro_pdn"));
+    EXPECT_STREQ(qor["macro_pdn"]["requested"].GetString(), "auto");
+    EXPECT_TRUE(qor["macro_pdn"]["degraded"].GetBool());
+    // The heuristic legalizer decides whether the aligned channel already stacks the pair; either way the gap level
+    // failed first and a weaker level was kept.
+    const std::string used = qor["macro_pdn"]["used_level"].GetString();
+    EXPECT_TRUE(used == "align" || used == "off") << used;
+    const auto tried = levels(qor);
+    ASSERT_GE(tried.size(), 2u);
+    EXPECT_EQ(tried.front(), (std::pair<std::string, std::string>{"gap", "legalization_failed"}));
+    EXPECT_EQ(tried.back(), (std::pair<std::string, std::string>{used, "used"}));
+    if (used == "align") {
+      EXPECT_NEAR(qor["macro_channel"]["y_um"].GetDouble(), 23.94, 1e-6);
+    } else {
+      EXPECT_LT(qor["macro_channel"]["y_um"].GetDouble(), 1);  // the metal-spacing channel
+    }
+  }
+  {
+    // 40 x 70 um: even the aligned channel cannot stack them (and they never fit side by side with the PDN x channel).
+    const auto qor = run("skip", "auto", 70);
+    EXPECT_STREQ(qor["macro_pdn"]["used_level"].GetString(), "off");
+    EXPECT_EQ(levels(qor),
+              (Attempts{
+                  {  "gap", "infeasible"},
+                  {"align", "infeasible"},
+                  {  "off",       "used"}
+    }));
+    EXPECT_FALSE(qor["macro_pdn"]["active"].GetBool());
+  }
+  {
+    const auto qor = run("roomy", "auto", 200);  // the gap channel fits: no degradation
+    EXPECT_STREQ(qor["macro_pdn"]["used_level"].GetString(), "gap");
+    EXPECT_FALSE(qor["macro_pdn"]["degraded"].GetBool());
+    EXPECT_EQ(levels(qor),
+              (Attempts{
+                  {"gap", "used"}
+    }));
+  }
+  try {
+    run("strict", "gap", 119);
+    ADD_FAILURE() << "explicit macro.pdn=gap must not degrade";
+  } catch (const std::runtime_error& error) {
+    EXPECT_NE(std::string(error.what()).find("macro.pdn=gap channel"), std::string::npos) << error.what();
   }
 }
 // LEF CLASS BLOCK SOFT blocks only have to be placed inside the core: they may
@@ -2907,6 +3055,7 @@ TEST(Placement, TimingCheckpointsCarryConnectivityForAutomaticResetCuts) {
     const auto                  tech = physical::read_lef(options.lefs);
     options.fp_pin_adjust            = floorplan;
     options.fp_place                 = floorplan;
+    options.fp_auto                  = false;
     options.fp_iterations            = 2;
     options.iterations               = 2;
     options.bins                     = 4;
@@ -6192,6 +6341,7 @@ TEST(Placement, PlacementColorsUseLibertyRolesAndPinsMoveWithoutSta) {
   {
     auto io_options                      = o;
     io_options.fp_place                  = false;
+    io_options.fp_auto                   = false;
     io_options.macro_pin_adjust          = false;
     io_options.output_dir                = (dir / "io_without_pressure").string();
     io_options.macro_cell_density_weight = io_options.macro_density_pull_weight = 0;
@@ -6214,6 +6364,7 @@ TEST(Placement, PlacementColorsUseLibertyRolesAndPinsMoveWithoutSta) {
   // Without FP, macro GP still owns IO movement. A fixed macro/IO handoff
   // suppresses that callback in the final cell solve, even with the flag set.
   o.fp_place = o.fp_colors = o.fp_pin_adjust = false;
+  o.fp_auto                                  = false;
   o.output_dir                               = (dir / "macro_only").string();
   o.floorplan                                = (dir / "out/out.def").string();
   const auto macro_only                      = place(*graph, flat, o);
@@ -7165,6 +7316,7 @@ TEST(Placement, UnplacedImportedPinsInitializeAndMoveInFpAndMacroStages) {
     auto run       = options;
     run.output_dir = (root / (macro_stage ? "macro" : "fp")).string();
     run.fp_place = run.fp_pin_adjust = !macro_stage;
+    run.fp_auto                      = false;
     run.macro_pin_adjust             = macro_stage;
     run.iterations = run.fp_iterations = run.io_iterations = 2;
     run.fp_pin_interval = run.macro_pin_interval = 1;
@@ -8000,6 +8152,59 @@ END LIBRARY
   const auto snapshot = physical::read_def(options.output_dir + "/after_legalization.def");
   EXPECT_EQ(snapshot.components.size(), result.floorplan.components.size());
   EXPECT_TRUE(std::filesystem::exists(options.output_dir + "/handoff_taps.json"));
+}
+// nangate45 provides only power-grid/handoff policy (no routing policy): its
+// taps must still resolve when the profile is detected from the LEF site.
+TEST(Placement, HandoffTapsResolveAPowerGridOnlyProfile) {
+  const auto dir = std::filesystem::path(std::getenv("TEST_TMPDIR")) / "handoff_taps_ng45";
+  std::filesystem::create_directories(dir);
+  const auto lef = dir / "tap.lef";
+  std::ofstream(lef) << R"(VERSION 5.8 ;
+SITE FreePDK45_38x28_10R_NP_162NW_34O
+ CLASS CORE ; SYMMETRY Y ; SIZE 0.19 BY 1.4 ;
+END FreePDK45_38x28_10R_NP_162NW_34O
+MACRO TAPCELL_X1
+ CLASS CORE WELLTAP ; ORIGIN 0 0 ; SIZE 0.46 BY 2.72 ;
+ SYMMETRY X Y ; SITE unithd ;
+END TAPCELL_X1
+END LIBRARY
+)";
+  hhds::GraphLibrary source, flat;
+  auto               io = source.create_io("handoff_taps_ng45");
+  io->add_input("a", 0);
+  io->set_bits("a", 1);
+  io->add_output("y", 0);
+  io->set_bits("y", 1);
+  auto graph = io->create_graph();
+  auto inv   = source.create_io("sky130_fd_sc_hd__inv_1");
+  inv->add_input("A", 0);
+  inv->add_output("Y", 0);
+  auto signal = graph->get_input_pin("a");
+  gu::set_bits(signal, 1);
+  for (unsigned i = 0; i < 8; ++i) {
+    auto node = gu::create_typed_node(*graph, Ntype_op::Sub);
+    node.set_subnode(inv);
+    node.set_name("inv" + std::to_string(i));
+    node.create_sink_pin("A").connect_driver(signal);
+    signal = node.create_driver_pin("Y");
+    gu::set_bits(signal, 1);
+  }
+  graph->get_output_pin("y").connect_driver(signal);
+  auto options                 = plain_options();
+  options.lefs                 = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef", lef.string()};
+  options.core                 = {0, 0, 27.6, 27.2};
+  options.die                  = options.core;
+  options.density              = .5;
+  options.final_cells          = true;
+  options.iterations           = 0;
+  options.bins                 = 4;
+  options.optimization_pending = false;
+  options.handoff_taps         = true;
+  options.terminal_legalize_options.critical_fraction = 0;
+  options.output_dir                                  = (dir / "out").string();
+  Result result;
+  ASSERT_NO_THROW(result = place(*graph, flat, options));  // auto-detects nangate45 from the site
+  EXPECT_TRUE(std::ranges::any_of(result.floorplan.components, [](const auto& c) { return c.macro == "TAPCELL_X1"; }));
 }
 }  // namespace livehd::placement
 

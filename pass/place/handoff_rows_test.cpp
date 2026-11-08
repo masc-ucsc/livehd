@@ -56,6 +56,13 @@ TEST(HandoffRows, FixedCellsProtectRowsAndUnplacedMacrosDoNotCut) {
   fp.components[0].place.status = ph::Status::UNPLACED;
   EXPECT_EQ(cut_macro_rows(fp, tech, 2, 0, 10), fp.rows);
 }
+// A soft block (CLASS BLOCK SOFT) is a standard-cell region that stays PLACED through final placement: its rows stay.
+TEST(HandoffRows, SoftBlocksDoNotCutRows) {
+  auto [tech, fp]               = fixture();
+  tech.macros["ram"].klass      = "BLOCK SOFT";
+  fp.components[0].place.status = ph::Status::PLACED;
+  EXPECT_EQ(cut_macro_rows(fp, tech, 2, 0, 10), fp.rows);
+}
 TEST(HandoffRows, EndcapCornerStepAndRotatedMacro) {
   auto [tech, fp]          = fixture();
   tech.macros["ram"].width = .005;

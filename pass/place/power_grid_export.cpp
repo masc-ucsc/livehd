@@ -78,12 +78,14 @@ static ph::Floorplan make_grid(const ph::Technology& tech, const ph::Floorplan& 
   // re-emit them as modifiable stripes or trim them to their contacts.
   std::map<std::string, std::vector<size_t>> macro_pins;
   std::map<size_t, std::string>              shape_cell;  // plan.metal id -> the macro whose pin it is
+  std::map<size_t, const ph::Pg_macro_grid*> shape_grid;  // plan.metal id -> the macro grid its pin connects through
   std::set<std::string>                      warned;      // macros whose own PG pins overlap each other (the LEF's fault)
   for (const auto& cell : input.components) {
     const auto& master = tech.macros.at(cell.macro);
-    if (!master.klass.starts_with("BLOCK")) {
-      continue;
+    if (!master.klass.starts_with("BLOCK") || ph::soft_block(master)) {
+      continue;  // soft blocks are standard-cell regions: the core grid passes over them (plan_power_grid)
     }
+    const auto* grid = profile.macro_grid(cell.place.orientation);
     for (int n = 0; n < 2; ++n) {
       bool found_pin = false;
       for (const auto& pin_name : profile.pin_names[n]) {
@@ -94,7 +96,7 @@ static ph::Floorplan make_grid(const ph::Technology& tech, const ph::Floorplan& 
         found_pin = true;
         auto& ids = macro_pins[cell.name + "/" + pin_name];
         for (const auto& shape : pin->second.shapes) {
-          if (std::none_of(profile.macro_connect.begin(), profile.macro_connect.end(), [&](const auto& pair) {
+          if (!grid || std::none_of(grid->connect.begin(), grid->connect.end(), [&](const auto& pair) {
                 return pair[0] == shape.layer;
               })) {
             continue;
@@ -132,6 +134,7 @@ static ph::Floorplan make_grid(const ph::Technology& tech, const ph::Floorplan& 
           }
           ids.push_back(plan.metal.size());
           shape_cell.emplace(plan.metal.size(), cell.name);
+          shape_grid.emplace(plan.metal.size(), grid);
           plan.metal.push_back({profile.nets[n], shape.layer, rect, false});
         }
         if (ids.empty()) {
@@ -211,12 +214,35 @@ static ph::Floorplan make_grid(const ph::Technology& tech, const ph::Floorplan& 
   std::map<std::string, std::string>            definitions;
   std::vector<std::optional<ph::Rect>>          attached(plan.metal.size());
   std::vector<Pg_metal>                         patches;
-  auto                                          connections = profile.connect;
-  connections.insert(connections.end(), profile.macro_connect.begin(), profile.macro_connect.end());
-  for (size_t connection = 0; connection < connections.size(); ++connection) {
-    const auto& pair             = connections[connection];
-    const bool  macro_connection = connection >= profile.connect.size();
-    if (macro_connection && macro_pins.empty()) {
+  // Core connections join grid shapes. Each distinct macro-grid connection then joins grid shapes (unless the core
+  // already does) and lands macro PG pins of the macros whose grid states it.
+  struct Connection {
+    std::array<std::string, 2> pair;
+    bool                       macro_connection;  // lower shapes are fixed macro PG pins
+    bool                       macro_grid;        // stated by a macro grid only: needs a macro
+  };
+  std::vector<Connection> connections;
+  for (const auto& pair : profile.connect) {
+    connections.push_back({pair, false, false});
+  }
+  std::vector<std::array<std::string, 2>> macro_pairs;
+  for (const auto& grid : profile.macro_grids) {
+    for (const auto& pair : grid.connect) {
+      if (std::find(macro_pairs.begin(), macro_pairs.end(), pair) == macro_pairs.end()) {
+        macro_pairs.push_back(pair);
+      }
+    }
+  }
+  for (const auto& pair : macro_pairs) {
+    if (std::find(profile.connect.begin(), profile.connect.end(), pair) == profile.connect.end()) {
+      connections.push_back({pair, false, true});
+    }
+    connections.push_back({pair, true, true});
+  }
+  for (const auto& connection : connections) {
+    const auto& pair             = connection.pair;
+    const bool  macro_connection = connection.macro_connection;
+    if (connection.macro_grid && macro_pins.empty()) {
       continue;
     }
     const auto lower = std::find(tech.routing_layers.begin(), tech.routing_layers.end(), pair[0]);
@@ -230,11 +256,20 @@ static ph::Floorplan make_grid(const ph::Technology& tech, const ph::Floorplan& 
       if (a.layer != pair[0] || (i >= grid_shapes) != macro_connection) {
         continue;
       }
+      if (macro_connection) {
+        const auto* grid = shape_grid.at(i);
+        if (!grid || std::find(grid->connect.begin(), grid->connect.end(), pair) == grid->connect.end()) {
+          continue;
+        }
+      }
       for (size_t j = 0; j < grid_shapes; ++j) {
         const auto& b = plan.metal[j];
         if (b.layer != pair[1] || a.net != b.net) {
           continue;
         }
+        // A grazing crossing may admit no via: tolerated on fixed macro pins and on optional macro-grid straps
+        // (another crossing connects them, or the strap is dropped as floating).
+        const bool tolerant = macro_connection || a.optional || b.optional;
         const auto overlap = a.rect.intersection(b.rect);
         if (overlap.empty()) {
           continue;
@@ -270,7 +305,7 @@ static ph::Floorplan make_grid(const ph::Technology& tech, const ph::Floorplan& 
                              req.upper_internal,
                              req.lower_fixed,
                              req.upper_fixed};
-          if (macro_connection && no_fit.contains(key)) {
+          if (tolerant && no_fit.contains(key)) {
             break;
           }
           auto found = cache.find(key);
@@ -278,7 +313,7 @@ static ph::Floorplan make_grid(const ph::Technology& tech, const ph::Floorplan& 
             try {
               found = cache.emplace(key, make_pg_via(tech, out.dbu, req)).first;
             } catch (const Pg_via_no_fit&) {
-              if (!macro_connection) {
+              if (!tolerant) {
                 throw;
               }
               no_fit.insert(key);
@@ -354,6 +389,9 @@ static ph::Floorplan make_grid(const ph::Technology& tech, const ph::Floorplan& 
   if (verify_grid) {
     std::map<std::string, size_t> roots;
     for (size_t i = 0; i < plan.metal.size(); ++i) {
+      if (plan.metal[i].optional && !attached[i]) {
+        continue;  // a floating macro-grid strap, dropped below
+      }
       const auto [it, added] = roots.emplace(plan.metal[i].net, connected.find(i));
       if (!added && it->second != connected.find(i)) {
         throw std::invalid_argument("disconnected power-grid metal");
@@ -370,6 +408,9 @@ static ph::Floorplan make_grid(const ph::Technology& tech, const ph::Floorplan& 
   }
   for (size_t i = 0; i < grid_shapes; ++i) {
     auto shape = plan.metal[i];
+    if (!attached[i] && shape.optional) {
+      continue;
+    }
     if (!attached[i]) {
       throw std::invalid_argument("PG metal has no via connection on " + shape.layer);
     }

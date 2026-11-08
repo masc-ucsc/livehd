@@ -147,6 +147,61 @@ TEST(MacroAnchor, ScheduleRefreshesAndStabilizes) {
   EXPECT_FALSE(late.update(d, 96).has_value());
 }
 
+TEST(MacroAnchor, RestartAnchorsTheReindexedMacros) {
+  // The GP retry after cache reuse re-sorts the nodes (make_arrays): the macro that was node 0 is node 1 and the
+  // other way round. The anchor must pull the new ids, and its refresh clock restarts with the new solve.
+  const std::vector<std::vector<int>> nets = {
+      {0, 2},
+      {1, 2}
+  };
+  auto first_order = make(
+      {
+          {10, 10, 10, 10},
+          {60, 60, 10, 10},
+          {50, 50,  1,  1}
+  },
+      3,
+      {0, 1},
+      nets);
+  auto second_order = make(
+      {
+          {60, 60, 10, 10},
+          {10, 10, 10, 10},
+          {50, 50,  1,  1}
+  },
+      3,
+      {0, 1},
+      nets);
+  pl::Macro_anchor_options o;
+  o.enabled           = true;
+  o.start_overflow    = 1;
+  o.milestones        = {};
+  o.refresh_interval  = 10;
+  o.gate              = 0;
+  o.settle            = 5;
+  o.select            = "all";
+  o.target_hysteresis = 0;
+  o.swaps             = false;
+  o.final_targets     = false;
+  o.spring_length     = 0;
+  pl::Macro_anchor anchor(o, {0}, 100, [](dp::Design&, bool) {}, "");
+  anchor.observe_overflow(.5);
+  for (int iteration = 1; iteration <= 41; iteration += 10) {
+    anchor.update(first_order, iteration);
+  }
+  ASSERT_FALSE(anchor.refreshes().empty());
+  // The small macro (first node 0) is node 1 after the re-sort.
+  anchor.restart({1});
+  EXPECT_TRUE(anchor.refreshes().empty());
+  anchor.observe_overflow(.5);
+  const auto pulls = anchor.update(second_order, 1);
+  ASSERT_TRUE(pulls.has_value());
+  ASSERT_EQ(pulls->size(), 1u);
+  EXPECT_EQ((*pulls)[0].node, 1);
+  EXPECT_DOUBLE_EQ((*pulls)[0].x, 15);
+  EXPECT_DOUBLE_EQ((*pulls)[0].y, 15);
+}
+
 TEST(MacroAnchor, WeightZeroMeasuresWithoutPulling) {
   auto d = make(
       {
@@ -506,10 +561,12 @@ TEST(MacroAnchor, EdgeWithoutChains) {
 }
 
 TEST(MacroAnchor, FinalTargetsSeedTheHardPass) {
+  // The cell sits left of the macro: the last legal targets (x 14) beat a fresh legalization of the final GP pose
+  // (x 17) on HPWL, so the hard pass keeps them.
   auto d = make(
       {
           {10, 10, 10, 10},
-          {50, 50,  1,  1}
+          { 0, 10,  1,  1}
   },
       2,
       {0},
@@ -518,6 +575,7 @@ TEST(MacroAnchor, FinalTargetsSeedTheHardPass) {
   o.enabled        = true;
   o.start_overflow = 1;
   o.final_targets  = true;
+  o.dead_space_refreshes = 0;  // no late pass: every refresh is comparable
   pl::Macro_anchor anchor(o, {0}, 100, [](dp::Design& p, bool) { p.node_x[0] += 4; }, "");
   anchor.observe_overflow(0);
   ASSERT_TRUE(anchor.update(d, 1).has_value());
@@ -533,4 +591,169 @@ TEST(MacroAnchor, FinalTargetsSeedTheHardPass) {
   final.node_x[0] = 30;
   EXPECT_FALSE(anchor.final_override(final));
   EXPECT_DOUBLE_EQ(final.node_x[0], 30);
+}
+
+TEST(MacroAnchor, FinalPassKeepsTheLowerHpwlLegalSet) {
+  // The cell sits right of the macro; GP drifted after the last refresh. The fresh legal set (final pose moved half
+  // way back toward the last target, then legalized: 12 + .5 * 2 + 4 = 17) is closer to the cell than the last
+  // targets (14), so the hard pass uses it.
+  auto d = make(
+      {
+          {10, 10, 10, 10},
+          {50, 10,  1,  1}
+  },
+      2,
+      {0},
+      {{0, 1}});
+  pl::Macro_anchor_options o;
+  o.enabled              = true;
+  o.start_overflow       = 1;
+  o.final_targets        = true;
+  o.dead_space_refreshes = 0;  // no late pass: every refresh is comparable
+  int              calls = 0;
+  pl::Macro_anchor anchor(
+      o,
+      {0},
+      100,
+      [&](dp::Design& p, bool) {
+        ++calls;
+        p.node_x[0] += 4;
+      },
+      "");
+  anchor.observe_overflow(0);
+  ASSERT_TRUE(anchor.update(d, 1).has_value());
+  auto final      = d;
+  final.node_x[0] = 12;
+  anchor.before_legalize(final);
+  EXPECT_EQ(calls, 2);  // one refresh plus the final re-legalization
+  EXPECT_DOUBLE_EQ(final.node_x[0], 17);
+  final.node_x[0] = 30;
+  EXPECT_TRUE(anchor.final_override(final));
+  EXPECT_DOUBLE_EQ(final.node_x[0], 17);
+}
+
+TEST(MacroAnchor, SparseStartWaitsForMacroMotion) {
+  // Overflow never exceeds 2x start_overflow: the first refresh also waits until the macros stop moving.
+  auto d = make(
+      {
+          {10, 10, 10, 10},
+          {50, 50,  1,  1}
+  },
+      2,
+      {0},
+      {{0, 1}});
+  pl::Macro_anchor_options o;
+  o.enabled          = true;
+  o.start_overflow   = .15;
+  o.refresh_interval = 10;
+  o.settle           = 0;
+  pl::Macro_anchor anchor(o, {0}, 1000, [](dp::Design&, bool) {}, "");
+  anchor.observe_overflow(.1);
+  EXPECT_FALSE(anchor.update(d, 1).has_value());  // no motion window yet
+  d.node_x[0] = 20;                               // one macro side per window: still moving
+  EXPECT_FALSE(anchor.update(d, 11).has_value());
+  d.node_x[0] = 20.5;  // 0.05 macro side per window: settled
+  EXPECT_TRUE(anchor.update(d, 21).has_value());
+  // An informative overflow (it rose above 2x start_overflow) starts at once.
+  pl::Macro_anchor dense(o, {0}, 1000, [](dp::Design&, bool) {}, "");
+  dense.observe_overflow(.5);
+  dense.observe_overflow(.1);
+  EXPECT_TRUE(dense.update(d, 1).has_value());
+}
+
+TEST(MacroAnchor, EdgeStableAnchorsOnlySteadyTargets) {
+  // Two interior macros (far from the core sides): macro 0's legal target is fixed, macro 1's jumps every refresh.
+  auto d = make(
+      {
+          {300, 300, 10, 10},
+          {600, 600, 10, 10},
+          {500, 500,  1,  1}
+  },
+      3,
+      {0, 1},
+      {{0, 2}, {1, 2}},
+      1000);
+  pl::Macro_anchor_options o;
+  o.enabled              = true;
+  o.start_overflow       = 1;
+  o.select               = "edge+stable";
+  o.refresh_interval     = 10;
+  o.ramp                 = 2;
+  o.gate                 = 0;
+  o.swaps                = false;
+  o.target_hysteresis    = 0;
+  int              round = 0;
+  pl::Macro_anchor anchor(
+      o,
+      {0, 1},
+      1000,
+      [&](dp::Design& p, bool) {
+        p.node_x[0] = 300;
+        p.node_x[1] = 600 + 50 * ++round;
+      },
+      "");
+  anchor.observe_overflow(0);
+  auto first = anchor.update(d, 1);
+  ASSERT_TRUE(first.has_value());
+  EXPECT_DOUBLE_EQ((*first)[0].weight, 0);  // no previous target: nothing is stable yet
+  EXPECT_DOUBLE_EQ((*first)[1].weight, 0);
+  auto second = anchor.update(d, 11);
+  ASSERT_TRUE(second.has_value());
+  EXPECT_DOUBLE_EQ((*second)[0].weight, o.random_weight);  // stable once: own ramp (1 + 1) / 2 = full weight
+  EXPECT_DOUBLE_EQ((*second)[1].weight, 0);
+}
+
+TEST(MacroAnchor, FinalPassReplacesAnEarlySetThatSkippedTheLatePasses) {
+  // As in FinalTargetsSeedTheHardPass the last targets (x 14) are closer to the cell, but that refresh ran before
+  // the late window, so the end-of-plan passes never saw it: the final pass takes the fresh late set (x 17).
+  auto d = make(
+      {
+          {10, 10, 10, 10},
+          { 0, 10,  1,  1}
+  },
+      2,
+      {0},
+      {{0, 1}});
+  pl::Macro_anchor_options o;
+  o.enabled        = true;
+  o.start_overflow = 1;
+  o.final_targets  = true;
+  std::vector<bool> lates;
+  pl::Macro_anchor  anchor(
+      o,
+      {0},
+      1000,
+      [&](dp::Design& p, bool late) {
+        lates.push_back(late);
+        p.node_x[0] += 4;
+      },
+      "");
+  anchor.observe_overflow(0);
+  ASSERT_TRUE(anchor.update(d, 1).has_value());
+  auto final      = d;
+  final.node_x[0] = 12;
+  anchor.before_legalize(final);
+  EXPECT_EQ(lates, (std::vector<bool>{false, true}));
+  EXPECT_DOUBLE_EQ(final.node_x[0], 17);
+  final.node_x[0] = 30;
+  EXPECT_TRUE(anchor.final_override(final));
+  EXPECT_DOUBLE_EQ(final.node_x[0], 17);
+  // When even the fresh legalization fails, the early set seeds the pass but the host chain still runs.
+  pl::Macro_anchor failing(
+      o,
+      {0},
+      1000,
+      [&, n = 0](dp::Design& p, bool) mutable {
+        if (n++) {
+          throw std::runtime_error("no legal set");
+        }
+        p.node_x[0] += 4;
+      },
+      "");
+  failing.observe_overflow(0);
+  ASSERT_TRUE(failing.update(d, 1).has_value());
+  auto seeded = d;
+  failing.before_legalize(seeded);
+  EXPECT_DOUBLE_EQ(seeded.node_x[0], 14);
+  EXPECT_FALSE(failing.final_override(seeded));
 }

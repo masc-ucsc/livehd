@@ -477,7 +477,7 @@ int main(int argc, char** argv) {
     const auto         source = ph::mapped_graph(source_library, original, technology);
     const auto         nets   = connectivity(original);
     options.output_dir        = (root / "placement").string();
-    options.fp_place = options.final_cells = options.macro_snap = false;
+    options.fp_place = options.final_cells = options.macro_snap = options.fp_auto = false;
     options.fp_pin_adjust = options.macro_pin_adjust = false;
     options.halo_x = options.halo_y = 0;
     options.optimization_pending    = true;

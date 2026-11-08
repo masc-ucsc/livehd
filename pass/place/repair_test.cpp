@@ -35,7 +35,7 @@ protected:
     // Repair fixtures use a controlled plain frame, independent of the
     // production floorplan/macro pipeline and its density policy.
     options.optimization_pending = true;  // Exercise the post-placement repair API.
-    options.fp_place = options.final_cells = options.macro_snap = false;
+    options.fp_place = options.final_cells = options.macro_snap = options.fp_auto = false;
     options.scale_macro_density = options.exact_macro_density = options.adaptive_density = options.routability = false;
     options.macro_overlap_weight = options.macro_jitter = 0;
     options.io_iterations = options.schedule_iterations = 0;

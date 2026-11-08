@@ -47,7 +47,9 @@ struct Area_fit_core {
 };
 Area_fit_core area_fit_core(const physical::Technology&, const physical::Floorplan&);
 
-// Area totals of the placed components (DEF DBU^2): CORE cells, and every other master (macros, soft blocks).
+// Area totals of the placed components (DEF DBU^2): CORE cells and soft blocks (cell clusters) as cells, hard BLOCK
+// masters as macros; PAD/COVER/RING/IO ENDCAP masters (outside the rows) are not counted. The largest extents cover
+// hard and soft blocks.
 struct Area_fit_areas {
   double  cells = 0, macros = 0;
   int64_t max_macro_w = 0, max_macro_h = 0;  // the largest macro extents (oriented as placed)

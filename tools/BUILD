@@ -174,6 +174,13 @@ cc_binary(
 )
 
 cc_binary(
+    name = "fp_repetition",
+    srcs = ["fp_repetition.cpp"],
+    copts = COPTS,
+    deps = ["//inou/lefdef:inou_lefdef", "//pass/liberty:liberty_dff", "//pass/place:fp_repetition"],
+)
+
+cc_binary(
     name = "routing_geometry",
     srcs = ["routing_geometry.cpp"],
     copts = COPTS,
@@ -191,7 +198,7 @@ cc_binary(
     name = "power_grid",
     srcs = ["power_grid.cpp"],
     copts = COPTS,
-    deps = ["//pass/place:power_grid", "@rapidjson"],
+    deps = ["//pass/place:handoff_rows", "//pass/place:power_grid", "@rapidjson"],
 )
 
 py_test(

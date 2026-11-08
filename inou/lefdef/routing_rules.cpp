@@ -5,6 +5,7 @@
 #include <cmath>
 #include <limits>
 #include <stdexcept>
+#include <tuple>
 
 #include "cut_rules.hpp"
 
@@ -102,7 +103,7 @@ Rule_check check_metal_spacing(const Technology& tech, int64_t dbu, const Shape&
   }
   const auto max_width = std::max(width(a.rect), width(b.rect));
   const auto run       = std::max(std::min(a.rect.xh, b.rect.xh) - std::max(a.rect.xl, b.rect.xl),
-                            std::min(a.rect.yh, b.rect.yh) - std::max(a.rect.yl, b.rect.yl));
+                                  std::min(a.rect.yh, b.rect.yh) - std::max(a.rect.yl, b.rect.yl));
   double     required  = 0;
   for (const auto& rule : r.spacing) {
     if (!number(rule.distance)) {
@@ -176,10 +177,118 @@ struct Rect_edge {
   double coordinate, lo, hi;
 };
 std::array<Rect_edge, 4> edges(const Rect& r) {
-  return {{{true, false, r.xl, r.yl, r.yh},
-           {true, true, r.xh, r.yl, r.yh},
-           {false, false, r.yl, r.xl, r.xh},
-           {false, true, r.yh, r.xl, r.xh}}};
+  return {
+      {{true, false, r.xl, r.yl, r.yh},
+       {true, true, r.xh, r.yl, r.yh},
+       {false, false, r.yl, r.xl, r.xh},
+       {false, true, r.yh, r.xl, r.xh}}
+  };
+}
+// Keep source identity at the caller. Here we prove only exact geometric
+// coverage and derive exterior edges without widening or bridging any gap.
+bool union_covers(const Shape& query, std::span<const Shape> shapes) {
+  std::vector<double> xs{query.rect.xl, query.rect.xh};
+  for (const auto& shape : shapes) {
+    if (shape.layer != query.layer) {
+      continue;
+    }
+    if (!integral_dbu(shape.rect) || shape.rect.empty()) {
+      return false;
+    }
+    if (shape.rect.overlaps(query.rect)) {
+      xs.push_back(std::max(query.rect.xl, shape.rect.xl));
+      xs.push_back(std::min(query.rect.xh, shape.rect.xh));
+    }
+  }
+  std::ranges::sort(xs);
+  xs.erase(std::unique(xs.begin(), xs.end()), xs.end());
+  for (size_t i = 1; i < xs.size(); ++i) {
+    std::vector<std::pair<double, double>> ys;
+    for (const auto& shape : shapes) {
+      if (shape.layer == query.layer && shape.rect.xl <= xs[i - 1] && shape.rect.xh >= xs[i] && shape.rect.yh > query.rect.yl
+          && shape.rect.yl < query.rect.yh) {
+        ys.emplace_back(std::max(query.rect.yl, shape.rect.yl), std::min(query.rect.yh, shape.rect.yh));
+      }
+    }
+    std::ranges::sort(ys);
+    double reached = query.rect.yl;
+    for (const auto& [lo, hi] : ys) {
+      if (lo > reached) {
+        return false;
+      }
+      reached = std::max(reached, hi);
+    }
+    if (reached < query.rect.yh) {
+      return false;
+    }
+  }
+  return true;
+}
+std::vector<Rect_edge> exposed_edges(const Shape& query, std::span<const Shape> shapes) {
+  const auto query_edges = edges(query.rect);
+  if (shapes.empty()) {
+    return {query_edges.begin(), query_edges.end()};
+  }
+  std::vector<Rect_edge> exposed;
+  for (const auto& shape : shapes) {
+    if (shape.layer != query.layer) {
+      continue;
+    }
+    for (const auto& edge : edges(shape.rect)) {
+      if (std::ranges::none_of(query_edges, [&](const auto& part) {
+            return part.vertical == edge.vertical && part.positive == edge.positive && part.coordinate == edge.coordinate;
+          })) {
+        continue;
+      }
+      std::vector<std::pair<double, double>> blocked;
+      for (const auto& cover : shapes) {
+        if (cover.layer != query.layer) {
+          continue;
+        }
+        const auto normal_lo = edge.vertical ? cover.rect.xl : cover.rect.yl;
+        const auto normal_hi = edge.vertical ? cover.rect.xh : cover.rect.yh;
+        if (edge.positive ? (normal_lo > edge.coordinate || normal_hi <= edge.coordinate)
+                          : (normal_lo >= edge.coordinate || normal_hi < edge.coordinate)) {
+          continue;
+        }
+        const auto lo = std::max(edge.lo, edge.vertical ? cover.rect.yl : cover.rect.xl);
+        const auto hi = std::min(edge.hi, edge.vertical ? cover.rect.yh : cover.rect.xh);
+        if (lo < hi) {
+          blocked.emplace_back(lo, hi);
+        }
+      }
+      std::ranges::sort(blocked);
+      double reached = edge.lo;
+      for (const auto& [lo, hi] : blocked) {
+        if (lo > reached) {
+          exposed.push_back({edge.vertical, edge.positive, edge.coordinate, reached, lo});
+        }
+        reached = std::max(reached, hi);
+      }
+      if (reached < edge.hi) {
+        exposed.push_back({edge.vertical, edge.positive, edge.coordinate, reached, edge.hi});
+      }
+    }
+  }
+  const auto key
+      = [](const Rect_edge& edge) { return std::tuple{edge.vertical, edge.positive, edge.coordinate, edge.lo, edge.hi}; };
+  std::ranges::sort(exposed, {}, key);
+  std::vector<Rect_edge> merged;
+  for (const auto& edge : exposed) {
+    if (!merged.empty() && merged.back().vertical == edge.vertical && merged.back().positive == edge.positive
+        && merged.back().coordinate == edge.coordinate && edge.lo <= merged.back().hi) {
+      merged.back().hi = std::max(merged.back().hi, edge.hi);
+    } else {
+      merged.push_back(edge);
+    }
+  }
+  std::erase_if(merged, [&](const auto& edge) {
+    return std::ranges::none_of(query_edges, [&](const auto& part) {
+      return part.vertical == edge.vertical && part.positive == edge.positive && part.coordinate == edge.coordinate
+             && std::max(part.lo, edge.lo) < std::min(part.hi, edge.hi);
+    });
+  });
+  return merged;
 }
 Rect edge_region(const Rect_edge& e, double backward, double forward, double side) {
   const auto lo = e.coordinate - (e.positive ? backward : forward);
@@ -266,7 +375,7 @@ Signal_metal_rules::Signal_metal_rules(const Technology& tech, const Floorplan& 
             t.need("ENDTOEND");
             const auto end_to_end = t.value();
             extension.eol.push_back({eol_width, spacing, within, end_to_end});
-            keepout = std::max({spacing, eol_width, within, end_to_end});
+            keepout           = std::max({spacing, eol_width, within, end_to_end});
             extension.lateral = std::max({extension.lateral, spacing, within});
             if (t.take("PARALLELEDGE")) {
               const auto par_space = t.value();
@@ -284,7 +393,7 @@ Signal_metal_rules::Signal_metal_rules(const Technology& tech, const Floorplan& 
             const auto backward = t.value(), side = t.value(), forward = t.value();
             const bool corner_only = t.take("CORNERONLY");
             extension.keepouts.push_back({eol_width, backward, side, forward, corner_only});
-            keepout = eol_width + backward + side + forward;
+            keepout           = eol_width + backward + side + forward;
             extension.lateral = std::max(extension.lateral, side);
             t.finish();
           } else if (key == "LEF58_CORNERSPACING") {
@@ -298,7 +407,7 @@ Signal_metal_rules::Signal_metal_rules(const Technology& tech, const Floorplan& 
             t.need("SPACING");
             const auto spacing = t.value();
             extension.corner_spacing.push_back(spacing);
-            keepout = std::max(keepout, spacing);
+            keepout           = std::max(keepout, spacing);
             extension.lateral = std::max(extension.lateral, keepout);
             t.finish();
           } else if (key == "LEF58_WIDTHTABLE") {
@@ -425,6 +534,15 @@ Rule_check Signal_metal_rules::rectangle(const Shape& shape) const {
 Rule_check Signal_metal_rules::spacing(const Shape& a, const Shape& b) const { return spacing_with_existing_source(a, b, {}); }
 Rule_check Signal_metal_rules::spacing_with_existing_source(const Shape& a, const Shape& b,
                                                             const std::function<bool(const Rect&)>& existing_target) const {
+  return spacing_context(a, b, {}, {}, existing_target);
+}
+Rule_check Signal_metal_rules::spacing_with_union(const Shape& a, const Shape& b, std::span<const Shape> a_union,
+                                                  std::span<const Shape> b_union) const {
+  return spacing_context(a, b, a_union, b_union, {});
+}
+Rule_check Signal_metal_rules::spacing_context(const Shape& a, const Shape& b, std::span<const Shape> a_union,
+                                               std::span<const Shape>                  b_union,
+                                               const std::function<bool(const Rect&)>& existing_target) const {
   for (const auto* shape : {&a, &b}) {
     const auto it = extensions_.find(shape->layer);
     if (it == extensions_.end()) {
@@ -438,9 +556,21 @@ Rule_check Signal_metal_rules::spacing_with_existing_source(const Shape& a, cons
   if (!ordinary.legal) {
     return ordinary;
   }
-  const auto& extension = extensions_.at(a.layer);
-  const auto  directed  = [&](const Rect& source, const Rect& target, bool existing_source) -> Rule_check {
-    const auto source_edges = edges(source), target_edges = edges(target);
+  if ((!a_union.empty() && !union_covers(a, a_union)) || (!b_union.empty() && !union_covers(b, b_union))) {
+    return reject("invalid native metal union context");
+  }
+  // Keep the legacy rectangular hot path allocation-free.
+  const auto                       a_rect_edges = edges(a.rect), b_rect_edges = edges(b.rect);
+  const auto                       a_exposed = a_union.empty() ? std::vector<Rect_edge>{} : exposed_edges(a, a_union);
+  const auto                       b_exposed = b_union.empty() ? std::vector<Rect_edge>{} : exposed_edges(b, b_union);
+  const std::span<const Rect_edge> a_edges   = a_union.empty() ? std::span<const Rect_edge>(a_rect_edges) : a_exposed;
+  const std::span<const Rect_edge> b_edges   = b_union.empty() ? std::span<const Rect_edge>(b_rect_edges) : b_exposed;
+  const auto&                      extension = extensions_.at(a.layer);
+  const auto                       directed  = [&](std::span<const Rect_edge> source_edges,
+                                                   std::span<const Rect_edge>
+                                                               target_edges,
+                                                   const Rect& target,
+                                                   bool        existing_source) -> Rule_check {
     for (const auto& rule : extension.eol) {
       for (const auto& edge : source_edges) {
         if (edge.hi - edge.lo >= rule_dbu(rule.width, dbu_)) {
@@ -488,11 +618,11 @@ Rule_check Signal_metal_rules::spacing_with_existing_source(const Shape& a, cons
   };
   // Evaluate lazily: an initializer list runs both directional checks even
   // when the first already rejects this candidate.
-  auto check = directed(a.rect, b.rect, true);
+  auto check = directed(a_edges, b_edges, b.rect, true);
   if (!check.legal) {
     return check;
   }
-  check = directed(b.rect, a.rect, false);
+  check = directed(b_edges, a_edges, a.rect, false);
   if (!check.legal) {
     return check;
   }
@@ -513,7 +643,14 @@ Rule_check Signal_metal_rules::spacing_with_existing_source(const Shape& a, cons
 }
 std::optional<int64_t> Signal_metal_rules::clearance(const std::string& name) const {
   const auto extension = extensions_.find(name);
-  if (extension == extensions_.end() || !extension->second.error.empty() || !supported(rules_, dbu_, {name, {0, 0, 1, 1}}).legal) {
+  if (extension == extensions_.end() || !extension->second.error.empty()
+      || !supported(rules_,
+                    dbu_,
+                    {
+                        name,
+                        {0, 0, 1, 1}
+  })
+              .legal) {
     return {};
   }
   const auto& rules = rules_.layers.at(name).rules;

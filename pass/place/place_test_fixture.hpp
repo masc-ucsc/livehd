@@ -16,6 +16,7 @@ inline Options plain_options() {
   Options o;
   o.optimization_pending = true;  // These fixtures exercise the legacy final-placement paths.
   o.fp_place             = false;
+  o.fp_auto              = false;  // legacy synth.place.fp=false; fp=auto is the Options default
   o.fp_pin_adjust = o.macro_pin_adjust = false;
   o.final_cells                        = false;
   o.macro_snap                         = false;

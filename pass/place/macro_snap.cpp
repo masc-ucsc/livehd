@@ -4,16 +4,18 @@
 #include <algorithm>
 #include <cmath>
 #include <map>
-#include <sstream>
 #include <stdexcept>
 
+#include "fp_repetition.hpp"
 #include "node_util.hpp"
 
 namespace livehd::placement {
 std::string original_hierarchy_path(const std::string& name) {
-  std::istringstream input(name);
-  std::string        path, part;
-  while (std::getline(input, part, '.')) {
+  // Flattened netlists mix `.` and `/` as separators (ORFS keeps the `/` of
+  // the original hierarchy); split like fp=auto (fp_rep_split: both, outside
+  // brackets) so both see the same scopes, and join with `.`.
+  std::string path;
+  for (const auto& part : fp_rep_split(name)) {
     // A region wrapper flattened with physical names is `__flat___sub_<nid>`
     // (pass/partition/flatten.cpp); older netlists spell it `sub_<nid>`.
     const bool generated = livehd::graph_util::is_transparent_instance_name(part)

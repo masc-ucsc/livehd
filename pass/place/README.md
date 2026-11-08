@@ -1,10 +1,12 @@
 # Physical placement stage
 
 With ABC, OpenTimer and an explicit workdir, the default runs macro placement,
-fixes the macros, and then places the cells (`synth.place.fp=false`). Without
-macros it uses a single placement stage. Macro snapping remains enabled.
-Enable `synth.place.fp=true` explicitly for centroid floorplanning and the separate
-macro-refinement/final-cell passes. The legacy `r8h2`/`r8h3` macro modes and manual
+fixes the macros, and then places the cells. Without macros it uses a single
+placement stage. Macro snapping remains enabled. The default `synth.place.fp=auto`
+adds centroid floorplanning and the separate macro-refinement/final-cell passes
+only for designs dominated by repeated hierarchy (see "Automatic floorplan
+selection"); `synth.place.fp=true` forces them and `synth.place.fp=false` is the
+legacy default (never floorplan). The legacy `r8h2`/`r8h3` macro modes and manual
 macro-centroid diagnostic have been removed.
 
 GP timing feedback is approximate critical-path ranking. It uses characterized
@@ -478,6 +480,87 @@ With an explicit `halo=0`, macros previously could touch; the channel now keeps
 them apart. This is a legality fix, not a default change: touching macros were
 never legal. The `tools/physical_repair` JSON config takes `"macro_channel"` as
 a number or `[x, y]`, and its `"halo"` also accepts `[x, y]`.
+
+#### Power-grid aware macro spacing (`synth.place.macro.pdn`)
+
+`synth.place.macro.pdn` (default `auto`) raises the macro channel per axis to
+what the technology's power-grid strategy needs between two macros, so the PDN
+can be built in every channel without repair. The strategy is the one named by
+`synth.place.pg`, else the one the LEF matches (`Tech_policy::power_grid`); a
+technology without a registered strategy, or one whose layers the LEF does not
+describe, is unaffected. The rule (`pass/place/power_grid_rules.hpp`) is
+derived only from the description and the LEF. A channel runs perpendicular to
+its gap axis; a supply shape crossing it on a layer the macros block (OBS,
+conservative obstruction or pin geometry of any hard macro master) is cut into
+an isolated segment. Following `connect` upward to the first layer that runs
+along the channel gives its feed:
+
+- *feeder*: the chain starts at the rails. Generators insert feeder straps
+  (pdngen channel repair, the native rail feeders), so the channel needs, beside
+  both halos plus the feed layer's spacing, room for three feed straps and three
+  spacings (two feeders next to a possible existing strap).
+- *lattice*: any other crossing strap. Its segment connects only where a strap
+  of the feed layer, at that layer's fixed pitch/offset, lies wholly inside the
+  clear band (the gap less, per side, the largest macro-grid halo and the
+  via-stack spacing). The band holds one strap of every net for any position
+  when it is at least pitch + width (*any phase*); a band as narrow as one strap
+  group works only with edges aligned to the strap lattice (*aligned*).
+- *none*: crossing layers pass over the macros.
+
+For NanGate45 + fakeram45 (macros block metal1-4): stacked macros (gap along
+y) are lattice-limited: metal4 segments need metal7 (pitch 30, VSS/VDD 15
+apart, 1.4 wide), margin 2 + 0.27, aligned 20.94 um, any phase 35.94 um;
+side-by-side macros (gap along x) are feeder-limited: 6.79 um. For ASAP7
+(macros block M1-M4) M5 passes over the macros (y: none) and rails need M5
+feeders (x: about 4.7 um), below the default 2 x 2.7 um halo spacing, so default ASAP7 runs are
+unchanged.
+
+Values: `gap`: the channel is at least the any-phase requirement,
+buildable wherever the macros land; `auto` (default) starts at `gap` and degrades
+(below); `align`: at least the aligned requirement
+plus a tenth of the feed strap pitch, and the routing-track alignment also
+snaps movable macro edges onto the strap lattice (`Pg_edge_lattice`: the band
+below each macro edge, down to the core edge, and above a macro closer than the
+channel to the core top, must hold a strap group; two manufacturing grids of
+tolerance for downstream re-snapping). When no lattice-aligned frame exists the
+alignment keeps the routing tracks alone, so `align` is a best-effort placement
+preference, not a guarantee: with 133 um tall NanGate45 memories stacked at the
+minimum channel the lattice rarely admits a local move, and stacking pitch
+effectively grows to about 29 um, near the any-phase 36 um.
+`synth.place.macro.pdn_origin` (`core`, or `X,Y` microns) moves the strap
+origin for `align` when the downstream PDN uses another frame (the challenge
+evaluator centres the proxy canvas in a larger ORFS core). `off` restores the
+metal-spacing channel alone. The explicit `macro.channel` is also raised (the
+requirement is a PDN legality bound, not a preference); QoR `macro_pdn` records
+the mode, per axis the rule kind, source/feed layers and required/aligned/any
+phase microns, and with `align` the lattice origin, the hard macros the lattice
+does not admit and the alignment fallbacks. `physical_repair` takes
+`"macro_pdn"` and `"macro_pdn_origin": "core" | [x, y]`.
+
+`auto` never turns the PDN channel into a hard failure. Levels, strongest first:
+`gap`, `align` (requirement and lattice snap as for an explicit `align`), `off`
+(metal-spacing channel), with levels of equal channel merged (ASAP7: `gap`,
+`off`). Once the solver core is known, the strongest level whose padded macro
+footprints (the native planning pad rounded up to sites/rows, fixed macros
+clipped to the core) pass a necessary packing check
+(`pg_macro_boxes_fit`: every box fits, total area fits, and per axis the summed
+widths are at most `core_w * floor(core_h / min height)` and symmetrically) is
+chosen; levels that fail it are skipped without a legalization attempt. When
+the native macro legalizer still fails (a heuristic: it can fail on a feasible
+instance near capacity), the same GP pose is re-legalized at the next weaker
+level until one legalizes. With every hard macro fixed (a staged final pass, a
+later timing or repair pass on a planned frame) `auto` takes the strongest
+level the frame keeps. Legality checks under `auto` require only the
+metal-spacing channel; an explicit `gap`/`align` is a hard rule and a failed
+macro legalization stops with a message naming the channel. QoR `macro_pdn`
+adds `requested`, `used_level`, `degraded` and `attempts` (`level`, channel,
+`result`: `infeasible`, `legalization_failed`, `used`, or `frame`); a staged
+flow reports the macro plan's record. Example: NanGate45 ariane136 (136
+fakeram45_256x16, 1436 um core) at `gap` needs 64.03 x 166.6 um native
+footprints, 22 columns x 8 tiers for 136 macros; fp_plan's grouped pose defeats
+the legalizer there and `auto` keeps `align` (6.79 x 23.94 um). Sizing fp_plan
+groups by the padded footprint does not help: its 12 group circles then no
+longer fit the core.
 
 While macros are still movable, the native solver pads each movable hard macro
 by its *planning pad* per side: the halo, or half the channel rounded down to
@@ -2321,10 +2404,83 @@ All future Eyeriss comparisons explicitly set `synth.place.grid.density=64` and
 `synth.place.grid.density_mode=fixed` for every GP stage. The native default grid is unchanged;
 earlier mixed-grid results are historical.
 
+### Automatic floorplan selection (`fp=auto`)
+
+Centroid floorplanning only pays off when copies of one hierarchy block hold a
+large part of the design (Eyeriss: four ClusterGroups). `synth.place.fp=auto`
+(physical_repair: `"fp_place": "auto"`) runs `fp_repetition.hpp` on the source
+netlist before fresh full placement and sets `fp` from its decision; explicit
+`true`/`false` are unchanged. ECO, timing-seed, placed-context and H2D calls never
+start a floorplan, so auto resolves to off there without detection.
+
+**Default.** `auto` is the default of `synth.place.fp`, of `placement::Options`
+(`fp_auto=true`; `fp_place=true` forces the stage, a forced off sets both false)
+and of physical_repair's floorplan mode `"fp_place"` (was `true` there). The
+user approved this default-contract change on 2026-11-07; before it the default
+was `false`. The legacy behavior is `--set synth.place.fp=false` (physical_repair:
+`"fp_place": false`): no detection, no `fp_auto.json`, no floorplan stage. On the
+20 HighTide designs and the 4 NG45 challenge designs auto turns the stage on only
+for Eyeriss, bp_uno and NG45 ariane133/136, so every other design keeps its
+`fp=false` result.
+
+The area proxy is **flop + memory area**: Liberty sequential cells (`ff`, `latch`
+and bank groups, not integrated clock gates) and memories (LEF `CLASS BLOCK*`
+masters, native memories at their proxy area), each at physical area.
+Combinational cells are ignored: synthesis renames them, while flop and memory
+instance names keep the hierarchy path even in a flattened netlist.
+
+Scopes come from the module tree when the netlist has one; otherwise (and below
+any module) from instance names, split on `.` and `/` outside brackets
+(`\a.b/gen[3].u_pe/q_reg[2]` has scopes `a`, `a/b`, `a/b/gen[3]`,
+`a/b/gen[3]/u_pe`). The last component, with its indices (`mem_reg[12][3]`), is a
+register array inside its scope: it adds area there but never forms copies.
+Sibling scopes are copies when their makeup matches after that collapse: equal
+memory count, memory area and flop count within `fp.auto_tolerance` (relative).
+Instances of one module always match, and so do differently named copies
+(uniquified parameterized modules, `u_left`/`u_right`). Counts only recognize
+copies; the score is area:
+
+`share = (flop+memory area inside the copies) / (total flop+memory area)`
+
+The floorplan stage runs when the best group's share reaches `fp.auto_share`, with
+at least `fp.auto_min_copies` copies, each holding at least `fp.auto_min_copy_share`
+on its own (many tiny FIFOs or synchronizers never add up). With
+`fp.auto_candidates=true` (default) only groups the floorplan stage can actually
+center count: more than `fp.min_macros` memories per copy and at least
+`fp.min_copies` copies, the hierarchy-candidate rule below. Repeated single-SRAM
+bank wrappers (cnn, CoralNPU, MemPool banks) and memory-less repetition (FlooNoC
+routers) are reported but do not select it; `false` uses the share alone. A large leaf flop
+array (register file) is reported but does not select the stage: candidate
+discovery needs more than `fp.min_macros` movable macros per scope, so such an
+array never gets a centroid of its own. On minimax (one 2048-flop register
+file, 91% of the proxy) and NVDLA partition_a (a 4352-flop RAM, 37%), `fp=true`
+found no candidate and the array's flop spread changed by +2% / -6% RMS.
+
+| Option (`synth.place.` prefix) | Default | Meaning |
+|---|---:|---|
+| `fp` | auto | `true`, `false` (legacy default) or `auto` |
+| `fp.auto_share` | 0.2 | Minimum repeated share of flop+memory area |
+| `fp.auto_min_copies` | 2 | Minimum matching copies in one group |
+| `fp.auto_min_copy_share` | 0.02 | Each copy's own minimum share |
+| `fp.auto_tolerance` | 0.05 | Relative flop-count / memory-area mismatch between copies |
+| `fp.auto_candidates` | true | Count only groups that form floorplan candidates (`fp.min_macros`, `fp.min_copies`) |
+
+`place/fp_auto.json` and `qor.json` `"fp_auto"` record the proxy totals, the
+source (`hierarchy` when modules below the top hold flops or memories, else
+`names`), the decision and trigger, the top five groups (parent, module when all
+copies share one, count, per-copy makeup and area, share, first copies) and the
+five largest flop arrays. `bazel build -c opt //tools:fp_repetition` replays the
+same detection on a gate-level Verilog netlist with LEF and Liberty
+(`fp_repetition --lef tech.lef --lef cells.lef --liberty cells.lib --verilog
+netlist.v`), without synthesis or placement.
+
 ### Optional floorplan, macro and cell passes
 
 `synth.place.fp=true` runs the R8H3-style floorplan GP from scratch, without
-legalization. It discovers repeated scopes using the same full-color membership,
+legalization. Hierarchy scopes come from instance names split on `.` and `/`
+outside brackets (`original_hierarchy_path`, sharing `fp_rep_split` with
+fp=auto), so flattened netlists that mix both separators (ORFS: Eyeriss
+`ClusterGroup_0_0/GLB_Cluster_inst.…`) still form whole-block candidates. It discovers repeated scopes using the same full-color membership,
 3K equivalent-cell threshold, four qualifying copies per immediate parent,
 physical-area/density circles and adaptive
 same-type repulsion. It then calls native `snap_floorplan`, freezes the resulting
@@ -2362,7 +2518,7 @@ This is a local heuristic, not a global symmetry optimum.
 
 | Option (`synth.place.` prefix) | Default | Meaning |
 |---|---:|---|
-| `fp` | true | Enable separate floorplan GP, snap and frozen-target refinement |
+| `fp` | auto | Enable separate floorplan GP, snap and frozen-target refinement (`true`/`false` force it; `auto`: see above) |
 | `final` | true | Fix macro/IO frames after the FP/macro stages and re-place cells without centroid anchors |
 | `final.iterations` | 0 | Final-cell GP cap; zero inherits `place.iterations` |
 | `fp.snap` | true | Fit circle targets; false freezes the original floorplan GP means without calling the snap solver |
@@ -3916,19 +4072,54 @@ legalizer remainder warping remains an independent option.
 
 ### Fixed-wire handoff foundation
 
-`//pass/place:power_grid` contains the native metal-planning stage and the
-`pg_asap7` strategy of the ASAP7 technology profile (`inou/lefdef/tech_profile.cpp`),
-transcribed from pinned ORFS profile data. `//tools:power_grid`
+`//pass/place:power_grid` contains the native metal-planning stage. Its input
+is the technology-neutral power-grid description `physical::Pg_strategy` of a
+technology profile (`inou/lefdef/tech_profile.{hpp,cpp}`), transcribed from the
+pinned ORFS PDN script of each platform without interpretation:
+
+| field | pdngen | meaning |
+|---|---|---|
+| `followpin_layers` | `add_pdn_stripe -followpins` | rails; width from the one-row masters' PG pins, pitch = row height |
+| `stripes` (`layer, width, spacing, pitch, offset`) | `add_pdn_stripe` | core straps, LEF preferred direction; first net's centerline at core origin + offset + k * pitch, the other net width + spacing further (pdngen's default spacing is pitch / nets - width) |
+| `connect` | `add_pdn_connect` | core via stacks {lower, upper} |
+| `macro_grids` (`orientations, halo, stripes, connect, over_boundary`) | `define_pdn_grid -macro` | per orientation set: halo = core-strap keep-out around the macro on the layers it blocks; straps pitched from the macro's corner over its PG-pin box; connections whose lower layer is a macro PG pin layer land on the fixed pins |
+| `rings` | `add_pdn_ring` | stated for completeness; the native generator rejects them |
+| `nets`, `pin_names`, `stripes_start_with_power`, `pin_layer` | global connects, `-starts_with`, `-pins` | supplies and terminals |
+
+Registered strategies: `pg_asap7` (`grid_strategy-M1-M2-M5-M6.tcl`: two macro
+grids with halo 2 and an M4-M5 pin connection, no macro straps) and
+`pg_nangate45` (`grid_strategy-M1-M4-M7.tcl`: metal1 rails, metal4 0.48/56,
+metal7 1.4/30, macro grids metal5/metal6 0.93/10 for upright macros and metal6
+0.93/40 for rotated ones, halo 2). A profile may provide only part of the
+process policy (`Tech_profile::provides(Tech_policy)`): `nangate45` has no
+supported routing policy (metal1 pins are horizontal), so routing consumers of
+`detect_tech_profile`/`resolve_tech_profile` (default `Tech_policy::route`)
+never see it and keep their LEF-stack fallback, while power-grid consumers
+(`Tech_policy::power_grid`, `power_grid_profile`) detect it from the
+`FreePDK45_38x28_10R_NP_162NW_34O` site. The ASAP7 export is bit-identical to
+the previous `macro_halo`/`macro_connect` form (same DEF on a HighTide cnn
+handoff). `//tools:power_grid`
 reads repeated `--lef` inputs and `--def`, and writes a JSON metal plan with
-`--output`; `--profile` accepts `pg_asap7` or `auto`. It derives followpin widths
+`--output`; `--profile` accepts a profile/strategy name or `auto`;
+`--cut-rows H` cuts the DEF rows around BLOCK macros by H microns (cut_rows /
+tapcell before pdngen) and `--tolerate-macro-pin-overlap true` accepts generated
+LEFs whose own VDD/VSS pins overlap. The JSON reports `unfed_strap_segments`
+per layer: core strap segments that no same-net shape of a layer they connect up
+to crosses, which is pdngen's channel condition (each one must be repaired;
+PDN-0178/0179 when it cannot). The native export accepts such a stub when the
+rails tie it to the grid, so a zero count is the pdngen-compatible check. It derives followpin widths
 and polarity from one-row standard-cell PG pins and row orientations (a
 multi-row master, such as a two-row domino abstract, never defines a row's
 rails; its parity is the legality check of `pg_rails.hpp`), merges shared
 rails, and clips stripe spans around macro halos on obstructed layers. Short
 row segments missed by periodic vertical feeders receive supplemental feeders
-using the profile width and spacing, on the manufacturing grid. Feeders must
-fit fully inside the rail and clear macro obstructions; an unserviceable segment
-fails explicitly. These additions precede channel cuts. Export verifies that
+using the profile width, on the manufacturing grid, kept the strap spacing or
+the LEF spacing rule (whichever is tighter) from other straps they run beside.
+Feeders must fit fully inside the rail; they span the obstacle-free stretch of
+their column around the rail (clipped at macro halos like core straps, still
+covering a rail that sits on a halo edge); an unserviceable segment fails
+explicitly. Macro-grid straps are optional: one that makes no via connection
+(an edge strap grazing the pins) is dropped, as pdngen removes floating straps. These additions precede channel cuts. Export verifies that
 each supply's grid is connected, including when channels are disabled.
 Rows require enough die inset
 for the full edge-rail width. The profile follows ORFS's unsnapped stripe offsets.
@@ -3937,8 +4128,8 @@ additionally builds the PG: LEF-derived via arrays,
 stack landing patches, enclosure-driven stripe extensions/trimming, and PG
 terminals are emitted as DEF VIAS/SPECIALNETS. The result requires independent
 OpenROAD placement, connectivity, DRC and IR checks. Fixed macro PG contacts
-are transformed from LEF geometry, connected through the profile's macro layer
-pairs, and kept immutable. Complete via stacks are preflighted before emission.
+are transformed from LEF geometry, connected through the connections of the
+macro grid selected by the macro's orientation, and kept immutable. Complete via stacks are preflighted before emission.
 A macro-pin crossing that is too small for a supported via is skipped; failed
 fits are cached, while unsupported-rule errors still fail the export. Every
 declared macro PG pin must have a grid
@@ -4852,9 +5043,9 @@ final hard pass becomes a correction. It reuses existing machinery:
 | (internal) `swap_neighbors` | 8 | `macro_anchor_swap_neighbors` |
 | `inflate` (0..0.25) | 0 | `macro_anchor_inflate` |
 | `dead_space_refreshes` (-1 = all) | 2 | `macro_anchor_dead_space_refreshes` |
-| `select` (`edge+random` \| `all`) | edge+random | `macro_anchor_select` |
+| `select` (`edge+random` \| `edge+stable` \| `all`) | edge+random | `macro_anchor_select` |
 | `edge_weight`, `random_weight` (0..64) | 4, 1 | `macro_anchor_edge_weight`, `macro_anchor_random_weight` |
-| `random_fraction` | 0.25 | `macro_anchor_random_fraction` |
+| `random_fraction` (edge+random only) | 0.25 | `macro_anchor_random_fraction` |
 | `edge_chain`, `edge_gate` | true, false | `macro_anchor_edge_chain`, `macro_anchor_edge_gate` |
 | `spring_length` (0..4; 0 = native 1) | 0.1 | `macro_anchor_spring_length` |
 | `target_hysteresis` (0..1) | 0.5 | `macro_anchor_target_hysteresis` |
@@ -4907,6 +5098,32 @@ controls fix it:
   alignment, macro LP) on 1-2 of 17 IBM designs, and rerunning the chain on
   its own output is not idempotent (edge snap re-slides macros the track snap
   shifted). `final_snap` still measures GP pose vs legal result.
+  GP keeps running after the last refresh (up to `settle` iterations after it,
+  or for the rest of the budget once `max_refreshes` is reached: ~300 iterations
+  at the defaults), so the last legal set can be stale. Before the hard pass
+  the generator legalizes the final GP pose once more (same chain, the same
+  hysteresis toward the last targets) and the pass keeps whichever of the two
+  legal sets has the lower net-weighted HPWL against the final cell pose
+  (`final_choice` = `last` | `fresh`, with both costs, in `macro_anchor.json`).
+- `select=edge+stable`: as `edge+random`, but the weak (`random_weight`)
+  anchors go to the non-edge macros whose legal target held (moved at most
+  `stable_distance` x its smaller side) since the previous refresh, instead of
+  a fresh random sample; a macro whose target still jumps stays free until its
+  GP position settles. Deterministic, no `random_fraction`.
+- Per-macro ramp: in both selective modes a macro's pull reaches its full
+  weight after `ramp` consecutive refreshes with an unchanged target; a target
+  jump restarts that macro's ramp (instead of one global ramp by refresh count).
+- Start gate: the first refresh waits for `start_overflow`. When the GP
+  overflow never rose above 2 x `start_overflow` (sparse macro stages such as
+  HighTide cnn, eyeriss, liteeth, litepci and NyuziProcessor start below it),
+  overflow says nothing about convergence; the first refresh then also waits
+  until the RMS macro motion per refresh window (center displacement over the
+  window / the macro's max side) is within `spring_length` (0.1 when 0), at
+  most until half the iteration budget. Targets legalized from a pose that
+  still moves more than the spring length per window are stale before the
+  next refresh (NyuziProcessor: first refresh at iteration 21-61 without the
+  gate). `motion_trace` (iteration, overflow, RMS motion, median motion in
+  mean macro sides) and each refresh's `motion` are reported.
 
 `macro_anchor.json` then also records per refresh the edge/random anchor
 counts and, per anchor kind at the last refresh, the mean final-snap

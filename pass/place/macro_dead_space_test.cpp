@@ -3,6 +3,7 @@
 
 #include <stdexcept>
 
+#include "dreamplace/native/placement.hpp"
 #include "gtest/gtest.h"
 
 namespace pl = livehd::placement;
@@ -193,4 +194,56 @@ TEST(MacroDeadSpace, OptionsParse) {
   EXPECT_THROW(pl::parse_dead_space_options("grid=1e100"), std::invalid_argument);
   EXPECT_EQ(pl::parse_dead_space_options("moves=0,grid=8")->max_moves, 0);
   EXPECT_THROW(pl::measure_dead_space({}, pl::Dead_space_limits{}), std::invalid_argument);
+}
+
+// The collapse moves `objects` while the design keeps the initial pose: after
+// an accepted move, a candidate is priced from the committed position.
+TEST(MacroDeadSpace, CostPricesCandidatesAtTheCommittedPose) {
+  DreamPlace::native::Design d;
+  d.layout      = {0, 0, 1000, 1000, 1, 1};
+  d.num_movable = 1;
+  d.node_x      = {100, 180};  // a movable macro and a fixed IO
+  d.node_y      = {0, 0};
+  d.node_size_x = d.node_size_y = {10, 0};
+  d.pin2node                    = {0, 1};
+  d.pin_offset_x = d.pin_offset_y = {0, 0};
+  d.flat_net2pin                  = {0, 1};
+  d.flat_net2pin_start            = {0, 2};
+  d.node_macro                    = {1, 0};
+  d.build_maps();
+  std::vector<pl::Dead_space_object> objects{
+      {100, 0, 110, 10, true, true, 0}
+  };
+  const std::vector<size_t> nodes{0};
+  double                    initial = 0;
+  const auto                cost    = pl::dead_space_hpwl_cost(d, nodes, objects, &initial);
+  EXPECT_DOUBLE_EQ(initial, 80);
+  EXPECT_DOUBLE_EQ(cost({0}, 100, 0), -60);  // 100 -> 200: |200-180| - |100-180|
+  objects[0].xl += 100;                      // accepted: the macro now sits at x=200
+  objects[0].xh += 100;
+  EXPECT_DOUBLE_EQ(cost({0}, -50, 0), 10);  // 200 -> 150 (pricing from x=100 would say +50)
+}
+
+TEST(MacroDeadSpace, CollapseIsIndependentOfThreads) {
+  const auto frame = [] {
+    return std::vector<pl::Dead_space_object>{macro(820, 0, 100, 100),
+                                              macro(820, 120, 100, 100),
+                                              macro(820, 240, 100, 100),
+                                              macro(80, 600, 100, 100),
+                                              macro(400, 30, 120, 60),
+                                              macro(300, 880, 100, 80)};
+  };
+  auto l = collapse_core();
+  auto a = frame(), b = frame();
+  l.threads     = 1;
+  const auto r1 = pl::collapse_dead_space(a, l, nullptr);
+  l.threads     = 4;
+  const auto r4 = pl::collapse_dead_space(b, l, nullptr);
+  EXPECT_EQ(r1.moves, r4.moves);
+  EXPECT_EQ(r1.candidates, r4.candidates);
+  EXPECT_EQ(r1.after.stranded_area, r4.after.stranded_area);
+  for (size_t i = 0; i < a.size(); ++i) {
+    EXPECT_EQ(a[i].xl, b[i].xl) << i;
+    EXPECT_EQ(a[i].yl, b[i].yl) << i;
+  }
 }

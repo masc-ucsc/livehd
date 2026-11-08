@@ -23,11 +23,14 @@ Route_components::Route_components(const Floorplan& fp) : frame_(&fp), data_(fp.
 bool Route_components::matches(const Floorplan& fp) const {
   return frame_ == &fp && data_ == fp.components.data() && size_ == fp.components.size();
 }
-Route_connectivity check_route_connectivity(const Technology& tech, const Floorplan& fp, const Net& net,
-                                            const Route_components* components, const Route_width_rules* trial_rules) {
+namespace {
+Route_connectivity check_connectivity(const Technology& tech, const Floorplan& fp, const Net& net,
+                                      const Route_components* components, const Route_width_rules* trial_rules,
+                                      std::span<const Shape> fixed_metal, std::span<const std::vector<Shape>> physical_pin_unions,
+                                      bool require_route_pair) {
   Route_connectivity out;
   try {
-    if (net.connections.size() < 2 || net.wires.empty()) {
+    if (require_route_pair && (net.connections.size() < 2 || net.wires.empty())) {
       throw std::runtime_error("missing endpoints or route");
     }
     Routing_occupancy   index(fp.dbu);
@@ -102,19 +105,28 @@ Route_connectivity check_route_connectivity(const Technology& tech, const Floorp
         }
       }
     }
-    if (!graph.size()) {
+    for (const auto& shape : fixed_metal) {
+      if (!tech.layers.contains(shape.layer) || shape.rect.empty()) {
+        throw std::runtime_error("unsupported fixed conductor shape");
+      }
+      const auto rect = snapped_dbu(shape.rect, 1e-6);
+      if (!rect) {
+        throw std::runtime_error("fractional fixed conductor geometry");
+      }
+      append({shape.layer, *rect});
+    }
+    if (require_route_pair && !graph.size()) {
       throw std::runtime_error("route has no metal");
     }
     std::optional<Route_components> local;
-    if (!components) {
+    if (!components && (require_route_pair || !net.connections.empty())) {
       local.emplace(fp);
       components = &*local;
     }
-    if (!components->matches(fp)) {
+    if (components && !components->matches(fp)) {
       throw std::invalid_argument("component index does not match routing floorplan");
     }
-    const auto& cells = *components;
-    const auto  append_pin = [&](const std::vector<Shape>& shapes, const auto& transform) {
+    const auto append_pin = [&](const std::vector<Shape>& shapes, const auto& transform) {
       if (shapes.empty()) {
         throw std::runtime_error("empty endpoint pin");
       }
@@ -148,8 +160,8 @@ Route_connectivity check_route_connectivity(const Technology& tech, const Floorp
                    [&](const Rect& r) { return orient_rect(r, 0, 0, terminal->orientation).translated(terminal->x, terminal->y); });
         continue;
       }
-      const auto found = cells.find(endpoint.instance);
-      if (found == cells.end()) {
+      const auto found = components->find(endpoint.instance);
+      if (found == components->end()) {
         throw std::runtime_error("unsupported non-cell endpoint");
       }
       const auto& cell   = *found->second;
@@ -159,6 +171,12 @@ Route_connectivity check_route_connectivity(const Technology& tech, const Floorp
       }
       const auto& pin = master.pins.at(endpoint.pin);
       append_pin(pin.shapes, [&](const Rect& r) { return placed_rect(master, cell.place, fp.dbu, r); });
+    }
+    for (const auto& pin : physical_pin_unions) {
+      append_pin(pin, [](const Rect& rect) { return rect; });
+    }
+    if (!graph.size()) {
+      throw std::runtime_error("route has no metal");
     }
     std::set<size_t> roots;
     for (size_t i = 0; i < graph.size(); ++i) {
@@ -173,5 +191,25 @@ Route_connectivity check_route_connectivity(const Technology& tech, const Floorp
     out.reason = e.what();
   }
   return out;
+}
+}  // namespace
+
+Route_connectivity check_route_connectivity(const Technology& tech, const Floorplan& fp, const Net& net,
+                                            const Route_components* components, const Route_width_rules* trial_rules) {
+  return check_connectivity(tech, fp, net, components, trial_rules, {}, {}, true);
+}
+
+Route_connectivity check_conductor_connectivity(const Technology& tech, const Floorplan& fp, std::span<const Route_path> paths,
+                                                std::span<const Shape>              fixed_metal,
+                                                std::span<const std::vector<Shape>> physical_pin_unions,
+                                                const Route_width_rules*            trial_rules) {
+  Net conductors;
+  if (!paths.empty()) {
+    conductors.wires.push_back({
+        "ROUTED",
+        {paths.begin(), paths.end()}
+    });
+  }
+  return check_connectivity(tech, fp, conductors, nullptr, trial_rules, fixed_metal, physical_pin_unions, false);
 }
 }  // namespace livehd::physical

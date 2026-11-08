@@ -245,7 +245,7 @@ Repair_result timing_place(Result initial, const Options& requested, const Evalu
     trial.iterations       = std::clamp(options.iterations / static_cast<int>(rounds), 1, 100);
     trial.min_iterations   = std::min(trial.iterations, 20);
     trial.final_iterations = trial.iterations;
-    trial.fp_place = trial.final_cells = false;
+    trial.fp_place = trial.final_cells = trial.fp_auto = false;
     trial.cell_stage                   = true;
     trial.fp_evaluate                  = {};
     trial.gp_rank                      = {};

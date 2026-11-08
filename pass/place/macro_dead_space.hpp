@@ -6,6 +6,10 @@
 #include <string_view>
 #include <vector>
 
+namespace DreamPlace::native {
+struct Design;
+}
+
 namespace livehd::placement {
 // Dead space left by macro planning: free core area that standard cells cannot
 // use well, measured on a raster of the core minus the macro bodies (plus their
@@ -71,6 +75,7 @@ struct Dead_space_collapse_limits {
   int64_t           min_gain        = 0;  // dead area (DBU^2) a move must remove
   double            wl_move_budget  = 0;  // largest wirelength growth one move may add (cost units)
   double            wl_total_budget = 0;  // largest summed growth of all accepted moves
+  int               threads         = 1;  // candidate measurements in parallel (the result does not depend on it)
 };
 // Wirelength change if `members` (object indexes) translate by (dx, dy).
 using Dead_space_cost = std::function<double(const std::vector<size_t>& members, int64_t dx, int64_t dy)>;
@@ -94,6 +99,14 @@ struct Dead_space_collapse_report {
 // macro inside the core with its halo and every macro pair `space` apart.
 Dead_space_collapse_report collapse_dead_space(std::vector<Dead_space_object>& objects, const Dead_space_collapse_limits& limits,
                                                const Dead_space_cost& cost);
+// The HPWL change of the nets touching the moved members. `nodes[j]` is the
+// design node of objects[j]; the design keeps the initial pose while
+// collapse_dead_space translates `objects` (held by reference) as it accepts
+// moves, so candidates are priced at the committed pose: the node's design
+// position plus its object's accepted offset. `initial` receives the HPWL of
+// the active nets touching a movable object (the budget base).
+Dead_space_cost            dead_space_hpwl_cost(const DreamPlace::native::Design& design, const std::vector<size_t>& nodes,
+                                                const std::vector<Dead_space_object>& objects, double* initial);
 
 // User controls of `synth.place.macro.dead_space` / physical_repair "macro_dead_space".
 struct Dead_space_options {

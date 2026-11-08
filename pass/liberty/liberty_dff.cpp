@@ -1492,6 +1492,34 @@ std::optional<double> smallest_flop_area(const std::string& lib_files) {
   return smallest;
 }
 
+std::set<std::string> sequential_cell_names_text(const std::string& contents) {
+  const auto            text = strip_comments(contents);
+  std::set<std::string> names;
+  std::string           args, ignored;
+  for (size_t p = find_group(text, "cell", 0, args); p != std::string::npos; p = find_group(text, "cell", p + 1, args)) {
+    const auto end = match_brace(text, p);
+    if (end == std::string::npos) {
+      break;
+    }
+    const auto body  = text.substr(p + 1, end - p - 1);
+    bool       state = false;
+    for (const auto* group : {"ff", "latch", "ff_bank", "latch_bank"}) {
+      state = state || find_group(body, group, 0, ignored) != std::string::npos;
+    }
+    if (state && body.find("clock_gating_integrated_cell") == std::string::npos) {
+      auto name = args;
+      std::erase_if(name, [](unsigned char c) { return c == '"' || std::isspace(c); });
+      names.insert(std::move(name));
+    }
+    p = end;
+  }
+  return names;
+}
+
+std::set<std::string> sequential_cell_names(const std::string& lib_files) {
+  return sequential_cell_names_text(read_files(lib_files));
+}
+
 std::vector<Dff_cell> scan_dff_cells(const std::string& lib_files) { return scan_cells(lib_files).dffs; }
 
 std::vector<Dff_cell> scan_async_dff_cells(const std::string& lib_files) { return scan_cells(lib_files).async; }

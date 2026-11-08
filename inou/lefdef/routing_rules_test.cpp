@@ -12,11 +12,18 @@ Technology technology() {
   layer.width             = .018;
   layer.rules.loaded      = true;
   layer.rules.area        = .000666;
-  layer.rules.min_size    = {{.037, .018}};
+  layer.rules.min_size    = {
+      {.037, .018}
+  };
   layer.rules.spacing.push_back({.018, {}, {}});
   return tech;
 }
-Shape metal(double xl, double yl, double xh, double yh) { return {"M2", {xl, yl, xh, yh}}; }
+Shape metal(double xl, double yl, double xh, double yh) {
+  return {
+      "M2",
+      {xl, yl, xh, yh}
+  };
+}
 }  // namespace
 TEST(RoutingRules, RectangleWidthAreaSizeAndManufacturingGrid) {
   auto tech = technology();
@@ -39,25 +46,94 @@ TEST(RoutingRules, SpacingTouchRangeAndConservativeCorners) {
   EXPECT_TRUE(check_metal_spacing(tech, 1000, a, metal(0, 36, 100, 54)).legal);
   EXPECT_FALSE(check_metal_spacing(tech, 1000, a, metal(117, 35, 200, 53)).legal);
   EXPECT_TRUE(check_metal_spacing(tech, 1000, a, metal(118, 35, 200, 53)).legal);
-  tech.layers["M2"].rules.spacing.push_back({.030, std::array{.036, .100}, {}});
+  tech.layers["M2"].rules.spacing.push_back({
+      .030,
+      std::array{.036, .100},
+      {}
+  });
   EXPECT_TRUE(check_metal_spacing(tech, 1000, a, metal(0, 36, 100, 54)).legal);
   EXPECT_FALSE(check_metal_spacing(tech, 1000, a, metal(0, 36, 100, 72)).legal);
   EXPECT_TRUE(check_metal_spacing(tech, 1000, a, metal(0, 48, 100, 84)).legal);
 }
+TEST(RoutingRules, ExactCappedSourceContourPreservesRealSpacingAndExposedEnds) {
+  auto tech                                              = technology();
+  tech.layers["M2"].rules.properties["LEF58_EOLKEEPOUT"] = {"EOLKEEPOUT .01825 EXTENSION 0 0 .031 ;"};
+  Floorplan frame;
+  frame.dbu = 1000;
+  const Signal_metal_rules rules(tech, frame);
+  // Exact translated DFF QN contour: 18-wide stem, 50-wide outer caps.
+  const auto               stem = metal(44, 27, 62, 243), rail = metal(-100, 261, 200, 279);
+  std::vector<Shape>       pin{stem, metal(12, 225, 62, 243), metal(12, 27, 62, 45)};
+  ASSERT_EQ(rules.spacing(stem, rail).reason, "LEF58 EOL keepout");
+  for (const auto& piece : pin) {
+    EXPECT_TRUE(rules.spacing_with_union(piece, rail, pin).legal);
+    EXPECT_TRUE(rules.spacing_with_union(rail, piece, {}, pin).legal);
+  }
+  EXPECT_FALSE(rules.spacing_with_union(stem, metal(-100, 260, 200, 278), pin).legal);
+  EXPECT_FALSE(rules.spacing_with_union(stem, rail, std::span<const Shape>(&stem, 1)).legal);
+  EXPECT_FALSE(rules.spacing_with_union(stem, metal(-100, 240, 200, 258), pin).legal);
+  auto missing            = pin;
+  missing.front().rect.xh = 61;
+  EXPECT_EQ(rules.spacing_with_union(stem, rail, missing).reason, "invalid native metal union context");
+  auto foreign_layer     = pin;
+  foreign_layer[1].layer = "M3";
+  EXPECT_FALSE(rules.spacing_with_union(stem, rail, foreign_layer).legal);
+  // Merely touching at a corner cannot supply a cap across the stem's end.
+  const std::vector<Shape> corner{stem, metal(62, 243, 112, 261)};
+  EXPECT_FALSE(rules.spacing_with_union(stem, rail, corner).legal);
+  // Split cap pieces have exactly the same contour, independent of ordering.
+  pin = {stem, metal(12, 225, 37, 243), metal(37, 225, 62, 243), metal(12, 27, 62, 45)};
+  for (int order = 0; order != 2; ++order) {
+    for (const auto& piece : pin) {
+      EXPECT_TRUE(rules.spacing_with_union(piece, rail, pin).legal);
+    }
+    std::reverse(pin.begin(), pin.end());
+  }
+}
+
+TEST(RoutingRules, UnionContourRetainsPartialEndsNotchesAndTrueCapEnds) {
+  auto tech                                              = technology();
+  tech.layers["M2"].rules.properties["LEF58_EOLKEEPOUT"] = {"EOLKEEPOUT .025 EXTENSION 0 0 .040 ;"};
+  Floorplan frame;
+  frame.dbu = 1000;
+  const Signal_metal_rules rules(tech, frame);
+  const auto               stem = metal(0, 0, 20, 100);
+  // A cap over only half the stem leaves a real 10-wide exposed end.
+  const std::vector<Shape> partial{stem, metal(-30, 100, 10, 120)};
+  EXPECT_FALSE(rules.spacing_with_union(stem, metal(15, 130, 45, 150), partial).legal);
+  // The outward-open notch remains an exposed inner boundary, not a hull.
+  const std::vector<Shape> notch{metal(0, 0, 40, 100), metal(60, 0, 100, 100), metal(0, 0, 100, 20)};
+  EXPECT_FALSE(rules.spacing_with_union(notch.back(), metal(40, 39, 60, 59), notch).legal);
+  // A true narrow cap end is still checked even though the stem end is hidden.
+  const std::vector<Shape> cap{stem, metal(-30, 100, 50, 120)};
+  EXPECT_FALSE(rules.spacing_with_union(cap.back(), metal(80, 100, 110, 120), cap).legal);
+}
 TEST(RoutingRules, ParallelRunTableAndConditionalEolBound) {
   auto  tech  = technology();
   auto& rules = tech.layers["M2"].rules;
-  rules.parallel.push_back({{0, .036}, {0, .100}, {{.018, .020}, {.024, .032}}});
+  rules.parallel.push_back({
+      {           0,         .036},
+      {           0,         .100},
+      {{.018, .020}, {.024, .032}}
+  });
   EXPECT_TRUE(check_metal_spacing(tech, 1000, metal(0, 0, 99, 36), metal(0, 60, 99, 96)).legal);
   EXPECT_FALSE(check_metal_spacing(tech, 1000, metal(0, 0, 100, 36), metal(0, 60, 100, 96)).legal);
   EXPECT_TRUE(check_metal_spacing(tech, 1000, metal(0, 0, 100, 36), metal(0, 68, 100, 104)).legal);
-  rules.spacing.push_back({.040, {}, Eol_spacing{.025, .020, std::array{.045, .020}, false}});
+  rules.spacing.push_back({
+      .040,
+      {},
+      Eol_spacing{.025, .020, std::array{.045, .020}, false}
+  });
   EXPECT_FALSE(check_metal_spacing(tech, 1000, metal(0, 0, 100, 18), metal(0, 62, 100, 80)).legal);
   EXPECT_TRUE(check_metal_spacing(tech, 1000, metal(0, 0, 100, 18), metal(0, 63, 100, 81)).legal);
 }
 TEST(RoutingRules, EolWithinDistanceCannotBeIgnoredAtDiagonalSeparation) {
   auto tech = technology();
-  tech.layers["M2"].rules.spacing.push_back({.018, {}, Eol_spacing{.025, .040, {}, false}});
+  tech.layers["M2"].rules.spacing.push_back({
+      .018,
+      {},
+      Eol_spacing{.025, .040, {}, false}
+  });
   const auto a = metal(0, 0, 100, 18);
   EXPECT_FALSE(check_metal_spacing(tech, 1000, a, metal(130, 35, 230, 53)).legal);
   EXPECT_TRUE(check_metal_spacing(tech, 1000, a, metal(140, 35, 240, 53)).legal);
@@ -72,29 +148,37 @@ TEST(RoutingRules, UnsupportedOrMalformedRulesFailClosed) {
   tech.layers["M2"].rules.min_step.push_back({.010});
   EXPECT_FALSE(check_metal_rectangle(tech, 1000, a).legal);
   tech = technology();
-  tech.layers["M2"].rules.parallel.push_back({{0}, {0, .1}, {{.018}}});
+  tech.layers["M2"].rules.parallel.push_back({
+      {0},
+      {0, .1},
+      {{.018}}
+  });
   EXPECT_FALSE(check_metal_spacing(tech, 1000, a, b).legal);
   EXPECT_FALSE(check_metal_rectangle(tech, 0, a).legal);
   EXPECT_FALSE(check_metal_rectangle(tech, 1000, metal(.5, 0, 100, 18)).legal);
   EXPECT_FALSE(check_metal_spacing(tech, 1000, a, {"M3", b.rect}).legal);
 }
 TEST(RoutingRules, CompiledAsap7ExtensionsRequireExplicitTracksAndWidths) {
-  auto  tech      = technology();
-  auto& layer     = tech.layers["M2"];
-  layer.direction = "HORIZONTAL";
-  layer.rules.properties
-      = {{"LEF58_SPACING", {"SPACING .018 ENDOFLINE .025 WITHIN .02 ENDTOEND .031 PARALLELEDGE .025 WITHIN .02 ;"}},
-         {"LEF58_EOLKEEPOUT", {"EOLKEEPOUT .025 EXTENSION 0 .0125 .031 CORNERONLY ;"}},
-         {"LEF58_CORNERSPACING", {"CORNERSPACING CONVEXCORNER WIDTH 0 SPACING .02 ;"}},
-         {"LEF58_WIDTHTABLE", {"WIDTHTABLE .018 .09 .162 ;"}},
-         {"LEF58_PITCH", {"PITCH .036 FIRSTLASTPITCH .045 ;"}},
-         {"LEF58_RIGHTWAYONGRIDONLY", {"RIGHTWAYONGRIDONLY ;"}},
-         {"LEF58_RECTONLY", {"RECTONLY ;"}}};
+  auto  tech             = technology();
+  auto& layer            = tech.layers["M2"];
+  layer.direction        = "HORIZONTAL";
+  layer.rules.properties = {
+      {           "LEF58_SPACING", {"SPACING .018 ENDOFLINE .025 WITHIN .02 ENDTOEND .031 PARALLELEDGE .025 WITHIN .02 ;"}},
+      {        "LEF58_EOLKEEPOUT",                                 {"EOLKEEPOUT .025 EXTENSION 0 .0125 .031 CORNERONLY ;"}},
+      {     "LEF58_CORNERSPACING",                                    {"CORNERSPACING CONVEXCORNER WIDTH 0 SPACING .02 ;"}},
+      {        "LEF58_WIDTHTABLE",                                                          {"WIDTHTABLE .018 .09 .162 ;"}},
+      {             "LEF58_PITCH",                                                    {"PITCH .036 FIRSTLASTPITCH .045 ;"}},
+      {"LEF58_RIGHTWAYONGRIDONLY",                                                                {"RIGHTWAYONGRIDONLY ;"}},
+      {          "LEF58_RECTONLY",                                                                          {"RECTONLY ;"}}
+  };
   for (const auto& [name, text] : layer.rules.properties) {
     layer.rules.unsupported.insert("PROPERTY " + name);
   }
   Floorplan fp;
-  fp.tracks = {{"Y", "M2", 9, 2, 270}, {"Y", "M2", 45, 2, 270}};
+  fp.tracks = {
+      {"Y", "M2",  9, 2, 270},
+      {"Y", "M2", 45, 2, 270}
+  };
   const Signal_metal_rules compiled(tech, fp);
   EXPECT_TRUE(compiled.rectangle(metal(0, 0, 100, 18)).legal);
   EXPECT_TRUE(compiled.rectangle(metal(0, 36, 100, 54)).legal);
@@ -114,7 +198,9 @@ TEST(RoutingRules, CompiledAsap7ExtensionsRequireExplicitTracksAndWidths) {
   EXPECT_FALSE(check_metal_rectangle(tech, 1000, metal(0, 0, 100, 18)).legal);
   fp.tracks.clear();
   EXPECT_FALSE(Signal_metal_rules(tech, fp).rectangle(metal(0, 0, 100, 18)).legal);
-  fp.tracks = {{"Y", "M2", 9, 2, 270, 1}};
+  fp.tracks = {
+      {"Y", "M2", 9, 2, 270, 1}
+  };
   EXPECT_FALSE(Signal_metal_rules(tech, fp).rectangle(metal(0, 0, 100, 18)).legal);
 }
 TEST(RoutingRules, UnknownLef58SuffixCannotBeSilentlyAccepted) {
@@ -125,7 +211,9 @@ TEST(RoutingRules, UnknownLef58SuffixCannotBeSilentlyAccepted) {
     rules.properties["LEF58_RECTONLY"] = {text};
     EXPECT_FALSE(Signal_metal_rules(tech, {}).rectangle(shape).legal);
   }
-  rules.properties = {{"LEF58_WIDTHTABLE", {"WIDTHTABLE .018 .018 ;"}}};
+  rules.properties = {
+      {"LEF58_WIDTHTABLE", {"WIDTHTABLE .018 .018 ;"}}
+  };
   EXPECT_FALSE(Signal_metal_rules(tech, {}).rectangle(shape).legal);
 }
 TEST(RoutingRules, WidthCandidatesComeFromValidatedTechnology) {
@@ -139,7 +227,9 @@ TEST(RoutingRules, WidthCandidatesComeFromValidatedTechnology) {
 }
 TEST(RoutingRules, QueryClearanceIncludesAllTableEntriesAndFailsForUnknownRules) {
   auto tech                        = technology();
-  tech.layers["M2"].rules.parallel = {{{0, .036}, {0, .100}, {{.018, .020}, {.024, .032}}}};
+  tech.layers["M2"].rules.parallel = {
+      {{0, .036}, {0, .100}, {{.018, .020}, {.024, .032}}}
+  };
   EXPECT_EQ(Signal_metal_rules(tech, {}).clearance("M2"), 32);
   tech.layers["M2"].rules.properties["LEF58_EOLKEEPOUT"] = {"EOLKEEPOUT .025 EXTENSION 0 .0125 .031 CORNERONLY ;"};
   EXPECT_EQ(Signal_metal_rules(tech, {}).clearance("M2"), 69);
@@ -147,8 +237,10 @@ TEST(RoutingRules, QueryClearanceIncludesAllTableEntriesAndFailsForUnknownRules)
   EXPECT_FALSE(Signal_metal_rules(tech, {}).clearance("M2"));
 }
 TEST(RoutingRules, EolKeepoutUsesBackwardSideForwardOrderAndBothDirections) {
-  auto tech                                              = technology();
-  tech.layers["M2"].rules.spacing                        = {{.001, {}, {}}};
+  auto tech                       = technology();
+  tech.layers["M2"].rules.spacing = {
+      {.001, {}, {}}
+  };
   tech.layers["M2"].rules.properties["LEF58_EOLKEEPOUT"] = {"EOLKEEPOUT .025 EXTENSION .010 .005 .020 CORNERONLY ;"};
   const Signal_metal_rules rules(tech, {});
   const auto               a = metal(0, 0, 100, 18), b = metal(95, 22, 130, 40), c = metal(95, 23, 130, 41);

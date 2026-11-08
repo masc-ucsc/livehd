@@ -882,7 +882,18 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      Synth_set_option::Kind::file,
      "minimum clear spacing between two macro bodies: auto = largest minimum metal spacing of the layers macros "
      "obstruct (at least one manufacturing grid), or X / X,Y microns rounded up only to the manufacturing grid; "
-     "macro pairs keep max(channel, both halos)"},
+     "macro pairs keep max(channel, both halos); macro.pdn may raise it"},
+    {"place.macro.pdn",
+     "auto",
+     Synth_set_option::Kind::file,
+     "power-grid aware macro spacing from the technology profile's PDN strategy: gap = channel at least the "
+     "any-phase strap requirement, align = the aligned requirement with macro edges snapped onto the strap lattice "
+     "(when the frame admits it), off = metal-spacing channel only; gap/align are strict (legalization failure is an "
+     "error); auto = gap, degrading to align then off when the macros cannot be legalized (QoR macro_pdn.used_level)"},
+    {"place.macro.pdn_origin",
+     "core",
+     Synth_set_option::Kind::file,
+     "strap grid origin for macro.pdn alignment: core (row core lower-left) or X,Y microns in the placement frame"},
     {"place.macro.edge_snap",
      "off",
      Synth_set_option::Kind::file,
@@ -906,7 +917,29 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      Synth_set_option::Kind::file,
      "optional final-cell clearance around fixed macros: H or X,Y microns; empty inherits place.halo; "
      "each axis must not exceed place.halo; macro placement and macro-to-macro spacing retain place.halo"},
-    {"place.fp", "false", Synth_set_option::Kind::boolean, "repelling-centroid floorplan GP, centroid snap and macro refinement"},
+    {"place.fp",
+     "auto",
+     Synth_set_option::Kind::file,
+     "true|false|auto: repelling-centroid floorplan GP, centroid snap and macro refinement; auto (default) runs it only "
+     "when repeated hierarchy holds at least place.fp.auto_share of the flop+memory area; false is the legacy default"},
+    {"place.fp.auto_share",
+     "0.2",
+     Synth_set_option::Kind::file,
+     "fp=auto: minimum share of flop+memory area inside one group of matching sibling copies (0..1)"},
+    {"place.fp.auto_min_copies", "2", Synth_set_option::Kind::integer, "fp=auto: minimum matching copies in a group (at least 2)"},
+    {"place.fp.auto_min_copy_share",
+     "0.02",
+     Synth_set_option::Kind::file,
+     "fp=auto: each copy's own minimum share of flop+memory area, so tiny repeated helpers never add up (0..1)"},
+    {"place.fp.auto_candidates",
+     "true",
+     Synth_set_option::Kind::boolean,
+     "fp=auto: count only repeated groups the floorplan stage can center (more than fp.min_macros memories per copy and "
+     "fp.min_copies copies)"},
+    {"place.fp.auto_tolerance",
+     "0.05",
+     Synth_set_option::Kind::file,
+     "fp=auto: relative flop-count and memory-area mismatch still matching two copies (0..1)"},
     {"place.final",
      "true",
      Synth_set_option::Kind::boolean,
@@ -1039,10 +1072,11 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
     {"place.macro.anchor.select",
      "edge+random",
      Synth_set_option::Kind::file,
-     "edge+random|all: edge/boundary-array targets (edge_weight) plus a fresh random sample of the rest (random_weight) per "
-     "refresh, or every macro with weight/final_weight (round-4 behavior)"},
-    {"place.macro.anchor.edge_weight", "4", Synth_set_option::Kind::file, "select=edge+random: edge anchor weight 0..64"},
-    {"place.macro.anchor.random_weight", "1", Synth_set_option::Kind::file, "select=edge+random: random anchor weight 0..64"},
+     "edge+random|edge+stable|all: edge/boundary-array targets (edge_weight) plus a fresh random sample of the rest "
+     "(random_weight) per refresh; edge+stable: the rest are anchored (random_weight) only while their legal target holds "
+     "between refreshes; all: every macro with weight/final_weight (round-4 behavior)"},
+    {"place.macro.anchor.edge_weight", "4", Synth_set_option::Kind::file, "select=edge+random|edge+stable: edge anchor weight 0..64"},
+    {"place.macro.anchor.random_weight", "1", Synth_set_option::Kind::file, "select=edge+random|edge+stable: weak (random or stable) anchor weight 0..64"},
     {"place.macro.anchor.random_fraction",
      "0.25",
      Synth_set_option::Kind::file,

@@ -21,6 +21,7 @@
 #include "dreamplace/native/floorplan.hpp"
 #include "dreamplace/native/macro/topology.hpp"
 #include "dreamplace/native/placement.hpp"
+#include "fp_repetition.hpp"
 #include "hhds/graph.hpp"
 #include "inou/lefdef/physical.hpp"
 #include "inou/lefdef/row_access.hpp"
@@ -156,6 +157,12 @@ struct Options {
   Macro_anchor_options                  macro_anchor;
   DreamPlace::native::MagnetOptions macro_magnet;
   bool                              fp_place = false, fp_snap_enabled = true;
+  // synth.place.fp=auto (the default): when fp_place is false, place() sets it
+  // from detect_fp_repetition on the source netlist (fp_repetition.hpp) and
+  // reports it as qor.json "fp_auto". fp_place=true forces the floorplan stage;
+  // a forced off needs fp_place = fp_auto = false.
+  bool                                  fp_auto = true;
+  Fp_rep_options                        fp_auto_options;
   bool                              fp_colors           = false;  // eligible color leaves; never independently centroid-snapped
   std::string                       fp_color_source     = "synthesis";
   bool                              analyze_colors_only = false;  // diagnostic: no GP/LG/STA or cache
@@ -357,6 +364,18 @@ struct Options {
   // grid only. Unset (auto) derives it from the technology: the largest minimum metal spacing of the routing layers
   // the macros obstruct, at least one manufacturing grid. Two macros keep max(channel, 2 * halo) per axis.
   std::optional<std::pair<double, double>> macro_channel;
+  // macro.pdn: power-grid awareness of macro spacing, from the technology profile's PDN strategy (the `pg` profile
+  // when one is named, else the LEF-detected one; none: no effect). "gap": the channel per axis is at least the
+  // strategy's any-phase requirement (power_grid_rules.hpp), buildable wherever the macros land; "auto": gap,
+  // degrading to align and then off when macro legalization fails or the core cannot hold the channel (legality
+  // then requires only the metal channel; QoR macro_pdn.attempts records the ladder); "align":
+  // at least the aligned requirement plus a tenth of the feed strap pitch, and movable macro edges snap onto the
+  // strap lattice when the frame admits it (else the routing-track alignment alone, counted in QoR); "off": the
+  // previous behaviour (metal-spacing channel only).
+  std::string                              macro_pdn = "auto";
+  // macro.pdn_origin: strap grid origin {x, y} microns for the lattice; unset: the row core's lower-left corner
+  // (where pdngen and the native generator start the core grid).
+  std::optional<std::pair<double, double>> macro_pdn_origin;
   // macro.edge_snap: after native macro legalization, slide a movable macro toward its nearest core edge when the
   // clear sliver between it and that edge (or an edge-anchored macro) is at most {x, y} microns. Unset (`off`)
   // disables it (the default); a negative axis is `auto`: one tenth of the core extent on that axis (OpenROAD mpl's
@@ -482,6 +501,7 @@ struct Result {
   std::optional<double>                            gp_density_weight;
   bool                                             boundary_refined = false;  // the region boundary refinement ran
   std::string                                      qor;
+  std::string                                      fp_auto;  // fp=auto decision (JSON); empty otherwise
   physical::Floorplan                              floorplan;
   Prects_library                                   prects;
   // Selected GP measurement, before macro snapping. Resynthesis can harvest

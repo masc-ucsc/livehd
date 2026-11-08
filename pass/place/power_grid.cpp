@@ -3,11 +3,13 @@
 
 #include <algorithm>
 #include <cmath>
+#include <format>
 #include <limits>
 #include <stdexcept>
 #include <tuple>
 
 #include "inou/lefdef/routing_rules.hpp"
+#include "power_grid_rules.hpp"
 
 namespace livehd::placement {
 namespace {
@@ -98,6 +100,9 @@ Power_grid_plan plan_power_grid(const ph::Technology& tech, const ph::Floorplan&
   if (fp.dbu <= 0 || fp.rows.empty() || profile.followpin_layers.empty() || profile.nets[0].empty() || profile.nets[1].empty()
       || profile.nets[0] == profile.nets[1] || !profile.unsupported.empty()) {
     throw std::invalid_argument("invalid or unsupported native power-grid profile/frame");
+  }
+  if (!profile.rings.empty()) {
+    throw std::invalid_argument("the native power-grid generator does not build core rings");
   }
   require_rect(fp.die);
   Power_grid_plan plan;
@@ -195,21 +200,52 @@ Power_grid_plan plan_power_grid(const ph::Technology& tech, const ph::Floorplan&
     boundary.yh = std::max(boundary.yh, metal.rect.yh);
   }
   std::vector<std::pair<ph::Rect, std::set<std::string>>> obstacles;
-  const auto                                              halo = dimension(profile.macro_halo, fp.dbu);
-  if (halo < 0) {
-    throw std::invalid_argument("negative power-grid macro halo");
-  }
+  // One periodic strap family over [lo, hi] along its pitch axis; `place` receives the net index and the strap
+  // centerline (DBU) of every strap whose complete width lies inside [min, max].
+  const auto periodic = [&](const Pg_stripe& stripe, int64_t lo, int64_t hi, double min, double max, const auto& place) {
+    const auto width = dimension(stripe.width, fp.dbu), spacing = dimension(stripe.spacing, fp.dbu);
+    const auto pitch = dimension(stripe.pitch, fp.dbu), offset = dimension(stripe.offset, fp.dbu);
+    if (width <= 0 || width % 2 || spacing < 0 || pitch < 2 * width + spacing || offset < 0) {
+      throw std::invalid_argument("invalid power-grid stripe dimensions");
+    }
+    if ((hi - lo) / pitch > 1000000) {
+      throw std::invalid_argument("oversized power-grid stripe plan");
+    }
+    for (int64_t base = lo + offset; base <= hi; base += pitch) {
+      for (int index = 0; index < 2; ++index) {
+        const auto center = base + index * (width + spacing);
+        if (center > hi || center - width / 2 < min || center + width / 2 > max) {
+          continue;
+        }
+        place(profile.stripes_start_with_power ? index : 1 - index, center, width);
+      }
+    }
+  };
+  const auto direction = [&](const std::string& name) {
+    const auto layer = tech.layers.find(name);
+    if (layer == tech.layers.end() || (layer->second.direction != "HORIZONTAL" && layer->second.direction != "VERTICAL")) {
+      throw std::invalid_argument("unknown power-grid stripe layer/direction: " + name);
+    }
+    return layer->second.direction == "VERTICAL";
+  };
   for (const auto& cell : fp.components) {
     const auto master = tech.macros.find(cell.macro);
     if (master == tech.macros.end()) {
       throw std::invalid_argument("unknown power-grid component master: " + cell.macro);
     }
-    if (!master->second.klass.starts_with("BLOCK") && !master->second.virtual_proxy) {
+    // A soft block (LEF CLASS BLOCK SOFT) is an area of standard cells: it
+    // stays movable through final placement and the core grid passes over it.
+    if ((!master->second.klass.starts_with("BLOCK") && !master->second.virtual_proxy) || ph::soft_block(master->second)) {
       continue;
     }
     const auto& loc = cell.place;
     if (loc.status != ph::Status::LOCKED && loc.status != ph::Status::FIXED) {
       throw std::invalid_argument("native power grid requires fixed macro locations");
+    }
+    const auto* grid = profile.macro_grid(loc.orientation);
+    const auto  halo = dimension(grid ? grid->halo : 0, fp.dbu);
+    if (halo < 0) {
+      throw std::invalid_argument("negative power-grid macro halo");
     }
     auto width = dimension(master->second.width, fp.dbu), height = dimension(master->second.height, fp.dbu);
     if (ph::swaps_axes(loc.orientation)) {
@@ -233,68 +269,100 @@ Power_grid_plan plan_power_grid(const ph::Technology& tech, const ph::Floorplan&
       }
     }
     obstacles.emplace_back(rect, std::move(layers));
-  }
-  for (const auto& stripe : profile.stripes) {
-    const auto layer = tech.layers.find(stripe.layer);
-    if (layer == tech.layers.end() || (layer->second.direction != "HORIZONTAL" && layer->second.direction != "VERTICAL")) {
-      throw std::invalid_argument("unknown power-grid stripe layer/direction: " + stripe.layer);
+    if (!grid || grid->stripes.empty() || master->second.virtual_proxy) {
+      continue;
     }
-    const bool vertical = layer->second.direction == "VERTICAL";
-    const auto width = dimension(stripe.width, fp.dbu), spacing = dimension(stripe.spacing, fp.dbu);
-    const auto pitch = dimension(stripe.pitch, fp.dbu), offset = dimension(stripe.offset, fp.dbu);
-    if (width <= 0 || width % 2 || spacing < 0 || pitch < 2 * width + spacing || offset < 0) {
-      throw std::invalid_argument("invalid power-grid stripe dimensions");
-    }
-    const auto lo = integer(vertical ? plan.core.xl : plan.core.yl), hi = integer(vertical ? plan.core.xh : plan.core.yh);
-    if ((hi - lo) / pitch > 1000000) {
-      throw std::invalid_argument("oversized power-grid stripe plan");
-    }
-    for (int64_t base = lo + offset; base <= hi; base += pitch) {
-      for (int index = 0; index < 2; ++index) {
-        const auto center = base + index * (width + spacing);
-        if (center > hi || center - width / 2 < (vertical ? fp.die.xl : fp.die.yl)
-            || center + width / 2 > (vertical ? fp.die.xh : fp.die.yh)) {
-          continue;
-        }
-        const auto                             net  = profile.stripes_start_with_power ? index : 1 - index;
-        const ph::Rect                         rect = vertical
-                                                          ? ph::Rect{double(center - width / 2), boundary.yl, double(center + width / 2), boundary.yh}
-                                                          : ph::Rect{plan.core.xl, double(center - width / 2), plan.core.xh, double(center + width / 2)};
-        std::vector<std::pair<double, double>> spans{{vertical ? rect.yl : rect.xl, vertical ? rect.yh : rect.xh}};
-        for (const auto& [obstacle, blocked_layers] : obstacles) {
-          if (!blocked_layers.contains(stripe.layer) || !rect.overlaps(obstacle)) {
+    // Macro-grid straps: pitch origin at the placed body's lower-left corner; length over the PG pins' bounding
+    // box (or the body with over_boundary), as pdngen's instance grids.
+    const ph::Rect body{double(loc.x), double(loc.y), double(loc.x + width), double(loc.y + height)};
+    auto           extent = body;
+    if (!grid->over_boundary) {
+      extent = {body.xh, body.yh, body.xl, body.yl};
+      for (const auto& names : profile.pin_names) {
+        for (const auto& pin_name : names) {
+          const auto pin = master->second.pins.find(pin_name);
+          if (pin == master->second.pins.end()) {
             continue;
           }
-          const auto                             a = vertical ? obstacle.yl : obstacle.xl, b = vertical ? obstacle.yh : obstacle.xh;
-          std::vector<std::pair<double, double>> next;
-          for (const auto& [start, end] : spans) {
-            if (b <= start || a >= end) {
-              next.emplace_back(start, end);
-            } else {
-              if (a > start) {
-                next.emplace_back(start, a);
-              }
-              if (b < end) {
-                next.emplace_back(b, end);
-              }
-            }
+          for (const auto& shape : pin->second.shapes) {
+            const auto local = ph::orient_rect(shape.rect.translated(master->second.origin_x, master->second.origin_y),
+                                               master->second.width,
+                                               master->second.height,
+                                               loc.orientation);
+            extent           = extent.hull({double(loc.x) + std::llround(local.xl * fp.dbu),
+                                            double(loc.y) + std::llround(local.yl * fp.dbu),
+                                            double(loc.x) + std::llround(local.xh * fp.dbu),
+                                            double(loc.y) + std::llround(local.yh * fp.dbu)});
           }
-          spans = std::move(next);
-        }
-        for (const auto& [start, end] : spans) {
-          auto clipped = rect;
-          if (vertical) {
-            clipped.yl = start;
-            clipped.yh = end;
-          } else {
-            clipped.xl = start;
-            clipped.xh = end;
-          }
-          plan.metal.push_back({profile.nets[net], stripe.layer, clipped, false});
-          ++plan.stripe_count[stripe.layer];
         }
       }
+      if (extent.empty()) {
+        throw std::invalid_argument("macro grid requires PG pins: " + cell.name);
+      }
     }
+    for (const auto& stripe : grid->stripes) {
+      const bool vertical = direction(stripe.layer);
+      periodic(stripe,
+               integer(vertical ? body.xl : body.yl),
+               integer(vertical ? body.xh : body.yh),
+               vertical ? fp.die.xl : fp.die.yl,
+               vertical ? fp.die.xh : fp.die.yh,
+               [&](int net, int64_t center, int64_t w) {
+                 const ph::Rect r = vertical ? ph::Rect{double(center - w / 2), extent.yl, double(center + w / 2), extent.yh}
+                                             : ph::Rect{extent.xl, double(center - w / 2), extent.xh, double(center + w / 2)};
+                 plan.metal.push_back({profile.nets[net], stripe.layer, r, false, true});
+                 ++plan.stripe_count[stripe.layer];
+               });
+    }
+  }
+  for (const auto& stripe : profile.stripes) {
+    const bool vertical = direction(stripe.layer);
+    const auto lo = integer(vertical ? plan.core.xl : plan.core.yl), hi = integer(vertical ? plan.core.xh : plan.core.yh);
+    periodic(stripe,
+             lo,
+             hi,
+             vertical ? fp.die.xl : fp.die.yl,
+             vertical ? fp.die.xh : fp.die.yh,
+             [&](int net, int64_t center, int64_t width) {
+               const ph::Rect rect
+                   = vertical ? ph::Rect{double(center - width / 2), boundary.yl, double(center + width / 2), boundary.yh}
+                              : ph::Rect{plan.core.xl, double(center - width / 2), plan.core.xh, double(center + width / 2)};
+               std::vector<std::pair<double, double>> spans{
+                   {vertical ? rect.yl : rect.xl, vertical ? rect.yh : rect.xh}
+               };
+               for (const auto& [obstacle, blocked_layers] : obstacles) {
+                 if (!blocked_layers.contains(stripe.layer) || !rect.overlaps(obstacle)) {
+                   continue;
+                 }
+                 const auto a = vertical ? obstacle.yl : obstacle.xl, b = vertical ? obstacle.yh : obstacle.xh;
+                 std::vector<std::pair<double, double>> next;
+                 for (const auto& [start, end] : spans) {
+                   if (b <= start || a >= end) {
+                     next.emplace_back(start, end);
+                   } else {
+                     if (a > start) {
+                       next.emplace_back(start, a);
+                     }
+                     if (b < end) {
+                       next.emplace_back(b, end);
+                     }
+                   }
+                 }
+                 spans = std::move(next);
+               }
+               for (const auto& [start, end] : spans) {
+                 auto clipped = rect;
+                 if (vertical) {
+                   clipped.yl = start;
+                   clipped.yh = end;
+                 } else {
+                   clipped.xl = start;
+                   clipped.xh = end;
+                 }
+                 plan.metal.push_back({profile.nets[net], stripe.layer, clipped, false});
+                 ++plan.stripe_count[stripe.layer];
+               }
+             });
   }
   // Row cuts can leave rail segments between the periodic feeder stripes.
   // Add feeders before channel patches, so a channel cannot silently heal
@@ -309,7 +377,14 @@ Power_grid_plan plan_power_grid(const ph::Technology& tech, const ph::Floorplan&
     if (spec == profile.stripes.end()) {
       continue;
     }
-    const auto width = dimension(spec->width, fp.dbu), spacing = dimension(spec->spacing, fp.dbu);
+    const auto width   = dimension(spec->width, fp.dbu);
+    // Feeder clearance: the strap family's spacing, or the LEF spacing rule when that is tighter (pdngen's default
+    // spacing spreads the nets over the pitch and is no clearance requirement); pg_feeder_spacing in DBU, which
+    // pg_macro_rules reserves in the macro channel.
+    auto       spacing = dimension(spec->spacing, fp.dbu);
+    if (const auto lef = pg_layer_spacing(tech.layers.at(spec->layer), spec->width); lef > 0) {
+      spacing = std::min(spacing, static_cast<int64_t>(std::ceil(lef * fp.dbu - 1e-6)));
+    }
     const auto grid = tech.manufacturing_grid == 0 ? 1 : dimension(tech.manufacturing_grid, fp.dbu);
     if (grid <= 0) {
       throw std::invalid_argument("invalid PG manufacturing grid");
@@ -355,10 +430,21 @@ Power_grid_plan plan_power_grid(const ph::Technology& tech, const ph::Floorplan&
       });
       bool connected = false;
       for (auto x : ordered) {
-        const ph::Rect rect{double(x - width / 2), boundary.yl, double(x + width / 2), boundary.yh};
-        bool           blocked = false;
+        // The feeder spans the obstacle-free stretch of its column around the rail (the whole core height when
+        // nothing blocks the column), as a core strap clipped at macro halos.
+        ph::Rect rect{double(x - width / 2), boundary.yl, double(x + width / 2), boundary.yh};
+        bool     blocked = false;
         for (const auto& [obstacle, layers] : obstacles) {
-          if (layers.contains(pair[1]) && rect.overlaps(obstacle)) {
+          if (!layers.contains(pair[1]) || !rect.overlaps(obstacle)) {
+            continue;
+          }
+          // A rail on a row edge at a halo boundary is half inside it; the feeder still covers that rail.
+          const auto rail_y = (rail.rect.yl + rail.rect.yh) / 2;
+          if (obstacle.yh <= rail_y) {
+            rect.yl = std::max(rect.yl, std::min(obstacle.yh, rail.rect.yl));
+          } else if (obstacle.yl >= rail_y) {
+            rect.yh = std::min(rect.yh, std::max(obstacle.yl, rail.rect.yh));
+          } else {
             blocked = true;
             break;
           }
@@ -367,7 +453,7 @@ Power_grid_plan plan_power_grid(const ph::Technology& tech, const ph::Floorplan&
           if (blocked) {
             break;
           }
-          if (metal.layer != pair[1]) {
+          if (metal.layer != pair[1] || metal.rect.yh <= rect.yl || metal.rect.yl >= rect.yh) {
             continue;
           }
           const auto gap = std::max(rect.xl - metal.rect.xh, metal.rect.xl - rect.xh);
@@ -384,7 +470,13 @@ Power_grid_plan plan_power_grid(const ph::Technology& tech, const ph::Floorplan&
         break;
       }
       if (!connected) {
-        throw std::invalid_argument("cannot feed isolated PG rail on " + rail.layer + " for " + rail.net);
+        throw std::invalid_argument(std::format("cannot feed isolated PG rail on {} for {} at ({}, {}) - ({}, {}) DBU",
+                                                rail.layer,
+                                                rail.net,
+                                                rail.rect.xl,
+                                                rail.rect.yl,
+                                                rail.rect.xh,
+                                                rail.rect.yh));
       }
     }
   }

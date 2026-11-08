@@ -9,6 +9,8 @@
 #include <set>
 #include <stdexcept>
 
+#include "pass/place/handoff_rows.hpp"
+#include "pass/place/power_grid_rules.hpp"
 #include "rapidjson/ostreamwrapper.h"
 #include "rapidjson/writer.h"
 
@@ -17,7 +19,8 @@ int main(int argc, char** argv) {
     std::vector<std::string>                   lefs;
     std::vector<livehd::placement::Pg_channel> channels;
     std::string                                def, output, def_output, report_output, profile = "auto";
-    bool                                       reserve_signals = false;
+    bool                                       reserve_signals = false, tolerate_overlap = false;
+    double                                     cut_rows = -1;  // microns; negative keeps the DEF rows
     for (int i = 1; i < argc; ++i) {
       const std::string key = argv[i];
       if (i + 1 == argc) {
@@ -45,6 +48,17 @@ int main(int argc, char** argv) {
           throw std::invalid_argument("--reserve-signals requires true or false");
         }
         reserve_signals = value == "true";
+      } else if (key == "--tolerate-macro-pin-overlap") {
+        if (value != "true" && value != "false") {
+          throw std::invalid_argument("--tolerate-macro-pin-overlap requires true or false");
+        }
+        tolerate_overlap = value == "true";
+      } else if (key == "--cut-rows") {
+        // Cut the rows around BLOCK macros by this halo (microns), as tapcell/cut_rows before pdngen.
+        cut_rows = std::stod(value);
+        if (!(cut_rows >= 0)) {
+          throw std::invalid_argument("--cut-rows requires a nonnegative halo in microns");
+        }
       } else if (key == "--profile") {
         profile = value;
       } else {
@@ -72,9 +86,15 @@ int main(int argc, char** argv) {
       }
     }
     const auto tech = livehd::physical::read_lef(lefs);
-    const auto fp   = livehd::physical::read_def(def);
+    auto       fp   = livehd::physical::read_def(def);
+    if (cut_rows >= 0) {
+      const auto halo = std::llround(cut_rows * fp.dbu);
+      const auto site = fp.rows.empty() ? int64_t{1} : fp.rows.front().step;
+      fp.rows         = livehd::placement::cut_macro_rows(fp, tech, halo, halo, 2 * site);
+    }
     auto       p    = livehd::placement::power_grid_profile(profile, tech);
     p.channels      = channels;
+    p.tolerate_macro_pin_overlap = tolerate_overlap;
     if (reserve_signals) {
       p = livehd::placement::reserve_power_grid_channels(tech, fp, p);
     }
@@ -114,6 +134,14 @@ int main(int argc, char** argv) {
     for (const auto& [layer, length] : plan.channel_removed_length_um) {
       w.Key(layer.c_str());
       w.Double(length);
+    }
+    w.EndObject();
+    // pdngen's channel condition: strap segments with no upward feed (what PDN-0178 reports).
+    w.Key("unfed_strap_segments");
+    w.StartObject();
+    for (const auto& [layer, count] : livehd::placement::pg_unfed_strap_segments(plan, p)) {
+      w.Key(layer.c_str());
+      w.Uint64(count);
     }
     w.EndObject();
     w.Key("metal");

@@ -111,6 +111,27 @@ TEST(PowerGridExport, EmitsConnectedLayerPairsWithoutMovingComponents) {
   ph::write_def(output, file.string());
   EXPECT_NO_THROW(ph::verify_def_roundtrip(output, ph::read_def(file.string())));
 }
+// A pinless soft block (CLASS BLOCK SOFT) stays PLACED through final placement as an area of cells: the export, like
+// plan_power_grid, passes over it instead of requiring macro PG pins.
+TEST(PowerGridExport, SoftBlocksNeedNoMacroPgPins) {
+  auto  t     = technology();
+  auto& soft  = t.macros["soft"];
+  soft.klass  = "BLOCK SOFT";
+  soft.width  = .54;
+  soft.height = .54;
+  auto      f = frame();
+  Ann_place loc(3240, 2700, 540, 540);
+  loc.status = ph::Status::PLACED;
+  f.components.push_back({"blob", "soft", loc});
+  const auto    p = profile(t);
+  ph::Floorplan output;
+  ASSERT_NO_THROW(output = make_power_grid(t, f, p));
+  const auto plain = make_power_grid(t, frame(), p);
+  ASSERT_EQ(output.special_nets.size(), plain.special_nets.size());
+  for (size_t i = 0; i < plain.special_nets.size(); ++i) {
+    EXPECT_EQ(output.special_nets[i].wires, plain.special_nets[i].wires);
+  }
+}
 TEST(PowerGridExport, ConnectsFixedMacroPinsWithoutReemittingTheirMetal) {
   auto t = technology();
   t.routing_layers.push_back("M3");
@@ -142,7 +163,9 @@ TEST(PowerGridExport, ConnectsFixedMacroPinsWithoutReemittingTheirMetal) {
   auto p    = profile(t);
   p.stripes = {{"M3", .12, .072, .54, .3}};
   p.connect.push_back({"M2", "M3"});
-  p.macro_connect   = {{{"M2", "M3"}}};
+  p.macro_grids = {
+      {{}, 2, {}, {{{"M2", "M3"}}}}
+  };
   p.pin_layer       = "M3";
   const auto output = make_power_grid(t, f, p);
   EXPECT_EQ(output.components, f.components);

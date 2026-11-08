@@ -28,6 +28,27 @@ TEST(MacroSnap, ScopeAndSizeSurviveFlattening) {
   EXPECT_EQ(original_hierarchy_path("sub_42.top.sub_real.sub_8.ram"), "top.sub_real.ram");
   EXPECT_EQ(original_hierarchy_path("__flat___sub_42.top.__flat___sub_8.ram"), "top.ram");
 }
+TEST(MacroSnap, SlashAndDotSeparateScopes) {
+  // ORFS flattened names keep `/` for the original hierarchy next to `.`.
+  EXPECT_EQ(original_hierarchy_path("ClusterGroup_0_0/GLB_Cluster_inst.bank_3/ram"),
+            "ClusterGroup_0_0.GLB_Cluster_inst.bank_3.ram");
+  EXPECT_EQ(original_hierarchy_path("sub_4/top.__flat___sub_8/ram"), "top.ram");
+  EXPECT_EQ(original_hierarchy_path("pe[1/2].ram"), "pe[1/2].ram");  // brackets never split
+  EXPECT_EQ(original_hierarchy_path("a.b.c"), "a.b.c");
+  auto classes = hierarchy_macro_classes(
+      {
+          "g0/c0.ram",
+          "g0.c1/ram",
+          "g1/c0/ram",
+          "g1.c1.ram"
+  },
+      {{4, 4}, {4, 4}, {4, 4}, {4, 4}},
+      {1, 1, 1, 1},
+      4);
+  EXPECT_EQ(classes[0], classes[1]);  // both single-memory wrappers inherit g0
+  EXPECT_EQ(classes[2], classes[3]);
+  EXPECT_NE(classes[0], classes[2]);
+}
 TEST(MacroSnap, FlatWrapperSiblingsAndNestedBanks) {
   auto classes = hierarchy_macro_classes(
       {

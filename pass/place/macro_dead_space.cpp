@@ -6,12 +6,17 @@
 #include <cctype>
 #include <cmath>
 #include <cstdlib>
+#include <exception>
 #include <limits>
 #include <map>
+#include <memory>
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <tuple>
+
+#include "dreamplace/native/placement.hpp"
 
 namespace livehd::placement {
 namespace {
@@ -702,20 +707,60 @@ Dead_space_collapse_report collapse_dead_space(std::vector<Dead_space_object>& o
       order[k]      = k;
     }
     std::stable_sort(order.begin(), order.end(), [&](size_t a, size_t b) { return bound[a] > bound[b]; });
-    for (const auto k : order) {
-      if (bound[k] < std::max<int64_t>(1, l.min_gain) || (!best.members.empty() && bound[k] < best.gain)) {
-        break;
-      }
+    // The raster measurement of a candidate dominates the run time. Candidates are measured ahead in parallel
+    // blocks on private copies of the frame; the scan below consumes them in the same order and with the same
+    // stopping rule as a serial scan, so the result does not depend on the thread count.
+    const auto measure = [&](size_t k, std::vector<Dead_space_object>& frame) -> int64_t {
       const auto& [members, dx, dy] = candidates[k].key;
-      std::vector<uint8_t> in(objects.size(), 0);
+      std::vector<uint8_t> in(frame.size(), 0);
       for (const auto m : members) {
         in[m] = 1;
       }
-      shift(objects, members, dx, dy);
-      const bool ok = legal_after(objects, in, members, l);
+      shift(frame, members, dx, dy);
+      const bool ok   = legal_after(frame, in, members, l);
+      const auto gain = ok ? base - stranded_area_of(frame, l) : -1;
+      shift(frame, members, -dx, -dy);
+      return gain;
+    };
+    const size_t         threads = static_cast<size_t>(std::max(1, l.threads));
+    std::vector<int64_t> measured(order.size(), 0);
+    size_t               ready = 0;  // order positions [0, ready) are measured
+    for (size_t pos = 0; pos < order.size(); ++pos) {
+      const auto k = order[pos];
+      if (bound[k] < std::max<int64_t>(1, l.min_gain) || (!best.members.empty() && bound[k] < best.gain)) {
+        break;
+      }
+      if (pos >= ready) {
+        const size_t end = std::min(order.size(), pos + threads);
+        if (threads == 1 || end - pos == 1) {
+          measured[pos] = measure(k, objects);
+        } else {
+          std::vector<std::thread>        workers;
+          std::vector<std::exception_ptr> failures(end - pos);
+          for (size_t q = pos; q < end; ++q) {
+            workers.emplace_back([&, q] {
+              try {
+                auto frame  = objects;
+                measured[q] = measure(order[q], frame);
+              } catch (...) {
+                failures[q - pos] = std::current_exception();  // rethrown below, as the serial scan would
+              }
+            });
+          }
+          for (auto& w : workers) {
+            w.join();
+          }
+          for (const auto& failure : failures) {
+            if (failure) {
+              std::rethrow_exception(failure);
+            }
+          }
+        }
+        ready = end;
+      }
+      const auto& [members, dx, dy] = candidates[k].key;
       ++report.candidates;
-      const auto gain = ok ? base - stranded_area_of(objects, l) : -1;
-      shift(objects, members, -dx, -dy);
+      const auto gain          = measured[pos];
       gains[candidates[k].key] = gain;
       if (gain < std::max<int64_t>(1, l.min_gain) || gain < best.gain) {
         continue;
@@ -858,5 +903,76 @@ std::optional<Dead_space_options> parse_dead_space_options(std::string_view text
     }
   }
   return o;
+}
+Dead_space_cost dead_space_hpwl_cost(const DreamPlace::native::Design& design, const std::vector<size_t>& nodes,
+                                     const std::vector<Dead_space_object>& objects, double* initial) {
+  const auto num_nodes = design.node_x.size();
+  auto       object_of = std::make_shared<std::vector<int>>(num_nodes, -1);
+  auto       origin    = std::make_shared<std::vector<std::pair<int64_t, int64_t>>>();
+  for (size_t j = 0; j < objects.size(); ++j) {
+    (*object_of)[nodes[j]] = static_cast<int>(j);
+    origin->emplace_back(objects[j].xl, objects[j].yl);
+  }
+  const auto active   = [&design](int net) { return design.net_mask.empty() || design.net_mask[net] != 0; };
+  // HPWL of `net` at the committed pose, with the `moved` nodes shifted by (dx, dy).
+  const auto net_hpwl = [&design, &objects, object_of, origin](int net, const std::vector<uint8_t>* moved, int64_t dx, int64_t dy) {
+    double xl = std::numeric_limits<double>::infinity(), yl = xl, xh = -xl, yh = -xl;
+    for (int j = design.flat_net2pin_start[net]; j < design.flat_net2pin_start[net + 1]; ++j) {
+      const int  pin   = design.flat_net2pin[j];
+      const int  node  = design.pin2node[pin];
+      const bool shift = moved && (*moved)[node];
+      const int  obj   = (*object_of)[node];
+      const auto ox    = obj < 0 ? 0 : objects[obj].xl - (*origin)[obj].first;
+      const auto oy    = obj < 0 ? 0 : objects[obj].yl - (*origin)[obj].second;
+      const auto x     = design.node_x[node] + static_cast<double>(ox) + design.pin_offset_x[pin] + (shift ? dx : 0);
+      const auto y     = design.node_y[node] + static_cast<double>(oy) + design.pin_offset_y[pin] + (shift ? dy : 0);
+      xl               = std::min(xl, x);
+      xh               = std::max(xh, x);
+      yl               = std::min(yl, y);
+      yh               = std::max(yh, y);
+    }
+    return xh >= xl ? (xh - xl) + (yh - yl) : 0.0;
+  };
+  if (initial) {
+    std::vector<uint8_t> macro_net(design.flat_net2pin_start.empty() ? 0 : design.flat_net2pin_start.size() - 1, 0);
+    for (size_t j = 0; j < objects.size(); ++j) {
+      if (!objects[j].movable) {
+        continue;
+      }
+      const auto node = static_cast<int>(nodes[j]);
+      for (int k = design.flat_node2pin_start[node]; k < design.flat_node2pin_start[node + 1]; ++k) {
+        macro_net[design.pin2net[design.flat_node2pin[k]]] = 1;
+      }
+    }
+    *initial = 0;
+    for (size_t n = 0; n < macro_net.size(); ++n) {
+      if (macro_net[n] && active(static_cast<int>(n))) {
+        *initial += net_hpwl(static_cast<int>(n), nullptr, 0, 0);
+      }
+    }
+  }
+  auto moved = std::make_shared<std::vector<uint8_t>>(num_nodes, 0);
+  return [&design, &nodes, active, net_hpwl, moved](const std::vector<size_t>& members, int64_t dx, int64_t dy) {
+    std::vector<int> nets;
+    for (const auto m : members) {
+      const auto node = static_cast<int>(nodes[m]);
+      (*moved)[node]  = 1;
+      for (int k = design.flat_node2pin_start[node]; k < design.flat_node2pin_start[node + 1]; ++k) {
+        nets.push_back(design.pin2net[design.flat_node2pin[k]]);
+      }
+    }
+    std::sort(nets.begin(), nets.end());
+    nets.erase(std::unique(nets.begin(), nets.end()), nets.end());
+    double delta = 0;
+    for (const auto n : nets) {
+      if (active(n)) {
+        delta += net_hpwl(n, moved.get(), dx, dy) - net_hpwl(n, nullptr, 0, 0);
+      }
+    }
+    for (const auto m : members) {
+      (*moved)[nodes[m]] = 0;
+    }
+    return delta;
+  };
 }
 }  // namespace livehd::placement

@@ -29,7 +29,7 @@ protected:
   double                                               period_ns = 10;
   void                                                 SetUp() override {
     options.optimization_pending = true;  // These fixtures exercise post-placement sizing.
-    options.fp_place = options.final_cells = options.macro_snap = false;
+    options.fp_place = options.final_cells = options.macro_snap = options.fp_auto = false;
     options.scale_macro_density = options.exact_macro_density = options.adaptive_density = options.routability = false;
     options.macro_overlap_weight = options.macro_jitter = 0;
     options.io_iterations = options.schedule_iterations = 0;

@@ -565,7 +565,7 @@ struct Routing {
   std::vector<double>               box_dem_h, box_dem_v;
   size_t overflow = 0, critical_conns = 0, pin_edge_moves = 0, vpin_overflow = 0, clock_domains = 0, clock_ribs = 0, unassigned = 0;
   // the clock tracks local reserved per tile (H, V) before SAT, checked against the tree L4 builds afterwards
-  std::vector<int> clock_reserved_h, clock_reserved_v;
+  std::vector<int>              clock_reserved_h, clock_reserved_v;
   std::map<std::string, size_t> track_failures;
   std::map<std::string, size_t> track_pick_rejections;           // LAYER:filter -> failed pick attempts
   std::map<std::string, size_t> track_fallback_shadow;           // l5_fallback_shadow diagnostic counts
@@ -617,7 +617,7 @@ struct Final_planned_geometry {
   std::vector<std::vector<physical::Route_path>>                                   paths;
   std::vector<std::vector<std::tuple<std::string, std::string, int64_t, int64_t>>> joins;
   std::vector<std::string>                                                         io_stub_failure;
-  std::vector<std::vector<uint8_t>> path_state;  // per path: Track_state of the L5 track it was drawn on
+  std::vector<std::vector<uint8_t>>              path_state;  // per path: Track_state of the L5 track it was drawn on
   // Selected DEFAULT adjacent via geometry, not a via/spacing certificate.
   // Its exact plates are covered by the emitted Local wire landings. Final
   // must still check native occupancy/cuts and the full connected net.
@@ -642,17 +642,17 @@ public:
   ~Final_geometry_emitter();
   Final_net_geometry emit(size_t net) const;
 };
-Final_planned_geometry final_planned_geometry(const Design&, const Grid&, const Boxes&, const Routing&);
+Final_planned_geometry   final_planned_geometry(const Design&, const Grid&, const Boxes&, const Routing&);
 size_t                   critical_backbone_conflicts(const Design&, const Grid&, const Final_planned_geometry&,
                                                      std::vector<std::string>* rejected = nullptr);
 // Structural precheck only. Empty reasons still require the complete native same-net union metal audit.
 std::vector<std::string> local_backbone_rejections(const Design&, const Grid&, const Boxes&, const Routing&,
                                                    const Final_planned_geometry&);
-void                   assign_layers(const Design&, const Grid&, Routing&);                    // L5 layers
-void                   assign_tracks(const Design&, const Grid&, Routing&, unsigned threads);  // L5 tracks
-double                 wire_um(const Grid&, const Conn&);
+void                     assign_layers(const Design&, const Grid&, Routing&);                    // L5 layers
+void                     assign_tracks(const Design&, const Grid&, Routing&, unsigned threads);  // L5 tracks
+double                   wire_um(const Grid&, const Conn&);
 // Elmore estimate (ps) of a net's worst sink over its routed tree, with the layer RC of its segments.
-double                 net_delay_ps(const Design&, const Grid&, const Boxes&, const Routing&, int net);
+double                   net_delay_ps(const Design&, const Grid&, const Boxes&, const Routing&, int net);
 
 // ---------------------------------------------------------------- legroute.final
 // Transactional cuts of a net's retained and pending route pieces. Exact via
@@ -676,8 +676,10 @@ bool write_local_join_probe(const Design&, const Grid&, const Final_planned_geom
 // legroute.dump_regions: each chosen region ("all", "failed" or ids) as a DEF of its own in dir (region_<r>.def/.json)
 void dump_regions(const Design&, const Grid&, const Boxes&, const Routing&, const Legroute_regions&, const Legroute_report&,
                   const std::string& dir, const std::string& which);
-void final_place(const Design&, const Grid&, const Boxes&, const Routing&, unsigned threads);                           // F1
-void final_wires(const Design&, const Grid&, const Boxes&, const Routing&, const Legroute_regions&, Legroute_report&);  // F2-F4
+// Membership and footprint preconditions only. Placement is selected jointly
+// with routing by Final's per-cellbox SAT transaction, never heuristically here.
+void validate_final_membership(const Design&, const Grid&, const Boxes&);
+void final_wires(const Design&, const Grid&, const Boxes&, const Routing&, const Legroute_regions&, Legroute_report&);
 Legroute_congestion route_congestion(const Design&, const Grid&, const Global_routes&, const std::vector<Global_net>&,
                                      const std::vector<int>& cap_h, const std::vector<int>& cap_v);
 }  // namespace livehd::placement::lr

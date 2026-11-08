@@ -665,6 +665,14 @@ TEST(LhdOptions, MacroPlacementRefinementsRemainOptIn) {
   const auto listed = lhd::list_set_options();
   for (const auto& [key, value] : std::vector<std::pair<std::string, std::string>>{
            {                    "synth.place.macro.channel",        "auto"},
+           {                        "synth.place.macro.pdn",        "auto"},
+           {                 "synth.place.macro.pdn_origin",        "core"},
+           {                               "synth.place.fp",        "auto"},
+           {                    "synth.place.fp.auto_share",         "0.2"},
+           {               "synth.place.fp.auto_min_copies",           "2"},
+           {           "synth.place.fp.auto_min_copy_share",        "0.02"},
+           {               "synth.place.fp.auto_candidates",        "true"},
+           {                "synth.place.fp.auto_tolerance",        "0.05"},
            {                  "synth.place.macro.edge_snap",         "off"},
            {                 "synth.place.macro.dead_space",         "off"},
            {              "synth.place.macro.refine_rounds",           "0"},

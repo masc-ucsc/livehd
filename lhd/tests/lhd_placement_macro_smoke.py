@@ -48,9 +48,9 @@ endmodule
 base=['lhd/lhd','synth',str(source),'--top','top','--workdir',str(root/'W'),'--set',f'synth.liberty={library}','--set',f'synth.lef={data}/sky130hd.tlef,{data}/sky130hd.lef,{lef}','--set','synth.opentimer=false','--set','synth.place.timing_driven=false','--set','compile.specialize_modules=true','--set','synth.place=true','--set','synth.place.macro=h2d','--set','synth.place.utilization=0.1','--set','synth.place.density=0.5','--set','synth.place.halo=0.5','--set','synth.place.iterations=10','--set','synth.place.grid.density=8','--set','synth.place.macro.K=2','--set','synth.place.macro.iters_per_outer=5','--set','synth.place.macro.evals=4','--set','synth.place.macro.seed_sa_evals=4','-q']
 # H2D and the older isolated-stage checks pin the old plain controls.
 base += [x for key,value in {'fp':'false','fp.pin_adjust':'false','macro.pin_adjust':'false','final':'false','macro.snap':'false','macro.align_weight':'0','scale_macro_density':'false','exact_macro_density':'false','adaptive_density':'false','routability':'false','macro_overlap':'0','macro_jitter':'0','schedule_iterations':'0','io_iterations':'0'}.items() for x in ['--set','synth.place.'+key+'='+value]]
-def run(name,extra=(),success=True):
+def run(name,extra=(),success=True,unset=()):
  result=root/(name+'.json')
- overrides={extra[i+1].split('=',1)[0] for i in range(len(extra)-1) if extra[i]=='--set'}
+ overrides={extra[i+1].split('=',1)[0] for i in range(len(extra)-1) if extra[i]=='--set'}|{'synth.place.'+k for k in unset}
  command=[]
  i=0
  while i<len(base):
@@ -208,6 +208,39 @@ run('fp_five_rejects_four',default_common+['--set','synth.place.fp.minimum=0']+[
 assert not json.loads((root/'W/synth/place/fp_candidates.json').read_text())['instances']
 print('Default four copies per immediate parent, configurable threshold and invalid counts pass')
 
+# fp=auto: the four banks hold every memory, so the repeated share selects the floorplan stage.
+for stale in ['fp_place.json','fp_auto.json']:
+ (root/'W/synth/place'/stale).unlink(missing_ok=True)
+run('fp_auto_on',default_common+['--set','synth.place.fp.minimum=0','--set','synth.place.macro=none','--set','synth.place.fp=auto','--set','synth.place.fp.iterations=20'])
+auto=json.loads((root/'W/synth/place/fp_auto.json').read_text())
+assert auto['enabled'] and auto['trigger']=='repetition' and auto['share']>.99 and auto['groups'][0]['count']==4,auto
+assert auto['memories']==12 and auto['groups'][0]['memories_per_copy']==3,auto
+assert json.loads((root/'W/synth/place/qor.json').read_text())['fp_auto']['enabled']
+assert (root/'W/synth/place/fp_place.json').is_file()
+for stale in ['fp_place.json','fp_auto.json']:
+ (root/'W/synth/place'/stale).unlink()
+run('fp_auto_off',default_common+['--set','synth.place.macro=none','--set','synth.place.fp=auto','--set','synth.place.fp.auto_min_copies=5'])
+auto=json.loads((root/'W/synth/place/fp_auto.json').read_text())
+assert not auto['enabled'] and auto['trigger']=='none' and not auto['groups'],auto
+assert not (root/'W/synth/place/fp_place.json').exists()
+# synth.place.fp defaults to auto (approved 2026-11-07): with no fp setting the same banks select it.
+for stale in ['fp_place.json','fp_auto.json']:
+ (root/'W/synth/place'/stale).unlink(missing_ok=True)
+run('fp_auto_default',default_common+['--set','synth.place.fp.minimum=0','--set','synth.place.macro=none','--set','synth.place.fp.iterations=20'],unset=['fp'])
+auto=json.loads((root/'W/synth/place/fp_auto.json').read_text())
+assert auto['enabled'] and json.loads((root/'W/synth/place/qor.json').read_text())['fp_auto']['enabled'],auto
+assert (root/'W/synth/place/fp_place.json').is_file()
+# The legacy default stays available as synth.place.fp=false: no detection, no floorplan stage.
+for stale in ['fp_place.json','fp_auto.json']:
+ (root/'W/synth/place'/stale).unlink()
+run('fp_legacy_false',default_common+['--set','synth.place.fp.minimum=0','--set','synth.place.macro=none','--set','synth.place.fp=false'])
+assert not (root/'W/synth/place/fp_auto.json').exists() and not (root/'W/synth/place/fp_place.json').exists()
+assert 'fp_auto' not in json.loads((root/'W/synth/place/qor.json').read_text())
+for value in ['maybe','2']:
+ run('bad_fp_mode_'+value,['--set','synth.place.macro=none','--set','synth.place.fp='+value],False)
+run('bad_fp_auto_share',['--set','synth.place.macro=none','--set','synth.place.fp=auto','--set','synth.place.fp.auto_share=1.5'],False)
+print('fp=auto selects the floorplan stage only for repeated flop+memory area')
+
 # The production default performs FP -> centroid snap -> macro GP/snap ->
 # fixed-macro cell GP in one synth invocation. Keep only the work budget small.
 source.write_text(source.read_text().replace('wire [4:0] mid0,mid1;', 'wire [4:0] mid0,mid1,mid2,mid3,mid4;').replace(
@@ -248,15 +281,16 @@ assert not re.search(r'^- \S+ sky130_fd_sc_\S+ \+ FIXED',text,re.M)
 print('Opt-in 3-pass flow, both snaps, 3K/four-per-parent/64 bins and fixed macro frames pass')
 
 base[base.index(str(root/'W'))]=str(root/'default_W')
-run('default_macro_cells',['--set',f'synth.place.tech_rc={tech_rc}','--set','lhd.incremental=false','--set','synth.place.iterations=20','--set','synth.place.io_iterations=10','--set','synth.place.snapshots=true'])
+# The legacy fp=false default (fp=auto, the default since 2026-11-07, selects FP for these 4x6 banks).
+run('default_macro_cells',['--set','synth.place.fp=false','--set',f'synth.place.tech_rc={tech_rc}','--set','lhd.incremental=false','--set','synth.place.iterations=20','--set','synth.place.io_iterations=10','--set','synth.place.snapshots=true'])
 p=root/'default_W/synth/place'
 assert (p/'gp.json').is_file() and (p/'out.def').is_file()
 flow=json.loads((p/'flow.json').read_text())
 assert flow['mode']=='macro-cells' and flow['fixed_macros']==24,flow
 assert not (p/'macro/fp_place.json').exists()
 assert json.loads((p/'macro/alignment.json').read_text())['snap']
-print('Default macro/cell stages retain macro snap without FP anchors')
-run('hierarchy_regular_snap',['--set',f'synth.place.tech_rc={tech_rc}','--set','lhd.incremental=false','--set','synth.place.iterations=20','--set','synth.place.io_iterations=10','--set','synth.place.snapshots=true','--set','synth.place.macro.snap_mode=symmetry'])
+print('Legacy fp=false macro/cell stages retain macro snap without FP anchors')
+run('hierarchy_regular_snap',['--set','synth.place.fp=false','--set',f'synth.place.tech_rc={tech_rc}','--set','lhd.incremental=false','--set','synth.place.iterations=20','--set','synth.place.io_iterations=10','--set','synth.place.snapshots=true','--set','synth.place.macro.snap_mode=symmetry'])
 a=json.loads((p/'macro/alignment.json').read_text())
 assert a['snap_mode']=='symmetry' and a['snap'],a
 classes={n['node']:n['class'] for n in a['snap_classes']}

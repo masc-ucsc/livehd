@@ -73,6 +73,6 @@ Pg_profile power_grid_profile(const physical::Tech_profile& profile) {
   return p;
 }
 Pg_profile power_grid_profile(std::string_view name, const physical::Technology& tech) {
-  return power_grid_profile(physical::resolve_tech_profile(tech, name));
+  return power_grid_profile(physical::resolve_tech_profile(tech, name, physical::Tech_policy::power_grid));
 }
 }  // namespace livehd::placement

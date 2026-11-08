@@ -1763,7 +1763,7 @@ TEST_F(PhysicalSession, IntegratedPreroutePublishesOnlyAcceptedGeometryAndRestor
   deferred_options.deferred_pg = pl::power_grid_profile("pg_asap7", pg_tech);
   deferred_options.deferred_pg->stripes.clear();
   deferred_options.deferred_pg->connect = {{{"M1", "M2"}}};
-  deferred_options.deferred_pg->macro_connect.clear();
+  deferred_options.deferred_pg->macro_grids.clear();
   deferred_options.deferred_pg->pin_layer = "M2";
   const auto with_pg                      = pl::detail::preroute_stage(pg_input,
                                                                        pg_tech,

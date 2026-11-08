@@ -38,6 +38,7 @@
 #include "forces/gp_rejection.hpp"
 #include "forces/gp_timing.hpp"
 #include "forces/legalization.hpp"
+#include "fp_repetition_graph.hpp"
 #include "growth_budget.hpp"
 #include "h2d.hpp"
 #include "handoff_pins.hpp"
@@ -61,6 +62,7 @@
 #include "placement_technology.hpp"
 #include "planning_selection.hpp"
 #include "power_grid.hpp"
+#include "power_grid_rules.hpp"
 #include "provisional_cell.hpp"
 #include "rapidjson/document.h"
 #include "rapidjson/stringbuffer.h"
@@ -351,11 +353,36 @@ double layer_min_spacing(const ph::Layer& layer) {
   }
   return std::isfinite(best) ? best : 0;
 }
-// Resolved macro channel {x, y} in DBU for the given masters. Auto keeps two macro obstructions DRC-clean: the
-// largest minimum spacing over the routing layers the macros obstruct (one isotropic value), at least one
+// The power-grid strategy macro.pdn follows: the named native power-grid profile, else the one the LEF matches;
+// nullptr when macro.pdn is off or no registered strategy applies.
+const ph::Pg_strategy* macro_pdn_strategy(const ph::Technology& tech, const Options& options) {
+  if (options.macro_pdn != "auto" && options.macro_pdn != "align" && options.macro_pdn != "gap" && options.macro_pdn != "off") {
+    throw std::invalid_argument("macro.pdn must be auto, align, gap or off: " + options.macro_pdn);
+  }
+  if (options.macro_pdn == "off") {
+    return nullptr;
+  }
+  return pg_macro_strategy(tech, options.pg);
+}
+// The level macro.pdn requests: auto starts at gap (and may degrade, see View::pdn_ladder); gap/align are strict.
+Pg_macro_level requested_pdn_level(const Options& options) {
+  return options.macro_pdn == "off"     ? Pg_macro_level::off
+         : options.macro_pdn == "align" ? Pg_macro_level::align
+                                        : Pg_macro_level::gap;
+}
+template <class Masters>
+std::optional<Pg_macro_rules> macro_pdn_rules(const ph::Technology& tech, const Masters& masters, const Options& options) {
+  const auto* pg = macro_pdn_strategy(tech, options);
+  if (!pg) {
+    return std::nullopt;
+  }
+  return pg_macro_rules(tech, *pg, std::set<std::string>(masters.begin(), masters.end()));
+}
+// The metal-spacing channel {x, y} in DBU: explicit macro.channel, else auto keeps two macro obstructions DRC-clean:
+// the largest minimum spacing over the routing layers the macros obstruct (one isotropic value), at least one
 // manufacturing grid, so two macros never abut.
 template <class Masters>
-std::pair<int64_t, int64_t> macro_channel(const ph::Technology& tech, const Masters& masters, const Options& options) {
+std::pair<int64_t, int64_t> macro_metal_channel(const ph::Technology& tech, const Masters& masters, const Options& options) {
   if (options.macro_channel) {
     return {channel_dbu(options.macro_channel->first, tech), channel_dbu(options.macro_channel->second, tech)};
   }
@@ -373,6 +400,31 @@ std::pair<int64_t, int64_t> macro_channel(const ph::Technology& tech, const Mast
   }
   const auto value = std::max(channel_grid(tech), channel_dbu(spacing, tech));
   return {value, value};
+}
+// Macro channel {x, y} in DBU at a macro.pdn level: the metal-spacing channel, raised per axis to the power-grid
+// requirement of that level (off: the metal-spacing channel alone).
+std::pair<int64_t, int64_t> macro_channel_at(const ph::Technology& tech, std::pair<int64_t, int64_t> metal,
+                                             const std::optional<Pg_macro_rules>& rules, Pg_macro_level level) {
+  if (rules && level != Pg_macro_level::off) {
+    metal.first  = std::max(metal.first, channel_dbu(pg_macro_requirement(rules->gap[0], level), tech));
+    metal.second = std::max(metal.second, channel_dbu(pg_macro_requirement(rules->gap[1], level), tech));
+  }
+  return metal;
+}
+// Resolved macro channel {x, y} in DBU for the given masters at the requested level (README "Power-grid aware macro
+// spacing").
+template <class Masters>
+std::pair<int64_t, int64_t> macro_channel(const ph::Technology& tech, const Masters& masters, const Options& options) {
+  return macro_channel_at(tech,
+                          macro_metal_channel(tech, masters, options),
+                          macro_pdn_rules(tech, masters, options),
+                          requested_pdn_level(options));
+}
+// The channel a legality check requires. Explicit macro.pdn=gap|align is a hard rule. auto is a placement target that
+// degrades when the macros cannot be legalized with it, so only the metal-spacing channel is mandatory.
+template <class Masters>
+std::pair<int64_t, int64_t> macro_legality_channel(const ph::Technology& tech, const Masters& masters, const Options& options) {
+  return options.macro_pdn == "auto" ? macro_metal_channel(tech, masters, options) : macro_channel(tech, masters, options);
 }
 std::set<std::string> component_masters(const ph::Floorplan& fp) {
   std::set<std::string> masters;
@@ -432,7 +484,7 @@ void check_macro_halo(const ph::Technology& tech, const ph::Floorplan& fp, const
       throw std::invalid_argument("cell halo requires a fixed macro frame: " + c.name);
     }
   }
-  const auto [cx, cy] = macro_channel(tech, component_masters(macros), options);
+  const auto [cx, cy] = macro_legality_channel(tech, component_masters(macros), options);
   check_legality(tech, macros, options.halo_x, options.halo_y, double(cx) / tech.dbu, double(cy) / tech.dbu);
 }
 int64_t macro_halo(double microns, int64_t dbu, int64_t pitch) {
@@ -447,9 +499,13 @@ int64_t macro_halo(double microns, int64_t dbu, int64_t pitch) {
 // technology profile explicitly; otherwise it is detected from the LEF.
 // The power grid's metal as legroute obstacles: the grid depends on rows, macros and taps, not on cell positions,
 // so building it on the legalization frame gives the exact rails, stripes and via-stack landings of the handoff grid.
+// Taps, the native grid and handoff IO layers are power-grid policy (nangate45
+// provides only that); SAT route vias also need the routing policy.
 static const ph::Tech_profile& placement_tech_profile(const ph::Technology& tech, const Options& options) {
   const bool pg = options.pg != "none" && options.pg != "off";
-  return ph::resolve_tech_profile(tech, pg ? std::string_view(options.pg) : std::string_view("auto"));
+  return ph::resolve_tech_profile(tech,
+                                  pg ? std::string_view(options.pg) : std::string_view("auto"),
+                                  options.satlegalize_route_vias ? ph::Tech_policy::route : ph::Tech_policy::power_grid);
 }
 std::string environment_key(const Options& o, const ph::Technology& tech) {
   uint64_t h = kPlaceSalt;
@@ -483,6 +539,13 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
   h = hash_text(o.macro_channel ? std::format("macro-channel:{}:{}", o.macro_channel->first, o.macro_channel->second)
                                 : std::string("macro-channel:auto-min-spacing"),
                 h);
+  if (o.macro_pdn != "off") {
+    h = hash_text(std::format("macro-pdn-v1:{}:{}",
+                              o.macro_pdn,
+                              o.macro_pdn_origin ? std::format("{}:{}", o.macro_pdn_origin->first, o.macro_pdn_origin->second)
+                                                 : std::string("core")),
+                  h);
+  }
   if (o.macro_edge_snap) {
     h = hash_text(std::format("macro-edge-snap:{}:{}", o.macro_edge_snap->first, o.macro_edge_snap->second), h);
   }
@@ -507,7 +570,7 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
     for (double m : a.milestones) {
       milestones += std::format("{},", m);
     }
-    h = hash_text(std::format("macro-anchor-v1:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}",
+    h = hash_text(std::format("macro-anchor-v2:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}",
                               a.weight,
                               a.start_overflow,
                               milestones,
@@ -815,7 +878,12 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
     h = hash_text(std::format("gp-min:{}", o.min_iterations), h);
   }
   if (o.post_density_factor) {
-    h = hash_text(std::format("gp-post-density:{}:{}", o.post_density_factor, o.convergence_tolerance), h);
+    // The native default patience selects which post-density iterate survives.
+    h = hash_text(std::format("gp-post-density:{}:{}:{}",
+                              o.post_density_factor,
+                              o.convergence_tolerance,
+                              dp::Options{}.post_density_patience),
+                  h);
   }
   if (o.boundarypins.enabled) {
     h = hash_text(std::format("boundarypins:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}",
@@ -1561,6 +1629,28 @@ struct View {
   int                                           centroid_min_macros = 2;
   int64_t                                       halo_x = 0, halo_y = 0;
   int64_t                                       channel_x = 0, channel_y = 0;  // macro-to-macro clear spacing, DBU
+  // macro.pdn: the strategy's macro rules (unset: off or no strategy), the strap origin override (DBU), whether
+  // edges snap onto the strap lattice, and how often the alignment had to fall back to routing tracks alone.
+  std::optional<Pg_macro_rules>                 pdn_rules;
+  std::optional<std::array<int64_t, 2>>         pdn_origin;
+  bool                                          pdn_align      = false;
+  mutable int64_t                               pdn_alignments = 0, pdn_fallbacks = 0;  // diagnostics only
+  // macro.pdn levels this placement may use, strongest first (auto: gap, align, off with equal channels merged;
+  // gap/align/off: that level alone), the one in use (channel_x/y, pdn_align follow it), whether it was chosen
+  // (make_arrays picks it once the core is known) and every level tried, for QoR.
+  struct Pdn_level {
+    Pg_macro_level level     = Pg_macro_level::off;
+    int64_t        channel_x = 0, channel_y = 0;
+  };
+  struct Pdn_attempt {
+    Pg_macro_level level     = Pg_macro_level::off;
+    int64_t        channel_x = 0, channel_y = 0;
+    std::string    result;  // infeasible | legalization_failed | used | frame
+  };
+  std::vector<Pdn_level>                        pdn_ladder;
+  size_t                                        pdn_level    = 0;
+  bool                                          pdn_selected = false;
+  std::vector<Pdn_attempt>                      pdn_attempts;
   // macro.edge_snap: resolved sliver limits (DBU, 0 = off) and what the snap did over the stage.
   int64_t                                       edge_snap_x = 0, edge_snap_y = 0;
   // Native padding of a movable hard macro per side while macros are planned: the halo, or half the macro channel
@@ -1574,6 +1664,7 @@ struct View {
     int     iterations = 0;
     double  hpwl = 0, overflow = 0, density_weight = 0;
     int64_t dead_area = -1, macro_displacement = 0, moved_macros = 0;
+    bool    rejected = false;  // the round lost wirelength and was undone
   };
   std::vector<Refine_round>                 refine_rounds;
   std::map<Endpoint, Bus_bit>               bus_names;
@@ -1593,10 +1684,142 @@ struct View {
   std::map<std::string, double>             weights;
   std::map<std::string, std::string>        cohesion_owners;
 };
+// DREAMPlace's macro legalizer reports "DREAMPlace macro legalization failed" when no legal macro pose was found.
+bool macro_legalization_failure(const std::exception& error) {
+  return std::string_view(error.what()).find("macro legalization failed") != std::string_view::npos;
+}
+// An explicit macro.pdn=gap|align is a hard requirement: say which channel could not be met and what degrades.
+std::string pdn_legalization_error(const View& v, const ph::Technology& tech, const Options& options, const std::exception& error) {
+  const auto& level = v.pdn_ladder.at(v.pdn_level);
+  return std::format(
+      "{}: the macros cannot be legalized with the macro.pdn={} channel {:.2f} x {:.2f} um (power-grid spacing). "
+      "macro.pdn=auto degrades to the aligned and then the metal-spacing channel; macro.pdn=off drops the power-grid "
+      "spacing; or enlarge the core / lower the macro count",
+      error.what(),
+      options.macro_pdn,
+      double(level.channel_x) / tech.dbu,
+      double(level.channel_y) / tech.dbu);
+}
+// Switch the placement to macro.pdn ladder entry `index`: the channel and the lattice snap follow it.
+void set_pdn_level(View& v, size_t index) {
+  const auto& level = v.pdn_ladder.at(index);
+  v.pdn_level       = index;
+  v.channel_x       = level.channel_x;
+  v.channel_y       = level.channel_y;
+  v.pdn_align       = v.pdn_rules && level.level == Pg_macro_level::align;
+}
+// The planning pad on the solver's own site/row lattice (the native solver rounds halos up to it), rounded down so
+// the pad never exceeds the channel: a channel below one site/row per side adds no native padding, and the track
+// alignment opens the remainder.
+std::pair<int64_t, int64_t> plan_pad(const View& v, int64_t channel_x, int64_t channel_y) {
+  const auto sx = std::max<int64_t>(1, std::llround(v.design.layout.site_width));
+  const auto sy = std::max<int64_t>(1, std::llround(v.design.layout.row_height));
+  return {std::max(v.halo_x, (channel_x + 1) / 2 / sx * sx), std::max(v.halo_y, (channel_y + 1) / 2 / sy * sy)};
+}
+bool planned_hard_macro(const Cell& c, const ph::Technology& tech) {
+  return !c.locked && c.place.status != Status::FIXED && c.place.status != Status::LOCKED && ph::hard_macro(tech.macros.at(c.macro))
+         && ph::placement_mask({c.name, c.macro, c.place}, tech) == ph::Placement_mask::none;
+}
+// macro.pdn=auto picks its starting level once the solver core is known (v.design.layout):
+//  * with movable hard macros, the strongest level whose padded macros can fit the core at all
+//    (pg_macro_boxes_fit on the native legalizer's footprints: the planning pad, rounded up to sites/rows); a level
+//    that cannot fit is recorded as infeasible and never attempted. Macro legalization may still degrade further.
+//  * with every hard macro fixed (a staged final pass, a later timing/repair pass on a planned frame), the strongest
+//    level whose channel the frame keeps, so the stages after a degraded macro plan agree with it.
+void select_pdn_level(View& v, const ph::Technology& tech) {
+  if (v.pdn_selected) {
+    return;
+  }
+  v.pdn_selected = true;
+  if (v.pdn_ladder.size() < 2) {
+    return;
+  }
+  const auto& l      = v.design.layout;
+  const auto  core_w = std::llround(l.xh - l.xl), core_h = std::llround(l.yh - l.yl);
+  const auto  sx = std::max<int64_t>(1, std::llround(l.site_width)), sy = std::max<int64_t>(1, std::llround(l.row_height));
+  std::vector<const Cell*> movable, fixed;
+  for (const auto& c : v.cells) {
+    if (!ph::hard_macro(tech.macros.at(c.macro))
+        || ph::placement_mask({c.name, c.macro, c.place}, tech) != ph::Placement_mask::none) {
+      continue;
+    }
+    (planned_hard_macro(c, tech) ? movable : fixed).push_back(&c);
+  }
+  size_t chosen = v.pdn_ladder.size() - 1;
+  if (!movable.empty()) {
+    for (size_t i = 0; i < v.pdn_ladder.size(); ++i) {
+      const auto [px, py] = plan_pad(v, v.pdn_ladder[i].channel_x, v.pdn_ladder[i].channel_y);
+      std::vector<Pg_macro_box> boxes;
+      for (const auto* c : movable) {
+        boxes.push_back({(c->place.width + 2 * px + sx - 1) / sx * sx, (c->place.height + 2 * py + sy - 1) / sy * sy});
+      }
+      for (const auto* c : fixed) {  // fixed bodies (and their halo) clipped to the core
+        const auto xl = std::max<int64_t>(c->place.x - v.halo_x, std::llround(l.xl));
+        const auto yl = std::max<int64_t>(c->place.y - v.halo_y, std::llround(l.yl));
+        const auto xh = std::min<int64_t>(c->place.x + c->place.width + v.halo_x, std::llround(l.xh));
+        const auto yh = std::min<int64_t>(c->place.y + c->place.height + v.halo_y, std::llround(l.yh));
+        if (xh > xl && yh > yl) {
+          boxes.push_back({xh - xl, yh - yl});
+        }
+      }
+      if (i + 1 == v.pdn_ladder.size() || pg_macro_boxes_fit(boxes, core_w, core_h)) {
+        chosen = i;
+        break;
+      }
+      v.pdn_attempts.push_back({v.pdn_ladder[i].level, v.pdn_ladder[i].channel_x, v.pdn_ladder[i].channel_y, "infeasible"});
+    }
+  } else {
+    std::vector<const Cell*> sorted = fixed;
+    std::sort(sorted.begin(), sorted.end(), [](auto a, auto b) {
+      return std::pair{a->place.x, a->name} < std::pair{b->place.x, b->name};
+    });
+    const auto keeps = [&](int64_t cx, int64_t cy) {
+      for (size_t i = 0; i < sorted.size(); ++i) {
+        const auto& a = sorted[i]->place;
+        for (size_t j = i + 1; j < sorted.size() && sorted[j]->place.x < a.x + a.width + cx; ++j) {
+          const auto& b = sorted[j]->place;
+          if (b.y < a.y + a.height + cy && a.y < b.y + b.height + cy) {
+            return false;
+          }
+        }
+      }
+      return true;
+    };
+    for (size_t i = 0; i < v.pdn_ladder.size(); ++i) {
+      if (keeps(v.pdn_ladder[i].channel_x, v.pdn_ladder[i].channel_y)) {
+        chosen = i;
+        break;
+      }
+    }
+    v.pdn_attempts.push_back({v.pdn_ladder[chosen].level, v.pdn_ladder[chosen].channel_x, v.pdn_ladder[chosen].channel_y, "frame"});
+  }
+  set_pdn_level(v, chosen);
+}
 // A timing checkpoint borrows connectivity and solver geometry. Ordinary GP
 // retains fractional pin positions. Legal checkpoints round positions and apply
 // row/macro orientations without copying topology or rebuilding native arrays.
 // None of these references escape the synchronous checkpoint.
+// macro.pdn alignment lattice for the current frame: strap origin at the row core's lower-left corner (or the
+// macro.pdn_origin override), windows for the resolved macro channel.
+std::optional<Pg_macro_alignment> macro_pdn_alignment(const View& v, const ph::Technology& tech) {
+  if (!v.pdn_align || v.fp.rows.empty()) {
+    return std::nullopt;
+  }
+  std::array<int64_t, 2> origin{std::numeric_limits<int64_t>::max(), std::numeric_limits<int64_t>::max()};
+  for (const auto& row : v.fp.rows) {
+    origin[0] = std::min(origin[0], row.x);
+    origin[1] = std::min(origin[1], row.y);
+  }
+  if (v.pdn_origin) {
+    origin = *v.pdn_origin;
+  }
+  // Two manufacturing grids of tolerance: a downstream flow re-snapping macro origins stays on the lattice.
+  auto alignment = pg_macro_alignment(*v.pdn_rules, {v.channel_x, v.channel_y}, origin, tech.dbu, 2 * channel_grid(tech));
+  if (!alignment.active()) {
+    return std::nullopt;
+  }
+  return alignment;
+}
 struct Geometry_view {
   const View&           view;
   const dp::Design&     design;
@@ -1904,15 +2127,8 @@ void make_arrays(View& v, const ph::Technology& tech) {
                           double(rows.back().y + rh),
                           double(rows.front().step),
                           double(rh)};
-  {
-    // The planning pad on the solver's own site/row lattice (the native solver rounds halos up to it), rounded
-    // down so the pad never exceeds the channel: a channel below one site/row per side adds no native padding,
-    // and the track alignment opens the remainder.
-    const auto sx = std::max<int64_t>(1, std::llround(d.layout.site_width));
-    const auto sy = std::max<int64_t>(1, rh);
-    v.plan_pad_x  = std::max(v.halo_x, (v.channel_x + 1) / 2 / sx * sx);
-    v.plan_pad_y  = std::max(v.halo_y, (v.channel_y + 1) / 2 / sy * sy);
-  }
+  select_pdn_level(v, tech);
+  std::tie(v.plan_pad_x, v.plan_pad_y) = plan_pad(v, v.channel_x, v.channel_y);
   std::stable_sort(v.cells.begin(), v.cells.end(), [](const auto& a, const auto& b) {
     const auto movable
         = [](const auto& c) { return !c.locked && c.place.status != Status::FIXED && c.place.status != Status::LOCKED; };
@@ -2626,7 +2842,8 @@ rapidjson::Value dead_space_json(const View& v, const ph::Technology& tech, cons
 // estimate is the HPWL of the moved macros' nets at the current (global)
 // cell positions, bounded per move and in total as fractions of the initial
 // HPWL of all nets touching a movable macro.
-void collapse_macro_dead_space(View& v, const ph::Technology& tech, dp::Design& physical, const Dead_space_options& o) {
+void collapse_macro_dead_space(View& v, const ph::Technology& tech, dp::Design& physical, const Dead_space_options& o,
+                               int threads) {
   if (physical.node_macro.empty() || o.max_moves <= 0) {
     return;
   }
@@ -2645,65 +2862,12 @@ void collapse_macro_dead_space(View& v, const ph::Technology& tech, dp::Design& 
   limits.space_y       = std::max(v.channel_y, 2 * limits.halo_y);
   limits.grid          = channel_grid(tech);
   limits.max_moves     = o.max_moves;
+  limits.threads         = std::max(1, threads);
   limits.min_gain      = 4 * limits.metric.pitch * limits.metric.pitch;
-  // Initial HPWL of the nets that touch a movable macro.
-  const auto net_hpwl  = [&](int net, const std::vector<uint8_t>* moved, int64_t dx, int64_t dy) {
-    double xl = std::numeric_limits<double>::infinity(), yl = xl, xh = -xl, yh = -xl;
-    for (int j = physical.flat_net2pin_start[net]; j < physical.flat_net2pin_start[net + 1]; ++j) {
-      const int  pin   = physical.flat_net2pin[j];
-      const int  node  = physical.pin2node[pin];
-      const bool shift = moved && (*moved)[node];
-      const auto x     = physical.node_x[node] + physical.pin_offset_x[pin] + (shift ? dx : 0);
-      const auto y     = physical.node_y[node] + physical.pin_offset_y[pin] + (shift ? dy : 0);
-      xl               = std::min(xl, x);
-      xh               = std::max(xh, x);
-      yl               = std::min(yl, y);
-      yh               = std::max(yh, y);
-    }
-    return xh >= xl ? (xh - xl) + (yh - yl) : 0.0;
-  };
-  const auto           active = [&](int net) { return physical.net_mask.empty() || physical.net_mask[net]; };
-  std::vector<uint8_t> macro_net(physical.flat_net2pin_start.size() > 0 ? physical.flat_net2pin_start.size() - 1 : 0, 0);
-  for (size_t j = 0; j < objects.size(); ++j) {
-    if (!objects[j].movable) {
-      continue;
-    }
-    const auto node = static_cast<int>(indexes[j]);
-    for (int k = physical.flat_node2pin_start[node]; k < physical.flat_node2pin_start[node + 1]; ++k) {
-      macro_net[physical.pin2net[physical.flat_node2pin[k]]] = 1;
-    }
-  }
-  double initial = 0;
-  for (size_t n = 0; n < macro_net.size(); ++n) {
-    if (macro_net[n] && active(static_cast<int>(n))) {
-      initial += net_hpwl(static_cast<int>(n), nullptr, 0, 0);
-    }
-  }
+  double     initial     = 0;
+  const auto cost        = dead_space_hpwl_cost(physical, indexes, objects, &initial);
   limits.wl_move_budget  = o.hpwl_move * initial;
   limits.wl_total_budget = o.hpwl_total * initial;
-  std::vector<uint8_t> moved(physical.node_x.size(), 0);
-  const auto           cost = [&](const std::vector<size_t>& members, int64_t dx, int64_t dy) {
-    std::vector<int> nets;
-    for (const auto m : members) {
-      const auto node = static_cast<int>(indexes[m]);
-      moved[node]     = 1;
-      for (int k = physical.flat_node2pin_start[node]; k < physical.flat_node2pin_start[node + 1]; ++k) {
-        nets.push_back(physical.pin2net[physical.flat_node2pin[k]]);
-      }
-    }
-    std::sort(nets.begin(), nets.end());
-    nets.erase(std::unique(nets.begin(), nets.end()), nets.end());
-    double delta = 0;
-    for (const auto n : nets) {
-      if (active(n)) {
-        delta += net_hpwl(n, &moved, dx, dy) - net_hpwl(n, nullptr, 0, 0);
-      }
-    }
-    for (const auto m : members) {
-      moved[indexes[m]] = 0;
-    }
-    return delta;
-  };
   auto report = collapse_dead_space(objects, limits, cost);
   for (size_t j = 0; j < objects.size(); ++j) {
     physical.node_x[indexes[j]] = objects[j].xl;
@@ -2759,10 +2923,26 @@ bool align_macro_geometry(const View& v, const ph::Technology& tech, dp::Design&
   // Moving macros are still being planned: keep their native planning pad (halo or half the channel).
   const auto hx = move ? std::max(v.halo_x, v.plan_pad_x) : v.halo_x;
   const auto hy = move ? std::max(v.halo_y, v.plan_pad_y) : v.halo_y;
+  const auto pdn     = move ? macro_pdn_alignment(v, tech) : std::nullopt;
+  bool       aligned = false;
   if (std::any_of(rigid_ids.begin(), rigid_ids.end(), [](auto id) { return id != 0; })) {
-    legalize_rigid_macro_tracks(tech, v.fp, frame, rigid_ids, hx, hy, move, v.channel_x, v.channel_y);
+    legalize_rigid_macro_tracks(tech,
+                                v.fp,
+                                frame,
+                                rigid_ids,
+                                hx,
+                                hy,
+                                move,
+                                v.channel_x,
+                                v.channel_y,
+                                pdn ? &*pdn : nullptr,
+                                &aligned);
   } else {
-    legalize_macro_tracks(tech, v.fp, frame, hx, hy, move, v.channel_x, v.channel_y);
+    legalize_macro_tracks(tech, v.fp, frame, hx, hy, move, v.channel_x, v.channel_y, pdn ? &*pdn : nullptr, &aligned);
+  }
+  if (pdn) {
+    ++v.pdn_alignments;
+    v.pdn_fallbacks += !aligned;
   }
   bool changed = false;
   if (move) {
@@ -5124,6 +5304,7 @@ Options final_cell_options(const Options& options) {
   // A placed-context request must not re-enter fresh floorplan or macro optimization.
   if (resolved.cell_halo) {
     resolved.fp_place    = false;
+    resolved.fp_auto     = false;
     resolved.final_cells = false;
     resolved.macro_mode  = "none";
   }
@@ -5182,7 +5363,7 @@ void check_legality(const ph::Technology& tech, const ph::Floorplan& fp, const O
   const auto options = resolve_macro_halo(requested, fp.rows.empty() ? 0 : tech.sites.at(fp.rows.front().site).height);
   check_macro_halo(tech, fp, options);
   const auto [x, y]    = effective_halo(options);
-  const auto [cx, cy]  = macro_channel(tech, component_masters(fp), requested);
+  const auto [cx, cy]  = macro_legality_channel(tech, component_masters(fp), requested);
   const auto channel_x = double(cx) / tech.dbu, channel_y = double(cy) / tech.dbu;
   const auto tap_master          = requested.handoff_taps ? placement_tech_profile(tech, requested).tap_master : std::string{};
   const auto physical_only_fixed = [&](const auto& c) {
@@ -5946,7 +6127,25 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       masters.insert(c.macro);
     }
     // Macro spacing never takes the final-cell halo override: macro-to-macro clearance keeps the macro halo.
-    std::tie(v.channel_x, v.channel_y) = macro_channel(tech, masters, options);
+    v.pdn_rules       = macro_pdn_rules(tech, masters, options);
+    const auto metal  = macro_metal_channel(tech, masters, options);
+    const auto levels = !v.pdn_rules || options.macro_pdn == "off" ? std::vector{Pg_macro_level::off}
+                        : options.macro_pdn == "auto" ? std::vector{Pg_macro_level::gap, Pg_macro_level::align, Pg_macro_level::off}
+                                                      : std::vector{requested_pdn_level(options)};
+    v.pdn_ladder.clear();
+    for (const auto level : levels) {
+      const auto [x, y] = macro_channel_at(tech, metal, v.pdn_rules, level);
+      if (v.pdn_ladder.empty() || v.pdn_ladder.back().channel_x != x || v.pdn_ladder.back().channel_y != y) {
+        v.pdn_ladder.push_back({level, x, y});
+      }
+    }
+    v.pdn_attempts.clear();
+    v.pdn_selected = false;
+    set_pdn_level(v, 0);
+    if (options.macro_pdn_origin) {
+      v.pdn_origin = std::array<int64_t, 2>{std::llround(options.macro_pdn_origin->first * tech.dbu),
+                                            std::llround(options.macro_pdn_origin->second * tech.dbu)};
+    }
   }
   if (options.macro_edge_snap) {
     // Explicit microns now; auto (-1) resolves against the placement core when the snap runs.
@@ -5957,8 +6156,15 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
   const auto pad_x          = std::max(v.halo_x, (v.channel_x + 1) / 2);
   const auto pad_y          = std::max(v.halo_y, (v.channel_y + 1) / 2);
   double     occupancy_area = area;
+  // A fixed core must hold every macro with the weakest channel macro.pdn may use (auto degrades); a generated core
+  // is sized for the requested one.
+  const auto must_pad_x     = std::max(v.halo_x, (v.pdn_ladder.back().channel_x + 1) / 2);
+  const auto must_pad_y     = std::max(v.halo_y, (v.pdn_ladder.back().channel_y + 1) / 2);
+  auto       must_width = max_width, must_height = max_height;
   for (const auto& c : v.cells) {
     if (ph::hard_macro(tech.macros.at(c.macro))) {
+      must_width       = std::max(must_width, c.place.width + 2 * must_pad_x);
+      must_height      = std::max(must_height, c.place.height + 2 * must_pad_y);
       max_width       = std::max(max_width, c.place.width + 2 * pad_x);
       max_height      = std::max(max_height, c.place.height + 2 * pad_y);
       occupancy_area += double(c.place.width + 2 * pad_x) * (c.place.height + 2 * pad_y) - double(c.place.width) * c.place.height;
@@ -6111,7 +6317,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
                                              area / tech.dbu / tech.dbu,
                                              double(columns * sw) * double(rows * rh) / tech.dbu / tech.dbu));
       }
-      if (max_width > columns * sw || max_height > rows * rh) {
+      if (must_width > columns * sw || must_height > rows * rh) {
         throw std::runtime_error("a mapped cell or macro halo does not fit in the fixed core");
       }
     }
@@ -6814,7 +7020,13 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     }
     // These newly packed proxies have no user-fixed origin yet. Correct their
     // routing phase before they become obstacles for standard-cell packing.
-    legalize_macro_tracks(tech, v.fp, frame, v.halo_x, v.halo_y, true, v.channel_x, v.channel_y);
+    const auto pdn     = macro_pdn_alignment(v, tech);
+    bool       aligned = false;
+    legalize_macro_tracks(tech, v.fp, frame, v.halo_x, v.halo_y, true, v.channel_x, v.channel_y, pdn ? &*pdn : nullptr, &aligned);
+    if (pdn) {
+      ++v.pdn_alignments;
+      v.pdn_fallbacks += !aligned;
+    }
     for (size_t i = 0; i < frame.size(); ++i) {
       if (packed_memories.contains(owners[i])) {
         owners[i]->place.x = frame[i].place.x;
@@ -6925,7 +7137,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     }
     snap_macros_to_core_edges(v, tech, physical);
     if (options.macro_dead_space && options.macro_dead_space->collapse && !anchor_skip_dead_space) {
-      collapse_macro_dead_space(v, tech, physical, *options.macro_dead_space);
+      collapse_macro_dead_space(v, tech, physical, *options.macro_dead_space, static_cast<int>(options.threads));
     }
     align_macro_geometry(v, tech, physical, true, false, options.legroute);
   };
@@ -9667,14 +9879,18 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     const auto anchor_override_guard = std::unique_ptr<void, std::function<void(void*)>>(reinterpret_cast<void*>(1), [&](void*) {
       anchor_final_override = nullptr;
     });
-    if (options.macro_anchor.enabled && movable_macros) {
-      // Movable hard macros (soft blocks and placement masks are not native macros).
-      std::vector<int> anchored;
+    // Movable hard macros (soft blocks and placement masks are not native macros), as node ids of v.design.
+    const auto anchored_macros       = [&] {
+      std::vector<int> ids;
       for (int i = 0; i < v.design.num_movable; ++i) {
         if (!v.design.node_macro.empty() && v.design.node_macro[i] && v.design.placement_mask(i) == dp::PlacementMask::none) {
-          anchored.push_back(i);
+          ids.push_back(i);
         }
       }
+      return ids;
+    };
+    if (options.macro_anchor.enabled && movable_macros) {
+      auto anchored = anchored_macros();
       if (!anchored.empty()) {
         Native_target_config target;
         target.bins_x = target.bins_y = control.auxiliary_bins ? control.auxiliary_bins : control.bins_x;
@@ -9687,26 +9903,32 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         // final hard pass, so target runs restore them.
         target.after_macro_legalize   = [&, after = control.after_macro_legalize](dp::Design& physical, bool late) {
           const auto counters    = std::tuple{v.edge_snap_moved, v.edge_snap_moves, v.edge_snap_distance};
+          const auto pdn         = std::pair{v.pdn_alignments, v.pdn_fallbacks};
           const auto dead        = v.dead_space_collapse;
           anchor_skip_dead_space = !late;
+          const auto restore     = [&] {
+            anchor_skip_dead_space                                               = false;
+            std::tie(v.edge_snap_moved, v.edge_snap_moves, v.edge_snap_distance) = counters;
+            std::tie(v.pdn_alignments, v.pdn_fallbacks)                          = pdn;
+            v.dead_space_collapse                                                = dead;
+          };
           try {
             if (after) {
               after(physical);
             }
           } catch (...) {
-            anchor_skip_dead_space                                               = false;
-            std::tie(v.edge_snap_moved, v.edge_snap_moves, v.edge_snap_distance) = counters;
-            v.dead_space_collapse                                                = dead;
+            restore();
             throw;
           }
-          anchor_skip_dead_space                                               = false;
-          std::tie(v.edge_snap_moved, v.edge_snap_moves, v.edge_snap_distance) = counters;
-          v.dead_space_collapse                                                = dead;
+          restore();
         };
         auto anchor_policy       = options.macro_anchor;
         anchor_policy.dbu_per_um = tech.dbu;
         anchor_policy.channel_x  = v.channel_x;
         anchor_policy.channel_y  = v.channel_y;
+        if (!options.macro_dead_space || !options.macro_dead_space->collapse) {
+          anchor_policy.dead_space_refreshes = 0;  // no late pass to run: every refresh is comparable
+        }
         macro_anchor.emplace(anchor_policy,
                              std::move(anchored),
                              control.max_iterations,
@@ -11483,18 +11705,87 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
                                    options.placement_area_resume && options.placement_macro_replan,
                                    remap_recovery);
     };
+    // macro.pdn=auto: keep the exact legalization input (after every pre-legalization hook) so a macro legalization
+    // that fails with the PDN channel can be retried from the same pose at the next weaker level.
+    const bool pdn_degradable
+        = !live_session && control.legalize && options.macro_pdn == "auto" && v.pdn_level + 1 < v.pdn_ladder.size()
+          && std::any_of(v.design.node_macro.begin(), v.design.node_macro.begin() + v.design.num_movable, [](auto macro) {
+               return macro != 0;
+             });
+    std::optional<dp::Design> pdn_legalize_input;
+    if (pdn_degradable) {
+      const auto prior        = control.before_legalize;
+      control.before_legalize = [&, prior](dp::Design& physical) {
+        if (prior) {
+          prior(physical);
+        }
+        pdn_legalize_input = physical;
+      };
+    }
     try {
       metrics = run_main_gp();
-    } catch (const std::runtime_error&) {
-      if (sat_gp) {
+    } catch (const std::runtime_error& error) {
+      if (macro_legalization_failure(error) && pdn_legalize_input) {
+        // Degrade one level at a time (gap -> align -> off), each attempt legalizing the same GP pose with the
+        // weaker channel; the first level that legalizes stays for the rest of the placement.
+        auto input = std::move(*pdn_legalize_input);
+        pdn_legalize_input.reset();
+        bool legal = false;
+        while (!legal && v.pdn_level + 1 < v.pdn_ladder.size()) {
+          const auto& failed = v.pdn_ladder[v.pdn_level];
+          v.pdn_attempts.push_back({failed.level, failed.channel_x, failed.channel_y, "legalization_failed"});
+          set_pdn_level(v, v.pdn_level + 1);
+          std::tie(v.plan_pad_x, v.plan_pad_y) = plan_pad(v, v.channel_x, v.channel_y);
+          v.design                             = input;
+          for (int i = 0; i < v.design.num_movable; ++i) {
+            if (v.design.node_macro[i] && v.design.placement_mask(i) == dp::PlacementMask::none) {
+              // the pose keeps each macro's body where GP put it; only the reserved pad shrinks
+              v.design.node_halo_x[i] = double(std::max(v.halo_x, v.plan_pad_x));
+              v.design.node_halo_y[i] = double(std::max(v.halo_y, v.plan_pad_y));
+            }
+          }
+          livehd::diag::warn("pass.place", "macro-pdn", "degrade")
+              .msg(
+                  "macro.pdn=auto: macro legalization failed with the {} channel ({:.2f} x {:.2f} um); retrying with the {} "
+                  "channel ({:.2f} x {:.2f} um)",
+                  pg_macro_level_name(failed.level),
+                  double(failed.channel_x) / tech.dbu,
+                  double(failed.channel_y) / tech.dbu,
+                  pg_macro_level_name(v.pdn_ladder[v.pdn_level].level),
+                  double(v.channel_x) / tech.dbu,
+                  double(v.channel_y) / tech.dbu)
+              .emit();
+          auto retry            = control;
+          retry.max_iterations  = 0;
+          retry.before_legalize = {};
+          // macro.anchor's final override was armed for the failed level (targets on its channel/lattice); the
+          // retry legalizes the captured pose and runs the host chain at the new level.
+          anchor_final_override = nullptr;
+          try {
+            metrics = dp::place(v.design, retry);
+            legal   = true;
+          } catch (const std::runtime_error& again) {
+            if (!macro_legalization_failure(again) || v.pdn_level + 1 >= v.pdn_ladder.size()) {
+              throw;
+            }
+          }
+        }
+      } else if (sat_gp) {
         v.design                 = *sat_gp;
         auto fallback            = control;
         fallback.max_iterations  = 0;
         fallback.before_legalize = {};
+        // The failed solve may have armed macro.anchor's final override; the
+        // fallback legalizes the SAT pose, not the anchor targets.
+        anchor_final_override    = nullptr;
         sat_retained             = 0;
         metrics                  = dp::place(v.design, fallback);
       } else {
         if (cache.reused == 0) {
+          if (macro_legalization_failure(error) && options.macro_pdn != "auto" && !v.pdn_ladder.empty()
+              && v.pdn_ladder[v.pdn_level].level != Pg_macro_level::off) {
+            throw std::runtime_error(pdn_legalization_error(v, tech, options, error));
+          }
           throw;
         }
         // Changed blocks may need whitespace outside their old anchors. Retry
@@ -11508,6 +11799,11 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         macro_checkpoints       = 0;
         macro_checkpoint_forced = false;
         macro_timed_positions.clear();
+        // make_arrays re-sorted the nodes (and unlocked blocks may add macros): macro.anchor restarts on the new
+        // node ids with a fresh refresh clock and history.
+        if (macro_anchor) {
+          macro_anchor->restart(anchored_macros());
+        }
         metrics = run_main_gp();
       }
     }
@@ -11544,6 +11840,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       // round's legal frame stays and refinement stops.
       auto       saved           = v.design;
       const auto saved_snap      = std::tuple{v.edge_snap_moved, v.edge_snap_moves, v.edge_snap_distance};
+      const auto saved_pdn       = std::pair{v.pdn_alignments, v.pdn_fallbacks};
       const auto saved_dead      = v.dead_space_collapse;
       dp::Result again;
       try {
@@ -11551,11 +11848,34 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       } catch (const std::runtime_error& error) {
         v.design                                                             = std::move(saved);
         std::tie(v.edge_snap_moved, v.edge_snap_moves, v.edge_snap_distance) = saved_snap;
+        std::tie(v.pdn_alignments, v.pdn_fallbacks)                          = saved_pdn;
         v.dead_space_collapse                                                = saved_dead;
         View::Refine_round failed;
         failed.iterations = -1;
         v.refine_rounds.push_back(failed);
         std::fprintf(stderr, "macro refine round %u failed (%s); keeping the previous round\n", round + 1, error.what());
+        break;
+      }
+      // A round is a local search step on the legal macro frame: keep it only when the legal, detailed-placed
+      // wirelength improves. A burst that loses wirelength (macros dragged by a re-spread, a collapse that
+      // stretches nets) is undone and refinement stops; the previous frame is already legal.
+      if (!again.legal || again.hpwl >= metrics.hpwl) {
+        std::fprintf(stderr,
+                     "macro refine round %u rejected: hpwl %.6g um (legal %d) does not improve %.6g um\n",
+                     round + 1,
+                     again.hpwl / tech.dbu,
+                     int(again.legal),
+                     metrics.hpwl / tech.dbu);
+        v.design                                                             = std::move(saved);
+        std::tie(v.edge_snap_moved, v.edge_snap_moves, v.edge_snap_distance) = saved_snap;
+        std::tie(v.pdn_alignments, v.pdn_fallbacks)                          = saved_pdn;
+        v.dead_space_collapse                                                = saved_dead;
+        View::Refine_round rejected;
+        rejected.iterations = again.iterations;
+        rejected.hpwl       = again.hpwl;
+        rejected.overflow   = again.overflow;
+        rejected.rejected   = true;
+        v.refine_rounds.push_back(rejected);
         break;
       }
       metrics.legal = again.legal;
@@ -13353,6 +13673,10 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     json.Double(control.target_density);
     json.Key("route_stalled");
     json.Bool(metrics.route_stalled);
+    json.Key("post_density_plateau");
+    json.Bool(metrics.post_density_plateau);
+    json.Key("post_density_best_iteration");
+    json.Int(metrics.post_density_best_iteration);
     json.Key("objective_converged");
     json.Bool(metrics.objective_converged);
     json.Key("timing_observed_in_gp");
@@ -13488,10 +13812,11 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
                  metrics.iterations,
                  metrics.density_stalled && metrics.overflow_floor > control.stop_overflow
                      ? "density infeasible; handing off to legalization"
-                 : metrics.density_stalled    ? "density stalled"
-                 : metrics.route_stalled      ? "routing stalled; handing off to legalization"
-                 : metrics.continuation_limit ? "post-density budget"
-                                              : "iteration cap",
+                 : metrics.density_stalled      ? "density stalled"
+                 : metrics.route_stalled        ? "routing stalled; handing off to legalization"
+                 : metrics.post_density_plateau ? "post-density plateau; drifted iterate replaced"
+                 : metrics.continuation_limit   ? "post-density budget"
+                                                : "iteration cap",
                  metrics.overflow,
                  control.stop_overflow,
                  metrics.overflow_floor,
@@ -13816,6 +14141,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
                               : metrics.density_stalled && metrics.overflow_floor > control.stop_overflow ? "density_infeasible"
                               : metrics.density_stalled                                                   ? "density_stalled"
                               : metrics.route_stalled                                                     ? "route_stalled"
+                              : metrics.post_density_plateau                                              ? "post_density_plateau"
                               : metrics.continuation_limit                                                ? "continuation_limit"
                               : metrics.iterations >= control.max_iterations                              ? "iteration_limit"
                                                                                                           : "stopped";
@@ -13934,6 +14260,74 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     channel.AddMember("y_dbu", v.channel_y, allocator);
     channel.AddMember("auto", !options.macro_channel, allocator);
     json.AddMember("macro_channel", channel, allocator);
+    {
+      rapidjson::Value pdn(rapidjson::kObjectType);
+      const auto       used_level = v.pdn_ladder.empty() ? requested_pdn_level(options) : v.pdn_ladder[v.pdn_level].level;
+      pdn.AddMember("mode", rapidjson::Value(options.macro_pdn.c_str(), allocator), allocator);
+      pdn.AddMember("requested", rapidjson::Value(options.macro_pdn.c_str(), allocator), allocator);
+      pdn.AddMember("used_level", rapidjson::StringRef(pg_macro_level_name(used_level)), allocator);
+      pdn.AddMember("degraded", options.macro_pdn == "auto" && v.pdn_rules && used_level != Pg_macro_level::gap, allocator);
+      {
+        rapidjson::Value attempts(rapidjson::kArrayType);
+        auto             tried = v.pdn_attempts;
+        if (!v.pdn_ladder.empty() && (tried.empty() || tried.back().result != "frame")) {
+          const auto& used = v.pdn_ladder[v.pdn_level];
+          tried.push_back({used.level, used.channel_x, used.channel_y, "used"});
+        }
+        for (const auto& a : tried) {
+          rapidjson::Value entry(rapidjson::kObjectType);
+          entry.AddMember("level", rapidjson::StringRef(pg_macro_level_name(a.level)), allocator);
+          entry.AddMember("channel_x_um", double(a.channel_x) / tech.dbu, allocator);
+          entry.AddMember("channel_y_um", double(a.channel_y) / tech.dbu, allocator);
+          entry.AddMember("result", rapidjson::Value(a.result.c_str(), allocator), allocator);
+          attempts.PushBack(entry, allocator);
+        }
+        pdn.AddMember("attempts", attempts, allocator);
+      }
+      pdn.AddMember("active", v.pdn_rules.has_value() && used_level != Pg_macro_level::off, allocator);
+      if (v.pdn_rules) {
+        const char* axes[]  = {"x", "y"};
+        const auto  lattice = macro_pdn_alignment(v, tech);
+        for (int axis = 0; axis < 2; ++axis) {
+          const auto&      rule = v.pdn_rules->gap[axis];
+          rapidjson::Value a(rapidjson::kObjectType);
+          const char*      kind = rule.kind == Pg_gap_rule::Kind::lattice  ? "lattice"
+                                  : rule.kind == Pg_gap_rule::Kind::feeder ? "feeder"
+                                                                           : "none";
+          a.AddMember("kind", rapidjson::StringRef(kind), allocator);
+          a.AddMember("source", rapidjson::Value(rule.source.c_str(), allocator), allocator);
+          a.AddMember("feed", rapidjson::Value(rule.feed.c_str(), allocator), allocator);
+          a.AddMember("required_um", pg_macro_requirement(rule, used_level), allocator);
+          a.AddMember("aligned_um", rule.aligned, allocator);
+          a.AddMember("any_phase_um", rule.any_phase, allocator);
+          if (lattice && lattice->axis[axis]) {
+            // Hard macros whose final edges the strap lattice does not admit.
+            const auto& l       = *lattice->axis[axis];
+            int64_t     core_lo = std::numeric_limits<int64_t>::max(), core_hi = std::numeric_limits<int64_t>::min();
+            for (const auto& row : v.fp.rows) {
+              const auto height = std::llround(tech.sites.at(row.site).height * tech.dbu);
+              core_lo           = std::min<int64_t>(core_lo, axis ? row.y : row.x);
+              core_hi           = std::max<int64_t>(core_hi, axis ? row.y + height : row.x + row.count * row.step);
+            }
+            uint64_t unaligned = 0;
+            for (const auto& c : v.cells) {
+              const auto& master = tech.macros.at(c.macro);
+              if (!master.klass.starts_with("BLOCK") || ph::soft_block(master)) {
+                continue;  // pads, covers and end caps are not lattice macros
+              }
+              const auto low = axis ? c.place.y : c.place.x, size = axis ? c.place.height : c.place.width;
+              unaligned += !l.allows(low, low + size, core_lo, core_hi);
+            }
+            a.AddMember("lattice_origin_um", double(l.origin) / tech.dbu, allocator);
+            a.AddMember("unaligned_macros", unaligned, allocator);
+          }
+          pdn.AddMember(rapidjson::StringRef(axes[axis]), a, allocator);
+        }
+        pdn.AddMember("alignments", v.pdn_alignments, allocator);
+        pdn.AddMember("alignment_fallbacks", v.pdn_fallbacks, allocator);
+      }
+      json.AddMember("macro_pdn", pdn, allocator);
+    }
     if (options.macro_edge_snap) {
       rapidjson::Value edge(rapidjson::kObjectType);
       edge.AddMember("x_um", double(std::max<int64_t>(0, v.edge_snap_x)) / tech.dbu, allocator);
@@ -13952,6 +14346,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       for (const auto& r : v.refine_rounds) {
         rapidjson::Value j(rapidjson::kObjectType);
         j.AddMember("gp_iterations", r.iterations, allocator);  // -1: the round failed and was dropped
+        j.AddMember("rejected", r.rejected, allocator);
         j.AddMember("hpwl_um", r.hpwl / tech.dbu, allocator);
         j.AddMember("overflow", r.overflow, allocator);
         j.AddMember("density_weight", r.density_weight, allocator);
@@ -14337,8 +14732,8 @@ Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& re
   return place(source, library, requested, {});
 }
 
-Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& requested,
-             const std::function<void()>& release_source) {
+static Result place_requested(hhds::Graph& source, hhds::GraphLibrary& library, const Options& requested,
+                              const std::function<void()>& release_source) {
   if (area_fit_applies(requested)) {  // place.area=auto: the smallest routable region of the imported core
     return place_area_fit(source, library, requested, release_source);
   }
@@ -14570,6 +14965,7 @@ Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& re
     cell_options.net_weights = macro.net_weights;
   }
   cell_options.fp_place               = false;
+  cell_options.fp_auto                = false;
   // FP centroids and macro warp pulls end at the fixed-macro handoff.
   cell_options.fp_warp.enabled        = false;
   cell_options.macro_warp.enabled     = false;
@@ -14603,6 +14999,28 @@ Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& re
                                                         release_source);
   result.fp_resized_cells                = macro.fp_resized_cells;
   result.fp_repair_edits                 = macro.fp_repair_edits;
+  {
+    // macro.pdn is decided by the macro plan (the final pass only reads the level off the fixed frame): report the
+    // plan's request, level and attempts.
+    rapidjson::Document macro_qor, final_qor;
+    macro_qor.Parse(macro.qor.c_str());
+    final_qor.Parse(result.qor.c_str());
+    if (macro_qor.IsObject() && final_qor.IsObject() && macro_qor.HasMember("macro_pdn")) {
+      auto& allocator = final_qor.GetAllocator();
+      final_qor.RemoveMember("macro_pdn");
+      final_qor.AddMember("macro_pdn", rapidjson::Value(macro_qor["macro_pdn"], allocator), allocator);
+      rapidjson::StringBuffer                    buffer;
+      rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+      final_qor.Accept(writer);
+      result.qor = buffer.GetString();
+      if (!options.output_dir.empty()) {
+        std::ofstream qor(options.output_dir + "/qor.json");
+        if (!(qor << result.qor << '\n')) {
+          throw std::runtime_error("cannot write staged macro.pdn QoR");
+        }
+      }
+    }
+  }
   if (options.macro_magnet.enabled) {
     for (const auto* artifact : {"magnet.json", "macro_animation.html"}) {
       fs::copy_file(macro_options.output_dir + "/" + artifact,
@@ -14659,6 +15077,70 @@ Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& re
   std::ofstream out(options.output_dir + "/flow.json");
   if (!(out << text << '\n')) {
     throw std::runtime_error("cannot write staged placement report");
+  }
+  return result;
+}
+// synth.place.fp=auto: the floorplan stage runs only for a design whose
+// flop+memory area is dominated by repeated hierarchy (fp_repetition.hpp).
+// Fresh full placement decides; ECO/seed/placed-context and h2d calls never
+// start a floorplan, so auto resolves to off there without detection. The
+// native GP pin-timing experiment rejects a floorplan stage, so auto is off
+// there as well.
+Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& requested,
+             const std::function<void()>& release_source) {
+  if (!requested.fp_auto) {
+    return place_requested(source, library, requested, release_source);
+  }
+  if (requested.fp_place) {  // an explicit floorplan request overrides the auto default
+    auto forced    = requested;
+    forced.fp_auto = false;
+    return place_requested(source, library, forced, release_source);
+  }
+  auto resolved    = requested;
+  resolved.fp_auto = false;
+  std::string report;
+  if (requested.full && !requested.previous && !requested.timing_seed && !requested.retain_placement && !requested.cell_stage
+      && requested.macro_mode == "none" && !requested.native_gp_timing && !requested.lefs.empty()) {
+    auto auto_options          = requested.fp_auto_options;
+    auto_options.fp_min_macros = requested.fp_min_macros;  // what candidate discovery will accept
+    auto_options.fp_min_copies = requested.fp_min_copies;
+    const auto& tech           = requested.technology().lef;
+    const auto  decision       = detect_fp_repetition(fp_repetition_design(source, tech, requested.liberty), auto_options);
+    resolved.fp_place          = decision.enabled;
+    report                     = fp_rep_json(decision, auto_options);
+    livehd::diag::info("pass.place", "fp-auto", "decision")
+        .msg("synth.place.fp=auto: floorplan {} (repeated flop+memory share {:.1f}%, as floorplan candidates {:.1f}%)",
+             decision.enabled ? "on" : "off",
+             100 * decision.share,
+             100 * decision.candidate_share)
+        .emit();
+    if (!requested.output_dir.empty()) {
+      fs::create_directories(requested.output_dir);
+      std::ofstream out(requested.output_dir + "/fp_auto.json");
+      if (!(out << report << '\n')) {
+        throw std::runtime_error("cannot write fp_auto.json");
+      }
+    }
+  }
+  auto result = place_requested(source, library, resolved, release_source);
+  if (!report.empty()) {
+    result.fp_auto = report;
+    rapidjson::Document qor, detail;
+    qor.Parse(result.qor.c_str());
+    detail.Parse(report.c_str());
+    if (qor.IsObject() && detail.IsObject()) {
+      qor.AddMember("fp_auto", rapidjson::Value(detail, qor.GetAllocator()), qor.GetAllocator());
+      rapidjson::StringBuffer                    buffer;
+      rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+      qor.Accept(writer);
+      result.qor = buffer.GetString();
+      if (!requested.output_dir.empty()) {
+        std::ofstream out(requested.output_dir + "/qor.json");
+        if (!(out << result.qor << '\n')) {
+          throw std::runtime_error("cannot write placement QoR");
+        }
+      }
+    }
   }
   return result;
 }

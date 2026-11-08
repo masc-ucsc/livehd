@@ -123,7 +123,7 @@ Signal_via_intrinsic_check check_signal_via_intrinsics(const Technology& tech, i
 
 Rule_check check_signal_via(const Technology& tech, const Floorplan& fp, const Signal_metal_rules& rules,
                             const Routing_occupancy& occupancy, const Route_via& via, int64_t x, int64_t y,
-                            const std::array<Shape, 2>& landings, const std::string& own_net) {
+                            const std::array<Shape, 2>& landings, const std::string& own_net, std::span<const Shape> owner_union) {
   const auto fail = [](const std::string& message) { return Rule_check{false, message}; };
   if (fp.dbu <= 0 || fp.dbu > INT32_MAX || x < INT32_MIN || x > INT32_MAX || y < INT32_MIN || y > INT32_MAX) {
     return fail("invalid via units/position");
@@ -181,7 +181,7 @@ Rule_check check_signal_via(const Technology& tech, const Floorplan& fp, const S
         return fail("unsupported landing spacing rules");
       }
       for (auto id : occupancy.query(landing.layer, landing.rect, *clearance, own_net)) {
-        const auto separated = rules.spacing(landing, occupancy.at(id).shape);
+        const auto separated = rules.spacing_with_union(landing, occupancy.at(id).shape, owner_union);
         if (!separated.legal) {
           return separated;
         }

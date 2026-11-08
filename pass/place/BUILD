@@ -304,6 +304,20 @@ cc_test(
     copts = COPTS,
     deps = [":signal_router", "@googletest//:gtest_main"],
 )
+cc_library(
+    name = "cellbox_sat_router",
+    srcs = ["cellbox_sat_router.cpp"],
+    hdrs = ["cellbox_sat_router.hpp"],
+    copts = COPTS,
+    deps = [":sat_solver", ":signal_router", "//core", "//inou/lefdef:inou_lefdef"],
+)
+cc_test(
+    name = "cellbox_sat_router_test",
+    size = "small",
+    srcs = ["cellbox_sat_router_test.cpp"],
+    copts = COPTS,
+    deps = [":cellbox_sat_router", ":signal_router", "//inou/lefdef:inou_lefdef", "@googletest//:gtest_main"],
+)
 cc_test(
     name = "signal_router_test",
     srcs = ["signal_router_test.cpp"],
@@ -320,8 +334,8 @@ cc_test(
 
 cc_library(
     name = "power_grid",
-    srcs = ["power_grid.cpp", "power_grid_profiles.cpp", "power_grid_vias.cpp", "power_grid_export.cpp"],
-    hdrs = ["power_grid.hpp", "power_grid_vias.hpp"],
+    srcs = ["power_grid.cpp", "power_grid_profiles.cpp", "power_grid_vias.cpp", "power_grid_export.cpp", "power_grid_rules.cpp"],
+    hdrs = ["power_grid.hpp", "power_grid_vias.hpp", "power_grid_rules.hpp"],
     copts = COPTS,
     visibility = ["//visibility:public"],
     deps = ["//inou/lefdef:index_union_find", "//inou/lefdef:inou_lefdef", "@rapidjson"],
@@ -330,6 +344,13 @@ cc_library(
 cc_test(
     name = "power_grid_test",
     srcs = ["power_grid_test.cpp"],
+    copts = COPTS,
+    deps = [":power_grid", "@googletest//:gtest_main"],
+)
+
+cc_test(
+    name = "power_grid_rules_test",
+    srcs = ["power_grid_rules_test.cpp"],
     copts = COPTS,
     deps = [":power_grid", "@googletest//:gtest_main"],
 )
@@ -376,6 +397,10 @@ filegroup(
     name = "place_srcs",
     srcs = [
         "//core:metadata_srcs",
+        "fp_repetition.cpp",
+        "fp_repetition.hpp",
+        "fp_repetition_graph.cpp",
+        "fp_repetition_graph.hpp",
         "area_fit.cpp",
         "area_fit.hpp",
         "handoff_rows.cpp",
@@ -391,6 +416,8 @@ filegroup(
         "power_grid_export.cpp",
         "power_grid_vias.cpp",
         "power_grid_vias.hpp",
+        "power_grid_rules.cpp",
+        "power_grid_rules.hpp",
         "placement_session.cpp",
         "planning_selection.cpp",
         "boundary_pins.cpp",
@@ -495,6 +522,8 @@ filegroup(
         "satlegalize.hpp",
         "sat_solver.cpp",
         "sat_solver.hpp",
+        "cellbox_sat_router.cpp",
+        "cellbox_sat_router.hpp",
         "legroute.cpp",
         "legroute.hpp",
         "legroute_boxes.cpp",
@@ -505,6 +534,7 @@ filegroup(
         "legroute_coalesce.cpp",
         "legroute_dump.cpp",
         "legroute_final.cpp",
+        "legroute_final_sat.cpp",
         "legroute_global.cpp",
         "legroute_gate.cpp",
         "fast_route_pattern.cpp",
@@ -702,6 +732,23 @@ cc_library(
 )
 
 cc_library(
+    name = "fp_repetition",
+    srcs = ["fp_repetition.cpp"],
+    hdrs = ["fp_repetition.hpp"],
+    copts = COPTS,
+    visibility = ["//visibility:public"],
+    deps = ["@rapidjson"],
+)
+
+cc_test(
+    name = "fp_repetition_test",
+    size = "small",
+    srcs = ["fp_repetition_test.cpp"],
+    copts = COPTS,
+    deps = [":fp_repetition", "@googletest//:gtest_main"],
+)
+
+cc_library(
     name = "place",
     srcs = [
         "area_fit.cpp",
@@ -720,6 +767,7 @@ cc_library(
         "macro_snap.cpp",
         "macro_tracks.cpp",
         "magnet_report.cpp",
+        "fp_repetition_graph.cpp",
         "memory_proxy.cpp",
         "pin_adjust.cpp",
         "place.cpp",
@@ -752,6 +800,7 @@ cc_library(
         "macro_snap.hpp",
         "macro_tracks.hpp",
         "magnet_report.hpp",
+        "fp_repetition_graph.hpp",
         "memory_proxy.hpp",
         "pin_adjust.hpp",
         "place.hpp",
@@ -792,6 +841,7 @@ cc_library(
         ":satlegalize",
         ":terminal_legalize",
         ":legroute",
+        ":fp_repetition",
         "//core",
         "//graph",
         "//inou/lefdef:index_union_find",
@@ -1065,6 +1115,7 @@ cc_library(
         "legroute_coalesce.cpp",
         "legroute_dump.cpp",
         "legroute_final.cpp",
+        "legroute_final_sat.cpp",
         "legroute_global.cpp",
         "legroute_gate.cpp",
         "legroute_partition.cpp",
@@ -1083,6 +1134,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":cell_criticality",
+        ":cellbox_sat_router",
         ":fast_route_pattern",
         ":row_occupancy",
         ":legroute_track_repair",

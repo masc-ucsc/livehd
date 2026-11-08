@@ -86,13 +86,22 @@ Area_fit_areas area_fit_areas(const ph::Technology& tech, const ph::Floorplan& f
     if (m == tech.macros.end() || ph::placement_mask(c, tech) != ph::Placement_mask::none) {
       continue;
     }
+    const auto& klass = m->second.klass;
+    const bool  soft  = ph::soft_block(m->second);
+    if (!klass.starts_with("CORE") && !klass.starts_with("BLOCK")) {
+      continue;  // PAD, COVER, RING and IO-ring ENDCAP masters sit outside the rows
+    }
     const auto [w, h] = extent(m->second, c, fp.dbu);
-    if (m->second.klass.starts_with("CORE")) {
+    if (klass.starts_with("CORE") || soft) {
+      // A soft block is a standard-cell cluster: its area competes for rows like the cells it stands for.
       areas.cells += double(w) * double(h);
     } else {
-      areas.macros      += double(w) * double(h);
-      areas.max_macro_w  = std::max(areas.max_macro_w, w);
-      areas.max_macro_h  = std::max(areas.max_macro_h, h);
+      areas.macros += double(w) * double(h);
+    }
+    if (!klass.starts_with("CORE")) {
+      // the region must still hold the largest hard or soft block body
+      areas.max_macro_w = std::max(areas.max_macro_w, w);
+      areas.max_macro_h = std::max(areas.max_macro_h, h);
     }
   }
   return areas;

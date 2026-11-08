@@ -1,5 +1,6 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
+#include <span>
 #include <unordered_map>
 
 #include "physical.hpp"
@@ -31,4 +32,16 @@ struct Route_connectivity {
 // polygon pins and malformed geometry fail closed. This is not a DRC check.
 Route_connectivity check_route_connectivity(const Technology&, const Floorplan&, const Net&, const Route_components* = nullptr,
                                             const Route_width_rules* trial_rules = nullptr);
+// Native-coordinate conductor check without invented logical endpoints. All
+// path/fixed-metal components are obligations, regardless of their labels.
+// Only explicit native via cuts join routing layers. Each pin union is one
+// actual library pin whose shapes have already been transformed into DBU;
+// callers must establish that source identity before using pin equivalence.
+// Fixed metal must be routing metal and has no intrinsic shape equivalence.
+// One real pin with no new wire is allowed; an entirely empty input fails.
+// This checks electrical connectivity, not DRC, source ownership or domains.
+Route_connectivity check_conductor_connectivity(const Technology&, const Floorplan&, std::span<const Route_path>,
+                                                std::span<const Shape>              fixed_metal,
+                                                std::span<const std::vector<Shape>> physical_pin_unions,
+                                                const Route_width_rules*            trial_rules = nullptr);
 }  // namespace livehd::physical

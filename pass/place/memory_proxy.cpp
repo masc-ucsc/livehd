@@ -21,6 +21,28 @@ bool memory_runtime_pin(hhds::Port_id pid) {
 std::string memory_pin(hhds::Port_id pid, int bit, bool output) {
   return std::format("{}{}[{}]", output ? "out_" : "in_", pid, bit);
 }
+Memory_proxy_shape memory_proxy_shape(const hhds::Node_class& node, double flop_area) {
+  namespace gu            = graph_util;
+  uint64_t           bits = 0, depth = 0;
+  std::set<unsigned> ports;
+  for (auto sink : node.inp_sorted_pins()) {
+    const auto off = sink.get_port_id() % Ntype::Memory_port_stride;
+    if (off == 0) {
+      ports.insert(sink.get_port_id() / Ntype::Memory_port_stride);
+    }
+    if (off == 1 || off == 9) {
+      const auto driver = sink.get_driver_pin();
+      if (!driver.is_const() || !gu::const_of(driver).is_just_i64() || gu::const_of(driver).to_just_i64() <= 0) {
+        throw std::runtime_error("memory proxy needs positive constant width and depth");
+      }
+      (off == 1 ? bits : depth) = gu::const_of(driver).to_just_i64();
+    }
+  }
+  if (!bits || !depth || ports.empty()) {
+    throw std::runtime_error("memory proxy needs width, depth and address ports");
+  }
+  return {bits, depth, double(bits) * double(depth) * flop_area * std::pow(1.1, ports.size())};
+}
 std::map<uint64_t, std::string> memory_proxies(hhds::Graph& graph, physical::Technology& tech, const std::string& liberty) {
   namespace gu = graph_util;
   std::map<uint64_t, std::string> result;
@@ -35,25 +57,7 @@ std::map<uint64_t, std::string> memory_proxies(hhds::Graph& graph, physical::Tec
         throw std::runtime_error("memory proxy needs a positive-area flop in synth.liberty");
       }
     }
-    uint64_t           bits = 0, depth = 0;
-    std::set<unsigned> ports;
-    for (auto sink : node.inp_sorted_pins()) {
-      const auto off = sink.get_port_id() % Ntype::Memory_port_stride;
-      if (off == 0) {
-        ports.insert(sink.get_port_id() / Ntype::Memory_port_stride);
-      }
-      if (off == 1 || off == 9) {
-        const auto driver = sink.get_driver_pin();
-        if (!driver.is_const() || !gu::const_of(driver).is_just_i64() || gu::const_of(driver).to_just_i64() <= 0) {
-          throw std::runtime_error("memory proxy needs positive constant width and depth");
-        }
-        (off == 1 ? bits : depth) = gu::const_of(driver).to_just_i64();
-      }
-    }
-    if (!bits || !depth || ports.empty()) {
-      throw std::runtime_error("memory proxy needs width, depth and address ports");
-    }
-    const double area     = double(bits) * double(depth) * flop_area * std::pow(1.1, ports.size());
+    const auto [bits, depth, area] = memory_proxy_shape(node, flop_area);
     const double raw_side = std::sqrt(area) * tech.dbu;
     if (!std::isfinite(raw_side) || raw_side > std::numeric_limits<int>::max() / 8.0) {
       throw std::runtime_error("memory proxy dimensions exceed physical coordinate range");

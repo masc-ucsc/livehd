@@ -6,7 +6,8 @@
 #include <vector>
 
 namespace livehd::placement {
-// Strip synthesis-only sub_<number> containers while retaining original paths.
+// Strip synthesis-only sub_<number> containers while retaining original paths;
+// `.` and `/` both separate scopes (fp_rep_split) and the result joins with `.`.
 std::string      original_hierarchy_path(const std::string& name);
 // A single-memory wrapper inherits its enclosing branching macro scope. Classes
 // are scope x physical dimensions, never synthesis color or a type shared across scopes.

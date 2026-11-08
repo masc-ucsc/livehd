@@ -2,6 +2,7 @@
 #include "macro_tracks.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <limits>
 #include <map>
@@ -165,6 +166,37 @@ std::optional<std::string> inaccessible(const Profile& p, int64_t x, int64_t y) 
 struct Box {
   int64_t xl, yl, xh, yh;
 };
+// The power-grid strap lattice a movable macro's edges must respect along each axis (optional).
+// Rigid track groups: per proxy master, every member body as {offset from the proxy origin, size} per axis.
+using Member_spans = std::map<std::string, std::array<std::vector<std::array<int64_t, 2>>, 2>>;
+struct Pdn_check {
+  const Pg_macro_alignment* alignment = nullptr;
+  Box                       core{};
+  const Member_spans*       members = nullptr;
+  bool                      active(int axis) const { return alignment && alignment->axis[axis].has_value(); }
+  bool                      edge_ok(int axis, int64_t low, int64_t size) const {
+    return alignment->axis[axis]->allows(low, low + size, axis ? core.yl : core.xl, axis ? core.yh : core.xh);
+  }
+  // A body of `macro` at `low` (size `size`): a rigid group's proxy is admitted only when every member macro's edges
+  // are, not just the group's bounding box.
+  bool ok(int axis, int64_t low, int64_t size, const std::string& macro) const {
+    if (!active(axis)) {
+      return true;
+    }
+    if (members) {
+      if (const auto found = members->find(macro); found != members->end()) {
+        return std::all_of(found->second[axis].begin(), found->second[axis].end(), [&](const auto& span) {
+          return edge_ok(axis, low + span[0], span[1]);
+        });
+      }
+    }
+    return edge_ok(axis, low, size);
+  }
+  // Lattice steps worth searching on either side: two strap periods of the routing-phase period.
+  int64_t steps(int axis, int64_t period) const {
+    return active(axis) ? 4 + 2 * (alignment->axis[axis]->period + period - 1) / std::max<int64_t>(1, period) : 4;
+  }
+};
 Box box(const ph::Technology& tech, const ph::Component& c, int64_t hx, int64_t hy) {
   if (tech.macros.at(c.macro).klass.starts_with("CORE")) {
     hx = hy = 0;
@@ -199,23 +231,44 @@ struct Candidate {
   std::string coverage;
 };
 std::vector<Candidate> candidates(const Profile& p, int axis, int64_t old, int64_t low, int64_t high,
-                                  const std::vector<int64_t>* edges = nullptr) {
+                                  const std::vector<int64_t>* edges = nullptr, const Pdn_check* pdn = nullptr, int64_t size = 0,
+                                  const std::string& macro = {}) {
   std::vector<Candidate> result;
+  const bool             lattice = pdn && pdn->active(axis);
+  const int64_t          steps   = lattice ? pdn->steps(axis, p.period[axis]) : 4;
   for (const auto& phase : p.phases[axis]) {
-    const auto add = [&](int64_t value) {
-      if (value >= low && value <= high) {
+    const auto valid
+        = [&](int64_t value) { return value >= low && value <= high && (!lattice || pdn->ok(axis, value, size, macro)); };
+    const auto add   = [&](int64_t value) {
+      if (valid(value)) {
         result.push_back({value, phase.misses, phase.coverage});
       }
     };
     if (edges) {
       for (int64_t edge : *edges) {
         const auto center = static_cast<int64_t>(std::floor(double(edge - phase.value) / p.period[axis]));
-        add(phase.value + center * p.period[axis]);
-        add(phase.value + (center + 1) * p.period[axis]);
+        if (!lattice) {
+          add(phase.value + center * p.period[axis]);
+          add(phase.value + (center + 1) * p.period[axis]);
+          continue;
+        }
+        // The nearest lattice-admitted value on each side of the edge.
+        for (int64_t delta = 0; delta <= steps; ++delta) {
+          if (valid(phase.value + (center - delta) * p.period[axis])) {
+            add(phase.value + (center - delta) * p.period[axis]);
+            break;
+          }
+        }
+        for (int64_t delta = 1; delta <= steps + 1; ++delta) {
+          if (valid(phase.value + (center + delta) * p.period[axis])) {
+            add(phase.value + (center + delta) * p.period[axis]);
+            break;
+          }
+        }
       }
     } else {
       const auto center = std::llround(double(old - phase.value) / p.period[axis]);
-      for (int delta = -4; delta <= 4; ++delta) {
+      for (int64_t delta = -steps; delta <= steps; ++delta) {
         add(phase.value + (center + delta) * p.period[axis]);
       }
     }
@@ -246,7 +299,7 @@ std::vector<Candidate> candidates(const Profile& p, int axis, int64_t old, int64
 // difference bounds make compact strips move together instead of blocking one
 // another; the original frame is changed only after the complete proof passes.
 bool coherent_macro_tracks(const ph::Technology& tech, const ph::Floorplan& layout, std::vector<ph::Component>& cells,
-                           const Clearance& k) {
+                           const Clearance& k, const Pg_macro_alignment* alignment, const Member_spans* members) {
   const auto hx = k.hx, hy = k.hy;
   if (cells.empty() || cells.size() > 4096 || layout.rows.empty()) {
     return false;
@@ -266,6 +319,7 @@ bool coherent_macro_tracks(const ph::Technology& tech, const ph::Floorplan& layo
     core.xh = std::max(core.xh, row.x + row.count * row.step);
     core.yh = std::max<int64_t>(core.yh, row.y + std::llround(tech.sites.at(row.site).height * tech.dbu));
   }
+  const Pdn_check                                            pdn{alignment, core, members};
   std::map<std::pair<std::string, ph::Orientation>, Profile> cache;
   std::vector<const Profile*>                                profiles(cells.size(), nullptr);
   for (size_t i = 0; i < cells.size(); ++i) {
@@ -344,10 +398,24 @@ bool coherent_macro_tracks(const ph::Technology& tech, const ph::Floorplan& layo
         if (first > last) {
           continue;
         }
-        const auto n     = std::clamp<int64_t>(std::llround(double(target - phase.value) / p.period[axis]), first, last);
-        const auto value = phase.value + n * p.period[axis];
-        if (!best || std::pair{std::abs(value - target), value} < std::pair{std::abs(*best - target), *best}) {
-          best = value;
+        const auto n    = std::clamp<int64_t>(std::llround(double(target - phase.value) / p.period[axis]), first, last);
+        const auto size = axis == 0 ? original[i].place.width : original[i].place.height;
+        const auto take = [&](int64_t m) {
+          const auto value = phase.value + m * p.period[axis];
+          if (m < first || m > last || !pdn.ok(axis, value, size, original[i].macro)) {
+            return;
+          }
+          if (!best || std::pair{std::abs(value - target), value} < std::pair{std::abs(*best - target), *best}) {
+            best = value;
+          }
+        };
+        take(n);
+        if (pdn.active(axis)) {
+          // Nearest lattice-admitted value within the bounds.
+          for (int64_t delta = 1, steps = pdn.steps(axis, p.period[axis]); delta <= steps; ++delta) {
+            take(n - delta);
+            take(n + delta);
+          }
         }
       }
       return best;
@@ -397,8 +465,10 @@ bool coherent_macro_tracks(const ph::Technology& tech, const ph::Floorplan& layo
   for (size_t i = 0; i < cells.size(); ++i) {
     if (!fixed(i)) {
       const auto b  = box(tech, cells[i], hx, hy);
-      valid        &= b.xl >= core.xl && b.yl >= core.yl && b.xh <= core.xh && b.yh <= core.yh
-                      && !inaccessible(*profiles[i], cells[i].place.x, cells[i].place.y);
+      valid         &= b.xl >= core.xl && b.yl >= core.yl && b.xh <= core.xh && b.yh <= core.yh
+               && !inaccessible(*profiles[i], cells[i].place.x, cells[i].place.y)
+               && pdn.ok(0, cells[i].place.x, cells[i].place.width, cells[i].macro)
+               && pdn.ok(1, cells[i].place.y, cells[i].place.height, cells[i].macro);
     }
     for (size_t j = 0; j < i; ++j) {
       if (!fixed(i) || !fixed(j)) {
@@ -511,7 +581,8 @@ std::function<bool(const std::vector<ph::Component>&)> make_rigid_macro_track_ch
 }
 
 void legalize_macro_tracks_impl(const ph::Technology& tech, const ph::Floorplan& layout, std::vector<ph::Component>& cells,
-                                const Clearance& k, bool move_macros, bool repack) {
+                                const Clearance& k, bool move_macros, bool repack, const Pg_macro_alignment* alignment,
+                                const Member_spans* members = nullptr) {
   const auto halo_x = k.hx, halo_y = k.hy;
   if (layout.rows.empty()) {
     return;
@@ -527,6 +598,7 @@ void legalize_macro_tracks_impl(const ph::Technology& tech, const ph::Floorplan&
     core.xh           = std::max(core.xh, row.x + row.count * row.step);
     core.yh           = std::max<int64_t>(core.yh, row.y + height);
   }
+  const Pdn_check     pdn{alignment, core, members};
   const auto fixed = [](const auto& c) { return c.place.status == ph::Status::FIXED || c.place.status == ph::Status::LOCKED; };
   std::vector<size_t> blockers;
   for (size_t i = 0; i < cells.size(); ++i) {
@@ -550,6 +622,10 @@ void legalize_macro_tracks_impl(const ph::Technology& tech, const ph::Floorplan&
     }
     if (!(profile_of(c).pins.empty() && grid == 1)) {
       return true;
+    }
+    if (!fixed(c) && (pdn.active(0) || pdn.active(1))
+        && !(pdn.ok(0, c.place.x, c.place.width, c.macro) && pdn.ok(1, c.place.y, c.place.height, c.macro))) {
+      return true;  // off the power-grid strap lattice
     }
     // A pinless body on a unit grid has no phase to correct; it still moves when it violates a clearance.
     return !fixed(c) && std::any_of(blockers.begin(), blockers.end(), [&](size_t j) {
@@ -596,8 +672,24 @@ void legalize_macro_tracks_impl(const ph::Technology& tech, const ph::Floorplan&
       y_edges.push_back(o.y + o.height + sy);
     }
     for (int pass = 0; pass < 2 && !placed; ++pass) {
-      const auto xs = candidates(p, 0, original.x, core.xl + halo_x, core.xh - c.place.width - halo_x, pass ? &x_edges : nullptr);
-      const auto ys = candidates(p, 1, original.y, core.yl + halo_y, core.yh - c.place.height - halo_y, pass ? &y_edges : nullptr);
+      const auto xs = candidates(p,
+                                 0,
+                                 original.x,
+                                 core.xl + halo_x,
+                                 core.xh - c.place.width - halo_x,
+                                 pass ? &x_edges : nullptr,
+                                 &pdn,
+                                 c.place.width,
+                                 c.macro);
+      const auto ys = candidates(p,
+                                 1,
+                                 original.y,
+                                 core.yl + halo_y,
+                                 core.yh - c.place.height - halo_y,
+                                 pass ? &y_edges : nullptr,
+                                 &pdn,
+                                 c.place.height,
+                                 c.macro);
       struct Position {
         int64_t  x, y;
         unsigned misses;
@@ -648,26 +740,24 @@ void legalize_macro_tracks_impl(const ph::Technology& tech, const ph::Floorplan&
     }
   }
 }
-void legalize_macro_tracks(const ph::Technology& tech, const ph::Floorplan& layout, std::vector<ph::Component>& cells,
-                           int64_t halo_x, int64_t halo_y, bool move_macros, int64_t channel_x, int64_t channel_y) {
-  if (halo_x < 0 || halo_y < 0 || channel_x < 0 || channel_y < 0) {
-    throw std::invalid_argument("macro halo and channel must be nonnegative");
-  }
-  const Clearance k(halo_x, halo_y, channel_x, channel_y);
-  const auto      original = cells;
+namespace {
+void legalize_macro_tracks_with(const ph::Technology& tech, const ph::Floorplan& layout, std::vector<ph::Component>& cells,
+                                const Clearance& k, bool move_macros, const Pg_macro_alignment* pdn,
+                                const Member_spans* members = nullptr) {
+  const auto original = cells;
   try {
     // Validate every immutable macro before an early movable failure can enter
     // a recovery path. Recovery treats fixed geometry solely as obstacles.
     if (move_macros) {
-      legalize_macro_tracks_impl(tech, layout, cells, k, false, false);
+      legalize_macro_tracks_impl(tech, layout, cells, k, false, false, nullptr);
     }
-    legalize_macro_tracks_impl(tech, layout, cells, k, move_macros, false);
+    legalize_macro_tracks_impl(tech, layout, cells, k, move_macros, false, pdn, members);
   } catch (const std::runtime_error& failure) {
     cells = original;
     if (!move_macros || !std::string(failure.what()).starts_with("no legal macro routing-track alignment near ")) {
       throw;
     }
-    if (coherent_macro_tracks(tech, layout, cells, k)) {
+    if (coherent_macro_tracks(tech, layout, cells, k, pdn, members)) {
       return;
     }
     cells = original;
@@ -675,17 +765,54 @@ void legalize_macro_tracks(const ph::Technology& tech, const ph::Floorplan& layo
     // movable macro remains an obstacle. Repack transactionally against fixed
     // geometry and completed macros; preserve the original frame on failure.
     try {
-      legalize_macro_tracks_impl(tech, layout, cells, k, move_macros, true);
+      legalize_macro_tracks_impl(tech, layout, cells, k, move_macros, true, pdn, members);
     } catch (...) {
       cells = original;
       throw;
     }
   }
 }
+void legalize_macro_tracks_lattice(const ph::Technology& tech, const ph::Floorplan& layout, std::vector<ph::Component>& cells,
+                                   int64_t halo_x, int64_t halo_y, bool move_macros, int64_t channel_x, int64_t channel_y,
+                                   const Pg_macro_alignment* pdn, bool* pdn_aligned, const Member_spans* members) {
+  if (halo_x < 0 || halo_y < 0 || channel_x < 0 || channel_y < 0) {
+    throw std::invalid_argument("macro halo and channel must be nonnegative");
+  }
+  const Clearance k(halo_x, halo_y, channel_x, channel_y);
+  const bool      lattice = move_macros && pdn && pdn->active();
+  if (pdn_aligned) {
+    *pdn_aligned = lattice;
+  }
+  if (!lattice) {
+    legalize_macro_tracks_with(tech, layout, cells, k, move_macros, nullptr);
+    return;
+  }
+  const auto original = cells;
+  try {
+    legalize_macro_tracks_with(tech, layout, cells, k, move_macros, pdn, members);
+  } catch (const std::runtime_error& failure) {
+    if (!std::string(failure.what()).starts_with("no legal macro routing-track alignment near ")) {
+      throw;
+    }
+    // The strap lattice is a placement preference on top of legality: without a lattice-aligned frame keep the
+    // routing-track alignment alone.
+    cells = original;
+    if (pdn_aligned) {
+      *pdn_aligned = false;
+    }
+    legalize_macro_tracks_with(tech, layout, cells, k, move_macros, nullptr);
+  }
+}
+}  // namespace
+void legalize_macro_tracks(const ph::Technology& tech, const ph::Floorplan& layout, std::vector<ph::Component>& cells,
+                           int64_t halo_x, int64_t halo_y, bool move_macros, int64_t channel_x, int64_t channel_y,
+                           const Pg_macro_alignment* pdn, bool* pdn_aligned) {
+  legalize_macro_tracks_lattice(tech, layout, cells, halo_x, halo_y, move_macros, channel_x, channel_y, pdn, pdn_aligned, nullptr);
+}
 
 void legalize_rigid_macro_tracks(const ph::Technology& tech, const ph::Floorplan& layout, std::vector<ph::Component>& cells,
                                  const std::vector<uint64_t>& ids, int64_t hx, int64_t hy, bool move, int64_t channel_x,
-                                 int64_t channel_y) {
+                                 int64_t channel_y, const Pg_macro_alignment* pdn, bool* pdn_aligned) {
   if (ids.size() != cells.size()) {
     throw std::invalid_argument("rigid track group id size mismatch");
   }
@@ -707,6 +834,7 @@ void legalize_rigid_macro_tracks(const ph::Technology& tech, const ph::Floorplan
   }
   const auto fixed = [](const auto& c) { return c.place.status == ph::Status::FIXED || c.place.status == ph::Status::LOCKED; };
   std::map<std::pair<std::string, ph::Orientation>, Profile> member_profiles;
+  Member_spans                                               member_spans;  // the PDN lattice checks every member edge
   for (size_t j = 0; j < proxies.size(); ++j) {
     if (!ids[members[j].front()]) {
       continue;
@@ -757,6 +885,12 @@ void legalize_rigid_macro_tracks(const ph::Technology& tech, const ph::Floorplan
     while (proxy_tech.macros.contains(name)) {
       name += "_";
     }
+    auto& spans = member_spans[name];
+    for (const auto i : members[j]) {
+      const auto& c = cells[i];
+      spans[0].push_back({c.place.x - xl, c.place.width});
+      spans[1].push_back({c.place.y - yl, c.place.height});
+    }
     proxy_tech.macros.emplace(name, std::move(master));
     proxy.macro             = name;
     proxy.place.x           = xl;
@@ -766,7 +900,9 @@ void legalize_rigid_macro_tracks(const ph::Technology& tech, const ph::Floorplan
     proxy.place.orientation = ph::Orientation::N;
   }
   const auto before = proxies;
-  legalize_macro_tracks(proxy_tech, layout, proxies, hx, hy, move, channel_x, channel_y);
+  // Routing tracks align each group's bounding box (members keep their packing inside it); the PDN lattice admits a
+  // group position only when every member macro's edges are admitted.
+  legalize_macro_tracks_lattice(proxy_tech, layout, proxies, hx, hy, move, channel_x, channel_y, pdn, pdn_aligned, &member_spans);
   auto result = cells;
   for (size_t j = 0; j < proxies.size(); ++j) {
     const int64_t dx = proxies[j].place.x - before[j].place.x;

@@ -1083,6 +1083,20 @@ livehd::placement::Options placement_options(const Options& opts) {
   if (channel_text != "auto") {
     out.macro_channel = parse_halo(channel_text, "place.macro.channel");
   }
+  out.macro_pdn = synth_set(opts, "place.macro.pdn", "auto");
+  if (out.macro_pdn != "auto" && out.macro_pdn != "align" && out.macro_pdn != "gap" && out.macro_pdn != "off") {
+    throw Lhd_error{"usage", "invalid synth.place.macro.pdn", "expected auto, align, gap or off"};
+  }
+  if (const auto origin_text = synth_set(opts, "place.macro.pdn_origin", "core"); origin_text != "core") {
+    char*      end   = nullptr;
+    const auto x     = std::strtod(origin_text.c_str(), &end);
+    const bool comma = end != origin_text.c_str() && *end == ',';
+    const auto y     = comma ? std::strtod(end + 1, &end) : 0.0;
+    if (!comma || *end != '\0' || !std::isfinite(x) || !std::isfinite(y)) {
+      throw Lhd_error{"usage", "invalid synth.place.macro.pdn_origin", "expected core or X,Y microns"};
+    }
+    out.macro_pdn_origin = std::pair{x, y};
+  }
   const auto edge_snap_text = synth_set(opts, "place.macro.edge_snap", "off");
   if (edge_snap_text == "auto") {
     out.macro_edge_snap = std::pair{-1.0, -1.0};
@@ -1134,7 +1148,23 @@ livehd::placement::Options placement_options(const Options& opts) {
   }
   out.final_cells           = truthy(synth_set(opts, "place.final", "true"));
   out.final_iterations      = integer("place.final.iterations", "0");
-  out.fp_place              = truthy(synth_set(opts, "place.fp", "false"));
+  const auto fp_mode        = synth_set(opts, "place.fp", "auto");
+  if (fp_mode != "true" && fp_mode != "false" && fp_mode != "1" && fp_mode != "0" && fp_mode != "on" && fp_mode != "off"
+      && fp_mode != "auto") {
+    throw Lhd_error{"usage", "invalid synth.place.fp: " + fp_mode, "expected true, false, on, off or auto"};
+  }
+  out.fp_auto         = fp_mode == "auto";
+  out.fp_place        = !out.fp_auto && truthy(fp_mode);
+  out.fp_auto_options = {.share          = number("place.fp.auto_share", "0.2"),
+                         .min_copies     = static_cast<int>(integer("place.fp.auto_min_copies", "2")),
+                         .min_copy_share = number("place.fp.auto_min_copy_share", "0.02"),
+                         .tolerance      = number("place.fp.auto_tolerance", "0.05"),
+                         .candidates     = truthy(synth_set(opts, "place.fp.auto_candidates", "true"))};
+  try {
+    out.fp_auto_options.validate();
+  } catch (const std::invalid_argument& e) {
+    throw Lhd_error{"usage", "invalid synth.place.fp.auto_* controls", e.what()};
+  }
   out.fp_snap_enabled       = truthy(synth_set(opts, "place.fp.snap", "true"));
   out.fp_colors             = truthy(synth_set(opts, "place.fp.colors", "false"));
   out.fp_color_source       = synth_set(opts, "place.fp.color_source", "synthesis");

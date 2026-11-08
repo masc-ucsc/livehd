@@ -51,7 +51,8 @@ std::vector<physical::Row> cut_macro_rows(const ph::Floorplan& frame, const ph::
       std::swap(width, height);
     }
     const ph::Rect bounds{double(inst.place.x), double(inst.place.y), double(inst.place.x) + width, double(inst.place.y) + height};
-    if (master.klass.starts_with("BLOCK") || master.virtual_proxy) {
+    if ((master.klass.starts_with("BLOCK") && !ph::soft_block(master)) || master.virtual_proxy) {
+      // (soft blocks, CLASS BLOCK SOFT, are standard-cell regions and keep their rows)
       blockages.push_back({bounds.xl - halo_x, bounds.yl - halo_y, bounds.xh + halo_x, bounds.yh + halo_y});
     } else if ((master.klass.starts_with("CORE") || master.klass.starts_with("ENDCAP"))
                && (inst.place.status == ph::Status::FIXED || inst.place.status == ph::Status::LOCKED)) {
