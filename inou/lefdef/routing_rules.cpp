@@ -344,6 +344,12 @@ public:
   }
 };
 }  // namespace
+Rule_check check_metal_union_context(const Shape& query, std::span<const Shape> context) {
+  if (query.layer.empty() || !integral_dbu(query.rect) || query.rect.empty() || context.empty() || !union_covers(query, context)) {
+    return reject("invalid native metal union context");
+  }
+  return {true, {}};
+}
 Signal_metal_rules::Signal_metal_rules(const Technology& tech, const Floorplan& fp) : dbu_(fp.dbu) {
   rules_.manufacturing_grid = tech.manufacturing_grid;
   rules_.layers             = tech.layers;
@@ -556,7 +562,8 @@ Rule_check Signal_metal_rules::spacing_context(const Shape& a, const Shape& b, s
   if (!ordinary.legal) {
     return ordinary;
   }
-  if ((!a_union.empty() && !union_covers(a, a_union)) || (!b_union.empty() && !union_covers(b, b_union))) {
+  if ((!a_union.empty() && !check_metal_union_context(a, a_union).legal)
+      || (!b_union.empty() && !check_metal_union_context(b, b_union).legal)) {
     return reject("invalid native metal union context");
   }
   // Keep the legacy rectangular hot path allocation-free.

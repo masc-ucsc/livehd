@@ -323,7 +323,7 @@ std::string check_metal(const ph::Technology& tech, const ph::Floorplan& frame, 
       const auto other = scene.at(q);
       const auto verdict
           = cut == tech.cut_layers.end()
-                ? rules.spacing(shape, other.shape)
+                ? rules.spacing_with_union(shape, other.shape, owner_union)
                 : ph::Rule_check{!ph::violates_cut_spacing(shape.rect, other.shape.rect, double(*clearance)), "cut spacing"};
       if (!verdict.legal) {
         return std::format("native spacing on {} [{},{},{},{}] against {} [{},{},{},{}]: {}",

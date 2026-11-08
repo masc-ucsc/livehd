@@ -24,6 +24,11 @@ Rule_check check_metal_rectangle(const Technology&, int64_t dbu, const Shape&);
 // Rules conditional on context use a conservative upper bound when checking
 // only this pair (e.g. EOL parallel-edge conditions).
 Rule_check check_metal_spacing(const Technology&, int64_t dbu, const Shape&, const Shape&);
+// Exact geometric coverage for an explicit contour context. Query and all
+// same-layer context rectangles must be nonempty integral DBU rectangles; an
+// empty context fails. Other layers are ignored. This does not prove ownership,
+// manufacturing rules or electrical connectivity.
+Rule_check check_metal_union_context(const Shape& query, std::span<const Shape> context);
 // Compiles the supported ASAP7 LEF58 forms once. EOL/keepout checks are
 // directional and corner checks require facing convex corners. Parallel-edge
 // trigger conditions are conservatively assumed active. The original LEF model is

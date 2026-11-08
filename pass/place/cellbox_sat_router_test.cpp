@@ -648,5 +648,41 @@ TEST(CellboxSatRouter, SourceGroupsNeverHideDifferentPinsOrOutOfDieOverhangs) {
   EXPECT_NE(f.solve().status, Cellbox_sat_status::complete);
 }
 
+TEST(CellboxSatRouter, RoutedViaOnCappedSourcePinUsesExactContourAgainstPg) {
+  Fixture f;
+  auto&   layer       = f.tech.layers["M1"];
+  layer.width         = .018;
+  layer.rules.spacing = {
+      {.018, {}, {}}
+  };
+  layer.rules.properties["LEF58_EOLKEEPOUT"] = {"EOLKEEPOUT .01825 EXTENSION 0 0 .031 ;"};
+  f.tech.macros["cell"].pins["A"].shapes     = {
+      {"M1", {.032, .027, .050, .243}},
+      {"M1",    {0, .225, .050, .243}},
+      {"M1",    {0, .027, .050, .045}}
+  };
+  f.tech.vias["V1_DEF"].shapes.front().rect = {-.009, -.010, .009, .010};
+  f.cell(100, 250);
+  f.cell(400, 250);
+  f.net("internal",
+        {
+            {0, "A"},
+            {1, "A"}
+  },
+        {325},
+        {});
+  f.background.insert({
+      {"M1", {0, 511, 800, 529}},
+      "VDD"
+  });
+  const auto routed = f.solve();
+  ASSERT_EQ(routed.status, Cellbox_sat_status::complete) << routed.reason;
+  ASSERT_EQ(routed.routes.size(), 1u);
+  EXPECT_FALSE(routed.routes.front().geometry.paths.empty());
+  EXPECT_TRUE(f.connectivity(routed, 0).connected);
+  EXPECT_GT(routed.metrics.route_trials, 0u);
+  EXPECT_GT(routed.metrics.route_sat_calls, 0u);
+}
+
 }  // namespace
 }  // namespace livehd::placement

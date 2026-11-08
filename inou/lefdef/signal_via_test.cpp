@@ -126,6 +126,36 @@ TEST(SignalVia, ExactOwnerContourRemovesOnlyCoveredLandingEol) {
   });
   EXPECT_EQ(check(owner).reason, "signal cut spacing");
 }
+TEST(SignalVia, ExplicitOwnerContextRequiresCoverageEvenWithoutNearbyMetal) {
+  Fixture f;
+  ASSERT_EQ(f.occupancy.size(), 0u);
+  const auto check = [&](std::span<const Shape> context) {
+    return check_signal_via(f.tech,
+                            f.fp,
+                            Signal_metal_rules(f.tech, f.fp),
+                            f.occupancy,
+                            {"VIA23"},
+                            1000,
+                            1000,
+                            f.landings,
+                            "self",
+                            context);
+  };
+  EXPECT_TRUE(check({}).legal);  // No explicit context preserves the default.
+  EXPECT_TRUE(check(f.landings).legal);
+  auto uncovered        = f.landings;
+  uncovered[1].rect.yl += 1;
+  EXPECT_FALSE(check(uncovered).legal);
+  auto fractional        = f.landings;
+  fractional[1].rect.yl -= .5;
+  EXPECT_FALSE(check(fractional).legal);
+  EXPECT_FALSE(check(std::span<const Shape>(f.landings.data(), 1)).legal);
+  std::vector<Shape> split{f.landings[0], f.landings[1], f.landings[1]};
+  split[1].rect.yh = split[2].rect.yl = 1000;
+  EXPECT_TRUE(check(split).legal);  // Exact union coverage, no hull shortcut.
+  split[2].rect.yl = 1001;
+  EXPECT_FALSE(check(split).legal);
+}
 TEST(SignalVia, NewCutSetKeepsSpacingBetweenProposalCuts) {
   Fixture        f;
   Signal_cut_set cuts(f.tech, f.fp);

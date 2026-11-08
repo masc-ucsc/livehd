@@ -131,6 +131,13 @@ Rule_check check_signal_via(const Technology& tech, const Floorplan& fp, const S
   if (const auto layers = check_landing_layers(tech, landings); !layers.legal) {
     return layers;
   }
+  if (!owner_union.empty()) {
+    for (const auto& landing : landings) {
+      if (const auto context = check_metal_union_context(landing, owner_union); !context.legal) {
+        return context;
+      }
+    }
+  }
   if (std::any_of(fp.vias.begin(), fp.vias.end(), [&](const auto& local) { return local.name == via.name; })) {
     return fail("DEF overrides LEF signal via");
   }
