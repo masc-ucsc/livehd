@@ -455,6 +455,9 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
         continue;
       }
       Cgen_sim::Native_loop binding{loop->index_input, loop->activation_input, loop->next_active_output, {}};
+      if (loop->count <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) {
+        binding.bounds = std::array<int64_t, 3>{static_cast<int64_t>(loop->count), loop->first, loop->step};
+      }
       for (const auto& carry : node.subnode_group().carries()) {
         binding.carries.emplace_back(carry.input_port(), carry.output_port());
       }
@@ -480,11 +483,16 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
       if (!inserted && it->second) {
         auto&      previous    = *it->second;
         const auto merged_bits = previous.index_bits && binding.index_bits ? std::max(previous.index_bits, binding.index_bits) : 0u;
-        previous.index_bits    = binding.index_bits;
+        // Instances with different domains share the body; only the constant
+        // domain is dropped (the runtime one serves them all).
+        const auto merged_bounds = previous.bounds == binding.bounds ? previous.bounds : std::nullopt;
+        previous.index_bits      = binding.index_bits;
+        binding.bounds           = previous.bounds;
         if (previous != binding) {
           it->second.reset();
         } else {
           previous.index_bits = merged_bits;
+          previous.bounds     = merged_bounds;
         }
       }
     }

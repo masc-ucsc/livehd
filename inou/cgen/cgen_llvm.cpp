@@ -1625,6 +1625,29 @@ public:
         builder.CreateOr(builder.CreateAnd(old, builder.getInt64(~mask)), builder.CreateAnd(bits, builder.getInt64(mask))),
         ptr);
   }
+  // Zero a transport buffer in the SHAPE its fields are accessed in: a value
+  // owning whole words takes one store of its own width, and only words
+  // shared by narrow values are zeroed word by word. Per-word zeroing of a
+  // 512-bit value made SROA split it into eight i64 pieces, rebuilt with
+  // zext/shl/or wherever the value is used whole (every loop trip).
+  // `widths[i]` is field i's width, 0 for a field that is not in the buffer.
+  void zero_fields(llvm::Value* base, size_t words, const std::vector<Packed_field>& fields, const std::vector<uint32_t>& widths) {
+    std::vector<bool> zeroed(words, false);
+    for (size_t i = 0; i < fields.size() && i < widths.size(); ++i) {
+      if (widths[i] == 0 || !fields[i].alone) {
+        continue;
+      }
+      store_packed(llvm::ConstantInt::get(builder.getIntNTy(widths[i]), 0), base, fields[i].word, widths[i]);
+      for (size_t w = fields[i].word; w < std::min(words, fields[i].word + word_count(widths[i])); ++w) {
+        zeroed[w] = true;
+      }
+    }
+    for (size_t w = 0; w < words; ++w) {
+      if (!zeroed[w]) {
+        builder.CreateStore(builder.getInt64(0), builder.CreateConstInBoundsGEP1_64(builder.getInt64Ty(), base, w));
+      }
+    }
+  }
   void zero_words(llvm::Value* base, size_t words) {
     for (size_t i = 0; i < words; ++i) {
       builder.CreateStore(builder.getInt64(0), builder.CreateConstInBoundsGEP1_64(builder.getInt64Ty(), base, i));
@@ -1743,6 +1766,7 @@ public:
     uint32_t          bits       = 0;  // entry width
     uint32_t          store_bits = 0;  // natural storage width of one entry
     uint64_t          size       = 0;
+    bool              packed     = false;  // one packed integer (small odd-width entries)
     llvm::AllocaInst* storage    = nullptr;
   };
   std::vector<Array_local> arrays;
@@ -2470,8 +2494,21 @@ size_t Cgen_llvm::array_create(uint32_t bits, uint64_t size) {
   a.bits       = std::max<uint32_t>(bits, 1);
   a.store_bits = a.bits <= 8 ? 8 : a.bits <= 16 ? 16 : a.bits <= 32 ? 32 : static_cast<uint32_t>(word_count(a.bits) * 64);
   a.size       = std::max<uint64_t>(size, 1);
+  // A small array of odd-width entries ([16]U1, [16]U5) lives as ONE packed
+  // integer (its own value layout): seeding and the whole read are free, an
+  // entry read is a shift, a write a masked merge, and SROA keeps the whole
+  // array in registers. Byte-per-entry storage would unpack and repack it on
+  // every read sequence.
+  const auto whole        = a.bits * a.size;
+  a.packed                = a.store_bits != a.bits && whole <= 128;
   auto&             entry = impl_->builder.GetInsertBlock()->getParent()->getEntryBlock();
   llvm::IRBuilder<> allocations(&entry, entry.getFirstInsertionPt());
+  if (a.packed) {
+    a.storage = allocations.CreateAlloca(impl_->builder.getIntNTy(static_cast<uint32_t>(whole)), nullptr, "array.packed");
+    a.storage->setAlignment(llvm::Align(8));
+    impl_->arrays.push_back(a);
+    return impl_->arrays.size() - 1;
+  }
   a.storage = allocations.CreateAlloca(llvm::ArrayType::get(impl_->builder.getIntNTy(a.store_bits), a.size), nullptr, "array");
   a.storage->setAlignment(llvm::Align(a.store_bits >= 64 ? 8 : a.store_bits / 8));
   impl_->arrays.push_back(a);
@@ -2490,7 +2527,7 @@ bool Cgen_llvm::array_seed(size_t array, Value base) {
   }
   const auto whole = static_cast<uint32_t>(a.bits * a.size);
   value            = cast_integer(b, value, whole, base.unsign);
-  if (a.store_bits == a.bits) {
+  if (a.packed || a.store_bits == a.bits) {
     // Entry i sits at bits [i*bits, (i+1)*bits) of the packed value, which is
     // exactly its little-endian place in the array: one wide store.
     b.CreateAlignedStore(value, a.storage, llvm::Align(1));
@@ -2517,10 +2554,29 @@ bool Cgen_llvm::array_write(size_t array, Value enable, Value address, Value dat
     return false;
   }
   auto* valid = b.CreateAnd(impl_->valid_address(address, a.size), b.CreateICmpNE(wen, llvm::ConstantInt::get(wen->getType(), 0)));
+  if (a.packed) {
+    // Branch-free masked merge: an invalid or disabled write merges nothing.
+    const auto whole = static_cast<uint32_t>(a.bits * a.size);
+    auto*      ty    = b.getIntNTy(whole);
+    auto*      shift = b.CreateMul(b.CreateSelect(valid, index, b.getInt64(0)), b.getInt64(a.bits));
+    shift            = cast_integer(b, shift, whole, true);
+    auto* lane       = b.CreateSelect(valid,
+                                      llvm::ConstantInt::get(ty, llvm::APInt::getLowBitsSet(whole, a.bits)),
+                                      llvm::ConstantInt::get(ty, 0));
+    auto* mask       = b.CreateShl(lane, shift);
+    auto* put = b.CreateShl(b.CreateAnd(cast_integer(b, cast_integer(b, value, a.bits, data.unsign), whole, true), lane), shift);
+    auto* old = b.CreateAlignedLoad(ty, a.storage, llvm::Align(8));
+    b.CreateAlignedStore(b.CreateOr(b.CreateAnd(old, b.CreateNot(mask)), put), a.storage, llvm::Align(8));
+    return true;
+  }
+  // Branch-free: a disabled or out-of-range write stores the entry's own
+  // value back at a clamped index, so the store needs no basic block of its
+  // own and the body stays one straight-line block LLVM can schedule.
   auto* entry = cast_integer(b, cast_integer(b, value, a.bits, data.unsign), a.store_bits, true);
-  impl_->when(valid, [&] {
-    b.CreateStore(entry, b.CreateInBoundsGEP(a.storage->getAllocatedType(), a.storage, {b.getInt64(0), index}));
-  });
+  auto* ptr
+      = b.CreateInBoundsGEP(a.storage->getAllocatedType(), a.storage, {b.getInt64(0), b.CreateSelect(valid, index, b.getInt64(0))});
+  auto* old = b.CreateLoad(entry->getType(), ptr);
+  b.CreateStore(b.CreateSelect(valid, entry, old), ptr);
   return true;
 }
 
@@ -2532,8 +2588,15 @@ Cgen_llvm::Value Cgen_llvm::array_read(size_t array, Value address, uint32_t res
   auto&       b     = impl_->builder;
   auto*       valid = impl_->valid_address(address, a.size);
   auto*       index = b.CreateSelect(valid, cast_integer(b, impl_->get(address), 64, address.unsign), b.getInt64(0));
-  llvm::Value* value
-      = b.CreateLoad(b.getIntNTy(a.store_bits), b.CreateInBoundsGEP(a.storage->getAllocatedType(), a.storage, {b.getInt64(0), index}));
+  llvm::Value* value = nullptr;
+  if (a.packed) {
+    const auto whole = static_cast<uint32_t>(a.bits * a.size);
+    auto*      all   = b.CreateAlignedLoad(b.getIntNTy(whole), a.storage, llvm::Align(8));
+    value            = b.CreateLShr(all, cast_integer(b, b.CreateMul(index, b.getInt64(a.bits)), whole, true));
+  } else {
+    value = b.CreateLoad(b.getIntNTy(a.store_bits),
+                         b.CreateInBoundsGEP(a.storage->getAllocatedType(), a.storage, {b.getInt64(0), index}));
+  }
   value = cast_integer(b, value, a.bits, true);
   value = b.CreateSelect(valid, value, llvm::ConstantInt::get(value->getType(), 0));  // out of range reads 0
   return impl_->remember(cast_integer(b, value, result_width, result_unsign), result_width, result_unsign);
@@ -2547,7 +2610,7 @@ Cgen_llvm::Value Cgen_llvm::array_read_all(size_t array, uint32_t result_width, 
   auto&        b     = impl_->builder;
   const auto   whole = static_cast<uint32_t>(a.bits * a.size);
   llvm::Value* value = nullptr;
-  if (a.store_bits == a.bits) {
+  if (a.packed || a.store_bits == a.bits) {
     value = b.CreateAlignedLoad(b.getIntNTy(whole), a.storage, llvm::Align(1));
   } else {
     value = llvm::ConstantInt::get(b.getIntNTy(whole), 0);
@@ -3299,7 +3362,7 @@ bool Cgen_llvm::inline_body(const Inline_body& body, const std::vector<Value>& i
   auto*                           packed_out = impl_->local_words(output_words, "inline.outputs");
   auto* changed = impl_->local_words(word_count(static_cast<uint32_t>(body.outputs.size())), "inline.changed");
   if (!body.scalar) {
-    impl_->zero_words(packed_in, input_words);
+    impl_->zero_fields(packed_in, input_words, in_fields, widths_of(body.inputs));
   }
   for (size_t i = 0; i < inputs.size(); ++i) {
     auto* value = impl_->get(resize(inputs[i], body.inputs[i].first, body.inputs[i].second));
@@ -3311,9 +3374,7 @@ bool Cgen_llvm::inline_body(const Inline_body& body, const std::vector<Value>& i
   }
   // Changed tracking is dead after inlining, but its old-output reads must
   // still have defined values before dead-code elimination.
-  for (size_t i = 0; i < output_words; ++i) {
-    b.CreateStore(b.getInt64(0), b.CreateConstInBoundsGEP1_64(b.getInt64Ty(), packed_out, i));
-  }
+  impl_->zero_fields(packed_out, output_words, out_fields, widths_of(body.outputs));
   if (!body.scalar) {
     args = {packed_in, packed_out, changed};
   }
@@ -3433,10 +3494,8 @@ bool Cgen_llvm::inline_loop(const Inline_body& body, const Loop_layout& layout, 
   auto*      packed_in  = impl_->local_words(input_words, "loop.inputs");
   auto*      packed_out = impl_->local_words(output_words, "loop.outputs");
   auto*      changed    = impl_->local_words(word_count(static_cast<uint32_t>(body.outputs.size())), "loop.changed");
-  impl_->zero_words(packed_in, input_words);
-  for (size_t i = 0; i < output_words; ++i) {
-    b.CreateStore(b.getInt64(0), b.CreateConstInBoundsGEP1_64(i64, packed_out, i));
-  }
+  impl_->zero_fields(packed_in, input_words, in_fields, widths_of(body.inputs));
+  impl_->zero_fields(packed_out, output_words, out_fields, widths_of(body.outputs));
   for (const auto& [input, output] : layout.carries) {
     const auto width = body.outputs[output].first;
     impl_->store_field(cast_integer(b, initial[input], width, layout.inputs[input].second), packed_out, out_fields[output], width);
@@ -3674,9 +3733,16 @@ bool Cgen_llvm::add_loop(std::string_view entry, const Loop_layout& layout, std:
   auto*       packed_in  = impl_->local_words(impl_->input_words, "body.inputs");
   auto*       packed_out = impl_->local_words(output_words, "body.outputs");
   auto*       changed    = impl_->local_words(word_count(static_cast<uint32_t>(impl_->output_values.size())), "body.changed");
-  impl_->zero_words(packed_in, impl_->input_words);
-  for (size_t i = 0; i < output_words; ++i) {
-    b.CreateStore(b.getInt64(0), b.CreateConstInBoundsGEP1_64(i64, packed_out, i));
+  {
+    std::vector<uint32_t> in_widths(in_fields.size(), 0), out_widths(out_fields.size(), 0);
+    for (size_t i = 0; i < in_widths.size() && i < impl_->input_types.size(); ++i) {
+      in_widths[i] = impl_->input_storage[i] ? 0u : impl_->input_types[i].first;
+    }
+    for (size_t i = 0; i < out_widths.size() && i < impl_->output_values.size(); ++i) {
+      out_widths[i] = impl_->output_values[i].dest ? 0u : impl_->output_values[i].value.width;
+    }
+    impl_->zero_fields(packed_in, impl_->input_words, in_fields, in_widths);
+    impl_->zero_fields(packed_out, output_words, out_fields, out_widths);
   }
   for (const auto& [input, output] : layout.carries) {
     const auto width = impl_->output_values[output].value.width;
@@ -3720,10 +3786,20 @@ bool Cgen_llvm::add_loop(std::string_view entry, const Loop_layout& layout, std:
     active->addIncoming(initial[*layout.activation], start);
     values[*layout.activation] = active;
   }
-  b.CreateCondBr(b.CreateICmpULT(ordinal, fn->getArg(2)), body, done);
+  // A compile-time domain replaces the runtime arguments: a constant trip
+  // count and an affine constant index let LLVM unroll and strength-reduce.
+  llvm::Value* trip_count = fn->getArg(2);
+  llvm::Value* trip_first = fn->getArg(3);
+  llvm::Value* trip_step  = fn->getArg(4);
+  if (layout.constant_bounds) {
+    trip_count = b.getInt64(static_cast<uint64_t>((*layout.constant_bounds)[0]));
+    trip_first = b.getInt64(static_cast<uint64_t>((*layout.constant_bounds)[1]));
+    trip_step  = b.getInt64(static_cast<uint64_t>((*layout.constant_bounds)[2]));
+  }
+  b.CreateCondBr(b.CreateICmpULT(ordinal, trip_count), body, done);
   b.SetInsertPoint(body);
   if (layout.index) {
-    auto* index = b.CreateAdd(fn->getArg(3), b.CreateMul(ordinal, fn->getArg(4)));
+    auto* index = b.CreateAdd(trip_first, b.CreateMul(ordinal, trip_step));
     if (layout.index_bits) {
       index = cast_integer(b, index, layout.index_bits, true);
     }

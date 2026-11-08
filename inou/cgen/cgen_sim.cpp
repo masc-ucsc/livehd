@@ -4547,6 +4547,12 @@ std::string Cgen_sim::generation_key(hhds::Graph* g, bool color_root) {
     if (has_loop) {
       const auto& loop = *it->second;
       gd               = fnv1a(gd, loop.index_bits);
+      gd               = fnv1a(gd, loop.bounds.has_value());  // a constant domain is baked into the native entry
+      if (loop.bounds) {
+        for (const auto v : *loop.bounds) {
+          gd = fnv1a(gd, static_cast<uint64_t>(v));
+        }
+      }
       for (const auto port : {loop.index, loop.activation, loop.next_active}) {
         gd = fnv1a(gd, port.has_value());
         if (port) {
@@ -15084,11 +15090,48 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       const bool stateful_loop = op == Ntype_op::Sub && shared_gen_ != nullptr && site.node.base_node().get_subnode_graph()
                                  && shared_gen_->state_loop_ir.contains(site.node.base_node().get_subnode_graph().get())
                                  && !shared_gen_->native_loop_ir.contains(site.node.base_node().get_subnode_graph().get());
-      // Embedding redirects the inner lanes' state flag to this lane's plain
-      // `__color_state_changed`; a framed root keeps it in the frame instead,
-      // so it walks the loop (whose own native loop still holds the nest).
-      if (stateful_loop && frame_dirty_words != 0) {
-        return reject_data("stateful-loop-frame");
+      // Each color embedding a stateful loop walks (advances) it once, so one
+      // phase of it must live in one color (the plan glues a loop's same-slot
+      // outputs). Otherwise the C++ walk, guarded once per period, runs it.
+      if (stateful_loop) {
+        const auto& versions = color_plan_->version_sites();
+        for (size_t other = 0; other < versions.size(); ++other) {
+          if (versions[other].base_site == version.base_site && versions[other].slot == version.slot
+              && direct_version_color[other] != direct_version_color[member]) {
+            return reject_data("stateful-loop-split");
+          }
+        }
+      }
+      // The embedding binds a loop clock port to the slot's level, so the
+      // clock must be this root's plain clock: an activation Clock_cell (a
+      // conditional call) or another gate is a tick the walk qualifies.
+      // A parent gating an instantiated root's clock port withholds periods
+      // through its `<port>__tick` word, which only the walk reads (a compact
+      // body settles a withheld period in `__compact_advance` instead).
+      if (stateful_loop && frame_dirty_words != 0 && !dut_ && !clock_in_fields.empty()) {
+        return reject_data("stateful-loop-tick");
+      }
+      if (stateful_loop) {
+        const auto& local_clocks = local_clocks_for(site.node.get_graph());
+        // The body's guard ports: state clocked on the port, through a gate
+        // rooted at it, or forwarded into a child's guard port.
+        const auto& body_clocks  = clock_guard_ports(site.node.base_node().get_subnode_graph(), port_cache);
+        for (size_t input = 0; input < definition_inputs.size(); ++input) {
+          const auto& driver = definition_inputs[input].driver;
+          const bool  clockish
+              = body_clocks.contains(static_cast<uint32_t>(definition_inputs[input].sink.get_port_id()))
+                || (livehd::graph_util::is_graph_input_pin(driver) && local_clocks.is_clock(driver))
+                || (!driver.is_invalid() && !driver.is_const() && type_op_of(driver.get_master_node()) == Ntype_op::Clock_cell);
+          if (!clockish) {
+            continue;
+          }
+          const auto root = livehd::latch_contract::control_root(occurrence_inputs[input].driver, /*stop_at_clock_cell=*/true);
+          if (root.inverted || root.net.is_invalid() || root.net.is_const()
+              || !livehd::graph_util::is_graph_input_pin(root.net.base_pin()) || root.net.get_graph() != g
+              || pin_name_of(root.net.base_pin()) != clock_input_of(g)) {
+            return reject_data("stateful-loop-clock");
+          }
+        }
       }
       if (op != Ntype_op::Memory && !stateful_loop) {
         const auto& local_clocks = local_clocks_for(site.node.get_graph());
@@ -17220,9 +17263,6 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
               if (!stateful && !shared_gen_->native_loop_ir.contains(child.get())) {
                 return reject("loop body is not available for embedding");
               }
-              if (stateful && frame_dirty_words != 0) {
-                return reject("stateful loop embedding needs the plain state flag");
-              }
               Cgen_sim::Native_loop_ir stateful_ir;
               std::optional<size_t>    tables_resource;
               if (stateful) {
@@ -17379,6 +17419,9 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
           Cgen_llvm::Loop_layout layout;
           layout.trip_tables = true;
           layout.index_bits  = loop.index_bits;
+          if (livehd::debug::env<"LHD_SIM_LOOP_CONST_BOUNDS">() != nullptr) {  // measured slower on gemmini: opt-in
+            layout.constant_bounds = loop.bounds;
+          }
           std::map<hhds::Port_id, size_t> input_indices;
           for (const auto& port : g->get_io()->get_input_pin_decls()) {
             input_indices.emplace(port.port_id, layout.inputs.size());
@@ -17507,6 +17550,9 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
             const auto&            loop = *found->second;
             Cgen_llvm::Loop_layout layout;
             layout.index_bits = loop.index_bits;
+            if (livehd::debug::env<"LHD_SIM_LOOP_CONST_BOUNDS">() != nullptr) {  // measured slower on gemmini: opt-in
+              layout.constant_bounds = loop.bounds;
+            }
             std::map<hhds::Port_id, size_t> input_indices, output_indices;
             for (const auto& port : g->get_io()->get_input_pin_decls()) {
               input_indices.emplace(port.port_id, layout.inputs.size());
@@ -18032,6 +18078,9 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         const auto&            loop = *found->second;
         Cgen_llvm::Loop_layout layout;
         layout.index_bits = loop.index_bits;
+        if (livehd::debug::env<"LHD_SIM_LOOP_CONST_BOUNDS">() != nullptr) {  // measured slower on gemmini: opt-in
+          layout.constant_bounds = loop.bounds;
+        }
         std::map<hhds::Port_id, size_t> inputs, outputs;
         for (const auto& port : g->get_io()->get_input_pin_decls()) {
           inputs.emplace(port.port_id, layout.inputs.size());

@@ -4621,6 +4621,63 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
       cone_stack.push_back(entry.first);
     }
   }
+  // A compact loop walks all its outputs at once (a Site::port_split loop
+  // excepted): its same-slot versions read the same inputs, so each can run
+  // right after the earliest one. Contiguous, the coarsener keeps them in one
+  // color (loop_glued below) and the loop walks once per phase. Spread over two
+  // colors, an embedded STATEFUL loop advanced its registers twice per period
+  // (gemmini Mesh in the framed top: wrong checksum).
+  if (order == plan.version_sites_.size()) {
+    absl::flat_hash_map<std::pair<size_t, int>, uint64_t> first_order;
+    for (const auto& version : plan.version_sites_) {
+      const auto& site = plan.sites_[version.base_site];
+      if (site.kind != Site_kind::loop_control || site.port_split) {
+        continue;
+      }
+      const auto [it, inserted]
+          = first_order.try_emplace(std::pair{version.base_site, static_cast<int>(version.slot)}, version.execution_order);
+      if (!inserted) {
+        it->second = std::min<uint64_t>(it->second, version.execution_order);
+      }
+    }
+    std::vector<uint64_t> key(plan.version_sites_.size());
+    bool                  moved = false;
+    for (size_t v = 0; v < key.size(); ++v) {
+      const auto& version = plan.version_sites_[v];
+      key[v]              = static_cast<uint64_t>(version.execution_order) * 2;
+      const auto it       = first_order.find(std::pair{version.base_site, static_cast<int>(version.slot)});
+      if (it != first_order.end() && it->second != version.execution_order) {
+        key[v] = it->second * 2 + 1;
+        moved  = true;
+      }
+    }
+    if (moved) {
+      std::vector<size_t> by_key(key.size());
+      std::iota(by_key.begin(), by_key.end(), 0);
+      std::ranges::sort(by_key, [&](size_t a, size_t b) {
+        return std::tie(key[a], plan.version_sites_[a].execution_order) < std::tie(key[b], plan.version_sites_[b].execution_order);
+      });
+      std::vector<uint64_t> rank_of(key.size());
+      for (size_t rank = 0; rank < by_key.size(); ++rank) {
+        rank_of[by_key[rank]] = rank;
+      }
+      const auto before = [&](size_t producer, size_t consumer) {
+        return producer == Color_plan::invalid_index || consumer == Color_plan::invalid_index || producer == consumer
+               || plan.version_sites_[producer].slot != plan.version_sites_[consumer].slot || rank_of[producer] < rank_of[consumer];
+      };
+      const bool ordered
+          = std::ranges::all_of(plan.version_dependencies_,
+                                [&](const Color_plan::Version_dependency& dep) { return before(dep.producer, dep.consumer); })
+            && std::ranges::all_of(plan.value_uses_, [&](const Color_plan::Value_use& use) {
+                 return before(use.producer_version, use.consumer_version);
+               });
+      if (ordered) {
+        for (size_t v = 0; v < rank_of.size(); ++v) {
+          plan.version_sites_[v].execution_order = rank_of[v];
+        }
+      }
+    }
+  }
   if (order != plan.version_sites_.size()) {
     plan.summary_.version_dag_acyclic    = false;
     plan.summary_.versioning_complete    = false;
@@ -5554,8 +5611,17 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     uint64_t                    frontier_words = 0;
     absl::flat_hash_set<size_t> frontier;
     bool                        prior_boundary = false;
+    size_t                      prior_version  = Color_plan::invalid_index;
     for (const size_t version : execution_order) {
       const auto version_order = plan.version_sites_[version].execution_order;
+      // One compact loop's same-slot outputs, made contiguous above, stay in
+      // one color: each color embedding the loop walks it once.
+      const bool loop_glued    = current != Color_plan::invalid_index && prior_version != Color_plan::invalid_index
+                                 && plan.sites_[plan.version_sites_[version].base_site].kind == Site_kind::loop_control
+                                 && !plan.sites_[plan.version_sites_[version].base_site].port_split
+                                 && plan.version_sites_[prior_version].base_site == plan.version_sites_[version].base_site
+                                 && plan.version_sites_[prior_version].slot == plan.version_sites_[version].slot;
+      prior_version            = version;
       const auto reset_color   = [&] {
         current        = version;
         start_order    = version_order;
@@ -5563,11 +5629,12 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
         frontier_words = 0;
         frontier.clear();
       };
-      const bool can_join = !prior_boundary && current != Color_plan::invalid_index
-                            && color_peak_words[current] <= plan.live_word_budget_
-                            && plan.version_sites_[members[current].front()].slot == plan.version_sites_[version].slot
-                            && !crosses_control_boundary(current, version)
-                            && color_ge[current] <= kSoftColorGe - std::min<uint64_t>(color_ge[version], kSoftColorGe);
+      const bool can_join
+          = loop_glued
+            || (!prior_boundary && current != Color_plan::invalid_index && color_peak_words[current] <= plan.live_word_budget_
+                && plan.version_sites_[members[current].front()].slot == plan.version_sites_[version].slot
+                && !crosses_control_boundary(current, version)
+                && color_ge[current] <= kSoftColorGe - std::min<uint64_t>(color_ge[version], kSoftColorGe));
       prior_boundary      = previous_cuts.contains(cut_identity(version));
       if (!can_join) {
         reset_color();
@@ -5591,7 +5658,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
         output_words += pressure_values[id].words;
       }
       auto new_inputs = additional_inputs();
-      if (current != version && new_inputs + frontier_words + output_words > plan.live_word_budget_) {
+      if (current != version && !loop_glued && new_inputs + frontier_words + output_words > plan.live_word_budget_) {
         reset_color();
         new_inputs = additional_inputs();
       }

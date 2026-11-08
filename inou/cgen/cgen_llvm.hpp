@@ -264,6 +264,9 @@ public:
     // The entry's `outputs`: one word run per listed (packed) body output, in
     // this order. Empty: every packed output, in output order.
     std::vector<size_t>                    entry_outputs;
+    // (count, first, step) known at code generation: the entry ignores its
+    // runtime domain arguments, so LLVM sees a constant trip count and index.
+    std::optional<std::array<int64_t, 3>>  constant_bounds;
   };
   // void entry(const uint64_t* inputs, uint64_t* outputs,
   //            uint64_t count, int64_t first, int64_t step

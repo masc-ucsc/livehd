@@ -1,0 +1,74 @@
+/*
+:name: loop_state_embed_split_colors
+:type: simulation
+*/
+// A rolled loop of stateful children embedded in the top's LLVM colors. Heavy
+// loop-independent cones push the top past the per-color GE cap, so the loop's
+// two outputs used to land in different colors; each color embedding the loop
+// walked it, and the lanes' registers advanced once per color instead of once
+// per period (gemmini's Mesh in GemminiSimTop). The plan now keeps one loop's
+// same-slot outputs contiguous and in one color; a split loop is not embedded.
+//
+// Same values as `--set compile.unroll=true`.
+mod es_lane(a:U8, en:Bool) -> (q:U8@[0], p:U8@[0]) {
+  reg c:U8 = 0
+  q = c
+  p = (c + a)#[0..<8]
+  if en { wrap c += 1 }
+}
+
+pub mod es_top(a:U8, en:U4, w:U128) -> (s:U8@[], t:U8@[]) {
+  mut qs:[4]U8 = 0
+  mut ps:[4]U8 = 0
+  for j in 0..<4 {
+    const l = es_lane(a=a, en=en#[j] == 1)
+    qs[j] = l.q
+    ps[j] = l.p
+  }
+  // Read the two output arrays in separate cones so they schedule apart.
+  // Heavy, loop-independent cones past the per-color GE cap put the two
+  // reads in different colors.
+  const w2:U128 = (w * w)#[0..<128]
+  const w3:U128 = (w2 * w)#[0..<128]
+  const w4:U128 = (w3 * w2)#[0..<128]
+  const w5:U128 = (w4 * w3)#[0..<128]
+  s = (qs[0] + qs[1] + qs[2] + qs[3] + w5#[0..<8])#[0..<8]
+  const v2:U128 = (w5 * w4)#[0..<128]
+  const v3:U128 = (v2 * w5)#[0..<128]
+  const v4:U128 = (v3 * v2)#[0..<128]
+  const v5:U128 = (v4 * v3)#[0..<128]
+  t = (ps[0] ^ ps[1] ^ ps[2] ^ ps[3] ^ v5#[0..<8])#[0..<8]
+}
+
+test es_top.lanes_advance_once_per_period {
+  mut x            = es_top
+  mut c0:U8        = 0
+  mut c1:U8        = 0
+  mut c2:U8        = 0
+  mut c3:U8        = 0
+  mut bad          = 0
+  mut seen         = 0
+  tick 16 {
+    const a:U8  = U8((clock * 7) & 255)
+    const en:U4 = U4((clock * 5) & 15)
+    x.a  = a
+    x.en = en
+    x.w  = 0
+    step
+    // outputs after the step show this period's commit
+    if en#[0] == 1 { wrap c0 += 1 }
+    if en#[1] == 1 { wrap c1 += 1 }
+    if en#[2] == 1 { wrap c2 += 1 }
+    if en#[3] == 1 { wrap c3 += 1 }
+    const sexp:U8 = (c0 + c1 + c2 + c3)#[0..<8]
+    const p0:U8   = (c0 + a)#[0..<8]
+    const p1:U8   = (c1 + a)#[0..<8]
+    const p2:U8   = (c2 + a)#[0..<8]
+    const p3:U8   = (c3 + a)#[0..<8]
+    const texp:U8 = p0 ^ p1 ^ p2 ^ p3
+    if x.s != sexp or x.t != texp { bad += 1 }
+    seen += 1
+  }
+  assert(seen == 16, "the comparisons ran")
+  assert(bad == 0, "every lane advances exactly once per period")
+}
