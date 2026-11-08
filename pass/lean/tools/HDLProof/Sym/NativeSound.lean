@@ -1,4 +1,4 @@
-import HDLProof.Sym.Native
+import HDLProof.Sym.NativeOps
 
 /-! Soundness lemmas for native symbolic operations. These are quantified over
 every consistent assignment; executable comparisons are kept in the tests.
@@ -245,6 +245,5 @@ theorem source_sound {σ : Asg} {si sf sm result : SVal} {inputs : RuntimeInput}
 #audit_axioms compare_sound
 #audit_axioms foldBits_sound
 #audit_axioms source_sound
-#audit_axioms runWith_extends
 
 end HDLProof.Sym.Native

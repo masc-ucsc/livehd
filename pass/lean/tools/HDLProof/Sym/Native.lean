@@ -1,34 +1,13 @@
-import HDLProof.Sym.NativeOps
+import HDLProof.Sym.NativeBuilders
 
-/-! Direct symbolic execution of dense certificates and compiled residuals.
-The traversal preserves cut definitions. A `Stepper` alone is not a proof
-backend: checker soundness additionally requires `MemResidual` for the design.
+/-! Direct symbolic execution of dense certificates (IR) and compiled residuals (VC).
+The traversal preserves cut definitions. `NativeRoute` proves both steppers are proof
+routes: `irStepper_sound : MemResidual D (irStepper D)` and
+`vcStepper_sound : compileDesign D = .ok R → MemResidual D (vcStepper R)`.
 -/
 
 open Projection Compiler Std.Tactic.BVDecide
 namespace HDLProof.Sym.Native
-
-def stateParts : SVal → Option (SVal × SVal)
-  | .ctor tag [fs, ms] => if tag = StateM.tagStateM then some (fs, ms) else none
-  | .conc (.ctor tag [fs, ms]) =>
-      if tag = StateM.tagStateM then some (.conc fs, .conc ms) else none
-  | _ => none
-
-def edgesOf : SVal → Option ClockEdges
-  | .conc v => decEdges v
-  | _ => none
-
-def source (inputs flops memories : SVal) : SourceDesc → Option SVal
-  | .input idx w => sNth inputs idx >>= resize w
-  | .const w v => some (constVal w v)
-  | .flopQ idx w => sNth flops idx >>= resize w
-  | .flopQAsync idx w ri rv al => do
-      let r ← sNth inputs ri
-      let q ← sNth flops idx
-      if al then select w r q (constVal w rv)
-      else select w r (constVal w rv) q
-  | .memImg idx _ _ => sNth memories idx
-  | .memConst _ dw contents => some (.conc (MemImg.encMemImg (MemImg.ofMemConst dw contents)))
 
 /-- Each node appends exactly one slot and cuts its symbolic leaves. -/
 def walk {α : Type} (eval : Array SVal → α → Option SVal) :
@@ -56,37 +35,96 @@ def irNode (env : Array SVal) (node : DenseNodeCert) : Option SVal := do
   let args ← node.deps.toList.mapM (env[·]?)
   evalOp node.op node.width args
 
+/-- The compiled bindings' own dispatch: one case per residual constructor, over the shared
+builders. -/
+def evalExpr (env : Array SVal) : ResidualExpr → Option SVal
+  | .rsum w n args => args.toList.mapM (env[·]?) >>= sumB w n
+  | .rmult w args => args.toList.mapM (env[·]?) >>= productB w
+  | .rand w args => args.toList.mapM (env[·]?) >>= fun
+      | [] => some (constVal w 0)
+      | a :: rest => resize w a >>= fun x => foldBits .and w x rest
+  | .rorBits w args => args.toList.mapM (env[·]?) >>= foldBits .or w (constVal w 0)
+  | .rxor w args => args.toList.mapM (env[·]?) >>= foldBits .xor w (constVal w 0)
+  | .rredOr w args => args.toList.mapM (env[·]?) >>= redOrB w
+  | .req w args => args.toList.mapM (env[·]?) >>= eqAllB w
+  | .rshl w args => args.toList.mapM (env[·]?) >>= fun
+      | [] => some (constVal w 0)
+      | a :: shifts => do
+          let shifted ← shifts.mapM fun b => symBvShl [widthVal w, a, b]
+          foldBits .xor w (constVal w 0) shifted
+  | .rmuxN w args => args.toList.mapM (env[·]?) >>= fun
+      | [] => none
+      | sel :: vals => muxNB w sel vals
+  | .rnot w a => do symBvNot [widthVal w, ← env[a]?]
+  | .rult w a b => do compare false false w (← env[a]?) (← env[b]?)
+  | .rugt w a b => do compare false true w (← env[a]?) (← env[b]?)
+  | .rslt w a b => do compare true false w (← env[a]?) (← env[b]?)
+  | .rsgt w a b => do compare true true w (← env[a]?) (← env[b]?)
+  | .rsra w a b => do symBvSra [widthVal w, ← env[a]?, ← env[b]?]
+  | .rsext w a n => do sextB w (← env[a]?) (← env[n]?)
+  | .rgetMask w a m => do symBvGetMask [widthVal w, ← env[a]?, ← env[m]?]
+  | .rsetMask w a m v => do setMaskB w (← env[a]?) (← env[m]?) (← env[v]?)
+  | .rmux w sel fv tv => do select w (← env[sel]?) (← env[tv]?) (← env[fv]?)
+  | .rmemRead w m a en => do symMemRead [widthVal w, ← env[m]?, ← env[a]?, ← env[en]?]
+  | .rmemWrite m a d en => do symMemWrite [← env[m]?, ← env[a]?, ← env[d]?, ← env[en]?]
+  | .rmemWriteBE w bw m a d be => do
+      symMemWriteBE [widthVal w, ← env[m]?, ← env[a]?, ← env[d]?, ← env[be]?, widthVal bw]
+  | .rmemLoad w n m bus en => do memLoadB w n (← env[m]?) (← env[bus]?) (← env[en]?)
+  | .rmemToBus w n m => do memToBusB w n (← env[m]?)
+  | .rudiv w a b => do udivB w (← env[a]?) (← env[b]?)
+  | .rsdiv w a b => do sdivB w (← env[a]?) (← env[b]?)
+
 def vcBinding (env : Array SVal) (binding : ResidualBinding) : Option SVal :=
   evalExpr env binding.rhs
+
+/-- A flop's value before its reset: the (enabled) data on a firing clock, else the held value. -/
+def flopValue (env : Array SVal) (edges : ClockEdges) (held : SVal) (f : FlopDesc) :
+    Option SVal :=
+  if fires edges f.clock then
+    match env[f.din]?, f.enable with
+    | some din, none => resize f.width din
+    | some din, some en =>
+        match env[en]? with
+        | some c => select f.width c din held
+        | none => none
+    | none, _ => none
+  else some held
+
+/-- The reset applied to the value: on a firing clock or for an asynchronous reset. -/
+def flopReset (env : Array SVal) (edges : ClockEdges) (value : SVal) (f : FlopDesc) :
+    Option SVal :=
+  match f.resetPin with
+  | none => some value
+  | some r =>
+      if fires edges f.clock || f.asyncReset then
+        match env[r]? with
+        | some c =>
+            if f.resetActiveLow then select f.width c value (constVal f.width f.resetValue)
+            else select f.width c (constVal f.width f.resetValue) value
+        | none => none
+      else some value
 
 def flopNext (env : Array SVal) (edges : ClockEdges) (old : SVal) (idx : Nat)
     (f : FlopDesc) : Option SVal := do
   let held ← sNth old idx
-  let value ← if fires edges f.clock then do
-    let din ← env[f.din]?
-    match f.enable with
-    | none => resize f.width din
-    | some en => select f.width (← env[en]?) din held
-    else pure held
-  match f.resetPin with
-  | none => pure value
-  | some r =>
-      if fires edges f.clock || f.asyncReset then
-        if f.resetActiveLow then select f.width (← env[r]?) value (constVal f.width f.resetValue)
-        else select f.width (← env[r]?) (constVal f.width f.resetValue) value
-      else pure value
+  let value ← flopValue env edges held f
+  flopReset env edges value f
+
+/-- The image a memory keeps when it does not commit: the async reset's slot, else the stored one. -/
+def memHeld (env : Array SVal) (old : SVal) (idx : Nat) (m : MemoryDesc) : Option SVal :=
+  match m.asyncImg with
+  | some slot => env[slot]?
+  | none => sNth old idx
 
 def memoryNext (env : Array SVal) (edges : ClockEdges) (old : SVal) (idx : Nat)
     (m : MemoryDesc) : Option SVal := do
-  let held ← match m.asyncImg with
-    | some slot => env[slot]?
-    | none => sNth old idx
+  let held ← memHeld env old idx m
   if m.commits.isEmpty then
-    if fires edges m.clock then env[m.nextImg]? else pure held
+    if fires edges m.clock then env[m.nextImg]? else some held
   else if m.allFire edges then env[m.nextImg]?
   else match m.commits.find? (m.firedIs edges) with
     | some commit => env[commit.nextImg]?
-    | none => pure held
+    | none => some held
 
 def finish (outputs : Array OutputDesc) (flops : Array FlopDesc) (memories : Array MemoryDesc)
     (edges : ClockEdges) (oldFlops oldMemories : SVal) (env : Array SVal) : Option SVal := do

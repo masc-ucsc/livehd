@@ -159,9 +159,13 @@ TOOL_MODULES=(
   HDLProof/Sym/Layout
   HDLProof/Sym/Step
   HDLProof/Sym/NativeOps
-  HDLProof/Sym/Native
   HDLProof/Sym/NativeSound
+  HDLProof/Sym/NativeBuilders
+  HDLProof/Sym/Native
   HDLProof/Sym/Trace
+  HDLProof/Sym/NativeInterp
+  HDLProof/Sym/NativeRoute
+  HDLProof/Kit/SymRoute
   HDLProof/Sym/Shape
   HDLProof/Sym/Unroll
   HDLProof/Sym/Oblig
