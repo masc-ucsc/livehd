@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# M3 self-test: unbounded invariants and refinement with stuttering, proved on
-# the projection residual (pass/lean/tools/drivers/sym_verify.lean, sym_refine.lean).
+# M3 self-test: unbounded invariants, proved by sym_verify
+# (pass/lean/tools/drivers/sym_verify.lean). Refinement with stuttering is
+# tested by refmap_selftest.sh (sym_refmap).
 #
 # Small RTL fixtures, each through the real flow (yosys-slang -> LGraph ->
 # DCERT2), then:
@@ -14,25 +15,19 @@ set -euo pipefail
 #     c == 0 while reset held     PROVED (k=1); NOT K-INDUCTIVE without the assumption
 #     candidates c != 9, c <= 9   one specialization; the first is not
 #                                 1-inductive, the second PROVED
-#   cnt10 refines cnt10           PROVED (identity refinement, lockstep, k=1),
-#                                 also with equal next states (`stateq`)
-#   acc2 refines acc1             a two-phase accumulator adds every other cycle
-#                                 (witness `adv`): NOT K-INDUCTIVE at k=1,
-#                                 PROVED at k=2 (also as one run over k=1,2);
-#                                 in LOCKSTEP a COUNTEREXAMPLE, decoded and
-#                                 replayed on both simulators
-# Every PROVED is the verified check (Sym.runInvKOf / Sym.runRefKOf, by
+# Every PROVED is the verified check (Sym.runInvKOf / Sym.runConjTOf, by
 # default through *_of_obls over the obligations already built)
 # accepting LRAT proofs from the untrusted solver. A run with several
 # attempts is judged by its LAST verdict line.
 #
 #   ram4 / ram4b  a 4-word RAM; writes never store 0xff (ram4b: except into word 0)
 #     word 0 != 0xff              PROVED (k=1) / COUNTEREXAMPLE (base)
+# The default route is vc (`sim:` absent); a run naming closed / emit: / route: and no sim: uses fp.
 # ROUTES (default "fp ir vc"): every sym_verify case that names no `closed`,
 # `emit:` or `route:` also runs on the IR and VC symbolic routes (`sim:ir`,
 # `sim:vc`) and must give the same verdict.
 #
-# SYM_NAT=<dir with native sym_verify and sym_refine> uses those; otherwise the
+# SYM_NAT=<dir with a native sym_verify> uses it; otherwise the
 # drivers run interpreted against formal/lean/.olean-dev (build it with
 # formal/lean/.build-proj.sh). The Lean toolchain pin lives in formal/lean.
 
@@ -52,25 +47,6 @@ module cnt10(input clk, input rst, output ok_good, output ok_bad, output [3:0] c
   assign ok_good = (c <= 4'd9);
   assign ok_bad  = (c != 4'd9);
   assign c_o = c;
-endmodule
-EOF
-cat > "$OUT/acc1.sv" <<'EOF'
-module acc1(input clk, input [7:0] x, output [7:0] acc_o);
-  reg [7:0] acc;
-  always @(posedge clk) acc <= acc + x;
-  assign acc_o = acc;
-endmodule
-EOF
-cat > "$OUT/acc2.sv" <<'EOF'
-module acc2(input clk, input [7:0] x, output [7:0] acc_o, output adv);
-  reg [7:0] acc;
-  reg phase;
-  always @(posedge clk) begin
-    phase <= ~phase;
-    if (phase) acc <= acc + x;
-  end
-  assign acc_o = acc;
-  assign adv = phase;
 endmodule
 EOF
 # M8 conjunctive induction: two counters kept in step, and a delayed copy.
@@ -150,7 +126,7 @@ module ram4b(input clk, input we, input [1:0] wa, input [7:0] wd, output ok, out
 endmodule
 EOF
 
-for d in cnt10 acc1 acc2 pair twocore ram4 ram4b; do
+for d in cnt10 pair twocore ram4 ram4b; do
   "$LHD" compile "$OUT/$d.sv" --reader yosys-slang --top "$d" --set yosys.setundef=zero \
     --emit-dir "lg:$OUT/${d}_lg" --workdir "$OUT/${d}_cw" > "$OUT/$d.compile.log" 2>&1 \
     || { tail -5 "$OUT/$d.compile.log"; echo "FAIL: compile $d"; exit 1; }
@@ -182,22 +158,33 @@ run1() { # <driver> <expect> args...
   fi
   echo "ok: $drv ${*##*/} -> $got"
 }
+fponly() { [[ " $* " == *" closed "* || " $* " == *" emit:"* || " $* " == *" route:"* ]]; }
 run() { # <driver> <expect> args... : on fp, and on the other ROUTES where the case allows
   local drv=$1 expect=$2; shift 2
   local sim
   for sim in $ROUTES; do
-    if [[ "$sim" == fp ]]; then run1 "$drv" "$expect" "$@"; continue; fi
+    if [[ "$sim" == fp ]]; then
+      # fp is named; a case using closed / emit: / route: names no sim: and so checks that
+      # such a run falls back to fp (the default is vc)
+      if [[ "$drv" == sym_verify ]] && ! fponly "$@"; then run1 "$drv" "$expect" "$@" sim:fp
+      else run1 "$drv" "$expect" "$@"; fi
+      continue
+    fi
     [[ "$drv" == sym_verify ]] || continue
-    [[ " $* " == *" closed "* || " $* " == *" emit:"* || " $* " == *" route:"* ]] && continue
+    fponly "$@" && continue
     run1 "$drv" "$expect" "$@" "sim:$sim"
   done
 }
 N=0
 C="$OUT/cnt10_lean/cnt10.dcert"
-A1="$OUT/acc1_lean/acc1.dcert"
-A2="$OUT/acc2_lean/acc2.dcert"
 P="$OUT/pair_lean/pair.dcert"
 run sym_verify "INVARIANT PROVED"    "$C" ok_good k:1
+# no sim: given -> vc; closed (fp only) and no sim: -> fp
+run1 sym_verify "INVARIANT PROVED" "$C" ok_good k:1
+grep -q 'route sim:vc (the default)' "$OUT/run_$N.log" || { tail -4 "$OUT/run_$N.log"; echo "FAIL: the default route is not vc"; exit 1; }
+run1 sym_verify "INVARIANT PROVED" "$C" ok_good k:1 closed
+grep -q 'route sim:fp (no sim: given' "$OUT/run_$N.log" || { tail -4 "$OUT/run_$N.log"; echo "FAIL: closed did not fall back to fp"; exit 1; }
+echo "ok: default route vc; closed without sim: uses fp"
 run sym_verify "INVARIANT PROVED"    "$C" ok_good k:1 rebuild
 run sym_verify "INVARIANT PROVED"    "$C" ok_good k:1 closed
 run sym_verify "INVARIANT PROVED"    "$C" ok_good k:1 route:plain
@@ -214,16 +201,6 @@ run sym_verify "INVARIANT PROVED"    "$C" '!c_o' in:rst=1 k:1
 run sym_verify "NOT K-INDUCTIVE"     "$C" '!c_o' k:1
 run sym_verify "INVARIANT PROVED"    "$C" ok_bad,ok_good k:1
 grep -q 'SUMMARY: ok_good PROVED at k=1 after 2 attempt' "$OUT/run_$N.log" || { echo "FAIL: candidate summary"; exit 1; }
-run sym_refine "REFINEMENT PROVED"   "$C" "$C" pair:c_o=c_o pair:ok_good=ok_good pair:ok_bad=ok_bad k:1
-run sym_refine "REFINEMENT PROVED"   "$C" "$C" pair:c_o=c_o stateq k:1
-run sym_refine "REFINEMENT PROVED"   "$C" "$C" pair:c_o=c_o stateq k:1 route:plain
-run sym_refine "NOT K-INDUCTIVE"     "$A2" "$A1" pair:acc_o=acc_o adv:adv k:1
-run sym_refine "REFINEMENT PROVED"   "$A2" "$A1" pair:acc_o=acc_o adv:adv k:2
-run sym_refine "REFINEMENT PROVED"   "$A2" "$A1" pair:acc_o=acc_o adv:adv k:2 rebuild
-run sym_refine "REFINEMENT PROVED"   "$A2" "$A1" pair:acc_o=acc_o adv:adv k:1,2
-grep -q '\[k=1\] RESULT: NOT K-INDUCTIVE' "$OUT/run_$N.log" || { echo "FAIL: k list"; exit 1; }
-run sym_refine "COUNTEREXAMPLE"      "$A2" "$A1" pair:acc_o=acc_o k:4
-grep -q "COUNTEREXAMPLE (base, replayed)" "$OUT/run_$N.log" || { tail -5 "$OUT/run_$N.log"; echo "FAIL: refinement counterexample not replayed"; exit 1; }
 run sym_verify "INVARIANT PROVED"    "$P" "conj:$OUT/pair_all.spec" jobs:4
 run sym_verify "INVARIANT PROVED"    "$P" "conj:$OUT/pair_min.spec" jobs:4
 run sym_verify "NOT INDUCTIVE"       "$P" "conj:$OUT/pair_missing.spec" jobs:4 replay

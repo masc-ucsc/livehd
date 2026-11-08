@@ -758,29 +758,33 @@ cd <livehd>
 CVA6_TOP=tc_sram LEAN_EMIT_CERT=true scripts/run_cva6_module_lean_stress.sh
 ```
 
-## Unbounded proofs on the projection simulator (`sym_verify`, `sym_refine`, `sym_refmap`)
+## Unbounded proofs (`sym_verify`, `sym_refmap`)
 
-A design's unbounded properties (invariants, refinement with stuttering) are checked on
+A design's unbounded properties (invariants, refinement with stuttering) are checked on a
+symbolic step of the design. Three routes build that step (`sim:`): `vc`, the verified
+compiler's program (the default); `ir`, the certificate's nodes walked directly; and `fp`,
 the residual of the Futamura projection, the same artifact the FP simulator runs. The
-checker is proved sound once for every design (`pass/lean/tools/HDLProof/Sym/*`, the
+checker is proved sound once for every design and every route (`pass/lean/tools/HDLProof/Sym/*`, the
 proof tools; see `pass/lean/tools/README.md`); a run per design only produces
 obligations and checks proofs.
 No per-design Lean proof is written.
 
 The pipeline of one run:
 
-1. The interpreter is specialized to the certificate, giving the residual
+1. The route is set up: `vc` compiles the certificate once (`compileDesign`), `ir` needs
+   nothing, `fp` specializes the interpreter to the certificate
    (`MemFused.projectMemFDesignAt`, a trusted native run).
-2. The residual is evaluated symbolically: one step of the design as a circuit over the state and inputs.
+2. One step of the design is built symbolically, as a circuit over the state and inputs
+   (`irStepper_sound`, `vcStepper_sound`, or fp's `MemResidual`).
 3. The obligations are built: base and step of k-induction, or one step obligation per conjunct and case.
 4. Each obligation is bit-blasted to CNF (`Std.Tactic.BVDecide`).
 5. cadical is run with `--lrat`. It is untrusted.
 6. Lean's `LRAT.check` checks the proofs.
-7. The verified checker accepts or rejects. Its acceptance is one of the theorems `runInvKOf_sound_ref`, `runConjTOf_sound_ref` or `runRefKOf_sound_ref`, each over `interpretDesign`.
+7. The verified checker accepts or rejects. Its acceptance is one of the theorems `runInvKOf_sound_ref`, `runConjTOf_sound_ref` or `runRefMapOf_sound`, each over `interpretDesign`.
 
 **Trusted:**
 - the front end and certificate exporter;
-- the native execution of the specializer and of the checker;
+- the native execution of the route's setup (fp's specializer, vc's `compileDesign`) and of the checker;
 - the Lean kernel.
 
 ### Build
@@ -790,14 +794,15 @@ The pipeline of one run:
 cd formal/lean
 ROOT=$PWD/../../generated/sym/nat_root
 OPT=-O2 ROOT=$ROOT bash Futamura_Projection_Scripts/build-opt.sh ../../pass/lean/tools/drivers/sym_verify.lean \
-    ../../pass/lean/tools/drivers/sym_refine.lean ../../pass/lean/tools/drivers/sym_refmap.lean
+    ../../pass/lean/tools/drivers/sym_refmap.lean
 # the solver: cadical ships with the Lean toolchain; link it next to the drivers
 # (or pass solver:<path>)
 ln -s "$(dirname "$(elan which lean)")/cadical" $ROOT/nat/cadical   # still in formal/lean
 ```
 
-The self-test runs the whole flow on small fixtures (counters, a two-phase accumulator, a
-pair of registers, two cores with a case split):
+The self-tests run the whole flow on small fixtures, on all three routes (counters, a pair of
+registers, two cores with a case split, a small RAM; the refinement maps on accumulators and
+two-channel designs):
 
 ```bash
 SYM_NAT=<root>/nat LHD=<lhd> bash pass/lean/tools/tests/sym_selftest.sh
@@ -890,24 +895,14 @@ change the relation or the spec, and rerun. A cycle-0 list that is not empty nam
 conjuncts left out of the target's `hyps:`. The report is diagnostic only; verdicts never
 depend on it.
 
-### Refinement with stuttering (`sym_refine`)
+### Refinement with stuttering: refinement maps (`sym_refmap`)
 
-```bash
-sym_refine impl.dcert spec.dcert pair:<implOut>=<specOut> [adv:[!]<implOut>] \
-    [map:<specIn>=<implIn>] [stateq] k:1,2,3
-```
-
-- **What is proved.** The implementation refines the specification up to stuttering.
-- **Witness and stuttering.** The specification steps only on cycles where the witness `adv` fires; without `adv`, the two designs step in lockstep.
-- **Output correspondence.** Every `pair:` must agree on every witnessed cycle.
-- **`stateq`.** Also requires equal next states, which an identity refinement needs.
-- **Counterexamples.** They are decoded and replayed on both simulators.
-
-### Refinement maps (`sym_refmap`)
+(The earlier `sym_refine` driver, k-induction over a lockstep or witness-stuttered pair of
+designs, is covered by `sym_refmap` and has been removed.)
 
 ```bash
 sym_refmap specfacts spec.refmap [emit:[f1:|f2:]<file>]
-sym_refmap refmap impl.refmap jobs:12 [emit:[f1:|f2:]<file>]
+sym_refmap refmap impl.refmap jobs:12 [sim:fp|ir|vc] [emit:[f1:|f2:]<file>]
 ```
 
 - **What is proved.** The implementation refines a spec certificate with stuttering. At every

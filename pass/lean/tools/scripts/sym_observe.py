@@ -6,8 +6,8 @@
 Each `name:width=expr` adds the output port `name` of `width` bits to `module`
 and drives it with `assign name = expr;`, so an internal signal -- a stutter
 witness, a piece of architectural state, a property -- becomes an output the
-M3 drivers can name (`sym_verify` properties and assumptions, `sym_refine`
-`pair:` / `adv:`). `--decl` text is inserted verbatim before `endmodule`, for
+proof tools can name (`sym_verify` properties and assumptions, `sym_refmap`
+observations and the outputs a `.refmap` file reads). `--decl` text is inserted verbatim before `endmodule`, for
 sequential observers (a `reg` and its `always` block) that a port then reads.
 
 The source file is not modified; the patched copy goes through the same flow

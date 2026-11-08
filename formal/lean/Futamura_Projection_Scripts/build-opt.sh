@@ -4,7 +4,7 @@
 # binaries of in-flight experiments -- is touched.
 #
 #   OPT=-O2 ROOT=/abs/path bash Futamura_Projection_Scripts/build-opt.sh Futamura_Projection_Scripts/total_probe.lean [more.lean ...]
-#   (the proof-tool drivers: ../../pass/lean/tools/drivers/sym_verify.lean sym_refine.lean sym_refmap.lean)
+#   (the proof-tool drivers: ../../pass/lean/tools/drivers/sym_verify.lean sym_refmap.lean)
 # OPT may carry several flags, e.g. OPT="-O2 -g -fno-omit-frame-pointer"
 # for a profiling build that keeps -O2 but can be unwound.
 set -uo pipefail
@@ -76,7 +76,7 @@ MODULES=(
 # The proof tools (pass/lean/tools, HDLProof): a second source root.
 TOOLS="$(cd ../../pass/lean/tools && pwd)"
 TOOL_MODULES=(
-  # verified symbolic interpretation and k-induction (sym_verify, sym_refine)
+  # verified symbolic interpretation and k-induction (sym_verify, sym_refmap)
   HDLProof/Sym/Kit HDLProof/Sym/Bridge HDLProof/Sym/Val HDLProof/Sym/Prim
   HDLProof/Sym/Mem HDLProof/Sym/Dispatch HDLProof/Sym/Wire HDLProof/Sym/Eval HDLProof/Sym/Asg
   HDLProof/Sym/Sat HDLProof/Sym/Layout HDLProof/Sym/Step

@@ -10,8 +10,8 @@ Lean proofs.
 Lean: `pass/lean/tools/HDLProof/Sym/` (the proof tools, namespace
 `HDLProof.Sym`; Mathlib-free, built by `formal/lean/.build-proj.sh` as a second
 source root, every theorem under the failing axiom gate in
-`HDLProof/Check/Audit.lean`). Drivers: `pass/lean/tools/drivers/sym_verify.lean`,
-`sym_refine.lean`. Scripts: `pass/lean/tools/tests/sym_selftest.sh` (small
+`HDLProof/Check/Audit.lean`). Drivers: `pass/lean/tools/drivers/sym_verify.lean` (refinement with
+stuttering is now `sym_refmap.lean`, see below). Scripts: `pass/lean/tools/tests/sym_selftest.sh` (small
 fixtures only), `pass/lean/tools/scripts/sym_observe.py`.
 
 This repository holds the machinery only. Properties of a particular RTL
@@ -86,16 +86,13 @@ The property has these parts:
   e.g. a reset held);
 - the initial state, which is all-zero.
 
-**Refinement with stuttering** (`Sym.runRefKOf_sound_ref`, `Refine.lean`).
-Same hypotheses for both designs. On every cycle where the implementation's
-witness output `adv` fires, each `pair:` of outputs agrees: the
-implementation's `interpretDesign` outputs against the specification's.
-
-The specification here is `refStut`: it steps only on witnessed cycles and
-holds otherwise. Its inputs come from the implementation's through `inMap`.
-With no `adv` the two run in lockstep. `stateq` also requires equal
-(normalized) next states on every cycle, which an identity refinement needs
-to be inductive.
+**Refinement with stuttering** is checked by `sym_refmap` with a refinement
+map (`runRefMapOf_sound`; the format and targets are in
+`pass/lean/tools/formats/refmap.md`). M3's own refinement driver,
+`sym_refine` (k-induction over a lockstep or witness-stuttered pair of
+designs with output pairs, `Sym.runRefKOf_sound_ref` in `Refine.lean`), is
+covered by `sym_refmap` and has been removed. `Refine.lean` stays: its
+theorem is still audited, and `sym_refmap` uses its `eqBvE` and `advLit`.
 
 **How it is checked.**
 1. The residual is evaluated symbolically (`symEval_sound`). Every `let`
@@ -108,10 +105,8 @@ to be inductive.
 5. Lean's own LRAT checker checks it (`checkUnsat_sound`).
 
 A satisfiable BASE obligation is a counterexample, decoded from the solver's
-model and REPLAYED on the projection's simulators:
-- `sym_verify` replays it on one simulator;
-- `sym_refine` replays it on both, the specification stepping only on
-  witnessed cycles, and reports the failing cycle and each disagreeing pair.
+model and REPLAYED on the projection's simulator (fp's, whatever the
+symbolic route).
 
 A satisfiable STEP obligation only means the property is not k-inductive at
 that k.
@@ -122,11 +117,11 @@ that k.
   - the specializer run (`projectMemFDesignAt`; `projectMemVarDesignAt` or
     `projectMemDesignAt` with `route:var` / `route:plain`), the same D1
     trusted native run every FP route makes;
-  - the check, evaluated through `runInvKOf_of_obls` / `runRefKOf_of_obls`
+  - the check, evaluated through `runInvKOf_of_obls`
     over the obligations the driver built for the solver. Those lemmas are
     definitional, so no evaluation is repeated and no trust is added.
 
-  `rebuild` evaluates `runInvKOf` / `runRefKOf` themselves. `closed`
+  `rebuild` evaluates `runInvKOf` itself. `closed`
   (sym_verify only) evaluates the closed `runInvKF` (`runInvKV` / `runInvK`
   with `route:var` / `route:plain`), which re-specializes.
 - **F2.** `sym_verify ... emit:<file>.lean` writes a theorem
@@ -143,21 +138,20 @@ that k.
 ## Drivers
 
     sym_verify <cert> [!]<out>[,[!]<out>...] [asm:[!]<out>] [in:<input>=<v>]...
-               [k:<n>[,<n>...]] [closed|rebuild] [route:fused|var|plain] [emit:<file>]
-               [sf:<n>] [wf:<n>] [solver:<cadical>] [work:<dir>]
-    sym_refine <impl> <spec> pair:<implOut>=<specOut>... [adv:[!]<implOut>]
-               [map:<specIn>=<implIn>]... [asm:[!]<implOut>] [in:<implIn>=<v>]...
-               [stateq] [rebuild] [route:fused|var|plain] [k:<n>[,<n>...]] [sf:..] [wf:..]
-               [solver:..] [work:..]
+               [k:<n>[,<n>...]] [closed|rebuild] [sim:fp|ir|vc] [route:fused|var|plain]
+               [emit:<file>] [sf:<n>] [wf:<n>] [solver:<cadical>] [work:<dir>]
 
-- **One specialization per run.** A design is specialized once per run. The
-  candidates and the k values are then tried in turn (k-major), and the first
-  PROVED wins.
+`sim:` picks the symbolic step: `vc` (the default), `ir` or `fp`. The F1/F2
+discussion above is fp's; `closed`, `emit:` and `route:` exist only for fp, so
+a run naming one of them and no `sim:` uses fp.
+
+- **One setup per run.** A design's route is set up once per run (fp's
+  specialization, vc's compile). The candidates and the k values are then
+  tried in turn (k-major), and the first PROVED wins.
 - **Naming ports.** Ports are named through the `<top>_io.json` next to the
-  certificate. Specification inputs default to the implementation input of
-  the same name.
+  certificate.
 - **Native builds.**
-  `OPT=-O2 ROOT=<dir> bash formal/lean/Futamura_Projection_Scripts/build-opt.sh ../../pass/lean/tools/drivers/sym_verify.lean ../../pass/lean/tools/drivers/sym_refine.lean`.
+  `OPT=-O2 ROOT=<dir> bash formal/lean/Futamura_Projection_Scripts/build-opt.sh ../../pass/lean/tools/drivers/sym_verify.lean ../../pass/lean/tools/drivers/sym_refmap.lean`.
   Pass `solver:` explicitly, or link the toolchain's cadical
   (`$(dirname $(elan which lean))/cadical`, run from `formal/lean`) into the
   build directory.
