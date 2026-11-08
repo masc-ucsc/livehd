@@ -23,7 +23,7 @@ refutes "the active output or the initial map fails at `R0`".
 of the channel spec `specOf`. k = 1. Mathlib-free.
 -/
 import HDLProof.Check.RefMap
-import HDLProof.Sym.Refine
+import HDLProof.Sym.BvLit
 
 open Projection
 namespace HDLProof.Check

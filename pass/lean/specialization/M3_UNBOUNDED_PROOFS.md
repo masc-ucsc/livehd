@@ -91,8 +91,9 @@ map (`runRefMapOf_sound`; the format and targets are in
 `pass/lean/tools/formats/refmap.md`). M3's own refinement driver,
 `sym_refine` (k-induction over a lockstep or witness-stuttered pair of
 designs with output pairs, `Sym.runRefKOf_sound_ref` in `Refine.lean`), is
-covered by `sym_refmap` and has been removed. `Refine.lean` stays: its
-theorem is still audited, and `sym_refmap` uses its `eqBvE` and `advLit`.
+covered by `sym_refmap` and has been removed with its checker. The two
+literal helpers `sym_refmap` used from it, `eqBvE` and `advLit`, are now
+`HDLProof/Sym/BvLit.lean`.
 
 **How it is checked.**
 1. The residual is evaluated symbolically (`symEval_sound`). Every `let`
