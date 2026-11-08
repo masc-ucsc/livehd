@@ -198,10 +198,16 @@ def main():
     ap.add_argument("--timeout", default="6h", help="per repetition, as for `timeout`")
     ap.add_argument("--only", default=None)
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--summarize", action="store_true",
+                    help="rebuild summary.tsv / summary.md from --out's raw.tsv; run nothing")
     ap.add_argument("--keep-work", action="store_true",
                     help="keep each run's work directory (CNF and LRAT files); deleted by default")
     a = ap.parse_args()
 
+    if a.summarize:
+        out = a.out.resolve()
+        summarize(out, read_raw(out / "raw.tsv"), a.reps, len(expand_cpus(a.cpus)), a.mem)
+        return
     runfile = a.runfile.resolve()
     runs = read_runs(runfile, a.only)
     sims = [s.strip() for s in a.sims.split(",") if s.strip()]
@@ -273,6 +279,16 @@ def main():
     if a.dry_run:
         return
 
+    summarize(out, rows, a.reps, len(expand_cpus(a.cpus)), a.mem)
+
+
+def verdict_kind(v: str) -> str:
+    """The verdict without its explanation: `COUNTEREXAMPLE (base, replayed)`, not the cycle it
+    names (two routes give different CNFs, so the solver may return different counterexamples)."""
+    return v.split(" -- ")[0].split(":")[0].strip()
+
+
+def summarize(out, rows, reps, ncpu, mem):
     # medians per (bench, run, sim)
     keys = []
     for r in rows:
@@ -286,7 +302,7 @@ def main():
         for mname in METRICS:
             vals = [r[mname] for r in rs if r[mname] is not None]
             med[mname] = statistics.median(vals) if vals else None
-        verdicts = sorted({r["verdict"] for r in rs})
+        verdicts = sorted({verdict_kind(r["verdict"]) for r in rs})
         summ.append(dict(bench=k[0], run=k[1], sim=k[2], n=len(rs),
                          exits=",".join(str(r["exit"]) for r in rs), verdict=" | ".join(verdicts), **med))
     with open(out / "summary.tsv", "w") as f:
@@ -297,8 +313,8 @@ def main():
     head = ["bench", "run", "sim", "setup ms", "build ms", "clauses", "blast ms", "cadical ms",
             "LRAT ms", "wall s", "peak RSS MB", "verdict"]
     with open(out / "summary.md", "w") as f:
-        f.write(f"Median of {a.reps} repetitions per route; cadical and blast are sums over "
-                f"obligations; {len(expand_cpus(a.cpus))} pinned CPUs, memory cap {a.mem}.\n\n")
+        f.write(f"Median of {reps} repetitions per route; cadical and blast are sums over "
+                f"obligations; {ncpu} pinned CPUs, memory cap {mem}.\n\n")
         f.write("| " + " | ".join(head) + " |\n|" + "---|" * len(head) + "\n")
         for (b, r) in dict.fromkeys((s["bench"], s["run"]) for s in summ):
             group = [s for s in summ if (s["bench"], s["run"]) == (b, r)]
@@ -307,6 +323,21 @@ def main():
                 v = s["verdict"] + (" **VERDICTS DIFFER**" if differ else "")
                 f.write("| " + " | ".join([b, r, s["sim"]] + [fmt(s[m], m) for m in METRICS] + [v]) + " |\n")
     print(f"summary: {out / 'summary.md'}")
+
+
+def read_raw(path):
+    """raw.tsv back into rows (for --summarize)."""
+    rows = []
+    lines = open(path).read().splitlines()
+    head = lines[0].split("\t")
+    for line in lines[1:]:
+        c = dict(zip(head, line.split("\t")))
+        r = dict(bench=c["bench"], run=c["run"], sim=c["sim"], rep=int(c["rep"]), exit=int(c["exit"]),
+                 verdict=c["verdict"])
+        for m in METRICS:
+            r[m] = None if c[m] == "-" else float(c[m])
+        rows.append(r)
+    return rows
 
 
 def expand_cpus(spec: str) -> list:
