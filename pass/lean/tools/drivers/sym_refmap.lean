@@ -2,9 +2,9 @@
 `sym_refmap` -- refinement maps: an implementation certificate refines a spec certificate with
 stuttering, and the spec's own facts.
 
-  sym_refmap refmap <file.refmap> [jobs:<n>] [runs:<n>] [sf:<n>] [wf:<n>] [sim|simS|simI:fp|ir|vc] [emit:[f1:|f2:]<file>]
+  sym_refmap refmap <file.refmap> [jobs:<n>] [runs:<n>] [sf:<n>] [wf:<n>] [sim|simS|simI:fp|ir|vc (default vc)] [emit:[f1:|f2:]<file>]
                     [cache] [solver:<cadical>] [work:<dir>]
-  sym_refmap specfacts <file.refmap> [jobs:<n>] [sf:<n>] [wf:<n>] [sim:fp|ir|vc] [emit:[f1:|f2:]<file>]
+  sym_refmap specfacts <file.refmap> [jobs:<n>] [sf:<n>] [wf:<n>] [sim:fp|ir|vc (default vc)] [emit:[f1:|f2:]<file>]
                     [cache] [solver:<cadical>] [work:<dir>]
   sym_refmap judge <file.refmap> trace:<file.tsv> | random:<steps>,<runs>[,<seed>]
                     [sim:fp|ir|vc] [check:<steps>] [sf:<n>] [wf:<n>] [work:<dir>] [label:<name>]
@@ -27,12 +27,12 @@ Results: `NO MATCH at step n` (exit 1: no alignment exists on this run; the repo
 last candidate and why each fails), `MATCH FOUND` (exit 0; the report adds where the slot's own
 stall choice fails, if it does), `ENVIRONMENT VIOLATED at step n` (exit 3: a random run broke
 `asm`). The simulator route (`sim:`), each with its theorem relating it to `interpretDesign`:
-`fp` the projection's specialized residual (`runMemSim`, `runMemSim_correct`; the default), `ir`
+`fp` the projection's specialized residual (`runMemSim`, `runMemSim_correct`), `ir`
 the post-lowering IR stepped directly (`directStepRaw` after one `checkDesign`,
 `directStepRaw_correct`), `vc` the verified compiler's straight-line program (`sim:tv` is the
 old name and is still accepted)
-(`compileDesign` once, `denoteResidual` every step, `compileDesign_correct`). `ir` and `vc` need a
-memory-free certificate. With `ir` or `vc` every run is also cross-checked against `fp` on its
+(`compileDesign` once, `denoteResidual` every step, `compileDesign_correct`; the default). `ir`
+and `vc` need a memory-free certificate; without `sim:` a certificate with memories uses `fp`. With `ir` or `vc` every run is also cross-checked against `fp` on its
 first `check:` steps (default 4; outputs and next state), and a NO MATCH is re-run on `fp` alone
 before it is reported, so the verdict always rests on `runMemSim` (a different answer on fp is
 ROUTE DISAGREES, exit 5). The implementation is simulated one step ahead of the search, so a run
@@ -719,14 +719,17 @@ def refmapMain (path : String) (rest : List String) (facts : Bool) : IO UInt32 :
   unless HwMem.admitsWB DS do say "  RESULT: REFUSED (the memory route does not admit the spec)"; return 4
   let t0 ← IO.monoMsNow
   -- the symbolic route: `sim:` for both designs, `simS:` / `simI:` for one
-  let simS := ((opt "simS").orElse fun _ => opt "sim").getD "fp"
-  let simI := ((opt "simI").orElse fun _ => opt "sim").getD "fp"
+  let fpOnly := (emitOpt rest).isSome
+  let gS := (opt "simS").orElse fun _ => opt "sim"
+  let gI := (opt "simI").orElse fun _ => opt "sim"
+  let simS := defaultSim gS fpOnly
+  let simI := defaultSim gI fpOnly
   if (simS != "fp" || simI != "fp") && (emitOpt rest).isSome then
     IO.eprintln s!"emit: only sim:fp has a closed checker so far (spec sim:{simS}, impl sim:{simI})"; return 2
   let (RS, fuelS, nameS) ← match ← symRouteOf simS DS sf wf with
     | .ok x => pure x
     | .error e => do say s!"  RESULT: REFUSED (spec: {e})"; return 4
-  say s!"  spec route sim:{simS}: {nameS}"
+  say s!"  spec route sim:{simS}{simWhy gS fpOnly}: {nameS}"
   let (DI, RI, fuelI) ← if facts then pure (DS, RS, fuelS) else do
     let (_, DI) ← Projection.CertLoadAny.loadAny implCert
     say s!"impl {implCert}: flops {DI.flops.size} outputs {DI.outputs.size} memories {DI.memories.size}"
@@ -734,7 +737,7 @@ def refmapMain (path : String) (rest : List String) (facts : Bool) : IO UInt32 :
     let (RI, fuelI, nameI) ← match ← symRouteOf simI DI sf wf with
       | .ok x => pure x
       | .error e => do say s!"  RESULT: REFUSED (implementation: {e})"; return 4
-    say s!"  impl route sim:{simI}: {nameI}"
+    say s!"  impl route sim:{simI}{simWhy gI fpOnly}: {nameI}"
     pure (DI, RI, fuelI)
   let t1 ← IO.monoMsNow
   say s!"  specialized and checked in {t1 - t0} ms"
@@ -1073,7 +1076,15 @@ def judgeMain (path : String) (rest : List String) : IO UInt32 := do
   say s!"  contract: {J.slot.obs.length} observed words, {J.xfer.length} xfer, maxstall {J.maxStall}; random inputs change at steps n % {period} = {phase}"
   let fpS : Judge.Sim := fun i st => runMemSim simS (edgesAll DS) i st
   let fpI : Judge.Sim := fun i st => runMemSim simI (edgesAll DI) i st
-  let route := match (opt "sim").getD "fp" with | "tv" => "vc" | r => r   -- `tv`: the old name of `vc`
+  -- `vc` by default; `fp` when a certificate has memories (the concrete ir/vc steps here are
+  -- memory-free); `tv`: the old name of `vc`
+  let memFree := DS.memories.size == 0 && DI.memories.size == 0
+  let route := match opt "sim" with
+    | some "tv" => "vc"
+    | some r => r
+    | none => if memFree then "vc" else "fp"
+  if (opt "sim").isNone then
+    say s!"  route sim:{route} ({if memFree then "the default" else "a certificate has memories: the concrete ir and vc steps are memory-free"})"
   let check := ((opt "check").bind (·.toNat?)).getD 4
   let ofRT (r : RuntimeResult) : StateM.ResultM := { nextState := { flops := r.nextState.flops, mems := #[] }, outputs := r.outputs }
   let mkRoute (D : DesignCert) (fp : Judge.Sim) : IO (Option Judge.Sim) := do

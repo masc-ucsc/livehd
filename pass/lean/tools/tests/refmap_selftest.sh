@@ -36,6 +36,7 @@ set -euo pipefail
 # Every PROVED is the verified check (Check.runRefMapOf / runSpecFactsOf)
 # accepting LRAT proofs from the untrusted solver.
 #
+# The default route is vc (no sim:); with emit: (fp only) and no sim: it is fp.
 # ROUTES (default "fp ir vc"): every refmap/specfacts case without `emit:` also runs on the IR
 # and VC symbolic routes (`sim:ir`, `sim:vc`, both designs) and must give the same verdict.
 #
@@ -191,7 +192,12 @@ run() { # <mode> <expect> <refmap> args... : on fp, and on the other ROUTES for 
   local mode=$1 expect=$2 rm=$3; shift 3
   local sim
   for sim in $ROUTES; do
-    if [[ "$sim" == fp ]]; then run1 "$mode" "$expect" "$rm" "$@"; continue; fi
+    if [[ "$sim" == fp ]]; then
+      if [[ ( "$mode" == refmap || "$mode" == specfacts ) && " $* " != *" emit:"* ]]; then
+        run1 "$mode" "$expect" "$rm" "$@" sim:fp
+      else run1 "$mode" "$expect" "$rm" "$@"; fi
+      continue
+    fi
     [[ "$mode" == refmap || "$mode" == specfacts ]] || continue
     [[ " $* " == *" emit:"* ]] && continue
     run1 "$mode" "$expect" "$rm" "$@" "sim:$sim"
@@ -216,6 +222,10 @@ two_map alt     alt rk_a/sl rk_b/sl 'slot a out:ph_o resp:in:x obs:out:ra_o' 'sl
 N=0
 run specfacts "SPEC FACTS PROVED"  accS
 run refmap    "REFINEMENT PROVED"  acc1
+# no sim: given -> vc for both designs
+run1 refmap "REFINEMENT PROVED" acc1
+grep -q 'impl route sim:vc (the default)' "$OUT/run_$N.log" || { tail -4 "$OUT/run_$N.log"; echo "FAIL: the default route is not vc"; exit 1; }
+echo "ok: refmap default route vc"
 run refmap    "REFINEMENT PROVED"  acc2
 grep -q '\[rankLt add\] .*UNSAT' "$OUT/run_$N.log" || { echo "FAIL: rank obligation not reported"; exit 1; }
 run refmap    "NOT A REFINEMENT"   acc2_all

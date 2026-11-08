@@ -18,6 +18,7 @@ set -euo pipefail
 #     random runs, pv1b (adds 2, not 1)     NO MATCH
 #     product search, pv1b                  COUNTEREXAMPLE (base), its trace -> judge NO MATCH
 #
+# The judge's default route is vc (fp for a certificate with memories); two cases also run on fp.
 # SYM_NAT=<dir with native sym_refmap and sym_verify> uses them; otherwise the drivers run
 # interpreted against formal/lean/.olean-dev (formal/lean/.build-proj.sh).
 
@@ -138,7 +139,11 @@ judge() { # <expect> <refmap> args...
   echo "ok: judge $rm $* -> $got"
 }
 judge "MATCH FOUND" acc2      random:40,8
+grep -q 'route sim:vc (the default)' "$OUT/judge_$N.log" || { tail -4 "$OUT/judge_$N.log"; echo "FAIL: the judge's default route is not vc"; exit 1; }
 judge "NO MATCH"    acc2b     random:40,8
+# the same two on fp, named
+judge "MATCH FOUND" acc2      random:40,8 sim:fp
+judge "NO MATCH"    acc2b     random:40,8 sim:fp
 judge "NO MATCH"    acc2_r0   random:10,1
 # the same run, 2000 steps long: the search must stop at the NO MATCH, not simulate the whole run
 judge "NO MATCH"    acc2_r0   random:2000,1

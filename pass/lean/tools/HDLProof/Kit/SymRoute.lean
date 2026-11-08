@@ -11,7 +11,11 @@ import LeanSemanticPrimitives.Compiler.CompileDesignDefs
 - `ir`: the certificate's dense nodes walked directly (`irStepper_sound`); fuel = node count.
 - `vc`: the verified compiler's bindings (`compileDesign`, `vcStepper_sound`); fuel = binding
   count.
-All three need `admitsWB D`, which the drivers check first. -/
+All three need `admitsWB D`, which the drivers check first.
+
+The default is `vc` (`defaultSim`): on a large design it is the fastest of the three and the
+smallest in memory (`projects/sym_routes/PERF.md`), and it needs no specialization. `closed`,
+`emit:` and `route:` exist only for fp, so a run that names one of them and no `sim:` uses fp. -/
 
 open Compiler Projection Projection.MemProjection HDLProof.Sym HDLProof.Sym.Native
 namespace HDLProof.Kit
@@ -25,6 +29,19 @@ structure SymRoute where
   fp   : Option Program
   /-- for reports -/
   name : String
+
+/-- The route a run uses: `sim:` when given (`tv` is the old name of `vc`); otherwise `vc`, or
+`fp` when the run asks for something only fp has (`fpOnly`: `closed`, `emit:`, `route:`). -/
+def defaultSim (asked : Option String) (fpOnly : Bool) : String :=
+  match asked with
+  | some s => if s == "tv" then "vc" else s
+  | none => if fpOnly then "fp" else "vc"
+
+/-- How the route was chosen, for the run's report. -/
+def simWhy (asked : Option String) (fpOnly : Bool) : String :=
+  match asked with
+  | some _ => ""
+  | none => if fpOnly then " (no sim: given; closed / emit: / route: exist only for fp)" else " (the default)"
 
 /-- Build the route `sim` (fp | ir | vc) for `D`; `route` is fp's variant. -/
 def mkSymRoute (sim route : String) (sf wf : Nat) (D : DesignCert) : Except String SymRoute :=

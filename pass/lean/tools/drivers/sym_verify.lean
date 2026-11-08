@@ -3,7 +3,7 @@
 residual (M3).
 
     sym_verify <cert> [!]<output>[,[!]<output>...] [asm:[!]<output>] [in:<input>=<value>]...
-               [k:<n>[,<n>...]] [base] [closed|rebuild] [sim:fp|ir|vc] [route:fused|var|plain] [emit:<file>] [sf:<n>] [wf:<n>]
+               [k:<n>[,<n>...]] [base] [closed|rebuild] [sim:fp|ir|vc (default vc)] [route:fused|var|plain] [emit:<file>] [sf:<n>] [wf:<n>]
                [solver:<cadical>] [work:<dir>]
 
 The specializer is `MemFused.projectMemFDesignAt`: the memory interpreter
@@ -13,6 +13,12 @@ is close to linear in the design. It is correct by
 `MemResidual.of_projF`. `route:var` uses `MemVariant.projectMemVarDesignAt`
 (`env0` inlined only, `of_projVar`); `route:plain` uses the original
 `projectMemDesignAt` (`of_proj`).
+
+`sim:fp|ir|vc` picks the symbolic step (`Kit.SymRoute`): `fp` the specialized residual above,
+`ir` the certificate's nodes walked directly (`irStepper_sound`), `vc` the verified compiler's
+bindings (`vcStepper_sound`). The default is `vc`; a run naming `closed`, `emit:` or `route:`
+and no `sim:` uses `fp`, the only route that has them. A base counterexample is replayed on
+fp's simulator whatever the route.
 
 Outputs and inputs are named by ordinal or by name (names come from the
 `<top>_io.json` next to the certificate). The property holds at a cycle when
@@ -57,7 +63,7 @@ import HDLProof.Kit.Driver
 import HDLProof.Kit.SymRoute
 
 open Compiler Projection HDLProof HDLProof.Sym HDLProof.Driver Projection.MemProjection Projection.HwMem
-open HDLProof.Kit (SymRoute mkSymRoute)
+open HDLProof.Kit (SymRoute mkSymRoute defaultSim simWhy)
 open Std.Tactic.BVDecide
 
 /-! ## Counterexample replay -/
@@ -376,12 +382,13 @@ flops {D.flops.size} memories {D.memories.size} clocks {D.clocks.size}"
   unless HwMem.admitsWB D do
     say "  RESULT: REFUSED (the memory route does not admit this certificate)"; return 4
   let t0 ← IO.monoMsNow
-  let sim := (opt "sim").getD "fp"
+  let fpOnly := (opt "emit").isSome || (opt "route").isSome
+  let sim := defaultSim (opt "sim") fpOnly
   let rt ← match ← IO.lazyPure (fun _ => mkSymRoute sim "fused" sf wf D) with
     | .ok rt => pure rt
     | .error e => do say s!"  RESULT: REFUSED ({e})"; return 4
   let t1 ← IO.monoMsNow
-  say s!"  route sim:{sim}: {rt.name}, set up in {t1 - t0} ms"
+  say s!"  route sim:{sim}{simWhy (opt "sim") fpOnly}: {rt.name}, set up in {t1 - t0} ms"
   say s!"  [time] setup {t1 - t0}"
   let s0 := zeroState D
   let sp : ConjTSpec := { conjs := conjs.toList, hyps := hyps.toList, split := split.toList, asmOut, asmIn,
@@ -584,14 +591,15 @@ flops {D.flops.size} memories {D.memories.size} clocks {D.clocks.size}"
     let route := (opt "route").getD "fused"
     unless ["fused", "var", "plain"].contains route do
       IO.eprintln s!"route:{route} is not one of fused | var | plain"; return 2
-    let sim := (opt "sim").getD "fp"
+    let fpOnly := rest.contains "closed" || (opt "emit").isSome || (opt "route").isSome
+    let sim := defaultSim (opt "sim") fpOnly
     if sim != "fp" && (rest.contains "closed" || (opt "emit").isSome) then
       IO.eprintln s!"closed / emit: only sim:fp has a closed checker so far (sim:{sim})"; return 2
     let rt ← match ← IO.lazyPure (fun _ => mkSymRoute sim route sf wf D) with
       | .ok rt => pure rt
       | .error e => do say s!"  RESULT: REFUSED ({e})"; return 4
     let t1 ← IO.monoMsNow
-    say s!"  route sim:{sim}: {rt.name}, set up in {t1 - t0} ms"
+    say s!"  route sim:{sim}{simWhy (opt "sim") fpOnly}: {rt.name}, set up in {t1 - t0} ms"
     say s!"  [time] setup {t1 - t0}"
     let s0 := zeroState D
     let single := cands.length == 1 && ks.length == 1
@@ -618,5 +626,5 @@ flops {D.flops.size} memories {D.memories.size} clocks {D.clocks.size}"
     unless single do say s!"  SUMMARY: none proved: {verdicts}"
     return last
   | _ =>
-    IO.eprintln "usage: sym_verify <cert> [!]<out>[,[!]<out>...] [asm:<output>] [in:<input>=<value>]... [k:<n>[,<n>...]] [base] [closed|rebuild] [sim:fp|ir|vc] [route:fused|var|plain] [emit:<file>] [sf:<n>] [wf:<n>] [solver:<cadical>] [work:<dir>]"
+    IO.eprintln "usage: sym_verify <cert> [!]<out>[,[!]<out>...] [asm:<output>] [in:<input>=<value>]... [k:<n>[,<n>...]] [base] [closed|rebuild] [sim:fp|ir|vc (default vc)] [route:fused|var|plain] [emit:<file>] [sf:<n>] [wf:<n>] [solver:<cadical>] [work:<dir>]"
     return 2
