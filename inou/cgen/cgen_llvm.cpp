@@ -30,15 +30,17 @@
 #include "llvm/ADT/Statistic.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/StringSet.h"
+#include "llvm/Analysis/LoopInfo.h"
+#include "llvm/Analysis/PostDominators.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/Bitcode/BitcodeReader.h"
 #include "llvm/Bitcode/BitcodeWriter.h"
-#include "llvm/IR/CFG.h"
-#include "llvm/IR/Dominators.h"
 #include "llvm/IR/BasicBlock.h"
+#include "llvm/IR/CFG.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/Dominators.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/IRBuilder.h"
@@ -66,10 +68,10 @@
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetOptions.h"
 #include "llvm/TargetParser/Host.h"
-#include "llvm/Transforms/Scalar/Sink.h"
 #include "llvm/Transforms/IPO/AlwaysInliner.h"
 #include "llvm/Transforms/IPO/GlobalDCE.h"
 #include "llvm/Transforms/InstCombine/InstCombine.h"
+#include "llvm/Transforms/Scalar/Sink.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/Cloning.h"
 #include "llvm/Transforms/Utils/LowerMemIntrinsics.h"
@@ -196,22 +198,18 @@ std::vector<uint32_t> widths_of(const std::vector<std::pair<uint32_t, bool>>& ty
 }
 
 // Native full unroll of an embedded rolled loop (Cgen_llvm::inline_loop).
-// Rolled, a per-bit loop pays a variable shift, mask and insert per lane every
-// cycle (br_flow_arb_rr: ~900 native instructions/cycle against ~400 for the
-// unrolled Verilog), and LLVM may vectorize it over a stack copy of a wide
-// operand (store-to-load forwarding stalls). Unrolled, every lane index is a
-// constant and the body folds to the fixed-position logic the equivalent
-// unrolled Verilog produces. The loop stays a loop in the graph and in the
-// reference (Slop) code; only the native kernel is unrolled, and only while
-// the replicated body stays within this many compute instructions (see
-// unroll_cost; lhdtrack br_arb_lru's 16x16 nest needs ~15k and runs 3x faster
-// unrolled, larger loops such as XiangShan's 520-lane ones stay rolled).
-constexpr uint64_t            kUnrollBudget       = 16384;
-constexpr uint64_t            kUnrollMaxTrips     = 256;
+// Loops stay rolled (user ruling 2026-11-07): unrolling wins on small tests,
+// but on large ones the replicated code saturates the instruction cache and
+// the branch predictors. Only an INNERMOST loop (its body embeds no loop) may
+// unroll, and only while the replicated body stays within this many compute
+// instructions (see unroll_cost): a short per-bit loop whose lane index folds
+// to fixed positions. An outer loop never unrolls, whatever its size.
+constexpr uint64_t            kUnrollBudget       = 1024;
+constexpr uint64_t            kUnrollMaxTrips     = 64;
 // All unrolls of one kernel together add at most this many compute
 // instructions, so a color holding many loop sites cannot grow into one
 // enormous function.
-constexpr uint64_t            kUnrollKernelBudget = 32768;
+constexpr uint64_t            kUnrollKernelBudget = 4096;
 // Instructions that the full unrolls pending in a function still add: a
 // sealed body carries it in its bitcode, so an enclosing loop sizes its own
 // unroll with the inner loops already expanded.
@@ -233,6 +231,17 @@ uint64_t unroll_cost(const llvm::Function& function) {
     }
   }
   return cost;
+}
+
+// A loop backedge anywhere in `function` (a rolled inner loop, or one the
+// sealed body embeds): `function` is then the body of an OUTER loop.
+bool has_loop(const llvm::Function& function) {
+  for (const auto& block : function) {
+    if (const auto* terminator = block.getTerminator(); terminator && terminator->getMetadata(llvm::LLVMContext::MD_loop)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 uint64_t unrolled_extra(const llvm::Function& function) {
@@ -524,6 +533,10 @@ unsigned select_load_addresses(llvm::Function& function) {
 // path between; LLVM's Sink refuses any load followed by any store.
 unsigned sink_into_use_blocks(llvm::Function& function) {
   llvm::DominatorTree dom(function);
+  // Never into a deeper loop: a value defined before a rolled loop and used in
+  // its body is loop-invariant there, and sinking it re-executes it every trip
+  // (gemmini's Mesh: the 16-register `aCur` pack, about half of each trip).
+  llvm::LoopInfo      loops(dom);
   unsigned            moved = 0;
   const auto          writes_scope = [](const llvm::Instruction& inst, const llvm::MDNode* scope) {
     if (!inst.mayWriteToMemory()) {
@@ -559,7 +572,8 @@ unsigned sink_into_use_blocks(llvm::Function& function) {
           }
           target = ub;
         }
-        if (!ok || target == nullptr || target == &block || !dom.dominates(&block, target)) {
+        if (!ok || target == nullptr || target == &block || !dom.dominates(&block, target)
+            || loops.getLoopDepth(target) > loops.getLoopDepth(&block)) {
           continue;
         }
         if (load != nullptr) {
@@ -1049,6 +1063,178 @@ unsigned shrink_live_ranges(llvm::Function& function) {
     }
   }
   return moved;
+}
+
+// Loop-carried arrays in place. A rolled loop whose body owns a local array
+// (Cgen_llvm::array_create) round-trips it through the carry every trip: store
+// the whole carry into the array, read/write one entry, load the whole array
+// back as the next carry (gemmini's Mesh: 4 x 512-bit plus a dozen narrower
+// arrays per trip, each a wide store and a wide reload right after a narrow
+// store). When that store is the trip's first access and that load its last,
+// memory already holds the carry between trips: store the initial value once
+// in the preheader and load the result once at the exit. Likewise a whole
+// store of a loop-invariant value (a read-only array view) is hoisted. Only
+// arrays that never escape qualify; their lifetime markers are dropped.
+unsigned carry_arrays_in_place(llvm::Function& function) {
+  if (function.isDeclaration()) {
+    return 0;
+  }
+  llvm::DominatorTree     dom(function);
+  llvm::PostDominatorTree pdom(function);
+  llvm::LoopInfo          loops(dom);
+  if (loops.empty()) {
+    return 0;
+  }
+  const auto&                    layout = function.getParent()->getDataLayout();
+  std::vector<llvm::AllocaInst*> allocas;
+  for (auto& inst : function.getEntryBlock()) {
+    if (auto* alloca = llvm::dyn_cast<llvm::AllocaInst>(&inst); alloca && alloca->isStaticAlloca()) {
+      allocas.push_back(alloca);
+    }
+  }
+  unsigned changed = 0;
+  for (auto* alloca : allocas) {
+    const auto size = alloca->getAllocationSize(layout);
+    if (!size || size->isScalable()) {
+      continue;
+    }
+    std::vector<llvm::Instruction*>   accesses;  // loads and stores of the array
+    std::vector<llvm::IntrinsicInst*> lifetimes;
+    std::vector<llvm::Value*>         work{alloca};
+    bool                              simple = true;
+    while (simple && !work.empty()) {
+      auto* pointer = work.back();
+      work.pop_back();
+      for (auto* user : pointer->users()) {
+        if (auto* load = llvm::dyn_cast<llvm::LoadInst>(user); load && load->isSimple()) {
+          accesses.push_back(load);
+        } else if (auto* store = llvm::dyn_cast<llvm::StoreInst>(user);
+                   store && store->isSimple() && store->getValueOperand() != pointer) {
+          accesses.push_back(store);
+        } else if (auto* gep = llvm::dyn_cast<llvm::GetElementPtrInst>(user)) {
+          work.push_back(gep);
+        } else if (auto* intrinsic = llvm::dyn_cast<llvm::IntrinsicInst>(user); intrinsic && intrinsic->isLifetimeStartOrEnd()) {
+          lifetimes.push_back(intrinsic);
+        } else {
+          simple = false;  // escapes (a call, a stored pointer, a select of pointers)
+          break;
+        }
+      }
+    }
+    if (!simple || accesses.empty()) {
+      continue;
+    }
+    // The smallest loop holding every access (after an inner loop is done,
+    // its preheader store and exit load are the enclosing loop's round trip).
+    auto* loop = loops.getLoopFor(accesses.front()->getParent());
+    while (loop != nullptr && !std::ranges::all_of(accesses, [&](const llvm::Instruction* a) { return loop->contains(a); })) {
+      loop = loop->getParentLoop();
+    }
+    if (loop == nullptr) {
+      continue;
+    }
+    auto* preheader = loop->getLoopPreheader();
+    if (preheader == nullptr) {
+      continue;
+    }
+    const auto whole = [&](const llvm::Instruction* inst) {
+      const llvm::Value* pointer = nullptr;
+      llvm::Type*        type    = nullptr;
+      if (const auto* load = llvm::dyn_cast<llvm::LoadInst>(inst)) {
+        pointer = load->getPointerOperand();
+        type    = load->getType();
+      } else if (const auto* store = llvm::dyn_cast<llvm::StoreInst>(inst)) {
+        pointer = store->getPointerOperand();
+        type    = store->getValueOperand()->getType();
+      }
+      return pointer == alloca && layout.getTypeStoreSize(type) == size->getFixedValue();
+    };
+    // The trip's first access: a whole store dominating every other access.
+    llvm::StoreInst* first = nullptr;
+    for (auto* access : accesses) {
+      auto* store = llvm::dyn_cast<llvm::StoreInst>(access);
+      if (store != nullptr && whole(store)
+          && std::ranges::all_of(accesses, [&](const llvm::Instruction* a) { return a == store || dom.dominates(store, a); })) {
+        first = store;
+        break;
+      }
+    }
+    if (first == nullptr) {
+      continue;
+    }
+    auto* seed = first->getValueOperand();
+    if (loop->isLoopInvariant(seed)) {
+      // Read-only view: nothing else writes the array inside the loop.
+      if (!std::ranges::all_of(accesses, [&](const llvm::Instruction* a) { return a == first || llvm::isa<llvm::LoadInst>(a); })) {
+        continue;
+      }
+      first->moveBefore(preheader->getTerminator()->getIterator());
+    } else {
+      // Carried: the seed is a header phi used only here, and its back edge
+      // value is a whole load that post-dominates every store (reads may
+      // follow it: nothing changes the array after it within the trip).
+      auto* phi   = llvm::dyn_cast<llvm::PHINode>(seed);
+      auto* latch = loop->getLoopLatch();
+      if (phi == nullptr || phi->getParent() != loop->getHeader() || !phi->hasOneUse() || latch == nullptr) {
+        continue;
+      }
+      auto* last = llvm::dyn_cast<llvm::LoadInst>(phi->getIncomingValueForBlock(latch));
+      if (last == nullptr || !whole(last) || !loop->contains(last) || !dom.dominates(last->getParent(), latch)
+          || !std::ranges::all_of(accesses, [&](const llvm::Instruction* a) {
+               return a == last || llvm::isa<llvm::LoadInst>(a) || pdom.dominates(last, a);
+             })) {
+        continue;
+      }
+      // Uses past the loop read the array once at the (unique) exit.
+      std::vector<llvm::Use*> outside;
+      for (auto& use : last->uses()) {
+        if (use.getUser() == phi) {
+          continue;
+        }
+        auto* user = llvm::cast<llvm::Instruction>(use.getUser());
+        if (!loop->contains(user)) {
+          outside.push_back(&use);
+        }
+      }
+      auto* exit = loop->getExitBlock();
+      if (!outside.empty()) {
+        if (exit == nullptr || exit->getSinglePredecessor() == nullptr) {
+          continue;
+        }
+        const bool dominated = std::ranges::all_of(outside, [&](const llvm::Use* use) {
+          const auto* user  = llvm::cast<llvm::Instruction>(use->getUser());
+          const auto* where = user->getParent();
+          if (const auto* user_phi = llvm::dyn_cast<llvm::PHINode>(user)) {
+            where = user_phi->getIncomingBlock(*use);
+          }
+          return dom.dominates(exit, where);
+        });
+        if (!dominated) {
+          continue;
+        }
+      }
+      llvm::IRBuilder<> before_loop(preheader->getTerminator());
+      before_loop.CreateAlignedStore(phi->getIncomingValueForBlock(preheader), alloca, first->getAlign());
+      first->eraseFromParent();
+      phi->replaceAllUsesWith(llvm::PoisonValue::get(phi->getType()));
+      phi->eraseFromParent();
+      if (!outside.empty()) {
+        llvm::IRBuilder<> at_exit(exit, exit->getFirstInsertionPt());
+        auto*             result = at_exit.CreateAlignedLoad(last->getType(), alloca, last->getAlign(), "array.result");
+        for (auto* use : outside) {
+          use->set(result);
+        }
+      }
+      if (last->use_empty()) {
+        last->eraseFromParent();
+      }
+    }
+    for (auto* lifetime : lifetimes) {
+      lifetime->eraseFromParent();
+    }
+    ++changed;
+  }
+  return changed;
 }
 
 // Preserve short-circuit evaluation for absorbing Boolean loop carries. After
@@ -3469,8 +3655,8 @@ bool Cgen_llvm::inline_loop(const Inline_body& body, const Loop_layout& layout, 
   // as they will be once expanded (kUnrolledExtra).
   const uint64_t body_extra = unrolled_extra(*callee);
   const uint64_t trip_cost  = unroll_cost(*callee) + body_extra;
-  const bool     unroll     = count <= kUnrollMaxTrips && trip_cost <= kUnrollBudget && count * trip_cost <= kUnrollBudget
-                              && impl_->unroll_extra + count * trip_cost <= kUnrollKernelBudget;
+  const bool     unroll = !has_loop(*callee) && body_extra == 0 && count <= kUnrollMaxTrips && trip_cost <= kUnrollBudget
+                          && count * trip_cost <= kUnrollBudget && impl_->unroll_extra + count * trip_cost <= kUnrollKernelBudget;
   impl_->add_unroll_extra(body_extra + (unroll && count > 0 ? (count - 1) * trip_cost : 0));
 
   auto& b       = impl_->builder;
@@ -4052,6 +4238,18 @@ bool Cgen_llvm::write_module(std::string_view path, std::string& error, bool tra
   }
   auto pipeline = pass_builder.buildPerModuleDefaultPipeline(llvm::OptimizationLevel::O2);
   pipeline.run(*impl_->module, module_analyses);
+  if (livehd::debug::env<"LHD_SIM_LLVM_NO_ARRAY_CARRY">() == nullptr) {
+    for (auto& function : *impl_->module) {
+      // Inner loops first, then each enclosing level (bounded: nesting depth).
+      bool any = false;
+      for (int level = 0; level < 8 && carry_arrays_in_place(function) != 0; ++level) {
+        any = true;
+      }
+      if (any) {
+        function_analyses.invalidate(function, llvm::PreservedAnalyses::none());
+      }
+    }
+  }
   if (impl_->loop_function != nullptr) {
     // Clean up hoisted loop expressions without perturbing straight-line
     // colors with a second global instruction-combining sweep.

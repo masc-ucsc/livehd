@@ -13511,13 +13511,12 @@ bool uPass_runner::plan_loop_roll(const Lnast_nid& body_stmts, const std::string
     }
   }
 
-  // The index port is signed and wide enough for every generated value (the
-  // realized Verilog localparam is signed, so a minimal unsigned width would
-  // wrap the top ordinal).
-  // The realized boundary is SIGNED (cgen prints `input signed [W-1:0]`), so
-  // the declared range must be a signed one wide enough for the extreme index.
-  // Declaring `[0, 7]` yields a 3-bit port that cannot hold 7 once it is read
-  // as signed — design rule 7 (a 0..=15 domain needs 5 signed bits, not 4).
+  // The index port carries the EXACT index range: unsigned [lo, last] when
+  // the domain is non-negative (0..<4 is a U2), so every backend -- the
+  // native sim in particular -- knows `row*4 + col` stays inside a 16-entry
+  // array and drops its bounds checks (gemmini's Mesh: 12% fewer instructions).
+  // A negative domain keeps a signed range wide enough for the extreme index
+  // (design rule 7: a signed 0..=15 needs 5 bits, not 4).
   const int64_t last = static_cast<int64_t>(static_cast<i128>(lo) + static_cast<i128>(count - 1) * step);
   {
     // Two's-complement width, sign bit included, of the extreme generated index.
@@ -13539,7 +13538,9 @@ bool uPass_runner::plan_loop_roll(const Lnast_nid& body_stmts, const std::string
       return b;
     };
     const int w     = std::max(sbits(lo), sbits(last));
-    out.types[ivar] = Spec_port{.inject = true, .max = upass::signed_max_from_bits(w), .min = upass::signed_min_from_bits(w)};
+    out.types[ivar] = lo >= 0 && last >= lo
+                          ? Spec_port{.inject = true, .max = *Dlop::create_integer(last), .min = *Dlop::create_integer(lo)}
+                          : Spec_port{.inject = true, .max = upass::signed_max_from_bits(w), .min = upass::signed_min_from_bits(w)};
   }
 
   // A compiler-owned port name must not collide with a source variable. EVERY

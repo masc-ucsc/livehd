@@ -15626,10 +15626,14 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
           continue;
         }
         // A clockless array is a kernel-local std::array (no state, no
-        // storage in the lane): it rides the native loop. Any other memory
-        // keeps the scheduled walk.
+        // storage in the lane): it rides the native loop. A registered memory
+        // updated in place and clocked by the plain period rides it too: its
+        // storage is a lane resource like a register's (bitcoin's 4 lanes of
+        // sha256 `w_mem`: the walk was 1.6x the instructions of the Verilog
+        // build). A pending buffer (a separate commit) or a clock guard / tick
+        // word (per-call samples) keeps the scheduled walk.
         const auto* m = find_local_mem(static_cast<size_t>(&site - color_plan_->sites().data()));
-        ok &= m != nullptr && llvm_local_array(*m);
+        ok &= m != nullptr && (llvm_local_array(*m) || (site.in_place && m->clock_guards.empty() && m->tick_field.empty()));
       }
       if (ok && advance && publish) {
         state_loop_colors = std::array<size_t, 2>{*advance, *publish};
@@ -15745,9 +15749,20 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         // how many of its program-order writes the kernel has applied so far
         // (-1: not seeded). Versions are emitted straight-line, so a later
         // read with a longer prefix continues where the previous one stopped.
+        // A read with a SHORTER prefix (emitted after later writes) undoes
+        // them from `undo` (each write's enable, address and the entry it
+        // overwrote) instead of re-seeding the whole array: a re-seed in a
+        // rolled loop body stores the whole carry again mid-trip, which keeps
+        // the carry from living in place (carry_arrays_in_place).
+        struct Llvm_array_undo {
+          Cgen_llvm::Value enable;
+          Cgen_llvm::Value address;
+          Cgen_llvm::Value old;
+        };
         struct Llvm_array_state {
-          size_t array   = 0;
-          int    applied = -1;
+          size_t                       array   = 0;
+          int                          applied = -1;
+          std::vector<Llvm_array_undo> undo;  // indexed by write number, [0, applied)
         };
         absl::flat_hash_map<size_t, Llvm_array_state> llvm_arrays;
         auto&      resources = llvm_loop_body_mode ? state_loop_phase[current_state_phase].table : llvm_resources[color_index];
@@ -16553,32 +16568,47 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                   ait->second.array = llvm_kernel.array_create(static_cast<uint32_t>(memory->bits), memory->size);
                 }
                 const size_t array = ait->second.array;
-                if (ait->second.applied < 0 || ait->second.applied > prefix) {
+                auto&        state = ait->second;
+                // A shorter single-entry read undoes the later writes; a whole
+                // read (or no undo record) re-seeds.
+                const bool   undo_read
+                    = !whole_read && state.applied > prefix && static_cast<int>(state.undo.size()) >= state.applied;
+                if (state.applied < 0 || (state.applied > prefix && !undo_read)) {
                   if (!llvm_kernel.array_seed(array, llvm_kernel.resize(base, whole_bits, memory->unsign))) {
                     return reject("array seed construction failed");
                   }
-                  ait->second.applied = 0;
+                  state.applied = 0;
+                  state.undo.clear();
                 }
-                const int from      = ait->second.applied;
-                ait->second.applied = prefix;
-                for (const auto& port : memory->ports) {
-                  if (port.rd || port.addr.is_invalid() || port.din.is_invalid() || port.wridx < from || port.wridx >= prefix) {
-                    continue;
-                  }
-                  if (port.enable.is_known_false()) {
-                    continue;
-                  }
-                  auto enable = memory_operand(port.pid, "enable");
-                  if (enable.width == 0) {
-                    enable = llvm_kernel.constant(1, 1, true);
-                  }
-                  auto address = memory_operand(port.pid, "addr");
-                  auto data    = memory_operand(port.pid, "din");
-                  if (address.width == 0 || data.width == 0) {
-                    return reject("array write has no address or data value");
-                  }
-                  if (!llvm_kernel.array_write(array, enable, address, data)) {
-                    return reject("array write construction failed");
+                const auto entry_bits = static_cast<uint32_t>(memory->bits);
+                if (!undo_read) {
+                  const int from = state.applied;
+                  state.applied  = prefix;
+                  state.undo.resize(static_cast<size_t>(std::max(prefix, 0)));
+                  for (const auto& port : memory->ports) {
+                    if (port.rd || port.addr.is_invalid() || port.din.is_invalid() || port.wridx < from || port.wridx >= prefix) {
+                      continue;
+                    }
+                    if (port.enable.is_known_false()) {
+                      continue;
+                    }
+                    auto enable = memory_operand(port.pid, "enable");
+                    if (enable.width == 0) {
+                      enable = llvm_kernel.constant(1, 1, true);
+                    }
+                    auto address = memory_operand(port.pid, "addr");
+                    auto data    = memory_operand(port.pid, "din");
+                    if (address.width == 0 || data.width == 0) {
+                      return reject("array write has no address or data value");
+                    }
+                    const auto old = llvm_kernel.array_read(array, address, entry_bits, memory->unsign);
+                    if (!llvm_kernel.array_write(array, enable, address, data)) {
+                      return reject("array write construction failed");
+                    }
+                    if (port.wridx >= 0 && static_cast<size_t>(port.wridx) < state.undo.size()) {
+                      state.undo[static_cast<size_t>(port.wridx)]
+                          = Llvm_array_undo{llvm_kernel.reduce_or(enable, 1, true), llvm_kernel.resize(address, 64, true), old};
+                    }
                   }
                 }
                 if (whole_read) {
@@ -16588,7 +16618,25 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                   if (address.width == 0) {
                     return reject("array read has no address value");
                   }
-                  result = llvm_kernel.array_read(array, address, result_width, result_unsign);
+                  auto value = llvm_kernel.array_read(array, address, entry_bits, memory->unsign);
+                  if (undo_read) {
+                    // Newest first: the oldest write past the prefix restores last.
+                    const auto where = llvm_kernel.resize(address, 64, true);
+                    for (int k = state.applied - 1; k >= std::max(prefix, 0); --k) {
+                      const auto& undo = state.undo[static_cast<size_t>(k)];
+                      if (undo.enable.width == 0) {
+                        continue;  // a write known disabled, or not a write port
+                      }
+                      const auto hit
+                          = llvm_kernel.binary(Cgen_llvm::Binary_op::bit_and,
+                                               undo.enable,
+                                               llvm_kernel.binary(Cgen_llvm::Binary_op::eq, where, undo.address, 1, true),
+                                               1,
+                                               true);
+                      value = llvm_kernel.mux(hit, value, undo.old, entry_bits, memory->unsign);
+                    }
+                  }
+                  result = llvm_kernel.resize(value, result_width, result_unsign);
                 }
                 break;
               }
@@ -17741,6 +17789,13 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
           llvm_loop_body_mode       = true;
           phase.built               = emit_llvm_object();
           llvm_loop_body_mode       = false;
+          // A trip table holds lane pointers only: a per-call local (a memory
+          // gate sample, a whole-memory staging buffer) cannot ride it.
+          if (phase.built && std::ranges::any_of(phase.table, [](const std::string& pointer) {
+                return pointer.find("__llvm_gate_") != std::string::npos || pointer.find("__llvm_whole_") != std::string::npos;
+              })) {
+            phase.built = false;
+          }
           llvm_raw_name             = scheduled_name;
           if (!phase.built && llvm_state_debug) {
             std::fprintf(stderr, "sim llvm: no stateful native loop (phase %zu): %s\n", current_state_phase, llvm_rejection.c_str());

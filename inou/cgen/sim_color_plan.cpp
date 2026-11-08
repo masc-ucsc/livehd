@@ -6546,28 +6546,171 @@ void Color_plan::build_tune_tables(hhds::Graph* root, const std::vector<std::vec
   const auto         executable = [&](size_t s) { return sites_[s].live && !compact_body[s] && !versions_by_base[s].empty(); };
 
   // ---- weights: a compact loop does its native body's work once per lane.
-  absl::flat_hash_map<const hhds::Graph*, uint64_t> body_ge_memo;
-  absl::flat_hash_set<const hhds::Graph*>           body_ge_active;
-  std::function<uint64_t(hhds::Graph*)>             body_ge = [&](hhds::Graph* graph) -> uint64_t {
-    if (const auto it = body_ge_memo.find(graph); it != body_ge_memo.end()) {
+  // A clockless array (Memory type 2) weighs what its lanes cost once the loop
+  // is unrolled: the whole-array buses (initial, update, read_all) are wiring,
+  // and so is a port whose address depends only on loop indices and constants
+  // (one fixed entry per lane). Only a runtime address pays a size*bits
+  // decode/mux. Counting every bus bit per array per lane made gemmini's
+  // for-loop Mesh weigh 209k GE against 63k for the same hardware written flat,
+  // and that tipped sim.tune.dirty=auto on (2.4x slower).
+  using Lane_ports = std::vector<hhds::Port_id>;  // sorted body inputs that are fixed per lane
+  absl::flat_hash_map<std::pair<const hhds::Graph*, Lane_ports>, uint64_t> body_ge_memo;
+  absl::flat_hash_set<const hhds::Graph*>                                  body_ge_active;
+  const auto memory_pid = [](std::string_view name) { return Ntype::get_sink_pid(Ntype_op::Memory, name); };
+  std::function<uint64_t(hhds::Graph*, const Lane_ports&)> body_ge
+      = [&](hhds::Graph* graph, const Lane_ports& lane_ports) -> uint64_t {
+    if (const auto it = body_ge_memo.find(std::pair{graph, lane_ports}); it != body_ge_memo.end()) {
       return it->second;
     }
     if (!body_ge_active.insert(graph).second) {
       return 0;  // recursive instantiation: discovery already failed the plan
     }
+    // Fixed per lane: constants, lane-fixed inputs, and combinational logic of
+    // them. An explicit-stack walk: a body's combinational depth must not
+    // become native recursion depth (worker threads have small stacks).
+    absl::flat_hash_map<hhds::Node_class, bool> fixed_node;  // absent: unknown; false while on the stack
+    const auto                                  leaf = [&](const hhds::Pin_class& pin) -> std::optional<bool> {
+      if (pin.is_invalid() || pin.is_const()) {
+        return true;
+      }
+      if (gu::is_graph_input_pin(pin)) {
+        return std::ranges::binary_search(lane_ports, pin.get_port_id());
+      }
+      const auto node = pin.get_master_node();
+      if (const auto it = fixed_node.find(node); it != fixed_node.end()) {
+        return it->second;
+      }
+      const auto op = gu::type_op_of(node);
+      if (op == Ntype_op::Memory || op == Ntype_op::Sub || gu::is_type_register(node)) {
+        fixed_node.emplace(node, false);
+        return false;
+      }
+      return std::nullopt;  // a combinational node not visited yet
+    };
+    const auto fixed = [&](const hhds::Pin_class& pin) -> bool {
+      if (const auto known = leaf(pin)) {
+        return *known;
+      }
+      struct Frame {
+        hhds::Node_class                                         node;
+        absl::InlinedVector<gu::Sink_driver<hhds::Pin_class>, 4> inputs;
+        size_t                                                   next = 0;
+      };
+      std::vector<Frame> stack;
+      const auto         push = [&](const hhds::Node_class& node) {
+        fixed_node.emplace(node, false);  // a combinational cycle is not fixed
+        stack.push_back(Frame{node, gu::inp_sink_drivers(node)});
+      };
+      push(pin.get_master_node());
+      while (!stack.empty()) {
+        auto& frame = stack.back();
+        bool  done  = true;
+        bool  all   = true;
+        while (frame.next < frame.inputs.size()) {
+          const auto& driver = frame.inputs[frame.next].driver;
+          const auto  known  = leaf(driver);
+          if (!known) {
+            done = false;
+            push(driver.get_master_node());  // revisit this frame once the input is known
+            break;
+          }
+          if (!*known) {
+            all = false;
+            break;
+          }
+          ++frame.next;
+        }
+        if (!done) {
+          continue;
+        }
+        fixed_node[stack.back().node] = all;
+        stack.pop_back();
+      }
+      return fixed_node.at(pin.get_master_node());
+    };
+    const auto clockless_array_ge = [&](const hhds::Node_class& node) -> std::optional<uint64_t> {
+      uint64_t type = 0, size = 0, bits = 0;
+      for (const auto& edge : gu::inp_sink_drivers(node)) {
+        const auto pid = edge.sink.get_port_id();
+        if (pid == memory_pid("type") || pid == memory_pid("size")) {
+          if (!edge.driver.is_const()) {
+            return std::nullopt;
+          }
+          (pid == memory_pid("type") ? type : size) = static_cast<uint64_t>(gu::const_of(edge.driver).to_just_i64());
+        } else if (pid == memory_pid("din")) {
+          bits = std::max<uint64_t>(bits, gu::bits_of(edge.driver));
+        }
+      }
+      if (type != 2) {
+        return std::nullopt;
+      }
+      for (const auto pin : node.out_sorted_pins()) {
+        if (pin.get_port_id() != Ntype::Memory_readall_pid) {
+          bits = std::max<uint64_t>(bits, gu::bits_of(pin));
+        }
+      }
+      uint64_t ge = 0;
+      for (const auto& edge : gu::inp_sink_drivers(node)) {
+        if (edge.sink.get_port_id() == memory_pid("addr") && !fixed(edge.driver)) {
+          ge = sat_add(ge, sat_mul(std::max<uint64_t>(1, bits), std::max<uint64_t>(1, size)));
+        }
+      }
+      return ge;
+    };
+    // Fixed per lane, a shift amount or a mask is a constant once unrolled:
+    // the operation is wiring (rolled, `x#[(31 - i)*8..+8]` is a 256-bit
+    // barrel shift per trip; gemmini/bitcoin's for-loop trees weighed 3-12x
+    // their flat equivalents and tipped sim.tune.dirty=auto on).
+    const auto lane_wiring = [&](const hhds::Node_class& node, Ntype_op op) {
+      if (op == Ntype_op::Memory || op == Ntype_op::Sub || gu::is_type_register(node)) {
+        return false;
+      }
+      bool all_fixed = true, fixed_amount = false, fixed_operand = false;
+      for (const auto& edge : gu::inp_sink_drivers(node)) {
+        const bool f   = fixed(edge.driver);
+        all_fixed     &= f;
+        fixed_operand |= f && !edge.driver.is_invalid();
+        fixed_amount  |= f && edge.sink.get_port_id() == Ntype::get_sink_pid(op, "b");
+      }
+      if (all_fixed) {
+        return true;  // a per-lane constant
+      }
+      if ((op == Ntype_op::SHL || op == Ntype_op::SRA) && fixed_amount) {
+        return true;  // a constant shift
+      }
+      return op == Ntype_op::And && fixed_operand;  // a constant mask
+    };
     uint64_t ge = 0;
     for (const auto node : graph->body().nodes()) {
-      uint64_t weight = gu::mappable_ge_weight(node);
-      if (gu::type_op_of(node) == Ntype_op::Sub) {
+      uint64_t   weight = gu::mappable_ge_weight(node);
+      const auto op     = gu::type_op_of(node);
+      if (!lane_ports.empty() && lane_wiring(node, op)) {
+        weight = 0;
+      } else if (op == Ntype_op::Memory) {
+        if (const auto array = clockless_array_ge(node)) {
+          weight = *array;
+        }
+      } else if (op == Ntype_op::Sub) {
         if (const auto child = node.get_subnode_graph()) {
           const auto loop = node.subnode_loop();
-          weight          = std::max<uint64_t>(1, sat_mul(body_ge(child.get()), loop ? std::max<uint64_t>(1, loop->count) : 1));
+          Lane_ports child_lanes;
+          if (loop && loop->index_input) {
+            child_lanes.push_back(*loop->index_input);
+          }
+          for (const auto& edge : gu::inp_sink_drivers(node)) {
+            if (fixed(edge.driver)) {
+              child_lanes.push_back(edge.sink.get_port_id());
+            }
+          }
+          std::ranges::sort(child_lanes);
+          child_lanes.erase(std::unique(child_lanes.begin(), child_lanes.end()), child_lanes.end());
+          weight = std::max<uint64_t>(1, sat_mul(body_ge(child.get(), child_lanes), loop ? std::max<uint64_t>(1, loop->count) : 1));
         }
       }
       ge = sat_add(ge, weight);
     }
     body_ge_active.erase(graph);
-    body_ge_memo.emplace(graph, ge);
+    body_ge_memo.emplace(std::pair{graph, lane_ports}, ge);
     return ge;
   };
   std::vector<uint64_t> weight(nsites, 0);
@@ -6583,7 +6726,18 @@ void Color_plan::build_tune_tables(hhds::Graph* root, const std::vector<std::vec
     const auto child = site.node.get_subnode_graph();
     const auto loop  = site.node.subnode_loop();
     const auto lanes = loop ? std::max<uint64_t>(1, loop->count) : 1;
-    weight[s]        = std::max<uint64_t>(1, sat_mul(child ? body_ge(child.get()) : 0, lanes));
+    Lane_ports lane_ports;
+    if (loop && loop->index_input) {
+      lane_ports.push_back(*loop->index_input);
+    }
+    for (const auto& edge : gu::inp_sink_drivers(site.node.base_node())) {
+      if (edge.driver.is_const()) {
+        lane_ports.push_back(edge.sink.get_port_id());
+      }
+    }
+    std::ranges::sort(lane_ports);
+    lane_ports.erase(std::unique(lane_ports.begin(), lane_ports.end()), lane_ports.end());
+    weight[s] = std::max<uint64_t>(1, sat_mul(child ? body_ge(child.get(), lane_ports) : 0, lanes));
   }
 
   // ---- occurrences

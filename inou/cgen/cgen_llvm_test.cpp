@@ -2416,12 +2416,12 @@ TEST(CgenLlvm, EmbeddedLoopStaysRolledPastTheTripLimit) {
   EXPECT_EQ(shape.full, 0u);
 }
 
-TEST(CgenLlvm, NestedEmbeddedLoopsSizeTheOuterUnrollWithInnerExpansion) {
+TEST(CgenLlvm, NestedEmbeddedLoopsUnrollOnlyTheInner) {
   // middle(j, x, acc) = rotl16(acc, 1) ^ reverse16(x ^ j) ^ reverse16(x + j),
-  // each 16-trip reversal embedded (and unrolled). An unroll of 64 outer trips
-  // would replicate 64 x 2 x 16 inner trips -- past the budget although the
-  // rolled middle body itself is small -- so it stays rolled, while 2 outer
-  // trips fit.
+  // each 16-trip reversal embedded (and unrolled: an innermost loop with a
+  // small footprint). The outer loop embeds loops, so it stays rolled at any
+  // trip count, even 2 (user ruling 2026-11-07: code footprint saturates the
+  // instruction cache and predictors on large tests).
   std::string error;
   const auto  trip = bit_reverse_trip(error);
   ASSERT_FALSE(trip.bitcode.empty()) << error;
@@ -2479,7 +2479,7 @@ TEST(CgenLlvm, NestedEmbeddedLoopsSizeTheOuterUnrollWithInnerExpansion) {
       return expected;
     });
     EXPECT_EQ(shape.full, 0u) << outer;  // the inner loops always unroll
-    EXPECT_EQ(shape.disabled, outer == 2 ? 0u : 1u) << outer;
+    EXPECT_EQ(shape.disabled, 1u) << outer;  // the outer loop never unrolls
   }
 }
 
