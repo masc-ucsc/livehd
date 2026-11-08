@@ -26,6 +26,12 @@ set -euo pipefail
 # accepting LRAT proofs from the untrusted solver. A run with several
 # attempts is judged by its LAST verdict line.
 #
+#   ram4 / ram4b  a 4-word RAM; writes never store 0xff (ram4b: except into word 0)
+#     word 0 != 0xff              PROVED (k=1) / COUNTEREXAMPLE (base)
+# ROUTES (default "fp ir vc"): every sym_verify case that names no `closed`,
+# `emit:` or `route:` also runs on the IR and VC symbolic routes (`sim:ir`,
+# `sim:vc`) and must give the same verdict.
+#
 # SYM_NAT=<dir with native sym_verify and sym_refine> uses those; otherwise the
 # drivers run interpreted against formal/lean/.olean-dev (build it with
 # formal/lean/.build-proj.sh). The Lean toolchain pin lives in formal/lean.
@@ -127,7 +133,24 @@ endmodule
 EOF
 printf '%s\n' 's_dom oneof sA=0,sB=0;sA=0,sB=1;sA=1,sB=2;sA=2,sB=3' 'd_eq eq dA dB split: s_dom' > "$OUT/tc_split.spec"
 printf '%s\n' 's_dom oneof sA=0,sB=0;sA=0,sB=1;sA=1,sB=2;sA=2,sB=2;sA=2,sB=3' 'd_eq eq dA dB split: s_dom' > "$OUT/tc_bad.spec"
-for d in cnt10 acc1 acc2 pair twocore; do
+cat > "$OUT/ram4.sv" <<'EOF'
+module ram4(input clk, input we, input [1:0] wa, input [7:0] wd, output ok, output [7:0] w0_o);
+  reg [7:0] mem [0:3];
+  always @(posedge clk) if (we) mem[wa] <= (wd == 8'hff) ? 8'hfe : wd;
+  assign w0_o = mem[0];
+  assign ok = mem[0] != 8'hff;
+endmodule
+EOF
+cat > "$OUT/ram4b.sv" <<'EOF'
+module ram4b(input clk, input we, input [1:0] wa, input [7:0] wd, output ok, output [7:0] w0_o);
+  reg [7:0] mem [0:3];
+  always @(posedge clk) if (we) mem[wa] <= (wd == 8'hff && wa != 2'd0) ? 8'hfe : wd;
+  assign w0_o = mem[0];
+  assign ok = mem[0] != 8'hff;
+endmodule
+EOF
+
+for d in cnt10 acc1 acc2 pair twocore ram4 ram4b; do
   "$LHD" compile "$OUT/$d.sv" --reader yosys-slang --top "$d" --set yosys.setundef=zero \
     --emit-dir "lg:$OUT/${d}_lg" --workdir "$OUT/${d}_cw" > "$OUT/$d.compile.log" 2>&1 \
     || { tail -5 "$OUT/$d.compile.log"; echo "FAIL: compile $d"; exit 1; }
@@ -136,7 +159,14 @@ for d in cnt10 acc1 acc2 pair twocore; do
     || { grep -o '"message":"[^"]*' "$OUT/$d.lean.log" | head -3; echo "FAIL: certificate $d"; exit 1; }
 done
 
-run() { # <driver> <expect> args...
+ROUTES="${ROUTES:-fp ir vc}"
+# the IR and VC symbolic steps against eval_op and interpretDesign, operator by operator and
+# step by step (tests/native_symbolic.lean)
+(cd "$ROOT/formal/lean" && LEAN_PATH="$PWD/.olean-dev" lean --run "$ROOT/pass/lean/tools/tests/native_symbolic.lean") \
+  > "$OUT/native_symbolic.log" 2>&1 && grep -q '^PASS native symbolic' "$OUT/native_symbolic.log" \
+  || { tail -5 "$OUT/native_symbolic.log"; echo "FAIL: native_symbolic"; exit 1; }
+echo "ok: $(tail -1 "$OUT/native_symbolic.log")"
+run1() { # <driver> <expect> args...
   local drv=$1 expect=$2; shift 2
   local log="$OUT/run_$(( ++N )).log"
   if [[ -n "$SYM_NAT" ]]; then
@@ -151,6 +181,16 @@ run() { # <driver> <expect> args...
     tail -6 "$log"; echo "FAIL: $drv $* -- expected $expect, got '$got'"; exit 1
   fi
   echo "ok: $drv ${*##*/} -> $got"
+}
+run() { # <driver> <expect> args... : on fp, and on the other ROUTES where the case allows
+  local drv=$1 expect=$2; shift 2
+  local sim
+  for sim in $ROUTES; do
+    if [[ "$sim" == fp ]]; then run1 "$drv" "$expect" "$@"; continue; fi
+    [[ "$drv" == sym_verify ]] || continue
+    [[ " $* " == *" closed "* || " $* " == *" emit:"* || " $* " == *" route:"* ]] && continue
+    run1 "$drv" "$expect" "$@" "sim:$sim"
+  done
 }
 N=0
 C="$OUT/cnt10_lean/cnt10.dcert"
@@ -202,4 +242,8 @@ run sym_verify "INVARIANT PROVED"    "$TC" "conj:$OUT/tc_split.spec" jobs:4
 grep -q '\[d_eq | sA=2,sB=3\] .*UNSAT' "$OUT/run_$N.log" || { echo "FAIL: per-case obligation not reported"; exit 1; }
 run sym_verify "NOT INDUCTIVE"       "$TC" "conj:$OUT/tc_bad.spec" jobs:4
 grep -q '\[d_eq | sA=2,sB=2\] counterexample: false at cycle 0 \[\], at cycle 1 \[.*d_eq' "$OUT/run_$N.log" || { tail -5 "$OUT/run_$N.log"; echo "FAIL: case counterexample not evaluated"; exit 1; }
+M4="$OUT/ram4_lean/ram4.dcert"
+M4B="$OUT/ram4b_lean/ram4b.dcert"
+run sym_verify "INVARIANT PROVED"    "$M4" ok k:1
+run sym_verify "COUNTEREXAMPLE"      "$M4B" ok k:4
 echo "PASS: sym_selftest"
