@@ -3,7 +3,7 @@
 residual (M3).
 
     sym_verify <cert> [!]<output>[,[!]<output>...] [asm:[!]<output>] [in:<input>=<value>]...
-               [k:<n>[,<n>...]] [base] [closed|rebuild] [route:fused|var|plain] [emit:<file>] [sf:<n>] [wf:<n>]
+               [k:<n>[,<n>...]] [base] [closed|rebuild] [sim:fp|ir|vc] [route:fused|var|plain] [emit:<file>] [sf:<n>] [wf:<n>]
                [solver:<cadical>] [work:<dir>]
 
 The specializer is `MemFused.projectMemFDesignAt`: the memory interpreter
@@ -54,8 +54,10 @@ import HDLProof.Sym.ConjT
 import LeanSemanticPrimitives.Projection.CertLoadAny
 import Lean.Data.Json
 import HDLProof.Kit.Driver
+import HDLProof.Kit.SymRoute
 
 open Compiler Projection HDLProof HDLProof.Sym HDLProof.Driver Projection.MemProjection Projection.HwMem
+open HDLProof.Kit (SymRoute mkSymRoute)
 open Std.Tactic.BVDecide
 
 /-! ## Counterexample replay -/
@@ -154,7 +156,7 @@ end SymF2.{name}
 /-- One k-induction attempt for one property, on the residual `R` specialized
 once for all attempts. Returns the exit code and the verdict. -/
 def attempt (cert : String) (solver : String) (work : System.FilePath) (sf wf : Nat)
-    (D : DesignCert) (R : Program) (bound : Nat) (s0 : StateM) (tag : String) (prop : PropSpec)
+    (D : DesignCert) (rt : SymRoute) (s0 : StateM) (tag : String) (prop : PropSpec)
     (asmOut : Option PropSpec) (asmIn : List (Nat × Int)) (kd : Nat) (closed rebuild : Bool) (route : String)
     (emit : Option String) (baseOnly : Bool := false) : IO (UInt32 × String) := do
   let pre := if tag.isEmpty then "" else s!"[{tag} k={kd}] "
@@ -162,21 +164,21 @@ def attempt (cert : String) (solver : String) (work : System.FilePath) (sf wf : 
     say s!"  {pre}RESULT: {v}"; return (code, v)
   let nIn := inputCount D
   let sp : InvSpec :=
-    { prop, asmOut, asmIn, k := kd, fuel := bound + 16
+    { prop, asmOut, asmIn, k := kd, fuel := rt.fuel + 16
     , inW := inputWidths D nIn, L := shapeOf D }
   unless sideOK D sp s0 do
     return ← fin 4 "REFUSED (side checks: shape, input bound, flop bound, edges, or an input value out of range)"
   let t2 ← IO.monoMsNow
-  let φB ← match baseObl D R sp s0 with
+  let φB ← match baseObl D rt.S sp s0 with
     | some φ => pure φ
     | none => do
-        let why := match baseRun D R sp s0 with
+        let why := match baseRun D rt.S sp s0 with
           | .error m => m | .ok (_, st) => if scopedB st then "?" else "definitions not scoped"
         return ← fin 4 s!"REFUSED (base obligation: {why})"
-  let φS ← if baseOnly then pure (.const true) else match stepObl D R sp with
+  let φS ← if baseOnly then pure (.const true) else match stepObl D rt.S sp with
     | some φ => pure φ
     | none => do
-        let why := match stepRun D R sp with
+        let why := match stepRun D rt.S sp with
           | .error m => m
           | .ok ([], _) => "no step"
           | .ok (s :: _, st) =>
@@ -192,7 +194,7 @@ def attempt (cert : String) (solver : String) (work : System.FilePath) (sf wf : 
     | .unsat p => pure p
     | .sat model => do
         let ins := decodeInputs φB (parseModel model) sp.inW kd
-        match replay D R sp s0 ins with
+        match (rt.fpProgram sf wf D).bind (fun R => replay D R sp s0 ins) with
         | some j =>
             say s!"  {pre}counterexample inputs (cycle: ordinal values): {(ins.toList.take (j + 1)).zipIdx.map fun (i, c) => (c, i.toList.map bv_uint)}"
             let names ← ioNames cert "inputs"
@@ -231,7 +233,7 @@ def attempt (cert : String) (solver : String) (work : System.FilePath) (sf wf : 
              if route == "plain" then runInvK sf wf D sp s0 pfB pfS
              else if route == "var" then runInvKV sf wf D sp s0 pfB pfS
              else runInvKF sf wf D sp s0 pfB pfS)
-           else if rebuild then IO.lazyPure (fun _ => runInvKOf D R sp s0 pfB pfS)
+           else if rebuild then IO.lazyPure (fun _ => runInvKOf D rt.S sp s0 pfB pfS)
            else IO.lazyPure (fun _ => sideOK D sp s0 && checkUnsat φB pfB && checkUnsat φS pfS)
   let t5 ← IO.monoMsNow
   say s!"  {pre}verified check ({mode}LRAT-check both) in {t5 - t4} ms"
@@ -374,25 +376,24 @@ flops {D.flops.size} memories {D.memories.size} clocks {D.clocks.size}"
   unless HwMem.admitsWB D do
     say "  RESULT: REFUSED (the memory route does not admit this certificate)"; return 4
   let t0 ← IO.monoMsNow
-  let res ← IO.lazyPure (fun _ => MemFused.projectMemFDesignAt sf wf D)
-  let R ← match res with
-    | .ok R => pure R
-    | .error e => do say s!"  RESULT: REFUSED (specialization failed: {repr e})"; return 4
-  let some bound := Hw.checkResidual R
-    | say "  RESULT: REFUSED (checkResidual rejected the residual)"; return 4
+  let sim := (opt "sim").getD "fp"
+  let rt ← match ← IO.lazyPure (fun _ => mkSymRoute sim "fused" sf wf D) with
+    | .ok rt => pure rt
+    | .error e => do say s!"  RESULT: REFUSED ({e})"; return 4
   let t1 ← IO.monoMsNow
-  say s!"  residual specialized (projectMemFDesignAt, fold fused) and checked in {t1 - t0} ms (bound {bound})"
+  say s!"  route sim:{sim}: {rt.name}, set up in {t1 - t0} ms"
+  say s!"  [time] setup {t1 - t0}"
   let s0 := zeroState D
   let sp : ConjTSpec := { conjs := conjs.toList, hyps := hyps.toList, split := split.toList, asmOut, asmIn,
-                          fuel := bound, inW := inputWidths D (inputCount D), L }
+                          fuel := rt.fuel, inW := inputWidths D (inputCount D), L }
   let allC := sp.allCases
   let nObl := (List.range n).foldl (fun acc t => acc + (sp.casesOf t).length) 0
   say s!"  conjunctive invariant: {lines.length} lines, {n} conjuncts, {allC.length} case(s), {nObl} step obligations; \
 k = 1; jobs {jobs}; initial state all-zero"
   unless sideOKC D sp.plain s0 do say "  RESULT: REFUSED (side conditions)"; return 4
   -- the base run, the plain step run (layout), and one run per case, in parallel
-  let tb ← IO.asTask (prio := .dedicated) (IO.lazyPure fun _ => baseRunC D R sp.plain s0)
-  let tp ← IO.asTask (prio := .dedicated) (IO.lazyPure fun _ => stepRunC D R sp.plain)
+  let tb ← IO.asTask (prio := .dedicated) (IO.lazyPure fun _ => baseRunC D rt.S sp.plain s0)
+  let tp ← IO.asTask (prio := .dedicated) (IO.lazyPure fun _ => stepRunC D rt.S sp.plain)
   -- case runs, `runs` at a time (each holds a symbolic run in memory until the final check)
   let runJobs := max 1 (((opt "runs").bind (·.toNat?)).getD jobs)
   let mut runList : List (Case × Except String (List StepO × SymSt)) := []
@@ -400,7 +401,7 @@ k = 1; jobs {jobs}; initial state all-zero"
     let mut tcs := #[]
     for j in batch do
       let c := allC.getD j []
-      tcs := tcs.push (c, ← IO.asTask (prio := .dedicated) (IO.lazyPure fun _ => stepRunT D R sp c))
+      tcs := tcs.push (c, ← IO.asTask (prio := .dedicated) (IO.lazyPure fun _ => stepRunT D rt.S sp c))
     for (c, task) in tcs.toList do
       match ← IO.wait task with
       | .ok r => runList := runList ++ [(c, r)]
@@ -508,7 +509,7 @@ state at cycle 0:\n{"\n".intercalate (regs0.map fun (r, v) => s!"  {r} = {v}")}\
                 say s!"  [{tag}] counterexample: false at cycle 0 {f0}, at cycle 1 {f1}; state, inputs and changes in {f}"
                 -- optional concrete cross-check on the projection's simulator (slow on big designs)
                 if rest.contains "replay" then
-                  match replay2 D R st0 ins with
+                  match (rt.fpProgram sf wf D).bind (fun R => replay2 D R st0 ins) with
                   | none => say s!"  [{tag}] replay: the simulator refused the decoded state"
                   | some (o0, st1, o1) =>
                     let broke := !(sp.conjs.getD t default).holds st1.flops o1
@@ -583,26 +584,22 @@ flops {D.flops.size} memories {D.memories.size} clocks {D.clocks.size}"
     let route := (opt "route").getD "fused"
     unless ["fused", "var", "plain"].contains route do
       IO.eprintln s!"route:{route} is not one of fused | var | plain"; return 2
-    let res ← IO.lazyPure (fun _ =>
-      if route == "plain" then projectMemDesignAt sf wf D
-      else if route == "var" then MemVariant.projectMemVarDesignAt sf wf D
-      else MemFused.projectMemFDesignAt sf wf D)
-    let R ← match res with
-      | .ok R => pure R
-      | .error e => do say s!"  RESULT: REFUSED (specialization failed: {repr e})"; return 4
-    let some bound := Hw.checkResidual R
-      | say "  RESULT: REFUSED (checkResidual rejected the residual)"; return 4
+    let sim := (opt "sim").getD "fp"
+    if sim != "fp" && (rest.contains "closed" || (opt "emit").isSome) then
+      IO.eprintln s!"closed / emit: only sim:fp has a closed checker so far (sim:{sim})"; return 2
+    let rt ← match ← IO.lazyPure (fun _ => mkSymRoute sim route sf wf D) with
+      | .ok rt => pure rt
+      | .error e => do say s!"  RESULT: REFUSED ({e})"; return 4
     let t1 ← IO.monoMsNow
-    let projName := if route == "plain" then "projectMemDesignAt"
-      else if route == "var" then "projectMemVarDesignAt, env0 inlined" else "projectMemFDesignAt, fold fused"
-    say s!"  residual specialized ({projName}) and checked in {t1 - t0} ms (bound {bound})"
+    say s!"  route sim:{sim}: {rt.name}, set up in {t1 - t0} ms"
+    say s!"  [time] setup {t1 - t0}"
     let s0 := zeroState D
     let single := cands.length == 1 && ks.length == 1
     let mut last : UInt32 := 2
     let mut verdicts : List String := []
     for kd in ks do
       for (tok, prop) in cands do
-        let (code, v) ← attempt cert solver work sf wf D R bound s0 (if single then "" else tok) prop
+        let (code, v) ← attempt cert solver work sf wf D rt s0 (if single then "" else tok) prop
           asmOut asmIn kd (rest.contains "closed") (rest.contains "rebuild") route (opt "emit")
           (rest.contains "base")
         verdicts := verdicts ++ [s!"{tok} k={kd}: {(v.splitOn " --").head!}"]
@@ -621,5 +618,5 @@ flops {D.flops.size} memories {D.memories.size} clocks {D.clocks.size}"
     unless single do say s!"  SUMMARY: none proved: {verdicts}"
     return last
   | _ =>
-    IO.eprintln "usage: sym_verify <cert> [!]<out>[,[!]<out>...] [asm:<output>] [in:<input>=<value>]... [k:<n>[,<n>...]] [base] [closed|rebuild] [route:fused|var|plain] [emit:<file>] [sf:<n>] [wf:<n>] [solver:<cadical>] [work:<dir>]"
+    IO.eprintln "usage: sym_verify <cert> [!]<out>[,[!]<out>...] [asm:<output>] [in:<input>=<value>]... [k:<n>[,<n>...]] [base] [closed|rebuild] [sim:fp|ir|vc] [route:fused|var|plain] [emit:<file>] [sf:<n>] [wf:<n>] [solver:<cadical>] [work:<dir>]"
     return 2
