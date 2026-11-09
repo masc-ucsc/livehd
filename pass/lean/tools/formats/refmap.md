@@ -110,7 +110,8 @@ implementation too. Each NO MATCH comes with the run's inputs as a trace, whethe
 `asm`, the failing channels as transactions (D0's words, and D1's transactions on the channel
 around the step), and a `CLASS:` hint from re-reading the same run under relaxed contracts:
 `DELAY?` (the channel read later removes it), `STUTTER?` (a larger `maxstall`, or one `xfer`
-left out, removes it) or `VALUE DIFFERENCE` (none does). A delay or a wait counts only if the
+left out, removes it) or `VALUE DIFFERENCE` (none does); on a trace the relaxed contracts read
+on past its end, over random inputs that keep `asm`. A delay or a wait counts only if the
 change adds it, which the RTL decides. Random runs keep `asm` (a vector that breaks it is drawn
 again, `tries:`), and the transactions searched are counted per channel: a MATCH FOUND on runs
 with no transaction on a channel says nothing about that channel.

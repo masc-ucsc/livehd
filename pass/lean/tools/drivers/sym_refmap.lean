@@ -49,7 +49,9 @@ comes with:
   guard) read 1..K steps later (`classify:<K>`, default 2; `classify:0` turns this off), `maxstall`
   raised by 1..K, each `xfer` left out alone. `DELAY?` or `STUTTER?` names the relaxation that
   removes the NO MATCH; `VALUE DIFFERENCE`: none does. A hint, never a verdict: a delay or a wait
-  counts only if the change adds it (read the RTL).
+  counts only if the change adds it (read the RTL). A trace (a product counterexample is short)
+  is re-read past its end too: its last vector once, then random vectors that keep `asm` (seed
+  1); the search and its verdict read the trace only.
 
 Controls (`control:pos|neg`): the same contract with D0 run as the implementation, its answer
 known. `pos`: D0 with each output in `delay:` passed through k registers (the delays the change
@@ -1197,6 +1199,21 @@ def randFeed (inW : List Nat) (sim : Judge.Sim) (asm : Option PropSpec)
       | none => return .refused
   return .envViolated
 
+/-- A trace extended for the classification only: its rows as given, then its last vector once
+(as `traceFeed`; the search reads no further than that), then random vectors that keep `asm`
+(`rand`, a `randFeed`, continuing from the trace's last vector). A NO MATCH near the end of a
+short trace (a product counterexample) can then be re-read under relaxed contracts past the
+trace's end, instead of over its last vector held. -/
+def traceExtFeed (ins : Array RuntimeInput) (sim : Judge.Sim) (asm : Option PropSpec)
+    (rand : Nat → StateM → RandG → Judge.FeedR RandG) : Nat → StateM → RandG → Judge.FeedR RandG :=
+  fun n st G =>
+    if n ≤ ins.size then
+      match traceFeed ins sim asm n st () with
+      | .ok v r ok _ => .ok v r ok { G with cur := v, last := v }
+      | .refused => .refused
+      | .envViolated => .envViolated
+    else rand n st G
+
 def showV (v : Int) : String :=
   if v < 10 then toString v else s!"{v} (0x{String.ofList (Nat.toDigits 16 v.toNat)})"
 
@@ -1468,9 +1485,11 @@ def witnessReport (X : JudgeCtx) (what : String) (J : Judge.JSpec) (simS : Judge
 /-- One run of the bug search: the search on the route, fp's confirmation of a NO MATCH, the
 witness report. `none`: go on with the next run; `some c`: stop with exit code `c`. Also the
 run's transactions per channel, over the steps searched, and whether the run was cut short (no
-vector kept `asm` at a step). -/
+vector kept `asm` at a step). `traceEnd`: the run is a trace of that many rows, and `feed`
+extends it past them for the classification only (`traceExtFeed`). -/
 def judgeRun {γ : Type} (X : JudgeCtx) (what : String) (runNo steps : Nat)
-    (feed : Nat → StateM → γ → Judge.FeedR γ) (g0 : γ) (note : γ → String) :
+    (feed : Nat → StateM → γ → Judge.FeedR γ) (g0 : γ) (note : γ → String)
+    (traceEnd : Option Nat := none) :
     IO (Option UInt32 × List (String × Nat) × Bool) := do
   let ta ← IO.monoMsNow
   let (v, R) ← IO.lazyPure fun _ =>
@@ -1556,10 +1575,16 @@ def judgeRun {γ : Type} (X : JudgeCtx) (what : String) (runNo steps : Nat)
         | none =>
             say s!"  [{what}] environment: {X.asmTxt} held on steps 0..{n + 1}"
             appendLine X.report s!"environment: {X.asmTxt} held on steps 0..{n + 1}"
-      -- D1's run past the NO MATCH, for the transactions and the relaxed contracts
-      let lim := min steps (n + 1 + X.H)
+      -- D1's run past the NO MATCH, for the transactions and the relaxed contracts (a trace:
+      -- past its end, the feed's random vectors that keep asm)
+      let lim := if traceEnd.isSome then n + 1 + X.H else min steps (n + 1 + X.H)
       let (R', _) := R.extend feed (lim + X.K + 1)
       let lim := min lim (R'.outs.size - (X.K + 1))
+      if let some e := traceEnd then
+        if X.K > 0 && R'.ins.size > e + 1 then
+          let t := s!"the trace ends at step {e - 1}: the classification reads on to step {R'.ins.size - 1}, past it with random inputs that keep {X.asmTxt} (seed 1; the verdict above is the trace's own)"
+          say s!"  [{what}] {t}"
+          appendLine X.report t
       witnessReport X what X.J X.stepS X.s0S R'.outs R'.ins n lim last
       return (some 1, [], false)
 
@@ -1574,7 +1599,8 @@ flipped at a time must give NO MATCH. `flip:<out>@<valid>,...` flips bit 0 of `<
 `<valid>` is 1 (the channel's own valid, which also tests the contract's guards); by default bit
 `lo` of every observed word is flipped in every cycle. A flip that is made but never seen is a
 word the contract does not compare. A random run is drawn on D1 (keeping `asm` there) and
-replayed on D0 by input name; a trace is replayed as given. -/
+replayed on D0 by input name; a trace is replayed as given (and extended past its end with
+random vectors drawn on D1 that keep `asm`, for the classification only). -/
 def controlMain (X : JudgeCtx) (lines : List RMLine) (path : String) (NS : Names) (DS : DesignCert)
     (mode : String) (rest : List String) (runs : List (String × Option (Array RuntimeInput) × Nat × Nat))
     (inW : List Nat) (period phase tries : Nat) (drive : Nat → RuntimeInput → RuntimeInput)
@@ -1649,12 +1675,20 @@ def controlMain (X : JudgeCtx) (lines : List RMLine) (path : String) (NS : Names
   let mut posCounts : List (String × Nat) := []
   for ((what, ins?, steps, seed), k) in runs.zipIdx do
     -- the run's inputs: a trace as given; a random run drawn on D1, keeping asm there
-    let (insD1, L, nt) := match ins? with
-      | some ins => (ins, steps, "")
+    -- `E`: the rows the classification may re-read (a trace: its rows, its last vector once,
+    -- then random vectors drawn on D1 that keep asm; the search reads only the trace)
+    let (insD1, L, nt, E) := match ins? with
+      | some ins =>
+          let rand := randFeed inW X.stepI X.asm (steps + X.H + X.K + 3) period phase tries drive
+          let (R, _) := Judge.RunSt.extend (traceExtFeed ins X.stepI X.asm rand)
+            ({ g := randInit inW 1, st := X.s0I } : Judge.RunSt RandG) (steps + X.H + X.K + 2)
+          let ext := if R.ins.size > steps + 1 then R.ins.extract (steps + 1) R.ins.size else #[]
+          let insX := (if ins.isEmpty then ins else ins.push ins.back!) ++ ext
+          (insX, steps, "", if ext.isEmpty then steps else insX.size - (X.K + 1))
       | none =>
           let (R, _) := Judge.RunSt.extend (randFeed inW X.stepI X.asm steps period phase tries drive)
             ({ g := randInit inW seed, st := X.s0I } : Judge.RunSt RandG) (steps + 1)
-          (R.ins, min steps (R.ins.size - 1), randNote R.g)
+          (R.ins, min steps (R.ins.size - 1), randNote R.g, min steps (R.ins.size - 1))
     if L == 0 then
       say s!"  [{what}] control: no step to run"
       continue
@@ -1702,7 +1736,11 @@ def controlMain (X : JudgeCtx) (lines : List RMLine) (path : String) (NS : Names
         let tsv := X.work / s!"{X.label}_control_run{k + 1}.tsv"
         writeTrace tsv X.NI (insD1.extract 0 (n + 2))
         say s!"  [{what}] the run's inputs (D1's names), steps 0..{n + 1}, as a trace: {tsv}"
-        witnessReport XC what J0 X.stepS X.s0S outsC insS n (min L (n + 1 + X.H)) last (ctrl := true)
+        if ins?.isSome && E > L && X.K > 0 then
+          let t := s!"the trace ends at step {L - 1}: the classification reads on past it with random inputs drawn on D1 that keep {X.asmTxt} (seed 1; the verdict above is the trace's own)"
+          say s!"  [{what}] {t}"
+          appendLine X.report t
+        witnessReport XC what J0 X.stepS X.s0S outsC insS n (min E (n + 1 + X.H)) last (ctrl := true)
     | _ =>
         say s!"  [{what}] RESULT: REFUSED (the D0 simulator refused a step)"
         return 4
@@ -1863,7 +1901,11 @@ def judgeMain (path : String) (rest : List String) : IO UInt32 := do
   let mut cut := 0
   for ((what, ins?, steps, seed), k) in runs.zipIdx do
     let (r, cnt, wasCut) ← match ins? with
-      | some ins => judgeRun X what (k + 1) steps (traceFeed ins stepI asm) () (fun _ => "")
+      | some ins =>
+          -- past the trace's end, random vectors that keep asm, for the classification only
+          let rand := randFeed inW stepI asm (ins.size + H + K + 3) period phase tries drive
+          judgeRun X what (k + 1) steps (traceExtFeed ins stepI asm rand) (randInit inW 1) (fun _ => "")
+            (traceEnd := some ins.size)
       | none =>
           let feed := randFeed inW stepI asm steps period phase tries drive
           judgeRun X what (k + 1) steps feed (randInit inW seed) randNote

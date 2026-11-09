@@ -42,8 +42,9 @@ set -euo pipefail
 #     product search, rD read late (@next)  NO COUNTEREXAMPLE UP TO k
 #     product search, rDb read late         COUNTEREXAMPLE at cycle m (D0 one step behind), its
 #                                           trace -> judge NO MATCH at step m-1, the payload
-#                                           differs (the CLASS hint re-reads only the trace's
-#                                           steps, too few here to tell the skew from a delay)
+#                                           differs; the classification reads on past the
+#                                           trace's end (random inputs keeping asm): VALUE
+#                                           DIFFERENCE (the trace alone cannot tell it from a delay)
 #     product, @next with period 2          refused
 #
 # The judge's default route is vc (fp for a certificate with memories); two cases also run on fp.
@@ -316,6 +317,8 @@ judge "NO MATCH" pv1b "trace:$(ls "$OUT"/prod_pv1b_sw2/*cex_inputs.tsv | head -1
 product prod_r_same r_same rS rD 2,4,8 "COUNTEREXAMPLE"
 grep -q 'd1_v ? d1_y' "$OUT/prod_r_same.sv" || { echo "FAIL: the 1-bit guard is not read as the port"; exit 1; }
 judge "NO MATCH" r_same "trace:$(ls "$OUT"/prod_r_same_sw2/*cex_inputs.tsv | head -1)"
+judge "CONTROLS FAIL" r_same "trace:$(ls "$OUT"/prod_r_same_sw2/*cex_inputs.tsv | head -1)" control:pos delay:v=1,y=1
+has 'the trace ends at step [0-9]+: the classification reads on past it with random inputs drawn on D1' "a control on a short trace is re-read past its end"
 # @next: the product runs D0 one step behind; a counterexample at cycle m is the judge's step m-1
 product prod_r_late r_late rS rD 2,4,8 "NO COUNTEREXAMPLE"
 grep -q 'D0 one step behind' "$OUT/prod_r_late.gen.log" || { cat "$OUT/prod_r_late.gen.log"; echo "FAIL: @next product mode not reported"; exit 1; }
@@ -325,6 +328,8 @@ m=$(grep -o 'fails the property at cycle [0-9]*' "$OUT/prod_rb_late.search.log" 
 judge "NO MATCH" rb_late "trace:$(ls "$OUT"/prod_rb_late_sw2/*cex_inputs.tsv | head -1)"
 has "NO MATCH at step $((m - 1))" "the product's counterexample at cycle $m is the judge's NO MATCH at step $((m - 1))"
 has "D1.s transaction #[0-9]+ \\(step [0-9]+\\) differs: out:y@next" "the @next product's counterexample shows the payload that differs"
+has 'the trace ends at step [0-9]+: the classification reads on to step [0-9]+, past it with random inputs' "a short trace is re-read past its end"
+has 'CLASS: VALUE DIFFERENCE' "past the trace's end, the skew is told apart from a delay"
 printf '%s\n' "impl pv1b_lean/pv1b.dcert" "spec pv0_lean/pv0.dcert" "chan step allow:ok resp:x obs:dly_o" \
   "slot step 1 resp:in:x obs:out:y@next" "maxstall 0" "period 2" > "$OUT/pv_next.refmap"
 if "$PY" "$ROOT/pass/lean/tools/scripts/mk_product.py" "$OUT/pv_next.refmap" "$OUT/pv0.v" "$OUT/pv1b.v" \
