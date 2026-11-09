@@ -1,8 +1,10 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include <cmath>
+#include <format>
 #include <queue>
 #include <set>
 #include <tuple>
+#include <unordered_map>
 
 #include "legroute_internal.hpp"
 
@@ -30,6 +32,13 @@ auto policy(const Legroute_options& o) {
                   o.cellbox_wide_exceptions,
                   o.cellbox_ignored_nets,
                   o.box_reserve,
+                  o.cellbox_reserve_tracks,
+                  o.cellbox_plan_only,
+                  o.cellbox_tile_capacity,
+                  o.cellbox_preroute_tiles,
+                  o.cellbox_preroute_max_pins,
+                  o.cellbox_fixed_regions,
+                  o.cellbox_fixed_min_regions,
                   o.reserved_tracks,
                   o.reserved_tracks_per_um,
                   o.global_share,
@@ -119,9 +128,9 @@ void check_slots(const Design& d, const Grid& g, const Cellbox_admission& a, boo
       }
     }
     for (const auto* list : {&slot.reserved_h, &slot.reserved_v}) {
-      require(list->size() == 20 && std::is_sorted(list->begin(), list->end())
+      require(list->size() == cellbox_reserve(d.opt) && std::is_sorted(list->begin(), list->end())
                   && std::adjacent_find(list->begin(), list->end()) == list->end(),
-              "reservation is not twenty distinct coordinates");
+              "reservation is not cellbox_reserve_tracks distinct coordinates");
     }
     require(std::ranges::includes(hs, slot.reserved_h) && std::ranges::includes(vs, slot.reserved_v),
             "reserved coordinate unavailable");
@@ -337,7 +346,8 @@ void validate_critical_boxes(const Design& d, const Grid& g, const Boxes& boxes)
   }
 }
 
-void critical_local_routes(const Design& d, const Grid& g, const Boxes& boxes, Routing& r, Legroute_report& rep) {
+void critical_local_routes(const Design& d, const Grid& g, const Boxes& boxes, Routing& r, Legroute_report& rep,
+                           const Local_forest* forest, const std::vector<char>* only) {
   validate_critical_boxes(d, g, boxes);
   const auto& h = *d.opt.cellbox_handoff;
   r             = {};
@@ -359,7 +369,7 @@ void critical_local_routes(const Design& d, const Grid& g, const Boxes& boxes, R
   }
   for (size_t n = 0; n < d.nets.size(); ++n) {
     const auto& net = d.nets[n];
-    if (net.power || net.control_scope || net.pins.empty()) {
+    if (net.power || net.control_scope || net.pins.empty() || (only && !(*only)[n])) {
       continue;
     }
     std::map<int, int> node_at;
@@ -389,8 +399,11 @@ void critical_local_routes(const Design& d, const Grid& g, const Boxes& boxes, R
         protected_tiles.insert(t);  // IO and fixed pins retain their explicit global attachment.
       }
     }
-    const int q = request_of[n];
-    if (q < 0 || h.routes.trees[size_t(q)].edges.empty()) {
+    const int  q          = request_of[n];
+    const auto plan_edges = [&]() -> const std::vector<std::pair<int, int>>& {
+      return forest ? forest->edges.at(size_t(q)) : h.routes.trees[size_t(q)].edges;
+    };
+    if (q < 0 || plan_edges().empty()) {
       // Only real ordinary endpoints wholly inside one admitted box use local routing.
       // A source terminal in that same coarse tile remains external and needs an IO carrier.
       int  internal_box = -1;
@@ -406,11 +419,18 @@ void critical_local_routes(const Design& d, const Grid& g, const Boxes& boxes, R
     }
     std::map<int, std::vector<int>> adjacency;
     std::set<std::pair<int, int>>   remaining;
-    for (auto [a, b] : h.routes.trees[size_t(q)].edges) {
+    for (auto [a, b] : plan_edges()) {
       adjacency[a].push_back(b);
       adjacency[b].push_back(a);
       remaining.insert(std::minmax(a, b));
       ++(g.row(a) == g.row(b) ? r.dem_h : r.dem_v)[size_t(std::min(a, b))];
+    }
+    if (forest && n < forest->splits.size()) {
+      for (int t : forest->splits[n]) {
+        if (adjacency.contains(t)) {
+          protected_tiles.insert(t);  // a split point delimits two separately tracked pieces of the run
+        }
+      }
     }
     for (const auto& [t, neighbours] : adjacency) {
       const bool collinear = neighbours.size() == 2
@@ -420,6 +440,18 @@ void critical_local_routes(const Design& d, const Grid& g, const Boxes& boxes, R
         if (existing != node_at.end() && r.trees[n].nodes[size_t(existing->second)].box >= 0) {
           // Preserve every physical pin and its box identity, but do not introduce a global detour just to tap it.
           r.trees[n].nodes[size_t(existing->second)].direct_carrier_tap = true;
+        }
+      }
+      // Every box node with only box pins (endpoint, bend or branch too) is a direct carrier tap: Local metal stops at
+      // the box edge and Final extends the carriers into the box and joins them there (no Local riser or jog inside
+      // the box, whose 20H/20V tracks belong to Final).
+      if (const auto existing = node_at.find(t); existing != node_at.end()) {
+        auto& nd = r.trees[n].nodes[size_t(existing->second)];
+        if (nd.box >= 0 && nd.term < 0 && std::ranges::all_of(nd.pins, [&](int k) {
+              const auto& p = net.pins[size_t(k)];
+              return p.comp >= 0 && d.cell.at(size_t(p.comp)) >= 0;
+            })) {
+          nd.direct_carrier_tap = true;
         }
       }
       if (!collinear) {
@@ -459,6 +491,7 @@ void critical_local_routes(const Design& d, const Grid& g, const Boxes& boxes, R
       c.b        = node(t);
       c.region   = g.region.at(size_t(a));
       c.weight   = net.weight;
+      c.priority = forest && n < forest->priority.size() ? forest->priority[n] : 0;
       c.critical = net.critical;
       c.poly     = {
           {g.col(a), g.row(a)},
@@ -690,5 +723,711 @@ size_t critical_backbone_conflicts(const Design& d, const Grid& g, const Final_p
     }
   }
   return conflicts;
+}
+bool repair_forest(const Grid& g, std::set<std::pair<int, int>>& E, const std::set<int>& terminals,
+                   std::unordered_map<int64_t, int>& use, const std::function<int(int, int)>& limit, const Forest_costs& costs,
+                   int margin) {
+  const auto key  = [&](int x, int y) { return forest_edge_key(g, x, y); };
+  const auto drop = [&](std::pair<int, int> e) {
+    if (E.erase(e)) {
+      --use[key(e.first, e.second)];
+    }
+  };
+  for (bool pruned = true; pruned;) {  // dangling branches (no terminal at their end)
+    pruned = false;
+    std::map<int, std::vector<std::pair<int, int>>> incident;
+    for (const auto& e : E) {
+      incident[e.first].push_back(e);
+      incident[e.second].push_back(e);
+    }
+    for (const auto& [t, list] : incident) {
+      if (list.size() == 1 && !terminals.contains(t) && E.contains(list.front())) {
+        drop(list.front());
+        pruned = true;
+      }
+    }
+  }
+  int        c0 = g.cols, c1 = -1, r0 = g.rows, r1 = -1;
+  const auto grow = [&](int t) {
+    c0 = std::min(c0, g.col(t));
+    c1 = std::max(c1, g.col(t));
+    r0 = std::min(r0, g.row(t));
+    r1 = std::max(r1, g.row(t));
+  };
+  for (int t : terminals) {
+    grow(t);
+  }
+  for (auto [x, y] : E) {
+    grow(x);
+    grow(y);
+  }
+  c0 = std::max(0, c0 - margin);
+  r0 = std::max(0, r0 - margin);
+  c1 = std::min(g.cols - 1, c1 + margin);
+  r1 = std::min(g.rows - 1, r1 + margin);
+  std::map<int, int> parent;
+  const auto         find = [&](int t) {
+    parent.try_emplace(t, t);
+    while (parent[t] != t) {
+      parent[t] = parent[parent[t]];
+      t         = parent[t];
+    }
+    return t;
+  };
+  std::set<int> nodes(terminals.begin(), terminals.end());
+  for (auto [x, y] : E) {
+    parent[find(x)] = find(y);
+    nodes.insert(x);
+    nodes.insert(y);
+  }
+  if (nodes.size() <= 1) {
+    return true;
+  }
+  std::set<int> connected;
+  const int     root0 = find(*nodes.begin());
+  for (int t : nodes) {
+    if (find(t) == root0) {
+      connected.insert(t);
+    }
+  }
+  // Legroute metal is 1D: every bend of a tile path is a via between an H and a V layer (a join node with its layer
+  // adjacency), so a turn costs costs.bend tiles. State: tile x arrival direction (0 H, 1 V, 2 start).
+  while (connected.size() < nodes.size()) {
+    std::unordered_map<int64_t, double>  dist;
+    std::unordered_map<int64_t, int64_t> from;
+    const auto state = [](int t, int dir) { return int64_t(t) * 3 + dir; };
+    using Entry      = std::pair<double, int64_t>;
+    std::priority_queue<Entry, std::vector<Entry>, std::greater<>> queue;
+    for (int t : connected) {
+      dist[state(t, 2)] = 0;
+      queue.emplace(0, state(t, 2));
+    }
+    int64_t arrival = -1;
+    while (!queue.empty()) {
+      auto [cost, st] = queue.top();
+      queue.pop();
+      if (cost > dist[st]) {
+        continue;
+      }
+      const int t = int(st / 3), dir = int(st % 3);
+      if (nodes.contains(t) && !connected.contains(t)) {
+        arrival = st;
+        break;
+      }
+      const int col = g.col(t), row = g.row(t);
+      for (int u : {col > c0 ? t - 1 : -1, col < c1 ? t + 1 : -1, row > r0 ? t - g.cols : -1, row < r1 ? t + g.cols : -1}) {
+        if (u < 0) {
+          continue;
+        }
+        const bool horizontal = g.row(t) == g.row(u);
+        const int  cap        = limit(t, u);
+        const int  used       = use[key(t, u)];
+        if (used >= cap) {
+          continue;  // the forest stays within the admitted capacity (the handoff contract)
+        }
+        double next = cost + 1 + double(used + 1) / cap + (dir != 2 && dir != (horizontal ? 0 : 1) ? costs.bend : 0);
+        if (const auto* hist = horizontal ? costs.hist_h : costs.hist_v) {
+          next += costs.hist_weight * ((*hist)[size_t(t)] + (*hist)[size_t(u)]);
+        }
+        const auto su = state(u, horizontal ? 0 : 1);
+        const auto it = dist.find(su);
+        if (it == dist.end() || next < it->second) {
+          dist[su] = next;
+          from[su] = st;
+          queue.emplace(next, su);
+        }
+      }
+    }
+    if (arrival < 0) {
+      return false;
+    }
+    std::set<int> seen;  // a path revisiting a tile (another arrival direction) would close a cycle
+    for (int64_t st = arrival;; st = from.at(st)) {
+      if (!seen.insert(int(st / 3)).second) {
+        return false;
+      }
+      if (st % 3 == 2) {
+        break;
+      }
+    }
+    const int hit   = int(arrival / 3);
+    parent[find(hit)] = find(root0);
+    for (int64_t st = arrival; st % 3 != 2;) {
+      const int64_t ps = from.at(st);
+      const int     t = int(st / 3), p = int(ps / 3);
+      E.insert(std::minmax(p, t));
+      ++use[key(p, t)];
+      parent[find(p)] = find(root0);
+      st              = ps;
+    }
+    for (int t : nodes) {
+      if (find(t) == find(root0)) {
+        connected.insert(t);
+      }
+    }
+  }
+  return true;
+}
+
+namespace {
+// What L5 could not place: per net the failing conns and the nodes with a failing riser, jog or IO stub, and every
+// tile (with its direction) a failure crosses.
+struct Local_failures {
+  std::map<int, std::set<int>>     conns, nodes;
+  std::vector<std::pair<int, bool>> tiles;
+  size_t                           items = 0;
+  size_t                           nets() const {
+    std::set<int> all;
+    for (const auto& [n, _] : conns) {
+      all.insert(n);
+    }
+    for (const auto& [n, _] : nodes) {
+      all.insert(n);
+    }
+    return all.size();
+  }
+};
+Local_failures local_failures(const Grid& g, const Routing& R) {
+  Local_failures f;
+  const auto     fallback = [](uint8_t state) { return state == uint8_t(Track_state::fallback); };
+  for (const auto& sg : R.segments) {
+    if (sg.net < 0 || size_t(sg.net) >= R.trees.size()) {
+      continue;
+    }
+    if (sg.track < 0
+        || (sg.track_state != uint8_t(Track_state::checked) && sg.track_state != uint8_t(Track_state::prescribed))) {
+      ++f.items;
+      f.conns[sg.net].insert(sg.conn);
+      if (sg.layer >= 0 && size_t(sg.layer) < g.layers.size()) {
+        const bool h = g.layers[size_t(sg.layer)].horizontal;
+        for (int k = sg.lo; k <= sg.hi; ++k) {
+          const int t = h ? g.tile(k, sg.band) : g.tile(sg.band, k);
+          if (t >= 0 && size_t(t) < g.size()) {
+            f.tiles.emplace_back(t, h);
+          }
+        }
+      }
+    }
+    for (auto [node, track, state] : {std::tuple{sg.node_lo, sg.jog_lo, sg.jog_lo_state}, std::tuple{sg.node_hi, sg.jog_hi, sg.jog_hi_state}}) {
+      if (node >= 0 && track >= 0 && fallback(state)) {
+        ++f.items;
+        f.nodes[sg.net].insert(node);
+        f.tiles.emplace_back(R.trees[size_t(sg.net)].nodes[size_t(node)].tile, true);
+      }
+    }
+  }
+  for (size_t n = 0; n < R.trees.size(); ++n) {
+    const auto& nodes = R.trees[n].nodes;
+    for (size_t k = 0; k < nodes.size(); ++k) {
+      const auto& node = nodes[k];
+      if (node.tile < 0) {
+        continue;
+      }
+      if (node.riser_track >= 0 && fallback(node.riser_state)) {
+        ++f.items;
+        f.nodes[int(n)].insert(int(k));
+        f.tiles.emplace_back(node.tile, false);
+      }
+      if (node.stub_track >= 0 && fallback(node.stub_state)) {
+        ++f.items;
+        f.nodes[int(n)].insert(int(k));
+        f.tiles.emplace_back(node.tile, true);
+      }
+    }
+  }
+  return f;
+}
+}  // namespace
+
+namespace {
+using Seg_key = std::tuple<int, int, int, size_t>;  // net, end tiles of its conn, segment index in the conn
+Seg_key seg_key(const Routing& r, const Segment& sg, size_t i) {
+  const auto& c     = r.conns[size_t(sg.conn)];
+  const auto& nodes = r.trees[size_t(sg.net)].nodes;
+  return Seg_key{sg.net, nodes[size_t(c.a)].tile, nodes[size_t(c.b)].tile, i};
+}
+}  // namespace
+
+Kept_tracks collect_kept(const Grid& g, const Routing& R, const std::function<bool(int)>& keep) {
+  Kept_tracks out;
+  for (const auto& c : R.conns) {
+    if (!keep(c.net)) {
+      continue;
+    }
+    for (size_t i = 0; i < c.segs.size(); ++i) {
+      const auto& sg = R.segments[size_t(c.segs[i])];
+      if (sg.track >= 0 && sg.track_state == uint8_t(Track_state::checked)) {
+        out.segs.emplace(seg_key(R, sg, i), sg);
+      }
+    }
+  }
+  std::set<std::pair<int, int>> v_arrival;  // (net, node)
+  for (const auto& sg : R.segments) {
+    if (sg.net >= 0 && sg.layer >= 0 && !g.layers[size_t(sg.layer)].horizontal) {
+      for (int node : {sg.node_lo, sg.node_hi}) {
+        if (node >= 0) {
+          v_arrival.emplace(sg.net, node);
+        }
+      }
+    }
+  }
+  for (size_t n = 0; n < R.trees.size(); ++n) {
+    if (!keep(int(n))) {
+      continue;
+    }
+    const auto& nodes = R.trees[n].nodes;
+    for (size_t k = 0; k < nodes.size(); ++k) {
+      const auto& nd = nodes[k];
+      if (nd.riser_track >= 0 && nd.riser_state == uint8_t(Track_state::checked) && !nd.direct_carrier_tap
+          && !v_arrival.contains({int(n), int(k)})) {
+        out.risers.emplace(std::pair{int(n), nd.tile}, std::pair{nd.riser_layer, nd.riser_track});
+      }
+    }
+  }
+  return out;
+}
+
+void l5_with_kept(const Design& d, const Grid& g, Routing& R, const Kept_tracks& kept, unsigned threads) {
+  assign_layers(d, g, R);
+  std::vector<char> preset(R.segments.size(), 0);
+  // the new tree's vertical arrival per (net, node): its key decides whether the node's riser stays
+  std::map<std::pair<int, int>, Seg_key> new_v_arrival;
+  for (const auto& c : R.conns) {
+    for (size_t i = 0; i < c.segs.size(); ++i) {
+      const auto& sg = R.segments[size_t(c.segs[i])];
+      if (sg.layer >= 0 && !g.layers[size_t(sg.layer)].horizontal) {
+        for (int node : {sg.node_lo, sg.node_hi}) {
+          if (node >= 0) {
+            new_v_arrival.try_emplace({sg.net, node}, seg_key(R, sg, i));
+          }
+        }
+      }
+    }
+  }
+  std::set<std::pair<int, int>> riser_kept;  // (net, node) whose riser keeps its coordinate
+  for (size_t n = 0; n < R.trees.size(); ++n) {
+    auto& nodes = R.trees[n].nodes;
+    for (size_t k = 0; k < nodes.size(); ++k) {
+      auto& nd = nodes[k];
+      if (nd.direct_carrier_tap) {
+        continue;
+      }
+      if (const auto v = new_v_arrival.find({int(n), int(k)}); v != new_v_arrival.end()) {
+        if (kept.segs.contains(v->second)) {
+          riser_kept.emplace(int(n), int(k));
+        }
+      } else if (const auto it = kept.risers.find({int(n), nd.tile}); it != kept.risers.end()) {
+        nd.riser_layer = it->second.first;
+        nd.riser_track = it->second.second;
+        riser_kept.emplace(int(n), int(k));
+      }
+    }
+  }
+  for (const auto& c : R.conns) {
+    for (size_t i = 0; i < c.segs.size(); ++i) {
+      auto& sg = R.segments[size_t(c.segs[i])];
+      auto  it = kept.segs.find(seg_key(R, sg, i));
+      if (it != kept.segs.end() && sg.layer >= 0 && g.layers[size_t(it->second.layer)].horizontal) {
+        // a horizontal end on a join stops at the node's riser: it keeps its span only if that riser stays
+        for (int node : {sg.node_lo, sg.node_hi}) {
+          if (node >= 0 && !R.trees[size_t(sg.net)].nodes[size_t(node)].direct_carrier_tap && !riser_kept.contains({sg.net, node})) {
+            it = kept.segs.end();
+            break;
+          }
+        }
+      }
+      if (it != kept.segs.end()) {
+        sg.layer                  = it->second.layer;
+        sg.track                  = it->second.track;
+        sg.tap_lo                 = it->second.tap_lo;
+        sg.tap_hi                 = it->second.tap_hi;
+        sg.span_lo                = it->second.span_lo;
+        sg.span_hi                = it->second.span_hi;
+        preset[size_t(c.segs[i])] = 1;
+      }
+    }
+  }
+  assign_tracks(d, g, R, threads);
+  // a kept track passed every pick filter when it was chosen, and every new pick was checked against it
+  for (auto& tree : R.trees) {
+    for (auto& nd : tree.nodes) {
+      if (nd.riser_state == uint8_t(Track_state::prescribed)) {
+        nd.riser_state = uint8_t(Track_state::checked);
+      }
+    }
+  }
+  for (size_t si = 0; si < R.segments.size(); ++si) {
+    auto& sg = R.segments[si];
+    if (!preset[si] || sg.track_state != uint8_t(Track_state::prescribed)) {
+      continue;
+    }
+    sg.track_state = uint8_t(Track_state::checked);
+    for (int node : {sg.node_lo, sg.node_hi}) {
+      if (node >= 0) {
+        auto& nd = R.trees[size_t(sg.net)].nodes[size_t(node)];
+        if (nd.riser_track == sg.track && nd.riser_layer == sg.layer && nd.riser_state == uint8_t(Track_state::prescribed)) {
+          nd.riser_state = uint8_t(Track_state::checked);
+        }
+      }
+    }
+  }
+}
+
+std::set<int> fixed_net_set(const Design& d, const Grid& g, const Boxes& boxes) {
+  (void)g;
+  (void)boxes;
+  std::set<int> out;
+  if (d.opt.cellbox_handoff) {
+    for (const auto& p : d.opt.cellbox_handoff->preroutes) {
+      out.insert(p.net);
+    }
+    out.insert(d.opt.cellbox_handoff->fixed_nets.begin(), d.opt.cellbox_handoff->fixed_nets.end());
+  }
+  return out;
+}
+
+std::set<int> select_region_nets(const Design& d, const Grid& g, const Boxes& boxes) {
+  std::set<int> out;
+  const int     k = int(d.opt.cellbox_fixed_regions), need = int(d.opt.cellbox_fixed_min_regions);
+  if (k <= 0 || need <= 0) {
+    return out;
+  }
+  const auto region = [&](int t) { return std::pair{std::min(k - 1, g.col(t) * k / g.cols), std::min(k - 1, g.row(t) * k / g.rows)}; };
+  for (size_t n = 0; n < d.nets.size(); ++n) {
+    const auto& net = d.nets[n];
+    if (net.power || net.control_scope || !net.routed || net.pins.size() < 2) {
+      continue;
+    }
+    std::set<std::pair<int, int>> regions;
+    for (const auto& p : net.pins) {
+      const int m = p.comp >= 0 ? d.cell[size_t(p.comp)] : -1;
+      const int b = m >= 0 ? boxes.box_of.at(size_t(m)) : -1;
+      const int t = b >= 0 ? boxes.boxes.at(size_t(b)).tile : physical_pin_access(d, g, p).tile;
+      if (t >= 0) {
+        regions.insert(region(t));
+      }
+    }
+    if (int(regions.size()) >= need) {
+      out.insert(int(n));
+    }
+  }
+  return out;
+}
+
+Plan_fixed plan_fixed_tracks(const Design& d, const Grid& g, const std::shared_ptr<const Critical_cellbox_handoff>& h,
+                             const std::set<int>& candidates, unsigned threads) {
+  Plan_fixed out;
+  out.use_h.assign(g.size(), 0);
+  out.use_v.assign(g.size(), 0);
+  out.candidates = candidates.size();
+  if (candidates.empty()) {
+    return out;
+  }
+  auto opt            = d.opt;
+  opt.cellbox_handoff = h;
+  Design      d2{d.tech, d.fp, opt, d.profile, d.macro, d.movable, d.cell, d.width, d.flop, d.tall, d.nets, d.nets_of, d.wns,
+            d.flop_w, d.widest};
+  const auto  saved = d.fp.components;  // installation writes the admitted poses; Plan's frame must stay as it was
+  Grid        g2    = g;
+  Boxes       b2;
+  Routing     R;
+  Legroute_report scratch;
+  try {
+    install_critical_handoff(d2, g2, b2);
+    std::vector<char> only(d.nets.size(), 0);
+    for (int n : candidates) {
+      only[size_t(n)] = 1;
+    }
+    critical_local_routes(d2, g2, b2, R, scratch, nullptr, &only);
+    assign_layers(d2, g2, R);
+    assign_tracks(d2, g2, R, threads);
+  } catch (...) {
+    d.fp.components = saved;
+    throw;
+  }
+  d.fp.components = saved;
+  std::set<int> failed;
+  for (const auto& sg : R.segments) {
+    if (sg.track < 0 || (sg.track_state != uint8_t(Track_state::checked) && sg.track_state != uint8_t(Track_state::prescribed))) {
+      failed.insert(sg.net);
+    }
+  }
+  for (size_t n = 0; n < R.trees.size(); ++n) {
+    for (const auto& nd : R.trees[n].nodes) {
+      if (nd.riser_track >= 0 && nd.riser_state == uint8_t(Track_state::fallback)) {
+        failed.insert(int(n));
+      }
+    }
+  }
+  out.failed = failed.size();
+  for (int n : candidates) {
+    if (!failed.contains(n)) {
+      out.nets.push_back(n);
+    }
+  }
+  const std::set<int> fixed(out.nets.begin(), out.nets.end());
+  out.kept = std::make_shared<Kept_tracks>(collect_kept(g2, R, [&](int n) { return fixed.contains(n); }));
+  // the tracks they take: a net once per tile and direction (segments and risers)
+  std::set<std::tuple<int, int, bool>> taken;  // (net, tile, horizontal)
+  for (const auto& sg : R.segments) {
+    if (!fixed.contains(sg.net) || sg.layer < 0) {
+      continue;
+    }
+    const bool hz = g2.layers[size_t(sg.layer)].horizontal;
+    for (int k = sg.lo; k <= sg.hi; ++k) {
+      taken.emplace(sg.net, hz ? g2.tile(k, sg.band) : g2.tile(sg.band, k), hz);
+    }
+  }
+  for (int n : out.nets) {
+    for (const auto& nd : R.trees[size_t(n)].nodes) {
+      if (nd.riser_track >= 0 && nd.tile >= 0) {
+        taken.emplace(n, nd.tile, false);
+      }
+    }
+  }
+  for (const auto& [n, t, hz] : taken) {
+    ++(hz ? out.use_h : out.use_v)[size_t(t)];
+  }
+  return out;
+}
+
+Local_detour_result local_detours(const Design& d, const Grid& g, const Boxes& boxes, Routing& R, Legroute_report& rep,
+                                  unsigned rounds, unsigned threads, const Kept_tracks& fixed_kept) {
+  const auto  start = Clock::now();
+  const auto& h     = *d.opt.cellbox_handoff;
+  std::vector<int> request_of(d.nets.size(), -1);
+  Local_forest     forest;
+  forest.edges.resize(h.requests.size());
+  forest.priority.assign(d.nets.size(), 0);
+  forest.splits.assign(d.nets.size(), {});
+  std::vector<unsigned> split_count(d.nets.size(), 0);
+  for (size_t q = 0; q < h.requests.size(); ++q) {
+    request_of.at(size_t(h.requests[q].net)) = int(q);
+    forest.edges[q]                          = h.routes.trees[q].edges;
+  }
+  auto [cap_h, cap_v] = transit_capacity(g);
+  const double share  = admission_share(d.opt);
+  const auto   key    = [&](int x, int y) { return forest_edge_key(g, x, y); };
+  const std::function<int(int, int)> limit = [&](int x, int y) {
+    const auto& caps = g.row(x) == g.row(y) ? cap_h : cap_v;
+    return std::max(0, int(std::floor(share * std::min(caps[size_t(x)], caps[size_t(y)]))));
+  };
+  std::vector<double> hist_h(g.size(), 0), hist_v(g.size(), 0);
+  // Incremental L5: the nets outside `moved` keep every checked layer/track of the previous round (prescribed, so
+  // only the moved nets pick against them); a full rebuild when moved is null.
+  const auto          rebuild = [&](const Local_forest& f, const std::set<int>* moved) {
+    Kept_tracks kept;
+    if (moved) {
+      kept = collect_kept(g, R, [&](int n) { return !moved->contains(n); });
+    }
+    for (const auto& [seg_id, sg] : fixed_kept.segs) {  // the nets fixed first keep their tracks in every round
+      kept.segs.insert_or_assign(seg_id, sg);
+    }
+    for (const auto& [riser_id, riser] : fixed_kept.risers) {
+      kept.risers.insert_or_assign(riser_id, riser);
+    }
+    const size_t critical = rep.critical_connections;
+    critical_local_routes(d, g, boxes, R, rep, &f);
+    rep.critical_connections = critical;
+    l5_with_kept(d, g, R, kept, threads);
+  };
+  Routing       best;
+  Local_forest  best_forest;
+  size_t        best_nets = std::numeric_limits<size_t>::max(), best_items = best_nets;
+  unsigned      best_round = 0, ran = 0;
+  std::set<int> rerouted;
+  for (unsigned round = 0;; ++round) {
+    const auto   failures = local_failures(g, R);
+    const size_t nets     = failures.nets();
+    if (round == 0) {
+      rep.local_detour_first_failed     = nets;
+      rep.local_detour_first_unassigned = R.unassigned;
+    }
+    std::fprintf(stderr,
+                 "legroute L5 detour round %u: %zu failing nets (%zu failing segments/risers/jogs/stubs), %zu unassigned\n",
+                 round,
+                 nets,
+                 failures.items,
+                 R.unassigned);
+    if (nets < best_nets || (nets == best_nets && failures.items < best_items)) {
+      if (round != rounds) {
+        best = R;  // the last round needs no snapshot: it is R itself
+      }
+      best_forest = forest;
+      best_nets  = nets;
+      best_items = failures.items;
+      best_round = round;
+    }
+    if (!nets || round == rounds) {
+      break;
+    }
+    for (auto [t, horizontal] : failures.tiles) {
+      (horizontal ? hist_h : hist_v)[size_t(t)] += 1;
+    }
+    std::unordered_map<int64_t, int> use;
+    for (const auto& es : forest.edges) {
+      for (auto [x, y] : es) {
+        ++use[key(x, y)];
+      }
+    }
+    std::set<int> failing;
+    for (const auto& [n, _] : failures.conns) {
+      failing.insert(n);
+    }
+    for (const auto& [n, _] : failures.nodes) {
+      failing.insert(n);
+    }
+    const auto fixed_nets = fixed_net_set(d, g, boxes);  // fixed before Local (and preroutes): never rerouted
+    for (int n : failing) {
+      const int q = request_of.at(size_t(n));
+      if (q < 0 || fixed_nets.contains(n)) {
+        continue;
+      }
+      if (d.opt.cellbox_local_detour_boost) {
+        ++forest.priority[size_t(n)];
+      }
+      const auto& tree = R.trees[size_t(n)];
+      std::set<int> terminals;
+      for (const auto& node : tree.nodes) {
+        if (!node.pins.empty() && node.tile >= 0) {
+          terminals.insert(node.tile);
+        }
+      }
+      std::set<std::pair<int, int>> E;
+      for (auto [x, y] : forest.edges[size_t(q)]) {
+        E.insert(std::minmax(x, y));
+      }
+      const auto old = E;
+      const auto drop = [&](std::pair<int, int> e) {
+        if (E.erase(e)) {
+          --use[key(e.first, e.second)];
+        }
+      };
+      // A failing long run first splits at its middle tile (each piece then takes its own track: a run needs one
+      // track free over its whole span); short runs, and runs split twice, rip and detour.
+      std::set<int> rip;
+      if (const auto it = failures.conns.find(n); it != failures.conns.end()) {
+        for (int ci : it->second) {
+          if (ci < 0 || size_t(ci) >= R.conns.size()) {
+            continue;  // a segment without a conn (not a Local tree run) has no tile path to reroute
+          }
+          const auto& poly = R.conns[size_t(ci)].poly;
+          const int   len  = poly.size() == 2 ? std::abs(poly[0].first - poly[1].first) + std::abs(poly[0].second - poly[1].second) : 0;
+          if (len >= 4 && split_count[size_t(n)] < 2 * it->second.size() + 2) {
+            const int mc = (poly[0].first + poly[1].first) / 2, mr = (poly[0].second + poly[1].second) / 2;
+            if (forest.splits[size_t(n)].insert(g.tile(mc, mr)).second) {
+              ++split_count[size_t(n)];
+              ++rep.local_detour_splits;
+              continue;
+            }
+          }
+          rip.insert(ci);
+        }
+      }
+      if (const auto it = failures.nodes.find(n); it != failures.nodes.end()) {
+        for (int ci : tree.conns) {
+          if (it->second.contains(R.conns[size_t(ci)].a) || it->second.contains(R.conns[size_t(ci)].b)) {
+            rip.insert(ci);
+          }
+        }
+      }
+      for (int ci : rip) {
+        if (ci < 0 || size_t(ci) >= R.conns.size()) {
+          continue;
+        }
+        const auto& poly = R.conns[size_t(ci)].poly;
+        for (size_t i = 0; i + 1 < poly.size(); ++i) {
+          auto [c, r]        = poly[i];
+          const auto [c1, r1] = poly[i + 1];
+          while (c != c1 || r != r1) {
+            const int t = g.tile(c, r);
+            c += (c1 > c) - (c1 < c);
+            r += (r1 > r) - (r1 < r);
+            drop(std::minmax(t, g.tile(c, r)));
+          }
+        }
+      }
+      Forest_costs costs;
+      costs.hist_h = &hist_h;
+      costs.hist_v = &hist_v;
+      const auto restore = [&]() {
+        for (const auto& e : E) {
+          --use[key(e.first, e.second)];
+        }
+        E = old;
+        for (const auto& e : E) {
+          ++use[key(e.first, e.second)];
+        }
+      };
+      bool ok = repair_forest(g, E, terminals, use, limit, costs, 4) || repair_forest(g, E, terminals, use, limit, costs, 16);
+      if (!ok) {
+        restore();
+        continue;
+      }
+      if (E != old) {
+        rerouted.insert(n);
+      }
+      forest.edges[size_t(q)].assign(E.begin(), E.end());
+    }
+    // Incremental: every checked segment whose run (net, end tiles) is unchanged keeps its track, failing nets
+    // included; only the failing, split or rerouted runs pick again.
+    const std::set<int> none;
+    rebuild(forest, d.opt.cellbox_local_detour_incremental ? &none : nullptr);
+    ran = round + 1;
+  }
+  if (best_round != ran) {
+    R = std::move(best);
+  }
+  Local_detour_result result;
+  result.forest = std::move(best_forest);
+  result.tile_cost.resize(g.size());
+  for (size_t t = 0; t < g.size(); ++t) {
+    result.tile_cost[t] = hist_h[t] + hist_v[t];
+  }
+  {
+    const auto         failures = local_failures(g, R);
+    std::map<int, int> count;
+    for (const auto& [n, conns] : failures.conns) {
+      for (int ci : conns) {
+        if (ci < 0 || size_t(ci) >= R.conns.size()) {
+          continue;
+        }
+        for (int node : {R.conns[size_t(ci)].a, R.conns[size_t(ci)].b}) {
+          if (const int b = R.trees[size_t(n)].nodes[size_t(node)].box; b >= 0) {
+            ++count[b];
+          }
+        }
+      }
+    }
+    for (const auto& [n, nodes] : failures.nodes) {
+      for (int node : nodes) {
+        if (const int b = R.trees[size_t(n)].nodes[size_t(node)].box; b >= 0) {
+          ++count[b];
+        }
+      }
+    }
+    std::vector<std::pair<int, int>> ranked;
+    for (auto [b, k] : count) {
+      ranked.emplace_back(-k, b);
+    }
+    std::ranges::sort(ranked);
+    for (auto [k, b] : ranked) {
+      result.failing_boxes.push_back(b);
+    }
+  }
+  rep.local_detour_rounds     = ran;
+  rep.local_detour_best_round = best_round;
+  rep.local_detour_nets       = rerouted.size();
+  rep.local_detour_best_failed = best_nets;
+  rep.local_detour_seconds    = seconds_since(start);
+  std::fprintf(stderr,
+               "legroute L5 detours: %u rounds, %zu nets rerouted, failing nets %zu -> %zu (round %u), %.1f s\n",
+               ran,
+               rerouted.size(),
+               rep.local_detour_first_failed,
+               best_nets,
+               best_round,
+               rep.local_detour_seconds);
+  return result;
 }
 }  // namespace livehd::placement::lr

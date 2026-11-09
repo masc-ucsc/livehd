@@ -32,11 +32,59 @@ struct Legroute_options {
   bool                                                cellbox_far_fallback     = false;
   // Explicit native Plan -> fixed-cellbox Local -> physical Final pipeline.
   bool                                                cellbox_full_flow        = false;
+  // With cellbox_full_flow: Plan only -- the admitted box poses are the legal placement and Plan's forest is written
+  // as detailed-routing guides (legroute.guide); no Local, no Final (hand-off to an external detailed router). No metal
+  // is reserved: boxes keep no private tracks and the box layer (M2) counts as transit; boxes, their admission rules
+  // and the global route gate are the same.
+  bool                                                cellbox_plan_only        = false;
+  // Private M2 and M3 tracks each critical cellbox reserves for Final's in-box routing (each layer); none with
+  // cellbox_plan_only.
+  unsigned                                            cellbox_reserve_tracks   = 20;
   // Diagnose eligible Local nets in a conditional scene; never emit final signal wires or certify closure.
   bool                                                cellbox_diagnostic_final = false;
   std::shared_ptr<const lr::Critical_cellbox_handoff> cellbox_handoff;
   // Runtime retry-controller signal only: never inferred by fixed replay.
   bool                                                cellbox_final_retry = false;
+  // Final -> relocation -> Local -> Final retry (once): a failing cellbox moves one single-IO-pin cell to the
+  // surrounding box (within cellbox_relocate_window tiles) with the fewest IO pins; only the affected regions
+  // reroute, with their boundary crossings fixed. A Local failure first runs Final on the eligible nets.
+  bool                                                cellbox_relocate        = false;
+  // Local on the selected Plan; its failing cells widen for one more Plan round (once).
+  bool                                                cellbox_local_replan    = false;
+  unsigned                                            cellbox_relocate_window = 4;
+  // Full flow Local: up to this many rip-up rounds after L5. The nets with failing segments (or risers) leave the
+  // Plan tile path where they failed (history-weighted maze over the tile grid, residual capacity) and L5 reruns;
+  // their region boundary crossings move with the path. The best round is kept. 0 keeps the Plan forest exactly.
+  unsigned                                            cellbox_local_detour_rounds = 4;
+  // with detours: nets that failed L5 claim their tracks first in the next round (by failed rounds)
+  bool                                                cellbox_local_detour_boost  = true;
+  // with detours: the nets that did not fail keep their tracks and exact spans (only the rerouted nets pick), else
+  // L5 reruns whole
+  bool                                                cellbox_local_detour_incremental = true;
+  // Plan's coarse route also bounds each tile's interior per direction (the nets ending, bending or branching in it
+  // as well as those passing through) by the same share, so a passing Plan leaves Local tracks for every segment end.
+  bool                                                cellbox_tile_capacity = true;
+  // Long one-driver/one-sink nets at least this many tiles apart are fixed ahead of Plan: both cells pinned to boxes in
+  // one row/column and the net on one reserved straight track, untouched by Plan, Local and Final (0: off).
+  unsigned                                            cellbox_preroute_tiles = 0;
+  // End of Plan: on a legal route, the nets whose pins touch at least cellbox_fixed_min_regions regions of a
+  // cellbox_fixed_regions^2 mesh take their exact L5 tracks alone (on Plan's tree) and are fixed; the remaining nets
+  // route again with those tracks taken, and an overflow fails the Plan attempt (density feedback). Local starts from
+  // the fixed tracks and never changes them or their boxes (0: off). Off by default: on sha3 (util .35) 613 fixed nets
+  // left 153 Local-rejected nets and 257 left 144, against 101 without fixing.
+  unsigned                                            cellbox_fixed_regions = 3, cellbox_fixed_min_regions = 0;
+  // the most pins a preroute's net may have (2: one driver, one sink; more: the driver-to-farthest-sink trace)
+  unsigned                                            cellbox_preroute_max_pins = 2;
+  // Local box moves (once): after the detours, the boxes at the failing runs move to a free admitted tile within
+  // cellbox_local_move_window tiles with less failure around it; their nets reconnect and Local reruns on the new
+  // boxes before Final.
+  bool                                                cellbox_local_box_moves   = true;
+  unsigned                                            cellbox_local_move_window = 2;
+  // Runtime only: this legroute call is Local's box-move rerun (no further moves).
+  bool                                                cellbox_local_moves_retry = false;
+  // Runtime only: this legroute call is the relocation retry (no further retry); its boxes route first in Final.
+  bool                                                cellbox_relocation_retry = false;
+  std::vector<int>                                    final_box_priority;
   // Runtime native pre-CTS trace in the exact measured Floorplan::nets order.
   // Derived from control_ports/Liberty roles, never inferred from missing STA.
   std::vector<bool>                                   cellbox_ignored_nets;
@@ -494,6 +542,37 @@ struct Legroute_report {
   bool                     final_diagnostic_only     = false;
   size_t                   final_local_rejected_nets = 0, final_local_rejected_pins = 0;
   size_t                   final_detail_failed_nets = 0, final_detail_failed_pins = 0, final_detail_unattempted_pins = 0;
+  // Final per-box outcome: attempted boxes that did not complete (relocation sources), attempted/complete counts
+  std::vector<int>         final_failed_boxes;
+  size_t                   final_attempted_boxes = 0, final_complete_boxes = 0, final_upstream_blocked_boxes = 0;
+  // Local failures as placement pressure per Floorplan component (> 1: a cell on a tile a failed Local segment crosses)
+  std::vector<double>      local_component_pressure;
+  size_t                   local_failed_nets = 0;
+  // Local's verdict (full flow): nets with any structural (track, riser, stub, private) or metal-audit rejection; of
+  // them only the audit; with a failed die IO stub
+  size_t                   local_rejected_nets = 0, local_audit_only_rejected_nets = 0, local_io_stub_rejected_nets = 0;
+  // Local detours: rounds run, distinct nets rerouted, failed nets before / after (best round), its round
+  unsigned                 local_detour_rounds = 0, local_detour_best_round = 0;
+  size_t                   local_detour_nets = 0, local_detour_first_failed = 0, local_detour_best_failed = 0;
+  size_t                   local_detour_first_unassigned = 0, local_detour_splits = 0;
+  double                   local_detour_seconds = 0;
+  // Local box moves: boxes moved, candidates without a better free tile, moves undone (nets could not reconnect);
+  // the failing nets before the moves (first Local)
+  size_t                   local_box_moves = 0, local_box_moves_without_destination = 0, local_box_moves_unroutable = 0;
+  size_t                   local_box_moves_first_failed = 0;
+  size_t                   preroutes = 0;  // Long_preroute runs in the handoff Local used
+  size_t                   fixed_nets = 0, fixed_nets_failed = 0;  // nets fixed before Local; of them without full tracks
+  double                   fixed_nets_seconds = 0;
+  bool                     local_partial_final = false;  // Local failed; Final ran on the eligible nets to find failing boxes
+  // cellbox_relocate: the first attempt's outcome and the relocation work before the retry
+  bool                     relocation_attempted = false;
+  size_t                   relocation_first_attempted_boxes = 0, relocation_first_complete_boxes = 0;
+  size_t                   relocation_first_failed_boxes = 0, relocation_first_connected_nets = 0;
+  size_t                   relocation_first_unassigned_segments = 0;
+  size_t                   relocation_without_candidate = 0, relocation_without_destination = 0, relocation_moves = 0;
+  size_t                   relocation_regions = 0, relocation_fixed_routed = 0, relocation_region_rerouted = 0;
+  size_t                   relocation_region_reverted = 0;
+  double                   relocation_seconds = 0, relocation_first_seconds = 0;
   double                   final_piece_seconds = 0;
   size_t                   final_skipped_nets
       = 0;  // final_skip_clock / final_skip_nets diagnostic  // opt-in final_precommit_connectivity rejections

@@ -147,6 +147,29 @@ struct Stack {
   }
 };
 
+}  // namespace
+
+std::vector<int64_t> via_landing_reach(const ph::Technology& tech, const ph::Floorplan& frame, const Grid& g) {
+  std::vector<int64_t> reach(g.layers.size(), 0);
+  const Stack          st(tech, frame, true);
+  for (const auto& [pair, vias] : st.adjacent) {
+    for (const auto& via : vias) {
+      for (const auto& plate : via.plates) {
+        for (size_t l = 0; l < g.layers.size(); ++l) {
+          if (g.layers[l].name != plate.layer) {
+            continue;
+          }
+          const auto& r     = plate.rect;
+          const auto  along = g.layers[l].horizontal ? std::max(-r.xl, r.xh) : std::max(-r.yl, r.yh);
+          reach[l]          = std::max(reach[l], int64_t(std::ceil(along)));
+        }
+      }
+    }
+  }
+  return reach;
+}
+
+namespace {
 struct Geo {
   const Stack&                st;
   std::vector<ph::Route_path> paths;
@@ -764,8 +787,23 @@ Final_net_geometry Final_geometry_emitter::emit(size_t n) const {
             }
           }
         }
+      } else if (node >= 0 && d.opt.cellbox_full_flow && T.nodes[node].direct_carrier_tap && T.nodes[node].box >= 0) {
+        // the box edge (or the deeper end L5 staggered it to): Final extends the carrier into the box
+        const auto staggered = e ? s.tap_hi : s.tap_lo;
+        ends[e]              = staggered >= 0 ? staggered : carrier_tap_end(g, h, k, e == 1);
       } else {
         ends[e] = h ? g.cx(k) : g.cy(k);
+      }
+    }
+    if (d.opt.cellbox_full_flow && !h) {
+      // L5 reserved (and checked against every neighbor) a vertical join end over its whole end tile: the attachment
+      // coordinates were not known yet. Stopping the metal at the join instead creates line ends L5 never checked
+      // (EOL/corner keepouts are not monotone in the span), so the metal keeps the reserved extent.
+      for (int e = 0; e < 2; ++e) {
+        const int node = e ? s.node_hi : s.node_lo;
+        if (node >= 0 && has_riser(node)) {
+          ends[e] = e ? g.bottom(s.hi) + g.tile_h : g.bottom(s.lo);
+        }
       }
     }
     geo.state = s.track_state;
@@ -827,8 +865,9 @@ Final_net_geometry Final_geometry_emitter::emit(size_t n) const {
     }
     const auto [lo, hi] = std::minmax_element(ys.begin(), ys.end());
     const int  tile     = T.nodes[node].tile;
-    const auto ylo      = std::min(*lo, g.bottom(g.row(tile)) + g.tile_h / 4),
-               yhi      = std::max(*hi, g.bottom(g.row(tile)) + 3 * g.tile_h / 4);
+    // full flow: the whole node tile, as L5 reserved and checked it
+    const auto ylo      = std::min(*lo, g.bottom(g.row(tile)) + (d.opt.cellbox_full_flow ? 0 : g.tile_h / 4)),
+               yhi      = std::max(*hi, g.bottom(g.row(tile)) + (d.opt.cellbox_full_flow ? g.tile_h : 3 * g.tile_h / 4));
     geo.state           = T.nodes[node].riser_state;
     geo.wire_on(lname(T.nodes[node].riser_layer), false, ylo, yhi, riser_x(node));
   }

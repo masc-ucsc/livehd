@@ -419,6 +419,9 @@ void assign_layers(const Design& d, const Grid& g, Routing& R) {
     if (A.critical != B.critical) {
       return A.critical;
     }
+    if (A.priority != B.priority) {
+      return A.priority > B.priority;
+    }
     if (A.weight != B.weight) {
       return A.weight > B.weight;
     }
@@ -431,8 +434,77 @@ void assign_layers(const Design& d, const Grid& g, Routing& R) {
   const auto                   key = [&](int l, int t, int net) {
     return (uint64_t(uint32_t(l)) << 56) ^ (uint64_t(uint32_t(t)) << 28) ^ uint64_t(uint32_t(net));
   };
+  // Full flow: segments meeting at a join node (not a box tap) take adjacent layers, so every join there is a single
+  // adjacent-layer via (a multi-layer stack leaves an off-grid intermediate plate below minimum area: asap7's M5/M7
+  // and M4/M6 track grids never coincide). Perpendicular partners: adjacent layers; same direction: at most two
+  // apart (a jog between them on the layer in between).
+  std::map<std::pair<int, int>, std::vector<int>> node_layers;  // (net, node) -> layers already assigned there
+  const auto join_node = [&](int net, int node) {
+    return d.opt.cellbox_full_flow && node >= 0 && size_t(net) < R.trees.size() && size_t(node) < R.trees[size_t(net)].nodes.size()
+           && !R.trees[size_t(net)].nodes[size_t(node)].direct_carrier_tap;
+  };
+  const auto node_allowed = [&](int net, int node, int l) {
+    const auto it = node_layers.find({net, node});
+    if (it == node_layers.end()) {
+      return true;
+    }
+    return std::ranges::all_of(it->second, [&](int o) {
+      return g.layers[o].horizontal == g.layers[l].horizontal ? std::abs(o - l) <= 2 : std::abs(o - l) == 1;
+    });
+  };
+  // Full flow lookahead: the perpendicular runs meeting each join node (net, node) -> (horizontal, band, lo, hi). A
+  // layer leaves its partners only the layers adjacent to it (a single-via join), so a vertical on M7 forces its
+  // horizontal partners onto M6, whose tracks power straps take on some rows.
+  std::map<std::pair<int, int>, std::vector<std::tuple<bool, int, int, int>>> partners;
+  if (d.opt.cellbox_full_flow) {
+    for (const auto& c : R.conns) {
+      if (c.poly.size() != 2) {
+        continue;
+      }
+      const auto [c0, r0] = c.poly[0];
+      const auto [c1, r1] = c.poly[1];
+      const bool h        = r0 == r1;
+      const auto run      = std::tuple{h, h ? r0 : c0, h ? std::min(c0, c1) : std::min(r0, r1), h ? std::max(c0, c1) : std::max(r0, r1)};
+      for (int node : {c.a, c.b}) {
+        if (join_node(c.net, node)) {
+          partners[{c.net, node}].push_back(run);
+        }
+      }
+    }
+  }
+  // the room a perpendicular partner run has left on the best layer adjacent to l (tracks, the tightest tile)
+  const auto partner_short = [&](int net, int node, int l, bool h_self) {
+    int short_by = 0;
+    const auto it = partners.find({net, node});
+    if (it == partners.end()) {
+      return 0;
+    }
+    for (const auto& [h, band, lo, hi] : it->second) {
+      if (h == h_self) {
+        continue;
+      }
+      int best = std::numeric_limits<int>::min();
+      for (int lp : {l - 1, l + 1}) {
+        if (lp < 0 || lp >= int(g.layers.size()) || g.layers[size_t(lp)].horizontal != h) {
+          continue;
+        }
+        int room = std::numeric_limits<int>::max();
+        for (int k = lo; k <= hi; ++k) {
+          const int t = h ? g.tile(k, band) : g.tile(band, k);
+          room        = std::min(room, g.cap[size_t(lp)][size_t(t)] - R.layer_dem[size_t(lp)][size_t(t)]);
+        }
+        best = std::max(best, room);
+      }
+      // a few tracks of headroom: the coarse count does not see line-end and neighbor rules on a thinned layer
+      constexpr int kPartnerRoom = 3;
+      if (best != std::numeric_limits<int>::min() && best < kPartnerRoom) {
+        short_by += kPartnerRoom - best;
+      }
+    }
+    return short_by;
+  };
   for (int ci : order) {
-    auto&        c      = R.conns[ci];
+    auto& c = R.conns[ci];
     const double tiles  = wire_um(g, c) * g.dbu / g.tile_w;
     const int    cls    = length_class(tiles, c.critical);
     const auto [ph, pv] = class_layers(g, cls);
@@ -480,6 +552,13 @@ void assign_layers(const Design& d, const Grid& g, Routing& R) {
           cand.push_back(l);
         }
       }
+      const auto allowed = [&](int l) {
+        return (!join_node(c.net, s.node_lo) || node_allowed(c.net, s.node_lo, l))
+               && (!join_node(c.net, s.node_hi) || node_allowed(c.net, s.node_hi, l));
+      };
+      if (std::ranges::any_of(cand, allowed)) {
+        std::erase_if(cand, [&](int l) { return !allowed(l); });
+      }
       int    pick  = -1;
       double least = INFINITY;
       for (int l : cand) {
@@ -487,6 +566,11 @@ void assign_layers(const Design& d, const Grid& g, Routing& R) {
         for (int t : load) {
           if (!net_on.contains(key(l, t, c.net))) {  // the net already pays for this layer and tile
             over += std::max(0, R.layer_dem[l][t] + 1 - g.cap[l][t]);
+          }
+        }
+        for (int node : {s.node_lo, s.node_hi}) {  // the partners this layer would leave without room
+          if (join_node(c.net, node)) {
+            over += partner_short(c.net, node, l, h);
           }
         }
         if (over == 0) {
@@ -500,6 +584,11 @@ void assign_layers(const Design& d, const Grid& g, Routing& R) {
         }
       }
       s.layer = pick;
+      for (int node : {s.node_lo, s.node_hi}) {
+        if (join_node(c.net, node)) {
+          node_layers[{c.net, node}].push_back(pick);
+        }
+      }
       if (least > 0 && std::isfinite(least)) {
         ++R.layer_overflow_segments;
         R.layer_overflow_tiles += size_t(least);
@@ -511,6 +600,21 @@ void assign_layers(const Design& d, const Grid& g, Routing& R) {
       }
       R.segments.push_back(s);
       c.segs.push_back(int(R.segments.size()) - 1);
+    }
+  }
+  // Long preroutes keep the layer and track fixed ahead of Plan (their run is the only segment of the net).
+  if (d.opt.cellbox_full_flow && d.opt.cellbox_handoff) {
+    for (const auto& p : d.opt.cellbox_handoff->preroutes) {
+      for (auto& sg : R.segments) {
+        const int run_lo = p.horizontal ? g.col(p.tiles[0]) : g.row(p.tiles[0]);
+        const int run_hi = p.horizontal ? g.col(p.tiles[1]) : g.row(p.tiles[1]);
+        if (sg.net == p.net && sg.layer >= 0 && g.layers[size_t(sg.layer)].horizontal == p.horizontal
+            && sg.band == (p.horizontal ? g.row(p.tiles[0]) : g.col(p.tiles[0])) && sg.lo >= run_lo && sg.hi <= run_hi) {
+          sg.layer    = p.layer;
+          sg.track    = p.track;
+          sg.preroute = true;
+        }
+      }
     }
   }
 }
@@ -592,13 +696,64 @@ void assign_tracks(const Design& d, const Grid& g, Routing& R, unsigned threads)
       = [&](int net, int node) { return d.opt.cellbox_full_flow && node >= 0 && R.trees[net].nodes[node].direct_carrier_tap; };
   // Ordinary leaf carriers stop inside their endpoint boxes. Real global junctions still reserve the full
   // endpoint tile until their H/jog attachments are selected; no H track choices are narrowed by this rule.
+  // Join nodes keep adjacent layers (assign_layers): a retry, riser or jog at a node takes a layer adjacent to every
+  // perpendicular segment there and at most two away from the same-direction ones.
+  std::map<std::pair<int, int>, std::vector<int>> segs_at;  // (net, join node) -> segments
+  for (int si = 0; si < int(R.segments.size()); ++si) {
+    const auto& sg = R.segments[si];
+    for (int node : {sg.node_lo, sg.node_hi}) {
+      if (d.opt.cellbox_full_flow && node >= 0 && !R.trees[sg.net].nodes[node].direct_carrier_tap) {
+        segs_at[{sg.net, node}].push_back(si);
+      }
+    }
+  }
+  const auto fits_node = [&](int net, int node, int l, int self) {
+    const auto it = segs_at.find({net, node});
+    if (it == segs_at.end()) {
+      return true;
+    }
+    return std::ranges::all_of(it->second, [&](int o) {
+      if (o == self || R.segments[o].layer < 0) {
+        return true;
+      }
+      const int ol = R.segments[o].layer;
+      return g.layers[ol].horizontal == g.layers[l].horizontal ? std::abs(ol - l) <= 2 : std::abs(ol - l) == 1;
+    });
+  };
+  const auto segment_layer_allowed = [&](int si, int l) {
+    const auto& sg = R.segments[si];
+    return fits_node(sg.net, sg.node_lo, l, si) && fits_node(sg.net, sg.node_hi, l, si);
+  };
+  // a riser or jog at a join node: adjacent to every segment of the other direction there
+  std::optional<std::pair<int, int>> attach_node;  // (net, node) of the current choose_direction call
+  const auto                         layer_allowed = [&](int net, int l) {
+    if (!attach_node || attach_node->first != net) {
+      return true;
+    }
+    const auto it = segs_at.find(*attach_node);
+    if (it == segs_at.end()) {
+      return true;
+    }
+    return std::ranges::all_of(it->second, [&](int o) {
+      const int ol = R.segments[o].layer;
+      return ol < 0 || g.layers[ol].horizontal == g.layers[l].horizontal || std::abs(ol - l) == 1;
+    });
+  };
+  // A box tap ends at the box edge; any other direct tap keeps the old vertical stop at the tile center.
+  const auto box_tap = [&](int net, int node) { return direct_tap(net, node) && R.trees[net].nodes[node].box >= 0; };
   const auto tile_lo = [&](const Segment& s, int k) {
+    if (k == s.lo && box_tap(s.net, s.node_lo)) {
+      return carrier_tap_end(g, g.layers[s.layer].horizontal, k, false);
+    }
     if (!g.layers[s.layer].horizontal && k == s.lo && direct_tap(s.net, s.node_lo)) {
       return g.cy(k);
     }
     return g.layers[s.layer].horizontal ? g.left(k) : g.bottom(k);
   };
   const auto tile_hi = [&](const Segment& s, int k) {
+    if (k == s.hi && box_tap(s.net, s.node_hi)) {
+      return carrier_tap_end(g, g.layers[s.layer].horizontal, k, true);
+    }
     if (!g.layers[s.layer].horizontal && k == s.hi && direct_tap(s.net, s.node_hi)) {
       return g.cy(k);
     }
@@ -612,7 +767,7 @@ void assign_tracks(const Design& d, const Grid& g, Routing& R, unsigned threads)
       continue;
     }
     for (int node : {s.node_lo, s.node_hi}) {
-      if (node >= 0) {
+      if (node >= 0 && !direct_tap(s.net, node)) {  // a direct tap has no riser: Final joins its carriers in the box
         auto [it, fresh] = v_arrival.try_emplace({s.net, node}, si);
         if (!fresh && s.layer < R.segments[it->second].layer) {
           it->second = si;  // the lowest arriving layer is the riser
@@ -856,6 +1011,14 @@ void assign_tracks(const Design& d, const Grid& g, Routing& R, unsigned threads)
                  int64_t(horizontal ? shape.rect.xh : shape.rect.yh));
     }
   };
+  const std::vector<int64_t> via_reach = d.opt.cellbox_full_flow ? via_landing_reach(d.tech, d.fp, g)
+                                                                 : std::vector<int64_t>(g.layers.size(), 0);
+  int64_t jog_landing = 0;  // the largest landing extension over the horizontal layers (a jog's layer is picked later)
+  for (size_t l = 0; l < g.layers.size(); ++l) {
+    if (d.opt.cellbox_full_flow && g.layers[l].horizontal) {
+      jog_landing = std::max<int64_t>(jog_landing, via_reach[l] - g.layers[l].width / 2);
+    }
+  }
   // per layer: the reach of its spacing rules (end of line included) from a wire edge
   std::vector<int64_t>               keep(g.layers.size());
   std::vector<char>                  ordinary_spacing(g.layers.size(), 0);
@@ -952,6 +1115,32 @@ void assign_tracks(const Design& d, const Grid& g, Routing& R, unsigned threads)
     }
     return true;
   };
+  // Full flow: hard metal (PG, macro bodies) is checked with the native rules against its real rectangles, like signal
+  // metal, instead of the conservative track envelope (which blocked every neighbor track a PG strap or via landing
+  // overlapped). Reserved-track exclusions stay as they are.
+  const auto hard_free = [&](int l, int band, const physical::Shape& candidate) {
+    const auto clearance = rules.clearance(g.layers[l].name);
+    if (!clearance) {
+      return false;
+    }
+    const auto& bands_of = g.obstacle_band[size_t(l)];
+    for (int bb = band - 1; bb <= band + 1; ++bb) {
+      if (bb < 0 || size_t(bb) >= bands_of.size()) {
+        continue;
+      }
+      for (int oi : bands_of[size_t(bb)]) {
+        const auto& r = g.obstacles[size_t(l)][size_t(oi)];
+        if (r.xl > candidate.rect.xh + *clearance || candidate.rect.xl > r.xh + *clearance || r.yl > candidate.rect.yh + *clearance
+            || candidate.rect.yl > r.yh + *clearance) {
+          continue;
+        }
+        if (!rules.spacing(candidate, {g.layers[l].name, r}).legal) {
+          return false;
+        }
+      }
+    }
+    return true;
+  };
   // line ends: no metal ahead of an end of the new span on the neighbor tracks within the rule reach, and the span
   // never lies ahead of a neighbor's end (the metal runs a wire width past each centerline end)
   struct End_blocker {
@@ -981,8 +1170,8 @@ void assign_tracks(const Design& d, const Grid& g, Routing& R, unsigned threads)
               for (const auto u : {t - dt, t + dt}) {
                 if (!visit_track(B, l, u, [&](const Band& neighbor_band, const Track& track) {
                       for (const auto& [owner, centers] : track.owners) {
-                        if (owner == kReservedOwner) {
-                          continue;
+                        if (owner == kReservedOwner || owner == kObstacleOwner) {
+                          continue;  // hard metal: exact native check in track_free (hard_free)
                         }
                         const auto native = track.native_owners.find(owner);
                         if (owner >= 0 && native == track.native_owners.end()) {
@@ -1112,9 +1301,15 @@ void assign_tracks(const Design& d, const Grid& g, Routing& R, unsigned threads)
     }
     const auto begin = int64_t(std::floor(L.horizontal ? candidate.rect.xl : candidate.rect.yl));
     const auto end   = int64_t(std::ceil(L.horizontal ? candidate.rect.xh : candidate.rect.yh));
+    if (!hard_free(l, B.index, candidate)) {
+      if (why) {
+        *why = {t, lo, hi, kObstacleOwner, true, false, B.index};
+      }
+      return false;
+    }
     return visit_track(B, l, t, [&](const Band& neighbor_band, const Track& occupied) {
       for (const auto& [owner, centerline_spans] : occupied.owners) {
-        if (owner == net && net >= 0) {
+        if ((owner == net && net >= 0) || owner == kObstacleOwner) {
           continue;
         }
         const auto native = occupied.native_owners.find(owner);
@@ -1294,11 +1489,59 @@ void assign_tracks(const Design& d, const Grid& g, Routing& R, unsigned threads)
     }
   };
   const auto occupy_segment = [&](Band& B, int si, int64_t lo, int64_t hi) {
-    const auto& segment = R.segments[si];
+    auto& segment   = R.segments[si];
+    segment.span_lo = lo;
+    segment.span_hi = hi;
     if (d.opt.l5_repair_ms && g.layers[B.layer].horizontal) {
       B.requests.push_back({si, segment.net, lo, hi, segment.track, segment.track_state});
     }
     occupy(B, segment.track, lo, hi, segment.net, segment.track_state, segment_destinations(segment), si);
+  };
+  // A failed pick of a segment ending at a box tap retries with the tap end(s) deeper in the box (Final extends the
+  // carrier there anyway): line ends at one box edge share a coordinate and their end-of-line keepouts collide on
+  // adjacent tracks; 2..8 pitches deeper staggers them, never past the box center. Returns the chosen ends.
+  struct Staggered {
+    int64_t track = -1;
+    bool    ok    = false;
+    int64_t lo = 0, hi = 0;
+  };
+  const auto pick_staggered = [&](Band& B, int l, const Segment& s, int64_t lo, int64_t hi, int64_t pref) {
+    const bool low_tap  = s.node_lo >= 0 && R.trees[s.net].nodes[s.node_lo].direct_carrier_tap
+                         && R.trees[s.net].nodes[s.node_lo].box >= 0 && d.opt.cellbox_full_flow;
+    const bool high_tap = s.node_hi >= 0 && R.trees[s.net].nodes[s.node_hi].direct_carrier_tap
+                          && R.trees[s.net].nodes[s.node_hi].box >= 0 && d.opt.cellbox_full_flow;
+    const bool h        = g.layers[l].horizontal;
+    const auto center   = [&](int k) { return h ? g.cx(k) : g.cy(k); };
+    Staggered  out{-1, false, lo, hi};
+    auto [t, ok] = pick(B, l, lo, hi, s.net, s.critical, pref, true, segment_destinations(s));
+    out.track    = t;
+    out.ok       = ok;
+    if (ok || (!low_tap && !high_tap)) {
+      return out;
+    }
+    const int64_t step = 2 * g.layers[l].pitch;
+    for (int k = 1; k <= 4 && !out.ok; ++k) {
+      for (int which = 0; which < 3 && !out.ok; ++which) {
+        const bool move_lo = low_tap && which != 1, move_hi = high_tap && which != 0;
+        if (!move_lo && !move_hi) {
+          continue;
+        }
+        const int64_t a = move_lo ? std::max(lo - k * step, std::min(lo, center(s.lo))) : lo;
+        const int64_t b = move_hi ? std::min(hi + k * step, std::max(hi, center(s.hi))) : hi;
+        if (a == lo && b == hi) {
+          continue;
+        }
+        auto [t2, ok2] = pick(B, l, a, b, s.net, s.critical, pref, true, segment_destinations(s));
+        if (ok2) {
+          out = {t2, true, a, b};
+        }
+      }
+    }
+    return out;
+  };
+  const auto record_taps = [&](Segment& s, int64_t lo, int64_t hi, int64_t lo0, int64_t hi0) {
+    s.tap_lo = lo != lo0 ? lo : -1;
+    s.tap_hi = hi != hi0 ? hi : -1;
   };
   // l5_fallback_shadow: after a failed pick (before its proposal is inserted), rerun the same predicates on the shadow
   std::mutex shadow_mutex;
@@ -1444,9 +1687,13 @@ void assign_tracks(const Design& d, const Grid& g, Routing& R, unsigned threads)
                                     const std::string& ends,
                                     Destinations       destinations = {-1, -1}) -> Track_choice {
     Track_choice fallback;
+    bool         any_allowed = false;
+    for (int l = 0; l < int(g.layers.size()); ++l) {
+      any_allowed |= g.layers[l].horizontal == horizontal && layer_allowed(net, l);
+    }
     for (int l = 0; l < int(g.layers.size()); ++l) {
       const auto& L = g.layers[l];
-      if (L.horizontal != horizontal) {
+      if (L.horizontal != horizontal || (any_allowed && !layer_allowed(net, l))) {
         continue;
       }
       auto& B           = band_of(l, band);
@@ -1673,7 +1920,7 @@ void assign_tracks(const Design& d, const Grid& g, Routing& R, unsigned threads)
         }
         const auto& node = R.trees[request.net].nodes[node_index];
         if (node.direct_carrier_tap) {
-          ends[e] = g.cx(g.col(node.tile));
+          ends[e] = node.box >= 0 ? carrier_tap_end(g, true, g.col(node.tile), e == 1) : g.cx(g.col(node.tile));
         } else if (node.riser_track >= 0 && checked(node.riser_state)) {
           ends[e] = g.track_coord(node.riser_layer, node.riser_track);
         } else {
@@ -2058,7 +2305,7 @@ void assign_tracks(const Design& d, const Grid& g, Routing& R, unsigned threads)
         for (int e = 0; e < 2; ++e) {
           const auto& node = R.trees[s.net].nodes[e ? s.node_hi : s.node_lo];
           if (d.opt.cellbox_full_flow && node.direct_carrier_tap) {
-            ends[e] = g.cx(g.col(node.tile));
+            ends[e] = node.box >= 0 ? carrier_tap_end(g, true, g.col(node.tile), e == 1) : g.cx(g.col(node.tile));
             continue;
           }
           if (node.riser_track < 0
@@ -2405,7 +2652,8 @@ void assign_tracks(const Design& d, const Grid& g, Routing& R, unsigned threads)
       continue;
     }
     auto&      B  = band_of(s.layer, s.band);
-    const auto lo = tile_lo(s, s.lo), hi = tile_hi(s, s.hi);
+    const bool spanned = s.track >= 0 && s.span_lo >= 0 && s.span_hi >= s.span_lo;  // a kept detour-round track
+    const auto lo = spanned ? s.span_lo : tile_lo(s, s.lo), hi = spanned ? s.span_hi : tile_hi(s, s.hi);
     if (s.track < 0) {
       const auto [t, ok] = pick(B,
                                 s.layer,
@@ -2433,7 +2681,11 @@ void assign_tracks(const Design& d, const Grid& g, Routing& R, unsigned threads)
       failures[0]   += !ok;
     } else {
       const bool allowed  = allowance_free(B, s.track, lo, hi, s.net, segment_destinations(s));
-      s.track_state       = allowed ? uint8_t(Track_state::prescribed) : uint8_t(Track_state::fallback);
+      // a preroute's track was checked against hard metal and the other preroutes when Plan fixed it, and it is
+      // placed before every other segment
+      s.track_state       = !allowed ? uint8_t(Track_state::fallback)
+                            : s.preroute ? uint8_t(Track_state::checked)
+                                         : uint8_t(Track_state::prescribed);
       unassigned         += !allowed;
       failures[0]        += !allowed;  // Prescribed geometry is immutable, but cannot claim a passing allowance.
       if (!allowed) {
@@ -2459,6 +2711,57 @@ void assign_tracks(const Design& d, const Grid& g, Routing& R, unsigned threads)
       }
     }
   };
+  // Full flow: a node with a die IO on the left/right edge joins the pin through an H stub on the pin's track,
+  // from the pin to the node's riser. Returns (pin x, how far that riser may be from it before the stub meets hard
+  // metal on the track), or nothing when the node has no such pin or nothing blocks the track nearby.
+  const auto io_stub_reach = [&](int net, const Node& node) -> std::optional<std::pair<double, double>> {
+    if (!d.opt.cellbox_full_flow) {
+      return std::nullopt;
+    }
+    for (int pi : node.pins) {
+      const auto& p = d.nets[size_t(net)].pins[size_t(pi)];
+      if (p.term < 0) {
+        continue;
+      }
+      const auto access   = physical_pin_access(d, g, p);
+      const bool on_left  = access.x <= g.die.xl + g.tile_w / 2;
+      const bool on_right = access.x >= g.die.xh - g.tile_w / 2;
+      int        lh       = -1;
+      for (int l = 0; l < int(g.layers.size()) && lh < 0; ++l) {
+        lh = g.layers[size_t(l)].horizontal ? l : -1;
+      }
+      if (lh < 0) {
+        return std::nullopt;
+      }
+      if (!on_left && !on_right) {
+        continue;  // a top/bottom IO pin must not hide a later left/right one
+      }
+      const auto&  L     = g.layers[size_t(lh)];
+      const double clear = L.pitch;  // a wire width plus spacing on either side of the stub
+      double       reach = std::numeric_limits<double>::infinity();
+      const int    row   = g.row(node.tile);
+      for (int bb = row - 1; bb <= row + 1; ++bb) {
+        if (bb < 0 || size_t(bb) >= g.obstacle_band[size_t(lh)].size()) {
+          continue;
+        }
+        for (int oi : g.obstacle_band[size_t(lh)][size_t(bb)]) {
+          const auto& o = g.obstacles[size_t(lh)][size_t(oi)];
+          if (o.yl > access.y + clear || o.yh < access.y - clear) {
+            continue;
+          }
+          const double gap = on_left ? o.xl - access.x : access.x - o.xh;
+          if (gap > 0) {
+            reach = std::min(reach, gap - clear);
+          }
+        }
+      }
+      if (!std::isfinite(reach)) {
+        continue;
+      }
+      return std::pair{double(access.x), reach};
+    }
+    return std::nullopt;
+  };
   // Fixed hops and clock segments skip run_phase(). Their vertical arrivals
   // still define the attachment coordinates used by horizontal wires and taps.
   for (int si = 0; si < int(R.segments.size()); ++si) {
@@ -2469,6 +2772,16 @@ void assign_tracks(const Design& d, const Grid& g, Routing& R, unsigned threads)
   for (const auto& r : risers) {
     auto&     node = R.trees[r.net].nodes[r.node];
     const int col = g.col(node.tile), row = g.row(node.tile);
+    if (node.riser_track >= 0 && node.riser_layer >= 0) {  // kept by a Local detour round: immutable, like a fixed track
+      const auto lo = g.bottom(row), hi = lo + g.tile_h;
+      auto&      B  = band_of(node.riser_layer, col);
+      node.riser_state = allowance_free(B, node.riser_track, lo, hi, r.net, {node.box, -1}) ? uint8_t(Track_state::prescribed)
+                                                                                             : uint8_t(Track_state::fallback);
+      unassigned  += node.riser_state == uint8_t(Track_state::fallback);
+      failures[1] += node.riser_state == uint8_t(Track_state::fallback);
+      occupy(B, node.riser_track, lo, hi, r.net, node.riser_state, {node.box, -1});
+      continue;
+    }
     int64_t   px = g.cx(col);
     for (int pi : node.pins) {
       const auto& p = d.nets[r.net].pins[pi];
@@ -2482,7 +2795,26 @@ void assign_tracks(const Design& d, const Grid& g, Routing& R, unsigned threads)
       }
     }
     const auto lo = g.bottom(row), hi = lo + g.tile_h;
-    const auto choice  = choose_direction(false, col, lo, hi, r.net, px, "riser", "tile", {node.box, -1});
+    attach_node        = std::pair{r.net, r.node};
+    // Full flow, a die IO on the left/right edge: its H stub runs on the pin's track from the pin to this riser, so
+    // the riser stays short of the first hard metal (a PG landing) along that track, on any vertical layer.
+    std::optional<Track_choice> io_choice;
+    if (const auto reach = io_stub_reach(r.net, node)) {
+      for (int l = 0; l < int(g.layers.size()) && !io_choice; ++l) {
+        const auto& V = g.layers[size_t(l)];
+        if (V.horizontal || !layer_allowed(r.net, l)) {
+          continue;
+        }
+        auto&      B    = band_of(l, col);
+        const auto pref = int64_t(std::lround(double(reach->first - V.offset) / V.pitch));
+        const auto [t, ok] = pick(B, l, lo, hi, r.net, false, pref, true, {node.box, -1});
+        if (ok && std::abs(double(g.track_coord(l, t)) - reach->first) <= reach->second) {
+          io_choice = Track_choice{l, t, true};
+        }
+      }
+    }
+    const auto choice  = io_choice ? *io_choice : choose_direction(false, col, lo, hi, r.net, px, "riser", "tile", {node.box, -1});
+    attach_node.reset();
     node.riser_layer   = choice.layer;
     node.riser_track   = choice.track;
     node.riser_state   = track_state(choice.checked);
@@ -2559,20 +2891,26 @@ void assign_tracks(const Design& d, const Grid& g, Routing& R, unsigned threads)
           auto&   s  = R.segments[si];
           int64_t lo = tile_lo(s, s.lo), hi = tile_hi(s, s.hi);
           if (horizontal) {  // exact ends: the node riser or the bend partner's track
+            // full flow: an end on a join via runs as far past the join as the via's landing plate reaches
+            const int64_t landing = d.opt.cellbox_full_flow ? std::max<int64_t>(0, via_reach[size_t(l)] - native_geometry[size_t(l)].width / 2) : 0;
             const auto end_x = [&](int node, int tile, bool low) -> int64_t {
+              const int64_t out = low ? -landing : landing;
+              if (box_tap(s.net, node)) {
+                return carrier_tap_end(g, true, tile, !low);
+              }
               if (direct_tap(s.net, node)) {
                 return g.cx(tile);
               }
               if (node >= 0) {
                 const auto& nd = R.trees[s.net].nodes[node];
                 if (nd.riser_track >= 0) {
-                  return g.track_coord(nd.riser_layer, nd.riser_track);
+                  return g.track_coord(nd.riser_layer, nd.riser_track) + out;
                 }
               } else if (s.conn >= 0) {
                 for (int o : R.conns[s.conn].segs) {
                   const auto& p = R.segments[o];
                   if (o != si && !g.layers[p.layer].horizontal && p.band == tile && p.track >= 0) {
-                    return g.track_coord(p.layer, p.track);
+                    return g.track_coord(p.layer, p.track) + out;
                   }
                 }
               }
@@ -2584,17 +2922,18 @@ void assign_tracks(const Design& d, const Grid& g, Routing& R, unsigned threads)
               std::swap(lo, hi);
             }
           }
-          const auto mid     = (g.tracks(l, b).first + g.tracks(l, b).second) / 2;
-          const auto [t, ok] = pick(B, l, lo, hi, s.net, s.critical, mid, true, segment_destinations(s));
-          if (!ok) {  // retried on the other layers of its direction after this pass
+          const auto mid    = (g.tracks(l, b).first + g.tracks(l, b).second) / 2;
+          const auto chosen = pick_staggered(B, l, s, lo, hi, mid);
+          if (!chosen.ok) {  // retried on the other layers of its direction after this pass
             probe(B, l, lo, hi, s.net, s.critical, mid, "segment_first", segment_destinations(s));
             std::lock_guard lock(failed_mutex);
             failed.push_back({si, lo, hi});
             continue;
           }
-          s.track       = t;
+          s.track       = chosen.track;
           s.track_state = uint8_t(Track_state::checked);
-          occupy_segment(B, si, lo, hi);
+          record_taps(s, chosen.lo, chosen.hi, lo, hi);
+          occupy_segment(B, si, chosen.lo, chosen.hi);
           set_riser(si);
         }
       });
@@ -2606,21 +2945,22 @@ void assign_tracks(const Design& d, const Grid& g, Routing& R, unsigned threads)
       auto&            s = R.segments[si];
       std::vector<int> others;
       for (int l = 0; l < int(g.layers.size()); ++l) {
-        if (l != s.layer && g.layers[l].horizontal == horizontal) {
+        if (l != s.layer && g.layers[l].horizontal == horizontal && segment_layer_allowed(si, l)) {
           others.push_back(l);
         }
       }
       std::ranges::stable_sort(others, [&](int a, int e) { return std::abs(a - s.layer) < std::abs(e - s.layer); });
       bool placed = false;
       for (int l : others) {
-        auto& B            = band_of(l, s.band);
-        const auto [a, e]  = g.tracks(l, s.band);
-        const auto [t, ok] = pick(B, l, lo, hi, s.net, s.critical, (a + e) / 2, true, segment_destinations(s));
-        if (ok) {
+        auto& B           = band_of(l, s.band);
+        const auto [a, e] = g.tracks(l, s.band);
+        const auto chosen = pick_staggered(B, l, s, lo, hi, (a + e) / 2);
+        if (chosen.ok) {
           s.layer       = l;
-          s.track       = t;
+          s.track       = chosen.track;
           s.track_state = uint8_t(Track_state::checked);
-          occupy_segment(B, si, lo, hi);
+          record_taps(s, chosen.lo, chosen.hi, lo, hi);
+          occupy_segment(B, si, chosen.lo, chosen.hi);
           placed = true;
           break;
         }
@@ -2682,7 +3022,9 @@ void assign_tracks(const Design& d, const Grid& g, Routing& R, unsigned threads)
       }
       const int  row = g.row(nd.tile);
       const auto xv = g.track_coord(s.layer, s.track), xr = g.track_coord(nd.riser_layer, nd.riser_track);
-      const auto lo = std::min(xv, xr), hi = std::max(xv, xr);
+      // full flow: both jog ends land on vias, whose plates reach past the wire's own end extension
+      const auto lo = std::min(xv, xr) - jog_landing, hi = std::max(xv, xr) + jog_landing;
+      attach_node       = std::pair{s.net, node};
       const auto choice = choose_direction(true,
                                            row,
                                            lo,
@@ -2691,6 +3033,7 @@ void assign_tracks(const Design& d, const Grid& g, Routing& R, unsigned threads)
                                            {},
                                            "jog",
                                            std::format("seg-{}/riser-{}", state_name(s.track_state), state_name(nd.riser_state)));
+      attach_node.reset();
       (e ? s.jog_hi_layer : s.jog_lo_layer)  = choice.layer;
       (e ? s.jog_hi : s.jog_lo)              = choice.track;
       (e ? s.jog_hi_state : s.jog_lo_state)  = track_state(choice.checked);

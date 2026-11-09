@@ -1122,7 +1122,7 @@ TEST(LegrouteFinal, DiagnosticFinalRequiresCompleteLocalAdmissionRecords) {
   EXPECT_TRUE(f.fp.nets[0].wires.empty());
 }
 
-TEST(LegrouteFinal, CriticalLeafCarriersEndAtBoxCentersWithoutAuxiliaryRisers) {
+TEST(LegrouteFinal, CriticalLeafCarriersEndAtBoxEdgesWithoutAuxiliaryRisers) {
   for (const bool horizontal : {false, true}) {
     Final_io f(0, 0);
     f.options.cellbox_full_flow = true;
@@ -1152,9 +1152,11 @@ TEST(LegrouteFinal, CriticalLeafCarriersEndAtBoxCentersWithoutAuxiliaryRisers) {
     const auto metal = physical::route_geometry(f.tech, f.fp, emitted);
     ASSERT_EQ(metal.size(), 1u);
     EXPECT_EQ(metal[0].layer, horizontal ? "M4" : "M3");
-    // Native width is 20 DBU: center endpoints plus 10 DBU at each end.
-    EXPECT_DOUBLE_EQ(horizontal ? metal[0].rect.xl : metal[0].rect.yl, horizontal ? 390 : 240);
-    EXPECT_DOUBLE_EQ(horizontal ? metal[0].rect.xh : metal[0].rect.yh, horizontal ? 1210 : 760);
+    // Box taps stop at the facing box edges, one site (grid.site) inside each box; Final extends the carrier into
+    // each box. Adjacent boxes share that edge, so the carrier straddles it: centerline +-site, 10 DBU caps.
+    const double site = std::max<int64_t>(1, f.grid.site);
+    EXPECT_DOUBLE_EQ(horizontal ? metal[0].rect.xl : metal[0].rect.yl, (horizontal ? 800 : 500) - site - 10);
+    EXPECT_DOUBLE_EQ(horizontal ? metal[0].rect.xh : metal[0].rect.yh, (horizontal ? 800 : 500) + site + 10);
   }
 }
 
@@ -1269,7 +1271,19 @@ TEST(LegrouteFinal, CriticalAdjacentJoinLandingsAreExplicitProducerMetal) {
   f.tech.vias["V3_DEF"].is_default = false;
   const auto unsupported           = final_planned_geometry(f.design, f.grid, {}, f.routes);
   EXPECT_TRUE(unsupported.adjacent_join_vias[0].empty());
-  EXPECT_EQ(decode(unsupported.paths[0]), before);
+  // The full flow itself extends risers over the whole node tile, so the baseline is the full-flow geometry with
+  // landings: dropping the DEFAULT via must remove only the landing growth (same shapes, each contained in the grown one,
+  // at least one strictly smaller) and add nothing.
+  const auto without = decode(unsupported.paths[0]);
+  ASSERT_EQ(without.size(), after.size());
+  size_t shrunk = 0;
+  for (size_t k = 0; k < after.size(); ++k) {
+    EXPECT_EQ(without[k].layer, after[k].layer);
+    EXPECT_TRUE(after[k].rect.contains(without[k].rect));
+    EXPECT_TRUE(without[k].rect.contains(before[k].rect) || before[k].layer != without[k].layer);
+    shrunk += without[k].rect != after[k].rect;
+  }
+  EXPECT_GT(shrunk, 0u);
   EXPECT_EQ(f.fp.terminals, original_terminals);
 }
 
