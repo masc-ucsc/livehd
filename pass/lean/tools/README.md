@@ -34,7 +34,8 @@ The Lean pin (4.36.0-rc1) lives in `formal/lean`, so build from there:
 cd formal/lean
 bash .build-proj.sh                       # simulator + tools, into .olean-dev, with the axiom gate
 bash .build-proj.sh HDLProof/Sym/ConjT    # one tools module
-# native drivers, into a project-local root:
+# native drivers, into a project-local root (incremental: only modules whose source or imports
+# changed are rebuilt; FORCE=1 rebuilds all; JOBS=<n> parallel C compiles, default 4):
 OPT=-O2 ROOT=$PWD/../../generated/sym/nat_root bash Futamura_Projection_Scripts/build-opt.sh \
     ../../pass/lean/tools/drivers/sym_verify.lean ../../pass/lean/tools/drivers/sym_refmap.lean
 ln -s "$(dirname "$(elan which lean)")/cadical" ../../generated/sym/nat_root/nat/cadical
