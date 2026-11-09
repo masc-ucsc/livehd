@@ -309,7 +309,13 @@ std::string check_metal(const ph::Technology& tech, const ph::Floorplan& frame, 
     if (cut == tech.cut_layers.end()) {
       if (!covered(shape, source_pins)) {
         if (const auto verdict = rules.rectangle(shape); !verdict.legal) {
-          return verdict.reason;
+          return std::format("{} on {} [{},{},{},{}]",
+                             verdict.reason,
+                             shape.layer,
+                             shape.rect.xl,
+                             shape.rect.yl,
+                             shape.rect.xh,
+                             shape.rect.yh);
         }
       }
       clearance = rules.clearance(shape.layer);
@@ -805,7 +811,21 @@ void final_wires(const Design& d, const Grid& g, const Boxes& boxes, const Routi
   std::vector<std::vector<size_t>> obligations(boxes.boxes.size());
   const auto                       upstream_why = why;
   const auto                       low_v = std::ranges::find_if(g.layers, [](const auto& layer) { return !layer.horizontal; });
+  // Relocation retry: the boxes the moves touched route first, the rest keep their order.
+  std::vector<size_t> box_order;
+  std::vector<char>   prioritized(boxes.boxes.size(), 0);
+  for (const int bi : d.opt.final_box_priority) {
+    if (bi >= 0 && size_t(bi) < boxes.boxes.size() && !prioritized[size_t(bi)]) {
+      prioritized[size_t(bi)] = 1;
+      box_order.push_back(size_t(bi));
+    }
+  }
   for (size_t bi = 0; bi < boxes.boxes.size(); ++bi) {
+    if (!prioritized[bi]) {
+      box_order.push_back(bi);
+    }
+  }
+  for (const size_t bi : box_order) {
     const auto&         box   = boxes.boxes[bi];
     auto                local = member_frame(work, members[bi]);
     Cellbox_sat_problem problem;
@@ -1204,7 +1224,13 @@ void final_wires(const Design& d, const Grid& g, const Boxes& boxes, const Routi
     assembly_complete[bi] = results[bi].status == Cellbox_sat_status::complete
                             && std::ranges::all_of(obligations[bi], [&](size_t n) { return !scope.required[n] || why[n].empty(); });
     complete_boxes += assembly_complete[bi];
+    if (results[bi].attempted && !assembly_complete[bi]) {
+      rep.final_failed_boxes.push_back(int(bi));
+    }
   }
+  rep.final_attempted_boxes        = attempted_boxes;
+  rep.final_complete_boxes         = complete_boxes;
+  rep.final_upstream_blocked_boxes = upstream_blocked_boxes;
   if (!all_boxes) {
     for (size_t bi = 0; bi < results.size() && rep.failure_sample.size() < 10; ++bi) {
       if (results[bi].status == Cellbox_sat_status::complete) {

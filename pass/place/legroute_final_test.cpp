@@ -1122,7 +1122,7 @@ TEST(LegrouteFinal, DiagnosticFinalRequiresCompleteLocalAdmissionRecords) {
   EXPECT_TRUE(f.fp.nets[0].wires.empty());
 }
 
-TEST(LegrouteFinal, CriticalLeafCarriersEndAtBoxCentersWithoutAuxiliaryRisers) {
+TEST(LegrouteFinal, CriticalLeafCarriersEndAtBoxEdgesWithoutAuxiliaryRisers) {
   for (const bool horizontal : {false, true}) {
     Final_io f(0, 0);
     f.options.cellbox_full_flow = true;
@@ -1152,9 +1152,11 @@ TEST(LegrouteFinal, CriticalLeafCarriersEndAtBoxCentersWithoutAuxiliaryRisers) {
     const auto metal = physical::route_geometry(f.tech, f.fp, emitted);
     ASSERT_EQ(metal.size(), 1u);
     EXPECT_EQ(metal[0].layer, horizontal ? "M4" : "M3");
-    // Native width is 20 DBU: center endpoints plus 10 DBU at each end.
-    EXPECT_DOUBLE_EQ(horizontal ? metal[0].rect.xl : metal[0].rect.yl, horizontal ? 390 : 240);
-    EXPECT_DOUBLE_EQ(horizontal ? metal[0].rect.xh : metal[0].rect.yh, horizontal ? 1210 : 760);
+    // Box taps stop at the facing box edges, one site (grid.site) inside each box; Final extends the carrier into
+    // each box. Adjacent boxes share that edge, so the carrier straddles it: centerline +-site, 10 DBU caps.
+    const double site = std::max<int64_t>(1, f.grid.site);
+    EXPECT_DOUBLE_EQ(horizontal ? metal[0].rect.xl : metal[0].rect.yl, (horizontal ? 800 : 500) - site - 10);
+    EXPECT_DOUBLE_EQ(horizontal ? metal[0].rect.xh : metal[0].rect.yh, (horizontal ? 800 : 500) + site + 10);
   }
 }
 

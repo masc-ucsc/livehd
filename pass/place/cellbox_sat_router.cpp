@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <climits>
 #include <cmath>
+#include <format>
 #include <ctime>
 #include <functional>
 #include <limits>
@@ -342,6 +343,7 @@ class Search {
   const Cellbox_sat_limits&                limits_;
   Cellbox_sat_result                       result_;
   ph::Signal_metal_rules                   rules_;
+  std::set<std::string>                    supply_nets_, supply_pin_layers_;
   std::vector<Layout>                      layouts_;
   std::vector<Candidate>                   candidates_;
   std::vector<std::vector<ph::Route_path>> incoming_paths_;
@@ -549,10 +551,18 @@ class Search {
           return false;
         }
         for (auto other : occupancy->query(item.shape.layer, item.shape.rect, *clearance, item.net)) {
+          const auto& existing = occupancy->at(other);
+          // Standard-cell geometry on legal rows/sites is clean by library construction: on the layers of the cells'
+          // own power pins (M1 in asap7) a member's pin/OBS shapes are not checked against other cells' pin/OBS shapes
+          // (abutment) nor against the supply rails (each cell's rail continues there). Routed signal metal, and every
+          // other layer, still is.
+          if (supply_pin_layers_.contains(item.shape.layer) && (!existing.routed || supply_nets_.contains(existing.net))) {
+            continue;
+          }
           if (!same_group(other)
               && !rules_
                       .spacing_with_union(item.shape,
-                                          occupancy->at(other).shape,
+                                          existing.shape,
                                           layout.source_groups[group],
                                           source_context(layout, other))
                       .legal) {
@@ -970,6 +980,12 @@ class Search {
                                                        : router.propose_tap(net, limits, anchors, costs, prior);
       result_.metrics.generation_time_limit |= proposal.timed_out;
       if (!proposal.geometry || !append(combined, *proposal.geometry)) {
+        auto why = std::string(sources ? "join: " : "tap: ")
+                   + (!proposal.geometry ? (proposal.timed_out ? std::string("timed out") : proposal.reason) : "overlaps the partial route");
+        if (why.size() > 160) {
+          why.resize(160);
+        }
+        ++external_failures_[why];
         return false;
       }
       auto added = path_shapes(tech_, *layout.frame, input.local_net.name, proposal.geometry->paths, &combined.nondefault_rules);
@@ -1226,8 +1242,26 @@ class Search {
 public:
   Search(const ph::Technology& tech, const ph::Floorplan& frame, const ph::Routing_occupancy& background,
          const Cellbox_sat_problem& problem, const Cellbox_sat_limits& limits)
-      : tech_(tech), original_(frame), background_(background), problem_(problem), limits_(limits), rules_(tech, frame) {}
+      : tech_(tech), original_(frame), background_(background), problem_(problem), limits_(limits), rules_(tech, frame) {
+    for (const auto& net : frame.special_nets) {
+      supply_nets_.insert(net.name);
+    }
+    for (const auto& cell : problem.cells) {
+      const auto& macro = tech.macros.at(frame.components.at(cell.component).macro);
+      for (const auto& [name, pin] : macro.pins) {
+        (void)name;
+        if (pin.use == "POWER" || pin.use == "GROUND") {
+          for (const auto& shape : pin.shapes) {
+            supply_pin_layers_.insert(shape.layer);
+          }
+        }
+      }
+    }
+  }
   Cellbox_sat_result run();
+
+private:
+  std::map<std::string, size_t> external_failures_;  // diagnostic: external join/tap proposal failures by reason
 };
 
 Cellbox_sat_result Search::run() {
@@ -1275,7 +1309,41 @@ Cellbox_sat_result Search::run() {
     }
     result_.metrics.generation_time_limit |= Clock::now() >= generation_stop();
     if (result_.metrics.generation_time_limit) {
-      throw Search_limit("bounded candidate-generation time slice exhausted");
+      // which obligations still have no alternative in any layout (diagnostic only)
+      size_t bare_external = 0, bare_internal = 0, bare_external_calls = 0, bare_internal_calls = 0;
+      for (size_t n = 0; n < problem_.nets.size(); ++n) {
+        if (std::ranges::any_of(layouts_, [&](const auto& layout) { return !layout.candidates[n].empty(); })) {
+          continue;
+        }
+        size_t calls = 0;
+        for (const auto& layout : layouts_) {
+          calls += layout.calls[n];
+        }
+        (problem_.nets[n].external ? bare_external : bare_internal)             += 1;
+        (problem_.nets[n].external ? bare_external_calls : bare_internal_calls) += calls;
+      }
+      std::string top;
+      size_t      top_count = 0, all_failures = 0;
+      for (const auto& [why, count] : external_failures_) {
+        all_failures += count;
+        if (count > top_count) {
+          top       = why;
+          top_count = count;
+        }
+      }
+      throw Search_limit(std::format("bounded candidate-generation time slice exhausted ({} of {} nets without any candidate: "
+                                     "{} external ({} trials), {} internal ({} trials); {} layouts; external failures {}, "
+                                     "most {}x '{}')",
+                                     bare_external + bare_internal,
+                                     problem_.nets.size(),
+                                     bare_external,
+                                     bare_external_calls,
+                                     bare_internal,
+                                     bare_internal_calls,
+                                     layouts_.size(),
+                                     all_failures,
+                                     top_count,
+                                     top));
     }
     for (size_t n = 0; n < problem_.nets.size(); ++n) {
       if (std::ranges::none_of(layouts_, [&](const auto& layout) { return !layout.candidates[n].empty(); })) {

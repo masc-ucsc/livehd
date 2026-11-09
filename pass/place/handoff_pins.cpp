@@ -2,6 +2,7 @@
 #include "handoff_pins.hpp"
 
 #include <algorithm>
+#include <set>
 #include <array>
 #include <cmath>
 #include <limits>
@@ -105,6 +106,17 @@ std::vector<ph::Terminal> handoff_pins(const ph::Technology& tech, const ph::Flo
   std::sort(pins.begin(), pins.end(), [&](const auto& a, const auto& b) {
     return std::tie(a.edge, a.coordinate, fp.terminals[a.index].name) < std::tie(b.edge, b.coordinate, fp.terminals[b.index].name);
   });
+  // left/right pins: how far inward the stub must run clear of supply metal (about one placement tile: five rows)
+  double stub_reach = 0;
+  if (!fp.rows.empty()) {
+    if (const auto site = tech.sites.find(fp.rows.front().site); site != tech.sites.end()) {
+      stub_reach = 5 * site->second.height * fp.dbu;
+    }
+  }
+  std::set<std::string> supply;
+  for (const auto& net : fp.special_nets) {
+    supply.insert(net.name);
+  }
   auto                  result = fp.terminals;
   std::array<double, 4> previous;
   previous.fill(-std::numeric_limits<double>::infinity());
@@ -156,6 +168,27 @@ std::vector<ph::Terminal> handoff_pins(const ph::Technology& tech, const ph::Flo
       if (!check.legal) {
         reason = check.reason;
         continue;
+      }
+      if (horizontal && stub_reach > 0) {
+        // the pin's stub runs inward on this track: its first stretch must clear the supply metal (the power grid's
+        // via landings sit on every rail row near the edge), or the router can never reach the pin on this track
+        const double    inward = pin.edge == 0 ? 1 : -1;
+        const double    from = x, to = x + inward * stub_reach;
+        const ph::Shape stub{
+            l.name,
+            {std::min(from, to), y - l.width / 2, std::max(from, to), y + l.width / 2}
+        };
+        for (auto id : occupancy.query(l.name, stub.rect, l.clearance, t.net)) {
+          const auto& other = occupancy.at(id);
+          if (supply.contains(other.net) && !rules.spacing(stub, other.shape).legal) {
+            check  = {false, "supply metal along the pin's stub"};
+            reason = check.reason;
+            break;
+          }
+        }
+        if (!check.legal) {
+          continue;
+        }
       }
       occupancy.insert({shape, t.net});
       t.x           = std::llround(x);

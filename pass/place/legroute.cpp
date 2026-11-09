@@ -134,7 +134,7 @@ void write_local_track_requests(const Design& d, const Grid& g, const Routing& r
   std::ofstream segments(directory + "/local_segments.tsv"), nodes(directory + "/local_nodes.tsv"),
       resources(directory + "/local_resources.tsv");
   segments << "segment\tnet_index\tnet\tlayer\tband\tlo_tile\thi_tile\ttrack\tcoordinate_dbu\tstate\tnode_lo\tnode_hi"
-              "\tjog_lo_layer\tjog_lo_track\tjog_lo_state\tjog_hi_layer\tjog_hi_track\tjog_hi_state\n";
+              "\tjog_lo_layer\tjog_lo_track\tjog_lo_state\tjog_hi_layer\tjog_hi_track\tjog_hi_state\tspan_lo\tspan_hi\n";
   for (size_t i = 0; i < routing.segments.size(); ++i) {
     const auto& s     = routing.segments[i];
     const auto& net   = d.nets.at(size_t(s.net));
@@ -143,7 +143,7 @@ void write_local_track_requests(const Design& d, const Grid& g, const Routing& r
              << s.band << '\t' << s.lo << '\t' << s.hi << '\t' << s.track << '\t'
              << (s.track < 0 ? -1 : g.track_coord(s.layer, s.track)) << '\t' << int(s.track_state) << '\t' << s.node_lo << '\t'
              << s.node_hi << '\t' << s.jog_lo_layer << '\t' << s.jog_lo << '\t' << int(s.jog_lo_state) << '\t' << s.jog_hi_layer
-             << '\t' << s.jog_hi << '\t' << int(s.jog_hi_state) << '\n';
+             << '\t' << s.jog_hi << '\t' << int(s.jog_hi_state) << '\t' << s.span_lo << '\t' << s.span_hi << '\n';
   }
   nodes << "net_index\tnode\ttile\tbox\tterminal\triser_layer\triser_track\triser_state\tstub_layer\tstub_track\tstub_state"
            "\tstub_access_state\n";
@@ -253,6 +253,9 @@ void validate_legroute_options(const Legroute_options& o) {
   const auto fail = [](const char* what) { throw std::invalid_argument(std::string("legroute: ") + what); };
   if (o.cellbox_diagnostic_final && (!o.cellbox_full_flow || !o.final)) {
     fail("cellbox_diagnostic_final requires cellbox_full_flow and final");
+  }
+  if (o.cellbox_relocate && (!o.critical_cellboxes || !o.cellbox_relocate_window)) {
+    fail("cellbox_relocate requires critical_cellboxes and a nonzero window");
   }
   if (o.cellbox_full_flow && (!o.critical_cellboxes || o.clock_spine || o.legal_boxes || o.paired_pin_reserve)) {
     fail("cellbox_full_flow requires critical admission, no legacy boxes or clock-spine reconstruction");
@@ -690,6 +693,84 @@ void dump_final_boxes(const lr::Design& d, const lr::Grid& g, const lr::Boxes& b
 }
 }  // namespace
 
+namespace {
+// legroute.guide: the routes as detailed-routing guides (OpenROAD read_guides)
+void write_route_guide(const lr::Design& d, const lr::Grid& g, const lr::Boxes& boxes, const lr::Routing& R,
+                       const std::string& output_dir) {
+      // per net, the corridor of tiles its route covers, on every routing layer (the detailed router picks layers and
+      // tracks inside it; the pin layer only on the tiles holding its pins, so the guides connect through the stack)
+      std::ofstream            out(output_dir + "/legroute.guide");
+      std::vector<std::string> layers;
+      for (const auto& l : g.layers) {
+        layers.push_back(l.name);
+      }
+      const auto rect = [&](int t, const std::string& layer) {
+        return std::format("{} {} {} {} {}\n",
+                           g.left(g.col(t)),
+                           g.bottom(g.row(t)),
+                           g.left(g.col(t) + 1),
+                           g.bottom(g.row(t) + 1),
+                           layer);
+      };
+      for (size_t n = 0; n < d.nets.size(); ++n) {
+        if (!d.nets[n].routed || d.nets[n].clock || d.nets[n].power) {
+          continue;
+        }
+        const auto&   tree = R.trees[n];
+        std::set<int> corridor, pin_tiles;
+        for (int ci : tree.conns) {
+          const auto& c = R.conns[ci];
+          for (size_t k = 0; k + 1 < c.poly.size(); ++k) {
+            const auto [c0, r0] = c.poly[k];
+            const auto [c1, r1] = c.poly[k + 1];
+            for (int cc = std::min(c0, c1); cc <= std::max(c0, c1); ++cc) {
+              for (int rr = std::min(r0, r1); rr <= std::max(r0, r1); ++rr) {
+                corridor.insert(g.tile(cc, rr));
+              }
+            }
+          }
+        }
+        for (const auto& node : tree.nodes) {
+          if (node.tile >= 0) {
+            corridor.insert(node.tile);
+            if (!node.pins.empty()) {
+              pin_tiles.insert(node.tile);
+            }
+          }
+        }
+        for (const auto& pin : d.nets[n].pins) {  // every pin's tile (a net inside one tile has no tree)
+          const int box = pin.comp >= 0 && d.cell[pin.comp] >= 0 ? boxes.box_of[d.cell[pin.comp]] : -1;
+          int       t   = -1;
+          if (box >= 0) {
+            t = boxes.boxes[box].tile;
+          } else if (pin.comp >= 0) {
+            t = g.tile_of(double(d.fp.components[pin.comp].place.x), double(d.fp.components[pin.comp].place.y));
+          } else if (pin.term >= 0) {
+            t = g.tile_of(double(d.fp.terminals[pin.term].x), double(d.fp.terminals[pin.term].y));
+          }
+          if (t >= 0) {
+            corridor.insert(t);
+            pin_tiles.insert(t);
+          }
+        }
+        if (corridor.empty()) {
+          continue;
+        }
+        out << d.fp.nets[d.nets[n].frame].name << "\n(\n";
+        for (int t : corridor) {
+          if (pin_tiles.contains(t)) {
+            out << rect(t, g.pin_layer);
+          }
+          out << rect(t, g.box_layer);
+          for (const auto& l : layers) {
+            out << rect(t, l);
+          }
+        }
+        out << ")\n";
+      }
+}
+}  // namespace
+
 Legroute_report legroute(const physical::Technology& tech, physical::Floorplan& fp, const timing::Feedback& timing,
                          const Legroute_options& options, const Legroute_regions& regions, const physical::Tech_profile* profile) {
   if (options.critical_cellboxes && (!options.cellbox_full_flow || !options.cellbox_handoff)) {
@@ -711,10 +792,11 @@ Legroute_report legroute(const physical::Technology& tech, physical::Floorplan& 
     wires.push_back(n.wires);
   }
   const auto restore_frame = [&] {
-    fp.components       = std::move(components);
-    fp.nondefault_rules = std::move(rules);
+    // copies, not moves: the lambda runs again from the catch below when a retry throws after an earlier restore
+    fp.components       = components;
+    fp.nondefault_rules = rules;
     for (size_t n = 0; n < fp.nets.size() && n < wires.size(); ++n) {
-      fp.nets[n].wires = std::move(wires[n]);
+      fp.nets[n].wires = wires[n];
     }
   };
   auto       step_t = lr::Clock::now();
@@ -821,7 +903,21 @@ Legroute_report legroute(const physical::Technology& tech, physical::Floorplan& 
     step("L2 cell-boxes");
     lr::Routing R;
     if (opt.cellbox_full_flow) {
+      rep.preroutes = opt.cellbox_handoff ? opt.cellbox_handoff->preroutes.size() : 0;
       lr::critical_local_routes(d, g, boxes, R, rep);
+      if (opt.cellbox_plan_only) {
+        // Plan as legalization + global routing: the cells stay on their admitted box poses, Plan's forest becomes
+        // the detailed router's guides; no Local or Final.
+        step("L3 selected Plan forest (plan only: legal placement and guides)");
+        if (!options.output_dir.empty()) {
+          write_route_guide(d, g, boxes, R, options.output_dir);
+        }
+        rep.seconds = lr::seconds_since(start);
+        if (!options.output_dir.empty()) {
+          write_legroute_report(rep, options.output_dir + "/legroute.json");
+        }
+        return rep;
+      }
     } else {
       lr::sat_place(d, g, boxes, regions, R, rep);
     }
@@ -901,24 +997,120 @@ Legroute_report legroute(const physical::Technology& tech, physical::Floorplan& 
                    rep.clock_excess_tracks);
     }
     step("L4 clock spines");
-    lr::assign_layers(d, g, R);
-    lr::assign_tracks(d, g, R, opt.threads);
+    lr::Kept_tracks fixed_kept;
+    if (opt.cellbox_full_flow && !opt.clock_spine && opt.cellbox_handoff && opt.cellbox_handoff->fixed_kept) {
+      // the nets Plan fixed keep their exact tracks; every other net routes around them
+      fixed_kept     = *opt.cellbox_handoff->fixed_kept;
+      rep.fixed_nets = opt.cellbox_handoff->fixed_nets.size();
+      lr::l5_with_kept(d, g, R, fixed_kept, opt.threads);
+      const std::set<int> fixed(opt.cellbox_handoff->fixed_nets.begin(), opt.cellbox_handoff->fixed_nets.end());
+      std::set<int>       broken;
+      for (const auto& sg : R.segments) {
+        if (fixed.contains(sg.net) && sg.track_state != uint8_t(lr::Track_state::checked)) {
+          broken.insert(sg.net);
+        }
+      }
+      rep.fixed_nets_failed = broken.size();
+    } else {
+      lr::assign_layers(d, g, R);
+      lr::assign_tracks(d, g, R, opt.threads);
+    }
+    if (opt.cellbox_full_flow && opt.cellbox_local_detour_rounds && !opt.clock_spine) {
+      auto detoured = lr::local_detours(d, g, boxes, R, rep, opt.cellbox_local_detour_rounds, opt.threads, fixed_kept);
+      if (opt.cellbox_local_box_moves && !options.cellbox_local_moves_retry && rep.local_detour_best_failed
+          && !detoured.failing_boxes.empty()) {
+        const auto moved = lr::move_cellboxes(d, detoured.forest.edges, detoured.failing_boxes, detoured.tile_cost,
+                                              opt.cellbox_local_move_window);
+        std::fprintf(stderr,
+                     "legroute Local box moves: %zu candidate boxes, %zu moved, %zu without a better free tile, %zu undone "
+                     "(nets could not reconnect)\n",
+                     detoured.failing_boxes.size(),
+                     moved.moved_boxes.size(),
+                     moved.without_destination,
+                     moved.unroutable);
+        if (moved.handoff) {
+          auto retry                      = options;
+          retry.cellbox_handoff           = moved.handoff;
+          retry.cellbox_local_moves_retry = true;
+          const auto first                = rep;
+          restore_frame();  // the rerun starts from the caller's frame; d and boxes are not used after this
+          auto second                                = legroute(tech, fp, timing, retry, regions, profile);
+          second.local_box_moves                     = moved.moved_boxes.size();
+          second.local_box_moves_without_destination = moved.without_destination;
+          second.local_box_moves_unroutable          = moved.unroutable;
+          second.local_box_moves_first_failed        = first.local_detour_best_failed;
+          if (!options.output_dir.empty()) {
+            write_legroute_report(second, options.output_dir + "/legroute.json");
+          }
+          return second;
+        }
+      }
+    }
+    {
+      // Local failures as placement pressure: the cells of every box on a tile a failed segment (or riser) crosses,
+      // 0.1 per failure on the tile, at most 1.5 (the Plan inflation cap).
+      std::vector<unsigned> failures(g.size(), 0);
+      std::set<int>         failed_nets;
+      for (const auto& sg : R.segments) {
+        if (sg.track >= 0 && (sg.track_state == uint8_t(lr::Track_state::checked)
+                              || sg.track_state == uint8_t(lr::Track_state::prescribed))) {
+          continue;
+        }
+        if (sg.layer < 0 || size_t(sg.layer) >= g.layers.size()) {
+          continue;
+        }
+        failed_nets.insert(sg.net);
+        for (int k = sg.lo; k <= sg.hi; ++k) {
+          const int t = g.layers[size_t(sg.layer)].horizontal ? g.tile(k, sg.band) : g.tile(sg.band, k);
+          if (t >= 0 && size_t(t) < g.size()) {
+            ++failures[size_t(t)];
+          }
+        }
+      }
+      for (size_t n = 0; n < R.trees.size(); ++n) {
+        for (const auto& node : R.trees[n].nodes) {
+          if (node.tile >= 0 && node.riser_state == uint8_t(lr::Track_state::fallback)) {
+            failed_nets.insert(int(n));
+            ++failures[size_t(node.tile)];
+          }
+        }
+      }
+      rep.local_failed_nets = failed_nets.size();
+      rep.local_component_pressure.assign(fp.components.size(), 1.);
+      for (const auto& b : boxes.boxes) {
+        unsigned count = 0;
+        for (int k = 0; k < std::max(1, b.span_columns); ++k) {
+          if (b.tile >= 0 && size_t(b.tile + k) < g.size()) {
+            count = std::max(count, failures[size_t(b.tile + k)]);
+          }
+        }
+        if (count) {
+          for (int m : b.cells) {
+            rep.local_component_pressure[size_t(d.movable[size_t(m)])] = 1 + std::min(.5, .1 * count);
+          }
+        }
+      }
+    }
     std::vector<std::string> local_structural_rejections;
     if (opt.cellbox_full_flow) {
       lr::validate_critical_boxes(d, g, boxes);
       const auto               carriers = lr::final_planned_geometry(d, g, boxes, R);
       std::vector<std::string> private_rejections;
       rep.final_domain_rejections
-          += lr::critical_backbone_conflicts(d, g, carriers, opt.cellbox_diagnostic_final ? &private_rejections : nullptr);
-      if (opt.cellbox_diagnostic_final) {
+          += lr::critical_backbone_conflicts(d, g, carriers, &private_rejections);
+      {  // Local's own verdict per net (always: Final runs only on a clean Local)
         local_structural_rejections = lr::local_backbone_rejections(d, g, boxes, R, carriers);
         const auto scope            = lr::final_net_scope(d);
-        R.final_local_rejected.resize(d.nets.size());
+        if (opt.cellbox_diagnostic_final) {
+          R.final_local_rejected.resize(d.nets.size());
+        }
         for (size_t n = 0; n < d.nets.size(); ++n) {
           if (!scope.required[n]) {
             continue;
           }
-          R.final_local_rejected[n] = "Local native metal audit unexamined";
+          if (opt.cellbox_diagnostic_final) {
+            R.final_local_rejected[n] = "Local native metal audit unexamined";
+          }
           if (!private_rejections[n].empty()) {
             if (!local_structural_rejections[n].empty()) {
               local_structural_rejections[n] += "; ";
@@ -1036,7 +1228,7 @@ Legroute_report legroute(const physical::Technology& tech, physical::Floorplan& 
                  R.layer_overflow_tiles,
                  R.unassigned);
     step("L5 layers, tracks");
-    if (opt.cellbox_diagnostic_final || (opt.l5_fallback_shadow && !options.output_dir.empty())) {
+    if (opt.cellbox_full_flow || opt.cellbox_diagnostic_final || (opt.l5_fallback_shadow && !options.output_dir.empty())) {
       rep.local_metal_audit_attempted = true;
       // Clear older successful join witnesses even when this candidate never qualifies for the probe below.
       if (!options.output_dir.empty()) {
@@ -1096,6 +1288,11 @@ Legroute_report legroute(const physical::Technology& tech, physical::Floorplan& 
             const auto& net        = work.nets.at(d.nets[n].frame);
             raw_backbone[n]        = physical::route_geometry(tech, work, net);
             normalized_backbone[n] = physical::coalesce_route_metal(tech, raw_backbone[n]);
+            // A net Local already rejected (no checked track, riser or stub) never reaches Final, so its fallback
+            // metal must not reject the neighbours it overlaps; its own shapes are still audited against the rest.
+            if (n < local_structural_rejections.size() && !local_structural_rejections[n].empty()) {
+              continue;
+            }
             for (const auto& shape : normalized_backbone[n]) {
               occupancy->insert({shape, net.name, true});
             }
@@ -1125,7 +1322,12 @@ Legroute_report legroute(const physical::Technology& tech, physical::Floorplan& 
                       "\"path_state_semantics\":\"raw_planned_paths_before_same_net_union\","
                    << "\"shape_semantics\":\"" << (opt.cellbox_full_flow ? "exact_collinear_same_net_unions" : "raw_route_shapes")
                    << "\",\"nets\":[";
-      bool first_net = true;
+      bool          first_net = true;
+      std::ofstream rejections_out;
+      if (opt.cellbox_full_flow && !options.output_dir.empty()) {
+        rejections_out.open(options.output_dir + "/local_rejections.tsv");
+        rejections_out << "net_index\tnet\tstructural\taudit\n";
+      }
       for (size_t n = 0; n < d.nets.size(); ++n) {
         if (!scope.required[n]) {
           continue;
@@ -1206,6 +1408,20 @@ Legroute_report legroute(const physical::Technology& tech, physical::Floorplan& 
           }
         }
         const bool net_audit_complete = geometry_error.empty() && first_unknown.empty();
+        if (opt.cellbox_full_flow) {
+          const bool structural = n < local_structural_rejections.size() && !local_structural_rejections[n].empty();
+          const bool audit      = !net_audit_complete || metal_conflicts || metal_unknown;
+          if ((structural || audit) && rejections_out.is_open()) {
+            rejections_out << n << '\t' << net.name << '\t' << (structural ? local_structural_rejections[n] : "") << '\t'
+                           << (!geometry_error.empty() ? geometry_error : !first_conflict.empty() ? first_conflict : first_unknown)
+                           << '\n';
+          }
+          rep.local_rejected_nets += structural || audit;
+          rep.local_audit_only_rejected_nets += audit && !structural;
+          if (structural && local_structural_rejections[n].starts_with("die IO stub")) {
+            ++rep.local_io_stub_rejected_nets;
+          }
+        }
         if (opt.cellbox_diagnostic_final) {
           auto& reason      = R.final_local_rejected[n];
           reason            = local_structural_rejections[n];
@@ -1355,78 +1571,8 @@ Legroute_report legroute(const physical::Technology& tech, physical::Floorplan& 
       }
       wires_out << "]}\n";
     }
-    if (!options.output_dir.empty()) {  // legroute.guide: the routes as detailed-routing guides (OpenROAD read_guides)
-      // per net, the corridor of tiles its route covers, on every routing layer (the detailed router picks layers and
-      // tracks inside it; the pin layer only on the tiles holding its pins, so the guides connect through the stack)
-      std::ofstream            out(options.output_dir + "/legroute.guide");
-      std::vector<std::string> layers;
-      for (const auto& l : g.layers) {
-        layers.push_back(l.name);
-      }
-      const auto rect = [&](int t, const std::string& layer) {
-        return std::format("{} {} {} {} {}\n",
-                           g.left(g.col(t)),
-                           g.bottom(g.row(t)),
-                           g.left(g.col(t) + 1),
-                           g.bottom(g.row(t) + 1),
-                           layer);
-      };
-      for (size_t n = 0; n < d.nets.size(); ++n) {
-        if (!d.nets[n].routed || d.nets[n].clock || d.nets[n].power) {
-          continue;
-        }
-        const auto&   tree = R.trees[n];
-        std::set<int> corridor, pin_tiles;
-        for (int ci : tree.conns) {
-          const auto& c = R.conns[ci];
-          for (size_t k = 0; k + 1 < c.poly.size(); ++k) {
-            const auto [c0, r0] = c.poly[k];
-            const auto [c1, r1] = c.poly[k + 1];
-            for (int cc = std::min(c0, c1); cc <= std::max(c0, c1); ++cc) {
-              for (int rr = std::min(r0, r1); rr <= std::max(r0, r1); ++rr) {
-                corridor.insert(g.tile(cc, rr));
-              }
-            }
-          }
-        }
-        for (const auto& node : tree.nodes) {
-          if (node.tile >= 0) {
-            corridor.insert(node.tile);
-            if (!node.pins.empty()) {
-              pin_tiles.insert(node.tile);
-            }
-          }
-        }
-        for (const auto& pin : d.nets[n].pins) {  // every pin's tile (a net inside one tile has no tree)
-          const int box = pin.comp >= 0 && d.cell[pin.comp] >= 0 ? boxes.box_of[d.cell[pin.comp]] : -1;
-          int       t   = -1;
-          if (box >= 0) {
-            t = boxes.boxes[box].tile;
-          } else if (pin.comp >= 0) {
-            t = g.tile_of(double(d.fp.components[pin.comp].place.x), double(d.fp.components[pin.comp].place.y));
-          } else if (pin.term >= 0) {
-            t = g.tile_of(double(d.fp.terminals[pin.term].x), double(d.fp.terminals[pin.term].y));
-          }
-          if (t >= 0) {
-            corridor.insert(t);
-            pin_tiles.insert(t);
-          }
-        }
-        if (corridor.empty()) {
-          continue;
-        }
-        out << d.fp.nets[d.nets[n].frame].name << "\n(\n";
-        for (int t : corridor) {
-          if (pin_tiles.contains(t)) {
-            out << rect(t, g.pin_layer);
-          }
-          out << rect(t, g.box_layer);
-          for (const auto& l : layers) {
-            out << rect(t, l);
-          }
-        }
-        out << ")\n";
-      }
+    if (!options.output_dir.empty()) {
+      write_route_guide(d, g, boxes, R, options.output_dir);
     }
     for (const auto& c : R.conns) {
       if (c.poly.size() >= 2) {
@@ -1493,6 +1639,71 @@ Legroute_report legroute(const physical::Technology& tech, physical::Floorplan& 
         }
       }
       step("F2-F4 joint cellbox SAT placement, routing and atomic assembly");
+      std::fprintf(stderr,
+                   "legroute Final: %zu boxes attempted, %zu complete, %zu failed, %zu blocked by Local; %zu of %zu nets connected\n",
+                   rep.final_attempted_boxes,
+                   rep.final_complete_boxes,
+                   rep.final_failed_boxes.size(),
+                   rep.final_upstream_blocked_boxes,
+                   rep.connected_nets,
+                   rep.routed_nets);
+      if (opt.cellbox_relocate && opt.cellbox_full_flow && !options.cellbox_relocation_retry && !rep.wires_emitted && !rep.final_failed_boxes.empty()) {
+        const auto t0    = lr::Clock::now();
+        const auto moved = lr::relocate_failed_cellboxes(d, rep.final_failed_boxes, opt.cellbox_relocate_window);
+        rep.relocation_attempted           = true;
+        rep.relocation_without_candidate   = moved.without_candidate;
+        rep.relocation_without_destination = moved.without_destination;
+        rep.relocation_moves               = moved.moves;
+        rep.relocation_regions             = moved.regions;
+        rep.relocation_fixed_routed        = moved.fixed_routed;
+        rep.relocation_region_rerouted     = moved.region_rerouted;
+        rep.relocation_region_reverted     = moved.region_reverted;
+        rep.relocation_seconds             = lr::seconds_since(t0);
+        std::fprintf(stderr,
+                     "legroute relocation: %zu failing boxes, %zu moves (%zu without a single-IO cell, %zu without a destination), "
+                     "%zu regions: %zu rerouted with fixed boxes, %zu rerouted whole, %zu undone, %.2f s\n",
+                     rep.final_failed_boxes.size(),
+                     moved.moves,
+                     moved.without_candidate,
+                     moved.without_destination,
+                     moved.regions,
+                     moved.fixed_routed,
+                     moved.region_rerouted,
+                     moved.region_reverted,
+                     rep.relocation_seconds);
+        if (moved.handoff) {
+          rep.seconds = lr::seconds_since(start);
+          if (!options.output_dir.empty()) {
+            write_legroute_report(rep, options.output_dir + "/legroute_attempt0.json");
+          }
+          auto retry                     = options;
+          retry.cellbox_handoff          = moved.handoff;
+          retry.cellbox_relocation_retry = true;
+          retry.final_box_priority       = moved.priority_boxes;
+          auto first                     = rep;
+          restore_frame();  // the retry starts from the caller's frame; d and boxes are not used after this
+          auto second                              = legroute(tech, fp, timing, retry, regions, profile);
+          second.relocation_attempted              = true;
+          second.relocation_first_attempted_boxes  = first.final_attempted_boxes;
+          second.relocation_first_complete_boxes   = first.final_complete_boxes;
+          second.relocation_first_failed_boxes     = first.final_failed_boxes.size();
+          second.relocation_first_connected_nets   = first.connected_nets;
+          second.relocation_first_unassigned_segments = first.unassigned_segments;
+          second.relocation_without_candidate      = first.relocation_without_candidate;
+          second.relocation_without_destination    = first.relocation_without_destination;
+          second.relocation_moves                  = first.relocation_moves;
+          second.relocation_regions                = first.relocation_regions;
+          second.relocation_fixed_routed           = first.relocation_fixed_routed;
+          second.relocation_region_rerouted        = first.relocation_region_rerouted;
+          second.relocation_region_reverted        = first.relocation_region_reverted;
+          second.relocation_seconds                = first.relocation_seconds;
+          second.relocation_first_seconds          = first.seconds;
+          if (!options.output_dir.empty()) {
+            write_legroute_report(second, options.output_dir + "/legroute.json");
+          }
+          return second;
+        }
+      }
     }
     {  // actual cell motion against the given poses (not the box-centre metric)
       std::vector<double> moves;
@@ -1728,7 +1939,7 @@ void write_legroute_report(const Legroute_report& r, const std::string& path) {
       R"("final_diagnostic_only":{},"final_local_rejected_nets":{},"final_local_rejected_pins":{},)"
       R"("final_detail_failed_nets":{},"final_detail_failed_pins":{},"final_detail_unattempted_pins":{},)"
       R"("local_metal_audit_attempted":{},"local_metal_audit_complete":{},"local_metal_conflict_shapes":{},"local_metal_unknown_shapes":{},)"
-      R"("local_join_probe_attempted":{},"local_join_probe_complete":{},"track_failures":{{)",
+      R"("local_join_probe_attempted":{},"local_join_probe_complete":{},)",
       r.partition_timeout_rounds,
       r.partition_timeout_regions,
       r.sat_reused_regions,
@@ -1744,6 +1955,52 @@ void write_legroute_report(const Legroute_report& r, const std::string& path) {
       r.local_metal_unknown_shapes,
       r.local_join_probe_attempted,
       r.local_join_probe_complete);
+  out << std::format(
+      R"("final_attempted_boxes":{},"final_complete_boxes":{},"final_failed_boxes":{},"final_upstream_blocked_boxes":{},)"
+      R"("local_failed_nets":{},"local_rejected_nets":{},"local_audit_only_rejected_nets":{},"local_io_stub_rejected_nets":{},"local_partial_final":{},"local_detour":{{"rounds":{},"best_round":{},"nets":{},"first_failed":{},"best_failed":{},"first_unassigned":{},"splits":{},"seconds":{:.3f}}},"local_box_moves":{{"moved":{},"without_destination":{},"undone":{},"first_failed":{}}},"preroutes":{},"fixed_nets":{{"nets":{},"failed":{},"seconds":{:.3f}}},"relocation":{{"attempted":{},"first_attempted_boxes":{},)"
+      R"("first_complete_boxes":{},"first_failed_boxes":{},"first_connected_nets":{},"first_unassigned_segments":{},)"
+      R"("without_candidate":{},"without_destination":{},"moves":{},"regions":{},"fixed_routed":{},"region_rerouted":{},)"
+      R"("region_reverted":{},"seconds":{:.3f},"first_seconds":{:.3f}}},"track_failures":{{)",
+      r.final_attempted_boxes,
+      r.final_complete_boxes,
+      r.final_failed_boxes.size(),
+      r.final_upstream_blocked_boxes,
+      r.local_failed_nets,
+      r.local_rejected_nets,
+      r.local_audit_only_rejected_nets,
+      r.local_io_stub_rejected_nets,
+      r.local_partial_final,
+      r.local_detour_rounds,
+      r.local_detour_best_round,
+      r.local_detour_nets,
+      r.local_detour_first_failed,
+      r.local_detour_best_failed,
+      r.local_detour_first_unassigned,
+      r.local_detour_splits,
+      r.local_detour_seconds,
+      r.local_box_moves,
+      r.local_box_moves_without_destination,
+      r.local_box_moves_unroutable,
+      r.local_box_moves_first_failed,
+      r.preroutes,
+      r.fixed_nets,
+      r.fixed_nets_failed,
+      r.fixed_nets_seconds,
+      r.relocation_attempted,
+      r.relocation_first_attempted_boxes,
+      r.relocation_first_complete_boxes,
+      r.relocation_first_failed_boxes,
+      r.relocation_first_connected_nets,
+      r.relocation_first_unassigned_segments,
+      r.relocation_without_candidate,
+      r.relocation_without_destination,
+      r.relocation_moves,
+      r.relocation_regions,
+      r.relocation_fixed_routed,
+      r.relocation_region_rerouted,
+      r.relocation_region_reverted,
+      r.relocation_seconds,
+      r.relocation_first_seconds);
   size_t k = 0;
   for (const auto& [kind, n] : r.track_failures) {
     out << (k++ ? "," : "") << quote(kind) << ':' << n;

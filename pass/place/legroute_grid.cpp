@@ -861,6 +861,7 @@ Grid build_grid(const Design& d, const Legroute_regions& regions) {
       }
     }
     g.box_cap.assign(g.size(), 0);
+    g.box_transit_share = d.opt.cellbox_plan_only ? 1.0 : 0;  // Plan-only: no box keeps the box layer to itself
     for (int tr = 0; tr < g.rows; ++tr) {
       const auto  lo   = std::lower_bound(ys_all.begin(), ys_all.end(), g.bottom(tr));
       const auto  hi   = std::lower_bound(ys_all.begin(), ys_all.end(), g.bottom(tr) + g.tile_h);
@@ -919,7 +920,8 @@ Grid build_grid(const Design& d, const Legroute_regions& regions) {
   // caches stay exact.
   g.box_short.assign(g.size(), 0);
   if (d.opt.critical_cellboxes || (!d.opt.paired_pin_reserve && !d.opt.box_reserve.empty())) {
-    std::string_view spec = d.opt.critical_cellboxes ? "M2:20,M3:20" : std::string_view(d.opt.box_reserve);
+    const std::string critical_spec = std::format("M2:{0},M3:{0}", cellbox_reserve(d.opt));
+    std::string_view  spec          = d.opt.critical_cellboxes ? std::string_view(critical_spec) : std::string_view(d.opt.box_reserve);
     while (!spec.empty()) {
       const auto comma = spec.find(',');
       const auto item  = spec.substr(0, comma);
@@ -1266,6 +1268,11 @@ std::pair<std::vector<int>, std::vector<int>> transit_capacity(const Grid& g) {
   for (size_t l = 0; l < g.layers.size(); ++l) {
     for (size_t t = 0; t < g.size(); ++t) {
       (g.layers[l].horizontal ? h : v)[t] += g.cap[l][t];
+    }
+  }
+  if (g.box_transit_share > 0 && g.box_cap.size() == g.size()) {
+    for (size_t t = 0; t < g.size(); ++t) {
+      h[t] += int(std::floor(g.box_transit_share * g.box_cap[t]));
     }
   }
   return {std::move(h), std::move(v)};

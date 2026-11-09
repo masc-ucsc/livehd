@@ -454,6 +454,21 @@ int main(int argc, char** argv) {
     boolean_option("cellbox_far_fallback", lr.cellbox_far_fallback);
     boolean_option("cellbox_full_flow", lr.cellbox_full_flow);
     boolean_option("cellbox_diagnostic_final", lr.cellbox_diagnostic_final);
+    boolean_option("cellbox_relocate", lr.cellbox_relocate);
+    unsigned_option("cellbox_relocate_window", lr.cellbox_relocate_window);
+    boolean_option("cellbox_local_replan", lr.cellbox_local_replan);
+    unsigned_option("cellbox_local_detour_rounds", lr.cellbox_local_detour_rounds);
+    boolean_option("cellbox_local_detour_boost", lr.cellbox_local_detour_boost);
+    boolean_option("cellbox_local_detour_incremental", lr.cellbox_local_detour_incremental);
+    boolean_option("cellbox_local_box_moves", lr.cellbox_local_box_moves);
+    boolean_option("cellbox_tile_capacity", lr.cellbox_tile_capacity);
+    boolean_option("cellbox_plan_only", lr.cellbox_plan_only);
+    unsigned_option("cellbox_reserve_tracks", lr.cellbox_reserve_tracks);
+    unsigned_option("cellbox_preroute_tiles", lr.cellbox_preroute_tiles);
+    unsigned_option("cellbox_preroute_max_pins", lr.cellbox_preroute_max_pins);
+    unsigned_option("cellbox_fixed_regions", lr.cellbox_fixed_regions);
+    unsigned_option("cellbox_fixed_min_regions", lr.cellbox_fixed_min_regions);
+    unsigned_option("cellbox_local_move_window", lr.cellbox_local_move_window);
     if (config.HasMember("cellbox_final_retry")) {
       throw std::invalid_argument("cellbox_final_retry is runtime-only and cannot be configured");
     }
@@ -573,6 +588,21 @@ int main(int argc, char** argv) {
       emit_bool("cellbox_far_fallback", lr.cellbox_far_fallback);
       emit_bool("cellbox_full_flow", lr.cellbox_full_flow);
       emit_bool("cellbox_diagnostic_final", lr.cellbox_diagnostic_final);
+      emit_bool("cellbox_relocate", lr.cellbox_relocate);
+      emit_uint("cellbox_relocate_window", lr.cellbox_relocate_window);
+      emit_bool("cellbox_local_replan", lr.cellbox_local_replan);
+      emit_uint("cellbox_local_detour_rounds", lr.cellbox_local_detour_rounds);
+      emit_bool("cellbox_local_detour_boost", lr.cellbox_local_detour_boost);
+      emit_bool("cellbox_local_detour_incremental", lr.cellbox_local_detour_incremental);
+      emit_bool("cellbox_local_box_moves", lr.cellbox_local_box_moves);
+      emit_bool("cellbox_tile_capacity", lr.cellbox_tile_capacity);
+      emit_bool("cellbox_plan_only", lr.cellbox_plan_only);
+      emit_uint("cellbox_reserve_tracks", lr.cellbox_reserve_tracks);
+      emit_uint("cellbox_preroute_tiles", lr.cellbox_preroute_tiles);
+      emit_uint("cellbox_preroute_max_pins", lr.cellbox_preroute_max_pins);
+      emit_uint("cellbox_fixed_regions", lr.cellbox_fixed_regions);
+      emit_uint("cellbox_fixed_min_regions", lr.cellbox_fixed_min_regions);
+      emit_uint("cellbox_local_move_window", lr.cellbox_local_move_window);
       emit_bool("legroute", options.legroute);
       emit_bool("legroute_final", lr.final);
       emit_uint("legroute_route_ms", lr.route_ms);

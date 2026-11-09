@@ -521,6 +521,13 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.legroute_options.cellbox_wide_exceptions  = truthy(synth_set(opts, "place.legroute.cellbox_wide_exceptions", "true"));
   out.legroute_options.cellbox_full_flow        = truthy(synth_set(opts, "place.legroute.cellbox_full_flow", "false"));
   out.legroute_options.cellbox_diagnostic_final = truthy(synth_set(opts, "place.legroute.cellbox_diagnostic_final", "false"));
+  out.legroute_options.cellbox_relocate         = truthy(synth_set(opts, "place.legroute.cellbox_relocate", "false"));
+  out.legroute_options.cellbox_relocate_window  = unsigned(integer("place.legroute.cellbox_relocate_window", "4"));
+  out.legroute_options.cellbox_local_replan     = truthy(synth_set(opts, "place.legroute.cellbox_local_replan", "false"));
+  out.legroute_options.cellbox_local_detour_rounds
+      = unsigned(integer("place.legroute.cellbox_local_detour_rounds", "4"));
+  out.legroute_options.cellbox_local_detour_boost
+      = truthy(synth_set(opts, "place.legroute.cellbox_local_detour_boost", "true"));
   out.legroute_options.cellbox_far_fallback     = truthy(synth_set(opts, "place.legroute.cellbox_far_fallback", "false"));
   if (out.legroute_options.critical_cellboxes) {
     out.legroute_options.box_reserve = "M2:20,M3:20";

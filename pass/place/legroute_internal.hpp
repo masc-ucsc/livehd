@@ -12,7 +12,10 @@
 #include <map>
 #include <memory>
 #include <numeric>
+#include <set>
+#include <unordered_map>
 #include <span>
+#include <tuple>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -173,6 +176,9 @@ struct Grid {
   std::vector<Layer>                         layers;
   std::vector<std::vector<int16_t>>          cap;
   std::vector<int16_t>                       box_cap;    // per tile: usable box-layer tracks (in-box routes and local nets only)
+  // the share of each tile's box-layer tracks the coarse route counts as horizontal transit (Plan-only hand-off to an
+  // external detailed router, which routes between cells on the box layer too); 0 in legroute's own flow
+  double                                     box_transit_share = 0;
   Track_resource_catalog                     resources;  // physical identities underlying coarse counts; not a DRC certificate
   std::vector<int>                           critical_box_of_tile;
   std::vector<std::vector<int64_t>>          critical_reserved_h, critical_reserved_v;
@@ -268,7 +274,25 @@ struct Cellbox_admission {
   size_t                    attempts = 0, rejected_geometry = 0, rejected_policy = 0, rejected_resources = 0, wide_exceptions = 0;
 };
 std::vector<double>  cellbox_body_pressure(const Design&, const Grid&, const std::vector<double>& tile_pressure);
-Cellbox_admission    admit_critical_cellboxes(const Design&, const Grid&, const timing::Feedback&);
+// A long one-driver/one-sink net fixed ahead of Plan (Legroute_options::cellbox_preroute_tiles): its two cells sit in
+// boxes on tiles of one row (H) or column (V) and one straight track joins the two box edges. Plan admits the cells
+// on exactly those tiles and routes the net only along that run; Local takes the track as given; nothing moves them.
+struct Long_preroute {
+  int                net = -1;
+  std::array<int, 2> cells{-1, -1};  // movable indices (driver first)
+  std::array<int, 2> tiles{-1, -1};  // box tiles, lower first
+  int                layer = -1;     // Grid::layers index
+  int64_t            track = -1;
+  bool               horizontal = true;
+};
+// Picks the preroutes on the current placement: longest first, each cell moved only across rows (H) or columns (V)
+// to the shared row/column inside the pair's span that moves the farther cell least, on an upper layer of that
+// direction with a track free of hard metal (and of other preroutes) over the whole run.
+std::vector<Long_preroute> select_long_preroutes(const Design&, const Grid&);
+// pins: movable cell -> the only tile it may be admitted on (admitted first); a pin that cannot be met is dropped
+// (listed in unpinned) and the cell admits as usual.
+Cellbox_admission    admit_critical_cellboxes(const Design&, const Grid&, const timing::Feedback&,
+                                              const std::map<int, int>* pins = nullptr, std::set<int>* unpinned = nullptr);
 Legroute_plan_report critical_cellbox_plan(const Design&, const Grid&, const timing::Feedback&, size_t net_pops,
                                            Legroute_congestion*);
 // One clock's boxed flops in one region (their tiles): the trunk column, the rib rows every `pitch` tile rows
@@ -347,6 +371,7 @@ struct Global_routes {
   std::vector<Global_tree>         trees;                                    // per Global_net
   size_t                           unrouted = 0, edges_full = 0;             // nets without a path; edges filled to their share
   size_t                           overflow_edges = 0, overflow_tracks = 0;  // edges over their share after the rounds, by how much
+  size_t                           overflow_tiles = 0;  // tile_capacity: tile directions over their share (in overflow_edges too)
   std::vector<std::pair<int, int>> over;                                     // those edges: (lower / left tile, h)
   unsigned                         rounds      = 0;                          // negotiation rounds run
   size_t                           search_pops = 0, search_pushes = 0, search_restarts = 0;
@@ -356,6 +381,7 @@ struct Global_routes {
   size_t                           pattern_work = 0, pattern_work_limited = 0;
   double                           seconds = 0;
 };
+struct Kept_tracks;
 // Frozen selected Plan state. Installation validates everything before mutating cells.
 struct Critical_cellbox_handoff {
   physical::Floorplan     source_frame;
@@ -364,8 +390,37 @@ struct Critical_cellbox_handoff {
   Cellbox_admission       admission;
   std::vector<Global_net> requests;
   Global_routes           routes;
+  std::vector<Long_preroute> preroutes;  // fixed ahead of Plan: Local and Final keep them as they are
+  // fixed at the end of Plan (cellbox_fixed_min_regions): these nets' exact L5 tracks, taken before the remaining nets
+  // were routed; Local starts from them and never changes them or their boxes
+  std::vector<int>                   fixed_nets;
+  std::shared_ptr<const Kept_tracks> fixed_kept;
 };
 void install_critical_handoff(const Design&, Grid&, Boxes&);
+// Final's relocation step on the installed handoff (d.opt.cellbox_handoff): each failing box gives one cell with a
+// single IO pin to the surrounding box (+-window tiles) with room and the fewest IO pins. The moves group into
+// disjoint regions (merged windows); per region the moved cells' nets reroute inside the region with the region's
+// boundary crossings fixed (try 1, every box fixed), else every net inside the region reroutes (try 2), else the
+// region's moves are undone. handoff is null when no move survives.
+struct Cellbox_relocation {
+  std::shared_ptr<Critical_cellbox_handoff> handoff;
+  std::vector<int>                          priority_boxes;  // the boxes the surviving moves touched
+  size_t without_candidate = 0, without_destination = 0, moves = 0, regions = 0;
+  size_t fixed_routed = 0, region_rerouted = 0, region_reverted = 0;
+};
+Cellbox_relocation relocate_failed_cellboxes(const Design&, const std::vector<int>& failed_boxes, unsigned window);
+// Local box moves on the installed handoff: each candidate box (single tile, worst first) moves to the free admitted
+// tile within +-window whose surroundings carry the least Local failure cost (tile_cost, plus a quarter per tile of
+// displacement), when that beats staying. Its cells keep their row/site poses; the private M2/M3 reservations are
+// picked for the new tile. The moved box's nets reconnect over the given forest (edges by request) within the
+// admitted capacity; a move whose nets cannot reconnect is undone. handoff is null when no box moved.
+struct Cellbox_moves {
+  std::shared_ptr<Critical_cellbox_handoff> handoff;
+  std::vector<int>                          moved_boxes;
+  size_t                                    without_destination = 0, unroutable = 0;
+};
+Cellbox_moves move_cellboxes(const Design&, const std::vector<std::vector<std::pair<int, int>>>& forest,
+                             const std::vector<int>& candidates, const std::vector<double>& tile_cost, unsigned window);
 void validate_critical_boxes(const Design&, const Grid&, const Boxes&);
 struct Box_route_seed_result {
   bool          accepted = false;
@@ -382,11 +437,14 @@ Box_route_seed_result prepare_box_route_seed(const Design&, const Grid&, const B
 // negotiation rounds (rip-up and reroute of the nets on edges over their share; 0: a full edge is closed, one pass)
 Global_routes         global_route(const Grid&, const std::vector<int>& cap_h, const std::vector<int>& cap_v, double share,
                                    double own_share, const std::vector<Global_net>&, unsigned margin_tiles, unsigned rounds,
-                                   size_t net_pops = 0, double astar_weight = 1, bool pattern_seed = false);
+                                   size_t net_pops = 0, double astar_weight = 1, bool pattern_seed = false,
+                                   bool tile_capacity = false);
 // The density ceiling (Legroute_options::density_ceiling, user policy 0.90): physical cell density per region
 // and the share of an edge's tracks any admitted, SAT or recounted demand may use. More conservative shares
 // (global_share, hop_share) and the cap_scale experiment apply under it; neither multiplies it again.
 inline double admission_share(const Legroute_options& options) { return std::min(options.global_share, options.density_ceiling); }
+// Private M2/M3 tracks per critical cellbox: none in a Plan-only hand-off (no Local/Final uses them).
+inline unsigned cellbox_reserve(const Legroute_options& o) { return o.cellbox_plan_only ? 0 : o.cellbox_reserve_tracks; }
 // Distinct nets an edge (or tile direction) of physical capacity C may carry: the narrower of the cap_scale
 // experiment and the ceiling.
 inline int    edge_limit(int capacity, const Legroute_options& options) {
@@ -512,10 +570,19 @@ struct Node {
   // Critical ordinary leaf/collinear cell pins tap the carrier directly; they need no global auxiliary riser.
   bool             direct_carrier_tap = false;
 };
+// A direct carrier tap ends at its box's edge facing the segment (the far edge of the segment's low end tile, the near
+// edge of its high end tile), one site inside the box so its nearest point is strictly inside: Final extends the
+// carrier into the box from there. along: column (H) or row (V) of the end tile.
+inline int64_t carrier_tap_end(const Grid& g, bool horizontal, int along, bool high_end) {
+  const int64_t base  = horizontal ? g.left(along) : g.bottom(along);
+  const int64_t inset = std::max<int64_t>(1, g.site);
+  return high_end ? base + inset : base + (horizontal ? g.tile_w : g.tile_h) - inset;
+}
 struct Conn {
   int                              net = -1, a = -1, b = -1;  // node ids of the net's tree
   int                              region   = -1;
   unsigned                         weight   = 1;
+  unsigned                         priority = 0;  // full-flow Local detours: L5 order after critical, before weight
   bool                             critical = false, clock = false;
   std::vector<std::pair<int, int>> poly;  // tile (col, row) corners of the pattern route, a to b
   std::vector<int>                 segs;  // segments in poly order (L6 layers)
@@ -535,6 +602,11 @@ struct Segment {
   uint8_t jog_lo_state = 0, jog_hi_state = 0;
   bool    critical = false, clock = false;
   int     jog_lo_layer = -1, jog_hi_layer = -1;  // Grid::layers indices; -1 retains legacy lowest-H track interpretation
+  // L5: a box-tap end L5 moved deeper into its box (staggered against neighbor line ends); -1 = carrier_tap_end
+  int64_t tap_lo = -1, tap_hi = -1;
+  // L5: the centerline span the track occupies (exact ends); a prescribed track with a span re-occupies exactly it
+  int64_t span_lo = -1, span_hi = -1;
+  bool    preroute = false;  // a Long_preroute's run: its layer/track were fixed ahead of Plan
 };
 struct Spine {  // one clock domain in one region: a trunk, ribs on fixed tracks, one tap per flop box
   int                              net = -1, region = -1, trunk = -1, node = -1;  // node: where the clock tree enters the trunk
@@ -578,7 +650,65 @@ struct Routing {
   double l5_repair_sat_build_seconds = 0, l5_repair_sat_solve_seconds = 0;
   double l5_repair_candidate_seconds = 0, l5_repair_native_validation_seconds = 0, l5_repair_seconds = 0;
 };
-void                  critical_local_routes(const Design&, const Grid&, const Boxes&, Routing&, Legroute_report&);
+// Full-flow Local inputs edited by the detour rounds: the tile forest per handoff request (replacing its Plan
+// edges) and the L5 priority per net.
+struct Local_forest {
+  std::vector<std::vector<std::pair<int, int>>> edges;     // by Critical_cellbox_handoff::requests index
+  std::vector<unsigned>                         priority;  // by net
+  // by net: tiles inside a straight run where it splits into separately tracked pieces (joined by a jog/riser there)
+  std::vector<std::set<int>>                    splits;
+};
+void critical_local_routes(const Design&, const Grid&, const Boxes&, Routing&, Legroute_report&, const Local_forest* = nullptr,
+                           const std::vector<char>* only = nullptr);  // only: the nets (by index) to build, all if null
+// Tracks one L5 result keeps into the next: checked segments by (net, end tiles of their run, index) and the
+// independent risers by (net, node tile). A kept horizontal end keeps its span only while its join risers stay.
+struct Kept_tracks {
+  std::map<std::tuple<int, int, int, size_t>, Segment>   segs;
+  std::map<std::pair<int, int>, std::pair<int, int64_t>> risers;
+};
+Kept_tracks   collect_kept(const Grid&, const Routing&, const std::function<bool(int)>& keep_net);
+// assign_layers + the kept tracks preset (immutable, placed first) + assign_tracks; kept tracks end checked
+void          l5_with_kept(const Design&, const Grid&, Routing&, const Kept_tracks&, unsigned threads);
+// The nets fixed before Local: the handoff's preroutes and fixed nets.
+std::set<int> fixed_net_set(const Design&, const Grid&, const Boxes&);
+// The nets whose pins touch at least cellbox_fixed_min_regions regions of a cellbox_fixed_regions^2 mesh.
+std::set<int> select_region_nets(const Design&, const Grid&, const Boxes&);
+// End of Plan: on a temporarily installed handoff, the candidate nets alone take their exact L5 tracks on the Plan
+// tree; the ones that get every track are fixed. use_h/use_v: the tracks they take per tile (each net once per tile
+// and direction, its risers too), for the remaining nets' route. The floorplan is restored.
+struct Plan_fixed {
+  std::shared_ptr<Kept_tracks> kept;
+  std::vector<int>             nets;
+  std::vector<int>             use_h, use_v;
+  size_t                       candidates = 0, failed = 0;
+};
+Plan_fixed plan_fixed_tracks(const Design&, const Grid&, const std::shared_ptr<const Critical_cellbox_handoff>&,
+                             const std::set<int>& candidates, unsigned threads);
+// Tile forests (adjacent tile pairs, lower first): an edge's key in the shared use count.
+inline int64_t forest_edge_key(const Grid& g, int x, int y) {
+  return int64_t(std::min(x, y)) * 2 + (g.row(x) == g.row(y) ? 0 : 1);
+}
+struct Forest_costs {
+  const std::vector<double>* hist_h = nullptr;  // per tile failure history, by direction
+  const std::vector<double>* hist_v = nullptr;
+  double                     hist_weight = 1.5, bend = 4;
+};
+// Prunes E's dangling branches (a leaf that is no terminal), then joins its pieces and the lone terminals by the
+// cheapest tile paths inside their bounding box grown by margin tiles: a tile length per edge, the room it has left,
+// the history, `bend` per turn (1D metal: every turn is a via). An edge at limit is never used. Updates use. False
+// when some piece is unreachable (E keeps the paths found).
+bool repair_forest(const Grid&, std::set<std::pair<int, int>>& E, const std::set<int>& terminals,
+                   std::unordered_map<int64_t, int>& use, const std::function<int(int, int)>& limit, const Forest_costs&,
+                   int margin);
+// Full-flow Local rip-up rounds after a first L5 (Legroute_options::cellbox_local_detour_rounds): reroutes the tile
+// paths of the failing nets around their failures and reruns L5; leaves R at the best round.
+struct Local_detour_result {
+  Local_forest        forest;        // the best round's tile forest (by request)
+  std::vector<int>    failing_boxes;  // boxes at the failing runs and nodes of the best round, most failures first
+  std::vector<double> tile_cost;     // per tile: the failures that crossed it over all rounds (both directions)
+};
+Local_detour_result local_detours(const Design&, const Grid&, const Boxes&, Routing&, Legroute_report&, unsigned rounds,
+                                  unsigned threads, const Kept_tracks& fixed_kept = {});
 // In-box demand: local nets and pin taps per box, charged to the box layer first; the excess and the vertical part
 // take tracks of the lowest routed layers over the box's tile. Marks the local nets.
 void                  box_demand(const Design&, const Grid&, const Boxes&, Routing&);
@@ -610,6 +740,9 @@ struct Planned_wire_geometry {
 Planned_wire_geometry planned_wire_geometry(const physical::Technology&, int64_t dbu, const physical::Rect& die,
                                             const std::string& layer);
 physical::Shape       planned_wire_shape(const Planned_wire_geometry&, bool horizontal, int64_t a, int64_t b, int64_t at);
+// Per Grid layer: the farthest a DEFAULT adjacent-via landing plate on it reaches along the layer's direction from the
+// via center (dbu). A line end on a join via is planned that far past the join, as the emitted landing grows it.
+std::vector<int64_t>  via_landing_reach(const physical::Technology&, const physical::Floorplan&, const Grid&);
 // Final's planned global metal per net (Design::nets index): wire paths from the L5 tracks (segments with their
 // bends and node ends, node risers, jogs, IO/fixed-pin stubs, clock trunks/ribs/taps) and the layer joins to be
 // made by the router (from layer, to layer, x, y). Final and the box dump both use it.
