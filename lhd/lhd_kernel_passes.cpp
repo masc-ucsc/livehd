@@ -1148,6 +1148,25 @@ void pass_command(Options& opts, Result& res) {
       }
       res.outputs.push_back(lg_out->path);
     }
+  } else if (sub == "lg2lnast") {
+    // Prototype graph -> LNAST lowering (pass/lg2lnast/README.md). The output is
+    // ordinary front-end LNAST: `lhd compile ln:DIR` rebuilds a graph from it.
+    Eprp_var var;
+    load_lg_into_var(lg_in, var);
+    if (var.graphs.empty()) {
+      throw Lhd_error{"config", std::format("lg: input {} holds no graphs", lg_in), ""};
+    }
+    Eprp_var::Eprp_dict labels;
+    merge_sets(opts, "pass.lg2lnast", labels);
+    run_step("pass.lg2lnast", var, labels, opts, res);
+    if (var.lnasts.empty()) {
+      throw Lhd_error{"unsupported", "pass lg2lnast lowered no graph (see the warnings above)", "milestone 1 covers combinational cells and default flops"};
+    }
+    if (const auto* ln_out = find_slot(opts.emit_dirs, "ln")) {
+      save_ln_dir(opts, res, var.lnasts, ln_out->path);
+      res.outputs.push_back(ln_out->path);
+    }
+    emit_lnast_dump_outputs(var.lnasts, opts, res);
   } else if (sub == "analyze") {
     // READ-ONLY diagnosis. Deliberately emits no lg: — it exists to survey a
     // design the transforming passes REFUSE, and it never fails fast, so a

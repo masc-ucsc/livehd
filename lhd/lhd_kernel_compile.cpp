@@ -99,6 +99,9 @@ void validate_emits(const Options& opts) {
       if (graph_output && (std::string_view{k} == "lg" || std::string_view{k} == "verilog")) {
         continue;
       }
+      if (sub == "lg2lnast" && (std::string_view{k} == "ln" || std::string_view{k} == "lnast-dump")) {
+        continue;  // the LNAST this pass produces (lg: -> ln:)
+      }
       reject_emit_kind(
           opts,
           k,

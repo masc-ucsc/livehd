@@ -2707,7 +2707,7 @@ inline constexpr Synth_set_rename kSynthSetRenames[] = {
 // the unknown-subcommand hints, the general help and the machine records --
 // so the lists can never disagree again.
 inline constexpr std::string_view kPassSubcommands
-    = "color <alg> | partition | single_edge | satopt | abc | usyn | opentimer | formal | liberty gensim | semdiff | analyze";
+    = "color <alg> | partition | single_edge | satopt | abc | usyn | opentimer | formal | liberty gensim | semdiff | analyze | lg2lnast";
 
 // One --set/--config option in the `pass.flag` vocabulary: an EPRP label of
 // the method that consumes it. Enumerated from the live registry, so

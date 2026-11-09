@@ -280,6 +280,7 @@ cc_library(
         "//pass/semdiff:pass_semdiff",
         "//pass/semdiff:semdiff",
         "//pass/lnastfmt:pass_lnastfmt",
+        "//pass/lg2lnast:pass_lg2lnast",
         "//pass/prp_writer:pass_prp_writer",
         "//pass/upass:pass_upass",
         "//upass/tolg:upass_tolg",
