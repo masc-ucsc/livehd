@@ -3396,7 +3396,11 @@ bool Cgen_llvm::seal(std::string& error, bool track_changed) {
     // Change effects accumulate per target (an OR mask, or a flag) in SSA
     // and reach memory once, at the end (below).
     using Effect_key = std::tuple<size_t, size_t, bool>;  // resource, byte offset, flag
-    std::map<Effect_key, llvm::Value*> effect_acc;
+    // The terms are kept as a list and OR-reduced as a balanced tree at the
+    // end: folding them into one running value made a left-deep chain as long
+    // as the number of outputs sharing a dirty word (thousands in a big kernel),
+    // and LLVM's instruction combining is superlinear in such a chain.
+    std::map<Effect_key, std::vector<llvm::Value*>> effect_acc;
     // A target only one output marks (a staged flop's commit flag) is updated
     // at that output: accumulating one value per such flag kept ~150 live
     // registers across picorv32's largest kernel. Shared targets (dirty
@@ -3449,10 +3453,7 @@ bool Cgen_llvm::seal(std::string& error, bool track_changed) {
             apply_effect(key, term);
             continue;
           }
-          auto [it, inserted] = effect_acc.try_emplace(key, term);
-          if (!inserted) {
-            it->second = impl_->builder.CreateOr(it->second, term);
-          }
+          effect_acc[key].push_back(term);
         }
       }
       impl_->store_storage(*output.dest, value);
@@ -3484,8 +3485,19 @@ bool Cgen_llvm::seal(std::string& error, bool track_changed) {
       impl_->store_field(value, impl_->outputs, field, output.value.width);
     }
     impl_->builder.SetInsertPoint(ret);
-    for (const auto& [key, bits] : effect_acc) {
-      apply_effect(key, bits);
+    for (auto& [key, terms] : effect_acc) {
+      while (terms.size() > 1) {  // balanced pairwise OR: depth log2(n), not n
+        std::vector<llvm::Value*> next;
+        next.reserve((terms.size() + 1) / 2);
+        for (size_t i = 0; i + 1 < terms.size(); i += 2) {
+          next.push_back(impl_->builder.CreateOr(terms[i], terms[i + 1]));
+        }
+        if (terms.size() % 2 != 0) {
+          next.push_back(terms.back());
+        }
+        terms = std::move(next);
+      }
+      apply_effect(key, terms.front());
     }
     if (changed_acc != nullptr) {
       for (size_t word = 0; word < changed_words; ++word) {
@@ -4244,8 +4256,20 @@ bool Cgen_llvm::write_module(std::string_view path, std::string& error, bool tra
       impl_->module->print(ir, nullptr);
     }
   }
+  // LHD_SIM_LLVM_TIME=1: per-kernel cost report on stderr (debug only).
+  const bool time_kernels = livehd::debug::env<"LHD_SIM_LLVM_TIME">() != nullptr;
+  size_t     pre_insts    = 0;
+  const auto t_o2_start   = std::chrono::steady_clock::now();
+  if (time_kernels) {
+    for (const auto& function : *impl_->module) {
+      for (const auto& block : function) {
+        pre_insts += block.size();
+      }
+    }
+  }
   auto pipeline = pass_builder.buildPerModuleDefaultPipeline(llvm::OptimizationLevel::O2);
   pipeline.run(*impl_->module, module_analyses);
+  const auto t_o2_end = std::chrono::steady_clock::now();
   if (livehd::debug::env<"LHD_SIM_LLVM_NO_ARRAY_CARRY">() == nullptr) {
     for (auto& function : *impl_->module) {
       // Inner loops first, then each enclosing level (bounded: nesting depth).
@@ -4390,7 +4414,24 @@ bool Cgen_llvm::write_module(std::string_view path, std::string& error, bool tra
       error = "LLVM target cannot emit native color objects";
       return false;
     }
+    const auto t_emit_start = std::chrono::steady_clock::now();
     emit.run(*impl_->module);
+    if (time_kernels) {
+      size_t post_insts = 0;
+      for (const auto& function : *impl_->module) {
+        for (const auto& block : function) {
+          post_insts += block.size();
+        }
+      }
+      const auto ms = [](auto from, auto to) { return std::chrono::duration<double, std::milli>(to - from).count(); };
+      std::fprintf(stderr,
+                   "llvm-kernel-time %s pre=%zu post=%zu o2_ms=%.0f emit_ms=%.0f\n",
+                   std::string(path).c_str(),
+                   pre_insts,
+                   post_insts,
+                   ms(t_o2_start, t_o2_end),
+                   ms(t_emit_start, std::chrono::steady_clock::now()));
+    }
     auto parsed = llvm::object::ObjectFile::createObjectFile(
         llvm::MemoryBufferRef(llvm::StringRef(object_buffer.data(), object_buffer.size()), "color.o"));
     if (!parsed) {
