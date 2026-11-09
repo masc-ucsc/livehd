@@ -36,9 +36,9 @@ touch "$W/marker"
   || fail "an unchanged replay rebuilt objects or relinked the simulator"
 
 # 2. a source edit made OUTSIDE the sim dir is picked up by the replay.
-sed -i 's/a + 1/a + 2/' "$W/tb.prp"
+sed -i.bak 's/a + 1/a + 2/' "$W/tb.prp"
 (cd "$S" && "$LHD_ABS" sim -q >"$W/edit.log" 2>&1) && fail "the edited design (b = a + 2) should fail its assert"
-sed -i 's/a + 2/a + 1/; s/dut.a = 4/dut.a = 5/; s/dut.b == 5/dut.b == 6/' "$W/tb.prp"
+sed -i.bak 's/a + 2/a + 1/; s/dut.a = 4/dut.a = 5/; s/dut.b == 5/dut.b == 6/' "$W/tb.prp"
 (cd "$S" && "$LHD_ABS" sim --setup-only -q >"$W/setup.log" 2>&1) || { cat "$W/setup.log" >&2; fail "replayed --setup-only failed"; }
 (cd "$S" && "$LHD_ABS" sim -q >"$W/run.log" 2>&1) || { cat "$W/run.log" >&2; fail "replay after the edit failed"; }
 
