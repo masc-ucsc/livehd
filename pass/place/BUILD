@@ -21,11 +21,13 @@ py_library(
 py_binary(
     name = "channel_ir",
     srcs = ["channel_ir.py"],
+    legacy_create_init = 0,
 )
 
 py_test(
     name = "channel_ir_test",
     srcs = ["channel_ir_test.py"],
+    legacy_create_init = 0,
     deps = [":channel_ir_lib"],
 )
 
