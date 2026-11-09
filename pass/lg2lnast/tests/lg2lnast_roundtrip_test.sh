@@ -12,7 +12,7 @@ W="${TEST_TMPDIR:-/tmp/lg2lnast_rt_$$}"
 mkdir -p "$W"
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
-for design in comb_reg:comb_reg reset_enable:reset_enable hier:hier struct_port:struct_port reduce_shift:reduce_shift; do
+for design in comb_reg:comb_reg reset_enable:reset_enable hier:hier struct_port:struct_port reduce_shift:reduce_shift memory:memory memory_array:memory_array; do
   file="${design%%:*}"
   top="${design##*:}"
   d="$W/$file"

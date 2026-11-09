@@ -59,8 +59,18 @@ value, reset signal, sync/async and power-on initial are always spelled as the
 front end's `attr_set clock_pin|posclk|initial|reset_pin|sync|negreset`, so the
 result never depends on the default-clock naming rule. Enable is an `if`.
 
+Memories (milestone 2 of the prototype): per-port read/write (`store(mem, addr, d)`
+under the enable, `tuple_get(mem, addr)`), sync read ports as `<mem>__rd<i>` registers
+loaded from the same read, the whole-array `update` bus (`set_mask(mem, mem, bus, 0,
+size*bits)` under `update_enable`), the async `read_all` bus (a concat of every entry),
+a zero `initial` image with optional sync/async `reset`, one clock, `ordering "old"`
+(fwd = undef = 0). Reads are worklist items, so a write whose data depends on a read of
+the same memory is not a cycle; writes are emitted after every combinational cell.
+Proven on the XiangShan `RenameTable` (70k lines of Verilog) and on flat dino.
+
 A graph outside the subset is skipped with a `graph-skipped` warning naming the
-reason, never lowered partially. Known gaps: Memory, Latch, Clock_cell, n-ary
+reason, never lowered partially. Known gaps: memories with byte/bit write enables,
+non-zero initial images, several clocks, forwarding/undefined orderings; Latch, Clock_cell, n-ary
 Mux/compare, LUT, compact loops, and a cycle through instance-level dependencies
 (two submodules feeding each other through independent internal paths; the
 `fcall` form needs every argument before any output, `dino` top and a few ibex

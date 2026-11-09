@@ -44,6 +44,47 @@ private:
   };
   std::vector<Flop_rec> flop_next_;
 
+  // Memory: declared up front, read ports are worklist items (async) or registers (sync),
+  // write ports and sync-read loads are emitted after every combinational cell, like a flop.
+  struct Mem_port {
+    int              kind = 0;  // Ntype::Memory_rdport_*
+    hhds::Pin_class  addr;
+    hhds::Pin_class  en;
+    hhds::Pin_class  din;
+    hhds::Pin_class  out;       // read-data driver pin (reads only)
+    std::string      rd_reg;    // sync read: the register holding the data
+  };
+  struct Mem_rec {
+    std::string            name;
+    hhds::Node_class       node;
+    std::vector<Mem_port>  ports;
+    hhds::Pin_class        clock;  // the clock driver, invalid = default
+    bool                   negedge = false;
+    int                    bits    = 0;
+    bool                   uns     = true;
+    int64_t                size    = 0;
+    hhds::Pin_class        read_all;   // async whole-array read bus (size*bits, entry 0 low)
+    hhds::Pin_class        update;     // whole-array next-state bus (size*bits, entry 0 low)
+    hhds::Pin_class        update_en;
+    bool                   has_zero_image = false;
+    hhds::Pin_class        reset;  // the (active-high) reset driver, invalid = none
+    bool                   async_reset = false;
+  };
+  std::vector<Mem_rec> mems_;
+  int                  mem_cnt_ = 0;
+  // Per-port sink name: pid = port * stride + the pin's base offset, spelled "<pid><base>" past port 0.
+  static std::string mem_sink(int port, std::string_view base) {
+    if (port == 0) {
+      return std::string(base);
+    }
+    const auto off = Ntype::get_sink_pid(Ntype_op::Memory, base);
+    return std::format("{}{}", port * Ntype::Memory_port_stride + off, base);
+  }
+  bool declare_memory(const hhds::Node_class& node);
+  bool lower_async_read(const Mem_rec& m, size_t port);
+  bool lower_read_all(const Mem_rec& m);
+  bool lower_memory_tail(const Mem_rec& m);
+
   static std::string max_str(int bits, bool uns) {
     if (bits <= 0) {
       bits = 1;
@@ -427,6 +468,296 @@ bool Lowering::lower_node(const hhds::Node_class& node) {
   return true;
 }
 
+// ---- Memory ----------------------------------------------------------------------------
+// Supported: one clock, wensize 1, plain contents (no initial image / whole-array bus / reset),
+// reads that see COMMITTED contents (fwd = undef = 0, the front end's `ordering "old"`).
+bool Lowering::declare_memory(const hhds::Node_class& node) {
+  using livehd::graph_util::get_driver_of_sink_name;
+  auto const_i64 = [&](std::string_view nm) -> std::optional<int64_t> {
+    auto d = get_driver_of_sink_name(node, nm);
+    if (d.is_invalid() || !d.is_const() || !const_of(d).is_just_i64()) {
+      return std::nullopt;
+    }
+    return const_of(d).to_just_i64();
+  };
+  // Contents: only a ZERO image (the front end's scalar `initial` broadcasts to every entry),
+  // optionally restored by `reset`.
+  bool has_zero_image = false;
+  if (auto i = get_driver_of_sink_name(node, "initial"); !i.is_invalid()) {
+    if (!i.is_const() || !const_of(i).is_known_zero()) {
+      why = "memory with a non-zero initial image (M2)";
+      return false;
+    }
+    has_zero_image = true;
+  }
+  hhds::Pin_class reset_pin;
+  if (auto r = get_driver_of_sink_name(node, "reset"); !r.is_invalid()) {
+    reset_pin = r;
+    if (!has_zero_image) {
+      why = "memory reset without an initial image";
+      return false;
+    }
+  }
+  if (const_i64("wensize").value_or(1) != 1) {
+    why = "memory with byte/bit write enables (wensize != 1; M2)";
+    return false;
+  }
+  if (const_i64("fwd").value_or(0) != 0 || const_i64("undef").value_or(0) != 0) {
+    why = "memory with read-during-write forwarding or undefined collisions (M2 covers `old` ordering)";
+    return false;
+  }
+  const auto size = const_i64("size");
+  const auto bits = const_i64("bits");
+  if (!size || !bits || *size <= 0 || *bits <= 0) {
+    why = "memory without constant size/bits";
+    return false;
+  }
+  int n_ports = 0;
+  for (const auto& sink : node.inp_sorted_pins()) {
+    n_ports = std::max(n_ports, static_cast<int>(sink.get_port_id() / Ntype::Memory_port_stride) + 1);
+  }
+  Mem_rec m;
+  m.node = node;
+  m.name = std::string(livehd::graph_util::node_name_of(node));
+  if (m.name.empty()) {
+    m.name = std::format("__mem{}", mem_cnt_);
+  }
+  ++mem_cnt_;
+  m.size = *size;
+  m.bits = static_cast<int>(*bits);
+  if (auto p = get_driver_of_sink_name(node, "posclk"); p.is_const()) {
+    const auto v = const_of(p);
+    if (v.is_just_i64() && v.to_just_i64() == Ntype::Memory_posclk_mixed) {
+      why = "memory with mixed clock edges";
+      return false;
+    }
+    m.negedge = v.is_known_false();
+  }
+  hhds::Pin_class clk;
+  auto note_clock = [&](const hhds::Pin_class& c) {
+    if (c.is_invalid()) {
+      return true;
+    }
+    if (!clk.is_invalid() && clk.get_class_index() != c.get_class_index()) {
+      why = "memory ports on different clocks (M2)";
+      return false;
+    }
+    clk = c;
+    return true;
+  };
+  if (!note_clock(get_driver_of_sink_name(node, "clock_pin"))) {
+    return false;
+  }
+  absl::flat_hash_map<hhds::Port_id, hhds::Pin_class> outs;
+  for (const auto& o : node.out_sorted_pins()) {
+    outs.emplace(o.get_port_id(), o);
+  }
+  for (int i = 0; i < n_ports; ++i) {
+    Mem_port pt;
+    auto     rd = get_driver_of_sink_name(node, mem_sink(i, "rdport"));
+    pt.kind     = (!rd.is_invalid() && rd.is_const() && const_of(rd).is_just_i64()) ? static_cast<int>(const_of(rd).to_just_i64()) : 0;
+    pt.addr     = get_driver_of_sink_name(node, mem_sink(i, "addr"));
+    pt.en       = get_driver_of_sink_name(node, mem_sink(i, "enable"));
+    pt.din      = get_driver_of_sink_name(node, mem_sink(i, "din"));
+    if (i > 0 && !note_clock(get_driver_of_sink_name(node, mem_sink(i, "clock_pin")))) {
+      return false;
+    }
+    if (pt.addr.is_invalid()) {
+      why = "memory port without an address";
+      return false;
+    }
+    if (pt.kind == Ntype::Memory_rdport_write) {
+      if (pt.din.is_invalid()) {
+        why = "memory write port without data";
+        return false;
+      }
+    } else if (auto it = outs.find(static_cast<hhds::Port_id>(i)); it != outs.end()) {
+      pt.out = it->second;
+      m.uns  = is_unsign(pt.out);
+    }
+    m.ports.push_back(pt);
+  }
+  m.clock = clk;
+  if (auto it = outs.find(Ntype::Memory_readall_pid); it != outs.end()) {
+    m.read_all = it->second;
+  }
+  m.update         = get_driver_of_sink_name(node, "update");
+  m.update_en      = get_driver_of_sink_name(node, "update_enable");
+  m.has_zero_image = has_zero_image;
+  m.reset          = reset_pin;
+  m.async_reset    = node.attr(livehd::attrs::memory_async_reset).has();
+  // declare + clock attrs, exactly the front end's spelling
+  auto ord = b_.add_child(Lnast_ntype::create_attr_set());
+  b_.lnast->add_child(ord, Lnast_node::create_ref(m.name));
+  b_.lnast->add_child(ord, Lnast_node::create_const("ordering"));
+  b_.lnast->add_child(ord, Lnast_node::create_const("\"old\""));
+  auto d = b_.add_child(Lnast_ntype::create_declare());
+  b_.lnast->add_child(d, Lnast_node::create_ref(m.name));
+  auto arr = b_.lnast->add_child(d, Lnast_ntype::create_comp_type_array());
+  add_type(arr, m.bits, m.uns);
+  b_.lnast->add_child(arr, Lnast_node::create_const(std::format("[{}]", m.size)));
+  b_.lnast->add_child(d, Lnast_node::create_const("reg"));
+  b_.lnast->add_child(d, Lnast_node::create_const("nil"));
+  // sync read ports are registers named after the memory
+  for (size_t i = 0; i < m.ports.size(); ++i) {
+    auto& pt = m.ports[i];
+    if (pt.kind != Ntype::Memory_rdport_sync || pt.out.is_invalid()) {
+      continue;
+    }
+    pt.rd_reg = std::format("{}__rd{}", m.name, i);
+    b_.create_declare_stmts(pt.rd_reg, "reg", max_str(m.bits, m.uns), min_str(m.bits, m.uns), "nil");
+    name_of_.insert_or_assign(pt.out.get_class_index(), pt.rd_reg);
+  }
+  mems_.push_back(std::move(m));
+  return true;
+}
+
+// read_all: every entry, MSB first (entry size-1 .. entry 0), as one concat.
+bool Lowering::lower_read_all(const Mem_rec& m) {
+  std::vector<std::string> lanes;
+  for (int64_t i = m.size - 1; i >= 0; --i) {
+    auto t = b_.create_lnast_tmp();
+    auto g = b_.add_child(Lnast_ntype::create_tuple_get());
+    b_.lnast->add_child(g, Lnast_node::create_ref(t));
+    b_.lnast->add_child(g, Lnast_node::create_ref(m.name));
+    leaf(g, std::to_string(i));
+    lanes.push_back(t);
+    lanes.push_back(std::to_string(m.bits));
+  }
+  const auto out = emit(Lnast_ntype::create_concat(), lanes, m.read_all);
+  name_of_.insert_or_assign(m.read_all.get_class_index(), out);
+  return true;
+}
+
+bool Lowering::lower_async_read(const Mem_rec& m, size_t port) {
+  const auto& pt = m.ports[port];
+  auto        a  = operand(pt.addr);
+  if (!a) {
+    return false;
+  }
+  auto t = b_.create_lnast_tmp();
+  auto g = b_.add_child(Lnast_ntype::create_tuple_get());
+  b_.lnast->add_child(g, Lnast_node::create_ref(t));
+  b_.lnast->add_child(g, Lnast_node::create_ref(m.name));
+  leaf(g, *a);
+  type_spec(t, pt.out);
+  name_of_.insert_or_assign(pt.out.get_class_index(), t);
+  return true;
+}
+
+// Writes (program order = port order) and the loads of the sync-read registers.
+bool Lowering::lower_memory_tail(const Mem_rec& m) {
+  auto attr = [&](const std::string& target, std::string_view key, std::string_view value) {
+    auto n = b_.add_child(Lnast_ntype::create_attr_set());
+    b_.lnast->add_child(n, Lnast_node::create_ref(target));
+    b_.lnast->add_child(n, Lnast_node::create_const(std::string(key)));
+    b_.add_value_child_pub(n, value);
+  };
+  std::string clock_op;
+  if (!m.clock.is_invalid()) {
+    auto c = operand(m.clock);
+    if (!c) {
+      return false;
+    }
+    clock_op = *c;
+    attr(m.name, "__store_clock_pin", clock_op);
+  }
+  if (m.negedge) {
+    attr(m.name, "__store_posclk", "false");
+  } else {
+    attr(m.name, "__store_posclk", "true");
+  }
+  if (m.has_zero_image) {
+    attr(m.name, "initial", "0");
+    if (m.reset.is_invalid()) {
+      attr(m.name, "reset_pin", "false");  // power-on contents only
+    } else {
+      auto r = operand(m.reset);
+      if (!r) {
+        return false;
+      }
+      attr(m.name, "reset_pin", *r);
+      attr(m.name, "negreset", "false");
+      attr(m.name, "sync", m.async_reset ? "false" : "true");
+    }
+  }
+  auto gated = [&](const hhds::Pin_class& en, const auto& body) {
+    if (en.is_invalid() || (en.is_const() && !const_of(en).is_known_false())) {
+      body();
+      return true;
+    }
+    auto o = operand(en);
+    if (!o) {
+      return false;
+    }
+    const auto c = emit(Lnast_ntype::create_ne(), {*o, "0"}, en, false);
+    auto       n = b_.create_if_stmt(false);
+    b_.add_if_cond(n, c);
+    auto th = b_.add_if_stmts(n);
+    b_.push_stmts(th);
+    body();
+    b_.pop_stmts();
+    return true;
+  };
+  // Whole-array update first (the per-port writes commit after it), spelled as the front end does:
+  // set_mask(mem, mem, bus, 0, size*bits) under the optional enable.
+  if (!m.update.is_invalid()) {
+    auto u = operand(m.update);
+    if (!u) {
+      return false;
+    }
+    if (!gated(m.update_en, [&] {
+          auto n = b_.add_child(Lnast_ntype::create_set_mask());
+          b_.lnast->add_child(n, Lnast_node::create_ref(m.name));
+          b_.lnast->add_child(n, Lnast_node::create_ref(m.name));
+          leaf(n, *u);
+          leaf(n, "0");
+          leaf(n, std::to_string(m.size * m.bits));
+        })) {
+      return false;
+    }
+  }
+  for (const auto& pt : m.ports) {
+    if (pt.kind == Ntype::Memory_rdport_write) {
+      auto a = operand(pt.addr);
+      auto d = operand(pt.din);
+      if (!a || !d) {
+        return false;
+      }
+      if (!gated(pt.en, [&] {
+            auto st = b_.add_child(Lnast_ntype::create_store());
+            b_.lnast->add_child(st, Lnast_node::create_ref(m.name));
+            leaf(st, *a);
+            leaf(st, *d);
+          })) {
+        return false;
+      }
+    } else if (pt.kind == Ntype::Memory_rdport_sync && !pt.rd_reg.empty()) {
+      auto a = operand(pt.addr);
+      if (!a) {
+        return false;
+      }
+      if (!clock_op.empty()) {
+        attr(pt.rd_reg, "clock_pin", clock_op);
+      }
+      if (m.negedge) {
+        attr(pt.rd_reg, "posclk", "false");
+      }
+      if (!gated(pt.en, [&] {
+            auto t = b_.create_lnast_tmp();
+            auto g = b_.add_child(Lnast_ntype::create_tuple_get());
+            b_.lnast->add_child(g, Lnast_node::create_ref(t));
+            b_.lnast->add_child(g, Lnast_node::create_ref(m.name));
+            leaf(g, *a);
+            store_raw(pt.rd_reg, t);
+          })) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
 // A module instance: fcall(inst, module, store(port, arg)...), then one tuple_get
 // per output that something reads -- the shape the slang front end emits.
 bool Lowering::lower_sub(const hhds::Node_class& node) {
@@ -627,15 +958,37 @@ std::shared_ptr<Lnast> Lowering::run() {
     flop_next_.push_back({nm, node});
   }
 
+  for (auto node : graph_.body().nodes(hhds::Node_order::forward)) {
+    if (type_op_of(node) == Ntype_op::Memory && !declare_memory(node)) {
+      return nullptr;
+    }
+  }
+
   // Dependency order (Kahn): hhds `forward` order is not topological around loop-last cells
   // such as Sub, and a use must follow its definition in the LNAST text. Registers and graph
   // inputs are already named, so they never block.
   {
-    std::vector<hhds::Node_class> nodes;
+    struct Item {
+      hhds::Node_class node;
+      int              mem  = -1;  // index into mems_ for an async memory read
+      size_t           port = 0;
+    };
+    std::vector<Item> nodes;
     for (auto node : graph_.body().nodes(hhds::Node_order::forward)) {
       const auto op = type_op_of(node);
-      if (op != Ntype_op::Flop && op != Ntype_op::IO) {
-        nodes.push_back(node);
+      if (op != Ntype_op::Flop && op != Ntype_op::IO && op != Ntype_op::Memory) {
+        nodes.push_back({node, -1, 0});
+      }
+    }
+    for (size_t mi = 0; mi < mems_.size(); ++mi) {
+      for (size_t pi = 0; pi < mems_[mi].ports.size(); ++pi) {
+        const auto& pt = mems_[mi].ports[pi];
+        if (pt.kind == Ntype::Memory_rdport_async && !pt.out.is_invalid()) {
+          nodes.push_back({mems_[mi].node, static_cast<int>(mi), pi});
+        }
+      }
+      if (!mems_[mi].read_all.is_invalid()) {
+        nodes.push_back({mems_[mi].node, static_cast<int>(mi), SIZE_MAX});
       }
     }
     std::vector<size_t>                                       waiting(nodes.size(), 0);
@@ -643,13 +996,22 @@ std::shared_ptr<Lnast> Lowering::run() {
     std::vector<size_t>                                       ready;
     for (size_t i = 0; i < nodes.size(); ++i) {
       absl::flat_hash_set<hhds::Class_index> seen;
-      for (const auto& sink : nodes[i].inp_sorted_pins()) {
-        for (const auto& d : sink.get_driver_pins()) {
-          if (d.is_const() || name_of_.contains(d.get_class_index()) || !seen.insert(d.get_class_index()).second) {
-            continue;
+      auto need = [&](const hhds::Pin_class& d) {
+        if (d.is_invalid() || d.is_const() || name_of_.contains(d.get_class_index()) || !seen.insert(d.get_class_index()).second) {
+          return;
+        }
+        waiters[d.get_class_index()].push_back(i);
+        ++waiting[i];
+      };
+      if (nodes[i].mem >= 0 && nodes[i].port == SIZE_MAX) {
+        // read_all has no combinational inputs
+      } else if (nodes[i].mem >= 0) {
+        need(mems_[static_cast<size_t>(nodes[i].mem)].ports[nodes[i].port].addr);
+      } else {
+        for (const auto& sink : nodes[i].node.inp_sorted_pins()) {
+          for (const auto& d : sink.get_driver_pins()) {
+            need(d);
           }
-          waiters[d.get_class_index()].push_back(i);
-          ++waiting[i];
         }
       }
       if (waiting[i] == 0) {
@@ -659,11 +1021,23 @@ std::shared_ptr<Lnast> Lowering::run() {
     size_t done = 0;
     for (size_t head = 0; head < ready.size(); ++head) {
       const auto i = ready[head];
-      if (!lower_node(nodes[i])) {
+      const bool ok = nodes[i].mem < 0 ? lower_node(nodes[i].node)
+                      : nodes[i].port == SIZE_MAX ? lower_read_all(mems_[static_cast<size_t>(nodes[i].mem)])
+                                                  : lower_async_read(mems_[static_cast<size_t>(nodes[i].mem)], nodes[i].port);
+      if (!ok) {
         return nullptr;
       }
       ++done;
-      for (const auto& o : nodes[i].out_sorted_pins()) {
+      std::vector<hhds::Pin_class> produced;
+      if (nodes[i].mem >= 0) {
+        const auto& mm = mems_[static_cast<size_t>(nodes[i].mem)];
+        produced.push_back(nodes[i].port == SIZE_MAX ? mm.read_all : mm.ports[nodes[i].port].out);  // only THIS read's data
+      } else {
+        for (const auto& o : nodes[i].node.out_sorted_pins()) {
+          produced.push_back(o);
+        }
+      }
+      for (const auto& o : produced) {
         auto it = waiters.find(o.get_class_index());
         if (it == waiters.end()) {
           continue;
@@ -679,9 +1053,9 @@ std::shared_ptr<Lnast> Lowering::run() {
       std::string names;
       for (size_t i = 0, shown = 0; i < nodes.size() && shown < 4; ++i) {
         if (waiting[i] != 0) {
-          const auto op = type_op_of(nodes[i]);
+          const auto op = type_op_of(nodes[i].node);
           names += std::format(" {}{}", Ntype::get_name(op),
-                               op == Ntype_op::Sub && nodes[i].get_subnode_io() ? std::format("({})", std::string(nodes[i].get_subnode_io()->get_name())) : "");
+                               op == Ntype_op::Sub && nodes[i].node.get_subnode_io() ? std::format("({})", std::string(nodes[i].node.get_subnode_io()->get_name())) : "");
           ++shown;
         }
       }
@@ -703,6 +1077,11 @@ std::shared_ptr<Lnast> Lowering::run() {
       return nullptr;
     }
     store_raw(std::string(d.name), *o);
+  }
+  for (const auto& m : mems_) {
+    if (!lower_memory_tail(m)) {
+      return nullptr;
+    }
   }
   for (const auto& f : flop_next_) {
     if (!lower_flop_next(f)) {
