@@ -46,17 +46,16 @@ jobs:
       # ~40 source-vs-normalized differentials across 18 scripts -- the only
       # checks in the repo performed by a simulator that does not share our
       # model's assumptions.
-      # LHD_EXTERNAL_SIM is OVERLOADED: it gates the iverilog differentials, the
-      # Verilator oracles (slang_plusargs_smoke) and the ninja build-planning leg
-      # (sim_unity_batch_test). A script FAILS, not skips, when the flag is set
-      # and its tool is missing, so all three must be here.
-      - name: Install external simulators and build tools
+      # LHD_EXTERNAL_SIM is OVERLOADED: it gates the iverilog differentials and
+      # the Verilator oracles (slang_plusargs_smoke). A script FAILS, not skips,
+      # when the flag is set and its tool is missing, so both must be here.
+      # (`lhd sim` builds its own host driver: no ninja or bazel is needed.)
+      - name: Install external simulators
         run: |
-          brew install icarus-verilog verilator ninja
-          command -v iverilog vvp verilator ninja
+          brew install icarus-verilog verilator
+          command -v iverilog vvp verilator
           iverilog -V | head -1
           verilator --version
-          ninja --version
 
       # --test_env=PATH is NOT redundant. These targets do not declare
       # env_inherit = ["PATH"], and when the flag is set but no simulator is
