@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
 #include "diag.hpp"
 #include "hhds/graph.hpp"
 #include "lnast.hpp"
@@ -96,15 +97,13 @@ private:
     }
     if (d.is_const()) {
       const auto& c = const_of(d);
-      if (c.has_unknowns()) {
-        why = "constant with unknown bits";
-        return std::nullopt;
-      }
+      // Unknown bits print as `?` (`0ub0?????`), the literal the front ends already emit.
       return c.to_pyrope();
     }
     auto it = name_of_.find(d.get_class_index());
     if (it == name_of_.end()) {
-      why = "operand used before it is defined (cycle or unsupported driver)";
+      why = std::format("operand driven by a {} cell is used before it is defined (cycle or unsupported driver)",
+                        Ntype::get_name(type_op_of(d.get_master_node())));
       return std::nullopt;
     }
     return it->second;
@@ -338,6 +337,83 @@ bool Lowering::lower_node(const hhds::Node_class& node) {
       type_spec(out, dpin);
       break;
     }
+    case Ntype_op::Rxor:
+    case Ntype_op::Popcount: {
+      // The cell reduces the low `b` bits of `a` (extension follows a's sign).
+      auto a = named("a");
+      if (!a) {
+        return false;
+      }
+      int count = 0;
+      try {
+        count = livehd::graph_util::reduction_count(node);
+      } catch (const std::exception&) {
+        why = "Rxor/Popcount without a constant bit count";
+        return false;
+      }
+      if (count == 0) {
+        out = "0";
+        name_of_.insert_or_assign(dpin.get_class_index(), out);
+        return true;
+      }
+      const auto masked = emit(Lnast_ntype::create_get_mask(), {*a, "0", std::to_string(count)}, dpin, false);
+      out               = emit(op == Ntype_op::Rxor ? Lnast_ntype::create_red_xor() : Lnast_ntype::create_popcount(), {masked}, dpin);
+      break;
+    }
+    case Ntype_op::Ror: {
+      auto v = all_inputs();
+      if (!v || v->empty()) {
+        return false;
+      }
+      std::string acc = (*v)[0];
+      if (v->size() > 1) {
+        for (const auto& sink : node.inp_sorted_pins()) {
+          if (!is_unsign(sink.get_driver_pin()) && !sink.get_driver_pin().is_const()) {
+            why = "n-ary Ror over a signed operand (M1)";
+            return false;
+          }
+        }
+        acc = emit(Lnast_ntype::create_bit_or(), *v, dpin, false);
+      }
+      out = emit(Lnast_ntype::create_red_or(), {acc}, dpin);
+      break;
+    }
+    case Ntype_op::Hotmux: {
+      // Controls are one-bit, mutually exclusive; no arm hot => the fallback (0 when absent).
+      const auto hm = livehd::graph_util::hotmux_inputs(node);
+      std::vector<std::pair<std::string, std::string>> arms;  // cond tmp, value
+      for (const auto& [control, value] : hm.arms) {
+        auto c = operand(control);
+        auto v = operand(value);
+        if (!c || !v) {
+          return false;
+        }
+        arms.emplace_back(emit(Lnast_ntype::create_ne(), {*c, "0"}, control, false), *v);
+      }
+      std::string fb = "0";
+      if (!hm.fallback.is_invalid()) {
+        auto f = operand(hm.fallback);
+        if (!f) {
+          return false;
+        }
+        fb = *f;
+      }
+      out       = b_.create_lnast_tmp();
+      auto if_n = b_.create_if_stmt(true);
+      for (const auto& [c, v] : arms) {
+        b_.add_if_cond(if_n, c);
+        auto t = b_.add_if_stmts(if_n);
+        b_.push_stmts(t);
+        store_raw(out, v);
+        b_.pop_stmts();
+      }
+      auto e = b_.add_if_stmts(if_n);
+      b_.push_stmts(e);
+      store_raw(out, fb);
+      b_.pop_stmts();
+      type_spec(out, dpin);
+      break;
+    }
     case Ntype_op::Sub:
       return lower_sub(node);
     case Ntype_op::Flop:
@@ -433,6 +509,17 @@ bool Lowering::lower_flop_next(const Flop_rec& f) {
     b_.lnast->add_child(n, Lnast_node::create_const(std::string(key)));
     b_.add_value_child_pub(n, value);
   };
+  // Clock: always explicit, so the result never depends on the default-clock naming rule.
+  if (auto c = get_driver_of_sink_name(f.node, "clock_pin"); !c.is_invalid() && !c.is_const()) {
+    auto o = operand(c);
+    if (!o) {
+      return false;
+    }
+    attr("clock_pin", *o);
+  }
+  if (auto pc = get_driver_of_sink_name(f.node, "posclk"); pc.is_const() && const_of(pc).is_known_false()) {
+    attr("posclk", "false");
+  }
   const auto init_pin = get_driver_of_sink_name(f.node, "initial");
   std::string init_txt;
   if (!init_pin.is_invalid()) {
@@ -453,7 +540,11 @@ bool Lowering::lower_flop_next(const Flop_rec& f) {
     }
     attr("initial", init_txt.empty() ? "0" : init_txt);
     attr("reset_pin", *o);
-    attr("sync", "true");
+    bool is_async = false;
+    if (auto a = get_driver_of_sink_name(f.node, "async"); a.is_const()) {
+      is_async = !const_of(a).is_known_false();
+    }
+    attr("sync", is_async ? "false" : "true");
     attr("negreset", neg ? "true" : "false");
   } else if (!init_txt.empty()) {
     attr("initial", init_txt);  // power-on value, no reset signal (the front end's spelling)
@@ -515,22 +606,6 @@ std::shared_ptr<Lnast> Lowering::run() {
     if (type_op_of(node) != Ntype_op::Flop) {
       continue;
     }
-    // The default clock is the graph input named `clk` (the front end wires every
-    // un-annotated register to it, so no clock appears in the LNAST).
-    if (auto c = livehd::graph_util::get_driver_of_sink_name(node, "clock_pin"); !c.is_invalid()) {
-      if (!livehd::graph_util::is_graph_input_pin(c) || livehd::graph_util::pin_name_of(c) != "clk") {
-        why = "flop clocked by something other than the `clk` input (M1)";
-        return nullptr;
-      }
-    }
-    if (auto a = livehd::graph_util::get_driver_of_sink_name(node, "async"); !a.is_invalid() && !(a.is_const() && const_of(a).is_known_false())) {
-      why = "flop with an asynchronous reset (M1)";
-      return nullptr;
-    }
-    if (auto pc = livehd::graph_util::get_driver_of_sink_name(node, "posclk"); !pc.is_invalid() && !(pc.is_const() && !const_of(pc).is_known_false())) {
-      why = "negedge flop (M1)";
-      return nullptr;
-    }
     for (const char* pin : {"pipe_min", "pipe_max"}) {
       if (!livehd::graph_util::get_driver_of_sink_name(node, pin).is_invalid()) {
         why = std::format("flop with explicit {} pin (M1 handles only default clock/reset)", pin);
@@ -552,8 +627,65 @@ std::shared_ptr<Lnast> Lowering::run() {
     flop_next_.push_back({nm, node});
   }
 
-  for (auto node : graph_.body().nodes(hhds::Node_order::forward)) {
-    if (!lower_node(node)) {
+  // Dependency order (Kahn): hhds `forward` order is not topological around loop-last cells
+  // such as Sub, and a use must follow its definition in the LNAST text. Registers and graph
+  // inputs are already named, so they never block.
+  {
+    std::vector<hhds::Node_class> nodes;
+    for (auto node : graph_.body().nodes(hhds::Node_order::forward)) {
+      const auto op = type_op_of(node);
+      if (op != Ntype_op::Flop && op != Ntype_op::IO) {
+        nodes.push_back(node);
+      }
+    }
+    std::vector<size_t>                                       waiting(nodes.size(), 0);
+    absl::flat_hash_map<hhds::Class_index, std::vector<size_t>> waiters;
+    std::vector<size_t>                                       ready;
+    for (size_t i = 0; i < nodes.size(); ++i) {
+      absl::flat_hash_set<hhds::Class_index> seen;
+      for (const auto& sink : nodes[i].inp_sorted_pins()) {
+        for (const auto& d : sink.get_driver_pins()) {
+          if (d.is_const() || name_of_.contains(d.get_class_index()) || !seen.insert(d.get_class_index()).second) {
+            continue;
+          }
+          waiters[d.get_class_index()].push_back(i);
+          ++waiting[i];
+        }
+      }
+      if (waiting[i] == 0) {
+        ready.push_back(i);
+      }
+    }
+    size_t done = 0;
+    for (size_t head = 0; head < ready.size(); ++head) {
+      const auto i = ready[head];
+      if (!lower_node(nodes[i])) {
+        return nullptr;
+      }
+      ++done;
+      for (const auto& o : nodes[i].out_sorted_pins()) {
+        auto it = waiters.find(o.get_class_index());
+        if (it == waiters.end()) {
+          continue;
+        }
+        for (const auto w : it->second) {
+          if (--waiting[w] == 0) {
+            ready.push_back(w);
+          }
+        }
+      }
+    }
+    if (done != nodes.size()) {
+      std::string names;
+      for (size_t i = 0, shown = 0; i < nodes.size() && shown < 4; ++i) {
+        if (waiting[i] != 0) {
+          const auto op = type_op_of(nodes[i]);
+          names += std::format(" {}{}", Ntype::get_name(op),
+                               op == Ntype_op::Sub && nodes[i].get_subnode_io() ? std::format("({})", std::string(nodes[i].get_subnode_io()->get_name())) : "");
+          ++shown;
+        }
+      }
+      why = std::format("cycle through instance-level dependencies (a call needs an output of a call that needs it); stuck:{}", names);
       return nullptr;
     }
   }

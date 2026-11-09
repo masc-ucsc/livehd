@@ -46,18 +46,25 @@ Run it: `lhd pass lg2lnast --top T lg:IN --emit-dir ln:OUT` (or `lnast-dump:DIR`
 Round trip: `lhd compile ln:OUT --top T --emit-dir lg:IMPL`, then
 `lhd lec --ref lg:IN --impl lg:IMPL --top T --set formal.effort=proof`.
 
-Covered, and proven `proven-full` by `lg2lnast_roundtrip_test` (and on the
-XiangShan `Alu` hierarchy): Sum, And/Or/Xor, Not (typed and untyped), Mult/Div/Rem,
-Get_mask, Sext, Concat, SHL/SRA, LT/GT/EQ (as `if c {1} else {0}`, comparisons are
-Bool in LNAST), 2-way Mux, flops (default `clk`; sync reset, power-on initial and
-enable ride the front end's `attr_set initial/reset_pin/sync/negreset`; register
-names are kept, which is what keeps LEC fast), dotted tuple-leaf port names, and
-`Sub` instances (`fcall` + `tuple_get`).
+Covered, and proven `proven-full` by `lg2lnast_roundtrip_test` (plus the
+XiangShan `Alu` hierarchy and `matched_filter`): Sum, And/Or/Xor, Not (typed and
+untyped), Mult/Div/Rem, Get_mask, Sext, Concat, SHL/SRA, Ror/Rxor/Popcount,
+LT/GT/EQ (as `if c {1} else {0}`: comparisons are Bool in LNAST), 2-way Mux,
+Hotmux (`unique_if`), flops, dotted tuple-leaf port names, and `Sub` instances
+(`fcall` + `tuple_get`). Cells are emitted in dependency order (Kahn), not hhds
+`forward` order, which is not topological around loop-last cells.
+
+Flops keep their register names (what keeps LEC fast). Clock, negedge, reset
+value, reset signal, sync/async and power-on initial are always spelled as the
+front end's `attr_set clock_pin|posclk|initial|reset_pin|sync|negreset`, so the
+result never depends on the default-clock naming rule. Enable is an `if`.
 
 A graph outside the subset is skipped with a `graph-skipped` warning naming the
-cell, never lowered partially. Not yet: Memory, Latch, Clock_cell, Hotmux, n-ary
-Mux/compare, async reset, negedge, non-`clk` clocks, Ror/Rxor/Popcount, LUT,
-compact loops.
+reason, never lowered partially. Known gaps: Memory, Latch, Clock_cell, n-ary
+Mux/compare, LUT, compact loops, and a cycle through instance-level dependencies
+(two submodules feeding each other through independent internal paths; the
+`fcall` form needs every argument before any output, `dino` top and a few ibex
+graphs hit it; a flattened graph has no such cycle).
 
 ## Milestones
 
