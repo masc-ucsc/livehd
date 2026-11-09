@@ -107,8 +107,8 @@ fi
 grep -q 'sum_op\|__out\.\|__o\.' <<<"$commit_body" && fail "rise commit re-evaluates combinational logic"
 
 [ ! -e "$work/setup/sim/runtime/taskflow" ] || fail "generated tree still stages Taskflow"
-refute "standalone BUILD still references Taskflow" -q 'runtime/taskflow' "$work/setup/sim/BUILD"
-refute "standalone BUILD requests toolchain-specific ThinLTO" -q 'thin_lto' "$work/setup/sim/BUILD"
+[ ! -e "$work/setup/sim/BUILD" ] || fail "setup still writes a bazel BUILD file"
+[ ! -e "$work/setup/sim/build.ninja" ] || fail "setup still writes a build.ninja"
 
 # Host-compile and execute the exact generated source, including checkpointing.
 # This and the relative-workdir run below are separate ~6s host builds over
@@ -125,7 +125,7 @@ lhd_abs="$(cd "$(dirname "$LHD")" && pwd)/$(basename "$LHD")"
 rel_pid=$!
 
 wait "$run_pid" || fail "checkpointing simulation failed"
-refute "host build still references Taskflow" -q 'runtime/taskflow' "$work/run/sim/build.ninja"
+refute "host build still references Taskflow" -q 'runtime/taskflow' "$work"/run/sim/obj/*.cmd
 refute "checkpoint driver retained worker quiescing" -q '__color_quiesce' "$work/run/sim/drv.cpp"
 wait "$rel_pid" || fail "relative --workdir simulation failed"
 

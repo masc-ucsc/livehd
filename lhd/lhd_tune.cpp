@@ -279,7 +279,7 @@ bool clone_tree(const std::string& src, const std::string& dst, std::string& why
   fs::create_directories(fs::path(dst).parent_path(), ec);
 #if defined(__APPLE__)
   // clonefile(2) clones a directory hierarchy in one call on APFS, keeping the
-  // nanosecond mtimes ninja and the built-in stamps key on. Never `cp -c`: it
+  // nanosecond mtimes the build stamps key on. Never `cp -c`: it
   // silently falls back to a FULL copy on a non-cloning volume, which would hide
   // the cost from the payoff gate.
   if (::clonefile(src.c_str(), dst.c_str(), CLONE_NOFOLLOW | CLONE_NOOWNERCOPY) == 0) {

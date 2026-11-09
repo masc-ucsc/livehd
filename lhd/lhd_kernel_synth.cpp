@@ -57,6 +57,7 @@
 #include "debug_env.hpp"
 #include "diag.hpp"
 #include "domino_bundle.hpp"
+#include "compile_salt.hpp"
 #include "export_file.hpp"
 #include "file_utils.hpp"
 #include "graph_library_singleton.hpp"
@@ -65,6 +66,7 @@
 #include "liberty_dff.hpp"
 #include "node_util.hpp"
 #include "pass.hpp"
+#include "pass/abc/abc_salt.hpp"
 #include "pass/domplace/timing/domino_liberty.hpp"
 #include "pass/domplace/timing/stage_timing.hpp"
 #include "pass/domplace/timing/stage_timing_salt.hpp"
@@ -81,6 +83,7 @@
 #include "pass/place/resize_engine.hpp"
 #include "physical_cache.hpp"
 #include "physical_salt.hpp"
+#include "woothash.hpp"
 #include "rapidjson/document.h"
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
@@ -1614,7 +1617,7 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
 // lowers the upper bound and the next point is the middle below; it stops after area_restarts placements or when
 // the bounds are area_search.tolerance apart, and the placement kept is routable (the best point placed once more
 // when the last try failed).
-void synth_command(Options& opts, Result& res) {
+static void synth_command_flow(Options& opts, Result& res) {
   const Result   start                 = res;
   const double   base_cells            = std::stod(synth_set(opts, "place.region.max_cells", "10000"));  // the mesh as asked
   const unsigned limit                 = unsigned(std::max(0.0, std::stod(synth_set(opts, "place.area_restarts", "12"))));
@@ -1743,6 +1746,87 @@ void synth_command(Options& opts, Result& res) {
     }
     cur = std::clamp((lo + hi) / 2, lo, hi);
     set_point(cur, 0, ok ? "core search: denser" : "core search: sparser");
+  }
+}
+
+// ---- incremental API: record, replay, and "already done" ---------------------
+//
+// With a --workdir, `<workdir>/synth/manifest.json` records the invocation (so
+// `lhd synth` run inside that directory replays it) and the finished run's
+// `synth` entry: a fingerprint of everything the result depends on plus the qor
+// report. A rerun whose fingerprint still matches and whose artifacts are on
+// disk does NO work and reports the stored qor again (`--stats` expands it).
+// Only a replay takes that shortcut: the same full command typed again still
+// runs the flow and reports its incremental tiers' hits.
+// Reuse stays a speedup, never an oracle: anything the fingerprint cannot see
+// (Verilog read through `--` flags/filelists) or that the caller asked to be
+// written elsewhere (--emit/--emit-dir) always runs the flow.
+namespace {
+std::string synth_fingerprint(const Options& opts, const Result& res) {
+  if (res.run_id.empty() || !opts.raw_args.empty() || opts.workdir.empty()) {
+    return {};
+  }
+  // Display-only switches (`--stats`) must not make a finished run look new:
+  // re-showing the stats is exactly what a replay is for.
+  Options base = opts;
+  std::erase_if(base.sets, [](const auto& kv) { return kv.first == "lhd.stats"; });
+  std::string buf = compute_run_id(base);
+  buf += std::format("|salts:{:x}:{:x}:{:x}:{:x}:{:x}",
+                     livehd::kCompileSrcSalt,
+                     livehd::abc::kAbcSrcSalt,
+                     livehd::opentimer::kStaSrcSalt,
+                     kPhysicalSrcSalt,
+                     livehd::domplace::timing::kStageTimingSalt);
+  // Every file named by an option (liberty, sdc, ...) is an input whose CONTENT
+  // matters; run_id only sees the option text.
+  std::vector<std::pair<std::string, std::string>> sets = opts.sets;
+  std::ranges::sort(sets);
+  for (const auto& [k, v] : sets) {
+    std::error_code ec;
+    if (!v.empty() && fs::is_regular_file(v, ec)) {
+      const auto bytes = livehd::file_utils::read_file(v).value_or("");
+      buf += std::format("|file:{}={:016x}", k, lh::woothash64(bytes.data(), bytes.size(), 1021));
+    }
+  }
+  return std::format("{:016x}", lh::woothash64(buf.data(), buf.size(), 1021));
+}
+}  // namespace
+
+void synth_command(Options& opts, Result& res) {
+  const std::string fingerprint = synth_fingerprint(opts, res);
+  std::string       root;
+  if (!opts.workdir.empty()) {
+    std::error_code ec;
+    root = fs::absolute(opts.workdir, ec).string() + "/synth";
+  }
+  if (opts.replayed && !fingerprint.empty() && opts.incremental && opts.emits.empty() && opts.emit_dirs.empty()) {
+    std::error_code ec;
+    if (const auto entry = manifest_get(root, "synth"); entry && fs::exists(root + "/qor.json", ec) && fs::exists(root + "/net", ec)) {
+      rapidjson::Document doc;
+      doc.Parse(entry->c_str());
+      if (!doc.HasParseError() && doc.IsObject() && doc.HasMember("fingerprint") && doc["fingerprint"].IsString()
+          && fingerprint == doc["fingerprint"].GetString() && doc.HasMember("qor") && doc["qor"].IsObject()) {
+        rapidjson::StringBuffer                    sb;
+        rapidjson::Writer<rapidjson::StringBuffer> w(sb);
+        doc["qor"].Accept(w);
+        res.qor_json = std::string{sb.GetString(), sb.GetSize()};
+        res.recipe_steps.push_back(std::format("synth: up to date, nothing re-run ({})", root));
+        return;
+      }
+    }
+  }
+  synth_command_flow(opts, res);
+  if (!root.empty() && !fingerprint.empty() && !livehd::diag::sink().has_errors() && !res.qor_json.empty()) {
+    rapidjson::StringBuffer                    sb;
+    rapidjson::Writer<rapidjson::StringBuffer> w(sb);
+    w.StartObject();
+    w.Key("fingerprint");
+    w.String(fingerprint.c_str());
+    w.Key("qor");
+    w.RawValue(res.qor_json.data(), res.qor_json.size(), rapidjson::kObjectType);
+    w.EndObject();
+    manifest_put(root, "synth", std::string_view{sb.GetString(), sb.GetSize()});
+    record_invocation(opts, "synth", opts.workdir, root);
   }
 }
 

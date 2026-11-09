@@ -39,5 +39,5 @@ TB
 # minute in clang's JumpThreading pass, while LLVM builds it in ~8 s. What the
 # test checks -- every one of the 65536 inputs through the mapped netlist --
 # does not depend on the backend.
-"$LHD" sim lg:"$W/impl" "$W/tb.prp" --set sim.ninja=false --set lhd.jobs=8 \
+"$LHD" sim lg:"$W/impl" "$W/tb.prp" --set lhd.jobs=8 \
   --set sim.tune.profile=off --set sim.tune.backend=llvm --workdir "$W/sim" -q

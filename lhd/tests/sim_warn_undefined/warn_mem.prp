@@ -1,7 +1,7 @@
-// A 3-entry array at index 3 writes and reads outside it. The write is dropped
-// and the read is 0 (unchanged); each port warns once. A bounded index type
-// reaching 3 is a compile error (upass.bitwidth index-out-of-range), so the
-// index here is too wide for bitwidth to bound (past 62 bits).
+// A 3-entry array indexed by a 70-bit address cannot be proven inside [0, 3):
+// pass.bitwidth reports mem-address-overflow, so this file must NOT compile
+// (sim_warn_undefined_test.sh asserts the rejection). Run-time out-of-range
+// memory warnings are only reachable from Verilog (warn_vmem.v).
 pub mod warn_mem(x:U8, wa:U70, ra:U70) -> (y:U8@[0]) {
   reg a:[3]U8 = 0
   a[wa] = x

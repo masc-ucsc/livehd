@@ -2829,8 +2829,13 @@ Cgen_llvm::Value Cgen_llvm::memory_read(std::string_view symbol, Value address, 
   }
   const auto& m     = it->second;
   auto&       b     = impl_->builder;
-  auto*       valid = impl_->valid_address(address, m.size);
-  if (m.warn_site != no_site) {
+  // A proven address is inside [0, size) by construction: no check, no
+  // out-of-range report, and the select below folds away.
+  llvm::Value* valid = m.address_proven ? static_cast<llvm::Value*>(b.getTrue()) : impl_->valid_address(address, m.size);
+  if (m.address_proven) {
+    impl_->get(address);  // materialize the lazily loaded address at the same point the checked path does (dominance)
+  }
+  if (m.warn_site != no_site && !m.address_proven) {
     impl_->undefined_if(b.CreateNot(valid), m.warn_site);
   }
   auto* index = cast_integer(b, impl_->get(address), 64, address.unsign);
@@ -2863,7 +2868,7 @@ Cgen_llvm::Value Cgen_llvm::memory_read(std::string_view symbol, Value address, 
     }
   }
   value = b.CreateSelect(valid, value, llvm::ConstantInt::get(value->getType(), 0));
-  if (address.width > 64 || (address.unsign && address.width == 64)) {
+  if (!m.address_proven && (address.width > 64 || (address.unsign && address.width == 64))) {
     // The shared Memory contract treats values outside int64's range as
     // unknown addresses; an ordinary in-range but out-of-array index reads 0.
     auto*      raw   = impl_->get(address);
@@ -2986,12 +2991,15 @@ bool Cgen_llvm::memory_stage_write(std::string_view symbol, Value enable, Value 
     mask = b.CreateOr(mask,
                       b.CreateSelect(active, llvm::ConstantInt::get(mask_type, lane_mask), llvm::ConstantInt::get(mask_type, 0)));
   }
-  auto* in_range = impl_->valid_address(address, m.size);
-  auto* enabled  = b.CreateICmpNE(mask, llvm::ConstantInt::get(mask_type, 0));
+  llvm::Value* in_range = m.address_proven ? static_cast<llvm::Value*>(b.getTrue()) : impl_->valid_address(address, m.size);
+  if (m.address_proven) {
+    impl_->get(address);  // see memory_read: keep the lazy load at its original position
+  }
+  auto*        enabled  = b.CreateICmpNE(mask, llvm::ConstantInt::get(mask_type, 0));
   if (m.gated) {
     enabled = b.CreateAnd(enabled, b.CreateICmpNE(b.CreateLoad(b.getInt64Ty(), impl_->resource(m.gate)), b.getInt64(0)));
   }
-  if (m.warn_site != no_site) {
+  if (m.warn_site != no_site && !m.address_proven) {
     impl_->undefined_if(b.CreateAnd(enabled, b.CreateNot(in_range)), m.warn_site);
   }
   auto* valid = b.CreateAnd(in_range, enabled);

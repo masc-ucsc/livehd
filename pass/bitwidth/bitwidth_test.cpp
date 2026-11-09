@@ -344,11 +344,15 @@ TEST(BitwidthInfer, MaskDoesNotFoldNonmonotoneInterval) {
   EXPECT_TRUE(gu::is_unsign(mask.get_driver_pin(0)));
 }
 
-TEST(BitwidthMemory, ExplicitSizeAcceptsWideDynamicAddress) {
+// A Memory port address must be PROVEN inside [0, size), whichever front end
+// built the graph: a 128-bit address into 8 entries is a compile error (the
+// programmer masks or bounds it), not a run-time out-of-range read.
+namespace {
+std::shared_ptr<hhds::Graph> mem_graph_with_address(std::string_view name, uint32_t addr_bits, int64_t size) {
   auto& lib = livehd::Hhds_graph_library::instance("lgdb_bitwidth_test");
-  auto  gio = lib.create_io("bw_mem_explicit_size");
+  auto  gio = lib.create_io(name);
   gio->add_input("addr", 1);
-  gio->set_bits("addr", 128);
+  gio->set_bits("addr", addr_bits);
   gio->set_unsign("addr", true);
   gio->add_output("q", 2);
   gio->set_bits("q", 7);
@@ -357,10 +361,31 @@ TEST(BitwidthMemory, ExplicitSizeAcceptsWideDynamicAddress) {
   auto mem = livehd::graph_util::create_typed_node(*g, Ntype_op::Memory);
   g->get_input_pin("addr").connect_sink(livehd::graph_util::setup_sink_by_name(mem, "addr"));
   livehd::graph_util::create_const(*g, *Dlop::create_integer(7)).connect_sink(livehd::graph_util::setup_sink_by_name(mem, "bits"));
-  livehd::graph_util::create_const(*g, *Dlop::create_integer(8)).connect_sink(livehd::graph_util::setup_sink_by_name(mem, "size"));
+  livehd::graph_util::create_const(*g, *Dlop::create_integer(size)).connect_sink(livehd::graph_util::setup_sink_by_name(mem, "size"));
   auto q = mem.create_driver_pin(0);
   livehd::graph_util::set_bits(q, 7);
   q.connect_sink(g->get_output_pin("q"));
+  return g;
+}
+}  // namespace
+
+TEST(BitwidthMemory, WideDynamicAddressIsACompileError) {
+  auto g = mem_graph_with_address("bw_mem_wide_address", 128, 8);
+
+  auto& sink = livehd::diag::sink();
+  sink.clear();
+  sink.set_jsonl_path("off");
+  sink.set_human_stderr(false);
+
+  Bitwidth bw(/*max_iterations=*/10);
+  EXPECT_THROW(bw.do_trans(g), std::runtime_error);
+  EXPECT_TRUE(has_diag_code(sink, "mem-address-overflow"));
+  EXPECT_FALSE(has_diag_code(sink, "mem-size-limit"));
+  sink.clear();
+}
+
+TEST(BitwidthMemory, AddressThatFitsTheSizeIsAccepted) {
+  auto g = mem_graph_with_address("bw_mem_fitting_address", 3, 8);
 
   auto& sink = livehd::diag::sink();
   sink.clear();
@@ -369,8 +394,7 @@ TEST(BitwidthMemory, ExplicitSizeAcceptsWideDynamicAddress) {
 
   Bitwidth bw(/*max_iterations=*/10);
   bw.do_trans(g);
-
-  EXPECT_FALSE(has_diag_code(sink, "mem-size-limit"));
+  EXPECT_FALSE(has_diag_code(sink, "mem-address-overflow"));
   sink.clear();
 }
 

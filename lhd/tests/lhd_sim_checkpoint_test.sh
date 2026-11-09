@@ -62,7 +62,7 @@ grep -q '::dump_state'   "$TOPCPP" || fail "cgen did not emit dump_state"
 grep -q '::load_state'   "$TOPCPP" || fail "cgen did not emit load_state"
 grep -q '::design_hash'  "$TOPCPP" || fail "cgen did not emit design_hash"
 grep -q 'write_mem_hex'  "$TOPCPP" || fail "dump_state does not write the memory hex"
-grep -q 'dump_state(_p + "' "$TOPCPP" || fail "dump_state does not recurse into the sub-instance"
+grep -q 'dump_state(__ckpt_p + "' "$TOPCPP" || fail "dump_state does not recurse into the sub-instance"
 grep -q '#include "checkpoint.hpp"' "$TOPCPP" || fail "module source does not include checkpoint.hpp"
 
 grep -q 'fork_checkpoint'       "$DRV" || fail "driver lacks the fork-checkpoint cadence"

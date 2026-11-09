@@ -68,6 +68,29 @@ to the LLVM backend (`sim.tune.backend=llvm`); `--set sim.tune.backend=slop`
 selects the reference C++ (Slop) kernels, e.g. to cross-check a suspected
 simulator bug.
 
+`lhd sim` generates the simulator sources under `<workdir>/sim` and builds the
+driver (`drv.bin`) itself, with its own parallel, incremental host compile. It
+writes no bazel or ninja project and has no `sim.ninja` option. The generated
+directory records the command that built it (the `invocation` entry of its `manifest.json`), so to
+rebuild after editing the Pyrope/Verilog source, `cd <workdir>/sim` and run
+`lhd sim`: it re-reads the original sources, regenerates only what changed,
+rebuilds incrementally and runs. `lhd sim --setup-only` there only regenerates;
+`lhd sim --run-only` builds and runs the regenerated tree, and adding
+`--set sim.compile_only=true` builds without running. Extra arguments
+(`+cycles=N`, `--set ...`) are appended to the recorded command and win.
+
+`lhd synth ... --workdir W` works the same way: `W/synth/manifest.json` records
+the command and the finished run. Inside `W/synth`, a bare `lhd synth` replays
+it. Nothing changed (sources, options, a Liberty/SDC file, the tool) means no
+work and the stored qor report is shown again (`--stats` expands it); a change
+re-runs the flow incrementally. The same full command typed again also reuses
+every cache tier but still runs the flow.
+
+A memory/array port address must be provably inside `[0, size)`: mask or bound
+the index (`m[i & (N-1)]`, `m[i % N]`) or it is the compile error
+`mem-address-overflow`. A sim built with `--set sim.debug=true` keeps unproven
+addresses and checks them at run time instead.
+
 ### formal verify
 
 Proves design `assert`/`assume` and `formal` blocks by BMC from reset, with

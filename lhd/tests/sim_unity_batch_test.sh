@@ -6,7 +6,7 @@
 # them through `<simdir>/unity/unity-<k>.cpp` wrappers that `#include` the
 # members, instead of one host-compiler process per few-KB file. This pins:
 #
-#   1. batching happens: the wrappers exist, build.ninja links their objects,
+#   1. batching happens: the wrappers exist, their objects are built,
 #      and there are fewer objects than generated sources;
 #   2. the batched build simulates correctly;
 #   3. a warm rebuild with nothing changed has no work left (the wrappers are
@@ -15,13 +15,7 @@
 #      the wrapper's depfile names every member. Without that the stale object
 #      would be linked silently.
 #
-# Steps 3-4 exercise the built-in builder and inspect object timestamps.
-#
-#   5. (LHD_EXTERNAL_SIM=1 only, see AGENTS.md) the same contract under ninja,
-#      the builder `lhd sim` uses by default when it is on PATH: `ninja -n`
-#      reports no work after a warm build, and plans the batch object after a
-#      member edit (only ninja can answer "what would rebuild" without
-#      rebuilding).
+# Steps 3-4 inspect object timestamps.
 
 set -u
 
@@ -74,7 +68,7 @@ test top.chain(cycles:U20 = 2) {
 EOF
 
 run_sim() {
-  "$LHD" sim "$W/tb.prp" --set compile.upass.inline=false --set sim.ninja=false --set sim.tune.profile=off --diag-fmt pretty --workdir "$W/wd" >"$W/run.log" 2>&1
+  "$LHD" sim "$W/tb.prp" --set compile.upass.inline=false --set sim.tune.profile=off --diag-fmt pretty --workdir "$W/wd" >"$W/run.log" 2>&1
 }
 
 if ! run_sim; then
@@ -86,16 +80,16 @@ fi
 S="$W/wd/sim"
 batches=("$S"/unity/unity-*.cpp)
 [ -f "${batches[0]}" ] || fail "no unity batch was written under $S/unity"
-grep -q 'unity-[0-9]*\.o' "$S/build.ninja" || fail "build.ninja does not link the unity batch objects"
+ls "$S"/obj/unity-*.o >/dev/null 2>&1 || fail "the unity batch objects were not built"
 sources=$(find "$S" -maxdepth 1 -name '*.cpp' ! -name 'drv.cpp' | wc -l)
-objects=$(grep -c '^build .*\.o: cc ' "$S/build.ninja")
+objects=$(find "$S/obj" -name '*.o' | wc -l)
 [ "$objects" -lt "$sources" ] || fail "batching did not reduce the TU count ($objects objects for $sources sources)"
 
 # ---- 2. the batched build simulates correctly ---------------------------------
 # 16 + (0 + 1 + ... + 13) = 107
 grep -q 'unity chain: got=107' "$W/run.log" || { cat "$W/run.log" >&2; fail "wrong simulation result from the batched build"; }
 
-# ---- 3. a warm built-in rebuild has no work ----------------------------------
+# ---- 3. a warm rebuild has no work ----------------------------------
 touch "$W/build-marker"
 run_sim || { cat "$W/run.log" >&2; fail "warm build failed"; }
 [ -z "$(find "$S" \( -name '*.o' -o -name drv.bin \) -newer "$W/build-marker")" ] \
@@ -127,55 +121,5 @@ run_sim || { cat "$W/run.log" >&2; fail "lhd sim failed after the edit"; }
 [ -n "$(find "$S" -name "$batch_obj" -newer "$W/build-marker")" ] \
   || fail "rewriting $victim_cpp did not rebuild its batch $batch_obj"
 grep -q 'unity chain: got=107' "$W/run.log" || { cat "$W/run.log" >&2; fail "wrong simulation result after the edit"; }
-
-# ---- 5. the same contract under ninja -----------------------------------------
-if [ -z "${LHD_EXTERNAL_SIM:-}" ]; then
-  echo "note: external-simulator leg skipped (set LHD_EXTERNAL_SIM=1)"
-else
-  command -v ninja >/dev/null 2>&1 || fail "LHD_EXTERNAL_SIM is set but ninja is not on PATH"
-  # Its own workdir: objects from the built-in builder have no .ninja_log, so
-  # ninja would plan everything.
-  NW="$W/wd_ninja"
-  NS="$NW/sim"
-  "$LHD" sim "$W/tb.prp" --set compile.upass.inline=false --set sim.ninja=true --set sim.tune.profile=off \
-    --diag-fmt pretty --workdir "$NW" >"$W/ninja.log" 2>&1 \
-    || { cat "$W/ninja.log" >&2; fail "lhd sim failed under ninja"; }
-  [ -f "$NS/.ninja_log" ] || fail "sim.ninja=true did not build with ninja (no $NS/.ninja_log)"
-  grep -q 'unity chain: got=107' "$W/ninja.log" || { cat "$W/ninja.log" >&2; fail "wrong simulation result from the ninja build"; }
-  plan=$(ninja -C "$NS" -n 2>&1 | grep -v '^ninja: Entering')
-  case "$plan" in
-  *"no work to do"*) ;;
-  *) fail "ninja: a rebuild with nothing changed still has work to do: $plan" ;;
-  esac
-  # Re-discover the batched source HERE, exactly as step 4 does for the built-in
-  # builder. `$victim_cpp` came from the other workdir and from before the U8->U9
-  # edit; a leaf's generated file carries a specialization suffix keyed on its
-  # interface (`leaves.leaf_7__k8bb173c30106d1f7.cpp`), so that name does not
-  # survive an interface change or a different build root. The contract being
-  # checked is "leaf_7's batched source rebuilds its batch", not what it is called.
-  ninja_victim=""
-  for f in "$NS"/leaves.leaf_7*.cpp; do
-    base=$(basename "$f")
-    if grep -lq "\"\.\./$base\"" "$NS"/unity/unity-*.cpp; then
-      ninja_victim="$base"
-      break
-    fi
-  done
-  [ -n "$ninja_victim" ] \
-    || fail "ninja: no generated source of leaf_7 was batched (test assumption broken): $(ls "$NS"/unity)"
-  ninja_obj=$(basename "$(grep -l "\"\.\./$ninja_victim\"" "$NS"/unity/unity-*.cpp)" .cpp).o
-  sed -e 's/pub comb leaf_7(a:U9)/pub comb leaf_7(a:U10)/' "$W/leaves.prp" > "$W/leaves.new" && mv "$W/leaves.new" "$W/leaves.prp"
-  grep -q 'leaf_7(a:U10)' "$W/leaves.prp" || fail "the second interface edit did not apply (test bug)"
-  "$LHD" sim "$W/tb.prp" --set compile.upass.inline=false --setup-only --workdir "$NW" >"$W/setup_n.log" 2>&1 \
-    || { cat "$W/setup_n.log" >&2; fail "lhd sim --setup-only failed after the edit (ninja leg)"; }
-  # build.ninja is rewritten by the build step, not by setup: the plan below is
-  # computed from the PREVIOUS build file, exactly what the next build starts from.
-  plan=$(ninja -C "$NS" -n 2>&1 | grep -v '^ninja: Entering')
-  case "$plan" in
-  *"$ninja_obj"*) ;;
-  *) fail "ninja: rewriting $ninja_victim did not rebuild its batch $ninja_obj -- the wrapper's depfile is not tracking members: $plan" ;;
-  esac
-  echo "ok: ninja plans no work after a warm build and rebuilds $ninja_obj after a member edit"
-fi
 
 echo "PASS (batched build, correct result, warm rebuild is a no-op, a member edit rebuilds its batch)"

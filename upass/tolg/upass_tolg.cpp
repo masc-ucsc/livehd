@@ -4215,7 +4215,91 @@ private:
   // cells (widths mirror lower_op: mul = sum of operand mws, add = max+1).
   // Returns an invalid Pin after reporting (index-arity mismatch, non-integer
   // index, field access).
-  [[nodiscard]] Pin flatten_mem_addr(const Mem_info& mi, const std::vector<Lnast_nid>& idxs, std::string_view name) {
+  // Every Memory port address leaves this front end PROVEN inside [0, size) or
+  // as a compile error in pass.bitwidth -- the programmer masks or bounds it.
+  // Two kinds of access are legal without that proof because something else
+  // already keeps an out-of-range address from mattering:
+  //   * an access under an `if`/guard (`if ri < 126 { mem[ri] }`): the write is
+  //     disabled and the read's result is discarded when the guard is false;
+  //   * a Verilog-origin access (SystemVerilog's X read / ignored write, already
+  //     expressed as an explicit guard around the access).
+  // Those get the address ROUTED through a clamp, the mask this reader generates:
+  //   hi = Mux(addr < size ? addr : 0), and for a possibly-negative address
+  //   lo = Mux(hi < 0 ? 0 : hi)
+  // pass.bitwidth recognizes exactly this shape and proves the clamped range, so
+  // no downstream pass (the sim included) needs a run-time bounds check. The
+  // clamp only changes an address whose access is already inert.
+  [[nodiscard]] Pin bound_mem_addr(const Mem_info& mi, const Pin& addr, Pin* in_range = nullptr) {
+    if (addr.is_invalid() || addr.is_const() || mi.size <= 0) {
+      return addr;
+    }
+    if (current_path_cond().is_invalid() && !lnast_->is_verilog_origin()) {
+      return addr;
+    }
+    // A Verilog-origin WRITE must be ignored when out of range (SystemVerilog
+    // 1800 7.4.6): its caller folds `in_range` into the write enable instead of
+    // letting the clamp alias the write onto entry 0. A guarded access needs no
+    // such term: the path condition already disables it.
+    return clamp_mem_addr(addr, mi.size, lnast_->is_verilog_origin() ? in_range : nullptr);
+  }
+
+  // The clamp itself. Returns `addr` untouched when its width alone proves it
+  // inside [0, size). Otherwise routes it through the mask described above and,
+  // when `in_range` is given, also returns the 1-bit "the original address was
+  // inside [0, size)" condition (for a caller that must DROP an out-of-range
+  // write instead of letting it alias the clamped entry).
+  [[nodiscard]] Pin clamp_mem_addr(const Pin& addr, int64_t size, Pin* in_range) {
+    if (addr.is_invalid() || addr.is_const() || size <= 0) {
+      return addr;
+    }
+    const bool can_neg = pin_can_be_negative(addr);
+    const auto bits    = pin_mw_of(addr);
+    if (!can_neg && bits > 0 && bits < 62 && (int64_t{1} << bits) <= size) {
+      return addr;  // the width alone proves it
+    }
+    const auto lt_of = [&](const Pin& x, int64_t limit) {
+      auto lt = make_node(Ntype_op::LT);
+      setup_sink_by_name(lt, "as").connect_driver(x);
+      setup_sink_by_name(lt, "bs").connect_driver(create_const(*g_, *Dlop::create_integer(limit)));
+      auto sel = lt.create_driver_pin(0);
+      set_ubits(sel, 1);
+      return sel;
+    };
+    const auto clamp = [&](const Pin& x, int64_t limit, bool upper) {
+      const auto sel = lt_of(x, limit);
+      auto       mux = make_node(Ntype_op::Mux);
+      livehd::graph_util::setup_sink_pid(mux, 0).connect_driver(sel);
+      const auto zero = create_const(*g_, *Dlop::create_integer(0));
+      // upper: x < limit ? x : 0      lower: x < 0 ? 0 : x
+      livehd::graph_util::setup_sink_pid(mux, 1).connect_driver(upper ? zero : x);
+      livehd::graph_util::setup_sink_pid(mux, 2).connect_driver(upper ? x : zero);
+      auto out = mux.create_driver_pin(0);
+      if (can_neg) {
+        set_sbits(out, std::max(2, bits + 1));
+      } else {
+        set_ubits(out, std::max(1, bits));
+      }
+      return out;
+    };
+    if (in_range != nullptr) {
+      *in_range = lt_of(addr, size);
+      if (can_neg) {
+        *in_range = and2(*in_range, not1(lt_of(addr, 0)));
+      }
+    }
+    auto out = clamp(addr, size, true);
+    if (can_neg) {
+      out = clamp(out, 0, false);
+    }
+    return out;
+  }
+
+  [[nodiscard]] Pin flatten_mem_addr(const Mem_info& mi, const std::vector<Lnast_nid>& idxs, std::string_view name,
+                                     Pin* in_range = nullptr) {
+    return bound_mem_addr(mi, flatten_mem_addr_raw(mi, idxs, name), in_range);
+  }
+
+  [[nodiscard]] Pin flatten_mem_addr_raw(const Mem_info& mi, const std::vector<Lnast_nid>& idxs, std::string_view name) {
     if (idxs.size() != mi.dims.size()) {
       error_here(
           "upass.tolg: memory '{}' has {} dimension(s) but the access "
@@ -5627,7 +5711,13 @@ private:
       const auto base  = i * kMemPortStride;
       auto       rdv   = Dlop::from_pyrope(lnast_->get_name(rdports[i]));
       const bool is_rd = rdv && !rdv->is_known_false();
-      livehd::graph_util::setup_sink_pid(mem, static_cast<hhds::Port_id>(base + 0)).connect_driver(leaf(addrs[i]).pin);
+      // The address leaves here proven inside [0, size) (see bound_mem_addr). An
+      // out-of-range WRITE must do nothing (SystemVerilog 1800 7.4.6), so its
+      // enable is gated by the in-range test rather than aliasing the clamped
+      // entry; an out-of-range read returns the clamped entry, a value X permits.
+      Pin in_range;
+      const auto port_addr = clamp_mem_addr(leaf(addrs[i]).pin, size, is_rd ? nullptr : &in_range);
+      livehd::graph_util::setup_sink_pid(mem, static_cast<hhds::Port_id>(base + 0)).connect_driver(port_addr);
       livehd::graph_util::setup_sink_pid(mem, static_cast<hhds::Port_id>(base + 10))
           .connect_driver(create_const(*g_, *Dlop::create_integer(is_rd ? 1 : 0)));
       if (type != 2 && clocks.size() > 1) {
@@ -5635,6 +5725,17 @@ private:
             .connect_driver(leaf(clocks[static_cast<size_t>(i)]).pin);
       }
       Pin en = i < static_cast<int>(ens.size()) ? leaf(ens[i]).pin : en_const(true);
+      if (!in_range.is_invalid()) {
+        // Keeps the enable's width (a wensize > 1 lane vector): in range -> the
+        // enable, out of range -> no lane.
+        auto gate = make_node(Ntype_op::Mux);
+        livehd::graph_util::setup_sink_pid(gate, 0).connect_driver(in_range);
+        livehd::graph_util::setup_sink_pid(gate, 1).connect_driver(create_const(*g_, *Dlop::create_integer(0)));
+        livehd::graph_util::setup_sink_pid(gate, 2).connect_driver(en);
+        auto gated = gate.create_driver_pin(0);
+        set_ubits(gated, std::max(1, pin_mw_of(en)));
+        en = gated;
+      }
       livehd::graph_util::setup_sink_pid(mem, static_cast<hhds::Port_id>(base + 4)).connect_driver(en);
       if (!is_rd) {
         if (i >= static_cast<int>(dins.size())) {
@@ -5726,7 +5827,8 @@ private:
     }
     auto val = idxs.back();
     idxs.pop_back();
-    auto addr = flatten_mem_addr(mi, idxs, lhs_name);
+    Pin  write_in_range;  // Verilog-origin write: the "address is inside [0, size)" term of its enable
+    auto addr = flatten_mem_addr(mi, idxs, lhs_name, &write_in_range);
     if (addr.is_invalid()) {
       return;  // flatten_mem_addr reported
     }
@@ -5847,7 +5949,10 @@ private:
     }
     ++mi.wr_next;
     const auto din     = rmw_din.is_invalid() ? leaf(val).pin : rmw_din;
-    const auto path_en = current_path_cond();
+    auto path_en = current_path_cond();
+    if (!write_in_range.is_invalid()) {
+      path_en = path_en.is_invalid() ? write_in_range : and2(path_en, write_in_range);
+    }
     mi.wr_sites.push_back({.addr = addr, .din = din, .en = path_en, .chunk = chunk, .bitmask = {}, .cmask = std::nullopt});
     if (masked != nullptr) {
       // The written bits of the entry: a constant mask stays a constant (it
@@ -11899,21 +12004,20 @@ private:
       cur_max = max_base4_digit_sum(cur_max);
       cur_mw  = mw_of_val(cur_max);
     }
-    // `cur` ∈ [0, 3]: result = (cur == 3) ? 0 : cur  ==  cur - 3*(cur == 3).
-    auto eq = make_node(Ntype_op::EQ);  // commutative: both operands feed sink "a"
-    setup_sink_by_name(eq, "as").connect_driver(cur);
-    setup_sink_by_name(eq, "as").connect_driver(create_const(*g_, *Dlop::create_integer(3)));
-    auto eqp = eq.create_driver_pin(0);
-    set_ubits(eqp, 1);
-    auto mul = make_node(Ntype_op::Mult);  // 3 * (cur == 3) ∈ {0, 3}
-    setup_sink_by_name(mul, "as").connect_driver(eqp);
-    setup_sink_by_name(mul, "as").connect_driver(create_const(*g_, *Dlop::create_integer(3)));
-    auto mulp = mul.create_driver_pin(0);
-    set_ubits(mulp, 2);
-    auto sub = make_node(Ntype_op::Sum);  // cur - 3*(cur == 3)
-    setup_sink_by_name(sub, "as").connect_driver(cur);
-    setup_sink_by_name(sub, "bs").connect_driver(mulp);
-    auto subp = sub.create_driver_pin(0);
+    // `cur` ∈ [0, 3]: result = (cur < 3) ? cur : 0. Spelled as the guard clamp
+    // pass.bitwidth recognizes, so the result is PROVEN in [0, 2] (the older
+    // `cur - 3*(cur == 3)` is exact too, but interval arithmetic can only say
+    // [-3, 3], which would reject `mem[i % 3]` as an unproven memory address).
+    auto lt = make_node(Ntype_op::LT);
+    setup_sink_by_name(lt, "as").connect_driver(cur);
+    setup_sink_by_name(lt, "bs").connect_driver(create_const(*g_, *Dlop::create_integer(3)));
+    auto ltp = lt.create_driver_pin(0);
+    set_ubits(ltp, 1);
+    auto mux = make_node(Ntype_op::Mux);
+    livehd::graph_util::setup_sink_pid(mux, 0).connect_driver(ltp);
+    livehd::graph_util::setup_sink_pid(mux, 1).connect_driver(create_const(*g_, *Dlop::create_integer(0)));  // cur == 3
+    livehd::graph_util::setup_sink_pid(mux, 2).connect_driver(cur);                                         // cur < 3
+    auto subp = mux.create_driver_pin(0);
     set_ubits(subp, 2);
     return subp;
   }

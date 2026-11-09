@@ -1552,23 +1552,14 @@ std::set<std::string> sim_unused_artifacts(const std::string& directory, const s
 // generate a C++ driver that runs the `tick` loop and turns `assert`s into
 // runtime checks, then host-compile + run it and report pass/fail.
 //
-// NOT bazel. Setup does write a standalone bazel module next to the sources (BUILD +
-// MODULE.bazel, see sim_into in lhd_kernel_common.cpp) so the dir stays
-// hand-buildable with `cd <simdir> && bazel run //:drv`, but `lhd sim` never
-// invokes it: it shells out to the host compiler directly (the "fast run path"
-// below). A nested bazel would want its own server and lock, and that generated
-// MODULE.bazel archive_overrides iassert from GitHub — so it needs the network
-// on a cold build, and it pins hlop at `<cwd>/../hlop`, which only resolves in
-// the dev layout. `lhd sim` has to work inside SOMEONE ELSE'S bazel test
-// sandbox (that is how lhdsuite drives it), where none of that holds.
-//
-// The trade used to cost what bazel would have handed us for free — per-TU
-// parallelism and incremental rebuilds. Both are back, without the sandbox
-// problems: parallelism from the built-in fan-out (`lhd.jobs`), and
-// incrementality from a generated `build.ninja` used when ninja is present
-// (`sim.ninja`). The build file is written either way, so `ninja -C <simdir>`
-// always reproduces exactly what lhd did — unlike the bazel project, which
-// nothing executes.
+// The host build is lhd's own: it shells out to the host compiler directly (the
+// "fast run path" below), with no bazel project, no ninja and no network. That
+// is what lets `lhd sim` work inside SOMEONE ELSE'S bazel test sandbox (that is
+// how lhdsuite drives it). Parallelism comes from the built-in fan-out
+// (`lhd.jobs`); incrementality from compiler depfiles plus a per-output stamp of
+// the exact command line. `lhd sim` / `lhd sim --setup-only` run with no
+// arguments inside a generated sim directory replays the recorded invocation
+// (see replay_recorded_invocation), so that is the one way to rebuild.
 void sim_command(Options& opts, Result& res) {
   res.command             = "sim pyrope";
   // Captured FIRST: compile_sources later mints a scratch workdir when the user
@@ -1687,7 +1678,14 @@ void sim_command(Options& opts, Result& res) {
   // never sweeps the nested BUILD package or follows its convenience symlinks.
   std::string simroot;
   if (!opts.workdir.empty()) {
-    simroot = opts.workdir;
+    // Absolute, so the compile commands (and their up-to-date stamps) are the
+    // same whether the build is started by the original command or by a replay
+    // from inside the sim dir.
+    std::error_code abs_ec;
+    simroot = fs::absolute(opts.workdir, abs_ec).string();
+    if (abs_ec) {
+      simroot = opts.workdir;
+    }
   } else {
     if (run_only) {
       throw Lhd_error{"usage", "--run-only needs --workdir pointing at a prior --setup-only build", ""};
@@ -1929,17 +1927,7 @@ void sim_command(Options& opts, Result& res) {
       return;
     }
     tune.after_generate();
-    // Also append a single `drv` cc_binary so the generated dir stays
-    // bazel-buildable (`cd <simdir> && bazel run //:drv -- --test ...`); the
-    // default `lhd sim` flow runs it via the fast host-compile below, no bazel.
-    std::ofstream bf(std::format("{}/BUILD", simdir), std::ios::app);
-    bf << "\nload(\"@rules_cc//cc:defs.bzl\", \"cc_binary\")\n";
-    bf << std::format(
-        "cc_binary(\n    name = \"{0}\",\n    srcs = [\"{0}.cpp\"],\n    copts = [\"-std=c++23\", \"-Os\", \"-pthread\"],\n"
-        "    linkopts = [\"-pthread\"],\n"
-        "    deps = [\":sim\", \"@hlop//hlop\"],\n)\n",
-        prp_sim::kDriverBasename);
-    bf.close();
+    record_invocation(opts, "sim", simroot, simdir);
     res.recipe_steps.push_back(std::format("sim setup: {} test(s) in {}", tests.size(), simdir));
     setup_outcome.reset();  // the setup passed: clear the marker now, before any test outcome
   }
@@ -2167,9 +2155,8 @@ void sim_command(Options& opts, Result& res) {
 
   // Size optimization is the simulator default for both Slop and LLVM's
   // generated C++ support. Keep compilation parallel and cache its full command.
-  // ABSOLUTE -I: `--workdir` is routinely relative, and the ninja build runs
-  // with its cwd set to the sim dir (so its .ninja_deps/.ninja_log land there),
-  // where a relative `-Iw/sim` would resolve to nothing.
+  // ABSOLUTE -I: `--workdir` is routinely relative, and a relative `-Iw/sim`
+  // would resolve to nothing for anything that runs from another directory.
   const std::string simdir_abs  = fs::absolute(simdir).string();
   std::string       cflags      = std::format("-std=c++23 -DNDEBUG -Os -pthread -I{} -I{} -I{}",
                                               shell_quote(simdir_abs),
@@ -2177,7 +2164,7 @@ void sim_command(Options& opts, Result& res) {
                                               shell_quote(iassert_inc));
   // --set lhd.jobs=N bounds the fan-out (0/unset = one per hardware thread).
   // Pin it to make a build-time measurement reproducible, or to leave the
-  // machine usable while a big design builds. Also becomes `ninja -j`.
+  // machine usable while a big design builds.
   // Under `bazel test` (TEST_SRCDIR set) the default is 2: bazel already runs
   // tests in parallel, and a per-test fan-out of every hardware thread
   // oversubscribes the machine several times over.
@@ -2208,10 +2195,9 @@ void sim_command(Options& opts, Result& res) {
     objs[i]             = std::format("{}/{}{}.o", objdir, external ? "_rt_" : "", fs::path(tus[i]).stem().string());
   }
   {
-    // Two TUs mapping to one object would make ninja hard-fail ("multiple rules
-    // generate ...") but would silently make the built-in path link whichever
-    // compile finished last — a wrong binary from a green run. Catch it here so
-    // both paths report the same, nameable problem.
+    // Two TUs mapping to one object would silently make the build link whichever
+    // compile finished last — a wrong binary from a green run. Catch it here
+    // and report a nameable problem.
     auto sorted = objs;
     std::sort(sorted.begin(), sorted.end());
     auto dup = std::adjacent_find(sorted.begin(), sorted.end());
@@ -2240,7 +2226,7 @@ void sim_command(Options& opts, Result& res) {
   //
   // A batch is an `#include` wrapper under <simdir>/unity/ (the body scan above
   // is not recursive, so the next run does not mistake it for a module). Its
-  // depfile names every member, so ninja and the built-in path both rebuild it
+  // depfile names every member, so the build rebuilds it
   // when any member changes. Membership is a stable hash of the file NAME into a
   // bucket count that depends only on the design, never on the host's core
   // count: an edit to one module rebuilds just its own batch, and two machines
@@ -2305,8 +2291,8 @@ void sim_command(Options& opts, Result& res) {
         const std::string name = std::format("unity-{}.cpp", b);
         const std::string path = unity_dir + "/" + name;
         unity_files.insert(name);
-        // Write-if-different, like every other generated source: ninja keys on
-        // mtimes, and an unconditional rewrite would rebuild every batch.
+        // Write-if-different, like every other generated source: staleness keys
+        // on mtimes, and an unconditional rewrite would rebuild every batch.
         std::string     old;
         std::error_code ec;
         if (fs::exists(path, ec)) {
@@ -2346,7 +2332,7 @@ void sim_command(Options& opts, Result& res) {
       }
     }
     // Batches a previous run wrote and this one does not reference (the design
-    // shrank, or no longer batches at all) would only confuse `ninja -C`.
+    // shrank, or no longer batches at all) would only confuse the next build.
     std::error_code ec;
     for (const auto& de : fs::directory_iterator(unity_dir, ec)) {
       if (de.path().extension() == ".cpp" && !unity_files.contains(de.path().filename().string())) {
@@ -2358,7 +2344,7 @@ void sim_command(Options& opts, Result& res) {
   // Output staleness, shared by the precompiled-header stage below and the
   // built-in TU build: an output is fresh when its stamp (the exact command
   // that produced it) matches and it is not older than any prerequisite its
-  // depfile lists -- ninja's rule, see the built-in build for the caveats.
+  // depfile lists, see the TU build below for the caveats.
   auto mtime_of = [](const std::string& path) -> std::optional<fs::file_time_type> {
     std::error_code ec;
     const auto      t = fs::last_write_time(path, ec);
@@ -2479,7 +2465,7 @@ void sim_command(Options& opts, Result& res) {
       const auto version = capture(std::format("{} --version 2>&1", shell_quote(cxx)), vrc);
       pch_on             = vrc == 0 && version.find("clang") != std::string::npos;
     }
-    // ABSOLUTE, like the -I paths: ninja runs with its cwd in the sim dir.
+    // ABSOLUTE, like the -I paths.
     const std::string pch_dir = simdir_abs + "/pch";
     if (pch_on) {
       ensure_dir(pch_dir);
@@ -2613,152 +2599,7 @@ void sim_command(Options& opts, Result& res) {
       }
     }
   }
-  // No leading space: ninja strips it from a variable's value (the `cc` rule
-  // spells `$cflags $pchflags`); the built-in command adds its own.
   const auto pch_flag = [&](size_t i) { return tu_pch[i].empty() ? std::string{} : "-include-pch " + shell_quote(tu_pch[i]); };
-
-  // build.ninja, ALWAYS written (even when the build below does not use ninja).
-  // It is the escape hatch that works: `ninja -C <simdir>` reproduces exactly
-  // what lhd did. That matters because the OTHER generated build file, the
-  // bazel one, is never executed by lhd and has silently rotted — its hlop
-  // local_path_override resolves only in a dev layout. A build file lhd itself
-  // runs cannot drift from the build lhd performs.
-  //
-  // Ninja is worth generating for ONE reason: incrementality. Parallelism is
-  // already covered by the fan-out below. What ninja adds is depfile-accurate
-  // staleness (`deps = gcc` + `-MD`), including the runtime headers
-  // (slop.hpp/memory.hpp) that no hand-rolled rule would think to track. Its
-  // mtime keying is sound here only because emission upstream is
-  // WRITE-IF-DIFFERENT (File_output::same_on_disk): a comment-only Pyrope edit
-  // rewrites nothing, and a body-only edit rewrites just that module's .cpp,
-  // leaving its .hpp — and therefore every parent's object — untouched. If that
-  // invariant ever breaks, this degrades to a full rebuild every run.
-  //
-  // Two limits of the mtime model, recorded because neither is enforced here.
-  // (a) Ninja treats an output as fresh when it is NOT OLDER than its inputs,
-  // so a source rewritten inside the same filesystem timestamp tick as its
-  // object is missed. Sub-second stamps (APFS, ext4, btrfs, xfs) make the
-  // window vanishingly small; a whole-second filesystem would make an
-  // edit-and-rerun within one second able to link a stale object. (b) The link
-  // line is `$in`, which is argument-list bound — around 8k objects on a 1 MiB
-  // ARG_MAX. Both are far outside anything these designs reach; a build that
-  // does would want `rspfile`, and a `restat`/digest rule respectively.
-  const std::string ninja_file = simdir + "/build.ninja";
-  {
-    // Ninja path escaping (build statements): space, `:` and `$` are the only
-    // characters with meaning. Commands additionally go through /bin/sh, so
-    // single-input paths are double-quoted at the point of use. Paths are
-    // written ABSOLUTE: ninja runs with -C into the sim dir, and the file is
-    // also meant to be run by hand from anywhere.
-    auto nesc = [](const std::string& p) {
-      std::error_code ec_abs;
-      std::string     s = fs::absolute(p, ec_abs).string();
-      if (ec_abs) {
-        s = p;
-      }
-      std::string o;
-      o.reserve(s.size());
-      for (char c : s) {
-        if (c == ' ' || c == ':' || c == '$') {
-          o += '$';
-        }
-        o += c;
-      }
-      return o;
-    };
-    // `cflags` already holds shell-quoted -I paths; `$` would be eaten by ninja
-    // variable expansion before /bin/sh ever sees it, so double it.
-    std::string nflags;
-    for (char c : cflags) {
-      nflags += (c == '$') ? "$$" : std::string(1, c);
-    }
-    std::ofstream nf(ninja_file);
-    nf << "# Generated by `lhd sim`. Reproduces the exact host build lhd runs:\n"
-       << "#   ninja -C " << simdir_abs << "\n"
-       << "# Regenerated on every build, so edits here are lost.\n"
-       << "ninja_required_version = 1.3\n\n"
-       << "cxx = " << cxx << "\n"
-       << "cflags = " << nflags
-       << "\n\n"
-       // $in/$out are NOT shell-quoted here: ninja already shell-escapes each
-       // path as it expands them into `command`, so wrapping them would hand
-       // the compiler an argument containing literal quote characters. The
-       // `depfile` binding expands RAW instead, which is exactly why the
-       // `-MF $out.d` in the command still names the file ninja goes on to
-       // read. Rule bodies must be SPACE-indented and every rule must be
-       // declared before the first build statement that uses it.
-       << "rule cc\n"
-       << "  command = $cxx $cflags $pchflags -MD -MF $out.d -c $in -o $out\n"
-       << "  description = CC $out\n"
-       << "  depfile = $out.d\n"
-       << "  deps = gcc\n\n"
-       << "rule link\n"
-       << "  command = $cxx @$out.rsp -pthread -o $out\n"
-       << "  rspfile = $out.rsp\n"
-       << "  rspfile_content = $in_newline\n"
-       << "  description = LINK $out\n\n";
-    for (size_t i = 0; i < tus.size(); ++i) {
-      nf << "build " << nesc(objs[i]) << ": cc " << nesc(tus[i]);
-      if (!tu_pch[i].empty()) {
-        // lhd builds the PCH (stage 0 above); ninja only orders on it.
-        std::string flag;
-        for (char c : pch_flag(i)) {
-          flag += (c == '$') ? "$$" : std::string(1, c);
-        }
-        nf << " | " << nesc(tu_pch[i]) << "\n  pchflags = " << flag;
-      }
-      nf << "\n";
-    }
-    nf << "\nbuild " << nesc(exe) << ": link";
-    for (const auto& o : objs) {
-      nf << " " << nesc(o);
-    }
-    for (const auto& object : direct_objects) {
-      nf << " " << nesc(object);
-    }
-    nf << "\n\ndefault " << nesc(exe) << "\n";
-  }
-
-  // --set sim.ninja: "" (default) = use ninja when it is on PATH, else the
-  // built-in fan-out; false = never; true = require it (fail if absent);
-  // PATH = use that binary. The DEFAULT must stay "use it only if present":
-  // `lhd sim` runs inside other people's build sandboxes, and needing nothing
-  // but a host C++ compiler is exactly why the fast path exists at all. A hard
-  // ninja dependency would repeat the mistake the generated bazel project made.
-  std::string ninja_set;
-  for (const auto& [k, v] : opts.sets) {
-    if (k == "sim.ninja") {
-      ninja_set = v;
-    }
-  }
-  std::string ninja_bin;
-  if (ninja_set != "false" && ninja_set != "0" && ninja_set != "off") {
-    if (!ninja_set.empty() && ninja_set != "true" && ninja_set != "1" && ninja_set != "on") {
-      ninja_bin = ninja_set;  // an explicit path
-    } else {
-      int  probe_rc = 0;
-      auto found    = capture("command -v ninja 2>/dev/null", probe_rc);
-      if (probe_rc == 0) {
-        while (!found.empty() && (found.back() == '\n' || found.back() == '\r')) {
-          found.pop_back();
-        }
-        // Absolute only. A bare or `./`-relative hit would mean we picked up a
-        // `ninja` sitting in the caller's cwd — and bazel runs tests with `.`
-        // FIRST on PATH, so that is a live way to have the build hijacked by a
-        // file that merely shares a name with the tool.
-        if (!found.empty() && found.front() == '/') {
-          ninja_bin = found;
-        }
-      }
-    }
-    if (ninja_bin.empty() && (ninja_set == "true" || ninja_set == "1" || ninja_set == "on")) {
-      res.status        = "fail";
-      res.error_class   = "dependency";
-      res.error_message = "--set sim.ninja=true but no `ninja` on PATH (drop the flag to use the built-in parallel build)";
-      res.exit_code     = exit_code_for(res.error_class);
-      return;
-    }
-  }
 
   // fail_build LOG_BODY SHOWN — the one compile-failure exit, shared by both
   // build paths. Persists the full compiler output (in JSONL mode it was
@@ -2797,140 +2638,119 @@ void sim_command(Options& opts, Result& res) {
   };
 
   // "sim.hostbuild": compiling + linking the generated driver into drv.bin,
-  // whichever of the two build paths runs. Recorded on a failed build too (the
+  // Recorded on a failed build too (the
   // destructor fires on the early return) — a build that burned two minutes and
   // then failed is exactly the number an incremental study wants.
   Phase_timer build_phase(res, "sim.hostbuild");
-  if (!ninja_bin.empty()) {
-    // ninja owns compile AND link, and skips whatever is already up to date.
-    // Its own output is already per-edge buffered and ordered, so it is both
-    // the log body and what gets shown.
-    const std::string nc   = std::format("{} -C {} -j {} 2>&1", shell_quote(ninja_bin), shell_quote(simdir), jobs);
-    int               nrc  = 0;
-    auto              nout = capture(nc, nrc);
-    if (nrc != 0) {
-      fail_build(nc + "\n\n" + nout, nout);
-      return;
-    }
-  } else {
-    // Built-in fallback: compile every TU, `jobs` at a time, then link, SKIPPING
-    // whatever is already up to date. Staleness is decided exactly the way the
-    // generated build.ninja decides it, and for the same reason it is sound
-    // there (see the write-if-different note above): the compiler emits a
-    // depfile (`-MD -MF`), so the headers a TU actually read are KNOWN rather
-    // than guessed, and a stamp beside each output records the command line
-    // that produced it, so a changed flag rebuilds even when no input is newer.
-    //
-    // This path used to rebuild unconditionally, on the grounds that without
-    // depfiles it could not know which headers a TU read. That is true, and the
-    // fix is to ASK the compiler rather than to give up: a build sandbox with no
-    // `ninja` on PATH (bazel's test PATH is exactly that) otherwise pays a full
-    // recompile on every `lhd sim` against an unchanged workdir — seconds per
-    // run, on every run.
-    //
-    // Ninja's freshness rule is reproduced verbatim, including its one gap: an
-    // output is fresh when it is NOT OLDER than its inputs, so a source
-    // rewritten inside the same filesystem timestamp tick as its object is
-    // missed (sub-second stamps make that window vanishing on APFS/ext4/btrfs).
+  // Compile every TU, `jobs` at a time, then link, SKIPPING whatever is already
+  // up to date. Staleness is sound because emission upstream is
+  // write-if-different (see the note above): the compiler emits a
+  // depfile (`-MD -MF`), so the headers a TU actually read are KNOWN rather
+  // than guessed, and a stamp beside each output records the command line
+  // that produced it, so a changed flag rebuilds even when no input is newer.
+  //
+  // Freshness rule, with its one gap: an
+  // output is fresh when it is NOT OLDER than its inputs, so a source
+  // rewritten inside the same filesystem timestamp tick as its object is
+  // missed (sub-second stamps make that window vanishing on APFS/ext4/btrfs).
 
-    std::vector<std::string> cmds(tus.size()), outs(tus.size());
-    std::vector<int>         rcs(tus.size(), 0);
-    {
-      std::atomic<size_t> cursor{0};
-      auto                worker = [&] {
-        for (size_t i = cursor.fetch_add(1); i < tus.size(); i = cursor.fetch_add(1)) {
-          const std::string dep = objs[i] + ".d";
-          cmds[i]               = std::format("{} {}{} -MD -MF {} -c {} -o {} 2>&1",
-                                              shell_quote(cxx),
-                                              cflags,
-                                              tu_pch[i].empty() ? std::string{} : " " + pch_flag(i),
-                                              shell_quote(dep),
-                                              shell_quote(tus[i]),
-                                              shell_quote(objs[i]));
-          if (stamp_matches(objs[i], cmds[i])) {
-            auto prereqs = read_depfile(dep);
-            if (!prereqs.empty() && !tu_pch[i].empty()) {
-              prereqs.push_back(tu_pch[i]);
-            }
-            // An empty prereq list means no usable depfile (ninja consumes and
-            // deletes them), which is a rebuild, not a free pass.
-            if (!prereqs.empty() && not_older_than_all(objs[i], prereqs)) {
-              outs[i] = "(up to date)\n";
-              continue;
-            }
+  std::vector<std::string> cmds(tus.size()), outs(tus.size());
+  std::vector<int>         rcs(tus.size(), 0);
+  {
+    std::atomic<size_t> cursor{0};
+    auto                worker = [&] {
+      for (size_t i = cursor.fetch_add(1); i < tus.size(); i = cursor.fetch_add(1)) {
+        const std::string dep = objs[i] + ".d";
+        cmds[i]               = std::format("{} {}{} -MD -MF {} -c {} -o {} 2>&1",
+                                            shell_quote(cxx),
+                                            cflags,
+                                            tu_pch[i].empty() ? std::string{} : " " + pch_flag(i),
+                                            shell_quote(dep),
+                                            shell_quote(tus[i]),
+                                            shell_quote(objs[i]));
+        if (stamp_matches(objs[i], cmds[i])) {
+          auto prereqs = read_depfile(dep);
+          if (!prereqs.empty() && !tu_pch[i].empty()) {
+            prereqs.push_back(tu_pch[i]);
           }
-          drop_stamp(objs[i]);
-          outs[i] = capture(cmds[i], rcs[i]);
-          if (rcs[i] == 0) {
-            write_stamp(objs[i], cmds[i]);
+          // An empty prereq list means no usable depfile, which is a
+          // rebuild, not a free pass.
+          if (!prereqs.empty() && not_older_than_all(objs[i], prereqs)) {
+            outs[i] = "(up to date)\n";
+            continue;
           }
         }
-      };
-      livehd::run_workers(static_cast<size_t>(jobs), [&](size_t) { worker(); });
-    }
+        drop_stamp(objs[i]);
+        outs[i] = capture(cmds[i], rcs[i]);
+        if (rcs[i] == 0) {
+          write_stamp(objs[i], cmds[i]);
+        }
+      }
+    };
+    livehd::run_workers(static_cast<size_t>(jobs), [&](size_t) { worker(); });
+  }
 
-    // Every TU's command + output reaches build.log in TU order, so the log is
-    // the same whatever order the workers finished in. What is PRINTED is only
-    // the FIRST failing TU: one bad generated header fails all 18 identically,
-    // and eighteen copies of the one diagnostic bury it.
-    std::string log_body, shown;
-    size_t      n_failed = 0;
-    for (size_t i = 0; i < tus.size(); ++i) {
-      log_body += cmds[i] + "\n\n" + outs[i] + "\n";
-      if (rcs[i] != 0 && n_failed++ == 0) {
-        shown = outs[i];
-      }
+  // Every TU's command + output reaches build.log in TU order, so the log is
+  // the same whatever order the workers finished in. What is PRINTED is only
+  // the FIRST failing TU: one bad generated header fails all 18 identically,
+  // and eighteen copies of the one diagnostic bury it.
+  std::string log_body, shown;
+  size_t      n_failed = 0;
+  for (size_t i = 0; i < tus.size(); ++i) {
+    log_body += cmds[i] + "\n\n" + outs[i] + "\n";
+    if (rcs[i] != 0 && n_failed++ == 0) {
+      shown = outs[i];
     }
-    if (n_failed != 0) {
-      if (n_failed > 1) {
-        shown += std::format("({} more translation unit(s) also failed; see build.log)\n", n_failed - 1);
+  }
+  if (n_failed != 0) {
+    if (n_failed > 1) {
+      shown += std::format("({} more translation unit(s) also failed; see build.log)\n", n_failed - 1);
+    }
+    fail_build(log_body, shown);
+    return;
+  }
+
+  auto link_inputs = objs;
+  link_inputs.insert(link_inputs.end(), direct_objects.begin(), direct_objects.end());
+  // Thousands of independent colors exceed the shell's single-argument
+  // limit. Both host builders pass objects through a compiler response file.
+  std::string response;
+  for (const auto& object : link_inputs) {
+    response += '"';
+    for (const char c : object) {
+      if (c == '\\' || c == '"') {
+        response += '\\';
       }
-      fail_build(log_body, shown);
+      response += c;
+    }
+    response += "\"\n";
+  }
+  const auto response_path = exe + ".rsp";
+  {
+    std::ofstream out(response_path);
+    out << response;
+    if (!out) {
+      fail_build("cannot write simulator link response file " + response_path, "");
       return;
     }
-
-    auto link_inputs = objs;
-    link_inputs.insert(link_inputs.end(), direct_objects.begin(), direct_objects.end());
-    // Thousands of independent colors exceed the shell's single-argument
-    // limit. Both host builders pass objects through a compiler response file.
-    std::string response;
-    for (const auto& object : link_inputs) {
-      response += '"';
-      for (const char c : object) {
-        if (c == '\\' || c == '"') {
-          response += '\\';
-        }
-        response += c;
-      }
-      response += "\"\n";
+  }
+  const auto link = shell_quote(cxx) + " " + shell_quote("@" + response_path) + " -pthread -o " + shell_quote(exe) + " 2>&1";
+  const auto link_stamp = link + "\n" + response;
+  if (!stamp_matches(exe, link_stamp) || !not_older_than_all(exe, link_inputs)) {
+    drop_stamp(exe);
+    int  link_rc  = 0;
+    auto link_out = capture(link, link_rc);
+    if (link_rc != 0) {
+      fail_build(link + "\n\n" + link_out, link_out);
+      return;
     }
-    const auto response_path = exe + ".rsp";
-    {
-      std::ofstream out(response_path);
-      out << response;
-      if (!out) {
-        fail_build("cannot write simulator link response file " + response_path, "");
-        return;
-      }
-    }
-    const auto link = shell_quote(cxx) + " " + shell_quote("@" + response_path) + " -pthread -o " + shell_quote(exe) + " 2>&1";
-    const auto link_stamp = link + "\n" + response;
-    if (!stamp_matches(exe, link_stamp) || !not_older_than_all(exe, link_inputs)) {
-      drop_stamp(exe);
-      int  link_rc  = 0;
-      auto link_out = capture(link, link_rc);
-      if (link_rc != 0) {
-        fail_build(link + "\n\n" + link_out, link_out);
-        return;
-      }
-      write_stamp(exe, link_stamp);
-    }
+    write_stamp(exe, link_stamp);
   }
   build_phase.stop();
   tune.after_build();
 
   // The incremental build benchmark wants the real generated host-build path
-  // (including Ninja's depfile-based reuse) but deliberately no simulation.
+  // (including the depfile-based reuse) but deliberately no simulation.
   // Returning here leaves drv.bin as the successful endpoint and guarantees
   // that no testbench side effects or design-dependent cycle time enter it.
   if (compile_only) {

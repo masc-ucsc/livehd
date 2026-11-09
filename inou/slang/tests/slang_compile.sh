@@ -152,7 +152,7 @@ CHECK
       cat "$wd"/lg.log
       return 1
     }
-    ${LHD} sim lg:"$wd"/lg "$tb" --set sim.ninja=false --set sim.tune.profile=off \
+    ${LHD} sim lg:"$wd"/lg "$tb" --set sim.tune.profile=off \
       --set compile.upass.inline=false --set sim.unknown_zero=true \
       --workdir "$wd"/simrun --result-json "$wd"/simrun.json -q >"$wd"/simrun.log 2>&1 || {
       echo "FAIL(${base}): native simulation of $tb failed"

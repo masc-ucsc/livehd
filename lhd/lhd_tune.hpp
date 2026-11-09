@@ -62,7 +62,7 @@ bool rewrite_jsonl(const std::string& path, const std::vector<std::string>& line
 // ---- the workdir lock -------------------------------------------------------
 //
 // flock(2) on a lock file OUTSIDE the tree it protects (the tree gets swapped).
-// The descriptor is O_CLOEXEC: ninja, the host compiler and drv.bin (and its
+// The descriptor is O_CLOEXEC: the host compiler and drv.bin (and its
 // forked checkpoint children) must never inherit it, or the lock would outlive
 // lhd. Shared <-> exclusive conversion is not atomic (flock semantics), so a
 // caller that re-acquires EXCLUSIVE must re-validate what it saw before.

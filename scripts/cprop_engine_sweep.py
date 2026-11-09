@@ -481,7 +481,7 @@ def one(fixture, args, workroot):
             if res["engines"][engine]["rc"] != 0:
                 continue
             rj = f"{wd}/sim_{engine}.json"
-            cmd = [LHD, "sim", fixture, "--workdir", f"{wd}/simw_{engine}", "--set", "sim.tune.profile=off", "--set", "sim.ninja=false", "--set", "lhd.incremental=false", "--set", "lhd.jobs=2", "--set", f"compile.cprop.engine={engine}", "--result-json", rj, "-q"] + cost_sets(args.sim_cost, base_sets) + base_sets
+            cmd = [LHD, "sim", fixture, "--workdir", f"{wd}/simw_{engine}", "--set", "sim.tune.profile=off", "--set", "lhd.incremental=false", "--set", "lhd.jobs=2", "--set", f"compile.cprop.engine={engine}", "--result-json", rj, "-q"] + cost_sets(args.sim_cost, base_sets) + base_sets
             rc, out, ms, _ = run_timed(cmd, wd, args.timeout)
             row = res["engines"][engine]
             if rc != 0:

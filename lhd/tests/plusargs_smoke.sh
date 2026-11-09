@@ -26,7 +26,7 @@ test echo.defaults(cycles:U8=9) {
   if not std.testplusarg("cycles") { assert(cycles == 9) }
 }
 PRP
-"$LHD" sim "$W/args.prp" --workdir "$W/run" --set sim.ninja=false --set sim.tune.profile=off --result-json "$W/default.json"
+"$LHD" sim "$W/args.prp" --workdir "$W/run" --set sim.tune.profile=off --result-json "$W/default.json"
 DRV="$W/run/sim/drv.bin"
 "$LHD" sim "$W/args.prp" --run-only --workdir "$W/run" +cycles=4 +verbose '+file=a=b.hex' --seed 42 +seed=7 --set sim.tune.profile=off --result-json "$W/cli.json"
 "$DRV" +cycles=4 +cycles=8 +verbose '+file=a=b.hex' --seed 42 +seed=7 --result-json "$W/direct.json" > "$W/direct.log"

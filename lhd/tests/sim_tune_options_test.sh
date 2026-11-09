@@ -9,10 +9,10 @@
 #   - a `[sim.tune]` --config table works;
 #   - P0.1: flipping a sim.* knob keeps the compile cache warm;
 #   - the envelope carries `sim_tune` (disabled without a --workdir);
-#   - `lhd compile --emit-dir sim:` lists every generated .cpp in its BUILD
-#     (alwayslink, so the tune-id identity survives a static-archive link) and
-#     bakes the explicit vector; a rolled loop's every `*.llvm.o` (including
-#     `<stem>.native-loop.llvm.o`) is linked and hashed, and `*.inc` is a header;
+#   - `lhd compile --emit-dir sim:` hashes every generated .cpp in its
+#     manifest.json (no bazel BUILD is written) and bakes the explicit vector;
+#     a rolled loop's every `*.llvm.o` (including `<stem>.native-loop.llvm.o`)
+#     is hashed too;
 #   - sim.tune.profile_stride is range-checked at parse time like drv.bin does;
 #   - a hand-written sim.tune.file may spell dirty as a JSON bool and fence /
 #     live_words as JSON integers; any other JSON type is a config error naming
@@ -134,18 +134,18 @@ grep -q '"warnings":[1-9]' "$W/nowd_on.json" || fail "profile=on without a --wor
   || fail "compile --emit-dir sim: failed: $(cat "$W/es.json")"
 for f in "$W"/es/*.cpp; do
   b=$(basename "$f")
-  grep -qF "\"$b\"" "$W/es/BUILD" || fail "--emit-dir sim: BUILD does not compile $b"
+  grep -qF "\"$b\"" "$W/es/manifest.json" || grep -qF "\"${b%.cpp}\"" "$W/es/manifest.json" || fail "--emit-dir sim: manifest.json does not hash $b"
 done
 if ls "$W"/es/*.tune-id.cpp >/dev/null 2>&1; then
   grep -q 'tv1:d=off;f=none;lw=512;be=llvm' "$W"/es/*.tune-id.cpp || fail "--emit-dir sim: did not bake the explicit vector"
 fi
 
-grep -q "alwayslink = True" "$W/es/BUILD" || fail "--emit-dir sim: BUILD must alwayslink the sim library (tune-id identity)"
+[ ! -e "$W/es/BUILD" ] && [ ! -e "$W/es/MODULE.bazel" ] || fail "--emit-dir sim: must not write a bazel project"
 
 # Rolled loops under the default llvm backend (two, so they fuse) write a
 # `<stem>.native-loop.llvm.o` (it defines the `__lhd_loop_<mod>` its adapter
-# calls) and `#include` `.inc` adapters: every object must be a BUILD input and
-# the headers must cover `*.inc`.
+# calls) and `#include` `.inc` adapters: every object must be hashed in the
+# manifest.
 cat >"$W/rolled.prp" <<'EOF'
 mod rolled(data:U32, select_a:U4, select_b:U4) -> (a:U8@[0], b:U8@[0]) {
   mut carry_a:U8 = 128
@@ -169,10 +169,8 @@ EOF
 ls "$W"/el/*.native-loop.llvm.o >/dev/null 2>&1 || fail "--emit-dir sim: the rolled loop emitted no native-loop object"
 for f in "$W"/el/*.llvm.o; do
   b=$(basename "$f")
-  grep -qF "\"$b\"" "$W/el/BUILD" || fail "--emit-dir sim: BUILD does not link $b"
   grep -qF "\"$b\"" "$W/el/manifest.json" || fail "--emit-dir sim: manifest.json does not hash $b"
 done
-grep -qF '"*.inc"' "$W/el/BUILD" || fail "--emit-dir sim: BUILD hdrs must declare the .inc adapters"
 
 # ---- sim.tune.file: JSON types, depfile and envelope inputs ----------------------------
 echo '[{"class":"livehd.sim.tuning","schema":"lhd-sim-tune-file-1","knobs":{"dirty":true,"fence":0}}]' >"$W/tf_json.json"
@@ -195,4 +193,4 @@ for bad in '"dirty":1' '"fence":1.5' '"backend":true' '"live_words":null'; do
   grep -q "bad knob: $knob" "$W/r.json" || fail "tune file knob $bad: the error does not name $knob: $(cat "$W/r.json")"
 done
 
-echo "PASS: sim.tune options, renames, grammar, [sim.tune] config, P0.1, envelope, emit-dir BUILD, tune-file types + inputs"
+echo "PASS: sim.tune options, renames, grammar, [sim.tune] config, P0.1, envelope, emit-dir manifest, tune-file types + inputs"

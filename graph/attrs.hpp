@@ -354,6 +354,18 @@ struct runtime_check_t {
 };
 inline constexpr runtime_check_t runtime_check{};
 
+// On a Memory node: pass.bitwidth proved every port address inside [0, size)
+// (any front end; see Bitwidth::check_mem_address). The proof is structural --
+// a loop index range, a guard clamp -- and later optimization (aegraph) may
+// restructure the cone it was made on without changing its meaning, so the
+// verdict is recorded on the node and carried with it. Absence means "not yet
+// proven"; the value is unused.
+struct mem_address_proven_t {
+  using value_type = uint32_t;
+  using storage    = hhds::flat_storage;
+};
+inline constexpr mem_address_proven_t mem_address_proven{};
+
 // On an arithmetic ware graph's input node: canonical specialization
 // descriptor, including every port's width/sign and the section options.
 // Synthesis preserves this boundary; STA/LEC may flatten the implementation.
@@ -526,6 +538,8 @@ inline constexpr Attr_kind attr_kind<simulation_init_t> = Attr_kind::node;
 template <>
 inline constexpr Attr_kind attr_kind<legalize_inlined_t> = Attr_kind::node;
 template <>
+inline constexpr Attr_kind attr_kind<mem_address_proven_t> = Attr_kind::node;
+template <>
 inline constexpr Attr_kind attr_kind<comb_reach_t> = Attr_kind::node;
 template <>
 inline constexpr Attr_kind attr_kind<proven_t> = Attr_kind::node;
@@ -608,6 +622,7 @@ inline constexpr bool carry_on_rebuild<route_strings_v1_t> = false;
   X(match)                          \
   X(proven)                         \
   X(runtime_check)                  \
+  X(mem_address_proven)             \
   X(ware_module)                    \
   X(specialization_origin)          \
   X(memory_module)                  \

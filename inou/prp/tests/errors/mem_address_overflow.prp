@@ -1,0 +1,16 @@
+/*
+:name: mem_address_overflow
+:type: error
+:tolg: 1
+:error: address may fall outside
+:help: mask the address
+*/
+// A memory/array port address must be proven inside [0, size), exactly like an
+// assignment that may overflow its width: a u3 index into 4 lanes can reach 7,
+// so the programmer masks or bounds it (`lanes[idx & 3]`). There is no run-time
+// out-of-range read or dropped write after pass.bitwidth.
+pub comb mem_address_overflow(idx:U3) -> (o:U8) {
+  mut lanes:[4]U8 = 0
+  lanes[0] = 0x11
+  o = lanes[idx]
+}

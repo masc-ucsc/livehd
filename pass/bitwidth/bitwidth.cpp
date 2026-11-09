@@ -3,6 +3,7 @@
 #include "bitwidth.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <format>
 #include <functional>
@@ -480,9 +481,80 @@ void Bitwidth::process_mux(hhds::Node_class& node, Inp_pins& inp_edges) {
       not_finished = true;
       return;
     }
+    // Guard refinement: `sel = (x < K)` selecting `x` itself. On the true arm
+    // x < K; on the false arm x >= K. This is the shape the front ends route a
+    // memory address through (the generated mask), so a guarded or imported
+    // access has a provable range. Sound for any mux of this shape.
+    if (inp_edges.size() == 3 && (e.get_port_id() == 1 || e.get_port_id() == 2)) {
+      Bitwidth_range arm = it->second;
+      if (const auto refined = refine_by_guard(node, e.get_driver_pin(), e.get_port_id() == 2, arm)) {
+        arm = *refined;
+      }
+      bw.set_wider_range(arm);
+      continue;
+    }
     bw.set_wider_range(it->second);
   }
   adjust_bw(node.create_driver_pin(0), bw);
+}
+
+std::optional<Bitwidth_range> Bitwidth::refine_by_guard(const hhds::Node_class& mux, const hhds::Pin_class& arm_driver,
+                                                        bool true_arm, const Bitwidth_range& range) {
+  const auto sel        = livehd::graph_util::find_sink_pin(mux, "s");
+  const auto sel_driver = sel.is_invalid() ? hhds::Pin_class{} : sel.get_driver_pin();
+  if (sel_driver.is_invalid() || sel_driver.is_const() || type_op_of(sel_driver.get_master_node()) != Ntype_op::LT) {
+    return std::nullopt;
+  }
+  const auto lt_node = sel_driver.get_master_node();
+  const auto x       = get_driver_of_sink_name(lt_node, "as");
+  const auto k       = get_driver_of_sink_name(lt_node, "bs");
+  if (x.is_invalid() || k.is_invalid() || !k.is_const() || !const_of(k).is_just_i64()) {
+    return std::nullopt;
+  }
+  // LT compares mathematical integers (the IR never wraps a comparison operand),
+  // so `x < K` bounds `x` itself whatever the operand widths or signedness.
+  // The arm is `x + c` (c a constant offset; c == 0 is `x` itself) -- e.g. the
+  // guard `i < 3` over the address `i + 1`. Anything else says nothing.
+  int64_t offset = 0;
+  if (arm_driver == x) {
+    offset = 0;
+  } else if (!arm_driver.is_const() && type_op_of(arm_driver.get_master_node()) == Ntype_op::Sum) {
+    bool dynamic_seen = false;
+    for (const auto& operand : livehd::graph_util::inp_sink_drivers(arm_driver.get_master_node())) {
+      // Even sink pids add, odd ones subtract (process_sum).
+      const int64_t sign = (operand.get_port_id() % 2 == 0) ? 1 : -1;
+      if (operand.driver.is_const()) {
+        if (!const_of(operand.driver).is_just_i64()) {
+          return std::nullopt;
+        }
+        offset += sign * const_of(operand.driver).to_just_i64();
+      } else if (!dynamic_seen && sign == 1 && operand.driver == x) {
+        dynamic_seen = true;
+      } else {
+        return std::nullopt;
+      }
+    }
+    if (!dynamic_seen) {
+      return std::nullopt;
+    }
+  } else {
+    return std::nullopt;
+  }
+  if (!range.get_min().is_just_i64() || !range.get_max().is_just_i64()) {
+    return std::nullopt;
+  }
+  const auto bound = const_of(k).to_just_i64();
+  int64_t    lo    = range.get_min().to_just_i64();
+  int64_t    hi    = range.get_max().to_just_i64();
+  if (true_arm) {
+    hi = std::min(hi, bound - 1 + offset);  // x < K  =>  x + c <= K - 1 + c
+  } else {
+    lo = std::max(lo, bound + offset);  // x >= K  =>  x + c >= K + c
+  }
+  if (lo > hi) {
+    return std::nullopt;  // an unreachable arm: keep the unrefined range
+  }
+  return Bitwidth_range(lo, hi);
 }
 
 // Hotmux controls have independent one-bit widths; union only value arms.
@@ -1642,7 +1714,11 @@ void Bitwidth::process_attr_set_bw(hhds::Node_class& node_attr, Bitwidth::Attr a
       bw.set_ubits_range(bits);
     }
 
-    if (bw.get_sbits() <= bits) {
+    // An always-positive value fits `bits` unsigned when its MAGNITUDE does:
+    // get_sbits() also counts a sign bit, so [1..7] (sbits 4) would be judged
+    // not to fit u3 and get a redundant mask whose output range widens back to
+    // [0..7], losing the precision a later bound check (memory addresses) needs.
+    if ((bw.is_always_positive() ? bw.get_ubits() : bw.get_sbits()) <= bits) {
       if (parent_dpin.is_invalid()) {
         parent_dpin    = create_const(*current_graph, *Dlop::create_integer(0));
         parent_pending = false;
@@ -1796,6 +1872,193 @@ void Bitwidth::debug_unconstrained_msg(hhds::Node_class& node, const hhds::Pin_c
   (void)dpin;
 }
 
+// The loop range of body graph `g`: by gid, else -- a specialized clone
+// (`<body>__k<hash>`, created after the parent's loop Sub was read) is the same
+// loop with some inputs bound, so it keeps its base body's index range.
+std::optional<Bitwidth::Loop_index> Bitwidth::find_loop_index(hhds::Graph* g) {
+  const auto lookup = [&]() -> std::optional<Loop_index> {
+    if (const auto it = loop_indices.find(g->get_gid()); it != loop_indices.end()) {
+      if (loop_index_conflict.contains(g->get_gid())) {
+        return std::nullopt;
+      }
+      return it->second;
+    }
+    // By name: the graph itself, or -- a specialized clone `<body>__k<hash>` is
+    // the same loop with some inputs bound -- its base body.
+    std::string name{g->get_name()};
+    std::vector<std::string> candidates{name};
+    const auto k = name.rfind("__k");
+    if (k != std::string::npos && k + 3 < name.size()
+        && std::ranges::all_of(name.begin() + static_cast<std::ptrdiff_t>(k) + 3, name.end(), [](unsigned char c) { return std::isxdigit(c); })) {
+      candidates.push_back(name.substr(0, k));
+    }
+    for (const auto& c : candidates) {
+      if (loop_index_name_conflict.contains(c)) {
+        return std::nullopt;
+      }
+      if (const auto it = loop_indices_by_name.find(c); it != loop_indices_by_name.end()) {
+        return it->second;
+      }
+    }
+    return std::nullopt;
+  };
+  if (auto found = lookup()) {
+    return found;
+  }
+  // The pass may run on a subset of graphs (clones alone, or bodies without
+  // their parents), so look at every loop in the library once.
+  if (!library_scanned) {
+    library_scanned = true;
+    if (const auto io = g->get_io(); io && io->get_library() != nullptr) {
+      auto* lib = io->get_library();
+      for (const auto other : lib->all_gids()) {
+        if (const auto graph = lib->get_graph(other); graph) {
+          collect_loop_indices(graph.get());
+        }
+      }
+    }
+    return lookup();
+  }
+  return std::nullopt;
+}
+
+void Bitwidth::collect_loop_indices(hhds::Graph* g) {
+  if (g == nullptr) {
+    return;
+  }
+  for (auto node : g->body().nodes()) {
+    if (!node.is_loop_subnode()) {
+      continue;
+    }
+    const auto desc = node.subnode_loop();
+    if (!desc || !desc->index_input || desc->count == 0) {
+      continue;
+    }
+    const __int128 first = desc->first;
+    const __int128 last  = first + static_cast<__int128>(desc->step) * (static_cast<__int128>(desc->count) - 1);
+    const auto     lo128 = std::min(first, last);
+    const auto     hi128 = std::max(first, last);
+    if (lo128 < INT64_MIN || hi128 > INT64_MAX) {
+      continue;
+    }
+    const auto gid = node.get_subnode_gid();
+    const auto lo  = static_cast<int64_t>(lo128);
+    const auto hi  = static_cast<int64_t>(hi128);
+    std::string index_name;
+    if (const auto io = node.get_subnode_io(); io) {
+      for (const auto& d : io->get_input_pin_decls()) {
+        if (d.port_id == *desc->index_input) {
+          index_name = d.name;
+        }
+      }
+    }
+    if (index_name.empty()) {
+      continue;
+    }
+    if (const auto callee_io = node.get_subnode_io(); callee_io) {
+      const std::string callee_name{callee_io->get_name()};
+      const auto        nit = loop_indices_by_name.find(callee_name);
+      if (nit == loop_indices_by_name.end()) {
+        loop_indices_by_name.emplace(callee_name, Loop_index{*desc->index_input, index_name, lo, hi});
+      } else if (nit->second.name != index_name) {
+        loop_index_name_conflict.insert(callee_name);
+      } else {
+        nit->second.lo = std::min(nit->second.lo, lo);
+        nit->second.hi = std::max(nit->second.hi, hi);
+      }
+    }
+    const auto it  = loop_indices.find(gid);
+    if (it == loop_indices.end()) {
+      loop_indices.emplace(gid, Loop_index{*desc->index_input, index_name, lo, hi});
+    } else if (it->second.name != index_name) {
+      loop_index_conflict.insert(gid);
+    } else {
+      it->second.lo = std::min(it->second.lo, lo);
+      it->second.hi = std::max(it->second.hi, hi);
+    }
+  }
+}
+
+// Every Memory port address -- read or write, whichever front end built the
+// graph -- must be PROVEN inside [0, size), exactly like an assignment that may
+// overflow its declared width: the programmer (or the reader that translates
+// the source) masks or bounds the index, otherwise it is a compile error. There
+// is no run-time fallback: out-of-range accesses do not exist after this pass.
+void Bitwidth::check_mem_address(const hhds::Node_class& node) {
+  if (allow_unproven_mem_address || node.attr(livehd::attrs::mem_address_proven).has()) {
+    return;  // proven on an earlier run: later passes may restructure the cone, not change its meaning
+  }
+  const auto size_pin = get_driver_of_sink_name(node, "size");
+  if (size_pin.is_invalid() || !size_pin.is_const() || !const_of(size_pin).is_just_i64()) {
+    return;
+  }
+  const auto size = const_of(size_pin).to_just_i64();
+  if (size <= 0) {
+    return;
+  }
+  bool all_ranged = true;  // proven only if EVERY address driver was ranged and fits
+  for (const auto& in_pin : node.inp_sorted_pins()) {
+    const auto name = Ntype::get_sink_name(Ntype_op::Memory, static_cast<int>(in_pin.get_port_id()) % Ntype::Memory_port_stride);
+    if (!str_tools::ends_with(name, "addr")) {
+      continue;
+    }
+    for (const auto& idx : in_pin.get_driver_pins()) {
+      std::optional<Bitwidth_range> range;
+      if (idx.is_const()) {
+        if (const_of(idx).is_numeric()) {
+          range = Bitwidth_range(const_of(idx));
+        }
+      } else if (const auto it = bwmap.find(idx.get_class_index()); it != bwmap.end()) {
+        range = it->second;
+      }
+      if (!range) {
+        all_ranged = false;  // never ranged: an earlier diagnostic owns it, and it is NOT proven
+        continue;
+      }
+      const bool max_ok = range->get_max().is_just_i64() && range->get_max().to_just_i64() < size;
+      const bool min_ok = range->get_min().is_just_i64() && range->get_min().to_just_i64() >= 0;
+      if (max_ok && min_ok) {
+        continue;
+      }
+      livehd::diag::Span span;
+      const auto         source = node.attr(hhds::attrs::srcid);
+      if (source.has() && source.get() != 0) {
+        span = current_graph->source_locator().resolve_span(source.get());
+      }
+      livehd::diag::err("pass.bitwidth", "mem-address-overflow", "bitwidth")
+          .at(span)
+          .msg("memory {} port '{}' address may fall outside [0, {}): its range is [{}..{}]; mask or bound the address",
+               debug_name(node),
+               name,
+               size,
+               range->get_min().to_pyrope(),
+               range->get_max().to_pyrope())
+          .hint("mask the address (`mem[i & (N - 1)]`) or bound it (`mem[i % N]`) so its range fits the size")
+          .note(std::format("in definition '{}'", current_graph->get_name()))
+          .note([&] {
+            // The address driver's own operands and their proven ranges: the
+            // widening is always one link upstream of the memory.
+            std::string t = std::format("address driver {} ({})", debug_name(idx.get_master_node()),
+                                        Ntype::get_name(type_op_of(idx.get_master_node())));
+            for (const auto& sink : idx.get_master_node().inp_pins_snapshot()) {
+              for (const auto& d : sink.get_driver_pins()) {
+                const auto it = bwmap.find(d.get_class_index());
+                t += std::format("; {}({}{})=[{}..{}]", debug_name(d.get_master_node()), Ntype::get_name(type_op_of(d.get_master_node())),
+                                 is_graph_input_pin(d) ? ",graph-input" : "",
+                                 it == bwmap.end() ? std::string{"?"} : it->second.get_min().to_pyrope(),
+                                 it == bwmap.end() ? std::string{"?"} : it->second.get_max().to_pyrope());
+              }
+            }
+            return t;
+          }())
+          .fatal();
+    }
+  }
+  if (all_ranged) {
+    node.attr(livehd::attrs::mem_address_proven).set(uint32_t{1});
+  }
+}
+
 void Bitwidth::bw_pass(hhds::Graph* g) {
   current_graph = g;
   // bwmap is keyed by hhds::Class_index, the per-body node id, which is
@@ -1846,7 +2109,13 @@ void Bitwidth::bw_pass(hhds::Graph* g) {
           b      = bits_of(pin);
           unsign = livehd::graph_util::is_unsign(pin);
         }
-        if (b) {
+        // A compact-loop body's index input holds exactly the loop's own
+        // induction values, not every value its port width could carry -- and a
+        // specialized clone may not declare a width for it at all.
+        const auto li = find_loop_index(g);
+        if (li && li->name == d.name) {
+          bwmap.insert_or_assign(pin.get_class_index(), Bitwidth_range(li->lo, li->hi));
+        } else if (b) {
           Bitwidth_range bw;
           if (unsign) {
             bw.set_ubits_range(b);
@@ -1961,6 +2230,31 @@ void Bitwidth::bw_pass(hhds::Graph* g) {
           } else {
             bw.set_sbits_range(bits);
           }
+          // `a % b` (truncated: the remainder's sign follows the dividend) is
+          // bounded by the divisor, not just by the stamped width: for a
+          // divisor that cannot be zero, |a % b| <= max|b| - 1 and |a % b| <=
+          // |a|. Memory addresses such as `(i + 1) % 5` depend on this to be
+          // proven in range. The stamped width stays an upper bound.
+          if (op == Ntype_op::Rem) {
+            const auto ra = bwmap.find(get_driver_of_sink_name(node, "a").get_class_index());
+            const auto rb = bwmap.find(get_driver_of_sink_name(node, "b").get_class_index());
+            if (ra != bwmap.end() && rb != bwmap.end() && ra->second.get_min().is_just_i64() && ra->second.get_max().is_just_i64()
+                && rb->second.get_min().is_just_i64() && rb->second.get_max().is_just_i64()) {
+              const int64_t alo = ra->second.get_min().to_just_i64();
+              const int64_t ahi = ra->second.get_max().to_just_i64();
+              const int64_t blo = rb->second.get_min().to_just_i64();
+              const int64_t bhi = rb->second.get_max().to_just_i64();
+              if (blo > 0 || bhi < 0) {  // the divisor can never be zero
+                const int64_t m  = std::max(blo < 0 ? -blo : blo, bhi < 0 ? -bhi : bhi) - 1;
+                const int64_t hi = ahi > 0 ? std::min(ahi, m) : 0;
+                const int64_t lo = alo < 0 ? std::max(alo, -m) : 0;
+                Bitwidth_range refined(lo, hi);
+                if (!refined.get_min().lt_op(bw.get_min())->is_known_true() && !refined.get_max().gt_op(bw.get_max())->is_known_true()) {
+                  bw = refined;
+                }
+              }
+            }
+          }
           bwmap.insert_or_assign(dpin.get_class_index(), bw);
           continue;
         }
@@ -2073,6 +2367,14 @@ void Bitwidth::bw_pass(hhds::Graph* g) {
   // removal below rewires lane sinks, so checking before it would miss exactly
   // the violations it can introduce.
   if (!not_finished) {
+    // BEFORE the mask removal and the rewrite below: they re-stamp pins from
+    // their declared widths, which forgets the tighter inferred ranges (a loop
+    // index, a guarded or `%`-reduced address) this check is built on.
+    for (auto node : g->body().nodes()) {
+      if (type_op_of(node) == Ntype_op::Memory) {
+        check_mem_address(node);
+      }
+    }
     remove_mask_identities(g);
     Bitwidth_rewrite{}.run(
         *g,

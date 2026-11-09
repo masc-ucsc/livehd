@@ -136,6 +136,10 @@ public:
     bool     packed_value       = false;
     // The scheduler has placed reads and writes in memory-semantic order.
     bool     direct_write       = false;
+    // pass.bitwidth proved every port address of this memory inside [0, size)
+    // (attrs::mem_address_proven): no range check, out-of-range select, unknown-
+    // address path or undefined-access report is emitted for it.
+    bool     address_proven     = false;
     // sim.warn_undefined: resource of this port's __lhd_undef_site (an
     // enabled write or a read outside [0, size)), or no_site.
     size_t   warn_site          = no_site;

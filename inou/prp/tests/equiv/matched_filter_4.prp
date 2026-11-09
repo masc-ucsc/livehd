@@ -55,7 +55,9 @@ pub mod top(x:S4, c_in:S4, load:Bool) -> (y:S12@[0]) {
       if j >= (N >> (lvl + 1)) {
         continue
       }
-      v[j] = add_node(a=v[2 * j], b=v[2 * j + 1])
+      // The `continue` above keeps 2j+1 < N, but that is a guard on `lvl`, not a
+      // range: mask the index so the access is provably inside the array.
+      v[j] = add_node(a=v[(2 * j) & (N - 1)], b=v[(2 * j + 1) & (N - 1)])
     }
   }
   y = v[0]

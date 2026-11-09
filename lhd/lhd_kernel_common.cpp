@@ -40,6 +40,7 @@
 #include "hhds/tree.hpp"
 #include "host_mem.hpp"
 #include "job_manager.hpp"
+#include "bitwidth.hpp"
 #include "lhd_kernel_internal.hpp"
 #include "lhd_sim_tune_session.hpp"
 #include "lnast.hpp"
@@ -49,6 +50,8 @@
 #include "pass/place/sdc_subset.hpp"
 #include "perf_tracing.hpp"
 #include "rapidjson/document.h"
+#include "rapidjson/stringbuffer.h"
+#include "rapidjson/writer.h"
 #include "satopt_stages.hpp"
 #include "str_tools.hpp"
 #include "synth_policy.hpp"
@@ -723,6 +726,16 @@ void run_step(std::string_view method, Eprp_var& var, const Eprp_var::Eprp_dict&
   // One perfetto slice per pipeline step (`--define profiling=1` builds; a
   // plain build compiles this away), so the trace timeline reads as the recipe.
   TRACE_EVENT("pass", perfetto::DynamicString{std::string(method)});
+  // A sim built with sim.debug=true keeps unproven memory addresses and checks
+  // them at run time; any other build must prove them. Set for EVERY step: a
+  // compile-cache hit skips pass.bitwidth, yet cgen's own bitwidth runs
+  // (specialize) must still agree.
+  Bitwidth::allow_unproven_mem_address = false;
+  for (const auto& [k, v] : opts.sets) {
+    if (k == "sim.debug") {
+      Bitwidth::allow_unproven_mem_address = (v == "true" || v == "1" || v == "on");
+    }
+  }
   auto               log = next_log_path(opts, method);
   std::exception_ptr failure;
   // Named BEFORE the step runs: if it dies on a signal there is no later
@@ -2151,7 +2164,99 @@ void write_unit_meta(std::ofstream& ofs, const Lnast& ln) {
   }
 }
 
+// ---- manifest.json: one file for the unit index AND the rebuild metadata -----
+//
+// Every generated directory (`sim/`, `synth/`, an emit dir) keeps ONE
+// manifest.json. Besides the unit index it carries named entries the commands
+// need to rebuild incrementally: the recorded `invocation` (what to replay) and
+// any command-owned result entry (e.g. `synth`). Entries are kept across
+// rewrites: write_manifest preserves every top-level key it does not own, and
+// manifest_put replaces exactly one.
+namespace {
+constexpr std::string_view kManifestOwnedKeys[] = {"schema_version", "kind", "units"};
+
+bool manifest_owns(std::string_view key) {
+  return std::ranges::find(kManifestOwnedKeys, key) != std::end(kManifestOwnedKeys);
+}
+
+std::optional<rapidjson::Document> manifest_read(const std::string& dir) {
+  const auto text = livehd::file_utils::read_file(dir + "/manifest.json");
+  if (!text) {
+    return std::nullopt;
+  }
+  rapidjson::Document doc;
+  doc.Parse(text->c_str());
+  if (doc.HasParseError() || !doc.IsObject()) {
+    return std::nullopt;
+  }
+  return doc;
+}
+
+void manifest_write(const std::string& dir, const rapidjson::Document& doc) {
+  rapidjson::StringBuffer                    sb;
+  rapidjson::Writer<rapidjson::StringBuffer> w(sb);
+  doc.Accept(w);
+  std::ofstream ofs(dir + "/manifest.json");
+  if (!ofs.is_open()) {
+    throw Lhd_error{"config", std::format("could not write {}/manifest.json", dir), ""};
+  }
+  ofs << std::string_view{sb.GetString(), sb.GetSize()} << "\n";
+}
+}  // namespace
+
+// Set (or replace) one named entry of DIR/manifest.json to the JSON text
+// `json_value`, keeping every other entry (the unit index included).
+void manifest_put(const std::string& dir, std::string_view key, std::string_view json_value) {
+  auto doc = manifest_read(dir);
+  if (!doc) {
+    doc.emplace();
+    doc->SetObject();
+    doc->AddMember("schema_version", 1, doc->GetAllocator());
+  }
+  rapidjson::Document value;
+  value.Parse(std::string(json_value).c_str());
+  if (value.HasParseError()) {
+    throw Lhd_error{"internal", std::format("manifest entry '{}' is not valid JSON", key), ""};
+  }
+  rapidjson::Value k(std::string(key).c_str(), doc->GetAllocator());
+  doc->RemoveMember(std::string(key).c_str());
+  rapidjson::Value v;
+  v.CopyFrom(value, doc->GetAllocator());
+  doc->AddMember(k, v, doc->GetAllocator());
+  manifest_write(dir, *doc);
+}
+
+// The JSON text of one named entry, if DIR/manifest.json holds it.
+std::optional<std::string> manifest_get(const std::string& dir, std::string_view key) {
+  const auto doc = manifest_read(dir);
+  if (!doc) {
+    return std::nullopt;
+  }
+  const auto it = doc->FindMember(std::string(key).c_str());
+  if (it == doc->MemberEnd()) {
+    return std::nullopt;
+  }
+  rapidjson::StringBuffer                    sb;
+  rapidjson::Writer<rapidjson::StringBuffer> w(sb);
+  it->value.Accept(w);
+  return std::string{sb.GetString(), sb.GetSize()};
+}
+
 void write_manifest(const std::string& dir, std::string_view kind, const std::vector<Manifest_unit>& units) {
+  // Entries this writer does not own (the recorded invocation, command results)
+  // survive the rewrite of the unit index.
+  std::vector<std::pair<std::string, std::string>> kept;
+  if (const auto old = manifest_read(dir)) {
+    for (auto it = old->MemberBegin(); it != old->MemberEnd(); ++it) {
+      if (manifest_owns(it->name.GetString())) {
+        continue;
+      }
+      rapidjson::StringBuffer                    sb;
+      rapidjson::Writer<rapidjson::StringBuffer> w(sb);
+      it->value.Accept(w);
+      kept.emplace_back(it->name.GetString(), std::string{sb.GetString(), sb.GetSize()});
+    }
+  }
   std::ofstream ofs(dir + "/manifest.json");
   if (!ofs.is_open()) {
     throw Lhd_error{"config", std::format("could not write {}/manifest.json", dir), ""};
@@ -2208,6 +2313,111 @@ void write_manifest(const std::string& dir, std::string_view kind, const std::ve
     ofs << "}";
   }
   ofs << "]}\n";
+  ofs.close();
+  for (const auto& [key, json] : kept) {
+    manifest_put(dir, key, json);
+  }
+}
+
+// ---- recorded invocation -----------------------------------------------------
+//
+// A generated command directory (`<workdir>/sim`, `<workdir>/synth`) records the
+// command line that produced it as the manifest's `invocation` entry. Running
+// the same command with no sources from inside that directory replays it, so the
+// original sources are re-read and the incremental machinery runs exactly as if
+// the full command had been typed again. Arguments given on the replay are
+// appended to the recorded ones, so they win.
+void record_invocation(const Options& opts, std::string_view command, const std::string& workdir, const std::string& dir) {
+  std::error_code ec;
+  rapidjson::StringBuffer                    sb;
+  rapidjson::Writer<rapidjson::StringBuffer> w(sb);
+  w.StartObject();
+  w.Key("command");
+  w.String(std::string(command).c_str());
+  w.Key("cwd");
+  w.String(std::filesystem::current_path(ec).string().c_str());
+  w.Key("workdir");
+  w.String(std::filesystem::absolute(workdir, ec).string().c_str());
+  w.Key("argv");
+  w.StartArray();
+  // Everything after argv[0] except the mode switches that are the replay's own
+  // choice and the workdir (re-supplied on replay).
+  const auto& argv = opts.invocation_argv;
+  for (size_t i = 1; i < argv.size(); ++i) {
+    const auto& a = argv[i];
+    if (a == "--setup-only" || a == "--run-only") {
+      continue;
+    }
+    if (a == "--workdir") {
+      ++i;
+      continue;
+    }
+    if (a.starts_with("--workdir=")) {
+      continue;
+    }
+    w.String(a.c_str());
+  }
+  w.EndArray();
+  w.EndObject();
+  manifest_put(dir, "invocation", std::string_view{sb.GetString(), sb.GetSize()});
+}
+
+bool replay_recorded_invocation(Options& opts) {
+  if ((opts.command != "sim" && opts.command != "synth") || !opts.files.empty() || !opts.ins.empty() || !opts.in_dirs.empty()) {
+    return false;
+  }
+  std::error_code ec;
+  const auto      cwd    = std::filesystem::current_path(ec).string();
+  const auto      record = manifest_get(cwd, "invocation");
+  if (!record) {
+    return false;
+  }
+  rapidjson::Document doc;
+  doc.Parse(record->c_str());
+  const auto bad = [&] {
+    throw Lhd_error{"config",
+                    std::format("{}/manifest.json holds an unreadable recorded invocation", cwd),
+                    "rerun the original command"};
+  };
+  if (doc.HasParseError() || !doc.IsObject() || !doc.HasMember("command") || !doc["command"].IsString() || !doc.HasMember("cwd")
+      || !doc["cwd"].IsString() || !doc.HasMember("workdir") || !doc["workdir"].IsString() || !doc.HasMember("argv")
+      || !doc["argv"].IsArray()) {
+    bad();
+  }
+  if (opts.command != doc["command"].GetString()) {
+    return false;  // e.g. `lhd synth` inside a sim dir: nothing to replay
+  }
+  std::vector<std::string> args;
+  args.emplace_back(opts.invocation_argv.empty() ? std::string{"lhd"} : opts.invocation_argv[0]);
+  for (const auto& v : doc["argv"].GetArray()) {
+    if (v.IsString()) {
+      args.emplace_back(v.GetString());
+    }
+  }
+  args.emplace_back("--workdir");
+  args.emplace_back(doc["workdir"].GetString());
+  bool command_word_skipped = false;
+  for (size_t i = 1; i < opts.invocation_argv.size(); ++i) {
+    if (!command_word_skipped && opts.invocation_argv[i] == opts.command) {
+      command_word_skipped = true;
+      continue;
+    }
+    args.push_back(opts.invocation_argv[i]);
+  }
+  // Sources were recorded as typed, so they resolve from the original cwd.
+  std::filesystem::current_path(doc["cwd"].GetString(), ec);
+  if (ec) {
+    throw Lhd_error{"missing_file",
+                    std::format("the recorded invocation ran in {}, which cannot be entered: {}", doc["cwd"].GetString(), ec.message()),
+                    "rerun the original command"};
+  }
+  std::vector<char*> argv_ptrs;
+  for (auto& a : args) {
+    argv_ptrs.push_back(a.data());
+  }
+  opts          = parse_args(static_cast<int>(argv_ptrs.size()), argv_ptrs.data());
+  opts.replayed = true;
+  return true;
 }
 
 // Pair-form adapter for the per-unit-file emit kinds (pyrope/verilog/
@@ -2949,7 +3159,7 @@ std::string find_header_in_runfiles(std::string_view header) {
   return result;
 }
 
-// hlop checkout for the generated MODULE.bazel:
+// hlop checkout for the sim host build:
 // `--set sim.hlop_dir=DIR` wins (point the sim build at a WORKING hlop
 // checkout — the reason to keep this knob is testing new slop/vcd_writer
 // code without reinstalling), else the sibling ../hlop of the CWD (the dev
@@ -3074,11 +3284,10 @@ std::string sim_llvm_link_tool() {
   return {};
 }
 
-// `--emit-dir sim:DIR/` — inou.cgen.sim. Writes a standalone Bazel
-// module of per-module Slop<N> structs over ../hlop: the pass writes a
-// <name>.hpp interface + a <name>.cpp body per module, here we add the build
-// scaffold (MODULE.bazel / BUILD) + manifest so `cd DIR && bazel build //:sim`
-// compiles the library.
+// `--emit-dir sim:DIR/` — inou.cgen.sim. Writes the per-module Slop<N> structs:
+// the pass writes a <name>.hpp interface + a <name>.cpp body per module, here we
+// add the manifest (content hashes of every generated source and kernel
+// object). There is no bazel/ninja project: `lhd sim` rebuilds the directory.
 void emit_sim_outputs(Options& opts, Result& res, Eprp_var& var) {
   const auto* sim_out = find_slot(opts.emit_dirs, "sim");
   if (sim_out == nullptr) {
@@ -3091,7 +3300,6 @@ void emit_sim_outputs(Options& opts, Result& res, Eprp_var& var) {
   }
   const auto&              dir   = sim_out->path;
   auto                     names = sim_into(opts, res, var, dir);  // writes <name>.hpp + <name>.cpp + checks
-  const auto               hlop  = sim_hlop_path(opts);
   std::vector<std::string> color_aux_sources;
   std::vector<std::string> color_objects;
   {
@@ -3121,98 +3329,6 @@ void emit_sim_outputs(Options& opts, Result& res, Eprp_var& var) {
     }
     std::ranges::sort(color_aux_sources);
     std::ranges::sort(color_objects);
-  }
-
-  // MODULE.bazel — standalone root. bzlmod honors only ROOT overrides, so we
-  // re-declare hlop (local_path_override to the dev checkout) AND iassert
-  // (archive_override, from hlop/MODULE.bazel). abseil/rules_cc come from BCR.
-  {
-    std::ofstream ofs(std::format("{}/MODULE.bazel", dir));
-    ofs << "module(name = \"sim\", version = \"0.0.0\")\n\n";
-    ofs << "bazel_dep(name = \"rules_cc\", version = \"0.2.27\")\n";
-    ofs << "bazel_dep(name = \"platforms\", version = \"1.1.0\")\n";
-    ofs << "bazel_dep(name = \"apple_support\", version = \"2.11.0\", repo_name = \"build_bazel_apple_support\")\n";
-    ofs << "bazel_dep(name = \"hlop\", version = \"0.2.0\")\n";
-    ofs << std::format("local_path_override(module_name = \"hlop\", path = \"{}\")\n\n", hlop);
-    ofs << "bazel_dep(name = \"iassert\", version = \"0.1.1\")\n";
-    ofs << "archive_override(\n"
-           "    module_name = \"iassert\",\n"
-           "    integrity = \"sha256-sMOp2bzYfLhVMYfFoliGIXKHAi3bZpTVTSD+2oXjMp8=\",\n"
-           "    strip_prefix = \"iassert-0460fbd8405a96b3615be425df9066eba835fcf0\",\n"
-           "    urls = [\"https://github.com/masc-ucsc/iassert/archive/0460fbd8405a96b3615be425df9066eba835fcf0.zip\"],\n"
-           ")\n";
-  }
-
-  // The standalone root does not inherit LiveHD's Bazel version or .bazelrc.
-  // Keep the toolchain settings aligned, including exec tools and dependencies.
-  // The scaffold smoke check catches drift when the root configuration changes.
-  {
-    std::ofstream ofs(std::format("{}/.bazelversion", dir));
-    ofs << "9.3.1\n";
-  }
-  {
-    std::ofstream ofs(std::format("{}/.bazelrc", dir));
-    ofs << "# Match the C++ library requirements of LiveHD and Slop.\n"
-           "build --repo_env=BAZEL_CONLYOPTS=\"-std=gnu17\"\n"
-           "build --cxxopt=\"-std=c++23\"\n"
-           "build --action_env=BAZEL_CXXOPTS=\"-std=c++23\"\n"
-           "build --enable_platform_specific_config\n"
-           "build:darwin --config=macos\n"
-           "build:macos --xcode_version_config=//:command_line_tools\n"
-           "build:macos --features=-layering_check\n"
-           "build:macos --host_features=-layering_check\n"
-           "build:macos --macos_minimum_os=26.0\n"
-           "build:macos --host_macos_minimum_os=26.0\n"
-           "build:macos --copt=-mmacosx-version-min=26.0\n"
-           "build:macos --cxxopt=-mmacosx-version-min=26.0\n"
-           "build:macos --linkopt=-mmacosx-version-min=26.0\n"
-           "build:macos --host_copt=-mmacosx-version-min=26.0\n"
-           "build:macos --host_linkopt=-mmacosx-version-min=26.0\n";
-  }
-
-  // BUILD — one cc_library compiling every module's <name>.cpp against
-  // @hlop//hlop (C++23). Each .cpp is its own compile action, so editing one
-  // module's body recompiles only that .o (the per-module bodies no longer live
-  // in headers). srcs is an explicit generated list (not glob) so a stray .cpp
-  // dropped in the dir — e.g. a hand-written test driver — is not swept into the
-  // library. Do not request Bazel's `thin_lto` feature here: its implementation
-  // is toolchain-specific (and expands to Clang-only flags in some GCC-selected
-  // toolchains). The caller's compilation mode still supplies the usual
-  // optimization flags.
-  //
-  // Native LLVM colors are ordinary PIC link inputs. The standalone library
-  // can consume them directly without a version-matched LLVM tool.
-  {
-    std::ofstream ofs(std::format("{}/BUILD", dir));
-    ofs << "load(\"@rules_cc//cc:defs.bzl\", \"cc_library\")\n";
-    ofs << "load(\"@build_bazel_apple_support//xcode:xcode_config.bzl\", \"xcode_config\")\n\n";
-    ofs << "# An empty version list selects Command Line Tools, as in LiveHD.\n"
-           "xcode_config(name = \"command_line_tools\")\n\n";
-    ofs << "cc_library(\n    name = \"sim\",\n    srcs = [\n";
-    for (const auto& n : names) {
-      ofs << std::format("        \"{}.cpp\",\n", n);
-    }
-    for (const auto& source : color_aux_sources) {
-      ofs << std::format("        \"{}\",\n", source);
-    }
-    for (const auto& object : color_objects) {
-      ofs << std::format("        \"{}\",\n", object);
-    }
-    ofs << "    ],\n";
-    // `*.inc`: the `<stem>.pure.inc` / `<stem>.native-loop.inc` adapters each
-    // `<stem>.hpp` includes; an undeclared include fails the sandboxed build.
-    ofs << "    hdrs = glob([\"*.hpp\", \"*.inc\"]),\n";
-    ofs << "    copts = [\"-std=c++23\", \"-Os\", \"-pthread\"],\n"
-           "    linkopts = [\"-pthread\"],\n";
-    // alwayslink: nothing references a `<stem>.tune-id.cpp` object by name --
-    // the driver DEFINES weak fallbacks of its identity functions -- so a
-    // static-archive link would never pull that member in, and drv.bin would
-    // silently lose its baked vector/structure/codegen identity (and with it
-    // the run-time `--set` codegen checks). Force every member in.
-    ofs << "    alwayslink = True,\n";
-    ofs << "    deps = [\"@hlop//hlop\"],\n"
-           "    visibility = [\"//visibility:public\"],\n"
-           ")\n";
   }
 
   // A missing file hashes as empty bytes.

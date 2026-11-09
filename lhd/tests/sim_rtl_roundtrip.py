@@ -78,7 +78,7 @@ test top.compare {{
         # Both C++/Slop and LLVM must implement the same phase dependencies.
         for backend in ((ARGS.backend,) if ARGS.backend else ("slop", "llvm")):
             run([LHD, "sim", *inputs, "--workdir", work / f"{language}-{backend}",
-                 "--set", "sim.ninja=false", "--set", "sim.tune.profile=off", "--set", f"sim.tune.backend={backend}",
+                 "--set", "sim.tune.profile=off", "--set", f"sim.tune.backend={backend}",
                  "--set", "compile.upass.inline=false"],
                 work / f"{language}-{backend}.log")
     if VERILATOR and ORACLES:

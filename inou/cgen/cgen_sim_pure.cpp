@@ -83,7 +83,7 @@ std::string Cgen_sim::pure_argument(std::string expression, const hhds::GraphIO:
     return expression;
   }
   if (port.unsign) {
-    expression = absl::StrCat("(", expression, ").zext_to<", port.bits + 1, ">()");
+    expression = absl::StrCat("(", expression, ").template zext_to<", port.bits + 1, ">()");
   } else {
     expression = absl::StrCat("Slop<", port.bits + 1, ">{Slop<", port.bits, ">{", expression, "}}");
   }

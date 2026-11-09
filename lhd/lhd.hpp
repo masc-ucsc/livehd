@@ -46,6 +46,7 @@ Diag_fmt default_diag_fmt();
 
 struct Options {
   std::vector<std::string> invocation_argv;  // exact CLI tokens, before normalization/config expansion
+  bool                     replayed = false;  // rebuilt from a directory's recorded invocation (replay_recorded_invocation)
   std::string              command;          // compile|lec|scan|pyrope|tool|pass|list|describe|version|help
   std::string              language;         // verilog|pyrope ("" for the IR/meta commands)
 
@@ -511,6 +512,10 @@ struct Lhd_error {
 // argv -> Options. Throws Lhd_error{usage,...} on malformed input.
 void    load_metadata(Options& opts);
 Options parse_args(int argc, char** argv);
+// Inside a generated `sim/` or `synth/` directory, the same command with no
+// sources replays the invocation recorded in its manifest.json (sources, top,
+// options) and returns true with `opts` rewritten.
+bool replay_recorded_invocation(Options& opts);
 
 // Computed GP density for a legroute core search. Stay strictly below the
 // terminal hard cap; explicit user densities are validated separately.
@@ -589,13 +594,6 @@ inline constexpr Sim_set_option kSimSetOptions[] = {
      "", Sim_set_option::Kind::bool_or_file,
      "DIR — iassert checkout to build the sim driver against (resolves iassert.hpp, which slop.hpp pulls in). "
      "Empty = auto: the bazel runfiles, else the sibling ../iassert/src. Same purpose as sim.hlop_dir"},
-    {"ninja",
-     "", Sim_set_option::Kind::bool_or_file,
-     "false|true|PATH — build the sim driver with ninja instead of the built-in parallel compile. Empty (the "
-     "default) uses ninja when it is on PATH and the built-in build otherwise; true REQUIRES it; PATH names the "
-     "binary. Ninja is what makes the host build incremental (depfile-accurate, so a header edit rebuilds exactly "
-     "its dependents); the built-in path reuses whatever its own depfiles and command stamps show unchanged. A "
-     "`build.ninja` reproducing the exact build is written into the sim dir either way — `ninja -C <workdir>/sim`"},
     {"slop_u",
      "true", Sim_set_option::Kind::boolean,
      "materialize LGraph-proven unsigned combinational values as the CANONICAL-unsigned Slop_u<n> instead of a "

@@ -52,14 +52,13 @@ for be in $backends; do
     ! grep -q 'lhd sim: warning:' "$W/$be.off.err" || { cat "$W/$be.off.err"; fail "$be: sim.warn_undefined=false still warns"; }
   fi
   if has_case mem; then
-    "$LHD" sim "$D/warn_mem.prp" --set sim.tune.backend=$be --workdir "$W/m$be" >"$W/m$be.out" 2>"$W/m$be.err" ||
-      { cat "$W/m$be.err"; fail "$be: memory sim"; }
-    grep 'lhd sim: warning:' "$W/m$be.err" >"$W/m$be.warn" || true
-    [ "$(wc -l <"$W/m$be.warn")" -eq 2 ] || { cat "$W/m$be.warn"; fail "$be: expected 2 memory warnings (one per port)"; }
-    grep -q 'memory write outside the array at .*warn_mem.prp:6 (`a` write port 0) (cycle 2)' "$W/m$be.warn" ||
-      { cat "$W/m$be.warn"; fail "$be: memory write site"; }
-    grep -q 'memory read outside the array at .*warn_mem.prp:6 (`a` read port 0) (cycle 3)' "$W/m$be.warn" ||
-      { cat "$W/m$be.warn"; fail "$be: memory read site"; }
+    # Pyrope has no run-time out-of-range memory access: pass.bitwidth rejects an
+    # address it cannot prove inside [0, size) (mem-address-overflow), so the
+    # run-time warning is only reachable from Verilog (the vmem case below).
+    if "$LHD" sim "$D/warn_mem.prp" --set sim.tune.backend=$be --workdir "$W/m$be" >"$W/m$be.out" 2>"$W/m$be.err"; then
+      fail "$be: warn_mem.prp must be rejected at compile time (mem-address-overflow)"
+    fi
+    grep -q 'mem-address-overflow' "$W/m$be.out" "$W/m$be.err" || { cat "$W/m$be.err"; fail "$be: expected a mem-address-overflow diagnostic"; }
   fi
   if has_case vmem; then
     "$LHD" sim "lg:$W/vlg/" "$D/warn_vmem_tb.prp" --set sim.tune.backend=$be --workdir "$W/v$be" >"$W/v$be.out" 2>"$W/v$be.err" ||

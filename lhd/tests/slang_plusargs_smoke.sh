@@ -58,7 +58,7 @@ test run(cycles:U8=3) {
   tick cycles { d.a = 42; step; assert(d.b == 42) }
 }
 PRP
-  "$LHD" sim "$W/bench.prp" "$kind:$W/$kind" --workdir "$W/$kind-run" --set sim.ninja=false --set sim.tune.profile=off > "$W/$kind.log" 2>&1
+  "$LHD" sim "$W/bench.prp" "$kind:$W/$kind" --workdir "$W/$kind-run" --set sim.tune.profile=off > "$W/$kind.log" 2>&1
   "$W/$kind-run/sim/drv.bin" > "$W/$kind.log" 2>&1
   grep -q 'SV number=19 file=default.hex h=0 b=0 o=0 p=0 n=0 bar=0' "$W/$kind.log"
 done
@@ -78,7 +78,7 @@ cp "$W/edit.sv" "$W/args.sv"
 grep -q "32'sd20" "$W/changed.sv"
 sed 's/ln:args/lg:args/' "$W/bench.prp" > "$W/bench-next.prp"
 cp "$W/bench-next.prp" "$W/bench.prp"
-"$LHD" sim "$W/bench.prp" "lg:$W/lg" --workdir "$W/lg-run" --set sim.ninja=false --set sim.tune.profile=off > "$W/edited-sim.log" 2>&1
+"$LHD" sim "$W/bench.prp" "lg:$W/lg" --workdir "$W/lg-run" --set sim.tune.profile=off > "$W/edited-sim.log" 2>&1
 "$DRV" > "$W/edited.log"
 grep -q 'SV number=20 file=default.hex' "$W/edited.log"
 # Argument-controlled data, control, and output aliases are hardware influence.

@@ -40,9 +40,17 @@ void Pass_bitwidth::trans(Eprp_var& var) {
   Bitwidth bw(p.max_iterations);
 
   for (const auto& g : var.graphs) {
+    bw.collect_loop_indices(g.get());
+  }
+
+  for (const auto& g : var.graphs) {
     if (!g) {
       continue;
     }
+    // Graphs can be appended to var.graphs while this loop runs (specialized
+    // clones of a parent and of its loop bodies, parent first): pick up each
+    // graph's loop descriptors right before the graph itself runs.
+    bw.collect_loop_indices(g.get());
     bw.do_trans(g);
   }
 }

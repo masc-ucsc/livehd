@@ -6670,7 +6670,9 @@ void Color_plan::build_tune_tables(hhds::Graph* root, const std::vector<std::vec
         const bool f   = fixed(edge.driver);
         all_fixed     &= f;
         fixed_operand |= f && !edge.driver.is_invalid();
-        fixed_amount  |= f && edge.sink.get_port_id() == Ntype::get_sink_pid(op, "b");
+        // Only a shift has an "amount" operand: other cells (a Mux, an LT) have
+        // no sink named `b`, and looking it up would assert.
+        fixed_amount |= f && (op == Ntype_op::SHL || op == Ntype_op::SRA) && edge.sink.get_port_id() == Ntype::get_sink_pid(op, "b");
       }
       if (all_fixed) {
         return true;  // a per-lane constant

@@ -9804,13 +9804,13 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     hout->append("  void __compact_post_fall();  // publish CURRENT committed-state outputs without another advance\n");
   }
   // Editable, name-keyed checkpoint (sim_checkpoint_debug_plan): flops/regs ->
-  // the `_r` map keyed by the hierarchical `_p`+member name (pyrope literal),
-  // memories -> one `<_dir>/<_p><member>.hex` file each, sub-instances recursed.
+  // the `__ckpt_r` map keyed by the hierarchical `__ckpt_p`+member name (pyrope literal),
+  // memories -> one `<__ckpt_dir>/<__ckpt_p><member>.hex` file each, sub-instances recursed.
   // design_hash folds member names+widths (cross-version warn, never reject).
   hout->append(
-      "  void dump_state(const std::string& _p, std::map<std::string, std::string>& _r, const std::string& _dir) const;\n");
+      "  void dump_state(const std::string& __ckpt_p, std::map<std::string, std::string>& __ckpt_r, const std::string& __ckpt_dir) const;\n");
   hout->append(
-      "  void load_state(const std::string& _p, const std::map<std::string, std::string>& _r, const std::string& _dir);\n");
+      "  void load_state(const std::string& __ckpt_p, const std::map<std::string, std::string>& __ckpt_r, const std::string& __ckpt_dir);\n");
   hout->append("  std::uint64_t design_hash() const;\n");
   // sim.tune state walkers (sim_profile.md §6.1): one canonical word per stored
   // state element, pre-order through the sub-instances, then -- only when the
@@ -12829,37 +12829,37 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     // into sub-instances. Mirrors the reset_cycle/peek member walk. ----
     fout->append("LHD_SIM_COLD void ",
                  mod,
-                 "::dump_state(const std::string& _p, std::map<std::string, std::string>& _r, const std::string& _dir) const {\n");
+                 "::dump_state(const std::string& __ckpt_p, std::map<std::string, std::string>& __ckpt_r, const std::string& __ckpt_dir) const {\n");
     for (const auto& f : flops) {
       for (const auto& s : f.stages) {
-        fout->append(absl::StrCat("  _r[_p + \"", s, "\"] = ", s, ".to_pyrope();\n"));
+        fout->append(absl::StrCat("  __ckpt_r[__ckpt_p + \"", s, "\"] = ", s, ".to_pyrope();\n"));
       }
-      fout->append(absl::StrCat("  _r[_p + \"", f.member, "\"] = ", f.member, ".to_pyrope();\n"));
+      fout->append(absl::StrCat("  __ckpt_r[__ckpt_p + \"", f.member, "\"] = ", f.member, ".to_pyrope();\n"));
     }
     {
       absl::flat_hash_set<std::string> emitted;
       for (const auto& f : flops) {
         if (!f.prev_member.empty() && emitted.insert(f.prev_member).second) {
-          fout->append(absl::StrCat("  _r[_p + \"", f.prev_member, "\"] = ", f.prev_member, " ? \"true\" : \"false\";\n"));
+          fout->append(absl::StrCat("  __ckpt_r[__ckpt_p + \"", f.prev_member, "\"] = ", f.prev_member, " ? \"true\" : \"false\";\n"));
         }
       }
     }
     for (const auto& m : mems) {
-      fout->append(absl::StrCat("  hlop::ckpt::write_mem_hex(_dir + \"/\" + _p + \"", m.member, ".hex\", ", m.member, ");\n"));
+      fout->append(absl::StrCat("  hlop::ckpt::write_mem_hex(__ckpt_dir + \"/\" + __ckpt_p + \"", m.member, ".hex\", ", m.member, ");\n"));
       for (const auto& p : m.ports) {
         if (p.rd && m.type == 1) {
-          fout->append(absl::StrCat("  _r[_p + \"", m.member, "_q", p.rdidx, "\"] = ", m.member, "_q", p.rdidx, ".to_pyrope();\n"));
+          fout->append(absl::StrCat("  __ckpt_r[__ckpt_p + \"", m.member, "_q", p.rdidx, "\"] = ", m.member, "_q", p.rdidx, ".to_pyrope();\n"));
         }
       }
     }
     for (const auto& s : subs) {
-      fout->append(absl::StrCat("  ", s.inst, ".dump_state(_p + \"", s.inst, ".\", _r, _dir);\n"));
+      fout->append(absl::StrCat("  ", s.inst, ".dump_state(__ckpt_p + \"", s.inst, ".\", __ckpt_r, __ckpt_dir);\n"));
     }
     // The persistent input latch __in is state too: a poke-once-and-hold input must
     // survive a restart (the testbench may not re-poke it after the checkpoint cycle).
     for (const auto& io : ios) {
       if (io.is_input) {
-        fout->append(absl::StrCat("  _r[_p + \"__in.", io.field, "\"] = __in.", io.field, ".to_pyrope();\n"));
+        fout->append(absl::StrCat("  __ckpt_r[__ckpt_p + \"__in.", io.field, "\"] = __in.", io.field, ".to_pyrope();\n"));
       }
     }
     fout->append("}\n");
@@ -12869,70 +12869,70 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     // hex file if present; recurse into sub-instances. ----
     fout->append("LHD_SIM_COLD void ",
                  mod,
-                 "::load_state(const std::string& _p, const std::map<std::string, std::string>& _r, const std::string& _dir) {\n");
+                 "::load_state(const std::string& __ckpt_p, const std::map<std::string, std::string>& __ckpt_r, const std::string& __ckpt_dir) {\n");
     for (const auto& f : flops) {
       const auto type = value_type(f.bits, f.unsign);
       for (const auto& s : f.stages) {
-        fout->append(absl::StrCat("  if (auto _it = _r.find(_p + \"",
+        fout->append(absl::StrCat("  if (auto __ckpt_it = __ckpt_r.find(__ckpt_p + \"",
                                   s,
-                                  "\"); _it != _r.end()) ",
+                                  "\"); __ckpt_it != __ckpt_r.end()) ",
                                   s,
                                   " = ",
                                   type,
-                                  "::from_pyrope(_it->second);\n"));
+                                  "::from_pyrope(__ckpt_it->second);\n"));
       }
-      fout->append(absl::StrCat("  if (auto _it = _r.find(_p + \"",
+      fout->append(absl::StrCat("  if (auto __ckpt_it = __ckpt_r.find(__ckpt_p + \"",
                                 f.member,
-                                "\"); _it != _r.end()) ",
+                                "\"); __ckpt_it != __ckpt_r.end()) ",
                                 f.member,
                                 " = ",
                                 type,
-                                "::from_pyrope(_it->second);\n"));
+                                "::from_pyrope(__ckpt_it->second);\n"));
     }
     {
       absl::flat_hash_set<std::string> emitted;
       for (const auto& f : flops) {
         if (!f.prev_member.empty() && emitted.insert(f.prev_member).second) {
-          fout->append(absl::StrCat("  if (auto _it = _r.find(_p + \"",
+          fout->append(absl::StrCat("  if (auto __ckpt_it = __ckpt_r.find(__ckpt_p + \"",
                                     f.prev_member,
-                                    "\"); _it != _r.end()) ",
+                                    "\"); __ckpt_it != __ckpt_r.end()) ",
                                     f.prev_member,
-                                    " = Slop<1>::from_pyrope(_it->second).is_known_true();\n"));
+                                    " = Slop<1>::from_pyrope(__ckpt_it->second).is_known_true();\n"));
         }
       }
     }
     for (const auto& m : mems) {
       const auto type = value_type(m.bits, m.unsign);
-      fout->append(absl::StrCat("  hlop::ckpt::read_mem_hex(_dir + \"/\" + _p + \"", m.member, ".hex\", ", m.member, ");\n"));
+      fout->append(absl::StrCat("  hlop::ckpt::read_mem_hex(__ckpt_dir + \"/\" + __ckpt_p + \"", m.member, ".hex\", ", m.member, ");\n"));
       for (const auto& p : m.ports) {
         if (p.rd && m.type == 1) {
-          fout->append(absl::StrCat("  if (auto _it = _r.find(_p + \"",
+          fout->append(absl::StrCat("  if (auto __ckpt_it = __ckpt_r.find(__ckpt_p + \"",
                                     m.member,
                                     "_q",
                                     p.rdidx,
-                                    "\"); _it != _r.end()) ",
+                                    "\"); __ckpt_it != __ckpt_r.end()) ",
                                     m.member,
                                     "_q",
                                     p.rdidx,
                                     " = ",
                                     type,
-                                    "::from_pyrope(_it->second);\n"));
+                                    "::from_pyrope(__ckpt_it->second);\n"));
         }
       }
     }
     for (const auto& s : subs) {
-      fout->append(absl::StrCat("  ", s.inst, ".load_state(_p + \"", s.inst, ".\", _r, _dir);\n"));
+      fout->append(absl::StrCat("  ", s.inst, ".load_state(__ckpt_p + \"", s.inst, ".\", __ckpt_r, __ckpt_dir);\n"));
     }
     for (const auto& io : ios) {
       if (io.is_input) {
         const auto type = value_type(io.bits, io.unsign);
-        fout->append(absl::StrCat("  if (auto _it = _r.find(_p + \"__in.",
+        fout->append(absl::StrCat("  if (auto __ckpt_it = __ckpt_r.find(__ckpt_p + \"__in.",
                                   io.field,
-                                  "\"); _it != _r.end()) { __in.",
+                                  "\"); __ckpt_it != __ckpt_r.end()) { __in.",
                                   io.field,
                                   " = ",
                                   type,
-                                  "::from_pyrope(_it->second); }\n"));
+                                  "::from_pyrope(__ckpt_it->second); }\n"));
         // Bump the version OUTSIDE the key-present guard. `<inst>.load_state`
         // just above has already overwritten this child subtree's own `__in`
         // from the checkpoint, while the parent's `__fwd_*` forward stamps (and
@@ -15938,13 +15938,14 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
           binding.size   = memory.size;
           binding.writes = memory.n_wr;
           binding.lanes  = memory.wensize;
+          binding.address_proven = site.node.base_node().attr(livehd::attrs::mem_address_proven).has();
           return binding;
         };
         // sim.warn_undefined: the site of write port w / read port r (the
         // memory member type's __lhd_sites, kUndefinedMemHelper).
         const auto memory_warn_site = [&](const livehd::sim::Color_plan::Site& site, const Mem& memory, int index) {
-          if (memory.n_wr + memory.n_rd <= 0) {
-            return Cgen_llvm::no_site;
+          if (memory.n_wr + memory.n_rd <= 0 || site.node.base_node().attr(livehd::attrs::mem_address_proven).has()) {
+            return Cgen_llvm::no_site;  // a proven address cannot leave the array: nothing to report
           }
           return undefined_resource(
               absl::StrCat("&std::remove_cvref_t<decltype(", occurrence_member(site), ")>::__lhd_sites::site[", index, "]"));

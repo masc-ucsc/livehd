@@ -286,7 +286,6 @@ clang++ --version
 g++ --version
 verilator --version
 perf --version
-ninja --version
 lscpu
 
 bazel build -c opt //lhd:all
@@ -380,7 +379,7 @@ direct `drv.bin` runs need nothing: a driver never profiles unless it is given
   --set sim.tune.profile=off --workdir "${RUN_ROOT}/minion/SW"
 
 "${LHD}" sim "lg:${RUN_ROOT}/minion/lg" minion/sim/minion_prog_tb.prp \
-  --run-only +cycles=100000 --set sim.ninja=false \
+  --run-only +cycles=100000 \
   --set sim.init_zero=true --set sim.tune.profile=off \
   --workdir "${RUN_ROOT}/minion/SW"
 
@@ -402,7 +401,7 @@ direct `drv.bin` runs need nothing: a driver never profiles unless it is given
   --workdir "${RUN_ROOT}/dino/SW"
 
 "${LHD}" sim "lg:${RUN_ROOT}/dino/lg" dino/sim/dino_prog_tb.prp \
-  --run-only +cycles=4000000 --set sim.ninja=false \
+  --run-only +cycles=4000000 \
   --set sim.tune.profile=off --workdir "${RUN_ROOT}/dino/SW"
 
 "${RUN_ROOT}/dino/SW/sim/drv.bin" +cycles=4000000 \
@@ -473,12 +472,13 @@ Map them back through:
 - `${RUN_ROOT}/minion/SW/sim/minion_top.color-runtime.hpp`
 - `${RUN_ROOT}/minion/SW/sim/minion_top.color-kernel-*.cpp`
 - `${RUN_ROOT}/minion/SW/sim/minion_top.color-commit-*.cpp`
-- `${RUN_ROOT}/minion/SW/sim/build.ninja`
+- `${RUN_ROOT}/minion/SW/sim/obj/*.cmd` (the exact compile command of each object)
 
 The optimized binary is not stripped, so function-level symbols should be
 available. If source-line annotation is required, make a separate profiling
-build with `-g -fno-omit-frame-pointer` added to the generated `build.ninja`,
-rebuild that temporary simulation directory, and do not use its compile time
+build in a temporary copy of the simulation directory: rerun the compile
+commands recorded in `obj/*.cmd` with `-g -fno-omit-frame-pointer` added and
+relink, and do not use its compile time
 as the normal benchmark result.
 
 Useful footprint commands are:
@@ -699,7 +699,7 @@ file and are never trialed on their own.
 
 Never tunable, and so never under `tune`: `sim.unknown_zero`, `sim.init_zero`
 and `lhd.seed` (they change simulated values), `sim.vcd*` and `sim.checkpoint*`
-(observability), `lhd.jobs`, `sim.ninja`, `sim.hlop_dir`, `sim.iassert_dir` and
+(observability), `lhd.jobs`, `sim.hlop_dir`, `sim.iassert_dir` and
 `sim.compile_only` (build plumbing), and `sim.slop_u` / `sim.debug` (validation
 fallbacks). `sim.unroll_sites` (default 0 = off) is a debug/experiment knob,
 applied, never trialed: a compact loop whose trip count times its body's node
@@ -1014,14 +1014,14 @@ variant, on a quiet machine, serially.
    - **V1** a hand-pinned vector, e.g. V0 plus
      `--set sim.tune.dirty=on --set sim.tune.fence=0`;
    - **V2** converged: in a persistent workdir P, repeat
-     `lhd sim DUT TB +cycles=N --set sim.vcd=false --set sim.ninja=false --workdir P --result-json rI.json`
+     `lhd sim DUT TB +cycles=N --set sim.vcd=false --workdir P --result-json rI.json`
      until `sim_tune.converged` (cap it at 5 runs), recording each run's
      `inou.cgen.sim` and `sim.hostbuild` phases as the convergence cost; then
      export (§13.6) and measure V0 plus `F` in a fresh
      workdir.
 3. Per variant, in a fresh workdir W:
    - setup: `lhd sim DUT TB --setup-only --set sim.vcd=false <variant> --workdir W --result-json setup.json`;
-   - run: `lhd sim DUT TB --run-only +cycles=N --set sim.ninja=false <variant> --workdir W`,
+   - run: `lhd sim DUT TB --run-only +cycles=N <variant> --workdir W`,
      gated on the testbench's marker and expected checksum;
    - exec: best of 3 `W/sim/drv.bin +cycles=N`; host C++ = run - exec.
 4. Prefer retired instructions over wall time. Each `--result-json` test row

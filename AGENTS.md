@@ -42,8 +42,21 @@
   slop-only knobs) pins `--set sim.tune.backend=slop`; a general sim test that
   fails under llvm is an LLVM-backend bug to fix in `inou/cgen`, not a reason
   to switch it to slop.
-- **External simulators**: the default suite must not need iverilog, vvp,
-  verilator or ninja. Optional independent event-simulator legs are skipped
+- **Sim build**: `lhd sim` generates `<workdir>/sim` and builds `drv.bin` itself
+  (built-in parallel, incremental host compile); there is no bazel/ninja project
+  and no `sim.ninja` option. The sim dir records its command, so `lhd sim` /
+  `lhd sim --setup-only` / `lhd sim --run-only` run inside it re-read the
+  original sources and reuse everything unchanged (`--setup-only` regenerates
+  only; plain `lhd sim` regenerates, builds and runs; `--run-only` builds and
+  runs the existing tree, `sim.compile_only=true` stops after the build).
+- **Synth rebuild**: `lhd synth ... --workdir W` records its command and result in
+  `W/synth/manifest.json` (the same single manifest.json the unit index lives in:
+  entries such as `invocation` and `synth` are kept across rewrites). A bare
+  `lhd synth` inside `W/synth` replays it: unchanged inputs mean no work and the
+  stored qor is reported again (`--stats` expands it); any change re-runs the
+  flow through the usual incremental tiers.
+- **External simulators**: the default suite must not need iverilog, vvp
+  or verilator. Optional independent event-simulator legs are skipped
   unless `LHD_EXTERNAL_SIM` is set:
   `bazel test --test_env=LHD_EXTERNAL_SIM=1 --test_env=PATH=<dir-with-tools>:$PATH <target>`.
   A requested leg whose tool is missing FAILS rather than skipping.

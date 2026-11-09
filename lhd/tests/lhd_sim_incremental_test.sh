@@ -4,7 +4,7 @@
 # Incremental regeneration of the sim tree. `lhd sim --setup-only` re-emits the
 # C++ for every module whose structural digest moved, and File_output skips the
 # write when the bytes are unchanged — so a generated file's MTIME is the signal
-# the host build (built-in builder or the generated build.ninja) keys on. This
+# the host build keys on. This
 # test pins the properties that make the host build incremental, and the ones
 # that make the reuse SOUND:
 #
@@ -33,7 +33,7 @@
 # default) runs steps 1-7 and `identity` runs step 8; they are two bazel
 # targets only to keep each under the per-test runtime budget.
 #
-# Steps 1-5 drive only --setup-only, so they need no host compiler and no ninja.
+# Steps 1-5 drive only --setup-only, so they need no host compiler.
 #
 # Rewrites are detected with `find -newer <marker>`, not by reading timestamps:
 # a whole-second stamp cannot see two setups that land in the same second, and
@@ -212,26 +212,26 @@ setup
   || fail "deleting the recorded artifact '$victim' did not force a re-emission — an incomplete tree reads as a hit"
 
 # ---- 6. compile-only stops at drv.bin; a second build compiles nothing -------
-if ! "$LHD" sim "$W/tb.prp" --run-only "${BE[@]}" --set sim.compile_only=true --set sim.ninja=false --set sim.tune.profile=off \
+if ! "$LHD" sim "$W/tb.prp" --run-only "${BE[@]}" --set sim.compile_only=true --set sim.tune.profile=off \
   --diag-fmt pretty --workdir "$W/wd" >"$W/build1.log" 2>&1; then
   cat "$W/build1.log" >&2
   fail "generated simulator host build failed"
 fi
 [ -x "$W/wd/sim/drv.bin" ] || fail "compile-only did not produce drv.bin"
 grep -qa "hello world" "$W/build1.log" && fail "compile-only executed the testbench"
-[ -f "$W/wd/sim/build.ninja" ] || fail "no build.ninja was written next to the generated sources"
+[ ! -e "$W/wd/sim/build.ninja" ] && [ ! -e "$W/wd/sim/BUILD" ] || fail "a bazel/ninja build file was written next to the generated sources"
 
-# A second built-in build must neither compile nor link.
+# A second build must neither compile nor link.
 touch "$W/build-marker"
 "$LHD" sim "$W/tb.prp" --run-only "${BE[@]}" --set sim.compile_only=true \
-  --set sim.ninja=false --set sim.tune.profile=off --workdir "$W/wd" >"$W/build2.log" 2>&1 \
+  --set sim.tune.profile=off --workdir "$W/wd" >"$W/build2.log" 2>&1 \
   || { cat "$W/build2.log" >&2; fail "warm build failed"; }
 [ -z "$(find "$W/wd/sim" \( -name '*.o' -o -name drv.bin \) -newer "$W/build-marker")" ] \
   || fail "a warm build rewrote objects or relinked the simulator"
 
 # ---- 7. an INTERFACE change must reach the parent, via the depfile ------------
 # The parent's object depends on the leaf's header only through the compiler's
-# `-MD` depfile, which both the built-in builder and build.ninja read. If that
+# `-MD` depfile, which the builder reads. If that
 # dependency is lost, header edits stop rebuilding the parent. So assert the
 # parent actually rebuilds.
 sed -e 's/b:U8/b:U7/' "$W/leaf.prp" > "$W/leaf.new" && mv "$W/leaf.new" "$W/leaf.prp"
@@ -240,7 +240,7 @@ sed -e 's/b = y/b = y#[0..=6]/' "$W/top.prp" > "$W/top.new" && mv "$W/top.new" "
 setup
 touch "$W/build-marker"
 "$LHD" sim "$W/tb.prp" --run-only "${BE[@]}" --set sim.compile_only=true \
-  --set sim.ninja=false --set sim.tune.profile=off --workdir "$W/wd" >"$W/build3.log" 2>&1 \
+  --set sim.tune.profile=off --workdir "$W/wd" >"$W/build3.log" 2>&1 \
   || { cat "$W/build3.log" >&2; fail "interface rebuild failed"; }
 for obj in leaf.leaf.o top.top.o; do
   [ -n "$(find "$W/wd/sim" -name "$obj" -newer "$W/build-marker")" ] \
@@ -286,7 +286,7 @@ identity_run() {
   local tag=$1 wd=$2 expected=$3
   shift 3
   "$LHD" sim "$IW/tb.prp" --workdir "$wd" "+expected=$expected" \
-    --set sim.ninja=false --set lhd.jobs=4 --set sim.tune.profile=off --result-json "$IW/$tag.json" "$@" >"$IW/$tag.log" 2>&1 \
+    --set lhd.jobs=4 --set sim.tune.profile=off --result-json "$IW/$tag.json" "$@" >"$IW/$tag.log" 2>&1 \
     || { cat "$IW/$tag.log" >&2; fail "default-specialization simulation failed ($tag)"; }
 }
 identity_run cold "$IW/w" 3

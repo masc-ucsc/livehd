@@ -62,7 +62,7 @@ def simulate(lhd, source, top, vectors, work):
     bench.write_text("\n".join(lines) + "\n")
     report = work / "native-result.json"
     result = subprocess.run([str(lhd), "sim", "lg:" + str(graph), str(bench),
-                    "--set", "sim.ninja=false", "--set", "sim.tune.profile=off",
+                    "--set", "sim.tune.profile=off",
                     "--set", "compile.upass.inline=false",
                     "--set", "sim.unknown_zero=true", "--workdir", str(work / "sim"),
                     "--result-json", str(report), "-q"])

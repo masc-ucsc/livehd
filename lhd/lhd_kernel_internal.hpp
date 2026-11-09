@@ -599,6 +599,11 @@ std::string locate_lgcheck_yosys();
 std::string materialize_verilog(Options& opts, Result& res, const std::string& kind, const std::string& path,
                                 std::string_view side);
 void        sim_command(Options& opts, Result& res);
+// manifest.json named entries (see lhd_kernel_common.cpp) and the recorded
+// invocation a generated directory replays.
+void                       manifest_put(const std::string& dir, std::string_view key, std::string_view json_value);
+std::optional<std::string> manifest_get(const std::string& dir, std::string_view key);
+void record_invocation(const Options& opts, std::string_view command, const std::string& workdir, const std::string& dir);
 void        load_side_graphs(Options& opts, Result& res, const std::string& kind, const std::string& path, std::string_view side,
                              Eprp_var& var);
 void        lec_command(Options& opts, Result& res);

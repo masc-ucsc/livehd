@@ -80,6 +80,7 @@ int main(int argc, char** argv) {
   // reconciliation after run_engine_command below).
   try {
     opts = lhd::parse_args(argc, argv);
+    lhd::replay_recorded_invocation(opts);  // `lhd sim|synth` with no sources inside its generated dir
   } catch (const lhd::Lhd_error& e) {
     res.command  = "usage";
     res.n_errors = 1;

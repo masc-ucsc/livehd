@@ -31,24 +31,6 @@ _MAPPERS = [
     ("_usyn", "usyn"),
 ]
 
-py_test(
-    name = "sim_bazel_scaffold_smoke",
-    srcs = ["sim_bazel_scaffold_smoke.py"],
-    args = [
-        "$(location //lhd)",
-        "$(location //:MODULE.bazel)",
-        "$(location //:.bazelrc)",
-        "$(location //:.bazelversion)",
-    ],
-    data = [
-        "//:.bazelrc",
-        "//:.bazelversion",
-        "//:MODULE.bazel",
-        "//lhd",
-    ],
-    legacy_create_init = 0,
-)
-
 sh_test(
     name = "lhd_unate_smoke",
     srcs = ["lhd_unate_smoke.sh"],
@@ -1909,6 +1891,18 @@ sh_test(
     env = {"MAPPER": mapper},
 ) for suffix, mapper in _MAPPERS]
 
+# `lhd synth` incremental API: the synth dir's manifest.json records the command,
+# a bare `lhd synth` inside it replays, skips when done, re-shows the stats.
+sh_test(
+    name = "lhd_synth_replay_test",
+    size = "large",
+    srcs = ["lhd_synth_replay_test.sh"],
+    data = _FLOW_DATA + [
+        "//inou/prp:abc_tests",
+        "//inou/prp:hier_tests",
+    ],
+)
+
 # 2opt-incr subtask 0: pass.abc memory admission. A whole-design ABC region can
 # exhaust the machine (flat XSCore reached 221 GB before the OS killed it), so
 # pass.abc samples its own RSS while bit-blasting and refuses a region that will
@@ -3072,6 +3066,13 @@ sh_test(
 sh_test(
     name = "plusargs_smoke",
     srcs = ["plusargs_smoke.sh"],
+    data = ["//lhd"],
+)
+
+# The generated sim dir records its command; `lhd sim` inside it replays it.
+sh_test(
+    name = "lhd_sim_replay_test",
+    srcs = ["lhd_sim_replay_test.sh"],
     data = ["//lhd"],
 )
 

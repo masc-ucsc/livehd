@@ -2,9 +2,12 @@
 #pragma once
 
 #include <memory>
+#include <string>
+#include <optional>
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
 #include "absl/container/inlined_vector.h"
 #include "bitwidth_range.hpp"
 #include "hhds/graph.hpp"
@@ -48,6 +51,35 @@ protected:
 
   hhds::Graph* current_graph = nullptr;
 
+public:
+  // A compact-loop body's index input is the loop's own induction value: its
+  // range is exactly [first .. first+step*(count-1)] (hull, either step sign),
+  // not what the declared port width could hold. The parent's loop Sub knows
+  // it; the body, compiled as its own graph, does not, so the pass collects it
+  // from every loop Sub before the bodies run.
+  struct Loop_index {
+    hhds::Port_id port = 0;
+    std::string   name;  // the index input's declared name: a specialized clone renumbers ports
+    int64_t       lo   = 0;
+    int64_t       hi   = 0;
+  };
+  void collect_loop_indices(hhds::Graph* g);
+
+  // Allow memory addresses the pass cannot prove inside [0, size) (debug only;
+  // otherwise it is the compile error `mem-address-overflow`).
+  // Process-wide: a sim built with sim.debug keeps unproven memory addresses (checked at run time);
+  // set by pass.bitwidth so the later private Bitwidth runs (specialize, satopt) agree.
+  static inline bool allow_unproven_mem_address = false;
+
+protected:
+  absl::flat_hash_map<hhds::Gid, Loop_index> loop_indices;
+  absl::flat_hash_set<hhds::Gid>             loop_index_conflict;
+  absl::flat_hash_map<std::string, Loop_index> loop_indices_by_name;
+  absl::flat_hash_set<std::string>             loop_index_name_conflict;
+  std::optional<Loop_index>                    find_loop_index(hhds::Graph* g);
+  bool                                         library_scanned = false;
+  void                                       check_mem_address(const hhds::Node_class& node);
+
   void set_bw_1bit(hhds::Pin_class dpin);
   void set_bits_sign(const hhds::Pin_class& dpin, const Bitwidth_range& bw);
   void adjust_bw(hhds::Pin_class dpin, const Bitwidth_range& bw);
@@ -56,6 +88,8 @@ protected:
   void process_flop(hhds::Node_class& node);
   void process_memory(hhds::Node_class& node);
   void process_mux(hhds::Node_class& node, Inp_pins& inp_edges);
+  static std::optional<Bitwidth_range> refine_by_guard(const hhds::Node_class& mux, const hhds::Pin_class& arm_driver, bool true_arm,
+                                                       const Bitwidth_range& range);
   void process_hotmux(hhds::Node_class& node, Inp_pins& inp_edges);
   void process_sra(hhds::Node_class& node, Inp_pins& inp_edges);
   void process_shl(hhds::Node_class& node, Inp_pins& inp_edges);
