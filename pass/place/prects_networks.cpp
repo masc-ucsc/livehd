@@ -141,8 +141,9 @@ Prects_networks prects_networks(const physical::Technology& tech, const physical
       if (const auto entry = pin_net.find(label); entry != pin_net.end() && entry->second == unbound) {
         entry->second = n;
       }
-      if ((c.instance == "PIN" && roles.reset_ports.contains(c.pin))
-          || (c.instance != "PIN" && (roles.reset_pins.contains(label) || roles.reset_pins.contains(c.instance + "/" + c.pin)))) {
+      if (!roles.reset_is_data
+          && ((c.instance == "PIN" && roles.reset_ports.contains(c.pin))
+              || (c.instance != "PIN" && (roles.reset_pins.contains(label) || roles.reset_pins.contains(c.instance + "/" + c.pin))))) {
         mark(n);
       }
       if ((c.instance == "PIN" && roles.clock_ports.contains(c.pin)) || (c.instance != "PIN" && roles.clock_pins.contains(label))) {
@@ -186,7 +187,10 @@ Prects_networks prects_networks(const physical::Technology& tech, const physical
           }
         }
       }
-      if ((!roles.override_controls && matches(info.controls)) || matches(info.resets)) {
+      // A flop's asynchronous reset pins are in `controls` as well as `resets`: as data they stay out of both.
+      const auto reset_pin = [&] { return info.resets && (info.resets->contains(c.pin) || info.resets->contains(c.pin.substr(0, c.pin.find('[')))); };
+      if ((!roles.override_controls && matches(info.controls) && !(roles.reset_is_data && reset_pin()))
+          || (!roles.reset_is_data && matches(info.resets))) {
         mark(n);
       }
     }

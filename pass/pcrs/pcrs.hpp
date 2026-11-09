@@ -34,9 +34,10 @@ struct Options {
 };
 
 // How deep one clock domain's tree is. `domain` names the (reset root, root clock) pair, `sinks` is
-// its load count. The default is a flat net for a network that one driver can serve, one flop
-// level otherwise.
-using Depth_policy = std::function<unsigned(std::string_view domain, size_t sinks)>;
+// its load count, `current` the flop levels of the tree already in the graph (absent: none yet). The
+// default keeps the current depth, and starts a new domain flat when one driver can serve it, with
+// one flop level otherwise. A network whose domains all keep their depth is left untouched.
+using Depth_policy = std::function<unsigned(std::string_view domain, size_t sinks, std::optional<unsigned> current)>;
 
 // Where a placed cell is, for spatial clustering (the sinks of one flop are neighbours). An empty
 // result keeps instance-name order, which follows the source hierarchy.
@@ -48,6 +49,12 @@ struct Domain_stats {
   unsigned    sinks   = 0;
   unsigned    flops   = 0;
   unsigned    buffers = 0;
+  bool        kept    = false;  // already at this depth: the tree was not rebuilt
+  // Full instance names of the cells serving this domain, for mapping a timing path back to its
+  // domain. Flops are exact; buffers of a network with several domains are listed with its first domain.
+  std::vector<std::string> cells;
+  // `instance:pin` labels of the domain's flop D and Q pins, where the reset hops are timed.
+  std::vector<std::string> flop_pins;
 };
 
 struct Stats {
@@ -64,6 +71,45 @@ struct Stats {
 // `depth_of` and `position_of` are optional. The graph must be the FLAT mapped netlist.
 Stats build_reset(hhds::Graph& graph, const physical::Technology& tech, const liberty::Cell_library& cells, const Options& options,
                   const Depth_policy& depth_of = {}, const Position_of& position_of = {});
+
+// Replace every flop this pass minted (node attribute pcrs_stage) by a wire, or by an inverter when the cell's Q is
+// inverted, and delete it. Formal equivalence then compares the design as if the network had zero depth, which is
+// what the design means whatever depth timing chose. Returns the flops bypassed. Each flop's D pin is port 1 and its
+// Q pin port 3 (liberty::create_dff_io).
+unsigned bypass_stages(hhds::Graph& graph);
+
+// The depth each clock domain should have, shared by every placement call of one flow so a decision
+// made in a timing round survives the next build. Unknown domains start by the default policy.
+class Depth_state {
+public:
+  unsigned max_depth = 8;
+  [[nodiscard]] std::optional<unsigned> get(std::string_view domain) const;
+  void                                  set(std::string_view domain, unsigned depth);
+  // Explicit entry first, else the depth already in the graph, else the default start.
+  [[nodiscard]] Depth_policy policy(unsigned fanout) const;
+  [[nodiscard]] const std::map<std::string, unsigned, std::less<>>& all() const { return depth_; }
+
+private:
+  std::map<std::string, unsigned, std::less<>> depth_;
+};
+
+// Timing evidence for a depth decision: the physical labels (`instance:pin`) of the worst setup path,
+// and the slack/arrival of any pin (nullopt: the pin is unknown).
+struct Pin_timing {
+  std::optional<double> slack, arrival;
+};
+using Timing_of = std::function<Pin_timing(std::string_view label)>;
+
+// Add one flop level to the domain whose cells are on the worst setup path. A reset path that is the
+// critical path is what a deeper tree fixes; the worst path of the design elsewhere is not this pass's
+// business, and TNS is not consulted (the clock goal may be unreachable). One domain per call.
+// Returns the domain that grew, or empty.
+std::string retarget_for_wns(const Stats& stats, const std::vector<std::string>& worst_path, Depth_state& state);
+
+// Remove one flop level from every domain whose reset hops have slack to spare: its worst slack must
+// exceed the longest hop arrival plus `margin` (merging two hops costs about one more hop). Meant for
+// the last timing iteration, when the placement is settled. Returns the domains that shrank.
+std::vector<std::string> retarget_shrink(const Stats& stats, const Timing_of& timing, double margin, Depth_state& state);
 
 // A cell minted by this pass, by its instance name (leaf segment after the hierarchy prefix).
 std::string_view instance_leaf(std::string_view instance);

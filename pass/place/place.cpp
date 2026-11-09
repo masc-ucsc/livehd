@@ -68,6 +68,7 @@
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
 #include "repair.hpp"
+#include "pass/pcrs/pcrs.hpp"
 #include "reset_tree.hpp"
 #include "resize_engine.hpp"
 #include "routing_tracks.hpp"
@@ -1569,6 +1570,10 @@ void collect_control_roles(hhds::Graph& graph, Resolver& resolve, Prects_library
   const auto collect = [&](const hhds::Node_class& node) {
     for (auto pin : node.out_sorted_pins()) {
       if (!gu::signal_roles_of(pin)) {
+        continue;
+      }
+      // With pass.pcrs a reset is ordinary data behind its own pipelined tree: only clock roles stay controls.
+      if (roles.reset_is_data && (gu::signal_roles_of(pin) & attrs::signal_reset) && !(gu::signal_roles_of(pin) & attrs::signal_clock)) {
         continue;
       }
       for (int bit = 0; bit < std::max(1, gu::bits_of(pin)); ++bit) {
@@ -5900,7 +5905,8 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
   }
   remove_transparent_latches(graph);
   View       v;
-  const auto weight_roles = prects_library(options.technology().cells, options.control_ports);
+  auto weight_roles       = prects_library(options.technology().cells, options.control_ports);
+  weight_roles.reset_is_data = pcrs_active(options);
   v.prects                = weight_roles;
   v.native_orientations   = macro_active;
   // ECO starts from the supplied physical frame; centroid initialization is a
@@ -5941,8 +5947,18 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       return true;  // unknown constant: left to the tie logic
     }
   };
+  const bool use_pcrs   = pcrs_active(options);
+  pcrs::Stats pcrs_stats;
+  if (use_pcrs) {
+    pcrs_stats = pcrs::build_reset(graph,
+                                   tech,
+                                   options.technology().cells,
+                                   {.fanout = options.reset_fanout},
+                                   options.pcrs_depth ? options.pcrs_depth->policy(options.reset_fanout) : pcrs::Depth_policy{});
+    result.pcrs_stats = std::make_shared<const pcrs::Stats>(pcrs_stats);
+  }
   const auto reset_tree
-      = options.reset_fanout
+      = options.reset_fanout && !use_pcrs
             ? buffer_reset_nets(graph, tech, options.technology().cells, options.reset_fanout, reset_constant, options.reset_pins)
             : Reset_tree_stats{};
   const auto rail_tree = options.domino_rail_fanout && !options.domino_rail_pins.empty()
@@ -14508,6 +14524,38 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       tree.AddMember("levels", reset_tree.levels, allocator);
       tree.AddMember("skipped", reset_tree.skipped, allocator);
       json.AddMember("reset_tree", tree, allocator);
+    }
+    if (use_pcrs) {
+      // pass.pcrs: one balanced flop tree per (reset root, clock domain). `depth` is the flop levels every sink of
+      // the domain sees, so post-placement simulation must hold reset for at least depth + 1 cycles.
+      rapidjson::Value block(rapidjson::kObjectType);
+      block.AddMember("fanout", options.reset_fanout, allocator);
+      block.AddMember("networks", pcrs_stats.networks, allocator);
+      block.AddMember("sinks", pcrs_stats.sinks, allocator);
+      block.AddMember("flops_added", pcrs_stats.flops, allocator);
+      block.AddMember("buffers_added", pcrs_stats.buffers, allocator);
+      block.AddMember("removed", pcrs_stats.removed, allocator);
+      block.AddMember("skipped", pcrs_stats.skipped, allocator);
+      block.AddMember("flops",
+                      static_cast<uint64_t>(std::count_if(v.cells.begin(), v.cells.end(), [](const Cell& c) {
+                        return pcrs::instance_leaf(c.name).starts_with("__pcrs_rstf");
+                      })),
+                      allocator);
+      unsigned max_depth = 0;
+      rapidjson::Value domains(rapidjson::kArrayType);
+      for (const auto& d : pcrs_stats.domains) {
+        rapidjson::Value one(rapidjson::kObjectType);
+        one.AddMember("name", rapidjson::Value(d.name.c_str(), allocator), allocator);
+        one.AddMember("depth", d.depth, allocator);
+        one.AddMember("sinks", d.sinks, allocator);
+        one.AddMember("flops", d.flops, allocator);
+        one.AddMember("buffers", d.buffers, allocator);
+        domains.PushBack(one, allocator);
+        max_depth = std::max(max_depth, d.depth);
+      }
+      block.AddMember("max_depth", max_depth, allocator);
+      block.AddMember("domains", domains, allocator);
+      json.AddMember("pcrs", block, allocator);
     }
     if (options.domino_rail_fanout && !options.domino_rail_pins.empty()) {
       rapidjson::Value tree(rapidjson::kObjectType);

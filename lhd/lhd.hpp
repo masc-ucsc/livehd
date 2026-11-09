@@ -974,6 +974,13 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      Synth_set_option::Kind::boolean,
      "retired control; must be false because pre-CTS clock/reset networks are not sized (synth.place.reset_fanout builds the reset "
      "tree)"},
+    {"place.pcrs",
+     "true",
+     Synth_set_option::Kind::boolean,
+     "pass.pcrs: rebuild every reset distribution (reset-role nets and asynchronous clear/preset pins) as one balanced tree of "
+     "flop levels and buffers per (reset root, clock domain), with place.reset_fanout loads per driver; every sink of a domain "
+     "sees the reset the same number of cycles late, and the reset is ordinary data for placement and timing. false: the "
+     "pre-pcrs buffer tree with reset networks excluded from placement and timing"},
     {"place.reset_fanout",
      "32",
      Synth_set_option::Kind::integer,

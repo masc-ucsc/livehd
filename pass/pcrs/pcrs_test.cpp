@@ -220,6 +220,8 @@ protected:
     return path;
   }
 
+  size_t stats_flops() { return minted("DFFx1") + minted("DFFQNx1"); }
+
   size_t minted(const char* master) {
     size_t n = 0;
     for (auto node : graph->body().nodes()) {
@@ -259,7 +261,7 @@ protected:
   }
 
   static Depth_policy depth(unsigned n) {
-    return [n](std::string_view, size_t) { return n; };
+    return [n](std::string_view, size_t, std::optional<unsigned>) { return n; };
   }
 };
 
@@ -277,7 +279,7 @@ TEST_F(Pcrs, OneFlopLevelServesFortySinksWithEightPerDriver) {
   expect_uniform(1, 0);
   for (auto node : graph->body().nodes()) {
     if (is_pcrs_cell(std::string(node.get_name())) && node.get_subnode_io()->get_name() == "DFFx1") {
-      EXPECT_EQ(node.attr(attrs::pcrs_stage).get(), 1u);
+      EXPECT_EQ(node.attr(attrs::pcrs_stage).get(), 1u);  // level 1, Q not inverted
       EXPECT_LE(fanout(node.get_driver_pin("Q")), 8u);
     }
   }
@@ -340,6 +342,115 @@ TEST_F(Pcrs, RebuildingChangesDepthWithoutLeavingTheOldTree) {
   EXPECT_EQ(first.flops, second.flops);
   EXPECT_EQ(first.buffers, second.buffers);
   expect_uniform(2, 0);
+}
+
+TEST_F(Pcrs, AnUnchangedNetworkIsLeftAloneAndTheDefaultKeepsTheCurrentDepth) {
+  add_flops(40, clock);
+  const auto lib   = cells();
+  const auto first = build_reset(*graph, tech, lib, {.fanout = 8}, depth(2));
+  ASSERT_EQ(first.domains.size(), 1u);
+  EXPECT_FALSE(first.domains[0].kept);
+  EXPECT_EQ(first.domains[0].cells.size(), first.flops + first.buffers);
+  std::set<std::string> before;
+  for (auto node : graph->body().nodes()) {
+    if (is_pcrs_cell(std::string(node.get_name()))) {
+      before.insert(std::string(node.get_name()));
+    }
+  }
+  // Same depth: untouched, with the same cells reported.
+  std::optional<unsigned> seen;
+  const auto second = build_reset(*graph, tech, lib, {.fanout = 8}, [&](std::string_view, size_t, std::optional<unsigned> current) {
+    seen = current;
+    return 2u;
+  });
+  EXPECT_EQ(seen, std::optional<unsigned>{2u});
+  ASSERT_EQ(second.domains.size(), 1u);
+  EXPECT_TRUE(second.domains[0].kept);
+  EXPECT_EQ(second.removed, 0u);
+  EXPECT_EQ(second.domains[0].flops, first.flops);
+  EXPECT_EQ(second.domains[0].cells.size(), first.domains[0].cells.size());
+  std::set<std::string> after;
+  for (auto node : graph->body().nodes()) {
+    if (is_pcrs_cell(std::string(node.get_name()))) {
+      after.insert(std::string(node.get_name()));
+    }
+  }
+  EXPECT_EQ(before, after) << "an unchanged network must keep its cells, names and so their placement";
+  // The default policy keeps the depth in the graph, not its own start value.
+  const auto third = build_reset(*graph, tech, lib, {.fanout = 8});
+  EXPECT_TRUE(third.domains[0].kept);
+  EXPECT_EQ(third.domains[0].depth, 2u);
+  // A different depth rebuilds.
+  const auto fourth = build_reset(*graph, tech, lib, {.fanout = 8}, depth(1));
+  EXPECT_FALSE(fourth.domains[0].kept);
+  expect_uniform(1, 0);
+}
+
+TEST_F(Pcrs, ADomainGrowsOnlyWhenItsCellsAreOnTheWorstPath) {
+  add_flops(40, clock);
+  const auto lib = cells();
+  Depth_state state;
+  auto        built = build_reset(*graph, tech, lib, {.fanout = 8}, state.policy(8));
+  ASSERT_EQ(built.domains.size(), 1u);
+  EXPECT_EQ(built.domains[0].depth, 1u);
+  ASSERT_FALSE(built.domains[0].cells.empty());
+  // A path elsewhere in the design: nothing grows.
+  EXPECT_TRUE(retarget_for_wns(built, {"core.u0.r0a:CLK", "core.u1.r3a:QN", "somewhere:D"}, state).empty());
+  EXPECT_FALSE(state.get(built.domains[0].name).has_value());
+  // A path through one of the domain's flops: one more level, for the whole domain.
+  const auto flop_pin = built.domains[0].cells.front() + ":Q";
+  EXPECT_EQ(retarget_for_wns(built, {"x:CLK", flop_pin, "y:D"}, state), built.domains[0].name);
+  EXPECT_EQ(state.get(built.domains[0].name), std::optional<unsigned>{2u});
+  built = build_reset(*graph, tech, lib, {.fanout = 8}, state.policy(8));
+  EXPECT_EQ(built.domains[0].depth, 2u);
+  EXPECT_FALSE(built.domains[0].kept);
+  expect_uniform(2, 0);
+  // The depth now in the graph is kept by the next call.
+  built = build_reset(*graph, tech, lib, {.fanout = 8}, state.policy(8));
+  EXPECT_TRUE(built.domains[0].kept);
+  // A cap stops it.
+  state.max_depth = 2;
+  EXPECT_TRUE(retarget_for_wns(built, {built.domains[0].cells.front() + ":Q"}, state).empty());
+  EXPECT_EQ(state.get(built.domains[0].name), std::optional<unsigned>{2u});
+}
+
+TEST_F(Pcrs, ADepthZeroNetworkGrowsWhenItsBuffersAreOnTheWorstPath) {
+  add_flops(40, clock);
+  const auto lib = cells();
+  Depth_state state;
+  state.set("rst@clk", 0);
+  auto built = build_reset(*graph, tech, lib, {.fanout = 8}, state.policy(8));
+  ASSERT_EQ(built.domains[0].depth, 0u);
+  ASSERT_GT(built.domains[0].buffers, 0u);
+  EXPECT_EQ(retarget_for_wns(built, {built.domains[0].cells.front() + ":Y"}, state), "rst@clk");
+  built = build_reset(*graph, tech, lib, {.fanout = 8}, state.policy(8));
+  EXPECT_EQ(built.domains[0].depth, 1u);
+  expect_uniform(1, 0);
+}
+
+TEST_F(Pcrs, ADomainShrinksOnlyWithSlackBeyondItsLongestHop) {
+  add_flops(40, clock);
+  const auto lib = cells();
+  Depth_state state;
+  state.set("rst@clk", 2);
+  const auto built = build_reset(*graph, tech, lib, {.fanout = 8}, state.policy(8));
+  ASSERT_EQ(built.domains[0].depth, 2u);
+  const auto roomy = [](std::string_view) { return Pin_timing{.slack = 900.0, .arrival = 80.0}; };
+  const auto tight = [](std::string_view label) {
+    return Pin_timing{.slack = label.ends_with(":Q") ? 30.0 : 900.0, .arrival = 80.0};
+  };
+  const auto blind = [](std::string_view) { return Pin_timing{}; };
+  Depth_state other = state;
+  EXPECT_TRUE(retarget_shrink(built, tight, 0, other).empty());  // a Q with 30 ps left: a merged hop would not fit
+  EXPECT_TRUE(retarget_shrink(built, blind, 0, other).empty());  // no evidence: keep
+  EXPECT_TRUE(retarget_shrink(built, roomy, 900, other).empty());  // the margin counts
+  EXPECT_EQ(other.get("rst@clk"), std::optional<unsigned>{2u});
+  const auto shrunk = retarget_shrink(built, roomy, 0, state);
+  ASSERT_EQ(shrunk.size(), 1u);
+  EXPECT_EQ(state.get("rst@clk"), std::optional<unsigned>{1u});
+  const auto again = build_reset(*graph, tech, lib, {.fanout = 8}, state.policy(8));
+  EXPECT_EQ(again.domains[0].depth, 1u);
+  expect_uniform(1, 0);
 }
 
 TEST_F(Pcrs, EveryClockDomainGetsItsOwnTreeOnItsOwnClock) {
@@ -444,6 +555,31 @@ TEST_F(Pcrs, NeighboursShareADriver) {
     }
     EXPECT_EQ(sides.size(), 1u) << node.get_name() << ": one driver serves both far-apart groups";
   }
+}
+
+TEST_F(Pcrs, BypassTurnsTheTreeIntoWiresAndKeepsPolarity) {
+  add_flops(40, clock);
+  const auto lib = cells();
+  build_reset(*graph, tech, lib, {.fanout = 8}, depth(2));
+  const auto flops = stats_flops();
+  EXPECT_EQ(flops, 12u);
+  EXPECT_EQ(bypass_stages(*graph), 12u);
+  EXPECT_EQ(minted("DFFx1"), 0u);
+  expect_uniform(0, 0);  // every reset pin is back on the root, through buffers only
+}
+
+TEST_F(Pcrs, BypassOfInvertingFlopsRestoresThePolarityWithInverters) {
+  lib_text = kLibQn;
+  add_flops(20, clock);
+  const auto lib = cells();
+  build_reset(*graph, tech, lib, {.fanout = 8}, depth(1));
+  EXPECT_EQ(bypass_stages(*graph), 5u);
+  size_t inverters = 0;
+  for (auto node : graph->body().nodes()) {
+    inverters += gu::type_op_of(node) == Ntype_op::Not;
+  }
+  EXPECT_EQ(inverters, 5u);  // one per inverting flop; the library INVx1 in front of level 1 stays
+  EXPECT_EQ(bypass_stages(*graph), 0u);
 }
 
 TEST_F(Pcrs, NonCellLoadsKeepTheirDirectConnection) {

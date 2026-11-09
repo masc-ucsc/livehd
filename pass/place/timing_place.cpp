@@ -106,8 +106,8 @@ std::map<std::string, double> timing_weights(const physical::Parasitics& nets, c
   return data_timing_weights(nets, timing, min_weight, max_weight, nullptr);
 }
 void refresh_timing_weights(Result& state, const Options& options, const Timing_feedback& timing) {
-  const auto roles
-      = state.floorplan.nets.empty() ? Prects_library{} : prects_library(options.technology().cells, options.control_ports);
+  auto roles = state.floorplan.nets.empty() ? Prects_library{} : prects_library(options.technology().cells, options.control_ports);
+  roles.reset_is_data = pcrs_active(options);
   refresh_timing_weights(state, options, timing, roles);
 }
 void refresh_timing_weights(Result& state, const Options& options, const Timing_feedback& timing,
@@ -221,6 +221,23 @@ Repair_result timing_place(Result initial, const Options& requested, const Evalu
     if (target.empty()) {
       break;
     }
+    // pass.pcrs: a reset path on the worst setup path is fixed by a deeper reset tree, so the round's placement
+    // starts from it. The last round may instead take a level away from a domain with slack to spare.
+    std::string              pcrs_grew;
+    std::vector<std::string> pcrs_shrunk;
+    if (pcrs_active(options) && options.pcrs_depth && result.placed.pcrs_stats) {
+      pcrs_grew = pcrs::retarget_for_wns(*result.placed.pcrs_stats, best.path, *options.pcrs_depth);
+      if (pcrs_grew.empty() && round + 1 == rounds) {
+        pcrs_shrunk = pcrs::retarget_shrink(
+            *result.placed.pcrs_stats,
+            [&](std::string_view label) {
+              const auto* pin = best.find_label(label);
+              return pin ? pcrs::Pin_timing{pin->slack, pin->arrival} : pcrs::Pin_timing{};
+            },
+            0.0,
+            *options.pcrs_depth);
+      }
+    }
     if (!refreshed) {
       refresh_timing_weights(result.placed, options, best);
     }
@@ -250,6 +267,19 @@ Repair_result timing_place(Result initial, const Options& requested, const Evalu
     physical::write_def(frame, trial.floorplan);
     trial.restart_seed = std::make_shared<physical::Floorplan>(std::move(frame));
     w.StartObject();
+    if (!pcrs_grew.empty() || !pcrs_shrunk.empty()) {
+      w.Key("pcrs");
+      w.StartObject();
+      w.Key("deeper");
+      w.String(pcrs_grew.c_str());
+      w.Key("shallower");
+      w.StartArray();
+      for (const auto& domain : pcrs_shrunk) {
+        w.String(domain.c_str());
+      }
+      w.EndArray();
+      w.EndObject();
+    }
     w.Key("weighted_nets");
     w.Uint64(target.size());
     w.Key("weights");

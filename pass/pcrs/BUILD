@@ -26,3 +26,13 @@ cc_test(
         "@googletest//:gtest_main",
     ],
 )
+
+# Hashed into the formal verdict-cache salt (see //pass/lec:formal_srcs): bypass_stages() decides what the prover sees.
+filegroup(
+    name = "formal_srcs",
+    srcs = [
+        "pcrs.cpp",
+        "pcrs.hpp",
+    ],
+    visibility = ["//visibility:public"],
+)

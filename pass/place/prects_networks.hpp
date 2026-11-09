@@ -24,6 +24,10 @@ struct Prects_library {
   std::set<std::string>                                                   ports, pins, clock_ports, clock_pins;
   std::set<std::string>                                                   reset_ports, reset_pins;
   bool                                                                    override_controls = false;
+  // pass.pcrs rebuilds every reset distribution as a pipelined tree: a reset net is then ordinary
+  // data (placed, timed, repaired like any other), and only clock networks stay excluded. False
+  // keeps the pre-pcrs policy, where reset roles and asynchronous reset pins are excluded.
+  bool                                                                    reset_is_data = false;
 };
 Prects_library prects_library(const std::string& liberty, const std::string& control_ports = {});
 Prects_library prects_library(const liberty::Cell_library& library, const std::string& control_ports = {});

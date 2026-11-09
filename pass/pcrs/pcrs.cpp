@@ -288,8 +288,16 @@ std::optional<Pin> leaf_clock(const Lib& lib, const Pin& sink) {
   return best->second.first;
 }
 
-std::string pin_label(const Pin& pin) {
+// A graph input by its declared name, any other driver by its cell name and port id.
+std::string pin_label(const hhds::Graph& graph, const Pin& pin) {
   const auto node = pin.get_master_node();
+  if (node.is_input_node()) {
+    for (const auto& decl : graph.get_io()->get_input_pin_decls()) {
+      if (decl.port_id == pin.get_port_id()) {
+        return std::string(decl.name);
+      }
+    }
+  }
   return std::format("{}:{}", std::string(node.get_name()), static_cast<uint64_t>(pin.get_port_id()));
 }
 
@@ -368,6 +376,13 @@ public:
     }
   }
 
+  struct Mark {
+    size_t cells, pins;
+  };
+  Mark mark() const { return {minted_names_.size(), minted_pins_.size()}; }
+  std::vector<std::string> cells_since(const Mark& m) const { return {minted_names_.begin() + m.cells, minted_names_.end()}; }
+  std::vector<std::string> pins_since(const Mark& m) const { return {minted_pins_.begin() + m.pins, minted_pins_.end()}; }
+
   // One (reset root, clock domain) tree at `depth` flop levels. Both polarities share the depth.
   void build(const Pin& head, const Pin& clock, std::vector<Leaf> leaves, unsigned depth, const Position_of& position_of,
              Domain_stats& domain) {
@@ -405,6 +420,7 @@ private:
                          serial_++);
     } while (!names_.insert(name).second);
     cell.set_name(name);
+    minted_names_.emplace_back(name);
     cell.attr(attrs::color).set(gu::node_color_of(owner));
     if (const auto group = owner.attr(attrs::synth_color_group); group.has()) {
       cell.attr(attrs::synth_color_group).set(std::string(group.get()));
@@ -500,7 +516,10 @@ private:
       std::vector<Pin> dpins, qpins;
       for (size_t j = 0; j < counts[k]; ++j) {
         auto cell = mint(flop_io_, owners[k][j], "f", k + 1);
-        cell.attr(attrs::pcrs_stage).set(uint32_t{k + 1});
+        const auto flop_name = minted_names_.back();
+        minted_pins_.push_back(flop_name + ":" + lib_.flop->d_pin);
+        minted_pins_.push_back(flop_name + ":" + lib_.flop->q_pin);
+        cell.attr(attrs::pcrs_stage).set(uint32_t{k + 1} | (lib_.flop->q_inverted ? uint32_t{1} << 16 : uint32_t{0}));
         ++stats_.flops;
         ++domain.flops;
         auto q = cell.create_driver_pin(lib_.flop->q_pin);
@@ -530,6 +549,7 @@ private:
   Stats&                         stats_;
   std::shared_ptr<hhds::GraphIO> buffer_io_, inverter_io_, flop_io_;
   std::set<std::string>          names_;
+  std::vector<std::string>       minted_names_, minted_pins_;
   unsigned                       serial_ = 0;
 };
 
@@ -538,6 +558,133 @@ private:
 std::string_view instance_leaf(std::string_view instance) {
   const auto dot = instance.rfind('.');
   return dot == std::string_view::npos ? instance : instance.substr(dot + 1);
+}
+
+unsigned bypass_stages(hhds::Graph& graph) {
+  std::vector<Node> stages;
+  for (auto n : graph.body().nodes()) {
+    if (n.attr(attrs::pcrs_stage).has()) {
+      stages.push_back(n);
+    }
+  }
+  unsigned bypassed = 0;
+  for (auto& node : stages) {
+    const auto io = node.get_subnode_io();
+    if (!io) {
+      continue;
+    }
+    std::string d_name;
+    for (const auto& decl : io->get_input_pin_decls()) {
+      if (decl.port_id == 1) {
+        d_name = std::string(decl.name);
+      }
+    }
+    const auto q = node.try_get_driver_pin(3);
+    if (d_name.empty() || q.is_invalid()) {
+      continue;
+    }
+    const auto d = driver_of(node, d_name);
+    if (d.is_invalid()) {
+      continue;
+    }
+    Pin source = d;
+    if (node.attr(attrs::pcrs_stage).get() & (uint32_t{1} << 16)) {
+      auto inverter = gu::create_typed_node(graph, Ntype_op::Not);
+      d.connect_sink(inverter.create_sink_pin(0));
+      source = inverter.create_driver_pin(0);
+      gu::set_bits(source, 1);
+      gu::set_unsign(source);
+    }
+    std::vector<Pin> loads;
+    for (const auto& edge : q.out_edges()) {
+      loads.push_back(edge.sink);
+    }
+    for (auto& load : loads) {
+      gu::drop_drivers(load);
+      load.connect_driver(source);
+    }
+    gu::drop_drivers(node);
+    node.del_node();
+    ++bypassed;
+  }
+  return bypassed;
+}
+
+std::optional<unsigned> Depth_state::get(std::string_view domain) const {
+  const auto it = depth_.find(domain);
+  return it == depth_.end() ? std::nullopt : std::optional<unsigned>{it->second};
+}
+
+void Depth_state::set(std::string_view domain, unsigned depth) { depth_[std::string(domain)] = std::min(depth, max_depth); }
+
+Depth_policy Depth_state::policy(unsigned fanout) const {
+  return [this, fanout](std::string_view domain, size_t sinks, std::optional<unsigned> current) {
+    if (const auto wanted = get(domain)) {
+      return *wanted;
+    }
+    return current ? *current : (sinks <= fanout ? 0u : 1u);
+  };
+}
+
+namespace {
+// `instance:pin` -> the leaf of the instance name (past the hierarchy prefix).
+std::string_view label_leaf(std::string_view label) {
+  const auto colon = label.rfind(':');
+  const auto instance = colon == std::string_view::npos ? label : label.substr(0, colon);
+  return instance_leaf(instance);
+}
+}  // namespace
+
+std::string retarget_for_wns(const Stats& stats, const std::vector<std::string>& worst_path, Depth_state& state) {
+  std::map<std::string, const Domain_stats*, std::less<>> owner;
+  for (const auto& domain : stats.domains) {
+    for (const auto& cell : domain.cells) {
+      owner.emplace(std::string(instance_leaf(cell)), &domain);
+    }
+  }
+  for (const auto& label : worst_path) {
+    const auto it = owner.find(label_leaf(label));
+    if (it == owner.end()) {
+      continue;
+    }
+    const auto& domain = *it->second;
+    const auto  now    = state.get(domain.name).value_or(domain.depth);
+    if (now >= state.max_depth) {
+      return {};  // as deep as allowed: nothing a deeper tree can still buy
+    }
+    state.set(domain.name, now + 1);
+    return domain.name;
+  }
+  return {};
+}
+
+std::vector<std::string> retarget_shrink(const Stats& stats, const Timing_of& timing, double margin, Depth_state& state) {
+  std::vector<std::string> shrunk;
+  for (const auto& domain : stats.domains) {
+    const auto now = state.get(domain.name).value_or(domain.depth);
+    if (now == 0 || domain.flop_pins.empty()) {
+      continue;
+    }
+    double worst_slack = 1e300, longest_hop = 0;
+    bool   known       = true;
+    for (const auto& label : domain.flop_pins) {
+      const auto t = timing(label);
+      if (!t.slack) {
+        known = false;
+        break;
+      }
+      worst_slack = std::min(worst_slack, *t.slack);
+      if (t.arrival) {
+        longest_hop = std::max(longest_hop, *t.arrival);
+      }
+    }
+    // Merging two hops costs about one more hop: only a domain with that much slack to spare loses a level.
+    if (known && worst_slack > longest_hop + margin) {
+      state.set(domain.name, now - 1);
+      shrunk.push_back(domain.name);
+    }
+  }
+  return shrunk;
 }
 
 bool is_pcrs_cell(std::string_view instance) { return instance_leaf(instance).starts_with(kPrefix); }
@@ -599,12 +746,19 @@ Stats build_reset(hhds::Graph& graph, const physical::Technology& tech, const li
 
   // Read-only: the network, its domains and their sinks.
   struct Domain {
-    Pin               clock;
-    std::vector<Leaf> leaves;
+    Pin                       clock;
+    std::vector<Leaf>         leaves;
+    std::optional<unsigned>   current;  // flop levels of the tree in the graph now
+    std::vector<std::string>  cells;    // minted cells already serving it
+    std::vector<std::string>  pins;     // their flop D/Q pin labels
+    unsigned                  flops = 0, buffers = 0;
+    unsigned                  depth = 0;
+    std::string               name;
   };
   struct Planned {
     Network                  net;
     std::map<Key, Domain>    domains;
+    bool                     keep = false;
   };
   std::vector<Planned> plan;
   for (const auto& head : heads) {
@@ -639,11 +793,57 @@ Stats build_reset(hhds::Graph& graph, const physical::Technology& tech, const li
     for (const auto& leaf : unclocked) {
       largest->second.leaves.push_back(leaf);
     }
+    // The tree already in the graph: its depth per domain (its flops sit on the domain's clock).
+    bool any_minted = false;
+    for (const auto& dead : p.net.dead) {
+      if (!minted(dead)) {
+        continue;
+      }
+      any_minted = true;
+      if (const auto it = lib.flops.find(master_name(dead)); it != lib.flops.end()) {
+        const auto clk = driver_of(dead, it->second->clk_pin);
+        if (const auto found = p.domains.find(clk.is_invalid() ? Key{} : key_of(root_clock(lib, clk))); found != p.domains.end()) {
+          const auto stage = dead.attr(attrs::pcrs_stage).has() ? (dead.attr(attrs::pcrs_stage).get() & 0xffffu) : 1u;
+          found->second.current = std::max(found->second.current.value_or(0u), stage);
+          ++found->second.flops;
+          found->second.cells.emplace_back(std::string(dead.get_name()));
+          found->second.pins.push_back(std::string(dead.get_name()) + ":" + it->second->d_pin);
+          found->second.pins.push_back(std::string(dead.get_name()) + ":" + it->second->q_pin);
+        }
+      }
+    }
+    if (any_minted) {
+      auto first = p.domains.begin();
+      for (auto& [clock_key, domain] : p.domains) {
+        if (!domain.current) {
+          domain.current = 0;  // minted buffers but no flops: a depth-0 tree
+        }
+      }
+      for (const auto& dead : p.net.dead) {
+        if (minted(dead) && !lib.flops.contains(master_name(dead))) {
+          first->second.cells.emplace_back(std::string(dead.get_name()));
+          ++first->second.buffers;
+        }
+      }
+    }
+    // Depth per domain now, so a network that keeps every depth is not touched.
+    bool all_keep = any_minted;
+    for (auto& [clock_key, domain] : p.domains) {
+      domain.name        = std::format("{}@{}", pin_label(graph, p.net.head), pin_label(graph, domain.clock));
+      const auto sinks   = domain.leaves.size();
+      const auto fallback = domain.current ? *domain.current : (sinks <= options.fanout ? 0u : 1u);
+      domain.depth       = depth_of ? depth_of(domain.name, sinks, domain.current) : fallback;
+      all_keep           = all_keep && domain.current && *domain.current == domain.depth;
+    }
+    p.keep = all_keep;
     plan.push_back(std::move(p));
   }
 
   // Strip every previous distribution first (their names are free again), then mint the new trees.
   for (auto& p : plan) {
+    if (p.keep) {
+      continue;
+    }
     for (auto& domain : p.domains) {
       for (const auto& leaf : domain.second.leaves) {
         gu::drop_drivers(leaf.sink);
@@ -654,6 +854,9 @@ Stats build_reset(hhds::Graph& graph, const physical::Technology& tech, const li
     }
   }
   for (auto& p : plan) {
+    if (p.keep) {
+      continue;
+    }
     for (auto& dead : p.net.dead) {
       dead.del_node();
       ++stats.removed;
@@ -664,15 +867,23 @@ Stats build_reset(hhds::Graph& graph, const physical::Technology& tech, const li
   for (auto& p : plan) {
     ++stats.networks;
     for (auto& [clock_key, domain] : p.domains) {
-      const auto name  = std::format("{}@{}", pin_label(p.net.head), pin_label(domain.clock));
-      const auto sinks = domain.leaves.size();
-      const unsigned depth = depth_of ? depth_of(name, sinks) : (sinks <= options.fanout ? 0u : 1u);
       Domain_stats ds;
-      ds.name  = name;
-      ds.depth = depth;
-      ds.sinks = static_cast<unsigned>(sinks);
+      ds.name  = domain.name;
+      ds.depth = domain.depth;
+      ds.sinks = static_cast<unsigned>(domain.leaves.size());
       stats.sinks += ds.sinks;
-      builder.build(p.net.head, domain.clock, std::move(domain.leaves), depth, position_of, ds);
+      if (p.keep) {
+        ds.kept    = true;
+        ds.flops   = domain.flops;
+        ds.buffers = domain.buffers;
+        ds.cells     = std::move(domain.cells);
+        ds.flop_pins = std::move(domain.pins);
+      } else {
+        const auto first_cell = builder.mark();
+        builder.build(p.net.head, domain.clock, std::move(domain.leaves), domain.depth, position_of, ds);
+        ds.cells     = builder.cells_since(first_cell);
+        ds.flop_pins = builder.pins_since(first_cell);
+      }
       stats.domains.push_back(std::move(ds));
     }
   }

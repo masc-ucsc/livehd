@@ -842,6 +842,7 @@ cc_library(
         ":terminal_legalize",
         ":legroute",
         ":fp_repetition",
+        "//pass/pcrs",
         "//core",
         "//graph",
         "//inou/lefdef:index_union_find",

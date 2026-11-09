@@ -3351,6 +3351,20 @@ sh_test(
     ],
 )
 
+sh_test(
+    name = "lhd_placement_pcrs_smoke",
+    size = "small",
+    timeout = "moderate",
+    srcs = ["lhd_placement_pcrs_smoke.py"],
+    data = [
+        "sky130_fixture.py",
+        "sky130hd_dfbbp_1.lef.part",
+        "sky130hd_dfbbp_1.lib.part",
+        "//inou/lefdef:test_data",
+        "//lhd",
+    ],
+)
+
 # 2d-domplace H cases: unsupported (retained) states, a complemented rail, a
 # converted Q shared by an output port and other domino rails, an endpoint
 # wider than one gate, LEC of the placed netlist, and warm/model-knob replay.

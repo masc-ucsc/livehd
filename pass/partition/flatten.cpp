@@ -325,6 +325,10 @@ void Flattener::carry_node_attrs(Ictx* ctx, const hhds::Node_class& orig, const 
   if (auto a = orig.attr(livehd::attrs::lut); a.has()) {
     neo.attr(livehd::attrs::lut).set(std::string{a.get()});
   }
+  // A reset pipeline flop of pass.pcrs stays a wire for formal wherever the netlist is flattened again.
+  if (auto a = orig.attr(livehd::attrs::pcrs_stage); a.has()) {
+    neo.attr(livehd::attrs::pcrs_stage).set(a.get());
+  }
   if (physical_names_) {
     if (auto a = orig.attr(livehd::attrs::place); a.has()) neo.attr(livehd::attrs::place).set(a.get());
     if (auto a = orig.attr(livehd::attrs::placement_block); a.has()) neo.attr(livehd::attrs::placement_block).set(a.get());

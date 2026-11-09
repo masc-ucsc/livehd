@@ -45,6 +45,7 @@
 #include "pass_single_edge.hpp"
 #include "proof_prep.hpp"
 #include "query.hpp"
+#include "pass/pcrs/pcrs.hpp"
 #include "semdiff.hpp"
 #include "solve_stats.hpp"
 #include "split_selfref.hpp"  // //graph — repair a self-ref exposed by flattening a comb instance
@@ -835,6 +836,9 @@ void load_side_graphs(Options& opts, Result& res, const std::string& kind, const
     for (const hhds::Gid id : lib.all_gids()) {
       auto g = lib.get_graph(id);
       if (g) {
+        // Reset pipeline flops minted by pass.pcrs are a timing choice, not design meaning: compare the
+        // network as if it had no stages (the library on disk is untouched, this is the in-memory copy).
+        livehd::pcrs::bypass_stages(*g);
         var.add(g);
       }
     }

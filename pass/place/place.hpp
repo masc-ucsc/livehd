@@ -32,6 +32,7 @@
 #include "multirow_eco.hpp"
 #include "placement_session.hpp"
 #include "power_grid.hpp"
+#include "pass/pcrs/pcrs.hpp"
 #include "prects_networks.hpp"
 #include "preroute_design.hpp"
 #include "rc_cache.hpp"
@@ -277,6 +278,14 @@ struct Options {
   // most this many loads (0: off). `reset_pins`, by LEF macro, adds reset pins the
   // Liberty does not describe: the domino storage resets (RST) of 2d-domplace U22.
   unsigned                 reset_fanout = 0;
+  // synth.place.pcrs: rebuild every reset distribution as a balanced pipelined tree (pass.pcrs) with
+  // `reset_fanout` loads per driver, and treat the reset as data. Off: the pre-pcrs buffer tree and the
+  // reset exclusion. The domino storage resets (`reset_pins`) always use the legacy tree.
+  bool                     pcrs = true;
+  // The flop levels of every reset domain, shared by all placement calls of one flow: a timing round that
+  // finds a reset path on the worst path deepens its domain here, and the next build keeps the decision.
+  // Null: each call keeps the depth already in the graph and starts new domains by the default.
+  std::shared_ptr<pcrs::Depth_state> pcrs_depth;
   std::map<std::string, std::vector<std::string>> reset_pins;
   // synth.place.domino_rail_fanout: the same pre-placement fanout tree for nets
   // on domino data rails, which the per-region mapping never buffers (0: off).
@@ -475,6 +484,8 @@ struct Options {
   // Logical constants still receive real per-load physical sources.
   bool                preserve_imported_ties = false;
 };
+// pass.pcrs is in effect: on, with a reset fanout cap, and no domino storage resets (those keep the legacy tree).
+inline bool pcrs_active(const Options& o) { return o.pcrs && o.reset_fanout >= 2 && o.reset_pins.empty(); }
 DreamPlace::native::RoutePolicy resolve_route_policy(const Options&, const Stage_route&);
 void                            initialize_route_tables();
 // The learned-routing pool snapshot requested by any stage, or nullptr. Store it
@@ -489,6 +500,8 @@ struct Macro_gp_timing {
 };
 struct Result {
   std::shared_ptr<const Preroute_design>           preroute_design;
+  // What pass.pcrs built or kept in this call (null when it did not run): which cells serve which domain.
+  std::shared_ptr<const pcrs::Stats>               pcrs_stats;
   unsigned                                         fp_resized_cells = 0, fp_repair_edits = 0;
   // Unknown constant bits tied low under Options::unknown_const_zero (zero otherwise).
   size_t                                           unknown_const_tied = 0;

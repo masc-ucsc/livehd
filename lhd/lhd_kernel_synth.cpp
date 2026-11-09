@@ -1226,6 +1226,8 @@ livehd::placement::Options placement_options(const Options& opts) {
                       "expected 0 (off) or an integer >= 2: loads per reset buffer"};
     }
     out.reset_fanout = static_cast<unsigned>(fanout);
+    out.pcrs         = truthy(synth_set(opts, "place.pcrs", "true"));
+    out.pcrs_depth   = std::make_shared<livehd::pcrs::Depth_state>();
     const auto rails = integer("place.domino_rail_fanout", "32");
     if (rails < 0 || rails == 1) {
       throw Lhd_error{"usage",

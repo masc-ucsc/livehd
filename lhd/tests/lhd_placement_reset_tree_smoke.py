@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""synth.place.reset_fanout: every flat reset net gets a buffer tree before placement (default 32, 0 off); reset repair stays
-rejected, and reset nets keep their pre-CTS placement exclusion."""
+"""synth.place.reset_fanout with synth.place.pcrs=false (the pre-pcrs path, still used for the domino storage resets): every
+flat reset net gets a buffer tree before placement (default 32, 0 off); reset repair stays rejected, and reset nets keep
+their pre-CTS placement exclusion. The default pcrs tree is covered by lhd_placement_pcrs_smoke."""
 import json
 import os
 from pathlib import Path
@@ -31,7 +32,7 @@ sdc.write_text('create_clock -name clk -period 10 [get_ports clk]\n'
 base = ['lhd/lhd', 'synth', str(source), '--top', 'dut', '--set', f'synth.liberty={root}/arst.lib',
         '--set', f'synth.lef={libdir}/sky130hd.tlef,{root}/arst.lef', '--set', f'synth.sdc={sdc}', '--set', 'synth.place=true',
         '--set', 'synth.place.iterations=80', '--set', 'synth.place.grid.density=8', '--set', 'synth.place.timing_driven=false',
-        '--set', f'synth.mapper={os.environ.get("MAPPER", "abc")}', '-q']
+        '--set', 'synth.place.pcrs=false', '--set', f'synth.mapper={os.environ.get("MAPPER", "abc")}', '-q']
 
 
 def run(name, extra, success=True):

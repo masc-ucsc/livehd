@@ -366,8 +366,9 @@ struct mem_address_proven_t {
 };
 inline constexpr mem_address_proven_t mem_address_proven{};
 
-// A flop minted by pass.pcrs for a pipelined network (reset first). The value is
-// the 1-based pipeline level inside its (root, clock domain) tree. Every sink of
+// A flop minted by pass.pcrs for a pipelined network (reset first). The low 16 bits are
+// the 1-based pipeline level inside its (root, clock domain) tree; bit 16 says the
+// cell's Q output is inverted (an ASAP7 DFFHQN flop), so a wire stand-in must invert. Every sink of
 // the tree sits at the same level count, so the network only shifts in time:
 // formal tools treat a tagged flop as a wire, and its depth is a timing choice,
 // not part of the design's meaning. Absence means an ordinary state element.

@@ -1686,6 +1686,11 @@ mapping never buffers a rail), with buffers named `__place_railtree*`;
 violations from 51/78 to 0/0 for 170 buffers (16 loads: 2210 ps, 444 buffers; 64: 2661 ps,
 69/62); lfsr has no rail above 32 loads, so it is unchanged.
 
+**pass.pcrs (default).** With `synth.place.pcrs=true` every reset distribution is rebuilt as a balanced pipelined tree
+(`pass/pcrs/README.md`) and the reset is ordinary data: only clock networks are excluded as described next. The exclusion
+below applies to reset networks only with `synth.place.pcrs=false`, or for the domino storage resets that keep the legacy
+tree.
+
 Clock/reset nets are excluded from GP wirelength, RUDY demand, connectivity-driven
 movement, IO attraction and legalization criticality/alignment. Synthesis preserves
 clock/reset roles on LGraph drivers through mapping, hierarchy flattening and cached
