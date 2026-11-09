@@ -97,7 +97,9 @@ An output channel the change delays without a ready is read late: `out:<name>@ne
 `obs`, for its valid and every word it guards, and in the `xfer` lines that read its valid
 (`xfer out:<valid>@next`). The judge warns about a word whose payload and guard are read at
 different cycles, and about an `xfer` that reads an output at a cycle the slot never observes it
-at.
+at. The product search reads `@next` too, with `period 1`: it runs D0 one step behind D1, so its
+counterexample at cycle m is the judge's step m-1 (the TSV has rows 0..m). With `period 2` it
+refuses `@next`; read the channel late through delay registers in D0's observers there.
 
 The judge's results: `NO MATCH at step n` (no alignment exists on the run UNDER THIS CONTRACT: the
 report lists every last candidate and why it fails), `MATCH FOUND` (and, if the slot's own stall

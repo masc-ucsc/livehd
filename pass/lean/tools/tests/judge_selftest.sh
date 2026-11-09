@@ -37,6 +37,14 @@ set -euo pipefail
 #                                           FAIL (NOT SEEN); an output no word reads: noted
 #     coverage                              transactions per channel are counted; runs with no
 #                                           transaction warn (search) and fail (controls)
+#     product search, rD read in the same   COUNTEREXAMPLE (its guard is bit 0 of the 1-bit v),
+#       cycle                               its trace -> judge NO MATCH
+#     product search, rD read late (@next)  NO COUNTEREXAMPLE UP TO k
+#     product search, rDb read late         COUNTEREXAMPLE at cycle m (D0 one step behind), its
+#                                           trace -> judge NO MATCH at step m-1, the payload
+#                                           differs (the CLASS hint re-reads only the trace's
+#                                           steps, too few here to tell the skew from a delay)
+#     product, @next with period 2          refused
 #
 # The judge's default route is vc (fp for a certificate with memories); two cases also run on fp.
 # SYM_NAT=<dir with native sym_refmap and sym_verify> uses them; otherwise the drivers run
@@ -304,4 +312,25 @@ judge "NO MATCH" acc2b "trace:$(ls "$OUT"/prod_acc2b_sw2/*cex_inputs.tsv | head 
 product prod_acc2 acc2 accS acc2 2,4,8 "NO COUNTEREXAMPLE"
 product prod_pv1b pv1b pv0 pv1b 4,8,16 "COUNTEREXAMPLE"
 judge "NO MATCH" pv1b "trace:$(ls "$OUT"/prod_pv1b_sw2/*cex_inputs.tsv | head -1)"
+# a guard on a 1-bit port (out:v.0) reads the port itself
+product prod_r_same r_same rS rD 2,4,8 "COUNTEREXAMPLE"
+grep -q 'd1_v ? d1_y' "$OUT/prod_r_same.sv" || { echo "FAIL: the 1-bit guard is not read as the port"; exit 1; }
+judge "NO MATCH" r_same "trace:$(ls "$OUT"/prod_r_same_sw2/*cex_inputs.tsv | head -1)"
+# @next: the product runs D0 one step behind; a counterexample at cycle m is the judge's step m-1
+product prod_r_late r_late rS rD 2,4,8 "NO COUNTEREXAMPLE"
+grep -q 'D0 one step behind' "$OUT/prod_r_late.gen.log" || { cat "$OUT/prod_r_late.gen.log"; echo "FAIL: @next product mode not reported"; exit 1; }
+product prod_rb_late rb_late rS rDb 2,4,8 "COUNTEREXAMPLE"
+m=$(grep -o 'fails the property at cycle [0-9]*' "$OUT/prod_rb_late.search.log" | tail -1 | grep -o '[0-9]*$' || true)
+[[ -n "$m" && "$m" -ge 1 ]] || { tail -4 "$OUT/prod_rb_late.search.log"; echo "FAIL: no counterexample cycle >= 1"; exit 1; }
+judge "NO MATCH" rb_late "trace:$(ls "$OUT"/prod_rb_late_sw2/*cex_inputs.tsv | head -1)"
+has "NO MATCH at step $((m - 1))" "the product's counterexample at cycle $m is the judge's NO MATCH at step $((m - 1))"
+has "D1.s transaction #[0-9]+ \\(step [0-9]+\\) differs: out:y@next" "the @next product's counterexample shows the payload that differs"
+printf '%s\n' "impl pv1b_lean/pv1b.dcert" "spec pv0_lean/pv0.dcert" "chan step allow:ok resp:x obs:dly_o" \
+  "slot step 1 resp:in:x obs:out:y@next" "maxstall 0" "period 2" > "$OUT/pv_next.refmap"
+if "$PY" "$ROOT/pass/lean/tools/scripts/mk_product.py" "$OUT/pv_next.refmap" "$OUT/pv0.v" "$OUT/pv1b.v" \
+     "$OUT/prod_pv_next.sv" pv0 pv1b > "$OUT/prod_pv_next.gen.log" 2>&1 \
+   || ! grep -q '@next with period 2' "$OUT/prod_pv_next.gen.log"; then
+  cat "$OUT/prod_pv_next.gen.log"; echo "FAIL: mk_product accepted @next with period 2"; exit 1
+fi
+echo "ok: product, @next with period 2 -> refused"
 echo "judge self-test: all passed"

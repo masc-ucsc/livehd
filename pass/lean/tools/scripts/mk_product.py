@@ -18,6 +18,18 @@ as the certificates were exported from). The product `prod` holds both:
   step of phase 0 (a rising-edge step) after the first period, every input equals its value of the
   step before (inputs change only between a rising-edge step and the falling-edge step after it).
 
+A guard on a 1-bit port (`?out:v.0`) reads the port itself (a bit-select of a 1-bit wire is not
+legal Verilog).
+
+`out:<name>@next` (D1's output one step later, in the slot's `<bool>`, `resp:`, `obs:` words and
+guards, or an `xfer`) makes the product check judge step n at cycle n+1, with D0 one step behind
+D1: `in:<name>` and `out:<name>` read registers that hold the value of the cycle before,
+`out:<name>@next` reads D1's output now, D0's clock is gated by the slot from cycle 1 on (D0 does
+not step in cycle 0), and `ok` holds in cycle 0. `env_ok` stays D1's `asm` now, so a
+counterexample keeps `asm` on every row. A counterexample at cycle m is then a judge NO MATCH at
+step m-1 (its TSV has rows 0..m: the judge reads row m for the `@next` words). Not with
+`period 2`: one step there is half a clock; use delay registers in D0's observers instead.
+
 `sym_verify prod.dcert ok asm:env_ok base k:<K>` then searches K steps from reset; its
 counterexample TSV is a run for `sym_refmap judge ... trace:`. The product decides nothing: with
 the slot's stall choice a failure is "this run breaks the contract or the stall choice", and the
@@ -69,21 +81,41 @@ def ports_of(path, top):
     return src, out
 
 
-def port_expr(tok, ins, outs, pre):
-    """Verilog for a .refmap port token over D1 (in:<n> -> the product input, out:<n> -> D1's output wire)."""
+class Ports:
+    """D1's ports as the product reads them. `late` (the .refmap reads `@next`): the product checks
+    judge step n at cycle n+1, so `in:<n>` and `out:<n>` read a register that holds the value of
+    the cycle before (`prev_<n>`, `prev_d1_<n>`) and `out:<n>@next` reads D1's output now."""
+
+    def __init__(self, ins, outs, late):
+        self.ins, self.outs, self.late = ins, outs, late
+        self.regs = {}  # register -> (the signal it holds one cycle, width), in first-use order
+
+    def prev(self, sig, w):
+        r = f'prev_{sig}'
+        self.regs.setdefault(r, (sig, w))
+        return r
+
+
+def port_expr(tok, P):
+    """(Verilog, width) for a .refmap port token over D1 (in:<n> -> the product input,
+    out:<n> -> D1's output wire, out:<n>@next -> D1's output one step later)."""
     if tok.startswith('in:'):
         n = tok[3:]
-        assert n in ins, f'no implementation input {n}'
-        return n, ins[n]
+        assert n in P.ins, f'no implementation input {n}'
+        return (P.prev(n, P.ins[n]) if P.late else n), P.ins[n]
     if tok.startswith('out:'):
         n = tok[4:]
-        assert not n.endswith('@next'), '@next words are not supported by the product'
-        assert n in outs, f'no implementation output {n}'
-        return f'{pre}{n}', outs[n]
-    raise SystemExit(f'a port is out:<name> or in:<name>, got {tok}')
+        nxt = n.endswith('@next')
+        n = n[:-len('@next')] if nxt else n
+        assert n in P.outs, f'no implementation output {n}'
+        if nxt:
+            assert P.late
+            return f'd1_{n}', P.outs[n]
+        return (P.prev(f'd1_{n}', P.outs[n]) if P.late else f'd1_{n}'), P.outs[n]
+    raise SystemExit(f'a port is out:<name>, out:<name>@next or in:<name>, got {tok}')
 
 
-def bit_expr(s, ins, outs):
+def bit_expr(s, P):
     """A .refmap Boolean (`!`, `&`, `|`, parentheses; atoms <port>, <port>==<n>, 1, 0)."""
     out, i = [], 0
     while i < len(s):
@@ -98,27 +130,29 @@ def bit_expr(s, ins, outs):
             out.append("1'b" + atom); continue
         if '==' in atom:
             p, v = atom.split('==')
-            e, _ = port_expr(p, ins, outs, 'd1_')
+            e, _ = port_expr(p, P)
             out.append(f'({e} == {int(v)})'); continue
-        e, _ = port_expr(atom, ins, outs, 'd1_')
+        e, _ = port_expr(atom, P)
         out.append(f'(|{e})')
     return ''.join(out)
 
 
-def obs_expr(tok, ins, outs):
+def obs_expr(tok, P):
     body, guard = (tok.split('?') + [None])[:2]
     if '[' in body:
         p, sl = body.split('[', 1)
         lo, ln = map(int, sl.rstrip(']').split(':'))
     else:
         p, lo, ln = body, 0, None
-    e, w = port_expr(p, ins, outs, 'd1_')
+    e, w = port_expr(p, P)
     ln = w if ln is None else ln
     v = f'{e}[{lo + ln - 1}:{lo}]' if (lo, ln) != (0, w) else e
     if guard:
-        gp, gb = guard.split('.')
-        ge, _ = port_expr(gp, ins, outs, 'd1_')
-        v = f'({ge}[{int(gb)}] ? {v} : {ln}\'d0)'
+        gp, gb = guard.rsplit('.', 1)
+        ge, gw = port_expr(gp, P)
+        b = int(gb)
+        assert b < gw, f'guard {guard}: bit {b} of a {gw}-bit port'
+        v = f'({ge if gw == 1 else f"{ge}[{b}]"} ? {v} : {ln}\'d0)'
     return v, ln
 
 
@@ -140,15 +174,25 @@ def main(refmap, d0p, d1p, outp, top0='uc_b03', top1='uc_b03'):
     out0 = {n: w for (d, n, w) in p0 if d == 'output'}
     clk = next((c for c in ('clk_i', 'clk') if c in ins), None)
     assert clk and clk in in0, 'both designs need the clock input clk_i (or clk)'
+    late = any('@next' in a for (k, args) in L if k in ('slot', 'xfer') for a in args)
+    if late and P != 1:
+        raise SystemExit(f'@next with period {P}: one step is not one clock there; read the channel '
+                         'late through delay registers in D0\'s observers instead')
+    PX = Ports(ins, outs, late)
     resp_in, resp_w = lst(ch[1:], 'resp'), lst(sl[2:], 'resp')
     assert len(resp_in) == len(resp_w), 'chan resp: and slot resp: differ in length'
     d0_in = {n: f"{w}'d0" for n, w in in0.items()}
     for di, tok in zip(resp_in, resp_w):
         assert di in in0, f'no spec input {di}'
-        d0_in[di] = port_expr(tok, ins, outs, 'd1_')[0]
+        d0_in[di] = port_expr(tok, PX)[0]
     obs0, obs1 = lst(ch[1:], 'obs'), lst(sl[2:], 'obs')
     assert len(obs0) == len(obs1), 'chan obs: and slot obs: differ in length'
-    fire = bit_expr(sl[1], ins, outs)
+    fire = bit_expr(sl[1], PX)
+    words = []
+    for o0, w1 in zip(obs0, obs1):
+        assert o0 in out0, f'no spec output {o0}'
+        words.append((o0,) + obs_expr(w1, PX))
+    xf = ' || '.join(f'({bit_expr(x, PX)})' for x in xfers) or "1'b0"
     T = []
     T.append('// Generated by mk_product.py: the product of D0 and D1 for a bounded search.')
     T.append(re.sub(r'^module\s+' + top0 + r'\b', 'module d0_core', s0, count=1, flags=re.M))
@@ -163,27 +207,38 @@ def main(refmap, d0p, d1p, outp, top0='uc_b03', top1='uc_b03'):
     for n, w in out0.items():
         T.append(f'  wire {"[%d:0] " % (w - 1) if w > 1 else ""}d0_{n};')
     T.append('  d1_core u_d1(' + ', '.join([f'.{n}({n})' for n in ins] + [f'.{n}(d1_{n})' for n in outs]) + ');')
+    if late:
+        T.append('  // @next: cycle m checks judge step m-1; prev_* hold the ports of the cycle before')
+        for r, (sig, w) in PX.regs.items():
+            T.append(f'  reg {"[%d:0] " % (w - 1) if w > 1 else ""}{r} = {w}\'d0;')
+        T.append('  reg started = 1\'b0;  // 0 in cycle 0 only')
+        T.append(f'  always @(posedge {clk}) begin')
+        T.append('    started <= 1\'b1;')
+        for r, (sig, w) in PX.regs.items():
+            T.append(f'    {r} <= {sig};')
+        T.append('  end')
     T.append(f'  wire fire = {fire};')
-    if R == 0:
+    if R == 0 and not late:
         T.append(f'  wire d0_clk = {clk};')
     else:
         T.append('  reg en_l;  // the gate\'s enable latch: open while the clock is low')
-        T.append(f'  always @* if (!{clk}) en_l = fire;')
+        T.append(f'  always @* if (!{clk}) en_l = {"started & fire" if late else "fire"};')
         T.append(f'  wire d0_clk = {clk} & en_l;')
     conn0 = [f'.{clk}(d0_clk)'] + [f'.{n}({d0_in[n]})' for n in in0 if n != clk] + [f'.{n}(d0_{n})' for n in out0]
     T.append('  d0_core u_d0(' + ', '.join(conn0) + ');')
     eqs = []
-    for i, (o0, w1) in enumerate(zip(obs0, obs1)):
-        assert o0 in out0, f'no spec output {o0}'
-        v, ln = obs_expr(w1, ins, outs)
+    for i, (o0, v, ln) in enumerate(words):
         T.append(f'  wire eq_{i} = ({v}) == ({max(ln, out0[o0])}\'d0 | d0_{o0});')
         eqs.append(f'eq_{i}')
     T.append(f'  wire all_eq = {" && ".join(eqs) if eqs else "1" + chr(39) + "b1"};')
-    xf = ' || '.join(f'({bit_expr(x, ins, outs)})' for x in xfers) or "1'b0"
     T.append(f'  wire any_xfer = {xf};')
     T.append('  reg [15:0] holds = 16\'d0;  // periods in a row without a D0 step')
-    T.append(f'  always @(posedge {clk}) holds <= fire ? 16\'d0 : holds + 16\'d1;')
-    T.append(f'  assign ok = (fire ? all_eq : !any_xfer) && (holds <= 16\'d{R});')
+    if late:
+        T.append(f'  always @(posedge {clk}) if (started) holds <= fire ? 16\'d0 : holds + 16\'d1;')
+        T.append(f'  assign ok = !started || ((fire ? all_eq : !any_xfer) && (holds <= 16\'d{R}));')
+    else:
+        T.append(f'  always @(posedge {clk}) holds <= fire ? 16\'d0 : holds + 16\'d1;')
+        T.append(f'  assign ok = (fire ? all_eq : !any_xfer) && (holds <= 16\'d{R});')
     env = [f'd1_{asm}' if asm else "1'b1"]
     if P == 2:
         allin = '{' + ', '.join(n for n in ins if n != clk) + '}'
@@ -200,7 +255,9 @@ def main(refmap, d0p, d1p, outp, top0='uc_b03', top1='uc_b03'):
     T.append(f'  assign env_ok = {" && ".join(env)};')
     T.append('endmodule')
     open(outp, 'w').write('\n'.join(T) + '\n')
-    print(f'{outp}: {len(ins)} inputs, {len(eqs)} observed pairs, {len(xfers)} xfer, maxstall {R}, period {P}')
+    lag = ('; @next: D0 one step behind, a counterexample at cycle m is judge step m-1'
+           if late else '')
+    print(f'{outp}: {len(ins)} inputs, {len(eqs)} observed pairs, {len(xfers)} xfer, maxstall {R}, period {P}{lag}')
 
 
 if __name__ == '__main__':
