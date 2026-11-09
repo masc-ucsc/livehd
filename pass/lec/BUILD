@@ -658,6 +658,13 @@ sh_test(
     tags = ["no-sandbox"],  # 2f-lec diverged-use memory collapse guard (no false PROVEN on crossed mems)
 )
 
+sh_test(
+    name = "lec_mem_port_addr_order_test",
+    srcs = ["tests/lec_mem_port_addr_order_test.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],  # constant-address write ports pair by address, not position (opposite emit order proves)
+)
+
 # One mapped netlist, one verdict. A latch enabled by a latch-based clock gate,
 # mapped by ABC (DLCLKPx1, whose gensim graph numbers its ports differently from
 # a Verilog re-read: graph/inline_sub.cpp binds a --lib model by port name) and

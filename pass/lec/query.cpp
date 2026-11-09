@@ -10234,7 +10234,51 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       identity_ok = rp[k].addr.getSort() == ip[k].addr.getSort() && rp[k].din.getSort() == ip[k].din.getSort()
                     && rp[k].wmask.getSort() == ip[k].wmask.getSort();
     }
-    if (identity_ok) {
+    // Constant-address writes (a reg array written one entry per port, as a
+    // loop unrolls or as Verilog spells it) pair by address, not by position:
+    // two front ends may emit the same entries in opposite order (Verilog
+    // 63..0 vs a Pyrope `for e in 0..<64`), and positional pairing then
+    // compares entry 63 against entry 0 on every port. When EVERY port on both
+    // sides has a distinct constant address, the writes commute (no two can
+    // hit one word), so reordering is sound and needs no collision obligation.
+    auto const_addr_pairing = [&]() -> bool {
+      if (!identity_ok || rp.size() != ip.size()) {
+        return false;
+      }
+      bool positional_same = true;
+      for (size_t k = 0; k < rp.size() && positional_same; ++k) {
+        positional_same = rp[k].addr == ip[k].addr;
+      }
+      if (positional_same) {
+        return false;  // already aligned: the plain identity pairing is exact
+      }
+      auto const_key = [&](const cvc5::Term& t) {
+        const auto v = solver.simplify(t);  // folds extract/zero_extend of literals
+        return v.isBitVectorValue() ? v.getBitVectorValue(2) : std::string{};
+      };
+      absl::flat_hash_map<std::string, size_t> impl_at;
+      for (size_t k = 0; k < ip.size(); ++k) {
+        const std::string c = const_key(ip[k].addr);
+        if (c.empty() || !impl_at.emplace(c, k).second) {
+          return false;  // non-constant or duplicated address: order matters
+        }
+      }
+      std::vector<size_t>              map(rp.size());
+      absl::flat_hash_set<std::string> ref_seen;
+      for (size_t k = 0; k < rp.size(); ++k) {
+        const std::string c  = const_key(rp[k].addr);
+        const auto        it = c.empty() ? impl_at.end() : impl_at.find(c);
+        if (it == impl_at.end() || !ref_seen.insert(c).second) {
+          return false;
+        }
+        map[k] = it->second;
+      }
+      pair_of = std::move(map);  // `permuted` stays false: distinct constants never collide
+      return true;
+    };
+    if (const_addr_pairing()) {
+      // pair_of is set by the lambda.
+    } else if (identity_ok) {
       for (size_t k = 0; k < rp.size(); ++k) {
         pair_of[k] = k;
       }
