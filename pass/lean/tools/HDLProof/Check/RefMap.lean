@@ -363,7 +363,7 @@ structure SlotRec where
   ch   : ChanS
   so   : SVal
 
-def chainS (DS : DesignCert) (RS : Program) (sp : RefMapSpec) (P : SPorts) :
+def chainS (DS : DesignCert) (RS : Stepper) (sp : RefMapSpec) (P : SPorts) :
     SymSt → SVal → List SlotS → Except String (List SlotRec × SVal × SymSt)
   | st, σS, [] => .ok ([], σS, st)
   | st, σS, sl :: sls =>
@@ -410,7 +410,7 @@ def RecsOK (σ : Asg) (DS : DesignCert) (sp : RefMapSpec) (C : Ports) :
       RecsOK σ DS sp C rs (if sl.kind.bit C then specStep DS sp σC r.ch (respOf C sl) else σC) sls
   | _, _, _ => False
 
-theorem chainS_extends {DS : DesignCert} {RS : Program} {sp : RefMapSpec} {P : SPorts} :
+theorem chainS_extends {DS : DesignCert} {RS : Stepper} {sp : RefMapSpec} {P : SPorts} :
     ∀ (sls : List SlotS) (st : SymSt) (σS : SVal) (recs : List SlotRec) (σe : SVal) (st' : SymSt),
       chainS DS RS sp P st σS sls = .ok (recs, σe, st') → st.Extends st'
   | [], st, σS, recs, σe, st', h => by
@@ -441,7 +441,7 @@ theorem chainS_extends {DS : DesignCert} {RS : Program} {sp : RefMapSpec} {P : S
 /-- **The chain is sound.** From a state value denoting a spec state of the declared shape, the
 chain's end denotes the concrete chain's end, and its records denote each slot's bit and the
 spec's outputs at the state before it. -/
-theorem chainS_sound {DS : DesignCert} {RS : Program} {sp : RefMapSpec} {P : SPorts} {C : Ports}
+theorem chainS_sound {DS : DesignCert} {RS : Stepper} {sp : RefMapSpec} {P : SPorts} {C : Ports}
     (hrS : MemResidual DS RS) (hAS : admitsWB DS = true) (hside : specSideOK DS sp = true)
     {σ : Asg} {stF : SymSt} (hc : stF.Consistent σ) (hP : PortsRel σ P C) :
     ∀ (sls : List SlotS) (st : SymSt) (σS : SVal) (σC : StateM) (recs : List SlotRec) (σe : SVal)

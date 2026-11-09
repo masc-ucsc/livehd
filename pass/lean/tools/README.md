@@ -15,13 +15,13 @@ memory route) stays in `formal/lean`; everything here builds on it.
 | path | contents |
 |---|---|
 | `HDLProof/Theory/` | refinement theory in pure Lean, independent of hardware: channel specs and Kahn determinism (`Channels`), runs refining a spec with stuttering and the `PipelineRefinement` API (`Stutter`), horizontal and vertical composition (`Compose`), progress under fairness (`Progress`) |
-| `HDLProof/Sym/` | the verified symbolic interpretation of a residual: evaluator (`Eval`), SAT/LRAT (`Sat`), k-induction (`KInd`), conjunctive invariants (`Conj`, `ConjT`), refinement with stuttering (`Refine`) |
+| `HDLProof/Sym/` | the verified symbolic step of a design on three routes (`sim:`): fp's residual (`Eval`, `Step`), the certificate's nodes and the verified compiler's bindings (`NativeOps`, `NativeBuilders`, `Native`, `NativeInterp`, `NativeRoute`: `irStepper_sound`, `vcStepper_sound`); SAT/LRAT (`Sat`), k-induction (`KInd`), conjunctive invariants (`Conj`, `ConjT`); `BvLit` (the equality and one-bit literals the refinement-map obligations use) |
 | `HDLProof/Kit/` | `Norm` (normalized memory-free states, state values from leaves), `BitE` (formulas and observed words over a design's real ports), `Driver` (the drivers' shared IO helpers; untrusted, no theorems) |
 | `HDLProof/Check/RefMap*.lean` | the refinement-map checker: a design refines a spec certificate with stuttering, the spec's state at every cycle being the map's value (`RefMap`, `RefMapSound`: `runRefMapOf`, `runRefMapOf_sound`) |
 | `HDLProof/Check/SpecFacts.lean` | the spec's facts, checked once per spec: Moore, and confluence of every pair of channels (`runSpecFactsOf_sound`) |
 | `HDLProof/Check/RefMapCompose.lean`, `RefMapRef.lean` | two checked maps of one spec show the same streams (`refmap_compose`); progress (`refmap_progress`); both restated over `interpretDesign` (`refmap_compose_ref`, `start_ref`, `refmap_progress_ref`) for verdicts stated as `RefMapChecked` / `SpecFactsChecked` |
 | `HDLProof/Check/Audit.lean` | the axiom gate: `#audit_axioms` for every checker theorem; the build fails on anything but `propext`, `Classical.choice`, `Quot.sound` |
-| `drivers/` | `sym_verify.lean` (invariants, k-induction, `conj:` specs), `sym_refine.lean` (refinement with stuttering, output pairs), `sym_refmap.lean` (refinement maps and spec facts; `.refmap` files; theorem files) |
+| `drivers/` | `sym_verify.lean` (invariants, k-induction, `conj:` specs), `sym_refmap.lean` (refinement with stuttering by refinement maps, spec facts, the judge; `.refmap` files; theorem files); both take `sim:fp\|ir\|vc`, default `vc` |
 | `formats/` | `refmap.md`: the `.refmap` format, what each target means, results, theorem files |
 | `tests/` | `sym_selftest.sh` and `refmap_selftest.sh`: small fixtures through the real flow, passing and failing |
 | `scripts/` | `sym_observe.py`: adds observer outputs (witnesses, internal state) to a copy of the RTL |
@@ -36,8 +36,7 @@ bash .build-proj.sh                       # simulator + tools, into .olean-dev, 
 bash .build-proj.sh HDLProof/Sym/ConjT    # one tools module
 # native drivers, into a project-local root:
 OPT=-O2 ROOT=$PWD/../../generated/sym/nat_root bash Futamura_Projection_Scripts/build-opt.sh \
-    ../../pass/lean/tools/drivers/sym_verify.lean ../../pass/lean/tools/drivers/sym_refine.lean \
-    ../../pass/lean/tools/drivers/sym_refmap.lean
+    ../../pass/lean/tools/drivers/sym_verify.lean ../../pass/lean/tools/drivers/sym_refmap.lean
 ln -s "$(dirname "$(elan which lean)")/cadical" ../../generated/sym/nat_root/nat/cadical
 ```
 
@@ -52,9 +51,9 @@ A native driver looks for `cadical` beside itself unless `solver:` is given.
 
 ## Use
 
-`pass/lean/README.md`, section "Unbounded proofs on the projection simulator", covers:
+`pass/lean/README.md`, section "Unbounded proofs", covers:
 - exporting a design;
-- the property, `conj:` and `sym_refine` options;
+- the property and `conj:` options, and refinement maps (`sym_refmap`);
 - the counterexample files an agent iterates on.
 
 `pass/lean/specialization/M3_UNBOUNDED_PROOFS.md` covers what a verdict means and what is trusted.

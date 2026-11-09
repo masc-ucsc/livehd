@@ -42,6 +42,11 @@ MODULES=(
   # Run admission (decisions C3, C4): exact edge vectors, reset-polarity guard.
   Compiler/ResetPolarity
   Compiler/RunAdmission
+  Compiler/ResidualIR
+  Compiler/ResidualSemantics
+  Compiler/CompileOpDefs
+  Compiler/CompileGraphDefs
+  Compiler/CompileDesignDefs
   # The axiom gate (`#audit_axioms`), first: every module that audits imports it.
   Projection/AxiomGate
   Projection/ObjectLanguage
@@ -153,14 +158,21 @@ TOOL_MODULES=(
   HDLProof/Sym/Sat
   HDLProof/Sym/Layout
   HDLProof/Sym/Step
+  HDLProof/Sym/NativeOps
+  HDLProof/Sym/NativeSound
+  HDLProof/Sym/NativeBuilders
+  HDLProof/Sym/Native
   HDLProof/Sym/Trace
+  HDLProof/Sym/NativeInterp
+  HDLProof/Sym/NativeRoute
+  HDLProof/Kit/SymRoute
   HDLProof/Sym/Shape
   HDLProof/Sym/Unroll
   HDLProof/Sym/Oblig
   HDLProof/Sym/KInd
   HDLProof/Sym/Conj
   HDLProof/Sym/ConjT
-  HDLProof/Sym/Refine
+  HDLProof/Sym/BvLit
   # refinement maps: kit (normalized states, port formulas) and the checker
   HDLProof/Kit/Norm
   HDLProof/Kit/BitE

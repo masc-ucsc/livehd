@@ -35,7 +35,7 @@ open Std.Tactic.BVDecide Projection.MemProjection Projection.Hw Projection.HwMem
 /-- One unrolled step: the assumption, the OUTPUTS, the next state. -/
 abbrev StepO := BVLogicalExpr × SVal × SVal
 
-def unrollO (D : DesignCert) (R : Program) (fuel : Nat) (asmOut : Option PropSpec)
+def unrollO (D : DesignCert) (R : Stepper) (fuel : Nat) (asmOut : Option PropSpec)
     (asmIn : List (Nat × Int)) (inW : List Nat) :
     Nat → Nat → SVal → SymSt → Except String (List StepO × SymSt)
   | 0, _, _, st => .ok ([], st)
@@ -53,7 +53,7 @@ def unrollO (D : DesignCert) (R : Program) (fuel : Nat) (asmOut : Option PropSpe
           | .error m => .error m
           | .ok (rest, st2) => .ok ((asm, so, sn) :: rest, st2)
 
-theorem unrollO_extends {D : DesignCert} {R : Program} {fuel : Nat}
+theorem unrollO_extends {D : DesignCert} {R : Stepper} {fuel : Nat}
     {asmOut : Option PropSpec} {asmIn : List (Nat × Int)} {inW : List Nat} :
     ∀ (k inB : Nat) (sS : SVal) (st : SymSt) (steps : List StepO) (st' : SymSt),
       unrollO D R fuel asmOut asmIn inW k inB sS st = .ok (steps, st') → st.Extends st' ∧ steps.length = k
@@ -84,7 +84,7 @@ def StepFactsO (σ : Asg) (asmOut : Option PropSpec) (asmIn : List (Nat × Int))
     ∧ SRel σ s.2.2 (StateM.encStateM stNext)
 
 /-- **`unrollO` is sound** (as `unroll_sound`, the outputs kept). -/
-theorem unrollO_sound {D : DesignCert} {R : Program} {fuel : Nat}
+theorem unrollO_sound {D : DesignCert} {R : Stepper} {fuel : Nat}
     {asmOut : Option PropSpec} {asmIn : List (Nat × Int)} {inW : List Nat}
     (hrange : inAsmRangeOK inW asmIn = true)
     (hres : MemResidual D R) (hA : admitsWB D = true)
@@ -120,8 +120,7 @@ theorem unrollO_sound {D : DesignCert} {R : Program} {fuel : Nat}
               obtain ⟨rfl, rfl⟩ := h
               have x2 := (unrollO_extends k _ _ _ _ _ h2).1.trans hx
               intro j hj hwf
-              have hev := hres hA (hwf 0 (by omega))
-              have rres := symStep_eval hev h1 hc x2 .conc
+              have rres := symStep_eval (hres hA (hwf 0 (by omega))) h1 hc x2 .conc
                 (inputVar_rel (hins (m + 0)) (by simpa using hin 0 (by omega))) hS
               obtain ⟨rn, ro⟩ := splitResult_sound rres hsplit
               have f0 : StepFactsO σ asmOut asmIn (outM D s0 ins (m + 0)) (ins (m + 0))
@@ -269,11 +268,11 @@ theorem mem_of_mapM_getElem? {α : Type} {xs : List α} :
       · exact List.mem_of_getElem? hy0
       · exact mem_of_mapM_getElem? hys' y hy
 
-def baseRunC (D : DesignCert) (R : Program) (sp : ConjSpec) (s0 : StateM) :
+def baseRunC (D : DesignCert) (R : Stepper) (sp : ConjSpec) (s0 : StateM) :
     Except String (List StepO × SymSt) :=
   unrollO D R sp.fuel sp.asmOut sp.asmIn sp.inW 1 0 (.conc (StateM.encStateM s0)) ⟨sp.inW.length, #[]⟩
 
-def stepRunC (D : DesignCert) (R : Program) (sp : ConjSpec) : Except String (List StepO × SymSt) :=
+def stepRunC (D : DesignCert) (R : Stepper) (sp : ConjSpec) : Except String (List StepO × SymSt) :=
   unrollO D R sp.fuel sp.asmOut sp.asmIn sp.inW 2 (layoutSize sp.L) (stateVar sp.L 0)
     ⟨layoutSize sp.L + 2 * sp.inW.length, #[]⟩
 
@@ -313,14 +312,14 @@ def checkConj (sp : ConjSpec) (rb rs : Except String (List StepO × SymSt)) (pfB
     | _ => false)
 
 /-- The checker. -/
-def runConjOf (D : DesignCert) (R : Program) (sp : ConjSpec) (s0 : StateM) (pfB : ByteArray)
+def runConjOf (D : DesignCert) (R : Stepper) (sp : ConjSpec) (s0 : StateM) (pfB : ByteArray)
     (pfS : List ByteArray) : Bool :=
   sideOKC D sp s0 && checkConj sp (baseRunC D R sp s0) (stepRunC D R sp) pfB pfS
 
 /-! ## Soundness -/
 
 section
-variable {D : DesignCert} {R : Program} {sp : ConjSpec} {s0 : StateM} {pfB : ByteArray}
+variable {D : DesignCert} {R : Stepper} {sp : ConjSpec} {s0 : StateM} {pfB : ByteArray}
   {pfS : List ByteArray} {ins : Nat → RuntimeInput}
 
 theorem sideOKC_parts (h : sideOKC D sp s0 = true) :
@@ -492,7 +491,7 @@ end
 /-- **The conjunctive invariant, in the shared reference semantics**, for a
 residual `R` from the specializer run: at every cycle whose assumptions up to
 it all held, every conjunct of `interpretDesign`'s outputs holds. -/
-theorem runConjOf_sound_ref {D : DesignCert} {R : Program} {sp : ConjSpec}
+theorem runConjOf_sound_ref {D : DesignCert} {R : Stepper} {sp : ConjSpec}
     {s0 : StateM} {pfB : ByteArray} {pfS : List ByteArray} (hres : MemResidual D R)
     (hA : admitsWB D = true) (hr : runConjOf D R sp s0 pfB pfS = true)
     (ins : Nat → RuntimeInput) (hins : ∀ n, (ins n).toList.map BV.width = sp.inW) :

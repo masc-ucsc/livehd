@@ -9,7 +9,7 @@
   script compiles; a new checker adds its soundness theorems here. -/
 
 import LeanSemanticPrimitives.Projection.AxiomGate
-import HDLProof.Sym.Refine
+import HDLProof.Sym.BvLit
 import HDLProof.Sym.Conj
 import HDLProof.Sym.ConjT
 import HDLProof.Theory.Progress
@@ -26,7 +26,6 @@ namespace HDLProof
 #audit_axioms Sym.runConjOf_sound_ref
 #audit_axioms Sym.stateVarT_rel
 #audit_axioms Sym.runConjTOf_sound_ref
-#audit_axioms Sym.runRefKOf_sound_ref
 
 -- Refinement theory: Kahn determinism of a confluent channel spec, runs that
 -- refine it, horizontal and vertical composition, progress under fairness.

@@ -26,7 +26,7 @@ open HDLProof.Sym HDLProof.Kit Std.Tactic.BVDecide Projection.MemProjection Proj
 
 /-! ## One spec step, symbolically -/
 
-def specEvalS (DS : DesignCert) (RS : Program) (sp : RefMapSpec) (st : SymSt) (σS sIn : SVal) :
+def specEvalS (DS : DesignCert) (RS : Stepper) (sp : RefMapSpec) (st : SymSt) (σS sIn : SVal) :
     Except String (SVal × SVal × SymSt) :=
   match symStep RS sp.fuelS st (.conc (encEdges (edgesAll DS))) sIn σS with
   | .error m => .error m
@@ -38,7 +38,7 @@ def specEvalS (DS : DesignCert) (RS : Program) (sp : RefMapSpec) (st : SymSt) (�
       | none => .error "the spec's next state is not of the declared shape"
       | some σn => .ok (σn, so, st1)
 
-theorem specEvalS_extends {DS : DesignCert} {RS : Program} {sp : RefMapSpec} {st st' : SymSt}
+theorem specEvalS_extends {DS : DesignCert} {RS : Stepper} {sp : RefMapSpec} {st st' : SymSt}
     {σS sIn σn so : SVal} (h : specEvalS DS RS sp st σS sIn = .ok (σn, so, st')) : st.Extends st' := by
   unfold specEvalS at h
   split at h
@@ -52,7 +52,7 @@ theorem specEvalS_extends {DS : DesignCert} {RS : Program} {sp : RefMapSpec} {st
         obtain ⟨-, -, rfl⟩ := h
         exact symStep_extends h1
 
-theorem specEvalS_sound {DS : DesignCert} {RS : Program} {sp : RefMapSpec}
+theorem specEvalS_sound {DS : DesignCert} {RS : Stepper} {sp : RefMapSpec}
     (hrS : MemResidual DS RS) (hAS : admitsWB DS = true) (hside : specSideOK DS sp = true)
     {σ : Asg} {stF : SymSt} (hc : stF.Consistent σ) {st st' : SymSt} {σS sIn σn so : SVal}
     (h : specEvalS DS RS sp st σS sIn = .ok (σn, so, st')) (hx : st'.Extends stF)
@@ -150,7 +150,7 @@ theorem specIn_respBVs (inW : List Nat) (ch : ChanS) (rs : List Int) :
 
 /-- Moore's run for channel `ch`: its outputs at a free state with free responses, and with
 zero responses. -/
-def mooreRun (DS : DesignCert) (RS : Program) (sp : RefMapSpec) (ch : ChanS) :
+def mooreRun (DS : DesignCert) (RS : Stepper) (sp : RefMapSpec) (ch : ChanS) :
     Except String (SVal × SVal × SymSt) :=
   let L := layoutSize sp.LS
   let ws := respWs sp.specInW ch
@@ -175,7 +175,7 @@ structure PairRun where
   st   : SymSt
 
 /-- An ordered pair `c, d`'s run from a free state, responses `rC` then `rD` free. -/
-def pairRun (DS : DesignCert) (RS : Program) (sp : RefMapSpec) (chc chd : ChanS) :
+def pairRun (DS : DesignCert) (RS : Stepper) (sp : RefMapSpec) (chc chd : ChanS) :
     Except String PairRun :=
   let L := layoutSize sp.LS
   let wc := respWs sp.specInW chc
@@ -263,7 +263,7 @@ theorem allFlopsLit_sound {σ : Asg} {s t : SVal} {st1 st2 : StateM}
   exact this
 
 /-- A target's obligation, from its own run. -/
-def sfObl (DS : DesignCert) (RS : Program) (sp : RefMapSpec) : STarget → Option BVLogicalExpr
+def sfObl (DS : DesignCert) (RS : Stepper) (sp : RefMapSpec) : STarget → Option BVLogicalExpr
   | .moore c => do
       let ch ← sp.chans[c]?
       match mooreRun DS RS sp ch with
@@ -313,7 +313,7 @@ def sfObl (DS : DesignCert) (RS : Program) (sp : RefMapSpec) : STarget → Optio
       | .error _ => none
 
 /-- **The spec facts check.** `pfs[i]` is the proof of `targetsSF sp`'s `i`-th target. -/
-def runSpecFactsOf (DS : DesignCert) (RS : Program) (sp : RefMapSpec) (pfs : List ByteArray) : Bool :=
+def runSpecFactsOf (DS : DesignCert) (RS : Stepper) (sp : RefMapSpec) (pfs : List ByteArray) : Bool :=
   specSideOK DS sp && sp.LS.mds.isEmpty
     && (targetsSF sp).zipIdx.all fun (t, i) =>
       match sfObl DS RS sp t with
@@ -345,7 +345,7 @@ theorem specOf_some {DS : DesignCert} {sp : RefMapSpec} {σ : StateM} {c : Nat}
   | none => rw [hc] at h; cases h
   | some ch => exact ⟨ch, rfl⟩
 
-theorem sf_parts {DS : DesignCert} {RS : Program} {sp : RefMapSpec} {pfs : List ByteArray}
+theorem sf_parts {DS : DesignCert} {RS : Stepper} {sp : RefMapSpec} {pfs : List ByteArray}
     (h : runSpecFactsOf DS RS sp pfs = true) :
     specSideOK DS sp = true ∧ sp.LS.mds = []
     ∧ ∀ t ∈ targetsSF sp, ∃ φ, sfObl DS RS sp t = some φ ∧ BVLogicalExpr.Unsat φ := by
@@ -362,7 +362,7 @@ theorem sf_parts {DS : DesignCert} {RS : Program} {sp : RefMapSpec} {pfs : List 
   | some φ => rw [ho] at h2; exact ⟨φ, rfl, checkUnsat_sound h2⟩
 
 section
-variable {DS : DesignCert} {RS : Program} {sp : RefMapSpec}
+variable {DS : DesignCert} {RS : Stepper} {sp : RefMapSpec}
 
 theorem respBVs_length (ws : List Nat) (rs : List Int) : (respBVs ws rs).length = ws.length := by
   simp [respBVs]
@@ -502,7 +502,7 @@ theorem bad_false_of {σ : Asg} {st : SymSt} (hc : st.Consistent σ) {bad φ : B
     rw [h, hU] at this; cases this
 
 section
-variable {DS : DesignCert} {RS : Program} {sp : RefMapSpec}
+variable {DS : DesignCert} {RS : Stepper} {sp : RefMapSpec}
 
 /-- **The spec facts check is sound**: Moore, and the channel spec's confluence. -/
 theorem runSpecFactsOf_sound {pfs : List ByteArray} (hrS : MemResidual DS RS) (hAS : admitsWB DS = true)

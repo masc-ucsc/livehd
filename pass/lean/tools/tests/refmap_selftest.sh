@@ -36,6 +36,10 @@ set -euo pipefail
 # Every PROVED is the verified check (Check.runRefMapOf / runSpecFactsOf)
 # accepting LRAT proofs from the untrusted solver.
 #
+# The default route is vc (no sim:); with emit: (fp only) and no sim: it is fp.
+# ROUTES (default "fp ir vc"): every refmap/specfacts case without `emit:` also runs on the IR
+# and VC symbolic routes (`sim:ir`, `sim:vc`, both designs) and must give the same verdict.
+#
 # SYM_NAT=<dir with a native sym_refmap> uses it; otherwise the driver runs
 # interpreted against formal/lean/.olean-dev (build it with
 # formal/lean/.build-proj.sh). The Lean toolchain pin lives in formal/lean.
@@ -167,7 +171,8 @@ refmap acc2_obs acc2 out:adv  acc_o out:acc_o@next rk/sl 0
 refmap acc2_rk0 acc2 out:adv  acc_o out:acc_o      sl/sl 0
 refmap acc2_ini acc2 out:adv  acc_o out:acc_o      rk/sl 1
 
-run() { # <mode> <expect> <refmap> args...
+ROUTES="${ROUTES:-fp ir vc}"
+run1() { # <mode> <expect> <refmap> args...
   local mode=$1 expect=$2 rm=$3; shift 3
   local log="$OUT/run_$(( ++N )).log"
   if [[ -n "$SYM_NAT" ]]; then
@@ -181,7 +186,22 @@ run() { # <mode> <expect> <refmap> args...
   if [[ "$got" != "$expect"* ]]; then
     tail -6 "$log"; echo "FAIL: $mode $rm $* -- expected $expect, got '$got'"; exit 1
   fi
-  echo "ok: $mode $rm -> $got"
+  echo "ok: $mode $rm $* -> $got"
+}
+run() { # <mode> <expect> <refmap> args... : on fp, and on the other ROUTES for refmap/specfacts
+  local mode=$1 expect=$2 rm=$3; shift 3
+  local sim
+  for sim in $ROUTES; do
+    if [[ "$sim" == fp ]]; then
+      if [[ ( "$mode" == refmap || "$mode" == specfacts ) && " $* " != *" emit:"* ]]; then
+        run1 "$mode" "$expect" "$rm" "$@" sim:fp
+      else run1 "$mode" "$expect" "$rm" "$@"; fi
+      continue
+    fi
+    [[ "$mode" == refmap || "$mode" == specfacts ]] || continue
+    [[ " $* " == *" emit:"* ]] && continue
+    run1 "$mode" "$expect" "$rm" "$@" "sim:$sim"
+  done
 }
 printf '%s\n' 'spec two_lean/two.dcert' 'chan a sel:sel=0 resp:x obs:ra_o allow:ok' \
   'chan b sel:sel=1 resp:x obs:rb_o allow:ok' > "$OUT/two.refmap"
@@ -202,6 +222,10 @@ two_map alt     alt rk_a/sl rk_b/sl 'slot a out:ph_o resp:in:x obs:out:ra_o' 'sl
 N=0
 run specfacts "SPEC FACTS PROVED"  accS
 run refmap    "REFINEMENT PROVED"  acc1
+# no sim: given -> vc for both designs
+run1 refmap "REFINEMENT PROVED" acc1
+grep -q 'impl route sim:vc (the default)' "$OUT/run_$N.log" || { tail -4 "$OUT/run_$N.log"; echo "FAIL: the default route is not vc"; exit 1; }
+echo "ok: refmap default route vc"
 run refmap    "REFINEMENT PROVED"  acc2
 grep -q '\[rankLt add\] .*UNSAT' "$OUT/run_$N.log" || { echo "FAIL: rank obligation not reported"; exit 1; }
 run refmap    "NOT A REFINEMENT"   acc2_all
