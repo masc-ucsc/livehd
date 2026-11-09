@@ -1448,6 +1448,7 @@ py_test(
     name = "placement_hints_smoke",
     srcs = ["tests/placement_hints_smoke.py"],
     main = "tests/placement_hints_smoke.py",
+    legacy_create_init = 0,
     size = "small",
     data = [
         "//lhd:lhd",
