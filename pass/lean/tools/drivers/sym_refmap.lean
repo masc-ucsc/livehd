@@ -7,12 +7,14 @@ stuttering, and the spec's own facts.
   sym_refmap specfacts <file.refmap> [jobs:<n>] [sf:<n>] [wf:<n>] [sim:fp|ir|vc (default vc)] [emit:[f1:|f2:]<file>]
                     [cache] [solver:<cadical>] [work:<dir>]
   sym_refmap judge <file.refmap> trace:<file.tsv> | random:<steps>,<runs>[,<seed>]
-                    [sim:fp|ir|vc] [check:<steps>] [sf:<n>] [wf:<n>] [work:<dir>] [label:<name>]
+                    [sim:fp|ir|vc] [check:<steps>] [classify:<K>] [horizon:<H>] [tries:<n>]
+                    [control:pos|neg [delay:<out>=<k>,...] [flip:<out>@<valid>,...]]
+                    [sf:<n>] [wf:<n>] [work:<dir>] [label:<name>]
 
 `judge` decides, on concrete runs from the all-zero state, whether ANY stuttering alignment of
-the spec matches the implementation (`Kit.Judge`): no map, no invariant, no solver. It reads only
-`impl`, `spec`, the one `chan` and the one `slot` (their response and observed words), `asm`
-(the environment's protocol, checked on random runs), and three lines the other modes ignore:
+the spec matches the implementation UNDER THE CONTRACT (`Kit.Judge`): no map, no invariant, no
+solver. It reads only `impl`, `spec`, the one `chan` and the one `slot` (their response and
+observed words), `asm` (the environment's protocol) and three lines the other modes ignore:
 `xfer <bool>` (an implementation transfer: no hold in a step where one is true; repeatable),
 `maxstall <R>` (at most R holds in a row, in steps, as the refinement's stutters are; default 0)
 and `period <P> [<k>]` (random runs only: a P-slot certificate's inputs change only at steps n
@@ -22,22 +24,62 @@ for a counterexample; `#` lines skipped; a missing input reads 0), or `random:` 
 inputs fair coins; wider inputs drawn from 4 values per input, 0 always one of them, so addresses
 repeat and configuration words often take their default; a line
 `drive <input> <v0> <n> <v1>` fixes an input of random runs to v0 before step n and v1 from step
-n on, e.g. a reset schedule the environment monitor `asm` requires).
-Results: `NO MATCH at step n` (exit 1: no alignment exists on this run; the report gives every
-last candidate and why each fails), `MATCH FOUND` (exit 0; the report adds where the slot's own
-stall choice fails, if it does), `ENVIRONMENT VIOLATED at step n` (exit 3: a random run broke
-`asm`). The simulator route (`sim:`), each with its theorem relating it to `interpretDesign`:
+n on, e.g. a reset schedule). Random runs keep `asm`: at a step where the inputs may change, a
+vector that breaks it is replaced, up to `tries` times (default 64), alternately by the previous
+vector with each input drawn again with probability 1/2 and by a fresh vector, then the previous
+vector is held, then the all-zero vector is tried. A run where no vector keeps `asm` is cut there
+and the search goes on with the next run; `tries:0` stops at the first vector that breaks it
+(ENVIRONMENT VIOLATED, exit 3). A trace is replayed as given, and whether it keeps `asm` is
+reported. After the runs, the transactions searched are counted per channel (a step whose guard
+is set, as the contract reads D1's ports); a channel with none is warned about: the search says
+nothing about it.
+
+Results: `NO MATCH at step n` (exit 1), `MATCH FOUND` (exit 0; the report adds where the slot's
+own stall choice fails, if it does: STALL CHOICE WRONG), `ENVIRONMENT VIOLATED at step n` (exit
+3, `tries:0` only). A NO MATCH is a verdict on the contract as much as on the
+implementation: a contract that reads an output channel the change delays in the same cycle, or
+allows fewer holds than the change adds, rejects a right implementation too. So every NO MATCH
+comes with:
+- the run's inputs as a trace (`<work>/<label>_run<k>.tsv`, steps 0..n+1), to re-run it;
+- whether the environment held on it (a trace that breaks `asm` is not a legal witness);
+- the failing channels as transactions: D0's words at step n, and D1's transactions on that
+  channel around it (a step whose guard is set, as the contract reads D1's ports);
+- `CLASS:` a hint from re-reading the same run under relaxed contracts, steps 0 .. n+H
+  (`horizon:`, default 20): each failing channel (the word, its guard and the words sharing the
+  guard) read 1..K steps later (`classify:<K>`, default 2; `classify:0` turns this off), `maxstall`
+  raised by 1..K, each `xfer` left out alone. `DELAY?` or `STUTTER?` names the relaxation that
+  removes the NO MATCH; `VALUE DIFFERENCE`: none does. A hint, never a verdict: a delay or a wait
+  counts only if the change adds it (read the RTL). A trace (a product counterexample is short)
+  is re-read past its end too: its last vector once, then random vectors that keep `asm` (seed
+  1); the search and its verdict read the trace only.
+
+Controls (`control:pos|neg`): the same contract with D0 run as the implementation, its answer
+known. `pos`: D0 with each output in `delay:` passed through k registers (the delays the change
+adds, counted in the RTL) must MATCH on every run, or the contract is stricter than the change
+allows (CONTRACT TOO STRICT). `neg` (after `pos` on the same run): D0 with one output bit flipped
+at a time must NO MATCH: `flip:<out>@<valid>` flips bit 0 of `<out>` while `<valid>` is 1; by
+default bit `lo` of every observed word is flipped in every cycle; a flip made but never seen is
+a word the contract does not compare (NOT SEEN). D0's certificate must carry the contract's port
+names; its slot fires always; random runs are drawn on the implementation (keeping `asm`) and
+replayed on D0 by input name. A channel that carries no transaction on the positive control's
+random runs fails the controls (not exercised; on a trace the counts are only reported).
+`RESULT: CONTROLS PASS` (exit 0) or `CONTROLS FAIL` (exit 1).
+Warnings when the file is read: an observed word whose payload and guard are read at different
+cycles, and an `xfer` that reads an output at a cycle the slot never observes it at.
+
+The simulator route (`sim:`), each with its theorem relating it to `interpretDesign`:
 `fp` the projection's specialized residual (`runMemSim`, `runMemSim_correct`), `ir`
 the post-lowering IR stepped directly (`directStepRaw` after one `checkDesign`,
 `directStepRaw_correct`), `vc` the verified compiler's straight-line program (`sim:tv` is the
 old name and is still accepted)
 (`compileDesign` once, `denoteResidual` every step, `compileDesign_correct`; the default). `ir`
 and `vc` need a memory-free certificate; without `sim:` a certificate with memories uses `fp`. With `ir` or `vc` every run is also cross-checked against `fp` on its
-first `check:` steps (default 4; outputs and next state), and a NO MATCH is re-run on `fp` alone
-before it is reported, so the verdict always rests on `runMemSim` (a different answer on fp is
+first `check:` steps (default 4; outputs and next state), and a NO MATCH (of the search, or of a
+positive control) is re-run on `fp` alone before it is reported: two proved routes must agree,
+which also covers the judge's own state conversion between them (a different answer on fp is
 ROUTE DISAGREES, exit 5). The implementation is simulated one step ahead of the search, so a run
-stops at its first NO MATCH: its cost is the steps up to it, whatever the run's length, and the
-remaining runs are skipped.
+stops at its first NO MATCH: its cost is the steps up to it (plus the classification's re-reads),
+whatever the run's length, and the remaining runs are skipped.
 
 The `.refmap` file names both certificates and everything else by the names in their
 `_io.json` sidecars; its grammar is in `pass/lean/tools/formats/refmap.md`.
@@ -931,8 +973,11 @@ the map refines the spec with stuttering from the first refined cycle on"
 
 /-! ## The judge: one concrete run, every stuttering alignment -/
 
-/-- The judge's contract from a `.refmap`: the one channel, the one slot, `xfer`, `maxstall`, `period`. -/
-def buildJudge (lines : List RMLine) (NI NS : Names) (DS : DesignCert) :
+/-- The judge's contract from a `.refmap`: the one channel, the one slot, `xfer`, `maxstall`.
+`NI` names the implementation's ports. A control (`ctrl`) runs D0 as the implementation: its
+slot fires always (a stall choice reads D1's own observers, and the verdict does not depend on
+it), and it reads no `asm` (its inputs are drawn on D1, which holds the environment monitor). -/
+def buildJudge (lines : List RMLine) (NI NS : Names) (DS : DesignCert) (ctrl : Bool := false) :
     Except String (Judge.JSpec × Option PropSpec) := do
   let get (k : String) : List (List String) := (lines.filter (·.key == k)).map (·.args)
   let chanLines := get "chan"
@@ -963,7 +1008,7 @@ def buildJudge (lines : List RMLine) (NI NS : Names) (DS : DesignCert) :
     | _ => throw "chan <name> allow:<out> ..."
   let (slot, obsTxt) ← match slotLines.head! with
     | _ :: kindTxt :: rest => do
-        let kind ← parseBitE NI kindTxt
+        let kind ← if ctrl then pure BitE.tt else parseBitE NI kindTxt
         let mut resp : List PortW := []
         for x in listArg rest "resp" do resp := resp ++ [← parsePort NI x]
         let mut obs : List ObsW := []
@@ -979,12 +1024,43 @@ def buildJudge (lines : List RMLine) (NI NS : Names) (DS : DesignCert) :
     | some [v] => match v.toNat? with | some n => pure n | none => throw s!"{k}: bad value {repr v}"
     | some _ => throw s!"{k} <n>"
   let maxStall ← natLine "maxstall" 0
-  let asm ← match (get "asm").head? with
+  let asm ← if ctrl then pure none else match (get "asm").head? with
     | some [tok] => pure (some (← implProp NI tok))
     | none => pure none
     | some _ => throw "asm <implementation-output>"
   pure ({ chan, slot, xfer, maxStall, specInW := inputWidths DS (inputCount DS)
         , obsName := obsTxt.toArray, xferName := xferTxt.toArray }, asm)
+
+/-- The outputs a Boolean reads, with their cycle (`true`: n+1). -/
+def bitOuts : BitE → List (Nat × Bool)
+  | .nz (.out o t) => [(o, t)]
+  | .eqc (.out o t) _ => [(o, t)]
+  | .not a => bitOuts a
+  | .and a b => bitOuts a ++ bitOuts b
+  | .or a b => bitOuts a ++ bitOuts b
+  | _ => []
+
+/-- Warnings about a contract's timing: an observed word whose payload and guard are read at
+different cycles, and an `xfer` that reads an output at a cycle the slot never observes it at
+(on a channel read late, its transfers are read late too). -/
+def judgeLints (J : Judge.JSpec) (NI : Names) : List String := Id.run do
+  let nm (o : Nat) : String := (NI.outW.getD o (s!"#{o}", 0)).1
+  let cyc (t : Bool) : String := if t then "n+1" else "n"
+  let mut ws : List String := []
+  let mut reads : List (Nat × Bool) := []
+  for (w, i) in J.slot.obs.zipIdx do
+    if let .out o t := w.port then reads := reads ++ [(o, t)]
+    if let some (.out g tg, _) := w.guard then
+      reads := reads ++ [(g, tg)]
+      if let .out _ t := w.port then
+        if t != tg then
+          ws := ws ++ [s!"observed word {J.obsName.getD i s!"#{i}"} reads its payload at cycle {cyc t} and its guard at cycle {cyc tg}"]
+  for (x, i) in J.xfer.zipIdx do
+    for (o, t) in bitOuts x do
+      let ts := (reads.filter (·.1 == o)).map (·.2)
+      if !ts.isEmpty && !ts.contains t then
+        ws := ws ++ [s!"xfer {J.xferName.getD i s!"#{i}"} reads {nm o} at cycle {cyc t}, but the slot observes {nm o} only at cycle {cyc (!t)}: on a channel read late, read its transfers late too (out:{nm o}{if t then "" else "@next"})"]
+  return ws.eraseDups
 
 /-- The input vectors of a `trace:` TSV, by implementation input name. -/
 def readTrace (path : String) (NI : Names) (inW : List Nat) : IO (Except String (Array RuntimeInput)) := do
@@ -1003,37 +1079,711 @@ def readTrace (path : String) (NI : Names) (inW : List Nat) : IO (Except String 
     out := out.push v
   return .ok out
 
-/-- A random run: `steps` input vectors; new values only at steps n with n % period = phase. -/
-def randomRun (inW : List Nat) (period phase steps seed : Nat) : Array RuntimeInput := Id.run do
+/-- A run's inputs as a `trace:` TSV (named inputs only). -/
+def writeTrace (path : System.FilePath) (NI : Names) (ins : Array RuntimeInput) : IO Unit := do
+  let named := NI.inW.toList.zipIdx.filter fun ((nm, _), _) => !nm.isEmpty
+  let mut s := "cycle\t" ++ "\t".intercalate (named.map fun ((nm, _), _) => nm) ++ "\n"
+  for (v, j) in ins.toList.zipIdx do
+    s := s ++ s!"{j}\t" ++ "\t".intercalate (named.map fun (_, k) => toString (bv_uint (v.getD k (mk_bv 1 0))).toNat) ++ "\n"
+  IO.FS.writeFile path s
+
+/-- The random inputs' generator: four values per wide input, drawn once per run (0, the reset
+and default value of most configuration words, always one of them, so addresses repeat); 1-bit
+inputs fair coins. `cur` is the vector held between change steps (`period`), `last` the last
+vector used. -/
+structure RandG where
+  g       : StdGen
+  pools   : Array (Array Nat)
+  cur     : Array BV := #[]
+  last    : RuntimeInput := #[]
+  redraws : Nat := 0
+  held    : Nat := 0
+  zeros   : Nat := 0
+
+def randInit (inW : List Nat) (seed : Nat) : RandG := Id.run do
   let mut g := mkStdGen seed
-  -- four values per wide input, drawn once per run; 0 (the reset and default value of most
-  -- configuration words: a bare translation mode, no fault, no error) is always one of them
   let mut pools : Array (Array Nat) := #[]
   for w in inW do
     let mut pool : Array Nat := #[0]
     for _ in [0:3] do
       let (x, g') := randNat g 0 (2 ^ w - 1); g := g'; pool := pool.push x
     pools := pools.push pool
+  return { g, pools, cur := (inW.map fun w => mk_bv w 0).toArray }
+
+/-- One input's random value: a 1-bit input a fair coin; a wide one a random value one time in
+four, else one of its four values. -/
+def randOne (pools : Array (Array Nat)) (w k : Nat) (g : StdGen) : BV × StdGen := Id.run do
+  if w == 1 then
+    let (x, g') := randNat g 0 1
+    return (mk_bv 1 x, g')
+  let (c, g1) := randNat g 0 3
+  let (i, g2) := randNat g1 0 3
+  if c == 0 then
+    let (y, g3) := randNat g2 0 (2 ^ w - 1)
+    return (mk_bv w y, g3)
+  return (mk_bv w ((pools.getD k #[]).getD i 0), g2)
+
+/-- One random vector. -/
+def randDraw (inW : List Nat) (G : RandG) : Array BV × RandG := Id.run do
+  let mut g := G.g
+  let mut v : Array BV := #[]
+  for (w, k) in inW.zipIdx do
+    let (b, g') := randOne G.pools w k g
+    g := g'; v := v.push b
+  return (v, { G with g })
+
+/-- The vector `prev` with each input drawn again with probability 1/2 (a protocol that holds a
+waiting request keeps most of the previous vector). -/
+def randMix (inW : List Nat) (G : RandG) (prev : Array BV) : Array BV × RandG := Id.run do
+  let mut g := G.g
+  let mut v : Array BV := #[]
+  for (w, k) in inW.zipIdx do
+    let (c, g') := randNat g 0 1
+    g := g'
+    if c == 0 then v := v.push (prev.getD k (mk_bv w 0))
+    else
+      let (b, g'') := randOne G.pools w k g
+      g := g''; v := v.push b
+  return (v, { G with g })
+
+/-- A trace as a feed (past its end, its last vector again). `asm` is recorded on each step of
+the trace, not enforced: a trace is replayed as given. -/
+def traceFeed (ins : Array RuntimeInput) (sim : Judge.Sim) (asm : Option PropSpec) :
+    Nat → StateM → Unit → Judge.FeedR Unit := fun n st _ =>
+  let v := ins.getD n (ins.back?.getD #[])
+  match sim v st with
+  | some r => .ok v r (n ≥ ins.size || (asm.map (propBit r.outputs ·)).getD true) ()
+  | none => .refused
+
+/-- Random runs as a feed that keeps the environment. At a step where the inputs may change, a
+vector that breaks `asm` is replaced, up to `tries` times, alternately by the previous vector with
+each input drawn again with probability 1/2 and by a fresh vector; then the previous vector is
+held, then the all-zero vector is tried (`drive` lines apply to every vector). At a step where the
+inputs may not change (`period`), a vector that breaks `asm` ends the run. `tries` = 0 ends the
+run at the first vector that breaks `asm`. A run that never breaks `asm` draws the same vectors
+whatever `tries` is. -/
+def randFeed (inW : List Nat) (sim : Judge.Sim) (asm : Option PropSpec)
+    (steps period phase tries : Nat) (drive : Nat → RuntimeInput → RuntimeInput) :
+    Nat → StateM → RandG → Judge.FeedR RandG := fun n st G0 => Id.run do
+  let envOk (r : StateM.ResultM) : Bool := (asm.map (propBit r.outputs ·)).getD true
+  if n ≥ steps then
+    -- one step past the run (the last step's outputs at n+1): the last vector again
+    match sim G0.last st with
+    | some r => return .ok G0.last r true G0
+    | none => return .refused
   let P := max 1 period
-  let mut out : Array RuntimeInput := #[]
-  let mut cur : Array BV := (inW.map fun w => mk_bv w 0).toArray
-  for n in [0:steps] do
-    if n == 0 || n % P == phase % P then
-      let mut v : Array BV := #[]
-      for (w, k) in inW.zipIdx do
-        if w == 1 then
-          let (x, g') := randNat g 0 1; g := g'; v := v.push (mk_bv 1 x)
-        else
-          let (c, g') := randNat g 0 3; g := g'
-          let (i, g'') := randNat g 0 3; g := g''
-          if c == 0 then
-            let (y, g3) := randNat g 0 (2 ^ w - 1); g := g3
-            v := v.push (mk_bv w y)
-          else
-            v := v.push (mk_bv w ((pools.getD k #[]).getD i 0))
-      cur := v
-    out := out.push cur
-  return out
+  unless n == 0 || n % P == phase % P do
+    let v := drive n G0.cur
+    match sim v st with
+    | some r => return (if envOk r then .ok v r true { G0 with last := v } else .envViolated)
+    | none => return .refused
+  let mut G := G0
+  for t in [0:tries + 1] do
+    let (raw, G') := if t % 2 == 1 then randMix inW G G0.cur else randDraw inW G
+    G := { G' with cur := raw }
+    let v := drive n raw
+    match sim v st with
+    | none => return .refused
+    | some r =>
+        if envOk r then
+          return .ok v r true { G with last := v, redraws := G.redraws + (if t > 0 then 1 else 0) }
+  if tries > 0 then
+    for (raw, hold) in [(G0.cur, true), ((inW.map fun w => mk_bv w 0).toArray, false)] do
+      let v := drive n raw
+      match sim v st with
+      | some r =>
+          if envOk r then
+            return .ok v r true { G with cur := raw, last := v
+                                         held := G.held + (if hold then 1 else 0)
+                                         zeros := G.zeros + (if hold then 0 else 1) }
+      | none => return .refused
+  return .envViolated
+
+/-- A trace extended for the classification only: its rows as given, then its last vector once
+(as `traceFeed`; the search reads no further than that), then random vectors that keep `asm`
+(`rand`, a `randFeed`, continuing from the trace's last vector). A NO MATCH near the end of a
+short trace (a product counterexample) can then be re-read under relaxed contracts past the
+trace's end, instead of over its last vector held. -/
+def traceExtFeed (ins : Array RuntimeInput) (sim : Judge.Sim) (asm : Option PropSpec)
+    (rand : Nat → StateM → RandG → Judge.FeedR RandG) : Nat → StateM → RandG → Judge.FeedR RandG :=
+  fun n st G =>
+    if n ≤ ins.size then
+      match traceFeed ins sim asm n st () with
+      | .ok v r ok _ => .ok v r ok { G with cur := v, last := v }
+      | .refused => .refused
+      | .envViolated => .envViolated
+    else rand n st G
+
+def showV (v : Int) : String :=
+  if v < 10 then toString v else s!"{v} (0x{String.ofList (Nat.toDigits 16 v.toNat)})"
+
+def appendLine (p : System.FilePath) (l : String) : IO Unit := do
+  let h ← IO.FS.Handle.mk p .append
+  h.putStrLn l
+
+/-! ### Classifying a NO MATCH -/
+
+/-- The output channel of observed word `i`: the outputs to re-time together and the words it
+covers. A guarded word's channel is its guard's port and every word that shares the guard or is
+that port; an unguarded word's channel is its port and every word it guards. -/
+def chanOf (J : Judge.JSpec) (i : Nat) : List Nat × List Nat := Id.run do
+  let obs := J.slot.obs
+  let outOf (p : PortW) : Option Nat := match p with | .out o _ => some o | _ => none
+  let w := obs.getD i default
+  let key : Option Nat := match w.guard with
+    | some (g, _) => outOf g
+    | none => outOf w.port
+  let mut words : List Nat := [i]
+  if let some k := key then
+    for (v, j) in obs.zipIdx do
+      let gk := v.guard.bind fun (g, _) => outOf g
+      if gk == some k || (v.guard.isNone && outOf v.port == some k) then words := words ++ [j]
+  let ws := words.eraseDups.mergeSort
+  let outs := (ws.filterMap fun j => outOf (obs.getD j default).port) ++
+    (ws.filterMap fun j => (obs.getD j default).guard.bind fun (g, _) => outOf g)
+  return (outs.eraseDups, ws)
+
+/-- A channel's name for reports. -/
+def chanLabel (J : Judge.JSpec) (words : List Nat) : String :=
+  let nm (j : Nat) : String := J.obsName.getD j s!"#{j}"
+  let obs := J.slot.obs
+  let plural (k : Nat) : String := if k == 1 then "" else "s"
+  match words.find? (fun j => (obs.getD j default).guard.isNone),
+        words.filter (fun j => (obs.getD j default).guard.isSome) with
+  | some v, [] => nm v
+  | some v, gs => s!"{nm v} and the {gs.length} word{plural gs.length} it guards"
+  | none, gs => match gs.head? with
+      | some g => s!"the {gs.length} word{plural gs.length} guarded by {((nm g).splitOn "?").getD 1 "?"}"
+      | none => "?"
+
+/-- The channels a contract's observed words name by their guards: guard, bit, name. -/
+def guardsOf (J : Judge.JSpec) : List (PortW × Nat × String) := Id.run do
+  let mut gs : List (PortW × Nat × String) := []
+  for (w, j) in J.slot.obs.zipIdx do
+    if let some (g, b) := w.guard then
+      unless gs.any (fun (h, c, _) => h == g && c == b) do
+        gs := gs ++ [(g, b, ((J.obsName.getD j "").splitOn "?").getD 1 "?")]
+  return gs
+
+/-- How many steps of `ps` show a transaction on each guarded channel. -/
+def countTxns (J : Judge.JSpec) (ps : Array Ports) : List (String × Nat) :=
+  (guardsOf J).map fun (g, b, nm) =>
+    (nm, (ps.toList.filter fun C => match g.val C with
+      | some x => (BV.bits x).getLsbD b
+      | none => false).length)
+
+def addCounts (a b : List (String × Nat)) : List (String × Nat) :=
+  if a.isEmpty then b else a.map fun (nm, k) => (nm, k + ((b.find? (·.1 == nm)).map (·.2)).getD 0)
+
+/-- The channels of a NO MATCH: those of the words its last candidates differ on. -/
+def failChans (J : Judge.JSpec) (last : List Judge.Last) : List (List Nat × List Nat) :=
+  ((last.filterMap (·.step.word?)).eraseDups.map (chanOf J)).eraseDups
+
+/-- The words of one output channel around a NO MATCH at step `n`: D0's words at the step (each
+last candidate, at most 3), and D1's transactions on the channel as the contract reads D1's ports
+(`ps`, from step 0). A transaction is a step whose channel guard is set (every step, for a word
+with no guard). Returns the report's lines and a one-line summary. -/
+def txnView (J : Judge.JSpec) (simS : Judge.Sim) (ps : Array Ports) (n : Nat)
+    (last : List Judge.Last) (words : List Nat) (impl : String := "D1") : List String × String := Id.run do
+  let obs := J.slot.obs
+  let nm (j : Nat) : String := J.obsName.getD j s!"#{j}"
+  let guard : Option (PortW × Nat) := (words.filterMap fun j => (obs.getD j default).guard).head?
+  let valOf (C : Ports) (j : Nat) : Int := ((obs.getD j default).val C).getD 0
+  let shown (C : Ports) : Bool := match guard with
+    | some (g, b) => match g.val C with | some x => (BV.bits x).getLsbD b | none => false
+    | none => true
+  -- the word that IS the channel's valid (unguarded, on the guard's port), if it is observed
+  let validWord : Option Nat := match guard with
+    | some (g, _) => words.find? fun j => let w := obs.getD j default; w.guard.isNone && w.port == g
+    | none => none
+  let cname := chanLabel J words
+  let fmt (vs : List Int) : String := " ".intercalate ((words.zip vs).map fun (j, v) => s!"{nm j}={showV v}")
+  let lim := ps.size
+  let d1 : List (Nat × List Int) := ((List.range lim).filter fun m => shown ps[m]!).map fun m =>
+    (m, words.map fun j => valOf ps[m]! j)
+  let k := (d1.filter (·.1 < n)).length
+  let C := ps.getD n default
+  let lo := n - 2
+  -- a word with no guard: values per step, not transactions
+  if guard.isNone then
+    let mut ls : List String := [s!"word {cname} (no guard: its value every step, as the contract reads {impl}'s ports):"]
+    let d1v (m : Nat) : List Int := words.map fun j => valOf (ps.getD m default) j
+    let mut summary := s!"word {cname}: no D0 candidate could be stepped"
+    let mut first := true
+    for (l, ci) in (last.take 3).zipIdx do
+      match simS (specIn J.specInW J.chan (respOf C J.slot)) l.cand.st with
+      | none => ls := ls ++ [s!"  step {n}, D0 candidate {ci}: the D0 simulator refuses the step"]
+      | some r =>
+          let d0 := outVals r.outputs J.chan.obsOut
+          let d0w := words.map fun j => d0.getD j 0
+          ls := ls ++ [s!"  step {n}, D0 candidate {ci}: {fmt d0w}"]
+          if first then
+            first := false
+            let later := (List.range lim).find? fun m => m > n && d1v m == d0w
+            summary := s!"word {cname} at step {n}: D0 {fmt d0w}, {impl} {fmt (d1v n)}" ++
+              (match later with
+               | some m => s!"; {impl} shows D0's value at step {m}, {m - n} step{if m - n == 1 then "" else "s"} later"
+               | none => s!"; {impl} does not show D0's value through step {lim - 1}")
+    ls := ls ++ [s!"  {impl}'s values as read, steps {lo}..{lim - 1}:"]
+    for m in (List.range lim).filter (· ≥ lo) do ls := ls ++ [s!"    step {m}: {fmt (d1v m)}"]
+    return (ls, summary)
+  let mut ls : List String := [s!"channel {cname}:",
+    s!"  before step {n} {impl} showed {k} transaction{if k == 1 then "" else "s"} on it (as the contract reads {impl}'s ports){if n == 0 then "" else s!", and the run matched through step {n - 1}"}"]
+  let mut summary := s!"channel {cname}: no D0 candidate could be stepped"
+  let mut first := true
+  for (l, ci) in (last.take 3).zipIdx do
+    match simS (specIn J.specInW J.chan (respOf C J.slot)) l.cand.st with
+    | none => ls := ls ++ [s!"  step {n}, D0 candidate {ci}: the D0 simulator refuses the step"]
+    | some r =>
+        let d0 := outVals r.outputs J.chan.obsOut
+        let d0w := words.map fun j => d0.getD j 0
+        let d0shown := match validWord with | some j => d0.getD j 0 != 0 | none => true
+        ls := ls ++ [s!"  step {n}, D0 candidate {ci}: {if d0shown then s!"transaction #{k}" else "no transaction"}: {fmt d0w}"]
+        let cmp : String :=
+          if d0shown then
+            match d1[k]? with
+            | some (m, vs) =>
+                if vs == d0w then
+                  if m == n then s!"{impl}'s transaction #{k} at step {m} has D0's words"
+                  else s!"D0 shows transaction #{k} at step {n}; {impl} shows the same words at step {m}, {m - n} step{if m - n == 1 then "" else "s"} later"
+                else
+                  let ds := ((words.zip (d0w.zip vs)).filter fun (_, a, b) => a != b).map fun (j, a, b) =>
+                    s!"{nm j}: D0 {showV a}, {impl} {showV b}"
+                  s!"D0 shows transaction #{k} at step {n}; {impl}'s transaction #{k} (step {m}) differs: {"; ".intercalate ds}"
+            | none => s!"D0 shows transaction #{k} at step {n}; {impl} shows no transaction #{k} through step {lim - 1}"
+          else if shown C then s!"{impl} shows a transaction at step {n} (its #{k}) that D0 does not show there"
+          else s!"neither shows a transaction at step {n}"
+        if first then summary := s!"channel {cname}: {cmp}"; first := false
+  ls := ls ++ [s!"  step {n}, {impl} as read: {if shown C then "a transaction" else "no transaction"}: {fmt (words.map fun j => valOf C j)}"]
+  let near := d1.zipIdx.filter fun ((m, _), _) => m ≥ lo
+  ls := ls ++ [s!"  {impl}'s transactions as read, steps {lo}..{lim - 1}:{if near.isEmpty then " none" else ""}"]
+  for ((m, vs), j) in near do ls := ls ++ [s!"    step {m}, #{j}: {fmt vs}"]
+  return (ls, summary)
+
+/-- What a relaxed contract does to the NO MATCH at step `n`. -/
+inductive ROut where
+  | full (lim : Nat)
+  | moved (m : Nat)
+  | same (m : Nat)
+  | other
+
+def ROut.show (n : Nat) : ROut → String
+  | .full l => s!"removes it: the run then matches through step {l - 1}"
+  | .moved m => s!"moves it from step {n} to step {m}"
+  | .same m => s!"does not remove it (NO MATCH at step {m})"
+  | .other => "cannot re-read the run"
+
+/-- Re-read the same run (`outs`, `ins`: D1's outputs and inputs per cycle, from cycle 0) under
+relaxed contracts, steps `0 .. lim-1`: each failing channel read `1..K` steps later (and one step
+earlier when the contract reads it late already); `maxstall` raised by `1..K`; each `xfer` left
+out alone. Each is a hint: a relaxation that removes the NO MATCH says what the contract would
+have to allow, never that the change does. One that only moves it later is reported, not taken
+as a class (a real difference can survive a few more steps by chance). Returns the report's lines
+and the class: DELAY?, STUTTER? or VALUE DIFFERENCE. -/
+def classifyRun (J : Judge.JSpec) (simS : Judge.Sim) (s0 : StateM) (outs : Array (Array BV))
+    (ins : Array RuntimeInput) (lim n K : Nat) (last : List Judge.Last) (ctrl : Bool := false) :
+    List String × String := Id.run do
+  let tryR (J' : Judge.JSpec) (shift : Nat → Int) : ROut :=
+    match (Judge.search J' simS s0 lim (Judge.arraySrc (Judge.shiftedPorts outs ins lim shift)) ()).1 with
+    | .matched _ _ _ => .full lim
+    | .noMatch m _ => if m > n then .moved m else .same m
+    | _ => .other
+  let mut ls : List String := []
+  let mut delayHit : Option String := none
+  let mut stutHit : Option String := none
+  let mut moved : Option String := none
+  for (cOuts, cWords) in failChans J last do
+    let cname := chanLabel J cWords
+    let late := cWords.all fun j => match (J.slot.obs.getD j default).port with
+      | .out _ t => t
+      | _ => false
+    let ds : List Int := (if late then [-1] else []) ++ (List.range K).map fun d => ((d + 1 : Nat) : Int)
+    for d in ds do
+      let r := tryR J (fun o => if cOuts.contains o then d else 0)
+      let desc := s!"{cname} read {if d < 0 then "1 step earlier" else s!"{d} step{if d == 1 then "" else "s"} later"}"
+      ls := ls ++ [s!"  {desc}: {r.show n}"]
+      match r with
+      | .full l => if delayHit.isNone then delayHit := some s!"{desc}: the run then matches through step {l - 1}"
+      | .moved m => if moved.isNone then moved := some s!"{desc} moves it to step {m}"
+      | _ => pure ()
+  for j in List.range K do
+    let ms := J.maxStall + j + 1
+    let r := tryR { J with maxStall := ms } (fun _ => 0)
+    ls := ls ++ [s!"  maxstall {ms}: {r.show n}"]
+    match r with
+    | .full l => if stutHit.isNone then stutHit := some s!"maxstall {ms}: the run then matches through step {l - 1}"
+    | .moved m => if moved.isNone then moved := some s!"maxstall {ms} moves it to step {m}"
+    | _ => pure ()
+  for i in List.range J.xfer.length do
+    let x := J.xferName.getD i s!"#{i}"
+    let r := tryR { J with xfer := J.xfer.eraseIdx i, xferName := (J.xferName.toList.eraseIdx i).toArray } (fun _ => 0)
+    ls := ls ++ [s!"  without xfer {x}: {r.show n}"]
+    match r with
+    | .full l => if stutHit.isNone then stutHit := some s!"without xfer {x}: the run then matches through step {l - 1}"
+    | .moved m => if moved.isNone then moved := some s!"without xfer {x} moves it to step {m}"
+    | _ => pure ()
+  let cls := if ctrl then
+      match delayHit, stutHit with
+      | some d, _ => s!"DELAY? ({d}): the contract's late readings and the control's delay: list disagree on this channel by that many steps; both must be the registers the change adds (read the RTL)"
+      | none, some t => s!"STUTTER? ({t}): unexpected for D0, which never waits; read the contract's xfer and maxstall lines"
+      | none, none => s!"VALUE DIFFERENCE: no relaxation tried makes the contract accept D0 here; read the contract's observed words and guards against the spec's"
+    else match delayHit, stutHit, moved with
+    | some d, s, _ =>
+        s!"DELAY? ({d}{match s with | some t => s!"; also STUTTER? ({t})" | none => ""}). A hint, not a verdict: the delay must be the change's own (count the registers it adds on this channel in the RTL); if it is, read the channel late in the contract, run the controls (control:pos) and search again"
+    | none, some s, _ =>
+        s!"STUTTER? ({s}). A hint, not a verdict: the change must add these waits (read the RTL); if it does, allow them in the contract, run the controls (control:pos) and search again"
+    | none, none, m =>
+        s!"VALUE DIFFERENCE (no relaxation tried removes the NO MATCH at step {n}{match m with | some t => s!"; {t} only" | none => ""}). A bug candidate: a bug only on a legal run, under a contract whose controls pass, stated as a transaction that differs; a channel whose delay varies with the state is beyond the judge (open)"
+  return (ls, cls)
+
+/-! ### One run of the bug search -/
+
+structure JudgeCtx where
+  J      : Judge.JSpec
+  NI     : Names
+  asm    : Option PropSpec
+  asmTxt : String
+  stepS  : Judge.Sim
+  stepI  : Judge.Sim
+  fpS    : Judge.Sim
+  fpI    : Judge.Sim
+  s0S    : StateM
+  s0I    : StateM
+  route  : String
+  check  : Nat
+  K      : Nat
+  H      : Nat
+  tries  : Nat
+  work   : System.FilePath
+  label  : String
+  report : System.FilePath
+
+/-- The witness lines of a NO MATCH at step `n` (the report and stdout): the inputs as a trace,
+whether the environment held, the failing channels as transactions, and the class. `outs`/`ins`
+hold D1's run from cycle 0 (at least `n + 2` cycles); `lim` is the window the relaxed contracts
+re-read (0: no classification). -/
+def witnessReport (X : JudgeCtx) (what : String) (J : Judge.JSpec) (simS : Judge.Sim) (s0 : StateM)
+    (outs : Array (Array BV)) (ins : Array RuntimeInput) (n lim : Nat) (last : List Judge.Last)
+    (ctrl : Bool := false) : IO Unit := do
+  let ps := Judge.shiftedPorts outs ins (min (outs.size - 1) (n + 2 + X.K)) (fun _ => 0)
+  appendLine X.report "the failing channels as transactions:"
+  for (_, ws) in failChans J last do
+    let (ls, sm) := txnView J simS ps n last ws (if ctrl then "the control" else "D1")
+    for l in ls do appendLine X.report s!"  {l}"
+    say s!"  [{what}] {sm}"
+  if X.K > 0 && lim > n then
+    let t0 ← IO.monoMsNow
+    let (ls, cls) ← IO.lazyPure fun _ => classifyRun J simS s0 outs ins lim n X.K last ctrl
+    let t1 ← IO.monoMsNow
+    appendLine X.report s!"classification: the same run re-read under relaxed contracts, steps 0..{lim - 1} (each a hint, never a verdict; {t1 - t0} ms):"
+    for l in ls do appendLine X.report l
+    appendLine X.report s!"CLASS: {cls}"
+    say s!"  [{what}] CLASS: {cls}"
+  else if X.K > 0 then
+    say s!"  [{what}] CLASS: not classified (the run could not be re-read past step {n})"
+
+/-- One run of the bug search: the search on the route, fp's confirmation of a NO MATCH, the
+witness report. `none`: go on with the next run; `some c`: stop with exit code `c`. Also the
+run's transactions per channel, over the steps searched, and whether the run was cut short (no
+vector kept `asm` at a step). `traceEnd`: the run is a trace of that many rows, and `feed`
+extends it past them for the classification only (`traceExtFeed`). -/
+def judgeRun {γ : Type} (X : JudgeCtx) (what : String) (runNo steps : Nat)
+    (feed : Nat → StateM → γ → Judge.FeedR γ) (g0 : γ) (note : γ → String)
+    (traceEnd : Option Nat := none) :
+    IO (Option UInt32 × List (String × Nat) × Bool) := do
+  let ta ← IO.monoMsNow
+  let (v, R) ← IO.lazyPure fun _ =>
+    Judge.search X.J X.stepS X.s0S steps (Judge.feedSrc feed) ({ g := g0, st := X.s0I } : Judge.RunSt γ)
+  let tb ← IO.monoMsNow
+  -- the route against fp: D1's first `check` steps, outputs and next state
+  if X.route != "fp" then
+    let ok := Id.run do
+      let mut a := X.s0I
+      let mut b := X.s0I
+      for i in R.ins.toList.take X.check do
+        match X.stepI i a, X.fpI i b with
+        | some r, some q =>
+            if !(decide ((r.outputs.map normBV) = (q.outputs.map normBV)) &&
+                 decide (Judge.normState r.nextState = Judge.normState q.nextState)) then return false
+            a := r.nextState; b := q.nextState
+        | _, _ => return false
+      return true
+    unless ok do
+      say s!"  [{what}] RESULT: ROUTE DISAGREES: {X.route} and fp differ within the first {X.check} steps"
+      return (some 5, [], false)
+  -- a NO MATCH on a faster route is re-run on fp alone, on the same inputs
+  let v ← match v with
+    | .noMatch n _ =>
+        if X.route == "fp" then pure v else do
+          say s!"  [{what}] NO MATCH on route {X.route} ({tb - ta} ms): re-running this run on fp"
+          let (w, _) ← IO.lazyPure fun _ => Judge.search X.J X.fpS X.s0S (n + 1)
+            (Judge.feedSrc (traceFeed R.ins X.fpI none)) ({ g := (), st := X.s0I } : Judge.RunSt Unit)
+          match w with
+          | .noMatch m _ =>
+              if m == n then pure w else do
+                say s!"  [{what}] RESULT: ROUTE DISAGREES: {X.route} gives NO MATCH at step {n}, fp at step {m}"
+                return (some 5, [], false)
+          | _ => do
+              say s!"  [{what}] RESULT: ROUTE DISAGREES: {X.route} gives NO MATCH at step {n}, fp does not"
+              return (some 5, [], false)
+    | _ => pure v
+  let tc ← IO.monoMsNow
+  let done := match v with
+    | .noMatch n _ => n + 1 | .matched s _ _ => s | .implRefused n => n | .envViolated n => n
+  let rerun := if tc > tb then s!", then {tc - tb} ms on fp" else ""
+  let nt := note R.g
+  say s!"  [{what}] {done} of {steps} steps searched in {tb - ta} ms on {X.route} ({if done == 0 then 0 else (tb - ta) / done} ms/step: D1, D0 and the comparison){rerun}{if nt.isEmpty then "" else s!"; {nt}"}"
+  match v with
+  | .implRefused n =>
+      say s!"  [{what}] RESULT: REFUSED (the implementation simulator refused step {n})"
+      return (some 4, [], false)
+  | .envViolated n =>
+      if X.tries == 0 then
+        say s!"  [{what}] RESULT: ENVIRONMENT VIOLATED at step {n} (the random vector broke {X.asmTxt}; tries:0)"
+        appendLine X.report s!"{what}: ENVIRONMENT VIOLATED at step {n}"
+        return (some 3, [], false)
+      let cnt := countTxns X.J (Judge.shiftedPorts R.outs R.ins (min (n - 1) (R.outs.size - 1)) (fun _ => 0))
+      say s!"  [{what}] no input vector kept {X.asmTxt} at step {n}: the run ends there, MATCH over steps 0..{n - 2}"
+      appendLine X.report s!"{what}: cut at step {n} (no vector kept {X.asmTxt}); MATCH over steps 0..{n - 2}"
+      return (none, cnt, true)
+  | .matched steps slotFail maxF =>
+      let slotTxt := match slotFail with
+        | some (m, w) => s!"; the slot's own stall choice fails at step {m}: {w} (STALL CHOICE WRONG on this run)"
+        | none => "; the slot's own stall choice also matches"
+      say s!"  [{what}] MATCH FOUND over {steps} steps (largest candidate set {maxF}){slotTxt}"
+      appendLine X.report s!"{what}: MATCH FOUND over {steps} steps (largest candidate set {maxF}){slotTxt}"
+      return (none, countTxns X.J (Judge.shiftedPorts R.outs R.ins (min steps (R.outs.size - 1)) (fun _ => 0)), false)
+  | .noMatch n last =>
+      say s!"  [{what}] RESULT: NO MATCH at step {n}: no stuttering alignment of the spec matches the implementation under this contract (its observed words, xfer and maxstall): classify it before calling it a bug (CLASS below)"
+      appendLine X.report s!"{what}: NO MATCH at step {n} (under this contract)"
+      appendLine X.report "inputs of steps 0..n (nonzero only):"
+      let inName (k : Nat) : String := (X.NI.inW.getD k (s!"in{k}", 0)).1
+      for (i, j) in (R.ins.toList.take (n + 1)).zipIdx do
+        let nz := (i.toList.zipIdx.filter fun (b, _) => bv_uint b != 0).map fun (b, k) => s!"{inName k}={bv_uint b}"
+        appendLine X.report s!"  step {j}: {" ".intercalate nz}"
+      appendLine X.report "the last candidates of the spec, and why each fails at that step:"
+      for (l, c) in last.zipIdx do
+        appendLine X.report s!"  candidate {c}: step: {l.step.show X.J}; hold: {l.hold.show X.J}"
+      let tsv := X.work / s!"{X.label}_run{runNo}.tsv"
+      writeTrace tsv X.NI (R.ins.extract 0 (n + 2))
+      say s!"  [{what}] the run's inputs, steps 0..{n + 1}, as a trace: {tsv}"
+      if X.asm.isSome then
+        match R.envBad with
+        | some m =>
+            say s!"  [{what}] environment: {X.asmTxt} FAILS at step {m}: this run is not a legal witness"
+            appendLine X.report s!"environment: {X.asmTxt} fails at step {m}: not a legal witness"
+        | none =>
+            say s!"  [{what}] environment: {X.asmTxt} held on steps 0..{n + 1}"
+            appendLine X.report s!"environment: {X.asmTxt} held on steps 0..{n + 1}"
+      -- D1's run past the NO MATCH, for the transactions and the relaxed contracts (a trace:
+      -- past its end, the feed's random vectors that keep asm)
+      let lim := if traceEnd.isSome then n + 1 + X.H else min steps (n + 1 + X.H)
+      let (R', _) := R.extend feed (lim + X.K + 1)
+      let lim := min lim (R'.outs.size - (X.K + 1))
+      if let some e := traceEnd then
+        if X.K > 0 && R'.ins.size > e + 1 then
+          let t := s!"the trace ends at step {e - 1}: the classification reads on to step {R'.ins.size - 1}, past it with random inputs that keep {X.asmTxt} (seed 1; the verdict above is the trace's own)"
+          say s!"  [{what}] {t}"
+          appendLine X.report t
+      witnessReport X what X.J X.stepS X.s0S R'.outs R'.ins n lim last
+      return (some 1, [], false)
+
+/-! ### The controls: the contract on D0, whose answer is known -/
+
+/-- The controls (`control:pos`, `control:neg`): the same contract with D0 run as the
+implementation. Positive: D0 with each output in `delay:<out>=<k>,...` passed through `k`
+registers (the delays the change adds, counted in the RTL; none when no channel is read late)
+must give MATCH FOUND on every run: a NO MATCH means the contract is stricter than the change
+allows. Negative (`neg`, after the positive one on the same run): the same D0 with one output bit
+flipped at a time must give NO MATCH. `flip:<out>@<valid>,...` flips bit 0 of `<out>` while
+`<valid>` is 1 (the channel's own valid, which also tests the contract's guards); by default bit
+`lo` of every observed word is flipped in every cycle. A flip that is made but never seen is a
+word the contract does not compare. A random run is drawn on D1 (keeping `asm` there) and
+replayed on D0 by input name; a trace is replayed as given (and extended past its end with
+random vectors drawn on D1 that keep `asm`, for the classification only). -/
+def controlMain (X : JudgeCtx) (lines : List RMLine) (path : String) (NS : Names) (DS : DesignCert)
+    (mode : String) (rest : List String) (runs : List (String × Option (Array RuntimeInput) × Nat × Nat))
+    (inW : List Nat) (period phase tries : Nat) (drive : Nat → RuntimeInput → RuntimeInput)
+    (randNote : RandG → String) : IO UInt32 := do
+  unless mode == "pos" || mode == "neg" do
+    IO.eprintln "control:pos|neg"; return 2
+  let (J0, _) ← match buildJudge lines NS NS DS (ctrl := true) with
+    | .ok x => pure x
+    | .error e => do
+        IO.eprintln s!"{path}: control (D0 as the implementation, read by the spec's port names): {e}"; return 2
+  let outName (o : Nat) : String := (NS.outW.getD o (s!"#{o}", 0)).1
+  let mut delays : List (Nat × Nat) := []
+  for d in listArg rest "delay" do
+    match d.splitOn "=" with
+    | [o, k] =>
+        match NS.outs[o]?, k.toNat? with
+        | some oi, some kk => delays := delays ++ [(oi, kk)]
+        | _, _ => IO.eprintln s!"delay: no spec output {repr o}, or a bad delay"; return 2
+    | _ => IO.eprintln "delay:<out>=<k>,..."; return 2
+  let mut flips : List (Nat × Nat × Option Nat) := []
+  for f in listArg rest "flip" do
+    match f.splitOn "@" with
+    | [o, vv] =>
+        match NS.outs[o]?, NS.outs[vv]? with
+        | some oi, some vi => flips := flips ++ [(oi, 0, some vi)]
+        | _, _ => IO.eprintln s!"flip: no spec output {repr o} or {repr vv}"; return 2
+    | _ => IO.eprintln "flip:<out>@<valid>,..."; return 2
+  if flips.isEmpty then
+    for w in J0.slot.obs do
+      if let .out o _ := w.port then flips := flips ++ [(o, w.lo, none)]
+    flips := flips.eraseDups
+  let doNeg := mode == "neg"
+  let delayTxt := if delays.isEmpty then "none" else
+    ", ".intercalate (delays.map fun (o, k) => s!"{outName o} by {k}")
+  say s!"  control: D0 as the implementation, the slot firing always; output delays (the change's own, from the RTL): {delayTxt}"
+  appendLine X.report s!"controls: D0 as the implementation; output delays: {delayTxt}"
+  -- D1's inputs to D0's, by name (an input D1 does not have reads 0)
+  let inWS := inputWidths DS (inputCount DS)
+  let mapIn (v : RuntimeInput) : RuntimeInput := (inWS.zipIdx.map fun (w, k) =>
+      let nm := (NS.inW.getD k ("", 0)).1
+      match (if nm.isEmpty then none else X.NI.ins[nm]?) with
+      | some j => mk_bv w (bv_uint (v.getD j (mk_bv 1 0)))
+      | none => mk_bv w 0).toArray
+  let d0Trace (sim : Judge.Sim) (ins : Array RuntimeInput) (len : Nat) : Option (Array (Array BV)) := Id.run do
+    let mut st := X.s0S
+    let mut outs : Array (Array BV) := #[]
+    for m in [0:len] do
+      match sim (ins.getD m (ins.back?.getD #[])) st with
+      | some r => outs := outs.push r.outputs; st := r.nextState
+      | none => return none
+    return some outs
+  let delayed (outs : Array (Array BV)) : Array (Array BV) := outs.mapIdx fun m os => os.mapIdx fun o b =>
+    match delays.find? (·.1 == o) with
+    | some (_, k) => if k == 0 then b else if m ≥ k then (outs.getD (m - k) #[]).getD o b else mk_bv b.width 0
+    | none => b
+  let flipped (outs : Array (Array BV)) (lim o bit : Nat) (vld : Option Nat) : Array (Array BV) × Nat := Id.run do
+    let mut cnt := 0
+    let mut res : Array (Array BV) := #[]
+    for (os, m) in outs.toList.zipIdx do
+      let on := match vld with | some vi => bv_nonzero (os.getD vi (mk_bv 1 0)) | none => true
+      if on && o < os.size then
+        let b := os[o]!
+        res := res.push (os.set! o (mk_bv b.width (((bv_uint b).toNat ^^^ 2 ^ bit : Nat) : Int)))
+        if m ≤ lim then cnt := cnt + 1
+      else res := res.push os
+    return (res, cnt)
+  let XC : JudgeCtx := { X with J := J0, NI := NS, asm := none }
+  let mut posFail : List String := []
+  let mut seen : Array (Option (Nat × Nat)) := Array.replicate flips.length none
+  let mut flipCnt : Array Nat := Array.replicate flips.length 0
+  let mut negRuns := 0
+  let mut posCounts : List (String × Nat) := []
+  for ((what, ins?, steps, seed), k) in runs.zipIdx do
+    -- the run's inputs: a trace as given; a random run drawn on D1, keeping asm there
+    -- `E`: the rows the classification may re-read (a trace: its rows, its last vector once,
+    -- then random vectors drawn on D1 that keep asm; the search reads only the trace)
+    let (insD1, L, nt, E) := match ins? with
+      | some ins =>
+          let rand := randFeed inW X.stepI X.asm (steps + X.H + X.K + 3) period phase tries drive
+          let (R, _) := Judge.RunSt.extend (traceExtFeed ins X.stepI X.asm rand)
+            ({ g := randInit inW 1, st := X.s0I } : Judge.RunSt RandG) (steps + X.H + X.K + 2)
+          let ext := if R.ins.size > steps + 1 then R.ins.extract (steps + 1) R.ins.size else #[]
+          let insX := (if ins.isEmpty then ins else ins.push ins.back!) ++ ext
+          (insX, steps, "", if ext.isEmpty then steps else insX.size - (X.K + 1))
+      | none =>
+          let (R, _) := Judge.RunSt.extend (randFeed inW X.stepI X.asm steps period phase tries drive)
+            ({ g := randInit inW seed, st := X.s0I } : Judge.RunSt RandG) (steps + 1)
+          (R.ins, min steps (R.ins.size - 1), randNote R.g, min steps (R.ins.size - 1))
+    if L == 0 then
+      say s!"  [{what}] control: no step to run"
+      continue
+    let insS := insD1.map mapIn
+    let len := L + 2 + X.K + X.H
+    let some outs0 := d0Trace X.stepS insS len
+      | do say s!"  [{what}] RESULT: REFUSED (the D0 simulator refused a step)"; return 4
+    let outsC := delayed outs0
+    let psC := Judge.shiftedPorts outsC insS L (fun _ => 0)
+    posCounts := addCounts posCounts (countTxns J0 psC)
+    let (v, _) := Judge.search J0 X.stepS X.s0S L (Judge.arraySrc psC) ()
+    match v with
+    | .matched _ _ _ =>
+        say s!"  [{what}] positive control: MATCH FOUND over {L} steps (ok){if nt.isEmpty then "" else s!"; {nt}"}"
+        appendLine X.report s!"{what}: positive control: MATCH FOUND over {L} steps"
+        if doNeg then
+          negRuns := negRuns + 1
+          for ((o, bit, vld), fi) in flips.zipIdx do
+            let (outsF, cnt) := flipped outsC L o bit vld
+            flipCnt := flipCnt.modify fi (· + cnt)
+            if seen[fi]!.isNone && cnt > 0 then
+              let (vf, _) := Judge.search J0 X.stepS X.s0S L
+                (Judge.arraySrc (Judge.shiftedPorts outsF insS L (fun _ => 0))) ()
+              if let .noMatch m _ := vf then seen := seen.set! fi (some (k + 1, m))
+    | .noMatch n last =>
+        if X.route != "fp" then
+          let agree := match d0Trace X.fpS insS len with
+            | none => false
+            | some of0 =>
+                match (Judge.search J0 X.fpS X.s0S L
+                    (Judge.arraySrc (Judge.shiftedPorts (delayed of0) insS L (fun _ => 0))) ()).1 with
+                | .noMatch m _ => m == n
+                | _ => false
+          unless agree do
+            say s!"  [{what}] RESULT: ROUTE DISAGREES on the positive control: {X.route} gives NO MATCH at step {n}, fp does not agree"
+            return 5
+        let firstFail := posFail.isEmpty
+        posFail := posFail ++ [s!"{what}: NO MATCH at step {n}"]
+        say s!"  [{what}] positive control: NO MATCH at step {n}: CONTRACT TOO STRICT: this contract rejects D0 with the change's output delays ({delayTxt})"
+        appendLine X.report s!"{what}: positive control: NO MATCH at step {n} (CONTRACT TOO STRICT)"
+        unless firstFail do continue
+        appendLine X.report "the last candidates of the spec, and why each fails at that step:"
+        for (l, c) in last.zipIdx do
+          appendLine X.report s!"  candidate {c}: step: {l.step.show J0}; hold: {l.hold.show J0}"
+        let tsv := X.work / s!"{X.label}_control_run{k + 1}.tsv"
+        writeTrace tsv X.NI (insD1.extract 0 (n + 2))
+        say s!"  [{what}] the run's inputs (D1's names), steps 0..{n + 1}, as a trace: {tsv}"
+        if ins?.isSome && E > L && X.K > 0 then
+          let t := s!"the trace ends at step {L - 1}: the classification reads on past it with random inputs drawn on D1 that keep {X.asmTxt} (seed 1; the verdict above is the trace's own)"
+          say s!"  [{what}] {t}"
+          appendLine X.report t
+        witnessReport XC what J0 X.stepS X.s0S outsC insS n (min E (n + 1 + X.H)) last (ctrl := true)
+    | _ =>
+        say s!"  [{what}] RESULT: REFUSED (the D0 simulator refused a step)"
+        return 4
+  -- outputs both designs have that no observed word reads
+  let readI : List String := X.J.slot.obs.flatMap fun w =>
+    (match w.port with | .out o _ => [(X.NI.outW.getD o ("", 0)).1] | _ => []) ++
+    (match w.guard with | some (.out g _, _) => [(X.NI.outW.getD g ("", 0)).1] | _ => [])
+  let readS : List String := X.J.chan.obsOut.map outName
+  let unread := (X.NI.outW.toList.map (·.1)).filter fun nm =>
+    !nm.isEmpty && (NS.outs[nm]?).isSome && !readI.contains nm && !readS.contains nm
+  unless unread.isEmpty do
+    say s!"  note: outputs both certificates have that no observed word reads (the contract does not compare them): {", ".intercalate unread}"
+    appendLine X.report s!"not observed: {", ".intercalate unread}"
+  if posFail.isEmpty then say s!"  positive control: MATCH FOUND on every run ({runs.length})"
+  unless posCounts.isEmpty do
+    say s!"  transactions on the positive control's runs, per channel: {", ".intercalate (posCounts.map fun (nm, k) => s!"{nm} {k}")}"
+  -- a random control that sees no transaction on a channel says nothing about it; a trace (a
+  -- witness) is the run it is, and need not touch every channel
+  let isTrace := runs.any fun (_, ins?, _, _) => ins?.isSome
+  let idle := if isTrace then [] else (posCounts.filter (·.2 == 0)).map (·.1)
+  let mut blind : List String := []
+  if doNeg then
+    say s!"  negative control, on the {negRuns} run{if negRuns == 1 then "" else "s"} the positive control passed: one output bit flipped at a time"
+    for ((o, bit, vld), fi) in flips.zipIdx do
+      let wtxt := s!"{outName o} bit {bit}{match vld with | some vi => s!" while {outName vi} = 1" | none => ", every cycle"}"
+      let line := match seen[fi]! with
+        | some (r, m) => s!"{wtxt}: seen (NO MATCH at step {m} of run {r})"
+        | none =>
+            if flipCnt[fi]! == 0 then s!"{wtxt}: never flipped on these runs (not exercised)"
+            else s!"{wtxt}: NOT SEEN: flipped on {flipCnt[fi]!} cycles and never compared: the contract does not see this word"
+      if (seen[fi]!).isNone && flipCnt[fi]! > 0 then blind := blind ++ [wtxt]
+      say s!"    {line}"
+      appendLine X.report s!"negative control: {line}"
+  if posFail.isEmpty && blind.isEmpty && idle.isEmpty then
+    say "  RESULT: CONTROLS PASS"
+    say s!"  report: {X.report}"
+    return 0
+  let why := (if posFail.isEmpty then [] else [s!"positive: CONTRACT TOO STRICT on {posFail.length} run{if posFail.length == 1 then "" else "s"}"]) ++
+    (if blind.isEmpty then [] else [s!"negative: not seen: {", ".intercalate blind}"]) ++
+    (if idle.isEmpty then [] else [s!"not exercised: no transaction on {", ".intercalate idle} (a control that sees no transaction says nothing; run longer or with other inputs)"])
+  say s!"  RESULT: CONTROLS FAIL ({"; ".intercalate why})"
+  say s!"  report: {X.report}"
+  return 1
 
 def judgeMain (path : String) (rest : List String) : IO UInt32 := do
   let opt (k : String) : Option String := rest.findSome? (fun t => (t.dropPrefix? (k ++ ":")).map (·.toString))
@@ -1069,11 +1819,17 @@ def judgeMain (path : String) (rest : List String) : IO UInt32 := do
   let NS ← loadNames specCert
   let (J, asm) ← match buildJudge lines NI NS DS with
     | .ok x => pure x | .error e => do IO.eprintln s!"{path}: {e}"; return 2
+  let asmTxt := match (lines.find? (·.key == "asm")).bind (·.args.head?) with
+    | some a => s!"asm {a}" | none => "asm"
   let (period, phase) : Nat × Nat := match (lines.find? (·.key == "period")).map (·.args) with
     | some [p] => let P := p.toNat?.getD 1; (P, if P > 1 then 1 else 0)
     | some [p, k] => (p.toNat?.getD 1, k.toNat?.getD 0)
     | _ => (1, 0)
+  let K := ((opt "classify").bind (·.toNat?)).getD 2
+  let H := ((opt "horizon").bind (·.toNat?)).getD 20
+  let tries := ((opt "tries").bind (·.toNat?)).getD 64
   say s!"  contract: {J.slot.obs.length} observed words, {J.xfer.length} xfer, maxstall {J.maxStall}; random inputs change at steps n % {period} = {phase}"
+  for w in judgeLints J NI do say s!"  warning: {w}"
   let fpS : Judge.Sim := fun i st => runMemSim simS (edgesAll DS) i st
   let fpI : Judge.Sim := fun i st => runMemSim simI (edgesAll DI) i st
   -- `vc` by default; `fp` when a certificate has memories (the concrete ir/vc steps here are
@@ -1117,93 +1873,53 @@ def judgeMain (path : String) (rest : List String) : IO UInt32 := do
         | some k, some x, some m, some y => drives := drives ++ [(k, x, m, y)]
         | _, _, _, _ => IO.eprintln s!"drive: cannot read {a}"; return 2
     | _ => IO.eprintln "drive <input> <v0> <n> <v1>"; return 2
-  let applyDrives (ins : Array RuntimeInput) : Array RuntimeInput :=
-    ins.mapIdx fun n v => drives.foldl (fun v (k, x, m, y) =>
-      v.set! k (mk_bv (inW.getD k 1) (if n < m then x else y))) v
-  let runs : List (String × Array RuntimeInput) ← match opt "trace", opt "random" with
+  let drive (n : Nat) (v : RuntimeInput) : RuntimeInput :=
+    drives.foldl (fun v (k, x, m, y) => v.set! k (mk_bv (inW.getD k 1) (if n < m then x else y))) v
+  -- the runs: (name, the trace's inputs or none for a random run, steps, seed)
+  let runs : List (String × Option (Array RuntimeInput) × Nat × Nat) ← match opt "trace", opt "random" with
     | some t, _ => do
         match ← readTrace t NI inW with
-        | .ok ins => pure [(s!"trace {t}", ins)]
+        | .ok ins => pure [(s!"trace {t}", some ins, ins.size, 0)]
         | .error e => do IO.eprintln e; return 2
     | none, some r =>
         match (r.splitOn ",").map (·.toNat?) with
-        | [some steps, some n] => pure ((List.range n).map fun k => (s!"random seed {k + 1}", applyDrives (randomRun inW period phase steps (k + 1))))
-        | [some steps, some n, some s0] => pure ((List.range n).map fun k => (s!"random seed {s0 + k}", applyDrives (randomRun inW period phase steps (s0 + k))))
+        | [some steps, some n] => pure ((List.range n).map fun k => (s!"random seed {k + 1}", none, steps, k + 1))
+        | [some steps, some n, some s0] => pure ((List.range n).map fun k => (s!"random seed {s0 + k}", none, steps, s0 + k))
         | _ => do IO.eprintln "random:<steps>,<runs>[,<seed>]"; return 2
     | none, none => do IO.eprintln "judge: trace:<file.tsv> or random:<steps>,<runs>[,<seed>]"; return 2
   let report := work / s!"{label}.txt"
   IO.FS.writeFile report s!"judge {path}\n"
-  let addR (l : String) : IO Unit := do
-    let h ← IO.FS.Handle.mk report .append; h.putStrLn l
-  let inName (k : Nat) : String := (NI.inW.getD k (s!"in{k}", 0)).1
-  for (what, ins) in runs do
-    let ta ← IO.monoMsNow
-    -- the environment's protocol, on random runs: checked at each step, before it is searched
-    let env : Ports → Bool := match (opt "random").isSome, asm with
-      | true, some a => fun C => propBit C.outs a
-      | _, _ => fun _ => true
-    -- the route against fp: the implementation's first `check` steps, outputs and next state
-    if route != "fp" then
-      let ok ← IO.lazyPure fun _ => Id.run do
-        let mut a := zeroState DI
-        let mut b := zeroState DI
-        for i in ins.toList.take check do
-          match stepI i a, fpI i b with
-          | some r, some q =>
-              if !(decide ((r.outputs.map normBV) = (q.outputs.map normBV)) &&
-                   decide (Judge.normState r.nextState = Judge.normState q.nextState)) then return false
-              a := r.nextState; b := q.nextState
-          | _, _ => return false
-        return true
-      unless ok do
-        say s!"  [{what}] RESULT: ROUTE DISAGREES: {route} and fp differ within the first {check} steps"; return 5
-    -- D1 and D0 together, D1 one step ahead: the search stops at the first NO MATCH
-    let v ← IO.lazyPure (fun _ => Judge.run J stepS (zeroState DS) stepI (zeroState DI) ins env)
-    let tb ← IO.monoMsNow
-    -- a NO MATCH on a faster route is re-run on fp alone before it is reported (it stops at the
-    -- same step when fp agrees)
-    let v ← match v with
-      | .noMatch n _ =>
-          if route == "fp" then pure v else do
-            say s!"  [{what}] NO MATCH on route {route} ({tb - ta} ms): re-running this run on fp"
-            let w ← IO.lazyPure (fun _ => Judge.run J fpS (zeroState DS) fpI (zeroState DI) ins env)
-            match w with
-            | .noMatch m _ =>
-                if m == n then pure w else do
-                  say s!"  [{what}] RESULT: ROUTE DISAGREES: {route} gives NO MATCH at step {n}, fp at step {m}"; return 5
-            | _ => do
-                say s!"  [{what}] RESULT: ROUTE DISAGREES: {route} gives NO MATCH at step {n}, fp does not"; return 5
-      | _ => pure v
-    let tc ← IO.monoMsNow
-    let done := match v with
-      | .noMatch n _ => n + 1 | .matched s _ _ => s | .implRefused n => n | .envViolated n => n + 1
-    let rerun := if tc > tb then s!", then {tc - tb} ms on fp" else ""
-    say s!"  [{what}] {done} of {ins.size} steps searched in {tb - ta} ms on {route} ({if done == 0 then 0 else (tb - ta) / done} ms/step: D1, D0 and the comparison){rerun}"
-    match v with
-    | .implRefused n =>
-        say s!"  [{what}] RESULT: REFUSED (the implementation simulator refused step {n})"; return 4
-    | .envViolated n =>
-        say s!"  [{what}] RESULT: ENVIRONMENT VIOLATED at step {n} (the random inputs broke asm)"
-        addR s!"{what}: ENVIRONMENT VIOLATED at step {n}"
-        return 3
-    | .noMatch n whys =>
-        say s!"  [{what}] RESULT: NO MATCH at step {n}: no stuttering alignment of the spec matches the implementation on this run"
-        addR s!"{what}: NO MATCH at step {n}"
-        addR "inputs of steps 0..n (nonzero only):"
-        for (i, j) in (ins.toList.take (n + 1)).zipIdx do
-          let nz := (i.toList.zipIdx.filter fun (b, _) => bv_uint b != 0).map fun (b, k) => s!"{inName k}={bv_uint b}"
-          addR s!"  step {j}: {" ".intercalate nz}"
-        addR "the last candidates of the spec, and why each fails at that step:"
-        for (w, c) in whys.zipIdx do addR s!"  candidate {c}: {"; ".intercalate w}"
-        say s!"  report: {report}"
-        return 1
-    | .matched steps slotFail maxF =>
-        let slotTxt := match slotFail with
-          | some (m, w) => s!"; the slot's own stall choice fails at step {m}: {w} (STALL CHOICE WRONG on this run)"
-          | none => "; the slot's own stall choice also matches"
-        say s!"  [{what}] MATCH FOUND over {steps} steps (largest candidate set {maxF}){slotTxt}"
-        addR s!"{what}: MATCH FOUND over {steps} steps (largest candidate set {maxF}){slotTxt}"
-  say s!"  RESULT: MATCH FOUND on every run ({runs.length})"
+  let X : JudgeCtx := { J, NI, asm, asmTxt, stepS, stepI, fpS, fpI, s0S := zeroState DS, s0I := zeroState DI
+                      , route, check, K, H, tries, work, label, report }
+  let randNote (G : RandG) : String :=
+    if G.redraws + G.held + G.zeros == 0 then "" else
+      s!"{G.redraws} step{if G.redraws == 1 then "" else "s"} drawn again, {G.held} held and {G.zeros} set to all zero to keep {asmTxt}"
+  -- the controls: D0 as the implementation, under this contract
+  if let some mode := opt "control" then
+    return ← controlMain X lines path NS DS mode rest runs inW period phase tries drive randNote
+  let mut counts : List (String × Nat) := []
+  let mut cut := 0
+  for ((what, ins?, steps, seed), k) in runs.zipIdx do
+    let (r, cnt, wasCut) ← match ins? with
+      | some ins =>
+          -- past the trace's end, random vectors that keep asm, for the classification only
+          let rand := randFeed inW stepI asm (ins.size + H + K + 3) period phase tries drive
+          judgeRun X what (k + 1) steps (traceExtFeed ins stepI asm rand) (randInit inW 1) (fun _ => "")
+            (traceEnd := some ins.size)
+      | none =>
+          let feed := randFeed inW stepI asm steps period phase tries drive
+          judgeRun X what (k + 1) steps feed (randInit inW seed) randNote
+    if let some code := r then
+      say s!"  report: {report}"
+      return code
+    counts := addCounts counts cnt
+    if wasCut then cut := cut + 1
+  unless counts.isEmpty do
+    say s!"  transactions searched, per channel (as the contract reads D1's ports): {", ".intercalate (counts.map fun (nm, k) => s!"{nm} {k}")}"
+    appendLine report s!"transactions searched, per channel: {", ".intercalate (counts.map fun (nm, k) => s!"{nm} {k}")}"
+  for (nm, k) in counts do
+    if k == 0 then say s!"  warning: channel {nm} carried no transaction on these runs: this search says nothing about it"
+  say s!"  RESULT: MATCH FOUND on every run ({runs.length}{if cut == 0 then "" else s!", {cut} cut short where no vector kept {asmTxt}"})"
   say s!"  report: {report}"
   return 0
 
@@ -1213,5 +1929,5 @@ def main (args : List String) : IO UInt32 := do
   | "specfacts" :: path :: rest => refmapMain path rest true
   | "judge" :: path :: rest => judgeMain path rest
   | _ =>
-    IO.eprintln "usage: sym_refmap refmap|specfacts <file.refmap> [jobs:<n>] [runs:<n>] [sf:<n>] [wf:<n>] [emit:[f1:|f2:]<file>] [cache] [solver:<cadical>] [work:<dir>]\n       sym_refmap judge <file.refmap> trace:<file.tsv> | random:<steps>,<runs>[,<seed>] [sf:<n>] [wf:<n>] [work:<dir>] [label:<name>]"
+    IO.eprintln "usage: sym_refmap refmap|specfacts <file.refmap> [jobs:<n>] [runs:<n>] [sf:<n>] [wf:<n>] [emit:[f1:|f2:]<file>] [cache] [solver:<cadical>] [work:<dir>]\n       sym_refmap judge <file.refmap> trace:<file.tsv> | random:<steps>,<runs>[,<seed>] [sim:fp|ir|vc] [check:<n>] [classify:<K>] [horizon:<H>] [tries:<n>] [control:pos|neg [delay:<out>=<k>,...] [flip:<out>@<valid>,...]] [sf:<n>] [wf:<n>] [work:<dir>] [label:<name>]"
     return 2

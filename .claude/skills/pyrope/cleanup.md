@@ -85,6 +85,13 @@ findings says nothing about naming, types, structure or correctness.
 * Loops, reductions and whole-vector operations instead of per-bit statements:
   `bin#[i] = gray#^[i..]`, `count = v#+[..]`, `mask#[i] = last#|[i..]`,
   `onehot = 1 << idx`.
+* Inside a loop, index arrays, not bit windows of a packed vector: declare
+  per-lane ports and families as `[N]UW` (`io_in_a:[4]U8`,
+  `const bCur:[16]U32 = [r0, r1, ...]`) and read `x[i]`, not
+  `x#[(i*W)..<((i+1)*W)]`. Same logic, but in sim every slice is a
+  shift-and-mask over the whole vector; a lane array is a plain read. Gemmini
+  Mesh 8x8: 13.2k -> 27.6k cycles/s, LEC unchanged. Keep packing only at real
+  bit-vector boundaries (above).
 * Derive widths and counts from declarations (`x.[bits]`, `std.clog2(N)`)
   instead of restating literals; bind them to a `comptime const` before use as
   a generic argument.

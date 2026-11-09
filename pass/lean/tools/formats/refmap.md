@@ -93,10 +93,38 @@ They need no `alpha`, `init`, `group` or `inv`.
 | `period <P> [<k>]` | random runs only: inputs change only at steps `t` with `t % P = k` (default `k` = 1 when `P` > 1: the real clock's input timing on a `single_edge` certificate with P slots); the product adds the same rule for P = 2 to `env_ok` |
 | `drive <input> <v0> <n> <v1>` | random runs only: the input is `v0` before step `n` and `v1` from step `n` on (a schedule `asm` requires, e.g. a reset) |
 
-The judge's results: `NO MATCH at step n` (no alignment exists on the run: the implementation does
-not refine the spec, whatever the map; the report lists every last candidate and why it fails),
-`MATCH FOUND` (and, if the slot's own stall choice fails on the run, the step where it does:
-STALL CHOICE WRONG), `ENVIRONMENT VIOLATED` (a random run broke `asm`).
+An output channel the change delays without a ready is read late: `out:<name>@next` in the slot's
+`obs`, for its valid and every word it guards, and in the `xfer` lines that read its valid
+(`xfer out:<valid>@next`). The judge warns about a word whose payload and guard are read at
+different cycles, and about an `xfer` that reads an output at a cycle the slot never observes it
+at. The product search reads `@next` too, with `period 1`: it runs D0 one step behind D1, so its
+counterexample at cycle m is the judge's step m-1 (the TSV has rows 0..m). With `period 2` it
+refuses `@next`; read the channel late through delay registers in D0's observers there.
+
+The judge's results: `NO MATCH at step n` (no alignment exists on the run UNDER THIS CONTRACT: the
+report lists every last candidate and why it fails), `MATCH FOUND` (and, if the slot's own stall
+choice fails on the run, the step where it does: STALL CHOICE WRONG), `ENVIRONMENT VIOLATED` (no
+random vector kept `asm` at a step). A NO MATCH is not by itself a bug: a contract that reads a
+delayed channel in the same cycle, or allows fewer holds than the change adds, rejects a right
+implementation too. Each NO MATCH comes with the run's inputs as a trace, whether the run kept
+`asm`, the failing channels as transactions (D0's words, and D1's transactions on the channel
+around the step), and a `CLASS:` hint from re-reading the same run under relaxed contracts:
+`DELAY?` (the channel read later removes it), `STUTTER?` (a larger `maxstall`, or one `xfer`
+left out, removes it) or `VALUE DIFFERENCE` (none does); on a trace the relaxed contracts read
+on past its end, over random inputs that keep `asm`. A delay or a wait counts only if the
+change adds it, which the RTL decides. Random runs keep `asm` (a vector that breaks it is drawn
+again, `tries:`), and the transactions searched are counted per channel: a MATCH FOUND on runs
+with no transaction on a channel says nothing about that channel.
+
+Controls, `sym_refmap judge <file.refmap> <runs> control:pos|neg [delay:<out>=<k>,...]
+[flip:<out>@<valid>,...]`: the same contract with D0 run as the implementation (by the spec
+certificate's port names; the slot fires always). `pos`: D0 with each `delay:` output passed
+through `k` registers (the delays the change adds, from the RTL) must MATCH on every run; a NO
+MATCH means the contract is stricter than the change allows. `neg`: D0 with one output bit
+flipped at a time (`flip:` bit 0 of `<out>` while `<valid>` is 1; by default bit `lo` of every
+observed word, every cycle) must NO MATCH; a flip made but never seen is a word the contract
+does not compare. A channel with no transaction on the positive control's random runs fails
+the controls (on a trace, the counts are reported only). Neither needs a separate certificate.
 
 ## Example
 

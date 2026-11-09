@@ -1,11 +1,13 @@
 /-
 `Kit.Judge` -- decide, on ONE concrete run, whether ANY stuttering alignment of the reference D0
-matches the implementation D1. No map, no invariant, no solver: two simulators and the contract's
-observations.
+matches the implementation D1 UNDER A CONTRACT. No map, no invariant, no solver: two simulators
+and the contract's observations.
 
 The contract (one `chan`, one `slot` of a `.refmap`, plus `xfer` and `maxstall`):
-- D1 runs once on the given inputs, one step ahead of the search; its ports of every step are
-  `Ports` (outputs at n, outputs at n+1, inputs at n). The search stops at the first NO MATCH.
+- D1's ports of every step are `Ports` (outputs at n, outputs at n+1, inputs at n). They come
+  from a source (`search`): D1 run step by step from a feed (`feedSrc`, D1 one step ahead of the
+  search, so the search stops at the first NO MATCH), or a fixed array (`arraySrc`: the same run
+  re-read under a relaxed contract, or a control design's run).
 - A set of D0 states is kept, starting from D0's initial state. At each step every D0 state may
   - STEP on the step's spec input (`specIn` of the slot's response words, as an event of the
     refinement): kept only if the channel allows the event and D0's observed words equal D1's
@@ -17,7 +19,11 @@ The contract (one `chan`, one `slot` of a `.refmap`, plus `xfer` and `maxstall`)
     D1's, and dies on its own at the next mismatch.
 - Identical states are merged (keeping the smallest hold count, which dominates). The search is
   exact and has no cap: if the set becomes empty at step n, NO alignment of D0 matches D1 on this
-  run (`noMatch`); otherwise one does (`matched`).
+  run under this contract (`noMatch`, with the last candidates and why each fails); otherwise one
+  does (`matched`). A NO MATCH is a verdict on the contract as much as on D1: a contract that
+  reads an output channel the change delays in the same cycle, or allows fewer holds than the
+  change adds, rejects a right D1 too. The driver classifies every NO MATCH by re-reading the
+  same run under relaxed contracts (`arraySrc`).
 - Separately, the path that follows the slot's own stall choice (step exactly when the slot fires)
   is run, and its first failure is reported: a MATCH whose slot path fails means the stall choice,
   not D1, is wrong on this run.
@@ -92,6 +98,11 @@ inductive Why where
   | holdLimit
   deriving Repr
 
+/-- The observed word a failing step differs on, if that is why it fails. -/
+def Why.word? : Why → Option Nat
+  | .obsDiffers i _ _ => some i
+  | _ => none
+
 def Why.show (J : JSpec) : Why → String
   | .refused => "the D0 simulator refused the step"
   | .notAllowed => "D0 does not allow the event"
@@ -119,40 +130,47 @@ def holdCand (J : JSpec) (C : Ports) (c : Cand) : Except Why Cand := do
   if c.holds + 1 > J.maxStall then throw .holdLimit
   return { st := c.st, holds := c.holds + 1 }
 
+/-- A candidate that cannot continue at the step: why its step fails and why its hold fails. -/
+structure Last where
+  cand : Cand
+  step : Why
+  hold : Why
+
 /-- The judge's verdict. -/
 inductive Verdict where
   /-- no D0 state survives step `step`; the last candidates and why each fails -/
-  | noMatch (step : Nat) (why : List (List String))
+  | noMatch (step : Nat) (last : List Last)
   /-- some alignment survives every step; the slot path's first failure, if any; the largest set -/
   | matched (steps : Nat) (slotFail : Option (Nat × String)) (maxFrontier : Nat)
   /-- D1's simulator refused step `step` -/
   | implRefused (step : Nat)
-  /-- the environment check `env` failed on D1's ports at step `step` -/
+  /-- no input vector for step `step` keeps the environment's protocol -/
   | envViolated (step : Nat)
 
-/-- The exact search over the steps of `ins`, D1 (`simI` from `s0I`) and D0 (`simS` from `s0`)
-together. D1 runs one step ahead of the search: step n's ports need D1's outputs at n+1 (for
-`@next` words; the last step's come from one more cycle on the last input vector). So the search
-stops at the first NO MATCH, and a NO MATCH at step n costs n+2 D1 steps and the D0 steps up to n,
-whatever the run's length. `env` is checked on D1's ports of each step before that step is
-searched: a NO MATCH at step n is reported only on a run whose environment held on steps 0..n. -/
-def run (J : JSpec) (simS : Sim) (s0 : StateM) (simI : Sim) (s0I : StateM)
-    (ins : Array RuntimeInput) (env : Ports → Bool := fun _ => true) : Verdict := Id.run do
-  if ins.isEmpty then return .matched 0 none 1
-  let some r0 := simI ins[0]! s0I | return .implRefused 0
-  let mut cur := r0
+/-- The ports of one step from a source, with the source's next state. -/
+inductive SrcR (σ : Type) where
+  | ok (C : Ports) (s : σ)
+  | refused (n : Nat) (s : σ)
+  | envViolated (n : Nat) (s : σ)
+
+/-- The exact search over steps `0 .. steps-1`, D0 (`simS` from `s0`) against the ports `src`
+gives for each step, asked in step order. Stops at the first step no D0 state survives. Returns
+the source's last state too (a feed's state holds the inputs it used). -/
+def search {σ : Type} (J : JSpec) (simS : Sim) (s0 : StateM) (steps : Nat)
+    (src : σ → Nat → SrcR σ) (init : σ) : Verdict × σ := Id.run do
+  let mut ss := init
   let mut F : Frontier := Frontier.insert {} { st := normState s0, holds := 0 }
   let mut maxF := 1
   -- the slot's own stall choice, followed alone
   let mut slotC : Option Cand := some { st := normState s0, holds := 0 }
   let mut slotFail : Option (Nat × String) := none
-  for n in [0:ins.size] do
-    let some rN := simI (ins.getD (n + 1) ins.back!) cur.nextState | return .implRefused (n + 1)
-    let C : Ports := { outs := cur.outputs, outsNext := rN.outputs, ins := ins[n]! }
-    cur := rN
-    unless env C do return .envViolated n
+  for n in [0:steps] do
+    let C ← match src ss n with
+      | .ok C s => do ss := s; pure C
+      | .refused m s => return (.implRefused m, s)
+      | .envViolated m s => return (.envViolated m, s)
     let mut G : Frontier := {}
-    let mut whys : List (List String) := []
+    let mut last : List Last := []
     -- each distinct D0 state is stepped once per step; the slot path reuses that step
     let mut stepped : List (StateM × Except Why Cand) := []
     for c in F.toList do
@@ -162,9 +180,9 @@ def run (J : JSpec) (simS : Sim) (s0 : StateM) (simI : Sim) (s0I : StateM)
       match a with | .ok c' => G := G.insert c' | .error _ => pure ()
       match b with | .ok c' => G := G.insert c' | .error _ => pure ()
       match a, b with
-      | .error wa, .error wb => whys := whys ++ [[s!"step: {wa.show J}", s!"hold: {wb.show J}"]]
+      | .error wa, .error wb => last := last ++ [{ cand := c, step := wa, hold := wb }]
       | _, _ => pure ()
-    if G.size == 0 then return .noMatch n whys
+    if G.size == 0 then return (.noMatch n last, ss)
     maxF := max maxF G.size
     F := G
     if let some c := slotC then
@@ -177,6 +195,69 @@ def run (J : JSpec) (simS : Sim) (s0 : StateM) (simI : Sim) (s0I : StateM)
         match r with
         | .ok c' => slotC := some c'
         | .error w => slotFail := some (n, w.show J); slotC := none
-  return .matched ins.size slotFail maxF
+  return (.matched steps slotFail maxF, ss)
+
+/-- A fixed run as a source: step `n`'s ports are `ps[n]` (the caller passes `steps ≤ ps.size`). -/
+def arraySrc (ps : Array Ports) : Unit → Nat → SrcR Unit :=
+  fun _ n => .ok ps[n]! ()
+
+/-- One fed step of D1: the inputs used, D1's result, whether the environment held, and the
+feed's next state. -/
+inductive FeedR (γ : Type) where
+  | ok (i : RuntimeInput) (r : StateM.ResultM) (envOk : Bool) (g : γ)
+  | refused
+  | envViolated
+
+/-- D1's run so far: the feed's state, D1's state after the last fed step, every fed step's
+inputs and outputs, and the first fed step whose environment failed (a feed that does not
+enforce the environment, e.g. a trace, only records it). -/
+structure RunSt (γ : Type) where
+  g      : γ
+  st     : StateM
+  ins    : Array RuntimeInput := #[]
+  outs   : Array (Array BV) := #[]
+  envBad : Option Nat := none
+
+/-- Feed D1 until `k` steps are fed (or the feed stops). -/
+def RunSt.extend {γ : Type} (feed : Nat → StateM → γ → FeedR γ) (R : RunSt γ) (k : Nat) :
+    RunSt γ × Option (SrcR (RunSt γ)) := Id.run do
+  let mut R := R
+  for _ in [0:k] do
+    if R.ins.size ≥ k then break
+    let m := R.ins.size
+    match feed m R.st R.g with
+    | .ok i r ok g =>
+        R := { R with g, st := r.nextState, ins := R.ins.push i, outs := R.outs.push r.outputs
+                      envBad := if ok || R.envBad.isSome then R.envBad else some m }
+    | .refused => return (R, some (.refused m R))
+    | .envViolated => return (R, some (.envViolated m R))
+  return (R, none)
+
+/-- D1 fed step by step as a source: step `n`'s ports need D1's outputs at `n+1`, so D1 runs one
+step ahead of the search and a run stops at its first NO MATCH. -/
+def feedSrc {γ : Type} (feed : Nat → StateM → γ → FeedR γ) : RunSt γ → Nat → SrcR (RunSt γ) :=
+  fun R n =>
+    match R.extend feed (n + 2) with
+    | (_, some e) => e
+    | (R, none) => .ok { outs := R.outs[n]!, outsNext := R.outs[n + 1]!, ins := R.ins[n]! } R
+
+/-- The ports of steps `0 .. lim-1` of a recorded run (`outs` has at least `lim + 1` entries),
+with output `o` read `shift o` cycles later (earlier when negative; 0 before cycle 0). -/
+def shiftedPorts (outs : Array (Array BV)) (ins : Array RuntimeInput) (lim : Nat)
+    (shift : Nat → Int) : Array Ports := Id.run do
+  let readAt (m : Nat) (o : Nat) (b : BV) : BV :=
+    let d := shift o
+    if d == 0 then b
+    else
+      let m' : Int := (m : Int) + d
+      if m' < 0 then mk_bv b.width 0
+      else ((outs.getD m'.toNat #[]).getD o (mk_bv b.width 0))
+  let mut ps : Array Ports := #[]
+  for n in [0:lim] do
+    let o0 := outs.getD n #[]
+    let o1 := outs.getD (n + 1) #[]
+    ps := ps.push { outs := o0.mapIdx (fun o b => readAt n o b), outsNext := o1.mapIdx (fun o b => readAt (n + 1) o b)
+                  , ins := ins.getD n #[] }
+  return ps
 
 end HDLProof.Kit.Judge
