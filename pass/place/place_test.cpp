@@ -1799,7 +1799,7 @@ TEST(Placement, MacroCellWorkCanBeDeferredWithoutSkippingGpTimingOrFinalLegaliza
         }
         macro_frame  = result.floorplan;
         macro_weight = result.net_weights.at("cell0:Y");
-        EXPECT_GT(macro_weight, 2);
+        EXPECT_GT(macro_weight, 1);  // above the median-1 weight of rank criticality
         macro_complete = true;
       }
       return false;

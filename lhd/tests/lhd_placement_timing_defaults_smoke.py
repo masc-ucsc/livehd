@@ -104,8 +104,7 @@ assert alignment['gp_alignment_seconds'] == 0, alignment
 td = q['timing_driven']
 assert td['initial_timing_source'] == 'post_synthesis_zero_wire', td
 assert max(td['initial_weights'].values()) > 1, td
-assert td['timing_fraction'] == 0.2 and td['timing_max_weight'] == 5 and td['timing_smoothing'] == .5, td
-assert td['timing_exponent'] == 1, td
+assert td['timing_min_weight'] == .5 and td['timing_max_weight'] == 2 and td['timing_smoothing'] == .5, td
 assert td['skipped_setup_met'] and td['rounds'] == [], td
 assert 'pass.place.post_synth_timing' in [p['name'] for p in timed['phases']]
 
@@ -176,8 +175,7 @@ gated_result = run('fp_gated', ['--set', 'synth.place=true', '--set', 'synth.pla
                  '--set', 'synth.place.fp=true', '--set', 'synth.place.fp.colors=true', '--set', 'synth.place.fp.minimum=0',
                  '--set', 'synth.place.fp.iterations=120', '--set', 'synth.place.utilization=0.1',
                  '--set', 'synth.place.fp.timing_after_density=true',
-                 '--set', 'synth.place.timing_fraction=0.29',
-                 '--set', 'synth.place.timing_exponent=3', '--set', 'synth.place.timing_spread_weight=1',
+                 '--set', 'synth.place.timing_spread_weight=1',
                  '--set', 'synth.place.macro.timing_interval=10',
                  '--set', 'synth.place.macro.align_global=true', '--set', 'synth.place.macro.align_weight=1',
                  '--set', 'synth.place.macro.align_sigma=0.25', '--set', 'synth.place.macro.align_start=0',
@@ -222,8 +220,6 @@ final_pins = (pin_root/'out.def').read_text().split('\nPINS ',1)[1].split('END P
 assert original_pins == final_pins, 'final cell placement changed IO geometry or original constraints'
 assert (root/'fp_gated/synth/place/macro/fp_history.jsonl').exists()
 assert gated['timing_after_density'] and gated['timing_checkpoints'] > 0, gated
-assert gated['timing_fraction'] == 0.29, gated
-assert gated['timing_exponent'] == 3, gated
 assert gated['timing_spread_weight'] == 1, gated
 assert gated['routability_macro_weight'] == 0 and gated['routability_macro_range'] == 3, gated
 assert all(sample['macro_routing_force'] == 0 for sample in gated['fp_routing_history']), gated
@@ -231,13 +227,12 @@ assert gated['timing_max_weight'] == 3 and gated['timing_smoothing'] == .25, gat
 assert gated['timing_max_updates'] == 2 and gated['timing_checkpoints'] <= 2, gated
 assert gated['timing_stop_overflow'] == .08 and gated['initial_density_weight'] == .02, gated
 weighted = gated_result['qor']['place']['timing_driven']
-assert weighted['timing_fraction'] == .29 and weighted['timing_max_weight'] == 3 and weighted['timing_smoothing'] == .25, weighted
+assert weighted['timing_max_weight'] == 3 and weighted['timing_smoothing'] == .25, weighted
 assert max(weighted['initial_weights'].values()) <= 3, weighted
-assert weighted['timing_exponent'] == 3, weighted
 macro_trace = [json.loads(line) for line in
                (root/'fp_gated/synth/place/macro/macro_timing.jsonl').read_text().splitlines()]
 assert macro_trace and len(macro_trace) <= 2, macro_trace
-assert all(sample['stage'] == 'macro' and sample['timing_exponent'] == 3 for sample in macro_trace), macro_trace
+assert all(sample['stage'] == 'macro' for sample in macro_trace), macro_trace
 for path in (root/'fp_gated/synth/place').rglob('gp_history.json'):
     history = json.loads(path.read_text())
     # the region refinement (bus order, on by default) starts from the placement's converged density weight
@@ -250,10 +245,6 @@ for sample in gated['timing_density_schedule']:
     assert not sample['invoked'] or sample['forced'] or sample['overflow'] <= gated['timing_stop_overflow'], sample
 run('fp_align_bad', ['--set', 'synth.place=true', '--set', 'synth.place.fp.align_weight=-1'],
     success=False, expect='fp alignment')
-run('fraction_zero', ['--set', 'synth.place=true', '--set', 'synth.place.timing_fraction=0'], success=False,
-    expect='timing_fraction')
-run('fraction_percent', ['--set', 'synth.place=true', '--set', 'synth.place.timing_fraction=20'], success=False,
-    expect='timing_fraction')
 run('macro_interval_negative', ['--set', 'synth.place=true', '--set', 'synth.place.macro.timing_interval=-1'],
     success=False, expect='macro.timing_interval')
 run('macro_pin_interval_zero', ['--set', 'synth.place=true', '--set', 'synth.place.macro.pin_interval=0'],
@@ -264,7 +255,8 @@ run('routing_range_zero', ['--set', 'synth.place=true', '--set', 'synth.place.ro
     success=False, expect='macro routing pressure')
 # These controls share one message that does not name the option.
 for name, setting in [('weight_below_one', 'timing_max_weight=0.5'),
-                      ('exponent_below_one', 'timing_exponent=0.5'),
+                      ('min_weight_zero', 'timing_min_weight=0'),
+                      ('min_weight_above_one', 'timing_min_weight=1.1'),
                       ('spread_below_zero', 'timing_spread_weight=-0.1'),
                       ('spread_above_one', 'timing_spread_weight=1.1'),
                       ('smoothing_range', 'timing_smoothing=1.1'),

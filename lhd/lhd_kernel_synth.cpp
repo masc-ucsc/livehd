@@ -705,9 +705,8 @@ livehd::placement::Options placement_options(const Options& opts) {
       || out.legalize_timing_threshold > 1) {
     throw Lhd_error{"usage", "invalid timing legalization controls", "strength: 0..99, threshold: 0..1"};
   }
-  out.timing_fraction        = number("place.timing_fraction", "0.2");
-  out.timing_max_weight      = number("place.timing_max_weight", "5");
-  out.timing_exponent        = number("place.timing_exponent", "1");
+  out.timing_max_weight      = number("place.timing_max_weight", "2");
+  out.timing_min_weight      = number("place.timing_min_weight", "0.5");
   out.timing_spread_weight   = number("place.timing_spread_weight", "0");
   out.macro_timing_interval  = static_cast<int>(integer("place.macro.timing_interval", "50"));
   out.timing_smoothing       = number("place.timing_smoothing", "0.5");
@@ -716,12 +715,9 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.initial_density_weight = number("place.initial_density_weight", "0.01");
   if (out.timing_max_weight < 1 || out.timing_max_weight > livehd::placement::max_net_weight || out.timing_smoothing < 0
       || out.timing_smoothing > 1 || out.fp_timing_max_updates < 2 || out.stop_overflow < 0 || out.stop_overflow > 1
-      || out.initial_density_weight <= 0 || out.timing_exponent < 1 || out.macro_timing_interval < 0 || out.timing_spread_weight < 0
+      || out.initial_density_weight <= 0 || out.timing_min_weight <= 0 || out.timing_min_weight > 1 || out.macro_timing_interval < 0 || out.timing_spread_weight < 0
       || out.timing_spread_weight > 1) {
     throw Lhd_error{"usage", "invalid synth.place timing/density tuning controls", "check lhd describe synth for allowed values"};
-  }
-  if (out.timing_fraction <= 0 || out.timing_fraction > 1) {
-    throw Lhd_error{"usage", "synth.place.timing_fraction expects a fraction in (0,1]", "use 0.1 for 10% or 0.29 for 29%"};
   }
   out.snapshots = truthy(synth_set(opts, "place.snapshots", "false"));
   out.cohesion  = number("place.cohesion", "0");
@@ -1212,6 +1208,11 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.gp_buffer_margin = number("place.resize.gp_margin", "0.01");
   if (!std::isfinite(out.gp_buffer_margin) || out.gp_buffer_margin < 0 || out.gp_buffer_margin > 1) {
     throw Lhd_error{"usage", "synth.place.resize.gp_margin expects a fraction in [0,1]", ""};
+  }
+  out.eval_budget     = static_cast<unsigned>(std::max<int64_t>(4, integer("place.eval_budget", "6")));
+  out.growth_fraction = number("place.growth", "0.03");
+  if (!std::isfinite(out.growth_fraction) || out.growth_fraction < 0 || out.growth_fraction > 4) {
+    throw Lhd_error{"usage", "synth.place.growth expects a fraction in [0,4]", ""};
   }
   out.resize_vt_swap = truthy(synth_set(opts, "place.resize.vt_swap", "false"));
   for (const auto& pattern : absl::StrSplit(synth_set(opts, "place.resize.dont_use", ""), ',', absl::SkipWhitespace())) {
@@ -2634,6 +2635,7 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
       place_options.output_dir = root + "/place";
       if (place_options.full) {
         livehd::placement::initialize_growth_budget(**found, place_options);
+        place_options.growth_budget->fraction = place_options.growth_fraction;
       }
       if (physical_cache) {
         const auto hint = physical_cache->placement_hint();
@@ -2718,15 +2720,16 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
       // One invocation-wide budget for optional detailed trials, rather than a
       // fresh budget at each repair phase. Reserve two of eight evaluations for
       // final legalization and the standalone timing report. Ranking is free.
+      const size_t eval_budget = place_options.eval_budget;
       const livehd::placement::Trial_admission admit_trial = [&] {
         const auto& stats = timing_session.statistics();
-        return stats.evaluations - stats.rankings < 6;
+        return stats.evaluations - stats.rankings < eval_budget;
       };
       const livehd::placement::Trial_admission admit_refinement = [&] {
         const auto& stats = timing_session.statistics();
         // Leave room for sizing and buffer repair. Rejected placement trials
         // must not consume the entire shared allowance on overloaded designs.
-        return admit_trial() && (!run_resize || stats.evaluations - stats.rankings < 4);
+        return admit_trial() && (!run_resize || stats.evaluations - stats.rankings < eval_budget - 2);
       };
       std::unique_ptr<livehd::placement::Io_timing_flow> io_flow;
       if (io_store) {
@@ -2867,9 +2870,7 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
         const auto data_timing    = livehd::placement::prects_data_timing(std::move(timing), controls);
         place_options.net_weights = livehd::placement::timing_weights(*seed.parasitics,
                                                                       data_timing,
-                                                                      place_options.timing_fraction,
-                                                                      place_options.timing_max_weight,
-                                                                      place_options.timing_exponent);
+                                                                      place_options.timing_min_weight, place_options.timing_max_weight);
         if (place_options.net_weights.empty()) {
           throw Lhd_error{"unsupported",
                           "post-synthesis timing has no constrained data nets for placement weighting",

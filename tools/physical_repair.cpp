@@ -763,8 +763,8 @@ int main(int argc, char** argv) {
     sat_limit("legalize_timing_corrections", options.legalize_timing_corrections);
     number_option("legalize_timing_strength", options.legalize_timing_strength);
     number_option("legalize_timing_threshold", options.legalize_timing_threshold);
-    if (config.HasMember("timing_exponent")) {
-      options.timing_exponent = config["timing_exponent"].GetDouble();
+    if (config.HasMember("timing_min_weight")) {
+      options.timing_min_weight = config["timing_min_weight"].GetDouble();
     }
     if (config.HasMember("timing_spread_weight")) {
       options.timing_spread_weight = config["timing_spread_weight"].GetDouble();
@@ -790,9 +790,6 @@ int main(int argc, char** argv) {
     }
     if (config.HasMember("initial_density_weight")) {
       options.initial_density_weight = config["initial_density_weight"].GetDouble();
-    }
-    if (config.HasMember("timing_fraction")) {
-      options.timing_fraction = config["timing_fraction"].GetDouble();
     }
     if (config.HasMember("resize_engine")) {
       options.resize_engine = text("resize_engine");
@@ -820,7 +817,7 @@ int main(int argc, char** argv) {
         throw std::invalid_argument("invalid net_weights file");
       }
       for (const auto& item : weights.GetObject()) {
-        if (!item.value.IsNumber() || !std::isfinite(item.value.GetDouble()) || item.value.GetDouble() < 1
+        if (!item.value.IsNumber() || !std::isfinite(item.value.GetDouble()) || item.value.GetDouble() <= 0
             || item.value.GetDouble() > pl::max_net_weight
             || !options.net_weights.emplace(item.name.GetString(), item.value.GetDouble()).second) {
           throw std::invalid_argument("invalid or duplicate net weight");
@@ -1319,9 +1316,7 @@ int main(int argc, char** argv) {
       if (!config.HasMember("net_weights") && timing_driven) {
         options.net_weights = pl::timing_weights(*seed.parasitics,
                                                  seed_timing,
-                                                 options.timing_fraction,
-                                                 options.timing_max_weight,
-                                                 options.timing_exponent);
+                                                 options.timing_min_weight, options.timing_max_weight);
       }
       if (timing_driven) {
         options.fp_evaluate = raw_evaluate;
@@ -1471,9 +1466,7 @@ int main(int argc, char** argv) {
       }
       const auto                                 membership = pl::timing_weights(*result.parasitics,
                                                                                  final_feedback,
-                                                                                 options.timing_fraction,
-                                                                                 options.timing_max_weight,
-                                                                                 options.timing_exponent);
+                                                                                 options.timing_min_weight, options.timing_max_weight);
       rapidjson::StringBuffer                    final_weights_json;
       rapidjson::Writer<rapidjson::StringBuffer> final_weights(final_weights_json);
       final_weights.StartObject();

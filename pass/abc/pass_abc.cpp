@@ -210,9 +210,10 @@ void Pass_abc::add_mapping_labels(Eprp_method& m) {
   m.add_label_optional("large_flow_latches",
                        "true|false: treat a region mapped by the tool's own default large_flow like the built-in flow: it only "
                        "strashes and maps, so clock-gated, derived-clock and asynchronously reset registers map to cells instead "
-                       "of staying native flops (which cannot be placed). False (default) keeps the size tier's regions on the "
-                       "\"user command list may reshape latches\" rule. A user-supplied large_flow always keeps that rule",
-                       "false");
+                       "of staying native flops (which cannot be placed). False keeps the size tier's regions on the "
+                       "\"user command list may reshape latches\" rule. A user-supplied large_flow always keeps that rule "
+                       "(true, the default)",
+                       "true");
   m.add_label_optional("large_ge",
                        "inclusive synthesis-GE threshold for large_flow (0 disables it); default protects wide indivisible "
                        "operations from unbounded &dch choice synthesis",
@@ -234,8 +235,8 @@ void Pass_abc::add_mapping_labels(Eprp_method& m) {
                        "true|false map a register clocked by region-internal logic that is not a recognized clock gate (a "
                        "gated/derived clock, e.g. `clk & latch` when the Liberty has no integrated clock-gate cell) to a "
                        "plain DFF cell whose clock pin the mapped logic drives, instead of keeping a native flop that physical "
-                       "synthesis cannot place (false, the default)",
-                       "false");
+                       "synthesis cannot place (true, the default)",
+                       "true");
   m.add_label_optional("register_max_bits",
                        "with register=true, keep a region's flops native when their total Q width exceeds this many bits "
                        "(0, the default, disables the guard: every flop maps, a bit-blasted 64x64 memory alone is 4096 "
@@ -912,7 +913,7 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
   auto       large_ge_s          = std::string{var.get("large_ge", "200000")};
   bool       map_register        = truthy(var.get("register", "true"));
   bool       drop_init           = truthy(var.get("drop_init", "false"));
-  bool       derived_clock       = truthy(var.get("derived_clock", "false"));
+  bool       derived_clock       = truthy(var.get("derived_clock", "true"));
   const bool memory_prune_reads  = truthy(var.get("memory_prune_reads", "false"));
   const bool ware_zero_bits      = truthy(var.get("ware_zero_bits", "false"));
   auto       memory_s            = std::string{var.get("memory", "auto")};
@@ -1193,7 +1194,7 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
   opts.area_flow          = area_flow;
   opts.reg_margin         = reg_margin;
   opts.large_flow         = large_flow;
-  opts.large_flow_latches = truthy(var.get("large_flow_latches", "false")) && large_flow == kDefaultLargeFlow;
+  opts.large_flow_latches = truthy(var.get("large_flow_latches", "true")) && large_flow == kDefaultLargeFlow;
   opts.large_ge           = large_ge;
   opts.ware_max_cells     = ware_max_cells;
   opts.map_register       = map_register;

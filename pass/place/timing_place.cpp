@@ -15,16 +15,13 @@
 #include "repair.hpp"
 namespace livehd::placement {
 namespace {
-std::map<std::string, double> data_timing_weights(const physical::Parasitics& nets, const Timing_feedback& timing, double fraction,
-                                                  double max_weight, double exponent, const Prects_networks* controls) {
-  if (!std::isfinite(fraction) || fraction <= 0 || fraction > 1) {
-    throw std::invalid_argument("timing fraction must be in (0, 1]");
-  }
+std::map<std::string, double> data_timing_weights(const physical::Parasitics& nets, const Timing_feedback& timing, double min_weight,
+                                                  double max_weight, const Prects_networks* controls) {
   if (!std::isfinite(max_weight) || max_weight < 1 || max_weight > max_net_weight) {
     throw std::invalid_argument("maximum timing weight must be finite and in [1, 100]");
   }
-  if (!std::isfinite(exponent) || exponent < 1) {
-    throw std::invalid_argument("timing criticality exponent must be finite and at least 1");
+  if (!std::isfinite(min_weight) || min_weight <= 0 || min_weight > 1) {
+    throw std::invalid_argument("minimum timing weight must be finite and in (0, 1]");
   }
   std::vector<std::pair<double, std::string_view>> ranked;
   ranked.reserve(nets.nets.size());
@@ -82,31 +79,31 @@ std::map<std::string, double> data_timing_weights(const physical::Parasitics& ne
   if (ranked.empty()) {
     return {};
   }
-  // Preserve the existing default exactly. One-ulp product roundoff (e.g.
-  // 0.14 * 100) must not select an extra net at an integer cutoff.
-  const auto   count    = std::ceil(std::nextafter(fraction * ranked.size(), 0.));
-  const size_t selected = fraction == .2 ? std::max<size_t>(1, (ranked.size() + 4) / 5)
-                                         : std::clamp<size_t>(static_cast<size_t>(count), 1, ranked.size());
-  // Only the selected critical fraction needs an ordering. Keep views into
-  // the immutable parasitics instead of copying every driver name.
-  if (selected < ranked.size()) {
-    std::nth_element(ranked.begin(), ranked.begin() + selected, ranked.end());
-    ranked.resize(selected);
-  }
+  // Every timed non-clock net gets a weight from its slack RANK, never from the sign or scale of the slack: designs
+  // where all nets fail (or all pass) still order their nets. Piecewise linear in the rank percentile p (0 = worst
+  // slack, 1 = best): the worst net weighs max_weight, the median exactly 1, the best min_weight. Nets with equal slack
+  // share their mean rank, so ties never split.
   std::sort(ranked.begin(), ranked.end());
-  const double                  worst = ranked.front().first, cutoff = ranked[selected - 1].first;
+  const size_t                  n = ranked.size();
   std::map<std::string, double> target;
-  for (size_t i = 0; i < selected; ++i) {
-    const double priority = timing.ranking_only ? (selected > 1 ? 1. - double(i) / (selected - 1) : 1.)
-                                                : (cutoff > worst + 1e-12 ? (cutoff - ranked[i].first) / (cutoff - worst) : 1.);
-    target[std::string(ranked[i].second)] = 1 + (max_weight - 1) * std::pow(priority, exponent);
+  for (size_t begin = 0; begin < n;) {
+    size_t end = begin + 1;
+    while (end < n && ranked[end].first == ranked[begin].first) {
+      ++end;
+    }
+    const double p = n > 1 ? .5 * double(begin + end - 1) / double(n - 1) : .5;  // mean rank / (n-1)
+    const double w = p <= .5 ? max_weight - (max_weight - 1) * (p / .5) : 1 - (1 - min_weight) * ((p - .5) / .5);
+    for (size_t i = begin; i < end; ++i) {
+      target[std::string(ranked[i].second)] = w;
+    }
+    begin = end;
   }
   return target;
 }
 }  // namespace
-std::map<std::string, double> timing_weights(const physical::Parasitics& nets, const Timing_feedback& timing, double fraction,
-                                             double max_weight, double exponent) {
-  return data_timing_weights(nets, timing, fraction, max_weight, exponent, nullptr);
+std::map<std::string, double> timing_weights(const physical::Parasitics& nets, const Timing_feedback& timing, double min_weight,
+                                             double max_weight) {
+  return data_timing_weights(nets, timing, min_weight, max_weight, nullptr);
 }
 void refresh_timing_weights(Result& state, const Options& options, const Timing_feedback& timing) {
   const auto roles
@@ -127,18 +124,16 @@ void refresh_timing_weights(Result& state, const Options& options, const Timing_
   }
   const auto                    target = data_timing_weights(*state.parasitics,
                                                              timing,
-                                                             options.timing_fraction,
+                                                             options.timing_min_weight,
                                                              options.timing_max_weight,
-                                                             options.timing_exponent,
                                                              controls ? &*controls : nullptr);
   std::map<std::string, double> current;
   for (const auto& net : state.parasitics->nets) {
     const auto next     = target.find(net.driver);
     const auto old      = state.net_weights.find(net.driver);
-    current[net.driver] = next == target.end() || next->second <= 1
-                              ? 1
-                              : (1 - options.timing_smoothing) * (old == state.net_weights.end() ? 1 : old->second)
-                                    + options.timing_smoothing * next->second;
+    current[net.driver] = next == target.end() ? 1
+                                               : (1 - options.timing_smoothing) * (old == state.net_weights.end() ? 1 : old->second)
+                                                     + options.timing_smoothing * next->second;
   }
   state.net_weights = std::move(current);
 }
@@ -188,12 +183,10 @@ Repair_result timing_place(Result initial, const Options& requested, const Evalu
   w.StartObject();
   w.Key("model");
   w.String("slack_weighted_placement");
-  w.Key("timing_fraction");
-  w.Double(options.timing_fraction);
+  w.Key("timing_min_weight");
+  w.Double(options.timing_min_weight);
   w.Key("timing_max_weight");
   w.Double(options.timing_max_weight);
-  w.Key("timing_exponent");
-  w.Double(options.timing_exponent);
   w.Key("timing_smoothing");
   w.Double(options.timing_smoothing);
   w.Key("initial_weights");
@@ -224,11 +217,7 @@ Repair_result timing_place(Result initial, const Options& requested, const Evalu
     if (admit_trial && !admit_trial()) {
       break;
     }
-    auto target = timing_weights(*result.placed.parasitics,
-                                 best,
-                                 options.timing_fraction,
-                                 options.timing_max_weight,
-                                 options.timing_exponent);
+    auto target = timing_weights(*result.placed.parasitics, best, options.timing_min_weight, options.timing_max_weight);
     if (target.empty()) {
       break;
     }

@@ -12,9 +12,9 @@ macro-centroid diagnostic have been removed.
 GP timing feedback is approximate critical-path ranking. It uses characterized
 gate delay at total load and a closed-form Elmore wire estimate, updates the
 existing timing graph for changed RC and gate strengths, and exports only pin
-slacks and clock flags. `synth.place.timing_fraction=0.2` selects the worst-ranked
-20% of timed data nets (`0.1` selects 10%); weight magnitudes follow rank rather
-than picosecond differences. The existing smoothing controls how quickly weights
+slacks and clock flags. Every timed non-clock net gets a weight from its slack rank
+(worst `synth.place.timing_max_weight=2`, median exactly 1, best `synth.place.timing_min_weight=0.5`, linear in rank);
+the sign and scale of the slack never matter, so designs where every net fails or every net passes are still ordered. The existing smoothing controls how quickly weights
 change. This feedback does not claim WNS, electrical validity or a certified
 period. Resynthesis obtains detailed timing for its selected placement frame;
 physical repair validation and final STA retain the detailed waveform model.
@@ -867,8 +867,8 @@ placement requires OpenTimer and constrained data nets (normally from
 `synth.sdc`). OpenTimer
 first ranks the mapped netlist with zero wire RC to seed the initial net weights.
 The seed prepares native memories and tie cells without running placement or
-publishing a placement cache or DEF. The worst 20% of timed data nets get weights
-from 1 to 5 with 0.5 smoothing; clock and reset networks are excluded.
+publishing a placement cache or DEF. Every timed data net gets a rank-based weight (worst 2, median 1, best 0.5)
+with 0.5 smoothing; clock and reset networks are excluded.
 
 `synth.place.timing_rounds` allows 1–8 refinement attempts (default 3). They are
 skipped when setup is already met; electrical repair remains a separate phase. Each attempt uses
@@ -934,18 +934,14 @@ are 200, 400, 600, 700, 800, 850, 900, 950 and 1000. Buffer repair starts on the
 second measurement as before. Replay spelling: `final_timing_schedule`.
 
 The initial weights are copied into floorplan GP, macro GP and final cell GP.
-`synth.place.timing_fraction=0.2` selects the worst 20% of constrained non-clock
-nets, rounded up to at least one net. It applies to the initial zero-wire weights,
-FP updates and post-placement refinement. Values must be in `(0,1]`; for example,
-use `0.1` for 10% or `0.29` for 29%. A smaller fraction concentrates on the worst
-nets, while a larger fraction covers more endpoints; measure WNS/TNS to choose.
-For selected nets, let `s` be a net's worst
-pin slack, `s_worst` the worst selected slack, and `s_cutoff` the last selected
-slack. With `W = synth.place.timing_max_weight` (default 5), the target is
-`1 + (W - 1) * (s_cutoff - s)/(s_cutoff - s_worst)`; tied selected slacks get
-weight W. Current noncritical nets immediately receive weight 1, and obsolete
-driver identities are removed. `synth.place.timing_smoothing` (default 0.5) is the
-new-target share for selected nets at updates: `(1-alpha)*old + alpha*target`.
+Every constrained non-clock net is weighted by its slack rank, in the initial zero-wire
+weights, the FP updates and the post-placement refinement. Let `p` be the net's rank percentile by worst pin slack
+(0 = the worst net, 1 = the best; nets with equal slack share their mean rank). With
+`W = synth.place.timing_max_weight` (default 2) and `w = synth.place.timing_min_weight` (default 0.5) the target is
+piecewise linear: `W - (W-1) * p/0.5` for `p <= 0.5` and `1 - (1-w) * (p-0.5)/0.5` above, so the worst net weighs `W`, the median net
+exactly 1 and the best net `w`. A flatter step is a setup (`1.5`/`0.75`; `1`/`1` turns weighting off). Nets without timing and
+clock nets keep weight 1, and obsolete driver identities are removed. `synth.place.timing_smoothing` (default 0.5) is the
+new-target share at updates: `(1-alpha)*old + alpha*target`.
 Initial zero-wire weights use the target directly. These weights multiply both
 the smooth wirelength cost and its gradient before GP preconditioning. They do
 not directly change the configured centroid or density coefficients, or size
@@ -1595,8 +1591,8 @@ QoR tuning controls preserve the existing numerical defaults:
 
 | Option (`synth.place.` prefix) | Default | Meaning |
 | --- | ---: | --- |
-| `timing_fraction` | 0.2 | Worst-slack share of timed non-clock nets, `(0,1]` |
-| `timing_max_weight` | 5 | Worst selected net's target weight, finite, `[1,100]` |
+| `timing_max_weight` | 2 | Worst-slack net's weight, finite, `[1,100]`; the median net weighs 1 |
+| `timing_min_weight` | 0.5 | Best-slack net's weight, `(0,1]` |
 | `timing_smoothing` | 0.5 | New-target share `[0,1]`; zero holds prior weights |
 | `stop_overflow` | 0.1 | GP overflow threshold `[0,1]`, also used by FP timing gating |
 | `initial_density_weight` | 0.01 | Positive density-force multiplier before native gradient normalization |

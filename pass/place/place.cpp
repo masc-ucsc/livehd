@@ -665,8 +665,8 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
       h = hash_text(std::format(":c{}", v), h);
     }
   }
-  if (o.timing_max_weight != 5 || o.timing_smoothing != .5) {
-    h = hash_text(std::format("timing-force:{}:{}", o.timing_max_weight, o.timing_smoothing), h);
+  if (o.timing_max_weight != 2 || o.timing_min_weight != .5 || o.timing_smoothing != .5) {
+    h = hash_text(std::format("timing-rank-weights:{}:{}:{}", o.timing_min_weight, o.timing_max_weight, o.timing_smoothing), h);
   }
   if (o.satlegalize_options.route_grid) {
     h = hash_text(std::format("sat-route-grid-v1:{}", o.satlegalize_options.route_guidance), h);
@@ -750,9 +750,6 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
                               t.remainder_wire_weight),
                   h);
   }
-  if (o.timing_exponent != 1) {
-    h = hash_text(std::format("timing-exponent:{}", o.timing_exponent), h);
-  }
   if (o.timing_spread_weight != 0) {
     h = hash_text(std::format("timing-spread:{}", o.timing_spread_weight), h);
   }
@@ -769,9 +766,6 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
   }
   if (o.fp_timing_max_updates != 10) {
     h = hash_text(std::format("fp-timing-budget:{}", o.fp_timing_max_updates), h);
-  }
-  if (o.timing_fraction != .2) {
-    h = hash_text(std::format("timing-fraction:{}", o.timing_fraction), h);
   }
   if (o.fixed_macro_overlap_weight > 0) {
     h = hash_text(std::format("fixed-macro-overlap:{}", o.fixed_macro_overlap_weight), h);
@@ -2312,7 +2306,7 @@ void make_arrays(View& v, const ph::Technology& tech) {
     d.flat_net2pin_start.push_back(d.pin2node.size());
     const auto key    = driver.label();
     const auto weight = v.weights.contains(key) ? v.weights.at(key) : 1;
-    if (!std::isfinite(weight) || weight < 1 || weight > max_net_weight) {
+    if (!std::isfinite(weight) || weight <= 0 || weight > max_net_weight) {
       throw std::invalid_argument("invalid physical net weight");
     }
     d.net_weights.push_back(weight);
@@ -5702,7 +5696,8 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
   }
   if (!std::isfinite(options.timing_max_weight) || options.timing_max_weight < 1 || options.timing_max_weight > max_net_weight
       || !std::isfinite(options.timing_smoothing) || options.timing_smoothing < 0 || options.timing_smoothing > 1
-      || options.fp_timing_max_updates < 2 || !std::isfinite(options.timing_exponent) || options.timing_exponent < 1
+      || options.fp_timing_max_updates < 2 || !std::isfinite(options.timing_min_weight) || options.timing_min_weight <= 0
+      || options.timing_min_weight > 1
       || !std::isfinite(options.timing_spread_weight) || options.timing_spread_weight < 0 || options.timing_spread_weight > 1
       || options.macro_timing_interval < 0) {
     throw std::invalid_argument("invalid timing weight/smoothing/update budget");
@@ -5747,9 +5742,6 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
   }
   if (!std::isfinite(options.fp_timing_movement) || options.fp_timing_movement < 0) {
     throw std::invalid_argument("invalid FP timing movement threshold");
-  }
-  if (!std::isfinite(options.timing_fraction) || options.timing_fraction <= 0 || options.timing_fraction > 1) {
-    throw std::invalid_argument("timing fraction must be in (0, 1]");
   }
   if (!std::isfinite(options.fp_attraction_outside) || options.fp_attraction_outside < 0) {
     throw std::invalid_argument("invalid floorplan outside-circle attraction stiffness");
@@ -8341,9 +8333,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
           }
           const auto target = timing_weights(*checkpoint.parasitics,
                                              after,
-                                             options.timing_fraction,
-                                             options.timing_max_weight,
-                                             options.timing_exponent);
+                                             options.timing_min_weight, options.timing_max_weight);
           if (target.empty()) {
             throw std::runtime_error("FP timing has no constrained data nets for weighting");
           }
@@ -8360,7 +8350,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
           fs::create_directories(options.output_dir);
           std::ofstream trace(options.output_dir + "/fp_timing.jsonl", fp_checkpoints == 1 ? std::ios::trunc : std::ios::app);
           trace << std::format(
-              R"({{"iteration":{},"trigger":"{}","movement_bins":{},"timing_seconds":{},"weighted_nets":{},"sta_calls":{},"resize_proposed":{},"resize_accepted":{},"repair_accepted":{},"before_delay":{},"after_delay":{},"time_unit_ps":{},"timing_exponent":{},"ranking_only":{}}})",
+              R"({{"iteration":{},"trigger":"{}","movement_bins":{},"timing_seconds":{},"weighted_nets":{},"sta_calls":{},"resize_proposed":{},"resize_accepted":{},"repair_accepted":{},"before_delay":{},"after_delay":{},"time_unit_ps":{},"ranking_only":{}}})",
               iteration,
               trigger,
               movement,
@@ -8373,7 +8363,6 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
               before.ranking_only ? "null" : std::format("{}", before.delay),
               after.ranking_only ? "null" : std::format("{}", after.delay),
               after.time_unit_ps,
-              options.timing_exponent,
               after.ranking_only)
                 << '\n';
           if (!trace) {
@@ -8625,15 +8614,14 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         std::ofstream trace(options.output_dir + "/" + timing_stage + "_timing.jsonl",
                             macro_checkpoints == 1 ? std::ios::trunc : std::ios::app);
         trace << std::format(
-            R"({{"stage":"{}","iteration":{},"forced":{},"overflow":{},"movement_bins":{},"timing_seconds":{},"weighted_nets":{},"timing_exponent":{},"max_applied_weight":{},"delay":{},"time_unit_ps":{},"ranking_only":{}}})",
+            R"({{"stage":"{}","iteration":{},"forced":{},"overflow":{},"movement_bins":{},"timing_seconds":{},"weighted_nets":{},"max_applied_weight":{},"delay":{},"time_unit_ps":{},"ranking_only":{}}})",
             timing_stage,
             iteration,
             final,
             macro_checkpoint_overflow,
             movement,
             std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count(),
-            std::count_if(v.weights.begin(), v.weights.end(), [](const auto& entry) { return entry.second > 1; }),
-            options.timing_exponent,
+            std::count_if(v.weights.begin(), v.weights.end(), [](const auto& entry) { return entry.second != 1; }),
             update.net_weights.empty() ? 1. : *std::max_element(update.net_weights.begin(), update.net_weights.end()),
             timing.ranking_only ? "null" : std::format("{}", timing.delay),
             timing.time_unit_ps,
@@ -8644,9 +8632,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         }
         const auto membership = timing_weights(*checkpoint.parasitics,
                                                timing,
-                                               options.timing_fraction,
-                                               options.timing_max_weight,
-                                               options.timing_exponent);
+                                               options.timing_min_weight, options.timing_max_weight);
         if (save_macro_gp_timing) {
           result.macro_gp_timing = Macro_gp_timing{timing, std::move(checkpoint.parasitics), std::move(checkpoint.pin_locations)};
         }
@@ -11877,7 +11863,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
               v.design.node_halo_y[i] = double(std::max(v.halo_y, v.plan_pad_y));
             }
           }
-          livehd::diag::warn("pass.place", "macro-pdn", "degrade")
+          livehd::diag::warn("pass.place", "macro-pdn", "unsupported")
               .msg(
                   "macro.pdn=auto: macro legalization failed with the {} channel ({:.2f} x {:.2f} um); retrying with the {} "
                   "channel ({:.2f} x {:.2f} um)",
@@ -12872,10 +12858,8 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     json.Bool(fp_metrics.timing_satisfied);
     json.Key("timing_interval");
     json.Int(options.fp_timing_interval);
-    json.Key("timing_fraction");
-    json.Double(options.timing_fraction);
-    json.Key("timing_exponent");
-    json.Double(options.timing_exponent);
+    json.Key("timing_min_weight");
+    json.Double(options.timing_min_weight);
     json.Key("timing_spread_weight");
     json.Double(options.timing_spread_weight);
     json.Key("timing_max_weight");
@@ -15241,7 +15225,7 @@ Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& re
     const auto  decision       = detect_fp_repetition(fp_repetition_design(source, tech, requested.liberty), auto_options);
     resolved.fp_place          = decision.enabled;
     report                     = fp_rep_json(decision, auto_options);
-    livehd::diag::info("pass.place", "fp-auto", "decision")
+    livehd::diag::info("pass.place", "fp-auto", "progress")
         .msg("synth.place.fp=auto: floorplan {} (repeated flop+memory share {:.1f}%, as floorplan candidates {:.1f}%)",
              decision.enabled ? "on" : "off",
              100 * decision.share,

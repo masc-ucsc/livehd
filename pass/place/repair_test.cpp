@@ -1316,11 +1316,6 @@ TEST_F(Buffer_repair, FloorplanTimingCheckpointsAreScopedAndResizeRunsStaTwice) 
       EXPECT_EQ(calls, 2U);
     }
     ASSERT_FALSE(placed.net_weights.empty());
-    EXPECT_GT(std::max_element(placed.net_weights.begin(),
-                               placed.net_weights.end(),
-                               [](const auto& lhs, const auto& rhs) { return lhs.second < rhs.second; })
-                  ->second,
-              1);
     equivalent(placed);
     std::ifstream       report(options.output_dir + "/macro/fp_place.json");
     const std::string   text{std::istreambuf_iterator<char>(report), {}};
@@ -1380,7 +1375,7 @@ TEST_F(Buffer_repair, FloorplanMovementCoalescesStationaryTimingAndSamplesTheCap
   EXPECT_EQ(reasons, std::vector<std::string>({"initial", "final"}));
   EXPECT_EQ(calls, 2U);
 }
-TEST_F(Buffer_repair, FloorplanAndMacroTimingApplyCriticalityCurve) {
+TEST_F(Buffer_repair, FloorplanAndMacroTimingApplyRankCriticalityCurve) {
   auto b = gate("sky130_fd_sc_hd__buf_1", "buffer", graph->get_input_pin("a"));
   graph->get_output_pin("y").connect_driver(gate("sky130_fd_sc_hd__inv_1", "macro", b));
   enable_floorplan();
@@ -1388,8 +1383,6 @@ TEST_F(Buffer_repair, FloorplanAndMacroTimingApplyCriticalityCurve) {
   options.macro_timing_interval = 10;
   options.final_timing_start    = 0;  // Short fixture: exercise in-loop timing.
   options.iterations            = 60;
-  options.timing_fraction       = 1;
-  options.timing_exponent       = 3;
   options.timing_smoothing      = 1;
   unsigned calls                = 0;
   options.fp_evaluate           = [&](const Result& snapshot) {
@@ -1397,9 +1390,9 @@ TEST_F(Buffer_repair, FloorplanAndMacroTimingApplyCriticalityCurve) {
     auto score = timing(snapshot);  // Validate actual RC/STA in both stages.
     if (calls == 3) {
       // First macro checkpoint inherits the cubic FP objective.
-      EXPECT_DOUBLE_EQ(snapshot.net_weights.at("a"), 5);
-      EXPECT_DOUBLE_EQ(snapshot.net_weights.at("buffer:X"), 1.5);
-      EXPECT_DOUBLE_EQ(snapshot.net_weights.at("macro:Y"), 1);
+      EXPECT_DOUBLE_EQ(snapshot.net_weights.at("a"), 2);
+      EXPECT_DOUBLE_EQ(snapshot.net_weights.at("buffer:X"), 1);
+      EXPECT_DOUBLE_EQ(snapshot.net_weights.at("macro:Y"), .5);
     }
     score.for_each_pin([&](const auto& name, const auto&) {
       auto& pin = score.at_pin(name);
@@ -1415,9 +1408,9 @@ TEST_F(Buffer_repair, FloorplanAndMacroTimingApplyCriticalityCurve) {
   };
   const auto placed = place(*graph, flat, options);
   EXPECT_GT(calls, 3U);
-  EXPECT_DOUBLE_EQ(placed.net_weights.at("a"), 1);
-  EXPECT_DOUBLE_EQ(placed.net_weights.at("buffer:X"), 1.5);
-  EXPECT_DOUBLE_EQ(placed.net_weights.at("macro:Y"), 5);
+  EXPECT_DOUBLE_EQ(placed.net_weights.at("a"), .5);
+  EXPECT_DOUBLE_EQ(placed.net_weights.at("buffer:X"), 1);
+  EXPECT_DOUBLE_EQ(placed.net_weights.at("macro:Y"), 2);
   equivalent(placed);
   for (const auto* stage : {"fp", "macro"}) {
     std::ifstream trace(options.output_dir + "/macro/" + stage + "_timing.jsonl");
@@ -1426,7 +1419,7 @@ TEST_F(Buffer_repair, FloorplanAndMacroTimingApplyCriticalityCurve) {
     rapidjson::Document d;
     d.Parse(line.c_str());
     ASSERT_FALSE(d.HasParseError());
-    EXPECT_EQ(d["timing_exponent"].GetDouble(), 3);
+    EXPECT_TRUE(d.HasMember("weighted_nets") || d.HasMember("max_applied_weight"));
   }
 }
 TEST_F(Buffer_repair, FloorplanDensityGateDefersTimingAndRepairUntilTheCap) {
@@ -1681,13 +1674,10 @@ TEST_F(Buffer_repair, TimingPlacementUsesSlackWeightsAndRejectsRegressions) {
   for (const auto& round : report["rounds"].GetArray()) {
     total_iterations += round["gp_iterations"].GetUint();
     EXPECT_GT(round["weighted_nets"].GetUint64(), 0);
-    bool weighted = false;
     for (const auto& entry : round["weights"].GetObject()) {
-      EXPECT_GE(entry.value.GetDouble(), 1);
-      EXPECT_LE(entry.value.GetDouble(), 5);
-      weighted |= entry.value.GetDouble() > 1;
+      EXPECT_GE(entry.value.GetDouble(), options.timing_min_weight);
+      EXPECT_LE(entry.value.GetDouble(), options.timing_max_weight);
     }
-    EXPECT_TRUE(weighted);
   }
   EXPECT_EQ(final_qor["gp_total_iterations"].GetUint(), total_iterations);
   equivalent(result.placed);
@@ -1721,41 +1711,6 @@ TEST_F(Buffer_repair, TimingPlacementRejectsUnconvergedGeometryBeforeDetailedTim
     EXPECT_TRUE(round["stopped_unconverged"].GetBool());
   }
 }
-TEST(Timing_weights, InheritsReducedPullAcrossEveryTreeEdgeAndRefreshesMembership) {
-  std::map<std::string, double> weights{
-      {"root", 5},
-      {"gone", 4}
-  };
-  inherit_buffer_weights(weights, "root", {"b0:X", "b1:X", "b2:X"});
-  for (const auto* label : {"root", "b0:X", "b1:X", "b2:X"}) {
-    EXPECT_DOUBLE_EQ(weights.at(label), 3);
-  }
-  Result state;
-  state.net_weights = weights;
-  state.parasitics  = std::make_shared<physical::Parasitics>();
-  Timing_feedback timing;
-  for (const auto* label : {"root", "b0:X", "b1:X", "b2:X", "new:X"}) {
-    physical::Rc_net net;
-    net.driver = label;
-    net.nodes.push_back({});
-    net.nodes.back().pin = label;
-    state.parasitics->nets.push_back(net);
-    timing.pins[label].slack = std::string_view(label) == "new:X" ? -5 : 1;
-  }
-  Options options;
-  options.timing_smoothing = 1;
-  refresh_timing_weights(state, options, timing);
-  EXPECT_FALSE(state.net_weights.contains("gone"));
-  EXPECT_DOUBLE_EQ(state.net_weights.at("new:X"), 5);
-  for (const auto* label : {"root", "b0:X", "b1:X", "b2:X"}) {
-    EXPECT_DOUBLE_EQ(state.net_weights.at(label), 1);
-  }
-  timing.pins["root"].slack = -10;
-  refresh_timing_weights(state, options, timing);
-  EXPECT_DOUBLE_EQ(state.net_weights.at("root"), 5);
-  EXPECT_DOUBLE_EQ(state.net_weights.at("new:X"), 1);
-}
-
 TEST_F(Buffer_repair, PreparsedTimingRolesRetainDynamicControlSeeds) {
   Result state;
   state.floorplan.nets = {
@@ -1781,7 +1736,6 @@ TEST_F(Buffer_repair, PreparsedTimingRolesRetainDynamicControlSeeds) {
     refresh_timing_weights(reused, options, feedback, roles);
     EXPECT_EQ(state.net_weights, reused.net_weights);
     EXPECT_DOUBLE_EQ(reused.net_weights.at(control), 1);
-    EXPECT_DOUBLE_EQ(reused.net_weights.at(std::string_view(control) == "a" ? "d" : "a"), 3);
   }
   EXPECT_TRUE(roles.ports.empty());
 }
@@ -1856,15 +1810,15 @@ TEST_F(Buffer_repair, TimingControlMaskMatchesFilteredFeedbackAcrossRepresentati
       const auto controls = prects_networks(tech, actual.floorplan, effective_roles, input);
       ASSERT_TRUE(controls.pins.contains("u3/A"));
       ASSERT_TRUE(controls.pins.contains("u3:A"));
-      for (double fraction : {.1, .2, 1.}) {
-        options.timing_fraction  = fraction;
-        options.timing_smoothing = .25;
-        const auto target        = timing_weights(*actual.parasitics, prects_data_timing(input, controls), fraction);
+      for (double steep : {1.5, 2., 4.}) {
+        options.timing_max_weight = steep;
+        options.timing_smoothing  = .25;
+        const auto target         = timing_weights(*actual.parasitics, prects_data_timing(input, controls), .5, steep);
         actual.net_weights       = state.net_weights;
         refresh_timing_weights(actual, options, input, roles);
         for (const auto& [driver, weight] : actual.net_weights) {
           const auto   found    = target.find(driver);
-          const double expected = found == target.end() || found->second <= 1 ? 1 : .75 * 3 + .25 * found->second;
+          const double expected = found == target.end() ? 1 : .75 * 3 + .25 * found->second;
           EXPECT_DOUBLE_EQ(weight, expected) << driver << " representation=" << representation;
         }
       }
@@ -1955,94 +1909,74 @@ TEST_F(Buffer_repair, FinalRecoveryRejectsElectricalRegressionAndExtraFanout) {
   EXPECT_EQ(calls, 1);  // no eligible bypass trial reaches STA
 }
 
-TEST(Timing_weights, ConfigurableFractionPreservesDefaultAndExcludesUntimedClocks) {
+TEST(Timing_weights, RankCurveWeightsEveryTimedNetAndExcludesUntimedClocks) {
   physical::Parasitics rc;
   Timing_feedback      timing;
-  for (int i = 0; i < 100; ++i) {
-    const auto driver = "d" + std::to_string(i), sink = "s" + std::to_string(i);
-    rc.nets.push_back({
-        driver,
-        {{driver, 0}, {sink, 0}},
-        {}
-    });
-    timing.pins[driver].slack = 1000;
-    timing.pins[sink].slack   = i - 100.;
+  for (int i = 0; i < 101; ++i) {  // slack ordering d0 (worst) .. d100 (best); all negative, spacing irregular
+    const auto driver = "d" + std::to_string(i);
+    rc.nets.push_back({driver, {{driver, 0}}, {}});
+    timing.pins[driver].slack = -1000. + i * i;
   }
   rc.nets.push_back({"clock", {{"clock", 0}}, {}});
-  timing.pins["clock"].slack = -1000;
+  timing.pins["clock"].slack = -5000;
   timing.pins["clock"].clock = true;
   rc.nets.push_back({"untimed", {{"untimed", 0}}, {}});
-  const auto original = timing_weights(rc, timing);
-  EXPECT_EQ(original.size(), 20U);
-  EXPECT_EQ(original, timing_weights(rc, timing, .2));
-  EXPECT_EQ(original.at("d0"), 5);
-  EXPECT_EQ(original.at("d19"), 1);
-  EXPECT_FALSE(original.contains("clock"));
-  EXPECT_FALSE(original.contains("untimed"));
-  for (auto [fraction, count] : {
-           std::pair{  .1,  10U},
-           { .14,  14U},
-           { .29,  29U},
-           {.101,  11U},
-           {.001,   1U},
-           {  1., 100U}
-  }) {
-    const auto weights = timing_weights(rc, timing, fraction);
-    EXPECT_EQ(weights.size(), count);
-    EXPECT_EQ(weights.at("d0"), 5);
-    EXPECT_TRUE(weights.contains("d" + std::to_string(count - 1)));
-    EXPECT_FALSE(weights.contains("d" + std::to_string(count)));
+  const auto w = timing_weights(rc, timing);
+  EXPECT_EQ(w.size(), 101U);  // every timed non-clock net, none dropped by a fraction
+  EXPECT_FALSE(w.contains("clock"));
+  EXPECT_FALSE(w.contains("untimed"));
+  EXPECT_DOUBLE_EQ(w.at("d0"), 2);
+  EXPECT_DOUBLE_EQ(w.at("d50"), 1);  // the median net is exactly 1
+  EXPECT_DOUBLE_EQ(w.at("d100"), .5);
+  EXPECT_NEAR(w.at("d25"), 1.5, 1e-12);  // linear in rank, not in slack
+  EXPECT_NEAR(w.at("d75"), .75, 1e-12);
+  for (int i = 1; i < 101; ++i) {
+    EXPECT_LT(w.at("d" + std::to_string(i)), w.at("d" + std::to_string(i - 1)));  // strictly progressive
   }
-  for (double bad : {0., -.1, 1.01, std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN()}) {
-    EXPECT_THROW(timing_weights(rc, timing, bad), std::invalid_argument);
-  }
-  const auto weaker = timing_weights(rc, timing, .29, 3);
-  EXPECT_EQ(weaker.at("d0"), 3);
-  EXPECT_EQ(weaker.at("d28"), 1);
-  for (const auto& [name, weight] : timing_weights(rc, timing, .29, 1)) {
-    (void)name;
-    EXPECT_EQ(weight, 1);
-  }
-  EXPECT_THROW(timing_weights(rc, timing, .2, .5), std::invalid_argument);
-  EXPECT_THROW(timing_weights(rc, timing, .2, std::numeric_limits<double>::infinity()), std::invalid_argument);
-  const auto cubic = timing_weights(rc, timing, .2, 5, 3);
-  EXPECT_EQ(cubic.size(), original.size());
-  EXPECT_DOUBLE_EQ(cubic.at("d0"), 5);
-  EXPECT_DOUBLE_EQ(cubic.at("d19"), 1);
-  EXPECT_NEAR(cubic.at("d10"), 1 + 4 * std::pow(9. / 19., 3), 1e-12);
-  EXPECT_GT((cubic.at("d1") - 1) / (cubic.at("d10") - 1), 7.9);
-  for (double bad : {0., .5, std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN()}) {
-    EXPECT_THROW(timing_weights(rc, timing, .2, 5, bad), std::invalid_argument);
-  }
-  timing.ranking_only = true;
-  const auto ranks    = timing_weights(rc, timing, .2);
+  // Rank only: a monotone distortion of the slacks (even a sign change) keeps every weight.
   for (auto& [name, pin] : timing.pins) {
     (void)name;
-    if (pin.slack) {
-      // Any monotone distortion preserves ordering, even though ps spacing
-      // changes substantially. Rank weights must therefore remain identical.
-      pin.slack = std::pow(*pin.slack, 3);
-    }
+    pin.slack = std::pow(*pin.slack, 3) + 1e6;
   }
-  EXPECT_EQ(ranks, timing_weights(rc, timing, .2));
-  EXPECT_EQ(timing_weights(rc, timing, .1).size(), 10U);
+  EXPECT_EQ(w, timing_weights(rc, timing));
+  // The step is a setup: 3 / 0.25 and the off switch 1 / 1.
+  const auto steep = timing_weights(rc, timing, .25, 3);
+  EXPECT_DOUBLE_EQ(steep.at("d0"), 3);
+  EXPECT_DOUBLE_EQ(steep.at("d50"), 1);
+  EXPECT_DOUBLE_EQ(steep.at("d100"), .25);
+  for (const auto& [name, weight] : timing_weights(rc, timing, 1, 1)) {
+    (void)name;
+    EXPECT_DOUBLE_EQ(weight, 1);
+  }
+  for (double bad : {0., -.5, 1.01, std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN()}) {
+    EXPECT_THROW(timing_weights(rc, timing, bad, 2), std::invalid_argument);
+  }
+  for (double bad : {.5, 100.5, std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN()}) {
+    EXPECT_THROW(timing_weights(rc, timing, .5, bad), std::invalid_argument);
+  }
 }
-TEST(Timing_weights, EqualSlackSelectionIsIndependentOfInputOrder) {
+TEST(Timing_weights, EqualSlackNetsShareOneWeightIndependentOfInputOrder) {
   physical::Parasitics rc;
   Timing_feedback      timing;
-  timing.ranking_only = true;
   for (int i = 0; i < 100; ++i) {
     const auto driver = std::format("d{:03}", i);
     rc.nets.push_back({driver, {{driver, 0}}, {}});
     timing.pins[driver].slack = -1;
   }
-  for (double fraction : {.01, .1, .2, 1.}) {
-    const auto expected = timing_weights(rc, timing, fraction);
-    EXPECT_EQ(expected.begin()->first, "d000");
-    EXPECT_EQ(expected.rbegin()->first, std::format("d{:03}", expected.size() - 1));
-    std::reverse(rc.nets.begin(), rc.nets.end());
-    EXPECT_EQ(timing_weights(rc, timing, fraction), expected);
+  const auto expected = timing_weights(rc, timing);
+  ASSERT_EQ(expected.size(), 100U);
+  for (const auto& [name, weight] : expected) {
+    (void)name;
+    EXPECT_DOUBLE_EQ(weight, 1);  // all tied: the single mean rank is the median
   }
+  std::reverse(rc.nets.begin(), rc.nets.end());
+  EXPECT_EQ(timing_weights(rc, timing), expected);
+  // One fast net among tied failing nets: the tie keeps the median-or-worse side, the fast net the best weight.
+  timing.pins["d000"].slack = 100;
+  const auto mixed          = timing_weights(rc, timing);
+  EXPECT_DOUBLE_EQ(mixed.at("d000"), .5);
+  EXPECT_GT(mixed.at("d001"), 1);
+  EXPECT_EQ(mixed.at("d001"), mixed.at("d099"));
 }
 TEST_F(Buffer_repair, TimingWeightsExcludeClockNetsAndRevertWorsePlacements) {
   options.bins = 2;

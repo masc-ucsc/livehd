@@ -115,6 +115,8 @@ struct Options {
   std::shared_ptr<const std::vector<Hint_scope>>        metadata_scopes;             // Before timing seed flattens hierarchy.
   bool                                                  metadata_finalized = false;  // Internal macro-to-final handoff.
   std::shared_ptr<Growth_budget>                        growth_budget;
+  double                                                growth_fraction = 0.03;  // synth.place.growth
+  unsigned                                              eval_budget     = 6;     // synth.place.eval_budget
   std::optional<double>                                 density_weight_seed;
   // Shared by copies used for checkpoints, rounds and repair. A new Options
   // starts a new snapshot; changing the input paths creates a new snapshot.
@@ -178,9 +180,8 @@ struct Options {
   int                               fp_timing_interval      = 50;
   double                            fp_timing_movement      = 0;  // RMS bin movement; 0 keeps fixed cadence
   bool                              fp_timing_after_density = false;
-  double                            timing_fraction         = .2;  // worst-slack fraction of timed non-clock nets
-  double                            timing_max_weight = 5, timing_smoothing = .5;
-  double                            timing_exponent             = 1;  // convex criticality curve; 1 preserves linear weights
+  // Rank-based criticality weights over every timed non-clock net: worst slack max_weight, median 1, best min_weight.
+  double                            timing_max_weight = 2, timing_min_weight = .5, timing_smoothing = .5;
   double                            timing_spread_weight        = 0;  // [0,1] protection from extra routing/local spreading
   int                               macro_timing_interval       = 50;
   int                               final_timing_start          = 200;      // GP warm-up before placement STA

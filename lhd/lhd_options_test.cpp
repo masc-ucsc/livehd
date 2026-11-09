@@ -560,6 +560,7 @@ TEST(LhdOptions, RecommendedSharedDefaults) {
            {                          "synth.delay_frac",    "0.4"},
            {                           "synth.partition", "coarse"},
            {                  "synth.place.reset_fanout",     "32"},
+           {                       "synth.place.growth",   "0.03"},
            {            "synth.place.domino_rail_fanout",     "32"},
            {                        "synth.place.resize",   "true"},
            {                "synth.place.buffer_cleanup",  "false"},

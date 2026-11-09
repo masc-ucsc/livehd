@@ -22,10 +22,10 @@ struct Buffer_cleanup {
 };
 Buffer_cleanup                remove_synthesis_buffers(hhds::Graph& source, hhds::GraphLibrary& library, const Options& options);
 Timing_feedback               timing_feedback(std::string_view json);
-std::map<std::string, double> timing_weights(const physical::Parasitics& nets, const Timing_feedback& timing, double fraction = .2,
-                                             double max_weight = 5, double exponent = 1);
-// Keep only current driver identities; nets outside the current timed critical
-// set return immediately to baseline, while current priorities may be smoothed.
+std::map<std::string, double> timing_weights(const physical::Parasitics& nets, const Timing_feedback& timing, double min_weight = .5,
+                                             double max_weight = 2);
+// Every timed non-clock net is weighted by its slack rank (worst max_weight, median 1, best min_weight); nets without
+// timing return to the baseline weight 1, and the weights are smoothed against the previous ones.
 void                          refresh_timing_weights(Result& state, const Options& options, const Timing_feedback& timing);
 // Reuse the unmodified Liberty/control-port roles parsed for this placement
 // invocation. Graph-specific control seeds still come from state.prects.
