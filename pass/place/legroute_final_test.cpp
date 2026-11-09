@@ -1271,7 +1271,19 @@ TEST(LegrouteFinal, CriticalAdjacentJoinLandingsAreExplicitProducerMetal) {
   f.tech.vias["V3_DEF"].is_default = false;
   const auto unsupported           = final_planned_geometry(f.design, f.grid, {}, f.routes);
   EXPECT_TRUE(unsupported.adjacent_join_vias[0].empty());
-  EXPECT_EQ(decode(unsupported.paths[0]), before);
+  // The full flow itself extends risers over the whole node tile, so the baseline is the full-flow geometry with
+  // landings: dropping the DEFAULT via must remove only the landing growth (same shapes, each contained in the grown one,
+  // at least one strictly smaller) and add nothing.
+  const auto without = decode(unsupported.paths[0]);
+  ASSERT_EQ(without.size(), after.size());
+  size_t shrunk = 0;
+  for (size_t k = 0; k < after.size(); ++k) {
+    EXPECT_EQ(without[k].layer, after[k].layer);
+    EXPECT_TRUE(after[k].rect.contains(without[k].rect));
+    EXPECT_TRUE(without[k].rect.contains(before[k].rect) || before[k].layer != without[k].layer);
+    shrunk += without[k].rect != after[k].rect;
+  }
+  EXPECT_GT(shrunk, 0u);
   EXPECT_EQ(f.fp.terminals, original_terminals);
 }
 
