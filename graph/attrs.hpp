@@ -366,6 +366,17 @@ struct mem_address_proven_t {
 };
 inline constexpr mem_address_proven_t mem_address_proven{};
 
+// A flop minted by pass.pcrs for a pipelined network (reset first). The value is
+// the 1-based pipeline level inside its (root, clock domain) tree. Every sink of
+// the tree sits at the same level count, so the network only shifts in time:
+// formal tools treat a tagged flop as a wire, and its depth is a timing choice,
+// not part of the design's meaning. Absence means an ordinary state element.
+struct pcrs_stage_t {
+  using value_type = uint32_t;
+  using storage    = hhds::flat_storage;
+};
+inline constexpr pcrs_stage_t pcrs_stage{};
+
 // On an arithmetic ware graph's input node: canonical specialization
 // descriptor, including every port's width/sign and the section options.
 // Synthesis preserves this boundary; STA/LEC may flatten the implementation.
@@ -540,6 +551,8 @@ inline constexpr Attr_kind attr_kind<legalize_inlined_t> = Attr_kind::node;
 template <>
 inline constexpr Attr_kind attr_kind<mem_address_proven_t> = Attr_kind::node;
 template <>
+inline constexpr Attr_kind attr_kind<pcrs_stage_t> = Attr_kind::node;
+template <>
 inline constexpr Attr_kind attr_kind<comb_reach_t> = Attr_kind::node;
 template <>
 inline constexpr Attr_kind attr_kind<proven_t> = Attr_kind::node;
@@ -623,6 +636,7 @@ inline constexpr bool carry_on_rebuild<route_strings_v1_t> = false;
   X(proven)                         \
   X(runtime_check)                  \
   X(mem_address_proven)             \
+  X(pcrs_stage)                     \
   X(ware_module)                    \
   X(specialization_origin)          \
   X(memory_module)                  \
