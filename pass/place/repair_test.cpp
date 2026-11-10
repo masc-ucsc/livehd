@@ -2342,9 +2342,20 @@ TEST_F(Buffer_repair, GrowthLimitedBatchSpendsHeadroomOnTheMostCriticalDriver) {
     before.pins[name + ":X"].slack   = i == 39 ? -100 : -1;
   }
   // The sizing share of the allowance (3%) of forty equal cells admits one doubled-area drive, not two.
-  for (const bool electrical : {false, true}) {
+  // The one drive goes to the worst setup slack (b39); an electrical violation (b38) decides only among equal
+  // slacks: a critical net can sit inside its driver's ratings and must not queue behind every overloaded one.
+  struct Case {
+    bool        electrical, equal_slack;
+    const char* expected;
+  };
+  for (const auto& [electrical, equal_slack, expected] :
+       {Case{false, false, "b39"}, Case{true, true, "b38"}, Case{true, false, "b39"}}) {
+    SCOPED_TRACE(expected);
     SCOPED_TRACE(electrical);
     auto score                            = before;
+    if (equal_slack) {
+      score.pins["b39:X"].slack = -1;
+    }
     score.electrical_pin_feedback         = electrical;
     score.electrical_excess               = electrical ? 100 : 0;
     score.violations                      = electrical ? 1 : 0;
@@ -2360,7 +2371,7 @@ TEST_F(Buffer_repair, GrowthLimitedBatchSpendsHeadroomOnTheMostCriticalDriver) {
         options,
         [&](const Result& trial) {
           ++calls;
-          const auto selected = electrical ? "b38" : "b39";
+          const std::string selected = expected;
           for (const auto& cell : trial.floorplan.components) {
             EXPECT_EQ(cell.macro, cell.name == selected ? strong : weak);
           }

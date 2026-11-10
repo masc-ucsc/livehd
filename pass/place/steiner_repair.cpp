@@ -252,8 +252,9 @@ Buffer_tree clustered_buffers(Point root, const std::vector<Point>& loads, const
 }  // namespace
 
 namespace {
-// LHD_STEINER_DUMP=<file>: append the inputs of a plan that found no alternative on a net of at least
-// LHD_STEINER_DUMP_LOADS (default 100) loads, so the planner can be replayed offline (steiner_replay).
+// LHD_STEINER_DUMP=<file>: append the inputs of a plan that found no alternative (with LHD_STEINER_DUMP_ALL: of every
+// plan) on a net of at least LHD_STEINER_DUMP_LOADS (default 100) loads, so the planner can be replayed offline
+// (steiner_replay_test).
 void dump_plan_inputs(Point root, const std::vector<Point>& loads, const std::vector<double>& capacitances,
                       const std::vector<double>& required_ps, const std::vector<Buffer_drive>& drives, const Buffer_drive& driver,
                       double r, double c, const Buffer_limits& limits) {
@@ -518,6 +519,10 @@ Buffer_tree plan_buffer_choices(Point root, const std::vector<Point>& loads, con
       continue;
     }
     const double required = packet.required - driver.intrinsic_ps - driver.resistance_ohm * packet.cap * 1e-3;
+    if (trace) {
+      std::fprintf(stderr, "[steiner] %zu loads candidate %zu: scored required %.1f ps, %zu buffers, area %.3f\n", loads.size(), candidate,
+                   required, plan.buffers.size(), packet.area);
+    }
     if (!found || required > best_required + 1e-6 || (std::abs(required - best_required) <= 1e-6 && packet.area < best_area)) {
       best          = std::move(plan);
       best_required = required;
@@ -526,8 +531,10 @@ Buffer_tree plan_buffer_choices(Point root, const std::vector<Point>& loads, con
       found         = true;
     }
   }
-  if (!found) {
+  if (!found || livehd::debug::env<"LHD_STEINER_DUMP_ALL">() != nullptr) {
     dump_plan_inputs(root, loads, capacitances, required_ps, drives, driver, wire_r_ohm_dbu, wire_c_ff_dbu, limits);
+  }
+  if (!found) {
     throw std::runtime_error("no buffer-tree alternative meets driver/load limits");
   }
   return best;

@@ -2706,13 +2706,14 @@ Repair_result repair_buffers(Result initial, const Options& requested, const Eva
           const double slack  = pin == nullptr ? std::numeric_limits<double>::infinity()
                                                : pin->slack.value_or(std::numeric_limits<double>::infinity());
           const double excess = score.electrical_pin_feedback && pin != nullptr ? std::max(0.0, pin->electrical_excess) : 0;
-          return std::pair{-excess, slack};
+          // Setup-violating drivers first, worst slack first; then the rest by electrical excess. The growth
+          // allowance is spent in this order, and a critical net can be inside its driver's cap and slew
+          // ratings: a 115-load net on a BUFx24 has no "excess", so by excess alone it queued behind every net
+          // that had some, critical or not, and the allowance was gone before it was reached (eyeriss, -18 ns).
+          const bool violating = slack < 0;
+          return std::tuple{!violating, violating ? slack : -excess, violating ? -excess : slack};
         };
-        // Repair the largest electrical violations first, then the worst
-        // setup slack. One overloaded source can dominate thousands of paths;
-        // spending all headroom on its downstream gates leaves that load intact.
-        // apply()
-        // admits each complete edit before mutation, so an oversized forest
+        // apply() admits each complete edit before mutation, so an oversized forest
         // cannot discard other useful repairs in the same batch.
         std::stable_sort(selected.begin(), selected.end(), [&](const auto& a, const auto& b) { return priority(a) < priority(b); });
       }
