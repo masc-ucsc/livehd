@@ -35,8 +35,12 @@ struct Growth_budget {
   double        tree_master_um2 = 0;  // the area of the master trees mint (placement sets it; 0: unknown)
   // The area charged against the budget: the cells plus tree-buffer growth.
   double        charged_area(const Physical_size& candidate) const;
-  bool          allows(const Physical_size& candidate) const;
+  // `share` scales the allowance: gate sizing is admitted against sizing_growth_share of it, so it cannot spend the
+  // whole budget before buffer trees reach the high-fanout nets (eyeriss: 0.07 um2 left for a 271-load net).
+  bool          allows(const Physical_size& candidate, double share = 1.0) const;
 };
+// The part of the growth allowance gate sizing may use; buffer insertion may use all of it.
+inline constexpr double sizing_growth_share = 0.6;
 void        initialize_growth_budget(hhds::Graph& source, Options& options);
 bool        growth_admissible(hhds::Graph& source, const Options& options, hhds::Graph* replacement = nullptr,
                               const Master_changes& masters = {});

@@ -51,6 +51,22 @@ TEST(GrowthBudget, SharedNestedColorsUseTheWholeDesignBudget) {
   EXPECT_FALSE(budget.allows(proposed));
   EXPECT_EQ(physical_size(*top, tech).cells, 300U);
 }
+TEST(GrowthBudget, SizingIsAdmittedAgainstItsShareSoBufferTreesKeepHeadroom) {
+  Growth_budget budget;
+  budget.baseline.cells    = 1000;
+  budget.baseline.area_um2 = 1000;
+  budget.fraction          = .10;
+  Physical_size at_five;  // 5% growth in cells and area
+  at_five.cells    = 1050;
+  at_five.area_um2 = 1050;
+  Physical_size at_seven = at_five;  // 7%: above the sizing share (6%), below the whole allowance
+  at_seven.cells    = 1070;
+  at_seven.area_um2 = 1070;
+  EXPECT_TRUE(budget.allows(at_five));
+  EXPECT_TRUE(budget.allows(at_five, sizing_growth_share));
+  EXPECT_TRUE(budget.allows(at_seven));
+  EXPECT_FALSE(budget.allows(at_seven, sizing_growth_share)) << "sizing must stop before the allowance is gone";
+}
 TEST(GrowthBudget, MasterSwapsRespectAreaAndMacrosCannotSubsidizeGrowth) {
   physical::Technology tech;
   for (const auto* name : {"INV", "BIG"}) {

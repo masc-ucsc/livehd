@@ -927,7 +927,7 @@ std::optional<Buffer_tree> apply(hhds::Graph& graph, const Inventory& cells, con
     owned.emplace(graph, placed);
     shared = &*owned;
   }
-  const auto admit_growth = [&](int64_t cells_delta, double area_delta) -> std::optional<Physical_size> {
+  const auto admit_growth = [&](int64_t cells_delta, double area_delta, bool sizing = false) -> std::optional<Physical_size> {
     if (!options.growth_budget) {
       return {};
     }
@@ -937,7 +937,8 @@ std::optional<Buffer_tree> apply(hhds::Graph& graph, const Inventory& cells, con
     auto proposed      = *shared->growth_size;
     proposed.cells     = static_cast<uint64_t>(static_cast<int64_t>(proposed.cells) + cells_delta);
     proposed.area_um2 += area_delta;
-    if (!options.growth_budget->allows(proposed)) {
+    // Sizing may use only part of the allowance: the rest is for the buffer trees that sizing cannot replace.
+    if (!options.growth_budget->allows(proposed, sizing ? sizing_growth_share : 1.0)) {
       ++options.growth_budget->rejected;
       throw std::runtime_error("physical cell/area growth budget exceeded");
     }
@@ -954,7 +955,7 @@ std::optional<Buffer_tree> apply(hhds::Graph& graph, const Inventory& cells, con
   auto        n       = source ? source->pin.get_master_node() : shared->nodes.at(edit.node);
   const auto* current = source ? nullptr : buffer(n, cells);
   if (edit.kind == "resize" || edit.kind == "gate_resize") {
-    const auto proposed = admit_growth(0, master_area(edit.master) - master_area(std::string(n.get_subnode_io()->get_name())));
+    const auto proposed = admit_growth(0, master_area(edit.master) - master_area(std::string(n.get_subnode_io()->get_name())), true);
     change_master(n, *combinational(n, cells), cells.at(edit.master));
     shared->growth_size = proposed;
     return {};

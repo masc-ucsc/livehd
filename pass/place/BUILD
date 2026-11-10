@@ -929,6 +929,18 @@ cc_test(
 )
 
 cc_test(
+    name = "steiner_replay_test",
+    size = "small",
+    srcs = ["steiner_replay_test.cpp"],
+    copts = COPTS,
+    tags = ["manual"],  # a debugging harness: set LHD_STEINER_REPLAY to a LHD_STEINER_DUMP file
+    deps = [
+        ":place",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "reset_tree_test",
     size = "small",
     srcs = ["reset_tree_test.cpp"],

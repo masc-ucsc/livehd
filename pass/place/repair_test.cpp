@@ -2341,7 +2341,7 @@ TEST_F(Buffer_repair, GrowthLimitedBatchSpendsHeadroomOnTheMostCriticalDriver) {
     before.pins[name + ":X"].load_ff = 100;
     before.pins[name + ":X"].slack   = i == 39 ? -100 : -1;
   }
-  // 3% of forty equal cells admits one doubled-area drive, not two.
+  // The sizing share of the allowance (3%) of forty equal cells admits one doubled-area drive, not two.
   for (const bool electrical : {false, true}) {
     SCOPED_TRACE(electrical);
     auto score                            = before;
@@ -2351,6 +2351,7 @@ TEST_F(Buffer_repair, GrowthLimitedBatchSpendsHeadroomOnTheMostCriticalDriver) {
     score.pins["b38:X"].electrical_excess = score.electrical_excess;
     score.pins["b38:X"].violations        = score.violations;
     initialize_growth_budget(*graph, options);
+    options.growth_budget->fraction = .03 / sizing_growth_share;
     hhds::GraphLibrary owner;
     auto               initial  = place(*graph, owner, options);
     unsigned           calls    = 0;

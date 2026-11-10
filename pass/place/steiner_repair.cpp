@@ -3,9 +3,12 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <limits>
 #include <numeric>
 #include <stdexcept>
+
+#include "core/debug_env.hpp"
 namespace livehd::placement {
 Buffer_tree plan_buffers(Point root, const std::vector<Point>& loads, const std::vector<double>& capacitances,
                          double buffer_input_ff, double max_cap_ff, unsigned max_fanout, double max_distance_dbu,
@@ -248,10 +251,55 @@ Buffer_tree clustered_buffers(Point root, const std::vector<Point>& loads, const
 }
 }  // namespace
 
+namespace {
+// LHD_STEINER_DUMP=<file>: append the inputs of a plan that found no alternative on a net of at least
+// LHD_STEINER_DUMP_LOADS (default 100) loads, so the planner can be replayed offline (steiner_replay).
+void dump_plan_inputs(Point root, const std::vector<Point>& loads, const std::vector<double>& capacitances,
+                      const std::vector<double>& required_ps, const std::vector<Buffer_drive>& drives, const Buffer_drive& driver,
+                      double r, double c, const Buffer_limits& limits) {
+  const char* path = livehd::debug::env<"LHD_STEINER_DUMP">();
+  if (path == nullptr) {
+    return;
+  }
+  const char*  min_text = livehd::debug::env<"LHD_STEINER_DUMP_LOADS">();
+  const size_t minimum  = min_text ? std::strtoul(min_text, nullptr, 10) : 100;
+  if (loads.size() < minimum) {
+    return;
+  }
+  std::FILE* f = std::fopen(path, "a");
+  if (f == nullptr) {
+    return;
+  }
+  const auto drive_line = [&](const Buffer_drive& d) {
+    std::fprintf(f, "%.17g %.17g %.17g %u %.17g %.17g %.17g\n", d.input_ff, d.max_cap_ff, d.max_distance_dbu, d.max_fanout,
+                 d.intrinsic_ps, d.resistance_ohm, d.area);
+  };
+  std::fprintf(f, "plan %zu %zu\nroot %.17g %.17g\nwire %.17g %.17g\nlimits %zu %.17g\ndriver\n", loads.size(), drives.size(),
+               root.first, root.second, r, c, limits.cells, limits.area);
+  drive_line(driver);
+  std::fprintf(f, "drives\n");
+  for (const auto& d : drives) {
+    drive_line(d);
+  }
+  std::fprintf(f, "loads\n");
+  for (size_t i = 0; i < loads.size(); ++i) {
+    std::fprintf(f, "%.17g %.17g %.17g %.17g\n", loads[i].first, loads[i].second, capacitances[i], required_ps[i]);
+  }
+  std::fprintf(f, "end\n");
+  std::fclose(f);
+}
+}  // namespace
+
 Buffer_tree plan_buffer_choices(Point root, const std::vector<Point>& loads, const std::vector<double>& capacitances,
                                 const std::vector<double>& required_ps, const std::vector<Buffer_drive>& drives,
                                 const Buffer_drive& driver, double wire_r_ohm_dbu, double wire_c_ff_dbu,
                                 const Buffer_limits& limits) {
+  const bool trace = livehd::debug::env<"LHD_STEINER_TRACE">() != nullptr && loads.size() >= 100;
+  const auto note  = [&](size_t candidate, const char* what, const char* detail = "") {
+    if (trace) {
+      std::fprintf(stderr, "[steiner] %zu loads candidate %zu: %s %s\n", loads.size(), candidate, what, detail);
+    }
+  };
   if (drives.empty() || loads.size() != required_ps.size() || loads.size() != capacitances.size() || !std::isfinite(wire_r_ohm_dbu)
       || wire_r_ohm_dbu < 0) {
     throw std::invalid_argument("invalid buffer-choice model");
@@ -313,7 +361,8 @@ Buffer_tree plan_buffer_choices(Point root, const std::vector<Point>& loads, con
         const auto spatial = candidate - topologies.size() - 2;
         plan               = clustered_buffers(root, loads, capacitances, drives[spatial / 2], wire_c_ff_dbu, spatial % 2 != 0);
       }
-    } catch (const std::runtime_error&) {
+    } catch (const std::runtime_error& error) {
+      note(candidate, "topology failed:", error.what());
       continue;
     }
     struct State {
@@ -405,6 +454,7 @@ Buffer_tree plan_buffer_choices(Point root, const std::vector<Point>& loads, con
           break;
         }
         if (plan.root.size() == 1 && plan.root.front().buffer && plan.buffers[plan.root.front().index].position == root) {
+          note(candidate, "rejected: the root buffer cannot drive its own packet (cap, fanout or distance)");
           viable = false;
           break;
         }
@@ -440,6 +490,10 @@ Buffer_tree plan_buffer_choices(Point root, const std::vector<Point>& loads, con
         }
       }
       if (!selected) {
+        if (trace) {
+          std::fprintf(stderr, "[steiner] %zu loads candidate %zu: no drive fits branch %zu (%zu loads, cap %.1f fF)\n", loads.size(),
+                       candidate, i, branch.loads.size(), packet.cap);
+        }
         viable = false;
         break;
       }
@@ -454,6 +508,10 @@ Buffer_tree plan_buffer_choices(Point root, const std::vector<Point>& loads, con
     const auto [packet, longest] = aggregate(root, plan.root);
     (void)longest;
     if (plan.buffers.size() > limits.cells || packet.area > limits.area + 1e-9 || packet.hpwl > spatial_hpwl_limit + 1e-9) {
+      note(candidate,
+           plan.buffers.size() > limits.cells ? "rejected: growth cell limit"
+           : packet.area > limits.area + 1e-9 ? "rejected: growth area limit"
+                                              : "rejected: spatial wire budget");
       continue;
     }
     const double required = packet.required - driver.intrinsic_ps - driver.resistance_ohm * packet.cap * 1e-3;
@@ -466,6 +524,7 @@ Buffer_tree plan_buffer_choices(Point root, const std::vector<Point>& loads, con
     }
   }
   if (!found) {
+    dump_plan_inputs(root, loads, capacitances, required_ps, drives, driver, wire_r_ohm_dbu, wire_c_ff_dbu, limits);
     throw std::runtime_error("no buffer-tree alternative meets driver/load limits");
   }
   return best;
