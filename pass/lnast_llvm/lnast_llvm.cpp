@@ -3,19 +3,24 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <format>
-#include <chrono>
 #include <fstream>
+#include <future>
 #include <limits>
+#include <map>
 #include <memory>
 #include <optional>
+#include <tuple>
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "cgen_llvm.hpp"
+#include "debug_env.hpp"
 #include "lnast.hpp"
+#include "sim_compile_workers.hpp"
 
 namespace livehd::lnast_llvm {
 
@@ -23,10 +28,11 @@ namespace {
 
 using V = Cgen_llvm::Value;
 using Op = Cgen_llvm::Binary_op;
+using Op_kind = Cgen_llvm::Binary_op;
 
-// LNAST_LLVM_TIME=1 prints where generation time goes (walk vs LLVM) to stderr.
+// LHD_SIM_LNAST_TIME=1 prints where generation time goes (walk vs LLVM) to stderr.
 struct Phase_timer {
-  bool                                  on = std::getenv("LNAST_LLVM_TIME") != nullptr;
+  bool                                  on = livehd::debug::env<"LHD_SIM_LNAST_TIME">() != nullptr;
   std::chrono::steady_clock::time_point t0 = std::chrono::steady_clock::now();
   void lap(const char* what) {
     if (!on) {
@@ -209,6 +215,285 @@ Type type_of_range(const Literal& max, const Literal& min) {
   return t;
 }
 
+// The recorded kernel: the Cgen_llvm calls the LNAST walk makes, kept as data instead of being built
+// at once. One walk of the design then yields every kernel: the tape is pruned to what a kernel
+// publishes (the next state, or the outputs settled after the edge), cut into consecutive intervals
+// -- an interval of a topological order never closes a cycle -- and each interval is replayed into
+// its own Cgen_llvm on a worker, so a large design compiles as many small functions in parallel.
+// A value is its op's index; `V{id, width, unsign}` views it exactly as Cgen_llvm::Value does.
+class Tape {
+public:
+  enum class K : uint8_t {
+    input,            // imm: state location (Tape::locs)
+    constant,         // imm: value
+    constant_words,   // x, n: words_
+    resize,           // a
+    concat,           // x, n: refs_ (most significant lane first)
+    unary_not,        // a
+    reduce_or,        // a
+    count_bits,       // a; imm: count; bop: parity
+    bitfield_insert,  // a: base, b: inserted; imm: lo | hi << 32
+    sign_extend,      // a; imm: sign bit
+    binary,           // bop; a, b
+    mux,              // a: select, b: when false, c: when true
+    array_read,       // imm: array; a: address
+    array_write,      // imm: array; a: enable, b: address, c: data            (side effect)
+    array_clear,      // imm: array; a: condition                              (side effect)
+    loop_begin,       // imm: trip count; width: index bits; x, n: refs_ (carry seeds); c.id: words_ index of `first`
+    loop_index,       // a: its loop_begin
+    loop_phi,         // a: its loop_begin; imm: carry number
+    loop_end,         // a: its loop_begin; x, n: refs_ (carry next values)
+    loop_final,       // a: its loop_end; imm: carry number
+  };
+  static constexpr uint32_t none = std::numeric_limits<uint32_t>::max();
+  struct Ref {
+    uint32_t id     = none;
+    uint32_t width  = 0;
+    bool     unsign = true;
+  };
+  struct Op {
+    K        kind   = K::constant;
+    uint8_t  bop    = 0;
+    bool     unsign = true;
+    uint32_t width  = 0;
+    Ref      a, b, c;
+    uint64_t imm = 0;
+    uint32_t x = 0, n = 0;
+  };
+  struct Array {
+    uint32_t bits = 0;
+    uint64_t size = 0;
+    size_t   loc  = 0;
+  };
+  std::vector<Op>       ops;
+  std::vector<uint64_t> words;
+  std::vector<Ref>      refs;
+  std::vector<Array>    arrays;  // by register index (scalars: size 0)
+  // State is addressed by LOCATION while the tape is recorded and analyzed; the word of each location
+  // is only fixed afterwards (the layout depends on which registers can be written in place).
+  std::vector<size_t>   locs;      // location -> first state word
+  std::vector<uint32_t> loc_bits;  // location -> footprint in bits
+  size_t                new_loc(uint64_t bits) {
+    loc_bits.push_back(static_cast<uint32_t>(bits));
+    locs.push_back(none);
+    return loc_bits.size() - 1;
+  }
+  std::vector<std::pair<uint32_t, uint32_t>> loops;  // outermost loops: [loop_begin, last loop_final or loop_end]
+
+  static Ref  ref(const V& v) { return Ref{static_cast<uint32_t>(v.id), v.width, v.unsign}; }
+  V           value(uint32_t id) const { return V{id, ops[id].width, ops[id].unsign}; }
+  static bool is_free(K k) { return k == K::input || k == K::constant || k == K::constant_words; }
+
+  V input(size_t loc, uint32_t width, bool unsign) {
+    const auto key = std::make_tuple(loc, width, unsign);
+    if (auto it = inputs_.find(key); it != inputs_.end()) {
+      return value(it->second);
+    }
+    Op o;
+    o.kind       = K::input;
+    o.imm        = loc;
+    const auto v = add(o, width, unsign);
+    inputs_.emplace(key, static_cast<uint32_t>(v.id));
+    return v;
+  }
+  V constant(uint32_t width, uint64_t val, bool unsign = true) {
+    const auto key = std::make_tuple(val, width, unsign);
+    if (auto it = constants_.find(key); it != constants_.end()) {
+      return value(it->second);
+    }
+    Op o;
+    o.kind       = K::constant;
+    o.imm        = val;
+    const auto v = add(o, width, unsign);
+    constants_.emplace(key, static_cast<uint32_t>(v.id));
+    return v;
+  }
+  V constant_words(uint32_t width, const std::vector<uint64_t>& w, bool unsign = true) {
+    if (width <= 64) {
+      return constant(width, w.empty() ? 0 : w[0], unsign);
+    }
+    Op o;
+    o.kind = K::constant_words;
+    o.x    = static_cast<uint32_t>(words.size());
+    o.n    = static_cast<uint32_t>(w.size());
+    words.insert(words.end(), w.begin(), w.end());
+    return add(o, width, unsign);
+  }
+  V resize(V v, uint32_t rw, bool ru) {
+    if (v.width == rw && v.unsign == ru) {
+      return v;
+    }
+    Op o;
+    o.kind = K::resize;
+    o.a    = ref(v);
+    return add(o, rw, ru);
+  }
+  V concat(const std::vector<V>& lanes) {
+    Op o;
+    o.kind         = K::concat;
+    o.x            = static_cast<uint32_t>(refs.size());
+    o.n            = static_cast<uint32_t>(lanes.size());
+    uint64_t total = 0;
+    for (const auto& l : lanes) {
+      refs.push_back(ref(l));
+      total += l.width;
+    }
+    return add(o, static_cast<uint32_t>(total), true);
+  }
+  V unary_not(V v, uint32_t rw, bool ru) { return unary(K::unary_not, v, rw, ru, 0); }
+  V reduce_or(V v, uint32_t rw, bool ru) { return unary(K::reduce_or, v, rw, ru, 0); }
+  V count_bits(V v, uint32_t count, uint32_t rw, bool parity) {
+    Op o;
+    o.kind = K::count_bits;
+    o.a    = ref(v);
+    o.imm  = count;
+    o.bop  = parity ? 1 : 0;
+    return add(o, rw, true);
+  }
+  V bitfield_insert(V base, V inserted, uint32_t lo, uint32_t hi, uint32_t rw, bool ru) {
+    Op o;
+    o.kind = K::bitfield_insert;
+    o.a    = ref(base);
+    o.b    = ref(inserted);
+    o.imm  = uint64_t{lo} | (uint64_t{hi} << 32);
+    return add(o, rw, ru);
+  }
+  V sign_extend_from(V v, uint32_t sign_bit, uint32_t rw, bool ru) { return unary(K::sign_extend, v, rw, ru, sign_bit); }
+  V binary(Op_kind op, V l, V r, uint32_t rw, bool ru) {
+    Op o;
+    o.kind = K::binary;
+    o.bop  = static_cast<uint8_t>(op);
+    o.a    = ref(l);
+    o.b    = ref(r);
+    return add(o, rw, ru);
+  }
+  V mux(V sel, V when_false, V when_true, uint32_t rw, bool ru) {
+    Op o;
+    o.kind = K::mux;
+    o.a    = ref(sel);
+    o.b    = ref(when_false);
+    o.c    = ref(when_true);
+    return add(o, rw, ru);
+  }
+  V array_read(size_t array, V address, uint32_t rw, bool ru) {
+    Op o;
+    o.kind = K::array_read;
+    o.imm  = array;
+    o.a    = ref(address);
+    return add(o, rw, ru);
+  }
+  bool array_write(size_t array, V enable, V address, V data) {
+    Op o;
+    o.kind = K::array_write;
+    o.imm  = array;
+    o.a    = ref(enable);
+    o.b    = ref(address);
+    o.c    = ref(data);
+    add(o, 0, true);
+    return true;
+  }
+  bool array_clear_if(size_t array, V condition) {
+    Op o;
+    o.kind = K::array_clear;
+    o.imm  = array;
+    o.a    = ref(condition);
+    add(o, 0, true);
+    return true;
+  }
+  bool loop_begin(uint64_t count, int64_t first, uint32_t index_width, const std::vector<V>& carry_init, V& index,
+                  std::vector<V>& carries) {
+    Op o;
+    o.kind = K::loop_begin;
+    o.imm  = count;
+    o.c.id = static_cast<uint32_t>(words.size());
+    words.push_back(static_cast<uint64_t>(first));
+    o.x = static_cast<uint32_t>(refs.size());
+    o.n = static_cast<uint32_t>(carry_init.size());
+    for (const auto& v : carry_init) {
+      refs.push_back(ref(v));
+    }
+    const auto begin = static_cast<uint32_t>(add(o, index_width, true).id);
+    open_.push_back(begin);
+    Op ix;
+    ix.kind = K::loop_index;
+    ix.a.id = begin;
+    index   = add(ix, index_width, true);
+    carries.clear();
+    for (size_t i = 0; i < carry_init.size(); ++i) {
+      Op ph;
+      ph.kind = K::loop_phi;
+      ph.a.id = begin;
+      ph.imm  = i;
+      carries.push_back(add(ph, carry_init[i].width, carry_init[i].unsign));
+    }
+    return true;
+  }
+  bool loop_end(const std::vector<V>& carry_next, std::vector<V>& carry_final) {
+    if (open_.empty()) {
+      return false;
+    }
+    const auto begin = open_.back();
+    open_.pop_back();
+    Op o;
+    o.kind = K::loop_end;
+    o.a.id = begin;
+    o.x    = static_cast<uint32_t>(refs.size());
+    o.n    = static_cast<uint32_t>(carry_next.size());
+    if (o.n != ops[begin].n) {
+      return false;
+    }
+    for (const auto& v : carry_next) {
+      refs.push_back(ref(v));
+    }
+    const auto end = static_cast<uint32_t>(add(o, 0, true).id);
+    carry_final.clear();
+    for (size_t i = 0; i < carry_next.size(); ++i) {
+      const auto& seed = refs[ops[begin].x + i];
+      Op          fi;
+      fi.kind = K::loop_final;
+      fi.a.id = end;
+      fi.imm  = i;
+      carry_final.push_back(add(fi, seed.width, seed.unsign));
+    }
+    if (open_.empty()) {
+      loops.emplace_back(begin, static_cast<uint32_t>(ops.size() - 1));
+    }
+    return true;
+  }
+  // Every value `o` reads.
+  template <class Fn>
+  void for_each_operand(const Op& o, Fn&& fn) const {
+    for (const Ref* r : {&o.a, &o.b, &o.c}) {
+      if (r->id != none && !(o.kind == K::loop_begin && r == &o.c)) {
+        fn(*r);
+      }
+    }
+    if (o.kind == K::concat || o.kind == K::loop_begin || o.kind == K::loop_end) {
+      for (uint32_t i = 0; i < o.n; ++i) {
+        fn(refs[o.x + i]);
+      }
+    }
+  }
+
+private:
+  V add(Op o, uint32_t width, bool unsign) {
+    o.width  = width;
+    o.unsign = unsign;
+    ops.push_back(o);
+    return V{ops.size() - 1, width, unsign};
+  }
+  V unary(K kind, V v, uint32_t rw, bool ru, uint64_t imm) {
+    Op o;
+    o.kind = kind;
+    o.a    = ref(v);
+    o.imm  = imm;
+    return add(o, rw, ru);
+  }
+  std::map<std::tuple<size_t, uint32_t, bool>, uint32_t>   inputs_;
+  std::map<std::tuple<uint64_t, uint32_t, bool>, uint32_t> constants_;
+  std::vector<uint32_t>                                    open_;
+};
+
 class Gen {
 public:
   Gen(const Lnast& ln, const std::vector<std::shared_ptr<Lnast>>& lib, std::string_view fn) : ln_(&ln), top_ln_(&ln), fn_name_(fn) {
@@ -217,7 +502,7 @@ public:
     }
   }
 
-  Result run(const std::string& dir);
+  Result run(const Sim_objects& out);
 
 private:
   struct Reg_info {
@@ -245,7 +530,7 @@ private:
   const Lnast*     ln_;      // the LNAST of the frame being executed
   const Lnast*     top_ln_;
   std::string      fn_name_;
-  Cgen_llvm*       k_ = nullptr;
+  Tape*                                                     k_ = nullptr;
   std::vector<Reg_info> regs_;
   absl::flat_hash_map<std::string, const Lnast*>            lib_;
   absl::flat_hash_map<std::string, std::unique_ptr<Frame>>  frames_;  // key: instance path
@@ -254,8 +539,6 @@ private:
   absl::flat_hash_map<std::string, Env>                     inst_env_;  // per walk: instance path -> final env
   std::vector<V>                                            cur_, next_;  // per walk register values / next state
   size_t                                   words_ = 0;
-  // memories (kernel-local arrays seeded from the state): array id per register index, rebuilt for every walk
-  std::vector<size_t> arrays_;
   struct Undo {
     Env*                  env;
     std::string           name;
@@ -275,11 +558,9 @@ private:
     log_.push_back({&env, name, it == env.end() ? std::nullopt : std::optional<V>(it->second)});
     env[name] = v;
   }
-  bool                record_ = true;  // false in the settle walk: next-state is not rebuilt
+  static constexpr bool record_ = true;  // one walk: the settled outputs are a replay of the same tape
   V                   path_;           // AND of the enclosing if conditions (width 0: none)
   V                   path_enable() { return path_.width != 0 ? path_ : k_->constant(1, 1, true); }
-  void                start_walk(const std::vector<V>& base);
-  std::vector<V>      walk_base_;  // memory contents at the start of the walk
   size_t              mem_array(const std::string& name, const Env& env) {
     auto it = fr_->reg_idx.find(name);
     if (it == fr_->reg_idx.end() || regs_[it->second].mem_size == 0) {
@@ -287,15 +568,8 @@ private:
     }
     return ensure_array(it->second, env);
   }
-  // The array of memory `idx`: it lives in the state allocation (no seed, no publish); created on first use.
-  size_t ensure_array(size_t idx, const Env&) {
-    if (arrays_[idx] != std::numeric_limits<size_t>::max()) {
-      return arrays_[idx];
-    }
-    const auto& r = regs_[idx];
-    arrays_[idx]  = k_->array_create_in_state(r.field.bits, r.mem_size, r.field.word);
-    return arrays_[idx];
-  }
+  // A memory is addressed by its register index: the array lives in the state allocation (Tape::arrays).
+  size_t ensure_array(size_t idx, const Env&) { return idx; }
 
   // ---- tree helpers ----
   std::vector<Lnast_nid> kids(const Lnast_nid& n) const {
@@ -329,17 +603,15 @@ private:
   void   collect_attrs(Frame& f);
   void   scan_calls(const std::vector<Lnast_nid>& stmts, Frame& f);
   void   finish_frame(Frame& f, const Env& pre, const Env& end);
-  // A register's reset is applied once per distinct reset signal, as one unlikely branch (apply_resets),
-  // not as a select inside every register's next-state cone.
+  // A register's reset is applied by the commit kernel, once per distinct reset signal and as one
+  // unlikely branch, not as a select inside every register's next-state cone.
   struct Reset_item {
-    size_t idx;
-    V      active;  // 1 bit: this register is being reset
-    V      value;   // next state when it is not
-    V      init;
+    size_t  idx;
+    V       active;  // 1 bit: this register is being reset
+    Literal init;
   };
   std::vector<Reset_item> reset_items_;
-  absl::flat_hash_map<std::string, V> reset_active_;  // reset pin name (+ polarity) -> its active condition, this walk
-  void apply_resets();
+  absl::flat_hash_map<std::string, V> reset_active_;  // reset pin name (+ polarity) -> its active condition
   void   run_frame(Frame& f, Env& env);
   void exec_block(const std::vector<Lnast_nid>& stmts, Env& env);
   void exec_if(const std::vector<Lnast_nid>& c, size_t at, Env& env);
@@ -514,6 +786,7 @@ void Gen::collect_attrs(Frame& fr) {
           if (!lit || bit_length(lit->mag) != 0) {
             bail("non-zero memory image");
           }
+          r.initial = *lit;  // an initialized (zero) image: not undefined at power-on
         } else if (key == "reset_pin") {
           if (nm(c[2]) != "false" && nm(c[2]) != "nil") {
             r.reset_pin = nm(c[2]);
@@ -1195,14 +1468,6 @@ void Gen::exec_stmt(const std::vector<Lnast_nid>& stmts, size_t& i, Env& env) {
   i += consumed;
 }
 
-void Gen::start_walk(const std::vector<V>& base) {
-  if (arrays_.size() != regs_.size()) {
-    arrays_.assign(regs_.size(), std::numeric_limits<size_t>::max());
-  }
-  walk_base_ = base;
-  path_      = V{};
-}
-
 Gen::Frame* Gen::build_frame(const Lnast* ln, const std::string& prefix) {
   auto fr    = std::make_unique<Frame>();
   fr->ln     = ln;
@@ -1307,205 +1572,861 @@ void Gen::finish_frame(Frame& f, const Env& pre, const Env& end) {
                                      : k_->binary(Op::ne, *rv, k_->constant(1, 0, true), 1, true))
                  .first;
       }
-      reset_items_.push_back({idx, ai->second, k_->resize(n, r.field.bits, !r.field.sign),
-                              k_->resize(literal(r.initial ? *r.initial : Literal{false, {0}}), r.field.bits, !r.field.sign)});
+      reset_items_.push_back({
+          idx,
+          ai->second,
+          r.initial ? *r.initial : Literal{false, {0}}
+      });
     }
     next_[idx] = k_->resize(n, r.field.bits, !r.field.sign);
   }
 }
 
-void Gen::apply_resets() {
-  // group by condition (one Value id per distinct reset signal and polarity)
-  std::vector<size_t>                           order;
-  absl::flat_hash_map<size_t, std::vector<size_t>> groups;
-  for (size_t i = 0; i < reset_items_.size(); ++i) {
-    auto& g = groups[reset_items_[i].active.id];
-    if (g.empty()) {
-      order.push_back(reset_items_[i].active.id);
+// ---- emission: the tape, pruned and cut, replayed into kernels ----
+
+// What one kernel family computes: the ops it needs, in the order they are emitted, and where its
+// results go.
+// One published result: `value` stored at state location `loc`. A register that keeps its value
+// while a condition holds (`r' = c ? x : r`) is `guarded`: when its next value lands in the register
+// itself (`loc == home`) it is published as `if (guard) r = data`, so a disabled register is not
+// rewritten and one branch serves every register sharing the enable; otherwise as the mux it is.
+struct Root {
+  Tape::Ref value;
+  size_t    loc       = 0;
+  bool      guarded   = false;
+  bool      when_zero = false;  // update while the guard is zero
+  Tape::Ref guard, data, hold;  // `hold`: the register's current value
+  size_t    home   = Tape::none;
+  size_t    kernel = 0;  // the kernel that publishes it
+  template <class Fn>
+  void for_each_operand(Fn&& fn) const {
+    if (guarded) {
+      fn(guard);
+      fn(data);
+    } else {
+      fn(value);
     }
-    g.push_back(i);
   }
-  for (const auto id : order) {
-    const auto&    g = groups.at(id);
-    std::vector<V> values, overrides, results;
-    for (const auto i : g) {
-      values.push_back(reset_items_[i].value);
-      overrides.push_back(reset_items_[i].init);
+};
+
+struct View {
+  std::string           tag;  // file/symbol suffix ("e": edge, "s": settle)
+  std::vector<Root>     roots;
+  std::vector<uint32_t> order;  // the live computed ops, in emission order
+  std::vector<uint32_t> pos;    // per op: its index in `order` (none: not emitted)
+  std::vector<uint32_t> cut;    // kernel k replays order[cut[k], cut[k + 1])
+  std::vector<uint8_t>  spill;  // per op: read by another kernel of this view
+  // The kernel that computes (or, for an input or a constant, may as well publish) `id`.
+  size_t                kernel_of(uint32_t id) const {
+    if (pos[id] == Tape::none || cut.size() < 2) {
+      return 0;
     }
-    if (!k_->unlikely_override(reset_items_[g.front()].active, values, overrides, results)) {
-      bail("register reset");
-    }
-    for (size_t j = 0; j < g.size(); ++j) {
-      next_[reset_items_[g[j]].idx] = results[j];
-    }
+    return static_cast<size_t>(std::upper_bound(cut.begin(), cut.end(), pos[id]) - cut.begin()) - 1;
   }
-  reset_items_.clear();
-  reset_active_.clear();
+  size_t count_live() const { return order.size(); }
+};
+
+struct Kernel_job {
+  std::string name, object;
+  const View* view  = nullptr;
+  size_t      index = 0;
+  uint32_t    begin = 0, end = 0;  // positions in view->order
+};
+
+// The largest number of ops one kernel replays. LLVM's instruction selection and scheduling are
+// superlinear in the size of a basic block, and a kernel is one block: boom as ONE kernel spent 364 s
+// there; in pieces the same code is a few CPU seconds per worker.
+uint32_t chunk_target() {
+  static const uint32_t target = [] {
+    const char* text = livehd::debug::env<"LHD_SIM_LNAST_CHUNK">();  // debug: ops per kernel
+    const auto  n    = text == nullptr ? 0ul : std::strtoul(text, nullptr, 10);
+    return n == 0 ? 3000u : static_cast<uint32_t>(n);
+  }();
+  return target;
 }
 
-Result Gen::run(const std::string& dir) {
+// Emission order: depth first from each result, in the order the results were recorded. The walk
+// records statements in dependency (Kahn) order, which is breadth first: every value of one logic
+// level is computed before any of the next, so nearly everything is live at once and a kernel is
+// mostly spills (dino: 878 of 2,990 instructions touched the stack). Depth first, a value is computed
+// right before the cone that consumes it. Only what a root needs is emitted, so this is also the
+// dead-code pass. A loop is one unit, emitted whole. A memory write (`side_effects`: the edge view)
+// is a root of its own and comes after every read of that memory, as the walk recorded it.
+void order_view(const Tape& t, View& v, bool side_effects) {
+  using K      = Tape::K;
+  const auto n = static_cast<uint32_t>(t.ops.size());
+  v.order.clear();
+  v.pos.assign(n, Tape::none);
+  // unit: an op outside any loop, or a whole outermost loop (named by its loop_begin)
+  std::vector<uint32_t> unit(n);
+  for (uint32_t i = 0; i < n; ++i) {
+    unit[i] = i;
+  }
+  absl::flat_hash_map<uint32_t, uint32_t> loop_last;  // loop_begin -> last op of the loop
+  for (const auto& [lb, le] : t.loops) {
+    loop_last[lb] = le;
+    for (uint32_t j = lb; j <= le; ++j) {
+      unit[j] = lb;
+    }
+  }
+  const auto                                           is_effect = [](K k) { return k == K::array_write || k == K::array_clear; };
+  // Memory order (the edge view): a memory is written in place, so its reads and writes keep the
+  // order they were recorded in. Per array, each write follows the write before it and every live
+  // read recorded since; each read follows the last write recorded before it (a byte-enable write is
+  // a chain of read-modify-writes of one entry: each lane must see the lane before it).
+  std::vector<uint32_t>                                roots;
+  absl::flat_hash_map<uint32_t, std::vector<uint32_t>> after;        // unit -> units it must follow
+  absl::flat_hash_map<uint32_t, std::vector<uint32_t>> after_reads;  // write unit -> earlier reads (if live)
+  if (side_effects) {
+    struct Last {
+      uint32_t              effect = Tape::none;
+      std::vector<uint32_t> reads;
+    };
+    absl::flat_hash_map<uint64_t, Last> last;
+    for (uint32_t i = 0; i < n; ++i) {
+      const auto kind = t.ops[i].kind;
+      if (!is_effect(kind) && kind != K::array_read) {
+        continue;
+      }
+      auto&      l = last[t.ops[i].imm];
+      const auto u = unit[i];
+      if (is_effect(kind)) {
+        roots.push_back(u);
+        if (l.effect != Tape::none && l.effect != u) {
+          after[u].push_back(l.effect);
+        }
+        for (const auto r : l.reads) {
+          if (r != u) {
+            after_reads[u].push_back(r);
+          }
+        }
+        l.reads.clear();
+        l.effect = u;
+      } else {
+        if (l.effect != Tape::none && l.effect != u) {
+          after[u].push_back(l.effect);
+        }
+        l.reads.push_back(u);
+      }
+    }
+  }
+  // the units a unit reads from, or must follow, outside itself (`live`: also the reads a write follows)
+  const auto operands = [&](uint32_t u, std::vector<uint32_t>& out, const std::vector<uint8_t>* live) {
+    out.clear();
+    const auto last = loop_last.contains(u) ? loop_last.at(u) : u;
+    for (uint32_t j = u; j <= last; ++j) {
+      t.for_each_operand(t.ops[j], [&](const Tape::Ref& r) {
+        if (unit[r.id] != u && !Tape::is_free(t.ops[r.id].kind)) {
+          out.push_back(unit[r.id]);
+        }
+      });
+    }
+    if (auto it = after.find(u); it != after.end()) {
+      out.insert(out.end(), it->second.begin(), it->second.end());
+    }
+    if (live != nullptr) {
+      if (auto it = after_reads.find(u); it != after_reads.end()) {
+        for (const auto r : it->second) {
+          if ((*live)[r] != 0) {
+            out.push_back(r);
+          }
+        }
+      }
+    }
+  };
+  for (const auto& root : v.roots) {
+    root.for_each_operand([&](const Tape::Ref& r) { roots.push_back(unit[r.id]); });
+  }
+  std::ranges::sort(roots);
+  roots.erase(std::unique(roots.begin(), roots.end()), roots.end());
+  // What is live, before any ordering: a read nothing consumes is not emitted for its memory's sake.
+  std::vector<uint8_t> live(n, 0);
+  {
+    std::vector<uint32_t> work = roots, ops;
+    while (!work.empty()) {
+      const auto u = work.back();
+      work.pop_back();
+      if (live[u] != 0) {
+        continue;
+      }
+      live[u] = 1;
+      operands(u, ops, nullptr);
+      work.insert(work.end(), ops.begin(), ops.end());
+    }
+  }
+  std::vector<uint8_t> done(n, 0);  // per unit: 1 on the stack, 2 emitted
+  struct Frame {
+    uint32_t              u;
+    std::vector<uint32_t> ops;
+    size_t                next = 0;
+  };
+  std::vector<Frame> stack;
+  for (auto root : roots) {
+    if (done[root] != 0 || Tape::is_free(t.ops[root].kind)) {
+      continue;
+    }
+    stack.push_back({root, {}, 0});
+    operands(root, stack.back().ops, &live);
+    done[root] = 1;
+    while (!stack.empty()) {
+      auto& f = stack.back();
+      if (f.next < f.ops.size()) {
+        const auto child = f.ops[f.next++];
+        if (done[child] == 0) {
+          done[child] = 1;
+          stack.push_back({child, {}, 0});
+          operands(child, stack.back().ops, &live);
+        }
+        continue;
+      }
+      const auto last = loop_last.contains(f.u) ? loop_last.at(f.u) : f.u;
+      for (uint32_t j = f.u; j <= last; ++j) {
+        v.pos[j] = static_cast<uint32_t>(v.order.size());
+        v.order.push_back(j);
+      }
+      done[f.u] = 2;
+      stack.pop_back();
+    }
+  }
+}
+
+void cut_kernels(const Tape& t, View& v) {
+  const auto n = static_cast<uint32_t>(v.order.size());
+  v.cut.clear();
+  v.spill.assign(t.ops.size(), 0);
+  if (n == 0 && v.roots.empty()) {
+    return;
+  }
+  absl::flat_hash_set<uint32_t> loop_tail;  // an op of a loop other than its last one: no cut after it
+  for (const auto& [lb, le] : t.loops) {
+    for (uint32_t j = lb; j < le; ++j) {
+      loop_tail.insert(j);
+    }
+  }
+  v.cut.push_back(0);
+  uint32_t count = 0;
+  for (uint32_t p = 0; p < n; ++p) {
+    if (++count >= chunk_target() && p + 1 < n && !loop_tail.contains(v.order[p])) {
+      v.cut.push_back(p + 1);
+      count = 0;
+    }
+  }
+  v.cut.push_back(n);
+  // A value crosses kernels through a state word: mark what another kernel of this view reads.
+  for (uint32_t p = 0; p < n; ++p) {
+    const auto i    = v.order[p];
+    const auto mine = v.kernel_of(i);
+    t.for_each_operand(t.ops[i], [&](const Tape::Ref& r) {
+      if (!Tape::is_free(t.ops[r.id].kind) && v.kernel_of(r.id) != mine) {
+        v.spill[r.id] = 1;
+      }
+    });
+  }
+  // A result is published by the last kernel that computes one of its operands; the others cross.
+  for (auto& root : v.roots) {
+    root.kernel = 0;
+    root.for_each_operand([&](const Tape::Ref& r) { root.kernel = std::max(root.kernel, v.kernel_of(r.id)); });
+    root.for_each_operand([&](const Tape::Ref& r) {
+      if (!Tape::is_free(t.ops[r.id].kind) && v.kernel_of(r.id) != root.kernel) {
+        v.spill[r.id] = 1;
+      }
+    });
+  }
+}
+
+// Replay order[begin, end) of `view` into one state kernel and write its object. Returns the
+// instruction count; throws Unsupported.
+size_t build_kernel(const Tape& t, const Kernel_job& job, const std::vector<size_t>& slot, size_t words) {
+  const View& v   = *job.view;
+  using K         = Tape::K;
+  const auto here = [&](uint32_t id) { return v.pos[id] != Tape::none && v.pos[id] >= job.begin && v.pos[id] < job.end; };
+  std::vector<Cgen_llvm::State_input>   layout;
+  absl::flat_hash_map<uint32_t, size_t> in_index;
+  const auto                            need = [&](uint32_t id) {
+    const auto& d = t.ops[id];
+    if (d.kind == K::input) {
+      if (in_index.try_emplace(id, layout.size()).second) {
+        layout.push_back({t.locs[d.imm], d.width, d.unsign, 0});
+      }
+    } else if (!Tape::is_free(d.kind) && !here(id)) {
+      if (in_index.try_emplace(id, layout.size()).second) {
+        if (slot[id] == Tape::none) {
+          bail("internal: a value crosses kernels without a state word");
+        }
+        layout.push_back({t.locs[slot[id]], d.width, d.unsign, 0});
+      }
+    }
+  };
+  for (uint32_t p = job.begin; p < job.end; ++p) {
+    t.for_each_operand(t.ops[v.order[p]], [&](const Tape::Ref& r) { need(r.id); });
+  }
+  std::vector<const Root*> my_roots;
+  for (const auto& root : v.roots) {
+    if (root.kernel == job.index) {
+      my_roots.push_back(&root);
+      root.for_each_operand([&](const Tape::Ref& r) { need(r.id); });
+      if (root.guarded && root.loc != root.home) {
+        need(root.hold.id);  // published as the mux: it reads the register
+      }
+    }
+  }
+
+  Cgen_llvm                             k(job.name, Cgen_llvm::State_layout{words, layout});
+  absl::flat_hash_map<uint32_t, V>      map;
+  absl::flat_hash_map<uint64_t, size_t> arrays;
+  for (const auto& [id, index] : in_index) {
+    map[id] = k.input(index);
+  }
+  const auto val = [&](const Tape::Ref& r) {
+    auto it = map.find(r.id);
+    if (it == map.end()) {
+      const auto& d = t.ops[r.id];
+      V           made;
+      if (d.kind == K::constant) {
+        made = k.constant(d.width, d.imm, d.unsign);
+      } else if (d.kind == K::constant_words) {
+        made = k.constant_words(d.width, std::vector<uint64_t>(t.words.begin() + d.x, t.words.begin() + d.x + d.n), d.unsign);
+      } else {
+        bail("internal: a value is read before its definition");
+      }
+      it = map.emplace(r.id, made).first;
+    }
+    return V{it->second.id, r.width, r.unsign};
+  };
+  const auto array_of = [&](uint64_t index) {
+    auto it = arrays.find(index);
+    if (it == arrays.end()) {
+      const auto& a = t.arrays[index];
+      it            = arrays.emplace(index, k.array_create_in_state(a.bits, a.size, t.locs[a.loc])).first;
+    }
+    return it->second;
+  };
+  const auto made = [&](uint32_t id, V value) {
+    if (value.width == 0) {
+      bail(std::format("internal: LLVM lowering of op {} failed", id));
+    }
+    map[id] = value;
+  };
+  for (uint32_t p = job.begin; p < job.end; ++p) {
+    const auto  i = v.order[p];
+    const auto& o = t.ops[i];
+    switch (o.kind) {
+      case K::input:
+      case K::constant:
+      case K::constant_words: break;  // on demand
+      case K::resize        : made(i, k.resize(val(o.a), o.width, o.unsign)); break;
+      case K::concat        : {
+        std::vector<V> lanes;
+        for (uint32_t j = 0; j < o.n; ++j) {
+          lanes.push_back(val(t.refs[o.x + j]));
+        }
+        made(i, k.concat(lanes));
+        break;
+      }
+      case K::unary_not : made(i, k.unary_not(val(o.a), o.width, o.unsign)); break;
+      case K::reduce_or : made(i, k.reduce_or(val(o.a), o.width, o.unsign)); break;
+      case K::count_bits: made(i, k.count_bits(val(o.a), static_cast<uint32_t>(o.imm), o.width, o.bop != 0)); break;
+      case K::bitfield_insert:
+        made(i,
+             k.bitfield_insert(val(o.a),
+                               val(o.b),
+                               static_cast<uint32_t>(o.imm),
+                               static_cast<uint32_t>(o.imm >> 32),
+                               o.width,
+                               o.unsign));
+        break;
+      case K::sign_extend: made(i, k.sign_extend_from(val(o.a), static_cast<uint32_t>(o.imm), o.width, o.unsign)); break;
+      case K::binary     : made(i, k.binary(static_cast<Op>(o.bop), val(o.a), val(o.b), o.width, o.unsign)); break;
+      case K::mux        : made(i, k.mux(val(o.a), val(o.b), val(o.c), o.width, o.unsign)); break;
+      case K::array_read : made(i, k.array_read(array_of(o.imm), val(o.a), o.width, o.unsign)); break;
+      case K::array_write:
+        if (!k.array_write(array_of(o.imm), val(o.a), val(o.b), val(o.c))) {
+          bail("memory write");
+        }
+        break;
+      case K::array_clear:
+        if (!k.array_clear_if(array_of(o.imm), val(o.a))) {
+          bail("memory reset");
+        }
+        break;
+      case K::loop_begin: {
+        // Array base pointers must dominate the body and what follows it (a loop is emitted whole,
+        // in recorded order, so its ops follow here until its loop_end).
+        for (uint32_t q = p; q < job.end && !(t.ops[v.order[q]].kind == K::loop_end && t.ops[v.order[q]].a.id == i); ++q) {
+          const auto& body = t.ops[v.order[q]];
+          if (body.kind == K::array_read || body.kind == K::array_write || body.kind == K::array_clear) {
+            (void)array_of(body.imm);
+          }
+        }
+        std::vector<V> seeds, phis;
+        for (uint32_t j = 0; j < o.n; ++j) {
+          seeds.push_back(val(t.refs[o.x + j]));
+        }
+        V index;
+        if (!k.loop_begin(o.imm, static_cast<int64_t>(t.words[o.c.id]), o.width, seeds, index, phis)) {
+          bail("native loop");
+        }
+        map[i + 1] = index;
+        for (uint32_t j = 0; j < o.n; ++j) {
+          map[i + 2 + j] = phis[j];
+        }
+        break;
+      }
+      case K::loop_index:
+      case K::loop_phi:
+      case K::loop_final: break;  // mapped by their loop_begin / loop_end
+      case K::loop_end  : {
+        std::vector<V> next, fin;
+        for (uint32_t j = 0; j < o.n; ++j) {
+          next.push_back(val(t.refs[o.x + j]));
+        }
+        if (!k.loop_end(next, fin)) {
+          bail("native loop end");
+        }
+        for (uint32_t j = 0; j < o.n; ++j) {
+          map[i + 1 + j] = fin[j];
+        }
+        break;
+      }
+    }
+  }
+  std::string error;
+  for (uint32_t p = job.begin; p < job.end; ++p) {
+    const auto i = v.order[p];
+    if (v.spill[i] != 0) {
+      const auto& d = t.ops[i];
+      if (!k.add_state_output(t.locs[slot[i]], t.locs[slot[i]], val(Tape::Ref{i, d.width, d.unsign}), {}, error)) {
+        bail("kernel boundary value: " + error);
+      }
+    }
+  }
+  for (const auto* root : my_roots) {
+    const auto word = t.locs[root->loc];
+    bool       ok   = false;
+    if (!root->guarded) {
+      ok = k.add_state_output(word, word, val(root->value), {}, error);
+    } else if (root->loc == root->home) {
+      ok = k.add_state_output_if(val(root->guard),
+                                 root->when_zero,
+                                 word,
+                                 k.resize(val(root->data), root->value.width, root->value.unsign),
+                                 error);
+    } else {
+      const V keep = val(root->hold), data = val(root->data);
+      ok = k.add_state_output(word,
+                              word,
+                              k.mux(val(root->guard),
+                                    root->when_zero ? data : keep,
+                                    root->when_zero ? keep : data,
+                                    root->value.width,
+                                    root->value.unsign),
+                              {},
+                              error);
+    }
+    if (!ok) {
+      bail("state output: " + error);
+    }
+  }
+  if (!k.write_object(job.object, error, true, job.object.substr(0, job.object.size() - 1) + "k")) {
+    bail("llvm: " + error);
+  }
+  return k.instruction_count();
+}
+
+Result Gen::run(const Sim_objects& out) {
   Result res;
-  res.function = fn_name_;
   try {
     Phase_timer timer;
     ln_  = top_ln_;
     top_ = build_frame(top_ln_, "");
     timer.lap("collect (decls/attrs/frames)");
     fr_  = top_;
-    for (const auto& r : regs_) {
-      // An asynchronous reset is treated as the synchronous one: every step carries an edge and the
-      // testbench samples after it, so the post-step state is the reset value either way.
-      if (r.initial && r.field.bits > 64 && (r.initial->negative || bit_length(r.initial->mag) > 64) && bit_length(r.initial->mag) != 0) {
-        bail("wide register initial value");
-      }
-    }
 
-    // state layout: non-clock top inputs, then every register (all occurrences), then the top outputs
-    std::vector<Cgen_llvm::State_input> layout_inputs;
-    auto place = [&](Field& f) {
-      f.word = words_;
-      words_ += (f.bits + 63) / 64;
-    };
+    // Every piece of state gets a LOCATION now and a word once the kernels are cut (see the layout
+    // below). A Field's `word` holds its location until then.
+    Tape tape;
     for (auto& f : top_->in) {
       if (!top_->clocks.contains(f.name)) {
-        place(f);
-        layout_inputs.push_back({f.word, f.bits, !f.sign, 0});
+        f.word = tape.new_loc(f.bits);
       }
     }
-    for (auto& r : regs_) {
+    tape.arrays.resize(regs_.size());
+    for (size_t i = 0; i < regs_.size(); ++i) {
+      auto& r = regs_[i];
       if (r.mem_size != 0) {
-        // In-place array layout (Cgen_llvm::array_state_words); the input slot is a placeholder.
-        Field whole = r.field;
-        whole.bits  = static_cast<uint32_t>(Cgen_llvm::array_state_words(r.field.bits, r.mem_size) * 64);
-        place(whole);
-        r.field.word = whole.word;
-        layout_inputs.push_back({whole.word, 1, true, 0});
-        continue;
+        r.field.word   = tape.new_loc(Cgen_llvm::array_state_words(r.field.bits, r.mem_size) * 64);
+        tape.arrays[i] = {r.field.bits, r.mem_size, r.field.word};
+      } else {
+        r.field.word = tape.new_loc(r.field.bits);
       }
-      place(r.field);
-      layout_inputs.push_back({r.field.word, r.field.bits, !r.field.sign, 0});
     }
     for (auto& f : top_->out) {
-      place(f);
+      f.word = tape.new_loc(f.bits);
     }
-    Cgen_llvm kernel(fn_name_, Cgen_llvm::State_layout{words_, layout_inputs});
-    k_ = &kernel;
 
-    size_t slot = 0;
-    Env    top_in;
+    // ---- one walk: next state, memory writes and the output expressions, all on the tape ----
+    k_ = &tape;
+    Env top_in;
     for (const auto& f : top_->in) {
       if (!top_->clocks.contains(f.name)) {
-        top_in[f.name] = k_->input(slot++);
+        top_in[f.name] = tape.input(f.word, f.bits, !f.sign);
       }
     }
-    std::vector<V> base(regs_.size());
+    cur_.assign(regs_.size(), V{});
     for (size_t i = 0; i < regs_.size(); ++i) {
-      base[i] = k_->input(slot + i);
-    }
-    auto walk = [&](const std::vector<V>& cur, bool record) {
-      cur_ = cur;
-      record_ = record;
-      next_.assign(regs_.size(), V{});
-      inst_env_.clear();
-      start_walk(cur);
-      Env env = top_in;
-      for (size_t idx : top_->owned) {
-        if (regs_[idx].mem_size == 0) {
-          env[regs_[idx].local] = cur[idx];
-        }
-      }
-      Env pre = env;
-      ln_     = top_ln_;
-      fr_     = top_;
-      exec_block(top_->stmts, env);
-      if (record) {
-        finish_frame(*top_, pre, env);
-        apply_resets();
-      }
-      return env;
-    };
-    walk(base, true);  // next state of every register from the current state
-    timer.lap("walk A (next state)");
-    const std::vector<V> next = next_;
-    Env                  env_b = walk(next, false);  // outputs settled on the post-edge registers
-    timer.lap("walk B (settled outputs)");
-    for (auto& f : top_->out) {
-      auto it = env_b.find(f.name);
-      if (it == env_b.end()) {
-        bail("output '" + f.name + "' is never assigned");
-      }
-      V           v = k_->resize(it->second, f.bits, !f.sign);
-      std::string error;
-      if (!k_->add_state_output(f.word, f.word, v, {}, error)) {
-        bail("output: " + error);
+      if (regs_[i].mem_size == 0) {
+        cur_[i] = tape.input(regs_[i].field.word, regs_[i].field.bits, !regs_[i].field.sign);
       }
     }
+    next_.assign(regs_.size(), V{});
+    inst_env_.clear();
+    path_   = V{};
+    Env env = top_in;
+    for (size_t idx : top_->owned) {
+      if (regs_[idx].mem_size == 0) {
+        env[regs_[idx].local] = cur_[idx];
+      }
+    }
+    Env pre = env;
+    exec_block(top_->stmts, env);
+    finish_frame(*top_, pre, env);
+    timer.lap("walk");
+
+    View edge, settle;
+    edge.tag                      = "e";
+    settle.tag                    = "s";
+    const bool          no_guards = livehd::debug::env<"LHD_SIM_LNAST_NO_GUARD">() != nullptr;  // debug A/B: plain stores only
+    // A register's next value is stored straight into the register when no later kernel still reads
+    // the old value; otherwise into a pending location the commit kernel copies. Decided once the
+    // kernels are cut: until then every register publishes into a pending location of its own.
+    std::vector<size_t> pending(regs_.size(), Tape::none);
     for (size_t i = 0; i < regs_.size(); ++i) {
-      std::string error;
       if (regs_[i].mem_size != 0) {
         continue;
       }
-      if (next[i].width == 0) {
+      if (next_[i].width == 0) {
         bail("register '" + regs_[i].field.name + "' has no next state");
       }
-      if (!k_->add_state_output(regs_[i].field.word, regs_[i].field.word, next[i], {}, error)) {
-        bail("register: " + error);
+      pending[i] = tape.new_loc(regs_[i].field.bits);
+      Root root;
+      root.value = Tape::ref(next_[i]);
+      root.loc   = pending[i];
+      root.home  = regs_[i].field.word;
+      // `r' = c ? x : r` (either arm): a hold, published under its condition when it lands in place.
+      if (const auto& m = tape.ops[next_[i].id]; m.kind == Tape::K::mux && m.width == next_[i].width && m.unsign == next_[i].unsign
+                                                 && (m.b.id == cur_[i].id) != (m.c.id == cur_[i].id) && !no_guards) {
+        root.guarded   = true;
+        root.when_zero = m.c.id == cur_[i].id;
+        root.guard     = m.a;
+        root.data      = root.when_zero ? m.b : m.c;
+        root.hold      = Tape::ref(cur_[i]);
       }
+      edge.roots.push_back(root);
     }
-    timer.lap("state outputs");
-    std::filesystem::create_directories(dir);
-    std::string error;
-    if (!k_->write_object(dir + "/kernel.o", error)) {
-      bail("llvm: " + error);
+    for (auto& f : top_->out) {
+      auto it = env.find(f.name);
+      if (it == env.end()) {
+        bail("output '" + f.name + "' is never assigned");
+      }
+      Root root;
+      root.value = Tape::ref(tape.resize(it->second, f.bits, !f.sign));
+      root.loc   = f.word;
+      settle.roots.push_back(root);
     }
-    timer.lap("LLVM optimize + codegen");
-    res.instructions = k_->instruction_count();
     k_ = nullptr;
 
-    std::ofstream js(dir + "/kernel.json");
-    auto          dump = [&](const char* key, const std::vector<Field>& v, bool with_init) {
-      js << "  \"" << key << "\": [";
-      for (size_t i = 0; i < v.size(); ++i) {
-        js << (i ? ", " : "") << "{\"name\":\"" << v[i].name << "\",\"bits\":" << v[i].bits << ",\"sign\":" << (v[i].sign ? 1 : 0)
-           << ",\"word\":" << v[i].word;
-        if (with_init) {
-          js << ",\"init\":" << v[i].init;
-        }
-        js << "}";
+    // The commit kernel reads each distinct reset condition: keep those values alive through the edge.
+    std::vector<uint32_t> reset_conditions;
+    for (const auto& item : reset_items_) {
+      const auto id = static_cast<uint32_t>(item.active.id);
+      if (std::ranges::find(reset_conditions, id) == reset_conditions.end()) {
+        reset_conditions.push_back(id);
       }
-      js << "]";
+    }
+    std::vector<size_t> slot(tape.ops.size(), Tape::none);
+    auto                give_slot = [&](uint32_t id) {
+      if (slot[id] == Tape::none && !Tape::is_free(tape.ops[id].kind)) {
+        slot[id] = tape.new_loc(tape.ops[id].width);
+      }
     };
+    for (const auto id : reset_conditions) {
+      give_slot(id);
+      if (slot[id] != Tape::none) {
+        Root root;
+        root.value = Tape::Ref{id, tape.ops[id].width, tape.ops[id].unsign};
+        root.loc   = slot[id];
+        edge.roots.push_back(root);
+      }
+    }
+    order_view(tape, edge, true);
+    order_view(tape, settle, false);
+    cut_kernels(tape, edge);
+    cut_kernels(tape, settle);
+    for (const View* v : {&edge, &settle}) {
+      for (uint32_t i = 0; i < v->spill.size(); ++i) {
+        if (v->spill[i] != 0) {
+          give_slot(i);
+        }
+      }
+    }
+
+    // In place: the kernel that publishes register i's next value is the last edge kernel to read Q(i)
+    // (a kernel loads what it reads before it stores anything).
+    size_t in_place = 0;
+    {
+      const auto kernel_of = [&](uint32_t id) { return static_cast<std::ptrdiff_t>(edge.kernel_of(id)); };
+      absl::flat_hash_map<uint32_t, std::ptrdiff_t> last_reader;  // input op -> last kernel reading it
+      for (const auto i : edge.order) {
+        const auto mine = kernel_of(i);
+        tape.for_each_operand(tape.ops[i], [&](const Tape::Ref& r) {
+          if (tape.ops[r.id].kind == Tape::K::input) {
+            auto& last = last_reader[r.id];
+            last       = std::max<std::ptrdiff_t>(last, mine);
+          }
+        });
+      }
+      absl::flat_hash_map<size_t, std::ptrdiff_t> writer;  // pending location -> the kernel publishing it
+      for (const auto& root : edge.roots) {
+        root.for_each_operand([&](const Tape::Ref& r) {
+          if (tape.ops[r.id].kind == Tape::K::input) {
+            auto& last = last_reader[r.id];
+            last       = std::max<std::ptrdiff_t>(last, static_cast<std::ptrdiff_t>(root.kernel));
+          }
+        });
+        writer[root.loc] = static_cast<std::ptrdiff_t>(root.kernel);
+      }
+      absl::flat_hash_map<size_t, size_t> redirect;  // pending location -> the register's own
+      for (size_t i = 0; i < regs_.size(); ++i) {
+        if (regs_[i].mem_size != 0) {
+          continue;
+        }
+        const auto reader = last_reader.find(static_cast<uint32_t>(cur_[i].id));
+        if (reader == last_reader.end() || reader->second <= writer.at(pending[i])) {
+          redirect[pending[i]] = regs_[i].field.word;
+          pending[i]           = Tape::none;
+          ++in_place;
+        }
+      }
+      for (auto& root : edge.roots) {
+        if (auto it = redirect.find(root.loc); it != redirect.end()) {
+          root.loc = it->second;
+        }
+      }
+    }
+
+    // ---- layout: inputs; registers written in place; the others twice (current, then pending: the
+    // commit is one copy); memories; outputs; the words kernels pass values through ----
+    auto place = [&](size_t loc) {
+      if (tape.locs[loc] == Tape::none) {
+        tape.locs[loc]  = words_;
+        words_         += (tape.loc_bits[loc] + 63) / 64;
+      }
+    };
+    for (auto& f : top_->in) {
+      if (!top_->clocks.contains(f.name)) {
+        place(f.word);
+      }
+    }
+    for (size_t i = 0; i < regs_.size(); ++i) {
+      if (regs_[i].mem_size == 0 && pending[i] == Tape::none) {
+        place(regs_[i].field.word);
+      }
+    }
+    const size_t q_base = words_;
+    for (size_t i = 0; i < regs_.size(); ++i) {
+      if (regs_[i].mem_size == 0 && pending[i] != Tape::none) {
+        place(regs_[i].field.word);
+      }
+    }
+    const size_t q_words = words_ - q_base;
+    const size_t d_base  = words_;
+    for (size_t i = 0; i < regs_.size(); ++i) {
+      if (regs_[i].mem_size == 0 && pending[i] != Tape::none) {
+        place(pending[i]);
+      }
+    }
+    for (size_t loc = 0; loc < tape.locs.size(); ++loc) {
+      place(loc);  // memories, outputs and boundary words, in creation order
+    }
+    for (auto& f : top_->in) {
+      if (!top_->clocks.contains(f.name)) {
+        f.word = tape.locs[f.word];
+      }
+    }
+    for (auto& r : regs_) {
+      r.field.word = tape.locs[r.field.word];
+    }
+    for (auto& f : top_->out) {
+      f.word = tape.locs[f.word];
+    }
+    timer.lap("prune + cut + layout");
+
+    // ---- kernels: replayed and compiled on the shared workers ----
+    const auto              stem = out.object.ends_with(".llvm.o") ? out.object.substr(0, out.object.size() - 7) : out.object;
+    std::vector<Kernel_job> jobs;
+    for (const View* v : {&edge, &settle}) {
+      auto& names = v == &edge ? res.edge_functions : res.settle_functions;
+      for (size_t c = 0; c + 1 < v->cut.size(); ++c) {
+        Kernel_job job;
+        job.name   = std::format("{}_{}{}", out.symbol, v->tag, c);
+        job.object = std::format("{}-{}{}.llvm.o", stem, v->tag, c);
+        job.view   = v;
+        job.index  = c;
+        job.begin  = v->cut[c];
+        job.end    = v->cut[c + 1];
+        names.push_back(job.name);
+        jobs.push_back(std::move(job));
+      }
+    }
+    const size_t words = words_;
+    {
+      livehd::sim::Compile_workers                             workers;
+      std::vector<std::future<std::pair<size_t, std::string>>> running;
+      for (const auto& job : jobs) {
+        running.push_back(workers.submit(
+            [&tape, &job, &slot, words]() -> std::pair<size_t, std::string> {
+              try {
+                return {build_kernel(tape, job, slot, words), {}};
+              } catch (const Unsupported& u) {
+                return {0, u.why};
+              }
+            },
+            std::max<uint64_t>(1, job.end - job.begin)));
+      }
+      std::string failure;
+      for (auto& p : running) {
+        auto [count, why]  = p.get();
+        res.instructions  += count;
+        if (!why.empty() && failure.empty()) {
+          failure = why;
+        }
+      }
+      if (!failure.empty()) {
+        bail(failure);
+      }
+    }
+    for (const auto& job : jobs) {
+      res.objects.push_back(job.object);
+    }
+    timer.lap("kernels (LLVM, parallel)");
+
+    // ---- the commit kernel: next state becomes state; a register in reset takes its initial value ----
+    if (q_words != 0 || !reset_items_.empty()) {
+      std::vector<Cgen_llvm::State_input> layout;
+      for (const auto id : reset_conditions) {
+        const auto& d = tape.ops[id];
+        layout.push_back({tape.locs[d.kind == Tape::K::input ? static_cast<size_t>(d.imm) : slot[id]], d.width, d.unsign, 0});
+      }
+      res.commit_function = out.symbol + "_c";
+      Cgen_llvm      k(res.commit_function, Cgen_llvm::State_layout{words, layout});
+      std::string    error;
+      // The reset conditions were stored by the edge kernels: read them before the copy below.
+      std::vector<V> active;
+      for (size_t i = 0; i < reset_conditions.size(); ++i) {
+        const auto& d = tape.ops[reset_conditions[i]];
+        active.push_back(d.kind == Tape::K::constant ? k.constant(d.width, d.imm, d.unsign) : k.input(i));
+      }
+      if (!k.copy_state(q_base, d_base, q_words, error)) {
+        bail("commit: " + error);
+      }
+      for (size_t i = 0; i < reset_conditions.size(); ++i) {
+        std::vector<std::pair<size_t, V>> stores;
+        for (const auto& item : reset_items_) {
+          if (item.active.id == reset_conditions[i]) {
+            const auto& f = regs_[item.idx].field;
+            stores.emplace_back(f.word, k.constant_words(f.bits, twos_words(item.init, f.bits), !f.sign));
+          }
+        }
+        if (!k.state_store_if(active[i], stores)) {
+          bail("commit: register reset");
+        }
+      }
+      const auto object = stem + "-c.llvm.o";
+      if (!k.write_object(object, error, true, object.substr(0, object.size() - 1) + "k")) {
+        bail("llvm: " + error);
+      }
+      res.instructions += k.instruction_count();
+      res.objects.push_back(object);
+    }
+    timer.lap("commit kernel");
+    if (timer.on) {
+      std::fprintf(
+          stderr,
+          "lnast_llvm: %zu ops (%zu edge, %zu settle live), %zu edge + %zu settle kernels, %zu state words, %zu registers in "
+          "place, %zu words copied at commit\n",
+          tape.ops.size(),
+          edge.count_live(),
+          settle.count_live(),
+          res.edge_functions.size(),
+          res.settle_functions.size(),
+          words,
+          in_place,
+          q_words);
+    }
+
     std::vector<Field> state_inputs;
     for (const auto& f : top_->in) {
       if (!top_->clocks.contains(f.name)) {
         state_inputs.push_back(f);
+      } else {
+        res.clocks.push_back(f.name);
       }
     }
     std::vector<Field> reg_fields;
     for (auto& r : regs_) {
       Field f = r.field;
       if (r.mem_size != 0) {
-        f.bits = static_cast<uint32_t>(Cgen_llvm::array_state_words(r.field.bits, r.mem_size) * 64);
-        f.sign = false;
+        f.entries    = r.mem_size;
+        f.entry_bits = r.field.bits;
+        f.bits       = static_cast<uint32_t>(Cgen_llvm::array_state_words(r.field.bits, r.mem_size) * 64);
+        f.sign       = false;
       }
       if (r.initial) {
-        auto w = twos_words(*r.initial, std::max<uint32_t>(f.bits, 1));
-        f.init = w.empty() ? 0 : w[0];
+        f.has_init = true;
+        if (r.mem_size == 0) {
+          f.init_words = twos_words(*r.initial, std::max<uint32_t>(f.bits, 1));
+          f.init       = f.init_words.empty() ? 0 : f.init_words[0];
+        }
       }
       reg_fields.push_back(f);
     }
-    js << "{\n  \"function\": \"" << fn_name_ << "\",\n  \"words\": " << words_ << ",\n";
-    dump("inputs", state_inputs, false);
-    js << ",\n";
-    dump("outputs", top_->out, false);
-    js << ",\n";
-    dump("regs", reg_fields, true);
-    js << "\n}\n";
+    if (!out.json.empty()) {
+      std::ofstream js(out.json);
+      auto          dump = [&](const char* key, const std::vector<Field>& v, bool with_init) {
+        js << "  \"" << key << "\": [";
+        for (size_t i = 0; i < v.size(); ++i) {
+          js << (i ? ", " : "") << "{\"name\":\"" << v[i].name << "\",\"bits\":" << v[i].bits << ",\"sign\":" << (v[i].sign ? 1 : 0)
+             << ",\"word\":" << v[i].word;
+          if (with_init) {
+            js << ",\"init\":" << v[i].init;
+          }
+          js << "}";
+        }
+        js << "]";
+      };
+      auto list = [&](const char* key, const std::vector<std::string>& v) {
+        js << "  \"" << key << "\": [";
+        for (size_t i = 0; i < v.size(); ++i) {
+          js << (i ? ", " : "") << "\"" << v[i] << "\"";
+        }
+        js << "],\n";
+      };
+      js << "{\n  \"words\": " << words << ",\n  \"commit\": \"" << res.commit_function << "\",\n";
+      list("edge", res.edge_functions);
+      list("settle", res.settle_functions);
+      list("objects", res.objects);
+      dump("inputs", state_inputs, false);
+      js << ",\n";
+      dump("outputs", top_->out, false);
+      js << ",\n";
+      dump("regs", reg_fields, true);
+      js << "\n}\n";
+    }
 
     res.inputs  = state_inputs;
     res.outputs = top_->out;
     res.regs    = reg_fields;
-    res.words   = words_;
+    res.words   = words;
     res.ok      = true;
   } catch (const Unsupported& u) {
     res.ok  = false;
@@ -1516,7 +2437,8 @@ Result Gen::run(const std::string& dir) {
 
 }  // namespace
 
-Result generate(const Lnast& ln, const std::vector<std::shared_ptr<Lnast>>& lib, const std::string& dir) {
+namespace {
+std::string symbol_of(const Lnast& ln) {
   std::string name(ln.get_top_module_name());
   if (name.empty()) {
     name = "top";
@@ -1526,8 +2448,24 @@ Result generate(const Lnast& ln, const std::vector<std::shared_ptr<Lnast>>& lib,
       ch = '_';
     }
   }
-  Gen g(ln, lib, "lnast_" + name + "_step");
-  return g.run(dir);
+  return "lnast_" + name;
+}
+}  // namespace
+
+Result generate(const Lnast& ln, const std::vector<std::shared_ptr<Lnast>>& lib, const std::string& dir) {
+  std::filesystem::create_directories(dir);
+  const auto symbol = symbol_of(ln);
+  Gen        g(ln, lib, symbol);
+  return g.run(Sim_objects{symbol, dir + "/kernel.llvm.o", dir + "/kernel.json"});
+}
+
+Result generate_sim(const Lnast& ln, const std::vector<std::shared_ptr<Lnast>>& lib, const Sim_objects& out) {
+  Sim_objects o = out;
+  if (o.symbol.empty()) {
+    o.symbol = symbol_of(ln);
+  }
+  Gen g(ln, lib, o.symbol);
+  return g.run(o);
 }
 
 }  // namespace livehd::lnast_llvm

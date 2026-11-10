@@ -164,6 +164,10 @@ public:
   // told is unlikely (a reset) with a phi per value: the hot path pays a compare, not a select per register.
   bool                    unlikely_override(Value condition, const std::vector<Value>& values, const std::vector<Value>& overrides,
                                             std::vector<Value>& results);
+  // State ABI: while `condition` is non-zero, store each value into its state word(s), on a branch the
+  // optimizer is told is unlikely (a reset). The stores happen where this is called, so a state copy
+  // made before it (copy_state) is overwritten and nothing is paid when the condition is clear.
+  bool                        state_store_if(Value condition, const std::vector<std::pair<size_t, Value>>& stores);
   bool                    array_write(size_t array, Value enable, Value address, Value data);
   [[nodiscard]] Value     array_read(size_t array, Value address, uint32_t result_width, bool result_unsign);
   [[nodiscard]] Value     array_read_all(size_t array, uint32_t result_width, bool result_unsign);
@@ -250,6 +254,11 @@ public:
   // Compare against `previous_word` (the current-state bank for a pending
   // register), store into `word`, and OR dirty masks when the value changes.
   bool add_state_output(size_t word, size_t previous_word, Value value, const std::vector<Dirty_mask>& dirty, std::string& error);
+  // The same store, performed only while `guard` is non-zero (`when_zero`: only while it is zero): a
+  // register that keeps its value when its enable is off is not rewritten, and what only its new
+  // value needs can sink under the test. Outputs of one guard share one branch, taken after every
+  // unconditional output is stored. No dirty masks: the caller owns change tracking for these.
+  bool add_state_output_if(Value guard, bool when_zero, size_t word, Value value, std::string& error);
   // Phase-barrier copy. Source and destination spans must not overlap.
   bool copy_state(size_t destination, size_t source, size_t words, std::string& error);
 

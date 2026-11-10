@@ -5,14 +5,25 @@ load("//tools:copt_default.bzl", "COPTS")
 
 cc_library(
     name = "lnast_llvm",
-    srcs = ["lnast_llvm.cpp"],
-    hdrs = ["lnast_llvm.hpp"],
+    srcs = [
+        "lnast_llvm.cpp",
+        "lnast_sim.cpp",
+    ],
+    hdrs = [
+        "lnast_llvm.hpp",
+        "lnast_sim.hpp",
+        "lnast_sim_rt.hpp",
+    ],
     copts = COPTS,
     includes = ["."],
     visibility = ["//visibility:public"],
     deps = [
+        "//core",
+        "//core:file_name",
+        "//graph",
         "//inou/cgen:inou_cgen",
         "//lnast",
+        "//pass/lg2lnast:pass_lg2lnast",
         "@abseil-cpp//absl/container:flat_hash_map",
         "@abseil-cpp//absl/container:flat_hash_set",
     ],

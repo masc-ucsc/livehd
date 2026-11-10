@@ -1866,9 +1866,15 @@ Pass_lg2lnast::Pass_lg2lnast(const Eprp_var& var) : Pass("pass.lg2lnast", var) {
 
 void Pass_lg2lnast::work(Eprp_var& var) {
   Pass_lg2lnast p(var);
+  (void)lower(var.graphs, var.get("passes"), var.lnasts);
+}
+
+bool Pass_lg2lnast::lower(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, std::string_view passes,
+                          std::vector<std::shared_ptr<Lnast>>& lnasts, std::vector<std::pair<std::string, std::string>>* skipped,
+                          bool warn) {
   // A compact-loop body is lowered inline into its caller (a `for`); on its own it is not a module.
   absl::flat_hash_set<std::string> loop_bodies;
-  for (const auto& g : var.graphs) {
+  for (const auto& g : graphs) {
     if (!g) {
       continue;
     }
@@ -1880,7 +1886,7 @@ void Pass_lg2lnast::work(Eprp_var& var) {
       }
     }
   }
-  for (const auto& g : var.graphs) {
+  for (const auto& g : graphs) {
     if (!g || loop_bodies.contains(std::string(g->get_name()))) {
       continue;
     }
@@ -1912,25 +1918,31 @@ void Pass_lg2lnast::work(Eprp_var& var) {
       }
     }
     Lowering lw(*g);
-    // `passes` label: comma separated stream passes (lnast/lnast_stream.hpp) run on the
+    // `passes`: comma separated stream passes (lnast/lnast_stream.hpp) run on the
     // statements as they are produced; the output is what the last one forwards.
     livehd::lnast_stream::Chain     chain;
     livehd::lnast_stream::Tree_sink tree;
     std::string                     chain_error;
-    if (!livehd::lnast_stream::parse_chain(std::string(var.get("passes")), chain, chain_error)) {
+    if (!livehd::lnast_stream::parse_chain(std::string(passes), chain, chain_error)) {
       livehd::diag::warn("pass.lg2lnast", "bad-passes", "unsupported").msg("{}", chain_error).emit();
-      return;
+      return false;
     }
     auto ln = chain.empty() ? lw.run() : lw.run(&chain.link(tree));
     if (ln && !chain.empty()) {
       ln = tree.result();
     }
     if (!ln) {
-      livehd::diag::warn("pass.lg2lnast", "graph-skipped", "unsupported")
-          .msg("graph {} skipped: {}", std::string(g->get_name()), lw.why)
-          .emit();
+      if (skipped != nullptr) {
+        skipped->emplace_back(std::string(g->get_name()), lw.why);
+      }
+      if (warn) {
+        livehd::diag::warn("pass.lg2lnast", "graph-skipped", "unsupported")
+            .msg("graph {} skipped: {}", std::string(g->get_name()), lw.why)
+            .emit();
+      }
       continue;
     }
-    var.lnasts.push_back(std::move(ln));
+    lnasts.push_back(std::move(ln));
   }
+  return true;
 }

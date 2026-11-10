@@ -9,13 +9,9 @@
 
 class Lnast;
 
-// Milestone 3 prototype (pass/lg2lnast/README.md): generate a native LLVM state
-// kernel straight from ONE typed LNAST function (what pass.lg2lnast emits: every
-// statement result carries a type_spec from the proven range), without going
-// through the lgraph cgen/color pipeline. The kernel is `void step(uint64_t*
-// state, void**)` built with Cgen_llvm: it reads the inputs and registers from
-// `state`, publishes the post-edge registers and the outputs settled on them
-// (what `lhd sim`'s `step` shows a testbench).
+// Generate native LLVM state kernels straight from the typed LNAST pass.lg2lnast emits (every
+// statement result carries a type_spec from the proven range), without going through the lgraph
+// cgen/color pipeline (pass/lg2lnast/README.md).
 namespace livehd::lnast_llvm {
 
 struct Field {
@@ -24,19 +20,46 @@ struct Field {
   bool        sign   = false;  // signed carrier (min < 0)
   size_t      word   = 0;      // first state word (little endian, whole words)
   uint64_t    init   = 0;      // registers: power-on value (low word)
+  // Registers only. `has_init`: the register declares an initial/reset value (`init_words`, two's
+  // complement over `bits`, little endian). `entries` > 0: a memory of that many entries of
+  // `entry_bits` bits each, stored in the natural layout (Cgen_llvm::array_state_words); `bits` is
+  // then the whole footprint.
+  bool                  has_init = false;
+  std::vector<uint64_t> init_words;
+  uint64_t              entries    = 0;
+  uint32_t              entry_bits = 0;
 };
 
+// The generated simulator: a list of state kernels `void k(uint64_t* state, void**)` over one flat
+// state allocation of `words` 64-bit words. One clock period is: write the inputs, call every
+// `edge_functions` kernel in order (the next state, memory writes), then `commit_function` (when not
+// empty: the registers take their next value, or their reset value), then every `settle_functions`
+// kernel in order (the outputs, settled on the new state). The settle kernels alone settle the
+// outputs on the current state without an edge (power-on, a loaded checkpoint).
 struct Result {
   bool                      ok = false;
   std::string               why;  // first unsupported construct (ok == false)
-  std::string               function;
+  std::vector<std::string>  edge_functions, settle_functions;
+  std::string               commit_function;
+  std::vector<std::string>  objects;  // every native object written
   std::vector<Field>        inputs, outputs, regs;
+  std::vector<std::string>  clocks;  // top inputs that are clocks (no state word)
   size_t                    words = 0;
   size_t                    instructions = 0;
 };
 
-// Builds the kernel and writes `<dir>/kernel.o` and `<dir>/kernel.json` (field
-// layout for the driver). `lib` holds every lowered module (instances are inlined).
+// Writes `<dir>/kernel*.llvm.o` and `<dir>/kernel.json` (the layout and the kernel lists, for
+// lnast_llvm_run). `lib` holds every lowered module (instances are inlined).
 Result generate(const Lnast& ln, const std::vector<std::shared_ptr<Lnast>>& lib, const std::string& dir);
+
+// The `lhd sim` form. `object` is the path stem of the objects: `<stem minus .llvm.o>-e<N>.llvm.o`
+// (edge), `-c.llvm.o` (commit) and `-s<N>.llvm.o` (settle); kernels are named `<symbol>_e<N>` and so
+// on. `json`: optional layout file.
+struct Sim_objects {
+  std::string symbol;
+  std::string object;
+  std::string json;
+};
+Result generate_sim(const Lnast& ln, const std::vector<std::shared_ptr<Lnast>>& lib, const Sim_objects& out);
 
 }  // namespace livehd::lnast_llvm

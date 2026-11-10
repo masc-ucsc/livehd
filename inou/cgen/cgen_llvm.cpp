@@ -1398,6 +1398,13 @@ public:
   size_t                                  state_words  = 0;
   uint64_t                                unroll_extra = 0;  // see kUnrolledExtra
   std::vector<State_output>               state_outputs;
+  struct Guarded_output {
+    Value  guard;
+    bool   when_zero = false;
+    size_t word      = 0;
+    Value  value;
+  };
+  std::vector<Guarded_output>             guarded_outputs;
   std::unordered_map<std::string, Memory> memories;
 
   Impl(std::string_view function_name, const std::vector<std::pair<uint32_t, bool>>& input_desc, bool use_scalar_abi,
@@ -2750,6 +2757,43 @@ size_t Cgen_llvm::array_create_in_state(uint32_t bits, uint64_t size, size_t wor
   return impl_->arrays.size() - 1;
 }
 
+bool Cgen_llvm::state_store_if(Value condition, const std::vector<std::pair<size_t, Value>>& stores) {
+  if (!impl_->state_abi || condition.width == 0) {
+    impl_->error = "state_store_if needs the state ABI and a condition";
+    return false;
+  }
+  if (stores.empty()) {
+    return true;
+  }
+  auto&                     b = impl_->builder;
+  std::vector<llvm::Value*> values;
+  for (const auto& [word, value] : stores) {
+    auto* v = impl_->get(value);
+    if (v == nullptr || value.width == 0 || word > impl_->state_words || word_count(value.width) > impl_->state_words - word) {
+      impl_->error = "state_store_if value is outside the state allocation";
+      return false;
+    }
+    values.push_back(v);  // materialized before the branch: a later use must be dominated
+  }
+  auto* cond = impl_->get(condition);
+  if (cond == nullptr) {
+    return false;
+  }
+  auto* active = b.CreateICmpNE(cond, llvm::ConstantInt::get(cond->getType(), 0));
+  auto* fn     = b.GetInsertBlock()->getParent();
+  auto* cold   = llvm::BasicBlock::Create(impl_->context, "state.reset", fn);
+  auto* cont   = llvm::BasicBlock::Create(impl_->context, "state.cont", fn);
+  b.CreateCondBr(active, cold, cont, llvm::MDBuilder(impl_->context).createBranchWeights(1, 2000));  // reset: rare
+  b.SetInsertPoint(cold);
+  for (size_t i = 0; i < stores.size(); ++i) {
+    const auto& [word, value] = stores[i];
+    impl_->store_packed(values[i], impl_->outputs, word, value.width);  // whole words, as add_state_output publishes
+  }
+  b.CreateBr(cont);
+  b.SetInsertPoint(cont);
+  return true;
+}
+
 bool Cgen_llvm::array_clear_if(size_t array, Value condition) {
   if (array >= impl_->arrays.size() || condition.width == 0) {
     return false;
@@ -3275,6 +3319,16 @@ bool Cgen_llvm::add_state_output(size_t word, size_t previous_word, Value value,
   return true;
 }
 
+bool Cgen_llvm::add_state_output_if(Value guard, bool when_zero, size_t word, Value value, std::string& error) {
+  if (!impl_->state_abi || value.width == 0 || guard.width == 0 || word > impl_->state_words
+      || word_count(value.width) > impl_->state_words - word || impl_->get(value) == nullptr || impl_->get(guard) == nullptr) {
+    error = "invalid guarded LLVM state output";
+    return false;
+  }
+  impl_->guarded_outputs.push_back({guard, when_zero, word, value});
+  return true;
+}
+
 bool Cgen_llvm::copy_state(size_t destination, size_t source, size_t words, std::string& error) {
   if (!impl_->state_abi || destination > impl_->state_words || source > impl_->state_words
       || words > impl_->state_words - destination || words > impl_->state_words - source
@@ -3289,11 +3343,38 @@ bool Cgen_llvm::copy_state(size_t destination, size_t source, size_t words, std:
     error = "LLVM state copy spans overlap";
     return false;
   }
-  impl_->builder.CreateMemCpy(impl_->word_ptr(impl_->outputs, destination),
-                              llvm::Align(8),
-                              impl_->word_ptr(impl_->inputs, source),
-                              llvm::Align(8),
-                              words * sizeof(uint64_t));
+  // Word loads and stores, not llvm.memcpy: write_module expands every memory intrinsic into a loop
+  // (an object may not call libc), and that expansion copies BYTE by byte -- a 46-word register bank
+  // cost 368 load/store pairs per clock. Short copies are straight-line (the backend merges
+  // neighbours into vector moves); long ones are a word loop the vectorizer may widen.
+  auto& b   = impl_->builder;
+  auto* i64 = b.getInt64Ty();
+  auto* dst = impl_->word_ptr(impl_->outputs, destination);
+  auto* src = impl_->word_ptr(impl_->inputs, source);
+  if (words <= 32) {
+    std::vector<llvm::Value*> loaded;
+    for (size_t w = 0; w < words; ++w) {
+      loaded.push_back(b.CreateAlignedLoad(i64, b.CreateConstInBoundsGEP1_64(i64, src, w), llvm::Align(8)));
+    }
+    for (size_t w = 0; w < words; ++w) {
+      b.CreateAlignedStore(loaded[w], b.CreateConstInBoundsGEP1_64(i64, dst, w), llvm::Align(8));
+    }
+    return true;
+  }
+  auto* pre  = b.GetInsertBlock();
+  auto* fn   = pre->getParent();
+  auto* loop = llvm::BasicBlock::Create(impl_->context, "copy", fn);
+  auto* done = llvm::BasicBlock::Create(impl_->context, "copy.done", fn);
+  b.CreateBr(loop);
+  b.SetInsertPoint(loop);
+  auto* index = b.CreatePHI(i64, 2, "copy.i");
+  index->addIncoming(b.getInt64(0), pre);
+  auto* word = b.CreateAlignedLoad(i64, b.CreateInBoundsGEP(i64, src, index), llvm::Align(8));
+  b.CreateAlignedStore(word, b.CreateInBoundsGEP(i64, dst, index), llvm::Align(8));
+  auto* next = b.CreateAdd(index, b.getInt64(1), "", true, true);
+  index->addIncoming(next, loop);
+  b.CreateCondBr(b.CreateICmpULT(next, b.getInt64(words)), loop, done);
+  b.SetInsertPoint(done);
   return true;
 }
 
@@ -3428,6 +3509,38 @@ bool Cgen_llvm::seal(std::string& error, bool track_changed) {
       auto* ptr = impl_->word_ptr(impl_->outputs, word);
       auto* old = impl_->builder.CreateLoad(impl_->builder.getInt64Ty(), ptr);
       impl_->builder.CreateStore(impl_->builder.CreateOr(old, bits), ptr);
+    }
+    // Guarded outputs: one branch per distinct guard, in first-use order. Every value was
+    // materialized when its output was added, so the blocks below hold stores only.
+    {
+      auto&                                                  b = impl_->builder;
+      std::vector<std::pair<size_t, bool>>                   guards;  // (guard value id, polarity), first use order
+      std::map<std::pair<size_t, bool>, std::vector<size_t>> members;
+      for (size_t i = 0; i < impl_->guarded_outputs.size(); ++i) {
+        const auto& g   = impl_->guarded_outputs[i];
+        const auto  key = std::pair{g.guard.id, g.when_zero};
+        if (!members.contains(key)) {
+          guards.push_back(key);
+        }
+        members[key].push_back(i);
+      }
+      for (const auto& key : guards) {
+        const auto& first = impl_->guarded_outputs[members[key].front()];
+        auto*       cond  = impl_->get(first.guard);
+        auto*       zero  = llvm::ConstantInt::get(cond->getType(), 0);
+        auto*       taken = first.when_zero ? b.CreateICmpEQ(cond, zero) : b.CreateICmpNE(cond, zero);
+        auto*       fn    = b.GetInsertBlock()->getParent();
+        auto*       then  = llvm::BasicBlock::Create(impl_->context, "state.update", fn);
+        auto*       cont  = llvm::BasicBlock::Create(impl_->context, "state.keep", fn);
+        b.CreateCondBr(taken, then, cont);
+        b.SetInsertPoint(then);
+        for (const auto index : members[key]) {
+          const auto& g = impl_->guarded_outputs[index];
+          impl_->store_packed(impl_->get(g.value), impl_->outputs, g.word, g.value.width);
+        }
+        b.CreateBr(cont);
+        b.SetInsertPoint(cont);
+      }
     }
     impl_->builder.CreateRetVoid();
   } else if (impl_->scalar_abi) {

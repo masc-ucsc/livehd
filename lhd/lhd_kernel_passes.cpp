@@ -1170,7 +1170,7 @@ void pass_command(Options& opts, Result& res) {
     emit_lnast_dump_outputs(var.lnasts, opts, res);
   } else if (sub == "lnast-llvm") {
     // M3 prototype (pass/lg2lnast/README.md): lg -> typed LNAST -> native LLVM state kernel,
-    // written to the `sim:` emit dir as kernel.o + kernel.json (run it with lnast_llvm_run).
+    // written to the `sim:` emit dir as kernel*.llvm.o + kernel.json (run it with lnast_llvm_run).
     Eprp_var var;
     load_lg_into_var(lg_in, var);
     if (var.graphs.empty()) {
@@ -1184,7 +1184,9 @@ void pass_command(Options& opts, Result& res) {
     }
     const auto* sim_out = find_slot(opts.emit_dirs, "sim");
     if (sim_out == nullptr) {
-      throw Lhd_error{"usage", "pass lnast-llvm needs --emit-dir sim:DIR", "the directory receives kernel.o and kernel.json"};
+      throw Lhd_error{"usage",
+                      "pass lnast-llvm needs --emit-dir sim:DIR",
+                      "the directory receives the kernel objects and kernel.json"};
     }
     std::shared_ptr<Lnast> pick;
     for (const auto& ln : var.lnasts) {
@@ -1200,7 +1202,12 @@ void pass_command(Options& opts, Result& res) {
     if (!gen.ok) {
       throw Lhd_error{"unsupported", std::format("pass lnast-llvm: {}", gen.why), "the typed LNAST uses a construct the prototype generator does not cover"};
     }
-    std::print(stderr, "lnast-llvm: {} words, {} instructions -> {}/kernel.o\n", gen.words, gen.instructions, sim_out->path);
+    std::print(stderr,
+               "lnast-llvm: {} words, {} instructions, {} kernels -> {}/kernel.json\n",
+               gen.words,
+               gen.instructions,
+               gen.objects.size(),
+               sim_out->path);
     res.outputs.push_back(sim_out->path);
   } else if (sub == "analyze") {
     // READ-ONLY diagnosis. Deliberately emits no lg: — it exists to survey a

@@ -1,5 +1,5 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
-// lnast_llvm_run DIR CYCLES: load DIR/kernel.o (+ kernel.json) and print one
+// lnast_llvm_run DIR CYCLES: load the kernel objects DIR/kernel.json lists and print one
 // `TRACE <cycle> name=value ...` line per cycle, driven by the same closed-form
 // stimulus the Pyrope testbench uses:
 //   input i, cycle c:  (((c+1)*P_i + (c+1)*(c+1)*Q_i) >> 3) masked to the width
@@ -123,20 +123,57 @@ int main(int argc, char** argv) {
   auto              regs   = parse_list(js, "regs");
   auto              pos    = js.find("\"words\":");
   const size_t      words  = std::strtoull(js.c_str() + pos + 8, nullptr, 10);
-  auto              fp     = js.find("\"function\": \"") + 13;
-  const std::string fn     = js.substr(fp, js.find('"', fp) - fp);
+  // "key": ["a", "b"] (and "commit": "name")
+  const auto        strings = [&](const std::string& key) {
+    std::vector<std::string> out;
+    auto                     at = js.find("\"" + key + "\":");
+    if (at == std::string::npos) {
+      return out;
+    }
+    at               = js.find_first_of("[\"", at + key.size() + 3);
+    const bool list  = js[at] == '[';
+    const auto close = list ? js.find(']', at) : js.find('"', at + 1) + 1;
+    for (auto q = js.find('"', at); q != std::string::npos && q < close; q = js.find('"', q + 1)) {
+      const auto e = js.find('"', q + 1);
+      if (e > q + 1) {
+        out.push_back(js.substr(q + 1, e - q - 1));
+      }
+      q = e;
+    }
+    return out;
+  };
 
   livehd::sim::Native_objects objects;
   std::string                 error;
-  if (!objects.load(dir + "/kernel.o", error)) {
-    std::fprintf(stderr, "load: %s\n", error.c_str());
+  for (const auto& object : strings("objects")) {
+    if (!objects.load(object, error)) {
+      std::fprintf(stderr, "load %s: %s\n", object.c_str(), error.c_str());
+      return 1;
+    }
+  }
+  std::vector<livehd::sim::Native_function> edge, settle;
+  const auto                                resolve = [&](const std::string& key, std::vector<livehd::sim::Native_function>& into) {
+    for (const auto& fn : strings(key)) {
+      auto entry = objects.lookup(fn, error);
+      if (entry == nullptr) {
+        std::fprintf(stderr, "lookup %s: %s\n", fn.c_str(), error.c_str());
+        return false;
+      }
+      into.push_back(entry);
+    }
+    return true;
+  };
+  if (!resolve("edge", edge) || !resolve("commit", edge) || !resolve("settle", settle)) {
     return 1;
   }
-  auto entry = objects.lookup(fn, error);
-  if (entry == nullptr) {
-    std::fprintf(stderr, "lookup %s: %s\n", fn.c_str(), error.c_str());
-    return 1;
-  }
+  const auto entry = [&](uint64_t* state, void** resources) {
+    for (auto fn : edge) {
+      fn(state, resources);
+    }
+    for (auto fn : settle) {
+      fn(state, resources);
+    }
+  };
   const char*           dump = std::getenv("LNAST_LLVM_DUMP");
   // LNAST_LLVM_EVERY=N: print only cycles with c % N == N-1 (speed runs; the testbench matches).
   const uint64_t every = std::getenv("LNAST_LLVM_EVERY") != nullptr ? std::strtoull(std::getenv("LNAST_LLVM_EVERY"), nullptr, 10) : 1;

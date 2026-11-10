@@ -81,42 +81,69 @@ and `lgassert` markers are skipped. Known gaps: non-zero initial images, several
 forwarding/undefined orderings; Latch, Clock_cell, n-ary Mux/compare, LUT, compact loops with a break/continue or
 an activation, or a state element in the body.
 
-## Milestone 3 prototype: LLVM straight from the typed LNAST
+## Milestone 3: LLVM straight from the typed LNAST
 
-`pass/lnast_llvm` (`lhd pass lnast-llvm --top T lg:IN --emit-dir sim:OUT`) lowers
-the LNAST this pass emits (typed statement results, `if`/`unique_if`, registers
-with `attr_set` clock/reset, memories, `fcall` instances) to one native state
-kernel built with `Cgen_llvm`, with no lgraph, color plan or cgen_sim involved:
-`void step(uint64_t* state, void**)` reads the inputs and registers from `state`,
-publishes the post-edge registers and the outputs settled on them (what a
-testbench sees after `step`). Instances are inlined with their own register and
-memory state (instance-path names); `if` arms merge by `mux`; memory writes carry
-the path condition as the write enable (kernel-local arrays seeded from the state
-and published whole, so a large memory costs O(size) per step: prototype only).
-An asynchronous reset is evaluated like the synchronous one (every step has an
-edge and the testbench samples after it). Reset is kept out of the hot path: a
-register's next state is computed without it, and the registers of each distinct
-reset signal take their initial values in ONE branch marked unlikely
-(`Cgen_llvm::unlikely_override`, a phi per register; the memory clear is an unlikely
-branch too). The hot path pays a compare and a not-taken branch, not a select per
-register; the reset block is placed out of line by LLVM.
+`pass/lnast_llvm` lowers the LNAST this pass emits (typed statement results, `if`/`unique_if`,
+registers with `attr_set` clock/reset, memories, `fcall` instances) to native state kernels built with
+`Cgen_llvm`, with no lgraph, color plan or cgen_sim involved. Two front doors:
 
-Acceptance: `//pass/lnast_llvm:lnast_llvm_diff_test` drives the same closed-form
-stimulus into the kernel (`lnast_llvm_run`) and into the existing
-`lhd sim` llvm flow (a generated Pyrope testbench importing the lg) and compares
-the per-cycle `TRACE` lines byte for byte.
+- `lhd pass lnast-llvm --top T lg:IN --emit-dir sim:OUT` writes the kernels and `kernel.json`;
+  `lnast_llvm_run OUT CYCLES` drives them with a closed-form stimulus.
+- `lhd sim` with the developer switch `LHD_SIM_LNAST=1` (or `auto`: fall back to inou.cgen.sim when the
+  design is outside the subset) simulates a Pyrope testbench on them. `lnast_sim.cpp` writes one thin
+  class per DUT (`__in`/`__out` Slop ports, `step()`, power-on, checkpoint and probe hooks answered
+  from a field table by the design-independent `lnast_sim_rt.hpp`) plus the `<stem>.iface.json` the
+  driver generator reads, so `inou/prp/prp_sim` drives it exactly like a class inou.cgen.sim wrote.
+  No per-module C++ exists: the host compiler builds the driver and that one class.
 
-Verified on XiangShan `RenameTable` (100 cycles, byte for byte against the `lhd sim` llvm flow).
-Timing (`LNAST_LLVM_TIME=1`, `LHD_SIM_LLVM_TIME=1`; use an optimized `lhd`: `bazel build -c opt`,
-a fastbuild `lhd` is 10-30x slower in LLVM and misleads): RenameTable generates in 20 s (walks 2.5 s,
-O2 2 s, instruction selection 9 s). `LHD_SIM_LLVM_EMIT_OPT=0..3` forces the machine-code level;
-level 0 compiles huge single-block functions faster (RenameTable 12 s) but the kernel runs about 2x
-slower (gemmini16 0.41 s vs 0.22 s), so level 2 stays the default. A balanced OR/AND/XOR tree
-changed nothing on RenameTable (its 413k pre-optimization instructions are not OR chains).
+How a design becomes kernels (`lnast_llvm.cpp`):
 
-Not covered yet: latches, `Clock_cell`, negedge or several clocks, whole-array
-`update`, memories with non-zero images, wide (> 64 bit) register initial values,
-`fcall` under a condition, loop bodies that write registers.
+1. **One walk, recorded.** The hierarchy is walked once (instances inlined with their own register
+   and memory state, `if` arms merged by `mux`) and every `Cgen_llvm` call is recorded on a *tape*
+   instead of being built at once. State is one flat allocation of 64-bit words.
+2. **Views.** A clock period is: *edge* kernels (the next state and the memory writes), a *commit*
+   kernel, *settle* kernels (the outputs, on the new state). Both views are replays of the same tape
+   pruned to what they publish, so the logic is evaluated once per period plus the output cone again;
+   the settle kernels alone settle the outputs without an edge (power-on, a loaded checkpoint).
+3. **Order.** The walk records statements breadth first (dependency order), which keeps nearly every
+   value live at once. Each view is re-ordered depth first from its results, so a value is computed
+   next to the cone that reads it. Reads and writes of one memory keep their recorded order (memories
+   are written in place; a byte-enable write is a chain of read-modify-writes).
+4. **Kernels.** The ordered ops are cut into intervals (`LHD_SIM_LNAST_CHUNK`, default 3000 ops): an
+   interval of a topological order never closes a cycle. Each interval is replayed into its own
+   `Cgen_llvm` on the shared compile workers. A value read by another kernel crosses through a state
+   word. boom: one 195k-instruction kernel spent 364 s in instruction selection; as 30 kernels the
+   whole generation is 4 s.
+5. **Registers.** A register's next value is stored straight into the register when no later kernel
+   still reads the old value (boom: 14,269 of them), else into a pending word the commit kernel copies.
+   `r' = c ? x : r` landing in place is published as `if (c) r = x`, one branch per enable: a disabled
+   register is not rewritten, what only `x` needs can sink under the test, and LLVM's scheduler no
+   longer sees hundreds of selects sharing one flag (one such block took 23 s to schedule).
+6. **Reset** is kept out of the hot path: next state is computed without it and the commit kernel
+   stores the initial values of each distinct reset signal's registers in one unlikely branch (the
+   memory clear is an unlikely branch too). An asynchronous reset is evaluated like the synchronous
+   one (every step has an edge and the testbench samples after it).
+
+Acceptance: `//pass/lnast_llvm:lnast_llvm_diff_test` drives the same closed-form stimulus into the
+kernels (`lnast_llvm_run`) and into the inou.cgen.sim llvm flow (a generated Pyrope testbench
+importing the lg) and compares the per-cycle `TRACE` lines byte for byte.
+
+lhdsuite, checksum-gated against the inou.cgen.sim llvm backend (2026-11-10, opt build, 128 jobs):
+
+| core | setup s | host C++ s | cycles/s | inou.cgen.sim: setup / host C++ / cycles/s |
+| --- | ---: | ---: | ---: | --- |
+| boom | 12.1 | 6.2 | 31.3k | 53.6 / 16.6 / 18.2k |
+| picorv32 | 0.5 | 5.1 | 6.18M | 0.7 / 5.2 / 5.58M |
+| dino | 0.3 | 5.4 | 4.41M | 0.5 / 5.4 / 5.81M |
+
+Timing switches: `LHD_SIM_LNAST_TIME=1` (phases), `LHD_SIM_LLVM_TIME=1` (per kernel); use an optimized
+`lhd` (`bazel build -c opt`): a fastbuild `lhd` is 10-30x slower in LLVM and misleads.
+
+Not covered yet (the run is declined, or falls back under `auto`): latches, `Clock_cell`, negedge or
+several clocks (minion), a state element inside a compact-loop body (bitcoin), memories with non-zero
+images, `fcall` under a condition, VCD/observation runs, testbench access below the DUT's top level,
+and the random power-on fill of inou.cgen.sim for an unknown (`?`) initializer (read as 0 here, i.e.
+`sim.unknown_zero=true`).
 
 ## Compact loops: a `for`, never a call
 

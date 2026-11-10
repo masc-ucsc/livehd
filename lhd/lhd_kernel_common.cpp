@@ -26,8 +26,10 @@
 #include "absl/container/flat_hash_set.h"
 #include "absl/strings/ascii.h"
 #include "absl/strings/str_split.h"
+#include "bitwidth.hpp"
 #include "cgen_verilog.hpp"
 #include "color_common.hpp"
+#include "core/debug_env.hpp"
 #include "core/metadata.hpp"
 #include "diag.hpp"
 #include "file_name.hpp"  // livehd::unit_file_stem — the shared long-name policy
@@ -40,10 +42,10 @@
 #include "hhds/tree.hpp"
 #include "host_mem.hpp"
 #include "job_manager.hpp"
-#include "bitwidth.hpp"
 #include "lhd_kernel_internal.hpp"
 #include "lhd_sim_tune_session.hpp"
 #include "lnast.hpp"
+#include "lnast_sim.hpp"
 #include "log.hpp"
 #include "node_util.hpp"
 #include "pass.hpp"
@@ -2997,6 +2999,56 @@ std::vector<std::string> sim_into(Options& opts, Result& res, Eprp_var& var, con
   }
   if (!top_full.empty()) {
     labels["top"] = top_full;  // only the top module emits the VCD
+  }
+  // The LNAST flow (pass/lnast_llvm/lnast_sim.hpp): lgraph -> typed LNAST -> native state kernels
+  // behind one thin class. It is replacing the inou.cgen.sim LLVM backend; until it covers
+  // everything that backend does it is selected with the developer switch LHD_SIM_LNAST: `1`
+  // requires it (a design it does not cover is an error), `auto` falls back to inou.cgen.sim.
+  if (const char* lnast_mode = livehd::debug::env<"LHD_SIM_LNAST">();
+      lnast_mode != nullptr && *lnast_mode != 0 && std::string_view(lnast_mode) != "0") {
+    const bool  required = std::string_view(lnast_mode) != "auto";
+    std::string declined;
+    if (opts.sim_observe || (labels.contains("vcd") && !labels["vcd"].empty())) {
+      declined = "VCD and observation runs are not covered yet";
+    } else if (labels["backend"] == "slop") {
+      declined = "sim.tune.backend=slop selects the reference C++ backend";
+    } else {
+      livehd::lnast_llvm::Sim_request request;
+      request.graphs = var.graphs;
+      request.top    = top_full;
+      request.odir   = odir;
+      for (const auto& [k, v] : opts.sets) {
+        if (k == "pass.lg2lnast.passes") {
+          request.passes = v;
+        }
+      }
+      // `lhd sim`: the last source holds the test blocks; the modules it imports are the DUTs.
+      if (opts.command == "sim" && !opts.files.empty()) {
+        std::ifstream     tb(opts.files.back());
+        std::stringstream text;
+        text << tb.rdbuf();
+        static const std::regex import_re(R"re(import\(\s*"(?:lg:|ln:)?([^"]+)"\s*\))re");
+        const std::string       body = text.str();
+        for (std::sregex_iterator it(body.begin(), body.end(), import_re), end; it != end; ++it) {
+          request.duts.push_back((*it)[1].str());
+        }
+      }
+      Phase_timer phase(res, "pass.lnast_sim");
+      const auto  emitted = livehd::lnast_llvm::emit_sim(request);
+      if (emitted.ok) {
+        res.recipe_steps.emplace_back(std::format("pass.lnast_sim words:{} instructions:{}", emitted.words, emitted.instructions));
+        return emitted.stems;
+      }
+      declined = emitted.why;
+    }
+    if (required) {
+      throw Lhd_error{"unsupported",
+                      std::format("the LNAST sim flow does not cover this run: {}", declined),
+                      "unset LHD_SIM_LNAST (or set it to auto) to simulate with inou.cgen.sim"};
+    }
+    livehd::diag::info("lhd.sim", "lnast-fallback", "progress")
+        .msg("LNAST sim flow declined ({}); using inou.cgen.sim", declined)
+        .emit();
   }
   run_step("inou.cgen.sim", var, labels, opts, res);
 
