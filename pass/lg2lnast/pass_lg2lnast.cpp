@@ -42,6 +42,8 @@ public:
   // Sub instances left waiting when lowering found an instance-level dependency cycle: the
   // fcall form needs every argument before any output, so the caller may inline these and retry.
   std::vector<hhds::Node_class> stuck_subs;
+  // Stop once the cells are ordered: enough to learn whether instances are stuck (stuck_subs).
+  bool                          order_only = false;
 
 private:
   hhds::Graph&   graph_;
@@ -88,6 +90,7 @@ private:
   struct Flop_rec {
     std::string       name;
     hhds::Node_class  node;
+    bool              latch = false;
   };
   std::vector<Flop_rec> flop_next_;
 
@@ -546,7 +549,48 @@ bool Lowering::lower_node(const hhds::Node_class& node) {
     }
     case Ntype_op::Sub:
       return lower_sub(node);
+    case Ntype_op::Clock_cell: {
+      // The front end's spelling of a clock gate (docs 07-typesystem "Clock and Reset"):
+      // `Clock(clock_pin=clk, enable=en)`, `invert=true` for the active-low flavour.
+      if (auto dv = get_driver_of_sink_name(node, "div");
+          !dv.is_invalid() && !(dv.is_const() && const_of(dv).is_just_i64() && const_of(dv).to_just_i64() == 1)) {
+        why = "clock cell with a divider";
+        return false;
+      }
+      auto clk = named("clk_ref");
+      if (!clk) {
+        return false;
+      }
+      std::string en = "true";
+      if (auto e = get_driver_of_sink_name(node, "en"); !e.is_invalid()) {
+        auto o = operand(e);
+        if (!o) {
+          return false;
+        }
+        en = emit(Lnast_ntype::create_ne(), {*o, "0"}, e, false);
+      }
+      bool invert = false;
+      if (auto iv = get_driver_of_sink_name(node, "invert"); iv.is_const()) {
+        invert = !const_of(iv).is_known_false();
+      }
+      out       = b_.create_lnast_tmp();
+      auto call = b_.add_child(Lnast_ntype::create_func_call());
+      b_.lnast->add_child(call, Lnast_node::create_ref(out));
+      b_.lnast->add_child(call, Lnast_node::create_ref("Clock"));
+      auto arg = [&](std::string_view key, std::string_view value) {
+        auto st = b_.lnast->add_child(call, Lnast_ntype::create_store());
+        b_.lnast->add_child(st, Lnast_node::create_ref(std::string(key)));
+        leaf(st, value);
+      };
+      arg("clock_pin", *clk);
+      arg("enable", en);
+      if (invert) {
+        arg("invert", "true");
+      }
+      break;
+    }
     case Ntype_op::Flop:
+    case Ntype_op::Latch:
     case Ntype_op::IO:
       return true;  // handled by the caller
     default:
@@ -1567,15 +1611,24 @@ bool Lowering::lower_flop_next(const Flop_rec& f) {
     b_.lnast->add_child(n, Lnast_node::create_const(std::string(key)));
     b_.add_value_child_pub(n, value);
   };
+  if (f.latch) {
+    // `reg l:[latch=true, enable=gate, enable_high=false]`: the gate IS the enable (graph/cell.cpp),
+    // and the stored value follows `din` while it is open. No clock, no edge.
+    attr("latch", "true");
+    attr("enable", en ? *en : std::string("true"));
+    if (auto pc = get_driver_of_sink_name(f.node, "posclk"); pc.is_const() && const_of(pc).is_known_false()) {
+      attr("enable_high", "false");
+    }
+  }
   // Clock: always explicit, so the result never depends on the default-clock naming rule.
-  if (auto c = get_driver_of_sink_name(f.node, "clock_pin"); !c.is_invalid() && !c.is_const()) {
+  if (auto c = get_driver_of_sink_name(f.node, "clock_pin"); !f.latch && !c.is_invalid() && !c.is_const()) {
     auto o = operand(c);
     if (!o) {
       return false;
     }
     attr("clock_pin", *o);
   }
-  if (auto pc = get_driver_of_sink_name(f.node, "posclk"); pc.is_const() && const_of(pc).is_known_false()) {
+  if (auto pc = get_driver_of_sink_name(f.node, "posclk"); !f.latch && pc.is_const() && const_of(pc).is_known_false()) {
     attr("posclk", "false");
   }
   const auto init_pin = get_driver_of_sink_name(f.node, "initial");
@@ -1609,7 +1662,7 @@ bool Lowering::lower_flop_next(const Flop_rec& f) {
     attr("reset_pin", "false");
   }
   auto store_gated = [&]() {
-    if (!en) {
+    if (!en || f.latch) {  // a latch's enable is its gate (the attribute above), not a write condition
       store_raw(f.name, *d);
       return;
     }
@@ -1640,7 +1693,7 @@ bool Lowering::lower_cells() {
     std::vector<Item> nodes;
     for (auto node : graph_.body().nodes(hhds::Node_order::forward)) {
       const auto op = type_op_of(node);
-      if (op != Ntype_op::Flop && op != Ntype_op::IO && op != Ntype_op::Memory) {
+      if (op != Ntype_op::Flop && op != Ntype_op::Latch && op != Ntype_op::IO && op != Ntype_op::Memory) {
         nodes.push_back({node, -1, 0});
       }
     }
@@ -1689,17 +1742,12 @@ bool Lowering::lower_cells() {
         ready.push_back(i);
       }
     }
+    // First the order alone (nothing is emitted): a graph whose instances depend on each other in a
+    // ring is found here, before any of its statements are built.
     size_t done = 0;
     for (size_t head = 0; head < ready.size(); ++head) {
       const auto i = ready[head];
-      const bool ok = nodes[i].mem < 0 ? lower_node(nodes[i].node)
-                      : nodes[i].port == SIZE_MAX ? lower_read_all(mems_[static_cast<size_t>(nodes[i].mem)])
-                                                  : lower_async_read(mems_[static_cast<size_t>(nodes[i].mem)], nodes[i].port);
-      if (!ok) {
-        return false;
-      }
       ++done;
-      flush();
       std::vector<hhds::Pin_class> produced;
       if (nodes[i].mem >= 0) {
         const auto& mm = mems_[static_cast<size_t>(nodes[i].mem)];
@@ -1738,6 +1786,18 @@ bool Lowering::lower_cells() {
       }
       why = std::format("cycle through instance-level dependencies (a call needs an output of a call that needs it); stuck:{}", names);
       return false;
+    }
+    if (order_only) {
+      return true;
+    }
+    for (const auto i : ready) {
+      const bool ok = nodes[i].mem < 0            ? lower_node(nodes[i].node)
+                      : nodes[i].port == SIZE_MAX ? lower_read_all(mems_[static_cast<size_t>(nodes[i].mem)])
+                                                  : lower_async_read(mems_[static_cast<size_t>(nodes[i].mem)], nodes[i].port);
+      if (!ok) {
+        return false;
+      }
+      flush();
     }
   }
   return true;
@@ -1785,11 +1845,12 @@ std::shared_ptr<Lnast> Lowering::run(livehd::lnast_stream::Sink* stream) {
 
   // Registers first so every read of Q has a name.
   for (auto node : graph_.body().nodes(hhds::Node_order::forward)) {
-    if (type_op_of(node) != Ntype_op::Flop) {
+    const bool latch = type_op_of(node) == Ntype_op::Latch;
+    if (type_op_of(node) != Ntype_op::Flop && !latch) {
       continue;
     }
     for (const char* pin : {"pipe_min", "pipe_max"}) {
-      if (!livehd::graph_util::get_driver_of_sink_name(node, pin).is_invalid()) {
+      if (!latch && !livehd::graph_util::get_driver_of_sink_name(node, pin).is_invalid()) {
         why = std::format("flop with explicit {} pin (M1 handles only default clock/reset)", pin);
         return nullptr;
       }
@@ -1806,7 +1867,7 @@ std::shared_ptr<Lnast> Lowering::run(livehd::lnast_stream::Sink* stream) {
     // slang front end spells them (a plain init would bind to the DEFAULT reset signal).
     b_.create_declare_stmts(nm, "reg", max_str(bits_of(q), is_unsign(q)), min_str(bits_of(q), is_unsign(q)), "nil");
     name_of_.insert_or_assign(q.get_class_index(), nm);
-    flop_next_.push_back({nm, node});
+    flop_next_.push_back({nm, node, latch});
   }
 
   flush();
@@ -1819,6 +1880,9 @@ std::shared_ptr<Lnast> Lowering::run(livehd::lnast_stream::Sink* stream) {
 
   if (!lower_cells()) {
     return nullptr;
+  }
+  if (order_only) {
+    return b_.lnast;  // the cells can be ordered: the caller lowers for real
   }
 
   // Outputs and register next values.
@@ -1895,6 +1959,7 @@ bool Pass_lg2lnast::lower(const std::vector<std::shared_ptr<hhds::Graph>>& graph
     // memory only, and lower again; a graph that still cycles after a few rounds is skipped.
     for (int round = 0; round < 8; ++round) {
       Lowering probe(*g);
+      probe.order_only = true;
       if (probe.run()) {
         break;
       }

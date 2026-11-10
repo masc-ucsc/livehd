@@ -32,15 +32,18 @@ struct Field {
 
 // The generated simulator: a list of state kernels `void k(uint64_t* state, void**)` over one flat
 // state allocation of `words` 64-bit words. One clock period is: write the inputs, call every
-// `edge_functions` kernel in order (the next state, memory writes), then `commit_function` (when not
-// empty: the registers take their next value, or their reset value), then every `settle_functions`
-// kernel in order (the outputs, settled on the new state). The settle kernels alone settle the
-// outputs on the current state without an edge (power-on, a loaded checkpoint).
+// `edge_functions` kernel in order (clock low: the next state, memory writes), then `commit_function`
+// (when not empty: the rising edge -- registers take their next value, or their reset value), then
+// the `fall_functions` kernels and `fall_commit_function` (clock high, then the falling edge: present
+// only for a design with negedge registers or latches open while the clock is high), then every
+// `settle_functions` kernel in order (clock low again: the outputs, on the new state). The settle
+// kernels alone settle the outputs on the current state without an edge (power-on, a loaded
+// checkpoint).
 struct Result {
   bool                      ok = false;
   std::string               why;  // first unsupported construct (ok == false)
-  std::vector<std::string>  edge_functions, settle_functions;
-  std::string               commit_function;
+  std::vector<std::string>  edge_functions, fall_functions, settle_functions;
+  std::string               commit_function, fall_commit_function;
   std::vector<std::string>  objects;  // every native object written
   std::vector<Field>        inputs, outputs, regs;
   std::vector<std::string>  clocks;  // top inputs that are clocks (no state word)

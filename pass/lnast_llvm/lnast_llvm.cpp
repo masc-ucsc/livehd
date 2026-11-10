@@ -244,6 +244,8 @@ public:
     loop_phi,         // a: its loop_begin; imm: carry number
     loop_end,         // a: its loop_begin; x, n: refs_ (carry next values)
     loop_final,       // a: its loop_end; imm: carry number
+    clock,            // the root clock's level in the view being replayed (0: low, 1: high)
+    latch,            // a: enable (1 bit), b: data, c: the held value (an input); imm: register index
   };
   static constexpr uint32_t none = std::numeric_limits<uint32_t>::max();
   struct Ref {
@@ -282,7 +284,32 @@ public:
 
   static Ref  ref(const V& v) { return Ref{static_cast<uint32_t>(v.id), v.width, v.unsign}; }
   V           value(uint32_t id) const { return V{id, ops[id].width, ops[id].unsign}; }
-  static bool is_free(K k) { return k == K::input || k == K::constant || k == K::constant_words; }
+  static bool is_free(K k) { return k == K::input || k == K::constant || k == K::constant_words || k == K::clock; }
+
+  // The root clock as a value: a constant in each view (a clock gate, a latch on a clock phase and
+  // any logic that reads the clock fold accordingly).
+  V clock() {
+    if (clock_ == none) {
+      Op o;
+      o.kind = K::clock;
+      clock_ = static_cast<uint32_t>(add(o, 1, true).id);
+    }
+    return value(clock_);
+  }
+  // A transparent latch, as its readers see it: `enable ? data : held`. Created when the walk first
+  // needs the latch's value and completed (set_latch) once its data and enable are known, so the
+  // tape is a dataflow graph, not a list in dependency order: each view orders it for itself.
+  V latch(V held, size_t reg) {
+    Op o;
+    o.kind = K::latch;
+    o.c    = ref(held);
+    o.imm  = reg;
+    return add(o, held.width, held.unsign);
+  }
+  void set_latch(size_t id, V enable, V data) {
+    ops[id].a = ref(enable);
+    ops[id].b = ref(data);
+  }
 
   V input(size_t loc, uint32_t width, bool unsign) {
     const auto key = std::make_tuple(loc, width, unsign);
@@ -492,6 +519,10 @@ private:
   std::map<std::tuple<size_t, uint32_t, bool>, uint32_t>   inputs_;
   std::map<std::tuple<uint64_t, uint32_t, bool>, uint32_t> constants_;
   std::vector<uint32_t>                                    open_;
+  uint32_t                                                 clock_ = none;
+
+public:
+  absl::flat_hash_map<uint32_t, std::string> names;  // diagnostics: latch op -> the latch's name
 };
 
 class Gen {
@@ -512,8 +543,17 @@ private:
     bool                     negreset = false;
     bool                     sync     = true;
     std::optional<Literal>   initial;
-    bool                     has_clock = false;
-    uint64_t                 mem_size  = 0;  // > 0: a memory of mem_size entries (field.bits = entry bits)
+    bool                       has_clock = false;
+    uint64_t                   mem_size  = 0;  // > 0: a memory of mem_size entries (field.bits = entry bits)
+    // What the element is clocked by (a clock port or a clock gate's output; empty: the root clock) and
+    // on which edge; a latch has no clock: it follows its data while `enable` (active high unless
+    // !enable_high) holds.
+    std::string                clock_name;
+    bool                       negedge     = false;
+    bool                       latch       = false;
+    bool                       has_enable  = false;
+    bool                       enable_high = true;
+    std::string                enable_name;
   };
   using Env = absl::flat_hash_map<std::string, V>;
 
@@ -561,6 +601,20 @@ private:
   static constexpr bool record_ = true;  // one walk: the settled outputs are a replay of the same tape
   V                   path_;           // AND of the enclosing if conditions (width 0: none)
   V                   path_enable() { return path_.width != 0 ? path_ : k_->constant(1, 1, true); }
+  // A memory write happens when its statement is reached AND its (possibly gated) clock takes the edge.
+  V                     write_enable(const Reg_info& r, const Env& env) {
+    V enable = path_enable();
+    if (!r.clock_name.empty()) {
+      auto it = env.find(r.clock_name);
+      if (it == env.end()) {
+        bail("memory '" + r.field.name + "' is clocked by unknown signal '" + r.clock_name + "'");
+      }
+      if (const V gate = all_of(clock_enables(it->second, "memory '" + r.field.name + "'")); gate.width != 0) {
+        enable = k_->binary(Op::bit_and, enable, gate, 1, true);
+      }
+    }
+    return enable;
+  }
   size_t              mem_array(const std::string& name, const Env& env) {
     auto it = fr_->reg_idx.find(name);
     if (it == fr_->reg_idx.end() || regs_[it->second].mem_size == 0) {
@@ -616,6 +670,54 @@ private:
   void exec_block(const std::vector<Lnast_nid>& stmts, Env& env);
   void exec_if(const std::vector<Lnast_nid>& c, size_t at, Env& env);
   void exec_for(const std::vector<Lnast_nid>& c, Env& env);
+  // ---- clocks, clock gates and latches ----
+  // A clock gate `Clock(clock_pin=clk, enable=en)` is what an ICG is: `clk & h`, where the latch `h`
+  // follows `en` while `clk` is low (`invert`: `clk | !h`, `h` open while `clk` is high). Its output
+  // is an ordinary value, so anything may read it; a register clocked by it takes its edge only
+  // while `h` is set, evaluated in the view the register is sampled in.
+  struct Gate {
+    V    clk;    // the clock it gates (the root clock or another gate's output)
+    V    latch;  // h
+    bool invert = false;
+  };
+  struct Hidden_latch {
+    std::string name;
+    size_t      loc = 0;
+    size_t      op  = 0;
+  };
+  absl::flat_hash_map<size_t, Gate> gates_;      // gate output op -> its parts
+  std::vector<Hidden_latch>         hidden_;     // one per clock gate: state the design does not name
+  std::vector<size_t>               latch_ops_;  // every latch op (registers declared `latch`, and the hidden ones)
+  // What a latch's held value follows: `if (guard) held = data`, in every view where the guard can be on.
+  struct Latch_update {
+    size_t   loc = 0;
+    V        guard, data;
+    uint32_t bits   = 0;
+    bool     unsign = true;
+  };
+  std::vector<Latch_update> latch_updates_;
+  std::vector<V>            held_;  // per register: a latch's held value (the input op)
+  void                      exec_clock_gate(const std::vector<Lnast_nid>& c, Env& env);
+  std::vector<V>            clock_enables(V clock, const std::string& what);
+  // AND of `enables` (empty: no value, i.e. always).
+  V                         all_of(const std::vector<V>& enables) {
+    V acc;
+    for (const auto& e : enables) {
+      acc = acc.width == 0 ? e : k_->binary(Op::bit_and, acc, e, 1, true);
+    }
+    return acc;
+  }
+  const V* signal(const std::string& name, const Env& pre, const Env& end) const {
+    if (auto e = end.find(name); e != end.end()) {
+      return &e->second;
+    }
+    if (auto q = pre.find(name); q != pre.end()) {
+      return &q->second;
+    }
+    return nullptr;
+  }
+  void                                finish_latch(Frame& f, size_t idx, const Env& pre, const Env& end);
+  void                                bypass_exclusive_latches();
   // Statements under `stmts`, nested blocks included (a loop's size for the unroll budget).
   uint64_t                            count_statements(const Lnast_nid& stmts) const {
     uint64_t n = 0;
@@ -680,9 +782,6 @@ V Gen::operand(const Lnast_nid& n, const Env& env) {
     return k_->constant(1, 1, true);
   }
   if (name == "false") {
-    return k_->constant(1, 0, true);
-  }
-  if (fr_->clocks.contains(name)) {
     return k_->constant(1, 0, true);
   }
   auto it = env.find(name);
@@ -791,6 +890,7 @@ void Gen::collect_attrs(Frame& fr) {
           }
         } else if (key == "__store_clock_pin") {
           fr.clocks.insert(nm(c[2]));
+          r.clock_name = nm(c[2]);
         } else if (key == "__store_posclk") {
           if (nm(c[2]) == "false") {
             bail("negedge memory");
@@ -816,11 +916,17 @@ void Gen::collect_attrs(Frame& fr) {
       }
       if (key == "clock_pin") {
         fr.clocks.insert(nm(c[2]));
-        r.has_clock = true;
+        r.has_clock  = true;
+        r.clock_name = nm(c[2]);
       } else if (key == "posclk") {
-        if (nm(c[2]) == "false") {
-          bail("negedge register");
-        }
+        r.negedge = nm(c[2]) == "false";
+      } else if (key == "latch") {
+        r.latch = nm(c[2]) != "false";
+      } else if (key == "enable") {
+        r.has_enable  = true;
+        r.enable_name = nm(c[2]);
+      } else if (key == "enable_high") {
+        r.enable_high = nm(c[2]) != "false";
       } else if (key == "initial") {
         const auto text = nm(c[2]);
         if (text == "nil") {
@@ -1115,7 +1221,7 @@ void Gen::exec_stmt(const std::vector<Lnast_nid>& stmts, size_t& i, Env& env) {
         }
         V           address = operand(c[1], env);
         V           data    = k_->resize(operand(c[2], env), r.field.bits, !r.field.sign);
-        if (!k_->array_write(mem_array(nm(c[0]), env), path_enable(), address, data)) {
+        if (!k_->array_write(mem_array(nm(c[0]), env), write_enable(r, env), address, data)) {
           bail("memory write");
         }
         break;
@@ -1138,6 +1244,10 @@ void Gen::exec_stmt(const std::vector<Lnast_nid>& stmts, size_t& i, Env& env) {
       if (path_.width != 0) {
         bail("module instance under a condition");
       }
+      if (nm(c[1]) == "Clock" && !lib_.contains("Clock")) {
+        exec_clock_gate(c, env);
+        break;
+      }
       auto fit_frame = frames_.find(fr_->prefix + nm(c[0]) + ".");
       if (fit_frame == frames_.end()) {
         bail("call to unknown module '" + nm(c[1]) + "'");
@@ -1145,9 +1255,6 @@ void Gen::exec_stmt(const std::vector<Lnast_nid>& stmts, size_t& i, Env& env) {
       Frame& cf = *fit_frame->second;
       Env    cenv;
       for (const auto& port : cf.in) {
-        if (cf.clocks.contains(port.name)) {
-          continue;
-        }
         bool found = false;
         for (size_t j = 2; j < c.size(); ++j) {
           auto sc = kids(c[j]);
@@ -1156,6 +1263,10 @@ void Gen::exec_stmt(const std::vector<Lnast_nid>& stmts, size_t& i, Env& env) {
             found           = true;
             break;
           }
+        }
+        if (!found && cf.clocks.contains(port.name)) {
+          cenv[port.name] = k_->clock();  // an unbound clock port takes the root clock
+          found           = true;
         }
         if (!found) {
           bail("instance '" + nm(c[0]) + "' leaves input '" + port.name + "' unconnected");
@@ -1277,10 +1388,10 @@ void Gen::exec_stmt(const std::vector<Lnast_nid>& stmts, size_t& i, Env& env) {
     case NT::Lnast_ntype_bit_or:
     case NT::Lnast_ntype_bit_xor: {
       const auto dst = dst_name();
-      if (c.size() < 3) {
+      if (c.size() < 2) {
         bail("bitwise arity");
       }
-      std::vector<V> ops;
+      std::vector<V> ops;  // one operand: the value itself (a reduced n-ary cell)
       for (size_t j = 1; j < c.size(); ++j) {
         ops.push_back(operand(c[j], env));
       }
@@ -1378,7 +1489,7 @@ void Gen::exec_stmt(const std::vector<Lnast_nid>& stmts, size_t& i, Env& env) {
         const uint32_t abits = std::max<uint32_t>(1, 64 - static_cast<uint32_t>(__builtin_clzll(r.mem_size)));
         for (uint64_t e = 0; e < r.mem_size; ++e) {
           V piece = k_->resize(k_->binary(Op::lshr, bus, k_->constant(32, e * r.field.bits, true), total, true), r.field.bits, true);
-          if (!k_->array_write(arr, path_enable(), k_->constant(abits, e, true), V{piece.id, piece.width, !r.field.sign})) {
+          if (!k_->array_write(arr, write_enable(r, env), k_->constant(abits, e, true), V{piece.id, piece.width, !r.field.sign})) {
             bail("whole-array write");
           }
         }
@@ -1535,11 +1646,35 @@ void Gen::scan_calls(const std::vector<Lnast_nid>& stmts, Frame& f) {
       if (c.size() < 2) {
         bail("fcall shape");
       }
+      const auto argument = [&](std::string_view port) -> std::optional<std::string> {  // the ref bound to `port`
+        for (size_t j = 2; j < c.size(); ++j) {
+          auto sc = kids(c[j]);
+          if (ty(c[j]) == Lnast_ntype::Lnast_ntype_store && sc.size() == 2 && nm(sc[0]) == port
+              && ty(sc[1]) == Lnast_ntype::Lnast_ntype_ref) {
+            return nm(sc[1]);
+          }
+        }
+        return std::nullopt;
+      };
       auto it = lib_.find(nm(c[1]));
       if (it == lib_.end()) {
+        if (nm(c[1]) == "Clock") {  // a clock gate: its clock_pin is a clock of this module
+          if (auto clk = argument("clock_pin")) {
+            f.clocks.insert(*clk);
+          }
+          continue;
+        }
         bail("call to unknown module '" + nm(c[1]) + "'");
       }
-      build_frame(it->second, f.prefix + nm(c[0]) + ".");
+      // What the instance uses as a clock is a clock here too (through as many levels as it takes).
+      const Frame* child = build_frame(it->second, f.prefix + nm(c[0]) + ".");
+      for (const auto& port : child->in) {
+        if (child->clocks.contains(port.name)) {
+          if (auto clk = argument(port.name)) {
+            f.clocks.insert(*clk);
+          }
+        }
+      }
     } else if (Lnast_ntype::is_if_like(t) || t == Lnast_ntype::Lnast_ntype_stmts) {
       for (const auto& ch : kids(st)) {
         if (ty(ch) == Lnast_ntype::Lnast_ntype_stmts) {
@@ -1547,6 +1682,346 @@ void Gen::scan_calls(const std::vector<Lnast_nid>& stmts, Frame& f) {
         }
       }
     }
+  }
+}
+
+void Gen::exec_clock_gate(const std::vector<Lnast_nid>& c, Env& env) {
+  using NT = Lnast_ntype;
+  if (ty(c[0]) != NT::Lnast_ntype_ref) {
+    bail("clock gate shape");
+  }
+  V    clk, en = k_->constant(1, 1, true);
+  bool invert = false;
+  for (size_t j = 2; j < c.size(); ++j) {
+    auto sc = kids(c[j]);
+    if (ty(c[j]) != NT::Lnast_ntype_store || sc.size() != 2) {
+      bail("clock gate argument");
+    }
+    const auto key = nm(sc[0]);
+    if (key == "clock_pin") {
+      clk = k_->resize(operand(sc[1], env), 1, true);
+    } else if (key == "enable") {
+      en = k_->binary(Op::ne, operand(sc[1], env), k_->constant(1, 0, true), 1, true);
+    } else if (key == "invert") {
+      invert = nm(sc[1]) == "true";
+    } else {
+      bail("clock gate argument '" + key + "'");
+    }
+  }
+  if (clk.width == 0) {
+    bail("clock gate without a clock");
+  }
+  Hidden_latch h;
+  h.name                                   = fr_->prefix + nm(c[0]) + "__en";
+  h.loc                                    = k_->new_loc(1);
+  const V held                             = k_->input(h.loc, 1, true);
+  const V lat                              = k_->latch(held, Tape::none);
+  h.op                                     = lat.id;
+  k_->names[static_cast<uint32_t>(lat.id)] = h.name;
+  k_->set_latch(lat.id, invert ? clk : k_->unary_not(clk, 1, true), en);
+  const V out
+      = invert ? k_->binary(Op::bit_or, clk, k_->unary_not(lat, 1, true), 1, true) : k_->binary(Op::bit_and, clk, lat, 1, true);
+  gates_[out.id] = Gate{clk, lat, invert};
+  hidden_.push_back(h);
+  latch_ops_.push_back(lat.id);
+  latch_updates_.push_back({h.loc, invert ? clk : k_->unary_not(clk, 1, true), en, 1, true});
+  put(env, nm(c[0]), out);
+}
+
+// The gate latches between `clock` and the root clock: a state element on it takes its edge only
+// while all of them are set. Empty: every edge.
+std::vector<V> Gen::clock_enables(V clock, const std::string& what) {
+  std::vector<V> enables;
+  for (int hops = 0; hops < 64; ++hops) {
+    size_t id = clock.id;
+    while (k_->ops[id].kind == Tape::K::resize) {
+      id = k_->ops[id].a.id;
+    }
+    if (k_->ops[id].kind == Tape::K::clock) {
+      return enables;
+    }
+    auto gate = gates_.find(id);
+    if (gate == gates_.end()) {
+      bail(what + " is clocked by a signal that is neither the clock nor a clock gate of it");
+    }
+    if (gate->second.invert) {
+      bail(what + " is clocked through an inverted clock gate");
+    }
+    enables.push_back(gate->second.latch);
+    clock = gate->second.clk;
+  }
+  bail(what + ": clock gates nest too deep");
+}
+
+// A latch: its readers see `enable ? data : held` (they got the latch op when the frame started), and
+// `held` follows while the latch is open. A level reset forces it open onto the reset value.
+void Gen::finish_latch(Frame& f, size_t idx, const Env& pre, const Env& end) {
+  (void)f;
+  const auto& r    = regs_[idx];
+  const V     held = held_[idx];
+  auto        nx   = end.find(r.local + next_tag);
+  V           enable, data;
+  if (nx == end.end()) {  // never written: it holds
+    enable = k_->constant(1, 0, true);
+    data   = held;
+  } else {
+    data = k_->resize(nx->second, r.field.bits, !r.field.sign);
+    if (!r.has_enable || r.enable_name == "true") {
+      enable = k_->constant(1, 1, true);
+    } else if (r.enable_name == "false") {
+      enable = k_->constant(1, 0, true);
+    } else {
+      const V* e = signal(r.enable_name, pre, end);
+      if (e == nullptr) {
+        bail("latch '" + r.field.name + "' is enabled by unknown signal '" + r.enable_name + "'");
+      }
+      enable = k_->binary(Op::ne, *e, k_->constant(1, 0, true), 1, true);
+    }
+    if (!r.enable_high) {
+      enable = k_->unary_not(enable, 1, true);
+    }
+  }
+  const size_t loc = static_cast<size_t>(k_->ops[held.id].imm);
+  if (r.reset_pin) {
+    // A level reset: `reset ? initial : (enable ? data : held)`. The latch itself stays a plain
+    // latch under a mux, and the held value follows two exclusive conditions, so in the phase where
+    // the latch is closed nothing reaches its data (a hi/lo latch pair is a ring otherwise).
+    const V* rv = signal(*r.reset_pin, pre, end);
+    if (rv == nullptr) {
+      bail("reset signal '" + *r.reset_pin + "' is not a known signal");
+    }
+    const V active = r.negreset ? k_->binary(Op::eq, *rv, k_->constant(1, 0, true), 1, true)
+                                : k_->binary(Op::ne, *rv, k_->constant(1, 0, true), 1, true);
+    const V init   = k_->resize(literal(r.initial ? *r.initial : Literal{false, {0}}), r.field.bits, !r.field.sign);
+    const V inner  = k_->latch(held, idx);
+    k_->set_latch(inner.id, enable, data);
+    k_->names[static_cast<uint32_t>(inner.id)] = r.field.name;
+    latch_ops_.push_back(inner.id);
+    auto& shown = k_->ops[cur_[idx].id];  // what the readers hold: now the mux over the latch
+    shown.kind  = Tape::K::mux;
+    shown.a     = Tape::ref(active);
+    shown.b     = Tape::ref(inner);
+    shown.c     = Tape::ref(init);
+    k_->names.erase(static_cast<uint32_t>(cur_[idx].id));
+    latch_updates_.push_back(
+        {loc, k_->binary(Op::bit_and, enable, k_->unary_not(active, 1, true), 1, true), data, r.field.bits, !r.field.sign});
+    latch_updates_.push_back({loc, active, init, r.field.bits, !r.field.sign});
+  } else {
+    k_->set_latch(cur_[idx].id, enable, data);
+    latch_ops_.push_back(cur_[idx].id);
+    latch_updates_.push_back({loc, enable, data, r.field.bits, !r.field.sign});
+  }
+  next_[idx] = V{};
+}
+
+// Two-phase latch logic on a GATED clock: `a` is open while `gclk` is high, `b` while it is low,
+// and each feeds the other through logic. With the gate off `gclk` stays low through the clock's
+// high phase, so in neither view is either enable a constant: structurally the two are a ring, and
+// only their exclusiveness says they are never transparent at once.
+//
+// So a latch's data is evaluated with every latch that is provably closed WHILE THIS ONE IS OPEN read
+// as its held value: while this latch is open that is what the other one shows, and while it is
+// closed its data is not used. Only the ops between the two are cloned, once per excluding condition
+// (every latch on one phase of a gated clock shares them); what nothing else reads of the originals
+// is then dead.
+//
+// Exclusive is proven syntactically and conservatively: the two enables, as conjunctions, hold one
+// condition with opposite polarities (`gclk` and `gclk == 0`).
+void Gen::bypass_exclusive_latches() {
+  auto& t                = *k_;
+  using K                = Tape::K;
+  const auto constant_is = [&](uint32_t id, uint64_t value) { return t.ops[id].kind == K::constant && t.ops[id].imm == value; };
+  // `id` as (condition, polarity): through `!= 0`, `== 0`, `!`, and `if c {1} else {0}`
+  std::function<std::pair<uint32_t, bool>(uint32_t, int)> literal = [&](uint32_t id, int depth) -> std::pair<uint32_t, bool> {
+    const auto& o = t.ops[id];
+    if (depth > 16 || o.width != 1) {
+      return {id, true};
+    }
+    const auto flip = [](std::pair<uint32_t, bool> l) { return std::pair{l.first, !l.second}; };
+    if (o.kind == K::resize && o.a.width == 1) {
+      return literal(o.a.id, depth + 1);
+    }
+    if (o.kind == K::unary_not && o.a.width == 1) {
+      return flip(literal(o.a.id, depth + 1));
+    }
+    if (o.kind == K::binary && o.a.width == 1 && constant_is(o.b.id, 0)) {
+      if (static_cast<Op>(o.bop) == Op::ne) {
+        return literal(o.a.id, depth + 1);
+      }
+      if (static_cast<Op>(o.bop) == Op::eq) {
+        return flip(literal(o.a.id, depth + 1));
+      }
+    }
+    if (o.kind == K::mux && o.a.width == 1) {
+      if (constant_is(o.b.id, 0) && constant_is(o.c.id, 1)) {
+        return literal(o.a.id, depth + 1);
+      }
+      if (constant_is(o.b.id, 1) && constant_is(o.c.id, 0)) {
+        return flip(literal(o.a.id, depth + 1));
+      }
+    }
+    return {id, true};
+  };
+  using Literal_set                                          = std::vector<std::pair<uint32_t, bool>>;  // sorted, unique
+  std::function<void(uint32_t, Literal_set&, int)> conjuncts = [&](uint32_t id, Literal_set& out, int depth) {
+    const auto l = literal(id, 0);
+    if (std::ranges::find(out, l) != out.end()) {
+      return;
+    }
+    out.push_back(l);
+    if (!l.second || depth > 32) {
+      return;
+    }
+    const auto& o = t.ops[l.first];
+    if (o.kind == K::binary && static_cast<Op>(o.bop) == Op::bit_and && o.width == 1 && o.a.width == 1 && o.b.width == 1) {
+      conjuncts(o.a.id, out, depth + 1);
+      conjuncts(o.b.id, out, depth + 1);
+    }
+  };
+  // per latch: what its enable requires; per condition: which latches require it, by polarity
+  const std::vector<size_t>                              latches = latch_ops_;  // the loop below records ops, never latches
+  absl::flat_hash_map<size_t, Literal_set>               requires_;
+  absl::flat_hash_map<std::pair<uint32_t, bool>, size_t> required_by;  // literal -> how many latches
+  for (const auto id : latches) {
+    auto& set = requires_[id];
+    conjuncts(static_cast<uint32_t>(t.ops[id].a.id), set, 0);
+    std::ranges::sort(set);
+    for (const auto& l : set) {
+      ++required_by[l];
+    }
+  }
+  // A latch op, or the latch under a reset mux (what a reader of a latch with a level reset holds).
+  const auto latch_under = [&](uint32_t id) -> size_t {
+    const auto& o = t.ops[id];
+    if (o.kind == K::latch) {
+      return id;
+    }
+    if (o.kind == K::mux && o.b.id != Tape::none && t.ops[o.b.id].kind == K::latch && requires_.contains(o.b.id)) {
+      return o.b.id;
+    }
+    return Tape::none;
+  };
+  // clones, per excluding set of literals (the literals of the latch being fed that some other latch
+  // requires the opposite of)
+  std::map<Literal_set, absl::flat_hash_map<uint32_t, uint32_t>> clones;
+  size_t                                                         cloned = 0, bypassed = 0;
+  for (const auto id : latches) {
+    const Tape::Ref data = t.ops[id].b;
+    if (data.id == Tape::none) {
+      continue;
+    }
+    Literal_set excluding;
+    for (const auto& l : requires_[id]) {
+      if (required_by.contains({l.first, !l.second})) {
+        excluding.push_back(l);
+      }
+    }
+    if (excluding.empty()) {
+      continue;
+    }
+    auto&      memo   = clones[excluding];
+    const auto closed = [&](size_t latch) {  // provably closed while `id` is open
+      return latch != id && std::ranges::any_of(excluding, [&](const auto& l) {
+               return std::ranges::binary_search(requires_[latch], std::pair{l.first, !l.second});
+             });
+    };
+    // post-order over the data cone; `memo[x] == x`: nothing under x changes
+    bool                                   ok = true;
+    std::vector<std::pair<uint32_t, bool>> stack{
+        {data.id, false}
+    };
+    while (!stack.empty() && ok) {
+      const auto [x, expanded] = stack.back();
+      if (memo.contains(x)) {
+        stack.pop_back();
+        continue;
+      }
+      const Tape::Op o = t.ops[x];  // by value: cloning grows the tape
+      if (const auto latch = latch_under(x); latch != Tape::none) {
+        if (closed(latch)) {
+          const Tape::Ref held = t.ops[latch].c;
+          if (o.kind == K::latch) {
+            memo[x] = held.id;
+          } else {  // the reset mux, over the held value
+            memo[x] = static_cast<uint32_t>(t.mux(V{o.a.id, o.a.width, o.a.unsign},
+                                                  V{held.id, o.b.width, o.b.unsign},
+                                                  V{o.c.id, o.c.width, o.c.unsign},
+                                                  o.width,
+                                                  o.unsign)
+                                                .id);
+            ++cloned;
+          }
+          ++bypassed;
+        } else {
+          memo[x] = x;  // another latch, open or not: as it is
+        }
+        stack.pop_back();
+        continue;
+      }
+      if (Tape::is_free(o.kind)) {
+        memo[x] = x;
+        stack.pop_back();
+        continue;
+      }
+      const bool pure = o.kind == K::resize || o.kind == K::concat || o.kind == K::unary_not || o.kind == K::reduce_or
+                        || o.kind == K::count_bits || o.kind == K::bitfield_insert || o.kind == K::sign_extend
+                        || o.kind == K::binary || o.kind == K::mux;
+      if (!pure) {
+        memo[x] = x;  // a memory read or a loop: not re-evaluated (if a closed latch is under it the ring stays, and is reported)
+        stack.pop_back();
+        continue;
+      }
+      if (!expanded) {
+        stack.back().second = true;
+        t.for_each_operand(o, [&](const Tape::Ref& r) {
+          if (!memo.contains(r.id)) {
+            stack.emplace_back(r.id, false);
+          }
+        });
+        continue;
+      }
+      bool changed = false;
+      t.for_each_operand(o, [&](const Tape::Ref& r) { changed = changed || memo.at(r.id) != r.id; });
+      if (!changed) {
+        memo[x] = x;
+      } else {
+        Tape::Op copy = o;
+        for (Tape::Ref* r : {&copy.a, &copy.b, &copy.c}) {
+          if (r->id != Tape::none) {
+            r->id = memo.at(r->id);
+          }
+        }
+        if (o.kind == K::concat) {
+          copy.x = static_cast<uint32_t>(t.refs.size());
+          for (uint32_t j = 0; j < o.n; ++j) {
+            Tape::Ref lane = t.refs[o.x + j];
+            lane.id        = memo.at(lane.id);
+            t.refs.push_back(lane);
+          }
+        }
+        t.ops.push_back(copy);
+        memo[x] = static_cast<uint32_t>(t.ops.size() - 1);
+        ++cloned;
+      }
+      stack.pop_back();
+    }
+    const auto replaced = memo.at(data.id);
+    if (replaced == data.id) {
+      continue;
+    }
+    const V bypass{replaced, data.width, data.unsign};
+    t.ops[id].b = Tape::ref(bypass);
+    for (auto& u : latch_updates_) {
+      if (u.data.id == data.id && u.loc == static_cast<size_t>(t.ops[t.ops[id].c.id].imm)) {
+        u.data = bypass;
+      }
+    }
+  }
+  if (livehd::debug::env<"LHD_SIM_LNAST_TIME">() != nullptr && bypassed != 0) {
+    std::fprintf(stderr,
+                 "lnast_llvm: %zu latch reads taken as held under an exclusive enable (%zu ops cloned)\n",
+                 bypassed,
+                 cloned);
   }
 }
 
@@ -1583,15 +2058,26 @@ void Gen::finish_frame(Frame& f, const Env& pre, const Env& end) {
       next_[idx] = V{};  // the memory is updated in place: nothing to publish
       continue;
     }
+    if (r.latch) {
+      finish_latch(f, idx, pre, end);
+      continue;
+    }
     auto nx = end.find(r.local + next_tag);
     V    n  = nx != end.end() ? nx->second : end.at(r.local);
+    // A gated clock: the register takes the edge only while every gate on the way to the root clock
+    // is on. Spelled as the hold mux, so it is published under that condition like any enable.
+    if (!r.clock_name.empty()) {
+      const V* clock = signal(r.clock_name, pre, end);
+      if (clock == nullptr) {
+        bail("register '" + r.field.name + "' is clocked by unknown signal '" + r.clock_name + "'");
+      }
+      if (const V gate = all_of(clock_enables(*clock, "register '" + r.field.name + "'")); gate.width != 0) {
+        n = k_->mux(gate, cur_[idx], k_->resize(n, r.field.bits, !r.field.sign), r.field.bits, !r.field.sign);
+      }
+    }
     if (r.reset_pin) {
-      const V* rv = nullptr;  // an input or any signal settled this cycle
-      if (auto e = end.find(*r.reset_pin); e != end.end()) {
-        rv = &e->second;
-      } else if (auto q = pre.find(*r.reset_pin); q != pre.end()) {
-        rv = &q->second;
-      } else {
+      const V* rv = signal(*r.reset_pin, pre, end);  // an input or any signal settled this cycle
+      if (rv == nullptr) {
         bail("reset signal '" + *r.reset_pin + "' is not a known signal");
       }
       const auto key = f.prefix + "/" + *r.reset_pin + (r.negreset ? "!" : "");
@@ -1621,6 +2107,7 @@ void Gen::finish_frame(Frame& f, const Env& pre, const Env& end) {
 // while a condition holds (`r' = c ? x : r`) is `guarded`: when its next value lands in the register
 // itself (`loc == home`) it is published as `if (guard) r = data`, so a disabled register is not
 // rewritten and one branch serves every register sharing the enable; otherwise as the mux it is.
+// A latch is always guarded and in place: `if (enable) held = data`.
 struct Root {
   Tape::Ref value;
   size_t    loc       = 0;
@@ -1629,25 +2116,24 @@ struct Root {
   Tape::Ref guard, data, hold;  // `hold`: the register's current value
   size_t    home   = Tape::none;
   size_t    kernel = 0;  // the kernel that publishes it
-  template <class Fn>
-  void for_each_operand(Fn&& fn) const {
-    if (guarded) {
-      fn(guard);
-      fn(data);
-    } else {
-      fn(value);
-    }
-  }
 };
 
+// What one kernel family computes: the ops it needs, in the order they are emitted, and where its
+// results go. A view replays the tape at ONE level of the root clock, so whatever reads the clock is
+// a constant in it: `fold_*` holds what that makes of each op (a clock gate is off, a latch on the
+// other phase is closed and reads as its held value, ...).
 struct View {
-  std::string           tag;  // file/symbol suffix ("e": edge, "s": settle)
+  std::string           tag;              // file/symbol suffix: "e" rise, "f" fall, "s" settle
+  int                   level   = 0;      // the root clock while this view runs
+  bool                  effects = false;  // memory writes happen in this view
   std::vector<Root>     roots;
-  std::vector<uint32_t> order;  // the live computed ops, in emission order
-  std::vector<uint32_t> pos;    // per op: its index in `order` (none: not emitted)
-  std::vector<uint32_t> cut;    // kernel k replays order[cut[k], cut[k + 1])
-  std::vector<uint8_t>  spill;  // per op: read by another kernel of this view
+  std::vector<uint32_t> order;     // the live computed ops, in emission order
+  std::vector<uint32_t> pos;       // per op: its index in `order` (none: not emitted)
+  std::vector<uint32_t> cut;       // kernel k replays order[cut[k], cut[k + 1])
+  std::vector<uint8_t>  spill;     // per op: read by another kernel of this view
   uint64_t              size = 0;  // words of code (cut_kernels)
+  std::vector<uint8_t>  fold_state;  // per op: 0 not evaluated, 1 not a constant, 2 the constant fold_value
+  std::vector<uint64_t> fold_value;
   // The kernel that computes (or, for an input or a constant, may as well publish) `id`.
   size_t                kernel_of(uint32_t id) const {
     if (pos[id] == Tape::none || cut.size() < 2) {
@@ -1656,7 +2142,149 @@ struct View {
     return static_cast<size_t>(std::upper_bound(cut.begin(), cut.end(), pos[id]) - cut.begin()) - 1;
   }
   size_t count_live() const { return order.size(); }
+  // The constant op `id` is in this view, if fold() found one (lookup only: safe from the workers).
+  std::optional<uint64_t> folded(uint32_t id) const {
+    return id < fold_state.size() && fold_state[id] == 2 ? std::optional<uint64_t>(fold_value[id]) : std::nullopt;
+  }
 };
+
+// Evaluate op `id` at the view's clock level when that makes it a constant. Deliberately small: the
+// values that matter are one-bit gate/enable cones (`clk & en`, `!clk`), and a wrong fold would be a
+// wrong simulation, so anything not obviously exact is "not a constant".
+std::optional<uint64_t> fold(const Tape& t, View& v, uint32_t id, int depth = 0) {
+  using K = Tape::K;
+  if (v.fold_state.size() != t.ops.size()) {
+    v.fold_state.assign(t.ops.size(), 0);
+    v.fold_value.assign(t.ops.size(), 0);
+  }
+  if (v.fold_state[id] != 0) {
+    return v.folded(id);
+  }
+  const auto&             o    = t.ops[id];
+  const auto              mask = [](uint32_t w) { return w >= 64 ? ~uint64_t{0} : (uint64_t{1} << w) - 1; };
+  std::optional<uint64_t> r;
+  if (o.width >= 1 && o.width <= 64 && depth < 128) {
+    const auto get = [&](const Tape::Ref& x) -> std::optional<uint64_t> {
+      // an operand is usable when its view is the op it names, unsigned, at that op's own width
+      if (x.id == Tape::none || x.width != t.ops[x.id].width || x.width > 64) {
+        return std::nullopt;
+      }
+      return fold(t, v, x.id, depth + 1);
+    };
+    switch (o.kind) {
+      case K::clock   : r = static_cast<uint64_t>(v.level); break;
+      case K::constant: r = o.imm & mask(o.width); break;
+      case K::resize:
+        if (auto a = get(o.a); a && (o.a.unsign || ((*a >> (o.a.width - 1)) & 1) == 0)) {
+          r = *a & mask(o.width);
+        }
+        break;
+      case K::unary_not:
+        if (auto a = get(o.a); a && o.a.width == o.width) {
+          r = ~*a & mask(o.width);
+        }
+        break;
+      case K::reduce_or:
+        if (auto a = get(o.a)) {
+          r = *a != 0 ? 1 : 0;
+        }
+        break;
+      case K::binary: {
+        const auto op   = static_cast<Op>(o.bop);
+        const bool same = o.a.width == o.b.width && o.a.unsign && o.b.unsign;
+        const auto a    = get(o.a);
+        const auto b    = get(o.b);
+        if (!same) {
+          break;
+        }
+        if (op == Op::bit_and && o.a.width == o.width) {
+          if ((a && *a == 0) || (b && *b == 0)) {
+            r = 0;
+          } else if (a && b) {
+            r = *a & *b;
+          }
+        } else if (op == Op::bit_or && o.a.width == o.width) {
+          if ((a && *a == mask(o.width)) || (b && *b == mask(o.width))) {
+            r = mask(o.width);
+          } else if (a && b) {
+            r = *a | *b;
+          }
+        } else if (op == Op::bit_xor && o.a.width == o.width && a && b) {
+          r = *a ^ *b;
+        } else if ((op == Op::eq || op == Op::ne) && a && b) {
+          r = ((*a == *b) == (op == Op::eq)) ? 1 : 0;
+        }
+        break;
+      }
+      case K::mux:
+        if (auto sel = get(o.a)) {
+          const auto& arm = *sel != 0 ? o.c : o.b;
+          if (arm.width == o.width && arm.unsign == o.unsign) {
+            r = get(arm);
+          }
+        }
+        break;
+      case K::latch:
+        if (auto en = get(o.a); en && *en != 0 && o.b.width == o.width && o.b.unsign == o.unsign) {
+          r = get(o.b);
+        }
+        break;
+      default: break;
+    }
+  }
+  v.fold_state[id] = r ? 2 : 1;
+  v.fold_value[id] = r ? *r : 0;
+  return r;
+}
+
+// The values op `id` reads IN THIS VIEW: none when it folded to a constant; a closed latch reads only
+// its held value and an open one only its data; a mux with a constant select reads one arm.
+template <class Fn>
+void view_operands(const Tape& t, const View& v, uint32_t id, Fn&& fn) {
+  using K       = Tape::K;
+  const auto& o = t.ops[id];
+  if (o.kind != K::array_write && o.kind != K::array_clear && v.folded(id)) {
+    return;
+  }
+  if (o.kind == K::latch) {
+    if (auto en = v.folded(o.a.id)) {
+      fn(*en != 0 ? o.b : o.c);
+      return;
+    }
+  } else if (o.kind == K::mux) {
+    if (auto sel = v.folded(o.a.id)) {
+      fn(*sel != 0 ? o.c : o.b);
+      return;
+    }
+  }
+  t.for_each_operand(o, fn);
+}
+
+// 0: the root publishes nothing in this view (its guard is a constant that is off); 1: a plain store
+// of `data` (the guard is a constant that is on); 2: as recorded.
+int root_mode(const View& v, const Root& root) {
+  if (root.guarded) {
+    if (auto g = v.folded(root.guard.id)) {
+      return ((*g != 0) != root.when_zero) ? 1 : 0;
+    }
+  }
+  return 2;
+}
+template <class Fn>
+void root_operands(const View& v, const Root& root, Fn&& fn) {
+  const auto mode = root_mode(v, root);
+  if (mode == 0) {
+    return;
+  }
+  if (!root.guarded) {
+    fn(root.value);
+    return;
+  }
+  if (mode == 2) {
+    fn(root.guard);
+  }
+  fn(root.data);
+}
 
 struct Kernel_job {
   std::string name, object;
@@ -1671,7 +2299,7 @@ struct Kernel_job {
 // CPU seconds per worker. Small kernels also run faster on a large design (less is live at once).
 uint32_t chunk_target() {
   static const uint32_t target = [] {
-    const char* text = livehd::debug::env<"LHD_SIM_LNAST_CHUNK">();  // debug: ops per kernel
+    const char* text = livehd::debug::env<"LHD_SIM_LNAST_CHUNK">();  // debug: words of code per kernel
     const auto  n    = text == nullptr ? 0ul : std::strtoul(text, nullptr, 10);
     return n == 0 ? 1250u : static_cast<uint32_t>(n);
   }();
@@ -1683,9 +2311,10 @@ uint32_t chunk_target() {
 // level is computed before any of the next, so nearly everything is live at once and a kernel is
 // mostly spills (dino: 878 of 2,990 instructions touched the stack). Depth first, a value is computed
 // right before the cone that consumes it. Only what a root needs is emitted, so this is also the
-// dead-code pass. A loop is one unit, emitted whole. A memory write (`side_effects`: the edge view)
-// is a root of its own and comes after every read of that memory, as the walk recorded it.
-void order_view(const Tape& t, View& v, bool side_effects) {
+// dead-code pass, and the order is the view's own: the tape is a dataflow graph (a latch's data may
+// be recorded after its readers), so nothing here relies on op numbers. A loop is one unit, emitted
+// whole. Throws when the view has a combinational cycle (two latches transparent in the same phase).
+void order_view(const Tape& t, View& v) {
   using K      = Tape::K;
   const auto n = static_cast<uint32_t>(t.ops.size());
   v.order.clear();
@@ -1703,14 +2332,15 @@ void order_view(const Tape& t, View& v, bool side_effects) {
     }
   }
   const auto                                           is_effect = [](K k) { return k == K::array_write || k == K::array_clear; };
-  // Memory order (the edge view): a memory is written in place, so its reads and writes keep the
-  // order they were recorded in. Per array, each write follows the write before it and every live
-  // read recorded since; each read follows the last write recorded before it (a byte-enable write is
-  // a chain of read-modify-writes of one entry: each lane must see the lane before it).
+  // Memory order (the view that writes memories): a memory is written in place, so its reads and
+  // writes keep the order they were recorded in. Per array, each write follows the write before it
+  // and every live read recorded since; each read follows the last write recorded before it (a
+  // byte-enable write is a chain of read-modify-writes of one entry: each lane must see the lane
+  // before it).
   std::vector<uint32_t>                                roots;
   absl::flat_hash_map<uint32_t, std::vector<uint32_t>> after;        // unit -> units it must follow
   absl::flat_hash_map<uint32_t, std::vector<uint32_t>> after_reads;  // write unit -> earlier reads (if live)
-  if (side_effects) {
+  if (v.effects) {
     struct Last {
       uint32_t              effect = Tape::none;
       std::vector<uint32_t> reads;
@@ -1748,7 +2378,11 @@ void order_view(const Tape& t, View& v, bool side_effects) {
     out.clear();
     const auto last = loop_last.contains(u) ? loop_last.at(u) : u;
     for (uint32_t j = u; j <= last; ++j) {
-      t.for_each_operand(t.ops[j], [&](const Tape::Ref& r) {
+      (void)fold(t, v, j);
+      if (t.ops[j].kind == K::latch || t.ops[j].kind == K::mux) {
+        (void)fold(t, v, t.ops[j].a.id);
+      }
+      view_operands(t, v, j, [&](const Tape::Ref& r) {
         if (unit[r.id] != u && !Tape::is_free(t.ops[r.id].kind)) {
           out.push_back(unit[r.id]);
         }
@@ -1768,7 +2402,10 @@ void order_view(const Tape& t, View& v, bool side_effects) {
     }
   };
   for (const auto& root : v.roots) {
-    root.for_each_operand([&](const Tape::Ref& r) { roots.push_back(unit[r.id]); });
+    if (root.guarded) {
+      (void)fold(t, v, root.guard.id);
+    }
+    root_operands(v, root, [&](const Tape::Ref& r) { roots.push_back(unit[r.id]); });
   }
   std::ranges::sort(roots);
   roots.erase(std::unique(roots.begin(), roots.end()), roots.end());
@@ -1809,6 +2446,58 @@ void order_view(const Tape& t, View& v, bool side_effects) {
           done[child] = 1;
           stack.push_back({child, {}, 0});
           operands(child, stack.back().ops, &live);
+        } else if (done[child] == 1) {
+          // name the latches on the ring: the units on the stack from `child` up
+          std::string ring;
+          size_t      from = stack.size();
+          while (from > 0 && stack[from - 1].u != child) {
+            --from;
+          }
+          size_t shown = 0, ops_on_ring = 0;
+          for (size_t k = from > 0 ? from - 1 : 0; k < stack.size(); ++k) {
+            ++ops_on_ring;
+            const auto u = stack[k].u;
+            if (t.ops[u].kind == K::latch && shown < 8) {
+              const auto name  = t.names.find(u);
+              const auto en    = v.folded(t.ops[u].a.id);
+              ring            += std::format("{}{}({})",
+                                  shown++ ? " -> " : "",
+                                  name == t.names.end() ? std::format("latch#{}", u) : name->second,
+                                  en ? (*en != 0 ? "open" : "closed") : "enable not constant");
+            }
+          }
+          if (livehd::debug::env<"LHD_SIM_LNAST_DEBUG">() != nullptr) {  // the enable cone of each latch on the ring
+            static const char* const kinds[]
+                = {"input", "const", "constw", "resize", "concat", "not",    "ror",  "count", "insert", "sext",  "binary",
+                   "mux",   "aread", "awrite", "aclear", "lbegin", "lindex", "lphi", "lend",  "lfinal", "clock", "latch"};
+            std::function<void(uint32_t, int)> dump = [&](uint32_t id, int depth) {
+              const auto& o  = t.ops[id];
+              const auto  fc = v.folded(id);
+              std::fprintf(stderr,
+                           "%*s#%u %s/%u w%u %s%s\n",
+                           depth * 2,
+                           "",
+                           id,
+                           kinds[static_cast<int>(o.kind)],
+                           o.bop,
+                           o.width,
+                           fc ? std::format("= {}", *fc).c_str() : "?",
+                           t.names.contains(id) ? (" " + t.names.at(id)).c_str() : "");
+              if (depth < 5 && o.kind != K::latch) {
+                t.for_each_operand(o, [&](const Tape::Ref& r) { dump(r.id, depth + 1); });
+              }
+            };
+            for (size_t k = from > 0 ? from - 1 : 0; k < stack.size(); ++k) {
+              if (t.ops[stack[k].u].kind == K::latch) {
+                std::fprintf(stderr, "ring latch #%u enable:\n", stack[k].u);
+                dump(t.ops[stack[k].u].a.id, 1);
+              }
+            }
+          }
+          bail(std::format("combinational cycle of {} values while the clock is {}, through transparent latches: {}",
+                           ops_on_ring,
+                           v.level != 0 ? "high" : "low",
+                           ring.empty() ? std::string("(none: a memory read/write order ring)") : ring));
         }
         continue;
       }
@@ -1827,7 +2516,8 @@ void cut_kernels(const Tape& t, View& v) {
   const auto n = static_cast<uint32_t>(v.order.size());
   v.cut.clear();
   v.spill.assign(t.ops.size(), 0);
-  if (n == 0 && v.roots.empty()) {
+  const bool any_root = std::ranges::any_of(v.roots, [&](const Root& r) { return root_mode(v, r) != 0; });
+  if (n == 0 && !any_root) {
     return;
   }
   absl::flat_hash_set<uint32_t> loop_tail;  // an op of a loop other than its last one: no cut after it
@@ -1850,7 +2540,7 @@ void cut_kernels(const Tape& t, View& v) {
   {
     std::vector<uint32_t> last_use(t.ops.size(), 0);
     for (uint32_t p = 0; p < n; ++p) {
-      t.for_each_operand(t.ops[v.order[p]], [&](const Tape::Ref& r) { last_use[r.id] = std::max(last_use[r.id], p); });
+      view_operands(t, v, v.order[p], [&](const Tape::Ref& r) { last_use[r.id] = std::max(last_use[r.id], p); });
     }
     for (uint32_t p = 0; p < n; ++p) {
       const auto id = v.order[p];
@@ -1901,7 +2591,7 @@ void cut_kernels(const Tape& t, View& v) {
   for (uint32_t p = 0; p < n; ++p) {
     const auto i    = v.order[p];
     const auto mine = v.kernel_of(i);
-    t.for_each_operand(t.ops[i], [&](const Tape::Ref& r) {
+    view_operands(t, v, i, [&](const Tape::Ref& r) {
       if (!Tape::is_free(t.ops[r.id].kind) && v.kernel_of(r.id) != mine) {
         v.spill[r.id] = 1;
       }
@@ -1910,8 +2600,8 @@ void cut_kernels(const Tape& t, View& v) {
   // A result is published by the last kernel that computes one of its operands; the others cross.
   for (auto& root : v.roots) {
     root.kernel = 0;
-    root.for_each_operand([&](const Tape::Ref& r) { root.kernel = std::max(root.kernel, v.kernel_of(r.id)); });
-    root.for_each_operand([&](const Tape::Ref& r) {
+    root_operands(v, root, [&](const Tape::Ref& r) { root.kernel = std::max(root.kernel, v.kernel_of(r.id)); });
+    root_operands(v, root, [&](const Tape::Ref& r) {
       if (!Tape::is_free(t.ops[r.id].kind) && v.kernel_of(r.id) != root.kernel) {
         v.spill[r.id] = 1;
       }
@@ -1922,8 +2612,8 @@ void cut_kernels(const Tape& t, View& v) {
 // Replay order[begin, end) of `view` into one state kernel and write its object. Returns the
 // instruction count; throws Unsupported.
 size_t build_kernel(const Tape& t, const Kernel_job& job, const std::vector<size_t>& slot, size_t words) {
-  const View& v   = *job.view;
-  using K         = Tape::K;
+  const View& v                              = *job.view;
+  using K                                    = Tape::K;
   const auto here = [&](uint32_t id) { return v.pos[id] != Tape::none && v.pos[id] >= job.begin && v.pos[id] < job.end; };
   std::vector<Cgen_llvm::State_input>   layout;
   absl::flat_hash_map<uint32_t, size_t> in_index;
@@ -1933,7 +2623,7 @@ size_t build_kernel(const Tape& t, const Kernel_job& job, const std::vector<size
       if (in_index.try_emplace(id, layout.size()).second) {
         layout.push_back({t.locs[d.imm], d.width, d.unsign, 0});
       }
-    } else if (!Tape::is_free(d.kind) && !here(id)) {
+    } else if (!Tape::is_free(d.kind) && !here(id) && !v.folded(id)) {
       if (in_index.try_emplace(id, layout.size()).second) {
         if (slot[id] == Tape::none) {
           bail("internal: a value crosses kernels without a state word");
@@ -1943,14 +2633,14 @@ size_t build_kernel(const Tape& t, const Kernel_job& job, const std::vector<size
     }
   };
   for (uint32_t p = job.begin; p < job.end; ++p) {
-    t.for_each_operand(t.ops[v.order[p]], [&](const Tape::Ref& r) { need(r.id); });
+    view_operands(t, v, v.order[p], [&](const Tape::Ref& r) { need(r.id); });
   }
   std::vector<const Root*> my_roots;
   for (const auto& root : v.roots) {
-    if (root.kernel == job.index) {
+    if (root.kernel == job.index && root_mode(v, root) != 0) {
       my_roots.push_back(&root);
-      root.for_each_operand([&](const Tape::Ref& r) { need(r.id); });
-      if (root.guarded && root.loc != root.home) {
+      root_operands(v, root, [&](const Tape::Ref& r) { need(r.id); });
+      if (root.guarded && root.loc != root.home && root_mode(v, root) == 2) {
         need(root.hold.id);  // published as the mux: it reads the register
       }
     }
@@ -1967,7 +2657,9 @@ size_t build_kernel(const Tape& t, const Kernel_job& job, const std::vector<size
     if (it == map.end()) {
       const auto& d = t.ops[r.id];
       V           made;
-      if (d.kind == K::constant) {
+      if (auto c = v.folded(r.id)) {  // a constant in this view (the clock, and what it decides)
+        made = k.constant(d.width, *c, d.unsign);
+      } else if (d.kind == K::constant) {
         made = k.constant(d.width, d.imm, d.unsign);
       } else if (d.kind == K::constant_words) {
         made = k.constant_words(d.width, std::vector<uint64_t>(t.words.begin() + d.x, t.words.begin() + d.x + d.n), d.unsign);
@@ -1995,10 +2687,14 @@ size_t build_kernel(const Tape& t, const Kernel_job& job, const std::vector<size
   for (uint32_t p = job.begin; p < job.end; ++p) {
     const auto  i = v.order[p];
     const auto& o = t.ops[i];
+    if (o.kind != K::array_write && o.kind != K::array_clear && v.folded(i)) {
+      continue;  // a constant in this view: made on demand
+    }
     switch (o.kind) {
       case K::input:
       case K::constant:
-      case K::constant_words: break;  // on demand
+      case K::constant_words:
+      case K::clock         : break;  // on demand
       case K::resize        : made(i, k.resize(val(o.a), o.width, o.unsign)); break;
       case K::concat        : {
         std::vector<V> lanes;
@@ -2022,8 +2718,22 @@ size_t build_kernel(const Tape& t, const Kernel_job& job, const std::vector<size
         break;
       case K::sign_extend: made(i, k.sign_extend_from(val(o.a), static_cast<uint32_t>(o.imm), o.width, o.unsign)); break;
       case K::binary     : made(i, k.binary(static_cast<Op>(o.bop), val(o.a), val(o.b), o.width, o.unsign)); break;
-      case K::mux        : made(i, k.mux(val(o.a), val(o.b), val(o.c), o.width, o.unsign)); break;
-      case K::array_read : made(i, k.array_read(array_of(o.imm), val(o.a), o.width, o.unsign)); break;
+      case K::mux:
+        if (auto sel = v.folded(o.a.id)) {
+          made(i, k.resize(val(*sel != 0 ? o.c : o.b), o.width, o.unsign));
+        } else {
+          made(i, k.mux(val(o.a), val(o.b), val(o.c), o.width, o.unsign));
+        }
+        break;
+      case K::latch:
+        // closed in this view: the held value; open: the data; else whichever the enable says
+        if (auto en = v.folded(o.a.id)) {
+          made(i, k.resize(val(*en != 0 ? o.b : o.c), o.width, o.unsign));
+        } else {
+          made(i, k.mux(val(o.a), val(o.c), val(o.b), o.width, o.unsign));
+        }
+        break;
+      case K::array_read: made(i, k.array_read(array_of(o.imm), val(o.a), o.width, o.unsign)); break;
       case K::array_write:
         if (!k.array_write(array_of(o.imm), val(o.a), val(o.b), val(o.c))) {
           bail("memory write");
@@ -2078,7 +2788,7 @@ size_t build_kernel(const Tape& t, const Kernel_job& job, const std::vector<size
   std::string error;
   for (uint32_t p = job.begin; p < job.end; ++p) {
     const auto i = v.order[p];
-    if (v.spill[i] != 0) {
+    if (v.spill[i] != 0 && !v.folded(i)) {
       const auto& d = t.ops[i];
       if (!k.add_state_output(t.locs[slot[i]], t.locs[slot[i]], val(Tape::Ref{i, d.width, d.unsign}), {}, error)) {
         bail("kernel boundary value: " + error);
@@ -2087,9 +2797,12 @@ size_t build_kernel(const Tape& t, const Kernel_job& job, const std::vector<size
   }
   for (const auto* root : my_roots) {
     const auto word = t.locs[root->loc];
+    const auto mode = root_mode(v, *root);
     bool       ok   = false;
     if (!root->guarded) {
       ok = k.add_state_output(word, word, val(root->value), {}, error);
+    } else if (mode == 1) {  // the guard is a constant that is on
+      ok = k.add_state_output(word, word, k.resize(val(root->data), root->value.width, root->value.unsign), {}, error);
     } else if (root->loc == root->home) {
       ok = k.add_state_output_if(val(root->guard),
                                  root->when_zero,
@@ -2126,6 +2839,18 @@ Result Gen::run(const Sim_objects& out) {
     top_ = build_frame(top_ln_, "");
     timer.lap("collect (decls/attrs/frames)");
     fr_  = top_;
+    {
+      std::string clocks;
+      size_t      count = 0;
+      for (const auto& f : top_->in) {
+        if (top_->clocks.contains(f.name)) {
+          clocks += (count++ ? ", " : "") + f.name;
+        }
+      }
+      if (count > 1) {
+        bail("several clock inputs (" + clocks + "): one root clock is modeled");
+      }
+    }
 
     // Every piece of state gets a LOCATION now and a word once the kernels are cut (see the layout
     // below). A Field's `word` holds its location until then.
@@ -2153,14 +2878,19 @@ Result Gen::run(const Sim_objects& out) {
     k_ = &tape;
     Env top_in;
     for (const auto& f : top_->in) {
-      if (!top_->clocks.contains(f.name)) {
-        top_in[f.name] = tape.input(f.word, f.bits, !f.sign);
-      }
+      top_in[f.name] = top_->clocks.contains(f.name) ? tape.clock() : tape.input(f.word, f.bits, !f.sign);
     }
     cur_.assign(regs_.size(), V{});
+    held_.assign(regs_.size(), V{});
     for (size_t i = 0; i < regs_.size(); ++i) {
-      if (regs_[i].mem_size == 0) {
-        cur_[i] = tape.input(regs_[i].field.word, regs_[i].field.bits, !regs_[i].field.sign);
+      if (regs_[i].mem_size != 0) {
+        continue;
+      }
+      const V stored = tape.input(regs_[i].field.word, regs_[i].field.bits, !regs_[i].field.sign);
+      held_[i]       = stored;
+      cur_[i]        = regs_[i].latch ? tape.latch(stored, i) : stored;  // a latch reads as its transparent value
+      if (regs_[i].latch) {
+        tape.names[static_cast<uint32_t>(cur_[i].id)] = regs_[i].field.name;
       }
     }
     next_.assign(regs_.size(), V{});
@@ -2175,18 +2905,33 @@ Result Gen::run(const Sim_objects& out) {
     Env pre = env;
     exec_block(top_->stmts, env);
     finish_frame(*top_, pre, env);
+    for (const auto id : latch_ops_) {
+      if (tape.ops[id].a.id == Tape::none) {
+        bail("internal: a latch was never completed");
+      }
+    }
+    bypass_exclusive_latches();
     timer.lap("walk");
 
-    View edge, settle;
-    edge.tag                      = "e";
+    // The views of one clock period: `rise` runs with the clock low and ends in the rising edge
+    // (posedge registers, memory writes); `fall` runs with it high and ends in the falling edge
+    // (negedge registers), and exists only when something happens there; `settle` runs with it low
+    // again and publishes the outputs. A latch follows its data in whichever views it is open.
+    View rise, fall, settle;
+    rise.tag                      = "e";
+    rise.level                    = 0;
+    rise.effects                  = true;
+    fall.tag                      = "f";
+    fall.level                    = 1;
     settle.tag                    = "s";
+    settle.level                  = 0;
     const bool          no_guards = livehd::debug::env<"LHD_SIM_LNAST_NO_GUARD">() != nullptr;  // debug A/B: plain stores only
-    // A register's next value is stored straight into the register when no later kernel still reads
-    // the old value; otherwise into a pending location the commit kernel copies. Decided once the
-    // kernels are cut: until then every register publishes into a pending location of its own.
+    // A register's next value is stored straight into the register when no later kernel of its edge
+    // view still reads the old value; otherwise into a pending location the commit kernel copies.
+    // Decided once the kernels are cut: until then every register publishes into a pending location.
     std::vector<size_t> pending(regs_.size(), Tape::none);
     for (size_t i = 0; i < regs_.size(); ++i) {
-      if (regs_[i].mem_size != 0) {
+      if (regs_[i].mem_size != 0 || regs_[i].latch) {
         continue;
       }
       if (next_[i].width == 0) {
@@ -2206,7 +2951,7 @@ Result Gen::run(const Sim_objects& out) {
         root.data      = root.when_zero ? m.b : m.c;
         root.hold      = Tape::ref(cur_[i]);
       }
-      edge.roots.push_back(root);
+      (regs_[i].negedge ? fall : rise).roots.push_back(root);
     }
     for (auto& f : top_->out) {
       auto it = env.find(f.name);
@@ -2219,35 +2964,53 @@ Result Gen::run(const Sim_objects& out) {
       settle.roots.push_back(root);
     }
     k_ = nullptr;
-
-    // The commit kernel reads each distinct reset condition: keep those values alive through the edge.
-    std::vector<uint32_t> reset_conditions;
-    for (const auto& item : reset_items_) {
-      const auto id = static_cast<uint32_t>(item.active.id);
-      if (std::ranges::find(reset_conditions, id) == reset_conditions.end()) {
-        reset_conditions.push_back(id);
+    // A latch's held value follows in every view where the latch can be open: `if (enable) held =
+    // data`, in place. After the fall that only matters when the enable is not just the clock phase:
+    // a latch that is simply open while the clock is low is written again, before anything can read
+    // what it held, by the next rise view.
+    for (const auto& u : latch_updates_) {
+      for (View* v : {&rise, &fall, &settle}) {
+        const auto open = fold(tape, *v, static_cast<uint32_t>(u.guard.id));
+        if ((open && *open == 0) || (v == &settle && open)) {
+          continue;
+        }
+        Root root;
+        root.value   = Tape::Ref{static_cast<uint32_t>(u.data.id), u.bits, u.unsign};
+        root.loc     = u.loc;
+        root.home    = u.loc;
+        root.guarded = true;
+        root.guard   = Tape::ref(u.guard);
+        root.data    = Tape::ref(u.data);
+        v->roots.push_back(root);
       }
     }
+
+    // Each commit kernel reads the distinct reset conditions of its registers: keep those values
+    // alive through its view.
     std::vector<size_t> slot(tape.ops.size(), Tape::none);
     auto                give_slot = [&](uint32_t id) {
       if (slot[id] == Tape::none && !Tape::is_free(tape.ops[id].kind)) {
         slot[id] = tape.new_loc(tape.ops[id].width);
       }
     };
-    for (const auto id : reset_conditions) {
-      give_slot(id);
-      if (slot[id] != Tape::none) {
-        Root root;
-        root.value = Tape::Ref{id, tape.ops[id].width, tape.ops[id].unsign};
-        root.loc   = slot[id];
-        edge.roots.push_back(root);
+    std::vector<uint32_t> reset_conditions[2];  // [0]: rise, [1]: fall
+    for (const auto& item : reset_items_) {
+      auto&      list = reset_conditions[regs_[item.idx].negedge ? 1 : 0];
+      const auto id   = static_cast<uint32_t>(item.active.id);
+      if (std::ranges::find(list, id) == list.end()) {
+        list.push_back(id);
+        give_slot(id);
+        if (slot[id] != Tape::none) {
+          Root root;
+          root.value = Tape::Ref{id, tape.ops[id].width, tape.ops[id].unsign};
+          root.loc   = slot[id];
+          (regs_[item.idx].negedge ? fall : rise).roots.push_back(root);
+        }
       }
     }
-    order_view(tape, edge, true);
-    order_view(tape, settle, false);
-    cut_kernels(tape, edge);
-    cut_kernels(tape, settle);
-    for (const View* v : {&edge, &settle}) {
+    for (View* v : {&rise, &fall, &settle}) {
+      order_view(tape, *v);
+      cut_kernels(tape, *v);
       for (uint32_t i = 0; i < v->spill.size(); ++i) {
         if (v->spill[i] != 0) {
           give_slot(i);
@@ -2255,15 +3018,14 @@ Result Gen::run(const Sim_objects& out) {
       }
     }
 
-    // In place: the kernel that publishes register i's next value is the last edge kernel to read Q(i)
-    // (a kernel loads what it reads before it stores anything).
+    // In place: the kernel that publishes register i's next value is the last kernel of its edge view
+    // to read Q(i) (a kernel loads what it reads before it stores anything).
     size_t in_place = 0;
-    {
-      const auto kernel_of = [&](uint32_t id) { return static_cast<std::ptrdiff_t>(edge.kernel_of(id)); };
+    for (View* v : {&rise, &fall}) {
       absl::flat_hash_map<uint32_t, std::ptrdiff_t> last_reader;  // input op -> last kernel reading it
-      for (const auto i : edge.order) {
-        const auto mine = kernel_of(i);
-        tape.for_each_operand(tape.ops[i], [&](const Tape::Ref& r) {
+      for (const auto i : v->order) {
+        const auto mine = static_cast<std::ptrdiff_t>(v->kernel_of(i));
+        view_operands(tape, *v, i, [&](const Tape::Ref& r) {
           if (tape.ops[r.id].kind == Tape::K::input) {
             auto& last = last_reader[r.id];
             last       = std::max<std::ptrdiff_t>(last, mine);
@@ -2271,8 +3033,8 @@ Result Gen::run(const Sim_objects& out) {
         });
       }
       absl::flat_hash_map<size_t, std::ptrdiff_t> writer;  // pending location -> the kernel publishing it
-      for (const auto& root : edge.roots) {
-        root.for_each_operand([&](const Tape::Ref& r) {
+      for (const auto& root : v->roots) {
+        root_operands(*v, root, [&](const Tape::Ref& r) {
           if (tape.ops[r.id].kind == Tape::K::input) {
             auto& last = last_reader[r.id];
             last       = std::max<std::ptrdiff_t>(last, static_cast<std::ptrdiff_t>(root.kernel));
@@ -2282,7 +3044,7 @@ Result Gen::run(const Sim_objects& out) {
       }
       absl::flat_hash_map<size_t, size_t> redirect;  // pending location -> the register's own
       for (size_t i = 0; i < regs_.size(); ++i) {
-        if (regs_[i].mem_size != 0) {
+        if (pending[i] == Tape::none || regs_[i].negedge != (v == &fall)) {
           continue;
         }
         const auto reader = last_reader.find(static_cast<uint32_t>(cur_[i].id));
@@ -2292,15 +3054,15 @@ Result Gen::run(const Sim_objects& out) {
           ++in_place;
         }
       }
-      for (auto& root : edge.roots) {
+      for (auto& root : v->roots) {
         if (auto it = redirect.find(root.loc); it != redirect.end()) {
           root.loc = it->second;
         }
       }
     }
 
-    // ---- layout: inputs; registers written in place; the others twice (current, then pending: the
-    // commit is one copy); memories; outputs; the words kernels pass values through ----
+    // ---- layout: inputs; registers written in place; per edge, the others twice (current, then
+    // pending: that commit is one copy); memories; outputs; the words kernels pass values through ----
     auto place = [&](size_t loc) {
       if (tape.locs[loc] == Tape::none) {
         tape.locs[loc]  = words_;
@@ -2317,21 +3079,26 @@ Result Gen::run(const Sim_objects& out) {
         place(regs_[i].field.word);
       }
     }
-    const size_t q_base = words_;
-    for (size_t i = 0; i < regs_.size(); ++i) {
-      if (regs_[i].mem_size == 0 && pending[i] != Tape::none) {
-        place(regs_[i].field.word);
+    size_t q_base[2] = {0, 0}, d_base[2] = {0, 0}, q_words[2] = {0, 0};
+    for (int e = 0; e < 2; ++e) {
+      const auto mine
+          = [&](size_t i) { return regs_[i].mem_size == 0 && pending[i] != Tape::none && regs_[i].negedge == (e == 1); };
+      q_base[e] = words_;
+      for (size_t i = 0; i < regs_.size(); ++i) {
+        if (mine(i)) {
+          place(regs_[i].field.word);
+        }
       }
-    }
-    const size_t q_words = words_ - q_base;
-    const size_t d_base  = words_;
-    for (size_t i = 0; i < regs_.size(); ++i) {
-      if (regs_[i].mem_size == 0 && pending[i] != Tape::none) {
-        place(pending[i]);
+      q_words[e] = words_ - q_base[e];
+      d_base[e]  = words_;
+      for (size_t i = 0; i < regs_.size(); ++i) {
+        if (mine(i)) {
+          place(pending[i]);
+        }
       }
     }
     for (size_t loc = 0; loc < tape.locs.size(); ++loc) {
-      place(loc);  // memories, outputs and boundary words, in creation order
+      place(loc);  // memories, outputs, clock-gate latches and boundary words, in creation order
     }
     for (auto& f : top_->in) {
       if (!top_->clocks.contains(f.name)) {
@@ -2349,8 +3116,8 @@ Result Gen::run(const Sim_objects& out) {
     // ---- kernels: replayed and compiled on the shared workers ----
     const auto              stem = out.object.ends_with(".llvm.o") ? out.object.substr(0, out.object.size() - 7) : out.object;
     std::vector<Kernel_job> jobs;
-    for (const View* v : {&edge, &settle}) {
-      auto& names = v == &edge ? res.edge_functions : res.settle_functions;
+    for (const View* v : {&rise, &fall, &settle}) {
+      auto& names = v == &rise ? res.edge_functions : v == &fall ? res.fall_functions : res.settle_functions;
       for (size_t c = 0; c + 1 < v->cut.size(); ++c) {
         Kernel_job job;
         job.name   = std::format("{}_{}{}", out.symbol, v->tag, c);
@@ -2395,29 +3162,39 @@ Result Gen::run(const Sim_objects& out) {
     }
     timer.lap("kernels (LLVM, parallel)");
 
-    // ---- the commit kernel: next state becomes state; a register in reset takes its initial value ----
-    if (q_words != 0 || !reset_items_.empty()) {
+    // ---- the commit kernels: next state becomes state; a register in reset takes its initial value ----
+    for (int e = 0; e < 2; ++e) {
+      const auto& conditions = reset_conditions[e];
+      if (q_words[e] == 0 && conditions.empty()) {
+        continue;
+      }
+      const View&                         v = e == 0 ? rise : fall;
       std::vector<Cgen_llvm::State_input> layout;
-      for (const auto id : reset_conditions) {
+      for (const auto id : conditions) {
         const auto& d = tape.ops[id];
         layout.push_back({tape.locs[d.kind == Tape::K::input ? static_cast<size_t>(d.imm) : slot[id]], d.width, d.unsign, 0});
       }
-      res.commit_function = out.symbol + "_c";
-      Cgen_llvm      k(res.commit_function, Cgen_llvm::State_layout{words, layout});
+      auto& name = e == 0 ? res.commit_function : res.fall_commit_function;
+      name       = out.symbol + (e == 0 ? "_c" : "_d");
+      Cgen_llvm      k(name, Cgen_llvm::State_layout{words, layout});
       std::string    error;
-      // The reset conditions were stored by the edge kernels: read them before the copy below.
+      // The reset conditions were stored by this edge's kernels: read them before the copy below.
       std::vector<V> active;
-      for (size_t i = 0; i < reset_conditions.size(); ++i) {
-        const auto& d = tape.ops[reset_conditions[i]];
-        active.push_back(d.kind == Tape::K::constant ? k.constant(d.width, d.imm, d.unsign) : k.input(i));
+      for (size_t i = 0; i < conditions.size(); ++i) {
+        const auto& d = tape.ops[conditions[i]];
+        if (auto c = v.folded(conditions[i])) {
+          active.push_back(k.constant(d.width, *c, d.unsign));
+        } else {
+          active.push_back(d.kind == Tape::K::constant ? k.constant(d.width, d.imm, d.unsign) : k.input(i));
+        }
       }
-      if (!k.copy_state(q_base, d_base, q_words, error)) {
+      if (!k.copy_state(q_base[e], d_base[e], q_words[e], error)) {
         bail("commit: " + error);
       }
-      for (size_t i = 0; i < reset_conditions.size(); ++i) {
+      for (size_t i = 0; i < conditions.size(); ++i) {
         std::vector<std::pair<size_t, V>> stores;
         for (const auto& item : reset_items_) {
-          if (item.active.id == reset_conditions[i]) {
+          if (item.active.id == conditions[i] && regs_[item.idx].negedge == (e == 1)) {
             const auto& f = regs_[item.idx].field;
             stores.emplace_back(f.word, k.constant_words(f.bits, twos_words(item.init, f.bits), !f.sign));
           }
@@ -2426,28 +3203,33 @@ Result Gen::run(const Sim_objects& out) {
           bail("commit: register reset");
         }
       }
-      const auto object = stem + "-c.llvm.o";
+      const auto object = stem + (e == 0 ? "-c.llvm.o" : "-d.llvm.o");
       if (!k.write_object(object, error, true, object.substr(0, object.size() - 1) + "k")) {
         bail("llvm: " + error);
       }
       res.instructions += k.instruction_count();
       res.objects.push_back(object);
     }
-    timer.lap("commit kernel");
+    timer.lap("commit kernels");
     if (timer.on) {
       std::fprintf(stderr,
-                   "lnast_llvm: %zu ops (%zu edge, %zu settle live; %llu + %llu words of code), %zu edge + %zu settle kernels, %zu "
-                   "state words, %zu registers in place, %zu words copied at commit\n",
+                   "lnast_llvm: %zu ops (%zu rise, %zu fall, %zu settle live; %llu + %llu + %llu words of code), %zu + %zu + %zu "
+                   "kernels, %zu state words, %zu registers in place, %zu + %zu words copied at commit, %zu latches\n",
                    tape.ops.size(),
-                   edge.count_live(),
+                   rise.count_live(),
+                   fall.count_live(),
                    settle.count_live(),
-                   static_cast<unsigned long long>(edge.size),
+                   static_cast<unsigned long long>(rise.size),
+                   static_cast<unsigned long long>(fall.size),
                    static_cast<unsigned long long>(settle.size),
                    res.edge_functions.size(),
+                   res.fall_functions.size(),
                    res.settle_functions.size(),
                    words,
                    in_place,
-                   q_words);
+                   q_words[0],
+                   q_words[1],
+                   latch_ops_.size());
     }
 
     std::vector<Field> state_inputs;
@@ -2476,6 +3258,15 @@ Result Gen::run(const Sim_objects& out) {
       }
       reg_fields.push_back(f);
     }
+    for (const auto& h : hidden_) {  // a clock gate's enable latch: state like any other (checkpoints)
+      Field f;
+      f.name     = h.name;
+      f.bits     = 1;
+      f.word     = tape.locs[h.loc];
+      f.has_init = true;
+      f.init_words.assign(1, 0);
+      reg_fields.push_back(f);
+    }
     if (!out.json.empty()) {
       std::ofstream js(out.json);
       auto          dump = [&](const char* key, const std::vector<Field>& v, bool with_init) {
@@ -2499,6 +3290,8 @@ Result Gen::run(const Sim_objects& out) {
       };
       js << "{\n  \"words\": " << words << ",\n  \"commit\": \"" << res.commit_function << "\",\n";
       list("edge", res.edge_functions);
+      list("fall", res.fall_functions);
+      js << "  \"fall_commit\": \"" << res.fall_commit_function << "\",\n";
       list("settle", res.settle_functions);
       list("objects", res.objects);
       dump("inputs", state_inputs, false);

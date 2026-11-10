@@ -163,7 +163,8 @@ int main(int argc, char** argv) {
     }
     return true;
   };
-  if (!resolve("edge", edge) || !resolve("commit", edge) || !resolve("settle", settle)) {
+  if (!resolve("edge", edge) || !resolve("commit", edge) || !resolve("fall", edge) || !resolve("fall_commit", edge)
+      || !resolve("settle", settle)) {
     return 1;
   }
   const auto entry = [&](uint64_t* state, void** resources) {

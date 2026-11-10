@@ -47,6 +47,61 @@ bool plain_name(std::string_view name) {
   return !name.empty() && name.find('.') == std::string_view::npos && livehd::cpp_ident(name) == name;
 }
 
+// A port name: an identifier, or a tuple leaf `bundle.inner.leaf`, the driver's `__in.bundle.inner.leaf`.
+bool port_name(std::string_view name) {
+  for (;;) {
+    const auto dot = name.find('.');
+    if (!plain_name(name.substr(0, dot))) {
+      return false;
+    }
+    if (dot == std::string_view::npos) {
+      return true;
+    }
+    name.remove_prefix(dot + 1);
+  }
+}
+
+// The members of a port struct: plain ports as fields, tuple leaves as nested structs, one per
+// bundle (members in first-appearance order).
+struct Port_tree {
+  std::string                                    type;  // a leaf's Slop type
+  std::vector<std::pair<std::string, Port_tree>> members;
+  Port_tree&                                     member(const std::string& name) {
+    for (auto& [n, m] : members) {
+      if (n == name) {
+        return m;
+      }
+    }
+    members.emplace_back(name, Port_tree{});
+    return members.back().second;
+  }
+  std::string text(int depth) const {
+    std::string out;
+    const auto  pad = std::string(static_cast<size_t>(depth) * 2, ' ');
+    for (const auto& [name, m] : members) {
+      if (m.members.empty()) {
+        out += std::format("{}{} {}{{}};\n", pad, m.type, name);
+      } else {
+        out += std::format("{}struct {{\n{}{}}} {}{{}};\n", pad, m.text(depth + 1), pad, name);
+      }
+    }
+    return out;
+  }
+};
+std::string port_members(const std::vector<Field>& ports) {
+  Port_tree root;
+  for (const auto& f : ports) {
+    Port_tree*       at   = &root;
+    std::string_view name = f.name;
+    for (auto dot = name.find('.'); dot != std::string_view::npos; dot = name.find('.')) {
+      at = &at->member(std::string(name.substr(0, dot)));
+      name.remove_prefix(dot + 1);
+    }
+    at->member(std::string(name)).type = slop_type(f);
+  }
+  return root.text(2);
+}
+
 }  // namespace
 
 Sim_emitted emit_sim(const Sim_request& request) {
@@ -236,13 +291,13 @@ Sim_emitted emit_sim(const Sim_request& request) {
       return fail(gen.why);
     }
     for (const auto& f : gen.inputs) {
-      if (!plain_name(f.name)) {
-        return fail(std::format("port '{}' is not a plain identifier", f.name));
+      if (!port_name(f.name)) {
+        return fail(std::format("port '{}' is not an identifier or a tuple leaf", f.name));
       }
     }
     for (const auto& f : gen.outputs) {
-      if (!plain_name(f.name)) {
-        return fail(std::format("port '{}' is not a plain identifier", f.name));
+      if (!port_name(f.name)) {
+        return fail(std::format("port '{}' is not an identifier or a tuple leaf", f.name));
       }
     }
     for (const auto& c : gen.clocks) {
@@ -260,13 +315,9 @@ Sim_emitted emit_sim(const Sim_request& request) {
     for (const auto& c : gen.clocks) {
       h += std::format("    Slop_u<1> {}{{}};\n    bool {}__tick = true;\n", c, c);
     }
-    for (const auto& f : gen.inputs) {
-      h += std::format("    {} {}{{}};\n", slop_type(f), f.name);
-    }
+    h += port_members(gen.inputs);
     h += "  };\n  struct Out {\n";
-    for (const auto& f : gen.outputs) {
-      h += std::format("    {} {}{{}};\n", slop_type(f), f.name);
-    }
+    h += port_members(gen.outputs);
     h += "  };\n  In __in{};\n  Out __out{};\n";
     h += std::format("  {}();\n", cls);
     h += "  void __push() {\n";
@@ -280,7 +331,7 @@ Sim_emitted emit_sim(const Sim_request& request) {
     h += "  }\n";
     h += "  void step() {\n    ++__gen;\n    __push();\n    __edge();\n    __settle_kernels();\n    __pull();\n  }\n";
     h += "  void __settle() {\n    __push();\n    __settle_kernels();\n    __pull();\n  }\n";
-    h += "  void __edge();            // next state, memory writes, commit\n";
+    h += "  void __edge();            // one clock: rise (next state, memory writes, commit), then fall\n";
     h += "  void __settle_kernels();  // outputs on the current state\n";
     h += "  void reset_cycle(bool zero_uninitialized = false);\n";
     h += "  void after_load() override;\n";
@@ -331,21 +382,26 @@ Sim_emitted emit_sim(const Sim_request& request) {
     }
     c += std::format("const __lnast_field fields[] = {{\n{}}};\n}}  // namespace\n", table);
     c += "extern \"C\" {\n";
-    for (const auto* list : {&gen.edge_functions, &gen.settle_functions}) {
+    for (const auto* list : {&gen.edge_functions, &gen.fall_functions, &gen.settle_functions}) {
       for (const auto& fn : *list) {
         c += std::format("void {}(std::uint64_t* state, void** resources);\n", fn);
       }
     }
-    if (!gen.commit_function.empty()) {
-      c += std::format("void {}(std::uint64_t* state, void** resources);\n", gen.commit_function);
+    for (const auto* commit : {&gen.commit_function, &gen.fall_commit_function}) {
+      if (!commit->empty()) {
+        c += std::format("void {}(std::uint64_t* state, void** resources);\n", *commit);
+      }
     }
     c += "}\n";
     c += std::format("void {}::__edge() {{\n  auto* s = st_.get();\n", cls);
-    for (const auto& fn : gen.edge_functions) {
-      c += std::format("  {}(s, nullptr);\n", fn);
-    }
-    if (!gen.commit_function.empty()) {
-      c += std::format("  {}(s, nullptr);\n", gen.commit_function);
+    for (const auto* list : {&gen.edge_functions, &gen.fall_functions}) {
+      for (const auto& fn : *list) {
+        c += std::format("  {}(s, nullptr);\n", fn);
+      }
+      const auto& commit = list == &gen.edge_functions ? gen.commit_function : gen.fall_commit_function;
+      if (!commit.empty()) {
+        c += std::format("  {}(s, nullptr);\n", commit);
+      }
     }
     c += std::format("}}\nvoid {}::__settle_kernels() {{\n  auto* s = st_.get();\n", cls);
     for (const auto& fn : gen.settle_functions) {

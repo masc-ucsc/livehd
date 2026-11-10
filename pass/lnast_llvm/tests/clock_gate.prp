@@ -1,0 +1,12 @@
+// A register on a gated clock next to one on the free clock: the gated one takes the edge only while
+// the enable held before the edge (the gate's latch is transparent while the clock is low).
+mod clock_gate(clk:Clock, en:Bool, d:U8) -> (q:U8@[0], cnt:U8@[0]) {
+  const g = Clock(clock_pin=clk, enable=en)
+  reg r:U8:[clock_pin=g] = 0
+  q = r
+  wrap r = r + d
+
+  reg c:U8:[clock_pin=clk] = 0
+  cnt = c
+  wrap c = c + 1
+}

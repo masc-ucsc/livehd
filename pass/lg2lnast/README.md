@@ -77,8 +77,11 @@ that form is verified by simulation (`lnast_llvm_diff_test`, `mem_bytes`) but LE
 round trip on an uninitialized memory, so it is not in the LEC list. A Sub instance cycle (the
 `fcall` form needs every argument before any output) is resolved by splicing the stuck instances
 into the graph in memory (`graph_util::Host_inliner`) and lowering again; `lgundef`, `fproperty`
-and `lgassert` markers are skipped. Known gaps: non-zero initial images, several clocks,
-forwarding/undefined orderings; Latch, Clock_cell, n-ary Mux/compare, LUT, compact loops with a break/continue or
+and `lgassert` markers are skipped. `Latch` cells are registers
+with `latch`/`enable`/`enable_high` attributes (the front end's `reg l:[latch=true, enable=g]`) and a
+`Clock_cell` is `Clock(clock_pin=clk, enable=en)`. Cells are ordered before any statement is built, so
+the probe for stuck instances builds nothing. Known gaps: non-zero initial images, several clocks,
+forwarding/undefined orderings; n-ary Mux/compare, LUT, compact loops with a break/continue or
 an activation, or a state element in the body.
 
 ## Milestone 3: LLVM straight from the typed LNAST
@@ -136,14 +139,35 @@ Acceptance: `//pass/lnast_llvm:lnast_llvm_diff_test` drives the same closed-form
 kernels (`lnast_llvm_run`) and into the inou.cgen.sim llvm flow (a generated Pyrope testbench
 importing the lg) and compares the per-cycle `TRACE` lines byte for byte.
 
-lhdsuite, checksum-gated against the inou.cgen.sim llvm backend (2026-11-10, opt build, 128 jobs):
+8. **Clock phases.** The root clock is a value on the tape (a constant in each view), so what reads
+   it folds: three views make one period -- *rise* (clock low, ending in the rising edge: posedge
+   registers, memory writes), *fall* (clock high, ending in the falling edge: negedge registers;
+   present only when something happens there) and *settle* (clock low again: the outputs). A clock
+   gate `Clock(clock_pin=clk, enable=en)` is what an ICG is, `clk & h` with the latch `h` following
+   `en` while `clk` is low; a register on a gated clock takes its edge only while every gate on the
+   way to the root clock is on (a hold, published under that condition like any enable).
+9. **Latches.** A latch reads as `enable ? data : held` in every view, and `held` follows under the
+   same enable, in place. The latch op is created when the walk first needs it and completed when its
+   data is known, so the tape is a dataflow graph and each view orders it for itself: a latch that is
+   closed in a view (its enable folds to 0 there) contributes only its held value. A level reset is a
+   mux over the plain latch. Two-phase logic on a GATED clock is a structural ring in neither view
+   (with the gate off the gated clock stays low through the high phase): a latch's data is evaluated
+   with every latch that is provably closed while this one is open -- the two enables hold one
+   condition with opposite polarities -- read as its held value (minion: 65 such reads, 1,589 ops
+   cloned). A ring that remains is reported with the latches on it.
+
+lhdsuite, results equal to the inou.cgen.sim llvm backend (2026-11-10, opt build, 128 jobs):
 
 | core | setup s | host C++ s | cycles/s | inou.cgen.sim: setup / host C++ / cycles/s |
 | --- | ---: | ---: | ---: | --- |
-| boom | 9.5 | 5.6 | 35.4k | 53.6 / 16.6 / 18.2k |
-| picorv32 | 0.5 | 5.1 | 6.12M | 0.7 / 5.2 / 5.58M |
-| dino | 0.4 | 5.4 | 5.82M | 0.5 / 5.4 / 5.81M |
-| bitcoin | 0.2 | 5.5 | 4.28M | 0.4 / 5.7 / 3.17M |
+| boom | 9.3 | 6.0 | 35.3k | 53.6 / 16.6 / 18.2k |
+| picorv32 | 0.5 | 5.1 | 6.25M | 0.7 / 5.2 / 5.58M |
+| dino | 0.4 | 5.7 | 5.83M | 0.5 / 5.4 / 5.81M |
+| bitcoin | 0.2 | 5.5 | 4.19M | 0.4 / 5.7 / 3.17M |
+| minion | 87.8 | 5.7 | 28.3k | 122.0 / 38.4 / 34.0k |
+
+minion is not there yet on either axis that is left: 42 s of its setup is pass.lg2lnast building the
+LNAST trees and 7 s the walk (18.7M tape ops for 260k live ones), and its simulation is 17% behind.
 
 Timing switches: `LHD_SIM_LNAST_TIME=1` (phases), `LHD_SIM_LLVM_TIME=1` (per kernel); use an optimized
 `lhd` (`bazel build -c opt`): a fastbuild `lhd` is 10-30x slower in LLVM and misleads.
@@ -156,10 +180,11 @@ then sees a constant index, so a lane is a fixed slice rather than a variable sh
 value (bitcoin's 32-trip byte swap of a 256-bit hash: 473k -> 3.32M cycles/s). A larger loop is one
 native loop (`Cgen_llvm::loop_begin/loop_end`).
 
-Not covered yet (the run is declined, or falls back under `auto`): latches, `Clock_cell`, negedge or
-several clocks (minion), memories with non-zero images, `fcall` under a condition, VCD/observation runs, testbench access below the DUT's top level,
-and the random power-on fill of inou.cgen.sim for an unknown (`?`) initializer (read as 0 here, i.e.
-`sim.unknown_zero=true`).
+Not covered yet (the run is declined, or falls back under `auto`): several root clocks, a register
+on an inverted clock gate or on a clock that is not a gate of the root clock, negedge memories,
+memories with non-zero images, `fcall` under a condition, VCD/observation runs, testbench access
+below the DUT's top level, and the random power-on fill of inou.cgen.sim for an unknown (`?`)
+initializer (read as 0 here, i.e. `sim.unknown_zero=true`).
 
 ## Compact loops: a `for`, never a call
 
