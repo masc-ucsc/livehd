@@ -137,6 +137,7 @@ int main(int argc, char** argv) {
     std::fprintf(stderr, "lookup %s: %s\n", fn.c_str(), error.c_str());
     return 1;
   }
+  const char*           dump = std::getenv("LNAST_LLVM_DUMP");
   std::vector<uint64_t> state(words + 1, 0);
   auto                  store = [&](const Field& f, uint64_t v) {
     v &= mask_of(f.bits);
@@ -169,6 +170,19 @@ int main(int argc, char** argv) {
       }
     }
     std::printf("\n");
+    if (dump != nullptr) {  // LNAST_LLVM_DUMP=name1,name2: registers/memories as hex words (debug aid)
+      std::printf("STATE %llu", static_cast<unsigned long long>(c));
+      for (const auto& r : regs) {
+        if ((std::string(",") + dump + ",").find("," + r.name + ",") == std::string::npos) {
+          continue;
+        }
+        std::printf(" %s=", r.name.c_str());
+        for (size_t w = (r.bits + 63) / 64; w-- > 0;) {
+          std::printf("%016llx", static_cast<unsigned long long>(state[r.word + w]));
+        }
+      }
+      std::printf("\n");
+    }
   }
   return 0;
 }

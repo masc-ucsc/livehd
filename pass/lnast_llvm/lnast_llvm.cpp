@@ -206,7 +206,15 @@ private:
     std::optional<V>      old;
   };
   std::vector<Undo>   log_;  // every env write, so an `if` arm can be rolled back without copying the env
-  void put(Env& env, const std::string& name, V v) {
+  // A register's name always READS its current value; a store to it only sets the NEXT value, kept under
+  // name + next_tag. (Reading `r` after `store(r, x)` in the same cycle still gives the old Q.)
+  static constexpr char next_tag = '\x01';
+  bool is_scalar_reg(const std::string& name) const {
+    auto it = fr_->reg_idx.find(name);
+    return it != fr_->reg_idx.end() && regs_[it->second].mem_size == 0;
+  }
+  void put(Env& env, const std::string& name_in, V v) {
+    const std::string name = (!name_in.empty() && name_in.back() != next_tag && is_scalar_reg(name_in)) ? name_in + next_tag : name_in;
     auto it = env.find(name);
     log_.push_back({&env, name, it == env.end() ? std::nullopt : std::optional<V>(it->second)});
     env[name] = v;
@@ -223,24 +231,13 @@ private:
     }
     return ensure_array(it->second, env);
   }
-  // The kernel-local array of memory `idx`, created and seeded on first use. An ASYNCHRONOUS reset clears the
-  // memory when it is asserted, before the edge: the seed is the cleared image, and this step's writes land on it.
-  size_t ensure_array(size_t idx, const Env& env) {
+  // The kernel-local array of memory `idx`, created and seeded on first use.
+  size_t ensure_array(size_t idx, const Env&) {
     if (arrays_[idx] != std::numeric_limits<size_t>::max()) {
       return arrays_[idx];
     }
     const auto& r    = regs_[idx];
-    V           base = walk_base_[idx];
-    if (r.reset_pin && !r.sync) {
-      auto ri = env.find(*r.reset_pin);
-      if (ri == env.end()) {
-        bail("memory reset signal '" + *r.reset_pin + "' is not an input");
-      }
-      V   active = r.negreset ? k_->binary(Op::eq, ri->second, k_->constant(1, 0, true), 1, true)
-                              : k_->binary(Op::ne, ri->second, k_->constant(1, 0, true), 1, true);
-      const auto total = static_cast<uint32_t>(r.mem_size * r.field.bits);
-      base = k_->mux(active, base, k_->constant_words(total, std::vector<uint64_t>((total + 63) / 64, 0), true), total, true);
-    }
+    V           base = walk_base_[idx];  // (reset clears the whole image at the edge, over any write: finish_frame)
     arrays_[idx] = k_->array_create(r.field.bits, r.mem_size);
     if (!k_->array_seed(arrays_[idx], base)) {
       bail("memory seed");
@@ -572,7 +569,10 @@ void Gen::exec_if(const std::vector<Lnast_nid>& c, size_t at, Env& env) {
   log_.resize(else_mark);
   path_ = saved;
   for (const auto& n : order) {
-    const auto& prior = before.at(n);
+    std::optional<V> prior = before.at(n);
+    if (!prior && !n.empty() && n.back() == next_tag) {
+      prior = env.at(n.substr(0, n.size() - 1));  // not written yet: it holds Q
+    }
     auto        ti    = then_vals.find(n);
     auto        ei    = else_vals.find(n);
     if (!prior && (ti == then_vals.end() || ei == else_vals.end())) {
@@ -938,7 +938,8 @@ void Gen::exec_stmt(const std::vector<Lnast_nid>& stmts, size_t& i, Env& env) {
       if (!tn) {
         bail("shift needs a typed result");
       }
-      finish(dst, k_->binary(t == NT::Lnast_ntype_shl ? Op::shl : Op::ashr, a, b, tn->bits, !tn->sign));
+      // cgen_sim's rule: a right shift of an unsigned value is logical (its top carrier bit is data, not a sign)
+      finish(dst, k_->binary(t == NT::Lnast_ntype_shl ? Op::shl : (a.unsign ? Op::lshr : Op::ashr), a, b, tn->bits, !tn->sign));
       break;
     }
     case NT::Lnast_ntype_eq:
@@ -1072,7 +1073,7 @@ void Gen::finish_frame(Frame& f, const Env& pre, const Env& end) {
     if (r.mem_size != 0) {
       const auto total = static_cast<uint32_t>(r.mem_size * r.field.bits);
       V          all   = k_->array_read_all(ensure_array(idx, pre), total, true);
-      if (r.reset_pin && r.sync) {  // a synchronous reset clears the whole image (initial image is zero), over any write
+      if (r.reset_pin) {  // reset clears the whole image (initial image is zero) at the edge, over any write
         auto ri = pre.find(*r.reset_pin);
         if (ri == pre.end()) {
           bail("memory reset signal '" + *r.reset_pin + "' is not an input");
@@ -1084,7 +1085,8 @@ void Gen::finish_frame(Frame& f, const Env& pre, const Env& end) {
       next_[idx] = all;
       continue;
     }
-    V n = end.at(r.local);
+    auto nx = end.find(r.local + next_tag);
+    V    n  = nx != end.end() ? nx->second : end.at(r.local);
     if (r.reset_pin) {
       auto ri = pre.find(*r.reset_pin);
       if (ri == pre.end()) {
