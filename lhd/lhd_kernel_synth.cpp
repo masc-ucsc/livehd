@@ -1212,6 +1212,13 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.eval_budget     = static_cast<unsigned>(std::max<int64_t>(4, integer("place.eval_budget", "6")));
   out.growth_fraction = number("place.growth", "0.05");
   out.growth_sizing_share = number("place.growth.sizing_share", "0.3");
+  {
+    const auto iterations = integer("place.repair.iterations", "0");
+    if (iterations < 0 || iterations > 8) {
+      throw Lhd_error{"usage", "synth.place.repair.iterations expects an integer in [0,8]", ""};
+    }
+    out.repair_iterations = static_cast<unsigned>(iterations);
+  }
   if (!std::isfinite(out.growth_sizing_share) || out.growth_sizing_share <= 0 || out.growth_sizing_share > 1) {
     throw Lhd_error{"usage", "synth.place.growth.sizing_share expects a fraction in (0,1]", ""};
   }
@@ -2526,6 +2533,8 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
   std::shared_ptr<hhds::GraphLibrary> preroute_library;
   livehd::placement::Repair_result    repaired;
   livehd::placement::Repair_result    design_repaired;
+  std::deque<livehd::placement::Repair_result> repair_loop_keep;  // the graph libraries of every repair-loop iteration, accepted or not
+  std::string                         repair_loop_report;           // JSON array, one object per iteration
   livehd::placement::Repair_result    timed_placement;
   livehd::placement::Repair_result    region_refined;  // keeps its graph library alive for the placement it returned
   livehd::placement::Repair_result    timing_kick;     // timing-driven placement reacting to the region refinement
@@ -3077,6 +3086,73 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
             placed          = std::move(design_repaired.placed);
             res.recipe_steps.emplace_back("pass.place.repair");
           }
+          // Repair loop: buffers and sizes change the timing picture and, once they exist, the placement they were
+          // computed for is stale. Re-place with the weights of the repaired result (a new buffer is a timed net, so
+          // its slack rank pulls it to its loads), repair again, and keep the iteration only while it improves timing.
+          // Each iteration may use a larger multiple of the growth allowance: the loop stops when more does not help.
+          if (run_resize && place_options.resize_engine != "new" && place_options.repair_iterations > 0 && design_repaired.timing
+              && !design_repaired.timing->ranking_only) {
+            Phase_timer phase(res, "pass.place.repair_loop");
+            auto        best_timing = *design_repaired.timing;
+            repair_loop_report      = "[";
+            constexpr size_t loop_allowance = 10;  // detailed evaluations one iteration may use
+            for (unsigned it = 0; it < place_options.repair_iterations; ++it) {
+              if (best_timing.wns && *best_timing.wns >= 0) {
+                break;
+              }
+              auto iter_options        = place_options;
+              iter_options.output_dir += "/repair_loop_" + std::to_string(it);
+              if (place_options.growth_budget) {
+                iter_options.growth_budget           = std::make_shared<livehd::placement::Growth_budget>(*place_options.growth_budget);
+                iter_options.growth_budget->fraction = place_options.growth_budget->fraction * (it + 2);
+              }
+              const auto base = [&] {
+                const auto& stats = timing_session.statistics();
+                return stats.evaluations - stats.rankings;
+              }();
+              const livehd::placement::Trial_admission admit_iteration = [&] {
+                const auto& stats = timing_session.statistics();
+                return stats.evaluations - stats.rankings - base < loop_allowance;
+              };
+              const auto  before_wns = best_timing.wns.value_or(0), before_tns = best_timing.tns.value_or(0);
+              auto        kick  = livehd::placement::timing_place(placed, iter_options, evaluate, 1, best_timing, admit_iteration);
+              auto        sized = livehd::placement::repair_buffers(std::move(kick.placed),
+                                                                    iter_options,
+                                                                    evaluate,
+                                                                    livehd::placement::Repair_scope::sizing,
+                                                                    std::move(kick.timing),
+                                                                    admit_iteration);
+              auto        again = livehd::placement::repair_buffers(std::move(sized.placed),
+                                                                    iter_options,
+                                                                    evaluate,
+                                                                    livehd::placement::Repair_scope::design_after_sizing,
+                                                                    std::move(sized.timing),
+                                                                    admit_iteration);
+              repair_loop_keep.push_back(std::move(kick));
+              repair_loop_keep.push_back(std::move(sized));
+              const bool better = again.timing && livehd::placement::timing_improves(best_timing, *again.timing);
+              repair_loop_report += std::format("{}{{\"iteration\":{},\"growth_fraction\":{},\"wns_before\":{},\"tns_before\":{},"
+                                                "\"wns_after\":{},\"tns_after\":{},\"accepted\":{}}}",
+                                                it ? "," : "",
+                                                it,
+                                                iter_options.growth_budget ? iter_options.growth_budget->fraction : 0.0,
+                                                before_wns,
+                                                before_tns,
+                                                again.timing ? again.timing->wns.value_or(0) : 0.0,
+                                                again.timing ? again.timing->tns.value_or(0) : 0.0,
+                                                better);
+              if (!better) {
+                repair_loop_keep.push_back(std::move(again));
+                break;
+              }
+              placed      = std::move(again.placed);
+              best_timing = *again.timing;
+              repair_loop_keep.push_back(std::move(again));
+            }
+            repair_loop_report += "]";
+            design_repaired.timing = std::move(best_timing);  // the prior of the final legalization
+            res.recipe_steps.emplace_back("pass.place.repair_loop");
+          }
           if (run_resynth) {
             Phase_timer phase(res, "pass.place.resynth");
             auto        prior = run_resize ? (place_options.resize_engine == "new" ? std::move(repaired.timing)
@@ -3179,6 +3255,18 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
         }
       }
       net.graphs = {placed.graph};
+      if (!repair_loop_report.empty()) {
+        rapidjson::Document q, loop;
+        q.Parse(placed.qor.c_str());
+        loop.Parse(repair_loop_report.c_str());
+        if (!q.HasParseError() && q.IsObject() && !loop.HasParseError()) {
+          q.AddMember("repair_loop", rapidjson::Value(loop, q.GetAllocator()), q.GetAllocator());
+          rapidjson::StringBuffer                    buffer;
+          rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+          q.Accept(writer);
+          placed.qor = buffer.GetString();
+        }
+      }
       if (io_flow) {
         const auto    io_log = next_log_path(opts, "pass.place.io_resynth.final");
         Stdout_to_log redirect(io_log);

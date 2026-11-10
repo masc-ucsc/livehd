@@ -563,6 +563,7 @@ TEST(LhdOptions, RecommendedSharedDefaults) {
            {                         "synth.place.pcrs",   "true"},
            {                       "synth.place.growth",   "0.05"},
            {         "synth.place.growth.sizing_share",    "0.3"},
+           {         "synth.place.repair.iterations",    "0"},
            {            "synth.place.domino_rail_fanout",     "32"},
            {                        "synth.place.resize",   "true"},
            {                "synth.place.buffer_cleanup",  "false"},

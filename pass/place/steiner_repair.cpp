@@ -294,7 +294,10 @@ Buffer_tree plan_buffer_choices(Point root, const std::vector<Point>& loads, con
                                 const std::vector<double>& required_ps, const std::vector<Buffer_drive>& drives,
                                 const Buffer_drive& driver, double wire_r_ohm_dbu, double wire_c_ff_dbu,
                                 const Buffer_limits& limits) {
-  const bool trace = livehd::debug::env<"LHD_STEINER_TRACE">() != nullptr && loads.size() >= 100;
+  // LHD_STEINER_TRACE=<n>: explain every rejected candidate on nets of at least n loads (empty or 0: n = 100).
+  const char*  trace_text = livehd::debug::env<"LHD_STEINER_TRACE">();
+  const size_t trace_min  = trace_text && std::strtoul(trace_text, nullptr, 10) > 0 ? std::strtoul(trace_text, nullptr, 10) : 100;
+  const bool   trace      = trace_text != nullptr && loads.size() >= trace_min;
   const auto note  = [&](size_t candidate, const char* what, const char* detail = "") {
     if (trace) {
       std::fprintf(stderr, "[steiner] %zu loads candidate %zu: %s %s\n", loads.size(), candidate, what, detail);

@@ -118,6 +118,10 @@ struct Options {
   std::shared_ptr<Growth_budget>                        growth_budget;
   double                                                growth_fraction = 0.05;  // synth.place.growth
   double                                                growth_sizing_share = 0.3;  // synth.place.growth.sizing_share
+  // synth.place.repair.iterations: after the first sizing + buffering pass, re-place with the timing weights of the result
+  // (new buffers are timed nets, so their rank weight puts them near their loads) and repair again, up to this many times,
+  // keeping an iteration only while it improves timing. 0: one pass.
+  unsigned                                              repair_iterations = 0;
   unsigned                                              eval_budget     = 6;     // synth.place.eval_budget
   std::optional<double>                                 density_weight_seed;
   // Shared by copies used for checkpoints, rounds and repair. A new Options

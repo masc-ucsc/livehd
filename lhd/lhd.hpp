@@ -996,6 +996,12 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      Synth_set_option::Kind::file,
      "fraction of the synthesized standard-cell count and area that placement-time repair (sizing, buffering) may add; "
      "tie cells minted by placement are charged"},
+    {"place.repair.iterations",
+     "0",
+     Synth_set_option::Kind::integer,
+     "after the first sizing and buffering pass, re-place with the result's timing weights (buffers are timed nets, so they stay near "
+     "their loads) and repair again, up to this many times, keeping an iteration only while it improves timing; each iteration may "
+     "use a growing multiple of place.growth; 0 = a single pass"},
     {"place.growth.sizing_share",
      "0.3",
      Synth_set_option::Kind::file,
