@@ -98,7 +98,10 @@ fresh color synthesis or incompatible timing engine. A stage meeting the actual
 physical setup objective skips resynthesis altogether.
 
 Full synthesis placement shares a cell-count and physical-area growth limit of
-3% over the original mapped standard-cell netlist. The inventory precedes
+5% (`synth.place.growth`) over the original mapped standard-cell netlist. Gate sizing may
+use only `synth.place.growth.sizing_share` (default 0.3) of it; buffer insertion may use all, so sizing cannot
+spend the headroom a high-fanout net needs for its buffer tree (measured on eyeriss: 3% with sizing first left
+0.07 um2 for a 271-load net; 5% with a 0.3 share takes WNS from -11.0 to -6.9 ns). The inventory precedes
 synthesis-buffer cleanup and counts every occurrence of a shared color; macro
 area cannot subsidize standard-cell growth. The reset and domino rail tree
 buffers (`__place_rsttree*`, `__place_railtree*`, below) are structural fanout

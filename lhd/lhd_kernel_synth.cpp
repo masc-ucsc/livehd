@@ -1210,8 +1210,8 @@ livehd::placement::Options placement_options(const Options& opts) {
     throw Lhd_error{"usage", "synth.place.resize.gp_margin expects a fraction in [0,1]", ""};
   }
   out.eval_budget     = static_cast<unsigned>(std::max<int64_t>(4, integer("place.eval_budget", "6")));
-  out.growth_fraction = number("place.growth", "0.03");
-  out.growth_sizing_share = number("place.growth.sizing_share", "0.6");
+  out.growth_fraction = number("place.growth", "0.05");
+  out.growth_sizing_share = number("place.growth.sizing_share", "0.3");
   if (!std::isfinite(out.growth_sizing_share) || out.growth_sizing_share <= 0 || out.growth_sizing_share > 1) {
     throw Lhd_error{"usage", "synth.place.growth.sizing_share expects a fraction in (0,1]", ""};
   }

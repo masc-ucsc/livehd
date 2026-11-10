@@ -992,12 +992,12 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      Synth_set_option::Kind::integer,
      "detailed STA evaluations the placement-time optional trials (timing rounds, sizing, buffering) may use in one run, at least 4"},
     {"place.growth",
-     "0.03",
+     "0.05",
      Synth_set_option::Kind::file,
      "fraction of the synthesized standard-cell count and area that placement-time repair (sizing, buffering) may add; "
      "tie cells minted by placement are charged"},
     {"place.growth.sizing_share",
-     "0.6",
+     "0.3",
      Synth_set_option::Kind::file,
      "part of place.growth that gate sizing may use, in (0,1]; buffer insertion may use all of it, so a smaller share keeps more "
      "headroom for the buffer trees of high-fanout nets"},

@@ -116,8 +116,8 @@ struct Options {
   std::shared_ptr<const std::vector<Hint_scope>>        metadata_scopes;             // Before timing seed flattens hierarchy.
   bool                                                  metadata_finalized = false;  // Internal macro-to-final handoff.
   std::shared_ptr<Growth_budget>                        growth_budget;
-  double                                                growth_fraction = 0.03;  // synth.place.growth
-  double                                                growth_sizing_share = 0.6;  // synth.place.growth.sizing_share
+  double                                                growth_fraction = 0.05;  // synth.place.growth
+  double                                                growth_sizing_share = 0.3;  // synth.place.growth.sizing_share
   unsigned                                              eval_budget     = 6;     // synth.place.eval_budget
   std::optional<double>                                 density_weight_seed;
   // Shared by copies used for checkpoints, rounds and repair. A new Options
