@@ -115,7 +115,7 @@ How a design becomes kernels (`lnast_llvm.cpp`):
 4. **Kernels.** The ordered ops are cut into intervals: an interval of a topological order never
    closes a cycle. Each interval is replayed into its own `Cgen_llvm` on the shared compile workers,
    and a value read by another kernel crosses through a state word. Size is counted in machine words
-   of code (`LHD_SIM_LNAST_CHUNK`, default 1250). A view that fits in four times that is ONE kernel: a
+   of code (`LHD_SIM_LNAST_CHUNK`; 1250, or 150 with activity gating, below). A view that fits in four times that is ONE kernel: a
    cut makes whatever crosses it unconditional, and picorv32 cut in two executed 4,234 instructions a
    clock against 2,807 whole, at half the speed. A larger view is cut into kernels of one to two
    times the target, each at the seam in that window where the fewest live words cross. There small
@@ -156,19 +156,53 @@ importing the lg) and compares the per-cycle `TRACE` lines byte for byte.
    condition with opposite polarities -- read as its held value (minion: 65 such reads, 1,589 ops
    cloned). A ring that remains is reported with the latches on it.
 
+10. **Activity gating** (a design of more than 20,000 words of code; `LHD_SIM_LNAST_GATE=0|1` forces
+   it). A kernel is a function of the state words it reads, so it need not run again until one of
+   them changes. Every kernel owns one bit of the *dirty* words at the start of the state; the caller
+   runs a kernel only when its bit is set, clearing it first (a test per dirty word, per eight
+   kernels and per kernel, with direct calls: scanning for set bits and calling through a table
+   lost a fifth on boom, one indirect call site the processor cannot predict). Whoever changes a
+   state location sets the bits of the kernels that *read* it and of the *other* kernels that write
+   it -- a latch's held value is written in every phase it is open and a memory by each of its
+   ports, so the location holds what the last one wrote and the others have to assert theirs again.
+   - A store compares before it marks. Stores that wake the same kernels share one accumulator
+     (`acc |= old ^ new`) and one test; under an enable the compare sits inside the guarded block.
+   - A register that is not written in place changes at the commit, not when its next value is
+     stored: its marks go to a second set of words that the commit kernel ORs into the dirty words.
+     (Set at once, a later kernel of the same view would run now, on the old value, and be clean
+     when the value does change.)
+   - A reset marks everything; the testbench marks the readers of an input it changes, and everything
+     after power-on or a loaded checkpoint.
+   - A value crossing kernels has a state word per view: the same op is a different value in another
+     clock phase, and two views taking turns on one word would never let its readers rest.
+   - Gated kernels are small (150 words): a kernel is also the unit that is skipped. minion runs
+     15% of its kernels a clock and boom 65%:
+
+     | words per kernel | 1250 | 600 | 300 | 150 | 75 | 40 | not gated (1250) |
+     | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+     | minion, cycles/s | 84k | 102k | 114k | 134k | 118k | 87k | 29.1k |
+     | boom, cycles/s | 23k | 31k | 31k | 36k | 35k | 27k | 34.3k |
+
+   - A register that only copies state (a pipeline stage, `r' = q`) computes nothing and belongs to
+     no kernel's logic; gated, such registers get small kernels of their own ahead of the others, a
+     chain of copies reader first so it stays in place. Left to the first kernel they were one block
+     of 1,500 stores and compares on boom that took as long to compile as forty other kernels.
+   - A small design is a kernel or two that run every clock anyway, and cut small enough to skip
+     anything it loses more at the cuts (picorv32 6.5M -> 2.3M cycles/s): it is not gated.
+   `LHD_SIM_LNAST_STATS=1` makes the simulator print how often each kernel ran.
+
 lhdsuite, results equal to the inou.cgen.sim llvm backend (2026-11-10, opt build, 128 jobs):
 
 | core | setup s | host C++ s | cycles/s | inou.cgen.sim: setup / host C++ / cycles/s |
 | --- | ---: | ---: | ---: | --- |
-| boom | 8.8 | 5.7 | 34.3k | 53.6 / 16.6 / 18.2k |
-| picorv32 | 0.4 | 5.1 | 6.48M | 0.7 / 5.2 / 5.58M |
-| dino | 0.3 | 5.4 | 5.84M | 0.5 / 5.4 / 5.81M |
-| bitcoin | 0.2 | 5.5 | 4.18M | 0.4 / 5.7 / 3.17M |
-| minion | 46.8 | 5.5 | 29.1k | 122.0 / 38.4 / 34.0k |
+| boom | 7.7 | 5.7 | 38.9k | 53.6 / 16.6 / 18.2k |
+| picorv32 | 0.4 | 5.1 | 6.47M | 0.7 / 5.2 / 5.58M |
+| dino | 0.3 | 5.3 | 5.84M | 0.5 / 5.4 / 5.81M |
+| bitcoin | 0.2 | 5.5 | 4.15M | 0.4 / 5.7 / 3.17M |
+| minion | 45.4 | 5.7 | 143.1k | 122.0 / 38.4 / 34.0k |
 
-Of that setup the flow itself (lowering, walk, LLVM) is 10.7 s on minion and 2.3 s on boom, where
-inou.cgen.sim took 86 s and 47 s; the rest is the front end both flows share. minion's simulation is
-still 14% behind (no activity gating here yet).
+Of that setup the flow itself (lowering, walk, LLVM) is 10.2 s on minion and 1.2 s on boom, where
+inou.cgen.sim took 86 s and 47 s; the rest is the front end both flows share.
 
 Three things keep generation proportional to what is simulated: lg2lnast merges the arms of a
 `Hotmux` that carry the same value into one arm on the OR of their controls (minion decodes an

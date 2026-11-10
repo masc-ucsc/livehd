@@ -6,10 +6,12 @@
 #include <format>
 #include <fstream>
 #include <functional>
+#include <map>
 #include <sstream>
 
 #include "absl/container/flat_hash_set.h"
 #include "cpp_ident.hpp"
+#include "debug_env.hpp"
 #include "file_name.hpp"
 #include "lnast.hpp"
 #include "lnast_llvm.hpp"
@@ -350,7 +352,27 @@ Sim_emitted emit_sim(const Sim_request& request) {
     h += std::format("  {}();\n", cls);
     h += "  void __push() {\n";
     for (const auto& f : gen.inputs) {
-      h += std::format("    __in.{}.copy_packed_words(&st_[{}]);\n", f.name, f.word);
+      if (f.marks.empty()) {  // no kernel waits on this input
+        h += std::format("    __in.{}.copy_packed_words(&st_[{}]);\n", f.name, f.word);
+        continue;
+      }
+      // Activity gating: an input that changed wakes the kernels that read it.
+      std::map<size_t, uint64_t> masks;
+      for (const auto bit : f.marks) {
+        masks[gen.gate_word + bit / 64] |= uint64_t{1} << (bit % 64);
+      }
+      const size_t n  = (f.bits + 63) / 64;
+      h              += std::format("    {{\n      std::uint64_t w[{}];\n      __in.{}.copy_packed_words(w);\n", n, f.name);
+      if (n == 1) {
+        h += std::format("      if (w[0] != st_[{0}]) {{\n        st_[{0}] = w[0];\n", f.word);
+      } else {
+        h += std::format("      if (std::memcmp(w, &st_[{0}], sizeof w) != 0) {{\n        std::memcpy(&st_[{0}], w, sizeof w);\n",
+                         f.word);
+      }
+      for (const auto& [word, mask] : masks) {
+        h += std::format("        st_[{}] |= 0x{:x}ULL;\n", word, mask);
+      }
+      h += "      }\n    }\n";
     }
     h += "  }\n  void __pull() {\n";
     for (const auto& f : gen.outputs) {
@@ -363,6 +385,12 @@ Sim_emitted emit_sim(const Sim_request& request) {
     h += "  void __settle_kernels();  // outputs on the current state\n";
     h += "  void reset_cycle(bool zero_uninitialized = false);\n";
     h += "  void after_load() override;\n";
+    h                += "  void __all_dirty();       // activity gating: every kernel runs once more\n";
+    // LHD_SIM_LNAST_STATS (debug): count how often each gated kernel really ran; printed at exit.
+    const bool stats  = gen.gate_bits != 0 && livehd::debug::env<"LHD_SIM_LNAST_STATS">() != nullptr;
+    if (stats) {
+      h += std::format("  std::uint64_t __runs[{}]{{}};\n  ~{}();\n", gen.gate_bits + 1, cls);
+    }
     h += "};\n";
     write_if_different(base + ".hpp", h);
 
@@ -421,10 +449,76 @@ Sim_emitted emit_sim(const Sim_request& request) {
       }
     }
     c += "}\n";
-    c += std::format("void {}::__edge() {{\n  auto* s = st_.get();\n", cls);
+    // Activity gating (lnast_llvm.hpp): a kernel runs when its dirty bit is set, cleared before the
+    // call: one test and a direct call per kernel, under a test per eight kernels and one per dirty
+    // word (most kernels of a large design rest most clocks, and resting kernels cluster). Every test
+    // reads the word again: a kernel wakes later ones. Scanning the dirty words for set bits and
+    // calling through a table instead is slower as soon as much of the design is active (boom, two
+    // thirds of its kernels each clock: 28.9k cycles/s against 35.5k) -- one indirect call site
+    // that the processor cannot predict.
+    const auto run  = [&](size_t first, size_t count) {
+      std::string out;
+      const auto  mask_of = [&](size_t lo, size_t hi) {  // bits [lo, hi) of one word, clipped to [first, first + count)
+        uint64_t m = 0;
+        for (size_t b = std::max(lo, first); b < std::min(hi, first + count); ++b) {
+          m |= uint64_t{1} << (b % 64);
+        }
+        return m;
+      };
+      const auto& name_of = [&](size_t bit) -> const std::string& {
+        if (bit < gen.edge_functions.size()) {
+          return gen.edge_functions[bit];
+        }
+        bit -= gen.edge_functions.size();
+        return bit < gen.fall_functions.size() ? gen.fall_functions[bit] : gen.settle_functions[bit - gen.fall_functions.size()];
+      };
+      for (size_t w = first / 64; w * 64 < first + count; ++w) {
+        const auto word  = gen.gate_word + w;
+        out             += std::format("  if ((s[{}] & 0x{:x}ULL) != 0) {{\n", word, mask_of(w * 64, w * 64 + 64));
+        for (size_t g = w * 64; g < w * 64 + 64; g += 8) {
+          const auto group = mask_of(g, g + 8);
+          if (group == 0) {
+            continue;
+          }
+          out += std::format("    if ((s[{}] & 0x{:x}ULL) != 0) {{\n", word, group);
+          for (size_t b = std::max(g, first); b < std::min(g + 8, first + count); ++b) {
+            const auto bit  = uint64_t{1} << (b % 64);
+            out            += std::format("      if ((s[{0}] & 0x{1:x}ULL) != 0) {{ s[{0}] &= ~0x{1:x}ULL; {2}(s, nullptr); }}\n",
+                               word,
+                               bit,
+                               name_of(b));
+          }
+          out += "    }\n";
+        }
+        out += "  }\n";
+      }
+      return out;
+    };
+    const bool scan     = gen.gate_bits != 0 && !stats;
+    size_t     gate_bit = 0;
+    const auto call     = [&](const std::string& fn) {
+      if (gen.gate_bits == 0) {
+        return std::format("  {}(s, nullptr);\n", fn);
+      }
+      const auto word = gen.gate_word + gate_bit / 64;
+      const auto mask = uint64_t{1} << (gate_bit % 64);
+      ++gate_bit;
+      return std::format("  if ((s[{0}] & 0x{1:x}ULL) != 0) {{\n    s[{0}] &= ~0x{1:x}ULL;\n{3}    {2}(s, nullptr);\n  }}\n",
+                         word,
+                         mask,
+                         fn,
+                         stats ? std::format("    ++__runs[{}];\n", gate_bit - 1) : std::string());
+    };
+    c += std::format("void {}::__edge() {{\n  auto* s = st_.get();\n{}",
+                     cls,
+                     stats ? std::format("  ++__runs[{}];\n", gen.gate_bits) : "");
     for (const auto* list : {&gen.edge_functions, &gen.fall_functions}) {
-      for (const auto& fn : *list) {
-        c += std::format("  {}(s, nullptr);\n", fn);
+      if (scan) {
+        c += run(list == &gen.edge_functions ? 0 : gen.edge_functions.size(), list->size());
+      } else {
+        for (const auto& fn : *list) {
+          c += call(fn);
+        }
       }
       const auto& commit = list == &gen.edge_functions ? gen.commit_function : gen.fall_commit_function;
       if (!commit.empty()) {
@@ -432,13 +526,38 @@ Sim_emitted emit_sim(const Sim_request& request) {
       }
     }
     c += std::format("}}\nvoid {}::__settle_kernels() {{\n  auto* s = st_.get();\n", cls);
-    for (const auto& fn : gen.settle_functions) {
-      c += std::format("  {}(s, nullptr);\n", fn);
+    if (scan) {
+      c += run(gen.edge_functions.size() + gen.fall_functions.size(), gen.settle_functions.size());
+    } else {
+      for (const auto& fn : gen.settle_functions) {
+        c += call(fn);
+      }
     }
     c += "}\n";
-    c += std::format("{0}::{0}() : __lnast_dut(fields, {1}, __lnast_words) {{}}\n", cls, fields);
-    c += std::format("void {}::reset_cycle(bool zero_uninitialized) {{\n  power_on(zero_uninitialized);\n  __settle();\n}}\n", cls);
-    c += std::format("void {}::after_load() {{\n", cls);
+    if (stats) {
+      c += std::format(
+          "{0}::~{0}() {{\n  std::uint64_t total = 0;\n  for (std::size_t i = 0; i < {1}; ++i) {{\n    total += __runs[i];\n"
+          "    std::fprintf(stderr, \"lnast activity: kernel %zu ran %llu of %llu clocks\\n\", i, "
+          "static_cast<unsigned long long>(__runs[i]), static_cast<unsigned long long>(__runs[{1}]));\n  }}\n"
+          "  std::fprintf(stderr, \"lnast activity: %llu kernel runs of %llu ({1} kernels, %llu clocks)\\n\", "
+          "static_cast<unsigned long long>(total), static_cast<unsigned long long>(__runs[{1}] * {1}), "
+          "static_cast<unsigned long long>(__runs[{1}]));\n}}\n",
+          cls,
+          gen.gate_bits);
+    }
+    c += std::format("void {}::__all_dirty() {{\n", cls);
+    for (size_t w = 0; w < (gen.gate_bits + 63) / 64; ++w) {
+      const bool part  = w + 1 == (gen.gate_bits + 63) / 64 && gen.gate_bits % 64 != 0;
+      c               += std::format("  st_[{}] = 0x{:x}ULL;\n",
+                       gen.gate_word + w,
+                       part ? (uint64_t{1} << (gen.gate_bits % 64)) - 1 : ~uint64_t{0});
+    }
+    c += "}\n";
+    c += std::format("{0}::{0}() : __lnast_dut(fields, {1}, __lnast_words) {{ __all_dirty(); }}\n", cls, fields);
+    c += std::format(
+        "void {}::reset_cycle(bool zero_uninitialized) {{\n  power_on(zero_uninitialized);\n  __all_dirty();\n  __settle();\n}}\n",
+        cls);
+    c += std::format("void {}::after_load() {{\n  __all_dirty();\n", cls);
     for (const auto& f : gen.inputs) {
       c += std::format("  __in.{} = {}::from_packed_words(&st_[{}]);\n", f.name, slop_type(f), f.word);
     }

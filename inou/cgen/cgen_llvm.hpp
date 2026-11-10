@@ -159,7 +159,8 @@ public:
   [[nodiscard]] static size_t array_state_words(uint32_t bits, uint64_t size);
   [[nodiscard]] size_t    array_create_in_state(uint32_t bits, uint64_t size, size_t word);
   // Zero every entry when `condition` is non-zero.
-  bool                    array_clear_if(size_t array, Value condition);
+  // `dirty`: masks ORed in whenever the array is cleared.
+  bool                        array_clear_if(size_t array, Value condition, const std::vector<Dirty_mask>& dirty = {});
   // `values[i]` is replaced by `overrides[i]` while `condition` is non-zero, as ONE branch the optimizer is
   // told is unlikely (a reset) with a phi per value: the hot path pays a compare, not a select per register.
   bool                    unlikely_override(Value condition, const std::vector<Value>& values, const std::vector<Value>& overrides,
@@ -167,8 +168,11 @@ public:
   // State ABI: while `condition` is non-zero, store each value into its state word(s), on a branch the
   // optimizer is told is unlikely (a reset). The stores happen where this is called, so a state copy
   // made before it (copy_state) is overwritten and nothing is paid when the condition is clear.
-  bool                        state_store_if(Value condition, const std::vector<std::pair<size_t, Value>>& stores);
-  bool                    array_write(size_t array, Value enable, Value address, Value data);
+  // `dirty`: masks ORed in whenever the condition holds (no compare: a reset is rare).
+  bool                        state_store_if(Value condition, const std::vector<std::pair<size_t, Value>>& stores,
+                                             const std::vector<Dirty_mask>& dirty = {});
+  // `dirty` (an array in the state only): masks ORed in when the write changes the entry.
+  bool array_write(size_t array, Value enable, Value address, Value data, const std::vector<Dirty_mask>& dirty = {});
   [[nodiscard]] Value     array_read(size_t array, Value address, uint32_t result_width, bool result_unsign);
   [[nodiscard]] Value     array_read_all(size_t array, uint32_t result_width, bool result_unsign);
   void                    bind_memory(std::string_view symbol, const Memory& memory);
@@ -258,9 +262,14 @@ public:
   // register that keeps its value when its enable is off is not rewritten, and what only its new
   // value needs can sink under the test. Outputs of one guard share one branch, taken after every
   // unconditional output is stored. No dirty masks: the caller owns change tracking for these.
-  bool add_state_output_if(Value guard, bool when_zero, size_t word, Value value, std::string& error);
+  // `dirty`: masks ORed in when the store changes the word (compared inside the guarded block).
+  bool add_state_output_if(Value guard, bool when_zero, size_t word, Value value, std::string& error,
+                           const std::vector<Dirty_mask>& dirty = {});
   // Phase-barrier copy. Source and destination spans must not overlap.
   bool copy_state(size_t destination, size_t source, size_t words, std::string& error);
+  // `state[destination + i] |= state[source + i]; state[source + i] = 0`, right here (not at the kernel's
+  // end): dirty marks recorded for the next phase become current. The spans must not overlap.
+  bool merge_state_words(size_t destination, size_t source, size_t words, std::string& error);
 
   // Add a rolled reduction entry to this stateless body object. The body is
   // inlined into the native loop once; neither a call nor loop unrolling is

@@ -1399,11 +1399,79 @@ public:
   uint64_t                                unroll_extra = 0;  // see kUnrolledExtra
   std::vector<State_output>               state_outputs;
   struct Guarded_output {
-    Value  guard;
-    bool   when_zero = false;
-    size_t word      = 0;
-    Value  value;
+    Value                   guard;
+    bool                    when_zero = false;
+    size_t                  word      = 0;
+    Value                   value;
+    std::vector<Dirty_mask> dirty;
   };
+  // OR `mask` into state word `word`, right here (inside whatever block the builder is in).
+  void or_state_word(size_t word, llvm::Value* mask) {
+    auto* ptr = word_ptr(outputs, word);
+    auto* old = builder.CreateLoad(builder.getInt64Ty(), ptr);
+    builder.CreateStore(builder.CreateOr(old, mask), ptr);
+  }
+  // Change detection for a set of state stores that set dirty bits. Stores that wake the SAME kernels
+  // share one accumulator: `acc |= old ^ new` per store (no compare, no flags), then one test per
+  // group. A compare and a select per store was a third more code on a register-heavy design, and
+  // hundreds of selects in one block is the instruction scheduler's quadratic case (boom: 1.6 s of
+  // LLVM became 4.0 s, 34k cycles/s became 23k).
+  struct Changes {
+    std::map<std::vector<std::pair<size_t, uint64_t>>, llvm::Value*> groups;
+  };
+  // Records whether storing `value` will change the `width` bits of state at `word` (the bits past
+  // them in the last word are not the value's: whoever wrote them may have sign-extended). Call for
+  // every store of the set BEFORE any of them is made.
+  void note_change(Changes& changes, size_t word, llvm::Value* value, uint32_t width, const std::vector<Dirty_mask>& dirty) {
+    std::map<size_t, uint64_t> by_word;
+    for (const auto& d : dirty) {
+      by_word[d.word] |= d.mask;
+    }
+    auto*        old  = load_packed(inputs, word, width, "state.old");
+    llvm::Value* diff = width <= 64 ? builder.CreateXor(old, value) : builder.CreateICmpNE(old, value);
+    diff              = builder.CreateZExt(diff, builder.getInt64Ty());
+    auto [it, inserted]
+        = changes.groups.try_emplace(std::vector<std::pair<size_t, uint64_t>>(by_word.begin(), by_word.end()), diff);
+    if (!inserted) {
+      it->second = builder.CreateOr(it->second, diff);
+    }
+  }
+  // Sets the dirty bits of every group that saw a change. Call after the stores.
+  void mark_changes(const Changes& changes) {
+    std::map<size_t, llvm::Value*> bits;  // dirty word -> what to OR in
+    for (const auto& [masks, acc] : changes.groups) {
+      auto* different = builder.CreateICmpNE(acc, builder.getInt64(0));
+      for (const auto& [word, mask] : masks) {
+        auto* set           = builder.CreateSelect(different, builder.getInt64(mask), builder.getInt64(0));
+        auto [it, inserted] = bits.try_emplace(word, set);
+        if (!inserted) {
+          it->second = builder.CreateOr(it->second, set);
+        }
+      }
+    }
+    for (const auto& [word, set] : bits) {
+      or_state_word(word, set);
+    }
+  }
+  // OR the masks in while `different` (an i1) holds.
+  void or_dirty_if(llvm::Value* different, const std::vector<Dirty_mask>& dirty) {
+    std::map<size_t, uint64_t> by_word;
+    for (const auto& d : dirty) {
+      by_word[d.word] |= d.mask;
+    }
+    for (const auto& [word, mask] : by_word) {
+      or_state_word(word, builder.CreateSelect(different, builder.getInt64(mask), builder.getInt64(0)));
+    }
+  }
+  void or_dirty(const std::vector<Dirty_mask>& dirty) {
+    std::map<size_t, uint64_t> by_word;
+    for (const auto& d : dirty) {
+      by_word[d.word] |= d.mask;
+    }
+    for (const auto& [word, mask] : by_word) {
+      or_state_word(word, builder.getInt64(mask));
+    }
+  }
   std::vector<Guarded_output>             guarded_outputs;
   std::unordered_map<std::string, Memory> memories;
 
@@ -2759,7 +2827,8 @@ size_t Cgen_llvm::array_create_in_state(uint32_t bits, uint64_t size, size_t wor
   return impl_->arrays.size() - 1;
 }
 
-bool Cgen_llvm::state_store_if(Value condition, const std::vector<std::pair<size_t, Value>>& stores) {
+bool Cgen_llvm::state_store_if(Value condition, const std::vector<std::pair<size_t, Value>>& stores,
+                               const std::vector<Dirty_mask>& dirty) {
   if (!impl_->state_abi || condition.width == 0) {
     impl_->error = "state_store_if needs the state ABI and a condition";
     return false;
@@ -2791,12 +2860,13 @@ bool Cgen_llvm::state_store_if(Value condition, const std::vector<std::pair<size
     const auto& [word, value] = stores[i];
     impl_->store_packed(values[i], impl_->outputs, word, value.width);  // whole words, as add_state_output publishes
   }
+  impl_->or_dirty(dirty);
   b.CreateBr(cont);
   b.SetInsertPoint(cont);
   return true;
 }
 
-bool Cgen_llvm::array_clear_if(size_t array, Value condition) {
+bool Cgen_llvm::array_clear_if(size_t array, Value condition, const std::vector<Dirty_mask>& dirty) {
   if (array >= impl_->arrays.size() || condition.width == 0) {
     return false;
   }
@@ -2814,6 +2884,7 @@ bool Cgen_llvm::array_clear_if(size_t array, Value condition) {
   b.SetInsertPoint(clear);
   const auto bytes = a.packed ? (uint64_t(a.bits) * a.size + 7) / 8 : uint64_t(a.store_bits / 8) * a.size;
   b.CreateMemSet(a.ptr, b.getInt8(0), bytes, llvm::Align(8));
+  impl_->or_dirty(dirty);
   b.CreateBr(cont);
   b.SetInsertPoint(cont);
   return true;
@@ -2887,11 +2958,15 @@ bool Cgen_llvm::array_seed(size_t array, Value base) {
   return true;
 }
 
-bool Cgen_llvm::array_write(size_t array, Value enable, Value address, Value data) {
+bool Cgen_llvm::array_write(size_t array, Value enable, Value address, Value data, const std::vector<Dirty_mask>& dirty) {
   if (array >= impl_->arrays.size() || enable.width == 0 || address.width == 0 || data.width == 0) {
     return false;
   }
-  const auto& a     = impl_->arrays[array];
+  const auto& a = impl_->arrays[array];
+  if (!dirty.empty() && !a.in_state) {
+    impl_->error = "array_write dirty masks need an array in the state";
+    return false;
+  }
   auto&       b     = impl_->builder;
   auto*       wen   = impl_->get(enable);
   auto*       value = impl_->get(data);  // materialized before the branch: later uses must be dominated
@@ -2911,12 +2986,16 @@ bool Cgen_llvm::array_write(size_t array, Value enable, Value address, Value dat
                                       llvm::ConstantInt::get(ty, 0));
     auto* mask       = b.CreateShl(lane, shift);
     auto* put = b.CreateShl(b.CreateAnd(cast_integer(b, cast_integer(b, value, a.bits, data.unsign), whole, true), lane), shift);
-    auto* old = b.CreateAlignedLoad(ty, a.ptr, llvm::Align(8));
-    b.CreateAlignedStore(b.CreateOr(b.CreateAnd(old, b.CreateNot(mask)), put), a.ptr, llvm::Align(8));
+    auto* old        = b.CreateAlignedLoad(ty, a.ptr, llvm::Align(8));
+    auto* merged     = b.CreateOr(b.CreateAnd(old, b.CreateNot(mask)), put);
+    if (!dirty.empty()) {
+      impl_->or_dirty_if(b.CreateICmpNE(old, merged), dirty);
+    }
+    b.CreateAlignedStore(merged, a.ptr, llvm::Align(8));
     return true;
   }
   auto* entry = cast_integer(b, cast_integer(b, value, a.bits, data.unsign), a.store_bits, true);
-  if (a.in_state && !llvm::isa<llvm::ConstantInt>(valid)) {
+  if (a.in_state && (!dirty.empty() || !llvm::isa<llvm::ConstantInt>(valid))) {
     // A memory in the state: `if (enabled) mem[address] = data`. A disabled port touches nothing --
     // no load of the entry, no store back -- and what only the data needs can sink under the test.
     // A design that decodes its own write address reaches here as one port per entry (dino's
@@ -2927,7 +3006,11 @@ bool Cgen_llvm::array_write(size_t array, Value enable, Value address, Value dat
     auto* cont  = llvm::BasicBlock::Create(impl_->context, "mem.cont", fn);
     b.CreateCondBr(valid, write, cont);
     b.SetInsertPoint(write);
-    b.CreateStore(entry, b.CreateInBoundsGEP(a.ty, a.ptr, {b.getInt64(0), index}));
+    auto* ptr = b.CreateInBoundsGEP(a.ty, a.ptr, {b.getInt64(0), index});
+    if (!dirty.empty()) {  // the kernels reading this memory run again only when an entry really changes
+      impl_->or_dirty_if(b.CreateICmpNE(b.CreateLoad(entry->getType(), ptr), entry), dirty);
+    }
+    b.CreateStore(entry, ptr);
     b.CreateBr(cont);
     b.SetInsertPoint(cont);
     return true;
@@ -3337,13 +3420,36 @@ bool Cgen_llvm::add_state_output(size_t word, size_t previous_word, Value value,
   return true;
 }
 
-bool Cgen_llvm::add_state_output_if(Value guard, bool when_zero, size_t word, Value value, std::string& error) {
+bool Cgen_llvm::add_state_output_if(Value guard, bool when_zero, size_t word, Value value, std::string& error,
+                                    const std::vector<Dirty_mask>& dirty) {
   if (!impl_->state_abi || value.width == 0 || guard.width == 0 || word > impl_->state_words
       || word_count(value.width) > impl_->state_words - word || impl_->get(value) == nullptr || impl_->get(guard) == nullptr) {
     error = "invalid guarded LLVM state output";
     return false;
   }
-  impl_->guarded_outputs.push_back({guard, when_zero, word, value});
+  for (const auto& mask : dirty) {
+    if (mask.word >= impl_->state_words) {
+      error = "LLVM dirty mask is outside its allocation";
+      return false;
+    }
+  }
+  impl_->guarded_outputs.push_back({guard, when_zero, word, value, dirty});
+  return true;
+}
+
+bool Cgen_llvm::merge_state_words(size_t destination, size_t source, size_t words, std::string& error) {
+  if (!impl_->state_abi || destination > impl_->state_words || source > impl_->state_words
+      || words > impl_->state_words - destination || words > impl_->state_words - source
+      || (destination < source + words && source < destination + words && words != 0)) {
+    error = "LLVM state merge is outside its allocation or overlaps";
+    return false;
+  }
+  auto& b = impl_->builder;
+  for (size_t i = 0; i < words; ++i) {
+    auto* from = impl_->word_ptr(impl_->outputs, source + i);
+    impl_->or_state_word(destination + i, b.CreateLoad(b.getInt64Ty(), from));
+    b.CreateStore(b.getInt64(0), from);
+  }
   return true;
 }
 
@@ -3505,29 +3611,16 @@ bool Cgen_llvm::seal(std::string& error, bool track_changed) {
     // Values have already been materialized by add_state_output. Snapshot all
     // comparisons before storing: a swap or pending/current alias must not
     // observe another output's new value. Accumulate dirty bits in SSA once.
-    std::map<size_t, llvm::Value*> changed;
+    Impl::Changes changed;
     for (const auto& output : impl_->state_outputs) {
-      if (output.dirty.empty()) {
-        continue;
-      }
-      auto* old       = impl_->load_packed(impl_->inputs, output.previous_word, output.value.width, "state.old");
-      auto* different = impl_->builder.CreateICmpNE(old, impl_->get(output.value));
-      for (const auto& mask : output.dirty) {
-        auto* bits = impl_->builder.CreateSelect(different, impl_->builder.getInt64(mask.mask), impl_->builder.getInt64(0));
-        auto [it, inserted] = changed.try_emplace(mask.word, bits);
-        if (!inserted) {
-          it->second = impl_->builder.CreateOr(it->second, bits);
-        }
+      if (!output.dirty.empty()) {
+        impl_->note_change(changed, output.previous_word, impl_->get(output.value), output.value.width, output.dirty);
       }
     }
     for (const auto& output : impl_->state_outputs) {
       impl_->store_packed(impl_->get(output.value), impl_->outputs, output.word, output.value.width);
     }
-    for (const auto& [word, bits] : changed) {
-      auto* ptr = impl_->word_ptr(impl_->outputs, word);
-      auto* old = impl_->builder.CreateLoad(impl_->builder.getInt64Ty(), ptr);
-      impl_->builder.CreateStore(impl_->builder.CreateOr(old, bits), ptr);
-    }
+    impl_->mark_changes(changed);
     // Guarded outputs: one branch per distinct guard, in first-use order. Every value was
     // materialized when its output was added, so the blocks below hold stores only.
     {
@@ -3552,10 +3645,18 @@ bool Cgen_llvm::seal(std::string& error, bool track_changed) {
         auto*       cont  = llvm::BasicBlock::Create(impl_->context, "state.keep", fn);
         b.CreateCondBr(taken, then, cont);
         b.SetInsertPoint(then);
+        Impl::Changes moved;  // compared here, under the guard: a register that is not enabled costs nothing
+        for (const auto index : members[key]) {
+          const auto& g = impl_->guarded_outputs[index];
+          if (!g.dirty.empty()) {
+            impl_->note_change(moved, g.word, impl_->get(g.value), g.value.width, g.dirty);
+          }
+        }
         for (const auto index : members[key]) {
           const auto& g = impl_->guarded_outputs[index];
           impl_->store_packed(impl_->get(g.value), impl_->outputs, g.word, g.value.width);
         }
+        impl_->mark_changes(moved);
         b.CreateBr(cont);
         b.SetInsertPoint(cont);
       }

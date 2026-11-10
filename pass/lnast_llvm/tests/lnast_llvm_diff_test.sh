@@ -57,6 +57,18 @@ one_design() {
     || { cat "$d/gc.log" >&2; fail "$design: lnast-llvm (small kernels) failed"; return 1; }
   "$RUN" "$d/kc" "$CYCLES" >"$d/cut.trace" || { fail "$design: small-kernel run failed"; return 1; }
   cmp -s "$d/cut.trace" "$d/ref.trace" || { diff "$d/cut.trace" "$d/ref.trace" | head -10 >&2; fail "$design: small-kernel traces differ"; return 1; }
+  # Activity gating (a kernel runs only when something it reads changed), which a small design does
+  # not get on its own: whole, and cut into small kernels (where nearly every value crosses kernels
+  # and every register, memory and latch is read by some other kernel).
+  local chunk
+  for chunk in 0 1; do
+    LHD_SIM_LNAST_GATE=1 LHD_SIM_LNAST_CHUNK=$chunk "$LHD_ABS" pass lnast-llvm --top "$top" "lg:$d/lg" "${lg2lnast[@]}" \
+      --emit-dir "sim:$d/kg$chunk" -q >"$d/gg$chunk.log" 2>&1 \
+      || { cat "$d/gg$chunk.log" >&2; fail "$design: lnast-llvm (gated, chunk $chunk) failed"; return 1; }
+    "$RUN" "$d/kg$chunk" "$CYCLES" >"$d/gated$chunk.trace" || { fail "$design: gated run (chunk $chunk) failed"; return 1; }
+    cmp -s "$d/gated$chunk.trace" "$d/ref.trace" \
+      || { diff "$d/gated$chunk.trace" "$d/ref.trace" | head -10 >&2; fail "$design: gated traces differ (chunk $chunk)"; return 1; }
+  done
   if [ "$kind" = prp ]; then
     # A short loop is unrolled in the native code; the rolled form (a loop past the unroll budget) must
     # give the same trace.

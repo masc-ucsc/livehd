@@ -23,6 +23,7 @@ struct Field {
   bool        sign = false;
   size_t      word = 0;
   uint64_t    init = 0;
+  std::vector<uint32_t> marks;  // activity gating: the kernel bits to set when this input changes
 };
 
 // kernel.json is written by lnast_llvm.cpp in a fixed shape; read it with a scanner, not a JSON library.
@@ -57,6 +58,12 @@ std::vector<Field> parse_list(const std::string& js, const std::string& key) {
     f.sign  = num(obj, "sign") != 0;
     f.word  = num(obj, "word");
     f.init  = num(obj, "init");
+    if (auto m = obj.find("\"marks\":\""); m != std::string::npos) {
+      std::istringstream bits(obj.substr(m + 9, obj.find('"', m + 9) - m - 9));
+      for (uint32_t bit; bits >> bit;) {
+        f.marks.push_back(bit);
+      }
+    }
     out.push_back(f);
     pos = end + 1;
   }
@@ -151,28 +158,49 @@ int main(int argc, char** argv) {
       return 1;
     }
   }
-  std::vector<livehd::sim::Native_function> edge, settle;
-  const auto                                resolve = [&](const std::string& key, std::vector<livehd::sim::Native_function>& into) {
+  // Activity gating (lnast_llvm.hpp): `gate_bits` dirty bits from state word `gate_word`, one per
+  // kernel in edge, fall, settle order; a kernel runs when its bit is set, cleared before the call.
+  const auto number = [&](const std::string& key) {
+    const auto at = js.find("\"" + key + "\":");
+    return at == std::string::npos ? 0ull : std::strtoull(js.c_str() + at + key.size() + 3, nullptr, 10);
+  };
+  const size_t gate_word = number("gate_word");
+  const size_t gate_bits = number("gate_bits");
+  struct Call {
+    livehd::sim::Native_function fn;
+    long                         bit;  // -1: always (a commit kernel, or no gating)
+  };
+  std::vector<Call> calls;
+  long              next_bit = 0;
+  const auto        resolve  = [&](const std::string& key, bool gated) {
     for (const auto& fn : strings(key)) {
       auto entry = objects.lookup(fn, error);
       if (entry == nullptr) {
         std::fprintf(stderr, "lookup %s: %s\n", fn.c_str(), error.c_str());
         return false;
       }
-      into.push_back(entry);
+      calls.push_back({entry, gated && gate_bits != 0 ? next_bit : -1});
+      next_bit += gated ? 1 : 0;
     }
     return true;
   };
-  if (!resolve("edge", edge) || !resolve("commit", edge) || !resolve("fall", edge) || !resolve("fall_commit", edge)
-      || !resolve("settle", settle)) {
+  if (!resolve("edge", true) || !resolve("commit", false) || !resolve("fall", true) || !resolve("fall_commit", false)
+      || !resolve("settle", true)) {
     return 1;
   }
-  const auto entry = [&](uint64_t* state, void** resources) {
-    for (auto fn : edge) {
-      fn(state, resources);
-    }
-    for (auto fn : settle) {
-      fn(state, resources);
+  uint64_t   kernel_runs = 0;
+  const auto entry       = [&](uint64_t* state, void** resources) {
+    for (const auto& call : calls) {
+      if (call.bit >= 0) {
+        auto&          word = state[gate_word + static_cast<size_t>(call.bit) / 64];
+        const uint64_t mask = uint64_t{1} << (call.bit % 64);
+        if ((word & mask) == 0) {
+          continue;
+        }
+        word &= ~mask;
+      }
+      ++kernel_runs;
+      call.fn(state, resources);
     }
   };
   const char*           dump = std::getenv("LNAST_LLVM_DUMP");
@@ -184,10 +212,18 @@ int main(int argc, char** argv) {
     if (f.sign && f.bits < 64 && ((v >> (f.bits - 1)) & 1)) {
       v |= ~mask_of(f.bits);
     }
+    if (state[f.word] != v) {
+      for (const auto bit : f.marks) {
+        state[gate_word + bit / 64] |= uint64_t{1} << (bit % 64);
+      }
+    }
     state[f.word] = v;
   };
   for (const auto& r : regs) {
     store(r, r.init);
+  }
+  for (size_t bit = 0; bit < gate_bits; ++bit) {  // power-on: every kernel runs
+    state[gate_word + bit / 64] |= uint64_t{1} << (bit % 64);
   }
   for (uint64_t c = 0; c < cycles; ++c) {
     for (size_t i = 0; i < ins.size(); ++i) {
@@ -226,6 +262,12 @@ int main(int argc, char** argv) {
       }
       std::printf("\n");
     }
+  }
+  if (std::getenv("LNAST_LLVM_STATS") != nullptr) {  // how much the gating skipped
+    std::fprintf(stderr,
+                 "lnast_llvm_run: %llu kernel calls of %llu\n",
+                 static_cast<unsigned long long>(kernel_runs),
+                 static_cast<unsigned long long>(cycles * calls.size()));
   }
   return 0;
 }

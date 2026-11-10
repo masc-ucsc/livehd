@@ -2163,6 +2163,11 @@ struct View {
   std::vector<uint32_t> pos;       // per op: its index in `order` (none: not emitted)
   std::vector<uint32_t> cut;       // kernel k replays order[cut[k], cut[k + 1])
   std::vector<uint8_t>  spill;     // per op: read by another kernel of this view
+  // Per op: the state location a spilled value crosses kernels through. The view's own: the same op
+  // is a different value in another clock phase, and two views taking turns on one word would never
+  // let the kernels that read it rest (activity gating).
+  std::vector<size_t>   slot;
+  uint32_t              first_bit = 0;  // activity gating: kernel k of this view owns dirty bit first_bit + k
   uint64_t              size = 0;  // words of code (cut_kernels)
   std::vector<uint8_t>  fold_state;  // per op: 0 not evaluated, 1 not a constant, 2 the constant fold_value
   std::vector<uint64_t> fold_value;
@@ -2318,6 +2323,70 @@ void root_operands(const View& v, const Root& root, Fn&& fn) {
   fn(root.data);
 }
 
+// Activity gating: a kernel is a function of the state words it reads, so it need not run again until
+// one of them changes. Every kernel owns one bit of the `dirty` words; the caller runs a kernel only
+// when its bit is set, clearing it first. Whoever changes a state location sets the bits of the
+// kernels that READ it and of the OTHER kernels that write it (a location with several writers -- a
+// latch's held value is written in every phase it is open, a memory by each of its ports -- holds
+// what the last one wrote, so the others have to assert their value again).
+// A store compares before it marks: most of a large design holds its value most cycles.
+// A register that is not written in place changes at the commit, not when its next value is stored:
+// its marks go to the `next` words, which the commit kernel merges into `dirty`. (Set right away, a
+// later kernel of the same view would run now, on the old value, and be clean when the value changes.)
+struct Activity {
+  bool                               on         = false;
+  size_t                             bits       = 0;           // kernels
+  size_t                             dirty_loc  = Tape::none;  // tape locations, then (after the layout) words
+  size_t                             next_loc   = Tape::none;
+  size_t                             dirty_word = 0;
+  size_t                             next_word  = 0;
+  std::vector<std::vector<uint32_t>> readers, writers;  // per state location: kernel bits
+  std::vector<std::vector<uint32_t>> array_readers, array_writers;
+  static constexpr uint32_t          nobody = ~uint32_t{0};
+
+  size_t      words() const { return (bits + 63) / 64; }
+  static void add(std::vector<Cgen_llvm::Dirty_mask>& out, size_t base, const std::vector<uint32_t>& list, uint32_t skip) {
+    for (const auto bit : list) {
+      if (bit == skip) {
+        continue;
+      }
+      const auto word = base + bit / 64;
+      auto       it   = std::ranges::find(out, word, &Cgen_llvm::Dirty_mask::word);
+      if (it == out.end()) {
+        out.push_back({word, 0});
+        it = out.end() - 1;
+      }
+      it->mask |= uint64_t{1} << (bit % 64);
+    }
+  }
+  // What kernel `self` marks when it changes location `loc`.
+  std::vector<Cgen_llvm::Dirty_mask> marks(size_t loc, uint32_t self, bool next = false) const {
+    std::vector<Cgen_llvm::Dirty_mask> out;
+    if (on) {
+      add(out, next ? next_word : dirty_word, readers[loc], nobody);
+      add(out, next ? next_word : dirty_word, writers[loc], self);
+    }
+    return out;
+  }
+  std::vector<Cgen_llvm::Dirty_mask> array_marks(size_t array, uint32_t self) const {
+    std::vector<Cgen_llvm::Dirty_mask> out;
+    if (on) {
+      add(out, dirty_word, array_readers[array], nobody);
+      add(out, dirty_word, array_writers[array], self);
+    }
+    return out;
+  }
+  std::vector<Cgen_llvm::Dirty_mask> all() const {
+    std::vector<Cgen_llvm::Dirty_mask> out;
+    for (size_t w = 0; on && w < words(); ++w) {
+      out.push_back({dirty_word + w, w + 1 == words() && bits % 64 != 0 ? (uint64_t{1} << (bits % 64)) - 1 : ~uint64_t{0}});
+    }
+    return out;
+  }
+  // The kernel bits reading `loc`, for a writer that is not a kernel (the testbench driving an input).
+  std::vector<uint32_t> readers_of(size_t loc) const { return on ? readers[loc] : std::vector<uint32_t>{}; }
+};
+
 struct Kernel_job {
   std::string name, object;
   const View* view  = nullptr;
@@ -2325,17 +2394,55 @@ struct Kernel_job {
   uint32_t    begin = 0, end = 0;  // positions in view->order
 };
 
+// A register root that publishes into a pending word: the register itself changes at the commit.
+bool is_pending(const Root& root) { return root.home != Tape::none && root.loc != root.home; }
+
+// Every value kernel `index` of `v` (order[begin, end)) reads: `fn(op id)` per operand of its ops and
+// of the results it publishes. What that means for the kernel's inputs is the caller's (an input op is
+// a state location; an op of another kernel arrives through its slot; a constant is made in place).
+template <class Fn>
+void kernel_operands(const Tape& t, const View& v, size_t index, uint32_t begin, uint32_t end, Fn&& fn) {
+  for (uint32_t p = begin; p < end; ++p) {
+    view_operands(t, v, v.order[p], [&](const Tape::Ref& r) { fn(r.id); });
+  }
+  for (const auto& root : v.roots) {
+    if (root.kernel == index && root_mode(v, root) != 0) {
+      root_operands(v, root, [&](const Tape::Ref& r) { fn(r.id); });
+      if (root.guarded && root.loc != root.home && root_mode(v, root) == 2) {
+        fn(root.hold.id);  // published as the mux: it reads the register
+      }
+    }
+  }
+}
+
 // The size of a kernel, in machine words of code (cut_kernels: kernels are one to two times this).
 // LLVM's instruction selection and scheduling are superlinear in the size of a basic block, and a
 // kernel is mostly one block: boom as ONE kernel spent 364 s there; in pieces the same code is a few
 // CPU seconds per worker. Small kernels also run faster on a large design (less is live at once).
-uint32_t chunk_target() {
-  static const uint32_t target = [] {
+//
+// With activity gating (see Activity) a kernel is also the unit that can be skipped, and smaller is
+// better again: one changed value wakes a whole kernel. Measured with gating on (cycles/s):
+//   words per kernel   1250    600    300    150     75     40
+//   minion            84.3k   102k   114k   134k   118k    87k    (ungated: 29.1k)
+//   boom              23.2k  30.6k  30.9k  36.3k  34.8k  27.1k    (ungated: 34.3k)
+// Below ~150 the values crossing kernels (a store, a load and a compare each) cost more than the
+// skipped work saves.
+uint32_t chunk_target(bool gated) {
+  static const uint32_t forced = [] {
     const char* text = livehd::debug::env<"LHD_SIM_LNAST_CHUNK">();  // debug: words of code per kernel
-    const auto  n    = text == nullptr ? 0ul : std::strtoul(text, nullptr, 10);
-    return n == 0 ? 1250u : static_cast<uint32_t>(n);
+    return text == nullptr ? 0u : static_cast<uint32_t>(std::strtoul(text, nullptr, 10));
   }();
-  return target;
+  return forced != 0 ? forced : gated ? 150u : 1250u;
+}
+
+// Words of code: an op on a 512-bit value is eight words.
+uint64_t op_size(const Tape& t, uint32_t id) { return std::max<uint64_t>(1, (t.ops[id].width + 63) / 64); }
+uint64_t view_size(const Tape& t, const View& v) {
+  uint64_t size = 0;
+  for (const auto id : v.order) {
+    size += op_size(t, id);
+  }
+  return size;
 }
 
 // Emission order: depth first from each result, in the order the results were recorded. The walk
@@ -2544,7 +2651,7 @@ void order_view(const Tape& t, View& v) {
   }
 }
 
-void cut_kernels(const Tape& t, View& v) {
+void cut_kernels(const Tape& t, View& v, uint64_t target, bool gated) {
   const auto n = static_cast<uint32_t>(v.order.size());
   v.cut.clear();
   v.spill.assign(t.ops.size(), 0);
@@ -2559,7 +2666,7 @@ void cut_kernels(const Tape& t, View& v) {
     }
   }
   // Size is counted in machine words, not ops: an op on a 512-bit value is eight words of code.
-  const auto            size_of = [&](uint32_t id) { return std::max<uint64_t>(1, (t.ops[id].width + 63) / 64); };
+  const auto            size_of = [&](uint32_t id) { return op_size(t, id); };
   std::vector<uint64_t> size_to(n + 1, 0);  // words of code in order[0, p)
   for (uint32_t p = 0; p < n; ++p) {
     size_to[p + 1] = size_to[p] + size_of(v.order[p]);
@@ -2591,8 +2698,7 @@ void cut_kernels(const Tape& t, View& v) {
   // instructions a clock against 2,807 in one, at half the speed. A larger view is cut into kernels of
   // `target` to 2 x `target` words, each at the cheapest seam in that window; there small kernels win
   // twice (boom: 13 kernels 26.4k cycles/s and 7.8 s of LLVM, 55 kernels 35.0k and 1.7 s).
-  const uint64_t target = chunk_target();
-  v.size                = size_to[n];
+  v.size = size_to[n];
   v.cut.push_back(0);
   for (uint32_t start = 0; size_to[n] > 4 * target && size_to[n] - size_to[start] > 2 * target;) {
     uint32_t best = n;
@@ -2619,6 +2725,31 @@ void cut_kernels(const Tape& t, View& v) {
     start = best;
   }
   v.cut.push_back(n);
+  // A result that computes nothing -- a register taking another register's value (a pipeline stage),
+  // an input or a constant -- belongs to no kernel's logic. Left to kernel 0 (below) they all pile up
+  // there: boom has 1,500, one block of stores and compares that took as long to compile as forty
+  // other kernels and that ran every clock. Gated, they get kernels of their own, in recorded order
+  // (a module's registers together), ahead of the others so the registers they read can still be
+  // written in place by the kernels behind them.
+  const auto copies = [&](const Root& root) {
+    bool any = false, computed = false;
+    root_operands(v, root, [&](const Tape::Ref& r) {
+      any      = true;
+      computed = computed || (!Tape::is_free(t.ops[r.id].kind) && !v.folded(r.id));
+    });
+    return any && !computed;
+  };
+  size_t copy_kernels = 0;
+  if (gated) {
+    uint64_t words = 0;
+    for (const auto& root : v.roots) {
+      words += copies(root) ? std::max<uint64_t>(1, (root.value.width + 63) / 64) : 0;
+    }
+    if (words > target) {
+      copy_kernels = static_cast<size_t>((words + target - 1) / target);
+      v.cut.insert(v.cut.begin(), copy_kernels, 0);  // empty op ranges: an op at position 0 is the first real kernel's
+    }
+  }
   // A value crosses kernels through a state word: mark what another kernel of this view reads.
   for (uint32_t p = 0; p < n; ++p) {
     const auto i    = v.order[p];
@@ -2630,7 +2761,56 @@ void cut_kernels(const Tape& t, View& v) {
     });
   }
   // A result is published by the last kernel that computes one of its operands; the others cross.
-  for (auto& root : v.roots) {
+  std::vector<uint8_t> is_copy(v.roots.size(), 0);
+  if (copy_kernels != 0) {
+    // A register is written in place only when nothing reads it in a later kernel, so along a chain
+    // of copies (a shift register: c' = b, b' = a) the reader goes first: c, then b.
+    absl::flat_hash_map<size_t, std::vector<uint32_t>> read_by;  // state location -> the copies reading it
+    for (uint32_t i = 0; i < v.roots.size(); ++i) {
+      if (copies(v.roots[i])) {
+        is_copy[i] = 1;
+        root_operands(v, v.roots[i], [&](const Tape::Ref& r) {
+          if (t.ops[r.id].kind == Tape::K::input) {
+            read_by[static_cast<size_t>(t.ops[r.id].imm)].push_back(i);
+          }
+        });
+      }
+    }
+    std::vector<uint8_t>                     seen(v.roots.size(), 0);
+    std::vector<std::pair<uint32_t, size_t>> stack;  // (root, next reader to visit)
+    uint64_t                                 copied = 0;
+    const auto                               place  = [&](uint32_t i) {
+      v.roots[i].kernel  = std::min<size_t>(copy_kernels - 1, static_cast<size_t>(copied / target));
+      copied            += std::max<uint64_t>(1, (v.roots[i].value.width + 63) / 64);
+    };
+    for (uint32_t first = 0; first < v.roots.size(); ++first) {
+      if (is_copy[first] == 0 || seen[first] != 0) {
+        continue;
+      }
+      seen[first] = 1;
+      stack.emplace_back(first, 0);
+      while (!stack.empty()) {
+        auto& [i, next] = stack.back();
+        const auto home = v.roots[i].home != Tape::none ? v.roots[i].home : v.roots[i].loc;
+        const auto it   = read_by.find(home);
+        if (it != read_by.end() && next < it->second.size()) {
+          const auto reader = it->second[next++];
+          if (seen[reader] == 0) {
+            seen[reader] = 1;
+            stack.emplace_back(reader, 0);
+          }
+          continue;
+        }
+        place(i);
+        stack.pop_back();
+      }
+    }
+  }
+  for (uint32_t index = 0; index < v.roots.size(); ++index) {
+    auto& root = v.roots[index];
+    if (is_copy[index] != 0) {
+      continue;
+    }
     root.kernel = 0;
     root_operands(v, root, [&](const Tape::Ref& r) { root.kernel = std::max(root.kernel, v.kernel_of(r.id)); });
     root_operands(v, root, [&](const Tape::Ref& r) {
@@ -2643,8 +2823,10 @@ void cut_kernels(const Tape& t, View& v) {
 
 // Replay order[begin, end) of `view` into one state kernel and write its object. Returns the
 // instruction count; throws Unsupported.
-size_t build_kernel(const Tape& t, const Kernel_job& job, const std::vector<size_t>& slot, size_t words) {
+size_t build_kernel(const Tape& t, const Kernel_job& job, const Activity& gate, size_t words) {
   const View& v                              = *job.view;
+  const auto& slot                           = v.slot;
+  const auto  self                           = static_cast<uint32_t>(v.first_bit + job.index);
   using K                                    = Tape::K;
   const auto here = [&](uint32_t id) { return v.pos[id] != Tape::none && v.pos[id] >= job.begin && v.pos[id] < job.end; };
   std::vector<Cgen_llvm::State_input>   layout;
@@ -2664,17 +2846,11 @@ size_t build_kernel(const Tape& t, const Kernel_job& job, const std::vector<size
       }
     }
   };
-  for (uint32_t p = job.begin; p < job.end; ++p) {
-    view_operands(t, v, v.order[p], [&](const Tape::Ref& r) { need(r.id); });
-  }
+  kernel_operands(t, v, job.index, job.begin, job.end, need);
   std::vector<const Root*> my_roots;
   for (const auto& root : v.roots) {
     if (root.kernel == job.index && root_mode(v, root) != 0) {
       my_roots.push_back(&root);
-      root_operands(v, root, [&](const Tape::Ref& r) { need(r.id); });
-      if (root.guarded && root.loc != root.home && root_mode(v, root) == 2) {
-        need(root.hold.id);  // published as the mux: it reads the register
-      }
     }
   }
 
@@ -2767,12 +2943,12 @@ size_t build_kernel(const Tape& t, const Kernel_job& job, const std::vector<size
         break;
       case K::array_read: made(i, k.array_read(array_of(o.imm), val(o.a), o.width, o.unsign)); break;
       case K::array_write:
-        if (!k.array_write(array_of(o.imm), val(o.a), val(o.b), val(o.c))) {
+        if (!k.array_write(array_of(o.imm), val(o.a), val(o.b), val(o.c), gate.array_marks(o.imm, self))) {
           bail("memory write");
         }
         break;
       case K::array_clear:
-        if (!k.array_clear_if(array_of(o.imm), val(o.a))) {
+        if (!k.array_clear_if(array_of(o.imm), val(o.a), gate.array_marks(o.imm, self))) {
           bail("memory reset");
         }
         break;
@@ -2822,7 +2998,11 @@ size_t build_kernel(const Tape& t, const Kernel_job& job, const std::vector<size
     const auto i = v.order[p];
     if (v.spill[i] != 0 && !v.folded(i)) {
       const auto& d = t.ops[i];
-      if (!k.add_state_output(t.locs[slot[i]], t.locs[slot[i]], val(Tape::Ref{i, d.width, d.unsign}), {}, error)) {
+      if (!k.add_state_output(t.locs[slot[i]],
+                              t.locs[slot[i]],
+                              val(Tape::Ref{i, d.width, d.unsign}),
+                              gate.marks(slot[i], self),
+                              error)) {
         bail("kernel boundary value: " + error);
       }
     }
@@ -2831,26 +3011,31 @@ size_t build_kernel(const Tape& t, const Kernel_job& job, const std::vector<size
     const auto word = t.locs[root->loc];
     const auto mode = root_mode(v, *root);
     bool       ok   = false;
+    // What changes is the register (at the commit, when the value goes to a pending word first).
+    const auto changes = is_pending(*root) ? root->home : root->loc;
+    const auto was     = t.locs[changes];
+    const auto marks   = gate.marks(changes, self, is_pending(*root));
     if (!root->guarded) {
-      ok = k.add_state_output(word, word, val(root->value), {}, error);
+      ok = k.add_state_output(word, was, val(root->value), marks, error);
     } else if (mode == 1) {  // the guard is a constant that is on
-      ok = k.add_state_output(word, word, k.resize(val(root->data), root->value.width, root->value.unsign), {}, error);
+      ok = k.add_state_output(word, was, k.resize(val(root->data), root->value.width, root->value.unsign), marks, error);
     } else if (root->loc == root->home) {
       ok = k.add_state_output_if(val(root->guard),
                                  root->when_zero,
                                  word,
                                  k.resize(val(root->data), root->value.width, root->value.unsign),
-                                 error);
+                                 error,
+                                 marks);
     } else {
       const V keep = val(root->hold), data = val(root->data);
       ok = k.add_state_output(word,
-                              word,
+                              was,
                               k.mux(val(root->guard),
                                     root->when_zero ? data : keep,
                                     root->when_zero ? keep : data,
                                     root->value.width,
                                     root->value.unsign),
-                              {},
+                              marks,
                               error);
     }
     if (!ok) {
@@ -3020,33 +3205,49 @@ Result Gen::run(const Sim_objects& out) {
 
     // Each commit kernel reads the distinct reset conditions of its registers: keep those values
     // alive through its view.
-    std::vector<size_t> slot(tape.ops.size(), Tape::none);
-    auto                give_slot = [&](uint32_t id) {
-      if (slot[id] == Tape::none && !Tape::is_free(tape.ops[id].kind)) {
-        slot[id] = tape.new_loc(tape.ops[id].width);
+    for (View* v : {&rise, &fall, &settle}) {
+      v->slot.assign(tape.ops.size(), Tape::none);
+    }
+    auto give_slot = [&](View& v, uint32_t id) {
+      if (v.slot[id] == Tape::none && !Tape::is_free(tape.ops[id].kind)) {
+        v.slot[id] = tape.new_loc(tape.ops[id].width);
       }
     };
     std::vector<uint32_t> reset_conditions[2];  // [0]: rise, [1]: fall
     for (const auto& item : reset_items_) {
       auto&      list = reset_conditions[regs_[item.idx].negedge ? 1 : 0];
+      auto&      view = regs_[item.idx].negedge ? fall : rise;
       const auto id   = static_cast<uint32_t>(item.active.id);
       if (std::ranges::find(list, id) == list.end()) {
         list.push_back(id);
-        give_slot(id);
-        if (slot[id] != Tape::none) {
+        give_slot(view, id);
+        if (view.slot[id] != Tape::none) {
           Root root;
           root.value = Tape::Ref{id, tape.ops[id].width, tape.ops[id].unsign};
-          root.loc   = slot[id];
-          (regs_[item.idx].negedge ? fall : rise).roots.push_back(root);
+          root.loc   = view.slot[id];
+          view.roots.push_back(root);
         }
       }
     }
+    // Activity gating (see Activity) pays for a compare at every store with the kernels it skips. A
+    // small design is a kernel or two that run every clock anyway, and cut small enough to skip
+    // anything it loses more at the cuts (picorv32 6.5M -> 2.3M cycles/s, dino 5.8M -> 4.4M): only a
+    // large design is gated. LHD_SIM_LNAST_GATE (debug): 0 never, 1 always.
+    bool gated = false;
+    {
+      uint64_t size = 0;
+      for (View* v : {&rise, &fall, &settle}) {
+        order_view(tape, *v);
+        size += view_size(tape, *v);
+      }
+      const char* text = livehd::debug::env<"LHD_SIM_LNAST_GATE">();
+      gated            = text != nullptr ? text[0] != '0' : size > 20000;
+    }
     for (View* v : {&rise, &fall, &settle}) {
-      order_view(tape, *v);
-      cut_kernels(tape, *v);
+      cut_kernels(tape, *v, chunk_target(gated), gated);
       for (uint32_t i = 0; i < v->spill.size(); ++i) {
         if (v->spill[i] != 0) {
-          give_slot(i);
+          give_slot(*v, i);
         }
       }
     }
@@ -3094,14 +3295,120 @@ Result Gen::run(const Sim_objects& out) {
       }
     }
 
-    // ---- layout: inputs; registers written in place; per edge, the others twice (current, then
-    // pending: that commit is one copy); memories; outputs; the words kernels pass values through ----
+    // ---- activity gating: which kernels read and which write every state location (see Activity) ----
+    Activity gate;
+    {
+      uint32_t kernels = 0;
+      for (View* v : {&rise, &fall, &settle}) {
+        v->first_bit  = kernels;
+        kernels      += v->cut.empty() ? 0 : static_cast<uint32_t>(v->cut.size() - 1);
+      }
+      gate.bits = kernels;
+      gate.on   = kernels != 0 && gated;
+    }
+    if (gate.on) {
+      using K        = Tape::K;
+      gate.dirty_loc = tape.new_loc(gate.words() * 64);
+      gate.next_loc  = tape.new_loc(gate.words() * 64);
+      gate.readers.resize(tape.locs.size());
+      gate.writers.resize(tape.locs.size());
+      gate.array_readers.resize(tape.arrays.size());
+      gate.array_writers.resize(tape.arrays.size());
+      for (View* v : {&rise, &fall, &settle}) {
+        for (size_t c = 0; c + 1 < v->cut.size(); ++c) {
+          const auto bit   = static_cast<uint32_t>(v->first_bit + c);
+          const auto begin = v->cut[c], end = v->cut[c + 1];
+          kernel_operands(tape, *v, c, begin, end, [&](uint32_t id) {
+            const auto& d = tape.ops[id];
+            if (d.kind == K::input) {
+              gate.readers[d.imm].push_back(bit);
+            } else if (!Tape::is_free(d.kind) && !(v->pos[id] != Tape::none && v->pos[id] >= begin && v->pos[id] < end)
+                       && !v->folded(id)) {
+              if (v->slot[id] == Tape::none) {
+                bail("internal: a value crosses kernels without a state word");
+              }
+              gate.readers[v->slot[id]].push_back(bit);
+            }
+          });
+          for (uint32_t p = begin; p < end; ++p) {
+            const auto  i = v->order[p];
+            const auto& o = tape.ops[i];
+            if (o.kind == K::array_read) {
+              gate.array_readers[o.imm].push_back(bit);
+            } else if (o.kind == K::array_write || o.kind == K::array_clear) {
+              gate.array_writers[o.imm].push_back(bit);
+            }
+            if (v->spill[i] != 0 && !v->folded(i)) {
+              gate.writers[v->slot[i]].push_back(bit);
+            }
+          }
+        }
+        for (const auto& root : v->roots) {
+          if (root_mode(*v, root) != 0) {
+            gate.writers[is_pending(root) ? root.home : root.loc].push_back(static_cast<uint32_t>(v->first_bit + root.kernel));
+          }
+        }
+      }
+      for (auto* lists : {&gate.readers, &gate.writers, &gate.array_readers, &gate.array_writers}) {
+        for (auto& list : *lists) {
+          std::ranges::sort(list);
+          list.erase(std::unique(list.begin(), list.end()), list.end());
+        }
+      }
+      for (auto& f : top_->in) {  // the testbench writes these: it marks their readers
+        if (!top_->clocks.contains(f.name)) {
+          f.marks = gate.readers_of(f.word);
+        }
+      }
+      if (timer.on) {
+        size_t plain = 0, guarded = 0, pend = 0, spills = 0, unread = 0;
+        for (View* v : {&rise, &fall, &settle}) {
+          for (const auto& root : v->roots) {
+            const auto mode = root_mode(*v, root);
+            if (mode == 0) {
+              continue;
+            }
+            const auto self = static_cast<uint32_t>(v->first_bit + root.kernel);
+            if (gate.marks(is_pending(root) ? root.home : root.loc, self).empty()) {
+              ++unread;
+            } else if (is_pending(root)) {
+              ++pend;
+            } else if (root.guarded && mode == 2) {
+              ++guarded;
+            } else {
+              ++plain;
+            }
+          }
+          for (const auto i : v->order) {
+            spills += v->spill[i] != 0 && !v->folded(i) ? 1 : 0;
+          }
+        }
+        std::fprintf(stderr,
+                     "lnast_llvm: gating compares: %zu plain stores, %zu guarded, %zu pending, %zu boundary values; %zu results "
+                     "nobody waits on\n",
+                     plain,
+                     guarded,
+                     pend,
+                     spills,
+                     unread);
+      }
+    }
+
+    // ---- layout: the dirty words; inputs; registers written in place; per edge, the others twice
+    // (current, then pending: that commit is one copy); memories; outputs; the words kernels pass
+    // values through ----
     auto place = [&](size_t loc) {
       if (tape.locs[loc] == Tape::none) {
         tape.locs[loc]  = words_;
         words_         += (tape.loc_bits[loc] + 63) / 64;
       }
     };
+    if (gate.on) {
+      place(gate.dirty_loc);
+      place(gate.next_loc);
+      gate.dirty_word = tape.locs[gate.dirty_loc];
+      gate.next_word  = tape.locs[gate.next_loc];
+    }
     for (auto& f : top_->in) {
       if (!top_->clocks.contains(f.name)) {
         place(f.word);
@@ -3169,9 +3476,9 @@ Result Gen::run(const Sim_objects& out) {
       std::vector<std::future<std::pair<size_t, std::string>>> running;
       for (const auto& job : jobs) {
         running.push_back(workers.submit(
-            [&tape, &job, &slot, words]() -> std::pair<size_t, std::string> {
+            [&tape, &job, &gate, words]() -> std::pair<size_t, std::string> {
               try {
-                return {build_kernel(tape, job, slot, words), {}};
+                return {build_kernel(tape, job, gate, words), {}};
               } catch (const Unsupported& u) {
                 return {0, u.why};
               }
@@ -3205,7 +3512,7 @@ Result Gen::run(const Sim_objects& out) {
       std::vector<Cgen_llvm::State_input> layout;
       for (const auto id : conditions) {
         const auto& d = tape.ops[id];
-        layout.push_back({tape.locs[d.kind == Tape::K::input ? static_cast<size_t>(d.imm) : slot[id]], d.width, d.unsign, 0});
+        layout.push_back({tape.locs[d.kind == Tape::K::input ? static_cast<size_t>(d.imm) : v.slot[id]], d.width, d.unsign, 0});
       }
       auto& name = e == 0 ? res.commit_function : res.fall_commit_function;
       name       = out.symbol + (e == 0 ? "_c" : "_d");
@@ -3224,6 +3531,10 @@ Result Gen::run(const Sim_objects& out) {
       if (!k.copy_state(q_base[e], d_base[e], q_words[e], error)) {
         bail("commit: " + error);
       }
+      // The registers just copied changed NOW: what their kernels marked for it becomes current.
+      if (gate.on && q_words[e] != 0 && !k.merge_state_words(gate.dirty_word, gate.next_word, gate.words(), error)) {
+        bail("commit: " + error);
+      }
       for (size_t i = 0; i < conditions.size(); ++i) {
         std::vector<std::pair<size_t, V>> stores;
         for (const auto& item : reset_items_) {
@@ -3232,7 +3543,8 @@ Result Gen::run(const Sim_objects& out) {
             stores.emplace_back(f.word, k.constant_words(f.bits, twos_words(item.init, f.bits), !f.sign));
           }
         }
-        if (!k.state_store_if(active[i], stores)) {
+        // A register in reset is not what its kernel stored: every kernel runs again (reset is rare).
+        if (!k.state_store_if(active[i], stores, gate.all())) {
           bail("commit: register reset");
         }
       }
@@ -3247,7 +3559,7 @@ Result Gen::run(const Sim_objects& out) {
     if (timer.on) {
       std::fprintf(stderr,
                    "lnast_llvm: %zu ops (%zu rise, %zu fall, %zu settle live; %llu + %llu + %llu words of code), %zu + %zu + %zu "
-                   "kernels, %zu state words, %zu registers in place, %zu + %zu words copied at commit, %zu latches\n",
+                   "kernels%s, %zu state words, %zu registers in place, %zu + %zu words copied at commit, %zu latches\n",
                    tape.ops.size(),
                    rise.count_live(),
                    fall.count_live(),
@@ -3258,6 +3570,7 @@ Result Gen::run(const Sim_objects& out) {
                    res.edge_functions.size(),
                    res.fall_functions.size(),
                    res.settle_functions.size(),
+                   gate.on ? " (activity gated)" : "",
                    words,
                    in_place,
                    q_words[0],
@@ -3307,6 +3620,13 @@ Result Gen::run(const Sim_objects& out) {
         for (size_t i = 0; i < v.size(); ++i) {
           js << (i ? ", " : "") << "{\"name\":\"" << v[i].name << "\",\"bits\":" << v[i].bits << ",\"sign\":" << (v[i].sign ? 1 : 0)
              << ",\"word\":" << v[i].word;
+          if (!v[i].marks.empty()) {  // activity gating: the kernel bits to set when this input changes
+            js << ",\"marks\":\"";
+            for (size_t m = 0; m < v[i].marks.size(); ++m) {
+              js << (m ? " " : "") << v[i].marks[m];
+            }
+            js << "\"";
+          }
           if (with_init) {
             js << ",\"init\":" << v[i].init;
           }
@@ -3321,7 +3641,8 @@ Result Gen::run(const Sim_objects& out) {
         }
         js << "],\n";
       };
-      js << "{\n  \"words\": " << words << ",\n  \"commit\": \"" << res.commit_function << "\",\n";
+      js << "{\n  \"words\": " << words << ",\n  \"gate_word\": " << gate.dirty_word
+         << ",\n  \"gate_bits\": " << (gate.on ? gate.bits : 0) << ",\n  \"commit\": \"" << res.commit_function << "\",\n";
       list("edge", res.edge_functions);
       list("fall", res.fall_functions);
       js << "  \"fall_commit\": \"" << res.fall_commit_function << "\",\n";
@@ -3338,8 +3659,10 @@ Result Gen::run(const Sim_objects& out) {
     res.inputs  = state_inputs;
     res.outputs = top_->out;
     res.regs    = reg_fields;
-    res.words   = words;
-    res.ok      = true;
+    res.words     = words;
+    res.gate_word = gate.dirty_word;
+    res.gate_bits = gate.on ? gate.bits : 0;
+    res.ok        = true;
   } catch (const Unsupported& u) {
     res.ok  = false;
     res.why = u.why;
