@@ -514,15 +514,6 @@ bool Lowering::lower_node(const hhds::Node_class& node) {
     case Ntype_op::Hotmux: {
       // Controls are one-bit, mutually exclusive; no arm hot => the fallback (0 when absent).
       const auto hm = livehd::graph_util::hotmux_inputs(node);
-      std::vector<std::pair<std::string, std::string>> arms;  // cond tmp, value
-      for (const auto& [control, value] : hm.arms) {
-        auto c = operand(control);
-        auto v = operand(value);
-        if (!c || !v) {
-          return false;
-        }
-        arms.emplace_back(emit(Lnast_ntype::create_ne(), {*c, "0"}, control, false), *v);
-      }
       std::string fb = "0";
       if (!hm.fallback.is_invalid()) {
         auto f = operand(hm.fallback);
@@ -530,6 +521,40 @@ bool Lowering::lower_node(const hhds::Node_class& node) {
           return false;
         }
         fb = *f;
+      }
+      // Arms that carry the same value are ONE arm on the OR of their controls (the controls are
+      // exclusive, so the arms still are), and an arm that carries the fallback's value is the
+      // fallback. minion decodes an "undefined when these collide" value as ~257 arms of one unknown
+      // constant, about 15,000 times: one statement per arm was 3.8 million statements in one module.
+      std::vector<std::pair<std::vector<std::string>, std::string>> groups;  // controls, value (first-use order)
+      absl::flat_hash_map<std::string, size_t>                      group_of;
+      hhds::Pin_class                                               any_control;
+      for (const auto& [control, value] : hm.arms) {
+        auto c = operand(control);
+        auto v = operand(value);
+        if (!c || !v) {
+          return false;
+        }
+        if (*v == fb) {
+          continue;
+        }
+        any_control         = control;
+        auto [it, inserted] = group_of.try_emplace(*v, groups.size());
+        if (inserted) {
+          groups.emplace_back(std::vector<std::string>{}, *v);
+        }
+        groups[it->second].first.push_back(*c);
+      }
+      std::vector<std::pair<std::string, std::string>> arms;  // cond tmp, value
+      for (auto& [controls, value] : groups) {
+        const auto any = controls.size() == 1 ? controls.front() : emit(Lnast_ntype::create_bit_or(), controls, any_control, false);
+        arms.emplace_back(emit(Lnast_ntype::create_ne(), {any, "0"}, any_control, false), value);
+      }
+      if (arms.empty()) {  // every arm is the fallback
+        out = b_.create_lnast_tmp();
+        store_raw(out, fb);
+        type_spec(out, dpin);
+        break;
       }
       out       = b_.create_lnast_tmp();
       auto if_n = b_.create_if_stmt(true);

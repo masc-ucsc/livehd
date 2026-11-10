@@ -599,8 +599,41 @@ private:
     env[name] = v;
   }
   static constexpr bool record_ = true;  // one walk: the settled outputs are a replay of the same tape
-  V                   path_;           // AND of the enclosing if conditions (width 0: none)
-  V                   path_enable() { return path_.width != 0 ? path_ : k_->constant(1, 1, true); }
+  // The enclosing `if` conditions, as (condition, taken when it is zero). Their AND is only built
+  // when something asks for it (a memory write under a condition): an `if` whose arms only assign
+  // merges by mux on the condition itself, and a 257-arm unique_if used to record three path ops per
+  // arm that nothing read.
+  std::vector<std::pair<V, bool>> path_terms_;
+  std::vector<V>                  path_made_;  // path_made_[i]: AND of terms [0, i], or width 0: not built
+  bool                            under_condition() const { return !path_terms_.empty(); }
+  void                            push_path(V condition, bool when_zero) {
+    path_terms_.emplace_back(condition, when_zero);
+    path_made_.emplace_back();
+  }
+  void pop_path() {
+    path_terms_.pop_back();
+    path_made_.pop_back();
+  }
+  V path_enable() {
+    if (path_terms_.empty()) {
+      return k_->constant(1, 1, true);
+    }
+    size_t start = 0;
+    V      acc;
+    for (size_t j = path_terms_.size(); j-- > 0;) {
+      if (path_made_[j].width != 0) {
+        acc   = path_made_[j];
+        start = j + 1;
+        break;
+      }
+    }
+    for (size_t j = start; j < path_terms_.size(); ++j) {
+      const V term  = k_->binary(path_terms_[j].second ? Op::eq : Op::ne, path_terms_[j].first, k_->constant(1, 0, true), 1, true);
+      acc           = acc.width != 0 ? k_->binary(Op::bit_and, acc, term, 1, true) : term;
+      path_made_[j] = acc;
+    }
+    return acc;
+  }
   // A memory write happens when its statement is reached AND its (possibly gated) clock takes the edge.
   V                     write_enable(const Reg_info& r, const Env& env) {
     V enable = path_enable();
@@ -982,11 +1015,10 @@ void Gen::exec_if(const std::vector<Lnast_nid>& c, size_t at, Env& env) {
     bail("if arm without a body");
   }
   V       cond  = operand(c[at], env);
-  const V saved = path_;
-  V       ncond = k_->binary(Op::eq, cond, k_->constant(1, 0, true), 1, true);
   const size_t mark = log_.size();
-  path_ = saved.width != 0 ? k_->binary(Op::bit_and, saved, cond, 1, true) : k_->binary(Op::ne, cond, k_->constant(1, 0, true), 1, true);
+  push_path(cond, false);
   exec_block(kids(c[at + 1]), env);
+  pop_path();
   // final value of every name the then-arm wrote, then roll the env back to the state before the arm
   absl::flat_hash_map<std::string, V>   then_vals;
   std::vector<std::string>              order;
@@ -1008,9 +1040,10 @@ void Gen::exec_if(const std::vector<Lnast_nid>& c, size_t at, Env& env) {
     }
   }
   log_.resize(mark);
-  path_ = saved.width != 0 ? k_->binary(Op::bit_and, saved, ncond, 1, true) : ncond;
   const size_t else_mark = log_.size();
+  push_path(cond, true);
   exec_if(c, at + 2, env);
+  pop_path();
   absl::flat_hash_map<std::string, V> else_vals;
   for (size_t i = else_mark; i < log_.size(); ++i) {
     if (!then_vals.contains(log_[i].name) && !else_vals.contains(log_[i].name)) {
@@ -1030,7 +1063,6 @@ void Gen::exec_if(const std::vector<Lnast_nid>& c, size_t at, Env& env) {
     }
   }
   log_.resize(else_mark);
-  path_ = saved;
   for (const auto& n : order) {
     std::optional<V> prior = before.at(n);
     if (!prior && !n.empty() && n.back() == next_tag) {
@@ -1241,7 +1273,7 @@ void Gen::exec_stmt(const std::vector<Lnast_nid>& stmts, size_t& i, Env& env) {
       if (c.size() < 2 || ty(c[0]) != NT::Lnast_ntype_ref || ty(c[1]) != NT::Lnast_ntype_ref) {
         bail("fcall shape");
       }
-      if (path_.width != 0) {
+      if (under_condition()) {
         bail("module instance under a condition");
       }
       if (nm(c[1]) == "Clock" && !lib_.contains("Clock")) {
@@ -2895,7 +2927,8 @@ Result Gen::run(const Sim_objects& out) {
     }
     next_.assign(regs_.size(), V{});
     inst_env_.clear();
-    path_   = V{};
+    path_terms_.clear();
+    path_made_.clear();
     Env env = top_in;
     for (size_t idx : top_->owned) {
       if (regs_[idx].mem_size == 0) {

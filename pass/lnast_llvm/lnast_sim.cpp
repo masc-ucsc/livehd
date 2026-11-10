@@ -251,10 +251,38 @@ Sim_emitted emit_sim(const Sim_request& request) {
   }
   std::sort(roots.begin(), roots.end());
 
+  // Lower what the roots reach, on demand: lowering a graph splices the instances that sit on an
+  // instance-level ring into it, so afterwards it calls fewer modules than it instantiated -- and a
+  // module that was spliced everywhere (or that nothing instantiates any more) needs no LNAST of its
+  // own. minion's frontend is spliced into the core and the core into the top: lowered standalone as
+  // well, the same logic was lowered three times.
   std::vector<std::shared_ptr<Lnast>>              lnasts;
   std::vector<std::pair<std::string, std::string>> skipped;
-  if (!Pass_lg2lnast::lower(graphs, request.passes, lnasts, &skipped, false)) {
-    return fail("unknown LNAST stream pass in pass.lg2lnast.passes");
+  {
+    absl::flat_hash_set<std::string>          lowered;
+    std::vector<std::shared_ptr<hhds::Graph>> work;
+    for (const auto& g : graphs) {
+      if (std::ranges::find(roots, std::string(g->get_name())) != roots.end()) {
+        work.push_back(g);
+      }
+    }
+    while (!work.empty()) {
+      auto g = std::move(work.back());
+      work.pop_back();
+      if (!lowered.insert(std::string(g->get_name())).second) {
+        continue;
+      }
+      if (!Pass_lg2lnast::lower({g}, request.passes, lnasts, &skipped, false)) {
+        return fail("unknown LNAST stream pass in pass.lg2lnast.passes");
+      }
+      for (const auto node : g->body().nodes()) {  // what it still calls
+        if (livehd::graph_util::type_op_of(node) == Ntype_op::Sub && !node.is_loop_subnode()) {
+          if (auto child = node.get_subnode_graph(); child && !lowered.contains(std::string(child->get_name()))) {
+            work.push_back(std::move(child));
+          }
+        }
+      }
+    }
   }
   absl::flat_hash_set<std::string> mine{"lnast_sim_rt.hpp"};
   std::error_code                  ec;
