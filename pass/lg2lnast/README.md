@@ -109,11 +109,15 @@ How a design becomes kernels (`lnast_llvm.cpp`):
    value live at once. Each view is re-ordered depth first from its results, so a value is computed
    next to the cone that reads it. Reads and writes of one memory keep their recorded order (memories
    are written in place; a byte-enable write is a chain of read-modify-writes).
-4. **Kernels.** The ordered ops are cut into intervals (`LHD_SIM_LNAST_CHUNK`, default 3000 ops): an
-   interval of a topological order never closes a cycle. Each interval is replayed into its own
-   `Cgen_llvm` on the shared compile workers. A value read by another kernel crosses through a state
-   word. boom: one 195k-instruction kernel spent 364 s in instruction selection; as 30 kernels the
-   whole generation is 4 s.
+4. **Kernels.** The ordered ops are cut into intervals: an interval of a topological order never
+   closes a cycle. Each interval is replayed into its own `Cgen_llvm` on the shared compile workers,
+   and a value read by another kernel crosses through a state word. Size is counted in machine words
+   of code (`LHD_SIM_LNAST_CHUNK`, default 1250). A view that fits in four times that is ONE kernel: a
+   cut makes whatever crosses it unconditional, and picorv32 cut in two executed 4,234 instructions a
+   clock against 2,807 whole, at half the speed. A larger view is cut into kernels of one to two
+   times the target, each at the seam in that window where the fewest live words cross. There small
+   kernels win twice: boom as one kernel spent 364 s in instruction selection; as 13 kernels 7.8 s of
+   LLVM and 26.4k cycles/s; as 50 kernels 1.7 s and 35.4k.
 5. **Registers.** A register's next value is stored straight into the register when no later kernel
    still reads the old value (boom: 14,269 of them), else into a pending word the commit kernel copies.
    `r' = c ? x : r` landing in place is published as `if (c) r = x`, one branch per enable: a disabled
@@ -136,10 +140,10 @@ lhdsuite, checksum-gated against the inou.cgen.sim llvm backend (2026-11-10, opt
 
 | core | setup s | host C++ s | cycles/s | inou.cgen.sim: setup / host C++ / cycles/s |
 | --- | ---: | ---: | ---: | --- |
-| boom | 12.1 | 6.2 | 31.3k | 53.6 / 16.6 / 18.2k |
-| picorv32 | 0.5 | 5.1 | 6.18M | 0.7 / 5.2 / 5.58M |
-| dino | 0.3 | 5.4 | 5.84M | 0.5 / 5.4 / 5.81M |
-| bitcoin | 0.2 | 5.6 | 3.32M | 0.4 / 5.7 / 3.17M |
+| boom | 9.5 | 5.6 | 35.4k | 53.6 / 16.6 / 18.2k |
+| picorv32 | 0.5 | 5.1 | 6.12M | 0.7 / 5.2 / 5.58M |
+| dino | 0.4 | 5.4 | 5.82M | 0.5 / 5.4 / 5.81M |
+| bitcoin | 0.2 | 5.5 | 4.28M | 0.4 / 5.7 / 3.17M |
 
 Timing switches: `LHD_SIM_LNAST_TIME=1` (phases), `LHD_SIM_LLVM_TIME=1` (per kernel); use an optimized
 `lhd` (`bazel build -c opt`): a fastbuild `lhd` is 10-30x slower in LLVM and misleads.

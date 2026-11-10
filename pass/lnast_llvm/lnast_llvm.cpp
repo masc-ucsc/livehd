@@ -1647,6 +1647,7 @@ struct View {
   std::vector<uint32_t> pos;    // per op: its index in `order` (none: not emitted)
   std::vector<uint32_t> cut;    // kernel k replays order[cut[k], cut[k + 1])
   std::vector<uint8_t>  spill;  // per op: read by another kernel of this view
+  uint64_t              size = 0;  // words of code (cut_kernels)
   // The kernel that computes (or, for an input or a constant, may as well publish) `id`.
   size_t                kernel_of(uint32_t id) const {
     if (pos[id] == Tape::none || cut.size() < 2) {
@@ -1664,14 +1665,15 @@ struct Kernel_job {
   uint32_t    begin = 0, end = 0;  // positions in view->order
 };
 
-// The largest number of ops one kernel replays. LLVM's instruction selection and scheduling are
-// superlinear in the size of a basic block, and a kernel is one block: boom as ONE kernel spent 364 s
-// there; in pieces the same code is a few CPU seconds per worker.
+// The size of a kernel, in machine words of code (cut_kernels: kernels are one to two times this).
+// LLVM's instruction selection and scheduling are superlinear in the size of a basic block, and a
+// kernel is mostly one block: boom as ONE kernel spent 364 s there; in pieces the same code is a few
+// CPU seconds per worker. Small kernels also run faster on a large design (less is live at once).
 uint32_t chunk_target() {
   static const uint32_t target = [] {
     const char* text = livehd::debug::env<"LHD_SIM_LNAST_CHUNK">();  // debug: ops per kernel
     const auto  n    = text == nullptr ? 0ul : std::strtoul(text, nullptr, 10);
-    return n == 0 ? 3000u : static_cast<uint32_t>(n);
+    return n == 0 ? 1250u : static_cast<uint32_t>(n);
   }();
   return target;
 }
@@ -1834,13 +1836,65 @@ void cut_kernels(const Tape& t, View& v) {
       loop_tail.insert(j);
     }
   }
-  v.cut.push_back(0);
-  uint32_t count = 0;
+  // Size is counted in machine words, not ops: an op on a 512-bit value is eight words of code.
+  const auto            size_of = [&](uint32_t id) { return std::max<uint64_t>(1, (t.ops[id].width + 63) / 64); };
+  std::vector<uint64_t> size_to(n + 1, 0);  // words of code in order[0, p)
   for (uint32_t p = 0; p < n; ++p) {
-    if (++count >= chunk_target() && p + 1 < n && !loop_tail.contains(v.order[p])) {
-      v.cut.push_back(p + 1);
-      count = 0;
+    size_to[p + 1] = size_to[p] + size_of(v.order[p]);
+  }
+  // What a cut before order[p] costs: every value computed before p and read at or after it becomes
+  // a store in one kernel and a load in another, per word. A depth-first order has natural seams
+  // (between the cones of two results) where almost nothing is live; a cut in the middle of a cone
+  // crosses everything that cone still holds (picorv32 cut blindly in two ran at half speed).
+  std::vector<int64_t> crossing(n + 2, 0);
+  {
+    std::vector<uint32_t> last_use(t.ops.size(), 0);
+    for (uint32_t p = 0; p < n; ++p) {
+      t.for_each_operand(t.ops[v.order[p]], [&](const Tape::Ref& r) { last_use[r.id] = std::max(last_use[r.id], p); });
     }
+    for (uint32_t p = 0; p < n; ++p) {
+      const auto id = v.order[p];
+      if (last_use[id] > p) {  // live across every cut in (p, last_use]
+        crossing[p + 1]            += static_cast<int64_t>(size_of(id));
+        crossing[last_use[id] + 1] -= static_cast<int64_t>(size_of(id));
+      }
+    }
+    for (uint32_t p = 1; p <= n; ++p) {
+      crossing[p] += crossing[p - 1];
+    }
+  }
+  // A view that fits in 4 x `target` is ONE kernel: a cut makes everything that crosses it
+  // unconditional (what a kernel only needs under a condition it computes under that condition), and
+  // on a small design that costs more than it saves -- picorv32 in two kernels executed 4,234
+  // instructions a clock against 2,807 in one, at half the speed. A larger view is cut into kernels of
+  // `target` to 2 x `target` words, each at the cheapest seam in that window; there small kernels win
+  // twice (boom: 13 kernels 26.4k cycles/s and 7.8 s of LLVM, 55 kernels 35.0k and 1.7 s).
+  const uint64_t target = chunk_target();
+  v.size                = size_to[n];
+  v.cut.push_back(0);
+  for (uint32_t start = 0; size_to[n] > 4 * target && size_to[n] - size_to[start] > 2 * target;) {
+    uint32_t best = n;
+    for (uint32_t p = start + 1; p < n && size_to[p] - size_to[start] <= 2 * target; ++p) {
+      if (size_to[p] - size_to[start] < target || loop_tail.contains(v.order[p - 1])) {
+        continue;
+      }
+      if (best == n || crossing[p] < crossing[best]) {
+        best = p;
+      }
+    }
+    if (best == n) {  // one loop larger than the window: cut right after it
+      for (uint32_t p = start + 1; p < n; ++p) {
+        if (size_to[p] - size_to[start] >= target && !loop_tail.contains(v.order[p - 1])) {
+          best = p;
+          break;
+        }
+      }
+      if (best == n) {
+        break;
+      }
+    }
+    v.cut.push_back(best);
+    start = best;
   }
   v.cut.push_back(n);
   // A value crosses kernels through a state word: mark what another kernel of this view reads.
@@ -2381,18 +2435,19 @@ Result Gen::run(const Sim_objects& out) {
     }
     timer.lap("commit kernel");
     if (timer.on) {
-      std::fprintf(
-          stderr,
-          "lnast_llvm: %zu ops (%zu edge, %zu settle live), %zu edge + %zu settle kernels, %zu state words, %zu registers in "
-          "place, %zu words copied at commit\n",
-          tape.ops.size(),
-          edge.count_live(),
-          settle.count_live(),
-          res.edge_functions.size(),
-          res.settle_functions.size(),
-          words,
-          in_place,
-          q_words);
+      std::fprintf(stderr,
+                   "lnast_llvm: %zu ops (%zu edge, %zu settle live; %llu + %llu words of code), %zu edge + %zu settle kernels, %zu "
+                   "state words, %zu registers in place, %zu words copied at commit\n",
+                   tape.ops.size(),
+                   edge.count_live(),
+                   settle.count_live(),
+                   static_cast<unsigned long long>(edge.size),
+                   static_cast<unsigned long long>(settle.size),
+                   res.edge_functions.size(),
+                   res.settle_functions.size(),
+                   words,
+                   in_place,
+                   q_words);
     }
 
     std::vector<Field> state_inputs;
