@@ -2727,6 +2727,22 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
         const auto& stats = timing_session.statistics();
         return stats.evaluations - stats.rankings < eval_budget;
       };
+      // Sizing and buffering are what fix electrical violations (a 271-load net with 44 ns of wire delay), so they are
+      // never starved by the optional work that runs first: IO resynthesis and the region refinement evaluate
+      // unconditionally and can spend the whole shared allowance (eyeriss: the Steiner buffering ran 0 attempts).
+      // Repair may always use a few evaluations of its own, counted from the first one it asks for.
+      constexpr size_t repair_allowance = 4;
+      size_t           repair_base      = 0;
+      bool             repair_started   = false;
+      const livehd::placement::Trial_admission admit_repair = [&] {
+        const auto&  stats = timing_session.statistics();
+        const size_t used  = stats.evaluations - stats.rankings;
+        if (!repair_started) {
+          repair_started = true;
+          repair_base    = used;
+        }
+        return used < eval_budget || used - repair_base < repair_allowance;
+      };
       const livehd::placement::Trial_admission admit_refinement = [&] {
         const auto& stats = timing_session.statistics();
         // Leave room for sizing and buffer repair. Rejected placement trials
@@ -3041,7 +3057,7 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
                                                          evaluate,
                                                          livehd::placement::Repair_scope::sizing,
                                                          std::move(timed_placement.timing),
-                                                         admit_trial);
+                                                         admit_repair);
             placed   = std::move(repaired.placed);
             res.recipe_steps.emplace_back("pass.place.resize");
           }
@@ -3052,7 +3068,7 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
                                                                 evaluate,
                                                                 livehd::placement::Repair_scope::design_after_sizing,
                                                                 std::move(repaired.timing),
-                                                                admit_trial);
+                                                                admit_repair);
             placed          = std::move(design_repaired.placed);
             res.recipe_steps.emplace_back("pass.place.repair");
           }
