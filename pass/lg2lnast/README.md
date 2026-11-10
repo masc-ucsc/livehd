@@ -119,7 +119,11 @@ How a design becomes kernels (`lnast_llvm.cpp`):
    `r' = c ? x : r` landing in place is published as `if (c) r = x`, one branch per enable: a disabled
    register is not rewritten, what only `x` needs can sink under the test, and LLVM's scheduler no
    longer sees hundreds of selects sharing one flag (one such block took 23 s to schedule).
-6. **Reset** is kept out of the hot path: next state is computed without it and the commit kernel
+6. **Memories** live in the state and are written in place as `if (enable) mem[address] = data`: a
+   disabled port touches nothing. A design that decodes its own write address arrives as one port per
+   entry (dino's register file: 64 constant-address ports); as read-modify-writes those were 64
+   dependent load/store pairs every clock (dino 4.41M -> 5.84M cycles/s).
+7. **Reset** is kept out of the hot path: next state is computed without it and the commit kernel
    stores the initial values of each distinct reset signal's registers in one unlikely branch (the
    memory clear is an unlikely branch too). An asynchronous reset is evaluated like the synchronous
    one (every step has an edge and the testbench samples after it).
@@ -134,7 +138,7 @@ lhdsuite, checksum-gated against the inou.cgen.sim llvm backend (2026-11-10, opt
 | --- | ---: | ---: | ---: | --- |
 | boom | 12.1 | 6.2 | 31.3k | 53.6 / 16.6 / 18.2k |
 | picorv32 | 0.5 | 5.1 | 6.18M | 0.7 / 5.2 / 5.58M |
-| dino | 0.3 | 5.4 | 4.41M | 0.5 / 5.4 / 5.81M |
+| dino | 0.3 | 5.4 | 5.84M | 0.5 / 5.4 / 5.81M |
 
 Timing switches: `LHD_SIM_LNAST_TIME=1` (phases), `LHD_SIM_LLVM_TIME=1` (per kernel); use an optimized
 `lhd` (`bazel build -c opt`): a fastbuild `lhd` is 10-30x slower in LLVM and misleads.

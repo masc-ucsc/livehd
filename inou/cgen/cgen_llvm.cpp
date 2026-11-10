@@ -1975,6 +1975,7 @@ public:
     uint32_t          store_bits = 0;  // natural storage width of one entry
     uint64_t          size       = 0;
     bool              packed     = false;  // one packed integer (small odd-width entries)
+    bool              in_state   = false;  // lives in the state allocation (array_create_in_state)
     llvm::AllocaInst* storage    = nullptr;
     llvm::Value*      ptr        = nullptr;  // the storage: the alloca, or a region of the state allocation
     llvm::Type*       ty         = nullptr;  // pointee type of `ptr`
@@ -2750,6 +2751,7 @@ size_t Cgen_llvm::array_create_in_state(uint32_t bits, uint64_t size, size_t wor
   a.size       = std::max<uint64_t>(size, 1);
   const auto whole = a.bits * a.size;
   a.packed         = a.store_bits != a.bits && whole <= 128;
+  a.in_state       = true;
   a.ptr            = impl_->word_ptr(impl_->inputs, word);
   a.ty             = a.packed ? static_cast<llvm::Type*>(impl_->builder.getIntNTy(static_cast<uint32_t>(whole)))
                                : static_cast<llvm::Type*>(llvm::ArrayType::get(impl_->builder.getIntNTy(a.store_bits), a.size));
@@ -2913,10 +2915,26 @@ bool Cgen_llvm::array_write(size_t array, Value enable, Value address, Value dat
     b.CreateAlignedStore(b.CreateOr(b.CreateAnd(old, b.CreateNot(mask)), put), a.ptr, llvm::Align(8));
     return true;
   }
+  auto* entry = cast_integer(b, cast_integer(b, value, a.bits, data.unsign), a.store_bits, true);
+  if (a.in_state && !llvm::isa<llvm::ConstantInt>(valid)) {
+    // A memory in the state: `if (enabled) mem[address] = data`. A disabled port touches nothing --
+    // no load of the entry, no store back -- and what only the data needs can sink under the test.
+    // A design that decodes its own write address reaches here as one port per entry (dino's
+    // register file: 64 ports, constant addresses): as read-modify-writes that was 64 dependent
+    // load/store pairs every clock, the slowest stretch of the kernel.
+    auto* fn    = b.GetInsertBlock()->getParent();
+    auto* write = llvm::BasicBlock::Create(impl_->context, "mem.write", fn);
+    auto* cont  = llvm::BasicBlock::Create(impl_->context, "mem.cont", fn);
+    b.CreateCondBr(valid, write, cont);
+    b.SetInsertPoint(write);
+    b.CreateStore(entry, b.CreateInBoundsGEP(a.ty, a.ptr, {b.getInt64(0), index}));
+    b.CreateBr(cont);
+    b.SetInsertPoint(cont);
+    return true;
+  }
   // Branch-free: a disabled or out-of-range write stores the entry's own
   // value back at a clamped index, so the store needs no basic block of its
   // own and the body stays one straight-line block LLVM can schedule.
-  auto* entry = cast_integer(b, cast_integer(b, value, a.bits, data.unsign), a.store_bits, true);
   auto* ptr
       = b.CreateInBoundsGEP(a.ty, a.ptr, {b.getInt64(0), b.CreateSelect(valid, index, b.getInt64(0))});
   auto* old = b.CreateLoad(entry->getType(), ptr);
