@@ -33,3 +33,22 @@ for design in comb_reg reset_enable reduce_shift struct_port hier async_reset m3
   cmp -s "$d/new.trace" "$d/ref.trace" || { diff "$d/new.trace" "$d/ref.trace" | head -10 >&2; fail "$design: traces differ"; }
   echo "ok $design"
 done
+
+# Compact loops (Pyrope sources): a `for` with its body inline -- carries, finals, nested loops, and a
+# memory read in place (also while this cycle's write to it is visible) -- no call, no array copy.
+for design in loop_mem loop_overlay loop_nested; do
+  top="$design.$design"
+  d="$W/$design"
+  mkdir -p "$d"
+  "$LHD_ABS" compile "$SRC/$design.prp" --top "$design" --emit-dir "lg:$d/lg" --workdir "$d/tw" -q >"$d/c.log" 2>&1 \
+    || { cat "$d/c.log" >&2; fail "$design: compile to lg failed"; }
+  "$LHD_ABS" pass lnast-llvm --top "$top" "lg:$d/lg" --emit-dir "sim:$d/k" -q >"$d/g.log" 2>&1 \
+    || { cat "$d/g.log" >&2; fail "$design: lnast-llvm failed"; }
+  python3 -I "$SRC/gen_tb.py" "$d/k/kernel.json" "$top" "$top" "$CYCLES" 1 >"$d/tb.prp" || fail "$design: testbench generation"
+  "$RUN" "$d/k" "$CYCLES" >"$d/new.trace" || fail "$design: kernel run failed"
+  (cd "$d" && "$LHD_ABS" sim lg:lg tb.prp --workdir w --set sim.init_zero=true -q >sim.log 2>&1) || { cat "$d/sim.log" >&2; fail "$design: reference sim failed"; }
+  "$d/w/sim/drv.bin" --set sim.init_zero=true 2>&1 | grep -a 'puts:TRACE' | sed 's/.*puts://' >"$d/ref.trace"
+  [ "$(wc -l <"$d/ref.trace")" -eq "$CYCLES" ] || fail "$design: reference trace has $(wc -l <"$d/ref.trace") lines, want $CYCLES"
+  cmp -s "$d/new.trace" "$d/ref.trace" || { diff "$d/new.trace" "$d/ref.trace" | head -10 >&2; fail "$design: traces differ"; }
+  echo "ok $design"
+done

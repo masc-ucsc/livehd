@@ -1,0 +1,19 @@
+mod loop_nested(clk:Clock, a:U8, b:U8, c:U4) -> (s:U16@[0], m:U9@[0], n:U16@[0]) {
+  mut acc:U16 = 0
+  mut mx:U9 = 0
+  for i in 0..<8 {
+    acc = acc + ((a ^ i) & b)
+    if (a >> (i & 7)) == c {
+      mx = a + i
+    }
+  }
+  s = acc
+  m = mx
+  mut tot:U16 = 0
+  for i in 0..<4 {
+    for j in 0..<3 {
+      tot = tot + ((b + i) ^ j)
+    }
+  }
+  n = tot
+}

@@ -308,6 +308,14 @@ public:
   // With `layout.trip_tables`, `tables_resource` is the resource of THIS
   // kernel holding the `void* const*` array of per-trip tables (the inner
   // wrapper's lanes), and `body.inputs` lists only the body's packed inputs.
+  // A counted loop spelled directly in the current function (the M3 path's `for`): `loop_begin` opens
+  // `for ordinal in 0..count` and returns the index (first + ordinal, `index_width` bits) and one header
+  // phi per carry (seeded with `carry_init`); the body is emitted once, touching state in place;
+  // `loop_end` closes it with the carries' next values and returns their values after the loop. The
+  // loop stays rolled (LLVM is told not to unroll it) unless it has at most 4 trips and no inner loop.
+  bool loop_begin(uint64_t count, int64_t first, uint32_t index_width, const std::vector<Value>& carry_init, Value& index,
+                  std::vector<Value>& carries);
+  bool loop_end(const std::vector<Value>& carry_next, std::vector<Value>& carry_final);
   bool inline_loop(const Inline_body& body, const Loop_layout& layout, uint64_t count, int64_t first, int64_t step,
                    const std::vector<Value>& inputs, std::vector<Value>& outputs, std::string& error,
                    std::optional<size_t> tables_resource = std::nullopt);

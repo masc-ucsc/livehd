@@ -1,0 +1,11 @@
+mod loop_overlay(clk:Clock, we:U1, wa:U6, wd:U8) -> (s:U16@[0]) {
+  reg mem:[64]U8 = 0
+  if we == 1 {
+    mem[wa] = wd
+  }
+  mut acc:U16 = 0
+  for i in 0..<64 {
+    acc = acc + mem[i]
+  }
+  s = acc
+}

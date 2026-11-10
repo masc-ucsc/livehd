@@ -78,7 +78,8 @@ round trip on an uninitialized memory, so it is not in the LEC list. A Sub insta
 `fcall` form needs every argument before any output) is resolved by splicing the stuck instances
 into the graph in memory (`graph_util::Host_inliner`) and lowering again; `lgundef`, `fproperty`
 and `lgassert` markers are skipped. Known gaps: non-zero initial images, several clocks,
-forwarding/undefined orderings; Latch, Clock_cell, n-ary Mux/compare, LUT, compact loops.
+forwarding/undefined orderings; Latch, Clock_cell, n-ary Mux/compare, LUT, compact loops with a break/continue,
+an activation, a negative or descending domain, a state element or a module call in the body.
 
 ## Milestone 3 prototype: LLVM straight from the typed LNAST
 
@@ -110,7 +111,30 @@ changed nothing on RenameTable (its 413k pre-optimization instructions are not O
 
 Not covered yet: latches, `Clock_cell`, negedge or several clocks, whole-array
 `update`, memories with non-zero images, wide (> 64 bit) register initial values,
-compact loops, `fcall` under a condition.
+`fcall` under a condition, loop bodies that write registers.
+
+## Compact loops: a `for`, never a call
+
+A compact-loop `Sub` (`Subnode_loop`: index port, invariant inputs, carry in/out pairs, finals read from
+the last trip) is lowered as a plain LNAST `for i in first..last { body }` with the body graph spelled
+inline in the same scope: the index is the loop variable, a carry is an ordinary variable assigned at
+the end of the body, a final is assigned every trip, and an invariant is the caller's operand. There is
+no `fcall` and nothing is copied per trip. `lnast_llvm` turns the `for` into one native loop
+(`Cgen_llvm::loop_begin/loop_end`: header phis for the carries, the body emitted once, LLVM told not to
+unroll unless the loop has at most 4 trips and no inner loop), so the code footprint does not grow
+with the trip count. `upass` unrolls the same `for` when the LNAST is compiled again, which is exact
+(LEC `proven-bounded`/`proven-full`).
+
+Memories are never copied into the loop. The front end hands a loop the whole array as one packed bus
+(`read_all` of the memory) and the body indexes it through an array-view `Memory` on its `update`
+input. When the only readers of that bus are loop bodies, no packed value is built and the body reads
+`mem[i]` where the memory lives. When the bus is `mem` as modified by this cycle's write (`if c { mem[a]
+= d }` before the loop: a mux of `read_all` and a masked-shift merge) the shape is recognized
+(`find_overlays`), none of its cells is emitted, and the body reads `(c && i == a) ? d : mem[i]`.
+Any other bus is still correct: the body slices the packed value (`(bus >> i*bits) & mask`).
+
+Not covered: loops that write a memory (the front end keeps those unrolled), break/continue, steps
+other than 1, state or module calls inside the body.
 
 ## Stream interface (milestone 2)
 

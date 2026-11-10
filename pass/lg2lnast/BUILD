@@ -26,5 +26,5 @@ sh_test(
     name = "lg2lnast_roundtrip_test",
     size = "medium",
     srcs = ["tests/lg2lnast_roundtrip_test.sh"],
-    data = glob(["tests/*.sv"]) + ["//lhd"],
+    data = glob(["tests/*.sv", "tests/*.prp"]) + ["//lhd"],
 )

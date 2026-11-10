@@ -31,7 +31,9 @@ using livehd::graph_util::type_op_of;
 // and the graph is skipped (never a partial, silently-wrong LNAST).
 class Lowering {
 public:
-  explicit Lowering(hhds::Graph& g) : graph_(g) {}
+  explicit Lowering(hhds::Graph& g) : graph_(g), b_(own_b_) {}
+  // A compact-loop body lowered inline: it emits into the parent's builder (the `for` body scope).
+  Lowering(hhds::Graph& g, Lowering& parent) : graph_(g), b_(parent.b_), parent_(&parent), root_(parent.root_) {}
 
   // `stream` (optional) receives the function as it is built: begin() once the io is complete, then
   // each top-level statement as soon as it is finished (see lnast/lnast_stream.hpp).
@@ -43,7 +45,28 @@ public:
 
 private:
   hhds::Graph&   graph_;
-  Lnast_builder  b_;
+  Lnast_builder  own_b_;
+  Lnast_builder& b_;
+  Lowering*      parent_ = nullptr;  // set for a loop body
+  Lowering*      root_   = this;     // the outermost lowering: owns the unique-name counters
+  int            loop_cnt_ = 0;
+  // driver pin -> name of the memory whose whole contents it carries (a read-all bus nothing needs
+  // as a value): a loop body reads such a memory in place instead of through a packed copy
+  struct View_alias {
+    std::string mem;           // the memory whose contents the bus carries
+    bool        ov = false;    // ... with entry `a` replaced by `d` while `c` holds (this cycle's write)
+    std::string c, a, d;
+  };
+  absl::flat_hash_map<hhds::Class_index, View_alias> view_alias_;
+  // `mem[a] = d` seen by a loop in the same cycle is a whole-array bus built from bit operations; when
+  // the shape is exactly that, none of its cells is emitted and the loop body applies the overlay itself.
+  struct Overlay_pins {
+    std::string     mem;
+    hhds::Pin_class c, a, d;
+  };
+  absl::flat_hash_map<hhds::Nid, Overlay_pins> overlay_at_;  // the mux cell -> its operands
+  absl::flat_hash_set<hhds::Nid>               skip_;        // cone cells of a recognized overlay
+  void find_overlays();
   livehd::lnast_stream::Sink* sink_ = nullptr;
   Lnast_nid                   last_sent_;
   bool                        any_sent_ = false;
@@ -94,6 +117,9 @@ private:
     hhds::Pin_class        reset;  // the (active-high) reset driver, invalid = none
     bool                   async_reset = false;
     int                    wensize     = 1;  // write-enable lanes of `bits/wensize` bits each
+    bool                   view        = false;  // loop-body array view of an `update` bus (no storage)
+    hhds::Pin_class        bus;                  // view: the packed contents it indexes
+    View_alias             alias;                // view of a real memory (alias.mem non-empty)
   };
   std::vector<Mem_rec> mems_;
   int                  mem_cnt_ = 0;
@@ -107,6 +133,9 @@ private:
     return std::format("{}{}", port * Ntype::Memory_port_stride + off, base);
   }
   bool declare_memory(const hhds::Node_class& node);
+  bool declare_view(const hhds::Node_class& node);
+  bool lower_loop(const hhds::Node_class& node);
+  bool view_only(const hhds::Pin_class& readall);
   bool lower_async_read(const Mem_rec& m, size_t port);
   bool lower_read_all(const Mem_rec& m);
   bool lower_memory_tail(const Mem_rec& m);
@@ -213,6 +242,7 @@ private:
   bool lower_node(const hhds::Node_class& node);
   bool lower_flop_next(const Flop_rec& f);
   bool lower_sub(const hhds::Node_class& node);
+  bool lower_cells();
   int  inst_cnt_ = 0;
 };
 
@@ -220,6 +250,28 @@ bool Lowering::lower_node(const hhds::Node_class& node) {
   using livehd::graph_util::get_driver_of_sink_name;
   const auto op   = type_op_of(node);
   auto       dpin = node.get_driver_pin(0);
+  if (const auto nid = node.get_debug_nid(); skip_.contains(nid)) {
+    for (const auto& o : node.out_sorted_pins()) {
+      name_of_.insert_or_assign(o.get_class_index(), "0");  // never read: only the overlay cone consumes it
+    }
+    return true;
+  } else if (auto ov = overlay_at_.find(nid); ov != overlay_at_.end()) {
+    View_alias va;
+    va.mem = ov->second.mem;
+    va.ov  = true;
+    auto c = operand(ov->second.c);
+    auto a = operand(ov->second.a);
+    auto d = operand(ov->second.d);
+    if (!c || !a || !d) {
+      return false;
+    }
+    va.c = *c;
+    va.a = *a;
+    va.d = *d;
+    view_alias_.insert_or_assign(dpin.get_class_index(), va);
+    name_of_.insert_or_assign(dpin.get_class_index(), va.mem);
+    return true;
+  }
 
   auto all_inputs = [&]() -> std::optional<std::vector<std::string>> {
     std::vector<std::string> v;
@@ -657,6 +709,12 @@ bool Lowering::declare_memory(const hhds::Node_class& node) {
 
 // read_all: every entry, MSB first (entry size-1 .. entry 0), as one concat.
 bool Lowering::lower_read_all(const Mem_rec& m) {
+  if (view_only(m.read_all)) {
+    // Only compact-loop bodies read this bus, and they read entries of the memory itself: no packed copy.
+    view_alias_.insert_or_assign(m.read_all.get_class_index(), View_alias{m.name});
+    name_of_.insert_or_assign(m.read_all.get_class_index(), m.name);
+    return true;
+  }
   std::vector<std::string> lanes;
   for (int64_t i = m.size - 1; i >= 0; --i) {
     auto t = b_.create_lnast_tmp();
@@ -678,12 +736,44 @@ bool Lowering::lower_async_read(const Mem_rec& m, size_t port) {
   if (!a) {
     return false;
   }
+  if (m.view && m.name.empty()) {
+    // An array view of a packed bus that is a real value: entry = (bus >> addr * bits) & mask.
+    auto bus = operand(m.bus);
+    if (!bus) {
+      return false;
+    }
+    const auto off = emit(Lnast_ntype::create_mult(), {*a, std::to_string(m.bits)}, pt.addr, false);
+    const auto sh  = emit(Lnast_ntype::create_sra(), {*bus, off}, m.bus);
+    const auto v   = emit(Lnast_ntype::create_bit_and(), std::vector<std::string>{sh, std::string(Dlop::get_mask_value(m.bits)->to_pyrope())}, pt.out);
+    name_of_.insert_or_assign(pt.out.get_class_index(), v);
+    return true;
+  }
   auto t = b_.create_lnast_tmp();
   auto g = b_.add_child(Lnast_ntype::create_tuple_get());
   b_.lnast->add_child(g, Lnast_node::create_ref(t));
   b_.lnast->add_child(g, Lnast_node::create_ref(m.name));
   leaf(g, *a);
   type_spec(t, pt.out);
+  if (m.view && m.alias.ov) {
+    // this cycle's write is visible: entry == a && c ? d : committed entry
+    const auto hit = cmp_as_int(Lnast_ntype::create_eq(), {*a, m.alias.a}, pt.addr);
+    const auto en  = emit(Lnast_ntype::create_bit_and(), {hit, m.alias.c}, pt.addr);
+    const auto cnd = emit(Lnast_ntype::create_ne(), {en, "0"}, pt.addr, false);
+    const auto r   = b_.create_lnast_tmp();
+    auto       n   = b_.create_if_stmt(false);
+    b_.add_if_cond(n, cnd);
+    auto th = b_.add_if_stmts(n);
+    b_.push_stmts(th);
+    store_raw(r, m.alias.d);
+    b_.pop_stmts();
+    auto el = b_.add_if_stmts(n);
+    b_.push_stmts(el);
+    store_raw(r, t);
+    b_.pop_stmts();
+    type_spec(r, pt.out);
+    name_of_.insert_or_assign(pt.out.get_class_index(), r);
+    return true;
+  }
   name_of_.insert_or_assign(pt.out.get_class_index(), t);
   return true;
 }
@@ -843,12 +933,525 @@ bool Lowering::lower_memory_tail(const Mem_rec& m) {
   return true;
 }
 
+// Recognizes the whole-array bus the front end builds for `if c { mem[a] = d }` seen by a loop in the
+// same cycle:  mux(c, R, (R & ~(M << K)) | (M & (d << K)))  with R = read_all(mem), M = (2^bits-1) <<
+// shifted by K = a << log2(bits). Anything else (or any cell of it read elsewhere) is left alone.
+void Lowering::find_overlays() {
+  auto drivers = [](const hhds::Node_class& n) {
+    std::vector<hhds::Pin_class> v;
+    for (const auto& sink : n.inp_sorted_pins()) {
+      v.push_back(sink.get_driver_pin());
+    }
+    return v;
+  };
+  auto driver_of = [](const hhds::Node_class& n, hhds::Port_id pid) {
+    for (const auto& sink : n.inp_sorted_pins()) {
+      if (sink.get_port_id() == pid) {
+        return sink.get_driver_pin();
+      }
+    }
+    return hhds::Pin_class{};
+  };
+  auto op_of = [](const hhds::Pin_class& p) { return p.is_invalid() || p.is_const() ? Ntype_op::Invalid : type_op_of(p.get_master_node()); };
+  auto same  = [](const hhds::Pin_class& a, const hhds::Pin_class& b) {
+    return !a.is_invalid() && !b.is_invalid() && a.get_class_index() == b.get_class_index();
+  };
+  // text of a constant with leading zeros dropped
+  auto hex = [](const hhds::Pin_class& p) {
+    if (p.is_invalid() || !p.is_const()) {
+      return std::string();
+    }
+    auto t = const_of(p).to_pyrope();
+    if (t.size() > 2 && t[0] == '0' && t[1] == 'x') {
+      t.erase(0, 2);
+      t.erase(0, std::min(t.find_first_not_of('0'), t.size()));
+    }
+    return std::string(t);
+  };
+  auto ones = [&](const hhds::Pin_class& p, int64_t bits) {
+    const auto t = hex(p);
+    if (t.empty() || bits < 1 || t.size() != static_cast<size_t>((bits + 3) / 4)) {
+      return false;
+    }
+    const char top = bits % 4 == 0 ? 'f' : "?137"[bits % 4];
+    return t[0] == top && t.find_first_not_of('f', 1) == std::string::npos;
+  };
+  for (const auto& mux : graph_.body().nodes(hhds::Node_order::forward)) {
+    if (type_op_of(mux) != Ntype_op::Mux || mux.get_driver_pin(0).is_invalid()) {
+      continue;
+    }
+    const auto c = driver_of(mux, 0), a = driver_of(mux, 1), b = driver_of(mux, 2);
+    if (c.is_invalid() || a.is_invalid() || a.is_const() || b.is_invalid() || op_of(b) != Ntype_op::Or) {
+      continue;
+    }
+    if (type_op_of(a.get_master_node()) != Ntype_op::Memory || a.get_port_id() != Ntype::Memory_readall_pid) {
+      continue;
+    }
+    const Mem_rec* mr = nullptr;
+    for (const auto& m : mems_) {
+      if (m.node == a.get_master_node() && !m.read_all.is_invalid() && same(m.read_all, a)) {
+        mr = &m;
+      }
+    }
+    if (mr == nullptr || mr->bits < 1 || (mr->bits & (mr->bits - 1)) != 0) {
+      continue;
+    }
+    const auto orn = b.get_master_node();
+    const auto ors = drivers(orn);
+    if (ors.size() != 2 || op_of(ors[0]) != Ntype_op::And || op_of(ors[1]) != Ntype_op::And) {
+      continue;
+    }
+    hhds::Pin_class and1, and2;
+    for (int k = 0; k < 2; ++k) {
+      const auto ins = drivers(ors[k].get_master_node());
+      if (ins.size() == 2 && (same(ins[0], a) || same(ins[1], a))) {
+        and1 = ors[k];
+        and2 = ors[1 - k];
+      }
+    }
+    if (and1.is_invalid()) {
+      continue;
+    }
+    const auto in1 = drivers(and1.get_master_node());
+    const auto x   = same(in1[0], a) ? in1[1] : in1[0];
+    const auto in2 = drivers(and2.get_master_node());
+    if (op_of(x) != Ntype_op::Xor || in2.size() != 2) {
+      continue;
+    }
+    const auto xs = drivers(x.get_master_node());
+    if (xs.size() != 2) {
+      continue;
+    }
+    const auto s = xs[0].is_const() ? xs[1] : xs[0];
+    const auto allones = xs[0].is_const() ? xs[0] : xs[1];
+    if (!(xs[0].is_const() != xs[1].is_const()) || op_of(s) != Ntype_op::SHL || !ones(allones, bits_of(s))) {
+      continue;
+    }
+    const auto t = same(in2[0], s) ? in2[1] : (same(in2[1], s) ? in2[0] : hhds::Pin_class{});
+    if (t.is_invalid() || op_of(t) != Ntype_op::SHL) {
+      continue;
+    }
+    const auto sn = s.get_master_node(), tn = t.get_master_node();
+    const auto lane = driver_of(sn, 0), k1 = driver_of(sn, 1), d = driver_of(tn, 0), k2 = driver_of(tn, 1);
+    if (!ones(lane, mr->bits) || !same(k1, k2) || op_of(k1) != Ntype_op::SHL) {
+      continue;
+    }
+    const auto kn   = k1.get_master_node();
+    const auto addr = driver_of(kn, 0), sh = driver_of(kn, 1);
+    if (addr.is_invalid() || d.is_invalid() || !sh.is_const() || !const_of(sh).is_just_i64()
+        || (int64_t{1} << const_of(sh).to_just_i64()) != mr->bits) {
+      continue;
+    }
+    // every cell of the cone is read only inside it (and the mux), the bus only by loop bodies
+    std::vector<hhds::Node_class> cone{kn, sn, tn, x.get_master_node(), and1.get_master_node(), and2.get_master_node(), orn};
+    bool                          closed = true;
+    for (const auto& cn : cone) {
+      for (const auto& o : cn.out_sorted_pins()) {
+        for (const auto& e : o.out_edges()) {
+          const auto sm = e.sink.get_master_node();
+          bool       in = sm == mux;
+          for (const auto& other : cone) {
+            in = in || sm == other;
+          }
+          closed = closed && in;
+        }
+      }
+    }
+    for (const auto& e : a.out_edges()) {
+      const auto sm = e.sink.get_master_node();
+      closed        = closed && (sm == mux || sm == and1.get_master_node() || type_op_of(sm) == Ntype_op::Sub);
+    }
+    if (!closed || !view_only(mux.get_driver_pin(0))) {
+      continue;
+    }
+    overlay_at_[mux.get_debug_nid()] = Overlay_pins{mr->name, c, addr, d};
+    for (const auto& cn : cone) {
+      skip_.insert(cn.get_debug_nid());
+    }
+  }
+}
+
+// True when every reader of the read-all bus `ra` is a compact-loop body that only indexes it
+// through an array-view memory (`update` bus): such a bus never needs to exist as a value.
+bool Lowering::view_only(const hhds::Pin_class& ra) {
+  bool any = false;
+  for (const auto& e : ra.out_edges()) {
+    any            = true;
+    const auto snk = e.sink;
+    const auto n   = snk.get_master_node();
+    if (skip_.contains(n.get_debug_nid()) || overlay_at_.contains(n.get_debug_nid())) {
+      continue;  // a recognized overlay cell: it is not emitted
+    }
+    if (type_op_of(n) != Ntype_op::Sub || !n.is_loop_subnode()) {
+      return false;
+    }
+    auto io   = n.get_subnode_io();
+    auto body = n.get_subnode_graph();
+    if (!io || !body) {
+      return false;
+    }
+    std::string pname;
+    for (const auto& d : io->get_input_pin_decls()) {
+      if (d.port_id == snk.get_port_id()) {
+        pname = std::string(d.name);
+      }
+    }
+    if (pname.empty()) {
+      return false;
+    }
+    const auto bp = body->get_input_pin(pname);
+    for (const auto& be : bp.out_edges()) {
+      const auto bs = be.sink;
+      if (type_op_of(bs.get_master_node()) != Ntype_op::Memory || bs.get_port_id() != Ntype::get_sink_pid(Ntype_op::Memory, "update")) {
+        return false;
+      }
+    }
+  }
+  return any;
+}
+
+// A loop-body memory: reads of an array bound to the `update` bus (the loop's invariant input).
+bool Lowering::declare_view(const hhds::Node_class& node) {
+  using livehd::graph_util::get_driver_of_sink_name;
+  auto const_i64 = [&](std::string_view nm) -> std::optional<int64_t> {
+    auto d = get_driver_of_sink_name(node, nm);
+    if (d.is_invalid() || !d.is_const() || !const_of(d).is_just_i64()) {
+      return std::nullopt;
+    }
+    return const_of(d).to_just_i64();
+  };
+  Mem_rec m;
+  m.node   = node;
+  m.view   = true;
+  m.bus    = get_driver_of_sink_name(node, "update");
+  m.update = hhds::Pin_class{};
+  const auto size = const_i64("size");
+  const auto bits = const_i64("bits");
+  if (m.bus.is_invalid() || !size || !bits || *size <= 0 || *bits <= 0) {
+    why = "loop-body memory that is not an array view of an input";
+    return false;
+  }
+  m.size = *size;
+  m.bits = static_cast<int>(*bits);
+  absl::flat_hash_map<hhds::Port_id, hhds::Pin_class> outs;
+  for (const auto& o : node.out_sorted_pins()) {
+    outs.emplace(o.get_port_id(), o);
+  }
+  int n_ports = 0;
+  for (const auto& sink : node.inp_sorted_pins()) {
+    n_ports = std::max(n_ports, static_cast<int>(sink.get_port_id() / Ntype::Memory_port_stride) + 1);
+  }
+  for (int i = 0; i < n_ports; ++i) {
+    Mem_port pt;
+    auto     rd = get_driver_of_sink_name(node, mem_sink(i, "rdport"));
+    pt.kind     = (!rd.is_invalid() && rd.is_const() && const_of(rd).is_just_i64()) ? static_cast<int>(const_of(rd).to_just_i64()) : 0;
+    pt.addr     = get_driver_of_sink_name(node, mem_sink(i, "addr"));
+    if (pt.kind != Ntype::Memory_rdport_async) {
+      why = "loop-body memory with a write or synchronous port";
+      return false;
+    }
+    if (pt.addr.is_invalid()) {
+      why = "memory port without an address";
+      return false;
+    }
+    if (auto it = outs.find(static_cast<hhds::Port_id>(i)); it != outs.end()) {
+      pt.out = it->second;
+      m.uns  = is_unsign(pt.out);
+    }
+    m.ports.push_back(pt);
+  }
+  if (auto it = view_alias_.find(m.bus.get_class_index()); it != view_alias_.end()) {
+    m.alias = it->second;
+    m.name  = it->second.mem;  // read the real memory in place
+  }
+  mems_.push_back(std::move(m));
+  return true;
+}
+
+// A compact loop: `for` over the index domain with the body graph spelled inline. Carries are
+// ordinary variables assigned at the end of the body, finals are assigned every trip, invariant
+// inputs are the caller's operands, and a memory the body indexes is read where it lives. No call,
+// no per-trip copy of any array. The loop stays rolled (the code footprint does not grow with the
+// trip count); upass unrolls it on the LEC round trip, which is exact.
+bool Lowering::lower_loop(const hhds::Node_class& node) {
+  auto sio  = node.get_subnode_io();
+  auto body = node.get_subnode_graph();
+  auto desc = node.subnode_loop();
+  if (!sio || !body || !desc) {
+    why = "unresolved compact loop (M1)";
+    return false;
+  }
+  if (desc->count == 0 || desc->step < 1 || desc->first < 0) {
+    why = "compact loop with an empty, descending or negative domain";
+    return false;
+  }
+  if (desc->next_active_output) {
+    why = "compact loop with break/continue";
+    return false;
+  }
+  auto bio = body->get_io();
+  if (!bio) {
+    why = "compact loop body without io";
+    return false;
+  }
+  for (const auto& bn : body->body().nodes(hhds::Node_order::forward)) {
+    const auto op = type_op_of(bn);
+    if (op == Ntype_op::Flop || op == Ntype_op::Fflop || op == Ntype_op::Latch || op == Ntype_op::Clock_cell) {
+      why = "state element inside a compact-loop body";
+      return false;
+    }
+  }
+  const auto id = root_->loop_cnt_++;
+
+  absl::flat_hash_map<hhds::Port_id, hhds::Pin_class> actual;
+  for (const auto& sink : node.inp_sorted_pins()) {
+    for (const auto& d : sink.get_driver_pins()) {
+      if (!(d.get_master_node() == node)) {  // the carry self-edge is the descriptor, not a value
+        actual.emplace(sink.get_port_id(), d);
+        break;
+      }
+    }
+  }
+  absl::flat_hash_map<hhds::Port_id, hhds::Pin_class> out_conn;
+  for (const auto& o : node.out_sorted_pins()) {
+    out_conn.emplace(o.get_port_id(), o);
+  }
+  struct Carry {
+    hhds::Port_id in = 0, out = 0;
+    std::string   in_name, out_name, var;
+  };
+  std::vector<Carry> carries;
+  for (const auto& c : node.subnode_group().carries()) {
+    Carry k;
+    k.in  = c.input_port();
+    k.out = c.output_port();
+    for (const auto& d : sio->get_input_pin_decls()) {
+      if (d.port_id == k.in) {
+        k.in_name = std::string(d.name);
+      }
+    }
+    for (const auto& d : sio->get_output_pin_decls()) {
+      if (d.port_id == k.out) {
+        k.out_name = std::string(d.name);
+      }
+    }
+    if (k.in_name.empty() || k.out_name.empty()) {
+      why = "compact loop carry without port declarations";
+      return false;
+    }
+    k.var = std::format("__lc{}_{}", id, k.out_name);
+    carries.push_back(std::move(k));
+  }
+  auto carry_of_in = [&](hhds::Port_id p) -> const Carry* {
+    for (const auto& c : carries) {
+      if (c.in == p) {
+        return &c;
+      }
+    }
+    return nullptr;
+  };
+  auto carry_of_out = [&](hhds::Port_id p) -> const Carry* {
+    for (const auto& c : carries) {
+      if (c.out == p) {
+        return &c;
+      }
+    }
+    return nullptr;
+  };
+
+  auto type_bits = [&](const std::string& name, int bits, bool uns) {
+    if (bits <= 0) {
+      return;
+    }
+    auto ts = b_.add_child(Lnast_ntype::create_type_spec());
+    b_.lnast->add_child(ts, Lnast_node::create_ref(name));
+    add_type(ts, bits, uns);
+  };
+  Lowering    sub(*body, *this);
+  const auto  ivar = std::format("__li{}", id);
+  std::string bad;
+  for (const auto& d : sio->get_input_pin_decls()) {
+    const auto bp = body->get_input_pin(d.name);
+    if (desc->index_input && *desc->index_input == d.port_id) {
+      sub.name_of_.insert_or_assign(bp.get_class_index(), ivar);
+    } else if (desc->activation_input && *desc->activation_input == d.port_id) {
+      auto it = actual.find(d.port_id);
+      if (it != actual.end() && !(it->second.is_const() && !const_of(it->second).is_known_false())) {
+        why = "compact loop with a run-time activation";
+        return false;
+      }
+      sub.name_of_.insert_or_assign(bp.get_class_index(), "1");
+    } else if (const auto* c = carry_of_in(d.port_id)) {
+      sub.name_of_.insert_or_assign(bp.get_class_index(), c->var);
+    } else {
+      auto it = actual.find(d.port_id);
+      if (it == actual.end()) {
+        continue;  // unconnected: the body must not read it (operand() reports it if it does)
+      }
+      if (auto va = view_alias_.find(it->second.get_class_index()); va != view_alias_.end()) {
+        sub.view_alias_.insert_or_assign(bp.get_class_index(), va->second);
+        sub.name_of_.insert_or_assign(bp.get_class_index(), va->second.mem);
+        continue;
+      }
+      auto o = operand(it->second);
+      if (!o) {
+        return false;
+      }
+      if (parent_ != nullptr && !o->empty() && (*o)[0] == '%' && !it->second.is_const()) {
+        // A temporary of an enclosing loop body that only the inner body reads: bind it to a named
+        // variable (upass' dead-statement sweep does not follow a tmp read only from an inner `for`).
+        auto nv = std::format("__lv{}_{}", id, std::string(d.name));
+        store_raw(nv, *o);
+        type_bits(nv, bits_of(it->second), is_unsign(it->second));
+        o = nv;
+      }
+      sub.name_of_.insert_or_assign(bp.get_class_index(), *o);
+    }
+  }
+  auto out_decl_bits = [&](std::string_view name) { return bits_of(body->get_output_pin(name), *bio, name); };
+
+  // Initial values: the carry seeds and a defined value for every final.
+  struct Final {
+    hhds::Port_id port;
+    std::string   name, var;
+    bool          uns;
+  };
+  std::vector<Final> finals;
+  for (const auto& c : carries) {
+    std::string init = "0";
+    if (auto it = actual.find(c.in); it != actual.end()) {
+      auto o = operand(it->second);
+      if (!o) {
+        return false;
+      }
+      init = *o;
+    }
+    bool uns = true;
+    for (const auto& d : sio->get_output_pin_decls()) {
+      if (d.port_id == c.out) {
+        uns = d.unsign;
+      }
+    }
+    store_raw(c.var, init);
+    type_bits(c.var, out_decl_bits(c.out_name), uns);
+  }
+  for (const auto& d : sio->get_output_pin_decls()) {
+    if (carry_of_out(d.port_id) != nullptr || (desc->next_active_output && *desc->next_active_output == d.port_id)) {
+      continue;
+    }
+    if (out_conn.find(d.port_id) == out_conn.end()) {
+      continue;  // nobody reads it
+    }
+    Final f{d.port_id, std::string(d.name), std::format("__lf{}_{}", id, std::string(d.name)), d.unsign};
+    store_raw(f.var, "0");
+    type_bits(f.var, out_decl_bits(f.name), f.uns);
+    finals.push_back(std::move(f));
+  }
+
+  // for __liN in first..last { body; carries/finals <- this trip's values }
+  const auto last = desc->first + static_cast<int64_t>(desc->count - 1) * desc->step;
+  if (desc->step != 1) {
+    why = "compact loop with a step other than 1";
+    return false;
+  }
+  auto rt = b_.create_lnast_tmp();
+  auto rg = b_.add_child(Lnast_ntype::create_range());
+  b_.lnast->add_child(rg, Lnast_node::create_ref(rt));
+  leaf(rg, std::to_string(desc->first));
+  leaf(rg, std::to_string(last));
+  auto lp = b_.add_child(Lnast_ntype::create_for());
+  b_.lnast->add_child(lp, Lnast_node::create_ref(ivar));
+  b_.lnast->add_child(lp, Lnast_node::create_ref(rt));
+  auto bs = b_.lnast->add_child(lp, Lnast_ntype::create_stmts());
+  b_.push_stmts(bs);
+  for (const auto& bn : body->body().nodes(hhds::Node_order::forward)) {
+    if (type_op_of(bn) == Ntype_op::Memory && !sub.declare_view(bn)) {
+      why = sub.why;
+      b_.pop_stmts();
+      return false;
+    }
+  }
+  if (!sub.lower_cells()) {
+    why = sub.why;
+    b_.pop_stmts();
+    return false;
+  }
+  auto body_value = [&](std::string_view name) -> std::optional<std::string> {
+    auto spin = body->get_output_pin(name);
+    auto drs  = spin.get_driver_pins();
+    if (drs.empty()) {
+      sub.why = "compact loop output without a driver";
+      return std::nullopt;
+    }
+    return sub.operand(*drs.begin());
+  };
+  // Values first (they may name a carry variable that is overwritten below), then the stores.
+  absl::flat_hash_set<std::string> carry_vars;
+  for (const auto& c : carries) {
+    carry_vars.insert(c.var);
+  }
+  std::vector<std::pair<std::string, std::string>> stores;  // variable, value
+  std::vector<std::pair<std::string, std::pair<int, bool>>> tys;
+  for (const auto& c : carries) {
+    auto v = body_value(c.out_name);
+    if (!v) {
+      why = sub.why;
+      b_.pop_stmts();
+      return false;
+    }
+    bool uns = true;
+    for (const auto& d : sio->get_output_pin_decls()) {
+      if (d.port_id == c.out) {
+        uns = d.unsign;
+      }
+    }
+    stores.emplace_back(c.var, *v);
+    tys.emplace_back(c.var, std::make_pair(out_decl_bits(c.out_name), uns));
+  }
+  for (const auto& f : finals) {
+    auto v = body_value(f.name);
+    if (!v) {
+      why = sub.why;
+      b_.pop_stmts();
+      return false;
+    }
+    stores.emplace_back(f.var, *v);
+    tys.emplace_back(f.var, std::make_pair(out_decl_bits(f.name), f.uns));
+  }
+  for (auto& [var, val] : stores) {
+    if (carry_vars.contains(val) && val != var && stores.size() > 1) {
+      const auto snap = b_.create_lnast_tmp();
+      store_raw(snap, val);
+      val = snap;
+    }
+  }
+  for (size_t i = 0; i < stores.size(); ++i) {
+    store_raw(stores[i].first, stores[i].second);
+    type_bits(tys[i].first, tys[i].second.first, tys[i].second.second);
+  }
+  b_.pop_stmts();
+  b_.lnast->add_child(lp, Lnast_node::create_const("val"));
+
+  for (const auto& c : carries) {
+    if (auto it = out_conn.find(c.out); it != out_conn.end()) {
+      name_of_.insert_or_assign(it->second.get_class_index(), c.var);
+    }
+  }
+  for (const auto& f : finals) {
+    name_of_.insert_or_assign(out_conn.at(f.port).get_class_index(), f.var);
+  }
+  return true;
+}
+
 // A module instance: fcall(inst, module, store(port, arg)...), then one tuple_get
 // per output that something reads -- the shape the slang front end emits.
 bool Lowering::lower_sub(const hhds::Node_class& node) {
+  if (node.is_loop_subnode()) {
+    return lower_loop(node);
+  }
   auto sub_io = node.get_subnode_io();
-  if (!sub_io || node.is_loop_subnode()) {
-    why = "compact-loop or unresolved sub instance (M1)";
+  if (!sub_io) {
+    why = "unresolved sub instance (M1)";
     return false;
   }
   const auto modname = std::string(sub_io->get_name());
@@ -856,6 +1459,10 @@ bool Lowering::lower_sub(const hhds::Node_class& node) {
     // fproperty / lgassert / lgundef: body-less, stateless, no hardware and no readable output
     // (a later read of one fails by name below), so they only matter to the checkers.
     return true;
+  }
+  if (parent_ != nullptr) {
+    why = "module call inside a compact-loop body (inline it first)";
+    return false;
   }
   absl::flat_hash_map<hhds::Port_id, hhds::Pin_class> in_conn;
   for (const auto& sink : node.inp_sorted_pins()) {
@@ -983,6 +1590,125 @@ bool Lowering::lower_flop_next(const Flop_rec& f) {
   return true;
 }
 
+bool Lowering::lower_cells() {
+  if (parent_ == nullptr) {
+    find_overlays();
+  }
+  // Dependency order (Kahn): hhds `forward` order is not topological around loop-last cells
+  // such as Sub, and a use must follow its definition in the LNAST text. Registers and graph
+  // inputs are already named, so they never block.
+  {
+    struct Item {
+      hhds::Node_class node;
+      int              mem  = -1;  // index into mems_ for an async memory read
+      size_t           port = 0;
+    };
+    std::vector<Item> nodes;
+    for (auto node : graph_.body().nodes(hhds::Node_order::forward)) {
+      const auto op = type_op_of(node);
+      if (op != Ntype_op::Flop && op != Ntype_op::IO && op != Ntype_op::Memory) {
+        nodes.push_back({node, -1, 0});
+      }
+    }
+    for (size_t mi = 0; mi < mems_.size(); ++mi) {
+      for (size_t pi = 0; pi < mems_[mi].ports.size(); ++pi) {
+        const auto& pt = mems_[mi].ports[pi];
+        if (pt.kind == Ntype::Memory_rdport_async && !pt.out.is_invalid()) {
+          nodes.push_back({mems_[mi].node, static_cast<int>(mi), pi});
+        }
+      }
+      if (!mems_[mi].read_all.is_invalid()) {
+        nodes.push_back({mems_[mi].node, static_cast<int>(mi), SIZE_MAX});
+      }
+    }
+    std::vector<size_t>                                       waiting(nodes.size(), 0);
+    absl::flat_hash_map<hhds::Class_index, std::vector<size_t>> waiters;
+    std::vector<size_t>                                       ready;
+    for (size_t i = 0; i < nodes.size(); ++i) {
+      absl::flat_hash_set<hhds::Class_index> seen;
+      auto need = [&](const hhds::Pin_class& d) {
+        if (d.is_invalid() || d.is_const() || name_of_.contains(d.get_class_index()) || !seen.insert(d.get_class_index()).second) {
+          return;
+        }
+        waiters[d.get_class_index()].push_back(i);
+        ++waiting[i];
+      };
+      if (nodes[i].mem >= 0 && nodes[i].port == SIZE_MAX) {
+        // read_all has no combinational inputs
+      } else if (nodes[i].mem >= 0) {
+        const auto& vm = mems_[static_cast<size_t>(nodes[i].mem)];
+        need(vm.ports[nodes[i].port].addr);
+        if (vm.view && vm.name.empty()) {
+          need(vm.bus);
+        }
+      } else {
+        for (const auto& sink : nodes[i].node.inp_sorted_pins()) {
+          for (const auto& d : sink.get_driver_pins()) {
+            if (d.get_master_node() == nodes[i].node) {
+              continue;  // a compact loop's carry self-edge
+            }
+            need(d);
+          }
+        }
+      }
+      if (waiting[i] == 0) {
+        ready.push_back(i);
+      }
+    }
+    size_t done = 0;
+    for (size_t head = 0; head < ready.size(); ++head) {
+      const auto i = ready[head];
+      const bool ok = nodes[i].mem < 0 ? lower_node(nodes[i].node)
+                      : nodes[i].port == SIZE_MAX ? lower_read_all(mems_[static_cast<size_t>(nodes[i].mem)])
+                                                  : lower_async_read(mems_[static_cast<size_t>(nodes[i].mem)], nodes[i].port);
+      if (!ok) {
+        return false;
+      }
+      ++done;
+      flush();
+      std::vector<hhds::Pin_class> produced;
+      if (nodes[i].mem >= 0) {
+        const auto& mm = mems_[static_cast<size_t>(nodes[i].mem)];
+        produced.push_back(nodes[i].port == SIZE_MAX ? mm.read_all : mm.ports[nodes[i].port].out);  // only THIS read's data
+      } else {
+        for (const auto& o : nodes[i].node.out_sorted_pins()) {
+          produced.push_back(o);
+        }
+      }
+      for (const auto& o : produced) {
+        auto it = waiters.find(o.get_class_index());
+        if (it == waiters.end()) {
+          continue;
+        }
+        for (const auto w : it->second) {
+          if (--waiting[w] == 0) {
+            ready.push_back(w);
+          }
+        }
+      }
+    }
+    if (done != nodes.size()) {
+      for (size_t i = 0; i < nodes.size(); ++i) {
+        if (waiting[i] != 0 && nodes[i].mem < 0 && type_op_of(nodes[i].node) == Ntype_op::Sub) {
+          stuck_subs.push_back(nodes[i].node);
+        }
+      }
+      std::string names;
+      for (size_t i = 0, shown = 0; i < nodes.size() && shown < 4; ++i) {
+        if (waiting[i] != 0) {
+          const auto op = type_op_of(nodes[i].node);
+          names += std::format(" {}{}", Ntype::get_name(op),
+                               op == Ntype_op::Sub && nodes[i].node.get_subnode_io() ? std::format("({})", std::string(nodes[i].node.get_subnode_io()->get_name())) : "");
+          ++shown;
+        }
+      }
+      why = std::format("cycle through instance-level dependencies (a call needs an output of a call that needs it); stuck:{}", names);
+      return false;
+    }
+  }
+  return true;
+}
+
 std::shared_ptr<Lnast> Lowering::run(livehd::lnast_stream::Sink* stream) {
   sink_ = stream;
   auto gio = graph_.get_io();
@@ -1057,110 +1783,8 @@ std::shared_ptr<Lnast> Lowering::run(livehd::lnast_stream::Sink* stream) {
   }
   flush();
 
-  // Dependency order (Kahn): hhds `forward` order is not topological around loop-last cells
-  // such as Sub, and a use must follow its definition in the LNAST text. Registers and graph
-  // inputs are already named, so they never block.
-  {
-    struct Item {
-      hhds::Node_class node;
-      int              mem  = -1;  // index into mems_ for an async memory read
-      size_t           port = 0;
-    };
-    std::vector<Item> nodes;
-    for (auto node : graph_.body().nodes(hhds::Node_order::forward)) {
-      const auto op = type_op_of(node);
-      if (op != Ntype_op::Flop && op != Ntype_op::IO && op != Ntype_op::Memory) {
-        nodes.push_back({node, -1, 0});
-      }
-    }
-    for (size_t mi = 0; mi < mems_.size(); ++mi) {
-      for (size_t pi = 0; pi < mems_[mi].ports.size(); ++pi) {
-        const auto& pt = mems_[mi].ports[pi];
-        if (pt.kind == Ntype::Memory_rdport_async && !pt.out.is_invalid()) {
-          nodes.push_back({mems_[mi].node, static_cast<int>(mi), pi});
-        }
-      }
-      if (!mems_[mi].read_all.is_invalid()) {
-        nodes.push_back({mems_[mi].node, static_cast<int>(mi), SIZE_MAX});
-      }
-    }
-    std::vector<size_t>                                       waiting(nodes.size(), 0);
-    absl::flat_hash_map<hhds::Class_index, std::vector<size_t>> waiters;
-    std::vector<size_t>                                       ready;
-    for (size_t i = 0; i < nodes.size(); ++i) {
-      absl::flat_hash_set<hhds::Class_index> seen;
-      auto need = [&](const hhds::Pin_class& d) {
-        if (d.is_invalid() || d.is_const() || name_of_.contains(d.get_class_index()) || !seen.insert(d.get_class_index()).second) {
-          return;
-        }
-        waiters[d.get_class_index()].push_back(i);
-        ++waiting[i];
-      };
-      if (nodes[i].mem >= 0 && nodes[i].port == SIZE_MAX) {
-        // read_all has no combinational inputs
-      } else if (nodes[i].mem >= 0) {
-        need(mems_[static_cast<size_t>(nodes[i].mem)].ports[nodes[i].port].addr);
-      } else {
-        for (const auto& sink : nodes[i].node.inp_sorted_pins()) {
-          for (const auto& d : sink.get_driver_pins()) {
-            need(d);
-          }
-        }
-      }
-      if (waiting[i] == 0) {
-        ready.push_back(i);
-      }
-    }
-    size_t done = 0;
-    for (size_t head = 0; head < ready.size(); ++head) {
-      const auto i = ready[head];
-      const bool ok = nodes[i].mem < 0 ? lower_node(nodes[i].node)
-                      : nodes[i].port == SIZE_MAX ? lower_read_all(mems_[static_cast<size_t>(nodes[i].mem)])
-                                                  : lower_async_read(mems_[static_cast<size_t>(nodes[i].mem)], nodes[i].port);
-      if (!ok) {
-        return nullptr;
-      }
-      ++done;
-      flush();
-      std::vector<hhds::Pin_class> produced;
-      if (nodes[i].mem >= 0) {
-        const auto& mm = mems_[static_cast<size_t>(nodes[i].mem)];
-        produced.push_back(nodes[i].port == SIZE_MAX ? mm.read_all : mm.ports[nodes[i].port].out);  // only THIS read's data
-      } else {
-        for (const auto& o : nodes[i].node.out_sorted_pins()) {
-          produced.push_back(o);
-        }
-      }
-      for (const auto& o : produced) {
-        auto it = waiters.find(o.get_class_index());
-        if (it == waiters.end()) {
-          continue;
-        }
-        for (const auto w : it->second) {
-          if (--waiting[w] == 0) {
-            ready.push_back(w);
-          }
-        }
-      }
-    }
-    if (done != nodes.size()) {
-      for (size_t i = 0; i < nodes.size(); ++i) {
-        if (waiting[i] != 0 && nodes[i].mem < 0 && type_op_of(nodes[i].node) == Ntype_op::Sub) {
-          stuck_subs.push_back(nodes[i].node);
-        }
-      }
-      std::string names;
-      for (size_t i = 0, shown = 0; i < nodes.size() && shown < 4; ++i) {
-        if (waiting[i] != 0) {
-          const auto op = type_op_of(nodes[i].node);
-          names += std::format(" {}{}", Ntype::get_name(op),
-                               op == Ntype_op::Sub && nodes[i].node.get_subnode_io() ? std::format("({})", std::string(nodes[i].node.get_subnode_io()->get_name())) : "");
-          ++shown;
-        }
-      }
-      why = std::format("cycle through instance-level dependencies (a call needs an output of a call that needs it); stuck:{}", names);
-      return nullptr;
-    }
+  if (!lower_cells()) {
+    return nullptr;
   }
 
   // Outputs and register next values.
@@ -1208,8 +1832,22 @@ Pass_lg2lnast::Pass_lg2lnast(const Eprp_var& var) : Pass("pass.lg2lnast", var) {
 
 void Pass_lg2lnast::work(Eprp_var& var) {
   Pass_lg2lnast p(var);
+  // A compact-loop body is lowered inline into its caller (a `for`); on its own it is not a module.
+  absl::flat_hash_set<std::string> loop_bodies;
   for (const auto& g : var.graphs) {
     if (!g) {
+      continue;
+    }
+    for (const auto& n : g->body().nodes(hhds::Node_order::forward)) {
+      if (type_op_of(n) == Ntype_op::Sub && n.is_loop_subnode()) {
+        if (auto cg = n.get_subnode_graph()) {
+          loop_bodies.insert(std::string(cg->get_name()));
+        }
+      }
+    }
+  }
+  for (const auto& g : var.graphs) {
+    if (!g || loop_bodies.contains(std::string(g->get_name()))) {
       continue;
     }
     // A cycle through instance-level dependencies cannot be spelled as fcall statements (each
@@ -1227,7 +1865,7 @@ void Pass_lg2lnast::work(Eprp_var& var) {
       size_t                           spliced = 0;
       for (const auto& inst : probe.stuck_subs) {
         auto io = inst.get_subnode_io();
-        if (!io || livehd::graph_util::is_marker_module_name(io->get_name()) || !inst.get_subnode_graph()) {
+        if (!io || inst.is_loop_subnode() || livehd::graph_util::is_marker_module_name(io->get_name()) || !inst.get_subnode_graph()) {
           continue;  // markers and body-less cells have nothing to splice
         }
         if (inliner.splice(inst)) {

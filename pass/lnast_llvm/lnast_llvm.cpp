@@ -332,6 +332,9 @@ private:
   void   run_frame(Frame& f, Env& env);
   void exec_block(const std::vector<Lnast_nid>& stmts, Env& env);
   void exec_if(const std::vector<Lnast_nid>& c, size_t at, Env& env);
+  void exec_for(const std::vector<Lnast_nid>& c, Env& env);
+  void collect_assigned(const Lnast_nid& stmts, std::vector<std::string>& out, absl::flat_hash_set<std::string>& seen) const;
+  absl::flat_hash_map<std::string, std::pair<int64_t, int64_t>> ranges_;  // range tmp -> [first, last] (literal bounds)
   void exec_stmt(const std::vector<Lnast_nid>& stmts, size_t& i, Env& env);
 
   V    operand(const Lnast_nid& n, const Env& env);
@@ -639,6 +642,105 @@ void Gen::exec_if(const std::vector<Lnast_nid>& c, size_t at, Env& env) {
   }
 }
 
+// Names a statement list assigns (first child of every non-structural statement), nested blocks included.
+void Gen::collect_assigned(const Lnast_nid& stmts, std::vector<std::string>& out, absl::flat_hash_set<std::string>& seen) const {
+  using NT = Lnast_ntype;
+  for (const auto& s : kids(stmts)) {
+    const auto t = ty(s);
+    if (t == NT::Lnast_ntype_stmts) {
+      collect_assigned(s, out, seen);
+    } else if (t == NT::Lnast_ntype_if || t == NT::Lnast_ntype_unique_if || t == NT::Lnast_ntype_for || t == NT::Lnast_ntype_while) {
+      for (const auto& k : kids(s)) {
+        if (ty(k) == NT::Lnast_ntype_stmts) {
+          collect_assigned(k, out, seen);
+        }
+      }
+    } else if (t == NT::Lnast_ntype_type_spec || t == NT::Lnast_ntype_attr_set || t == NT::Lnast_ntype_declare || t == NT::Lnast_ntype_range) {
+      continue;
+    } else {
+      const auto k = kids(s);
+      if (!k.empty() && ty(k[0]) == NT::Lnast_ntype_ref) {
+        const auto name = nm(k[0]);
+        if (fr_->reg_idx.contains(name) && regs_[fr_->reg_idx.at(name)].mem_size != 0) {
+          continue;  // a memory write is a store in place
+        }
+        if (seen.insert(name).second) {
+          out.push_back(name);
+        }
+      }
+    }
+  }
+}
+
+// `for i in lo..hi { body }`: one native loop, the body lowered once. Variables the body assigns that
+// exist before it are the carries (header phis); memories are read and written in place. The index is
+// an unsigned value of just the bits the range needs.
+void Gen::exec_for(const std::vector<Lnast_nid>& c, Env& env) {
+  if (c.size() < 3 || ty(c[2]) != Lnast_ntype::Lnast_ntype_stmts) {
+    bail("for shape");
+  }
+  const auto ivar = nm(c[0]);
+  const auto rit  = ranges_.find(nm(c[1]));
+  if (rit == ranges_.end()) {
+    bail("for over a range that is not a pair of literals");
+  }
+  const auto [lo, hi] = rit->second;
+  if (hi < lo) {
+    return;  // empty
+  }
+  if (lo < 0) {
+    bail("for with a negative index");
+  }
+  std::vector<std::string>         assigned;
+  absl::flat_hash_set<std::string> seen;
+  collect_assigned(c[2], assigned, seen);
+  std::vector<std::string> carried;
+  std::vector<V>           init;
+  for (const auto& n : assigned) {
+    if (n == ivar) {
+      continue;
+    }
+    if (is_scalar_reg(n)) {
+      bail("register written inside a for body");
+    }
+    if (auto it = env.find(n); it != env.end()) {
+      carried.push_back(n);
+      init.push_back(it->second);
+    }
+  }
+  // Arrays are created ahead of the loop so their base pointers dominate the body and what follows.
+  for (const auto& [name, idx] : fr_->reg_idx) {
+    if (regs_[idx].mem_size != 0) {
+      ensure_array(idx, env);
+    }
+  }
+  uint32_t iw = 1;
+  while (iw < 63 && (uint64_t{1} << iw) <= static_cast<uint64_t>(hi)) {
+    ++iw;
+  }
+  V              index;
+  std::vector<V> phis;
+  if (!k_->loop_begin(static_cast<uint64_t>(hi - lo + 1), lo, iw, init, index, phis)) {
+    bail("native loop");
+  }
+  for (size_t i = 0; i < carried.size(); ++i) {
+    put(env, carried[i], phis[i]);
+  }
+  put(env, ivar, index);
+  exec_block(kids(c[2]), env);
+  std::vector<V> next;
+  for (const auto& n : carried) {
+    next.push_back(env.at(n));
+  }
+  std::vector<V> fin;
+  if (!k_->loop_end(next, fin)) {
+    bail("native loop end");
+  }
+  for (size_t i = 0; i < carried.size(); ++i) {
+    put(env, carried[i], fin[i]);
+  }
+}
+
 void Gen::exec_block(const std::vector<Lnast_nid>& stmts, Env& env) {
   for (size_t i = 0; i < stmts.size();) {
     exec_stmt(stmts, i, env);
@@ -673,6 +775,23 @@ void Gen::exec_stmt(const std::vector<Lnast_nid>& stmts, size_t& i, Env& env) {
     case NT::Lnast_ntype_declare:
     case NT::Lnast_ntype_attr_set:
       break;  // collected up front
+    case NT::Lnast_ntype_range: {
+      if (c.size() != 3 || ty(c[0]) != NT::Lnast_ntype_ref) {
+        bail("range shape");
+      }
+      auto as_int = [&](const Lnast_nid& n) {
+        const auto l = parse_literal(nm(n));
+        if (!l || l->mag.size() > 1 || l->mag.empty() || (l->mag[0] >> 62) != 0) {
+          bail("range bound is not a small literal");
+        }
+        return l->negative ? -static_cast<int64_t>(l->mag[0]) : static_cast<int64_t>(l->mag[0]);
+      };
+      ranges_[nm(c[0])] = {as_int(c[1]), as_int(c[2])};
+      break;
+    }
+    case NT::Lnast_ntype_for:
+      exec_for(c, env);
+      break;
     case NT::Lnast_ntype_store: {
       if (c.size() == 3 && ty(c[0]) == NT::Lnast_ntype_ref && fr_->reg_idx.contains(nm(c[0])) && regs_[fr_->reg_idx.at(nm(c[0]))].mem_size != 0) {
         const auto& r = regs_[fr_->reg_idx.at(nm(c[0]))];

@@ -1368,6 +1368,19 @@ public:
   // gives each object its own alias scope, noalias against every other one.
   std::vector<std::pair<llvm::Instruction*, std::pair<size_t, size_t>>>                           storage_accesses;
   std::vector<std::optional<Value>>                                                               deferred_casts;
+  // Every resize() still waiting for its first use: a native loop materializes them ahead of its header
+  // so no cast first emitted inside a body is reused where the body does not dominate.
+  std::vector<Value>                                                                              pending_resizes;
+  struct Loop_frame {
+    llvm::BasicBlock*           header  = nullptr;
+    llvm::BasicBlock*           done    = nullptr;
+    llvm::PHINode*              ordinal = nullptr;
+    std::vector<llvm::PHINode*> phis;
+    std::vector<Value>          values;  // the carry phis as Values
+    uint64_t                    count        = 0;
+    bool                        has_inner    = false;
+  };
+  std::vector<Loop_frame>                                                                         loop_frames;
   std::map<size_t, uint64_t>              speculations;   // input id -> inactive value (speculate_input)
   std::map<size_t, llvm::WeakTrackingVH>  input_handles;  // materialized inputs (null once erased)
   std::vector<std::pair<uint32_t, bool>>  input_types;
@@ -2106,6 +2119,7 @@ Cgen_llvm::Value Cgen_llvm::resize(Value value, uint32_t result_width, bool resu
   }
   const auto result                = impl_->remember(nullptr, result_width, result_unsign);
   impl_->deferred_casts[result.id] = value;
+  impl_->pending_resizes.push_back(result);
   return result;
 }
 
@@ -3663,6 +3677,113 @@ bool Cgen_llvm::inline_body(const Inline_body& body, const std::vector<Value>& i
   auto* block = continuation->getParent();
   continuation->eraseFromParent();
   b.SetInsertPoint(block);
+  return true;
+}
+
+// ---- native counted loop ---------------------------------------------------------------------
+// One basic-block loop in the current function. State (memories, registers) is touched in place by
+// the body; only the index and the carries are SSA values (header phis). The body is emitted once:
+// no unrolling here, and the back edge says so to LLVM unless the loop is a small innermost one.
+bool Cgen_llvm::loop_begin(uint64_t count, int64_t first, uint32_t index_width, const std::vector<Value>& carry_init, Value& index,
+                           std::vector<Value>& carries) {
+  if (count == 0 || index_width == 0) {
+    impl_->error = "native loop needs a positive trip count and an index width";
+    return false;
+  }
+  auto& b = impl_->builder;
+  // Everything first used inside the body would be emitted there and then reused after it.
+  for (size_t id = 0; id < impl_->input_types.size() && id < impl_->values.size(); ++id) {
+    if (impl_->values[id] == nullptr && impl_->input_types[id].first != 0) {
+      (void)impl_->get(Value{id, impl_->input_types[id].first, true});
+    }
+  }
+  const auto pending = std::move(impl_->pending_resizes);
+  impl_->pending_resizes.clear();
+  for (const auto& v : pending) {
+    if (v.id < impl_->values.size() && impl_->values[v.id] == nullptr) {
+      (void)impl_->get(v);
+    }
+  }
+  std::vector<llvm::Value*> initial;
+  for (const auto& c : carry_init) {
+    auto* v = impl_->get(c);
+    if (v == nullptr) {
+      return false;
+    }
+    initial.push_back(v);
+  }
+  if (!impl_->loop_frames.empty()) {
+    impl_->loop_frames.back().has_inner = true;
+  }
+  auto* fn     = impl_->function;
+  auto* start  = b.GetInsertBlock();
+  Impl::Loop_frame f;
+  f.count      = count;
+  f.header     = llvm::BasicBlock::Create(impl_->context, "nloop", fn);
+  auto* bodyb  = llvm::BasicBlock::Create(impl_->context, "nloop.body", fn);
+  f.done       = llvm::BasicBlock::Create(impl_->context, "nloop.done", fn);
+  b.CreateBr(f.header);
+  b.SetInsertPoint(f.header);
+  f.ordinal = b.CreatePHI(b.getInt64Ty(), 2, "ordinal");
+  f.ordinal->addIncoming(b.getInt64(0), start);
+  for (size_t i = 0; i < initial.size(); ++i) {
+    auto* phi = b.CreatePHI(initial[i]->getType(), 2, "carry");
+    phi->addIncoming(initial[i], start);
+    f.phis.push_back(phi);
+    f.values.push_back(impl_->remember(phi, carry_init[i].width, carry_init[i].unsign));
+  }
+  b.CreateCondBr(b.CreateICmpULT(f.ordinal, b.getInt64(count)), bodyb, f.done);
+  b.SetInsertPoint(bodyb);
+  auto* idx = b.CreateAdd(f.ordinal, b.getInt64(static_cast<uint64_t>(first)));
+  index     = impl_->remember(cast_integer(b, idx, index_width, true), index_width, true);
+  carries   = f.values;
+  impl_->loop_frames.push_back(std::move(f));
+  return true;
+}
+
+bool Cgen_llvm::loop_end(const std::vector<Value>& carry_next, std::vector<Value>& carry_final) {
+  if (impl_->loop_frames.empty()) {
+    impl_->error = "native loop end without a begin";
+    return false;
+  }
+  auto  f = std::move(impl_->loop_frames.back());
+  impl_->loop_frames.pop_back();
+  auto& b = impl_->builder;
+  if (carry_next.size() != f.phis.size()) {
+    impl_->error = "native loop carry count mismatch";
+    return false;
+  }
+  std::vector<llvm::Value*> next;
+  for (size_t i = 0; i < carry_next.size(); ++i) {
+    auto* v = impl_->get(resize(carry_next[i], f.values[i].width, f.values[i].unsign));
+    if (v == nullptr) {
+      return false;
+    }
+    next.push_back(v);
+  }
+  // Casts the body left pending are emitted at the end of the body, before the back edge.
+  const auto pending = std::move(impl_->pending_resizes);
+  impl_->pending_resizes.clear();
+  for (const auto& v : pending) {
+    if (v.id < impl_->values.size() && impl_->values[v.id] == nullptr) {
+      (void)impl_->get(v);
+    }
+  }
+  auto* latch = b.GetInsertBlock();
+  for (size_t i = 0; i < next.size(); ++i) {
+    f.phis[i]->addIncoming(next[i], latch);
+  }
+  f.ordinal->addIncoming(b.CreateAdd(f.ordinal, b.getInt64(1)), latch);
+  auto*          br    = b.CreateBr(f.header);
+  const bool     small = f.count <= 4 && !f.has_inner;
+  auto&          ctx   = impl_->context;
+  llvm::Metadata* hint = llvm::MDString::get(ctx, small ? "llvm.loop.unroll.full" : "llvm.loop.unroll.disable");
+  llvm::MDNode*   props = llvm::MDNode::get(ctx, {hint});
+  llvm::MDNode*   id    = llvm::MDNode::getDistinct(ctx, {nullptr, props});
+  id->replaceOperandWith(0, id);
+  br->setMetadata(llvm::LLVMContext::MD_loop, id);
+  b.SetInsertPoint(f.done);
+  carry_final = f.values;
   return true;
 }
 

@@ -34,5 +34,5 @@ sh_test(
     name = "lnast_llvm_diff_test",
     size = "medium",
     srcs = ["tests/lnast_llvm_diff_test.sh"],
-    data = glob(["tests/*.sv", "tests/gen_tb.py"]) + ["//lhd", ":lnast_llvm_run"],
+    data = glob(["tests/*.sv", "tests/*.prp", "tests/gen_tb.py"]) + ["//lhd", ":lnast_llvm_run"],
 )
