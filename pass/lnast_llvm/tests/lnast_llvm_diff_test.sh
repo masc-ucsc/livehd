@@ -48,6 +48,15 @@ one_design() {
   "$d/w/sim/drv.bin" --set sim.init_zero=true 2>&1 | grep -a 'puts:TRACE' | sed 's/.*puts://' >"$d/ref.trace"
   [ "$(wc -l <"$d/ref.trace")" -eq "$CYCLES" ] || { fail "$design: reference trace has $(wc -l <"$d/ref.trace") lines, want $CYCLES"; return 1; }
   cmp -s "$d/new.trace" "$d/ref.trace" || { diff "$d/new.trace" "$d/ref.trace" | head -10 >&2; fail "$design: traces differ"; return 1; }
+  # The same design cut into many small kernels: values crossing kernels through state words,
+  # registers that can no longer be written in place (pending words and the commit copy). A small
+  # design is otherwise always ONE kernel, so only the large benchmarks would ever run these paths.
+  local lg2lnast=()
+  [ "$kind" = sv ] && lg2lnast=(--set pass.lg2lnast.passes=balance)
+  LHD_SIM_LNAST_CHUNK=1 "$LHD_ABS" pass lnast-llvm --top "$top" "lg:$d/lg" "${lg2lnast[@]}" --emit-dir "sim:$d/kc" -q >"$d/gc.log" 2>&1 \
+    || { cat "$d/gc.log" >&2; fail "$design: lnast-llvm (small kernels) failed"; return 1; }
+  "$RUN" "$d/kc" "$CYCLES" >"$d/cut.trace" || { fail "$design: small-kernel run failed"; return 1; }
+  cmp -s "$d/cut.trace" "$d/ref.trace" || { diff "$d/cut.trace" "$d/ref.trace" | head -10 >&2; fail "$design: small-kernel traces differ"; return 1; }
   if [ "$kind" = prp ]; then
     # A short loop is unrolled in the native code; the rolled form (a loop past the unroll budget) must
     # give the same trace.
