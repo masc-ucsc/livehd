@@ -320,34 +320,76 @@ Buffer_tree plan_buffer_choices(Point root, const std::vector<Point>& loads, con
       double cap, required, area, hpwl = 0;
     };
     std::vector<State> states;
+    // The state a driver at `origin` sees over `children`: the capacitance of all of them, the wire, and the
+    // required time at the driver's output. The wire delay is the Elmore delay on the net's Steiner tree, so
+    // the resistance of the SHARED trunk carries the capacitance of everything behind it: a star of
+    // independent wires (each load alone behind its own wire) makes a long net with hundreds of loads look
+    // nearly free, and no buffer tree could then beat leaving it as it is.
     const auto         aggregate = [&](Point origin, const std::vector<Buffer_tree::Load>& children) {
       State              result{0, std::numeric_limits<double>::infinity(), 0};
       double             longest = 0;
       auto               low = origin, high = origin;
       std::vector<Point> endpoints{origin};
+      std::vector<State> child_state;
       for (const auto& child : children) {
         const auto xy = child.buffer ? plan.buffers.at(child.index).position : loads.at(child.index);
         const auto state
             = child.buffer ? states.at(child.index) : State{capacitances.at(child.index), required_ps.at(child.index), 0};
-        const double length     = std::abs(xy.first - origin.first) + std::abs(xy.second - origin.second);
-        const double wire_cap   = length * wire_c_ff_dbu;
-        const double wire_delay = length * wire_r_ohm_dbu * (state.cap + .5 * wire_cap) * 1e-3;
+        const double length = std::abs(xy.first - origin.first) + std::abs(xy.second - origin.second);
         endpoints.push_back(xy);
-        result.cap      += state.cap;
-        result.required  = std::min(result.required, state.required - wire_delay);
-        result.area     += state.area;
-        result.hpwl     += state.hpwl;
-        low.first        = std::min(low.first, xy.first);
-        low.second       = std::min(low.second, xy.second);
-        high.first       = std::max(high.first, xy.first);
-        high.second      = std::max(high.second, xy.second);
-        longest          = std::max(longest, length);
+        child_state.push_back(state);
+        result.cap  += state.cap;
+        result.area += state.area;
+        result.hpwl += state.hpwl;
+        low.first    = std::min(low.first, xy.first);
+        low.second   = std::min(low.second, xy.second);
+        high.first   = std::max(high.first, xy.first);
+        high.second  = std::max(high.second, xy.second);
+        longest      = std::max(longest, length);
       }
       result.hpwl      += high.first - low.first + high.second - low.second;
       const auto wires  = steiner_tree(endpoints);
       for (const auto& [a, b] : wires.edges) {
         const auto p = wires.points[a], q = wires.points[b];
         result.cap += (std::abs(p.first - q.first) + std::abs(p.second - q.second)) * wire_c_ff_dbu;
+      }
+      // Elmore delay from the driver to every child over the tree.
+      const size_t                       vertices = wires.points.size();
+      std::vector<std::vector<unsigned>> adjacent(vertices);
+      for (const auto& [a, b] : wires.edges) {
+        adjacent[a].push_back(b);
+        adjacent[b].push_back(a);
+      }
+      constexpr auto        none = std::numeric_limits<unsigned>::max();
+      const auto            root_vertex = wires.terminals.front();
+      std::vector<unsigned> parent(vertices, none), order{root_vertex};
+      parent[root_vertex] = root_vertex;
+      for (size_t k = 0; k < order.size(); ++k) {
+        for (const auto n : adjacent[order[k]]) {
+          if (parent[n] == none) {
+            parent[n] = order[k];
+            order.push_back(n);
+          }
+        }
+      }
+      std::vector<double> below(vertices, 0), length(vertices, 0), arrival(vertices, 0);
+      for (size_t k = 0; k < children.size(); ++k) {
+        below[wires.terminals[k + 1]] += child_state[k].cap;
+      }
+      for (size_t k = 1; k < order.size(); ++k) {
+        const auto v = order[k], up = parent[v];
+        length[v]    = std::abs(wires.points[v].first - wires.points[up].first) + std::abs(wires.points[v].second - wires.points[up].second);
+      }
+      for (size_t k = order.size(); k-- > 1;) {  // leaves first: a vertex's subtree is complete before its parent reads it
+        const auto v = order[k];
+        below[parent[v]] += below[v] + length[v] * wire_c_ff_dbu;
+      }
+      for (size_t k = 1; k < order.size(); ++k) {
+        const auto v = order[k], up = parent[v];
+        arrival[v]   = arrival[up] + length[v] * wire_r_ohm_dbu * (below[v] + .5 * length[v] * wire_c_ff_dbu) * 1e-3;
+      }
+      for (size_t k = 0; k < children.size(); ++k) {
+        result.required = std::min(result.required, child_state[k].required - arrival[wires.terminals[k + 1]]);
       }
       return std::pair{result, longest};
     };

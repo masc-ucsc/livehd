@@ -866,7 +866,7 @@ TEST(SteinerRepair, FasterClusterCannotAddAnOverlappingSourceWire) {
   std::vector<Point> loads(16, {-100, 0});
   loads.insert(loads.end(), 16, {100, 0});
   const auto plan
-      = plan_buffer_choices(root, loads, std::vector<double>(32, 1), std::vector<double>(32, 100), {buffer}, source, 1, 0);
+      = plan_buffer_choices(root, loads, std::vector<double>(32, 1), std::vector<double>(32, 100), {buffer}, source, .01, 0);
   // Moving the repeater to the center reduces its longest sink path, but
   // adds a 50-unit source wire over the unchanged 200-unit leaf-net box.
   // The faster spatial alternative must preserve the reference wire budget.
@@ -874,6 +874,32 @@ TEST(SteinerRepair, FasterClusterCannotAddAnOverlappingSourceWire) {
   EXPECT_EQ(plan.buffers.front().position, root);
   EXPECT_EQ(plan.buffers.front().loads.size(), loads.size());
 }
+// A long net with many loads is judged by the delay of its shared trunk, which carries the capacitance of
+// everything behind it. Judged as a star of independent wires (each load alone behind its own wire) the
+// unbuffered net looked nearly free and was left as one 271-load net on eyeriss (44 ns of wire delay).
+TEST(SteinerRepair, ALongNetWithManyLoadsIsSplitNotLeftAsOneNet) {
+  const Buffer_drive repeater{.5, 400, 1000000, 16, 8, 120, 1};
+  const Buffer_drive source{.5, 4000, 1000000, 1000, 8, 40, 1};  // a strong cell: no electrical limit is hit
+  std::vector<Point> loads;
+  for (int i = 0; i < 200; ++i) {
+    loads.push_back({1000 * (i % 100), 10 * (i / 100)});  // 100 columns along 100000 units, two rows
+  }
+  const auto plan = plan_buffer_choices({0, 0},
+                                        loads,
+                                        std::vector<double>(loads.size(), 1),
+                                        std::vector<double>(loads.size(), 5000),
+                                        {repeater},
+                                        source,
+                                        .05,   // ohm per unit
+                                        .0002);  // fF per unit
+  ASSERT_FALSE(plan.buffers.empty()) << "the whole net left on one driver: shared-trunk delay was not counted";
+  size_t widest = plan.root.size();
+  for (const auto& branch : plan.buffers) {
+    widest = std::max(widest, branch.loads.size());
+  }
+  EXPECT_LE(widest, 16U);  // no driver of the tree keeps the 200 loads
+}
+
 TEST_F(Buffer_repair, FloorplanSizesAllStressedDriversIncludingEqualAreaDrives) {
   std::filesystem::create_directories(options.output_dir);
   const std::string from = "sky130_fd_sc_hd__buf_1", to = "sky130_fd_sc_hd__buf_2", overloaded = "sky130_fd_sc_hd__buf_4";
