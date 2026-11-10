@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <format>
+#include <chrono>
 #include <fstream>
 #include <limits>
 #include <memory>
@@ -22,6 +23,20 @@ namespace {
 
 using V = Cgen_llvm::Value;
 using Op = Cgen_llvm::Binary_op;
+
+// LNAST_LLVM_TIME=1 prints where generation time goes (walk vs LLVM) to stderr.
+struct Phase_timer {
+  bool                                  on = std::getenv("LNAST_LLVM_TIME") != nullptr;
+  std::chrono::steady_clock::time_point t0 = std::chrono::steady_clock::now();
+  void lap(const char* what) {
+    if (!on) {
+      return;
+    }
+    const auto now = std::chrono::steady_clock::now();
+    std::fprintf(stderr, "lnast_llvm: %-28s %8.2f s\n", what, std::chrono::duration<double>(now - t0).count());
+    t0 = now;
+  }
+};
 
 struct Unsupported {
   std::string why;
@@ -810,11 +825,19 @@ void Gen::exec_stmt(const std::vector<Lnast_nid>& stmts, size_t& i, Env& env) {
         }
       }
       const Op op = t == NT::Lnast_ntype_bit_and ? Op::bit_and : (t == NT::Lnast_ntype_bit_or ? Op::bit_or : Op::bit_xor);
-      V        acc = ops[0];
-      for (size_t j = 1; j < ops.size(); ++j) {
-        acc = k_->binary(op, acc, ops[j], w, !sign);
+      // Balanced reduction tree: a linear fold makes an N-deep dependence chain that LLVM's
+      // optimizer handles badly on long OR/AND/XOR lists.
+      while (ops.size() > 1) {
+        std::vector<V> next;
+        for (size_t j = 0; j + 1 < ops.size(); j += 2) {
+          next.push_back(k_->binary(op, ops[j], ops[j + 1], w, !sign));
+        }
+        if (ops.size() & 1) {
+          next.push_back(ops.back());
+        }
+        ops.swap(next);
       }
-      finish(dst, acc);
+      finish(dst, ops[0]);
       break;
     }
     case NT::Lnast_ntype_bit_not: {
@@ -1105,8 +1128,10 @@ Result Gen::run(const std::string& dir) {
   Result res;
   res.function = fn_name_;
   try {
+    Phase_timer timer;
     ln_  = top_ln_;
     top_ = build_frame(top_ln_, "");
+    timer.lap("collect (decls/attrs/frames)");
     fr_  = top_;
     for (const auto& r : regs_) {
       // An asynchronous reset is treated as the synchronous one: every step carries an edge and the
@@ -1179,8 +1204,10 @@ Result Gen::run(const std::string& dir) {
       return env;
     };
     walk(base, true);  // next state of every register from the current state
+    timer.lap("walk A (next state)");
     const std::vector<V> next = next_;
     Env                  env_b = walk(next, false);  // outputs settled on the post-edge registers
+    timer.lap("walk B (settled outputs)");
     for (auto& f : top_->out) {
       auto it = env_b.find(f.name);
       if (it == env_b.end()) {
@@ -1201,11 +1228,13 @@ Result Gen::run(const std::string& dir) {
         bail("register: " + error);
       }
     }
+    timer.lap("state outputs");
     std::filesystem::create_directories(dir);
     std::string error;
     if (!k_->write_object(dir + "/kernel.o", error)) {
       bail("llvm: " + error);
     }
+    timer.lap("LLVM optimize + codegen");
     res.instructions = k_->instruction_count();
     k_ = nullptr;
 

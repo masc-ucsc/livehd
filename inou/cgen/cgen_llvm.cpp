@@ -4409,6 +4409,34 @@ bool Cgen_llvm::write_module(std::string_view path, std::string& error, bool tra
         impl_->module->print(ir, nullptr);
       }
     }
+    // Instruction selection, scheduling and register allocation are superlinear in function size
+    // (RenameTable: one 93k-instruction block spent 338 s here vs 71 s in O2). Past a size
+    // threshold, trade code quality for compile time. LHD_SIM_LLVM_EMIT_OPT=0..3 forces a level.
+    {
+      size_t emit_insts = 0;
+      for (const auto& function : *impl_->module) {
+        for (const auto& block : function) {
+          emit_insts += block.size();
+        }
+      }
+      int level = 2;
+      if (const auto* forced = std::getenv("LHD_SIM_LLVM_EMIT_OPT")) {
+        level = std::atoi(forced);
+      } else if (emit_insts > 40000) {
+        level = 0;
+      } else if (emit_insts > 15000) {
+        level = 1;
+      }
+      if (level != 2) {
+        const auto cg = level <= 0 ? llvm::CodeGenOptLevel::None : (level == 1 ? llvm::CodeGenOptLevel::Less : llvm::CodeGenOptLevel::Aggressive);
+        std::unique_ptr<llvm::TargetMachine> lowered(
+            target->createTargetMachine(triple, "generic", "", options, llvm::Reloc::PIC_, std::nullopt, cg));
+        if (lowered) {
+          lowered->setOptLevel(cg);
+          machine = std::move(lowered);
+        }
+      }
+    }
     llvm::legacy::PassManager emit;
     if (machine->addPassesToEmitFile(emit, object, nullptr, llvm::CodeGenFileType::ObjectFile)) {
       error = "LLVM target cannot emit native color objects";
