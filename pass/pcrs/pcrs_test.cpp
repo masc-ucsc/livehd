@@ -694,6 +694,34 @@ TEST_F(Pcrs, NonCellLoadsKeepTheirDirectConnection) {
   EXPECT_LE(fanout(reset), 8u);
 }
 
+TEST_F(Pcrs, AnOutputPortBehindABufferGoesBackOnTheRootAndTheFlopsGetTheirTree) {
+  // rst -> BUF -> {40 flops, output port}: the port is the block's interface, not a reason to leave one buffer
+  // driving every flop.
+  graph->get_io()->add_output("rst_out", 0);
+  graph->get_io()->set_bits("rst_out", 1);
+  auto buffer = gu::create_typed_node(*graph, Ntype_op::Sub);
+  buffer.set_subnode(io_of("BUFx1", {"A"}, "Y"));
+  buffer.set_name("synth_buf");
+  buffer.create_sink_pin("A").connect_driver(reset);
+  auto buffered = buffer.create_driver_pin("Y");
+  gu::set_bits(buffered, 1);
+  for (int i = 0; i < 40; ++i) {
+    flop("core.r" + std::to_string(i), buffered, clock);
+  }
+  buffered.connect_sink(graph->get_output_pin("rst_out"));
+  const auto lib   = cells();
+  const auto stats = build_reset(*graph, tech, lib, {.fanout = 8}, depth(1));
+  EXPECT_EQ(stats.sinks, 80u);
+  EXPECT_EQ(graph->get_output_pin("rst_out").get_driver_pin(), reset);
+  expect_uniform(1, 0);
+  for (auto node : graph->body().nodes()) {
+    EXPECT_NE(node.get_name(), "synth_buf");
+    if (const auto io = node.get_subnode_io(); io && io->get_name() == "BUFx1") {
+      EXPECT_LE(fanout(node.get_driver_pin("Y")), 8u) << node.get_name();
+    }
+  }
+}
+
 TEST_F(Pcrs, DeadLibraryDoesNothing) {
   add_flops(20, clock);
   lib_text = R"(library(empty) { time_unit : "1ns"; })";

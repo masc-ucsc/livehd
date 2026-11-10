@@ -146,14 +146,17 @@ struct Network {
   Pin               head;
   std::vector<Leaf> leaves;
   std::vector<Node> dead;
+  std::vector<Pin>  ports;  // graph outputs found behind a transit cell: they go back on the head
 };
 
 class Scanner {
 public:
   Scanner(const Lib& lib) : lib_(lib) {}
 
-  // A sink can be deleted-through when every load of the cell is a movable cell pin or another such cell.
-  bool transit_ok(const Node& node) {
+  // A sink can be deleted-through when every load of the cell is a movable cell pin, another such cell, or a
+  // graph output that can go back on the head: the block's interface keeps the undelayed reset, so it must see the
+  // head's polarity. `negative` is the polarity at the cell's input (one driver per cell: one polarity per cell).
+  bool transit_ok(const Node& node, bool negative) {
     const auto key = key_of(node);
     if (const auto it = ok_.find(key); it != ok_.end()) {
       return it->second;
@@ -162,14 +165,17 @@ public:
     const auto t = transit_of(lib_, node);
     bool       ok = t.has_value();
     if (ok) {
-      const auto out = node.get_driver_pin(t->output);
+      const auto out      = node.get_driver_pin(t->output);
+      const bool inverted = negative != t->inverting;
       for (const auto& edge : out.out_edges()) {
         const auto sink = edge.sink;
         const auto next = sink.get_master_node();
         const auto nt   = transit_of(lib_, next);
-        const bool through = nt && sink.get_port_id() == next.get_sink_pin(nt->input).get_port_id() && transit_ok(next);
-        const bool leaf    = is_core_cell(lib_, next) && sink.get_driver_pins().size() == 1;
-        if (!through && !leaf) {
+        const bool through
+            = nt && sink.get_port_id() == next.get_sink_pin(nt->input).get_port_id() && transit_ok(next, inverted);
+        const bool leaf = is_core_cell(lib_, next) && sink.get_driver_pins().size() == 1;
+        const bool port = next.is_output_node() && !inverted && sink.get_driver_pins().size() == 1;
+        if (!through && !leaf && !port) {
           ok = false;
           break;
         }
@@ -179,16 +185,18 @@ public:
     return ok;
   }
 
-  void walk(const Pin& driver, bool negative, Network& net) {
+  void walk(const Pin& driver, bool negative, Network& net, bool below = false) {
     for (const auto& edge : driver.out_edges()) {
       const auto sink = edge.sink;
       const auto node = sink.get_master_node();
       const auto t    = transit_of(lib_, node);
-      if (t && sink.get_port_id() == node.get_sink_pin(t->input).get_port_id() && transit_ok(node)) {
+      if (t && sink.get_port_id() == node.get_sink_pin(t->input).get_port_id() && transit_ok(node, negative)) {
         net.dead.push_back(node);
-        walk(node.get_driver_pin(t->output), negative != t->inverting, net);
+        walk(node.get_driver_pin(t->output), negative != t->inverting, net, true);
       } else if (is_core_cell(lib_, node) && sink.get_driver_pins().size() == 1) {
         net.leaves.push_back({sink, negative});
+      } else if (below && node.is_output_node()) {
+        net.ports.push_back(sink);
       }
     }
   }
@@ -876,6 +884,10 @@ Stats build_reset(hhds::Graph& graph, const physical::Technology& tech, const li
     }
     for (const auto& dead : p.net.dead) {
       gu::drop_drivers(dead);
+    }
+    for (auto& port : p.net.ports) {
+      gu::drop_drivers(port);
+      port.connect_driver(p.net.head);
     }
   }
   for (auto& p : plan) {
