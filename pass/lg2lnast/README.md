@@ -139,13 +139,21 @@ lhdsuite, checksum-gated against the inou.cgen.sim llvm backend (2026-11-10, opt
 | boom | 12.1 | 6.2 | 31.3k | 53.6 / 16.6 / 18.2k |
 | picorv32 | 0.5 | 5.1 | 6.18M | 0.7 / 5.2 / 5.58M |
 | dino | 0.3 | 5.4 | 5.84M | 0.5 / 5.4 / 5.81M |
+| bitcoin | 0.2 | 5.6 | 3.32M | 0.4 / 5.7 / 3.17M |
 
 Timing switches: `LHD_SIM_LNAST_TIME=1` (phases), `LHD_SIM_LLVM_TIME=1` (per kernel); use an optimized
 `lhd` (`bazel build -c opt`): a fastbuild `lhd` is 10-30x slower in LLVM and misleads.
 
+A compact loop whose body holds state (bitcoin: N engines written as a loop over one module) is
+expanded into its N instances first (`graph_util::materialize_occurrence`, in the flow's private copy
+of the library); a stateless loop stays one `for`. In the native code a `for` of at most 256 trips and
+16,384 body statements in all is unrolled (`LHD_SIM_LNAST_NO_UNROLL=1` keeps it rolled): each trip
+then sees a constant index, so a lane is a fixed slice rather than a variable shift of the whole
+value (bitcoin's 32-trip byte swap of a 256-bit hash: 473k -> 3.32M cycles/s). A larger loop is one
+native loop (`Cgen_llvm::loop_begin/loop_end`).
+
 Not covered yet (the run is declined, or falls back under `auto`): latches, `Clock_cell`, negedge or
-several clocks (minion), a state element inside a compact-loop body (bitcoin), memories with non-zero
-images, `fcall` under a condition, VCD/observation runs, testbench access below the DUT's top level,
+several clocks (minion), memories with non-zero images, `fcall` under a condition, VCD/observation runs, testbench access below the DUT's top level,
 and the random power-on fill of inou.cgen.sim for an unknown (`?`) initializer (read as 0 here, i.e.
 `sim.unknown_zero=true`).
 

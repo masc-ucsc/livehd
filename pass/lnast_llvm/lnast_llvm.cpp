@@ -616,6 +616,20 @@ private:
   void exec_block(const std::vector<Lnast_nid>& stmts, Env& env);
   void exec_if(const std::vector<Lnast_nid>& c, size_t at, Env& env);
   void exec_for(const std::vector<Lnast_nid>& c, Env& env);
+  // Statements under `stmts`, nested blocks included (a loop's size for the unroll budget).
+  uint64_t                            count_statements(const Lnast_nid& stmts) const {
+    uint64_t n = 0;
+    for (const auto& s : kids(stmts)) {
+      ++n;
+      for (const auto& k : kids(s)) {
+        if (ty(k) == Lnast_ntype::Lnast_ntype_stmts) {
+          n += count_statements(k);
+        }
+      }
+    }
+    return n;
+  }
+  static bool no_unroll() { return livehd::debug::env<"LHD_SIM_LNAST_NO_UNROLL">() != nullptr; }  // debug A/B
   void collect_assigned(const Lnast_nid& stmts, std::vector<std::string>& out, absl::flat_hash_set<std::string>& seen) const;
   absl::flat_hash_map<std::string, std::pair<int64_t, int64_t>> ranges_;  // range tmp -> [first, last] (literal bounds)
   void exec_stmt(const std::vector<Lnast_nid>& stmts, size_t& i, Env& env);
@@ -808,9 +822,13 @@ void Gen::collect_attrs(Frame& fr) {
           bail("negedge register");
         }
       } else if (key == "initial") {
-        auto lit = parse_literal(nm(c[2]));
+        const auto text = nm(c[2]);
+        if (text == "nil") {
+          continue;  // no initializer
+        }
+        auto lit = text == "true" ? parse_literal("1") : text == "false" ? parse_literal("0") : parse_literal(text);
         if (!lit) {
-          bail("non-numeric initial");
+          bail("register '" + target + "' has a non-numeric initial value '" + text + "'");
         }
         r.initial = *lit;
       } else if (key == "reset_pin") {
@@ -992,10 +1010,23 @@ void Gen::exec_for(const std::vector<Lnast_nid>& c, Env& env) {
       init.push_back(it->second);
     }
   }
-  // Arrays are created ahead of the loop so their base pointers dominate the body and what follows.
-  for (const auto& [name, idx] : fr_->reg_idx) {
-    if (regs_[idx].mem_size != 0) {
-      ensure_array(idx, env);
+  // A short loop is unrolled here, in the native code only (the LNAST and the graph keep it rolled):
+  // every trip then sees its index as a constant, so a lane position is a fixed slice instead of a
+  // variable shift of the whole value. bitcoin's 32-trip byte swap of a 256-bit hash did four 256-bit
+  // variable shifts per trip, rolled: 473k cycles/s against 3.2M unrolled. The budget is the one
+  // inou.cgen.sim's native loops use: at most 256 trips and 16,384 body statements in all.
+  {
+    const uint64_t trips = static_cast<uint64_t>(hi - lo + 1);
+    if (trips <= 256 && trips * count_statements(c[2]) <= 16384 && !no_unroll()) {
+      uint32_t width = 1;
+      while (width < 63 && (uint64_t{1} << width) <= static_cast<uint64_t>(hi)) {
+        ++width;
+      }
+      for (int64_t trip = lo; trip <= hi; ++trip) {
+        put(env, ivar, k_->constant(width, static_cast<uint64_t>(trip), true));
+        exec_block(kids(c[2]), env);
+      }
+      return;
     }
   }
   uint32_t iw = 1;

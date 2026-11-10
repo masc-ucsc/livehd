@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <functional>
 #include <sstream>
 
 #include "absl/container/flat_hash_set.h"
@@ -14,6 +15,7 @@
 #include "lnast_llvm.hpp"
 #include "lnast_sim_rt.hpp"
 #include "node_util.hpp"
+#include "occurrence_materialize.hpp"
 #include "pass_lg2lnast.hpp"
 
 namespace livehd::lnast_llvm {
@@ -97,6 +99,53 @@ Sim_emitted emit_sim(const Sim_request& request) {
   for (const auto gid : library.all_gids()) {
     if (auto g = library.get_graph(gid)) {
       graphs.push_back(std::move(g));
+    }
+  }
+
+  // A compact loop whose body holds state (N engines written as a loop over one module) has no `for`
+  // spelling: every trip owns its registers. Expand it into its N ordinary instances here, in the
+  // private library; a stateless loop stays one rolled `for`.
+  {
+    absl::flat_hash_map<const hhds::Graph*, bool> memo;
+    std::function<bool(const hhds::Graph*)>       stateful = [&](const hhds::Graph* g) -> bool {
+      if (auto it = memo.find(g); it != memo.end()) {
+        return it->second;
+      }
+      memo[g]  = false;  // a recursive definition adds nothing
+      bool any = false;
+      for (const auto node : g->body().nodes()) {
+        const auto op = livehd::graph_util::type_op_of(node);
+        if (op == Ntype_op::Flop || op == Ntype_op::Fflop || op == Ntype_op::Latch || op == Ntype_op::Clock_cell) {
+          any = true;
+        } else if (op == Ntype_op::Sub) {
+          if (auto child = node.get_subnode_graph()) {
+            any = any || stateful(child.get());
+          }
+        }
+        if (any) {
+          break;
+        }
+      }
+      return memo[g] = any;
+    };
+    for (bool changed = true; changed;) {
+      changed = false;
+      for (const auto& g : graphs) {
+        std::vector<hhds::Node_class> loops;
+        for (const auto node : g->body().nodes()) {
+          if (node.subnode_loop()) {
+            if (auto body = node.get_subnode_graph(); body && stateful(body.get())) {
+              loops.push_back(node);
+            }
+          }
+        }
+        for (auto it = loops.rbegin(); it != loops.rend(); ++it) {
+          if (!livehd::graph_util::materialize_occurrence(g.get(), *it, "pass.lnast_sim")) {
+            return fail(std::format("{}: a compact loop with state in its body could not be expanded", std::string(g->get_name())));
+          }
+          changed = true;
+        }
+      }
     }
   }
 
