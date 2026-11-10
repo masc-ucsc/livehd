@@ -466,11 +466,15 @@ unsigned branch_min_cost() {
   return min == nullptr ? 4u : static_cast<unsigned>(std::strtoul(min, nullptr, 0));
 }
 
+// The storage object a load/store touches (Impl::scope_storage tags every access of one object with the
+// same TBAA node); null for anything else, which the passes below treat as "may be any object".
+const llvm::MDNode* storage_object_of(const llvm::Instruction* inst) { return inst->getMetadata(llvm::LLVMContext::MD_tbaa); }
+
 // `select c, load A, load B` (each load used only here, same type) reads both
 // objects to keep one. Select the address instead: one load, no branch, no
 // merge (a branch around each load left a PHI whose extension no longer folds
 // into the load: matched_filter +18%). Each load may move down to the select
-// only if nothing between may write its object (alias scope per object).
+// only if nothing between may write its object (one storage tag per object).
 unsigned select_load_addresses(llvm::Function& function) {
   unsigned merged = 0;
   for (auto& block : function) {
@@ -489,12 +493,12 @@ unsigned select_load_addresses(llvm::Function& function) {
         continue;
       }
       const auto safe_to_select = [&](llvm::LoadInst* load) {
-        const auto* scope = load->getMetadata(llvm::LLVMContext::MD_alias_scope);
+        const auto* scope = storage_object_of(load);
         for (auto it = std::next(load->getIterator()); &*it != select; ++it) {
           if (!it->mayWriteToMemory()) {
             continue;
           }
-          const auto* other = it->getMetadata(llvm::LLVMContext::MD_alias_scope);
+          const auto* other = storage_object_of(&*it);
           if (!llvm::isa<llvm::StoreInst>(&*it) || scope == nullptr || other == nullptr || other == scope) {
             return false;
           }
@@ -529,7 +533,7 @@ unsigned select_load_addresses(llvm::Function& function) {
 // selection (per block) cannot fold them, and the value stays live across the
 // arms. Move such an instruction to just before its first use when all its uses
 // are in one block it dominates. A load moves only if no write that may alias
-// it (a call, an unscoped write, or a store of its !alias.scope) lies on any
+// it (a call, an untagged write, or a store to its storage object) lies on any
 // path between; LLVM's Sink refuses any load followed by any store.
 unsigned sink_into_use_blocks(llvm::Function& function) {
   llvm::DominatorTree dom(function);
@@ -542,7 +546,7 @@ unsigned sink_into_use_blocks(llvm::Function& function) {
     if (!inst.mayWriteToMemory()) {
       return false;
     }
-    const auto* other = inst.getMetadata(llvm::LLVMContext::MD_alias_scope);
+    const auto* other = storage_object_of(&inst);
     return !llvm::isa<llvm::StoreInst>(&inst) || scope == nullptr || other == nullptr || other == scope;
   };
   for (bool changed = true; changed;) {
@@ -577,7 +581,7 @@ unsigned sink_into_use_blocks(llvm::Function& function) {
           continue;
         }
         if (load != nullptr) {
-          const auto* scope = load->getMetadata(llvm::LLVMContext::MD_alias_scope);
+          const auto* scope = storage_object_of(load);
           for (auto rest = std::next(inst.getIterator()); rest != block.end() && ok; ++rest) {
             ok = !writes_scope(*rest, scope);
           }
@@ -647,7 +651,7 @@ unsigned conditionalize_selects(llvm::Function& function, unsigned min_cost) {
   // A simple load is a candidate too: it moves into its arm (later in the
   // block) only if no store or call that may write its object lies between it
   // and the branch (next_write, checked per region below). Kernel storage
-  // carries one !alias.scope per object, so a store to another object does
+  // carries one storage tag per object, so a store to another object does
   // not block it.
   static const bool arm_loads = livehd::debug::env<"LHD_SIM_LLVM_NO_ARM_LOADS">() == nullptr;
   const auto        movable   = [](const llvm::Instruction& inst) {
@@ -657,7 +661,7 @@ unsigned conditionalize_selects(llvm::Function& function, unsigned min_cost) {
     return !inst.isTerminator() && !llvm::isa<llvm::PHINode>(inst) && !llvm::isa<llvm::AllocaInst>(inst)
            && !inst.mayHaveSideEffects() && !inst.mayReadOrWriteMemory();
   };
-  const auto scope_of = [](const llvm::Instruction* inst) { return inst->getMetadata(llvm::LLVMContext::MD_alias_scope); };
+  const auto scope_of      = [](const llvm::Instruction* inst) { return storage_object_of(inst); };
   const auto scalar_select = [](const llvm::Instruction* inst) -> const llvm::SelectInst* {
     const auto* select = llvm::dyn_cast<llvm::SelectInst>(inst);
     return select != nullptr && select->getCondition()->getType()->isIntegerTy(1) ? select : nullptr;
@@ -1365,7 +1369,7 @@ public:
   std::vector<std::optional<Storage>>                                                             input_storage;
   bool                                                                                            input_layout_ready = false;
   // Every load/store of a storage object, by owner-table resource: seal()
-  // gives each object its own alias scope, noalias against every other one.
+  // gives each object its own TBAA type, so it aliases no other one.
   std::vector<std::pair<llvm::Instruction*, std::pair<size_t, size_t>>>                           storage_accesses;
   std::vector<std::optional<Value>>                                                               deferred_casts;
   // Every resize() still waiting for its first use: a native loop materializes them ahead of its header
@@ -1632,32 +1636,30 @@ public:
   // object), so their accesses may be reordered freely: without this every
   // input load stayed above every earlier output store and its value lived
   // in a register (and spilled) until its use. One object's load and store
-  // share a scope, so an in-place register keeps its order.
+  // share a tag, so an in-place register keeps its order.
+  //
+  // Spelled as TBAA: one scalar type per object under a private root, so two
+  // different objects never alias and the metadata is O(objects). It used to
+  // be scoped-noalias metadata, where every access lists every OTHER object's
+  // scope: O(objects^2) operands, which the inliner re-uniques per changed
+  // operand when it clones the scopes into the reset-split dispatcher (boom:
+  // one 51k-instruction kernel spent 42 s in AlwaysInliner) and which every
+  // alias query walks. The custom passes below identify an access's object by
+  // this tag (storage_object_of).
   void scope_storage() {
     if (storage_accesses.empty()) {
       return;
     }
     llvm::MDBuilder                                    md(context);
-    auto*                                              domain = md.createAnonymousAliasScopeDomain("lhd.storage");
-    std::map<std::pair<size_t, size_t>, llvm::MDNode*> scopes;
+    auto*                                              root = md.createTBAARoot("lhd.storage");
+    std::map<std::pair<size_t, size_t>, llvm::MDNode*> tags;
     for (const auto& [instruction, resource] : storage_accesses) {
-      if (!scopes.contains(resource)) {
-        scopes[resource] = md.createAnonymousAliasScope(domain, "object");
+      auto [it, inserted] = tags.try_emplace(resource, nullptr);
+      if (inserted) {
+        auto* type = md.createTBAAScalarTypeNode(("o" + llvm::Twine(tags.size())).str(), root);
+        it->second = md.createTBAAStructTagNode(type, type, 0);
       }
-    }
-    std::map<std::pair<size_t, size_t>, llvm::MDNode*> others;
-    for (const auto& [resource, scope] : scopes) {
-      llvm::SmallVector<llvm::Metadata*> list;
-      for (const auto& [other, other_scope] : scopes) {
-        if (other != resource) {
-          list.push_back(other_scope);
-        }
-      }
-      others[resource] = llvm::MDNode::get(context, list);
-    }
-    for (const auto& [instruction, resource] : storage_accesses) {
-      instruction->setMetadata(llvm::LLVMContext::MD_alias_scope, llvm::MDNode::get(context, {scopes[resource]}));
-      instruction->setMetadata(llvm::LLVMContext::MD_noalias, others[resource]);
+      instruction->setMetadata(llvm::LLVMContext::MD_tbaa, it->second);
     }
   }
   // Loads that read one value for the whole call -- an object this kernel
