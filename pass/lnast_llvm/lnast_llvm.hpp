@@ -25,6 +25,9 @@ struct Field {
   // `entry_bits` bits each, stored in the natural layout (Cgen_llvm::array_state_words); `bits` is
   // then the whole footprint.
   bool                  has_init = false;
+  // Power-on value of state without an initializer (lnast_sim_rt.hpp, `fill`): 0 zero, 1 unknown or
+  // zero under sim.init_zero, 2 unknown.
+  uint8_t               fill     = 0;
   std::vector<uint64_t> init_words;
   uint64_t              entries    = 0;
   uint32_t              entry_bits = 0;

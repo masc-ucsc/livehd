@@ -191,17 +191,47 @@ importing the lg) and compares the per-cycle `TRACE` lines byte for byte.
      anything it loses more at the cuts (picorv32 6.5M -> 2.3M cycles/s): it is not gated.
    `LHD_SIM_LNAST_STATS=1` makes the simulator print how often each kernel ran.
 
-lhdsuite, results equal to the inou.cgen.sim llvm backend (2026-11-10, opt build, 128 jobs):
+11. **A module is lowered once, on its own** -- the unit that is reused when it did not change.
+   Instances that depend on each other in a ring (a call needs an output of a call that needs one
+   of its own; an instance that reads its own output) have no statement order in which every
+   argument exists before its call. lg2lnast calls one of them early and passes what does not
+   exist yet as the *settled* value of a net assigned further down: `declare net mut`,
+   `delay_assign tmp net 1` (Pyrope's `net.[defer]`), and `store net value` once the driver is
+   lowered. The instance waiting for the fewest drivers goes first, a choice that depends on the
+   graph alone. In the walk such a read is a *wire* op, completed at the end of its frame and then
+   resolved away (readers take the value itself), so the kernels see the same dataflow as if the
+   instances had been merged; a true combinational loop is found when the view is ordered. A clock
+   that arrives through such a net has its gates resolved after the walk.
+   Earlier the ring instances were spliced into their parent, and everything behind the ring with
+   them: minion's top swallowed most of the design, 9.1 s of the flow's 10.4 s (2.3 s now), and no
+   module could be reused on its own.
+12. **Readers first.** A register is written in place only when nothing reads its old value after
+   the kernel that writes it, so in a view that is cut the cone that reads a register is emitted
+   before the cone that computes its next value (a pipeline: last stage first). The order of the
+   emission starts is a depth-first topological order of "must precede", derived from the order
+   just made, for a few rounds; the order kept is the cheapest counted after the cut (four per word
+   of register not in place, one per word crossing kernels), which is often the recorded one for a
+   small design. minion: 2,725 registers with a reader behind their writer -> 17, 1,175 words copied
+   at each commit -> 65, 135k -> 196k cycles/s; boom 29.9k -> 35.1k.
+
+Power-on follows inou.cgen.sim: a register with an initializer takes it; with neither an
+initializer nor a reset it is unknown, or zero under `sim.init_zero`; with a reset alone it is
+unknown under both. A memory with neither is zero under both (what a 2-state simulator reads back).
+Unknown bits are drawn from the seed and the register's *name*, never from its position: an edit
+elsewhere, or another order of the same design, does not change a register's power-on value.
+
+lhdsuite, results equal to the inou.cgen.sim llvm backend for every seed tried (2026-11-10, opt
+build, 128 jobs):
 
 | core | setup s | host C++ s | cycles/s | inou.cgen.sim: setup / host C++ / cycles/s |
 | --- | ---: | ---: | ---: | --- |
-| boom | 7.7 | 5.7 | 38.9k | 53.6 / 16.6 / 18.2k |
-| picorv32 | 0.4 | 5.1 | 6.47M | 0.7 / 5.2 / 5.58M |
-| dino | 0.3 | 5.3 | 5.84M | 0.5 / 5.4 / 5.81M |
-| bitcoin | 0.2 | 5.5 | 4.15M | 0.4 / 5.7 / 3.17M |
-| minion | 45.4 | 5.7 | 143.1k | 122.0 / 38.4 / 34.0k |
+| boom | 7.7 | 5.7 | 35.1k | 53.6 / 16.6 / 18.2k |
+| picorv32 | 0.4 | 5.1 | 6.13M | 0.7 / 5.2 / 5.58M |
+| dino | 0.4 | 5.4 | 5.58M | 0.5 / 5.4 / 5.81M |
+| bitcoin | 0.2 | 5.5 | 4.25M | 0.4 / 5.7 / 3.17M |
+| minion | 40.2 | 5.7 | 196.5k | 122.0 / 38.4 / 34.0k |
 
-Of that setup the flow itself (lowering, walk, LLVM) is 10.2 s on minion and 1.2 s on boom, where
+Of that setup the flow itself (lowering, walk, LLVM) is 4.2 s on minion and 1.2 s on boom, where
 inou.cgen.sim took 86 s and 47 s; the rest is the front end both flows share.
 
 Three things keep generation proportional to what is simulated: lg2lnast merges the arms of a

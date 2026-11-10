@@ -246,6 +246,7 @@ public:
     loop_final,       // a: its loop_end; imm: carry number
     clock,            // the root clock's level in the view being replayed (0: low, 1: high)
     latch,            // a: enable (1 bit), b: data, c: the held value (an input); imm: register index
+    wire,             // a: the value it carries, known later (set_wire): a net read at its settled value
   };
   static constexpr uint32_t none = std::numeric_limits<uint32_t>::max();
   struct Ref {
@@ -310,6 +311,53 @@ public:
     ops[id].a = ref(enable);
     ops[id].b = ref(data);
   }
+  // A net read before the statement that assigns it (`delay_assign tmp net 1`: the settled value).
+  // Like a latch, created where it is first read and completed when the value is known.
+  V wire(uint32_t width, bool unsign) {
+    Op o;
+    o.kind = K::wire;
+    return add(o, width, unsign);
+  }
+  void     set_wire(size_t id, V value) { ops[id].a = ref(value); }
+  // What a (complete) wire carries: the op at the end of a chain of wires. `none`: the chain closes
+  // on itself (nets assigned from each other and from nothing else).
+  uint32_t carried(uint32_t id) const {
+    for (size_t hops = 0; ops[id].kind == K::wire; ++hops) {
+      if (ops[id].a.id == none || hops > ops.size()) {
+        return none;
+      }
+      id = ops[id].a.id;
+    }
+    return id;
+  }
+  // Once every wire is complete its readers take the value itself, and the wires are dead. A wire is
+  // not a value of its own: left in place, two registers reset by one signal through two nets would
+  // look like two resets, and a register enabled through a net like no hold at all.
+  bool resolve_wires() {
+    bool       ok  = true;
+    const auto fix = [&](Ref& r) {
+      if (r.id != none && ops[r.id].kind == K::wire) {
+        const auto to = carried(r.id);
+        ok            = ok && to != none;
+        r.id          = to != none ? to : r.id;
+      }
+    };
+    for (auto& o : ops) {
+      if (o.kind == K::wire) {
+        continue;
+      }
+      for (Ref* r : {&o.a, &o.b, &o.c}) {
+        if (!(o.kind == K::loop_begin && r == &o.c)) {
+          fix(*r);
+        }
+      }
+    }
+    for (auto& r : refs) {
+      fix(r);
+    }
+    return ok;
+  }
+  bool in_loop() const { return !open_.empty(); }
 
   V input(size_t loc, uint32_t width, bool unsign) {
     const auto key = std::make_tuple(loc, width, unsign);
@@ -566,6 +614,10 @@ private:
     absl::flat_hash_map<std::string, size_t> reg_idx;  // local name -> index in regs_
     absl::flat_hash_set<std::string>         clocks;
     std::vector<size_t>                      owned;  // regs_ indices of this occurrence
+    // Nets that may be read at their settled value before they are assigned (`declare ... mut`), and
+    // the tape op standing for each one that was (completed in finish_frame).
+    absl::flat_hash_map<std::string, Type>   wires;
+    absl::flat_hash_map<std::string, V>      wire_ops;
   };
   const Lnast*     ln_;      // the LNAST of the frame being executed
   const Lnast*     top_ln_;
@@ -732,6 +784,23 @@ private:
   std::vector<V>            held_;  // per register: a latch's held value (the input op)
   void                      exec_clock_gate(const std::vector<Lnast_nid>& c, Env& env);
   std::vector<V>            clock_enables(V clock, const std::string& what);
+  struct Late_gate {
+    size_t      op;     // the 1-bit wire standing for "every gate from here to the root clock is on"
+    V           clock;  // where the search stopped
+    std::string what;
+  };
+  std::vector<Late_gate> late_gates_;
+  void                   finish_late_gates() {
+    for (size_t i = 0; i < late_gates_.size(); ++i) {  // completing one may add another (a longer chain)
+      const auto g = late_gates_[i];
+      if (k_->ops[g.clock.id].a.id == Tape::none) {
+        bail(g.what + " is clocked through a net that is never assigned");
+      }
+      const V rest = all_of(clock_enables(g.clock, g.what));
+      k_->set_wire(g.op, rest.width != 0 ? rest : k_->constant(1, 1, true));
+    }
+    late_gates_.clear();
+  }
   // AND of `enables` (empty: no value, i.e. always).
   V                         all_of(const std::vector<V>& enables) {
     V acc;
@@ -873,6 +942,10 @@ void Gen::collect_attrs(Frame& fr) {
     }
     if (t == Lnast_ntype::Lnast_ntype_declare) {
       auto c = kids(s);
+      if (c.size() == 3 && nm(c[2]) == "mut" && ty(c[1]) != Lnast_ntype::Lnast_ntype_comp_type_array) {
+        fr.wires[nm(c[0])] = type_node(c[1]);
+        continue;
+      }
       if (c.size() < 4 || nm(c[2]) != "reg") {
         bail("declare of a non-register");
       }
@@ -1228,6 +1301,25 @@ void Gen::exec_stmt(const std::vector<Lnast_nid>& stmts, size_t& i, Env& env) {
     case NT::Lnast_ntype_declare:
     case NT::Lnast_ntype_attr_set:
       break;  // collected up front
+    case NT::Lnast_ntype_delay_assign: {
+      // The settled value of a net assigned further down (an instance on a ring of instances).
+      if (c.size() != 3 || ty(c[1]) != NT::Lnast_ntype_ref || nm(c[2]) != "1") {
+        bail("delay_assign shape (only a settled read, offset 1)");
+      }
+      const auto net = fr_->wires.find(nm(c[1]));
+      if (net == fr_->wires.end()) {
+        bail("settled read of '" + nm(c[1]) + "', which is not a declared net");
+      }
+      if (under_condition() || k_->in_loop()) {
+        bail("settled read under a condition or in a loop");
+      }
+      auto [op, created] = fr_->wire_ops.try_emplace(net->first);
+      if (created) {
+        op->second = k_->wire(net->second.bits, !net->second.sign);
+      }
+      finish(dst_name(), op->second);
+      break;
+    }
     case NT::Lnast_ntype_range: {
       if (c.size() != 3 || ty(c[0]) != NT::Lnast_ntype_ref) {
         bail("range shape");
@@ -1766,10 +1858,23 @@ std::vector<V> Gen::clock_enables(V clock, const std::string& what) {
   std::vector<V> enables;
   for (int hops = 0; hops < 64; ++hops) {
     size_t id = clock.id;
-    while (k_->ops[id].kind == Tape::K::resize) {
+    while (k_->ops[id].kind == Tape::K::resize || (k_->ops[id].kind == Tape::K::wire && k_->ops[id].a.id != Tape::none)) {
       id = k_->ops[id].a.id;
     }
     if (k_->ops[id].kind == Tape::K::clock) {
+      return enables;
+    }
+    if (k_->ops[id].kind == Tape::K::wire) {
+      // The clock arrives through a net that is assigned further down (the instance was called early,
+      // on a ring of instances): what gates it is known once the walk is over. Until then one
+      // enable stands for the gates still to be found (finish_late_gates).
+      const V rest = k_->wire(1, true);
+      late_gates_.push_back({
+          static_cast<size_t>(rest.id),
+          V{id, 1, true},
+          what
+      });
+      enables.push_back(rest);
       return enables;
     }
     auto gate = gates_.find(id);
@@ -1870,7 +1975,7 @@ void Gen::bypass_exclusive_latches() {
       return {id, true};
     }
     const auto flip = [](std::pair<uint32_t, bool> l) { return std::pair{l.first, !l.second}; };
-    if (o.kind == K::resize && o.a.width == 1) {
+    if ((o.kind == K::resize || o.kind == K::wire) && o.a.width == 1) {
       return literal(o.a.id, depth + 1);
     }
     if (o.kind == K::unary_not && o.a.width == 1) {
@@ -1997,7 +2102,7 @@ void Gen::bypass_exclusive_latches() {
       }
       const bool pure = o.kind == K::resize || o.kind == K::concat || o.kind == K::unary_not || o.kind == K::reduce_or
                         || o.kind == K::count_bits || o.kind == K::bitfield_insert || o.kind == K::sign_extend
-                        || o.kind == K::binary || o.kind == K::mux;
+                        || o.kind == K::binary || o.kind == K::mux || o.kind == K::wire;
       if (!pure) {
         memo[x] = x;  // a memory read or a loop: not re-evaluated (if a closed latch is under it the ring stays, and is reported)
         stack.pop_back();
@@ -2069,6 +2174,14 @@ void Gen::run_frame(Frame& f, Env& env) {
 
 // Next-state of every register this occurrence owns, from its final `end` values (`pre`: ports at entry).
 void Gen::finish_frame(Frame& f, const Env& pre, const Env& end) {
+  for (const auto& [name, op] : f.wire_ops) {
+    const auto value = end.find(name);
+    if (value == end.end()) {
+      bail("net '" + f.prefix + name + "' is read at its settled value and never assigned");
+    }
+    k_->set_wire(op.id, k_->resize(value->second, op.width, op.unsign));
+  }
+  f.wire_ops.clear();
   for (size_t idx : f.owned) {
     const auto& r = regs_[idx];
     if (r.mem_size != 0) {
@@ -2148,6 +2261,7 @@ struct Root {
   Tape::Ref guard, data, hold;  // `hold`: the register's current value
   size_t    home   = Tape::none;
   size_t    kernel = 0;  // the kernel that publishes it
+  uint32_t  q      = Tape::none;  // a register's root: the op that reads the register (its current value)
 };
 
 // What one kernel family computes: the ops it needs, in the order they are emitted, and where its
@@ -2159,6 +2273,11 @@ struct View {
   int                   level   = 0;      // the root clock while this view runs
   bool                  effects = false;  // memory writes happen in this view
   std::vector<Root>     roots;
+  // Emission starts from the results one at a time (order_view): `rank`, when set, is the order of
+  // those starts (per op: lower first; default: recorded order), and `groups` what came out -- the
+  // start op and the first position of each run of ops emitted for one start.
+  std::vector<uint32_t>                      rank;
+  std::vector<std::pair<uint32_t, uint32_t>> groups;
   std::vector<uint32_t> order;     // the live computed ops, in emission order
   std::vector<uint32_t> pos;       // per op: its index in `order` (none: not emitted)
   std::vector<uint32_t> cut;       // kernel k replays order[cut[k], cut[k + 1])
@@ -2264,6 +2383,11 @@ std::optional<uint64_t> fold(const Tape& t, View& v, uint32_t id, int depth = 0)
       case K::latch:
         if (auto en = get(o.a); en && *en != 0 && o.b.width == o.width && o.b.unsign == o.unsign) {
           r = get(o.b);
+        }
+        break;
+      case K::wire:
+        if (o.a.id != Tape::none && o.a.width == o.width && o.a.unsign == o.unsign) {
+          r = get(o.a);
         }
         break;
       default: break;
@@ -2548,6 +2672,10 @@ void order_view(const Tape& t, View& v) {
   }
   std::ranges::sort(roots);
   roots.erase(std::unique(roots.begin(), roots.end()), roots.end());
+  if (!v.rank.empty()) {
+    std::ranges::stable_sort(roots, [&](uint32_t a, uint32_t b) { return v.rank[a] < v.rank[b]; });
+  }
+  v.groups.clear();
   // What is live, before any ordering: a read nothing consumes is not emitted for its memory's sake.
   std::vector<uint8_t> live(n, 0);
   {
@@ -2574,6 +2702,7 @@ void order_view(const Tape& t, View& v) {
     if (done[root] != 0 || Tape::is_free(t.ops[root].kind)) {
       continue;
     }
+    v.groups.emplace_back(root, static_cast<uint32_t>(v.order.size()));
     stack.push_back({root, {}, 0});
     operands(root, stack.back().ops, &live);
     done[root] = 1;
@@ -2607,8 +2736,8 @@ void order_view(const Tape& t, View& v) {
           }
           if (livehd::debug::env<"LHD_SIM_LNAST_DEBUG">() != nullptr) {  // the enable cone of each latch on the ring
             static const char* const kinds[]
-                = {"input", "const", "constw", "resize", "concat", "not",    "ror",  "count", "insert", "sext",  "binary",
-                   "mux",   "aread", "awrite", "aclear", "lbegin", "lindex", "lphi", "lend",  "lfinal", "clock", "latch"};
+                = {"input", "const",  "constw", "resize", "concat", "not",  "ror",  "count",  "insert", "sext",  "binary", "mux",
+                   "aread", "awrite", "aclear", "lbegin", "lindex", "lphi", "lend", "lfinal", "clock",  "latch", "wire"};
             std::function<void(uint32_t, int)> dump = [&](uint32_t id, int depth) {
               const auto& o  = t.ops[id];
               const auto  fc = v.folded(id);
@@ -2649,6 +2778,95 @@ void order_view(const Tape& t, View& v) {
       stack.pop_back();
     }
   }
+}
+
+// A register is written in place -- no pending word, no copy at the commit, and under an enable no
+// store at all while it is off -- only when nothing reads its old value after the kernel that
+// writes it. So the cone that READS a register should be emitted before the cone that computes its
+// next value: a pipeline is emitted last stage first. Emission goes start by start (order_view);
+// this derives, from the order just made, which starts must precede which (every start whose run
+// reads register A before the start that publishes A), and returns how many registers have a
+// reader behind their writer as things stand. `rank` gets the order to try next: a depth-first
+// topological order of those constraints, otherwise as now (a ring of registers cannot be satisfied
+// and keeps its order).
+size_t rank_readers_first(const Tape& t, const View& v, std::vector<uint32_t>& rank) {
+  const auto n_groups = v.groups.size();
+  const auto group_of = [&](uint32_t pos) {
+    const auto it = std::upper_bound(v.groups.begin(), v.groups.end(), pos, [](uint32_t p, const auto& g) { return p < g.second; });
+    return static_cast<uint32_t>(it - v.groups.begin()) - 1;
+  };
+  absl::flat_hash_map<uint32_t, std::vector<uint32_t>> readers;    // register read op -> groups reading it
+  absl::flat_hash_map<uint32_t, uint32_t>              last_read;  // register read op -> last position reading it
+  absl::flat_hash_set<uint32_t>                        wanted;
+  for (const auto& root : v.roots) {
+    if (root.q != Tape::none) {
+      wanted.insert(root.q);
+    }
+  }
+  for (uint32_t p = 0; p < v.order.size(); ++p) {
+    view_operands(t, v, v.order[p], [&](const Tape::Ref& r) {
+      if (wanted.contains(r.id)) {
+        auto&      list = readers[r.id];
+        const auto g    = group_of(p);
+        if (list.empty() || list.back() != g) {
+          list.push_back(g);
+        }
+        last_read[r.id] = p;
+      }
+    });
+  }
+  std::vector<std::vector<uint32_t>> before(n_groups);  // group -> groups that should come first
+  size_t                             behind = 0;
+  for (const auto& root : v.roots) {
+    if (root.q == Tape::none || root_mode(v, root) == 0) {
+      continue;
+    }
+    uint32_t written = Tape::none;  // where the register's next value is complete
+    root_operands(v, root, [&](const Tape::Ref& r) {
+      if (v.pos[r.id] != Tape::none && (written == Tape::none || v.pos[r.id] > written)) {
+        written = v.pos[r.id];
+      }
+    });
+    if (written == Tape::none) {
+      continue;  // computes nothing: published by a kernel ahead of all the others
+    }
+    if (auto it = last_read.find(root.q); it != last_read.end() && it->second > written) {
+      ++behind;
+    }
+    if (auto it = readers.find(root.q); it != readers.end()) {
+      const auto writer = group_of(written);
+      for (const auto g : it->second) {
+        if (g != writer) {
+          before[writer].push_back(g);
+        }
+      }
+    }
+  }
+  rank.assign(t.ops.size(), Tape::none);
+  std::vector<uint8_t>                     state(n_groups, 0);
+  std::vector<std::pair<uint32_t, size_t>> stack;
+  uint32_t                                 next = 0;
+  for (uint32_t first = 0; first < n_groups; ++first) {
+    if (state[first] != 0) {
+      continue;
+    }
+    state[first] = 1;
+    stack.emplace_back(first, 0);
+    while (!stack.empty()) {
+      const auto g = stack.back().first;
+      if (stack.back().second < before[g].size()) {
+        const auto b = before[g][stack.back().second++];
+        if (state[b] == 0) {
+          state[b] = 1;
+          stack.emplace_back(b, 0);
+        }
+        continue;
+      }
+      rank[v.groups[g].first] = next++;
+      stack.pop_back();
+    }
+  }
+  return behind;
 }
 
 void cut_kernels(const Tape& t, View& v, uint64_t target, bool gated) {
@@ -2941,6 +3159,7 @@ size_t build_kernel(const Tape& t, const Kernel_job& job, const Activity& gate, 
           made(i, k.mux(val(o.a), val(o.c), val(o.b), o.width, o.unsign));
         }
         break;
+      case K::wire      : made(i, k.resize(val(o.a), o.width, o.unsign)); break;
       case K::array_read: made(i, k.array_read(array_of(o.imm), val(o.a), o.width, o.unsign)); break;
       case K::array_write:
         if (!k.array_write(array_of(o.imm), val(o.a), val(o.b), val(o.c), gate.array_marks(o.imm, self))) {
@@ -3123,9 +3342,41 @@ Result Gen::run(const Sim_objects& out) {
     Env pre = env;
     exec_block(top_->stmts, env);
     finish_frame(*top_, pre, env);
+    finish_late_gates();
     for (const auto id : latch_ops_) {
       if (tape.ops[id].a.id == Tape::none) {
         bail("internal: a latch was never completed");
+      }
+    }
+    for (const auto& o : tape.ops) {
+      if (o.kind == Tape::K::wire && o.a.id == Tape::none) {
+        bail("internal: a settled read was never completed");
+      }
+    }
+    {
+      bool       ok  = tape.resolve_wires();
+      const auto fix = [&](V& v) {
+        if (v.width != 0 && tape.ops[v.id].kind == Tape::K::wire) {
+          const auto to = tape.carried(static_cast<uint32_t>(v.id));
+          ok            = ok && to != Tape::none;
+          v.id          = to != Tape::none ? to : v.id;
+        }
+      };
+      for (auto& v : next_) {
+        fix(v);
+      }
+      for (auto& [name, v] : env) {
+        fix(v);
+      }
+      for (auto& u : latch_updates_) {
+        fix(u.guard);
+        fix(u.data);
+      }
+      for (auto& item : reset_items_) {
+        fix(item.active);
+      }
+      if (!ok) {
+        bail("nets that are assigned only from each other (a combinational cycle of wires)");
       }
     }
     bypass_exclusive_latches();
@@ -3160,6 +3411,7 @@ Result Gen::run(const Sim_objects& out) {
       root.value = Tape::ref(next_[i]);
       root.loc   = pending[i];
       root.home  = regs_[i].field.word;
+      root.q     = static_cast<uint32_t>(cur_[i].id);
       // `r' = c ? x : r` (either arm): a hold, published under its condition when it lands in place.
       if (const auto& m = tape.ops[next_[i].id]; m.kind == Tape::K::mux && m.width == next_[i].width && m.unsign == next_[i].unsign
                                                  && (m.b.id == cur_[i].id) != (m.c.id == cur_[i].id) && !no_guards) {
@@ -3214,6 +3466,51 @@ Result Gen::run(const Sim_objects& out) {
       }
     };
     std::vector<uint32_t> reset_conditions[2];  // [0]: rise, [1]: fall
+    // One reset signal reaches the registers of many instances, and each instance derives its own
+    // "is active" from it (`reset != 0`): the same condition, built once per instance. The commit
+    // kernel tests each DISTINCT condition once, so equal ones are folded here (a small structural
+    // compare: these cones are a compare or two over an input).
+    {
+      std::function<bool(uint32_t, uint32_t, int)> same = [&](uint32_t a, uint32_t b, int depth) -> bool {
+        if (a == b) {
+          return true;
+        }
+        const auto& x = tape.ops[a];
+        const auto& y = tape.ops[b];
+        using K       = Tape::K;
+        if (depth > 6 || x.kind != y.kind || x.bop != y.bop || x.unsign != y.unsign || x.width != y.width || x.imm != y.imm
+            || (x.kind != K::resize && x.kind != K::unary_not && x.kind != K::reduce_or && x.kind != K::binary && x.kind != K::mux
+                && x.kind != K::constant)) {
+          return false;
+        }
+        if (x.kind == K::constant) {
+          return true;
+        }
+        for (const auto& [p, q] : {
+                 std::pair{&x.a, &y.a},
+                 std::pair{&x.b, &y.b},
+                 std::pair{&x.c, &y.c}
+        }) {
+          if ((p->id == Tape::none) != (q->id == Tape::none)) {
+            return false;
+          }
+          if (p->id != Tape::none && (p->width != q->width || p->unsign != q->unsign || !same(p->id, q->id, depth + 1))) {
+            return false;
+          }
+        }
+        return true;
+      };
+      std::vector<uint32_t> distinct[2];
+      for (auto& item : reset_items_) {
+        auto& list  = distinct[regs_[item.idx].negedge ? 1 : 0];
+        auto  equal = std::ranges::find_if(list, [&](uint32_t id) { return same(id, static_cast<uint32_t>(item.active.id), 0); });
+        if (equal == list.end()) {
+          list.push_back(static_cast<uint32_t>(item.active.id));
+        } else {
+          item.active.id = *equal;
+        }
+      }
+    }
     for (const auto& item : reset_items_) {
       auto&      list = reset_conditions[regs_[item.idx].negedge ? 1 : 0];
       auto&      view = regs_[item.idx].negedge ? fall : rise;
@@ -3242,6 +3539,83 @@ Result Gen::run(const Sim_objects& out) {
       }
       const char* text = livehd::debug::env<"LHD_SIM_LNAST_GATE">();
       gated            = text != nullptr ? text[0] != '0' : size > 20000;
+      // Readers of a register before its writer (rank_readers_first): a few rounds, each from the
+      // order the one before produced. What an order costs is counted where it is paid, after the
+      // cut: a word of register that is not written in place and a word crossing kernels (a store,
+      // a load and a compare) -- reordering trades the first for the second, and the recorded order
+      // has the fewest crossings (bitcoin, four kernels: 4.15M cycles/s as recorded, 3.77M with one
+      // more register in place and 29 more words crossing; boom and minion gain a fifth and a
+      // third: 3,100 and 1,100 fewer words copied at every commit). The cheapest order seen stays. Only
+      // for a view that will be cut: in ONE kernel every register is in place whatever the order.
+      const auto target = chunk_target(gated);
+      const auto cost   = [&](View& v) {
+        cut_kernels(tape, v, target, gated);
+        uint64_t                              words = 0;
+        absl::flat_hash_map<uint32_t, size_t> last;  // register read op -> last kernel reading it
+        for (uint32_t p = 0; p < v.order.size(); ++p) {
+          const auto i  = v.order[p];
+          words        += v.spill[i] != 0 && !v.folded(i) ? op_size(tape, i) : 0;
+          const auto k  = v.kernel_of(i);
+          view_operands(tape, v, i, [&](const Tape::Ref& r) {
+            if (tape.ops[r.id].kind == Tape::K::input) {
+              auto& l = last[r.id];
+              l       = std::max(l, k);
+            }
+          });
+        }
+        for (const auto& root : v.roots) {
+          root_operands(v, root, [&](const Tape::Ref& r) {
+            if (tape.ops[r.id].kind == Tape::K::input) {
+              auto& l = last[r.id];
+              l       = std::max(l, root.kernel);
+            }
+          });
+        }
+        for (const auto& root : v.roots) {
+          if (root.q != Tape::none && root_mode(v, root) != 0) {
+            if (auto it = last.find(root.q); it != last.end() && it->second > root.kernel) {
+              // Four times a crossing word: it is copied at every commit whether or not anything
+              // ran, and under an enable it turns "nothing to do" into a mux, a store and a compare.
+              words += 4 * std::max<uint64_t>(1, (root.value.width + 63) / 64);
+            }
+          }
+        }
+        return words;
+      };
+      for (View* v : {&rise, &fall}) {
+        if (view_size(tape, *v) <= 4 * target) {
+          continue;
+        }
+        std::vector<uint32_t> rank, best_rank;
+        const uint64_t        recorded = cost(*v);
+        uint64_t              best     = recorded;
+        size_t                behind   = rank_readers_first(tape, *v, rank);
+        for (int round = 0; round < 3 && behind != 0; ++round) {
+          v->rank = rank;
+          order_view(tape, *v);
+          const uint64_t now = cost(*v);
+          if (now < best) {
+            best      = now;
+            best_rank = v->rank;
+          }
+          std::vector<uint32_t> next;
+          const size_t          left = rank_readers_first(tape, *v, next);
+          if (left >= behind) {
+            break;
+          }
+          behind = left;
+          rank   = std::move(next);
+        }
+        v->rank = best_rank;
+        order_view(tape, *v);
+        if (timer.on) {
+          std::fprintf(stderr,
+                       "lnast_llvm: ordering: cost %llu as recorded, %llu with readers first (%s)\n",
+                       static_cast<unsigned long long>(recorded),
+                       static_cast<unsigned long long>(best),
+                       best_rank.empty() ? "kept as recorded" : "reordered");
+        }
+      }
     }
     for (View* v : {&rise, &fall, &settle}) {
       cut_kernels(tape, *v, chunk_target(gated), gated);
@@ -3601,6 +3975,10 @@ Result Gen::run(const Sim_objects& out) {
           f.init_words = twos_words(*r.initial, std::max<uint32_t>(f.bits, 1));
           f.init       = f.init_words.empty() ? 0 : f.init_words[0];
         }
+      } else if (r.mem_size != 0) {
+        f.fill = r.reset_pin ? 2 : 0;  // a memory nothing initializes and nothing resets powers on zero
+      } else {
+        f.fill = r.reset_pin ? 2 : 1;
       }
       reg_fields.push_back(f);
     }

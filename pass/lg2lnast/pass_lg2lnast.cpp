@@ -10,12 +10,13 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
+#include "debug_env.hpp"
 #include "diag.hpp"
 #include "hhds/graph.hpp"
+#include "inline_sub.hpp"
 #include "lnast.hpp"
 #include "lnast_builder.hpp"
 #include "lnast_stream.hpp"
-#include "inline_sub.hpp"
 #include "node_util.hpp"
 
 static Pass_plugin sample("pass_lg2lnast", Pass_lg2lnast::setup);
@@ -39,11 +40,6 @@ public:
   // each top-level statement as soon as it is finished (see lnast/lnast_stream.hpp).
   std::shared_ptr<Lnast> run(livehd::lnast_stream::Sink* stream = nullptr);
   std::string            why;
-  // Sub instances left waiting when lowering found an instance-level dependency cycle: the
-  // fcall form needs every argument before any output, so the caller may inline these and retry.
-  std::vector<hhds::Node_class> stuck_subs;
-  // Stop once the cells are ordered: enough to learn whether instances are stuck (stuck_subs).
-  bool                          order_only = false;
 
 private:
   hhds::Graph&   graph_;
@@ -51,6 +47,17 @@ private:
   Lnast_builder& b_;
   Lowering*      parent_ = nullptr;  // set for a loop body
   Lowering*      root_   = this;     // the outermost lowering: owns the unique-name counters
+  // An instance on a ring of instances (a call needs an output of a call that needs one of its own)
+  // has no statement order in which every argument exists before the call. The argument that does
+  // not exist yet is passed as the SETTLED value of a net variable (`delay_assign tmp net 1`, what
+  // Pyrope spells `net.[defer]`), and the net is assigned once its driver is lowered. The module
+  // stays one self-contained function: nothing is copied into it from its callees.
+  struct Late {
+    hhds::Pin_class driver;
+    std::string     net;
+  };
+  std::vector<Late> late_;
+  size_t            late_count_ = 0;
   int            loop_cnt_ = 0;
   // driver pin -> name of the memory whose whole contents it carries (a read-all bus nothing needs
   // as a value): a loop body reads such a memory in place instead of through a packed copy
@@ -1767,11 +1774,49 @@ bool Lowering::lower_cells() {
         ready.push_back(i);
       }
     }
-    // First the order alone (nothing is emitted): a graph whose instances depend on each other in a
-    // ring is found here, before any of its statements are built.
-    size_t done = 0;
-    for (size_t head = 0; head < ready.size(); ++head) {
-      const auto i = ready[head];
+    // First the order alone (nothing is emitted). When nothing is ready and cells remain, the
+    // cells left are on, or behind, a ring: an instance among them is called early, with what it
+    // still waits for read as settled values (see Late). The one waiting for the fewest drivers
+    // goes first -- a choice that depends on the graph alone, so the text is stable.
+    std::vector<uint8_t> forced(nodes.size(), 0);
+    size_t               done = 0;
+    for (size_t head = 0; done != nodes.size();) {
+      if (head == ready.size()) {
+        size_t pick = SIZE_MAX;
+        for (size_t i = 0; i < nodes.size(); ++i) {
+          if (waiting[i] == 0 || forced[i] != 0 || nodes[i].mem >= 0 || type_op_of(nodes[i].node) != Ntype_op::Sub
+              || nodes[i].node.is_loop_subnode()) {
+            continue;
+          }
+          const auto io = nodes[i].node.get_subnode_io();
+          if (!io || livehd::graph_util::is_marker_module_name(io->get_name()) || !nodes[i].node.get_subnode_graph()) {
+            continue;
+          }
+          if (pick == SIZE_MAX || waiting[i] < waiting[pick]) {
+            pick = i;
+          }
+        }
+        if (pick == SIZE_MAX) {
+          std::string names;
+          for (size_t i = 0, shown = 0; i < nodes.size() && shown < 4; ++i) {
+            if (waiting[i] != 0 && forced[i] == 0) {
+              const auto op  = type_op_of(nodes[i].node);
+              names         += std::format(" {}{}",
+                                   Ntype::get_name(op),
+                                   op == Ntype_op::Sub && nodes[i].node.get_subnode_io()
+                                               ? std::format("({})", std::string(nodes[i].node.get_subnode_io()->get_name()))
+                                               : "");
+              ++shown;
+            }
+          }
+          why = std::format("combinational cycle through cells that are not instances; stuck:{}", names);
+          return false;
+        }
+        forced[pick]  = 1;
+        waiting[pick] = 0;
+        ready.push_back(pick);
+      }
+      const auto i = ready[head++];
       ++done;
       std::vector<hhds::Pin_class> produced;
       if (nodes[i].mem >= 0) {
@@ -1788,42 +1833,80 @@ bool Lowering::lower_cells() {
           continue;
         }
         for (const auto w : it->second) {
-          if (--waiting[w] == 0) {
+          if (forced[w] == 0 && --waiting[w] == 0) {
             ready.push_back(w);
           }
         }
       }
     }
-    if (done != nodes.size()) {
-      for (size_t i = 0; i < nodes.size(); ++i) {
-        if (waiting[i] != 0 && nodes[i].mem < 0 && type_op_of(nodes[i].node) == Ntype_op::Sub) {
-          stuck_subs.push_back(nodes[i].node);
-        }
-      }
-      std::string names;
-      for (size_t i = 0, shown = 0; i < nodes.size() && shown < 4; ++i) {
-        if (waiting[i] != 0) {
-          const auto op = type_op_of(nodes[i].node);
-          names += std::format(" {}{}", Ntype::get_name(op),
-                               op == Ntype_op::Sub && nodes[i].node.get_subnode_io() ? std::format("({})", std::string(nodes[i].node.get_subnode_io()->get_name())) : "");
-          ++shown;
-        }
-      }
-      why = std::format("cycle through instance-level dependencies (a call needs an output of a call that needs it); stuck:{}", names);
-      return false;
-    }
-    if (order_only) {
-      return true;
-    }
     for (const auto i : ready) {
+      // An instance called before a driver it reads exists (it was called early, or it reads one of
+      // its own outputs): that driver is a net read at its settled value.
+      std::vector<hhds::Class_index> borrowed;
+      std::vector<std::string>       borrowed_as;
+      if (nodes[i].mem < 0 && type_op_of(nodes[i].node) == Ntype_op::Sub && !nodes[i].node.is_loop_subnode()) {
+        std::vector<hhds::Pin_class> missing;
+        for (const auto& sink : nodes[i].node.inp_sorted_pins()) {
+          for (const auto& d : sink.get_driver_pins()) {
+            if (!d.is_invalid() && !d.is_const() && !name_of_.contains(d.get_class_index())
+                && std::ranges::find(borrowed, d.get_class_index()) == borrowed.end()) {
+              missing.push_back(d);
+              borrowed.push_back(d.get_class_index());
+            }
+          }
+        }
+        borrowed.clear();
+        for (const auto& d : missing) {
+          const int bits = bits_of(d);
+          if (bits <= 0) {
+            why = "an instance on a ring reads a value of unknown width";
+            return false;
+          }
+          const auto net = std::format("__late_{}", root_->late_count_++);
+          b_.create_declare_stmts(net, "mut", max_str(bits, is_unsign(d)), min_str(bits, is_unsign(d)));
+          const auto tmp = b_.create_settled_read_stmts(net);
+          type_spec(tmp, d);
+          name_of_[d.get_class_index()] = tmp;
+          borrowed.push_back(d.get_class_index());
+          borrowed_as.push_back(tmp);
+          if (livehd::debug::env<"LHD_LG2LNAST_DEBUG">() != nullptr) {
+            const auto dn = d.get_master_node();
+            std::fprintf(stderr,
+                         "lg2lnast: %s: instance of %s reads %s late (driver: %s%s, %d bits)\n",
+                         std::string(graph_.get_name()).c_str(),
+                         std::string(nodes[i].node.get_subnode_io()->get_name()).c_str(),
+                         net.c_str(),
+                         std::string(Ntype::get_name(type_op_of(dn))).c_str(),
+                         dn == nodes[i].node ? " (itself)" : "",
+                         bits);
+          }
+          late_.push_back({d, net});
+        }
+      }
       const bool ok = nodes[i].mem < 0            ? lower_node(nodes[i].node)
                       : nodes[i].port == SIZE_MAX ? lower_read_all(mems_[static_cast<size_t>(nodes[i].mem)])
                                                   : lower_async_read(mems_[static_cast<size_t>(nodes[i].mem)], nodes[i].port);
       if (!ok) {
         return false;
       }
+      for (size_t b = 0; b < borrowed.size(); ++b) {
+        // Everyone else waits for the driver itself -- which the call just named, when the instance
+        // reads one of its own outputs.
+        if (auto it = name_of_.find(borrowed[b]); it != name_of_.end() && it->second == borrowed_as[b]) {
+          name_of_.erase(it);
+        }
+      }
       flush();
     }
+    for (const auto& late : late_) {
+      auto value = operand(late.driver);
+      if (!value) {
+        return false;
+      }
+      store_raw(late.net, *value);
+    }
+    late_.clear();
+    flush();
   }
   return true;
 }
@@ -1906,10 +1989,6 @@ std::shared_ptr<Lnast> Lowering::run(livehd::lnast_stream::Sink* stream) {
   if (!lower_cells()) {
     return nullptr;
   }
-  if (order_only) {
-    return b_.lnast;  // the cells can be ordered: the caller lowers for real
-  }
-
   // Outputs and register next values.
   for (const auto& d : gio->get_output_pin_decls()) {
     auto spin = graph_.get_output_pin(d.name);
@@ -1978,34 +2057,6 @@ bool Pass_lg2lnast::lower(const std::vector<std::shared_ptr<hhds::Graph>>& graph
   for (const auto& g : graphs) {
     if (!g || loop_bodies.contains(std::string(g->get_name()))) {
       continue;
-    }
-    // A cycle through instance-level dependencies cannot be spelled as fcall statements (each
-    // call needs all its arguments first). Splice the stuck instances into this graph, in
-    // memory only, and lower again; a graph that still cycles after a few rounds is skipped.
-    for (int round = 0; round < 8; ++round) {
-      Lowering probe(*g);
-      probe.order_only = true;
-      if (probe.run()) {
-        break;
-      }
-      if (probe.stuck_subs.empty()) {
-        break;
-      }
-      livehd::graph_util::Host_inliner inliner(g.get(), "pass.lg2lnast");
-      size_t                           spliced = 0;
-      for (const auto& inst : probe.stuck_subs) {
-        auto io = inst.get_subnode_io();
-        if (!io || inst.is_loop_subnode() || livehd::graph_util::is_marker_module_name(io->get_name()) || !inst.get_subnode_graph()) {
-          continue;  // markers and body-less cells have nothing to splice
-        }
-        if (inliner.splice(inst)) {
-          ++spliced;
-        }
-      }
-      inliner.flush();
-      if (spliced == 0) {
-        break;
-      }
     }
     Lowering lw(*g);
     // `passes`: comma separated stream passes (lnast/lnast_stream.hpp) run on the

@@ -82,8 +82,9 @@ one_design() {
 
 # SystemVerilog designs: registers, resets, memories (ports, arrays, byte enables), hierarchy, and the
 # clock-phase cases (a negedge register against a posedge one; a hi/lo latch pair that is a ring).
+# inst_ring: instances that depend on each other in a ring, and one that reads its own output.
 SV="comb_reg reset_enable reduce_shift struct_port hier async_reset m3_memory m3_memory_array mem_reset mem_reload mem_update
-    mem_collide nary_ops mem_bytes setmask negedge_reg latch_pair"
+    mem_collide nary_ops mem_bytes setmask negedge_reg latch_pair inst_ring"
 # Pyrope designs. Compact loops: a `for` with its body inline -- carries, finals, nested loops, a
 # memory read in place (also while this cycle's write to it is visible), strided domains, calls in the
 # body. clock_gate: a register on `Clock(clock_pin=, enable=)` next to one on the free clock.

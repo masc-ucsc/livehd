@@ -2,6 +2,8 @@
 #include "lnast_sim.hpp"
 
 #include <algorithm>
+#include <chrono>
+#include <cstdio>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -108,6 +110,16 @@ std::string port_members(const std::vector<Field>& ports) {
 
 Sim_emitted emit_sim(const Sim_request& request) {
   Sim_emitted result;
+  // LHD_SIM_LNAST_TIME (debug): where the time before and after the kernels goes.
+  const bool  timed = livehd::debug::env<"LHD_SIM_LNAST_TIME">() != nullptr;
+  auto        mark  = std::chrono::steady_clock::now();
+  const auto  lap   = [&](const char* what) {
+    if (timed) {
+      const auto now = std::chrono::steady_clock::now();
+      std::fprintf(stderr, "lnast_sim: %-34s %6.2f s\n", what, std::chrono::duration<double>(now - mark).count());
+      mark = now;
+    }
+  };
   const auto  fail = [&](std::string why) {
     result.ok  = false;
     result.why = std::move(why);
@@ -159,6 +171,7 @@ Sim_emitted emit_sim(const Sim_request& request) {
     }
   }
 
+  lap("private library copy");
   // A compact loop whose body holds state (N engines written as a loop over one module) has no `for`
   // spelling: every trip owns its registers. Expand it into its N ordinary instances here, in the
   // private library; a stateless loop stays one rolled `for`.
@@ -206,6 +219,7 @@ Sim_emitted emit_sim(const Sim_request& request) {
     }
   }
 
+  lap("expand stateful loops");
   // The DUT root: the named top, else the one definition nothing instantiates (a `%`-named graph
   // is a lowered `test` block, not hardware).
   absl::flat_hash_set<std::string> instantiated;
@@ -286,6 +300,7 @@ Sim_emitted emit_sim(const Sim_request& request) {
       }
     }
   }
+  lap("lower to LNAST (pass.lg2lnast)");
   absl::flat_hash_set<std::string> mine{"lnast_sim_rt.hpp"};
   std::error_code                  ec;
   fs::create_directories(request.odir, ec);
@@ -314,6 +329,7 @@ Sim_emitted emit_sim(const Sim_request& request) {
     objects.symbol = "__lnast_" + cls;
     objects.object = base + ".lnast.llvm.o";
     const auto gen = generate_sim(*top, lnasts, objects);
+    lap("kernels (lnast_llvm)");
     if (!gen.ok) {
       for (const auto& [name, why] : skipped) {  // usually the real reason: a callee that was not lowered
         return fail(std::format("{} ({}: {})", gen.why, name, why));
@@ -414,7 +430,7 @@ Sim_emitted emit_sim(const Sim_request& request) {
         c += "};\n";
       }
     }
-    const auto row = [&](const Field& f, int kind, std::string_view init, bool has_init) {
+    const auto row = [&](const Field& f, int kind, std::string_view init, int fill) {
       table += std::format("  {{\"{}\", {}, {}, {}, {}, {}ULL, {}, {}}},\n",
                            f.name,
                            kind == 3 ? f.entry_bits : f.bits,
@@ -423,18 +439,18 @@ Sim_emitted emit_sim(const Sim_request& request) {
                            f.sign ? "true" : "false",
                            f.entries,
                            init,
-                           has_init ? "true" : "false");
+                           fill);
       ++fields;
     };
     for (const auto& f : gen.inputs) {
-      row(f, 0, "nullptr", true);
+      row(f, 0, "nullptr", 0);
     }
     for (const auto& f : gen.outputs) {
-      row(f, 1, "nullptr", true);
+      row(f, 1, "nullptr", 0);
     }
     for (size_t i = 0; i < gen.regs.size(); ++i) {
       const auto& r = gen.regs[i];
-      row(r, r.entries != 0 ? 3 : 2, r.entries == 0 && r.has_init ? std::format("init_{}", i) : "nullptr", r.has_init);
+      row(r, r.entries != 0 ? 3 : 2, r.entries == 0 && r.has_init ? std::format("init_{}", i) : "nullptr", r.fill);
     }
     c += std::format("const __lnast_field fields[] = {{\n{}}};\n}}  // namespace\n", table);
     c += "extern \"C\" {\n";
@@ -655,6 +671,7 @@ Sim_emitted emit_sim(const Sim_request& request) {
     }
   }
 
+  lap("class, manifest, cleanup");
   result.ok = true;
   return result;
 }
