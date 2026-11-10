@@ -58,6 +58,7 @@ private:
   };
   std::vector<Late> late_;
   size_t            late_count_ = 0;
+  absl::flat_hash_map<hhds::Class_index, std::string> const_text_;  // constant pin -> its literal
   int            loop_cnt_ = 0;
   // driver pin -> name of the memory whose whole contents it carries (a read-all bus nothing needs
   // as a value): a loop body reads such a memory in place instead of through a packed copy
@@ -202,9 +203,14 @@ private:
       return std::nullopt;
     }
     if (d.is_const()) {
-      const auto& c = const_of(d);
-      // Unknown bits print as `?` (`0ub0?????`), the literal the front ends already emit.
-      return c.to_pyrope();
+      // Unknown bits print as `?` (`0ub0?????`), the literal the front ends already emit. The text is
+      // kept per constant: spelling a wide constant digit by digit at each of its uses was two fifths
+      // of the whole lowering on minion.
+      auto [it, fresh] = root_->const_text_.try_emplace(d.get_class_index());
+      if (fresh) {
+        it->second = const_of(d).to_pyrope();
+      }
+      return it->second;
     }
     auto it = name_of_.find(d.get_class_index());
     if (it == name_of_.end()) {
