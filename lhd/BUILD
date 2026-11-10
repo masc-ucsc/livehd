@@ -283,6 +283,7 @@ cc_library(
         "//pass/semdiff:semdiff",
         "//pass/lnastfmt:pass_lnastfmt",
         "//pass/lg2lnast:pass_lg2lnast",
+        "//pass/lnast_llvm:lnast_llvm",
         "//pass/prp_writer:pass_prp_writer",
         "//pass/upass:pass_upass",
         "//upass/tolg:upass_tolg",

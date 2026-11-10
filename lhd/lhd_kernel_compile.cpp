@@ -102,6 +102,9 @@ void validate_emits(const Options& opts) {
       if (sub == "lg2lnast" && (std::string_view{k} == "ln" || std::string_view{k} == "lnast-dump")) {
         continue;  // the LNAST this pass produces (lg: -> ln:)
       }
+      if (sub == "lnast-llvm" && std::string_view{k} == "sim") {
+        continue;  // the native kernel directory (lg: -> typed LNAST -> LLVM object)
+      }
       reject_emit_kind(
           opts,
           k,

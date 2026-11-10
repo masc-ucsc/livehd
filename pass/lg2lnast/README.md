@@ -76,6 +76,30 @@ Mux/compare, LUT, compact loops, and a cycle through instance-level dependencies
 `fcall` form needs every argument before any output, `dino` top and a few ibex
 graphs hit it; a flattened graph has no such cycle).
 
+## Milestone 3 prototype: LLVM straight from the typed LNAST
+
+`pass/lnast_llvm` (`lhd pass lnast-llvm --top T lg:IN --emit-dir sim:OUT`) lowers
+the LNAST this pass emits (typed statement results, `if`/`unique_if`, registers
+with `attr_set` clock/reset, memories, `fcall` instances) to one native state
+kernel built with `Cgen_llvm`, with no lgraph, color plan or cgen_sim involved:
+`void step(uint64_t* state, void**)` reads the inputs and registers from `state`,
+publishes the post-edge registers and the outputs settled on them (what a
+testbench sees after `step`). Instances are inlined with their own register and
+memory state (instance-path names); `if` arms merge by `mux`; memory writes carry
+the path condition as the write enable (kernel-local arrays seeded from the state
+and published whole, so a large memory costs O(size) per step: prototype only).
+An asynchronous reset is evaluated like the synchronous one (every step has an
+edge and the testbench samples after it).
+
+Acceptance: `//pass/lnast_llvm:lnast_llvm_diff_test` drives the same closed-form
+stimulus into the kernel (`lnast_llvm_run`) and into the existing
+`lhd sim` llvm flow (a generated Pyrope testbench importing the lg) and compares
+the per-cycle `TRACE` lines byte for byte.
+
+Not covered yet: latches, `Clock_cell`, negedge or several clocks, whole-array
+`update`, memories with non-zero images, wide (> 64 bit) register initial values,
+compact loops, `fcall` under a condition.
+
 ## Milestones
 
 1. Combinational cells + flops with the default clock/reset; round trip + LEC.

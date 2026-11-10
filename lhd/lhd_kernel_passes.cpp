@@ -13,6 +13,7 @@
 #include "graph_library_singleton.hpp"
 #include "hhds/graph.hpp"
 #include "lhd_kernel_internal.hpp"
+#include "lnast_llvm.hpp"
 #include "node_util.hpp"
 #include "pass.hpp"
 #include "proof_prep.hpp"
@@ -1167,6 +1168,40 @@ void pass_command(Options& opts, Result& res) {
       res.outputs.push_back(ln_out->path);
     }
     emit_lnast_dump_outputs(var.lnasts, opts, res);
+  } else if (sub == "lnast-llvm") {
+    // M3 prototype (pass/lg2lnast/README.md): lg -> typed LNAST -> native LLVM state kernel,
+    // written to the `sim:` emit dir as kernel.o + kernel.json (run it with lnast_llvm_run).
+    Eprp_var var;
+    load_lg_into_var(lg_in, var);
+    if (var.graphs.empty()) {
+      throw Lhd_error{"config", std::format("lg: input {} holds no graphs", lg_in), ""};
+    }
+    Eprp_var::Eprp_dict labels;
+    merge_sets(opts, "pass.lg2lnast", labels);
+    run_step("pass.lg2lnast", var, labels, opts, res);
+    if (var.lnasts.empty()) {
+      throw Lhd_error{"unsupported", "pass lnast-llvm: lg2lnast lowered no graph (see the warnings above)", ""};
+    }
+    const auto* sim_out = find_slot(opts.emit_dirs, "sim");
+    if (sim_out == nullptr) {
+      throw Lhd_error{"usage", "pass lnast-llvm needs --emit-dir sim:DIR", "the directory receives kernel.o and kernel.json"};
+    }
+    std::shared_ptr<Lnast> pick;
+    for (const auto& ln : var.lnasts) {
+      if (opts.top.empty() || ln->get_top_module_name() == opts.top) {
+        pick = ln;
+        break;
+      }
+    }
+    if (!pick) {
+      throw Lhd_error{"config", "pass lnast-llvm: --top matches no lowered graph", ""};
+    }
+    const auto gen = livehd::lnast_llvm::generate(*pick, var.lnasts, sim_out->path);
+    if (!gen.ok) {
+      throw Lhd_error{"unsupported", std::format("pass lnast-llvm: {}", gen.why), "the typed LNAST uses a construct the prototype generator does not cover"};
+    }
+    std::print(stderr, "lnast-llvm: {} words, {} instructions -> {}/kernel.o\n", gen.words, gen.instructions, sim_out->path);
+    res.outputs.push_back(sim_out->path);
   } else if (sub == "analyze") {
     // READ-ONLY diagnosis. Deliberately emits no lg: — it exists to survey a
     // design the transforming passes REFUSE, and it never fails fast, so a
