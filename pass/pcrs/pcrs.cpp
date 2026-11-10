@@ -2,6 +2,7 @@
 #include "pcrs.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <format>
 #include <map>
@@ -469,53 +470,56 @@ private:
   void build_polarity(const Pin& head, const Pin& clock, bool negative, std::vector<std::vector<Leaf>> groups, unsigned depth,
                       Domain_stats& domain) {
     const auto f = options_.fanout;
-    // Flops of an inverting-Q family flip the reset once per level: one inverter in front fixes the parity.
+    // Flops of an inverting-Q family flip the reset once per level: where the parity is wrong one inverter fixes it.
     const bool flips = depth % 2 == 1 && lib_.flop->q_inverted;
-    Pin        source = head;
+    const bool invert = negative != flips;
     std::vector<Node> group_owner;
     for (const auto& g : groups) {
       group_owner.push_back(g.front().sink.get_master_node());
     }
-    if (negative != flips) {
-      auto inv = mint(inverter_io_, group_owner.front(), "i", 0);
-      auto out = inv.create_driver_pin(lib_.inverter->output);
-      gu::set_bits(out, 1);
-      inv.create_sink_pin(lib_.inverter->inputs.front()).connect_driver(head);
-      source = out;
-    }
-    std::vector<Pin> leaf_sinks;
-    std::vector<Node> leaf_owner;
-    std::vector<size_t> group_of;
-    for (size_t g = 0; g < groups.size(); ++g) {
-      for (const auto& leaf : groups[g]) {
-        leaf_sinks.push_back(leaf.sink);
-        leaf_owner.push_back(group_owner[g]);
-        group_of.push_back(g);
-      }
-    }
     if (depth == 0) {
-      // Flat: the loads of a group stay together under one buffer where the cap asks for one.
+      // Flat: one inverter at the root where the polarity asks for it, then buffers where the cap asks for them.
+      std::vector<Pin>  leaf_sinks;
+      std::vector<Node> leaf_owner;
+      for (size_t g = 0; g < groups.size(); ++g) {
+        for (const auto& leaf : groups[g]) {
+          leaf_sinks.push_back(leaf.sink);
+          leaf_owner.push_back(group_owner[g]);
+        }
+      }
+      Pin source = head;
+      if (invert) {
+        auto inv = mint(inverter_io_, group_owner.front(), "i", 0);
+        auto out = inv.create_driver_pin(lib_.inverter->output);
+        gu::set_bits(out, 1);
+        inv.create_sink_pin(lib_.inverter->inputs.front()).connect_driver(head);
+        source = out;
+      }
       fanout(source, leaf_sinks, leaf_owner, domain);
       return;
     }
-    // counts[k] flops at level k+1; the last level drives the groups.
-    std::vector<size_t> counts(depth);
-    counts[depth - 1] = groups.size();
+    // G leaf groups, one leaf flop each. The tree branches by r per level, r = G^(1/depth) (capped by the fanout):
+    // a deeper tree has narrower fan-out at every hop, so every hop is shorter, not just one more stage.
+    const size_t G = groups.size();
+    size_t       r = static_cast<size_t>(std::ceil(std::pow(double(G), 1.0 / double(depth))));
+    r              = std::clamp<size_t>(r, 2, f);
+    std::vector<size_t> counts(depth);  // counts[k] flops at level k+1
+    counts[depth - 1] = G;
     for (int k = int(depth) - 2; k >= 0; --k) {
-      counts[k] = (counts[k + 1] + f - 1) / f;
+      counts[k] = (counts[k + 1] + r - 1) / r;
     }
     std::vector<std::vector<Node>> owners(depth);
     owners[depth - 1] = group_owner;
     for (int k = int(depth) - 2; k >= 0; --k) {
       for (size_t j = 0; j < counts[k]; ++j) {
-        owners[k].push_back(owners[k + 1][j * f]);
+        owners[k].push_back(owners[k + 1][j * r]);
       }
     }
     std::vector<Pin> previous;  // Q outputs of the level above
     for (unsigned k = 0; k < depth; ++k) {
       std::vector<Pin> dpins, qpins;
       for (size_t j = 0; j < counts[k]; ++j) {
-        auto cell = mint(flop_io_, owners[k][j], "f", k + 1);
+        auto       cell      = mint(flop_io_, owners[k][j], "f", k + 1);
         const auto flop_name = minted_names_.back();
         minted_pins_.push_back(flop_name + ":" + lib_.flop->d_pin);
         minted_pins_.push_back(flop_name + ":" + lib_.flop->q_pin);
@@ -529,17 +533,27 @@ private:
         qpins.push_back(q);
       }
       if (k == 0) {
-        fanout(source, dpins, owners[0], domain);
+        fanout(head, dpins, owners[0], domain);
       } else {
         for (size_t j = 0; j < dpins.size(); ++j) {
-          dpins[j].connect_driver(previous[j / f]);
+          dpins[j].connect_driver(previous[j / r]);
         }
       }
       previous = std::move(qpins);
     }
-    for (size_t i = 0; i < leaf_sinks.size(); ++i) {
-      // groups are consecutive runs: group g is served by flop g of the last level
-      leaf_sinks[i].connect_driver(previous[group_of[i]]);
+    // The leaf flop of a group drives its loads, through one local inverter when the polarity needs it.
+    for (size_t g = 0; g < groups.size(); ++g) {
+      Pin driver = previous[g];
+      if (invert) {
+        auto inv = mint(inverter_io_, group_owner[g], "i", depth);
+        auto out = inv.create_driver_pin(lib_.inverter->output);
+        gu::set_bits(out, 1);
+        inv.create_sink_pin(lib_.inverter->inputs.front()).connect_driver(driver);
+        driver = out;
+      }
+      for (const auto& leaf : groups[g]) {
+        leaf.sink.connect_driver(driver);
+      }
     }
   }
 
@@ -635,7 +649,7 @@ std::string_view label_leaf(std::string_view label) {
 }
 }  // namespace
 
-std::string retarget_for_wns(const Stats& stats, const std::vector<std::string>& worst_path, Depth_state& state) {
+std::string retarget_for_wns(const Stats& stats, const std::vector<std::string>& worst_path, Depth_state& state, unsigned branching) {
   std::map<std::string, const Domain_stats*, std::less<>> owner;
   for (const auto& domain : stats.domains) {
     for (const auto& cell : domain.cells) {
@@ -652,7 +666,10 @@ std::string retarget_for_wns(const Stats& stats, const std::vector<std::string>&
     if (now >= state.max_depth) {
       return {};  // as deep as allowed: nothing a deeper tree can still buy
     }
-    state.set(domain.name, now + 1);
+    // Leaf groups of `fanout` sinks, then log_branching of them: the depth at which every hop branches by <= `branching`.
+    const double groups = stats.fanout ? std::ceil(double(domain.sinks) / stats.fanout) : 1.0;
+    const auto   narrow = branching >= 2 && groups > 1 ? static_cast<unsigned>(std::ceil(std::log(groups) / std::log(double(branching)))) : 1u;
+    state.set(domain.name, std::max(now + 1, narrow));
     return domain.name;
   }
   return {};
@@ -692,6 +709,7 @@ bool is_pcrs_cell(std::string_view instance) { return instance_leaf(instance).st
 Stats build_reset(hhds::Graph& graph, const physical::Technology& tech, const liberty::Cell_library& cells, const Options& options,
                   const Depth_policy& depth_of, const Position_of& position_of) {
   Stats stats;
+  stats.fanout = options.fanout;
   if (options.fanout < 2) {
     return stats;
   }
@@ -732,6 +750,13 @@ Stats build_reset(hhds::Graph& graph, const physical::Technology& tech, const li
   role_drivers(graph.get_input_node());
   for (auto n : graph.body().nodes()) {
     role_drivers(n);
+    // A tree this pass built earlier is a network of its own even when the role-tagged cells it replaced are
+    // gone (a synchronous reset has no async pin to find it by): the top of its chain is the root.
+    if (minted(n)) {
+      if (const auto t = transit_of(lib, n)) {
+        add(driver_of(n, t->input));
+      }
+    }
     if (const auto it = lib.async_flops.find(master_name(n)); it != lib.async_flops.end()) {
       for (const auto* pin : {&it->second->reset0_pin, &it->second->reset1_pin}) {
         if (!pin->empty()) {

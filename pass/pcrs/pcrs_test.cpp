@@ -32,6 +32,12 @@ constexpr const char* kLib = R"(library(pcrs) {
     pin(A) { direction : input; capacitance : 1; }
     pin(Y) { direction : output; function : "A'"; }
   }
+  cell(AND2x1) {
+    area : 3;
+    pin(A) { direction : input; capacitance : 1; }
+    pin(B) { direction : input; capacitance : 1; }
+    pin(Y) { direction : output; function : "A & B"; }
+  }
   cell(ICGx1) {
     area : 3;
     clock_gating_integrated_cell : "latch_posedge";
@@ -120,6 +126,7 @@ protected:
     tech.macros["BUFx1"]     = core_macro({"A", "Y"});
     tech.macros["ICGx1"]     = core_macro({"CLK", "GATE", "GCLK"});
     tech.macros["INVx1"]     = core_macro({"A", "Y"});
+    tech.macros["AND2x1"]    = core_macro({"A", "B", "Y"});
     tech.macros["DFFx1"]     = core_macro({"CLK", "D", "Q"});
     tech.macros["DFFQNx1"]   = core_macro({"CLK", "D", "QN"});
     tech.macros["DFFASRNx1"] = core_macro({"CLK", "D", "RESETN", "SETN", "QN"});
@@ -290,7 +297,7 @@ TEST_F(Pcrs, TwoLevelsAreBalancedAndKeepEveryLoad) {
   const auto lib   = cells();
   const auto stats = build_reset(*graph, tech, lib, {.fanout = 8}, depth(2));
   EXPECT_EQ(stats.sinks, 80u);
-  EXPECT_EQ(stats.flops, 12u);  // 10 leaf flops + 2 above them
+  EXPECT_EQ(stats.flops, 13u);  // 10 leaf flops + 3 above them: the branching is 10^(1/2) -> 4 per level, not the cap
   expect_uniform(2, 0);
   EXPECT_LE(fanout(reset), 8u);
 }
@@ -414,6 +421,30 @@ TEST_F(Pcrs, ADomainGrowsOnlyWhenItsCellsAreOnTheWorstPath) {
   EXPECT_EQ(state.get(built.domains[0].name), std::optional<unsigned>{2u});
 }
 
+TEST_F(Pcrs, AReasonToDeepenJumpsToTheDepthWhereHopsBranchByAtMostEight) {
+  add_flops(200, clock);  // 400 reset pins -> 50 leaf groups at fanout 8
+  const auto lib = cells();
+  Depth_state state;
+  state.max_depth = 16;
+  const auto built = build_reset(*graph, tech, lib, {.fanout = 8}, state.policy(8));
+  EXPECT_EQ(built.domains[0].depth, 1u);
+  // log_8(50) = 1.88 -> 2 levels; log_2(50) -> 6 levels for a branching of 2.
+  EXPECT_EQ(retarget_for_wns(built, {built.domains[0].cells.front() + ":Q"}, state), "rst@clk");
+  EXPECT_EQ(state.get("rst@clk"), std::optional<unsigned>{2u});
+  Depth_state narrow;
+  narrow.max_depth = 16;
+  narrow.set("rst@clk", 1);
+  EXPECT_FALSE(retarget_for_wns(built, {built.domains[0].cells.front() + ":Q"}, narrow, 2).empty());
+  EXPECT_EQ(narrow.get("rst@clk"), std::optional<unsigned>{6u});
+  // A small domain still gains one level.
+  Depth_state small;
+  small.set("rst@clk", 1);
+  Stats tiny   = built;
+  tiny.domains[0].sinks = 8;
+  EXPECT_FALSE(retarget_for_wns(tiny, {built.domains[0].cells.front() + ":Q"}, small).empty());
+  EXPECT_EQ(small.get("rst@clk"), std::optional<unsigned>{2u});
+}
+
 TEST_F(Pcrs, ADepthZeroNetworkGrowsWhenItsBuffersAreOnTheWorstPath) {
   add_flops(40, clock);
   const auto lib = cells();
@@ -424,8 +455,8 @@ TEST_F(Pcrs, ADepthZeroNetworkGrowsWhenItsBuffersAreOnTheWorstPath) {
   ASSERT_GT(built.domains[0].buffers, 0u);
   EXPECT_EQ(retarget_for_wns(built, {built.domains[0].cells.front() + ":Y"}, state), "rst@clk");
   built = build_reset(*graph, tech, lib, {.fanout = 8}, state.policy(8));
-  EXPECT_EQ(built.domains[0].depth, 1u);
-  expect_uniform(1, 0);
+  EXPECT_EQ(built.domains[0].depth, 2u);  // 10 leaf groups: log_8(10) -> 2 levels
+  expect_uniform(2, 0);
 }
 
 TEST_F(Pcrs, ADomainShrinksOnlyWithSlackBeyondItsLongestHop) {
@@ -451,6 +482,79 @@ TEST_F(Pcrs, ADomainShrinksOnlyWithSlackBeyondItsLongestHop) {
   const auto again = build_reset(*graph, tech, lib, {.fanout = 8}, state.policy(8));
   EXPECT_EQ(again.domains[0].depth, 1u);
   expect_uniform(1, 0);
+}
+
+// A synchronous reset: no async pin anywhere, the reset only gates the data of plain flops (AND2 -> D).
+TEST_F(Pcrs, ASynchronousResetKeepsItsRootAcrossRebuildsAndIsFoundByItsOwnCells) {
+  // The role sits on a mapper-made buffer behind the port, as in a mapped netlist: the rebuild deletes that buffer.
+  auto mapped = gu::create_typed_node(*graph, Ntype_op::Sub);
+  mapped.set_subnode(io_of("BUFx1", {"A"}, "Y"));
+  mapped.set_name("mapped_rst_buf");
+  mapped.create_sink_pin("A").connect_driver(reset);
+  auto reset_buf = mapped.create_driver_pin("Y");
+  gu::set_bits(reset_buf, 1);
+  gu::add_signal_roles(reset_buf, attrs::signal_reset);
+  for (int i = 0; i < 40; ++i) {
+    auto gate = gu::create_typed_node(*graph, Ntype_op::Sub);
+    gate.set_subnode(io_of("AND2x1", {"A", "B"}, "Y"));
+    gate.set_name("core.u" + std::to_string(i / 10) + ".and" + std::to_string(i));
+    gate.create_sink_pin("A").connect_driver(reset_buf);
+    gate.create_sink_pin("B").connect_driver(clock2);
+    auto y = gate.create_driver_pin("Y");
+    gu::set_bits(y, 1);
+    auto ff = gu::create_typed_node(*graph, Ntype_op::Sub);
+    ff.set_subnode(io_of("DFFx1", {"CLK", "D"}, "Q"));
+    ff.set_name("core.u" + std::to_string(i / 10) + ".ff" + std::to_string(i));
+    ff.create_sink_pin("CLK").connect_driver(clock);
+    ff.create_sink_pin("D").connect_driver(y);
+    gu::set_bits(ff.create_driver_pin("Q"), 1);
+  }
+  const auto lib   = cells();
+  Depth_state state;
+  auto        first = build_reset(*graph, tech, lib, {.fanout = 8}, state.policy(8));
+  ASSERT_EQ(first.domains.size(), 1u);
+  EXPECT_EQ(first.domains[0].depth, 1u);
+  EXPECT_EQ(first.domains[0].sinks, 40u);
+  // The cells it minted have no role: the second call must still find the network, keep it, and report it.
+  auto second = build_reset(*graph, tech, lib, {.fanout = 8}, state.policy(8));
+  ASSERT_EQ(second.networks, 1u);
+  ASSERT_EQ(second.domains.size(), 1u);
+  EXPECT_TRUE(second.domains[0].kept);
+  EXPECT_EQ(second.domains[0].flops, first.flops);
+  EXPECT_FALSE(second.domains[0].cells.empty());
+  // And a decision made on its cells deepens it.
+  EXPECT_EQ(retarget_for_wns(second, {second.domains[0].cells.front() + ":Q"}, state), second.domains[0].name);
+  const auto third = build_reset(*graph, tech, lib, {.fanout = 8}, state.policy(8));
+  EXPECT_EQ(third.domains[0].depth, 2u);
+  size_t levels2 = 0;
+  for (auto node : graph->body().nodes()) {
+    if (is_pcrs_cell(std::string(node.get_name())) && node.get_subnode_io()->get_name() == "DFFx1") {
+      levels2 += node.attr(attrs::pcrs_stage).get() == 2u;
+    }
+  }
+  EXPECT_GT(levels2, 0u);
+}
+
+TEST_F(Pcrs, ADeeperTreeBranchesLessAtEveryLevel) {
+  add_flops(100, clock);  // 200 reset pins, 25 leaf groups at fanout 8
+  const auto lib = cells();
+  const auto d1  = build_reset(*graph, tech, lib, {.fanout = 8}, depth(1));
+  const auto d2  = build_reset(*graph, tech, lib, {.fanout = 8}, depth(2));
+  const auto d3  = build_reset(*graph, tech, lib, {.fanout = 8}, depth(3));
+  // Level sizes: depth 1: 25 | depth 2: r=5 -> 5, 25 | depth 3: r=3 -> 3, 9, 25.
+  EXPECT_EQ(d1.flops, 25u);
+  EXPECT_EQ(d2.flops, 30u);
+  EXPECT_EQ(d3.flops, 37u);
+  expect_uniform(3, 0);
+  // No flop of any level drives more than the cap, and the widest branching is below it.
+  size_t widest = 0;
+  for (auto node : graph->body().nodes()) {
+    if (is_pcrs_cell(std::string(node.get_name())) && node.get_subnode_io()->get_name() == "DFFx1" &&
+        node.attr(attrs::pcrs_stage).get() < 3u) {
+      widest = std::max(widest, fanout(node.get_driver_pin("Q")));
+    }
+  }
+  EXPECT_LE(widest, 3u);
 }
 
 TEST_F(Pcrs, EveryClockDomainGetsItsOwnTreeOnItsOwnClock) {
@@ -562,8 +666,8 @@ TEST_F(Pcrs, BypassTurnsTheTreeIntoWiresAndKeepsPolarity) {
   const auto lib = cells();
   build_reset(*graph, tech, lib, {.fanout = 8}, depth(2));
   const auto flops = stats_flops();
-  EXPECT_EQ(flops, 12u);
-  EXPECT_EQ(bypass_stages(*graph), 12u);
+  EXPECT_EQ(flops, 13u);
+  EXPECT_EQ(bypass_stages(*graph), 13u);
   EXPECT_EQ(minted("DFFx1"), 0u);
   expect_uniform(0, 0);  // every reset pin is back on the root, through buffers only
 }

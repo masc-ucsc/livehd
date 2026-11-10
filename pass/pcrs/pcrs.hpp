@@ -58,6 +58,7 @@ struct Domain_stats {
 };
 
 struct Stats {
+  unsigned                  fanout   = 0;  // the cap the trees were built with
   unsigned                  networks = 0;  // reset roots rebuilt
   unsigned                  sinks    = 0;
   unsigned                  flops    = 0;
@@ -100,11 +101,12 @@ struct Pin_timing {
 };
 using Timing_of = std::function<Pin_timing(std::string_view label)>;
 
-// Add one flop level to the domain whose cells are on the worst setup path. A reset path that is the
-// critical path is what a deeper tree fixes; the worst path of the design elsewhere is not this pass's
-// business, and TNS is not consulted (the clock goal may be unreachable). One domain per call.
-// Returns the domain that grew, or empty.
-std::string retarget_for_wns(const Stats& stats, const std::vector<std::string>& worst_path, Depth_state& state);
+// Deepen the domain whose cells are on the worst setup path: one level at least, and straight to the depth
+// where no hop branches by more than `branching` (each timing round is expensive, and a reset hop is
+// spread over the die, so a narrower tree is what shortens it). A reset path that is the critical path is
+// what a deeper tree fixes; the worst path of the design elsewhere is not this pass's business, and TNS is
+// not consulted (the clock goal may be unreachable). One domain per call. Returns the domain that grew, or empty.
+std::string retarget_for_wns(const Stats& stats, const std::vector<std::string>& worst_path, Depth_state& state, unsigned branching = 8);
 
 // Remove one flop level from every domain whose reset hops have slack to spare: its worst slack must
 // exceed the longest hop arrival plus `margin` (merging two hops costs about one more hop). Meant for
