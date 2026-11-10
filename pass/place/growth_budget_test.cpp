@@ -120,7 +120,7 @@ TEST(GrowthBudget, ResetAndRailTreeBuffersAreNotGrowth) {
   EXPECT_EQ(physical_size(*top, tech).cells, 11U);
   EXPECT_FALSE(budget.allows(physical_size(*top, tech)));
 }
-TEST(GrowthBudget, ConstantCellsRemainChargedThroughSharedHierarchy) {
+TEST(GrowthBudget, TieCellsAreCountedThroughSharedHierarchyAndNeverCharged) {
   physical::Technology tech;
   for (const auto* name : {"BUF", "TIE"}) {
     tech.macros[name].klass = "CORE";
@@ -145,7 +145,13 @@ TEST(GrowthBudget, ConstantCellsRemainChargedThroughSharedHierarchy) {
   const auto candidate = physical_size(*top, tech, nullptr, {}, &constants);
   EXPECT_EQ(candidate.cells, 5U);
   EXPECT_EQ(candidate.constant_cells, 3U);
-  EXPECT_FALSE(budget.allows(candidate));
+  // Placement mints one tie cell per constant pin after the baseline: that is not growth.
+  EXPECT_TRUE(budget.allows(candidate));
+  EXPECT_DOUBLE_EQ(budget.charged_area(candidate), 2);
+  instance(*top, buf);
+  const auto grown = physical_size(*top, tech, nullptr, {}, &constants);
+  EXPECT_EQ(grown.charged_cells(), 3U);
+  EXPECT_FALSE(budget.allows(grown));
 }
 TEST(GrowthBudget, OnlyTheLeafNamesATreeBufferAndUpsizingIsGrowth) {
   physical::Technology tech;

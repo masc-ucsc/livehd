@@ -81,26 +81,29 @@ Physical_size physical_size(hhds::Graph& source, const physical::Technology& tec
   return visit(visit, source);
 }
 double Growth_budget::charged_area(const Physical_size& candidate) const {
+  const double area = candidate.area_um2 - candidate.constant_um2;
   if (tree_master_um2 <= 0) {
-    return candidate.area_um2;
+    return area;
   }
-  return candidate.area_um2 + std::max(0.0, candidate.tree_um2 - candidate.tree_cells * tree_master_um2);
+  return area + std::max(0.0, candidate.tree_um2 - candidate.tree_cells * tree_master_um2);
 }
 bool Growth_budget::allows(const Physical_size& candidate, double share) const {
   const auto area = charged_area(candidate);
-  return candidate.cells <= std::floor(baseline.cells * (1 + fraction * share) + 1e-9) && std::isfinite(area)
-         && area <= baseline.area_um2 * (1 + fraction * share) + 1e-9;
+  return candidate.charged_cells() <= std::floor(baseline.charged_cells() * (1 + fraction * share) + 1e-9) && std::isfinite(area)
+         && area <= (baseline.area_um2 - baseline.constant_um2) * (1 + fraction * share) + 1e-9;
 }
 void initialize_growth_budget(hhds::Graph& source, Options& options) {
-  const auto constants            = constant_masters(options);
-  options.growth_budget           = std::make_shared<Growth_budget>();
-  options.growth_budget->baseline = physical_size(source, options.technology().lef, nullptr, {}, &constants);
+  options.growth_budget            = std::make_shared<Growth_budget>();
+  options.growth_budget->constants = constant_masters(options);
+  options.growth_budget->baseline
+      = physical_size(source, options.technology().lef, nullptr, {}, &options.growth_budget->constants);
 }
 bool growth_admissible(hhds::Graph& source, const Options& options, hhds::Graph* replacement, const Master_changes& masters) {
   if (!options.growth_budget) {
     return true;
   }
-  const bool allowed = options.growth_budget->allows(physical_size(source, options.technology().lef, replacement, masters));
+  const bool allowed = options.growth_budget->allows(
+      physical_size(source, options.technology().lef, replacement, masters, &options.growth_budget->constants));
   options.growth_budget->rejected += !allowed;
   return allowed;
 }
@@ -113,9 +116,8 @@ std::string growth_budget_report(hhds::Graph& source, const Options& options) {
   if (!options.growth_budget) {
     return "null";
   }
-  const auto  constants = constant_masters(options);
-  const auto  now       = physical_size(source, options.technology().lef, nullptr, {}, &constants);
-  const auto& budget    = *options.growth_budget;
+  const auto& budget = *options.growth_budget;
+  const auto  now    = physical_size(source, options.technology().lef, nullptr, {}, &budget.constants);
   return std::format(
       R"({{"basis":"synthesized_standard_cells","fraction":{},"baseline_cells":{},"baseline_area_um2":{},"baseline_constant_cells":{},"baseline_constant_area_um2":{},"cells":{},"area_um2":{},"constant_cells":{},"constant_area_um2":{},"within_budget":{},"rejected_proposals":{}}})",
       budget.fraction,

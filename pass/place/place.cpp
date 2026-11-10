@@ -5552,7 +5552,9 @@ static bool defer_timing_checkpoint(const Options& options, unsigned done, bool 
 static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& library, const Options& requested,
                                  const std::function<void()>& release_source, bool& notify_after_stage) {
   std::optional<Options> automatic_options;
-  if (requested.halo_x == -1 || requested.halo_y == -1) {
+  // A frame this run does not size (a fixed core, an imported floorplan) may need its GP target density resolved too.
+  if (requested.halo_x == -1 || requested.halo_y == -1 || !requested.die.empty() || !requested.core.empty()
+      || !requested.floorplan.empty()) {
     automatic_options = requested;
     // Resolving geometry must not clone the caller's stateful callbacks.
     if (requested.after_stage) {
@@ -6215,6 +6217,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
   const auto pad_x          = std::max(v.halo_x, (v.channel_x + 1) / 2);
   const auto pad_y          = std::max(v.halo_y, (v.channel_y + 1) / 2);
   double     occupancy_area = area;
+  double     macro_area     = 0;  // hard macros, unpadded
   // A fixed core must hold every macro with the weakest channel macro.pdn may use (auto degrades); a generated core
   // is sized for the requested one.
   const auto must_pad_x     = std::max(v.halo_x, (v.pdn_ladder.back().channel_x + 1) / 2);
@@ -6227,6 +6230,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       max_width       = std::max(max_width, c.place.width + 2 * pad_x);
       max_height      = std::max(max_height, c.place.height + 2 * pad_y);
       occupancy_area += double(c.place.width + 2 * pad_x) * (c.place.height + 2 * pad_y) - double(c.place.width) * c.place.height;
+      macro_area     += double(c.place.width) * c.place.height;
     }
   }
   auto                       resolved_uroute  = resolve_uroute_options(options.uroute);
@@ -6431,6 +6435,30 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     }
   }
   v.original_row_frame = prepare_rows(tech, v.fp);
+  if (automatic_options && (!options.die.empty() || !options.core.empty() || !options.floorplan.empty())) {
+    // A frame this run did not size can be as full as the requested GP target density, or fuller: the overflow goal
+    // is then out of reach, GP spends its iterations spreading and never trades density for wirelength. Target what
+    // the frame holds plus a quarter of what it has left (the ORFS lower-bound-plus-addon rule). A sparse frame keeps
+    // any target, however low.
+    double row_area = 0;
+    for (const auto& row : v.fp.rows) {
+      row_area += double(row.count) * sw * rh;
+    }
+    const double free_area = row_area - (occupancy_area - area + macro_area);
+    if (free_area > 0) {
+      const double held = std::min(1., (area - macro_area) / free_area);
+      if (options.density < 1.15 * held) {
+        const double raised = held + .25 * (1 - held);
+        livehd::diag::info("pass.place", "place-density", "progress")
+            .msg("synth.place.density={:.3f} is too low for a fixed frame holding {:.3f}; using {:.3f}", options.density, held, raised)
+            .emit();
+        automatic_options->density = raised;
+        // the legalizer's bin cap stays above the GP target, as it must
+        automatic_options->terminal_legalize_options.max_density
+            = std::max(options.terminal_legalize_options.max_density, std::min(1.0, raised + .05));
+      }
+    }
+  }
   if ((options.macro_transparency.enabled() || options.vanished_memory)
       && std::any_of(v.fp.blockages.begin(), v.fp.blockages.end(), [](const auto& b) { return !b.soft; })) {
     throw std::invalid_argument("hard DEF placement blockages require opaque fixed macros until mask opacity is independent");

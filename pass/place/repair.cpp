@@ -932,7 +932,7 @@ std::optional<Buffer_tree> apply(hhds::Graph& graph, const Inventory& cells, con
       return {};
     }
     if (!shared->growth_size) {
-      shared->growth_size = physical_size(graph, tech);
+      shared->growth_size = physical_size(graph, tech, nullptr, {}, &options.growth_budget->constants);
     }
     auto proposed      = *shared->growth_size;
     proposed.cells     = static_cast<uint64_t>(static_cast<int64_t>(proposed.cells) + cells_delta);
@@ -1196,7 +1196,7 @@ std::optional<Buffer_tree> apply(hhds::Graph& graph, const Inventory& cells, con
     Buffer_limits limits;
     if (options.growth_budget) {
       if (!shared->growth_size) {
-        shared->growth_size = physical_size(graph, tech);
+        shared->growth_size = physical_size(graph, tech, nullptr, {}, &options.growth_budget->constants);
       }
       const auto& budget       = *options.growth_budget;
       const auto& now          = *shared->growth_size;
@@ -1204,9 +1204,11 @@ std::optional<Buffer_tree> apply(hhds::Graph& graph, const Inventory& cells, con
       for (const auto& cell : removed) {
         removed_area += master_area(std::string(cell.get_subnode_io()->get_name()));
       }
-      const auto max_cells = static_cast<uint64_t>(std::floor(budget.baseline.cells * (1 + budget.fraction) + 1e-9));
-      limits.cells         = max_cells + removed.size() >= now.cells ? max_cells + removed.size() - now.cells : 0;
-      limits.area = std::max(0.0, budget.baseline.area_um2 * (1 + budget.fraction) - budget.charged_area(now) + removed_area);
+      const auto max_cells = static_cast<uint64_t>(std::floor(budget.baseline.charged_cells() * (1 + budget.fraction) + 1e-9));
+      limits.cells = max_cells + removed.size() >= now.charged_cells() ? max_cells + removed.size() - now.charged_cells() : 0;
+      limits.area  = std::max(0.0,
+                              (budget.baseline.area_um2 - budget.baseline.constant_um2) * (1 + budget.fraction)
+                                  - budget.charged_area(now) + removed_area);
     }
     plan = plan_buffer_choices(root_xy->second,
                                locations,
@@ -1427,14 +1429,22 @@ std::vector<std::string_view> retention_failures(const Timing_feedback& before, 
   if (!(!before.hold_wns || (after.hold_wns && std::min(0.0, *after.hold_wns) + epsilon >= std::min(0.0, *before.hold_wns)))) {
     failures.emplace_back("hold_wns");
   }
-  if (after.violations > before.violations) {
-    failures.emplace_back("electrical_violations");
-  }
-  if (after.electrical_excess > before.electrical_excess + epsilon) {
-    failures.emplace_back("electrical_excess");
-  }
   const bool setup_gain = (before.wns && *before.wns < 0 && after.wns && *after.wns > *before.wns + epsilon)
                           || (before.tns && *before.tns < 0 && after.tns && *after.tns > *before.tns + epsilon);
+  // A material setup gain (1% of the violation, WNS or TNS, the other not worse) outranks the electrical tally. The
+  // trees that split a net far over its limits leave more, smaller violations behind, which the next sizing sweep
+  // works on; a veto keeps the unbuffered net instead (coralnpu: -9.2 ns to -2.2 ns refused for its violation count).
+  const auto material = [](const auto& was, const auto& now) { return was && *was < 0 && now && *now >= *was * .99; };
+  const bool setup_outranks
+      = failures.empty() && setup_gain && (material(before.wns, after.wns) || material(before.tns, after.tns));
+  if (!setup_outranks) {
+    if (after.violations > before.violations) {
+      failures.emplace_back("electrical_violations");
+    }
+    if (after.electrical_excess > before.electrical_excess + epsilon) {
+      failures.emplace_back("electrical_excess");
+    }
+  }
   // Different endpoint requirements can improve WNS/TNS without changing the
   // absolute longest arrival. That is real progress toward the SDC objective.
   if (failures.empty()

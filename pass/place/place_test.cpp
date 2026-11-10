@@ -3673,31 +3673,32 @@ static std::shared_ptr<hhds::Graph> tie_graph(hhds::GraphLibrary& source, bool c
   graph->get_output_pin("k").connect_driver(unknown_k ? gu::create_const(*graph, *Dlop::from_pyrope("0ub?")) : one());
   return graph;
 }
-TEST(Placement, InfeasibleDensityHandsOffAndReportsOriginalTarget) {
+TEST(Placement, AFixedFrameFullerThanTheTargetDensityRaisesTheTarget) {
+  // Half full against a 0.1 target: no placement reaches it. The target becomes what the frame holds plus a quarter
+  // of the room left, and density is never traded for area.
   hhds::GraphLibrary source, placed;
   auto               graph = tie_graph(source, false);
   auto               o     = plain_options();
   o.lefs                   = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
-  o.core = o.die        = {0, 0, 5.52, 2.72};
-  o.bins                = 2;
-  o.density             = .1;
-  o.iterations          = 200;
-  o.min_iterations      = 40;
-  o.post_density_factor = 4;
-  o.snapshots           = true;
-  o.output_dir          = std::string(std::getenv("TEST_TMPDIR")) + "/infeasible_density";
-  const auto result     = place(*graph, placed, o);
+  o.core = o.die           = {0, 0, 5.52, 2.72};
+  o.bins                   = 2;
+  o.density                = .1;
+  o.iterations             = 200;
+  o.output_dir             = std::string(std::getenv("TEST_TMPDIR")) + "/raised_density";
+  const auto result        = place(*graph, placed, o);
   EXPECT_NO_THROW(check_legality(physical::read_lef(o.lefs), result.floorplan));
   rapidjson::Document qor;
   qor.Parse(result.qor.c_str());
   ASSERT_FALSE(qor.HasParseError());
-  EXPECT_DOUBLE_EQ(qor["gp_target_density"].GetDouble(), o.density);
-  EXPECT_GT(qor["gp_overflow_floor"].GetDouble(), o.stop_overflow);
-  EXPECT_GT(qor["gp_overflow"].GetDouble(), o.stop_overflow);
-  EXPECT_FALSE(qor["gp_converged"].GetBool());
-  EXPECT_STREQ(qor["gp_stop_reason"].GetString(), "density_infeasible");
-  EXPECT_GE(qor["gp_iterations"].GetInt(), o.min_iterations);
-  EXPECT_LT(qor["gp_iterations"].GetInt(), o.iterations);
+  EXPECT_DOUBLE_EQ(qor["gp_target_density"].GetDouble(), .625);
+  EXPECT_EQ(result.floorplan.die.xh, 5520);
+  // A sparse frame keeps its target, however low.
+  o.core = o.die     = {0, 0, 55.2, 27.2};
+  o.output_dir       = std::string(std::getenv("TEST_TMPDIR")) + "/kept_density";
+  hhds::GraphLibrary sparse;
+  qor.Parse(place(*graph, sparse, o).qor.c_str());
+  ASSERT_FALSE(qor.HasParseError());
+  EXPECT_DOUBLE_EQ(qor["gp_target_density"].GetDouble(), .1);
 }
 
 struct Tie_fixture {
@@ -3753,7 +3754,7 @@ static std::shared_ptr<hhds::Graph> both_constants(hhds::GraphLibrary& source) {
   graph->get_output_pin("low").connect_driver(gu::create_const(*graph, *Dlop::create_integer(0)));
   return graph;
 }
-TEST(Placement, GrowthReportShowsMaterializedConstantsWithoutDiscountingThem) {
+TEST(Placement, GrowthReportShowsMaterializedConstantsAndDoesNotChargeThem) {
   hhds::GraphLibrary source, flat;
   const auto         graph   = both_constants(source);
   auto               options = tie_options("constant_growth",
@@ -3773,7 +3774,7 @@ TEST(Placement, GrowthReportShowsMaterializedConstantsWithoutDiscountingThem) {
   EXPECT_EQ(growth["constant_cells"].GetUint64(), 3U);
   EXPECT_GT(growth["constant_area_um2"].GetDouble(), 0);
   EXPECT_LT(growth["constant_area_um2"].GetDouble(), growth["area_um2"].GetDouble());
-  EXPECT_FALSE(growth["within_budget"].GetBool());
+  EXPECT_TRUE(growth["within_budget"].GetBool());  // the tie cells placement minted are not repair growth
 }
 TEST(Placement, ConstantDriversUseLibertyPolarityAndPhysicalCandidates) {
   hhds::GraphLibrary source, flat;

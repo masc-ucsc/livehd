@@ -565,8 +565,15 @@ TEST(PhysicalAcceptance, SetupProgressDoesNotRequireChangingTheLongestArrival) {
   after     = before;
   after.tns = -40;
   EXPECT_TRUE(timing_improves(before, after));
-  after.violations = 1;
+  // A material setup gain outranks the electrical tally; a marginal one (under 1% of the violation) does not.
+  after.violations        = 1;
+  after.electrical_excess = .5;
+  EXPECT_TRUE(timing_improves(before, after));
+  after.tns = -49.9;
   EXPECT_FALSE(timing_improves(before, after));
+  after.violations        = 0;
+  after.electrical_excess = 0;
+  EXPECT_TRUE(timing_improves(before, after));
   after          = before;
   after.wns      = -10;
   after.hold_wns = -1;

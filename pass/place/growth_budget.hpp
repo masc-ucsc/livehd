@@ -15,8 +15,12 @@ struct Physical_size {
   double   area_um2       = 0;
   uint64_t tree_cells     = 0;  // reset/rail tree buffers, outside cells and area_um2
   double   tree_um2       = 0;
-  uint64_t constant_cells = 0;  // reporting subset of cells, still fully charged
+  // Tie cells, a subset of cells and area_um2. Placement mints them for the constant pins it finds (one per pin
+  // with synth.place.unknown_const=zero), after the baseline is taken: they are not timing growth and are never
+  // charged, or a design with many constant pins has no allowance left before repair starts.
+  uint64_t constant_cells = 0;
   double   constant_um2   = 0;
+  uint64_t charged_cells() const { return cells - constant_cells; }
 };
 // Standard-cell inventory: fixed macro area cannot subsidize logic growth.
 // Reset and domino rail tree buffers (reset_tree.hpp) are structural fanout
@@ -34,7 +38,8 @@ struct Growth_budget {
   double        sizing_share    = 0.6;  // see sizing_growth_share
   uint64_t      rejected        = 0;
   double        tree_master_um2 = 0;  // the area of the master trees mint (placement sets it; 0: unknown)
-  // The area charged against the budget: the cells plus tree-buffer growth.
+  std::set<std::string> constants;    // tie-cell masters: every measurement against this budget names them
+  // The area charged against the budget: the cells that are not tie cells, plus tree-buffer growth.
   double        charged_area(const Physical_size& candidate) const;
   // `share` scales the allowance: gate sizing is admitted against sizing_growth_share of it, so it cannot spend the
   // whole budget before buffer trees reach the high-fanout nets (eyeriss: 0.07 um2 left for a 271-load net).
