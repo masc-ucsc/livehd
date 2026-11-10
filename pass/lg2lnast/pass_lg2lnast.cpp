@@ -14,6 +14,7 @@
 #include "hhds/graph.hpp"
 #include "lnast.hpp"
 #include "lnast_builder.hpp"
+#include "lnast_stream.hpp"
 #include "node_util.hpp"
 
 static Pass_plugin sample("pass_lg2lnast", Pass_lg2lnast::setup);
@@ -31,12 +32,31 @@ class Lowering {
 public:
   explicit Lowering(hhds::Graph& g) : graph_(g) {}
 
-  std::shared_ptr<Lnast> run();
+  // `stream` (optional) receives the function as it is built: begin() once the io is complete, then
+  // each top-level statement as soon as it is finished (see lnast/lnast_stream.hpp).
+  std::shared_ptr<Lnast> run(livehd::lnast_stream::Sink* stream = nullptr);
   std::string            why;
 
 private:
   hhds::Graph&   graph_;
   Lnast_builder  b_;
+  livehd::lnast_stream::Sink* sink_ = nullptr;
+  Lnast_nid                   last_sent_;
+  bool                        any_sent_ = false;
+
+  // Hand every top-level statement finished since the last call to the stream.
+  void flush() {
+    if (sink_ == nullptr) {
+      return;
+    }
+    Lnast_nid next = any_sent_ ? b_.lnast->get_sibling_next(last_sent_) : b_.lnast->get_first_child(b_.idx_stmts);
+    while (!next.is_invalid()) {
+      sink_->stmt(b_.lnast, next);
+      last_sent_ = next;
+      any_sent_  = true;
+      next       = b_.lnast->get_sibling_next(next);
+    }
+  }
   absl::flat_hash_map<hhds::Class_index, std::string> name_of_;  // driver pin -> LNAST operand text
   struct Flop_rec {
     std::string       name;
@@ -897,7 +917,8 @@ bool Lowering::lower_flop_next(const Flop_rec& f) {
   return true;
 }
 
-std::shared_ptr<Lnast> Lowering::run() {
+std::shared_ptr<Lnast> Lowering::run(livehd::lnast_stream::Sink* stream) {
+  sink_ = stream;
   auto gio = graph_.get_io();
   if (!gio) {
     why = "no io";
@@ -932,6 +953,10 @@ std::shared_ptr<Lnast> Lowering::run() {
     b_.lnast->add_child(st, Lnast_node::create_const("nil"));
   }
 
+  if (sink_ != nullptr) {
+    sink_->begin(b_.lnast);
+  }
+
   // Registers first so every read of Q has a name.
   for (auto node : graph_.body().nodes(hhds::Node_order::forward)) {
     if (type_op_of(node) != Ntype_op::Flop) {
@@ -958,11 +983,13 @@ std::shared_ptr<Lnast> Lowering::run() {
     flop_next_.push_back({nm, node});
   }
 
+  flush();
   for (auto node : graph_.body().nodes(hhds::Node_order::forward)) {
     if (type_op_of(node) == Ntype_op::Memory && !declare_memory(node)) {
       return nullptr;
     }
   }
+  flush();
 
   // Dependency order (Kahn): hhds `forward` order is not topological around loop-last cells
   // such as Sub, and a use must follow its definition in the LNAST text. Registers and graph
@@ -1028,6 +1055,7 @@ std::shared_ptr<Lnast> Lowering::run() {
         return nullptr;
       }
       ++done;
+      flush();
       std::vector<hhds::Pin_class> produced;
       if (nodes[i].mem >= 0) {
         const auto& mm = mems_[static_cast<size_t>(nodes[i].mem)];
@@ -1078,15 +1106,21 @@ std::shared_ptr<Lnast> Lowering::run() {
     }
     store_raw(std::string(d.name), *o);
   }
+  flush();
   for (const auto& m : mems_) {
     if (!lower_memory_tail(m)) {
       return nullptr;
     }
+    flush();
   }
   for (const auto& f : flop_next_) {
     if (!lower_flop_next(f)) {
       return nullptr;
     }
+    flush();
+  }
+  if (sink_ != nullptr) {
+    sink_->end();
   }
   return b_.lnast;
 }
@@ -1095,6 +1129,7 @@ std::shared_ptr<Lnast> Lowering::run() {
 
 void Pass_lg2lnast::setup() {
   Eprp_method m1("pass.lg2lnast", "lower lgraphs to ordinary front-end LNAST (prototype)", &Pass_lg2lnast::work);
+  m1.add_label_optional("passes", "comma separated LNAST stream passes applied as statements are produced (balance)", "");
   register_pass(m1);
 }
 
@@ -1107,7 +1142,19 @@ void Pass_lg2lnast::work(Eprp_var& var) {
       continue;
     }
     Lowering lw(*g);
-    auto     ln = lw.run();
+    // `passes` label: comma separated stream passes (lnast/lnast_stream.hpp) run on the
+    // statements as they are produced; the output is what the last one forwards.
+    livehd::lnast_stream::Chain     chain;
+    livehd::lnast_stream::Tree_sink tree;
+    std::string                     chain_error;
+    if (!livehd::lnast_stream::parse_chain(std::string(var.get("passes")), chain, chain_error)) {
+      livehd::diag::warn("pass.lg2lnast", "bad-passes", "unsupported").msg("{}", chain_error).emit();
+      return;
+    }
+    auto ln = chain.empty() ? lw.run() : lw.run(&chain.link(tree));
+    if (ln && !chain.empty()) {
+      ln = tree.result();
+    }
     if (!ln) {
       livehd::diag::warn("pass.lg2lnast", "graph-skipped", "unsupported")
           .msg("graph {} skipped: {}", std::string(g->get_name()), lw.why)

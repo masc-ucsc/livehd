@@ -107,6 +107,22 @@ Not covered yet: latches, `Clock_cell`, negedge or several clocks, whole-array
 `update`, memories with non-zero images, wide (> 64 bit) register initial values,
 compact loops, `fcall` under a condition.
 
+## Stream interface (milestone 2)
+
+`lnast/lnast_stream.hpp`: a minimal LNAST-to-LNAST pipeline, in the spirit of upass (a statement is
+processed as soon as the producer finishes it) but without its symbol table or bundles. A producer
+calls `begin(header)` (module name, attributes, the complete `io`) and then `stmt(tree, nid)` for each
+top-level statement; a `Pass` forwards zero, one or many statements to its `next()` sink and may buffer
+a lookahead window until `end()`. `Tree_sink` rebuilds an ordinary `Lnast`; `Chain` wires the stages.
+Every stage speaks plain LNAST, so dropping a stage leaves valid compiler input.
+
+`lg2lnast` is the first producer: `--set pass.lg2lnast.passes=balance[,more]` (also accepted by
+`lhd pass lnast-llvm`). Stage `balance` turns n-ary `bit_and|bit_or|bit_xor` into a log-depth binary
+tree of `%balN` temporaries. The round trip stays `proven-full` (the test runs every design with and
+without it; XiangShan `RenameTable` too). Limitations: the producer still builds its whole tree
+(the stream only avoids a second pass), source ids are not carried across trees, and
+`lnast_llvm` buffers the stream because it walks the statements twice.
+
 ## Milestones
 
 1. Combinational cells + flops with the default clock/reset; round trip + LEC.

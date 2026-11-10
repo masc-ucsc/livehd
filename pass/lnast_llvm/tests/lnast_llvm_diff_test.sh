@@ -17,13 +17,13 @@ CYCLES=96
 mkdir -p "$W"
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
-for design in comb_reg reset_enable reduce_shift struct_port hier async_reset m3_memory m3_memory_array mem_reset mem_reload mem_update mem_collide; do
+for design in comb_reg reset_enable reduce_shift struct_port hier async_reset m3_memory m3_memory_array mem_reset mem_reload mem_update mem_collide nary_ops; do
   top="$design"
   d="$W/$design"
   mkdir -p "$d"
   "$LHD_ABS" compile "$SRC/$design.sv" --reader slang --top "$top" --emit-dir "lg:$d/lg" -q >"$d/c.log" 2>&1 \
     || { cat "$d/c.log" >&2; fail "$design: compile to lg failed"; }
-  "$LHD_ABS" pass lnast-llvm --top "$top" "lg:$d/lg" --emit-dir "sim:$d/k" -q >"$d/g.log" 2>&1 \
+  "$LHD_ABS" pass lnast-llvm --top "$top" "lg:$d/lg" --set pass.lg2lnast.passes=balance --emit-dir "sim:$d/k" -q >"$d/g.log" 2>&1 \
     || { cat "$d/g.log" >&2; fail "$design: lnast-llvm failed"; }
   python3 -I "$SRC/gen_tb.py" "$d/k/kernel.json" "$top" "$top" "$CYCLES" >"$d/tb.prp" || fail "$design: testbench generation"
   "$RUN" "$d/k" "$CYCLES" >"$d/new.trace" || fail "$design: kernel run failed"
