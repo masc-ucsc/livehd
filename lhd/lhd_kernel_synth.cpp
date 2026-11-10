@@ -3115,6 +3115,8 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
                 return stats.evaluations - stats.rankings - base < loop_allowance;
               };
               const auto  before_wns = best_timing.wns.value_or(0), before_tns = best_timing.tns.value_or(0);
+              // a rejected iteration takes its reset-tree depth decisions back with its placement
+              const auto  pcrs_before = place_options.pcrs_depth ? std::optional{*place_options.pcrs_depth} : std::nullopt;
               auto        kick  = livehd::placement::timing_place(placed, iter_options, evaluate, 1, best_timing, admit_iteration);
               auto        sized = livehd::placement::repair_buffers(std::move(kick.placed),
                                                                     iter_options,
@@ -3142,6 +3144,9 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
                                                 again.timing ? again.timing->tns.value_or(0) : 0.0,
                                                 better);
               if (!better) {
+                if (pcrs_before) {
+                  *place_options.pcrs_depth = *pcrs_before;
+                }
                 repair_loop_keep.push_back(std::move(again));
                 break;
               }

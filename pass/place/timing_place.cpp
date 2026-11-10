@@ -225,6 +225,9 @@ Repair_result timing_place(Result initial, const Options& requested, const Evalu
     // starts from it. The last round may instead take a level away from a domain with slack to spare.
     std::string              pcrs_grew;
     std::vector<std::string> pcrs_shrunk;
+    // The depth decisions describe the placement that is kept: a round that is not accepted takes its decisions
+    // (and its one-time regroup) back, or a later zero-GP call would rebuild the trees to match them, unplaced.
+    const auto pcrs_before = options.pcrs_depth ? std::optional{*options.pcrs_depth} : std::nullopt;
     if (pcrs_active(options) && options.pcrs_depth && result.placed.pcrs_stats) {
       pcrs_grew = pcrs::retarget_for_wns(*result.placed.pcrs_stats, best.path, *options.pcrs_depth);
       if (pcrs_grew.empty() && round + 1 == rounds) {
@@ -353,6 +356,9 @@ Repair_result timing_place(Result initial, const Options& requested, const Evalu
     } catch (const std::exception& error) {
       w.Key("reason");
       w.String(error.what());
+    }
+    if (!keep && pcrs_before) {
+      *options.pcrs_depth = *pcrs_before;
     }
     w.Key("accepted");
     w.Bool(keep);

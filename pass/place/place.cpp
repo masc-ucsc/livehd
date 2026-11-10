@@ -5967,13 +5967,22 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       const auto found = placed_at.find(instance);
       return found == placed_at.end() ? std::nullopt : std::optional{found->second};
     };
-    const bool regroup = !placed_at.empty() && options.pcrs_depth && !options.pcrs_depth->clustered;
-    pcrs_stats         = pcrs::build_reset(graph,
-                                           tech,
-                                           options.technology().cells,
-                                           {.fanout = options.reset_fanout, .regroup = regroup},
-                                           options.pcrs_depth ? options.pcrs_depth->policy(options.reset_fanout) : pcrs::Depth_policy{},
-                                           placed_at.empty() ? pcrs::Position_of{} : position_of);
+    // A pass with no GP iterations (final legalization, region refinement) cannot place a new tree: whatever the
+    // depth state says, a tree in the graph stays as it is there.
+    const bool frozen  = !placed_at.empty() && options.iterations == 0;
+    const bool regroup = !frozen && !placed_at.empty() && options.pcrs_depth && !options.pcrs_depth->clustered;
+    pcrs::Depth_policy depth_of = options.pcrs_depth ? options.pcrs_depth->policy(options.reset_fanout) : pcrs::Depth_policy{};
+    if (frozen && depth_of) {
+      depth_of = [wanted = std::move(depth_of)](std::string_view domain, size_t sinks, std::optional<unsigned> current) {
+        return current ? *current : wanted(domain, sinks, current);
+      };
+    }
+    pcrs_stats = pcrs::build_reset(graph,
+                                   tech,
+                                   options.technology().cells,
+                                   {.fanout = options.reset_fanout, .regroup = regroup},
+                                   depth_of,
+                                   placed_at.empty() ? pcrs::Position_of{} : position_of);
     if (regroup) {
       options.pcrs_depth->clustered = true;
     }
