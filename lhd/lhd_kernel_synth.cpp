@@ -3059,6 +3059,17 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
               res.recipe_steps.emplace_back("pass.place.timing_driven.regions");
             }
           }
+          if (run_resize && place_options.growth_budget) {
+            // The allowance for sizing and buffering is measured from the netlist repair starts from. Measured from the
+            // synthesized netlist it was already spent before repair began (IO resynthesis, tie cells and reset flops all
+            // add cells): on eyeriss all 2,686 nets whose buffer tree failed were rejected by the cell limit alone, and
+            // only the ~1% left over could ever be used.
+            const auto fraction = place_options.growth_budget->fraction;
+            const auto share    = place_options.growth_budget->sizing_share;
+            livehd::placement::initialize_growth_budget(*placed.graph, place_options);
+            place_options.growth_budget->fraction     = fraction;
+            place_options.growth_budget->sizing_share = share;
+          }
           if (run_resize && place_options.resize_engine == "new") {
             Phase_timer phase(res, "pass.place.resize");
             repaired = livehd::placement::resize_placed(std::move(placed), place_options, evaluate);
