@@ -3249,15 +3249,18 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
       // truncation anyone would notice. Concat's literal result width is
       // sum(w); the unsigned expression landing deliberately requests its
       // one-bit-wider Slop carrier here.
-      I(wbits > total,
-        std::format("internal: Concat carrier Slop<{}> is not wider than its {}-bit assembly -- hlop would sign-extend "
-                    "from bit {}, turning the all-ones value into -1; the unsigned landing carrier must be sum(w)+1 = {}",
-                    wbits,
-                    total,
-                    wbits - 1,
-                    total + 1)
-            .c_str());
       const auto output = node.get_driver_pin(0);
+      if (wbits <= total) {
+        // The pin is narrower than the lanes it concatenates (bitwidth proved the upper lanes
+        // cannot matter, e.g. a 128-bit assembly feeding a 75-bit carrier). Truncate explicitly
+        // instead of relying on the carrier being wider.
+        if (!output.is_invalid() && is_unsign(output) && wbits >= 2) {
+          // Unsigned: keep the low wbits-1 bits and land them in the +1 carrier.
+          return absl::StrCat("Slop<", total + 1, ">{Slop_u<", total, ">::concat_op(", args, ")}.zext_to<", wbits - 1, ", ", wbits, ">()");
+        }
+        // Signed: Slop<N>{Slop_u<M>} with N <= M sign-extends from bit N-1, i.e. keeps the low N bits.
+        return absl::StrCat("Slop<", tw, ">{Slop_u<", total, ">::concat_op(", args, ")}");
+      }
       if (slop_u_ && !output.is_invalid() && proven_unsigned_result(node, output) && wbits == total + 1) {
         slop_u_expr_ = true;
         return absl::StrCat("Slop_u<", total, ">::concat_op(", args, ")");
