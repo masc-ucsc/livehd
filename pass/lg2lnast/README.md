@@ -160,14 +160,23 @@ lhdsuite, results equal to the inou.cgen.sim llvm backend (2026-11-10, opt build
 
 | core | setup s | host C++ s | cycles/s | inou.cgen.sim: setup / host C++ / cycles/s |
 | --- | ---: | ---: | ---: | --- |
-| boom | 9.3 | 6.0 | 35.3k | 53.6 / 16.6 / 18.2k |
-| picorv32 | 0.5 | 5.1 | 6.25M | 0.7 / 5.2 / 5.58M |
-| dino | 0.4 | 5.7 | 5.83M | 0.5 / 5.4 / 5.81M |
-| bitcoin | 0.2 | 5.5 | 4.19M | 0.4 / 5.7 / 3.17M |
-| minion | 87.8 | 5.7 | 28.3k | 122.0 / 38.4 / 34.0k |
+| boom | 8.8 | 5.7 | 34.3k | 53.6 / 16.6 / 18.2k |
+| picorv32 | 0.4 | 5.1 | 6.48M | 0.7 / 5.2 / 5.58M |
+| dino | 0.3 | 5.4 | 5.84M | 0.5 / 5.4 / 5.81M |
+| bitcoin | 0.2 | 5.5 | 4.18M | 0.4 / 5.7 / 3.17M |
+| minion | 46.8 | 5.5 | 29.1k | 122.0 / 38.4 / 34.0k |
 
-minion is not there yet on either axis that is left: 42 s of its setup is pass.lg2lnast building the
-LNAST trees and 7 s the walk (18.7M tape ops for 260k live ones), and its simulation is 17% behind.
+Of that setup the flow itself (lowering, walk, LLVM) is 10.7 s on minion and 2.3 s on boom, where
+inou.cgen.sim took 86 s and 47 s; the rest is the front end both flows share. minion's simulation is
+still 14% behind (no activity gating here yet).
+
+Three things keep generation proportional to what is simulated: lg2lnast merges the arms of a
+`Hotmux` that carry the same value into one arm on the OR of their controls (minion decodes an
+"undefined when these collide" value as about 257 arms of one unknown constant, 15,000 times: 3.8
+million statements in one module); the walk builds the AND of the enclosing `if` conditions only
+when a memory write asks for it; and only the modules the roots still call after splicing are
+lowered (a module spliced into its parent needs no LNAST of its own: minion's frontend was lowered
+three times). minion: 18.7M tape ops -> 318k, the walk 7.4 s -> 0.4 s.
 
 Timing switches: `LHD_SIM_LNAST_TIME=1` (phases), `LHD_SIM_LLVM_TIME=1` (per kernel); use an optimized
 `lhd` (`bazel build -c opt`): a fastbuild `lhd` is 10-30x slower in LLVM and misleads.
