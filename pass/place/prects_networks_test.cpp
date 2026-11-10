@@ -118,6 +118,56 @@ TEST(PrectsNetworks, DistributionClosureExcludesSiblingsButPreservesDataAndGateE
   EXPECT_EQ(moved.path, (std::vector<std::string>{"ff:d"}));
 }
 
+TEST(PrectsNetworks, DataThatAlsoClocksOneStateCellStaysData) {
+  // An FSM state behind its fanout buffers, whose last buffer also clocks one state cell: the closure walks the
+  // buffers back to the flop like a clock tree, but every net mostly feeds logic.
+  auto                 roles = library();
+  physical::Technology tech;
+  physical::Floorplan  fp;
+  for (const auto& [name, master] : std::vector<std::pair<std::string, std::string>>{
+           {"fsm",  "state"},
+           { "b0",  "unary"},
+           { "b1",  "unary"},
+           {"lat",  "state"},
+           { "g0", "logic2"},
+           { "g1", "logic2"},
+           { "g2", "logic2"},
+           { "g3", "logic2"},
+           { "g4", "logic2"},
+           { "ck",  "unary"},
+           { "f0",  "state"},
+           { "f1",  "state"}
+  }) {
+    fp.components.push_back({name, master, {}});
+  }
+  fp.nets = {
+      {    "state",                             {{"fsm", "q"}, {"b0", "i"}}},
+      {    "near", {{"b0", "o"}, {"b1", "i"}, {"g0", "a"}, {"g1", "a"}}},
+      {     "far", {{"b1", "o"}, {"lat", "c"}, {"g2", "a"}, {"g3", "a"}, {"g4", "a"}}},
+      {"clk_root",                         {{"PIN", "clk"}, {"ck", "i"}}},
+      {"clk_leaf", {{"ck", "o"}, {"fsm", "c"}, {"f0", "c"}, {"f1", "c"}, {"g4", "b"}}},
+      // one logic load beside the clocked state cell, and an inverter to one more: no net has a majority of its own
+      {    "xor",              {{"g0", "y"}, {"lat2", "c"}, {"g1", "b"}, {"i0", "i"}}},
+      {   "xor_n",                                    {{"i0", "o"}, {"g2", "b"}}},
+  };
+  fp.components.push_back({"lat2", "state", {}});
+  fp.components.push_back({"i0", "invert", {}});
+  auto excluded = prects_networks(tech, fp, roles);
+  EXPECT_EQ(excluded.ignored, (std::vector<bool>{false, false, false, true, true, false, false}));
+  EXPECT_FALSE(excluded.pins.contains("b0:o"));
+  EXPECT_FALSE(excluded.pins.contains("lat:c"));
+  EXPECT_TRUE(excluded.pins.contains("f0:c"));
+  // STA flags every state cell's clock pin: that is the same structural evidence, and changes nothing.
+  timing::Feedback timing;
+  timing.pins["lat:c"].clock = true;
+  excluded                  = prects_networks(tech, fp, roles, timing);
+  EXPECT_EQ(excluded.ignored, (std::vector<bool>{false, false, false, true, true, false, false}));
+  // A named clock root keeps its whole network a distribution whatever else it feeds.
+  roles.clock_pins.insert("b0:o");
+  excluded = prects_networks(tech, fp, roles);
+  EXPECT_EQ(excluded.ignored, (std::vector<bool>{true, true, true, true, true, false, false}));
+}
+
 TEST(PrectsNetworks, MissingDistributionEndpointsDoNotJoinDataToResetOrClock) {
   auto                 roles = library();
   physical::Technology tech;

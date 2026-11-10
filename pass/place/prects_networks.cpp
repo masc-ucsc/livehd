@@ -123,13 +123,28 @@ Prects_networks prects_networks(const physical::Technology& tech, const physical
   std::vector<std::vector<size_t>> adjacent(fp.nets.size());
   std::vector<size_t>              pending, pending_clocks;
   std::vector<bool>                clock_nets(fp.nets.size());
-  const auto                       mark_clock = [&](size_t n) {
+  // Per net: the connections that carry a distribution role, the distribution-cell (link) pins among all of its
+  // connections and among the role ones, and whether a named root (a control, clock or reset port or pin) rather than
+  // a cell's pin role put the net here.
+  std::vector<uint32_t> role_pins(fp.nets.size()), link_pins(fp.nets.size()), role_link_pins(fp.nets.size());
+  std::vector<bool>     named(fp.nets.size());
+  bool                  in_connection = false, counted = false, link_pin = false;
+  const auto            role          = [&](size_t n) {
+    if (in_connection && !counted) {
+      counted = true;
+      ++role_pins[n];
+      role_link_pins[n] += link_pin;
+    }
+  };
+  const auto mark_clock = [&](size_t n) {
+    role(n);
     if (!clock_nets[n]) {
       clock_nets[n] = true;
       pending_clocks.push_back(n);
     }
   };
   const auto mark = [&](size_t n) {
+    role(n);
     if (!result.ignored[n]) {
       result.ignored[n] = true;
       pending.push_back(n);
@@ -138,22 +153,33 @@ Prects_networks prects_networks(const physical::Technology& tech, const physical
   for (size_t n = 0; n < fp.nets.size(); ++n) {
     for (const auto& c : fp.nets[n].connections) {
       const auto label = physical::connection_label(c);
-      if (const auto entry = pin_net.find(label); entry != pin_net.end() && entry->second == unbound) {
+      const auto entry = pin_net.find(label);
+      if (entry != pin_net.end() && entry->second == unbound) {
         entry->second = n;
       }
+      in_connection = true;
+      counted       = false;
+      link_pin      = entry != pin_net.end();
+      link_pins[n] += link_pin;
       if (!roles.reset_is_data
           && ((c.instance == "PIN" && roles.reset_ports.contains(c.pin))
               || (c.instance != "PIN" && (roles.reset_pins.contains(label) || roles.reset_pins.contains(c.instance + "/" + c.pin))))) {
+        named[n] = true;
         mark(n);
       }
       if ((c.instance == "PIN" && roles.clock_ports.contains(c.pin)) || (c.instance != "PIN" && roles.clock_pins.contains(label))) {
+        named[n] = true;
         mark_clock(n);
       }
       if (!roles.override_controls && c.instance != "PIN"
           && (roles.pins.contains(label) || roles.pins.contains(c.instance + "/" + c.pin))) {
+        named[n] = true;
         mark(n);
       }
-      if (timing.is_clock_pin(c.instance, c.pin)) {
+      // STA flags a pin a clock reaches and every state cell's own clock pin alike. Only the first is a named root:
+      // a port, or a pin that is not its cell's clock pin (decided below, once the cell is known).
+      const bool sta_clock = timing.is_clock_pin(c.instance, c.pin);
+      if (sta_clock) {
         mark_clock(n);
         if (!roles.override_controls) {
           mark(n);
@@ -161,18 +187,22 @@ Prects_networks prects_networks(const physical::Technology& tech, const physical
       }
       if (c.instance == "PIN") {
         if (roles.ports.contains(c.pin)) {
+          named[n] = true;
           mark(n);
         }
+        named[n] = named[n] || sta_clock;
         continue;
       }
       const auto instance = instances.find(c.instance);
       if (instance == instances.end()) {
+        named[n] = named[n] || sta_clock;
         continue;
       }
       const auto& info    = *instance->second;
       const auto  matches = [&](const std::set<std::string>* pins) {
         return pins && (pins->contains(c.pin) || pins->contains(c.pin.substr(0, c.pin.find('['))));
       };
+      named[n] = named[n] || (sta_clock && !matches(info.clocks));
       if (matches(info.clocks)) {
         mark_clock(n);
       }
@@ -191,6 +221,9 @@ Prects_networks prects_networks(const physical::Technology& tech, const physical
       const auto reset_pin = [&] { return info.resets && (info.resets->contains(c.pin) || info.resets->contains(c.pin.substr(0, c.pin.find('[')))); };
       if ((!roles.override_controls && matches(info.controls) && !(roles.reset_is_data && reset_pin()))
           || (!roles.reset_is_data && matches(info.resets))) {
+        // An excluded reset stays a false path whatever else it feeds (the pre-pcrs policy): only clock evidence
+        // is weighed against the ordinary pins below.
+        named[n] = named[n] || (!roles.reset_is_data && matches(info.resets));
         mark(n);
       }
     }
@@ -208,6 +241,7 @@ Prects_networks prects_networks(const physical::Technology& tech, const physical
       }
     }
   }
+  in_connection = false;
   // Bidirectional closure includes both upstream buffers and sibling branches.
   // It stops at arbitrary combinational logic, state and ICG enable/test pins.
   for (size_t p = 0; p < pending.size(); ++p) {
@@ -219,6 +253,47 @@ Prects_networks prects_networks(const physical::Technology& tech, const physical
     for (size_t next : adjacent[pending_clocks[p]]) {
       mark_clock(next);
     }
+  }
+  // A data signal that also clocks a latch or feeds a clock gate (an FSM state behind its fanout buffers) is reached
+  // by the closure like a clock tree. Without a named root, a connected distribution whose ordinary pins outnumber
+  // its role pins is data: left excluded, nothing pulls its buffers toward their loads and no path through it is
+  // ever timed. The count is over the whole distribution, so a tree is one decision and never half a clock.
+  {
+    std::vector<int> group(fp.nets.size(), -1);
+    std::vector<size_t> members;
+    std::vector<bool>   data(fp.nets.size());
+    for (size_t seed : pending) {
+      if (group[seed] >= 0) {
+        continue;
+      }
+      members.assign(1, seed);
+      group[seed]     = static_cast<int>(seed);
+      bool   has_name = false;
+      size_t roles_n = 0, ordinary = 0;
+      for (size_t p = 0; p < members.size(); ++p) {
+        const size_t n  = members[p];
+        has_name        = has_name || named[n];
+        roles_n        += role_pins[n];
+        ordinary       += fp.nets[n].connections.size() + role_link_pins[n] - role_pins[n] - link_pins[n];
+        for (size_t next : adjacent[n]) {
+          if (group[next] < 0 && result.ignored[next]) {
+            group[next] = static_cast<int>(seed);
+            members.push_back(next);
+          }
+        }
+      }
+      if (!has_name && ordinary > roles_n) {
+        for (size_t n : members) {
+          data[n] = true;
+        }
+      }
+    }
+    std::erase_if(pending, [&](size_t n) {
+      if (data[n]) {
+        result.ignored[n] = false;
+      }
+      return data[n];
+    });
   }
   for (size_t n : pending) {
     for (const auto& c : fp.nets[n].connections) {
