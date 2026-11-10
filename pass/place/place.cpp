@@ -5977,10 +5977,19 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         return current ? *current : wanted(domain, sinks, current);
       };
     }
+    // The tree's cells are sized by pcrs for the pins and the wire they drive (positions are in DBU).
+    const auto   reset_wire = technology_wire_rc(tech,
+                                                 options.liberty,
+                                                 options.tech_rc_file,
+                                                 options.resistance_ohm_um,
+                                                 options.capacitance_ff_um,
+                                                 options.rc_pessimism,
+                                                 options.technology().cells.contents);
+    const double reset_c    = std::max(reset_wire.horizontal_c, reset_wire.vertical_c) / tech.dbu;
     pcrs_stats = pcrs::build_reset(graph,
                                    tech,
                                    options.technology().cells,
-                                   {.fanout = options.reset_fanout, .regroup = regroup},
+                                   {.fanout = options.reset_fanout, .regroup = regroup, .wire_ff_per_unit = reset_c},
                                    depth_of,
                                    placed_at.empty() ? pcrs::Position_of{} : position_of);
     if (regroup) {
@@ -6451,6 +6460,11 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         // a two-row cell's rail twin (the frame's rows decided it in an earlier stage): the same cell, taken as is
         const auto t = options.multirow_templates.find(c.macro);
         if (t == options.multirow_templates.end() || t->second.rail_twin != imported.macro) {
+          // pass.pcrs names a tree cell after what it drives and sizes it for the placement it is given: the
+          // same cell may come back one size up or down. The netlist's master is the one that counts.
+          if (pcrs::instance_leaf(c.name).starts_with("__pcrs_rst")) {
+            continue;
+          }
           throw std::runtime_error("floorplan cell master mismatch: " + c.name);
         }
         take_rail_twin(v, size_t(&c - v.cells.data()), imported.macro);

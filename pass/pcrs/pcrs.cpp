@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "attrs.hpp"
+#include "core/hash_util.hpp"
 #include "node_util.hpp"
 #include "pass/liberty/liberty_dff.hpp"
 
@@ -37,6 +38,10 @@ struct Lib {
   const liberty::Comb_cell*                        buffer   = nullptr;  // smallest identity buffer
   const liberty::Comb_cell*                        inverter = nullptr;  // smallest inverter
   const liberty::Dff_cell*                         flop     = nullptr;  // smallest plain posedge flop
+  // The cells with the pins of each of those three, by rising output capacitance limit: [0] is the cell above, the
+  // rest are what a heavier load gets. One entry when the Liberty states no limit.
+  std::vector<const liberty::Comb_cell*>                    buffer_sizes, inverter_sizes;
+  std::vector<std::pair<const liberty::Dff_cell*, double>> flop_sizes;  // with the Q pin's limit in fF (0: unstated)
 
   bool placeable(const std::string& name, std::initializer_list<const std::string*> pins) const {
     const auto macro = tech.macros.find(name);
@@ -84,6 +89,61 @@ struct Lib {
     }
     for (const auto& icg : cells.icgs) {
       icgs[icg.name] = &icg;
+    }
+    const auto family = [](const auto& all, const liberty::Comb_cell* base) {
+      std::vector<const liberty::Comb_cell*> sizes;
+      if (!base) {
+        return sizes;
+      }
+      sizes.push_back(base);
+      if (!base->max_capacitance_ff) {
+        return sizes;
+      }
+      std::vector<const liberty::Comb_cell*> stronger;
+      for (const auto& [name, cell] : all) {
+        if (cell != base && cell->inputs == base->inputs && cell->output == base->output && cell->max_capacitance_ff
+            && *cell->max_capacitance_ff > *base->max_capacitance_ff) {
+          stronger.push_back(cell);
+        }
+      }
+      std::ranges::sort(stronger, [](const auto* a, const auto* b) {
+        return std::tuple(*a->max_capacitance_ff, a->area, a->name) < std::tuple(*b->max_capacitance_ff, b->area, b->name);
+      });
+      for (const auto* cell : stronger) {
+        if (*cell->max_capacitance_ff > *sizes.back()->max_capacitance_ff) {
+          sizes.push_back(cell);
+        }
+      }
+      return sizes;
+    };
+    buffer_sizes   = family(buffers, buffer);
+    inverter_sizes = family(inverters, inverter);
+    if (flop) {
+      const auto limit = [&](const liberty::Dff_cell& cell) {
+        for (const auto& drive : cells.drives) {
+          if (drive.name == cell.name && drive.output == cell.q_pin) {
+            return drive.max_capacitance_ff.value_or(0);
+          }
+        }
+        return 0.0;
+      };
+      flop_sizes.emplace_back(flop, limit(*flop));
+      std::vector<std::pair<const liberty::Dff_cell*, double>> stronger;
+      for (const auto& [name, cell] : flops) {
+        if (cell != flop && cell->d_pin == flop->d_pin && cell->clk_pin == flop->clk_pin && cell->q_pin == flop->q_pin
+            && cell->q_inverted == flop->q_inverted && cell->n_out == flop->n_out && flop_sizes.front().second > 0
+            && limit(*cell) > flop_sizes.front().second) {
+          stronger.emplace_back(cell, limit(*cell));
+        }
+      }
+      std::ranges::sort(stronger, [](const auto& a, const auto& b) {
+        return std::tuple(a.second, a.first->area, a.first->name) < std::tuple(b.second, b.first->area, b.first->name);
+      });
+      for (const auto& entry : stronger) {
+        if (entry.second > flop_sizes.back().second) {
+          flop_sizes.push_back(entry);
+        }
+      }
     }
   }
 };
@@ -374,10 +434,10 @@ class Builder {
 public:
   Builder(hhds::Graph& graph, const Lib& lib, const Options& options, Stats& stats)
       : graph_(graph), lib_(lib), options_(options), stats_(stats) {
-    auto* library = graph.get_io()->get_library();
-    buffer_io_    = identity_io(library, *lib.buffer);
-    inverter_io_  = identity_io(library, *lib.inverter);
-    flop_io_      = liberty::create_dff_io(*library, *lib.flop);
+    library_ = graph.get_io()->get_library();
+    if (!lib.buffer->input_capacitance_ff.empty() && lib.buffer->input_capacitance_ff.front() > 0) {
+      pin_ff_ = lib.buffer->input_capacitance_ff.front();
+    }
     for (auto n : graph.body().nodes()) {
       if (const auto name = std::string(n.get_name()); name.find(kPrefix) != std::string::npos) {
         names_.insert(name);
@@ -397,34 +457,49 @@ public:
   // (NVDLA partition_p: 214 loads over 60 gated-clock domains). Put them behind one buffer tree, neighbours
   // together. Buffers add no latency, so every domain keeps its depth.
   void cap_head(const Pin& head, const Position_of& position_of, Domain_stats& domain) {
+    position_of_ = &position_of;
     std::vector<Leaf> loads;
+    std::vector<Pin>  pins;
     for (const auto& edge : head.out_edges()) {
       const auto sink = edge.sink;
       if (is_core_cell(lib_, sink.get_master_node()) && sink.get_driver_pins().size() == 1) {
         loads.push_back({sink, false});
+        pins.push_back(sink);
       }
     }
-    if (loads.size() <= options_.fanout) {
+    // The head is a design cell this pass does not size: what the smallest buffer would carry is all it is given.
+    const double comfortable = comfort(lib_.buffer_sizes.front()->max_capacitance_ff);
+    Box          spread;
+    if (loads.size() <= options_.fanout && load_of(pins, spread) <= comfortable) {
       return;
     }
-    // A cell minted in this call has no position yet: it sits with the load it was named after.
     const Position_of where = [&](std::string_view instance) -> std::optional<std::pair<double, double>> {
-      if (!position_of) {
-        return std::nullopt;
+      const auto minted_at = minted_center_.find(instance);
+      if (minted_at != minted_center_.end()) {
+        return minted_at->second;
       }
+      // a minted cell with nothing placed beneath it sits with the load it was named after
       const auto owner = minted_owner_.find(instance);
-      return position_of(owner == minted_owner_.end() ? instance : std::string_view{owner->second});
+      return position_of ? position_of(owner == minted_owner_.end() ? instance : std::string_view{owner->second}) : std::nullopt;
     };
     const auto        first = mark();
-    std::vector<Pin>  pins;
     std::vector<Node> owners;
+    pins.clear();
     for (const auto& group : group_leaves(std::move(loads), options_.fanout, position_of ? where : Position_of{})) {
       for (const auto& leaf : group) {
         pins.push_back(leaf.sink);
         owners.push_back(leaf.sink.get_master_node());
       }
     }
-    fanout(head, std::move(pins), owners, domain);
+    auto top = reduce(std::move(pins), owners, domain);
+    // One buffer at the root, sized for the top of the tree, when that top is still more than the head should see.
+    Box box;
+    if (top.size() > 4 || load_of(top, box) > comfortable) {
+      top.assign(1, buffer_for(top, owners.front(), "r", 0, domain));
+    }
+    for (auto& pin : top) {
+      pin.connect_driver(head);
+    }
     for (auto& name : cells_since(first)) {
       domain.cells.push_back(std::move(name));
     }
@@ -433,6 +508,7 @@ public:
   // One (reset root, clock domain) tree at `depth` flop levels. Both polarities share the depth.
   void build(const Pin& head, const Pin& clock, std::vector<Leaf> leaves, unsigned depth, const Position_of& position_of,
              Domain_stats& domain) {
+    position_of_ = &position_of;
     for (const bool negative : {false, true}) {
       std::vector<Leaf> mine;
       std::ranges::copy_if(leaves, std::back_inserter(mine), [&](const Leaf& l) { return l.negative == negative; });
@@ -456,15 +532,42 @@ private:
     return io;
   }
 
-  Node mint(const std::shared_ptr<hhds::GraphIO>& io, const Node& owner, std::string_view tag, unsigned level) {
+  std::shared_ptr<hhds::GraphIO> flop_io(const liberty::Dff_cell& cell) {
+    auto& io = flop_ios_[cell.name];
+    if (!io) {
+      io = liberty::create_dff_io(*library_, cell);
+    }
+    return io;
+  }
+
+  // What a set of load pins is, whatever order they come in.
+  static uint64_t identity_of(const std::vector<Pin>& pins) {
+    std::vector<std::string> labels;
+    labels.reserve(pins.size());
+    for (const auto& pin : pins) {
+      labels.push_back(std::format("{}:{}", std::string(pin.get_master_node().get_name()), static_cast<uint64_t>(pin.get_port_id())));
+    }
+    std::ranges::sort(labels);
+    uint64_t id = hash_util::kFnv1a64_offset;
+    for (const auto& label : labels) {
+      id = hash_util::fnv1a64(label, id);
+      id = hash_util::fnv1a64("|", id);
+    }
+    return id;
+  }
+
+  // A cell is named after what it drives (`identity`), not after the order it was minted in. Every placement call
+  // derives the trees again and finds a cell's place, from the call before, by its name: the same loads give the
+  // same name and so the same place, and a cell that drives something else is a new name with no place to inherit.
+  Node mint(const std::shared_ptr<hhds::GraphIO>& io, const Node& owner, std::string_view tag, unsigned level, uint64_t identity) {
     auto        cell      = gu::create_typed_node(graph_, Ntype_op::Sub);
     cell.set_subnode(io);
     const auto  load_name = std::string(owner.get_name());
     const auto  dot       = load_name.rfind('.');
     std::string name;
     do {
-      name = std::format("{}{}{}{}_{}", dot == std::string::npos ? std::string{} : load_name.substr(0, dot + 1), kPrefix, tag, level,
-                         serial_++);
+      name = std::format("{}{}{}{}_{:x}", dot == std::string::npos ? std::string{} : load_name.substr(0, dot + 1), kPrefix, tag, level,
+                         identity++ & 0xffffffffffffULL);
     } while (!names_.insert(name).second);
     cell.set_name(name);
     minted_names_.emplace_back(name);
@@ -482,10 +585,102 @@ private:
     return cell;
   }
 
-  // Connect `loads` to `driver` through identity buffers so that no driver carries more than `fanout`.
-  void fanout(const Pin& driver, std::vector<Pin> loads, const std::vector<Node>& owners, Domain_stats& domain) {
-    std::vector<Node> own = owners;
-    unsigned          level = 0;
+  // Where the loads of a driver are, and what they and their wire weigh.
+  struct Box {
+    double xl = 1e300, yl = 1e300, xh = -1e300, yh = -1e300;
+    void   add(const std::pair<double, double>& at) {
+      xl = std::min(xl, at.first);
+      xh = std::max(xh, at.first);
+      yl = std::min(yl, at.second);
+      yh = std::max(yh, at.second);
+    }
+    void add(const Box& other) {
+      if (other.any()) {
+        add(std::pair{other.xl, other.yl});
+        add(std::pair{other.xh, other.yh});
+      }
+    }
+    [[nodiscard]] bool                      any() const { return xl <= xh; }
+    [[nodiscard]] double                    hpwl() const { return any() ? (xh - xl) + (yh - yl) : 0; }
+    [[nodiscard]] std::pair<double, double> center() const { return {(xl + xh) / 2, (yl + yh) / 2}; }
+  };
+  // A cell minted in this call sits at the middle of what it drives; any other cell where the placement has it.
+  std::optional<std::pair<double, double>> where(const Node& node) const {
+    const auto name = std::string(node.get_name());
+    if (const auto minted_at = minted_center_.find(name); minted_at != minted_center_.end()) {
+      return minted_at->second;
+    }
+    return position_of_ && *position_of_ ? (*position_of_)(name) : std::nullopt;
+  }
+  double pin_ff(const Pin& sink) const {
+    const auto name = master_name(sink.get_master_node());
+    for (const auto* cells : {&lib_.buffers, &lib_.inverters}) {
+      if (const auto it = cells->find(name);
+          it != cells->end() && !it->second->input_capacitance_ff.empty() && it->second->input_capacitance_ff.front() > 0) {
+        return it->second->input_capacitance_ff.front();
+      }
+    }
+    return pin_ff_;
+  }
+  // The wire of n loads spread over a box, driven from its middle: a Steiner length grows with sqrt(n).
+  double wire_ff(const Box& box, size_t n) const {
+    return options_.wire_ff_per_unit > 0 ? box.hpwl() * std::max(.5, .35 * std::sqrt(double(n))) * options_.wire_ff_per_unit : 0;
+  }
+  double load_of(const std::vector<Pin>& sinks, Box& box) const {
+    double pins = 0;
+    for (const auto& sink : sinks) {
+      pins += pin_ff(sink);
+      if (const auto at = where(sink.get_master_node())) {
+        box.add(*at);
+      }
+    }
+    return pins + wire_ff(box, sinks.size());
+  }
+  // A cell carries a load comfortably up to half its capacitance limit (no limit stated: any load).
+  static double comfort(const std::optional<double>& limit) {
+    return limit && *limit > 0 ? *limit / 2 : std::numeric_limits<double>::infinity();
+  }
+  const liberty::Comb_cell& sized(const std::vector<const liberty::Comb_cell*>& sizes, double load) const {
+    for (const auto* cell : sizes) {
+      if (load <= comfort(cell->max_capacitance_ff)) {
+        return *cell;
+      }
+    }
+    return *sizes.back();
+  }
+  const liberty::Dff_cell& sized_flop(double load) const {
+    for (const auto& [cell, limit] : lib_.flop_sizes) {
+      if (load <= comfort(limit > 0 ? std::optional{limit} : std::nullopt)) {
+        return *cell;
+      }
+    }
+    return *lib_.flop_sizes.back().first;
+  }
+  void sit(const Node& cell, const Box& box) {
+    if (box.any()) {
+      minted_center_[std::string(cell.get_name())] = box.center();
+    }
+  }
+
+  // One buffer for `loads`, sized for them: its input pin.
+  Pin buffer_for(const std::vector<Pin>& loads, const Node& owner, std::string_view tag, unsigned level, Domain_stats& domain) {
+    Box         box;
+    const auto& master = sized(lib_.buffer_sizes, load_of(loads, box));
+    auto        cell   = mint(identity_io(library_, master), owner, tag, level, identity_of(loads));
+    sit(cell, box);
+    ++stats_.buffers;
+    ++domain.buffers;
+    auto out = cell.create_driver_pin(master.output);
+    gu::set_bits(out, 1);
+    for (auto load : loads) {
+      load.connect_driver(out);
+    }
+    return cell.create_sink_pin(master.inputs.front());
+  }
+
+  // Group `loads` behind identity buffers until at most `fanout` remain, and return those (undriven).
+  std::vector<Pin> reduce(std::vector<Pin> loads, std::vector<Node>& own, Domain_stats& domain) {
+    unsigned level = 0;
     for (auto& load : loads) {
       gu::drop_drivers(load);
     }
@@ -493,23 +688,21 @@ private:
       std::vector<Pin>  next;
       std::vector<Node> next_owner;
       for (size_t lo = 0; lo < loads.size(); lo += options_.fanout) {
-        const size_t hi   = std::min(loads.size(), lo + options_.fanout);
-        auto         cell = mint(buffer_io_, own[lo], "b", level);
-        ++stats_.buffers;
-        ++domain.buffers;
-        auto out = cell.create_driver_pin(lib_.buffer->output);
-        gu::set_bits(out, 1);
-        for (size_t i = lo; i < hi; ++i) {
-          loads[i].connect_driver(out);
-        }
-        next.push_back(cell.create_sink_pin(lib_.buffer->inputs.front()));
+        const size_t hi = std::min(loads.size(), lo + options_.fanout);
+        next.push_back(buffer_for({loads.begin() + lo, loads.begin() + hi}, own[lo], "b", level, domain));
         next_owner.push_back(own[lo]);
       }
       loads = std::move(next);
       own   = std::move(next_owner);
       ++level;
     }
-    for (auto& load : loads) {
+    return loads;
+  }
+
+  // Connect `loads` to `driver` through identity buffers so that no driver carries more than `fanout`.
+  void fanout(const Pin& driver, std::vector<Pin> loads, const std::vector<Node>& owners, Domain_stats& domain) {
+    std::vector<Node> own = owners;
+    for (auto& load : reduce(std::move(loads), own, domain)) {
       load.connect_driver(driver);
     }
   }
@@ -534,15 +727,21 @@ private:
           leaf_owner.push_back(group_owner[g]);
         }
       }
-      Pin source = head;
+      auto top    = reduce(std::move(leaf_sinks), leaf_owner, domain);
+      Pin  source = head;
       if (invert) {
-        auto inv = mint(inverter_io_, group_owner.front(), "i", 0);
-        auto out = inv.create_driver_pin(lib_.inverter->output);
+        Box         box;
+        const auto& master = sized(lib_.inverter_sizes, load_of(top, box));
+        auto        inv    = mint(identity_io(library_, master), group_owner.front(), "i", 0, identity_of(top));
+        sit(inv, box);
+        auto out = inv.create_driver_pin(master.output);
         gu::set_bits(out, 1);
-        inv.create_sink_pin(lib_.inverter->inputs.front()).connect_driver(head);
+        inv.create_sink_pin(master.inputs.front()).connect_driver(head);
         source = out;
       }
-      fanout(source, leaf_sinks, leaf_owner, domain);
+      for (auto& load : top) {
+        load.connect_driver(source);
+      }
       return;
     }
     // G leaf groups, one leaf flop each. The tree branches by r per level, r = G^(1/depth) (capped by the fanout):
@@ -562,11 +761,53 @@ private:
         owners[k].push_back(owners[k + 1][j * r]);
       }
     }
+    // What every flop drives, bottom up: a leaf flop its group (or the one inverter in front of it), a flop above
+    // the r flops below it, each in the middle of its own loads.
+    std::vector<std::vector<Box>>    boxes(depth);
+    std::vector<std::vector<double>> loads(depth);
+    std::vector<const liberty::Comb_cell*> leaf_inverter(G, nullptr);
+    std::vector<std::vector<uint64_t>>     ids(depth);  // the sinks beneath every flop
+    boxes[depth - 1].resize(G);
+    loads[depth - 1].resize(G);
+    ids[depth - 1].resize(G);
+    for (size_t g = 0; g < G; ++g) {
+      std::vector<Pin> sinks;
+      for (const auto& leaf : groups[g]) {
+        sinks.push_back(leaf.sink);
+      }
+      ids[depth - 1][g]       = identity_of(sinks);
+      const double group_load = load_of(sinks, boxes[depth - 1][g]);
+      if (invert) {
+        leaf_inverter[g] = &sized(lib_.inverter_sizes, group_load);
+        const auto& in   = leaf_inverter[g]->input_capacitance_ff;
+        loads[depth - 1][g] = in.empty() || in.front() <= 0 ? pin_ff_ : in.front();
+      } else {
+        loads[depth - 1][g] = group_load;
+      }
+    }
+    for (int k = int(depth) - 2; k >= 0; --k) {
+      boxes[k].resize(counts[k]);
+      loads[k].resize(counts[k]);
+      ids[k].assign(counts[k], hash_util::kFnv1a64_offset);
+      for (size_t j = 0; j < counts[k]; ++j) {
+        Box    children;
+        size_t n = 0;
+        for (size_t c = j * r; c < std::min(counts[k + 1], (j + 1) * r); ++c, ++n) {
+          ids[k][j] = hash_util::fnv1a64(std::format("{:x}|", ids[k + 1][c]), ids[k][j]);
+          boxes[k][j].add(boxes[k + 1][c]);
+          if (boxes[k + 1][c].any()) {
+            children.add(boxes[k + 1][c].center());
+          }
+        }
+        loads[k][j] = double(n) * pin_ff_ + wire_ff(children, n);
+      }
+    }
     std::vector<Pin> previous;  // Q outputs of the level above
     for (unsigned k = 0; k < depth; ++k) {
       std::vector<Pin> dpins, qpins;
       for (size_t j = 0; j < counts[k]; ++j) {
-        auto       cell      = mint(flop_io_, owners[k][j], "f", k + 1);
+        auto cell = mint(flop_io(sized_flop(loads[k][j])), owners[k][j], "f", k + 1, ids[k][j]);
+        sit(cell, boxes[k][j]);
         const auto flop_name = minted_names_.back();
         minted_pins_.push_back(flop_name + ":" + lib_.flop->d_pin);
         minted_pins_.push_back(flop_name + ":" + lib_.flop->q_pin);
@@ -592,10 +833,12 @@ private:
     for (size_t g = 0; g < groups.size(); ++g) {
       Pin driver = previous[g];
       if (invert) {
-        auto inv = mint(inverter_io_, group_owner[g], "i", depth);
-        auto out = inv.create_driver_pin(lib_.inverter->output);
+        const auto& master = *leaf_inverter[g];
+        auto        inv    = mint(identity_io(library_, master), group_owner[g], "i", depth, ids[depth - 1][g]);
+        sit(inv, boxes[depth - 1][g]);
+        auto out = inv.create_driver_pin(master.output);
         gu::set_bits(out, 1);
-        inv.create_sink_pin(lib_.inverter->inputs.front()).connect_driver(driver);
+        inv.create_sink_pin(master.inputs.front()).connect_driver(driver);
         driver = out;
       }
       for (const auto& leaf : groups[g]) {
@@ -608,11 +851,14 @@ private:
   const Lib&                     lib_;
   const Options&                 options_;
   Stats&                         stats_;
-  std::shared_ptr<hhds::GraphIO> buffer_io_, inverter_io_, flop_io_;
+  hhds::GraphLibrary*            library_ = nullptr;
+  std::map<std::string, std::shared_ptr<hhds::GraphIO>> flop_ios_;
+  const Position_of*             position_of_ = nullptr;
+  double                         pin_ff_      = 1;  // a pin the Liberty summary has no capacitance for
+  std::map<std::string, std::pair<double, double>, std::less<>> minted_center_;
   std::set<std::string>          names_;
   std::vector<std::string>       minted_names_, minted_pins_;
   std::map<std::string, std::string, std::less<>> minted_owner_;  // minted cell -> the load it was named after
-  unsigned                       serial_ = 0;
 };
 
 }  // namespace

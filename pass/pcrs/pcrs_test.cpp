@@ -209,9 +209,9 @@ protected:
       const auto node = driver.get_master_node();
       const auto io   = node.get_subnode_io();
       const auto name = io ? std::string(io->get_name()) : std::string{};
-      if (name == "BUFx1") {
+      if (name.starts_with("BUFx")) {
         driver = driver_named(node, "A");
-      } else if (name == "INVx1") {
+      } else if (name.starts_with("INVx")) {
         ++path.inversions;
         driver = driver_named(node, "A");
       } else if ((name == "DFFx1" || name == "DFFQNx1") && is_pcrs_cell(std::string(node.get_name()))) {
@@ -757,6 +757,75 @@ TEST_F(Pcrs, TheHeadIsCappedAcrossDomainsAndARegroupRebuildsAnUnchangedTree) {
   EXPECT_FALSE(stats.domains.front().kept);
   EXPECT_LE(fanout(reset), 8u);
   EXPECT_EQ(minted("BUFx1"), buffers);
+  expect_uniform(0, 0);
+}
+
+TEST_F(Pcrs, CellsAreSizedForThePinsAndTheWireTheyDrive) {
+  // A family of three buffers (the Liberty's unit is pF). Eight pins of 1 pF sit comfortably on the smallest
+  // (limit 20: 10 comfortable); spread over a long wire they need the next, and the root of a wide tree the largest.
+  tech.macros["BUFx4"] = core_macro({"A", "Y"});
+  tech.macros["BUFx9"] = core_macro({"A", "Y"});
+  std::string sized = kLib;
+  const std::string plain = "pin(Y) { direction : output; function : \"A\"; }\n  }\n  cell(INVx1)";
+  const auto        at    = sized.find(plain);
+  ASSERT_NE(at, std::string::npos);
+  sized.replace(at,
+                plain.size(),
+                R"(pin(Y) { direction : output; function : "A"; max_capacitance : 20; }
+  }
+  cell(BUFx4) {
+    area : 4;
+    pin(A) { direction : input; capacitance : 2; }
+    pin(Y) { direction : output; function : "A"; max_capacitance : 80; }
+  }
+  cell(BUFx9) {
+    area : 9;
+    pin(A) { direction : input; capacitance : 4; }
+    pin(Y) { direction : output; function : "A"; max_capacitance : 400; }
+  }
+  cell(INVx1))");
+  lib_text = sized;
+  for (int i = 0; i < 32; ++i) {
+    flop("u.r" + std::to_string(i), reset, clock);
+  }
+  const auto lib = cells();
+  // No wire: 64 pins in groups of eight, 8 pF each, all on the smallest buffer.
+  auto stats = build_reset(*graph, tech, lib, {.fanout = 8}, depth(0));
+  EXPECT_EQ(minted("BUFx1"), stats.buffers);
+  EXPECT_EQ(minted("BUFx4") + minted("BUFx9"), 0u);
+  expect_uniform(0, 0);
+  // Flops 100 units apart on a line, 0.02 pF a unit: a leaf group spans 300 units (6 pF of wire, 14 with its pins:
+  // the next size), and the head, with eight such buffers spread over the line, gets one root buffer of the largest.
+  const Position_of line = [](std::string_view name) -> std::optional<std::pair<double, double>> {
+    const auto digits = name.substr(name.find_last_not_of("0123456789") + 1);
+    return digits.empty() ? std::nullopt : std::optional{std::pair{100.0 * std::stoi(std::string(digits)), 0.0}};
+  };
+  const auto names = [&] {
+    std::set<std::string> found;
+    for (auto node : graph->body().nodes()) {
+      if (is_pcrs_cell(std::string(node.get_name()))) {
+        found.insert(std::string(node.get_name()));
+      }
+    }
+    return found;
+  };
+  const auto by_name = names();
+  stats = build_reset(*graph, tech, lib, {.fanout = 8, .regroup = true, .wire_ff_per_unit = 20}, depth(0), line);
+  // A cell is named after what it drives: the placement a call starts from finds a cell's place by its name. A
+  // group that position and name order agree on (r12..r15) keeps its name; the others are new names; and the same
+  // tree built again is the same names.
+  const auto by_place = names();
+  size_t     shared   = 0;
+  for (const auto& name : by_place) {
+    shared += by_name.contains(name);
+  }
+  EXPECT_EQ(shared, 2u);
+  build_reset(*graph, tech, lib, {.fanout = 8, .regroup = true, .wire_ff_per_unit = 20}, depth(0), line);
+  EXPECT_EQ(names(), by_place);
+  EXPECT_EQ(minted("BUFx1"), 0u);
+  EXPECT_GE(minted("BUFx4"), 8u);
+  EXPECT_GE(minted("BUFx9"), 1u);
+  EXPECT_LE(fanout(reset), 8u);
   expect_uniform(0, 0);
 }
 

@@ -24,8 +24,14 @@ call**: the previous buffers, inverters and pass flops are stripped, the loads a
   once (`Options::regroup`) so a tree made before placement does not keep its name-order groups. The root serves
   every clock domain of its network; when the domains together put more than the cap on it (many small gated-clock
   domains), its loads go behind one buffer tree. A graph output behind a buffer returns to the root undelayed.
-* **Cells.** The smallest plain posedge flop, identity buffer and inverter of the Liberty that the LEF can place. Names
-  are `<hierarchy>.__pcrs_rst{f<level>|b<level>|i}<n>`. Flops carry the node attribute `pcrs_stage` (low 16 bits the level,
+* **Cells.** The plain posedge flop, identity buffer and inverter families of the Liberty that the LEF can place. A
+  cell is the smallest of its family that the pins and the wire it drives leave at half its capacitance limit
+  (`Options::wire_ff_per_unit` and the positions give the wire; before a placement only the pins count), and the
+  root gets one sized buffer when its load is more than the smallest buffer would carry. Names are
+  `<hierarchy>.__pcrs_rst{f<level>|b<level>|i<level>|r0}_<id>`, where `<id>` is derived from what the cell drives:
+  every placement stage derives the trees again and finds a cell's place from the stage before by its name, so
+  the same loads must give the same name and other loads another (the master may differ by a size; the netlist's
+  wins). Flops carry the node attribute `pcrs_stage` (low 16 bits the level,
   bit 16 = inverted Q).
 
 ### Depth

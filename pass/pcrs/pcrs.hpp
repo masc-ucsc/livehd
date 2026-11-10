@@ -34,6 +34,10 @@ struct Options {
   // Rebuild every network, also one whose domains all keep their depth: the first call that knows where the
   // cells are regroups the sinks by position (a tree built before placement follows instance names).
   bool regroup = false;
+  // Wire capacitance per position unit (the unit Position_of answers in). With it and the positions, every minted
+  // cell is the smallest of its family that the pins and the wire it drives leave at half its capacitance limit;
+  // 0 counts the pins only.
+  double wire_ff_per_unit = 0;
 };
 
 // How deep one clock domain's tree is. `domain` names the (reset root, root clock) pair, `sinks` is
