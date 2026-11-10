@@ -2278,6 +2278,7 @@ struct View {
   // start op and the first position of each run of ops emitted for one start.
   std::vector<uint32_t>                      rank;
   std::vector<std::pair<uint32_t, uint32_t>> groups;
+  bool                                       deep = false;  // deepest operand cone first (order_view)
   std::vector<uint32_t> order;     // the live computed ops, in emission order
   std::vector<uint32_t> pos;       // per op: its index in `order` (none: not emitted)
   std::vector<uint32_t> cut;       // kernel k replays order[cut[k], cut[k + 1])
@@ -2698,6 +2699,47 @@ void order_view(const Tape& t, View& v) {
     size_t                next = 0;
   };
   std::vector<Frame> stack;
+  // Of a unit's operands the deepest cone is emitted first (Sethi-Ullman): while the long cone is
+  // computed, nothing else of this unit is being held, so values live for a shorter stretch of the
+  // order and fewer of them cross a cut (boundary values: minion 26,678 -> 23,026 and 193k -> 201k
+  // cycles/s, boom 8,476 -> 8,122). Used where the view is cut (`deep`); inside ONE kernel LLVM
+  // schedules the block itself and the effect is noise either way (dino +6%, picorv32 -4%).
+  std::vector<uint32_t> height;
+  if (v.deep) {
+    height.assign(n, 0);
+    std::vector<uint8_t> seen(n, 0);
+    for (auto root : roots) {
+      if (seen[root] != 0 || Tape::is_free(t.ops[root].kind)) {
+        continue;
+      }
+      seen[root] = 1;
+      stack.push_back({root, {}, 0});
+      operands(root, stack.back().ops, &live);
+      while (!stack.empty()) {
+        auto& f = stack.back();
+        if (f.next < f.ops.size()) {
+          const auto child = f.ops[f.next++];
+          if (seen[child] == 0) {
+            seen[child] = 1;
+            stack.push_back({child, {}, 0});
+            operands(child, stack.back().ops, &live);
+          }
+          continue;
+        }
+        uint32_t h = 0;
+        for (const auto o : f.ops) {
+          h = std::max(h, height[o]);
+        }
+        height[f.u] = h + 1;
+        stack.pop_back();
+      }
+    }
+  }
+  const auto deepest_first = [&](std::vector<uint32_t>& ops) {
+    if (!height.empty()) {
+      std::ranges::stable_sort(ops, [&](uint32_t a, uint32_t b) { return height[a] > height[b]; });
+    }
+  };
   for (auto root : roots) {
     if (done[root] != 0 || Tape::is_free(t.ops[root].kind)) {
       continue;
@@ -2705,6 +2747,7 @@ void order_view(const Tape& t, View& v) {
     v.groups.emplace_back(root, static_cast<uint32_t>(v.order.size()));
     stack.push_back({root, {}, 0});
     operands(root, stack.back().ops, &live);
+    deepest_first(stack.back().ops);
     done[root] = 1;
     while (!stack.empty()) {
       auto& f = stack.back();
@@ -2714,6 +2757,7 @@ void order_view(const Tape& t, View& v) {
           done[child] = 1;
           stack.push_back({child, {}, 0});
           operands(child, stack.back().ops, &live);
+          deepest_first(stack.back().ops);
         } else if (done[child] == 1) {
           // name the latches on the ring: the units on the stack from `child` up
           std::string ring;
@@ -3548,7 +3592,15 @@ Result Gen::run(const Sim_objects& out) {
       // third: 3,100 and 1,100 fewer words copied at every commit). The cheapest order seen stays. Only
       // for a view that will be cut: in ONE kernel every register is in place whatever the order.
       const auto target = chunk_target(gated);
-      const auto cost   = [&](View& v) {
+      // A view that will be cut is ordered deepest cone first. LHD_SIM_LNAST_ORDER (debug): rec, deep.
+      for (View* v : {&rise, &fall, &settle}) {
+        const char* how = livehd::debug::env<"LHD_SIM_LNAST_ORDER">();
+        v->deep         = how != nullptr ? std::string_view(how) == "deep" : view_size(tape, *v) > 4 * target;
+        if (v->deep) {
+          order_view(tape, *v);
+        }
+      }
+      const auto cost = [&](View& v) {
         cut_kernels(tape, v, target, gated);
         uint64_t                              words = 0;
         absl::flat_hash_map<uint32_t, size_t> last;  // register read op -> last kernel reading it

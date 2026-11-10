@@ -214,6 +214,13 @@ importing the lg) and compares the per-cycle `TRACE` lines byte for byte.
    small design. minion: 2,725 registers with a reader behind their writer -> 17, 1,175 words copied
    at each commit -> 65, 135k -> 196k cycles/s; boom 29.9k -> 35.1k.
 
+13. **Short lifetimes.** In a view that is cut, the operands of an op are emitted deepest cone
+   first (Sethi-Ullman): while the long cone is computed nothing else of that op is held, so a value
+   lives for a shorter stretch of the order and fewer values cross a cut (minion: 26,678 -> 23,026
+   crossing values, 193k -> 200k cycles/s; boom 8,476 -> 8,122). Inside one kernel LLVM schedules
+   the block itself and the effect is noise in both directions (dino +6%, picorv32 -4%), so a view
+   that stays one kernel keeps the recorded order. `LHD_SIM_LNAST_ORDER=rec|deep` forces either.
+
 Power-on follows inou.cgen.sim: a register with an initializer takes it; with neither an
 initializer nor a reset it is unknown, or zero under `sim.init_zero`; with a reset alone it is
 unknown under both. A memory with neither is zero under both (what a 2-state simulator reads back).
@@ -225,13 +232,13 @@ build, 128 jobs):
 
 | core | setup s | host C++ s | cycles/s | inou.cgen.sim: setup / host C++ / cycles/s |
 | --- | ---: | ---: | ---: | --- |
-| boom | 7.7 | 5.7 | 35.1k | 53.6 / 16.6 / 18.2k |
-| picorv32 | 0.4 | 5.1 | 6.13M | 0.7 / 5.2 / 5.58M |
-| dino | 0.4 | 5.4 | 5.58M | 0.5 / 5.4 / 5.81M |
-| bitcoin | 0.2 | 5.5 | 4.25M | 0.4 / 5.7 / 3.17M |
-| minion | 40.2 | 5.7 | 196.5k | 122.0 / 38.4 / 34.0k |
+| boom | 7.6 | 5.6 | 36.0k | 53.6 / 16.6 / 18.2k |
+| picorv32 | 0.4 | 5.1 | 6.40M | 0.7 / 5.2 / 5.58M |
+| dino | 0.4 | 5.4 | 5.65M | 0.5 / 5.4 / 5.81M |
+| bitcoin | 0.2 | 5.5 | 4.32M | 0.4 / 5.7 / 3.17M |
+| minion | 39.5 | 5.5 | 200.0k | 122.0 / 38.4 / 34.0k |
 
-Of that setup the flow itself (lowering, walk, LLVM) is 4.2 s on minion and 1.2 s on boom, where
+Of that setup the flow itself (lowering, walk, LLVM) is 3.4 s on minion and 1.2 s on boom, where
 inou.cgen.sim took 86 s and 47 s; the rest is the front end both flows share.
 
 Three things keep generation proportional to what is simulated: lg2lnast merges the arms of a
