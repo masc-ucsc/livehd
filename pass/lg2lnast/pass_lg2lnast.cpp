@@ -15,6 +15,7 @@
 #include "lnast.hpp"
 #include "lnast_builder.hpp"
 #include "lnast_stream.hpp"
+#include "inline_sub.hpp"
 #include "node_util.hpp"
 
 static Pass_plugin sample("pass_lg2lnast", Pass_lg2lnast::setup);
@@ -36,6 +37,9 @@ public:
   // each top-level statement as soon as it is finished (see lnast/lnast_stream.hpp).
   std::shared_ptr<Lnast> run(livehd::lnast_stream::Sink* stream = nullptr);
   std::string            why;
+  // Sub instances left waiting when lowering found an instance-level dependency cycle: the
+  // fcall form needs every argument before any output, so the caller may inline these and retry.
+  std::vector<hhds::Node_class> stuck_subs;
 
 private:
   hhds::Graph&   graph_;
@@ -89,9 +93,11 @@ private:
     bool                   has_zero_image = false;
     hhds::Pin_class        reset;  // the (active-high) reset driver, invalid = none
     bool                   async_reset = false;
+    int                    wensize     = 1;  // write-enable lanes of `bits/wensize` bits each
   };
   std::vector<Mem_rec> mems_;
   int                  mem_cnt_ = 0;
+  int                  wlane_cnt_ = 0;
   // Per-port sink name: pid = port * stride + the pin's base offset, spelled "<pid><base>" past port 0.
   static std::string mem_sink(int port, std::string_view base) {
     if (port == 0) {
@@ -518,8 +524,9 @@ bool Lowering::declare_memory(const hhds::Node_class& node) {
       return false;
     }
   }
-  if (const_i64("wensize").value_or(1) != 1) {
-    why = "memory with byte/bit write enables (wensize != 1; M2)";
+  const auto wensize = const_i64("wensize").value_or(1);
+  if (wensize < 1 || wensize > 64) {
+    why = "memory with an unsupported write-enable lane count";
     return false;
   }
   if (const_i64("fwd").value_or(0) != 0 || const_i64("undef").value_or(0) != 0) {
@@ -545,6 +552,11 @@ bool Lowering::declare_memory(const hhds::Node_class& node) {
   ++mem_cnt_;
   m.size = *size;
   m.bits = static_cast<int>(*bits);
+  if (*bits % wensize != 0) {
+    why = "memory whose width is not a multiple of its write-enable lanes";
+    return false;
+  }
+  m.wensize = static_cast<int>(wensize);
   if (auto p = get_driver_of_sink_name(node, "posclk"); p.is_const()) {
     const auto v = const_of(p);
     if (v.is_just_i64() && v.to_just_i64() == Ntype::Memory_posclk_mixed) {
@@ -744,11 +756,53 @@ bool Lowering::lower_memory_tail(const Mem_rec& m) {
       if (!a || !d) {
         return false;
       }
+      std::optional<std::string> en_op;
+      if (m.wensize > 1) {
+        if (pt.en.is_invalid()) {
+          why = "memory with write-enable lanes but no enable";
+          return false;
+        }
+        en_op = operand(pt.en);
+        if (!en_op) {
+          return false;
+        }
+      }
       if (!gated(pt.en, [&] {
+            if (m.wensize == 1) {
+              auto st = b_.add_child(Lnast_ntype::create_store());
+              b_.lnast->add_child(st, Lnast_node::create_ref(m.name));
+              leaf(st, *a);
+              leaf(st, *d);
+              return;
+            }
+            // Per-lane write: start from the entry as it is, replace each enabled lane, store back.
+            const int lane_bits = m.bits / m.wensize;
+            auto      old_t     = b_.create_lnast_tmp();
+            auto      g         = b_.add_child(Lnast_ntype::create_tuple_get());
+            b_.lnast->add_child(g, Lnast_node::create_ref(old_t));
+            b_.lnast->add_child(g, Lnast_node::create_ref(m.name));
+            leaf(g, *a);
+            const auto merged = std::format("__wlane{}", wlane_cnt_++);  // mutable: a %tmp is single-assignment
+            store_raw(merged, old_t);
+            for (int j = 0; j < m.wensize; ++j) {
+              const auto lane_en = b_.create_get_mask_stmts(*en_op, std::to_string(j), std::to_string(j + 1));
+              auto       c       = b_.create_lnast_tmp();
+              auto       ne      = b_.add_child(Lnast_ntype::create_ne());
+              b_.lnast->add_child(ne, Lnast_node::create_ref(c));
+              b_.lnast->add_child(ne, Lnast_node::create_ref(lane_en));
+              leaf(ne, "0");
+              auto n  = b_.create_if_stmt(false);
+              b_.add_if_cond(n, c);
+              auto th = b_.add_if_stmts(n);
+              b_.push_stmts(th);
+              const auto lane = b_.create_get_mask_stmts(*d, std::to_string(j * lane_bits), std::to_string((j + 1) * lane_bits));
+              b_.create_set_mask_stmts(merged, lane, std::to_string(j * lane_bits), std::to_string((j + 1) * lane_bits));
+              b_.pop_stmts();
+            }
             auto st = b_.add_child(Lnast_ntype::create_store());
             b_.lnast->add_child(st, Lnast_node::create_ref(m.name));
             leaf(st, *a);
-            leaf(st, *d);
+            leaf(st, merged);
           })) {
         return false;
       }
@@ -788,8 +842,9 @@ bool Lowering::lower_sub(const hhds::Node_class& node) {
   }
   const auto modname = std::string(sub_io->get_name());
   if (livehd::graph_util::is_marker_module_name(modname)) {
-    why = std::format("marker module {} (M1)", modname);
-    return false;
+    // fproperty / lgassert / lgundef: body-less, stateless, no hardware and no readable output
+    // (a later read of one fails by name below), so they only matter to the checkers.
+    return true;
   }
   absl::flat_hash_map<hhds::Port_id, hhds::Pin_class> in_conn;
   for (const auto& sink : node.inp_sorted_pins()) {
@@ -1078,6 +1133,11 @@ std::shared_ptr<Lnast> Lowering::run(livehd::lnast_stream::Sink* stream) {
       }
     }
     if (done != nodes.size()) {
+      for (size_t i = 0; i < nodes.size(); ++i) {
+        if (waiting[i] != 0 && nodes[i].mem < 0 && type_op_of(nodes[i].node) == Ntype_op::Sub) {
+          stuck_subs.push_back(nodes[i].node);
+        }
+      }
       std::string names;
       for (size_t i = 0, shown = 0; i < nodes.size() && shown < 4; ++i) {
         if (waiting[i] != 0) {
@@ -1140,6 +1200,33 @@ void Pass_lg2lnast::work(Eprp_var& var) {
   for (const auto& g : var.graphs) {
     if (!g) {
       continue;
+    }
+    // A cycle through instance-level dependencies cannot be spelled as fcall statements (each
+    // call needs all its arguments first). Splice the stuck instances into this graph, in
+    // memory only, and lower again; a graph that still cycles after a few rounds is skipped.
+    for (int round = 0; round < 8; ++round) {
+      Lowering probe(*g);
+      if (probe.run()) {
+        break;
+      }
+      if (probe.stuck_subs.empty()) {
+        break;
+      }
+      livehd::graph_util::Host_inliner inliner(g.get(), "pass.lg2lnast");
+      size_t                           spliced = 0;
+      for (const auto& inst : probe.stuck_subs) {
+        auto io = inst.get_subnode_io();
+        if (!io || livehd::graph_util::is_marker_module_name(io->get_name()) || !inst.get_subnode_graph()) {
+          continue;  // markers and body-less cells have nothing to splice
+        }
+        if (inliner.splice(inst)) {
+          ++spliced;
+        }
+      }
+      inliner.flush();
+      if (spliced == 0) {
+        break;
+      }
     }
     Lowering lw(*g);
     // `passes` label: comma separated stream passes (lnast/lnast_stream.hpp) run on the

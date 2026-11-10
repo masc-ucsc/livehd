@@ -69,12 +69,16 @@ the same memory is not a cycle; writes are emitted after every combinational cel
 Proven on the XiangShan `RenameTable` (70k lines of Verilog) and on flat dino.
 
 A graph outside the subset is skipped with a `graph-skipped` warning naming the
-reason, never lowered partially. Known gaps: memories with byte/bit write enables,
-non-zero initial images, several clocks, forwarding/undefined orderings; Latch, Clock_cell, n-ary
-Mux/compare, LUT, compact loops, and a cycle through instance-level dependencies
-(two submodules feeding each other through independent internal paths; the
-`fcall` form needs every argument before any output, `dino` top and a few ibex
-graphs hit it; a flattened graph has no such cycle).
+reason, never lowered partially.
+
+Added for the minion/boom/gemmini work: memories with byte/bit write enables (`wensize` lanes)
+lower to a read-modify-write of the entry with one conditional `set_mask` per lane (`__wlaneN`);
+that form is verified by simulation (`lnast_llvm_diff_test`, `mem_bytes`) but LEC refutes its
+round trip on an uninitialized memory, so it is not in the LEC list. A Sub instance cycle (the
+`fcall` form needs every argument before any output) is resolved by splicing the stuck instances
+into the graph in memory (`graph_util::Host_inliner`) and lowering again; `lgundef`, `fproperty`
+and `lgassert` markers are skipped. Known gaps: non-zero initial images, several clocks,
+forwarding/undefined orderings; Latch, Clock_cell, n-ary Mux/compare, LUT, compact loops.
 
 ## Milestone 3 prototype: LLVM straight from the typed LNAST
 

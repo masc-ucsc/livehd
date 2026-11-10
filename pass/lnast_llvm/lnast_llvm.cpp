@@ -81,6 +81,47 @@ std::optional<Literal> parse_literal(std::string_view t) {
   if (t.empty()) {
     return std::nullopt;
   }
+  if (t.size() > 3 && t[0] == '0' && (t[1] == 'u' || t[1] == 's') && t[2] == 'b') {
+    // 0ub / 0sb bit patterns; unknown bits (? x z) read as 0, like sim.unknown_zero.
+    const bool is_signed = t[1] == 's';
+    t.remove_prefix(3);
+    std::string bits;
+    for (char c : t) {
+      if (c == '_') {
+        continue;
+      }
+      if (c == '0' || c == '1') {
+        bits.push_back(c);
+      } else if (c == '?' || c == 'x' || c == 'X' || c == 'z' || c == 'Z') {
+        bits.push_back('0');
+      } else {
+        return std::nullopt;
+      }
+    }
+    if (bits.empty()) {
+      return std::nullopt;
+    }
+    const size_t n = bits.size();
+    l.mag.assign((n + 63) / 64, 0);
+    for (size_t i = 0; i < n; ++i) {
+      if (bits[n - 1 - i] == '1') {
+        l.mag[i / 64] |= uint64_t{1} << (i % 64);
+      }
+    }
+    if (is_signed && bits[0] == '1') {  // value - 2^n: negate the two's complement magnitude
+      l.negative = !l.negative;
+      uint64_t carry = 1;
+      for (size_t i = 0; i < l.mag.size(); ++i) {
+        const uint64_t inv = ~l.mag[i];
+        l.mag[i]           = inv + carry;
+        carry              = (carry != 0 && l.mag[i] == 0) ? 1 : 0;
+      }
+      if (n % 64 != 0) {
+        l.mag.back() &= (uint64_t{1} << (n % 64)) - 1;
+      }
+    }
+    return l;
+  }
   if (t.size() > 2 && t[0] == '0' && (t[1] == 'x' || t[1] == 'X')) {
     t.remove_prefix(2);
     size_t nibbles = 0;
@@ -1097,12 +1138,16 @@ void Gen::finish_frame(Frame& f, const Env& pre, const Env& end) {
       const auto total = static_cast<uint32_t>(r.mem_size * r.field.bits);
       V          all   = k_->array_read_all(ensure_array(idx, pre), total, true);
       if (r.reset_pin) {  // reset clears the whole image (initial image is zero) at the edge, over any write
-        auto ri = pre.find(*r.reset_pin);
-        if (ri == pre.end()) {
-          bail("memory reset signal '" + *r.reset_pin + "' is not an input");
+        const V* rv = nullptr;  // an input or any signal settled this cycle
+        if (auto e = end.find(*r.reset_pin); e != end.end()) {
+          rv = &e->second;
+        } else if (auto q = pre.find(*r.reset_pin); q != pre.end()) {
+          rv = &q->second;
+        } else {
+          bail("memory reset signal '" + *r.reset_pin + "' is not a known signal");
         }
-        V active = r.negreset ? k_->binary(Op::eq, ri->second, k_->constant(1, 0, true), 1, true)
-                              : k_->binary(Op::ne, ri->second, k_->constant(1, 0, true), 1, true);
+        V active = r.negreset ? k_->binary(Op::eq, *rv, k_->constant(1, 0, true), 1, true)
+                              : k_->binary(Op::ne, *rv, k_->constant(1, 0, true), 1, true);
         all      = k_->mux(active, all, k_->constant_words(total, std::vector<uint64_t>((total + 63) / 64, 0), true), total, true);
       }
       next_[idx] = all;
@@ -1111,12 +1156,16 @@ void Gen::finish_frame(Frame& f, const Env& pre, const Env& end) {
     auto nx = end.find(r.local + next_tag);
     V    n  = nx != end.end() ? nx->second : end.at(r.local);
     if (r.reset_pin) {
-      auto ri = pre.find(*r.reset_pin);
-      if (ri == pre.end()) {
-        bail("reset signal '" + *r.reset_pin + "' is not an input");
+      const V* rv = nullptr;  // an input or any signal settled this cycle
+      if (auto e = end.find(*r.reset_pin); e != end.end()) {
+        rv = &e->second;
+      } else if (auto q = pre.find(*r.reset_pin); q != pre.end()) {
+        rv = &q->second;
+      } else {
+        bail("reset signal '" + *r.reset_pin + "' is not a known signal");
       }
-      V active = r.negreset ? k_->binary(Op::eq, ri->second, k_->constant(1, 0, true), 1, true)
-                            : k_->binary(Op::ne, ri->second, k_->constant(1, 0, true), 1, true);
+      V active = r.negreset ? k_->binary(Op::eq, *rv, k_->constant(1, 0, true), 1, true)
+                            : k_->binary(Op::ne, *rv, k_->constant(1, 0, true), 1, true);
       V init   = literal(r.initial ? *r.initial : Literal{false, {0}});
       n        = k_->mux(active, n, init, r.field.bits, !r.field.sign);
     }

@@ -138,6 +138,8 @@ int main(int argc, char** argv) {
     return 1;
   }
   const char*           dump = std::getenv("LNAST_LLVM_DUMP");
+  // LNAST_LLVM_EVERY=N: print only cycles with c % N == N-1 (speed runs; the testbench matches).
+  const uint64_t every = std::getenv("LNAST_LLVM_EVERY") != nullptr ? std::strtoull(std::getenv("LNAST_LLVM_EVERY"), nullptr, 10) : 1;
   std::vector<uint64_t> state(words + 1, 0);
   auto                  store = [&](const Field& f, uint64_t v) {
     v &= mask_of(f.bits);
@@ -156,6 +158,9 @@ int main(int argc, char** argv) {
       store(ins[i], ((((c + 1) * p) + (c + 1) * (c + 1) * q) >> 3));
     }
     entry(state.data(), nullptr);
+    if (every > 1 && c % every != every - 1) {
+      continue;
+    }
     std::printf("TRACE %llu", static_cast<unsigned long long>(c));
     for (const auto& o : outs) {
       if (o.bits > 64) {

@@ -1,6 +1,6 @@
 # Writes the Pyrope testbench matching lnast_llvm_run's stimulus for the ports in kernel.json.
 import json, sys
-js = json.load(open(sys.argv[1])); lg_name = sys.argv[2]; top = sys.argv[3]; cycles = sys.argv[4]
+js = json.load(open(sys.argv[1])); lg_name = sys.argv[2]; top = sys.argv[3]; cycles = sys.argv[4]; every = int(sys.argv[5]) if len(sys.argv) > 5 else 1
 out = ['const dut_t = import("lg:%s")' % lg_name, 'test trace(cycles:U32=%s) {' % cycles, '  mut dut = dut_t', '  tick cycles {']
 for i, f in enumerate(js['inputs']):
     p = 2654435761 + 1234567 * i; q = 40503 + 2 * i
@@ -11,6 +11,11 @@ for i, f in enumerate(js['inputs']):
     out.append('    dut.%s = %s' % (f['name'], expr))
 out.append('    step')
 fmt = ' '.join('%s={dut.%s}' % (o['name'], o['name']) for o in js['outputs'])
-out.append('    puts("TRACE {clock} %s")' % fmt)
+if every > 1:
+    out.append('    if clock %% %d == %d {' % (every, every - 1))
+    out.append('      puts("TRACE {clock} %s")' % fmt)
+    out.append('    }')
+else:
+    out.append('    puts("TRACE {clock} %s")' % fmt)
 out += ['  }', '}']
 print('\n'.join(out))
