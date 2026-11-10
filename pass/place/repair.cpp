@@ -938,7 +938,7 @@ std::optional<Buffer_tree> apply(hhds::Graph& graph, const Inventory& cells, con
     proposed.cells     = static_cast<uint64_t>(static_cast<int64_t>(proposed.cells) + cells_delta);
     proposed.area_um2 += area_delta;
     // Sizing may use only part of the allowance: the rest is for the buffer trees that sizing cannot replace.
-    if (!options.growth_budget->allows(proposed, sizing ? sizing_growth_share : 1.0)) {
+    if (!options.growth_budget->allows(proposed, sizing ? options.growth_budget->sizing_share : 1.0)) {
       ++options.growth_budget->rejected;
       throw std::runtime_error("physical cell/area growth budget exceeded");
     }

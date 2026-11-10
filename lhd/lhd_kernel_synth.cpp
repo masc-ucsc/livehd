@@ -1211,6 +1211,10 @@ livehd::placement::Options placement_options(const Options& opts) {
   }
   out.eval_budget     = static_cast<unsigned>(std::max<int64_t>(4, integer("place.eval_budget", "6")));
   out.growth_fraction = number("place.growth", "0.03");
+  out.growth_sizing_share = number("place.growth.sizing_share", "0.6");
+  if (!std::isfinite(out.growth_sizing_share) || out.growth_sizing_share <= 0 || out.growth_sizing_share > 1) {
+    throw Lhd_error{"usage", "synth.place.growth.sizing_share expects a fraction in (0,1]", ""};
+  }
   if (!std::isfinite(out.growth_fraction) || out.growth_fraction < 0 || out.growth_fraction > 4) {
     throw Lhd_error{"usage", "synth.place.growth expects a fraction in [0,4]", ""};
   }
@@ -2637,7 +2641,8 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
       place_options.output_dir = root + "/place";
       if (place_options.full) {
         livehd::placement::initialize_growth_budget(**found, place_options);
-        place_options.growth_budget->fraction = place_options.growth_fraction;
+        place_options.growth_budget->fraction     = place_options.growth_fraction;
+        place_options.growth_budget->sizing_share = place_options.growth_sizing_share;
       }
       if (physical_cache) {
         const auto hint = physical_cache->placement_hint();

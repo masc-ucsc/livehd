@@ -996,6 +996,11 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      Synth_set_option::Kind::file,
      "fraction of the synthesized standard-cell count and area that placement-time repair (sizing, buffering) may add; "
      "tie cells minted by placement are charged"},
+    {"place.growth.sizing_share",
+     "0.6",
+     Synth_set_option::Kind::file,
+     "part of place.growth that gate sizing may use, in (0,1]; buffer insertion may use all of it, so a smaller share keeps more "
+     "headroom for the buffer trees of high-fanout nets"},
     {"place.fp.warpspace", "false", Synth_set_option::Kind::boolean, "enable density warp for this placement stage"},
     {"place.fp.warpspace.weight",
      "1",
