@@ -1954,6 +1954,8 @@ public:
     uint64_t          size       = 0;
     bool              packed     = false;  // one packed integer (small odd-width entries)
     llvm::AllocaInst* storage    = nullptr;
+    llvm::Value*      ptr        = nullptr;  // the storage: the alloca, or a region of the state allocation
+    llvm::Type*       ty         = nullptr;  // pointee type of `ptr`
   };
   std::vector<Array_local> arrays;
 
@@ -2692,13 +2694,67 @@ size_t Cgen_llvm::array_create(uint32_t bits, uint64_t size) {
   if (a.packed) {
     a.storage = allocations.CreateAlloca(impl_->builder.getIntNTy(static_cast<uint32_t>(whole)), nullptr, "array.packed");
     a.storage->setAlignment(llvm::Align(8));
+    a.ptr = a.storage;
+    a.ty  = a.storage->getAllocatedType();
     impl_->arrays.push_back(a);
     return impl_->arrays.size() - 1;
   }
   a.storage = allocations.CreateAlloca(llvm::ArrayType::get(impl_->builder.getIntNTy(a.store_bits), a.size), nullptr, "array");
   a.storage->setAlignment(llvm::Align(a.store_bits >= 64 ? 8 : a.store_bits / 8));
+  a.ptr = a.storage;
+  a.ty  = a.storage->getAllocatedType();
   impl_->arrays.push_back(a);
   return impl_->arrays.size() - 1;
+}
+
+size_t Cgen_llvm::array_state_words(uint32_t bits, uint64_t size) {
+  bits                     = std::max<uint32_t>(bits, 1);
+  size                     = std::max<uint64_t>(size, 1);
+  const uint32_t store_bits = bits <= 8 ? 8 : bits <= 16 ? 16 : bits <= 32 ? 32 : static_cast<uint32_t>(word_count(bits) * 64);
+  const bool     packed     = store_bits != bits && uint64_t(bits) * size <= 128;
+  const uint64_t total_bits = packed ? uint64_t(bits) * size : uint64_t(store_bits) * size;
+  return static_cast<size_t>((total_bits + 63) / 64);
+}
+
+size_t Cgen_llvm::array_create_in_state(uint32_t bits, uint64_t size, size_t word) {
+  if (!impl_->state_abi || word + array_state_words(bits, size) > impl_->state_words) {
+    impl_->error = "LLVM state array is outside its allocation";
+    return 0;
+  }
+  Impl::Array_local a;
+  a.bits       = std::max<uint32_t>(bits, 1);
+  a.store_bits = a.bits <= 8 ? 8 : a.bits <= 16 ? 16 : a.bits <= 32 ? 32 : static_cast<uint32_t>(word_count(a.bits) * 64);
+  a.size       = std::max<uint64_t>(size, 1);
+  const auto whole = a.bits * a.size;
+  a.packed         = a.store_bits != a.bits && whole <= 128;
+  a.ptr            = impl_->word_ptr(impl_->inputs, word);
+  a.ty             = a.packed ? static_cast<llvm::Type*>(impl_->builder.getIntNTy(static_cast<uint32_t>(whole)))
+                               : static_cast<llvm::Type*>(llvm::ArrayType::get(impl_->builder.getIntNTy(a.store_bits), a.size));
+  impl_->arrays.push_back(a);
+  return impl_->arrays.size() - 1;
+}
+
+bool Cgen_llvm::array_clear_if(size_t array, Value condition) {
+  if (array >= impl_->arrays.size() || condition.width == 0) {
+    return false;
+  }
+  const auto& a    = impl_->arrays[array];
+  auto&       b    = impl_->builder;
+  auto*       cond = impl_->get(condition);
+  if (cond == nullptr) {
+    return false;
+  }
+  auto* active = b.CreateICmpNE(cond, llvm::ConstantInt::get(cond->getType(), 0));
+  auto* fn     = b.GetInsertBlock()->getParent();
+  auto* clear  = llvm::BasicBlock::Create(impl_->context, "array.clear", fn);
+  auto* cont   = llvm::BasicBlock::Create(impl_->context, "array.cont", fn);
+  b.CreateCondBr(active, clear, cont);
+  b.SetInsertPoint(clear);
+  const auto bytes = a.packed ? (uint64_t(a.bits) * a.size + 7) / 8 : uint64_t(a.store_bits / 8) * a.size;
+  b.CreateMemSet(a.ptr, b.getInt8(0), bytes, llvm::Align(8));
+  b.CreateBr(cont);
+  b.SetInsertPoint(cont);
+  return true;
 }
 
 bool Cgen_llvm::array_seed(size_t array, Value base) {
@@ -2716,13 +2772,13 @@ bool Cgen_llvm::array_seed(size_t array, Value base) {
   if (a.packed || a.store_bits == a.bits) {
     // Entry i sits at bits [i*bits, (i+1)*bits) of the packed value, which is
     // exactly its little-endian place in the array: one wide store.
-    b.CreateAlignedStore(value, a.storage, llvm::Align(1));
+    b.CreateAlignedStore(value, a.ptr, llvm::Align(1));
     return true;
   }
   for (uint64_t i = 0; i < a.size; ++i) {
     auto* entry = b.CreateLShr(value, llvm::ConstantInt::get(value->getType(), i * a.bits));
     entry       = cast_integer(b, cast_integer(b, entry, a.bits, true), a.store_bits, true);
-    b.CreateStore(entry, b.CreateConstInBoundsGEP2_64(a.storage->getAllocatedType(), a.storage, 0, i));
+    b.CreateStore(entry, b.CreateConstInBoundsGEP2_64(a.ty, a.ptr, 0, i));
   }
   return true;
 }
@@ -2751,8 +2807,8 @@ bool Cgen_llvm::array_write(size_t array, Value enable, Value address, Value dat
                                       llvm::ConstantInt::get(ty, 0));
     auto* mask       = b.CreateShl(lane, shift);
     auto* put = b.CreateShl(b.CreateAnd(cast_integer(b, cast_integer(b, value, a.bits, data.unsign), whole, true), lane), shift);
-    auto* old = b.CreateAlignedLoad(ty, a.storage, llvm::Align(8));
-    b.CreateAlignedStore(b.CreateOr(b.CreateAnd(old, b.CreateNot(mask)), put), a.storage, llvm::Align(8));
+    auto* old = b.CreateAlignedLoad(ty, a.ptr, llvm::Align(8));
+    b.CreateAlignedStore(b.CreateOr(b.CreateAnd(old, b.CreateNot(mask)), put), a.ptr, llvm::Align(8));
     return true;
   }
   // Branch-free: a disabled or out-of-range write stores the entry's own
@@ -2760,7 +2816,7 @@ bool Cgen_llvm::array_write(size_t array, Value enable, Value address, Value dat
   // own and the body stays one straight-line block LLVM can schedule.
   auto* entry = cast_integer(b, cast_integer(b, value, a.bits, data.unsign), a.store_bits, true);
   auto* ptr
-      = b.CreateInBoundsGEP(a.storage->getAllocatedType(), a.storage, {b.getInt64(0), b.CreateSelect(valid, index, b.getInt64(0))});
+      = b.CreateInBoundsGEP(a.ty, a.ptr, {b.getInt64(0), b.CreateSelect(valid, index, b.getInt64(0))});
   auto* old = b.CreateLoad(entry->getType(), ptr);
   b.CreateStore(b.CreateSelect(valid, entry, old), ptr);
   return true;
@@ -2777,11 +2833,11 @@ Cgen_llvm::Value Cgen_llvm::array_read(size_t array, Value address, uint32_t res
   llvm::Value* value = nullptr;
   if (a.packed) {
     const auto whole = static_cast<uint32_t>(a.bits * a.size);
-    auto*      all   = b.CreateAlignedLoad(b.getIntNTy(whole), a.storage, llvm::Align(8));
+    auto*      all   = b.CreateAlignedLoad(b.getIntNTy(whole), a.ptr, llvm::Align(8));
     value            = b.CreateLShr(all, cast_integer(b, b.CreateMul(index, b.getInt64(a.bits)), whole, true));
   } else {
     value = b.CreateLoad(b.getIntNTy(a.store_bits),
-                         b.CreateInBoundsGEP(a.storage->getAllocatedType(), a.storage, {b.getInt64(0), index}));
+                         b.CreateInBoundsGEP(a.ty, a.ptr, {b.getInt64(0), index}));
   }
   value = cast_integer(b, value, a.bits, true);
   value = b.CreateSelect(valid, value, llvm::ConstantInt::get(value->getType(), 0));  // out of range reads 0
@@ -2797,12 +2853,12 @@ Cgen_llvm::Value Cgen_llvm::array_read_all(size_t array, uint32_t result_width, 
   const auto   whole = static_cast<uint32_t>(a.bits * a.size);
   llvm::Value* value = nullptr;
   if (a.packed || a.store_bits == a.bits) {
-    value = b.CreateAlignedLoad(b.getIntNTy(whole), a.storage, llvm::Align(1));
+    value = b.CreateAlignedLoad(b.getIntNTy(whole), a.ptr, llvm::Align(1));
   } else {
     value = llvm::ConstantInt::get(b.getIntNTy(whole), 0);
     for (uint64_t i = 0; i < a.size; ++i) {
       llvm::Value* entry
-          = b.CreateLoad(b.getIntNTy(a.store_bits), b.CreateConstInBoundsGEP2_64(a.storage->getAllocatedType(), a.storage, 0, i));
+          = b.CreateLoad(b.getIntNTy(a.store_bits), b.CreateConstInBoundsGEP2_64(a.ty, a.ptr, 0, i));
       entry = cast_integer(b, cast_integer(b, entry, a.bits, true), whole, true);
       value = b.CreateOr(value, b.CreateShl(entry, llvm::ConstantInt::get(entry->getType(), i * a.bits)));
     }
@@ -4409,23 +4465,13 @@ bool Cgen_llvm::write_module(std::string_view path, std::string& error, bool tra
         impl_->module->print(ir, nullptr);
       }
     }
-    // Instruction selection, scheduling and register allocation are superlinear in function size
-    // (RenameTable: one 93k-instruction block spent 338 s here vs 71 s in O2). Past a size
-    // threshold, trade code quality for compile time. LHD_SIM_LLVM_EMIT_OPT=0..3 forces a level.
+    // LHD_SIM_LLVM_EMIT_OPT=0..3 forces the machine-code optimization level (default 2). A lower
+    // level compiles huge single-block functions faster but runs markedly slower (gemmini16:
+    // 0.41 s vs 0.22 s per 20k cycles), so it is opt-in, not a size heuristic.
     {
-      size_t emit_insts = 0;
-      for (const auto& function : *impl_->module) {
-        for (const auto& block : function) {
-          emit_insts += block.size();
-        }
-      }
       int level = 2;
       if (const auto* forced = std::getenv("LHD_SIM_LLVM_EMIT_OPT")) {
         level = std::atoi(forced);
-      } else if (emit_insts > 40000) {
-        level = 0;
-      } else if (emit_insts > 15000) {
-        level = 1;
       }
       if (level != 2) {
         const auto cg = level <= 0 ? llvm::CodeGenOptLevel::None : (level == 1 ? llvm::CodeGenOptLevel::Less : llvm::CodeGenOptLevel::Aggressive);

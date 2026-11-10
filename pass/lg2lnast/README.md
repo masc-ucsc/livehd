@@ -101,11 +101,12 @@ stimulus into the kernel (`lnast_llvm_run`) and into the existing
 the per-cycle `TRACE` lines byte for byte.
 
 Verified on XiangShan `RenameTable` (100 cycles, byte for byte against the `lhd sim` llvm flow).
-Generation time (`LNAST_LLVM_TIME=1`, `LHD_SIM_LLVM_TIME=1`): the walks take 2.5 s each; LLVM
-dominated. One 93k-instruction function spent 71 s in O2 and 338 s in instruction selection, so
-`Cgen_llvm` now emits very large functions (> 40k instructions; > 15k a middle level) at a lower
-codegen level (`LHD_SIM_LLVM_EMIT_OPT=0..3` forces one): 474 s -> 144 s. A balanced OR/AND/XOR
-tree changed nothing there (the 413k pre-optimization instructions are not OR chains).
+Timing (`LNAST_LLVM_TIME=1`, `LHD_SIM_LLVM_TIME=1`; use an optimized `lhd`: `bazel build -c opt`,
+a fastbuild `lhd` is 10-30x slower in LLVM and misleads): RenameTable generates in 20 s (walks 2.5 s,
+O2 2 s, instruction selection 9 s). `LHD_SIM_LLVM_EMIT_OPT=0..3` forces the machine-code level;
+level 0 compiles huge single-block functions faster (RenameTable 12 s) but the kernel runs about 2x
+slower (gemmini16 0.41 s vs 0.22 s), so level 2 stays the default. A balanced OR/AND/XOR tree
+changed nothing on RenameTable (its 413k pre-optimization instructions are not OR chains).
 
 Not covered yet: latches, `Clock_cell`, negedge or several clocks, whole-array
 `update`, memories with non-zero images, wide (> 64 bit) register initial values,

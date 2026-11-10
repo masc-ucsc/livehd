@@ -346,6 +346,17 @@ bool Lowering::lower_node(const hhds::Node_class& node) {
       out = emit(Lnast_ntype::create_get_mask(), {*a, std::to_string(r->first), std::to_string(r->second)}, dpin);
       break;
     }
+    case Ntype_op::Set_mask: {
+      auto r = livehd::graph_util::bit_range(node);
+      auto a = named("a");
+      auto v = named("value");
+      if (!r || !a || !v) {
+        why = why.empty() ? "set_mask without a constant range" : why;
+        return false;
+      }
+      out = emit(Lnast_ntype::create_set_mask(), {*a, *v, std::to_string(r->first), std::to_string(r->second)}, dpin);
+      break;
+    }
     case Ntype_op::LT:
     case Ntype_op::GT:
     case Ntype_op::EQ: {

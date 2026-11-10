@@ -17,7 +17,7 @@ CYCLES=96
 mkdir -p "$W"
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
-for design in comb_reg reset_enable reduce_shift struct_port hier async_reset m3_memory m3_memory_array mem_reset mem_reload mem_update mem_collide nary_ops mem_bytes; do
+for design in comb_reg reset_enable reduce_shift struct_port hier async_reset m3_memory m3_memory_array mem_reset mem_reload mem_update mem_collide nary_ops mem_bytes setmask; do
   top="$design"
   d="$W/$design"
   mkdir -p "$d"

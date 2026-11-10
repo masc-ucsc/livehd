@@ -153,6 +153,13 @@ public:
   // in program order, and loads.
   [[nodiscard]] size_t    array_create(uint32_t bits, uint64_t size);
   bool                    array_seed(size_t array, Value base);
+  // The same array living IN the state allocation (state ABI only), at word `word`, in its natural
+  // layout (array_state_words 64-bit words): reads and writes go straight to the state, so there is
+  // no seed and no publish. A write lands at once, program order decides what later reads see.
+  [[nodiscard]] static size_t array_state_words(uint32_t bits, uint64_t size);
+  [[nodiscard]] size_t    array_create_in_state(uint32_t bits, uint64_t size, size_t word);
+  // Zero every entry when `condition` is non-zero.
+  bool                    array_clear_if(size_t array, Value condition);
   bool                    array_write(size_t array, Value enable, Value address, Value data);
   [[nodiscard]] Value     array_read(size_t array, Value address, uint32_t result_width, bool result_unsign);
   [[nodiscard]] Value     array_read_all(size_t array, uint32_t result_width, bool result_unsign);

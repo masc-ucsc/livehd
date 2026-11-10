@@ -287,17 +287,13 @@ private:
     }
     return ensure_array(it->second, env);
   }
-  // The kernel-local array of memory `idx`, created and seeded on first use.
+  // The array of memory `idx`: it lives in the state allocation (no seed, no publish); created on first use.
   size_t ensure_array(size_t idx, const Env&) {
     if (arrays_[idx] != std::numeric_limits<size_t>::max()) {
       return arrays_[idx];
     }
-    const auto& r    = regs_[idx];
-    V           base = walk_base_[idx];  // (reset clears the whole image at the edge, over any write: finish_frame)
-    arrays_[idx] = k_->array_create(r.field.bits, r.mem_size);
-    if (!k_->array_seed(arrays_[idx], base)) {
-      bail("memory seed");
-    }
+    const auto& r = regs_[idx];
+    arrays_[idx]  = k_->array_create_in_state(r.field.bits, r.mem_size, r.field.word);
     return arrays_[idx];
   }
 
@@ -680,6 +676,9 @@ void Gen::exec_stmt(const std::vector<Lnast_nid>& stmts, size_t& i, Env& env) {
     case NT::Lnast_ntype_store: {
       if (c.size() == 3 && ty(c[0]) == NT::Lnast_ntype_ref && fr_->reg_idx.contains(nm(c[0])) && regs_[fr_->reg_idx.at(nm(c[0]))].mem_size != 0) {
         const auto& r = regs_[fr_->reg_idx.at(nm(c[0]))];
+        if (!record_) {
+          break;  // the settle walk reads the post-edge memory; the writes were applied in walk A
+        }
         V           address = operand(c[1], env);
         V           data    = k_->resize(operand(c[2], env), r.field.bits, !r.field.sign);
         if (!k_->array_write(mem_array(nm(c[0]), env), path_enable(), address, data)) {
@@ -937,6 +936,9 @@ void Gen::exec_stmt(const std::vector<Lnast_nid>& stmts, size_t& i, Env& env) {
         if (nm(c[0]) != nm(c[1]) || lo->mag[0] != 0 || hi->mag[0] != total) {
           bail("partial or renamed whole-array write");
         }
+        if (!record_) {
+          break;
+        }
         V      bus  = k_->resize(operand(c[2], env), total, true);
         size_t arr  = mem_array(nm(c[1]), env);
         const uint32_t abits = std::max<uint32_t>(1, 64 - static_cast<uint32_t>(__builtin_clzll(r.mem_size)));
@@ -1064,7 +1066,9 @@ void Gen::exec_stmt(const std::vector<Lnast_nid>& stmts, size_t& i, Env& env) {
 }
 
 void Gen::start_walk(const std::vector<V>& base) {
-  arrays_.assign(regs_.size(), std::numeric_limits<size_t>::max());
+  if (arrays_.size() != regs_.size()) {
+    arrays_.assign(regs_.size(), std::numeric_limits<size_t>::max());
+  }
   walk_base_ = base;
   path_      = V{};
 }
@@ -1135,8 +1139,6 @@ void Gen::finish_frame(Frame& f, const Env& pre, const Env& end) {
   for (size_t idx : f.owned) {
     const auto& r = regs_[idx];
     if (r.mem_size != 0) {
-      const auto total = static_cast<uint32_t>(r.mem_size * r.field.bits);
-      V          all   = k_->array_read_all(ensure_array(idx, pre), total, true);
       if (r.reset_pin) {  // reset clears the whole image (initial image is zero) at the edge, over any write
         const V* rv = nullptr;  // an input or any signal settled this cycle
         if (auto e = end.find(*r.reset_pin); e != end.end()) {
@@ -1148,9 +1150,11 @@ void Gen::finish_frame(Frame& f, const Env& pre, const Env& end) {
         }
         V active = r.negreset ? k_->binary(Op::eq, *rv, k_->constant(1, 0, true), 1, true)
                               : k_->binary(Op::ne, *rv, k_->constant(1, 0, true), 1, true);
-        all      = k_->mux(active, all, k_->constant_words(total, std::vector<uint64_t>((total + 63) / 64, 0), true), total, true);
+        if (!k_->array_clear_if(ensure_array(idx, pre), active)) {
+          bail("memory reset");
+        }
       }
-      next_[idx] = all;
+      next_[idx] = V{};  // the memory is updated in place: nothing to publish
       continue;
     }
     auto nx = end.find(r.local + next_tag);
@@ -1204,11 +1208,12 @@ Result Gen::run(const std::string& dir) {
     }
     for (auto& r : regs_) {
       if (r.mem_size != 0) {
+        // In-place array layout (Cgen_llvm::array_state_words); the input slot is a placeholder.
         Field whole = r.field;
-        whole.bits  = static_cast<uint32_t>(r.mem_size * r.field.bits);
+        whole.bits  = static_cast<uint32_t>(Cgen_llvm::array_state_words(r.field.bits, r.mem_size) * 64);
         place(whole);
         r.field.word = whole.word;
-        layout_inputs.push_back({whole.word, whole.bits, true, 0});
+        layout_inputs.push_back({whole.word, 1, true, 0});
         continue;
       }
       place(r.field);
@@ -1270,6 +1275,9 @@ Result Gen::run(const std::string& dir) {
     }
     for (size_t i = 0; i < regs_.size(); ++i) {
       std::string error;
+      if (regs_[i].mem_size != 0) {
+        continue;
+      }
       if (next[i].width == 0) {
         bail("register '" + regs_[i].field.name + "' has no next state");
       }
@@ -1310,7 +1318,7 @@ Result Gen::run(const std::string& dir) {
     for (auto& r : regs_) {
       Field f = r.field;
       if (r.mem_size != 0) {
-        f.bits = static_cast<uint32_t>(r.mem_size * r.field.bits);
+        f.bits = static_cast<uint32_t>(Cgen_llvm::array_state_words(r.field.bits, r.mem_size) * 64);
         f.sign = false;
       }
       if (r.initial) {
