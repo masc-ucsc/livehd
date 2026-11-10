@@ -5952,11 +5952,31 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
   const bool use_pcrs   = pcrs_active(options);
   pcrs::Stats pcrs_stats;
   if (use_pcrs) {
-    pcrs_stats = pcrs::build_reset(graph,
-                                   tech,
-                                   options.technology().cells,
-                                   {.fanout = options.reset_fanout},
-                                   options.pcrs_depth ? options.pcrs_depth->policy(options.reset_fanout) : pcrs::Depth_policy{});
+    // A tree built before the first placement groups its sinks by instance name. The first call that starts
+    // from a placement regroups them by position, once: a reset hop then spans neighbours, not the die.
+    std::unordered_map<std::string_view, std::pair<double, double>> placed_at;
+    if (const auto* seed = options.previous ? options.previous.get() : options.restart_seed.get()) {
+      placed_at.reserve(seed->components.size());
+      for (const auto& c : seed->components) {
+        if (c.place.status != Status::UNPLACED) {
+          placed_at.emplace(c.name, std::pair{double(c.place.x), double(c.place.y)});
+        }
+      }
+    }
+    const pcrs::Position_of position_of = [&](std::string_view instance) -> std::optional<std::pair<double, double>> {
+      const auto found = placed_at.find(instance);
+      return found == placed_at.end() ? std::nullopt : std::optional{found->second};
+    };
+    const bool regroup = !placed_at.empty() && options.pcrs_depth && !options.pcrs_depth->clustered;
+    pcrs_stats         = pcrs::build_reset(graph,
+                                           tech,
+                                           options.technology().cells,
+                                           {.fanout = options.reset_fanout, .regroup = regroup},
+                                           options.pcrs_depth ? options.pcrs_depth->policy(options.reset_fanout) : pcrs::Depth_policy{},
+                                           placed_at.empty() ? pcrs::Position_of{} : position_of);
+    if (regroup) {
+      options.pcrs_depth->clustered = true;
+    }
     result.pcrs_stats = std::make_shared<const pcrs::Stats>(pcrs_stats);
   }
   const auto reset_tree

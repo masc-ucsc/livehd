@@ -19,7 +19,11 @@ call**: the previous buffers, inverters and pass flops are stripped, the loads a
   polarity. Asynchronous reset pins are served the same way: the reset is registered to the clock edge.
 * **Fanout.** No driver of the tree carries more than `synth.place.reset_fanout` loads (default 32). Level sizes follow
   from the sink count: `ceil(sinks/f)` leaf flops, `ceil(that/f)` above, and a buffer tree in front of level 1 if needed.
-  Sinks cluster by placement when positions are known (recursive bisection), else by instance name (source hierarchy).
+  Sinks cluster by placement when positions are known (recursive bisection), else by instance name (source hierarchy):
+  the placer passes the positions of the placement a call starts from, and the first such call rebuilds every tree
+  once (`Options::regroup`) so a tree made before placement does not keep its name-order groups. The root serves
+  every clock domain of its network; when the domains together put more than the cap on it (many small gated-clock
+  domains), its loads go behind one buffer tree. A graph output behind a buffer returns to the root undelayed.
 * **Cells.** The smallest plain posedge flop, identity buffer and inverter of the Liberty that the LEF can place. Names
   are `<hierarchy>.__pcrs_rst{f<level>|b<level>|i}<n>`. Flops carry the node attribute `pcrs_stage` (low 16 bits the level,
   bit 16 = inverted Q).

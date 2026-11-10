@@ -392,6 +392,44 @@ public:
   std::vector<std::string> cells_since(const Mark& m) const { return {minted_names_.begin() + m.cells, minted_names_.end()}; }
   std::vector<std::string> pins_since(const Mark& m) const { return {minted_pins_.begin() + m.pins, minted_pins_.end()}; }
 
+  // The head serves every domain of its network, and each domain connects up to `fanout` loads to it (its first
+  // flop level, or the sinks of a flat domain): with many small domains the head itself is the unbuffered net
+  // (NVDLA partition_p: 214 loads over 60 gated-clock domains). Put them behind one buffer tree, neighbours
+  // together. Buffers add no latency, so every domain keeps its depth.
+  void cap_head(const Pin& head, const Position_of& position_of, Domain_stats& domain) {
+    std::vector<Leaf> loads;
+    for (const auto& edge : head.out_edges()) {
+      const auto sink = edge.sink;
+      if (is_core_cell(lib_, sink.get_master_node()) && sink.get_driver_pins().size() == 1) {
+        loads.push_back({sink, false});
+      }
+    }
+    if (loads.size() <= options_.fanout) {
+      return;
+    }
+    // A cell minted in this call has no position yet: it sits with the load it was named after.
+    const Position_of where = [&](std::string_view instance) -> std::optional<std::pair<double, double>> {
+      if (!position_of) {
+        return std::nullopt;
+      }
+      const auto owner = minted_owner_.find(instance);
+      return position_of(owner == minted_owner_.end() ? instance : std::string_view{owner->second});
+    };
+    const auto        first = mark();
+    std::vector<Pin>  pins;
+    std::vector<Node> owners;
+    for (const auto& group : group_leaves(std::move(loads), options_.fanout, position_of ? where : Position_of{})) {
+      for (const auto& leaf : group) {
+        pins.push_back(leaf.sink);
+        owners.push_back(leaf.sink.get_master_node());
+      }
+    }
+    fanout(head, std::move(pins), owners, domain);
+    for (auto& name : cells_since(first)) {
+      domain.cells.push_back(std::move(name));
+    }
+  }
+
   // One (reset root, clock domain) tree at `depth` flop levels. Both polarities share the depth.
   void build(const Pin& head, const Pin& clock, std::vector<Leaf> leaves, unsigned depth, const Position_of& position_of,
              Domain_stats& domain) {
@@ -430,6 +468,7 @@ private:
     } while (!names_.insert(name).second);
     cell.set_name(name);
     minted_names_.emplace_back(name);
+    minted_owner_.emplace(name, load_name);
     cell.attr(attrs::color).set(gu::node_color_of(owner));
     if (const auto group = owner.attr(attrs::synth_color_group); group.has()) {
       cell.attr(attrs::synth_color_group).set(std::string(group.get()));
@@ -572,6 +611,7 @@ private:
   std::shared_ptr<hhds::GraphIO> buffer_io_, inverter_io_, flop_io_;
   std::set<std::string>          names_;
   std::vector<std::string>       minted_names_, minted_pins_;
+  std::map<std::string, std::string, std::less<>> minted_owner_;  // minted cell -> the load it was named after
   unsigned                       serial_ = 0;
 };
 
@@ -868,7 +908,7 @@ Stats build_reset(hhds::Graph& graph, const physical::Technology& tech, const li
       domain.depth       = depth_of ? depth_of(domain.name, sinks, domain.current) : fallback;
       all_keep           = all_keep && domain.current && *domain.current == domain.depth;
     }
-    p.keep = all_keep;
+    p.keep = all_keep && !options.regroup;
     plan.push_back(std::move(p));
   }
 
@@ -903,6 +943,7 @@ Stats build_reset(hhds::Graph& graph, const physical::Technology& tech, const li
   Builder builder{graph, lib, options, stats};
   for (auto& p : plan) {
     ++stats.networks;
+    const size_t first_domain = stats.domains.size();
     for (auto& [clock_key, domain] : p.domains) {
       Domain_stats ds;
       ds.name  = domain.name;
@@ -922,6 +963,9 @@ Stats build_reset(hhds::Graph& graph, const physical::Technology& tech, const li
         ds.flop_pins = builder.pins_since(first_cell);
       }
       stats.domains.push_back(std::move(ds));
+    }
+    if (!p.keep && stats.domains.size() > first_domain) {
+      builder.cap_head(p.net.head, position_of, stats.domains[first_domain]);
     }
   }
   return stats;

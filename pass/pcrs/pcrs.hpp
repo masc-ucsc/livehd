@@ -31,6 +31,9 @@ namespace livehd::pcrs {
 
 struct Options {
   unsigned fanout = 32;  // loads on any driver of the tree (>= 2)
+  // Rebuild every network, also one whose domains all keep their depth: the first call that knows where the
+  // cells are regroups the sinks by position (a tree built before placement follows instance names).
+  bool regroup = false;
 };
 
 // How deep one clock domain's tree is. `domain` names the (reset root, root clock) pair, `sinks` is
@@ -89,6 +92,7 @@ public:
   // Explicit entry first, else the depth already in the graph, else the default start.
   [[nodiscard]] Depth_policy policy(unsigned fanout) const;
   [[nodiscard]] const std::map<std::string, unsigned, std::less<>>& all() const { return depth_; }
+  bool clustered = false;  // the trees in the graph were grouped by cell position (see Options::regroup)
 
 private:
   std::map<std::string, unsigned, std::less<>> depth_;

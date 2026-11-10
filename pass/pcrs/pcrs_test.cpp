@@ -722,6 +722,44 @@ TEST_F(Pcrs, AnOutputPortBehindABufferGoesBackOnTheRootAndTheFlopsGetTheirTree) 
   }
 }
 
+TEST_F(Pcrs, TheHeadIsCappedAcrossDomainsAndARegroupRebuildsAnUnchangedTree) {
+  // Three clock domains, each small enough to hang on the head by itself: together they are 24 loads on it.
+  auto gate = [&](const std::string& name) {
+    auto n = gu::create_typed_node(*graph, Ntype_op::Sub);
+    n.set_subnode(io_of("AND2x1", {"A", "B"}, "Y"));
+    n.set_name(name);
+    n.create_sink_pin("A").connect_driver(clock);
+    n.create_sink_pin("B").connect_driver(clock2);
+    auto out = n.create_driver_pin("Y");
+    gu::set_bits(out, 1);
+    return out;
+  };
+  const auto gated = gate("clkgate");
+  for (int i = 0; i < 4; ++i) {
+    flop("a.r" + std::to_string(i), reset, clock);
+    flop("b.r" + std::to_string(i), reset, clock2);
+    flop("c.r" + std::to_string(i), reset, gated);
+  }
+  const auto lib   = cells();
+  auto       stats = build_reset(*graph, tech, lib, {.fanout = 8}, depth(0));
+  EXPECT_EQ(stats.domains.size(), 3u);
+  EXPECT_LE(fanout(reset), 8u);
+  expect_uniform(0, 0);
+  const auto buffers = minted("BUFx1");
+  EXPECT_GE(buffers, 3u);
+  // Unchanged depth: left alone. A regroup rebuilds it, by position where the cells have one.
+  stats = build_reset(*graph, tech, lib, {.fanout = 8}, depth(0));
+  EXPECT_TRUE(stats.domains.front().kept);
+  const Position_of at = [](std::string_view name) -> std::optional<std::pair<double, double>> {
+    return std::pair{double(name.back() - '0'), name.starts_with("a") ? 0.0 : name.starts_with("b") ? 10.0 : 20.0};
+  };
+  stats = build_reset(*graph, tech, lib, {.fanout = 8, .regroup = true}, depth(0), at);
+  EXPECT_FALSE(stats.domains.front().kept);
+  EXPECT_LE(fanout(reset), 8u);
+  EXPECT_EQ(minted("BUFx1"), buffers);
+  expect_uniform(0, 0);
+}
+
 TEST_F(Pcrs, DeadLibraryDoesNothing) {
   add_flops(20, clock);
   lib_text = R"(library(empty) { time_unit : "1ns"; })";
