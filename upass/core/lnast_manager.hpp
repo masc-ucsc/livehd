@@ -406,11 +406,42 @@ protected:
   // disjoint from frontend names, whose final `_` segment is digits-only
   // (scoped `%<label>_<n>`, stabilized `%<hash>_<n>`) or absent
   // (interim bare `%<digits>`).
+  // The node is the destination (first child) of a defining statement, not an operand.
+  bool is_def_dst(const Lnast_nid& nid) const {
+    const auto parent = lnast->get_parent(nid);
+    if (parent.is_invalid() || lnast->get_first_child(parent) != nid) {
+      return false;
+    }
+    const auto t = lnast->get_type(parent);
+    return !(t == Lnast_ntype::Lnast_ntype_if || t == Lnast_ntype::Lnast_ntype_unique_if || t == Lnast_ntype::Lnast_ntype_while
+             || t == Lnast_ntype::Lnast_ntype_for || t == Lnast_ntype::Lnast_ntype_tick || t == Lnast_ntype::Lnast_ntype_stmts
+             || t == Lnast_ntype::Lnast_ntype_top);
+  }
+
   std::string_view rename_tmp(std::string_view raw) const {
     std::string key = std::to_string(active_salt_) + ":" + std::string(raw);
     auto        it  = tmp_remap_.find(key);
     if (it != tmp_remap_.end()) {
       return std::string_view(it->second);
+    }
+    if (!is_def_dst(current_nid)) {
+      // A READ of a tmp this frame never defined: it was defined by an enclosing iteration frame of the
+      // same tree (an outer loop body's value read by an inner loop), or before any frame at all (then
+      // it was never renamed). Minting a fresh name here would leave the read undefined.
+      for (size_t i = frames_.size(); i-- > 0;) {
+        const auto&  f     = frames_[i];
+        const Lnast* inner = i + 1 == frames_.size() ? lnast.get() : frames_[i + 1].tree.get();
+        if (f.tree.get() != inner) {
+          break;  // crossed an inline call: the enclosing frames' tmps belong to another tree
+        }
+        if (f.salt == 0) {
+          return raw;
+        }
+        auto outer = tmp_remap_.find(std::to_string(f.salt) + ":" + std::string(raw));
+        if (outer != tmp_remap_.end()) {
+          return std::string_view(outer->second);
+        }
+      }
     }
     const auto  h     = lnast->tmp_site_hash(current_nid);
     std::string fresh = "%" + std::to_string(h) + "_i" + std::to_string(tmp_hash_occ_[h]++);
