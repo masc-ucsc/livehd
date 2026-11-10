@@ -39,7 +39,7 @@ done
 # memory loops are only checked structurally here (a `for`, no call, no packed whole-array bus): a Pyrope
 # memory with reset does not round-trip through LNAST exactly even without a loop, and their behaviour is
 # covered by the lnast_llvm differential test against `lhd sim`.
-for file in loop_mem loop_overlay loop_nested; do
+for file in loop_mem loop_overlay loop_nested loop_step loop_call; do
   d="$W/$file"
   mkdir -p "$d"
   "$LHD_ABS" compile "$SRC/$file.prp" --top "$file" --emit-dir "lg:$d/ref" --workdir "$d/tw" -q >"$d/c1.log" 2>&1 \
@@ -48,7 +48,7 @@ for file in loop_mem loop_overlay loop_nested; do
     || { cat "$d/l2l.log" >&2; fail "$file: lg2lnast failed"; }
   grep -q "fcall" "$d"/dump/*.lnast && fail "$file: a loop was lowered as a call"
   grep -q "── for" "$d"/dump/*.lnast || fail "$file: no for loop in the LNAST"
-  if [ "$file" != loop_nested ]; then
+  if [ "$file" = loop_mem ] || [ "$file" = loop_overlay ]; then
     grep -q "concat\|shl\|sra" "$d"/dump/*.lnast && fail "$file: the memory was copied into a packed value"
     echo "ok $file (structure)"
     continue

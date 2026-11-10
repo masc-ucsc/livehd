@@ -2762,12 +2762,54 @@ bool Cgen_llvm::array_clear_if(size_t array, Value condition) {
   auto* fn     = b.GetInsertBlock()->getParent();
   auto* clear  = llvm::BasicBlock::Create(impl_->context, "array.clear", fn);
   auto* cont   = llvm::BasicBlock::Create(impl_->context, "array.cont", fn);
-  b.CreateCondBr(active, clear, cont);
+  b.CreateCondBr(active, clear, cont, llvm::MDBuilder(impl_->context).createBranchWeights(1, 2000));  // reset: rare
   b.SetInsertPoint(clear);
   const auto bytes = a.packed ? (uint64_t(a.bits) * a.size + 7) / 8 : uint64_t(a.store_bits / 8) * a.size;
   b.CreateMemSet(a.ptr, b.getInt8(0), bytes, llvm::Align(8));
   b.CreateBr(cont);
   b.SetInsertPoint(cont);
+  return true;
+}
+
+// `values[i]` becomes `overrides[i]` while `condition` holds, as one cold branch (a reset): the hot path
+// is a compare and a not-taken branch instead of a select per register.
+bool Cgen_llvm::unlikely_override(Value condition, const std::vector<Value>& values, const std::vector<Value>& overrides,
+                                  std::vector<Value>& results) {
+  if (values.size() != overrides.size() || condition.width == 0) {
+    impl_->error = "reset override operand mismatch";
+    return false;
+  }
+  auto&                     b = impl_->builder;
+  std::vector<llvm::Value*> keep, over;
+  for (size_t i = 0; i < values.size(); ++i) {
+    auto* v = impl_->get(values[i]);
+    auto* o = impl_->get(resize(overrides[i], values[i].width, values[i].unsign));
+    if (v == nullptr || o == nullptr) {
+      return false;
+    }
+    keep.push_back(v);
+    over.push_back(o);
+  }
+  auto* c = impl_->get(condition);
+  if (c == nullptr) {
+    return false;
+  }
+  auto* active = b.CreateICmpNE(c, llvm::ConstantInt::get(c->getType(), 0));
+  auto* pre    = b.GetInsertBlock();
+  auto* fn     = pre->getParent();
+  auto* cold   = llvm::BasicBlock::Create(impl_->context, "reset", fn);
+  auto* cont   = llvm::BasicBlock::Create(impl_->context, "reset.cont", fn);
+  b.CreateCondBr(active, cold, cont, llvm::MDBuilder(impl_->context).createBranchWeights(1, 2000));
+  b.SetInsertPoint(cold);
+  b.CreateBr(cont);
+  b.SetInsertPoint(cont);
+  results.clear();
+  for (size_t i = 0; i < keep.size(); ++i) {
+    auto* phi = b.CreatePHI(keep[i]->getType(), 2, "rst");
+    phi->addIncoming(keep[i], pre);
+    phi->addIncoming(over[i], cold);
+    results.push_back(impl_->remember(phi, values[i].width, values[i].unsign));
+  }
   return true;
 }
 

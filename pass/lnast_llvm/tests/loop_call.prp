@@ -1,0 +1,8 @@
+comb mix(x:U9, y:U8) -> (r:U10) { r = (x & y) + (x ^ y) }
+mod loop_call(clk:Clock, a:U8, b:U8) -> (s:U16@[0]) {
+  mut acc:U16 = 0
+  for i in 0..<5 {
+    acc = acc + mix(x=a + i, y=b)
+  }
+  s = acc
+}

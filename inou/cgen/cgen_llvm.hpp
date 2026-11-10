@@ -160,6 +160,10 @@ public:
   [[nodiscard]] size_t    array_create_in_state(uint32_t bits, uint64_t size, size_t word);
   // Zero every entry when `condition` is non-zero.
   bool                    array_clear_if(size_t array, Value condition);
+  // `values[i]` is replaced by `overrides[i]` while `condition` is non-zero, as ONE branch the optimizer is
+  // told is unlikely (a reset) with a phi per value: the hot path pays a compare, not a select per register.
+  bool                    unlikely_override(Value condition, const std::vector<Value>& values, const std::vector<Value>& overrides,
+                                            std::vector<Value>& results);
   bool                    array_write(size_t array, Value enable, Value address, Value data);
   [[nodiscard]] Value     array_read(size_t array, Value address, uint32_t result_width, bool result_unsign);
   [[nodiscard]] Value     array_read_all(size_t array, uint32_t result_width, bool result_unsign);

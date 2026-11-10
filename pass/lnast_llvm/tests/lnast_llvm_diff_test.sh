@@ -36,7 +36,7 @@ done
 
 # Compact loops (Pyrope sources): a `for` with its body inline -- carries, finals, nested loops, and a
 # memory read in place (also while this cycle's write to it is visible) -- no call, no array copy.
-for design in loop_mem loop_overlay loop_nested; do
+for design in loop_mem loop_overlay loop_nested loop_step loop_call; do
   top="$design.$design"
   d="$W/$design"
   mkdir -p "$d"

@@ -1181,8 +1181,8 @@ bool Lowering::lower_loop(const hhds::Node_class& node) {
     why = "unresolved compact loop (M1)";
     return false;
   }
-  if (desc->count == 0 || desc->step < 1 || desc->first < 0) {
-    why = "compact loop with an empty, descending or negative domain";
+  if (desc->count == 0 || desc->step == 0) {
+    why = "compact loop with an empty domain";
     return false;
   }
   if (desc->next_active_output) {
@@ -1193,6 +1193,32 @@ bool Lowering::lower_loop(const hhds::Node_class& node) {
   if (!bio) {
     why = "compact loop body without io";
     return false;
+  }
+  {
+    // Module calls in the body are spliced into the body graph (in memory), so the loop stays one `for`
+    // with everything inline: no call per trip.
+    std::vector<hhds::Node_class> calls;
+    for (const auto& bn : body->body().nodes(hhds::Node_order::forward)) {
+      if (type_op_of(bn) != Ntype_op::Sub || bn.is_loop_subnode()) {
+        continue;
+      }
+      auto io = bn.get_subnode_io();
+      if (io && !livehd::graph_util::is_marker_module_name(io->get_name()) && bn.get_subnode_graph()) {
+        calls.push_back(bn);
+      }
+    }
+    if (!calls.empty()) {
+      livehd::graph_util::Host_inliner inliner(body.get(), "pass.lg2lnast");
+      size_t                           spliced = 0;
+      for (const auto& c : calls) {
+        spliced += inliner.splice(c) ? 1 : 0;
+      }
+      inliner.flush();
+      if (spliced != calls.size()) {
+        why = "module call inside a compact-loop body that cannot be inlined";
+        return false;
+      }
+    }
   }
   for (const auto& bn : body->body().nodes(hhds::Node_order::forward)) {
     const auto op = type_op_of(bn);
@@ -1297,14 +1323,6 @@ bool Lowering::lower_loop(const hhds::Node_class& node) {
       if (!o) {
         return false;
       }
-      if (parent_ != nullptr && !o->empty() && (*o)[0] == '%' && !it->second.is_const()) {
-        // A temporary of an enclosing loop body that only the inner body reads: bind it to a named
-        // variable (upass' dead-statement sweep does not follow a tmp read only from an inner `for`).
-        auto nv = std::format("__lv{}_{}", id, std::string(d.name));
-        store_raw(nv, *o);
-        type_bits(nv, bits_of(it->second), is_unsign(it->second));
-        o = nv;
-      }
       sub.name_of_.insert_or_assign(bp.get_class_index(), *o);
     }
   }
@@ -1349,21 +1367,37 @@ bool Lowering::lower_loop(const hhds::Node_class& node) {
   }
 
   // for __liN in first..last { body; carries/finals <- this trip's values }
-  const auto last = desc->first + static_cast<int64_t>(desc->count - 1) * desc->step;
-  if (desc->step != 1) {
-    why = "compact loop with a step other than 1";
-    return false;
-  }
-  auto rt = b_.create_lnast_tmp();
-  auto rg = b_.add_child(Lnast_ntype::create_range());
+  // A domain that is not 0.. or 1.. up (a negative first index or any other step) counts trips `0..count-1`
+  // and derives the index in the body: index = first + trip * step.
+  const bool direct = desc->first >= 0 && desc->step == 1;
+  const auto kvar   = direct ? ivar : std::format("__lk{}", id);
+  const auto last   = direct ? desc->first + static_cast<int64_t>(desc->count - 1) : static_cast<int64_t>(desc->count - 1);
+  auto       rt     = b_.create_lnast_tmp();
+  auto       rg     = b_.add_child(Lnast_ntype::create_range());
   b_.lnast->add_child(rg, Lnast_node::create_ref(rt));
-  leaf(rg, std::to_string(desc->first));
+  leaf(rg, std::to_string(direct ? desc->first : 0));
   leaf(rg, std::to_string(last));
   auto lp = b_.add_child(Lnast_ntype::create_for());
-  b_.lnast->add_child(lp, Lnast_node::create_ref(ivar));
+  b_.lnast->add_child(lp, Lnast_node::create_ref(kvar));
   b_.lnast->add_child(lp, Lnast_node::create_ref(rt));
   auto bs = b_.lnast->add_child(lp, Lnast_ntype::create_stmts());
   b_.push_stmts(bs);
+  if (!direct && desc->index_input) {
+    const auto scaled = b_.create_lnast_tmp();
+    auto       m      = b_.add_child(Lnast_ntype::create_mult());
+    b_.lnast->add_child(m, Lnast_node::create_ref(scaled));
+    leaf(m, kvar);
+    leaf(m, std::to_string(desc->step));
+    auto p = b_.add_child(Lnast_ntype::create_plus());
+    b_.lnast->add_child(p, Lnast_node::create_ref(ivar));
+    leaf(p, scaled);
+    leaf(p, std::to_string(desc->first));
+    for (const auto& d : sio->get_input_pin_decls()) {
+      if (d.port_id == *desc->index_input) {
+        type_bits(ivar, bits_of(body->get_input_pin(d.name), *bio, d.name), d.unsign);
+      }
+    }
+  }
   for (const auto& bn : body->body().nodes(hhds::Node_order::forward)) {
     if (type_op_of(bn) == Ntype_op::Memory && !sub.declare_view(bn)) {
       why = sub.why;

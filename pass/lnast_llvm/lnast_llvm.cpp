@@ -329,6 +329,17 @@ private:
   void   collect_attrs(Frame& f);
   void   scan_calls(const std::vector<Lnast_nid>& stmts, Frame& f);
   void   finish_frame(Frame& f, const Env& pre, const Env& end);
+  // A register's reset is applied once per distinct reset signal, as one unlikely branch (apply_resets),
+  // not as a select inside every register's next-state cone.
+  struct Reset_item {
+    size_t idx;
+    V      active;  // 1 bit: this register is being reset
+    V      value;   // next state when it is not
+    V      init;
+  };
+  std::vector<Reset_item> reset_items_;
+  absl::flat_hash_map<std::string, V> reset_active_;  // reset pin name (+ polarity) -> its active condition, this walk
+  void apply_resets();
   void   run_frame(Frame& f, Env& env);
   void exec_block(const std::vector<Lnast_nid>& stmts, Env& env);
   void exec_if(const std::vector<Lnast_nid>& c, size_t at, Env& env);
@@ -1287,13 +1298,49 @@ void Gen::finish_frame(Frame& f, const Env& pre, const Env& end) {
       } else {
         bail("reset signal '" + *r.reset_pin + "' is not a known signal");
       }
-      V active = r.negreset ? k_->binary(Op::eq, *rv, k_->constant(1, 0, true), 1, true)
-                            : k_->binary(Op::ne, *rv, k_->constant(1, 0, true), 1, true);
-      V init   = literal(r.initial ? *r.initial : Literal{false, {0}});
-      n        = k_->mux(active, n, init, r.field.bits, !r.field.sign);
+      const auto key = f.prefix + "/" + *r.reset_pin + (r.negreset ? "!" : "");
+      auto       ai  = reset_active_.find(key);
+      if (ai == reset_active_.end()) {
+        ai = reset_active_
+                 .emplace(key,
+                          r.negreset ? k_->binary(Op::eq, *rv, k_->constant(1, 0, true), 1, true)
+                                     : k_->binary(Op::ne, *rv, k_->constant(1, 0, true), 1, true))
+                 .first;
+      }
+      reset_items_.push_back({idx, ai->second, k_->resize(n, r.field.bits, !r.field.sign),
+                              k_->resize(literal(r.initial ? *r.initial : Literal{false, {0}}), r.field.bits, !r.field.sign)});
     }
     next_[idx] = k_->resize(n, r.field.bits, !r.field.sign);
   }
+}
+
+void Gen::apply_resets() {
+  // group by condition (one Value id per distinct reset signal and polarity)
+  std::vector<size_t>                           order;
+  absl::flat_hash_map<size_t, std::vector<size_t>> groups;
+  for (size_t i = 0; i < reset_items_.size(); ++i) {
+    auto& g = groups[reset_items_[i].active.id];
+    if (g.empty()) {
+      order.push_back(reset_items_[i].active.id);
+    }
+    g.push_back(i);
+  }
+  for (const auto id : order) {
+    const auto&    g = groups.at(id);
+    std::vector<V> values, overrides, results;
+    for (const auto i : g) {
+      values.push_back(reset_items_[i].value);
+      overrides.push_back(reset_items_[i].init);
+    }
+    if (!k_->unlikely_override(reset_items_[g.front()].active, values, overrides, results)) {
+      bail("register reset");
+    }
+    for (size_t j = 0; j < g.size(); ++j) {
+      next_[reset_items_[g[j]].idx] = results[j];
+    }
+  }
+  reset_items_.clear();
+  reset_active_.clear();
 }
 
 Result Gen::run(const std::string& dir) {
@@ -1373,6 +1420,7 @@ Result Gen::run(const std::string& dir) {
       exec_block(top_->stmts, env);
       if (record) {
         finish_frame(*top_, pre, env);
+        apply_resets();
       }
       return env;
     };

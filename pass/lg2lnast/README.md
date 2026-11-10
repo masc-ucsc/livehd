@@ -78,8 +78,8 @@ round trip on an uninitialized memory, so it is not in the LEC list. A Sub insta
 `fcall` form needs every argument before any output) is resolved by splicing the stuck instances
 into the graph in memory (`graph_util::Host_inliner`) and lowering again; `lgundef`, `fproperty`
 and `lgassert` markers are skipped. Known gaps: non-zero initial images, several clocks,
-forwarding/undefined orderings; Latch, Clock_cell, n-ary Mux/compare, LUT, compact loops with a break/continue,
-an activation, a negative or descending domain, a state element or a module call in the body.
+forwarding/undefined orderings; Latch, Clock_cell, n-ary Mux/compare, LUT, compact loops with a break/continue or
+an activation, or a state element in the body.
 
 ## Milestone 3 prototype: LLVM straight from the typed LNAST
 
@@ -94,7 +94,12 @@ memory state (instance-path names); `if` arms merge by `mux`; memory writes carr
 the path condition as the write enable (kernel-local arrays seeded from the state
 and published whole, so a large memory costs O(size) per step: prototype only).
 An asynchronous reset is evaluated like the synchronous one (every step has an
-edge and the testbench samples after it).
+edge and the testbench samples after it). Reset is kept out of the hot path: a
+register's next state is computed without it, and the registers of each distinct
+reset signal take their initial values in ONE branch marked unlikely
+(`Cgen_llvm::unlikely_override`, a phi per register; the memory clear is an unlikely
+branch too). The hot path pays a compare and a not-taken branch, not a select per
+register; the reset block is placed out of line by LLVM.
 
 Acceptance: `//pass/lnast_llvm:lnast_llvm_diff_test` drives the same closed-form
 stimulus into the kernel (`lnast_llvm_run`) and into the existing
@@ -133,8 +138,12 @@ input. When the only readers of that bus are loop bodies, no packed value is bui
 (`find_overlays`), none of its cells is emitted, and the body reads `(c && i == a) ? d : mem[i]`.
 Any other bus is still correct: the body slices the packed value (`(bus >> i*bits) & mask`).
 
-Not covered: loops that write a memory (the front end keeps those unrolled), break/continue, steps
-other than 1, state or module calls inside the body.
+Domains that are not `first..` with step 1 (a negative first index, any other step) count trips `0..count-1`
+and derive the index in the body (`index = first + trip * step`). Module calls inside a body are spliced into
+the body graph first, so the loop is still one `for`.
+
+Not covered: loops that write a memory (the front end keeps those unrolled), break/continue (an
+activation), and state elements inside the body.
 
 ## Stream interface (milestone 2)
 

@@ -1,0 +1,19 @@
+mod loop_step(clk:Clock, a:U8, b:U8) -> (s:U16@[0], t:U16@[0], u:U16@[0]) {
+  mut acc:U16 = 0
+  for i in 0..<16 step 3 {
+    acc = acc + ((a ^ i) & b)
+  }
+  s = acc
+  mut neg:U16 = 0
+  for i in 2..<10 step 2 {
+    if (a >> (i & 7)) == (b & 3) {
+      neg = neg + i
+    }
+  }
+  t = neg
+  mut sw:U16 = 0
+  for i in -3..<4 {
+    sw = sw + (a + 3 + i)
+  }
+  u = sw
+}
