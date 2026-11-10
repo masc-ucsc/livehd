@@ -1213,7 +1213,7 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.growth_fraction = number("place.growth", "0.05");
   out.growth_sizing_share = number("place.growth.sizing_share", "0.3");
   {
-    const auto iterations = integer("place.repair.iterations", "0");
+    const auto iterations = integer("place.repair.iterations", "3");
     if (iterations < 0 || iterations > 8) {
       throw Lhd_error{"usage", "synth.place.repair.iterations expects an integer in [0,8]", ""};
     }
@@ -3058,17 +3058,6 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
               timed_placement.timing    = std::move(timing_kick.timing);
               res.recipe_steps.emplace_back("pass.place.timing_driven.regions");
             }
-          }
-          if (run_resize && place_options.growth_budget) {
-            // The allowance for sizing and buffering is measured from the netlist repair starts from. Measured from the
-            // synthesized netlist it was already spent before repair began (IO resynthesis, tie cells and reset flops all
-            // add cells): on eyeriss all 2,686 nets whose buffer tree failed were rejected by the cell limit alone, and
-            // only the ~1% left over could ever be used.
-            const auto fraction = place_options.growth_budget->fraction;
-            const auto share    = place_options.growth_budget->sizing_share;
-            livehd::placement::initialize_growth_budget(*placed.graph, place_options);
-            place_options.growth_budget->fraction     = fraction;
-            place_options.growth_budget->sizing_share = share;
           }
           if (run_resize && place_options.resize_engine == "new") {
             Phase_timer phase(res, "pass.place.resize");

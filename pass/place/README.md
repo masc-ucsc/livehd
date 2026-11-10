@@ -101,7 +101,16 @@ Full synthesis placement shares a cell-count and physical-area growth limit of
 5% (`synth.place.growth`) over the original mapped standard-cell netlist. Gate sizing may
 use only `synth.place.growth.sizing_share` (default 0.3) of it; buffer insertion may use all, so sizing cannot
 spend the headroom a high-fanout net needs for its buffer tree (measured on eyeriss: 3% with sizing first left
-0.07 um2 for a 271-load net; 5% with a 0.3 share takes WNS from -11.0 to -6.9 ns). The inventory precedes
+0.07 um2 for a 271-load net; 5% with a 0.3 share takes WNS from -11.0 to -6.9 ns).
+
+**Repair loop** (`synth.place.repair.iterations`, default 3; 0 = a single pass). After the first sizing and buffering
+pass the placement those edits were computed for is stale, so the flow re-places warm with the timing weights of the
+repaired result (a new buffer is a timed net: its slack rank pulls it to its loads), then sizes and buffers again. An
+iteration is kept only while `timing_improves` holds, and iteration k may use (k+2) times the growth allowance, so
+growth is bounded by whether it still helps, not by a fixed cap. Measured (pre-CTS, OpenSTA): eyeriss WNS -6.9 ns ->
+-0.65 ns and TNS -25.3M -> -0.24M ps (OpenROAD: -2.6 ns, -1.2M), cnn -8.7 ns -> -1.3 ns and -16.5M -> -0.23M
+(OpenROAD: -7.5 ns, -12.1M), for +8..14% cells and roughly 35 minutes more on these 270k-cell designs.
+`qor.place.repair_loop` reports every iteration. The inventory precedes
 synthesis-buffer cleanup and counts every occurrence of a shared color; macro
 area cannot subsidize standard-cell growth. The reset and domino rail tree
 buffers (`__place_rsttree*`, `__place_railtree*`, below) are structural fanout
