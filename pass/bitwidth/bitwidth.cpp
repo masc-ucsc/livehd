@@ -502,19 +502,41 @@ std::optional<Bitwidth_range> Bitwidth::refine_by_guard(const hhds::Node_class& 
                                                         bool true_arm, const Bitwidth_range& range) {
   const auto sel        = livehd::graph_util::find_sink_pin(mux, "s");
   const auto sel_driver = sel.is_invalid() ? hhds::Pin_class{} : sel.get_driver_pin();
-  if (sel_driver.is_invalid() || sel_driver.is_const() || type_op_of(sel_driver.get_master_node()) != Ntype_op::LT) {
+  if (sel_driver.is_invalid() || sel_driver.is_const()) {
     return std::nullopt;
   }
-  const auto lt_node = sel_driver.get_master_node();
-  const auto x       = get_driver_of_sink_name(lt_node, "as");
-  const auto k       = get_driver_of_sink_name(lt_node, "bs");
+  const auto cmp_op = type_op_of(sel_driver.get_master_node());
+  if (cmp_op != Ntype_op::LT && cmp_op != Ntype_op::EQ) {
+    return std::nullopt;
+  }
+  // The guard is `x < K` (LT: as = x, bs = K) or `x == K` (EQ: one operand bank,
+  // the constant on either side). x is the non-constant side, K the constant.
+  const auto cmp_node = sel_driver.get_master_node();
+  hhds::Pin_class x;
+  hhds::Pin_class k;
+  if (cmp_op == Ntype_op::LT) {
+    x = get_driver_of_sink_name(cmp_node, "as");
+    k = get_driver_of_sink_name(cmp_node, "bs");
+  } else {
+    const auto operands = livehd::graph_util::inp_sink_drivers(cmp_node);
+    if (operands.size() != 2) {
+      return std::nullopt;
+    }
+    const bool first_const = operands[0].driver.is_const();
+    if (first_const == operands[1].driver.is_const()) {
+      return std::nullopt;  // const == const folds elsewhere; x == y says nothing about a value
+    }
+    x = first_const ? operands[1].driver : operands[0].driver;
+    k = first_const ? operands[0].driver : operands[1].driver;
+  }
   if (x.is_invalid() || k.is_invalid() || !k.is_const() || !const_of(k).is_just_i64()) {
     return std::nullopt;
   }
-  // LT compares mathematical integers (the IR never wraps a comparison operand),
-  // so `x < K` bounds `x` itself whatever the operand widths or signedness.
-  // The arm is `x + c` (c a constant offset; c == 0 is `x` itself) -- e.g. the
-  // guard `i < 3` over the address `i + 1`. Anything else says nothing.
+  // The comparators compare mathematical integers (the IR never wraps a comparison
+  // operand), so the guard bounds `x` itself whatever the operand widths or
+  // signedness. The arm is `x + c` (c a constant offset; c == 0 is `x` itself) --
+  // e.g. the guard `i < 3` over the address `i + 1`, or the guard `i == 0` over
+  // the previous-slot address `i - 1`. Anything else says nothing.
   int64_t offset = 0;
   if (arm_driver == x) {
     offset = 0;
@@ -546,10 +568,29 @@ std::optional<Bitwidth_range> Bitwidth::refine_by_guard(const hhds::Node_class& 
   const auto bound = const_of(k).to_just_i64();
   int64_t    lo    = range.get_min().to_just_i64();
   int64_t    hi    = range.get_max().to_just_i64();
-  if (true_arm) {
-    hi = std::min(hi, bound - 1 + offset);  // x < K  =>  x + c <= K - 1 + c
+  if (cmp_op == Ntype_op::LT) {
+    if (true_arm) {
+      hi = std::min(hi, bound - 1 + offset);  // x < K  =>  x + c <= K - 1 + c
+    } else {
+      lo = std::max(lo, bound + offset);  // x >= K  =>  x + c >= K + c
+    }
+  } else if (true_arm) {
+    // x == K  =>  the arm is exactly K + c.
+    lo = std::max(lo, bound + offset);
+    hi = std::min(hi, bound + offset);
   } else {
-    lo = std::max(lo, bound + offset);  // x >= K  =>  x + c >= K + c
+    // x != K removes K from x's range, which only shows at an END of it: `x == 0`
+    // guarding `x - 1` leaves x in [1..max] on the else arm, so x - 1 >= 0.
+    const auto x_it = bwmap.find(x.get_class_index());
+    if (x_it == bwmap.end() || !x_it->second.get_min().is_just_i64() || !x_it->second.get_max().is_just_i64()) {
+      return std::nullopt;
+    }
+    if (x_it->second.get_min().to_just_i64() == bound) {
+      lo = std::max(lo, bound + 1 + offset);
+    }
+    if (x_it->second.get_max().to_just_i64() == bound) {
+      hi = std::min(hi, bound - 1 + offset);
+    }
   }
   if (lo > hi) {
     return std::nullopt;  // an unreachable arm: keep the unrefined range

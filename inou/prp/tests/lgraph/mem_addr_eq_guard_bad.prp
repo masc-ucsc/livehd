@@ -1,0 +1,12 @@
+// Negative twin of mem_addr_eq_guard.prp: the guard excludes 3, not 0, so `cur - 1` can still be -1.
+const Stages = 7
+pub mod mem_addr_eq_guard_bad(en:Bool) -> (o:U8@[0]) {
+  reg cur:U3 = 0
+  mut prev:U3 = 0
+  wrap prev = if cur == 3 { Stages - 1 } else { cur - 1 }
+  mut m:[Stages]U8 = 0
+  m[prev] = 5
+  if en { cur = prev }
+  o = 0
+  if cur < Stages { o = m[cur] }
+}

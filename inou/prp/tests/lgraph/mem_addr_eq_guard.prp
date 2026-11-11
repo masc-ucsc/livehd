@@ -1,0 +1,16 @@
+// A circular buffer's previous-slot address. `cur == 0` guards `cur - 1`, so on the
+// else arm cur >= 1 and the address is in [0..6] even though cur is a U3 (0..7) and
+// `cur - 1` alone would reach -1 (which the wrap into U3 turns into 7, outside the
+// 7 entries). mem_addr_eq_guard_test.sh checks this compiles, and that a guard on
+// the WRONG value (`cur == 3`) is still the address-overflow error.
+const Stages = 7
+pub mod mem_addr_eq_guard(en:Bool) -> (o:U8@[0]) {
+  reg cur:U3 = 0
+  mut prev:U3 = 0
+  wrap prev = if cur == 0 { Stages - 1 } else { cur - 1 }
+  mut m:[Stages]U8 = 0
+  m[prev] = 5
+  if en { cur = prev }
+  o = 0
+  if cur < Stages { o = m[cur] }
+}

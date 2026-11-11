@@ -339,6 +339,22 @@ sh_test(
     ],
 )
 
+# `x == K` guarding the address `x - c` (circular-buffer previous slot) narrows
+# the else arm in pass.bitwidth; a guard on a different value must not.
+sh_test(
+    name = "prp-mem-addr-eq-guard",
+    srcs = ["tests/mem_addr_eq_guard_test.sh"],
+    args = [
+        "$(location //inou/prp:tests/lgraph/mem_addr_eq_guard.prp)",
+        "$(location //inou/prp:tests/lgraph/mem_addr_eq_guard_bad.prp)",
+    ],
+    data = [
+        "//inou/prp:tests/lgraph/mem_addr_eq_guard.prp",
+        "//inou/prp:tests/lgraph/mem_addr_eq_guard_bad.prp",
+        "//lhd",
+    ],
+)
+
 # A runtime bit-range write whose endpoints arrive REVERSED (upper endpoint
 # `i-1` can even go negative). Two obligations, neither statically decidable:
 # the destination comes back untouched (native simulation), and the

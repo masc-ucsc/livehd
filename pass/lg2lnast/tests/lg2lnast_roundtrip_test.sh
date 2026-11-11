@@ -23,7 +23,7 @@ for design in comb_reg:comb_reg reset_enable:reset_enable hier:hier struct_port:
   tag="${passes:-plain}"
   set_passes=()
   [ -n "$passes" ] && set_passes=(--set "pass.lg2lnast.passes=$passes")
-  "$LHD_ABS" pass lg2lnast --top "$top" "lg:$d/ref" "${set_passes[@]}" --emit-dir "ln:$d/ln_$tag" -q >"$d/l2l_$tag.log" 2>&1 \
+  "$LHD_ABS" pass lg2lnast --top "$top" "lg:$d/ref" ${set_passes[@]+"${set_passes[@]}"} --emit-dir "ln:$d/ln_$tag" -q >"$d/l2l_$tag.log" 2>&1 \
     || { cat "$d/l2l_$tag.log" >&2; fail "$file ($tag): lg2lnast failed"; }
   "$LHD_ABS" compile "ln:$d/ln_$tag" --top "$top" --emit-dir "lg:$d/impl_$tag" -q >"$d/c2_$tag.log" 2>&1 \
     || { cat "$d/c2_$tag.log" >&2; fail "$file ($tag): the emitted LNAST does not compile"; }

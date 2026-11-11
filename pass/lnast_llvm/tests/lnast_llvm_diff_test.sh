@@ -53,7 +53,7 @@ one_design() {
   # design is otherwise always ONE kernel, so only the large benchmarks would ever run these paths.
   local lg2lnast=()
   [ "$kind" = sv ] && lg2lnast=(--set pass.lg2lnast.passes=balance)
-  LHD_SIM_LNAST_CHUNK=1 "$LHD_ABS" pass lnast-llvm --top "$top" "lg:$d/lg" "${lg2lnast[@]}" --emit-dir "sim:$d/kc" -q >"$d/gc.log" 2>&1 \
+  LHD_SIM_LNAST_CHUNK=1 "$LHD_ABS" pass lnast-llvm --top "$top" "lg:$d/lg" ${lg2lnast[@]+"${lg2lnast[@]}"} --emit-dir "sim:$d/kc" -q >"$d/gc.log" 2>&1 \
     || { cat "$d/gc.log" >&2; fail "$design: lnast-llvm (small kernels) failed"; return 1; }
   "$RUN" "$d/kc" "$CYCLES" >"$d/cut.trace" || { fail "$design: small-kernel run failed"; return 1; }
   cmp -s "$d/cut.trace" "$d/ref.trace" || { diff "$d/cut.trace" "$d/ref.trace" | head -10 >&2; fail "$design: small-kernel traces differ"; return 1; }
@@ -62,7 +62,7 @@ one_design() {
   # and every register, memory and latch is read by some other kernel).
   local chunk
   for chunk in 0 1; do
-    LHD_SIM_LNAST_GATE=1 LHD_SIM_LNAST_CHUNK=$chunk "$LHD_ABS" pass lnast-llvm --top "$top" "lg:$d/lg" "${lg2lnast[@]}" \
+    LHD_SIM_LNAST_GATE=1 LHD_SIM_LNAST_CHUNK=$chunk "$LHD_ABS" pass lnast-llvm --top "$top" "lg:$d/lg" ${lg2lnast[@]+"${lg2lnast[@]}"} \
       --emit-dir "sim:$d/kg$chunk" -q >"$d/gg$chunk.log" 2>&1 \
       || { cat "$d/gg$chunk.log" >&2; fail "$design: lnast-llvm (gated, chunk $chunk) failed"; return 1; }
     "$RUN" "$d/kg$chunk" "$CYCLES" >"$d/gated$chunk.trace" || { fail "$design: gated run (chunk $chunk) failed"; return 1; }

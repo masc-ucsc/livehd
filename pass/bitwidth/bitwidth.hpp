@@ -88,8 +88,8 @@ protected:
   void process_flop(hhds::Node_class& node);
   void process_memory(hhds::Node_class& node);
   void process_mux(hhds::Node_class& node, Inp_pins& inp_edges);
-  static std::optional<Bitwidth_range> refine_by_guard(const hhds::Node_class& mux, const hhds::Pin_class& arm_driver, bool true_arm,
-                                                       const Bitwidth_range& range);
+  std::optional<Bitwidth_range> refine_by_guard(const hhds::Node_class& mux, const hhds::Pin_class& arm_driver, bool true_arm,
+                                                const Bitwidth_range& range);
   void process_hotmux(hhds::Node_class& node, Inp_pins& inp_edges);
   void process_sra(hhds::Node_class& node, Inp_pins& inp_edges);
   void process_shl(hhds::Node_class& node, Inp_pins& inp_edges);
