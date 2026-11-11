@@ -2,6 +2,8 @@
 
 #include "pass_abc.hpp"
 
+#include "stage_mem.hpp"
+
 #include <charconv>
 #include <cstdlib>
 #include <filesystem>
@@ -204,7 +206,8 @@ void Pass_abc::add_mapping_labels(Eprp_method& m) {
                        "auto");
 
   m.add_label_optional("large_flow",
-                       "ABC command string for indivisible over-large regions at or above large_ge; empty disables the tier. "
+                       "ABC command string for indivisible over-large regions at or above large_ge that have no delay budget "
+                       "(a region with one always runs the built-in timing flow); empty disables the tier. "
                        "An explicit global flow or region_opts flow wins",
                        kDefaultLargeFlow);
   m.add_label_optional("large_flow_latches",
@@ -834,6 +837,7 @@ void Pass_abc::work_with(Eprp_var& var, const std::function<void(livehd::abc::Ma
 }
 
 void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map_options&)>& configure) {
+  livehd::debug::stage_memory("pass.abc", "entry");
   const auto unroll_carry_text = var.get("unroll_carry", "true");
   if (unroll_carry_text != "true" && unroll_carry_text != "false" && unroll_carry_text != "1" && unroll_carry_text != "0"
       && unroll_carry_text != "on" && unroll_carry_text != "off") {
@@ -1437,6 +1441,7 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
     outlib.delete_graphio(outlib.find_io(gid));
   }
 
+  livehd::debug::stage_memory("pass.abc", "prepared");  // source copy, sweeps, cache snapshot loaded
   livehd::abc::Mapper mapper(opts);
   mapper.set_outlib(&outlib);
   mapper.set_flat(flat_whole_design);
@@ -1464,6 +1469,7 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
       loops.preserved_defs);
 
   mapper.finish_parallel();
+  livehd::debug::stage_memory("pass.abc", "regions-mapped");
   if (!partitioned) {
     mapper.stop();
     return;
@@ -1491,9 +1497,11 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
   // cache was written under, and the cached bodies are the refined ones
   // (save() runs after this), so ABC need not start at all.
   const bool all_hit = incr && incr->misses() == 0 && incr->hits() > 0;
+  livehd::debug::stage_memory("pass.abc", "occurrences-stitched");
   if (mapper.admission_refusal() == nullptr && mapper.time_refusal() == nullptr && !all_hit) {
     mapper.refine_boundaries(outlib, top);
   }
+  livehd::debug::stage_memory("pass.abc", "boundaries-refined");
   if (incr) {
     // Persist before reporting: a crash between the two loses a line of text,
     // not the snapshot work. save() is a no-op when nothing was stored. The
@@ -1502,6 +1510,7 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
     incr->save();
   }
   mapper.save_tuning();
+  livehd::debug::stage_memory("pass.abc", "cache-saved");
   if (opts.ware_trials && mapper.admission_refusal() == nullptr && mapper.time_refusal() == nullptr) {
     mapper.optimize_ware(outlib, top);
     // Apply the ordinary final boundary environment to the selected bodies,

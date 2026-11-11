@@ -515,8 +515,14 @@ synth::Region_plan Abc_backend::plan(const synth::Region_ctx& ctx) {
   // The `*_flow selected` lines are the only external evidence that a tier fired
   // (lhd/tests/lhd_abc_test.sh greps for them); keep them on every branch that
   // substitutes a recipe.
+  // The size tier is for a region with no clock to meet. Its flow only strashes and maps: with a delay budget that
+  // leaves every ripple carry and priority chain as written, and the tier's size estimate is a pre-optimization
+  // bound (dino's core color: 213k GE estimated, 14k gates mapped, 1806 ps against 1045 ps with the built-in
+  // flow; coralnpu's: 2.7M estimated, -2.3 ns against +0.2 ns). A region asked to meet a budget runs the built-in
+  // flow, whose choice synthesis is bounded on its own (`-C 500`).
   bool large_tier                              = false;  // the region runs the size tier's flow
-  if (region_.flow.empty() && region_.large_ge && !region_.large_flow.empty() && ctx.input_ge >= region_.large_ge) {
+  if (region_.flow.empty() && region_.large_ge && !region_.large_flow.empty() && ctx.input_ge >= region_.large_ge
+      && !(ctx.budget > 0.0f)) {
     region_.flow = resolve_flow(region_.large_flow);
     large_tier   = true;
     if (region_.verbose) {

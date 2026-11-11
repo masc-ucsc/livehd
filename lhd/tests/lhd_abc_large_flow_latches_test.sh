@@ -39,6 +39,12 @@ synth off --set pass.abc.large_flow_latches=false
 [ "$(count "$W/off/net.v" '^DFF')" -lt 12 ] || fail "off: every register was mapped although the tier's flow may reshape latches"
 grep -q '"derived-clock-native"' "$W/off/synth.log" || fail "off: the derived-clock-native diagnostic is missing"
 
+# A region with a delay budget is not a size-tier region at all: the tier's strash-and-map would leave its carry and
+# priority chains as written. The built-in timing flow maps it, registers included, whatever the option says.
+synth timed --set pass.abc.large_flow_latches=false --set synth.delay=1000
+[ "$(count "$W/timed/net.v" '^always @')" = 0 ] || fail "timed: a region with a delay budget still ran the size tier's flow"
+[ "$(count "$W/timed/net.v" '^DFF')" = 12 ] || fail "timed: expected 12 DFF cells, got $(count "$W/timed/net.v" '^DFF')"
+
 # Option true: the same region maps all 12 register bits to DFF cells.
 synth on --set pass.abc.large_flow_latches=true
 [ "$(count "$W/on/net.v" '^always @')" = 0 ] || fail "on: a register stayed native: $(grep '^always @' "$W/on/net.v" | head -3)"
