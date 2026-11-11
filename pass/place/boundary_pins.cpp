@@ -902,9 +902,9 @@ void Boundary_pins::write() const {
   j.Key("original_nets");
   j.Uint64(original_nets);
   j.Key("placement_nets");
-  j.Uint64(model.design.net_weights.size());
+  j.Uint64(released_counts ? released_counts->first : model.design.net_weights.size());
   j.Key("placement_pins");
-  j.Uint64(model.design.pin2node.size());
+  j.Uint64(released_counts ? released_counts->second : model.design.pin2node.size());
   j.Key("virtual_pins");
   j.Uint64(model.anchors.size());
   j.Key("split_nets");

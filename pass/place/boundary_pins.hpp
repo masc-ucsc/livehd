@@ -99,6 +99,8 @@ class Boundary_pins {
   DreamPlace::native::Options      measure_options;
   double                           build_seconds  = 0;
   size_t                           original_nodes = 0, original_pins = 0, original_nets = 0;
+  // The split model's net and pin counts for the report, once release_design() has dropped the model.
+  std::optional<std::pair<size_t, size_t>> released_counts;
   void                             write() const;
 
 public:
@@ -110,5 +112,14 @@ public:
   const std::vector<Boundary_pin_sample>& samples() const { return history; }
   // The fixed virtual pins (anchors) with their original nets, as refined: legroute cuts region routes there.
   const Boundary_pin_model&               pin_model() const { return model; }
+  // After refine(): drop the split design and its net tables. The anchors, the edges and the report stay, and
+  // observe() still works. A caller that only needs those gives back a full copy of the placement arrays.
+  void                                    release_design() {
+    released_counts  = std::pair{model.design.net_weights.size(), model.design.pin2node.size()};
+    model.design     = {};
+    model.parent_net = {};
+    model.piece_region  = {};
+    model.pin_is_driver = {};
+  }
 };
 }  // namespace livehd::placement

@@ -1682,7 +1682,7 @@ struct View {
   std::map<Name, size_t>                    terminal;
   std::map<Name, size_t>                    cell;
   std::map<std::string, double>             weights;
-  std::map<std::string, std::string>        cohesion_owners;
+  std::map<Name, Name>                      cohesion_owners;
 };
 // DREAMPlace's macro legalizer reports "DREAMPlace macro legalization failed" when no legal macro pose was found.
 bool macro_legalization_failure(const std::exception& error) {
@@ -2236,7 +2236,7 @@ void make_arrays(View& v, const ph::Technology& tech) {
       const int  i     = v.cell.at(c.name);
       if (d.node_macro[i] && (v.global_macro_alignment || owner != v.cohesion_owners.end())) {
         const auto [it, inserted]
-            = classes.try_emplace({c.macro, v.global_macro_alignment ? std::string{} : owner->second}, classes.size());
+            = classes.try_emplace({c.macro, v.global_macro_alignment ? std::string{} : owner->second.str()}, classes.size());
         (void)inserted;
         d.node_align_class[i] = it->second;
       }
@@ -8654,6 +8654,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         refine_control.checkpoint_interval = int(options.legroute_plan.timing_interval);
       }
       boundary_pins->refine(physical, refine_control, live_session, session_identities());
+      boundary_pins->release_design();  // only the anchors and the report are read from here on
       bus_order->observe(physical, "after_gp");
     }
     if (control.observer) {
@@ -13376,6 +13377,10 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       }
       if (terminal_report) {
         write_terminal_legalize_report(*terminal_report, frame, terminal_options, options.output_dir + "/terminal_legalize");
+        // Written: only the run time and the accepted alignments are read after this. The per-cell and per-bin
+        // records are a before/after copy of every cell.
+        terminal_report->cells = {};
+        terminal_report->bins  = {};
       }
       if (options.handoff_taps) {
         std::ofstream report(options.output_dir + "/handoff_taps.json");

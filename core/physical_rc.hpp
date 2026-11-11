@@ -36,16 +36,16 @@ struct Parasitics {
   bool                approximate = true;
   std::vector<Rc_net> nets;
   struct Io {
-    std::string name;
+    Name        name;
     int64_t     x = 0, y = 0;
     bool        operator==(const Io&) const = default;
   };
   std::vector<Io> terminals;
   struct Cell {
-    std::string name;
+    Name        name;
     int64_t     x = 0, y = 0;
     unsigned    orientation = 0;
-    std::string master;
+    Name        master;
     int64_t     width = 0, height = 0;
     bool        operator==(const Cell&) const = default;
   };
