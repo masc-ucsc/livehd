@@ -1633,6 +1633,16 @@ Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_
           }
         }
       }
+      // A net whose clock/reset role or preroute exclusion is preserved below is
+      // read there as a mapped signal (`__control_role`), consumer or not. Left
+      // a direct boundary it has no bit to read: a region that is one latch
+      // with an excluded output (liteeth after pass.usyn: 46 of them) was
+      // refused as an unmaterialized driver.
+      if (!needs_abc && !native_wiring.contains(n)
+          && (gu::signal_roles_of(op_pin) != 0 || gu::preroute_net_excluded(op_pin) || n.attr(attrs::preroute_exclude).has()
+              || rb.src->get_input_node().attr(attrs::preroute_exclude).has())) {
+        needs_abc = true;
+      }
       int oi = static_cast<int>(bb.outs.size());
       bb.outs.push_back({op_pin, pid, w, !gu::is_unsign(op_pin), needs_abc});
       if (!needs_abc) {
