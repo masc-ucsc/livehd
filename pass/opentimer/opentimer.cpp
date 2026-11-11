@@ -39,6 +39,7 @@
 #include "provisional_cell.hpp"
 #include "semdiff.hpp"
 #include "sta_salt.hpp"
+#include "stage_mem.hpp"
 #include "str_tools.hpp"
 
 // WARNING: opentimer has a nasty "define has_member" that overlaps with perfetto methods
@@ -297,50 +298,7 @@ std::string src_of_node(const std::shared_ptr<hhds::Graph>& g, const Node& n) {
 }  // namespace
 
 namespace {
-// LHD_PHASE_MEM (debug): resident memory after each stage of the pass, and the highest it reached
-// during the stage (the kernel's high-water mark is reset at every call; Linux only).
-void stage_memory(const char* stage) {
-#if defined(__GLIBC__)
-  if (livehd::debug::env<"LHD_PHASE_TRIM">() != nullptr) {  // EXPERIMENT
-    malloc_trim(0);
-  }
-#endif
-  if (livehd::debug::env<"LHD_PHASE_MEM">() == nullptr) {
-    return;
-  }
-  const auto status_kb = [](const char* key) {
-    uint64_t value = 0;
-    if (std::FILE* f = std::fopen("/proc/self/status", "r")) {
-      char         line[256];
-      const size_t n = std::strlen(key);
-      while (std::fgets(line, sizeof line, f) != nullptr) {
-        if (std::strncmp(line, key, n) == 0) {
-          value = std::strtoull(line + n, nullptr, 10);
-          break;
-        }
-      }
-      std::fclose(f);
-    }
-    return value;
-  };
-  unsigned long long live_mb = 0, free_mb = 0;
-#if defined(__GLIBC__)
-  const auto info = mallinfo2();
-  live_mb         = (info.uordblks + info.hblkhd) >> 20;
-  free_mb         = info.fordblks >> 20;
-#endif
-  std::fprintf(stderr,
-               "lhd-stage-mem pass.opentimer %s rss_mb=%llu peak_mb=%llu live_mb=%llu free_mb=%llu\n",
-               stage,
-               static_cast<unsigned long long>(status_kb("VmRSS:") / 1024),
-               static_cast<unsigned long long>(status_kb("VmHWM:") / 1024),
-               live_mb,
-               free_mb);
-  if (std::FILE* f = std::fopen("/proc/self/clear_refs", "w")) {
-    std::fputs("5", f);
-    std::fclose(f);
-  }
-}
+void stage_memory(const char* stage) { livehd::debug::stage_memory("pass.opentimer", stage); }
 }  // namespace
 
 void Pass_opentimer::time_work(Eprp_var& var) {

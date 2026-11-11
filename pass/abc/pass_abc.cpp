@@ -2,8 +2,6 @@
 
 #include "pass_abc.hpp"
 
-#include "stage_mem.hpp"
-
 #include <charconv>
 #include <cstdlib>
 #include <filesystem>
@@ -13,6 +11,7 @@
 #include <map>
 #include <memory>
 #include <new>
+#include <optional>
 #include <print>
 #include <set>
 #include <string>
@@ -40,6 +39,7 @@
 #include "query.hpp"
 #include "region_cache.hpp"
 #include "satopt.hpp"
+#include "stage_mem.hpp"
 #include "synth_policy.hpp"
 #include "ware_module.hpp"
 
@@ -1359,6 +1359,13 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
   // region is digested. The out dir is wiped by the kernel every run, so a cache
   // living inside it would self-destruct -- refuse the overlap.
   auto                                         cache_dir = std::string{var.get("cache_dir", "")};
+  // The cache's two graph libraries (mapped bodies, pre-mapping bodies) are opened through the
+  // process-wide registry, which keeps a library loaded for the life of the process: after this
+  // pass every cached body stayed in memory (minion: 240 MB after a cold run, 100 MB after a warm
+  // one) under whatever ran next. They are scoped to this call instead, unless the caller keeps the
+  // cache for later rounds (io_feedback) or something already holds the path open. Declared before
+  // `incr` and the mapper: every handle into the two libraries dies before the scopes do.
+  std::optional<livehd::Hhds_graph_library::Scoped_instance> cache_scope, cache_pre_scope;
   std::shared_ptr<livehd::synth::Region_cache> incr;
   // The register cell is resolved HERE, once, rather than in Mapper::start():
   // the cache salt below needs the resolved pick (not the raw, usually empty,
@@ -1408,6 +1415,18 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
     // failure shapes stay distinct keys too.
     const std::string dff_desc = livehd::liberty::dff_selection_descriptor(dff_sel, opts.dff_cell)
                                  + (opts.drop_init ? "+drop_init" : "") + (opts.derived_clock ? "+derived_clock" : "");
+    if (!opts.io_feedback) {
+      std::error_code made;  // the registry loads what is there: the directories must exist first, as the cache makes them
+      std::filesystem::create_directories(cache_dir, made);
+      std::filesystem::create_directories(cache_dir + "_pre", made);
+      try {
+        cache_scope.emplace(cache_dir);
+        cache_pre_scope.emplace(cache_dir + "_pre");
+      } catch (const std::logic_error&) {  // already open in this process: leave it to its owner
+        cache_pre_scope.reset();
+        cache_scope.reset();
+      }
+    }
     incr                       = std::make_shared<livehd::synth::Region_cache>(
         cache_dir,
         livehd::synth::Region_cache::make_salt(livehd::fold_salt_mix(livehd::abc::kAbcSrcSalt),

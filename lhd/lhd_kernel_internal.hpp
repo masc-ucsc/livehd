@@ -428,8 +428,14 @@ public:
     done_                                              = true;
     const std::chrono::duration<double, std::milli> dt = std::chrono::steady_clock::now() - t0_;
 #if defined(__GLIBC__)
-    if (livehd::debug::env<"LHD_PHASE_TRIM">() != nullptr) {  // EXPERIMENT: hand freed pages back after each phase
-      malloc_trim(0);
+    // Hand freed pages back to the system when a phase of a second or more ends. glibc keeps what a
+    // phase freed (minion: 0.9 GB after technology mapping, 2.4 GB after timing), and the next phase
+    // starts on top of it. A trim costs milliseconds; LHD_PHASE_TRIM=0 turns it off.
+    if (dt.count() >= 1000.0) {
+      const char* trim = livehd::debug::env<"LHD_PHASE_TRIM">();
+      if (trim == nullptr || trim[0] != '0') {
+        malloc_trim(0);
+      }
     }
 #endif
     if (start_kb_ != 0) {
