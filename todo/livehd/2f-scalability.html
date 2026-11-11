@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TODO 2f-scalability — Memory-bounded placement in chunks of 1, 2, 4 or 8 GB</title>
+<link rel="stylesheet" href="../todo.css">
+</head>
+<body>
+<nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
+<main>
+<h1><strong class="item-id">2f-scalability</strong> Memory-bounded placement in chunks of 1, 2, 4 or 8 GB</h1>
+<p><span class="status">Plan written 2026-11-10. Only step B (memory per cell of the current pass) has started; the chunking itself is not implemented or scheduled.</span></p>
+
+<p>Cut the floorplan into <strong>chunks sized by memory</strong>, so that synthesis, timing and
+placement of a design of any size run on a machine that has a fixed amount of memory for data:
+<strong>1, 2, 4 or 8 GB per chunk</strong>. A fast global placement with no wire RC and no timing
+gives a stable floorplan. The floorplan is then cut into chunks, and each chunk gets its detail
+(RC, timing, legalization, repair) on its own, with the rest of the design reduced to fixed
+points on the chunk edges. Chunks follow the synthesis colors, so that an incremental edit of one
+color replaces a small part of one or two chunks instead of the whole placement.</p>
+
+<h2>Goals</h2>
+<ul>
+<li><strong>Four budgets.</strong> The flow takes a data budget of 1, 2, 4 or 8 GB and sizes its
+chunks to fit. The budget, not the number of colors, decides the number of chunks: a design the
+size of minion has hundreds of colors and needs only a handful of chunks, each holding dozens of
+colors.</li>
+<li><strong>1 GB is the stress case.</strong> It is expected to be too small for good results. It
+is in the plan to show what is lost when the chunks are pushed too far.</li>
+<li><strong>8 GB is the reference.</strong> For minion it means one or two chunks, so it is close
+to a flat run and shows what chunking itself costs.</li>
+<li><strong>Size independence.</strong> A design 100 times larger than minion uses the same budget
+per chunk and about 100 times more chunks.</li>
+<li><strong>Parallel later.</strong> A chunk depends only on the previous round's fixed points, so
+chunks can run at the same time, one process each. A machine with <em>M</em> GB runs
+<em>M / budget</em> chunks at once, which is the practical advantage of the smaller budgets.</li>
+<li><strong>Incremental.</strong> After a small edit of one color, only that color's part of its
+chunk is placed again. A full redo is needed only when the color grows well beyond the free space
+around it.</li>
+</ul>
+
+<h3>What "data budget" means (proposed)</h3>
+<p>The peak resident memory of the process that handles one chunk, without the executable and
+shared-library code: heap, stacks, and the technology data it loads. It is measured with
+<code>LHD_PHASE_MEM=1</code> (per phase and per stage) and checked for the whole process tree.
+The global phase and the stitching steps between rounds must fit the same budget.</p>
+
+<h2>Where the memory goes today</h2>
+<p>Measured 2026-11-10 on minion compiled from Verilog, sky130. Placement was measured with
+<code>synth.memory=flops</code>, because with memory macros the placement stops early ("memory
+proxy edge has too few routing tracks for its pins").</p>
+<table>
+<thead><tr><th>Phase</th><th>Peak</th><th>What holds it</th></tr></thead>
+<tbody>
+<tr><td>Compile</td><td>0.58 GB</td><td>Front end (slang).</td></tr>
+<tr><td>Coloring</td><td>0.27 GB</td><td></td></tr>
+<tr><td>Mapping (<code>pass.abc</code>)</td><td>1.44–1.58 GB</td><td>One region of 167,559 gates
+(<code>minion_top</code>, color 2) needs about 730 MB while it is mapped. The other 456 regions
+need at most 40 MB each. 0.46 GB stays in use after the pass.</td></tr>
+<tr><td>Timing after synthesis (<code>pass.opentimer</code>)</td><td>6.1 GB</td><td>A flat copy of
+the design (0.8 GB) and the OpenTimer model (2.85 GB, about 6 KB per gate for 476k gates).</td></tr>
+<tr><td>Placement, timing off</td><td>8.75 GB</td><td>7.84 GB in use at the peak for 667,612 cells
+(116k of them fillers): about 11.7 KB per cell.</td></tr>
+<tr><td>Placement, timing on</td><td>over 40 GB</td><td>Stopped after 3 hours without finishing;
+33–36 GB were in use.</td></tr>
+</tbody></table>
+
+<p>Placement with timing off, by owner, at the peak:</p>
+<table>
+<thead><tr><th>Owner</th><th>In use</th><th>Per cell</th><th>Note</th></tr></thead>
+<tbody>
+<tr><td><code>place_single_frame</code> locals</td><td>1.44 GB</td><td>2.1 KB</td><td></td></tr>
+<tr><td>Wire RC (<code>steiner_rc</code>, <code>estimate_rc</code>, <code>record_poses</code>)</td><td>1.39 GB</td><td>2.1 KB</td><td>Computed although timing is off.</td></tr>
+<tr><td>Flat graph and its attributes</td><td>1.2 GB</td><td>1.8 KB</td><td></td></tr>
+<tr><td><code>make_arrays</code></td><td>0.96 GB</td><td>1.4 KB</td><td></td></tr>
+<tr><td>DEF read back (<code>net_cb</code>, <code>component_cb</code>)</td><td>0.77 GB</td><td>1.2 KB</td><td>An in-memory round trip.</td></tr>
+<tr><td>Physical vectors (connections, nets, components)</td><td>0.74 GB</td><td>1.1 KB</td><td></td></tr>
+<tr><td><code>Resolver::bit</code>, <code>split_boundary_nets</code></td><td>0.57 GB</td><td>0.85 KB</td><td></td></tr>
+<tr><td>Native placer model (DREAMPlace)</td><td>0.14 GB</td><td>0.2 KB</td><td><code>double</code> coordinates, <code>int</code> indices.</td></tr>
+</tbody></table>
+<p>The placer's own model is 1–2% of the peak. The rest is LiveHD's placement pass, and it is all
+per cell, so it is what a chunk has to bound.</p>
+
+<h3>Why it is kilobytes per cell: names, not numbers</h3>
+<p>Checked 2026-11-10 in a second heap dump of the same run (7.2 GB in use). 4.1 GB of it are 28
+million heap blocks of about 150 bytes each, 42 per cell, from three places: the copy constructor
+of <code>View</code> (1.65 GB), <code>make_arrays</code> (1.61 GB) and
+<code>place_single_frame</code> (0.88 GB). They are copies of instance names and map nodes keyed
+by them:</p>
+<ul>
+<li>The placed DEF has 667,612 components with an average name of <strong>108 characters</strong>
+(the full hierarchical path), 664,274 nets and 2,473,583 connections, 3.7 per cell.</li>
+<li><code>Endpoint</code> (place.cpp) and <code>physical::Connection</code> are
+<code>{std::string instance, pin}</code>. Every connection carries its own copy of the 108-character
+instance name, in each model that lists connections.</li>
+<li><code>View</code> holds <code>pins</code>, <code>drivers</code>, <code>nets</code>
+(<code>std::map&lt;Endpoint, std::vector&lt;Endpoint&gt;&gt;</code>), <code>bus_names</code>, and maps
+from name to index (<code>cell</code>, <code>terminal</code>, <code>weights</code>,
+<code>cohesion_owners</code>). <code>Cell</code> has three strings, <code>physical::Component</code>
+two, <code>physical::Net</code> a name and a vector of connections.</li>
+<li><code>View</code> is copied whole (<code>auto snapshot = v</code> and ten similar places), so two
+or more complete string models are alive at the peak.</li>
+<li>The flat graph repeats the names as attributes (<code>carry_node_attrs</code> 0.25 GB).</li>
+</ul>
+<p>A model of numbers needs a cell index, a type index, a position and an orientation per cell, a
+net index per pin, and one table of names: a few hundred bytes per cell. The native placer model
+is already that (about 210 bytes per cell). So the 11.7 KB per cell is not a property of
+placement; it is the cost of using names as identities inside the pass.</p>
+
+<h3>Step B2 in progress (2026-11-11)</h3>
+<p>Same minion run (timing off), the placed DEF identical byte for byte at every step, and the small cores
+identical in every report field with the default options (timing on):</p>
+<table>
+<thead><tr><th>Change</th><th>Peak</th><th>Run time</th></tr></thead>
+<tbody>
+<tr><td>Before</td><td>8.0 GB</td><td>390 s</td></tr>
+<tr><td><code>livehd::Name</code> (<code>core/interned_name.hpp</code>): one pointer to a text stored once, which
+compares and orders by text. Used by <code>physical::Component</code>, <code>Connection</code>, <code>Net</code>
+and the view's endpoints, cells and name indices.</td><td>5.8 GB</td><td>348 s</td></tr>
+<tr><td><code>livehd::Pin_label</code>: the "instance:pin" identity as two names, ordered as the joined text. Used
+by the RC nodes and drivers and by the pin-location maps.</td><td>4.9 GB</td><td>351 s</td></tr>
+<tr><td>Names in the RC cell list and the cohesion table; the boundary-pin split model and the legalizer's per-cell
+report released after their last reader.</td><td>4.2 GB</td><td>345 s</td></tr>
+</tbody></table>
+<p>That is about 6.3 KB per cell, from 11.7. What holds the rest at the new peak (the boundary-pin refinement,
+4.1 GB in use):</p>
+<ul>
+<li><strong>Copies of the placer arrays, about 1.5 GB.</strong> The view's design, the copy the native placer makes of
+its input (alive twice, because the refinement runs inside the outer placement call), the split model and one more
+copy for metrics.</li>
+<li><strong>The flat graph, about 1.1 GB</strong> (1.65 KB per cell). Each node has about three overflow blocks for its
+connectivity, and about four sparse attributes: the full hierarchical name, the color-group name and the placement
+block as strings, plus color, source and region ids. These are the candidates for dense and per-class attributes,
+and for names read from the hierarchy when needed.</li>
+<li><strong>Node identity lists for the placement session, about 0.3 GB</strong>, built as strings even when no
+session exists.</li>
+<li><strong>The name table itself, 0.1 to 0.2 GB.</strong> It is never released, and nets named after their driver add
+one text per net.</li>
+</ul>
+<p>Not converted yet: the control-pin sets of <code>Prects_networks</code> (they mix "instance:pin" and
+"instance/pin" texts) and the label tables of the timing feedback, which belong with the timing work.</p>
+
+<h2>What the budgets mean</h2>
+<p>Estimates from the numbers above. Three quarters of the budget go to the chunk's own cells. The
+rest is left for technology data, the state shared between chunks and allocator slack.</p>
+<table>
+<thead><tr><th>Budget</th><th>Cells per chunk, today (11.7 KB/cell)</th><th>Chunks for minion,
+today</th><th>Cells per chunk, after step B (8.5 KB/cell)</th><th>Chunks for minion, after step
+B</th><th>Chunks for 100× minion, after step B</th></tr></thead>
+<tbody>
+<tr><td>1 GB</td><td>64k</td><td>11</td><td>88k</td><td>8</td><td>about 760</td></tr>
+<tr><td>2 GB</td><td>128k</td><td>6</td><td>176k</td><td>4</td><td>about 380</td></tr>
+<tr><td>4 GB</td><td>256k</td><td>3</td><td>353k</td><td>2</td><td>about 190</td></tr>
+<tr><td>8 GB</td><td>513k</td><td>2</td><td>706k</td><td>1</td><td>about 95</td></tr>
+</tbody></table>
+<ul>
+<li>All of these are with <strong>timing off</strong>. Timing adds at least the 6 KB per gate of the
+OpenTimer model, and far more in the current timing-driven loop. The per-cell cost of timing
+inside a chunk is not known yet and is the largest unknown in this plan (step H).</li>
+<li>The <strong>global phase</strong> cannot hold every cell of a very large design: the native
+model alone is about 210 bytes per cell, 14 GB for 100× minion. It has to place clusters. At that
+cost a budget holds about 3.5 million movable objects per GB.</li>
+<li>Even <strong>one position per cell</strong> (8 bytes) is 0.5 GB for 100× minion, so the state
+shared between chunks lives on disk, split by chunk, and only a per-chunk summary stays in
+memory.</li>
+</ul>
+
+<h2>Vocabulary</h2>
+<p><a href="3g-partitions.html">3g-partitions</a> fixed three partition names: <strong>grid</strong>
+(force fields), <strong>region</strong> (detail-final rectangles of at most 10,000 cells) and
+<strong>bin</strong> (legalization capacity). This plan adds a fourth:</p>
+<table>
+<thead><tr><th>Name</th><th>Sized by</th><th>Semantics</th><th>Proposed option prefix</th></tr></thead>
+<tbody>
+<tr><td><strong>chunk</strong></td><td>The memory budget</td><td>The part of the floorplan that one
+process loads. It holds whole regions and, where possible, whole colors. The rest of the design
+is visible only as fixed points on the chunk's edges. It is the unit of memory and of parallel
+work; the color stays the unit of incremental work.</td><td><code>synth.place.chunk.*</code>
+(<code>chunk.memory_gb</code>, 0 = one chunk, as today)</td></tr>
+</tbody></table>
+
+<h2>Approach</h2>
+<ol>
+<li><strong>Coarse global placement.</strong> No wire RC, no timing, every edge with the same
+weight. The objects are clusters: colors, or groups of small colors, and macros. This gives one
+position and one area per cluster and a density map. It is fast and its memory depends on the
+number of clusters, not on the number of cells. For a design that fits the budget whole, the
+objects can be the cells themselves.</li>
+<li><strong>Cut into chunks.</strong> The budget and the measured cost per cell give the number of
+cells per chunk. The cut lines run between clusters, so most colors land whole in one chunk. A
+color larger than a chunk spans several. Colors are never split for synthesis because of this:
+the cut only decides which of a color's cells are loaded together for placement.</li>
+<li><strong>Fix the crossing points.</strong> Every net that crosses a chunk edge gets a fixed point
+on that edge, like a pin of a soft macro. A chunk sees its neighbours only through these
+points.</li>
+<li><strong>Detail per chunk.</strong> One process loads the chunk's cells and its crossing points,
+refines the placement with RC and timing, legalizes, repairs, and writes the positions back.
+Chunks run one after the other, or at the same time.</li>
+<li><strong>Rounds.</strong> Between rounds the flow updates the crossing points and the boundary
+timing, and moves area between chunks that are over and under capacity (a small flow problem on
+the chunk graph). Two tilings alternate, shifted by half a chunk, so that a cell on a boundary
+in one round is inside a chunk in the next. No cell has a permanent owner.</li>
+<li><strong>Global nets.</strong> Clock, reset and nets too large to split (the boundary-pin code
+already leaves nets over 1,000 pins unsplit) stay with the global level. A color that spreads
+over most chunks is treated the same way.</li>
+</ol>
+
+<h3>Storage between rounds</h3>
+<p>The stored unit is a <strong>tile</strong>, a quarter of a chunk. A chunk is a group of
+adjacent tiles, and the shifted tiling is a different grouping of the same tiles. Each tile file
+holds its cells, positions and the crossing points on its edges. A table maps each color to the
+tiles it touches. The mapped netlist is already stored per color (one region module
+<code>&lt;top&gt;__c&lt;color&gt;</code> in the region cache), so a chunk can load its colors
+without loading the flat design.</p>
+
+<h3>Incremental path</h3>
+<ol>
+<li>The edited color is mapped again. This is per color today: a leaf edit of minion mapped 45 of
+457 regions again.</li>
+<li>The color's chunks are loaded. Every other color in them is held fixed, and only the edited
+color, with a small margin around it, is placed from scratch against the fixed crossing points.
+Old cells are not matched to new ones, because mapping may rename most of them; flops and
+boundary nets are the stable references.</li>
+<li>Escalation:
+  <ul>
+  <li>the growth fits in the free space kept in the chunk: done;</li>
+  <li>it does not fit: area moves to the neighbouring chunks and those are redone;</li>
+  <li>the crossing nets changed a lot, or the neighbours are also full: the global phase runs
+  again.</li>
+  </ul></li>
+</ol>
+
+<h2>What exists already</h2>
+<ul>
+<li><strong>Colors in the floorplan.</strong> The FP stage already moves hierarchy candidates and
+color leaves as circles with their own area budgets (<code>synth.place.fp.colors</code>,
+<code>pass/place/color_centroids.cpp</code>).</li>
+<li><strong>Region mesh.</strong> <code>Region_mesh</code> cuts the placed design into rectangles of
+at most <code>region.max_cells</code> cells with explicit membership and writes
+<code>region_mesh.json</code>. Minion gets 203 rectangles. A chunk is a group of these.</li>
+<li><strong>Fixed boundary pins.</strong> <code>region.boundarypins</code> cuts each net where it
+crosses a rectangle edge, joins the pieces through fixed zero-area terminals and writes
+<code>boundarypins/pins.tsv</code> as the pin contract. Today it builds one model for the whole
+mesh in one process and removes the pins before legalization.</li>
+<li><strong>Timing at color ports.</strong> <a href="2is-incsynth.html">2is-incsynth</a> saves the
+arrival and required times that each placement stage measured at every color's ports. The same
+record is what two chunks exchange at a crossing net.</li>
+<li><strong>Mapping per color</strong> with a region cache, and the region cache libraries now
+released when the pass ends.</li>
+<li><strong>Measurement.</strong> <code>LHD_PHASE_MEM</code>, stage lines in
+<code>pass.abc</code> and <code>pass.opentimer</code> (<code>core/stage_mem.hpp</code>), and heap
+profiles by owner (jemalloc).</li>
+</ul>
+
+<h2>Facts to confirm first</h2>
+<ul class="subtasks">
+<li><strong>F1 — color locality.</strong> In a flat minion placement, cut the die in 2, 4 and 8 and
+count the pieces each color touches and the nets that cross each cut. If most colors touch one
+or two pieces the plan holds as written. If not, the coloring needs a locality term before
+anything else.</li>
+<li><strong>F2 — memory of the FP stage.</strong> How much of the 7.84 GB is already in use while
+the FP stage runs, and whether that stage loads every cell.</li>
+<li><strong>F3 — independence of regions today.</strong> Whether any region consumer can run on one
+rectangle without the full design in memory. The boundary-pin model suggests not.</li>
+<li><strong>F4 — technology data.</strong> The footprint of Liberty and LEF once loaded, which every
+chunk process pays.</li>
+<li><strong>F5 — memory macros.</strong> Why minion with memory macros stops in placement. Until it
+is fixed, measurements use <code>synth.memory=flops</code>, which inflates the cell count.</li>
+<li><strong>F6 — cost of timing per cell</strong> in the placement loop, on a design small enough to
+finish.</li>
+</ul>
+
+<h2>Steps</h2>
+<ul class="subtasks">
+<li><strong>A — locality measurement (F1).</strong> A script over an existing placement and the
+color table. No change to the flow.</li>
+<li><strong>B — lower the cost per cell of the current pass.</strong> Each of these helps a flat
+run today and every chunk later.
+  <ul>
+  <li>B1: skip wire RC when timing is off (1.39 GB) and remove the in-memory DEF round trip
+  (0.77 GB). That alone takes minion from 11.7 to about 8.5 KB per cell.</li>
+  <li>B2: indices instead of names. <code>Endpoint</code> and <code>Connection</code> become a cell
+  index and a pin index of the cell type; nets become index arrays; names are kept once (or read
+  from the graph when a file is written); a snapshot of a <code>View</code> copies positions only.
+  This removes most of the 4.1 GB of name copies and is the largest single reduction known. The
+  chunk counts in the table above must be computed again after it: minion with timing off may
+  then fit whole in the smaller budgets, which moves the stress case to larger designs.</li>
+  <li>B3: the flat graph (1.2 GB, 1.8 KB per cell), which is then the largest remaining
+  owner.</li>
+  </ul></li>
+<li><strong>C — budget and estimator.</strong> <code>chunk.memory_gb</code> and a predicted peak per
+chunk from cell, net and pin counts. Every run reports predicted against measured peak. The
+default keeps one chunk, so results do not change.</li>
+<li><strong>D — coarse global placement.</strong> A mode with equal edge weights, no RC and no
+timing, on clusters built from colors. Check first how far the FP stage with
+<code>fp.colors</code> already is this mode.</li>
+<li><strong>E — chunk cut and tiles.</strong> Tiles from the coarse result with cut lines between
+clusters and at macro edges, the color-to-tile table, and the tile files.</li>
+<li><strong>F — crossing points as a stored contract.</strong> The boundary-pin model applied to
+tile edges and kept on disk across processes and rounds, with capacity per edge.</li>
+<li><strong>G — one chunk in one process.</strong> Load a chunk from its tiles, refine, legalize,
+write back. A sequential driver walks all chunks. This is the first point where the peak can be
+compared with the budget.</li>
+<li><strong>H — timing per chunk and stitch.</strong> Timing inside the chunk with boundary arrival
+and required times, exchanged between rounds. This shares the work of timing per color in
+synthesis and depends on F6.</li>
+<li><strong>I — rounds.</strong> Shifted tilings, area transfer between chunks, damping, and a stop
+rule.</li>
+<li><strong>J — parallel chunks.</strong> One process per chunk, results independent of the order
+and of the number of processes.</li>
+<li><strong>K — incremental color replacement.</strong> The path above with its escalation, and a
+test that edits one module of minion and checks which tiles were rewritten.</li>
+<li><strong>L — synthesis under the same budget.</strong> Timing per color with a stitch instead of
+the flat OpenTimer model, and the one mapping region that needs 730 MB on its own. Color sizes
+stay as they are unless a natural cut is found: a color is not split only because it is over a
+cell count.</li>
+</ul>
+<p>A and B are useful on their own and can be done at any time. C to G give the first run under a
+budget with timing off. H to J make it usable. K and L can follow in either order.</p>
+
+<h2>Experiments</h2>
+<p>Each budget (1, 2, 4, 8 GB) against a flat run of the same design, first on minion and then on a
+larger design. For each run:</p>
+<ul>
+<li>peak data memory per phase and per chunk, against the budget;</li>
+<li>number of chunks, nets crossing chunk edges, and colors that span more than two chunks;</li>
+<li>wire length, worst and total negative slack, and legality, against the flat run;</li>
+<li>rounds until the stop rule, and wall time sequential and parallel;</li>
+<li>for the incremental path: tiles rewritten and time after a one-module edit.</li>
+</ul>
+
+<h2>Acceptance</h2>
+<ul>
+<li>Minion completes placement at each of the four budgets with the measured peak under the
+budget, and the report shows predicted against measured peak per chunk.</li>
+<li>The 8 GB result is within noise of the flat run. The loss at 4, 2 and 1 GB is published,
+whatever it is.</li>
+<li>A design that does not fit flat on the test machine completes at 4 GB per chunk.</li>
+<li>The result does not depend on the number of processes.</li>
+<li>A one-module edit of minion rewrites only the tiles of the edited color, or reports which
+escalation it took and why.</li>
+<li>With <code>chunk.memory_gb=0</code> every existing result is unchanged.</li>
+</ul>
+
+<h2>Risks</h2>
+<ul>
+<li><strong>Quality at the boundaries.</strong> Fixed crossing points are a constraint a flat
+placement does not have. The size of the loss is unknown until the experiments.</li>
+<li><strong>Colors that do not stay together.</strong> Colors come from logic structure, not from
+location. F1 measures this before any design work.</li>
+<li><strong>Oscillation between rounds.</strong> Shifted tilings help but do not guarantee
+convergence.</li>
+<li><strong>Timing memory.</strong> If timing cannot be bounded per cell inside a chunk, the 1 and
+2 GB budgets may only be reachable with timing off.</li>
+<li><strong>Macros.</strong> They are placed in the global phase and are fixed for every chunk, so a
+poor macro placement cannot be repaired later.</li>
+<li><strong>Free space for increments.</strong> The space kept in each chunk for growth costs area
+in every run.</li>
+</ul>
+
+<h2>Related</h2>
+<ul>
+<li><a href="3g-partitions.html">3g-partitions</a> — grid, region and bin; the region mesh a chunk
+is built from.</li>
+<li><a href="2is-incsynth.html">2is-incsynth</a> — timing at color ports from each placement stage,
+and resynthesis of whole colors.</li>
+<li><a href="2t-timeclosure.html">2t-timeclosure</a> — the timing proxy inside global
+placement.</li>
+<li><a href="2m-magnet.html">2m-magnet</a> — rigid groups moved as one object, a form of
+clustering for the global phase.</li>
+<li><a href="1f-fixes.html">1f-fixes</a> — STA cost and large-design limits of the current
+flow.</li>
+<li><a href="../../pass/place/README.md">pass/place/README.md</a> — spatial partitions, placement
+color leaves, fixed boundary pins.</li>
+</ul>
+</main>
+<footer><a href="../index.html">← All tasks</a> · LiveHD TODO · <code>livehd</code></footer>
+</body>
+</html>
