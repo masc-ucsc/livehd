@@ -487,6 +487,12 @@ sh_test(
     data = ["//lhd"],
 )
 
+sh_test(
+    name = "lhd_sim_restart_pre_read_test",
+    srcs = ["lhd_sim_restart_pre_read_test.sh"],
+    data = ["//lhd"],
+)
+
 # `lhd sim` RESTART + windowed VCD (sim_checkpoint_debug_plan, Stage C):
 # `--restart-cycle N` loads the nearest checkpoint <= N (DUT + testbench frame) and
 # resumes there, so an accumulating tb local matches a full run bit-exactly and
