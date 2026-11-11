@@ -6,7 +6,7 @@ load("@rules_shell//shell:sh_test.bzl", _sh_test = "sh_test")
 
 _BACKEND = [
     "inou/lefdef", "pass/place", "pass/domplace", "pass/opentimer",
-    "pass/liberty", "tools/uroute", "tools/spef", "scripts/domplace",
+    "pass/liberty", "pass/timing", "tools/uroute", "tools/spef", "scripts/domplace",
 ]
 _BOTH = ["lhd", "pass/abc", "pass/usyn", "pass/synth", "pass/domino", "tools", "benchmark"]
 _SMOKE = [

@@ -10,7 +10,8 @@
 <nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
 <main>
 <h1><strong class="item-id">2q-fasttimer</strong> Fast approximate timing engine for synthesis and placement</h1>
-<p><span class="status">Plan written 2026-11-11 from a question-and-answer session. Nothing is implemented.
+<p><span class="status">Plan written 2026-11-11 from a question-and-answer session. Steps A, B (without the SDC
+reader) and C are implemented in <code>pass/timing</code> (2026-11-11), see <a href="#progress">Progress</a>.
 Names of options, targets and directories are proposals.</span></p>
 
 <p>Replace OpenTimer <strong>inside</strong> synthesis and placement with a small native timing engine
@@ -286,6 +287,49 @@ factor falls outside a sane range.</li>
 corner exceeds the added delay with margin. Downsizing first, then a delay cell.</li>
 <li>Residual violations are reported and never fail a run. Real clock skew does not exist before
 routing, so the post-route ECO keeps the final responsibility.</li>
+</ul>
+
+<h2 id="progress">Progress (2026-11-11)</h2>
+<p>Implemented in <code>pass/timing</code> (<code>README.md</code> there has the numbers and the commands):
+<strong>A</strong> cell-type tables for N corners; <strong>B</strong> the numeric netlist, levelization and
+the binder from a flat mapped graph (the typed constraints are built by hand; the one SDC reader is still to
+do); <strong>C</strong> forward and backward propagation, hold, electrical checks, criticality, worst path.
+Unit tests: <code>fast_timing_test</code>, <code>bind_graph_test</code>.</p>
+<table>
+<tr><th>Exit criterion</th><th>Result</th></tr>
+<tr><td>A: lookups match <code>Table::lookup</code> on asap7 and sky130; load time and size</td>
+<td>Met. Worst error 0.005 ps (sky130, three corners, 5.3 MB, 0.63 s to load 38.6 MB of Liberty) and 0.002 ps
+(asap7 RVT ss and ff, 10.2 MB, 1.43 s for 92 MB, 41,772 tables on 8 shared axes).</td></tr>
+<tr><td>C: zero-wire comparison with OpenTimer as a diagnostic</td>
+<td>Longest arrival at OpenTimer's ten longest endpoints, engine against OpenTimer: picorv32 +1.0 to +2.0%,
+dino +1.0 to +1.3%, minion +0.40 to +0.41%; the same endpoints in the same order in all three. Consistently
+above, because a pin's load is the larger of its rise and fall capacitance and slews merge by the worst.</td></tr>
+<tr><td>C: time and bytes per cell against the targets</td>
+<td>Evaluate of minion (649k cells): 0.73 s with one corner, 1.35 s with three; OpenTimer takes 45 s for the whole
+pass and 6.4 GB. Engine state 307 B per cell (one corner) and 568 B (three), plus 100 B per cell for the netlist:
+<strong>0.4 KB for one corner, 0.67 KB for three, against a target of 0.5 KB for three corners with trees</strong>.
+Per pin the three-corner state is 154 B against the 80 B estimated: the per-corner late arrival, slew, required
+and depth for both transitions are 84 B, the predecessor 16 B, the early walk 16 B. Reducing it (predecessor for the
+path corner only, depth narrowed, early walk without a slew array) is open and has to happen before the wire trees
+add their share.</td></tr>
+</table>
+<h3>Deviations and findings</h3>
+<ul>
+<li><strong>Combinational loops are cut, not left untimed.</strong> Minion has 4,004 loops (79k pins). Left untimed
+they hid the longest paths, which all run through them, and OpenTimer cuts them silently. The engine cuts a loop at
+one pin (the one with the fewest arcs still waiting among the first unordered pins, so the rule depends only on the
+netlist), and the count is in <code>Report::unsupported</code>.</li>
+<li><strong>Primary inputs launch at time 0 by default,</strong> as OpenTimer does without input delays;
+<code>cut_pins</code> on the input ports turns it off.</li>
+<li><strong>The binder time is graph access:</strong> on minion flatten takes 2.2 s and bind 3.3 s, ten times the
+evaluation. The numeric netlist is built once per topology, so this is paid once, but it is where an incremental
+rebuild will need care.</li>
+<li><strong>Not timed, listed:</strong> latches, memories and clock gates (2,535 cells in minion), falling-edge
+elements, state-dependent arcs are all treated as separate arcs (the worst wins; the case analysis of step B is not
+done), sinks driven by constants (9,257 in minion).</li>
+<li><strong>Single clock tags:</strong> arrivals carry no launch-clock tag, so several clocks are timed against
+the capture clock's period with the worst launch; asynchronous groups are not supported yet (to be reported as
+unsupported when the SDC reader lands).</li>
 </ul>
 
 <h2>Facts to confirm first</h2>
