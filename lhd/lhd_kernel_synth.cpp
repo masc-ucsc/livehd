@@ -3203,19 +3203,27 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
       // Sizing and buffering are what fix electrical violations (a 271-load net with 44 ns of wire delay), so they are
       // never starved by the optional work that runs first: IO resynthesis and the region refinement evaluate
       // unconditionally and can spend the whole shared allowance (eyeriss: the Steiner buffering ran 0 attempts).
-      // Repair may always use a few evaluations of its own, counted from the first one it asks for.
+      // Each may always use a few evaluations of its own, counted from the first one it asks for. Sizing and
+      // buffering do not share that allowance either: sizing runs first and keeps trying while timing fails, so on
+      // a shared count it left buffering none (liteeth with several colors: 4 sizing attempts, 0 buffering attempts,
+      // and a 159 fF segment of a synchronous reset at -1.2 ns that only a buffer fixes).
       constexpr size_t repair_allowance = 4;
-      size_t           repair_base      = 0;
-      bool             repair_started   = false;
-      const livehd::placement::Trial_admission admit_repair = [&] {
+      struct Own_allowance {
+        size_t base    = 0;
+        bool   started = false;
+      };
+      Own_allowance sizing_allowance, buffering_allowance;
+      const auto    own_allowance = [&](Own_allowance& state) {
         const auto&  stats = timing_session.statistics();
         const size_t used  = stats.evaluations - stats.rankings;
-        if (!repair_started) {
-          repair_started = true;
-          repair_base    = used;
+        if (!state.started) {
+          state.started = true;
+          state.base    = used;
         }
-        return used < eval_budget || used - repair_base < repair_allowance;
+        return used < eval_budget || used - state.base < repair_allowance;
       };
+      const livehd::placement::Trial_admission admit_sizing    = [&] { return own_allowance(sizing_allowance); };
+      const livehd::placement::Trial_admission admit_buffering = [&] { return own_allowance(buffering_allowance); };
       const livehd::placement::Trial_admission admit_refinement = [&] {
         const auto& stats = timing_session.statistics();
         // Leave room for sizing and buffer repair. Rejected placement trials
@@ -3533,7 +3541,7 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
                                                          evaluate,
                                                          livehd::placement::Repair_scope::sizing,
                                                          std::move(timed_placement.timing),
-                                                         admit_repair);
+                                                         admit_sizing);
             placed   = std::move(repaired.placed);
             res.recipe_steps.emplace_back("pass.place.resize");
           }
@@ -3544,7 +3552,7 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
                                                                 evaluate,
                                                                 livehd::placement::Repair_scope::design_after_sizing,
                                                                 std::move(repaired.timing),
-                                                                admit_repair);
+                                                                admit_buffering);
             placed          = std::move(design_repaired.placed);
             res.recipe_steps.emplace_back("pass.place.repair");
           }
@@ -3557,7 +3565,9 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
             Phase_timer phase(res, "pass.place.repair_loop");
             auto        best_timing = *design_repaired.timing;
             repair_loop_report      = "[";
-            constexpr size_t loop_allowance = 10;  // detailed evaluations one iteration may use
+            // Detailed evaluations one iteration may use: half for the placement kick and sizing, half for
+            // buffering, which would otherwise find the count spent when its turn comes.
+            constexpr size_t loop_allowance = 10;
             for (unsigned it = 0; it < place_options.repair_iterations; ++it) {
               if (best_timing.wns && *best_timing.wns >= 0) {
                 break;
@@ -3574,7 +3584,17 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
               }();
               const livehd::placement::Trial_admission admit_iteration = [&] {
                 const auto& stats = timing_session.statistics();
-                return stats.evaluations - stats.rankings - base < loop_allowance;
+                return stats.evaluations - stats.rankings - base < loop_allowance / 2;
+              };
+              Own_allowance                            loop_buffering;
+              const livehd::placement::Trial_admission admit_loop_buffering = [&] {
+                const auto&  stats = timing_session.statistics();
+                const size_t used  = stats.evaluations - stats.rankings;
+                if (!loop_buffering.started) {
+                  loop_buffering.started = true;
+                  loop_buffering.base    = used;
+                }
+                return used - loop_buffering.base < loop_allowance / 2;
               };
               const auto  before_wns = best_timing.wns.value_or(0), before_tns = best_timing.tns.value_or(0);
               // a rejected iteration takes its reset-tree depth decisions back with its placement
@@ -3591,7 +3611,7 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
                                                                     evaluate,
                                                                     livehd::placement::Repair_scope::design_after_sizing,
                                                                     std::move(sized.timing),
-                                                                    admit_iteration);
+                                                                    admit_loop_buffering);
               repair_loop_keep.push_back(std::move(kick));
               repair_loop_keep.push_back(std::move(sized));
               const bool better = again.timing && livehd::placement::timing_improves(best_timing, *again.timing);
