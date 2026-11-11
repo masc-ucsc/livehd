@@ -49,6 +49,7 @@
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
 #include "affine_amount.hpp"
 #include "color_region_graph.hpp"
 #include "color_synth.hpp"
@@ -96,6 +97,48 @@ constexpr uint32_t kPidUpdateEn = 13;
 [[nodiscard]] constexpr bool is_mem_port_off(uint32_t off) { return off == kPidAddr || off == kPidDin || off == kPidEnable; }
 [[nodiscard]] constexpr bool is_mem_whole_array_off(uint32_t off) { return off == kPidUpdate || off == kPidUpdateEn; }
 
+// Predicted logic LEVELS of one node, the depth companion of predict_abc_size:
+// what a delay-driven mapping makes of it, in two-input gates. It only has to
+// tell a deep path from a shallow one (the soft cap asks whether a cut sits
+// mid-way on a long path), so the table is coarse on purpose: balanced trees
+// for reductions and selects, a logarithmic carry for arithmetic.
+[[nodiscard]] uint32_t clog2(uint64_t v) {
+  uint32_t r = 0;
+  while (r < 63 && (uint64_t{1} << r) < v) {
+    ++r;
+  }
+  return r;
+}
+
+[[nodiscard]] uint32_t predict_levels(const hhds::Node_class& node, Ntype_op op, uint64_t pred) {
+  if (pred == 0) {
+    return 0;  // wiring, constants, blackboxes: no gate, no level
+  }
+  const auto     sh    = graph_util::predict_detail::fanin_shape(node, op);
+  const uint64_t width = std::max<uint64_t>({1, sh.widest, graph_util::ge_detail::out_width(node)});
+  const uint32_t terms = std::max<uint32_t>(1, clog2(sh.terms));
+  switch (op) {
+    case Ntype_op::And:
+    case Ntype_op::Or : return terms;
+    case Ntype_op::Xor: return 2 * terms;
+    case Ntype_op::Ror: return std::max<uint32_t>(1, clog2(width));
+    case Ntype_op::Rxor: return 2 * std::max<uint32_t>(1, clog2(width));
+    case Ntype_op::Popcount: return 3 * std::max<uint32_t>(1, clog2(width));
+    case Ntype_op::Mux: return 2 * std::max<uint32_t>(1, clog2(sh.arms));
+    case Ntype_op::Hotmux: return 1 + std::max<uint32_t>(1, clog2(sh.arms));
+    case Ntype_op::Sum: return (2 * clog2(width) + 2) * terms;
+    case Ntype_op::LT:
+    case Ntype_op::GT: return 2 * clog2(width) + 1;
+    case Ntype_op::EQ: return clog2(width) + 1;
+    case Ntype_op::SHL:
+    case Ntype_op::SRA: return 2 * std::max<uint32_t>(1, clog2(width));
+    case Ntype_op::Mult: return 4 * clog2(width) + 4;
+    case Ntype_op::Div:
+    case Ntype_op::Rem: return static_cast<uint32_t>(std::min<uint64_t>(4 * width, 1U << 16));
+    default: return 1;
+  }
+}
+
 // Phase-2 forward merge (pass.color.synth.forward).
 // `pair` ranks one (register color, ONE consumer color) candidate at a time;
 // `all` ranks the register against the WHOLE qualifying Q fanout at once and
@@ -114,6 +157,14 @@ struct Cone_stats {
   uint64_t              absorbed = 0, absorb_left = 0, absorb_ctrl = 0;  // small data colors folded / left alone / into control
   uint64_t              memory_rounds = 0, memory_merges = 0;
   std::vector<uint64_t> memory_merges_per_round;
+  // Data colors on a combinational cycle of the color graph (a path leaves the
+  // color and re-enters it): how many, in how many groups, the largest group's
+  // predicted AIG, and how many colors the convex join folded away.
+  uint64_t              cyc_colors = 0, cyc_groups = 0, cyc_max_pred = 0, cyc_joined = 0;
+  // The soft cap's own joins and refusals: colors folded across a cut that sat
+  // mid-way on a deep path, colors folded because they fed each other before
+  // any merge, and capped merges refused because they would have made a cycle.
+  uint64_t              deep_joined = 0, pre_joined = 0, cyc_refused = 0, max_levels = 0;
 };
 
 // One def's cone state. Every array is indexed by idx_of(); every phase after
@@ -123,6 +174,9 @@ struct Cones {
   uint64_t     max_gate     = 0;
   uint64_t     min_gate     = 0;
   bool         flop_to_flop = false;  // walks and the overlap merge ignore max_gate
+  bool         convex       = false;  // max_gate is a soft bound: no cut that costs efficiency
+  uint32_t     deep_path    = 0;      // percent of the deepest path a cut may sit on ...
+  uint32_t     deep_side    = 0;      // ... once both of its sides are at least this deep
   Forward_mode forward      = Forward_mode::off;
 
   bool                                                 ctrl_cones         = false;
@@ -202,6 +256,11 @@ struct Cones {
   std::vector<uint8_t>  flag;
   std::vector<uint8_t>  op;  // Ntype_op, so no phase after prepare() needs a node handle
   std::vector<uint64_t> pred;
+  std::vector<uint32_t> lvl;  // predicted logic levels of the node (convex only)
+  // Depth in predicted levels (convex only): the deepest path from a register
+  // up to and including the node, and from the node on to a register.
+  std::vector<uint32_t> arr, req;
+  uint32_t              deepest = 0;
   std::vector<uint32_t> owner;  // color id, 0 = unowned
   std::vector<uint32_t> epoch;  // per-root visited stamp
 
@@ -310,7 +369,7 @@ struct Cones {
       }
 
       const auto next = graph_util::sat_add(traversed, pred[n]);
-      if (!flop_to_flop && max_gate != 0 && next > max_gate && traversed != 0) {
+      if (!flop_to_flop && !convex && max_gate != 0 && next > max_gate && traversed != 0) {
         // Leave the crossing node for another cone. An indivisible node may
         // exceed the heuristic by itself, but it must not grow an existing
         // color past the limit. Retain known overlap before stopping the walk.
@@ -329,7 +388,7 @@ struct Cones {
       }
 
       traversed = next;
-      if (!flop_to_flop && max_gate != 0 && traversed > max_gate) {
+      if (!flop_to_flop && !convex && max_gate != 0 && traversed > max_gate) {
         // The first indivisible node alone exceeds the soft bound.
         ++st.truncated;
         work.clear();
@@ -1144,7 +1203,115 @@ struct Heap_cmp {
 // (predict_abc_size charges a register only for folded enable/reset muxes), so
 // for such a chain the cap never binds and the whole chain fuses into one
 // weightless color. `fwd_max_chain` reports it.
-void merge_forward(Cones& cn, Region_graph& rg, Int_union_find& cuf) {
+// Strongly connected components of a small dense digraph (iterative Tarjan;
+// the color graph of a flat CPU is thousands of vertices deep). comp[v] is a
+// component id; two vertices share one iff each reaches the other.
+[[nodiscard]] std::vector<uint32_t> strong_components(const std::vector<std::vector<uint32_t>>& succ) {
+  const uint32_t                             k = static_cast<uint32_t>(succ.size());
+  std::vector<uint32_t>                      index(k, UINT32_MAX), low(k, 0), comp(k, UINT32_MAX);
+  std::vector<uint8_t>                       on_stack(k, 0);
+  std::vector<uint32_t>                      stack;
+  std::vector<std::pair<uint32_t, uint32_t>> call;  // (vertex, next successor)
+  uint32_t                                   next = 0, n_comp = 0;
+  for (uint32_t root = 0; root < k; ++root) {
+    if (index[root] != UINT32_MAX) {
+      continue;
+    }
+    call.emplace_back(root, 0);
+    while (!call.empty()) {
+      const uint32_t v  = call.back().first;
+      const uint32_t at = call.back().second;
+      if (at == 0) {
+        index[v] = low[v] = next++;
+        stack.emplace_back(v);
+        on_stack[v] = 1;
+      }
+      if (at < succ[v].size()) {
+        ++call.back().second;
+        const uint32_t w = succ[v][at];
+        if (index[w] == UINT32_MAX) {
+          call.emplace_back(w, 0);
+        } else if (on_stack[w]) {
+          low[v] = std::min(low[v], index[w]);
+        }
+        continue;
+      }
+      call.pop_back();
+      if (!call.empty()) {
+        low[call.back().first] = std::min(low[call.back().first], low[v]);
+      }
+      if (low[v] != index[v]) {
+        continue;
+      }
+      for (;;) {
+        const uint32_t w = stack.back();
+        stack.pop_back();
+        on_stack[w] = 0;
+        comp[w]     = n_comp;
+        if (w == v) {
+          break;
+        }
+      }
+      ++n_comp;
+    }
+  }
+  return comp;
+}
+
+// Which color feeds which, by Region_graph root, kept current across merges.
+// Only what the soft cap asks of it: fold one color into another, and tell
+// whether a merge would close a cycle.
+struct Color_deps {
+  std::vector<absl::flat_hash_set<int>> succ;
+  std::vector<uint32_t>                 seen;
+  uint32_t                              epoch = 0;
+  std::vector<int>                      work;
+
+  void fold(int survivor, int dissolved) {
+    for (int t : succ[dissolved]) {
+      succ[survivor].insert(t);
+    }
+    absl::flat_hash_set<int>().swap(succ[dissolved]);
+  }
+
+  // A path from `from` to `to` through at least one other color. Merging the
+  // two would then leave that color both fed by and feeding the union. `find`
+  // resolves a stored id to its live color (ids go stale as colors fold).
+  template <typename Find>
+  [[nodiscard]] bool closes_cycle(Find&& find, int a, int b) {
+    return path_around(find, a, b) || path_around(find, b, a);
+  }
+  template <typename Find>
+  [[nodiscard]] bool path_around(Find&& find, int from, int to) {
+    ++epoch;
+    work.clear();
+    seen[from] = epoch;
+    for (int t : succ[from]) {
+      const int r = find(t);
+      if (r != from && r != to && seen[r] != epoch) {
+        seen[r] = epoch;
+        work.emplace_back(r);
+      }
+    }
+    while (!work.empty()) {
+      const int v = work.back();
+      work.pop_back();
+      for (int t : succ[v]) {
+        const int r = find(t);
+        if (r == to) {
+          return true;
+        }
+        if (seen[r] != epoch) {
+          seen[r] = epoch;
+          work.emplace_back(r);
+        }
+      }
+    }
+    return false;
+  }
+};
+
+void merge_forward(Cones& cn, Region_graph& rg, Int_union_find& cuf, Color_deps* deps) {
   struct Cand {
     uint64_t key;  // combined predicted size if this candidate fires
     uint32_t reg;  // the register node index
@@ -1263,11 +1430,16 @@ void merge_forward(Cones& cn, Region_graph& rg, Int_union_find& cuf) {
       continue;  // sizes only grow: this candidate can never fit later
     }
 
-    int survivor = self;
+    int  survivor = self;
+    bool folded_any = false;
     for (int t : now) {
       const int tt = rg.find(t);
       if (tt == survivor) {
         continue;  // an earlier target in this same candidate already absorbed it
+      }
+      if (deps != nullptr && deps->closes_cycle([&](int c) { return rg.find(c); }, survivor, tt)) {
+        ++cn.st.cyc_refused;
+        continue;  // a third color sits between the register's cone and this consumer
       }
       const int      a      = survivor;  // capture BEFORE merge: rg.merge picks the survivor
       // Two LOOKUPS, never two `operator[]`s inside one expression: `chain[a]`
@@ -1278,14 +1450,24 @@ void merge_forward(Cones& cn, Region_graph& rg, Int_union_find& cuf) {
       const uint64_t folded = (ia == chain.end() ? 0 : ia->second) + (itt == chain.end() ? 0 : itt->second) + 1;
       chain.erase(a);
       chain.erase(tt);
+      const int gone  = rg.dissolved_side(a, tt);
       survivor        = rg.merge(a, tt);
+      if (deps != nullptr) {
+        deps->fold(survivor, gone);
+      }
       chain[survivor] = folded;
+      folded_any      = true;
       cuf.merge(a + 1, tt + 1);  // union the two ORIGINAL cone-id classes
       ++cn.st.fwd_merges;
       cn.st.fwd_max_chain = std::max(cn.st.fwd_max_chain, folded);
     }
     // The register's color grew, so every candidate touching it is now stale;
-    // lazy re-keying above catches them when they surface.
+    // lazy re-keying above catches them when they surface. A candidate that
+    // folded nothing (every target would have closed a cycle) is spent: its
+    // colors can only grow more entangled, never less.
+    if (!folded_any) {
+      continue;
+    }
     targets(e.reg, now);
     if (!now.empty()) {
       if (cn.forward == Forward_mode::all) {
@@ -1295,6 +1477,141 @@ void merge_forward(Cones& cn, Region_graph& rg, Int_union_find& cuf) {
           heap.push({pair_cost(e.reg, c), e.reg, c});
         }
       }
+    }
+  }
+}
+
+// The joins the soft cap owes BEFORE any size-capped merge: a cut that would
+// cost efficiency is not a cut, whatever the union weighs.
+//
+//   deep   the cut sits mid-way on a deep register-to-register path. Each side
+//          is mapped against the whole delay target, so a path that crosses is
+//          granted the target once per region; and the mapper restructures
+//          neither side across the net. A cut next to a register (one side
+//          shallow) or on a short path costs nothing and stays a candidate.
+//   cycle  the two colors feed each other. Raw cones do so only around a
+//          word-level loop; the deep joins above add more.
+void join_required(Cones& cn, Region_graph& rg, Int_union_find& cuf, Color_deps& deps) {
+  const uint32_t n_colors = static_cast<uint32_t>(rg.size());
+  const auto     data     = [&](uint32_t i) {
+    return cn.traversable(i) && cn.owner[i] != 0 && !cn.is_ctrl(cn.owner[i])
+           && !cn.is_memory_color(static_cast<uint32_t>(cuf.find(static_cast<int>(cn.owner[i]))));
+  };
+  const auto join = [&](int a, int b) {
+    const int ra = rg.find(a);
+    const int rb = rg.find(b);
+    if (ra == rb) {
+      return false;
+    }
+    const int d = rg.dissolved_side(ra, rb);
+    const int s = rg.merge(ra, rb);
+    cuf.merge(a + 1, b + 1);
+    deps.fold(s, d);
+    ++cn.st.merges;
+    return true;
+  };
+
+  deps.succ.assign(n_colors, {});
+  deps.seen.assign(n_colors, 0);
+  for (uint32_t i : cn.forward_idx) {
+    if (!data(i)) {
+      continue;
+    }
+    for (uint32_t e = cn.fin_start[i]; e < cn.fin_start[i] + cn.fin_cnt[i]; ++e) {
+      const uint32_t d = cn.fin_drv[e];
+      if (data(d) && (cn.flag[d] & kLoopBreak) == 0 && cn.owner[d] != cn.owner[i]) {
+        deps.succ[cn.owner[d] - 1].insert(static_cast<int>(cn.owner[i]) - 1);
+      }
+    }
+  }
+
+  // Depth in predicted levels: arr = deepest path from a register (or input)
+  // up to and including the node, req = deepest path from the node to a
+  // register (or output), the node included. forward_idx is a topological
+  // schedule; a word-level loop only makes the estimate a little shallow.
+  {
+    auto&    arr     = cn.arr;
+    auto&    req     = cn.req;
+    uint32_t deepest = 0;
+    arr.assign(cn.owner.size(), 0);
+    req.assign(cn.owner.size(), 0);
+    for (uint32_t i : cn.forward_idx) {
+      if (!cn.traversable(i) || (cn.flag[i] & kLoopBreak) != 0) {
+        continue;
+      }
+      uint32_t in = 0;
+      for (uint32_t e = cn.fin_start[i]; e < cn.fin_start[i] + cn.fin_cnt[i]; ++e) {
+        const uint32_t d = cn.fin_drv[e];
+        if (cn.traversable(d) && (cn.flag[d] & kLoopBreak) == 0) {
+          in = std::max(in, arr[d]);
+        }
+      }
+      arr[i]  = in + cn.lvl[i];
+      deepest = std::max(deepest, arr[i]);
+    }
+    for (auto it = cn.forward_idx.rbegin(); it != cn.forward_idx.rend(); ++it) {
+      const uint32_t i = *it;
+      if (!cn.traversable(i) || (cn.flag[i] & kLoopBreak) != 0) {
+        continue;
+      }
+      uint32_t out = 0;
+      for (uint32_t k = cn.fout_start[i]; k < cn.fout_start[i] + cn.fout_cnt[i]; ++k) {
+        const uint32_t m = cn.fout[k];
+        if (cn.traversable(m) && (cn.flag[m] & kLoopBreak) == 0) {
+          out = std::max(out, req[m]);
+        }
+      }
+      req[i] = out + cn.lvl[i];
+    }
+    cn.st.max_levels = deepest;
+    cn.deepest       = deepest;
+    const uint64_t path = (static_cast<uint64_t>(deepest) * cn.deep_path + 99) / 100;
+    const uint64_t side = std::max<uint64_t>(1, (static_cast<uint64_t>(deepest) * cn.deep_side + 99) / 100);
+    for (uint32_t i : cn.forward_idx) {
+      if (cn.deep_path == 0 || !data(i) || (cn.flag[i] & kLoopBreak) != 0 || req[i] < side) {
+        continue;
+      }
+      for (uint32_t e = cn.fin_start[i]; e < cn.fin_start[i] + cn.fin_cnt[i]; ++e) {
+        const uint32_t d = cn.fin_drv[e];
+        if (!data(d) || (cn.flag[d] & kLoopBreak) != 0 || cn.owner[d] == cn.owner[i]) {
+          continue;
+        }
+        if (arr[d] >= side && static_cast<uint64_t>(arr[d]) + req[i] >= path
+            && join(static_cast<int>(cn.owner[d]) - 1, static_cast<int>(cn.owner[i]) - 1)) {
+          ++cn.st.deep_joined;
+        }
+      }
+    }
+  }
+
+  // Whatever now feeds itself is one color.
+  std::vector<uint32_t> dense(n_colors, UINT32_MAX);
+  std::vector<int>      root_of;
+  for (uint32_t c = 0; c < n_colors; ++c) {
+    if (rg.alive(static_cast<int>(c)) && rg.find(static_cast<int>(c)) == static_cast<int>(c)) {
+      dense[c] = static_cast<uint32_t>(root_of.size());
+      root_of.emplace_back(static_cast<int>(c));
+    }
+  }
+  std::vector<std::vector<uint32_t>> succ(root_of.size());
+  for (uint32_t v = 0; v < root_of.size(); ++v) {
+    for (int t : deps.succ[root_of[v]]) {
+      const int r = rg.find(t);
+      if (r != root_of[v] && dense[r] != UINT32_MAX) {
+        succ[v].emplace_back(dense[r]);
+      }
+    }
+    std::sort(succ[v].begin(), succ[v].end());
+    succ[v].erase(std::unique(succ[v].begin(), succ[v].end()), succ[v].end());
+  }
+  const auto            comp = strong_components(succ);
+  std::vector<uint32_t> head(root_of.size(), UINT32_MAX);
+  for (uint32_t v = 0; v < root_of.size(); ++v) {
+    auto& h = head[comp[v]];
+    if (h == UINT32_MAX) {
+      h = v;
+    } else if (join(root_of[h], root_of[v])) {
+      ++cn.st.pre_joined;
     }
   }
 }
@@ -1323,6 +1640,10 @@ void merge_colors(Cones& cn, uint32_t n_colors, Int_union_find& cuf) {
     adj[b][a]   = ov;
   }
   Region_graph rg(std::move(weight), {}, std::move(adj));
+  Color_deps   deps;
+  if (cn.convex) {
+    join_required(cn, rg, cuf, deps);
+  }
 
   if (cn.memory_color_first) {
     std::vector<uint64_t> served(n_colors, 0);
@@ -1370,9 +1691,12 @@ void merge_colors(Cones& cn, uint32_t n_colors, Int_union_find& cuf) {
   std::priority_queue<Heap_entry, std::vector<Heap_entry>, Heap_cmp> heap;
   absl::flat_hash_map<uint64_t, uint32_t>                            ver;
   const auto pair_key = [](uint32_t a, uint32_t b) { return (static_cast<uint64_t>(a) << 32) | b; };
-  if (cn.memory_color_first) {
+  if (cn.memory_color_first || cn.convex) {
+    // The required joins and the memory rounds already folded colors: seed
+    // from what is left, not from the raw pair map.
     for (uint32_t a = 0; a < n_colors; ++a) {
-      if (!rg.alive(a) || cn.is_memory_color(static_cast<uint32_t>(cuf.find(a + 1)))) {
+      if (!rg.alive(a) || rg.find(static_cast<int>(a)) != static_cast<int>(a)
+          || cn.is_memory_color(static_cast<uint32_t>(cuf.find(a + 1)))) {
         continue;
       }
       for (const auto& [b, ov] : rg.neighbours(a)) {
@@ -1414,6 +1738,12 @@ void merge_colors(Cones& cn, uint32_t n_colors, Int_union_find& cuf) {
       ++cn.st.refused;
       continue;
     }
+    if (cn.convex && deps.closes_cycle([&](int c) { return rg.find(c); }, a, b)) {
+      // A third color sits between the two: the union would feed it and be fed
+      // by it. Not a pair the cap may fold on its own.
+      ++cn.st.cyc_refused;
+      continue;
+    }
 
     // Snapshot exactly what the merge is about to rewrite -- the DISSOLVED
     // side's adjacency. Snapshotting both sides instead would cost the hub's
@@ -1429,6 +1759,9 @@ void merge_colors(Cones& cn, uint32_t n_colors, Int_union_find& cuf) {
     const int s = rg.merge(a, b);
     cuf.merge(a + 1, b + 1);  // union the two ORIGINAL cone-id classes
     ++cn.st.merges;
+    if (cn.convex) {
+      deps.fold(s, d);
+    }
 
     for (int nb_raw : touched) {
       const int nb = rg.find(nb_raw);
@@ -1448,7 +1781,7 @@ void merge_colors(Cones& cn, uint32_t n_colors, Int_union_find& cuf) {
 
   // Phase 2: only now, on whatever budget the backward cones left behind.
   if (cn.forward != Forward_mode::off && cn.max_gate != 0) {
-    merge_forward(cn, rg, cuf);
+    merge_forward(cn, rg, cuf, cn.convex ? &deps : nullptr);
   }
 }
 
@@ -1537,6 +1870,30 @@ void absorb_small(Cones& cn, Int_union_find& cuf) {
     }
   }
 
+  // Soft cap: a small color folds only into a neighbour that leaves no third
+  // color between the two. Data colors only -- control and memory groups are
+  // separate by design and take no part in the dependency question.
+  Color_deps deps;
+  const auto find_cls = [&](int c) { return cuf.find(c); };
+  if (cn.convex) {
+    deps.succ.assign(n_roots + 1, {});
+    deps.seen.assign(n_roots + 1, 0);
+    const auto plain = [&](uint32_t i) {
+      return cn.traversable(i) && cn.owner[i] != 0 && data(cls(cn.owner[i])) && !cn.is_memory_color(cls(cn.owner[i]));
+    };
+    for (uint32_t i : cn.forward_idx) {
+      if (!plain(i)) {
+        continue;
+      }
+      for (uint32_t k = cn.fin_start[i]; k < cn.fin_start[i] + cn.fin_cnt[i]; ++k) {
+        const auto d = cn.fin_drv[k];
+        if (plain(d) && (cn.flag[d] & kLoopBreak) == 0 && cls(cn.owner[d]) != cls(cn.owner[i])) {
+          deps.succ[cls(cn.owner[d])].insert(static_cast<int>(cls(cn.owner[i])));
+        }
+      }
+    }
+  }
+
   using Entry = std::pair<uint32_t, uint32_t>;  // (nodes, class): smallest first, then lowest id
   std::priority_queue<Entry, std::vector<Entry>, std::greater<>> queue;
   for (uint32_t c = cn.ctrl_count + 1; c <= n_roots; ++c) {
@@ -1570,6 +1927,10 @@ void absorb_small(Cones& cn, Int_union_find& cuf) {
       if (any_data && !data(t)) {
         continue;
       }
+      if (cn.convex && data(t) && deps.closes_cycle(find_cls, static_cast<int>(c), static_cast<int>(t))) {
+        ++cn.st.cyc_refused;
+        continue;
+      }
       const auto rank = std::tuple(contact.overlap, contact.edges);
       const auto held = std::tuple(best_contact.overlap, best_contact.edges);
       // Ties: the smaller target, then the lower id -- a total order, so the
@@ -1597,11 +1958,200 @@ void absorb_small(Cones& cn, Int_union_find& cuf) {
       m.edges   = graph_util::sat_add(m.edges, contact.edges);
     }
     adj[gone].clear();
+    if (cn.convex) {
+      deps.fold(static_cast<int>(survivor), static_cast<int>(gone));
+    }
     ++cn.st.absorbed;
     if (data(survivor) && small(survivor)) {
       queue.emplace(nodes[survivor], survivor);
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// A5c -- no path through the same color twice
+// ---------------------------------------------------------------------------
+//
+// Raw cones are a DAG of colors: cone k owns what cones 1..k-1 left, so every
+// edge runs from an earlier color to a later one. Two things break that. A walk
+// that stops at the max_gate budget leaves the rest of its cone to later roots,
+// and a later walk reaches THROUGH the truncated color to claim it; and an
+// overlap merge joins two colors with a third between them. Either way a
+// combinational path now leaves a color and comes back, once per crossing: the
+// mapper sees the path as unrelated segments, each with the full delay budget,
+// and each crossing is a net it may not restructure across.
+//
+// The quotient graph over data colors (an edge out of a register / memory /
+// stateful instance is last cycle's value and orders nothing) is condensed with
+// Tarjan; every component of more than one color is a group of colors that
+// only make sense together. `convex` joins them. Control and memory colors are
+// separate by design and take no part.
+void join_cycles(Cones& cn, Int_union_find& cuf) {
+  const auto data_class = [&](uint32_t i) -> int {
+    if (!cn.traversable(i) || cn.owner[i] == 0 || cn.is_ctrl(cn.owner[i])) {
+      return 0;
+    }
+    const int cls = cuf.find(static_cast<int>(cn.owner[i]));
+    return cn.is_memory_color(static_cast<uint32_t>(cls)) ? 0 : cls;
+  };
+
+  absl::flat_hash_map<int, uint32_t> dense;  // class -> 0..k-1
+  std::vector<int>                   cls_of;
+  std::vector<uint64_t>              weight;
+  std::vector<uint32_t>              node_cls(cn.owner.size(), UINT32_MAX);
+  for (uint32_t i : cn.forward_idx) {
+    const int cls = data_class(i);
+    if (cls == 0) {
+      continue;
+    }
+    auto [it, added] = dense.try_emplace(cls, static_cast<uint32_t>(cls_of.size()));
+    if (added) {
+      cls_of.emplace_back(cls);
+      weight.emplace_back(0);
+    }
+    node_cls[i]        = it->second;
+    weight[it->second] = graph_util::sat_add(weight[it->second], cn.pred[i]);
+  }
+  const uint32_t k = static_cast<uint32_t>(cls_of.size());
+  if (k < 2) {
+    return;
+  }
+
+  std::vector<std::vector<uint32_t>> succ(k);
+  for (uint32_t i : cn.forward_idx) {
+    const uint32_t to = node_cls[i];
+    if (to == UINT32_MAX) {
+      continue;
+    }
+    for (uint32_t e = cn.fin_start[i]; e < cn.fin_start[i] + cn.fin_cnt[i]; ++e) {
+      const uint32_t d = cn.fin_drv[e];
+      if (d >= node_cls.size() || node_cls[d] == UINT32_MAX || node_cls[d] == to || (cn.flag[d] & kLoopBreak) != 0) {
+        continue;
+      }
+      succ[node_cls[d]].emplace_back(to);
+    }
+  }
+  for (auto& out : succ) {
+    std::sort(out.begin(), out.end());
+    out.erase(std::unique(out.begin(), out.end()), out.end());
+  }
+
+  const auto            comp = strong_components(succ);
+  std::vector<uint32_t> head(k, UINT32_MAX), members(k, 0);
+  std::vector<uint64_t> pred(k, 0);
+  for (uint32_t v = 0; v < k; ++v) {
+    const uint32_t c = comp[v];
+    ++members[c];
+    pred[c] = graph_util::sat_add(pred[c], weight[v]);
+    if (head[c] == UINT32_MAX) {
+      head[c] = v;
+    } else if (cn.convex) {
+      cuf.merge(cls_of[head[c]], cls_of[v]);
+    }
+  }
+  for (uint32_t c = 0; c < k; ++c) {
+    if (members[c] > 1) {
+      cn.st.cyc_colors += members[c];
+      ++cn.st.cyc_groups;
+      cn.st.cyc_max_pred = std::max(cn.st.cyc_max_pred, pred[c]);
+      if (cn.convex) {
+        cn.st.cyc_joined += members[c] - 1;
+      }
+    }
+  }
+}
+
+// The caller's answer to a join_candidates report: each pair names one node on
+// either side of a cut, and their colors become one. Control and memory colors
+// take no part; a pair that no longer names two data colors is skipped.
+uint32_t join_forced(Cones& cn, Int_union_find& cuf, const std::vector<std::pair<uint32_t, uint32_t>>& pairs) {
+  uint32_t   folded = 0;
+  const auto data   = [&](uint32_t i) {
+    return cn.traversable(i) && cn.owner[i] != 0 && !cn.is_ctrl(cn.owner[i])
+           && !cn.is_memory_color(static_cast<uint32_t>(cuf.find(static_cast<int>(cn.owner[i]))));
+  };
+  for (const auto& [a, b] : pairs) {
+    if (data(a) && data(b) && cuf.find(static_cast<int>(cn.owner[a])) != cuf.find(static_cast<int>(cn.owner[b]))) {
+      cuf.merge(static_cast<int>(cn.owner[a]), static_cast<int>(cn.owner[b]));
+      ++folded;
+    }
+  }
+  return folded;
+}
+
+// The cuts the depth rule could not decide, deepest first and one per color:
+// on a path at least half of deep_path long with both sides deep, yet short of
+// the rule that joins outright. A pair whose union would leave a third color
+// between the two is not offered -- folding it would pull that color in too,
+// and the trial would no longer be about one cut.
+struct Undecided_cut {
+  uint32_t a = 0, b = 0, depth = 0;
+};
+
+std::vector<Undecided_cut> undecided_cuts(Cones& cn, Int_union_find& cuf, uint32_t limit) {
+  std::vector<Undecided_cut> out;
+  if (limit == 0 || cn.deepest == 0 || cn.arr.empty()) {
+    return out;
+  }
+  const auto cls = [&](uint32_t i) { return cuf.find(static_cast<int>(cn.owner[i])); };
+  const auto data = [&](uint32_t i) {
+    return cn.traversable(i) && cn.owner[i] != 0 && !cn.is_ctrl(cn.owner[i]) && (cn.flag[i] & kLoopBreak) == 0
+           && !cn.is_memory_color(static_cast<uint32_t>(cls(i)));
+  };
+  const uint64_t side  = std::max<uint64_t>(1, (static_cast<uint64_t>(cn.deepest) * cn.deep_side + 99) / 100);
+  const uint64_t floor = std::max<uint64_t>(1, (static_cast<uint64_t>(cn.deepest) * std::max<uint32_t>(cn.deep_path, 2) / 2 + 99) / 100);
+
+  const auto n_roots = static_cast<uint32_t>(cn.root_start.size());
+  Color_deps deps;
+  deps.succ.assign(n_roots + 1, {});
+  deps.seen.assign(n_roots + 1, 0);
+  absl::flat_hash_map<uint64_t, Undecided_cut> best;  // (class a, class b) -> its deepest crossing
+  for (uint32_t i : cn.forward_idx) {
+    if (!data(i)) {
+      continue;
+    }
+    for (uint32_t e = cn.fin_start[i]; e < cn.fin_start[i] + cn.fin_cnt[i]; ++e) {
+      const uint32_t d = cn.fin_drv[e];
+      if (!data(d) || cls(d) == cls(i)) {
+        continue;
+      }
+      deps.succ[cls(d)].insert(cls(i));
+      const uint64_t through = static_cast<uint64_t>(cn.arr[d]) + cn.req[i];
+      if (cn.arr[d] < side || cn.req[i] < side || through < floor) {
+        continue;
+      }
+      const uint64_t key = (static_cast<uint64_t>(cls(d)) << 32) | static_cast<uint32_t>(cls(i));
+      auto&          cut = best[key];
+      if (through > cut.depth || (through == cut.depth && std::pair(d, i) < std::pair(cut.a, cut.b))) {
+        cut = {d, i, static_cast<uint32_t>(through)};
+      }
+    }
+  }
+  std::vector<Undecided_cut> ranked;
+  ranked.reserve(best.size());
+  for (const auto& [key, cut] : best) {
+    (void)key;
+    ranked.emplace_back(cut);
+  }
+  std::sort(ranked.begin(), ranked.end(), [](const auto& x, const auto& y) {
+    return std::tuple(y.depth, x.a, x.b) < std::tuple(x.depth, y.a, y.b);
+  });
+  absl::flat_hash_set<int> used;
+  const auto               find = [&](int c) { return cuf.find(c); };
+  for (const auto& cut : ranked) {
+    if (out.size() >= limit) {
+      break;
+    }
+    const int a = cls(cut.a);
+    const int b = cls(cut.b);
+    if (used.contains(a) || used.contains(b) || deps.closes_cycle(find, a, b)) {
+      continue;
+    }
+    used.insert(a);
+    used.insert(b);
+    out.push_back({cut.a, cut.b, static_cast<uint32_t>(static_cast<uint64_t>(cut.depth) * 100 / cn.deepest)});
+  }
+  return out;
 }
 
 }  // namespace
@@ -1622,6 +2172,9 @@ void Color_synth::label_cones(hhds::Graph* g) {
   cn.max_gate           = opts.max_gate;
   cn.min_gate           = opts.min_gate;
   cn.flop_to_flop       = opts.flop_to_flop;
+  cn.convex             = opts.convex;
+  cn.deep_path          = opts.deep_path;
+  cn.deep_side          = opts.deep_side;
   cn.forward = opts.forward == "pair" ? Forward_mode::pair : (opts.forward == "all" ? Forward_mode::all : Forward_mode::off);
 
   // ---- A1: preparation, one pass over the body ----------------------------
@@ -1640,6 +2193,9 @@ void Color_synth::label_cones(hhds::Graph* g) {
   }
   cn.op.assign(n, static_cast<uint8_t>(Ntype_op::Invalid));
   cn.pred.assign(n, 0);
+  if (cn.convex) {
+    cn.lvl.assign(n, 0);
+  }
   cn.owner.assign(n, 0);
   cn.epoch.assign(n, 0);
   cn.fin_start.assign(n, 0);
@@ -1711,6 +2267,9 @@ void Color_synth::label_cones(hhds::Graph* g) {
         f |= kRuntimeSra;
       }
       cn.pred[i] = predict_abc_size(node);
+      if (cn.convex) {
+        cn.lvl[i] = predict_levels(node, op, cn.pred[i]);
+      }
     }
     cn.flag[i] = f;
 
@@ -1872,6 +2431,23 @@ void Color_synth::label_cones(hhds::Graph* g) {
     }
   }
   absorb_small(cn, cuf);
+  if (cn.convex && !opts.join.empty()) {
+    join_forced(cn, cuf, opts.join);
+  }
+  if (cn.convex || opts.verbose) {
+    join_cycles(cn, cuf);
+  }
+  auto undecided = cn.convex && opts.join_candidates != nullptr ? undecided_cuts(cn, cuf, opts.join_trials)
+                                                                : std::vector<Undecided_cut>{};
+  if (cn.convex && opts.join_candidates != nullptr) {
+    // The pairs the caller folded come back with the color they ended in
+    // (depth 0 marks them): that is how it finds the joined region again.
+    for (const auto& [a, b] : opts.join) {
+      if (cn.traversable(a) && cn.traversable(b) && cn.owner[a] != 0 && cn.owner[b] != 0) {
+        undecided.push_back({a, b, 0});
+      }
+    }
+  }
 
   // ---- A6: finalize -------------------------------------------------------
   // Renumber 1..k in forward first-encounter order: deterministic ids the caller
@@ -1960,6 +2536,25 @@ void Color_synth::label_cones(hhds::Graph* g) {
   }
   keep_clock_gates_whole(g);
   const int n_colors = apply_coloring(g, flat_node2id, o, o.sizes);
+  if (!undecided.empty()) {
+    absl::flat_hash_map<uint32_t, int> written;
+    for (const auto& cut : undecided) {
+      written.try_emplace(cut.a, 0);
+      written.try_emplace(cut.b, 0);
+    }
+    for (auto node : g->body().nodes()) {
+      if (auto it = written.find(idx_of(node)); it != written.end()) {
+        it->second = graph_util::node_color_of(node);
+      }
+    }
+    for (const auto& cut : undecided) {
+      // A later pass (arithmetic cuts, clock gates) may have moved one end: an
+      // undecided cut must still be a cut, a folded pair still one color.
+      if ((written[cut.a] != written[cut.b]) == (cut.depth != 0)) {
+        opts.join_candidates->push_back({cut.a, cut.b, written[cut.a], written[cut.b], cut.depth});
+      }
+    }
+  }
 
   if (cn.ctrl_cones || cn.memory_color_first) {
     int base = 0;
@@ -2057,6 +2652,8 @@ void Color_synth::label_cones(hhds::Graph* g) {
                "[color.cones] {} dead {}, roots {} (din {}, en {}, mem-port {}, sub {}, cut {}, out {}, sweep {}), truncated {}, "
                "pairs {}, merges {}, refused {} over cap, fwd {} merges ({} refused, max chain {}), "
                "min_color_nodes {}: {} small control group(s) left to data, {} small color(s) absorbed ({} into control, {} left), "
+               "soft cap: {} level(s) deep, {} joined across a deep cut, {} joined before the merge, {} capped merge(s) "
+               "refused for a cycle, {} color(s) in {} dependency cycle(s) (largest {} pred, {} joined), "
                "colors {}, max pred {} ({} over max_gate {})\n",
                g->get_name(),
                cn.st.dead,
@@ -2080,6 +2677,14 @@ void Color_synth::label_cones(hhds::Graph* g) {
                cn.st.absorbed,
                cn.st.absorb_ctrl,
                cn.st.absorb_left,
+               cn.st.max_levels,
+               cn.st.deep_joined,
+               cn.st.pre_joined,
+               cn.st.cyc_refused,
+               cn.st.cyc_colors,
+               cn.st.cyc_groups,
+               cn.st.cyc_max_pred,
+               cn.st.cyc_joined,
                n_colors,
                cn.st.max_pred,
                cn.st.over_max,

@@ -13,6 +13,45 @@ and forward merging. Recognized latch/AND ICG implementations still stay
 together for clock-gate mapping. Implicit reset muxes inside a native register
 are still lowered with that register; coloring does not rewrite state semantics.
 
+## Soft size bound (`convex`)
+
+With `flop_to_flop=false` the budget is a hard cap: a cone walk stops where
+its budget runs out and an overlap merge is refused once the union is over
+`max_gate`. Both leave cuts in the middle of logic. Measured on coralnpu (ASAP7,
+pre-CTS): 964 of 2,952 walks were cut mid-cone, 45 of the 55 core colors fed
+each other, and the worst path changed region 58 times; every region met its
+own delay target while the path missed by 1.3 ns.
+
+`pass.color.synth.convex=true` makes `max_gate` a soft bound. It is tried, and
+exceeded wherever no cut is free:
+
+* a cone is never cut where its walk ran out of budget;
+* two colors that feed each other are one color (a path that leaves a color
+  and re-enters it is granted the delay target once per crossing);
+* two colors whose boundary sits mid-way on a deep path are one color: the
+  longest register-to-register path through the cut is at least `deep_path`
+  percent of the deepest path in the definition and each side at least
+  `deep_side` percent, in predicted logic levels (`predict_levels`). A cut next
+  to a register, or on a short path, stays a candidate;
+* the size-capped overlap merge, the forward merge and small-color absorption
+  refuse a merge that would leave a third color between the two.
+
+What the size cap then chooses among are one-way boundaries off the deep
+paths. The verbose line reports how many joins each rule made and how many
+capped merges it refused; a correct run ends with no dependency cycle.
+
+### Join trials
+
+Depth in predicted levels cannot decide every cut. Cuts on a path at least
+half of `deep_path` long (both sides deep) that the rule did not join are
+listed, deepest first and at most one per color, as `join_candidates` in the
+top's coloring_info when `join_trials=N` is set. `lhd synth` then maps the
+design as colored and with every listed pair folded (`join=a:b,...`), times
+both, and keeps a pair folded only where the worst arrival through it improves
+by `join_gain` percent (default 5). The region cache makes the second mapping
+cost the folded regions only; `<workdir>/synth/join_trials.json` records each
+decision. It needs the ABC mapper, a workdir and `lhd.incremental`.
+
 ## Memory-first experiment
 
 Enable with:

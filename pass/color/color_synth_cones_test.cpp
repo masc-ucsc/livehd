@@ -563,6 +563,182 @@ TEST(ColorSynthCones, BudgetStopsWalk) {
   EXPECT_NE(node_color_of(c3), node_color_of(c1)) << "the walk stopped before c3";
 }
 
+// A walk that stops at the budget leaves the rest of its cone behind, and a
+// later cone reaches through the truncated color to claim it: `deep` feeds
+// `mid` feeds `tail`, with `mid` in one color and both its neighbours in
+// another. The path crosses the same boundary twice, and each crossing is a
+// place the mapper cannot restructure. `convex` joins the two.
+struct Cycle_fixture {
+  std::shared_ptr<hhds::Graph> g;
+  hhds::Node_class             deep, mid, side, top, tail;
+};
+
+Cycle_fixture truncated_cone_cycle(const char* dir) {
+  auto& lib = livehd::Hhds_graph_library::instance(dir);
+  auto  gio = lib.create_io("cones_cycle");
+  gio->add_input("a", 8);
+  gio->add_input("b", 8);
+  auto g = gio->create_graph();
+  set_bits(g->get_input_pin("a"), 8);
+  set_bits(g->get_input_pin("b"), 8);
+  const auto node = [&](Ntype_op op, const hhds::Pin_class& l, const hhds::Pin_class& r) {
+    auto n = create_typed_node(*g, op, 8);
+    l.connect_sink(livehd::graph_util::setup_sink_pid(n, 0));
+    r.connect_sink(livehd::graph_util::setup_sink_pid(n, 0));
+    return n;
+  };
+  auto a    = g->get_input_pin("a");
+  auto b    = g->get_input_pin("b");
+  auto deep = node(Ntype_op::Xor, a, b);                                        // 24
+  auto mid  = node(Ntype_op::And, deep.create_driver_pin(0), a);                // 8
+  auto side = node(Ntype_op::Xor, a, b);                                        // 24
+  auto top  = node(Ntype_op::And, mid.create_driver_pin(0), side.create_driver_pin(0));
+  auto tail = node(Ntype_op::And, mid.create_driver_pin(0), b);
+  make_flop(*g, top.create_driver_pin(0), 8);
+  make_flop(*g, tail.create_driver_pin(0), 8);
+  return {g, deep, mid, side, top, tail};
+}
+
+TEST(ColorSynthCones, TruncatedWalkLeavesAColorThatFeedsItself) {
+  auto f = truncated_cone_cycle("lgdb_cones_cycle_off");
+  Color_synth(capped_opts(45), "cones").label(f.g.get());
+  ASSERT_EQ(node_color_of(f.mid), node_color_of(f.top)) << "the first cone owns top, side and mid";
+  ASSERT_NE(node_color_of(f.deep), node_color_of(f.mid)) << "and its walk stopped before deep";
+  EXPECT_EQ(node_color_of(f.deep), node_color_of(f.tail)) << "the second cone reached through mid: deep -> mid -> tail";
+}
+
+// The soft cap never cuts a cone where its walk ran out of budget: the first
+// cone keeps `deep` although that puts it past max_gate, and what is left is a
+// boundary a path crosses once.
+TEST(ColorSynthCones, SoftCapKeepsAConeWholePastMaxGate) {
+  auto f         = truncated_cone_cycle("lgdb_cones_cycle_on");
+  auto opts      = capped_opts(45);
+  opts.convex    = true;
+  opts.deep_path = 0;  // depth out of it: only the walk and the merge are under test
+  Color_synth(opts, "cones").label(f.g.get());
+  EXPECT_EQ(node_color_of(f.deep), node_color_of(f.mid)) << "one cone, 64 predicted against a cap of 45";
+  EXPECT_EQ(node_color_of(f.mid), node_color_of(f.top));
+  EXPECT_EQ(node_color_of(f.side), node_color_of(f.top));
+  EXPECT_NE(node_color_of(f.tail), node_color_of(f.mid)) << "the second cone only reads the first: a cut the cap may keep";
+  EXPECT_EQ(uncolored_count(f.g.get()), 0u);
+}
+
+// near feeds mid feeds far, and far also reads near directly with the largest
+// overlap of the three pairs. Folding near and far would leave mid both fed by
+// the union and feeding it, so the capped merge has to leave the pair alone.
+struct Between_fixture {
+  std::shared_ptr<hhds::Graph> g;
+  hhds::Node_class             near_top, mid_low, far;
+};
+
+Between_fixture color_between(const char* dir) {
+  auto& lib = livehd::Hhds_graph_library::instance(dir);
+  auto  gio = lib.create_io("cones_between");
+  gio->add_input("a", 8);
+  gio->add_input("b", 8);
+  auto g = gio->create_graph();
+  set_bits(g->get_input_pin("a"), 8);
+  set_bits(g->get_input_pin("b"), 8);
+  const auto node = [&](Ntype_op op, const hhds::Pin_class& l, const hhds::Pin_class& r) {
+    auto n = create_typed_node(*g, op, 8);
+    l.connect_sink(livehd::graph_util::setup_sink_pid(n, 0));
+    r.connect_sink(livehd::graph_util::setup_sink_pid(n, 0));
+    return n;
+  };
+  auto a = g->get_input_pin("a");
+  auto b = g->get_input_pin("b");
+  // near: three xors, 72 predicted.
+  auto n1 = node(Ntype_op::Xor, a, b);
+  auto n2 = node(Ntype_op::Xor, n1.create_driver_pin(0), a);
+  auto n3 = node(Ntype_op::Xor, n2.create_driver_pin(0), b);
+  make_flop(*g, n3.create_driver_pin(0), 8);
+  // mid: four xors on top of near's first one, 96 predicted -- under the cap
+  // of 100 by itself and past it with either neighbour.
+  auto m1 = node(Ntype_op::Xor, n1.create_driver_pin(0), b);
+  auto m  = m1;
+  for (int i = 0; i < 3; ++i) {
+    m = node(Ntype_op::Xor, m.create_driver_pin(0), (i & 1) ? a : b);
+  }
+  make_flop(*g, m.create_driver_pin(0), 8);
+  // far: one and, reading near's top (the largest overlap) and mid's bottom.
+  auto far = node(Ntype_op::And, n3.create_driver_pin(0), m1.create_driver_pin(0));
+  make_flop(*g, far.create_driver_pin(0), 8);
+  return {g, n3, m1, far};
+}
+
+TEST(ColorSynthCones, CappedMergeAloneFoldsAroundTheColorBetween) {
+  auto f = color_between("lgdb_cones_between_off");
+  Color_synth(capped_opts(100), "cones").label(f.g.get());
+  ASSERT_EQ(node_color_of(f.near_top), node_color_of(f.far)) << "largest overlap, 80 predicted: it fits";
+  EXPECT_NE(node_color_of(f.mid_low), node_color_of(f.far)) << "and mid is left between the two halves";
+}
+
+TEST(ColorSynthCones, SoftCapRefusesAMergeThatClosesACycle) {
+  auto f         = color_between("lgdb_cones_between_on");
+  auto opts      = capped_opts(100);
+  opts.convex    = true;
+  opts.deep_path = 0;
+  Color_synth(opts, "cones").label(f.g.get());
+  EXPECT_NE(node_color_of(f.near_top), node_color_of(f.far));
+  EXPECT_NE(node_color_of(f.mid_low), node_color_of(f.far));
+  EXPECT_NE(node_color_of(f.mid_low), node_color_of(f.near_top));
+}
+
+// Two xor chains in series, the second reading the top of the first. With
+// `depth` xors in the second chain the cut between them is mid-way on the
+// deepest path (depth 3) or next to a register (depth 1, one And).
+struct Series_fixture {
+  std::shared_ptr<hhds::Graph> g;
+  hhds::Node_class             first_top, second_low;
+};
+
+Series_fixture chains_in_series(const char* dir, int depth) {
+  auto& lib = livehd::Hhds_graph_library::instance(dir);
+  auto  gio = lib.create_io("cones_series");
+  gio->add_input("a", 8);
+  gio->add_input("b", 8);
+  auto g = gio->create_graph();
+  set_bits(g->get_input_pin("a"), 8);
+  set_bits(g->get_input_pin("b"), 8);
+  const auto node = [&](Ntype_op op, const hhds::Pin_class& l, const hhds::Pin_class& r) {
+    auto n = create_typed_node(*g, op, 8);
+    l.connect_sink(livehd::graph_util::setup_sink_pid(n, 0));
+    r.connect_sink(livehd::graph_util::setup_sink_pid(n, 0));
+    return n;
+  };
+  auto a = g->get_input_pin("a");
+  auto b = g->get_input_pin("b");
+  auto x = node(Ntype_op::Xor, a, b);
+  x      = node(Ntype_op::Xor, x.create_driver_pin(0), a);
+  x      = node(Ntype_op::Xor, x.create_driver_pin(0), b);
+  make_flop(*g, x.create_driver_pin(0), 8);
+  auto low = node(depth > 1 ? Ntype_op::Xor : Ntype_op::And, x.create_driver_pin(0), a);
+  auto y   = low;
+  for (int i = 1; i < depth; ++i) {
+    y = node(Ntype_op::Xor, y.create_driver_pin(0), b);
+  }
+  make_flop(*g, y.create_driver_pin(0), 8);
+  return {g, x, low};
+}
+
+TEST(ColorSynthCones, SoftCapJoinsACutMidWayOnADeepPath) {
+  auto f         = chains_in_series("lgdb_cones_series_deep", 3);
+  auto opts      = capped_opts(100);  // 72 + 72: the union does not fit
+  opts.convex    = true;
+  opts.deep_side = 30;
+  Color_synth(opts, "cones").label(f.g.get());
+  EXPECT_EQ(node_color_of(f.first_top), node_color_of(f.second_low)) << "six levels on each side of the cut";
+}
+
+TEST(ColorSynthCones, SoftCapKeepsACutNextToARegister) {
+  auto f         = chains_in_series("lgdb_cones_series_shallow", 1);
+  auto opts      = capped_opts(75);  // 72 + 8: the union does not fit
+  opts.convex    = true;
+  opts.deep_side = 30;
+  Color_synth(opts, "cones").label(f.g.get());
+  EXPECT_NE(node_color_of(f.first_top), node_color_of(f.second_low)) << "one level before the register: nothing to restructure";
+}
+
 TEST(ColorSynthCones, RegisterPlacementRespectsTheColorBudget) {
   auto f      = two_flops_sharing("lgdb_cones_reg_cap");
   auto enable = create_typed_node(*f.g, Ntype_op::And, 1);

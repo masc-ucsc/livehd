@@ -227,6 +227,31 @@ struct Color_opts {
   // path lies inside one color (flop-to-flop colors, the synth/domino mapper's
   // contract). max_gate then only bounds the forward merge across registers.
   bool     flop_to_flop       = false;
+  // cones mode: max_gate is a SOFT bound. A cone is never cut where a walk's
+  // budget ran out, two colors that feed each other are one color, and so are
+  // two colors whose boundary sits mid-way on a deep path -- each whatever the
+  // union weighs. The size cap then only chooses among the cuts that are left.
+  bool     convex             = false;
+  // What "mid-way on a deep path" means, in percent of the def's deepest
+  // register-to-register path (predicted levels): the path through the cut is
+  // at least deep_path long and each side of the cut at least deep_side.
+  // deep_path 0 leaves depth out of it.
+  uint32_t deep_path          = 60;
+  uint32_t deep_side          = 10;
+  // convex: the cuts the depth rule could NOT decide. A cut on a path at least
+  // half of deep_path long, with both sides deep, is neither clearly free nor
+  // clearly costly; up to join_trials of them (deepest first, one per color)
+  // are reported so the caller can map the pair both ways and keep the better.
+  // `join` is that caller's answer: node-index pairs (Join_candidate::a/b of
+  // the same definition) whose colors are one color.
+  struct Join_candidate {
+    uint32_t a = 0, b = 0;              // one node on each side of the cut (index in the colored definition)
+    int      color_a = 0, color_b = 0;  // the colors written for them
+    uint32_t depth = 0;                 // path through the cut, percent of the deepest path
+  };
+  uint32_t                                   join_trials     = 0;
+  std::vector<std::pair<uint32_t, uint32_t>> join;
+  std::vector<Join_candidate>*               join_candidates = nullptr;
   // Raw callers keep the base coloring; the CLI enables shared mux/enable groups.
   bool     ctrl_cones         = false;
   // Opt-in memory-seeded cones, grown one best-overlap merge per memory/round.

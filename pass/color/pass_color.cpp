@@ -13,6 +13,9 @@
 #include <system_error>
 #include <unordered_set>
 
+#include "absl/strings/numbers.h"
+#include "absl/strings/str_split.h"
+
 #include "color_acyclic.hpp"
 #include "color_cgen.hpp"
 #include "color_common.hpp"
@@ -189,6 +192,32 @@ void Pass_color::setup() {
                        "max_gate says, so each combinational path lies inside one color (max_gate then only bounds the "
                        "forward merge). Default: true under mapper=usyn, false under mapper=abc",
                        "");
+  m.add_label_optional("convex",
+                       "cones mode: max_gate is a soft bound. No cone is cut where its walk ran out of budget; colors that "
+                       "feed each other, or whose boundary sits mid-way on a deep path (deep_path, deep_side), are joined "
+                       "whatever the union weighs; the cap only picks among the remaining cuts. Moot under flop_to_flop",
+                       "false");
+  m.add_label_optional("deep_path",
+                       "convex: a cut is on a deep path when the longest register-to-register path through it is at "
+                       "least this percent of the deepest one in the definition (predicted levels). 0 ignores depth",
+                       "60");
+  m.add_label_optional("join_trials",
+                       "convex: report up to this many cuts the depth rule could not decide (coloring_info "
+                       "\"join_candidates\": a node on each side, their colors, the path depth in percent). `lhd synth` maps "
+                       "each pair both ways and keeps the join where it is clearly better",
+                       "0");
+  m.add_label_optional("join_gain",
+                       "`lhd synth` keeps a join_trials join when the worst arrival through the pair improves by at least "
+                       "this percent over the split mapping",
+                       "5");
+  m.add_label_optional("join",
+                       "convex: colors to fold, as node-index pairs a:b,c:d taken from a join_candidates report of the same "
+                       "design",
+                       "");
+  m.add_label_optional("deep_side",
+                       "convex: a deep-path cut only costs when both of its sides are at least this percent of the "
+                       "deepest path; a cut next to a register stays a candidate",
+                       "10");
   // Phase 2 of cones' merge. Spelled pass.color.synth.forward on the CLI; the
   // kernel splits a --set key at the LAST dot and pass.color.synth is a
   // registered namespace of this method.
@@ -306,6 +335,7 @@ std::string params_json(std::string_view alg, const Color_opts& opts, const Eprp
                        opts.ctrl_cones,
                        opts.ctrl_max_gate,
                        opts.ctrl_min_gate);
+      s += std::format(",\"convex\":{},\"deep_path\":{},\"deep_side\":{}", opts.convex, opts.deep_path, opts.deep_side);
       s += std::format(",\"max_gate\":{},\"flop_to_flop\":{},\"forward\":\"{}\",\"min_color_nodes\":{}",
                        opts.max_gate,
                        opts.flop_to_flop,
@@ -562,6 +592,22 @@ void Pass_color::color(Eprp_var& var) {
   opts.stop_cmp      = parse_bool(var.get("stop_cmp", stop_default));
   opts.stop_shift    = parse_bool(var.get("stop_shift", stop_default));
   opts.flop_to_flop  = parse_bool(var.get("flop_to_flop", mapper == "usyn" ? "true" : "false"));
+  opts.convex        = parse_bool(var.get("convex", "false"));
+  opts.deep_path     = static_cast<uint32_t>(std::min<uint64_t>(parse_count(var, "deep_path", "60"), 100));
+  opts.deep_side     = static_cast<uint32_t>(std::min<uint64_t>(parse_count(var, "deep_side", "10"), 100));
+  opts.join_trials   = static_cast<uint32_t>(std::min<uint64_t>(parse_count(var, "join_trials", "0"), 1024));
+  for (const auto pair : absl::StrSplit(var.get("join", ""), ',', absl::SkipEmpty())) {
+    const std::vector<std::string_view> ends = absl::StrSplit(pair, ':');
+    uint32_t                            a = 0, b = 0;
+    if (ends.size() != 2 || !absl::SimpleAtoi(ends[0], &a) || !absl::SimpleAtoi(ends[1], &b)) {
+      livehd::diag::err("pass.color", "bad-option", "usage")
+          .msg("pass.color.synth.join expects node-index pairs a:b,c:d (got '{}')", pair)
+          .hint("copy the a and b of a join_candidates entry")
+          .emit();
+      return;
+    }
+    opts.join.emplace_back(a, b);
+  }
   opts.ctrl_max_gate = parse_ge_bound(var, "ctrl_max_gate", "0");
   opts.ctrl_min_gate = parse_ge_bound(var, "ctrl_min_gate", "0");
   opts.min_nodes     = static_cast<uint32_t>(std::min<uint64_t>(parse_count(var, "min_color_nodes", "12"), UINT32_MAX));
@@ -723,6 +769,7 @@ void Pass_color::color(Eprp_var& var) {
   // flat def still exists.
   Color_stats stats_acc;
   std::string flat_info;
+  std::vector<Color_opts::Join_candidate> join_candidates;  // the top's (flat) coloring only
 
   // ---- VIRTUAL FLATTENING -------------------------------------------------
   //
@@ -864,6 +911,7 @@ void Pass_color::color(Eprp_var& var) {
       Def_color_sizes flat_sizes;
       Color_opts      o = opts;
       o.sizes           = stats ? &flat_sizes : nullptr;
+      o.join_candidates = &join_candidates;  // node indices are the flat view's
       apply_scope_profile(flat.get(), o);
       run_one(alg, flat.get(), o, var);
 
@@ -931,6 +979,12 @@ void Pass_color::color(Eprp_var& var) {
     Def_color_sizes sizes;
     Color_opts      o = opts;
     o.sizes           = stats ? &sizes : nullptr;
+    if (g == top_g && !virtual_flat) {
+      o.join_candidates = &join_candidates;
+    } else {
+      o.join.clear();  // the pairs name nodes of the top's coloring only
+      o.join_trials = 0;
+    }
     apply_scope_profile(g, o);
     if (loop_bodies.contains(g->get_gid())) {
       livehd::color::Color_flat(o).label(g);
@@ -992,12 +1046,33 @@ void Pass_color::color(Eprp_var& var) {
     // FLAT design, so they were captured off the scratch def before it was
     // deleted; top_g's own body holds only the top's share of each color and
     // would under-report every one of them.
-    set_coloring_info(
+    auto info = preserve_seeded_info(
         top_g,
-        preserve_seeded_info(
-            top_g,
-            flat_info.empty()
-                ? build_coloring_info_json(top_g, top.empty() ? top_g->get_name() : top, alg, params_json(alg, opts, var, false))
-                : flat_info));
+        flat_info.empty()
+            ? build_coloring_info_json(top_g, top.empty() ? top_g->get_name() : top, alg, params_json(alg, opts, var, false))
+            : flat_info);
+    if (!join_candidates.empty()) {
+      std::string list, joined;  // depth 0 marks a pair the caller folded
+      for (const auto& c : join_candidates) {
+        if (c.depth == 0) {
+          joined += std::format("{}{{\"a\":{},\"b\":{},\"color\":{}}}", joined.empty() ? "" : ",", c.a, c.b, c.color_a);
+        } else {
+          list += std::format("{}{{\"a\":{},\"b\":{},\"color_a\":{},\"color_b\":{},\"depth\":{}}}",
+                              list.empty() ? "" : ",",
+                              c.a,
+                              c.b,
+                              c.color_a,
+                              c.color_b,
+                              c.depth);
+        }
+      }
+      if (const auto close = info.rfind('}'); close != std::string::npos) {
+        info.insert(close, ",\"join_candidates\":[" + list + "],\"joined\":[" + joined + "]");
+      }
+      if (opts.verbose || stats) {
+        std::print(stderr, "color[stats]: join      undecided cut(s) [{}], folded on request [{}]\n", list, joined);
+      }
+    }
+    set_coloring_info(top_g, info);
   }
 }
