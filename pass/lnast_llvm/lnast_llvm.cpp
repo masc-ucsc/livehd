@@ -247,6 +247,8 @@ public:
     clock,            // the root clock's level in the view being replayed (0: low, 1: high)
     latch,            // a: enable (1 bit), b: data, c: the held value (an input); imm: register index
     wire,             // a: the value it carries, known later (set_wire): a net read at its settled value
+    lane_get,         // a: a wide value, b: bit position; the `width` bits from there      (recognize_lanes)
+    lane_set,         // a: a wide value, b: bit position, c: value; imm: lane bits; `a` with that lane replaced
   };
   static constexpr uint32_t none = std::numeric_limits<uint32_t>::max();
   struct Ref {
@@ -282,6 +284,8 @@ public:
     return loc_bits.size() - 1;
   }
   std::vector<std::pair<uint32_t, uint32_t>> loops;  // outermost loops: [loop_begin, last loop_final or loop_end]
+  // Per loop_begin op: the carries (by index) that live in a lane buffer for the loop (recognize_lanes).
+  absl::flat_hash_map<uint32_t, std::vector<uint8_t>> memory_carries;
 
   static Ref  ref(const V& v) { return Ref{static_cast<uint32_t>(v.id), v.width, v.unsign}; }
   V           value(uint32_t id) const { return V{id, ops[id].width, ops[id].unsign}; }
@@ -573,6 +577,201 @@ public:
   absl::flat_hash_map<uint32_t, std::string> names;  // diagnostics: latch op -> the latch's name
 };
 
+// Lane access at a position that depends on a loop index. `x#[i*8..+8] = y#[(31-i)*8..+8]` reaches
+// the tape as arithmetic on the WHOLE values:
+//   read    low W bits of (y >> p)
+//   write   (x & ((1 << p) - 1)) | (((x >> p) with its low W bits replaced by v) << p), cut to x's width
+// In a rolled loop that is several variable shifts of a wide value per trip (bitcoin's 32-trip byte
+// swap of a 256-bit hash: about 300 instructions a trip, 8.5 times slower than the same loop
+// unrolled). Inside loops the two shapes become one op each (lane_get, lane_set), and a carried
+// value that is only ever read and written through them lives in a buffer while the loop runs
+// (Tape::memory_carries): an aligned lane is then one load or one store.
+void recognize_lanes(Tape& t) {
+  using K         = Tape::K;
+  // through resizes that keep every bit (the same value, zero-extended or not at all)
+  const auto same = [&](uint32_t id) {
+    while (t.ops[id].kind == K::resize && t.ops[id].a.unsign && t.ops[id].width >= t.ops[id].a.width
+           && t.ops[id].a.width == t.ops[t.ops[id].a.id].width) {
+      id = t.ops[id].a.id;
+    }
+    return id;
+  };
+  const auto is_binary = [&](uint32_t id, Op op) { return t.ops[id].kind == K::binary && static_cast<Op>(t.ops[id].bop) == op; };
+  const auto is_one    = [&](uint32_t id) {
+    id = same(id);
+    return t.ops[id].kind == K::constant && t.ops[id].imm == 1;
+  };
+  std::vector<uint8_t> in_loop(t.ops.size(), 0);
+  for (const auto& [lb, le] : t.loops) {
+    for (uint32_t i = lb; i <= le; ++i) {
+      in_loop[i] = 1;
+    }
+  }
+  const auto n = static_cast<uint32_t>(t.ops.size());
+  for (uint32_t i = 0; i < n; ++i) {
+    if (in_loop[i] == 0) {
+      continue;
+    }
+    const Tape::Op o = t.ops[i];
+    if (o.kind == K::resize && o.width <= 64 && o.a.width >= o.width) {
+      // low W bits of (x >> p)
+      const auto s = same(o.a.id);
+      if (is_binary(s, Op::lshr) && t.ops[s].width >= o.width) {
+        const auto x = same(t.ops[s].a.id);
+        if (t.ops[s].a.unsign && t.ops[x].width > 64 && t.ops[x].unsign) {
+          auto& g = t.ops[i];
+          g.kind  = K::lane_get;
+          g.a     = Tape::Ref{x, t.ops[x].width, true};
+          g.b     = t.ops[s].b;
+          g.c     = Tape::Ref{};
+        }
+      }
+      continue;
+    }
+    if (!is_binary(i, Op::bit_or) || o.width <= 64 || !o.unsign) {
+      continue;
+    }
+    for (int swap = 0; swap < 2; ++swap) {
+      const auto low  = same(swap == 0 ? o.a.id : o.b.id);  // x & ((1 << p) - 1)
+      auto       high = swap == 0 ? o.b.id : o.a.id;        // ((x >> p) with the lane replaced) << p
+      if (!is_binary(low, Op::bit_and)) {
+        continue;
+      }
+      if (t.ops[high].kind == K::resize && t.ops[high].width == o.width) {
+        high = t.ops[high].a.id;  // the cut to x's width
+      }
+      high = same(high);
+      if (!is_binary(high, Op::shl) || t.ops[high].width < o.width) {
+        continue;
+      }
+      const auto filled = same(t.ops[high].a.id);
+      const auto at     = same(t.ops[high].b.id);
+      if (t.ops[filled].kind != K::bitfield_insert || static_cast<uint32_t>(t.ops[filled].imm) != 0) {
+        continue;
+      }
+      const auto lane = static_cast<uint32_t>(t.ops[filled].imm >> 32);
+      const auto down = same(t.ops[filled].a.id);
+      if (lane == 0 || lane > 64 || !is_binary(down, Op::lshr) || same(t.ops[down].b.id) != at) {
+        continue;
+      }
+      const auto x = same(t.ops[down].a.id);
+      if (t.ops[x].width != o.width || !t.ops[x].unsign || t.ops[filled].width < o.width || t.ops[down].width < o.width) {
+        continue;
+      }
+      bool masked = false;
+      for (int side = 0; side < 2 && !masked; ++side) {
+        const auto kept = same(side == 0 ? t.ops[low].a.id : t.ops[low].b.id);
+        const auto mask = same(side == 0 ? t.ops[low].b.id : t.ops[low].a.id);
+        if (kept != x || !is_binary(mask, Op::sub) || !is_one(t.ops[mask].b.id)) {
+          continue;
+        }
+        const auto bit = same(t.ops[mask].a.id);
+        masked         = is_binary(bit, Op::shl) && is_one(t.ops[bit].a.id) && same(t.ops[bit].b.id) == at;
+      }
+      if (!masked) {
+        continue;
+      }
+      auto& w = t.ops[i];
+      w.kind  = K::lane_set;
+      w.bop   = 0;
+      w.a     = Tape::Ref{x, o.width, true};
+      w.b     = t.ops[high].b;
+      w.c     = t.ops[filled].b;
+      w.imm   = lane;
+      break;
+    }
+  }
+  // A carried value lives in a buffer when, of the ops of its loop that are still needed, exactly
+  // the lane ops touch it: reads of the current content, then the one write that makes the next
+  // content, and so on to the value the loop carries on.
+  for (uint32_t lb = 0; lb < n; ++lb) {
+    if (t.ops[lb].kind != K::loop_begin || t.ops[lb].n == 0) {
+      continue;
+    }
+    uint32_t le = lb + 1;
+    while (le < n && !(t.ops[le].kind == K::loop_end && t.ops[le].a.id == lb)) {
+      ++le;
+    }
+    if (le == n) {
+      continue;
+    }
+    // what the loop needs of its own ops: the carries' next values and its memory writes
+    absl::flat_hash_map<uint32_t, std::vector<uint32_t>> users;
+    {
+      std::vector<uint8_t>  live(le - lb + 1, 0);
+      std::vector<uint32_t> work;
+      const auto            want = [&](uint32_t id) {
+        if (id > lb && id < le && live[id - lb] == 0) {
+          live[id - lb] = 1;
+          work.push_back(id);
+        }
+      };
+      for (uint32_t j = 0; j < t.ops[le].n; ++j) {
+        want(t.refs[t.ops[le].x + j].id);
+      }
+      for (uint32_t i = lb + 1; i < le; ++i) {
+        if (t.ops[i].kind == K::array_write || t.ops[i].kind == K::array_clear || t.ops[i].kind == K::loop_end) {
+          want(i);
+        }
+      }
+      while (!work.empty()) {
+        const auto i = work.back();
+        work.pop_back();
+        t.for_each_operand(t.ops[i], [&](const Tape::Ref& r) {
+          users[r.id].push_back(i);
+          want(r.id);
+        });
+      }
+    }
+    std::vector<uint8_t> flags(t.ops[lb].n, 0);
+    bool                 any = false;
+    for (uint32_t j = 0; j < t.ops[lb].n; ++j) {
+      const uint32_t phi = lb + 2 + j;
+      if (t.ops[phi].width <= 64 || t.ops[phi].width % 64 != 0 || !t.ops[phi].unsign) {
+        continue;
+      }
+      const auto last   = same(t.refs[t.ops[le].x + j].id);
+      uint32_t   cur    = phi;
+      size_t     writes = 0;
+      bool       ok     = true;
+      while (ok && cur != last) {
+        uint32_t write = Tape::none;
+        if (auto it = users.find(cur); it != users.end()) {
+          for (const auto u : it->second) {
+            const auto& uo = t.ops[u];
+            if (uo.kind == K::lane_set && uo.a.id == cur && uo.b.id != cur && uo.c.id != cur
+                && (write == Tape::none || write == u)) {
+              write = u;
+            } else if (!(uo.kind == K::lane_get && uo.a.id == cur && uo.b.id != cur)) {
+              ok = false;
+            }
+          }
+          for (const auto u : it->second) {  // every read of this content is recorded before the write
+            ok = ok && (u == write || (write != Tape::none && u < write));
+          }
+        }
+        ok  = ok && write != Tape::none;
+        cur = write;
+        ++writes;
+      }
+      if (ok && writes != 0) {
+        if (auto it = users.find(last); it != users.end()) {  // the final content: read only as lanes
+          for (const auto u : it->second) {
+            ok = ok && t.ops[u].kind == K::lane_get && t.ops[u].a.id == last;
+          }
+        }
+        if (ok) {
+          flags[j] = 1;
+          any      = true;
+        }
+      }
+    }
+    if (any) {
+      t.memory_carries[lb] = std::move(flags);
+    }
+  }
+}
+
 class Gen {
 public:
   Gen(const Lnast& ln, const std::vector<std::shared_ptr<Lnast>>& lib, std::string_view fn) : ln_(&ln), top_ln_(&ln), fn_name_(fn) {
@@ -833,7 +1032,30 @@ private:
     }
     return n;
   }
-  static bool no_unroll() { return livehd::debug::env<"LHD_SIM_LNAST_NO_UNROLL">() != nullptr; }  // debug A/B
+  // LHD_SIM_LNAST_UNROLL=N / LHD_SIM_LNAST_NO_UNROLL (the same as N = 0): see exec_for.
+  static std::optional<uint64_t> unroll_limit() {
+    if (livehd::debug::env<"LHD_SIM_LNAST_NO_UNROLL">() != nullptr) {
+      return 0;
+    }
+    if (const char* text = livehd::debug::env<"LHD_SIM_LNAST_UNROLL">()) {
+      return std::strtoull(text, nullptr, 10);
+    }
+    return std::nullopt;
+  }
+  // A `for` anywhere under `stmts`.
+  bool has_loop(const Lnast_nid& stmts) const {
+    for (const auto& st : kids(stmts)) {
+      if (ty(st) == Lnast_ntype::Lnast_ntype_for) {
+        return true;
+      }
+      for (const auto& k : kids(st)) {
+        if (ty(k) == Lnast_ntype::Lnast_ntype_stmts && has_loop(k)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
   void collect_assigned(const Lnast_nid& stmts, std::vector<std::string>& out, absl::flat_hash_set<std::string>& seen) const;
   absl::flat_hash_map<std::string, std::pair<int64_t, int64_t>> ranges_;  // range tmp -> [first, last] (literal bounds)
   void exec_stmt(const std::vector<Lnast_nid>& stmts, size_t& i, Env& env);
@@ -1221,14 +1443,15 @@ void Gen::exec_for(const std::vector<Lnast_nid>& c, Env& env) {
       init.push_back(it->second);
     }
   }
-  // A short loop is unrolled here, in the native code only (the LNAST and the graph keep it rolled):
-  // every trip then sees its index as a constant, so a lane position is a fixed slice instead of a
-  // variable shift of the whole value. bitcoin's 32-trip byte swap of a 256-bit hash did four 256-bit
-  // variable shifts per trip, rolled: 473k cycles/s against 3.2M unrolled. The budget is the one
-  // inou.cgen.sim's native loops use: at most 256 trips and 16,384 body statements in all.
+  // Loops stay loops: unrolled code is that many times the footprint. Only an INNERMOST loop of
+  // fewer than five trips is unrolled, in the native code only (the LNAST and the graph keep it
+  // rolled). LHD_SIM_LNAST_UNROLL=N (debug, to see what unrolling would buy): unroll any loop of up
+  // to N trips and 16,384 body statements in all; 0 never.
   {
-    const uint64_t trips = static_cast<uint64_t>(hi - lo + 1);
-    if (trips <= 256 && trips * count_statements(c[2]) <= 16384 && !no_unroll()) {
+    const uint64_t trips  = static_cast<uint64_t>(hi - lo + 1);
+    const auto     forced = unroll_limit();
+    const bool     unroll = forced ? trips <= *forced && trips * count_statements(c[2]) <= 16384 : trips < 5 && !has_loop(c[2]);
+    if (unroll) {
       uint32_t width = 1;
       while (width < 63 && (uint64_t{1} << width) <= static_cast<uint64_t>(hi)) {
         ++width;
@@ -2780,8 +3003,9 @@ void order_view(const Tape& t, View& v) {
           }
           if (livehd::debug::env<"LHD_SIM_LNAST_DEBUG">() != nullptr) {  // the enable cone of each latch on the ring
             static const char* const kinds[]
-                = {"input", "const",  "constw", "resize", "concat", "not",  "ror",  "count",  "insert", "sext",  "binary", "mux",
-                   "aread", "awrite", "aclear", "lbegin", "lindex", "lphi", "lend", "lfinal", "clock",  "latch", "wire"};
+                = {"input", "const",  "constw", "resize", "concat", "not",    "ror",    "count",  "insert",
+                   "sext",  "binary", "mux",    "aread",  "awrite", "aclear", "lbegin", "lindex", "lphi",
+                   "lend",  "lfinal", "clock",  "latch",  "wire",   "lget",   "lset"};
             std::function<void(uint32_t, int)> dump = [&](uint32_t id, int depth) {
               const auto& o  = t.ops[id];
               const auto  fc = v.folded(id);
@@ -3119,6 +3343,7 @@ size_t build_kernel(const Tape& t, const Kernel_job& job, const Activity& gate, 
   Cgen_llvm                             k(job.name, Cgen_llvm::State_layout{words, layout});
   absl::flat_hash_map<uint32_t, V>      map;
   absl::flat_hash_map<uint64_t, size_t> arrays;
+  absl::flat_hash_map<uint32_t, size_t> lane_buffer;  // op -> the buffer holding its value (a buffered loop carry)
   for (const auto& [id, index] : in_index) {
     map[id] = k.input(index);
   }
@@ -3228,13 +3453,21 @@ size_t build_kernel(const Tape& t, const Kernel_job& job, const Activity& gate, 
         for (uint32_t j = 0; j < o.n; ++j) {
           seeds.push_back(val(t.refs[o.x + j]));
         }
+        // A carry that lives in a buffer for this loop (recognize_lanes): seeded here, ahead of the loop.
+        if (auto plan = t.memory_carries.find(i); plan != t.memory_carries.end()) {
+          for (uint32_t j = 0; j < o.n; ++j) {
+            if (plan->second[j] != 0) {
+              lane_buffer[i + 2 + j] = k.lane_buffer_create(seeds[j]);
+            }
+          }
+        }
         V index;
         if (!k.loop_begin(o.imm, static_cast<int64_t>(t.words[o.c.id]), o.width, seeds, index, phis)) {
           bail("native loop");
         }
         map[i + 1] = index;
         for (uint32_t j = 0; j < o.n; ++j) {
-          map[i + 2 + j] = phis[j];
+          map[i + 2 + j] = phis[j];  // for a buffered carry: a value nothing that is needed reads
         }
         break;
       }
@@ -3250,10 +3483,31 @@ size_t build_kernel(const Tape& t, const Kernel_job& job, const Activity& gate, 
           bail("native loop end");
         }
         for (uint32_t j = 0; j < o.n; ++j) {
-          map[i + 1 + j] = fin[j];
+          const auto  buffered = lane_buffer.find(static_cast<uint32_t>(o.a.id) + 2 + j);
+          const auto& d        = t.ops[i + 1 + j];
+          map[i + 1 + j]       = buffered == lane_buffer.end() ? fin[j] : k.lane_buffer_load(buffered->second, d.width, d.unsign);
         }
         break;
       }
+      case K::lane_get:
+        if (auto buffered = lane_buffer.find(o.a.id); buffered != lane_buffer.end()) {
+          made(i, k.lane_buffer_extract(buffered->second, val(o.b), o.width, o.width, o.unsign));
+        } else {
+          made(i, k.dynamic_extract(val(o.a), val(o.b), o.width, o.width, o.unsign));
+        }
+        break;
+      case K::lane_set:
+        if (auto buffered = lane_buffer.find(o.a.id); buffered != lane_buffer.end()) {
+          const auto buffer = buffered->second;
+          if (!k.lane_buffer_insert(buffer, val(o.b), static_cast<uint32_t>(o.imm), val(o.c))) {
+            bail("lane write");
+          }
+          lane_buffer[i] = buffer;          // the same buffer now holds this value
+          map[i]         = map.at(o.a.id);  // nothing that is needed reads it as a value
+        } else {
+          made(i, k.dynamic_insert(val(o.a), val(o.b), static_cast<uint32_t>(o.imm), val(o.c), o.width, o.unsign));
+        }
+        break;
     }
   }
   std::string error;
@@ -3422,6 +3676,9 @@ Result Gen::run(const Sim_objects& out) {
       if (!ok) {
         bail("nets that are assigned only from each other (a combinational cycle of wires)");
       }
+    }
+    if (livehd::debug::env<"LHD_SIM_LNAST_NO_LANES">() == nullptr) {  // debug A/B: lane access as plain arithmetic
+      recognize_lanes(tape);
     }
     bypass_exclusive_latches();
     timer.lap("walk");

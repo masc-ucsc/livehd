@@ -235,7 +235,7 @@ build, 128 jobs):
 | boom | 7.6 | 5.6 | 36.0k | 53.6 / 16.6 / 18.2k |
 | picorv32 | 0.4 | 5.1 | 6.40M | 0.7 / 5.2 / 5.58M |
 | dino | 0.4 | 5.4 | 5.65M | 0.5 / 5.4 / 5.81M |
-| bitcoin | 0.2 | 5.5 | 4.32M | 0.4 / 5.7 / 3.17M |
+| bitcoin | 0.3 | 5.5 | 3.21M | 0.4 / 5.7 / 3.17M |
 | minion | 39.5 | 5.5 | 200.0k | 122.0 / 38.4 / 34.0k |
 
 Of that setup the flow itself (lowering, walk, LLVM) is 3.4 s on minion and 1.2 s on boom, where
@@ -254,11 +254,30 @@ Timing switches: `LHD_SIM_LNAST_TIME=1` (phases), `LHD_SIM_LLVM_TIME=1` (per ker
 
 A compact loop whose body holds state (bitcoin: N engines written as a loop over one module) is
 expanded into its N instances first (`graph_util::materialize_occurrence`, in the flow's private copy
-of the library); a stateless loop stays one `for`. In the native code a `for` of at most 256 trips and
-16,384 body statements in all is unrolled (`LHD_SIM_LNAST_NO_UNROLL=1` keeps it rolled): each trip
-then sees a constant index, so a lane is a fixed slice rather than a variable shift of the whole
-value (bitcoin's 32-trip byte swap of a 256-bit hash: 473k -> 3.32M cycles/s). A larger loop is one
-native loop (`Cgen_llvm::loop_begin/loop_end`).
+of the library); a stateless loop stays one `for`, and in the native code **a loop stays a loop**
+(`Cgen_llvm::loop_begin/loop_end`): unrolled code is that many times the footprint. Only an
+innermost loop of fewer than five trips is unrolled. `LHD_SIM_LNAST_UNROLL=N` (debug) unrolls any
+loop of up to N trips, to see what unrolling would buy; `0` never unrolls.
+
+What made a rolled loop slow was lane access at a position that depends on the index.
+`le#[i*8..+8] = hash#[(31-i)*8..+8]` reaches the tape as arithmetic on the whole values -- a lane
+read is `(y >> p)` cut to the lane, a lane write `(x & ((1 << p) - 1)) | (((x >> p) with its low
+bits replaced) << p)` -- so bitcoin's 32-trip byte swap of a 256-bit hash did five 256-bit variable
+shifts a trip (about 300 instructions). Inside loops the two shapes become one op each
+(`recognize_lanes`: lane_get, lane_set), and a carried value that the loop touches only through them
+lives in a buffer while the loop runs: an aligned lane is one load or one store, read straight from
+the state when the source is a register (that byte swap: 8 instructions a trip). A carried value
+that is also read whole inside the loop stays a plain value.
+
+| bitcoin, cycles/s | every loop rolled | default (rolled, lanes in a buffer) | every loop unrolled |
+| --- | ---: | ---: | ---: |
+| | 0.50M | 3.21M | 4.32M |
+
+The other four cores have no loop left by the time they reach this flow and are the same in all
+three. What still separates the rolled loop from the unrolled one is the loop itself (32 trips of a
+byte load and store where the unrolled code is a few moves) and reading the 256-bit result back
+right after it was written a byte at a time. Code size is the same either way here (23 kB vs
+24 kB): the loop bodies are small.
 
 Not covered yet (the run is declined, or falls back under `auto`): several root clocks, a register
 on an inverted clock gate or on a clock that is not a gate of the root clock, negedge memories,

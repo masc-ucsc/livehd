@@ -1,0 +1,51 @@
+// Lanes of a wide value read and written at positions that depend on the loop index. Rolled, a wide
+// value that the loop only touches lane by lane lives in a buffer (lnast_llvm: recognize_lanes):
+//   rev   a byte swap (aligned lanes, read from one value and written into another)
+//   mix   12-bit lanes of a 192-bit value (not byte aligned: the general window)
+//   two   two lane writes a trip, and a read of the lane just written
+//   keep  the carried value is also read whole inside the loop, so it stays a plain value
+//   sum   a short innermost loop (unrolled) inside a rolled one
+mod loop_lanes(clk:Clock, a:U64, b:U64, c:U64) -> (rev_lo:U64@[0], rev_hi:U64@[0], mix:U64@[0], two:U64@[0], keep:U64@[0],
+                                                   sum:U32@[0]) {
+  const x:U128 = (a << 64) | b
+  mut le:U128 = 0
+  for i in 0..<16 {
+    le#[i*8..+8] = x#[(15 - i)*8..+8]
+  }
+  rev_lo = le#[0..<64]
+  rev_hi = le#[64..<128]
+
+  const y:U192 = (a << 128) | (b << 64) | c
+  mut m:U192 = 0
+  for i in 0..<16 {
+    m#[i*12..+12] = y#[(15 - i)*12..+12] ^ i
+  }
+  mix = m#[0..<64] ^ m#[64..<128] ^ m#[128..<192]
+
+  mut t:U128 = x
+  mut seen:U64 = 0
+  for i in 0..<8 {
+    t#[i*16..+16] = x#[(7 - i)*16..+16]
+    t#[((i + 3) & 7)*16..+8] = c#[i*8..+8]
+    wrap seen = seen + t#[i*16..+16]
+  }
+  two = t#[0..<64] ^ t#[64..<128] ^ seen
+
+  mut k:U128 = 0
+  mut hits:U8 = 0
+  for i in 0..<16 {
+    k#[i*8..+8] = x#[i*8..+8] ^ c#[0..<8]
+    if k#[0..<64] == b {
+      wrap hits = hits + 1
+    }
+  }
+  keep = k#[0..<64] ^ k#[64..<128] ^ hits
+
+  mut acc:U32 = 0
+  for i in 0..<8 {
+    for j in 0..<3 {
+      wrap acc = acc + x#[(i*2 + j)*8..+8]
+    }
+  }
+  sum = acc
+}

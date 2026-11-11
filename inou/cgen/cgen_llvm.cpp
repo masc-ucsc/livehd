@@ -2050,6 +2050,12 @@ public:
   };
   std::vector<Array_local> arrays;
 
+  struct Lane_buffer {
+    llvm::Value* words = nullptr;
+    uint32_t     width = 0;
+  };
+  std::vector<Lane_buffer> lane_buffers;
+
   llvm::Value* packed_alloca(llvm::Value* value, uint32_t width, llvm::StringRef name) {
     auto* words = local_words(word_count(width), name);
     store_packed(value, words, 0, width);
@@ -2311,45 +2317,26 @@ Cgen_llvm::Value Cgen_llvm::sign_extend_from(Value value, uint32_t sign_bit, uin
   return impl_->remember(operand, result_width, result_unsign);
 }
 
-Cgen_llvm::Value Cgen_llvm::dynamic_extract(Value source, Value count, uint32_t len, uint32_t result_width, bool result_unsign) {
-  auto& builder = impl_->builder;
-  if (len == 0 || len > 64 || result_width == 0 || source.width == 0) {
-    return {};
-  }
-  auto* raw_count = impl_->get(count);
-  if (raw_count == nullptr) {
-    return {};
-  }
-  const size_t nwords = word_count(source.width);
-  llvm::Value* base   = nullptr;
-  size_t       offset = 0;
-  if (impl_->inputs != nullptr && source.id < impl_->input_types.size() && impl_->input_types[source.id].first == source.width
-      && (impl_->ensure_input_layout(), true) && !impl_->input_storage[source.id] && impl_->input_bits[source.id] == 0
-      && (impl_->input_fields.empty() || impl_->input_fields[source.id].alone)) {
-    base   = impl_->inputs;  // a kernel input: its packed words are already in the input buffer
-    offset = impl_->input_word_offsets[source.id];
-  } else {
-    auto* value = impl_->get(source);
-    if (value == nullptr) {
-      return {};
-    }
-    base = impl_->packed_alloca(cast_integer(builder, value, source.width, source.unsign), source.width, "extract.words");
-  }
-  const auto count_bits = llvm::computeKnownBits(raw_count, impl_->module->getDataLayout());
+// The `len` (<= 64) bits from bit `raw_count` of the `source_width`-bit value whose packed words
+// start at word `offset` of `base`; zero past its end.
+static llvm::Value* extract_lane(llvm::IRBuilder<>& builder, llvm::Module& module, llvm::Value* base, size_t offset,
+                                 uint32_t source_width, llvm::Value* raw_count, uint32_t len) {
+  const size_t nwords     = word_count(source_width);
+  const auto   count_bits = llvm::computeKnownBits(raw_count, module.getDataLayout());
   const auto alignment  = std::min(6u, count_bits.countMinTrailingZeros());
   if constexpr (std::endian::native == std::endian::little) {
-    if ((len == 8 || len == 16 || len == 32 || len == 64) && len <= (uint32_t{1} << alignment) && source.width % len == 0) {
+    if ((len == 8 || len == 16 || len == 32 || len == 64) && len <= (uint32_t{1} << alignment) && source_width % len == 0) {
       // An array-style lane can load its native integer directly. The word
       // path otherwise needs an indexed i64 load followed by another variable
       // shift, even for the ubiquitous i*32 +: 32 mux/reduction loop.
       auto* index  = builder.CreateLShr(cast_integer(builder, raw_count, 64, true), std::countr_zero(len));
-      auto* valid  = builder.CreateICmpULT(index, builder.getInt64(source.width / len));
+      auto* valid  = builder.CreateICmpULT(index, builder.getInt64(source_width / len));
       auto* safe   = builder.CreateSelect(valid, index, builder.getInt64(0));
-      auto* start  = impl_->word_ptr(base, offset);
+      auto* start  = builder.CreateConstInBoundsGEP1_64(builder.getInt64Ty(), base, offset);
       auto* ptr    = builder.CreateInBoundsGEP(builder.getIntNTy(len), start, safe);
       auto* loaded = builder.CreateAlignedLoad(builder.getIntNTy(len), ptr, llvm::Align(len / 8));
       auto* lane   = builder.CreateSelect(valid, loaded, llvm::ConstantInt::get(builder.getIntNTy(len), 0));
-      return impl_->remember(cast_integer(builder, lane, result_width, true), result_width, result_unsign);
+      return cast_integer(builder, lane, len, true);
     }
   }
   auto* i64       = builder.getInt64Ty();
@@ -2373,11 +2360,142 @@ Cgen_llvm::Value Cgen_llvm::dynamic_extract(Value source, Value count, uint32_t 
     lane = builder.CreateLShr(low, shift, "extract.bit");
   } else {
     auto* high = load_word(builder.CreateAdd(word, llvm::ConstantInt::get(i64, 1)));
-    auto* fshr = llvm::Intrinsic::getOrInsertDeclaration(impl_->module.get(), llvm::Intrinsic::fshr, {i64});
+    auto* fshr = llvm::Intrinsic::getOrInsertDeclaration(&module, llvm::Intrinsic::fshr, {i64});
     lane       = builder.CreateCall(fshr, {high, low, shift}, "extract.lane");
   }
-  auto* bits = cast_integer(builder, lane, len, true);
-  return impl_->remember(cast_integer(builder, bits, result_width, true), result_width, result_unsign);
+  return cast_integer(builder, lane, len, true);
+}
+
+Cgen_llvm::Value Cgen_llvm::dynamic_extract(Value source, Value count, uint32_t len, uint32_t result_width, bool result_unsign) {
+  auto& builder = impl_->builder;
+  if (len == 0 || len > 64 || result_width == 0 || source.width == 0) {
+    return {};
+  }
+  auto* raw_count = impl_->get(count);
+  if (raw_count == nullptr) {
+    return {};
+  }
+  llvm::Value* base   = nullptr;
+  size_t       offset = 0;
+  if (impl_->inputs != nullptr && source.id < impl_->input_types.size() && impl_->input_types[source.id].first == source.width
+      && (impl_->ensure_input_layout(), true) && !impl_->input_storage[source.id] && impl_->input_bits[source.id] == 0
+      && (impl_->input_fields.empty() || impl_->input_fields[source.id].alone)) {
+    base   = impl_->inputs;  // a kernel input: its packed words are already in the input buffer
+    offset = impl_->input_word_offsets[source.id];
+  } else {
+    auto* value = impl_->get(source);
+    if (value == nullptr) {
+      return {};
+    }
+    base = impl_->packed_alloca(cast_integer(builder, value, source.width, source.unsign), source.width, "extract.words");
+  }
+  auto* lane = extract_lane(builder, *impl_->module, base, offset, source.width, raw_count, len);
+  return impl_->remember(cast_integer(builder, lane, result_width, true), result_width, result_unsign);
+}
+
+// `whole` (i<width>) with `len` bits from bit `raw_count` replaced by `lane` (i<len>): the plain
+// arithmetic, at a width where no shift can run past the type.
+static llvm::Value* insert_lane_value(llvm::IRBuilder<>& b, llvm::Value* whole, uint32_t width, llvm::Value* raw_count,
+                                      uint32_t len, llvm::Value* lane) {
+  auto* wide  = b.getIntNTy(width + 64);
+  auto* count = cast_integer(b, raw_count, 64, true);
+  if (raw_count->getType()->getIntegerBitWidth() > 64) {  // a count that does not fit is past any value
+    auto* big = b.CreateICmpUGT(raw_count, llvm::ConstantInt::get(raw_count->getType(), width));
+    count     = b.CreateSelect(big, b.getInt64(width), count);
+  }
+  auto* limit = b.CreateICmpULT(count, b.getInt64(width));
+  auto* at    = b.CreateZExt(b.CreateSelect(limit, count, b.getInt64(width)), wide);
+  auto* mask  = b.CreateShl(llvm::ConstantInt::get(wide, llvm::APInt::getLowBitsSet(width + 64, len)), at);
+  auto* put   = b.CreateShl(b.CreateZExt(lane, wide), at);
+  auto* next  = b.CreateOr(b.CreateAnd(b.CreateZExt(whole, wide), b.CreateNot(mask)), put);
+  return b.CreateTrunc(next, b.getIntNTy(width));
+}
+
+Cgen_llvm::Value Cgen_llvm::dynamic_insert(Value base, Value count, uint32_t len, Value value, uint32_t result_width,
+                                           bool result_unsign) {
+  auto& b = impl_->builder;
+  if (len == 0 || len > 64 || result_width == 0 || base.width == 0 || value.width == 0) {
+    return {};
+  }
+  auto* whole     = impl_->get(base);
+  auto* raw_count = impl_->get(count);
+  auto* lane      = impl_->get(value);
+  if (whole == nullptr || raw_count == nullptr || lane == nullptr) {
+    return {};
+  }
+  auto* next = insert_lane_value(b,
+                                 cast_integer(b, whole, base.width, base.unsign),
+                                 base.width,
+                                 raw_count,
+                                 len,
+                                 cast_integer(b, lane, len, true));
+  return impl_->remember(cast_integer(b, next, result_width, true), result_width, result_unsign);
+}
+
+size_t Cgen_llvm::lane_buffer_create(Value seed) {
+  auto* value = impl_->get(seed);
+  if (value == nullptr || seed.width == 0) {
+    impl_->error = "lane buffer needs a value";
+    return 0;
+  }
+  auto* words = impl_->packed_alloca(cast_integer(impl_->builder, value, seed.width, seed.unsign), seed.width, "lanes");
+  impl_->lane_buffers.push_back({words, seed.width});
+  return impl_->lane_buffers.size() - 1;
+}
+
+Cgen_llvm::Value Cgen_llvm::lane_buffer_load(size_t buffer, uint32_t result_width, bool result_unsign) {
+  if (buffer >= impl_->lane_buffers.size() || result_width == 0) {
+    return {};
+  }
+  const auto& lb    = impl_->lane_buffers[buffer];
+  auto*       whole = impl_->load_packed(lb.words, 0, lb.width, "lanes.value");
+  return impl_->remember(cast_integer(impl_->builder, whole, result_width, true), result_width, result_unsign);
+}
+
+Cgen_llvm::Value Cgen_llvm::lane_buffer_extract(size_t buffer, Value count, uint32_t len, uint32_t result_width,
+                                                bool result_unsign) {
+  auto* raw_count = impl_->get(count);
+  if (buffer >= impl_->lane_buffers.size() || raw_count == nullptr || len == 0 || len > 64 || result_width == 0) {
+    return {};
+  }
+  const auto& lb   = impl_->lane_buffers[buffer];
+  auto*       lane = extract_lane(impl_->builder, *impl_->module, lb.words, 0, lb.width, raw_count, len);
+  return impl_->remember(cast_integer(impl_->builder, lane, result_width, true), result_width, result_unsign);
+}
+
+bool Cgen_llvm::lane_buffer_insert(size_t buffer, Value count, uint32_t len, Value value) {
+  auto& b         = impl_->builder;
+  auto* raw_count = impl_->get(count);
+  auto* raw_value = impl_->get(value);
+  if (buffer >= impl_->lane_buffers.size() || raw_count == nullptr || raw_value == nullptr || len == 0 || len > 64) {
+    impl_->error = "lane insert operands";
+    return false;
+  }
+  const auto& lb         = impl_->lane_buffers[buffer];
+  auto*       lane       = cast_integer(b, raw_value, len, true);
+  const auto  count_bits = llvm::computeKnownBits(raw_count, impl_->module->getDataLayout());
+  const auto  alignment  = std::min(6u, count_bits.countMinTrailingZeros());
+  if constexpr (std::endian::native == std::endian::little) {
+    if ((len == 8 || len == 16 || len == 32 || len == 64) && len <= (uint32_t{1} << alignment) && lb.width % len == 0
+        && raw_count->getType()->getIntegerBitWidth() <= 64) {
+      // An aligned lane never straddles the end: it is one store, or (past the end) nothing.
+      auto* index = b.CreateLShr(cast_integer(b, raw_count, 64, true), std::countr_zero(len));
+      auto* valid = b.CreateICmpULT(index, b.getInt64(lb.width / len));
+      auto* fn    = b.GetInsertBlock()->getParent();
+      auto* write = llvm::BasicBlock::Create(impl_->context, "lane.write", fn);
+      auto* cont  = llvm::BasicBlock::Create(impl_->context, "lane.cont", fn);
+      b.CreateCondBr(valid, write, cont);
+      b.SetInsertPoint(write);
+      auto* ptr = b.CreateInBoundsGEP(b.getIntNTy(len), lb.words, index);
+      b.CreateAlignedStore(lane, ptr, llvm::Align(len / 8));
+      b.CreateBr(cont);
+      b.SetInsertPoint(cont);
+      return true;
+    }
+  }
+  auto* whole = impl_->load_packed(lb.words, 0, lb.width, "lanes.value");
+  impl_->store_packed(insert_lane_value(b, whole, lb.width, raw_count, len, lane), lb.words, 0, lb.width);
+  return true;
 }
 
 Cgen_llvm::Value Cgen_llvm::binary(Binary_op op, Value lhs, Value rhs, uint32_t result_width, bool result_unsign) {

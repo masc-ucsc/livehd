@@ -112,6 +112,18 @@ public:
   // guarded word loads and a funnel shift instead of a variable shift of the
   // whole value (a 7,800-bit register file read per lane iteration).
   [[nodiscard]] Value dynamic_extract(Value source, Value count, uint32_t len, uint32_t result_width, bool result_unsign);
+  // `base` with the `len` (<= 64) bits from bit `count` replaced by the low bits of `value`; what
+  // would land past `base`'s width is dropped, a `count` past it changes nothing.
+  [[nodiscard]] Value dynamic_insert(Value base, Value count, uint32_t len, Value value, uint32_t result_width, bool result_unsign);
+  // A wide value kept in MEMORY while a loop reads and writes lanes of it at positions that depend
+  // on the loop index (`x#[i*8..+8] = y#[(31-i)*8..+8]`). As an SSA value every trip shifts and
+  // masks the whole value several times (a 256-bit byte swap: ~300 instructions a trip); in a
+  // buffer an aligned lane is one load or one store. `lane_buffer_create` stores `seed` at the
+  // current position (before the loop); `lane_buffer_load` reads the whole value back (after it).
+  [[nodiscard]] size_t lane_buffer_create(Value seed);
+  [[nodiscard]] Value  lane_buffer_load(size_t buffer, uint32_t result_width, bool result_unsign);
+  [[nodiscard]] Value  lane_buffer_extract(size_t buffer, Value count, uint32_t len, uint32_t result_width, bool result_unsign);
+  bool                 lane_buffer_insert(size_t buffer, Value count, uint32_t len, Value value);
   [[nodiscard]] Value mux(Value select, Value when_false, Value when_true, uint32_t result_width, bool result_unsign);
   [[nodiscard]] Value hotmux(const std::vector<Value>& inputs, uint32_t result_width, bool result_unsign);
   [[nodiscard]] Value indexed_mux(Value select, const std::vector<Value>& arms, uint32_t result_width, bool result_unsign);

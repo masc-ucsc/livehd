@@ -17,7 +17,7 @@ RUN="$(cd "$(dirname "pass/lnast_llvm/lnast_llvm_run")" && pwd)/lnast_llvm_run"
 SRC="$(cd pass/lnast_llvm/tests && pwd)"
 W="${TEST_TMPDIR:-/tmp/lnast_llvm_diff_$$}"
 CYCLES=96
-JOBS=6
+JOBS=8
 mkdir -p "$W"
 
 # one_design NAME KIND: KIND is `sv` (SystemVerilog source) or `prp` (Pyrope source; these are also
@@ -70,12 +70,17 @@ one_design() {
       || { diff "$d/gated$chunk.trace" "$d/ref.trace" | head -10 >&2; fail "$design: gated traces differ (chunk $chunk)"; return 1; }
   done
   if [ "$kind" = prp ]; then
-    # A short loop is unrolled in the native code; the rolled form (a loop past the unroll budget) must
-    # give the same trace.
-    LHD_SIM_LNAST_NO_UNROLL=1 "$LHD_ABS" pass lnast-llvm --top "$top" "lg:$d/lg" --emit-dir "sim:$d/kr" -q >"$d/gr.log" 2>&1 \
-      || { cat "$d/gr.log" >&2; fail "$design: lnast-llvm (rolled) failed"; return 1; }
-    "$RUN" "$d/kr" "$CYCLES" >"$d/rolled.trace" || { fail "$design: rolled kernel run failed"; return 1; }
-    cmp -s "$d/rolled.trace" "$d/ref.trace" || { diff "$d/rolled.trace" "$d/ref.trace" | head -10 >&2; fail "$design: rolled traces differ"; return 1; }
+    # Loops stay rolled, except an innermost loop of fewer than five trips. The same trace must come
+    # out with every loop rolled, with every loop unrolled, and with lane access at an index-dependent
+    # position left as arithmetic on the whole value (no lane buffers).
+    local variant
+    for variant in LHD_SIM_LNAST_UNROLL=0 LHD_SIM_LNAST_UNROLL=256 LHD_SIM_LNAST_NO_LANES=1; do
+      env "$variant" "$LHD_ABS" pass lnast-llvm --top "$top" "lg:$d/lg" --emit-dir "sim:$d/k_$variant" -q >"$d/g_$variant.log" 2>&1 \
+        || { cat "$d/g_$variant.log" >&2; fail "$design: lnast-llvm ($variant) failed"; return 1; }
+      "$RUN" "$d/k_$variant" "$CYCLES" >"$d/$variant.trace" || { fail "$design: kernel run ($variant) failed"; return 1; }
+      cmp -s "$d/$variant.trace" "$d/ref.trace" \
+        || { diff "$d/$variant.trace" "$d/ref.trace" | head -10 >&2; fail "$design: traces differ ($variant)"; return 1; }
+    done
   fi
   echo "ok $design"
 }
@@ -87,8 +92,8 @@ SV="comb_reg reset_enable reduce_shift struct_port hier async_reset m3_memory m3
     mem_collide nary_ops mem_bytes setmask negedge_reg latch_pair inst_ring"
 # Pyrope designs. Compact loops: a `for` with its body inline -- carries, finals, nested loops, a
 # memory read in place (also while this cycle's write to it is visible), strided domains, calls in the
-# body. clock_gate: a register on `Clock(clock_pin=, enable=)` next to one on the free clock.
-PRP="loop_mem loop_overlay loop_nested loop_step loop_call clock_gate"
+# body. loop_lanes: lanes of a wide value read and written at index-dependent positions. clock_gate: a register on `Clock(clock_pin=, enable=)` next to one on the free clock.
+PRP="loop_mem loop_overlay loop_nested loop_step loop_call loop_lanes clock_gate"
 
 pids=()
 names=()
