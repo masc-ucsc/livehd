@@ -13,6 +13,11 @@ E: hskinner@ucsc.edu
 D: Pyrope creator
 Y: 2018-
 
+N: Leen Hawk
+E: leenhawk@leenhawk.com
+D: Checkpoint restore output settling and regression coverage
+Y: 2026-
+
 N: Jose Renau
 E: renau@ucsc.edu
 W: http://www.soe.ucsc.edu/~renau
