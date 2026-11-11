@@ -624,6 +624,13 @@ void Engine::rank() {
   backward();
   required_rebased_ = true;
   criticality_pass();
+  if (options_.true_slack_in_rank) {
+    // A caller that reports slack (a GUI estimate, a comparison across rounds) wants the real one: another
+    // backward walk against the true requirements; the criticality above stays the rebased one.
+    seed_endpoints(false);
+    backward();
+    required_rebased_ = false;
+  }
   report_.hold_computed = false;
 }
 

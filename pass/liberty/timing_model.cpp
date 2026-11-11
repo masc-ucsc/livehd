@@ -563,6 +563,8 @@ Library parse(std::string_view text) {
     const auto levels = thresholds(library);
     if (first) {
       result.default_thresholds = levels;
+      result.time_unit_ps       = units.time;
+      result.capacitance_unit_ff = units.cap;
       first                     = false;
     }
     for (const auto& group : library.groups) {

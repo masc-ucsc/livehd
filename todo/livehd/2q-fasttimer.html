@@ -291,10 +291,53 @@ routing, so the post-route ECO keeps the final responsibility.</li>
 
 <h2 id="progress">Progress (2026-11-11)</h2>
 <p>Implemented in <code>pass/timing</code> (<code>README.md</code> there has the numbers and the commands):
-<strong>A</strong> cell-type tables for N corners; <strong>B</strong> the numeric netlist, levelization and
-the binder from a flat mapped graph (the typed constraints are built by hand; the one SDC reader is still to
-do); <strong>C</strong> forward and backward propagation, hold, electrical checks, criticality, worst path.
-Unit tests: <code>fast_timing_test</code>, <code>bind_graph_test</code>.</p>
+<strong>A</strong> cell-type tables for N corners; <strong>B</strong> the numeric netlist, levelization, the
+binder from a flat mapped graph, and one typed SDC reader (<code>sdc.hpp</code>; OpenTimer's own reader is not yet
+fed from it); <strong>C</strong> forward and backward propagation, hold, electrical checks, criticality, worst path;
+<strong>D</strong> (first part) the Elmore solver of an RC tree with the same moments as OpenTimer's <code>Rct</code>
+(<code>wire.hpp</code>); <strong>E</strong> the engine behind the placement ranking callback
+(<code>physical_rank.hpp</code>, <code>synth.timing.engine=opentimer|fast|compare</code>).
+Unit tests: <code>fast_timing_test</code>, <code>bind_graph_test</code>, <code>physical_rank_test</code>.</p>
+<p><strong>Not yet in D:</strong> the engine does not build its own trees. It takes the RC snapshot the placer already
+produces (<code>physical::Parasitics</code>) and solves Elmore on it per corner; Prim-Dijkstra topology, the frozen
+topology with length updates and the <code>Parasitics</code> export are still to do. <strong>Not yet in E:</strong>
+detailed evaluations (the <code>evaluate</code> callback, what-if edits) still run OpenTimer; the ranking layout is
+still the sorted vector of label strings of <code>Feedback::Ranking</code>.</p>
+<h3>Step E and the SDC reader: measurements</h3>
+<table>
+<tr><th>What</th><th>Result</th></tr>
+<tr><td>F4: SDC forms in the benchmarks</td>
+<td>The reader parses 60 HighTide <code>constraint.sdc</code> files (asap7, gt2n, nangate45, sky130hd). Twelve designs
+use only create_clock, IO delays, loads, port false paths and variables. Five (litedram, liteeth, litepci, Nyuzi) use
+<code>create_generated_clock</code>, <code>set_clock_groups</code>, a pin-sourced clock or a <code>foreach</code>; those are
+listed as unsupported, never dropped silently. <code>set_driving_cell</code> and <code>set_max_fanout</code> are listed
+everywhere they occur (not modelled yet).</td></tr>
+<tr><td>Ranking against OpenTimer's Elmore ranking, same RC (<code>--set synth.timing.engine=compare</code>)</td>
+<td>picorv32 (9.3k cells, IO delays 2 ns of a 10 ns clock): 33.5k pins in common, |slack difference| median 17 ps,
+90th percentile 41 ps, 99th 69 ps, maximum 113 ps on paths of 4 to 6 ns (engine more pessimistic, about 1 to 3%); the
+most critical 1% of OpenTimer's pins are all in the engine's most critical 2%; clock pins agree on all of them.
+56 pins only OpenTimer times are the pins of tie-cell-driven gates.</td></tr>
+<tr><td>Cost of one ranking call</td>
+<td>picorv32: 3 ms engine + 3 ms Elmore (OpenTimer's ranking is 9 ms per call on average); dino (30k cells): 12 ms
+against 37 ms. The graph is bound once per structure change (hhds body epoch, also a cell swap), the RC snapshot is
+mapped to engine pins once per label set; nets with a changed RC cost only their Elmore solve.</td></tr>
+<tr><td>Placement quality with <code>fast</code> ranking (default flow)</td>
+<td>picorv32: HPWL +0.02%, WNS 3.45 &rarr; 3.56 ns; dino: HPWL &minus;2.7%, WNS 0.40 &rarr; 0.28 ns (all met, TNS 0). Inside the
+run-to-run band of the existing runs; place phase 44.0 &rarr; 40.7 s on dino. Detailed evaluations are unchanged.</td></tr>
+</table>
+<h3>Findings in E</h3>
+<ul>
+<li><strong>SDC numbers are in the Liberty units.</strong> The first version read <code>-period 10</code> as 10 ps (the sky130
+library is in ns), which made every slack 10 ns too low. <code>liberty::timing::Library</code> now carries the units of its
+first library group, and the reader takes them.</li>
+<li><strong>The ranking returns the true slack, not the rebased one.</strong> Weights use only the rank order, but the GUI
+estimate and the acceptance of rounds read the sign and size of the slack. <code>Options::true_slack_in_rank</code> adds one
+backward walk against the true requirements (criticality stays the rebased one).</li>
+<li><strong>An unconstrained output is an endpoint in OpenTimer, not in the engine.</strong> Without <code>set_output_delay</code>
+OpenTimer gives a primary output a required time of 0, so a test SDC with only <code>create_clock</code> shows a worst slack of
+&minus;407 ps in OpenTimer and +4.6 ns in the engine. With real IO delays they agree. Decision for R-list: the engine keeps
+the SDC meaning (no delay, no check).</li>
+</ul>
 <table>
 <tr><th>Exit criterion</th><th>Result</th></tr>
 <tr><td>A: lookups match <code>Table::lookup</code> on asap7 and sky130; load time and size</td>

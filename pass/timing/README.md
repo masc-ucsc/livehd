@@ -68,6 +68,16 @@ rise and fall pin capacitance and the worst slew at a merge.
 Minion has 4,004 combinational loops (mostly state built from gates); OpenTimer cuts them silently and its ten
 longest endpoints are all behind them. Without the cut those pins were untimed and the comparison was empty.
 
+## Wire, SDC and placement ranking
+
+`wire.hpp`: the Elmore delay and impulse variance of one RC tree (Ω, fF, ps), the same moments as OpenTimer's
+`Rct`. `sdc.hpp`: one typed reader for the SDC the flows use (`set`, `$var`, `[expr]`, `[get_ports]`, `[all_inputs]`,
+`lsearch`, `create_clock`, IO delays, `set_load`, `set_input_transition`, port false paths); numbers are in the
+Liberty units; every command or form it does not model is listed in `Sdc::unsupported`. `physical_rank.hpp`: the engine
+behind the placement ranking callback, selectable with `--set synth.timing.engine=opentimer|fast|compare` (compare runs
+both and logs the agreement per call in the placement's `pass.opentimer.incremental` log). Detailed evaluations and
+what-if edits still go to OpenTimer.
+
 ## Tools
 
 ```
@@ -85,5 +95,6 @@ fast_timing_probe --lg lg_dir --top top --corner tt=tt.lib --clock-port clk --pe
 `bazel test --config=all //pass/timing/...`: `fast_timing_test` (the tables against the model, arc kinds and
 senses, a missing cell or arc in a corner; propagation against hand-computed values in a reference model,
 two corners, setup, hold, worst path, criticality and its window, rebasing, false paths, loops, electrical
-limits, wire model, depth margin, ideal clock through buffers) and `bind_graph_test` (wiring resolution on
-a small graph).
+limits, wire model, depth margin, ideal clock through buffers, the Elmore solver, the SDC reader),
+`bind_graph_test` (wiring resolution on a small graph) and `physical_rank_test` (wire delay in the ranking, rebind on a
+structural change or a cell swap, cuts).

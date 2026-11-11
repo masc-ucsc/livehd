@@ -67,6 +67,8 @@ struct Options {
   size_t             path_corner     = 0;
   // Criticality falls from 1 on the worst path of a clock to 0 this far (a fraction of the achievable period) away.
   float              window_fraction = 0.10f;
+  // rank() leaves the required times against the true requirements instead of rebased ones (one more backward walk).
+  bool               true_slack_in_rank = false;
   // Random variation (R14): at an endpoint the arrival grows by margin[corner] / sqrt(logic depth) of itself.
   std::vector<float> depth_margin;
 };
@@ -121,6 +123,8 @@ public:
   // Setup slack over the setup corners and both transitions; +inf when no path passes the pin.
   [[nodiscard]] float         slack(uint32_t pin) const;
   [[nodiscard]] float         criticality(uint32_t pin) const { return criticality_[pin]; }
+  // True for a pin of the ideal clock network (clock source to flip-flop clock pins).
+  [[nodiscard]] bool          clock_network(uint32_t pin) const { return clock_pin_[pin] != 0; }
   // Hold slack of a data pin (after evaluate); +inf without a check.
   [[nodiscard]] float         hold_slack(uint32_t pin) const {
     return hold_slack_.empty() ? std::numeric_limits<float>::infinity() : hold_slack_[pin];

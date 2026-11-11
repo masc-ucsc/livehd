@@ -110,3 +110,36 @@ cc_binary(
     tags = ["manual"],
     deps = [":fast_timing"],
 )
+
+# The fast engine behind the placement rank callback: placed graph + RC snapshot in, Feedback::Ranking out.
+cc_library(
+    name = "physical_rank",
+    srcs = ["physical_rank.cpp"],
+    hdrs = ["physical_rank.hpp"],
+    copts = COPTS,
+    includes = ["."],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":bind_graph",
+        ":fast_timing",
+        "//core",
+        "@abseil-cpp//absl/container:flat_hash_map",
+        "@hhds//hhds:graph",
+    ],
+)
+
+cc_test(
+    name = "physical_rank_test",
+    size = "small",
+    srcs = [
+        "physical_rank_test.cpp",
+        "test_library.hpp",
+    ],
+    copts = COPTS,
+    deps = [
+        ":physical_rank",
+        "//graph",
+        "@googletest//:gtest_main",
+        "@hhds//hhds:graph",
+    ],
+)

@@ -58,6 +58,8 @@ struct Cell {
 };
 struct Library {
   Thresholds                  default_thresholds;
+  // The units of the first library group, in ps and fF: what a unit-less number of an SDC beside it means.
+  double                      time_unit_ps = 1000, capacitance_unit_ff = 1000;
   std::map<std::string, Cell> cells;
 };
 // Parse one owned snapshot containing one or more library groups. No timer,

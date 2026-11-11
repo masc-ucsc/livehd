@@ -80,6 +80,7 @@
 #include "pass/domplace/timing/stage_timing.hpp"
 #include "pass/domplace/timing/stage_timing_salt.hpp"
 #include "pass/opentimer/pass_opentimer.hpp"
+#include "pass/timing/physical_rank.hpp"
 #include "pass/opentimer/sta_salt.hpp"
 #include "pass/place/custom_sizing.hpp"
 #include "pass/place/growth_budget.hpp"
@@ -3256,9 +3257,149 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
         show_timing(fb);
         return fb;
       };
+      // The ranking engine (2q-fasttimer E): OpenTimer's Elmore ranking, the native engine, or both with a comparison.
+      const auto timing_engine = synth_set(opts, "timing.engine", "opentimer");
+      if (timing_engine != "opentimer" && timing_engine != "fast" && timing_engine != "compare") {
+        throw Lhd_error{"usage", "synth.timing.engine expects opentimer, fast or compare, got '" + timing_engine + "'", ""};
+      }
+      std::unique_ptr<livehd::timing::fast::Physical_ranker> fast_ranker;
+      const auto fast_rank = [&](const livehd::placement::Ranking_view& state) {
+        Stdout_to_log redirect(timing_log);
+        if (!fast_ranker) {
+          const auto read_text = [](std::string_view path) {
+            auto text = livehd::file_utils::read_file(std::string(path));
+            if (!text) {
+              throw Lhd_error{"io", "synth.timing.engine=fast cannot read " + std::string(path), ""};
+            }
+            return std::move(*text);
+          };
+          livehd::timing::fast::Physical_ranker::Options ranker_options;
+          bool                                           first_file = true;
+          for (const auto path : absl::StrSplit(liberty, absl::ByAnyChar(", \t\n"), absl::SkipEmpty())) {
+            auto text = read_text(path);
+            if (first_file) {
+              // Macro libraries (SRAM, hard macros) join the setup corner.
+              for (const auto extra : absl::StrSplit(extra_libs(), absl::ByAnyChar(", \t\n"), absl::SkipEmpty())) {
+                text += "\n" + read_text(extra);
+              }
+              first_file = false;
+            }
+            ranker_options.liberty_texts.push_back(std::move(text));
+            break;  // one corner for ranking; the min corner joins with hold (step H)
+          }
+          if (!sdc.empty()) {
+            ranker_options.sdc_text = read_text(sdc);
+          }
+          fast_ranker = std::make_unique<livehd::timing::fast::Physical_ranker>(std::move(ranker_options));
+        }
+        auto feedback = fast_ranker->rank(state.graph, state.parasitics, state.controls.timing_cuts);
+        if (timing_profile) {
+          const auto& r = fast_ranker->engine()->report();
+          std::print("fast engine: wns {:.1f} tns {:.1f} endpoints {} unclocked_endpoints {} unclocked_flops {} loops {}\n",
+                     r.wns_ps, r.tns_ps, r.endpoints, r.unclocked_endpoints, r.unclocked_flops,
+                     fast_ranker->bound()->netlist->loop_pins().size());
+          for (const auto& u : fast_ranker->unsupported()) {
+            std::print("fast unsupported: {}\n", u);
+          }
+          const auto& s = fast_ranker->statistics();
+          std::print("fast rank {}: binds {} remaps {} wire {:.6f}s engine {:.6f}s feedback {:.6f}s bad_trees {} unresolved {}\n",
+                     s.ranks,
+                     s.binds,
+                     s.remaps,
+                     s.wire_seconds,
+                     s.engine_seconds,
+                     s.feedback_seconds,
+                     s.bad_trees,
+                     s.unresolved_labels);
+        }
+        return livehd::placement::prects_data_timing(std::move(feedback), state.controls);
+      };
+      const auto compare_rankings = [&](const livehd::timing::Feedback& reference, const livehd::timing::Feedback& fast) {
+        Stdout_to_log redirect(timing_log);
+        if (!reference.ranking || !fast.ranking) {
+          return;
+        }
+        const auto&         a = *reference.ranking;
+        const auto&         b = *fast.ranking;
+        std::vector<double> diffs;
+        std::vector<std::tuple<double, std::string, double, double>> worst_labels;
+        size_t              shown_only = 0;
+        std::vector<std::pair<double, double>> pairs;  // (reference, fast) slack of the labels both time
+        size_t              only_reference = 0, only_fast = 0, clock_mismatch = 0;
+        for (size_t i = 0; i < a.layout->labels.size(); ++i) {
+          const auto  j  = b.layout->find(a.layout->labels[i]);
+          const bool  ra = std::isfinite(a.pins[i].slack);
+          if (j >= b.pins.size()) {
+            continue;
+          }
+          const bool fb = std::isfinite(b.pins[j].slack);
+          clock_mismatch += a.pins[i].clock != b.pins[j].clock;
+          if (ra && fb) {
+            const double sa = a.pins[i].slack * reference.time_unit_ps, sb = b.pins[j].slack * fast.time_unit_ps;
+            pairs.emplace_back(sa, sb);  // both in ps
+            diffs.push_back(std::abs(sa - sb));
+            worst_labels.emplace_back(std::abs(sa - sb), a.layout->labels[i], sa, sb);
+          } else {
+            only_reference += ra;
+            only_fast += fb;
+            if (ra && !fb && shown_only++ < 4) {
+              std::print("compare only_reference: {} {:.1f} ps\n", a.layout->labels[i], a.pins[i].slack * reference.time_unit_ps);
+            }
+          }
+        }
+        std::ranges::sort(diffs);
+        std::ranges::sort(worst_labels, std::greater<>());
+        for (size_t i = 0; i < std::min<size_t>(4, worst_labels.size()); ++i) {
+          const auto& [d, label, x, y] = worst_labels[i];
+          std::print("compare outlier: {} reference {:.1f} fast {:.1f}\n", label, x, y);
+        }
+        const auto at = [&](double q) { return diffs.empty() ? 0. : diffs[std::min(diffs.size() - 1, size_t(q * double(diffs.size())))]; };
+        double     worst_a = 0, worst_b = 0;
+        for (const auto& [x, y] : pairs) {
+          worst_a = std::min(worst_a, x);
+          worst_b = std::min(worst_b, y);
+        }
+        // The most critical 1% of the reference: how many of them the engine puts in its own most critical 2%.
+        std::ranges::sort(pairs);
+        std::vector<double> fast_sorted;
+        for (const auto& pair : pairs) {
+          fast_sorted.push_back(pair.second);
+        }
+        std::ranges::sort(fast_sorted);
+        const size_t top_count = std::max<size_t>(1, pairs.size() / 100);
+        size_t       kept = 0;
+        if (!fast_sorted.empty()) {
+          const double cut = fast_sorted[std::min(fast_sorted.size() - 1, 2 * top_count)];
+          for (size_t i = 0; i < std::min(top_count, pairs.size()); ++i) {
+            kept += pairs[i].second <= cut;
+          }
+        }
+        std::print("compare rank: pins {} only_reference {} only_fast {} clock_mismatch {} |dslack| p50 {:.2f} p90 {:.2f} p99 {:.2f} max "
+                   "{:.2f} ps; worst reference {:.1f} fast {:.1f}; top1% kept {}/{}\n",
+                   pairs.size(),
+                   only_reference,
+                   only_fast,
+                   clock_mismatch,
+                   at(.5),
+                   at(.9),
+                   at(.99),
+                   diffs.empty() ? 0. : diffs.back(),
+                   worst_a,
+                   worst_b,
+                   kept,
+                   std::min(top_count, pairs.size()));
+      };
       const auto rank = [&](const livehd::placement::Ranking_view& state) {
+        if (timing_engine == "fast") {
+          Phase_timer phase(res, "pass.timing.fast_ranking");
+          return fast_rank(state);
+        }
         Phase_timer phase(res, "pass.opentimer.ranking");
-        return estimate(state, livehd::opentimer::Physical_session::Purpose::ranking);
+        auto        reference = estimate(state, livehd::opentimer::Physical_session::Purpose::ranking);
+        if (timing_engine == "compare") {
+          compare_rankings(reference, fast_rank(state));
+        }
+        return reference;
       };
       // One invocation-wide budget for optional detailed trials, rather than a
       // fresh budget at each repair phase. Reserve two of eight evaluations for
@@ -3431,9 +3572,8 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
         placement_input = seed.graph;
         prepared_libraries.clear();
         auto timing = [&] {
-          Phase_timer ranking_phase(res, "pass.opentimer.ranking");
-          const auto  controls = livehd::placement::prects_networks(timing_tech, seed.floorplan, seed.prects);
-          return estimate({seed.graph, seed.parasitics, controls}, livehd::opentimer::Physical_session::Purpose::ranking);
+          const auto controls = livehd::placement::prects_networks(timing_tech, seed.floorplan, seed.prects);
+          return rank({seed.graph, seed.parasitics, controls});
         }();
         const auto controls
             = livehd::placement::prects_networks(place_options.technology().lef, seed.floorplan, seed.prects, timing);

@@ -265,6 +265,7 @@ cc_library(
         "//pass/specialize",
         "//pass/sweep",
         "//pass/opentimer:pass_opentimer",
+        "//pass/timing:physical_rank",
         "//inou/lefdef:inou_lefdef",
         "//pass/place",
         "//pass/place:preroute_host",
