@@ -1010,14 +1010,16 @@ std::optional<Buffer_tree> apply(hhds::Graph& graph, const Inventory& cells, con
         }
         const auto leaf = physical_sink(graph, point.pin, node_index);
         auto       node = leaf.pin.get_master_node();
-        if (protected_names.contains(std::string(node.get_name()))) {
-          throw std::runtime_error("protected tree leaf");
-        }
+        // A protected load (a cell whose OUTPUT is a clock or control network: the buffer in front of a RAM's
+        // latch enables, a clock gate's logic) is a leaf like any other. What is protected is the cell and the
+        // net it drives; this net only feeds it, and refusing the whole tree left a data net with one such load
+        // unbuffered (vortex: an address bit on 25 loads across the die, 1.8 ns of wire). It is never absorbed.
+        const bool protected_leaf = protected_names.contains(std::string(node.get_name()));
         // Retain distribution forks as timing cut points. Flattening every fork
         // can replace an existing shallow backbone with a long wire-minimal
         // path. Single-load chains remain removable/rebuildable as a unit.
-        if (const auto* next = buffer(node, cells); next && !preserve_chains && edit.kind != "preroute" && !fixed(node)
-                                                    && leaf.width == 1 && sinks(output(node, *next)).size() <= 1) {
+        if (const auto* next = buffer(node, cells); next && !protected_leaf && !preserve_chains && edit.kind != "preroute"
+                                                    && !fixed(node) && leaf.width == 1 && sinks(output(node, *next)).size() <= 1) {
           removed.push_back(node);
           pending.push_back(physical_label(output(node, *next)));
         } else if (leaf_set.insert(point.pin).second) {
