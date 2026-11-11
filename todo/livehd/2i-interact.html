@@ -1,0 +1,647 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TODO 2i-interact — interactive placement GUI (lhd synth --gui)</title>
+<link rel="stylesheet" href="../todo.css">
+</head>
+<body>
+<nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
+<main>
+<h1><strong class="item-id">2i-interact</strong> Interactive placement: <code>lhd synth --gui</code></h1>
+<p><code>lhd synth --gui ...</code> runs the normal synthesis and placement flow, keeps
+the process alive, and serves a browser page that shows the floorplan while the
+placer works: macros as boxes, cells as dots, optional centroids and map overlays, a
+crude side panel with stats and controls. The user can pause before any stage, drag
+or align cells, macros and centroids, and watch global placement (GP) and the stats
+react. Every action is written to a trace that replays in batch, which is also how
+video is produced and how an agent will later drive the same controls.</p>
+<p><span class="status">Implemented (opened 2026-11-09)</span> G0-G12 are implemented
+(see <a href="#status">Implementation status</a>).
+The rulings below came from the user. The design was checked against the code on
+2026-11-09 by reading only (<a href="#facts">Facts checked</a>); what reading could
+not settle is listed under <a href="#measure">Still to measure</a>.</p>
+
+<h2>Depends on</h2>
+<p>Nothing outstanding. It builds on the in-process native DREAMPlace
+(<code>dp::place(Design&amp;, const Options&amp;, GpState*)</code>), its existing
+per-iteration callbacks, <code>Placement_session</code> (GP stop and resume with
+<code>GpState</code>), the ECO windowed <code>local_place()</code>,
+<code>Region_mesh</code> (<a href="3g-partitions.html">3g-partitions</a>) and the
+placed STA callbacks (<code>Physical_session::evaluate</code>).</p>
+
+<h2>Why</h2>
+<ul>
+  <li><strong>Feedback.</strong> Today the only way to ask "what if this SRAM sat in
+  that corner" is a hint file and a full rerun. Moving it with the mouse and reading
+  WNS/TNS/HPWL a few seconds later is a much shorter loop.</li>
+  <li><strong>Visibility.</strong> Watching FP, macro GP, final GP and legalization as
+  they run is the cheapest way to see what the tool is doing; today that needs
+  snapshots plus offline matplotlib scripts.</li>
+  <li><strong>Agent control.</strong> The same command set, plus a screenshot and a
+  state query, lets an agent look at a placement and act on it.</li>
+</ul>
+
+<h2 id="rulings">Rulings (decided 2026-11-09)</h2>
+<ol>
+  <li><strong>Browser front end.</strong> <code>lhd</code> serves a local port and
+  opens the default browser; one self-contained page. No native GUI toolkit. Works on
+  macOS and Linux, and over an SSH port forward.</li>
+  <li><strong>Live for the whole flow.</strong> The page shows the placement as every
+  stage iterates. The placer checks for user commands every few GP iterations
+  (1 to 20) and applies them while it runs.</li>
+  <li><strong>Stage switches are breakpoints.</strong> The panel lists the flow parts
+  (FP plan, macro plan, final, legalize, ...), initialized from the options (all the
+  defaults on). A part that is off makes the flow stop before it; turning it on lets
+  the flow continue.</li>
+  <li><strong>Centroids.</strong> An overlay shows the FP/macro-plan centroids; they
+  can be dragged like any object to see the impact.</li>
+  <li><strong>Pins.</strong> A dropped cell, macro or centroid stays pinned at the drop
+  location until the user unpins it. Pins survive into later stages.</li>
+  <li><strong>Mouse.</strong> Click and drag moves an object. Shift+click builds a
+  multi-selection, which can be aligned and distributed as in Inkscape (left, center,
+  right, top, middle, bottom, equal gaps, rows by columns matrix). Aligned objects
+  end pinned.</li>
+  <li><strong>Pause and run only.</strong> One pause/run control, no separate step
+  button. The session starts paused, so the user can set the view and the stage
+  switches first. While paused, edits only accumulate; run applies them all. When the
+  GP of the current stage has already finished, run forces at least 20 more GP
+  iterations (it then stops again on the normal criteria), either to absorb the edits
+  or just to see what more iterations do.</li>
+  <li><strong>Timing at two rates.</strong> Positions and cheap stats (HPWL, overflow,
+  RUDY) go out at every poll. WNS/TNS and the worst path refresh on a slower cadence
+  bounded by a time budget (default 10% of wall time), and always after a released
+  edit and at each stage boundary. Each number shows the iteration it came from.</li>
+  <li><strong>Action trace.</strong> Every action is appended to a trace with the stage
+  and iteration where it was applied. The trace replays in batch with no browser.</li>
+  <li><strong>Capture.</strong> The page has a screenshot button only. Video comes from
+  replaying a trace headless.</li>
+  <li><strong>Agent later.</strong> After the GUI works, an agent gets the same
+  controls (commands, state query, screenshot).</li>
+  <li><strong>Small footprint on the flow.</strong> The existing placement code should
+  change little. After legalization an edit triggers a few GP iterations plus
+  legalization again, scoped to the region that holds the object. A drag that leaves
+  its region regenerates every region.</li>
+</ol>
+
+<h2>Architecture</h2>
+<table>
+  <tr><th>Piece</th><th>Where</th><th>Role</th></tr>
+  <tr><td><code>Gui_session</code></td><td>new <code>pass/place/gui/</code></td>
+  <td>Owns the command queue, the latest published frame, the breakpoint set, the pin
+  set and the trace writer. The flow thread calls into it; it never calls the flow.</td></tr>
+  <tr><td>Server</td><td><code>pass/place/gui/gui_server.cpp</code></td>
+  <td>One extra thread, POSIX sockets, plain HTTP/1.1. No library exists in the repo
+  and none is added.</td></tr>
+  <tr><td>Page</td><td><code>pass/place/gui/page.html</code> embedded in the binary</td>
+  <td>Canvas (WebGL points for cells, 2D for boxes and overlays), side panel, mouse
+  model. No external script.</td></tr>
+  <tr><td>Rasterizer</td><td><code>pass/place/gui/gui_render.cpp</code></td>
+  <td>Draws the same scene to PNG without a browser (reuse <code>mp::write_png</code>).
+  Used by headless screenshots, replay video and tests.</td></tr>
+  <tr><td>Flow hooks</td><td><code>place.cpp</code>, DREAMPlace <code>placement.cpp</code>,
+  <code>lhd_kernel_synth.cpp</code></td>
+  <td>One new GP callback, gates at stage edges, the region-scoped edit path.</td></tr>
+</table>
+
+<h3>Threads</h3>
+<p>The flow keeps its single placement thread. The server thread only parses requests,
+pushes commands into a mutex-protected queue and serves the last published frame. A
+paused flow is the flow thread blocked inside a <code>Gui_session</code> call waiting
+on the queue, so "pause" needs no change to the solver's control flow. The flow never
+waits on the browser: with no client connected, publishing a frame is a pointer swap.</p>
+
+<h3>Protocol (HTTP only, no WebSocket)</h3>
+<table>
+  <tr><th>Endpoint</th><th>Content</th></tr>
+  <tr><td><code>GET /</code></td><td>The page.</td></tr>
+  <tr><td><code>GET /design</code></td><td>JSON, once per stage change: die and core
+  box, rows, node table (name, kind cell/macro/io, width, height, region id, color),
+  centroid list, region rectangles.</td></tr>
+  <tr><td><code>GET /frame?since=N</code></td><td>Binary, long poll. Header (frame id,
+  stage, iteration, counts) then positions quantized to 16 bits per axis over the die
+  (4 bytes per node), then the pin bitmap and centroid positions.</td></tr>
+  <tr><td><code>GET /stats?since=N</code></td><td>JSON, long poll: stage, iteration,
+  run state, HPWL, overflow, route overflow, area and utilization, WNS/TNS with their
+  source iteration, stage switch state, pending edit count.</td></tr>
+  <tr><td><code>GET /map?kind=K</code></td><td>Binary grid for one overlay, computed
+  only when requested.</td></tr>
+  <tr><td><code>GET /path</code></td><td>JSON worst path: pins with coordinates and
+  per-pin slack.</td></tr>
+  <tr><td><code>GET /screenshot.png?view=..&amp;layers=..</code></td><td>Server-side
+  render of the current frame.</td></tr>
+  <tr><td><code>POST /cmd</code></td><td>One JSON command (table below). The reply
+  carries the sequence number it was queued with.</td></tr>
+</table>
+<p>The server binds 127.0.0.1 and the URL carries a random per-run token; requests
+without it are refused. A command channel that can move the placement and write
+files must not be reachable from the network by default.</p>
+
+<h3>Commands (browser, trace, agent: one vocabulary)</h3>
+<table>
+  <tr><th>Command</th><th>Arguments</th><th>Effect</th></tr>
+  <tr><td><code>pause</code></td><td></td><td>Block at the next poll. This is the
+  initial state.</td></tr>
+  <tr><td><code>run</code></td><td></td><td>Apply the pending edits and iterate. If
+  the stage's GP had finished, run at least <code>gui.min_iters</code> more
+  iterations, then stop on the normal criteria. When GP finishes and the next stage
+  switch is on, the flow goes on into it; when it is off, the session returns to
+  paused at that gate.</td></tr>
+  <tr><td><code>move</code></td><td><code>nodes[]</code>, <code>x[]</code>,
+  <code>y[]</code></td><td>Place and pin. A drag sends intermediate moves while the
+  button is down; only the released position goes to the trace. Align and distribute
+  are computed in the page and arrive as one multi-node <code>move</code>.</td></tr>
+  <tr><td><code>unpin</code></td><td><code>nodes[]</code></td><td>Movable again.</td></tr>
+  <tr><td><code>centroid</code></td><td><code>id</code>, <code>x</code>, <code>y</code>;
+  or <code>id</code>, <code>release</code></td><td>Move and pin a centroid target, or
+  give it back to the placer.</td></tr>
+  <tr><td><code>stage</code></td><td><code>name</code>, <code>on</code></td><td>Set or
+  clear the breakpoint before that stage.</td></tr>
+  <tr><td><code>timing</code></td><td></td><td>Refresh WNS/TNS and the worst path
+  now.</td></tr>
+  <tr><td><code>screenshot</code></td><td><code>file</code>, <code>view</code>,
+  <code>layers</code></td><td>Write a PNG into the workdir.</td></tr>
+  <tr><td><code>finish</code></td><td></td><td>Clear all breakpoints, run to the end,
+  exit.</td></tr>
+</table>
+
+<h3>GP hook</h3>
+<p>DREAMPlace gets one new callback, <code>Options::interact</code>, called every
+<code>interact_interval</code> iterations at the site of the existing
+<code>movable_update</code>. It receives read-only views of the solver's current
+positions and the iteration, and returns holds (node, x, y), releases, centroid
+targets and macro pulls. <code>Gui_session</code> implements it: publish a frame,
+drain the queue, block while paused.</p>
+<p>Most of the mechanism already exists and is reused, not rebuilt:</p>
+<ul>
+  <li><strong>Holds exist.</strong> The solver keeps <code>movable_holds</code> and a
+  <code>can_move(i)</code> mask applied in the Nesterov look-ahead and in the gradient
+  step; the code states "a hold changes only motion, never net forces or density
+  accounting". A pin is a hold that does not expire.</li>
+  <li><strong>What must be added.</strong> (1) Holds on macros:
+  <code>movable_update</code> rejects them with a <code>require</code>. (2) Permanent
+  holds: today a hold is a countdown (<code>fix_iterations</code>). (3) A cheap
+  snapshot: <code>movable_update</code> copies the whole <code>Design</code>
+  (netlist included) per call; <code>interact</code> passes position spans.</li>
+  <li><strong>An edit restarts the optimizer globally.</strong> Applying a moved
+  position sets the Nesterov counter to 1, copies <code>prev = x</code> and clears the
+  convergence samples and the best-feasible iterate. This is kept: a user edit changes
+  the problem. During a drag the restart happens at each poll that carries a new
+  position, so the surrounding cells react with gradient steps and regain momentum
+  after the release.</li>
+  <li><strong>The hook must be invisible until the first edit.</strong> Merely setting
+  <code>movable_update</code> or <code>macro_pull_update</code> today disables several
+  behaviors (<code>allow_density_floor</code>, the post-density continuation, the
+  routing-plateau handoff, <code>gp_search</code>, <code>checkpoint_rollback</code>).
+  If <code>interact</code> were treated the same way, opening the GUI would change
+  the result with no edit. Those conditions must test "an interactive edit has been
+  applied in this solve", not "the hook is installed".</li>
+</ul>
+<p>At the stage boundary the holds become real FIXED status: the macro pass already
+marks hard macros FIXED and writes <code>macro/fixed.def</code> before the final pass
+(<code>place_requested</code>), and FIXED standard cells are kept by that hand-off and
+treated as obstacles by the ECO placer. A pinned cell's drop position is snapped to
+a row and site when it becomes FIXED.</p>
+
+<h3>Pause, and run after GP has finished</h3>
+<ul>
+  <li><strong>Pause blocks inside the callback.</strong> It must not end the
+  <code>dp::place</code> call and continue with a <code>GpState</code>: a continued
+  solve (<code>state != nullptr</code>) disables the density floor and the
+  post-density and routing-plateau stops, so a GP cut into slices is not the same GP.
+  Blocking leaves the solve untouched. Deadlines in the loop are iteration counts;
+  the clocks only feed the reported seconds.</li>
+  <li><strong>Run after the stage's GP stopped</strong> uses what exists for exactly
+  this: <code>Options::min_slice_iterations</code> "requires that many additional
+  steps in the current call, independently of the accumulated GP clock and old
+  convergence deadline", wrapped by <code>Placement_session::advance(...,
+  minimum_steps)</code>. The continuation keeps the iteration clock, the density
+  weight and the filler positions. A fixed macro moved while GP is stopped goes
+  through <code>GpRebind::allow_fixed_macro_move</code>, which exists for the
+  macro-plan hand-off.</li>
+  <li><strong>Where GP can be continued.</strong> The final pass already runs on a
+  <code>Placement_session</code>. The FP and macro GP are plain <code>dp::place</code>
+  calls inside <code>place_single_frame</code>; continuing them needs their
+  <code>GpState</code> kept and the stage-end work (centroid snap, macro
+  legalization) run again after the extra iterations. See G2.</li>
+</ul>
+
+<h3>Stages and breakpoints</h3>
+<p>The panel shows one switch per flow part, in order, taken from the code's own
+stages rather than new ones:</p>
+<table>
+  <tr><th>Panel name</th><th>Code</th><th>Edits allowed</th></tr>
+  <tr><td>fp plan</td><td><code>Placement_stage::floorplan</code>, FP GP and centroid
+  snap in <code>place_single_frame</code></td><td>centroids, macros, cells</td></tr>
+  <tr><td>macro plan</td><td><code>Placement_stage::macro</code></td><td>centroid
+  targets, macros, cells</td></tr>
+  <tr><td>final</td><td><code>Placement_stage::final</code>, <code>run_main_gp</code></td>
+  <td>cells; macros are FIXED here unless unpinned (see G6)</td></tr>
+  <tr><td>legalize, detailed</td><td>native or terminal legalization, detailed
+  placement, legroute when enabled</td><td>region-scoped edits after it completes</td></tr>
+  <tr><td>timing_driven, resize, repair, resynth, satlegalize, final_legalize, preroute</td>
+  <td>post-placement steps in <code>lhd_kernel_synth.cpp</code></td><td>view only
+  while running</td></tr>
+</table>
+<p>Gates use hooks that exist:</p>
+<ul>
+  <li><strong>Between fp, macro and final:</strong>
+  <code>Options::after_stage(Placement_stage, const Result&amp;)</code> is already
+  called after the floorplan GP and after the macro and final passes, and
+  <code>lhd_kernel_synth.cpp</code> already installs it. Blocking there is "stop
+  before the next stage" with no new code in <code>place.cpp</code>. Its boolean
+  return throws <code>Placement_restart</code> for the completed stage, which is a
+  ready-made way to redo a stage from its seed.</li>
+  <li><strong>Before legalization and detailed placement:</strong> these run inside
+  the same <code>dp::place</code> call as GP (<code>o.legalize</code>,
+  <code>o.detailed_place</code>). The gate blocks in the existing
+  <code>before_legalize</code> callback and in the <code>observer</code> stage events
+  (<code>legalization</code>, <code>detailed_placement</code>, <code>finished</code>).</li>
+  <li><strong>Post-placement steps:</strong> one <code>gui.gate()</code> call between
+  the steps in <code>lhd_kernel_synth.cpp</code>.</li>
+</ul>
+<p>Initial switch state comes from the options: a part the options disable
+(<code>place.final=false</code>, <code>place.fp=false</code>, ...) starts off, and
+turning it on at the gate runs it. A part can be enabled late, but a part that
+already ran cannot be undone in this plan.</p>
+
+<h3>Centroids</h3>
+<ul>
+  <li><strong>FP stage.</strong> The centroids are <code>dp::CentroidGroup</code>
+  candidates (hierarchy and color) attracted to their own moving centroid.
+  <code>Design::centroid_targets</code> gives frozen targets but is all or nothing
+  (one per candidate, empty keeps the moving attraction). Dragging one centroid needs
+  a per-candidate optional target, a small DREAMPlace addition carried by the
+  <code>interact</code> return.</li>
+  <li><strong>Macro stage.</strong> After the snap the frozen
+  <code>centroid_targets</code> anchor macro GP; a drag rewrites one entry. Macros
+  also have <code>MacroPull</code> (absolute center target with a weight, replaceable
+  mid-run through <code>macro_pull_update</code>), which is the soft alternative to a
+  hold if a hard hold on a large macro turns out unstable.</li>
+</ul>
+<p>The overlay draws each centroid with its name and, optionally, lines to its
+members.</p>
+
+<h3>Edits after legalization</h3>
+<p>The default legalizer works on the whole design; only legroute works per region.
+So "redo this region" is the ECO placer <code>local_place()</code> with the region
+rectangle as its window. <code>local_place()</code> today takes a reference floorplan
+and a list of forced cell names, builds its window as the hull of the changed cells
+plus a margin that doubles per attempt up to the whole core, locks every cell outside
+the window, and runs at most 60 GP iterations on 16 bins followed by legalization and
+detailed placement. FIXED and LOCKED cells are obstacles. A
+<code>Region_mesh</code> region is a single rectangle with a member list, and
+<code>rect_of(x, y)</code> already finds the region of a point.</p>
+<p>A <code>move</code> on a legal placement then:</p>
+<ol>
+  <li>finds the region of the old and of the new position of every moved node;</li>
+  <li>if all stay inside their region: calls <code>local_place()</code> with the
+  current legal floorplan as reference, the moved cells as forced and FIXED at the
+  snapped drop site, and the region rectangle as the first window (a small change:
+  the first window is given, not derived). If the region alone cannot be made legal
+  the existing window growth applies and the GUI reports that the edit spilled;</li>
+  <li>if any node crossed a region edge: rebuilds the mesh and reruns the region
+  stage for all regions;</li>
+  <li>refreshes timing and publishes.</li>
+</ol>
+<p>The pending edits applied by one <code>run</code> are grouped by region, so each
+touched region is redone once. The mesh is built in the detail-final phase; it has to
+be kept in memory after the flow moves on (today it is written to
+<code>region_mesh.json</code>).</p>
+
+<h3>Timing refresh</h3>
+<p>There is a precedent for a read-only look at a running GP:
+<code>Options::gp_observer</code> ("diagnostic-only, synchronous observation; never
+supplies optimizer feedback") samples routing during the final GP. The GUI refresh
+has the same contract: <code>estimate_rc</code> on the current positions, then
+<code>Physical_session::evaluate(graph, rc, exclusions, Purpose::ranking)</code>, and
+never <code>refresh_timing_weights</code> or a <code>GpUpdate</code>.
+<code>Gui_session</code> measures each refresh and schedules the next so that refresh
+time stays under the budget.</p>
+<p>The STA session is stateful (incremental, with a "last evaluated state"), so an
+extra evaluation between two of the flow's own checkpoints may not be bit-neutral for
+the next one. Reading the code cannot settle this. Two consequences: timing refreshes
+are recorded in the trace, so a replay performs the same evaluations at the same
+iterations and reproduces the interactive run exactly; and whether a GUI run with no
+edits equals a batch run bit for bit is a test in G6, with "equal QoR within noise"
+as the fallback claim.</p>
+
+<h3>Trace and replay</h3>
+<p><code>&lt;workdir&gt;/synth/place/gui_trace.jsonl</code>: one line per applied
+command, <code>{seq, stage, pass, iter, cmd, args}</code>. Recorded are released
+moves, unpins, centroid changes, stage switches, <code>run</code>,
+<code>pause</code>, <code>finish</code> and timing refreshes; intermediate drag
+positions, view changes and map toggles are not. In replay the same <code>interact</code> hook reads the next
+line and applies it when the stage and iteration match, so no browser or socket is
+involved. A pause in the trace is replayed as its recorded iteration count, not as
+wall time.</p>
+
+<h3>Rendering and capture</h3>
+<ul>
+  <li><strong>Page.</strong> Pan and zoom; macros as outlined boxes with names when
+  large enough; cells as points colored by synthesis color, by region or by slack;
+  pins marked; selection highlighted. Layers: centroids, regions, worst path, density,
+  RUDY, RSMT congestion, URoute congestion, displacement since the last frame (how the
+  other cells moved).</li>
+  <li><strong>Screenshot button.</strong> Saves the canvas as shown.</li>
+  <li><strong>Rasterizer.</strong> Same layers, simpler look. Feeds
+  <code>/screenshot.png</code>, the <code>screenshot</code> command, and replay video:
+  one PNG per published frame piped to <code>ffmpeg</code> when it is on the PATH,
+  otherwise a numbered PNG directory.</li>
+  <li><strong>Large designs.</strong> Above a node budget the frame carries a density
+  raster plus the dots inside the current viewport only.</li>
+</ul>
+
+<h2 id="status">Implementation status (2026-11-09)</h2>
+<table>
+  <tr><th>Subtask</th><th>State</th><th>Notes</th></tr>
+  <tr><td>G0</td><td>done</td><td><code>../DREAMPlace</code> fast-forwarded to the pin; <code>local_repository</code> while developing. A GUI run replays byte-identically. A hook that returns nothing changes no result (<code>interact_smoke</code>). Unmeasured: frame cost at 1M cells, held-macro stability under large density pressure, FP/macro GP continuation (not needed: run-after-GP uses the <code>finishing</code> extension).</td></tr>
+  <tr><td>G1</td><td>done</td><td><code>pass/place/gui/</code>: <code>Session</code>, HTTP server (127.0.0.1, token), embedded page, stats panel.</td></tr>
+  <tr><td>G2</td><td>done</td><td>Starts paused; pause/run/continue; stage gates in <code>place.cpp</code>; run after the GP stopped: <code>InteractView::finishing</code> + <code>InteractUpdate::extend</code> with the stop rules deferred. Deviation from the plan: the stop rules are not keyed on "edit applied" (an idle hook changes nothing, tested).</td></tr>
+  <tr><td>G3</td><td>done</td><td>Permanent holds for cells and macros; pins re-sent by name to every <code>dp::place</code> call and re-applied at each pass start. Not done: holds becoming FIXED status between passes.</td></tr>
+  <tr><td>G4</td><td>done</td><td>Shift+click, box select, align/distribute/matrix, unpin; exercised in headless Chrome over the DevTools protocol.</td></tr>
+  <tr><td>G5</td><td>done</td><td>Centroids drawn from the live frame and draggable; DREAMPlace <code>centroid_targets</code>/<code>release_centroids</code> in the interact update (first drag freezes the other groups, targets restored when the loop exits); traced and replayed. <code>lhd_gui_centroid_smoke</code>.</td></tr>
+  <tr><td>G6</td><td>done</td><td>RUDY, RSMT and URoute maps computed on the flow thread on request (also while paused; URoute only with the model loaded, otherwise the panel says why: <code>tools/uroute:gui_smoke</code> covers both with a synthetic model); client-side density layer; WNS/TNS from the flow's own STA evaluations/checkpoints plus the budgeted refresh (<code>timing</code> command, every released edit, automatic while running under <code>synth.place.gui.timing_budget</code> % of wall time). The refresh is a ranking evaluation read-only on the solver (detailed evaluations are a counted shared allowance and are not spent): worst pin slack as an estimate (<code>~WNS</code>), no TNS. A refreshed run's STA result equals its batch replay (<code>lhd_gui_smoke</code>).</td></tr>
+  <tr><td>G7</td><td>done</td><td>Post-legalization edit mode (<code>edit</code> switch): moves accumulate, <em>Apply edits</em> runs <code>local_place</code> with the region rectangle as first window and the moved objects held (no detailed placement), whole core when a move crosses a region edge; edits are recorded and re-applied by later final passes; failures revert and report. <code>lhd_gui_smoke</code> covers it, including a byte-identical replay.</td></tr>
+  <tr><td>G8</td><td>done</td><td>Trace and batch replay (moves, unpins, centroid moves, the <code>extend</code> decision, edit-mode moves).</td></tr>
+  <tr><td>G9</td><td>done</td><td>Server-side rasterizer, <code>screenshot</code> command, <code>/screenshot.png</code>, replay video frames and mp4.</td></tr>
+  <tr><td>G10</td><td>done</td><td>Core area: the <code>area</code> command and the panel's <em>Core area</em> section move one edge of the placement area (or set the core), shrinking free area that lets cells land far away or growing it. The frame is a flag: a restart at the latest checkpoint with <code>synth.place.core/die</code> set (the same re-exec as <em>Replay from here</em>), pins replayed and shown at their pinned place at the gate, the recorded actions moved along when the frame would start below the origin. In the page the edge move is a <em>preview</em> (dashed outline, red/green for area leaving/added, new size and fill) that can also be dragged on the canvas; <em>Apply</em> sends the previewed core as <code>box</code>. Refused with a note when the core would be &gt;98% full, too small for the largest node, or would leave a pinned node outside. <code>gui_session_test</code> (3 tests), <code>lhd_gui_area_smoke</code>. Found while testing: a pin replayed or carried to a gate was not drawn until <em>Run</em> (the gate's publish overwrote it).</td></tr>
+  <tr><td>G11</td><td>done (first version)</td><td>Fork region: <em>Fork selection</em>/<em>Fork view</em> and the <code>fork</code> command take the cells inside a box as a design of their own (netlist from the placer's bit-level <code>View::nets</code>, written as an lg: library; floorplan DEF with the box's rows and boundary pins FIXED where the nets crossed it; <code>synth.place.seed</code> TSV so the cells start where they were) and start a child <code>lhd synth --gui</code> with the parent's flags, its own port and token. Experiment loop: change a flag in the child's Options panel, replay, compare. Open: regions with bus-pin macros are refused; fork after <code>finish</code>; an optional "same boundary, new flags" comparison view of parent region vs fork; clock definition for internal clocks cut at the box. <code>gui_session_test</code> (2 tests), <code>lhd_gui_fork_smoke</code>.</td></tr>
+  <tr><td>G12</td><td>done</td><td>The <em>regions</em> layer was a checkbox over an empty <code>Scene::regions</code>: nothing filled it. Now computed on the flow thread on request and at every gate like the congestion maps (<code>Map_provider</code> kind <code>regions</code>, <code>/regions</code>): <code>Region_mesh::build</code> at the current positions plus each net's Steiner tree against the mesh edges (the boundary-pin crossings). Checked on PipelinedDualIssueCPU (36k cells: 4 regions, 9166 crossings). <code>gui_session_test</code>, <code>lhd_gui_regions_smoke</code>. Open: screenshots do not draw it; the crossings are an estimate (the real virtual pins exist only after the region refinement runs).</td></tr>
+  <tr><td>G10</td><td>done</td><td>Same command vocabulary, <code>/query</code>, <code>/map</code>, <code>/screenshot.png</code>, <code>timing</code>. Not built: top-N violating endpoints (a ranking refresh has no endpoint list) and a client wrapper (the HTTP/JSON API is the interface).</td></tr>
+  <tr><td>G11</td><td>done</td><td>16-bit frames above 50k nodes, delta frames (<code>since=</code>, <code>LHD1</code>), off-screen culling in the page, frames cached per publish, cell names on demand. Measured on a synthetic 1M-node scene, optimized build (<code>gui_session_test</code> <code>MillionNodeFrameCosts</code>): design.json 87 ms (11 MB), publish 0.6 ms, full frame 0.5 ms (8 MB), 16-bit 0.6 ms (4 MB), delta of 1% moved nodes 0.9 ms (120 KB). The placer itself was not run on a 1M-cell design.</td></tr>
+  <tr><td>G12</td><td>done</td><td>README sections in <code>pass/place</code> and DREAMPlace <code>native</code>.</td></tr>
+</table>
+<p>Two DREAMPlace tests, <code>gp_hooks_smoke</code> (line 888) and <code>placement_test</code> ("post-density drift ran on to the iteration cap"), fail in a <code>-c dbg</code> build with and without this work and pass in <code>-c opt</code>; they are unrelated to the interact hook.</p>
+
+<h2 id="scrub">Scrubber, registers (added 2026-11-10)</h2>
+<p>Timeline as a video: <code>Session</code> records a 16-bit snapshot per published frame
+(<code>GET /timeline</code>, <code>/frame?tl=</code>, <code>/design?tl=</code>; budget
+<code>synth.place.gui.history_mb</code>, thinned beyond it, checkpoints kept). The page has a slider with an iteration
+counter, step back/forward, play and live, and phase markers from the checkpoints. Cells on a clock net are flagged
+(<code>Node::seq</code>), split into the <em>comb</em> and <em>regs</em> layers (page and renderer), and hover shows
+the instance name. Tests: <code>gui_session_test</code> (recording, thinning, register flags) and
+<code>lhd_gui_register_smoke</code> (12 flops flagged and named, layers differ in the renderer, one snapshot per GP
+poll, markers at the first gate and the end of the GP).</p>
+
+<h2 id="agent">Agent channel (added 2026-11-10)</h2>
+<p>A local assistant or script can talk to the open session without a browser and without the token: a Unix-domain
+socket (mode 0600, announced on stderr and in <code>&lt;workdir&gt;/synth/place/gui_agent.json</code>) serves the HTTP
+routes plus <code>POST /agent</code>; <code>tools/lhd_gui</code> is the stdlib client. Commands: <code>find</code>,
+<code>highlight</code> / <code>highlight_names</code> / <code>clear_highlight</code> / <code>highlights</code>
+(painted in the page, listed in the side panel), <code>critical</code> (worst-slack cells through the ranking timer,
+served by the flow thread at its next poll or gate), <code>select</code> / <code>selection</code> / <code>describe</code>
+(the page posts what the user clicks; details include master, LEF class, size and position in um, pins),
+<code>state</code> and <code>cmd</code> (any page command). Highlights and the selection are session state keyed by
+node name, so they survive phase changes. Tests: <code>gui_session_test</code> (find/highlight/select/describe,
+critical answered by a flow thread, the Unix socket and its mode, the TCP side still refusing without a token) and
+<code>lhd_gui_register_smoke</code> (the same on a real placement through <code>tools/lhd_gui</code>).</p>
+
+<h2 id="options-panel">Options panel and faster timeline (added 2026-11-10)</h2>
+<p>The Options panel lists the same entries as <code>lhd list options synth.place</code> (deprecated spellings left
+out, <code>synth.place</code> and source-attribute entries read-only), editable and grouped, with <em>Rerun from
+start</em> and <em>Rerun from checkpoint</em> (both re-execute the process; the token and port are kept).
+<code>lhd_gui_timeline_smoke</code> checks the panel's list equals <code>lhd list options synth.place</code> and a
+from-start rerun with an edited option. The timeline records every <code>synth.place.gui.history_every</code>
+(default 50) GP iterations plus every gate/checkpoint, serves the stored 16-bit frames directly, and the page caches
+and prefetches them (scrubbing 13 snapshots: 25 ms cold, under 1 ms cached); the slider no longer fights a drag and the
+markers are rebuilt only when the history changes. A from-start restart used to come back with a new token (403 for
+the open page): fixed.</p>
+
+<h2 id="failures">Failures and keys (added 2026-11-10)</h2>
+<p>A run that fails after the session started (a forgotten <code>--top</code>, a bad SDC, ...) no longer leaves the
+page waiting on a dead server: the process stays up, the page shows the error text and hint in a red banner, and
+<em>Restart (edited flags)</em> re-runs from the start with the flags edited in the panel; <em>Exit lhd</em> ends
+the process with the failure's exit code (<code>lhd_gui_failure_smoke</code>). The page zooms with <code>z</code> /
+<code>Z</code> (shift+z) around the pointer, in addition to the wheel.</p>
+
+<h2 id="timeline">Timeline and flags (added 2026-11-10)</h2>
+<p>Request: the side panel lists the <code>synth.place</code> flags, and a timeline integrated with pause/run keeps
+checkpoints after each major phase so the user can go back, change flags and replay from that point.</p>
+<table>
+  <tr><th>Piece</th><th>Design</th><th>State</th></tr>
+  <tr><td>Checkpoints</td><td>One per gate (<code>fp</code>, <code>macro</code>, <code>final</code>, <code>legalize</code>, ...), after each GP (<code>gp_end</code>), <code>edit</code> and <code>finished</code>, keyed by (label, nth occurrence), which is deterministic for the same flags. Each keeps its scene and frame (the last 40; older ones keep only the key and the trace position).</td><td>done</td></tr>
+  <tr><td>Timeline UI</td><td>Chips under the toolbar, the last is the current position; click = read-only review of that snapshot (<code>/design?cp=</code>, <code>/frame?cp=</code>), <em>Live</em> returns.</td><td>done</td></tr>
+  <tr><td>Flags panel</td><td>Every <code>place.*</code> entry of the options registry with the value this run uses, default and help (<code>GET /options</code>); filterable; edited values are marked.</td><td>done</td></tr>
+  <tr><td>Replay from here</td><td>Rulings of this design: <strong>restart-based</strong>. The process re-executes itself (<code>execv</code>: same pid, port and token; sockets are close-on-exec) with the edited <code>--set</code> values and hidden <code>--gui-resume/--gui-replay/--gui-replay-seq</code> flags; the session replays the trace lines up to the checkpoint without blocking, then becomes interactive and paused there. In-process snapshots of the placer state were rejected: the solver, STA session and caches are not snapshot-able, while the replay machinery is already byte-exact.</td><td>done</td></tr>
+  <tr><td>Cost</td><td>The replay re-runs the stages before the checkpoint (synthesis is reused from the workdir caches; placement caches are removed, since a cache hit would skip the GP). On large designs that is the GP time of the earlier stages.</td><td>known</td></tr>
+  <tr><td>Tests</td><td><code>gui_session_test</code> (checkpoints, review, restart request, resume), <code>lhd_gui_timeline_smoke</code> (restart under a changed flag, same pid, replayed checkpoint frame equals the original, pin replayed, session continues).</td><td>done</td></tr>
+</table>
+
+<h2>Options</h2>
+<table>
+  <tr><th>Option</th><th>Default</th><th>Meaning</th></tr>
+  <tr><td><code>--gui</code></td><td>off</td><td>Top-level flag of <code>lhd synth</code>.
+  Starts the server and opens the browser. Needs placement enabled and a
+  <code>--workdir</code>. Not part of the run id.</td></tr>
+  <tr><td><code>--gui-port</code></td><td>0 (pick a free port)</td><td>Top-level;
+  also not part of the run id.</td></tr>
+  <tr><td><code>--gui-no-open</code></td><td>off</td><td>Print the URL only (remote
+  runs).</td></tr>
+  <tr><td><code>synth.place.gui.poll</code></td><td>10</td><td>GP iterations between
+  polls, 1 to 20.</td></tr>
+  <tr><td><code>synth.place.gui.min_iters</code></td><td>20</td><td>Minimum extra GP
+  iterations when run is pressed after the stage's GP has finished.</td></tr>
+  <tr><td><code>synth.place.gui.timing_budget</code></td><td>10</td><td>Percent of
+  wall time the GUI may spend refreshing timing.</td></tr>
+  <tr><td><code>synth.place.gui.replay</code></td><td>empty</td><td>Trace file to
+  replay without a browser.</td></tr>
+  <tr><td><code>synth.place.gui.video</code></td><td>empty</td><td>Output video (or PNG
+  directory) for a replay.</td></tr>
+</table>
+<p>Only <code>replay</code> changes the placement result. Whether it enters the run id
+through <code>--set</code> by path or by trace content is settled in G8.</p>
+
+<h2>Subtasks</h2>
+<ul class="subtasks">
+  <li id="G0"><strong>G0 — Setup and measurements.</strong> Fast-forward
+  <code>../DREAMPlace</code> to the pinned commit, switch <code>MODULE.bazel</code> to
+  the local repository, and run the items under <a href="#measure">Still to
+  measure</a>.</li>
+  <li id="G1"><strong>G1 — Read-only viewer.</strong> <code>--gui</code> flag
+  (<code>lhd_options.cpp</code>, <code>Options</code>, describe text),
+  <code>Gui_session</code>, server, page with pan/zoom, boxes and dots, stats panel.
+  Frames come from the existing <code>observer</code> and
+  <code>progress_observer</code> (chained with the <code>prior</code> pattern), so
+  DREAMPlace is untouched. Done when sha3 and a macro design animate through all
+  stages and the run without <code>--gui</code> is byte-identical to today.</li>
+  <li id="G2"><strong>G2 — Run control.</strong> <code>Options::interact</code> in
+  DREAMPlace, <code>run</code>/<code>pause</code> (start paused, blocking in the
+  callback), stage gates on <code>after_stage</code>, <code>before_legalize</code> and
+  the observer stage events, panel switches. Run after a finished GP: first for the
+  final pass (<code>Placement_session::advance</code> with
+  <code>minimum_steps = gui.min_iters</code>), then for the FP and macro GP (keep
+  their <code>GpState</code>, rerun the stage-end work). Done when a run paused and resumed at arbitrary polls gives the same
+  placement as an uninterrupted run.</li>
+  <li id="G3"><strong>G3 — Drag and pin in GP.</strong> Holds for cells and macros,
+  <code>move</code>/<code>unpin</code>, pin markers, hold to FIXED at the stage
+  boundary, displacement layer.</li>
+  <li id="G4"><strong>G4 — Selection and align.</strong> Shift+click, rubber band,
+  align/distribute/matrix in the page, one multi-node <code>move</code>.</li>
+  <li id="G5"><strong>G5 — Centroids.</strong> Overlay, FP candidate targets,
+  post-snap <code>centroid_targets</code>, pin and release.</li>
+  <li id="G6"><strong>G6 — Maps and timing.</strong> Density, RUDY, RSMT, URoute
+  layers on request; budgeted read-only timing refresh; worst-path overlay from
+  <code>Feedback::path</code> and <code>Result::pin_locations</code>; cell color by
+  slack. Decide here how a macro is unpinned during the final pass (it is FIXED in
+  the DEF handed to that pass).</li>
+  <li id="G7"><strong>G7 — Edits after legalization.</strong> Region lookup,
+  region-window <code>local_place()</code>, cross-region rebuild, grouping of pending
+  edits by region.</li>
+  <li id="G8"><strong>G8 — Trace and replay.</strong> Writer, replay reader inside the
+  <code>interact</code> hook, run-id rule, Bazel tests driven by small traces (each
+  under 30 s opt).</li>
+  <li id="G9"><strong>G9 — Rasterizer and video.</strong> PNG render of all layers,
+  <code>screenshot</code> command, <code>gui.video</code> with <code>ffmpeg</code> or a
+  PNG directory, one golden-image test with a tolerance.</li>
+  <li id="G10"><strong>G10 — Agent interface.</strong> Document the endpoints; add
+  <code>/query</code> (objects in a box, node by name, nets of a node, top N violating
+  endpoints) so an agent can go from a picture to names; a thin wrapper (MCP server
+  or a <code>lhd gui</code> client command) that posts commands and returns the
+  screenshot.</li>
+  <li id="G11"><strong>G11 — Scale.</strong> Viewport and level-of-detail frames,
+  delta frames, measured frame cost on a design above 1M cells.</li>
+  <li id="G12"><strong>G12 — Docs.</strong> A section in
+  <code>pass/place/README.md</code> and <code>docs/placer.html</code>.</li>
+</ul>
+<p>G1 to G3 are the first usable tool. G7 is the largest single item and can land
+after G8 and G9.</p>
+
+<h2 id="facts">Facts checked (2026-11-09, by reading the code)</h2>
+<table>
+  <tr><th>Assumption</th><th>Finding</th><th>Effect on the plan</th></tr>
+  <tr><td>DREAMPlace runs in process and can be hooked per iteration</td>
+  <td>Yes. <code>dp::place</code> is C++ with <code>observer</code>,
+  <code>progress_observer</code>, <code>movable_update</code>,
+  <code>terminal_update</code>, <code>macro_pull_update</code>,
+  <code>checkpoint</code>, <code>before_legalize</code>,
+  <code>after_macro_legalize</code>.</td><td>G1 needs no DREAMPlace change.</td></tr>
+  <tr><td>A node can be pinned mid-run</td><td>Yes for standard cells, as a counted
+  hold masked by <code>can_move</code>. Macros are rejected. Every applied move
+  restarts Nesterov globally.</td><td>Extend holds (macros, permanent); do not invent
+  a second mechanism.</td></tr>
+  <tr><td>Installing a hook is neutral</td><td>No. <code>movable_update</code> and
+  <code>macro_pull_update</code> being set changes stop rules and disables
+  <code>gp_search</code> and <code>checkpoint_rollback</code>.</td><td>The new hook
+  keys those rules on "edit applied", see GP hook.</td></tr>
+  <tr><td>GP can be re-entered and forced to iterate</td><td>Yes:
+  <code>GpState</code>, <code>min_slice_iterations</code>,
+  <code>Placement_session::advance(minimum_steps)</code>, <code>GpRebind</code>. A
+  continued solve disables some stop heuristics.</td><td>Pause blocks; continuation
+  is used only for run after a finished GP.</td></tr>
+  <tr><td>A pause does not distort the solver</td><td>Deadlines are iteration counts;
+  <code>steady_clock</code> is used for reported seconds only, in the code
+  read.</td><td>Reported runtimes include pause time; the GUI subtracts it.</td></tr>
+  <tr><td>Stage breakpoints need restructuring</td><td>No.
+  <code>after_stage</code> exists for floorplan, macro and final;
+  <code>before_legalize</code> and observer stage events exist inside
+  <code>dp::place</code>.</td><td>Gates are a few lines, mostly in
+  <code>lhd_kernel_synth.cpp</code>.</td></tr>
+  <tr><td>Centroids can be given a target</td><td>Only all at once
+  (<code>Design::centroid_targets</code>); macros have per-node
+  <code>MacroPull</code>.</td><td>Per-candidate optional target added in G5.</td></tr>
+  <tr><td>A region can be re-placed alone</td><td>Not as such. Regions are single
+  rectangles with <code>rect_of</code> and members, but the default legalizer is whole
+  design. <code>local_place()</code> does windowed GP, legalization and detailed
+  placement with a window it derives itself.</td><td>G7 passes the region rectangle
+  as the first window.</td></tr>
+  <tr><td>Pins survive into later stages</td><td>Hard macros become FIXED between the
+  macro and final passes; FIXED standard cells survive that hand-off and are
+  obstacles in <code>local_place()</code>.</td><td>Holds convert to FIXED at stage
+  boundaries, snapped to a site.</td></tr>
+  <tr><td>A read-only timing look exists</td><td><code>gp_observer</code> is a
+  read-only mid-GP sample (routing only, final GP only).
+  <code>Physical_session::evaluate</code> has <code>Purpose::ranking</code> but the
+  session is stateful.</td><td>Refreshes are traced; bit-neutrality is a
+  test.</td></tr>
+  <tr><td>Server and image code can be reused</td><td>No HTTP or socket code in the
+  repo. <code>mp::write_png</code> (no zlib) exists in DREAMPlace; rapidjson is the
+  JSON library.</td><td>Hand-written HTTP; PNG writer reused.</td></tr>
+  <tr><td><code>../DREAMPlace</code> matches the pin</td><td>No. The checkout is clean
+  but 4 commits behind the pinned <code>d6612ee</code>
+  (<code>min_slice_iterations</code> and <code>GpRebind</code> are only in the newer
+  commits).</td><td>Fast-forward before switching to the local repository.</td></tr>
+</table>
+
+<h2 id="measure">Still to measure (G0)</h2>
+<ul>
+  <li><strong>Determinism.</strong> Two runs with the same options give the same
+  placement at the thread count the flow uses. The solver seeds its jitter from
+  <code>o.seed</code> and <code>num_threads</code> defaults to 1; this was not run.</li>
+  <li><strong>STA neutrality.</strong> Whether an extra
+  <code>evaluate(ranking)</code> between two flow checkpoints changes the next
+  checkpoint's numbers, and what one refresh costs on sha3 and on a large design.</li>
+  <li><strong>Macro holds.</strong> Stability of a permanently held large macro under
+  the density preconditioner, against <code>MacroPull</code> with a high weight.</li>
+  <li><strong>FP and macro continuation.</strong> What the centroid snap and macro
+  legalization do when run a second time after extra iterations.</li>
+  <li><strong>Fixed off-grid cells.</strong> Whether the legalizers accept a FIXED
+  standard cell only on a legal site (the plan snaps it; confirm the checks).</li>
+  <li><strong>Frame cost.</strong> Copy and quantize positions at <code>poll=1</code>
+  on sha3 and on a 1M-cell design.</li>
+</ul>
+
+<h2>DREAMPlace workflow (ruled 2026-11-09)</h2>
+<p>The fork lives at <code>../DREAMPlace</code>; first fast-forward it to the pinned
+commit (it is 4 commits behind). While this task is being developed,
+<code>MODULE.bazel</code> uses <code>local_repository(name = "dreamplace", path =
+"../DREAMPlace")</code> in place of the git pin. When the work is done and ready to
+push: commit and push DREAMPlace, then restore the git pin in
+<code>MODULE.bazel</code> at the new commit and push LiveHD.</p>
+
+<h2>Files</h2>
+<ul>
+  <li><code>lhd/lhd_options.cpp</code>, <code>lhd/lhd.hpp</code>,
+  <code>lhd/lhd_meta.cpp</code>: <code>--gui</code> flags, option rows, describe text.</li>
+  <li><code>lhd/lhd_kernel_synth.cpp</code>: session creation, option reading, gates
+  between post-placement steps.</li>
+  <li><code>pass/place/gui/</code> (new): <code>gui_session.hpp/.cpp</code>,
+  <code>gui_server.cpp</code>, <code>gui_render.cpp</code>, <code>gui_trace.cpp</code>,
+  <code>page.html</code>, tests.</li>
+  <li><code>pass/place/place.hpp</code>, <code>pass/place/place.cpp</code>: observer
+  chaining, <code>interact</code> wiring, gates, hold to FIXED conversion,
+  region-scoped edit entry.</li>
+  <li><code>pass/place/region_mesh.hpp</code>: lookup of a region by position and by
+  node.</li>
+  <li><code>../DREAMPlace/dreamplace/native/placement.hpp/.cpp</code>:
+  <code>Options::interact</code>, holds.</li>
+  <li><code>pass/place/README.md</code>, <code>docs/placer.html</code>.</li>
+</ul>
+
+<h2>Risks</h2>
+<ul>
+  <li><strong>Result drift with the GUI open.</strong> A run with <code>--gui</code>
+  and no edits must equal a batch run. The read-only timing refresh and the
+  no-wall-time rule exist for this; G2 tests it.</li>
+  <li><strong>Holds versus real fixed objects.</strong> A held macro still counts as
+  movable charge, so density near it differs slightly from a FIXED macro until the
+  stage boundary. Fallbacks, in order: <code>MacroPull</code> with a high weight; a
+  rebind with the node fixed when the drag is released.</li>
+  <li><strong>Global optimizer restart per edit.</strong> Each applied move resets
+  momentum and the convergence samples for the whole design. On a large design a long
+  drag at a short poll interval could keep GP from making progress; the page then
+  sends drag positions at a lower rate.</li>
+  <li><strong>The 9300-line stage function.</strong> Gates and hooks must stay a few
+  lines each; any restructuring of <code>place_single_frame</code> is out of scope.</li>
+  <li><strong>Region-scoped redo.</strong> No code re-places one region by id today;
+  boundary pins and bus order live on region edges and may need a refresh when a
+  region's content moves.</li>
+  <li><strong>Hand-written HTTP.</strong> Small, but it is new network code; keep it
+  to localhost, a token, fixed-size request limits and no file serving.</li>
+  <li><strong>Two renderers.</strong> The page and the rasterizer will differ in look;
+  the contract is same layers and same geometry, not same pixels.</li>
+  <li><strong>Large designs.</strong> Full-position frames stop being practical past a
+  few million nodes; G11 is required before those are usable.</li>
+</ul>
+
+<h2>Out of scope for now</h2>
+<ul>
+  <li>Undo or rewind to an earlier stage (rerun with an edited trace instead).</li>
+  <li>Editing nets, cells or constraints; only positions, pins and centroids move.</li>
+  <li>Routing display beyond the congestion maps.</li>
+  <li>Several simultaneous clients editing; extra clients are viewers.</li>
+</ul>
+</main>
+</body>
+</html>

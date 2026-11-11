@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TODO 2q-fasttimer — fast approximate timing for synthesis and placement</title>
+<link rel="stylesheet" href="../todo.css">
+</head>
+<body>
+<nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
+<main>
+<h1><strong class="item-id">2q-fasttimer</strong> Fast approximate timing engine for synthesis and placement</h1>
+<p><span class="status">Plan written 2026-11-11 from a question-and-answer session. Nothing is implemented.
+Names of options, targets and directories are proposals.</span></p>
+
+<p>Replace OpenTimer <strong>inside</strong> synthesis and placement with a small native timing engine
+that is fast, uses a few hundred bytes per cell and times several Liberty corners in one walk.
+OpenTimer stays for the final report, for validation and for an occasional calibration on a small
+part of the design. The engine does not need exact slack. It needs to order paths correctly
+(which are more critical than others), give gate sizing a consistent delay model, and work on one
+chunk of the design at a time.</p>
+
+<h2>Why</h2>
+<ul>
+<li><strong>Time.</strong> One detailed OpenTimer evaluation on minimax (about 18k cells) has a median
+of 14 s, and 74% of its cycles are in the RC driver model (fitting a driver ramp and an effective
+capacitance), not in Liberty lookups. After the 1f reductions, timing is still 24–34% of placement
+time (<a href="1f-fixes.html">1f-fixes</a>).</li>
+<li><strong>Memory.</strong> The OpenTimer model costs about 6 KB per gate (2.85 GB for 476k gates).
+Minion placement with timing on went over 40 GB and did not finish in 3 hours
+(<a href="2f-scalability.html">2f-scalability</a>).</li>
+<li><strong>Scalability.</strong> OpenTimer holds one flat design. 2f-scalability needs timing per
+memory-bounded chunk.</li>
+<li><strong>One corner.</strong> <code>lhd synth</code> takes one Liberty file, so hold is checked on the
+same library as setup, and no decision looks at a second cell speed.</li>
+<li><strong>Unreachable targets.</strong> Most runs ask for a period the design cannot meet. Against
+that period almost every path is negative, which hides the difference between the paths that set
+the frequency and the rest.</li>
+</ul>
+
+<h2>Decisions (2026-11-11)</h2>
+<table>
+<tr><th>#</th><th>Topic</th><th>Decision</th></tr>
+<tr><td>R1</td><td>Foundation</td><td>A new lean engine, not an evolution of
+<code>placement::late::Proxy</code> and not a slimmed OpenTimer. It reuses the Liberty parser
+(<code>pass/liberty/timing_model</code>) and the Steiner topology code.</td></tr>
+<tr><td>R2</td><td>Cell model</td><td>Liberty NLDM delay and slew tables, looked up with input slew and
+<strong>total net load</strong> (pin capacitances plus wire capacitance). Rise and fall are carried
+separately, with slew. No driver-ramp fitting, no effective capacitance. One model for ranking and
+for sizing.</td></tr>
+<tr><td>R3</td><td>Corners</td><td>A named list of N Liberty corners (for example slow, typical,
+fast). All corners are propagated in one walk. Setup criticality is the worst over the corners;
+hold is checked on the fastest. One corner keeps working.</td></tr>
+<tr><td>R4</td><td>Criticality</td><td>One forward and one backward walk. When the target is not met,
+slack is measured against the period the design reaches now (per clock), and criticality is
+nonzero only inside a window of the worst path, so effort is not spread over paths that will
+never set the frequency. When the target is met, the SDC period is the reference. SDC false paths
+(reset, clock network) must be honoured.</td></tr>
+<tr><td>R5</td><td>Partitions</td><td>The engine times one chunk at a time, with arrival and required
+times on its boundary pins. No flat timing graph of the whole design is held.</td></tr>
+<tr><td>R6</td><td>Wire RC</td><td>The engine owns compact numeric trees built from pin coordinates,
+kept between samples. Prim-Dijkstra topology for all nets, plus delay-driven refinement
+(Wu et al., TCAD 2025) for nets in the critical window. <code>physical::Parasitics</code> objects
+are produced only for an OpenTimer report or calibration.</td></tr>
+<tr><td>R7</td><td>Sizing and repair</td><td>The engine implements the existing
+<code>timing::Feedback</code> and <code>timing::Whatif</code> contracts, with incremental update and
+rollback, so every consumer moves over. This plan owns that code: simplifying interfaces and
+deleting dead paths is part of the work.</td></tr>
+<tr><td>R8</td><td>Synthesis</td><td>All timing that is not a report moves to the engine: color join
+trials, the post-synthesis seed, per-color port times for incremental resynthesis, usyn
+accept/reject and region scoring. ABC's internal timer stays only inside ABC's own mapping
+commands.</td></tr>
+<tr><td>R9</td><td>Acceptance</td><td>End-to-end QoR. Run the full flow with the new engine and with
+OpenTimer in the loop and compare the final OpenTimer-reported period, area and electrical
+violations. Rank agreement with OpenTimer is a diagnostic, not a gate.</td></tr>
+<tr><td>R10</td><td>Calibration</td><td>Two forms. Offline, per technology, fitted against
+<strong>OpenSTA</strong> (more accurate than OpenTimer) on saved runs. In a run, once before
+sizing, OpenTimer on the chunk that holds the worst paths; infrequent and never the whole
+design.</td></tr>
+<tr><td>R11</td><td>Threads</td><td>The engine is single-threaded and deterministic. Parallelism comes
+from timing chunks side by side.</td></tr>
+<tr><td>R12</td><td>Old native timer</td><td>A late step ports the domino stage timer and the timeclosure
+pin-weight experiment to the new engine, then deletes <code>late::Proxy</code> and its waveform and
+star code.</td></tr>
+<tr><td>R13</td><td>Hold</td><td>Best effort. Sizing rejects a change that creates or worsens a hold
+violation, and repair fixes clear violations before routing. Hold never blocks acceptance; the
+post-route multi-corner ECO remains the real fix.</td></tr>
+<tr><td>R14</td><td>Variation</td><td>Corners cover global variation. A per-corner margin that shrinks
+with logic depth covers random variation; its one or two numbers per technology are fitted
+offline.</td></tr>
+</table>
+
+<h2>Who uses timing today</h2>
+<p>From a sweep of the tree on 2026-11-11. In <code>lhd synth</code> everything goes through one
+<code>opentimer::Physical_session</code> (created in <code>lhd/lhd_kernel_synth.cpp</code>, wrapped as
+the <code>rank</code> and <code>evaluate</code> callbacks and the <code>whatif</code> pointer).</p>
+<table>
+<tr><th>Job</th><th>Consumers</th><th>What they read</th><th>How often</th></tr>
+<tr><td>Ranking</td><td>Post-synthesis seed, FP / macro / final GP checkpoints, terminal and SAT
+legalization, legroute grid and admission, planning selection, cell criticality</td><td>Per-pin setup
+slack (worst of rise and fall) and a clock flag</td><td>8–12 per flow</td></tr>
+<tr><td>Detailed evaluation</td><td>Timing rounds, region refinement, SAT alignment, IO resynthesis,
+legacy repair and sizing, cone resynthesis (opt-in), final legalization</td><td>WNS, TNS, hold WNS,
+delay, area, electrical violations; per pin arrival, required, slack, slew, load, capacitance; the
+critical path</td><td>3–7 per flow, plus one per repair candidate batch</td></tr>
+<tr><td>What-if</td><td><code>resize.engine=new</code> (opt-in), preroute (opt-in)</td><td>resize, add
+cell, set net, then WNS/TNS, pin slack/arrival/slew, hold slack (preroute), electrical checks, arc
+and pin-capacitance queries, rollback</td><td>Per candidate move; every query runs an OpenTimer
+update</td></tr>
+<tr><td>Synthesis</td><td>Color join trials (two full <code>pass.opentimer</code> runs, reading
+per-color <code>max_arrival</code>); per-color port arrival/required for IO resynthesis</td><td>As
+listed</td><td>Per trial / per stage</td></tr>
+<tr><td>Report</td><td>Final <code>pass.opentimer</code>, critical marks, <code>lhd tool sta</code></td>
+<td>Everything</td><td>Once</td></tr>
+</table>
+<p>The mapping passes do not call OpenTimer: <code>pass.abc</code> and <code>pass.synth</code> score with
+ABC's SCL timer (<code>Abc_backend::score</code>), and <code>pass.usyn</code> compares
+<code>Mapped_cost::maximum_region_delay</code>. A native timer already exists
+(<code>placement::late::Proxy</code>): setup only, full walks, with the same accuracy-first driver
+model that dominates OpenTimer's cost. It serves the domino stage timer and the paused
+<a href="2t-timeclosure.html">2t-timeclosure</a> experiment.</p>
+
+<h2>Design</h2>
+
+<h3>Where it lives</h3>
+<p>A new library, proposed <code>pass/timing</code> (namespace <code>livehd::timing</code>, where
+<code>Feedback</code> and <code>Whatif</code> already are). It depends on the Liberty model and on hhds
+for binding. It does not depend on OpenTimer, DREAMPlace or <code>pass/place</code>, so synthesis and
+placement can both link it.</p>
+
+<h3>Numbers, not names</h3>
+<p>Following the 2f ruling (no copy of what the graph holds, no table keyed by a string where a graph
+is in hand):</p>
+<ul>
+<li><strong>Cell-type table</strong>, built once per set of corners. Per type: pins, arcs with their
+sense and conditions, setup and hold constraints, pin capacitance and electrical limits. Each arc
+points at one delay and one slew table per corner and transition. Tables live in one pool and
+share their axes. Corners are matched by cell name; a cell missing from a corner is a
+diagnostic.</li>
+<li><strong>Binding</strong>, built once per topology of a chunk: a type index per cell, a pin index
+derived from the cell and the type, a net index per pin, and the pins in levelized order so a walk
+is a linear scan. The hhds pin handle of each index is kept for writing results back; names are
+produced only for reports.</li>
+<li><strong>State per pin</strong>, as flat arrays of 32-bit floats: late arrival, slew and required
+time for each corner and transition; early arrival for the hold corner; a depth count for the
+margin of R14; the worst predecessor. The delay of each arc is kept from the forward walk, so the
+backward walk and incremental updates do not repeat table lookups.</li>
+</ul>
+<p>Estimate for three corners: about 80 bytes per pin and 24 per arc, so roughly 0.4–0.5 KB per cell
+at four pins per cell, against about 6 KB per gate today. This is an estimate to confirm in step
+C.</p>
+
+<h3>Delay calculation</h3>
+<ul>
+<li><strong>Net load</strong> per corner: sink pin capacitances plus the wire capacitance of the
+tree.</li>
+<li><strong>Cell arc:</strong> delay and output slew from the NLDM tables at (input slew, net load),
+with the same interpolation and extrapolation as <code>Table::lookup</code>. Rise and fall follow
+the arc sense. Worst arrival and worst slew are tracked per transition, as OpenTimer does, so the
+two timers can be compared like for like.</li>
+<li><strong>Wire:</strong> Elmore delay per sink on the numeric tree. Sink slew combines the driver
+slew with the wire's time constant (root-sum-square form, adjusted to the library's slew
+thresholds).</li>
+<li><strong>Checks:</strong> setup and hold from the constraint tables with ideal clocks, as the default
+flow does today. Maximum capacitance, transition and fanout are counted the way the current
+detailed evaluation counts them.</li>
+<li><strong>Constants and conditions:</strong> case analysis over cell truth tables and
+<code>when</code> conditions, ported from <code>late_timing.cpp</code>, which already does this for up
+to six inputs.</li>
+</ul>
+<p>The known cost of R2: total load is pessimistic on long resistive nets, where the far capacitance
+is shielded from the driver. The plan accepts a uniform error and controls the non-uniform part
+with the per-length-class wire factor of the calibration (step I).</p>
+
+<h3>Constraints and false paths</h3>
+<p>Today there are two SDC readers: the one inside <code>pass.opentimer</code> and
+<code>pass/place/sdc_subset.hpp</code>. The engine takes one typed constraint object (clocks, IO
+delays, loads, driving cells, case constants, cuts, false paths) from one reader, and OpenTimer is
+fed from the same object, so both timers see the same constraints.</p>
+<ul>
+<li><code>set_false_path -from</code> / <code>-to</code> a port or pin: the start or end point is
+removed, the net stays wired and loaded.</li>
+<li><code>-through</code> a pin, reset distribution and other control nets: an arc cut, the same
+mechanism as today's <code>timing_cuts</code> and data exclusions.</li>
+<li>Clock-to-clock false paths and asynchronous groups: launch-domain tags per clock.</li>
+<li>Pin-to-pin pairs (<code>-from A -to B</code> between data pins) would need a tag per start point.
+They are reported as unsupported in the first version; step B measures how often the benchmark
+SDCs use them.</li>
+</ul>
+
+<h3>Criticality</h3>
+<p>Per clock, the achievable period is the SDC period minus the worst setup slack over the setup
+corners, after the depth margin.</p>
+<ul>
+<li><strong>Target not met</strong> (the common case): slack is rebased so the worst path has zero.
+Criticality falls from 1 on the worst path to 0 at the edge of a window, proposed 10% of the
+achievable period. Pins outside the window have criticality 0 and are candidates for area
+recovery, not for more pull or larger cells.</li>
+<li><strong>Target met:</strong> the SDC period is the reference, with the same window. Paths with
+positive slack beyond the window are not critical.</li>
+<li><strong>Corners:</strong> each setup corner is evaluated against its own worst path, and a pin's
+criticality is the largest over the corners. A corner can be marked setup-only or hold-only.</li>
+<li><strong>Depth margin (R14):</strong> at each endpoint the arrival is increased by a fraction that
+shrinks with the square root of the logic depth of its worst path. Random variation averages out
+over many stages, so short paths keep a larger relative margin.</li>
+</ul>
+<p>Consumers get a criticality per pin and the achievable period per clock. The net-weight formula in
+<code>timing_place.cpp</code> (percentile of the net's worst slack, blended with the previous weight)
+is replaced by a function of criticality with the same smoothing; nets with criticality 0 fall to
+the minimum weight.</p>
+
+<h3>Three levels of work</h3>
+<table>
+<tr><th>Call</th><th>What runs</th><th>Used by</th></tr>
+<tr><td><code>rank</code></td><td>Late arrival forward and required backward on the setup corners.
+Criticality and achievable period. No hold, no electrical checks.</td><td>Seed, GP checkpoints,
+legalizers</td></tr>
+<tr><td><code>evaluate</code></td><td>All corners, late and early. WNS/TNS per clock and corner, hold,
+electrical checks, worst paths from the recorded predecessors.</td><td>Accept/reject decisions, IO
+resynthesis, reports inside the flow</td></tr>
+<tr><td>Edits</td><td>Resize, add or remove a cell, change a net, move pins; a journal with mark and
+rollback. An edit re-times the fanout cone forward until values stop changing. Endpoint slack,
+WNS and TNS follow from that. Slack of internal pins is recomputed on request, inside the affected
+cone.</td><td>Repair, sizing, preroute</td></tr>
+</table>
+
+<h3>Wire trees</h3>
+<ul>
+<li>One compact tree per net: nodes with coordinates, a parent index and a segment length. Per-unit
+R and C come from the existing <code>technology_wire_rc</code>.</li>
+<li>Topology from the existing driver-aware Prim-Dijkstra code
+(<code>timing_steiner_topology</code>), with the FLUTE-group fallback for very large nets.</li>
+<li>Between samples the topology is frozen and only segment lengths follow the pins, which is cheap
+and continuous. A net's tree is rebuilt when a pin has moved more than a fraction of the net's
+bounding box, or when the frozen tree is longer than a fresh estimate by a set margin.
+<code>Rc_cache</code> is prior art for the keys.</li>
+<li><strong>Delay-driven refinement</strong> (Wu, Li, Chen, Yu, Zhu, "Delay-Driven Rectilinear Steiner
+Tree Construction", TCAD 44(5), 2025) for nets with a sink in the critical window: edge
+replacement to bound the source-to-sink path length, then edge shifting to reduce Elmore delay,
+weighted by each sink's criticality (their critical-sink problem). This models what a
+timing-driven router does for critical nets. It is only valid if the router builds comparable
+trees, so it is an experiment measured against routed RC (step K) before it becomes a
+default.</li>
+<li><strong>Before placement</strong> (synthesis) there are no coordinates: wire capacitance comes from
+a per-technology table by fanout, fitted offline, or is zero when no table exists.</li>
+<li><code>physical::Parasitics</code> is generated from the same trees when OpenTimer needs it, so both
+timers see the same RC. The 1.39 GB that <code>estimate_rc</code> holds on minion is then no longer
+part of the loop.</li>
+</ul>
+
+<h3>Chunks and boundary times</h3>
+<p>An engine instance times one chunk. A boundary input carries arrival and slew per corner and
+transition; a boundary output carries required time and the external load. The same interface
+serves a synthesis color (the per-port times of <a href="2is-incsynth.html">2is-incsynth</a>) and
+the top level (IO delays from the SDC).</p>
+<p>Between rounds only the boundary values are stored. Stitching is a worklist over chunks: a chunk is
+timed again when one of its boundary inputs changed by more than a tolerance, and its new boundary
+outputs feed its neighbours. The design graph is acyclic between state elements, so this settles
+after at most one sweep per chunk crossing on the longest path, with one chunk in memory at a
+time.</p>
+<p><strong>Note on R5:</strong> the question that led to R5 described stitching with port-to-port delay
+summaries per chunk. The plan uses boundary values and re-timing instead, because a port-to-port
+table grows with the square of the port count. To confirm with the user.</p>
+<p>Until 2f chunking exists, the whole design is one chunk and the worklist has one entry.</p>
+
+<h3>Calibration</h3>
+<ul>
+<li><strong>Offline, per technology (OpenSTA).</strong> A tool takes saved placed and routed runs,
+exports the engine's RC, runs OpenSTA and fits: a cell-delay factor and a wire-delay factor per
+corner, the wire factor per net-length class, the depth-margin numbers of R14 and the fanout
+wire-load table. The result is a small data file next to the technology data, named by an option
+and part of every cache key that depends on timing.</li>
+<li><strong>In a run (OpenTimer), once before sizing.</strong> When placement is stable, OpenTimer times
+the chunk that holds the worst paths, with the same boundary times and RC. Two factors per corner
+(cell, wire) are fitted on the endpoints inside the critical window and applied to the whole
+design. The fit is skipped when the chunk is above a size limit, and ignored with a warning when a
+factor falls outside a sane range.</li>
+</ul>
+
+<h3>Hold (best effort)</h3>
+<ul>
+<li>Early arrival on the fastest corner, ideal clocks.</li>
+<li>GP does not raise the weight of short flop-to-flop nets.</li>
+<li>Sizing and repair reject a change that creates a hold violation or worsens one.</li>
+<li>Repair fixes clear cases only: a hold slack well below zero on a path whose setup slack on every
+corner exceeds the added delay with margin. Downsizing first, then a delay cell.</li>
+<li>Residual violations are reported and never fail a run. Real clock skew does not exist before
+routing, so the post-route ECO keeps the final responsibility.</li>
+</ul>
+
+<h2>Facts to confirm first</h2>
+<ul class="subtasks">
+<li><strong>F1 — control runs.</strong> Re-measure, on the current tree, timing time and peak memory per
+consumer for the 1f set (lfsr, minimax, partition_m, coralnpu, CNN). These are the controls for
+R9. Measure the run-to-run spread of the final period, which sets the tolerance.</li>
+<li><strong>F2 — corner libraries.</strong> Which slow / typical / fast Liberty files exist for asap7 and
+sky130 in the benchmark platforms, and whether cell names and pins match across them.</li>
+<li><strong>F3 — OpenSTA and reference runs.</strong> Whether OpenSTA is available on the test machines,
+and which saved routed runs are suitable for the offline fit.</li>
+<li><strong>F4 — false-path forms.</strong> Which <code>set_false_path</code> forms and clock groups the
+benchmark SDCs use.</li>
+<li><strong>F5 — reference code.</strong> The licence of the paper's published code
+(github.com/Whx97/Delay-driven-Steiner-Tree). Without a compatible licence the refinement is written
+from the paper.</li>
+</ul>
+
+<h2>Steps</h2>
+<ul class="subtasks">
+<li><strong>A — cell-type tables for N corners.</strong> Built from <code>liberty::timing::parse</code>.
+Pooled tables, shared axes, pin capacitances, constraints, electrical limits. <em>Exit:</em>
+lookups match <code>Table::lookup</code> within float tolerance on asap7 and sky130; load time and
+size reported.</li>
+<li><strong>B — binding and constraints.</strong> Numeric binding and levelization of a flat mapped
+graph, for a whole design, a chunk or a color, with boundary pins. One SDC reader feeding the typed
+constraints (also to OpenTimer). Clocks, IO delays, false paths, cuts, case constants. <em>Exit:</em>
+the benchmark designs bind with every unsupported item listed; F4 answered.</li>
+<li><strong>C — propagation.</strong> Forward and backward walks for all corners, zero wire. Endpoints,
+achievable period per clock, criticality, depth margin, worst predecessor. <em>Exit:</em> analytic
+unit cases; a zero-wire comparison with OpenTimer on the benchmark set as a diagnostic; measured
+time and bytes per cell against the targets below.</li>
+<li><strong>D — wire trees.</strong> Numeric trees, Elmore delay and slew, frozen topology with length
+updates, the rebuild rule, <code>Parasitics</code> export. <em>Exit:</em> same-RC comparison with
+OpenTimer on placed designs as a diagnostic; tree memory and update time reported.</li>
+<li><strong>E — ranking in placement.</strong> An option selects the engine for the <code>rank</code>
+callback: seed, GP checkpoints, legalizers. Consumers read numeric criticality. <em>Exit:</em> the
+benchmark flows complete; period and timing share reported against F1.</li>
+<li><strong>F — detailed evaluation.</strong> <code>evaluate</code> with all corners, early mode,
+electrical checks and worst paths. Timing rounds, region refinement, IO resynthesis and final
+legalization move over.</li>
+<li><strong>G — edits and what-if.</strong> Incremental update, journal and rollback. Legacy repair, the
+new resize engine and preroute move over. <em>Exit:</em> incremental results equal a fresh
+evaluation within tolerance after every edit and rollback in the tests.</li>
+<li><strong>H — synthesis.</strong> Join trials, the post-synthesis seed, per-color port times, usyn
+accept/reject and region scoring on the engine, with the fanout wire table. Stored measurements are
+keyed by the engine's source salt instead of OpenTimer's.</li>
+<li><strong>I — calibration.</strong> The offline fit tool with OpenSTA and its data file; the in-run
+chunk calibration with OpenTimer.</li>
+<li><strong>J — hold.</strong> The guard in sizing and repair, then best-effort fixing.</li>
+<li><strong>K — delay-driven trees.</strong> The refinement for critical-window nets, measured against
+routed RC on the reference runs. Default decided by that measurement.</li>
+<li><strong>L — chunk stitching.</strong> Boundary storage and the worklist, scheduled with the 2f
+chunking steps.</li>
+<li><strong>M — acceptance and default.</strong> The R9 comparison; flip the default; OpenTimer remains
+selectable for comparison.</li>
+<li><strong>N — cleanup.</strong> See below.</li>
+</ul>
+<p>A to G are in order and put the engine in the placement loop. H, I, J and K are independent of each
+other once F is done. M can be run for placement before H lands and again after.</p>
+
+<h3>Cleanup this plan owns (R7, R12)</h3>
+<ul>
+<li><code>timing::Feedback</code>: numeric pin indices instead of sorted label tables and the string
+map; one representation instead of sparse, dense and ranking variants.</li>
+<li><code>Physical_session</code> shrinks to building OpenTimer for the report and the calibration; the
+what-if journal, the ranking purpose and the binding caches go.</li>
+<li><code>estimate_rc</code> and <code>Parasitics</code> are computed only when OpenTimer runs.</li>
+<li>One SDC reader instead of two.</li>
+<li>Dead code: <code>repair_gp_buffers</code> has no caller and <code>gp_resize</code> is not consumed.</li>
+<li>The evaluation budget (<code>eval_budget</code>, the private allowances of sizing and buffering)
+exists because one evaluation costs seconds. Revisit it once the cost is measured.</li>
+<li>Port the domino stage timer (provisional cells, capture budgets, inverted clocks, clock-gate
+checks) and the timeclosure pin weights, then delete <code>late::Proxy</code>,
+<code>gate_waveform</code>, <code>star_rc</code> and the probes that only serve them.</li>
+</ul>
+
+<h2>Targets (proposed, to confirm in step C)</h2>
+<ul>
+<li>Timing is at most 5% of placement time on the 1f set (24–34% today; the 1f target was 10%).</li>
+<li>At most 0.5 KB per cell for three corners, trees included.</li>
+<li>A full <code>evaluate</code> of minimax at least 100 times faster than the 14 s OpenTimer median.</li>
+<li>A what-if probe costs time proportional to the edited cone, not to the design.</li>
+</ul>
+
+<h2>Acceptance (R9)</h2>
+<ul>
+<li>On the 1f set, with the engine in the loop and with OpenTimer in the loop, same inputs and
+options: the final OpenTimer-reported period is within 2% (or the measured run-to-run spread, if
+larger), area within 2%, and no additional electrical violations.</li>
+<li>The time and memory targets above are met, and reported per consumer.</li>
+<li>Reported but not gating: rank correlation and overlap of the near-critical set against OpenTimer on
+identical RC, split by path style (local, long, high fanout), and hold residuals.</li>
+<li>With the engine option off, every existing result is unchanged until the default flips.</li>
+<li>Minion with timing on completes placement, which it does not today.</li>
+</ul>
+
+<h2>Risks</h2>
+<ul>
+<li><strong>Wire-heavy against cell-heavy paths.</strong> Total-load pessimism affects long resistive
+nets more than short ones, which can reorder paths. The per-length wire factor addresses it; the
+per-style diagnostic shows whether it is enough.</li>
+<li><strong>Sizing without effective capacitance.</strong> Drivers of long nets may be upsized more than
+needed. Compare cell area after sizing against the control.</li>
+<li><strong>Criticality jumps.</strong> When the worst path changes identity, the rebased reference
+moves. The existing weight smoothing damps it; watch for oscillation in GP weights.</li>
+<li><strong>False-path coverage.</strong> An unsupported form leaves false paths in the critical window
+and misdirects the whole flow. Unsupported items must be reported, never timed silently.</li>
+<li><strong>Calibration from one chunk.</strong> Factors fitted on the worst chunk are applied
+everywhere. Bounds and the offline fit limit the damage; compare with calibration off.</li>
+<li><strong>Corner mismatch.</strong> A cell missing or different in one corner removes that corner for
+the paths through it.</li>
+<li><strong>Final report.</strong> The report can no longer reuse the placement session's timer, so
+OpenTimer is built once at the end for the whole design, with its full memory cost. A report per
+chunk is outside this plan.</li>
+<li><strong>Domino port.</strong> The stage timer relies on features of <code>late::Proxy</code> that the
+main flow does not need; porting them must not complicate the common path.</li>
+<li><strong>Delay-driven trees.</strong> If the router does not build such trees, the estimate is
+optimistic exactly on the critical nets.</li>
+</ul>
+
+<h2>Open points</h2>
+<ul>
+<li>Stitching by boundary values and re-timing instead of port-to-port summaries (see the note on
+R5).</li>
+<li>Option names: proposed <code>synth.timing.engine=opentimer|fast</code>,
+<code>synth.corners=slow:a.lib,typ:b.lib,fast:c.lib</code>, <code>synth.timing.window</code>,
+<code>synth.timing.fit</code>, <code>synth.timing.calibrate</code>.</li>
+<li>The window width (10% proposed) and whether it differs between GP weights and sizing.</li>
+<li>Whether pin-to-pin false paths need support in the first version (F4).</li>
+</ul>
+
+<h2>Related</h2>
+<ul>
+<li><a href="1f-fixes.html">1f-fixes</a> — measurements of the OpenTimer loop this plan replaces.</li>
+<li><a href="2f-scalability.html">2f-scalability</a> — chunks, memory per cell, numbers instead of
+names. Its F6 (cost of timing per cell) and its timing-memory risk are answered by this plan.</li>
+<li><a href="2t-timeclosure.html">2t-timeclosure</a> and
+<a href="timing_closure_plan.md">timing_closure_plan</a> — paused. Its subtask B (the proxy timer) is
+superseded by this engine. Its controller, virtual buffering and LR sizing remain paused and would
+use this engine when resumed. The rebased-period objective is adopted here.</li>
+<li><a href="2is-incsynth.html">2is-incsynth</a> — per-color port times, the boundary interface the
+engine shares.</li>
+<li><code>pass/opentimer/README.md</code> — the report, the STA cache and the session this plan
+shrinks.</li>
+</ul>
+</main>
+<footer>LiveHD TODO</footer>
+</body>
+</html>
