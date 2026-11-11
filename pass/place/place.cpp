@@ -5425,7 +5425,7 @@ gui::Fork_files gui_fork_build(const View& v, const ph::Technology& tech, const 
       if (use.inside.empty()) {
         continue;
       }
-      const auto name = driver.instance == "PIN" ? driver.pin : std::format("cut_in_{}", cut_in++);
+      const auto name = driver.instance == "PIN" ? driver.pin.str() : std::format("cut_in_{}", cut_in++);
       const auto at   = position(driver);
       add_port(name, true, at ? std::vector{*at} : std::vector<std::pair<double, double>>{});
       use.in_port = name;
