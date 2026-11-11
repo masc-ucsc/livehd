@@ -122,7 +122,14 @@ and the view's endpoints, cells and name indices.</td><td>5.8 GB</td><td>348 s</
 by the RC nodes and drivers and by the pin-location maps.</td><td>4.9 GB</td><td>351 s</td></tr>
 <tr><td>Names in the RC cell list and the cohesion table; the boundary-pin split model and the legalizer's per-cell
 report released after their last reader.</td><td>4.2 GB</td><td>345 s</td></tr>
+<tr><td>Node identity texts built only for a placement session.</td><td>4.2 GB (0.16 GB less in use)</td><td>343 s</td></tr>
+<tr><td>Color group and placement block stored once per graph with an id per node
+(<code>graph/shared_text.hpp</code>), instead of a string on every mapped node.</td><td>4.0 GB (0.26 GB less in
+use)</td><td>344 s</td></tr>
 </tbody></table>
+<p>Measured on the way: a dense attribute is indexed by the flat key, and node keys share their id space with pins
+(about 18 slots per node in a mapped netlist). For a 32-bit value on every cell the dense store took 48 MB and the
+sparse one 20 MB, so node attributes stay sparse until node keys are compact.</p>
 <p>That is about 6.3 KB per cell, from 11.7. What holds the rest at the new peak (the boundary-pin refinement,
 4.1 GB in use):</p>
 <ul>
@@ -158,9 +165,9 @@ by the graph's names, so results do not change.</p>
 <ul>
 <li>the placer arrays: two full copies inside every native placement call, the split model and a metrics copy in the
 boundary refinement, and a saved state from the previous call (DREAMPlace);</li>
-<li>the flat graph as a second copy of the hierarchy: per node, the full name, the color-group name and the placement
-block as strings. The group and the block have a few thousand distinct values for 668k cells (about 0.2 GB), and the
-name is the instance prefix plus the name in the definition;</li>
+<li>the flat graph as a second copy of the hierarchy: per node, the full name as a string (the instance prefix plus
+the name in the definition), about 0.13 GB, and the same names once more in the name table. The color group and the
+placement block are done (see the table above);</li>
 <li>the netlist held four times next to the graph: the view's net map with its pin and driver lists, the floorplan's
 nets, the placer arrays and the RC model, with two name-to-index maps to join them;</li>
 <li>each cell record copying name, master, block and position out of its node, and the floorplan component copying
