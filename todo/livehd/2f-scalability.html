@@ -126,10 +126,15 @@ report released after their last reader.</td><td>4.2 GB</td><td>345 s</td></tr>
 <tr><td>Color group and placement block stored once per graph with an id per node
 (<code>graph/shared_text.hpp</code>), instead of a string on every mapped node.</td><td>4.0 GB (0.26 GB less in
 use)</td><td>344 s</td></tr>
+<tr><td>hhds: a cell's callee id stays in its node entry instead of forcing an overflow edge set per cell (458 MB
+for the 668k cells); a dense attribute costs one slot per node instead of eight. LiveHD: <code>color</code>,
+<code>synth_region_id</code> and the shared-text ids are dense.</td><td>3.6 GB (3.2 GB in use, 0.5 GB less)</td><td>unchanged</td></tr>
 </tbody></table>
-<p>Measured on the way: a dense attribute is indexed by the flat key, and node keys share their id space with pins
-(about 18 slots per node in a mapped netlist). For a 32-bit value on every cell the dense store took 48 MB and the
-sparse one 20 MB, so node attributes stay sparse until node keys are compact.</p>
+<p>In use at the peak went from 8.0 GB to 3.2 GB, about 4.7 KB per cell from 11.7. The hhds change moved the graph
+body format to version 8: a library saved before it is refused with a message and has to be regenerated.</p>
+<p>Measured on the way: a dense attribute was indexed by the flat key, which carries three tag bits, so a 32-bit
+value on every cell took 48 MB dense against 20 MB sparse. With one vector per tag value it takes 6 MB. Pin widths
+stay sparse: only driver pins have one, and dense measured 25 MB against 20 MB.</p>
 <p>That is about 6.3 KB per cell, from 11.7. What holds the rest at the new peak (the boundary-pin refinement,
 4.1 GB in use):</p>
 <ul>
