@@ -92,6 +92,7 @@ synth::Tmap_result map_design(const std::shared_ptr<hhds::Graph>& top, const syn
   options.boundary_buffer  = request.boundary_buffer;
   options.port_bypass      = request.port_bypass;
   options.drop_init        = request.drop_init;
+  options.derived_clock    = request.derived_clock;
   options.boundary_drive   = request.boundary_drive;
   options.io_load          = request.io_load;
   options.boundary_rounds  = request.boundary_rounds;
@@ -102,7 +103,7 @@ synth::Tmap_result map_design(const std::shared_ptr<hhds::Graph>& top, const syn
   // region key) and the cache salt below both carry it verbatim.
   const auto physical      = std::format(
       "max_fanout={}|boundary={}|boundary_buffer={}|boundary_drive={}|io_load={}|"
-      "boundary_rounds={}|reg_margin={}|area_relax={}|pre={}{}{}{}{}",
+      "boundary_rounds={}|reg_margin={}|area_relax={}|pre={}{}{}{}{}{}",
       request.max_fanout,
       request.boundary,
       request.boundary_buffer,
@@ -116,6 +117,7 @@ synth::Tmap_result map_design(const std::shared_ptr<hhds::Graph>& top, const syn
       request.reset_fanout != 0 ? std::format("|reset_fanout={}", request.reset_fanout) : std::string{},
       request.port_bypass ? "|port_bypass=1" : "",
       request.drop_init ? "|drop_init=1" : "",
+      request.derived_clock ? "|derived_clock=1" : "",
       *memory_mode != synth::Memory_fold::Never ? std::format("|memory={}/{}", request.memory, request.memory_max_bits)
                                                 : std::string{});
   options.region_hook_recipe = "logical-tmap-v2/sharing-" + std::to_string(request.sharing_fanout) + "/" + physical;

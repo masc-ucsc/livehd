@@ -552,6 +552,7 @@ std::string mapping_report(const synth::Mapped_design& design, std::string_view 
   flag(w, "boundary_buffer", options.boundary_buffer);
   flag(w, "port_bypass", options.port_bypass);
   flag(w, "drop_init", options.drop_init);
+  flag(w, "derived_clock", options.derived_clock);
   w.Key("memory");
   text(w, options.memory);
   w.Key("boundary_drive");

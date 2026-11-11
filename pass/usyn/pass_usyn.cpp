@@ -258,6 +258,9 @@ bool read_options(const Eprp_var& var, Options& options) {
   if (!flag("drop_init", mapping.drop_init, "false")) {
     return invalid_option("drop_init", "true|false");
   }
+  if (!flag("derived_clock", mapping.derived_clock, "false")) {
+    return invalid_option("derived_clock", "true|false");
+  }
   mapping.memory = std::string(var.get_stage("memory", "false"));
   if (!livehd::synth::parse_memory_fold(mapping.memory).has_value()) {
     return invalid_option("memory", "false|true|auto");
@@ -793,6 +796,11 @@ void Pass_usyn::setup() {
                        "memory_max_bits or over 3 ports. The logical synthesis always treats a memory as a barrier",
                        "false");
   m.add_label_optional("memory_max_bits", "the `auto` storage threshold in bits; 0 = no limit", "1024");
+  m.add_label_optional("derived_clock",
+                       "map a register clocked by logic that is not a recognized clock gate to a plain DFF cell whose clock "
+                       "pin the mapped logic drives (pass.abc.derived_clock), instead of keeping a native flop that cannot be "
+                       "placed",
+                       "false");
   m.add_label_optional("drop_init",
                        "map a resetless register with a power-on `initial` value to a plain DFF cell and drop the value "
                        "(pass.abc.drop_init), instead of keeping it on a native flop that cannot be placed",
