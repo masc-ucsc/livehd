@@ -10,6 +10,7 @@
 #include "design_prepare.hpp"
 #include "diag.hpp"
 #include "fold_engine.hpp"
+#include "memory_module.hpp"
 #include "sharing_hint.hpp"
 #include "tmap.hpp"
 #include "tmap_cache.hpp"
@@ -47,6 +48,27 @@ synth::Tmap_result map_design(const std::shared_ptr<hhds::Graph>& top, const syn
       }
     }
   }
+  // Memories selected for lowering become child modules of registers and decode, mapped like any other
+  // definition (what pass.abc does): the logical synthesis kept each one a native barrier.
+  const auto memory_mode = synth::parse_memory_fold(request.memory);
+  if (!memory_mode) {
+    return {Tmap_status::invalid, {}, "technology-mapping memory mode must be false|true|auto, got " + request.memory};
+  }
+  std::vector<synth::Memory_row> memory_table;
+  if (*memory_mode != synth::Memory_fold::Never) {
+    const auto modules = synth::build_memory_modules(prepared->definitions, *memory_mode, request.memory_max_bits, &memory_table);
+    prepared->resolve_graphs.insert(prepared->resolve_graphs.end(), modules.begin(), modules.end());
+    for (const auto& row : memory_table) {
+      std::println("[pass.usyn.tmap] memory {}.{}: {} x {} bits, {} port(s) -> {} ({})",
+                   row.graph,
+                   row.name,
+                   row.size,
+                   row.bits,
+                   row.ports,
+                   row.realization,
+                   row.reason);
+    }
+  }
   auto        output = std::make_unique<synth::Mapped_design>();
   Map_options options;
   options.library = request.library;
@@ -58,7 +80,8 @@ synth::Tmap_result map_design(const std::shared_ptr<hhds::Graph>& top, const syn
   options.admission        = request.admission;
   options.threads          = 1;
   options.ware_trials      = false;
-  options.memory_fold      = synth::Memory_fold::Never;
+  options.memory_fold      = *memory_mode;
+  options.memory_max_bits  = request.memory_max_bits;
   options.area_flow        = "none";
   options.large_ge         = 0;
   // Physical techniques only: buffering, gate sizing to the budget, boundary
@@ -67,6 +90,8 @@ synth::Tmap_result map_design(const std::shared_ptr<hhds::Graph>& top, const syn
   options.reset_fanout     = request.reset_fanout;
   options.boundary         = request.boundary;
   options.boundary_buffer  = request.boundary_buffer;
+  options.port_bypass      = request.port_bypass;
+  options.drop_init        = request.drop_init;
   options.boundary_drive   = request.boundary_drive;
   options.io_load          = request.io_load;
   options.boundary_rounds  = request.boundary_rounds;
@@ -77,7 +102,7 @@ synth::Tmap_result map_design(const std::shared_ptr<hhds::Graph>& top, const syn
   // region key) and the cache salt below both carry it verbatim.
   const auto physical      = std::format(
       "max_fanout={}|boundary={}|boundary_buffer={}|boundary_drive={}|io_load={}|"
-      "boundary_rounds={}|reg_margin={}|area_relax={}|pre={}{}",
+      "boundary_rounds={}|reg_margin={}|area_relax={}|pre={}{}{}{}{}",
       request.max_fanout,
       request.boundary,
       request.boundary_buffer,
@@ -88,7 +113,11 @@ synth::Tmap_result map_design(const std::shared_ptr<hhds::Graph>& top, const syn
       request.area_relax_pct,
       request.pre,
       // Absent when off: the default recipe, and the cache salt made of it, stay what they were.
-      request.reset_fanout != 0 ? std::format("|reset_fanout={}", request.reset_fanout) : std::string{});
+      request.reset_fanout != 0 ? std::format("|reset_fanout={}", request.reset_fanout) : std::string{},
+      request.port_bypass ? "|port_bypass=1" : "",
+      request.drop_init ? "|drop_init=1" : "",
+      *memory_mode != synth::Memory_fold::Never ? std::format("|memory={}/{}", request.memory, request.memory_max_bits)
+                                                : std::string{});
   options.region_hook_recipe = "logical-tmap-v2/sharing-" + std::to_string(request.sharing_fanout) + "/" + physical;
   // Every region, including output-only logic, takes the existing mapping-only
   // branch. No failed candidate or embedded region flow can select ABC synthesis.

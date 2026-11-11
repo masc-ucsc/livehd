@@ -23,6 +23,15 @@ struct Tmap_options {
   uint32_t                              reset_fanout    = 0;        // async clear/preset pins per buffer of a reset tree; 0 off
   bool                                  boundary        = true;     // static + exact boundary re-size
   bool                                  boundary_buffer = true;     // tree region inputs past max_fanout
+  bool                                  port_bypass     = false;    // a region output reads the root of its buffer chain
+  // A resetless register with a power-on `initial` value maps to a plain DFF cell and drops the value
+  // (pass.abc.drop_init); otherwise it stays a native flop, which physical synthesis cannot place.
+  bool                                  drop_init       = false;
+  // How a native Memory is realized by the mapping step: `false` keeps it a native block (the default),
+  // `true` lowers it to registers and decode and maps those, `auto` lowers what no macro could be
+  // (memory_module.hpp). The logical synthesis before it always sees a memory as a barrier.
+  std::string                           memory          = "false";
+  uint64_t                              memory_max_bits = 1024;     // the `auto` storage threshold; 0: no limit
   std::string                           boundary_drive;             // empty: smallest buffer; `none`: ideal driver
   float                                 io_load          = -1.0f;   // fF on primary outputs; <0: typical input pin
   int                                   boundary_rounds  = 1;       // exact re-size rounds, 1..64

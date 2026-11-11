@@ -596,16 +596,20 @@ if selected memory || [[ "$group" = memory_* ]]; then
     usyn_native_mem none
     echo "PASS: USYN keeps the memory native in logical CMOS (tmap=none) (abc_mem)"
 
-    # ABC's memory-mapping knob does not exist for USYN: asking for a blasted
-    # memory is a usage error, never a silent native keep.
+    # Asked to (pass.usyn.memory=true, what an explicit synth.memory=flops selects), the mapping step lowers
+    # the memory to registers and decode like pass.abc does, and the result is still equivalent. The logical
+    # synthesis before it kept the memory a barrier either way.
+    run_abc_lec abc_mem abc_mem.abc_mem true false 0 --set pass.usyn.memory=true
+    has "$NETV" "_blasted" || fail "abc_mem (usyn memory=true): the memory was not lowered to registers"
+    ! has "$NETV" "\[waddr\] <= wdata;" || fail "abc_mem (usyn memory=true): a native array remains next to the lowered memory"
+    echo "PASS: USYN lowers the memory in the mapping step when asked and remains equivalent (abc_mem)"
     UMD="$W/usyn_memory_flag"
     mkdir -p "$UMD"
     cp -R "$W/base_abc_mem/lg" "$UMD/lg"
     if "$LHD" pass usyn --top abc_mem.abc_mem lg:"$UMD/lg" --emit-dir lg:"$UMD/net" --set synth.liberty="$LIB" \
-        --set pass.usyn.memory=true --workdir "$UMD/w" -q --result-json "$UMD/r.json" 2>/dev/null; then
-      fail "pass.usyn accepted the ABC-only memory=true knob"
+        --set pass.usyn.memory=sometimes --workdir "$UMD/w" -q --result-json "$UMD/r.json" 2>/dev/null; then
+      fail "pass.usyn accepted memory=sometimes"
     fi
-    grep -q '"class":"usage"' "$UMD/r.json" || fail "pass.usyn memory=true is not a usage error: $(cat "$UMD/r.json")"
     echo "PASS: USYN memory stays a native barrier and remains equivalent"
   else
     if selected memory || selected memory_native; then

@@ -23,6 +23,7 @@
 #include "host_mem.hpp"
 #include "job_manager.hpp"
 #include "liberty_dff.hpp"
+#include "memory_module.hpp"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/SHA256.h"
 #include "native_report.hpp"
@@ -250,6 +251,19 @@ bool read_options(const Eprp_var& var, Options& options) {
   }
   if (!flag("boundary_buffer", mapping.boundary_buffer)) {
     return invalid_option("boundary_buffer", "true|false");
+  }
+  if (!flag("port_bypass", mapping.port_bypass, "false")) {
+    return invalid_option("port_bypass", "true|false");
+  }
+  if (!flag("drop_init", mapping.drop_init, "false")) {
+    return invalid_option("drop_init", "true|false");
+  }
+  mapping.memory = std::string(var.get_stage("memory", "false"));
+  if (!livehd::synth::parse_memory_fold(mapping.memory).has_value()) {
+    return invalid_option("memory", "false|true|auto");
+  }
+  if (!read("memory_max_bits", "1024", mapping.memory_max_bits)) {
+    return invalid_option("memory_max_bits", "a non-negative integer; 0 = no limit");
   }
   mapping.boundary_drive = std::string(var.get_stage("boundary_drive", ""));
   mapping.reg_margin     = std::string(var.get_stage("reg_margin", "auto"));
@@ -773,6 +787,20 @@ void Pass_usyn::setup() {
   m.add_label_optional("boundary_buffer",
                        "tree every tmap region input's fanout past max_fanout by declaring boundary_drive as its driver",
                        "true");
+  m.add_label_optional("memory",
+                       "false|true|auto: how the mapping step realizes a native memory. false keeps it a native block; true "
+                       "lowers it to registers and decode and maps those (synth.memory=flops); auto lowers only storage within "
+                       "memory_max_bits or over 3 ports. The logical synthesis always treats a memory as a barrier",
+                       "false");
+  m.add_label_optional("memory_max_bits", "the `auto` storage threshold in bits; 0 = no limit", "1024");
+  m.add_label_optional("drop_init",
+                       "map a resetless register with a power-on `initial` value to a plain DFF cell and drop the value "
+                       "(pass.abc.drop_init), instead of keeping it on a native flop that cannot be placed",
+                       "false");
+  m.add_label_optional("port_bypass",
+                       "a tmap region output reads the signal at the root of the buffer chain that leads to it, not the "
+                       "chain's last buffer (pass.abc.port_bypass); what is beyond a port is buffered by placement",
+                       "false");
   m.add_label_optional("boundary_drive",
                        "stand-in Liberty cell driving a tmap region input without a mapped driver (empty: smallest buffer; "
                        "none: ideal driver)",

@@ -1088,6 +1088,9 @@ void merge_mapper_sets(const Options& opts, std::string_view method, Eprp_var::E
       labels["pre"] = v;
     } else if (k == "synth.memory" && method == "pass.abc") {
       labels["memory"] = v == "flops" ? "true" : v == "macro" ? "false" : "auto";
+    } else if (k == "synth.memory" && method == "pass.usyn" && (v == "flops" || v == "macro")) {
+      // USYN keeps memories native unless asked: only an explicit flops/macro reaches its mapping step.
+      labels["memory"] = v == "flops" ? "true" : "false";
     }
   }
   // The shared clock fraction applies when an SDC actually defines a clock.

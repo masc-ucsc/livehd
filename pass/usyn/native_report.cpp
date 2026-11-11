@@ -550,6 +550,10 @@ std::string mapping_report(const synth::Mapped_design& design, std::string_view 
   number(w, "reset_fanout", options.reset_fanout);
   flag(w, "boundary", options.boundary);
   flag(w, "boundary_buffer", options.boundary_buffer);
+  flag(w, "port_bypass", options.port_bypass);
+  flag(w, "drop_init", options.drop_init);
+  w.Key("memory");
+  text(w, options.memory);
   w.Key("boundary_drive");
   text(w, options.boundary_drive);
   w.Key("io_load");
