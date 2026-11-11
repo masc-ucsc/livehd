@@ -228,7 +228,7 @@ Area_fit_route rudy_route(const ph::Technology& tech, const ph::Floorplan& fp) {
     ++out.signals;
     double xl = std::numeric_limits<double>::max(), yl = xl, xh = std::numeric_limits<double>::lowest(), yh = xh;
     for (const auto& c : net.connections) {
-      const auto it = where.find(c.instance == "PIN" ? "PIN:" + c.pin : c.instance);
+      const auto it = where.find(c.instance == "PIN" ? "PIN:" + c.pin : c.instance.str());
       if (it == where.end()) {
         continue;
       }

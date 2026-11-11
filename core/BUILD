@@ -169,12 +169,14 @@ cc_test(
 #                       its parser, which semdiff / LEC state pairing use to
 #                       regroup per-bit cells into a bus
 #   - file_name_test:   livehd::shorten_file_name (links :file_name, not :core)
+#   - interned_name_test: livehd::Name, the one-pointer name that reads like a string
 cc_test(
     name = "core_unit_test",
     srcs = [
         "tests/bus_name_test.cpp",
         "tests/debug_env_smoke.cpp",
         "tests/file_name_test.cpp",
+        "tests/interned_name_test.cpp",
         "tests/util_smoke.cpp",
         "tests/worker_pool_test.cpp",
     ],

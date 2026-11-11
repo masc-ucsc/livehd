@@ -7182,7 +7182,7 @@ TEST(Placement, RemovingFirstConstantUserKeepsOtherTieIdentities) {
   const auto nand_source     = [](const Result& placed) {
     for (const auto& net : placed.floorplan.nets) {
       if (net.connections.size() == 2 && net.connections[1].instance == "nand" && net.connections[1].pin == "B") {
-        return net.connections[0].instance;
+        return net.connections[0].instance.str();
       }
     }
     return std::string{};

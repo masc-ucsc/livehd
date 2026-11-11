@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "ann_place.hpp"
+#include "interned_name.hpp"
 
 namespace livehd::physical {
 using Orientation = Ann_place::Orientation;
@@ -214,8 +215,10 @@ struct Row {
   Orientation orientation                        = Orientation::N;
   friend bool operator==(const Row&, const Row&) = default;
 };
+// Component, connection and net names are interned (interned_name.hpp): a design repeats each instance name once
+// per connection, and a hierarchical name is about a hundred characters.
 struct Component {
-  std::string name, macro;
+  Name        name, macro;
   Ann_place   place;
   friend bool operator==(const Component&, const Component&) = default;
 };
@@ -244,7 +247,7 @@ struct Terminal {
   friend bool        operator==(const Terminal&, const Terminal&) = default;
 };
 struct Connection {
-  std::string instance, pin;
+  Name        instance, pin;
   friend bool operator==(const Connection&, const Connection&) = default;
 };
 // Timing/demand endpoint identity: "instance:pin", or the bare DEF PIN name.
@@ -300,10 +303,10 @@ struct Via {
   friend bool                  operator==(const Via&, const Via&) = default;
 };
 struct Net {
-  std::string             name;
+  Name                    name;
   std::vector<Connection> connections;
   std::vector<Wire>       wires{};
-  std::string             use{};
+  Name                    use{};
   friend bool             operator==(const Net&, const Net&) = default;
 };
 // Unwired ordinary net with at least two endpoints: a signal-routing candidate.

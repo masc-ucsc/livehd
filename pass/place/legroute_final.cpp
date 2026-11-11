@@ -1037,7 +1037,7 @@ Final_net_scope final_net_scope(const Design& d) {
     if (!net.requires_final_route()) {
       continue;
     }
-    if ((d.opt.final_skip_clock && net.clock) || (skip_re && std::regex_search(d.fp.nets[net.frame].name, *skip_re))) {
+    if ((d.opt.final_skip_clock && net.clock) || (skip_re && std::regex_search(d.fp.nets[net.frame].name.str(), *skip_re))) {
       ++scope.skipped;
     } else {
       scope.required[n] = 1;

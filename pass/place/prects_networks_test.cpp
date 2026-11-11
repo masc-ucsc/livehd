@@ -85,7 +85,7 @@ TEST(PrectsNetworks, DistributionClosureExcludesSiblingsButPreservesDataAndGateE
   timing::Feedback timing;
   for (const auto& net : fp.nets) {
     for (const auto& pin : net.connections) {
-      timing.pins[pin.instance == "PIN" ? pin.pin : pin.instance + ":" + pin.pin].slack = -100;
+      timing.pins[pin.instance == "PIN" ? pin.pin.str() : pin.instance + ":" + pin.pin].slack = -100;
     }
   }
   const auto before   = fp;

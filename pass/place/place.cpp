@@ -1324,7 +1324,7 @@ std::string pin_name(Pin pin) {
 }
 std::string bit_name(const std::string& name, int bits, int bit) { return bits > 1 ? std::format("{}[{}]", name, bit) : name; }
 struct Endpoint {
-  std::string instance, pin;
+  Name        instance, pin;
   int         constant                                     = -1;
   friend bool operator==(const Endpoint&, const Endpoint&) = default;
   friend bool operator<(const Endpoint& a, const Endpoint& b) {
@@ -1500,7 +1500,7 @@ public:
 };
 struct Cell {
   Node        node;
-  std::string name, macro, block;
+  Name        name, macro, block;
   Ann_place   place;
   bool        locked = false;
 };
@@ -1679,8 +1679,8 @@ struct View {
   std::vector<Endpoint>                     pins;
   std::vector<Endpoint>                     drivers;
   std::map<Endpoint, std::vector<Endpoint>> nets;
-  std::map<std::string, size_t>             terminal;
-  std::map<std::string, size_t>             cell;
+  std::map<Name, size_t>                    terminal;
+  std::map<Name, size_t>                    cell;
   std::map<std::string, double>             weights;
   std::map<std::string, std::string>        cohesion_owners;
 };
@@ -2441,7 +2441,7 @@ void refresh_floorplan_view(View& v, const View& baseline, Result& state, const 
     if (old == previous.end() && !io) {
       continue;
     }
-    const auto master = io ? std::string(io->get_name()) : old->second.macro;
+    const auto master = io ? std::string(io->get_name()) : old->second.macro.str();
     if (!tech.macros.contains(master)) {
       throw std::runtime_error("FP repair inserted an unmapped cell: " + name);
     }
@@ -7634,7 +7634,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     v.nets.erase(constant_driver);
     for (size_t i = 0; i < sinks.size(); ++i) {
       const auto& target = sinks[i];
-      const auto  base   = imported ? constant_driver.instance : std::string(value ? "__place_tiehi" : "__place_tielo");
+      const auto  base     = imported ? constant_driver.instance.str() : std::string(value ? "__place_tiehi" : "__place_tielo");
       const auto  name = imported && i == 0 ? base : std::format("{}_{:016x}", base, hash_text(target.instance + ":" + target.pin));
       const auto  existing = v.cell.find(name);
       Node        node;
@@ -8640,7 +8640,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       }
       std::vector<std::string> drivers;
       for (const auto& [driver, sinks] : v.nets) {
-        drivers.push_back(driver.instance == "PIN" ? driver.pin : driver.instance + "/" + driver.pin);
+        drivers.push_back(driver.instance == "PIN" ? driver.pin.str() : driver.instance + "/" + driver.pin);
       }
       boundary_pins.emplace(regions,
                             router,
@@ -8688,7 +8688,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       std::map<std::string, size_t> by_driver;  // the net index is the nets' iteration order (the refinement's too)
       size_t                        index = 0;
       for (const auto& [driver, sinks] : v.nets) {
-        by_driver.emplace(driver.instance == "PIN" ? driver.pin : driver.instance + "/" + driver.pin, index++);
+        by_driver.emplace(driver.instance == "PIN" ? driver.pin.str() : driver.instance + "/" + driver.pin, index++);
       }
       std::ifstream pins_file(options.region_seed_dir + "/boundarypins/pins.tsv");
       std::string   line;
@@ -9072,7 +9072,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
           }
           size_t index = 0;
           for (const auto& [driver, sinks] : v.nets) {
-            auto net_name = driver.instance == "PIN" ? driver.pin : "snapshot_net_" + std::to_string(index++);
+            auto net_name = driver.instance == "PIN" ? driver.pin.str() : "snapshot_net_" + std::to_string(index++);
             if (driver.instance != "PIN") {
               const auto base   = net_name;
               unsigned   suffix = 0;
@@ -11223,7 +11223,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
             for (const auto& net : frame.nets) {
               for (const auto& pin : net.connections) {
                 const auto rank = final_gp_timing.pin_rank(pin.instance, pin.pin);
-                const auto name = pin.instance == "PIN" ? pin.pin : pin.instance + ":" + pin.pin;
+                const auto name = pin.instance == "PIN" ? pin.pin.str() : pin.instance + ":" + pin.pin;
                 if ((std::isfinite(rank.slack) || rank.clock) && written.insert(name).second) {
                   timing_file << std::quoted(name) << '\t'
                               << (std::isfinite(rank.slack) ? rank.slack * final_gp_timing.time_unit_ps : 0) << '\t' << rank.clock
@@ -11513,17 +11513,17 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         capacity << std::setprecision(17) << tiles.bounds.xl << ' ' << tiles.bounds.yl << ' ' << tiles.bounds.xh << ' '
                  << tiles.bounds.yh << ' ' << tiles.cols << ' ' << tiles.rows << ' ' << tiles.admission_share << '\n';
         for (const auto& component : physical.components) {
-          pose << std::quoted(component.name) << ' ' << component.place.x << ' ' << component.place.y << ' '
+          pose << std::quoted(component.name.str()) << ' ' << component.place.x << ' ' << component.place.y << ' '
                << int(component.place.orientation) << '\n';
-          topology << std::quoted(component.name) << ' ' << std::quoted(component.macro) << '\n';
+          topology << std::quoted(component.name.str()) << ' ' << std::quoted(component.macro.str()) << '\n';
         }
         for (const auto& terminal : physical.terminals) {
           pose << std::quoted(terminal.name) << ' ' << terminal.x << ' ' << terminal.y << '\n';
         }
         for (const auto& net : physical.nets) {
-          topology << std::quoted(net.name) << ' ' << std::quoted(net.use);
+          topology << std::quoted(net.name.str()) << ' ' << std::quoted(net.use.str());
           for (const auto& pin : net.connections) {
-            topology << ' ' << std::quoted(pin.instance) << ' ' << std::quoted(pin.pin);
+            topology << ' ' << std::quoted(pin.instance.str()) << ' ' << std::quoted(pin.pin.str());
           }
           topology << '\n';
         }
@@ -14320,7 +14320,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
   size_t                   legroute_kept = 0;
   std::vector<std::string> legroute_changed;
   for (size_t net = 0; net < v.drivers.size(); ++net) {
-    auto name = v.drivers[net].instance == "PIN" ? v.drivers[net].pin : std::format("net_{}", net);
+    auto name = v.drivers[net].instance == "PIN" ? v.drivers[net].pin.str() : std::format("net_{}", net);
     if (v.drivers[net].instance != "PIN") {
       // Preserve identified buses through the macro-to-final handoff when the
       // experimental final refinement is requested. Never rename input nets.

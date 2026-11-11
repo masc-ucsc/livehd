@@ -502,7 +502,7 @@ void dump_final_boxes(const lr::Design& d, const lr::Grid& g, const lr::Boxes& b
       for (size_t p = 0; p < N.pins.size(); ++p) {
         const auto& P      = N.pins[p];
         const bool  in_box = box >= 0 && P.comp >= 0 && d.cell[P.comp] >= 0 && boxes.box_of[size_t(d.cell[P.comp])] == box;
-        const auto  owner  = P.comp >= 0   ? d.fp.components[size_t(P.comp)].name
+        const auto  owner  = P.comp >= 0   ? d.fp.components[size_t(P.comp)].name.str()
                              : P.term >= 0 ? d.fp.terminals[size_t(P.term)].name
                                            : std::string{};
         out << std::format(R"({}{{"owner":{},"pin":{},"terminal":{},"in_box":{},"driver":{}}})",

@@ -1278,7 +1278,7 @@ void final_wires(const Design& d, const Grid& g, const Boxes& boxes, const Routi
     nets << "net_index\tnet\tpins\toutcome\n";
     for (size_t n = 0; n < d.nets.size(); ++n) {
       if (scope.required[n]) {
-        nets << n << '\t' << std::quoted(d.fp.nets[d.nets[n].frame].name) << '\t' << d.nets[n].pins.size() << '\t'
+        nets << n << '\t' << std::quoted(d.fp.nets[d.nets[n].frame].name.str()) << '\t' << d.nets[n].pins.size() << '\t'
              << std::quoted(why[n].empty() ? "connected" : why[n]) << '\n';
       }
     }
