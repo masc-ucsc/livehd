@@ -12,11 +12,15 @@ cc_library(
         "cell_types.cpp",
         "engine.cpp",
         "netlist.cpp",
+        "sdc.cpp",
+        "wire.cpp",
     ],
     hdrs = [
         "cell_types.hpp",
         "engine.hpp",
         "netlist.hpp",
+        "sdc.hpp",
+        "wire.hpp",
     ],
     copts = COPTS,
     includes = ["."],
@@ -47,7 +51,9 @@ cc_test(
     srcs = [
         "cell_types_test.cpp",
         "engine_test.cpp",
+        "sdc_test.cpp",
         "test_library.hpp",
+        "wire_test.cpp",
     ],
     copts = COPTS,
     deps = [
@@ -95,4 +101,12 @@ cc_binary(
         "//pass/partition:flatten",
         "@rapidjson",
     ],
+)
+
+cc_binary(
+    name = "sdc_survey",
+    srcs = ["sdc_survey.cpp"],
+    copts = COPTS,
+    tags = ["manual"],
+    deps = [":fast_timing"],
 )
