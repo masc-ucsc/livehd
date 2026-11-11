@@ -2494,6 +2494,8 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
       }
     }
   }
+  // Kept for the join trials below: they color again with the same options.
+  Eprp_var::Eprp_dict color_labels;
   {
     Eprp_var::Eprp_dict labels;
     labels["alg"]        = "synth";
@@ -2520,9 +2522,12 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
       labels["stats"] = "true";
     }
     run_step("pass.color", var, labels, opts, res);
+    color_labels = labels;
   }
 
-  {
+  // The synthesis groups as colored: written now, and again if a join trial
+  // changes the coloring.
+  const auto write_groups = [&] {
     std::map<hhds::Gid, std::shared_ptr<hhds::Graph>> definitions;
     for (const auto& g : var.graphs) {
       if (g) {
@@ -2614,10 +2619,11 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
         throw Lhd_error{"config", "cannot write synth_groups.json", "check workdir permissions"};
       }
     }
-    if (user_workdir) {
+    if (user_workdir && std::find(res.outputs.begin(), res.outputs.end(), path) == res.outputs.end()) {
       res.outputs.push_back(path);
     }
-  }
+  };
+  write_groups();
 
   // ---- 3. ABC tech-map --------------------------------------------------------
   const std::string qor_path = root + "/qor.json";
@@ -2672,6 +2678,183 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
     }
     for (const auto& [key, value] : labels) {
       io_mapper_options.emplace(key, value);
+    }
+
+    // ---- join trials ------------------------------------------------------
+    // The coloring lists the few cuts its depth rule could not decide
+    // (pass.color.synth.join_trials). Each is mapped both ways -- the design
+    // as colored, and with every listed pair folded -- and timed; a pair stays
+    // folded only where the worst arrival through it improves by join_gain
+    // percent. The region cache makes the second mapping cost the folded
+    // regions only, and the final mapping below is then all cache hits.
+    struct Join_trial {
+      uint32_t a = 0, b = 0;
+      int      color_a = 0, color_b = 0, color_joined = 0;
+      unsigned depth = 0;
+      double   split_ps = 0, joined_ps = 0;
+      bool     kept = false;
+    };
+    const auto top_coloring = [&]() -> std::string {
+      for (const auto& g : var.graphs) {
+        if (g && g->get_name() == top) {
+          auto info = g->get_input_node().attr(livehd::attrs::coloring_info);
+          return info.has() ? std::string(info.get()) : std::string{};
+        }
+      }
+      return {};
+    };
+    std::vector<Join_trial> join_trials;
+    {
+      rapidjson::Document doc;
+      doc.Parse(top_coloring().c_str());
+      if (!doc.HasParseError() && doc.IsObject() && doc.HasMember("join_candidates") && doc["join_candidates"].IsArray()) {
+        for (const auto& c : doc["join_candidates"].GetArray()) {
+          if (c.IsObject() && c.HasMember("a") && c.HasMember("b") && c.HasMember("color_a") && c.HasMember("color_b")) {
+            Join_trial t;
+            t.a       = c["a"].GetUint();
+            t.b       = c["b"].GetUint();
+            t.color_a = c["color_a"].GetInt();
+            t.color_b = c["color_b"].GetInt();
+            t.depth   = c.HasMember("depth") ? c["depth"].GetUint() : 0;
+            join_trials.push_back(t);
+          }
+        }
+      }
+    }
+    if (!join_trials.empty() && (mapper_method != "pass.abc" || !labels.contains("cache_dir") || !mapped_output)) {
+      livehd::diag::warn("synth", "join-trials-skipped", "unsupported")
+          .msg("{} undecided cut(s) are not tried: a join trial maps the design twice and needs the ABC mapper with its "
+               "region cache",
+               join_trials.size())
+          .hint("give --workdir and keep lhd.incremental on, or drop pass.color.synth.join_trials")
+          .emit();
+      join_trials.clear();
+    }
+    if (!join_trials.empty()) {
+      const auto trial_root = root + "/join_trial";
+      // The worst arrival in each top-level color of one mapping, by color id.
+      const auto map_and_time = [&](const std::string& name) {
+        const auto dir = trial_root + "/" + name;
+        std::error_code trial_ec;
+        fs::remove_all(dir, trial_ec);
+        ensure_dir(dir);
+        auto trial_labels   = labels;
+        trial_labels["out"] = dir + "/net";
+        trial_labels["qor"] = dir + "/qor.json";
+        ensure_dir(trial_labels["out"]);
+        run_step(mapper_method, var, trial_labels, opts, res);
+        Eprp_var trial_net;
+        load_lg_into_var(trial_labels["out"], trial_net);
+        Eprp_var::Eprp_dict sta{
+            {"files", liberty + (sdc.empty() ? "" : "," + sdc)}
+        };
+        sta["top"]   = top;
+        sta["qor"]   = dir + "/timing.json";
+        sta["stats"] = "true";
+        merge_sets(opts, "pass.opentimer", sta);
+        if (const auto macros = synth_set(opts, "macro_liberty", ""); !macros.empty()) {
+          sta["extra_libs"] = macros;
+        }
+        run_step("pass.opentimer", trial_net, sta, opts, res);
+        std::map<int, double> arrival;
+        rapidjson::Document   doc;
+        doc.Parse(slurp_json(sta["qor"]).c_str());
+        if (!doc.HasParseError() && doc.IsObject() && doc.HasMember("designs") && doc["designs"].IsArray()) {
+          for (const auto& design : doc["designs"].GetArray()) {
+            if (!design.IsObject() || !design.HasMember("colors") || !design["colors"].IsArray()) {
+              continue;
+            }
+            for (const auto& row : design["colors"].GetArray()) {
+              if (!row.IsObject() || !row.HasMember("module") || !row.HasMember("color") || !row.HasMember("max_arrival")) {
+                continue;
+              }
+              // A color of the top's (flat) coloring names its region `<top>__...`.
+              if (std::string_view{row["module"].GetString()}.starts_with(top + "__")) {
+                auto& worst = arrival[row["color"].GetInt()];
+                worst       = std::max(worst, row["max_arrival"].GetDouble());
+              }
+            }
+          }
+        }
+        return arrival;
+      };
+      const auto recolor = [&](const std::vector<Join_trial>& folded, bool only_kept) {
+        auto        again = color_labels;
+        std::string pairs;
+        for (const auto& t : folded) {
+          if (!only_kept || t.kept) {
+            pairs += std::format("{}{}:{}", pairs.empty() ? "" : ",", t.a, t.b);
+          }
+        }
+        again["join"]        = pairs;
+        again["join_trials"] = "0";  // the trial is the answer: no second round
+        run_step("pass.color", var, again, opts, res);
+      };
+
+      const auto split = map_and_time("split");
+      recolor(join_trials, false);
+      {
+        rapidjson::Document doc;
+        doc.Parse(top_coloring().c_str());
+        if (!doc.HasParseError() && doc.IsObject() && doc.HasMember("joined") && doc["joined"].IsArray()) {
+          for (const auto& j : doc["joined"].GetArray()) {
+            for (auto& t : join_trials) {
+              if (j.IsObject() && j.HasMember("a") && j.HasMember("b") && j.HasMember("color") && j["a"].GetUint() == t.a
+                  && j["b"].GetUint() == t.b) {
+                t.color_joined = j["color"].GetInt();
+              }
+            }
+          }
+        }
+      }
+      const auto joined = map_and_time("joined");
+      double     gain   = 5;
+      if (auto it = color_labels.find("join_gain"); it != color_labels.end() && !it->second.empty()) {
+        gain = std::stod(it->second);
+      }
+      std::string report;
+      for (auto& t : join_trials) {
+        const auto sa = split.find(t.color_a);
+        const auto sb = split.find(t.color_b);
+        const auto jj = joined.find(t.color_joined);
+        if (sa != split.end() && sb != split.end() && jj != joined.end() && t.color_joined != 0) {
+          t.split_ps  = std::max(sa->second, sb->second);
+          t.joined_ps = jj->second;
+          t.kept      = t.split_ps > 0 && (t.split_ps - t.joined_ps) * 100.0 >= gain * t.split_ps;
+        }
+        report += std::format("{}{{\"a\":{},\"b\":{},\"depth\":{},\"color_a\":{},\"color_b\":{},\"color_joined\":{},\"split_ps\":{:.1f},"
+                              "\"joined_ps\":{:.1f},\"kept\":{}}}",
+                              report.empty() ? "" : ",",
+                              t.a,
+                              t.b,
+                              t.depth,
+                              t.color_a,
+                              t.color_b,
+                              t.color_joined,
+                              t.split_ps,
+                              t.joined_ps,
+                              t.kept);
+      }
+      const auto kept = std::count_if(join_trials.begin(), join_trials.end(), [](const auto& t) { return t.kept; });
+      {
+        std::ofstream out(root + "/join_trials.json");
+        out << "{\"schema_version\":1,\"gain_percent\":" << gain << ",\"trials\":[" << report << "]}\n";
+      }
+      if (user_workdir) {
+        res.outputs.push_back(root + "/join_trials.json");
+      }
+      if (opts.stats) {
+        std::print("synth[stats]: join trials: {} cut(s) mapped both ways, {} kept joined (gain >= {}%): [{}]\n",
+                   join_trials.size(),
+                   kept,
+                   gain,
+                   report);
+      }
+      res.recipe_steps.emplace_back(std::format("synth.join_trials.tried={}.kept={}", join_trials.size(), kept));
+      recolor(join_trials, true);  // the coloring the design keeps
+      if (kept != 0) {
+        write_groups();
+      }
     }
     run_step(mapper_method, var, labels, opts, res);
     if (user_workdir || lg_emit != nullptr) {
