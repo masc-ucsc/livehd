@@ -2609,7 +2609,9 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      "coarse",
      Synth_set_option::Kind::file,
      "auto|fine|coarse: region granularity, independent of the mapper. fine cuts at wide arithmetic/shifters/compares/muxes "
-     "and extracts ware modules (small ABC regions); coarse keeps register-to-register cones and extracts nothing. "
+     "and extracts ware modules (small ABC regions); coarse keeps register-to-register cones and extracts nothing. With "
+     "the ABC mapper coarse cones are bounded softly (pass.color.synth.convex: a region passes max_gate only where no cut "
+     "is free) and region outputs skip the mapper's buffer chains (pass.abc.port_bypass). "
      "auto = the mapper's own profile (abc: fine, usyn: coarse). Explicit color.* settings still win"},
     {"tune.profile",
      "auto",

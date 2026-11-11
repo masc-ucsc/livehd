@@ -2172,7 +2172,7 @@ void Color_synth::label_cones(hhds::Graph* g) {
   cn.max_gate           = opts.max_gate;
   cn.min_gate           = opts.min_gate;
   cn.flop_to_flop       = opts.flop_to_flop;
-  cn.convex             = opts.convex;
+  cn.convex             = opts.convex && !opts.flop_to_flop;  // one color per overlapping cone set leaves nothing to bound
   cn.deep_path          = opts.deep_path;
   cn.deep_side          = opts.deep_side;
   cn.forward = opts.forward == "pair" ? Forward_mode::pair : (opts.forward == "all" ? Forward_mode::all : Forward_mode::off);

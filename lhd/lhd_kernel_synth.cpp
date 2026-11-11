@@ -2511,6 +2511,16 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
     labels["mapper"]     = partition == "coarse" ? std::string{"usyn"}
                            : partition == "fine" ? std::string{"abc"}
                                                  : std::string{mapper->color_profile};
+    // Coarse regions for ABC are register-to-register cones under a SOFT size bound: a color grows past max_gate
+    // only where no cut is free (pass/color/README.md). One color per overlapping cone set (flop_to_flop, what the
+    // usyn/domino mapper needs) left a CPU as one region of most of the design; the soft bound splits it and is the
+    // better result overall -- bp_uno -128 -> +438 ps, partition_c -230 -> -47, partition_p -161 -> -66, with
+    // vortex, coralnpu, partition_o and sha3 40-70 ps behind one color. `pass.color.synth.flop_to_flop=true` asks
+    // for the one-color form again.
+    if (mapper_method == "pass.abc" && partition == "coarse") {
+      labels["flop_to_flop"] = "false";
+      labels["convex"]       = "true";
+    }
     merge_color_sets(opts, labels);
     labels["liberty"] = liberty;
     if (labels["alg"] != "synth") {
@@ -2654,6 +2664,11 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
     labels["clock_gate_depth"]    = synth_set(opts, "clock_gate_depth", "1");
     // Each mapper receives its own labels. Native USYN does not inherit
     // ABC optimization settings; standalone dispatch uses the same rule.
+    // Several coarse regions meet at ports the mapper buffered blind: with the soft bound the outputs read the
+    // root of their buffer chain (pass.abc.port_bypass; vortex -738 -> -177 ps). An explicit setting wins.
+    if (mapper_method == "pass.abc" && synth_set(opts, "partition", "coarse") == "coarse") {
+      labels["port_bypass"] = "true";
+    }
     merge_mapper_sets(opts, mapper_method, labels);
     labels["library"] = usyn_liberty;  // synth.liberty is the one spelling (pass.abc.library is refused)
     if (domino) {
