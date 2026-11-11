@@ -69,7 +69,9 @@ protected:
   std::set<std::string>                               physical_timing_cuts_;
   void                                                apply_physical_captures();
   std::set<std::string>                               propagated_clocks_;
-  std::set<std::string>                               false_start_ports_;
+  // Ports no reported or optimized path starts from (set_false_path -from, set_ideal_network) or ends at
+  // (set_false_path -to): their arrival / required time is removed, the net is still wired, loaded and repaired.
+  std::set<std::string>                               false_start_ports_, false_end_ports_;
 
   int    margin;  // % margin to mark nodes
   double freq;

@@ -328,6 +328,30 @@ Sdc_selector sdc_selector(const std::vector<std::string>& tokens, size_t& index)
   return result;
 }
 
+// Tcl string match over a port name: `*` any run, `?` one character, the rest literal (a bus index's brackets
+// are literal here, as every SDC writer means them).
+bool sdc_glob(std::string_view pattern, std::string_view text) {
+  size_t p = 0, t = 0, star = std::string_view::npos, mark = 0;
+  while (t < text.size()) {
+    if (p < pattern.size() && (pattern[p] == '?' || pattern[p] == text[t])) {
+      ++p;
+      ++t;
+    } else if (p < pattern.size() && pattern[p] == '*') {
+      star = p++;
+      mark = t;
+    } else if (star != std::string_view::npos) {
+      p = star + 1;
+      t = ++mark;
+    } else {
+      return false;
+    }
+  }
+  while (p < pattern.size() && pattern[p] == '*') {
+    ++p;
+  }
+  return p == pattern.size();
+}
+
 // A token is the constraint's VALUE only if it parses as a complete number.
 // `-min` must not be read as one, and neither must a port called `1a`.
 bool sdc_number(const std::string& t, float& out) {
@@ -613,6 +637,8 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
                                                          "set_load",
                                                          "set_driving_cell",
                                                          "set_false_path",
+                                                         "set_ideal_network",
+                                                         "set_clock_transition",
                                                          "set_propagated_clock",
                                                          "current_design"};
 
@@ -684,18 +710,121 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
       continue;  // the selected timing graph is already bound by lhd
     }
 
-    if (directive == "set_false_path") {
-      // Exact primary-input launch exclusion has no path-history state: removing
-      // its arrival removes only paths launched from that port. General
-      // through/to, edge- or corner-specific exceptions remain unsupported.
-      static const std::regex input_false_path(R"(\s*set_false_path\s+-from\s+\[get_ports\s+([^\s\[\]{}]+)\]\s*)");
-      std::smatch             match;
-      if (std::regex_match(expanded, match, input_false_path)) {
-        const auto name = match[1].str();
-        if (timer.primary_inputs().contains(name) && !native_start_clocks_.contains(name) && !clock_ports.contains(name)) {
-          false_start_ports_.insert(name);
+    if (directive == "set_false_path" || directive == "set_ideal_network") {
+      // A port-launched or port-captured exception has no path-history state: removing the port's arrival (its
+      // required time) removes exactly the paths that start (end) there. `set_false_path -from [get_ports ..]`,
+      // `-to [get_ports ..]`, and an ideal network rooted at a port or at a port's net are that. The network is
+      // still wired, loaded and repaired (a reset still gets its tree): it only stops being a timing path that is
+      // reported or ranked. A -from together with a -to (one pair of ports only), -through, clocks, pins and
+      // edge- or corner-specific forms remain unsupported.
+      const bool               ideal = directive == "set_ideal_network";
+      std::vector<std::string> from, to;
+      std::vector<std::string>* into       = ideal ? &from : nullptr;
+      bool                      understood = true;
+      for (size_t i = 1; i < tok.size() && understood; ++i) {
+        const auto& t = tok[i];
+        if (t == "-from" && !ideal) {
+          into = &from;
+        } else if (t == "-to" && !ideal) {
+          into = &to;
+        } else if (t == "-no_propagate" && ideal) {
+          // the net alone, not what its loads drive: for a port's net that is the same start
+        } else if (const std::string bare = sdc_strip(t); into && (bare == "get_ports" || (ideal && bare == "get_nets"))) {
+          const auto selector = sdc_selector(tok, i);
+          understood          = selector.closed && !selector.args.empty();
+          into->insert(into->end(), selector.args.begin(), selector.args.end());
+        } else {
+          understood = false;
+        }
+      }
+      understood = understood && (from.empty() != to.empty());
+      // Every bit of the ports a pattern names: a scalar, a whole bus (`d`, `d.1`, .. as Pin_tracker names its
+      // bits), one bit `d[3]`, or a glob over any of those spellings.
+      const auto matching = [&](const std::vector<std::string>& patterns, const auto& ports) {
+        std::set<std::string> found;
+        for (const auto& [name, port] : ports) {
+          (void)port;
+          std::string base = name, bit = name + "[0]";
+          if (const auto dot = name.rfind('.');
+              dot != std::string::npos && dot + 1 < name.size() && name.find_first_not_of("0123456789", dot + 1) == std::string::npos) {
+            base = name.substr(0, dot);
+            bit  = base + "[" + name.substr(dot + 1) + "]";
+          }
+          for (const auto& pattern : patterns) {
+            if (sdc_glob(pattern, name) || sdc_glob(pattern, base) || sdc_glob(pattern, bit)) {
+              found.insert(name);
+            }
+          }
+        }
+        return found;
+      };
+      if (understood) {
+        const auto starts = matching(from, timer.primary_inputs());
+        const auto ends   = matching(to, timer.primary_outputs());
+        // A pattern that names nothing here is not an exception this netlist needs (a port another partition
+        // has); a clock port keeps its arrival, it is the clock.
+        for (const auto& name : starts) {
+          if (!native_start_clocks_.contains(name) && !clock_ports.contains(name)) {
+            false_start_ports_.insert(name);
+          }
+        }
+        false_end_ports_.insert(ends.begin(), ends.end());
+        if (!starts.empty() || !ends.empty() || !ideal) {
           continue;
         }
+        // An ideal network on a net inside the design (NVDLA's nvdla_core_rstn behind its reset synchronizer):
+        // the mapped netlist does not keep that net's name, so it stays timed like any net.
+        warn_ignored(directive, "names no port or port net of the mapped design (an internal net is not found by name)");
+        continue;
+      }
+    }
+    if (directive == "set_clock_transition") {
+      // set_clock_transition [-rise] [-fall] [-min] [-max] value [get_clocks name]: the slew at the clock's source.
+      bool                     rise = false, fall = false, lo = false, hi = false, have = false, ok = true;
+      float                    value = 0;
+      std::vector<std::string> clocks;
+      for (size_t i = 1; i < tok.size() && ok; ++i) {
+        const auto& t = tok[i];
+        if (t == "-rise") {
+          rise = true;
+        } else if (t == "-fall") {
+          fall = true;
+        } else if (t == "-min") {
+          lo = true;
+        } else if (t == "-max") {
+          hi = true;
+        } else if (!have && sdc_number(t, value)) {
+          have = true;
+        } else if (sdc_strip(t) == "get_clocks") {
+          const auto selector = sdc_selector(tok, i);
+          ok                  = selector.closed && !selector.args.empty();
+          clocks              = selector.args;
+        } else {
+          ok = false;
+        }
+      }
+      std::vector<std::string> sources;
+      for (const auto& clock : clocks) {
+        const auto target = timing_targets_.find(clock);
+        ok                = ok && target != timing_targets_.end() && target->second.pin.empty() && !target->second.ports.empty();
+        if (ok) {
+          sources.insert(sources.end(), target->second.ports.begin(), target->second.ports.end());
+        }
+      }
+      if (ok && have && value >= 0 && !sources.empty()) {
+        for (const auto& port : sources) {
+          if (!timer.primary_inputs().contains(port)) {
+            continue;
+          }
+          for (auto split : {ot::MIN, ot::MAX}) {
+            for (auto tran : {ot::RISE, ot::FALL}) {
+              if ((split == ot::MIN ? lo || !hi : hi || !lo) && (tran == ot::RISE ? rise || !fall : fall || !rise)) {
+                timer.set_slew(port, split, tran, value);
+              }
+            }
+          }
+        }
+        continue;
       }
     }
     if (directive == "set_propagated_clock") {
@@ -1188,6 +1317,13 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
     for (auto split : {ot::MIN, ot::MAX}) {
       for (auto tran : {ot::RISE, ot::FALL}) {
         timer.set_at(name, split, tran, std::nullopt);
+      }
+    }
+  }
+  for (const auto& name : false_end_ports_) {
+    for (auto split : {ot::MIN, ot::MAX}) {
+      for (auto tran : {ot::RISE, ot::FALL}) {
+        timer.set_rat(name, split, tran, std::nullopt);
       }
     }
   }

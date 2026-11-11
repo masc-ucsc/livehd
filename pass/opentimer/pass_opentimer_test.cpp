@@ -234,6 +234,58 @@ set_false_path -from [get_ports a]
   EXPECT_FLOAT_EQ(pass.timer.report_slack("z", ot::MAX, ot::RISE).value(), 60);
   EXPECT_TRUE(pass.complete());
 }
+TEST_F(SdcClock, FalsePathsAndIdealNetworksOnPortsDropTheirPathsAndKeepTheRest) {
+  // The NVDLA partitions: reset and test ports are false paths and ideal networks (a port, a bus, a glob, a list,
+  // a port's net), and a port another partition has is named too. None of it is a reported path; the rest is.
+  Sdc_probe pass(var);
+  for (const auto* in : {"rst", "test_mode", "pwr", "pwr.1", "core_rstn", "b"}) {
+    const std::string out = std::string("o_") + in, net = std::string("n_") + in;
+    pass.timer.insert_primary_input(in).insert_primary_output(out).insert_net(net);
+    pass.timer.disconnect_pin(in).disconnect_pin(out);
+    pass.timer.connect_pin(in, net).connect_pin(out, net);
+  }
+  pass.read_sdc(write(R"sdc(
+create_clock -name virtual -period 100
+set_input_delay 10 -clock virtual [all_inputs]
+set_output_delay 20 -clock virtual [all_outputs]
+set_false_path -from [get_ports rst]
+set_false_path   -from [get_ports pwr*]
+set_false_path -from [get_ports {test_mode not_in_this_partition}]
+set_ideal_network [get_ports test_mode]
+set_ideal_network -no_propagate [get_nets core_rstn]
+set_false_path -to [get_ports o_b]
+)sdc"));
+  for (const auto* gone : {"o_rst", "o_test_mode", "o_pwr", "o_pwr.1", "o_core_rstn", "o_b"}) {
+    EXPECT_FALSE(pass.timer.report_slack(gone, ot::MAX, ot::RISE)) << gone;
+  }
+  EXPECT_FLOAT_EQ(pass.timer.report_slack("y", ot::MAX, ot::RISE).value(), 70);
+  EXPECT_TRUE(pass.complete());
+  // What it cannot honor is still said, and the report marked incomplete: one pair of ports, an internal net.
+  Sdc_probe partial(var);
+  partial.read_sdc(write(R"sdc(
+create_clock -name virtual -period 100
+set_input_delay 10 -clock virtual [all_inputs]
+set_output_delay 20 -clock virtual [all_outputs]
+set_false_path -from [get_ports a] -to [get_ports y]
+set_ideal_network [get_nets some_internal_net]
+)sdc"));
+  EXPECT_FLOAT_EQ(partial.timer.report_slack("y", ot::MAX, ot::RISE).value(), 70);
+  EXPECT_FALSE(partial.complete());
+}
+TEST_F(SdcClock, ClockTransitionSetsTheSlewAtTheClockPort) {
+  Sdc_probe pass(var);
+  pass.timer.insert_primary_input("clk");
+  pass.read_sdc(write(R"sdc(
+create_clock -name core -period 100 [get_ports clk]
+set_clock_transition -rise -min 0.1 [get_clocks {core}]
+set_clock_transition -rise -max 0.2 [get_clocks {core}]
+set_clock_transition -fall 0.3 [get_clocks core]
+)sdc"));
+  EXPECT_FLOAT_EQ(pass.timer.report_slew("clk", ot::MIN, ot::RISE).value(), .1f);
+  EXPECT_FLOAT_EQ(pass.timer.report_slew("clk", ot::MAX, ot::RISE).value(), .2f);
+  EXPECT_FLOAT_EQ(pass.timer.report_slew("clk", ot::MIN, ot::FALL).value(), .3f);
+  EXPECT_FLOAT_EQ(pass.timer.report_slew("clk", ot::MAX, ot::FALL).value(), .3f);
+}
 TEST_F(SdcClock, ExactListSearchExcludesOnlyTheSelectedInputPort) {
   Sdc_probe pass(var);
   pass.timer.insert_primary_input("clk");
