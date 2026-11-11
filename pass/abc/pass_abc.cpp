@@ -229,6 +229,11 @@ void Pass_abc::add_mapping_labels(Eprp_method& m) {
                        "true|false map flops to Liberty DFF cells (true, falls back to native flops when the library has no "
                        "DFF cell) vs keep them native as `always @(posedge)` (false)",
                        "true");
+  m.add_label_optional("port_bypass",
+                       "true|false a region output reads the signal at the root of the buffer chain that leads to it, not the "
+                       "chain's last buffer. The mapper buffers a high-fanout net without knowing which reader is the next "
+                       "region's critical one; what is beyond a port is buffered by placement, which does know",
+                       "false");
   m.add_label_optional("drop_init",
                        "true|false map a resetless register with a power-on `initial` value to a plain DFF cell and drop the "
                        "value (what Yosys does for an ASIC), instead of keeping it on a native flop that cannot be placed "
@@ -1203,6 +1208,7 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
   opts.ware_max_cells     = ware_max_cells;
   opts.map_register       = map_register;
   opts.drop_init          = drop_init;
+  opts.port_bypass        = truthy(var.get("port_bypass", "false"));
   opts.derived_clock      = derived_clock;
   opts.memory_fold        = *memory_fold;
   opts.memory_max_bits    = memory_max_bits;
@@ -1398,6 +1404,7 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
                                                           opts.memory_max_bits,
                                                           livehd::liberty::dff_selection_descriptor(dff_sel, opts.dff_cell)
                                                               + (opts.drop_init ? "+drop_init" : "")
+                                                              + (opts.port_bypass ? "+port_bypass" : "")
                                                               + (opts.derived_clock ? "+derived_clock" : ""));
   if (!cache_dir.empty()) {
     std::error_code ec;
@@ -1414,7 +1421,8 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
     // an unknown `dff_cell` name) falls back to the raw option so the two
     // failure shapes stay distinct keys too.
     const std::string dff_desc = livehd::liberty::dff_selection_descriptor(dff_sel, opts.dff_cell)
-                                 + (opts.drop_init ? "+drop_init" : "") + (opts.derived_clock ? "+derived_clock" : "");
+                                 + (opts.drop_init ? "+drop_init" : "") + (opts.port_bypass ? "+port_bypass" : "")
+                                 + (opts.derived_clock ? "+derived_clock" : "");
     if (!opts.io_feedback) {
       std::error_code made;  // the registry loads what is there: the directories must exist first, as the cache makes them
       std::filesystem::create_directories(cache_dir, made);

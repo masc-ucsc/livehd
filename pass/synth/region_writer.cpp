@@ -1920,6 +1920,18 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
             blast.control_signals.size())
         .emit();
   }
+  // Registers::port_bypass: the input net of every identity buffer that was
+  // kept (one a cell still reads), so a port can step back over it.
+  std::vector<uint32_t> buffer_input;
+  if (registers.port_bypass) {
+    buffer_input.assign(signal_slots, Cell_netlist::kNone);
+    for (const auto& cell : mapped.cells) {
+      if (cell.fanins.size() == 1 && cell.fanins.front() != Cell_netlist::kNone && lib.is_identity(cell.type)
+          && buffer_aliases[cell.output] == Cell_netlist::kNone) {
+        buffer_input[cell.output] = cell.fanins.front();
+      }
+    }
+  }
   for (int i = 0; i < static_cast<int>(mapped.outputs.size()); ++i) {
     if (has_dummy_po && i >= static_cast<int>(po_order.size() + bbox_po.size())) {
       continue;  // the all-native sentinel PO: no read-back target, and its net
@@ -1928,7 +1940,22 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
     if (i >= static_cast<int>(po_order.size() + bbox_po.size())) {
       continue;  // an internal async-reset PO: wired to its cell pins in pass 2b
     }
-    auto drv = get_net_driver(mapped.outputs[static_cast<size_t>(i)]);
+    auto po_net = mapped.outputs[static_cast<size_t>(i)];
+    // Region ports and the inputs of the cells rebuilt natively alike: both are beyond what the mapper timed.
+    if (registers.port_bypass) {
+      // The port's own decoupling buffer is already an alias (net_alias); the kept buffers behind it are
+      // stepped over here. Either kind may follow the other along one chain.
+      while (po_net != Cell_netlist::kNone) {
+        if (net_alias[po_net] >= 0) {
+          po_net = static_cast<uint32_t>(net_alias[po_net]);
+        } else if (buffer_input[po_net] != Cell_netlist::kNone) {
+          po_net = buffer_input[po_net];
+        } else {
+          break;
+        }
+      }
+    }
+    auto drv = get_net_driver(po_net);
     if (drv.is_invalid()) {
       livehd::diag::warn("pass.abc", "abc-readback", "internal")
           .msg("pass.abc: region '{}': PO {} ('{}') fanin net has no read-back driver — emitted const0",

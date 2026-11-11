@@ -357,6 +357,44 @@ lec_proven --impl lg:"$FT/net" --ref lg:"$FT/re" --lib lg:"$FT/models" --top abc
     --workdir "$FT/w7"
 echo "PASS: feed-through wires map to no buffer cell (identity-buffer bypass) and the netlist stays LEC-equivalent"
 
+# ---------------------------------------------------------------------------
+# pass.abc.port_bypass: a region output reads the ROOT of the buffer chain
+# that leads to it. d[5] drives 64 gates and the `thru` output; with a fanout
+# cap of 4 ABC buffers that net as a chain and leaves the output behind
+# several buffers -- it has no way to know whether the reader beyond the port
+# is the critical one. With the option the output is the input bit itself; the
+# chain keeps feeding the gates (the cell count does not change), and the
+# netlist stays equivalent.
+# ---------------------------------------------------------------------------
+PB="$W/port_bypass"
+mkdir -p "$PB"
+cat >"$PB/abc_port_bypass.v" <<'EOF'
+module abc_port_bypass(input [7:0] d, input [63:0] e, output [63:0] q, output thru, output nthru);
+  assign q = e & {64{d[5]}};
+  assign thru = d[5];
+  assign nthru = ~d[5];
+endmodule
+EOF
+run compile "$PB/abc_port_bypass.v" --top abc_port_bypass --emit-dir lg:"$PB/lg" --workdir "$PB/w1"
+for pb in false true; do
+  "$LHD" pass abc --top abc_port_bypass lg:"$PB/lg" --emit-dir verilog:"$PB/netv_$pb" --set synth.liberty="$TIMING_LIB" \
+      --set pass.abc.delay=100 --set pass.abc.max_fanout=4 --set pass.abc.port_bypass=$pb \
+      -q --result-json "$PB/r_$pb.json" --workdir "$PB/w_$pb" \
+    || fail "pass abc port_bypass=$pb -> $(cat "$PB/r_$pb.json" 2>/dev/null)"
+done
+grep -hq "assign thru = g[0-9]*_BUFx1" "$PB/netv_false/"*.v \
+  || fail "the fixture no longer leaves the output behind a buffer (nothing to bypass): $(grep -h 'assign thru' "$PB/netv_false/"*.v)"
+grep -h "assign thru = " "$PB/netv_true/"*.v | grep -q "BUFx1" \
+  && fail "port_bypass left the output behind a buffer: $(grep -h 'assign thru' "$PB/netv_true/"*.v)"
+pb_gates_off=$(grep -o '"gates":[0-9]*' "$PB/r_false.json" | head -1)
+pb_gates_on=$(grep -o '"gates":[0-9]*' "$PB/r_true.json" | head -1)
+[ "$pb_gates_off" = "$pb_gates_on" ] || fail "port_bypass changed the cell count ($pb_gates_off -> $pb_gates_on): the chain still feeds the gates"
+run pass liberty gensim "$TIMING_LIB" --emit-dir lg:"$PB/models" --workdir "$PB/w_models"
+run compile lg:"$PB/models" --emit-dir verilog:"$PB/modelsv" --workdir "$PB/w_modelsv"
+cat "$PB/netv_true/"*.v "$PB/modelsv/"*.v > "$PB/impl.v"
+lec_proven --impl verilog:"$PB/impl.v" --ref verilog:"$PB/abc_port_bypass.v" --top abc_port_bypass --workdir "$PB/w_lec"
+echo "PASS: pass.abc.port_bypass moves a region output to the root of its buffer chain (same cells, LEC-equivalent)"
+
 # Reduce-OR survives lowering in loop predicates and bit selections. Test
 # both a wide unsigned input and a signed input, including its sign bit.
 RO="$W/reduce_or"

@@ -56,6 +56,13 @@ public:
     // Resetless power-on init values are dropped (plain DFF cell) instead of kept
     // on a native flop; pass.abc.drop_init.
     bool                                    drop_init = false;
+    // A region output reads the signal at the ROOT of the identity-buffer chain
+    // that leads to it. The mapper sees every output as one unit load with one
+    // required time, so a high-fanout net is buffered as a chain with the port
+    // wherever it fell -- seven buffers deep on vortex, for the reader the next
+    // region's critical path starts at. The chain's other readers keep their
+    // buffers; what is beyond the port is placement's to buffer.
+    bool                                    port_bypass = false;
     // Asynchronous-reset buffer-tree fan-out cap: clear/preset pins per buffer (0: no tree;
     // Driver_options::reset_fanout).
     uint32_t                                reset_fanout = 0;

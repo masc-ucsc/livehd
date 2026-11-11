@@ -116,6 +116,9 @@ struct Driver_options {
   // rebuilding it as a native flop that physical synthesis cannot place. The
   // default keeps the value (pass.abc.drop_init=false).
   bool                                  drop_init         = false;
+  // A region output reads the root of the buffer chain that leads to it
+  // (pass.abc.port_bypass): see Region_writer::Registers::port_bypass.
+  bool                                  port_bypass       = false;
   // Map a register clocked by region-internal logic that is not a recognized
   // clock gate (a derived/gated clock) to a plain DFF cell whose clock pin is
   // driven by the mapped logic, instead of keeping a native flop that physical

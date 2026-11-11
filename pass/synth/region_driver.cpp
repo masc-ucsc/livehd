@@ -1678,6 +1678,7 @@ void Region_driver::map_region(const livehd::partition::Region_body& rb) {
                                      design_state_bits_ >= opts_.input_clock_min,
                                      &derived_ports_};
   registers.drop_init    = opts_.drop_init;
+  registers.port_bypass  = opts_.port_bypass;
   registers.reset_fanout = opts_.reset_fanout;
   writer_.set_outlib(outlib_);
   writer_.set_flat(flat_);
