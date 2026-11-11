@@ -12925,6 +12925,11 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     fout->append("  ++__gen;  // loaded state: every gated evaluation must recompute\n");
     if (color_runtime_root) {
       fout->append("  __color_runtime.reset();  // discard serial dirty/input caches after checkpoint restore\n");
+      // A testbench may read an output before its first resumed step. Outputs
+      // are derived, not checkpointed: publish restored state without an edge.
+      fout->append("  __color_reset_settle();\n");
+    } else if (compact_kernel_) {
+      fout->append("  __compact_publish();\n");
     }
     fout->append("}\n");
 
