@@ -228,15 +228,14 @@ Checkpoint_demand discover_checkpoint_demand(const Checkpoint_input& input, cons
       if (node.pin.empty() || node.pin == net.owner) {
         continue;
       }
-      const auto colon = node.pin.rfind(':');
-      if (colon == std::string::npos || !masters.contains(node.pin.substr(0, colon))) {
+      if (node.pin.bare() || !masters.contains(node.pin.instance())) {
         supported = false;
         break;
       }
       Sink sink;
       sink.name = node.pin;
-      sink.cell = masters.at(node.pin.substr(0, colon));
-      sink.pin  = node.pin.substr(colon + 1);
+      sink.cell = masters.at(node.pin.instance());
+      sink.pin  = node.pin.pin();
       context.sinks.push_back(std::move(sink));
     }
     if (supported && !context.sinks.empty()) {

@@ -509,7 +509,7 @@ std::string                     uroute_cache_identity(const Options&);
 struct Macro_gp_timing {
   Timing_feedback                                  timing;
   std::shared_ptr<physical::Parasitics>            parasitics;
-  std::map<std::string, std::pair<double, double>> pin_locations;
+  physical::Pin_locations                          pin_locations;
 };
 struct Result {
   std::shared_ptr<const Preroute_design>           preroute_design;
@@ -521,7 +521,7 @@ struct Result {
   // Own the last FP topology trial; declared before graph so it outlives it.
   std::map<std::string, std::string>               fp_buffer_origins;
   std::shared_ptr<hhds::GraphLibrary>              fp_library;
-  std::map<std::string, std::pair<double, double>> pin_locations;
+  physical::Pin_locations                          pin_locations;
   std::map<std::string, double>                    net_weights;
   std::shared_ptr<hhds::Graph>                     graph;
   std::shared_ptr<physical::Parasitics>            parasitics;

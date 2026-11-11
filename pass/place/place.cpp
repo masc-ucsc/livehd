@@ -3972,8 +3972,8 @@ ph::Rc_net steiner_rc(std::string driver, const std::vector<std::pair<std::strin
 }
 namespace {
 std::shared_ptr<ph::Parasitics> estimate_rc(const Geometry_view& geometry, const ph::Technology& tech, const Options& options,
-                                            std::map<std::string, std::pair<double, double>>* pin_locations,
-                                            Rc_cache* cache = nullptr, Rc_reuse_stats* reuse = nullptr, bool provenance = true) {
+                                            ph::Pin_locations* pin_locations, Rc_cache* cache = nullptr,
+                                            Rc_reuse_stats* reuse = nullptr, bool provenance = true) {
   const auto& v             = geometry.view;
   const auto& design        = geometry.design;
   auto        result        = std::make_shared<ph::Parasitics>();
@@ -10187,7 +10187,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         Rc_reuse_stats reuse;
         checkpoint.parasitics = estimate_rc(view, tech, rc_options, &checkpoint.pin_locations, rc_cache.get(), &reuse);
         if (options.gp_observer_rc_verify) {
-          std::map<std::string, std::pair<double, double>> fresh_locations;
+          ph::Pin_locations                                fresh_locations;
           const auto                                       fresh = estimate_rc(view, tech, rc_options, &fresh_locations);
           if (fresh->nets != checkpoint.parasitics->nets || fresh->identity != checkpoint.parasitics->identity
               || fresh->approximate != checkpoint.parasitics->approximate || fresh_locations != checkpoint.pin_locations) {
@@ -10315,7 +10315,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
           make_arrays(reference, tech);
           auto reference_options = options;
           reference_options.full = false;
-          std::map<std::string, std::pair<double, double>> locations;
+          ph::Pin_locations locations;
           const auto   rc     = estimate_rc(reference, tech, reference_options, &locations, nullptr, nullptr, false);
           const double period = session->set_legal_reference(*rc, true);
           write_legal_acceptance({.reference_period_ps = period, .reason = "final output not evaluated"}, false, true);
@@ -10326,7 +10326,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       }
       if (config.startup_coefficient > 0) {
         const auto                                       begin = std::chrono::steady_clock::now();
-        std::map<std::string, std::pair<double, double>> locations;
+        ph::Pin_locations                                locations;
         auto                                             rc_options = options;
         rc_options.full                                             = false;
         const auto    rc      = estimate_rc(v, tech, rc_options, &locations, nullptr, nullptr, false);
@@ -10400,7 +10400,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         view.design     = physical;
         auto rc_options = options;
         rc_options.full = false;
-        std::map<std::string, std::pair<double, double>> locations;
+        ph::Pin_locations locations;
         const auto rc = estimate_rc(view, tech, rc_options, &locations, rc_cache.get(), nullptr, false);
         if (options.native_gp_buffering) {
           for (size_t i = 0; i < view.cells.size(); ++i) {
@@ -10664,7 +10664,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
           view.design        = physical;
           auto rc_options    = options;
           rc_options.full    = false;
-          std::map<std::string, std::pair<double, double>> locations;
+          ph::Pin_locations                                locations;
           const auto                                       rc    = estimate_rc(view, tech, rc_options, &locations);
           const auto                                       fresh = session->legalization_weights(*rc);
           timeclosure::Legalization_binding                binding;
@@ -10756,7 +10756,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
           view.design        = physical;
           auto rc_options    = options;
           rc_options.full    = false;
-          std::map<std::string, std::pair<double, double>> locations;
+          ph::Pin_locations                                locations;
           const auto                                       rc       = estimate_rc(view, tech, rc_options, &locations);
           const bool                                       legal    = dp::is_legal(physical);
           const auto                                       observed = session->check_legal_output(*rc, legal);

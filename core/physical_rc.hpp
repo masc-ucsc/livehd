@@ -1,14 +1,21 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 #include <cstdint>
+#include <map>
 #include <set>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
+#include "interned_name.hpp"
+
 namespace livehd::physical {
+// Where each pin is, keyed by its label ("instance:pin", or the bare terminal name), in label-text order.
+using Pin_locations = std::map<Pin_label, std::pair<double, double>>;
+// A pin of the net (its label), or a junction of the wire (empty).
 struct Rc_node {
-  std::string pin;
+  Pin_label   pin;
   double      capacitance_ff                   = 0;
   bool        operator==(const Rc_node&) const = default;
 };
@@ -18,7 +25,7 @@ struct Rc_edge {
   bool     operator==(const Rc_edge&) const = default;
 };
 struct Rc_net {
-  std::string          driver;
+  Pin_label            driver;
   std::vector<Rc_node> nodes;
   std::vector<Rc_edge> edges;
   double               wire_length_um                  = 0;  // actual estimated Steiner tree, independent of RC units

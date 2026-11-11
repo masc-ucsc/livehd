@@ -61,7 +61,7 @@ public:
 struct Star_context {
   Star_bank                                        bank;
   Rc_policy                                        policy;
-  std::map<std::string, std::pair<double, double>> locations;
+  physical::Pin_locations                          locations;
   bool                                             refresh = false;
   Star_stats                                       stats;
   Star_options                                     options;

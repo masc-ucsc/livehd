@@ -104,7 +104,7 @@ TEST_F(GpRejection, SavedStatesReproduceTheRejectingComparisonAndExactRcFrame) {
   rc.nets     = {
       {"driver:Y", {{"driver:Y", .12345678901234568}, {"end:A", .9876543210987654}}, {{0, 1, 123.45678901234567}}}
   };
-  const std::map<std::string, std::pair<double, double>> locations{
+  const livehd::physical::Pin_locations locations{
       {"driver:Y", {.12345678901234568, 4.}},
       {   "end:A",  {9., .9876543210987654}}
   };
@@ -130,8 +130,8 @@ TEST_F(GpRejection, SavedStatesReproduceTheRejectingComparisonAndExactRcFrame) {
   EXPECT_EQ(ph::deserialize_parasitics_exact(text(prefix + ".rc.json")).nets, rc.nets);
   const auto pins = parse(prefix + ".pins.json");
   for (const auto& [name, xy] : locations) {
-    EXPECT_EQ(pins[name.c_str()][0].GetDouble(), xy.first);
-    EXPECT_EQ(pins[name.c_str()][1].GetDouble(), xy.second);
+    EXPECT_EQ(pins[name.str().c_str()][0].GetDouble(), xy.first);
+    EXPECT_EQ(pins[name.str().c_str()][1].GetDouble(), xy.second);
   }
 }
 TEST_F(GpRejection, UnavailableRankAndUndeclaredLoadToleranceRemainNull) {

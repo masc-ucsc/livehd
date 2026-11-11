@@ -116,14 +116,14 @@ static void write_parasitics(Buffer& buffer, const Parasitics& rc) {
   for (const auto& net : rc.nets) {
     w.StartObject();
     w.Key("driver");
-    w.String(net.driver.c_str());
+    w.String(net.driver.str().c_str());
     w.Key("wire_length_um");
     w.Double(net.wire_length_um);
     w.Key("nodes");
     w.StartArray();
     for (const auto& n : net.nodes) {
       w.StartArray();
-      w.String(n.pin.c_str());
+      w.String(n.pin.str().c_str());
       w.Double(n.capacitance_ff);
       w.EndArray();
     }

@@ -92,8 +92,7 @@ Gp_legalization_update Gp_timing_session::legalization_weights(const physical::P
   Pin_weight_bank fresh(config);
   return {fresh.update(timing), *timing.achievable_period_ps};
 }
-Gp_timing_update Gp_timing_session::update(const physical::Parasitics&                             rc,
-                                           const std::map<std::string, std::pair<double, double>>& locations, int iteration,
+Gp_timing_update Gp_timing_session::update(const physical::Parasitics& rc, const physical::Pin_locations& locations, int iteration,
                                            double overflow, const Gp_timing_rejection_observer& rejected,
                                            const Gp_timing_prepare& prepare) {
   if (iteration < 0 || iteration <= last_iteration || !std::isfinite(overflow) || overflow < 0) {

@@ -66,7 +66,7 @@ void observation(Writer& json, const late::Result& value) {
 }
 }  // namespace
 void write_gp_timing_rejection(const std::string& prefix, const Gp_timing_rejection& rejected, const physical::Parasitics& rc,
-                               const std::map<std::string, std::pair<double, double>>& locations, int iteration, double overflow) {
+                               const physical::Pin_locations& locations, int iteration, double overflow) {
   if (iteration < 0 || !std::isfinite(overflow) || overflow < 0) {
     throw std::invalid_argument("invalid rejected native timing checkpoint metadata");
   }
@@ -81,7 +81,7 @@ void write_gp_timing_rejection(const std::string& prefix, const Gp_timing_reject
   Writer                    pin_json(pin_stream);
   pin_json.StartObject();
   for (const auto& [name, xy] : locations) {
-    pin_json.Key(name.c_str());
+    pin_json.Key(name.str().c_str());
     pin_json.StartArray();
     pin_json.Double(xy.first);
     pin_json.Double(xy.second);

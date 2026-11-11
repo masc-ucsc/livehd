@@ -23,7 +23,7 @@ std::map<std::string, double> data_timing_weights(const physical::Parasitics& ne
   if (!std::isfinite(min_weight) || min_weight <= 0 || min_weight > 1) {
     throw std::invalid_argument("minimum timing weight must be finite and in (0, 1]");
   }
-  std::vector<std::pair<double, std::string_view>> ranked;
+  std::vector<std::pair<double, Pin_label>> ranked;
   ranked.reserve(nets.nets.size());
   const auto*       indexed = timing.ranking && timing.ranking->parasitics.get() == &nets ? &*timing.ranking : nullptr;
   // Borrow feedback: filtering controls must not duplicate all detailed pin

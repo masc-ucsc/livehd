@@ -30,7 +30,7 @@ void Pass_opentimer::apply_physical_timing_cuts(const std::set<std::string>& cut
   std::unordered_set<const ot::Pin*> roots;
   for (const auto& net : physical_rc_->nets) {
     if (cuts.contains(net.driver)) {
-      roots.insert(&physical_timing_pin(net.driver));
+      roots.insert(&physical_timing_pin(net.driver.str()));
     }
   }
   std::vector<std::pair<size_t, uint8_t>> masks;
@@ -120,7 +120,7 @@ void Pass_opentimer::apply_physical_rc(const std::shared_ptr<hhds::Graph>& graph
   }
   std::map<std::string, std::string> ports;
   std::map<std::string, std::string> instances = physical_instances_;
-  std::vector<std::pair<std::string_view, const ot::Pin*>> bindings;
+  std::vector<std::pair<livehd::Pin_label, const ot::Pin*>> bindings;
   size_t                                                   binding_count = physical_rc_->nets.size();
   for (const auto& net : physical_rc_->nets) {
     binding_count += std::count_if(net.nodes.begin(), net.nodes.end(), [](const auto& node) { return !node.pin.empty(); });

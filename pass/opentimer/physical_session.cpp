@@ -359,12 +359,12 @@ struct Physical_session::Impl : Pass_opentimer {
         continue;
       }
       ot::BoundRc mapped;
-      mapped.driver = physical_timing_pin(net.driver).idx();
+      mapped.driver = physical_timing_pin(net.driver.str()).idx();
       mapped.nodes.reserve(net.nodes.size());
       mapped.edges.reserve(net.edges.size());
       for (size_t i = 0; i < net.nodes.size(); ++i) {
         const auto& node = net.nodes[i];
-        mapped.nodes.push_back({node.pin.empty() ? ot::BoundRc::no_pin : physical_timing_pin(node.pin).idx(),
+        mapped.nodes.push_back({node.pin.empty() ? ot::BoundRc::no_pin : physical_timing_pin(node.pin.str()).idx(),
                                 static_cast<float>(node.capacitance_ff)});
       }
       for (const auto& edge : net.edges) {
@@ -969,7 +969,7 @@ struct Physical_session::Impl : Pass_opentimer {
         layout->net_offsets.push_back(layout->net_pins.size());
         for (const auto& node : net.nodes) {
           if (!node.pin.empty()) {
-            const auto index = layout->find(node.pin);
+            const auto index = layout->find(node.pin.str());
             if (index == layout->labels.size()) {
               throw std::runtime_error("physical ranking pin has no timing identity: " + node.pin);
             }

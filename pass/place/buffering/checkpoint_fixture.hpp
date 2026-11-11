@@ -37,7 +37,7 @@ struct Fixture : livehd::placement::test_fixture::Timing_circuit {
   b::Checkpoint_settings                           settings;
   dp::Design                                       physical;
   livehd::physical::Parasitics                     rc;
-  std::map<std::string, std::pair<double, double>> locations;
+  physical::Pin_locations                          locations;
   late::Result                                     timing;
   std::string                                      liberty = fixture_liberty();
   tc::Pin_weights                                  weights;
@@ -112,7 +112,7 @@ struct Fixture : livehd::placement::test_fixture::Timing_circuit {
         {"v", int64_t(d.node_x[1]), int64_t(d.node_y[1]), 0, "S", 1000, 1000}
     };
   }
-  b::Checkpoint_problem problem(const std::map<std::string, std::pair<double, double>>& pins) const {
+  b::Checkpoint_problem problem(const physical::Pin_locations& pins) const {
     b::Checkpoint_problem result;
     result.sites = b::build_legal_sites(
         {

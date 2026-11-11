@@ -2,6 +2,7 @@
 #pragma once
 #include <algorithm>
 #include <cmath>
+#include <concepts>
 #include <limits>
 #include <map>
 #include <memory>
@@ -10,6 +11,8 @@
 #include <string>
 #include <string_view>
 #include <vector>
+
+#include "interned_name.hpp"
 
 namespace livehd::physical {
 struct Parasitics;
@@ -32,6 +35,13 @@ struct Feedback {
         const auto it = std::lower_bound(labels.begin(), labels.end(), name);
         return it != labels.end() && *it == name ? size_t(it - labels.begin()) : labels.size();
       }
+      // A pin label compares with the stored text piece by piece; no text is built for the search.
+      template <std::same_as<Pin_label> L>
+      size_t find(const L& name) const {
+        const auto it
+            = std::lower_bound(labels.begin(), labels.end(), name, [](const std::string& a, const L& b) { return a < b; });
+        return it != labels.end() && name == *it ? size_t(it - labels.begin()) : labels.size();
+      }
     };
     std::shared_ptr<const Layout>               layout;
     // Own the exact immutable RC snapshot: a reordered/different netlist must
@@ -39,6 +49,11 @@ struct Feedback {
     std::shared_ptr<const physical::Parasitics> parasitics;
     std::vector<Pin>                            pins;
     const Pin*                                  find(std::string_view name) const {
+      const auto index = layout->find(name);
+      return index < pins.size() ? &pins[index] : nullptr;
+    }
+    template <std::same_as<Pin_label> L>
+    const Pin* find(const L& name) const {
       const auto index = layout->find(name);
       return index < pins.size() ? &pins[index] : nullptr;
     }
@@ -55,6 +70,11 @@ struct Feedback {
     size_t                   find(std::string_view name) const {
       const auto it = std::lower_bound(labels.begin(), labels.end(), name);
       return it != labels.end() && *it == name ? size_t(it - labels.begin()) : labels.size();
+    }
+    template <std::same_as<Pin_label> L>
+    size_t find(const L& name) const {
+      const auto it = std::lower_bound(labels.begin(), labels.end(), name, [](const std::string& a, const L& b) { return a < b; });
+      return it != labels.end() && name == *it ? size_t(it - labels.begin()) : labels.size();
     }
   };
   struct Dense_pins {
@@ -95,6 +115,15 @@ struct Feedback {
   size_t     pin_count() const { return dense ? dense->values.size() - dense->excluded_count : pins.size(); }
   bool       has_pins() const { return pin_count() != 0; }
   const Pin* find_label(std::string_view name) const {
+    if (dense) {
+      const auto i = dense->index->find(name);
+      return dense->contains(i) ? &dense->values[i] : nullptr;
+    }
+    const auto it = pins.find(name);
+    return it == pins.end() ? nullptr : &it->second;
+  }
+  template <std::same_as<Pin_label> L>
+  const Pin* find_label(const L& name) const {
     if (dense) {
       const auto i = dense->index->find(name);
       return dense->contains(i) ? &dense->values[i] : nullptr;

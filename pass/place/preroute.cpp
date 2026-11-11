@@ -358,11 +358,10 @@ static Preroute_result preroute_impl(const physical::Technology& tech, const phy
       if (expired()) {
         break;
       }
-      const auto separator = pin.pin.rfind(':');
-      if (separator == std::string::npos || excluded_timing_pins.contains(pin.pin)) {
+      if (pin.pin.bare() || excluded_timing_pins.contains(pin.pin)) {
         continue;
       }
-      const auto instance = pin.pin.substr(0, separator);
+      const std::string& instance = pin.pin.instance();
       if (cells.contains(instance)) {
         cell_timing_pins[instance].insert(pin.pin);
       }

@@ -111,8 +111,8 @@ public:
   // calibration, GP guard, response latch or spent iteration is updated.
   Gp_legalization_update legalization_weights(const physical::Parasitics&) const;
   Startup_weights        startup_weights(const physical::Parasitics&) const;
-  Gp_timing_update       update(const physical::Parasitics&, const std::map<std::string, std::pair<double, double>>& locations,
-                                int iteration, double density_overflow, const Gp_timing_rejection_observer& rejected = {},
+  Gp_timing_update       update(const physical::Parasitics&, const physical::Pin_locations& locations, int iteration,
+                                double density_overflow, const Gp_timing_rejection_observer& rejected = {},
                                 const Gp_timing_prepare& prepare = {});
 };
 }  // namespace livehd::placement::timeclosure

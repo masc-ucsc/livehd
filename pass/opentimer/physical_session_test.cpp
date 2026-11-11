@@ -591,7 +591,7 @@ TEST_F(PhysicalSession, HierarchicalNetNamesSurviveTopologyReplacementAndWhatifR
     for (auto& cell : circuit->rc->cells) {
       cell.name = prefix + cell.name;
     }
-    const auto rename = [&](std::string& pin) {
+    const auto rename = [&](auto& pin) {
       if (pin.find(':') != std::string::npos) {
         pin = prefix + pin;
       }
@@ -932,7 +932,7 @@ TEST_F(PhysicalSession, EvaluatedConnectionsSurviveRecycledPinsAndWhatifRollback
         cell.name = name;
       }
     }
-    const auto rename = [&](std::string& pin) {
+    const auto rename = [&](auto& pin) {
       if (pin.starts_with("b:")) {
         pin = name + pin.substr(1);
       }

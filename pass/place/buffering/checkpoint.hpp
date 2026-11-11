@@ -13,7 +13,7 @@ struct Checkpoint_input {
   const late::Result&                                     timing;
   const timeclosure::Pin_weights&                         weights;
   const physical::Parasitics&                             parasitics;
-  const std::map<std::string, std::pair<double, double>>& locations;
+  const physical::Pin_locations&                          locations;
   int                                                     iteration = 0;
   const Checkpoint_state*                                 previous  = nullptr;
 };

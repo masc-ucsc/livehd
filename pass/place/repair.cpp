@@ -269,7 +269,7 @@ std::string physical_label(Pin p) {
   }
   return {};
 }
-using Rc_index = std::unordered_map<std::string_view, const physical::Rc_net*>;
+using Rc_index = std::unordered_map<Pin_label, const physical::Rc_net*>;
 bool needs_repair(Node n, const Inventory& cells, const Timing_feedback& timing, const Result& state, double limit_dbu,
                   const Rc_index& nets) {
   const auto io = n.get_subnode_io();

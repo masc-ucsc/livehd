@@ -43,6 +43,11 @@ const std::string& Name::empty_text() noexcept {
   return *empty;
 }
 
+Name Pin_label::bare_marker() noexcept {
+  static const auto* marker = new std::string();  // its address is the mark; it is in no table
+  return Name(marker);
+}
+
 const std::string* Name::intern(std::string_view text) {
   if (text.empty()) {
     return &empty_text();

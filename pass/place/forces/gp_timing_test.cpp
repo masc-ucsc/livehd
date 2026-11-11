@@ -21,11 +21,11 @@ rise_transition(scalar){values("1");}fall_transition(scalar){values("1");}}}}})"
 struct Circuit : livehd::placement::test_fixture::Timing_circuit {
   tc::Gp_timing_settings                           settings;
   livehd::physical::Parasitics                     rc;
-  std::map<std::string, std::pair<double, double>> locations{
-      {  "a",    {0, 0}},
-      {"u:A", {1000, 0}},
-      {"u:Y", {2000, 0}},
-      {  "z", {3000, 0}}
+  livehd::physical::Pin_locations                  locations{
+                       {  "a",    {0, 0}},
+                       {"u:A", {1000, 0}},
+                       {"u:Y", {2000, 0}},
+                       {  "z", {3000, 0}}
   };
   Circuit(bool tied = false) : Timing_circuit(library_text(tied), "gp_session", {"a", "clk"}, {"z"}) {
     settings.models = library;
