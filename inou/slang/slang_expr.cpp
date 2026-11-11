@@ -2162,9 +2162,13 @@ std::string Slang_context::inline_call(const slang::ast::CallExpression& expr, c
   func_ret_sym_              = &rv;
   func_returned_flag_        = fresh_local("function_returned");
   builder_.create_assign_stmts(func_returned_flag_, "0");
+  // The body's own blocking writes set the assignment style; the caller may be in the middle of a
+  // nonblocking write whose index or value holds this call (`d[f(i)] <= 1`).
+  const bool saved_body_nb = current_assign_nonblocking_;
   ++inline_depth_;
   lower_statement(sub.getBody());
   --inline_depth_;
+  current_assign_nonblocking_ = saved_body_nb;
   in_function_call_   = saved_in;
   func_ret_sym_       = saved_ret;
   func_returned_flag_ = std::move(saved_returned);

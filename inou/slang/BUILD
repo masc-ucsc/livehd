@@ -403,6 +403,14 @@ sh_test(
 )
 
 sh_test(
+    name = "slang_function_in_nonblocking_index",
+    size = "small",
+    timeout = "short",
+    srcs = ["tests/function_in_nonblocking_index.sh"],
+    data = ["//lhd"],
+)
+
+sh_test(
     name = "slang_reachable_modules",
     size = "small",
     timeout = "short",
