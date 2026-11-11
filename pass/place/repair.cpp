@@ -2606,10 +2606,14 @@ Repair_result repair_buffers(Result initial, const Options& requested, const Eva
   const auto&             tech  = options.technology().lef;
   const auto              cells = inventory(options, tech);
   auto                    score = prior_timing && !prior_timing->ranking_only ? std::move(*prior_timing) : evaluate(result.placed);
+  // With pass.pcrs a reset is data behind its tree: repair splits the tree's long nets and resizes its cells like
+  // any other, on real RC and slack (pcrs sizes for load, and knows neither the wire resistance nor the slack).
+  // The next pcrs rebuild of a network strips whatever was added here. Without pcrs the reset stays protected.
+  const bool              protect_reset   = !pcrs_active(options);
   const auto              protected_names = protected_buffers(*result.placed.graph,
                                                               cells,
-                                                              scan_special_pins(options.technology().cells, true),
-                                                              true,
+                                                              scan_special_pins(options.technology().cells, protect_reset),
+                                                              protect_reset,
                                                               options.control_ports);
   std::set<std::string>   tried;
   rapidjson::StringBuffer trace;

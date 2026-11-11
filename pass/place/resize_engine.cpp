@@ -81,7 +81,7 @@ std::shared_ptr<Library> build_library(const Options& options) {
   lib->snapshot = options.technology_cache;
   lib->tech     = options.technology().lef;
   lib->cells    = inventory(options, lib->tech);
-  lib->special  = scan_special_pins(options.technology().cells, !options.repair_reset);
+  lib->special  = scan_special_pins(options.technology().cells, !options.repair_reset && !pcrs_active(options));
   for (auto& d : options.technology().cells.drives) {
     lib->drives.emplace(std::pair{d.name, d.output}, d);
   }
@@ -163,7 +163,7 @@ std::shared_ptr<const Library> library(const Options& options) {
   }
   key += std::format("|{}|{}|{}|{}|{}",
                      options.resize_vt_swap,
-                     options.repair_reset,
+                     options.repair_reset || pcrs_active(options),
                      options.resistance_ohm_um,
                      options.capacitance_ff_um,
                      options.rc_pessimism);
@@ -349,7 +349,7 @@ private:
   // ---- model -------------------------------------------------------------
   void build_model() {
     auto&      graph           = *state_.graph;
-    const auto protected_names = protected_buffers(graph, lib_.cells, lib_.special, true, options_.control_ports);
+    const auto protected_names = protected_buffers(graph, lib_.cells, lib_.special, !pcrs_active(options_), options_.control_ports);
     std::unordered_map<std::string, const physical::Component*> components;
     for (const auto& c : state_.floorplan.components) {
       components.emplace(c.name, &c);
