@@ -141,7 +141,9 @@ set_output_delay 0 -clock [get_clocks {sys}] -add_delay [get_ports {z}]
         assert (root/'legal_guard/out.def').exists() and not legal_guard['accepted_for_optimization']
         # An incompatible density regime must not invent a timing observation
         # or force history. A strict final gate then rejects missing response.
-        cfg.update(output=str(root/'deferred'), density=.01, native_timing_max_overflow=0,
+        # 0.03 is just above 1.15x what this frame holds (0.025); a lower target is raised for a fixed frame
+        # (place_single_frame: "too low for a fixed frame"), which would leave no overflow to defer on.
+        cfg.update(output=str(root/'deferred'), density=.03, native_timing_max_overflow=0,
                    native_timing_final_guard=False)
         config.write_text(json.dumps(cfg))
         deferred = subprocess.run([binary, config], capture_output=True, text=True)

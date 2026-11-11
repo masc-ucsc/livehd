@@ -214,7 +214,7 @@ EOF
     [ -n "$tgt" ] || return 1
     cond="$(awk -v t="$tgt" 'NR < t && /if[ \t]*\(/ { l = NR } END { print l }' "$1")"
     [ -n "$cond" ] || return 1
-    sed "${cond}s/\\b${arm}\\b/enl/g" "$1" > "$2"
+    perl -pe "s/\\b${arm}\\b/enl/g if \$. == ${cond}" "$1" > "$2"
     printf '%s' "$arm"
   }
   arm_net="$(l1_mutate "$W/norm.v" "$W/norm_late.v")" \

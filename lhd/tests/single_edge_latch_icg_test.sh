@@ -394,8 +394,8 @@ mutate() { # <replacement line> -> the design with the commit line replaced
       if (p > 0) { $0 = substr($0, 1, p - 1) new substr($0, p + length(old)) }
       print }' "$W/nnorm.v"
 }
-mutate "$(sed -E 's/\ben_1p\b/en/'    <<<"$CMT")" > "$W/nnorm_inner.v"
-mutate "$(sed -E 's/\bg\b/en_wb/'     <<<"$CMT")" > "$W/nnorm_outer.v"
+mutate "$(perl -pe 's/\ben_1p\b/en/'  <<<"$CMT")" > "$W/nnorm_inner.v"
+mutate "$(perl -pe 's/\bg\b/en_wb/'   <<<"$CMT")" > "$W/nnorm_outer.v"
 cmp -s "$W/nnorm.v" "$W/nnorm_inner.v" && fail "the inner-bypass mutation did not apply"
 cmp -s "$W/nnorm.v" "$W/nnorm_outer.v" && fail "the outer-bypass mutation did not apply"
 out="$(run_sim ninner "$W/nnorm_inner.v")"

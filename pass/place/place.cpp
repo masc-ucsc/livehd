@@ -5788,12 +5788,25 @@ bool gui_apply_edits(View& v, const ph::Technology& tech, const Options& options
       before.emplace(c.name, c.place);
     }
     for (auto& c : v.cells) {
-      c.place  = before.at(c.name);
+      // a cell the failed edit added (a buffer, a tie) has no earlier place; it keeps the one it has
+      if (const auto it = before.find(c.name); it != before.end()) {
+        c.place = it->second;
+      }
       c.locked = false;
     }
+    const auto json_text = [](std::string_view text) {  // a Verilog escaped identifier may hold a quote or a backslash
+      std::string out;
+      for (const char ch : text) {
+        if (ch == '"' || ch == '\\') {
+          out += '\\';
+        }
+        out += ch;
+      }
+      return out;
+    };
     std::string list = "{\"cmd\":\"unpin\",\"nodes\":[";
     for (size_t k = 0; k < forced.size(); ++k) {
-      list += std::format("{}\"{}\"", k ? "," : "", forced[k]);
+      list += std::format("{}\"{}\"", k ? "," : "", json_text(forced[k]));
     }
     session->submit(list + "]}");
     session->set_note(std::string("edit not applied: ") + error.what());

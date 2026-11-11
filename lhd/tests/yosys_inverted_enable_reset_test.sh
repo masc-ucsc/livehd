@@ -87,7 +87,7 @@ for reader in yosys-slang yosys-verilog; do
     --emit verilog:"$out" --workdir "$W/w_$reader" -q > "$W/$reader.log" 2>&1 \
     || { tail -5 "$W/$reader.log"; fail "$reader: compile failed"; }
   [ -s "$out" ] || fail "$reader: no verilog emitted"
-  sed 's/^module hold\b/module hold_lhd/' "$out" > "$W/lhd_$reader.v"
+  perl -pe 's/^module hold\b/module hold_lhd/' "$out" > "$W/lhd_$reader.v"
   grep -q "^module hold_lhd" "$W/lhd_$reader.v" || fail "$reader: could not rename the emitted module"
   iverilog -g2012 -o "$W/sim_$reader" "$W/tb.v" "$W/hold.sv" "$W/lhd_$reader.v" > "$W/ivl_$reader.log" 2>&1 \
     || { cat "$W/ivl_$reader.log"; fail "$reader: iverilog compile"; }

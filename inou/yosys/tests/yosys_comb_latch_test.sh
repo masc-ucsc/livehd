@@ -42,7 +42,7 @@ if [ -z "${LHD_EXTERNAL_SIM:-}" ]; then
 fi
 command -v iverilog >/dev/null 2>&1 && command -v vvp >/dev/null 2>&1 \
   || fail "LHD_EXTERNAL_SIM is set but iverilog/vvp is not on PATH"
-sed 's/^module comb_latch\b/module comb_latch_n/; s/^module comb_latch(/module comb_latch_n(/' "$W/net.v" >"$W/net_n.v"
+perl -pe 's/^module comb_latch\b/module comb_latch_n/; s/^module comb_latch\(/module comb_latch_n(/' "$W/net.v" >"$W/net_n.v"
 grep -q 'module comb_latch_n' "$W/net_n.v" || fail "could not rename the netlist module"
 cat >"$W/tb.v" <<'EOF'
 module tb;

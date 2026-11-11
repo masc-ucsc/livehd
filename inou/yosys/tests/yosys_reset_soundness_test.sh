@@ -92,7 +92,7 @@ V
 
 # Renamed twins: the same pairs without a conventional reset name.
 for base in comb_xor comb_add combu_xor combu_add seq_xor seq_add cells_xor negr_add; do
-  sed 's/\brst\b/foo/g' "$W/$base.v" >"$W/${base}_ren.v"
+  perl -pe 's/\brst\b/foo/g' "$W/$base.v" >"$W/${base}_ren.v"
 done
 
 LGCHECK_BUDGET="${LGCHECK_BUDGET:-120}"

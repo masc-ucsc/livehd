@@ -158,9 +158,9 @@ neg() {  # <name> <sed-program> <expect-substring>
 }
 echo "--- negative controls ---"
 neg "port 1 update made unconditional" \
-    's/^\(\s*\)if (rd_enable_1) begin$/\1if (1) begin/' "c3 port1 hold"
+    's/^\([[:space:]]*\)if (rd_enable_1) begin$/\1if (1) begin/' "c3 port1 hold"
 neg "port 1 gated by port 0's enable" \
-    's/^\(\s*\)if (rd_enable_1) begin$/\1if (rd_enable_0) begin/' "port1"
+    's/^\([[:space:]]*\)if (rd_enable_1) begin$/\1if (rd_enable_0) begin/' "port1"
 
 [ "$rc_all" -eq 0 ] || { echo "FAIL: mem_multiread_hold_test"; exit 1; }
 echo "PASS: mem_multiread_hold_test (7 cases + 2 negative controls, all EXECUTED)"

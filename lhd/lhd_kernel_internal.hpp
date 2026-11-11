@@ -404,7 +404,11 @@ public:
       phase_mem::reset_high_water();
       start_kb_ = phase_mem::status_kb("VmRSS:");
       peak_kb_  = start_kb_;
-      phase_mem::open_peaks().push_back(&peak_kb_);
+      // Only a phase whose memory can be read is tracked: stop() unregisters it only then, and a pointer
+      // left behind would dangle once this timer is destroyed (no /proc/self/status, e.g. macOS).
+      if (start_kb_ != 0) {
+        phase_mem::open_peaks().push_back(&peak_kb_);
+      }
     }
   }
   Phase_timer(const Phase_timer&)            = delete;
