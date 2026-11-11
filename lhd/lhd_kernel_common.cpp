@@ -1093,6 +1093,23 @@ void merge_mapper_sets(const Options& opts, std::string_view method, Eprp_var::E
       labels["memory"] = v == "flops" ? "true" : "false";
     }
   }
+  // synth.sram: memories are generated macros (pass/synth/sram_macro.hpp), so `auto` folds only a memory below
+  // the smallest macro or one no macro can realize. An explicit flops/macro still wins.
+  if (method == "pass.abc" && (!labels.contains("memory") || labels["memory"] == "auto")) {
+    bool        sram     = false;
+    std::string min_bits = "2048";
+    for (const auto& [k, v] : opts.sets) {
+      if (k == "synth.sram") {
+        sram = v == "true" || v == "1" || v == "on" || v == "yes";
+      } else if (k == "synth.sram.min_bits") {
+        min_bits = v;
+      }
+    }
+    if (sram) {
+      labels["memory"]          = "sram";
+      labels["memory_max_bits"] = min_bits;
+    }
+  }
   // The shared clock fraction applies when an SDC actually defines a clock.
   // Explicit mapper budgets win; an explicit fraction without a clock is an
   // error, while an untimed/default invocation remains supported.

@@ -2642,6 +2642,16 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      Synth_set_option::Kind::file,
      "comma-separated Liberty files of hard macros (blackbox modules with a MACRO in synth.lef), read by the timers "
      "after synth.liberty"},
+    {"sram",
+     "false",
+     Synth_set_option::Kind::boolean,
+     "true: a memory kept native (synth.memory=macro, or auto above pass.abc.memory_max_bits) becomes a generated SRAM "
+     "macro -- any port count, a Liberty and LEF view written under --workdir/synth and handed to the timers and the "
+     "placer -- instead of a cgen_memory RTL instance. Forwarding between ports, power-on contents, whole-array "
+     "update/reset and several write clocks keep the native instance"},
+    {"sram.um2_per_bit", "0.49", Synth_set_option::Kind::file, "generated SRAM macro area per stored bit, um2 (asap7 fakeram)"},
+    {"sram.access_ns", "0.218", Synth_set_option::Kind::file, "generated SRAM macro read delay (clock to data, or address to data for an asynchronous read), ns"},
+    {"sram.min_bits", "2048", Synth_set_option::Kind::integer, "with synth.sram, a memory with fewer bits than this is bit-blasted to flops (the smallest macro)"},
     {"liberty",
      "",
      Synth_set_option::Kind::file,

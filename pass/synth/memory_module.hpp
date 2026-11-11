@@ -17,7 +17,10 @@ namespace livehd::synth {
 //   Auto   (`auto`, the default) fold only what a macro would never be: storage
 //                    at or below memory_max_bits, or more ports than any SRAM
 //                    offers (kAutoFoldPortsAbove).
-enum class Memory_fold : uint8_t { Never = 0, Always = 1, Auto = 2 };
+//   Sram   (`sram`)  the synth.sram flow: fold only a memory under memory_max_bits (the smallest
+//                    macro) or one no generated macro can realize (sram_macro.hpp); every other
+//                    memory stays native whatever its port count, for macro_memories to convert.
+enum class Memory_fold : uint8_t { Never = 0, Always = 1, Auto = 2, Sram = 3 };
 
 // `auto` folds a memory with MORE than this many ports whatever its storage
 // size: no SRAM compiler or standard-cell library offers such a macro, so
@@ -32,6 +35,7 @@ inline constexpr uint64_t kAutoFoldPortsAbove = 3;
     case Memory_fold::Never: return "false";
     case Memory_fold::Always: return "true";
     case Memory_fold::Auto: return "auto";
+    case Memory_fold::Sram: return "sram";
   }
   return "auto";
 }
@@ -39,6 +43,9 @@ inline constexpr uint64_t kAutoFoldPortsAbove = 3;
 [[nodiscard]] constexpr std::optional<Memory_fold> parse_memory_fold(std::string_view v) {
   if (v == "auto") {
     return Memory_fold::Auto;
+  }
+  if (v == "sram") {
+    return Memory_fold::Sram;
   }
   if (v == "false" || v == "0" || v == "off" || v == "no") {
     return Memory_fold::Never;
@@ -77,4 +84,9 @@ std::vector<std::shared_ptr<hhds::Graph>> build_memory_modules(const std::vector
                                                                Memory_fold mode, uint64_t max_bits,
                                                                std::vector<Memory_row>* report = nullptr,
                                                                bool                     prune_reads = false);
+
+// Enclose one Memory node of `parent` in its native instance module (the `cgen_memory_*` shape an
+// inline-array memory gets from build_memory_modules): the node becomes a Sub of a new module in
+// parent's library, marked attrs::memory_module. Returns that module.
+std::shared_ptr<hhds::Graph> enclose_native_memory(hhds::Graph& parent, const hhds::Node_class& mem);
 }  // namespace livehd::synth

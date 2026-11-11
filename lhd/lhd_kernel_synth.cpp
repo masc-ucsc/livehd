@@ -90,6 +90,7 @@
 #include "pass/place/placement_technology.hpp"
 #include "pass/place/preroute_host.hpp"
 #include "pass/place/repair.hpp"
+#include "pass/synth/sram_macro.hpp"
 #include "pass/place/resize_engine.hpp"
 #include "physical_cache.hpp"
 #include "physical_salt.hpp"
@@ -2904,8 +2905,12 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
   std::string       domino_liberty_path;
   // hard macros (blackbox cells with a LEF MACRO): their Liberty files, read by the timers after synth.liberty
   const std::string macro_liberty = synth_set(opts, "macro_liberty", "");
+  std::string       sram_liberty_path;  // the generated SRAM macros' Liberty (synth.sram)
   const auto        extra_libs    = [&] {
     std::string list = domino_liberty_path;
+    if (!sram_liberty_path.empty()) {
+      list += (list.empty() ? "" : ",") + sram_liberty_path;
+    }
     if (!macro_liberty.empty()) {
       list += (list.empty() ? "" : ",") + macro_liberty;
     }
@@ -2990,6 +2995,54 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
   load_lg_into_var(net_dir, net);
   if (net.graphs.empty()) {
     throw Lhd_error{"internal", mapper_method + " produced an empty netlist library", ""};
+  }
+  if (mapped_output && truthy(synth_set(opts, "sram", "false"))) {
+    livehd::synth::Sram_tech tech;
+    tech.um2_per_bit = std::stod(synth_set(opts, "sram.um2_per_bit", "0.49"));
+    tech.clk_to_q_ns = std::stod(synth_set(opts, "sram.access_ns", "0.218"));
+    tech.min_bits    = static_cast<uint64_t>(std::stoull(synth_set(opts, "sram.min_bits", "2048")));
+    const auto sram  = livehd::synth::macro_memories(net.graphs, tech);
+    for (const auto& [module, why] : sram.kept) {
+      std::fprintf(stderr, "lhd synth: synth.sram: '%s' stays a native memory instance: %s\n", module.c_str(), why.c_str());
+    }
+    if (!sram.macros.empty()) {
+      ensure_dir(root);
+      const auto lib_dir = root + "/sram", lef_path = root + "/sram.lef";
+      ensure_dir(lib_dir);
+      std::string lib_path;  // comma-separated: one file per macro
+      {
+        std::ofstream table(root + "/sram.txt");
+        table << "macro\tbits\tentries\treads\twrites\twidth_um\theight_um\n";
+        for (const auto& m : sram.macros) {
+          table << m.name << '\t' << m.bits << '\t' << m.size << '\t' << m.read_ports << '\t' << m.write_ports << '\t' << m.width_um << '\t'
+                << m.height_um << '\n';
+        }
+      }
+      for (const auto& [macro, text] : sram.liberties) {
+        const auto file = lib_dir + "/" + macro + ".lib";
+        std::ofstream(file) << text;
+        lib_path += (lib_path.empty() ? "" : ",") + file;
+      }
+      std::ofstream(lef_path) << "VERSION 5.7 ;\nBUSBITCHARS \"[]\" ;\n" << sram.lef << "END LIBRARY\n";
+      sram_liberty_path = lib_path;
+      if (run_place) {
+        place_options.lefs.push_back(lef_path);
+      }
+      if (physical_cache) {
+        for (const auto& [macro, text] : sram.liberties) {
+          physical_cache->add_dependency(lib_dir + "/" + macro + ".lib");
+        }
+        physical_cache->add_dependency(lef_path);
+      }
+      double area = 0;
+      uint64_t bits = 0;
+      for (const auto& m : sram.macros) {
+        area += m.width_um * m.height_um;
+        bits += m.bits * m.size;
+      }
+      std::fprintf(stderr, "lhd synth: synth.sram: %zu memories became macros (%.0f Kib, %.0f um2): %s/*.lib, %s\n", sram.macros.size(),
+                   static_cast<double>(bits) / 1024.0, area, lib_dir.c_str(), lef_path.c_str());
+    }
   }
 
   // ---- placement: one persistent flat graph for physical outputs and STA ----

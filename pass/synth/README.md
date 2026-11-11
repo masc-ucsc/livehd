@@ -149,6 +149,21 @@ Remaining native synthesis work is tracked in [2u-usyn](../../todo/livehd/2u-usy
    instances. They bypass native-array lowering; their physical geometry is
    supplied by the corresponding LEF. The library interface alone does not
    authorize replacing an inferred array with unspecified collision semantics.
+   **`synth.sram=true` (default false) is that authorization, for an array with no SRAM cell to bind**
+   (`sram_macro.cpp`): a memory the fold policy keeps native becomes a generated macro, whatever its port
+   count. `synth.memory=auto` then folds (`pass.abc.memory=sram`) only a memory below `synth.sram.min_bits`
+   (2048, the smallest macro) or one no macro can realize -- forwarding between ports, power-on contents, a
+   whole-array update/reset/read, a loader image, an unknown size -- and keeps every other native, so the
+   over-3-port arrays `auto` bit-blasts (register files, rename tables) are macros too; `synth.memory=flops`
+   and `macro` still win. After mapping, each kept memory is enclosed in its `memory_module` (the pins
+   `clk`, `rd_addr_k`, `rd_enable_k`, `rd_dout_k`, `wr_addr_k`, `wr_enable_k` (one bit per `wensize` lane),
+   `wr_din_k`), that module loses its body, and `<workdir>/synth/sram.lib` and `sram.lef` describe it: a
+   clocked read for a synchronous read port, a combinational address-to-data arc for an asynchronous one
+   (the register the source puts after it stays a flop), setup/hold against `clk` for everything else. The
+   files join the timers' extra libraries and the placement LEFs, so the macro is placed fixed like an
+   explicit fakeram. The physical model is analytic (area per bit and per port, pins over the four edges,
+   constant delays; `synth.sram.um2_per_bit`, `synth.sram.access_ns`, defaults from asap7's bsg_fakeram);
+   same-edge collisions are the macro's contract, as for any SRAM, which is why forwarding stays native.
 
 3. **Regions.** `pass/partition` cuts the colored source into region bodies;
    `region_driver.cpp` (`Region_driver`) maps them: per-region options

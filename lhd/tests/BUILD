@@ -3688,6 +3688,17 @@ sh_test(
 )
 
 sh_test(
+    name = "lhd_synth_sram_smoke",
+    size = "small",
+    timeout = "short",
+    srcs = ["lhd_synth_sram_smoke.py"],
+    data = [
+        "//inou/lefdef:test_data",
+        "//lhd",
+    ],
+)
+
+sh_test(
     name = "lhd_macro_bringup_smoke",
     size = "small",
     timeout = "short",

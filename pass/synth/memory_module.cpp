@@ -23,6 +23,7 @@
 #include "graph_library_singleton.hpp"
 #include "node_util.hpp"
 #include "pass.hpp"
+#include "sram_macro.hpp"
 #include "synth_policy.hpp"
 
 namespace gu = livehd::graph_util;
@@ -861,6 +862,13 @@ size_t write_clock_count(const hhds::Node_class& mem) {
 }
 }  // namespace
 
+std::shared_ptr<hhds::Graph> enclose_native_memory(hhds::Graph& parent, const hhds::Node_class& mem) {
+  if (!gu::has_name(mem)) {
+    mem.attr(hhds::attrs::name).set(gu::default_instance_name(mem));
+  }
+  return enclose(parent, mem, false, fs::path{}, fs::path{}, false);
+}
+
 std::vector<std::shared_ptr<hhds::Graph>> build_memory_modules(const std::vector<std::shared_ptr<hhds::Graph>>& graphs,
                                                                Memory_fold pass_mode, uint64_t max_bits,
                                                                std::vector<Memory_row>* report, bool prune_reads) {
@@ -978,7 +986,17 @@ std::vector<std::shared_ptr<hhds::Graph>> build_memory_modules(const std::vector
       const bool oversized  = max_bits && bits && size > max_bits / bits;
       const bool many_ports = ports > kAutoFoldPortsAbove;
       bool       map        = mode == Memory_fold::Always;
-      if (mode == Memory_fold::Auto) {
+      if (mode == Memory_fold::Sram) {
+        // The synth.sram flow: a generated macro has any number of ports, so neither `oversized` nor
+        // `many_ports` applies. A memory folds when it is below the smallest macro (memory_max_bits)
+        // or when no macro can realize it.
+        const auto why_not = sram_macro_refusal(mem);
+        const bool tiny    = max_bits && bits && size < (max_bits + bits - 1) / bits;
+        map                = tiny || !why_not.empty();
+        record(map ? "flops" : (inline_array ? "inline-array" : "sram"),
+               tiny ? "sram: " + std::to_string(size * bits) + " bits < macro minimum " + std::to_string(max_bits)
+                    : !why_not.empty() ? "sram: no macro (" + why_not + ")" : "sram: becomes a macro");
+      } else if (mode == Memory_fold::Auto) {
         // `many_ports` deliberately OVERRIDES memory_max_bits. It is a
         // MACRO-REALIZABILITY fact, not a budget: ware/rtl ships cgen_memory_*
         // only up to 4rd_2wr, so there is no macro for an over-3-port array and
@@ -1028,7 +1046,7 @@ std::vector<std::shared_ptr<hhds::Graph>> build_memory_modules(const std::vector
               .emit();
         }
       }
-      {
+      if (mode != Memory_fold::Sram) {
         std::string why = source;
         if (mode == Memory_fold::Auto) {
           why = map ? (oversized ? "auto: " + std::to_string(ports) + " ports > " + std::to_string(kAutoFoldPortsAbove) +
