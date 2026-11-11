@@ -60,6 +60,11 @@ enum class Attr_kind { node, driver_pin, edge, any_pin };
 
 // Per-pin bitwidth (driver pin), plain int32; storage uses uint32_t
 // for the flat_storage value to avoid signed-int hashmap key issues.
+//
+// Sparse on purpose: only driver pins carry a width, and a dense store pays a slot for every pin (measured on
+// a 668k-cell netlist: 25 MB dense, 20 MB sparse). The per-NODE integers below (color, synth_region_id, the
+// shared-text ids) are dense: nearly every node has one, a dense store costs one value per node, and zero is
+// "none" for all of them, which is the dense layout's absent state.
 struct bits_t {
   using value_type = int32_t;
   using storage    = hhds::flat_storage;
@@ -106,6 +111,7 @@ inline constexpr pin_signed_t pin_signed{};
 struct color_t {
   using value_type = int32_t;
   using storage    = hhds::flat_storage;
+  using layout     = hhds::dense_layout;
 };
 inline constexpr color_t color{};
 
@@ -176,6 +182,7 @@ inline constexpr synth_region_t synth_region{};
 struct synth_region_id_t {
   using value_type = uint32_t;
   using storage    = hhds::flat_storage;
+  using layout     = hhds::dense_layout;
 };
 inline constexpr synth_region_id_t synth_region_id{};
 
@@ -186,13 +193,10 @@ inline constexpr synth_region_id_t synth_region_id{};
 // graph holds each text once, in the `_names` table on its input node. graph/shared_text.hpp
 // (graph_util::Color_group) reads and writes the pair; nothing else touches these two tags. An id means
 // something only inside its own graph: a copy to another graph goes through the text.
-//
-// The id stays in the sparse layout although nearly every mapped node has one: a dense store is indexed by
-// the flat key, node keys are spread through the id space they share with pins (about 18 slots per node in
-// a mapped netlist), and on a 668k-cell design the dense store measured 48 MB against 20 MB sparse.
 struct synth_color_group_id_t {
   using value_type = uint32_t;
   using storage    = hhds::flat_storage;
+  using layout     = hhds::dense_layout;
 };
 inline constexpr synth_color_group_id_t synth_color_group_id{};
 struct synth_color_group_names_t {
@@ -243,6 +247,7 @@ inline constexpr placement_rc_t placement_rc{};
 struct placement_block_id_t {
   using value_type = uint32_t;
   using storage    = hhds::flat_storage;
+  using layout     = hhds::dense_layout;
 };
 inline constexpr placement_block_id_t placement_block_id{};
 struct placement_block_names_t {
