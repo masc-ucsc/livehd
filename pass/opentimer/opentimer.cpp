@@ -14,10 +14,17 @@
 #include <utility>
 #include <vector>
 
+#if defined(__GLIBC__)
+#include <malloc.h>
+#endif
+#include <cstdio>
+#include <cstring>
+
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/strings/str_cat.h"
 #include "cell.hpp"
+#include "debug_env.hpp"
 #include "flatten.hpp"
 #include "hash_util.hpp"
 #include "hhds/attrs/srcid.hpp"
@@ -289,6 +296,53 @@ std::string src_of_node(const std::shared_ptr<hhds::Graph>& g, const Node& n) {
 
 }  // namespace
 
+namespace {
+// LHD_PHASE_MEM (debug): resident memory after each stage of the pass, and the highest it reached
+// during the stage (the kernel's high-water mark is reset at every call; Linux only).
+void stage_memory(const char* stage) {
+#if defined(__GLIBC__)
+  if (livehd::debug::env<"LHD_PHASE_TRIM">() != nullptr) {  // EXPERIMENT
+    malloc_trim(0);
+  }
+#endif
+  if (livehd::debug::env<"LHD_PHASE_MEM">() == nullptr) {
+    return;
+  }
+  const auto status_kb = [](const char* key) {
+    uint64_t value = 0;
+    if (std::FILE* f = std::fopen("/proc/self/status", "r")) {
+      char         line[256];
+      const size_t n = std::strlen(key);
+      while (std::fgets(line, sizeof line, f) != nullptr) {
+        if (std::strncmp(line, key, n) == 0) {
+          value = std::strtoull(line + n, nullptr, 10);
+          break;
+        }
+      }
+      std::fclose(f);
+    }
+    return value;
+  };
+  unsigned long long live_mb = 0, free_mb = 0;
+#if defined(__GLIBC__)
+  const auto info = mallinfo2();
+  live_mb         = (info.uordblks + info.hblkhd) >> 20;
+  free_mb         = info.fordblks >> 20;
+#endif
+  std::fprintf(stderr,
+               "lhd-stage-mem pass.opentimer %s rss_mb=%llu peak_mb=%llu live_mb=%llu free_mb=%llu\n",
+               stage,
+               static_cast<unsigned long long>(status_kb("VmRSS:") / 1024),
+               static_cast<unsigned long long>(status_kb("VmHWM:") / 1024),
+               live_mb,
+               free_mb);
+  if (std::FILE* f = std::fopen("/proc/self/clear_refs", "w")) {
+    std::fputs("5", f);
+    std::fclose(f);
+  }
+}
+}  // namespace
+
 void Pass_opentimer::time_work(Eprp_var& var) {
   // Private physical library for the occurrence expansion below: pass.opentimer
   // is not occurrence-aware (it times a Sub as ONE instance), so a rolled
@@ -533,8 +587,11 @@ void Pass_opentimer::time_work(Eprp_var& var) {
     }
   }
 
+  stage_memory("design-copied-expanded-flattened");
   pass.setup_hier(g);
+  stage_memory("setup_hier");
   pass.build_circuit(g);  // ensure_libs() runs here: a cache hit above never parses a Liberty
+  stage_memory("build_circuit");
   pass.read_sdc_spef();
   pass.apply_case_analysis();
   pass.apply_physical_rc(g);
@@ -542,10 +599,13 @@ void Pass_opentimer::time_work(Eprp_var& var) {
   pass.prepare_critical_targets();
   pass.apply_physical_captures();
   pass.annotate_critical(g);
+  stage_memory("sdc-case-rc");
   pass.compute_timing(g);
+  stage_memory("compute_timing");
   if (!pass.critical_) {
     pass.populate_table(g);
   }
+  stage_memory("populate_table");
   if (pass.critical_ && !livehd::diag::sink().has_errors()
       && !pass.apply_annotations(annotation_top, pass.annotation_records_, pass.annotation_summary_)) {
     livehd::diag::err("pass.opentimer", "critical-identity", "internal")
@@ -1945,6 +2005,19 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
     }
 
     timer.insert_gate(instance_name, type_name);
+    // EXPERIMENT (LHD_OT_FLUSH=N): OpenTimer queues every builder call as a closure and runs the queue
+    // at the first query. Running it every N gates keeps the queue (and its strings) from growing
+    // to the size of the design.
+    {
+      static const uint64_t every = [] {
+        const char* text = livehd::debug::env<"LHD_OT_FLUSH">();
+        return text == nullptr ? uint64_t{0} : std::strtoull(text, nullptr, 10);
+      }();
+      static uint64_t queued = 0;
+      if (every != 0 && ++queued % every == 0) {
+        timer.update_netlist();
+      }
+    }
     if (critical_) {
       for (const auto& [name, pin] : lib->cell(type_name)->cellpins) {
         (void)pin;
