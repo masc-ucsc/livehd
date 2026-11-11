@@ -1813,9 +1813,8 @@ int main(int argc, char** argv) {
       if (!node.get_subnode_io() && livehd::graph_util::type_op_of(node) != Ntype_op::Memory) {
         continue;
       }
-      const auto group = node.attr(livehd::attrs::synth_color_group);
       colors << node.get_name() << '\t' << livehd::graph_util::node_color_of(node) << '\t'
-             << (group.has() ? group.get() : std::string{}) << '\n';
+             << livehd::graph_util::Color_group::text(node) << '\n';
     }
 
     hhds::GraphLibrary output;

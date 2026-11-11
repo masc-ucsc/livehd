@@ -1687,7 +1687,7 @@ TEST(Placement, MacroCellWorkCanBeDeferredWithoutSkippingGpTimingOrFinalLegaliza
     auto cell = gu::create_typed_node(*graph, Ntype_op::Sub);
     cell.set_subnode(cell_io);
     cell.set_name("cell" + std::to_string(i));
-    cell.attr(attrs::synth_color_group).set("macro_detail_group");
+    livehd::graph_util::Color_group::set(cell, "macro_detail_group");
     cell.create_sink_pin("A").connect_driver(signal);
     signal = cell.create_driver_pin(i ? "X" : "Y");
     gu::set_bits(signal, 1);
@@ -2755,7 +2755,7 @@ END )" << name
     auto cell = gu::create_typed_node(*graph, Ntype_op::Sub);
     cell.set_subnode(master);
     cell.set_name(name);
-    cell.attr(attrs::synth_color_group).set(name);
+    livehd::graph_util::Color_group::set(cell, name);
     cell.create_sink_pin("A").connect_driver(signal);
     signal = cell.create_driver_pin("Y");
     gu::set_bits(signal, 1);
@@ -5309,7 +5309,7 @@ TEST(Placement, IncrementalWindowKeepsDistantBlocksAndSeedsNewCells) {
     n.set_subnode(inv);
     n.set_name("n" + std::to_string(i));
     n.attr(attrs::color).set(i + 1);
-    n.attr(attrs::placement_block).set("block" + std::to_string(i));
+    livehd::graph_util::Placement_block::set(n, "block" + std::to_string(i));
     Ann_place p(i ? i * 12000 : 1380, i ? i * 8160 : 0, 1380, 2720);
     p.status = Ann_place::Status::PLACED;
     // x must be a whole number of sites.
@@ -5337,7 +5337,7 @@ TEST(Placement, IncrementalWindowKeepsDistantBlocksAndSeedsNewCells) {
   inserted.set_subnode(inv);
   inserted.set_name("inserted");
   inserted.attr(attrs::color).set(1);
-  inserted.attr(attrs::placement_block).set("block0");
+  livehd::graph_util::Placement_block::set(inserted, "block0");
   inserted.create_sink_pin("A").connect_driver(outputs.front());
   auto out = inserted.create_driver_pin("Y");
   gu::set_bits(out, 1);
@@ -5395,7 +5395,7 @@ TEST(Placement, IncrementalNewMemoryUnlocksCachedCellsUnderItsProxy) {
     auto n = gu::create_typed_node(*graph, Ntype_op::Sub);
     n.set_subnode(inv);
     n.set_name("c" + std::to_string(i));
-    n.attr(attrs::placement_block).set("chain");
+    livehd::graph_util::Placement_block::set(n, "chain");
     n.create_sink_pin("A").connect_driver(chain);
     chain = n.create_driver_pin("Y");
     gu::set_bits(chain, 1);
@@ -5412,7 +5412,7 @@ TEST(Placement, IncrementalNewMemoryUnlocksCachedCellsUnderItsProxy) {
   const auto         initial = place(*graph, initial_lib, options);
   auto               mem     = gu::create_typed_node(*graph, Ntype_op::Memory);
   mem.set_name("ram");
-  mem.attr(attrs::placement_block).set("ram");
+  livehd::graph_util::Placement_block::set(mem, "ram");
   for (const unsigned pid : {1, 9, 6, 4, 7, 10}) {  // 1-bit x 1-entry read port, enable on
     mem.create_sink_pin(pid).connect_driver(gu::create_const(*graph, *Dlop::create_integer(1)));
   }
@@ -6097,7 +6097,7 @@ END LIBRARY
   // both instances use the same SRAM master and local color number.
   for (auto node : body->body().nodes()) {
     if (gu::type_op_of(node) == Ntype_op::Sub) {
-      node.attr(livehd::attrs::synth_color_group).set(std::string("bank:color:1"));
+      livehd::graph_util::Color_group::set(node, std::string("bank:color:1"));
     }
   }
   options.macro_mode         = "none";
@@ -6193,7 +6193,7 @@ TEST(Placement, PlacementColorsUseLibertyRolesAndPinsMoveWithoutSta) {
     auto n = gu::create_typed_node(*graph, Ntype_op::Sub);
     n.set_subnode(inv_io);
     n.set_name(name);
-    n.attr(attrs::synth_color_group).set("synthesis-kept");
+    livehd::graph_util::Color_group::set(n, "synthesis-kept");
     n.create_sink_pin("A").connect_driver(from);
     auto output = n.create_driver_pin("Y");
     gu::set_bits(output, 1);
@@ -6212,7 +6212,7 @@ TEST(Placement, PlacementColorsUseLibertyRolesAndPinsMoveWithoutSta) {
     auto       ram  = gu::create_typed_node(*graph, Ntype_op::Sub);
     ram.set_subnode(ram_io);
     ram.set_name(name);
-    ram.attr(attrs::synth_color_group).set("synthesis-kept");
+    livehd::graph_util::Color_group::set(ram, "synthesis-kept");
     ram.create_sink_pin("P").connect_driver(clock);
     ram.create_sink_pin("E").connect_driver(enable);
     ram.create_sink_pin("X").connect_driver(pre);
@@ -6283,8 +6283,8 @@ TEST(Placement, PlacementColorsUseLibertyRolesAndPinsMoveWithoutSta) {
     EXPECT_GT(macro_history["macro_cell_density_seconds"].GetDouble(), 0);
     EXPECT_GT(macro_history["macro_density_pull_seconds"].GetDouble(), 0);
     for (auto node : graph->body().nodes()) {
-      if (auto a = node.attr(attrs::synth_color_group); a.has()) {
-        EXPECT_EQ(a.get(), "synthesis-kept");
+      if (livehd::graph_util::Color_group::has(node)) {
+        EXPECT_EQ(livehd::graph_util::Color_group::text(node), "synthesis-kept");
       }
     }
     for (const auto& t : result.floorplan.terminals) {

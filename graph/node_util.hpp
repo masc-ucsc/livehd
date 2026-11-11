@@ -34,6 +34,7 @@
 #include "hhds/graph.hpp"
 #include "hlop/dlop.hpp"
 #include "hlop/memory_init.hpp"
+#include "shared_text.hpp"
 
 // GCC's -Wdangling-reference heuristic flags `const T& x = f(temporary())`
 // for any `f` that returns a reference and takes one by reference, even when

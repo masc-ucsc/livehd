@@ -2246,11 +2246,11 @@ bool write_io_body(hhds::Graph& source, const Imp_def& imported, const synth::Ce
       kept_names.emplace(node.get_name());
     }
     if (mapped_nodes.contains(node.get_debug_nid())) {
-      if (auto group = node.attr(livehd::attrs::synth_color_group); group.has()) {
-        groups.emplace(group.get());
+      if (gu::Color_group::has(node)) {
+        groups.emplace(gu::Color_group::text(node));
       }
-      if (auto block = node.attr(livehd::attrs::placement_block); block.has()) {
-        blocks.emplace(block.get());
+      if (gu::Placement_block::has(node)) {
+        blocks.emplace(gu::Placement_block::text(node));
       }
     }
   }
@@ -2289,10 +2289,10 @@ bool write_io_body(hhds::Graph& source, const Imp_def& imported, const synth::Ce
       n.attr(livehd::attrs::synth_region_id).set(region.get());
     }
     if (groups.size() == 1) {
-      n.attr(livehd::attrs::synth_color_group).set(*groups.begin());
+      gu::Color_group::set(n, *groups.begin());  // one text for the whole region: the table has one entry
     }
     if (blocks.size() == 1) {
-      n.attr(livehd::attrs::placement_block).set(*blocks.begin());
+      gu::Placement_block::set(n, *blocks.begin());
     }
     signals[c.output] = n.create_driver_pin(type.output);
     gu::set_bits(signals[c.output], 1);

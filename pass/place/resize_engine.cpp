@@ -2347,11 +2347,11 @@ void apply_resize_edits(hhds::Graph& graph, const Options& options, const std::v
     cell.set_name(e.instance);
     if (const auto owner = nodes.find(e.owner); owner != nodes.end()) {
       cell.attr(attrs::color).set(gu::node_color_of(owner->second));
-      if (const auto g = owner->second.attr(attrs::synth_color_group); g.has() && !g.get().empty()) {
-        cell.attr(attrs::synth_color_group).set(g.get());
+      if (!gu::Color_group::text(owner->second).empty()) {
+        gu::Color_group::copy(owner->second, cell);
       }
-      if (const auto blk = owner->second.attr(attrs::placement_block); blk.has() && !blk.get().empty()) {
-        cell.attr(attrs::placement_block).set(blk.get());
+      if (!gu::Placement_block::text(owner->second).empty()) {
+        gu::Placement_block::copy(owner->second, cell);
       }
       if (const auto region = owner->second.attr(attrs::synth_region_id); region.has() && region.get()) {
         cell.attr(attrs::synth_region_id).set(region.get());

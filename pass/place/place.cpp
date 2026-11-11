@@ -2346,8 +2346,8 @@ void make_arrays(View& v, const ph::Technology& tech) {
       }
     }
     for (size_t i = 0; !v.placement_colors && i < v.cells.size(); ++i) {
-      if (auto attr = v.cells[i].node.attr(attrs::synth_color_group); attr.has()) {
-        auto key               = std::string(attr.get());
+      if (gu::Color_group::has(v.cells[i].node)) {
+        auto key               = std::string(gu::Color_group::text(v.cells[i].node));
         const auto [it, added] = colors.try_emplace(key, colors.size());
         if (added) {
           d.centroid_color_names.push_back(key);
@@ -2472,8 +2472,8 @@ void refresh_floorplan_view(View& v, const View& baseline, Result& state, const 
           members.push_back(name);
         }
       }
-      if (auto block = node.attr(attrs::placement_block); block.has()) {
-        cell.block = block.get();
+      if (gu::Placement_block::has(node)) {
+        cell.block = gu::Placement_block::text(node);
       }
     }
     if (old != previous.end() && !tech.macros.at(old->second.macro).klass.starts_with("CORE") && master != old->second.macro) {
@@ -2493,8 +2493,8 @@ void refresh_floorplan_view(View& v, const View& baseline, Result& state, const 
     if (!io) {
       memories.emplace(node.get_debug_nid(), master);
     }
-    if (auto color = node.attr(attrs::synth_color_group); color.has()) {
-      v.cohesion_owners.emplace(name, color.get());
+    if (gu::Color_group::has(node)) {
+      v.cohesion_owners.emplace(name, gu::Color_group::text(node));
     }
     v.cells.push_back(std::move(cell));
   }
@@ -6864,6 +6864,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
   double      area      = 0;
   int64_t     max_width = 0, max_height = 0;
   std::string site_name;
+  gu::Placement_block::Writer placement_blocks(&graph);  // for this loop only: flushed right after it
   for (auto node : graph.body().nodes()) {
     if (auto io = node.get_subnode_io(); io || memories.contains(node.get_debug_nid())) {
       const auto name = io ? std::string(io->get_name()) : memories.at(node.get_debug_nid());
@@ -6891,12 +6892,17 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       }
       const auto dot    = instance.rfind('.');
       const auto prefix = dot == std::string::npos ? std::string{} : instance.substr(0, dot);
-      const auto owner  = node.attr(attrs::placement_block);
-      const auto block  = owner.has() ? owner.get() : std::format("{}:{}", prefix, gu::node_color_of(node));
-      node.attr(attrs::placement_block).set(block);
+      // A cell keeps the block it already has; a new one gets its instance prefix and color. The node holds an
+      // id and the graph each block text once (graph/shared_text.hpp).
+      auto       block_id = gu::Placement_block::id_of(node);
+      if (block_id == 0) {
+        block_id = placement_blocks.id(std::format("{}:{}", prefix, gu::node_color_of(node)));
+        placement_blocks.set(node, block_id);
+      }
+      const auto block = placement_blocks.text(block_id);
       if (options.cohesion > 0 || v.align_macros) {
-        if (auto group = node.attr(attrs::synth_color_group); group.has()) {
-          v.cohesion_owners.emplace(instance, std::string(group.get()));
+        if (gu::Color_group::has(node)) {
+          v.cohesion_owners.emplace(instance, gu::Color_group::text(node));
         }
       }
       v.cells.push_back({node, instance, name, block, p});
@@ -6907,6 +6913,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       throw std::runtime_error("unmapped physical object: " + std::string(Ntype::get_name(gu::type_op_of(node))));
     }
   }
+  placement_blocks.flush();
   if (v.cells.empty()) {
     throw std::runtime_error("placement needs at least one mapped physical cell");
   }
@@ -14301,10 +14308,14 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
   // A restored or edited placement keeps the netlist's geometry template; the
   // rows each two-row cell landed on decide its PG rail stack.
   sync_rail_twins(v, tech, options);
-  for (auto& c : v.cells) {
-    c.node.attr(attrs::place).set(c.place);
-    c.node.attr(attrs::placement_block).set(c.block);
-    v.fp.components.push_back({c.name, c.macro, c.place});
+  {
+    gu::Placement_block::Writer blocks(&graph);
+    for (auto& c : v.cells) {
+      c.node.attr(attrs::place).set(c.place);
+      blocks.set(c.node, c.block.view());
+      v.fp.components.push_back({c.name, c.macro, c.place});
+    }
+    blocks.flush();
   }
   v.fp.components.insert(v.fp.components.end(), handoff_cells.begin(), handoff_cells.end());
   // Internal array order depends on which cells were cache-locked. Keep the

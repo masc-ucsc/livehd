@@ -208,12 +208,8 @@ Reset_tree_stats buffer_nets(hhds::Graph& graph, const physical::Technology& tec
         ++stats.buffers;
         cell.set_name(name);
         cell.attr(attrs::color).set(gu::node_color_of(owner));
-        if (const auto group = owner.attr(attrs::synth_color_group); group.has()) {
-          cell.attr(attrs::synth_color_group).set(std::string(group.get()));
-        }
-        if (const auto block = owner.attr(attrs::placement_block); block.has()) {
-          cell.attr(attrs::placement_block).set(std::string(block.get()));
-        }
+        gu::Color_group::copy(owner, cell);
+        gu::Placement_block::copy(owner, cell);
         if (const auto region = owner.attr(attrs::synth_region_id); region.has() && region.get()) {
           cell.attr(attrs::synth_region_id).set(region.get());
         }

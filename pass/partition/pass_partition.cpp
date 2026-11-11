@@ -698,9 +698,7 @@ void Partitioner::carry_node_attrs(const hhds::Node_class& orig, const hhds::Nod
   if (orig.attr(livehd::attrs::preroute_exclude).has()) {
     neo.attr(livehd::attrs::preroute_exclude).set();
   }
-  if (auto a = orig.attr(livehd::attrs::synth_color_group); a.has()) {
-    neo.attr(livehd::attrs::synth_color_group).set(std::string(a.get()));
-  }
+  gu::Color_group::copy(orig, neo);
   if (auto a = orig.attr(livehd::attrs::synth_policy); a.has()) {
     neo.attr(livehd::attrs::synth_policy).set(std::string(a.get()));
   }

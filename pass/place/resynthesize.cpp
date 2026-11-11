@@ -373,9 +373,7 @@ void splice(hhds::Graph& graph, const Cone& cone, const synth::Cone_mapping& map
     if (const auto a = root.attr(hhds::attrs::srcid); a.has()) {
       n.attr(hhds::attrs::srcid).set(a.get());
     }
-    if (const auto a = root.attr(attrs::placement_block); a.has()) {
-      n.attr(attrs::placement_block).set(a.get());
-    }
+    gu::Placement_block::copy(root, n);
     if (const auto a = root.attr(attrs::synth_region_id); a.has()) {
       n.attr(attrs::synth_region_id).set(a.get());
     }

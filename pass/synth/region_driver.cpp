@@ -1180,12 +1180,15 @@ void Region_driver::map_region(const livehd::partition::Region_body& rb) {
       input.attr(livehd::attrs::synth_region_id).set(region_id);
       input.attr(livehd::attrs::color).set(rb->color);
       if (rb->color > 0) {
-        const auto group = rb->module_name + ":color:" + std::to_string(rb->color);
+        // One group for the whole region: its text is stored once, each node holds the id.
+        gu::Color_group::Writer groups(rb->body);
+        const auto              group = groups.id(rb->module_name + ":color:" + std::to_string(rb->color));
         for (auto node : rb->body->body().nodes()) {
           if (!gu::is_builtin_node(node)) {
-            node.attr(livehd::attrs::synth_color_group).set(group);
+            groups.set(node, group);
           }
         }
+        groups.flush();
       }
       if (*resynthesized) {
         input.attr(livehd::attrs::resynth).set({});

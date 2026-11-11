@@ -46,6 +46,7 @@
 #include "hhds/attrs/name.hpp"
 #include "hhds/attrs/srcid.hpp"
 #include "hhds/graph.hpp"
+#include "shared_text.hpp"
 
 namespace livehd::graph_util {
 
@@ -84,9 +85,11 @@ inline constexpr std::size_t pin_tag_count  = 0 LIVEHD_FOR_EACH_ATTR_TAG(LIVEHD_
 }  // namespace attr_carry_detail
 
 // How many attributes each carrier moves (test/diagnostic use): every
-// node-kind tag except hier_color, plus hhds::attrs::name and the NODE overload
-// of `match`; pin tags eligible for carry. Physical route tags are excluded.
-inline constexpr std::size_t kNodeAttrTagCount = attr_carry_detail::node_tag_count + 2;
+// node-kind tag except hier_color, plus hhds::attrs::name, the NODE overload
+// of `match` and the two shared texts (color group, placement block: carried
+// through their text, see graph/shared_text.hpp); pin tags eligible for carry.
+// Physical route tags are excluded.
+inline constexpr std::size_t kNodeAttrTagCount = attr_carry_detail::node_tag_count + 4;
 inline constexpr std::size_t kPinAttrTagCount  = attr_carry_detail::pin_tag_count;
 
 // Every node-kind attribute (hier_color excepted, see above), plus the name,
@@ -97,6 +100,8 @@ template <class Src, class Dst>
 inline void carry_node_attrs(const Src& from, const Dst& to) {
   carry_attr<hhds::attrs::name_t>(from, to);
   carry_attr<livehd::attrs::match_t>(from, to);
+  Color_group::copy(from, to);
+  Placement_block::copy(from, to);
 #define LIVEHD_ATTR_CARRY_NODE(tag)                                           \
   if constexpr (attr_carry_detail::is_node_carried<livehd::attrs::tag##_t>) { \
     carry_attr<livehd::attrs::tag##_t>(from, to);                             \

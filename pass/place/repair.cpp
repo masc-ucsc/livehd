@@ -1067,21 +1067,21 @@ std::optional<Buffer_tree> apply(hhds::Graph& graph, const Inventory& cells, con
       }
     }
     if (!members.empty()) {
-      const auto group = members.front().attr(attrs::synth_color_group);
-      if (group.has() && !group.get().empty() && std::all_of(members.begin(), members.end(), [&](const auto& member) {
-            const auto candidate = member.attr(attrs::synth_color_group);
-            return candidate.has() && candidate.get() == group.get();
-          })) {
+      // One graph: two nodes are in the same group exactly when their ids are equal.
+      const auto group = gu::Color_group::id_of(members.front());
+      if (group != 0 && !gu::Color_group::text(members.front()).empty()
+          && std::all_of(members.begin(), members.end(), [&](const auto& member) {
+               return gu::Color_group::id_of(member) == group;
+             })) {
         owner = members.front();
       }
     }
   }
   const std::string owner_name       = std::string(owner.get_name());
   const auto        owner_color      = gu::node_color_of(owner);
-  const auto        color_group_attr = owner.attr(attrs::synth_color_group);
-  const std::string color_group      = color_group_attr.has() ? color_group_attr.get() : std::string{};
-  const auto        block_attr       = owner.attr(attrs::placement_block);
-  const std::string owner_block      = block_attr.has() ? block_attr.get() : std::string{};
+  // The owner may be one of the cells removed below, so its group and block are taken now, as ids of this graph.
+  const auto        color_group_id   = gu::Color_group::text(owner).empty() ? 0U : gu::Color_group::id_of(owner);
+  const auto        owner_block_id   = gu::Placement_block::text(owner).empty() ? 0U : gu::Placement_block::id_of(owner);
   const auto        region_attr      = owner.attr(attrs::synth_region_id);
   const auto        owner_region     = region_attr.has() ? region_attr.get() : 0;
   const auto        root_xy          = placed.pin_locations.find(root_name);
@@ -1292,12 +1292,8 @@ std::optional<Buffer_tree> apply(hhds::Graph& graph, const Inventory& cells, con
     shared->nodes.emplace(name, cell);
     shared->origins.emplace(name, owner_name);
     cell.attr(attrs::color).set(owner_color);
-    if (!color_group.empty()) {
-      cell.attr(attrs::synth_color_group).set(color_group);
-    }
-    if (!owner_block.empty()) {
-      cell.attr(attrs::placement_block).set(owner_block);
-    }
+    gu::Color_group::set_id(cell, color_group_id);
+    gu::Placement_block::set_id(cell, owner_block_id);
     if (owner_region) {
       cell.attr(attrs::synth_region_id).set(owner_region);
     }

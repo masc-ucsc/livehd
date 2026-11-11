@@ -15,6 +15,7 @@
 #include "hhds/attrs/name.hpp"
 #include "hhds/attrs/srcid.hpp"
 #include "node_util.hpp"
+#include "shared_text.hpp"
 #include "synth_policy.hpp"
 
 namespace gu = livehd::graph_util;
@@ -78,6 +79,10 @@ struct Ictx {
   hhds::Node_class                                             inst;              // the Sub node in parent->src (invalid for top)
   std::string                                                  prefix;            // dotted instance path ("" for top)
   std::string                                                  inherited_color_group;
+  // The flat graph's id of each color group / placement block of `src` (index: the id in `src` minus one; 0: not
+  // looked up yet), and of the inherited group. A context clones one def, so each text is scoped and looked up once.
+  std::vector<uint32_t>                                        group_ids, block_ids;
+  uint32_t                                                     inherited_group_id = 0;
   uint32_t                                                     synth_region_id = 0;
   bool                                                         preroute_excluded = false;
   std::shared_ptr<const livehd::partition::Flat_instance_path> instance;
@@ -138,6 +143,9 @@ private:
   hhds::Graph*                        top_;
   hhds::GraphLibrary*                 lib_;
   hhds::Graph*                        flat_ = nullptr;
+  // The flat graph's shared texts (graph/shared_text.hpp): every group and block text is stored once.
+  std::optional<gu::Color_group::Writer>     groups_;
+  std::optional<gu::Placement_block::Writer> blocks_;
   std::deque<Ictx>                    arena_;  // stable pointers
   bool                                failed_           = false;
   bool                                preserve_modules_ = false;
@@ -220,8 +228,8 @@ Ictx* Flattener::make_ctx(hhds::Graph* src, Ictx* parent, const hhds::Node_class
   c.instance = std::move(path);
   if (parent) {
     c.inherited_color_group = parent->inherited_color_group;
-    if (auto group = inst.attr(livehd::attrs::synth_color_group); group.has()) {
-      c.inherited_color_group = parent->prefix + std::string(group.get());
+    if (gu::Color_group::has(inst)) {
+      c.inherited_color_group = parent->prefix + std::string(gu::Color_group::text(inst));
     }
   }
   auto input = src->get_input_node();
@@ -299,10 +307,20 @@ void Flattener::carry_node_attrs(Ictx* ctx, const hhds::Node_class& orig, const 
   if (ctx->preroute_excluded || orig.attr(livehd::attrs::preroute_exclude).has()) {
     neo.attr(livehd::attrs::preroute_exclude).set();
   }
-  if (auto a = orig.attr(livehd::attrs::synth_color_group); a.has()) {
-    neo.attr(livehd::attrs::synth_color_group).set(ctx->prefix + std::string(a.get()));
+  if (const auto source = gu::Color_group::id_of(orig); source != 0) {
+    if (ctx->group_ids.size() < source) {
+      ctx->group_ids.resize(source, 0);
+    }
+    auto& id = ctx->group_ids[source - 1];
+    if (id == 0) {
+      id = groups_->id(ctx->prefix + std::string(gu::Color_group::text(orig)));
+    }
+    groups_->set(neo, id);
   } else if (!ctx->inherited_color_group.empty()) {
-    neo.attr(livehd::attrs::synth_color_group).set(ctx->inherited_color_group);
+    if (ctx->inherited_group_id == 0) {
+      ctx->inherited_group_id = groups_->id(ctx->inherited_color_group);
+    }
+    groups_->set(neo, ctx->inherited_group_id);
   }
   auto policy=orig.attr(livehd::attrs::synth_policy).has()?livehd::synth_attr::read(orig.attr(livehd::attrs::synth_policy).get()):livehd::synth_attr::Policy{};
   for (auto* scope=ctx;scope!=nullptr;scope=scope->parent) {
@@ -331,7 +349,16 @@ void Flattener::carry_node_attrs(Ictx* ctx, const hhds::Node_class& orig, const 
   }
   if (physical_names_) {
     if (auto a = orig.attr(livehd::attrs::place); a.has()) neo.attr(livehd::attrs::place).set(a.get());
-    if (auto a = orig.attr(livehd::attrs::placement_block); a.has()) neo.attr(livehd::attrs::placement_block).set(a.get());
+    if (const auto source = gu::Placement_block::id_of(orig); source != 0) {
+      if (ctx->block_ids.size() < source) {
+        ctx->block_ids.resize(source, 0);
+      }
+      auto& id = ctx->block_ids[source - 1];
+      if (id == 0) {
+        id = blocks_->id(gu::Placement_block::text(orig));
+      }
+      blocks_->set(neo, id);
+    }
     if (auto a = orig.attr(livehd::attrs::synth_region_id); a.has()) neo.attr(livehd::attrs::synth_region_id).set(a.get());
   }
   if (auto a = orig.attr(hhds::attrs::srcid); a.has() && a.get() != 0) {
@@ -752,6 +779,8 @@ std::shared_ptr<hhds::Graph> Flattener::run(std::string_view flat_name) {
   }
   auto flat = gio->create_graph();
   flat_     = flat.get();
+  groups_.emplace(flat_);
+  blocks_.emplace(flat_);
 
   // Stamp bits/sign on the materialized flat input pins (the decl is not
   // auto-propagated to pin attrs; every downstream reader sizes from the pin).
@@ -795,6 +824,8 @@ std::shared_ptr<hhds::Graph> Flattener::run(std::string_view flat_name) {
     return nullptr;
   }
   admit("flatten-complete", 0);
+  groups_->flush();
+  blocks_->flush();
   return flat;
 }
 

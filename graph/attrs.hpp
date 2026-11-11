@@ -181,11 +181,25 @@ inline constexpr synth_region_id_t synth_region_id{};
 
 // Synthesis-color provenance on mapped nodes. Flattening scopes this key by
 // instance path, so reused definitions do not attract unrelated replicas.
-struct synth_color_group_t {
-  using value_type = std::string;
+//
+// A group is one text shared by many nodes, so a node holds only a small id (1-based; 0 is absent) and the
+// graph holds each text once, in the `_names` table on its input node. graph/shared_text.hpp
+// (graph_util::Color_group) reads and writes the pair; nothing else touches these two tags. An id means
+// something only inside its own graph: a copy to another graph goes through the text.
+//
+// The id stays in the sparse layout although nearly every mapped node has one: a dense store is indexed by
+// the flat key, node keys are spread through the id space they share with pins (about 18 slots per node in
+// a mapped netlist), and on a 668k-cell design the dense store measured 48 MB against 20 MB sparse.
+struct synth_color_group_id_t {
+  using value_type = uint32_t;
   using storage    = hhds::flat_storage;
 };
-inline constexpr synth_color_group_t synth_color_group{};
+inline constexpr synth_color_group_id_t synth_color_group_id{};
+struct synth_color_group_names_t {
+  using value_type = std::vector<std::string>;
+  using storage    = hhds::flat_storage;
+};
+inline constexpr synth_color_group_names_t synth_color_group_names{};
 
 // Present on a mapped-region node when this pass.abc invocation rebuilt the
 // region; absent means the node came from the incremental cache.  This is a
@@ -224,12 +238,18 @@ struct placement_rc_t {
   using storage    = hhds::flat_storage;
 };
 inline constexpr placement_rc_t placement_rc{};
-// Persistent physical block ownership, including cells introduced by ECOs.
-struct placement_block_t {
-  using value_type = std::string;
+// Persistent physical block ownership, including cells introduced by ECOs. Stored like the color group:
+// an id per node and the texts once per graph (graph_util::Placement_block in graph/shared_text.hpp).
+struct placement_block_id_t {
+  using value_type = uint32_t;
   using storage    = hhds::flat_storage;
 };
-inline constexpr placement_block_t placement_block{};
+inline constexpr placement_block_id_t placement_block_id{};
+struct placement_block_names_t {
+  using value_type = std::vector<std::string>;
+  using storage    = hhds::flat_storage;
+};
+inline constexpr placement_block_names_t placement_block_names{};
 
 // Input terminals explicitly absent from an imported physical netlist. This
 // preserves open connections without inventing tie cells. Timing may accept
@@ -524,7 +544,9 @@ inline constexpr Attr_kind attr_kind<synth_region_t> = Attr_kind::node;
 template <>
 inline constexpr Attr_kind attr_kind<synth_region_id_t> = Attr_kind::node;
 template <>
-inline constexpr Attr_kind attr_kind<synth_color_group_t> = Attr_kind::node;
+inline constexpr Attr_kind attr_kind<synth_color_group_id_t> = Attr_kind::node;
+template <>
+inline constexpr Attr_kind attr_kind<synth_color_group_names_t> = Attr_kind::node;
 template <>
 inline constexpr Attr_kind attr_kind<resynth_t> = Attr_kind::node;
 template <>
@@ -534,7 +556,9 @@ inline constexpr Attr_kind attr_kind<place_t> = Attr_kind::node;
 template <>
 inline constexpr Attr_kind attr_kind<placement_rc_t> = Attr_kind::node;
 template <>
-inline constexpr Attr_kind attr_kind<placement_block_t> = Attr_kind::node;
+inline constexpr Attr_kind attr_kind<placement_block_id_t> = Attr_kind::node;
+template <>
+inline constexpr Attr_kind attr_kind<placement_block_names_t> = Attr_kind::node;
 template <>
 inline constexpr Attr_kind attr_kind<physical_open_inputs_t> = Attr_kind::node;
 template <>
@@ -595,6 +619,16 @@ template <>
 inline constexpr bool carry_on_rebuild<route_records_v1_t> = false;
 template <>
 inline constexpr bool carry_on_rebuild<route_strings_v1_t> = false;
+// Shared texts (graph/shared_text.hpp): an id is local to its graph, so the plain value copy would point a
+// node at another graph's table. graph_util::carry_node_attrs carries them through the text instead.
+template <>
+inline constexpr bool carry_on_rebuild<synth_color_group_id_t> = false;
+template <>
+inline constexpr bool carry_on_rebuild<synth_color_group_names_t> = false;
+template <>
+inline constexpr bool carry_on_rebuild<placement_block_id_t> = false;
+template <>
+inline constexpr bool carry_on_rebuild<placement_block_names_t> = false;
 
 // EVERY LiveHD attribute tag, in one list. graph/cell.cpp pre-registers from it
 // and graph/attr_carry.hpp derives carry policy from it (role from `attr_kind`,
@@ -605,7 +639,8 @@ inline constexpr bool carry_on_rebuild<route_strings_v1_t> = false;
   X(route_records_v1)               \
   X(route_strings_v1)               \
   X(placement_rc)                   \
-  X(placement_block)                \
+  X(placement_block_id)             \
+  X(placement_block_names)          \
   X(physical_open_inputs)           \
   X(pin_place)                      \
   X(place_weight)                   \
@@ -625,7 +660,8 @@ inline constexpr bool carry_on_rebuild<route_strings_v1_t> = false;
   X(ctrl_stats)                     \
   X(synth_region)                   \
   X(synth_region_id)                \
-  X(synth_color_group)              \
+  X(synth_color_group_id)           \
+  X(synth_color_group_names)        \
   X(resynth)                        \
   X(native_comb_boundary)           \
   X(hier_color)                     \

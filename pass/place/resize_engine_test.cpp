@@ -367,7 +367,7 @@ TEST_F(Resize_engine, FloorplanCheckpointsUseTheEngineOnRealTiming) {
   options.capacitance_ff_um       = 20;
   period_ns                       = .3;
   for (auto n : graph->body().nodes()) {
-    n.attr(attrs::synth_color_group).set(std::string("bank:color:1"));
+    livehd::graph_util::Color_group::set(n, std::string("bank:color:1"));
   }
   unsigned checkpoints = 0;
   options.fp_evaluate  = [&](const Result& state) {
@@ -375,7 +375,7 @@ TEST_F(Resize_engine, FloorplanCheckpointsUseTheEngineOnRealTiming) {
     for (auto n : state.graph->body().nodes()) {
       if (n.get_name().starts_with("__place_rebuffer")) {
         EXPECT_TRUE(n.attr(attrs::place).has());
-        EXPECT_TRUE(n.attr(attrs::synth_color_group).has());
+        EXPECT_TRUE(livehd::graph_util::Color_group::has(n));
       }
     }
     return timing(state);

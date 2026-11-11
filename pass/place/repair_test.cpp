@@ -123,7 +123,7 @@ protected:
     options.halo_x = options.halo_y = .46;
     options.utilization             = .1;
     for (auto n : graph->body().nodes()) {
-      n.attr(attrs::synth_color_group).set(std::string("bank:color:1"));
+      livehd::graph_util::Color_group::set(n, std::string("bank:color:1"));
     }
   }
   unsigned count(const Result& r, std::string_view prefix) {
@@ -1260,7 +1260,7 @@ TEST_F(Buffer_repair, FloorplanTimingCheckpointsAreScopedAndResizeRunsStaTwice) 
   auto p = gate("sky130_fd_sc_hd__inv_1", "macro", b);
   graph->get_output_pin("y").connect_driver(p);
   for (auto n : graph->body().nodes()) {
-    n.attr(attrs::synth_color_group).set(std::string("bank:color:1"));
+    livehd::graph_util::Color_group::set(n, std::string("bank:color:1"));
   }
   // A real Liberty cell with macro LEF geometry avoids a second timing library.
   std::ifstream input(options.lefs[1]);
@@ -1547,9 +1547,9 @@ TEST_F(Buffer_repair, FloorplanRebuildsFanoutWithSteinerSeedsAndOwnerColors) {
           for (auto pin : n.out_sorted_pins()) {
             EXPECT_TRUE(gu::preroute_net_excluded(pin));
           }
-          EXPECT_TRUE(n.attr(attrs::synth_color_group).has());
-          if (n.attr(attrs::synth_color_group).has()) {
-            EXPECT_EQ(n.attr(attrs::synth_color_group).get(), "bank:color:1");
+          EXPECT_TRUE(livehd::graph_util::Color_group::has(n));
+          if (livehd::graph_util::Color_group::has(n)) {
+            EXPECT_EQ(livehd::graph_util::Color_group::text(n), "bank:color:1");
           }
         }
       }

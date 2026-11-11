@@ -53,14 +53,14 @@ TEST(AttrCarry, EveryNodeAttributeSurvivesARebuild) {
   src.attr(la::ctrl_stats).set(std::string{"ctrl_stats_blob"});
   src.attr(la::synth_region).set(std::string{"reg_A"});
   src.attr(la::synth_region_id).set(uint32_t{11});
-  src.attr(la::synth_color_group).set(std::string{"color_group_A"});
+  livehd::graph_util::Color_group::set(src, std::string{"color_group_A"});
   src.attr(la::synth_policy).set(std::string{"color=ex0"});
   src.attr(la::resynth).set(la::resynth_t::value_type{});
   src.attr(la::native_comb_boundary).set(la::native_comb_boundary_t::value_type{});
   src.attr(la::place).set(Ann_place{1.0F, 2.0F, 3.0F, 4.0F});
   src.attr(la::coloring_info).set(std::string{"info_blob"});
   src.attr(la::placement_rc).set(std::string{"physical_rc_blob"});
-  src.attr(la::placement_block).set(std::string{"region:7"});
+  livehd::graph_util::Placement_block::set(src, std::string{"region:7"});
   src.attr(la::simulation_init).set(std::string{"simulation_init_blob"});
   src.attr(la::proven).set(uint32_t{3});
   src.attr(la::runtime_check).set(uint32_t{5});
@@ -94,7 +94,7 @@ TEST(AttrCarry, EveryNodeAttributeSurvivesARebuild) {
   EXPECT_EQ(dst.attr(la::ctrl_stats).get(), "ctrl_stats_blob");
   EXPECT_EQ(dst.attr(la::synth_region).get(), "reg_A");
   EXPECT_EQ(dst.attr(la::synth_region_id).get(), 11u);
-  EXPECT_EQ(dst.attr(la::synth_color_group).get(), "color_group_A");
+  EXPECT_EQ(livehd::graph_util::Color_group::text(dst), "color_group_A");
   EXPECT_EQ(dst.attr(la::synth_policy).get(), "color=ex0");
   EXPECT_TRUE(dst.attr(la::resynth).has());
   EXPECT_TRUE(dst.attr(la::native_comb_boundary).has());
@@ -102,7 +102,7 @@ TEST(AttrCarry, EveryNodeAttributeSurvivesARebuild) {
   EXPECT_EQ(dst.attr(la::place).get(), Ann_place(1.0F, 2.0F, 3.0F, 4.0F));
   EXPECT_EQ(dst.attr(la::coloring_info).get(), "info_blob");
   EXPECT_EQ(dst.attr(la::placement_rc).get(), "physical_rc_blob");
-  EXPECT_EQ(dst.attr(la::placement_block).get(), "region:7");
+  EXPECT_EQ(livehd::graph_util::Placement_block::text(dst), "region:7");
   EXPECT_EQ(dst.attr(la::simulation_init).get(), "simulation_init_blob");
   EXPECT_EQ(dst.attr(la::proven).get(), 3u);
   EXPECT_EQ(dst.attr(la::runtime_check).get(), 5u);
@@ -179,7 +179,7 @@ TEST(AttrCarry, AbsentAttributesAreNotMaterialized) {
   EXPECT_EQ(dst.attr(la::color).get(), 4);
   EXPECT_FALSE(dst.attr(la::critical).has());
   EXPECT_FALSE(dst.attr(la::sta).has());
-  EXPECT_FALSE(dst.attr(la::synth_color_group).has());
+  EXPECT_FALSE(livehd::graph_util::Color_group::has(dst));
   EXPECT_FALSE(dst.attr(la::ctrl_members).has());
   EXPECT_FALSE(dst.attr(la::ctrl_stats).has());
   EXPECT_FALSE(dst.attr(hhds::attrs::name).has());

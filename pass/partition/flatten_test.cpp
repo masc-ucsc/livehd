@@ -165,7 +165,7 @@ TEST_F(FlattenAdmission, AnonymousPhysicalScopesAreTransparent) {
 TEST_F(FlattenAdmission, SynthesisColorGroupsAreScopedPerPhysicalInstance) {
   for (auto node : child->body().nodes()) {
     if (!gu::is_builtin_node(node)) {
-      node.attr(livehd::attrs::synth_color_group).set(std::string("unit:color:1"));
+      livehd::graph_util::Color_group::set(node, std::string("unit:color:1"));
     }
   }
   unsigned index = 0;
@@ -179,14 +179,14 @@ TEST_F(FlattenAdmission, SynthesisColorGroupsAreScopedPerPhysicalInstance) {
   ASSERT_TRUE(flat);
   std::map<std::string, unsigned> groups;
   for (auto node : flat->body().nodes()) {
-    if (auto group = node.attr(livehd::attrs::synth_color_group); group.has()) {
-      ++groups[std::string(group.get())];
+    if (livehd::graph_util::Color_group::has(node)) {
+      ++groups[std::string(livehd::graph_util::Color_group::text(node))];
     }
   }
   EXPECT_EQ(groups.size(), 2);
   EXPECT_EQ(groups["left.unit:color:1"], 2);
   EXPECT_EQ(groups["right.unit:color:1"], 2);
-  EXPECT_EQ(invert.attr(livehd::attrs::synth_color_group).get(), "unit:color:1");
+  EXPECT_EQ(livehd::graph_util::Color_group::text(invert), "unit:color:1");
 }
 
 TEST_F(FlattenAdmission, PrerouteExclusionIsScopedToProtectedOccurrences) {

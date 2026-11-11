@@ -37,6 +37,7 @@ cc_library(
         "attr_carry.hpp",
         "attrs.hpp",
         "cell.hpp",
+        "shared_text.hpp",
         "synth_groups.hpp",
         "graph_library_singleton.hpp",
         "latch_contract.hpp",
@@ -72,6 +73,7 @@ cc_library(
     ],
 ) for test_name in [
     "attr_carry_test",
+    "shared_text_test",
     "graph_library_singleton_test",
     "inline_sub_test",
     "loop_split_test",
