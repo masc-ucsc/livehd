@@ -141,6 +141,35 @@ one text per net.</li>
 <p>Not converted yet: the control-pin sets of <code>Prects_networks</code> (they mix "instance:pin" and
 "instance/pin" texts) and the label tables of the timing feedback, which belong with the timing work.</p>
 
+<h3>Rule for the rest of step B: no copy of what the graph holds</h3>
+<p>Ruling 2026-11-11: information is not replicated when it can be avoided, and a table keyed by a string is
+suspect wherever a graph is in hand. <code>Name</code> and <code>Pin_label</code> keep results identical while the
+copies shrink; they are not the end state. The end state keys by node and pin ids (or by the index the placer arrays
+already use), keeps per-node data in dense attributes and per-definition data in class attributes, and reads a name
+from the graph only where text is written. Where the visiting order comes from names today, the ids are sorted once
+by the graph's names, so results do not change.</p>
+<p>Count of string-keyed containers in sources that have a graph (tests excluded): <code>pass/place</code> 499
+(place.cpp 75, repair.cpp 38, resize_engine.cpp 26), <code>pass/lec</code> 200, <code>lhd</code> 195,
+<code>inou/cgen</code> 87, <code>pass/opentimer</code> 77, <code>pass/synth</code> 53, <code>inou/lefdef</code> 52,
+<code>pass/domplace</code> 42. In placement they are keyed by cell, net and pin names almost without exception
+(<code>old</code>, <code>drivers</code>, <code>names</code>, <code>components</code>, <code>positions</code>,
+<code>net_of_</code>, <code>pin_cap_</code> and so on).</p>
+<p>The replicas that still cost memory in a minion placement, largest first:</p>
+<ul>
+<li>the placer arrays: two full copies inside every native placement call, the split model and a metrics copy in the
+boundary refinement, and a saved state from the previous call (DREAMPlace);</li>
+<li>the flat graph as a second copy of the hierarchy: per node, the full name, the color-group name and the placement
+block as strings. The group and the block have a few thousand distinct values for 668k cells (about 0.2 GB), and the
+name is the instance prefix plus the name in the definition;</li>
+<li>the netlist held four times next to the graph: the view's net map with its pin and driver lists, the floorplan's
+nets, the placer arrays and the RC model, with two name-to-index maps to join them;</li>
+<li>each cell record copying name, master, block and position out of its node, and the floorplan component copying
+them again;</li>
+<li>the control-pin text sets, which are the per-net <code>ignored</code> flags spelled out pin by pin in two text
+forms;</li>
+<li>with timing on, the label tables of the timing feedback and of the timer bindings.</li>
+</ul>
+
 <h2>What the budgets mean</h2>
 <p>Estimates from the numbers above. Three quarters of the budget go to the chunk's own cells. The
 rest is left for technology data, the state shared between chunks and allocator slack.</p>
