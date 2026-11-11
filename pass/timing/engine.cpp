@@ -2,6 +2,8 @@
 #include "engine.hpp"
 
 #include <algorithm>
+#include <string_view>
+#include <unordered_map>
 #include <array>
 #include <cmath>
 #include <format>
@@ -105,8 +107,6 @@ void Engine::prepare() {
   slew_.assign(pins * C * 2, 0.f);
   required_.assign(pins * C * 2, inf);
   depth_.assign(pins * C * 2, 0);
-  early_arrival_.assign(pins * 2, inf);
-  early_slew_.assign(pins * 2, 0.f);
   criticality_.assign(pins, 0.f);
   predecessor_.assign(pins * 2, {});
   clock_pin_.assign(pins, 0);
@@ -128,11 +128,22 @@ void Engine::prepare() {
     }
     excluded_[pin] = 1;
   }
-  for (const auto& out : constraints_.outputs) {
+  // The constraint entries of each port, by one pass over the ports (a design has thousands of both).
+  port_input_.assign(cells, no_index);
+  {
+    std::unordered_map<std::string_view, uint32_t> input_cell, output_cell;
     for (const auto& port : netlist_.ports()) {
-      if (!port.input && port.name == out.port) {
-        port_load_[port.cell]  = out.load_ff;
-        port_delay_[port.cell] = out.delay_ps;
+      (port.input ? input_cell : output_cell)[port.name] = port.cell;
+    }
+    for (uint32_t i = 0; i < constraints_.inputs.size(); ++i) {
+      if (const auto it = input_cell.find(constraints_.inputs[i].port); it != input_cell.end()) {
+        port_input_[it->second] = i;
+      }
+    }
+    for (const auto& out : constraints_.outputs) {
+      if (const auto it = output_cell.find(out.port); it != output_cell.end()) {
+        port_load_[it->second]  = out.load_ff;
+        port_delay_[it->second] = out.delay_ps;
       }
     }
   }
@@ -316,11 +327,9 @@ void Engine::seed_late() {
       continue;
     }
     float delay = 0, slew = constraints_.default_input_slew_ps;
-    for (const auto& in : constraints_.inputs) {
-      if (in.port == port.name) {
-        delay = in.delay_ps;
-        slew  = in.slew_ps;
-      }
+    if (const auto entry = port_input_[port.cell]; entry != no_index) {
+      delay = constraints_.inputs[entry].delay_ps;
+      slew  = constraints_.inputs[entry].slew_ps;
     }
     for (size_t k = 0; k < C; ++k) {
       for (unsigned t = 0; t < 2; ++t) {
@@ -647,19 +656,18 @@ void Engine::evaluate() {
 
 void Engine::forward_early() {
   const size_t h = hold_corner_;
-  std::fill(early_arrival_.begin(), early_arrival_.end(), inf);
-  std::fill(early_slew_.begin(), early_slew_.end(), 0.f);
+  // The hold walk's state is allocated here, on first use: a caller that only ranks never pays for it.
+  early_arrival_.assign(netlist_.pins() * 2, inf);
+  early_slew_.assign(netlist_.pins() * 2, 0.f);
   for (const auto& port : netlist_.ports()) {
     const auto pin = netlist_.pin(port.cell, 0);
     if (!port.input || clock_pin_[pin] != 0 || cut_[pin]) {
       continue;
     }
     float delay = 0, slew = constraints_.default_input_slew_ps;
-    for (const auto& in : constraints_.inputs) {
-      if (in.port == port.name) {
-        delay = in.delay_ps;
-        slew  = in.slew_ps;
-      }
+    if (const auto entry = port_input_[port.cell]; entry != no_index) {
+      delay = constraints_.inputs[entry].delay_ps;
+      slew  = constraints_.inputs[entry].slew_ps;
     }
     for (unsigned t = 0; t < 2; ++t) {
       early_arrival_[pin * 2 + t] = delay;
@@ -895,7 +903,7 @@ size_t Engine::bytes() const {
       = [](const auto& vector) { return vector.capacity() * sizeof(typename std::decay_t<decltype(vector)>::value_type); };
   return of(arrival_) + of(slew_) + of(required_) + of(early_arrival_) + of(early_slew_) + of(hold_slack_) + of(criticality_)
          + of(depth_) + of(predecessor_) + of(clock_pin_) + of(pin_clock_) + of(load_) + of(early_load_) + of(arc_delay_)
-         + of(cell_base_) + of(arc_offset_) + of(port_load_) + of(endpoints_) + of(cut_) + of(excluded_);
+         + of(cell_base_) + of(port_input_) + of(arc_offset_) + of(port_load_) + of(endpoints_) + of(cut_) + of(excluded_);
 }
 
 }  // namespace livehd::timing::fast

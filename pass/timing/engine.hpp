@@ -117,8 +117,11 @@ public:
   [[nodiscard]] float         arrival(uint32_t pin, size_t corner, unsigned t) const { return arrival_[index(pin, corner, t)]; }
   [[nodiscard]] float         slew(uint32_t pin, size_t corner, unsigned t) const { return slew_[index(pin, corner, t)]; }
   [[nodiscard]] float         required(uint32_t pin, size_t corner, unsigned t) const { return required_[index(pin, corner, t)]; }
-  [[nodiscard]] float         early_arrival(uint32_t pin, unsigned t) const { return early_arrival_[pin * 2 + t]; }
-  [[nodiscard]] float         early_slew(uint32_t pin, unsigned t) const { return early_slew_[pin * 2 + t]; }
+  // The hold walk's state exists after evaluate(); before it, +inf and 0.
+  [[nodiscard]] float         early_arrival(uint32_t pin, unsigned t) const {
+    return early_arrival_.empty() ? std::numeric_limits<float>::infinity() : early_arrival_[pin * 2 + t];
+  }
+  [[nodiscard]] float         early_slew(uint32_t pin, unsigned t) const { return early_slew_.empty() ? 0.f : early_slew_[pin * 2 + t]; }
   [[nodiscard]] uint16_t      depth(uint32_t pin, size_t corner, unsigned t) const { return depth_[index(pin, corner, t)]; }
   // Setup slack over the setup corners and both transitions; +inf when no path passes the pin.
   [[nodiscard]] float         slack(uint32_t pin) const;
@@ -181,6 +184,7 @@ private:
   std::vector<uint8_t>     pin_clock_;  // the clock id of a clock-network pin
   // Per net, per corner.
   std::vector<float>       load_, early_load_;
+  std::vector<uint32_t>    port_input_;  // per cell: the index of its input constraint, no_index without one
   // Delay of every timed arc of every cell: [cell block][arc][corner][combo].
   std::vector<float>       arc_delay_;
   std::vector<uint32_t>    cell_base_, arc_offset_;  // arc_offset_: per arc of the type table, in floats per corner
