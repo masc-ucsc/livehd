@@ -352,6 +352,15 @@ the flat OpenTimer model, and the one mapping region that needs 730 MB on its ow
 stay as they are unless a natural cut is found: a color is not split only because it is over a
 cell count.</li>
 </ul>
+<ul class="subtasks">
+<li><strong>M — single precision.</strong> Requested 2026-11-11: fp64 to fp32 throughout placement, for speed
+first, then storage, and so that the placer can run on a GPU later (fp64 is poorly supported there). Size of
+the change: about 1,500 uses of <code>double</code> in the native placer (the design arrays, pin offsets, net
+weights, the Poisson solver, RUDY, the wirelength kernels), about 3,200 in <code>pass/place</code> and 116 in
+<code>pass/opentimer</code>. Two points to settle in the design: positions are in DBU and fp32 is exact only up to
+16.7 million, so legal positions stay integers and the continuous solver works in site and row units; and
+results will not be byte-identical, so acceptance is wire length, timing and run time against the fp64 run.</li>
+</ul>
 <p>A and B are useful on their own and can be done at any time. C to G give the first run under a
 budget with timing off. H to J make it usable. K and L can follow in either order.</p>
 
