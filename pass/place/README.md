@@ -780,6 +780,12 @@ mode. The default `none` preserves the existing flow. The host reads hierarchy
 before flattening, passes physical macros and LEF symmetry to DREAMPlace, then
 fixes the selected legal macro frame for standard-cell placement, cache reuse,
 ECO and timing repair. The zero-wire post-synthesis timing snapshot skips H2D.
+Under `macro=h2d` the controls that belong to the plain flow default off, so the one flag is enough: the movable-macro GP
+controls (`macro.pin_adjust`, `macro.align_weight`, `macro.snap`) and the native repulsion experiment controls
+(`scale_macro_density`, `exact_macro_density`, `adaptive_density`, `routability`, `macro_overlap`, `macro_jitter`,
+`io_iterations`, `schedule_iterations`); setting one of them on explicitly is still an error. H2D runs macros and cells in
+one native solver call, so `lhd synth --gui` has no fp/macro/final GP gates for it (the page says so) and shows only
+edit mode on the result; the default `macro=none` flow is the one with a macro phase to stop at and move macros in.
 Every native parameter is exposed as `synth.place.macro.<name>`; use
 `lhd describe synth.place.macro.<name>` for each option. For example:
 
@@ -1985,6 +1991,159 @@ positions, IOs and connectivity, independent of later resizing/netlist edits.
 The pre-legalization DEF can overlap or be off-site and is for inspection.
 The final `out.def` also contains accepted later sizing/buffer-repair edits.
 `gp_history.json` records actual density bins, local-field time and peak force.
+
+## Interactive placement (`lhd synth --gui`)
+
+`lhd synth ... --set synth.place=true --gui` runs the normal flow, serves the live placement on
+`http://127.0.0.1:<port>/?t=<token>` (printed on stderr; `--gui-port N`, `--gui-no-open` to skip the
+browser) and keeps the process alive after the flow until the page's *Exit lhd* button (or the
+`finish` command). The page shows macros, cells, IO, pins, a density layer, regions and
+displacement, and a side panel with the phase, iteration, HPWL, the stage switches and the
+selection tools. Design, rulings and open work: `todo/livehd/2i-interact.html`.
+
+- **Keys.** `z` zooms in and `Z` (shift+z) out around the pointer, the wheel too; `f` fits, `u` unpins the
+  selection, space runs/pauses, `Esc` clears the selection.
+- **Pause and run.** The session starts paused at the first gate (before the first GP). *Run*
+  continues; *Pause* blocks at the next poll (`synth.place.gui.poll`, default 10 GP iterations).
+  Stage switches ("stop before stage": `fp`, `macro`, `macro_legalize`, `final`, `legalize`) block the
+  flow before that stage until the switch is cleared or *Run* is pressed. When the GP is about to stop
+  and the session is paused (or `legalize` is switched off), *Run* adds at least
+  `synth.place.gui.min_iters` (20) iterations and stops again at their end; *Continue* goes on.
+- **Edits.** Dragging a movable cell or macro pins it where it is dropped (shift+click and shift+drag
+  select, then align left/centre/right, top/middle/bottom, distribute, rows x columns matrix). A pin
+  is a permanent hold in `dp::Options::interact`: the node keeps its density charge and wirelength
+  terms, is masked from the Nesterov step, and the rest of the design reacts. Pins are by node name and
+  are re-sent to every later `dp::place` call of the phase, so they survive into the final DEF (the
+  legalizer snaps them to a site). While paused, edits only accumulate; *Run* applies them together.
+  A hold applies only while the node is movable: macros are movable in the `macro` phase and fixed
+  obstacles afterwards, so a macro pinned at the macro gate keeps its position (it is not placed by the
+  macro GP) and the later phases drop the hold instead of passing the solver a fixed node.
+- **Regions layer.** The *regions* checkbox draws the region mesh (`synth.place.region.*`: the rectangles bus order and
+  boundary pins are cut along in the detail-final phase) at the positions of the moment, as dashed lines with each
+  region's name and cell count, and as dots on those lines the estimated boundary pins: where each net's Steiner tree
+  crosses a border (nets of more than 64 pins are left out, the list is thinned to 40000 dots, the note gives the
+  total). It is recomputed at every gate and when switched on, so scrub through GP, legalization and edit mode to see
+  the crossings settle. A design that fits `region.max_cells` is one region (the note says so and which flag to
+  lower); the mesh is cut around placed macros, so it appears from the final phase on. `/regions` serves it and
+  `{"cmd":"regions","on":true}` turns it on (a view toggle: not traced, not in screenshots).
+- **Core area.** In the page, an edge is picked (L/R/B/T, or by grabbing its handle on the canvas) and moved with
+  *Shrink*/*Grow* (the step, cumulative) or by dragging it; that only *previews* the new outline (dashed, red where area
+  leaves, green where it is added) with the new size and the cells' fill, and nothing re-places until *Apply* (Esc or
+  *Cancel* drops it). Apply is disabled, with the reason, when the cells would fill more than 98% or a pinned node
+  would lie outside. Apply sends the previewed core as the `area` command's `box`. The panel's *Core area* section (and the `area` command: `{"cmd":"area","edge":"right","delta":-40}`,
+  um, positive grows, or `{"cmd":"area","box":[xl,yl,xh,yh]}` for the whole core) moves one edge of the placement
+  area at a time, to take away free area that lets cells land far from their nets, or to give room. The frame is a
+  flag, so this is a restart at the latest checkpoint (the process re-executes, as for *Replay from here*) with
+  `synth.place.core` and `synth.place.die` set to the new frame; the die keeps its margin around the core, and the
+  frame is then explicit (utilization and aspect no longer apply, and the core does not grow on its own). Pins and
+  switches recorded up to there are replayed, shown at their pinned place at the gate, and moved along when
+  growing the left or bottom edge would take the frame below the origin. The command is refused, with a note and
+  no restart, when the new core would be more than 98% full of cells, cannot hold the largest cell or macro, or
+  would leave a pinned node outside it. The edge snaps inward to the site/row grid.
+- **Fork region.** To learn and experiment fast, a region of the placement can become a chip of its own in a new
+  page: *Fork selection* (the box around the selected nodes) or *Fork view* (what is on screen) in the panel, or
+  `{"cmd":"fork","box":[xl,yl,xh,yh]}` (um) / `{"cmd":"fork","nodes":[...]}` over the agent socket. The cells whose
+  centers are inside are written, from the placer's own bit-level connectivity (so buffers and ties the flow added
+  are real cells), as an lg: netlist `synth/place/forks/fork_<n>/net`, with a floorplan DEF (the box snapped to
+  complete rows and sites, the parent's tracks) whose boundary pins are FIXED where the nets crossed the box: a net
+  from or to a real top port keeps that port's name (so the SDC still applies), every other crossing net becomes
+  `cut_in_<k>` / `cut_out_<k>` at the nearest box edge point to its far side. `synth.place.seed=<tsv>` starts the
+  region's cells where they were. A child `lhd synth --gui` then runs on them (same flags except the frame and the
+  GUI ones; its own port and token, `fork_<n>/child.log` and `fork_<n>/W`), and the parent's page lists and opens
+  it. The child is an ordinary session: the Options panel, *Replay from here*, `area`, pins, maps, timing and the
+  agent socket all work, so changing a flag and comparing the region's WNS/HPWL is one click. Limits of this first
+  version: regions of single-bit cells only (a macro with bus pins is refused with the instance named), forking is
+  available at the gates and in edit mode of a phase (not after `finish`), the netlist is the flow's current one
+  (not the one saved by an earlier stage), internal clocks cut at the box have no clock definition in the child,
+  and synthesis in the child renames cells `__flat___sub_N.<name>` (the seed matches them back).
+- **Trace and replay.** Every released edit, stage switch, run/continue and screenshot is appended to
+  `<workdir>/synth/place/gui_trace.jsonl` with the phase and GP iteration where it was applied (drag
+  steps are not traced). `--set synth.place.gui.replay=<trace>` replays it in batch with no browser,
+  byte-identical to the interactive run (`lhd/tests/lhd_gui_smoke.py`), and
+  `--set synth.place.gui.video=<path>` writes one PNG per frame (`<path>.frames/` or the directory) and
+  an mp4 when the path ends in `.mp4` and `ffmpeg` is on the PATH.
+- **Agent channel (a local assistant talks to the open page).** Besides the page's token-protected HTTP port, the
+  session listens on a Unix-domain socket (mode 0600, so only the user running `lhd`; `lhd synth --gui` prints it and
+  writes `<workdir>/synth/place/gui_agent.json`). It serves the same routes with no token plus `POST /agent`, which
+  `tools/lhd_gui` (stdlib Python; `--workdir W` finds the socket) wraps: `find` (regex, scope all/cells/comb/regs/macros/io/
+  movable/fixed/selected, field name/master/any), `highlight` (paints the matches in the page with a colour and a label;
+  the same label repaints; the side panel lists them with a remove button), `highlight_names`, `clear_highlight`,
+  `highlights`, `critical` (the n most critical cells by worst pin slack through the flow's timer, answered at the flow's
+  next poll or gate and painted as `critical`), `select` (the page's selection), `selection` / `describe` (name, kind,
+  register, library master, LEF class, size and position in um, pins, pinned), `state`, and `cmd` (any page command:
+  `pause`, `run`, `move`, `restart`, ...). The page posts its selection as the user clicks, so "what is this macro?" is
+  `tools/lhd_gui --workdir W selection`, answered in the terminal while the page shows the same object.
+  `tools/lhd_gui --workdir W highlight regex='^pc' scope=regs color=orange label=pc`.
+- **Agent interface.** The same JSON commands (`POST /cmd`: `run`, `continue`, `pause`, `stage`, `move`
+  with node names or `#index`, `unpin`, `screenshot`, `finish`) and read endpoints (`GET /state`,
+  `/design`, `/frame`, `/node?i=`, `/query?name=` or `x0,y0,x1,y1`, `/screenshot.png?w=&h=&layers=`)
+  drive the session from a script or an agent; the server-side rasterizer needs no browser.
+- **Security.** The server binds 127.0.0.1 only and every request needs the random per-run token.
+  `--gui*` flags are not part of the run id.
+
+- **Centroids.** The floorplan candidates (and the frozen macro-stage targets) are drawn as circles and can be
+  dragged (`centroid` / `centroid_release` commands). The first drag freezes the other groups at their current
+  centroids and pulls the dragged group's members to the target; *release* gives the design its own targets
+  back. Moving parent-centroid attraction (`fp.parent_weight > 0`) refuses the drag.
+- **Maps and timing.** The *congestion* selector computes RUDY (bounding-box), RSMT (Steiner) or URoute (only
+  when the run loaded the learned model; otherwise the panel says why it is empty) utilization of the solver's
+  current positions on the flow thread (`map` command, `GET /map`), also while paused. A density layer is drawn
+  in the page. WNS/TNS in the panel are the numbers the flow's own STA evaluations and GP checkpoints compute,
+  plus a budgeted refresh from the solver's current positions: *Refresh timing* (`timing` command), every
+  released edit, and automatically while running as long as the time spent stays under
+  `synth.place.gui.timing_budget` percent (default 10) of the wall time. A refresh is a ranking evaluation (the
+  detailed evaluations are a shared, counted allowance and are never spent), so it shows the worst pin slack as an
+  estimate (`~WNS`) and no TNS. Refreshes read the solver and never feed back; the smoke test checks the STA
+  result of a refreshed run equals its batch replay.
+- **Edit after legalization.** The `edit` stage switch (off by default in the GUI) stops after the final
+  legalization. Moves accumulate; *Apply edits* re-places them with the ECO windowed placer (`local_place`: a few
+  GP iterations with the moved objects held, then legalization, no detailed placement because it is HPWL-driven
+  and would walk a held cell back), confined to the `Region_mesh` region that holds each object, or the whole
+  core when a move crosses a region edge. The edits are recorded and re-applied by the later final passes of the
+  flow, so the result carries them; a failed edit is reverted and reported in the panel.
+- **Scrubbing the history.** A 16-bit snapshot is kept every `synth.place.gui.history_every` GP iterations (default
+  50) and always at a gate, GP end, `edit` and `finished` (`synth.place.gui.history_mb`, default 256 MB; beyond it
+  the older ones are thinned, checkpoints always stay). The page fetches the stored 4-byte-per-node frames, caches
+  them by identity and prefetches the neighbours, so stepping and sliding are served from memory (13 snapshots:
+  25 ms the first time, under 1 ms cached). The
+  slider under the toolbar moves through them like a video: the counter shows the phase and GP iteration
+  (`final iter 55   13/27`), the arrow buttons / left and right keys step one snapshot, the play button runs the
+  history at about 8 snapshots a second, `>|` returns to live, and the markers on the slider are the placer's
+  phases (gates, `gp_end`, `legalize`, `edit`, `finished`; click one to jump). Scrubbing is read-only and does not
+  stop the flow, so pause/run keep working while you look back.
+- **Registers.** Cells with a sink on a clock net are drawn in a separate colour; the layers are *comb* (cells
+  without a clock) and *regs* (clocked registers), also in the server-side renderer (`layers=comb,regs`, `-regs`
+  switches one off). Hovering any cell shows its instance name (and "register"), not a number.
+- **Options panel.** The *Options* button (toolbar or side panel) opens a panel with every entry of
+  `lhd list options synth.place` (517 today), grouped by area, filterable by name or help text, with a checkbox for
+  booleans, a field for the rest, a *default* button per option and an *edited only* view. `synth.place` itself and
+  source-attribute-only entries are shown read-only. *Rerun from start* re-executes the flow with the edited values;
+  *Rerun from checkpoint* (select a chip on the timeline first) replays the recorded actions up to it first.
+- **Timeline and flags.** A row of checkpoints under the toolbar records the flow as it runs: one per gate
+  (`fp`, `macro`, `final`, `legalize`, ...), one after each GP (`gp_end`), `edit` and `finished`; the last one is
+  the current position. Clicking one reviews that snapshot read-only (design, frame, centroids; *Live* returns).
+  The panel lists every `synth.place.*` flag with the value this run uses, its default and its help; edit any of
+  them, select a checkpoint and press *Replay from here*: the process re-executes itself (same pid, port and token,
+  so the page just reconnects) with the edited `--set` values, replays the recorded actions up to that checkpoint
+  without blocking (pins, moves, centroid drags, GP extensions, timing requests), and becomes interactive and paused
+  at the same checkpoint (`lhd --gui-resume label:nth --gui-replay trace --gui-replay-seq n`, hidden flags set by
+  the page). The replayed checkpoint reproduces the original placement exactly when the edited flags only matter
+  after it (`lhd_gui_timeline_smoke` compares the frames); a flag that changes an earlier stage changes the replay
+  too, which is the point of re-running. A resumed session that never reaches its checkpoint (the flags changed the
+  flow) stops at the end and says so. GUI runs never use the whole-flow physical replay or the placement cache, and
+  a restart also removes `place_cache/` and `physical_cache/` from the workdir. A restart needs `--workdir` (the
+  action trace is what gets replayed). A flag such as `synth.place.resize=false` takes the flow through a different
+  path that has no `legalize`/`edit` gates.
+- **Large designs.** Above 50k nodes the page requests 16-bit frames (`GET /frame?q=16`, 4 bytes per node), and
+  every frame request after the first carries `since=<frame id>`: the server answers with a delta of the changed
+  nodes (`LHD1`) when that is smaller, and the page culls off-screen cells. Measured with an optimized build on a
+  synthetic 1M-node scene (`gui_session_test`, `MillionNodeFrameCosts`): `design.json` 87 ms (11 MB), publishing a
+  frame 0.6 ms, packing a full 8 MB frame 0.5 ms, a 16-bit 4 MB frame 0.6 ms, a delta of 1% moved nodes 0.9 ms
+  (120 KB).
+
+Limits: a GP pin that the legalizer cannot honor in a dense die is displaced like
+any cell (edit-mode moves are verified to land within a few sites of the drop); the placer itself was not run on a
+1M-cell design (only the GUI side was measured).
 
 ## Path-based resize engine (`synth.place.resize.engine=new`)
 

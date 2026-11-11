@@ -750,6 +750,23 @@ cc_test(
     deps = [":fp_repetition", "@googletest//:gtest_main"],
 )
 
+# 2i-interact: the interactive placement session, its HTTP server and the embedded page.
+cc_library(
+    name = "gui",
+    srcs = ["gui/gui_session.cpp", "gui/gui_server.cpp", "gui/gui_page.cpp", "gui/gui_render.cpp", "gui/gui_agent.cpp"],
+    hdrs = ["gui/gui_session.hpp", "gui/gui_page.hpp", "gui/gui_render.hpp"],
+    copts = COPTS,
+    visibility = ["//visibility:public"],
+    deps = ["@rapidjson"],
+)
+
+cc_test(
+    name = "gui_session_test",
+    srcs = ["gui/gui_session_test.cpp"],
+    copts = COPTS,
+    deps = [":gui", "@googletest//:gtest_main"],
+)
+
 cc_library(
     name = "place",
     srcs = [
@@ -823,6 +840,7 @@ cc_library(
     copts = COPTS,
     visibility = ["//visibility:public"],
     deps = [
+        ":gui",
         ":uroute",
         ":region_mesh",
         ":custom_cells",

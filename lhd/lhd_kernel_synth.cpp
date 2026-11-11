@@ -35,6 +35,15 @@
 // as a cold one (the abc region digest is content-based, the coloring is
 // seeded and deterministic).
 
+#include <spawn.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+#include <cerrno>
+#include <fcntl.h>
+#include <thread>
+#include <chrono>
+#include <cstring>
 #include <algorithm>
 #include <charconv>
 #include <cmath>
@@ -74,6 +83,7 @@
 #include "pass/opentimer/sta_salt.hpp"
 #include "pass/place/custom_sizing.hpp"
 #include "pass/place/growth_budget.hpp"
+#include "pass/place/gui/gui_session.hpp"
 #include "pass/place/io_timing.hpp"
 #include "pass/place/place.hpp"
 #include "pass/place/placement_hints.hpp"
@@ -88,6 +98,8 @@
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
 #include "synth_policy.hpp"
+
+extern char** environ;
 
 namespace lhd {
 
@@ -398,6 +410,10 @@ livehd::placement::Options placement_options(const Options& opts) {
   }
   check_inputs_exist(out.lefs);
   out.floorplan = synth_set(opts, "place.floorplan", "");
+  out.seed_file = synth_set(opts, "place.seed", "");
+  if (!out.seed_file.empty()) {
+    check_inputs_exist({out.seed_file});
+  }
   if (!out.floorplan.empty()) {
     check_inputs_exist({out.floorplan});
   }
@@ -929,6 +945,12 @@ livehd::placement::Options placement_options(const Options& opts) {
       || out.fixed_macro_overlap_weight < 0) {
     throw Lhd_error{"usage", "invalid synth.place cell-placement controls", ""};
   }
+  // place.macro=h2d is the native hierarchical macro algorithm: the movable-macro GP controls (pin adjustment, alignment,
+  // snapping) and the native repulsion experiment controls (macro/density scaling, routability, IO and schedule
+  // iterations, overlap, jitter) belong to the plain flow, so under h2d they default off. Turning one on explicitly is
+  // still an error (the placement says which one conflicts).
+  const bool h2d_macro    = synth_set(opts, "place.macro", "none") == "h2d";
+  const auto plain        = [&](const char* on) { return h2d_macro ? "false" : on; };
   out.bins                = integer("place.grid.density", "64");
   // grid.density_mode is one choice; the deprecated booleans it replaces could
   // be combined, so they are still read when it is absent.
@@ -970,16 +992,16 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.macro_cell_density_reach    = number("place.macro.cell_density_reach", "2");
   out.macro_density_pull_weight   = number("place.macro.density_pull_weight", "0");
   out.macro_density_pull_range    = number("place.macro.density_pull_range", "4");
-  out.scale_macro_density         = truthy(synth_set(opts, "place.scale_macro_density", "true"));
-  out.exact_macro_density         = truthy(synth_set(opts, "place.exact_macro_density", "true"));
-  out.adaptive_density            = truthy(synth_set(opts, "place.adaptive_density", "true"));
+  out.scale_macro_density         = truthy(synth_set(opts, "place.scale_macro_density", plain("true")));
+  out.exact_macro_density         = truthy(synth_set(opts, "place.exact_macro_density", plain("true")));
+  out.adaptive_density            = truthy(synth_set(opts, "place.adaptive_density", plain("true")));
   const auto unknown_const        = synth_set(opts, "place.unknown_const", "error");
   if (unknown_const != "error" && unknown_const != "zero") {
     throw Lhd_error{"usage", "synth.place.unknown_const must be error or zero", ""};
   }
   out.unknown_const_zero     = unknown_const == "zero";
   out.preserve_imported_ties = truthy(synth_set(opts, "place.preserve_imported_ties", "false"));
-  out.routability            = truthy(synth_set(opts, "place.routability", "true"));
+  out.routability            = truthy(synth_set(opts, "place.routability", plain("true")));
   out.route_model            = synth_set(opts, "place.route.model", "rsmt");
   out.route_degree           = integer("place.route.degree", "40");
   out.route_accuracy         = integer("place.route.accuracy", "3");
@@ -1049,10 +1071,10 @@ livehd::placement::Options placement_options(const Options& opts) {
   if (out.routability_macro_weight < 0 || out.routability_macro_range <= 0 || out.routability_macro_range > 16) {
     throw Lhd_error{"usage", "invalid synth.place macro routing pressure controls", "weight >= 0; range in (0,16]"};
   }
-  out.macro_overlap_weight = number("place.macro_overlap", "50");
-  out.macro_jitter         = number("place.macro_jitter", "0.01");
-  out.io_iterations        = integer("place.io_iterations", "500");
-  out.schedule_iterations  = integer("place.schedule_iterations", "500");
+  out.macro_overlap_weight = number("place.macro_overlap", h2d_macro ? "0" : "50");
+  out.macro_jitter         = number("place.macro_jitter", h2d_macro ? "0" : "0.01");
+  out.io_iterations        = integer("place.io_iterations", h2d_macro ? "0" : "500");
+  out.schedule_iterations  = integer("place.schedule_iterations", h2d_macro ? "0" : "500");
   if (out.macro_overlap_weight < 0 || out.macro_jitter < 0 || out.macro_jitter > .1 || out.schedule_iterations < 0
       || out.io_iterations < 0) {
     throw Lhd_error{"usage", "invalid synth.place repulsion controls", ""};
@@ -1180,7 +1202,7 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.fp_pin_interval       = integer("place.fp.pin_interval", "50");
   out.fp_pin_step           = number("place.fp.pin_step", "0.01");
   out.fp_pin_improvement    = number("place.fp.pin_improvement", "0.001");
-  out.macro_pin_adjust      = truthy(synth_set(opts, "place.macro.pin_adjust", "true"));
+  out.macro_pin_adjust      = truthy(synth_set(opts, "place.macro.pin_adjust", h2d_macro ? "false" : "true"));
   out.macro_pin_interval    = integer("place.macro.pin_interval", "50");
   out.macro_pin_step        = number("place.macro.pin_step", "0.01");
   out.macro_pin_improvement = number("place.macro.pin_improvement", "0.001");
@@ -1299,7 +1321,7 @@ livehd::placement::Options placement_options(const Options& opts) {
   if (out.macro_mode != "none" && out.macro_mode != "h2d") {
     throw Lhd_error{"usage", "synth.place.macro must be none or h2d", ""};
   }
-  out.macro_align_weight               = number("place.macro.align_weight", "25");
+  out.macro_align_weight               = number("place.macro.align_weight", out.macro_mode == "h2d" ? "0" : "25");
   out.macro_align_sigma                = number("place.macro.align_sigma", "0.25");
   out.macro_align_overlap_boost        = number("place.macro.align_overlap_boost", "0");
   out.macro_align_start                = integer("place.macro.align_start", "100");
@@ -1325,7 +1347,7 @@ livehd::placement::Options placement_options(const Options& opts) {
                     "macro magnet requires native full placement",
                     "use synth.place.macro=none; final=false stops after macro_plan"};
   }
-  out.macro_snap                             = truthy(synth_set(opts, "place.macro.snap", out.full ? "true" : "false"));
+  out.macro_snap                             = truthy(synth_set(opts, "place.macro.snap", out.full && out.macro_mode != "h2d" ? "true" : "false"));
   out.macro_snap_mode                        = synth_set(opts, "place.macro.snap_mode", "alignment");
   out.macro_snap_options.alignment_tolerance = number("place.macro.snap_alignment", "1");
   out.macro_snap_options.spacing_tolerance   = number("place.macro.snap_spacing_tolerance", "0.25");
@@ -1347,7 +1369,10 @@ livehd::placement::Options placement_options(const Options& opts) {
     throw Lhd_error{"usage", "invalid synth.place.macro alignment/snap controls", "alignment requires start < full"};
   }
   if ((out.macro_align_weight > 0 || out.macro_snap || out.macro_pin_adjust) && out.macro_mode == "h2d") {
-    throw Lhd_error{"usage", "macro alignment/snap/pin adjustment requires synth.place.macro=none", ""};
+    throw Lhd_error{"usage",
+                    "macro alignment/snap/pin adjustment requires synth.place.macro=none",
+                    "they are off by default under place.macro=h2d; do not set place.macro.align_weight>0, place.macro.snap=true or "
+                    "place.macro.pin_adjust=true with it"};
   }
   if (out.macro_snap && !out.full) {
     throw Lhd_error{"usage", "macro snapping requires full placement", "use synth.place.mode=full"};
@@ -1885,6 +1910,243 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
     place_options.placement_area_resume = placement_area_resume;
   }
   const bool run_resynth  = truthy(synth_set(opts, "place.resynth", "false"));
+  // 2i-interact: the interactive session serves the whole run and keeps the process alive afterwards.
+  std::shared_ptr<livehd::placement::gui::Session> gui_session;
+  std::string                                      gui_video_out;
+  const std::string gui_replay = synth_set(opts, "place.gui.replay", "");
+  if (opts.gui || !gui_replay.empty()) {
+    if (!run_place) {
+      throw Lhd_error{"usage", "--gui needs placement", "add --set synth.place=true"};
+    }
+    livehd::placement::gui::Config gc;
+    const bool resuming    = !opts.gui_replay.empty();  // after "replay from a checkpoint": replay, then interactive
+    const bool pure_replay = !gui_replay.empty() && !resuming;
+    gc.replay_path  = resuming ? opts.gui_replay : gui_replay;
+    if (resuming) {
+      const auto colon = opts.gui_resume.rfind(':');
+      gc.resume_label  = opts.gui_resume.substr(0, colon);
+      gc.resume_nth    = colon == std::string::npos ? 1 : std::atoi(opts.gui_resume.c_str() + colon + 1);
+      gc.replay_limit_seq = opts.gui_replay_seq;
+    }
+    if (!pure_replay) {  // a local agent (an assistant, a script) talks to the page's session through this Unix socket
+      auto socket_path = (std::filesystem::temp_directory_path() / std::format("lhd-gui-{}.sock", int(::getpid()))).string();
+      if (socket_path.size() > 90) {
+        socket_path = std::format("/tmp/lhd-gui-{}.sock", int(::getpid()));  // sun_path is short (104 bytes on macOS)
+      }
+      gc.agent_socket = socket_path;
+    }
+    gc.token = opts.gui_token;  // a restart keeps the page's URL (and so its token); empty: a fresh random one
+    const std::string gui_video = synth_set(opts, "place.gui.video", "");
+    if (!gui_video.empty() && !gui_replay.empty()) {
+      gc.video_dir = gui_video.ends_with(".mp4") ? gui_video + ".frames" : gui_video;
+    }
+    gui_video_out = gui_video.ends_with(".mp4") ? gui_video : std::string{};
+    if (!opts.workdir.empty()) {
+      gc.shot_dir = opts.workdir + "/synth/place/gui";
+    }
+    gc.port         = opts.gui_port;
+    gc.open_browser = !opts.gui_no_open;
+    gc.poll         = std::max(1, std::min(20, std::atoi(synth_set(opts, "place.gui.poll", "10").c_str())));
+    gc.min_iters    = std::max(1, std::atoi(synth_set(opts, "place.gui.min_iters", "20").c_str()));
+    gc.history_every = std::max(1, std::atoi(synth_set(opts, "place.gui.history_every", "50").c_str()));
+    gc.history_mb    = std::max(1, std::atoi(synth_set(opts, "place.gui.history_mb", "256").c_str()));
+    gc.timing_budget = std::clamp(std::atoi(synth_set(opts, "place.gui.timing_budget", "10").c_str()), 0, 100);
+    gc.trace_path   = pure_replay ? std::string{} : !opts.gui_trace.empty() ? opts.gui_trace : opts.workdir.empty() ? std::string{} : opts.workdir + "/synth/place/gui_trace.jsonl";
+    if (!gc.trace_path.empty()) {
+      std::filesystem::create_directories(std::filesystem::path(gc.trace_path).parent_path());
+    }
+    // Fork a region: the placer wrote its netlist, floorplan and seed positions; start a new `lhd synth --gui` on them
+    // (a child process with its own page, port and token, free to run with other flags) and hand back its page.
+    if (!opts.workdir.empty()) {
+      gc.fork_dir = opts.workdir + "/synth/place/forks";
+      gc.fork     = [&opts](const livehd::placement::gui::Fork_files& files, const livehd::placement::gui::Fork_request& req)
+          -> livehd::placement::gui::Fork_launch {
+        namespace fs = std::filesystem;
+        livehd::placement::gui::Fork_launch out;
+        const auto bare = [](std::string k) { return k.starts_with("synth.") ? k.substr(6) : k; };
+        // What the child must not inherit: the frame (the region has its own), the parent's GUI session and output files.
+        static const std::set<std::string> own{"place.die", "place.core", "place.floorplan", "place.seed", "place.utilization",
+                                                "place.aspect", "place.gui.replay", "place.gui.video", "place.gui.poll"};
+        std::vector<std::string> args;
+        args.push_back(opts.invocation_argv.empty() ? std::string{"lhd"} : opts.invocation_argv[0]);
+        args.insert(args.end(), {"synth", "lg:" + files.net_dir, "--top", files.top, "--workdir", req.dir + "/W", "--gui", "--gui-no-open"});
+        for (const auto& [key, value] : opts.sets) {
+          if (!own.contains(bare(key))) {
+            args.push_back("--set");
+            args.push_back(key + "=" + value);
+          }
+        }
+        args.insert(args.end(), {"--set", "synth.place.floorplan=" + files.floorplan, "--set", "synth.place.seed=" + files.seed});
+        const auto log_path = req.dir + "/child.log";
+        std::vector<char*> cargs;
+        for (auto& a : args) {
+          cargs.push_back(a.data());
+        }
+        cargs.push_back(nullptr);
+        posix_spawn_file_actions_t actions;
+        posix_spawn_file_actions_init(&actions);
+        posix_spawn_file_actions_addopen(&actions, STDIN_FILENO, "/dev/null", O_RDONLY, 0);
+        posix_spawn_file_actions_addopen(&actions, STDOUT_FILENO, "/dev/null", O_WRONLY, 0);
+        posix_spawn_file_actions_addopen(&actions, STDERR_FILENO, log_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        pid_t pid = 0;
+        const int rc = posix_spawn(&pid, cargs[0], &actions, nullptr, cargs.data(), environ);
+        posix_spawn_file_actions_destroy(&actions);
+        if (rc != 0) {
+          out.error = std::string("cannot start lhd: ") + std::strerror(rc);
+          return out;
+        }
+        for (int i = 0; i < 1200; ++i) {  // up to 60 s for its page
+          std::this_thread::sleep_for(std::chrono::milliseconds(50));
+          std::ifstream log(log_path);
+          const std::string text{std::istreambuf_iterator<char>(log), {}};
+          if (const auto at = text.find("http://127"); at != std::string::npos) {
+            const auto end = text.find_first_of(" \r\n", at);
+            out.url        = text.substr(at, end == std::string::npos ? std::string::npos : end - at);
+            return out;
+          }
+          int status = 0;
+          if (::waitpid(pid, &status, WNOHANG) == pid) {
+            const auto tail = text.size() > 600 ? text.substr(text.size() - 600) : text;
+            out.error       = "the new session exited before it started: " + tail;
+            return out;
+          }
+        }
+        out.error = "the new session did not start within 60 s (see " + log_path + ")";
+        return out;
+      };
+    }
+    gc.restart = [&opts, &gui_session, trace_path = gc.trace_path](const livehd::placement::gui::Restart_request& r) -> std::string {
+      // Re-run the flow with the recorded actions up to the checkpoint under other flags: re-execute this process (same
+      // pid, port and token, so the open page just reconnects). Caches that would skip the placement are removed.
+      if (!r.from_start && (opts.workdir.empty() || trace_path.empty())) {
+        return "restart needs --workdir (the action trace is what gets replayed)";
+      }
+      namespace fs = std::filesystem;
+      std::error_code ec;
+      const auto      resume_trace = trace_path + ".resume";
+      if (!r.from_start) {
+        fs::copy_file(trace_path, resume_trace, fs::copy_options::overwrite_existing, ec);
+        if (ec) {
+          return "cannot save the trace: " + ec.message();
+        }
+        if ((r.shift_x != 0 || r.shift_y != 0) && !livehd::placement::gui::shift_trace(resume_trace, r.shift_x, r.shift_y)) {
+          return "cannot move the recorded actions into the new frame";
+        }
+      }
+      if (!opts.workdir.empty()) {
+        fs::remove_all(fs::path(opts.workdir) / "place_cache", ec);
+        fs::remove_all(fs::path(opts.workdir) / "physical_cache", ec);
+      }
+      const auto bare = [](std::string k) { return k.starts_with("synth.") ? k.substr(6) : k; };
+      std::vector<std::string> args;
+      const auto&              in = opts.invocation_argv;
+      args.push_back(in.empty() ? std::string{"lhd"} : in[0]);
+      for (size_t i = 1; i < in.size(); ++i) {
+        const auto& t = in[i];
+        if (t == "--gui" || t == "--gui-no-open") {
+          continue;
+        }
+        if ((t == "--gui-port" || t == "--gui-resume" || t == "--gui-replay" || t == "--gui-replay-seq" || t == "--gui-token") && i + 1 < in.size()) {
+          ++i;
+          continue;
+        }
+        if (t == "--set" && i + 1 < in.size()) {
+          const auto key = in[i + 1].substr(0, in[i + 1].find('='));
+          if (r.set.contains(key) || r.set.contains("synth." + bare(key)) || (key.starts_with("place.") && r.set.contains("synth." + key))) {
+            ++i;
+            continue;
+          }
+        }
+        args.push_back(t);
+      }
+      for (const auto& [key, value] : r.set) {
+        args.push_back("--set");
+        args.push_back(key + "=" + value);
+      }
+      args.insert(args.end(), {"--gui", "--gui-no-open", "--gui-port", std::to_string(gui_session->port()), "--gui-token", gui_session->token()});
+      if (!r.from_start) {
+        args.insert(args.end(), {"--gui-resume", r.label + ":" + std::to_string(r.nth), "--gui-replay", resume_trace, "--gui-replay-seq", std::to_string(r.seq)});
+      }
+      std::vector<char*> cargs;
+      for (auto& a : args) {
+        cargs.push_back(a.data());
+      }
+      cargs.push_back(nullptr);
+      std::fflush(nullptr);
+      ::execv(cargs[0], cargs.data());
+      return std::string("cannot re-execute lhd: ") + std::strerror(errno);
+    };
+    gui_session = std::make_shared<livehd::placement::gui::Session>(gc);
+    livehd::placement::gui::set_active_session(gui_session);
+    {  // the flags the page may edit: synth.place.* with the values this run uses
+      std::string json = "[";
+      bool        first = true;
+      for (const auto& opt : kSynthSetOptions) {
+        if (opt.name != "place" && !std::string_view{opt.name}.starts_with("place.")) {
+          continue;  // exactly what `lhd list options synth.place` lists
+        }
+        if (std::any_of(std::begin(kSynthSetRenames), std::end(kSynthSetRenames), [&](const auto& r) { return r.old_name == opt.name; })) {
+          continue;  // a deprecated spelling: `list options` leaves it out and so does the panel
+        }
+        const auto esc = [](std::string_view s) {
+          std::string out;
+          for (const char c : s) {
+            if (c == '"' || c == '\\') {
+              out += '\\';
+              out += c;
+            } else if (c == '\n') {
+              out += "\\n";
+            } else {
+              out += c;
+            }
+          }
+          return out;
+        };
+        json += std::format(R"({}{{"name":"synth.{}","value":"{}","default":"{}","kind":"{}","ro":{},"help":"{}"}})", first ? "" : ",", opt.name,
+                            esc(synth_set(opts, opt.name, opt.default_value)), esc(opt.default_value),
+                            opt.kind == Synth_set_option::Kind::boolean ? "boolean" : opt.kind == Synth_set_option::Kind::integer ? "integer" : "text",
+                            // synth.place itself must stay on for a placement session; source attributes have no run-wide value
+                            opt.kind == Synth_set_option::Kind::source_only || opt.name == "place" ? "true" : "false",
+                            esc(opt.help));
+        first = false;
+      }
+      gui_session->set_options_json(json + "]");
+    }
+    if (!pure_replay) {
+      std::string gui_error;
+      if (!gui_session->start(&gui_error)) {
+        throw Lhd_error{"usage", "--gui: " + gui_error, "pick another --gui-port"};
+      }
+      gui_session->set_stages({{"fp", true, true}, {"macro", true, true}, {"macro_legalize", true, true}, {"final", true, true}, {"legalize", true, true}, {"edit", false, true}});
+      std::fprintf(stderr, "lhd synth --gui: %s\n", gui_session->url().c_str());
+      if (!gui_session->agent_socket().empty()) {
+        std::fprintf(stderr, "lhd synth --gui agent socket (local, mode 0600): %s   (tools/lhd_gui.py --workdir W help)\n", gui_session->agent_socket().c_str());
+        if (!opts.workdir.empty()) {  // where an agent finds it
+          std::filesystem::create_directories(std::filesystem::path(opts.workdir) / "synth/place");
+          std::ofstream(std::filesystem::path(opts.workdir) / "synth/place/gui_agent.json")
+              << std::format(R"({{"socket":"{}","pid":{}}})", gui_session->agent_socket(), int(::getpid())) << "\n";
+        }
+      }
+      if (gc.open_browser) {
+        livehd::placement::gui::open_browser(gui_session->url());
+      }
+    }
+    place_options.gui = gui_session;
+  }
+  struct Gui_finish {  // the flow is done: keep serving until the user presses finish (not after an error)
+    std::shared_ptr<livehd::placement::gui::Session> session;
+    int                                              uncaught;
+    std::string&                                     video_out;
+    ~Gui_finish() {
+      if (session && std::uncaught_exceptions() == uncaught) {
+        session->wait_finish();
+        if (session->replaying() && !video_out.empty() && session->video_frames() > 0
+            && !livehd::placement::gui::make_video(session->config().video_dir, video_out)) {
+          std::fprintf(stderr, "synth.place.gui.video: ffmpeg not found; the frames are in %s\n", session->config().video_dir.c_str());
+        }
+      }
+    }
+  } gui_finish{gui_session, std::uncaught_exceptions(), gui_video_out};
   const bool run_resize   = truthy(synth_set(opts, "place.resize", run_place && run_sta && place_options.full ? "true" : "false"));
   place_options.gp_resize = run_resize && place_options.gp_resize;
   // Timing weights are the normal full-placement objective. Synthesis-only
@@ -2048,6 +2310,11 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
       && (!run_place || !place_options.full || !run_sta || mapper_method != "pass.abc")) {
     throw Lhd_error{"usage", "synth.place.io_resynth requires ABC full placement and OpenTimer", "use 0 to disable"};
   }
+  if (gui_session && !sdc.empty()) {  // the page shows the achieved frequency against this period
+    if (const auto clock_period = sdc_min_clock_period_ps(sdc, liberty)) {
+      gui_session->set_clock_period_ps(*clock_period);
+    }
+  }
   std::shared_ptr<livehd::synth::Io_store> io_store;
   if (!macro_plan_only && io_resynth_percent > 0 && user_workdir && run_place && place_options.full && run_sta
       && mapper_method == "pass.abc") {
@@ -2163,7 +2430,8 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
   opts.top = top;
 
   std::unique_ptr<Physical_cache> physical_cache;
-  if (user_workdir && opts.incremental && run_place && place_options.full) {
+  // An interactive (or replayed) session must run the placement: no whole-flow physical replay, no placement cache.
+  if (user_workdir && opts.incremental && run_place && place_options.full && !gui_session) {
     // Hash the learned-routing pool once: replay identity and placement share it.
     place_options.uroute_pool = livehd::placement::load_uroute_pool(place_options);
     auto        dependencies  = place_options.lefs;
@@ -2173,7 +2441,7 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
     for (std::string path; paths >> path;) {
       dependencies.push_back(path);
     }
-    for (const auto& path : {sdc, place_options.tech_rc_file, place_options.tracks_file, place_options.floorplan}) {
+    for (const auto& path : {sdc, place_options.tech_rc_file, place_options.tracks_file, place_options.floorplan, place_options.seed_file}) {
       if (!path.empty()) {
         dependencies.push_back(path);
       }
@@ -2675,7 +2943,7 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
       // own reports above; recomputation must only publish newly produced ones.
       fs::remove(fs::path(place_options.output_dir) / "preroute.json");
       fs::remove(fs::path(place_options.output_dir) / "power_grid.json");
-      if (user_workdir && opts.incremental) {
+      if (user_workdir && opts.incremental && !gui_session) {
         place_options.cache_dir = opts.workdir + "/place_cache";
       }
       Eprp_var timing_options;
@@ -2724,10 +2992,18 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
               set_crash_context(phase_step, phase_log);
               return livehd::placement::prects_data_timing(std::move(feedback), controls);
             };
+      // 2i-interact: the panel shows the numbers every STA evaluation of the flow already computes (read-only).
+      const auto show_timing = [&](const livehd::timing::Feedback& fb) {
+        if (gui_session && fb.wns) {
+          gui_session->set_timing(*fb.wns * fb.time_unit_ps, fb.tns ? *fb.tns * fb.time_unit_ps : 0., -1);
+        }
+      };
       const auto evaluate = [&](const livehd::placement::Result& state) {
         Phase_timer phase(res, "pass.opentimer.incremental");
         const auto  controls = livehd::placement::prects_networks(timing_tech, state.floorplan, state.prects);
-        return estimate({state.graph, state.parasitics, controls}, livehd::opentimer::Physical_session::Purpose::detailed);
+        auto        fb       = estimate({state.graph, state.parasitics, controls}, livehd::opentimer::Physical_session::Purpose::detailed);
+        show_timing(fb);
+        return fb;
       };
       const auto rank = [&](const livehd::placement::Ranking_view& state) {
         Phase_timer phase(res, "pass.opentimer.ranking");
@@ -2834,6 +3110,9 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
         place_options.gp_rank     = rank;
         // GP consumes criticality only. Physical resizing runs after legal GP.
         place_options.fp_resize   = false;
+      }
+      if (gui_session) {
+        place_options.gui_rank = rank;  // read-only timing refresh for the panel (never the flow's own gp_rank)
       }
       if (io_flow && !place_options.macro_legalize_cells && !place_options.fp_evaluate) {
         // Resynthesis still needs one selected GP measurement when periodic
@@ -3327,6 +3606,9 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
     if (!place_options.tracks_file.empty()) {
       res.inputs.push_back(place_options.tracks_file);
     }
+    if (!place_options.seed_file.empty()) {
+      res.inputs.push_back(place_options.seed_file);
+    }
     if (!place_options.floorplan.empty()) {
       res.inputs.push_back(place_options.floorplan);
     }
@@ -3620,4 +3902,22 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
 }
 }  // namespace
 
+void gui_report_failure(const Result& res) {
+  const auto session = livehd::placement::gui::active_session();
+  if (!session) {
+    return;
+  }
+  std::string detail = res.error_message;
+  if (!res.error_hint.empty()) {
+    detail += "\nhint: " + res.error_hint;
+  }
+  size_t shown = 0;
+  for (const auto& rec : livehd::diag::sink().records()) {
+    if (rec.severity == livehd::diag::Severity::error && rec.message != res.error_message && shown++ < 10) {
+      detail += "\n" + rec.message;
+    }
+  }
+  std::fprintf(stderr, "lhd synth --gui: the run failed; the page shows the error. Exit it in the page (or restart with other flags).\n");
+  session->fail("The run failed (" + res.error_class + ")", detail);
+}
 }  // namespace lhd

@@ -585,6 +585,34 @@ Options parse_args(int argc, char** argv) {
                         std::format("--diag-fmt expects auto|json|pretty, got '{}'", v),
                         "auto = pretty on a terminal, json when piped/captured"};
       }
+    } else if (a == "--gui") {
+      opts.gui = true;
+    } else if (a == "--gui-no-open") {
+      opts.gui = opts.gui_no_open = true;
+    } else if (a == "--gui-port") {
+      const std::string v{need_value(a, i, argc, argv)};
+      char*             end  = nullptr;
+      const long        port = std::strtol(v.c_str(), &end, 10);
+      if (v.empty() || *end != '\0' || port < 0 || port > 65535) {
+        throw Lhd_error{"usage", std::format("--gui-port expects 0..65535, got '{}'", v), "0 picks a free port"};
+      }
+      opts.gui      = true;
+      opts.gui_port = int(port);
+    } else if (a == "--gui-resume" || a == "--gui-replay" || a == "--gui-token" || a == "--gui-replay-seq") {
+      const std::string v{need_value(a, i, argc, argv)};
+      opts.gui = true;
+      if (a == "--gui-resume") {
+        opts.gui_resume = v;
+      } else if (a == "--gui-replay") {
+        opts.gui_replay = v;
+      } else if (a == "--gui-token") {
+        opts.gui_token = v;
+      } else {
+        opts.gui_replay_seq = std::strtoull(v.c_str(), nullptr, 10);
+      }
+    } else if (a == "--gui-trace") {
+      opts.gui       = true;
+      opts.gui_trace = need_value(a, i, argc, argv);
     } else if (a == "--workdir") {
       opts.workdir = need_value(a, i, argc, argv);
     } else if (a == "-q" || a == "--quiet") {

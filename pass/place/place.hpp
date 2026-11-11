@@ -111,7 +111,12 @@ struct Preroute_settings {
   int         budget_ms = 10, stage_budget_ms = 10000, bins = 64;
   int         max_rows = 0, max_sites = 0;  // Zero leaves original-net pin spans unlimited.
 };
+namespace gui {
+class Session;  // pass/place/gui/gui_session.hpp (2i-interact)
+}
 struct Options {
+  // Interactive session (lhd synth --gui): live frames, stage gates, pins. Null: batch.
+  std::shared_ptr<gui::Session>                         gui;
   std::shared_ptr<const metadata::Bundle>               metadata;
   std::shared_ptr<const std::vector<Hint_scope>>        metadata_scopes;             // Before timing seed flattens hierarchy.
   bool                                                  metadata_finalized = false;  // Internal macro-to-final handoff.
@@ -158,6 +163,8 @@ struct Options {
   Placement_stage                                           completed_stage = Placement_stage::final;
   std::vector<std::string>                                  lefs;
   std::string                                               floorplan, output_dir, cache_dir;
+  // TSV (instance, x, y DBU): initial positions of movable cells (a forked region starts from its parent's placement)
+  std::string                                               seed_file;
   std::string                                               liberty, tech_rc_file, tracks_file;
   std::string                                               macro_mode = "none";
   Warp_options                      fp_warp{.weight = 1}, macro_warp{.weight = .7, .start_stability = .2, .refresh_interval = 25};
@@ -301,6 +308,7 @@ struct Options {
   // Optional lightweight path ranking for placement weights. Detailed timing
   // remains available through fp_evaluate for resizing and resynthesis.
   Rank                                            gp_rank;
+  Rank                                            gui_rank;  // 2i-interact: read-only timing refresh for the panel
   double                                          fp_minimum = 3000, fp_attraction = .25, fp_repulsion = 5, fp_anchor = .25;
   bool                                            fp_distance_attraction = true;
   bool                                            fp_anchor_macros_only = false;  // frozen targets; retain all-member normalization

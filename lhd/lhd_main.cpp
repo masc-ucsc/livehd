@@ -234,5 +234,8 @@ int main(int argc, char** argv) {
     }
   }
   lhd::write_result(opts, res);
+  if (res.status != "pass") {
+    lhd::gui_report_failure(res);
+  }
   return res.exit_code;
 }

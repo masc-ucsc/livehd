@@ -37,6 +37,7 @@
 #include "filler_budget.hpp"
 #include "forces/gp_rejection.hpp"
 #include "forces/gp_timing.hpp"
+#include "gui/gui_session.hpp"
 #include "forces/legalization.hpp"
 #include "fp_repetition_graph.hpp"
 #include "growth_budget.hpp"
@@ -4844,8 +4845,696 @@ bool legalize_edits(View& v, const ph::Technology& tech, const ph::Floorplan& re
   make_arrays(v, tech);
   return true;
 }
+// ---- 2i-interact: the adapter between the solver and gui::Session ---------------------------------------------------
+// Pins and the action trace use node *names*; the scene maps them to this phase's solver indices.
+std::shared_ptr<const gui::Scene> gui_scene(const View& v, const ph::Technology& tech, const std::string& phase) {
+  auto        scene = std::make_shared<gui::Scene>();
+  const auto& d     = v.design;
+  scene->phase      = phase;
+  scene->dbu_per_um = tech.dbu;
+  scene->die        = {d.layout.xl, d.layout.yl, d.layout.xh, d.layout.yh};
+  scene->frame_die  = {v.fp.die.xl, v.fp.die.yl, v.fp.die.xh, v.fp.die.yh};
+  for (int i = 0; i < d.num_movable && size_t(i) < d.node_size_x.size(); ++i) {
+    scene->cell_area += d.node_size_x[size_t(i)] * d.node_size_y[size_t(i)];
+  }
+  scene->nodes.reserve(d.node_x.size());
+  // Registers: instances with a sink on a net that carries the clock role.
+  std::unordered_set<std::string> clocked;
+  for (const auto& [driver, sinks] : v.nets) {
+    const auto& roles = driver.instance == "PIN" ? v.prects.clock_ports : v.prects.clock_pins;
+    if (roles.contains(driver.label())) {
+      for (const auto& sink : sinks) {
+        if (sink.instance != "PIN") {
+          clocked.insert(sink.instance);
+        }
+      }
+    }
+  }
+  for (size_t i = 0; i < d.node_x.size(); ++i) {
+    gui::Node n;
+    n.w = d.node_size_x[i];
+    n.h = d.node_size_y[i];
+    if (i < v.cells.size()) {
+      n.name    = v.cells[i].name;
+      n.master  = v.cells[i].macro;
+      if (const auto m = tech.macros.find(n.master); m != tech.macros.end()) {
+        n.klass = m->second.klass;
+      }
+      n.pins    = i + 1 < d.flat_node2pin_start.size() ? uint32_t(d.flat_node2pin_start[i + 1] - d.flat_node2pin_start[i]) : 0;
+      n.seq     = clocked.contains(v.cells[i].name);
+      n.movable = int(i) < d.num_movable;
+      const bool macro = i < d.node_macro.size() && d.node_macro[i];
+      n.kind    = macro ? (n.movable ? gui::Kind::macro : gui::Kind::fixed) : gui::Kind::cell;
+    } else if (i < v.terminal_begin) {
+      n.name    = "blockage#" + std::to_string(i);
+      n.kind    = gui::Kind::blockage;
+      n.movable = false;
+    } else {
+      n.name    = v.fp.terminals.at(i - v.terminal_begin).name;
+      n.master  = "PIN";
+      n.kind    = gui::Kind::io;
+      n.movable = false;
+    }
+    scene->nodes.push_back(std::move(n));
+  }
+  if (!d.centroid_groups.empty()) {  // FP candidates / frozen macro-stage targets, by group name
+    const auto samples = dp::detail::centroid_summary(d);
+    for (size_t g = 0; g < d.centroid_groups.size() && g < samples.size(); ++g) {
+      scene->centroids.push_back({d.centroid_groups[g].name, samples[g].x, samples[g].y, samples[g].radius, true});
+    }
+  }
+  scene->build_index();
+  return scene;
+}
+// Edits from the session -> what the solver applies (pins, releases, centroid targets).
+dp::InteractUpdate gui_update(const gui::Edits& edits) {
+  dp::InteractUpdate update;
+  for (const auto& p : edits.pins) {
+    update.pins.push_back({p.node, p.x, p.y, 0});
+  }
+  update.releases = edits.releases;
+  for (const auto& c : edits.centroids) {
+    update.centroid_targets.push_back({c.group, c.x, c.y});
+  }
+  update.release_centroids = edits.release_centroids;
+  return update;
+}
+// HPWL (um) of the solver's current positions, over the design's own connectivity.
+double gui_hpwl_um(const dp::Design& d, const double* x, const double* y, double dbu) {
+  double total = 0;
+  for (size_t net = 0; net + 1 < d.flat_net2pin_start.size(); ++net) {
+    double xl = 1e300, xh = -1e300, yl = 1e300, yh = -1e300;
+    const int begin = d.flat_net2pin_start[net], end = d.flat_net2pin_start[net + 1];
+    if (end - begin < 2) {
+      continue;
+    }
+    for (int k = begin; k < end; ++k) {
+      const int p = d.flat_net2pin[k], node = d.pin2node[p];
+      const double px = x[node] + d.pin_offset_x[p], py = y[node] + d.pin_offset_y[p];
+      xl = std::min(xl, px);
+      xh = std::max(xh, px);
+      yl = std::min(yl, py);
+      yh = std::max(yh, py);
+    }
+    total += (xh - xl) + (yh - yl);
+  }
+  return total / dbu;
+}
+struct Gui_map_env {
+  // the region mesh the page draws ("regions"): its options, the fixed macros and the IO terminals it is cut around
+  Region_options         region;
+  std::vector<int>       region_macros;
+  std::vector<Region_io> region_ios;
+  double                 dbu = 1;
+  double                 ch = 1, cv = 1;
+  std::function<void()> init;
+  int                   bins = 32, degree = 40, accuracy = 3;
+  std::shared_ptr<const dp::UrouteContext> uroute;  // loaded only when the run uses the URoute model
+};
+// The region mesh at the given positions (what bus order and boundary pins are cut along in the detail-final phase) and
+// where the nets cross its borders: each net's Steiner tree against every mesh edge. The crossings are the places the
+// boundary pins of the region refinement would sit; the list is thinned to a cap, the total is reported.
+gui::Grid gui_regions(const dp::Design& base, const double* x, const double* y, size_t n, const Gui_map_env& env) {
+  gui::Grid g;
+  dp::Design d = base;
+  for (size_t i = 0; i < n && i < d.node_x.size(); ++i) {
+    d.node_x[i] = x[i];
+    d.node_y[i] = y[i];
+  }
+  for (int i = 0; i < d.num_movable; ++i) {
+    if (!d.node_macro.empty() && d.node_macro[size_t(i)]) {
+      g.note = "regions are cut around placed macros: they appear in the final phase";
+      return g;
+    }
+  }
+  const auto mesh = Region_mesh::build(d, env.region_macros, env.region_ios, env.region, env.dbu);
+  for (const auto& r : mesh.rects) {
+    g.rects.insert(g.rects.end(), {float(r.xl), float(r.yl), float(r.xh), float(r.yh), float(r.cells)});
+  }
+  if (mesh.rects.size() < 2) {
+    g.note = std::format("one region: {} cells fit region.max_cells={}; lower synth.place.region.max_cells to partition it",
+                         d.num_movable,
+                         env.region.max_cells);
+    return g;
+  }
+  constexpr size_t cap = 40000;
+  size_t           stride = 1, seen = 0, skipped = 0;
+  const auto       keep   = [&](double cx, double cy, int axis) {
+    ++g.crossing_total;
+    if (seen++ % stride == 0) {
+      g.crossings.insert(g.crossings.end(), {float(cx), float(cy), float(axis)});
+      if (g.crossings.size() > 3 * cap) {  // thin to every other one
+        std::vector<float> half;
+        for (size_t i = 0; i + 2 < g.crossings.size(); i += 6) {
+          half.insert(half.end(), g.crossings.begin() + long(i), g.crossings.begin() + long(i) + 3);
+        }
+        g.crossings = std::move(half);
+        stride *= 2;
+      }
+    }
+  };
+  std::vector<Point> points;
+  for (size_t net = 0; net + 1 < d.flat_net2pin_start.size(); ++net) {
+    const int begin = d.flat_net2pin_start[net], end = d.flat_net2pin_start[net + 1];
+    if (end - begin < 2) {
+      continue;
+    }
+    if (end - begin > 64) {  // a wide net (clock, reset): its tree is not the story
+      ++skipped;
+      continue;
+    }
+    points.clear();
+    int first = -2;
+    bool crosses = false;
+    for (int k = begin; k < end; ++k) {
+      const int p = d.flat_net2pin[size_t(k)], node = d.pin2node[size_t(p)];
+      const double px = d.node_x[size_t(node)] + d.pin_offset_x[size_t(p)], py = d.node_y[size_t(node)] + d.pin_offset_y[size_t(p)];
+      points.emplace_back(px, py);
+      const int at = mesh.rect_of(px, py).value_or(-1);
+      if (first == -2) {
+        first = at;
+      } else if (at != first) {
+        crosses = true;
+      }
+    }
+    if (!crosses) {
+      continue;
+    }
+    const auto tree = steiner_tree(points);
+    for (const auto& [a, b] : tree.edges) {
+      const auto [ax, ay] = tree.points[a];
+      const auto [bx, by] = tree.points[b];
+      for (const auto& e : mesh.edges) {
+        const double pa = e.axis == 0 ? ax : ay, pb = e.axis == 0 ? bx : by;
+        if ((pa < e.position) == (pb < e.position) || pa == pb) {
+          continue;
+        }
+        const double t     = (e.position - pa) / (pb - pa);
+        const double along = e.axis == 0 ? ay + t * (by - ay) : ax + t * (bx - ax);
+        if (along < e.low || along > e.high) {
+          continue;
+        }
+        e.axis == 0 ? keep(e.position, along, 0) : keep(along, e.position, 1);
+      }
+    }
+  }
+  g.note = std::format("{} regions, {} net crossings of their borders{}",
+                       mesh.rects.size(),
+                       g.crossing_total,
+                       skipped ? std::format(" ({} wide nets left out)", skipped) : std::string{});
+  return g;
+}
+// "rudy" (bounding-box demand) or "rsmt" (Steiner demand) utilization of the given positions: max of the two directions.
+gui::Grid gui_map(const std::string& kind, const dp::Design& base, const double* x, const double* y, size_t n, const Gui_map_env& env) {
+  if (kind == "regions") {
+    return gui_regions(base, x, y, n, env);
+  }
+  dp::Design d = base;
+  for (size_t i = 0; i < n && i < d.node_x.size(); ++i) {
+    d.node_x[i] = x[i];
+    d.node_y[i] = y[i];
+  }
+  if (kind == "uroute" && !env.uroute) {
+    gui::Grid none;
+    none.note = "the URoute model is not loaded (synth.place.route.model=uroute or auto)";
+    return none;
+  }
+  dp::RudyOptions ro;
+  ro.bins_x = ro.bins_y   = env.bins;
+  ro.horizontal_capacity  = env.ch;
+  ro.vertical_capacity    = env.cv;
+  ro.macro_blockages      = ro.pin_access = true;
+  ro.model                = kind == "uroute" ? dp::RudyModel::uroute : kind == "rsmt" ? dp::RudyModel::rsmt : dp::RudyModel::bbox;
+  ro.uroute               = env.uroute;
+  ro.degree               = env.degree;
+  ro.accuracy             = env.accuracy;
+  ro.initialize           = env.init;
+  const auto r            = dp::rudy(d, ro);
+  gui::Grid  g;
+  g.bx = g.by = env.bins;
+  g.v.resize(r.horizontal.size());
+  for (size_t i = 0; i < g.v.size(); ++i) {
+    g.v[i] = float(std::max(r.horizontal[i], i < r.vertical.size() ? r.vertical[i] : 0.));
+    g.peak = std::max(g.peak, double(g.v[i]));
+  }
+  g.overflow = r.overflow;
+  return g;
+}
+
+// WNS/TNS (ps) of the given positions through the flow's timer (Options::gui_rank), the way a GP checkpoint ranks them:
+// RC from the geometry, then a ranking evaluation. It reads the solver and never feeds anything back.
+bool gui_timing(const View& v, const ph::Technology& tech, const Options& options, const Result& result, const dp::Design& base,
+                const double* x, const double* y, size_t n, gui::Timing_query& q) {
+  if (!options.gui_rank || !result.graph) {
+    return false;
+  }
+  dp::Design d = base;
+  for (size_t i = 0; i < n && i < d.node_x.size(); ++i) {
+    d.node_x[i] = x[i];
+    d.node_y[i] = y[i];
+  }
+  const Geometry_view geometry{v, d};
+  for (size_t i = 0; i < geometry.view.cells.size(); ++i) {
+    geometry.view.cells[i].node.attr(attrs::place).set(geometry.pose(i));
+  }
+  Result checkpoint;
+  checkpoint.prects      = v.prects;
+  checkpoint.graph       = result.graph;
+  checkpoint.net_weights = v.weights;
+  checkpoint.fp_library  = result.fp_library;
+  auto rc_options        = options;
+  rc_options.full        = false;
+  checkpoint.parasitics  = estimate_rc(geometry, tech, rc_options, nullptr);
+  record_poses(*checkpoint.parasitics, geometry);
+  const auto fb = prects_data_timing(options.gui_rank({checkpoint.graph, checkpoint.parasitics, v.ignored}), v.ignored);
+  // The most critical cells: the worst pin slack of each instance (pin labels are "instance:pin"), ascending.
+  const auto critical = [&] {
+    if (!q.want_critical || !fb.ranking || !fb.ranking->layout) {
+      return;
+    }
+    const auto& labels = fb.ranking->layout->labels;
+    std::unordered_map<std::string, double> worst;
+    for (size_t i = 0; i < fb.ranking->pins.size() && i < labels.size(); ++i) {
+      const auto& pin = fb.ranking->pins[i];
+      const auto  at  = labels[i].rfind(':');
+      if (pin.clock || !std::isfinite(pin.slack) || at == std::string::npos) {
+        continue;  // clock pins and the design's own ports are not cells
+      }
+      auto [it, fresh] = worst.emplace(labels[i].substr(0, at), pin.slack * fb.time_unit_ps);
+      if (!fresh) {
+        it->second = std::min(it->second, pin.slack * fb.time_unit_ps);
+      }
+    }
+    std::vector<std::pair<std::string, double>> sorted(worst.begin(), worst.end());
+    std::sort(sorted.begin(), sorted.end(), [](const auto& a, const auto& b) { return a.second != b.second ? a.second < b.second : a.first < b.first; });
+    for (const auto& entry : sorted) {
+      if (int(q.critical.size()) >= q.n || (q.margin_ps >= 0 && entry.second > sorted.front().second + q.margin_ps)) {
+        break;
+      }
+      q.critical.push_back(entry);
+    }
+  };
+  if (fb.wns) {
+    q.wns_ps = *fb.wns * fb.time_unit_ps;
+    q.tns_ps = fb.tns ? *fb.tns * fb.time_unit_ps : std::nan("");
+    critical();
+    return true;
+  }
+  // A ranking evaluation has no sign-off WNS/TNS (and the shared detailed-evaluation allowance must not be spent here):
+  // report the worst pin slack as an estimate and leave TNS unknown.
+  if (fb.ranking) {
+    double worst = std::numeric_limits<double>::infinity();
+    for (const auto& pin : fb.ranking->pins) {
+      if (!pin.clock && std::isfinite(pin.slack)) {
+        worst = std::min(worst, pin.slack);
+      }
+    }
+    if (std::isfinite(worst)) {
+      q.wns_ps = worst * fb.time_unit_ps;
+      q.tns_ps = std::nan("");
+      critical();
+      return true;
+    }
+  }
+  return false;
+}
+gui::Timing_provider gui_timing_provider(const View* v, const ph::Technology* tech, const Options* options, const Result* result,
+                                         const dp::Design* base, const double* x, const double* y, size_t n) {
+  return [=](gui::Timing_query& q) { return gui_timing(*v, *tech, *options, *result, *base, x, y, n, q); };
+}
+
+gui::Fork_files gui_fork_build(const View& v, const ph::Technology& tech, const gui::Fork_request& req);
+
+// Publishes this phase, blocks at its gate (the session starts paused), and installs the poll hook and the
+// legalization gate on `control`. Pins that survived from an earlier phase move the design before the solve.
+void gui_attach(dp::Options& control, const Options& options, View& v, const ph::Technology& tech, const Result& result,
+                const std::string& phase) {
+  auto session = options.gui;
+  if (!session) {
+    return;
+  }
+  auto&        d = v.design;
+  const double dbu = tech.dbu;
+  session->begin_phase(gui_scene(v, tech, phase), d.node_x.data(), d.node_y.data(), d.node_x.size());
+  session->set_fork_builder([vp = &v, tp = &tech](const gui::Fork_request& r) { return gui_fork_build(*vp, *tp, r); });
+  auto env = std::make_shared<Gui_map_env>();
+  env->ch = control.route_capacity_h;
+  env->cv = control.route_capacity_v;
+  env->init = control.route_initialize;
+  env->bins = std::clamp(route_grid_bins(control.auxiliary_bins, options.bins), 8, 64);
+  env->uroute = control.uroute;
+  env->degree = control.route.degree;
+  env->accuracy = control.route.accuracy;
+  env->dbu = tech.dbu;
+  env->region = region_options_with_tracks(tech, options.region);
+  for (size_t i = size_t(std::max(0, d.num_movable)); i < v.cells.size(); ++i) {  // the fixed macros (not placement masks)
+    if (!tech.macros.at(v.cells[i].macro).klass.starts_with("CORE") && !v.cells[i].name.starts_with("__lhd_frame_mask_")) {
+      env->region_macros.push_back(int(i));
+    }
+  }
+  for (const auto& t : v.fp.terminals) {
+    env->region_ios.push_back({t.name, double(t.x), double(t.y)});
+  }
+  gui::Stats start;
+  start.hpwl_um = gui_hpwl_um(d, d.node_x.data(), d.node_y.data(), dbu);
+  const gui::Map_provider start_maps = [&](const std::string& k) { return gui_map(k, d, d.node_x.data(), d.node_y.data(), d.node_x.size(), *env); };
+  const auto start_timing = gui_timing_provider(&v, &tech, &options, &result, &d, d.node_x.data(), d.node_y.data(), d.node_x.size());
+  auto pending = std::make_shared<gui::Edits>(session->gate(phase, d.node_x.data(), d.node_y.data(), d.node_x.size(), start, &start_maps, &start_timing));
+  for (const auto& pin : pending->pins) {
+    if (pin.node >= 0 && pin.node < d.num_movable) {
+      d.node_x[size_t(pin.node)] = pin.x;
+      d.node_y[size_t(pin.node)] = pin.y;
+    }
+  }
+  control.interact_interval  = std::max(1, session->config().poll);
+  control.interact_centroids = !d.centroid_groups.empty();
+  const View*                vp = &v;
+  const ph::Technology*      tp = &tech;
+  const Options*             op = &options;
+  const Result*              rp = &result;
+  control.interact          = [session, pending, dbu, env, vp, tp, op, rp](const dp::InteractView& view) {
+    gui::Stats st;
+    st.hpwl_um = gui_hpwl_um(*view.design, view.x, view.y, dbu);
+    const gui::Map_provider maps = [&](const std::string& k) { return gui_map(k, *view.design, view.x, view.y, size_t(view.count), *env); };
+    const auto timing = gui_timing_provider(vp, tp, op, rp, view.design, view.x, view.y, size_t(view.count));
+    if (view.centroids) {
+      for (const auto& c : *view.centroids) {
+        st.centroids.push_back({c.x, c.y, c.radius});
+      }
+    }
+    if (view.finishing) {
+      st.iteration = view.iteration;
+      auto end     = session->gp_end(view.x, view.y, size_t(view.count), st, &maps, &timing);
+      auto update  = gui_update(end.edits);
+      update.extend = end.extend;
+      return update;
+    }
+    auto edits = session->poll(view.iteration, view.x, view.y, size_t(view.count), st, &maps, &timing);
+    if (view.first) {
+      // A new place() call (the GP, then any retry or burst) holds nothing yet: re-send every pin of this phase.
+      auto all = session->all_pins();
+      for (const auto& p : edits.pins) {
+        std::erase_if(all.pins, [&](const auto& q) { return q.node == p.node; });
+      }
+      edits.pins.insert(edits.pins.end(), all.pins.begin(), all.pins.end());
+      for (const auto& c : edits.centroids) {
+        std::erase_if(all.centroids, [&](const auto& q) { return q.group == c.group; });
+      }
+      edits.centroids.insert(edits.centroids.end(), all.centroids.begin(), all.centroids.end());
+    }
+    pending->pins.clear();
+    return gui_update(edits);
+  };
+  const auto prior = control.before_legalize;
+  const bool macro_only = control.macro_only_legalize;
+  control.before_legalize = [prior, session, macro_only, dbu, env, vp, tp, op, rp](dp::Design& physical) {
+    if (prior) {
+      prior(physical);
+    }
+    gui::Stats st;
+    st.hpwl_um = gui_hpwl_um(physical, physical.node_x.data(), physical.node_y.data(), dbu);
+    const gui::Map_provider maps = [&](const std::string& k) {
+      return gui_map(k, physical, physical.node_x.data(), physical.node_y.data(), physical.node_x.size(), *env);
+    };
+    const auto timing = gui_timing_provider(vp, tp, op, rp, &physical, physical.node_x.data(), physical.node_y.data(), physical.node_x.size());
+    session->gate(macro_only ? "macro_legalize" : "legalize", physical.node_x.data(), physical.node_y.data(), physical.node_x.size(), st, &maps, &timing);
+  };
+}
+
+// 2i-interact fork: the cells of a region as a design of their own. The netlist comes from the placer's own bit-level
+// connectivity (View::nets), so buffers and ties added by the flow so far are real cells of it; every net that
+// crosses the region becomes a top port of the new design, fixed in its floorplan DEF where the net crossed the box.
+// Nets from a real top input / to a real top output keep that port's name, so the SDC still applies to them.
+gui::Fork_files gui_fork_build(const View& v, const ph::Technology& tech, const gui::Fork_request& req) {
+  gui::Fork_files out;
+  const auto      fail = [&](std::string why) {
+    out.error = std::move(why);
+    return out;
+  };
+  const auto& scene = *req.scene;
+  const auto& frame = *req.frame;
+  std::set<std::string> region(req.cells.begin(), req.cells.end());
+  std::map<std::string, const Cell*> mine;
+  for (const auto& name : req.cells) {
+    const auto it = v.cell.find(name);
+    if (it == v.cell.end()) {
+      return fail("cell " + name + " is not in the placement netlist");
+    }
+    const auto& c = v.cells.at(it->second);
+    const auto  io = c.node.get_subnode_io();
+    if (!io) {
+      return fail("cell " + name + " has no master declaration");
+    }
+    for (const auto* decls : {&io->get_input_pin_decls(), &io->get_output_pin_decls()}) {
+      for (const auto& d : *decls) {
+        if (d.bits > 1) {
+          return fail(std::format("{} ({}) has bus pins ({}); forks take regions of single-bit cells", name, c.macro, d.name));
+        }
+      }
+    }
+    mine.emplace(name, &c);
+  }
+  // Where an endpoint is in the parent (center of a cell, the pin of a terminal), from the live frame.
+  const auto position = [&](const Endpoint& e) -> std::optional<std::pair<double, double>> {
+    const auto f = scene.index.find(e.instance == "PIN" ? e.pin : e.instance);
+    if (f == scene.index.end() || size_t(f->second) >= frame.x.size()) {
+      return std::nullopt;
+    }
+    const auto i = size_t(f->second);
+    return std::pair{double(frame.x[i]) + scene.nodes[i].w / 2, double(frame.y[i]) + scene.nodes[i].h / 2};
+  };
+  // The core: the box snapped inward to complete rows and sites of the parent's rows.
+  std::vector<ph::Row> rows;
+  for (const auto& r : v.fp.rows) {
+    const auto site = tech.sites.find(r.site);
+    if (site == tech.sites.end() || r.step <= 0) {
+      continue;
+    }
+    const auto height = int64_t(std::llround(site->second.height * tech.dbu));
+    if (double(r.y) < req.box.yl || double(r.y + height) > req.box.yh) {
+      continue;
+    }
+    const auto first = std::max<int64_t>(0, int64_t(std::ceil((req.box.xl - double(r.x)) / double(r.step) - 1e-9)));
+    const auto last  = std::min<int64_t>(r.count, int64_t(std::floor((req.box.xh - double(r.x)) / double(r.step) + 1e-9)));
+    if (last - first < 1) {
+      continue;
+    }
+    auto row  = r;
+    row.x     = r.x + first * r.step;
+    row.count = last - first;
+    rows.push_back(std::move(row));
+  }
+  if (rows.empty()) {
+    return fail("the region holds no complete row; make it taller");
+  }
+  // Keep a rectangle: the columns every kept row has, and the longest run of consecutive rows.
+  std::ranges::sort(rows, {}, &ph::Row::y);
+  int64_t x0 = rows.front().x, x1 = rows.front().x + rows.front().count * rows.front().step;
+  for (const auto& r : rows) {
+    x0 = std::max(x0, r.x);
+    x1 = std::min(x1, r.x + r.count * r.step);
+  }
+  if (x1 <= x0) {
+    return fail("the rows of the region share no columns");
+  }
+  for (auto& r : rows) {
+    r.count = (x1 - x0) / r.step;
+    r.x     = x0;
+  }
+  int64_t y0 = rows.front().y, y1 = rows.back().y + 1;
+  {
+    const auto site   = tech.sites.at(rows.back().site);
+    y1                = rows.back().y + int64_t(std::llround(site.height * tech.dbu));
+  }
+  out.core = {double(x0), double(y0), double(x1), double(y1)};
+  // Nets: classify each by where its driver and sinks are.
+  struct Port {
+    std::string name;
+    bool        input = false;
+    double      x = 0, y = 0;  // where the net crossed the core (the parent's position, snapped to the core edge)
+  };
+  std::vector<Port> ports;
+  std::map<std::string, size_t> port_of;
+  const auto edge_point = [&](double px, double py) {
+    const auto& b = out.core;
+    double      cx = std::clamp(px, b.xl, b.xh), cy = std::clamp(py, b.yl, b.yh);
+    if (cx > b.xl && cx < b.xh && cy > b.yl && cy < b.yh) {  // inside: the nearest edge
+      const double dl = cx - b.xl, dr = b.xh - cx, db = cy - b.yl, dt = b.yh - cy;
+      const double m = std::min({dl, dr, db, dt});
+      (m == dl ? cx = b.xl : m == dr ? cx = b.xh : m == db ? cy = b.yl : cy = b.yh);
+    }
+    return std::pair{cx, cy};
+  };
+  const auto add_port = [&](const std::string& name, bool input, const std::vector<std::pair<double, double>>& far) {
+    if (port_of.contains(name)) {
+      return;
+    }
+    double sx = 0, sy = 0;
+    for (const auto& [px, py] : far) {
+      sx += px;
+      sy += py;
+    }
+    const auto n = far.empty() ? 1.0 : double(far.size());
+    const auto [ex, ey] = edge_point(far.empty() ? (out.core.xl + out.core.xh) / 2 : sx / n, far.empty() ? out.core.yl : sy / n);
+    port_of.emplace(name, ports.size());
+    ports.push_back({name, input, ex, ey});
+  };
+  struct Net_use {
+    Endpoint                 driver;
+    std::vector<Endpoint>    inside;      // sinks in the region
+    std::string              in_port;     // the region's input port feeding them (driver outside)
+    std::vector<std::string> out_ports;   // output ports this (inside) driver feeds
+  };
+  std::vector<Net_use> uses;
+  size_t cut_in = 0, cut_out = 0;
+  for (const auto& [driver, sinks] : v.nets) {
+    if (driver.constant >= 0) {
+      continue;
+    }
+    const bool driver_in = driver.instance != "PIN" && region.contains(driver.instance);
+    Net_use    use;
+    use.driver = driver;
+    std::vector<std::pair<double, double>> far_sinks;
+    bool outside_sink = false;
+    for (const auto& s : sinks) {
+      if (s.instance != "PIN" && region.contains(s.instance)) {
+        use.inside.push_back(s);
+      } else if (s.instance == "PIN") {
+        if (driver_in) {
+          const auto at = position(s);
+          add_port(s.pin, false, at ? std::vector{*at} : std::vector<std::pair<double, double>>{});
+          use.out_ports.push_back(s.pin);
+        }
+      } else if (driver_in) {
+        outside_sink = true;
+        if (const auto at = position(s)) {
+          far_sinks.push_back(*at);
+        }
+      }
+    }
+    if (driver_in) {
+      if (outside_sink) {
+        const auto name = std::format("cut_out_{}", cut_out++);
+        add_port(name, false, far_sinks);
+        use.out_ports.push_back(name);
+      }
+      if (use.inside.empty() && use.out_ports.empty()) {
+        continue;
+      }
+    } else {
+      if (use.inside.empty()) {
+        continue;
+      }
+      const auto name = driver.instance == "PIN" ? driver.pin : std::format("cut_in_{}", cut_in++);
+      const auto at   = position(driver);
+      add_port(name, true, at ? std::vector{*at} : std::vector<std::pair<double, double>>{});
+      use.in_port = name;
+    }
+    uses.push_back(std::move(use));
+  }
+  out.cells   = mine.size();
+  out.inputs  = std::ranges::count_if(ports, [](const auto& p) { return p.input; });
+  out.outputs = ports.size() - out.inputs;
+  out.top     = std::filesystem::path(req.dir).filename().string();
+  // The netlist: masters declared as in the parent, one node per cell, one connection per net sink.
+  hhds::GraphLibrary                                       library;
+  std::map<std::string, std::shared_ptr<hhds::GraphIO>>  masters;
+  for (const auto& [name, c] : mine) {
+    if (masters.contains(c->macro)) {
+      continue;
+    }
+    const auto src = c->node.get_subnode_io();
+    auto       dst = library.create_io(c->macro);
+    for (const auto& d : src->get_input_pin_decls()) {
+      dst->add_input(d.name, d.port_id);
+      dst->set_bits(d.name, 1);
+    }
+    for (const auto& d : src->get_output_pin_decls()) {
+      dst->add_output(d.name, d.port_id);
+      dst->set_bits(d.name, 1);
+    }
+    masters.emplace(c->macro, dst);
+  }
+  auto top = library.create_io(out.top);
+  {
+    hhds::Port_id next = 0;
+    for (const auto& p : ports) {
+      p.input ? top->add_input(p.name, next++) : top->add_output(p.name, next++);
+      top->set_bits(p.name, 1);
+    }
+  }
+  auto graph = top->create_graph();
+  std::map<std::string, Node> nodes;
+  for (const auto& [name, c] : mine) {
+    auto node = gu::create_typed_node(*graph, Ntype_op::Sub);
+    node.set_subnode(masters.at(c->macro));
+    node.set_name(name);
+    nodes.emplace(name, node);
+  }
+  std::map<std::pair<std::string, std::string>, Pin> driver_pins;
+  for (const auto& use : uses) {
+    Pin d;
+    if (use.in_port.empty()) {
+      auto& slot = driver_pins[{use.driver.instance, use.driver.pin}];
+      if (slot.is_invalid()) {
+        slot = nodes.at(use.driver.instance).create_driver_pin(use.driver.pin);
+        gu::set_bits(slot, 1);
+      }
+      d = slot;
+    } else {
+      d = graph->get_input_pin(use.in_port);
+      gu::set_bits(d, 1);
+    }
+    for (const auto& s : use.inside) {
+      nodes.at(s.instance).create_sink_pin(s.pin).connect_driver(d);
+    }
+    for (const auto& name : use.out_ports) {
+      graph->get_output_pin(name).connect_driver(d);
+    }
+  }
+  std::filesystem::create_directories(req.dir);
+  out.net_dir = req.dir + "/net";
+  library.save(out.net_dir);
+  // The floorplan: the rows of the region and the boundary pins, FIXED where the nets crossed. Pin shapes come from a
+  // terminal of the parent (same layer and size).
+  if (v.fp.terminals.empty()) {
+    return fail("the design has no IO pins to take a pin shape from");
+  }
+  ph::Floorplan fp;
+  fp.design = out.top;
+  fp.dbu    = v.fp.dbu;
+  fp.die    = {out.core.xl, out.core.yl, out.core.xh, out.core.yh};
+  fp.rows   = rows;
+  fp.tracks = v.fp.tracks;
+  for (const auto& p : ports) {
+    auto t        = v.fp.terminals.front();
+    t.name        = p.name;
+    t.net         = p.name;
+    t.direction   = p.input ? "INPUT" : "OUTPUT";
+    t.status      = ph::Status::FIXED;
+    t.x           = int64_t(std::llround(p.x));
+    t.y           = int64_t(std::llround(p.y));
+    t.orientation = ph::Orientation::N;
+    fp.terminals.push_back(std::move(t));
+  }
+  out.floorplan = req.dir + "/floorplan.def";
+  ph::write_def(fp, out.floorplan);
+  // Where every cell was in the parent: the region's own placement starts from it.
+  out.seed = req.dir + "/seed.tsv";
+  {
+    std::ofstream seed(out.seed);
+    for (const auto& [name, c] : mine) {
+      if (const auto f = scene.index.find(name); f != scene.index.end() && size_t(f->second) < frame.x.size()) {
+        seed << name << '\t' << std::llround(frame.x[size_t(f->second)]) << '\t' << std::llround(frame.y[size_t(f->second)]) << '\n';
+      }
+    }
+  }
+  return out;
+}
+
 dp::Result local_place(View& v, const ph::Technology& tech, const Options& options, const ph::Floorplan& reference,
-                       const std::vector<std::string>& forced, Eco_stats& stats) {
+                       const std::vector<std::string>& forced, Eco_stats& stats, const ph::Rect* window_hint = nullptr,
+                       const std::map<std::string, std::pair<double, double>>* held = nullptr) {
   std::map<std::string, const ph::Component*> old;
   std::set<std::string>                       current, dirty(forced.begin(), forced.end());
   for (const auto& c : reference.components) {
@@ -4889,6 +5578,9 @@ dp::Result local_place(View& v, const ph::Technology& tech, const Options& optio
     if (!std::isfinite(bounds.xl)) {
       throw std::runtime_error("fixed reference violates placement clearance");
     }
+  }
+  if (window_hint) {  // 2i-interact: the first window is the edited region, not just the hull of the changed cells
+    bounds = bounds.hull(*window_hint);
   }
   stats.used            = true;
   auto         original = v.cells;  // the whole-core retry releases its cache locks
@@ -4952,6 +5644,31 @@ dp::Result local_place(View& v, const ph::Technology& tech, const Options& optio
       control.add_fillers             = false;
       control.legalize                = true;
       control.detailed_place          = true;
+      if (held && !held->empty()) {
+        // Held cells keep their position through the window's GP (a hold, as in the interactive GP) and are then
+        // legalized like any other cell.
+        std::vector<dp::MovablePosition> pins;
+        for (const auto& [name, pos] : *held) {
+          const auto it = v.cell.find(name);
+          if (it == v.cell.end() || int(it->second) >= d.num_movable) {
+            continue;
+          }
+          const size_t i = it->second;
+          pins.push_back({int(i),
+                          std::clamp(pos.first, window.xl + d.node_halo_x[i], window.xh - d.node_size_x[i] - d.node_halo_x[i]),
+                          std::clamp(pos.second, window.yl + d.node_halo_y[i], window.yh - d.node_size_y[i] - d.node_halo_y[i]),
+                          0});
+        }
+        control.detailed_place    = false;  // detailed placement is HPWL-driven and would walk a held cell back
+        control.interact_interval = 1 << 30;  // only the first step of the solve
+        control.interact          = [pins](const dp::InteractView& view) {
+          dp::InteractUpdate update;
+          if (view.first) {
+            update.pins = pins;
+          }
+          return update;
+        };
+      }
       metrics                         = dp::place(d, control);
       capture(v, tech, true);
       ph::Floorplan check = v.fp;
@@ -4995,6 +5712,132 @@ dp::Result local_place(View& v, const ph::Technology& tech, const Options& optio
     }
   }
   throw std::runtime_error("ECO window expansion exhausted");
+}
+
+// 2i-interact: post-legalization edit mode. After the final legalization the session lets the user move cells and
+// macros; the edits of one "Apply" are re-placed by the ECO windowed placer (a few GP iterations with the moved
+// objects held, then legalization, no detailed placement), confined to the Region_mesh region that holds each object.
+// A move that leaves its region re-places the whole core. The flow runs several final passes (restarts, region
+// experiments); the user edits once, and every later pass re-applies the recorded edits without blocking.
+using Named_edits = std::vector<std::pair<std::string, std::pair<double, double>>>;
+bool gui_apply_edits(View& v, const ph::Technology& tech, const Options& options, const Named_edits& edits,
+                     const std::function<std::vector<int>()>& macros, const std::function<std::vector<Region_io>()>& ios) {
+  auto session = options.gui;
+  make_arrays(v, tech);
+  auto&                    d = v.design;
+  ph::Floorplan            reference = v.fp;
+  reference.components.clear();
+  for (const auto& c : v.cells) {
+    reference.components.push_back({c.name, c.macro, c.place});
+  }
+  const auto               mesh = Region_mesh::build(d, macros(), ios(), region_options_with_tracks(tech, options.region), tech.dbu);
+  auto                     held = session->pin_positions();
+  std::vector<std::string> forced;
+  std::optional<ph::Rect>  window;
+  bool                     whole_core = false;
+  for (const auto& [name, pos] : edits) {
+    const auto it = v.cell.find(name);
+    if (it == v.cell.end() || int(it->second) >= d.num_movable) {
+      continue;
+    }
+    auto&        c  = v.cells[it->second];
+    const double ox = c.place.x + c.place.width / 2., oy = c.place.y + c.place.height / 2.;
+    const double nx = pos.first + c.place.width / 2., ny = pos.second + c.place.height / 2.;
+    const auto   ro = mesh.rect_of(ox, oy), rn = mesh.rect_of(nx, ny);
+    if (!ro || !rn || *ro != *rn) {
+      whole_core = true;  // crossed a region edge: regenerate every region
+    } else {
+      const auto&    r = mesh.rects[size_t(*rn)];
+      const ph::Rect rect{r.xl, r.yl, r.xh, r.yh};
+      window = window ? window->hull(rect) : rect;
+    }
+    c.place.x = std::llround(pos.first);
+    c.place.y = std::llround(pos.second);
+    forced.push_back(name);
+    held[name] = pos;
+  }
+  for (const auto& c : v.cells) {  // pins that were not edited stay where the placement left them
+    if (!std::ranges::contains(forced, c.name)) {
+      if (auto it = held.find(c.name); it != held.end()) {
+        it->second = {double(c.place.x), double(c.place.y)};
+      }
+    }
+  }
+  if (forced.empty()) {
+    return false;
+  }
+  Eco_stats eco;
+  try {
+    local_place(v, tech, options, reference, forced, eco, whole_core || !window ? nullptr : &*window, &held);
+    auto frame = v.fp;
+    frame.components.clear();
+    for (const auto& c : v.cells) {
+      frame.components.push_back({c.name, c.macro, c.place});
+    }
+    check_legality(tech, frame, options);
+    std::map<std::string, std::array<std::int64_t, 3>> legal;
+    for (const auto& c : v.cells) {
+      legal.emplace(c.name, std::array<std::int64_t, 3>{c.place.x, c.place.y, static_cast<std::int64_t>(c.place.orientation)});
+    }
+    session->set_placement(std::move(legal));
+    session->set_note(std::format("edit applied to {} ({} moved, {} attempt(s))", whole_core ? "the whole core" : "its region", eco.moved, eco.attempts));
+    return true;
+  } catch (const std::exception& error) {
+    std::map<std::string, Ann_place> before;  // put every cell back; the failed edit's pins are released
+    for (const auto& c : reference.components) {
+      before.emplace(c.name, c.place);
+    }
+    for (auto& c : v.cells) {
+      c.place  = before.at(c.name);
+      c.locked = false;
+    }
+    std::string list = "{\"cmd\":\"unpin\",\"nodes\":[";
+    for (size_t k = 0; k < forced.size(); ++k) {
+      list += std::format("{}\"{}\"", k ? "," : "", forced[k]);
+    }
+    session->submit(list + "]}");
+    session->set_note(std::string("edit not applied: ") + error.what());
+    make_arrays(v, tech);
+    return false;
+  }
+}
+
+void gui_edit_mode(View& v, const ph::Technology& tech, const Options& options, const Result& result, const std::function<std::vector<int>()>& macros,
+                   const std::function<std::vector<Region_io>()>& ios) {
+  auto session = options.gui;
+  if (!session || v.fp.rows.empty()) {
+    return;
+  }
+  if (session->edit_left()) {  // a later pass: the user already edited; reproduce the edits on this pass's placement
+    if (const auto recorded = session->recorded_edits(); !recorded.empty()) {
+      gui_apply_edits(v, tech, options, recorded, macros, ios);
+    }
+    return;
+  }
+  for (int round = 0; round < 10000; ++round) {
+    make_arrays(v, tech);
+    auto& d = v.design;
+    session->begin_phase(gui_scene(v, tech, "edit"), d.node_x.data(), d.node_y.data(), d.node_x.size(), false);
+    Gui_map_env env;
+    env.bins = 32;
+    gui::Stats st;
+    st.hpwl_um = gui_hpwl_um(d, d.node_x.data(), d.node_y.data(), tech.dbu);
+    const gui::Map_provider maps = [&](const std::string& k) { return gui_map(k, d, d.node_x.data(), d.node_y.data(), d.node_x.size(), env); };
+    const auto timing = gui_timing_provider(&v, &tech, &options, &result, &d, d.node_x.data(), d.node_y.data(), d.node_x.size());
+    const auto waited = session->edit_wait(d.node_x.data(), d.node_y.data(), d.node_x.size(), st, &maps, &timing);
+    if (!waited.again) {
+      return;
+    }
+    Named_edits edits;
+    for (const auto& pin : waited.edits.pins) {
+      if (pin.node >= 0 && size_t(pin.node) < v.cells.size() && pin.node < d.num_movable) {
+        edits.push_back({v.cells[size_t(pin.node)].name, {pin.x, pin.y}});
+      }
+    }
+    if (gui_apply_edits(v, tech, options, edits, macros, ios)) {
+      session->record_edits(edits);
+    }
+  }
 }
 void save_cache(const View& v, const std::string& path, const std::string& environment,
                 const std::map<std::string, uint64_t>& hashes) {
@@ -5809,6 +6652,10 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     throw std::invalid_argument("invalid FP centroid alignment controls");
   }
   const bool macro_active = options.macro_mode == "h2d" && !options.timing_seed;
+  if (macro_active && options.gui) {
+    options.gui->set_note("macro=h2d places macros and cells in one native solver run: there are no fp/macro/final GP gates here, "
+                          "only edit mode on its result. Use the default macro=none flow to stop and move macros in the macro phase.");
+  }
   if (macro_active && !options.macro_legalize_cells) {
     throw std::invalid_argument("macro-only legalization currently requires plain macro placement mode");
   }
@@ -6544,6 +7391,31 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       }
     }
   }
+  if (!options.seed_file.empty()) {  // initial positions only: nothing here is fixed
+    std::map<std::string, std::pair<int64_t, int64_t>> seeds;
+    std::istringstream                                 lines(file_text(options.seed_file));
+    for (std::string line; std::getline(lines, line);) {
+      std::istringstream f(line);
+      std::string        name;
+      int64_t            x = 0, y = 0;
+      if (std::getline(f, name, '\t') && (f >> x >> y)) {
+        seeds.emplace(std::move(name), std::pair{x, y});
+      }
+    }
+    for (auto& c : v.cells) {
+      // synthesis wraps the cells of a read-back netlist in generated modules (`__flat___sub_16.<instance>`)
+      auto it = seeds.find(c.name);
+      if (it == seeds.end() && c.name.starts_with("__flat_")) {
+        if (const auto dot = c.name.find('.'); dot != std::string::npos) {
+          it = seeds.find(c.name.substr(dot + 1));
+        }
+      }
+      if (it != seeds.end() && !c.locked && c.place.status != Status::FIXED && c.place.status != Status::LOCKED) {
+        c.place.x = it->second.first;
+        c.place.y = it->second.second;
+      }
+    }
+  }
   if (!options.tracks_file.empty()) {
     apply_routing_tracks(tech, v.fp, file_text(options.tracks_file));
   }
@@ -7195,6 +8067,15 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       std::map<std::string, Ann_place> positions;
       for (const auto& c : options.restart_seed->components) {
         positions.emplace(c.name, c.place);
+      }
+      if (options.gui) {  // 2i-interact: the edit mode's legal placement supersedes the seed captured before it
+        for (const auto& [name, p] : options.gui->placement_override()) {
+          if (const auto it = positions.find(name); it != positions.end()) {
+            it->second.x           = p[0];
+            it->second.y           = p[1];
+            it->second.orientation = static_cast<Ann_place::Orientation>(p[2]);
+          }
+        }
       }
       for (auto& c : v.cells) {
         const auto old = positions.find(c.name);
@@ -8459,6 +9340,9 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
           update.replacement = v.design;
           if (after.wns) {
             update.timing_violation = std::max(0., -*after.wns);
+            if (options.gui) {  // read-only: the numbers this checkpoint already computed
+              options.gui->set_timing(*after.wns * after.time_unit_ps, after.tns ? *after.tns * after.time_unit_ps : 0., iteration);
+            }
           }
           for (const auto& c : v.cells) {
             const auto old = baseline.cell.find(c.name);
@@ -8473,6 +9357,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         placement_hints->seed(v.design);
         placement_hints->attach(fp_control, hint_objects);
       }
+      gui_attach(fp_control, options, v, tech, result, "fp");
       fp_metrics = dp::place(v.design, fp_control);
       if (options.after_stage) {
         auto view = v;
@@ -8691,6 +9576,9 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         }
         if (timing.wns) {
           update.timing_violation = std::max(0., -*timing.wns);
+          if (options.gui) {
+            options.gui->set_timing(*timing.wns * timing.time_unit_ps, timing.tns ? *timing.tns * timing.time_unit_ps : 0., iteration);
+          }
         }
         macro_timed_positions.clear();
         for (size_t i = 0; i < v.cells.size(); ++i) {
@@ -11928,6 +12816,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         pdn_legalize_input = physical;
       };
     }
+    gui_attach(control, options, v, tech, result, options.completed_stage == Placement_stage::macro ? "macro" : "final");
     try {
       metrics = run_main_gp();
     } catch (const std::runtime_error& error) {
@@ -13395,6 +14284,10 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     result.qor = std::format(R"({{"schema_version":1,"kind":"floorplan_color_analysis","legal":false,"colors":{}}})",
                              v.fp_coloring.colors.size());
     return result;
+  }
+  if (options.gui && options.full && options.completed_stage == Placement_stage::final && !options.timing_seed
+      && !options.retain_placement && !options.fp_place && !defer_cells && !terminal_active) {
+    gui_edit_mode(v, tech, options, result, region_macros, region_ios);
   }
   // A restored or edited placement keeps the netlist's geometry template; the
   // rows each two-row cell landed on decide its PG rail stack.
@@ -15322,8 +16215,8 @@ static Result place_requested(hhds::Graph& source, hhds::GraphLibrary& library, 
 // start a floorplan, so auto resolves to off there without detection. The
 // native GP pin-timing experiment rejects a floorplan stage, so auto is off
 // there as well.
-Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& requested,
-             const std::function<void()>& release_source) {
+static Result place_fp_auto(hhds::Graph& source, hhds::GraphLibrary& library, const Options& requested,
+                            const std::function<void()>& release_source) {
   if (!requested.fp_auto) {
     return place_requested(source, library, requested, release_source);
   }
@@ -15377,6 +16270,20 @@ Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& re
         }
       }
     }
+  }
+  return result;
+}
+
+Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& requested, const std::function<void()>& release_source) {
+  auto result = place_fp_auto(source, library, requested, release_source);
+  if (requested.gui) {
+    // The session ends on the placement the flow produced (cells by name; the IO pads are already where the frames left them).
+    std::vector<std::tuple<std::string, double, double>> placed;
+    placed.reserve(result.floorplan.components.size());
+    for (const auto& c : result.floorplan.components) {
+      placed.emplace_back(c.name, double(c.place.x), double(c.place.y));
+    }
+    requested.gui->set_result(placed);
   }
   return result;
 }

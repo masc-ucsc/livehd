@@ -3298,6 +3298,103 @@ sh_test(
     ],
 )
 
+# 2i-interact: timeline checkpoints and "replay from here" with edited flags (the process re-executes).
+sh_test(
+    name = "lhd_gui_timeline_smoke",
+    size = "small",
+    timeout = "short",
+    srcs = ["lhd_gui_timeline_smoke.py"],
+    data = [
+        "//inou/lefdef:test_data",
+        "//lhd",
+    ],
+)
+
+# 2i-interact: `area` moves one edge of the core; the flow restarts with the new die/core and replays the pins.
+sh_test(
+    name = "lhd_gui_area_smoke",
+    size = "small",
+    timeout = "short",
+    srcs = ["lhd_gui_area_smoke.py"],
+    data = [
+        "//inou/lefdef:test_data",
+        "//lhd",
+    ],
+)
+
+# 2i-interact: `fork` extracts a region of the placement as a design of its own, run in a child session.
+sh_test(
+    name = "lhd_gui_fork_smoke",
+    size = "small",
+    timeout = "short",
+    srcs = ["lhd_gui_fork_smoke.py"],
+    data = [
+        "//inou/lefdef:test_data",
+        "//lhd",
+    ],
+)
+
+# 2i-interact: the `regions` layer: the region mesh and the boundary-pin crossings of its borders.
+sh_test(
+    name = "lhd_gui_regions_smoke",
+    size = "small",
+    timeout = "short",
+    srcs = ["lhd_gui_regions_smoke.py"],
+    data = [
+        "//inou/lefdef:test_data",
+        "//lhd",
+    ],
+)
+
+# 2i-interact: a failing run is shown in the page and the server stays up until the user exits.
+sh_test(
+    name = "lhd_gui_failure_smoke",
+    size = "small",
+    timeout = "short",
+    srcs = ["lhd_gui_failure_smoke.py"],
+    data = [
+        "//inou/lefdef:test_data",
+        "//lhd",
+    ],
+)
+
+# 2i-interact: register cells (clocked) are flagged and named; the timeline records one snapshot per GP poll.
+sh_test(
+    name = "lhd_gui_register_smoke",
+    size = "small",
+    timeout = "short",
+    srcs = ["lhd_gui_register_smoke.py"],
+    data = [
+        "//inou/lefdef:test_data",
+        "//lhd",
+        "//tools:lhd_gui",
+    ],
+)
+
+# 2i-interact G5: draggable floorplan centroids.
+sh_test(
+    name = "lhd_gui_centroid_smoke",
+    size = "small",
+    timeout = "short",
+    srcs = ["lhd_gui_centroid_smoke.py"],
+    data = [
+        "//inou/lefdef:test_data",
+        "//lhd",
+    ],
+)
+
+# 2i-interact: lhd synth --gui pause/pin/finish over HTTP, the action trace and its batch replay.
+sh_test(
+    name = "lhd_gui_smoke",
+    size = "small",
+    timeout = "short",
+    srcs = ["lhd_gui_smoke.py"],
+    data = [
+        "//inou/lefdef:test_data",
+        "//lhd",
+    ],
+)
+
 sh_test(
     name = "lhd_placement_smoke",
     size = "small",
@@ -3608,6 +3705,18 @@ sh_test(
     srcs = ["lhd_remainder_smoke.py"],
     data = [
         "//inou/prp:abc_tests",
+        "//lhd",
+    ],
+)
+
+# synth.place.macro=h2d alone: the plain-flow controls it cannot combine with default off.
+sh_test(
+    name = "lhd_place_h2d_defaults_smoke",
+    size = "small",
+    timeout = "short",
+    srcs = ["lhd_place_h2d_defaults_smoke.py"],
+    data = [
+        "//inou/lefdef:test_data",
         "//lhd",
     ],
 )

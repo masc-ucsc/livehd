@@ -175,6 +175,18 @@ py_test(
 )
 
 py_test(
+    name = "gui_smoke",
+    timeout = "short",
+    srcs = ["gui_smoke.py"],
+    data = [
+        "//inou/lefdef:test_data",
+        "//lhd",
+    ],
+    legacy_create_init = 0,
+    deps = [":data"],
+)
+
+py_test(
     name = "episodes_test",
     timeout = "short",
     srcs = ["episodes_test.py"],

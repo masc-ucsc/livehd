@@ -3,6 +3,7 @@
 load("//tools:regression.bzl", "py_test")
 load("@build_bazel_apple_support//xcode:xcode_config.bzl", "xcode_config")
 load("@rules_cc//cc:defs.bzl", "cc_binary")
+load("@rules_python//python:defs.bzl", "py_binary")
 
 load("//tools:copt_default.bzl", "COPTS")
 
@@ -20,6 +21,14 @@ py_test(
     data = [":warpspace"],
     legacy_create_init = 0,
     timeout = "short",
+)
+
+# Talks to a running `lhd synth --gui` over its local Unix socket (an assistant's channel into the visualization).
+py_binary(
+    name = "lhd_gui",
+    srcs = ["lhd_gui.py"],
+    legacy_create_init = 0,
+    visibility = ["//visibility:public"],
 )
 
 exports_files([

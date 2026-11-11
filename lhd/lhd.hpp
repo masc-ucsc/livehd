@@ -171,6 +171,15 @@ struct Options {
   size_t style_max_findings         = 20;
 
   std::string result_json;
+  // 2i-interact: `lhd synth --gui` serves the live placement on 127.0.0.1 (never part of the run id).
+  bool        gui         = false;
+  int         gui_port    = 0;      // 0: any free port
+  bool        gui_no_open = false;  // print the URL, do not start a browser
+  // Resume after a restart from a checkpoint (set by the page's "replay from here"; hidden flags): replay gui_replay's
+  // actions up to gui_replay_seq without blocking, then become interactive at the checkpoint gui_resume ("label:nth").
+  std::string   gui_resume, gui_replay, gui_token;
+  std::uint64_t gui_replay_seq = 0;
+  std::string gui_trace;            // JSONL action trace path (default <workdir>/synth/place/gui_trace.jsonl)
   std::string workdir;
   // Set by workdir() when it MINTED an ephemeral scratch dir because the user
   // named none. Every persistent-reuse gate (compile cache, abc_cache,
@@ -867,6 +876,13 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      Synth_set_option::Kind::file,
      "global-placement target density, at least utilization; 0: utilization + 0.05"},
     {"place.snapshots", "false", Synth_set_option::Kind::boolean, "save physical GP coordinates before legalization"},
+    {"place.gui.poll", "10", Synth_set_option::Kind::integer, "--gui: GP iterations between polls of the interactive session (1..20)"},
+    {"place.gui.replay", "", Synth_set_option::Kind::file, "replay a --gui action trace (JSONL) in batch: the recorded moves and unpins are applied at the same phase and GP iteration, with no browser"},
+    {"place.gui.video", "", Synth_set_option::Kind::file, "replay only: write one PNG per frame to <path>.frames/ (or <path> when it is a directory) and an .mp4 with ffmpeg when <path> ends in .mp4 and ffmpeg is on the PATH"},
+    {"place.gui.timing_budget", "10", Synth_set_option::Kind::integer, "--gui: percent of wall time the page may spend refreshing WNS/TNS from the solver's current positions (0: only on request and after a released edit)"},
+    {"place.gui.history_every", "50", Synth_set_option::Kind::integer, "--gui: GP iterations between the timeline's placement snapshots (gates and checkpoints always record one); smaller scrubs finer, larger uses less memory"},
+    {"place.gui.history_mb", "256", Synth_set_option::Kind::integer, "--gui: memory (MB) for the timeline's per-poll placement snapshots; beyond it the older ones are thinned"},
+    {"place.gui.min_iters", "20", Synth_set_option::Kind::integer, "--gui: minimum extra GP iterations when run follows a finished GP"},
     {"place.cohesion",
      "0",
      Synth_set_option::Kind::file,
@@ -1157,7 +1173,7 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      "0.001",
      Synth_set_option::Kind::file,
      "minimum relative wirelength improvement for IO moves/reversal"},
-    {"place.macro.pin_adjust", "true", Synth_set_option::Kind::boolean, "adjust ordered IO buses during movable-macro GP"},
+    {"place.macro.pin_adjust", "true", Synth_set_option::Kind::boolean, "adjust ordered IO buses during movable-macro GP (off under place.macro=h2d)"},
     {"place.macro.pin_interval", "50", Synth_set_option::Kind::integer, "macro GP IO adjustment interval, independently of STA"},
     {"place.macro.pin_step", "0.01", Synth_set_option::Kind::file, "maximum per-pin macro GP travel as a perimeter fraction"},
     {"place.macro.pin_improvement",
@@ -1236,7 +1252,7 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
     {"place.macro.align_weight",
      "25",
      Synth_set_option::Kind::file,
-     "macro GP alignment relative to mean macro force; zero disables"},
+     "macro GP alignment relative to mean macro force; zero disables (0 under place.macro=h2d)"},
     {"place.macro.align_sigma",
      "0.25",
      Synth_set_option::Kind::file,
@@ -1259,7 +1275,7 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
     {"place.macro.snap",
      "true",
      Synth_set_option::Kind::boolean,
-     "soft snap of equal-size macros within hierarchy scopes during macro legalization"},
+     "soft snap of equal-size macros within hierarchy scopes during macro legalization (off under place.macro=h2d)"},
     {"place.macro.snap_mode",
      "alignment",
      Synth_set_option::Kind::file,
@@ -1293,6 +1309,10 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
 #undef H2D_BOOL
 #undef H2D_STRING
     {"place.floorplan", "", Synth_set_option::Kind::file, "optional DEF with contiguous N/FS rows and FIXED pins/macros"},
+    {"place.seed",
+     "",
+     Synth_set_option::Kind::file,
+     "optional TSV (instance, x, y in DBU) of initial cell positions; a forked region starts from its parent's placement"},
     {"place.wire_rc", "", Synth_set_option::Kind::file, "wire RC override: ohm/um,fF/um; empty derives it from LEF"},
     {"place.rc_pessimism",
      "1",
@@ -2775,5 +2795,8 @@ std::string compute_run_id(const Options& opts);
 
 // Serialize the result envelope (single JSON line) to --result-json or stdout.
 void write_result(const Options& opts, const Result& res);
+// `lhd synth --gui` when the run failed: show the error (and the error diagnostics) in the page and keep serving, so a
+// restart with other flags is possible, until the user exits. A no-op without a GUI session.
+void gui_report_failure(const Result& res);
 
 }  // namespace lhd
