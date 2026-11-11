@@ -1020,7 +1020,7 @@ int main(int argc, char** argv) {
         rapidjson::Document poses;
         poses.Parse(read(string(spec, "pin_locations")).c_str());
         check(!poses.HasParseError() && poses.IsObject(), "invalid joint replay pin locations");
-        std::map<std::string, std::pair<double, double>> locations;
+        livehd::physical::Pin_locations locations;
         for (auto it = poses.MemberBegin(); it != poses.MemberEnd(); ++it) {
           check(it->value.IsArray() && it->value.Size() == 2 && it->value[0].IsNumber() && it->value[1].IsNumber(),
                 "invalid joint replay pin point");

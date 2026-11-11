@@ -90,13 +90,13 @@ bool flag(const rapidjson::Value& object, const char* key) {
   }
   return object[key].GetBool();
 }
-std::map<std::string, std::pair<double, double>> read_locations(const std::string& path) {
+livehd::physical::Pin_locations read_locations(const std::string& path) {
   rapidjson::Document json;
   json.Parse<rapidjson::kParseFullPrecisionFlag>(read(path).c_str());
   if (json.HasParseError() || !json.IsObject()) {
     throw std::invalid_argument("invalid checkpoint pin locations");
   }
-  std::map<std::string, std::pair<double, double>> result;
+  livehd::physical::Pin_locations result;
   for (const auto& member : json.GetObject()) {
     const auto& xy = member.value;
     if (!xy.IsArray() || xy.Size() != 2 || !xy[0].IsNumber() || !xy[1].IsNumber() || !std::isfinite(xy[0].GetDouble())
@@ -572,7 +572,7 @@ int main(int argc, char** argv) {
         rapidjson::Writer<rapidjson::OStreamWrapper> writer(stream);
         writer.StartObject();
         for (const auto& [name, xy] : snapshot.pin_locations) {
-          writer.Key(name.c_str());
+          writer.Key(name.str().c_str());
           writer.StartArray();
           writer.Double(xy.first);
           writer.Double(xy.second);
