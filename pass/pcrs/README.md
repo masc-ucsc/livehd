@@ -51,8 +51,10 @@ cells keep their names and placement.
 ### Placement and timing
 
 With pcrs on (`Prects_library::reset_is_data`) a reset is ordinary data: it is placed, timed and repaired like any net,
-and only clock networks stay excluded. Sizing and buffering do not need to touch the reset because pcrs picks the flop
-sizes. `qor.place.pcrs` reports `networks`, `sinks`, `flops_added`/`buffers_added`/`removed` (this call), `flops` (in the
+and only clock networks stay excluded. pcrs decides the structure (flop levels, groups) and sizes each cell for its
+load; repair then works on the tree like on any data net, splitting the long nets and resizing on real RC and slack
+(a sized buffer on 32 loads spread over the die is still a slow wire: NVDLA partition_c went from -2.2 ns to -0.23 ns
+when repair was let in). A pcrs rebuild of a network strips whatever repair added to it. `qor.place.pcrs` reports `networks`, `sinks`, `flops_added`/`buffers_added`/`removed` (this call), `flops` (in the
 placed netlist), `max_depth` and per-domain `depth`/`sinks`/`flops`/`buffers`/`kept`. Post-placement simulation must hold
 reset for at least `max_depth + 1` cycles.
 
