@@ -793,6 +793,80 @@ bool Lowering::declare_memory(const hhds::Node_class& node) {
 
 // read_all: every entry, MSB first (entry size-1 .. entry 0), as one concat.
 bool Lowering::lower_read_all(const Mem_rec& m) {
+  if (m.view) {
+    // A loop-body array: the packed value it was handed, with each write applied in port order.
+    // An entry write is spelled as the front end spells `x#[p..+W] = v` at a position that is not
+    // a constant -- (x & ((1 << p) - 1)) | (((x >> p) with its low W bits replaced) << p), cut to
+    // x's width -- which the native back end recognizes and turns into one store.
+    auto bus = operand(m.bus);
+    if (!bus) {
+      return false;
+    }
+    const int64_t total = m.size * m.bits;
+    const auto    typed = [&](Lnast_ntype::Lnast_ntype_int op, const std::vector<std::string>& ops, int64_t bits) {
+      auto dst = b_.create_lnast_tmp();
+      auto n   = b_.add_child(op);
+      b_.lnast->add_child(n, Lnast_node::create_ref(dst));
+      for (const auto& o : ops) {
+        leaf(n, o);
+      }
+      auto ts = b_.add_child(Lnast_ntype::create_type_spec());
+      b_.lnast->add_child(ts, Lnast_node::create_ref(dst));
+      add_type(ts, static_cast<int>(bits), true);
+      return dst;
+    };
+    int position_bits = 1;
+    while ((int64_t{1} << position_bits) <= total) {
+      ++position_bits;
+    }
+    std::string cur = *bus;
+    for (const auto& pt : m.ports) {
+      if (pt.kind != Ntype::Memory_rdport_write) {
+        continue;
+      }
+      auto a = operand(pt.addr);
+      auto d = operand(pt.din);
+      if (!a || !d) {
+        return false;
+      }
+      const auto  at    = typed(Lnast_ntype::create_mult(), {*a, std::to_string(m.bits)}, position_bits);
+      const auto  down  = typed(Lnast_ntype::create_sra(), {cur, at}, total);
+      std::string value = *d;
+      if (!pt.en.is_invalid() && !(pt.en.is_const() && const_of(pt.en).is_just_i64() && const_of(pt.en).to_just_i64() != 0)) {
+        // a write that may not happen stores the entry's own value back
+        auto en = operand(pt.en);
+        if (!en) {
+          return false;
+        }
+        const auto old
+            = typed(Lnast_ntype::create_bit_and(), {down, std::string(Dlop::get_mask_value(m.bits)->to_pyrope())}, m.bits);
+        const auto cnd = emit(Lnast_ntype::create_ne(), {*en, "0"}, pt.en, false);
+        value          = b_.create_lnast_tmp();
+        auto n         = b_.create_if_stmt(false);
+        b_.add_if_cond(n, cnd);
+        auto th = b_.add_if_stmts(n);
+        b_.push_stmts(th);
+        store_raw(value, *d);
+        b_.pop_stmts();
+        auto el = b_.add_if_stmts(n);
+        b_.push_stmts(el);
+        store_raw(value, old);
+        b_.pop_stmts();
+        auto ts = b_.add_child(Lnast_ntype::create_type_spec());
+        b_.lnast->add_child(ts, Lnast_node::create_ref(value));
+        add_type(ts, m.bits, true);
+      }
+      const auto one  = typed(Lnast_ntype::create_shl(), {"1", at}, total);
+      const auto low  = typed(Lnast_ntype::create_minus(), {one, "1"}, total);
+      const auto kept = typed(Lnast_ntype::create_bit_and(), {cur, low}, total);
+      const auto fill = typed(Lnast_ntype::create_set_mask(), {down, value, "0", std::to_string(m.bits)}, total);
+      const auto up   = typed(Lnast_ntype::create_shl(), {fill, at}, 2 * total);
+      const auto cut  = typed(Lnast_ntype::create_get_mask(), {up, "0", std::to_string(total)}, total);
+      cur             = typed(Lnast_ntype::create_bit_or(), {kept, cut}, total);
+    }
+    name_of_.insert_or_assign(m.read_all.get_class_index(), cur);
+    return true;
+  }
   if (view_only(m.read_all)) {
     // Only compact-loop bodies read this bus, and they read entries of the memory itself: no packed copy.
     view_alias_.insert_or_assign(m.read_all.get_class_index(), View_alias{m.name});
@@ -1225,28 +1299,49 @@ bool Lowering::declare_view(const hhds::Node_class& node) {
   for (const auto& sink : node.inp_sorted_pins()) {
     n_ports = std::max(n_ports, static_cast<int>(sink.get_port_id() / Ntype::Memory_port_stride) + 1);
   }
+  int writes = 0, reads = 0;
   for (int i = 0; i < n_ports; ++i) {
     Mem_port pt;
     auto     rd = get_driver_of_sink_name(node, mem_sink(i, "rdport"));
     pt.kind     = (!rd.is_invalid() && rd.is_const() && const_of(rd).is_just_i64()) ? static_cast<int>(const_of(rd).to_just_i64()) : 0;
     pt.addr     = get_driver_of_sink_name(node, mem_sink(i, "addr"));
-    if (pt.kind != Ntype::Memory_rdport_async) {
-      why = "loop-body memory with a write or synchronous port";
+    if (pt.kind != Ntype::Memory_rdport_async && pt.kind != Ntype::Memory_rdport_write) {
+      why = "loop-body memory with a synchronous port";
       return false;
     }
     if (pt.addr.is_invalid()) {
       why = "memory port without an address";
       return false;
     }
-    if (auto it = outs.find(static_cast<hhds::Port_id>(i)); it != outs.end()) {
+    if (pt.kind == Ntype::Memory_rdport_write) {
+      // An array the loop body writes: `a[i] = v`. The array is the packed value on the `update`
+      // bus, and what the body hands on (the read-all bus) is that value with the entry replaced.
+      pt.en  = get_driver_of_sink_name(node, mem_sink(i, "enable"));
+      pt.din = get_driver_of_sink_name(node, mem_sink(i, "din"));
+      if (pt.din.is_invalid()) {
+        why = "memory write port without data";
+        return false;
+      }
+      ++writes;
+    } else if (auto it = outs.find(static_cast<hhds::Port_id>(i)); it != outs.end()) {
       pt.out = it->second;
       m.uns  = is_unsign(pt.out);
+      ++reads;
     }
     m.ports.push_back(pt);
+  }
+  if (auto it = outs.find(Ntype::Memory_readall_pid); it != outs.end()) {
+    m.read_all = it->second;
   }
   if (auto it = view_alias_.find(m.bus.get_class_index()); it != view_alias_.end()) {
     m.alias = it->second;
     m.name  = it->second.mem;  // read the real memory in place
+  }
+  if (writes != 0 && (reads != 0 || !m.name.empty())) {
+    // Whether an indexed read of the same cell sees the write is the cell's to say, and a write
+    // through a view of a real memory would have to reach that memory: neither is lowered yet.
+    why = reads != 0 ? "loop-body array written and indexed in one cell" : "loop-body write to an array that is a memory";
+    return false;
   }
   mems_.push_back(std::move(m));
   return true;
@@ -1761,7 +1856,19 @@ bool Lowering::lower_cells() {
         ++waiting[i];
       };
       if (nodes[i].mem >= 0 && nodes[i].port == SIZE_MAX) {
-        // read_all has no combinational inputs
+        // read_all has no combinational inputs -- except a loop-body array's, which is the value it
+        // was handed with this trip's writes applied
+        const auto& vm = mems_[static_cast<size_t>(nodes[i].mem)];
+        if (vm.view) {
+          need(vm.bus);
+          for (const auto& pt : vm.ports) {
+            if (pt.kind == Ntype::Memory_rdport_write) {
+              need(pt.addr);
+              need(pt.din);
+              need(pt.en);
+            }
+          }
+        }
       } else if (nodes[i].mem >= 0) {
         const auto& vm = mems_[static_cast<size_t>(nodes[i].mem)];
         need(vm.ports[nodes[i].port].addr);

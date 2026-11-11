@@ -269,6 +269,13 @@ lives in a buffer while the loop runs: an aligned lane is one load or one store,
 the state when the source is a register (that byte swap: 8 instructions a trip). A carried value
 that is also read whole inside the loop stays a plain value.
 
+An array written inside a loop (`a[i] = v`) is, in the loop body's graph, a memory cell whose
+contents are carried from trip to trip as one packed value: lg2lnast spells the write as that same
+lane write on the carried value (a write that may not happen stores the entry's own value back),
+and an indexed read as a lane read, so both end up as one store or load in the buffer. A lane read
+spelled as a shift by the index followed by a constant slice (`(x >> i*32)#[8..<16]`) is one lane
+read at the sum of the two.
+
 | bitcoin, cycles/s | every loop rolled | default (rolled, lanes in a buffer) | every loop unrolled |
 | --- | ---: | ---: | ---: |
 | | 0.50M | 3.21M | 4.32M |

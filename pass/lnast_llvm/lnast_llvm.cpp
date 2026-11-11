@@ -247,7 +247,7 @@ public:
     clock,            // the root clock's level in the view being replayed (0: low, 1: high)
     latch,            // a: enable (1 bit), b: data, c: the held value (an input); imm: register index
     wire,             // a: the value it carries, known later (set_wire): a net read at its settled value
-    lane_get,         // a: a wide value, b: bit position; the `width` bits from there      (recognize_lanes)
+    lane_get,         // a: a wide value, b: bit position (+ imm); the `width` bits from there (recognize_lanes)
     lane_set,         // a: a wide value, b: bit position, c: value; imm: lane bits; `a` with that lane replaced
   };
   static constexpr uint32_t none = std::numeric_limits<uint32_t>::max();
@@ -601,6 +601,32 @@ void recognize_lanes(Tape& t) {
     id = same(id);
     return t.ops[id].kind == K::constant && t.ops[id].imm == 1;
   };
+  // `s` is a right shift: the wide value read, where (the position op), and a constant added to it.
+  // `(x >> p) >> 8` is the lane at p + 8 of x -- how `(x >> p)#[8..<16]` arrives.
+  struct Lane_read {
+    uint32_t  x = Tape::none;
+    Tape::Ref at;
+    uint64_t  plus = 0;
+  };
+  const auto lane_read = [&](uint32_t s) -> Lane_read {
+    if (!is_binary(s, Op::lshr) || !t.ops[s].a.unsign) {
+      return {};
+    }
+    const auto inner = same(t.ops[s].a.id);
+    const auto by    = same(t.ops[s].b.id);
+    if (t.ops[by].kind == K::constant && is_binary(inner, Op::lshr) && t.ops[inner].a.unsign
+        && t.ops[inner].width >= t.ops[s].width) {
+      const auto x = same(t.ops[inner].a.id);
+      if (t.ops[x].width > 64 && t.ops[x].unsign && t.ops[by].imm < t.ops[x].width) {
+        return {x, t.ops[inner].b, t.ops[by].imm};
+      }
+    }
+    const auto x = same(t.ops[s].a.id);
+    if (t.ops[x].width > 64 && t.ops[x].unsign) {
+      return {x, t.ops[s].b, 0};
+    }
+    return {};
+  };
   std::vector<uint8_t> in_loop(t.ops.size(), 0);
   for (const auto& [lb, le] : t.loops) {
     for (uint32_t i = lb; i <= le; ++i) {
@@ -617,13 +643,35 @@ void recognize_lanes(Tape& t) {
       // low W bits of (x >> p)
       const auto s = same(o.a.id);
       if (is_binary(s, Op::lshr) && t.ops[s].width >= o.width) {
-        const auto x = same(t.ops[s].a.id);
-        if (t.ops[s].a.unsign && t.ops[x].width > 64 && t.ops[x].unsign) {
+        if (const auto read = lane_read(s); read.x != Tape::none) {
           auto& g = t.ops[i];
           g.kind  = K::lane_get;
-          g.a     = Tape::Ref{x, t.ops[x].width, true};
-          g.b     = t.ops[s].b;
+          g.a     = Tape::Ref{read.x, t.ops[read.x].width, true};
+          g.b     = read.at;
           g.c     = Tape::Ref{};
+          g.imm   = read.plus;
+        }
+      }
+      continue;
+    }
+    if (is_binary(i, Op::bit_and) && o.width <= 64) {
+      // (x >> p) & (2^W - 1): how an indexed read of an array carried as a packed value arrives
+      for (int swap = 0; swap < 2; ++swap) {
+        const auto s    = same(swap == 0 ? o.a.id : o.b.id);
+        const auto mask = same(swap == 0 ? o.b.id : o.a.id);
+        if (!is_binary(s, Op::lshr) || t.ops[mask].kind != K::constant || t.ops[s].width < o.width
+            || t.ops[mask].imm != (o.width == 64 ? ~uint64_t{0} : (uint64_t{1} << o.width) - 1)) {
+          continue;
+        }
+        if (const auto read = lane_read(s); read.x != Tape::none) {
+          auto& g = t.ops[i];
+          g.kind  = K::lane_get;
+          g.bop   = 0;
+          g.a     = Tape::Ref{read.x, t.ops[read.x].width, true};
+          g.b     = read.at;
+          g.c     = Tape::Ref{};
+          g.imm   = read.plus;
+          break;
         }
       }
       continue;
@@ -3344,6 +3392,7 @@ size_t build_kernel(const Tape& t, const Kernel_job& job, const Activity& gate, 
   absl::flat_hash_map<uint32_t, V>      map;
   absl::flat_hash_map<uint64_t, size_t> arrays;
   absl::flat_hash_map<uint32_t, size_t> lane_buffer;  // op -> the buffer holding its value (a buffered loop carry)
+  absl::flat_hash_map<uint32_t, size_t> read_buffer;  // op -> a copy of it made ahead of a loop that reads its lanes
   for (const auto& [id, index] : in_index) {
     map[id] = k.input(index);
   }
@@ -3443,11 +3492,23 @@ size_t build_kernel(const Tape& t, const Kernel_job& job, const Activity& gate, 
       case K::loop_begin: {
         // Array base pointers must dominate the body and what follows it (a loop is emitted whole,
         // in recorded order, so its ops follow here until its loop_end).
+        std::vector<uint32_t> lane_sources;  // wide values the body reads lanes of and that exist before the loop
         for (uint32_t q = p; q < job.end && !(t.ops[v.order[q]].kind == K::loop_end && t.ops[v.order[q]].a.id == i); ++q) {
           const auto& body = t.ops[v.order[q]];
           if (body.kind == K::array_read || body.kind == K::array_write || body.kind == K::array_clear) {
             (void)array_of(body.imm);
           }
+          if (body.kind == K::lane_get && map.contains(body.a.id) && t.ops[body.a.id].kind != K::input
+              && !lane_buffer.contains(body.a.id) && !read_buffer.contains(body.a.id)) {
+            lane_sources.push_back(body.a.id);
+            read_buffer[body.a.id] = 0;
+          }
+        }
+        // Stored once, ahead of the loop: a lane read is then a load, not a copy of the value a trip.
+        // (A value read straight from the state needs no copy: dynamic_extract reads it in place.)
+        for (const auto src : lane_sources) {
+          const auto& d    = t.ops[src];
+          read_buffer[src] = k.lane_buffer_create(val(Tape::Ref{src, d.width, d.unsign}));
         }
         std::vector<V> seeds, phis;
         for (uint32_t j = 0; j < o.n; ++j) {
@@ -3489,13 +3550,21 @@ size_t build_kernel(const Tape& t, const Kernel_job& job, const Activity& gate, 
         }
         break;
       }
-      case K::lane_get:
+      case K::lane_get: {
+        V at = val(o.b);
+        if (o.imm != 0) {  // a constant further up the value
+          const uint32_t w = std::max<uint32_t>(at.width, 64 - static_cast<uint32_t>(__builtin_clzll(o.imm))) + 1;
+          at               = k.binary(Op::add, V{at.id, at.width, true}, k.constant(w, o.imm, true), w, true);
+        }
         if (auto buffered = lane_buffer.find(o.a.id); buffered != lane_buffer.end()) {
-          made(i, k.lane_buffer_extract(buffered->second, val(o.b), o.width, o.width, o.unsign));
+          made(i, k.lane_buffer_extract(buffered->second, at, o.width, o.width, o.unsign));
+        } else if (auto stored = read_buffer.find(o.a.id); stored != read_buffer.end()) {
+          made(i, k.lane_buffer_extract(stored->second, at, o.width, o.width, o.unsign));
         } else {
-          made(i, k.dynamic_extract(val(o.a), val(o.b), o.width, o.width, o.unsign));
+          made(i, k.dynamic_extract(val(o.a), at, o.width, o.width, o.unsign));
         }
         break;
+      }
       case K::lane_set:
         if (auto buffered = lane_buffer.find(o.a.id); buffered != lane_buffer.end()) {
           const auto buffer = buffered->second;

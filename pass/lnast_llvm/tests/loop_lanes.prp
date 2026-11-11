@@ -5,8 +5,10 @@
 //   two   two lane writes a trip, and a read of the lane just written
 //   keep  the carried value is also read whole inside the loop, so it stays a plain value
 //   sum   a short innermost loop (unrolled) inside a rolled one
+//   arr   an array written entry by entry in one loop and indexed in another, and words read as
+//         `(x >> i*32)#[8..<16]` (a shift by the index, then a constant slice)
 mod loop_lanes(clk:Clock, a:U64, b:U64, c:U64) -> (rev_lo:U64@[0], rev_hi:U64@[0], mix:U64@[0], two:U64@[0], keep:U64@[0],
-                                                   sum:U32@[0]) {
+                                                   sum:U32@[0], arr:U32@[0], wsum:U32@[0]) {
   const x:U128 = (a << 64) | b
   mut le:U128 = 0
   for i in 0..<16 {
@@ -48,4 +50,21 @@ mod loop_lanes(clk:Clock, a:U64, b:U64, c:U64) -> (rev_lo:U64@[0], rev_hi:U64@[0
     }
   }
   sum = acc
+
+  mut bytes:[16]U8 = nil
+  for i in 0..<16 {
+    bytes[i] = x#[(15 - i)*8..+8] ^ c#[0..<8]
+  }
+  mut asum:U32 = 0
+  for i in 0..<16 {
+    wrap asum = asum + (bytes[15 - i] << (i & 7))
+  }
+  arr = asum
+
+  mut ws:U32 = 0
+  for i in 0..<8 {
+    const w:U32 = y#[(i & 3)*32..+32]
+    wrap ws = ws + ((w#[8..<16] << 8) | w#[24..<32]) + i
+  }
+  wsum = ws
 }
