@@ -14,8 +14,10 @@ import LeanSemanticPrimitives.Compiler.CompileDesignDefs
 All three need `admitsWB D`, which the drivers check first.
 
 The default is `vc` (`defaultSim`): on a large design it is the fastest of the three and the
-smallest in memory (`projects/sym_routes/PERF.md`), and it needs no specialization. `closed`,
-`emit:` and `route:` exist only for fp, so a run that names one of them and no `sim:` uses fp. -/
+smallest in memory (`projects/sym_routes/PERF.md`), and it needs no specialization. A run that
+names `closed`, `emit:` or `route:` and no `sim:` uses fp: `route:` is fp's alone, and a theorem
+file from fp keeps its fp form (`RefMapChecked`, `runInvKF`). `closed` and `emit:` work on every
+route (`Sym.Closed`: `Sim`, `runInvKOn`; `Check.runRefMapOn`, `Check.runSpecFactsOn`). -/
 
 open Compiler Projection Projection.MemProjection HDLProof.Sym HDLProof.Sym.Native
 namespace HDLProof.Kit
@@ -31,7 +33,7 @@ structure SymRoute where
   name : String
 
 /-- The route a run uses: `sim:` when given (`tv` is the old name of `vc`); otherwise `vc`, or
-`fp` when the run asks for something only fp has (`fpOnly`: `closed`, `emit:`, `route:`). -/
+`fp` when the run names `closed`, `emit:` or `route:` (`fpOnly`). -/
 def defaultSim (asked : Option String) (fpOnly : Bool) : String :=
   match asked with
   | some s => if s == "tv" then "vc" else s
@@ -41,7 +43,7 @@ def defaultSim (asked : Option String) (fpOnly : Bool) : String :=
 def simWhy (asked : Option String) (fpOnly : Bool) : String :=
   match asked with
   | some _ => ""
-  | none => if fpOnly then " (no sim: given; closed / emit: / route: exist only for fp)" else " (the default)"
+  | none => if fpOnly then " (no sim: given; closed / emit: / route: use fp unless sim: is named)" else " (the default)"
 
 /-- Build the route `sim` (fp | ir | vc) for `D`; `route` is fp's variant. -/
 def mkSymRoute (sim route : String) (sf wf : Nat) (D : DesignCert) : Except String SymRoute :=

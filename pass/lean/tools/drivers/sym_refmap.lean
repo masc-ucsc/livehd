@@ -96,12 +96,18 @@ runs built here: `runConjTOf && sideRM && checkRM`, which is `runRefMapOf` by de
 `specfacts` proves the spec's Moore and confluence facts (`runSpecFactsOf`,
 `runSpecFactsOf_sound`).
 
-`emit:` writes a theorem file for the verdict, stated as `Check.RefMapChecked` /
-`Check.SpecFactsChecked` on the fused route (`runRefMapF`, `runSpecFactsF`), with the
-certificates included as text. `f2` (the default) embeds the proofs and proves the statement
-by `native_decide`; `f1` states it as one named axiom whose docstring records the certificates'
-and the proofs' SHA-256 (for proofs too large to embed). `Check.refmap_compose_ref`,
-`Check.start_ref` and `Check.refmap_progress_ref` take these statements.
+`emit:` writes a theorem file for the verdict, with the certificates included as text. On fp
+(both designs) it is stated as `Check.RefMapChecked` / `Check.SpecFactsChecked` on the fused
+route (`runRefMapF`, `runSpecFactsF`). On ir or vc, or with the two designs on different routes,
+it is stated as `Check.RefMapCheckedOn <impl route> <spec route>` / `Check.SpecFactsCheckedOn
+<route>` (`runRefMapOn`, `runSpecFactsOn`; a route is `.ir`, `.vc` or `(.fp sf wf)`). `f2` (the
+default) embeds the proofs and proves the statement by `native_decide`; `f1` states it as one
+named axiom whose docstring records the routes, the certificates' and the proofs' SHA-256 (for
+proofs too large to embed). Every form gives the route-free `Check.RefMapPasses` /
+`Check.SpecFactsPass` by `.passes`, which `Check.refmap_compose_any`, `Check.start_any` and
+`Check.refmap_progress_any` take, so verdicts from different routes compose;
+`Check.refmap_compose_ref`, `Check.start_ref` and `Check.refmap_progress_ref` take the fp forms
+directly. `emit:` with no `sim:` runs on fp.
 
 `cache` reuses an LRAT proof already in `work/` when the obligation's CNF there is
 byte-identical, without running the solver. The verified check re-checks every proof
@@ -674,8 +680,8 @@ def D{tag} : DesignCert := certOf cert{tag}
 check, by `native_decide` (trusted native: one `_native` axiom). `f1`: the verdict is a named
 axiom; its docstring records the certificates' and the proofs' hashes. -/
 def emitFile (out : System.FilePath) (kind : String) (facts : Bool) (implCert specCert : String)
-    (sf wf : Nat) (sp : RefMapSpec) (pfs : List ByteArray) (pfDefs : Unit → String) (pfArgs : String)
-    (work : System.FilePath) : IO Unit := do
+    (sf wf : Nat) (simI simS : String) (sp : RefMapSpec) (pfs : List ByteArray) (pfDefs : Unit → String)
+    (pfArgs : String) (work : System.FilePath) : IO Unit := do
   let dir := out.parent.getD "."
   IO.FS.createDirAll dir
   let name := safeName (out.fileStem.getD "verdict")
@@ -685,10 +691,18 @@ def emitFile (out : System.FilePath) (kind : String) (facts : Bool) (implCert sp
   for (t, c) in certs do defs := defs ++ (← certDef t c dir) ++ "\n"
   let what := if facts then s!"the spec `{specCert.splitOn "/" |>.getLast!}` has its Moore and confluence facts"
     else s!"`{implCert.splitOn "/" |>.getLast!}` refines `{specCert.splitOn "/" |>.getLast!}`"
-  let stmt := if facts then s!"SpecFactsChecked {sf} {wf} DS spec"
-    else s!"RefMapChecked {sf} {wf} {sf} {wf} DI DS spec s0"
-  let check := if facts then s!"runSpecFactsF {sf} {wf} DS spec {pfArgs}"
-    else s!"runRefMapF {sf} {wf} {sf} {wf} DI DS spec s0 {pfArgs}"
+  -- fp on every design: the fused-route form; otherwise the form that names each route
+  let simL (s : String) : String := if s == "ir" then ".ir" else if s == "vc" then ".vc" else s!"(.fp {sf} {wf})"
+  let allFp := simS == "fp" && (facts || simI == "fp")
+  let stmt := if facts then
+      (if allFp then s!"SpecFactsChecked {sf} {wf} DS spec" else s!"SpecFactsCheckedOn {simL simS} DS spec")
+    else if allFp then s!"RefMapChecked {sf} {wf} {sf} {wf} DI DS spec s0"
+    else s!"RefMapCheckedOn {simL simI} {simL simS} DI DS spec s0"
+  let check := if facts then
+      (if allFp then s!"runSpecFactsF {sf} {wf} DS spec {pfArgs}" else s!"runSpecFactsOn {simL simS} DS spec {pfArgs}")
+    else if allFp then s!"runRefMapF {sf} {wf} {sf} {wf} DI DS spec s0 {pfArgs}"
+    else s!"runRefMapOn {simL simI} {simL simS} DI DS spec s0 {pfArgs}"
+  let routes := if facts then s!"sim:{simS}" else s!"impl sim:{simI}, spec sim:{simS}"
   let s0Def := if facts then "" else "def s0 : StateM :=
   { flops := DI.flops.map (fun f => mk_bv f.width 0)
   , mems  := DI.memories.map (fun md =>
@@ -702,7 +716,7 @@ theorem verdict : {check} = true := by native_decide
 theorem checked : {stmt} := ⟨{pfArgs.replace " " ", "}, verdict⟩
 "
     else do
-      let mut prov := ""
+      let mut prov := s!"\n  routes: {routes}"
       for (t, c) in certs do prov := prov ++ s!"\n  certificate {t}: sha256 {← sha256 c}"
       prov := prov ++ s!"\n  proofs: {pfs.length} LRAT proofs, {pfs.foldl (· + ·.size) 0} bytes, sha256 {← proofsHash work pfs}"
       pure s!"/-- {what}: the proofs passed the check, natively evaluated by sym_refmap.{prov} -/
@@ -712,7 +726,7 @@ axiom checked : {stmt}
 verified checker, which `native_decide` evaluates (trusted native: one `_native` axiom)."
     else "The verdict is a named axiom: sym_refmap evaluated the verified checker on the
 proofs natively (trust F1); the docstring records what it checked."
-  let src := s!"/- Generated by sym_refmap: {what}.
+  let src := s!"/- Generated by sym_refmap: {what} ({routes}).
 The certificates are included as text. {trust} -/
 import HDLProof.Check.RefMapRef
 open Compiler Projection HDLProof HDLProof.Sym HDLProof.Check
@@ -766,8 +780,6 @@ def refmapMain (path : String) (rest : List String) (facts : Bool) : IO UInt32 :
   let gI := (opt "simI").orElse fun _ => opt "sim"
   let simS := defaultSim gS fpOnly
   let simI := defaultSim gI fpOnly
-  if (simS != "fp" || simI != "fp") && (emitOpt rest).isSome then
-    IO.eprintln s!"emit: only sim:fp has a closed checker so far (spec sim:{simS}, impl sim:{simI})"; return 2
   let (RS, fuelS, nameS) ← match ← symRouteOf simS DS sf wf with
     | .ok x => pure x
     | .error e => do say s!"  RESULT: REFUSED (spec: {e})"; return 4
@@ -827,7 +839,7 @@ def refmapMain (path : String) (rest : List String) (facts : Bool) : IO UInt32 :
     let ok ← IO.lazyPure (fun _ => runSpecFactsOf DS RS sp pfs.toList)
     if ok then
       if let some (kind, out) := emitOpt rest then
-        emitFile out kind true "" specCert sf wf sp pfs.toList
+        emitFile out kind true "" specCert sf wf simI simS sp pfs.toList
           (fun _ => s!"def pfF : List ByteArray := {leanBytesL pfs.toList}\n") "pfF" work
         say s!"  {kind.toUpper} theorem file: {out}"
       say "  RESULT: SPEC FACTS PROVED -- runSpecFactsOf_sound: Moore, and the channel spec is confluent"
@@ -958,7 +970,7 @@ implementation state at cycle n:\n{"\n".intercalate ((groupedState flopNames st0
   say s!"  verified check (runRefMapOf over the runs above; LRAT-check all) in {t6 - t5} ms; total {t6 - t2} ms"
   if ok then
     if let some (kind, out) := emitOpt rest then
-      emitFile out kind false implCert specCert sf wf sp ([pfIB] ++ pfIS.flatten ++ [pfB] ++ pfL.flatten)
+      emitFile out kind false implCert specCert sf wf simI simS sp ([pfIB] ++ pfIS.flatten ++ [pfB] ++ pfL.flatten)
         (fun _ => s!"def pfIB : ByteArray := {leanBytes pfIB}\ndef pfIS : List (List ByteArray) := {leanBytesLL pfIS}\n\
 def pfB : ByteArray := {leanBytes pfB}\ndef pfS : List (List ByteArray) := {leanBytesLL pfL}\n")
         "pfIB pfIS pfB pfS" work

@@ -3,8 +3,10 @@
 checks on the fused route.
 
 `runRefMapF` and `runSpecFactsF` specialize each certificate with the proved fused specializer
-(`projectMemFDesignAt`) and run `runRefMapOf` / `runSpecFactsOf` on the residual. These closed
-Bools are what an emitted theorem file evaluates.
+(`projectMemFDesignAt`) and run `runRefMapOf` / `runSpecFactsOf` on the residual.
+`runRefMapOn` and `runSpecFactsOn` do the same on any route (`Sym.Sim`: fp, ir or vc; the
+implementation and the spec may use different routes). These closed Bools are what an emitted
+theorem file evaluates.
 
 The checker reasons about `outM`, the trace of the finite-memory semantics. On a checked
 implementation that trace IS `interpretDesign`'s (`refOut`, `rm_denote`), so this file restates
@@ -13,11 +15,16 @@ the streams over `refOut` (`portsR`, `GoodR`, `implUpToR`, `implStreamR`, `ImplO
 - `refmap_compose_ref`: two checked implementations of one checked spec show the same streams;
 - `start_ref`: their map states at `R0` agree when their initial maps do (`InitAgree`);
 - `refmap_progress_ref`: under justice, every allowed ranked channel gets an event.
-The verdicts enter as `RefMapChecked` / `SpecFactsChecked`: some proofs pass the check. An
-emitted F2 file proves that by `native_decide`; an emitted F1 file assumes it as a named axiom.
-Nothing here mentions the specializer's state or residual. Mathlib-free.
+The verdicts enter as `RefMapChecked` / `SpecFactsChecked` (fp) or `RefMapCheckedOn` /
+`SpecFactsCheckedOn` (any route): some proofs pass the check. An emitted F2 file proves that by
+`native_decide`; an emitted F1 file assumes it as a named axiom. Every form implies the
+route-free `RefMapPasses` / `SpecFactsPass` (`.passes`), and the results are proved over those
+(`start_any`, `refmap_compose_any`, `refmap_progress_any`), so verdicts from different routes
+compose. `start_ref`, `refmap_compose_ref` and `refmap_progress_ref` are the same results for fp
+verdicts. Nothing here mentions the specializer's state or residual. Mathlib-free.
 -/
 import HDLProof.Check.RefMapCompose
+import HDLProof.Sym.Closed
 import LeanSemanticPrimitives.Compiler.CertIOCodec
 
 open Projection
@@ -65,6 +72,48 @@ theorem runSpecFactsF_parts {sf wf : Nat} {DS : DesignCert} {sp : RefMapSpec} {p
   split at hr
   · rename_i RS hS
     exact ⟨RS, MemResidual.of_projF hS, hAS, hr⟩
+  · cases hr
+
+/-! ## The checks on every route -/
+
+/-- The refinement-map check, the implementation run on route `rI` and the spec on `rS`. -/
+def runRefMapOn (rI rS : Sim) (DI DS : DesignCert) (sp : RefMapSpec) (s0 : StateM)
+    (pfIB : ByteArray) (pfIS : List (List ByteArray)) (pfB : ByteArray)
+    (pfS : List (List ByteArray)) : Bool :=
+  admitsWB DI && admitsWB DS &&
+    match rI.stepper DI, rS.stepper DS with
+    | some RI, some RS => runRefMapOf DI DS RI RS sp s0 pfIB pfIS pfB pfS
+    | _, _ => false
+
+/-- The spec-facts check, the spec run on route `r`. -/
+def runSpecFactsOn (r : Sim) (DS : DesignCert) (sp : RefMapSpec) (pfF : List ByteArray) : Bool :=
+  admitsWB DS &&
+    match r.stepper DS with
+    | some RS => runSpecFactsOf DS RS sp pfF
+    | none => false
+
+theorem runRefMapOn_parts {rI rS : Sim} {DI DS : DesignCert} {sp : RefMapSpec} {s0 : StateM}
+    {pfIB pfB : ByteArray} {pfIS pfS : List (List ByteArray)}
+    (h : runRefMapOn rI rS DI DS sp s0 pfIB pfIS pfB pfS = true) :
+    ∃ RI RS, MemResidual DI RI ∧ admitsWB DI = true ∧ MemResidual DS RS ∧ admitsWB DS = true
+      ∧ runRefMapOf DI DS RI RS sp s0 pfIB pfIS pfB pfS = true := by
+  unfold runRefMapOn at h
+  simp only [Bool.and_eq_true] at h
+  obtain ⟨⟨hAI, hAS⟩, hr⟩ := h
+  split at hr
+  · rename_i RI RS hI hS
+    exact ⟨RI, RS, Sim.stepper_sound hI, hAI, Sim.stepper_sound hS, hAS, hr⟩
+  · cases hr
+
+theorem runSpecFactsOn_parts {r : Sim} {DS : DesignCert} {sp : RefMapSpec} {pfF : List ByteArray}
+    (h : runSpecFactsOn r DS sp pfF = true) :
+    ∃ RS, MemResidual DS RS ∧ admitsWB DS = true ∧ runSpecFactsOf DS RS sp pfF = true := by
+  unfold runSpecFactsOn at h
+  simp only [Bool.and_eq_true] at h
+  obtain ⟨hAS, hr⟩ := h
+  split at hr
+  · rename_i RS hS
+    exact ⟨RS, Sim.stepper_sound hS, hAS, hr⟩
   · cases hr
 
 /-! ## The checked trace is the reference trace -/
@@ -184,24 +233,83 @@ def RefMapChecked (sf wf sfS wfS : Nat) (DI DS : DesignCert) (sp : RefMapSpec) (
 def SpecFactsChecked (sf wf : Nat) (DS : DesignCert) (sp : RefMapSpec) : Prop :=
   ∃ pfF, runSpecFactsF sf wf DS sp pfF = true
 
-/-- The parts of a checked map: its facts, and that its trace is the reference trace. -/
+/-- Some proofs pass the refinement-map check, the implementation run on route `rI` and the
+spec on `rS`: the statement of a theorem file emitted from a run on ir or vc (or on two
+routes). -/
+def RefMapCheckedOn (rI rS : Sim) (DI DS : DesignCert) (sp : RefMapSpec) (s0 : StateM) : Prop :=
+  ∃ pfIB pfIS pfB pfS, runRefMapOn rI rS DI DS sp s0 pfIB pfIS pfB pfS = true
+
+/-- Some proofs pass the spec-facts check on route `r`. -/
+def SpecFactsCheckedOn (r : Sim) (DS : DesignCert) (sp : RefMapSpec) : Prop :=
+  ∃ pfF, runSpecFactsOn r DS sp pfF = true
+
+/-- What every refinement-map verdict says, the route left out: for some symbolic steps proved
+for the two certificates (`MemResidual`), some proofs pass `runRefMapOf`. -/
+def RefMapPasses (DI DS : DesignCert) (sp : RefMapSpec) (s0 : StateM) : Prop :=
+  ∃ (RI RS : Stepper) (pfIB : ByteArray) (pfIS : List (List ByteArray)) (pfB : ByteArray)
+    (pfS : List (List ByteArray)),
+    MemResidual DI RI ∧ admitsWB DI = true ∧ MemResidual DS RS ∧ admitsWB DS = true
+      ∧ runRefMapOf DI DS RI RS sp s0 pfIB pfIS pfB pfS = true
+
+/-- What every spec-facts verdict says, the route left out. -/
+def SpecFactsPass (DS : DesignCert) (sp : RefMapSpec) : Prop :=
+  ∃ (RS : Stepper) (pfF : List ByteArray),
+    MemResidual DS RS ∧ admitsWB DS = true ∧ runSpecFactsOf DS RS sp pfF = true
+
+theorem RefMapChecked.passes {sf wf sfS wfS : Nat} {DI DS : DesignCert} {sp : RefMapSpec}
+    {s0 : StateM} (h : RefMapChecked sf wf sfS wfS DI DS sp s0) : RefMapPasses DI DS sp s0 := by
+  obtain ⟨pfIB, pfIS, pfB, pfS, h⟩ := h
+  obtain ⟨RI, RS, hrI, hAI, hrS, hAS, hc⟩ := runRefMapF_parts h
+  exact ⟨RI, RS, pfIB, pfIS, pfB, pfS, hrI, hAI, hrS, hAS, hc⟩
+
+theorem RefMapCheckedOn.passes {rI rS : Sim} {DI DS : DesignCert} {sp : RefMapSpec}
+    {s0 : StateM} (h : RefMapCheckedOn rI rS DI DS sp s0) : RefMapPasses DI DS sp s0 := by
+  obtain ⟨pfIB, pfIS, pfB, pfS, h⟩ := h
+  obtain ⟨RI, RS, hrI, hAI, hrS, hAS, hc⟩ := runRefMapOn_parts h
+  exact ⟨RI, RS, pfIB, pfIS, pfB, pfS, hrI, hAI, hrS, hAS, hc⟩
+
+theorem SpecFactsChecked.passes {sf wf : Nat} {DS : DesignCert} {sp : RefMapSpec}
+    (h : SpecFactsChecked sf wf DS sp) : SpecFactsPass DS sp := by
+  obtain ⟨pfF, h⟩ := h
+  obtain ⟨RS, hrS, hAS, hc⟩ := runSpecFactsF_parts h
+  exact ⟨RS, pfF, hrS, hAS, hc⟩
+
+theorem SpecFactsCheckedOn.passes {r : Sim} {DS : DesignCert} {sp : RefMapSpec}
+    (h : SpecFactsCheckedOn r DS sp) : SpecFactsPass DS sp := by
+  obtain ⟨pfF, h⟩ := h
+  obtain ⟨RS, hrS, hAS, hc⟩ := runSpecFactsOn_parts h
+  exact ⟨RS, pfF, hrS, hAS, hc⟩
+
+/-- The parts of a passed map: its facts, and that its trace is the reference trace. -/
+theorem passes_parts {DI DS : DesignCert} {sp : RefMapSpec} {s0 : StateM}
+    (h : RefMapPasses DI DS sp s0) {ins : Nat → RuntimeInput}
+    (hins : ∀ n, (ins n).toList.map BV.width = sp.inv.inW) :
+    admitsWB DS = true ∧ RefMapFacts DI DS sp s0 ins
+      ∧ ∀ n, outM DI s0 ins n = refOut DI (StateM.denote s0) ins n := by
+  obtain ⟨RI, RS, _, _, _, _, hrI, hAI, hrS, hAS, hc⟩ := h
+  exact ⟨hAS, runRefMapOf_sound hrI hAI hrS hAS hc hins, rm_denote hrI hAI hc hins⟩
+
+/-- The parts of a checked map (fp). -/
 theorem checked_parts {sf wf sfS wfS : Nat} {DI DS : DesignCert} {sp : RefMapSpec} {s0 : StateM}
     (h : RefMapChecked sf wf sfS wfS DI DS sp s0) {ins : Nat → RuntimeInput}
     (hins : ∀ n, (ins n).toList.map BV.width = sp.inv.inW) :
     admitsWB DS = true ∧ RefMapFacts DI DS sp s0 ins
-      ∧ ∀ n, outM DI s0 ins n = refOut DI (StateM.denote s0) ins n := by
-  obtain ⟨_, _, _, _, h⟩ := h
-  obtain ⟨RI, RS, hrI, hAI, hrS, hAS, hc⟩ := runRefMapF_parts h
-  exact ⟨hAS, runRefMapOf_sound hrI hAI hrS hAS hc hins, rm_denote hrI hAI hc hins⟩
+      ∧ ∀ n, outM DI s0 ins n = refOut DI (StateM.denote s0) ins n :=
+  passes_parts h.passes hins
 
-/-- The facts of a checked spec, for any map with the same spec. -/
-theorem specFacts_checked {sf wf : Nat} {DS : DesignCert} {spF sp : RefMapSpec}
-    (h : SpecFactsChecked sf wf DS spF) (hs : SameSpec spF sp) :
+/-- The facts of a passed spec, for any map with the same spec. -/
+theorem specFacts_pass {DS : DesignCert} {spF sp : RefMapSpec}
+    (h : SpecFactsPass DS spF) (hs : SameSpec spF sp) :
     specSideOK DS sp = true ∧ SpecFactsOK DS sp := by
-  obtain ⟨_, h⟩ := h
-  obtain ⟨RS, hrS, hAS, hc⟩ := runSpecFactsF_parts h
+  obtain ⟨RS, _, hrS, hAS, hc⟩ := h
   exact ⟨by rw [← specSide_same hs]; exact (sf_parts hc).1,
     specFacts_same hs (runSpecFactsOf_sound hrS hAS hc)⟩
+
+/-- The facts of a checked spec (fp), for any map with the same spec. -/
+theorem specFacts_checked {sf wf : Nat} {DS : DesignCert} {spF sp : RefMapSpec}
+    (h : SpecFactsChecked sf wf DS spF) (hs : SameSpec spF sp) :
+    specSideOK DS sp = true ∧ SpecFactsOK DS sp :=
+  specFacts_pass h.passes hs
 
 /-! ## The start -/
 
@@ -249,8 +357,26 @@ theorem start_of_facts {DIa DIb DS : DesignCert} {spA spB : RefMapSpec} {s0A s0B
     obtain ⟨b2, h2, e2⟩ := iB k _ hb
     exact ⟨b1, b2, h1, h2, by rw [e1, e2]; exact hab⟩
 
-/-- The start in the reference semantics: two checked maps whose initial maps agree start from
+/-- The start in the reference semantics: two passed maps whose initial maps agree start from
 the same map state at `R0`. -/
+theorem start_any {DIa DIb DS : DesignCert} {spA spB : RefMapSpec} {s0A s0B : StateM}
+    (hA : RefMapPasses DIa DS spA s0A) (hB : RefMapPasses DIb DS spB s0B) (hsame : SameSpec spA spB)
+    {insA insB : Nat → RuntimeInput}
+    (hinsA : ∀ n, (insA n).toList.map BV.width = spA.inv.inW)
+    (hinsB : ∀ n, (insB n).toList.map BV.width = spB.inv.inW)
+    (hgA : GoodR DIa spA (StateM.denote s0A) insA spA.R0)
+    (hgB : GoodR DIb spB (StateM.denote s0B) insB spB.R0)
+    (hI : ∀ k, k < spA.LS.fws.length → InitAgree spA spB
+      (refOut DIa (StateM.denote s0A) insA 0) (refOut DIb (StateM.denote s0B) insB 0) k) :
+    alphaSt spA (refOut DIa (StateM.denote s0A) insA spA.R0)
+      = alphaSt spB (refOut DIb (StateM.denote s0B) insB spB.R0) := by
+  obtain ⟨-, hFA, hdA⟩ := passes_parts hA hinsA
+  obtain ⟨-, hFB, hdB⟩ := passes_parts hB hinsB
+  rw [← hdA, ← hdB]
+  exact start_of_facts hsame hFA hFB ((good_ref hdA _).mpr hgA) ((good_ref hdB _).mpr hgB)
+    (fun k hk => by rw [hdA, hdB]; exact hI k hk)
+
+/-- `start_any` for two fp verdicts. -/
 theorem start_ref {sfA wfA sfSa wfSa sfB wfB sfSb wfSb : Nat} {DIa DIb DS : DesignCert}
     {spA spB : RefMapSpec} {s0A s0B : StateM}
     (hA : RefMapChecked sfA wfA sfSa wfSa DIa DS spA s0A)
@@ -263,22 +389,44 @@ theorem start_ref {sfA wfA sfSa wfSa sfB wfB sfSb wfSb : Nat} {DIa DIb DS : Desi
     (hI : ∀ k, k < spA.LS.fws.length → InitAgree spA spB
       (refOut DIa (StateM.denote s0A) insA 0) (refOut DIb (StateM.denote s0B) insB 0) k) :
     alphaSt spA (refOut DIa (StateM.denote s0A) insA spA.R0)
-      = alphaSt spB (refOut DIb (StateM.denote s0B) insB spB.R0) := by
-  obtain ⟨-, hFA, hdA⟩ := checked_parts hA hinsA
-  obtain ⟨-, hFB, hdB⟩ := checked_parts hB hinsB
-  rw [← hdA, ← hdB]
-  exact start_of_facts hsame hFA hFB ((good_ref hdA _).mpr hgA) ((good_ref hdB _).mpr hgB)
-    (fun k hk => by rw [hdA, hdB]; exact hI k hk)
+      = alphaSt spB (refOut DIb (StateM.denote s0B) insB spB.R0) :=
+  start_any hA.passes hB.passes hsame hinsA hinsB hgA hgB hI
 
 /-! ## Composition and progress, in the reference semantics -/
 
 /-- **Two checked implementations of one checked spec show the same streams** in
 `interpretDesign`'s semantics. `DIa` and `DIb` each pass the refinement-map check against `DS`,
 with maps of the same spec, and `DS` passes the spec facts (checked once, on a map `spF` of the
-same spec). Take any two runs that meet their assumptions, start from the same map state at
-`R0` (`start_ref`), and are each answered by the same environment `E` from their own histories.
-On every channel the observed and response words agree on the common prefix, at any two cycle
-counts. -/
+same spec). Each verdict may come from any route (`.passes`). Take any two runs that meet their
+assumptions, start from the same map state at `R0` (`start_any`), and are each answered by the
+same environment `E` from their own histories. On every channel the observed and response words
+agree on the common prefix, at any two cycle counts. -/
+theorem refmap_compose_any {DIa DIb DS : DesignCert} {spA spB spF : RefMapSpec} {s0A s0B : StateM}
+    (hA : RefMapPasses DIa DS spA s0A) (hB : RefMapPasses DIb DS spB s0B)
+    (hF : SpecFactsPass DS spF) (hfa : SameSpec spF spA) (hsame : SameSpec spA spB)
+    {insA insB : Nat → RuntimeInput}
+    (hinsA : ∀ n, (insA n).toList.map BV.width = spA.inv.inW)
+    (hinsB : ∀ n, (insB n).toList.map BV.width = spB.inv.inW)
+    (hgA : ∀ n, GoodR DIa spA (StateM.denote s0A) insA n)
+    (hgB : ∀ n, GoodR DIb spB (StateM.denote s0B) insB n)
+    (hstart : alphaSt spA (refOut DIa (StateM.denote s0A) insA spA.R0)
+      = alphaSt spB (refOut DIb (StateM.denote s0B) insB spB.R0))
+    {E : Theory.Env Nat (List Int) (List Int)}
+    (hEA : ImplObeysR DIa spA (StateM.denote s0A) insA E)
+    (hEB : ImplObeysR DIb spB (StateM.denote s0B) insB E) :
+    ∀ nA nB x, Theory.PrefixAgree (implStreamR DIa spA (StateM.denote s0A) insA x nA)
+      (implStreamR DIb spB (StateM.denote s0B) insB x nB) := by
+  obtain ⟨hAS, hFA, hdA⟩ := passes_parts hA hinsA
+  obtain ⟨-, hFB, hdB⟩ := passes_parts hB hinsB
+  obtain ⟨hside, hSF⟩ := specFacts_pass hF hfa
+  intro nA nB x
+  rw [← implStream_ref hdA, ← implStream_ref hdB]
+  refine compose_of_facts hAS hside hSF hsame hFA hFB
+    (fun n => (good_ref hdA n).mpr (hgA n)) (fun n => (good_ref hdB n).mpr (hgB n))
+    (by rw [hdA, hdB]; exact hstart) ((implObeys_ref hdA E).mpr hEA) ((implObeys_ref hdB E).mpr hEB)
+    nA nB x
+
+/-- `refmap_compose_any` for fp verdicts. -/
 theorem refmap_compose_ref {sfA wfA sfSa wfSa sfB wfB sfSb wfSb sfF wfF : Nat}
     {DIa DIb DS : DesignCert} {spA spB spF : RefMapSpec} {s0A s0B : StateM}
     (hA : RefMapChecked sfA wfA sfSa wfSa DIa DS spA s0A)
@@ -295,20 +443,31 @@ theorem refmap_compose_ref {sfA wfA sfSa wfSa sfB wfB sfSb wfSb sfF wfF : Nat}
     (hEA : ImplObeysR DIa spA (StateM.denote s0A) insA E)
     (hEB : ImplObeysR DIb spB (StateM.denote s0B) insB E) :
     ∀ nA nB x, Theory.PrefixAgree (implStreamR DIa spA (StateM.denote s0A) insA x nA)
-      (implStreamR DIb spB (StateM.denote s0B) insB x nB) := by
-  obtain ⟨hAS, hFA, hdA⟩ := checked_parts hA hinsA
-  obtain ⟨-, hFB, hdB⟩ := checked_parts hB hinsB
-  obtain ⟨hside, hSF⟩ := specFacts_checked hF hfa
-  intro nA nB x
-  rw [← implStream_ref hdA, ← implStream_ref hdB]
-  refine compose_of_facts hAS hside hSF hsame hFA hFB
-    (fun n => (good_ref hdA n).mpr (hgA n)) (fun n => (good_ref hdB n).mpr (hgB n))
-    (by rw [hdA, hdB]; exact hstart) ((implObeys_ref hdA E).mpr hEA) ((implObeys_ref hdB E).mpr hEB)
-    nA nB x
+      (implStreamR DIb spB (StateM.denote s0B) insB x nB) :=
+  refmap_compose_any hA.passes hB.passes hF.passes hfa hsame hinsA hinsB hgA hgB hstart hEA hEB
 
 /-- **Progress** in `interpretDesign`'s semantics. Under justice of the environment
 requirements, a ranked channel that is allowed at a cycle from `R0` on gets, at that cycle or
-later, a slot of its own that fires. -/
+later, a slot of its own that fires. The verdicts may come from any route (`.passes`). -/
+theorem refmap_progress_any {DI DS : DesignCert} {sp spF : RefMapSpec} {s0 : StateM}
+    (hchk : RefMapPasses DI DS sp s0)
+    (hF : SpecFactsPass DS spF) (hfs : SameSpec spF sp)
+    {ins : Nat → RuntimeInput} (hins : ∀ n, (ins n).toList.map BV.width = sp.inv.inW)
+    (hg : ∀ n, GoodR DI sp (StateM.denote s0) ins n)
+    (hJ : (progOfR DI sp (StateM.denote s0) ins).Just) {c : Nat} {ch : ChanS} {r : Nat × Nat}
+    (hch : sp.chans[c]? = some ch) (hrank : ch.rank = some r) :
+    ∀ n, sp.R0 ≤ n → (specOf DS sp).en (alphaSt sp (refOut DI (StateM.denote s0) ins n)) c = true →
+      ∃ m, n ≤ m ∧ ∃ sl ∈ sp.slots, sl.chan = c
+        ∧ sl.kind.bit (portsR DI (StateM.denote s0) ins m) = true := by
+  obtain ⟨hAS, hFc, hd⟩ := passes_parts hchk hins
+  obtain ⟨hside, hSF⟩ := specFacts_pass hF hfs
+  intro n hn hen
+  rw [← hd] at hen
+  obtain ⟨m, hm, sl, hsl, h1, h2⟩ := progress_of_facts hAS hside hSF hFc
+    (fun n => (good_ref hd n).mpr (hg n)) (by rw [progOf_ref hd]; exact hJ) hch hrank n hn hen
+  exact ⟨m, hm, sl, hsl, h1, by rw [← portsAt_ref hd]; exact h2⟩
+
+/-- `refmap_progress_any` for fp verdicts. -/
 theorem refmap_progress_ref {sf wf sfS wfS sfF wfF : Nat} {DI DS : DesignCert}
     {sp spF : RefMapSpec} {s0 : StateM}
     (hchk : RefMapChecked sf wf sfS wfS DI DS sp s0)
@@ -319,13 +478,7 @@ theorem refmap_progress_ref {sf wf sfS wfS sfF wfF : Nat} {DI DS : DesignCert}
     (hch : sp.chans[c]? = some ch) (hrank : ch.rank = some r) :
     ∀ n, sp.R0 ≤ n → (specOf DS sp).en (alphaSt sp (refOut DI (StateM.denote s0) ins n)) c = true →
       ∃ m, n ≤ m ∧ ∃ sl ∈ sp.slots, sl.chan = c
-        ∧ sl.kind.bit (portsR DI (StateM.denote s0) ins m) = true := by
-  obtain ⟨hAS, hFc, hd⟩ := checked_parts hchk hins
-  obtain ⟨hside, hSF⟩ := specFacts_checked hF hfs
-  intro n hn hen
-  rw [← hd] at hen
-  obtain ⟨m, hm, sl, hsl, h1, h2⟩ := progress_of_facts hAS hside hSF hFc
-    (fun n => (good_ref hd n).mpr (hg n)) (by rw [progOf_ref hd]; exact hJ) hch hrank n hn hen
-  exact ⟨m, hm, sl, hsl, h1, by rw [← portsAt_ref hd]; exact h2⟩
+        ∧ sl.kind.bit (portsR DI (StateM.denote s0) ins m) = true :=
+  refmap_progress_any hchk.passes hF.passes hfs hins hg hJ hch hrank
 
 end HDLProof.Check

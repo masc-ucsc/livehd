@@ -33,10 +33,14 @@ set -euo pipefail
 #     and Compose.lean, which derives in the kernel, from those three verdicts
 #     (Check.start_ref, Check.refmap_compose_ref), that par and alt answered by
 #     one environment show the same streams; acc2 as an F1 file (named axiom)
+#   theorem files on ir and vc (`RefMapCheckedOn`, `SpecFactsCheckedOn`): par on vc, alt with the
+#     implementation on vc and the spec on fp, two's spec facts on ir (F2), acc2 on vc (F1); and
+#     ComposeAny.lean, which composes verdicts of different routes and statement forms
+#     (Check.start_any, Check.refmap_compose_any, `.passes`)
 # Every PROVED is the verified check (Check.runRefMapOf / runSpecFactsOf)
 # accepting LRAT proofs from the untrusted solver.
 #
-# The default route is vc (no sim:); with emit: (fp only) and no sim: it is fp.
+# The default route is vc (no sim:); with emit: and no sim: it is fp.
 # ROUTES (default "fp ir vc"): every refmap/specfacts case without `emit:` also runs on the IR
 # and VC symbolic routes (`sim:ir`, `sim:vc`, both designs) and must give the same verdict.
 #
@@ -317,4 +321,107 @@ lean_c "$T/Compose.lean" > "$T/Compose.out" 2>&1 || { tail -5 "$T/Compose.out"; 
 [[ "$(axioms "$T/Compose.out")" == "depends on axioms: [propext, Classical.choice, Quot.sound, RefMapF2.F2alt.verdict._native.native_decide.ax_1_1, RefMapF2.F2par.verdict._native.native_decide.ax_1_1, RefMapF2.F2two.verdict._native.native_decide.ax_1_1]" ]] \
   || { cat "$T/Compose.out"; echo "FAIL: composition axioms"; exit 1; }
 echo "ok: composition par/alt kernel-checked; axioms: standard + the three verdicts' native_decide"
+# theorem files on ir and vc, and verdicts of different routes composed
+run1 refmap    "REFINEMENT PROVED"  par sim:vc "emit:f2:$T/V2par.lean"
+run1 refmap    "REFINEMENT PROVED"  alt simI:vc simS:fp "emit:f2:$T/M2alt.lean"
+run1 specfacts "SPEC FACTS PROVED"  two sim:ir "emit:f2:$T/I2two.lean"
+run1 refmap    "REFINEMENT PROVED"  acc2 sim:vc "emit:f1:$T/V1acc2.lean"
+grep -q '^theorem checked : RefMapCheckedOn \.vc \.vc DI DS spec s0 := ' "$T/V2par.lean" || { echo "FAIL: V2par statement"; exit 1; }
+grep -q '^theorem checked : RefMapCheckedOn \.vc (\.fp 20000 200) DI DS spec s0 := ' "$T/M2alt.lean" || { echo "FAIL: M2alt statement"; exit 1; }
+grep -q '^theorem checked : SpecFactsCheckedOn \.ir DS spec := ' "$T/I2two.lean" || { echo "FAIL: I2two statement"; exit 1; }
+grep -q '^axiom checked : RefMapCheckedOn \.vc \.vc DI DS spec s0$' "$T/V1acc2.lean" || { echo "FAIL: V1acc2 statement"; exit 1; }
+grep -q '^  routes: impl sim:vc, spec sim:vc$' "$T/V1acc2.lean" || { echo "FAIL: F1 routes"; exit 1; }
+for f in V2par M2alt I2two V1acc2; do
+  lean_c -R "$T" -o "$T/$f.olean" "$T/$f.lean" > "$T/$f.out" 2>&1 \
+    || { tail -5 "$T/$f.out"; echo "FAIL: theorem file $f"; exit 1; }
+done
+for f in V2par M2alt I2two; do
+  [[ "$(axioms "$T/$f.out")" == "depends on axioms: [propext, Classical.choice, Quot.sound, verdict._native.native_decide.ax_1_1]" ]] \
+    || { cat "$T/$f.out"; echo "FAIL: $f axioms"; exit 1; }
+done
+[[ "$(axioms "$T/V1acc2.out")" == "depends on axioms: [propext, Classical.choice, Quot.sound, checked]" ]] \
+  || { cat "$T/V1acc2.out"; echo "FAIL: V1acc2 axioms"; exit 1; }
+echo "ok: theorem files on ir and vc (and mixed) compile; F2 axioms: standard + one native_decide each; F1: the named verdict"
+cat > "$T/ComposeAny.lean" <<'EOF2'
+/- The composition of Compose.lean, from verdicts of three routes: par on vc, alt with the
+implementation on vc and the spec on fp, the spec facts on ir. Each verdict gives the route-free
+`RefMapPasses` / `SpecFactsPass` (`.passes`). A second theorem mixes the fp form (F2par, F2two)
+with the route form (M2alt). Kernel-checked from the verdicts. -/
+import V2par
+import M2alt
+import I2two
+import F2par
+import F2two
+open Compiler Projection HDLProof HDLProof.Check
+
+namespace RefMapDemoAny
+
+abbrev A := RefMapF2.V2par.DI
+abbrev B := RefMapF2.M2alt.DI
+abbrev spA := RefMapF2.V2par.spec
+abbrev spB := RefMapF2.M2alt.spec
+
+theorem same_streams_any {insA insB : Nat → RuntimeInput}
+    (hinsA : ∀ n, (insA n).toList.map BV.width = spA.inv.inW)
+    (hinsB : ∀ n, (insB n).toList.map BV.width = spB.inv.inW)
+    {E : Theory.Env Nat (List Int) (List Int)}
+    (hEA : ImplObeysR A spA (StateM.denote RefMapF2.V2par.s0) insA E)
+    (hEB : ImplObeysR B spB (StateM.denote RefMapF2.M2alt.s0) insB E) :
+    ∀ nA nB x, Theory.PrefixAgree (implStreamR A spA (StateM.denote RefMapF2.V2par.s0) insA x nA)
+      (implStreamR B spB (StateM.denote RefMapF2.M2alt.s0) insB x nB) := by
+  have hsF : SameSpec RefMapF2.I2two.spec spA := ⟨rfl, rfl, rfl⟩
+  have hs : SameSpec spA spB := ⟨rfl, rfl, rfl⟩
+  have hgA : ∀ n, GoodR A spA (StateM.denote RefMapF2.V2par.s0) insA n := fun _ _ _ => by
+    rw [show spA.inv.asmOut = none from rfl, show spA.inv.asmIn = [] from rfl]
+    simp [HDLProof.Sym.asmBit, HDLProof.Sym.inAsmOK]
+  have hgB : ∀ n, GoodR B spB (StateM.denote RefMapF2.M2alt.s0) insB n := fun _ _ _ => by
+    rw [show spB.inv.asmOut = none from rfl, show spB.inv.asmIn = [] from rfl]
+    simp [HDLProof.Sym.asmBit, HDLProof.Sym.inAsmOK]
+  have hstart := start_any RefMapF2.V2par.checked.passes RefMapF2.M2alt.checked.passes hs
+    hinsA hinsB (hgA _) (hgB _)
+    (fun k hk => by
+      have hk' : k < 2 := hk
+      rcases (show k = 0 ∨ k = 1 by omega) with rfl | rfl <;> exact Or.inl ⟨0, rfl, rfl⟩)
+  exact refmap_compose_any RefMapF2.V2par.checked.passes RefMapF2.M2alt.checked.passes
+    RefMapF2.I2two.checked.passes hsF hs hinsA hinsB hgA hgB hstart hEA hEB
+
+abbrev A' := RefMapF2.F2par.DI
+abbrev spA' := RefMapF2.F2par.spec
+
+theorem same_streams_mixed {insA insB : Nat → RuntimeInput}
+    (hinsA : ∀ n, (insA n).toList.map BV.width = spA'.inv.inW)
+    (hinsB : ∀ n, (insB n).toList.map BV.width = spB.inv.inW)
+    {E : Theory.Env Nat (List Int) (List Int)}
+    (hEA : ImplObeysR A' spA' (StateM.denote RefMapF2.F2par.s0) insA E)
+    (hEB : ImplObeysR B spB (StateM.denote RefMapF2.M2alt.s0) insB E) :
+    ∀ nA nB x, Theory.PrefixAgree (implStreamR A' spA' (StateM.denote RefMapF2.F2par.s0) insA x nA)
+      (implStreamR B spB (StateM.denote RefMapF2.M2alt.s0) insB x nB) := by
+  have hsF : SameSpec RefMapF2.F2two.spec spA' := ⟨rfl, rfl, rfl⟩
+  have hs : SameSpec spA' spB := ⟨rfl, rfl, rfl⟩
+  have hgA : ∀ n, GoodR A' spA' (StateM.denote RefMapF2.F2par.s0) insA n := fun _ _ _ => by
+    rw [show spA'.inv.asmOut = none from rfl, show spA'.inv.asmIn = [] from rfl]
+    simp [HDLProof.Sym.asmBit, HDLProof.Sym.inAsmOK]
+  have hgB : ∀ n, GoodR B spB (StateM.denote RefMapF2.M2alt.s0) insB n := fun _ _ _ => by
+    rw [show spB.inv.asmOut = none from rfl, show spB.inv.asmIn = [] from rfl]
+    simp [HDLProof.Sym.asmBit, HDLProof.Sym.inAsmOK]
+  have hstart := start_any RefMapF2.F2par.checked.passes RefMapF2.M2alt.checked.passes hs
+    hinsA hinsB (hgA _) (hgB _)
+    (fun k hk => by
+      have hk' : k < 2 := hk
+      rcases (show k = 0 ∨ k = 1 by omega) with rfl | rfl <;> exact Or.inl ⟨0, rfl, rfl⟩)
+  exact refmap_compose_any RefMapF2.F2par.checked.passes RefMapF2.M2alt.checked.passes
+    RefMapF2.F2two.checked.passes hsF hs hinsA hinsB hgA hgB hstart hEA hEB
+
+#print axioms same_streams_any
+#print axioms same_streams_mixed
+
+end RefMapDemoAny
+EOF2
+lean_c "$T/ComposeAny.lean" > "$T/ComposeAny.out" 2>&1 || { tail -5 "$T/ComposeAny.out"; echo "FAIL: composition across routes"; exit 1; }
+ax_of() { tr '\n' ' ' < "$1" | grep -o "'$2' depends on axioms: \[[^]]*\]" | tr -s ' '; }
+[[ "$(ax_of "$T/ComposeAny.out" RefMapDemoAny.same_streams_any)" == "'RefMapDemoAny.same_streams_any' depends on axioms: [propext, Classical.choice, Quot.sound, RefMapF2.I2two.verdict._native.native_decide.ax_1_1, RefMapF2.M2alt.verdict._native.native_decide.ax_1_1, RefMapF2.V2par.verdict._native.native_decide.ax_1_1]" ]] \
+  || { cat "$T/ComposeAny.out"; echo "FAIL: same_streams_any axioms"; exit 1; }
+[[ "$(ax_of "$T/ComposeAny.out" RefMapDemoAny.same_streams_mixed)" == "'RefMapDemoAny.same_streams_mixed' depends on axioms: [propext, Classical.choice, Quot.sound, RefMapF2.F2par.verdict._native.native_decide.ax_1_1, RefMapF2.F2two.verdict._native.native_decide.ax_1_1, RefMapF2.M2alt.verdict._native.native_decide.ax_1_1]" ]] \
+  || { cat "$T/ComposeAny.out"; echo "FAIL: same_streams_mixed axioms"; exit 1; }
+echo "ok: composition across routes (vc, vc+fp, ir) and statement forms kernel-checked; axioms: standard + the verdicts' native_decide"
 echo "PASS: refmap_selftest"

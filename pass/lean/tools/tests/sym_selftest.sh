@@ -10,7 +10,8 @@ set -euo pipefail
 #     c <= 9                      PROVED (k=1); also with the check re-building
 #                                 the obligations (`rebuild`), closed (`closed`),
 #                                 on the plain memory interpreter (`route:plain`),
-#                                 and as the F2 theorem file (`emit:`), compiled
+#                                 and as the F2 theorem file (`emit:`), compiled;
+#                                 closed and emitted also on ir and vc (`runInvKOn`)
 #     c != 9                      NOT K-INDUCTIVE at k=1; COUNTEREXAMPLE at k=10
 #     c == 0 while reset held     PROVED (k=1); NOT K-INDUCTIVE without the assumption
 #     candidates c != 9, c <= 9   one specialization; the first is not
@@ -21,11 +22,12 @@ set -euo pipefail
 # attempts is judged by its LAST verdict line.
 #
 #   ram4 / ram4b  a 4-word RAM; writes never store 0xff (ram4b: except into word 0)
-#     word 0 != 0xff              PROVED (k=1) / COUNTEREXAMPLE (base)
+#     word 0 != 0xff              PROVED (k=1) / COUNTEREXAMPLE (base); closed on every
+#                                 route, and emitted on vc, compiled
 # The default route is vc (`sim:` absent); a run naming closed / emit: / route: and no sim: uses fp.
-# ROUTES (default "fp ir vc"): every sym_verify case that names no `closed`,
-# `emit:` or `route:` also runs on the IR and VC symbolic routes (`sim:ir`,
-# `sim:vc`) and must give the same verdict.
+# ROUTES (default "fp ir vc"): every sym_verify case that names no `emit:` or `route:` also
+# runs on the IR and VC symbolic routes (`sim:ir`, `sim:vc`) and must give the same verdict
+# (`closed` included: each route's closed check). `emit:` on ir and vc is tested by name.
 #
 # SYM_NAT=<dir with a native sym_verify> uses it; otherwise the
 # drivers run interpreted against formal/lean/.olean-dev (build it with
@@ -158,14 +160,14 @@ run1() { # <driver> <expect> args...
   fi
   echo "ok: $drv ${*##*/} -> $got"
 }
-fponly() { [[ " $* " == *" closed "* || " $* " == *" emit:"* || " $* " == *" route:"* ]]; }
+fponly() { [[ " $* " == *" emit:"* || " $* " == *" route:"* ]]; }
 run() { # <driver> <expect> args... : on fp, and on the other ROUTES where the case allows
   local drv=$1 expect=$2; shift 2
   local sim
   for sim in $ROUTES; do
     if [[ "$sim" == fp ]]; then
-      # fp is named; a case using closed / emit: / route: names no sim: and so checks that
-      # such a run falls back to fp (the default is vc)
+      # fp is named; a case using emit: / route: names no sim: and so checks that such a
+      # run falls back to fp (the default is vc)
       if [[ "$drv" == sym_verify ]] && ! fponly "$@"; then run1 "$drv" "$expect" "$@" sim:fp
       else run1 "$drv" "$expect" "$@"; fi
       continue
@@ -195,6 +197,21 @@ run sym_verify "INVARIANT PROVED"    "$C" ok_good k:1 "emit:$OUT/F2cnt10.lean"
 tr '\n' ' ' < "$OUT/F2cnt10.out" | grep -Eq "'SymF2.F2cnt10.invariant' depends on axioms: \[propext, +Classical.choice, +Quot.sound, +[^],]*native_decide[^],]*\]" \
   || { cat "$OUT/F2cnt10.out"; echo "FAIL: F2 axioms"; exit 1; }
 echo "ok: F2 theorem file compiles; axioms: $(tr '\n' ' ' < "$OUT/F2cnt10.out" | grep -o "invariant' depends on axioms: [^]]*]" | tr -s ' ')"
+# the theorem form on ir and vc: stated over the closed runInvKOn of that route
+f2_on() { # <sim> <cert> <name> args...
+  local sim=$1 cert=$2 name=$3; shift 3
+  run1 sym_verify "INVARIANT PROVED" "$cert" "$@" "sim:$sim" "emit:$OUT/$name.lean"
+  grep -q "runInvKOn_sound via native_decide" "$OUT/run_$N.log" || { tail -3 "$OUT/run_$N.log"; echo "FAIL: $name not stated over runInvKOn"; exit 1; }
+  grep -q "^theorem verdict : runInvKOn \.$sim D spec s0 pfB pfS = true := by native_decide" "$OUT/$name.lean" \
+    || { echo "FAIL: $name verdict line"; exit 1; }
+  (cd "$ROOT/formal/lean" && LEAN_PATH="$PWD/.olean-dev" lean "$OUT/$name.lean") > "$OUT/$name.out" 2>&1 \
+    || { tail -5 "$OUT/$name.out"; echo "FAIL: theorem file $name"; exit 1; }
+  tr '\n' ' ' < "$OUT/$name.out" | grep -Eq "'SymF2.$name.invariant' depends on axioms: \[propext, +Classical.choice, +Quot.sound, +[^],]*native_decide[^],]*\]" \
+    || { cat "$OUT/$name.out"; echo "FAIL: $name axioms"; exit 1; }
+  echo "ok: $name (sim:$sim) theorem file compiles; axioms: standard + one native_decide"
+}
+f2_on vc "$C" V2cnt10 ok_good k:1
+f2_on ir "$C" I2cnt10 ok_good k:1
 run sym_verify "NOT K-INDUCTIVE"     "$C" ok_bad k:1
 run sym_verify "COUNTEREXAMPLE"      "$C" ok_bad k:10
 run sym_verify "INVARIANT PROVED"    "$C" '!c_o' in:rst=1 k:1
@@ -222,5 +239,7 @@ grep -q '\[d_eq | sA=2,sB=2\] counterexample: false at cycle 0 \[\], at cycle 1 
 M4="$OUT/ram4_lean/ram4.dcert"
 M4B="$OUT/ram4b_lean/ram4b.dcert"
 run sym_verify "INVARIANT PROVED"    "$M4" ok k:1
+run sym_verify "INVARIANT PROVED"    "$M4" ok k:1 closed
+f2_on vc "$M4" V2ram4 ok k:1
 run sym_verify "COUNTEREXAMPLE"      "$M4B" ok k:4
 echo "PASS: sym_selftest"

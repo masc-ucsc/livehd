@@ -172,6 +172,7 @@ TOOL_MODULES=(
   HDLProof/Sym/KInd
   HDLProof/Sym/Conj
   HDLProof/Sym/ConjT
+  HDLProof/Sym/Closed
   HDLProof/Sym/BvLit
   # refinement maps: kit (normalized states, port formulas) and the checker
   HDLProof/Kit/Norm

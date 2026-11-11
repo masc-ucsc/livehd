@@ -171,21 +171,37 @@ emit a verdict file from a round that has already solved everything.
 
 ## Theorem files
 
-`emit:` writes a Lean file stating the verdict on the fused route:
-`Check.RefMapChecked sf wf sf wf DI DS spec s0` (`Check.SpecFactsChecked sf wf DS spec`). The
-certificates are included as text (`include_str`, paths relative to the file) through
-`Check.certOf`, so two files that include the same spec text name the same spec certificate.
+`emit:` writes a Lean file stating the verdict on the routes the run used:
+- **fp on both designs:** `Check.RefMapChecked sf wf sf wf DI DS spec s0`
+  (`Check.SpecFactsChecked sf wf DS spec`), the check `runRefMapF` (`runSpecFactsF`) on the
+  fused route. `emit:` with no `sim:` runs on fp.
+- **ir or vc, or two routes:** `Check.RefMapCheckedOn <impl route> <spec route> DI DS spec s0`
+  (`Check.SpecFactsCheckedOn <route> DS spec`), the check `runRefMapOn` (`runSpecFactsOn`).
+  A route is `.ir`, `.vc` or `(.fp sf wf)` (`Sym.Sim`). `sim:vc` gives
+  `RefMapCheckedOn .vc .vc ...`; `simI:vc simS:fp` gives `RefMapCheckedOn .vc (.fp sf wf) ...`.
+
+The closed check on each route builds the symbolic step it proves sound (`Sym.Sim.stepper`,
+`Sym.Sim.stepper_sound`): fp specializes the memory interpreter (`MemResidual.of_projF`), ir
+walks the certificate's nodes (`irStepper_sound`), vc compiles it with the verified compiler
+(`compileDesign`, `vcStepper_sound`). The certificates are included as text (`include_str`,
+paths relative to the file) through `Check.certOf`, so two files that include the same spec
+text name the same spec certificate.
 
 - `emit:f2:<file>` embeds the proofs and proves the statement by `native_decide`: the axioms
   are the standard ones plus one `native_decide` axiom.
 - `emit:f1:<file>` states it as one named axiom `checked`. The axiom's docstring records the
-  SHA-256 of the certificates and of the proofs. Use this for proofs too large to embed.
+  routes and the SHA-256 of the certificates and of the proofs. Use this for proofs too large
+  to embed.
 
 `Check.RefMapRef` turns such statements into theorems over `interpretDesign`'s outputs
-(`refOut`):
-- `refmap_compose_ref`: two maps of one spec, the spec's facts, the same start and one
+(`refOut`). Every statement gives the route-free `Check.RefMapPasses` /
+`Check.SpecFactsPass` (`checked.passes`), and the theorems take those, so verdicts from
+different routes and in different forms compose:
+- `refmap_compose_any`: two maps of one spec, the spec's facts, the same start and one
   environment `E` give equal streams on every channel;
-- `start_ref`: their starts agree when their `init` lines do (`InitAgree`);
-- `refmap_progress_ref`: under justice, every allowed ranked channel gets an event.
+- `start_any`: their starts agree when their `init` lines do (`InitAgree`);
+- `refmap_progress_any`: under justice, every allowed ranked channel gets an event.
 
-The selftest's `thm/Compose.lean` is a complete example.
+`refmap_compose_ref`, `start_ref` and `refmap_progress_ref` are the same theorems for the fp
+form, taken directly. The selftest's `thm/Compose.lean` (fp) and `thm/ComposeAny.lean` (vc,
+vc with an fp spec, ir; and the fp form mixed with the route form) are complete examples.

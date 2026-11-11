@@ -91,7 +91,7 @@ TOOL_MODULES=(
   HDLProof/Sym/Mem HDLProof/Sym/Dispatch HDLProof/Sym/Wire HDLProof/Sym/Eval HDLProof/Sym/Asg
   HDLProof/Sym/Sat HDLProof/Sym/Layout HDLProof/Sym/Step
   HDLProof/Sym/NativeOps HDLProof/Sym/NativeSound HDLProof/Sym/NativeBuilders HDLProof/Sym/Native HDLProof/Sym/Trace HDLProof/Sym/NativeInterp HDLProof/Sym/NativeRoute HDLProof/Kit/SymRoute
-  HDLProof/Sym/Shape HDLProof/Sym/Unroll HDLProof/Sym/Oblig HDLProof/Sym/KInd HDLProof/Sym/Conj HDLProof/Sym/ConjT
+  HDLProof/Sym/Shape HDLProof/Sym/Unroll HDLProof/Sym/Oblig HDLProof/Sym/KInd HDLProof/Sym/Conj HDLProof/Sym/ConjT HDLProof/Sym/Closed
   HDLProof/Sym/BvLit
   # refinement maps (sym_refmap): theory, kit, checker, spec facts, composition
   HDLProof/Theory/Channels HDLProof/Theory/Stutter HDLProof/Theory/Compose HDLProof/Theory/Progress

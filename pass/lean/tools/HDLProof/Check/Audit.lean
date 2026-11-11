@@ -14,6 +14,7 @@ import HDLProof.Sym.Conj
 import HDLProof.Sym.ConjT
 import HDLProof.Theory.Progress
 import HDLProof.Check.RefMapRef
+import HDLProof.Sym.Closed
 
 namespace HDLProof
 
@@ -59,5 +60,19 @@ namespace HDLProof
 #audit_axioms Check.start_ref
 #audit_axioms Check.refmap_compose_ref
 #audit_axioms Check.refmap_progress_ref
+-- The closed checks on every route (fp, ir, vc), and the results for verdicts of any route.
+#audit_axioms Sym.Sim.stepper_sound
+#audit_axioms Sym.runInvKOn_sound
+#audit_axioms Check.runRefMapOn_parts
+#audit_axioms Check.runSpecFactsOn_parts
+#audit_axioms Check.RefMapChecked.passes
+#audit_axioms Check.RefMapCheckedOn.passes
+#audit_axioms Check.SpecFactsChecked.passes
+#audit_axioms Check.SpecFactsCheckedOn.passes
+#audit_axioms Check.passes_parts
+#audit_axioms Check.specFacts_pass
+#audit_axioms Check.start_any
+#audit_axioms Check.refmap_compose_any
+#audit_axioms Check.refmap_progress_any
 
 end HDLProof

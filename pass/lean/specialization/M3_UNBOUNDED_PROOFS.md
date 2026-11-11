@@ -143,8 +143,11 @@ that k.
                [emit:<file>] [sf:<n>] [wf:<n>] [solver:<cadical>] [work:<dir>]
 
 `sim:` picks the symbolic step: `vc` (the default), `ir` or `fp`. The F1/F2
-discussion above is fp's; `closed`, `emit:` and `route:` exist only for fp, so
-a run naming one of them and no `sim:` uses fp.
+discussion above is fp's. `closed` and `emit:` work on every route: on ir and
+vc the closed check is `Sym.runInvKOn .ir` / `.vc` (`runInvKOn_sound`), which
+rebuilds the route's step and uses its soundness theorem (`Sym.Sim.stepper_sound`:
+`irStepper_sound`, `vcStepper_sound`) where fp uses the specializer's. `route:` is
+fp's alone. A run naming `closed`, `emit:` or `route:` and no `sim:` uses fp.
 
 - **One setup per run.** A design's route is set up once per run (fp's
   specialization, vc's compile). The candidates and the k values are then
