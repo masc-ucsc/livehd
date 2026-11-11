@@ -677,11 +677,12 @@ void Boundary_pins::refine(dp::Design& physical, const dp::Options& base, Placem
                        dp::hpwl(snapshot),
                        elapsed(start)});
   };
-  auto temporary_names = node_names;
+  std::vector<std::string> temporary_names;  // the session's identities plus the virtual pins; unused without one
   if (session) {
     if (node_names.size() != physical.node_x.size()) {
       throw std::invalid_argument("boundary session identities mismatch");
     }
+    temporary_names = node_names;
     for (size_t i = physical.node_x.size(); i < work.node_x.size(); ++i) {
       temporary_names.push_back("region:" + std::to_string(i));
     }

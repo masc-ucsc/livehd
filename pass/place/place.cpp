@@ -8653,7 +8653,11 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       if (live_session && options.legroute_plan.timing_interval) {
         refine_control.checkpoint_interval = int(options.legroute_plan.timing_interval);
       }
-      boundary_pins->refine(physical, refine_control, live_session, session_identities());
+      // The identities (one text per node) are only read by a session.
+      boundary_pins->refine(physical,
+                            refine_control,
+                            live_session,
+                            live_session ? session_identities() : std::vector<std::string>{});
       boundary_pins->release_design();  // only the anchors and the report are read from here on
       bus_order->observe(physical, "after_gp");
     }
