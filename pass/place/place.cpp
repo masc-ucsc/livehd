@@ -74,6 +74,7 @@
 #include "resize_engine.hpp"
 #include "routing_tracks.hpp"
 #include "signal_router.hpp"
+#include "absl/container/flat_hash_map.h"
 #include "pass/timing/physical_rank.hpp"
 #include "steiner_net.hpp"
 #include "steiner_topology.hpp"
@@ -1681,8 +1682,8 @@ struct View {
   std::vector<Endpoint>                     pins;
   std::vector<Endpoint>                     drivers;
   std::map<Endpoint, std::vector<Endpoint>> nets;
-  std::map<Name, size_t>                    terminal;
-  std::map<Name, size_t>                    cell;
+  absl::flat_hash_map<Name, size_t>         terminal;
+  absl::flat_hash_map<Name, size_t>         cell;
   std::map<std::string, double>             weights;
   std::map<Name, Name>                      cohesion_owners;
 };

@@ -6,6 +6,7 @@
 #include <string_view>
 #include <unordered_map>
 
+#include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "pass/liberty/liberty_dff.hpp"
 
@@ -86,7 +87,7 @@ Prects_networks prects_networks(const physical::Technology& tech, const physical
   // All referenced names and role sets remain owned by the immutable inputs.
   // Resolve each library master once, then use one instance lookup per pin.
   std::map<std::string_view, Instance_roles>                  master_roles;
-  std::unordered_map<std::string_view, const Instance_roles*> instances;
+  absl::flat_hash_map<std::string_view, const Instance_roles*> instances;
   instances.reserve(fp.components.size());
   for (const auto& c : fp.components) {
     auto [it, inserted] = master_roles.try_emplace(c.macro);
@@ -110,7 +111,7 @@ Prects_networks prects_networks(const physical::Technology& tech, const physical
   // Preseed the queried identities, then retain their first connection just as
   // the full index did, including aliases with the same physical label.
   const auto                              unbound = fp.nets.size();
-  std::unordered_map<std::string, size_t> pin_net;
+  absl::flat_hash_map<std::string, size_t> pin_net;
   for (const auto& c : fp.components) {
     const auto links = roles.links.find(c.macro);
     if (links == roles.links.end()) {
@@ -163,6 +164,19 @@ Prects_networks prects_networks(const physical::Technology& tech, const physical
     return out;
   };
   const Name_set reset_pin_names = view(roles.reset_pins), clock_pin_names = view(roles.clock_pins), pin_names = view(roles.pins);
+  // A ranking names every pin it knows as "instance:pin" (a terminal by its bare name): the pins a clock reaches are collected
+  // once, instead of a string search over all its labels for every connection.
+  const bool ranked_clocks = timing.ranking && timing.ranking->layout
+                             && timing.ranking->layout->labels.size() == timing.ranking->pins.size();
+  Name_set   clock_labels;
+  if (ranked_clocks) {
+    const auto& labels = timing.ranking->layout->labels;
+    for (size_t i = 0; i < labels.size(); ++i) {
+      if (timing.ranking->pins[i].clock) {
+        clock_labels.insert(labels[i]);
+      }
+    }
+  }
   std::string    conn_label, conn_slashed;  // "instance:pin" or the bare terminal name; "instance/pin"
   for (size_t n = 0; n < fp.nets.size(); ++n) {
     for (const auto& c : fp.nets[n].connections) {
@@ -200,7 +214,10 @@ Prects_networks prects_networks(const physical::Technology& tech, const physical
       }
       // STA flags a pin a clock reaches and every state cell's own clock pin alike. Only the first is a named root:
       // a port, or a pin that is not its cell's clock pin (decided below, once the cell is known).
-      const bool sta_clock = timing.is_clock_pin(c.instance, c.pin);
+      // pin_rank reads "instance:pin", and "instance/pin" only when the first spelling is not in the ranking at all.
+      const bool sta_clock = !ranked_clocks ? timing.is_clock_pin(c.instance, c.pin)
+                             : clock_labels.contains(conn_label)
+                                 || (!terminal && clock_labels.contains(conn_slashed) && timing.ranking->find(conn_label) == nullptr);
       if (sta_clock) {
         mark_clock(n);
         if (!roles.override_controls) {

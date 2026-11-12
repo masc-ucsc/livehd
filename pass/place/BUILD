@@ -1343,7 +1343,7 @@ cc_library(
     hdrs = ["prects_networks.hpp"],
     copts = COPTS,
     visibility = ["//visibility:public"],
-    deps = ["//core", "//inou/lefdef:inou_lefdef", "//pass/liberty:liberty_dff", "@abseil-cpp//absl/container:flat_hash_set"],
+    deps = ["//core", "//inou/lefdef:inou_lefdef", "//pass/liberty:liberty_dff", "@abseil-cpp//absl/container:flat_hash_map", "@abseil-cpp//absl/container:flat_hash_set"],
 )
 cc_test(
     name = "prects_networks_test",
