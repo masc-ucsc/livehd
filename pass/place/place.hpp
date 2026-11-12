@@ -86,6 +86,20 @@ struct Ranking_view {
   const Prects_networks&                       controls;
 };
 using Rank = std::function<Timing_feedback(const Ranking_view&)>;
+}  // namespace livehd::placement
+namespace livehd::timing::fast {
+struct Wire_trees;
+}
+namespace livehd::placement {
+// The same ranking from numeric wire trees: `parasitics` is a skeleton (one net per tree, only its driver label), not an RC
+// snapshot, and the ranking refers to it. Used instead of Rank where the wire is never needed as strings.
+struct Trees_view {
+  const std::shared_ptr<hhds::Graph>&          graph;
+  const timing::fast::Wire_trees&              trees;
+  const std::shared_ptr<physical::Parasitics>& skeleton;
+  const Prects_networks&                       controls;
+};
+using Rank_trees = std::function<Timing_feedback(const Trees_view&)>;
 struct Stage_route {
   std::string                     model = "inherit";
   DreamPlace::native::RoutePolicy policy;
@@ -310,6 +324,7 @@ struct Options {
   Rank                                            gp_rank;
   Rank                                            gui_rank;  // 2i-interact: read-only timing refresh for the panel
   double                                          fp_minimum = 3000, fp_attraction = .25, fp_repulsion = 5, fp_anchor = .25;
+  Rank_trees                                      gp_rank_trees;  // when set, GP timing checkpoints rank from numeric trees
   bool                                            fp_distance_attraction = true;
   bool                                            fp_anchor_macros_only = false;  // frozen targets; retain all-member normalization
   double                                          fp_attraction_outside = 4;      // additional stiffness beyond the centroid circle

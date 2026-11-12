@@ -3587,6 +3587,16 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
         place_options.fp_evaluate = evaluate;
         place_options.gp_rank     = rank;
         // GP consumes criticality only. Physical resizing runs after legal GP.
+        if (timing_engine == "fast") {
+          // GP checkpoints rank from numeric wire trees: no RC strings are built for them.
+          place_options.gp_rank_trees = [&](const livehd::placement::Trees_view& state) {
+            Phase_timer   phase(res, "pass.timing.fast_ranking");
+            Stdout_to_log redirect(timing_log);
+            ensure_fast_ranker();
+            return livehd::placement::prects_data_timing(
+                fast_ranker->rank_trees(state.graph, state.trees, state.skeleton, state.controls.timing_cuts), state.controls);
+          };
+        }
         place_options.fp_resize   = false;
       }
       if (gui_session) {

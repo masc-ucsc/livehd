@@ -853,6 +853,7 @@ cc_library(
         ":signal_router",
         ":handoff_rows",
         ":steiner_topology",
+        "//pass/timing:physical_rank",
         ":handoff_pins",
         ":preroute_design",
         ":power_grid",

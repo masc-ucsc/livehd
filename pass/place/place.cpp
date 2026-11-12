@@ -74,6 +74,7 @@
 #include "resize_engine.hpp"
 #include "routing_tracks.hpp"
 #include "signal_router.hpp"
+#include "pass/timing/physical_rank.hpp"
 #include "steiner_net.hpp"
 #include "steiner_topology.hpp"
 #include "technology_rc.hpp"
@@ -3879,6 +3880,89 @@ std::shared_ptr<ph::Parasitics> estimate_rc(const Geometry_view& geometry, const
   result->identity = std::format("{:016x}", hash);
   return result;
 }
+// The wire trees of the nets of a placement view as numbers, for a ranker that never needs them as strings. The identity
+// (which pins are on which tree, by label) is built once, while the view keeps its connectivity; each call then only
+// reads the pin positions and builds the numeric tree of every net.
+struct Tree_cache {
+  std::shared_ptr<const timing::fast::Tree_topology> topology;
+  std::shared_ptr<ph::Parasitics>                    skeleton;  // one net per tree, driver label only
+  std::vector<uint32_t>                              tree_net;  // the view's net index of each tree
+};
+std::shared_ptr<Tree_cache> make_tree_cache(const Geometry_view& geometry) {
+  const auto& v        = geometry.view;
+  const auto& design   = geometry.design;
+  auto        cache    = std::make_shared<Tree_cache>();
+  auto        topology = std::make_shared<timing::fast::Tree_topology>();
+  cache->skeleton      = std::make_shared<ph::Parasitics>();
+  cache->skeleton->identity    = "tree-skeleton";
+  cache->skeleton->approximate = true;
+  topology->net_pin_start.push_back(0);
+  for (size_t net = 0; net < v.drivers.size(); ++net) {
+    const int begin = design.flat_net2pin_start[net], end = design.flat_net2pin_start[net + 1];
+    if (end - begin < 2) {
+      continue;
+    }
+    const auto& driver = v.drivers[net];
+    int         found  = -1;
+    for (int p = begin; p < end; ++p) {
+      topology->pin_label.emplace_back(v.pins[p].instance, v.pins[p].pin);
+      if (found < 0 && v.pins[p].instance == driver.instance && v.pins[p].pin == driver.pin) {
+        found = p - begin;
+      }
+    }
+    if (found < 0) {
+      throw std::invalid_argument("Steiner RC requires a driver pin");
+    }
+    topology->driver_index.push_back(static_cast<uint32_t>(found));
+    topology->net_pin_start.push_back(static_cast<uint32_t>(topology->pin_label.size()));
+    cache->tree_net.push_back(static_cast<uint32_t>(net));
+    cache->skeleton->nets.emplace_back();
+    cache->skeleton->nets.back().driver = Pin_label(driver.instance, driver.pin);
+  }
+  cache->topology = std::move(topology);
+  return cache;
+}
+timing::fast::Wire_trees estimate_wire_trees(const Geometry_view& geometry, const ph::Technology& tech, const Options& options,
+                                             const Tree_cache& cache) {
+  const auto& v      = geometry.view;
+  const auto& design = geometry.design;
+  const auto  wire   = technology_wire_rc(tech,
+                                         options.liberty,
+                                         options.tech_rc_file,
+                                         options.resistance_ohm_um,
+                                         options.capacitance_ff_um,
+                                         options.rc_pessimism,
+                                         options.technology().cells.contents);
+  (void)v;
+  timing::fast::Wire_trees trees;
+  trees.topology = cache.topology;
+  trees.node_start.reserve(cache.tree_net.size() + 1);
+  trees.edge_start.reserve(cache.tree_net.size() + 1);
+  trees.node_start.push_back(0);
+  trees.edge_start.push_back(0);
+  trees.node_cap_ff.reserve(cache.topology->pin_label.size() * 2);
+  trees.edges.reserve(cache.topology->pin_label.size() * 2);
+  initialize_flute_tables();
+  std::vector<std::pair<double, double>> xy;
+  for (size_t k = 0; k < cache.tree_net.size(); ++k) {
+    const auto net   = cache.tree_net[k];
+    const int  begin = design.flat_net2pin_start[net], end = design.flat_net2pin_start[net + 1];
+    xy.clear();
+    for (int p = begin; p < end; ++p) {
+      xy.push_back(geometry.pin_position(p, geometry.pin_offset(p)));
+    }
+    const auto tree = steiner_net(xy, cache.topology->driver_index[k], per_um(wire), tech.dbu);
+    for (const auto cap : tree.node_cap_ff) {
+      trees.node_cap_ff.push_back(static_cast<float>(cap));
+    }
+    for (const auto& edge : tree.edges) {
+      trees.edges.push_back({edge.from, edge.to, static_cast<float>(edge.resistance_ohm)});
+    }
+    trees.node_start.push_back(static_cast<uint32_t>(trees.node_cap_ff.size()));
+    trees.edge_start.push_back(static_cast<uint32_t>(trees.edges.size()));
+  }
+  return trees;
+}
 // Attach the view's cell poses and IO terminal positions to its RC estimate,
 // as timing and repair consumers of a placement checkpoint expect them.
 void record_poses(ph::Parasitics& rc, const Geometry_view& geometry) {
@@ -6197,6 +6281,9 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     }
     if (requested.gp_rank) {
       automatic_options->gp_rank = [&requested](const Ranking_view& state) { return requested.gp_rank(state); };
+    }
+    if (requested.gp_rank_trees) {
+      automatic_options->gp_rank_trees = [&requested](const Trees_view& state) { return requested.gp_rank_trees(state); };
     }
   }
   const auto&                                     options = automatic_options ? *automatic_options : requested;
@@ -9277,6 +9364,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     Timing_feedback final_gp_timing, trial_gp_timing;
     bool            final_gp_timing_started     = false;
     int             last_final_timing_iteration = -1;
+    std::shared_ptr<Tree_cache>  tree_cache;  // the wire trees' identity, for the life of this placement
     bool            trial_scoring               = false;
     const char*     timing_stage                = final_timing ? "final" : "macro";
     bool            legal_timing_snapshot       = false;
@@ -9344,13 +9432,26 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         fs::create_directories(options.output_dir);
         // Ordinary ranking consumes RC, not a duplicate string-keyed map of
         // every pin position. The selected macro handoff still owns that map.
-        auto* pin_locations   = !ranking || save_macro_gp_timing ? &checkpoint.pin_locations : nullptr;
-        checkpoint.parasitics = estimate_rc(geometry, tech, rc_options, pin_locations);
-        record_poses(*checkpoint.parasitics, geometry);
+        auto* pin_locations = !ranking || save_macro_gp_timing ? &checkpoint.pin_locations : nullptr;
+        // Ranking from numeric trees: no RC strings, no hash text, no pin-location map; only a skeleton of the nets.
+        const bool from_trees = ranking && options.gp_rank_trees && !save_macro_gp_timing;
+        std::optional<timing::fast::Wire_trees> wire_trees;
+        if (from_trees) {
+          if (!tree_cache) {
+            tree_cache = make_tree_cache(geometry);
+          }
+          checkpoint.parasitics = tree_cache->skeleton;
+          wire_trees            = estimate_wire_trees(geometry, tech, rc_options, *tree_cache);
+        } else {
+          checkpoint.parasitics = estimate_rc(geometry, tech, rc_options, pin_locations);
+          record_poses(*checkpoint.parasitics, geometry);
+        }
         // Propagation belongs to untimed GP. Do not defer STA to finish jumps.
         final_gp_timing_started |= final_timing;
         auto timing              = prects_data_timing(
-            ranking ? options.gp_rank({checkpoint.graph, checkpoint.parasitics, v.ignored}) : options.fp_evaluate(checkpoint),
+            from_trees ? options.gp_rank_trees({checkpoint.graph, *wire_trees, checkpoint.parasitics, v.ignored})
+            : ranking  ? options.gp_rank({checkpoint.graph, checkpoint.parasitics, v.ignored})
+                       : options.fp_evaluate(checkpoint),
             v.ignored);
         if (trial_scoring) {
           trial_gp_timing = timing;
