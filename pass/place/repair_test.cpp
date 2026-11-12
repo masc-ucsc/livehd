@@ -799,6 +799,26 @@ TEST(SteinerRepair, SelectsAnAffordableAlternativeInsteadOfRejectingTheFastestTr
   }
   EXPECT_THROW(plan_buffer_choices({0, 0}, loads, caps, required, {small, large}, source, 0, 0, {0, 0}), std::runtime_error);
 }
+TEST(SteinerRepair, DuplicateDrivesAreOneAlternativeAndLowEffortStillFindsTheLegalPlan) {
+  const Buffer_drive        small{.1, 8, 1000, 4, .1, 1, 1};
+  const Buffer_drive        large{.2, 100, 1000, 32, 100, 1, 3};
+  const Buffer_drive        source{.1, .5, 1000, 1, 1, 1, 1};
+  const std::vector<Point>  loads(20, {0, 0});
+  const std::vector<double> caps(20, 1), required(20, 1000);
+  // A library that repeats a cell offers the same alternatives: the plan is the one of the library without the copy.
+  const auto once   = plan_buffer_choices({0, 0}, loads, caps, required, {small, large}, source, 0, 0);
+  const auto copied = plan_buffer_choices({0, 0}, loads, caps, required, {small, large, large, small}, source, 0, 0);
+  ASSERT_EQ(once.buffers.size(), copied.buffers.size());
+  for (size_t i = 0; i < once.buffers.size(); ++i) {
+    EXPECT_EQ(once.buffers[i].drive, copied.buffers[i].drive);
+    EXPECT_EQ(once.buffers[i].position, copied.buffers[i].position);
+  }
+  // Fewer alternatives, spread over the library (never fewer than the minimum), still reach a legal tree here: the net
+  // breaks the source's fanout limit, so some buffering is required, and the least effort tries the extremes of the library.
+  const auto least = plan_buffer_choices({0, 0}, loads, caps, required, {small, large}, source, 0, 0, {}, 0.01, 1);
+  EXPECT_FALSE(least.buffers.empty());
+  EXPECT_EQ(least.root.empty(), false);
+}
 TEST(SteinerRepair, SpatialClustersIsolateDistantSinkCapacitance) {
   const Buffer_drive buffer{.1, 16.1, 1000000, 16, 1, 10, 1};
   const Buffer_drive source{.1, .5, 1000000, 1, 0, 10, 1};

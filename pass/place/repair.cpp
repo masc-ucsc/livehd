@@ -4,6 +4,7 @@
 #include <fnmatch.h>
 
 #include <algorithm>
+#include <cstdlib>
 #include <cctype>
 #include <charconv>
 #include <chrono>
@@ -41,6 +42,8 @@ struct Edit {
   unsigned    fanout  = 4;
   double      gain_ps = 0;
   std::string driver{};
+  std::string reason{};  // why a tree was proposed: the clauses of edits() that held, for the report
+  double      effort = 1;  // how many of the planner's alternatives to try (see plan_buffer_choices)
 };
 const Buffer* combinational(Node n, const Inventory& cells) {
   const auto io = n.get_subnode_io();
@@ -486,6 +489,8 @@ std::vector<Edit> edits(hhds::Graph& graph, const Inventory& cells, const Timing
   }
   const auto [wire_r, wire_c] = wire_rc(options, tech);
   const double limit_dbu = preferred ? wire_limit(*preferred, wire_r, wire_c) * tech.dbu : std::numeric_limits<double>::infinity();
+  const double min_effort = std::clamp(options.repair_tree_min_effort, 0.0, 1.0);
+  const double wns_native   = timing.wns ? *timing.wns : 0.0;
   std::vector<Edit> result;
   // Interleave action classes so a bounded search does not spend its entire
   // budget sizing a long chain before it ever considers removing/rebuilding it.
@@ -687,14 +692,30 @@ std::vector<Edit> edits(hhds::Graph& graph, const Inventory& cells, const Timing
       // it has several loads. Repair electrical violations, critical long
       // wires, or removable existing chains; leave healthy positive-slack nets
       // alone. Unknown sources retain the conservative fanout fallback.
+      std::string reason;
+      const auto  why = [&](const char* clause) {
+        if (reason.find(clause) == std::string::npos) {
+          reason += reason.empty() ? clause : std::string(",") + clause;
+        }
+      };
+      // How critical this net is: 0 (no slack problem) to 1 (the worst slack of the design).
+      const double crit = pin != nullptr && pin->slack && *pin->slack < 0 && wns_native < 0 ? std::clamp(*pin->slack / wns_native, 0.0, 1.0) : 0.0;
       bool       needed      = (!characterize_source || critical_net) && sink_count > 3;
-      const auto max_fanout  = cell ? cell->max_fanout : state_drive ? state_drive->max_fanout : std::nullopt;
-      needed                |= max_fanout && sink_count > *max_fanout;
-      if (state_drive && pin != nullptr) {
-        needed |= drive_stress(*state_drive, *pin, timing.time_unit_ps) > 1;
+      if (needed) {
+        why("fanout4");
       }
-      if (cell && pin != nullptr) {
-        needed |= drive_stress(*cell, *pin, timing.time_unit_ps) > 1;
+      const auto max_fanout  = cell ? cell->max_fanout : state_drive ? state_drive->max_fanout : std::nullopt;
+      if (max_fanout && sink_count > *max_fanout) {
+        needed = true;
+        why("max_fanout");
+      }
+      if (state_drive && pin != nullptr && drive_stress(*state_drive, *pin, timing.time_unit_ps) > 1) {
+        needed = true;
+        why("stress");
+      }
+      if (cell && pin != nullptr && drive_stress(*cell, *pin, timing.time_unit_ps) > 1) {
+        needed = true;
+        why("stress");
       }
       const auto root = placed.pin_locations.find(net.driver);
       for (const auto& p : net.nodes) {
@@ -703,18 +724,25 @@ std::vector<Edit> edits(hhds::Graph& graph, const Inventory& cells, const Timing
         }
         const auto split = p.pin.rfind(':');
         if (split != std::string::npos) {
-          const auto child  = nodes.find(p.pin.substr(0, split));
-          needed           |= child != nodes.end() && buffer(child->second, cells) && !fixed(child->second);
+          const auto child = nodes.find(p.pin.substr(0, split));
+          if (child != nodes.end() && buffer(child->second, cells) && !fixed(child->second)) {
+            needed = true;
+            why("chain");
+          }
         }
         const auto xy = placed.pin_locations.find(p.pin);
-        if (root != placed.pin_locations.end() && xy != placed.pin_locations.end()) {
-          needed
-              |= (!characterize_source || critical_net)
-                 && std::abs(xy->second.first - root->second.first) + std::abs(xy->second.second - root->second.second) > limit_dbu;
+        if (root != placed.pin_locations.end() && xy != placed.pin_locations.end()
+            && (!characterize_source || critical_net)
+            && std::abs(xy->second.first - root->second.first) + std::abs(xy->second.second - root->second.second) > limit_dbu) {
+          needed = true;
+          why("long");
         }
       }
       if (needed) {
-        result.push_back({"tree", owner, preferred->name, 4, 0, net.driver});
+        // Nets that break an electrical limit keep every alternative; the others get fewer as they matter less.
+        const bool   electrical = reason.find("stress") != std::string::npos || reason.find("max_fanout") != std::string::npos;
+        const double effort     = electrical ? 1.0 : min_effort + (1.0 - min_effort) * crit;
+        result.push_back({"tree", owner, preferred->name, 4, 0, net.driver, reason, effort});
       }
     }
   } else {
@@ -1234,7 +1262,9 @@ std::optional<Buffer_tree> apply(hhds::Graph& graph, const Inventory& cells, con
                                root_model,
                                r / tech.dbu,
                                c / tech.dbu,
-                               limits);
+                               limits,
+                               edit.effort,
+                               options.repair_tree_min_topologies);
   } else {
     plan = plan_buffers(root_xy->second,
                         locations,
@@ -2756,6 +2786,20 @@ Repair_result repair_buffers(Result initial, const Options& requested, const Eva
         w.String(trees ? "forest_sweep" : "sizing_sweep");
         w.Key("drivers");
         w.Uint64(batch.size());
+        if (trees) {
+          // Why these nets were chosen: the clauses of edits() that held, counted over the batch.
+          std::map<std::string, size_t> reasons;
+          for (const auto i : batch) {
+            ++reasons[selected[i].reason];
+          }
+          w.Key("reasons");
+          w.StartObject();
+          for (const auto& [clause, count] : reasons) {
+            w.Key(clause.c_str());
+            w.Uint64(count);
+          }
+          w.EndObject();
+        }
         std::vector<size_t>                              retry;
         size_t                                           feedback_pruned = 0;
         bool                                             kept            = false;
@@ -2763,6 +2807,7 @@ Repair_result repair_buffers(Result initial, const Options& requested, const Eva
         size_t                                           upsized = 0, downsized = 0, same_area = 0;
         const auto                                       trial_start = std::chrono::steady_clock::now();
         std::vector<std::pair<std::string, std::string>> failures;
+        std::map<std::string, size_t>                    applied_by_reason;
         try {
           hhds::GraphLibrary draft;
           auto               graph = partition::flatten_hierarchy(result.placed.graph.get(),
@@ -2797,6 +2842,7 @@ Repair_result repair_buffers(Result initial, const Options& requested, const Eva
               }
               changed_names.push_back(edit.node);
               ++changed;
+              ++applied_by_reason[edit.reason];
             } catch (const std::runtime_error& error) {
               // apply plans and validates the complete tree before changing it.
               // Eligibility failures are reported, not charged as STA trials.
@@ -2896,6 +2942,15 @@ Repair_result repair_buffers(Result initial, const Options& requested, const Eva
         w.Key("changed");
         w.Uint64(changed);
         w.Key("upsized");
+        if (trees) {
+          w.Key("applied_reasons");
+          w.StartObject();
+          for (const auto& [clause, count] : applied_by_reason) {
+            w.Key(clause.c_str());
+            w.Uint64(count);
+          }
+          w.EndObject();
+        }
         w.Uint64(upsized);
         w.Key("downsized");
         w.Uint64(downsized);

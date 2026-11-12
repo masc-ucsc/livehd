@@ -34,8 +34,12 @@ struct Buffer_limits {
 // Generate spatial tree alternatives and select drives bottom-up using sink
 // required times and RC delay. The estimate only proposes edits; STA validates
 // the actual legalized result. Required times use ps; geometry uses DBU.
+//
+// `effort` in (0, 1] is how much of the alternatives to try: a net that matters little for timing is given a few
+// topologies spread over the buffer library, never fewer than `min_topologies`. Topologies that would be built from the
+// same limits are built once, whatever the effort.
 Buffer_tree plan_buffer_choices(Point root, const std::vector<Point>& loads, const std::vector<double>& capacitances,
                                 const std::vector<double>& required_ps, const std::vector<Buffer_drive>& drives,
                                 const Buffer_drive& driver, double wire_r_ohm_dbu, double wire_c_ff_dbu,
-                                const Buffer_limits& limits = {});
+                                const Buffer_limits& limits = {}, double effort = 1.0, size_t min_topologies = 4);
 }  // namespace livehd::placement

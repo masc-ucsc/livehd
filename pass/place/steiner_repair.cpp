@@ -294,7 +294,7 @@ void dump_plan_inputs(Point root, const std::vector<Point>& loads, const std::ve
 Buffer_tree plan_buffer_choices(Point root, const std::vector<Point>& loads, const std::vector<double>& capacitances,
                                 const std::vector<double>& required_ps, const std::vector<Buffer_drive>& drives,
                                 const Buffer_drive& driver, double wire_r_ohm_dbu, double wire_c_ff_dbu,
-                                const Buffer_limits& limits) {
+                                const Buffer_limits& limits, double effort, size_t min_topologies) {
   // LHD_STEINER_TRACE=<n>: explain every rejected candidate on nets of at least n loads (empty or 0: n = 100).
   const char*  trace_text = livehd::debug::env<"LHD_STEINER_TRACE">();
   const size_t trace_min  = trace_text && std::strtoul(trace_text, nullptr, 10) > 0 ? std::strtoul(trace_text, nullptr, 10) : 100;
@@ -317,21 +317,60 @@ Buffer_tree plan_buffer_choices(Point root, const std::vector<Point>& loads, con
   double                    best_required = -std::numeric_limits<double>::infinity(), best_area = best_required;
   double                    best_hpwl = std::numeric_limits<double>::infinity(), spatial_hpwl_limit = best_hpwl;
   bool                      found = false;
-  std::vector<Buffer_drive> topologies;
-  for (const auto& drive : drives) {
+  // The topologies to build: one per distinct set of limits (two drives with the same limits give the same tree), and,
+  // for a net of little consequence, an even spread of them over the library instead of all of them.
+  struct Topology {
+    Buffer_drive limits;
+    size_t       drive;  // the library drive whose limits these are (the spatial alternatives follow it)
+  };
+  std::vector<Topology> all_topologies;
+  for (size_t d = 0; d < drives.size(); ++d) {
+    const auto& drive = drives[d];
     std::vector<unsigned> fanouts{std::min(4u, drive.max_fanout), std::min(16u, drive.max_fanout), drive.max_fanout};
     std::sort(fanouts.begin(), fanouts.end());
     fanouts.erase(std::unique(fanouts.begin(), fanouts.end()), fanouts.end());
     for (const auto fanout : fanouts) {
       auto topology       = drive;
       topology.max_fanout = fanout;
-      topologies.push_back(topology);
+      all_topologies.push_back({topology, d});
     }
   }
+  const auto same_limits = [](const Buffer_drive& a, const Buffer_drive& b) {
+    return a.input_ff == b.input_ff && a.max_cap_ff == b.max_cap_ff && a.max_fanout == b.max_fanout
+           && a.max_distance_dbu == b.max_distance_dbu;
+  };
+  std::vector<Topology> distinct;
+  for (const auto& t : all_topologies) {
+    if (std::none_of(distinct.begin(), distinct.end(), [&](const auto& u) { return same_limits(u.limits, t.limits); })) {
+      distinct.push_back(t);
+    }
+  }
+  std::vector<Topology> chosen;
+  if (effort >= 1.0 || distinct.size() <= min_topologies) {
+    chosen = distinct;
+  } else {
+    std::stable_sort(distinct.begin(), distinct.end(), [](const auto& a, const auto& b) {
+      return std::tie(a.limits.max_cap_ff, a.limits.max_fanout, a.limits.max_distance_dbu)
+             < std::tie(b.limits.max_cap_ff, b.limits.max_fanout, b.limits.max_distance_dbu);
+    });
+    const size_t keep = std::clamp<size_t>(static_cast<size_t>(std::ceil(std::max(effort, 0.0) * double(distinct.size()))),
+                                           min_topologies, distinct.size());
+    for (size_t k = 0; k < keep; ++k) {
+      chosen.push_back(distinct[keep == 1 ? 0 : k * (distinct.size() - 1) / (keep - 1)]);
+    }
+  }
+  std::vector<Buffer_drive> topologies;
+  std::vector<size_t>       spatial_drives;  // library drives whose spatial alternatives are tried, in library order
+  for (const auto& t : chosen) {
+    topologies.push_back(t.limits);
+    spatial_drives.push_back(t.drive);
+  }
+  std::sort(spatial_drives.begin(), spatial_drives.end());
+  spatial_drives.erase(std::unique(spatial_drives.begin(), spatial_drives.end()), spatial_drives.end());
   // Include both the original connection and a single source repeater. A
   // source can satisfy electrical limits yet benefit from isolating its load;
   // requiring an electrical violation would omit this compact alternative.
-  const size_t spatial_candidates = loads.size() > 16 ? 2 * drives.size() : 0;
+  const size_t spatial_candidates = loads.size() > 16 ? 2 * spatial_drives.size() : 0;
   for (size_t candidate = 0; candidate < topologies.size() + 2 + spatial_candidates; ++candidate) {
     if (candidate == topologies.size() + 2) {
       // New topologies may improve delay without duplicating more wire than
@@ -363,7 +402,7 @@ Buffer_tree plan_buffer_choices(Point root, const std::vector<Point>& loads, con
                                             wire_c_ff_dbu);
       } else {
         const auto spatial = candidate - topologies.size() - 2;
-        plan               = clustered_buffers(root, loads, capacitances, drives[spatial / 2], wire_c_ff_dbu, spatial % 2 != 0);
+        plan               = clustered_buffers(root, loads, capacitances, drives[spatial_drives[spatial / 2]], wire_c_ff_dbu, spatial % 2 != 0);
       }
     } catch (const std::runtime_error& error) {
       note(candidate, "topology failed:", error.what());

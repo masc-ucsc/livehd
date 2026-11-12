@@ -483,6 +483,11 @@ struct Options {
   bool                                 macro_legalize_cells       = true;   // false leaves macro-stage cells at GP poses
   bool                                 final_independent_timing   = false;  // synthesis weights, then density-gated final STA
   bool                                 exact_cell_density         = false;
+  // Buffer-tree repair: how many of the planner's alternatives a net of no timing consequence gets (a fraction of the distinct
+  // topologies, never fewer than repair_tree_min_topologies), rising linearly to all of them for the worst-slack net. On
+  // minion and a tight-clock dino 0.1 changed no result beyond noise and halved the planning time.
+  double                               repair_tree_min_effort     = 0.1;
+  size_t                               repair_tree_min_topologies = 4;
   bool                                 density_upper_bound        = false;  // experimental filler-free upper-bound penalty
   int                                  min_iterations             = 40;
   double              post_density_factor                 = 4;  // bounded continuation after geometry/density settle; zero disables
