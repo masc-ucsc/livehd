@@ -177,6 +177,8 @@ TOOL_MODULES=(
   HDLProof/Sym/ConjT
   HDLProof/Sym/Closed
   HDLProof/Sym/BvLit
+  # diagnostics for sym_probe (untrusted: no theorems)
+  HDLProof/Sym/Diag
   # refinement maps: kit (normalized states, port formulas) and the checker
   HDLProof/Kit/Norm
   HDLProof/Kit/BitE

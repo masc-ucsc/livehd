@@ -172,6 +172,36 @@ The copy then goes through the normal flow (yosys-slang -> LGraph ->
 function is unchanged. `--decl` adds sequential observers: a register and
 its `always` block, read by a port.
 
+## What each route evaluates symbolically
+
+A route evaluates one step of the design on symbolic values. Where it has no symbolic semantics
+it refuses: the run stops with an error, and never guesses. Each refusal message names a class.
+`sym_probe <cert> sim:fp|ir|vc|all [census] [diag]` runs one symbolic step without SAT and prints
+the class, so a design's coverage can be checked before a proof run.
+
+**fp** (`Sym/Prim.lean`, `Sym/Dispatch.lean`, `Sym/Eval.lean`; each sound against `evalPrim` /
+`Eval`):
+- Integer primitives on symbolic operands: `addI`, `subI`, `mulI`, the comparisons, and `divI` /
+  `modI`. `divI` / `modI` follow `evalPrim`: Euclidean division, and 0 when the divisor is 0.
+- `bvBit` with a symbolic position; `bvGetMask` with a symbolic mask.
+- `eqV` on two values whose bit vectors are normalized: every computed result and constant
+  (`.nbv`). Comparing the raw value of an input, a held register or a stored memory word is
+  refused (`unnormalized-bv`), unless the two shapes already decide the answer.
+- `mkCtorP`, `ctorTagP`, `ctorFieldsP`; `ctorFieldsP` of a raw bit vector is refused
+  (`unnormalized-bv`).
+- `ite` whose two branches have different shapes gives a guarded union (`.alt`). A primitive or
+  a `caseT` applied to a union is evaluated per branch, up to 6 nested unions, and the results
+  are merged. For a primitive, a branch with concrete operands on which the concrete primitive
+  fails is dropped (no successful run takes it). A union may have at most 64 leaves
+  (`resource-limit`).
+- Refused: a width or a constructor tag computed from data (`data-dependent-width`,
+  `symbolic-tag`); an `ite` whose condition is not a Boolean.
+
+**ir, vc** (`Sym/NativeBuilders.lean`, sound against `eval_op`): every operator the admission
+check accepts, including `Op_Mult`, `Op_UDiv`, `Op_SDiv`, and `Op_GetMask` / `Op_SetMask` with a
+mask that is not a constant (rank circuits). `Op_Sub`, `Op_Div`, `Op_LT` and `Op_GT` are refused
+at admission; the exporter emits none of them.
+
 ## Scale and limits
 
 - **Initial state.** Runs start from the all-zero state, and resets are
