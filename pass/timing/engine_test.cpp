@@ -358,6 +358,11 @@ TEST(FastEngine, ElectricalLimitsAreCounted) {
   EXPECT_EQ(over.report().capacitance_violations, 1u);
   EXPECT_NEAR(over.report().electrical_excess, (6.0 - 5.0) / 5.0, 1e-4);
   EXPECT_EQ(over.report().slew_violations, 0u);
+  // The pin over its limit is listed: the driver of the loaded net, one limit, the same excess.
+  ASSERT_EQ(over.electrical_pins().size(), 1u);
+  EXPECT_EQ(over.electrical_pins()[0].pin, e.pin(src, "Y"));
+  EXPECT_EQ(over.electrical_pins()[0].count, 1u);
+  EXPECT_NEAR(over.electrical_pins()[0].excess, 0.2f, 1e-4);
 
   // The data pin of FF2 has a transition limit of 12: met on the fast corner, not on the slow one.
   Bench      f;
@@ -372,6 +377,8 @@ TEST(FastEngine, ElectricalLimitsAreCounted) {
   fast::Engine slew(*f.netlist, single_clock(1000));
   slew.evaluate();
   EXPECT_EQ(slew.report().slew_violations, 1u);
+  ASSERT_EQ(slew.electrical_pins().size(), 1u);
+  EXPECT_EQ(slew.electrical_pins()[0].pin, f.pin(r, "D"));
   EXPECT_GT(slew.slew(f.pin(r, "D"), 1, 0), 12.f);
   EXPECT_LT(slew.slew(f.pin(r, "D"), 0, 0), 12.f);
   fast::Options fast_only;

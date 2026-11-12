@@ -3244,27 +3244,13 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
               set_crash_context(phase_step, phase_log);
               return livehd::placement::prects_data_timing(std::move(feedback), controls);
             };
-      // 2i-interact: the panel shows the numbers every STA evaluation of the flow already computes (read-only).
-      const auto show_timing = [&](const livehd::timing::Feedback& fb) {
-        if (gui_session && fb.wns) {
-          gui_session->set_timing(*fb.wns * fb.time_unit_ps, fb.tns ? *fb.tns * fb.time_unit_ps : 0., -1);
-        }
-      };
-      const auto evaluate = [&](const livehd::placement::Result& state) {
-        Phase_timer phase(res, "pass.opentimer.incremental");
-        const auto  controls = livehd::placement::prects_networks(timing_tech, state.floorplan, state.prects);
-        auto        fb       = estimate({state.graph, state.parasitics, controls}, livehd::opentimer::Physical_session::Purpose::detailed);
-        show_timing(fb);
-        return fb;
-      };
       // The ranking engine (2q-fasttimer E): OpenTimer's Elmore ranking, the native engine, or both with a comparison.
       const auto timing_engine = synth_set(opts, "timing.engine", "opentimer");
       if (timing_engine != "opentimer" && timing_engine != "fast" && timing_engine != "compare") {
         throw Lhd_error{"usage", "synth.timing.engine expects opentimer, fast or compare, got '" + timing_engine + "'", ""};
       }
       std::unique_ptr<livehd::timing::fast::Physical_ranker> fast_ranker;
-      const auto fast_rank = [&](const livehd::placement::Ranking_view& state) {
-        Stdout_to_log redirect(timing_log);
+      const auto ensure_fast_ranker = [&] {
         if (!fast_ranker) {
           const auto read_text = [](std::string_view path) {
             auto text = livehd::file_utils::read_file(std::string(path));
@@ -3292,6 +3278,11 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
           }
           fast_ranker = std::make_unique<livehd::timing::fast::Physical_ranker>(std::move(ranker_options));
         }
+      };
+      const auto fast_rank = [&](const livehd::placement::Ranking_view& state) {
+        Stdout_to_log redirect(timing_log);
+        ensure_fast_ranker();
+
         auto feedback = fast_ranker->rank(state.graph, state.parasitics, state.controls.timing_cuts);
         if (timing_profile) {
           const auto& r = fast_ranker->engine()->report();
@@ -3388,6 +3379,76 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
                    worst_b,
                    kept,
                    std::min(top_count, pairs.size()));
+      };
+      // 2i-interact: the panel shows the numbers every STA evaluation of the flow already computes (read-only).
+      const auto show_timing = [&](const livehd::timing::Feedback& fb) {
+        if (gui_session && fb.wns) {
+          gui_session->set_timing(*fb.wns * fb.time_unit_ps, fb.tns ? *fb.tns * fb.time_unit_ps : 0., -1);
+        }
+      };
+      const auto compare_detailed = [&](const livehd::timing::Feedback& reference, const livehd::timing::Feedback& fast) {
+        Stdout_to_log redirect(timing_log);
+        const auto    ps = [](const std::optional<double>& v, double unit) { return v ? *v * unit : std::nan(""); };
+        std::print("compare detailed: wns {:.1f}/{:.1f} tns {:.0f}/{:.0f} hold_wns {:.1f}/{:.1f} delay {:.1f}/{:.1f} area {:.1f}/{:.1f} "
+                   "violations {}/{} excess {:.2f}/{:.2f} (reference/fast)\n",
+                   ps(reference.wns, reference.time_unit_ps), ps(fast.wns, fast.time_unit_ps),
+                   ps(reference.tns, reference.time_unit_ps), ps(fast.tns, fast.time_unit_ps),
+                   ps(reference.hold_wns, reference.time_unit_ps), ps(fast.hold_wns, fast.time_unit_ps),
+                   reference.delay * reference.time_unit_ps, fast.delay * fast.time_unit_ps, reference.area, fast.area,
+                   reference.violations, fast.violations, reference.electrical_excess, fast.electrical_excess);
+        if (!reference.dense || !fast.dense) {
+          return;
+        }
+        std::vector<double> setup, hold, arrival, slew;
+        size_t              missing = 0;
+        reference.for_each_pin([&](const std::string& label, const livehd::timing::Feedback::Pin& a) {
+          const auto* b = fast.find_label(label);
+          if (!b) {
+            ++missing;
+            return;
+          }
+          const auto add = [](std::vector<double>& out, const std::optional<double>& x, double ux, const std::optional<double>& y,
+                              double uy) {
+            if (x && y) {
+              out.push_back(std::abs(*x * ux - *y * uy));
+            }
+          };
+          add(setup, a.slack, reference.time_unit_ps, b->slack, fast.time_unit_ps);
+          add(hold, a.hold_slack, reference.time_unit_ps, b->hold_slack, fast.time_unit_ps);
+          add(arrival, a.arrival, reference.time_unit_ps, b->arrival, fast.time_unit_ps);
+          add(slew, a.slew, reference.time_unit_ps, b->slew, fast.time_unit_ps);
+        });
+        const auto quant = [](std::vector<double>& v, double q) {
+          if (v.empty()) {
+            return 0.;
+          }
+          std::ranges::sort(v);
+          return v[std::min(v.size() - 1, size_t(q * double(v.size())))];
+        };
+        const auto line = [&](const char* name, std::vector<double>& v) {
+          std::ranges::sort(v);
+          std::print("compare detailed {}: pins {} |diff| p50 {:.2f} p90 {:.2f} p99 {:.2f} max {:.2f} ps\n", name, v.size(),
+                     quant(v, .5), quant(v, .9), quant(v, .99), v.empty() ? 0. : v.back());
+        };
+        line("slack", setup);
+        line("hold_slack", hold);
+        line("arrival", arrival);
+        line("slew", slew);
+        std::print("compare detailed: labels only in reference {}\n", missing);
+      };
+      const auto evaluate = [&](const livehd::placement::Result& state) {
+        Phase_timer phase(res, "pass.opentimer.incremental");
+        const auto  controls = livehd::placement::prects_networks(timing_tech, state.floorplan, state.prects);
+        auto        fb       = estimate({state.graph, state.parasitics, controls}, livehd::opentimer::Physical_session::Purpose::detailed);
+        if (timing_engine == "compare") {
+          ensure_fast_ranker();
+          Stdout_to_log redirect(timing_log);
+          auto          fast = livehd::placement::prects_data_timing(
+              fast_ranker->evaluate(state.graph, state.parasitics, controls.timing_cuts), controls);
+          compare_detailed(fb, fast);
+        }
+        show_timing(fb);
+        return fb;
       };
       const auto rank = [&](const livehd::placement::Ranking_view& state) {
         if (timing_engine == "fast") {

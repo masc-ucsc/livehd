@@ -786,6 +786,7 @@ void Engine::check_electrical() {
   report_.slew_violations        = 0;
   report_.capacitance_violations = 0;
   report_.electrical_excess      = 0;
+  electrical_pins_.clear();
   for (uint32_t p = 0; p < netlist_.pins(); ++p) {
     if (netlist_.untimed(p) || clock_pin_[p] != 0) {
       continue;
@@ -821,6 +822,9 @@ void Engine::check_electrical() {
     if (cap_excess > 0) {
       ++report_.capacitance_violations;
       report_.electrical_excess += cap_excess;
+    }
+    if (slew_excess > 0 || cap_excess > 0) {
+      electrical_pins_.push_back({p, static_cast<uint8_t>((slew_excess > 0) + (cap_excess > 0)), static_cast<float>(slew_excess + cap_excess)});
     }
   }
 }
@@ -903,7 +907,7 @@ size_t Engine::bytes() const {
       = [](const auto& vector) { return vector.capacity() * sizeof(typename std::decay_t<decltype(vector)>::value_type); };
   return of(arrival_) + of(slew_) + of(required_) + of(early_arrival_) + of(early_slew_) + of(hold_slack_) + of(criticality_)
          + of(depth_) + of(predecessor_) + of(clock_pin_) + of(pin_clock_) + of(load_) + of(early_load_) + of(arc_delay_)
-         + of(cell_base_) + of(port_input_) + of(arc_offset_) + of(port_load_) + of(endpoints_) + of(cut_) + of(excluded_);
+         + of(cell_base_) + of(port_input_) + of(electrical_pins_) + of(arc_offset_) + of(port_load_) + of(endpoints_) + of(cut_) + of(excluded_);
 }
 
 }  // namespace livehd::timing::fast

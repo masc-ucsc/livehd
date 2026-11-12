@@ -94,6 +94,13 @@ struct Report {
   std::vector<std::string>   unsupported;
 };
 
+// A pin beyond its electrical limits after evaluate(): how many limits (slew, capacitance) and the summed excess ratio.
+struct Electrical_pin {
+  uint32_t pin   = 0;
+  uint8_t  count = 0;
+  float    excess = 0;
+};
+
 struct Path_point {
   uint32_t pin        = 0;
   unsigned transition = 0;
@@ -132,6 +139,10 @@ public:
   [[nodiscard]] float         hold_slack(uint32_t pin) const {
     return hold_slack_.empty() ? std::numeric_limits<float>::infinity() : hold_slack_[pin];
   }
+  // The pins over a limit (after evaluate), in pin order.
+  [[nodiscard]] const std::vector<Electrical_pin>& electrical_pins() const { return electrical_pins_; }
+  // Total load of a net in a corner, fF (pin capacitances plus wire).
+  [[nodiscard]] float                              net_load_ff(uint32_t net, size_t corner) const { return net_load(net, corner, false); }
   // The endpoint pins, in pin order.
   [[nodiscard]] std::vector<uint32_t>   endpoint_pins() const;
   // The delay of a cell arc in a corner for an (input, output) transition pair; NaN when the pair is not an arc.
@@ -184,6 +195,7 @@ private:
   std::vector<uint8_t>     pin_clock_;  // the clock id of a clock-network pin
   // Per net, per corner.
   std::vector<float>       load_, early_load_;
+  std::vector<Electrical_pin> electrical_pins_;
   std::vector<uint32_t>    port_input_;  // per cell: the index of its input constraint, no_index without one
   // Delay of every timed arc of every cell: [cell block][arc][corner][combo].
   std::vector<float>       arc_delay_;

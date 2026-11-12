@@ -136,3 +136,28 @@ TEST(PhysicalRank, StructuralChangeRebindsAndCutsRemoveTheStart) {
   EXPECT_EQ(ranker.statistics().binds, 3u);
   EXPECT_NE(resized.ranking->find("ub:D")->slack, after.ranking->find("ub:D")->slack);
 }
+
+TEST(PhysicalRank, DetailedEvaluationFillsTheFeedback) {
+  Design                design;
+  fast::Physical_ranker ranker(options());
+  const auto            fb = ranker.evaluate(design.graph, rc(5, 2000), {});
+  ASSERT_TRUE(fb.wns.has_value());
+  ASSERT_TRUE(fb.hold_wns.has_value());
+  EXPECT_GT(*fb.wns, 0);  // a 1 ns clock against a flop, an inverter and a flop
+  EXPECT_GT(fb.area, 0);
+  EXPECT_GT(fb.delay, 0);
+  EXPECT_FALSE(fb.ranking_only);
+  ASSERT_TRUE(fb.dense.has_value());
+  const auto* d = fb.find_label("ub:D");
+  ASSERT_TRUE(d);
+  ASSERT_TRUE(d->slack && d->required && d->arrival && d->slew);
+  EXPECT_LE(*d->slack, *d->required - *d->arrival + 1e-3);  // the extremes are taken per field, over both transitions
+  EXPECT_NEAR(*d->slack, *fb.wns, 1e-3);  // the only endpoint on the worst path
+  EXPECT_TRUE(d->hold_slack.has_value());
+  const auto* q = fb.find_label("ua:Q");
+  ASSERT_TRUE(q && q->load_ff);
+  EXPECT_NEAR(*q->load_ff, 5 + 2, 1e-3);  // the wire plus the inverter's input pin
+  EXPECT_FALSE(q->clock);
+  ASSERT_FALSE(fb.path.empty());
+  EXPECT_EQ(fb.path.back(), "ub:D");
+}

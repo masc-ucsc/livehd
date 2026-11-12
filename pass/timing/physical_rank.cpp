@@ -6,6 +6,8 @@
 #include <cmath>
 #include <limits>
 
+#include "absl/container/flat_hash_map.h"
+
 namespace livehd::timing::fast {
 namespace {
 using Steady = std::chrono::steady_clock;
@@ -167,6 +169,9 @@ void Physical_ranker::remap(const physical::Parasitics& rc) {
     }
   }
   layout->net_offsets.push_back(layout->net_pins.size());
+  auto index    = std::make_shared<livehd::timing::Feedback::Pin_index>();
+  index->labels = layout->labels;
+  m.index       = std::move(index);
   m.layout       = std::move(layout);
   mapping_bound_ = true;
   ++stats_.remaps;
@@ -233,11 +238,10 @@ Wire_model Physical_ranker::wire_model(const physical::Parasitics& rc) {
   return wire;
 }
 
-livehd::timing::Feedback Physical_ranker::rank(const std::shared_ptr<hhds::Graph>&                  graph,
-                                               const std::shared_ptr<const physical::Parasitics>& rc,
-                                               const std::set<std::string>&                       cuts) {
+void Physical_ranker::prepare(const std::shared_ptr<hhds::Graph>& graph, const std::shared_ptr<const physical::Parasitics>& rc,
+                              const std::set<std::string>& cuts) {
   if (!graph || !rc) {
-    throw std::invalid_argument("fast ranking requires a graph and in-memory RC");
+    throw std::invalid_argument("fast timing requires a graph and in-memory RC");
   }
   if (!bound_ || bound_graph_ != graph.get() || bound_epoch_ != graph->body_epoch()) {
     bind(graph);
@@ -251,9 +255,14 @@ livehd::timing::Feedback Physical_ranker::rank(const std::shared_ptr<hhds::Graph
   if (!engine_ || combined != engine_cuts_) {
     build_engine(cuts, *rc);
   }
-  auto wire = wire_model(*rc);
+  engine_->set_wire(wire_model(*rc));
+}
+
+livehd::timing::Feedback Physical_ranker::rank(const std::shared_ptr<hhds::Graph>&                  graph,
+                                               const std::shared_ptr<const physical::Parasitics>& rc,
+                                               const std::set<std::string>&                       cuts) {
+  prepare(graph, rc, cuts);
   const auto engine_start = Steady::now();
-  engine_->set_wire(std::move(wire));
   engine_->rank();
   stats_.engine_seconds += since(engine_start);
 
@@ -276,6 +285,135 @@ livehd::timing::Feedback Physical_ranker::rank(const std::shared_ptr<hhds::Graph
     ranking.pins[i].clock = engine_->clock_network(pin) || netlist.pin_type(pin).clock;
   }
   ++stats_.ranks;
+  stats_.feedback_seconds += since(feedback_start);
+  return result;
+}
+
+}  // namespace livehd::timing::fast
+
+namespace livehd::timing::fast {
+
+livehd::timing::Feedback Physical_ranker::evaluate(const std::shared_ptr<hhds::Graph>&                  graph,
+                                                   const std::shared_ptr<const physical::Parasitics>& rc,
+                                                   const std::set<std::string>&                       cuts) {
+  prepare(graph, rc, cuts);
+  const auto engine_start = Steady::now();
+  engine_->evaluate();
+  stats_.engine_seconds += since(engine_start);
+
+  const auto feedback_start = Steady::now();
+  const auto& netlist       = *bound_->netlist;
+  const auto& types         = netlist.types();
+  const size_t C            = types.corners();
+  const auto&  report       = engine_->report();
+  livehd::timing::Feedback result;
+  result.time_unit_ps = 1;
+  const auto finite = [](float v) { return std::isfinite(v); };
+  if (report.endpoints != 0 && finite(report.wns_ps)) {
+    result.wns = report.wns_ps;
+    result.tns = report.tns_ps;
+  }
+  float hold_wns = std::numeric_limits<float>::infinity();
+  float delay    = 0;
+  for (const auto pin : engine_->endpoint_pins()) {
+    hold_wns = std::min(hold_wns, engine_->hold_slack(pin));
+    for (size_t k = 0; k < C; ++k) {
+      for (unsigned t = 0; t < 2; ++t) {
+        if (finite(engine_->arrival(pin, k, t))) {
+          delay = std::max(delay, engine_->arrival(pin, k, t));
+        }
+      }
+    }
+  }
+  if (finite(hold_wns)) {
+    result.hold_wns = hold_wns;
+  }
+  result.delay = delay;
+  for (uint32_t cell = 0; cell < netlist.cells(); ++cell) {
+    result.area += types.type(netlist.type_of(cell)).area;
+  }
+  result.violations              = static_cast<unsigned>(report.slew_violations + report.capacitance_violations);
+  result.electrical_excess       = report.electrical_excess;
+  result.electrical_pin_feedback = true;
+
+  absl::flat_hash_map<uint32_t, std::pair<unsigned, double>> electrical;
+  for (const auto& e : engine_->electrical_pins()) {
+    electrical.emplace(e.pin, std::pair{unsigned(e.count), double(e.excess)});
+  }
+  auto& dense = result.dense.emplace();
+  dense.index = mapping_.index;
+  dense.values.resize(mapping_.layout_pin.size());
+  for (size_t i = 0; i < dense.values.size(); ++i) {
+    const auto pin = mapping_.layout_pin[i];
+    if (pin == no_index) {
+      continue;
+    }
+    auto& value = dense.values[i];
+    if (const auto it = electrical.find(pin); it != electrical.end()) {
+      value.violations        = it->second.first;
+      value.electrical_excess = it->second.second;
+    }
+    float arrival = -std::numeric_limits<float>::infinity(), slew = arrival;
+    for (size_t k = 0; k < C; ++k) {
+      for (unsigned t = 0; t < 2; ++t) {
+        arrival = std::max(arrival, engine_->arrival(pin, k, t));
+        if (finite(engine_->arrival(pin, k, t))) {
+          slew = std::max(slew, engine_->slew(pin, k, t));
+        }
+      }
+    }
+    if (finite(arrival)) {
+      value.arrival = arrival;
+      value.slew    = slew;
+    }
+    float required = std::numeric_limits<float>::infinity();
+    for (size_t k = 0; k < C; ++k) {
+      for (unsigned t = 0; t < 2; ++t) {
+        if (finite(engine_->arrival(pin, k, t))) {
+          required = std::min(required, engine_->required(pin, k, t));
+        }
+      }
+    }
+    if (finite(required)) {
+      value.required = required;
+    }
+    if (const auto slack = engine_->slack(pin); finite(slack)) {
+      value.slack = slack;
+    }
+    if (const auto hold = engine_->hold_slack(pin); finite(hold)) {
+      value.hold_slack = hold;
+    }
+    const auto cell  = netlist.cell_of(pin);
+    const auto type  = netlist.type_of(cell);
+    const auto local = netlist.local_of(pin);
+    if (const auto net = netlist.net_of(pin); net != no_index && (netlist.is_driver(pin))) {
+      float load = 0;
+      for (size_t k = 0; k < C; ++k) {
+        load = std::max(load, engine_->net_load_ff(net, k));
+      }
+      value.load_ff = load;
+    }
+    if (const float cap = std::max(types.pin_cap(type, local, 0, 0), types.pin_cap(type, local, 0, 1)); cap > 0) {
+      value.capacitance_ff = cap;
+    }
+    value.clock = engine_->clock_network(pin) || netlist.pin_type(pin).clock;
+  }
+  // The worst path, as labels.
+  if (result.wns) {
+    absl::flat_hash_map<uint32_t, size_t> label_of;
+    for (const auto& point : engine_->worst_path()) {
+      if (label_of.empty()) {
+        label_of.reserve(mapping_.layout_pin.size());
+        for (size_t i = 0; i < mapping_.layout_pin.size(); ++i) {
+          label_of.emplace(mapping_.layout_pin[i], i);
+        }
+      }
+      if (const auto it = label_of.find(point.pin); it != label_of.end()) {
+        result.path.push_back(mapping_.layout->labels[it->second]);
+      }
+    }
+  }
+  ++stats_.evaluations;
   stats_.feedback_seconds += since(feedback_start);
   return result;
 }

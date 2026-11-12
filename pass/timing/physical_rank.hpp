@@ -38,7 +38,7 @@ public:
     fast::Options            engine;
   };
   struct Statistics {
-    size_t binds = 0, ranks = 0, remaps = 0, bad_trees = 0, unresolved_labels = 0;
+    size_t binds = 0, ranks = 0, evaluations = 0, remaps = 0, bad_trees = 0, unresolved_labels = 0;
     double bind_seconds = 0, map_seconds = 0, wire_seconds = 0, engine_seconds = 0, feedback_seconds = 0;
   };
 
@@ -47,6 +47,13 @@ public:
   [[nodiscard]] livehd::timing::Feedback rank(const std::shared_ptr<hhds::Graph>&                  graph,
                                               const std::shared_ptr<const physical::Parasitics>& rc,
                                               const std::set<std::string>&                       cuts);
+
+  // The detailed evaluation: everything `rank` does, then true requirements, hold, the electrical limits, and the
+  // per-pin arrival, required, slack, hold slack, slew, load and capacitance (`Feedback::dense`), the worst path and
+  // the totals, as OpenTimer's detailed physical evaluation returns them.
+  [[nodiscard]] livehd::timing::Feedback evaluate(const std::shared_ptr<hhds::Graph>&                  graph,
+                                                  const std::shared_ptr<const physical::Parasitics>& rc,
+                                                  const std::set<std::string>&                       cuts);
 
   [[nodiscard]] const Statistics&  statistics() const { return stats_; }
   [[nodiscard]] const Engine*      engine() const { return engine_.get(); }
@@ -63,8 +70,11 @@ private:
     std::vector<uint32_t>  net_root;    // per RC net: the node of the driver
     std::shared_ptr<const livehd::timing::Feedback::Ranking::Layout> layout;
     std::vector<uint32_t>                                            layout_pin;  // per label of the layout
+    std::shared_ptr<const livehd::timing::Feedback::Pin_index>       index;       // the same labels, for dense feedback
   };
 
+  void     prepare(const std::shared_ptr<hhds::Graph>& graph, const std::shared_ptr<const physical::Parasitics>& rc,
+                   const std::set<std::string>& cuts);
   void     bind(const std::shared_ptr<hhds::Graph>& graph);
   void     build_engine(const std::set<std::string>& cuts, const physical::Parasitics& rc);
   bool     mapping_valid(const physical::Parasitics& rc) const;
