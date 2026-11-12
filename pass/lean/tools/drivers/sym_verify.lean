@@ -42,7 +42,11 @@ evaluates `runInvKOf` itself (repeats the symbolic evaluation), `closed` the
 closed check of the route (also rebuilds the step: `runInvKF_sound` on fp,
 `runInvKOn_sound` on ir and vc). A satisfiable BASE obligation is a counterexample from the initial
 state, replayed on the projection's simulator; a satisfiable STEP obligation
-only says the property is not k-inductive.
+only says the property is not k-inductive. A model the simulator does not confirm gives
+`COUNTEREXAMPLE NOT REPLAYED (base)` (exit 7) with the reason: the replay simulator could not be
+built (on ir and vc it is specialized at `sf:`/`wf:`, and fp setup running out of fuel needs more,
+e.g. `sf:20000000 wf:500000`), the simulator gave no result at a cycle, or the model did not
+reproduce (the symbolic step and the simulator disagree).
 
 Every replayed base counterexample is also written to `<work>/[<tag>_k<k>_]cex_inputs.tsv`:
 one row per cycle of the obligation (`cycle` then one column per input, named from the
@@ -84,21 +88,33 @@ def decodeInputs (φ : BVLogicalExpr) (model : Std.HashMap Nat Bool) (inW : List
       mk_bv w (Int.ofNat (modelValue nodes model (j * nIn + t) w))).toArray)
   return out
 
+/-- What running a solver's model on the simulator gave. -/
+inductive ReplayRes where
+  /-- The property fails at this cycle, the assumptions holding up to it. -/
+  | fails (j : Nat)
+  /-- `mkMemSimOfW` refused the residual (`admitsWB` or `checkResidual`). -/
+  | noSim
+  /-- The simulator gave no result at this cycle. -/
+  | stuck (j : Nat)
+  /-- Every cycle ran and the property did not fail while the assumptions held;
+  `some a`: the assumptions first failed at cycle `a`. -/
+  | holds (asmFail : Option Nat)
+
 /-- Run the decoded inputs on the projection's simulator from `s0`; the first
 cycle whose assumptions held so far and whose property fails. -/
 def replay (D : DesignCert) (R : Program) (sp : InvSpec) (s0 : StateM) (ins : Array RuntimeInput) :
-    Option Nat := Id.run do
-  let some sim := mkMemSimOfW D R | return none
+    ReplayRes := Id.run do
+  let some sim := mkMemSimOfW D R | return .noSim
   let mut st := s0
-  let mut asmOK := true
+  let mut asmFail : Option Nat := none
   for j in List.range ins.size do
     match runMemSim sim (edgesAll D) ins[j]! st with
-    | none => return none
+    | none => return .stuck j
     | some r =>
-      asmOK := asmOK && asmBit r.outputs ins[j]! sp.asmOut sp.asmIn
-      if asmOK && !propBit r.outputs sp.prop then return some j
+      if asmFail.isNone && !asmBit r.outputs ins[j]! sp.asmOut sp.asmIn then asmFail := some j
+      if asmFail.isNone && !propBit r.outputs sp.prop then return .fails j
       st := r.nextState
-  return none
+  return .holds asmFail
 
 
 /-! ## F2: the theorem form -/
@@ -206,8 +222,26 @@ def attempt (cert : String) (solver : String) (work : System.FilePath) (sf wf : 
     | .unsat p => pure p
     | .sat model => do
         let ins := decodeInputs φB (parseModel model) sp.inW kd
-        match (rt.fpProgram sf wf D).bind (fun R => replay D R sp s0 ins) with
-        | some j =>
+        let notReplayed (why : String) : IO (UInt32 × String) :=
+          fin 7 s!"COUNTEREXAMPLE NOT REPLAYED (base): {why}"
+        let R ← match rt.fpProgramE sf wf D with
+          | .ok R => pure R
+          | .error e =>
+              return ← notReplayed s!"the solver found a model, but the replay simulator could not be built \
+({e} at sf:{sf} wf:{wf}); the model was not checked. Rerun with more fp fuel, e.g. sf:20000000 wf:500000"
+        match replay D R sp s0 ins with
+        | .noSim =>
+            return ← notReplayed "the solver found a model, but the replay simulator refused the fp residual \
+(admitsWB or checkResidual); the model was not checked"
+        | .stuck j =>
+            return ← notReplayed s!"the simulator gave no result at cycle {j} of the solver's model"
+        | .holds none =>
+            return ← notReplayed s!"the solver's model did not reproduce: on the simulator the property held at \
+every cycle 0..{kd - 1} (the symbolic step and the simulator disagree)"
+        | .holds (some a) =>
+            return ← notReplayed s!"the solver's model did not reproduce: on the simulator the assumptions failed at \
+cycle {a} and the property held at every cycle before it (the symbolic step and the simulator disagree)"
+        | .fails j =>
             say s!"  {pre}counterexample inputs (cycle: ordinal values): {(ins.toList.take (j + 1)).zipIdx.map fun (i, c) => (c, i.toList.map bv_uint)}"
             let names ← ioNames cert "inputs"
             let nameOf (t : Nat) : String := (names[t]?.filter (!·.isEmpty)).getD s!"in{t}"
@@ -218,8 +252,6 @@ def attempt (cert : String) (solver : String) (work : System.FilePath) (sf wf : 
             IO.FS.writeFile tsv ("\n".intercalate (hdr :: rows) ++ s!"\n# fails at cycle {j}\n")
             say s!"  {pre}counterexample inputs written to {tsv}"
             return ← fin 1 s!"COUNTEREXAMPLE (base, replayed): the projection's simulator from the initial state fails the property at cycle {j} with assumptions holding"
-        | none =>
-            return ← fin 7 "COUNTEREXAMPLE NOT REPLAYED (base): the solver's model did not reproduce on the simulator"
     | .failed w => return ← fin 5 s!"SOLVER FAILED (base): {w}"
   if baseOnly then
     return ← fin 8 s!"NO COUNTEREXAMPLE UP TO k = {kd} (base only: a search result over cycles 0..{kd - 1}, not a proof)"
@@ -527,9 +559,10 @@ state at cycle 0:\n{"\n".intercalate (regs0.map fun (r, v) => s!"  {r} = {v}")}\
                 say s!"  [{tag}] counterexample: false at cycle 0 {f0}, at cycle 1 {f1}; state, inputs and changes in {f}"
                 -- optional concrete cross-check on the projection's simulator (slow on big designs)
                 if rest.contains "replay" then
-                  match (rt.fpProgram sf wf D).bind (fun R => replay2 D R st0 ins) with
-                  | none => say s!"  [{tag}] replay: the simulator refused the decoded state"
-                  | some (o0, st1, o1) =>
+                  match (rt.fpProgramE sf wf D).map (fun R => replay2 D R st0 ins) with
+                  | .error e => say s!"  [{tag}] replay: no simulator ({e} at sf:{sf} wf:{wf}; rerun with more fp fuel)"
+                  | .ok none => say s!"  [{tag}] replay: the simulator refused the residual or the decoded state"
+                  | .ok (some (o0, st1, o1)) =>
                     let broke := !(sp.conjs.getD t default).holds st1.flops o1
                     let hs := (sp.hypsOf t).all fun i => (sp.conjs.getD i default).holds st0.flops o0
                     say s!"  [{tag}] replay: hypotheses at cycle 0 {hs}, broken at cycle 1 {broke}"

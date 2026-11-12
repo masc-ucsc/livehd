@@ -42,6 +42,8 @@ set -euo pipefail
 #   bulk_ok / bulk_bad: a whole-memory load from a bus, read back onto a bus, equals the bus
 #          PROVED; with the load enable an input COUNTEREXAMPLE (on fp: mulI / divI / modI by
 #          powers of two)
+#   mul4 bad_lsb on ir with sf:1 wf:1: fp cannot specialize the replay simulator, so the run
+#          is COUNTEREXAMPLE NOT REPLAYED and names that reason (not "did not reproduce")
 #   tests/fp_symbolic.lean checks fp's symbolic primitives and terms against evalPrim / evalFuel.
 # The default route is vc (`sim:` absent); a run naming closed / emit: / route: and no sim: uses fp.
 # ROUTES (default "fp ir vc"): every sym_verify case that names no `emit:` or `route:` also
@@ -326,6 +328,9 @@ MU="$OUT/mul4_lean/mul4.dcert"
 run sym_verify "INVARIANT PROVED"    "$MU" ok_lsb k:1
 run sym_verify "COUNTEREXAMPLE"      "$MU" bad_lsb k:1
 run sym_verify "INVARIANT PROVED"    "$MU" ok_max k:1
+run1 sym_verify "COUNTEREXAMPLE NOT REPLAYED" "$MU" bad_lsb k:1 base sim:ir sf:1 wf:1
+grep -q 'the replay simulator could not be built (fp specialization failed' "$OUT/run_$N.log" \
+  || { tail -3 "$OUT/run_$N.log"; echo "FAIL: the not-replayed result does not name its reason"; exit 1; }
 UD="$OUT/udiv4_lean/udiv4.dcert"
 run sym_verify "INVARIANT PROVED"    "$UD" ok_q k:1
 run sym_verify "INVARIANT PROVED"    "$UD" ok_r k:1

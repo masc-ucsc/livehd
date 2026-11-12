@@ -72,10 +72,18 @@ def mkSymRoute (sim route : String) (sf wf : Nat) (D : DesignCert) : Except Stri
                        name := s!"vc (compileDesign, {R.bindings.size} bindings)" }
   | s => .error s!"sim:{s} is not one of fp | ir | vc"
 
-/-- An fp residual for concrete replay: the route's own, else specialized now. -/
-def SymRoute.fpProgram (rt : SymRoute) (sf wf : Nat) (D : DesignCert) : Option Program :=
+/-- An fp residual for concrete replay: the route's own, else specialized now
+(fuel `sf`, `wf`); the error says why fp could not specialize `D`. -/
+def SymRoute.fpProgramE (rt : SymRoute) (sf wf : Nat) (D : DesignCert) : Except String Program :=
   match rt.fp with
-  | some R => some R
-  | none => (MemFused.projectMemFDesignAt sf wf D).toOption
+  | some R => .ok R
+  | none =>
+      match MemFused.projectMemFDesignAt sf wf D with
+      | .ok R => .ok R
+      | .error e => .error s!"fp specialization failed: {repr e}"
+
+/-- `fpProgramE` without the reason. -/
+def SymRoute.fpProgram (rt : SymRoute) (sf wf : Nat) (D : DesignCert) : Option Program :=
+  (rt.fpProgramE sf wf D).toOption
 
 end HDLProof.Kit
