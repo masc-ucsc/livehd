@@ -329,6 +329,16 @@ struct Lec_options {
   // `timeout + (unsettled units x min_timeout)` and the run always reports
   // target/actual/units/floored, so the overrun is never silent.
   int         min_timeout         = 20;
+  // Hierarchical top-down driver: wall budget (seconds) for ONE in-context
+  // confirmation of a refuted block (a parent re-proved with the refuted child
+  // INLINED). The block CEX was found in milliseconds and every ancestor already
+  // proved with the block boxed, so the only open question is whether the CEX is
+  // reachable in context; a from-reset BMC of a large parent routinely cannot
+  // answer that (cvc5 preprocesses the whole unrolled design), and spending the
+  // whole run on it, then on every larger ancestor, hid the known counterexample
+  // behind a TIMEOUT. The effective cap is max(confirm_timeout, 2 x the parent's
+  // own boxed proof time), never above a third of `timeout`. 0 = uncapped.
+  int         confirm_timeout        = 30;
   // HARD wall backstop on a forked proof worker, as a multiple of `timeout`
   // (0 = off). `timeout` is armed as cvc5
   // `tlimit-per`, which the ResourceManager can only check at a spendResource

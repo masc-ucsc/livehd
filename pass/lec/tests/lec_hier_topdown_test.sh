@@ -543,13 +543,55 @@ done
 return "$fail"
 }
 
+section_s_block() {
+# A refuted block whose in-context confirmation stays undecided, while every other
+# def proved with the block boxed: the top reports the BLOCK counterexample as
+# REFUTED-cex (exit 10) instead of a TIMEOUT/undecided that discards it, and it
+# does so without climbing: no ancestor is re-proved with the undecided parent
+# inlined. The child differs only when b=1; the caller's 2-bit counter reaches
+# s==3 only from an unreachable start, so the forced engine=ind (single-step CEX
+# from an arbitrary state) cannot settle the parent with the child inlined. The
+# design is the same in both orders; the verdict line says the CEX may be
+# unreachable, which is exactly this fixture.
+for side in ref impl; do
+  if [ "$side" = ref ]; then op='^'; else op='|'; fi
+  cat > "$W/block_$side.v" <<EOF
+module child(input a, input b, output y); assign y = a $op b; endmodule
+module mid(input clk, input rst, input a, output y, output [1:0] z);
+  reg [1:0] s;
+  always @(posedge clk) if (rst) s <= 2'd0; else s <= (s == 2'd2) ? 2'd0 : s + 2'd1;
+  child u(.a(a), .b(s == 2'd3), .y(y));
+  assign z = s;
+endmodule
+module top(input clk, input rst, input a, output y, output [1:0] z);
+  mid m(.clk(clk), .rst(rst), .a(a), .y(y), .z(z));
+endmodule
+EOF
+  C "block_$side"
+done
+"$LHD" lec --set formal.effort=proof --ref "lg:$W/block_ref" --impl "lg:$W/block_impl" --top top \
+  --set formal.engine=ind --set formal.lec.hier_order=top_down --set formal.lec.confirm_timeout=5 --workdir "$W/block_run" \
+  --result-json "$W/block.json" > "$W/block.log" 2>&1
+brc=$?
+if [ "$brc" -ne 10 ]; then
+  echo "FAIL: block CEX: rc=$brc (want 10, REFUTED-cex)"; grep "lec\[hier\]\|^lec:" "$W/block.log"; return 1
+elif ! grep -q "^lec: .* REFUTED-cex" "$W/block.log" \
+    || ! grep -q "BLOCK REFUTATION 'child' stands" "$W/block.log"; then
+  echo "FAIL: block CEX: no REFUTED-cex headline naming the block"; grep "lec\[hier\]\|^lec:" "$W/block.log"; return 1
+elif grep -q "ESCALATE 'top'" "$W/block.log"; then
+  echo "FAIL: block CEX: climbed to the top after the parent's confirmation stayed undecided"; return 1
+fi
+echo "ok: an unconfirmed block CEX under an all-proved ancestry is the top's REFUTED-cex, without climbing"
+return 0
+}
+
 pids=()
-for s in s1_2 s3 s4 s5 s6 s7 s8 s9 s10 s11 s_unconfirmed; do
+for s in s1_2 s3 s4 s5 s6 s7 s8 s9 s10 s11 s_unconfirmed s_block; do
   "section_$s" > "$W/section_$s.log" 2>&1 &
   pids+=($!)
 done
 i=0
-for s in s1_2 s3 s4 s5 s6 s7 s8 s9 s10 s11 s_unconfirmed; do
+for s in s1_2 s3 s4 s5 s6 s7 s8 s9 s10 s11 s_unconfirmed s_block; do
   wait "${pids[$i]}" || fail=1
   cat "$W/section_$s.log"
   i=$((i + 1))

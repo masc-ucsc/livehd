@@ -2435,6 +2435,14 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
   // live array would be a race on another task's slot (and would make the round
   // depend on scheduling). Written only while no task is in flight.
   std::vector<uint8_t>                                       refuted_snapshot(order.size(), 0);
+  // The in-context confirmation of a refuted child came back UNDECIDED for this def (its re-proof with
+  // the child inlined neither proved nor refuted within the confirm cap). The def's pass-A proof (every
+  // child boxed) still stands, so its ancestors need nothing more: climbing would only re-solve a
+  // strictly larger miter around the same open question.
+  std::vector<uint8_t>                                       confirm_failed(order.size(), 0);
+  // Wall ms of each def's FIRST solve (pass A, every child boxed): the yardstick for how long its
+  // in-context confirmation may reasonably take. Written in-task, read in later rounds.
+  std::vector<long long>                                     pass_a_ms(order.size(), 0);
   // Parents of a def key (reverse of `children`), for the escalation rounds.
   absl::flat_hash_map<std::string, std::vector<std::string>> parents;
   for (const auto& [p, kids] : children) {
@@ -2553,6 +2561,29 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
       const auto now = std::chrono::steady_clock::now();
       if (now < base._deadline) {
         o._deadline = now + (base._deadline - now) / 2;
+      }
+    }
+    // The budget the known-timeout ledger is asked about and records: the run's, unless this def is a
+    // capped in-context confirmation, which only ever had its cap (a later run with a larger cap or
+    // timeout must re-attempt it, not replay "known timeout").
+    int ledger_budget_s = base.timeout;
+    if (!force_flat_refuted[def_ix].empty() && base.confirm_timeout > 0) {
+      // IN-CONTEXT CONFIRMATION of a refuted child (this def re-proves with it inlined). The child's CEX
+      // took milliseconds and every ancestor already proved with the child boxed, so what is left is a
+      // reachability question that a from-reset BMC of a large parent often cannot answer at any
+      // budget. Bound it by what this def's own boxed proof cost (a benign absorption proves in about
+      // that time), never beyond a third of the run, and let the driver report the block CEX when it
+      // does not settle (see `confirm_failed`).
+      const long long floor_s = std::max<long long>(1, base.min_timeout);
+      long long       cap     = std::max<long long>(base.confirm_timeout, 2 * ((pass_a_ms[def_ix] + 999) / 1000));
+      if (base.timeout > 0) {
+        cap = std::min<long long>(cap, std::max<long long>(floor_s, base.timeout / 3));
+      }
+      o.timeout       = static_cast<int>(o.timeout > 0 ? std::min<long long>(o.timeout, cap) : cap);
+      ledger_budget_s = o.timeout;
+      const auto dl   = std::chrono::steady_clock::now() + std::chrono::seconds(cap);
+      if (o._deadline == std::chrono::steady_clock::time_point{} || dl < o._deadline) {
+        o._deadline = dl;
       }
     }
     if (name != top_key) {
@@ -2807,7 +2838,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
       // does not. Self-defeating, too -- the better the cache works, the more
       // budget is left, the less the ledger fires. Measured on minion: 169/169
       // verdicts hit, and one 127s def re-ground anyway on sub-second jitter.
-      if (!retry_all && vcache->skip_timeout(ckey, base.timeout)) {
+      if (!retry_all && vcache->skip_timeout(ckey, ledger_budget_s)) {
         livehd::lec::Query_result ur;
         ur.verdict    = Verdict::Undecided;
         ur.engine     = "cache-skip";
@@ -2816,6 +2847,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
             = std::format("known timeout at formal.timeout<={}s with unchanged digest/options; --set formal.retry=all re-attempts",
                           o.timeout);
         std::lock_guard report_lock(report_mutex);
+        confirm_failed[def_ix] = force_flat_refuted[def_ix].empty() ? 0 : 1;  // same meaning as a fresh undecided confirmation
         emit_lec_block_progress(name, ur, o, 0);
         std::print("lec[hier]: '{}' {} (skipped: known timeout; formal.retry=all re-attempts)\n",
                    name,
@@ -3509,7 +3541,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
         // Only a TIMEOUT-time result: any other cause (a refusal, a memory
         // limit, a witness-carrying partial-miter diff) must re-surface on
         // every run, never replay as "known timeout".
-        vcache->note_timeout(ckey, {base.timeout, ms});  // the RUN's budget; see skip_timeout above
+        vcache->note_timeout(ckey, {ledger_budget_s, ms});  // the budget this attempt had; see skip_timeout above
       }
       if (pairs_from_hint && vcache != nullptr) {
         // Self-heal: the replayed pair hint validated but its solve did NOT
@@ -3562,6 +3594,10 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
       } else {
         undecided_cause_by_ix.erase(def_ix);
       }
+      if (pass_a_ms[def_ix] == 0) {
+        pass_a_ms[def_ix] = std::max<long long>(1, static_cast<long long>(ms));
+      }
+      confirm_failed[def_ix] = (!force_flat_refuted[def_ix].empty() && r.verdict == Verdict::Undecided) ? 1 : 0;
       emit_lec_block_progress(name, r, o, ms);
       if (base.stats) {
         for (const auto& arm : r.arms) {
@@ -3730,6 +3766,13 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
   if (top_down) {
     compute_closure();
     const size_t top_ix = order_ix.at(top_key);
+    // Pass A, as it stood before any escalation: which defs proved with every child boxed. The block
+    // verdict below needs "everything except the refuted blocks proved".
+    const std::vector<uint8_t> proven_pass_a  = proven;
+    const std::vector<uint8_t> refuted_pass_a = refuted;
+    // A def whose in-context confirmation of a refuted child stayed undecided: nothing above it climbs.
+    auto                       stuck_confirm
+        = [&]() { return std::any_of(confirm_failed.begin(), confirm_failed.end(), [](uint8_t c) { return c != 0; }); };
     // Escalation rounds. Each round picks defs whose OWN proof is unresolved
     // (Refuted or Unknown), inlines exactly those into their parents, and
     // re-proves ONLY those parents. Picking only own-proof failures avoids
@@ -3744,6 +3787,9 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
       for (size_t i = 0; i < order.size(); ++i) {
         if (proven[i] != 0 || order[i] == top_key) {
           continue;
+        }
+        if (confirm_failed[i] != 0) {
+          continue;  // its parents proved with it boxed; inlining it upward re-solves a bigger miter for the same open question
         }
         for (const auto& p : parents[order[i]]) {
           auto pi = order_ix.find(p);
@@ -3804,8 +3850,8 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     // ruling 2026-10-14): re-prove the TOP with every undischarged premise
     // INLINED (flat), and its outcome is the answer. Each round inlines at
     // least one more def, so this is bounded by the hierarchy size.
-    for (size_t round = 0; round < order.size() && have_top && top_result.verdict == Verdict::Proven
-                           && unconditional[top_ix] == 0 && !open_premise_free(top_ix);
+    for (size_t round = 0; round < order.size() && have_top && top_result.verdict == Verdict::Proven && unconditional[top_ix] == 0
+                           && !open_premise_free(top_ix) && !stuck_confirm();
          ++round) {
       std::vector<std::string> inline_now;
       for (const auto& c : assumed[top_ix]) {
@@ -3872,13 +3918,54 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
           "(a module boundary is not part of the specification)\n",
           absorbed);
     }
+    // BLOCK COUNTEREXAMPLE AT THE TOP. A refuted block that no parent absorbed, whose in-context
+    // confirmation stayed undecided within its cap, while EVERY other def proved in pass A (all children
+    // boxed): the whole design is equivalent assuming that block pair is, and the block pair is not. The
+    // conditional proofs above it pin the difference to the block, so the design is REFUTED with the
+    // block's boundary witness. It is not a from-reset trace of the top (that is the open question the
+    // confirmation could not answer), so the headline says so and the simfail replay is disabled.
+    // A top that is itself undecided for its own reasons keeps its own cause (owner ruling 2026-10-14).
+    if (have_refuted && stuck_confirm() && !fail_fast_refute) {
+      bool others_proved = true;
+      for (size_t i = 0; i < order.size(); ++i) {
+        if (proven_pass_a[i] == 0 && refuted_pass_a[i] == 0 && !is_trusted(order[i])) {
+          others_proved = false;
+          break;
+        }
+      }
+      if (others_proved) {
+        std::vector<std::string> unconfirmed;
+        for (size_t i = 0; i < order.size(); ++i) {
+          if (confirm_failed[i] != 0) {
+            unconfirmed.push_back(order[i]);
+          }
+        }
+        const std::string note = std::format(
+            "block '{}' differs at its boundary; every other def ({}) proved equal assuming it, "
+            "and re-proving {} with the block inlined did not settle in context within {}s: the design is not equivalent unless "
+            "this block's counterexample is unreachable",
+            refuted_def,
+            order.size() - static_cast<size_t>(std::count(refuted_pass_a.begin(), refuted_pass_a.end(), uint8_t{1})),
+            absl::StrJoin(unconfirmed, ", "),
+            base.confirm_timeout);
+        std::print("lec[hier]: BLOCK REFUTATION '{}' stands: {}\n", refuted_def, note);
+        top_result         = refuted_result;
+        top_result.verdict = Verdict::Refuted;
+        top_result.trace   = {};  // the witness is at the block's ports, not the top's: nothing to replay
+        top_result.cause_detail.clear();
+        top_result.witness = std::format("block '{}': {}", refuted_def, refuted_result.witness);
+        top_result.detail  = std::format("hierarchical: {}; block result: {}", note, refuted_result.detail);
+        have_top           = true;
+      }
+    }
     // A top STILL proven only CONDITIONALLY after the flat re-prove above is not
     // a proof of the top -- and it is not a verdict either: the re-prove should
     // have inlined every undischarged premise. An internal cause that reaches
     // the top is a LiveHD bug (REFUTED-unexplained, owner ruling 2026-10-14),
     // never silently accepted as PROVEN. The premise list (with each premise's
     // own internal cause) says where to look.
-    if (have_top && top_result.verdict == Verdict::Proven && unconditional[top_ix] == 0 && !open_premise_free(top_ix)) {
+    if (have_top && top_result.verdict == Verdict::Proven && unconditional[top_ix] == 0 && !open_premise_free(top_ix)
+        && !stuck_confirm()) {
       std::string open_premises;
       int         n = 0;
       for (size_t i = 0; i < order.size(); ++i) {
@@ -5514,6 +5601,7 @@ void lec_command(Options& opts, Result& res) {
   // Hard wall backstop on a forked proof worker, as a multiple of `timeout` (0 = off).
   // `timeout` is cvc5 tlimit-per, which cannot preempt ONE long CaDiCaL solve -- the
   // shape a flat box-free miter takes. See Lec_options::hard_timeout_mult.
+  o.confirm_timeout     = std::atoi(label("confirm_timeout", "30").c_str());
   o.hard_timeout_mult   = std::atoi(label("hard_timeout_mult", "3").c_str());
   o.spec_mining_timeout = std::atoi(label("spec_mining_timeout", "0").c_str());
   o.phase               = label("phase", "after_reset");

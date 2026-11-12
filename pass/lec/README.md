@@ -523,6 +523,42 @@ boxed (`minion_top`: *297/297 cones PROVEN, every cut discharged*) and names the
 three undischarged premises. The cycle never enters a miter, because nothing is
 flattened.
 
+### When the in-context confirmation does not settle: the block counterexample stands
+
+Confirming D's CEX in context means proving P with D inlined, and for a large
+sequential P that is a from-reset BMC that can fail to settle at *any* budget
+(measured on lhdsuite Rocket with a one-line `ALU` bug: the block CEX takes
+0.4 s, every one of the other 24 defs proves with ALU boxed in ~19 s, and
+`Rocket` with ALU inlined does not settle: 50 s of a 120 s budget, and still
+nothing after 200 s for a flat BMC at bound 2 aimed at the single differing
+output, where the time is cvc5 preprocessing the whole unrolled design, not
+search; the bench run reported 30 min in total. The old driver then re-proved `RocketTile` with the undecided
+`Rocket` inlined, a bigger miter around the same open question, and ended
+TIMEOUT, discarding the known CEX).
+
+So the confirmation is **bounded** (`formal.lec.confirm_timeout`, default 30 s,
+raised to twice the parent's own boxed proof time, never above a third of
+`formal.timeout`, 0 = uncapped; settable as `--set formal.lec.confirm_timeout=N`), and when it stays undecided nothing climbs: the
+parent's boxed proof already stands, and so does every ancestor's. If *every*
+other def proved in pass A, the whole design is equivalent assuming the block pair
+is, and the block pair is not, so the top is **REFUTED-cex** (exit 10) carrying the
+block's boundary witness, with a headline that says it is a block counterexample
+whose reachability in context was not established (`lec[hier]: BLOCK REFUTATION
+'<def>' stands`). It has no from-reset trace of the top, so the simfail replay is
+skipped. This is the user flow "assume the refuted block equal, prove upward, and
+if the top closes the assumption was bad" (2026-11-12, supersedes the 2026-10-14
+ruling for this case only). A top that is itself undecided for its own reasons, or
+any other undischarged def, keeps its own cause; a parent that *proves* with the
+block inlined still ABSORBS it exactly as before. The residual risk is an
+equivalent design whose block differs only at inputs the caller never supplies,
+**and** whose absorbing proof is too hard to finish within the cap: raise
+`confirm_timeout` for such a design. The cap also trades away real traces: with
+one tap broken, lhdsuite `matched_filter` ends at 31 s with the block witness under
+the default cap, but with `confirm_timeout=0` its flat confirmation settles at
+92 s with a genuine from-reset top-level trace (dino's confirm already runs at the
+top and is unaffected). Use `0` when the replayable trace matters more than time.
+(`tests/lec_hier_topdown_test.sh` case `s_block`.)
+
 `formal.lec.hier_refute=fail` is the old fail-fast behaviour: it stops at the
 first differing block, which localizes quickly but calls a boundary mismatch a
 design bug. It is a **debug aid**, announces itself with a warning, and forces

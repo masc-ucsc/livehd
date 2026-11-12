@@ -182,6 +182,14 @@ void Pass_lec::setup() {
                        "minimum per-unit solver allowance for legacy property's soft budget and hierarchical scheduling. "
                        "A requested floor is always clamped by LEC or explicit proof effort's shared wall deadline",
                        "20");
+  m.add_label_optional("confirm_timeout",
+                       "hierarchical top-down driver: wall budget (seconds, 0 = uncapped) for ONE in-context confirmation of a "
+                       "refuted block (its parent re-proved with the block inlined). When it stays undecided and every other "
+                       "def proved with the block boxed, the top reports the BLOCK counterexample as REFUTED-cex instead of "
+                       "climbing to ever larger parents and ending TIMEOUT. The effective cap is max(this, 2 x the parent's own "
+                       "boxed proof time), never above a third of formal.timeout. Raise it (or 0) when a real top-level trace "
+                       "is wanted, or when an equivalent design's block differs only at inputs its caller never supplies",
+                       "30");
   m.add_label_optional("spec_mining_timeout",
                        "independent budget (seconds, 0 = off) for the SPECULATIVE post-run phase, never drawn from "
                        "`timeout`: the unproven-def straggler list, the cvc5 timeout-CORE diagnosis (which subset of "
