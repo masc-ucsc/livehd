@@ -348,6 +348,12 @@ design (resize, wire edit, buffer insertion, taking a sink off a net) and the ro
 picorv32, full flow: place phase 8.3 &rarr; 5.8 s, HPWL &minus;3.8%, WNS 3.45 &rarr; 3.47 ns. dino: place phase 44.0 &rarr; 32.3 s, whole run
 140 &rarr; 119 s, HPWL &minus;0.01%, WNS 0.40 &rarr; 0.54 ns; the Steiner repair ran with 447 inserted buffers on the engine's what-if (OpenTimer:
 484), its timing time 2.6 &rarr; 0.3 s. The hold slack is not kept up to date by edits and the fanout limit is not checked.</td></tr>
+<tr><td>Minion (668k cells), the whole timing path on the engine</td>
+<td>2,099 s wall against 2,573 s with OpenTimer's detailed evaluations (placement phase 405 &rarr; 346 s, OpenTimer detailed time 53 &rarr; 7 s);
+the Steiner repair's timing time falls from 64 to 11 s for 12k inserted buffers (12,663 before). HPWL &minus;0.8%, TNS &minus;122k &rarr; &minus;80k ns-ps,
+WNS &minus;10.8 &rarr; &minus;11.7 ns. What is left in that repair step is <strong>the RC producer</strong>: 73 s of <code>placement_rc_s</code> and 78 s of
+<code>prepare_s</code> out of 172 s, which is step D (<code>estimate_rc</code> builds a string label per pin and runs FLUTE per net). Peak memory is
+unchanged at 17.5 GB: the peak is not in timing.</td></tr>
 </table>
 <h3>Findings in E</h3>
 <ul>
