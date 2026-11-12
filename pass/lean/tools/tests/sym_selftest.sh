@@ -24,6 +24,25 @@ set -euo pipefail
 #   ram4 / ram4b  a 4-word RAM; writes never store 0xff (ram4b: except into word 0)
 #     word 0 != 0xff              PROVED (k=1) / COUNTEREXAMPLE (base); closed on every
 #                                 route, and emitted on vc, compiled
+#
+# The symbolic semantics of operators the routes used to refuse (fp's mulI / divI / modI;
+# Op_GetMask / Op_SetMask with a mask that is an input, on every route). Each has a PROVED case
+# and a mutation that must fail:
+#   mul4   q = a*b: q[0] == a[0]&b[0] PROVED, q[0] == a[0]|b[0] COUNTEREXAMPLE;
+#          the registered product <= 225 PROVED
+#   udiv4  unsigned q = a/b, r = a - q*b: when b != 0, q <= a and r < b PROVED;
+#          q < a COUNTEREXAMPLE
+#   sdiv4  signed q = a/b: the sign of a nonzero q is sign(a) xor sign(b), except -8/-1, PROVED;
+#          without the exception COUNTEREXAMPLE
+#   rem3   signed a % 3 (truncated): a negative a gives a negative or zero remainder PROVED;
+#          the remainder is never negative COUNTEREXAMPLE; -1 % 3 == 2 (Euclidean) COUNTEREXAMPLE
+#   getmask_sym / setmask_sym (built by tests/gen_gap_certs.lean): when the input mask equals
+#          0xA5, the result equals that of the constant mask 0xA5 (output 0) PROVED; compared
+#          with 0xA4 (output 1) COUNTEREXAMPLE
+#   bulk_ok / bulk_bad: a whole-memory load from a bus, read back onto a bus, equals the bus
+#          PROVED; with the load enable an input COUNTEREXAMPLE (on fp: mulI / divI / modI by
+#          powers of two)
+#   tests/fp_symbolic.lean checks fp's symbolic primitives and terms against evalPrim / evalFuel.
 # The default route is vc (`sim:` absent); a run naming closed / emit: / route: and no sim: uses fp.
 # ROUTES (default "fp ir vc"): every sym_verify case that names no `emit:` or `route:` also
 # runs on the IR and VC symbolic routes (`sim:ir`, `sim:vc`) and must give the same verdict
@@ -127,8 +146,60 @@ module ram4b(input clk, input we, input [1:0] wa, input [7:0] wd, output ok, out
   assign ok = mem[0] != 8'hff;
 endmodule
 EOF
+cat > "$OUT/mul4.sv" <<'EOF'
+module mul4(input clk, input [3:0] a, input [3:0] b, output ok_lsb, output bad_lsb, output ok_max,
+            output [7:0] p_o);
+  wire [7:0] q = a * b;
+  reg [7:0] p;
+  always @(posedge clk) p <= a * b;
+  assign ok_lsb = q[0] == (a[0] & b[0]);
+  assign bad_lsb = q[0] == (a[0] | b[0]);
+  assign ok_max = p <= 8'd225;
+  assign p_o = p;
+endmodule
+EOF
+cat > "$OUT/udiv4.sv" <<'EOF'
+module udiv4(input clk, input [3:0] a, input [3:0] b, output ok_q, output ok_r, output bad_q,
+             output [3:0] q_o);
+  wire [3:0] q = a / b;
+  wire [3:0] r = a - q * b;  // the exporter refuses `%` by a divisor that can be zero
+  reg [3:0] qr;
+  always @(posedge clk) qr <= q;
+  assign ok_q = (b == 4'd0) | (q <= a);
+  assign ok_r = (b == 4'd0) | (r < b);
+  assign bad_q = (b == 4'd0) | (q < a);
+  assign q_o = qr;
+endmodule
+EOF
+cat > "$OUT/sdiv4.sv" <<'EOF'
+module sdiv4(input clk, input signed [3:0] a, input signed [3:0] b, output ok_sign,
+             output bad_sign, output [3:0] q_o);
+  wire signed [3:0] q = a / b;
+  reg [3:0] qr;
+  always @(posedge clk) qr <= q;
+  assign ok_sign = (b == 4'sb0000) | (q == 4'sb0000) | ((a == 4'sb1000) & (b == 4'sb1111))
+                   | (q[3] == (a[3] ^ b[3]));
+  assign bad_sign = (b == 4'sb0000) | (q == 4'sb0000) | (q[3] == (a[3] ^ b[3]));
+  assign q_o = qr;
+endmodule
+EOF
+# The properties read r's sign bit and compare r with non-negative constants only: the front end
+# takes `a % 3` to be non-negative, so a signed comparison of r (r >= 0, r == -1) compiles to an
+# unsigned one and disagrees with Verilog (a front-end issue, not a symbolic route's).
+cat > "$OUT/rem3.sv" <<'EOF'
+module rem3(input clk, input signed [3:0] a, output ok_neg, output bad_sign, output bad_eu,
+            output [3:0] r_o);
+  wire signed [3:0] r = a % 4'sd3;
+  reg [3:0] rr;
+  always @(posedge clk) rr <= r;
+  assign ok_neg = ~a[3] | r[3] | (r == 4'd0);
+  assign bad_sign = ~r[3];
+  assign bad_eu = (a != 4'sb1111) | (r == 4'sd2);
+  assign r_o = rr;
+endmodule
+EOF
 
-for d in cnt10 pair twocore ram4 ram4b; do
+for d in cnt10 pair twocore ram4 ram4b mul4 udiv4 sdiv4 rem3; do
   "$LHD" compile "$OUT/$d.sv" --reader yosys-slang --top "$d" --set yosys.setundef=zero \
     --emit-dir "lg:$OUT/${d}_lg" --workdir "$OUT/${d}_cw" > "$OUT/$d.compile.log" 2>&1 \
     || { tail -5 "$OUT/$d.compile.log"; echo "FAIL: compile $d"; exit 1; }
@@ -144,6 +215,14 @@ ROUTES="${ROUTES:-fp ir vc}"
   > "$OUT/native_symbolic.log" 2>&1 && grep -q '^PASS native symbolic' "$OUT/native_symbolic.log" \
   || { tail -5 "$OUT/native_symbolic.log"; echo "FAIL: native_symbolic"; exit 1; }
 echo "ok: $(tail -1 "$OUT/native_symbolic.log")"
+# fp's symbolic primitives and terms against the concrete semantics (tests/fp_symbolic.lean)
+(cd "$ROOT/formal/lean" && LEAN_PATH="$PWD/.olean-dev" lean --run "$ROOT/pass/lean/tools/tests/fp_symbolic.lean") \
+  > "$OUT/fp_symbolic.log" 2>&1 && grep -q '^PASS fp symbolic' "$OUT/fp_symbolic.log" \
+  || { tail -5 "$OUT/fp_symbolic.log"; echo "FAIL: fp_symbolic"; exit 1; }
+echo "ok: $(tail -1 "$OUT/fp_symbolic.log")"
+# certificates no Verilog front end emits (symbolic masks, whole-memory load)
+(cd "$ROOT/formal/lean" && LEAN_PATH="$PWD/.olean-dev" lean --run "$ROOT/pass/lean/tools/tests/gen_gap_certs.lean" "$OUT/gap") \
+  > "$OUT/gen_gap_certs.log" 2>&1 || { tail -5 "$OUT/gen_gap_certs.log"; echo "FAIL: gen_gap_certs"; exit 1; }
 run1() { # <driver> <expect> args...
   local drv=$1 expect=$2; shift 2
   local log="$OUT/run_$(( ++N )).log"
@@ -242,4 +321,27 @@ run sym_verify "INVARIANT PROVED"    "$M4" ok k:1
 run sym_verify "INVARIANT PROVED"    "$M4" ok k:1 closed
 f2_on vc "$M4" V2ram4 ok k:1
 run sym_verify "COUNTEREXAMPLE"      "$M4B" ok k:4
+# operators the routes used to refuse (see the header)
+MU="$OUT/mul4_lean/mul4.dcert"
+run sym_verify "INVARIANT PROVED"    "$MU" ok_lsb k:1
+run sym_verify "COUNTEREXAMPLE"      "$MU" bad_lsb k:1
+run sym_verify "INVARIANT PROVED"    "$MU" ok_max k:1
+UD="$OUT/udiv4_lean/udiv4.dcert"
+run sym_verify "INVARIANT PROVED"    "$UD" ok_q k:1
+run sym_verify "INVARIANT PROVED"    "$UD" ok_r k:1
+run sym_verify "COUNTEREXAMPLE"      "$UD" bad_q k:1
+SD="$OUT/sdiv4_lean/sdiv4.dcert"
+run sym_verify "INVARIANT PROVED"    "$SD" ok_sign k:1
+run sym_verify "COUNTEREXAMPLE"      "$SD" bad_sign k:1
+R3="$OUT/rem3_lean/rem3.dcert"
+run sym_verify "INVARIANT PROVED"    "$R3" ok_neg k:1
+run sym_verify "COUNTEREXAMPLE"      "$R3" bad_sign k:1
+run sym_verify "COUNTEREXAMPLE"      "$R3" bad_eu k:1
+G="$OUT/gap"
+run sym_verify "INVARIANT PROVED"    "$G/getmask_sym.dcert" 0 k:1
+run sym_verify "COUNTEREXAMPLE"      "$G/getmask_sym.dcert" 1 k:1
+run sym_verify "INVARIANT PROVED"    "$G/setmask_sym.dcert" 0 k:1
+run sym_verify "COUNTEREXAMPLE"      "$G/setmask_sym.dcert" 1 k:1
+run sym_verify "INVARIANT PROVED"    "$G/bulk_ok.dcert" 0 k:1
+run sym_verify "COUNTEREXAMPLE"      "$G/bulk_bad.dcert" 0 k:1
 echo "PASS: sym_selftest"

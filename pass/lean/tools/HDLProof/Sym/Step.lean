@@ -183,6 +183,8 @@ theorem sNth_sound {σ : Asg} {α : Type} {f : α → Val} :
   | .bool _, _, _, _, _, hk => by simp [sNth] at hk
   | .bv _ _, _, _, _, _, hk => by simp [sNth] at hk
   | .ctor _ _, _, _, _, _, hk => by simp [sNth] at hk
+  | .nbv _ _, _, _, _, _, hk => by simp [sNth] at hk
+  | .alt _ _ _, _, _, _, _, hk => by simp [sNth] at hk
 
 /-- An output (or any bit vector) as an expression of its width. -/
 def bvOfS (s : SVal) : Option (Σ w, BVExpr w) := asSBV s

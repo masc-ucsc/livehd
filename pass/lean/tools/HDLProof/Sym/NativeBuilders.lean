@@ -966,13 +966,95 @@ def setStep {wa wv : Nat} (V : BVExpr wv) (acc : BVExpr wa) (p : Nat × Nat) : B
       (muxE (.extract p.1 1 V) (.const (BitVec.twoPow wa p.2)) (.const 0#wa))
   else acc
 
+/-- Bit `K` of `V` for a symbolic UNSIGNED index `K`: bit 0 of `V >>> K`. -/
+def bitAtU {wv r : Nat} (V : BVExpr wv) (K : BVExpr r) : BVExpr 1 := .extract 0 1 (.shiftRight V K)
+
+theorem bit_bitAtU (σ : Asg) {wv r : Nat} (V : BVExpr wv) (K : BVExpr r) :
+    bitOf ((bitAtU V K).eval σ) = (V.eval σ).getLsbD (K.eval σ).toNat := by
+  simp [bitAtU, bitOf, BVExpr.eval_extract, BitVec.getLsbD_extractLsb', BVExpr.eval_shiftRight,
+    BitVec.ushiftRight_eq', BitVec.getLsbD_ushiftRight]
+
+/-- One position `i` of the scatter over a SYMBOLIC mask `M` (`SetMaskLoop.smRun`): when the
+mask's bit `i` is set, bit `i` of the accumulator (if inside its width) becomes the value's bit at
+the counter, and the counter advances. -/
+def smStepS {wa wm wv r : Nat} (M : BVExpr wm) (V : BVExpr wv) (p : BVExpr wa × BVExpr r) (i : Nat) :
+    BVExpr wa × BVExpr r :=
+  let mi : BVExpr 1 := .extract i 1 M
+  let set : BVExpr wa :=
+    if i < wa then
+      .bin (.bin p.1 .and (.un .not (.const (BitVec.twoPow wa i)))) .or
+        (muxE (bitAtU V p.2) (.const (BitVec.twoPow wa i)) (.const 0#wa))
+    else p.1
+  (muxE mi set p.1, .bin p.2 .add (zextE r mi))
+
+/-- Positions `i, …, i+n-1` of the symbolic scatter. -/
+def smRunS {wa wm wv r : Nat} (M : BVExpr wm) (V : BVExpr wv) :
+    Nat → Nat → BVExpr wa × BVExpr r → BVExpr wa × BVExpr r
+  | 0, _, p => p
+  | n + 1, i, p => smRunS M V n (i + 1) (smStepS M V p i)
+
+theorem toNat_extract1' {w : Nat} (x : BitVec w) (i : Nat) :
+    (x.extractLsb' i 1).toNat = if x.getLsbD i then 1 else 0 := by
+  rw [BitVec.extractLsb'_toNat, Nat.shiftRight_eq_div_pow, Nat.pow_one, BitVec.getLsbD,
+    Nat.testBit_eq_decide_div_mod_eq]
+  rcases Nat.mod_two_eq_zero_or_one (x.toNat / 2 ^ i) with h | h <;> simp [h]
+
+/-- **The symbolic scatter is `smRun`.** -/
+theorem smRunS_sound {σ : Asg} {wa wm wv r : Nat} {M : BVExpr wm} {V : BVExpr wv} {m v : BV}
+    (hm : bv_uint m = ((M.eval σ).toNat : Int)) (hv : bv_uint v = ((V.eval σ).toNat : Int)) :
+    ∀ (n i : Nat) (x : BV) (A : BVExpr wa) (K : BVExpr r) (k : Nat), x.width = wa →
+      bv_uint x = ((A.eval σ).toNat : Int) → (K.eval σ).toNat = k → k + n < 2 ^ r →
+      (SetMaskLoop.smRun m v n i x k).width = wa ∧
+      bv_uint (SetMaskLoop.smRun m v n i x k) = (((smRunS M V n i (A, K)).1.eval σ).toNat : Int)
+  | 0, _, x, A, K, k, hw, hx, _, _ => ⟨hw, hx⟩
+  | n + 1, i, x, A, K, k, hw, hx, hk, hb => by
+      simp only [SetMaskLoop.smRun, smRunS]
+      have hmi : bv_bit m i = (M.eval σ).getLsbD i := testBit_eq_bv_bit hm i
+      have hvk : bv_bit v k = bitOf ((bitAtU V K).eval σ) := by
+        rw [testBit_eq_bv_bit hv, bit_bitAtU, hk]
+      have hmiE : bitOf ((BVExpr.extract i 1 M).eval σ) = (M.eval σ).getLsbD i := by
+        simp [bitOf, BVExpr.eval_extract, BitVec.getLsbD_extractLsb']
+      have hK' : ((BVExpr.bin K .add (zextE r (BVExpr.extract i 1 M))).eval σ).toNat
+          = k + (if (M.eval σ).getLsbD i then 1 else 0) := by
+        simp only [BVExpr.eval_bin, BVBinOp.eval, BitVec.toNat_add, toNat_zextE, BVExpr.eval_extract,
+          toNat_extract1', hk]
+        have hr : 1 < 2 ^ r := by omega
+        by_cases hmb : (M.eval σ).getLsbD i
+        · simp only [hmb, if_true, Nat.mod_eq_of_lt hr]; exact Nat.mod_eq_of_lt (by omega)
+        · simp only [hmb, Bool.false_eq_true, if_false, Nat.zero_mod, Nat.add_zero]
+          exact Nat.mod_eq_of_lt (by omega)
+      rw [hmi]
+      by_cases hmb : (M.eval σ).getLsbD i
+      · simp only [hmb, if_true]
+        apply smRunS_sound hm hv n (i + 1) _ _ _ (k + 1)
+        · simp [bv_set_bit, hw, width_mk_bv]
+        · simp only [smStepS, eval_muxE, hmiE, hmb, if_true]
+          split
+          · rename_i hd
+            rw [set_bit_rel hw hx hd, hvk]
+            simp only [BVExpr.eval_bin, BVExpr.eval_un, BVExpr.eval_const, BVBinOp.eval, BVUnOp.eval,
+              eval_muxE]
+          · rename_i hd
+            rw [set_bit_high (by omega), hx]
+        · simp only [smStepS]; rw [hK', hmb]; rfl
+        · omega
+      · simp only [hmb, Bool.false_eq_true, if_false]
+        apply smRunS_sound hm hv n (i + 1) _ _ _ k hw
+        · simp only [smStepS, eval_muxE, hmiE, hmb, Bool.false_eq_true, if_false]; exact hx
+        · simp only [smStepS]; rw [hK']; simp [hmb]
+        · omega
+
+/-- `Op_SetMask`: with a concrete mask, the fold over its set positions (`setStep`); with a
+symbolic mask, the positional scatter `smRunS` over the node's width (`set_mask_eq_smRun`). -/
 def setMaskB (w : Nat) (a mask value : SVal) : Option SVal := do
   let ⟨wa, A⟩ ← asSBV a
   let ⟨_, V⟩ ← asSBV value
-  let .conc mv := mask | none
-  let m ← asBV mv
-  let idxs := mask_indices_bv m
-  pure (.bv w (zextE w ((List.zip (List.range idxs.length) idxs).foldl (setStep V) A)))
+  match ← maskView mask with
+  | .inl m =>
+      let idxs := mask_indices_bv m
+      pure (.bv w (zextE w ((List.zip (List.range idxs.length) idxs).foldl (setStep V) A)))
+  | .inr ⟨_, M⟩ =>
+      pure (.bv w (zextE w (smRunS M V w 0 (A, (.const 0#(w.log2 + 1) : BVExpr (w.log2 + 1)))).1))
 
 theorem setFold_sound {σ : Asg} {wa wv : Nat} {V : BVExpr wv} {v : BV}
     (hv : bv_uint v = ((V.eval σ).toNat : Int)) :
@@ -1003,23 +1085,30 @@ theorem setMask_sound {σ : Asg} {w : Nat} {a mk val r : SVal} {x m v : BV}
     (h : setMaskB w a mk val = some r) :
     SRel σ r (ofBV (eval_op .Op_SetMask w [x, m, v])) := by
   simp only [setMaskB, Option.bind_eq_bind, Option.bind_eq_some_iff] at h
-  obtain ⟨⟨wa, A⟩, hA, ⟨wv, V⟩, hV, h⟩ := h
-  split at h
-  · rename_i mv
-    simp only [Option.bind_eq_some_iff, Option.pure_def, Option.some.injEq] at h
-    obtain ⟨m', hm', rfl⟩ := h
-    have hmv : mv = ofBV m := by cases hm; rfl
-    subst hmv; rw [asBV_ofBV] at hm'; cases hm'
-    obtain ⟨wx, ux⟩ := rel_uintT ha hA
-    obtain ⟨_, uv⟩ := rel_uintT hval hV
+  obtain ⟨⟨wa, A⟩, hA, ⟨wv, V⟩, hV, mv, hmv, h⟩ := h
+  obtain ⟨wx, ux⟩ := rel_uintT ha hA
+  obtain ⟨_, uv⟩ := rel_uintT hval hV
+  cases mv with
+  | inl m' =>
+    simp only [Option.pure_def, Option.some.injEq] at h; subst h
+    have hm' := maskView_inl hm hmv
+    rw [asBV_ofBV] at hm'; cases hm'
     obtain ⟨-, hf⟩ := setFold_sound uv (List.zip (List.range (mask_indices_bv m).length)
       (mask_indices_bv m)) A x wx ux
     refine SRel_ofBV (r := eval_op .Op_SetMask w [x, m, v]) rfl ?_
     simp only [eval_op, bv_set_mask, bv_resize, eval_zextE, BitVec.toNat_setWidth, mk_rel] at hf ⊢
     rw [hf, BitVec.ofInt_natCast, BitVec.toNat_ofNat]
-  · cases h
-
-
+  | inr p =>
+    obtain ⟨wm, M⟩ := p
+    simp only [Option.pure_def, Option.some.injEq] at h; subst h
+    obtain ⟨m', hm', hmw, um⟩ := maskView_inr hm hmv
+    rw [asBV_ofBV] at hm'; cases hm'
+    have hK : ((BVExpr.const 0#(w.log2 + 1) : BVExpr (w.log2 + 1)).eval σ).toNat = 0 := by simp
+    obtain ⟨-, hf⟩ := smRunS_sound um uv w 0 x A _ 0 wx ux hK (by simpa using Nat.lt_log2_self)
+    refine SRel_ofBV (r := eval_op .Op_SetMask w [x, m, v]) rfl ?_
+    simp only [eval_op, SetMaskLoop.set_mask_eq_smRun, bv_resize, eval_zextE, BitVec.toNat_setWidth,
+      mk_rel] at hf ⊢
+    rw [hf, BitVec.ofInt_natCast, BitVec.toNat_ofNat]
 
 /-! ## The IR dispatch, over the proved builders -/
 

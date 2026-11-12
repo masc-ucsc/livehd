@@ -335,6 +335,34 @@ theorem toBits_eq (σ : Asg) (x : SInt) (w : Nat) :
   simp only [toBits, eval_sextE, val]
   rfl
 
+
+theorem natAbs_val_le (σ : Asg) (x : SInt) : (x.val σ).natAbs ≤ 2 ^ x.k := by
+  have h := val_range σ x
+  have e : ((2 ^ x.k : Nat) : Int) = (2 : Int) ^ x.k := by simp [Int.natCast_pow]
+  omega
+
+/-- The exact product: both operands sign-extended to a width (`x.k + y.k + 2` bits) that the
+product cannot overflow, since `|x * y| ≤ 2^(x.k + y.k)`. -/
+def mul (x y : SInt) : SInt :=
+  let k := x.k + y.k + 1
+  ⟨k, .bin (sextE (k + 1) x.e) .mul (sextE (k + 1) y.e)⟩
+
+theorem val_mul (σ : Asg) (x y : SInt) : (x.mul y).val σ = x.val σ * y.val σ := by
+  simp only [mul, val, BVExpr.eval_bin, BVBinOp.eval, eval_sextE, BitVec.toInt_mul,
+    BitVec.toInt_signExtend_of_le (show x.k + 1 ≤ x.k + y.k + 1 + 1 by omega),
+    BitVec.toInt_signExtend_of_le (show y.k + 1 ≤ x.k + y.k + 1 + 1 by omega)]
+  have hx := natAbs_val_le σ x
+  have hy := natAbs_val_le σ y
+  simp only [val] at hx hy
+  generalize (x.e.eval σ).toInt = a at hx ⊢
+  generalize (y.e.eval σ).toInt = b at hy ⊢
+  have hab : (a * b).natAbs ≤ 2 ^ (x.k + y.k) := by
+    rw [Int.natAbs_mul, Nat.pow_add]; exact Nat.mul_le_mul hx hy
+  have hlt : 2 ^ (x.k + y.k) < 2 ^ (x.k + y.k + 1) := Nat.pow_lt_pow_right (by decide) (by omega)
+  have e : ((2 ^ (x.k + y.k + 1) : Nat) : Int) = (2 : Int) ^ (x.k + y.k + 1) := by
+    simp [Int.natCast_pow]
+  apply bmod_id <;> omega
+
 end SInt
 
 end HDLProof.Sym

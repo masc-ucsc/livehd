@@ -22,6 +22,8 @@ def evalVal (σ : Asg) : SVal → Val
   | .int i => .int (i.val σ)
   | .cons h t => .cons (evalVal σ h) (evalVal σ t)
   | .ctor tag vs => .ctor tag (vs.map (evalVal σ))
+  | .nbv w e => ofBV ⟨w, ((e.eval σ).toNat : Int)⟩
+  | .alt c a b => if bitOf (c.eval σ) then evalVal σ a else evalVal σ b
 
 def packed (b : BV) : PBV := ⟨BitVec.ofInt b.width (bv_uint b)⟩
 
@@ -56,6 +58,11 @@ def testScalar : IO Nat := do
               count := count + 1
             scalar .Op_GetMask w args true
             scalar .Op_SetMask w (args ++ [mk_bv 3 5]) true
+            -- a SYMBOLIC mask (gmFold / smRunS)
+            scalar .Op_GetMask w args
+            scalar .Op_SetMask w (args ++ [mk_bv 3 5])
+            scalar .Op_SetMask w (args ++ [mk_bv 2 2])
+            count := count + 3
             scalar .Op_MuxBool w (mk_bv 2 b :: args)
             scalar .Op_MuxN w (mk_bv 2 b :: args)
             count := count + 4

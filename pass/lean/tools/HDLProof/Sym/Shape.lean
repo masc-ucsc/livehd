@@ -57,6 +57,8 @@ theorem widthsOf_sound {σ : Asg} :
   | .bool _, _, _, _, h => by simp [widthsOf] at h
   | .bv _ _, _, _, _, h => by simp [widthsOf] at h
   | .ctor _ _, _, _, _, h => by simp [widthsOf] at h
+  | .nbv _ _, _, _, _, h => by simp [widthsOf] at h
+  | .alt _ _ _, _, _, _, h => by simp [widthsOf] at h
 
 /-- An image's `(aw, dw)`: `2^aw` words, every word and the default of width `dw`. -/
 def imgShapeOf (s : SVal) : Option (Nat × Nat) :=
@@ -185,6 +187,8 @@ theorem imgsShapeOf_sound {σ : Asg} :
   | .bool _, _, _, _, h => by simp [imgsShapeOf] at h
   | .bv _ _, _, _, _, h => by simp [imgsShapeOf] at h
   | .ctor _ _, _, _, _, h => by simp [imgsShapeOf] at h
+  | .nbv _ _, _, _, _, h => by simp [imgsShapeOf] at h
+  | .alt _ _ _, _, _, _, h => by simp [imgsShapeOf] at h
 
 /-- A state's shape. -/
 def stateShapeOf (s : SVal) : Option Shape :=

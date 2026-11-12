@@ -147,10 +147,13 @@ TOOL_MODULES=(
   HDLProof/Theory/Progress
   # the verified symbolic interpretation of a residual
   HDLProof/Sym/Kit
+  HDLProof/Sym/IntDiv
   HDLProof/Sym/Bridge
   HDLProof/Sym/Val
   HDLProof/Sym/Prim
   HDLProof/Sym/Mem
+  HDLProof/Sym/EqV
+  HDLProof/Sym/CtorP
   HDLProof/Sym/Dispatch
   HDLProof/Sym/Wire
   HDLProof/Sym/Eval

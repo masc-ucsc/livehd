@@ -37,6 +37,10 @@ set -euo pipefail
 #     implementation on vc and the spec on fp, two's spec facts on ir (F2), acc2 on vc (F1); and
 #     ComposeAny.lean, which composes verdicts of different routes and statement forms
 #     (Check.start_any, Check.refmap_compose_any, `.passes`)
+#   sqS             spec: acc += x*x (a multiplier with two symbolic operands: fp's mulI)
+#     spec facts                        SPEC FACTS PROVED
+#   sqm refines sqS                     the square by shift-and-add: REFINEMENT PROVED
+#   sqb (sqm without the x[3] term)     NOT A REFINEMENT: comm
 # Every PROVED is the verified check (Check.runRefMapOf / runSpecFactsOf)
 # accepting LRAT proofs from the untrusted solver.
 #
@@ -145,7 +149,34 @@ module alt(input clk, input [7:0] x, output [7:0] ra_o, output [7:0] rb_o, outpu
   assign sl = 1'b0;
 endmodule
 EOF2
-for d in accS acc1 acc2 two ncon nmoore par alt; do
+cat > "$OUT/sqS.sv" <<'EOF2'
+module sqS(input clk, input [3:0] x, output ok, output [7:0] acc_o);
+  reg [7:0] acc;
+  always @(posedge clk) acc <= acc + x * x;
+  assign ok = 1'b1;
+  assign acc_o = acc;
+endmodule
+EOF2
+cat > "$OUT/sqm.sv" <<'EOF2'
+module sqm(input clk, input [3:0] x, output [7:0] acc_o);
+  reg [7:0] acc;
+  wire [7:0] xe = {4'b0000, x};
+  wire [7:0] sq = (x[0] ? xe : 8'd0) + (x[1] ? xe << 1 : 8'd0) + (x[2] ? xe << 2 : 8'd0)
+                + (x[3] ? xe << 3 : 8'd0);
+  always @(posedge clk) acc <= acc + sq;
+  assign acc_o = acc;
+endmodule
+EOF2
+cat > "$OUT/sqb.sv" <<'EOF2'
+module sqb(input clk, input [3:0] x, output [7:0] acc_o);
+  reg [7:0] acc;
+  wire [7:0] xe = {4'b0000, x};
+  wire [7:0] sq = (x[0] ? xe : 8'd0) + (x[1] ? xe << 1 : 8'd0) + (x[2] ? xe << 2 : 8'd0);
+  always @(posedge clk) acc <= acc + sq;
+  assign acc_o = acc;
+endmodule
+EOF2
+for d in accS acc1 acc2 two ncon nmoore par alt sqS sqm sqb; do
   "$LHD" compile "$OUT/$d.sv" --reader yosys-slang --top "$d" --set yosys.setundef=zero \
     --emit-dir "lg:$OUT/${d}_lg" --workdir "$OUT/${d}_cw" > "$OUT/$d.compile.log" 2>&1 \
     || { tail -5 "$OUT/$d.compile.log"; echo "FAIL: compile $d"; exit 1; }
@@ -251,6 +282,18 @@ grep -q 'SPEC FACTS FAIL: \[moore a\]' "$OUT/run_$N.log" || { tail -3 "$OUT/run_
 run refmap    "REFINEMENT PROVED"  par
 run refmap    "REFINEMENT PROVED"  par_ba
 run refmap    "REFINEMENT PROVED"  alt
+sq_map() { # <name> <impl, or "" for the spec alone>
+  { [[ -n "$2" ]] && echo "impl $2_lean/$2.dcert"
+    echo "spec sqS_lean/sqS.dcert"; echo "reset 0"; echo "alpha acc acc_o"; echo "init acc 0"
+    echo "chan add allow:ok resp:x obs:acc_o"; echo "slot add 1 resp:in:x obs:out:acc_o"; } > "$OUT/$1.refmap"
+}
+sq_map sqS ""
+sq_map sqm sqm
+sq_map sqb sqb
+run specfacts "SPEC FACTS PROVED"  sqS
+run refmap    "REFINEMENT PROVED"  sqm
+run refmap    "NOT A REFINEMENT"   sqb
+grep -q 'NOT A REFINEMENT (step): \[comm acc\]' "$OUT/run_$N.log" || { tail -3 "$OUT/run_$N.log"; echo "FAIL: the missing partial product not caught by comm"; exit 1; }
 # theorem files and the composition, compiled against formal/lean/.olean-dev
 T="$OUT/thm"
 run refmap    "REFINEMENT PROVED"  par "emit:f2:$T/F2par.lean"

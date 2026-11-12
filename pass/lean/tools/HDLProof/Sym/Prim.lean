@@ -7,11 +7,20 @@ helper and a soundness lemma: if the concrete operands are related to `ss`
 and `evalPrim` succeeds on them, the symbolic answer is related to the
 concrete one (`symPrim_sound`).
 
-Refused (an `error`, never a guess): `mulI`, `divI`, `modI` with a symbolic
-operand, `eqV` on anything symbolic, `bvBit`/`bvGetMask` with a symbolic
-position or mask, and the memory primitives (a later increment).
+Symbolic operands are supported for the integer primitives (`mulI` via `SInt.mul`; `divI` and
+`modI`, Euclidean with a zero divisor giving 0, in `Sym/IntDiv`), `bvBit` with a symbolic
+position (`bitAtS`), `bvGetMask` with a symbolic mask (`gmFold`), and, in `Sym/Dispatch`, `eqV`
+(`Sym/EqV`) and the constructor primitives (`Sym/CtorP`). A guarded union operand (`.alt`) is
+split and the answers merged (`symPrimD`).
+
+Refused (an `error`, never a guess), with the class at the start of the message:
+`data-dependent-width` (a width argument that is a symbolic integer), `unnormalized-bv` (`eqV` or
+`ctorFieldsP` needing the raw value of an input, a held register or a stored memory word),
+`symbolic-tag` (`mkCtorP` with a symbolic tag), `resource-limit` (a guarded union beyond 64
+leaves), and `unsupported operand shapes` for anything else.
 -/
 import HDLProof.Sym.Val
+import HDLProof.Sym.IntDiv
 
 open Projection
 namespace HDLProof.Sym
@@ -62,6 +71,8 @@ theorem allConc_sound {σ : Asg} :
   | .bv _ _ :: _, _, _, h, _ => by simp [allConc] at h
   | .cons _ _ :: _, _, _, h, _ => by simp [allConc] at h
   | .ctor _ _ :: _, _, _, h, _ => by simp [allConc] at h
+  | .nbv _ _ :: _, _, _, h, _ => by simp [allConc] at h
+  | .alt _ _ _ :: _, _, _, h, _ => by simp [allConc] at h
 
 /-! ## Integers and Booleans -/
 
@@ -146,9 +157,12 @@ theorem symNotB_sound {σ : Asg} {ss : List SVal} {vs : List Val} {s : SVal} {v 
 /-- Neither `nil` nor a list cell's tail can be told from a symbolic LEAF: an
 `int`/`bool`/`bv` never relates to `nil`. -/
 theorem SRel_leaf_not_nil {σ : Asg} {s : SVal} {v : Val} (hr : SRel σ s v)
-    (h : ∀ x, s ≠ .conc x) : v ≠ .nil := by
+    (h : ∀ x, s ≠ .conc x) (h' : ∀ c a b, s ≠ .alt c a b) : v ≠ .nil := by
   cases hr with
   | conc => exact absurd rfl (h _)
+  | nbv hv => intro h'; subst h'; simp [ofBV, mkBV] at hv
+  | altT _ _ => exact absurd rfl (h' _ _ _)
+  | altF _ _ => exact absurd rfl (h' _ _ _)
   | int _ => intro h'; cases h'
   | bool _ => intro h'; cases h'
   | bv hb _ _ => intro h'; subst h'; simp [asBV] at hb
@@ -157,6 +171,7 @@ theorem SRel_leaf_not_nil {σ : Asg} {s : SVal} {v : Val} (hr : SRel σ s v)
 
 def symIsNil : List SVal → Option SVal
   | [.conc _] => none
+  | [.alt _ _ _] => none
   | [_] => some (.conc (.bool false))
   | _ => none
 
@@ -167,9 +182,10 @@ theorem symIsNil_sound {σ : Asg} {ss : List SVal} {vs : List Val} {s : SVal} {v
     obtain ⟨va, rfl, ra⟩ := SRelL_one hr
     cases a with
     | conc x => simp [symIsNil] at h
+    | alt c a b => simp [symIsNil] at h
     | _ =>
       simp only [symIsNil, Option.some.injEq] at h; subst h
-      have hne := SRel_leaf_not_nil ra (by intro x hx; cases hx)
+      have hne := SRel_leaf_not_nil ra (by intro x hx; cases hx) (by intro c a b hx; cases hx)
       simp only [evalPrim, Except.ok.injEq] at he
       subst he
       cases va <;> first | exact absurd rfl hne | exact .conc
@@ -347,11 +363,32 @@ theorem symBvSint_sound {σ : Asg} {ss : List SVal} {vs : List Val} {s : SVal} {
     simp only [evalPrim, hb, Except.ok.injEq] at he; subst he
     exact sintOf_rel hw hu
 
+/-- Bit `j` of `e` for a SYMBOLIC position `j` (an exact integer): `0 ≤ j`, and bit 0 of
+`e >>> j`. A position at or past the width reads 0, as `bv_bit` does. -/
+def bitAtS {w : Nat} (e : BVExpr w) (j : SInt) : BVExpr 1 :=
+  andE (notE j.isNeg) (.extract 0 1 (.shiftRight e j.e))
+
+theorem bit_bitAtS (σ : Asg) {w : Nat} (e : BVExpr w) (j : SInt) :
+    bitOf ((bitAtS e j).eval σ) = (decide (0 ≤ j.val σ) && (e.eval σ).getLsbD (j.val σ).toNat) := by
+  simp only [bitAtS, bit_andE, bit_notE, SInt.bit_isNeg]
+  by_cases h : j.val σ < 0
+  · simp [h, show ¬ (0 ≤ j.val σ) by omega]
+  · have h0 : 0 ≤ j.val σ := by omega
+    have hmsb : (j.e.eval σ).msb = false := by
+      rw [BitVec.msb_eq_toInt]; simp only [SInt.val] at h0; simp; omega
+    have hn : (j.e.eval σ).toNat = (j.val σ).toNat := by
+      simp only [SInt.val, BitVec.toInt_eq_toNat_of_msb hmsb, Int.toNat_natCast]
+    simp [h, h0, bitOf, BVExpr.eval_extract, BitVec.getLsbD_extractLsb', BVExpr.eval_shiftRight,
+      BitVec.ushiftRight_eq', BitVec.getLsbD_ushiftRight, hn]
+
+/-- Bit `i` of a bit vector: a concrete position reads one bit (or 0 past the width); a
+symbolic one (an exact integer) is `bitAtS`. -/
 def symBvBit : List SVal → Option SVal
   | [x, i] => do
       let ⟨w, e⟩ ← asSBV x
-      let iz ← cIntOf i
-      pure (if 0 ≤ iz ∧ iz.toNat < w then bitOfE e iz.toNat else .conc (.bool false))
+      match cIntOf i with
+      | some iz => pure (if 0 ≤ iz ∧ iz.toNat < w then bitOfE e iz.toNat else .conc (.bool false))
+      | none => (asSInt i).map fun j => .bool (bitAtS e j)
   | _ => none
 
 theorem symBvBit_sound {σ : Asg} {ss : List SVal} {vs : List Val} {s : SVal} {v : Val}
@@ -359,12 +396,23 @@ theorem symBvBit_sound {σ : Asg} {ss : List SVal} {vs : List Val} {s : SVal} {v
     SRel σ s v := by
   match ss, h with
   | [x, i], h =>
-    simp only [symBvBit, Option.bind_eq_bind, Option.bind_eq_some_iff, Option.pure_def,
-      Option.some.injEq] at h
-    obtain ⟨⟨w, e⟩, hx, iz, hi, rfl⟩ := h
+    simp only [symBvBit, Option.bind_eq_bind, Option.bind_eq_some_iff] at h
+    obtain ⟨⟨w, e⟩, hx, h⟩ := h
     obtain ⟨vx, vi, rfl, rx, ri⟩ := SRelL_two hr
     obtain ⟨b, hb, _, hu⟩ := asSBV_sound rx hx
-    rw [cIntOf_sound ri hi] at he
+    cases hc : cIntOf i with
+    | none =>
+      rw [hc] at h
+      simp only [Option.map_eq_some_iff] at h
+      obtain ⟨j, hj, rfl⟩ := h
+      obtain ⟨z, rfl, hz⟩ := asSInt_sound ri hj
+      simp only [evalPrim, hb, Except.ok.injEq] at he; subst he
+      rw [testBit_eq_bv_bit hu]
+      exact .bool (by rw [bit_bitAtS, hz])
+    | some iz =>
+    rw [hc] at h
+    simp only [Option.pure_def, Option.some.injEq] at h; subst h
+    rw [cIntOf_sound ri hc] at he
     simp only [evalPrim, hb, Except.ok.injEq] at he; subst he
     rw [testBit_eq_bv_bit hu]
     split
@@ -531,29 +579,190 @@ theorem getLsbD_catBits (σ : Asg) {w : Nat} (e : BVExpr w) :
         simp only [show ¬ (j + 1 < 1) by omega, if_false, Nat.add_sub_cancel, List.getD_cons_succ]
         exact getLsbD_catBits σ e rest j (by simp at hj; omega)
 
+theorem getD_append_lt {α : Type} {l l' : List α} {n : Nat} (d : α) (h : n < l.length) :
+    (l ++ l').getD n d = l.getD n d := by
+  rw [List.getD_eq_getElem?_getD, List.getD_eq_getElem?_getD, List.getElem?_append_left h]
+
+theorem getD_append_len {α : Type} (l : List α) (a d : α) : (l ++ [a]).getD l.length d = a := by
+  rw [List.getD_eq_getElem?_getD, List.getElem?_append_right (Nat.le_refl _)]; simp
+
+theorem toNat_extract1 {w : Nat} (x : BitVec w) (i : Nat) :
+    (x.extractLsb' i 1).toNat = if x.getLsbD i then 1 else 0 := by
+  rw [BitVec.extractLsb'_toNat, Nat.shiftRight_eq_div_pow, Nat.pow_one, BitVec.getLsbD,
+    Nat.testBit_eq_decide_div_mod_eq]
+  rcases Nat.mod_two_eq_zero_or_one (x.toNat / 2 ^ i) with h | h <;> simp [h]
+
+/-- Gather the bits of `X` at the set positions of `M` (positions `0..i-1`), lowest first, into
+`W` bits; the second component counts the set positions seen, in `r` bits. -/
+def gmFold (W r : Nat) {wx wm : Nat} (X : BVExpr wx) (M : BVExpr wm) : Nat → BVExpr W × BVExpr r
+  | 0 => (.const 0#W, .const 0#r)
+  | i + 1 =>
+      let p := gmFold W r X M i
+      (.bin p.1 .or (.shiftLeft (zextE W (.bin (.extract i 1 M) .and (.extract i 1 X))) p.2),
+       .bin p.2 .add (zextE r (.extract i 1 M)))
+
+/-- The set positions of `M` below `i`, ascending. -/
+def setPos (Mv : BitVec wm) (i : Nat) : List Nat := (List.range i).filter (fun p => Mv.getLsbD p)
+
+theorem setPos_succ (Mv : BitVec wm) (i : Nat) :
+    setPos Mv (i + 1) = setPos Mv i ++ (if Mv.getLsbD i then [i] else []) := by
+  unfold setPos
+  rw [List.range_succ, List.filter_append]
+  by_cases h : Mv.getLsbD i <;> simp [h]
+
+theorem setPos_length_le (Mv : BitVec wm) (i : Nat) : (setPos Mv i).length ≤ i := by
+  unfold setPos
+  exact Nat.le_trans (List.length_filter_le _ _) (by simp)
+
+theorem gmFold_spec (σ : Asg) (W r : Nat) {wx wm : Nat} (X : BVExpr wx) (M : BVExpr wm) :
+    ∀ i, i < 2 ^ r →
+      ((gmFold W r X M i).2.eval σ).toNat = (setPos (M.eval σ) i).length ∧
+      ∀ j, j < W → ((gmFold W r X M i).1.eval σ).getLsbD j =
+        (decide (j < (setPos (M.eval σ) i).length) &&
+          (X.eval σ).getLsbD ((setPos (M.eval σ) i).getD j 0))
+  | 0, _ => by
+      refine ⟨by simp [gmFold, setPos], fun j _ => by simp [gmFold, setPos]⟩
+  | i + 1, hi => by
+      obtain ⟨hk, hb⟩ := gmFold_spec σ W r X M i (by omega)
+      have hlen := setPos_length_le (M.eval σ) i
+      simp only [gmFold]
+      constructor
+      · simp only [BVExpr.eval_bin, BVBinOp.eval, BitVec.toNat_add, toNat_zextE, BVExpr.eval_extract,
+          toNat_extract1, hk, setPos_succ, List.length_append]
+        have hr : 1 < 2 ^ r := by omega
+        have h1 : 1 % 2 ^ r = 1 := Nat.mod_eq_of_lt hr
+        have h2 : ((setPos (M.eval σ) i).length + 1) % 2 ^ r = (setPos (M.eval σ) i).length + 1 :=
+          Nat.mod_eq_of_lt (by omega)
+        have h3 : (setPos (M.eval σ) i).length % 2 ^ r = (setPos (M.eval σ) i).length :=
+          Nat.mod_eq_of_lt (by omega)
+        by_cases hm : (M.eval σ).getLsbD i <;> simp [hm, h1, h2, h3]
+      · intro j hj
+        have hnew : ((zextE W (BVExpr.bin (BVExpr.extract i 1 M) .and (BVExpr.extract i 1 X))).eval σ
+              <<< ((gmFold W r X M i).2.eval σ)).getLsbD j
+            = (decide (j = (setPos (M.eval σ) i).length) && (M.eval σ).getLsbD i && (X.eval σ).getLsbD i) := by
+          rw [BitVec.getLsbD_shiftLeft', hk, getLsbD_zextE]
+          simp only [BVExpr.eval_bin, BVBinOp.eval, BitVec.getLsbD_and, BVExpr.eval_extract,
+            BitVec.getLsbD_extractLsb', hj, decide_true, Bool.true_and]
+          by_cases hje : j = (setPos (M.eval σ) i).length
+          · subst hje; simp; intro _ _; omega
+          · by_cases hjl : j < (setPos (M.eval σ) i).length
+            · simp [hjl, hje]
+            · have : ¬ (j - (setPos (M.eval σ) i).length < 1) := by omega
+              simp [hjl, hje, this]
+        simp only [BVExpr.eval_bin, BVBinOp.eval, BitVec.getLsbD_or, BVExpr.eval_shiftLeft, hb j hj,
+          hnew, setPos_succ, List.length_append]
+        by_cases hm : (M.eval σ).getLsbD i
+        · simp only [hm, if_true, List.length_singleton, Bool.true_and, Bool.and_true]
+          by_cases hjl : j < (setPos (M.eval σ) i).length
+          · simp [hjl, show j < (setPos (M.eval σ) i).length + 1 by omega, getD_append_lt _ hjl,
+              show j ≠ (setPos (M.eval σ) i).length by omega]
+          · by_cases hje : j = (setPos (M.eval σ) i).length
+            · subst hje; simp [getD_append_len]
+            · simp [hjl, hje, show ¬ (j < (setPos (M.eval σ) i).length + 1) by omega]
+        · simp [hm]
+
+/-- The mask's set positions are `setPos` of its bits. -/
+theorem mask_indices_setPos {m : BV} {wm : Nat} {M : BitVec wm} (hw : m.width = wm)
+    (hm : bv_uint m = (M.toNat : Int)) : mask_indices_bv m = setPos M wm := by
+  unfold mask_indices_bv setPos
+  rw [hw]
+  congr 1
+  funext i
+  exact testBit_eq_bv_bit hm i
+
+/-- `bv_get_mask` with a mask known only through its bits `M`: bit `j` of the result is `x`'s
+bit at the mask's `j`-th set position, or 0 past the number of set positions. -/
+theorem getmask_bits {x m : BV} {wx wm : Nat} {X : BitVec wx} {M : BitVec wm}
+    (hx : bv_uint x = (X.toNat : Int)) (hmw : m.width = wm) (hm : bv_uint m = (M.toNat : Int))
+    (w : Nat) (Z : BitVec w)
+    (hz : ∀ j, j < w → Z.getLsbD j =
+      (decide (j < (setPos M wm).length) && X.getLsbD ((setPos M wm).getD j 0))) :
+    bv_uint (bv_get_mask w x m) = (Z.toNat : Int) := by
+  have hidx := mask_indices_setPos hmw hm
+  let bs := (mask_indices_bv m).map (fun i => X.getLsbD i)
+  have hL : (mask_indices_bv m).length = bs.length := by simp [bs]
+  have hbit : ∀ j, j < bs.length → (BitVec.ofBoolListLE bs).getLsbD j
+      = X.getLsbD ((mask_indices_bv m).getD j 0) := by
+    intro j hj
+    rw [BitVec.getLsbD_ofBoolListLE]
+    simp only [bs, List.getD_eq_getElem?_getD, List.getElem?_map]
+    have hj' : j < (mask_indices_bv m).length := by simpa [bs] using hj
+    rw [List.getElem?_eq_getElem hj']
+    rfl
+  rw [getmask_rel hx w m (BitVec.ofBoolListLE bs) hL hbit]
+  congr 1
+  congr 1
+  apply BitVec.eq_of_getLsbD_eq
+  intro j hj
+  rw [BitVec.getLsbD_setWidth, hz j hj, BitVec.getLsbD_ofBoolListLE, ← hidx]
+  simp only [hj, decide_true, Bool.true_and, bs, List.getD_eq_getElem?_getD, List.getElem?_map,
+    List.length_map]
+  by_cases hjl : j < (mask_indices_bv m).length
+  · rw [List.getElem?_eq_getElem hjl]; simp [hjl]
+  · rw [List.getElem?_eq_none (by omega)]; simp [hjl]
+
+/-- A mask operand: concrete (its set positions are known), or symbolic bits. -/
+def maskView : SVal → Option (BV ⊕ (Σ w, BVExpr w))
+  | .conc mv => (asBV mv).map .inl
+  | s => (asSBV s).map .inr
+
+theorem maskView_inl {σ : Asg} {s : SVal} {v : Val} {mb : BV} (hr : SRel σ s v)
+    (h : maskView s = some (.inl mb)) : asBV v = some mb := by
+  cases s with
+  | conc mv =>
+      simp only [maskView, Option.map_eq_some_iff, Sum.inl.injEq] at h
+      obtain ⟨b, hb, rfl⟩ := h
+      rw [SRel_conc_inv hr]; exact hb
+  | _ => simp [maskView, Option.map_eq_some_iff] at h
+
+theorem maskView_inr {σ : Asg} {s : SVal} {v : Val} {wm : Nat} {M : BVExpr wm} (hr : SRel σ s v)
+    (h : maskView s = some (.inr ⟨wm, M⟩)) :
+    ∃ b, asBV v = some b ∧ b.width = wm ∧ bv_uint b = ((M.eval σ).toNat : Int) := by
+  cases s with
+  | conc mv => simp [maskView, Option.map_eq_some_iff] at h
+  | _ =>
+      simp only [maskView, Option.map_eq_some_iff, Sum.inr.injEq] at h
+      obtain ⟨p, hp, hpe⟩ := h
+      subst hpe
+      exact asSBV_sound hr hp
+
+/-- `bv_get_mask`: with a concrete mask, the bits at its set positions (`catBits`); with a
+symbolic mask, the rank fold `gmFold` over every position of the mask. -/
 def symBvGetMask : List SVal → Option SVal
-  | [w, x, .conc m] => do
+  | [w, x, m] => do
       let wz ← cIntOf w
       let ⟨_, X⟩ ← asSBV x
-      let mb ← asBV m
       let W := widthOf wz
-      pure (.bv W (zextE W (catBits X (mask_indices_bv mb))))
+      match ← maskView m with
+      | .inl mb => pure (.bv W (zextE W (catBits X (mask_indices_bv mb))))
+      | .inr ⟨wm, M⟩ => pure (.bv W (gmFold W (wm.log2 + 1) X M wm).1)
   | _ => none
 
 theorem symBvGetMask_sound {σ : Asg} {ss : List SVal} {vs : List Val} {s : SVal} {v : Val}
     (h : symBvGetMask ss = some s) (hr : SRelL σ ss vs) (he : evalPrim .bvGetMask vs = .ok v) :
     SRel σ s v := by
   match ss, h with
-  | [w, x, .conc m], h =>
-    simp only [symBvGetMask, Option.bind_eq_bind, Option.bind_eq_some_iff, Option.pure_def,
-      Option.some.injEq] at h
-    obtain ⟨wz, hw, ⟨wx, X⟩, hx, mb, hm, rfl⟩ := h
+  | [w, x, m], h =>
+    simp only [symBvGetMask, Option.bind_eq_bind, Option.bind_eq_some_iff] at h
+    obtain ⟨wz, hw, ⟨wx, X⟩, hx, mv, hmv, h⟩ := h
     obtain ⟨vw, vx, vm, rfl, rw', rx, rm⟩ := SRelL_three hr
-    rw [cIntOf_sound rw' hw, SRel_conc_inv rm] at he
+    rw [cIntOf_sound rw' hw] at he
     obtain ⟨bx, hbx, _, hux⟩ := asSBV_sound rx hx
-    simp only [evalPrim, hbx, hm, Except.ok.injEq] at he; subst he
-    refine SRel_ofBV rfl ?_
-    rw [getmask_rel hux _ mb ((catBits X (mask_indices_bv mb)).eval σ) rfl
-          (fun j hj => getLsbD_catBits σ X _ j hj), eval_zextE]
+    cases mv with
+    | inl mb =>
+      simp only [Option.pure_def, Option.some.injEq] at h; subst h
+      have hm := maskView_inl rm hmv
+      simp only [evalPrim, hbx, hm, Except.ok.injEq] at he; subst he
+      refine SRel_ofBV rfl ?_
+      rw [getmask_rel hux _ mb ((catBits X (mask_indices_bv mb)).eval σ) rfl
+            (fun j hj => getLsbD_catBits σ X _ j hj), eval_zextE]
+    | inr p =>
+      obtain ⟨wm, M⟩ := p
+      simp only [Option.pure_def, Option.some.injEq] at h; subst h
+      obtain ⟨bm, hbm, hbw, hum⟩ := maskView_inr rm hmv
+      simp only [evalPrim, hbx, hbm, Except.ok.injEq] at he; subst he
+      refine SRel_ofBV rfl ?_
+      exact getmask_bits hux hbw hum _ _
+        (fun j hj => (gmFold_spec σ _ (wm.log2 + 1) X M wm Nat.lt_log2_self).2 j hj)
 
 end HDLProof.Sym

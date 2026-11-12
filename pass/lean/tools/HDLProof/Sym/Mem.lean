@@ -49,6 +49,8 @@ theorem sListElems_sound {σ : Asg} :
   | .bool _, _, _, _, h => by simp [sListElems] at h
   | .bv _ _, _, _, _, h => by simp [sListElems] at h
   | .ctor _ _, _, _, _, h => by simp [sListElems] at h
+  | .nbv _ _, _, _, _, h => by simp [sListElems] at h
+  | .alt _ _ _, _, _, _, h => by simp [sListElems] at h
 
 /-- An image's words and default. -/
 def imgParts : SVal → Option (List SVal × SVal)

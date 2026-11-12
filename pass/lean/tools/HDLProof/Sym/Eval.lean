@@ -116,6 +116,12 @@ def cutS (st : SymSt) : SVal → SVal × SymSt
       let r2 := cutS r1.2 t
       (.cons r1.1 r2.1, r2.2)
   | .ctor k fs => let r := cutL st fs; (.ctor k r.1, r.2)
+  | .nbv w e => let r := cutE st e; (.nbv w r.1, r.2)
+  | .alt c a b =>
+      let r0 := cutE st c
+      let r1 := cutS r0.2 a
+      let r2 := cutS r1.2 b
+      (.alt r0.1 r1.1 r2.1, r2.2)
 
 def cutL (st : SymSt) : List SVal → List SVal × SymSt
   | [] => ([], st)
@@ -126,6 +132,21 @@ def cutL (st : SymSt) : List SVal → List SVal × SymSt
 
 end
 
+theorem cutS_extends : ∀ (st : SymSt) (s : SVal), st.Extends (cutS st s).2 := by
+  refine cutS.mutual_induct
+    (motive_1 := fun st s => st.Extends (cutS st s).2)
+    (motive_2 := fun st ss => st.Extends (cutL st ss).2) ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ |>.1
+  · intro st v; exact .refl _
+  · intro st k e; exact cutE_extends st e
+  · intro st e; exact cutE_extends st e
+  · intro st w e; exact cutE_extends st e
+  · intro st h t _ ih1 ih2; simp only [cutS]; exact ih1.trans ih2
+  · intro st k fs ih; simp only [cutS]; exact ih
+  · intro st w e; exact cutE_extends st e
+  · intro st c a b _ _ ih1 ih2; simp only [cutS]; exact (cutE_extends st c).trans (ih1.trans ih2)
+  · intro st; exact .refl _
+  · intro st s ss _ ih1 ih2; simp only [cutL]; exact ih1.trans ih2
+
 theorem cutS_sound {σ : Asg} {stF : SymSt} (hc : stF.Consistent σ) :
     ∀ (st : SymSt) (s : SVal) {v : Val}, SRel σ s v → (cutS st s).2.Extends stF →
       SRel σ (cutS st s).1 v ∧ st.Extends (cutS st s).2 := by
@@ -134,7 +155,7 @@ theorem cutS_sound {σ : Asg} {stF : SymSt} (hc : stF.Consistent σ) :
       SRel σ (cutS st s).1 v ∧ st.Extends (cutS st s).2)
     (motive_2 := fun st ss => ∀ {vs : List Val}, SRelL σ ss vs → (cutL st ss).2.Extends stF →
       SRelL σ (cutL st ss).1 vs ∧ st.Extends (cutL st ss).2)
-    ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ |>.1
+    ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ |>.1
   · intro st v' v hr _
     exact ⟨hr, .refl _⟩
   · intro st k e v hr hx
@@ -160,6 +181,20 @@ theorem cutS_sound {σ : Asg} {stF : SymSt} (hc : stF.Consistent σ) :
     obtain ⟨vs, rfl, r⟩ := SRel_ctor_inv hr
     have ⟨s, e⟩ := ih r hx
     exact ⟨.ctor s, e⟩
+  · intro st w e v hr hx
+    simp only [cutS] at hx ⊢
+    have hv := SRel_nbv_inv hr
+    exact ⟨.nbv (by rw [cutE_eval st e hc hx]; exact hv), cutE_extends st e⟩
+  · intro st c a b _ _ ih1 ih2 v hr hx
+    simp only [cutS] at hx ⊢
+    have e2 := cutS_extends (cutS (cutE st c).2 a).2 b
+    have e1 := cutS_extends (cutE st c).2 a
+    have hcx : (cutE st c).2.Extends stF := e1.trans (e2.trans hx)
+    have hce := cutE_eval st c hc hcx
+    refine ⟨?_, (cutE_extends st c).trans (e1.trans e2)⟩
+    rcases SRel_alt_inv hr with ⟨hct, ha⟩ | ⟨hcf, hb⟩
+    · exact .altT (by rw [hce]; exact hct) (ih1 ha (e2.trans hx)).1
+    · exact .altF (by rw [hce]; exact hcf) (ih2 hb hx).1
   · intro st vs hr _
     simp only [cutL]
     exact ⟨hr, .refl _⟩
@@ -182,6 +217,7 @@ def mkCtorS (k : Nat) (ss : List SVal) : SVal :=
 def ctorView : SVal → Option (Nat × List SVal)
   | .ctor k fs        => some (k, fs)
   | .conc (.ctor k vs) => some (k, vs.map .conc)
+  | .nbv w e          => some (bvTag, [.conc (.int (Int.ofNat w)), .int (SInt.ofUint e)])
   | _                 => none
 
 /-- Whether a `let`'s value needs cutting. A variable read or a `tl` yields a
@@ -254,6 +290,43 @@ theorem envPopN_pushL :
 
 theorem envL_toArray (l : List SVal) : envL l.reverse.toArray = l := by simp [envL]
 
+/-- `caseT` on a scrutinee value whose tag is known: run its alternative with `ev` (the fields
+pushed, then popped). -/
+def caseLeaf (ev : SymSt → Array SVal → Term → Except String (SVal × SymSt × Array SVal))
+    (alts : List Alt) (st : SymSt) (env : Array SVal) (sv : SVal) :
+    Except String (SVal × SymSt × Array SVal) :=
+  match ctorView sv with
+  | some (tag, fs) =>
+      match findAlt alts tag with
+      | some a =>
+          if a.arity = fs.length then
+            match ev st (envPushL env fs.reverse) a.body with
+            | .ok (r, st2, env2) => .ok (r, st2, envPopN env2 fs.length)
+            | .error m => .error m
+          else .error "caseT: arity mismatch"
+      | none => .error "caseT: no alternative"
+  | none => .error "caseT: symbolic-tag: the scrutinee's tag is symbolic"
+
+/-- `caseT` over a scrutinee VALUE that may be a guarded union of constructors: the two sides of
+a union are cased separately (at most `d` deep) and their answers merged under its guard
+(`mergeA`); a leaf is `caseLeaf`. -/
+def caseAlt (ev : SymSt → Array SVal → Term → Except String (SVal × SymSt × Array SVal))
+    (alts : List Alt) : Nat → SymSt → Array SVal → SVal → Except String (SVal × SymSt × Array SVal)
+  | 0, st, env, sv => caseLeaf ev alts st env sv
+  | d + 1, st, env, sv =>
+    match sv with
+    | .alt c a b =>
+        match caseAlt ev alts d st env a with
+        | .ok (ra, st1, env1) =>
+            match caseAlt ev alts d st1 env1 b with
+            | .ok (rb, st2, env2) =>
+                match mergeA c ra rb with
+                | some m => .ok (m, st2, env2)
+                | none => .error "caseT: resource-limit: guarded union exceeds 64 leaves"
+            | .error m => .error m
+        | .error m => .error m
+    | _ => caseLeaf ev alts st env sv
+
 mutual
 
 /-- Symbolic evaluation of `t` in the environment `env` (an array by binding
@@ -283,9 +356,9 @@ def symEvalA : Nat → SymSt → Array SVal → Term → Except String (SVal × 
             | .ok (sa, st2, env2) =>
                 match symEvalA n st2 env2 b with
                 | .ok (sb, st3, env3) =>
-                    match merge ce sa sb with
+                    match mergeA ce sa sb with
                     | some m => .ok (m, st3, env3)
-                    | none   => .error "ite: the branches differ in shape"
+                    | none   => .error "ite: resource-limit: guarded union exceeds 64 leaves"
                 | .error m => .error m
             | .error m => .error m
         | .ok _       => .error "ite: the condition is not a Boolean"
@@ -303,18 +376,7 @@ def symEvalA : Nat → SymSt → Array SVal → Term → Except String (SVal × 
         | .error m           => .error m
     | .caseT s alts =>
         match symEvalA n st env s with
-        | .ok (sv, st1, env1) =>
-            match ctorView sv with
-            | some (tag, fs) =>
-                match findAlt alts tag with
-                | some a =>
-                    if a.arity = fs.length then
-                      match symEvalA n st1 (envPushL env1 fs.reverse) a.body with
-                      | .ok (r, st2, env2) => .ok (r, st2, envPopN env2 fs.length)
-                      | .error m => .error m
-                    else .error "caseT: arity mismatch"
-                | none => .error "caseT: no alternative"
-            | none => .error "caseT: the scrutinee's tag is symbolic"
+        | .ok (sv, st1, env1) => caseAlt (fun st env t => symEvalA n st env t) alts 6 st1 env1 sv
         | .error m => .error m
     | .call _ _ => .error "call: a residual is call-free"
 termination_by n _ _ _ => (n, 0)
@@ -388,6 +450,13 @@ theorem ctorView_sound {σ : Asg} {sv : SVal} {tag : Nat} {vs : List Val} {k : N
       have := SRel_conc_inv hr
       cases this
       exact ⟨rfl, SRelL_conc _⟩
+  | nbv w e =>
+      simp only [ctorView, Option.some.injEq, Prod.mk.injEq] at h
+      obtain ⟨rfl, rfl⟩ := h
+      have hv := SRel_nbv_inv hr
+      simp only [ofBV, mkBV, Val.ctor.injEq] at hv
+      obtain ⟨rfl, rfl⟩ := hv
+      exact ⟨rfl, .cons .conc (.cons (.int (SInt.val_ofUint σ e)) .nil)⟩
   | _ => simp [ctorView] at h
 
 /-- The concrete condition was `true`/`false`; the symbolic one agrees. -/
@@ -397,19 +466,6 @@ theorem cond_bit {σ : Asg} {ce : BVExpr 1} {b : Bool} (hr : SRel σ (.bool ce) 
   cases he; exact hb
 
 /-! ### The state only grows -/
-
-theorem cutS_extends : ∀ (st : SymSt) (s : SVal), st.Extends (cutS st s).2 := by
-  refine cutS.mutual_induct
-    (motive_1 := fun st s => st.Extends (cutS st s).2)
-    (motive_2 := fun st ss => st.Extends (cutL st ss).2) ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ |>.1
-  · intro st v; exact .refl _
-  · intro st k e; exact cutE_extends st e
-  · intro st e; exact cutE_extends st e
-  · intro st w e; exact cutE_extends st e
-  · intro st h t _ ih1 ih2; simp only [cutS]; exact ih1.trans ih2
-  · intro st k fs ih; simp only [cutS]; exact ih
-  · intro st; exact .refl _
-  · intro st s ss _ ih1 ih2; simp only [cutL]; exact ih1.trans ih2
 
 theorem cutLet_extends (st : SymSt) (e : Term) (s : SVal) : st.Extends (cutLet st e s).2 := by
   unfold cutLet; split
@@ -447,6 +503,54 @@ theorem symEvalListA_post_of {n : Nat}
           exact ⟨x1.trans x2, rfl⟩
         · cases h
       · cases h
+
+theorem caseLeaf_post {ev : SymSt → Array SVal → Term → Except String (SVal × SymSt × Array SVal)}
+    (hpost : ∀ st env t r st' env', ev st env t = .ok (r, st', env') → st.Extends st' ∧ env' = env)
+    (alts : List Alt) {st : SymSt} {env : Array SVal} {sv r : SVal} {st' : SymSt} {env' : Array SVal}
+    (h : caseLeaf ev alts st env sv = .ok (r, st', env')) : st.Extends st' ∧ env' = env := by
+  unfold caseLeaf at h
+  split at h
+  · rename_i tag fs hv
+    split at h
+    · rename_i a ha
+      split at h
+      · split at h
+        · rename_i r2 st2 env2 h2
+          simp only [Except.ok.injEq, Prod.mk.injEq] at h; obtain ⟨_, rfl, rfl⟩ := h
+          obtain ⟨x2, rfl⟩ := hpost _ _ _ _ _ _ h2
+          refine ⟨x2, ?_⟩
+          have hp := envPopN_pushL env fs.reverse
+          rwa [List.length_reverse] at hp
+        · cases h
+      · cases h
+    · cases h
+  · cases h
+
+theorem caseAlt_post {ev : SymSt → Array SVal → Term → Except String (SVal × SymSt × Array SVal)}
+    (hpost : ∀ st env t r st' env', ev st env t = .ok (r, st', env') → st.Extends st' ∧ env' = env)
+    (alts : List Alt) :
+    ∀ d st env sv r st' env', caseAlt ev alts d st env sv = .ok (r, st', env') →
+      st.Extends st' ∧ env' = env := by
+  intro d
+  induction d with
+  | zero => intro st env sv r st' env' h; exact caseLeaf_post hpost alts h
+  | succ d ih =>
+    intro st env sv r st' env' h
+    simp only [caseAlt] at h
+    split at h
+    · split at h
+      · rename_i ra st1 env1 h1
+        split at h
+        · rename_i rb st2 env2 h2
+          split at h
+          · simp only [Except.ok.injEq, Prod.mk.injEq] at h; obtain ⟨_, rfl, rfl⟩ := h
+            obtain ⟨x1, rfl⟩ := ih _ _ _ _ _ _ h1
+            obtain ⟨x2, rfl⟩ := ih _ _ _ _ _ _ h2
+            exact ⟨x1.trans x2, rfl⟩
+          · cases h
+        · cases h
+      · cases h
+    · exact caseLeaf_post hpost alts h
 
 theorem symEvalA_post :
     ∀ n st env t s st' env', symEvalA n st env t = .ok (s, st', env') →
@@ -521,24 +625,9 @@ theorem symEvalA_post :
     case caseT sc alts =>
         split at h
         · rename_i sv st1 env1 h1
-          split at h
-          · rename_i tag fs hv
-            split at h
-            · rename_i a ha
-              split at h
-              · rename_i har
-                split at h
-                · rename_i r st2 env2 h2
-                  simp only [Except.ok.injEq, Prod.mk.injEq] at h; obtain ⟨_, rfl, rfl⟩ := h
-                  obtain ⟨x1, rfl⟩ := ih _ _ _ _ _ _ h1
-                  obtain ⟨x2, rfl⟩ := ih _ _ _ _ _ _ h2
-                  refine ⟨x1.trans x2, ?_⟩
-                  have hp := envPopN_pushL env1 fs.reverse
-                  rwa [List.length_reverse] at hp
-                · cases h
-              · cases h
-            · cases h
-          · cases h
+          obtain ⟨x1, rfl⟩ := ih _ _ _ _ _ _ h1
+          obtain ⟨x2, rfl⟩ := caseAlt_post ih alts _ _ _ _ _ _ _ h
+          exact ⟨x1.trans x2, rfl⟩
         · cases h
     case call f ts => cases h
 
@@ -586,6 +675,69 @@ theorem symEvalListA_sound_of {n : Nat}
 /-- **`symEvalA` is sound.** Under any assignment consistent with the final
 definitions, the symbolic answer denotes what the concrete evaluation of the
 same term, in a related environment, returns. -/
+theorem caseLeaf_sound (hc : stF.Consistent σ)
+    {ev : SymSt → Array SVal → Term → Except String (SVal × SymSt × Array SVal)}
+    (hev : ∀ st env t r st' env', ev st env t = .ok (r, st', env') → st'.Extends stF →
+      ∀ ρ v, SRelL σ (envL env) ρ → Eval P ρ t v → SRel σ r v)
+    (alts : List Alt) {st : SymSt} {env : Array SVal} {sv r : SVal} {st' : SymSt} {env' : Array SVal}
+    (h : caseLeaf ev alts st env sv = .ok (r, st', env')) (hx : st'.Extends stF)
+    {ρ : List Val} {tag : Nat} {vs : List Val} {a : Alt} {v : Val}
+    (henv : SRelL σ (envL env) ρ) (rs : SRel σ sv (.ctor tag vs)) (hfa : findAlt alts tag = some a)
+    (eb : Eval P (vs ++ ρ) a.body v) : SRel σ r v := by
+  unfold caseLeaf at h
+  split at h
+  · rename_i tag' fs hv
+    obtain ⟨rfl, rfs⟩ := ctorView_sound rs hv
+    split at h
+    · rename_i a' ha'
+      rw [hfa] at ha'; cases ha'
+      split at h
+      · split at h
+        · rename_i r2 st2 env2 h2
+          simp only [Except.ok.injEq, Prod.mk.injEq] at h; obtain ⟨rfl, rfl, rfl⟩ := h
+          exact hev _ _ _ _ _ _ h2 hx _ _ (by rw [envL_pushL_rev]; exact SRelL_append rfs henv) eb
+        · cases h
+      · cases h
+    · cases h
+  · cases h
+
+theorem caseAlt_sound (hc : stF.Consistent σ)
+    {ev : SymSt → Array SVal → Term → Except String (SVal × SymSt × Array SVal)}
+    (hev : ∀ st env t r st' env', ev st env t = .ok (r, st', env') → st'.Extends stF →
+      ∀ ρ v, SRelL σ (envL env) ρ → Eval P ρ t v → SRel σ r v)
+    (hpost : ∀ st env t r st' env', ev st env t = .ok (r, st', env') → st.Extends st' ∧ env' = env)
+    (alts : List Alt) :
+    ∀ d st env sv r st' env', caseAlt ev alts d st env sv = .ok (r, st', env') → st'.Extends stF →
+      ∀ ρ tag vs a v, SRelL σ (envL env) ρ → SRel σ sv (.ctor tag vs) → findAlt alts tag = some a →
+        Eval P (vs ++ ρ) a.body v → SRel σ r v := by
+  intro d
+  induction d with
+  | zero =>
+    intro st env sv r st' env' h hx ρ tag vs a v henv rs hfa eb
+    exact caseLeaf_sound hc hev alts h hx henv rs hfa eb
+  | succ d ih =>
+    intro st env sv r st' env' h hx ρ tag vs a v henv rs hfa eb
+    simp only [caseAlt] at h
+    split at h
+    · rename_i c sa sb
+      split at h
+      · rename_i ra st1 env1 h1
+        split at h
+        · rename_i rb st2 env2 h2
+          split at h
+          · rename_i m hm
+            simp only [Except.ok.injEq, Prod.mk.injEq] at h; obtain ⟨rfl, rfl, rfl⟩ := h
+            obtain ⟨x2, _⟩ := caseAlt_post hpost alts _ _ _ _ _ _ _ h2
+            obtain ⟨_, he1⟩ := caseAlt_post hpost alts _ _ _ _ _ _ _ h1
+            subst he1
+            rcases SRel_alt_inv rs with ⟨hct, ra'⟩ | ⟨hcf, rb'⟩
+            · exact mergeA_t hct (ih _ _ _ _ _ _ h1 (x2.trans hx) _ _ _ _ _ henv ra' hfa eb) hm
+            · exact mergeA_f hcf (ih _ _ _ _ _ _ h2 hx _ _ _ _ _ henv rb' hfa eb) hm
+          · cases h
+        · cases h
+      · cases h
+    · exact caseLeaf_sound hc hev alts h hx henv rs hfa eb
+
 theorem symEvalA_sound (hc : stF.Consistent σ) :
     ∀ n st env t s st' env', symEvalA n st env t = .ok (s, st', env') → st'.Extends stF →
       ∀ ρ v, SRelL σ (envL env) ρ → Eval P ρ t v → SRel σ s v := by
@@ -659,10 +811,10 @@ theorem symEvalA_sound (hc : stF.Consistent σ) :
               cases hev with
               | iteT ec ea =>
                 have rc := ih _ _ _ _ _ _ h1 x1 _ _ henv ec
-                exact merge_t (cond_bit rc) sa sb (ih _ _ _ _ _ _ h2 x2 _ _ henv ea) hm
+                exact mergeA_t (cond_bit rc) (ih _ _ _ _ _ _ h2 x2 _ _ henv ea) hm
               | iteF ec eb =>
                 have rc := ih _ _ _ _ _ _ h1 x1 _ _ henv ec
-                exact merge_f (cond_bit rc) sa sb (ih _ _ _ _ _ _ h3 x3 _ _ henv eb) hm
+                exact mergeA_f (cond_bit rc) (ih _ _ _ _ _ _ h3 x3 _ _ henv eb) hm
             · cases h
           · cases h
         · cases h
@@ -690,30 +842,13 @@ theorem symEvalA_sound (hc : stF.Consistent σ) :
     case caseT sc alts =>
       split at h
       · rename_i sv st1 env1 h1
-        split at h
-        · rename_i tag fs hv
-          split at h
-          · rename_i a ha
-            split at h
-            · rename_i har
-              split at h
-              · rename_i r st2 env2 h2
-                simp only [Except.ok.injEq, Prod.mk.injEq] at h
-                obtain ⟨rfl, rfl, rfl⟩ := h
-                obtain ⟨_, rfl⟩ := symEvalA_post _ _ _ _ _ _ _ h1
-                cases hev with
-                | caseT es hfa har' eb =>
-                  have rs := ih _ _ _ _ _ _ h1 ((symEvalA_post _ _ _ _ _ _ _ h2).1.trans hx) _ _
-                    henv es
-                  obtain ⟨rfl, rfs⟩ := ctorView_sound rs hv
-                  rw [ha] at hfa
-                  cases hfa
-                  exact ih _ _ _ _ _ _ h2 hx _ _
-                    (by rw [envL_pushL_rev]; exact SRelL_append rfs henv) eb
-              · cases h
-            · cases h
-          · cases h
-        · cases h
+        obtain ⟨_, rfl⟩ := symEvalA_post _ _ _ _ _ _ _ h1
+        cases hev with
+        | caseT es hfa har' eb =>
+          have post := fun st env t s st' env' (hh : symEvalA m st env t = .ok (s, st', env')) =>
+            symEvalA_post m st env t s st' env' hh
+          have rs := ih _ _ _ _ _ _ h1 ((caseAlt_post post alts _ _ _ _ _ _ _ h).1.trans hx) _ _ henv es
+          exact caseAlt_sound hc ih post alts _ _ _ _ _ _ _ h hx _ _ _ _ _ henv rs hfa eb
       · cases h
     case call f ts => cases h
 
