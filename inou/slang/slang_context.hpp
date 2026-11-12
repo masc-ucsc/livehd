@@ -318,6 +318,9 @@ struct Slang_module_state {
   // Keep the applied/reset sets separate so the warning is emitted only after
   // async-reset attributes have had a chance to override the initializer.
   absl::flat_hash_map<const slang::ast::ValueSymbol*, std::string>         reg_init_vals_;
+  // Never-driven variables with a constant declaration initializer, and that
+  // constant: the variable's value (lower_members fills it, declare_value_symbol reads it).
+  absl::flat_hash_map<const slang::ast::ValueSymbol*, std::string>         undriven_init_;
   absl::flat_hash_set<const slang::ast::ValueSymbol*>                      reg_init_applied_;
   absl::flat_hash_set<const slang::ast::ValueSymbol*>                      reset_attr_syms_;
   // Unpacked-array PORTS are not memories: an `output T arr[N-1:0]` port lowers

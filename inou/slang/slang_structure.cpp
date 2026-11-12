@@ -3634,7 +3634,8 @@ void Slang_context::declare_value_symbol(const slang::ast::ValueSymbol& sym, boo
   // continuous driver is the net's value, and reads of it are position-
   // independent (a read before the driver binds to the resolved net). No poison
   // init (that would be a competing driver) — the driver supplies the value.
-  if (wire_syms_.contains(&sym)) {
+  const auto undriven = undriven_init_.find(&sym);
+  if (undriven == undriven_init_.end() && wire_syms_.contains(&sym)) {
     set_pending_loc(sym.location);
     // Declare the cyclic net at its real width/sign (a Verilog net has a known
     // type). An untyped wire gets provisional width 1, restamped from its driver
@@ -3674,7 +3675,9 @@ void Slang_context::declare_value_symbol(const slang::ast::ValueSymbol& sym, boo
     } else {
       builder_.create_declare_stmts(name, "mut", int_max_str(ti.bits, ti.is_signed), int_min_str(ti.bits, ti.is_signed));
     }
-    builder_.create_assign_stmts(name, "0sb?");
+    // An undriven variable with a constant initializer holds it (see the
+    // driver census in lower_members); everything else starts as the poison.
+    builder_.create_assign_stmts(name, undriven != undriven_init_.end() ? undriven->second : std::string("0sb?"));
   }
   clear_pending_loc();
 }
@@ -4595,6 +4598,8 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
   // LHS writes the split accumulator; see emit_driver below.
   absl::flat_hash_set<const slang::ast::ValueSymbol*> resolved_cont_selfrefs;
   size_t                                              generate_loop_depth = 0;
+  // Variables whose declaration initializer is not a register's power-on value.
+  std::vector<const slang::ast::VariableSymbol*>      initialized_vars;
 
   std::function<void(const slang::ast::Scope&)> collect = [&](const slang::ast::Scope& sc) {
     for (const auto& member : sc.members()) {
@@ -4634,10 +4639,9 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
         case SymbolKind::Variable: {
           const auto& vs = member.as<slang::ast::VariableSymbol>();
           if (vs.getInitializer() != nullptr && !reg_init_vals_.contains(&vs) && !plusarg_vars_.contains(&vs)) {
-            emit_warning(slang::SourceRange(vs.location, vs.location),
-                         "var-init-ignored",
-                         "unsupported",
-                         std::string("initializer of '") + std::string(vs.name) + "' is ignored (initial-block semantics)");
+            // Decided after the driver census below: with no driver at all the
+            // initializer IS the variable's value (undriven_init).
+            initialized_vars.push_back(&vs);
           }
           break;
         }
@@ -4937,6 +4941,30 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
   for (size_t i = 0; i < drivers.size(); ++i) {
     for (const auto* w : drivers[i].writes) {
       writers_of[w].push_back(i);
+    }
+  }
+  // A variable with a declaration initializer that NOTHING drives -- no
+  // process, continuous assign or instance output -- holds that initializer
+  // for good: `reg replace = 1'd0;` is the constant 0 (LiteX emits one per
+  // disabled feature; Yosys folds it the same way). Declaring it with the
+  // x-fill poison instead made every reader see `?`, and a `?` is free to
+  // become 1: litedram's `we & (writable | replace)` FIFO write enables and
+  // `& ~replace` level counters were synthesized as constants. Plain scalars
+  // only, and only a known constant; anything else keeps the old diagnostic.
+  for (const auto* vs : initialized_vars) {
+    bool constant = false;
+    if (!writers_of.contains(vs) && !reg_syms_.contains(vs) && !input_syms_.contains(vs) && !output_syms_.contains(vs)
+        && is_plain_scalar_net(*vs)) {
+      if (auto cv = try_eval_const_net(*vs->getInitializer()); cv && cv->isInteger() && !cv->integer().hasUnknown()) {
+        undriven_init_[vs] = const_text(cv->integer());
+        constant           = true;
+      }
+    }
+    if (!constant) {
+      emit_warning(slang::SourceRange(vs->location, vs->location),
+                   "var-init-ignored",
+                   "unsupported",
+                   std::string("initializer of '") + std::string(vs->name) + "' is ignored (initial-block semantics)");
     }
   }
   // Concurrent packed destinations are connections, not ordered RMW stores.
@@ -5836,7 +5864,7 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
         if (!is_plain_scalar_net(vsym)) {
           continue;  // structs / memories / flattened buses have their own pre-declare
         }
-        if (!writers_of.contains(&vsym)) {
+        if (!writers_of.contains(&vsym) && !undriven_init_.contains(&vsym)) {
           continue;  // never driven: leave the (already undriven) read path alone
         }
         declare_value_symbol(vsym, /*force_reg=*/false);
