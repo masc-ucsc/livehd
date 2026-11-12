@@ -6,6 +6,7 @@
 #include <string_view>
 #include <unordered_map>
 
+#include "absl/container/flat_hash_set.h"
 #include "pass/liberty/liberty_dff.hpp"
 
 namespace livehd::placement {
@@ -150,10 +151,32 @@ Prects_networks prects_networks(const physical::Technology& tech, const physical
       pending.push_back(n);
     }
   };
+  // The pin-name sets are ordered sets of strings: one lookup compares a label with about log2(size) others. A
+  // connection asks several of them, so hash views of the same strings answer them (the sets own the text).
+  using Name_set = absl::flat_hash_set<std::string_view>;
+  const auto view = [](const std::set<std::string>& names) {
+    Name_set out;
+    out.reserve(names.size());
+    for (const auto& name : names) {
+      out.insert(name);
+    }
+    return out;
+  };
+  const Name_set reset_pin_names = view(roles.reset_pins), clock_pin_names = view(roles.clock_pins), pin_names = view(roles.pins);
+  std::string    conn_label, conn_slashed;  // "instance:pin" or the bare terminal name; "instance/pin"
   for (size_t n = 0; n < fp.nets.size(); ++n) {
     for (const auto& c : fp.nets[n].connections) {
-      const auto label = physical::connection_label(c);
-      const auto entry = pin_net.find(label);
+      const bool terminal = c.instance == "PIN";
+      conn_label.clear();
+      if (!terminal) {
+        conn_label.append(c.instance).append(1, ':');
+      }
+      conn_label.append(c.pin);
+      conn_slashed.clear();
+      if (!terminal) {
+        conn_slashed.append(c.instance).append(1, '/').append(c.pin);
+      }
+      const auto entry = pin_net.empty() ? pin_net.end() : pin_net.find(conn_label);
       if (entry != pin_net.end() && entry->second == unbound) {
         entry->second = n;
       }
@@ -162,17 +185,16 @@ Prects_networks prects_networks(const physical::Technology& tech, const physical
       link_pin      = entry != pin_net.end();
       link_pins[n] += link_pin;
       if (!roles.reset_is_data
-          && ((c.instance == "PIN" && roles.reset_ports.contains(c.pin))
-              || (c.instance != "PIN" && (roles.reset_pins.contains(label) || roles.reset_pins.contains(c.instance + "/" + c.pin))))) {
+          && ((terminal && roles.reset_ports.contains(c.pin))
+              || (!terminal && (reset_pin_names.contains(conn_label) || reset_pin_names.contains(conn_slashed))))) {
         named[n] = true;
         mark(n);
       }
-      if ((c.instance == "PIN" && roles.clock_ports.contains(c.pin)) || (c.instance != "PIN" && roles.clock_pins.contains(label))) {
+      if ((terminal && roles.clock_ports.contains(c.pin)) || (!terminal && clock_pin_names.contains(conn_label))) {
         named[n] = true;
         mark_clock(n);
       }
-      if (!roles.override_controls && c.instance != "PIN"
-          && (roles.pins.contains(label) || roles.pins.contains(c.instance + "/" + c.pin))) {
+      if (!roles.override_controls && !terminal && (pin_names.contains(conn_label) || pin_names.contains(conn_slashed))) {
         named[n] = true;
         mark(n);
       }

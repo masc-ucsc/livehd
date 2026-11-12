@@ -225,15 +225,30 @@ private:
           out = b >= range->first && b < range->second ? input("value", b - range->first) : input("a", b);
         }
       } else if (op == Ntype_op::Concat) {
-        const auto lanes = gu::concat_lanes(node);
-        if (lanes.empty()) {
-          throw std::runtime_error("malformed concat");
+        // The lanes of a concat are the same for every bit asked of it: build them, and the lane of each bit, once.
+        auto cached = lanes_.find(node);
+        if (cached == lanes_.end()) {
+          Concat_cache entry;
+          entry.lanes = gu::concat_lanes(node);
+          if (entry.lanes.empty()) {
+            throw std::runtime_error("malformed concat");
+          }
+          int total = 0;
+          for (const auto& lane : entry.lanes) {
+            total = std::max<int>(total, lane.offset + lane.width);
+          }
+          entry.lane_of_bit.assign(static_cast<size_t>(total), -1);
+          for (size_t i = 0; i < entry.lanes.size(); ++i) {
+            for (int k = 0; k < entry.lanes[i].width; ++k) {
+              entry.lane_of_bit[static_cast<size_t>(entry.lanes[i].offset + k)] = static_cast<int32_t>(i);  // a later lane wins, as before
+            }
+          }
+          cached = lanes_.emplace(node, std::move(entry)).first;
         }
         out = {Terminal::Kind::constant, no_index, false};
-        for (const auto& lane : lanes) {
-          if (b >= lane.offset && b < lane.offset + lane.width) {
-            out = resolve(lane.value, b - lane.offset, depth + 1);
-          }
+        if (b >= 0 && static_cast<size_t>(b) < cached->second.lane_of_bit.size() && cached->second.lane_of_bit[b] >= 0) {
+          const auto& lane = cached->second.lanes[cached->second.lane_of_bit[b]];
+          out              = resolve(lane.value, b - lane.offset, depth + 1);
         }
       } else if (op == Ntype_op::Or || op == Ntype_op::And) {
         // A constant that decides the gate, or the single remaining operand.
@@ -293,6 +308,11 @@ private:
   absl::flat_hash_map<hhds::Node_class, uint32_t>         cell_of_node_;
   absl::flat_hash_map<std::string, uint32_t>              input_bit_;
   absl::flat_hash_map<std::pair<uint64_t, int>, Terminal> memo_;
+  struct Concat_cache {
+    std::vector<gu::Concat_lane> lanes;
+    std::vector<int32_t>         lane_of_bit;
+  };
+  absl::flat_hash_map<hhds::Node_class, Concat_cache> lanes_;
   absl::flat_hash_set<std::pair<uint64_t, int>>           busy_;
 };
 }  // namespace

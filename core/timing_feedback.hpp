@@ -160,6 +160,9 @@ struct Feedback {
     }
   }
   Ranking::Pin               pin_rank(const std::string& instance, const std::string& pin) const {
+    if (!ranking && !dense && pins.empty()) {
+      return Ranking::Pin{};  // no timing at all: nothing to look up, and no label to build for it
+    }
     if (ranking) {
       auto* value = ranking->find(instance == "PIN" ? pin : instance + ":" + pin);
       if (!value && instance != "PIN") {
