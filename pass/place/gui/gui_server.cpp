@@ -19,6 +19,7 @@
 #include <cstring>
 #include <format>
 #include <string_view>
+#include <system_error>
 #include <thread>
 
 #include "gui_page.hpp"
@@ -288,9 +289,11 @@ bool Session::start(std::string* error) {
   sockaddr_in addr{};
   addr.sin_family      = AF_INET;
   addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-  addr.sin_port        = htons(uint16_t(cfg_.port));
+  // The configured port, or the one this session was already serving on (a restart that could not re-execute).
+  const int port       = port_ != 0 ? port_ : cfg_.port;
+  addr.sin_port        = htons(uint16_t(port));
   if (::bind(server->fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
-    return fail(std::format("cannot bind 127.0.0.1:{}", cfg_.port));
+    return fail(std::format("cannot bind 127.0.0.1:{}", port));
   }
   socklen_t len = sizeof(addr);
   ::getsockname(server->fd, reinterpret_cast<sockaddr*>(&addr), &len);
@@ -343,16 +346,25 @@ bool Session::start(std::string* error) {
 #endif
       ::fcntl(client, F_SETFD, FD_CLOEXEC);
       raw->active.fetch_add(1);
-      std::thread([raw, self, client, local] {
-        handle(*self, self->token(), client, raw->stop, local);
+      try {
+        std::thread([raw, self, client, local] {
+          handle(*self, self->token(), client, raw->stop, local);
+          ::close(client);
+          raw->active.fetch_sub(1);
+        }).detach();
+      } catch (const std::system_error&) {
+        // No thread for this request (the system refused one): drop the connection, keep serving. The page and
+        // the agent retry; an exception leaving this thread would end the whole run.
         ::close(client);
         raw->active.fetch_sub(1);
-      }).detach();
+      }
     }
   });
   server_ = std::move(server);
   return true;
 }
+
+void Session::stop_serving() { server_.reset(); }
 
 bool make_video(const std::string& frames_dir, const std::string& out) {
   if (std::system("command -v ffmpeg >/dev/null 2>&1") != 0) {

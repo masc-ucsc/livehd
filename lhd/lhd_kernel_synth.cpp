@@ -2070,8 +2070,14 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
       }
       cargs.push_back(nullptr);
       std::fflush(nullptr);
+      // The server stops first: the answer to this very command is written to its end, and no request arrives
+      // while the process image is replaced (the kernel refuses a new thread during an exec, and a handler
+      // thread that cannot start would end the run instead of restarting it).
+      gui_session->stop_serving();
       ::execv(cargs[0], cargs.data());
-      return std::string("cannot re-execute lhd: ") + std::strerror(errno);
+      const std::string why = std::string("cannot re-execute lhd: ") + std::strerror(errno);
+      gui_session->start(nullptr);  // still this run: serve again so the page shows why
+      return why;
     };
     gui_session = std::make_shared<livehd::placement::gui::Session>(gc);
     livehd::placement::gui::set_active_session(gui_session);
@@ -2137,6 +2143,9 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
     ~Gui_finish() {
       if (session && std::uncaught_exceptions() == uncaught) {
         session->wait_finish();
+        // Nothing is left to serve: stop the server so that the answer to `finish` is written to its end before
+        // the process exits (a handler thread cut off at exit leaves the page with half an answer).
+        session->stop_serving();
         if (session->replaying() && !video_out.empty() && session->video_frames() > 0
             && !livehd::placement::gui::make_video(session->config().video_dir, video_out)) {
           std::fprintf(stderr, "synth.place.gui.video: ffmpeg not found; the frames are in %s\n", session->config().video_dir.c_str());

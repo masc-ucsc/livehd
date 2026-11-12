@@ -2862,6 +2862,7 @@ Repair_result repair_buffers(Result initial, const Options& requested, const Eva
             trial_options.previous       = std::make_shared<physical::Floorplan>(result.placed.floorplan);
             trial_options.changed_cells  = std::move(changed_names);
             trial_options.output_dir     = directory + "/sweep_" + std::to_string(attempt);
+            trial_options.own_frame      = options.own_frame || options.floorplan.empty();
             trial_options.floorplan      = directory + "/floorplan.def";
             auto frame                   = result.placed.floorplan;
             std::erase_if(frame.components, [](const auto& c) {
@@ -2941,7 +2942,6 @@ Repair_result repair_buffers(Result initial, const Options& requested, const Eva
         w.EndArray();
         w.Key("changed");
         w.Uint64(changed);
-        w.Key("upsized");
         if (trees) {
           w.Key("applied_reasons");
           w.StartObject();
@@ -2951,6 +2951,7 @@ Repair_result repair_buffers(Result initial, const Options& requested, const Eva
           }
           w.EndObject();
         }
+        w.Key("upsized");
         w.Uint64(upsized);
         w.Key("downsized");
         w.Uint64(downsized);
@@ -3111,6 +3112,7 @@ Repair_result repair_buffers(Result initial, const Options& requested, const Eva
         trial_options.previous       = std::make_shared<physical::Floorplan>(result.placed.floorplan);
         trial_options.changed_cells  = std::move(changed_names);
         trial_options.output_dir     = directory + "/trial_" + std::to_string(attempt);
+        trial_options.own_frame      = options.own_frame || options.floorplan.empty();
         trial_options.floorplan      = directory + "/floorplan.def";
         auto floorplan               = result.placed.floorplan;
         std::erase_if(floorplan.components, [](const auto& c) {

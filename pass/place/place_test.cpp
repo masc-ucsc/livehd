@@ -3701,6 +3701,88 @@ TEST(Placement, AFixedFrameFullerThanTheTargetDensityRaisesTheTarget) {
   EXPECT_DOUBLE_EQ(qor["gp_target_density"].GetDouble(), .1);
 }
 
+TEST(Placement, ATrialInsideTheRunsOwnFrameKeepsTheDensityItWasPlacedWith) {
+  // A frame the run generated, handed back as a floorplan for an incremental trial, is still this run's frame: the
+  // target and the hard bin cap the trial asks for stay as asked. The same file as an imported floorplan is a frame
+  // the run did not size, and resolves its target from what it holds.
+  hhds::GraphLibrary source, placed;
+  auto               graph = tie_graph(source, false);
+  auto               o     = plain_options();
+  o.lefs                   = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
+  o.bins                   = 2;
+  o.utilization            = .5;
+  o.density                = .5;
+  o.iterations             = 200;
+  const std::string dir    = std::string(std::getenv("TEST_TMPDIR")) + "/own_frame";
+  o.output_dir             = dir + "/reference";
+  const auto reference     = place(*graph, placed, o);
+  rapidjson::Document qor;
+  qor.Parse(reference.qor.c_str());
+  ASSERT_FALSE(qor.HasParseError());
+  EXPECT_DOUBLE_EQ(qor["gp_target_density"].GetDouble(), .5);
+
+  auto frame = reference.floorplan;
+  frame.components.clear();
+  for (auto& port : frame.terminals) {
+    port.status = physical::Status::FIXED;
+  }
+  std::filesystem::create_directories(dir);
+  physical::write_def(frame, dir + "/floorplan.def");
+  const auto target = [&](bool own, const char* label) {
+    auto trial       = o;
+    trial.floorplan  = dir + "/floorplan.def";
+    trial.own_frame  = own;
+    trial.density    = .1;  // far below what the frame holds: only a frame the run did not size raises it
+    trial.output_dir = dir + "/" + label;
+    hhds::GraphLibrary  again;
+    rapidjson::Document result;
+    result.Parse(place(*graph, again, trial).qor.c_str());
+    EXPECT_FALSE(result.HasParseError());
+    return result["gp_target_density"].GetDouble();
+  };
+  EXPECT_DOUBLE_EQ(target(true, "own"), .1);
+  EXPECT_GT(target(false, "imported"), .1);
+}
+
+TEST(Placement, ASeedFileIsTheRestartSeedOfTheRun) {
+  // synth.place.seed (a forked region starts from its parent's placement): the positions are initial coordinates
+  // of the movable cells, applied as a restart seed is, so they are not replaced by the default start of an
+  // unplaced cell or by the prototype placement of a fresh design. A name the netlist does not have is ignored.
+  hhds::GraphLibrary source, placed, seeded;
+  auto               graph = tie_graph(source, false);
+  auto               o     = plain_options();
+  o.lefs                   = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
+  o.bins                   = 2;
+  o.iterations             = 200;
+  const std::string dir    = std::string(std::getenv("TEST_TMPDIR")) + "/seed_file";
+  o.output_dir             = dir + "/reference";
+  const auto reference     = place(*graph, placed, o);
+  EXPECT_FALSE(std::filesystem::exists(o.output_dir + "/restart_seed.json"));
+  size_t movable = 0;
+  {
+    std::ofstream seed(dir + "/seed.tsv");
+    for (const auto& c : reference.floorplan.components) {
+      if (c.place.status != physical::Status::FIXED && c.place.status != physical::Status::LOCKED) {
+        seed << c.name << '\t' << c.place.x << '\t' << c.place.y << '\n';
+        ++movable;
+      }
+    }
+    seed << "not_in_the_netlist\t10\t10\n";
+  }
+  ASSERT_GT(movable, 0u);
+  o.seed_file  = dir + "/seed.tsv";
+  o.output_dir = dir + "/seeded";
+  const auto result = place(*graph, seeded, o);
+  EXPECT_NO_THROW(check_legality(physical::read_lef(o.lefs), result.floorplan));
+  std::ifstream       report_file(o.output_dir + "/restart_seed.json");
+  const std::string   text{std::istreambuf_iterator<char>(report_file), {}};
+  rapidjson::Document report;
+  report.Parse(text.c_str());
+  ASSERT_FALSE(report.HasParseError()) << text;
+  EXPECT_EQ(report["reused_movable_cells"].GetUint64(), movable);
+  EXPECT_EQ(report["new_movable_cells"].GetUint64(), 0u);
+}
+
 struct Tie_fixture {
   std::string                               name;
   std::vector<std::pair<std::string, bool>> outputs;

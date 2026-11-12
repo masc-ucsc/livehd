@@ -6270,7 +6270,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
   std::optional<Options> automatic_options;
   // A frame this run does not size (a fixed core, an imported floorplan) may need its GP target density resolved too.
   if (requested.halo_x == -1 || requested.halo_y == -1 || !requested.die.empty() || !requested.core.empty()
-      || !requested.floorplan.empty()) {
+      || !requested.floorplan.empty() || !requested.seed_file.empty()) {
     automatic_options = requested;
     // Resolving geometry must not clone the caller's stateful callbacks.
     if (requested.after_stage) {
@@ -7222,11 +7222,13 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     }
   }
   v.original_row_frame = prepare_rows(tech, v.fp);
-  if (automatic_options && (!options.die.empty() || !options.core.empty() || !options.floorplan.empty())) {
+  if (automatic_options && (!options.die.empty() || !options.core.empty() || (!options.floorplan.empty() && !options.own_frame))) {
     // A frame this run did not size can be as full as the requested GP target density, or fuller: the overflow goal
     // is then out of reach, GP spends its iterations spreading and never trades density for wirelength. Target what
     // the frame holds plus a quarter of what it has left (the ORFS lower-bound-plus-addon rule). A sparse frame keeps
-    // any target, however low.
+    // any target, however low. An incremental trial inside the frame this run generated (own_frame) is not such a
+    // frame: it was sized from the target and legalized under the hard bin cap, and an edit that no longer fits
+    // under that cap is refused, not let through by a cap raised for the trial alone.
     double row_area = 0;
     for (const auto& row : v.fp.rows) {
       row_area += double(row.count) * sw * rh;
@@ -7288,7 +7290,10 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       }
     }
   }
-  if (!options.seed_file.empty()) {  // initial positions only: nothing here is fixed
+  if (!options.seed_file.empty() && !options.restart_seed) {
+    // Initial positions only: nothing here is fixed. They are the restart seed of this run, so they are applied
+    // where a restart seed is (after the default positions of unplaced cells) and global placement starts from them
+    // instead of from the prototype that places the IOs of a fresh design.
     std::map<std::string, std::pair<int64_t, int64_t>> seeds;
     std::istringstream                                 lines(file_text(options.seed_file));
     for (std::string line; std::getline(lines, line);) {
@@ -7299,7 +7304,8 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         seeds.emplace(std::move(name), std::pair{x, y});
       }
     }
-    for (auto& c : v.cells) {
+    auto seed = std::make_shared<ph::Floorplan>();
+    for (const auto& c : v.cells) {
       // synthesis wraps the cells of a read-back netlist in generated modules (`__flat___sub_16.<instance>`)
       auto it = seeds.find(c.name);
       if (it == seeds.end() && c.name.starts_with("__flat_")) {
@@ -7308,10 +7314,13 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         }
       }
       if (it != seeds.end() && !c.locked && c.place.status != Status::FIXED && c.place.status != Status::LOCKED) {
-        c.place.x = it->second.first;
-        c.place.y = it->second.second;
+        auto place = c.place;
+        place.x    = it->second.first;
+        place.y    = it->second.second;
+        seed->components.push_back({c.name, c.macro, place});
       }
     }
+    automatic_options->restart_seed = std::move(seed);
   }
   if (!options.tracks_file.empty()) {
     apply_routing_tracks(tech, v.fp, file_text(options.tracks_file));

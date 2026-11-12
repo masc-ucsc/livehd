@@ -73,6 +73,43 @@ TEST(GuiSession, ServesPageStateAndRejectsMissingToken) {
   EXPECT_NE(http(port, "POST", "/cmd?" + t, R"({"cmd":"nope"})").find("400"), std::string::npos);
 }
 
+TEST(GuiSession, StopServingAnswersWhatIsInFlightAndStartServesAgainOnTheSamePort) {
+  // A restart stops the server before it re-executes the process: a command sent just before gets its whole
+  // answer, nothing is taken after, and the same port serves again (the process after the exec, or this one when
+  // the exec fails).
+  Session s(Config{.open_browser = false});
+  ASSERT_TRUE(s.start());
+  const int  port = port_of(s.url());
+  const auto t    = "t=" + s.token();
+  std::vector<std::string> answers(16);
+  std::vector<std::thread> clients;
+  for (auto& answer : answers) {
+    clients.emplace_back([&] { answer = http(port, "POST", "/cmd?" + t, R"({"cmd":"pause"})"); });
+  }
+  for (auto& client : clients) {
+    client.join();
+  }
+  s.stop_serving();
+  for (const auto& answer : answers) {  // whole answers: the status line and all of the body
+    ASSERT_NE(answer.find("200 OK"), std::string::npos);
+    EXPECT_EQ(body_of(answer), R"({"ok":true})");
+  }
+  {  // stopped: the port refuses a connection
+    const int   fd = ::socket(AF_INET, SOCK_STREAM, 0);
+    sockaddr_in a{};
+    a.sin_family      = AF_INET;
+    a.sin_port        = htons(uint16_t(port));
+    a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    EXPECT_NE(::connect(fd, reinterpret_cast<sockaddr*>(&a), sizeof(a)), 0);
+    ::close(fd);
+  }
+  s.stop_serving();  // a second stop is nothing
+  std::string err;
+  ASSERT_TRUE(s.start(&err)) << err;
+  EXPECT_EQ(port_of(s.url()), port);
+  EXPECT_NE(http(port, "GET", "/state?" + t).find("200 OK"), std::string::npos);
+}
+
 TEST(GuiSession, QuantizedFramesCoverTheDieInFourBytesPerNode) {
   Session s(Config{.open_browser = false});
   ASSERT_TRUE(s.start());

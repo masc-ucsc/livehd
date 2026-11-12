@@ -2248,6 +2248,7 @@ Resize_trial run_resize_trial(const Result& state, const Options& options, const
   trial_options.previous       = std::make_shared<physical::Floorplan>(state.floorplan);
   trial_options.changed_cells  = changed_names(edits);
   trial_options.output_dir     = output_dir;
+  trial_options.own_frame      = options.own_frame || options.floorplan.empty();
   trial_options.floorplan      = floorplan;
   auto frame                   = state.floorplan;
   std::erase_if(frame.components, [](const auto& c) {

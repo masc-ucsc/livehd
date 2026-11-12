@@ -179,6 +179,10 @@ struct Options {
   Placement_stage                                           completed_stage = Placement_stage::final;
   std::vector<std::string>                                  lefs;
   std::string                                               floorplan, output_dir, cache_dir;
+  // `floorplan` is the frame this run generated itself, written out so that an incremental trial (a resize, a repair
+  // batch, the two-row ECO) re-places inside it. Such a re-entry keeps the density controls its reference placement
+  // was legalized with; a frame the run did not size (die, core, an imported floorplan) resolves them from what it holds.
+  bool                                                      own_frame = false;
   // TSV (instance, x, y DBU): initial positions of movable cells (a forked region starts from its parent's placement)
   std::string                                               seed_file;
   std::string                                               liberty, tech_rc_file, tracks_file;
@@ -479,15 +483,15 @@ struct Options {
   double                               fixed_macro_overlap_weight = 0;
   double                               wirelength_gamma_end       = .05;  // experimental; existing smoothing schedule by default
   int                                  detailed_iterations        = 2;
-  bool                                 macro_detailed_place       = true;   // cell detail while macros are movable
-  bool                                 macro_legalize_cells       = true;   // false leaves macro-stage cells at GP poses
-  bool                                 final_independent_timing   = false;  // synthesis weights, then density-gated final STA
-  bool                                 exact_cell_density         = false;
   // Buffer-tree repair: how many of the planner's alternatives a net of no timing consequence gets (a fraction of the distinct
   // topologies, never fewer than repair_tree_min_topologies), rising linearly to all of them for the worst-slack net. On
   // minion and a tight-clock dino 0.1 changed no result beyond noise and halved the planning time.
   double                               repair_tree_min_effort     = 0.1;
   size_t                               repair_tree_min_topologies = 4;
+  bool                                 macro_detailed_place       = true;   // cell detail while macros are movable
+  bool                                 macro_legalize_cells       = true;   // false leaves macro-stage cells at GP poses
+  bool                                 final_independent_timing   = false;  // synthesis weights, then density-gated final STA
+  bool                                 exact_cell_density         = false;
   bool                                 density_upper_bound        = false;  // experimental filler-free upper-bound penalty
   int                                  min_iterations             = 40;
   double              post_density_factor                 = 4;  // bounded continuation after geometry/density settle; zero disables

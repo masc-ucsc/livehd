@@ -189,6 +189,10 @@ public:
 
   // Binds 127.0.0.1 and starts the server thread. Returns false (and a reason) on failure.
   bool               start(std::string* error = nullptr);
+  // Stops the server: no new connection is taken, and the requests in flight finish their answers. A restart
+  // calls it before it re-executes the process, so that a request does not arrive (or an answer end) in the
+  // middle of the exec. `start` serves again, on the same port.
+  void               stop_serving();
   std::string        url() const;
   const std::string& token() const { return token_; }
   const std::string& agent_socket() const { return agent_socket_; }

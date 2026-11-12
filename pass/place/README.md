@@ -2048,7 +2048,9 @@ selection tools. Design, rulings and open work: `todo/livehd/2i-interact.html`.
   complete rows and sites, the parent's tracks) whose boundary pins are FIXED where the nets crossed the box: a net
   from or to a real top port keeps that port's name (so the SDC still applies), every other crossing net becomes
   `cut_in_<k>` / `cut_out_<k>` at the nearest box edge point to its far side. `synth.place.seed=<tsv>` starts the
-  region's cells where they were. A child `lhd synth --gui` then runs on them (same flags except the frame and the
+  region's cells where they were: the file is the restart seed of the child's run (initial coordinates of its
+  movable cells, nothing fixed), so global placement starts from those positions and not from the default start
+  of unplaced cells or the prototype placement of a fresh design. A child `lhd synth --gui` then runs on them (same flags except the frame and the
   GUI ones; its own port and token, `fork_<n>/child.log` and `fork_<n>/W`), and the parent's page lists and opens
   it. The child is an ordinary session: the Options panel, *Replay from here*, `area`, pins, maps, timing and the
   agent socket all work, so changing a flag and comparing the region's WNS/HPWL is one click. Limits of this first
@@ -2124,7 +2126,8 @@ selection tools. Design, rulings and open work: `todo/livehd/2i-interact.html`.
   the current position. Clicking one reviews that snapshot read-only (design, frame, centroids; *Live* returns).
   The panel lists every `synth.place.*` flag with the value this run uses, its default and its help; edit any of
   them, select a checkpoint and press *Replay from here*: the process re-executes itself (same pid, port and token,
-  so the page just reconnects) with the edited `--set` values, replays the recorded actions up to that checkpoint
+  so the page just reconnects; the server stops before the exec, so the answer to the command is complete and no
+  request lands in the middle of it) with the edited `--set` values, replays the recorded actions up to that checkpoint
   without blocking (pins, moves, centroid drags, GP extensions, timing requests), and becomes interactive and paused
   at the same checkpoint (`lhd --gui-resume label:nth --gui-replay trace --gui-replay-seq n`, hidden flags set by
   the page). The replayed checkpoint reproduces the original placement exactly when the edited flags only matter
