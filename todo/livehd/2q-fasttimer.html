@@ -351,9 +351,18 @@ picorv32, full flow: place phase 8.3 &rarr; 5.8 s, HPWL &minus;3.8%, WNS 3.45 &r
 <tr><td>Minion (668k cells), the whole timing path on the engine</td>
 <td>2,099 s wall against 2,573 s with OpenTimer's detailed evaluations (placement phase 405 &rarr; 346 s, OpenTimer detailed time 53 &rarr; 7 s);
 the Steiner repair's timing time falls from 64 to 11 s for 12k inserted buffers (12,663 before). HPWL &minus;0.8%, TNS &minus;122k &rarr; &minus;80k ns-ps,
-WNS &minus;10.8 &rarr; &minus;11.7 ns. What is left in that repair step is <strong>the RC producer</strong>: 73 s of <code>placement_rc_s</code> and 78 s of
-<code>prepare_s</code> out of 172 s, which is step D (<code>estimate_rc</code> builds a string label per pin and runs FLUTE per net). Peak memory is
-unchanged at 17.5 GB: the peak is not in timing.</td></tr>
+WNS &minus;10.8 &rarr; &minus;11.7 ns. What is left in that repair step is not timing and not the RC producer as such: <code>placement_rc_s</code> is a whole incremental
+<code>place()</code> of the buffered design (73 s) and <code>prepare_s</code> is flattening the graph and applying the buffer trees (78 s).
+Minion's time by phase now: repair 497 s, ABC 295 s, regions 220 s, timing-driven placement 161 s, final legalization 156 s, resize 106 s,
+OpenTimer's final report 70 s, post-synthesis timing 40 s. Peak memory is unchanged at 17.5 GB: the peak is not in timing.</td></tr>
+<tr><td>D (first part): the Steiner RC tree of a net as numbers, and GP timing checkpoints that rank from numeric trees</td>
+<td><code>steiner_net</code> is the numeric core of <code>steiner_rc</code> (which is now that plus labels). A GP checkpoint builds
+numeric trees (no RC strings, no hash text, no pin-location map; a skeleton of driver labels stands in for the parasitics) and the
+ranker solves Elmore from them. The ranking equals the one from Parasitics bit for bit (unit test) and the placed DEF is byte-identical on
+dino and picorv32. A checkpoint of dino costs 0.56 &rarr; 0.29 s, its place phase 31.8 &rarr; 29.3 s. Tree memory: 4 B per node of
+capacitance and 12 B per edge, against about 100 B per node of <code>Rc_net</code>. Not done: frozen topology with length updates and the
+rebuild rule (every checkpoint rebuilds), Parasitics export from trees, the other GP and repair consumers of
+<code>estimate_rc</code>.</td></tr>
 </table>
 <h3>Findings in E</h3>
 <ul>
