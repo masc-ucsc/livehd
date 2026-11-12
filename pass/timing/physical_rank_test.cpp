@@ -151,7 +151,7 @@ TEST(PhysicalRank, DetailedEvaluationFillsTheFeedback) {
   const auto* d = fb.find_label("ub:D");
   ASSERT_TRUE(d);
   ASSERT_TRUE(d->slack && d->required && d->arrival && d->slew);
-  EXPECT_LE(*d->slack, *d->required - *d->arrival + 1e-3);  // the extremes are taken per field, over both transitions
+  EXPECT_GE(*d->slack, *d->required - *d->arrival - 1e-3);  // the extremes are taken per field, over both transitions
   EXPECT_NEAR(*d->slack, *fb.wns, 1e-3);  // the only endpoint on the worst path
   EXPECT_TRUE(d->hold_slack.has_value());
   const auto* q = fb.find_label("ua:Q");
