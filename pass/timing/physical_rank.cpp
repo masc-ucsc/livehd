@@ -14,27 +14,6 @@ using Steady = std::chrono::steady_clock;
 double since(Steady::time_point start) { return std::chrono::duration<double>(Steady::now() - start).count(); }
 }  // namespace
 
-Physical_ranker::Physical_ranker(Options options) : options_(std::move(options)) {
-  if (options_.liberty_texts.empty()) {
-    throw std::invalid_argument("Physical_ranker needs at least one Liberty corner");
-  }
-  std::vector<const liberty::timing::Library*> pointers;
-  libraries_.reserve(options_.liberty_texts.size());
-  for (const auto& text : options_.liberty_texts) {
-    libraries_.push_back(liberty::timing::parse(text));
-  }
-  for (const auto& library : libraries_) {
-    pointers.push_back(&library);
-  }
-  std::vector<std::string> names = options_.corner_names;
-  for (size_t i = names.size(); i < libraries_.size(); ++i) {
-    names.push_back("corner" + std::to_string(i));
-  }
-  types_ = Cell_types::build(pointers, names);
-  options_.engine.true_slack_in_rank = true;  // the placer's consumers read the slack's sign and size
-  sdc_   = read_sdc(options_.sdc_text, {libraries_.front().time_unit_ps, libraries_.front().capacitance_unit_ff});
-}
-
 std::vector<std::string> Physical_ranker::unsupported() const {
   std::vector<std::string> out = constraints_.unsupported;
   if (bound_) {
@@ -905,6 +884,28 @@ private:
   std::unordered_map<uint32_t, uint32_t>           by_driver_;  // driver pin -> net of the evaluated RC snapshot
   size_t                                           by_driver_generation_ = ~size_t{0};
 };
+
+// Defined after Whatif_impl: the constructor's unwind path destroys whatif_, which needs the complete type.
+Physical_ranker::Physical_ranker(Options options) : options_(std::move(options)) {
+  if (options_.liberty_texts.empty()) {
+    throw std::invalid_argument("Physical_ranker needs at least one Liberty corner");
+  }
+  std::vector<const liberty::timing::Library*> pointers;
+  libraries_.reserve(options_.liberty_texts.size());
+  for (const auto& text : options_.liberty_texts) {
+    libraries_.push_back(liberty::timing::parse(text));
+  }
+  for (const auto& library : libraries_) {
+    pointers.push_back(&library);
+  }
+  std::vector<std::string> names = options_.corner_names;
+  for (size_t i = names.size(); i < libraries_.size(); ++i) {
+    names.push_back("corner" + std::to_string(i));
+  }
+  types_ = Cell_types::build(pointers, names);
+  options_.engine.true_slack_in_rank = true;  // the placer's consumers read the slack's sign and size
+  sdc_   = read_sdc(options_.sdc_text, {libraries_.front().time_unit_ps, libraries_.front().capacitance_unit_ff});
+}
 
 Physical_ranker::~Physical_ranker() = default;
 
