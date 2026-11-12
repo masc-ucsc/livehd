@@ -608,6 +608,119 @@ TEST(FastEngineEdits, ResizeAgreesWithAFullEvaluationAndRollsBackExactly) {
   }
 }
 
+namespace {
+// The layered design with two launch groups: the flip-flops launch in group 0, the input ports in group 1
+// against a tighter relation, and one endpoint is not checked for the ports.
+fast::Constraints grouped_constraints(const fast::Netlist& netlist) {
+  auto c = layered_constraints();
+  c.clocks.push_back({"io", "", 300, 0, 0});  // a virtual clock
+  c.groups            = 2;
+  c.setup_relation_ps = {400, 300, 250, 300};  // [group][capture clock]
+  c.hold_relation_ps  = {0, 0, -20, 0};
+  uint32_t first_data = fast::no_index;
+  for (const auto& port : netlist.ports()) {
+    if (port.input && port.name != "clk") {
+      c.inputs.push_back({port.name, "io", 15, 4, 1});
+    }
+  }
+  // The data pin of the last flip-flop.
+  for (uint32_t p = 0; p < netlist.pins(); ++p) {
+    if (netlist.pin_type(p).name == "D") {
+      first_data = p;
+    }
+  }
+  c.endpoint_relations.push_back({first_data, 1u, inf});
+  return c;
+}
+void expect_same_groups(const fast::Engine& a, const fast::Engine& b, size_t pins, const char* what) {
+  ASSERT_EQ(a.groups(), 2u);
+  for (uint32_t p = 0; p < pins; ++p) {
+    for (size_t g = 0; g < 2; ++g) {
+      for (size_t k = 0; k < 2; ++k) {
+        for (unsigned t = 0; t < 2; ++t) {
+          ASSERT_EQ(a.arrival(p, k, t, g), b.arrival(p, k, t, g)) << what << " arrival pin " << p << " group " << g;
+          ASSERT_EQ(a.required(p, k, t, g), b.required(p, k, t, g)) << what << " required pin " << p << " group " << g;
+        }
+      }
+    }
+    ASSERT_EQ(a.slack(p), b.slack(p)) << what << " slack pin " << p;
+  }
+  expect_same_state(a, b, pins, what);
+}
+}  // namespace
+
+TEST(FastEngineEdits, LaunchGroupsAreKeptApartAndFollowEdits) {
+  for (uint32_t seed : {1u, 7u, 99u}) {
+    Bench      base;
+    const auto design = build_layered(base, seed, -1);
+    const auto constraints = grouped_constraints(*base.netlist);
+    fast::Engine engine(*base.netlist, constraints);
+    engine.evaluate();
+    Bench pristine;
+    build_layered(pristine, seed, -1);
+    fast::Engine reference_base(*pristine.netlist, constraints);
+    reference_base.evaluate();
+    const size_t pins = base.netlist->pins();
+
+    // The groups are apart: a flip-flop output has no arrival in the group of the ports and a port none in the
+    // group of the clock; somewhere behind them both arrive, and the two requirements differ.
+    size_t both = 0, differ = 0;
+    for (uint32_t p = 0; p < pins; ++p) {
+      const auto& type = base.netlist->pin_type(p);
+      if (type.name == "Q") {
+        ASSERT_EQ(engine.arrival(p, 0, 0, 1), -inf);
+      }
+      if (std::isfinite(engine.arrival(p, 0, 0, 0)) && std::isfinite(engine.arrival(p, 0, 0, 1))) {
+        ++both;
+        differ += engine.required(p, 0, 0, 0) != engine.required(p, 0, 0, 1);
+      }
+    }
+    EXPECT_GT(both, 0u);
+    EXPECT_GT(differ, 0u);
+    // The endpoint that is excluded for the ports has no requirement in their group, and one in the other.
+    const auto excluded = constraints.endpoint_relations.front().pin;
+    EXPECT_EQ(engine.required(excluded, 0, 0, 1), inf);
+    // The same design with one group is more optimistic for the ports (the whole period) and never less for
+    // the flip-flops: the worst slack with groups is not larger.
+    fast::Engine single(*pristine.netlist, layered_constraints());
+    single.evaluate();
+    EXPECT_LE(engine.report().wns_ps, single.report().wns_ps);
+
+    const auto start = engine.mark();
+    for (const int gate : {3, 17, 22, 38}) {
+      Bench edited;
+      build_layered(edited, seed, gate);
+      fast::Engine fresh(*edited.netlist, constraints);
+      fresh.evaluate();
+      const auto cell   = design.gates[gate];
+      const bool is_xor = base.types.type(base.netlist->type_of(cell)).name == "XOR2";
+      const auto m      = engine.mark();
+      engine.resize_cell(cell, base.types.find(is_xor ? "XOR2B" : "INV2"));
+      EXPECT_NEAR(engine.wns(), fresh.report().wns_ps, 1e-3) << "seed " << seed << " gate " << gate;
+      EXPECT_NEAR(engine.tns(), fresh.report().tns_ps, 1e-2);
+      expect_same_groups(engine, fresh, pins, "after resize");
+      engine.rollback(m);
+      expect_same_groups(engine, reference_base, pins, "after rollback");
+    }
+    for (const int gate : {3, 17, 22}) {
+      const auto cell   = design.gates[gate];
+      const bool is_xor = base.types.type(base.netlist->type_of(cell)).name == "XOR2";
+      engine.resize_cell(cell, base.types.find(is_xor ? "XOR2B" : "INV2"));
+    }
+    (void)engine.wns();
+    engine.rollback(start);
+    expect_same_groups(engine, reference_base, pins, "after the full rollback");
+    engine.end_edits();
+    expect_same_groups(engine, reference_base, pins, "after end_edits");
+    // The worst path is the path of one group, start to end.
+    const auto path = engine.worst_path();
+    ASSERT_GE(path.size(), 2u);
+    for (size_t i = 1; i < path.size(); ++i) {
+      EXPECT_GE(path[i].arrival_ps, path[i - 1].arrival_ps);
+    }
+  }
+}
+
 TEST(FastEngineEdits, ResizeToAnotherInterfaceThrowsAndChangesNothing) {
   Bench        b;
   const auto   design = build_layered(b, 5, -1);

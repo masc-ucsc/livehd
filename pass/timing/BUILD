@@ -13,6 +13,9 @@ cc_library(
         "engine.cpp",
         "netlist.cpp",
         "sdc.cpp",
+        "sdc_resolve.cpp",
+        "sdc_tcl.cpp",
+        "sdc_tcl.hpp",
         "wire.cpp",
     ],
     hdrs = [
@@ -26,6 +29,18 @@ cc_library(
     includes = ["."],
     visibility = ["//visibility:public"],
     deps = ["//pass/liberty:timing_model"],
+)
+
+# The constraint reader also feeds pass.opentimer, whose reuse cache is salted by these sources.
+filegroup(
+    name = "sdc_srcs",
+    srcs = [
+        "sdc.cpp",
+        "sdc.hpp",
+        "sdc_tcl.cpp",
+        "sdc_tcl.hpp",
+    ],
+    visibility = ["//pass/opentimer:__pkg__"],
 )
 
 # The binding of a flat mapped graph to the numeric netlist.

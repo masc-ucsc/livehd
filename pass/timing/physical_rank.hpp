@@ -88,7 +88,8 @@ public:
 
   // Transient edits on top of the last evaluate(), answered incrementally by the engine (see Engine's edit
   // sessions). Valid after an evaluate(); the next rank() or evaluate() discards what is pending. The hold slack
-  // of a pin is not kept up to date by edits (Pin_timing::hold_slack is empty), and the fanout limit is not checked.
+  // of a pin is not kept up to date by edits (Pin_timing::hold_slack is empty). The electrical checks are the Liberty
+  // slew and capacitance limits and the fanout limit of the SDC (set_max_fanout on the design).
   [[nodiscard]] livehd::timing::Whatif& whatif();
 
   [[nodiscard]] const Statistics&  statistics() const { return stats_; }
@@ -133,7 +134,7 @@ private:
   Options                    options_;
   std::vector<liberty::timing::Library> libraries_;
   Cell_types                 types_;
-  Sdc                        sdc_;
+  Sdc_units                  sdc_units_;
   std::unique_ptr<Bound_graph> bound_;
   const hhds::Graph*         bound_graph_ = nullptr;
   uint64_t                   bound_epoch_ = 0;
@@ -141,7 +142,8 @@ private:
   Constraints                constraints_;
   std::set<std::string>      engine_cuts_;
   // Views into the graph (valid while it is bound): instance name -> cell, bare port name -> its pin.
-  absl::flat_hash_map<std::string_view, uint32_t> cell_index_, port_index_;
+  absl::flat_hash_map<std::string_view, uint32_t> port_index_;
+  std::unique_ptr<Bound_names>                    names_;
   Mapping                    mapping_;
   bool                       mapping_bound_ = false;
   Statistics                 stats_;

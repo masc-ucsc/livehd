@@ -4,6 +4,10 @@
 //   fast_timing_probe --lg DIR --top NAME --corner NAME=FILE[,FILE...] [--corner ...]
 //                     --clock-port PORT --period-ps P [--uncertainty-ps U] [--no-input-launch]
 //                     [--input-slew-ps S] [--output-delay-ps D --output-load-ff L] [--opentimer-json FILE]
+//   fast_timing_probe --lg DIR --top NAME --corner NAME=FILE[,FILE...] --sdc FILE
+//
+// With --sdc the constraints come from the SDC file (run against the bound netlist, in the units of the first
+// corner) instead of the clock and delay options, and what the reader made of it is printed first.
 //
 // DIR is the lg: library of a mapped netlist (`lhd synth --emit-dir lg:DIR`). The hierarchy under NAME is
 // flattened in memory. A corner is one or more Liberty files, concatenated (a `.gz` goes through zcat).
@@ -64,7 +68,7 @@ double rss_mb() {
 }  // namespace
 
 int main(int argc, char** argv) {
-  std::string              lg, top, clock_port, opentimer_json;
+  std::string              lg, top, clock_port, opentimer_json, sdc_file;
   double                   period = 0, uncertainty = 0, input_slew = 0, output_delay = 0, output_load = 0;
   bool                     input_launch = true, outputs = false;
   std::vector<std::string> corner_specs;
@@ -101,12 +105,14 @@ int main(int argc, char** argv) {
       input_launch = false;
     } else if (arg == "--opentimer-json") {
       opentimer_json = next();
+    } else if (arg == "--sdc") {
+      sdc_file = next();
     } else {
       std::fprintf(stderr, "unknown argument %s\n", arg.c_str());
       return 2;
     }
   }
-  if (lg.empty() || top.empty() || corner_specs.empty() || clock_port.empty() || period <= 0) {
+  if (lg.empty() || top.empty() || corner_specs.empty() || (sdc_file.empty() && (clock_port.empty() || period <= 0))) {
     std::fprintf(stderr, "usage: see the head of fast_timing_probe.cpp\n");
     return 2;
   }
@@ -165,14 +171,47 @@ int main(int argc, char** argv) {
   const double rss_bound = rss_mb();
 
   fast::Constraints constraints;
-  constraints.clocks.push_back({"clk", clock_port, static_cast<float>(period), static_cast<float>(uncertainty), 0.f});
-  constraints.default_input_slew_ps = static_cast<float>(input_slew);
-  for (const auto& port : bound.netlist->ports()) {
-    if (port.input && port.name != clock_port && !input_launch) {
-      constraints.cut_pins.push_back(bound.netlist->pin(port.cell, 0u));
+  if (!sdc_file.empty()) {
+    // The constraint file, run against this netlist, in the units of the first corner.
+    const fast::Bound_names design_names(bound);
+    constraints = fast::read_constraints(read_file(sdc_file), {libraries.front().time_unit_ps, libraries.front().capacitance_unit_ff},
+                                         *bound.netlist, &design_names);
+    period = constraints.clocks.empty() ? 0 : constraints.clocks.front().period_ps;
+    std::printf("sdc: %zu clocks, %zu input and %zu output constraints, %zu cut pins, %zu excluded endpoints, %u launch groups, "
+                "%zu endpoint relations (false paths to pins, set_max_delay), max fanout %.0f\n",
+                constraints.clocks.size(),
+                constraints.inputs.size(),
+                constraints.outputs.size(),
+                constraints.cut_pins.size(),
+                constraints.excluded_endpoints.size(),
+                constraints.groups,
+                constraints.endpoint_relations.size(),
+                constraints.max_fanout);
+    for (size_t c = 0; c < constraints.clocks.size(); ++c) {
+      const auto& clock = constraints.clocks[c];
+      std::printf("  clock %s: period %.1f ps, %zu source pins, launch group %u; setup relation from each group:",
+                  clock.name.c_str(),
+                  clock.period_ps,
+                  clock.source_pins.size(),
+                  clock.group);
+      for (uint32_t g = 0; g < constraints.groups; ++g) {
+        std::printf(" %.1f", constraints.setup_relation_ps.empty() ? clock.period_ps : constraints.setup_relation_ps[g * constraints.clocks.size() + c]);
+      }
+      std::printf("\n");
     }
-    if (!port.input && outputs) {
-      constraints.outputs.push_back({port.name, "", static_cast<float>(output_delay), static_cast<float>(output_load)});
+    for (const auto& line : constraints.unsupported) {
+      std::printf("  sdc unsupported: %s\n", line.c_str());
+    }
+  } else {
+    constraints.clocks.push_back({"clk", clock_port, static_cast<float>(period), static_cast<float>(uncertainty), 0.f});
+    constraints.default_input_slew_ps = static_cast<float>(input_slew);
+    for (const auto& port : bound.netlist->ports()) {
+      if (port.input && port.name != clock_port && !input_launch) {
+        constraints.cut_pins.push_back(bound.netlist->pin(port.cell, 0u));
+      }
+      if (!port.input && outputs) {
+        constraints.outputs.push_back({port.name, "", static_cast<float>(output_delay), static_cast<float>(output_load)});
+      }
     }
   }
   for (const auto& line : bound.unsupported) {
@@ -234,13 +273,21 @@ int main(int argc, char** argv) {
   for (const auto& corner : report.corners) {
     std::printf("  corner %s: wns %.2f ps, tns %.2f ps\n", corner.name.c_str(), corner.wns_ps, corner.tns_ps);
   }
-  if (!report.clocks.empty()) {
-    std::printf("hold: wns %.2f ps, tns %.2f ps; electrical: %zu slew, %zu capacitance violations\n",
-                report.clocks[0].hold_wns_ps,
-                report.clocks[0].hold_tns_ps,
-                report.slew_violations,
-                report.capacitance_violations);
+  for (const auto& clock : report.clocks) {
+    std::printf("  clock %s: %zu endpoints, wns %.2f ps, tns %.2f ps, achievable period %.2f ps; hold wns %.2f ps, tns %.2f ps\n",
+                clock.name.c_str(),
+                clock.endpoints,
+                clock.wns_ps,
+                clock.tns_ps,
+                clock.achievable_period_ps,
+                clock.hold_wns_ps,
+                clock.hold_tns_ps);
   }
+  std::printf("electrical: %zu slew, %zu capacitance, %zu fanout violations; unclocked flip-flops %zu\n",
+              report.slew_violations,
+              report.capacitance_violations,
+              report.fanout_violations,
+              report.unclocked_flops);
   std::printf("unsupported (%zu):\n", report.unsupported.size());
   for (size_t i = 0; i < report.unsupported.size() && i < 8; ++i) {
     std::printf("  %s\n", report.unsupported[i].c_str());

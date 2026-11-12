@@ -252,11 +252,6 @@ stage::Clock_spec stage_timing_clock(const std::string& port, const Eprp_var::Ep
   const double to_ps = liberty_sdc_units(liberty).time_ps;
   spec.name          = match->name;
   spec.period_ps     = *match->period * to_ps;
-  if (match->waveform_unparsed) {
-    throw Lhd_error{"usage",
-                    "synth.place.stage_timing cannot read the SDC clock waveform",
-                    "the domino stage schedule is a fixed T/2; spell -waveform {rise fall} with numbers"};
-  }
   if (match->waveform) {
     spec.waveform_ps = std::array{(*match->waveform)[0] * to_ps, (*match->waveform)[1] * to_ps};
   }

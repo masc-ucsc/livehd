@@ -29,19 +29,15 @@ void Physical_ranker::bind(const std::shared_ptr<hhds::Graph>& graph) {
   bound_         = std::make_unique<Bound_graph>(bind_graph(*graph, types_));
   bound_graph_   = graph.get();
   bound_epoch_   = graph->body_epoch();
-  cell_index_.clear();
+  names_.reset();
   port_index_.clear();
   const auto& netlist = *bound_->netlist;
-  cell_index_.reserve(bound_->cell_node.size());
-  for (uint32_t cell = 0; cell < bound_->cell_node.size(); ++cell) {
-    if (bound_->cell_node[cell].is_valid()) {
-      cell_index_.emplace(bound_->cell_node[cell].get_name(), cell);
-    }
-  }
+  names_ = std::make_unique<Bound_names>(*bound_);
   for (const auto& port : netlist.ports()) {
     port_index_.emplace(port.name, netlist.pin(port.cell, 0u));
   }
-  constraints_ = resolve(sdc_, netlist);
+  // The constraint file is run against this netlist: its object queries and its own checks see these names.
+  constraints_ = read_constraints(options_.sdc_text, sdc_units_, netlist, names_.get());
   ++stats_.binds;
   stats_.bind_seconds += since(start);
 }
@@ -57,8 +53,8 @@ uint32_t Physical_ranker::resolve_label(const Pin_label& label) const {
       return netlist.pin(added->second, label.pin().view());
     }
   }
-  const auto it = cell_index_.find(label.instance().view());
-  return it == cell_index_.end() ? no_index : netlist.pin(it->second, label.pin().view());
+  const auto cell = names_->cell(label.instance().view());
+  return cell == no_index ? no_index : netlist.pin(cell, label.pin().view());
 }
 
 void Physical_ranker::build_engine(const std::set<std::string>& cuts, const physical::Parasitics& rc) {
@@ -474,7 +470,7 @@ livehd::timing::Feedback Physical_ranker::evaluate(const std::shared_ptr<hhds::G
   for (uint32_t cell = 0; cell < netlist.cells(); ++cell) {
     result.area += types.type(netlist.type_of(cell)).area;
   }
-  result.violations              = static_cast<unsigned>(report.slew_violations + report.capacitance_violations);
+  result.violations = static_cast<unsigned>(report.slew_violations + report.capacitance_violations + report.fanout_violations);
   result.electrical_excess       = report.electrical_excess;
   result.electrical_pin_feedback = true;
 
@@ -788,11 +784,11 @@ private:
     if (const auto it = o_.added_cells_.find(instance); it != o_.added_cells_.end()) {
       return it->second;
     }
-    const auto it = o_.cell_index_.find(instance);
-    if (it == o_.cell_index_.end()) {
+    const auto cell = o_.names_->cell(instance);
+    if (cell == no_index) {
       throw std::invalid_argument("what-if instance is not in the timing netlist: " + instance);
     }
-    return it->second;
+    return cell;
   }
   uint32_t type_of(const std::string& master) const {
     const auto type = o_.types_.find(master);
@@ -904,7 +900,7 @@ Physical_ranker::Physical_ranker(Options options) : options_(std::move(options))
   }
   types_ = Cell_types::build(pointers, names);
   options_.engine.true_slack_in_rank = true;  // the placer's consumers read the slack's sign and size
-  sdc_   = read_sdc(options_.sdc_text, {libraries_.front().time_unit_ps, libraries_.front().capacitance_unit_ff});
+  sdc_units_ = {libraries_.front().time_unit_ps, libraries_.front().capacitance_unit_ff};
 }
 
 Physical_ranker::~Physical_ranker() = default;

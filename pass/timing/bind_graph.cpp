@@ -324,4 +324,95 @@ Bound_graph bind_graph(const hhds::Graph& flat, const Cell_types& types) {
   return out;
 }
 
+Bound_names::Bound_names(const Bound_graph& bound) : bound_(bound) {
+  cells_.reserve(bound.cell_node.size());
+  for (uint32_t cell = 0; cell < bound.cell_node.size(); ++cell) {
+    if (bound.cell_node[cell].is_valid()) {
+      cells_.emplace(bound.cell_node[cell].get_name(), cell);
+    }
+  }
+}
+
+uint32_t Bound_names::cell(std::string_view instance) const {
+  if (const auto it = cells_.find(instance); it != cells_.end()) {
+    return it->second;
+  }
+  // A constraint file written against a Yosys netlist names a register by its fine-grain cell,
+  // `path.reg[3]$_DFF_PP0_`; here the flip-flop of that register is the instance `path.reg[3]`.
+  if (instance.size() > 3 && instance.back() == '_') {
+    if (const auto tail = instance.rfind("$_"); tail != std::string_view::npos && tail != 0) {
+      const auto kind = instance.substr(tail + 2, instance.size() - tail - 3);
+      if (!kind.empty() && kind.find_first_not_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_") == std::string_view::npos) {
+        if (const auto it = cells_.find(instance.substr(0, tail)); it != cells_.end()) {
+          return it->second;
+        }
+      }
+    }
+  }
+  return no_index;
+}
+
+void Bound_names::cells(const std::function<void(std::string_view, uint32_t)>& visit) const {
+  for (uint32_t cell = 0; cell < bound_.cell_node.size(); ++cell) {
+    if (bound_.cell_node[cell].is_valid()) {
+      visit(bound_.cell_node[cell].get_name(), cell);
+    }
+  }
+}
+
+void Bound_names::gather_nets() const {
+  if (nets_ready_) {
+    return;
+  }
+  nets_ready_         = true;
+  const auto& netlist = *bound_.netlist;
+  const auto& types   = netlist.types();
+  for (uint32_t cell = 0; cell < bound_.cell_node.size(); ++cell) {
+    const auto& node = bound_.cell_node[cell];
+    if (!node.is_valid()) {
+      continue;
+    }
+    for (const auto& pin : node.out_pins()) {
+      const auto local = types.find_pin(netlist.type_of(cell), declared_name(pin));
+      if (local == no_index) {
+        continue;
+      }
+      nets_.emplace(gu::wire_name(pin), netlist.pin(cell, local));
+    }
+  }
+}
+
+uint32_t Bound_names::net_driver(std::string_view net) const {
+  // The net of a register carries the register's name in an RTL netlist; here that name is the flip-flop
+  // instance, and its net is the one its output drives.
+  if (const auto it = cells_.find(net); it != cells_.end()) {
+    const auto& netlist = *bound_.netlist;
+    const auto  type    = netlist.type_of(it->second);
+    uint32_t    first   = no_index;
+    for (uint32_t local = 0; local < netlist.types().type(type).pin_count; ++local) {
+      const auto pin = netlist.pin(it->second, local);
+      if (netlist.pin_type(pin).direction != Direction::output) {
+        continue;
+      }
+      if (netlist.net_of(pin) != no_index) {
+        return pin;
+      }
+      first = first == no_index ? pin : first;
+    }
+    if (first != no_index) {
+      return first;
+    }
+  }
+  gather_nets();
+  const auto it = nets_.find(net);
+  return it == nets_.end() ? no_index : it->second;
+}
+
+void Bound_names::nets(const std::function<void(std::string_view, uint32_t)>& visit) const {
+  gather_nets();
+  for (const auto& [name, driver] : nets_) {
+    visit(name, driver);
+  }
+}
+
 }  // namespace livehd::timing::fast

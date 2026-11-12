@@ -536,15 +536,16 @@ std::optional<double>              sdc_min_clock_period_ps(const std::string& sd
 // (fF when absent).
 livehd::placement::late::Sdc_units liberty_sdc_units(const std::string& liberty_path);
 // The SDC's clocks: one entry per create_clock or create_generated_clock, in
-// order. `port` is resolved when it is spelled directly, braced or through a
-// known variable; otherwise port_resolved is false. Period and waveform are in
-// SDC time units.
+// order, as the constraint reader of the timers (pass/timing/sdc.hpp) reads the
+// file alone: variables, expressions and lists are evaluated. `port` is
+// resolved when the clock is on one port; a clock on a pin, on several sources
+// or without one (virtual) has port_resolved false. Period and waveform are in
+// SDC time units; the waveform is set when the file gives one.
 struct Sdc_clock {
   std::string                          name, port;
   bool                                 port_resolved = false;
   std::optional<double>                period;
   std::optional<std::array<double, 2>> waveform;  // rise, fall
-  bool                                 waveform_unparsed = false;
 };
 std::vector<Sdc_clock>   sdc_clocks(const std::string& sdc_path);
 // The SDC's one clock: exactly one clock, on one resolved port; nullopt

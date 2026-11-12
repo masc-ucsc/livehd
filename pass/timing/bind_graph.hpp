@@ -6,8 +6,10 @@
 #include <string>
 #include <vector>
 
+#include "absl/container/flat_hash_map.h"
 #include "hhds/graph.hpp"
 #include "netlist.hpp"
+#include "sdc.hpp"
 
 // Binding of a flat, technology-mapped graph to the numeric netlist of the fast timing engine (todo
 // 2q-fasttimer, step B). The graph is the authority on connectivity; the netlist is built from it once per
@@ -32,5 +34,25 @@ struct Bound_graph {
 };
 
 Bound_graph bind_graph(const hhds::Graph& flat, const Cell_types& types);
+
+// The names of a bound graph for the constraint reader: instances by their name in the graph, nets by the name
+// of the pin that drives them (the name the Verilog writer gives the wire: the pin's own name, or the name of
+// its instance). The names are views into the graph, which must stay alive and unchanged; the net names are
+// gathered the first time a net is asked for, so a constraint file without nets costs nothing.
+class Bound_names final : public Design_names {
+public:
+  explicit Bound_names(const Bound_graph& bound);
+  [[nodiscard]] uint32_t cell(std::string_view instance) const override;
+  void                   cells(const std::function<void(std::string_view, uint32_t)>& visit) const override;
+  [[nodiscard]] uint32_t net_driver(std::string_view net) const override;
+  void                   nets(const std::function<void(std::string_view, uint32_t)>& visit) const override;
+
+private:
+  void                                                    gather_nets() const;
+  const Bound_graph&                                      bound_;
+  absl::flat_hash_map<std::string_view, uint32_t>         cells_;
+  mutable bool                                            nets_ready_ = false;
+  mutable absl::flat_hash_map<std::string, uint32_t>      nets_;
+};
 
 }  // namespace livehd::timing::fast

@@ -285,7 +285,10 @@ TEST(LhdOptions, SynthDelayFractionScalesTheSdcClockPeriod) {
     std::ofstream(dir + "/frac_ps.lib") << "library (x) {\n  time_unit : \"1ps\";\n}\n";
     std::ofstream(dir + "/frac_ns.lib") << "library (x) {\n  time_unit : \"1ns\";\n}\n";
     std::ofstream(dir + "/frac_ns.sdc") << "create_clock -name clk -period 0.9 [get_ports clk]\n";
-    std::ofstream(dir + "/frac_bad.sdc") << "create_clock -name clk -period [expr {1 + 2}] [get_ports clk]\n";
+    std::ofstream(dir + "/frac_bad.sdc") << "create_clock -name clk -period $no_such_period [get_ports clk]\n";
+    // The spelling of the benchmark files: the port and the period through variables, a computed waveform.
+    std::ofstream(dir + "/frac_tcl.sdc") << "set clk_name core\nset clk_period [expr {400 + 500}]\nset clk_port [get_ports $clk_name]\n"
+                                         << "create_clock -name $clk_name -period $clk_period -waveform [list 0 [expr $clk_period / 2]] $clk_port\n";
   }
   const auto merged = [&](std::vector<std::pair<std::string, std::string>> sets) {
     lhd::Options opts;
@@ -327,6 +330,25 @@ TEST(LhdOptions, SynthDelayFractionScalesTheSdcClockPeriod) {
   })
                 .at("delay"),
             "360.000");
+  EXPECT_EQ(merged({
+                       {       "synth.sdc",   dir + "/frac_tcl.sdc"},
+                       {   "synth.liberty",    dir + "/frac_ps.lib"},
+                       {"synth.delay_frac",                   "0.5"}
+  })
+                .at("delay"),
+            "450.000");
+  {
+    const auto clocks = lhd::sdc_clocks(dir + "/frac_tcl.sdc");
+    ASSERT_EQ(clocks.size(), 1);
+    EXPECT_EQ(clocks[0].name, "core");
+    EXPECT_EQ(clocks[0].port, "core");
+    EXPECT_TRUE(clocks[0].port_resolved);
+    ASSERT_TRUE(clocks[0].waveform);
+    EXPECT_DOUBLE_EQ((*clocks[0].waveform)[1], 450);
+  }
+  // A period is the number of the file, in double: the domino schedule puts 0.9 ns on a 1e-6 ps grid.
+  EXPECT_EQ(lhd::sdc_clocks(dir + "/frac_ns.sdc").at(0).period.value(), 0.9);
+  EXPECT_EQ(lhd::sdc_min_clock_period_ps(dir + "/frac_ns.sdc", dir + "/frac_ns.lib").value(), 0.9 * 1e3);
   // The SDC unit is the Liberty unit: 0.9 ns is 900 ps.
   EXPECT_EQ(merged({
                        {       "synth.sdc", dir + "/frac_ns.sdc"},

@@ -3298,6 +3298,20 @@ sh_test(
     ],
 )
 
+# 2q-fasttimer: the constraint forms of the HighTide benchmark files (Tcl loops and lists, two clocks with false paths
+# between them, false paths through nets and to pins, a generated clock, a driving cell) through placement with the
+# fast engine and OpenTimer side by side (synth.timing.engine=compare), then on the fast engine alone.
+sh_test(
+    name = "lhd_fast_timing_sdc_smoke",
+    size = "small",
+    timeout = "short",
+    srcs = ["lhd_fast_timing_sdc_smoke.py"],
+    data = [
+        "//inou/lefdef:test_data",
+        "//lhd",
+    ],
+)
+
 # 2i-interact: timeline checkpoints and "replay from here" with edited flags (the process re-executes).
 sh_test(
     name = "lhd_gui_timeline_smoke",

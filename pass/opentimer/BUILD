@@ -38,6 +38,7 @@ genrule(
     name = "sta_salt",
     srcs = [
         ":timer_srcs",
+        "//pass/timing:sdc_srcs",
         "//pass/partition:partition_srcs",
         "//pass/liberty:liberty_dff_srcs",
         "//:MODULE.bazel",
@@ -72,6 +73,7 @@ cc_library(
         "//pass/common:pass",
         "//pass/partition:pass_partition",
         "//pass/semdiff:semdiff",
+        "//pass/timing:fast_timing",
         "@hhds//hhds:graph",
         "@hlop//hlop:hlop",
         "@opentimer",

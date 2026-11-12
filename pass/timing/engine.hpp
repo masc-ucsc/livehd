@@ -1,11 +1,13 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <span>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "netlist.hpp"
@@ -28,26 +30,67 @@ namespace livehd::timing::fast {
 
 struct Clock {
   std::string name;
-  std::string port;  // the input port that is the ideal clock source
+  std::string port;  // the input port that is the ideal clock source (used when source_pins is empty)
   float       period_ps      = 1000;
   float       uncertainty_ps = 0;  // taken off every setup requirement of the clock
   float       slew_ps        = 0;  // the ideal transition at every clock pin
+  // The pins the ideal clock starts at: port pins or the pins of cells (a clock made on the output of a macro,
+  // a generated clock on a divider or on an output port). The network of a clock stops at a source pin of
+  // another clock. Empty with an empty `port`: a virtual clock, which only references IO delays.
+  std::vector<uint32_t> source_pins;
+  uint32_t              group = 0;  // the launch group of the flip-flops this clock clocks
 };
 struct Input_delay {
   std::string port, clock;  // an empty clock is the first one
   float       delay_ps = 0, slew_ps = 0;
+  uint32_t    group = 0;                  // the launch group
+  bool        late = true, early = true;  // which walks the port launches (-max only: late; -min only: early)
+  float       early_delay_ps = 0;         // used when `early_set`; otherwise the hold walk starts at delay_ps
+  bool        early_set      = false;
+  // set_driving_cell: the port is driven by this output pin of a cell of this type. The arrival grows by the
+  // cell's delay at the load of the port's net less its delay without load, and the slew is the cell's output
+  // slew at that load (slew_ps is then the transition at the input of the driving cell).
+  uint32_t    drive_type = no_index, drive_pin = 0;
 };
 struct Output_delay {
   std::string port, clock;
   float       delay_ps = 0, load_ff = 0;
+  bool        check    = true;  // false: only the load of the port (a set_load without a set_output_delay)
+  // false: the port has no output delay against a clock; it is an endpoint only for the groups an endpoint
+  // relation (set_max_delay) names, with nothing but that delay as its requirement.
+  bool        clocked  = true;
+};
+// The setup relation of one endpoint for the arrivals of one launch group (no_index: of every group), in place of
+// the relation between the group and the capture clock. +inf: not checked, for hold neither (a false path from
+// some start points to this endpoint). A delay: set_max_delay, the time the path may take from its launch edge
+// (the setup time or the output delay and the uncertainty still come off; hold is unchanged). A relation between
+// clocks that is +inf (a false path, asynchronous groups) stays unchecked whatever a delay says.
+struct Endpoint_relation {
+  uint32_t pin = 0, group = no_index;
+  float    setup_ps = std::numeric_limits<float>::infinity();
 };
 struct Constraints {
   std::vector<Clock>        clocks;
-  std::vector<Input_delay>  inputs;   // an input port without an entry: arrival 0, default slew
+  std::vector<Input_delay>  inputs;   // an input port without an entry: arrival 0, default slew, default_input_group
   std::vector<Output_delay> outputs;  // an output port without an entry is not an endpoint
   float                     default_input_slew_ps = 0;
   // False paths: no arrival or required time passes through a cut pin, and an excluded endpoint has no check.
   std::vector<uint32_t>     cut_pins, excluded_endpoints;
+  // Launch groups. Every start point (the flip-flops of a clock, an input port) launches in one group, and the
+  // arrivals of the groups are kept apart, so a check can depend on where the path started: a false path or an
+  // asynchronous relation between two clocks, two clocks of different periods, a false path from some ports to
+  // some pins. One group (the default) is the engine without any of this, at the same cost.
+  uint32_t                  groups              = 1;
+  uint32_t                  default_input_group = 0;
+  // [group * clocks + capture clock]: for setup, the time from the launch edge of the group to the capture edge
+  // that checks it (the period, for one clock); +inf: not checked. Empty: the period of the capture clock.
+  std::vector<float>        setup_relation_ps;
+  // Same layout, for hold: the capture edge that must not catch the data, relative to the launch edge (0 for one
+  // clock, never positive); +inf: not checked. Empty: 0.
+  std::vector<float>        hold_relation_ps;
+  std::vector<Endpoint_relation> endpoint_relations;
+  // set_max_fanout on the design: the most sinks a driver may have; 0: no limit.
+  float                     max_fanout = 0;
   // Items the constraint reader could not honor; copied into the report so that nothing is dropped silently.
   std::vector<std::string>  unsupported;
 };
@@ -88,13 +131,14 @@ struct Report {
   std::vector<Corner_report> corners;
   float                      wns_ps = 0, tns_ps = 0;
   size_t                     endpoints = 0, unclocked_endpoints = 0, unclocked_flops = 0;
-  size_t                     slew_violations = 0, capacitance_violations = 0;
+  size_t                     slew_violations = 0, capacitance_violations = 0, fanout_violations = 0;
+  size_t                     groups = 1;
   double                     electrical_excess = 0;
   bool                       hold_computed     = false;
   std::vector<std::string>   unsupported;
 };
 
-// A pin beyond its electrical limits after evaluate(): how many limits (slew, capacitance) and the summed excess ratio.
+// A pin beyond its electrical limits after evaluate(): how many limits (slew, capacitance, fanout) and the summed excess ratio.
 struct Electrical_pin {
   uint32_t pin   = 0;
   uint8_t  count = 0;
@@ -120,16 +164,73 @@ public:
 
   [[nodiscard]] const Report& report() const { return report_; }
   [[nodiscard]] size_t        corners() const { return corners_; }
-  // Per pin. Arrival -inf: not reached; required +inf: no endpoint downstream.
-  [[nodiscard]] float         arrival(uint32_t pin, size_t corner, unsigned t) const { return arrival_[index(pin, corner, t)]; }
-  [[nodiscard]] float         slew(uint32_t pin, size_t corner, unsigned t) const { return slew_[index(pin, corner, t)]; }
-  [[nodiscard]] float         required(uint32_t pin, size_t corner, unsigned t) const { return required_[index(pin, corner, t)]; }
-  // The hold walk's state exists after evaluate(); before it, +inf and 0.
-  [[nodiscard]] float         early_arrival(uint32_t pin, unsigned t) const {
-    return early_arrival_.empty() ? std::numeric_limits<float>::infinity() : early_arrival_[pin * 2 + t];
+  [[nodiscard]] size_t        groups() const { return groups_; }
+  // Per pin. Arrival -inf: not reached; required +inf: no endpoint downstream. With several launch groups these are
+  // the latest arrival, the largest slew and the earliest requirement over the groups (the slack of a pin is
+  // `slack`, which pairs each arrival with the requirement of its own group); the overloads with a group are exact.
+  [[nodiscard]] float         arrival(uint32_t pin, size_t corner, unsigned t) const {
+    float v = arrival_[index(pin, corner, t)];
+    for (size_t g = 1; g < groups_; ++g) {
+      v = std::max(v, arrival_[index(pin, g * corners_ + corner, t)]);
+    }
+    return v;
   }
-  [[nodiscard]] float         early_slew(uint32_t pin, unsigned t) const { return early_slew_.empty() ? 0.f : early_slew_[pin * 2 + t]; }
-  [[nodiscard]] uint16_t      depth(uint32_t pin, size_t corner, unsigned t) const { return depth_[index(pin, corner, t)]; }
+  [[nodiscard]] float         slew(uint32_t pin, size_t corner, unsigned t) const {
+    float v = slew_[index(pin, corner, t)];
+    for (size_t g = 1; g < groups_; ++g) {
+      v = std::max(v, slew_[index(pin, g * corners_ + corner, t)]);
+    }
+    return v;
+  }
+  [[nodiscard]] float         required(uint32_t pin, size_t corner, unsigned t) const {
+    float v = required_[index(pin, corner, t)];
+    for (size_t g = 1; g < groups_; ++g) {
+      v = std::min(v, required_[index(pin, g * corners_ + corner, t)]);
+    }
+    return v;
+  }
+  [[nodiscard]] float arrival(uint32_t pin, size_t corner, unsigned t, size_t group) const {
+    return arrival_[index(pin, group * corners_ + corner, t)];
+  }
+  [[nodiscard]] float required(uint32_t pin, size_t corner, unsigned t, size_t group) const {
+    return required_[index(pin, group * corners_ + corner, t)];
+  }
+  // The hold walk's state exists after evaluate(); before it, +inf and 0. The earliest over the groups.
+  [[nodiscard]] float         early_arrival(uint32_t pin, unsigned t) const {
+    float v = std::numeric_limits<float>::infinity();
+    if (!early_arrival_.empty()) {
+      for (size_t g = 0; g < groups_; ++g) {
+        v = std::min(v, early_arrival_[(pin * groups_ + g) * 2 + t]);
+      }
+    }
+    return v;
+  }
+  [[nodiscard]] float         early_arrival(uint32_t pin, unsigned t, size_t group) const {
+    return early_arrival_.empty() ? std::numeric_limits<float>::infinity() : early_arrival_[(pin * groups_ + group) * 2 + t];
+  }
+  [[nodiscard]] float         early_slew(uint32_t pin, unsigned t) const {
+    float v = 0.f;
+    if (!early_slew_.empty()) {
+      v = std::numeric_limits<float>::infinity();
+      for (size_t g = 0; g < groups_; ++g) {
+        if (early_arrival_[(pin * groups_ + g) * 2 + t] != std::numeric_limits<float>::infinity()) {
+          v = std::min(v, early_slew_[(pin * groups_ + g) * 2 + t]);
+        }
+      }
+      v = v == std::numeric_limits<float>::infinity() ? 0.f : v;
+    }
+    return v;
+  }
+  // The logic depth of the latest arrival.
+  [[nodiscard]] uint16_t      depth(uint32_t pin, size_t corner, unsigned t) const {
+    size_t best = index(pin, corner, t);
+    for (size_t g = 1; g < groups_; ++g) {
+      if (const auto at = index(pin, g * corners_ + corner, t); arrival_[at] > arrival_[best]) {
+        best = at;
+      }
+    }
+    return depth_[best];
+  }
   // Setup slack over the setup corners and both transitions; +inf when no path passes the pin.
   [[nodiscard]] float         slack(uint32_t pin) const;
   [[nodiscard]] float         criticality(uint32_t pin) const { return criticality_[pin]; }
@@ -198,10 +299,23 @@ private:
     uint32_t pin   = 0;
     uint32_t clock = 0;
     bool     port  = false;  // a primary output (otherwise the data pin of a flip-flop)
+    bool     unclocked = false;  // a primary output without an output delay: checked only by an endpoint relation
   };
-  [[nodiscard]] size_t index(uint32_t pin, size_t corner, unsigned t) const {
-    return (static_cast<size_t>(pin) * corners_ + corner) * 2 + t;
+  // The state of a pin is kept per slot: a Liberty corner in a launch group (slot = group * corners + corner).
+  [[nodiscard]] size_t index(uint32_t pin, size_t slot, unsigned t) const {
+    return (static_cast<size_t>(pin) * slots_ + slot) * 2 + t;
   }
+  [[nodiscard]] size_t path_index(uint32_t pin, size_t group, unsigned t) const {
+    return (static_cast<size_t>(pin) * groups_ + group) * 2 + t;
+  }
+  [[nodiscard]] float setup_relation(size_t group, size_t clock) const;
+  [[nodiscard]] float hold_relation(size_t group, size_t clock) const;
+  struct Seed {
+    float arrival = 0, slew = 0;
+  };
+  [[nodiscard]] Seed  input_seed(uint32_t port_cell, size_t corner, unsigned t, bool early) const;
+  [[nodiscard]] uint32_t input_group(uint32_t port_cell) const;
+  [[nodiscard]] double   fanout_excess(uint32_t pin) const;
 
   void                prepare();
   void                mark_clock_network();
@@ -220,6 +334,7 @@ private:
   void                check_hold();
   void                check_electrical();
   void                electrical_excess(uint32_t pin, double& slew_excess, double& cap_excess) const;
+  void                mark_start_points();
   [[nodiscard]] float wire_delay(uint32_t pin, size_t corner) const;
   [[nodiscard]] float net_load(uint32_t net, size_t corner, bool early) const;
 
@@ -227,7 +342,7 @@ private:
   const Cell_types& types_;
   Constraints       constraints_;
   Options           options_;
-  size_t            corners_ = 0, hold_corner_ = 0;
+  size_t            corners_ = 0, hold_corner_ = 0, groups_ = 1, slots_ = 0;
   Wire_model        wire_;
 
   // Per pin.
@@ -240,7 +355,7 @@ private:
   std::vector<float>       load_, early_load_;
   std::vector<Electrical_pin> electrical_pins_;
   std::vector<uint32_t>    port_input_;  // per cell: the index of its input constraint, no_index without one
-  // Delay of every timed arc of every cell: [cell block][arc][corner][combo].
+  // Delay of every timed arc of every cell: [cell block][arc][slot][combo].
   std::vector<float>       arc_delay_;
   std::vector<uint32_t>    cell_base_, arc_offset_;  // arc_offset_: per arc of the type table, in floats per corner
   std::vector<uint32_t>    type_block_;
@@ -248,13 +363,15 @@ private:
   std::vector<float>       port_load_, port_delay_;
   std::vector<Endpoint>    endpoints_;
   std::vector<float>       endpoint_slack_, endpoint_path_slack_;  // worst setup corner; the path corner
-  std::vector<uint8_t>     endpoint_path_transition_;
+  std::vector<uint8_t>     endpoint_path_transition_, endpoint_path_group_;
+  std::vector<float>       endpoint_override_;    // [endpoint][group]: its Endpoint_relation; NaN without one
+  std::vector<float>       before_;               // scratch of settle()
   std::vector<float>       clock_wns_;  // [clock * corners + corner]
   std::vector<uint8_t>     cut_, excluded_;
   bool                     required_rebased_ = false;
   bool                     rebased_          = false;  // the requirements the endpoints were last seeded with
   static constexpr size_t  no_endpoint       = ~size_t{0};
-  std::vector<float>       endpoint_required_;  // [endpoint][corner][transition], as seeded
+  std::vector<float>       endpoint_required_;  // [endpoint][slot][transition], as seeded
   // The journal of an edit session (see mark/rollback): every stored value keeps its old one.
   enum class Undo_kind : uint8_t {
     arrival, slew, required, depth, predecessor, arc_delay, load, wire_cap, wire_delay, wire_slew, endpoint_required,

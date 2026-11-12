@@ -9,13 +9,15 @@
 #include <fstream>
 #include <iostream>
 #include <map>
-#include <regex>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
+#include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/strings/str_split.h"
+#include "pass/timing/sdc.hpp"
 #include "str_tools.hpp"
 
 static Pass_plugin sample("pass_opentimer", Pass_opentimer::setup);
@@ -367,203 +369,112 @@ bool sdc_number(const std::string& t, float& out) {
   return true;
 }
 
-// Restricted Tcl substitutions used by ordinary generated SDCs. Port selectors
-// remain symbolic for the timing reader; arbitrary Tcl commands are not executed.
-class Sdc_expression {
-  // Tcl `/` on two integers floors; track integer-ness so `[expr 5/2]` is 2.
-  struct Num {
-    double v;
-    bool   is_int;
-  };
-  const char* cursor;
-  unsigned    depth = 0;
-  void        space() {
-    while (std::isspace(static_cast<unsigned char>(*cursor))) {
-      ++cursor;
+// The timing graph as the constraint reader queries it. A port is named as an SDC names it: Pin_tracker
+// calls bit zero of a bus by the base name and the later bits `base.N`, which is `base[N]` here (a graph that
+// already has literal bracket names keeps them). The launch and capture points the pass adds for state
+// elements are not ports of the design. An instance pin is `instance/pin`, `instance:pin` in the timer.
+class Timer_design final : public livehd::timing::fast::Sdc_design {
+public:
+  Timer_design(const ot::Timer& timer, const std::map<std::string, std::string>& start_clocks,
+               const std::map<std::string, std::string>& end_clocks)
+      : timer_(timer) {
+    const auto add = [&](const auto& ports, const auto& hidden, bool input) {
+      for (const auto& [name, port] : ports) {
+        (void)port;
+        if (hidden.contains(name)) {
+          continue;
+        }
+        std::string spelled = name;
+        if (const auto dot = name.rfind('.'); dot != std::string::npos && dot + 1 < name.size()
+                                              && name.find_first_not_of("0123456789", dot + 1) == std::string::npos
+                                              && ports.contains(name.substr(0, dot))) {
+          spelled = name.substr(0, dot) + "[" + name.substr(dot + 1) + "]";
+        } else if (ports.contains(name + ".1")) {
+          spelled = name + "[0]";
+        }
+        ports_.emplace_back(std::move(spelled), input);
+      }
+    };
+    add(timer.primary_inputs(), start_clocks, true);
+    add(timer.primary_outputs(), end_clocks, false);
+  }
+  void ports(const std::function<void(std::string_view, bool)>& visit) const override {
+    for (const auto& [name, input] : ports_) {
+      visit(name, input);
     }
   }
-  Num atom() {
-    space();
-    if (++depth > 64) {
-      throw std::runtime_error("SDC expression nesting exceeds 64");
+  void pins(const std::function<void(std::string_view, std::string_view)>& visit) const override {
+    for (const auto& [key, pin] : timer_.pins()) {
+      (void)pin;
+      if (const auto colon = key.rfind(':'); colon != std::string::npos) {
+        visit(std::string_view(key).substr(0, colon), std::string_view(key).substr(colon + 1));
+      }
     }
-    Num value{0, false};
-    if (*cursor == '+' || *cursor == '-') {
-      const bool minus = *cursor++ == '-';
-      value            = atom();
-      if (minus) {
-        value.v = -value.v;
-      }
-    } else if (*cursor == '(') {
-      ++cursor;
-      value = sum();
-      space();
-      if (*cursor++ != ')') {
-        throw std::runtime_error("unclosed SDC expression");
-      }
-    } else {
-      char* end = nullptr;
-      value.v   = std::strtod(cursor, &end);
-      if (cursor == end) {
-        throw std::runtime_error("unsupported SDC expression operand");
-      }
-      std::string_view token(cursor, static_cast<size_t>(end - cursor));
-      const bool       hex = token.size() > 2 && token[0] == '0' && (token[1] == 'x' || token[1] == 'X');
-      if (hex) {
-        token.remove_prefix(2);
-      }
-      value.is_int
-          = !token.empty() && token.find_first_not_of(hex ? "0123456789abcdefABCDEF" : "0123456789") == std::string_view::npos;
-      cursor = end;
-    }
-    --depth;
-    return value;
   }
-  Num product() {
-    Num value = atom();
-    space();
-    while (*cursor == '*' || *cursor == '/') {
-      const char op  = *cursor++;
-      const Num  rhs = atom();
-      if (op == '/' && rhs.v == 0) {
-        throw std::runtime_error("division by zero in SDC expression");
-      }
-      const bool both_int = value.is_int && rhs.is_int;
-      value.v             = op == '*' ? value.v * rhs.v : both_int ? std::floor(value.v / rhs.v) : value.v / rhs.v;
-      value.is_int        = both_int;
-      space();
+  bool has_pin(std::string_view instance, std::string_view pin) const override {
+    if (timer_.pins().contains(instance.empty() ? std::string(pin) : std::string(instance) + ":" + std::string(pin))) {
+      return true;
     }
-    return value;
+    const auto gate = gate_of(instance);
+    return !gate.empty() && timer_.pins().contains(gate + ":" + std::string(pin));
   }
-  Num sum() {
-    Num value = product();
-    space();
-    while (*cursor == '+' || *cursor == '-') {
-      const char op  = *cursor++;
-      const Num  rhs = product();
-      value.v        = op == '+' ? value.v + rhs.v : value.v - rhs.v;
-      value.is_int   = value.is_int && rhs.is_int;
-      space();
+  void nets(const std::function<void(std::string_view)>& visit) const override {
+    for (const auto& [name, net] : timer_.nets()) {
+      (void)net;
+      visit(name);
     }
-    return value;
+  }
+  // The net of a register carries the register's name in an RTL netlist; here that name is its instance.
+  bool has_net(std::string_view name) const override { return timer_.nets().contains(std::string(name)) || !gate_of(name).empty(); }
+  void cells(const std::function<void(std::string_view)>& visit) const override {
+    for (const auto& [name, gate] : timer_.gates()) {
+      (void)gate;
+      visit(name);
+    }
+  }
+  bool               has_cell(std::string_view name) const override { return !gate_of(name).empty(); }
+  // The command handlers below resolve names themselves and have their own rule for a missing one.
+  [[nodiscard]] bool keep_unmatched() const override { return true; }
+
+private:
+  // The gate an instance name of a constraint file means: the gate of that name, or the one gate whose name is
+  // that plus the node suffix the pass adds (`reg[3]__n412`). A file written against a Yosys netlist names a
+  // register by its fine-grain cell, `reg[3]$_DFF_PP0_`: the gate of the register is `reg[3]`.
+  [[nodiscard]] std::string gate_of(std::string_view instance) const {
+    if (instance.empty()) {
+      return {};
+    }
+    if (timer_.gates().contains(std::string(instance))) {
+      return std::string(instance);
+    }
+    if (!indexed_) {
+      indexed_ = true;
+      for (const auto& [name, gate] : timer_.gates()) {
+        (void)gate;
+        if (const auto tail = name.rfind("__n"); tail != std::string::npos && tail != 0 && tail + 3 < name.size()
+                                                 && name.find_first_not_of("0123456789", tail + 3) == std::string::npos) {
+          // Two gates of one base name are no answer to either.
+          const auto [it, fresh] = by_base_.emplace(name.substr(0, tail), name);
+          if (!fresh) {
+            it->second.clear();
+          }
+        }
+      }
+    }
+    if (const auto it = by_base_.find(std::string(instance)); it != by_base_.end()) {
+      return it->second;
+    }
+    if (const auto tail = instance.rfind("$_"); tail != std::string_view::npos && tail != 0 && instance.back() == '_') {
+      return gate_of(instance.substr(0, tail));
+    }
+    return {};
   }
 
-public:
-  explicit Sdc_expression(const std::string& text) : cursor(text.c_str()) {}
-  double value() {
-    const double v = sum().v;
-    space();
-    if (*cursor || !std::isfinite(v)) {
-      throw std::runtime_error("unsupported or nonfinite SDC expression");
-    }
-    return v;
-  }
+  const ot::Timer&                                     timer_;
+  std::vector<std::pair<std::string, bool>>           ports_;
+  mutable bool                                         indexed_ = false;
+  mutable absl::flat_hash_map<std::string, std::string> by_base_;
 };
-// Net `{` minus `}` of one Tcl line, ignoring braces that are backslash-escaped or inside double quotes.
-int brace_delta(std::string_view line) {
-  int  delta = 0;
-  bool quote = false;
-  for (size_t i = 0; i < line.size(); ++i) {
-    const char c = line[i];
-    if (c == '\\') {
-      ++i;
-    } else if (c == '"') {
-      quote = !quote;
-    } else if (!quote && c == '{') {
-      ++delta;
-    } else if (!quote && c == '}') {
-      --delta;
-    }
-  }
-  return delta;
-}
-std::string sdc_expand(std::string_view line, const std::map<std::string, std::string>& variables) {
-  std::string text;
-  // Tcl does not substitute inside {...}; only expr's own braced argument is
-  // evaluated with substitution (`[expr {4.0 * $cap}]`).
-  unsigned    depth      = 0;
-  bool        expr_group = false;
-  for (size_t i = 0; i < line.size();) {
-    if (line[i] == '{' && depth++ == 0) {
-      const auto last = text.find_last_not_of(" \t\r");
-      expr_group      = last != std::string::npos && last >= 4 && last + 1 < text.size() && text.compare(last - 3, 4, "expr") == 0
-                        && text[last - 4] == '[';
-    } else if (line[i] == '}' && depth > 0 && --depth == 0) {
-      expr_group = false;
-    }
-    if (line[i] != '$' || (depth > 0 && !expr_group)) {
-      text += line[i++];
-      continue;
-    }
-    const bool braces = i + 1 < line.size() && line[i + 1] == '{';
-    const auto begin  = i + (braces ? 2 : 1);
-    auto       end    = begin;
-    while (end < line.size() && (std::isalnum(static_cast<unsigned char>(line[end])) || line[end] == '_')) {
-      ++end;
-    }
-    if (end == begin || (braces && (end == line.size() || line[end] != '}'))) {
-      throw std::runtime_error("unsupported SDC variable reference");
-    }
-    const std::string name(line.substr(begin, end - begin));
-    const auto        value = variables.find(name);
-    if (value == variables.end()) {
-      throw std::runtime_error("undefined SDC variable '" + name + "'");
-    }
-    text += value->second;
-    i     = end + (braces ? 1 : 0);
-    if (text.size() > 1024 * 1024) {
-      throw std::runtime_error("SDC substitution exceeds one megabyte");
-    }
-  }
-  for (size_t at = text.find("[expr "); at != std::string::npos; at = text.find("[expr ", at)) {
-    const auto end = text.find(']', at);
-    if (end == std::string::npos) {
-      throw std::runtime_error("unclosed SDC expr command");
-    }
-    auto       expression = text.substr(at + 6, end - at - 6);
-    const auto first      = expression.find_first_not_of(" \t\r");
-    const auto last       = expression.find_last_not_of(" \t\r");
-    if (first == std::string::npos) {
-      throw std::runtime_error("empty SDC expression");
-    }
-    expression = expression.substr(first, last - first + 1);
-    if ((expression.front() == '{' && expression.back() == '}') || (expression.front() == '"' && expression.back() == '"')) {
-      expression = expression.substr(1, expression.size() - 2);
-    }
-    text.replace(at, end - at + 1, std::format("{:.9g}", Sdc_expression(expression).value()));
-  }
-  // HighTide/ORFS excludes clock ports from input/output collections using this Tcl list-search idiom,
-  // alone or nested once per excluded port:
-  //   [lsearch -inline -all -not [lsearch -inline -all -not [all_inputs] a] b]
-  // Preserve an exact exclusion selector rather than evaluating Tcl or silently
-  // replacing a general list search with all_inputs -no_clocks. Tcl's default
-  // pattern is a glob, so without -exact the name must have no glob characters
-  // to be the same thing. The innermost search is rewritten first, so an outer
-  // one then sees the `[all_inputs -exclude_exact ...]` it extends.
-  static const std::regex exclusion(
-      R"(\[lsearch\s+((?:-[a-z]+\s+){3,4})(\[all_(?:inputs|outputs)(?:\s+-exclude_exact\s+[^\s\[\]{}]+)*)\]\s+(?:\[get_ports\s+([^\s\[\]{}]+)\]|([^\s\[\]{}]+))\s*\])");
-  for (size_t at = text.rfind("[lsearch "); at != std::string::npos;
-       at        = at == 0 ? std::string::npos : text.rfind("[lsearch ", at - 1)) {
-    std::smatch match;
-    if (!std::regex_search(text.cbegin() + at, text.cend(), match, exclusion, std::regex_constants::match_continuous)) {
-      throw std::runtime_error("unsupported SDC list-search expression");
-    }
-    std::vector<std::string> flags = absl::StrSplit(match[1].str(), absl::ByAnyChar(" \t\r"), absl::SkipWhitespace());
-    std::sort(flags.begin(), flags.end());
-    const bool exact = flags.size() == 4;
-    if (flags
-        != (exact ? std::vector<std::string>{"-all", "-exact", "-inline", "-not"}
-                  : std::vector<std::string>{"-all", "-inline", "-not"})) {
-      throw std::runtime_error("SDC list search requires -inline -all -not [-exact]");
-    }
-    const auto port = match[3].matched ? match[3].str() : match[4].str();
-    if (!exact && port.find_first_of("*?\\") != std::string::npos) {
-      throw std::runtime_error("SDC list search with a glob pattern needs an exact port name");
-    }
-    text.replace(at, match.length(), match[2].str() + " -exclude_exact " + port + "]");
-  }
-  return text;
-}
 
 }  // namespace
 
@@ -576,10 +487,16 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
     livehd::diag::err("pass.opentimer", "missing-file", "io").msg("could not open sdc:{}", sdc_file).fatal();
     return;
   }
+  std::stringstream text;
+  text << file.rdbuf();
+  file.close();
+  // The file is a Tcl script. The shared constraint reader runs it against this timing graph (variables,
+  // expressions, lists, loops, conditions, object queries) and hands back the flat list of the SDC commands it
+  // executed; the handlers below read those. The numbers stay in the units of the file.
+  const auto script = livehd::timing::fast::read_sdc(text.str(), {}, Timer_design(timer, native_start_clocks_, native_end_clocks_));
 
-  std::string                        line;
-  size_t                             lineno = 0;
-  std::map<std::string, std::string> variables;
+  std::string line;
+  size_t      lineno = 0;
 
   // Ports named by a create_clock, so `[all_inputs -no_clocks]` can exclude
   // them. Both spellings are recorded: the clock's -name and its [get_ports].
@@ -642,70 +559,24 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
                                                          "set_propagated_clock",
                                                          "current_design"};
 
-  while (std::getline(file, line)) {
-    ++lineno;
-    // Tcl joins a backslash-newline into one space: a command continued over several lines is one command.
-    while (!line.empty() && (line.back() == '\\' || (line.back() == '\r' && line.size() > 1 && line[line.size() - 2] == '\\'))) {
-      line.resize(line.find_last_of('\\'));
-      std::string more;
-      if (!std::getline(file, more)) {
-        break;
+  for (const auto& entry : script.commands) {
+    lineno = entry.line;
+    line   = entry.error.empty() ? entry.text : entry.name;
+    if (!entry.error.empty()) {
+      // A command that could not be evaluated: a Tcl error (also the file's own `error`), a failed object query.
+      if (modelled.contains(entry.name)) {
+        fail("sdc-syntax", entry.error);
       }
-      ++lineno;
-      line += ' ' + more;
-    }
-    const auto first = line.find_first_not_of(" \t\r");
-    if (first == std::string::npos || line[first] == '#') {
+      warn_ignored(entry.name.empty() ? std::string("<script>") : entry.name,
+                   std::format("could not be evaluated by the constraint reader ({})", entry.error));
       continue;
     }
-    // A Tcl control structure (`foreach {a b} {...} { ... }`) is not interpreted here, and the lines of its
-    // body mean nothing without the variables it binds: skip the whole braced command as one unit rather
-    // than reading its body line by line (an undefined loop variable would fail a constraint that is fine).
-    {
-      static const absl::flat_hash_set<std::string> control{"foreach", "for", "while", "if", "switch", "proc", "catch"};
-      const std::string                             word = line.substr(first, line.find_first_of(" \t\r{", first) - first);
-      if (control.contains(word)) {
-        int         depth = brace_delta(line);
-        std::string more;
-        while (depth > 0 && std::getline(file, more)) {
-          ++lineno;
-          depth += brace_delta(more);
-        }
-        warn_ignored(word, "is a Tcl control structure pass.opentimer does not interpret; its body was skipped");
-        continue;
-      }
-    }
-    std::string expanded;
-    try {
-      expanded = sdc_expand(line, variables);
-    } catch (const std::exception& e) {
-      const std::string d = line.substr(first, line.find_first_of(" \t\r", first) - first);
-      if (modelled.contains(d)) {
-        fail("sdc-syntax", e.what());
-      }
-      warn_ignored(d, std::format("uses a Tcl construct pass.opentimer cannot expand ({})", e.what()));
+    const std::string&             expanded = entry.text;
+    const std::vector<std::string> tok      = absl::StrSplit(expanded, absl::ByAnyChar(" \t\r"), absl::SkipWhitespace());
+    if (tok.empty()) {
       continue;
-    }
-    const std::vector<std::string> tok = absl::StrSplit(expanded, absl::ByAnyChar(" \t\r"), absl::SkipWhitespace());
-    if (tok.empty() || tok[0].front() == '#') {
-      continue;  // blank line or Tcl comment
     }
     const std::string& directive = tok[0];
-    if (directive == "set") {
-      if (tok.size() < 3) {
-        fail("sdc-syntax", "set requires a variable and value");
-      }
-      const auto begin = expanded.find(tok[1], expanded.find("set") + 3) + tok[1].size();
-      const auto start = expanded.find_first_not_of(" \t\r", begin);
-      auto       value = expanded.substr(start);
-      const auto end   = value.find_last_not_of(" \t\r");
-      value.resize(end + 1);
-      if (value.size() >= 2 && ((value.front() == '"' && value.back() == '"') || (value.front() == '{' && value.back() == '}'))) {
-        value = value.substr(1, value.size() - 2);
-      }
-      variables[tok[1]] = std::move(value);
-      continue;
-    }
     if (directive == "current_design") {
       continue;  // the selected timing graph is already bound by lhd
     }
@@ -1327,5 +1198,4 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
       }
     }
   }
-  file.close();
 }

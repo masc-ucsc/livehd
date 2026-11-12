@@ -10,8 +10,9 @@
 <nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
 <main>
 <h1><strong class="item-id">2q-fasttimer</strong> Fast approximate timing engine for synthesis and placement</h1>
-<p><span class="status">Plan written 2026-11-11 from a question-and-answer session. Steps A, B (without the SDC
-reader) and C are implemented in <code>pass/timing</code> (2026-11-11), see <a href="#progress">Progress</a>.
+<p><span class="status">Plan written 2026-11-11 from a question-and-answer session. Steps A, B (with the
+SDC reader, which also feeds OpenTimer) and C, and the first parts of D to G, are implemented in <code>pass/timing</code>
+(2026-11-11), see <a href="#progress">Progress</a>.
 Names of options, targets and directories are proposals.</span></p>
 
 <p>Replace OpenTimer <strong>inside</strong> synthesis and placement with a small native timing engine
@@ -174,19 +175,21 @@ is shielded from the driver. The plan accepts a uniform error and controls the n
 with the per-length-class wire factor of the calibration (step I).</p>
 
 <h3>Constraints and false paths</h3>
-<p>Today there are two SDC readers: the one inside <code>pass.opentimer</code> and
-<code>pass/place/sdc_subset.hpp</code>. The engine takes one typed constraint object (clocks, IO
-delays, loads, driving cells, case constants, cuts, false paths) from one reader, and OpenTimer is
-fed from the same object, so both timers see the same constraints.</p>
+<p>Before this plan there were SDC readers in <code>pass.opentimer</code>, in the <code>lhd</code> kernel (clock
+periods) and in <code>pass/place/sdc_subset.hpp</code>. The engine takes one typed constraint object (clocks, IO
+delays, loads, driving cells, cuts, false paths, clock groups) from one reader, and OpenTimer is
+fed from the same reader, so both timers accept the same files (done 2026-11-11, see Progress; the
+<code>sdc_subset</code> reader of the domino stage timer goes with <code>late::Proxy</code> in the cleanup).</p>
 <ul>
 <li><code>set_false_path -from</code> / <code>-to</code> a port or pin: the start or end point is
 removed, the net stays wired and loaded.</li>
 <li><code>-through</code> a pin, reset distribution and other control nets: an arc cut, the same
 mechanism as today's <code>timing_cuts</code> and data exclusions.</li>
-<li>Clock-to-clock false paths and asynchronous groups: launch-domain tags per clock.</li>
-<li>Pin-to-pin pairs (<code>-from A -to B</code> between data pins) would need a tag per start point.
-They are reported as unsupported in the first version; step B measures how often the benchmark
-SDCs use them.</li>
+<li>Clock-to-clock false paths and asynchronous groups: launch-domain tags per clock (implemented as
+<em>launch groups</em>, see Progress).</li>
+<li>Pin-to-pin pairs (<code>-from A -to B</code>) need a tag per start point. Implemented for a port as the start:
+an endpoint exclusion or a cut when that is exact, otherwise a launch group for the port. From a register to
+some of its endpoints is reported as unsupported (no benchmark SDC uses it).</li>
 </ul>
 
 <h3>Criticality</h3>
@@ -292,12 +295,13 @@ routing, so the post-route ECO keeps the final responsibility.</li>
 <h2 id="progress">Progress (2026-11-11)</h2>
 <p>Implemented in <code>pass/timing</code> (<code>README.md</code> there has the numbers and the commands):
 <strong>A</strong> cell-type tables for N corners; <strong>B</strong> the numeric netlist, levelization, the
-binder from a flat mapped graph, and one typed SDC reader (<code>sdc.hpp</code>; OpenTimer's own reader is not yet
-fed from it); <strong>C</strong> forward and backward propagation, hold, electrical checks, criticality, worst path;
+binder from a flat mapped graph, and one typed SDC reader (<code>sdc.hpp</code>, a small Tcl interpreter underneath;
+<code>pass.opentimer</code> and the clock-period helpers of the <code>lhd</code> kernel read through it too); <strong>C</strong> forward and backward propagation, hold, electrical checks, criticality, worst path;
 <strong>D</strong> (first part) the Elmore solver of an RC tree with the same moments as OpenTimer's <code>Rct</code>
 (<code>wire.hpp</code>); <strong>E</strong> the engine behind the placement ranking callback
 (<code>physical_rank.hpp</code>, <code>synth.timing.engine=opentimer|fast|compare</code>).
-Unit tests: <code>fast_timing_test</code>, <code>bind_graph_test</code>, <code>physical_rank_test</code>.</p>
+Unit tests: <code>fast_timing_test</code>, <code>bind_graph_test</code>, <code>physical_rank_test</code>; end to end
+<code>//lhd/tests:lhd_fast_timing_sdc_smoke</code> (the benchmark constraint forms through placement on both timers).</p>
 <p><strong>Not yet in D:</strong> the engine does not build its own trees. It takes the RC snapshot the placer already
 produces (<code>physical::Parasitics</code>) and solves Elmore on it per corner; Prim-Dijkstra topology, the frozen
 topology with length updates and the <code>Parasitics</code> export are still to do. <strong>Not yet in E:</strong>
@@ -307,11 +311,36 @@ still the sorted vector of label strings of <code>Feedback::Ranking</code>.</p>
 <table>
 <tr><th>What</th><th>Result</th></tr>
 <tr><td>F4: SDC forms in the benchmarks</td>
-<td>The reader parses 60 HighTide <code>constraint.sdc</code> files (asap7, gt2n, nangate45, sky130hd). Twelve designs
-use only create_clock, IO delays, loads, port false paths and variables. Five (litedram, liteeth, litepci, Nyuzi) use
-<code>create_generated_clock</code>, <code>set_clock_groups</code>, a pin-sourced clock or a <code>foreach</code>; those are
-listed as unsupported, never dropped silently. <code>set_driving_cell</code> and <code>set_max_fanout</code> are listed
-everywhere they occur (not modelled yet).</td></tr>
+<td>All 76 HighTide <code>constraint.sdc</code> files (asap7, gt2n, nangate45, sky130hd) read without an unsupported
+item (<code>sdc_survey</code>, each file alone). Beyond clocks, IO delays, loads and port false paths they use: Tcl
+variables, <code>expr</code>, <code>list</code>, <code>concat</code>, <code>lappend</code>, <code>llength</code>,
+<code>lsearch</code>, <code>format</code>, <code>foreach</code>, <code>if</code>/<code>elseif</code>, <code>error</code>,
+<code>unset</code>; <code>-waveform [list 0 [expr ..]]</code>; <code>create_generated_clock</code> on an output port
+(litedram, litepci, Nyuzi) and on a divider pin (liteeth); a clock on the pin of a macro (litepci);
+<code>set_clock_groups -asynchronous</code> (liteeth, litepci); clock-to-clock false paths (NVDLA partition_o);
+<code>set_false_path -through [get_nets ..]</code> (NVDLA partition_c); a false path from a port to a pin found with
+<code>get_pins -hierarchical -regexp</code> (Nyuzi); <code>set_driving_cell</code>, <code>set_max_fanout</code>,
+<code>set_input_delay -min/-max</code>, <code>set_ideal_network</code>, <code>set_wire_load_mode</code>. The table of
+what the engine does with each is in <code>pass/timing/README.md</code>.</td></tr>
+<tr><td>One reader for both timers (step B, cleanup)</td>
+<td><code>read_sdc</code> runs the file as the Tcl script it is, against the design, and returns the typed constraints
+and the flat list of the SDC commands it executed. <code>pass.opentimer</code> reads that list with its own command
+handlers (its private substitution code is gone), so a file with a loop, a computed waveform or a list search no
+longer stops it: before, the NVDLA gt2n files failed in OpenTimer on <code>-waveform [list ..]</code> and a
+<code>foreach</code> body was skipped whole. What OpenTimer does not model (clock groups, generated clocks, false
+paths between clocks or through nets) it still reports, once per command. The clock-period helpers of the
+<code>lhd</code> kernel (<code>synth.delay_frac</code>, the domino clock, the GUI period) use the same reader.</td></tr>
+<tr><td>Launch groups: several clocks, false paths between them</td>
+<td>Every start point launches in a group and the state of a pin is per group, so a check depends on where the path
+started: the setup and hold relation of two clocks of different periods, a false path or an asynchronous group between
+two clocks, a false path from a port to some pins. Clocks that relate to every capture clock in the same way share a
+group; one clock, or several clocks of one period without exceptions, is one group and costs what it did (picorv32,
+three corners: same slack bit for bit, 155 B per pin, rank 14 ms, evaluate 21 ms against 20). A second group on the
+same netlist: 289 B per pin, rank 21 ms, evaluate 30 ms. Also new: a clock on the pin of a cell, generated and
+forwarded clocks, driving cells at the inputs (kept up to date by what-if edits), early input delays for hold, the
+fanout limit of the design in the electrical counts. Checked on a small two-clock design modelled on the NVDLA and
+Nyuzi constraints through the whole flow (<code>synth.timing.engine=compare</code>): the 61 pins only OpenTimer times
+are the ones behind the false paths.</td></tr>
 <tr><td>Ranking against OpenTimer's Elmore ranking, same RC (<code>--set synth.timing.engine=compare</code>)</td>
 <td>picorv32 (9.3k cells, IO delays 2 ns of a 10 ns clock): 33.5k pins in common, |slack difference| median 17 ps,
 90th percentile 41 ps, 99th 69 ps, maximum 113 ps on paths of 4 to 6 ns (engine more pessimistic, about 1 to 3%); the
@@ -338,7 +367,7 @@ ranking 3.7 s in total; the placement phase is 405 s, in which the log counts se
 per-pin slack median difference 31 ps, 99th 80 ps. dino: WNS 396/203 ps (the engine is 1.9% pessimistic on a 9.5 ns path),
 hold WNS identical, slack median 56 ps, 99th 189 ps; electrical violations 38/68 because the engine takes the total load
 where OpenTimer's detailed model uses an effective capacitance (R2; the wire-class factor of step I is what removes this).
-The Feedback has every field OpenTimer fills except the fanout limit check. What-if edits (G) are what the repair loop
+The Feedback has every field OpenTimer fills (the fanout limit check came with the SDC reader, from <code>set_max_fanout</code>). What-if edits (G) are what the repair loop
 needs before the engine can replace OpenTimer there; until then <code>evaluate</code> only compares.</td></tr>
 <tr><td>G: incremental what-if edits in the engine, and <code>synth.timing.engine=fast</code> as the whole timing path of placement
 (ranking, detailed evaluation, the what-if edits of repair; OpenTimer only for the final report)</td>
@@ -347,7 +376,7 @@ layered designs and compare, pin by pin and bit for bit, an incrementally edited
 design (resize, wire edit, buffer insertion, taking a sink off a net) and the rolled-back engine with the original.
 picorv32, full flow: place phase 8.3 &rarr; 5.8 s, HPWL &minus;3.8%, WNS 3.45 &rarr; 3.47 ns. dino: place phase 44.0 &rarr; 32.3 s, whole run
 140 &rarr; 119 s, HPWL &minus;0.01%, WNS 0.40 &rarr; 0.54 ns; the Steiner repair ran with 447 inserted buffers on the engine's what-if (OpenTimer:
-484), its timing time 2.6 &rarr; 0.3 s. The hold slack is not kept up to date by edits and the fanout limit is not checked.</td></tr>
+484), its timing time 2.6 &rarr; 0.3 s. The hold slack is not kept up to date by edits.</td></tr>
 <tr><td>Minion (668k cells), the whole timing path on the engine</td>
 <td>2,099 s wall against 2,573 s with OpenTimer's detailed evaluations (placement phase 405 &rarr; 346 s, OpenTimer detailed time 53 &rarr; 7 s);
 the Steiner repair's timing time falls from 64 to 11 s for 12k inserted buffers (12,663 before). HPWL &minus;0.8%, TNS &minus;122k &rarr; &minus;80k ns-ps,
@@ -438,9 +467,28 @@ rebuild will need care.</li>
 <li><strong>Not timed, listed:</strong> latches, memories and clock gates (2,535 cells in minion), falling-edge
 elements, state-dependent arcs are all treated as separate arcs (the worst wins; the case analysis of step B is not
 done), sinks driven by constants (9,257 in minion).</li>
-<li><strong>Single clock tags:</strong> arrivals carry no launch-clock tag, so several clocks are timed against
-the capture clock's period with the worst launch; asynchronous groups are not supported yet (to be reported as
-unsupported when the SDC reader lands).</li>
+<li><strong>Launch groups instead of single clock tags (done):</strong> arrivals used to carry no launch-clock
+tag, so several clocks were timed against the capture clock's period with the worst launch. A pin now has one
+state per launch group; the cost is the number of groups, which is one unless the SDC has clocks that relate
+differently to a capture clock.</li>
+<li><strong>Names in constraint files.</strong> The benchmark files are written against a Yosys netlist: a register
+pin is <code>path.reg[3]$_DFF_PP0_/D</code> and a register net is <code>path.q</code>. In the mapped graph the
+flip-flop instance is <code>path.reg[3]</code> and its net is the wire of its output, so the reader resolves both
+spellings to that instance. A name that still finds nothing makes the file's own <code>error</code> fire, which is
+listed and ends that loop only.</li>
+<li><strong><code>set_max_delay</code> (done 2026-11-12):</strong> not in the benchmark files, but frequent elsewhere. It is
+one more relation: between two clocks it replaces the time to the capture edge; to ports, pins or cells it is a
+relation of those endpoints (the same per-endpoint mechanism as a false path from a port to a pin, with a delay in
+place of "no check"); from ports it is the relation of a launch group of those ports. The setup time or output delay
+and the uncertainty still come off, as in OpenSTA; an output port without an output delay becomes an endpoint; a
+false path or clock groups win; a block without any clock is reported under a virtual clock. Hold is unchanged
+(<code>set_min_delay</code> is still listed). OpenTimer does not model it and says so.</li>
+<li><strong>Still listed as unsupported:</strong> <code>set_multicycle_path</code>, <code>set_min_delay</code>,
+<code>set_max_delay</code> with <code>-through</code> or from a register to some of its endpoints,
+<code>set_case_analysis</code>, <code>set_clock_latency</code>, edge-specific options, <code>-through</code> combined
+with <code>-from</code>/<code>-to</code>, a false path from a register to some of its endpoints, hold at output
+ports. A clock on the pin of a cell the Liberty does not have (an uncharacterized macro) has no pin to start
+from: the binder leaves such instances out, and the clock is reported as without a source.</li>
 </ul>
 
 <h2>Facts to confirm first</h2>
@@ -509,7 +557,8 @@ map; one representation instead of sparse, dense and ranking variants.</li>
 <li><code>Physical_session</code> shrinks to building OpenTimer for the report and the calibration; the
 what-if journal, the ranking purpose and the binding caches go.</li>
 <li><code>estimate_rc</code> and <code>Parasitics</code> are computed only when OpenTimer runs.</li>
-<li>One SDC reader instead of two.</li>
+<li>One SDC reader (done for the engine, <code>pass.opentimer</code> and the <code>lhd</code> kernel;
+<code>pass/place/sdc_subset</code> remains for <code>late::Proxy</code> until that is deleted).</li>
 <li>Dead code: <code>repair_gp_buffers</code> has no caller and <code>gp_resize</code> is not consumed.</li>
 <li>The evaluation budget (<code>eval_budget</code>, the private allowances of sizing and buffering)
 exists because one evaluation costs seconds. Revisit it once the cost is measured.</li>
@@ -570,7 +619,8 @@ R5).</li>
 <code>synth.corners=slow:a.lib,typ:b.lib,fast:c.lib</code>, <code>synth.timing.window</code>,
 <code>synth.timing.fit</code>, <code>synth.timing.calibrate</code>.</li>
 <li>The window width (10% proposed) and whether it differs between GP weights and sizing.</li>
-<li>Whether pin-to-pin false paths need support in the first version (F4).</li>
+<li>Pin-to-pin false paths: answered by F4. The one benchmark use (Nyuzi, a port to a synchronizer pin) is
+supported; register-to-pin is not needed yet.</li>
 </ul>
 
 <h2>Related</h2>

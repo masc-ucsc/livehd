@@ -50,6 +50,7 @@
 #include "node_util.hpp"
 #include "pass.hpp"
 #include "pass/place/sdc_subset.hpp"
+#include "pass/timing/sdc.hpp"
 #include "perf_tracing.hpp"
 #include "rapidjson/document.h"
 #include "rapidjson/stringbuffer.h"
@@ -877,55 +878,14 @@ void merge_color_sets(const Options& opts, Eprp_var::Eprp_dict& labels) {
 }
 
 namespace {
-// The SDC subset the readers below share: statements split on newlines and
-// ';', whitespace tokens, and `set NAME VALUE` variables substituted as
-// `$NAME` / `${NAME}`. A Tcl expression or a nested command is never
-// evaluated.
-class Sdc_statements {
-public:
-  explicit Sdc_statements(const std::string& path) {
-    std::ifstream in(path);
-    text_.assign(std::istreambuf_iterator<char>(in), {});
-  }
-  bool empty() const { return text_.empty(); }
-  // f(statement, tokens) for every statement but a variable `set`, in file
-  // order; value() resolves the variables set before it.
-  template <typename F>
-  void each(F f) {
-    vars_.clear();
-    for (const auto line : absl::StrSplit(text_, absl::ByAnyChar("\n;"))) {
-      const auto                     statement = absl::StripAsciiWhitespace(line);
-      const std::vector<std::string> tok       = absl::StrSplit(statement, absl::ByAnyChar(" \t"), absl::SkipEmpty());
-      if (tok.size() == 3 && tok[0] == "set") {
-        if (auto v = value(tok[2])) {
-          vars_[tok[1]] = std::move(*v);
-        }
-      } else if (!tok.empty()) {
-        f(statement, tok);
-      }
-    }
-  }
-  // A token without quotes or braces, a variable reference substituted;
-  // nullopt for an unknown variable.
-  std::optional<std::string> value(std::string_view tok) const {
-    while (!tok.empty() && (tok.front() == '"' || tok.front() == '{')) {
-      tok.remove_prefix(1);
-    }
-    while (!tok.empty() && (tok.back() == '"' || tok.back() == '}' || tok.back() == ';')) {
-      tok.remove_suffix(1);
-    }
-    if (tok.empty() || tok.front() != '$') {
-      return std::string{tok};
-    }
-    tok.remove_prefix(tok.size() > 1 && tok[1] == '{' ? 2 : 1);
-    const auto it = vars_.find(tok);
-    return it == vars_.end() ? std::nullopt : std::optional<std::string>{it->second};
-  }
-
-private:
-  std::string                                   text_;
-  absl::flat_hash_map<std::string, std::string> vars_;
-};
+// The clocks of an SDC file, read alone (no design: every port and pin it names is taken to exist) by the
+// constraint reader the timers use, so variables, expressions, lists and control flow mean here what they mean
+// there. Times are in the units of the file.
+livehd::timing::fast::Sdc sdc_alone(const std::string& path) {
+  std::ifstream     in(path);
+  const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+  return livehd::timing::fast::read_sdc(text);
+}
 }  // namespace
 
 livehd::placement::late::Sdc_units liberty_sdc_units(const std::string& liberty_path) {
@@ -957,35 +917,14 @@ livehd::placement::late::Sdc_units liberty_sdc_units(const std::string& liberty_
 // (the usual HighTide/ORFS spelling); a Tcl expression is not guessed. The SDC
 // time unit is the Liberty time unit, read from the first `time_unit` attribute.
 std::optional<double> sdc_min_clock_period_ps(const std::string& sdc_path, const std::string& liberty_path) {
-  Sdc_statements sdc(sdc_path);
-  if (sdc.empty()) {
-    return std::nullopt;
-  }
-  const double to_ps  = liberty_sdc_units(liberty_path).time_ps;
-  const auto   number = [&](const std::string& tok, double& out) {
-    const auto text = sdc.value(tok);
-    if (!text) {
-      return false;
-    }
-    char* end = nullptr;
-    out       = std::strtod(text->c_str(), &end);
-    return end != text->c_str() && *end == '\0';
-  };
   std::optional<double> best;
-  sdc.each([&](std::string_view, const std::vector<std::string>& tok) {
-    if (tok[0] != "create_clock") {
-      return;
+  for (const auto& clock : sdc_alone(sdc_path).clocks) {
+    if (!clock.generated && clock.period_ps > 0 && (!best || clock.period_ps < *best)) {
+      best = clock.period_ps;
     }
-    for (size_t i = 1; i + 1 < tok.size(); ++i) {
-      if (tok[i] == "-period") {
-        if (double v = 0; number(tok[i + 1], v) && v > 0 && (!best || v < *best)) {
-          best = v;
-        }
-      }
-    }
-  });
+  }
   if (best) {
-    *best *= to_ps;
+    *best *= liberty_sdc_units(liberty_path).time_ps;
   }
   return best;
 }
@@ -1027,44 +966,21 @@ void domino_profile_labels(const Options& opts, const std::string& lefs, Eprp_va
 }
 
 std::vector<Sdc_clock> sdc_clocks(const std::string& sdc_path) {
-  static const std::regex port_re(R"(\[\s*get_ports\s+\{?\s*(\$\{[^\s\{\}\[\]]+\}|[^\s\{\}\[\]]+)\s*\}?\s*\])");
-  static const std::regex source_re(R"(-(source|master_clock)\s+(\[[^\]]*\]|\{[^\}]*\}|\S+))");
-  Sdc_statements          statements(sdc_path);
-  std::vector<Sdc_clock>  found;
-  const auto              number = [&](std::string_view tok) -> std::optional<double> {
-    const auto text = statements.value(tok);
-    char*      end  = nullptr;
-    const auto v    = text ? std::strtod(text->c_str(), &end) : 0.;
-    return text && end != text->c_str() && *end == '\0' && std::isfinite(v) ? std::optional<double>{v} : std::nullopt;
-  };
-  statements.each([&](std::string_view statement, const std::vector<std::string>& tok) {
-    if (tok[0] != "create_clock" && tok[0] != "create_generated_clock") {
-      return;
+  std::vector<Sdc_clock> found;
+  for (const auto& clock : sdc_alone(sdc_path).clocks) {
+    auto& out  = found.emplace_back();
+    out.name   = clock.name;
+    out.period = clock.period_ps;
+    // The clock is on a port when its one source is a port (a generated clock's -source is where it comes
+    // from, not where it is).
+    if (clock.sources.size() == 1 && clock.sources.front().kind == livehd::timing::fast::Sdc_object::Kind::port) {
+      out.port          = clock.sources.front().name;
+      out.port_resolved = true;
     }
-    auto&             clock = found.emplace_back();
-    // A generated clock's -source/-master_clock name the clock it derives
-    // from, not where it is defined: only the remaining object list counts.
-    const std::string text  = std::regex_replace(std::string{statement}, source_re, " ");
-    if (std::smatch match; std::regex_search(text, match, port_re)) {
-      const auto port     = statements.value(match[1].str());
-      clock.port          = port.value_or("");
-      clock.port_resolved = port && !port->empty() && port->front() != '$';
+    if (clock.waveform_given) {
+      out.waveform = std::array<double, 2>{clock.rise_ps, clock.fall_ps};
     }
-    for (size_t i = 1; i + 1 < tok.size(); ++i) {
-      if (tok[i] == "-name") {
-        clock.name = statements.value(tok[i + 1]).value_or("");
-      } else if (tok[i] == "-period") {
-        clock.period = number(tok[i + 1]);
-      } else if (tok[i] == "-waveform") {
-        // -waveform {rise fall}: two tokens once the braces are stripped.
-        const auto rise = number(tok[i + 1]), fall = i + 2 < tok.size() ? number(tok[i + 2]) : std::nullopt;
-        clock.waveform_unparsed = !rise || !fall;
-        if (rise && fall) {
-          clock.waveform = std::array{*rise, *fall};
-        }
-      }
-    }
-  });
+  }
   return found;
 }
 

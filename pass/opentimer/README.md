@@ -274,19 +274,18 @@ remain attached to cells; net propagation converts slew and arrival to the
 receiving library's convention, including primary ports in the first library.
 The positional one/two-file maximum/minimum-corner convention remains unchanged.
 
-The native SDC reader supports scalar `set` variables, variable-held port
-selectors, `${name}` references, and numeric `[expr ...]` with `+ - * /` and
-parentheses. It also applies output `set_load` in Liberty capacitance units and
-binds single-source physical clocks to their input pin. Output required times
-subtract the output delay from the referenced clock period. This remains a
-restricted SDC reader: arbitrary Tcl and generated clocks
-are not modeled; unsupported constraints are reported, and physical-clock
-coverage remains conservative. `$name` is substituted outside braces, as in
-Tcl, and inside `[expr {...}]`; `[expr]` divides two integers with flooring
-integer division (`[expr 5/2]` is 2, `[expr 5/2.0]` is 2.5). A line whose
-command is not modelled, or that cannot be expanded (`$::env(X)`), warns once
-and marks the report incomplete; a modelled command with a bad substitution is
-an error. `set_load` and `set_driving_cell` with an unmodelled option
+The SDC file is read by the constraint reader of `pass/timing` (`sdc.hpp`), the same one the fast timing
+engine uses: the file is run as the Tcl script it is (variables, `expr`, lists, `lsearch`, `format`, `foreach`,
+`if`, `proc`, the file's own `error`) against this timing graph, and the pass receives the flat list of the SDC
+commands the script executed, which its own handlers read. `[expr]` divides two integers with flooring
+integer division (`[expr 5/2]` is 2, `[expr 5/2.0]` is 2.5). A whole `[all_inputs]` or `[all_outputs]` stays
+that selector; a filtered list names its ports. The handlers apply output `set_load` in Liberty capacitance
+units and bind single-source physical clocks to their input pin; output required times subtract the output
+delay from the referenced clock period. What the pass does not model (generated clocks, clock groups, false
+paths between clocks or through nets, multicycle paths) is reported once per command and marks the report
+incomplete, and physical-clock coverage remains conservative. A command that cannot be evaluated (an unset
+variable, `$::env(X)`, an error raised inside a loop, which ends that loop) warns once the same way; when it
+is a command the pass models, it is an error. `set_load` and `set_driving_cell` with an unmodelled option
 (`-pin_load`, `-library`, ...), a selector such as `[get_nets]`, a port of the
 wrong direction or an unknown `-lib_cell` are skipped whole the same way
 (fatal only with `critical=true`).

@@ -357,10 +357,11 @@ create_clock -name nowhere -period 50 [get_pins macro/clk_out]
   ASSERT_TRUE(pass.timer.clocks().contains("nowhere"));
   EXPECT_FLOAT_EQ(pass.timer.clocks().at("nowhere").period(), 50);
 }
-TEST_F(SdcClock, TclControlStructureBodyIsSkippedAsOneUnit) {
+TEST_F(SdcClock, TclLoopsAndConditionsRunAndTheFilesOwnErrorOnlyStopsItsLoop) {
   Sdc_probe pass(var);
-  // HighTide's NyuziProcessor SDC loops over the JTAG ports. The body lines mean nothing without the loop
-  // variables, so reading them one by one failed on `$port`; the whole braced command is skipped instead.
+  // HighTide's NyuziProcessor SDC loops over the JTAG ports and raises an error when a synchronizer pin is
+  // missing. The loop runs (the constraint reader of pass/timing executes the script); here no such pin
+  // exists, so the file's own `error` ends the loop, is reported, and the commands after it still apply.
   pass.read_sdc(write(R"sdc(
 create_clock -name virtual -period 100
 set_input_delay 10 -clock virtual [all_inputs]
@@ -378,6 +379,39 @@ set_output_delay 20 -clock virtual [all_outputs]
 )sdc"));
   EXPECT_FLOAT_EQ(pass.timer.report_at("a", ot::MAX, ot::RISE).value(), 10);
   EXPECT_FLOAT_EQ(pass.timer.report_slack("y", ot::MAX, ot::RISE).value(), 70);
+}
+TEST_F(SdcClock, BenchmarkConstraintFormsAreExecuted) {
+  Sdc_probe pass(var);
+  pass.timer.insert_primary_input("clk").insert_primary_input("b").insert_net("other");
+  pass.timer.disconnect_pin("b").connect_pin("b", "other");
+  // The spellings of the NVDLA and LiteX benchmark files: a waveform built with `list` and `expr`, the clock
+  // port held in a variable and taken off [all_inputs] in a loop, a delay computed from the period.
+  pass.read_sdc(write(R"sdc(
+current_design top
+set clk_name core
+set clk_period 100
+set clk_io_pct 0.2
+set clk_port [get_ports clk]
+create_clock -name $clk_name -period $clk_period -waveform [list 0 [expr $clk_period / 2]] $clk_port
+set non_clock_inputs [all_inputs]
+foreach clock_port [concat $clk_port] {
+  set non_clock_inputs [lsearch -inline -all -not -exact $non_clock_inputs $clock_port]
+}
+if {[llength $non_clock_inputs] != 2} {
+  error "expected two data inputs"
+}
+set_input_delay [expr $clk_period * $clk_io_pct] -clock $clk_name $non_clock_inputs
+set_output_delay [expr $clk_period * $clk_io_pct] -clock $clk_name [all_outputs]
+set_false_path -from [get_ports pwrbus_ram_pd*]
+)sdc"));
+  pass.timer.update_timing();
+  ASSERT_TRUE(pass.timer.clocks().contains("core"));
+  EXPECT_FLOAT_EQ(pass.timer.clocks().at("core").period(), 100);
+  EXPECT_FLOAT_EQ(pass.timer.report_at("a", ot::MAX, ot::RISE).value(), 20);
+  EXPECT_FLOAT_EQ(pass.timer.report_at("b", ot::MAX, ot::RISE).value(), 20);
+  // The clock port was taken off the list: it has no input delay of its own.
+  EXPECT_FLOAT_EQ(pass.timer.report_at("clk", ot::MAX, ot::RISE).value_or(0), 0);
+  EXPECT_FLOAT_EQ(pass.timer.report_slack("y", ot::MAX, ot::RISE).value(), 60);
 }
 TEST_F(SdcClock, ExprDividesIntegersLikeTcl) {
   Sdc_probe                           pass(var);

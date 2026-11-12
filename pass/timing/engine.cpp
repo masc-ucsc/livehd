@@ -68,6 +68,19 @@ Engine::Engine(Netlist& netlist, Constraints constraints, Options options)
     throw std::invalid_argument("hold or path corner out of range");
   }
   options_.depth_margin.resize(corners_, 0.f);
+  groups_ = std::max<uint32_t>(1, constraints_.groups);
+  if (groups_ > 32) {
+    throw std::invalid_argument("at most 32 launch groups");
+  }
+  slots_ = corners_ * groups_;
+  const auto relations = groups_ * std::max<size_t>(1, constraints_.clocks.size());
+  if ((!constraints_.setup_relation_ps.empty() && constraints_.setup_relation_ps.size() != relations)
+      || (!constraints_.hold_relation_ps.empty() && constraints_.hold_relation_ps.size() != relations)) {
+    throw std::invalid_argument("clock relations do not match groups x clocks");
+  }
+  if (constraints_.default_input_group >= groups_) {
+    throw std::invalid_argument("default input group out of range");
+  }
   prepare();
 }
 
@@ -129,9 +142,67 @@ float Engine::net_load(uint32_t net, size_t corner, bool early) const {
   return early ? early_load_[net] : load_[static_cast<size_t>(net) * corners_ + corner];
 }
 
+float Engine::setup_relation(size_t group, size_t clock) const {
+  return constraints_.setup_relation_ps.empty() ? constraints_.clocks[clock].period_ps
+                                                : constraints_.setup_relation_ps[group * constraints_.clocks.size() + clock];
+}
+
+float Engine::hold_relation(size_t group, size_t clock) const {
+  return constraints_.hold_relation_ps.empty() ? 0.f : constraints_.hold_relation_ps[group * constraints_.clocks.size() + clock];
+}
+
+uint32_t Engine::input_group(uint32_t port_cell) const {
+  const auto entry = port_input_[port_cell];
+  return entry == no_index ? constraints_.default_input_group : constraints_.inputs[entry].group;
+}
+
+// The arrival and slew an input port launches with: its input delay and transition, or, behind a driving cell, the
+// delay that cell adds for the load of the port's net and its output slew there.
+Engine::Seed Engine::input_seed(uint32_t port_cell, size_t k, unsigned t, bool early) const {
+  Seed       seed{0.f, constraints_.default_input_slew_ps};
+  const auto entry = port_input_[port_cell];
+  if (entry == no_index) {
+    return seed;
+  }
+  const auto& in = constraints_.inputs[entry];
+  seed.arrival   = early && in.early_set ? in.early_delay_ps : in.delay_ps;
+  seed.slew      = in.slew_ps;
+  if (in.drive_type == no_index) {
+    return seed;
+  }
+  const auto  net  = netlist_.net_of(netlist_.pin(port_cell, 0u));
+  const float load = net == no_index ? 0.f : net_load(net, k, early);
+  float       add = early ? inf : -inf, slew = early ? inf : -inf;
+  for (const auto& arc : types_.arcs_into(in.drive_type, in.drive_pin)) {
+    if (!timed_arc(arc)) {
+      continue;
+    }
+    for (const auto& combo : combos_of(arc)) {
+      if (static_cast<unsigned>(combo.out) != t) {
+        continue;
+      }
+      const auto delay_table = types_.table(arc, k, 0, t);
+      if (delay_table == no_index) {
+        continue;
+      }
+      const Query loaded{in.slew_ps, load, 0.f, 0.f}, unloaded{in.slew_ps, 0.f, 0.f, 0.f};
+      const float extra      = types_.lookup(delay_table, loaded) - types_.lookup(delay_table, unloaded);
+      const auto  slew_table = types_.table(arc, k, 1, t);
+      const float out_slew   = slew_table == no_index ? in.slew_ps : std::max(0.f, types_.lookup(slew_table, loaded));
+      add                    = early ? std::min(add, extra) : std::max(add, extra);
+      slew                   = early ? std::min(slew, out_slew) : std::max(slew, out_slew);
+    }
+  }
+  if (std::isfinite(add)) {
+    seed.arrival += add;
+    seed.slew     = slew;
+  }
+  return seed;
+}
+
 void Engine::prepare() {
   const size_t pins = netlist_.pins(), cells = netlist_.cells();
-  const size_t C = corners_;
+  const size_t C = slots_;
 
   // Layout of the arc delays kept for the backward walk and for incremental updates.
   arc_offset_.assign(types_.arc_total(), 0);
@@ -156,7 +227,7 @@ void Engine::prepare() {
   required_.assign(pins * C * 2, inf);
   depth_.assign(pins * C * 2, 0);
   criticality_.assign(pins, 0.f);
-  predecessor_.assign(pins * 2, {});
+  predecessor_.assign(pins * groups_ * 2, {});
   clock_pin_.assign(pins, 0);
   pin_clock_.assign(pins, 0);
   cut_.assign(pins, 0);
@@ -190,9 +261,24 @@ void Engine::prepare() {
     }
     for (const auto& out : constraints_.outputs) {
       if (const auto it = output_cell.find(out.port); it != output_cell.end()) {
-        port_load_[it->second]  = out.load_ff;
-        port_delay_[it->second] = out.delay_ps;
+        port_load_[it->second] = out.load_ff;
+        if (out.check) {
+          port_delay_[it->second] = out.delay_ps;
+        }
       }
+    }
+  }
+  for (const auto& in : constraints_.inputs) {
+    if (in.group >= groups_) {
+      throw std::invalid_argument("input delay group out of range");
+    }
+    if (in.drive_type != no_index && (in.drive_type >= types_.types() || in.drive_pin >= types_.type(in.drive_type).pin_count)) {
+      throw std::invalid_argument("driving cell out of range");
+    }
+  }
+  for (const auto& clock : constraints_.clocks) {
+    if (clock.group >= groups_) {
+      throw std::invalid_argument("clock group out of range");
     }
   }
   mark_clock_network();
@@ -240,7 +326,7 @@ void Engine::prepare() {
       clocked   = clocked && has_clock;
       if (has_setup && !excluded_[netlist_.pin(c, local)]) {
         if (has_clock) {
-          endpoints_.push_back({netlist_.pin(c, local), pin_clock_[clock_pin], false});
+          endpoints_.push_back({netlist_.pin(c, local), pin_clock_[clock_pin], false, false});
         } else {
           ++report_.unclocked_endpoints;
         }
@@ -250,21 +336,50 @@ void Engine::prepare() {
       ++report_.unclocked_flops;
     }
   }
-  for (const auto& out : constraints_.outputs) {
+  {
+    std::unordered_map<std::string_view, uint32_t> output_pin;
     for (const auto& port : netlist_.ports()) {
-      if (!port.input && port.name == out.port) {
-        const auto pin = netlist_.pin(port.cell, 0);
-        if (!excluded_[pin] && !netlist_.untimed(pin)) {
-          endpoints_.push_back({pin, clock_index(out.clock), true});
-        }
+      if (!port.input) {
+        output_pin[port.name] = netlist_.pin(port.cell, 0);
+      }
+    }
+    for (const auto& out : constraints_.outputs) {
+      const auto it = output_pin.find(out.port);
+      if (!out.check || it == output_pin.end()) {
+        continue;
+      }
+      // An output port inside a clock network forwards the clock: it is not a data endpoint.
+      if (const auto pin = it->second; !excluded_[pin] && !netlist_.untimed(pin) && clock_pin_[pin] == 0) {
+        endpoints_.push_back({pin, clock_index(out.clock), true, !out.clocked});
       }
     }
   }
   std::sort(endpoints_.begin(), endpoints_.end(), [](const Endpoint& a, const Endpoint& b) { return a.pin < b.pin; });
+  endpoints_.erase(std::unique(endpoints_.begin(), endpoints_.end(), [](const Endpoint& a, const Endpoint& b) { return a.pin == b.pin; }),
+                   endpoints_.end());
   endpoint_slack_.assign(endpoints_.size(), inf);
   endpoint_path_slack_.assign(endpoints_.size(), inf);
   endpoint_path_transition_.assign(endpoints_.size(), 0);
-  clock_wns_.assign(std::max<size_t>(1, constraints_.clocks.size()) * C, 0.f);
+  endpoint_path_group_.assign(endpoints_.size(), 0);
+  endpoint_override_.assign(endpoints_.size() * groups_, std::numeric_limits<float>::quiet_NaN());
+  for (const auto& relation : constraints_.endpoint_relations) {
+    if (relation.group != no_index && relation.group >= groups_) {
+      throw std::invalid_argument("endpoint relation group out of range");
+    }
+    const auto e = endpoint_of(relation.pin);
+    if (e == no_endpoint) {
+      continue;
+    }
+    for (size_t g = 0; g < groups_; ++g) {
+      if (relation.group == no_index || relation.group == g) {
+        // A false path wins over a delay, and of two delays the smaller.
+        auto& slot = endpoint_override_[e * groups_ + g];
+        slot       = std::isnan(slot) ? relation.setup_ps : relation.setup_ps == inf || slot == inf ? inf : std::min(slot, relation.setup_ps);
+      }
+    }
+  }
+  clock_wns_.assign(std::max<size_t>(1, constraints_.clocks.size()) * corners_, 0.f);
+  report_.groups = groups_;
 
   report_.unsupported = constraints_.unsupported;
   for (const auto& line : netlist_.diagnostics()) {
@@ -276,7 +391,7 @@ void Engine::prepare() {
   }
   if (report_.unclocked_flops != 0) {
     report_.unsupported.push_back(
-        std::format("{} flip-flops have no ideal clock from a clock port: not timed", report_.unclocked_flops));
+        std::format("{} flip-flops have no ideal clock from a clock source: not timed", report_.unclocked_flops));
   }
   if (constraints_.clocks.empty() && !endpoints_.empty()) {
     throw std::invalid_argument("endpoints without a clock");
@@ -284,11 +399,44 @@ void Engine::prepare() {
 }
 
 void Engine::mark_clock_network() {
-  // The ideal clock: from each clock port through buffers and gates to the clock pins of flip-flops. Nothing
-  // inside it is timed as data; a flip-flop's clock pin is launched at time 0 with the clock's transition.
+  // The ideal clock: from each clock source through buffers and gates to the clock pins of flip-flops. Nothing
+  // inside it is timed as data; a flip-flop's clock pin is launched at time 0 with the clock's transition. A
+  // source of another clock (a generated clock on a divider, a clock made on a pin) ends the network that
+  // reaches it: what is behind belongs to that clock.
+  if (constraints_.clocks.size() > 255) {
+    throw std::invalid_argument("at most 255 clocks");
+  }
+  std::vector<std::vector<uint32_t>> sources(constraints_.clocks.size());
+  std::unordered_map<uint32_t, uint32_t> source_clock;  // the last clock made on a pin owns it
+  for (size_t c = 0; c < constraints_.clocks.size(); ++c) {
+    const auto& clock = constraints_.clocks[c];
+    if (!clock.source_pins.empty()) {
+      for (const auto pin : clock.source_pins) {
+        if (pin >= netlist_.pins()) {
+          throw std::invalid_argument("clock source pin out of range");
+        }
+        sources[c].push_back(pin);
+      }
+    } else if (!clock.port.empty()) {
+      for (const auto& port : netlist_.ports()) {
+        if (port.input && port.name == clock.port) {
+          sources[c].push_back(netlist_.pin(port.cell, 0));
+        }
+      }
+      if (sources[c].empty()) {
+        throw std::invalid_argument("clock port not found: " + clock.port);
+      }
+    }
+    for (const auto pin : sources[c]) {
+      source_clock[pin] = static_cast<uint32_t>(c);
+    }
+  }
   std::vector<uint32_t> work;
-  const auto            reach = [&](uint32_t pin, uint32_t clock) {
+  const auto            reach = [&](uint32_t pin, uint32_t clock, bool source) {
     if (clock_pin_[pin] != 0) {
+      return;
+    }
+    if (!source && source_clock.contains(pin)) {
       return;
     }
     const auto  cell   = netlist_.cell_of(pin);
@@ -303,15 +451,10 @@ void Engine::mark_clock_network() {
     work.push_back(pin);
   };
   for (size_t c = 0; c < constraints_.clocks.size(); ++c) {
-    bool found = false;
-    for (const auto& port : netlist_.ports()) {
-      if (port.input && port.name == constraints_.clocks[c].port) {
-        found = true;
-        reach(netlist_.pin(port.cell, 0), static_cast<uint32_t>(c));
+    for (const auto pin : sources[c]) {
+      if (source_clock[pin] == c) {
+        reach(pin, static_cast<uint32_t>(c), true);
       }
-    }
-    if (!found) {
-      throw std::invalid_argument("clock port not found: " + constraints_.clocks[c].port);
     }
     while (!work.empty()) {
       const auto pin = work.back();
@@ -319,14 +462,14 @@ void Engine::mark_clock_network() {
       const auto clock = pin_clock_[pin];
       if (netlist_.net_of(pin) != no_index && netlist_.is_driver(pin)) {
         for (const auto sink : netlist_.sinks_of(netlist_.net_of(pin))) {
-          reach(sink, clock);
+          reach(sink, clock, false);
         }
       }
       const auto cell  = netlist_.cell_of(pin);
       const auto local = netlist_.local_of(pin);
       for (const auto& arc : types_.arcs(netlist_.type_of(cell))) {
         if (arc.kind == Arc_kind::combinational && arc.from == local) {
-          reach(netlist_.pin(cell, arc.to), clock);
+          reach(netlist_.pin(cell, arc.to), clock, false);
         }
       }
     }
@@ -389,25 +532,32 @@ void Engine::seed_late() {
     if (!port.input || clock_pin_[pin] != 0 || cut_[pin]) {
       continue;
     }
-    float delay = 0, slew = constraints_.default_input_slew_ps;
-    if (const auto entry = port_input_[port.cell]; entry != no_index) {
-      delay = constraints_.inputs[entry].delay_ps;
-      slew  = constraints_.inputs[entry].slew_ps;
+    if (const auto entry = port_input_[port.cell]; entry != no_index && !constraints_.inputs[entry].late) {
+      continue;
     }
+    const auto g = input_group(port.cell);
     for (size_t k = 0; k < C; ++k) {
       for (unsigned t = 0; t < 2; ++t) {
-        arrival_[index(pin, k, t)] = delay;
-        slew_[index(pin, k, t)]    = slew;
+        const auto seed                    = input_seed(port.cell, k, t, false);
+        arrival_[index(pin, g * C + k, t)] = seed.arrival;
+        slew_[index(pin, g * C + k, t)]    = seed.slew;
       }
     }
   }
   for (uint32_t pin = 0; pin < netlist_.pins(); ++pin) {
     if (clock_pin_[pin] == 2 && !cut_[pin]) {
-      const float clock_slew = constraints_.clocks[pin_clock_[pin]].slew_ps;
+      const auto& clock      = constraints_.clocks[pin_clock_[pin]];
+      const float clock_slew = clock.slew_ps;
       for (size_t k = 0; k < C; ++k) {
-        arrival_[index(pin, k, 0)] = 0.f;  // the rising edge; the falling edge launches nothing
-        slew_[index(pin, k, 0)]    = clock_slew;
-        slew_[index(pin, k, 1)]    = clock_slew;
+        const auto s               = clock.group * C + k;
+        arrival_[index(pin, s, 0)] = 0.f;  // the rising edge; the falling edge launches nothing
+        slew_[index(pin, s, 0)]    = clock_slew;
+        slew_[index(pin, s, 1)]    = clock_slew;
+      }
+      // The check on the data pin reads the clock's transition in every group.
+      for (size_t s = 0; s < slots_; ++s) {
+        slew_[index(pin, s, 0)] = clock_slew;
+        slew_[index(pin, s, 1)] = clock_slew;
       }
     }
   }
@@ -423,20 +573,37 @@ void Engine::forward_late() {
 // The late arrival, slew, depth and worst predecessor of one pin from its sources, which must be current.
 // A pin the engine does not time keeps its seed.
 void Engine::recompute_arrival(uint32_t p) {
-  const size_t C = corners_;
+  const size_t C = corners_, S = slots_;
   if (netlist_.untimed(p) || clock_pin_[p] != 0 || cut_[p]) {
     return;
   }
-  const auto net = netlist_.net_of(p);
+  const auto net  = netlist_.net_of(p);
+  const auto cell = netlist_.cell_of(p);
+  const auto type = netlist_.type_of(cell);
+  if (type == Cell_types::input_port_type) {
+    // Behind a driving cell the launch depends on the load of the port's net, which an edit may have changed.
+    if (const auto entry = port_input_[cell]; entry != no_index && constraints_.inputs[entry].drive_type != no_index
+                                              && constraints_.inputs[entry].late) {
+      const auto g = constraints_.inputs[entry].group;
+      for (size_t k = 0; k < C; ++k) {
+        for (unsigned t = 0; t < 2; ++t) {
+          const auto seed = input_seed(cell, k, t, false);
+          store(arrival_, index(p, g * C + k, t), seed.arrival);
+          store(slew_, index(p, g * C + k, t), seed.slew);
+        }
+      }
+    }
+    return;
+  }
   if (net == no_index && netlist_.pin_type(p).direction == Direction::input) {
     // A sink with no driver (never connected, or taken off its net by an edit): nothing arrives.
-    for (size_t k = 0; k < C; ++k) {
+    for (size_t s = 0; s < S; ++s) {
       for (unsigned t = 0; t < 2; ++t) {
-        store(arrival_, index(p, k, t), -inf);
-        store(slew_, index(p, k, t), 0.f);
-        store(depth_, index(p, k, t), uint16_t{0});
-        if (k == options_.path_corner) {
-          store_predecessor(p * 2 + t, {});
+        store(arrival_, index(p, s, t), -inf);
+        store(slew_, index(p, s, t), 0.f);
+        store(depth_, index(p, s, t), uint16_t{0});
+        if (s % C == options_.path_corner) {
+          store_predecessor(path_index(p, s / C, t), {});
         }
       }
     }
@@ -444,37 +611,37 @@ void Engine::recompute_arrival(uint32_t p) {
   }
   if (net != no_index && !netlist_.is_driver(p)) {
     const auto driver = netlist_.driver_of(net);
-    for (size_t k = 0; k < C; ++k) {
-      const float wd = wire_delay(p, k);
-      const float ws = wire_.sink_slew_ps.empty() ? 0.f : wire_.sink_slew_ps[static_cast<size_t>(p) * C + k];
+    for (size_t s = 0; s < S; ++s) {
+      const size_t k  = s % C;
+      const float  wd = wire_delay(p, k);
+      const float  ws = wire_.sink_slew_ps.empty() ? 0.f : wire_.sink_slew_ps[static_cast<size_t>(p) * C + k];
       for (unsigned t = 0; t < 2; ++t) {
-        const auto from = index(driver, k, t), to = index(p, k, t);
+        const auto from = index(driver, s, t), to = index(p, s, t);
         store(arrival_, to, arrival_[from] + wd);
         store(slew_, to, ws == 0.f ? slew_[from] : std::hypot(slew_[from], ws));
         store(depth_, to, depth_[from]);
         if (k == options_.path_corner) {
-          store_predecessor(p * 2 + t, {driver, static_cast<uint8_t>(t)});
+          store_predecessor(path_index(p, s / C, t), {driver, static_cast<uint8_t>(t)});
         }
       }
     }
     return;
   }
-  const auto cell  = netlist_.cell_of(p);
   const auto local = netlist_.local_of(p);
-  const auto type  = netlist_.type_of(cell);
   const auto arcs  = types_.arcs_into(type, local);
   if (arcs.empty()) {
     return;
   }
   const auto* type_arcs = types_.arcs(type).data();
-  for (size_t k = 0; k < C; ++k) {
+  for (size_t s = 0; s < S; ++s) {
+    const size_t k = s % C;
     // Start the pin from nothing: this is also the update of a pin that already has a value.
     for (unsigned t = 0; t < 2; ++t) {
-      store(arrival_, index(p, k, t), -inf);
-      store(slew_, index(p, k, t), 0.f);
-      store(depth_, index(p, k, t), uint16_t{0});
+      store(arrival_, index(p, s, t), -inf);
+      store(slew_, index(p, s, t), 0.f);
+      store(depth_, index(p, s, t), uint16_t{0});
       if (k == options_.path_corner) {
-        store_predecessor(p * 2 + t, {});
+        store_predecessor(path_index(p, s / C, t), {});
       }
     }
     const float load = net == no_index ? 0.f : net_load(net, k, false);
@@ -487,10 +654,10 @@ void Engine::recompute_arrival(uint32_t p) {
         continue;
       }
       const auto combos = combos_of(arc);
-      const auto offset = cell_base_[cell] + (arc_offset_[types_.type(type).first_arc + (&arc - type_arcs)]) * C + k * combos.size();
+      const auto offset = cell_base_[cell] + (arc_offset_[types_.type(type).first_arc + (&arc - type_arcs)]) * S + s * combos.size();
       for (size_t m = 0; m < combos.size(); ++m) {
         const auto in = static_cast<unsigned>(combos[m].in), out = static_cast<unsigned>(combos[m].out);
-        const auto from = index(from_pin, k, in), to = index(p, k, out);
+        const auto from = index(from_pin, s, in), to = index(p, s, out);
         if (arrival_[from] == -inf) {
           delay_changed_ = delay_changed_ || arc_delay_[offset + m] != 0.f;
           store(arc_delay_, offset + m, 0.f);
@@ -511,7 +678,7 @@ void Engine::recompute_arrival(uint32_t p) {
           store(arrival_, to, at);
           store(depth_, to, static_cast<uint16_t>(std::min<uint32_t>(depth_[from] + 1, 65535)));
           if (k == options_.path_corner) {
-            store_predecessor(p * 2 + out, {from_pin, static_cast<uint8_t>(in)});
+            store_predecessor(path_index(p, s / C, out), {from_pin, static_cast<uint8_t>(in)});
           }
         }
         store(slew_, to, std::max(slew_[to], out_slew));
@@ -520,20 +687,30 @@ void Engine::recompute_arrival(uint32_t p) {
   }
 }
 
-// The requirement of one endpoint in a corner and transition: the clock period less the setup (or the output
-// delay), the uncertainty, the depth margin, and, rebased, the clock's negative worst slack. +inf: not checked.
-float Engine::endpoint_requirement(size_t e, size_t k, unsigned t, bool rebased) const {
-  const auto& endpoint = endpoints_[e];
-  const auto  pin      = endpoint.pin;
-  const auto  at       = index(pin, k, t);
+// The requirement of one endpoint in a slot (a corner of a launch group) and transition: the time to the capture
+// edge less the setup (or the output delay), the uncertainty, the depth margin, and, rebased, the clock's negative
+// worst slack. +inf: not checked.
+float Engine::endpoint_requirement(size_t e, size_t s, unsigned t, bool rebased) const {
+  const auto&  endpoint = endpoints_[e];
+  const auto   pin      = endpoint.pin;
+  const auto   at       = index(pin, s, t);
+  const size_t k = s % corners_, g = s / corners_;
   if (arrival_[at] == -inf) {
+    return inf;
+  }
+  // The relation between the group and the capture clock, or the one given for this endpoint.
+  float relation = endpoint.unclocked ? inf : setup_relation(g, endpoint.clock);
+  if (const float given = endpoint_override_[e * groups_ + g]; !std::isnan(given)) {
+    relation = given == inf || (relation == inf && !endpoint.unclocked) ? inf : given;
+  }
+  if (relation == inf) {
     return inf;
   }
   const auto& clock = constraints_.clocks[endpoint.clock];
   const auto  cell  = netlist_.cell_of(pin);
   float       requirement = inf;
   if (endpoint.port) {
-    requirement = clock.period_ps - port_delay_[cell];
+    requirement = relation - port_delay_[cell];
   } else {
     float      setup = -inf;
     const auto type  = netlist_.type_of(cell);
@@ -546,15 +723,15 @@ float Engine::endpoint_requirement(size_t e, size_t k, unsigned t, bool rebased)
         continue;
       }
       const auto  clock_pin = netlist_.pin(cell, arc.from);
-      const Query query{0.f, 0.f, slew_[index(clock_pin, k, 0)], slew_[at]};
+      const Query query{0.f, 0.f, slew_[index(clock_pin, s, 0)], slew_[at]};
       setup = std::max(setup, types_.lookup(table, query));
     }
     if (setup == -inf) {
       return inf;
     }
-    requirement = clock.period_ps - setup;
+    requirement = relation - setup;
   }
-  requirement        -= clock.uncertainty_ps;
+  requirement        -= endpoint.unclocked ? 0.f : clock.uncertainty_ps;
   const float margin  = options_.depth_margin[k];
   if (margin > 0.f) {
     requirement -= margin * arrival_[at] / std::sqrt(static_cast<float>(std::max<uint16_t>(depth_[at], 1)));
@@ -566,14 +743,14 @@ float Engine::endpoint_requirement(size_t e, size_t k, unsigned t, bool rebased)
 void Engine::seed_endpoints(bool rebased) {
   rebased_ = rebased;
   std::fill(required_.begin(), required_.end(), inf);
-  endpoint_required_.assign(endpoints_.size() * corners_ * 2, inf);
+  endpoint_required_.assign(endpoints_.size() * slots_ * 2, inf);
   for (size_t e = 0; e < endpoints_.size(); ++e) {
-    for (size_t k = 0; k < corners_; ++k) {
+    for (size_t s = 0; s < slots_; ++s) {
       for (unsigned t = 0; t < 2; ++t) {
-        const float r = endpoint_requirement(e, k, t, rebased);
-        endpoint_required_[(e * corners_ + k) * 2 + t] = r;
+        const float r = endpoint_requirement(e, s, t, rebased);
+        endpoint_required_[(e * slots_ + s) * 2 + t] = r;
         if (r != inf) {
-          required_[index(endpoints_[e].pin, k, t)] = std::min(required_[index(endpoints_[e].pin, k, t)], r);
+          required_[index(endpoints_[e].pin, s, t)] = std::min(required_[index(endpoints_[e].pin, s, t)], r);
         }
       }
     }
@@ -593,25 +770,26 @@ void Engine::recompute_required(uint32_t p) {
   if (netlist_.untimed(p) || clock_pin_[p] != 0 || cut_[p]) {
     return;
   }
-  const size_t C    = corners_;
+  const size_t C = corners_, S = slots_;
   const auto   net  = netlist_.net_of(p);
   const auto   cell = netlist_.cell_of(p);
   const auto   local = netlist_.local_of(p);
   const auto   type  = netlist_.type_of(cell);
   // The endpoint of this pin, if any.
-  const auto endpoint = std::lower_bound(endpoints_.begin(), endpoints_.end(), p, [](const Endpoint& e, uint32_t pin) { return e.pin < pin; });
-  const size_t e      = endpoint != endpoints_.end() && endpoint->pin == p ? static_cast<size_t>(endpoint - endpoints_.begin()) : no_endpoint;
-  const auto* type_arcs = types_.arcs(type).data();
-  const auto  arcs      = types_.arcs(type);
-  for (size_t k = 0; k < C; ++k) {
+  const size_t e         = endpoint_of(p);
+  const auto*  type_arcs = types_.arcs(type).data();
+  const auto   arcs      = types_.arcs(type);
+  const bool   driver    = net != no_index && netlist_.is_driver(p);
+  for (size_t s = 0; s < S; ++s) {
+    const size_t k = s % C;
     for (unsigned t = 0; t < 2; ++t) {
-      float requirement = e == no_endpoint ? inf : endpoint_required_[(e * C + k) * 2 + t];
-      if (net != no_index && netlist_.is_driver(p)) {
+      float requirement = e == no_endpoint ? inf : endpoint_required_[(e * S + s) * 2 + t];
+      if (driver) {
         for (const auto sink : netlist_.sinks_of(net)) {
           if (netlist_.untimed(sink) || clock_pin_[sink] != 0) {
             continue;
           }
-          requirement = std::min(requirement, required_[index(sink, k, t)] - wire_delay(sink, k));
+          requirement = std::min(requirement, required_[index(sink, s, t)] - wire_delay(sink, k));
         }
       }
       for (size_t j = 0; j < arcs.size(); ++j) {
@@ -621,19 +799,19 @@ void Engine::recompute_required(uint32_t p) {
         }
         const auto combos = combos_of(arc);
         const auto offset
-            = cell_base_[cell] + (arc_offset_[types_.type(type).first_arc + (&arc - type_arcs)]) * C + k * combos.size();
+            = cell_base_[cell] + (arc_offset_[types_.type(type).first_arc + (&arc - type_arcs)]) * S + s * combos.size();
         const auto to_pin = netlist_.pin(cell, arc.to);
         for (size_t m = 0; m < combos.size(); ++m) {
           if (static_cast<unsigned>(combos[m].in) != t) {
             continue;
           }
-          const auto out_required = required_[index(to_pin, k, static_cast<unsigned>(combos[m].out))];
+          const auto out_required = required_[index(to_pin, s, static_cast<unsigned>(combos[m].out))];
           if (out_required != inf) {
             requirement = std::min(requirement, out_required - arc_delay_[offset + m]);
           }
         }
       }
-      store(required_, index(p, k, t), requirement);
+      store(required_, index(p, s, t), requirement);
     }
   }
 }
@@ -649,16 +827,19 @@ void Engine::measure_endpoints() {
     endpoint_path_slack_[e] = inf;
     for (size_t k = 0; k < C; ++k) {
       float slack_k = inf;
-      for (unsigned t = 0; t < 2; ++t) {
-        const auto at = index(endpoint.pin, k, t);
-        if (arrival_[at] == -inf || required_[at] == inf) {
-          continue;
-        }
-        const float s = required_[at] - arrival_[at];
-        slack_k       = std::min(slack_k, s);
-        if (k == options_.path_corner && s < endpoint_path_slack_[e]) {
-          endpoint_path_slack_[e]      = s;
-          endpoint_path_transition_[e] = static_cast<uint8_t>(t);
+      for (size_t g = 0; g < groups_; ++g) {
+        for (unsigned t = 0; t < 2; ++t) {
+          const auto at = index(endpoint.pin, g * C + k, t);
+          if (arrival_[at] == -inf || required_[at] == inf) {
+            continue;
+          }
+          const float s = required_[at] - arrival_[at];
+          slack_k       = std::min(slack_k, s);
+          if (k == options_.path_corner && s < endpoint_path_slack_[e]) {
+            endpoint_path_slack_[e]      = s;
+            endpoint_path_transition_[e] = static_cast<uint8_t>(t);
+            endpoint_path_group_[e]      = static_cast<uint8_t>(g);
+          }
         }
       }
       if (slack_k == inf) {
@@ -720,12 +901,12 @@ void Engine::criticality_pass() {
   const float window = std::max(options_.window_fraction * longest, 1e-3f);
   for (uint32_t p = 0; p < netlist_.pins(); ++p) {
     float best = 0.f;
-    for (size_t k = 0; k < C; ++k) {
-      if (!(options_.setup_corners >> k & 1u)) {
+    for (size_t s = 0; s < slots_; ++s) {
+      if (!(options_.setup_corners >> (s % C) & 1u)) {
         continue;
       }
       for (unsigned t = 0; t < 2; ++t) {
-        const auto at = index(p, k, t);
+        const auto at = index(p, s, t);
         if (arrival_[at] == -inf || required_[at] == inf) {
           continue;
         }
@@ -766,31 +947,34 @@ void Engine::evaluate() {
 }
 
 void Engine::forward_early() {
-  const size_t h = hold_corner_;
+  const size_t h = hold_corner_, G = groups_;
   // The hold walk's state is allocated here, on first use: a caller that only ranks never pays for it.
-  early_arrival_.assign(netlist_.pins() * 2, inf);
-  early_slew_.assign(netlist_.pins() * 2, 0.f);
+  early_arrival_.assign(netlist_.pins() * G * 2, inf);
+  early_slew_.assign(netlist_.pins() * G * 2, 0.f);
+  const auto at = [&](uint32_t pin, size_t g, unsigned t) { return (static_cast<size_t>(pin) * G + g) * 2 + t; };
   for (const auto& port : netlist_.ports()) {
     const auto pin = netlist_.pin(port.cell, 0);
     if (!port.input || clock_pin_[pin] != 0 || cut_[pin]) {
       continue;
     }
-    float delay = 0, slew = constraints_.default_input_slew_ps;
-    if (const auto entry = port_input_[port.cell]; entry != no_index) {
-      delay = constraints_.inputs[entry].delay_ps;
-      slew  = constraints_.inputs[entry].slew_ps;
+    if (const auto entry = port_input_[port.cell]; entry != no_index && !constraints_.inputs[entry].early) {
+      continue;
     }
+    const auto g = input_group(port.cell);
     for (unsigned t = 0; t < 2; ++t) {
-      early_arrival_[pin * 2 + t] = delay;
-      early_slew_[pin * 2 + t]    = slew;
+      const auto seed               = input_seed(port.cell, h, t, true);
+      early_arrival_[at(pin, g, t)] = seed.arrival;
+      early_slew_[at(pin, g, t)]    = seed.slew;
     }
   }
   for (uint32_t pin = 0; pin < netlist_.pins(); ++pin) {
     if (clock_pin_[pin] == 2 && !cut_[pin]) {
-      const float clock_slew   = constraints_.clocks[pin_clock_[pin]].slew_ps;
-      early_arrival_[pin * 2]  = 0.f;
-      early_slew_[pin * 2]     = clock_slew;
-      early_slew_[pin * 2 + 1] = clock_slew;
+      const auto& clock                       = constraints_.clocks[pin_clock_[pin]];
+      early_arrival_[at(pin, clock.group, 0)] = 0.f;
+      for (size_t g = 0; g < G; ++g) {
+        early_slew_[at(pin, g, 0)] = clock.slew_ps;
+        early_slew_[at(pin, g, 1)] = clock.slew_ps;
+      }
     }
   }
   for (const uint32_t p : netlist_.order()) {
@@ -802,55 +986,61 @@ void Engine::forward_early() {
       const auto  driver = netlist_.driver_of(net);
       const float wd     = wire_delay(p, h);
       const float ws     = wire_.sink_slew_ps.empty() ? 0.f : wire_.sink_slew_ps[static_cast<size_t>(p) * corners_ + h];
-      for (unsigned t = 0; t < 2; ++t) {
-        early_arrival_[p * 2 + t] = early_arrival_[driver * 2 + t] + wd;
-        early_slew_[p * 2 + t]    = ws == 0.f ? early_slew_[driver * 2 + t] : std::hypot(early_slew_[driver * 2 + t], ws);
+      for (size_t g = 0; g < G; ++g) {
+        for (unsigned t = 0; t < 2; ++t) {
+          early_arrival_[at(p, g, t)] = early_arrival_[at(driver, g, t)] + wd;
+          early_slew_[at(p, g, t)]    = ws == 0.f ? early_slew_[at(driver, g, t)] : std::hypot(early_slew_[at(driver, g, t)], ws);
+        }
       }
       continue;
     }
-    const auto           cell = netlist_.cell_of(p);
-    const auto           type = netlist_.type_of(cell);
-    const auto           arcs = types_.arcs_into(type, netlist_.local_of(p));
-    const float          load = net == no_index ? 0.f : net_load(net, h, true);
-    std::array<float, 2> slew_min{inf, inf};
-    for (const auto& arc : arcs) {
-      if (!timed_arc(arc)) {
-        continue;
-      }
-      const auto from_pin = netlist_.pin(cell, arc.from);
-      if (cut_[from_pin]) {
-        continue;
-      }
-      for (const auto& combo : combos_of(arc)) {
-        const auto in = static_cast<unsigned>(combo.in), out = static_cast<unsigned>(combo.out);
-        if (early_arrival_[from_pin * 2 + in] == inf) {
+    const auto  cell = netlist_.cell_of(p);
+    const auto  type = netlist_.type_of(cell);
+    const auto  arcs = types_.arcs_into(type, netlist_.local_of(p));
+    const float load = net == no_index ? 0.f : net_load(net, h, true);
+    for (size_t g = 0; g < G; ++g) {
+      std::array<float, 2> slew_min{inf, inf};
+      for (const auto& arc : arcs) {
+        if (!timed_arc(arc)) {
           continue;
         }
-        const auto delay_table = types_.table(arc, h, 0, out);
-        if (delay_table == no_index) {
+        const auto from_pin = netlist_.pin(cell, arc.from);
+        if (cut_[from_pin]) {
           continue;
         }
-        const Query query{early_slew_[from_pin * 2 + in], load, 0.f, 0.f};
-        const float delay           = types_.lookup(delay_table, query);
-        const auto  slew_table      = types_.table(arc, h, 1, out);
-        const float out_slew        = slew_table == no_index ? 0.f : std::max(0.f, types_.lookup(slew_table, query));
-        early_arrival_[p * 2 + out] = std::min(early_arrival_[p * 2 + out], early_arrival_[from_pin * 2 + in] + delay);
-        slew_min[out]               = std::min(slew_min[out], out_slew);
+        for (const auto& combo : combos_of(arc)) {
+          const auto in = static_cast<unsigned>(combo.in), out = static_cast<unsigned>(combo.out);
+          if (early_arrival_[at(from_pin, g, in)] == inf) {
+            continue;
+          }
+          const auto delay_table = types_.table(arc, h, 0, out);
+          if (delay_table == no_index) {
+            continue;
+          }
+          const Query query{early_slew_[at(from_pin, g, in)], load, 0.f, 0.f};
+          const float delay             = types_.lookup(delay_table, query);
+          const auto  slew_table        = types_.table(arc, h, 1, out);
+          const float out_slew          = slew_table == no_index ? 0.f : std::max(0.f, types_.lookup(slew_table, query));
+          early_arrival_[at(p, g, out)] = std::min(early_arrival_[at(p, g, out)], early_arrival_[at(from_pin, g, in)] + delay);
+          slew_min[out]                 = std::min(slew_min[out], out_slew);
+        }
       }
-    }
-    for (unsigned t = 0; t < 2; ++t) {
-      if (slew_min[t] != inf) {
-        early_slew_[p * 2 + t] = slew_min[t];
+      for (unsigned t = 0; t < 2; ++t) {
+        if (slew_min[t] != inf) {
+          early_slew_[at(p, g, t)] = slew_min[t];
+        }
       }
     }
   }
 }
 
 void Engine::check_hold() {
-  const size_t h = hold_corner_;
+  const size_t h = hold_corner_, G = groups_;
   hold_slack_.assign(netlist_.pins(), inf);
   std::vector<float> wns(std::max<size_t>(1, constraints_.clocks.size()), inf), tns(wns.size(), 0.f);
-  for (const auto& endpoint : endpoints_) {
+  const auto at = [&](uint32_t pin, size_t g, unsigned t) { return (static_cast<size_t>(pin) * G + g) * 2 + t; };
+  for (size_t e = 0; e < endpoints_.size(); ++e) {
+    const auto& endpoint = endpoints_[e];
     if (endpoint.port) {
       continue;
     }
@@ -858,27 +1048,33 @@ void Engine::check_hold() {
     const auto cell  = netlist_.cell_of(pin);
     const auto type  = netlist_.type_of(cell);
     float      worst = inf;
-    for (unsigned t = 0; t < 2; ++t) {
-      if (early_arrival_[pin * 2 + t] == inf) {
+    for (size_t g = 0; g < G; ++g) {
+      const float relation = hold_relation(g, endpoint.clock);
+      if (relation == inf || endpoint_override_[e * groups_ + g] == inf) {
         continue;
       }
-      float hold = -inf;
-      for (const auto& arc : types_.arcs_into(type, netlist_.local_of(pin))) {
-        if (arc.kind != Arc_kind::hold_rise) {
+      for (unsigned t = 0; t < 2; ++t) {
+        if (early_arrival_[at(pin, g, t)] == inf) {
           continue;
         }
-        const auto table = types_.table(arc, h, 2, t);
-        if (table == no_index) {
+        float hold = -inf;
+        for (const auto& arc : types_.arcs_into(type, netlist_.local_of(pin))) {
+          if (arc.kind != Arc_kind::hold_rise) {
+            continue;
+          }
+          const auto table = types_.table(arc, h, 2, t);
+          if (table == no_index) {
+            continue;
+          }
+          const auto  clock_pin = netlist_.pin(cell, arc.from);
+          const Query query{0.f, 0.f, early_slew_[at(clock_pin, g, 0)], early_slew_[at(pin, g, t)]};
+          hold = std::max(hold, types_.lookup(table, query));
+        }
+        if (hold == -inf) {
           continue;
         }
-        const auto  clock_pin = netlist_.pin(cell, arc.from);
-        const Query query{0.f, 0.f, early_slew_[clock_pin * 2], early_slew_[pin * 2 + t]};
-        hold = std::max(hold, types_.lookup(table, query));
+        worst = std::min(worst, early_arrival_[at(pin, g, t)] - hold - relation);
       }
-      if (hold == -inf) {
-        continue;
-      }
-      worst = std::min(worst, early_arrival_[pin * 2 + t] - hold);
     }
     hold_slack_[pin] = worst;
     if (worst != inf) {
@@ -907,9 +1103,11 @@ void Engine::electrical_excess(uint32_t p, double& slew_excess, double& cap_exce
     }
     const float limit = types_.max_transition(type, local, k);
     if (limit != inf && limit > 0) {
-      for (unsigned t = 0; t < 2; ++t) {
-        if (arrival_[index(p, k, t)] != -inf) {
-          slew_excess = std::max<double>(slew_excess, (slew_[index(p, k, t)] - limit) / limit);
+      for (size_t g = 0; g < groups_; ++g) {
+        for (unsigned t = 0; t < 2; ++t) {
+          if (const auto at = index(p, g * corners_ + k, t); arrival_[at] != -inf) {
+            slew_excess = std::max<double>(slew_excess, (slew_[at] - limit) / limit);
+          }
         }
       }
     }
@@ -923,17 +1121,32 @@ void Engine::electrical_excess(uint32_t p, double& slew_excess, double& cap_exce
   }
 }
 
+// How far the driver of a net is over the fanout limit of the design, as a ratio (0: within it, or no limit).
+double Engine::fanout_excess(uint32_t p) const {
+  if (constraints_.max_fanout <= 0 || netlist_.untimed(p) || clock_pin_[p] != 0) {
+    return 0;
+  }
+  const auto net = netlist_.net_of(p);
+  if (net == no_index || !netlist_.is_driver(p)) {
+    return 0;
+  }
+  const double sinks = static_cast<double>(netlist_.sinks_of(net).size());
+  return sinks > constraints_.max_fanout * (1 + 1e-6) ? sinks / constraints_.max_fanout - 1 : 0;
+}
+
 Electrical_pin Engine::pin_electrical(uint32_t p) {
   settle();
   double slew_excess, cap_excess;
   electrical_excess(p, slew_excess, cap_excess);
-  return {p, static_cast<uint8_t>((slew_excess > 0) + (cap_excess > 0)),
-          static_cast<float>((slew_excess > 0 ? slew_excess : 0) + (cap_excess > 0 ? cap_excess : 0))};
+  const double fanout = fanout_excess(p);
+  return {p, static_cast<uint8_t>((slew_excess > 0) + (cap_excess > 0) + (fanout > 0)),
+          static_cast<float>((slew_excess > 0 ? slew_excess : 0) + (cap_excess > 0 ? cap_excess : 0) + fanout)};
 }
 
 void Engine::check_electrical() {
   report_.slew_violations        = 0;
   report_.capacitance_violations = 0;
+  report_.fanout_violations      = 0;
   report_.electrical_excess      = 0;
   electrical_pins_.clear();
   for (uint32_t p = 0; p < netlist_.pins(); ++p) {
@@ -947,21 +1160,26 @@ void Engine::check_electrical() {
       ++report_.capacitance_violations;
       report_.electrical_excess += cap_excess;
     }
-    if (slew_excess > 0 || cap_excess > 0) {
-      electrical_pins_.push_back({p, static_cast<uint8_t>((slew_excess > 0) + (cap_excess > 0)),
-                                  static_cast<float>(slew_excess + cap_excess)});
+    const double fanout = fanout_excess(p);
+    if (fanout > 0) {
+      ++report_.fanout_violations;
+      report_.electrical_excess += fanout;
+    }
+    if (slew_excess > 0 || cap_excess > 0 || fanout > 0) {
+      electrical_pins_.push_back({p, static_cast<uint8_t>((slew_excess > 0) + (cap_excess > 0) + (fanout > 0)),
+                                  static_cast<float>(slew_excess + cap_excess + fanout)});
     }
   }
 }
 
 float Engine::slack(uint32_t pin) const {
   float worst = inf;
-  for (size_t k = 0; k < corners_; ++k) {
-    if (!(options_.setup_corners >> k & 1u)) {
+  for (size_t s = 0; s < slots_; ++s) {
+    if (!(options_.setup_corners >> (s % corners_) & 1u)) {
       continue;
     }
     for (unsigned t = 0; t < 2; ++t) {
-      const auto at = index(pin, k, t);
+      const auto at = index(pin, s, t);
       if (arrival_[at] != -inf && required_[at] != inf) {
         worst = std::min(worst, required_[at] - arrival_[at]);
       }
@@ -985,7 +1203,13 @@ float Engine::arc_delay(uint32_t cell, uint32_t arc, size_t corner, unsigned in,
   const auto  combos = combos_of(a);
   for (size_t m = 0; m < combos.size(); ++m) {
     if (combos[m].in == static_cast<int8_t>(in) && combos[m].out == static_cast<int8_t>(out)) {
-      return arc_delay_[cell_base_[cell] + arc_offset_[types_.type(type).first_arc + arc] * corners_ + corner * combos.size() + m];
+      // The delay of the group that reaches the arc (the largest, when several do).
+      float delay = 0;
+      for (size_t g = 0; g < groups_; ++g) {
+        delay = std::max(delay, arc_delay_[cell_base_[cell] + arc_offset_[types_.type(type).first_arc + arc] * slots_
+                                           + (g * corners_ + corner) * combos.size() + m]);
+      }
+      return delay;
     }
   }
   return std::numeric_limits<float>::quiet_NaN();
@@ -994,6 +1218,8 @@ float Engine::arc_delay(uint32_t cell, uint32_t arc, size_t corner, unsigned in,
 std::vector<Path_point> Engine::worst_path(uint32_t endpoint) const {
   std::vector<Path_point> path;
   unsigned                transition = 0;
+  size_t                  group      = 0;
+  const size_t            C          = corners_;
   if (endpoint == no_index) {
     float worst = inf;
     for (size_t e = 0; e < endpoints_.size(); ++e) {
@@ -1001,25 +1227,32 @@ std::vector<Path_point> Engine::worst_path(uint32_t endpoint) const {
         worst      = endpoint_path_slack_[e];
         endpoint   = endpoints_[e].pin;
         transition = endpoint_path_transition_[e];
+        group      = endpoint_path_group_[e];
       }
     }
     if (endpoint == no_index) {
       return path;
     }
+  } else if (const auto e = endpoint_of(endpoint); e != no_endpoint && endpoint_path_slack_[e] != inf) {
+    transition = endpoint_path_transition_[e];
+    group      = endpoint_path_group_[e];
   } else {
     float worst = inf;
-    for (unsigned t = 0; t < 2; ++t) {
-      const auto at = index(endpoint, options_.path_corner, t);
-      if (arrival_[at] != -inf && (worst == inf || -arrival_[at] < worst)) {
-        worst      = -arrival_[at];
-        transition = t;
+    for (size_t g = 0; g < groups_; ++g) {
+      for (unsigned t = 0; t < 2; ++t) {
+        const auto at = index(endpoint, g * C + options_.path_corner, t);
+        if (arrival_[at] != -inf && (worst == inf || -arrival_[at] < worst)) {
+          worst      = -arrival_[at];
+          transition = t;
+          group      = g;
+        }
       }
     }
   }
   uint32_t pin = endpoint;
   while (pin != no_index && path.size() < netlist_.pins() + 1) {
-    path.push_back({pin, transition, arrival_[index(pin, options_.path_corner, transition)]});
-    const auto& before = predecessor_[pin * 2 + transition];
+    path.push_back({pin, transition, arrival_[index(pin, group * C + options_.path_corner, transition)]});
+    const auto& before = predecessor_[path_index(pin, group, transition)];
     pin                = before.pin;
     transition         = before.transition;
   }
@@ -1095,12 +1328,12 @@ void Engine::touch_endpoint(uint32_t pin) {
 // endpoint slack, kept up to date.
 void Engine::refresh_endpoint(size_t e) {
   float worst = inf;
-  for (size_t k = 0; k < corners_; ++k) {
-    if (!(options_.setup_corners >> k & 1u)) {
+  for (size_t s = 0; s < slots_; ++s) {
+    if (!(options_.setup_corners >> (s % corners_) & 1u)) {
       continue;
     }
     for (unsigned t = 0; t < 2; ++t) {
-      const auto at = index(endpoints_[e].pin, k, t);
+      const auto at = index(endpoints_[e].pin, s, t);
       if (arrival_[at] != -inf && required_[at] != inf) {
         worst = std::min(worst, required_[at] - arrival_[at]);
       }
@@ -1113,8 +1346,9 @@ void Engine::settle() {
   if (!journal_on_ || (fwd_heap_.empty() && bwd_heap_.empty())) {
     return;
   }
-  const size_t         C = corners_;
-  std::array<float, 192> before{};  // arrival, slew, depth of the 2 transitions of up to 31 corners: 186 values
+  const size_t C = slots_;
+  before_.resize(C * 6);  // arrival, slew, depth of the 2 transitions of every slot
+  auto& before = before_;
   // Forward: lowest position first; a pin that changes wakes what it feeds.
   while (!fwd_heap_.empty()) {
     std::pop_heap(fwd_heap_.begin(), fwd_heap_.end(), std::greater<>());
@@ -1303,9 +1537,9 @@ void Engine::resize_cell(uint32_t cell, uint32_t type) {
       push_forward(pin);
     }
     if (const auto e = endpoint_of(pin); e != no_endpoint) {
-      for (size_t k = 0; k < corners_; ++k) {
+      for (size_t k = 0; k < slots_; ++k) {
         for (unsigned t = 0; t < 2; ++t) {
-          store(endpoint_required_, (e * corners_ + k) * 2 + t, endpoint_requirement(e, k, t, false));
+          store(endpoint_required_, (e * slots_ + k) * 2 + t, endpoint_requirement(e, k, t, false));
         }
       }
       touch_endpoint(pin);
@@ -1387,11 +1621,12 @@ uint32_t Engine::add_cell(uint32_t type) {
   const auto cell = netlist_.append_cell(type);
   const size_t n = t.pin_count, C = corners_;
   journal_.push_back({Undo_kind::grow_cells, 0, static_cast<uint32_t>(pins), cells});
-  arrival_.resize((pins + n) * C * 2, -inf);
-  slew_.resize((pins + n) * C * 2, 0.f);
-  required_.resize((pins + n) * C * 2, inf);
-  depth_.resize((pins + n) * C * 2, 0);
-  predecessor_.resize((pins + n) * 2);
+  const size_t S = slots_, G = groups_;
+  arrival_.resize((pins + n) * S * 2, -inf);
+  slew_.resize((pins + n) * S * 2, 0.f);
+  required_.resize((pins + n) * S * 2, inf);
+  depth_.resize((pins + n) * S * 2, 0);
+  predecessor_.resize((pins + n) * G * 2);
   criticality_.resize(pins + n, 0.f);
   clock_pin_.resize(pins + n, 0);
   pin_clock_.resize(pins + n, 0);
@@ -1403,26 +1638,26 @@ uint32_t Engine::add_cell(uint32_t type) {
     hold_slack_.resize(pins + n, inf);
   }
   if (!early_arrival_.empty()) {
-    early_arrival_.resize((pins + n) * 2, inf);
-    early_slew_.resize((pins + n) * 2, 0.f);
+    early_arrival_.resize((pins + n) * G * 2, inf);
+    early_slew_.resize((pins + n) * G * 2, 0.f);
   }
   wire_.sink_delay_ps.resize((pins + n) * C, 0.f);
   wire_.sink_slew_ps.resize((pins + n) * C, 0.f);
   port_load_.push_back(0.f);
   port_delay_.push_back(0.f);
   port_input_.push_back(no_index);
-  arc_delay_.resize(cell_base_.back() + type_block_[type] * C, 0.f);
+  arc_delay_.resize(cell_base_.back() + type_block_[type] * S, 0.f);
   cell_base_.push_back(static_cast<uint32_t>(arc_delay_.size()));
   return cell;
 }
 
 void Engine::shrink_cells(size_t cells, uint32_t pins) {
-  const size_t C = corners_;
-  arrival_.resize(static_cast<size_t>(pins) * C * 2);
-  slew_.resize(static_cast<size_t>(pins) * C * 2);
-  required_.resize(static_cast<size_t>(pins) * C * 2);
-  depth_.resize(static_cast<size_t>(pins) * C * 2);
-  predecessor_.resize(static_cast<size_t>(pins) * 2);
+  const size_t C = corners_, S = slots_, G = groups_;
+  arrival_.resize(static_cast<size_t>(pins) * S * 2);
+  slew_.resize(static_cast<size_t>(pins) * S * 2);
+  required_.resize(static_cast<size_t>(pins) * S * 2);
+  depth_.resize(static_cast<size_t>(pins) * S * 2);
+  predecessor_.resize(static_cast<size_t>(pins) * G * 2);
   criticality_.resize(pins);
   clock_pin_.resize(pins);
   pin_clock_.resize(pins);
@@ -1434,8 +1669,8 @@ void Engine::shrink_cells(size_t cells, uint32_t pins) {
     hold_slack_.resize(pins);
   }
   if (!early_arrival_.empty()) {
-    early_arrival_.resize(static_cast<size_t>(pins) * 2);
-    early_slew_.resize(static_cast<size_t>(pins) * 2);
+    early_arrival_.resize(static_cast<size_t>(pins) * G * 2);
+    early_slew_.resize(static_cast<size_t>(pins) * G * 2);
   }
   wire_.sink_delay_ps.resize(static_cast<size_t>(pins) * C);
   wire_.sink_slew_ps.resize(static_cast<size_t>(pins) * C);
