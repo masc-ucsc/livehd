@@ -75,8 +75,9 @@ longest endpoints are all behind them. Without the cut those pins were untimed a
 `lsearch`, `create_clock`, IO delays, `set_load`, `set_input_transition`, port false paths); numbers are in the
 Liberty units; every command or form it does not model is listed in `Sdc::unsupported`. `physical_rank.hpp`: the engine
 behind the placement ranking callback, selectable with `--set synth.timing.engine=opentimer|fast|compare` (compare runs
-both and logs the agreement per call in the placement's `pass.opentimer.incremental` log). Detailed evaluations and
-what-if edits still go to OpenTimer.
+both and logs the agreement per call in the placement's `pass.opentimer.incremental` log). `--set synth.timing.engine=fast`
+also runs the detailed evaluations and the what-if edits of repair on the engine (`Physical_ranker::whatif()`: resize,
+add_cell, set_net with rollback, settled incrementally; OpenTimer stays for the final report).
 
 ## Tools
 

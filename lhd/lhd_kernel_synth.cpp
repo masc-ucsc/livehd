@@ -3279,6 +3279,12 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
           fast_ranker = std::make_unique<livehd::timing::fast::Physical_ranker>(std::move(ranker_options));
         }
       };
+      if (timing_engine == "fast") {
+        // Ranking, detailed evaluation and the what-if edits of repair all run on the native engine; OpenTimer is
+        // only used for the final report.
+        ensure_fast_ranker();
+        place_options.whatif = &fast_ranker->whatif();
+      }
       const auto fast_rank = [&](const livehd::placement::Ranking_view& state) {
         Stdout_to_log redirect(timing_log);
         ensure_fast_ranker();
@@ -3439,6 +3445,14 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
       const auto evaluate = [&](const livehd::placement::Result& state) {
         Phase_timer phase(res, "pass.opentimer.incremental");
         const auto  controls = livehd::placement::prects_networks(timing_tech, state.floorplan, state.prects);
+        if (timing_engine == "fast") {
+          ensure_fast_ranker();
+          Stdout_to_log redirect(timing_log);
+          auto          fb = livehd::placement::prects_data_timing(
+              fast_ranker->evaluate(state.graph, state.parasitics, controls.timing_cuts), controls);
+          show_timing(fb);
+          return fb;
+        }
         auto        fb       = estimate({state.graph, state.parasitics, controls}, livehd::opentimer::Physical_session::Purpose::detailed);
         if (timing_engine == "compare") {
           ensure_fast_ranker();
@@ -3466,10 +3480,15 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
       // fresh budget at each repair phase. Reserve two of eight evaluations for
       // final legalization and the standalone timing report. Ranking is free.
       const size_t eval_budget = place_options.eval_budget;
-      const livehd::placement::Trial_admission admit_trial = [&] {
+      // The detailed evaluations so far, by whichever engine runs them.
+      const auto detailed_count = [&]() -> size_t {
+        if (timing_engine == "fast") {
+          return fast_ranker ? fast_ranker->statistics().evaluations : 0;
+        }
         const auto& stats = timing_session.statistics();
-        return stats.evaluations - stats.rankings < eval_budget;
+        return stats.evaluations - stats.rankings;
       };
+      const livehd::placement::Trial_admission admit_trial = [&] { return detailed_count() < eval_budget; };
       // Sizing and buffering are what fix electrical violations (a 271-load net with 44 ns of wire delay), so they are
       // never starved by the optional work that runs first: IO resynthesis and the region refinement evaluate
       // unconditionally and can spend the whole shared allowance (eyeriss: the Steiner buffering ran 0 attempts).
@@ -3484,8 +3503,7 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
       };
       Own_allowance sizing_allowance, buffering_allowance;
       const auto    own_allowance = [&](Own_allowance& state) {
-        const auto&  stats = timing_session.statistics();
-        const size_t used  = stats.evaluations - stats.rankings;
+        const size_t used = detailed_count();
         if (!state.started) {
           state.started = true;
           state.base    = used;
@@ -3495,10 +3513,9 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
       const livehd::placement::Trial_admission admit_sizing    = [&] { return own_allowance(sizing_allowance); };
       const livehd::placement::Trial_admission admit_buffering = [&] { return own_allowance(buffering_allowance); };
       const livehd::placement::Trial_admission admit_refinement = [&] {
-        const auto& stats = timing_session.statistics();
         // Leave room for sizing and buffer repair. Rejected placement trials
         // must not consume the entire shared allowance on overloaded designs.
-        return admit_trial() && (!run_resize || stats.evaluations - stats.rankings < eval_budget - 2);
+        return admit_trial() && (!run_resize || detailed_count() < eval_budget - 2);
       };
       std::unique_ptr<livehd::placement::Io_timing_flow> io_flow;
       if (io_store) {
@@ -3847,18 +3864,11 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
                 iter_options.growth_budget           = std::make_shared<livehd::placement::Growth_budget>(*place_options.growth_budget);
                 iter_options.growth_budget->fraction = place_options.growth_budget->fraction * (it + 2);
               }
-              const auto base = [&] {
-                const auto& stats = timing_session.statistics();
-                return stats.evaluations - stats.rankings;
-              }();
-              const livehd::placement::Trial_admission admit_iteration = [&] {
-                const auto& stats = timing_session.statistics();
-                return stats.evaluations - stats.rankings - base < loop_allowance / 2;
-              };
+              const auto base = detailed_count();
+              const livehd::placement::Trial_admission admit_iteration = [&] { return detailed_count() - base < loop_allowance / 2; };
               Own_allowance                            loop_buffering;
               const livehd::placement::Trial_admission admit_loop_buffering = [&] {
-                const auto&  stats = timing_session.statistics();
-                const size_t used  = stats.evaluations - stats.rankings;
+                const size_t used = detailed_count();
                 if (!loop_buffering.started) {
                   loop_buffering.started = true;
                   loop_buffering.base    = used;
