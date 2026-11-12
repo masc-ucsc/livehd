@@ -161,3 +161,69 @@ TEST(PhysicalRank, DetailedEvaluationFillsTheFeedback) {
   ASSERT_FALSE(fb.path.empty());
   EXPECT_EQ(fb.path.back(), "ub:D");
 }
+
+TEST(PhysicalRank, WhatifEditsAgreeWithAFullEvaluationOfTheEditedDesign) {
+  const std::set<std::string> no_cuts;
+  Design                      design;
+  fast::Physical_ranker       ranker(options());
+  const auto                  base = ranker.evaluate(design.graph, rc(5, 2000), no_cuts);
+  auto&                       w    = ranker.whatif();
+  const double                wns0 = w.wns();
+  EXPECT_NEAR(wns0, *base.wns, 1e-3);
+  EXPECT_NEAR(*w.pin("ub:D").slack, *base.find_label("ub:D")->slack, 1e-3);
+  EXPECT_NEAR(*w.load("ua:Q"), 7.0, 1e-3);
+  EXPECT_NEAR(w.clock_period(), 1000.0, 1e-3);
+  EXPECT_NEAR(*w.pin_capacitance("INV", "A"), 2.0, 1e-3);
+  ASSERT_TRUE(w.arc("INV", "A", "Y", 10, 5).has_value());
+  EXPECT_FALSE(w.arc("INV", "A", "Nope", 10, 5).has_value());
+
+  // A resize against the full evaluation of a design that has the other cell.
+  const auto m = w.mark();
+  w.resize("inv", "INV2");
+  const double resized = w.wns();
+  EXPECT_NE(resized, wns0);
+  {
+    Design other;
+    auto   inv2 = other.library.create_io("INV2");
+    inv2->add_input("A", 1);
+    inv2->add_output("Y", 2);
+    for (auto node : other.graph->body().nodes()) {
+      if (node.get_name() == "inv") {
+        node.set_subnode(inv2);
+      }
+    }
+    fast::Physical_ranker fresh(options());
+    const auto            fb = fresh.evaluate(other.graph, rc(5, 2000), no_cuts);
+    EXPECT_NEAR(resized, *fb.wns, 1e-3);
+    EXPECT_NEAR(*w.pin("ub:D").slack, *fb.find_label("ub:D")->slack, 1e-3);
+  }
+  w.rollback(m);
+  EXPECT_NEAR(w.wns(), wns0, 1e-4);
+
+  // A buffer in front of the inverter: it slows the path, and rolling back removes the cell and its name.
+  w.add_cell("buf1", "BUF");
+  auto net1   = rc(5, 2000);
+  auto edited = std::make_shared<ph::Parasitics>(*net1);
+  edited->nets[0].nodes = {{"ua:Q", 0}, {"buf1:A", 1}};
+  edited->nets[0].edges = {{0, 1, 500}};
+  ph::Rc_net out;
+  out.driver = "buf1:Y";
+  out.nodes  = {{"buf1:Y", 0}, {"inv:A", 2}};
+  out.edges  = {{0, 1, 500}};
+  w.set_net(edited->nets[0]);
+  w.set_net(out);
+  const double buffered = w.wns();
+  EXPECT_LT(buffered, wns0);
+  const auto failing = w.failing_endpoints(1e9);
+  ASSERT_FALSE(failing.empty());
+  EXPECT_EQ(failing.front().first, "ub:D");
+  EXPECT_NEAR(failing.front().second, buffered, 1e-3);
+  EXPECT_GT(w.pin("buf1:Y").arrival.value_or(0), 0);
+  w.rollback(m);
+  EXPECT_NEAR(w.wns(), wns0, 1e-4);
+  EXPECT_FALSE(w.pin("buf1:Y").arrival.has_value());
+  // A full evaluation after edits starts from the base again.
+  const auto again = ranker.evaluate(design.graph, rc(5, 2000), no_cuts);
+  EXPECT_NEAR(*again.wns, wns0, 1e-4);
+  EXPECT_THROW(w.resize("nothing", "INV2"), std::invalid_argument);
+}

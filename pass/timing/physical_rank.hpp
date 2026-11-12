@@ -4,13 +4,16 @@
 #include <cstdint>
 #include <memory>
 #include <set>
+#include <span>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
 #include "bind_graph.hpp"
 #include "core/interned_name.hpp"
 #include "core/physical_rc.hpp"
+#include "core/timing_whatif.hpp"
 #include "core/timing_feedback.hpp"
 #include "engine.hpp"
 #include "sdc.hpp"
@@ -43,6 +46,7 @@ public:
   };
 
   explicit Physical_ranker(Options options);
+  ~Physical_ranker();
 
   [[nodiscard]] livehd::timing::Feedback rank(const std::shared_ptr<hhds::Graph>&                  graph,
                                               const std::shared_ptr<const physical::Parasitics>& rc,
@@ -55,6 +59,11 @@ public:
                                                   const std::shared_ptr<const physical::Parasitics>& rc,
                                                   const std::set<std::string>&                       cuts);
 
+  // Transient edits on top of the last evaluate(), answered incrementally by the engine (see Engine's edit
+  // sessions). Valid after an evaluate(); the next rank() or evaluate() discards what is pending. The hold slack
+  // of a pin is not kept up to date by edits (Pin_timing::hold_slack is empty), and the fanout limit is not checked.
+  [[nodiscard]] livehd::timing::Whatif& whatif();
+
   [[nodiscard]] const Statistics&  statistics() const { return stats_; }
   [[nodiscard]] const Engine*      engine() const { return engine_.get(); }
   [[nodiscard]] const Bound_graph* bound() const { return bound_.get(); }
@@ -62,6 +71,7 @@ public:
   [[nodiscard]] std::vector<std::string> unsupported() const;
 
 private:
+  class Whatif_impl;
   struct Mapping {
     std::vector<Pin_label> labels;      // per RC node of every net, in order (empty for a junction)
     std::vector<uint32_t>  pin;         // the engine pin of each, no_index for a junction or an unmapped label
@@ -81,6 +91,10 @@ private:
   void     remap(const physical::Parasitics& rc);
   uint32_t resolve_label(const Pin_label& label) const;
   Wire_model wire_model(const physical::Parasitics& rc);
+  struct Solved {
+    std::vector<float> cap, delay, slew;
+  };
+  bool solve_net(const physical::Rc_net& net, std::span<const uint32_t> node_pins, uint32_t root, uint32_t driver, Solved& out);
 
   Options                    options_;
   std::vector<liberty::timing::Library> libraries_;
@@ -97,7 +111,15 @@ private:
   Mapping                    mapping_;
   bool                       mapping_bound_ = false;
   Statistics                 stats_;
+  // The cells an open what-if added, by instance name, and the other way round.
+  std::unordered_map<std::string, uint32_t> added_cells_;
+  std::unordered_map<uint32_t, std::string> added_names_;
+  std::unique_ptr<Whatif_impl>              whatif_;
+  std::shared_ptr<const physical::Parasitics> rc_;  // the snapshot the engine was last evaluated with
+  size_t                                    mapping_generation_ = 0;
   Elmore                     solver_;
+  std::vector<Wire_edge>     edges_;
+  std::vector<float>         node_cap_;
 };
 
 }  // namespace livehd::timing::fast
