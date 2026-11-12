@@ -129,11 +129,13 @@ void refresh_timing_weights(Result& state, const Options& options, const Timing_
                                                              controls ? &*controls : nullptr);
   std::map<std::string, double> current;
   for (const auto& net : state.parasitics->nets) {
-    const auto next     = target.find(net.driver);
-    const auto old      = state.net_weights.find(net.driver);
-    current[net.driver] = next == target.end() ? 1
-                                               : (1 - options.timing_smoothing) * (old == state.net_weights.end() ? 1 : old->second)
-                                                     + options.timing_smoothing * next->second;
+    auto       key  = net.driver.str();  // one label string per net, not one per lookup
+    const auto next = target.find(key);
+    const auto old  = state.net_weights.find(key);
+    const auto weight = next == target.end() ? 1
+                                             : (1 - options.timing_smoothing) * (old == state.net_weights.end() ? 1 : old->second)
+                                                   + options.timing_smoothing * next->second;
+    current[std::move(key)] = weight;
   }
   state.net_weights = std::move(current);
 }

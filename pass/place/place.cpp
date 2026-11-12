@@ -7931,7 +7931,17 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         route_grid_bins(auxiliary_route_bins(options), options.bins));
     env += ":uroute-selection:" + selected_uroute.cache_identity + ":" + selected_uroute.skipped;
   }
-  const auto hashes = block_hashes(v);
+  // The hash of every block matters only to a placement cache that exists; without one only the number of blocks is read.
+  const auto hashes = [&] {
+    if (!cache_path.empty()) {
+      return block_hashes(v);
+    }
+    std::map<std::string, uint64_t> blocks;
+    for (const auto& c : v.cells) {
+      blocks.emplace(c.block, 0);
+    }
+    return blocks;
+  }();
   // H2D already legalized the complete cell frame after changing the macro
   // topology. Old block anchors must not overwrite that solved placement.
   // Experimental FP targets are not persisted by the placement cache yet.
