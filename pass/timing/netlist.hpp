@@ -6,6 +6,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 #include "cell_types.hpp"
@@ -44,6 +45,18 @@ public:
   // other arc connectivity or another untimed class, and the netlist is then unchanged.
   void     retype(uint32_t cell, uint32_t type);
 
+  // ---- What-if topology edits after finalize. They are undone in reverse order by edit_rollback; `order()`
+  // does not know the new pins (the engine keeps its own keys for an edited netlist), and the sinks of an
+  // edited net are kept apart from the compact arrays.
+  [[nodiscard]] size_t edit_mark() const { return edit_log_.size(); }
+  void                 edit_rollback(size_t mark);
+  // A new cell without connections; its pins come after the existing ones.
+  uint32_t             append_cell(uint32_t type);
+  // Make the net driven by `driver` have exactly `sinks` (a net is made when the driver has none). A sink that
+  // was on another net leaves it, and a former sink that is not listed has no net. The nets that lost a sink
+  // other than the returned one are appended to `touched`. A pin is either a driver or a sink.
+  uint32_t             set_net_sinks(uint32_t driver, std::span<const uint32_t> sinks, std::vector<uint32_t>* touched);
+
   [[nodiscard]] const Cell_types& types() const { return *types_; }
   [[nodiscard]] size_t            cells() const { return cell_type_.size(); }
   [[nodiscard]] size_t            pins() const { return first_pin_.back(); }
@@ -61,6 +74,11 @@ public:
   [[nodiscard]] uint32_t                  net_of(uint32_t pin) const { return pin_net_[pin]; }
   [[nodiscard]] uint32_t                  driver_of(uint32_t net) const { return net_driver_[net]; }
   [[nodiscard]] std::span<const uint32_t> sinks_of(uint32_t net) const {
+    if (!edited_.empty()) {
+      if (const auto it = edited_.find(net); it != edited_.end()) {
+        return it->second;
+      }
+    }
     return {net_sinks_.data() + net_sink_start_[net], net_sink_start_[net + 1] - net_sink_start_[net]};
   }
   // True for the driver pin of its net.
@@ -83,6 +101,17 @@ private:
   std::vector<uint8_t>                       untimed_;
   std::vector<std::string>                   diagnostics_;
   size_t                                     untimed_cells_ = 0;
+
+  struct Edit {
+    enum class Kind : uint8_t { append_cell, net_created, pin_net, net_sinks } kind;
+    uint32_t              a = 0, b = 0;
+    bool                  had = false;
+    std::vector<uint32_t> sinks;
+  };
+  std::vector<Edit>                                    edit_log_;
+  std::unordered_map<uint32_t, std::vector<uint32_t>> edited_;
+  void set_pin_net(uint32_t pin, uint32_t net);
+  void set_edited_sinks(uint32_t net, std::vector<uint32_t> sinks);
 };
 
 }  // namespace livehd::timing::fast

@@ -671,3 +671,161 @@ TEST(FastEngineEdits, WireEditAgreesWithAFullEvaluationWithThatWire) {
   reference.evaluate();
   expect_same_state(engine, reference, b.netlist->pins(), "after rolling the wire back");
 }
+
+namespace {
+// The netlist of an edited one, rebuilt compactly (finalize gives it a valid order): the same pin numbers.
+std::unique_ptr<fast::Netlist> clone_netlist(const fast::Netlist& n) {
+  auto out = std::make_unique<fast::Netlist>(n.types());
+  std::map<uint32_t, const fast::Port*> port_of;
+  for (const auto& port : n.ports()) {
+    port_of[port.cell] = &port;
+  }
+  for (uint32_t c = 0; c < n.cells(); ++c) {
+    if (const auto it = port_of.find(c); it != port_of.end()) {
+      it->second->input ? out->add_input_port(it->second->name) : out->add_output_port(it->second->name);
+    } else {
+      out->add_cell(n.type_of(c));
+    }
+  }
+  for (uint32_t net = 0; net < n.nets(); ++net) {
+    for (const auto sink : n.sinks_of(net)) {
+      out->connect(n.driver_of(net), sink);
+    }
+  }
+  out->finalize();
+  return out;
+}
+
+// What the test put on the wires, by driver and sink pin, to rebuild the same wire model on a clone.
+struct Wires {
+  std::map<uint32_t, std::vector<float>>                    cap;    // driver pin -> per corner
+  std::map<uint32_t, std::pair<std::vector<float>, std::vector<float>>> sink;  // sink pin -> delay, slew per corner
+};
+
+fast::Wire_model wire_for(const fast::Netlist& n, const Wires& w) {
+  fast::Wire_model wire;
+  wire.net_cap_ff.assign(n.nets() * 2, 0.f);
+  wire.sink_delay_ps.assign(n.pins() * 2, 0.f);
+  wire.sink_slew_ps.assign(n.pins() * 2, 0.f);
+  for (const auto& [driver, cap] : w.cap) {
+    const auto net = n.net_of(driver);
+    for (size_t k = 0; k < 2; ++k) {
+      wire.net_cap_ff[net * 2 + k] = cap[k];
+    }
+  }
+  for (const auto& [pin, dl] : w.sink) {
+    if (n.net_of(pin) == fast::no_index) {
+      continue;
+    }
+    for (size_t k = 0; k < 2; ++k) {
+      wire.sink_delay_ps[pin * 2 + k] = dl.first[k];
+      wire.sink_slew_ps[pin * 2 + k]  = dl.second[k];
+    }
+  }
+  return wire;
+}
+}  // namespace
+
+TEST(FastEngineEdits, BufferInsertionAndDetachAgreeWithAFullEvaluation) {
+  for (uint32_t seed : {2u, 3u, 8u}) {
+    Bench        b;
+    const auto   design = build_layered(b, seed, -1);
+    fast::Engine engine(*b.netlist, layered_constraints());
+    engine.evaluate();
+    Bench pristine;
+    build_layered(pristine, seed, -1);
+    fast::Engine reference_base(*pristine.netlist, layered_constraints());
+    reference_base.evaluate();
+    const size_t pins0 = b.netlist->pins(), cells0 = b.netlist->cells(), nets0 = b.netlist->nets();
+
+    // A gate output with at least three sinks, and no flop among them (a flop D is an endpoint, fine, but keep it simple).
+    uint32_t driver = fast::no_index;
+    for (const auto g : design.gates) {
+      const auto y = b.pin(g, "Y");
+      if (b.netlist->net_of(y) != fast::no_index && b.netlist->sinks_of(b.netlist->net_of(y)).size() >= 3) {
+        driver = y;
+        break;
+      }
+    }
+    ASSERT_NE(driver, fast::no_index) << "seed " << seed;
+    const auto net_old = b.netlist->net_of(driver);
+    const std::vector<uint32_t> sinks(b.netlist->sinks_of(net_old).begin(), b.netlist->sinks_of(net_old).end());
+
+    const auto m = engine.mark();
+    // Insert a buffer: it keeps sinks[0] on the original net and takes the rest.
+    const auto buf = engine.add_cell(b.types.find("BUF"));
+    Wires      wires;
+    const auto put = [&](uint32_t drv, const std::vector<uint32_t>& list, float cap0, float delay0, float slew0) {
+      std::vector<float> cap{cap0, 2 * cap0}, delay, slew;
+      wires.cap[drv] = cap;
+      for (const auto s : list) {
+        std::vector<float> d{delay0, 2 * delay0}, sl{slew0, 2 * slew0};
+        delay.insert(delay.end(), d.begin(), d.end());
+        slew.insert(slew.end(), sl.begin(), sl.end());
+        wires.sink[s] = {d, sl};
+      }
+      return std::tuple{cap, delay, slew};
+    };
+    const std::vector<uint32_t> first{b.netlist->pin(buf, "A"), sinks[0]};
+    const std::vector<uint32_t> rest(sinks.begin() + 1, sinks.end());
+    {
+      const auto [cap, delay, slew] = put(driver, first, 3.f, 5.f, 2.f);
+      engine.set_net(driver, first, cap, delay, slew);
+    }
+    {
+      const auto [cap, delay, slew] = put(b.netlist->pin(buf, "Y"), rest, 4.f, 7.f, 3.f);
+      engine.set_net(b.netlist->pin(buf, "Y"), rest, cap, delay, slew);
+    }
+    EXPECT_EQ(b.netlist->cells(), cells0 + 1);
+    {
+      auto           clone = clone_netlist(*b.netlist);
+      fast::Engine   fresh(*clone, layered_constraints());
+      fresh.set_wire(wire_for(*clone, wires));
+      fresh.evaluate();
+      EXPECT_NEAR(engine.wns(), fresh.report().wns_ps, 1e-3) << "seed " << seed;
+      EXPECT_NEAR(engine.tns(), fresh.report().tns_ps, 1e-2);
+      expect_same_state(engine, fresh, clone->pins(), "after the buffer");
+      size_t moved = 0;
+      for (uint32_t p = 0; p < pins0; ++p) {
+        moved += engine.arrival(p, 0, 0) != reference_base.arrival(p, 0, 0);
+      }
+      EXPECT_GT(moved, 0u) << "the buffer changed nothing: the test would prove nothing";
+    }
+    // Take the second sink off the net altogether: it is then driven by nothing.
+    {
+      const std::vector<uint32_t> only{b.netlist->pin(buf, "A")};
+      const auto [cap, delay, slew] = put(driver, only, 3.f, 5.f, 2.f);
+      std::vector<uint32_t> keep{only[0], sinks[0]};
+      const auto [cap2, delay2, slew2] = put(driver, keep, 3.f, 5.f, 2.f);
+      engine.set_net(driver, keep, cap2, delay2, slew2);
+      auto         clone = clone_netlist(*b.netlist);
+      fast::Engine fresh(*clone, layered_constraints());
+      fresh.set_wire(wire_for(*clone, wires));
+      fresh.evaluate();
+      EXPECT_NEAR(engine.wns(), fresh.report().wns_ps, 1e-3);
+      expect_same_state(engine, fresh, clone->pins(), "after the detach");
+    }
+    engine.rollback(m);
+    EXPECT_EQ(b.netlist->cells(), cells0);
+    EXPECT_EQ(b.netlist->pins(), pins0);
+    EXPECT_EQ(b.netlist->nets(), nets0);
+    expect_same_state(engine, reference_base, pins0, "after rolling the topology back");
+    EXPECT_NEAR(engine.wns(), reference_base.report().wns_ps, 1e-4);
+    engine.end_edits();
+  }
+}
+
+TEST(FastEngineEdits, AnEditThatBreaksTheOrderIsRefused) {
+  Bench        b;
+  const auto   design = build_layered(b, 4, -1);
+  fast::Engine engine(*b.netlist, layered_constraints());
+  engine.evaluate();
+  // The output of the first gate cannot drive the input of a gate that comes before it.
+  const auto early = b.pin(design.gates[0], "Y");
+  const auto late  = b.pin(design.gates[design.gates.size() - 1], "Y");
+  const std::vector<uint32_t> sinks{b.pin(design.gates[0], "A")};
+  std::vector<float> cap{0, 0}, delay{0, 0}, slew{0, 0};
+  EXPECT_THROW(engine.set_net(late, sinks, cap, delay, slew), std::domain_error);
+  (void)early;
+  EXPECT_NEAR(engine.wns(), engine.report().wns_ps, 1e-4);
+}

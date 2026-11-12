@@ -154,6 +154,16 @@ public:
   // corner ([pin][corner]). Sinks not listed keep theirs.
   void                 set_net_wire(uint32_t net, std::span<const float> cap_ff, std::span<const uint32_t> sink_pins,
                                     std::span<const float> delay_ps, std::span<const float> slew_ps);
+  // A new cell of `type` (a buffer or inverter; not a flip-flop), without connections: connect its input with
+  // set_net before its output. Returns its index.
+  uint32_t             add_cell(uint32_t type);
+  // Make the net driven by `driver` have exactly `sinks`, with its wire (as set_net_wire, for all sinks). The
+  // pins keep a valid order: a sink must come after the driver in the design's levelized order, a new cell is
+  // placed between the driver and the sinks that used to follow it; otherwise this throws std::domain_error
+  // and the netlist is unchanged except for the keys of new pins (the caller rolls back, or evaluates from scratch).
+  // Returns the net.
+  uint32_t             set_net(uint32_t driver, std::span<const uint32_t> sinks, std::span<const float> cap_ff,
+                               std::span<const float> delay_ps, std::span<const float> slew_ps);
   // Propagate the pending edits; every query below does it first.
   void                 settle();
   [[nodiscard]] float  wns();  // worst endpoint slack over the setup corners, +inf without endpoints
@@ -248,7 +258,7 @@ private:
   // The journal of an edit session (see mark/rollback): every stored value keeps its old one.
   enum class Undo_kind : uint8_t {
     arrival, slew, required, depth, predecessor, arc_delay, load, wire_cap, wire_delay, wire_slew, endpoint_required,
-    endpoint_slack, cell_type
+    endpoint_slack, cell_type, netlist_edit, grow_cells, grow_nets
   };
   struct Undo {
     Undo_kind kind;
@@ -259,10 +269,18 @@ private:
   bool                     journal_on_ = false;
   std::vector<Undo>        journal_;
   // Edit sessions: dirty pins by position in the order (a forward and a backward heap), flags per pin.
-  std::vector<uint32_t>    pos_, fwd_heap_, bwd_heap_, touched_endpoints_;
+  // The key of a pin orders the walk of an edit session: the position in the levelized order times 2^24 for an
+  // existing pin, between its neighbours for a pin of an added cell (unset_key until connected).
+  static constexpr uint64_t unset_key = ~uint64_t{0};
+  using Heap_entry                    = std::pair<uint64_t, uint32_t>;  // key, pin
+  std::vector<uint64_t>    key_;
+  std::vector<Heap_entry>  fwd_heap_, bwd_heap_;
+  std::vector<uint32_t>    touched_endpoints_;
   std::vector<uint8_t>     queued_, endpoint_touched_;
   bool                     delay_changed_ = false;
   void                     begin_edits();
+  void                     shrink_cells(size_t cells, uint32_t pins);
+  void                     shrink_nets(size_t nets);
   void                     push_forward(uint32_t pin);
   void                     push_backward(uint32_t pin);
   void                     refresh_endpoint(size_t endpoint);

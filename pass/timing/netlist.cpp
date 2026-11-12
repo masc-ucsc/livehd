@@ -58,6 +58,109 @@ void Netlist::retype(uint32_t cell, uint32_t type) {
   cell_type_[cell] = type;
 }
 
+uint32_t Netlist::append_cell(uint32_t type) {
+  const auto cell = add_cell(type);
+  const auto& t   = types_->type(type);
+  untimed_.insert(untimed_.end(), t.pin_count, (t.latch || t.memory || t.clock_gate) ? 1 : 0);
+  pin_net_.insert(pin_net_.end(), t.pin_count, no_index);
+  Edit e{Edit::Kind::append_cell, cell, 0, false, {}};
+  edit_log_.push_back(std::move(e));
+  return cell;
+}
+
+void Netlist::set_pin_net(uint32_t pin, uint32_t net) {
+  edit_log_.push_back({Edit::Kind::pin_net, pin, pin_net_[pin], false, {}});
+  pin_net_[pin] = net;
+}
+
+void Netlist::set_edited_sinks(uint32_t net, std::vector<uint32_t> sinks) {
+  const auto it = edited_.find(net);
+  Edit       e{Edit::Kind::net_sinks, net, 0, it != edited_.end(), {}};
+  if (it != edited_.end()) {
+    e.sinks = it->second;
+  }
+  edit_log_.push_back(std::move(e));
+  edited_[net] = std::move(sinks);
+}
+
+uint32_t Netlist::set_net_sinks(uint32_t driver, std::span<const uint32_t> sinks, std::vector<uint32_t>* touched) {
+  if (driver >= pins() || (pin_net_[driver] != no_index && net_driver_[pin_net_[driver]] != driver)) {
+    throw std::invalid_argument("Netlist::set_net_sinks: the driver pin is a sink of a net");
+  }
+  for (const auto sink : sinks) {
+    if (sink >= pins() || sink == driver || (pin_net_[sink] != no_index && net_driver_[pin_net_[sink]] == sink)) {
+      throw std::invalid_argument("Netlist::set_net_sinks: a sink is the driver or a driver of another net");
+    }
+  }
+  uint32_t net = pin_net_[driver];
+  if (net == no_index) {
+    net = static_cast<uint32_t>(net_driver_.size());
+    net_driver_.push_back(driver);
+    net_sink_start_.push_back(net_sink_start_.back());
+    edit_log_.push_back({Edit::Kind::net_created, net, 0, false, {}});
+    set_pin_net(driver, net);
+  }
+  // The former sinks that are not listed lose the net.
+  const std::vector<uint32_t> old(sinks_of(net).begin(), sinks_of(net).end());
+  for (const auto sink : old) {
+    if (std::find(sinks.begin(), sinks.end(), sink) == sinks.end()) {
+      set_pin_net(sink, no_index);
+    }
+  }
+  for (const auto sink : sinks) {
+    const auto other = pin_net_[sink];
+    if (other != no_index && other != net) {
+      // It leaves the other net.
+      std::vector<uint32_t> rest;
+      for (const auto s : sinks_of(other)) {
+        if (s != sink) {
+          rest.push_back(s);
+        }
+      }
+      set_edited_sinks(other, std::move(rest));
+      if (touched != nullptr && std::find(touched->begin(), touched->end(), other) == touched->end()) {
+        touched->push_back(other);
+      }
+    }
+    if (other != net) {
+      set_pin_net(sink, net);
+    }
+  }
+  set_edited_sinks(net, std::vector<uint32_t>(sinks.begin(), sinks.end()));
+  return net;
+}
+
+void Netlist::edit_rollback(size_t mark) {
+  while (edit_log_.size() > mark) {
+    auto e = std::move(edit_log_.back());
+    edit_log_.pop_back();
+    switch (e.kind) {
+      case Edit::Kind::append_cell: {
+        const auto first = first_pin_[e.a];
+        cell_type_.pop_back();
+        first_pin_.pop_back();
+        pin_cell_.resize(first);
+        pin_net_.resize(first);
+        untimed_.resize(first);
+        break;
+      }
+      case Edit::Kind::net_created:
+        net_driver_.pop_back();
+        net_sink_start_.pop_back();
+        edited_.erase(e.a);
+        break;
+      case Edit::Kind::pin_net: pin_net_[e.a] = e.b; break;
+      case Edit::Kind::net_sinks:
+        if (e.had) {
+          edited_[e.a] = std::move(e.sinks);
+        } else {
+          edited_.erase(e.a);
+        }
+        break;
+    }
+  }
+}
+
 void Netlist::connect(uint32_t driver_pin, uint32_t sink_pin) {
   if (driver_pin >= pins() || sink_pin >= pins()) {
     throw std::invalid_argument("Netlist::connect: pin out of range");

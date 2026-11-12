@@ -428,6 +428,20 @@ void Engine::recompute_arrival(uint32_t p) {
     return;
   }
   const auto net = netlist_.net_of(p);
+  if (net == no_index && netlist_.pin_type(p).direction == Direction::input) {
+    // A sink with no driver (never connected, or taken off its net by an edit): nothing arrives.
+    for (size_t k = 0; k < C; ++k) {
+      for (unsigned t = 0; t < 2; ++t) {
+        store(arrival_, index(p, k, t), -inf);
+        store(slew_, index(p, k, t), 0.f);
+        store(depth_, index(p, k, t), uint16_t{0});
+        if (k == options_.path_corner) {
+          store_predecessor(p * 2 + t, {});
+        }
+      }
+    }
+    return;
+  }
   if (net != no_index && !netlist_.is_driver(p)) {
     const auto driver = netlist_.driver_of(net);
     for (size_t k = 0; k < C; ++k) {
@@ -1036,9 +1050,9 @@ void Engine::begin_edits() {
     throw std::logic_error("Engine edits need a state left by evaluate()");
   }
   const auto order = netlist_.order();
-  pos_.assign(netlist_.pins(), 0);
+  key_.assign(netlist_.pins(), unset_key);
   for (size_t i = 0; i < order.size(); ++i) {
-    pos_[order[i]] = static_cast<uint32_t>(i);
+    key_[order[i]] = static_cast<uint64_t>(i) << 24;
   }
   queued_.assign(netlist_.pins(), 0);
   endpoint_touched_.assign(endpoints_.size(), 0);
@@ -1057,7 +1071,7 @@ void Engine::begin_edits() {
 void Engine::push_forward(uint32_t pin) {
   if (!(queued_[pin] & 1u)) {
     queued_[pin] |= 1u;
-    fwd_heap_.push_back(pos_[pin]);
+    fwd_heap_.emplace_back(key_[pin], pin);
     std::push_heap(fwd_heap_.begin(), fwd_heap_.end(), std::greater<>());
   }
 }
@@ -1065,7 +1079,7 @@ void Engine::push_forward(uint32_t pin) {
 void Engine::push_backward(uint32_t pin) {
   if (!(queued_[pin] & 2u)) {
     queued_[pin] |= 2u;
-    bwd_heap_.push_back(pos_[pin]);
+    bwd_heap_.emplace_back(key_[pin], pin);
     std::push_heap(bwd_heap_.begin(), bwd_heap_.end());
   }
 }
@@ -1099,15 +1113,13 @@ void Engine::settle() {
   if (!journal_on_ || (fwd_heap_.empty() && bwd_heap_.empty())) {
     return;
   }
-  const size_t         C     = corners_;
-  const auto           order = netlist_.order();
+  const size_t         C = corners_;
   std::array<float, 192> before{};  // arrival, slew, depth of the 2 transitions of up to 31 corners: 186 values
   // Forward: lowest position first; a pin that changes wakes what it feeds.
   while (!fwd_heap_.empty()) {
     std::pop_heap(fwd_heap_.begin(), fwd_heap_.end(), std::greater<>());
-    const auto position = fwd_heap_.back();
+    const auto [position, p] = fwd_heap_.back();
     fwd_heap_.pop_back();
-    const auto p = order[position];
     queued_[p]  &= static_cast<uint8_t>(~1u);
     size_t n = 0;
     for (size_t k = 0; k < C; ++k) {
@@ -1151,7 +1163,7 @@ void Engine::settle() {
       touch_endpoint(p);
     }
     const auto wake = [&](uint32_t pin) {
-      if (pos_[pin] > position) {
+      if (key_[pin] > position) {
         push_forward(pin);
       }
     };
@@ -1171,9 +1183,8 @@ void Engine::settle() {
   // Backward: highest position first; a pin whose requirement changes wakes what feeds it.
   while (!bwd_heap_.empty()) {
     std::pop_heap(bwd_heap_.begin(), bwd_heap_.end());
-    const auto position = bwd_heap_.back();
+    const auto [position, p] = bwd_heap_.back();
     bwd_heap_.pop_back();
-    const auto p = order[position];
     queued_[p]  &= static_cast<uint8_t>(~2u);
     size_t n = 0;
     for (size_t k = 0; k < C; ++k) {
@@ -1194,7 +1205,7 @@ void Engine::settle() {
     }
     touch_endpoint(p);
     const auto wake = [&](uint32_t pin) {
-      if (pos_[pin] < position) {
+      if (key_[pin] < position) {
         push_backward(pin);
       }
     };
@@ -1226,11 +1237,11 @@ void Engine::rollback(size_t to) {
   if (!journal_on_) {
     return;
   }
-  for (const auto p : fwd_heap_) {
-    queued_[netlist_.order()[p]] = 0;
+  for (const auto& entry : fwd_heap_) {
+    queued_[entry.second] = 0;
   }
-  for (const auto p : bwd_heap_) {
-    queued_[netlist_.order()[p]] = 0;
+  for (const auto& entry : bwd_heap_) {
+    queued_[entry.second] = 0;
   }
   fwd_heap_.clear();
   bwd_heap_.clear();
@@ -1260,6 +1271,9 @@ void Engine::rollback(size_t to) {
       case Undo_kind::endpoint_required: endpoint_required_[u.index] = bits_to_float(u.old_bits); break;
       case Undo_kind::endpoint_slack   : endpoint_slack_[u.index] = bits_to_float(u.old_bits); break;
       case Undo_kind::cell_type        : netlist_.retype(static_cast<uint32_t>(u.index), u.old_bits); break;
+      case Undo_kind::netlist_edit     : netlist_.edit_rollback(u.index); break;
+      case Undo_kind::grow_cells       : shrink_cells(u.index, u.old_bits); break;
+      case Undo_kind::grow_nets        : shrink_nets(u.index); break;
     }
   }
 }
@@ -1359,6 +1373,178 @@ std::vector<std::pair<uint32_t, float>> Engine::failing_endpoints(float below_ps
   }
   std::ranges::sort(out, [](const auto& a, const auto& b) { return a.second != b.second ? a.second < b.second : a.first < b.first; });
   return out;
+}
+
+uint32_t Engine::add_cell(uint32_t type) {
+  begin_edits();
+  settle();
+  const auto& t = types_.type(type);
+  if (t.sequential || t.latch || t.memory || t.clock_gate || type < 2) {
+    throw std::invalid_argument("Engine::add_cell: only combinational cells can be added");
+  }
+  const size_t cells = netlist_.cells(), pins = netlist_.pins();
+  journal_.push_back({Undo_kind::netlist_edit, 0, 0, netlist_.edit_mark()});
+  const auto cell = netlist_.append_cell(type);
+  const size_t n = t.pin_count, C = corners_;
+  journal_.push_back({Undo_kind::grow_cells, 0, static_cast<uint32_t>(pins), cells});
+  arrival_.resize((pins + n) * C * 2, -inf);
+  slew_.resize((pins + n) * C * 2, 0.f);
+  required_.resize((pins + n) * C * 2, inf);
+  depth_.resize((pins + n) * C * 2, 0);
+  predecessor_.resize((pins + n) * 2);
+  criticality_.resize(pins + n, 0.f);
+  clock_pin_.resize(pins + n, 0);
+  pin_clock_.resize(pins + n, 0);
+  cut_.resize(pins + n, 0);
+  excluded_.resize(pins + n, 0);
+  queued_.resize(pins + n, 0);
+  key_.resize(pins + n, unset_key);
+  if (!hold_slack_.empty()) {
+    hold_slack_.resize(pins + n, inf);
+  }
+  if (!early_arrival_.empty()) {
+    early_arrival_.resize((pins + n) * 2, inf);
+    early_slew_.resize((pins + n) * 2, 0.f);
+  }
+  wire_.sink_delay_ps.resize((pins + n) * C, 0.f);
+  wire_.sink_slew_ps.resize((pins + n) * C, 0.f);
+  port_load_.push_back(0.f);
+  port_delay_.push_back(0.f);
+  port_input_.push_back(no_index);
+  arc_delay_.resize(cell_base_.back() + type_block_[type] * C, 0.f);
+  cell_base_.push_back(static_cast<uint32_t>(arc_delay_.size()));
+  return cell;
+}
+
+void Engine::shrink_cells(size_t cells, uint32_t pins) {
+  const size_t C = corners_;
+  arrival_.resize(static_cast<size_t>(pins) * C * 2);
+  slew_.resize(static_cast<size_t>(pins) * C * 2);
+  required_.resize(static_cast<size_t>(pins) * C * 2);
+  depth_.resize(static_cast<size_t>(pins) * C * 2);
+  predecessor_.resize(static_cast<size_t>(pins) * 2);
+  criticality_.resize(pins);
+  clock_pin_.resize(pins);
+  pin_clock_.resize(pins);
+  cut_.resize(pins);
+  excluded_.resize(pins);
+  queued_.resize(pins);
+  key_.resize(pins);
+  if (!hold_slack_.empty()) {
+    hold_slack_.resize(pins);
+  }
+  if (!early_arrival_.empty()) {
+    early_arrival_.resize(static_cast<size_t>(pins) * 2);
+    early_slew_.resize(static_cast<size_t>(pins) * 2);
+  }
+  wire_.sink_delay_ps.resize(static_cast<size_t>(pins) * C);
+  wire_.sink_slew_ps.resize(static_cast<size_t>(pins) * C);
+  port_load_.resize(cells);
+  port_delay_.resize(cells);
+  port_input_.resize(cells);
+  cell_base_.resize(cells + 1);
+  arc_delay_.resize(cell_base_.back());
+}
+
+void Engine::shrink_nets(size_t nets) {
+  load_.resize(nets * corners_);
+  early_load_.resize(nets);
+  wire_.net_cap_ff.resize(nets * corners_);
+}
+
+uint32_t Engine::set_net(uint32_t driver, std::span<const uint32_t> sinks, std::span<const float> cap_ff, std::span<const float> delay_ps,
+                         std::span<const float> slew_ps) {
+  begin_edits();
+  settle();
+  const size_t C = corners_;
+  if (cap_ff.size() != C || delay_ps.size() != sinks.size() * C || slew_ps.size() != sinks.size() * C) {
+    throw std::invalid_argument("Engine::set_net: sizes do not match the corners and sinks");
+  }
+  if (key_[driver] == unset_key) {
+    throw std::domain_error("Engine::set_net: connect the inputs of a new cell before its output");
+  }
+  // Keys first, so that a refusal changes nothing. The pins of a new cell go between the driver and what
+  // followed it.
+  const uint64_t lo      = key_[driver];
+  uint64_t       hi      = lo + (uint64_t{1} << 24);
+  if (const auto old_net = netlist_.net_of(driver); old_net != no_index) {
+    for (const auto sink : netlist_.sinks_of(old_net)) {
+      if (key_[sink] != unset_key && key_[sink] > lo) {
+        hi = std::min(hi, key_[sink]);
+      }
+    }
+  }
+  for (const auto sink : sinks) {
+    if (key_[sink] == unset_key) {
+      const auto  cell = netlist_.cell_of(sink);
+      const auto  first = netlist_.first_pin(cell);
+      const auto  count = types_.type(netlist_.type_of(cell)).pin_count;
+      std::vector<uint32_t> unset;
+      for (uint32_t local = 0; local < count; ++local) {
+        if (key_[first + local] == unset_key && netlist_.pin_type(first + local).direction == Direction::input) {
+          unset.push_back(first + local);
+        }
+      }
+      for (uint32_t local = 0; local < count; ++local) {
+        if (key_[first + local] == unset_key && netlist_.pin_type(first + local).direction != Direction::input) {
+          unset.push_back(first + local);
+        }
+      }
+      const uint64_t step = (hi - lo) / (unset.size() + 1);
+      if (step < 1) {
+        throw std::domain_error("Engine::set_net: no room in the order for a new cell");
+      }
+      for (size_t j = 0; j < unset.size(); ++j) {
+        key_[unset[j]] = lo + (j + 1) * step;
+      }
+    }
+    if (key_[sink] <= lo) {
+      throw std::domain_error("Engine::set_net: a sink would come before its driver in the order");
+    }
+  }
+  const size_t nets_before = netlist_.nets();
+  std::vector<uint32_t> removed;  // the pins that are on the net now and are not listed
+  if (const auto old_net = netlist_.net_of(driver); old_net != no_index) {
+    for (const auto sink : netlist_.sinks_of(old_net)) {
+      if (std::find(sinks.begin(), sinks.end(), sink) == sinks.end()) {
+        removed.push_back(sink);
+      }
+    }
+  }
+  journal_.push_back({Undo_kind::netlist_edit, 0, 0, netlist_.edit_mark()});
+  std::vector<uint32_t> touched;
+  const auto            net = netlist_.set_net_sinks(driver, sinks, &touched);
+  if (netlist_.nets() != nets_before) {
+    journal_.push_back({Undo_kind::grow_nets, 0, 0, nets_before});
+    load_.resize(netlist_.nets() * C, 0.f);
+    early_load_.resize(netlist_.nets(), 0.f);
+    wire_.net_cap_ff.resize(netlist_.nets() * C, 0.f);
+  }
+  for (size_t k = 0; k < C; ++k) {
+    store(wire_.net_cap_ff, net * C + k, cap_ff[k]);
+  }
+  for (size_t i = 0; i < sinks.size(); ++i) {
+    for (size_t k = 0; k < C; ++k) {
+      store(wire_.sink_delay_ps, static_cast<size_t>(sinks[i]) * C + k, delay_ps[i * C + k]);
+      store(wire_.sink_slew_ps, static_cast<size_t>(sinks[i]) * C + k, slew_ps[i * C + k]);
+    }
+  }
+  compute_net_load(net);
+  push_forward(driver);
+  push_backward(driver);
+  for (const auto sink : sinks) {
+    push_forward(sink);
+  }
+  for (const auto pin : removed) {
+    push_forward(pin);
+  }
+  // Pins that left a net: the nets they left, and they themselves (nothing arrives any more).
+  for (const auto other : touched) {
+    compute_net_load(other);
+    push_forward(netlist_.driver_of(other));
+    push_backward(netlist_.driver_of(other));
+  }
+  return net;
 }
 
 }  // namespace livehd::timing::fast
