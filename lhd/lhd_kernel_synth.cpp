@@ -3299,11 +3299,13 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
             std::print("fast unsupported: {}\n", u);
           }
           const auto& s = fast_ranker->statistics();
-          std::print("fast rank {}: binds {} remaps {} wire {:.6f}s engine {:.6f}s feedback {:.6f}s bad_trees {} unresolved {}\n",
+          std::print("fast rank {}: binds {} ({:.3f}s) remaps {} ({:.3f}s) wire {:.6f}s engine {:.6f}s feedback {:.6f}s bad_trees {} unresolved {}\n",
                      s.ranks,
                      s.binds,
                      s.remaps,
+                     s.bind_seconds,
                      s.wire_seconds,
+                     s.map_seconds,
                      s.engine_seconds,
                      s.feedback_seconds,
                      s.bad_trees,
@@ -3451,6 +3453,12 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
           auto          fb = livehd::placement::prects_data_timing(
               fast_ranker->evaluate(state.graph, state.parasitics, controls.timing_cuts), controls);
           show_timing(fb);
+          if (timing_profile) {
+            const auto& s = fast_ranker->statistics();
+            std::print("fast evaluate {}: binds {} ({:.3f}s) remaps {} ({:.3f}s) wire {:.3f}s engine {:.3f}s feedback {:.3f}s\n",
+                       s.evaluations, s.binds, s.bind_seconds, s.remaps, s.map_seconds, s.wire_seconds, s.engine_seconds,
+                       s.feedback_seconds);
+          }
           return fb;
         }
         auto        fb       = estimate({state.graph, state.parasitics, controls}, livehd::opentimer::Physical_session::Purpose::detailed);
@@ -3586,7 +3594,6 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
       if (run_timing_place && (place_options.fp_timing_interval > 0 || place_options.macro_timing_interval > 0)) {
         place_options.fp_evaluate = evaluate;
         place_options.gp_rank     = rank;
-        // GP consumes criticality only. Physical resizing runs after legal GP.
         if (timing_engine == "fast") {
           // GP checkpoints rank from numeric wire trees: no RC strings are built for them.
           place_options.gp_rank_trees = [&](const livehd::placement::Trees_view& state) {
@@ -3598,6 +3605,7 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
           };
         }
         place_options.fp_resize   = false;
+        // GP consumes criticality only. Physical resizing runs after legal GP.
       }
       if (gui_session) {
         place_options.gui_rank = rank;  // read-only timing refresh for the panel (never the flow's own gp_rank)

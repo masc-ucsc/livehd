@@ -910,13 +910,27 @@ struct Apply_index {
     }
     for (const auto& net : placed.parasitics->nets) {
       nets.emplace(net.driver, &net);
-      for (const auto& p : net.nodes) {
-        if (!p.pin.empty()) {
-          pin_driver.emplace(p.pin, net.driver);
+    }
+    parasitics = placed.parasitics;
+  }
+  // The driver of the net a pin is on. Only the removal of a buffer asks, so the map of every pin of the design is built on
+  // the first question, not for every trial.
+  const std::string* driver_of_pin(const std::string& pin) {
+    if (!pins_indexed) {
+      pins_indexed = true;
+      for (const auto& net : parasitics->nets) {
+        for (const auto& p : net.nodes) {
+          if (!p.pin.empty()) {
+            pin_driver.emplace(p.pin, net.driver);
+          }
         }
       }
     }
+    const auto found = pin_driver.find(pin);
+    return found == pin_driver.end() ? nullptr : &found->second;
   }
+  std::shared_ptr<physical::Parasitics> parasitics;
+  bool                                  pins_indexed = false;
 };
 std::optional<Buffer_tree> apply(hhds::Graph& graph, const Inventory& cells, const Edit& edit,
                                  const std::set<std::string>& protected_names, const Result& placed, const Timing_feedback& timing,
@@ -1033,8 +1047,8 @@ std::optional<Buffer_tree> apply(hhds::Graph& graph, const Inventory& cells, con
   if (current) {
     removed.push_back(n);
     const auto entry = physical_label(n.get_sink_pin(current->inputs.front()));
-    if (const auto net = shared->pin_driver.find(entry); net != shared->pin_driver.end()) {
-      root_name = net->second;
+    if (const auto* driver = shared->driver_of_pin(entry)) {
+      root_name = *driver;
     }
     collect(physical_label(output(n, *current)));
   } else {
@@ -2145,11 +2159,11 @@ Floorplan_resize repair_gp_buffers(Result& state, const Options& options, const 
         }
         driver               = physical_label(output(node->second, *cell));
         const auto input_pin = physical_label(node->second.get_sink_pin(cell->inputs.front()));
-        const auto parent    = index.pin_driver.find(input_pin);
-        if (parent == index.pin_driver.end()) {
+        const auto* parent   = index.driver_of_pin(input_pin);
+        if (parent == nullptr) {
           continue;
         }
-        upstream = parent->second;
+        upstream = *parent;
       }
       if (!ready(driver) || !ready(candidate.node) || (!upstream.empty() && !ready(upstream))) {
         continue;
@@ -2237,8 +2251,8 @@ Floorplan_resize repair_gp_buffers(Result& state, const Options& options, const 
             if (old != index.nodes.end()) {
               const auto* cell      = buffer(old->second, cells);
               const auto  input_pin = physical_label(old->second.get_sink_pin(cell->inputs.front()));
-              if (index.pin_driver.contains(input_pin)) {
-                touched.push_back(index.pin_driver.at(input_pin));
+              if (const auto* upstream_driver = index.driver_of_pin(input_pin)) {
+                touched.push_back(*upstream_driver);
               }
             }
           }
