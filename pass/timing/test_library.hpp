@@ -68,6 +68,15 @@ library(test) {
       "cell(INV) { area : 3; pin(A) { direction : input; capacitance : 2; } pin(Y) { direction : output; function : \"!A\"; "
       "max_capacitance : 5; "
           + comb("A", "negative_unate", 10, 15, k) + " } }\n");
+  // The same interface as INV and XOR2 with other numbers and capacitances: a resize target.
+  add("INV2",
+      "cell(INV2) { area : 5; pin(A) { direction : input; capacitance : 4; } pin(Y) { direction : output; function : \"!A\"; "
+      "max_capacitance : 8; "
+          + comb("A", "negative_unate", 6, 9, k) + " } }\n");
+  add("XOR2B",
+      "cell(XOR2B) { area : 11; pin(A) { direction : input; capacitance : 3; } pin(B) { direction : input; capacitance : 3; } "
+      "pin(Y) { direction : output; function : \"A^B\"; "
+          + comb("A", "non_unate", 18, 20, k) + comb("B", "non_unate", 18, 20, k) + " } }\n");
   add("BUF",
       "cell(BUF) { area : 4; pin(A) { direction : input; capacitance : 3; } pin(Y) { direction : output; function : \"A\"; "
           + comb("A", "positive_unate", 20, 22, k) + " } }\n");

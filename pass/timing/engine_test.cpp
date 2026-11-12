@@ -460,3 +460,214 @@ TEST(FastEngine, ClockGatesAndClocksThroughBuffersAreIdeal) {
   EXPECT_NEAR(engine.arrival(b.pin(ff1, "Q"), 0, 1), 40, 1e-3);
   EXPECT_EQ(engine.report().endpoints, 1u);
 }
+
+// ---- Edit sessions ---------------------------------------------------------------------------------------
+
+namespace {
+// A deterministic layered design: `width` inputs and flops feed `layers` layers of INV / INV2 / XOR2 / BUF gates,
+// and the last layer is captured by flops and by output ports. Cell types are chosen by `type_of`.
+struct Layered {
+  Bench                                bench;
+  std::vector<uint32_t>                gates;      // the cells that can be resized (INV, INV2, XOR2, XOR2B)
+  std::vector<std::vector<uint32_t>>   gate_sinks;  // the pins each gate output drives, for wire edits
+  uint32_t                             state = 12345;
+  uint32_t                             next() { return state = state * 1664525u + 1013904223u; }
+  explicit Layered(std::vector<double> scales = {1.0, 2.0}) : bench(std::move(scales)) {}
+};
+
+// Builds the design in `b` and returns the gates. `variant` swaps the type of one gate by index (or none).
+struct Design_result {
+  std::vector<uint32_t> gates;
+  uint32_t              first_output = 0;
+  std::vector<uint32_t> nets_driver_cells;
+};
+
+Design_result build_layered(Bench& b, uint32_t seed, int swapped_gate, size_t width = 8, size_t layers = 5) {
+  uint32_t state = seed;
+  const auto next = [&] { return state = state * 1664525u + 1013904223u; };
+  const auto clk = b.netlist->add_input_port("clk");
+  std::vector<uint32_t> level;  // driver pins of the current level
+  for (size_t i = 0; i < width; ++i) {
+    level.push_back(b.port_pin(b.netlist->add_input_port("in" + std::to_string(i))));
+  }
+  for (size_t i = 0; i < width; ++i) {
+    const auto ff = b.cell("FF");
+    b.netlist->connect(b.port_pin(clk), b.pin(ff, "CLK"));
+    b.netlist->connect(level[i], b.pin(ff, "D"));  // captures an input, launches into the logic
+    level.push_back(b.pin(ff, "Q"));
+  }
+  Design_result result;
+  for (size_t layer = 0; layer < layers; ++layer) {
+    std::vector<uint32_t> out;
+    for (size_t i = 0; i < width; ++i) {
+      const bool two = next() % 3 == 0;
+      const int  index = static_cast<int>(result.gates.size());
+      const bool swap = index == swapped_gate;
+      const char* type = two ? (swap ? "XOR2B" : "XOR2") : (swap ? "INV2" : "INV");
+      const auto cell  = b.cell(type);
+      b.netlist->connect(level[next() % level.size()], b.pin(cell, "A"));
+      if (two) {
+        b.netlist->connect(level[next() % level.size()], b.pin(cell, "B"));
+      }
+      result.gates.push_back(cell);
+      out.push_back(b.pin(cell, "Y"));
+    }
+    level = out;
+  }
+  for (size_t i = 0; i < width; ++i) {
+    const auto ff = b.cell("FF");
+    b.netlist->connect(b.port_pin(clk), b.pin(ff, "CLK"));
+    b.netlist->connect(level[i], b.pin(ff, "D"));
+    const auto out = b.netlist->add_output_port("out" + std::to_string(i));
+    b.netlist->connect(level[(i + 3) % level.size()], b.port_pin(out));
+  }
+  b.netlist->finalize();
+  return result;
+}
+
+fast::Constraints layered_constraints() {
+  auto c = single_clock(400);
+  for (size_t i = 0; i < 8; ++i) {
+    c.outputs.push_back({"out" + std::to_string(i), "", 5, 3});
+  }
+  return c;
+}
+
+// All of the engine's late setup state, compared pin by pin.
+void expect_same_state(const fast::Engine& a, const fast::Engine& b, size_t pins, const char* what) {
+  for (uint32_t p = 0; p < pins; ++p) {
+    for (size_t k = 0; k < 2; ++k) {
+      for (unsigned t = 0; t < 2; ++t) {
+        ASSERT_EQ(a.arrival(p, k, t), b.arrival(p, k, t)) << what << " arrival pin " << p;
+        ASSERT_EQ(a.slew(p, k, t), b.slew(p, k, t)) << what << " slew pin " << p;
+        ASSERT_EQ(a.required(p, k, t), b.required(p, k, t)) << what << " required pin " << p;
+        ASSERT_EQ(a.depth(p, k, t), b.depth(p, k, t)) << what << " depth pin " << p;
+      }
+    }
+  }
+}
+}  // namespace
+
+TEST(FastEngineEdits, ResizeAgreesWithAFullEvaluationAndRollsBackExactly) {
+  for (uint32_t seed : {1u, 7u, 99u}) {
+    Bench      base;
+    const auto design = build_layered(base, seed, -1);
+    fast::Engine engine(*base.netlist, layered_constraints());
+    engine.evaluate();
+    // A copy of the base state to compare the rollback with.
+    Bench      pristine;
+    build_layered(pristine, seed, -1);
+    fast::Engine reference_base(*pristine.netlist, layered_constraints());
+    reference_base.evaluate();
+    const size_t pins = base.netlist->pins();
+    const float  wns0 = engine.report().wns_ps, tns0 = engine.report().tns_ps;
+
+    ASSERT_GT(engine.endpoint_pins().size(), 8u);
+    ASSERT_TRUE(std::isfinite(wns0));
+    size_t     moved = 0;
+    const auto start = engine.mark();
+    for (const int gate : {3, 17, 22, 38}) {
+      // The edited design built from scratch.
+      Bench edited;
+      build_layered(edited, seed, gate);
+      fast::Engine fresh(*edited.netlist, layered_constraints());
+      fresh.evaluate();
+      const auto cell      = design.gates[gate];
+      const auto old_type  = base.netlist->type_of(cell);
+      const bool is_xor    = base.types.type(old_type).name == "XOR2";
+      const auto new_type  = base.types.find(is_xor ? "XOR2B" : "INV2");
+      const auto m         = engine.mark();
+      engine.resize_cell(cell, new_type);
+      EXPECT_NEAR(engine.wns(), fresh.report().wns_ps, 1e-3) << "seed " << seed << " gate " << gate;
+      for (uint32_t p = 0; p < pins; ++p) {
+        if (engine.arrival(p, 0, 0) != reference_base.arrival(p, 0, 0) || engine.required(p, 0, 1) != reference_base.required(p, 0, 1)) {
+          ++moved;
+          break;
+        }
+      }
+      EXPECT_NEAR(engine.tns(), fresh.report().tns_ps, 1e-2);
+      expect_same_state(engine, fresh, pins, "after resize");
+      engine.rollback(m);
+      expect_same_state(engine, reference_base, pins, "after rollback");
+      EXPECT_EQ(base.netlist->type_of(cell), old_type);
+      EXPECT_NEAR(engine.wns(), wns0, 1e-4);
+      EXPECT_NEAR(engine.tns(), tns0, 1e-3);
+    }
+    EXPECT_GT(moved, 0u) << "no edit changed the timing: the test would prove nothing";
+    // Several edits in a row, then everything undone in one rollback.
+    for (const int gate : {3, 17, 22}) {
+      const auto cell     = design.gates[gate];
+      const bool is_xor   = base.types.type(base.netlist->type_of(cell)).name == "XOR2";
+      engine.resize_cell(cell, base.types.find(is_xor ? "XOR2B" : "INV2"));
+    }
+    (void)engine.wns();
+    engine.rollback(start);
+    expect_same_state(engine, reference_base, pins, "after the full rollback");
+    engine.end_edits();
+    expect_same_state(engine, reference_base, pins, "after end_edits");
+  }
+}
+
+TEST(FastEngineEdits, ResizeToAnotherInterfaceThrowsAndChangesNothing) {
+  Bench        b;
+  const auto   design = build_layered(b, 5, -1);
+  fast::Engine engine(*b.netlist, layered_constraints());
+  engine.evaluate();
+  const auto wns = engine.report().wns_ps;
+  EXPECT_THROW(engine.resize_cell(design.gates[0], b.types.find("BUF")), std::invalid_argument);
+  EXPECT_NEAR(engine.wns(), wns, 1e-4);
+}
+
+TEST(FastEngineEdits, WireEditAgreesWithAFullEvaluationWithThatWire) {
+  Bench        b;
+  const auto   design = build_layered(b, 11, -1);
+  fast::Engine engine(*b.netlist, layered_constraints());
+  engine.evaluate();
+  // Put a wire on the net of gate 9: 8 fF and, on every sink, 14 ps of delay and 6 ps of slew in corner 0, double in 1.
+  const auto driver = b.pin(design.gates[9], "Y");
+  const auto net    = b.netlist->net_of(driver);
+  ASSERT_NE(net, fast::no_index);
+  std::vector<uint32_t> sinks(b.netlist->sinks_of(net).begin(), b.netlist->sinks_of(net).end());
+  std::vector<float>    cap{8, 16}, delay, slew;
+  for (size_t i = 0; i < sinks.size(); ++i) {
+    for (size_t k = 0; k < 2; ++k) {
+      delay.push_back(14.f * (1 + k));
+      slew.push_back(6.f * (1 + k));
+    }
+  }
+  const auto m = engine.mark();
+  engine.set_net_wire(net, cap, sinks, delay, slew);
+
+  Bench        other;
+  build_layered(other, 11, -1);
+  fast::Engine fresh(*other.netlist, layered_constraints());
+  fast::Wire_model wire;
+  wire.net_cap_ff.assign(other.netlist->nets() * 2, 0.f);
+  wire.sink_delay_ps.assign(other.netlist->pins() * 2, 0.f);
+  wire.sink_slew_ps.assign(other.netlist->pins() * 2, 0.f);
+  for (size_t k = 0; k < 2; ++k) {
+    wire.net_cap_ff[net * 2 + k] = cap[k];
+  }
+  for (size_t i = 0; i < sinks.size(); ++i) {
+    for (size_t k = 0; k < 2; ++k) {
+      wire.sink_delay_ps[sinks[i] * 2 + k] = delay[i * 2 + k];
+      wire.sink_slew_ps[sinks[i] * 2 + k]  = slew[i * 2 + k];
+    }
+  }
+  fresh.set_wire(wire);
+  fresh.evaluate();
+  EXPECT_NEAR(engine.wns(), fresh.report().wns_ps, 1e-3);
+  EXPECT_NEAR(engine.tns(), fresh.report().tns_ps, 1e-2);
+  expect_same_state(engine, fresh, b.netlist->pins(), "after the wire edit");
+  const auto failing = engine.failing_endpoints(1e9);
+  EXPECT_EQ(failing.size(), fresh.endpoint_pins().size());
+  EXPECT_TRUE(std::is_sorted(failing.begin(), failing.end(), [](const auto& x, const auto& y) { return x.second < y.second; }));
+  const auto electrical = engine.pin_electrical(driver);
+  EXPECT_EQ(electrical.pin, driver);
+  engine.rollback(m);
+  Bench        pristine;
+  build_layered(pristine, 11, -1);
+  fast::Engine reference(*pristine.netlist, layered_constraints());
+  reference.evaluate();
+  expect_same_state(engine, reference, b.netlist->pins(), "after rolling the wire back");
+}

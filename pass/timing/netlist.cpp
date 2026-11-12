@@ -36,6 +36,28 @@ uint32_t Netlist::pin(uint32_t cell, std::string_view name) const {
   return local == no_index ? no_index : first_pin_[cell] + local;
 }
 
+void Netlist::retype(uint32_t cell, uint32_t type) {
+  const auto& from = types_->type(cell_type_[cell]);
+  const auto& to   = types_->type(type);
+  bool        same = from.pin_count == to.pin_count && from.sequential == to.sequential && from.latch == to.latch
+              && from.memory == to.memory && from.clock_gate == to.clock_gate;
+  for (uint32_t local = 0; same && local < from.pin_count; ++local) {
+    const auto& a = types_->pin(cell_type_[cell], local);
+    const auto& b = types_->pin(type, local);
+    same          = a.name == b.name && a.direction == b.direction && a.clock == b.clock;
+  }
+  const auto arcs_from = types_->arcs(cell_type_[cell]), arcs_to = types_->arcs(type);
+  same = same && arcs_from.size() == arcs_to.size();
+  for (size_t i = 0; same && i < arcs_from.size(); ++i) {
+    same = arcs_from[i].from == arcs_to[i].from && arcs_from[i].to == arcs_to[i].to && arcs_from[i].kind == arcs_to[i].kind
+           && arcs_from[i].sense == arcs_to[i].sense;
+  }
+  if (!same) {
+    throw std::invalid_argument(std::format("Netlist::retype: {} and {} do not have the same interface", from.name, to.name));
+  }
+  cell_type_[cell] = type;
+}
+
 void Netlist::connect(uint32_t driver_pin, uint32_t sink_pin) {
   if (driver_pin >= pins() || sink_pin >= pins()) {
     throw std::invalid_argument("Netlist::connect: pin out of range");

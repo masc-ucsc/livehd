@@ -121,7 +121,7 @@ TEST(BindGraph, WiringIsResolvedToTheDriverPinsAndPortBits) {
   constraints.clocks.push_back({"clk", "clk", 1000, 0, 0});
   constraints.outputs.push_back({"y0", "", 0, 5});
   constraints.outputs.push_back({"y1", "", 0, 5});
-  fast::Engine engine(net, constraints);
+  fast::Engine engine(*bound.netlist, constraints);
   engine.evaluate();
   EXPECT_EQ(engine.report().endpoints, 2u);
   EXPECT_NEAR(engine.arrival(output("y0"), 0, 0), 10 + 2 * 5, 1e-3);  // a rising output of an inverter driving 5 fF, input slew 0

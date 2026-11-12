@@ -109,7 +109,7 @@ struct Path_point {
 
 class Engine {
 public:
-  Engine(const Netlist& netlist, Constraints constraints, Options options = {});
+  Engine(Netlist& netlist, Constraints constraints, Options options = {});
 
   void set_wire(Wire_model wire);
   // Setup only: late walk, endpoint slacks, criticality. Required times are left rebased (the worst path of
@@ -139,6 +139,34 @@ public:
   [[nodiscard]] float         hold_slack(uint32_t pin) const {
     return hold_slack_.empty() ? std::numeric_limits<float>::infinity() : hold_slack_[pin];
   }
+  // ---- Edit sessions (todo 2q-fasttimer, step G): transient edits on top of an evaluate(), settled
+  // incrementally and undone exactly. The late setup state (arrival, slew, depth, required, endpoint
+  // slack, loads) is kept up to date; the hold walk and the criticality are not (they are stale until the
+  // next evaluate()). Edits are journaled; rollback(mark) restores every value stored after the mark.
+  // A mark is a settled state: mark() settles first.
+  [[nodiscard]] size_t mark();
+  void                 rollback(size_t mark);
+  // Undo everything and leave edit mode; the engine is then in the state evaluate() left it.
+  void                 end_edits();
+  // The same cell with another type of the same interface (Netlist::retype), at the engine's corners.
+  void                 resize_cell(uint32_t cell, uint32_t type);
+  // Replace the wire of a net: its capacitance per corner, and for each listed sink pin its delay and slew per
+  // corner ([pin][corner]). Sinks not listed keep theirs.
+  void                 set_net_wire(uint32_t net, std::span<const float> cap_ff, std::span<const uint32_t> sink_pins,
+                                    std::span<const float> delay_ps, std::span<const float> slew_ps);
+  // Propagate the pending edits; every query below does it first.
+  void                 settle();
+  [[nodiscard]] float  wns();  // worst endpoint slack over the setup corners, +inf without endpoints
+  [[nodiscard]] float  tns();  // sum of the negative endpoint slacks
+  [[nodiscard]] float  settled_slack(uint32_t pin) {
+    settle();
+    return slack(pin);
+  }
+  // Setup slack of the endpoints below a limit, ascending.
+  [[nodiscard]] std::vector<std::pair<uint32_t, float>> failing_endpoints(float below_ps);
+  // The electrical limits of one pin as evaluate() counts them: {limits exceeded, excess ratio}.
+  [[nodiscard]] Electrical_pin                          pin_electrical(uint32_t pin);
+
   // The pins over a limit (after evaluate), in pin order.
   [[nodiscard]] const std::vector<Electrical_pin>& electrical_pins() const { return electrical_pins_; }
   // Total load of a net in a corner, fF (pin capacitances plus wire).
@@ -168,19 +196,24 @@ private:
   void                prepare();
   void                mark_clock_network();
   void                compute_loads();
+  bool                compute_net_load(uint32_t net);
   void                seed_late();
   void                forward_late();
   void                seed_endpoints(bool rebased);
+  void                recompute_arrival(uint32_t pin);
+  void                recompute_required(uint32_t pin);
+  [[nodiscard]] float endpoint_requirement(size_t endpoint, size_t corner, unsigned transition, bool rebased) const;
   void                backward();
   void                measure_endpoints();
   void                criticality_pass();
   void                forward_early();
   void                check_hold();
   void                check_electrical();
+  void                electrical_excess(uint32_t pin, double& slew_excess, double& cap_excess) const;
   [[nodiscard]] float wire_delay(uint32_t pin, size_t corner) const;
   [[nodiscard]] float net_load(uint32_t net, size_t corner, bool early) const;
 
-  const Netlist&    netlist_;
+  Netlist&          netlist_;
   const Cell_types& types_;
   Constraints       constraints_;
   Options           options_;
@@ -209,6 +242,35 @@ private:
   std::vector<float>       clock_wns_;  // [clock * corners + corner]
   std::vector<uint8_t>     cut_, excluded_;
   bool                     required_rebased_ = false;
+  bool                     rebased_          = false;  // the requirements the endpoints were last seeded with
+  static constexpr size_t  no_endpoint       = ~size_t{0};
+  std::vector<float>       endpoint_required_;  // [endpoint][corner][transition], as seeded
+  // The journal of an edit session (see mark/rollback): every stored value keeps its old one.
+  enum class Undo_kind : uint8_t {
+    arrival, slew, required, depth, predecessor, arc_delay, load, wire_cap, wire_delay, wire_slew, endpoint_required,
+    endpoint_slack, cell_type
+  };
+  struct Undo {
+    Undo_kind kind;
+    uint8_t   aux;  // the transition of a predecessor
+    uint32_t  old_bits;
+    size_t    index;
+  };
+  bool                     journal_on_ = false;
+  std::vector<Undo>        journal_;
+  // Edit sessions: dirty pins by position in the order (a forward and a backward heap), flags per pin.
+  std::vector<uint32_t>    pos_, fwd_heap_, bwd_heap_, touched_endpoints_;
+  std::vector<uint8_t>     queued_, endpoint_touched_;
+  bool                     delay_changed_ = false;
+  void                     begin_edits();
+  void                     push_forward(uint32_t pin);
+  void                     push_backward(uint32_t pin);
+  void                     refresh_endpoint(size_t endpoint);
+  void                     touch_endpoint(uint32_t pin);
+  [[nodiscard]] size_t     endpoint_of(uint32_t pin) const;
+  template <class T>
+  void store(std::vector<T>& v, size_t i, T value);
+  void store_predecessor(size_t i, Predecessor value);
   Report                   report_;
 };
 

@@ -39,6 +39,10 @@ public:
   uint32_t add_output_port(std::string name);
   void     connect(uint32_t driver_pin, uint32_t sink_pin);
   void     finalize();
+  // After finalize: the same cell with another type of the same interface (a resize). The pins keep their
+  // indices, so the order and the nets stay valid; it throws when the new type has other pins (names, order),
+  // other arc connectivity or another untimed class, and the netlist is then unchanged.
+  void     retype(uint32_t cell, uint32_t type);
 
   [[nodiscard]] const Cell_types& types() const { return *types_; }
   [[nodiscard]] size_t            cells() const { return cell_type_.size(); }
