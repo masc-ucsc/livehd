@@ -227,3 +227,43 @@ TEST(PhysicalRank, WhatifEditsAgreeWithAFullEvaluationOfTheEditedDesign) {
   EXPECT_NEAR(*again.wns, wns0, 1e-4);
   EXPECT_THROW(w.resize("nothing", "INV2"), std::invalid_argument);
 }
+
+TEST(PhysicalRank, RankingFromNumericTreesEqualsRankingFromParasitics) {
+  const std::set<std::string> no_cuts;
+  Design                      design;
+  fast::Physical_ranker       ranker(options());
+  const auto                  from_rc = ranker.rank(design.graph, rc(5, 2000), no_cuts);
+
+  auto topology           = std::make_shared<fast::Tree_topology>();
+  topology->net_pin_start = {0, 2, 4};
+  topology->pin_label     = {livehd::Pin_label("ua:Q"), livehd::Pin_label("inv:A"), livehd::Pin_label("inv:Y"), livehd::Pin_label("ub:D")};
+  topology->driver_index  = {0, 0};
+  fast::Wire_trees trees;
+  trees.topology    = topology;
+  trees.node_start  = {0, 2, 4};
+  trees.edge_start  = {0, 1, 2};
+  trees.node_cap_ff = {0, 5, 0, 0};
+  trees.edges       = {{0, 1, 2000}, {0, 1, 0}};
+  auto skeleton     = std::make_shared<ph::Parasitics>();
+  skeleton->nets.resize(2);
+  skeleton->nets[0].driver = "ua:Q";
+  skeleton->nets[1].driver = "inv:Y";
+  fast::Physical_ranker numeric(options());
+  const auto            from_trees = numeric.rank_trees(design.graph, trees, skeleton, no_cuts);
+  ASSERT_TRUE(from_trees.ranking);
+  EXPECT_EQ(from_trees.ranking->parasitics, skeleton);
+  const auto& a = *from_rc.ranking;
+  const auto& b = *from_trees.ranking;
+  ASSERT_EQ(a.layout->labels, b.layout->labels);
+  ASSERT_EQ(a.pins.size(), b.pins.size());
+  for (size_t i = 0; i < a.pins.size(); ++i) {
+    EXPECT_EQ(a.pins[i].slack, b.pins[i].slack) << a.layout->labels[i];
+    EXPECT_EQ(a.pins[i].clock, b.pins[i].clock);
+  }
+  EXPECT_EQ(a.layout->net_offsets, b.layout->net_offsets);
+  EXPECT_EQ(a.layout->net_pins, b.layout->net_pins);
+  EXPECT_EQ(numeric.statistics().remaps, 1u);
+  (void)numeric.rank_trees(design.graph, trees, skeleton, no_cuts);
+  EXPECT_EQ(numeric.statistics().remaps, 1u);  // the same topology is mapped once
+  EXPECT_TRUE(trees.bytes() > 0);
+}

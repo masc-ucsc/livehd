@@ -96,7 +96,7 @@ void Physical_ranker::build_engine(const std::set<std::string>& cuts, const phys
 }
 
 bool Physical_ranker::mapping_valid(const physical::Parasitics& rc) const {
-  if (!mapping_bound_ || mapping_.net_driver.size() != rc.nets.size()) {
+  if (!mapping_bound_ || mapping_.source != nullptr || mapping_.net_driver.size() != rc.nets.size()) {
     return false;
   }
   size_t at = 0;
@@ -154,6 +154,15 @@ void Physical_ranker::remap(const physical::Parasitics& rc) {
     m.net_root.push_back(root);
   }
   m.net_start.push_back(static_cast<uint32_t>(m.labels.size()));
+  build_layout(m, named, m.labels, rc.nets.size());
+  mapping_bound_ = true;
+  ++mapping_generation_;
+  ++stats_.remaps;
+  stats_.map_seconds += since(start);
+}
+
+void Physical_ranker::build_layout(Mapping& m, std::vector<std::pair<Pin_label, uint32_t>>& named, std::span<const Pin_label> labels,
+                                   size_t nets) {
   // The ranking layout: sorted unique labels, and per net the layout index of each of its labelled nodes.
   std::ranges::sort(named, [](const auto& a, const auto& b) { return a.first < b.first; });
   named.erase(std::unique(named.begin(), named.end(), [](const auto& a, const auto& b) { return a.first == b.first; }), named.end());
@@ -164,12 +173,12 @@ void Physical_ranker::remap(const physical::Parasitics& rc) {
     layout->labels.push_back(label.str());
     m.layout_pin.push_back(pin);
   }
-  layout->net_offsets.reserve(rc.nets.size() + 1);
-  for (size_t n = 0; n < rc.nets.size(); ++n) {
+  layout->net_offsets.reserve(nets + 1);
+  for (size_t n = 0; n < nets; ++n) {
     layout->net_offsets.push_back(layout->net_pins.size());
     for (uint32_t k = m.net_start[n]; k < m.net_start[n + 1]; ++k) {
-      if (!m.labels[k].empty()) {
-        layout->net_pins.push_back(layout->find(m.labels[k]));
+      if (!labels[k].empty()) {
+        layout->net_pins.push_back(layout->find(labels[k]));
       }
     }
   }
@@ -177,11 +186,7 @@ void Physical_ranker::remap(const physical::Parasitics& rc) {
   auto index    = std::make_shared<livehd::timing::Feedback::Pin_index>();
   index->labels = layout->labels;
   m.index       = std::move(index);
-  m.layout       = std::move(layout);
-  mapping_bound_ = true;
-  ++mapping_generation_;
-  ++stats_.remaps;
-  stats_.map_seconds += since(start);
+  m.layout      = std::move(layout);
 }
 
 // The Elmore solution of one RC net at every corner: the wire capacitance (the tree's total without the pin
@@ -189,25 +194,38 @@ void Physical_ranker::remap(const physical::Parasitics& rc) {
 // engine pins of the nodes (no_index for a junction). False: the tree is not a tree.
 bool Physical_ranker::solve_net(const physical::Rc_net& net, std::span<const uint32_t> node_pins, uint32_t root, uint32_t driver,
                                 Solved& out) {
-  const auto&  netlist = *bound_->netlist;
-  const auto&  types   = netlist.types();
-  const size_t C       = types.corners();
-  const size_t count   = net.nodes.size();
-  out.cap.assign(C, 0.f);
-  out.delay.assign(count * C, 0.f);
-  out.slew.assign(count * C, 0.f);
   edges_.clear();
   for (const auto& e : net.edges) {
     edges_.push_back({e.from, e.to, static_cast<float>(e.resistance_ohm)});
   }
+  node_wire_cap_.clear();
+  for (const auto& node : net.nodes) {
+    node_wire_cap_.push_back(static_cast<float>(node.capacitance_ff));
+  }
+  return solve_arrays(node_wire_cap_, edges_, node_pins, root, driver, out);
+}
+
+// The Elmore solution of one RC tree at every corner: the wire capacitance (the tree's total without the pin
+// capacitances the engine adds itself), and the delay and slew at every node ([node][corner]). `node_pins` are the engine
+// pins of the first nodes (no_index for a junction; nodes past its end are junctions). False: it is not a tree.
+bool Physical_ranker::solve_arrays(std::span<const float> wire_cap, std::span<const Wire_edge> edges,
+                                   std::span<const uint32_t> node_pins, uint32_t root, uint32_t driver, Solved& out) {
+  const auto&  netlist = *bound_->netlist;
+  const auto&  types   = netlist.types();
+  const size_t C       = types.corners();
+  const size_t count   = wire_cap.size();
+  out.cap.assign(C, 0.f);
+  out.delay.assign(count * C, 0.f);
+  out.slew.assign(count * C, 0.f);
   std::vector<float>& cap = node_cap_;
   for (size_t k = 0; k < C; ++k) {
     cap.assign(count, 0.f);
     float sink_pins = 0;
     for (size_t i = 0; i < count; ++i) {
-      float c = static_cast<float>(net.nodes[i].capacitance_ff);
-      if (const auto pin = node_pins[i]; pin != no_index) {
-        const auto  cell  = netlist.cell_of(pin);
+      float c = wire_cap[i];
+      if (i < node_pins.size() && node_pins[i] != no_index) {
+        const auto pin   = node_pins[i];
+        const auto cell  = netlist.cell_of(pin);
         const float input = netlist.is_driver(pin) || pin == driver
                                 ? 0.f
                                 : std::max(types.pin_cap(netlist.type_of(cell), netlist.local_of(pin), k, 0),
@@ -217,7 +235,7 @@ bool Physical_ranker::solve_net(const physical::Rc_net& net, std::span<const uin
       }
       cap[i] = c;
     }
-    if (!solver_.solve(cap, edges_, root)) {
+    if (!solver_.solve(cap, edges, root)) {
       return false;
     }
     out.cap[k] = std::max(0.f, solver_.total_cap_ff() - sink_pins);
@@ -269,6 +287,111 @@ Wire_model Physical_ranker::wire_model(const physical::Parasitics& rc) {
   return wire;
 }
 
+void Physical_ranker::remap_trees(const std::shared_ptr<const Tree_topology>& topology) {
+  const auto start = Steady::now();
+  auto&      m     = mapping_;
+  m                = Mapping{};
+  m.source         = topology.get();
+  const auto& t    = *topology;
+  m.net_start      = t.net_pin_start;
+  m.pin.reserve(t.pin_label.size());
+  std::vector<std::pair<Pin_label, uint32_t>> named;
+  named.reserve(t.pin_label.size());
+  for (size_t k = 0; k < t.pin_label.size(); ++k) {
+    const auto pin = resolve_label(t.pin_label[k]);
+    if (pin == no_index) {
+      ++stats_.unresolved_labels;
+    }
+    m.pin.push_back(pin);
+    named.emplace_back(t.pin_label[k], pin);
+  }
+  for (size_t n = 0; n < t.trees(); ++n) {
+    const auto driver_node = t.net_pin_start[n] + t.driver_index[n];
+    m.net_driver.push_back(m.pin[driver_node]);
+    m.net_root.push_back(t.driver_index[n]);
+  }
+  build_layout(m, named, t.pin_label, t.trees());
+  mapping_topology_ = topology;
+  mapping_bound_    = true;
+  ++mapping_generation_;
+  ++stats_.remaps;
+  stats_.map_seconds += since(start);
+}
+
+Wire_model Physical_ranker::wire_model_trees(const Wire_trees& trees) {
+  const auto  start   = Steady::now();
+  const auto& netlist = *bound_->netlist;
+  const size_t C      = netlist.types().corners();
+  Wire_model wire;
+  wire.net_cap_ff.assign(netlist.nets() * C, 0.f);
+  wire.sink_delay_ps.assign(netlist.pins() * C, 0.f);
+  wire.sink_slew_ps.assign(netlist.pins() * C, 0.f);
+  const auto& m = mapping_;
+  Solved      solved;
+  for (size_t n = 0; n < trees.node_start.size() - 1; ++n) {
+    const auto driver = m.net_driver[n];
+    if (driver == no_index || netlist.net_of(driver) == no_index) {
+      continue;
+    }
+    const auto pin_first = m.net_start[n], pins = m.net_start[n + 1] - pin_first;
+    const auto nodes     = trees.node_start[n + 1] - trees.node_start[n];
+    const auto edges_n   = trees.edge_start[n + 1] - trees.edge_start[n];
+    if (!solve_arrays(std::span<const float>(trees.node_cap_ff.data() + trees.node_start[n], nodes),
+                      std::span<const Wire_edge>(trees.edges.data() + trees.edge_start[n], edges_n),
+                      std::span<const uint32_t>(m.pin.data() + pin_first, pins), m.net_root[n], driver, solved)) {
+      ++stats_.bad_trees;
+      continue;
+    }
+    const auto engine_net = netlist.net_of(driver);
+    for (size_t k = 0; k < C; ++k) {
+      wire.net_cap_ff[engine_net * C + k] = solved.cap[k];
+    }
+    for (size_t i = 0; i < pins; ++i) {
+      const auto pin = m.pin[pin_first + i];
+      if (pin == no_index || pin == driver) {
+        continue;
+      }
+      for (size_t k = 0; k < C; ++k) {
+        wire.sink_delay_ps[static_cast<size_t>(pin) * C + k] = solved.delay[i * C + k];
+        wire.sink_slew_ps[static_cast<size_t>(pin) * C + k]  = solved.slew[i * C + k];
+      }
+    }
+  }
+  stats_.wire_seconds += since(start);
+  return wire;
+}
+
+livehd::timing::Feedback Physical_ranker::rank_trees(const std::shared_ptr<hhds::Graph>& graph, const Wire_trees& trees,
+                                                     const std::shared_ptr<const physical::Parasitics>& skeleton,
+                                                     const std::set<std::string>&                       cuts) {
+  if (!graph || !skeleton || !trees.topology) {
+    throw std::invalid_argument("fast ranking from trees requires a graph, trees and their skeleton");
+  }
+  if (engine_) {
+    engine_->end_edits();
+  }
+  added_cells_.clear();
+  added_names_.clear();
+  rc_.reset();
+  if (!bound_ || bound_graph_ != graph.get() || bound_epoch_ != graph->body_epoch()) {
+    bind(graph);
+  }
+  if (!mapping_bound_ || mapping_.source != trees.topology.get()) {
+    remap_trees(trees.topology);
+    engine_.reset();
+  }
+  auto combined = cuts;
+  combined.insert(skeleton->timing_cuts.begin(), skeleton->timing_cuts.end());
+  if (!engine_ || combined != engine_cuts_) {
+    build_engine(cuts, *skeleton);
+  }
+  engine_->set_wire(wire_model_trees(trees));
+  const auto engine_start = Steady::now();
+  engine_->rank();
+  stats_.engine_seconds += since(engine_start);
+  return ranking_feedback(skeleton);
+}
+
 void Physical_ranker::prepare(const std::shared_ptr<hhds::Graph>& graph, const std::shared_ptr<const physical::Parasitics>& rc,
                               const std::set<std::string>& cuts) {
   if (!graph || !rc) {
@@ -302,7 +425,10 @@ livehd::timing::Feedback Physical_ranker::rank(const std::shared_ptr<hhds::Graph
   const auto engine_start = Steady::now();
   engine_->rank();
   stats_.engine_seconds += since(engine_start);
+  return ranking_feedback(rc);
+}
 
+livehd::timing::Feedback Physical_ranker::ranking_feedback(const std::shared_ptr<const physical::Parasitics>& rc) {
   const auto feedback_start = Steady::now();
   livehd::timing::Feedback result;
   result.ranking_only = true;

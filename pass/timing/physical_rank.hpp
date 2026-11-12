@@ -31,6 +31,27 @@
 // ideal clock marked), so the two can be compared label by label.
 namespace livehd::timing::fast {
 
+// The identity of the wire trees of a placed design, built once while the placed graph keeps its connectivity: for each
+// tree (a net with at least two pins) its pins by label, and which of them drives. Pointer identity tells the ranker
+// that the labels are the same as last time.
+struct Tree_topology {
+  std::vector<uint32_t>  net_pin_start;  // [tree] first pin; one more entry at the end
+  std::vector<Pin_label> pin_label;      // per tree pin
+  std::vector<uint32_t>  driver_index;   // per tree: the index of the driver among its pins
+  [[nodiscard]] size_t   trees() const { return driver_index.size(); }
+};
+// The wire of every tree of one placement state as numbers (no labels, no strings): the nodes of tree k are the pins of
+// the topology in order, then the junctions; the edges are the resistors between nodes of the tree.
+struct Wire_trees {
+  std::shared_ptr<const Tree_topology> topology;
+  std::vector<uint32_t>                node_start, edge_start;  // [tree], one more entry at the end
+  std::vector<float>                   node_cap_ff;             // the wire capacitance at each node
+  std::vector<Wire_edge>               edges;
+  [[nodiscard]] size_t                 bytes() const {
+    return (node_start.capacity() + edge_start.capacity()) * 4 + node_cap_ff.capacity() * 4 + edges.capacity() * sizeof(Wire_edge);
+  }
+};
+
 class Physical_ranker {
 public:
   struct Options {
@@ -51,6 +72,12 @@ public:
   [[nodiscard]] livehd::timing::Feedback rank(const std::shared_ptr<hhds::Graph>&                  graph,
                                               const std::shared_ptr<const physical::Parasitics>& rc,
                                               const std::set<std::string>&                       cuts);
+
+  // The same ranking from numeric wire trees (see Wire_trees). `skeleton` is what the caller keeps as its parasitics: its
+  // nets are the trees, in order (only the driver label of each is read), and the ranking refers to it.
+  [[nodiscard]] livehd::timing::Feedback rank_trees(const std::shared_ptr<hhds::Graph>& graph, const Wire_trees& trees,
+                                                    const std::shared_ptr<const physical::Parasitics>& skeleton,
+                                                    const std::set<std::string>&                       cuts);
 
   // The detailed evaluation: everything `rank` does, then true requirements, hold, the electrical limits, and the
   // per-pin arrival, required, slack, hold slack, slew, load and capacitance (`Feedback::dense`), the worst path and
@@ -78,6 +105,7 @@ private:
     std::vector<uint32_t>  net_start;   // per RC net: first entry; plus one more
     std::vector<uint32_t>  net_driver;  // per RC net: engine pin of the driver, no_index when unmapped
     std::vector<uint32_t>  net_root;    // per RC net: the node of the driver
+    const void*                                                      source = nullptr;  // the Tree_topology of a tree mapping
     std::shared_ptr<const livehd::timing::Feedback::Ranking::Layout> layout;
     std::vector<uint32_t>                                            layout_pin;  // per label of the layout
     std::shared_ptr<const livehd::timing::Feedback::Pin_index>       index;       // the same labels, for dense feedback
@@ -95,6 +123,12 @@ private:
     std::vector<float> cap, delay, slew;
   };
   bool solve_net(const physical::Rc_net& net, std::span<const uint32_t> node_pins, uint32_t root, uint32_t driver, Solved& out);
+  bool solve_arrays(std::span<const float> wire_cap, std::span<const Wire_edge> edges, std::span<const uint32_t> node_pins,
+                    uint32_t root, uint32_t driver, Solved& out);
+  livehd::timing::Feedback ranking_feedback(const std::shared_ptr<const physical::Parasitics>& rc);
+  void build_layout(Mapping& m, std::vector<std::pair<Pin_label, uint32_t>>& named, std::span<const Pin_label> labels, size_t nets);
+  void remap_trees(const std::shared_ptr<const Tree_topology>& topology);
+  Wire_model wire_model_trees(const Wire_trees& trees);
 
   Options                    options_;
   std::vector<liberty::timing::Library> libraries_;
@@ -119,7 +153,8 @@ private:
   size_t                                    mapping_generation_ = 0;
   Elmore                     solver_;
   std::vector<Wire_edge>     edges_;
-  std::vector<float>         node_cap_;
+  std::vector<float>         node_cap_, node_wire_cap_;
+  std::shared_ptr<const Tree_topology> mapping_topology_;  // keeps the topology of a tree mapping alive
 };
 
 }  // namespace livehd::timing::fast
