@@ -383,7 +383,15 @@ after the region refinement, is skipped when the first was refused for that reas
 incoming placement alone). (c) The region refinement (175 s) is the bus-ordering flow for chunk boundaries (<code>place.region.busorder</code>, on by default):
 24 s of setup, a split model of 21 rectangles with 103k split nets and 192k virtual pins, 50 GP iterations on it (about 100 s), 66k cells moved; on dino turning it off
 gives HPWL &minus;1.9% and 8% less time, so its value depends on the chunked flow that uses it. OpenMP in the native placer scales poorly on dino (place phase 30.0 s
-at 1 thread, 27.0 at 2, 25.8 at 8, 25.3 at 32).</td></tr>
+at 1 thread, 27.0 at 2, 25.8 at 8, 25.3 at 32).
+<br/><strong>Buffer-tree candidates per net.</strong> The planner built about a hundred alternative trees for every selected net (three fanouts for every buffer
+size, plus spatial variants, each one a Steiner tree and an Elmore evaluation), and only a quarter of the 39k nets selected on minion ended with a tree (dino: 18%). Topologies with the
+same limits are now built once (identical result), and a net of little consequence gets an even spread of the distinct ones, never fewer than four, rising to all of them with its criticality
+(<code>repair_tree_min_effort</code> 0.1): minion's forest sweep prepare 67 s &rarr; 36 s, 1,573 s in all, with the same result (HPWL 53,314,865, WNS &minus;11.73 ns, TNS &minus;80,261);
+tight-clock dino 27% faster at +0.3% TNS. Selecting the nets differently was measured too and does not pay: only buffering critical nets whose reach exceeds 2 repeater spacings, or among the
+top 30% by criticality, gives 50% worse TNS on dino (the nets between one and two spacings carry it), and moderate thresholds on minion select 98% of the same nets (the design has negative slack
+almost everywhere, so criticality and length do not discriminate). The repair report now says why each net was chosen (<code>reasons</code>) and which reasons ended in a tree
+(<code>applied_reasons</code>). A region-crossing test needs the region mesh, which repair does not have.</td></tr>
 </table>
 <h3>Findings in E</h3>
 <ul>
