@@ -6674,6 +6674,20 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
   };
   const bool use_pcrs   = pcrs_active(options);
   pcrs::Stats pcrs_stats;
+  bool missing_wire_rc = false;
+  if (options.allow_missing_wire_rc && !options.timing_seed && !options.fp_evaluate && !options.gp_rank && !options.gui_rank
+      && !options.native_gp_timing && !options.after_stage && !options.gp_observer) {
+    try {
+      (void)technology_wire_rc(tech, options.liberty, options.tech_rc_file, options.resistance_ohm_um, options.capacitance_ff_um,
+                               options.rc_pessimism, options.technology().cells.contents);
+    } catch (const std::runtime_error& e) {
+      if (std::string_view(e.what())
+          != "technology has no characterized signal or horizontal/vertical wire RC; supply synth.place.tech_rc or synth.place.wire_rc") {
+        throw;
+      }
+      missing_wire_rc = true;
+    }
+  }
   if (use_pcrs) {
     // A tree built before the first placement groups its sinks by instance name. The first call that starts
     // from a placement regroups them by position, once: a reset hop then spans neighbours, not the die.
@@ -6704,8 +6718,8 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     const auto   reset_wire = technology_wire_rc(tech,
                                                  options.liberty,
                                                  options.tech_rc_file,
-                                                 options.resistance_ohm_um,
-                                                 options.capacitance_ff_um,
+                                                 missing_wire_rc ? 0 : options.resistance_ohm_um,
+                                                 missing_wire_rc ? 0 : options.capacitance_ff_um,
                                                  options.rc_pessimism,
                                                  options.technology().cells.contents);
     const double reset_c    = std::max(reset_wire.horizontal_c, reset_wire.vertical_c) / tech.dbu;
@@ -9361,6 +9375,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     // This callback changes only the objective: macro geometry, centroid targets
     // and graph topology stay unchanged. Electrical repair follows legal GP.
     std::map<std::string, Point> macro_timed_positions;
+    std::shared_ptr<Tree_cache>  tree_cache;  // the wire trees' identity, for the life of this placement
     unsigned                     macro_checkpoints         = 0;
     bool                         macro_checkpoint_forced   = false;
     double                       macro_checkpoint_overflow = 0;
@@ -9375,7 +9390,6 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     Timing_feedback final_gp_timing, trial_gp_timing;
     bool            final_gp_timing_started     = false;
     int             last_final_timing_iteration = -1;
-    std::shared_ptr<Tree_cache>  tree_cache;  // the wire trees' identity, for the life of this placement
     bool            trial_scoring               = false;
     const char*     timing_stage                = final_timing ? "final" : "macro";
     bool            legal_timing_snapshot       = false;
@@ -14410,7 +14424,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     rc_options.resistance_ohm_um = 0;
     rc_options.capacitance_ff_um = 0;
     result.parasitics            = estimate_rc(v, tech, rc_options, &result.pin_locations);
-  } else {
+  } else if (!missing_wire_rc) {
     result.parasitics = estimate_rc(v, tech, options, &result.pin_locations);
   }
   if (native_session && options.native_gp_timing->legal_output_guard && !defer_legroute_cells
@@ -14423,8 +14437,8 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       throw std::invalid_argument("native final legal timing rejected output: " + acceptance.reason);
     }
   }
-  record_poses(*result.parasitics, v);
-  {
+  if (result.parasitics) {
+    record_poses(*result.parasitics, v);
     // Classification is only needed to attach the cuts. Release its pin sets
     // before allocating the persisted RC text.
     const auto persisted_controls = prects_networks(tech, v.fp, v.prects);
@@ -15108,7 +15122,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
   result.boundary_refined   = boundary_pins.has_value();
   result.unknown_const_tied = resolver.unknown_tied();
   result.qor                = std::format(
-      R"({{"schema_version":1,"kind":"placement","mode":"{}","legal":{},"gp_converged":{},"gp_overflow":{},"hpwl_um":{},"initial_hpwl_um":{},"cells":{},"nets":{},"estimated_macros":{},"virtual_fillers":{},"density_constraint":"soft","timing_model":"placement_rc","timing_approximate":{},"rc_identity":"{}","incremental":{{"enabled":{},"hit":{},"reused_blocks":{},"changed_blocks":{}}}}})",
+      R"({{"schema_version":1,"kind":"placement","mode":"{}","legal":{},"gp_converged":{},"gp_overflow":{},"hpwl_um":{},"initial_hpwl_um":{},"cells":{},"nets":{},"estimated_macros":{},"virtual_fillers":{},"density_constraint":"soft","timing_model":"{}","timing_approximate":{},"rc_identity":"{}","incremental":{{"enabled":{},"hit":{},"reused_blocks":{},"changed_blocks":{}}}}})",
       options.retain_placement ? "timing_snapshot"
       : options.timing_seed    ? "post_synthesis_zero_wire"
       : options.full           ? "full"
@@ -15128,8 +15142,9 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       v.nets.size(),
       memories.size(),
       options.virtual_fillers ? "true" : "false",
-      result.parasitics->approximate ? "true" : "false",
-      result.parasitics->identity,
+      result.parasitics ? "placement_rc" : "none",
+      result.parasitics && result.parasitics->approximate ? "true" : "false",
+      result.parasitics ? result.parasitics->identity : std::string{},
       cache_path.empty() ? "false" : "true",
       cache.hit ? "true" : "false",
       cache.reused,
@@ -15766,7 +15781,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   // electrical snapshot. Neither should acquire a persisted RC attribute.
   if (result.parasitics && !options.timing_seed && options.persist_parasitics) {
     result.graph->get_input_node().attr(attrs::placement_rc).set(ph::serialize_parasitics(*result.parasitics));
-  } else if (!options.persist_parasitics) {
+  } else if (!options.persist_parasitics || !result.parasitics) {
     // A copied input may carry an obsolete annotation. The fused optimizer
     // uses the current in-memory RC and persists only its accepted final state.
     result.graph->get_input_node().attr(attrs::placement_rc).del();

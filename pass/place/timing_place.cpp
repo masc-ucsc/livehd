@@ -208,6 +208,7 @@ Repair_result timing_place(Result initial, const Options& requested, const Evalu
   w.StartArray();
   std::map<std::string, double> weights   = result.placed.net_weights;
   unsigned                      accepted  = 0;
+  bool                          unconverged_refusal = false;
   const auto                    directory = options.output_dir + "/timing_place";
   std::filesystem::create_directories(directory);
   // An accepted round already refreshed toward the new best; smoothing again
@@ -312,6 +313,7 @@ Repair_result timing_place(Result initial, const Options& requested, const Evalu
                                      && geometry["gp_overflow"].GetDouble() <= options.stop_overflow);
       // A rejected geometric retry would restart from the same accepted state.
       exhausted                = !density_ready || !bounded;
+      unconverged_refusal      = unconverged_refusal || !density_ready;
       w.Key("density_ready_for_timing");
       w.Bool(density_ready);
       for (const auto& member : geometry.GetObject()) {
@@ -379,7 +381,8 @@ Repair_result timing_place(Result initial, const Options& requested, const Evalu
   w.Key("after_delay");
   w.Double(best.delay);
   w.EndObject();
-  result.report = buffer.GetString();
+  result.report         = buffer.GetString();
+  result.gp_unconverged = unconverged_refusal && accepted == 0;
   rapidjson::Document q;
   q.Parse(result.placed.qor.c_str());
   // The primary GP's convergence and cost must survive an accepted short

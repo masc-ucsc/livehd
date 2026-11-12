@@ -2223,6 +2223,7 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
   // Native stage timing of the final placement (2d-domplace E): opt-in and
   // report-only, with or without the domino profile, never cached.
   const bool run_stage_timing         = truthy(synth_set(opts, "place.stage_timing", "false"));
+  place_options.allow_missing_wire_rc = !run_sta && !run_timing_place && !run_resize && !run_resynth && !run_stage_timing;
   const bool stage_timing_complete    = truthy(synth_set(opts, "place.stage_timing.require_complete", "false"));
   double     stage_timing_uncertainty = 0;
   {
@@ -3302,10 +3303,10 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
           std::print("fast rank {}: binds {} ({:.3f}s) remaps {} ({:.3f}s) wire {:.6f}s engine {:.6f}s feedback {:.6f}s bad_trees {} unresolved {}\n",
                      s.ranks,
                      s.binds,
-                     s.remaps,
                      s.bind_seconds,
-                     s.wire_seconds,
+                     s.remaps,
                      s.map_seconds,
+                     s.wire_seconds,
                      s.engine_seconds,
                      s.feedback_seconds,
                      s.bad_trees,
@@ -3452,13 +3453,13 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
           Stdout_to_log redirect(timing_log);
           auto          fb = livehd::placement::prects_data_timing(
               fast_ranker->evaluate(state.graph, state.parasitics, controls.timing_cuts), controls);
-          show_timing(fb);
           if (timing_profile) {
             const auto& s = fast_ranker->statistics();
             std::print("fast evaluate {}: binds {} ({:.3f}s) remaps {} ({:.3f}s) wire {:.3f}s engine {:.3f}s feedback {:.3f}s\n",
                        s.evaluations, s.binds, s.bind_seconds, s.remaps, s.map_seconds, s.wire_seconds, s.engine_seconds,
                        s.feedback_seconds);
           }
+          show_timing(fb);
           return fb;
         }
         auto        fb       = estimate({state.graph, state.parasitics, controls}, livehd::opentimer::Physical_session::Purpose::detailed);
@@ -3604,8 +3605,8 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
                 fast_ranker->rank_trees(state.graph, state.trees, state.skeleton, state.controls.timing_cuts), state.controls);
           };
         }
-        place_options.fp_resize   = false;
         // GP consumes criticality only. Physical resizing runs after legal GP.
+        place_options.fp_resize   = false;
       }
       if (gui_session) {
         place_options.gui_rank = rank;  // read-only timing refresh for the panel (never the flow's own gp_rank)
@@ -3818,7 +3819,9 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
               res.recipe_steps.emplace_back("pass.place.regions");
             }
             timed_placement.timing = std::move(region_refined.timing);
-            if (run_timing_place && region_refined.moved_cells > 0) {
+            // A timing-driven placement that ran out of GP budget before converging was refused; the one after the
+            // refinement starts from nearly the same placement and weights, with the same budget (159 s on minion).
+            if (run_timing_place && region_refined.moved_cells > 0 && !timed_placement.gp_unconverged) {
               Phase_timer phase(res, "pass.place.timing_driven.regions");
               auto        kick_options  = place_options;
               kick_options.output_dir  += "/regions";  // its rounds next to the refinement, not over the first rounds

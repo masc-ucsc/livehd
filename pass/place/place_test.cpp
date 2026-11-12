@@ -7768,6 +7768,32 @@ TEST(Placement, UnsetCellHaloPreservesStatefulCallbackAcrossCalls) {
   EXPECT_EQ(options.after_stage.target<Observer>()->calls, 1);
   EXPECT_TRUE(persisted.graph->get_input_node().attr(attrs::placement_rc).has());
   EXPECT_FALSE(transient.graph->get_input_node().attr(attrs::placement_rc).has());
+
+  // A geometric placement may have LEF geometry but no characterized wire RC.
+  const auto no_rc_lef = std::string(std::getenv("TEST_TMPDIR")) + "/no_wire_rc.tlef";
+  {
+    std::ifstream in("inou/lefdef/tests/data/sky130hd.tlef");
+    std::ofstream out(no_rc_lef);
+    std::string line;
+    while (std::getline(in, line)) {
+      if (line.find("RESISTANCE RPERSQ") == std::string::npos && line.find("CAPACITANCE CPERSQDIST") == std::string::npos) {
+        out << line << '\n';
+      }
+    }
+  }
+  options.lefs = {no_rc_lef, "inou/lefdef/tests/data/sky130hd.lef"};
+  options.technology_cache.reset();
+  options.output_dir += "_no_rc";
+  options.after_stage = {};
+  options.resistance_ohm_um = options.capacitance_ff_um = -1;
+  hhds::GraphLibrary missing_rc_library;
+  EXPECT_THROW(place(*graph, missing_rc_library, options), std::runtime_error);
+  options.allow_missing_wire_rc = true;
+  hhds::GraphLibrary geometric_library;
+  const auto geometric = place(*first.graph, geometric_library, options);
+  EXPECT_EQ(geometric.parasitics, nullptr);
+  EXPECT_FALSE(geometric.graph->get_input_node().attr(attrs::placement_rc).has());
+  EXPECT_NE(geometric.qor.find("\"timing_model\":\"none\""), std::string::npos);
 }
 }  // namespace livehd::placement
 

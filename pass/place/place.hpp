@@ -165,6 +165,8 @@ struct Options {
   // Internal fused-flow lifetime: intermediate consumers use Result::parasitics.
   // Standalone placement and final publication retain the persisted annotation.
   bool                                                      persist_parasitics     = true;
+  // A geometry-only caller can proceed without an unavailable wire model.
+  bool                                                      allow_missing_wire_rc = false;
   // Diagnostic-only, synchronous observation; never supplies optimizer feedback.
   std::function<void(const Result&, const Gp_observation&)> gp_observer;
   int                                                       gp_observer_interval  = 0;
@@ -322,9 +324,9 @@ struct Options {
   // Optional lightweight path ranking for placement weights. Detailed timing
   // remains available through fp_evaluate for resizing and resynthesis.
   Rank                                            gp_rank;
+  Rank_trees                                      gp_rank_trees;  // when set, GP timing checkpoints rank from numeric trees
   Rank                                            gui_rank;  // 2i-interact: read-only timing refresh for the panel
   double                                          fp_minimum = 3000, fp_attraction = .25, fp_repulsion = 5, fp_anchor = .25;
-  Rank_trees                                      gp_rank_trees;  // when set, GP timing checkpoints rank from numeric trees
   bool                                            fp_distance_attraction = true;
   bool                                            fp_anchor_macros_only = false;  // frozen targets; retain all-member normalization
   double                                          fp_attraction_outside = 4;      // additional stiffness beyond the centroid circle

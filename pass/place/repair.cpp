@@ -2953,6 +2953,7 @@ Repair_result repair_buffers(Result initial, const Options& requested, const Eva
   // Reserve half the shared 24-trial budget for final physical recovery.
   // Every accepted bypass refreshes candidates against the new legal geometry.
   unsigned recovery_attempts = 0, recovery_accepted = 0;
+  size_t   recovery_group = 16;  // candidates removed per trial; halved when a group is refused
   while (needs_repair() && trial_available() && (scope == Repair_scope::recovery || !score.wns || *score.wns < 0)
          && ((physical_recovery && attempt < 24 && recovery_attempts < 12 && recovery_accepted < 8)
              || (!score.has_pins() && scope != Repair_scope::recovery && attempt < 24 && accepted < 8))) {
@@ -2969,14 +2970,28 @@ Repair_result repair_buffers(Result initial, const Options& requested, const Eva
       });
     }
     bool progress = false;
-    for (const auto& edit : candidates) {
+    // Physical recovery removes buffers one whole-design trial at a time: a clone, a legalization of every cell and a full
+    // timing run to test one removal. The sweep above batches its edits and bisects a rejected batch; recovery does the
+    // same, starting with a group of candidates, halving it when the group is refused, and so spends one trial where it
+    // spent one per buffer.
+    for (size_t first = 0; first < candidates.size();) {
       if (!trial_available()) {
         break;
       }
-      const auto key = std::format("{}:{}:{}:{}:{}", edit.kind, edit.node, edit.master, edit.fanout, edit.driver);
-      if (!tried.insert(key).second) {
-        continue;
+      const auto key_of = [](const Edit& edit) {
+        return std::format("{}:{}:{}:{}:{}", edit.kind, edit.node, edit.master, edit.fanout, edit.driver);
+      };
+      std::vector<size_t> group;
+      for (size_t next = first; next < candidates.size() && group.size() < (physical_recovery ? recovery_group : 1); ++next) {
+        if (!tried.contains(key_of(candidates[next]))) {
+          group.push_back(next);
+        }
       }
+      if (group.empty()) {
+        break;
+      }
+      first = group.front() + 1;
+      const auto& edit = candidates[group.front()];
       ++attempt;
       recovery_attempts += physical_recovery;
       w.StartObject();
@@ -2986,6 +3001,8 @@ Repair_result repair_buffers(Result initial, const Options& requested, const Eva
       w.String(edit.node.c_str());
       w.Key("master");
       w.String(edit.master.c_str());
+      w.Key("group");
+      w.Uint64(group.size());
       bool kept = false;
       try {
         hhds::GraphLibrary draft;
@@ -3000,8 +3017,29 @@ Repair_result repair_buffers(Result initial, const Options& requested, const Eva
         if (!graph) {
           throw std::runtime_error("cannot clone buffer trial");
         }
-        Apply_index trial_index(*graph, result.placed);
-        const auto  tree = apply(*graph, cells, edit, protected_names, result.placed, score, options, tech, &trial_index);
+        Apply_index              trial_index(*graph, result.placed);
+        std::vector<std::string> changed_names;
+        std::optional<Buffer_tree> tree;
+        for (const auto member : group) {
+          const auto& item = candidates[member];
+          if (group.size() > 1 && !trial_index.nodes.contains(item.node)) {
+            continue;  // removed together with an earlier member
+          }
+          try {
+            auto applied = apply(*graph, cells, item, protected_names, result.placed, score, options, tech, &trial_index);
+            if (applied && !tree) {
+              tree = std::move(applied);
+            }
+            changed_names.push_back(item.node);
+          } catch (const std::runtime_error&) {
+            if (group.size() == 1) {
+              throw;  // a single edit reports its own reason
+            }
+          }
+        }
+        if (changed_names.empty()) {
+          throw std::runtime_error("no edit of the group could be applied");
+        }
         if (tree) {
           w.Key("topology");
           w.String("flute_steiner");
@@ -3016,7 +3054,7 @@ Repair_result repair_buffers(Result initial, const Options& requested, const Eva
         }
         trial_options.net_weights    = std::move(trial_index.weights);
         trial_options.previous       = std::make_shared<physical::Floorplan>(result.placed.floorplan);
-        trial_options.changed_cells  = {edit.node};
+        trial_options.changed_cells  = std::move(changed_names);
         trial_options.output_dir     = directory + "/trial_" + std::to_string(attempt);
         trial_options.floorplan      = directory + "/floorplan.def";
         auto floorplan               = result.placed.floorplan;
@@ -3057,6 +3095,13 @@ Repair_result repair_buffers(Result initial, const Options& requested, const Eva
       w.Key("accepted");
       w.Bool(kept);
       w.EndObject();
+      if (!kept && group.size() > 1) {
+        // Refused as a group: the same start again with half of it (nothing is marked tried yet).
+        recovery_group = std::max<size_t>(1, group.size() / 2);
+        first          = group.front();
+      } else if (!(kept && physical_recovery)) {
+        tried.insert(key_of(edit));  // as before: every edit tried is remembered, except after a physical recovery's reset
+      }
       if (progress || attempt >= 24 || (physical_recovery && recovery_attempts >= 12)) {
         break;
       }

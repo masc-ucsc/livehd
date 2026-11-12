@@ -41,6 +41,9 @@ struct Repair_result {
   std::string                                      report;
   std::optional<Timing_feedback>                   timing;
   unsigned                                         moved_cells = 0;  // refine_regions: cells whose pose changed
+  // timing_place: a round ran out of its GP continuation budget before the solve converged, so nothing was accepted. A
+  // later round from nearly the same placement and weights runs the same budget and ends the same way.
+  bool                                             gp_unconverged = false;
 };
 struct Floorplan_resize {
   Timing_feedback timing;
