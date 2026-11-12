@@ -60,6 +60,7 @@ filegroup(
         "signal_router.cpp", "signal_maze.cpp", "signal_router.hpp",
         "signal_route_profile.cpp", "signal_route_profile.hpp",
         "pin_escape_guard.cpp", "pin_escape_guard.hpp",
+        "steiner_net.cpp", "steiner_net.hpp",
         "steiner_topology.cpp", "steiner_topology.hpp",
         "technology_rc.cpp", "technology_rc.hpp",
         "preroute_handoff.tcl", "preroute_validate.tcl", "preroute_reserve.tcl",
@@ -1385,8 +1386,8 @@ cc_test(
 
 cc_library(
     name = "steiner_topology",
-    srcs = ["steiner_topology.cpp"],
-    hdrs = ["steiner_topology.hpp"],
+    srcs = ["steiner_net.cpp", "steiner_topology.cpp"],
+    hdrs = ["steiner_net.hpp", "steiner_topology.hpp"],
     copts = COPTS,
     visibility = ["//visibility:public"],
     deps = ["//inou/lefdef:index_union_find", "@dreamplace//thirdparty/flute"],
