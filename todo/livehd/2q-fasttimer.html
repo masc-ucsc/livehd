@@ -373,7 +373,17 @@ with a byte-identical result (HPWL 53,317,349, WNS &minus;11.73 ns, TNS &minus;8
 different but deterministic placement (HPWL +0.9%, TNS &minus;1.8%); with one thread the OpenMP build is byte-identical to the default build. The
 same flow on dino (8 threads): place phase &minus;17%, HPWL +1.3%. What remains by phase (1,697 s run): ABC 287 s (one region of 6M gate
 equivalents takes 153 s), the repair step 430 s (a whole incremental placement per trial), global placement 217 s, final legalization 129 s,
-resize 100 s, OpenTimer's final report 65 s.</td></tr>
+resize 100 s, OpenTimer's final report 65 s.
+<br/><strong>Algorithmic changes in the repair and timing-driven steps</strong> (same minion, one thread, every run with an identical result up to 21 cells and
+0.02% of TNS): 1,784 s &rarr; <strong>1,583 s</strong>, i.e. <strong>&minus;24.5% from the 2,096 s before this work started</strong>. (a) Physical recovery removed one buffer per
+trial, each trial a whole-design clone, legalization and timing run, and never stopped early on a &minus;11 ns design; it now removes a group of up to 16
+and halves the group when it is refused (repair 427 &rarr; 372 s). (b) Both timing-driven placements (about 150 s each) did nothing on minion and on dino: their one
+GP round stops at the 100-iteration continuation limit, the routability gate requires convergence, and the round is refused without being timed. The second one,
+after the region refinement, is skipped when the first was refused for that reason (&minus;139 s). The first is still run (the refusal is not predictable from the
+incoming placement alone). (c) The region refinement (175 s) is the bus-ordering flow for chunk boundaries (<code>place.region.busorder</code>, on by default):
+24 s of setup, a split model of 21 rectangles with 103k split nets and 192k virtual pins, 50 GP iterations on it (about 100 s), 66k cells moved; on dino turning it off
+gives HPWL &minus;1.9% and 8% less time, so its value depends on the chunked flow that uses it. OpenMP in the native placer scales poorly on dino (place phase 30.0 s
+at 1 thread, 27.0 at 2, 25.8 at 8, 25.3 at 32).</td></tr>
 </table>
 <h3>Findings in E</h3>
 <ul>
