@@ -79,6 +79,18 @@ TEST(Bus_name, MemoryStorage) {
   }
 }
 
+TEST(Bus_name, MemoryInstance) {
+  // A name below the wrapper is spelled with the source memory: the storage cells of a memory lowered to registers.
+  EXPECT_EQ(bn::decode_memory_instance("lane.__lhdmem_h6d656d_e._mem[3][5]").value_or(""), "lane.mem._mem[3][5]");
+  EXPECT_EQ(bn::decode_memory_instance("__lhdmem_h612e62_e_3._mem[0].flop_16").value_or(""), "a.b._mem[0].flop_16");
+  EXPECT_EQ(bn::decode_memory_instance("x___lhdmem_h71_e__mem[1]", '_').value_or(""), "x_q__mem[1]");
+  // The wrapper itself and its own state are parse_memory_storage's, and a broken encoding is no wrapper.
+  for (const char* s : {"mem._mem[3]", "__lhdmem_h6d656d_e", "__lhdmem_h6d656d_e_data", "__lhdmem_h6d6_e._mem[0]", "__lhdmem_hzz_e._mem[0]",
+                        "__lhdmem_h6d_e."}) {
+    EXPECT_FALSE(bn::decode_memory_instance(s).has_value()) << s;
+  }
+}
+
 TEST(Bus_name, RejectsNonStandard) {
   for (const char* s : {"x", "x_3", "[3]", "x[]", "x[03]", "x[-1]", "x[3:0]", "x[a]", "x[3]y", "x[1234567890]", "x3]"}) {
     EXPECT_FALSE(bn::parse_bus_piece(s).has_value()) << s;

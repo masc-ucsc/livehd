@@ -160,12 +160,58 @@ void semdiff_command(Options& opts, Result& res) {
     };
     auto* const ref_top  = top_of(ref_var, !opts.ref_top.empty() ? opts.ref_top : opts.top, "ref");
     auto* const impl_top = !opts.impl_top.empty() ? top_of(impl_var, opts.impl_top, "impl") : top_of(impl_var, opts.top, "");
-    const auto  ref_flat
-        = livehd::single_edge::inline_instances_missing_from_other_side({}, ref_var.graphs, impl_var.graphs, ref_top, &absorbed);
-    const auto impl_flat
-        = livehd::single_edge::inline_instances_missing_from_other_side({}, impl_var.graphs, ref_var.graphs, impl_top, &absorbed);
+    // --lib lg:DIR cell-model libraries, exactly as in lec: a mapped netlist keeps its registers inside body-less
+    // Liberty cell instances, and without the models (`lhd pass liberty gensim`) the splice below has no body to
+    // dissolve -- the report then reads `registers impl 0/0` for a netlist full of flops. With them every mapped
+    // flop is a state cell named by its instance (`x[i].flop_16`, regrouped to `x` by its bus name).
+    absl::flat_hash_map<hhds::Gid, hhds::Graph*> sub_lib;
+    std::vector<std::shared_ptr<hhds::Graph>>    sub_lib_keep;
+    for (const auto& lp : opts.libs) {
+      if (lp.kind != "lg") {
+        throw Lhd_error{"usage",
+                        std::format("pass semdiff --lib expects lg:DIR, got '{}:'", lp.kind),
+                        "the cell-model library, e.g. --lib lg:models (`lhd pass liberty gensim cells.lib --emit-dir lg:models`)"};
+      }
+      if (!fs::is_directory(lp.path)) {
+        throw Lhd_error{"missing_file", std::format("pass semdiff --lib not found: {}", lp.path), ""};
+      }
+      auto& lib = livehd::Hhds_graph_library::instance(lp.path);
+      for (const hhds::Gid id : lib.all_gids()) {
+        if (auto g = lib.get_graph(id)) {
+          sub_lib_keep.push_back(g);
+          sub_lib[id] = g.get();  // later --lib wins on a gid clash
+        }
+      }
+    }
+    const auto ref_flat = livehd::single_edge::inline_instances_missing_from_other_side(sub_lib,
+                                                                                         ref_var.graphs,
+                                                                                         impl_var.graphs,
+                                                                                         ref_top,
+                                                                                         &absorbed);
+    const auto impl_flat = livehd::single_edge::inline_instances_missing_from_other_side(sub_lib,
+                                                                                          impl_var.graphs,
+                                                                                          ref_var.graphs,
+                                                                                          impl_top,
+                                                                                          &absorbed);
     if (ref_flat + impl_flat > 0 && !opts.quiet) {
       std::print("semdiff: inlined {} ref and {} impl instance(s) absent from the other hierarchy\n", ref_flat, impl_flat);
+    }
+    // The stateful cell models are spliced where their instances now stand (the regions above are dissolved), so
+    // each mapped flop or latch is real body state named after its instance -- what lec does before it cuts state.
+    // The combinational cells stay instances: the name correspondence does not need their function.
+    if (!sub_lib.empty()) {
+      for (const auto* side : {&ref_var, &impl_var}) {
+        for (const auto& g : side->graphs) {
+          if (!g || sub_lib.contains(g->get_gid())) {
+            continue;
+          }
+          if (auto why = livehd::single_edge::inline_stateful_lib_cells(sub_lib, g.get()); !why.empty()) {
+            throw Lhd_error{"unsupported",
+                            std::format("pass semdiff: a --lib cell model does not bind to its instance in '{}': {}", g->get_name(), why),
+                            "regenerate the models from the Liberty the netlist was mapped with"};
+          }
+        }
+      }
     }
   }
 

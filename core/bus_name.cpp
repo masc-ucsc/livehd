@@ -112,4 +112,47 @@ std::optional<Memory_storage> parse_memory_storage(std::string_view name, char s
   return out;
 }
 
+std::optional<std::string> decode_memory_instance(std::string_view name, char separator) {
+  const auto pos = name.find(memory_instance_marker);
+  if (pos == std::string_view::npos) {
+    return std::nullopt;
+  }
+  const auto hex_begin = pos + memory_instance_marker.size();
+  const auto hex_end   = name.find("_e", hex_begin);
+  if (hex_end == std::string_view::npos || hex_end == hex_begin || ((hex_end - hex_begin) & 1U) != 0) {
+    return std::nullopt;
+  }
+  auto rest = name.substr(hex_end + 2);
+  if (rest.size() > 1 && rest.front() == '_' && rest[1] >= '0' && rest[1] <= '9') {  // a declaration uniquifier
+    const auto digits_end = rest.find_first_not_of("0123456789", 1);
+    rest                  = digits_end == std::string_view::npos ? std::string_view{} : rest.substr(digits_end);
+  }
+  if (rest.size() < 2 || rest.front() != separator) {
+    return std::nullopt;  // the wrapper itself, or its `_data` register: not a name below it
+  }
+  auto nibble = [](char ch) -> int {
+    if (ch >= '0' && ch <= '9') {
+      return ch - '0';
+    }
+    if (ch >= 'a' && ch <= 'f') {
+      return ch - 'a' + 10;
+    }
+    if (ch >= 'A' && ch <= 'F') {
+      return ch - 'A' + 10;
+    }
+    return -1;
+  };
+  std::string out{name.substr(0, pos)};
+  for (auto i = hex_begin; i < hex_end; i += 2) {
+    const int hi = nibble(name[i]);
+    const int lo = nibble(name[i + 1]);
+    if (hi < 0 || lo < 0) {
+      return std::nullopt;
+    }
+    out.push_back(static_cast<char>((hi << 4) | lo));
+  }
+  out.append(rest);
+  return out;
+}
+
 }  // namespace livehd::bus_name

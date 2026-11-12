@@ -90,4 +90,10 @@ struct Memory_storage {
 // hierarchy separator in `name`, as in parse_bus_piece.
 [[nodiscard]] std::optional<Memory_storage> parse_memory_storage(std::string_view name, char separator = '.');
 
+// A name BELOW a cgen memory wrapper (`<prefix>__lhdmem_h<hex>_e<separator><rest>`, e.g. the storage cells
+// `..._e._mem[3][5]` of a memory lowered to registers) with the wrapper replaced by the source Memory name it
+// encodes: `<prefix><source><separator><rest>`. nullopt for any other name, the wrapper's own state included
+// (parse_memory_storage answers that one).
+[[nodiscard]] std::optional<std::string> decode_memory_instance(std::string_view name, char separator = '.');
+
 }  // namespace livehd::bus_name

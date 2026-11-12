@@ -160,6 +160,13 @@ std::string normalize_reg_name(std::string_view raw) {
   if (auto storage = livehd::bus_name::parse_memory_storage(name)) {
     return std::string(storage->prefix) + storage->source;
   }
+  // The storage cells of a memory lowered to registers sit BELOW the same wrapper (`__lhdmem_h<hex>_e._mem[i][b]`):
+  // spelled with the source name they are `<mem>._mem[i][b]`, the bank the memory-bank correspondence looks for.
+  if (auto below = livehd::bus_name::decode_memory_instance(name)) {
+    if (below->find("._mem[") != std::string::npos) {
+      return *below;
+    }
+  }
   return name;
 }
 
