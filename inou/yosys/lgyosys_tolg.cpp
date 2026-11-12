@@ -2729,11 +2729,42 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
       hhds::Pin_class a_dpin = get_unsigned_dpin(g, cell, ID::A);
       hhds::Pin_class b_dpin = get_unsigned_dpin(g, cell, ID::B);
 
-      set_type_op(exit_node, Ntype_op::Rem);
-      set_bits(exit_node.create_driver_pin(0), y_bits);
+      // The remainder truncates: its sign follows the DIVIDEND, which
+      // get_unsigned_dpin reads signed exactly when A_SIGNED. A signed `a % b`
+      // is then negative for a negative `a`, while the RTLIL wire receiving Y
+      // carries no sign: it holds the low Y_WIDTH bits. Stamping the Rem pin
+      // with that wire's unsigned width therefore claimed [0, 2^Y) for a value
+      // that can be -1 (a hint that cannot hold its value, node_util.hpp).
+      // Bitwidth keeps a Rem's stamp, so every reader that trusts it (the
+      // Lean certificate, emitted Verilog) compared `r >= 0` unsigned once
+      // aegraph's sext_fits had -- correctly, on the integer value -- dropped
+      // the Sext a signed reader puts in front of the wire.
+      //
+      // Same shape as $add/$sub: the Rem carries the remainder's own range,
+      // and the cell's result is the unsigned Y_WIDTH selection of it. Since
+      // |a % b| <= |a| with the sign of a, A_WIDTH signed bits always hold a
+      // signed remainder. An unsigned remainder is never negative and keeps
+      // the single Rem cell: an unsigned reader of the wire selects its low
+      // Y_WIDTH bits (create_pick_operator), which agrees with the stamp.
+      const bool a_signed = cell->getParam(ID::A_SIGNED).as_bool();
+      auto       rem_node = exit_node;
+      if (a_signed) {
+        rem_node      = create_typed_node(*g, Ntype_op::Rem);
+        auto rem_dpin = rem_node.create_driver_pin(0);
+        livehd::graph_util::set_sbits(rem_dpin, cell->getParam(ID::A_WIDTH).as_int());
+        explicit_pin_signs.insert(rem_dpin.get_class_index());
 
-      setup_sink_by_name(exit_node, "a").connect_driver(a_dpin);
-      setup_sink_by_name(exit_node, "b").connect_driver(b_dpin);
+        set_type_op(exit_node, Ntype_op::Get_mask);
+        set_ubits(exit_node.create_driver_pin(0), y_bits);
+        explicit_pin_signs.insert(exit_node.create_driver_pin(0).get_class_index());
+        livehd::graph_util::connect_mask_operands(exit_node, rem_dpin, 0, y_bits);
+      } else {
+        set_type_op(exit_node, Ntype_op::Rem);
+        set_bits(exit_node.create_driver_pin(0), y_bits);
+      }
+
+      setup_sink_by_name(rem_node, "a").connect_driver(a_dpin);
+      setup_sink_by_name(rem_node, "b").connect_driver(b_dpin);
     } else if (std::strncmp(cell->type.c_str(), "$pos", 4) == 0) {
       auto y_bits = cell->getParam(ID::Y_WIDTH).as_int();
 

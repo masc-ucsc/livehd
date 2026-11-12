@@ -34,8 +34,9 @@ set -euo pipefail
 #          q < a COUNTEREXAMPLE
 #   sdiv4  signed q = a/b: the sign of a nonzero q is sign(a) xor sign(b), except -8/-1, PROVED;
 #          without the exception COUNTEREXAMPLE
-#   rem3   signed a % 3 (truncated): a negative a gives a negative or zero remainder PROVED;
-#          the remainder is never negative COUNTEREXAMPLE; -1 % 3 == 2 (Euclidean) COUNTEREXAMPLE
+#   rem3   signed a % 3 (truncated): a negative a gives a negative or zero remainder, -2 <= r <= 2,
+#          -1 % 3 == -1, and the registered remainder read signed is > -3, PROVED; the sign bit
+#          is never set, r >= 0, and -1 % 3 == 2 (Euclidean), each COUNTEREXAMPLE
 #   getmask_sym / setmask_sym (built by tests/gen_gap_certs.lean): when the input mask equals
 #          0xA5, the result equals that of the constant mask 0xA5 (output 0) PROVED; compared
 #          with 0xA4 (output 1) COUNTEREXAMPLE
@@ -185,16 +186,19 @@ module sdiv4(input clk, input signed [3:0] a, input signed [3:0] b, output ok_si
   assign q_o = qr;
 endmodule
 EOF
-# The properties read r's sign bit and compare r with non-negative constants only: the front end
-# takes `a % 3` to be non-negative, so a signed comparison of r (r >= 0, r == -1) compiles to an
-# unsigned one and disagrees with Verilog (a front-end issue, not a symbolic route's).
+# r is also compared signed (r >= 0, r == -1): the yosys reader keeps the sign of a signed `%`
+# (inou/yosys yosys_rem_sign_test; it used to compare r unsigned, so bad_pos was PROVED).
 cat > "$OUT/rem3.sv" <<'EOF'
-module rem3(input clk, input signed [3:0] a, output ok_neg, output bad_sign, output bad_eu,
-            output [3:0] r_o);
+module rem3(input clk, input signed [3:0] a, output ok_neg, output ok_rng, output ok_tr,
+            output ok_reg, output bad_pos, output bad_sign, output bad_eu, output [3:0] r_o);
   wire signed [3:0] r = a % 4'sd3;
   reg [3:0] rr;
   always @(posedge clk) rr <= r;
   assign ok_neg = ~a[3] | r[3] | (r == 4'd0);
+  assign ok_rng = (r > -4'sd3) & (r < 4'sd3);
+  assign ok_tr = (a != 4'sb1111) | (r == 4'sb1111);
+  assign ok_reg = $signed(rr) > -4'sd3;
+  assign bad_pos = r >= 4'sd0;
   assign bad_sign = ~r[3];
   assign bad_eu = (a != 4'sb1111) | (r == 4'sd2);
   assign r_o = rr;
@@ -340,6 +344,10 @@ run sym_verify "INVARIANT PROVED"    "$SD" ok_sign k:1
 run sym_verify "COUNTEREXAMPLE"      "$SD" bad_sign k:1
 R3="$OUT/rem3_lean/rem3.dcert"
 run sym_verify "INVARIANT PROVED"    "$R3" ok_neg k:1
+run sym_verify "INVARIANT PROVED"    "$R3" ok_rng k:1
+run sym_verify "INVARIANT PROVED"    "$R3" ok_tr k:1
+run sym_verify "INVARIANT PROVED"    "$R3" ok_reg k:1
+run sym_verify "COUNTEREXAMPLE"      "$R3" bad_pos k:1
 run sym_verify "COUNTEREXAMPLE"      "$R3" bad_sign k:1
 run sym_verify "COUNTEREXAMPLE"      "$R3" bad_eu k:1
 G="$OUT/gap"

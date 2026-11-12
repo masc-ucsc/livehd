@@ -143,6 +143,22 @@ sh_test(
     deps = [":scripts"],
 )
 
+# A signed `%` keeps its sign. The remainder's sign follows the dividend, but the RTLIL wire that
+# receives it carries none, and the Rem pin used to take that wire's unsigned width; bitwidth keeps
+# a Rem's stamp, so `r >= 0` was compared unsigned once aegraph's sext_fits dropped the reader's
+# Sext. The Rem now carries a signed range and the cell's result is its unsigned Y_WIDTH selection,
+# the $add/$sub shape.
+sh_test(
+    name = "yosys_rem_sign_test",
+    srcs = ["tests/yosys_rem_sign_test.sh"],
+    data = [
+        "tests/rem_sign.sv",
+        "tests/rem_sign_ref.sv",
+        "//lhd",
+    ],
+    deps = [":scripts"],
+)
+
 # A case that lists every selector value has no unmatched path. read_slang --no-proc leaves the block's "hold
 # the previous value" start in front of it and proc_mux wires that into the dead path, which was a false
 # combinational loop (Vortex FPU/ALU). lhd_full_case marks such cases full_case before proc; cases that miss a
