@@ -363,6 +363,17 @@ dino and picorv32. A checkpoint of dino costs 0.56 &rarr; 0.29 s, its place phas
 capacitance and 12 B per edge, against about 100 B per node of <code>Rc_net</code>. Not done: frozen topology with length updates and the
 rebuild rule (every checkpoint rebuilds), Parasitics export from trees, the other GP and repair consumers of
 <code>estimate_rc</code>.</td></tr>
+<tr><td>Minion run time, after the timing path moved to the engine (whole run, 668k cells, one thread)</td>
+<td>A stack sample of the whole run (539 samples) put the control-network classification (<code>prects_networks</code>) at 12% (string sets searched
+with log2(n) comparisons, several temporary strings per connection) and the binder's concat lanes, the engine's layout strings and the
+repair trials' whole-design maps at a few percent each. With hashed name sets, the lanes cached, block hashes only when a placement cache
+exists, one label string per net in the weight refresh and the pin-to-driver map built on demand: <strong>2,096 s &rarr; 1,876 s (&minus;10.5%)</strong>
+with a byte-identical result (HPWL 53,317,349, WNS &minus;11.73 ns, TNS &minus;80,325). OpenMP in the native placer
+(<code>--define dreamplace_openmp=true</code>, <code>synth.place.threads=16</code>): another &minus;9.5% (1,697 s; global placement stages 280 &rarr; 217 s) with a
+different but deterministic placement (HPWL +0.9%, TNS &minus;1.8%); with one thread the OpenMP build is byte-identical to the default build. The
+same flow on dino (8 threads): place phase &minus;17%, HPWL +1.3%. What remains by phase (1,697 s run): ABC 287 s (one region of 6M gate
+equivalents takes 153 s), the repair step 430 s (a whole incremental placement per trial), global placement 217 s, final legalization 129 s,
+resize 100 s, OpenTimer's final report 65 s.</td></tr>
 </table>
 <h3>Findings in E</h3>
 <ul>
