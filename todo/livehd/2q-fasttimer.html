@@ -328,7 +328,9 @@ run-to-run band of the existing runs; place phase 44.0 &rarr; 40.7 s on dino. De
 <td>One ranking call: 0.47 s engine + 0.16 s Elmore + 0.04 s feedback (the first, with the bind and mapping of the whole
 design done once: 1.3 s of graph access). Nine ranking calls cost 4.7 s of engine and 1.7 s of Elmore in total. The detailed
 evaluations that remain on OpenTimer cost 60 to 82 s each (41 s of netlist reconcile, 32 s of propagation, 8 s of feedback), at
-16 GB of resident memory for the process: <strong>step F is where the time on large designs is</strong>, not ranking.</td></tr>
+16 GB of resident memory for the process: <strong>step F is where the time on large designs is</strong>, not ranking.
+Whole run (placement with timing on, <code>fast</code> ranking, legal result, 668k cells): 2,573 s wall, 17.9 GB peak,
+ranking 3.7 s in total, 53 s in OpenTimer's detailed evaluations that remain (the remaining 400 s of the placement are not timing).</td></tr>
 <tr><td>F (first part): the detailed <code>Feedback</code> from the engine, against OpenTimer's detailed evaluation on the same RC
 (<code>compare</code> logs both)</td>
 <td>picorv32: WNS 3446/3402 ps, hold WNS 413.8/413.7, longest arrival +0.7%, area identical, no violations either way;
