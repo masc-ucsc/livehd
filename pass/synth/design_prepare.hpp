@@ -52,9 +52,9 @@ enum class Loop_reassoc {
 // balanced plain loop chains (lhdtrack br_arb_lru +8% delay), but a guarded
 // accumulation's chain it maps linearly (Reassoc_trees::guarded).
 // `state` runs the register clean-ups of the private copy, after specialization and before
-// the loops are prepared: `merge_registers` (synth.merge_registers, default false) merges
+// the loops are prepared: `merge_registers` (synth.merge_registers, on under `lhd synth`) merges
 // registers that are the same machine (register_merge.hpp), then `state_sweep`
-// (synth.state_sweep, default false) deletes the registers and cells nothing observes and
+// (synth.state_sweep, on under `lhd synth`) deletes the registers and cells nothing observes and
 // narrows registers to their highest observed bit (state_sweep.hpp).
 struct State_options {
   bool             state_sweep     = false;

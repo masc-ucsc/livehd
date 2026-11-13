@@ -108,6 +108,14 @@ struct State_stats {
   // structural match re-verifies it (see build_sides), never trusts it.
   uint32_t name_reconstructed = 0;
   uint32_t memory_projection_candidates = 0;
+  // Memories lowered to registers on the other side that keep their names with some storage bits removed (columns or
+  // entries nothing reads): the name relation, not a correspondence (state_match::memory_bank_coverage).
+  uint32_t memory_partial_candidates    = 0;
+  uint64_t memory_partial_kept_bits = 0, memory_partial_removed_bits = 0;
+  // Storage bits of the other side that a memory bank (total or partial) accounts for: lowered-memory registers.
+  uint64_t a_bank_bits = 0, b_bank_bits = 0;
+  // Integrated clock-gate latches synthesis inserted (`<gate>__icg`): state with no source counterpart by design.
+  uint32_t a_clock_gates = 0, b_clock_gates = 0;
   uint32_t projection_candidates        = 0;                      // renamed packed/bit relations needing a solver
   uint32_t projected_name_pairs         = 0;                      // name-paired registers with eliminated bits
   uint32_t full_pairs     = 0;                      // tier-2 full-match pairs (state_pairing)
@@ -141,6 +149,13 @@ struct State_stats {
     projected_name_pairs         += o.projected_name_pairs;
     projection_candidates        += o.projection_candidates;
     memory_projection_candidates += o.memory_projection_candidates;
+    memory_partial_candidates    += o.memory_partial_candidates;
+    memory_partial_kept_bits     += o.memory_partial_kept_bits;
+    memory_partial_removed_bits  += o.memory_partial_removed_bits;
+    a_bank_bits                  += o.a_bank_bits;
+    b_bank_bits                  += o.b_bank_bits;
+    a_clock_gates                += o.a_clock_gates;
+    b_clock_gates                += o.b_clock_gates;
     full_pairs       += o.full_pairs;
     name_pairs_mem   += o.name_pairs_mem;
     full_pairs_mem   += o.full_pairs_mem;
@@ -205,6 +220,8 @@ struct Match_result {
   // Shape candidates for retained bits of renamed registers; never identity proofs.
   std::vector<livehd::state_match::Register_projection> state_projections;
   std::vector<livehd::state_match::Memory_projection>   memory_projections;
+  // Partial banks (Memory_projection::removed_bits > 0): kept apart, a proof must not consume them as they stand.
+  std::vector<livehd::state_match::Memory_projection>   memory_partial_projections;
   std::vector<std::string> a_state_unpaired, b_state_unpaired;
   // Memories whose correspondence GENUINELY diverges — unpaired with a kind/init
   // mismatch or no counterpart, NOT mere symmetric `ambiguous` (which is
@@ -238,7 +255,7 @@ struct Match_result {
 [[nodiscard]] inline bool is_structural_identity(const Match_result& m) {
   return m.a_matched > 0 && m.a_unmatched == 0 && m.b_unmatched == 0 && m.cut_violated == 0 && m.cut_unknown == 0
          && m.state.full_pairs == 0 && m.state.seed_pairs == 0 && m.state.projected_name_pairs == 0 && m.state_projections.empty()
-         && m.memory_projections.empty();
+         && m.memory_projections.empty() && m.memory_partial_projections.empty();
 }
 
 // Stamp the `match` attribute on nodes + driver pins of BOTH graphs: a shared id

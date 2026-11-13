@@ -90,12 +90,14 @@ std::pair<int, int> inline_clock_gates_and_fold(hhds::Graph* top, const std::vec
 // `deadline` is checked between splices, inside a long splice (Host_inliner)
 // and before each host's packed-slice repair; reaching it stops with
 // `*timed_out` set and the side partially inlined -- the caller must report
-// TIMEOUT-time and not query.
+// TIMEOUT-time and not query. An instantiated clock gate stays an instance (the encoder models it as a clock cell)
+// unless `keep_clock_gates` is false, for a caller that compares names only (`pass semdiff`).
 size_t inline_instances_missing_from_other_side(const Cell_models&                               sub_lib,
                                                 const std::vector<std::shared_ptr<hhds::Graph>>& side_graphs,
                                                 const std::vector<std::shared_ptr<hhds::Graph>>& other_graphs, hhds::Graph* side_g,
                                                 absl::flat_hash_set<std::string>*     absorbed = nullptr,
-                                                std::chrono::steady_clock::time_point deadline = {}, bool* timed_out = nullptr);
+                                                std::chrono::steady_clock::time_point deadline = {}, bool* timed_out = nullptr,
+                                                bool keep_clock_gates = true);
 
 // Outcome of prepare_time_base. Nothing here throws: each caller decides what a
 // decline or an error means for it (`lhd lec` refuses; the publication gate

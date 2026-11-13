@@ -101,6 +101,9 @@ struct Memory_projection {
   int         bits           = 0;
   bool        memory_in_impl = false;
   Memory_bank bank;
+  // A partial bank (memory_bank_coverage): the storage bits the other side no longer has. Their keys in `bank` are
+  // empty. Zero for a total bank, the only kind a proof consumes.
+  int         removed_bits = 0;
 };
 
 // A read-back cell owns one state segment below its indexed bank entry/bit.
@@ -137,6 +140,53 @@ std::optional<Memory_bank> memory_bank(const std::string& name, int entries, int
       }
       out.bit_keys[i].push_back(it->second.first);
     }
+  }
+  return out;
+}
+
+// The name relation of a memory lowered to registers when the other side no longer has every storage bit: synthesis
+// removes the bit columns (or entries) nothing reads, and the rest keep their `<mem>._mem[i][b]` names. Each surviving
+// key must still be exactly one storage bit (or one whole entry of `width` bits) and unclaimed by a register; a key of
+// another width means the name belongs to something else, and there is no relation. The bank carries the surviving
+// keys, empty strings where a bit was removed. Not a correspondence a proof can use as it stands: the removed bits
+// must first be shown unobservable.
+template <class Index, class Matched>
+std::optional<Memory_bank> memory_bank_coverage(const std::string& name, int entries, int width, const Index& candidates,
+                                                const Matched& matched, int& removed_bits, char separator = '.') {
+  removed_bits = 0;
+  if (name.empty() || entries <= 0 || width <= 0) {
+    return std::nullopt;
+  }
+  Memory_bank out{std::vector<std::string>(entries), std::vector<std::vector<std::string>>(entries)};
+  size_t      kept = 0;
+  for (int i = 0; i < entries; ++i) {
+    const auto entry = bus_name::entry(name + separator + "_mem", i);
+    if (auto it = candidates.find(entry); it != candidates.end()) {
+      if (it->second.second != width || matched.contains(entry)) {
+        return std::nullopt;
+      }
+      out.entry_keys[i]  = it->second.first;
+      kept              += static_cast<size_t>(width);
+      continue;
+    }
+    out.bit_keys[i].assign(static_cast<size_t>(width), std::string());
+    for (int b = 0; b < width; ++b) {
+      const auto key = bus_name::bit(entry, b);
+      const auto it  = candidates.find(key);
+      if (it == candidates.end()) {
+        ++removed_bits;
+        continue;
+      }
+      if (it->second.second != 1 || matched.contains(key)) {
+        return std::nullopt;
+      }
+      out.bit_keys[i][static_cast<size_t>(b)] = it->second.first;
+      ++kept;
+    }
+  }
+  if (kept == 0) {
+    removed_bits = 0;
+    return std::nullopt;
   }
   return out;
 }

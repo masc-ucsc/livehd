@@ -31,7 +31,10 @@ void Pass_semdiff::setup() {
   m.add_label_optional("stats",
                        "design health check: aggregate node/register/memory match report. A PRESET — implies "
                        "matching_names and state_pairing (an explicit --set of any of those still wins), since "
-                       "whole-design correspondence is what the report answers",
+                       "whole-design correspondence is what the report answers. A memory one side lowered to registers "
+                       "pairs as a storage bank (`<mem>._mem[i][b]`, or the cgen wrapper's `data` spellings); one that "
+                       "lost unread bits is a partial bank, a name relation only. Unpaired impl state is explained as "
+                       "lowered-memory bits, inserted clock gates, or other",
                        "false");
   m.add_label_optional("dump_state", "print per-state-cell pairing outcome (matcher iteration aid)", "false");
   m.add_label_optional(

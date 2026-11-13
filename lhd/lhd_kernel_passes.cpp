@@ -183,16 +183,22 @@ void semdiff_command(Options& opts, Result& res) {
         }
       }
     }
-    const auto ref_flat = livehd::single_edge::inline_instances_missing_from_other_side(sub_lib,
-                                                                                         ref_var.graphs,
-                                                                                         impl_var.graphs,
-                                                                                         ref_top,
-                                                                                         &absorbed);
+    const auto ref_flat  = livehd::single_edge::inline_instances_missing_from_other_side(sub_lib,
+                                                                                        ref_var.graphs,
+                                                                                        impl_var.graphs,
+                                                                                        ref_top,
+                                                                                        &absorbed,
+                                                                                         {},
+                                                                                        nullptr,
+                                                                                        /*keep_clock_gates=*/false);
     const auto impl_flat = livehd::single_edge::inline_instances_missing_from_other_side(sub_lib,
-                                                                                          impl_var.graphs,
-                                                                                          ref_var.graphs,
-                                                                                          impl_top,
-                                                                                          &absorbed);
+                                                                                         impl_var.graphs,
+                                                                                         ref_var.graphs,
+                                                                                         impl_top,
+                                                                                         &absorbed,
+                                                                                         {},
+                                                                                         nullptr,
+                                                                                         /*keep_clock_gates=*/false);
     if (ref_flat + impl_flat > 0 && !opts.quiet) {
       std::print("semdiff: inlined {} ref and {} impl instance(s) absent from the other hierarchy\n", ref_flat, impl_flat);
     }
@@ -315,9 +321,33 @@ void semdiff_command(Options& opts, Result& res) {
       std::print("semdiff[stats]: {} memory storage-bank candidate(s); requires initial-state and transition proof\n",
                  st.memory_projection_candidates);
     }
+    if (st.memory_partial_candidates != 0) {
+      std::print(
+          "semdiff[stats]: {} memory partial bank(s): {} storage bits keep their memory names, {} removed (unread); "
+          "a name relation, not a correspondence\n",
+          st.memory_partial_candidates,
+          st.memory_partial_kept_bits,
+          st.memory_partial_removed_bits);
+    }
+    // What the unpaired state of each side is: storage bits of a memory the other side keeps (a lowered memory, named
+    // after it), clock-gate latches synthesis inserted, and the rest -- the state whose name was lost or that has no
+    // source counterpart. Only the last is a naming gap.
+    const auto explain = [](std::string_view side, uint32_t unpaired, uint64_t bank_bits, uint32_t gates) {
+      if (bank_bits == 0 && gates == 0) {
+        return;
+      }
+      const uint64_t rest = unpaired > bank_bits + gates ? unpaired - bank_bits - gates : 0;
+      std::print("semdiff[stats]: {} unpaired state: {} lowered-memory bit(s) in banks, {} inserted clock gate(s), {} other\n",
+                 side,
+                 bank_bits,
+                 gates,
+                 rest);
+    };
+    explain("ref ", st.a_unpaired, st.a_bank_bits, st.a_clock_gates);
+    explain("impl", st.b_unpaired, st.b_bank_bits, st.b_clock_gates);
     const bool clean = a_matched == a_total && b_matched == b_total && st.a_unpaired == 0 && st.b_unpaired == 0
                        && st.projected_name_pairs == 0 && st.projection_candidates == 0 && st.memory_projection_candidates == 0
-                       && ref_only == 0;
+                       && st.memory_partial_candidates == 0 && ref_only == 0;
     std::print(
         "semdiff[stats]: => {}\n",
         clean ? "designs fully correspond" : "DIFFERENCES present (grep the `match=0` nodes: `lhd tool grep match=0 lg:<impl>`)");

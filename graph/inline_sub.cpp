@@ -246,7 +246,7 @@ void Sub_inliner::carry_node_attrs(const hhds::Node_class& orig, const hhds::Nod
   if (state_name_.has_value() && (is_type_flop(orig) || op == Ntype_op::Latch)) {
     if (!state_name_->empty()) {
       neo.attr(hhds::attrs::name).set(prefix_ + *state_name_);
-    } else if (name_state_ && is_type_flop(neo) && !prefix_.empty()) {
+    } else if (name_state_ && (is_type_flop(neo) || type_op_of(neo) == Ntype_op::Latch) && !prefix_.empty()) {
       neo.attr(hhds::attrs::name).set(prefix_.substr(0, prefix_.size() - 1));
     }
   } else if (has_name(orig)) {
@@ -256,8 +256,8 @@ void Sub_inliner::carry_node_attrs(const hhds::Node_class& orig, const hhds::Nod
     // the first \x1f -- an assume would re-emit as an assert). The payload is
     // parsed, never used as an identifier: copy it verbatim.
     neo.attr(hhds::attrs::name).set(nm.find('\x1f') == std::string::npos ? prefix_ + nm : nm);
-  } else if (name_state_ && is_type_flop(neo) && !prefix_.empty()) {
-    // Unnamed spliced STATE: take the instance's own name (prefix_ minus its
+  } else if (name_state_ && (is_type_flop(neo) || op == Ntype_op::Latch) && !prefix_.empty()) {
+    // Unnamed spliced STATE (a flop, or the latch of a latch cell): take the instance's own name (prefix_ minus its
     // trailing '.'). Done here, once per spliced node, instead of re-walking the
     // parent body after every inline.
     neo.attr(hhds::attrs::name).set(prefix_.substr(0, prefix_.size() - 1));

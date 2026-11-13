@@ -43,7 +43,7 @@ Remaining native synthesis work is tracked in [2u-usyn](../../todo/livehd/2u-usy
    refinement. Separately, `compile.sweep=true` enables per-definition constant-state
    proofs during specialization without requiring flattening. The hierarchical
    register-chain regression is `//lhd/tests:lhd_sweep_hier_const_test`.
-   **State sweep** (`synth.state_sweep`, default false; `state_sweep.cpp`). On the
+   **State sweep** (`synth.state_sweep`, default true under `lhd synth`, off in `State_options`; `state_sweep.cpp`). On the
    private copy, after `pass.specialize` and before the loops are prepared, a
    register that no top output, no instance of a body-less cell (a Liberty cell,
    a macro), no memory and no attribute cell can observe is deleted with the cells
@@ -78,7 +78,7 @@ Remaining native synthesis work is tracked in [2u-usyn](../../todo/livehd/2u-usy
    after the first sweep), and `pass.usyn` takes it too. Run together, the second finds only
    what the first could not (`//lhd/tests:lhd_state_sweep_test` runs both and proves the
    result against the source).
-   **Register merge** (`synth.merge_registers`, default false; `register_merge.cpp`), just
+   **Register merge** (`synth.merge_registers`, default true under `lhd synth`, off in `State_options`; `register_merge.cpp`), just
    before the sweep: a Flop with the same clock, enable, reset, polarities, reset value,
    width, sign and D driver as another in its definition holds the same value every cycle,
    so its readers move to the survivor and it goes, repeated until nothing merges (a

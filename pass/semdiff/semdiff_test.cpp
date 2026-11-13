@@ -7,6 +7,7 @@
 #include "semdiff.hpp"
 
 #include <format>
+#include <functional>
 #include <initializer_list>
 #include <memory>
 #include <optional>
@@ -1558,4 +1559,143 @@ TEST(Semdiff, MemoryBankCandidatesAreSharedAndRequireProof) {
   const auto reverse = livehd::semdiff::structural_match(complete.get(), ref.get(), options);
   ASSERT_EQ(reverse.memory_projections.size(), 1U);
   EXPECT_TRUE(reverse.memory_projections.front().memory_in_impl);
+}
+
+// A memory lowered to registers keeps its name in several spellings: the bank `m._mem[i][b]`, the cgen wrapper's
+// storage array `__lhdmem_h<hex>_e.data[i][b]`, its flattened inline bus `..._e_data[k]` (k = i * bits + b), and the
+// same two under a module named after the memory whose wrapper calls its memory `data` (ABC's lowering). Every one is
+// the same total bank. With unread bits removed it is a partial bank: the name relation, kept apart from the proof
+// candidates. A key outside the memory's shape is no relation at all.
+TEST(Semdiff, LoweredMemoryStorageSpellingsFormItsBank) {
+  const auto ref  = build_memory_kind("lgdb_semdiff_mem_spell_ref", 0);
+  int        dirs = 0;
+  const auto make = [&](const std::function<std::string(int, int)>& spell, bool drop_last, bool stray) {
+    auto&      lib = livehd::Hhds_graph_library::instance(std::format("lgdb_semdiff_mem_spell_{}", dirs++));
+    auto       g   = lib.create_io("memory_kind")->create_graph();
+    const auto add = [&](const std::string& name) {
+      auto flop = create_typed_node(*g, Ntype_op::Flop);
+      flop.set_name(name);
+      auto q = flop.create_driver_pin(0);
+      livehd::graph_util::set_ubits(q, 1);
+      livehd::graph_util::set_pin_name(q, name);
+    };
+    for (int entry = 0; entry < 4; ++entry) {
+      for (int bit = 0; bit < 8; ++bit) {
+        if (!(drop_last && entry == 3 && bit == 7)) {
+          add(spell(entry, bit));
+        }
+      }
+    }
+    if (stray) {
+      add("m._mem[4][0]");
+    }
+    return g;
+  };
+  livehd::semdiff::Semdiff_options options;
+  options.matching_names     = true;
+  options.project_state_bits = true;
+  const std::vector<std::function<std::string(int, int)>> spellings{
+      [](int i, int b) { return std::format("m._mem[{}][{}]", i, b); },
+      [](int i, int b) { return std::format("__lhdmem_h6d_e.data[{}][{}]", i, b); },
+      [](int i, int b) { return std::format("__lhdmem_h6d_e_data[{}]", i * 8 + b); },
+      [](int i, int b) { return std::format("m.__lhdmem_h64617461_e.data[{}][{}]", i, b); },
+      [](int i, int b) { return std::format("m.__lhdmem_h64617461_e_data[{}]", i * 8 + b); },
+  };
+  for (size_t s = 0; s < spellings.size(); ++s) {
+    SCOPED_TRACE(spellings[s](3, 7));
+    auto       total = make(spellings[s], false, false);
+    const auto whole = livehd::semdiff::structural_match(ref.get(), total.get(), options);
+    ASSERT_EQ(whole.memory_projections.size(), 1U);
+    EXPECT_TRUE(whole.memory_partial_projections.empty());
+    EXPECT_EQ(whole.memory_projections.front().removed_bits, 0);
+    EXPECT_EQ(whole.memory_projections.front().bank.bit_keys[3][7], spellings[s](3, 7));
+    EXPECT_EQ(whole.state.b_bank_bits, 32U);
+
+    auto       partial = make(spellings[s], true, false);
+    const auto part    = livehd::semdiff::structural_match(ref.get(), partial.get(), options);
+    EXPECT_TRUE(part.memory_projections.empty());
+    ASSERT_EQ(part.memory_partial_projections.size(), 1U);
+    EXPECT_EQ(part.memory_partial_projections.front().removed_bits, 1);
+    EXPECT_EQ(part.memory_partial_projections.front().bank.bit_keys[3][7], "");
+    EXPECT_EQ(part.memory_partial_projections.front().bank.bit_keys[3][6], spellings[s](3, 6));
+    EXPECT_EQ(part.state.memory_partial_candidates, 1U);
+    EXPECT_EQ(part.state.memory_partial_kept_bits, 31U);
+    EXPECT_EQ(part.state.b_bank_bits, 31U);
+    EXPECT_FALSE(livehd::semdiff::is_structural_identity(part));
+  }
+  // A key outside the shape: not this memory's bank, total or partial.
+  auto       odd = make(spellings[0], true, true);
+  const auto bad = livehd::semdiff::structural_match(ref.get(), odd.get(), options);
+  EXPECT_TRUE(bad.memory_projections.empty());
+  EXPECT_TRUE(bad.memory_partial_projections.empty());
+  EXPECT_EQ(bad.state.b_bank_bits, 0U);
+}
+
+// A single-entry memory lowered to one register named after its wrapper storage (`m.data`), and a memory kept whole
+// whose storage is `m.data` (an inline array): both are the source memory `m`.
+TEST(Semdiff, SingleEntryAndInlineArrayStorageNamesPairWithTheMemory) {
+  const auto memory = [](const std::string& dir, const std::string& name, int size) {
+    auto& lib = livehd::Hhds_graph_library::instance(dir);
+    auto  g   = lib.create_io("memory_kind")->create_graph();
+    auto  mem = create_typed_node(*g, Ntype_op::Memory);
+    mem.set_name(name);
+    livehd::graph_util::create_const(*g, *Dlop::create_integer(0))
+        .connect_sink(livehd::graph_util::setup_sink_by_name(mem, "type"));
+    livehd::graph_util::create_const(*g, *Dlop::create_integer(8))
+        .connect_sink(livehd::graph_util::setup_sink_by_name(mem, "bits"));
+    livehd::graph_util::create_const(*g, *Dlop::create_integer(size))
+        .connect_sink(livehd::graph_util::setup_sink_by_name(mem, "size"));
+    auto q = mem.create_driver_pin(0);
+    livehd::graph_util::set_bits(q, 8);
+    livehd::graph_util::set_pin_name(q, name);
+    return g;
+  };
+  livehd::semdiff::Semdiff_options options;
+  options.matching_names     = true;
+  options.project_state_bits = true;
+  // Kept whole: memory to memory, by name.
+  const auto ref             = memory("lgdb_semdiff_inline_ref", "m", 4);
+  const auto inline_         = memory("lgdb_semdiff_inline_impl", "m.data", 4);
+  const auto pair            = livehd::semdiff::structural_match(ref.get(), inline_.get(), options);
+  EXPECT_EQ(pair.state.a_paired_mems, 1U);
+  EXPECT_EQ(pair.state.b_paired_mems, 1U);
+  // One entry lowered to one 8-bit register.
+  const auto one  = memory("lgdb_semdiff_single_ref", "m", 1);
+  auto&      lib  = livehd::Hhds_graph_library::instance("lgdb_semdiff_single_impl");
+  auto       impl = lib.create_io("memory_kind")->create_graph();
+  auto       flop = create_typed_node(*impl, Ntype_op::Flop);
+  flop.set_name("m.data");
+  auto q = flop.create_driver_pin(0);
+  livehd::graph_util::set_ubits(q, 8);
+  livehd::graph_util::set_pin_name(q, "m.data");
+  const auto lowered = livehd::semdiff::structural_match(one.get(), impl.get(), options);
+  ASSERT_EQ(lowered.memory_projections.size(), 1U);
+  EXPECT_EQ(lowered.memory_projections.front().bank.entry_keys[0], "m.data");
+  EXPECT_EQ(lowered.state.b_bank_bits, 8U);
+}
+
+// An integrated clock gate that replaced a source latch keys as that latch (`<latch>__icg.IQ`); a gate synthesis
+// inserted on its own has no counterpart and is counted as an inserted clock gate.
+TEST(Semdiff, ClockGateCellsKeyAsTheLatchTheyRealize) {
+  const auto latches = [](const std::string& dir, const std::vector<std::string>& names) {
+    auto& lib = livehd::Hhds_graph_library::instance(dir);
+    auto  g   = lib.create_io("gate")->create_graph();
+    for (const auto& name : names) {
+      auto latch = create_typed_node(*g, Ntype_op::Latch);
+      latch.set_name(name);
+      auto q = latch.create_driver_pin(0);
+      livehd::graph_util::set_ubits(q, 1);
+      livehd::graph_util::set_pin_name(q, name);
+    }
+    return g;
+  };
+  livehd::semdiff::Semdiff_options options;
+  options.matching_names = true;
+  const auto ref         = latches("lgdb_semdiff_icg_ref", {"cg.en_latch"});
+  const auto impl        = latches("lgdb_semdiff_icg_impl", {"cg.en_latch__icg.IQ", "latch_16__icg.IQ"});
+  const auto r           = livehd::semdiff::structural_match(ref.get(), impl.get(), options);
+  EXPECT_EQ(r.state.name_pairs, 1U);
+  EXPECT_EQ(r.state.a_unpaired, 0U);
+  EXPECT_EQ(r.state.b_unpaired, 1U);
+  EXPECT_EQ(r.state.b_clock_gates, 1U);
 }

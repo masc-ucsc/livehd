@@ -743,9 +743,10 @@ std::string inline_stateful_lib_cells(const absl::flat_hash_map<hhds::Gid, hhds:
     // instance would be quadratic on a design with thousands of mapped cells.
     // An own body's flop usually arrives NAMED (`x[3].flop_16`); the inliner
     // names only an unnamed one, and core/bus_name reads the named shape.
+    // A latch cell's one latch is its state as a flip-flop cell's one flop is.
     int model_flops = 0;
     for (auto dn : src.body->body().nodes(hhds::Node_order::forward)) {
-      model_flops += livehd::graph_util::is_type_flop(dn) ? 1 : 0;
+      model_flops += livehd::graph_util::is_type_flop(dn) || livehd::graph_util::type_op_of(dn) == Ntype_op::Latch ? 1 : 0;
     }
     if (!livehd::graph_util::inline_sub_instance(impl_g,
                                                  inst,
@@ -916,7 +917,8 @@ size_t inline_instances_missing_from_other_side(const absl::flat_hash_map<hhds::
                                                 const std::vector<std::shared_ptr<hhds::Graph>>&    side_graphs,
                                                 const std::vector<std::shared_ptr<hhds::Graph>>& other_graphs, hhds::Graph* side_g,
                                                 absl::flat_hash_set<std::string>*     absorbed,
-                                                std::chrono::steady_clock::time_point deadline, bool* timed_out) {
+                                                std::chrono::steady_clock::time_point deadline, bool* timed_out,
+                                                bool keep_clock_gates) {
   if (timed_out != nullptr) {
     *timed_out = false;
   }
@@ -1016,6 +1018,9 @@ size_t inline_instances_missing_from_other_side(const absl::flat_hash_map<hhds::
     // comes back UNKNOWN instead of REFUTED (clock_cell_test case 6b).
     // Cached per definition: a splice edits only its host, and a host is
     // never the definition of an instance it holds.
+    if (!keep_clock_gates) {
+      return true;
+    }
     auto [icg, inserted] = icg_defs.try_emplace(def_g.get(), false);
     if (inserted) {
       icg->second = livehd::latch_contract::match_icg_def(def_g.get()).has_value();

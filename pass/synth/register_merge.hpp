@@ -17,7 +17,7 @@ struct Register_merge_stats {
   uint64_t rounds    = 0;  // sweeps over the definitions until nothing merged
 };
 
-// Merge registers that are the same machine (synth.merge_registers, off by default): a Flop
+// Merge registers that are the same machine (synth.merge_registers, on under `lhd synth`): a Flop
 // with the same clock, enable, reset, polarities, reset value, width, sign and D driver as
 // another in its definition holds the same value in every cycle, so its readers move to the
 // survivor and it goes. Registers whose D is another duplicate's Q become identical once that

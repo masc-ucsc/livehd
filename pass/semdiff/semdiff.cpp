@@ -3,11 +3,14 @@
 #include "semdiff.hpp"
 
 #include <algorithm>
+#include <cctype>
+#include <charconv>
 #include <cstdint>
 #include <format>
 #include <functional>
 #include <iterator>
 #include <limits>
+#include <map>
 #include <optional>
 #include <print>
 #include <string>
@@ -160,6 +163,34 @@ std::string normalize_reg_name(std::string_view raw) {
   if (auto storage = livehd::bus_name::parse_memory_storage(name)) {
     return std::string(storage->prefix) + storage->source;
   }
+  // The same storage register split into bits by synthesis: the wrapper's array `..._e.data[i][b]` (entry i, bit b;
+  // `.data[i]` a whole entry) or the inline packed bus `..._e_data[k]` (k = i * bits + b, flattened; the memory's
+  // width is needed to split k, so it is spelled `._flat[k]` and the memory-bank correspondence splits it).
+  {
+    std::string_view              base = name;
+    std::vector<std::string_view> indices;
+    while (base.size() > 2 && base.back() == ']') {
+      const auto open = base.rfind('[');
+      if (open == std::string_view::npos || open + 2 > base.size() - 1) {
+        break;
+      }
+      const auto digits = base.substr(open + 1, base.size() - open - 2);
+      if (digits.empty() || digits.find_first_not_of("0123456789") != std::string_view::npos) {
+        break;
+      }
+      indices.insert(indices.begin(), digits);
+      base = base.substr(0, open);
+    }
+    if (!indices.empty() && indices.size() <= 2) {
+      if (auto storage = livehd::bus_name::parse_memory_storage(base)) {
+        std::string out = std::string(storage->prefix) + storage->source;
+        if (indices.size() == 2) {
+          return std::format("{}._mem[{}][{}]", out, indices[0], indices[1]);
+        }
+        return base.ends_with(".data") ? std::format("{}._mem[{}]", out, indices[0]) : std::format("{}._flat[{}]", out, indices[0]);
+      }
+    }
+  }
   // The storage cells of a memory lowered to registers sit BELOW the same wrapper (`__lhdmem_h<hex>_e._mem[i][b]`):
   // spelled with the source name they are `<mem>._mem[i][b]`, the bank the memory-bank correspondence looks for.
   if (auto below = livehd::bus_name::decode_memory_instance(name)) {
@@ -170,6 +201,25 @@ std::string normalize_reg_name(std::string_view raw) {
   return name;
 }
 
+// The state an integrated clock-gate cell realizes is the source latch it replaced: `<latch>__icg[<k>]`, with the cell
+// model's own state segment after it (`.IQ`), keys as `<latch>`. A gate synthesis inserted on its own keys after its
+// gate name, which nothing on the source side shares.
+std::string clock_gate_source(std::string nm) {
+  const auto at = nm.rfind("__icg");
+  if (at == std::string::npos || at == 0) {
+    return nm;
+  }
+  size_t end = at + 5;
+  while (end < nm.size() && std::isdigit(static_cast<unsigned char>(nm[end]))) {
+    ++end;
+  }
+  if (end != nm.size() && nm[end] != '.') {
+    return nm;
+  }
+  nm.resize(at);
+  return nm;
+}
+
 std::string state_key(hhds::Graph* g, const hhds::Node_class& node) {
   if (auto origin = node.attr(livehd::attrs::aggregate_origin); origin.has() && !origin.get().empty()) {
     return "n:" + normalize_reg_name(origin.get());
@@ -178,7 +228,17 @@ std::string state_key(hhds::Graph* g, const hhds::Node_class& node) {
   if (pn.empty()) {
     pn = gu::node_name_of(node);
   }
+  std::string gate_source;  // owns the shortened name pn may point at
+  if (gu::type_op_of(node) == Ntype_op::Latch) {
+    gate_source = clock_gate_source(std::string(pn));
+    pn          = gate_source;
+  }
   if (auto nm = normalize_reg_name(pn); !nm.empty()) {
+    // A memory synthesis kept whole inside an instance named after it stores into `<mem>.data` (an inline array):
+    // the same state as the source memory `<mem>`.
+    if (gu::type_op_of(node) == Ntype_op::Memory && nm.size() > 5 && nm.ends_with(".data")) {
+      nm.resize(nm.size() - 5);
+    }
     return "n:" + nm;
   }
   auto ref = node.attr(hhds::attrs::srcid);
@@ -366,6 +426,10 @@ struct State_cell {
   std::string                                truth;          // name_noise only: the original key (empty = key is original)
   std::string                                aggregate_key;  // empty unless this is an SROA leaf
   bool                                       is_mem = false;
+  // Explained without a counterpart of its own (dump_state and the stats name them; the pairing is unchanged): a
+  // storage bit of a memory the other side keeps whole (a total or partial bank), or a clock-gate latch synthesis
+  // inserted.
+  bool                                               bank_bit = false, clock_gate = false;
   uint64_t                                   kind   = 0;   // op + bits + init fold (local identity)
   std::vector<uint32_t>                      preds;        // state cells feeding a data pin through comb
   std::vector<uint32_t>                      succs;        // state cells fed from a driver pin through comb
@@ -376,8 +440,11 @@ struct State_cell {
   // the paper's plain sets: a linear chain (in -> A -> B -> out) is permanently
   // ambiguous under {in}/{out} set equality, while (in,1)/(in,2) tells A from B.
   // Annotation only refines buckets, and lec re-verifies every pair anyway.
-  std::vector<std::pair<uint32_t, uint32_t>> reach_b;  // (index, dist>=1)
-  std::vector<std::pair<uint32_t, uint32_t>> reach_f;
+  // Built on first use (ensure_reach): only the cells tier-2 signs need it, and
+  // a memory lowered to registers makes the all-cells closure quadratic.
+  mutable std::vector<std::pair<uint32_t, uint32_t>> reach_b;  // (index, dist>=1)
+  mutable std::vector<std::pair<uint32_t, uint32_t>> reach_f;
+  mutable bool                                       reach_done         = false;
   uint64_t                                   token              = 0;  // nonzero = resolved (tier-1 seed or tier-2 pair)
   // Aggregate provenance reconstructed from a bus-expansion NAME (`x[i]`,
   // core/bus_name.hpp) when the aggregate_* attributes did not survive (a
@@ -402,6 +469,9 @@ struct State_side {
   std::vector<State_cell>                          cells;
   absl::flat_hash_map<hhds::Class_index, uint32_t> index;  // node -> cells[] slot
   absl::flat_hash_map<uint64_t, std::string>       label;  // explain only: RP token -> name
+  // ensure_reach scratch: a cell is visited in the current walk when its mark equals `walk`.
+  mutable std::vector<uint32_t>                    mark;
+  mutable uint32_t                                 walk = 0;
 };
 
 State_side collect_state(hhds::Graph* g, const Semdiff_options& opts) {
@@ -422,6 +492,18 @@ State_side collect_state(hhds::Graph* g, const Semdiff_options& opts) {
       c.aggregate_key = normalize_reg_name(origin.get());
     }
     c.is_mem = op == Ntype_op::Memory;
+    {
+      // An integrated clock gate synthesis inserted is named `<gate>__icg[<k>]` (region_writer); a cell model may
+      // add its own state segment after it (`.IQ`).
+      const auto name = node.get_hier_name();
+      if (const auto at = name.rfind("__icg"); at != std::string_view::npos) {
+        size_t end = at + 5;
+        while (end < name.size() && std::isdigit(static_cast<unsigned char>(name[end]))) {
+          ++end;
+        }
+        c.clock_gate = end == name.size() || name[end] == '.';
+      }
+    }
     c.kind   = hcombine(hstr("\x01skind"), static_cast<uint64_t>(op));
     // COMMIT CLASS folds into the identity for Flop AND Latch (2f-latch M2),
     // mirroring the initial-value fold below. `posclk` means posedge-vs-negedge
@@ -486,118 +568,200 @@ State_side collect_state(hhds::Graph* g, const Semdiff_options& opts) {
 
   // Immediate sequential neighbors: BFS through comb nodes only, so each cell
   // records the state cells / graph IOs one comb hop away in the state graph.
+  //
+  // `walk` gathers the support of a set of driver pins: the state cells and
+  // graph-input tokens their comb fan-in reaches (a state cell or an input ends
+  // a path, a constant carries nothing). Cells share fan-in: every entry of a
+  // large array register reads the same enable logic, so a comb node a second
+  // walk reaches has its own support computed once (`memo`), and later walks
+  // stop there and take it whole. The entries stay within a budget; past it
+  // every walk is the plain one. The union is the same set the plain walk
+  // finds either way; only the work changes.
+  struct Support {
+    std::vector<uint32_t> cells;
+    std::vector<uint64_t> ins;
+  };
+  constexpr size_t                                 memo_budget = size_t{1} << 27;  // cell + input entries
+  size_t                                           memo_used   = 0;
+  absl::flat_hash_map<hhds::Class_index, Support>  memo;
+  absl::flat_hash_map<hhds::Class_index, uint32_t> hits;
+  // Per-walk membership of a cell: marked when its stamp is the walk's. The
+  // outer walk and the memo walk it starts each have their own.
+  struct Marks {
+    std::vector<uint32_t> cell;
+    uint32_t              stamp = 0;
+    void                  next(size_t n) {
+      if (cell.size() != n) {
+        cell.assign(n, 0);
+        stamp = 0;
+      }
+      if (++stamp == 0) {
+        std::fill(cell.begin(), cell.end(), 0);
+        stamp = 1;
+      }
+    }
+  } outer_marks, memo_marks;
+  auto push_operands = [](const hhds::Node_class& m, std::vector<hhds::Pin_class>& work) {
+    for_each_inp_operand(m, [&](const hhds::Pin_class&, const hhds::Pin_class& driver) {
+      work.push_back(driver);
+      return true;
+    });
+  };
+  // memoize=false (a memo entry being computed) reads entries but makes none.
+  auto walk = [&](auto& self, std::vector<hhds::Pin_class>& work, Support& out, bool memoize) -> void {
+    Marks& marks = memoize ? outer_marks : memo_marks;
+    marks.next(ss.cells.size());
+    absl::flat_hash_set<hhds::Class_index> seen;
+    absl::flat_hash_set<uint64_t>          ins;
+    auto                                   add_cell = [&](uint32_t i) {
+      if (marks.cell[i] != marks.stamp) {
+        marks.cell[i] = marks.stamp;
+        out.cells.push_back(i);
+      }
+    };
+    auto add_in = [&](uint64_t t) {
+      if (ins.insert(t).second) {
+        out.ins.push_back(t);
+      }
+    };
+    while (!work.empty()) {
+      auto drv = work.back();
+      work.pop_back();
+      if (drv.is_invalid() || drv.is_const()) {
+        continue;
+      }
+      if (gu::is_graph_input_pin(drv)) {
+        uint64_t t = hcombine(hstr("\x01in"), hstr(drv.get_pin_name()));
+        if (want_labels) {
+          ss.label.try_emplace(t, "in:" + std::string{drv.get_pin_name()});
+        }
+        add_in(t);
+        continue;
+      }
+      auto       m  = drv.get_master_node();
+      const auto ci = m.get_class_index();
+      if (auto it = ss.index.find(ci); it != ss.index.end()) {
+        add_cell(it->second);
+        continue;
+      }
+      if (!seen.insert(ci).second) {
+        continue;
+      }
+      auto mit = memo.find(ci);
+      if (mit == memo.end() && memoize && memo_used < memo_budget && ++hits[ci] >= 2) {
+        Support                      sup;
+        std::vector<hhds::Pin_class> sub;
+        push_operands(m, sub);
+        self(self, sub, sup, false);
+        memo_used += sup.cells.size() + sup.ins.size();
+        mit        = memo.emplace(ci, std::move(sup)).first;
+      }
+      if (mit != memo.end()) {
+        for (uint32_t i : mit->second.cells) {
+          add_cell(i);
+        }
+        for (uint64_t t : mit->second.ins) {
+          add_in(t);
+        }
+        continue;
+      }
+      push_operands(m, work);
+    }
+  };
   for (auto& c : ss.cells) {
     auto op = gu::type_op_of(c.node);
 
     // Backward: data-pin fan-in.
-    absl::flat_hash_set<hhds::Class_index> seen;
-    std::vector<hhds::Pin_class>           work;
+    std::vector<hhds::Pin_class> work;
     for_each_inp_operand(c.node, [&](const hhds::Pin_class& sink, const hhds::Pin_class& driver) {
       if (data_sink_port(op, sink.get_port_id())) {
         work.push_back(driver);
       }
       return true;
     });
-    while (!work.empty()) {
-      auto drv = work.back();
-      work.pop_back();
-      if (gu::is_graph_input_pin(drv)) {
-        uint64_t t = hcombine(hstr("\x01in"), hstr(drv.get_pin_name()));
-        if (want_labels) {
-          ss.label.try_emplace(t, "in:" + std::string{drv.get_pin_name()});
-        }
-        c.in_anchors.push_back(t);
-        continue;
-      }
-      if (drv.is_const()) {
-        continue;
-      }
-      auto m = drv.get_master_node();
-      if (auto it = ss.index.find(m.get_class_index()); it != ss.index.end()) {
-        c.preds.push_back(it->second);
-        continue;
-      }
-      if (seen.insert(m.get_class_index()).second) {
-        for_each_inp_operand(m, [&](const hhds::Pin_class&, const hhds::Pin_class& driver) {
-          work.push_back(driver);
-          return true;
-        });
-      }
-    }
-
-    // Forward: fan-out until the next state cell's DATA pin or a graph output.
-    // An edge landing on a clock/reset pin of downstream state is ignored.
-    seen.clear();
-    std::vector<hhds::Pin_class> fwork;
-    for (const auto& e : c.node.out_edges()) {
-      fwork.push_back(e.sink);
-    }
-    while (!fwork.empty()) {
-      auto snk = fwork.back();
-      fwork.pop_back();
-      if (gu::is_graph_output_pin(snk)) {
-        uint64_t t = hcombine(hstr("\x01out"), hstr(snk.get_pin_name()));
-        if (want_labels) {
-          ss.label.try_emplace(t, "out:" + std::string{snk.get_pin_name()});
-        }
-        c.out_anchors.push_back(t);
-        continue;
-      }
-      auto m = snk.get_master_node();
-      if (auto it = ss.index.find(m.get_class_index()); it != ss.index.end()) {
-        if (data_sink_port(gu::type_op_of(m), snk.get_port_id())) {
-          c.succs.push_back(it->second);
-        }
-        continue;
-      }
-      if (seen.insert(m.get_class_index()).second) {
-        for (const auto& e : m.out_edges()) {
-          fwork.push_back(e.sink);
-        }
-      }
-    }
-
-    auto dedupe = [](auto& v) {
-      std::sort(v.begin(), v.end());
-      v.erase(std::unique(v.begin(), v.end()), v.end());
-    };
-    dedupe(c.preds);
-    dedupe(c.succs);
-    dedupe(c.in_anchors);
-    dedupe(c.out_anchors);
+    Support sup;
+    walk(walk, work, sup, true);
+    c.preds      = std::move(sup.cells);
+    c.in_anchors = std::move(sup.ins);
+    std::sort(c.preds.begin(), c.preds.end());
+    std::sort(c.in_anchors.begin(), c.in_anchors.end());
   }
 
-  // Transitive closure over the state graph (SRP/ERP accumulate ALL resolved
-  // points in the transitive cone, not just the frontier — traversal passes
-  // through resolved and unresolved cells alike, so the closure is static and
-  // computed once; per round only the member tokens change). BFS => the stored
-  // distance is the MIN hop count.
-  auto close = [&](std::vector<uint32_t> State_cell::* step, std::vector<std::pair<uint32_t, uint32_t>> State_cell::* out) {
-    std::vector<uint8_t> mark(ss.cells.size());
-    for (auto& c : ss.cells) {
-      std::fill(mark.begin(), mark.end(), 0);
-      auto& res = c.*out;
-      for (uint32_t i : c.*step) {
-        if (mark[i] == 0) {
-          mark[i] = 1;
-          res.emplace_back(i, 1);
-        }
-      }
-      for (size_t head = 0; head < res.size(); ++head) {
-        auto [i, d] = res[head];  // BFS: res doubles as the queue
-        for (uint32_t j : ss.cells[i].*step) {
-          if (mark[j] == 0) {
-            mark[j] = 1;
-            res.emplace_back(j, d + 1);
-          }
-        }
-      }
-      std::sort(res.begin(), res.end());
+  // Forward neighbors are the transpose of the backward ones: a cell's succs
+  // are the cells whose data-pin fan-in reaches it through comb (an edge on a
+  // clock/reset pin of downstream state never counted, and the backward walk
+  // only starts at data pins), and its output anchors are the graph outputs
+  // whose fan-in reaches it. Walking each cell's fan-out instead floods the
+  // whole downstream cone once per cell: every storage bit of a memory lowered
+  // to registers re-walks the same read mux tree and everything it feeds.
+  for (uint32_t x = 0; x < ss.cells.size(); ++x) {
+    for (uint32_t p : ss.cells[x].preds) {
+      ss.cells[p].succs.push_back(x);  // x ascending: each succs list is sorted and unique
     }
-  };
-  close(&State_cell::preds, &State_cell::reach_b);
-  close(&State_cell::succs, &State_cell::reach_f);
+  }
+  if (auto onode = g->get_output_node(); !onode.is_invalid()) {
+    for (const auto& sink : onode.inp_sorted_pins()) {
+      const uint64_t t = hcombine(hstr("\x01out"), hstr(sink.get_pin_name()));
+      if (want_labels) {
+        ss.label.try_emplace(t, "out:" + std::string{sink.get_pin_name()});
+      }
+      std::vector<hhds::Pin_class> work;
+      for (auto drv : sink.get_driver_pins()) {
+        work.push_back(drv);
+      }
+      Support sup;
+      walk(walk, work, sup, true);
+      for (uint32_t i : sup.cells) {
+        ss.cells[i].out_anchors.push_back(t);
+      }
+    }
+    for (auto& c : ss.cells) {
+      std::sort(c.out_anchors.begin(), c.out_anchors.end());
+      c.out_anchors.erase(std::unique(c.out_anchors.begin(), c.out_anchors.end()), c.out_anchors.end());
+    }
+  }
+
   return ss;
+}
+
+// Transitive closure over the state graph (SRP/ERP accumulate ALL resolved
+// points in the transitive cone, not just the frontier -- traversal passes
+// through resolved and unresolved cells alike, so the closure is static; per
+// round only the member tokens change). BFS => the stored distance is the MIN
+// hop count. Computed once per cell, on first use.
+void ensure_reach(const State_side& ss, const State_cell& c) {
+  if (c.reach_done) {
+    return;
+  }
+  c.reach_done = true;
+  if (ss.mark.size() != ss.cells.size()) {
+    ss.mark.assign(ss.cells.size(), 0);
+    ss.walk = 0;
+  }
+  auto close = [&](const std::vector<uint32_t> State_cell::* step, std::vector<std::pair<uint32_t, uint32_t>>& res) {
+    if (++ss.walk == 0) {  // wrapped: every old mark is stale
+      std::fill(ss.mark.begin(), ss.mark.end(), 0);
+      ss.walk = 1;
+    }
+    for (uint32_t i : c.*step) {
+      if (ss.mark[i] != ss.walk) {
+        ss.mark[i] = ss.walk;
+        res.emplace_back(i, 1);
+      }
+    }
+    for (size_t head = 0; head < res.size(); ++head) {
+      auto [i, d] = res[head];  // BFS: res doubles as the queue
+      for (uint32_t j : ss.cells[i].*step) {
+        if (ss.mark[j] != ss.walk) {
+          ss.mark[j] = ss.walk;
+          res.emplace_back(j, d + 1);
+        }
+      }
+    }
+    std::sort(res.begin(), res.end());
+  };
+  close(&State_cell::preds, c.reach_b);
+  close(&State_cell::succs, c.reach_f);
 }
 
 // One direction's resolved points as (base token, min hop dist) items, sorted
@@ -612,6 +776,7 @@ State_side collect_state(hhds::Graph* g, const Semdiff_options& opts) {
 // data-path mux (`if (rst) q <= K; else if (en) q <= d;` read by slang) has one.
 std::vector<std::pair<uint64_t, uint32_t>> rp_items(const State_side& ss, const State_cell& c, bool backward,
                                                     const absl::flat_hash_set<uint64_t>* drop = nullptr) {
+  ensure_reach(ss, c);
   const auto&                                reach = backward ? c.reach_b : c.reach_f;
   const auto&                                own   = backward ? c.in_anchors : c.out_anchors;
   auto                                       kept  = [&](uint64_t t) { return drop == nullptr || !drop->contains(t); };
@@ -794,6 +959,85 @@ void reconstruct_bus_groups(State_side& side, const State_side& other, bool proj
   }
 }
 
+// The registers of a memory lowered to flops keep one of several spellings below the memory's name: the wrapper's
+// storage `<mem>.data` (one register for a single-entry memory), `<mem>.data[i]` (whole entries), `<mem>.data[i][b]`,
+// or the flattened inline bus `<mem>._flat[k]` (normalize_reg_name). The ABC memory lowering wraps each memory in a
+// module named after it whose cgen wrapper calls the memory `data`, so the decoded names gain that segment:
+// `<mem>.data._mem[i][b]`, `<mem>.data._mem[i]`, `<mem>.data._flat[k]`. Re-key them as the bank spelling
+// `<mem>._mem[i]` / `<mem>._mem[i][b]` the memory-bank correspondence reads, now that the memory's shape is known. A
+// key that does not fit the shape is left as it is (the bank then fails or reports the stray key).
+void alias_storage(std::map<std::string, std::pair<std::string, int>>& candidates, const std::string& name, int entries,
+                   int width) {
+  if (entries <= 0 || width <= 0) {
+    return;
+  }
+  std::vector<std::pair<std::string, std::string>> moves;  // from, to
+  const auto                                       parse = [](std::string_view rest, std::vector<int64_t>& out) {
+    out.clear();
+    while (!rest.empty()) {
+      if (rest.front() != '[') {
+        return false;
+      }
+      const auto close = rest.find(']');
+      if (close == std::string_view::npos || close == 1) {
+        return false;
+      }
+      int64_t    v = 0;
+      const auto r = std::from_chars(rest.data() + 1, rest.data() + close, v);
+      if (r.ec != std::errc() || r.ptr != rest.data() + close) {
+        return false;
+      }
+      out.push_back(v);
+      rest.remove_prefix(close + 1);
+    }
+    return true;
+  };
+  std::vector<int64_t> idx;
+  for (const auto* stem : {".data._mem", ".data._flat", ".data", "._flat"}) {
+    const auto prefix = name + stem;
+    for (auto it = candidates.lower_bound(prefix); it != candidates.end() && it->first.starts_with(prefix); ++it) {
+      const std::string_view rest = std::string_view(it->first).substr(prefix.size());
+      if (!parse(rest, idx)) {
+        continue;
+      }
+      const int              bits = it->second.second;
+      const std::string_view kind(stem);
+      std::string            to;
+      if (kind == ".data._mem") {
+        if (idx.size() == 2 && bits == 1 && idx[0] < entries && idx[1] < width) {
+          to = std::format("{}._mem[{}][{}]", name, idx[0], idx[1]);
+        } else if (idx.size() == 1 && bits == width && idx[0] < entries) {
+          to = std::format("{}._mem[{}]", name, idx[0]);
+        }
+      } else if (kind == "._flat" || kind == ".data._flat") {
+        if (idx.size() == 1 && bits == 1 && idx[0] < int64_t{entries} * width) {
+          to = std::format("{}._mem[{}][{}]", name, idx[0] / width, idx[0] % width);
+        }
+      } else if (idx.empty()) {
+        if (entries == 1 && bits == width) {
+          to = std::format("{}._mem[0]", name);
+        }
+      } else if (idx.size() == 1) {
+        if (entries > 1 && bits == width && idx[0] < entries) {
+          to = std::format("{}._mem[{}]", name, idx[0]);
+        } else if (entries == 1 && bits == 1 && idx[0] < width) {
+          to = std::format("{}._mem[0][{}]", name, idx[0]);
+        }
+      } else if (idx.size() == 2 && bits == 1 && idx[0] < entries && idx[1] < width) {
+        to = std::format("{}._mem[{}][{}]", name, idx[0], idx[1]);
+      }
+      if (!to.empty()) {
+        moves.emplace_back(it->first, std::move(to));
+      }
+    }
+  }
+  for (auto& [from, to] : moves) {
+    auto node  = candidates.extract(from);
+    node.key() = std::move(to);
+    candidates.insert(std::move(node));  // a key already there wins: the bank sees the clash as it would without us
+  }
+}
+
 // Tier-1 (name) + tier-2 (full-match) state pairing. Fills stats + the exported
 // pair/unpaired lists, assigns resolved tokens, and reports per-cell outcomes
 // under dump_state.
@@ -823,9 +1067,10 @@ void pair_state(hhds::Graph* ga, hhds::Graph* gb, State_side& sa, State_side& sb
     };
     res.state_projections    = livehd::state_match::renamed_register_projections(registers(sa), registers(sb));
     st.projection_candidates = static_cast<uint32_t>(res.state_projections.size());
-    auto memory_candidates   = [&](const State_side& memories, const State_side& bank_side, bool memory_in_impl) {
+    auto memory_candidates   = [&](const State_side& memories, State_side& bank_side, bool memory_in_impl) {
       std::map<std::string, std::pair<std::string, int>> candidates;
       std::set<std::string>                              matched, other_memories;
+      std::map<std::string, uint32_t>                    bank_cells;  // a candidate's hier name -> its cell
       for (const auto& c : memories.cells) {
         if (!c.is_mem) {
           matched.insert(normalize_reg_name(c.node.get_hier_name()));
@@ -841,6 +1086,7 @@ void pair_state(hhds::Graph* ga, hhds::Graph* gb, State_side& sa, State_side& sb
           continue;
         }
         const int width  = gu::real_width(c.node.get_driver_pin(0));
+        bank_cells.emplace(std::string(c.node.get_hier_name()), static_cast<uint32_t>(&c - bank_side.cells.data()));
         name             = livehd::state_match::memory_bank_name(name);
         auto [it, fresh] = candidates.emplace(name, std::pair{std::string(c.node.get_hier_name()), width != 0 ? width : 1});
         if (!fresh && it->second.first != c.node.get_hier_name()) {
@@ -871,13 +1117,71 @@ void pair_state(hhds::Graph* ga, hhds::Graph* gb, State_side& sa, State_side& sb
             || width > std::numeric_limits<int>::max()) {
           continue;
         }
+        alias_storage(candidates, name, static_cast<int>(entries), static_cast<int>(width));
         auto bank = livehd::state_match::memory_bank(name, static_cast<int>(entries), static_cast<int>(width), candidates, matched);
-        if (bank) {
-          res.memory_projections.push_back({std::string(c.node.get_hier_name()),
-                                            static_cast<int>(entries),
-                                            static_cast<int>(width),
-                                            memory_in_impl,
-                                            std::move(*bank)});
+        int  removed = 0;
+        if (!bank) {
+          // A memory lowered to registers whose unread bits synthesis removed: the surviving storage keeps its names.
+          // Every candidate key below `<mem>._mem` must be a storage bit the coverage accounted for; a stray one (an
+          // index out of the memory's range) means the names describe something else.
+          bank = livehd::state_match::memory_bank_coverage(name,
+                                                           static_cast<int>(entries),
+                                                           static_cast<int>(width),
+                                                           candidates,
+                                                           matched,
+                                                           removed);
+          if (bank) {
+            size_t     keys   = 0;
+            const auto prefix = name + "._mem[";
+            for (auto it = candidates.lower_bound(prefix); it != candidates.end() && it->first.starts_with(prefix); ++it) {
+              ++keys;
+            }
+            size_t covered = 0;
+            for (int i = 0; i < static_cast<int>(entries); ++i) {
+              covered += bank->entry_keys[i].empty() ? 0 : 1;
+              for (const auto& bit : bank->bit_keys[i]) {
+                covered += bit.empty() ? 0 : 1;
+              }
+            }
+            if (keys != covered) {
+              bank.reset();
+            }
+          }
+        }
+        if (!bank) {
+          continue;
+        }
+        uint64_t storage = 0;
+        for (int i = 0; i < static_cast<int>(entries); ++i) {
+          if (const auto& key = bank->entry_keys[i]; !key.empty()) {
+            storage += static_cast<uint64_t>(width);
+            if (const auto it = bank_cells.find(key); it != bank_cells.end()) {
+              bank_side.cells[it->second].bank_bit = true;
+            }
+          }
+          for (const auto& key : bank->bit_keys[i]) {
+            if (!key.empty()) {
+              ++storage;
+              if (const auto it = bank_cells.find(key); it != bank_cells.end()) {
+                bank_side.cells[it->second].bank_bit = true;
+              }
+            }
+          }
+        }
+        (memory_in_impl ? st.a_bank_bits : st.b_bank_bits) += storage;
+        livehd::state_match::Memory_projection projection{std::string(c.node.get_hier_name()),
+                                                          static_cast<int>(entries),
+                                                          static_cast<int>(width),
+                                                          memory_in_impl,
+                                                          std::move(*bank),
+                                                          removed};
+        if (removed == 0) {
+          res.memory_projections.push_back(std::move(projection));
+        } else {
+          ++st.memory_partial_candidates;
+          st.memory_partial_kept_bits    += storage;
+          st.memory_partial_removed_bits += static_cast<uint64_t>(removed);
+          res.memory_partial_projections.push_back(std::move(projection));
         }
       }
     };
@@ -890,6 +1194,15 @@ void pair_state(hhds::Graph* ga, hhds::Graph* gb, State_side& sa, State_side& sb
                    projection.memory_key,
                    projection.entries,
                    projection.bits);
+      }
+      for (const auto& projection : res.memory_partial_projections) {
+        std::print("semdiff[state]: memory partial bank '{}' ({}x{}: {} of {} storage bits keep their names, {} removed)\n",
+                   projection.memory_key,
+                   projection.entries,
+                   projection.bits,
+                   projection.entries * projection.bits - projection.removed_bits,
+                   projection.entries * projection.bits,
+                   projection.removed_bits);
       }
     }
     if (opts.dump_state) {
@@ -1275,17 +1588,20 @@ void pair_state(hhds::Graph* ga, hhds::Graph* gb, State_side& sa, State_side& sb
       };
       // The reset-agnostic phase is for registers only: a memory pair is also a
       // confident collapse hint to lec (a_mem_diverged), so it keeps its reset
-      // anchors.
+      // anchors. A storage bit of a memory the other side keeps whole already
+      // has its counterpart (the bank), and a register never pairs with a
+      // memory, so it is not signed: a cache lowered to flops is most of a
+      // netlist's state.
       auto bucket = [&]() {
         asig.clear();
         bsig.clear();
         for (uint32_t i = 0; i < sa.cells.size(); ++i) {
-          if (sa.cells[i].token == 0 && (phase < 2 || !sa.cells[i].is_mem)) {
+          if (sa.cells[i].token == 0 && !sa.cells[i].bank_bit && (phase < 2 || !sa.cells[i].is_mem)) {
             asig[sig_of(sa, sa.cells[i])].push_back(i);
           }
         }
         for (uint32_t i = 0; i < sb.cells.size(); ++i) {
-          if (sb.cells[i].token == 0 && (phase < 2 || !sb.cells[i].is_mem)) {
+          if (sb.cells[i].token == 0 && !sb.cells[i].bank_bit && (phase < 2 || !sb.cells[i].is_mem)) {
             bsig[sig_of(sb, sb.cells[i])].push_back(i);
           }
         }
@@ -1388,20 +1704,20 @@ void pair_state(hhds::Graph* ga, hhds::Graph* gb, State_side& sa, State_side& sb
         };
         absl::flat_hash_set<uint64_t> a_nk, b_nk;
         for (const auto& c : sa.cells) {
-          if (c.token == 0) {
+          if (c.token == 0 && !c.bank_bit) {
             a_nk.insert(nokind_sig(sa, c));
           }
         }
         for (const auto& c : sb.cells) {
-          if (c.token == 0) {
+          if (c.token == 0 && !c.bank_bit) {
             b_nk.insert(nokind_sig(sb, c));
           }
         }
         for (auto& c : sa.cells) {
-          c.kind_clash = c.token == 0 && !c.ambiguous && b_nk.contains(nokind_sig(sa, c));
+          c.kind_clash = c.token == 0 && !c.bank_bit && !c.ambiguous && b_nk.contains(nokind_sig(sa, c));
         }
         for (auto& c : sb.cells) {
-          c.kind_clash = c.token == 0 && !c.ambiguous && a_nk.contains(nokind_sig(sb, c));
+          c.kind_clash = c.token == 0 && !c.bank_bit && !c.ambiguous && a_nk.contains(nokind_sig(sb, c));
         }
 
         // explain_noise: deep-dump noised-but-unrecovered impl cells against
@@ -1512,6 +1828,9 @@ void pair_state(hhds::Graph* ga, hhds::Graph* gb, State_side& sa, State_side& sb
                     std::vector<std::string>& mem_diverged,
                     std::string_view          side) {
     for (auto& c : ss.cells) {
+      if (c.token == 0 && c.clock_gate) {
+        ++(side == "ref" ? st.a_clock_gates : st.b_clock_gates);
+      }
       if (c.token == 0) {
         ++unpaired;
         ambiguous += c.ambiguous ? 1 : 0;
@@ -1539,6 +1858,8 @@ void pair_state(hhds::Graph* ga, hhds::Graph* gb, State_side& sa, State_side& sb
                    : c.t1_pair                         ? "name"
                    : c.t1_group                        ? "name-group"
                    : c.t2_pair                         ? "full"
+                   : c.bank_bit                        ? "bank(lowered memory)"
+                   : c.clock_gate                      ? "clock-gate(inserted)"
                    : c.ambiguous                       ? "UNPAIRED(ambiguous)"
                                                        : "UNPAIRED(no-counterpart)");
       }
