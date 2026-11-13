@@ -1,0 +1,673 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LiveHD Acknowledgements</title>
+<style>
+:root {
+  --bg:#ffffff; --fg:#24292f; --muted:#57606a; --border:#d0d7de;
+  --soft:#f6f8fa; --accent:#0969da; --accent-bg:#ddf4ff; --codefg:#1f2328;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg:#0d1117; --fg:#e6edf3; --muted:#8b949e; --border:#30363d;
+    --soft:#161b22; --accent:#58a6ff; --accent-bg:#13233b; --codefg:#e6edf3;
+  }
+}
+* { box-sizing:border-box; }
+html { scroll-behavior:smooth; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif; }
+nav { position:sticky; top:0; z-index:10; background:var(--soft);
+  border-bottom:1px solid var(--border); padding:.55rem 1rem;
+  display:flex; gap:.4rem; flex-wrap:wrap; align-items:center; }
+nav .brand { font-weight:700; margin-right:.6rem; color:var(--muted); }
+nav a { text-decoration:none; color:var(--fg); padding:.25rem .7rem;
+  border-radius:6px; font-size:.92rem; }
+nav a:hover { background:var(--accent-bg); }
+main { max-width:960px; margin:0 auto; padding:2rem 1rem 5rem; }
+h1,h2,h3,h4 { line-height:1.25; font-weight:600; scroll-margin-top:3.5rem; }
+h1 { font-size:1.9rem; padding-bottom:.3em; border-bottom:1px solid var(--border); }
+h2 { font-size:1.5rem; margin-top:2.6rem; padding-bottom:.3em; border-bottom:1px solid var(--border); }
+h3 { font-size:1.22rem; margin-top:2rem; }
+h4 { font-size:1rem; margin:1.4rem 0 .4rem; color:var(--muted); }
+a { color:var(--accent); }
+code { background:var(--soft); color:var(--codefg); padding:.1em .35em; border-radius:5px;
+  font-size:.86em; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+.table-wrap { overflow-x:auto; }
+table { border-collapse:collapse; width:100%; margin:1rem 0; font-size:.93rem; }
+th,td { border:1px solid var(--border); padding:.4rem .65rem; text-align:left; vertical-align:top; }
+th { background:var(--soft); }
+td.years { white-space:nowrap; }
+tr:nth-child(even) td { background:var(--soft); }
+ul { padding-left:1.3rem; }
+li { margin:.3rem 0; }
+ul.refs > li { margin:.55rem 0; }
+ul.refs em { font-style:normal; font-weight:600; }
+ul.refs a { font-size:.82em; margin-left:.25rem; }
+.use { display:block; color:var(--muted); font-size:.9em; }
+ul.compact > li { margin:.25rem 0; font-size:.93rem; }
+ul.tools > li > a:first-child { font-weight:600; }
+.note { color:var(--muted); font-size:.92rem; }
+.todo-check,.fixme { font-size:.72em; font-weight:700; padding:.05em .4em; border-radius:5px;
+  margin-left:.3rem; cursor:help; vertical-align:middle; font-family:ui-monospace,Menlo,Consolas,monospace; }
+.todo-check { background:#fff8c5; color:#7d4e00; border:1px solid #d4a72c; }
+.fixme { background:#ffebe9; color:#a40e26; border:1px solid #ff8182; }
+@media (prefers-color-scheme: dark) {
+  .todo-check { background:#3b2f00; color:#f2cc60; border-color:#9e6a03; }
+  .fixme { background:#490202; color:#ff9492; border-color:#f85149; } }
+footer { max-width:960px; margin:0 auto; padding:0 1rem 3rem; color:var(--muted); font-size:.85rem; }
+</style>
+</head>
+<body>
+<nav><span class="brand">LiveHD</span>
+<a href="#people">People</a><a href="#tools">Tools</a><a href="#papers">Papers</a></nav>
+<main>
+<h1>Acknowledgements</h1>
+<p>LiveHD is built by the <a href="https://masc.soe.ucsc.edu">MASC group</a> at UC Santa Cruz and
+by everyone who has contributed to it. It stands on many open-source tools and on decades of
+research. This page credits the <a href="#people">people</a> who committed to the repository, the
+<a href="#tools">tools</a> we use or studied, and the <a href="#papers">papers</a> behind parts of
+the implementation.</p>
+<p class="note">Missing someone or something? Please open a pull request against
+<code>docs/acknowledgement.html</code>. If a part of LiveHD follows a paper or comes close to one,
+add it here. When in doubt, cite it.</p>
+
+<h2 id="people">People</h2>
+<p>Everyone with a commit in the LiveHD repository, ordered by number of commits. Years and areas come
+from <code>git log</code>, except where the earlier credits file recorded work that predates the
+repository history. Bot and automation identities are left out. Google LLC also supported
+the project from 2018.</p>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Name</th><th>Years</th><th>Main contributions</th></tr></thead>
+<tbody>
+<tr><td>Jose Renau</td><td class="years">2015–2026</td><td>Project lead and architect: LGraph and LNAST core, the Pyrope compiler, the <code>lhd</code> driver, Yosys and slang readers, simulation code generation, LEC, synthesis and placement.</td></tr>
+<tr><td>Sheng-Hong Wang</td><td class="years">2018–2022</td><td>LNAST and the multi-threaded compiler: Pyrope and FIRRTL front ends, the LNAST-to-LGraph translation, SSA and elaboration passes.</td></tr>
+<tr><td>Sakshi Garg</td><td class="years">2020–2025</td><td>Code generation from LNAST, the simlib simulation library, and source-to-netlist mapping (the locator and SynAlign).</td></tr>
+<tr><td>Changyang Zeng</td><td class="years">2026</td><td>Lean and Isabelle semantics of the IR and translation validation (<code>pass/lean</code>, <code>formal/lean</code>).</td></tr>
+<tr><td>Rafael T. Possignolo</td><td class="years">2016–2018</td><td>Lead student of the original LGraph: core data model and Yosys interface; LiveSynth and SMatch incremental synthesis.</td></tr>
+<tr><td>Kyle Neil</td><td class="years">2020–2021</td><td>Hierarchical floorplanner (<code>pass/fplan</code>) and its third-party integration.</td></tr>
+<tr><td>Hunter Coffman</td><td class="years">2018–2020</td><td>FIRRTL front end, LGraph-to-LNAST translation and bitwidth inference.</td></tr>
+<tr><td>Jesse Chan</td><td class="years">2021–2022</td><td>Build system, external dependencies and CI; FIRRTL/CHIRRTL tests and semantic-check cleanups.</td></tr>
+<tr><td>Qian Chen</td><td class="years">2019</td><td>The mockturtle logic synthesis and LUT mapping pass.</td></tr>
+<tr><td>Sloan Liu</td><td class="years">2020–2022</td><td>The label pass (acyclic partitioning) and the <code>mmap_lib</code> string library.</td></tr>
+<tr><td>Kenneth Mayer</td><td class="years">2019–2020</td><td>Pyrope parser: operators, precedence, attributes and selects.</td></tr>
+<tr><td>Maximilian Tiao</td><td class="years">2020–2021</td><td>LNAST semantic checks and warnings.</td></tr>
+<tr><td>Jing-Hsiang Huang</td><td class="years">2021–2022</td><td>LNAST text reader and writer, Pyrope-to-LNAST translation and LNAST benchmarks.</td></tr>
+<tr><td>Joshua Pena</td><td class="years">2019–2020</td><td>LNAST-to-Pyrope and LNAST-to-Verilog code generation (cgen) with golden tests.</td></tr>
+<tr><td>Syed Jamal</td><td class="years">2026</td><td>uPass LNAST passes: bitwidth ranges, constant propagation, the Pyrope writer and round-trip tests.</td></tr>
+<tr><td>Farzaneh Rabiei Kashanaki</td><td class="years">2021–2026</td><td>Yosys JSON reader and writer; Pyrope rule-ablation skills.</td></tr>
+<tr><td>Haven Blake Skinner</td><td class="years">2018</td><td>Pyrope creator; the early dataflow-graph pass and LiveSim.</td></tr>
+<tr><td>Rohan Ganpati</td><td class="years">2018–2019</td><td>OpenTimer integration, bringing SPEF and SDC into LGraph.</td></tr>
+<tr><td>zwang400</td><td class="years">2021</td><td>jops, a JavaScript calculator for Pyrope constant semantics.</td></tr>
+<tr><td>birdeclipse</td><td class="years">2018</td><td>ABC interface (LGraph to AIG) and the BLIF and LEF/DEF readers.</td></tr>
+<tr><td>Divya2030</td><td class="years">2026</td><td>slang reader features, LEC, and lowering of formal properties.</td></tr>
+<tr><td>Arik</td><td class="years">2020–2021</td><td>The first slang-based SystemVerilog front end.</td></tr>
+<tr><td>Mark Zakharov</td><td class="years">2021–2023</td><td>Memory support in the Yosys reader and code generator; <code>ware</code> test RTL.</td></tr>
+<tr><td>Jiahan Xie</td><td class="years">2026</td><td>Yosys and slang upgrades and database path cleanups.</td></tr>
+<tr><td>Clark Hilbert</td><td class="years">2020</td><td>The LGraph-to-JSON writer and its documentation.</td></tr>
+<tr><td>Bhawandeep Singh Harsh</td><td class="years">2020–2021</td><td>SAT-based optimization pass built on ezSAT.</td></tr>
+<tr><td>Huijie Pan</td><td class="years">2019–2020</td><td>RapidWright FPGA place-and-route interface.</td></tr>
+<tr><td>Tanvir Heer</td><td class="years">2018</td><td>Python packaging and cloud deployment.</td></tr>
+<tr><td>Zach Potter</td><td class="years">2018</td><td>Early Pyrope integration with the console and Python interface.</td></tr>
+<tr><td>aalomari</td><td class="years">2021–2022</td><td>LNAST optimization pass and LNAST creation in the slang reader.</td></tr>
+<tr><td>mgkapp</td><td class="years">2020–2022</td><td>Early SMT-based LEC pass (Boolector).</td></tr>
+<tr><td>Nursultan Kabylkas</td><td class="years">2019</td><td>The hierarchy punch pass and the LGraph hierarchy API.</td></tr>
+<tr><td>Anirudh Sridhar</td><td class="years">2021</td><td>The <code>graph_core</code> data structure.</td></tr>
+<tr><td>bokket</td><td class="years">2021</td><td>Class-naming cleanups and installation documentation.</td></tr>
+<tr><td>Olyad Mulisa Kebede</td><td class="years">2021</td><td>String constructors and tests in <code>mmap_lib</code>.</td></tr>
+<tr><td>Rohan Jobanputra</td><td class="years">2018–2019</td><td>Python bindings for LGraph.</td></tr>
+<tr><td>Shahzaib Kashif</td><td class="years">2023</td><td>Power analysis from VCD in the OpenTimer pass.</td></tr>
+<tr><td>Michael Jao</td><td class="years">2024</td><td>Dependency updates (Bazel 7, Yosys 0.44).</td></tr>
+<tr><td>liyuxuan07</td><td class="years">2021</td><td>Multi-word arithmetic in the lemu library.</td></tr>
+<tr><td>Dean Bader</td><td class="years">2023</td><td>File attributes in LNAST save and load.</td></tr>
+<tr><td>Surim Oh</td><td class="years">2020</td><td>Prometheus monitoring of benchmark metrics.</td></tr>
+<tr><td>Nilufar Ferdous</td><td class="years">2018</td><td>The SAT interface (<code>inou/sat</code>).</td></tr>
+<tr><td>Sterling Nicholson</td><td class="years">2021</td><td>Mask equivalence test.</td></tr>
+<tr><td>Milad Gholami</td><td class="years">2020</td><td>Graph library benchmarks.</td></tr>
+<tr><td>Alexander Cardaras</td><td class="years">2020</td><td>Elaboration cleanup.</td></tr>
+<tr><td>deny72</td><td class="years">2020</td><td>A FIRRTL regression test.</td></tr>
+<tr><td>Akash Sridhar</td><td class="years">2019</td><td>Pyrope test examples; co-author of the LNAST paper.</td></tr>
+<tr><td>Tim Ansell</td><td class="years">2018</td><td>README code-organization section.</td></tr>
+<tr><td>Garvit Mantri</td><td class="years">2018</td><td>Benchmark results for the <code>ware</code> designs.</td></tr>
+<tr><td>Muhammad Zian Ilahee</td><td class="years">2018</td><td>Early repository setup.</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="tools">Tools</h2>
+<p>Tools whose code LiveHD links, vendors or adapts, or that it runs as part of its flows, come first. Tools we
+studied for ideas, without using their code, are under <a href="#tools-inspiration">Inspiration</a>.</p>
+
+<h3 id="tools-linked">Linked libraries</h3>
+<ul class="tools">
+<li><a href="https://github.com/YosysHQ/yosys">Yosys</a> — Verilog/RTLIL reader (<code>inou/yosys</code>) and the lgcheck cross-checker. Builds with <a href="https://github.com/povik/sv-elab">sv-elab</a>, <a href="https://github.com/YosysHQ/symfpu">SymFPU</a>, <a href="https://github.com/jarro2783/cxxopts">cxxopts</a>, <a href="https://github.com/libffi/libffi">libffi</a>, flex and bison.</li>
+<li><a href="https://github.com/MikePopoloski/slang">slang</a> — the native SystemVerilog front end (<code>inou/slang</code>). The driver code is derived from upstream. Builds with <a href="https://github.com/fmtlib/fmt">fmt</a>, <a href="https://github.com/MikePopoloski/regex">Boost.Regex</a> and <a href="https://github.com/marzer/tomlplusplus">toml++</a>.</li>
+<li><a href="https://github.com/berkeley-abc/abc">ABC</a> — logic synthesis, technology mapping and CEC (<code>pass/abc</code>, <code>pass/lec</code>).</li>
+<li><a href="https://github.com/cvc5/cvc5">cvc5</a> — in-process SMT solver for LEC, formal verification and satopt. Brings <a href="https://github.com/arminbiere/cadical">CaDiCaL</a>, <a href="https://github.com/arminbiere/kissat">Kissat</a>, <a href="https://github.com/msoos/cryptominisat">CryptoMiniSat</a>, <a href="http://minisat.se">MiniSat</a>, <a href="https://github.com/SRI-CSL/libpoly">LibPoly</a>, <a href="https://github.com/martin-cs/symfpu">SymFPU</a> and <a href="https://gmplib.org">GMP</a>.</li>
+<li><a href="https://github.com/llvm/llvm-project">LLVM</a> — native code generation and ORC JIT for <code>lhd sim</code>.</li>
+<li><a href="https://github.com/OpenTimer/OpenTimer">OpenTimer</a> (masc-ucsc fork) with <a href="https://github.com/taskflow/taskflow">Taskflow</a> — static timing analysis (<code>pass/opentimer</code>).</li>
+<li><a href="https://github.com/limbo018/DREAMPlace">DREAMPlace</a> (masc-ucsc fork) — global, macro and detailed placement and routability kernels. Brings <a href="https://home.engineering.iastate.edu/~cnchu/flute.html">FLUTE</a>, <a href="https://lemon.cs.elte.hu">LEMON</a> and OpenMP.</li>
+<li><a href="https://github.com/ERGO-Code/HiGHS">HiGHS</a> — the LP solver for density warping (<code>pass/place/density_warp.cpp</code>).</li>
+<li><a href="https://github.com/tree-sitter/tree-sitter">tree-sitter</a> — runtime for the Pyrope formatter.</li>
+<li><a href="https://github.com/abseil/abseil-cpp">Abseil</a>, <a href="https://github.com/ktprime/emhash">emhash</a>, <a href="https://github.com/microsoft/mimalloc">mimalloc</a>, <a href="https://github.com/Tencent/rapidjson">RapidJSON</a>, <a href="https://github.com/google/perfetto">Perfetto</a>, <a href="https://github.com/kainjow/Mustache">Mustache</a>, zlib, zlib-ng and zstd — containers, allocation, JSON, tracing, templates and compression.</li>
+<li><a href="https://github.com/google/googletest">GoogleTest</a> and <a href="https://github.com/google/benchmark">Google Benchmark</a> — tests and benchmarks.</li>
+<li><a href="https://bazel.build">Bazel</a> and its rule sets (rules_cc, rules_python, rules_foreign_cc, bazel_skylib, …) — the build.</li>
+<li>MASC libraries: <a href="https://github.com/masc-ucsc/hhds">HHDS</a> (graph and tree containers), <a href="https://github.com/masc-ucsc/hlop">HLOP</a> (wide integers), <a href="https://github.com/masc-ucsc/iassert">iassert</a> and <a href="https://github.com/masc-ucsc/tree-sitter-pyrope">tree-sitter-pyrope / prpparse</a> (the Pyrope parser).</li>
+</ul>
+
+<h3 id="tools-vendored">Vendored or adapted code</h3>
+<ul class="tools">
+<li><a href="https://github.com/VieCut/VieCut">VieCut</a> — min-cut partitioning, vendored in <code>third_party/viecut</code>.</li>
+<li><a href="https://github.com/The-OpenROAD-Project/lefdef">Si2/Cadence LEF/DEF parser 5.8</a> — vendored in <code>third_party/misc</code>, used by <code>inou/lefdef</code>.</li>
+<li><a href="https://github.com/The-OpenROAD-Project/OpenROAD">OpenROAD</a> — FastRoute L/Z pattern routing adapted in <code>pass/place/fast_route_pattern.cpp</code>; OpenDB row cutting and tap-cell rules adapted in <code>pass/place/handoff_rows.cpp</code>.</li>
+<li><a href="https://github.com/wangyi-fudan/wyhash">wyhash</a> and <a href="https://github.com/tommyettinger/waterhash">waterhash/woothash</a> — hashing in <code>core/</code>.</li>
+<li><a href="https://www.1024cores.net/home/lock-free-algorithms/queues/bounded-mpmc-queue">Dmitry Vyukov's bounded queue</a> — basis of <code>core/spsc.hpp</code>.</li>
+<li><a href="https://github.com/shibatch/sleef">SLEEF</a> — bit-exact <code>expf</code> ported for URoute inference.</li>
+<li><a href="https://github.com/louiskenzo/dye">dye</a> — colors for Graphviz output; <a href="https://github.com/WojciechMula/toys">Wojciech Muła's linux-perf-events</a> — perf counters; sfc64 from PractRand — <code>core/lrand.hpp</code>.</li>
+<li><a href="https://github.com/google/skywater-pdk">SkyWater SKY130</a> cells, <a href="https://github.com/The-OpenROAD-Project/OpenROAD-flow-scripts">OpenROAD-flow-scripts</a> platform files and the TAU 2015 timing-contest fixtures — hermetic test data.</li>
+<li><a href="https://www.contributor-covenant.org">Contributor Covenant</a> — the code of conduct.</li>
+</ul>
+
+<h3 id="tools-external">External tools in our flows</h3>
+<ul class="tools">
+<li><a href="https://github.com/steveicarus/iverilog">Icarus Verilog</a> and <a href="https://github.com/verilator/verilator">Verilator</a> — reference simulators for checks, fuzzing and speed baselines.</li>
+<li><a href="https://github.com/YosysHQ/yosys">yosys-smtbmc</a> with <a href="https://github.com/Z3Prover/z3">Z3</a> — bounded equivalence of generated Verilog.</li>
+<li><a href="https://github.com/The-OpenROAD-Project/OpenROAD">OpenROAD</a> and <a href="https://github.com/The-OpenROAD-Project/OpenROAD-flow-scripts">OpenROAD-flow-scripts</a> — DRC on routed DEF, the routing handoff, power-grid checks and the reference flow.</li>
+<li><a href="https://github.com/The-OpenROAD-Project/OpenSTA">OpenSTA</a> — reference timing in the synthesis harness.</li>
+<li><a href="https://lean-lang.org">Lean 4</a> with <a href="https://github.com/leanprover-community/mathlib4">Mathlib</a> and <a href="https://isabelle.in.tum.de">Isabelle/HOL</a> — formal semantics and translation validation.</li>
+<li>clang++ / g++ and Ninja — compile the generated simulators.</li>
+<li><a href="https://github.com/zachjs/sv2v">sv2v</a> and <a href="https://github.com/pulp-platform/bender">Bender</a> — CVA6 preparation; <a href="https://graphviz.org">Graphviz</a> — viewing graphs; <a href="https://ffmpeg.org">ffmpeg</a> — placement replay videos.</li>
+<li><a href="https://pytorch.org">PyTorch</a>, <a href="https://numpy.org">NumPy</a> and <a href="https://matplotlib.org">Matplotlib</a> — URoute training and placement analysis.</li>
+<li><a href="https://www.mkdocs.org">MkDocs</a>, GitHub Actions, <a href="https://docs.renovatebot.com">Renovate</a>, <a href="https://codecov.io">Codecov</a> and <a href="https://prometheus.io">Prometheus</a> — documentation, CI and monitoring.</li>
+</ul>
+
+<h3 id="tools-bench">PDKs and benchmarks</h3>
+<ul class="tools">
+<li><a href="https://github.com/The-OpenROAD-Project/asap7">ASAP7</a>, <a href="https://github.com/The-OpenROAD-Project/OpenROAD-flow-scripts/tree/master/flow/platforms/nangate45">Nangate45</a> and <a href="https://github.com/google/skywater-pdk">SKY130 HD</a> — technologies for synthesis, placement and timing.</li>
+<li><a href="https://github.com/masc-ucsc/HighTide">HighTide</a> — physical-design benchmark suite.</li>
+<li><a href="https://github.com/OpenXiangShan/XiangShan">XiangShan</a>, <a href="https://github.com/openhwgroup/cva6">CVA6</a>, <a href="https://github.com/YosysHQ/picorv32">PicoRV32</a>, <a href="https://github.com/lowRISC/ibex">Ibex</a>, <a href="https://github.com/nvdla/hw">NVDLA</a>, <a href="https://github.com/vortexgpgpu/vortex">Vortex</a> and CORE-ET <span class="fixme" title="no URL in the repo; add one">fixme</span> — designs for simulation, synthesis, LEC and formal runs.</li>
+<li><a href="https://github.com/lsils/benchmarks">EPFL combinational suite</a>, ISCAS and OpenCores — logic synthesis evaluation.</li>
+<li><a href="https://github.com/circuitnet/CircuitNet">CircuitNet</a> and TimingPredict — datasets for routability and timing models.</li>
+</ul>
+
+<h3 id="tools-past">Used in the past</h3>
+<ul class="tools">
+<li><a href="https://github.com/lsils/mockturtle">mockturtle</a> and <a href="https://github.com/msoeken/kitty">kitty</a> — the old logic synthesis pass.</li>
+<li><a href="https://github.com/Boolector/boolector">Boolector</a>, <a href="https://github.com/stanford-centaur/pono">pono</a> and <a href="https://github.com/stanford-centaur/smt-switch">smt-switch</a> — earlier LEC solver layers, replaced by cvc5.</li>
+<li><a href="https://github.com/povik/yosys-slang">yosys-slang</a> — replaced by sv-elab; <a href="https://github.com/google/xls">Google XLS</a> — early interoperability.</li>
+<li><a href="https://github.com/Xilinx/RapidWright">RapidWright</a> — the old FPGA place-and-route interface.</li>
+<li><a href="https://github.com/AmokHuginnsson/replxx">replxx</a>, spdlog, nlohmann/json, range-v3, sparsehash, parallel-hashmap, pybind11, protobuf, BitMagic, roaring, Boost and bazel_rules_hdl — utilities in earlier versions.</li>
+</ul>
+
+<h3 id="tools-inspiration">Inspiration</h3>
+<p class="note">Tools we studied or compared against. Their code is not part of LiveHD.</p>
+<ul class="tools">
+<li><a href="https://github.com/The-OpenROAD-Project/OpenSTA">OpenSTA</a> — Elmore plus ramp-driver timing conventions for the native timer.</li>
+<li><a href="https://github.com/The-OpenROAD-Project/OpenROAD">OpenROAD</a> gpl/rsz/mpl/pdngen — density grids, slack weighting, repair order and macro thresholds in the native placer.</li>
+<li><a href="https://github.com/The-OpenROAD-Project/RePlAce">RePlAce</a> and MLBuf-RePlAce — soft macros and virtual buffering.</li>
+<li><a href="https://github.com/cuhk-eda/Xplace">Xplace</a> — timing-driven placement weighting.</li>
+<li><a href="https://github.com/The-OpenROAD-Project/TritonRoute">TritonRoute</a> and <a href="https://github.com/cuhk-eda/cu-gr">CUGR</a> — routing handoff conventions.</li>
+<li><a href="https://github.com/verilog-to-routing/vtr-verilog-to-routing">VPR</a> — timing criticality exponent; PathFinder-style negotiation.</li>
+<li><a href="https://www.klayout.de">KLayout</a> — a proposed independent DRC check.</li>
+<li><a href="https://verilator.org">Verilator</a> — semantics for overlapping controls and combinational loops, and the simulation speed target.</li>
+<li><a href="https://github.com/ucsc-vama/essent">ESSENT</a>, <a href="https://github.com/OpenXiangShan/gsim">GSIM</a> and RepCut — partitioned, activity-aware simulation.</li>
+<li><a href="https://circt.llvm.org">CIRCT</a> (arc, firtool, ImportVerilog) — clock-gate enable modeling and the slang importer structure.</li>
+<li><a href="https://github.com/chipsalliance/firrtl-spec">FIRRTL</a> and <a href="https://www.chisel-lang.org">Chisel</a> — CheckCombLoops summaries and generated-code idioms.</li>
+<li><a href="https://cranelift.dev">Cranelift</a> — the acyclic e-graph and ISLE rules behind <code>pass/aegraph</code>.</li>
+<li><a href="https://google.github.io/xls">Google XLS</a> — keeping loops rolled through the flow.</li>
+<li><a href="https://github.com/lsils/mockturtle">mockturtle</a>, LSOracle and AnySyn — synthesis design references for <code>pass/usyn</code>.</li>
+<li>Synopsys VCS, Design Compiler, Formality, Cadence Conformal and AMD Vivado — language-compatibility and LEC conventions.</li>
+<li><a href="https://compcert.org">CompCert</a>, <a href="https://github.com/ymherklotz/vericert">Vericert</a>, <a href="https://github.com/mit-plv/koika">Kôika</a>, Kami, Vera, <a href="https://github.com/AliveToolkit/alive2">Alive2</a> and seL4 graph-refine — trust boundaries for verified translation.</li>
+<li><a href="https://llvm.org/docs/DeveloperPolicy.html">LLVM Developer Policy</a> — model for the contribution policy.</li>
+</ul>
+
+<h2 id="papers">Papers</h2>
+<p>Papers that a part of LiveHD uses, or whose idea is close to what LiveHD implements. The gray line under
+each entry says where it applies. A paper used in several areas is listed once.</p>
+<p class="note">Markers: <span class="todo-check" title="example">todo-check</span> means a citation detail
+(authors, venue, year or DOI) has not been confirmed against the source.
+<span class="fixme" title="example">fixme</span> means a known problem on this page or in the repo file that cites the paper.
+Hover a marker for the details; <code>grep -n "todo-check\|fixme" docs/acknowledgement.html</code> lists them all.</p>
+<p class="note">Sections: <a href="#papers-own">LiveHD</a> · <a href="#papers-frontend">Front end, IR and language</a> ·
+<a href="#papers-sim">Simulation</a> · <a href="#papers-synth">Synthesis</a> · <a href="#papers-phys">Physical design</a> ·
+<a href="#papers-formal">Formal</a></p>
+
+<h3 id="papers-own">LiveHD publications</h3>
+<ul class="refs">
+<li>S.-H. Wang, H. Coffman, K. Mayer, S. Garg, J. Renau. <em>A Multi-threaded Fast Hardware Compiler for HDLs.</em> CC 2023. <a href="https://doi.org/10.1145/3578360.3580254">doi</a> <a href="papers/livehd_cc23.pdf">pdf</a></li>
+<li>S.-H. Wang, R.T. Possignolo, H. Skinner, J. Renau. <em>LiveHD: A Productive Live Hardware Development Flow.</em> IEEE Micro 40(4), 2020. <a href="https://doi.org/10.1109/MM.2020.2996508">doi</a> <a href="papers/LiveHD_IEEE_Micro20.pdf">pdf</a></li>
+<li>H. Skinner, R.T. Possignolo, S.-H. Wang, J. Renau. <em>LiveSim: A Fast Hot Reload Simulator for HDLs.</em> ISPASS 2020. <a href="papers/LiveSim_ISPASS20.pdf">pdf</a><span class="use">Checkpoints and replay in <code>lhd sim</code>.</span></li>
+<li>S.-H. Wang, R.T. Possignolo, Q. Chen, R. Ganpati, J. Renau. <em>LGraph: A Unified Data Model and API for Productive Open-Source Hardware Design.</em> WOSET 2019. <a href="papers/LGraph_WOSET19.pdf">pdf</a></li>
+<li>S.-H. Wang, A. Sridhar, J. Renau. <em>LNAST: A Language Neutral Intermediate Representation for Hardware Description Languages.</em> WOSET 2019. <a href="papers/LNAST_WOSET19.pdf">pdf</a></li>
+<li>R.T. Possignolo, J. Renau. <em>SMatch: Structural Matching for Fast Resynthesis in FPGAs.</em> DAC 2019. <a href="papers/SMatch_DAC19.pdf">pdf</a><span class="use"><code>pass/submatch</code>; related to the structural matching in <code>pass/semdiff</code>.</span></li>
+<li>R.T. Possignolo, S.-H. Wang, H. Skinner, J. Renau. <em>LGraph: A Multi-Language Open-Source Database for VLSI.</em> WOSET 2018. <a href="papers/LGraph_WOSET18.pdf">pdf</a></li>
+<li>R.T. Possignolo, J. Renau. <em>LiveSynth: Towards an Interactive Synthesis Flow.</em> DAC 2017. <a href="papers/LiveSynth_DAC17.pdf">pdf</a><span class="use">The incremental region cache in <code>pass/synth</code>.</span></li>
+<li>H. Skinner, R.T. Possignolo, J. Renau. <em>Liam: An Actor Based Programming Model for HDLs.</em> MEMOCODE 2017. <a href="https://doi.org/10.1145/3127041.3127060">doi</a><span class="use">A precursor of Pyrope.</span></li>
+<li>S. Garg, J. Renau. <em>Aligning Netlist to Source Code using SynAlign.</em> 2025. <a href="https://arxiv.org/abs/2501.00921">arXiv</a><span class="use">The state pairing in <code>pass/semdiff</code> is a simplified SynAlign.</span></li>
+</ul>
+
+<h3 id="papers-frontend">Front end, IR and language</h3>
+<h4 id="papers-ir">Intermediate representations and compiler structure</h4>
+<ul class="refs">
+<li>C. Click, M. Paleczny. <em>A Simple Graph-Based Intermediate Representation.</em> IR Workshop 1995, SIGPLAN Notices 30(3). <a href="https://doi.org/10.1145/202529.202534">doi</a><span class="use">The sea-of-nodes and lazy DCE design in <code>upass/runner/upass_runner.cpp</code> and <code>upass/coalescer</code>.</span></li>
+<li>D. Weise, R.F. Crew, M.D. Ernst, B. Steensgaard. <em>Value Dependence Graphs: Representation Without Taxation.</em> POPL 1994. <span class="todo-check" title="DOI 10.1145/174675.177907 found in only one bibtex source">todo-check</span><span class="use">Demand-driven emit in <code>upass/runner</code>.</span></li>
+<li>A.W. Keep, R.K. Dybvig. <em>A Nanopass Framework for Commercial Compiler Development.</em> ICFP 2013. <a href="https://doi.org/10.1145/2500365.2500618">doi</a><span class="use">The micro-pass pipeline in <code>upass/</code>, ordered by dependences.</span></li>
+<li>M. Grimmer, C. Seaton, R. Schatz, T. Würthinger, H. Mössenböck. <em>High-Performance Cross-Language Interoperability in a Multi-Language Runtime.</em> DLS 2015. <a href="https://doi.org/10.1145/2816707.2816714">doi</a><span class="use">Truffle's language-neutral AST, the analog of LNAST.</span></li>
+<li>C. Lattner, V. Adve. <em>LLVM: A Compilation Framework for Lifelong Program Analysis &amp; Transformation.</em> CGO 2004. <a href="https://doi.org/10.1109/CGO.2004.1281665">doi</a><span class="use">The multi-level IR approach; LLVM is also the native simulation back end.</span></li>
+<li>C. Lattner et al. <em>MLIR: Scaling Compiler Infrastructure for Domain Specific Computation.</em> CGO 2021. <a href="https://doi.org/10.1109/CGO51391.2021.9370308">doi</a></li>
+<li>S. Eldridge et al. <em>MLIR as Hardware Compiler Infrastructure.</em> WOSET 2021. <span class="todo-check" title="venue/year not checked">todo-check</span><span class="use">CIRCT; <code>inou/slang</code> follows the shape of its ImportVerilog.</span></li>
+<li>F. Schuiki, A. Kurth, T. Grosser, L. Benini. <em>LLHD: A Multi-level Intermediate Representation for Hardware Description Languages.</em> PLDI 2020. <a href="https://doi.org/10.1145/3385412.3386024">doi</a></li>
+<li>A. Izraelevitz et al. <em>Reusability is FIRRTL Ground: Hardware Construction Languages, Compiler Frameworks, and Transformations.</em> ICCAD 2017. <a href="https://doi.org/10.1109/ICCAD.2017.8203780">doi</a><span class="use">FIRRTL; <code>graph/port_reach.hpp</code> uses the per-module summary of CheckCombLoops.</span></li>
+<li>G.C. Necula, S. McPeak, S.P. Rahul, W. Weimer. <em>CIL: Intermediate Language and Tools for Analysis and Transformation of C Programs.</em> CC 2002. <span class="todo-check" title="details not checked">todo-check</span><span class="use">Related work for LNAST.</span></li>
+</ul>
+
+<h4 id="papers-dataflow">SSA, dataflow and code motion</h4>
+<ul class="refs">
+<li>R. Cytron, J. Ferrante, B.K. Rosen, M.N. Wegman, F.K. Zadeck. <em>Efficiently Computing Static Single Assignment Form and the Control Dependence Graph.</em> ACM TOPLAS 13(4), 1991. <a href="https://doi.org/10.1145/115372.115320">doi</a><span class="use"><code>upass/ssa</code> and the SSA-based DCE.</span></li>
+<li>M. Braun, S. Buchwald, S. Hack, R. Leißa, C. Mallon, A. Zwinkau. <em>Simple and Efficient Construction of Static Single Assignment Form.</em> CC 2013. <a href="https://doi.org/10.1007/978-3-642-37051-9_6">doi</a><span class="use">SSA versions assigned on the fly while walking the tree (<code>upass/ssa</code>).</span></li>
+<li>R.A. Ballance, A.B. Maccabe, K.J. Ottenstein. <em>The Program Dependence Web.</em> PLDI 1990. <a href="https://doi.org/10.1145/93542.93578">doi</a><span class="use">Gated SSA: joins become Mux gates, not phi nodes (<code>upass/tolg</code>).</span></li>
+<li>M.N. Wegman, F.K. Zadeck. <em>Constant Propagation with Conditional Branches.</em> ACM TOPLAS 13(2), 1991. <a href="https://doi.org/10.1145/103135.103136">doi</a><span class="use"><code>upass/constprop</code>.</span></li>
+<li>C. Click. <em>Global Code Motion / Global Value Numbering.</em> PLDI 1995. <a href="https://doi.org/10.1145/207110.207154">doi</a><span class="use">Placing floated definitions in <code>upass/runner</code>.</span></li>
+<li>J. Knoop, O. Rüthing, B. Steffen. <em>Lazy Code Motion.</em> PLDI 1992. <a href="https://doi.org/10.1145/143095.143136">doi</a></li>
+<li>J. Knoop, O. Rüthing, B. Steffen. <em>Partial Dead Code Elimination.</em> PLDI 1994. <a href="https://doi.org/10.1145/178243.178256">doi</a><span class="use">Sinking to the use and dead-store removal in <code>upass/coalescer</code>.</span></li>
+<li>K.D. Cooper, L. Torczon. <em>Engineering a Compiler</em>, ch. 10. Morgan Kaufmann.<span class="use">Mark-sweep DCE with side-effect roots.</span></li>
+<li>S.S. Muchnick. <em>Advanced Compiler Design and Implementation.</em> Morgan Kaufmann, 1997.<span class="use">Scalar replacement of aggregates (SROA) in <code>inou/slang</code>, <code>upass/tolg</code> and the tuple scalarizer.</span></li>
+<li>R.E. Tarjan. <em>Depth-First Search and Linear Graph Algorithms.</em> SIAM J. Computing 1(2), 1972. <a href="https://doi.org/10.1137/0201010">doi</a><span class="use">SCCs in <code>upass/tolg</code> and <code>graph/port_reach.cpp</code>.</span></li>
+<li>A.B. Kahn. <em>Topological Sorting of Large Networks.</em> CACM 5(11), 1962. <a href="https://doi.org/10.1145/368996.369025">doi</a><span class="use">Topological order in <code>pass/lg2lnast</code>, <code>upass/tolg</code>, <code>graph/split_selfref.cpp</code>.</span></li>
+</ul>
+
+<h4 id="papers-types">Bitwidth, value range and type inference</h4>
+<ul class="refs">
+<li>M. Stephenson, J. Babb, S. Amarasinghe. <em>Bitwidth Analysis with Application to Silicon Compilation.</em> PLDI 2000. <a href="https://doi.org/10.1145/349299.349317">doi</a><span class="use"><code>upass/bitwidth</code>, <code>pass/bitwidth</code>.</span></li>
+<li>M. Budiu, M. Sakr, K. Walker, S.C. Goldstein. <em>BitValue Inference: Detecting and Exploiting Narrow Bitwidth Computations.</em> Euro-Par 2000. <a href="https://doi.org/10.1007/3-540-44520-X_137">doi</a><span class="use">Unknown bits propagated bit by bit in <code>upass/constprop</code>.</span></li>
+<li>P. Cousot, R. Cousot. <em>Abstract Interpretation: A Unified Lattice Model for Static Analysis of Programs.</em> POPL 1977. <a href="https://doi.org/10.1145/512950.512973">doi</a><span class="use">The interval lattice in <code>upass/bitwidth/lnast_range.hpp</code>.</span></li>
+<li>W.H. Harrison. <em>Compiler Analysis of the Value Ranges for Variables.</em> IEEE TSE SE-3(3), 1977. <span class="todo-check" title="details not checked">todo-check</span><span class="use">Range analysis and the overflow checks.</span></li>
+<li>P.M. Rondon, M. Kawaguchi, R. Jhala. <em>Liquid Types.</em> PLDI 2008. <span class="todo-check" title="details not checked">todo-check</span><span class="use">Close idea: Pyrope integer types as checked value ranges.</span></li>
+<li>L. Cardelli. <em>A Semantics of Multiple Inheritance.</em> Information and Computation 76, 1988. <span class="todo-check" title="details not checked">todo-check</span><span class="use">Close idea: Pyrope's structural <code>does</code> check.</span></li>
+</ul>
+
+<h4 id="papers-comptime">Compile-time evaluation and specialization</h4>
+<ul class="refs">
+<li>N.D. Jones, C.K. Gomard, P. Sestoft. <em>Partial Evaluation and Automatic Program Generation.</em> Prentice Hall, 1993.<span class="use">Comptime evaluation, loop unrolling, call inlining and template specialization in <code>upass/runner</code>.</span></li>
+<li>R.C.O. Rocha, P. Petoumenos, B. Franke, P. Bhatotia, M. O'Boyle. <em>Loop Rolling for Code Size Reduction.</em> CGO 2022. <a href="https://doi.org/10.1109/CGO53902.2022.9741256">doi</a><span class="use">Close idea: the loop roller and compact occurrences (<code>graph/occurrence_materialize.hpp</code>, <code>pass/lg2lnast</code>).</span></li>
+</ul>
+
+<h4 id="papers-timing-types">Timing and pipeline types</h4>
+<ul class="refs">
+<li>R. Nigam, P.H. Azevedo de Amorim, A. Sampson. <em>Modular Hardware Design with Timeline Types.</em> PLDI 2023. <a href="https://doi.org/10.1145/3591234">doi</a><span class="use">Filament; per-value cycle intervals in <code>upass/timecheck</code> and <code>upass/pipe</code>.</span></li>
+<li>R. Nigam et al. <em>Predictable Accelerator Design with Time-Sensitive Affine Types.</em> PLDI 2020. <span class="todo-check" title="author list and DOI not checked">todo-check</span><span class="use">Dahlia.</span></li>
+<li>J.Z. Yu, A.R. Jha, U. Mathur, T.E. Carlson, P. Saxena. <em>Anvil: A General-Purpose Timing-Safe Hardware Description Language.</em> ASPLOS 2026. <a href="https://arxiv.org/abs/2503.19447">arXiv</a></li>
+<li>S.F. Hoover. <em>Timing-Abstract Circuit Design in Transaction-Level Verilog.</em> ICCD 2017. <span class="todo-check" title="DOI 10.1109/ICCD.2017.91 from a library catalog only">todo-check</span><span class="use">Pipeline stages that generate their own flops (<code>upass/pipe</code>).</span></li>
+<li>K.A. Sakallah, T.N. Mudge, O.A. Olukotun. <em>Analysis and Design of Latch-Controlled Synchronous Digital Circuits.</em> DAC 1990. <span class="todo-check" title="venue/year not checked">todo-check</span><span class="use">Close idea: the latch model in <code>graph/latch_contract.hpp</code>.</span></li>
+</ul>
+
+<h4 id="papers-hdl">Hardware languages</h4>
+<ul class="refs">
+<li>J. Bachrach et al. <em>Chisel: Constructing Hardware in a Scala Embedded Language.</em> DAC 2012. <a href="https://doi.org/10.1145/2228360.2228584">doi</a><span class="use">The former CHIRRTL/FIRRTL front end; Chisel idioms in the slang reader.</span></li>
+<li>R. Nikhil. <em>Bluespec System Verilog: Efficient, Correct RTL from High-Level Specifications.</em> MEMOCODE 2004. <span class="todo-check" title="details not checked">todo-check</span></li>
+<li>R. Nigam, S. Thomas, Z. Li, A. Sampson. <em>A Compiler Infrastructure for Accelerator Generators.</em> ASPLOS 2021. <a href="https://doi.org/10.1145/3445814.3446712">doi</a><span class="use">Calyx.</span></li>
+<li>D. Lockhart, G. Zibrat, C. Batten. <em>PyMTL: A Unified Framework for Vertically Integrated Computer Architecture Research.</em> MICRO 2014. <a href="https://doi.org/10.1109/MICRO.2014.50">doi</a></li>
+<li>J. Clow et al. <em>A Pythonic Approach for Rapid Hardware Prototyping and Instrumentation.</em> FPL 2017.<span class="use">PyRTL.</span></li>
+<li>D. Koeplinger et al. <em>Spatial: A Language and Compiler for Application Accelerators.</em> PLDI 2018. <a href="https://doi.org/10.1145/3192366.3192379">doi</a></li>
+<li>M. Mattarei et al. <em>CoSA: Integrated Verification for Agile Hardware Design.</em> FMCAD 2018.<span class="use">CoreIR.</span></li>
+</ul>
+
+<h4 id="papers-parse">Parsing and editor support</h4>
+<ul class="refs">
+<li>T.A. Wagner, S.L. Graham. <em>Efficient and Flexible Incremental Parsing.</em> ACM TOPLAS 20(5), 1998. <span class="todo-check" title="volume/issue and DOI not confirmed">todo-check</span><span class="use">The algorithm under tree-sitter, used by the Pyrope formatter (<code>inou/prp/pyrope_style.cpp</code>).</span></li>
+<li>V.R. Pratt. <em>Top Down Operator Precedence.</em> POPL 1973. <a href="https://doi.org/10.1145/512927.512931">doi</a><span class="use">Precedence climbing in the prpparse Pyrope parser.</span></li>
+<li>Microsoft. <em>Language Server Protocol Specification.</em> <a href="https://microsoft.github.io/language-server-protocol/">spec</a><span class="use"><code>lsp/livehd_lsp.cpp</code>.</span></li>
+<li>E.R. Gansner, S.C. North. <em>An Open Graph Visualization System and its Applications to Software Engineering.</em> Software: Practice and Experience 30(11), 2000.<span class="use">Graphviz; <code>inou/graphviz</code> writes .dot files.</span></li>
+</ul>
+
+<h3 id="papers-sim">Simulation and code generation</h3>
+<p class="note">LLVM, SSA, sea-of-nodes, bitwidth analysis, partial evaluation and the topological-sort and SCC algorithms are shared with the front end; they are listed under <a href="#papers-ir">IR</a> and <a href="#papers-dataflow">dataflow</a>.</p>
+
+<h4>RTL simulation</h4>
+<ul class="refs">
+<li>S. Beamer, D. Donofrio. <em>Efficiently Exploiting Low Activity Factors to Accelerate RTL Simulation.</em> DAC 2020. <a href="https://escholarship.org/uc/item/64x147r1">pdf</a> <span class="todo-check" title="DAC DOI not confirmed (escholarship link only)">todo-check</span><span class="use">ESSENT; acyclic coarsened colors, a static schedule and skipping idle colors (<code>inou/cgen/sim_color_plan.cpp</code>, <code>docs/simopt.md</code>).</span></li>
+<li>H. Wang, S. Beamer. <em>RepCut: Superlinear Parallel RTL Simulation with Replication-Aided Partitioning.</em> ASPLOS 2023. <a href="https://doi.org/10.1145/3582016.3582034">doi</a><span class="use">Partitioning that limits boundary traffic (<code>todo/livehd/llvm-native-runtime.html</code>).</span></li>
+<li>L. Chen, D. Zhao, Z. Yu, N. Sun, Y. Bao. <em>GSIM: Accelerating RTL Simulation for Large-Scale Designs.</em> DAC 2025. <a href="https://arxiv.org/abs/2508.02236">arXiv</a><span class="use">Supernode partitioning and bit-level optimizations.</span></li>
+<li>H. Wang, T. Nijssen, S. Beamer. <em>Don't Repeat Yourself! Coarse-Grained Circuit Deduplication to Accelerate RTL Simulation.</em> ASPLOS 2024. <a href="https://doi.org/10.1145/3622781.3674184">doi</a><span class="use">One shared kernel for repeated module occurrences.</span></li>
+<li>K. Zhou, Y. Liang, Y. Lin, R. Wang, R. Huang. <em>Khronos: Fusing Memory Access for Improved Hardware RTL Simulation.</em> MICRO 2023. <a href="https://doi.org/10.1145/3613424.3614301">doi</a><span class="use">Close idea: state locality in the native frame layout.</span></li>
+<li>J. Herrmann, M.Y. Özkaya, B. Uçar, K. Kaya, Ü. Çatalyürek. <em>Multilevel Algorithms for Acyclic Partitioning of Directed Acyclic Graphs.</em> SIAM J. Sci. Comput. 41(4), 2019. <a href="https://doi.org/10.1137/18M1176865">doi</a><span class="use">Coarsening that keeps the color DAG acyclic.</span></li>
+<li>E. Schkufza, M. Wei, C.J. Rossbach. <em>Just-In-Time Compilation for Verilog.</em> ASPLOS 2019. <a href="https://doi.org/10.1145/3297858.3304010">doi</a><span class="use">Cascade; JIT-loaded native objects in <code>inou/cgen/sim_native_rt.cpp</code>.</span></li>
+<li>K. Shim et al. <em>A Fast Two-Pass HDL Simulation with On-Demand Dump.</em> ASP-DAC 2008. <a href="https://doi.org/10.1109/ASPDAC.2008.4483987">doi</a><span class="use">Checkpoints and replay for <code>--vcd-from</code> and <code>--restart-cycle</code> (<code>lhd/lhd_kernel_sim.cpp</code>).</span></li>
+<li>D. Kim, M. Ciesielski, K. Shim, S. Yang. <em>Temporal Parallel Simulation: A Fast Gate-Level HDL Simulation Using Higher Level Models.</em> DATE 2011; D. Kim, M. Ciesielski, S. Yang. <em>MULTES.</em> IEEE TCAD 32(6), 2013.</li>
+<li>C. Zilles, G. Sohi. <em>Master/Slave Speculative Parallelization.</em> MICRO 2002.<span class="use">Fast run with a background checkpoint check (LiveSim).</span></li>
+<li>Y. Liu, D. Cummings, N. Vadlamudi. <em>WaveformQA: Benchmarking LLM Temporal Reasoning on Digital Waveforms.</em> ICLAD 2026. <a href="https://arxiv.org/abs/2607.20638">arXiv</a><span class="use">Benchmark for <code>lhd sim --query</code>.</span></li>
+</ul>
+
+<h4>Native code generation</h4>
+<ul class="refs">
+<li>N. Warter, S. Mahlke, W.-M. Hwu, B.R. Rau. <em>Reverse If-Conversion.</em> PLDI 1993. <a href="https://doi.org/10.1145/155090.155118">doi</a><span class="use">Rebuilding branches from select groups in <code>inou/cgen/cgen_llvm.cpp</code>.</span></li>
+<li>J.R. Allen, K. Kennedy, C. Porterfield, J. Warren. <em>Conversion of Control Dependence to Data Dependence.</em> POPL 1983. <span class="todo-check" title="DOI not confirmed">todo-check</span><span class="use">Fully if-converted kernels.</span></li>
+<li>G. Shobaki, M. Shawabkeh, N. Abu-Rmaileh. <em>Preallocation Instruction Scheduling with Register Pressure Minimization Using a Combinatorial Optimization Approach.</em> ACM TACO 10(3), 2013. <a href="https://doi.org/10.1145/2512432">doi</a> <span class="fixme" title="inou/cgen/cgen_llvm.cpp cites &quot;Shobaki et al.&quot; for the SLIL cost; this paper may not be the one that defines it">fixme</span><span class="use"><code>shrink_live_ranges</code> in <code>cgen_llvm.cpp</code>.</span></li>
+<li>P. Briggs, K. Cooper, L. Torczon. <em>Rematerialization.</em> PLDI 1992. <a href="https://doi.org/10.1145/143095.143143">doi</a><span class="use"><code>rematerialize_invariant</code>.</span></li>
+<li>K. Kennedy, K. McKinley. <em>Maximizing Loop Parallelism and Improving Data Locality via Loop Fusion and Distribution.</em> LCPC 1993. <span class="todo-check" title="DOI not confirmed">todo-check</span><span class="use"><code>inou/cgen/sim_loop_fusion.cpp</code>.</span></li>
+<li>T. Johnson, M. Amini, X.D. Li. <em>ThinLTO: Scalable and Incremental LTO.</em> CGO 2017.<span class="use">Close idea: per-color objects keyed by an IR hash and reused incrementally.</span></li>
+<li>N. Shervashidze et al. <em>Weisfeiler-Lehman Graph Kernels.</em> JMLR 12, 2011.<span class="use">Partition identity from neighborhood-hash rounds.</span></li>
+<li>J. Ansel et al. <em>OpenTuner: An Extensible Framework for Program Autotuning.</em> PACT 2014. <a href="https://doi.org/10.1145/2628071.2628092">doi</a><span class="use">Close idea: the <code>sim.tune</code> trial ladder (<code>lhd/lhd_sim_tune*.cpp</code>).</span></li>
+</ul>
+
+<h4>Incremental and live flows</h4>
+<ul class="refs">
+<li>A. Mokhov, N. Mitchell, S. Peyton Jones. <em>Build Systems à la Carte.</em> ICFP 2018. <a href="https://doi.org/10.1145/3236774">doi</a><span class="use">Early cutoff in <code>docs/opt_loop_incr.md</code>.</span></li>
+<li>W.F. Tichy. <em>Smart Recompilation.</em> ACM TOPLAS 8(3), 1986. <span class="todo-check" title="DOI not confirmed">todo-check</span><span class="use">Interface vs. body invalidation keys.</span></li>
+<li>R.C. Merkle. <em>A Digital Signature Based on a Conventional Encryption Function.</em> CRYPTO 1987. <span class="todo-check" title="DOI not confirmed">todo-check</span><span class="use">Hierarchical digests in <code>lhd/lhd_compile_cache.hpp</code> and <code>inou/cgen/cgen_sim.hpp</code>.</span></li>
+<li>D. Clarke, S. Devadas, M. van Dijk, B. Gassend, G.E. Suh. <em>Incremental Multiset Hash Functions and Their Application to Memory Integrity Checking.</em> ASIACRYPT 2003. <a href="https://doi.org/10.1007/978-3-540-40061-5_12">doi</a><span class="use">The order-independent combiner in <code>core/hash_util.hpp</code>.</span></li>
+<li>S.L. Tanimoto. <em>A Perspective on the Evolution of Live Programming.</em> LIVE 2013.</li>
+<li>J. Dabrowski, E.V. Munson. <em>40 Years of Searching for the Best Computer System Response Time.</em> Interacting with Computers 23(5), 2011.</li>
+<li>G.N. Lambert. <em>A Comparative Study of System Response Time on Program Developer Productivity.</em> IBM Systems Journal 23, 1984.</li>
+</ul>
+
+<h4>Runtime and data structures</h4>
+<ul class="refs">
+<li>L. Lamport. <em>Specifying Concurrent Program Modules.</em> ACM TOPLAS 5(2), 1983. <span class="todo-check" title="DOI not confirmed">todo-check</span><span class="use">The lock-free single-producer/single-consumer ring in <code>core/spsc.hpp</code>.</span></li>
+<li>D. Leijen, B. Zorn, L. de Moura. <em>Mimalloc: Free List Sharding in Action.</em> APLAS 2019. <a href="https://doi.org/10.1007/978-3-030-34175-6_13">doi</a></li>
+<li>D. Lemire. <em>Fast Random Integer Generation in an Interval.</em> ACM TOMACS 29(1), 2019. <a href="https://doi.org/10.1145/3230636">doi</a><span class="use"><code>core/lrand.hpp</code>.</span></li>
+<li>P. Celis, P.-Å. Larson, J.I. Munro. <em>Robin Hood Hashing.</em> FOCS 1985. <span class="todo-check" title="DOI not confirmed">todo-check</span><span class="use">Open-addressing tables in LGraph.</span></li>
+<li>J.-C. Filliâtre, S. Conchon. <em>Type-Safe Modular Hash-Consing.</em> ML Workshop 2006. <span class="todo-check" title="DOI not found">todo-check</span><span class="use">Interned names in <code>core/interned_name.hpp</code>.</span></li>
+<li>Z. Lin et al. <em>MMAP: Fast Billion-Scale Graph Computation on a PC via Memory Mapping.</em> IEEE BigData 2014. <span class="todo-check" title="DOI not found; author list incomplete">todo-check</span><span class="use">Memory-mapped storage in LGraph and <code>core/vcd_reader</code>.</span></li>
+</ul>
+
+<h3 id="papers-synth">Logic synthesis</h3>
+<p class="note">ABC, FRAIGs, structural hashing and sequential signal correspondence (van Eijk; Mishchenko et al. ICCAD 2008) are used by both synthesis and LEC; they are listed under <a href="#papers-formal">formal verification</a>.</p>
+
+<h4>AIG and Boolean optimization</h4>
+<ul class="refs">
+<li>A. Mishchenko, S. Chatterjee, R. Brayton. <em>DAG-Aware AIG Rewriting: A Fresh Look at Combinational Logic Synthesis.</em> DAC 2006. <a href="https://doi.org/10.1145/1146909.1147048">doi</a><span class="use">NPN4 cut rewriting in <code>pass/usyn</code>; rw/rf/resyn2/dc2 recipes in <code>pass/abc</code>.</span></li>
+<li>A. Mishchenko, R. Brayton. <em>Scalable Logic Synthesis using a Simple Circuit Structure.</em> IWLS 2006.<span class="use">Reconvergence-driven windows and resubstitution in <code>pass/usyn</code>.</span></li>
+<li>A. Mishchenko, R. Brayton, J.-H.R. Jiang, S. Jang. <em>Scalable Don't-Care-Based Logic Optimization and Resynthesis.</em> FPGA 2009; ACM TRETS 4(4), 2011. <a href="https://doi.org/10.1145/2068716.2068720">doi</a><span class="use"><code>&amp;mfs</code> in the default flow and the windowed ODC stage of <code>pass/satopt</code>.</span></li>
+<li>A. Mishchenko, J.S. Zhang, S. Sinha, J.R. Burch, R. Brayton, M. Chrzanowska-Jeske. <em>Using Simulation and Satisfiability to Compute Flexibilities in Boolean Networks.</em> IEEE TCAD 25(5), 2006. <span class="todo-check" title="authors and venue from memory">todo-check</span><span class="use">The odc and resub stages of <code>pass/satopt</code>.</span></li>
+<li>S.-Y. Lee, H. Riener, A. Mishchenko, R. Brayton, G. De Micheli. <em>Simulation-Guided Boolean Resubstitution.</em> IWLS 2020. <a href="https://arxiv.org/abs/2007.02579">arXiv</a> <span class="todo-check" title="not confirmed">todo-check</span><span class="use">Close idea: simulation proposes, SAT completes or refutes (<code>pass/satopt</code>).</span></li>
+<li>C.-C. Lee, J.-H.R. Jiang, C.-Y. Huang, A. Mishchenko. <em>Scalable Exploration of Functional Dependency by Interpolation and Incremental SAT Solving.</em> ICCAD 2007. <span class="todo-check" title="not confirmed">todo-check</span><span class="use">Close idea: <code>simp_ctrl</code> re-derives a mux select from existing signals.</span></li>
+<li>A. Mishchenko, R. Brayton, S. Jang, V. Kravets. <em>Delay Optimization using SOP Balancing.</em> ICCAD 2011. <a href="https://doi.org/10.1109/ICCAD.2011.6105357">doi</a><span class="use"><code>&amp;sopb</code> and <code>pass/usyn/xag_balance.hpp</code>.</span></li>
+<li>E. Testa, M. Soeken, L. Amarù, G. De Micheli. <em>Reducing the Multiplicative Complexity in Logic Networks for Cryptography and Security Applications.</em> DAC 2019.<span class="use">The AND/XOR graph (XAG) of <code>pass/usyn/xag.hpp</code>.</span></li>
+<li>M. Soeken et al. <em>The EPFL Logic Synthesis Libraries.</em> IWLS 2019. <a href="https://arxiv.org/abs/1805.05121">arXiv</a><span class="use">mockturtle/kitty, a design reference for <code>pass/usyn</code>.</span></li>
+<li>M. Austin, S. Temple, W. Lau Neto, L. Amarù, X. Tang, P.-E. Gaillardon. <em>A Scalable Mixed Synthesis Framework for Heterogeneous Networks.</em> DATE 2020. <a href="https://doi.org/10.23919/DATE48585.2020.9116534">doi</a><span class="use">LSOracle; the mixed SOP/DSD/BDD/XAG trial in <code>pass/usyn</code>.</span></li>
+<li>H. Wang, S.-Y. Lee, G. De Micheli. <em>AnySyn: A Cost-Generic Logic Synthesis Framework with Customizable Cost Functions.</em> IWLS 2022. <a href="https://arxiv.org/abs/2311.14721">arXiv</a><span class="use"><code>pass/usyn</code> scores moves by mapped cost, not graph size.</span></li>
+<li>A. Tempia Calvino et al. <em>Shared Logic Unleashed: Multiple-Node Boolean Optimization for Next-Gen Synthesis.</em> DAC 2026. <span class="todo-check" title="DAC 2026 entry not checked; full author list missing">todo-check</span><span class="use">Joint endpoint reselection in <code>pass/usyn/joint_endpoint.hpp</code>.</span></li>
+<li>M. Alidina, J. Monteiro, S. Devadas, A. Ghosh, M. Papaefthymiou. <em>Precomputation-Based Sequential Logic Optimization for Low Power.</em> IEEE TVLSI 2(4), 1994.<span class="use">Register-rooted endpoint synthesis (<code>pass/synth/region_writer.cpp</code>).</span></li>
+</ul>
+
+<h4>Two-level logic, decomposition and decision diagrams</h4>
+<ul class="refs">
+<li>R.K. Brayton, G.D. Hachtel, C.T. McMullen, A. Sangiovanni-Vincentelli. <em>Logic Minimization Algorithms for VLSI Synthesis.</em> Kluwer, 1984.<span class="use">ESPRESSO-style primes and cover cleanup in <code>pass/usyn</code> and <code>pass/domino</code>.</span></li>
+<li>R.K. Brayton, C. McMullen. <em>The Decomposition and Factorization of Boolean Expressions.</em> ISCAS 1982.<span class="use">SOP factoring in <code>pass/usyn/sop_factor.hpp</code> and <code>pass/domino</code>.</span></li>
+<li>R.E. Bryant. <em>Graph-Based Algorithms for Boolean Function Manipulation.</em> IEEE Trans. Computers C-35(8), 1986. <a href="https://doi.org/10.1109/TC.1986.1676819">doi</a><span class="use">Bounded BDD candidates in <code>pass/usyn/xag_representations.cpp</code>.</span></li>
+<li>C. Yang, M. Ciesielski. <em>BDS: A BDD-Based Logic Optimization System.</em> IEEE TCAD 21(7), 2002.</li>
+<li>V. Bertacco, M. Damiani. <em>The Disjunctive Decomposition of Logic Functions.</em> ICCAD 1997.<span class="use">Bounded DSD in <code>pass/usyn</code>.</span></li>
+<li>R.L. Ashenhurst. <em>The Decomposition of Switching Functions.</em> Int. Symp. Theory of Switching, 1957; H.A. Curtis. <em>A New Approach to the Design of Switching Circuits.</em> Van Nostrand, 1962.<span class="use">Bound-set decomposition in <code>pass/usyn</code>.</span></li>
+<li>J.P. Roth, R.M. Karp. <em>Minimization over Boolean Graphs.</em> IBM J. Res. Dev. 6(2), 1962.</li>
+<li>B. Hien, M. Walter, A. Tempia Calvino, A. Mishchenko, R. Wille. <em>Ashenhurst-Curtis Decomposition using Don't Cares.</em> IWLS 2025.<span class="use">Care-aware divisor completion in <code>pass/usyn</code>.</span></li>
+<li>J. Jacob, A. Mishchenko. <em>Unate Decomposition of Boolean Functions.</em> IWLS 2001.<span class="use"><code>pass/usyn/unate.hpp</code>, <code>pass/domino</code>.</span></li>
+</ul>
+
+<h4>Technology mapping</h4>
+<ul class="refs">
+<li>A. Mishchenko, S. Cho, S. Chatterjee, R. Brayton. <em>Combinational and Sequential Mapping with Priority Cuts.</em> ICCAD 2007. <a href="https://doi.org/10.1109/ICCAD.2007.4397290">doi</a><span class="use"><code>&amp;if</code> and the bounded cut frontier in <code>pass/usyn</code>.</span></li>
+<li>A. Mishchenko, S. Chatterjee, R. Brayton. <em>Improvements to Technology Mapping for LUT-Based FPGAs.</em> IEEE TCAD 26(2), 2007.<span class="use">Area flow and exact area in <code>pass/usyn/lut_cover.cpp</code>.</span></li>
+<li>S. Chatterjee, A. Mishchenko, R. Brayton, X. Wang, T. Kam. <em>Reducing Structural Bias in Technology Mapping.</em> IEEE TCAD 25(12), 2006.<span class="use">Structural choices in <code>pass/abc</code> and <code>pass/usyn/xag_choice.hpp</code>.</span></li>
+<li>Z. Hu, H. Pan, Y. Xia, L. Wang, Z. Chu. <em>Mixed Structural Choice Operator: Enhancing Technology Mapping with Heterogeneous Representations.</em> DAC 2025. <a href="https://arxiv.org/abs/2504.12824">arXiv</a> <span class="todo-check" title="author list not checked">todo-check</span></li>
+<li>J. Cong, Y. Ding. <em>FlowMap: An Optimal Technology Mapping Algorithm for Delay Optimization in Lookup-Table Based FPGA Designs.</em> IEEE TCAD 13(1), 1994.</li>
+<li>J. Cong, Y. Ding. <em>On Area/Depth Trade-off in LUT-Based FPGA Technology Mapping.</em> DAC 1993; IEEE TVLSI 2(2), 1994. <span class="fixme" title="pass/color/color_size.cpp cites &quot;Cong DAC'94&quot;; the matching papers are DAC 1993 and TVLSI 1994">fixme</span><span class="use">Maximum fanout-free cones in <code>pass/color/color_size.cpp</code>, <code>pass/submatch</code>, <code>pass/satopt</code>.</span></li>
+</ul>
+
+<h4>Domino and unate synthesis</h4>
+<ul class="refs">
+<li>R.H. Krambeck, C.M. Lee, H.-F.S. Law. <em>High-Speed Compact Circuits with CMOS.</em> IEEE JSSC 17(3), 1982.<span class="use"><code>pass/domino</code>.</span></li>
+<li>R. Puri, A. Bjorksten, T.E. Rosser. <em>Logic Optimization by Output Phase Assignment in Dynamic Logic Synthesis.</em> ICCAD 1996.<span class="use">Dual-rail phase assignment in <code>pass/domino</code> and <code>pass/usyn</code>.</span></li>
+<li>M. Zhao, S.S. Sapatnekar. <em>Technology Mapping for Domino Logic.</em> ICCAD 1998; ACM TODAES 7(2), 2002.</li>
+<li>T. Thorp, G. Yee, C. Sechen. <em>Domino Logic Synthesis using Complex Static Gates.</em> ICCAD 1998.</li>
+<li>D. Samanta, N. Sinha, A. Pal. <em>Synthesis of High Performance Low Power Dynamic CMOS Circuits.</em> ASP-DAC/VLSI Design 2002. <a href="https://doi.org/10.1109/ASPDAC.2002.994892">doi</a></li>
+<li>D. Harris. <em>Skew-Tolerant Circuit Design.</em> Morgan Kaufmann, 2001.</li>
+</ul>
+
+<h4>Word-level rewriting and e-graphs</h4>
+<ul class="refs">
+<li>C. Fallin. <em>ægraphs: Acyclic E-graphs for Efficient Optimization in a Production Compiler.</em> EGRAPHS keynote, PLDI 2023. <a href="https://cfallin.org/pubs/egraphs2023_aegraphs_slides.pdf">slides</a><span class="use"><code>pass/aegraph</code>; its rules port Cranelift's ISLE rules.</span></li>
+<li>M. Willsey, C. Nandi, Y.R. Wang, O. Flatt, Z. Tatlock, P. Panchekha. <em>egg: Fast and Extensible Equality Saturation.</em> POPL 2021. <a href="https://doi.org/10.1145/3434304">doi</a><span class="use">E-class analyses and cost extraction in <code>pass/aegraph</code>.</span></li>
+<li>R. Tate, M. Stepp, Z. Tatlock, S. Lerner. <em>Equality Saturation: A New Approach to Optimization.</em> POPL 2009. <a href="https://doi.org/10.1145/1480881.1480915">doi</a></li>
+<li>T. Granlund, P.L. Montgomery. <em>Division by Invariant Integers using Multiplication.</em> PLDI 1994. <a href="https://doi.org/10.1145/178243.178249">doi</a><span class="use">Divide-by-constant rules in <code>pass/aegraph/rules/div.rules</code>.</span></li>
+</ul>
+
+<h4>Arithmetic</h4>
+<ul class="refs">
+<li>R.P. Brent, H.T. Kung. <em>A Regular Layout for Parallel Adders.</em> IEEE Trans. Computers C-31(3), 1982. <a href="https://doi.org/10.1109/TC.1982.1675982">doi</a><span class="use">The default wide adder in <code>pass/synth/arith.hpp</code> and <code>pass/usyn</code>.</span></li>
+<li>P.M. Kogge, H.S. Stone. <em>A Parallel Algorithm for the Efficient Solution of a General Class of Recurrence Equations.</em> IEEE Trans. Computers C-22(8), 1973. <a href="https://doi.org/10.1109/TC.1973.5009159">doi</a><span class="use">The prefix adder in <code>pass/synth/arith.hpp</code>.</span></li>
+<li>R.E. Ladner, M.J. Fischer. <em>Parallel Prefix Computation.</em> JACM 27(4), 1980.<span class="use">Prefix networks and the priority-mux rebuild in <code>pass/usyn/xag_balance.hpp</code>.</span></li>
+<li>J. Sklansky. <em>Conditional-Sum Addition Logic.</em> IRE Trans. EC-9(2), 1960; T. Han, D.A. Carlson. <em>Fast Area-Efficient VLSI Adders.</em> ARITH 1987.<span class="use">Planned adder kinds in <code>pass/synth/arith.hpp</code>.</span></li>
+<li>A. Weinberger, J.L. Smith. <em>A Logic for High-Speed Addition.</em> NBS Circular 591, 1958.<span class="use">Carry-lookahead adder.</span></li>
+<li>M. Lehman, N. Burla. <em>Skip Techniques for High-Speed Carry-Propagation in Binary Arithmetic Units.</em> IRE Trans. EC-10(4), 1961.<span class="use">Carry-skip adder.</span></li>
+<li>C.R. Baugh, B.A. Wooley. <em>A Two's Complement Parallel Array Multiplication Algorithm.</em> IEEE Trans. Computers C-22(12), 1973.<span class="use">Signed partial products in <code>pass/synth/arith.hpp</code>.</span></li>
+<li>V.G. Oklobdzija, D. Villeger, S.S. Liu. <em>A Method for Speed Optimized Partial Product Reduction and Generation of Fast Parallel Multipliers using an Algorithmic Approach.</em> IEEE Trans. Computers 45(3), 1996. <a href="https://doi.org/10.1109/12.485568">doi</a><span class="use">The three-dimensional method (<code>Mult_kind::tdm</code>).</span></li>
+<li>P.F. Stelling, C.U. Martel, V.G. Oklobdzija, R. Ravi. <em>Optimal Circuits for Parallel Multipliers.</em> IEEE Trans. Computers 47(3), 1998.</li>
+<li>C.S. Wallace. <em>A Suggestion for a Fast Multiplier.</em> IEEE Trans. EC-13(1), 1964; L. Dadda. <em>Some Schemes for Parallel Multipliers.</em> Alta Frequenza 34, 1965.<span class="use">The carry-save multiplier family.</span></li>
+</ul>
+
+<h4>Clock gating</h4>
+<ul class="refs">
+<li>L. Benini, G. De Micheli. <em>Automatic Synthesis of Low-Power Gated-Clock Finite-State Machines.</em> IEEE TCAD 15(6), 1996. <a href="https://doi.org/10.1109/43.503933">doi</a><span class="use">Clock-gate inference in <code>graph/clock_gate.cpp</code>, <code>pass/synth/clock_gates.cpp</code>, <code>pass/enableopt</code>.</span></li>
+</ul>
+
+<h3 id="papers-phys">Physical design and timing</h3>
+
+<h4>Global placement</h4>
+<ul class="refs">
+<li>Y. Lin, S. Dhar, W. Li, H. Ren, B. Khailany, D.Z. Pan. <em>DREAMPlace: Deep Learning Toolkit-Enabled GPU Acceleration for Modern VLSI Placement.</em> DAC 2019 <a href="https://doi.org/10.1145/3316781.3317803">doi</a>; IEEE TCAD 40(4), 2021 <a href="https://doi.org/10.1109/TCAD.2020.3003843">doi</a><span class="use">The native placer behind <code>pass/place</code> (masc-ucsc fork).</span></li>
+<li>J. Lu et al. <em>ePlace: Electrostatics-Based Placement Using Fast Fourier Transform and Nesterov's Method.</em> ACM TODAES 20(2), 2015. <a href="https://doi.org/10.1145/2699873">doi</a><span class="use">The spectral density field and Nesterov steps.</span></li>
+<li>J. Lu et al. <em>ePlace-MS: Electrostatics-Based Placement for Mixed-Size Circuits.</em> IEEE TCAD 34(5), 2015.<span class="use">Macros, cells and fillers in one density field (macro stage).</span></li>
+<li>C.-K. Cheng, A.B. Kahng, I. Kang, L. Wang. <em>RePlAce: Advancing Solution Quality and Routability Validation in Global Placement.</em> IEEE TCAD 38(9), 2019.<span class="use">Soft-macro model and slack weighting (<code>pass/place/README.md</code>).</span></li>
+<li>M.-K. Hsu, Y.-W. Chang, V. Balabanov. <em>TSV-Aware Analytical Placement for 3D IC Designs.</em> DAC 2011.<span class="use">The weighted-average wirelength model.</span></li>
+<li>Y. Nesterov. <em>A Method for Solving the Convex Programming Problem with Convergence Rate O(1/k²).</em> Soviet Math. Doklady 27, 1983.</li>
+<li>J. Barzilai, J.M. Borwein. <em>Two-Point Step Size Gradient Methods.</em> IMA J. Numerical Analysis 8(1), 1988.<span class="use">The step-size estimate in global placement.</span></li>
+<li>R.W. Hockney, J.W. Eastwood. <em>Computer Simulation Using Particles.</em> McGraw-Hill, 1981.<span class="use">Close idea: cloud-in-cell deposition for the local density force (<code>docs/placer.html</code>).</span></li>
+<li>N. Viswanathan, C. Chu. <em>FastPlace: Efficient Analytical Placement Using Cell Shifting, Iterative Local Refinement and a Hybrid Net Model.</em> IEEE TCAD 24(5), 2005.<span class="use">Close idea: area-conserving density warp (<code>pass/place/density_warp.cpp</code>, solved as an LP).</span></li>
+</ul>
+
+<h4>Macro placement and floorplanning</h4>
+<ul class="refs">
+<li>H. Murata, K. Fujiyoshi, S. Nakatake, Y. Kajitani. <em>VLSI Module Placement Based on Rectangle-Packing by the Sequence-Pair.</em> IEEE TCAD 15(12), 1996.<span class="use">The sequence-pair search in <code>pass/place/h2d.cpp</code>.</span></li>
+<li>A.B. Kahng, R. Varadarajan, Z. Wang. <em>RTL-MP: Toward Practical, Human-Quality Chip Planning and Macro Placement.</em> ISPD 2022.<span class="use">Hierarchy- and dataflow-driven macro planning; OpenROAD mpl thresholds.</span></li>
+<li>A. Mirhoseini et al. <em>A Graph Placement Methodology for Fast Chip Design.</em> Nature 594, 2021.<span class="use">Circuit Training, used as a soft-block evaluator reference.</span></li>
+<li>S.N. Adya, S. Chaturvedi, J.A. Roy, D.A. Papa, I.L. Markov. <em>Unification of Partitioning, Placement and Floorplanning.</em> ICCAD 2004. <span class="todo-check" title="the repo names the ICCAD04 benchmarks only; attribution to this paper is ours">todo-check</span><span class="use">The ICCAD04 mixed-size benchmarks.</span></li>
+</ul>
+
+<h4>Legalization and detailed placement</h4>
+<ul class="refs">
+<li>P. Spindler, U. Schlichtmann, F.M. Johannes. <em>Abacus: Fast Legalization of Standard Cell Circuits with Minimal Movement.</em> ISPD 2008. <a href="https://doi.org/10.1145/1353629.1353640">doi</a></li>
+<li>Y. Lin, W. Li, J. Gu, H. Ren, B. Khailany, D.Z. Pan. <em>ABCDPlace: Accelerated Batch-Based Concurrent Detailed Placement on Multithreaded CPUs and GPUs.</em> IEEE TCAD 39(12), 2020.<span class="use">k-reorder, independent-set matching and global swap.</span></li>
+<li>M. Pan, N. Viswanathan, C. Chu. <em>An Efficient and Effective Detailed Placement Algorithm.</em> ICCAD 2005.</li>
+<li>T.-C. Chen, Z.-W. Jiang, T.-C. Hsu, H.-C. Chen, Y.-W. Chang. <em>NTUplace3: An Analytical Placer for Large-Scale Mixed-Size Designs.</em> IEEE TCAD 27(7), 2008.</li>
+<li>S. Devadas. <em>Optimal Layout via Boolean Satisfiability.</em> ICCAD 1989.<span class="use">Close idea: SAT legalization and route-aware legalization (<code>pass/place/satlegalize.cpp</code>, <code>legroute_sat.cpp</code>).</span></li>
+<li>N. Eén, N. Sörensson. <em>Translating Pseudo-Boolean Constraints into SAT.</em> JSAT 2, 2006.<span class="use">The displacement bound encoding in <code>pass/place/sat_solver.cpp</code>.</span></li>
+<li>H.W. Kuhn. <em>The Hungarian Method for the Assignment Problem.</em> Naval Research Logistics Quarterly 2, 1955.<span class="use">IO pin assignment in <code>pass/place/place.cpp</code>.</span></li>
+</ul>
+
+<h4>Partitioning and min-cut</h4>
+<ul class="refs">
+<li>M. Henzinger, A. Noe, C. Schulz, D. Strash. <em>Practical Minimum Cut Algorithms.</em> ACM JEA 23, 2018. <a href="https://arxiv.org/abs/1708.06127">arXiv</a><span class="use">VieCut in <code>third_party/viecut</code>, used by <code>pass/color/color_mincut.cpp</code> and legroute.</span></li>
+<li>M. Henzinger, A. Noe, C. Schulz. <em>Shared-Memory Exact Minimum Cuts.</em> IPDPS 2019. <a href="https://arxiv.org/abs/1808.05458">arXiv</a> <span class="todo-check" title="venue not checked">todo-check</span></li>
+<li>V. Batagelj, M. Zaversnik. <em>An O(m) Algorithm for Cores Decomposition of Networks.</em> 2003. <a href="https://arxiv.org/abs/cs/0310049">arXiv</a></li>
+<li>A.V. Goldberg, R.E. Tarjan. <em>A New Approach to the Maximum-Flow Problem.</em> J. ACM 35(4), 1988.<span class="use">Push-relabel min cuts for legroute spill boxes.</span></li>
+<li>E. Dahlhaus, D.S. Johnson, C.H. Papadimitriou, P.D. Seymour, M. Yannakakis. <em>The Complexity of Multiterminal Cuts.</em> SIAM J. Computing 23(4), 1994.<span class="use">Isolating cuts in <code>legroute_sat.cpp</code>.</span></li>
+</ul>
+
+<h4>Steiner trees and net topology</h4>
+<ul class="refs">
+<li>C. Chu, Y.-C. Wong. <em>FLUTE: Fast Lookup Table Based Rectilinear Steiner Minimal Tree Algorithm for VLSI Design.</em> IEEE TCAD 27(1), 2008.<span class="use"><code>pass/place/steiner_topology.cpp</code>, signal routing and RSMT-RUDY.</span></li>
+<li>C.J. Alpert, T.C. Hu, J.H. Huang, A.B. Kahng, D. Karger. <em>Prim-Dijkstra Tradeoffs for Improved Performance-Driven Routing Tree Design.</em> IEEE TCAD 14(7), 1995.<span class="use">The driver-aware RC tree in <code>pass/place/steiner_topology.hpp</code>.</span></li>
+<li>C.J. Alpert, W.-K. Chow, K. Han, A.B. Kahng, Z. Li, D. Liu, S. Venkatesh. <em>Prim-Dijkstra Revisited: Achieving Superior Timing-driven Routing Trees.</em> ISPD 2018.</li>
+<li>H. Zhou, N. Shenoy, W. Nicholls. <em>Efficient Minimum Spanning Tree Construction without Delaunay Triangulation.</em> Information Processing Letters 81(5), 2002.<span class="use">Close idea: the quadrant visibility graph in <code>steiner_topology.cpp</code>.</span></li>
+</ul>
+
+<h4>Routing and congestion</h4>
+<ul class="refs">
+<li>P. Spindler, F.M. Johannes. <em>Fast and Accurate Routing Demand Estimation for Efficient Routability-driven Placement.</em> DATE 2007.<span class="use">RUDY maps (<code>tools/rudy_metrics.cpp</code>, uroute features).</span></li>
+<li>S. Liu, Q. Sun, P. Liao, Y. Lin, B. Yu. <em>Global Placement with Deep Learning-Enabled Explicit Routability Optimization.</em> DATE 2021. <span class="todo-check" title="PinRUDY origin confirmed from a summary, not the full text">todo-check</span><span class="use">PinRUDY (<code>tools/uroute</code>).</span></li>
+<li>Z. Xie et al. <em>RouteNet: Routability Prediction for Mixed-size Designs Using Convolutional Neural Network.</em> ICCAD 2018. <a href="https://doi.org/10.1145/3240765.3240843">doi</a></li>
+<li>Z. Lin, Y. Lin, G. Liu, G. Du. <em>URoute: Universal Routability Prediction.</em> IEEE TCAD 45(7), 2026. <a href="https://doi.org/10.1109/TCAD.2025.3636449">doi</a><span class="use">Implemented in <code>tools/uroute</code> and <code>pass/place/uroute.cpp</code>.</span></li>
+<li>Z. Chai, Y. Zhao, W. Liu, Y. Lin, R. Wang, R. Huang. <em>CircuitNet: An Open-Source Dataset for Machine Learning in VLSI CAD Applications.</em> IEEE TCAD 42(12), 2023.<span class="use">Training data for uroute.</span></li>
+<li>Z. Wang, A.C. Bovik, H.R. Sheikh, E.P. Simoncelli. <em>Image Quality Assessment: From Error Visibility to Structural Similarity.</em> IEEE TIP 13(4), 2004.<span class="use">SSIM score in <code>tools/uroute/score.py</code>.</span></li>
+<li>M. Pan, C. Chu. <em>FastRoute: A Step to Integrate Global Routing into Placement.</em> ICCAD 2006; Y. Xu, Y. Zhang, C. Chu. <em>FastRoute 4.0.</em> ASP-DAC 2009.<span class="use">L/Z pattern routing adapted in <code>pass/place/fast_route_pattern.cpp</code>.</span></li>
+<li>L. McMurchie, C. Ebeling. <em>PathFinder: A Negotiation-Based Performance-Driven Router for FPGAs.</em> FPGA 1995.<span class="use">Negotiated congestion in legroute and buffering.</span></li>
+<li>C.Y. Lee. <em>An Algorithm for Path Connections and Its Applications.</em> IRE Trans. EC-10(3), 1961.<span class="use">Maze routing (<code>signal_maze.cpp</code>).</span></li>
+<li>P.E. Hart, N.J. Nilsson, B. Raphael. <em>A Formal Basis for the Heuristic Determination of Minimum Cost Paths.</em> IEEE Trans. SSC 4(2), 1968; I. Pohl. <em>Heuristic Search Viewed as Path Finding in a Graph.</em> Artificial Intelligence 1, 1970.<span class="use">A* and weighted A* in legroute.</span></li>
+<li>E.W. Dijkstra. <em>A Note on Two Problems in Connexion with Graphs.</em> Numerische Mathematik 1, 1959.</li>
+</ul>
+
+<h4>Interconnect delay and timing analysis</h4>
+<ul class="refs">
+<li>W.C. Elmore. <em>The Transient Response of Damped Linear Networks with Particular Regard to Wideband Amplifiers.</em> J. Applied Physics 19(1), 1948; J. Rubinstein, P. Penfield, M. Horowitz. <em>Signal Delay in RC Tree Networks.</em> IEEE TCAD 2(3), 1983.<span class="use"><code>pass/place/rc_tree.cpp</code>, <code>pass/timing/wire.hpp</code>.</span></li>
+<li>P.R. O'Brien, T.L. Savarino. <em>Modeling the Driving-Point Characteristic of Resistive Interconnect for Accurate Delay Estimation.</em> ICCAD 1989.<span class="use">The π model in <code>rc_tree.hpp</code>.</span></li>
+<li>J. Qian, S. Pullela, L. Pillage. <em>Modeling the "Effective Capacitance" for the RC Interconnect of CMOS Gates.</em> IEEE TCAD 13(12), 1994.<span class="use">Ceff in <code>pass/place/gate_waveform.cpp</code>.</span></li>
+<li>F. Dartu, N. Menezes, L.T. Pileggi. <em>Performance Computation for Precharacterized CMOS Gates with RC Loads.</em> IEEE TCAD 15(5), 1996.</li>
+<li>C.V. Kashyap, C.J. Alpert, F. Liu, A. Devgan. <em>Closed-Form Expressions for Extending Step Delay and Slew Metrics to Ramp Inputs for RC Trees.</em> IEEE TCAD 23(4), 2004.<span class="use">Slew from delay moments (<code>pass/timing</code>).</span></li>
+<li>R.B. Hitchcock, G.L. Smith, D.D. Cheng. <em>Timing Analysis of Computer Hardware.</em> IBM J. R&amp;D 26(1), 1982.<span class="use">Block-based STA in <code>pass/timing/engine.cpp</code>.</span></li>
+<li>T.-W. Huang, M.D.F. Wong. <em>OpenTimer: A High-Performance Timing Analysis Tool.</em> ICCAD 2015; T.-W. Huang, G. Guo, C.-X. Lin, M.D.F. Wong. <em>OpenTimer v2.</em> IEEE TCAD 41(4), 2022.<span class="use"><code>pass/opentimer</code>, <code>core/timing_whatif.hpp</code>.</span></li>
+<li>T.-W. Huang, D.-L. Lin, C.-X. Lin, Y. Lin. <em>Taskflow: A Lightweight Parallel and Heterogeneous Task Graph Computing System.</em> IEEE TPDS 33(6), 2022.</li>
+<li>I. Sutherland, R. Sproull, D. Harris. <em>Logical Effort: Designing Fast CMOS Circuits.</em> Morgan Kaufmann, 1999.<span class="use">Domino stage delay in <code>pass/domplace</code>.</span></li>
+</ul>
+
+<h4>Timing-driven placement and optimization</h4>
+<ul class="refs">
+<li>B. Fu, L. Liu, M.D.F. Wong, E.F.Y. Young. <em>Hybrid Modeling and Weighting for Timing-driven Placement with Efficient Calibration.</em> ICCAD 2024. <a href="https://doi.org/10.1145/3676536.3676803">doi</a><span class="use">Pin weights in <code>pass/place/forces/pin_weights.hpp</code> and calibrated star RC.</span></li>
+<li>P. Liao et al. <em>DREAMPlace 4.0: Timing-Driven Placement with Momentum-Based Net Weighting and Lagrangian-Based Refinement.</em> IEEE TCAD 42(10), 2023.<span class="use">Slack-ranked net weights with smoothing.</span></li>
+<li>Z. Guo, Y. Lin. <em>Differentiable-Timing-Driven Global Placement.</em> DAC 2022. <a href="https://doi.org/10.1145/3489517.3530486">doi</a><span class="use">The soft-max period objective in <code>pass/place/objective/period.hpp</code>.</span></li>
+<li>C.-P. Chen, C. Chu, D.F. Wong. <em>Fast and Exact Simultaneous Gate and Wire Sizing by Lagrangian Relaxation.</em> IEEE TCAD 18(7), 1999.<span class="use">Flow-conserving multipliers in <code>objective/period.hpp</code>.</span></li>
+<li>A. Marquardt, V. Betz, J. Rose. <em>Timing-Driven Placement for FPGAs.</em> FPGA 2000.<span class="use">Criticality with an exponent, as in VPR.</span></li>
+<li>L.P.P.P. van Ginneken. <em>Buffer Placement in Distributed RC-Tree Networks for Minimal Elmore Delay.</em> ISCAS 1990.<span class="use"><code>pass/place/buffering</code>.</span></li>
+<li>W. Chen, M. Pedram, P. Buch. <em>Buffered Routing Tree Construction Under Buffer Placement Blockages.</em> ASP-DAC 2002.<span class="use">The topology search in <code>pass/place/buffering/graph_search</code>.</span></li>
+<li>J.P. Fishburn, A.E. Dunlop. <em>TILOS: A Posynomial Programming Approach to Transistor Sizing.</em> ICCAD 1985.<span class="use">Greedy critical-path sizing in <code>pass/place/resize_engine.cpp</code>.</span></li>
+</ul>
+
+<h4>Solvers and geometry</h4>
+<ul class="refs">
+<li>Q. Huangfu, J.A.J. Hall. <em>Parallelizing the Dual Revised Simplex Method.</em> Math. Programming Computation 10(1), 2018.<span class="use">HiGHS, the density-warp LP.</span></li>
+<li>B. Dezső, A. Jüttner, P. Kovács. <em>LEMON – an Open Source C++ Graph Template Library.</em> ENTCS 264(5), 2011.<span class="use">Network simplex for the macro displacement LP.</span></li>
+<li>S. Umeyama. <em>Least-Squares Estimation of Transformation Parameters Between Two Point Patterns.</em> IEEE TPAMI 13(4), 1991.<span class="use">Close idea: the pattern fit in <code>docs/placement_regularity.html</code>.</span></li>
+</ul>
+
+<h4>Cited by open plans (not implemented yet)</h4>
+<p class="note">Referenced from <code>todo/</code> plans such as <code>timing_closure_plan.md</code>, <code>2q-fasttimer</code> and <code>2t-timeclosure</code>.</p>
+<ul class="refs compact">
+<li>G. Chen, P. Tu, E.F.Y. Young. <em>SALT: Provably Good Routing Topology by a Novel Steiner Shallow-Light Tree Algorithm.</em> ICCAD 2017.</li>
+<li>H. Wu, X. Li, L. Chen, B. Yu, W. Zhu. <em>Delay-Driven Rectilinear Steiner Tree Construction.</em> IEEE TCAD 44(5), 2025. <a href="https://doi.org/10.1109/TCAD.2024.3501932">doi</a></li>
+<li>S. Held, E. Perner. <em>Cost-Distance Steiner Trees for Timing-Constrained Global Routing.</em> 2025. <a href="https://arxiv.org/abs/2503.04419">arXiv</a></li>
+<li>D.W. Hightower. <em>A Solution to Line-Routing Problems on the Continuous Plane.</em> DAW 1969.</li>
+<li>C.J. Alpert, A. Devgan, C.V. Kashyap. <em>RC Delay Metrics for Performance Optimization.</em> IEEE TCAD 20(5), 2001.</li>
+<li>Z. Guo, M. Liu, J. Gu, S. Zhang, D.Z. Pan, Y. Lin. <em>A Timing Engine Inspired Graph Neural Network Model for Pre-Routing Slack Prediction.</em> DAC 2022.</li>
+<li>S. Bodhe et al. <em>E2ESlack: An End-to-End Graph-Based Framework for Pre-Routing Slack Prediction.</em> 2025. <a href="https://arxiv.org/abs/2501.07564">arXiv</a></li>
+<li>W. Li, Y. Kukimoto, G. Servel, I. Bustany, M.E. Dehkordi. <em>Calibration-Based Differentiable Timing Optimization in Non-linear Global Placement.</em> ISPD 2024. <span class="fixme" title="todo/livehd/timing_closure_plan.md lists the author &quot;M. Imani&quot;; dblp says Mehrdad E. Dehkordi">fixme</span></li>
+<li>N. Viswanathan et al. <em>ITOP: Integrating Timing Optimization within Placement.</em> ISPD 2010.</li>
+<li>D. Mangiras et al. <em>Timing-Driven Placement Optimization Facilitated by Timing-Compatibility Flip-Flop Clustering.</em> IEEE TCAD. <span class="fixme" title="year and full author list missing (also missing in timing_closure_plan.md)">fixme</span></li>
+<li>D.A. Papa et al. <em>RUMBLE: An Incremental, Timing-Driven, Physical-Synthesis Optimization Algorithm.</em> ISPD 2008. <span class="todo-check" title="authors not checked">todo-check</span></li>
+<li>A.B. Kahng, Y. Liu, Z. Wang. <em>Recursive Learning-Based Virtual Buffering for Analytical Global Placement.</em> 2025. <a href="https://arxiv.org/abs/2506.17247">arXiv</a> <span class="todo-check" title="not checked">todo-check</span></li>
+<li>C.J. Alpert, M. Hrkic, J. Hu, S.T. Quay. <em>Fast and Flexible Buffer Trees that Navigate the Physical Layout Environment.</em> DAC 2004.</li>
+<li>C.J. Alpert et al. <em>Porosity Aware Buffered Steiner Tree Construction.</em> ISPD 2003.</li>
+<li>C.J. Alpert, G. Gandham, J. Hu, J. Neves, S. Quay, S. Sapatnekar. <em>A Steiner Tree Construction for Buffers, Blockages, and Bays.</em> IEEE TCAD 20(4), 2001.</li>
+<li>H. Zhou, D.F. Wong, I.-M. Liu, A. Aziz. <em>Simultaneous Routing and Buffer Insertion with Restrictions on Buffer Locations.</em> DAC 1999.</li>
+<li>J. Cong, X. Yuan. <em>Routing Tree Construction Under Fixed Buffer Locations.</em> DAC 2000.</li>
+<li>J. Lillis, C.-K. Cheng, T.-T. Lin. <em>Optimal Wire Sizing and Buffer Insertion for Low Power and a Generalized Delay Model.</em> IEEE JSSC 1996.</li>
+<li>Z. Li, W. Shi. <em>An O(bn²) Time Algorithm for Optimal Buffer Insertion with b Buffer Types.</em> IEEE TCAD 2006.</li>
+<li>R. Otten, R. Brayton. <em>Planning for Performance.</em> DAC 1998.</li>
+<li>G. Flach, T. Reimann, G. Posser, M. Johann, R. Reis. <em>Effective Method for Simultaneous Gate Sizing and Vth Assignment Using Lagrangian Relaxation.</em> IEEE TCAD 33(4), 2014.</li>
+<li>A. Sharma, C. Chu. <em>Rapid Gate Sizing with Fewer Iterations of Lagrangian Relaxation.</em> ICCAD 2017.</li>
+<li>P.-C. Wu, M.D.F. Wong, I. Nedelchev, S. Bhardwaj, V. Parkhe. <em>On Timing Closure: Buffer Insertion for Hold-Violation Removal.</em> DAC 2014.</li>
+<li>Y. Ji, Y. Lu, Z. Zhang, Z. Guo, Y. Lin, B. Yu. <em>DiffCCD: Differentiable Concurrent Clock and Data Optimization.</em> ICCAD 2025.</li>
+<li>A.B. Kahng et al. <em>Post-Placement Buffering and Sizing Contest.</em> ISPD 2026. <span class="todo-check" title="not checked">todo-check</span></li>
+<li>Y.-C. Lu et al. <em>2025 ICCAD CAD Contest Problem C: Simultaneous Gate Sizing, Buffering, and Cell Relocation.</em> <span class="todo-check" title="not checked">todo-check</span></li>
+<li>J. Liu et al. <em>CUGR: Detailed-Routability-Driven 3D Global Routing with Probabilistic Resource Model.</em> DAC 2020. <span class="todo-check" title="title and authors not checked">todo-check</span></li>
+</ul>
+
+<h3 id="papers-formal">Formal verification and equivalence checking</h3>
+
+<h4>Combinational equivalence</h4>
+<ul class="refs">
+<li>R. Brayton, A. Mishchenko. <em>ABC: An Academic Industrial-Strength Verification Tool.</em> CAV 2010. <a href="https://doi.org/10.1007/978-3-642-14295-6_5">doi</a><span class="use">The CEC, FRAIG, dsec and PDR engines behind <code>pass/lec/cone_abc.cpp</code>.</span></li>
+<li>A. Mishchenko, S. Chatterjee, R. Jiang, R. Brayton. <em>FRAIGs: A Unifying Representation for Logic Synthesis and Verification.</em> UC Berkeley ERL Tech. Report, 2005.<span class="use">The rewrite, fraig and miter SAT step in <code>pass/lec/cone_abc.cpp</code>.</span></li>
+<li>A. Mishchenko, S. Chatterjee, R. Brayton, N. Eén. <em>Improvements to Combinational Equivalence Checking.</em> ICCAD 2006. <a href="https://doi.org/10.1109/ICCAD.2006.320087">doi</a><span class="use">SAT sweeping that finds internal equivalences in <code>pass/lec</code>.</span></li>
+<li>A. Kuehlmann, V. Paruthi, F. Krohm, M. Ganai. <em>Robust Boolean Reasoning for Equivalence Checking and Functional Property Verification.</em> IEEE TCAD 21(12), 2002. <a href="https://doi.org/10.1109/TCAD.2002.804386">doi</a><span class="use">Structural hashing followed by SAT on each cut's miter.</span></li>
+<li>A. Kuehlmann, F. Krohm. <em>Equivalence Checking Using Cuts and Heaps.</em> DAC 1997. <a href="https://doi.org/10.1145/266021.266090">doi</a><span class="use">Splitting the design into register cones, each checked as its own combinational miter (<code>pass/lec/lec.md</code>).</span></li>
+</ul>
+
+<h4>Sequential equivalence and model checking</h4>
+<ul class="refs">
+<li>C.A.J. van Eijk. <em>Sequential Equivalence Checking Based on Structural Similarities.</em> IEEE TCAD 19(7), 2000. <a href="https://doi.org/10.1109/43.851997">doi</a><span class="use">Register correspondence by partition refinement in <code>pass/lec</code> and <code>core/state_match.hpp</code> (shared with semdiff).</span></li>
+<li>F. Lu, K.-T. Cheng. <em>Sequential Equivalence Checking Based on K-th Invariants and Circuit SAT Solving.</em> HLDVT 2005. <a href="https://doi.org/10.1109/HLDVT.2005.1568812">doi</a><span class="use">Cited in <code>pass/lec/lec.md</code>.</span></li>
+<li>A. Mishchenko, M.L. Case, R.K. Brayton, S. Jang. <em>Scalable and Scalably-Verifiable Sequential Synthesis.</em> ICCAD 2008. <a href="https://doi.org/10.1145/1509456.1509516">doi</a><span class="use">SAT sweeping plus induction (ABC <code>dsec</code>) for renamed registers and retimed logic.</span></li>
+<li>M.N. Mneimneh, K.A. Sakallah. <em>Principles of Sequential-Equivalence Verification.</em> IEEE Design &amp; Test 22(3), 2005. <a href="https://doi.org/10.1109/MDT.2005.68">doi</a><span class="use">Background for reset handling and bounded vs. full verdicts in <code>pass/lec</code>.</span></li>
+<li>A. Biere, A. Cimatti, E. Clarke, Y. Zhu. <em>Symbolic Model Checking without BDDs.</em> TACAS 1999. <a href="https://doi.org/10.1007/3-540-49059-0_14">doi</a><span class="use">The <code>bmc</code> engine in <code>pass/lec</code> and <code>pass/formal</code>.</span></li>
+<li>M. Sheeran, S. Singh, G. Stålmarck. <em>Checking Safety Properties Using Induction and a SAT-Solver.</em> FMCAD 2000. <a href="https://doi.org/10.1007/3-540-40922-X_8">doi</a><span class="use">The <code>ind</code> engine and k-induction in <code>pass/lec</code>, <code>pass/formal</code> and <code>pass/lean/tools/HDLProof</code>.</span></li>
+<li>A.R. Bradley. <em>SAT-Based Model Checking without Unrolling.</em> VMCAI 2011. <a href="https://doi.org/10.1007/978-3-642-18275-4_7">doi</a><span class="use">The <code>ic3</code>/<code>pdr</code> engines of <code>lhd formal verify</code>.</span></li>
+<li>N. Eén, A. Mishchenko, R. Brayton. <em>Efficient Implementation of Property Directed Reachability.</em> FMCAD 2011.<span class="use">The PDR engine and invariant reuse in <code>pass/lec</code>.</span></li>
+<li>C. Flanagan, K.R.M. Leino. <em>Houdini, an Annotation Assistant for ESC/Java.</em> FME 2001. <a href="https://doi.org/10.1007/3-540-45251-6_29">doi</a><span class="use">Filtering mined candidates into inductive invariants (<code>houdini()</code> in <code>pass/lec/cone_abc.cpp</code>).</span></li>
+<li>M.D. Ernst et al. <em>The Daikon System for Dynamic Detection of Likely Invariants.</em> Science of Computer Programming 69, 2007. <a href="https://doi.org/10.1016/j.scico.2007.01.015">doi</a><span class="use">Close idea: mining range and equality invariants from sampled states in <code>pass/lec/query.cpp</code>.</span></li>
+</ul>
+
+<h4>SAT and SMT solving</h4>
+<ul class="refs">
+<li>H. Barbosa et al. <em>cvc5: A Versatile and Industrial-Strength SMT Solver.</em> TACAS 2022. <a href="https://doi.org/10.1007/978-3-030-99524-9_24">doi</a><span class="use">The default solver of <code>pass/lec</code> and <code>pass/formal</code>.</span></li>
+<li>A. Niemetz, M. Preiner. <em>Bitwuzla.</em> CAV 2023. <a href="https://doi.org/10.1007/978-3-031-37703-7_1">doi</a><span class="use">Optional <code>formal.solver=bitwuzla</code> backend.</span></li>
+<li>A. Biere, T. Faller, K. Fazekas, M. Fleury, N. Froleyks, F. Pollitt. <em>CaDiCaL 2.0.</em> CAV 2024. <a href="https://doi.org/10.1007/978-3-031-65627-9_7">doi</a><span class="use">SAT back end for cvc5 profiles and the LRAT producer for Lean checking.</span></li>
+<li>A. Biere, K. Fazekas, M. Fleury, M. Heisinger. <em>CaDiCaL, Kissat, Paracooba, Plingeling and Treengeling Entering the SAT Competition 2020.</em> SAT Competition 2020.<span class="use">The <code>eager-kissat</code> solver profile.</span></li>
+<li>N. Eén, N. Sörensson. <em>An Extensible SAT-solver.</em> SAT 2003. <a href="https://doi.org/10.1007/978-3-540-24605-3_37">doi</a><span class="use">MiniSat in the deterministic solver tier.</span></li>
+<li>M. Soos, K. Nohl, C. Castelluccia. <em>Extending SAT Solvers to Cryptographic Problems.</em> SAT 2009.<span class="use">CryptoMiniSat, the <code>eager-cms</code> profile.</span></li>
+<li>Y. Zohar, A. Irfan, M. Mann, A. Niemetz, A. Nötzli, M. Preiner, A. Reynolds, C. Barrett, C. Tinelli. <em>Bit-Precise Reasoning via Int-Blasting.</em> VMCAI 2022. <a href="https://doi.org/10.1007/978-3-030-94583-1_25">doi</a><span class="use">The <code>bmc:intblast</code> arm of <code>pass/lec</code>.</span></li>
+<li>M. Brain, F. Schanda, Y. Sun. <em>Building Better Bit-Blasters for Floating-Point Problems.</em> TACAS 2019. <a href="https://doi.org/10.1007/978-3-030-17465-1_5">doi</a><span class="use">SymFPU, bundled with cvc5.</span></li>
+<li>J. McCarthy. <em>Towards a Mathematical Science of Computation.</em> IFIP Congress 1962.<span class="use">Read-over-write array theory behind memories as SMT arrays and <code>pass/lec/array_blast.hpp</code>.</span></li>
+<li>J.R. Burch, D.L. Dill. <em>Automatic Verification of Pipelined Microprocessor Control.</em> CAV 1994.<span class="use">Memory and uninterpreted-function abstraction in <code>pass/lec</code>.</span></li>
+<li>G.S. Tseitin. <em>On the Complexity of Derivation in Propositional Calculus.</em> 1968.<span class="use">Tseitin definitions in the Lean bit-blasting flow.</span></li>
+</ul>
+
+<h4>Proof certificates, translation validation and verified compilation</h4>
+<ul class="refs">
+<li>A. Pnueli, M. Siegel, E. Singerman. <em>Translation Validation.</em> TACAS 1998. <a href="https://doi.org/10.1007/BFb0054170">doi</a><span class="use">The validation design of <code>pass/isabelle</code> and <code>pass/lean</code>.</span></li>
+<li>T. Sewell, M. Myreen, G. Klein. <em>Translation Validation for a Verified OS Kernel.</em> PLDI 2013. <a href="https://doi.org/10.1145/2491956.2462183">doi</a><span class="use">Cited as a design option in <code>pass/lean</code>.</span></li>
+<li>N.P. Lopes, J. Lee, C.-K. Hur, Z. Liu, J. Regehr. <em>Alive2: Bounded Translation Validation for LLVM.</em> PLDI 2021. <a href="https://doi.org/10.1145/3453483.3454030">doi</a><span class="use">The bounded, corpus-wide differential option in <code>pass/lean</code>.</span></li>
+<li>R.M. McConnell, K. Mehlhorn, S. Näher, P. Schweitzer. <em>Certifying Algorithms.</em> Computer Science Review 5(2), 2011. <a href="https://doi.org/10.1016/j.cosrev.2010.09.009">doi</a><span class="use">The translation emits a certificate that a checker, proved once, validates (<code>formal/translation_correctness</code>).</span></li>
+<li>X. Leroy. <em>Formal Verification of a Realistic Compiler.</em> CACM 52(7), 2009.<span class="use">CompCert, a reference point for the trusted base of <code>pass/lean</code>.</span></li>
+<li>D. Monniaux, S. Boldo. <em>The Trusted Computing Base of the CompCert Verified Compiler.</em> ESOP 2022. <a href="https://arxiv.org/abs/2201.10280">arXiv</a></li>
+<li>A. Lööw. <em>Lutsig: A Verified Verilog Compiler for Verified Circuit Development.</em> CPP 2021. <a href="https://doi.org/10.1145/3437992.3439916">doi</a></li>
+<li>Y. Herklotz, J.D. Pollard, N. Ramanathan, J. Wickerson. <em>Formal Verification of High-Level Synthesis.</em> OOPSLA 2021. <a href="https://doi.org/10.1145/3485494">doi</a></li>
+<li>J. Choi, M. Vijayaraghavan, B. Sherman, A. Chlipala, Arvind. <em>Kami: A Platform for High-Level Parametric Hardware Specification and Its Modular Verification.</em> ICFP 2017.</li>
+<li>T. Bourgeat, C. Pit-Claudel, A. Chlipala, Arvind. <em>The Essence of Bluespec: A Core Language for Rule-Based Hardware Design.</em> PLDI 2020.</li>
+<li>M. Pardalos, L. Pozzi, J. Wickerson. <em>Towards Mechanized Verification of Verilog Equivalence Checking.</em> LATTE 2025. <a href="https://johnwickerson.github.io/papers/vera_LATTE25.pdf">pdf</a></li>
+<li>E. Yu, A. Biere, K. Heljanko. <em>Progress in Certifying Hardware Model Checking Results.</em> CAV 2021. <a href="https://doi.org/10.1007/978-3-030-81688-9_17">doi</a> <span class="fixme" title="pass/lean D1_TRANSCRIPTION_BOUNDARY.md cites &quot;Certifaiger and Cerbtora&quot; (doi 10.1007/978-3-032-32589-1_17), which could not be found; this entry is a substitute">fixme</span><span class="use">Certifaiger, cited as a certification option in <code>pass/lean</code>.</span></li>
+<li>E. Yu, N. Froleyks, A. Biere, K. Heljanko. <em>Stratified Certification for k-Induction.</em> FMCAD 2022.</li>
+<li><em>Certified Sequential Sweep Without Unrolling.</em> arXiv:2607.27498, 2026. <a href="https://arxiv.org/abs/2607.27498">arXiv</a> <span class="fixme" title="authors unknown; add them">fixme</span></li>
+<li>L. Cruz-Filipe, M.J.H. Heule, W.A. Hunt Jr., M. Kaufmann, P. Schneider-Kamp. <em>Efficient Certified RAT Verification.</em> CADE 2017. <a href="https://doi.org/10.1007/978-3-319-63046-5_14">doi</a><span class="use">LRAT proofs checked in Lean (<code>pass/lean/tools</code>).</span></li>
+<li>N. Wetzler, M. Heule, W. Hunt. <em>DRAT-trim: Efficient Checking and Trimming Using Expressive Clausal Proofs.</em> SAT 2014.</li>
+<li>H. Böving, S. Bhat, et al., T. Grosser. <em>Interactive Bitvector Reasoning using Verified Bit-Blasting.</em> OOPSLA 2025. <a href="https://doi.org/10.1145/3763167">doi</a><span class="use">Lean's <code>bv_decide</code> and LRAT checker in <code>pass/lean/tools/HDLProof</code>.</span></li>
+<li>Y. Futamura. <em>Partial Evaluation of Computation Process: An Approach to a Compiler-Compiler.</em> Systems, Computers, Controls 2(5), 1971.<span class="use">The Futamura-projection specializer in <code>formal/lean</code>.</span></li>
+</ul>
+
+<h4>Semantics and proof theory</h4>
+<ul class="refs">
+<li>L. de Moura, S. Ullrich. <em>The Lean 4 Theorem Prover and Programming Language.</em> CADE 2021. <a href="https://doi.org/10.1007/978-3-030-79876-5_37">doi</a><span class="use"><code>formal/lean</code>, <code>pass/lean</code>.</span></li>
+<li>The mathlib Community. <em>The Lean Mathematical Library.</em> CPP 2020. <a href="https://doi.org/10.1145/3372885.3373824">doi</a></li>
+<li>T. Nipkow, L.C. Paulson, M. Wenzel. <em>Isabelle/HOL: A Proof Assistant for Higher-Order Logic.</em> LNCS 2283, 2002.<span class="use"><code>formal/semantic_primitives</code>, <code>formal/translation_correctness</code>, <code>pass/isabelle</code>.</span></li>
+<li>M. Abadi, L. Lamport. <em>The Existence of Refinement Mappings.</em> TCS 82(2), 1991. <a href="https://doi.org/10.1016/0304-3975(91)90224-P">doi</a><span class="use">Refinement maps with stuttering in <code>HDLProof/Check/RefMap*</code>.</span></li>
+<li>D. Lehmann, A. Pnueli, J. Stavi. <em>Impartiality, Justice and Fairness: The Ethics of Concurrent Termination.</em> ICALP 1981.<span class="use"><code>HDLProof/Theory/Progress.lean</code>.</span></li>
+<li>Z. Manna, A. Pnueli. <em>Completing the Temporal Picture.</em> TCS 83, 1991.<span class="use">Helpful transitions in <code>HDLProof/Theory/Progress.lean</code>.</span></li>
+<li>G. Kahn. <em>The Semantics of a Simple Language for Parallel Programming.</em> IFIP Congress 1974.<span class="use">Kahn determinism in <code>HDLProof/Theory/Channels.lean</code>.</span></li>
+<li>A. Mazurkiewicz. <em>Trace Theory.</em> Advances in Petri Nets, 1987.<span class="use">The diamond lemma in <code>HDLProof/Theory/Channels.lean</code>.</span></li>
+<li>A. Armstrong et al. <em>ISA Semantics for ARMv8-A, RISC-V, and CHERI-MIPS.</em> POPL 2019. <a href="https://doi.org/10.1145/3290384">doi</a><span class="use">Sail, a planned refinement target (<code>formal/translation_correctness</code>).</span></li>
+</ul>
+
+<h4>Testing and fuzzing</h4>
+<ul class="refs">
+<li>W.M. McKeeman. <em>Differential Testing for Software.</em> Digital Technical Journal 10(1), 1998.<span class="use">Icarus vs. Verilator vs. <code>lhd sim</code> in <code>docs/divergence</code>; differential tests in <code>pass/lean</code> and <code>pass/lec</code>.</span></li>
+<li>X. Yang, Y. Chen, E. Eide, J. Regehr. <em>Finding and Understanding Bugs in C Compilers.</em> PLDI 2011. <a href="https://doi.org/10.1145/1993498.1993532">doi</a><span class="use">Random programs that avoid undefined behavior, as in the Verilog fuzzer behind <code>docs/divergence</code>.</span></li>
+<li>Y. Herklotz, J. Wickerson. <em>Finding and Understanding Bugs in FPGA Synthesis Tools.</em> FPGA 2020. <a href="https://doi.org/10.1145/3373087.3375310">doi</a><span class="use">Verismith; the same random-Verilog approach.</span></li>
+<li>T.Y. Chen, S.C. Cheung, S.M. Yiu. <em>Metamorphic Testing: A New Approach for Generating Next Test Cases.</em> HKUST-CS98-01, 1998.<span class="use">Close idea: <code>pass/bitfuzz</code> strips width annotations, re-infers them and checks equivalence.</span></li>
+</ul>
+
+</main>
+<footer>LiveHD acknowledgements. People and years come from the repository history; papers and tools come from a scan of the source, design notes and <code>todo/</code> pages. Corrections are welcome as pull requests.</footer>
+</body>
+</html>

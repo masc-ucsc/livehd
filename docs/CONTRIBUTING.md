@@ -27,9 +27,11 @@ the author once appropriate (based on the progression of code review, etc.). Whe
 important to retain correct attribution of contributions to their contributors. However, we do not
 want the source code to be littered with random attributions “this code written by J. Random Hacker”
 (this is noisy and distracting). In practice, the revision control system keeps a perfect history of
-who changed what, and the [CREDITS.txt](CREDITS.txt) file describes higher-level contributions.
+who changed what, and the [acknowledgements page](acknowledgement.html) describes higher-level
+contributions, the tools we use, and the papers behind the implementation.
 
-If you commit code for other user, update the [CREDITS.txt](CREDITS.txt) as required.
+If you commit code for another user, or your change follows a paper or uses a new tool, update the
+[acknowledgements page](acknowledgement.html) as required.
 
 ## License
 

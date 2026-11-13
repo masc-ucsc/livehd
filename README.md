@@ -79,6 +79,14 @@ The instructions for installation and internal LiveHD passes can be found at
 If you are not one of the code owners, you need to create a pull request as
 indicated in [CONTRIBUTING.md](docs/CONTRIBUTING.md).
 
+## Acknowledgements
+
+LiveHD is the work of many contributors and builds on many open-source tools
+and research papers. The [acknowledgements page](docs/acknowledgement.html)
+credits everyone who has committed to the repository, the tools we use or
+learned from, and the papers behind each part of the implementation (front end,
+simulation, synthesis, physical design and formal verification).
+
 
 # Publications
 For more detailed information and paper reference, please refer to

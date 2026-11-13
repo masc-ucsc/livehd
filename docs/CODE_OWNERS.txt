@@ -4,8 +4,8 @@ They are also the gatekeepers for their part of LGRAPH, with the final word on
 what goes in or not.
 
 The list is sorted by email and formatted to allow easy grepping and
-beautification by scripts. People listed here must be also listed in the CREDITS.txt
-with matching email.  The fields are: name (N), email (E), bazel build targets owned (D),
+beautification by scripts. People listed here must be also listed in the People section of
+acknowledgement.html.  The fields are: name (N), email (E), bazel build targets owned (D),
 (T) Time were the person was code owner in quarters (1Q17-present)
 
 
