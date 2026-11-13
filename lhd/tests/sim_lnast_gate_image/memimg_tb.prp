@@ -1,0 +1,24 @@
+const dut_m = import("lg:memimg")
+
+test memimg.reload {
+  mut d = dut_m
+  tick 17 {
+    d.reset = clock < 1 or (clock >= 12 and clock < 13)
+    d.we = clock >= 2 and clock < 10
+    d.a  = 0x5A5A5 + clock
+    d.i  = clock
+    step
+    if clock == 2 {
+      assert(d.z == 0x5A5A7, "the write landed")
+    }
+    if clock == 12 {
+      assert(d.z == 5005 and d.y == 1 and d.x == 11, "entry 4/0 reloaded")
+    }
+    if clock == 15 {
+      assert(d.z == 0xFFFFF and d.y == 7 and d.x == 44, "entry 7/3 reloaded")
+    }
+    if clock == 16 {
+      assert(d.z == 1001 and d.y == 1 and d.x == 11, "entry 0 reloaded")
+    }
+  }
+}

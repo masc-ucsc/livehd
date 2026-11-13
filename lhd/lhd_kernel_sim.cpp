@@ -1907,17 +1907,57 @@ void sim_command(Options& opts, Result& res) {
     tune.after_compile();
     std::string err;
     int         gen_rc = 0;
-    {
+    const auto  generate_driver = [&]() {
       Phase_timer drvgen(res, "sim.drvgen");  // the testbench driver generation (drv.cpp)
-      gen_rc = prp_sim::generate(file,
-                                 simdir,
-                                 test_sel,
-                                 vcd_dir,
-                                 opts.sim_observe,
-                                 opts.sim_runtime_support,
-                                 unknown_zero,
-                                 tests,
-                                 err);
+      return prp_sim::generate(file,
+                               simdir,
+                               test_sel,
+                               vcd_dir,
+                               opts.sim_observe,
+                               opts.sim_runtime_support,
+                               unknown_zero,
+                               tests,
+                               err);
+    };
+    gen_rc = generate_driver();
+    const bool built_on_lnast = std::ranges::any_of(res.recipe_steps, [](const std::string& s) { return s.starts_with("pass.lnast_sim"); });
+    if (gen_rc != 0 && built_on_lnast && lnast_sim_may_fall_back()) {
+      // The testbench asks for something the LNAST flow's interface does not publish (a register inside a
+      // sub-instance, ...): build the design again on inou.cgen.sim, which does.
+      livehd::diag::info("lhd.sim", "lnast-fallback", "progress")
+          .msg("LNAST sim flow cannot serve this testbench ({}); using inou.cgen.sim", err)
+          .emit();
+      std::error_code rm_ec;
+      for (const auto& entry : fs::directory_iterator(simdir, rm_ec)) {
+        const auto name = entry.path().filename().string();
+        if (name.find(".lnast") != std::string::npos || name == "lnast_sim_rt.hpp") {
+          fs::remove(entry.path(), rm_ec);
+        }
+      }
+      std::erase_if(res.recipe_steps, [](const std::string& s) { return s.starts_with("pass.lnast_sim"); });
+      g_lnast_sim_off = true;
+      try {
+        auto ir = gather_ir_inputs(opts, "sim");
+        compile_sources(opts, res, ir);
+      } catch (const Lhd_error& e) {
+        g_lnast_sim_off           = false;
+        setup_outcome->thrown_cls = e.cls;
+        setup_outcome->thrown_msg = e.msg;
+        throw;
+      } catch (const std::exception& e) {
+        g_lnast_sim_off           = false;
+        const auto classified     = classify_engine_failure(e.what());  // as the first compile above
+        setup_outcome->thrown_cls = classified.cls;
+        setup_outcome->thrown_msg = classified.msg;
+        throw;
+      }
+      g_lnast_sim_off = false;
+      if (res.status != "pass") {
+        return;
+      }
+      err.clear();
+      tests.clear();
+      gen_rc = generate_driver();
     }
     if (gen_rc != 0) {
       res.status        = "fail";

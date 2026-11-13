@@ -11,6 +11,7 @@
 
 #include "upass_tolg.hpp"
 
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <format>
@@ -494,4 +495,45 @@ TEST(UpassTolgCall, UnconsumedGenericBindingIsRefused) {
   // Without the binding the same call lowers past the argument loop.
   const auto ok = tolg_error("generic_arg_none", {caller_of("t.f", false), comb_callee(false)});
   EXPECT_EQ(ok.find("generic binding"), std::string::npos) << ok;
+}
+
+TEST(UpassTolgCall, ReassignedCallResultsHaveDistinctInstanceNames) {
+  // Minion's txfma_c0 calls classify_f32 twice into class_b_hi in different
+  // branches. Stripping SSA from both destinations used to give both Subs
+  // the same name, and physical flattening then duplicated every child cell.
+  for (const bool explicit_name : {false, true}) {
+    const auto path   = fresh_lib_dir("call_names");
+    auto       caller = module_unit("t.top", {in("a", 1), out("y", 2)});
+    caller->set_lambda_kind("mod");
+    auto                     stmts = caller->get_first_child(caller->get_root());
+    std::vector<std::string> destinations{"r___ssa_0", "r__call1", "r___ssa_1", "r___ssa_2"};
+    for (const auto& dst : destinations) {
+      auto call = caller->add_child(stmts, Lnast_ntype::create_func_call());
+      caller->add_child(call, Lnast_node::create_ref(dst));
+      caller->add_child(call, Lnast_node::create_ref("t.f"));
+      auto arg = caller->add_child(call, Lnast_ntype::create_store());
+      caller->add_child(arg, Lnast_node::create_ref("a"));
+      caller->add_child(arg, Lnast_node::create_ref("a"));
+      if (explicit_name) {
+        auto name = caller->add_child(call, Lnast_ntype::create_store());
+        caller->add_child(name, Lnast_node::create_ref("__inst_name"));
+        caller->add_child(name, Lnast_node::create_const(dst == "r__call1" ? "r__call1" : "r"));
+      }
+    }
+    auto store = caller->add_child(stmts, Lnast_ntype::create_store());
+    caller->add_child(store, Lnast_node::create_ref("y"));
+    caller->add_child(store, Lnast_node::create_ref(destinations.back()));
+    const uPass_tolg::Registry registry{caller, comb_callee(false)};
+    register_all(registry, path);
+    auto graph = uPass_tolg::run(caller, path, registry);
+    ASSERT_TRUE(graph);
+    std::vector<std::string> names;
+    for (auto node : graph->body().nodes()) {
+      if (gu::type_op_of(node) == Ntype_op::Sub) {
+        names.emplace_back(node.get_name());
+      }
+    }
+    std::sort(names.begin(), names.end());
+    EXPECT_EQ(names, (std::vector<std::string>{"r", "r__call1", "r__call2", "r__call3"}));
+  }
 }

@@ -2939,8 +2939,15 @@ size_t Cgen_llvm::array_create_in_state(uint32_t bits, uint64_t size, size_t wor
   a.packed         = a.store_bits != a.bits && whole <= 128;
   a.in_state       = true;
   a.ptr            = impl_->word_ptr(impl_->inputs, word);
-  a.ty             = a.packed ? static_cast<llvm::Type*>(impl_->builder.getIntNTy(static_cast<uint32_t>(whole)))
-                               : static_cast<llvm::Type*>(llvm::ArrayType::get(impl_->builder.getIntNTy(a.store_bits), a.size));
+  // The entry stride is store_bits / 8 bytes, as array_state_words lays the state out. An `iN` element
+  // is NOT that wide past 64 bits: its alloc size rounds up to its ABI alignment (16 bytes for any
+  // N > 64 on arm64), so `[2 x i320]` strides 48 bytes, not 40, and the second entry lands on the next
+  // state words. Wide entries are therefore `[store_bits/64 x i64]` elements, still loaded and stored
+  // as one iN (an `iN` load of the element's address reads exactly store_bits / 8 bytes).
+  llvm::Type* element = a.store_bits > 64 ? static_cast<llvm::Type*>(llvm::ArrayType::get(impl_->builder.getInt64Ty(), a.store_bits / 64))
+                                          : static_cast<llvm::Type*>(impl_->builder.getIntNTy(a.store_bits));
+  a.ty                = a.packed ? static_cast<llvm::Type*>(impl_->builder.getIntNTy(static_cast<uint32_t>(whole)))
+                                 : static_cast<llvm::Type*>(llvm::ArrayType::get(element, a.size));
   impl_->arrays.push_back(a);
   return impl_->arrays.size() - 1;
 }
@@ -3002,6 +3009,83 @@ bool Cgen_llvm::array_clear_if(size_t array, Value condition, const std::vector<
   b.SetInsertPoint(clear);
   const auto bytes = a.packed ? (uint64_t(a.bits) * a.size + 7) / 8 : uint64_t(a.store_bits / 8) * a.size;
   b.CreateMemSet(a.ptr, b.getInt8(0), bytes, llvm::Align(8));
+  impl_->or_dirty(dirty);
+  b.CreateBr(cont);
+  b.SetInsertPoint(cont);
+  return true;
+}
+
+bool Cgen_llvm::array_load_if(size_t array, Value condition, Value image, const std::vector<Dirty_mask>& dirty) {
+  if (array >= impl_->arrays.size() || condition.width == 0 || image.width == 0) {
+    return false;
+  }
+  auto& b    = impl_->builder;
+  auto* cond = impl_->get(condition);
+  auto* img  = impl_->get(image);  // materialized before the branch: it must dominate the cold block
+  if (cond == nullptr || img == nullptr) {
+    return false;
+  }
+  auto* active = b.CreateICmpNE(cond, llvm::ConstantInt::get(cond->getType(), 0));
+  auto* fn     = b.GetInsertBlock()->getParent();
+  auto* load   = llvm::BasicBlock::Create(impl_->context, "array.load", fn);
+  auto* cont   = llvm::BasicBlock::Create(impl_->context, "array.cont", fn);
+  b.CreateCondBr(active, load, cont, llvm::MDBuilder(impl_->context).createBranchWeights(1, 2000));  // reset: rare
+  b.SetInsertPoint(load);
+  if (!array_seed(array, image)) {
+    return false;
+  }
+  impl_->or_dirty(dirty);
+  b.CreateBr(cont);
+  b.SetInsertPoint(cont);
+  return true;
+}
+
+std::vector<uint64_t> Cgen_llvm::array_state_image(uint32_t bits, uint64_t size, const std::vector<uint64_t>& packed) {
+  bits                       = std::max<uint32_t>(bits, 1);
+  size                       = std::max<uint64_t>(size, 1);
+  const uint32_t store_bits  = bits <= 8 ? 8 : bits <= 16 ? 16 : bits <= 32 ? 32 : static_cast<uint32_t>(word_count(bits) * 64);
+  const bool     packed_kind = store_bits != bits && uint64_t(bits) * size <= 128;
+  std::vector<uint64_t> out(array_state_words(bits, size), 0);
+  const auto            bit_at = [&](uint64_t i) { return i / 64 < packed.size() && ((packed[i / 64] >> (i % 64)) & 1) != 0; };
+  const uint64_t        stride = packed_kind || store_bits == bits ? bits : store_bits;
+  for (uint64_t e = 0; e < size; ++e) {
+    for (uint32_t b = 0; b < bits; ++b) {
+      if (bit_at(e * bits + b)) {
+        const uint64_t at  = e * stride + b;
+        out[at / 64]      |= uint64_t{1} << (at % 64);
+      }
+    }
+  }
+  return out;
+}
+
+bool Cgen_llvm::array_load_words_if(size_t array, Value condition, const std::vector<uint64_t>& words,
+                                    const std::vector<Dirty_mask>& dirty) {
+  if (array >= impl_->arrays.size() || condition.width == 0) {
+    return false;
+  }
+  const auto& a = impl_->arrays[array];
+  if (!a.in_state || words.size() != array_state_words(a.bits, a.size)) {
+    impl_->error = "array_load_words_if needs an array in the state and its whole image";
+    return false;
+  }
+  auto& b    = impl_->builder;
+  auto* cond = impl_->get(condition);
+  if (cond == nullptr) {
+    return false;
+  }
+  auto* values = llvm::ConstantDataArray::get(impl_->context, llvm::ArrayRef<uint64_t>(words));
+  auto* table  = new llvm::GlobalVariable(*impl_->module, values->getType(), true, llvm::GlobalValue::PrivateLinkage, values, "array.image");
+  table->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
+  table->setAlignment(llvm::Align(8));
+  auto* active = b.CreateICmpNE(cond, llvm::ConstantInt::get(cond->getType(), 0));
+  auto* fn     = b.GetInsertBlock()->getParent();
+  auto* load   = llvm::BasicBlock::Create(impl_->context, "array.load", fn);
+  auto* cont   = llvm::BasicBlock::Create(impl_->context, "array.cont", fn);
+  b.CreateCondBr(active, load, cont, llvm::MDBuilder(impl_->context).createBranchWeights(1, 2000));  // reset: rare
+  b.SetInsertPoint(load);
+  const auto bytes = a.packed ? (uint64_t(a.bits) * a.size + 7) / 8 : uint64_t(a.store_bits / 8) * a.size;
+  b.CreateMemCpy(a.ptr, llvm::Align(8), table, llvm::Align(8), bytes);
   impl_->or_dirty(dirty);
   b.CreateBr(cont);
   b.SetInsertPoint(cont);

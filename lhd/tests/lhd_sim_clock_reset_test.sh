@@ -13,6 +13,10 @@
 #     output poke, or an unknown field is rejected at setup with a clear message.
 
 set -u
+# Pinned to inou.cgen.sim: this test is about that flow's generated sources (per-module bodies, VCD scaffolding,
+# color scheduler, query interface files); the LNAST sim flow (the `lhd sim` default) generates none of them.
+# See AGENTS.md, "Sim flow".
+export LHD_SIM_LNAST=0
 
 LHD="${LHD:-lhd/lhd}"
 W="${TEST_TMPDIR:-/tmp/lhd_sim_cr_$$}"

@@ -61,6 +61,22 @@ for file in loop_mem loop_overlay loop_nested loop_step loop_call; do
   echo "ok $file"
 done
 
+# A memory with a non-zero image: pass.lg2lnast spells it `initial=<packed>` (entry 0 low), the form tolg
+# reads, so the contents and the per-entry reset survive the round trip (bounded: a reset memory).
+d="$W/memory_image"
+mkdir -p "$d"
+"$LHD_ABS" compile "$SRC/memory_image.prp" --top memory_image --emit-dir "lg:$d/ref" --workdir "$d/tw" -q >"$d/c1.log" 2>&1 \
+  || { cat "$d/c1.log" >&2; fail "memory_image: compile to lg failed"; }
+"$LHD_ABS" pass lg2lnast --top memory_image "lg:$d/ref" --emit-dir "ln:$d/ln" --emit-dir "lnast-dump:$d/dump" -q >"$d/l2l.log" 2>&1 \
+  || { cat "$d/l2l.log" >&2; fail "memory_image: lg2lnast failed"; }
+grep -q "0x4030201" "$d"/dump/*.lnast || fail "memory_image: the packed image is not in the LNAST"
+"$LHD_ABS" compile "ln:$d/ln" --top memory_image --emit-dir "lg:$d/impl" -q >"$d/c2.log" 2>&1 \
+  || { cat "$d/c2.log" >&2; fail "memory_image: the emitted LNAST does not compile"; }
+"$LHD_ABS" lec --ref "lg:$d/ref" --impl "lg:$d/impl" --top memory_image --set formal.effort=proof --result-json "$d/lec.json" -q >"$d/lec.log" 2>&1 \
+  || { cat "$d/lec.log" >&2; fail "memory_image: lec failed"; }
+grep -q '"verdict": *"proven-\(full\|bounded\)"' "$d/lec.json" || fail "memory_image: lec did not prove the round trip: $(cat "$d/lec.json")"
+echo "ok memory_image"
+
 # The stream pass really rewrote the n-ary operators (and only then): a balanced tree has %bal temps.
 "$LHD_ABS" pass lg2lnast --top nary "lg:$W/nary/ref" --set pass.lg2lnast.passes=balance --emit-dir "lnast-dump:$W/nary/dump" -q >/dev/null 2>&1 \
   || fail "nary: balance dump failed"

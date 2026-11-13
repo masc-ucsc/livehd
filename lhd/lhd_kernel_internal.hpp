@@ -621,6 +621,12 @@ std::string              sim_iassert_include_dir(const Options& opts);
 std::string              sim_host_cxx();
 std::string              sim_llvm_link_tool();
 void                     emit_sim_outputs(Options& opts, Result& res, Eprp_var& var);
+// `lhd sim` backend: the LNAST flow (pass.lg2lnast -> lnast_llvm) is the default and falls back to
+// inou.cgen.sim for what it does not cover. `g_lnast_sim_off` is set by sim_command when the testbench
+// driver cannot be generated for the LNAST flow's interface (e.g. a hierarchical register path) and the
+// design is rebuilt on inou.cgen.sim; `lnast_sim_may_fall_back` is false under LHD_SIM_LNAST=1 (required).
+inline bool              g_lnast_sim_off = false;
+bool                     lnast_sim_may_fall_back();
 void                     emit_isabelle_outputs(Options& opts, Result& res, Eprp_var& var);
 void                     emit_lean_outputs(Options& opts, Result& res, Eprp_var& var);
 void                     emit_pyrope_outputs(Options& opts, Result& res, Eprp_var& var);

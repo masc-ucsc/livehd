@@ -35,6 +35,56 @@
 namespace livehd::placement {
 namespace gu = graph_util;
 
+TEST(Placement, TimingSeedHashesLongPhysicalPinNames) {
+  // CoralNPU's hierarchy exceeds libc++ format_to's 256-byte output buffer.
+  // Exercise the actual RC identity path, including pin and tree-node names.
+  for (const size_t length : {size_t{255}, size_t{256}, size_t{512}, size_t{4096}}) {
+    SCOPED_TRACE(length);
+    hhds::GraphLibrary source, placed;
+    auto               io = source.create_io("long_pin_names");
+    io->add_input("a", 1);
+    io->add_output("y", 2);
+    io->set_bits("a", 1);
+    io->set_bits("y", 1);
+    auto graph  = io->create_graph();
+    auto master = source.create_io("sky130_fd_sc_hd__inv_1");
+    master->add_input("A", 1);
+    master->add_output("Y", 2);
+    const std::string name(length, 'n');
+    auto              node = gu::create_typed_node(*graph, Ntype_op::Sub);
+    node.set_subnode(master);
+    node.set_name(name);
+    auto input = graph->get_input_pin("a");
+    gu::set_bits(input, 1);
+    input.connect_sink(node.create_sink_pin("A"));
+    auto output = node.create_driver_pin("Y");
+    gu::set_bits(output, 1);
+    output.connect_sink(graph->get_output_pin("y"));
+    auto options        = plain_options();
+    options.lefs        = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
+    options.timing_seed = true;
+    options.output_dir  = std::format("{}/long_pin_names_{}", std::getenv("TEST_TMPDIR"), length);
+    const auto result   = place(*graph, placed, options);
+    ASSERT_NE(result.parasitics, nullptr);
+    EXPECT_FALSE(result.parasitics->identity.empty());
+    EXPECT_TRUE(result.pin_locations.contains(name + ":A"));
+    EXPECT_TRUE(result.pin_locations.contains(name + ":Y"));
+    ASSERT_EQ(result.floorplan.components.size(), 1U);
+    EXPECT_EQ(result.floorplan.components.front().name, name);
+    // Compare the new numerical path + timing binding with the existing
+    // named-tree adapter. This pins labels, pin order and every R/C value.
+    for (const auto& rc : result.parasitics->nets) {
+      std::vector<std::pair<std::string, std::pair<double, double>>> pins;
+      for (const auto& rc_node : rc.nodes) {
+        if (!rc_node.pin.empty()) {
+          pins.emplace_back(rc_node.pin.str(), result.pin_locations.at(rc_node.pin));
+        }
+      }
+      EXPECT_EQ(rc, steiner_rc(rc.driver.str(), pins, Wire_rc{0, 0, 0, 0, "ideal"}, result.floorplan.dbu));
+    }
+  }
+}
+
 TEST(Placement, ExperimentalBoundaryRefinementsRunOnlyAtTheFinalStage) {
   hhds::GraphLibrary source;
   auto               io  = source.create_io("busorder_stages");

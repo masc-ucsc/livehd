@@ -81,6 +81,18 @@ const Symbol_table::Scope* Symbol_table::find_decl_scope_read(std::string_view v
   return nullptr;
 }
 
+const std::shared_ptr<Bundle>* Symbol_table::find_slot_read(std::string_view var) const {
+  if (stack.empty()) {
+    return nullptr;
+  }
+  for (const auto* s = stack.back(); s != nullptr; s = s->parent) {
+    if (const auto it = s->varmap.find(var); it != s->varmap.end()) {
+      return &it->second;
+    }
+  }
+  return nullptr;
+}
+
 bool Symbol_table::var(std::string_view key) {
   I(!stack.empty());
   assert_no_prefix(key);
@@ -597,48 +609,51 @@ std::shared_ptr<Bundle> Symbol_table::leave_scope() {
 }
 
 bool Symbol_table::is_known_const(std::string_view name) const {
-  if (!has_trivial(name)) {
+  auto [var, field] = get_var_field(name);
+
+  const auto* slot = find_slot_read(var);  // one scope walk, one path interning (was has_trivial + get_trivial)
+  if (slot == nullptr) {
     return false;
   }
-  const auto& val = get_trivial(name);
+  const auto path = bundle_path::of_string(field);
+  if (!(*slot)->has_trivial(path)) {
+    return false;
+  }
+  const auto& val = (*slot)->get_trivial(path);
   return !val.is_invalid() && !val.has_unknowns();
 }
 
 bool Symbol_table::has_trivial(std::string_view key) const {
   auto [var, field] = get_var_field(key);
 
-  const auto* s = find_decl_scope_read(var);  // Reads cross the Function barrier
-  if (s == nullptr) {
+  const auto* slot = find_slot_read(var);  // Reads cross the Function barrier
+  if (slot == nullptr) {
     return false;
   }
-  const auto it = s->varmap.find(var);
-  return it->second->has_trivial(bundle_path::of_string(field));
+  return (*slot)->has_trivial(bundle_path::of_string(field));
 }
 
 const Dlop& Symbol_table::get_trivial(std::string_view key) const {
   auto [var, field] = get_var_field(key);
 
-  const auto* s = find_decl_scope_read(var);  // Reads cross the Function barrier
-  if (s == nullptr) {
+  const auto* slot = find_slot_read(var);  // Reads cross the Function barrier
+  if (slot == nullptr) {
     return invalid_lconst;
   }
-  const auto it = s->varmap.find(var);
-  return it->second->get_trivial(bundle_path::of_string(field));
+  return (*slot)->get_trivial(bundle_path::of_string(field));
 }
 
 std::shared_ptr<Bundle> Symbol_table::get_bundle(std::string_view key) const {
   auto [var, field] = get_var_field(key);
 
-  const auto* s = find_decl_scope_read(var);  // Reads cross the Function barrier
-  if (s == nullptr) {
+  const auto* slot = find_slot_read(var);  // Reads cross the Function barrier
+  if (slot == nullptr) {
     return nullptr;
   }
-  const auto it = s->varmap.find(var);
-
   if (var == key) {
-    return it->second;
+    return *slot;
   }
-  return it->second->get_bundle(bundle_path::of_string(field));
+  return (*slot)->get_bundle(bundle_path::of_string(field));
 }
 
 std::shared_ptr<Bundle> Symbol_table::get_bundle_for_write(std::string_view var) {
@@ -667,12 +682,11 @@ const Bundle* Symbol_table::peek_writable_bundle(std::string_view var) const {
 bool Symbol_table::has_bundle(std::string_view key) const {
   auto [var, field] = get_var_field(key);
 
-  const auto* s = find_decl_scope_read(var);  // Reads cross the Function barrier
-  if (s == nullptr) {
+  const auto* slot = find_slot_read(var);  // Reads cross the Function barrier
+  if (slot == nullptr) {
     return false;
   }
-  const auto it = s->varmap.find(var);
-  return var == key || it->second->has_bundle(bundle_path::of_string(field));
+  return var == key || (*slot)->has_bundle(bundle_path::of_string(field));
 }
 
 void Symbol_table::dump() const {

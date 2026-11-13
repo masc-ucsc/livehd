@@ -834,6 +834,19 @@ TEST(LateTiming, RepeatedEvaluationDoesNotRetainOldRCArrivals) {
   EXPECT_GT(*pin(wired, "z").transitions[0].arrival_ps, *pin(before, "z").transitions[0].arrival_ps);
   EXPECT_EQ(pin(before, "z").transitions[0].arrival_ps, pin(after, "z").transitions[0].arrival_ps);
   EXPECT_FALSE(after.certified);  // caller has not affirmed full SDC coverage
+  auto invalid = rc;
+  invalid.nets.push_back(invalid.nets.front());
+  EXPECT_THROW(proxy.evaluate(&invalid), std::invalid_argument);
+  invalid = rc;
+  invalid.nets[0].nodes.push_back(invalid.nets[0].nodes.back());
+  invalid.nets[0].edges.push_back({1, 2, 1});
+  EXPECT_THROW(proxy.evaluate(&invalid), std::invalid_argument);
+  invalid = rc;
+  invalid.nets[0].nodes[1].pin = "z";  // a valid pin, but on another net
+  EXPECT_THROW(proxy.evaluate(&invalid), std::invalid_argument);
+  std::reverse(rc.nets.begin(), rc.nets.end());
+  const auto restored = proxy.evaluate(&rc);
+  EXPECT_EQ(pin(wired, "z").transitions[0].arrival_ps, pin(restored, "z").transitions[0].arrival_ps);
 }
 
 TEST(LateTiming, LoadIndependentDelayTablesExposeTheDelayOnlyWireApproximation) {

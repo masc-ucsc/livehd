@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
@@ -1680,6 +1681,8 @@ struct View {
   size_t                                    terminal_begin = 0;  // after cells and placement-only mask geometry
   std::set<std::string>                     constant_masters;
   std::vector<Endpoint>                     pins;
+  std::shared_ptr<const Rc_layout>          rc_layout;
+  std::vector<uint64_t>                     rc_pin_types;
   std::vector<Endpoint>                     drivers;
   std::map<Endpoint, std::vector<Endpoint>> nets;
   absl::flat_hash_map<Name, size_t>         terminal;
@@ -2290,19 +2293,29 @@ void make_arrays(View& v, const ph::Technology& tech) {
   v.ignored = prects_networks(tech, connectivity, v.prects);
   v.pins.clear();
   v.drivers.clear();
+  uint64_t rc_layout_hash = hash_text("physical-pin-layout-v1");
+  v.rc_pin_types.clear();
   for (const auto& [driver, sinks] : v.nets) {
     v.drivers.push_back(driver);
     auto append = [&](const Endpoint& e) {
       v.pins.push_back(e);
+      // Bind stable content identities once at the design boundary. RC sees
+      // only these numbers and dense pin IDs, never endpoint labels.
+      for (const auto part : {e.instance.view(), e.pin.view()}) {
+        rc_layout_hash = hash_util::combine64(rc_layout_hash, part.size());
+        rc_layout_hash = hash_text(part, rc_layout_hash);
+      }
+      v.rc_pin_types.push_back(0);
       d.flat_net2pin.push_back(d.pin2node.size());
       if (e.instance == "PIN") {
         d.pin2node.push_back(v.terminal_begin + v.terminal.at(e.pin));
         d.pin_offset_x.push_back(0);
         d.pin_offset_y.push_back(0);
       } else {
-        const auto  index = v.cell.at(e.instance);
-        const auto& c     = v.cells[index];
-        const auto [x, y] = offset(tech.macros.at(c.macro), e.pin, c.place.orientation, tech.dbu);
+        const auto  index     = v.cell.at(e.instance);
+        const auto& c         = v.cells[index];
+        v.rc_pin_types.back() = hash_text(e.pin.view(), hash_text(c.macro));
+        const auto [x, y]     = offset(tech.macros.at(c.macro), e.pin, c.place.orientation, tech.dbu);
         d.pin2node.push_back(index);
         d.pin_offset_x.push_back(x);
         d.pin_offset_y.push_back(y);
@@ -2326,7 +2339,12 @@ void make_arrays(View& v, const ph::Technology& tech) {
     const bool tree = is_tree_buffer(driver.instance)
                       || std::any_of(sinks.begin(), sinks.end(), [](const auto& s) { return is_tree_buffer(s.instance); });
     d.net_mask.push_back((tree || !v.ignored.ignored[v.drivers.size() - 1]) && !sinks.empty());
+    rc_layout_hash = hash_util::combine64(rc_layout_hash, v.pins.size());
   }
+  if (v.pins.size() > std::numeric_limits<Rc_pin_id>::max()) {
+    throw std::invalid_argument("too many physical pins");
+  }
+  v.rc_layout = std::make_shared<const Rc_layout>(Rc_layout{v.pins.size(), rc_layout_hash});
   d.build_maps();
   if (v.centroids) {
     std::vector<std::string> paths, masters;
@@ -3748,13 +3766,151 @@ ph::Rc_net steiner_rc(std::string driver, const std::vector<std::pair<std::strin
   return rc;
 }
 namespace {
+// The numerical RC step consumes only an immutable pin-ID layout and arrays.
+// Named timing adapters below bind the already-existing endpoint labels later.
+struct Numeric_rc_snapshot {
+  struct Fresh {
+    Rc_geometry     geometry;
+    Rc_cache::Built built;
+  };
+  Rc_cache::Snapshot cache;
+  std::vector<Fresh> fresh;
+  uint64_t           identity = 0;
+
+  template <class F>
+  void each_net(F&& f) const {
+    for (const auto& entry : fresh) {
+      f(entry.geometry, entry.built);
+    }
+    for (const auto& entry : cache.nets) {
+      f(entry->geometry, *entry->built);
+    }
+  }
+};
+uint64_t            rc_double_bits(double value) { return std::bit_cast<uint64_t>(value == 0 ? 0.0 : value); }
+Numeric_rc_snapshot estimate_numeric_rc(const Geometry_view& geometry, const Rc_policy& policy, bool full, Rc_cache* cache) {
+  const auto&              v      = geometry.view;
+  const auto&              design = geometry.design;
+  std::vector<Rc_geometry> nets;
+  nets.reserve(v.drivers.size());
+  for (size_t net = 0; net < v.drivers.size(); ++net) {
+    const int begin = design.flat_net2pin_start[net], end = design.flat_net2pin_start[net + 1];
+    if (end - begin < 2) {
+      continue;
+    }
+    Rc_geometry g;
+    g.driver = static_cast<Rc_pin_id>(begin);  // make_arrays puts the driver first
+    g.pins.reserve(end - begin);
+    for (int p = begin; p < end; ++p) {
+      const auto node   = design.pin2node[p];
+      const auto offset = geometry.pin_offset(p);
+      g.pins.emplace_back(static_cast<Rc_pin_id>(p), geometry.pin_position(p, offset));
+      if (size_t(node) < v.cells.size()) {
+        const auto pose = geometry.pose(node);
+        for (const uint64_t field : {v.rc_pin_types[p],
+                                     uint64_t(pose.width),
+                                     uint64_t(pose.height),
+                                     uint64_t(pose.orientation),
+                                     rc_double_bits(offset.first),
+                                     rc_double_bits(offset.second)}) {
+          g.load_identity = hash_util::combine64(g.load_identity, field);
+        }
+      }
+    }
+    nets.push_back(std::move(g));
+  }
+  const auto build = [&](const Rc_geometry& g, const Rc_policy& p) {
+    std::vector<std::pair<double, double>> xy;
+    xy.reserve(g.pins.size());
+    size_t driver = 0;
+    for (size_t i = 0; i < g.pins.size(); ++i) {
+      xy.push_back(g.pins[i].second);
+      if (g.pins[i].first == g.driver) {
+        driver = i;
+      }
+    }
+    Rc_cache::Built result;
+    result.rc = steiner_net(xy, driver, p.per_um, p.dbu, &result.approximate);
+    return result;
+  };
+  initialize_flute_tables();
+  Numeric_rc_snapshot result;
+  if (cache) {
+    result.cache = cache->update(v.rc_layout, std::move(nets), policy, build);
+  } else {
+    result.fresh.reserve(nets.size());
+    for (auto& net : nets) {
+      auto tree = build(net, policy);
+      result.fresh.push_back({std::move(net), std::move(tree)});
+    }
+  }
+  // Version the numerical identity independently of the historical text hash.
+  // The layout's caller-supplied identity makes dense ordinals safe across runs;
+  // live RC cache entries additionally belong to this exact layout generation.
+  auto       hash = hash_util::combine64(0x72635f70696e7632ULL, v.rc_layout->identity);
+  const auto mix  = [&](uint64_t value) { hash = hash_util::combine64(hash, value); };
+  mix(full);
+  mix(rc_double_bits(policy.dbu));
+  for (const auto value : policy.per_um) {
+    mix(rc_double_bits(value));
+  }
+  result.each_net([&](const Rc_geometry& g, const Rc_cache::Built& built) {
+    mix(g.driver);
+    mix(g.pins.size());
+    for (const auto& [pin, xy] : g.pins) {
+      mix(pin);
+      mix(rc_double_bits(xy.first));
+      mix(rc_double_bits(xy.second));
+    }
+    const auto& tree = built.rc;
+    mix(tree.node_cap_ff.size());
+    for (const auto cap : tree.node_cap_ff) {
+      mix(rc_double_bits(cap));
+    }
+    mix(tree.edges.size());
+    for (const auto& edge : tree.edges) {
+      mix(edge.from);
+      mix(edge.to);
+      mix(rc_double_bits(edge.resistance_ohm));
+    }
+  });
+  result.identity = hash;
+  return result;
+}
+
+// Compatibility boundary for the existing named OpenTimer/physical feedback
+// interface. Labels already belong to the placement view; RC never builds,
+// compares, hashes or retains them. Tree pins are its input IDs, followed by
+// unlabeled junctions, so binding is a vector lookup without a name map.
+std::shared_ptr<ph::Parasitics> bind_rc_timing(const Numeric_rc_snapshot& snapshot, const View& v, bool approximate) {
+  auto result         = std::make_shared<ph::Parasitics>();
+  result->approximate = approximate;
+  result->identity    = std::format("{:016x}", snapshot.identity);
+  result->nets.reserve(snapshot.fresh.size() + snapshot.cache.nets.size());
+  const auto label = [&](Rc_pin_id id) { return Pin_label(v.pins[id].instance, v.pins[id].pin); };
+  snapshot.each_net([&](const Rc_geometry& g, const Rc_cache::Built& built) {
+    const auto& tree = built.rc;
+    ph::Rc_net  net;
+    net.driver         = label(g.driver);
+    net.wire_length_um = tree.wire_length_um;
+    net.nodes.reserve(tree.node_cap_ff.size());
+    for (size_t i = 0; i < tree.node_cap_ff.size(); ++i) {
+      net.nodes.push_back({i < g.pins.size() ? label(g.pins[i].first) : Pin_label(), tree.node_cap_ff[i]});
+    }
+    net.edges.reserve(tree.edges.size());
+    for (const auto& edge : tree.edges) {
+      net.edges.push_back({edge.from, edge.to, edge.resistance_ohm});
+    }
+    result->approximate |= built.approximate;
+    result->nets.push_back(std::move(net));
+  });
+  return result;
+}
+
 std::shared_ptr<ph::Parasitics> estimate_rc(const Geometry_view& geometry, const ph::Technology& tech, const Options& options,
                                             ph::Pin_locations* pin_locations, Rc_cache* cache = nullptr,
                                             Rc_reuse_stats* reuse = nullptr, bool provenance = true) {
-  const auto& v             = geometry.view;
-  const auto& design        = geometry.design;
-  auto        result        = std::make_shared<ph::Parasitics>();
-  result->approximate       = !options.full;
+  const auto&  v            = geometry.view;
   const auto   wire         = technology_wire_rc(tech,
                                                  options.liberty,
                                                  options.tech_rc_file,
@@ -3795,91 +3951,19 @@ std::shared_ptr<ph::Parasitics> estimate_rc(const Geometry_view& geometry, const
       throw std::runtime_error("cannot write technology RC provenance");
     }
   }
-  initialize_flute_tables();
-  uint64_t hash
-      = hash_text(std::format("{}:{}:{}:{}:{}:{}", horizontal_r, horizontal_c, vertical_r, vertical_c, options.full, tech.dbu));
-  // Reuse the formatting storage across pins and RC edges. The byte stream is
-  // unchanged, so this does not change the persistent RC identity.
-  std::string hash_buffer;
-  hash_buffer.reserve(256);
-  const auto hash_format = [&]<typename... Args>(std::format_string<Args...> format, Args&&... args) {
-    hash_buffer.clear();
-    std::format_to(std::back_inserter(hash_buffer), format, std::forward<Args>(args)...);
-    hash = hash_text(hash_buffer, hash);
-  };
-  result->nets.reserve(v.drivers.size());
-  const auto append = [&](ph::Rc_net rc, bool approximate) {
-    result->approximate |= approximate;
-    for (const auto& node : rc.nodes) {
-      hash_format("{}:{:.17g};", node.pin, node.capacitance_ff);
-    }
-    for (const auto& edge : rc.edges) {
-      hash_format("{}:{}:{:.17g};", edge.from, edge.to, edge.resistance_ohm);
-    }
-    result->nets.push_back(std::move(rc));
-  };
-  // Keep identity hashing in its historical per-net order under either path.
-  std::vector<Rc_geometry>                                       geometries;
-  std::vector<std::pair<std::string, std::pair<double, double>>> pins;
-  for (size_t net = 0; net < v.drivers.size(); ++net) {
-    const int begin = design.flat_net2pin_start[net], end = design.flat_net2pin_start[net + 1];
-    if (end - begin < 2) {
-      continue;
-    }
-    pins.clear();
-    uint64_t load_hash = hash_util::kFnv1a64_offset;
-    for (int p = begin; p < end; ++p) {
-      const auto node       = design.pin2node[p];
-      const auto pin_offset = geometry.pin_offset(p);
-      const auto [x, y]     = geometry.pin_position(p, pin_offset);
-      pins.emplace_back(v.pins[p].label(), std::pair{x, y});
-      if (pin_locations) {
-        pin_locations->emplace(pins.back().first, std::pair{x, y});
-      }
-      if (!cache) {
-        hash_format("{}:{}:{};", pins.back().first, std::llround(x), std::llround(y));
-      }
-      if (cache && size_t(node) < v.cells.size()) {
-        const auto& cell = v.cells[node];
-        load_hash        = hash_text(std::format("{}:{}:{}:{}:{}:{:.17g}:{:.17g};",
-                                                 cell.macro,
-                                                 cell.place.width,
-                                                 cell.place.height,
-                                                 static_cast<unsigned>(geometry.pose(node).orientation),
-                                                 v.pins[p].pin,
-                                                 pin_offset.first,
-                                                 pin_offset.second),
-                                     load_hash);
-      }
-    }
-    if (cache) {
-      geometries.push_back({v.drivers[net].label(), pins, std::format("{:016x}", load_hash)});
-      continue;
-    }
-    bool approximate = false;
-    auto rc          = steiner_rc(v.drivers[net].label(), pins, wire, tech.dbu, &approximate);
-    append(std::move(rc), approximate);
+  const Rc_policy policy{per_um(wire), double(tech.dbu), wire.source};
+  const auto      numeric = estimate_numeric_rc(geometry, policy, options.full, cache);
+  if (reuse) {
+    *reuse = numeric.cache.stats;
   }
-  if (cache) {
-    const Rc_policy policy{per_um(wire), double(tech.dbu), wire.source};
-    const auto      snapshot = cache->update(std::move(geometries), policy, [&](const Rc_geometry& net, const Rc_policy&) {
-      Rc_cache::Built built;
-      built.rc = steiner_rc(net.driver, net.pins, wire, tech.dbu, &built.approximate);
-      return built;
+  if (pin_locations) {
+    numeric.each_net([&](const Rc_geometry& g, const Rc_cache::Built&) {
+      for (const auto& [id, xy] : g.pins) {
+        pin_locations->emplace(Pin_label(v.pins[id].instance, v.pins[id].pin), xy);
+      }
     });
-    if (reuse) {
-      *reuse = snapshot.stats;
-    }
-    hash = hash_text(std::format("{}:{}:{}:{}:{}:{}", horizontal_r, horizontal_c, vertical_r, vertical_c, options.full, tech.dbu));
-    for (const auto& entry : snapshot.nets) {
-      for (const auto& [name, xy] : entry->geometry.pins) {
-        hash_format("{}:{}:{};", name, std::llround(xy.first), std::llround(xy.second));
-      }
-      append(entry->built->rc, entry->built->approximate);
-    }
   }
-  result->identity = std::format("{:016x}", hash);
-  return result;
+  return bind_rc_timing(numeric, v, !options.full);
 }
 // The wire trees of the nets of a placement view as numbers, for a ranker that never needs them as strings. The identity
 // (which pins are on which tree, by label) is built once, while the view keeps its connectivity; each call then only

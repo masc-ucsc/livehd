@@ -5,6 +5,10 @@
 # frontend, with yosys-slang retained as a compatibility alias.
 
 set -u
+# Pinned to inou.cgen.sim: this test is about that flow's generated sources, color plan, tune/profile
+# machinery or its default undefined-access warnings, none of which the LNAST sim flow (the `lhd sim`
+# default) produces. See AGENTS.md, "Sim flow".
+export LHD_SIM_LNAST=0
 
 LHD=lhd/lhd
 SV=lhd/tests/trivial.v

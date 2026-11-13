@@ -279,13 +279,32 @@ public:
   // its trivial invalid), so it is not a known-const here and never folds —
   // it is runtime-divergent, NOT nil.
   std::optional<Dlop> known_const_scalar(std::string_view name) const {
-    if (name.empty() || !is_known_const(name)) {
+    // ONE scope walk (was is_known_const + get_bundle + get_trivial: three). Same answer: the trivial value must
+    // be valid and fully known, and the bundle it lives in a trivial scalar.
+    if (name.empty()) {
       return std::nullopt;
     }
-    if (auto b = get_bundle(name); b && !b->is_trivial_scalar()) {
+    const auto [var, field] = get_var_field(name);
+    const auto* slot        = find_slot_read(var);
+    if (slot == nullptr) {
       return std::nullopt;
     }
-    return get_trivial(name);
+    const auto path = bundle_path::of_string(field);
+    if (!(*slot)->has_trivial(path)) {
+      return std::nullopt;
+    }
+    const Dlop& v = (*slot)->get_trivial(path);
+    if (v.is_invalid() || v.has_unknowns()) {
+      return std::nullopt;
+    }
+    if (var == name) {
+      if (!(*slot)->is_trivial_scalar()) {
+        return std::nullopt;
+      }
+    } else if (auto sub = (*slot)->get_bundle(path); sub && !sub->is_trivial_scalar()) {
+      return std::nullopt;
+    }
+    return v;
   }
 
   // The COMPTIME read: same trivial-scalar binding as known_const_scalar, but
@@ -295,13 +314,26 @@ public:
   // inlining, where substituting x-bits is LEC-breaking; this one feeds
   // comptime-only consumers (cputs) that merely render the value as text.
   std::optional<Dlop> comptime_scalar(std::string_view name) const {
-    if (name.empty() || !has_trivial(name)) {
+    if (name.empty()) {
       return std::nullopt;
     }
-    if (auto b = get_bundle(name); b && !b->is_trivial_scalar()) {
+    const auto [var, field] = get_var_field(name);  // one scope walk (was has_trivial + get_bundle + get_trivial)
+    const auto* slot        = find_slot_read(var);
+    if (slot == nullptr) {
       return std::nullopt;
     }
-    if (const auto& v = get_trivial(name); !v.is_invalid()) {
+    const auto path = bundle_path::of_string(field);
+    if (!(*slot)->has_trivial(path)) {
+      return std::nullopt;
+    }
+    if (var == name) {
+      if (!(*slot)->is_trivial_scalar()) {
+        return std::nullopt;
+      }
+    } else if (auto sub = (*slot)->get_bundle(path); sub && !sub->is_trivial_scalar()) {
+      return std::nullopt;
+    }
+    if (const auto& v = (*slot)->get_trivial(path); !v.is_invalid()) {
       return v;
     }
     return std::nullopt;
@@ -401,6 +433,10 @@ private:
   // An uncertain scope lies between the innermost scope and `decl` (exclusive).
   bool         crosses_uncertain_scope(const Scope* decl) const;
   const Scope* find_decl_scope_read(std::string_view var) const;
+  // The same read-transparent walk, returning the varmap slot itself: the caller that needs the bundle
+  // (has_trivial, get_trivial, get_bundle, ...) would otherwise hash `var` once to find the scope and a
+  // second time to fetch the slot. nullptr: not declared.
+  const std::shared_ptr<Bundle>* find_slot_read(std::string_view var) const;
 
 public:
   // True when `var` is visible only ACROSS a Function barrier:

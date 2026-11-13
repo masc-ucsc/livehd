@@ -1787,8 +1787,12 @@ private:
     if (info.bound_din.is_invalid() || info.early_readers.empty()) {
       return;
     }
-    livehd::graph_util::split_packed_selfref_wire(g_, info.buf, info.bound_din, info.early_readers, &comb_dependencies_);
-    if (!lnast_->is_timecheck_off() && livehd::graph_util::comb_pin_depends_on(info.bound_din, info.buf, &comb_dependencies_)) {
+    bool cycle_gone = false;
+    livehd::graph_util::split_packed_selfref_wire(g_, info.buf, info.bound_din, info.early_readers, &comb_dependencies_, &cycle_gone);
+    // `cycle_gone`: the splitter's stop check just proved this very pair independent on this very graph;
+    // asking again (a forward closure of the buffer's fanout plus a backward walk) answers the same.
+    if (!lnast_->is_timecheck_off() && !cycle_gone
+        && livehd::graph_util::comb_pin_depends_on(info.bound_din, info.buf, &comb_dependencies_)) {
       // Lead with the established `combinational loop` vocabulary -- the same
       // words the time-checker's SCC uses at the end of this file. This IS
       // one; it is simply caught earlier and with a better source anchor.
@@ -9165,13 +9169,23 @@ private:
         inst_name = lhs_var_of_temp_dst(nid, dst_txt);
       }
       if (!callsite_inst.empty()) {
-        sub.set_name(callsite_inst + callsite_suffix);
+        inst_name = callsite_inst + callsite_suffix;
       } else if (!inst_name.empty()) {
-        sub.set_name(inst_name + callsite_suffix);
+        inst_name += callsite_suffix;
       } else {
         std::string suffix = is_tmp ? dst_txt.substr(1) : dst_txt;
-        sub.set_name("u_" + callee_name + "_" + suffix + callsite_suffix);
+        inst_name = "u_" + callee_name + "_" + suffix + callsite_suffix;
       }
+      // Reassigning a call result (including calls in separate branches) can
+      // give distinct sites the same SSA-stripped base. Each Sub still needs
+      // a distinct hierarchy path: placement flattens it directly, without
+      // cgen's identifier disambiguation. Check suffixes too, since a source
+      // variable or explicit instance name may already use one.
+      std::string unique_name = inst_name;
+      for (uint32_t k = 1; !call_instance_names_.insert(unique_name).second; ++k) {
+        unique_name = absl::StrCat(inst_name, "__call", k);
+      }
+      sub.set_name(unique_name);
     }
 
     // An explicit rolled_for supplies its index per occurrence, so that one
@@ -12976,6 +12990,7 @@ private:
   int                                                 array_versions_ = 0;  // version_array_mem ordinal
   std::string                                         last_retired_key_;    // retire_array_mem's last version key
   absl::flat_hash_set<std::string>                    mem_node_names_;      // unique_mem_name  // packed array value -> its type=2 memory
+  absl::flat_hash_set<std::string>                    call_instance_names_;
   absl::flat_hash_set<std::string>                    comptime_array_names_;
   absl::flat_hash_set<std::string>                    comptime_scalar_names_;
   absl::flat_hash_map<int32_t, int>                   mem_write_site_counts_;

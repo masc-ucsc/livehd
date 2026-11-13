@@ -82,6 +82,7 @@ struct Dut {
   // member holding its previous level (`prev`, "" for the reference clock). Both
   // parallel to `inputs`.
   std::vector<bool>                     inputs_clock;
+  bool                                  lnast_flow = false;  // the iface came from the LNAST sim flow (`"gen":"lnast-1"`)
   std::vector<std::string>              inputs_prev;
   std::vector<bool>                     inputs_s, outputs_s, regs_s;     // signed?
   std::vector<int>                      inputs_dw, outputs_dw, regs_dw;  // source-DECLARED width
@@ -184,6 +185,7 @@ bool parse_iface(const std::string& path, Dut& d, std::string& err) {
     return v.HasMember(k) && v[k].IsBool() ? v[k].GetBool() : dflt;
   };
 
+  d.lnast_flow = doc.HasMember("gen") && doc["gen"].IsString() && std::string_view(doc["gen"].GetString()).starts_with("lnast");
   if (doc.HasMember("io") && doc["io"].IsArray()) {
     for (const auto& e : doc["io"].GetArray()) {
       if (!e.IsObject()) {
@@ -1035,8 +1037,8 @@ public:
     for (const auto& [var, m] : inst_of_var) {
       includes_out.insert(duts_.at(m).hpp);
       o << "  auto _dut_storage_" << var << " = std::make_unique<" << duts_.at(m).cls << ">(); auto& " << var << " = *_dut_storage_"
-        << var << "; __lhd_sim_initializing = true; try { " << var
-        << ".reset_cycle(_init_zero); } catch (...) { __lhd_sim_initializing = false; throw; } __lhd_sim_initializing = false;\n";
+        << var << "; __lhd_sim_initializing = true; try { __lhd_reset_dut(" << var
+        << "); } catch (...) { __lhd_sim_initializing = false; throw; } __lhd_sim_initializing = false;\n";
       if (!vcd_dir_.empty()) {
         // one VCD per test: <vcd_dir>/<test>.vcd (suffixed by instance when >1).
         // Stash the path; set it immediately for a whole-run trace, but for a
@@ -1646,6 +1648,11 @@ private:
     {
       const Dut& td = duts_.at(inst_of_var.at(var));
       if (td.has_input(fld)) {
+        if (write && td.lnast_flow && td.is_clock_input(fld)) {
+          // The LNAST flow's `step` is a whole period of the one root clock; the levels a testbench drives
+          // onto a clock port (explicit edges, a clock as data) are not modeled by it.
+          fail("the testbench drives clock input '" + var + "." + fld + "' explicitly (explicit clock edges)");
+        }
         if (!write && td.is_clock_input(fld) && poked_.count({var, fld}) == 0) {
           // A Clock input the test never drives is auto-wired to the tick's
           // clock: in simulation its value is that clock's CYCLE COUNT (rising
@@ -4420,6 +4427,12 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
   // smaller `max` would otherwise delete checkpoints an earlier long run saved.
   o << "static std::set<std::string> _ckpt_written;\n";
   o << "static bool _init_zero = false;\n";
+  // Power-on of a DUT instance. A class that also takes the run-time sim.unknown_zero (the LNAST flow's, which
+  // draws its `?` literals at power-on) gets it; inou.cgen.sim's classes fold it into the code instead.
+  o << "template <class _D> static void __lhd_reset_dut(_D& _d) {\n"
+       "  if constexpr (requires { _d.reset_cycle(_init_zero, __lhd_unknown_zero); }) { _d.reset_cycle(_init_zero, __lhd_unknown_zero); }\n"
+       "  else { _d.reset_cycle(_init_zero); }\n"
+       "}\n";
   o << "static unsigned long long _seed_used = " << kDefaultSeed << ";\n";
 
   // ---- observability (--list-signals / --probe / --break-when) ----

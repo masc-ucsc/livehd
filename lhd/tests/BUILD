@@ -3245,7 +3245,41 @@ _SIM_WARN_CASES = [
         "llvm",
     ]
     for case in _SIM_WARN_CASES
+] + [
+    # The LNAST flow (the `lhd sim` default), required: its own undefined-access sites. The `mem` case
+    # is a compile-time rejection, the same for every flow.
+    sh_test(
+        name = "sim_warn_undefined_lnast_" + case,
+        size = "medium",
+        srcs = ["sim_warn_undefined_test.sh"],
+        args = [
+            "lnast",
+            case,
+        ],
+        data = glob([
+            "sim_warn_undefined/*.v",
+            "sim_warn_undefined/*.prp",
+        ]) + ["//lhd"],
+        env = {"LHD": "lhd/lhd"},
+    )
+    for case in [
+        "div",
+        "vmem",
+    ]
 ]
+
+# The LNAST sim flow: a clean `latch & clk` clock gate runs, a glitchy one is declined, and memories
+# with non-zero images reload on reset in each state layout.
+sh_test(
+    name = "sim_lnast_gate_image_test",
+    size = "medium",
+    srcs = ["sim_lnast_gate_image_test.sh"],
+    data = glob([
+        "sim_lnast_gate_image/*.v",
+        "sim_lnast_gate_image/*.prp",
+    ]) + ["//lhd"],
+    env = {"LHD": "lhd/lhd"},
+)
 
 test_suite(
     name = "sim_warn_undefined_test",
@@ -3256,6 +3290,12 @@ test_suite(
             "llvm",
         ]
         for case in _SIM_WARN_CASES
+    ] + [
+        "sim_warn_undefined_lnast_" + case
+        for case in [
+            "div",
+            "vmem",
+        ]
     ],
 )
 

@@ -88,4 +88,45 @@ namespace livehd {
   return r;
 }
 
+// The C++ spelling of a simulator port path, shared by inou.cgen.sim (Cgen_sim::cpp_port_path) and
+// the LNAST flow's class (pass/lnast_llvm/lnast_sim.cpp): the first dot segment is the bundle member,
+// the rest is ONE member whose dots became `_` (`noc_req_o.ar.len` is `noc_req_o.ar_len`). Existing
+// testbenches and the driver generator (inou/prp/prp_sim.cpp) are written against this spelling.
+[[nodiscard]] inline std::string cpp_port_path(std::string_view name) {
+  const auto dot = name.find('.');
+  if (dot == std::string_view::npos) {
+    return cpp_ident(name);
+  }
+  return cpp_ident(name.substr(0, dot)) + "." + cpp_ident(name.substr(dot + 1));
+}
+
+// A C++ string literal (quotes included) that holds `text` exactly.
+[[nodiscard]] inline std::string cpp_string_literal(std::string_view text) {
+  std::string result{"\""};
+  result.reserve(text.size() + 2);
+  for (const unsigned char ch : text) {
+    switch (ch) {
+      case '\\': result += "\\\\"; break;
+      case '"' : result += "\\\""; break;
+      case '\n': result += "\\n"; break;
+      case '\r': result += "\\r"; break;
+      case '\t': result += "\\t"; break;
+      default:
+        if (ch < 0x20 || ch == 0x7f) {
+          // Exactly three octal digits cannot consume a following source character. A C++ `\xNN`
+          // escape has no fixed length, so a literal byte followed by [0-9a-fA-F] could silently
+          // become another value.
+          result += '\\';
+          result += static_cast<char>('0' + ((ch >> 6) & 0x7));
+          result += static_cast<char>('0' + ((ch >> 3) & 0x7));
+          result += static_cast<char>('0' + (ch & 0x7));
+        } else {
+          result += static_cast<char>(ch);
+        }
+    }
+  }
+  result += '"';
+  return result;
+}
+
 }  // namespace livehd

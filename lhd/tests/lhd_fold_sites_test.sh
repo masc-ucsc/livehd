@@ -16,6 +16,10 @@
 # The results stay sound under every engine (mapped netlists and the LEC are PROVEN), compile.sweep follows the
 # engine too, and the synthesis region cache never replays one engine's regions for another.
 set -u
+# Pinned to inou.cgen.sim: this test is about that flow's generated sources, color plan, tune/profile
+# machinery or its default undefined-access warnings, none of which the LNAST sim flow (the `lhd sim`
+# default) produces. See AGENTS.md, "Sim flow".
+export LHD_SIM_LNAST=0
 
 LHD="${LHD:-lhd/lhd}"
 LIB=inou/prp/tests/abc/test.lib

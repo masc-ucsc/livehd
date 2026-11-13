@@ -538,15 +538,15 @@ void uPass_attributes::read_scalar_type_at_cursor(Numeric_kind& kind, uint32_t& 
     is_real_type = true;
     if (move_to_child()) {
       if (Lnast_ntype::is_const(get_raw_ntype())) {
-        auto v = Dlop::from_pyrope(current_text());
-        if (v->is_integer()) {
-          range_max = *v;
+        const auto& v = Dlop::from_pyrope_cached(current_text());  // the same bound texts recur per statement
+        if (v.is_integer()) {
+          range_max = v;
         }
       }
       if (move_to_sibling() && Lnast_ntype::is_const(get_raw_ntype())) {
-        auto v = Dlop::from_pyrope(current_text());
-        if (v->is_integer()) {
-          range_min = *v;
+        const auto& v = Dlop::from_pyrope_cached(current_text());
+        if (v.is_integer()) {
+          range_min = v;
         }
       }
       move_to_parent();

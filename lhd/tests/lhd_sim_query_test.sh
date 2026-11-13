@@ -18,6 +18,10 @@
 # Structural and runtime checks use lhd's declared runtime dependencies.
 
 set -u
+# Pinned to inou.cgen.sim: this test is about that flow's generated sources (per-module bodies, VCD scaffolding,
+# color scheduler, query interface files); the LNAST sim flow (the `lhd sim` default) generates none of them.
+# See AGENTS.md, "Sim flow".
+export LHD_SIM_LNAST=0
 
 LHD="${LHD:-lhd/lhd}"
 W="${TEST_TMPDIR:-/tmp/lhd_sim_query_$$}"

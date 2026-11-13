@@ -9,7 +9,7 @@ cc_library(
     hdrs = ["rc_cache.hpp"],
     copts = COPTS,
     visibility = ["//visibility:public"],
-    deps = ["//core"],
+    deps = [":steiner_topology"],
 )
 
 py_library(

@@ -20,10 +20,12 @@ public:
   // A graph outside it is reported in `skipped` (name, reason) and, when `warn`, as a `graph-skipped`
   // diagnostic. A Sub instance cycle is resolved by splicing the stuck instances into the graph IN
   // MEMORY, so hand this a private copy of a library that must stay as it is. Returns false when
-  // `passes` names an unknown stream pass.
+  // `passes` names an unknown stream pass. `sim_markers` (the `lhd sim` flow): keep each `lgundef`
+  // marker as a call pass/lnast_llvm reports (sim.warn_undefined); tolg does not read that call.
   static bool lower(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, std::string_view passes,
                     std::vector<std::shared_ptr<Lnast>>&              lnasts,
-                    std::vector<std::pair<std::string, std::string>>* skipped = nullptr, bool warn = true);
+                    std::vector<std::pair<std::string, std::string>>* skipped = nullptr, bool warn = true,
+                    bool sim_markers = false);
   explicit Pass_lg2lnast(const Eprp_var& var);
   static void setup();
 };

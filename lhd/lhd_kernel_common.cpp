@@ -2937,15 +2937,24 @@ std::vector<std::string> sim_into(Options& opts, Result& res, Eprp_var& var, con
     labels["top"] = top_full;  // only the top module emits the VCD
   }
   // The LNAST flow (pass/lnast_llvm/lnast_sim.hpp): lgraph -> typed LNAST -> native state kernels
-  // behind one thin class. It is replacing the inou.cgen.sim LLVM backend; until it covers
-  // everything that backend does it is selected with the developer switch LHD_SIM_LNAST: `1`
-  // requires it (a design it does not cover is an error), `auto` falls back to inou.cgen.sim.
-  if (const char* lnast_mode = livehd::debug::env<"LHD_SIM_LNAST">();
-      lnast_mode != nullptr && *lnast_mode != 0 && std::string_view(lnast_mode) != "0") {
+  // behind one thin class. It is the DEFAULT `lhd sim` backend; a design (or observation run) it
+  // does not cover yet falls back to inou.cgen.sim with a `lnast-fallback` progress note. The
+  // developer switch LHD_SIM_LNAST selects: unset/`auto` = LNAST flow with fallback, `1` = LNAST
+  // flow required (a design it does not cover is an error), `0` = inou.cgen.sim only.
+  const char* lnast_mode = livehd::debug::env<"LHD_SIM_LNAST">();
+  if (lnast_mode == nullptr || *lnast_mode == 0) {
+    lnast_mode = "auto";
+  }
+  // Only the `lhd sim` command takes the LNAST flow by default: `lhd compile --emit-dir sim:` hands the
+  // generated class to other tools (the equivalence-sim harness drives `dut.cycle()`), and that class API is
+  // inou.cgen.sim's. LHD_SIM_LNAST=1 asks for it anywhere.
+  const bool sim_command = opts.command == "sim";
+  if (std::string_view(lnast_mode) != "0" && !g_lnast_sim_off && (sim_command || std::string_view(lnast_mode) != "auto")) {
     const bool  required = std::string_view(lnast_mode) != "auto";
     std::string declined;
-    if (opts.sim_observe || (labels.contains("vcd") && !labels["vcd"].empty())) {
-      declined = "VCD and observation runs are not covered yet";
+    if (!opts.sim_probe.empty() || !opts.sim_break_when.empty() || !opts.sim_query.empty() || opts.sim_list_signals
+        || opts.sim_restart_cycle >= 0) {
+      declined = "probe, break-when, query, list-signals and restart runs are not covered yet";
     } else if (labels["backend"] == "slop") {
       declined = "sim.tune.backend=slop selects the reference C++ backend";
     } else {
@@ -2953,6 +2962,10 @@ std::vector<std::string> sim_into(Options& opts, Result& res, Eprp_var& var, con
       request.graphs = var.graphs;
       request.top    = top_full;
       request.odir   = odir;
+      request.vcd = labels.contains("vcd") && !labels["vcd"].empty();
+      if (auto uz = labels.find("unknown_zero"); uz != labels.end()) {
+        request.unknown_zero = uz->second == "true" || uz->second == "1" || uz->second == "on";
+      }
       for (const auto& [k, v] : opts.sets) {
         if (k == "pass.lg2lnast.passes") {
           request.passes = v;
@@ -3276,6 +3289,11 @@ std::string sim_llvm_link_tool() {
 // the pass writes a <name>.hpp interface + a <name>.cpp body per module, here we
 // add the manifest (content hashes of every generated source and kernel
 // object). There is no bazel/ninja project: `lhd sim` rebuilds the directory.
+bool lnast_sim_may_fall_back() {
+  const char* mode = livehd::debug::env<"LHD_SIM_LNAST">();
+  return mode == nullptr || *mode == 0 || std::string_view(mode) == "auto";
+}
+
 void emit_sim_outputs(Options& opts, Result& res, Eprp_var& var) {
   const auto* sim_out = find_slot(opts.emit_dirs, "sim");
   if (sim_out == nullptr) {

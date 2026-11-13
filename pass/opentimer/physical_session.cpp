@@ -49,6 +49,36 @@ struct Physical_session::Impl : Pass_opentimer {
   bool                                                             exclusions_dirty = true;
   std::shared_ptr<const livehd::timing::Feedback::Ranking::Layout> ranking_layout;
   std::vector<const ot::Pin*>                                      ranking_pins;
+  struct Bound_net {
+    size_t              driver = 0;
+    std::vector<size_t> pins;  // feedback pin IDs for non-junction nodes, in RC order
+  };
+  std::vector<Bound_net> bound_nets;
+  bool                   pin_bindings_dirty = true;
+
+  void bind_physical_pins() {
+    bound_nets.clear();
+    bound_nets.reserve(physical_rc_->nets.size());
+    for (const auto& net : physical_rc_->nets) {
+      Bound_net  bound;
+      const auto bind = [&](const Pin_label& label) {
+        const auto index = physical_feedback_index_->find(label);
+        if (index >= physical_timing_pins_.size()) {
+          throw std::runtime_error("physical pin has no timing identity: " + label);
+        }
+        return index;
+      };
+      bound.driver = bind(net.driver);
+      for (const auto& node : net.nodes) {
+        if (!node.pin.empty()) {
+          const auto index = bind(node.pin);
+          bound.pins.push_back(index);
+        }
+      }
+      bound_nets.push_back(std::move(bound));
+    }
+    pin_bindings_dirty = false;
+  }
 
   explicit Impl(const Eprp_var& options, int threads) : Pass_opentimer(options) {
     if (threads < 0) {
@@ -138,6 +168,7 @@ struct Physical_session::Impl : Pass_opentimer {
     timing_net_nodes_.clear();
     overwrite_dpin2net.clear();
     remember_cells();
+    bind_physical_pins();
     ++stats.builds;
   }
 
@@ -193,7 +224,11 @@ struct Physical_session::Impl : Pass_opentimer {
             physical_rc_->cells.end(),
             [](const auto& identity, const auto& cell) { return identity.first == cell.name && identity.second == cell.master; })
         && same_connectivity()) {
-      update_bound_rc();
+      if (pin_bindings_dirty) {
+        finish_update(graph, false);
+      } else {
+        update_bound_rc();
+      }
       return;
     }
     std::map<std::string, std::string> next_masters;
@@ -346,6 +381,7 @@ struct Physical_session::Impl : Pass_opentimer {
       timer.set_ideal_clocks(std::move(ideal), {physical_clock_endpoints_.begin(), physical_clock_endpoints_.end()});
     }
     apply_physical_rc(graph);
+    bind_physical_pins();
   }
 
   void update_bound_rc() {
@@ -359,12 +395,14 @@ struct Physical_session::Impl : Pass_opentimer {
         continue;
       }
       ot::BoundRc mapped;
-      mapped.driver = physical_timing_pin(net.driver.str()).idx();
+      const auto& bound = bound_nets.at(index);
+      mapped.driver     = physical_timing_pins_[bound.driver]->idx();
       mapped.nodes.reserve(net.nodes.size());
       mapped.edges.reserve(net.edges.size());
+      size_t pin = 0;
       for (size_t i = 0; i < net.nodes.size(); ++i) {
         const auto& node = net.nodes[i];
-        mapped.nodes.push_back({node.pin.empty() ? ot::BoundRc::no_pin : physical_timing_pin(node.pin.str()).idx(),
+        mapped.nodes.push_back({node.pin.empty() ? ot::BoundRc::no_pin : physical_timing_pins_[bound.pins.at(pin++)]->idx(),
                                 static_cast<float>(node.capacitance_ff)});
       }
       for (const auto& edge : net.edges) {
@@ -875,6 +913,7 @@ struct Physical_session::Impl : Pass_opentimer {
     // when ranking resumes after the trial journal has been rolled back.
     ranking_layout.reset();
     ranking_pins.clear();
+    pin_bindings_dirty = true;
     if (!whatif_) {
       whatif_ = std::make_unique<Whatif_impl>(*this);
     }
@@ -965,16 +1004,10 @@ struct Physical_session::Impl : Pass_opentimer {
       layout->labels = physical_feedback_index_->labels;
       ranking_pins   = physical_timing_pins_;
       layout->net_offsets.reserve(physical_rc_->nets.size() + 1);
-      for (const auto& net : physical_rc_->nets) {
+      for (const auto& net : bound_nets) {
         layout->net_offsets.push_back(layout->net_pins.size());
-        for (const auto& node : net.nodes) {
-          if (!node.pin.empty()) {
-            const auto index = layout->find(node.pin.str());
-            if (index == layout->labels.size()) {
-              throw std::runtime_error("physical ranking pin has no timing identity: " + node.pin);
-            }
-            layout->net_pins.push_back(index);
-          }
+        for (const auto& pin : net.pins) {
+          layout->net_pins.push_back(pin);
         }
       }
       layout->net_offsets.push_back(layout->net_pins.size());

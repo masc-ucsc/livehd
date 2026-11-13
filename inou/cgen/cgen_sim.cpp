@@ -1264,13 +1264,8 @@ Native_layout native_layout_of(std::vector<Native_field> fields) {
 }
 }  // namespace
 
-std::string Cgen_sim::cpp_port_path(std::string_view name) {
-  const auto dot = name.find('.');
-  if (dot == std::string_view::npos) {
-    return cpp_id(name);
-  }
-  return absl::StrCat(cpp_id(name.substr(0, dot)), ".", cpp_id(name.substr(dot + 1)));
-}
+// livehd::cpp_port_path (core/cpp_ident.hpp): the LNAST flow's class spells its ports with it too.
+std::string Cgen_sim::cpp_port_path(std::string_view name) { return livehd::cpp_port_path(name); }
 
 // Delegates to livehd::cpp_ident (core/cpp_ident.hpp) so this and prp_sim's
 // manifest lookup cannot drift: the member is DECLARED here and REFERENCED
@@ -1640,33 +1635,7 @@ std::string sim_const_expr(std::string_view pyrope_text, std::string_view width)
   return absl::StrCat("([]{ constexpr auto _k = Slop<", width, ">::from_pyrope(\"", pyrope_text, "\"); return _k; }())");
 }
 
-std::string cpp_string_literal(std::string_view text) {
-  std::string result{"\""};
-  result.reserve(text.size() + 2);
-  for (const unsigned char ch : text) {
-    switch (ch) {
-      case '\\': result += "\\\\"; break;
-      case '"' : result += "\\\""; break;
-      case '\n': result += "\\n"; break;
-      case '\r': result += "\\r"; break;
-      case '\t': result += "\\t"; break;
-      default:
-        if (ch < 0x20 || ch == 0x7f) {
-          // Exactly three octal digits cannot consume a following source
-          // character. A C++ `\\xNN` escape has no fixed length, so a literal
-          // byte followed by [0-9a-fA-F] could silently become another value.
-          result += '\\';
-          result += static_cast<char>('0' + ((ch >> 6) & 0x7));
-          result += static_cast<char>('0' + ((ch >> 3) & 0x7));
-          result += static_cast<char>('0' + (ch & 0x7));
-        } else {
-          result += static_cast<char>(ch);
-        }
-    }
-  }
-  result += '"';
-  return result;
-}
+using livehd::cpp_string_literal;  // core/cpp_ident.hpp, shared with the LNAST flow
 }  // namespace
 
 const Cgen_sim::Frame_layout& Cgen_sim::frame_layout(const hhds::Graph* def) {

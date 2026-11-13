@@ -24,6 +24,8 @@ struct Sim_request {
   std::vector<std::string>                  duts;
   std::string                               odir;    // the simulator directory (`<workdir>/sim`)
   std::string                               passes;  // LNAST stream passes (pass.lg2lnast.passes)
+  bool                                      unknown_zero = false;  // sim.unknown_zero: `?` bits are 0, else drawn once per run
+  bool                                      vcd          = false;  // sim.vcd: the class writes a VCD of its ports and registers
 };
 
 struct Sim_emitted {

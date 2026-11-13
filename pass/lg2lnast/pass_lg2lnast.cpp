@@ -12,6 +12,7 @@
 #include "absl/container/flat_hash_set.h"
 #include "debug_env.hpp"
 #include "diag.hpp"
+#include "hhds/attrs/srcid.hpp"
 #include "hhds/graph.hpp"
 #include "inline_sub.hpp"
 #include "lnast.hpp"
@@ -40,6 +41,10 @@ public:
   // each top-level statement as soon as it is finished (see lnast/lnast_stream.hpp).
   std::shared_ptr<Lnast> run(livehd::lnast_stream::Sink* stream = nullptr);
   std::string            why;
+  // `lhd sim` only (Pass_lg2lnast::lower sim_markers): an `lgundef` marker (the slang reader's
+  // out-of-range memory access, a sim.warn_undefined site) is kept as `fcall(<marker name>, lgundef,
+  // store(cond, c))`, which pass/lnast_llvm reports. Otherwise it is dropped: tolg has no such module.
+  bool                   sim_markers = false;
 
 private:
   hhds::Graph&   graph_;
@@ -127,9 +132,24 @@ private:
     hhds::Pin_class        update;     // whole-array next-state bus (size*bits, entry 0 low)
     hhds::Pin_class        update_en;
     bool                   has_zero_image = false;
+    std::string            image_text;  // a non-zero constant image (size*bits packed, entry 0 low); empty: none
     hhds::Pin_class        reset;  // the (active-high) reset driver, invalid = none
     bool                   async_reset = false;
     int                    wensize     = 1;  // write-enable lanes of `bits/wensize` bits each
+    // A combinational array (memory type 2, the front end's `mut a:[N]T`): no storage and no clock. Its
+    // contents are ONE packed bus value (entry 0 low): `base` (the `update` bus, else the image, else 0)
+    // with the write ports applied in port (program) order; read port r sees the first `rd_prefix[r]`
+    // writes (the `fwd` matrix row), the whole-array read all of them. `chain[k]` names the bus after k
+    // writes, built when first needed (its operands exist by then: lower_cells waits for them).
+    // A REGISTERED memory's `fwd` matrix row for read port i (index into `ports`): that read sees the NEW data
+    // of the first fwd_prefix[i] write ports on a same-cycle same-address collision (program / fwd
+    // ordering). Empty or 0: it reads the committed contents (old ordering; a `none` row is a don't-care
+    // and is read the same way).
+    std::vector<int>             fwd_prefix;
+    bool                         array = false;
+    std::vector<int>             rd_prefix;  // per port index (reads only): writes that precede it
+    int                          n_wr  = 0;
+    mutable std::vector<std::string> chain;
     bool                   view        = false;  // loop-body array view of an `update` bus (no storage)
     hhds::Pin_class        bus;                  // view: the packed contents it indexes
     View_alias             alias;                // view of a real memory (alias.mem non-empty)
@@ -146,11 +166,18 @@ private:
     return std::format("{}{}", port * Ntype::Memory_port_stride + off, base);
   }
   bool declare_memory(const hhds::Node_class& node);
+  bool decode_array_rows(const hhds::Node_class& node, Mem_rec& m);
+  bool decode_fwd_rows(const Dlop& mat, const std::vector<Mem_port>& ports, int n_wr, std::vector<int>& prefix,
+                       std::string_view not_prefix);
   bool declare_view(const hhds::Node_class& node);
   bool lower_loop(const hhds::Node_class& node);
   bool view_only(const hhds::Pin_class& readall);
   bool lower_async_read(const Mem_rec& m, size_t port);
   bool lower_read_all(const Mem_rec& m);
+  std::string typed_tmp(Lnast_ntype::Lnast_ntype_int op, const std::vector<std::string>& ops, int64_t bits);
+  std::optional<std::string> forward_writes(const Mem_rec& m, size_t port, const std::string& committed, const std::string& addr);
+  std::optional<std::string> bus_after_write(const Mem_rec& m, const std::string& cur, const Mem_port& pt);
+  std::optional<std::string> array_bus(const Mem_rec& m, int writes);
   bool lower_memory_tail(const Mem_rec& m);
 
   static std::string max_str(int bits, bool uns) {
@@ -262,6 +289,36 @@ private:
   bool lower_sub(const hhds::Node_class& node);
   bool lower_cells();
   int  inst_cnt_ = 0;
+
+  // sim.warn_undefined names the source line of an undefined access (a division or remainder by
+  // zero, a memory access outside its array). While a Src_scope is alive, every def-bearing LNAST
+  // node emitted carries the line of `node` (Lnast::set_pending_srcid), so pass/lnast_llvm can name
+  // it. Only those cells are stamped: resolving every node's span would slow the lowering of a big
+  // design for nothing.
+  class Src_scope {
+  public:
+    Src_scope(Lowering& l, const hhds::Node_class& node) : ln_(*l.b_.lnast) { ln_.set_pending_srcid(l.src_of(node)); }
+    ~Src_scope() { ln_.set_pending_srcid(hhds::SourceId_invalid); }
+    Src_scope(const Src_scope&)            = delete;
+    Src_scope& operator=(const Src_scope&) = delete;
+
+  private:
+    Lnast& ln_;
+  };
+  hhds::SourceId src_of(const hhds::Node_class& node) {
+    if (node.is_invalid() || node.get_graph() == nullptr) {
+      return hhds::SourceId_invalid;
+    }
+    auto ref = node.attr(hhds::attrs::srcid);
+    if (!ref.has()) {
+      return hhds::SourceId_invalid;
+    }
+    const auto sp = node.get_graph()->source_locator().resolve_span(ref.get());
+    if (!sp.start_line || sp.file.empty()) {
+      return hhds::SourceId_invalid;
+    }
+    return b_.lnast->source_locator().mint_line(sp.file, *sp.start_line);
+  }
 };
 
 bool Lowering::lower_node(const hhds::Node_class& node) {
@@ -391,6 +448,14 @@ bool Lowering::lower_node(const hhds::Node_class& node) {
       if (!v || v->size() != 2) {
         why = "shift arity";
         return false;
+      }
+      if (bits_of(dpin) <= 0) {
+        // No proven result width (a shift of a constant 0 whose amount nothing bounds): the value is 0 for
+        // every amount, and a shift statement without a type has nowhere to land.
+        if ((*v)[0] == "0") {
+          out = "0";
+          break;
+        }
       }
       out = emit(op == Ntype_op::SHL ? Lnast_ntype::create_shl() : Lnast_ntype::create_sra(), *v, dpin);
       break;
@@ -644,6 +709,52 @@ bool Lowering::lower_node(const hhds::Node_class& node) {
 // ---- Memory ----------------------------------------------------------------------------
 // Supported: one clock, wensize 1, plain contents (no initial image / whole-array bus / reset),
 // reads that see COMMITTED contents (fwd = undef = 0, the front end's `ordering "old"`).
+// Decode a combinational array's per-read forwarding prefix (`rd_prefix`) from the cell's `fwd` matrix, and its
+// write count. Row r (read ordinal), bit w (write ordinal): bit (r * n_wr + w). No matrix: every read sees every write.
+bool Lowering::decode_array_rows(const hhds::Node_class& node, Mem_rec& m) {
+  using livehd::graph_util::get_driver_of_sink_name;
+  m.n_wr = 0;
+  for (const auto& pt : m.ports) {
+    m.n_wr += pt.kind == Ntype::Memory_rdport_write ? 1 : 0;
+  }
+  m.rd_prefix.assign(m.ports.size(), m.n_wr);
+  if (auto fwd = get_driver_of_sink_name(node, "fwd"); !fwd.is_invalid()) {
+    if (!fwd.is_const()) {
+      why = "combinational array with a runtime forwarding matrix";
+      return false;
+    }
+    return decode_fwd_rows(const_of(fwd), m.ports, m.n_wr, m.rd_prefix,
+                           "combinational array whose forwarding row is not a prefix of the writes");
+  }
+  return true;
+}
+
+// One (read x write) forwarding matrix, bit (r * n_wr + w) for read ordinal r and write ordinal w: each read
+// port's row must be a prefix of the writes, and its length lands in `prefix[port index]` (write ports keep
+// what the caller put there). A row that is not a prefix sets `why` to `not_prefix` and fails.
+bool Lowering::decode_fwd_rows(const Dlop& mat, const std::vector<Mem_port>& ports, int n_wr, std::vector<int>& prefix,
+                               std::string_view not_prefix) {
+  int rd = 0;
+  for (size_t i = 0; i < ports.size(); ++i) {
+    if (ports[i].kind == Ntype::Memory_rdport_write) {
+      continue;
+    }
+    int pre = 0;
+    while (pre < n_wr && mat.bit_test(rd * n_wr + pre)) {
+      ++pre;
+    }
+    for (int w = pre; w < n_wr; ++w) {
+      if (mat.bit_test(rd * n_wr + w)) {
+        why = std::string(not_prefix);
+        return false;
+      }
+    }
+    prefix[i] = pre;
+    ++rd;
+  }
+  return true;
+}
+
 bool Lowering::declare_memory(const hhds::Node_class& node) {
   using livehd::graph_util::get_driver_of_sink_name;
   auto const_i64 = [&](std::string_view nm) -> std::optional<int64_t> {
@@ -653,15 +764,27 @@ bool Lowering::declare_memory(const hhds::Node_class& node) {
     }
     return const_of(d).to_just_i64();
   };
+  const bool is_array = const_i64("type").value_or(0) == Ntype::Memory_type_array;
+  const bool array_based = is_array && !get_driver_of_sink_name(node, "update").is_invalid();  // `initial` is a reset bus then
   // Contents: only a ZERO image (the front end's scalar `initial` broadcasts to every entry),
   // optionally restored by `reset`.
-  bool has_zero_image = false;
-  if (auto i = get_driver_of_sink_name(node, "initial"); !i.is_invalid()) {
-    if (!i.is_const() || !const_of(i).is_known_zero()) {
-      why = "memory with a non-zero initial image (M2)";
+  bool        has_zero_image = false;
+  std::string image_text;
+  if (auto i = get_driver_of_sink_name(node, "initial"); !i.is_invalid() && !array_based) {
+    if (!i.is_const()) {
+      why = "memory with a runtime initial image (M2)";
       return false;
     }
-    has_zero_image = true;
+    if (const_of(i).is_known_zero()) {
+      has_zero_image = true;
+    } else {
+      if (!const_of(i).is_integer()) {
+        why = "memory with a non-integer initial image (M2)";
+        return false;
+      }
+      image_text     = const_of(i).to_pyrope();
+      has_zero_image = true;  // an image of any value: power-on contents and the reset reload
+    }
   }
   hhds::Pin_class reset_pin;
   if (auto r = get_driver_of_sink_name(node, "reset"); !r.is_invalid()) {
@@ -676,9 +799,22 @@ bool Lowering::declare_memory(const hhds::Node_class& node) {
     why = "memory with an unsupported write-enable lane count";
     return false;
   }
-  if (const_i64("fwd").value_or(0) != 0 || const_i64("undef").value_or(0) != 0) {
-    why = "memory with read-during-write forwarding or undefined collisions (M2 covers `old` ordering)";
-    return false;
+  // `fwd` is a (read x write) forwarding MATRIX: wider than 64 bits it is not an i64, and reading it as
+  // "absent" would silently turn a forwarding memory into an `old`-ordering one. Anything driven that is
+  // not a constant zero is declined.
+  // (A registered memory's `fwd` / `undef` rows are decoded once its ports are known, below.)
+  // A combinational array (type 2, the front end's `mut a:[N]T`) has no committed state: its reads see
+  // the cycle's base contents plus the writes before them in program order. It is lowered as a packed
+  // bus (see Mem_rec::array), never as an `old`-ordering register memory.
+  if (is_array) {
+    if (!get_driver_of_sink_name(node, "reset").is_invalid() || !get_driver_of_sink_name(node, "update_enable").is_invalid()) {
+      why = "combinational array with a reset or an update enable";
+      return false;
+    }
+    if (wensize != 1) {
+      why = "combinational array with byte-enable lanes";
+      return false;
+    }
   }
   const auto size = const_i64("size");
   const auto bits = const_i64("bits");
@@ -742,6 +878,9 @@ bool Lowering::declare_memory(const hhds::Node_class& node) {
       return false;
     }
     if (pt.addr.is_invalid()) {
+      if (pt.din.is_invalid() && pt.en.is_invalid() && !outs.contains(static_cast<hhds::Port_id>(i))) {
+        continue;  // a port number nothing connects (a gap between used ports): no access, nothing to lower
+      }
       why = "memory port without an address";
       return false;
     }
@@ -763,8 +902,59 @@ bool Lowering::declare_memory(const hhds::Node_class& node) {
   m.update         = get_driver_of_sink_name(node, "update");
   m.update_en      = get_driver_of_sink_name(node, "update_enable");
   m.has_zero_image = has_zero_image;
+  m.image_text     = std::move(image_text);
   m.reset          = reset_pin;
   m.async_reset    = node.attr(livehd::attrs::memory_async_reset).has();
+  if (!is_array) {
+    // Ordering rows. Bit (r * n_wr + w): read ordinal r, write ordinal w. A `fwd` row is a prefix of the
+    // writes whose new data the read sees on a collision; an `undef` (ordering none) collision is a
+    // don't-care, read as the committed value; both at once has no ordering spelling.
+    int  n_wr_ports = 0;
+    for (const auto& pt : m.ports) {
+      n_wr_ports += pt.kind == Ntype::Memory_rdport_write ? 1 : 0;
+    }
+    const Dlop* fwd_mat   = nullptr;
+    bool        undef_set = false;
+    if (auto d = get_driver_of_sink_name(node, "fwd"); !d.is_invalid() && !(d.is_const() && const_of(d).is_known_zero())) {
+      if (!d.is_const()) {
+        why = "memory with a runtime forwarding matrix";
+        return false;
+      }
+      fwd_mat = &const_of(d);
+    }
+    if (auto d = get_driver_of_sink_name(node, "undef"); !d.is_invalid() && !(d.is_const() && const_of(d).is_known_zero())) {
+      if (!d.is_const()) {
+        why = "memory with a runtime undefined-collision matrix";
+        return false;
+      }
+      undef_set = true;
+    }
+    if (fwd_mat != nullptr && undef_set) {
+      why = "memory driving both the forwarding and the undefined-collision matrix";
+      return false;
+    }
+    if (fwd_mat != nullptr) {
+      m.fwd_prefix.assign(m.ports.size(), 0);
+      if (!decode_fwd_rows(*fwd_mat, m.ports, n_wr_ports, m.fwd_prefix,
+                           "memory whose forwarding row is not a prefix of its write ports")) {
+        return false;
+      }
+    }
+  }
+  if (is_array) {
+    for (const auto& pt : m.ports) {
+      if (pt.kind == Ntype::Memory_rdport_sync) {
+        why = "combinational array with a synchronous read port";
+        return false;
+      }
+    }
+    m.array = true;
+    if (!decode_array_rows(node, m)) {
+      return false;
+    }
+    mems_.push_back(std::move(m));
+    return true;  // no declaration: the bus is the storage
+  }
   // declare + clock attrs, exactly the front end's spelling
   auto ord = b_.add_child(Lnast_ntype::create_attr_set());
   b_.lnast->add_child(ord, Lnast_node::create_ref(m.name));
@@ -791,78 +981,141 @@ bool Lowering::declare_memory(const hhds::Node_class& node) {
   return true;
 }
 
+// A typed temp: dst = op(ops...) with a `bits`-wide unsigned type_spec.
+std::string Lowering::typed_tmp(Lnast_ntype::Lnast_ntype_int op, const std::vector<std::string>& ops, int64_t bits) {
+  auto dst = b_.create_lnast_tmp();
+  auto n   = b_.add_child(op);
+  b_.lnast->add_child(n, Lnast_node::create_ref(dst));
+  for (const auto& o : ops) {
+    leaf(n, o);
+  }
+  auto ts = b_.add_child(Lnast_ntype::create_type_spec());
+  b_.lnast->add_child(ts, Lnast_node::create_ref(dst));
+  add_type(ts, static_cast<int>(bits), true);
+  return dst;
+}
+
+// The packed bus `cur` (size*bits wide, entry 0 low) after write port `pt`. An entry write is spelled
+// as the front end spells `x#[p..+W] = v` at a position that is not a constant --
+// (x & ((1 << p) - 1)) | (((x >> p) with its low W bits replaced) << p), cut to x's width -- which the
+// native back end recognizes and turns into one store. A write whose address is outside the array
+// changes nothing (the shifted-out mask is empty).
+std::optional<std::string> Lowering::bus_after_write(const Mem_rec& m, const std::string& cur, const Mem_port& pt) {
+  const int64_t total = m.size * m.bits;
+  const auto    typed = [&](Lnast_ntype::Lnast_ntype_int op, const std::vector<std::string>& ops, int64_t bits) {
+    return typed_tmp(op, ops, bits);
+  };
+  int position_bits = 1;
+  while ((int64_t{1} << position_bits) <= total) {
+    ++position_bits;
+  }
+  auto a = operand(pt.addr);
+  auto d = operand(pt.din);
+  if (!a || !d) {
+    return std::nullopt;
+  }
+  const auto  at    = typed(Lnast_ntype::create_mult(), {*a, std::to_string(m.bits)}, position_bits);
+  const auto  down  = typed(Lnast_ntype::create_sra(), {cur, at}, total);
+  std::string value = *d;
+  if (!pt.en.is_invalid() && !(pt.en.is_const() && const_of(pt.en).is_just_i64() && const_of(pt.en).to_just_i64() != 0)) {
+    // a write that may not happen stores the entry's own value back
+    auto en = operand(pt.en);
+    if (!en) {
+      return std::nullopt;
+    }
+    const auto old = typed(Lnast_ntype::create_bit_and(), {down, std::string(Dlop::get_mask_value(m.bits)->to_pyrope())}, m.bits);
+    const auto cnd = emit(Lnast_ntype::create_ne(), {*en, "0"}, pt.en, false);
+    value          = b_.create_lnast_tmp();
+    auto n         = b_.create_if_stmt(false);
+    b_.add_if_cond(n, cnd);
+    auto th = b_.add_if_stmts(n);
+    b_.push_stmts(th);
+    store_raw(value, *d);
+    b_.pop_stmts();
+    auto el = b_.add_if_stmts(n);
+    b_.push_stmts(el);
+    store_raw(value, old);
+    b_.pop_stmts();
+    auto ts = b_.add_child(Lnast_ntype::create_type_spec());
+    b_.lnast->add_child(ts, Lnast_node::create_ref(value));
+    add_type(ts, m.bits, true);
+  }
+  const auto one  = typed(Lnast_ntype::create_shl(), {"1", at}, total);
+  const auto low  = typed(Lnast_ntype::create_minus(), {one, "1"}, total);
+  const auto kept = typed(Lnast_ntype::create_bit_and(), {cur, low}, total);
+  const auto fill = typed(Lnast_ntype::create_set_mask(), {down, value, "0", std::to_string(m.bits)}, total);
+  const auto up   = typed(Lnast_ntype::create_shl(), {fill, at}, 2 * total);
+  const auto cut  = typed(Lnast_ntype::create_get_mask(), {up, "0", std::to_string(total)}, total);
+  return typed(Lnast_ntype::create_bit_or(), {kept, cut}, total);
+}
+
+// A combinational array's bus after its first `writes` write ports (program order); `chain` caches it.
+std::optional<std::string> Lowering::array_bus(const Mem_rec& m, int writes) {
+  if (m.chain.empty()) {
+    std::string base;
+    if (!m.update.is_invalid()) {
+      auto u = operand(m.update);
+      if (!u) {
+        return std::nullopt;
+      }
+      base = *u;
+    } else if (!m.image_text.empty()) {
+      base = m.image_text;
+    } else {
+      base = "0";
+    }
+    m.chain.push_back(base);
+  }
+  while (static_cast<int>(m.chain.size()) <= writes) {
+    int seen = 0;
+    const Mem_port* next = nullptr;
+    for (const auto& pt : m.ports) {
+      if (pt.kind != Ntype::Memory_rdport_write) {
+        continue;
+      }
+      if (seen++ == static_cast<int>(m.chain.size()) - 1) {
+        next = &pt;
+        break;
+      }
+    }
+    if (next == nullptr) {
+      return std::nullopt;
+    }
+    auto out = bus_after_write(m, m.chain.back(), *next);
+    if (!out) {
+      return std::nullopt;
+    }
+    m.chain.push_back(*out);
+  }
+  return m.chain[static_cast<size_t>(writes)];
+}
+
 // read_all: every entry, MSB first (entry size-1 .. entry 0), as one concat.
 bool Lowering::lower_read_all(const Mem_rec& m) {
-  if (m.view) {
-    // A loop-body array: the packed value it was handed, with each write applied in port order.
-    // An entry write is spelled as the front end spells `x#[p..+W] = v` at a position that is not
-    // a constant -- (x & ((1 << p) - 1)) | (((x >> p) with its low W bits replaced) << p), cut to
-    // x's width -- which the native back end recognizes and turns into one store.
-    auto bus = operand(m.bus);
+  if (m.array) {
+    auto bus = array_bus(m, m.n_wr);
     if (!bus) {
       return false;
     }
-    const int64_t total = m.size * m.bits;
-    const auto    typed = [&](Lnast_ntype::Lnast_ntype_int op, const std::vector<std::string>& ops, int64_t bits) {
-      auto dst = b_.create_lnast_tmp();
-      auto n   = b_.add_child(op);
-      b_.lnast->add_child(n, Lnast_node::create_ref(dst));
-      for (const auto& o : ops) {
-        leaf(n, o);
-      }
-      auto ts = b_.add_child(Lnast_ntype::create_type_spec());
-      b_.lnast->add_child(ts, Lnast_node::create_ref(dst));
-      add_type(ts, static_cast<int>(bits), true);
-      return dst;
-    };
-    int position_bits = 1;
-    while ((int64_t{1} << position_bits) <= total) {
-      ++position_bits;
+    name_of_.insert_or_assign(m.read_all.get_class_index(), *bus);
+    return true;
+  }
+  if (m.view) {
+    // A loop-body array: the packed value it was handed, with each write applied in port order.
+    auto bus = operand(m.bus);
+    if (!bus) {
+      return false;
     }
     std::string cur = *bus;
     for (const auto& pt : m.ports) {
       if (pt.kind != Ntype::Memory_rdport_write) {
         continue;
       }
-      auto a = operand(pt.addr);
-      auto d = operand(pt.din);
-      if (!a || !d) {
+      auto next = bus_after_write(m, cur, pt);
+      if (!next) {
         return false;
       }
-      const auto  at    = typed(Lnast_ntype::create_mult(), {*a, std::to_string(m.bits)}, position_bits);
-      const auto  down  = typed(Lnast_ntype::create_sra(), {cur, at}, total);
-      std::string value = *d;
-      if (!pt.en.is_invalid() && !(pt.en.is_const() && const_of(pt.en).is_just_i64() && const_of(pt.en).to_just_i64() != 0)) {
-        // a write that may not happen stores the entry's own value back
-        auto en = operand(pt.en);
-        if (!en) {
-          return false;
-        }
-        const auto old
-            = typed(Lnast_ntype::create_bit_and(), {down, std::string(Dlop::get_mask_value(m.bits)->to_pyrope())}, m.bits);
-        const auto cnd = emit(Lnast_ntype::create_ne(), {*en, "0"}, pt.en, false);
-        value          = b_.create_lnast_tmp();
-        auto n         = b_.create_if_stmt(false);
-        b_.add_if_cond(n, cnd);
-        auto th = b_.add_if_stmts(n);
-        b_.push_stmts(th);
-        store_raw(value, *d);
-        b_.pop_stmts();
-        auto el = b_.add_if_stmts(n);
-        b_.push_stmts(el);
-        store_raw(value, old);
-        b_.pop_stmts();
-        auto ts = b_.add_child(Lnast_ntype::create_type_spec());
-        b_.lnast->add_child(ts, Lnast_node::create_ref(value));
-        add_type(ts, m.bits, true);
-      }
-      const auto one  = typed(Lnast_ntype::create_shl(), {"1", at}, total);
-      const auto low  = typed(Lnast_ntype::create_minus(), {one, "1"}, total);
-      const auto kept = typed(Lnast_ntype::create_bit_and(), {cur, low}, total);
-      const auto fill = typed(Lnast_ntype::create_set_mask(), {down, value, "0", std::to_string(m.bits)}, total);
-      const auto up   = typed(Lnast_ntype::create_shl(), {fill, at}, 2 * total);
-      const auto cut  = typed(Lnast_ntype::create_get_mask(), {up, "0", std::to_string(total)}, total);
-      cur             = typed(Lnast_ntype::create_bit_or(), {kept, cut}, total);
+      cur = *next;
     }
     name_of_.insert_or_assign(m.read_all.get_class_index(), cur);
     return true;
@@ -888,11 +1141,127 @@ bool Lowering::lower_read_all(const Mem_rec& m) {
   return true;
 }
 
+// `committed` (the entry read from the stored contents) with this cycle's writes forwarded: for the first
+// fwd_prefix[port] write ports in order, `if (enable && write_addr == addr) value = din`. Later ports win.
+std::optional<std::string> Lowering::forward_writes(const Mem_rec& m, size_t port, const std::string& committed,
+                                                    const std::string& addr) {
+  if (m.fwd_prefix.empty() || m.fwd_prefix[port] <= 0) {
+    return committed;
+  }
+  std::string cur  = committed;
+  int         seen = 0;
+  for (const auto& wp : m.ports) {
+    if (wp.kind != Ntype::Memory_rdport_write) {
+      continue;
+    }
+    if (seen++ >= m.fwd_prefix[port]) {
+      break;
+    }
+    if (!wp.en.is_invalid() && wp.en.is_const() && const_of(wp.en).is_known_false()) {
+      continue;
+    }
+    auto wa = operand(wp.addr);
+    auto wd = operand(wp.din);
+    if (!wa || !wd) {
+      return std::nullopt;
+    }
+    std::string hit = cmp_as_int(Lnast_ntype::create_eq(), {addr, *wa}, wp.addr);
+    if (m.wensize > 1) {
+      // Byte/bit lanes: on an address match, each lane the colliding write enables takes its data; the
+      // other lanes keep the value so far.
+      const int  lane_bits = m.bits / m.wensize;
+      const auto merged    = std::format("__fwdlane{}", wlane_cnt_++);  // mutable: a %tmp is single-assignment
+      store_raw(merged, cur);
+      std::string en_all;
+      if (!wp.en.is_invalid()) {
+        auto we = operand(wp.en);
+        if (!we) {
+          return std::nullopt;
+        }
+        en_all = *we;
+      }
+      for (int j = 0; j < m.wensize; ++j) {
+        std::string both = hit;
+        if (!en_all.empty()) {
+          const auto lane_en = b_.create_get_mask_stmts(en_all, std::to_string(j), std::to_string(j + 1));
+          both               = emit(Lnast_ntype::create_bit_and(), {hit, lane_en}, wp.addr);
+        }
+        const auto lane_cnd = emit(Lnast_ntype::create_ne(), {both, "0"}, wp.addr, false);
+        auto       n        = b_.create_if_stmt(false);
+        b_.add_if_cond(n, lane_cnd);
+        auto th = b_.add_if_stmts(n);
+        b_.push_stmts(th);
+        const auto lane = b_.create_get_mask_stmts(*wd, std::to_string(j * lane_bits), std::to_string((j + 1) * lane_bits));
+        b_.create_set_mask_stmts(merged, lane, std::to_string(j * lane_bits), std::to_string((j + 1) * lane_bits));
+        b_.pop_stmts();
+      }
+      const auto next = b_.create_lnast_tmp();
+      store_raw(next, merged);
+      auto ts = b_.add_child(Lnast_ntype::create_type_spec());
+      b_.lnast->add_child(ts, Lnast_node::create_ref(next));
+      add_type(ts, m.bits, m.uns);
+      cur = next;
+      continue;
+    }
+    if (!wp.en.is_invalid() && !(wp.en.is_const() && const_of(wp.en).is_just_i64() && const_of(wp.en).to_just_i64() != 0)) {
+      auto we = operand(wp.en);
+      if (!we) {
+        return std::nullopt;
+      }
+      const auto en_i = cmp_as_int(Lnast_ntype::create_ne(), {*we, "0"}, wp.addr);
+      hit             = emit(Lnast_ntype::create_bit_and(), {hit, en_i}, wp.addr);
+    }
+    const auto cnd = emit(Lnast_ntype::create_ne(), {hit, "0"}, wp.addr, false);
+    const auto next = b_.create_lnast_tmp();
+    auto       n    = b_.create_if_stmt(false);
+    b_.add_if_cond(n, cnd);
+    auto th = b_.add_if_stmts(n);
+    b_.push_stmts(th);
+    store_raw(next, *wd);
+    b_.pop_stmts();
+    auto el = b_.add_if_stmts(n);
+    b_.push_stmts(el);
+    store_raw(next, cur);
+    b_.pop_stmts();
+    auto ts = b_.add_child(Lnast_ntype::create_type_spec());
+    b_.lnast->add_child(ts, Lnast_node::create_ref(next));
+    add_type(ts, m.bits, m.uns);
+    cur = next;
+  }
+  return cur;
+}
+
 bool Lowering::lower_async_read(const Mem_rec& m, size_t port) {
   const auto& pt = m.ports[port];
   auto        a  = operand(pt.addr);
   if (!a) {
     return false;
+  }
+  if (m.array) {
+    // entry = (bus after the writes this read sees >> addr * bits) & mask; an address past the array
+    // shifts everything out and reads 0
+    auto bus = array_bus(m, m.rd_prefix[port]);
+    if (!bus) {
+      return false;
+    }
+    const int64_t total = m.size * m.bits;
+    int           position_bits = 1;
+    while ((int64_t{1} << position_bits) <= total) {
+      ++position_bits;
+    }
+    const auto at   = typed_tmp(Lnast_ntype::create_mult(), {*a, std::to_string(m.bits)}, position_bits);
+    const auto down = typed_tmp(Lnast_ntype::create_sra(), {*bus, at}, total);
+    const auto mask = std::string(Dlop::get_mask_value(m.bits)->to_pyrope());
+    if (!m.uns) {
+      // signed entries: the bus holds their two's complement bits; take the low `bits` and extend the sign
+      const auto low = typed_tmp(Lnast_ntype::create_bit_and(), {down, mask}, m.bits);
+      const auto v   = emit(Lnast_ntype::create_sext(), {low, std::to_string(m.bits - 1)}, pt.out);
+      name_of_.insert_or_assign(pt.out.get_class_index(), v);
+      return true;
+    }
+    const auto v = emit(Lnast_ntype::create_bit_and(), std::vector<std::string>{down, mask}, pt.out);
+    name_of_.insert_or_assign(pt.out.get_class_index(), v);
+    return true;
   }
   if (m.view && m.name.empty()) {
     // An array view of a packed bus that is a real value: entry = (bus >> addr * bits) & mask.
@@ -901,7 +1270,9 @@ bool Lowering::lower_async_read(const Mem_rec& m, size_t port) {
       return false;
     }
     const auto off = emit(Lnast_ntype::create_mult(), {*a, std::to_string(m.bits)}, pt.addr, false);
-    const auto sh  = emit(Lnast_ntype::create_sra(), {*bus, off}, m.bus);
+    // The bus pin may carry no proven width (a loop-carried constant): the array's own size*bits types it.
+    const auto sh = bits_of(m.bus) > 0 ? emit(Lnast_ntype::create_sra(), {*bus, off}, m.bus)
+                                       : typed_tmp(Lnast_ntype::create_sra(), {*bus, off}, m.size * m.bits);
     const auto v   = emit(Lnast_ntype::create_bit_and(), std::vector<std::string>{sh, std::string(Dlop::get_mask_value(m.bits)->to_pyrope())}, pt.out);
     name_of_.insert_or_assign(pt.out.get_class_index(), v);
     return true;
@@ -932,12 +1303,18 @@ bool Lowering::lower_async_read(const Mem_rec& m, size_t port) {
     name_of_.insert_or_assign(pt.out.get_class_index(), r);
     return true;
   }
-  name_of_.insert_or_assign(pt.out.get_class_index(), t);
-  return true;
+  if (auto fw = forward_writes(m, port, t, *a); fw) {
+    name_of_.insert_or_assign(pt.out.get_class_index(), *fw);
+    return true;
+  }
+  return false;
 }
 
 // Writes (program order = port order) and the loads of the sync-read registers.
 bool Lowering::lower_memory_tail(const Mem_rec& m) {
+  if (m.array) {
+    return true;  // the bus chain already applied every write
+  }
   auto attr = [&](const std::string& target, std::string_view key, std::string_view value) {
     auto n = b_.add_child(Lnast_ntype::create_attr_set());
     b_.lnast->add_child(n, Lnast_node::create_ref(target));
@@ -959,7 +1336,9 @@ bool Lowering::lower_memory_tail(const Mem_rec& m) {
     attr(m.name, "__store_posclk", "true");
   }
   if (m.has_zero_image) {
-    attr(m.name, "initial", "0");
+    // `initial` is the PACKED contents, entry 0 in the low bits (04b-attributes.md): tolg reads it so,
+    // and so does lnast_llvm (a non-zero one is the memory's image).
+    attr(m.name, "initial", m.image_text.empty() ? std::string{"0"} : m.image_text);
     if (m.reset.is_invalid()) {
       attr(m.name, "reset_pin", "false");  // power-on contents only
     } else {
@@ -1008,7 +1387,8 @@ bool Lowering::lower_memory_tail(const Mem_rec& m) {
       return false;
     }
   }
-  for (const auto& pt : m.ports) {
+  for (size_t port_i = 0; port_i < m.ports.size(); ++port_i) {
+    const auto& pt = m.ports[port_i];
     if (pt.kind == Ntype::Memory_rdport_write) {
       auto a = operand(pt.addr);
       auto d = operand(pt.din);
@@ -1076,14 +1456,19 @@ bool Lowering::lower_memory_tail(const Mem_rec& m) {
       if (m.negedge) {
         attr(pt.rd_reg, "posclk", "false");
       }
+      bool forward_failed = false;
       if (!gated(pt.en, [&] {
             auto t = b_.create_lnast_tmp();
             auto g = b_.add_child(Lnast_ntype::create_tuple_get());
             b_.lnast->add_child(g, Lnast_node::create_ref(t));
             b_.lnast->add_child(g, Lnast_node::create_ref(m.name));
             leaf(g, *a);
-            store_raw(pt.rd_reg, t);
-          })) {
+            if (auto fw = forward_writes(m, port_i, t, *a); fw) {
+              store_raw(pt.rd_reg, *fw);
+            } else {
+              forward_failed = true;
+            }
+          }) || forward_failed) {
         return false;
       }
     }
@@ -1151,7 +1536,7 @@ void Lowering::find_overlays() {
         mr = &m;
       }
     }
-    if (mr == nullptr || mr->bits < 1 || (mr->bits & (mr->bits - 1)) != 0) {
+    if (mr == nullptr || mr->array || mr->bits < 1 || (mr->bits & (mr->bits - 1)) != 0) {
       continue;
     }
     const auto orn = b.get_master_node();
@@ -1337,10 +1722,21 @@ bool Lowering::declare_view(const hhds::Node_class& node) {
     m.alias = it->second;
     m.name  = it->second.mem;  // read the real memory in place
   }
-  if (writes != 0 && (reads != 0 || !m.name.empty())) {
-    // Whether an indexed read of the same cell sees the write is the cell's to say, and a write
-    // through a view of a real memory would have to reach that memory: neither is lowered yet.
-    why = reads != 0 ? "loop-body array written and indexed in one cell" : "loop-body write to an array that is a memory";
+  if (writes != 0 && m.name.empty() && reads != 0) {
+    // A loop-body array that is a bare packed value (no real memory behind it), written AND indexed in one
+    // cell: exactly a combinational array. The carried bus is its base, the writes apply in port order, and
+    // each read sees the prefix of them the cell's `fwd` row names (all of them without a matrix).
+    m.array  = true;
+    m.update = m.bus;
+    if (!decode_array_rows(node, m)) {
+      return false;
+    }
+    mems_.push_back(std::move(m));
+    return true;
+  }
+  if (writes != 0 && !m.name.empty()) {
+    // A write through a view of a real memory would have to reach that memory: not lowered yet.
+    why = "loop-body write to an array that is a memory";
     return false;
   }
   mems_.push_back(std::move(m));
@@ -1668,6 +2064,29 @@ bool Lowering::lower_sub(const hhds::Node_class& node) {
     return false;
   }
   const auto modname = std::string(sub_io->get_name());
+  if (modname == livehd::graph_util::lgundef_module_name && root_->sim_markers) {
+    const auto marker = std::string(livehd::graph_util::node_name_of(node));
+    if (!marker.starts_with(livehd::graph_util::lgundef_name_prefix)) {
+      return true;  // no site name: nothing to report it as
+    }
+    // Its one input is `cond` (a loaded `lg:` marker keeps no binding to the body-less primitive, so
+    // the sink is found by position, not by name).
+    hhds::Pin_class cond_pin;
+    for (const auto& sink : node.inp_sorted_pins()) {
+      cond_pin = sink.get_driver_pin();
+    }
+    auto cond = operand(cond_pin);
+    if (!cond) {
+      return false;
+    }
+    auto call = b_.add_child(Lnast_ntype::create_func_call());
+    b_.lnast->add_child(call, Lnast_node::create_ref(marker));
+    b_.lnast->add_child(call, Lnast_node::create_ref(std::string(livehd::graph_util::lgundef_module_name)));
+    auto st = b_.lnast->add_child(call, Lnast_ntype::create_store());
+    b_.lnast->add_child(st, Lnast_node::create_ref("cond"));
+    leaf(st, *cond);
+    return true;
+  }
   if (livehd::graph_util::is_marker_module_name(modname)) {
     // fproperty / lgassert / lgundef: body-less, stateless, no hardware and no readable output
     // (a later read of one fails by name below), so they only matter to the checkers.
@@ -1784,7 +2203,11 @@ bool Lowering::lower_flop_next(const Flop_rec& f) {
     if (auto n = get_driver_of_sink_name(f.node, "negreset"); n.is_const()) {
       neg = !const_of(n).is_known_false();
     }
-    attr("initial", init_txt.empty() ? "0" : init_txt);
+    // A reset with NO initializer (the `initial` pin is not driven) is not an initializer: the register is
+    // unknown until the reset lands. Spelling it `initial 0` would also power it on at zero.
+    if (!init_txt.empty()) {
+      attr("initial", init_txt);
+    }
     attr("reset_pin", *o);
     bool is_async = false;
     if (auto a = get_driver_of_sink_name(f.node, "async"); a.is_const()) {
@@ -1859,7 +2282,16 @@ bool Lowering::lower_cells() {
         // read_all has no combinational inputs -- except a loop-body array's, which is the value it
         // was handed with this trip's writes applied
         const auto& vm = mems_[static_cast<size_t>(nodes[i].mem)];
-        if (vm.view) {
+        if (vm.array) {
+          need(vm.update);
+          for (const auto& pt : vm.ports) {
+            if (pt.kind == Ntype::Memory_rdport_write) {
+              need(pt.addr);
+              need(pt.din);
+              need(pt.en);
+            }
+          }
+        } else if (vm.view) {
           need(vm.bus);
           for (const auto& pt : vm.ports) {
             if (pt.kind == Ntype::Memory_rdport_write) {
@@ -1874,6 +2306,27 @@ bool Lowering::lower_cells() {
         need(vm.ports[nodes[i].port].addr);
         if (vm.view && vm.name.empty()) {
           need(vm.bus);
+        }
+        if (!vm.array && !vm.fwd_prefix.empty() && vm.fwd_prefix[nodes[i].port] > 0) {
+          int visible = 0;
+          for (const auto& pt : vm.ports) {  // forwarding reads the first fwd_prefix write ports' operands
+            if (pt.kind == Ntype::Memory_rdport_write && visible++ < vm.fwd_prefix[nodes[i].port]) {
+              need(pt.addr);
+              need(pt.din);
+              need(pt.en);
+            }
+          }
+        }
+        if (vm.array) {
+          need(vm.update);
+          int visible = 0;
+          for (const auto& pt : vm.ports) {  // the writes this read sees: the first `rd_prefix` write ports
+            if (pt.kind == Ntype::Memory_rdport_write && visible++ < vm.rd_prefix[nodes[i].port]) {
+              need(pt.addr);
+              need(pt.din);
+              need(pt.en);
+            }
+          }
         }
       } else {
         for (const auto& sink : nodes[i].node.inp_sorted_pins()) {
@@ -1998,9 +2451,21 @@ bool Lowering::lower_cells() {
           late_.push_back({d, net});
         }
       }
-      const bool ok = nodes[i].mem < 0            ? lower_node(nodes[i].node)
-                      : nodes[i].port == SIZE_MAX ? lower_read_all(mems_[static_cast<size_t>(nodes[i].mem)])
-                                                  : lower_async_read(mems_[static_cast<size_t>(nodes[i].mem)], nodes[i].port);
+      bool ok = false;
+      if (nodes[i].mem < 0) {
+        const auto op = type_op_of(nodes[i].node);
+        if (op == Ntype_op::Div || op == Ntype_op::Rem) {
+          Src_scope src(*this, nodes[i].node);
+          ok = lower_node(nodes[i].node);
+        } else {
+          ok = lower_node(nodes[i].node);
+        }
+      } else if (nodes[i].port == SIZE_MAX) {
+        ok = lower_read_all(mems_[static_cast<size_t>(nodes[i].mem)]);
+      } else {
+        Src_scope src(*this, mems_[static_cast<size_t>(nodes[i].mem)].node);
+        ok = lower_async_read(mems_[static_cast<size_t>(nodes[i].mem)], nodes[i].port);
+      }
       if (!ok) {
         return false;
       }
@@ -2120,6 +2585,7 @@ std::shared_ptr<Lnast> Lowering::run(livehd::lnast_stream::Sink* stream) {
   }
   flush();
   for (const auto& m : mems_) {
+    Src_scope src(*this, m.node);
     if (!lower_memory_tail(m)) {
       return nullptr;
     }
@@ -2154,7 +2620,7 @@ void Pass_lg2lnast::work(Eprp_var& var) {
 
 bool Pass_lg2lnast::lower(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, std::string_view passes,
                           std::vector<std::shared_ptr<Lnast>>& lnasts, std::vector<std::pair<std::string, std::string>>* skipped,
-                          bool warn) {
+                          bool warn, bool sim_markers) {
   // A compact-loop body is lowered inline into its caller (a `for`); on its own it is not a module.
   absl::flat_hash_set<std::string> loop_bodies;
   for (const auto& g : graphs) {
@@ -2174,6 +2640,7 @@ bool Pass_lg2lnast::lower(const std::vector<std::shared_ptr<hhds::Graph>>& graph
       continue;
     }
     Lowering lw(*g);
+    lw.sim_markers = sim_markers;
     // `passes`: comma separated stream passes (lnast/lnast_stream.hpp) run on the
     // statements as they are produced; the output is what the last one forwards.
     livehd::lnast_stream::Chain     chain;

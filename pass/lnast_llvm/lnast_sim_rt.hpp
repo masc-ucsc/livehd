@@ -24,6 +24,9 @@ inline constexpr std::string_view kSimRuntimeHeader
 
 #include "slop.hpp"
 #include "checkpoint.hpp"
+#ifdef LHD_LNAST_VCD
+#include "vcd_writer.hpp"
+#endif
 
 #ifndef LHD_LNAST_SIM_RT_V1
 #define LHD_LNAST_SIM_RT_V1
@@ -47,6 +50,78 @@ inline constexpr std::string_view kSimRuntimeHeader
             class __lnast_dut {
             public:
               std::uint64_t __gen = 1;  // observable-change generation (inputs + state commits)
+#ifdef LHD_LNAST_VCD
+              // VCD (`--set sim.vcd`): the driver names the file in __vcd_path (and may reset the writer to
+              // end a window); step() calls __vcd_sample once per period. A period is 10 time units: the
+              // clock rises at t and falls at t + 5, every port and register shows its value after the
+              // period settled. Names with dots become nested scopes.
+              std::shared_ptr<vcd::VCDWriter> __vcd;
+              std::string                     __vcd_path;
+              unsigned                        __vcd_tick = 0;
+              void                            __vcd_sample(const char* top, const char* clocks) {
+                if (!__vcd) {
+                  if (__vcd_path.empty()) {
+                    return;
+                  }
+                  __vcd     = std::make_shared<vcd::VCDWriter>(__vcd_path, vcd::makeVCDHeader());
+                  vcd_clks_.clear();
+                  for (std::string_view rest = clocks; !rest.empty();) {  // the design's clock ports, comma separated
+                    const auto comma = rest.find(',');
+                    const auto one   = rest.substr(0, comma);
+                    vcd_clks_.push_back(__vcd->register_var(top, std::string(one), vcd::VariableType::wire, 1));
+                    rest = comma == std::string_view::npos ? std::string_view{} : rest.substr(comma + 1);
+                  }
+                  if (vcd_clks_.empty()) {
+                    vcd_clks_.push_back(__vcd->register_var(top, "clock", vcd::VariableType::wire, 1));
+                  }
+                  vcd_vars_.clear();
+                  for (std::size_t i = 0; i < nf_; ++i) {
+                    const auto& f = f_[i];
+                    if (f.kind == 3 || std::strncmp(f.name, "__unknown", 9) == 0) {
+                      continue;  // memories are not traced; a drawn `?` literal is not a signal
+                    }
+                    const std::string full  = f.name;
+                    std::string       scope = top;
+                    std::string       leaf  = full;
+                    if (const auto dot = full.rfind('.'); dot != std::string::npos) {
+                      scope += "." + full.substr(0, dot);
+                      leaf   = full.substr(dot + 1);
+                    }
+                    if (f.bits > 1) {
+                      leaf += "[" + std::to_string(f.bits - 1) + ":0]";  // a vector's range, as inou.cgen.sim names it
+                    }
+                    vcd_vars_.emplace_back(i, __vcd->register_var(scope, leaf, vcd::VariableType::wire, f.bits != 0 ? f.bits : 1));
+                  }
+                }
+                const unsigned t      = __vcd_tick * 10;
+                vcd::global_timestamp = t;
+                for (const auto& clk : vcd_clks_) {
+                  __vcd->change(clk, "1");
+                }
+                std::vector<std::uint64_t> words;
+                for (const auto& [i, var] : vcd_vars_) {
+                  const auto& f = f_[i];
+                  words.assign((f.bits + 63) / 64 + 1, 0);
+                  get(f, 0, words.data());
+                  std::string v;
+                  if (f.bits <= 1) {
+                    v = (words[0] & 1) != 0 ? "1" : "0";
+                  } else {
+                    v.reserve(f.bits + 1);
+                    v.push_back('b');
+                    for (std::uint32_t b = f.bits; b-- > 0;) {
+                      v.push_back(((words[b / 64] >> (b % 64)) & 1) != 0 ? '1' : '0');
+                    }
+                  }
+                  __vcd->change(var, v);
+                }
+                vcd::global_timestamp = t + 5;
+                for (const auto& clk : vcd_clks_) {
+                  __vcd->change(clk, "0");
+                }
+                ++__vcd_tick;
+              }
+#endif
 
               __lnast_dut(const __lnast_dut&)            = delete;
               __lnast_dut& operator=(const __lnast_dut&) = delete;
@@ -147,7 +222,7 @@ inline constexpr std::string_view kSimRuntimeHeader
               // `zero_uninitialized` (sim.init_zero); with a reset and no initializer it is unknown under both
               // (only the reset defines it). A memory with neither is zero under both policies (what a 2-state
               // simulator reads back), with a reset and no initializer unknown. Unknown is drawn from the seed.
-              void power_on(bool zero_uninitialized) {
+              void power_on(bool zero_uninitialized, bool unknown_zero = false) {
                 std::memset(st_.get(), 0, (words_ + 1) * sizeof(std::uint64_t));
                 for (std::size_t i = 0; i < nf_; ++i) {
                   const auto& f = f_[i];
@@ -160,7 +235,18 @@ inline constexpr std::string_view kSimRuntimeHeader
                     }
                     continue;
                   }
+                  if (f.kind == 3 && f.init != nullptr) {  // a memory with a non-zero image: entry-major words
+                    const std::size_t nw = (f.bits + 63) / 64;
+                    for (std::uint64_t e = 0; e < f.entries; ++e) {
+                      put(f, e, f.init + e * nw);
+                    }
+                    continue;
+                  }
                   if (f.fill == 0 || (f.fill == 1 && zero_uninitialized)) {
+                    continue;
+                  }
+                  // A drawn `?` literal (sim.unknown_zero is a run-time switch of the driver): zero, not drawn.
+                  if (unknown_zero && f.kind == 2 && std::strncmp(f.name, "__unknown", 9) == 0) {
                     continue;
                   }
                   // Unknown: bits drawn from the run's seed and the field's NAME (and entry), never from the
@@ -282,6 +368,10 @@ inline constexpr std::string_view kSimRuntimeHeader
               const __lnast_field* f_;
               std::size_t          nf_;
               std::size_t          words_;
+#ifdef LHD_LNAST_VCD
+              std::vector<vcd::VarPtr>                       vcd_clks_;
+              std::vector<std::pair<std::size_t, vcd::VarPtr>> vcd_vars_;
+#endif
             };
 #endif
 )cpp";

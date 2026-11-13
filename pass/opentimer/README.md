@@ -418,9 +418,14 @@ session; another evaluation starts a fresh timer.
 Coordinate-only updates compare an owned cell-identity snapshot and net
 connectivity before updating RC. They reuse the existing cell and connection
 indexes; resize, cell-order and topology changes use the full delta path.
+Each connectivity generation binds RC pin ordinals to the timer's numeric pin
+table once. Coordinate-only updates stream these IDs directly, including when
+Steiner junctions move or change order; they do not format physical pin labels
+or search the name index. Ranking uses the same bindings. Gate reconciliation
+and what-if access invalidate them before reuse.
 Both paths flush changed RC batches after 65,536 capacitance/resistance records.
 Nets are indivisible, so the last net can take a batch beyond that threshold.
-Batches carry one name per RC node and numeric segment endpoints through
+Batches carry numeric pin identities and segment endpoints through
 OpenTimer's indexed in-memory API, avoiding repeated endpoint strings and
 lookups. Each batch replaces the timer's old RC trees immediately and releases
 its temporary payload. Node insertion and segment order match the SPEF path

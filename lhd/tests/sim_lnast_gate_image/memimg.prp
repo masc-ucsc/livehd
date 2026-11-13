@@ -1,0 +1,15 @@
+// Memories with non-zero images in the three state layouts: 20-bit entries (32-bit stride), 3-bit
+// entries (one packed integer) and 8-bit entries (natural). Reset reloads every entry.
+pub mod memimg(a:U20, i:U3, we:Bool) -> (z:U20@[0], y:U3@[0], x:U8@[0]) {
+  reg t:[8]U20 = (1001, 2002, 3003, 4004, 5005, 6006, 7007, 0xFFFFF)
+  reg u:[4]U3 = (1, 2, 3, 7)
+  reg v:[4]U8 = (11, 22, 33, 44)
+  if we {
+    t[i] = a
+    u[i#[0..=1]] = a#[0..=2]
+    v[i#[0..=1]] = a#[0..=7]
+  }
+  z = t[i]
+  y = u[i#[0..=1]]
+  x = v[i#[0..=1]]
+}

@@ -1632,10 +1632,10 @@ void uPass_bitwidth::process_declare() {
     Dlop mx;
     Dlop mn;
     if (Lnast_ntype::is_const(get_raw_ntype())) {
-      mx = *Dlop::from_pyrope(current_text());
+      mx = Dlop::from_pyrope_cached(current_text());
     }
     if (move_to_sibling() && Lnast_ntype::is_const(get_raw_ntype())) {
-      mn = *Dlop::from_pyrope(current_text());
+      mn = Dlop::from_pyrope_cached(current_text());
     }
     move_to_parent();
     if (const auto r = range_from_entry(mx, mn); !r.is_unbounded()) {
@@ -2027,13 +2027,13 @@ void uPass_bitwidth::process_type_spec() {
   if (move_to_sibling() && Lnast_ntype::is_prim_type_int(get_raw_ntype())) {
     if (move_to_child()) {
       if (Lnast_ntype::is_const(get_raw_ntype())) {
-        if (auto v = Dlop::from_pyrope(current_text()); v->is_integer()) {
-          dmax = *v;
+        if (const auto& v = Dlop::from_pyrope_cached(current_text()); v.is_integer()) {
+          dmax = v;
         }
       }
       if (move_to_sibling() && Lnast_ntype::is_const(get_raw_ntype())) {
-        if (auto v = Dlop::from_pyrope(current_text()); v->is_integer()) {
-          dmin = *v;
+        if (const auto& v = Dlop::from_pyrope_cached(current_text()); v.is_integer()) {
+          dmin = v;
         }
       }
       move_to_parent();

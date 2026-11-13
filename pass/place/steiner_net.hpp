@@ -12,15 +12,17 @@ namespace livehd::placement {
 struct Steiner_net {
   struct Edge {
     unsigned from = 0, to = 0;
-    double   resistance_ohm = 0;
+    double   resistance_ohm                = 0;
+    bool     operator==(const Edge&) const = default;
   };
   std::vector<double> node_cap_ff;
   std::vector<Edge>   edges;
-  double              wire_length_um = 0;
+  double              wire_length_um                       = 0;
+  bool                operator==(const Steiner_net&) const = default;
 };
 // `pins` are positions in DBU, `driver_index` indexes them, `per_um` is {horizontal R, horizontal C, vertical R,
 // vertical C} per micron (ohm, fF). Throws on a bad driver or coordinates out of the FLUTE range. `approximate` is
 // set when the work-bounded fallback built the tree.
-Steiner_net steiner_net(const std::vector<std::pair<double, double>>& pins, size_t driver_index, const std::array<double, 4>& per_um,
-                        double dbu, bool* approximate = nullptr);
+Steiner_net steiner_net(const std::vector<std::pair<double, double>>& pins, size_t driver_index,
+                        const std::array<double, 4>& per_um, double dbu, bool* approximate = nullptr);
 }  // namespace livehd::placement

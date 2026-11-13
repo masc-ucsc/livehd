@@ -1,0 +1,9 @@
+// A register array with a non-zero initializer: its image (power-on contents and per-entry reset value)
+// leaves pass.lg2lnast as `attr_set(t, "initial", <packed>)`, entry 0 in the low bits, which tolg reads.
+pub mod memory_image(a:U8, i:U2, we:Bool) -> (z:U8@[0]) {
+  reg t:[4]U8 = (1,2,3,4)
+  if we {
+    t[i] = a
+  }
+  z = t[i]
+}

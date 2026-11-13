@@ -63,6 +63,16 @@ struct Result {
   size_t                    words = 0;
   size_t                    gate_word = 0, gate_bits = 0;
   size_t                    instructions = 0;
+  // sim.warn_undefined (Sim_objects::warn_undefined): a statement that can compute a value the source
+  // leaves undefined (a division or remainder by zero, a memory access outside its array) owns one
+  // state word, set non-zero by the edge kernels when it happens. The words are consecutive, in this
+  // order; the caller reports a site and clears its word.
+  struct Undefined {
+    std::string what;   // e.g. "division by zero"
+    std::string where;  // "file:line", else module.value
+    size_t      word = 0;
+  };
+  std::vector<Undefined> undefined;
 };
 
 // Writes `<dir>/kernel*.llvm.o` and `<dir>/kernel.json` (the layout and the kernel lists, for
@@ -76,6 +86,11 @@ struct Sim_objects {
   std::string symbol;
   std::string object;
   std::string json;
+  // true: every `?` bit of a literal is 0 (sim.unknown_zero). false (the `lhd sim` default): each `?`
+  // literal is drawn ONCE per run from the seeded PRNG, so an unspecified bit cannot be relied on.
+  bool        unknown_zero = true;
+  // true: instrument the undefined accesses sim.warn_undefined reports (Result::undefined).
+  bool        warn_undefined = false;
 };
 Result generate_sim(const Lnast& ln, const std::vector<std::shared_ptr<Lnast>>& lib, const Sim_objects& out);
 

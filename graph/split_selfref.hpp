@@ -25,8 +25,13 @@ using Comb_dependency_cache = absl::flat_hash_map<std::pair<hhds::Gid, uint32_t>
 //
 // This is a lowering operation, not an optimization or writer repair: after it
 // returns, every downstream pass sees the same valid LGraph.
+//
+// `cycle_gone` (optional) is set when the splitter's own stop check (comb_pin_depends_on, after the
+// last rewrite round) already proved that `driver` no longer reaches `buffer`: the caller needs no second
+// check of the same pair on the same graph. False means the cycle may remain (nothing proved it).
 int split_packed_selfref_wire(hhds::Graph* g, const hhds::Node_class& buffer, const hhds::Pin_class& driver,
-                              const std::vector<hhds::Node_class>& early_readers, Comb_dependency_cache* dependencies = nullptr);
+                              const std::vector<hhds::Node_class>& early_readers, Comb_dependency_cache* dependencies = nullptr,
+                              bool* cycle_gone = nullptr);
 
 // Does `driver`'s backward cone still reach `target` COMBINATIONALLY? State and
 // memories are scheduling boundaries. A `Sub` is NOT: a pure-comb call is seen

@@ -1203,6 +1203,7 @@ struct Split_result {
   unsigned stop_reasons = 0;  // OR of the kStop* bits
   int      rounds       = 0;  // fixpoint rounds ACTUALLY run
   bool     fixpoint     = false;
+  bool     cycle_gone   = false;  // the scoped stop check (comb_pin_depends_on) proved the wire no longer depends on itself
 };
 
 // Is this `Sub` instance a PURE-COMB call -- is its whole callee CLOSURE
@@ -1331,45 +1332,172 @@ static absl::flat_hash_set<uint32_t> sub_output_deps(const hhds::Node_class& ins
     return res;
   }
 
-  absl::flat_hash_set<hhds::Pin_class> seen;
-  std::vector<hhds::Pin_class>         work;
-  if (auto seed = opin.get_driver_pin(); !seed.is_invalid()) {
-    work.push_back(seed);  // a graph output pin is a sink: at most one driver
+  // ONE pass for every output of this callee. Which input ports an output depends on is a fact about the
+  // callee alone, and a caller asks for output after output (CVA6/XiangShan decode lanes: hundreds of
+  // outputs of one large module): a backward walk per output walked the whole cone each time. Here a
+  // dependency set (a bitset over the callee's input ports) is computed per driver pin, once, by an
+  // iterative post-order walk, and the cache is filled for every output port.
+  std::vector<uint32_t>                   index_to_pid;
+  absl::flat_hash_map<std::string, uint32_t> name_to_index;
+  for (const auto& [nm, pid] : in_name2pid) {
+    name_to_index.emplace(nm, static_cast<uint32_t>(index_to_pid.size()));
+    index_to_pid.push_back(pid);
   }
-  while (!work.empty()) {
-    auto d = work.back();
-    work.pop_back();
-    if (d.is_invalid() || d.is_const() || !seen.insert(d).second) {
-      continue;
+  const size_t                         W = (index_to_pid.size() + 63) / 64 + 1;
+  std::vector<uint64_t>                pool;      // one W-word set per slot
+  std::vector<uint8_t>                 finished;  // per slot: its set is complete
+  // A cone with a combinational cycle: a set completed while an ancestor on the stack was still open
+  // took that ancestor's PARTIAL set and is missing whatever the cycle reaches. Memoized sets are then
+  // under-approximations, so the exact per-output walk below answers instead.
+  bool                                 cyclic = false;
+  absl::flat_hash_map<hhds::Pin_class, uint32_t> memo;
+  struct Frame {
+    hhds::Pin_class              pin;
+    uint32_t                     slot = 0;
+    std::vector<hhds::Pin_class> kids;
+    size_t                       next = 0;
+  };
+  std::vector<Frame> stack;
+  const auto enter = [&](const hhds::Pin_class& d) -> int64_t {
+    if (d.is_invalid() || d.is_const()) {
+      return -1;
     }
+    if (auto it = memo.find(d); it != memo.end()) {
+      return it->second;  // finished, or on the stack (a loop: its partial set, as the seeded recursion guard)
+    }
+    const auto slot = static_cast<uint32_t>(pool.size() / W);
+    pool.resize(pool.size() + W, 0);
+    finished.push_back(1);  // a leaf is complete now; a pushed frame clears this until it pops
+    memo.emplace(d, slot);
     if (is_graph_input_pin(d)) {
-      if (auto it = in_name2pid.find(std::string{pin_name_of(d)}); it != in_name2pid.end()) {
-        res.insert(it->second);
+      if (auto it = name_to_index.find(std::string{pin_name_of(d)}); it != name_to_index.end()) {
+        pool[slot * W + it->second / 64] |= uint64_t{1} << (it->second % 64);
       }
-      continue;
+      return slot;
     }
     auto dn = d.get_master_node();
     if (dn.is_invalid()) {
-      continue;
+      return slot;
     }
     const auto op = type_op_of(dn);
     if (op == Ntype_op::Memory || op == Ntype_op::Flop || op == Ntype_op::Latch || op == Ntype_op::Fflop) {
-      continue;  // state cuts the cone, so it contributes no comb dependency
+      return slot;  // state cuts the cone, so it contributes no comb dependency
     }
+    Frame f;
+    f.pin  = d;
+    f.slot = slot;
     if (op == Ntype_op::Sub) {
       const auto inner = sub_output_deps(dn, static_cast<uint32_t>(d.get_port_id()), cache);
       for (auto sink : dn.inp_sorted_pins()) {
         if (inner.contains(static_cast<uint32_t>(sink.get_port_id()))) {
-          work.push_back(sink.get_driver_pin());
+          f.kids.push_back(sink.get_driver_pin());
         }
       }
-      continue;
+    } else {
+      for (auto sink : dn.inp_sorted_pins()) {
+        f.kids.push_back(sink.get_driver_pin());
+      }
     }
-    for (auto sink : dn.inp_sorted_pins()) {
-      work.push_back(sink.get_driver_pin());
+    if (!f.kids.empty()) {
+      finished[slot] = 0;
+      stack.push_back(std::move(f));
     }
+    return slot;
+  };
+  const auto settle = [&]() {
+    while (!stack.empty()) {
+      if (stack.back().next < stack.back().kids.size()) {
+        const auto kid = stack.back().kids[stack.back().next++];
+        enter(kid);  // may push a frame
+        continue;
+      }
+      const auto f = std::move(stack.back());
+      stack.pop_back();
+      for (const auto& kid : f.kids) {
+        if (kid.is_invalid() || kid.is_const()) {
+          continue;
+        }
+        if (auto it = memo.find(kid); it != memo.end()) {
+          cyclic = cyclic || finished[it->second] == 0;  // an open ancestor: the cycle's partial set
+          for (size_t w = 0; w < W; ++w) {
+            pool[f.slot * W + w] |= pool[it->second * W + w];
+          }
+        }
+      }
+      finished[f.slot] = 1;
+    }
+  };
+  // The exact backward reachability of one output (a cyclic cone only): one walk, a `seen` set.
+  const auto exact_deps = [&](const hhds::Pin_class& seed) {
+    absl::flat_hash_set<uint32_t>        deps;
+    absl::flat_hash_set<hhds::Pin_class> seen;
+    std::vector<hhds::Pin_class>         work{seed};
+    while (!work.empty()) {
+      auto d = work.back();
+      work.pop_back();
+      if (d.is_invalid() || d.is_const() || !seen.insert(d).second) {
+        continue;
+      }
+      if (is_graph_input_pin(d)) {
+        if (auto it = in_name2pid.find(std::string{pin_name_of(d)}); it != in_name2pid.end()) {
+          deps.insert(it->second);
+        }
+        continue;
+      }
+      auto dn = d.get_master_node();
+      if (dn.is_invalid()) {
+        continue;
+      }
+      const auto op = type_op_of(dn);
+      if (op == Ntype_op::Memory || op == Ntype_op::Flop || op == Ntype_op::Latch || op == Ntype_op::Fflop) {
+        continue;
+      }
+      if (op == Ntype_op::Sub) {
+        const auto inner = sub_output_deps(dn, static_cast<uint32_t>(d.get_port_id()), cache);
+        for (auto sink : dn.inp_sorted_pins()) {
+          if (inner.contains(static_cast<uint32_t>(sink.get_port_id()))) {
+            work.push_back(sink.get_driver_pin());
+          }
+        }
+        continue;
+      }
+      for (auto sink : dn.inp_sorted_pins()) {
+        work.push_back(sink.get_driver_pin());
+      }
+    }
+    return deps;
+  };
+  std::vector<std::pair<Sub_dep_key, hhds::Pin_class>> seeds;
+  std::vector<absl::flat_hash_set<uint32_t>>           fast;
+  for (const auto& od : gio->get_output_pin_decls()) {
+    auto                          opn = cg->get_output_pin(od.name);
+    absl::flat_hash_set<uint32_t> deps;
+    hhds::Pin_class               seed;
+    if (!opn.is_invalid()) {
+      seed = opn.get_driver_pin();  // a graph output pin is a sink: at most one driver
+      if (!seed.is_invalid()) {
+        const auto slot = enter(seed);
+        settle();
+        if (slot >= 0) {
+          for (size_t k = 0; k < index_to_pid.size(); ++k) {
+            if ((pool[static_cast<size_t>(slot) * W + k / 64] >> (k % 64)) & 1) {
+              deps.insert(index_to_pid[k]);
+            }
+          }
+        }
+      }
+    }
+    seeds.emplace_back(Sub_dep_key{inst.get_subnode_gid(), static_cast<uint32_t>(od.port_id)}, seed);
+    fast.push_back(std::move(deps));
   }
-  cache[key] = res;
+  for (size_t i = 0; i < seeds.size(); ++i) {
+    const auto& [okey, seed] = seeds[i];
+    auto deps                = cyclic && !seed.is_invalid() ? exact_deps(seed) : std::move(fast[i]);
+    if (okey == key) {
+      res = deps;
+    }
+    cache[okey] = std::move(deps);
+  }
   return res;
 }
 
@@ -1467,7 +1595,8 @@ static Split_result split_packed_selfref_wires_body(hhds::Graph* g, int max_dept
     if (scoped_buffer != nullptr && scoped_driver != nullptr && n > 0
         && !comb_pin_depends_on(*scoped_driver, *scoped_buffer, dependencies)) {
       ++r.rounds;
-      r.fixpoint = true;
+      r.fixpoint   = true;
+      r.cycle_gone = true;
       break;
     }
     if (n == 0) {
@@ -2055,7 +2184,8 @@ int split_packed_cycle_slices(hhds::Graph* g) {
 }
 
 int split_packed_selfref_wire(hhds::Graph* g, const hhds::Node_class& buffer, const hhds::Pin_class& driver,
-                              const std::vector<hhds::Node_class>& early_readers, Comb_dependency_cache* dependencies) {
+                              const std::vector<hhds::Node_class>& early_readers, Comb_dependency_cache* dependencies,
+                              bool* cycle_gone) {
   // Guard BEFORE the trace: debug_name() dereferences the handle, so tracing an
   // invalid buffer/driver would crash exactly the runs that turned tracing on.
   if (g == nullptr || buffer.is_invalid() || driver.is_invalid() || early_readers.empty()) {
@@ -2167,6 +2297,9 @@ int split_packed_selfref_wire(hhds::Graph* g, const hhds::Node_class& buffer, co
   // remains; do not emit the legacy global splitter warning here.
   if (debug) {
     std::print("split[wire]: rewired={} unresolved={} rounds={}\n", r.total, r.unresolved, r.rounds);
+  }
+  if (cycle_gone != nullptr) {
+    *cycle_gone = r.cycle_gone;
   }
   return r.total;
 }

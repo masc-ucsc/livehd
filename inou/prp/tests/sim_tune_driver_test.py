@@ -26,6 +26,13 @@
 # NOTE: runs under /usr/bin/python3 (3.9) inside the bazel sandbox -- keep it
 # 3.9-clean (no `X | None`, no match).
 
+import os as _os
+
+# This test is about inou.cgen.sim's sim.tune driver (the color root's support table and class dump,
+# the baked codegen-key check): the LNAST sim flow (the `lhd sim` default) has none of that machinery,
+# so the old flow is pinned, as AGENTS.md prescribes for a test about one backend.
+_os.environ['LHD_SIM_LNAST'] = '0'
+
 import argparse
 from concurrent.futures import ThreadPoolExecutor
 import glob

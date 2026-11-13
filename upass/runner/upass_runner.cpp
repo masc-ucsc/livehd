@@ -3693,8 +3693,19 @@ void uPass_runner::emit_inline_typespec(const std::string& name, int bits, bool 
   // (early return above), so just split on signedness via the shared helpers.
   auto       pt = s->add_child(root, Lnast_ntype::create_prim_type_int());
   const auto ub = static_cast<uint32_t>(bits);
-  s->add_child(pt, Lnast_node::create_const(std::string(upass::max_from_bits(ub, is_signed).to_pyrope())));
-  s->add_child(pt, Lnast_node::create_const(std::string(upass::min_from_bits(ub, is_signed).to_pyrope())));
+  // The (max, min) texts of a width are a pure function of (bits, signedness) and bit selections ask for the
+  // same few dozen over and over: build each pair once (thread-local, keyed by value, nothing to invalidate).
+  static thread_local absl::flat_hash_map<uint64_t, std::pair<std::string, std::string>> bound_text;
+  auto bt = bound_text.find((static_cast<uint64_t>(ub) << 1) | (is_signed ? 1U : 0U));
+  if (bt == bound_text.end()) {
+    bt = bound_text
+             .emplace((static_cast<uint64_t>(ub) << 1) | (is_signed ? 1U : 0U),
+                      std::pair{std::string(upass::max_from_bits(ub, is_signed).to_pyrope()),
+                                std::string(upass::min_from_bits(ub, is_signed).to_pyrope())})
+             .first;
+  }
+  s->add_child(pt, Lnast_node::create_const(bt->second.first));
+  s->add_child(pt, Lnast_node::create_const(bt->second.second));
   flush_deferred_emits();
   lm->push_source(s, "", 0);
   process_lnast();  // cursor at type_spec root → C_OP(type_spec): dispatch + emit
@@ -20227,8 +20238,8 @@ void uPass_runner::bake_decl_pre_step(bool is_declare) {
   // and `Dlop::from_pyrope("N")` would silently read a character code.
   auto bake_bound = [&](Dlop& out) {
     if (Lnast_ntype::is_const(lm->get_raw_ntype())) {
-      if (auto v = Dlop::from_pyrope(lm->current_text()); v->is_integer()) {
-        out = *v;
+      if (const auto& v = Dlop::from_pyrope_cached(lm->current_text()); v.is_integer()) {  // bound texts recur per declare
+        out = v;
       }
       return;
     }

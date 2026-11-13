@@ -76,13 +76,32 @@ lower to a read-modify-write of the entry with one conditional `set_mask` per la
 that form is verified by simulation (`lnast_llvm_diff_test`, `mem_bytes`) but LEC refutes its
 round trip on an uninitialized memory, so it is not in the LEC list. A Sub instance cycle (the
 `fcall` form needs every argument before any output) is resolved by splicing the stuck instances
-into the graph in memory (`graph_util::Host_inliner`) and lowering again; `lgundef`, `fproperty`
-and `lgassert` markers are skipped. `Latch` cells are registers
+into the graph in memory (`graph_util::Host_inliner`) and lowering again; `fproperty` and `lgassert`
+markers are skipped, and so is `lgundef` except for `lhd sim` (`lower(..., sim_markers)`), which keeps it
+as `fcall(<marker name>, lgundef, store(cond, c))` for `lnast_llvm` to report (sim.warn_undefined; tolg
+has no such module). For the same warnings, the LNAST nodes lowered from a Div/Rem or a memory carry the
+cell's source line (`srcid`). `Latch` cells are registers
 with `latch`/`enable`/`enable_high` attributes (the front end's `reg l:[latch=true, enable=g]`) and a
 `Clock_cell` is `Clock(clock_pin=clk, enable=en)`. Cells are ordered before any statement is built, so
-the probe for stuck instances builds nothing. Known gaps: non-zero initial images, several clocks,
-forwarding/undefined orderings; n-ary Mux/compare, LUT, compact loops with a break/continue or
-an activation, or a state element in the body.
+the probe for stuck instances builds nothing. A REGISTERED memory's `fwd` rows must each be a prefix of
+its write ports (each read forwards the colliding data of the first writes, in port order); a runtime or
+non-prefix matrix, or `fwd` and `undef` both driven, is declined (a matrix is never read as "absent"). An
+`undef` (ordering none) collision reads the committed value. Known gaps: several clocks; n-ary
+Mux/compare, LUT, compact loops with a break/continue or an activation, or a state element in the body.
+
+Memory initial images: a constant `initial` of any value is the memory's power-on contents and its reset
+reload, spelled `attr_set(m, "initial", <const>)`: the packed size*bits constant, entry 0 in the low bits
+(04b-attributes.md), which tolg and `lnast_llvm` both read (0 for a zero image). `lnast_llvm` reloads it with
+`Cgen_llvm::array_load_if` on reset and the runtime puts it entry by entry at power-on.
+
+Combinational arrays (memory `type` 2, the front end's `mut a:[N]T`) have no storage and no clock. They
+are ONE packed bus (entry 0 low): its base is the `update` bus, else the image, else 0; each write port
+is a masked merge at `addr * bits` in port (program) order; read port r takes the entry at `addr * bits`
+(`sra` + mask) from the bus after the first `rd_prefix[r]` writes, the `fwd` matrix row of that read
+(no matrix: all of them), and the whole-array read bus is the bus after every write. An address past the
+array shifts everything out: a read gives 0 and a write changes nothing. Declined: a reset or update
+enable, byte-enable lanes, a sync read port, a forwarding row that is not a prefix.
+Lowering such an array as an `old`-ordering register memory instead reads last cycle's contents.
 
 ## Milestone 3: LLVM straight from the typed LNAST
 
@@ -287,8 +306,9 @@ right after it was written a byte at a time. Code size is the same either way he
 24 kB): the loop bodies are small.
 
 Not covered yet (the run is declined, or falls back under `auto`): several root clocks, a register
-on an inverted clock gate or on a clock that is not a gate of the root clock, negedge memories,
-memories with non-zero images, `fcall` under a condition, VCD/observation runs, testbench access
+on an inverted clock gate or on a clock that is not a gate of the root clock (or a `latch & clock` AND
+whose latch can be open while the clock is high), negedge memories, `fcall` under a condition,
+probe/query/observation runs, testbench access
 below the DUT's top level, and the random power-on fill of inou.cgen.sim for an unknown (`?`)
 initializer (read as 0 here, i.e. `sim.unknown_zero=true`).
 

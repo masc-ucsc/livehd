@@ -42,6 +42,15 @@ cc_test(
     ],
 )
 
+sh_test(
+    name = "call_instance_names_test",
+    srcs = ["tests/call_instance_names_test.sh"],
+    data = [
+        "//inou/lefdef:test_data",
+        "//lhd",
+    ],
+)
+
 # Loop lowering QoR guard: a rolled loop's per-bit writes into a packed word
 # merge into one narrow write that folds to a constant position once synthesis
 # expands the loop (a `unique if` merge stays one-hot), and the copies of

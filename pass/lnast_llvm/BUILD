@@ -22,6 +22,7 @@ cc_library(
         "//core:file_name",
         "//graph",
         "//inou/cgen:inou_cgen",
+        "//inou/cgen:sim_tune_hdrs",
         "//lnast",
         "//pass/lg2lnast:pass_lg2lnast",
         "@abseil-cpp//absl/container:flat_hash_map",

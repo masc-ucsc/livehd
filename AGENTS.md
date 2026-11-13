@@ -42,6 +42,24 @@
   slop-only knobs) pins `--set sim.tune.backend=slop`; a general sim test that
   fails under llvm is an LLVM-backend bug to fix in `inou/cgen`, not a reason
   to switch it to slop.
+- **Sim flow (LNAST vs inou.cgen.sim)**: `lhd sim` builds the DUT through the
+  LNAST flow by default (`pass.lg2lnast` -> `pass/lnast_llvm` native kernels, no
+  color plan or cgen_sim; `pass/lg2lnast/README.md` milestone 3). What it does not
+  cover (VCD/probe/query runs, `sim.tune.backend=slop`, a design `lg2lnast` or
+  `lnast_llvm` declines, a testbench that reads a register/memory/sub-instance of
+  the DUT) falls back to `inou.cgen.sim` with a `lnast-fallback` progress note.
+  `LHD_SIM_LNAST=0` forces inou.cgen.sim, `=1` requires the LNAST flow (a decline
+  is an error: the way to find out why a design is not covered). A test about
+  inou.cgen.sim itself (the sim.tune driver, its generated C++) pins
+  `LHD_SIM_LNAST=0`. Known semantic difference: with `sim.unknown_zero` off each
+  `?` literal is drawn ONCE per run from the seed in both flows, but a `?` the
+  LNAST flow meets outside an operand literal is 0. `sim.vcd` is supported (ports
+  and registers, one scope per instance path, edge-aligned: no `sim.vcd_fake_delay`
+  X windows, memories not traced); probe / break-when / query / list-signals /
+  restart runs still fall back. `sim.warn_undefined` reports in both flows (the
+  LNAST flow: division/remainder by zero, registered-memory accesses outside the
+  array, and the Verilog reader's `lgundef` markers; not inside a rolled loop). When a flow disagrees with the
+  other, do not assume the old one is right: compare against the language rules.
 - **Sim build**: `lhd sim` generates `<workdir>/sim` and builds `drv.bin` itself
   (built-in parallel, incremental host compile); there is no bazel/ninja project
   and no `sim.ninja` option. The sim dir records its command, so `lhd sim` /

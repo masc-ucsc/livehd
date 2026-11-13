@@ -10,6 +10,8 @@
 #include <set>
 #include <sstream>
 #include <stdexcept>
+#include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 #include "gate_waveform.hpp"
@@ -124,14 +126,16 @@ struct Proxy::Impl {
   std::shared_ptr<const model::Library>    library;
   std::shared_ptr<const Provisional_cells> provisional;
   Constraints                              constraints;
-  Clock_system                          clock_system;
-  uint64_t                              topology_generation, model_generation;
-  std::vector<Bound_pin>                pins;
-  std::map<std::string, size_t>         identities;
-  std::vector<Cell>                     cells;
-  std::map<size_t, std::vector<size_t>> nets;
-  std::vector<Edge>                     edges;
-  std::vector<std::vector<size_t>>      outgoing;
+  Clock_system                             clock_system;
+  uint64_t                                 topology_generation, model_generation;
+  std::vector<Bound_pin>                   pins;
+  // Bind external labels once. RC inputs already carry interned Pin_labels;
+  // their two identity words hash directly, without joining hierarchical text.
+  std::unordered_map<Pin_label, size_t>    identities;
+  std::vector<Cell>                        cells;
+  std::map<size_t, std::vector<size_t>>    nets;
+  std::vector<Edge>                        edges;
+  std::vector<std::vector<size_t>>         outgoing;
   std::vector<size_t>                   order;
   std::vector<std::string>              unsupported;
   std::vector<std::string>              warnings;
@@ -1474,14 +1478,13 @@ struct Proxy::Impl {
         }
       }
     }
-    std::map<size_t, const physical::Rc_net*> physical_nets;
-    std::vector<Star_net>                     star_nets;
+    std::vector<const physical::Rc_net*> physical_nets(pins.size());
+    std::vector<size_t>                  rc_node(pins.size(), absent), rc_owner(pins.size(), absent);
+    std::vector<Star_net>                star_nets;
+    std::vector<size_t>                  star_drivers;
     // A pin of an unbound cell (a native memory's proxy macro): not in the
     // timing graph, the cell is already reported unsupported.
-    const auto                                opaque_pin = [&](const std::string& pin) {
-      const auto colon = pin.rfind(':');
-      return colon != std::string::npos && opaque_cells.contains(pin.substr(0, colon));
-    };
+    const auto opaque_pin = [&](const Pin_label& pin) { return !pin.bare() && opaque_cells.contains(pin.instance().str()); };
     if (rc) {
       for (const auto& net : rc->nets) {
         const auto found = identities.find(net.driver);
@@ -1495,22 +1498,23 @@ struct Proxy::Impl {
           }
           throw std::invalid_argument("RC driver is absent from mapped connectivity: " + net.driver);
         }
-        if (!physical_nets.emplace(found->second, &net).second) {
+        if (physical_nets[found->second]) {
           throw std::invalid_argument("duplicate physical RC driver");
         }
+        physical_nets[found->second] = &net;
       }
       for (const auto& [driver, sinks] : nets) {
         if (pins[driver].clock || constraints.cuts.contains(pins[driver].name)) {
           continue;
         }
-        const auto found = physical_nets.find(driver);
-        if (found == physical_nets.end()) {
+        const auto* found = physical_nets[driver];
+        if (!found) {
           issue("missing physical RC net: " + pins[driver].name);
           continue;
         }
-        const auto&                   net = *found->second;
+        const auto&                   net = *found;
         std::vector<Pair>             cap(net.nodes.size());
-        std::map<std::string, size_t> nodes;
+        std::unordered_set<Pin_label> opaque_nodes;
         for (size_t i = 0; i < net.nodes.size(); ++i) {
           const auto& node = net.nodes[i];
           require_nonnegative(node.capacitance_ff, "invalid wire capacitance");
@@ -1518,18 +1522,24 @@ struct Proxy::Impl {
           if (node.pin.empty()) {
             continue;
           }
-          if (!nodes.emplace(node.pin, i).second) {
-            throw std::invalid_argument("duplicate physical RC pin");
-          }
-          if (node.pin == net.driver) {
-            continue;
-          }
           const auto pin = identities.find(node.pin);
           if (pin == identities.end() && opaque_pin(node.pin)) {
-            continue;  // an unbound cell's load: its wire capacitance stays, no pin load or arrival
+            if (!opaque_nodes.insert(node.pin).second) {
+              throw std::invalid_argument("duplicate physical RC pin");
+            }
+            continue;  // unbound cell load: retain wire capacitance only
           }
-          if (pin == identities.end() || std::find(sinks.begin(), sinks.end(), pin->second) == sinks.end()) {
+          if (pin == identities.end() || (pin->second != driver && driver_of[pin->second] != driver)) {
             throw std::invalid_argument("physical RC sink differs from mapped connectivity: " + node.pin);
+          }
+          const auto id = pin->second;
+          if (rc_owner[id] == driver) {
+            throw std::invalid_argument("duplicate physical RC pin");
+          }
+          rc_owner[id] = driver;
+          rc_node[id]  = i;
+          if (id == driver) {
+            continue;
           }
           if (const auto pin_load = sink_load(pin->second)) {
             for (unsigned t = 0; t < 2; ++t) {
@@ -1537,11 +1547,11 @@ struct Proxy::Impl {
             }
           }
         }
-        if (!nodes.contains(net.driver)) {
+        if (rc_owner[driver] != driver) {
           throw std::invalid_argument("physical RC has no driver node");
         }
         for (auto sink : sinks) {
-          if (!nodes.contains(pins[sink].name)) {
+          if (rc_owner[sink] != driver) {
             throw std::invalid_argument("physical RC omits mapped sink: " + pins[sink].name);
           }
         }
@@ -1560,12 +1570,13 @@ struct Proxy::Impl {
             add(sink, sink_load(sink).value_or(Pair{}));
           }
           star_nets.push_back(std::move(input));
+          star_drivers.push_back(driver);
         } else {
-          const auto state  = analyze_rc_tree(net, static_cast<unsigned>(nodes.at(net.driver)), cap);
+          const auto state  = analyze_rc_tree(net, static_cast<unsigned>(rc_node[driver]), cap);
           load[driver]      = state.total_cap_ff;
           pi_models[driver] = state.pi;
           for (auto sink : sinks) {
-            elmore[sink] = state.elmore_ps[nodes.at(pins[sink].name)];
+            elmore[sink] = state.elmore_ps[rc_node[sink]];
           }
         }
       }
@@ -1573,12 +1584,14 @@ struct Proxy::Impl {
     if (star) {
       auto snapshot = star->bank.evaluate(star_nets, star->policy, star->refresh, star->options);
       star->stats   = snapshot.stats;
-      for (const auto& net : snapshot.nets) {
-        const auto driver = identities.at(net.pins.front());
-        load[driver]      = net.timing.total_cap_ff;
-        pi_models[driver] = net.timing.pi;
-        for (size_t i = 1; i < net.pins.size(); ++i) {
-          elmore[identities.at(net.pins[i])] = net.timing.elmore_ps[i];
+      for (size_t n = 0; n < snapshot.nets.size(); ++n) {
+        const auto& net    = snapshot.nets[n];
+        const auto  driver = star_drivers.at(n);
+        load[driver]       = net.timing.total_cap_ff;
+        pi_models[driver]  = net.timing.pi;
+        const auto& sinks  = nets.at(driver);
+        for (size_t i = 0; i < sinks.size(); ++i) {
+          elmore[sinks[i]] = net.timing.elmore_ps.at(i + 1);
         }
       }
       result.warnings.push_back(

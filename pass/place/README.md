@@ -5529,6 +5529,12 @@ explicit clock/state cuts and a validated pin DAG. A combinational cycle is an
 error even if HHDS returns a cycle tail. Topology edits require a new binding;
 each result carries topology/model generations.
 
+The binding table uses interned pin identities rather than copied hierarchical
+strings. RC evaluations index nets and tree nodes by the already-bound numeric
+pin IDs, and check sink membership through the driver-ID array. They do not
+rebuild string-keyed RC-node maps. Star-model feedback uses the submitted net
+and sink order to carry those IDs through evaluation too.
+
 The timer carries rise/fall arrival, slew, required time, load and worst
 predecessor separately. It supports positive/negative/non-unate arcs, ideal
 positive-edge clocks, clock-to-Q, setup and explicit IO boundaries. Named clocks
@@ -5733,6 +5739,16 @@ tree, identity and pin position against fresh FLUTE construction. Observations
 report inspected pins/nets, rebuilt/reused trees, dirty timing and removed nets.
 All pins are still inspected and all timing walks remain full walks. These
 caches alone do not supply continuous wires or forward/backward incremental timing.
+
+RC geometry and cache keys use dense physical-pin IDs scoped to one immutable
+connectivity layout. Rebuilding the layout invalidates those bindings even if
+the new graph reuses the same ordinals. RC stores numerical Steiner trees and
+hashes only numerical geometry/electrical data. The existing design binding
+supplies the layout fingerprint once; RC never reads hierarchical names.
+The existing named timing interface binds its endpoint labels after RC using
+the pin-ID table, without string joins or name lookups inside RC. Numerical
+RC fingerprints have a new version, so older internal RC identities get a
+one-time cache miss. No placement or timing defaults change.
 
 `star_rc.{hpp,cpp}` now implements an optional continuous driver-to-sink wire
 model. A calibration stores the ratio of Steiner wire capacitance to the raw

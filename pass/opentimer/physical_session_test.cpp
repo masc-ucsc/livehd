@@ -416,6 +416,78 @@ TEST_F(PhysicalSession, RankingTracksRcAndGateChangesWithoutPublishingDetailedTi
   EXPECT_EQ(session.statistics().evaluations, 5U);
 }
 
+TEST_F(PhysicalSession, BoundPinIdsSurviveLongNamesAndChangingRcNodeOrder) {
+  using Purpose               = livehd::opentimer::Physical_session::Purpose;
+  const std::string long_name = "top." + std::string(512, 'n') + ".lane";
+  const auto        rename    = [&](Circuit& circuit) {
+    for (auto node : circuit.graph->body().nodes()) {
+      if (node.get_name() == "u") {
+        node.set_name(long_name);
+      }
+    }
+    for (auto& cell : circuit.rc->cells) {
+      if (cell.name == "u") {
+        cell.name = long_name;
+      }
+    }
+    const auto label = [&](livehd::Pin_label pin) {
+      return pin.instance() == "u" ? livehd::Pin_label(livehd::Name(long_name), pin.pin()) : pin;
+    };
+    for (auto& net : circuit.rc->nets) {
+      net.driver = label(net.driver);
+      for (auto& node : net.nodes) {
+        node.pin = label(node.pin);
+      }
+    }
+  };
+  livehd::opentimer::Physical_session session(options);
+  Circuit                             initial(false, false);
+  rename(initial);
+  const auto first = session.evaluate(initial.graph, initial.rc, {}, Purpose::ranking);
+  for (unsigned variant = 0; variant < 3; ++variant) {
+    Circuit changed(false, false, 1000);
+    rename(changed);
+    for (auto& net : changed.rc->nets) {
+      const auto driver = net.nodes[0], sink = net.nodes[1];
+      net.nodes = {
+          {"", .15},
+          driver,
+          {"",  .1},
+          sink
+      };
+      net.edges = {
+          {1, 0, 300},
+          {0, 2, 300},
+          {2, 3, 400}
+      };
+      if (variant > 0) {
+        std::reverse(net.nodes.begin(), net.nodes.end());
+        for (auto& edge : net.edges) {
+          edge.from = 3 - edge.from;
+          edge.to   = 3 - edge.to;
+        }
+      }
+    }
+    if (variant == 2) {
+      std::reverse(changed.rc->nets.begin(), changed.rc->nets.end());
+      session.whatif().add_cell("rejected_trial", "sky130_fd_sc_hd__buf_1");
+    }
+    const auto ranked = session.evaluate(changed.graph, changed.rc, {}, Purpose::ranking);
+    if (variant == 0) {
+      EXPECT_EQ(first.ranking->layout, ranked.ranking->layout);
+    }
+    livehd::opentimer::Physical_session fresh(options);
+    const auto                          expected = fresh.evaluate(changed.graph, changed.rc, {}, Purpose::ranking);
+    ASSERT_EQ(ranked.ranking->layout->labels, expected.ranking->layout->labels);
+    for (size_t i = 0; i < ranked.ranking->pins.size(); ++i) {
+      EXPECT_EQ(ranked.ranking->pins[i].slack, expected.ranking->pins[i].slack);
+      EXPECT_EQ(ranked.ranking->pins[i].clock, expected.ranking->pins[i].clock);
+    }
+    compare(session.evaluate(changed.graph, changed.rc), fresh.evaluate(changed.graph, changed.rc));
+  }
+  EXPECT_EQ(session.statistics().builds, 1U);
+}
+
 TEST_F(PhysicalSession, IndexedRankingPreservesWeightsAcrossTopologyAndFiltering) {
   using Purpose = livehd::opentimer::Physical_session::Purpose;
   livehd::opentimer::Physical_session session(options);

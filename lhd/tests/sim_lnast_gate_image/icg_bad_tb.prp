@@ -1,0 +1,13 @@
+const dut_m = import("lg:icg_bad")
+
+test icg_bad.gated {
+  mut d = dut_m
+  tick 6 {
+    d.en = clock >= 2
+    d.d  = clock + 10
+    step
+    if clock >= 2 {
+      assert(d.q == clock + 10, "the gated register takes d while en is set")
+    }
+  }
+}

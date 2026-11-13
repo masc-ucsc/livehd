@@ -173,6 +173,17 @@ public:
   // Zero every entry when `condition` is non-zero.
   // `dirty`: masks ORed in whenever the array is cleared.
   bool                        array_clear_if(size_t array, Value condition, const std::vector<Dirty_mask>& dirty = {});
+  // Reload every entry from `image` (size*bits packed, entry 0 low) when `condition` is non-zero: a
+  // reset to a non-zero initial image. Same cold branch and `dirty` contract as array_clear_if.
+  bool                        array_load_if(size_t array, Value condition, Value image, const std::vector<Dirty_mask>& dirty = {});
+  // The same reload from a CONSTANT image already in the array's state layout (array_state_image): one
+  // private constant table and a memcpy, linear in the array (array_load_if of a wide constant shifts it
+  // once per entry). The array must live in the state (array_create_in_state).
+  bool array_load_words_if(size_t array, Value condition, const std::vector<uint64_t>& words,
+                           const std::vector<Dirty_mask>& dirty = {});
+  // `packed` (size*bits bits, entry 0 low, little-endian words) laid out as array_create_in_state stores
+  // an array of `size` entries of `bits` bits: array_state_words(bits, size) words.
+  [[nodiscard]] static std::vector<uint64_t> array_state_image(uint32_t bits, uint64_t size, const std::vector<uint64_t>& packed);
   // `values[i]` is replaced by `overrides[i]` while `condition` is non-zero, as ONE branch the optimizer is
   // told is unlikely (a reset) with a phi per value: the hot path pays a compare, not a select per register.
   bool                    unlikely_override(Value condition, const std::vector<Value>& values, const std::vector<Value>& overrides,

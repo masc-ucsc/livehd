@@ -54,6 +54,11 @@ struct Unsupported {
 struct Literal {
   bool                  negative = false;
   std::vector<uint64_t> mag;  // magnitude, little endian
+  // A 0ub/0sb pattern with `?` bits (read as 0 in `mag`): `unk` marks them, `raw` is the known bits as
+  // the n-bit pattern, `raw_bits` = n and `raw_signed` whether the pattern is a two's complement value.
+  std::vector<uint64_t> unk, raw;
+  uint32_t              raw_bits   = 0;
+  bool                  raw_signed = false;
 };
 
 uint32_t bit_length(const std::vector<uint64_t>& m) {
@@ -112,6 +117,29 @@ std::optional<Literal> parse_literal(std::string_view t) {
     for (size_t i = 0; i < n; ++i) {
       if (bits[n - 1 - i] == '1') {
         l.mag[i / 64] |= uint64_t{1} << (i % 64);
+      }
+    }
+    {
+      // which bits were `?` / x / z: the loop above already turned them into '0'
+      std::vector<uint64_t> unk((n + 63) / 64, 0);
+      bool                  any = false;
+      size_t                at  = 0;
+      for (char c : std::string_view(t)) {  // `t` is the text after the prefix; walk it MSB first
+        if (c == '_') {
+          continue;
+        }
+        if (c == '?' || c == 'x' || c == 'X' || c == 'z' || c == 'Z') {
+          const size_t bit = n - 1 - at;
+          unk[bit / 64]   |= uint64_t{1} << (bit % 64);
+          any              = true;
+        }
+        ++at;
+      }
+      if (any) {
+        l.unk        = std::move(unk);
+        l.raw        = l.mag;
+        l.raw_bits   = static_cast<uint32_t>(n);
+        l.raw_signed = is_signed;
       }
     }
     if (is_signed && bits[0] == '1') {  // value - 2^n: negate the two's complement magnitude
@@ -238,7 +266,7 @@ public:
     mux,              // a: select, b: when false, c: when true
     array_read,       // imm: array; a: address
     array_write,      // imm: array; a: enable, b: address, c: data            (side effect)
-    array_clear,      // imm: array; a: condition                              (side effect)
+    array_clear,      // imm: array; a: condition; b (optional): the image reloaded instead of zero (side effect)
     loop_begin,       // imm: trip count; width: index bits; x, n: refs_ (carry seeds); c.id: words_ index of `first`
     loop_index,       // a: its loop_begin
     loop_phi,         // a: its loop_begin; imm: carry number
@@ -471,11 +499,14 @@ public:
     add(o, 0, true);
     return true;
   }
-  bool array_clear_if(size_t array, V condition) {
+  bool array_clear_if(size_t array, V condition, V image = V{}) {
     Op o;
     o.kind = K::array_clear;
     o.imm  = array;
     o.a    = ref(condition);
+    if (image.width != 0) {
+      o.b = ref(image);
+    }
     add(o, 0, true);
     return true;
   }
@@ -838,6 +869,7 @@ private:
     bool                     negreset = false;
     bool                     sync     = true;
     std::optional<Literal>   initial;
+    std::optional<Literal>   image;  // a memory's non-zero initial image: size*bits packed, entry 0 low
     bool                       has_clock = false;
     uint64_t                   mem_size  = 0;  // > 0: a memory of mem_size entries (field.bits = entry bits)
     // What the element is clocked by (a clock port or a clock gate's output; empty: the root clock) and
@@ -1011,7 +1043,11 @@ private:
     V    clk;    // the clock it gates (the root clock or another gate's output)
     V    latch;  // h
     bool invert = false;
+    // Recognized from a plain `latch & clk` AND (not a Clock() cell): glitch-free only when the latch
+    // is closed while `clk` is high, which is checked once every latch is complete (check_and_gates).
+    bool from_and = false;
   };
+  void check_and_gates();
   struct Hidden_latch {
     std::string name;
     size_t      loc = 0;
@@ -1019,6 +1055,30 @@ private:
   };
   absl::flat_hash_map<size_t, Gate> gates_;      // gate output op -> its parts
   std::vector<Hidden_latch>         hidden_;     // one per clock gate: state the design does not name
+  struct Unknown_site {  // one `?` literal drawn at power-on
+    std::string name;
+    size_t      loc  = 0;
+    uint32_t    bits = 0;
+  };
+  bool                              draw_unknown_ = false;  // sim.unknown_zero is off
+  std::vector<Unknown_site>         unknown_sites_;
+  absl::flat_hash_map<std::string, size_t> unknown_locs_;  // literal -> its draw's state location (one draw per literal)
+  // sim.warn_undefined: one site per statement that can compute a value the source leaves undefined
+  // (a division or remainder by zero, a memory access outside its array). Each site is a one-word
+  // state array (Tape::arrays, past the registers') that the rise view writes 1 into when the access
+  // happens: an effect, so it is never pruned, and one array per site, so the sites are not chained
+  // in memory order. The locations are created together after the walk, so the words are
+  // contiguous; the class around the kernels polls them after each clock (lnast_sim.cpp).
+  struct Undefined_site {
+    std::string what, where;
+    size_t      array = 0;
+  };
+  bool                              warn_undefined_ = false;
+  std::vector<Undefined_site>       undefined_sites_;
+  void                              undefined_if(V condition, std::string_view what, const Lnast_nid& stmt, bool path = true);
+  void                              undefined_at(V condition, std::string_view what, std::string where, bool path);
+  // Out-of-range condition of a memory address (none when the address cannot leave the array).
+  V                                 outside(V address, uint64_t size);
   std::vector<size_t>               latch_ops_;  // every latch op (registers declared `latch`, and the hidden ones)
   // What a latch's held value follows: `if (guard) held = data`, in every view where the guard can be on.
   struct Latch_update {
@@ -1117,7 +1177,81 @@ private:
   V    combine(Env& env, const V& c, const V& t, const V& f);
 };
 
+void Gen::undefined_if(V condition, std::string_view what, const Lnast_nid& stmt, bool path) {
+  // A rolled native loop body is not instrumented (as in inou.cgen.sim): an effect inside it would
+  // change how the loop is lowered.
+  if (!warn_undefined_ || k_ == nullptr || k_->in_loop() || condition.width == 0) {
+    return;
+  }
+  std::string where;
+  if (const auto sp = ln_->span_of_nearest(stmt); sp.start_line) {
+    where = std::format("{}:{}", sp.file.empty() ? std::string{"?"} : sp.file, *sp.start_line);
+  } else if (!sp.file.empty()) {
+    where = sp.file;
+  } else {  // no source line: the module and the value, as inou.cgen.sim names a cell
+    const auto c = kids(stmt);
+    where        = std::string(ln_->get_top_module_name());
+    if (!c.empty() && ty(c[0]) == Lnast_ntype::Lnast_ntype_ref) {
+      where += "." + nm(c[0]);
+    }
+  }
+  undefined_at(condition, what, std::move(where), path);
+}
+
+void Gen::undefined_at(V condition, std::string_view what, std::string where, bool path) {
+  if (!warn_undefined_ || k_ == nullptr || k_->in_loop() || condition.width == 0) {
+    return;
+  }
+  const V hit = path && under_condition() ? k_->binary(Op::bit_and, condition, path_enable(), 1, true) : condition;
+  k_->arrays.push_back(Tape::Array{64, 1, Tape::none});  // its location is created after the walk
+  const size_t array = k_->arrays.size() - 1;
+  undefined_sites_.push_back({std::string(what), std::move(where), array});
+  (void)k_->array_write(array, hit, k_->constant(1, 0, true), k_->constant(64, 1, true));
+}
+
+V Gen::outside(V address, uint64_t size) {
+  if (address.unsign && address.width < 64 && (uint64_t{1} << address.width) <= size) {
+    return V{};  // every value of the address is an entry
+  }
+  const V past = k_->binary(Op::ge, address, k_->constant(64, size, true), 1, true);
+  if (address.unsign) {
+    return past;
+  }
+  const V negative = k_->binary(Op::lt, address, k_->constant(1, 0, true), 1, true);
+  return k_->binary(Op::bit_or, past, negative, 1, true);
+}
+
 V Gen::literal(const Literal& l) {
+  if (draw_unknown_ && !l.unk.empty()) {
+    // Unknown bits drawn once per run: a state word nothing writes, filled at power-on from the seeded PRNG
+    // (a field with fill 2), under the literal's mask; the known bits are fixed.
+    const uint32_t n = l.raw_bits;
+    // One literal is ONE draw wherever it is spelled (the graph has one constant node; lg2lnast prints
+    // it at every use): the key is the whole literal, so equal spellings share one state word.
+    std::string key = std::to_string(n) + (l.raw_signed ? "s" : "u");
+    for (size_t w = 0; w < l.unk.size(); ++w) {
+      key += ":" + std::to_string(l.raw[w]) + "/" + std::to_string(l.unk[w]);
+    }
+    // The cache holds the draw's state word, not a value: a value built inside one loop body must not be
+    // reused after it (or in another), so the few ops that read the word are rebuilt at every use.
+    auto site_loc = unknown_locs_.find(key);
+    if (site_loc == unknown_locs_.end()) {
+      Unknown_site site;
+      site.name = "__unknown" + std::to_string(unknown_sites_.size());
+      site.loc  = k_->new_loc(n);
+      site.bits = n;
+      unknown_sites_.push_back(site);
+      site_loc = unknown_locs_.emplace(key, site.loc).first;
+    }
+    const V drawn = k_->input(site_loc->second, n, true);
+    const V mask  = k_->constant_words(n, l.unk, true);
+    const V known = k_->constant_words(n, l.raw, true);
+    V       v     = k_->binary(Op::bit_or, k_->binary(Op::bit_and, drawn, mask, n, true), known, n, true);
+    if (l.raw_signed) {
+      v = k_->sign_extend_from(v, n - 1, n, false);
+    }
+    return v;
+  }
   if (!l.negative) {
     const uint32_t w = std::max<uint32_t>(1, bit_length(l.mag));
     auto           words = twos_words(l, w);
@@ -1272,11 +1406,15 @@ void Gen::collect_attrs(Frame& fr) {
             bail("negedge memory");
           }
         } else if (key == "initial") {
+          // The packed contents, entry 0 in the low bits (pass.lg2lnast, 04b-attributes.md).
           auto lit = parse_literal(nm(c[2]));
-          if (!lit || bit_length(lit->mag) != 0) {
-            bail("non-zero memory image");
+          if (!lit || lit->negative) {
+            bail("memory image '" + nm(c[2]) + "' is not an unsigned integer");
           }
-          r.initial = *lit;  // an initialized (zero) image: not undefined at power-on
+          r.initial = Literal{false, {0}};  // initialized: not undefined at power-on
+          if (bit_length(lit->mag) != 0) {
+            r.image = *lit;
+          }
         } else if (key == "reset_pin") {
           if (nm(c[2]) != "false" && nm(c[2]) != "nil") {
             r.reset_pin = nm(c[2]);
@@ -1616,7 +1754,11 @@ void Gen::exec_stmt(const std::vector<Lnast_nid>& stmts, size_t& i, Env& env) {
         }
         V           address = operand(c[1], env);
         V           data    = k_->resize(operand(c[2], env), r.field.bits, !r.field.sign);
-        if (!k_->array_write(mem_array(nm(c[0]), env), write_enable(r, env), address, data)) {
+        const V     enable  = write_enable(r, env);
+        if (const V out = warn_undefined_ ? outside(address, r.mem_size) : V{}; out.width != 0) {
+          undefined_if(k_->binary(Op::bit_and, enable, out, 1, true), "memory write outside the array", s, false);
+        }
+        if (!k_->array_write(mem_array(nm(c[0]), env), enable, address, data)) {
           bail("memory write");
         }
         break;
@@ -1635,6 +1777,23 @@ void Gen::exec_stmt(const std::vector<Lnast_nid>& stmts, size_t& i, Env& env) {
     case NT::Lnast_ntype_func_call: {
       if (c.size() < 2 || ty(c[0]) != NT::Lnast_ntype_ref || ty(c[1]) != NT::Lnast_ntype_ref) {
         bail("fcall shape");
+      }
+      if (constexpr std::string_view prefix = "\x1flgundef\x1f"; nm(c[1]) == "lgundef" && !lib_.contains("lgundef")) {
+        // A sim.warn_undefined marker (pass.lg2lnast, `lhd sim` only): `cond` is true while the access it
+        // guards stays defined, the path condition already folded in; the name is "<prefix><what>\x1f<loc>".
+        if (c.size() != 3 || ty(c[2]) != NT::Lnast_ntype_store || kids(c[2]).size() != 2) {
+          bail("lgundef marker shape");
+        }
+        std::string text = nm(c[0]);
+        if (text.starts_with(prefix)) {
+          text.erase(0, prefix.size());
+        }
+        const auto sep   = text.find('\x1f');
+        std::string what  = sep == std::string::npos ? std::string{"undefined value"} : text.substr(0, sep);
+        std::string where = sep == std::string::npos ? text : text.substr(sep + 1);
+        const V     cond  = operand(kids(c[2])[1], env);
+        undefined_at(k_->binary(Op::eq, cond, k_->constant(1, 0, true), 1, true), what, std::move(where), true);
+        break;
       }
       if (under_condition()) {
         bail("module instance under a condition");
@@ -1701,6 +1860,9 @@ void Gen::exec_stmt(const std::vector<Lnast_nid>& stmts, size_t& i, Env& env) {
         bail("tuple_get of a register");
       }
       V address = operand(c[2], env);
+      if (const V out = warn_undefined_ ? outside(address, r.mem_size) : V{}; out.width != 0) {
+        undefined_if(out, "memory read outside the array", s);
+      }
       V v       = k_->array_read(mem_array(nm(c[1]), env), address, r.field.bits, !r.field.sign);
       if (v.width == 0) {
         bail("memory read");
@@ -1776,6 +1938,16 @@ void Gen::exec_stmt(const std::vector<Lnast_nid>& stmts, size_t& i, Env& env) {
         w    = t == NT::Lnast_ntype_mult ? (sign ? sw(a) + sw(b) : a.width + b.width) : std::max(sw(a), sw(b));
       }
       const Op op = t == NT::Lnast_ntype_mult ? Op::mul : (t == NT::Lnast_ntype_div ? Op::div : Op::rem);
+      if (op == Op::div || op == Op::rem) {
+        // A zero divisor is X (Pyrope leaves it to the Verilog meaning): the native divide would trap on it,
+        // so divide by 1 instead and give 0, a value in range.
+        const V zero_b = k_->binary(Op::eq, b, k_->constant(std::max<uint32_t>(b.width, 1), 0, b.unsign), 1, true);
+        undefined_if(zero_b, op == Op::div ? "division by zero" : "remainder by zero", s);
+        const V safe_b = k_->mux(zero_b, b, k_->constant(std::max<uint32_t>(b.width, 1), 1, b.unsign), std::max<uint32_t>(b.width, 1), b.unsign);
+        const V quot   = k_->binary(op, a, safe_b, w, !sign);
+        finish(dst, k_->mux(zero_b, quot, k_->constant(std::max<uint32_t>(w, 1), 0, !sign), w, !sign));
+        break;
+      }
       finish(dst, k_->binary(op, a, b, w, !sign));
       break;
     }
@@ -1805,6 +1977,7 @@ void Gen::exec_stmt(const std::vector<Lnast_nid>& stmts, size_t& i, Env& env) {
         }
       }
       const Op op = t == NT::Lnast_ntype_bit_and ? Op::bit_and : (t == NT::Lnast_ntype_bit_or ? Op::bit_or : Op::bit_xor);
+      const std::vector<V> pair_ops = ops;  // an ICG is `latch & clock`: recognized below once both are known
       // Balanced reduction tree: a linear fold makes an N-deep dependence chain that LLVM's
       // optimizer handles badly on long OR/AND/XOR lists.
       while (ops.size() > 1) {
@@ -1816,6 +1989,31 @@ void Gen::exec_stmt(const std::vector<Lnast_nid>& stmts, size_t& i, Env& env) {
           next.push_back(ops.back());
         }
         ops.swap(next);
+      }
+      if (op == Op::bit_and && pair_ops.size() == 2) {
+        // The standard integrated clock gate as hardware writes it: `gated = enable_latch & clk`, the latch
+        // transparent while `clk` is low (always_latch if (!clk) en = ...). Its edges are the clock's, taken only
+        // while the latch holds 1: the same gate `Clock(clock_pin=, enable=)` builds, so a register or memory on
+        // `gated` is handled by clock_enables like any other gated clock.
+        const auto base = [&](V v) {
+          size_t id = v.id;
+          while (k_->ops[id].kind == Tape::K::resize && k_->ops[id].a.id != Tape::none) {
+            id = k_->ops[id].a.id;
+          }
+          return id;
+        };
+        for (int swap = 0; swap < 2; ++swap) {
+          const size_t clk_id = base(pair_ops[swap]);
+          const size_t lat_id = base(pair_ops[1 - swap]);
+          if ((k_->ops[clk_id].kind == Tape::K::clock || gates_.contains(clk_id)) && k_->ops[lat_id].kind == Tape::K::latch) {
+            size_t out_id = ops[0].id;
+            while (k_->ops[out_id].kind == Tape::K::resize && k_->ops[out_id].a.id != Tape::none) {
+              out_id = k_->ops[out_id].a.id;
+            }
+            gates_[out_id] = Gate{V{clk_id, 1, true}, V{lat_id, 1, true}, false, true};
+            break;
+          }
+        }
       }
       finish(dst, ops[0]);
       break;
@@ -2057,6 +2255,9 @@ void Gen::scan_calls(const std::vector<Lnast_nid>& stmts, Frame& f) {
           if (auto clk = argument("clock_pin")) {
             f.clocks.insert(*clk);
           }
+          continue;
+        }
+        if (nm(c[1]) == "lgundef") {  // a sim.warn_undefined marker: no instance, nothing clocked
           continue;
         }
         bail("call to unknown module '" + nm(c[1]) + "'");
@@ -2456,7 +2657,7 @@ void Gen::finish_frame(Frame& f, const Env& pre, const Env& end) {
   for (size_t idx : f.owned) {
     const auto& r = regs_[idx];
     if (r.mem_size != 0) {
-      if (r.reset_pin) {  // reset clears the whole image (initial image is zero) at the edge, over any write
+      if (r.reset_pin) {  // reset reloads the whole image (zero unless `image`) at the edge, over any write
         const V* rv = nullptr;  // an input or any signal settled this cycle
         if (auto e = end.find(*r.reset_pin); e != end.end()) {
           rv = &e->second;
@@ -2467,7 +2668,23 @@ void Gen::finish_frame(Frame& f, const Env& pre, const Env& end) {
         }
         V active = r.negreset ? k_->binary(Op::eq, *rv, k_->constant(1, 0, true), 1, true)
                               : k_->binary(Op::ne, *rv, k_->constant(1, 0, true), 1, true);
-        if (!k_->array_clear_if(ensure_array(idx, pre), active)) {
+        // A SYNC reset behind a closed clock gate waits for an edge the gate lets through, exactly as a
+        // register's (and as the memory's writes, see write_enable). An async reset lands regardless.
+        if (r.sync && !r.clock_name.empty()) {
+          const V* clock = signal(r.clock_name, pre, end);
+          if (clock == nullptr) {
+            bail("memory '" + r.field.name + "' is clocked by unknown signal '" + r.clock_name + "'");
+          }
+          if (const V gate = all_of(clock_enables(*clock, "memory '" + r.field.name + "'")); gate.width != 0) {
+            active = k_->binary(Op::bit_and, active, k_->resize(gate, 1, true), 1, true);
+          }
+        }
+        V image{};
+        if (r.image) {
+          const uint32_t whole = static_cast<uint32_t>(r.mem_size * r.field.bits);
+          image                = k_->constant_words(whole, twos_words(*r.image, whole), true);
+        }
+        if (!k_->array_clear_if(ensure_array(idx, pre), active, image)) {
           bail("memory reset");
         }
       }
@@ -2482,13 +2699,15 @@ void Gen::finish_frame(Frame& f, const Env& pre, const Env& end) {
     V    n  = nx != end.end() ? nx->second : end.at(r.local);
     // A gated clock: the register takes the edge only while every gate on the way to the root clock
     // is on. Spelled as the hold mux, so it is published under that condition like any enable.
+    V gate_all{};  // the gates on this register's clock, all of them on (none: width 0)
     if (!r.clock_name.empty()) {
       const V* clock = signal(r.clock_name, pre, end);
       if (clock == nullptr) {
         bail("register '" + r.field.name + "' is clocked by unknown signal '" + r.clock_name + "'");
       }
       if (const V gate = all_of(clock_enables(*clock, "register '" + r.field.name + "'")); gate.width != 0) {
-        n = k_->mux(gate, cur_[idx], k_->resize(n, r.field.bits, !r.field.sign), r.field.bits, !r.field.sign);
+        n        = k_->mux(gate, cur_[idx], k_->resize(n, r.field.bits, !r.field.sign), r.field.bits, !r.field.sign);
+        gate_all = gate;
       }
     }
     if (r.reset_pin) {
@@ -2505,9 +2724,15 @@ void Gen::finish_frame(Frame& f, const Env& pre, const Env& end) {
                                      : k_->binary(Op::ne, *rv, k_->constant(1, 0, true), 1, true))
                  .first;
       }
+      // A SYNC reset is a clocked event: behind a closed clock gate it waits for an edge the gate lets
+      // through. An async reset lands whatever the gate does.
+      V act = ai->second;
+      if (r.sync && gate_all.width != 0) {
+        act = k_->binary(Op::bit_and, act, k_->resize(gate_all, 1, true), 1, true);
+      }
       reset_items_.push_back({
           idx,
-          ai->second,
+          act,
           r.initial ? *r.initial : Literal{false, {0}}
       });
     }
@@ -2828,7 +3053,11 @@ uint32_t chunk_target(bool gated) {
     const char* text = livehd::debug::env<"LHD_SIM_LNAST_CHUNK">();  // debug: words of code per kernel
     return text == nullptr ? 0u : static_cast<uint32_t>(std::strtoul(text, nullptr, 10));
   }();
-  return forced != 0 ? forced : gated ? 150u : 1250u;
+  // Ungated, a kernel is only cut to bound the LLVM compile of a huge function (a 93k-instruction kernel took 338 s
+  // to select): every cut costs the values crossing it a store, a load and a compare at run time. matched_filter's
+  // loop-built tap chain is 15k ops of 450-bit values (108k words): in 1250-word kernels it ran 3.45 s per 10M
+  // cycles, as one kernel 0.38 s. 10,000 words: gemmini8 Pyrope2 builds in 4 s (20,000: 18 s; LLVM compile is superlinear).
+  return forced != 0 ? forced : gated ? 150u : 10000u;
 }
 
 // Words of code: an op on a 512-bit value is eight words.
@@ -3485,7 +3714,25 @@ size_t build_kernel(const Tape& t, const Kernel_job& job, const Activity& gate, 
         }
         break;
       case K::array_clear:
-        if (!k.array_clear_if(array_of(o.imm), val(o.a), gate.array_marks(o.imm, self))) {
+        if (o.b.id != Tape::none) {
+          // A constant image (the usual case: a declared initializer) is one table copied on reset, linear
+          // in the memory; shifting one size*bits constant per entry was quadratic.
+          const auto& img = t.ops[o.b.id];
+          if (img.kind == K::constant_words || img.kind == K::constant) {
+            const auto&                 a = t.arrays[o.imm];
+            const std::vector<uint64_t> packed
+                = img.kind == K::constant ? std::vector<uint64_t>{img.imm}
+                                          : std::vector<uint64_t>(t.words.begin() + img.x, t.words.begin() + img.x + img.n);
+            if (!k.array_load_words_if(array_of(o.imm),
+                                       val(o.a),
+                                       Cgen_llvm::array_state_image(a.bits, a.size, packed),
+                                       gate.array_marks(o.imm, self))) {
+              bail("memory reset");
+            }
+          } else if (!k.array_load_if(array_of(o.imm), val(o.a), val(o.b), gate.array_marks(o.imm, self))) {
+            bail("memory reset");
+          }
+        } else if (!k.array_clear_if(array_of(o.imm), val(o.a), gate.array_marks(o.imm, self))) {
           bail("memory reset");
         }
         break;
@@ -3634,8 +3881,38 @@ size_t build_kernel(const Tape& t, const Kernel_job& job, const Activity& gate, 
   return k.instruction_count();
 }
 
+// A `latch & clk` AND models a clean clock gate (edges of `clk`, taken while the latch holds 1) only
+// when the latch cannot change while `clk` is high: its enable must be 0 whenever `clk` is 1. Any other
+// latch (transparent while the clock is high, or on an unrelated enable) makes the AND a glitchy clock
+// that inou.cgen.sim evaluates as logic: decline instead of simulating clean edges the hardware lacks.
+void Gen::check_and_gates() {
+  for (const auto& [out, gate] : gates_) {
+    if (!gate.from_and) {
+      continue;
+    }
+    const auto& latch = k_->ops[gate.latch.id];
+    bool        clean = false;
+    if (latch.a.id != Tape::none) {
+      View high;
+      high.level = 1;  // the root clock high; a gated clock `clk` is forced high below
+      high.fold_state.assign(k_->ops.size(), 0);
+      high.fold_value.assign(k_->ops.size(), 0);
+      high.fold_state[gate.clk.id] = 2;
+      high.fold_value[gate.clk.id] = 1;
+      const auto open              = fold(*k_, high, latch.a.id);
+      clean                        = open && *open == 0;
+    }
+    if (!clean) {
+      bail(std::format("a clock ANDed with latch '{}' that is not closed while that clock is high (not a clean clock gate)",
+                       latch.imm < regs_.size() ? regs_[latch.imm].field.name : std::string{"(a clock gate's)"}));
+    }
+  }
+}
+
 Result Gen::run(const Sim_objects& out) {
   Result res;
+  draw_unknown_   = !out.unknown_zero;
+  warn_undefined_ = out.warn_undefined;
   try {
     Phase_timer timer;
     ln_  = top_ln_;
@@ -3652,6 +3929,11 @@ Result Gen::run(const Sim_objects& out) {
       }
       if (count > 1) {
         bail("several clock inputs (" + clocks + "): one root clock is modeled");
+      }
+      if (count == 0 && std::ranges::any_of(regs_, [](const Reg_info& r) { return r.latch; })) {
+        // The state is latches and no flop or memory names a clock: the design's clock reaches the latch
+        // enable as DATA, a port nothing here toggles. inou.cgen.sim derives the clock from the enable.
+        bail("a latch with no clock port: its enable is driven by a plain input");
       }
     }
 
@@ -3710,6 +3992,9 @@ Result Gen::run(const Sim_objects& out) {
     exec_block(top_->stmts, env);
     finish_frame(*top_, pre, env);
     finish_late_gates();
+    for (const auto& site : undefined_sites_) {  // consecutive locations: the class polls one run of words
+      tape.arrays[site.array].loc = tape.new_loc(64);
+    }
     for (const auto id : latch_ops_) {
       if (tape.ops[id].a.id == Tape::none) {
         bail("internal: a latch was never completed");
@@ -3746,6 +4031,7 @@ Result Gen::run(const Sim_objects& out) {
         bail("nets that are assigned only from each other (a combinational cycle of wires)");
       }
     }
+    check_and_gates();  // every latch is complete and every settled read resolved
     if (livehd::debug::env<"LHD_SIM_LNAST_NO_LANES">() == nullptr) {  // debug A/B: lane access as plain arithmetic
       recognize_lanes(tape);
     }
@@ -3908,7 +4194,10 @@ Result Gen::run(const Sim_objects& out) {
         size += view_size(tape, *v);
       }
       const char* text = livehd::debug::env<"LHD_SIM_LNAST_GATE">();
-      gated            = text != nullptr ? text[0] != '0' : size > 20000;
+      // Gating pays only where most kernels sleep most cycles: minion (219k words) gains 4.6x, boom (95k) a few percent,
+      // while a dense design of 100-170k words (matched_filter and gemmini Pyrope2, every kernel active each cycle)
+      // lost 6x to 30x in 150-word kernels. 200k words and above.
+      gated            = text != nullptr ? text[0] != '0' : size > 200000;
       // Readers of a register before its writer (rank_readers_first): a few rounds, each from the
       // order the one before produced. What an order costs is counted where it is paid, after the
       // cut: a word of register that is not written in place and a word crossing kernels (a store,
@@ -4352,6 +4641,20 @@ Result Gen::run(const Sim_objects& out) {
         if (r.mem_size == 0) {
           f.init_words = twos_words(*r.initial, std::max<uint32_t>(f.bits, 1));
           f.init       = f.init_words.empty() ? 0 : f.init_words[0];
+        } else if (r.image) {
+          // Entry-major little-endian words, (entry_bits + 63) / 64 per entry: power_on puts each entry.
+          const uint32_t whole = static_cast<uint32_t>(r.mem_size * r.field.bits);
+          const auto     all   = twos_words(*r.image, whole);
+          const size_t   nw    = (r.field.bits + 63) / 64;
+          auto           bit   = [&](uint64_t i) { return ((all[i / 64] >> (i % 64)) & 1) != 0; };
+          f.init_words.assign(nw * r.mem_size, 0);
+          for (uint64_t e = 0; e < r.mem_size; ++e) {
+            for (uint32_t b = 0; b < r.field.bits; ++b) {
+              if (bit(e * r.field.bits + b)) {
+                f.init_words[e * nw + b / 64] |= uint64_t{1} << (b % 64);
+              }
+            }
+          }
         }
       } else if (r.mem_size != 0) {
         f.fill = r.reset_pin ? 2 : 0;  // a memory nothing initializes and nothing resets powers on zero
@@ -4359,6 +4662,17 @@ Result Gen::run(const Sim_objects& out) {
         f.fill = r.reset_pin ? 2 : 1;
       }
       reg_fields.push_back(f);
+    }
+    for (const auto& u : unknown_sites_) {  // a drawn `?` literal: random at power-on whatever the init policy
+      Field f;
+      f.name = u.name;
+      f.bits = u.bits;
+      f.word = tape.locs[u.loc];
+      f.fill = 2;
+      reg_fields.push_back(f);
+    }
+    for (const auto& site : undefined_sites_) {
+      res.undefined.push_back({site.what, site.where, tape.locs[tape.arrays[site.array].loc]});
     }
     for (const auto& h : hidden_) {  // a clock gate's enable latch: state like any other (checkpoints)
       Field f;

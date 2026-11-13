@@ -12,6 +12,10 @@
 # Structural and runtime checks use lhd's declared runtime dependencies.
 
 set -u
+# Pinned to inou.cgen.sim: this test is about that flow's generated sources, color plan, tune/profile
+# machinery or its default undefined-access warnings, none of which the LNAST sim flow (the `lhd sim`
+# default) produces. See AGENTS.md, "Sim flow".
+export LHD_SIM_LNAST=0
 
 LHD="${LHD:-lhd/lhd}"
 W="${TEST_TMPDIR:-/tmp/lhd_sim_ckpt_$$}"

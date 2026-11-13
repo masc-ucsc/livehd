@@ -1,6 +1,10 @@
 #!/bin/bash
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 set -eu
+# Pinned to inou.cgen.sim: this test is about that flow's generated sources, color plan, tune/profile
+# machinery or its default undefined-access warnings, none of which the LNAST sim flow (the `lhd sim`
+# default) produces. See AGENTS.md, "Sim flow".
+export LHD_SIM_LNAST=0
 LHD="${LHD:-lhd/lhd}"
 W="${TEST_TMPDIR:-/tmp/lhd_pure_loop_$$}"
 mkdir -p "$W"
