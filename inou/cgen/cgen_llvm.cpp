@@ -26,6 +26,7 @@
 #include "file_output.hpp"
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/ADT/StringRef.h"
@@ -1385,6 +1386,43 @@ public:
     bool                        has_inner    = false;
   };
   std::vector<Loop_frame>                                                                         loop_frames;
+
+  // The low bits of `v` known to be zero, for choosing an aligned lane access. A loop that is still
+  // being emitted has phis holding only their entry value (the back edge is added by loop_end), so
+  // computeKnownBits would call `ordinal * 34` all zeros and an unaligned lane one word wide, losing
+  // every bit past the first word (a 34-bit lane at bit 102 of a 170-bit value read 26 bits). A
+  // value whose operands reach such a phi is not trusted: nothing is known about it.
+  unsigned known_trailing_zeros(llvm::Value* v) const {
+    if (!loop_frames.empty()) {
+      llvm::SmallPtrSet<const llvm::Value*, 8> open;
+      for (const auto& f : loop_frames) {
+        open.insert(f.ordinal);
+        for (const auto* phi : f.phis) {
+          open.insert(phi);
+        }
+      }
+      llvm::SmallPtrSet<const llvm::Value*, 32> seen;
+      std::vector<const llvm::Value*>           work{v};
+      while (!work.empty()) {
+        const auto* cur = work.back();
+        work.pop_back();
+        if (open.contains(cur)) {
+          return 0;
+        }
+        const auto* inst = llvm::dyn_cast<llvm::Instruction>(cur);
+        if (inst == nullptr || !seen.insert(cur).second) {
+          continue;
+        }
+        if (seen.size() > 256 || llvm::isa<llvm::PHINode>(inst)) {
+          return 0;  // too deep to tell, or a phi of a loop closed earlier that may still lead to one
+        }
+        for (const auto& op : inst->operands()) {
+          work.push_back(op.get());
+        }
+      }
+    }
+    return llvm::computeKnownBits(v, module->getDataLayout()).countMinTrailingZeros();
+  }
   std::map<size_t, uint64_t>              speculations;   // input id -> inactive value (speculate_input)
   std::map<size_t, llvm::WeakTrackingVH>  input_handles;  // materialized inputs (null once erased)
   std::vector<std::pair<uint32_t, bool>>  input_types;
@@ -2320,10 +2358,9 @@ Cgen_llvm::Value Cgen_llvm::sign_extend_from(Value value, uint32_t sign_bit, uin
 // The `len` (<= 64) bits from bit `raw_count` of the `source_width`-bit value whose packed words
 // start at word `offset` of `base`; zero past its end.
 static llvm::Value* extract_lane(llvm::IRBuilder<>& builder, llvm::Module& module, llvm::Value* base, size_t offset,
-                                 uint32_t source_width, llvm::Value* raw_count, uint32_t len) {
+                                 uint32_t source_width, llvm::Value* raw_count, uint32_t len, unsigned count_trailing_zeros) {
   const size_t nwords     = word_count(source_width);
-  const auto   count_bits = llvm::computeKnownBits(raw_count, module.getDataLayout());
-  const auto alignment  = std::min(6u, count_bits.countMinTrailingZeros());
+  const auto   alignment  = std::min(6u, count_trailing_zeros);
   if constexpr (std::endian::native == std::endian::little) {
     if ((len == 8 || len == 16 || len == 32 || len == 64) && len <= (uint32_t{1} << alignment) && source_width % len == 0) {
       // An array-style lane can load its native integer directly. The word
@@ -2389,7 +2426,8 @@ Cgen_llvm::Value Cgen_llvm::dynamic_extract(Value source, Value count, uint32_t 
     }
     base = impl_->packed_alloca(cast_integer(builder, value, source.width, source.unsign), source.width, "extract.words");
   }
-  auto* lane = extract_lane(builder, *impl_->module, base, offset, source.width, raw_count, len);
+  auto* lane
+      = extract_lane(builder, *impl_->module, base, offset, source.width, raw_count, len, impl_->known_trailing_zeros(raw_count));
   return impl_->remember(cast_integer(builder, lane, result_width, true), result_width, result_unsign);
 }
 
@@ -2459,7 +2497,8 @@ Cgen_llvm::Value Cgen_llvm::lane_buffer_extract(size_t buffer, Value count, uint
     return {};
   }
   const auto& lb   = impl_->lane_buffers[buffer];
-  auto*       lane = extract_lane(impl_->builder, *impl_->module, lb.words, 0, lb.width, raw_count, len);
+  auto*       lane
+      = extract_lane(impl_->builder, *impl_->module, lb.words, 0, lb.width, raw_count, len, impl_->known_trailing_zeros(raw_count));
   return impl_->remember(cast_integer(impl_->builder, lane, result_width, true), result_width, result_unsign);
 }
 
@@ -2473,8 +2512,7 @@ bool Cgen_llvm::lane_buffer_insert(size_t buffer, Value count, uint32_t len, Val
   }
   const auto& lb         = impl_->lane_buffers[buffer];
   auto*       lane       = cast_integer(b, raw_value, len, true);
-  const auto  count_bits = llvm::computeKnownBits(raw_count, impl_->module->getDataLayout());
-  const auto  alignment  = std::min(6u, count_bits.countMinTrailingZeros());
+  const auto  alignment  = std::min(6u, impl_->known_trailing_zeros(raw_count));
   if constexpr (std::endian::native == std::endian::little) {
     if ((len == 8 || len == 16 || len == 32 || len == 64) && len <= (uint32_t{1} << alignment) && lb.width % len == 0
         && raw_count->getType()->getIntegerBitWidth() <= 64) {

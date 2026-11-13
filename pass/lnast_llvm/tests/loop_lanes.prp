@@ -7,8 +7,11 @@
 //   sum   a short innermost loop (unrolled) inside a rolled one
 //   arr   an array written entry by entry in one loop and indexed in another, and words read as
 //         `(x >> i*32)#[8..<16]` (a shift by the index, then a constant slice)
+//   wide  34-bit lanes of a 170-bit value at i*34, ORed under a select bit (bedrock br_mux_onehot):
+//         lane 3 straddles bit 128, and while the loop is emitted its index phi still holds only 0,
+//         which once made the lane look word aligned and dropped the bits past 128
 mod loop_lanes(clk:Clock, a:U64, b:U64, c:U64) -> (rev_lo:U64@[0], rev_hi:U64@[0], mix:U64@[0], two:U64@[0], keep:U64@[0],
-                                                   sum:U32@[0], arr:U32@[0], wsum:U32@[0]) {
+                                                   sum:U32@[0], arr:U32@[0], wsum:U32@[0], wide:U34@[0]) {
   const x:U128 = (a << 64) | b
   mut le:U128 = 0
   for i in 0..<16 {
@@ -67,4 +70,13 @@ mod loop_lanes(clk:Clock, a:U64, b:U64, c:U64) -> (rev_lo:U64@[0], rev_hi:U64@[0
     wrap ws = ws + ((w#[8..<16] << 8) | w#[24..<32]) + i
   }
   wsum = ws
+
+  const z:U170 = (a << 106) | (b << 42) | c
+  mut wo:U34 = 0
+  for i in 0..<5 {
+    if c#[i] != 0 {
+      wo |= z#[i*34..+34]
+    }
+  }
+  wide = wo
 }
