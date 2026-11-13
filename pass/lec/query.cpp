@@ -3105,6 +3105,45 @@ std::string memory_bank_correspondence_name(std::string_view name, bool strip_re
   return livehd::state_match::memory_bank_name(prefix + decoded->substr(marker) + key.substr(entry + 2), '_');
 }
 
+// select(arr, i) for a CONSTANT index i, with read-over-write applied while it is built: a store at another
+// constant index is skipped, one at i is the value, one at a symbolic index becomes an ite, and an ite of arrays
+// selects through both arms. A memory paired with a flop bank is a store chain over EVERY entry, and the plain
+// SELECT left each cell's obligation carrying the whole bank (quadratic: a 512x32 bank did not prove in 600 s).
+static cvc5::Term select_const_index(cvc5::TermManager& tm, const cvc5::Term& arr, const cvc5::Term& idx,
+                                     std::unordered_map<cvc5::Term, cvc5::Term>& memo) {
+  if (auto it = memo.find(arr); it != memo.end()) {
+    return it->second;
+  }
+  cvc5::Term out;
+  if (arr.getKind() == cvc5::Kind::STORE) {
+    const auto j = arr[1];
+    if (j.getKind() == cvc5::Kind::CONST_BITVECTOR && idx.getKind() == cvc5::Kind::CONST_BITVECTOR) {
+      out = j == idx ? arr[2] : select_const_index(tm, arr[0], idx, memo);
+    } else {
+      // Under `j == idx` the stored value of a masked write reads the array it writes at j (read-modify-write:
+      // (old & ~mask) | (data & mask), old = select(arr[0], j)). There j IS idx, so that read is the entry below,
+      // already being built: one substitution, not a mux over every entry per stored bit.
+      const auto rest  = select_const_index(tm, arr[0], idx, memo);
+      cvc5::Term value = arr[2];
+      if (idx.getKind() == cvc5::Kind::CONST_BITVECTOR) {
+        value = value.substitute({tm.mkTerm(cvc5::Kind::SELECT, {arr[0], j}), j}, {rest, idx});
+      }
+      out = tm.mkTerm(cvc5::Kind::ITE, {tm.mkTerm(cvc5::Kind::EQUAL, {j, idx}), value, rest});
+    }
+  } else if (arr.getKind() == cvc5::Kind::ITE) {
+    out = tm.mkTerm(cvc5::Kind::ITE,
+                    {arr[0], select_const_index(tm, arr[1], idx, memo), select_const_index(tm, arr[2], idx, memo)});
+  } else {
+    out = tm.mkTerm(cvc5::Kind::SELECT, {arr, idx});
+  }
+  memo.emplace(arr, out);
+  return out;
+}
+static cvc5::Term select_const_index(cvc5::TermManager& tm, const cvc5::Term& arr, const cvc5::Term& idx) {
+  std::unordered_map<cvc5::Term, cvc5::Term> memo;
+  return select_const_index(tm, arr, idx, memo);
+}
+
 using Mem_entry_bank = livehd::state_match::Memory_bank;
 struct Mem_bank_index {
   Io_name_map<std::pair<std::string, int>> candidates;
@@ -8607,8 +8646,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         A                       = bank_array;
       }
       for (size_t i = 0; i < br.flop_keys.size(); ++i) {
-        cvc5::Term sel
-            = tm.mkTerm(cvc5::Kind::SELECT, {A, tm.mkBitVector(static_cast<uint32_t>(br.addr_w), static_cast<uint64_t>(i))});
+        cvc5::Term sel = select_const_index(tm, A, tm.mkBitVector(static_cast<uint32_t>(br.addr_w), static_cast<uint64_t>(i)));
         if (i < br.bit_keys.size() && !br.bit_keys[i].empty()) {
           // bit-blasted entry: cell b holds bit b of the entry
           for (size_t b = 0; b < br.bit_keys[i].size(); ++b) {
@@ -9845,8 +9883,8 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       continue;
     }
     for (size_t i = 0; i < br.flop_keys.size(); ++i) {
-      cvc5::Term sel = tm.mkTerm(cvc5::Kind::SELECT,
-                                 {mem_it->second, tm.mkBitVector(static_cast<uint32_t>(br.addr_w), static_cast<uint64_t>(i))});
+      cvc5::Term sel
+          = select_const_index(tm, mem_it->second, tm.mkBitVector(static_cast<uint32_t>(br.addr_w), static_cast<uint64_t>(i)));
       if (i < br.bit_keys.size() && !br.bit_keys[i].empty()) {
         // bit-blasted entry: cell b's next state vs bit b of the entry's next value
         for (size_t b = 0; b < br.bit_keys[i].size(); ++b) {
