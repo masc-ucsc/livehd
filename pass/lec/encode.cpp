@@ -6147,6 +6147,13 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     if (spin.is_invalid()) {
       continue;
     }
+    if (unobserved_outputs_ != nullptr
+        && std::find(unobserved_outputs_->begin(), unobserved_outputs_->end(), d.name) != unobserved_outputs_->end()) {
+      // No instance reads this port: the same constant on both sides, so it is
+      // never a compare point (see Lec_options::unobserved_outputs).
+      out.outputs[d.name] = Val{bv_const(tm_, 1, 0), 1, false};
+      continue;
+    }
     auto occurrence_spin = output_view.lift(spin);
     auto output_drivers  = occurrence_spin.get_driver_pins();
     if (output_drivers.empty()) {

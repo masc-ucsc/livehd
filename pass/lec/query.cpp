@@ -5346,6 +5346,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       denc.set_name_alias(&name_alias);
       denc.set_collapse_defs(collapse_ptr);
       denc.set_ignore_memory(&opts.ignore_memory);
+      denc.set_unobserved_outputs(&opts.unobserved_outputs);
       denc.set_state_boxes(state_boxes_ptr);
       denc.set_comb_boxes(comb_boxes_ptr);
       denc.set_force_multi_clock(force_multi_clock);
@@ -5449,6 +5450,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     enc.set_name_alias(&name_alias);
     enc.set_collapse_defs(collapse_ptr);
     enc.set_ignore_memory(&opts.ignore_memory);
+    enc.set_unobserved_outputs(&opts.unobserved_outputs);
     enc.set_state_boxes(state_boxes_ptr);
     enc.set_comb_boxes(comb_boxes_ptr);
     enc.set_force_multi_clock(force_multi_clock);
@@ -8740,6 +8742,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     penc.set_name_alias(&name_alias);
     penc.set_collapse_defs(collapse_ptr);
     penc.set_ignore_memory(&opts.ignore_memory);
+    penc.set_unobserved_outputs(&opts.unobserved_outputs);
     penc.set_state_boxes(state_boxes_ptr);
     penc.set_comb_boxes(comb_boxes_ptr);
     penc.set_force_multi_clock(force_multi_clock);
@@ -9249,6 +9252,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   enc.set_name_alias(&name_alias);
   enc.set_collapse_defs(collapse_ptr);
   enc.set_ignore_memory(&opts.ignore_memory);
+  enc.set_unobserved_outputs(&opts.unobserved_outputs);
   enc.set_state_boxes(state_boxes_ptr);
   enc.set_comb_boxes(comb_boxes_ptr);
   enc.set_force_multi_clock(force_multi_clock);

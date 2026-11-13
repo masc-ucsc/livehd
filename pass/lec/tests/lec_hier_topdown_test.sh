@@ -585,13 +585,62 @@ echo "ok: an unconfirmed block CEX under an all-proved ancestry is the top's REF
 return 0
 }
 
+section_s_unread() {
+# An output port no instance reads cannot reach the top, so a block obligation
+# leaves it out (a synthesized netlist legally drops the logic behind it --
+# bedrock's `.out_stages()  // unused`). The child's `dbg` differs in the two
+# sides; (1) mid leaves it unconnected, (2) mid reads it only to drive its OWN
+# unread port `mdbg` (transitively unobservable). Both must PROVE the top,
+# without a block refutation. (3) Soundness: the same difference on a port the
+# parent DOES read still refutes. The forced engine=ind with a 5 s confirm cap is
+# what made the unread difference a false top REFUTED-cex before.
+local fail=0
+for side in ref impl; do
+  if [ "$side" = ref ]; then dbg='a ^ b'; else dbg="1'b0"; fi
+  cat > "$W/unread1_$side.v" <<EOF
+module child(input a, input b, output y, output dbg); assign y = a & b; assign dbg = $dbg; endmodule
+module mid(input a, input b, output y); child u(.a(a), .b(b), .y(y), .dbg()); endmodule
+module top(input a, input b, output y); mid m(.a(a), .b(b), .y(y)); endmodule
+EOF
+  cat > "$W/unread2_$side.v" <<EOF
+module child(input a, input b, output y, output dbg); assign y = a & b; assign dbg = $dbg; endmodule
+module mid(input a, input b, output y, output mdbg); child u(.a(a), .b(b), .y(y), .dbg(mdbg)); endmodule
+module top(input a, input b, output y); mid m(.a(a), .b(b), .y(y), .mdbg()); endmodule
+EOF
+  cat > "$W/unread3_$side.v" <<EOF
+module child(input a, input b, output y, output dbg); assign y = a & b; assign dbg = $dbg; endmodule
+module mid(input a, input b, output y, output mdbg); child u(.a(a), .b(b), .y(y), .dbg(mdbg)); endmodule
+module top(input a, input b, output y, output d); mid m(.a(a), .b(b), .y(y), .mdbg(d)); endmodule
+EOF
+  for c in unread1 unread2 unread3; do C "${c}_$side"; done
+done
+for c in unread1 unread2 unread3; do
+  "$LHD" lec --set formal.effort=proof --ref "lg:$W/${c}_ref" --impl "lg:$W/${c}_impl" --top top \
+    --set formal.engine=ind --set formal.lec.hier_order=top_down --set formal.lec.confirm_timeout=5 --workdir "$W/${c}_run" \
+    --result-json "$W/${c}.json" > "$W/${c}.log" 2>&1
+  rc=$?
+  if [ "$c" = unread3 ]; then
+    if [ "$rc" -ne 10 ]; then
+      echo "FAIL: $c: a difference on a READ port must refute (rc=$rc, want 10)"; grep "lec\[hier\]\|^lec:" "$W/${c}.log"; fail=1
+    fi
+  elif [ "$rc" -ne 0 ]; then
+    echo "FAIL: $c: a difference only on an unread port refuted the design (rc=$rc, want 0)"
+    grep "lec\[hier\]\|^lec:" "$W/${c}.log"; fail=1
+  elif grep -q "BLOCK REFUTATION\|'child' REFUTED" "$W/${c}.log"; then
+    echo "FAIL: $c: the child was refuted on its unread port"; grep "lec\[hier\]" "$W/${c}.log"; fail=1
+  fi
+done
+[ "$fail" -eq 0 ] && echo "ok: an unread (or transitively unread) port is left out of a block obligation; a read one still refutes"
+return "$fail"
+}
+
 pids=()
-for s in s1_2 s3 s4 s5 s6 s7 s8 s9 s10 s11 s_unconfirmed s_block; do
+for s in s1_2 s3 s4 s5 s6 s7 s8 s9 s10 s11 s_unconfirmed s_block s_unread; do
   "section_$s" > "$W/section_$s.log" 2>&1 &
   pids+=($!)
 done
 i=0
-for s in s1_2 s3 s4 s5 s6 s7 s8 s9 s10 s11 s_unconfirmed s_block; do
+for s in s1_2 s3 s4 s5 s6 s7 s8 s9 s10 s11 s_unconfirmed s_block s_unread; do
   wait "${pids[$i]}" || fail=1
   cat "$W/section_$s.log"
   i=$((i + 1))

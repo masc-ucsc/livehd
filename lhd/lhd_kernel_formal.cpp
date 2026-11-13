@@ -391,11 +391,27 @@ public:
 
   [[nodiscard]] bool timed_out() const { return timed_out_; }
 
+  // Everything the driver pin `seed` reaches inside its own body: the body's
+  // output ports and whether a compared point is hit (the whole cone, no early
+  // stop, no forward step budget). nullopt when the deadline passed.
+  [[nodiscard]] std::optional<Reach> of_pin(const hhds::Pin_class& seed) {
+    unbounded_ = true;
+    try {
+      auto r     = walk(seed, false);
+      unbounded_ = false;
+      return r;
+    } catch (const Abort&) {
+      unbounded_ = false;
+      busy_.clear();
+      return std::nullopt;
+    }
+  }
+
 private:
   using Key = std::pair<const hhds::Graph*, hhds::Port_id>;
   struct Abort {};
   void tick(bool forward) {
-    if (forward && ++forward_steps_ > forward_budget_) {
+    if (forward && !unbounded_ && ++forward_steps_ > forward_budget_) {
       throw Abort{};
     }
     if ((++steps_ & 4095) == 1 && deadline_ != std::chrono::steady_clock::time_point{}
@@ -650,6 +666,7 @@ private:
   uint64_t                                                            steps_          = 0;
   uint64_t                                                            forward_steps_  = 0;
   bool                                                                timed_out_      = false;
+  bool                                                                unbounded_      = false;  // of_pin: no forward budget
   absl::flat_hash_map<Key, Reach>                                     memo_;
   absl::flat_hash_set<Key>                                            busy_;
   absl::flat_hash_map<Key, std::vector<hhds::Port_id>>                back_memo_;
@@ -1057,13 +1074,13 @@ static std::string lec_pair_cache_key(const livehd::semdiff::Canonical_digest& d
   for (const auto& [mk, mv] : o.mem_match) {
     mem_pairs.push_back(mk + "=" + mv);
   }
-  // ignore_memory / trust / mem_match / ignore_assumes change WHAT is claimed
+  // ignore_memory / trust / mem_match / ignore_assumes / unobserved_outputs change WHAT is claimed
   // (a boxed memory, an assumed-equal leaf, a memory pairing, dropped design
   // assumptions), so a verdict obtained under one setting must never replay
   // under another.
   return std::format(
       "{:016x}{:016x}:{:016x}{:016x}|e={};gx={};b={};dc={};ph={};rc={};r={};m=[{}];um=[{}];c=[{}];ac={};da={};a={};sv={};"
-      "im=[{}];t=[{}];mm=[{}];ia={};profile={};portfolio={}",
+      "im=[{}];t=[{}];mm=[{}];ia={};profile={};portfolio={};uo=[{}]",
       dref.h0,
       dref.h1,
       dimpl.h0,
@@ -1087,7 +1104,8 @@ static std::string lec_pair_cache_key(const livehd::semdiff::Canonical_digest& d
       sorted_join(mem_pairs),
       o.ignore_assumes ? 1 : 0,
       o.profile,
-      o.portfolio);
+      o.portfolio,
+      sorted_join(o.unobserved_outputs));  // a block proven with a port left out must not replay where it is read
 }
 
 // The detail of a verdict-cache hit. Names the matched digests (ref:impl,
@@ -1705,6 +1723,109 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
       }
     };
     collect(g);
+  }
+
+  // OBSERVED OUTPUTS per def: the output ports through which some instance of
+  // it can influence the TOP's outputs. A least fixpoint over every graph of
+  // both libraries: the top's outputs are observed; an instance output of a
+  // shared def is observed when its forward cone inside the parent reaches a
+  // compared point (a blackbox input) or an observed output of the parent. A
+  // port outside that set has nothing observable downstream, so the def's value
+  // there cannot reach the top, and its block obligation leaves it out
+  // (Lec_options::unobserved_outputs). Without this a netlist that dropped the
+  // logic behind an unread port refuted an equivalent block, and the block
+  // refutation became the design's verdict: bedrock's br_delay_valid with
+  // `.out_stages()  // unused`, and one whose `out_valid` only drives
+  // br_ram_addr_decoder's own unused `.out_data_valid()`. Conservative where it
+  // cannot tell: a loop-subnode instance, or a walk past the deadline, marks
+  // every port of that def observed.
+  absl::flat_hash_map<std::string, absl::flat_hash_set<std::string>> observed_outputs;
+  absl::flat_hash_set<std::string>                                   all_outputs_observed;
+  {
+    struct Seed {
+      std::string              parent;  // canonical key of the graph holding the instance
+      std::string              child;   // canonical key of the instantiated def
+      std::string              port;    // the child's output port
+      bool                     compared = false;
+      std::vector<std::string> parent_outs;  // parent output ports the cone reaches
+    };
+    std::vector<Seed>       seeds;
+    Lec_input_observability reach(base._deadline);
+    auto                    collect_seeds = [&](const std::string& pkey, hhds::Graph* pg, bool ref_side) {
+      absl::flat_hash_map<hhds::Port_id, std::string> pouts;
+      if (pg->get_io() != nullptr) {
+        for (const auto& d : pg->get_io()->get_output_pin_decls()) {
+          pouts.emplace(d.port_id, d.name);
+        }
+      }
+      for (auto node : pg->body().nodes(hhds::Node_order::forward)) {
+        if (gu::type_op_of(node) != Ntype_op::Sub) {
+          continue;
+        }
+        auto sio = node.get_subnode_io();
+        if (sio == nullptr) {
+          continue;
+        }
+        const std::string cn = ref_side ? canon_ref(sio->get_name()) : canon_impl(sio->get_name());
+        // Every def of either library is tracked, shared or not: a one-sided
+        // def (a module the netlist flattened, br_ram_addr_decoder) still
+        // carries the observability of the shared defs it instantiates.
+        if ((ref_side ? ref_by_name.find(cn) == ref_by_name.end() : impl_by_name.find(cn) == impl_by_name.end())) {
+          continue;  // a library cell / body-less def: holds no tracked instance
+        }
+        if (node.is_loop_subnode()) {
+          all_outputs_observed.insert(cn);
+          continue;
+        }
+        for (const auto& d : sio->get_output_pin_decls()) {
+          const auto p = node.try_get_driver_pin(d.port_id);
+          if (p.is_invalid()) {
+            continue;
+          }
+          const auto r = reach.of_pin(p);
+          if (!r) {
+            all_outputs_observed.insert(cn);
+            continue;
+          }
+          Seed sd{pkey, cn, d.name, r->compared, {}};
+          for (const auto o : r->outs) {
+            if (auto f = pouts.find(o); f != pouts.end()) {
+              sd.parent_outs.push_back(f->second);
+            }
+          }
+          if (sd.compared || !sd.parent_outs.empty()) {
+            seeds.push_back(std::move(sd));
+          }
+        }
+      }
+    };
+    for (const auto& [key, g] : ref_by_name) {
+      collect_seeds(key, g, true);
+    }
+    for (const auto& [key, g] : impl_by_name) {
+      collect_seeds(key, g, false);
+    }
+    for (bool changed = true; changed;) {
+      changed = false;
+      for (const auto& sd : seeds) {
+        auto& obs = observed_outputs[sd.child];
+        if (obs.contains(sd.port)) {
+          continue;
+        }
+        bool hit = sd.compared;
+        if (!hit) {
+          if (sd.parent == top_key || all_outputs_observed.contains(sd.parent)) {
+            hit = true;
+          } else if (auto po = observed_outputs.find(sd.parent); po != observed_outputs.end()) {
+            hit = std::any_of(sd.parent_outs.begin(), sd.parent_outs.end(), [&](const auto& n) { return po->second.contains(n); });
+          }
+        }
+        if (hit) {
+          obs.insert(sd.port);
+          changed = true;
+        }
+      }
+    }
   }
 
   // Topo-order leaves-first (DFS post-order; the in-progress mark guards cycles),
@@ -2452,11 +2573,39 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
   }
   // Per def, under report_mutex: the state each def's proof could not pair.
   std::map<std::string, Lec_state_report> state_reports;
+  // The def's output ports (either side) that no instance reads anywhere (see
+  // observed_outputs). Empty for the top, for a def never seen instantiated, and
+  // for one with a loop-subnode instance.
+  auto                                    unobserved_of = [&](const std::string& name) {
+    std::vector<std::string> out;
+    if (name == top_key || all_outputs_observed.contains(name)) {
+      return out;
+    }
+    static const absl::flat_hash_set<std::string> none;
+    const auto                                    ob = observed_outputs.find(name);
+    const auto&                                   obs = ob == observed_outputs.end() ? none : ob->second;
+    absl::flat_hash_set<std::string>              ports;
+    for (auto* g : {ref_by_name[name], impl_by_name[name]}) {
+      if (g != nullptr && g->get_io() != nullptr) {
+        for (const auto& d : g->get_io()->get_output_pin_decls()) {
+          ports.insert(d.name);
+        }
+      }
+    }
+    for (const auto& pn : ports) {
+      if (!obs.contains(pn)) {
+        out.push_back(pn);
+      }
+    }
+    std::sort(out.begin(), out.end());
+    return out;
+  };
   auto                                    run_def = [&](size_t def_ix) {
     if (settled[def_ix]) {
       return;  // definitively decided in an earlier round — do not re-solve
     }
     const auto& name = order[def_ix];
+    const auto  unobserved = unobserved_of(name);
 
     // A non-top definition with no output ports has no hardware observation at
     // its instance boundary. Its inputs may feed simulation-only DPI calls or
@@ -2468,13 +2617,28 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     // of becoming a vacuous whole-design PASS.
     const auto ref_io  = ref_by_name[name]->get_io();
     const auto impl_io = impl_by_name[name]->get_io();
-    if (name != top_key && ref_io != nullptr && impl_io != nullptr && ref_io->get_output_pin_decls().empty()
-        && impl_io->get_output_pin_decls().empty()) {
+    // Every output port unread by every instance is the same case: nothing flows back.
+    const bool all_unread
+        = name != top_key && ref_io != nullptr && impl_io != nullptr && !unobserved.empty()
+          && unobserved.size() >= std::max(ref_io->get_output_pin_decls().size(), impl_io->get_output_pin_decls().size()) && [&]() {
+               for (auto* io : {ref_io.get(), impl_io.get()}) {
+                 for (const auto& d : io->get_output_pin_decls()) {
+                   if (!std::binary_search(unobserved.begin(), unobserved.end(), d.name)) {
+                     return false;
+                   }
+                 }
+               }
+               return true;
+             }();
+    if (all_unread
+        || (name != top_key && ref_io != nullptr && impl_io != nullptr && ref_io->get_output_pin_decls().empty()
+            && impl_io->get_output_pin_decls().empty())) {
       livehd::lec::Query_result r;
       r.verdict          = Verdict::Proven;
       r.engine           = "structural";
       r.elapsed_ms       = 0;
-      r.detail           = "no observable output ports; the definition cannot affect its parent";
+      r.detail           = all_unread ? "no instance reads any output port; the definition cannot affect its parent"
+                                      : "no observable output ports; the definition cannot affect its parent";
       proven[def_ix]     = 1;
       settled[def_ix]    = 1;
       by_semdiff[def_ix] = 1;
@@ -2537,6 +2701,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     }
     livehd::lec::Lec_options o = base;
     o.design_assumes           = base.design_assumes && assume_cones.contains(name);
+    o.unobserved_outputs       = unobserved;
     if (budget_on && name != top_key) {
       // Each def gets the elapsed wall allowance left when dispatched.
       // Parallel workers do not consume one another's time allowance.

@@ -518,6 +518,13 @@ struct Lec_options {
   // the encoder refuses to model — today, one with PER-PORT clock edge
   // polarity (Ntype::Memory_posclk_mixed).
   std::vector<std::string> ignore_memory;
+  // Hierarchical driver only (never a CLI option): output ports of the def under
+  // proof that NO instance of it reads, in any parent, on either side. Nothing
+  // downstream of such a port exists, so its value cannot reach the top, and the
+  // block obligation leaves it out (both encoders emit one constant for it). A
+  // synthesized netlist legally drops the logic behind an unread port (bedrock's
+  // `.out_stages()  // unused`), so comparing it refuted equivalent blocks.
+  std::vector<std::string> unobserved_outputs;
   // Proven-module black-box collapse (`lhd lec --collapse <def>` / lec.collapse):
   // module-def names the driver has ALREADY proven equivalent in isolation, which
   // are FORCED to the sound black-box path even when they could be flattened (a
