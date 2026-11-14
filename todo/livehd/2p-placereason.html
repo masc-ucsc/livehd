@@ -1,0 +1,1050 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TODO 2p-placereason — Interactive placement reasoning and portable intent</title>
+<link rel="stylesheet" href="../todo.css">
+</head>
+<body>
+<nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
+<main>
+<h1><strong class="item-id">2p-placereason</strong> Interactive placement reasoning and portable intent</h1>
+<p>Let a human or agent explore placement through the live GUI socket, with fast RC/timing feedback,
+explicit control of expensive repair, bounded local movement, and several candidate checks running side by
+side under a host limit. Preserve useful relationships beside RTL so they can be resolved again after a
+floorplan change. The actual goal is to fit the constrained floorplan and achieve good timing after routing.
+Because routed timing is expensive, LiveHD exposes cheaper measurements with their limitations; the external
+agent chooses proxies, search strategy and when to route. Implementing that agent is outside this task.</p>
+<p><span class="status">Implementation plan — not implemented. Written 2026-11-13, revised 2026-11-13.</span>
+The revision follows a reading of two papers (arXiv:2609.21263v2 and arXiv:2611.12048v2), of the first one's
+code, of the PDAGENT-BENCH repository and of the GUI session code, and the <a href="#rulings">rulings</a> below. It adds explorations, scratch
+copies of the main line used for feedback and then discarded, in the foreground or as parallel workers
+(<a href="#h">H</a>, <a href="#parallel">design</a>); deterministic checkers and a leverage test
+(<a href="#i">I</a>); a table of <a href="#foundation">code facts with their source lines</a>; and a
+<a href="#order">delivery order</a>.
+All new commands, policy fields, options and UI controls are proposals. This task changes no existing defaults.
+Initial scope is macro placement and the surrounding cell placement; source attributes and memory-bounded
+execution follow after the basic experiment loop works.</p>
+
+<h2>Depends on</h2>
+<ul>
+<li><a href="2i-interact.html">2i-interact</a> — reuse the live session, agent socket, shared selection,
+phase gates, replay and region edit path; this task adds exploration policy, explorations and persistent intent.</li>
+<li><a href="../../core/job_manager.hpp">core/job_manager.hpp</a> and
+<a href="../../pass/lec/fork_race.hpp">pass/lec/fork_race.hpp</a> — the admission control (<code>lhd.jobs</code>,
+host load, memory) and the forked-worker discipline (process groups, parent watch, wall deadline) that formal
+and synthesis already use. Explore jobs are a new job class on the same manager, not a second scheduler.</li>
+<li><a href="json-metadata.html">json-metadata</a> and the existing
+<a href="../../docs/placement_regularity.html#placement-hints">placement hints</a> — extend the
+class-tagged bundle and scope binding instead of introducing another constraint-file format.</li>
+<li><a href="3g-partitions.html">3g-partitions</a> — reuse Region_mesh and legality capacity accounting
+for local active sets. A synthesis color, geometric region and memory chunk are distinct selectors.</li>
+<li><a href="2is-incsynth.html">2is-incsynth</a> and <a href="2t-timeclosure.html">2t-timeclosure</a>
+— gate every resynthesis, sizing and buffering entry point; reuse their acceptance and proof checks.</li>
+<li><a href="2q-fasttimer.html">2q-fasttimer</a> — coordinate incremental RC/timing and boundary timing
+contracts. Its single-threaded engine (ruling R11) fits the separate snapshot owner in H0; a single-threaded
+timer alone does not make a threaded GUI process safe to fork. Threaded timer/placer configurations use
+spawned replay workers unless the snapshot architecture supports them safely. Label cost and coverage honestly.</li>
+<li><a href="2f-scalability.html">2f-scalability</a> — required for later execution with bounded resident
+memory. Freezing most cells in an existing flat design does not by itself provide chunked memory usage.</li>
+</ul>
+
+<h2 id="rulings">Rulings (2026-11-13)</h2>
+<table>
+<tr><th>#</th><th>Ruling</th></tr>
+<tr><td>P1</td><td>The number of parallel exploration workers is a configuration option. Workers compete for
+<code>lhd.jobs</code> slots with the other jobs of the session; they have no pool of their own.</td></tr>
+<tr><td>P2</td><td>An exploration is available even when no slot is free: “I am going to try something here;
+do not remember it.” An exploration never changes main. To use its findings, the agent reads or exports them,
+returns to main and issues ordinary macro moves, coordinates or relative commands itself. Main is the real
+plan and measures its own resulting state. There is no attach, process promotion or automatic segment merge.</td></tr>
+<tr><td>P3</td><td>An exploration reports WNS and TNS, and whatever else the page can show for the main line:
+routing congestion, density, regions, critical cells, the placement itself.</td></tr>
+<tr><td>P4</td><td>Three numbers lead every summary, for main and for each exploration: timing (WNS, with TNS),
+routing density, and one composite quality score. The score is agent-configured feedback, not an acceptance
+rule. Non-rectangular placement areas are in scope.</td></tr>
+<tr><td>P5</td><td>The agent explores and edits main on its own; no person has to confirm. The way in is a coding
+agent (claude, codex) opened in the repository and given the agent socket path that <code>lhd synth --gui</code>
+prints. Changes that should outlast the session are edits the agent makes to files of the repository.</td></tr>
+<tr><td>P6</td><td>An exploration lives where the agent socket lives: on the session's host, in the session's
+temporary directory. It has no long-term side effect; once closed, it is gone.</td></tr>
+<tr><td>P7</td><td>PlaceReasoner-Bench (published through PDAGENT-BENCH) is the bring-up and benchmark set. Edits
+go through the local socket; a tool imports a task and exports a result in the benchmark's own formats.</td></tr>
+<tr><td>P8</td><td>Nangate45 and the benchmark's DEFs are supported inputs. Where one of them fails to read
+or place, that is a LiveHD defect to fix, not a limit of the benchmark work.</td></tr>
+<tr><td>P9</td><td>The GUI/socket controller is a separate process from main's evaluator and exploration
+workers, remaining responsive during computation. Snapshots come from an isolated single-threaded state owner,
+not from the threaded GUI process.</td></tr>
+<tr><td>P10</td><td>LiveHD follows commands and reports numbers. The external agent owns long-term strategy,
+candidate selection, timing tradeoffs and proxy choice. Worse TNS, low macro leverage or similarity to a prior
+candidate does not cause LiveHD to reject a requested exploration or edit.</td></tr>
+<tr><td>P11</td><td>Illegal intermediate geometry is allowed, with a prominent <strong>ILLEGAL GEOMETRY</strong>
+warning in the GUI and structured violations in socket responses. An explicit <em>Legalize</em> button/command
+uses the existing macro/cell legalizer, halos, density and other constraints, including its failure semantics.</td></tr>
+<tr><td>P12</td><td>An illegally placed macro cannot acquire a new GUI pin. Existing pin intent and anchors are
+preserved: a move that makes a pinned macro illegal is allowed and temporarily suspends its effective pin,
+with a warning; clearing the conflict automatically restores the pin. Moving another macro around must not
+erase pins or change their anchors. Authored FIXED constraints remain distinct.</td></tr>
+<tr><td>P13</td><td>Excluded floorplan areas prohibit both placement and routing. The placer, legalizer,
+estimators and GUI use the same exclusion geometry.</td></tr>
+<tr><td>P14</td><td>Coordinates preserve the precision required by the design's DEF database units. Relative
+moves, alignment and edge/gap relationships let LiveHD resolve macro sizes and coordinate arithmetic.</td></tr>
+</table>
+
+<h2 id="order">Delivery order</h2>
+<ol>
+<li><strong>Separate control and evaluation (H0).</strong> Establish the responsive controller, evaluator
+protocol and single-threaded snapshot owner. Verify the process/thread lifecycle before measuring snapshot
+latency and memory. Use spawned replay for configurations that cannot meet the snapshot preconditions.</li>
+<li><strong>Foreground explorations (H7), the agent's way in (H9) and the fast check.</strong> Begin, inspect,
+export, discard, the banner and private segment trace; <code>hello</code> and explicit main edits. With it:
+policy gates (A, B), geometry warnings, pin suspension/restoration and explicit legalization (I), the first
+acceptance milestones, and one small benchmark task imported as the bring-up design (J).</li>
+<li><strong>Parallel explorations.</strong> Job table, limits, workers, result documents and protocol (H1–H5,
+H8) with the geometry and frozen-timing tiers, plus the ledger (E). This is the point where an agent that
+connects can fan out.</li>
+<li><strong>Checkers and pictures (I).</strong> Cheap findings and pictures that help the external agent decide
+what to evaluate; LiveHD does not select candidates.</li>
+<li><strong>Local exploration (C), intent (D), source binding (F).</strong></li>
+<li><strong>Validation (G)</strong> runs with every step; the 16 benchmark tasks scored under the benchmark's
+own downstream flow (J) come last.</li>
+</ol>
+
+<h2>Subtasks — pending</h2>
+<ul class="subtasks">
+<li id="a"><strong>A — Define and enforce the exploration transaction.</strong>
+<ul>
+<li>Capture a baseline identity for netlist, masters, coordinates/orientations, constraints, technology,
+intent, timing model, seed and optimizer state. Publish design, placement, intent and evaluation revisions.
+An exploration names the revisions it starts from. A queued request whose baseline is no longer available
+ends as <code>stale</code>; a running worker retains its snapshot and reports that original identity.</li>
+<li>Add one typed runtime policy shared by GUI, agent, explore workers and batch replay. Apply policy changes
+and intent patches atomically on the flow thread at safe boundaries. Reply separately with queued and applied
+status; reject stale expected revisions. A timing result identifies exactly which applied revision it measures.</li>
+<li>Audit mutation producers in placement and the outer synthesis driver. The policy must guard callbacks,
+stage transitions, cached-feedback triggers and restart paths, not merely hide buttons or change one flag.</li>
+<li>Provide safe interruption between expensive operations. An already running noninterruptible operation
+may finish, but cannot publish a new candidate after cancellation without reporting that outcome.</li>
+</ul></li>
+<li id="b"><strong>B — Fast evaluation with explicit slow-step controls.</strong>
+<ul>
+<li>Implement the policy table below: geometry-only inspection, frozen-netlist timing, placement relaxation,
+and explicitly enabled repair. Keep RC extraction and timing available independently of resizing/resynthesis.</li>
+<li>Expose “No resynthesis”, “No sizing” and “No buffer edits” independently, plus a preset that enables
+all three prohibitions. Display the effective policy and pending expensive work in both GUI and socket state.</li>
+<li>Bound GP iterations, timing calls, repair trials, elapsed time and active cells for each experiment.
+Show the next eligible slow operation and its stage/iteration trigger. Disabled work remains deferred;
+reaching an iteration threshold cannot override a prohibition.</li>
+<li>When a prohibition is removed, the operation becomes eligible under its ordinary trigger and remaining
+budget; it does not necessarily run immediately. Offer a separately requested one-shot repair and a later
+full validation. Prevent deferred operations from bursting past the budget when re-enabled.</li>
+<li>Decouple GUI gates/local legalization from the current resize-enabled flow (the README notes that
+<code>synth.place.resize=false</code> takes a path with no <code>legalize</code>/<code>edit</code> gates). A
+frozen-netlist experiment must retain the necessary edit, evaluate, legalize and exit paths.</li>
+</ul></li>
+<li id="c"><strong>C — Local exploration with a frozen exterior.</strong>
+<ul>
+<li>Select an active set by explicit nodes, hierarchy/cluster, Region_mesh region, box or available chunk;
+resolve and record exact membership at the baseline. Offer an explicit surrounding relaxation halo.</li>
+<li>Move the chosen macros and relax only the declared cells. Preserve exterior coordinates, orientations,
+masters and connectivity; retain their density, blockage, pin and net effects. Temporary freeze masks are
+separate from authored FIXED constraints and user pins and are restored on exit.</li>
+<li>Use bounded local kernels, active adjacency and cached exterior fields rather than running full GP
+with most coordinates masked. Retain a correctness reference path that freezes the exterior in the full model.</li>
+<li>Report destination conflicts, halos and displaced cells when applying movement. Temporary illegal geometry
+is permitted with the warning and pin behavior of P11–P12. If requested legalization cannot fit within the
+active window, report failure and the needed scope; expanding it requires another command. Never silently
+invoke whole-core GP.</li>
+<li>Implement the crossing-net and timing-boundary contract below. Local repair, when permitted, must stay
+inside its declared mutation scope; a cone crossing that scope requires expansion or rejection.</li>
+</ul></li>
+<li id="d"><strong>D — Edit portable intent through the GUI and socket.</strong>
+<ul>
+<li>Expose existing cluster/align/direction/snap hints for preview, apply, remove, inspect and export.
+Show bindings, weights, residuals and reasons for relaxed/discarded hints.</li>
+<li>Add ordered matrices, explicit channel/gap preferences, boundary/group anchors and legal pin-facing
+orientation preferences. Use explicit coordinate frames and units. Version schema extensions.</li>
+<li>Offer “preserve as relationship” for alignment, distribution and matrix operations. Converting a drag to
+portable intent is explicit; GUI pins follow P12. Resolve relative commands against named objects, edges and
+halos on the evaluator, using DEF database-unit precision and returning the resulting coordinates.</li>
+<li>Keep authored intent, generated positions and measured outcomes separate. Compile hints to solver
+objectives/pulls or supported legality constraints; do not add functional nets or timing arcs.</li>
+</ul></li>
+<li id="e"><strong>E — Candidate ledger, comparison and escalation.</strong>
+<ul>
+<li>The ledger is the session's table of explorations (H1, H7): baseline, hypothesis, segment or patch, policy,
+active set, evaluation evidence, cost, parent and close reason, with an optional agent-supplied annotation. It keeps
+main's current measurements and one summary line per closed exploration, failures included, for as long as the session runs,
+and writes nothing to the workdir (ruling P6). An agent that wants a lasting record saves the summary itself. A timeout or a tool failure is a recorded failed candidate, never a substituted estimate.</li>
+<li>Support comparisons from the same baseline. A snapshot worker (H2) forked from the isolated state owner
+inherits netlist, optimizer, compatible RC/timer and random state without replaying the baseline. Where it is
+not available use the replay worker (H3) and report its replay cost. A timeline image or coordinate rollback
+is not a snapshot.</li>
+<li>Allow the agent to evaluate the baseline itself with the same tier, engine and scope as its candidates.
+Only show comparison deltas for matched measurements; never subtract a worker result from the panel's older estimate.</li>
+<li>Track geometry-only, frozen-netlist, repaired-placement and routed results separately. Repair creates
+a child candidate with a new topology/master identity; never silently replaces the fast measurement.</li>
+<li>Report legality, routability proxies, TNS, WNS and failing-endpoint counts per path family, including
+regressions. The agent chooses tradeoffs; LiveHD has no mandatory non-regression guards or candidate-selection
+policy. (The first paper's WNS-first rule accepted 3.9% better WNS with 49.5% worse TNS; the second reports
+tradeoffs across path families.) Keep exploration evidence distinct from what main actually delivers.</li>
+<li>Expose evidence about timing scope, electrical violations and repair needs without launching broader work.
+The agent requests evaluation, repair or routing and separately applies chosen edits to main. Main's new
+measurements have their own identity; exploration metrics are never presented as main's measured result.</li>
+</ul></li>
+<li id="f"><strong>F — Stable source binding and round-trip metadata.</strong>
+<ul>
+<li>Use module-scoped templates and logical declaration/instance identities. Expand repeated instances
+independently; bind a memory split across SRAMs to a group. Report missing or ambiguous bindings without guessing.</li>
+<li>Define explicit instance overrides and disable operations by stable hint ID. Preserve unknown records;
+keep generated state from replacing authored intent. Hash effective hints and experiment policy in relevant
+reuse identities without invalidating unrelated compile/mapping caches.</li>
+<li>Deliver sidecar JSON beside RTL first. Later agree source attribute syntax and lower both frontends to
+the same representation; preserve identity across coloring, inlining, mapping and disappearance.</li>
+<li>Document unsupported combinations, including current H2D hint handling, rigid macro magnet contraction
+and macro-bus limitations in region forks. Advertise capabilities before accepting an experiment.</li>
+</ul></li>
+<li id="h"><strong>H — Explorations: foreground, and parallel under a host limit.</strong>
+<ul>
+<li><strong>H0 — Isolate control and snapshot ownership (gates H2).</strong> Put the GUI/socket controller in
+its own process; it owns connections, immutable published views, command queues and worker supervision.
+Main's evaluator owns computation state. Fork snapshots only from an isolated single-threaded state owner
+with a defined library/runtime lifecycle, never from the threaded controller. An idle thread pool or a passing
+stress test is not a fork-safety argument. Threaded timer/OpenMP modes that cannot meet this contract use
+spawned replay; do not change ordinary placement defaults. Then measure on Linux and macOS: timing refresh,
+full evaluation, a few GP iterations, controller responsiveness, start latency and total memory under parent
+and child divergence. Record the supported configurations and fallback reasons.</li>
+<li><strong>H1 — Table and admission.</strong> A table of explorations in the session; a new
+<code>Job_class::place_explore</code> on <code>Job_manager::global()</code>, so workers compete for
+<code>lhd.jobs</code> (ruling P1); a configured share, a queue bound, a wall deadline and a thread share per
+worker; reaping; exploration files in the session's temporary directory beside the socket, removed when the
+exploration closes (ruling P6). Move <code>kill_tree</code> and <code>watch_parent</code> out of
+<code>pass/lec/fork_race.hpp</code> into <code>core/</code> so placement does not include a formal header.</li>
+<li><strong>H2 — Snapshot worker.</strong> A copy-on-write child of H0's single-threaded state owner at a gate,
+pause or edit wait. The child evaluates a private patch and stop condition, publishing results to the controller.
+It never takes over the GUI sockets or becomes main. The same mechanism leaves main intact during foreground
+exploration, so discard only closes the scratch evaluator. H0's lifecycle contract gates every snapshot.</li>
+<li><strong>H3 — Replay worker.</strong> Today's <code>restart</code> recipe run as a child process instead of an
+<code>execv</code> of the session: headless, own workdir, the recorded trace up to the baseline plus the patch
+and flag overrides. Needed for flag changes that affect earlier stages (core area and aspect, seeds), for
+repair and validation tiers, and wherever H2 is not allowed.</li>
+<li><strong>H4 — Region fork joins the table.</strong> The existing <code>fork</code> command keeps its meaning
+and its page, and gains the limit, reaping, the parent watch and a result summary. Its files move from
+<code>&lt;workdir&gt;/synth/place/forks/</code> to the session's temporary directory, under the same rule.</li>
+<li><strong>H5 — Protocol, tool and panel.</strong> <code>explore_begin</code>, <code>explore</code>,
+<code>explore_wait</code>, <code>explorations</code>, <code>export</code>, <code>explore_discard</code>
+on the agent socket and in <code>tools/lhd_gui.py</code>; the <em>Explorations</em> list and the banner in the
+page. Ordinary edits and <code>legalize</code> target main or an explicit exploration id. Limits, occupancy,
+geometry warnings and effective/suspended pin state appear in <code>state</code>.</li>
+<li><strong>H6 — Inline what-if for small moves.</strong> When a move touches few nets, answer frozen-netlist
+timing on the flow thread through the timer's edit journal (move pins, new wire RC, incremental update, read,
+<code>rollback</code>) instead of spending a slot. Serial but short; several candidates are coalesced into one
+visit of the flow thread. Requires a test that rollback restores the timer exactly.</li>
+<li><strong>H7 — Foreground exploration and return to main (ruling P2).</strong> <code>explore_begin</code>
+selects a scratch evaluator while main waits intact. Commands go to its private segment. The agent can inspect
+or export findings, discard the exploration, then issue chosen ordinary edits to main. No exploration segment
+is merged automatically. Use a snapshot or a separate replay evaluator; foreground computation uses main's
+reserved capacity without needing another job slot, subject to the session's memory budget.</li>
+<li><strong>H8 — An exploration reports what the page shows (ruling P3).</strong> A worker writes the page's
+documents at its stop point: state, full WNS/TNS evaluation by clock and path family, frame, density and
+congestion maps with local summaries, regions, hint residuals, critical cells, pictures. The read routes take
+an exploration id; the page gains <em>View</em> and <em>Compare</em>. The summary line of main and of every
+exploration is the three numbers of ruling P4, computed by one shared function.</li>
+<li><strong>H9 — The agent's way in (ruling P5).</strong> The socket path is the only thing a person hands over.
+<code>hello</code> answers with everything else: build, repository root, workdir, top, input files, flags, page
+URL, capabilities, limits, policy and where the guide is. <code>export</code> returns intent, flags and macro
+placement as data. <code>tools/lhd_gui.py</code> accepts the pasted line as it is printed. The session never
+writes into the repository; the agent does, with ordinary file edits.</li>
+</ul></li>
+<li id="j"><strong>J — Benchmark bring-up and result export (ruling P7).</strong>
+<ul>
+<li>Import: a tool builds the <code>lhd synth --gui</code> command for one PlaceReasoner-Bench task from its
+directory (mapped netlist, SDC, LEF, LIB, the floorplan DEF of the chosen aspect ratio) and turns the cluster
+file into cluster hints. The mapped Nangate45 netlist must be placed without remapping and both floorplan DEFs
+must be accepted as they are (ruling P8): each failure is fixed in LiveHD, in the reader or the placer that
+owns it, with a reduced case added to that component's tests as a repository fixture. No conversion script
+that rewrites the benchmark's files to suit LiveHD.</li>
+<li>Export: macro positions and orientations in the benchmark's placement format and as a DEF with FIXED
+macros, with the benchmark's instance names restored exactly.</li>
+<li>Score: run the benchmark's fixed downstream flow on the exported placement and write one row per task in
+its result schema, with the evidence files. External tools and data; outputs under ignored <code>repros/</code>.</li>
+<li>Bring up on the two smallest tasks, then all 16. Report every run, not the best of several.</li>
+<li>Ask the maintainers how an outside result is accepted and under what terms the data may be used; the
+repository states neither.</li>
+</ul></li>
+<li id="i"><strong>I — Deterministic checkers, leverage and pictures (from the two papers).</strong>
+<ul>
+<li>Geometry checks as pure functions of a published frame plus a proposed patch: core bounds, overlap, halo
+and minimum channel, narrow channels and dead pockets, standard-cell area continuity, periphery, pin side
+facing its logic, cluster locality, pin-access demand. Each returns the objects and the cause, not a pass/fail
+bit. Reuse the rules behind <code>macro_edge</code>, <code>macro_dead_space</code>, <code>macro_tracks</code> and
+the RUDY map where they fit; do not write a second definition of legal.</li>
+<li>An explicit <em>Legalize</em> button and socket command reuse the existing macro/cell legalizer and its
+halo, density, channel and other constraints. Report every displacement and the existing placement-failure
+conditions; do not silently legalize a move. Geometry checks report illegal intermediate states prominently
+without rejecting those moves or deciding whether an agent may evaluate them.</li>
+<li>Keep GUI pin intent separate from effective enforcement. Reject a new pin on an illegal macro; suspend an
+existing pin only while its macro has a reported geometry conflict, preserving its identity and anchor. Clear
+that suspension automatically when the conflict clears. A transient drag through other macros cannot erase
+their pins, rewrite their anchors or leave them unpinned afterward. Show suspension/restoration and causes in
+the GUI and socket. An explicit move of the pinned macro itself updates its requested anchor as an ordinary
+move would; movement of another object does not. Legalization respects active pins and authored FIXED
+constraints, using its existing failure reporting when constraints cannot be met.</li>
+<li>Non-rectangular areas (ruling P4). The placer already excludes rows and sites through hard
+<code>__lhd_frame_mask_*</code> instances, but the scene has one die box, the <code>area</code> command moves the
+edges of a rectangle, and frame masks are not routing obstacles, so the congestion maps treat a missing corner
+as routable. For this task, publish one usable outline (core minus the declared excluded areas) as a
+rectilinear polygon with exact macro sizes and pin positions. Placement and routing both exclude those areas
+(P13): check proposals against them, draw them, and remove routing capacity there in every estimator. This is
+an explicit extension of today's frame-mask behavior. Compute utilization, periphery and “distance to edge” against the polygon,
+whose concave corners are not edges a macro can hide behind. An L-shaped region must not look like free space. (In the second paper 9 of 12 runs of agents that could not read the geometry delivered macros
+outside the die or overlapping.)</li>
+<li>A leverage query: the share of failing endpoints and of TNS whose worst path has a macro pin on it or
+crosses a macro channel, reported with the per-family timing of H8 (register to memory and memory to register
+are the families a macro move reaches directly). Report the evidence; stopping or continuing exploration is
+the external agent's decision.</li>
+<li>Strips: standard-cell area enclosed between long macro edges, with its entrances. Both papers find the
+congestion there, at equal global utilization.</li>
+<li>Macro orientation in the vocabulary: <code>move</code> carries positions only today. Add an orientation to
+the patch, the pin-side distribution of each macro to <code>describe</code>, and a pin-side layer to the
+rasterizer so every job result has a picture a vision model can read.</li>
+<li>A structural signature per candidate (side, order within its group, orientation class, quantized
+position) to report similarity to prior candidates. Similarity does not refuse a requested job.</li>
+<li>An agent guide: one page with the loop, the tiers, the limits and the command reference, the equivalent of
+the first paper's skill pack. <code>cmd=help</code> stays the source of truth for the vocabulary.</li>
+</ul></li>
+<li id="g"><strong>G — Validate correctness, speed and transfer.</strong>
+<ul>
+<li>Add focused regressions for policy enforcement at every mutation site, deferred triggers, stale commands,
+atomic batches, cancellation, baseline restoration, replay and cache separation.</li>
+<li>Explorations: main's deterministic design state and action trace are unchanged by scratch work; a discarded
+foreground exploration leaves main's next frame equal to one that never began it. Main changes only through
+ordinary commands from the agent/user and produces independent measurements. Test target isolation and stale
+expected-revision refusal. The number of running workers never exceeds the limit under an injected load and
+memory probe; a killed controller leaves no worker; failed workers publish no successful partial result.
+Verify supervisor cleanup and stale-session cleanup after a whole-session crash.</li>
+<li>Illegal geometry: a conflicting move succeeds with the prominent warning; pinning an illegal macro fails;
+existing pin intent suspends and restores when the cause moves away. Drag a macro across several pinned macros
+and back: their anchors and final pin states must be unchanged. Exercise explicit legalization success/failure
+with halos, density, active pins and FIXED constraints, plus an excluded L-shaped corner in placement and
+every routing estimator. Exercise DEF-precision export and relative edge/gap commands.</li>
+<li>Check that frozen-netlist evaluation changes neither connectivity nor masters; check frozen exterior
+geometry and inventory before/after local movement, legalization and allowed repair. Preserve immutable contract tests.</li>
+<li>Compare local RC/timing with a full evaluation of the same candidate, including cross-boundary fanout,
+reconvergent paths, multiple clocks, exceptions and changed external loads. Report coverage and error.</li>
+<li>Test hint transfer across translated cores, aspect/size changes, macro-size changes, repeated hierarchy
+and split/deleted memories. Include infeasible arrangements and explicit relaxation reports.</li>
+<li>Measure interaction latency, placement iterations, RC/STA/repair time, touched cells/nets, peak memory,
+legality, hint residuals, WNS/TNS, routed quality and total search cost. Run multiple seeds and held-out floorplans.</li>
+<li>Use declared repository fixtures/dependencies for tests; no runtime dependency on sibling benchmark repos.
+PlaceReasoner-Bench (8 designs at 1:1 and 2:1) is an external bring-up and comparison set driven by J and kept
+under ignored <code>repros/</code>, not a Bazel test. Run backend regression for placement-only work and all-group regression for synthesis/repair
+changes. Keep normal Bazel scheduling and coverage; an exploration budget is not a regression timeout or reason
+to skip tests.</li>
+<li>Credit PlaceReasoner-Beta in <code>docs/acknowledgement.html</code> when implementing the inspired feature,
+as required by AGENTS.md; this page records the research reference now.</li>
+</ul></li>
+</ul>
+
+<h2>Subtasks — landed</h2>
+<p>None yet. The facilities below predate this task and do not constitute its completion.</p>
+
+<h2 id="design">Design notes</h2>
+<h3 id="foundation">Existing foundation and gaps (source inspection, 2026-11-13)</h3>
+<table>
+<tr><th>Existing facility</th><th>Reuse and limitation</th></tr>
+<tr><td><a href="../../tools/lhd_gui.py">tools/lhd_gui.py</a> and
+<a href="../../pass/place/gui/gui_agent.cpp">agent dispatch</a></td><td>The Unix socket shares selection,
+highlights, state and page commands with the browser. Extend this interface; do not build a separate agent placer.</td></tr>
+<tr><td>Finding the session</td><td><code>lhd synth --gui</code> prints the socket path and writes it to
+<code>&lt;workdir&gt;/synth/place/gui_agent.json</code>; <code>tools/lhd_gui.py</code> takes <code>--socket</code>,
+<code>LHD_GUI_SOCKET</code> or <code>--workdir</code>. <code>help</code> lists the commands but nothing tells an
+agent which design, files or repository the session belongs to.</td></tr>
+<tr><td><a href="../../pass/place/gui/gui_server.cpp">Server threads</a> (<code>gui_server.cpp:350</code>)</td>
+<td>One detached thread per connection, so several agents can already talk at once. The transport is not the
+bottleneck.</td></tr>
+<tr><td>Flow thread as the only evaluator (<code>gui_agent.cpp:225</code>, <code>gui_session.hpp:109</code>)</td>
+<td><code>critical</code>, <code>timing</code> and <code>map</code> are answered by the single flow thread at its next
+poll or gate. <code>critical</code> admits one pending query and gives up after 15 s. A second check waits for
+the first; a check during a long stage times out. This is the serialization background explorations remove.</td></tr>
+<tr><td>Timing refresh (<code>gui_timing</code>, <code>place.cpp:5030</code>)</td><td>Copies the solver design,
+writes poses onto the shared graph's <code>place</code> attribute, estimates RC and calls the ranking
+evaluation. It is a ranking estimate (~WNS, no refreshed TNS). Because it writes graph attributes it cannot
+simply run on a second thread of the same process: parallel timing needs separate address spaces.</td></tr>
+<tr><td>Region fork (<code>gui_session.cpp:670</code>, launcher at <code>lhd_kernel_synth.cpp:1955</code>)</td>
+<td>Writes the region as its own design and starts a child <code>lhd synth --gui</code> with
+<code>posix_spawn</code>. Gaps: no limit on the number of children; a child is not reaped after its first 60 s
+and does not watch its parent; the parent learns the child's URL and nothing of its result; a macro with bus
+pins is refused (<code>place.cpp:5235</code>), so it cannot hold a macro experiment; the child re-runs
+synthesis and renames cells; cut-pin timing is not the parent's timing.</td></tr>
+<tr><td>Restart from a checkpoint (<code>lhd_kernel_synth.cpp:2011</code>)</td><td><code>execv</code> of the
+session itself with the trace replayed to the checkpoint. One alternative at a time, the live state is gone,
+and the cost is a replay of the flow. The recipe (trace, <code>--gui-replay-seq</code>, flag overrides) is
+what a replay worker can reuse. H0 additionally needs a private evaluator protocol and separate supervision;
+changing <code>execv</code> to spawn alone does not provide the new architecture.</td></tr>
+<tr><td><a href="../../core/job_manager.hpp">Job_manager</a></td><td>Process-wide admission shared across
+forked children through one shared mapping: a ceiling (<code>lhd.jobs</code>, 0 selects the available CPUs),
+host load with its own jobs subtracted, memory from predictions that it corrects from observed peaks, slot
+adoption by pid, <code>reap_tree</code>, stop/resume of a child's process group. Classes today: formal arm,
+simulation compile, synthesis region. A spawned (<code>exec</code>) child gets a manager of its own, so the
+parent must hold the slot for it and pass it a thread share.</td></tr>
+<tr><td><a href="../../pass/lec/fork_race.hpp">fork_race</a></td><td>Fork per method, result over a pipe,
+<code>_exit</code> without destructors, wall deadline, kill of the whole process group, a child that dies with
+its parent. Its stated precondition is a clean parent (no solver object, no worker threads); a paused
+placement is not clean, which is why H0 exists.</td></tr>
+<tr><td>Threads a fork would drop</td><td>OpenTimer owns a <code>tf::Executor</code> whose default size is the
+machine's hardware concurrency (<code>../OpenTimer/ot/timer/timer.hpp:187</code>); the placer uses OpenMP only
+in the <code>dreamplace_openmp</code> build with <code>synth.place.threads</code> above 1 (default 1); the GUI
+server threads. A forked child has only the forking thread. The 2q engine is single-threaded by ruling R11 and
+is already wired for GP ranking (<code>timing_engine == "fast"</code>, <code>lhd_kernel_synth.cpp:3598</code>).
+Graph storage is heap memory (no shared file mapping in hhds), so a child's writes stay private.</td></tr>
+<tr><td><a href="../../pass/place/gui/gui_page.cpp">GUI alignment/matrix</a></td><td>Currently computes
+absolute coordinates and sends move/pin commands. The durable relationship is lost. <code>move</code> has no
+orientation, and a scene node carries a pin count but no pin side (<code>gui_session.hpp:31</code>).</td></tr>
+<tr><td>Non-rectangular areas (<code>__lhd_frame_mask_*</code>, README “frame masks”)</td><td>Hard masks are
+missing-row/site exclusions and soft masks are initial-placement blockages; both are fixed instances in the
+solver. They are not routing obstacles, the scene exposes a single die <code>Box</code>
+(<code>gui_session.hpp:51</code>), and the map code leaves mask instances out of its macro list
+(<code>place.cpp:5135</code>). The geometry exists; the agent, the page and the congestion estimate do not
+see it as an outline.</td></tr>
+<tr><td><a href="../../pass/place/placement_hints.cpp">Placement_hints</a></td><td>Existing module-scoped
+cluster, align, direction and snap soft pulls; position is an initial seed, not FIXED. Relative pulls refresh
+periodically. Results distinguish accepted/relaxed/discarded and preserve authored input.</td></tr>
+<tr><td><a href="../../pass/place/README.md">Interactive placement reference</a></td><td>Region ECO edits exist
+after legalization, but crossing a region can fall back to the whole core. Replay re-executes the flow; it is
+not a constant-time solver checkpoint. GUI runs use neither the placement cache nor the whole-flow physical
+replay.</td></tr>
+<tr><td>What-if timing (<code>core/timing_whatif.hpp</code>, used by the path-based resize engine)</td>
+<td>Transient edits on the evaluated timer with a mark and <code>rollback</code>: master swap, new cell, and
+<code>set_net</code>, which moves pins onto a net and attaches its wire RC. The basis for H6.</td></tr>
+<tr><td><a href="../../lhd/lhd.hpp">Registered controls</a></td><td><code>synth.place.resize</code> controls
+sizing/buffer removal/Steiner repair; <code>synth.place.resynth</code> controls cone resynthesis;
+<code>synth.place.io_resynth</code> controls a separate whole-color path. Legacy GP resize knobs are not a
+complete mutation gate. Timing intervals can disable timing itself and therefore are not a substitute.</td></tr>
+<tr><td><a href="../../lhd/lhd_kernel_synth.cpp">Synthesis orchestration</a> and
+<a href="../../pass/place/place.cpp">placement callbacks</a></td><td>Enforce the new policy at both levels,
+including FP repair, post-placement repair, stage feedback and pre-placement cached-feedback resynthesis.</td></tr>
+</table>
+
+<h3 id="paper">What the two papers and the first one's code change in this plan</h3>
+<table>
+<tr><th>Observation (first paper's section, or file in the checkout)</th><th>Consequence here</th></tr>
+<tr><td>Three loops of rising cost: geometry, placement-stage feedback, routed feedback; expensive evaluation
+only for survivors (3.2). Budgets used: 5 candidates, 3 checker rounds each, 4 optimizer rounds (4).</td>
+<td>The <a href="#parallel">tiers</a> expose different costs. These paper budgets are examples for an
+external agent, not a LiveHD candidate-selection policy.</td></tr>
+<tr><td>Candidates run as isolated worker processes with their own tool session and work directory
+(<code>macroflow/orchestrator.py</code>, <code>ProcessPoolExecutor</code>, <code>parallel_workers: 5</code>).
+The only limit is the worker count.</td><td>Same isolation, with snapshots from H0's state owner where supported
+and spawned replay otherwise. Admission also reads host load and memory.</td></tr>
+<tr><td>Across the 5 candidates of a design, TNS varies with a mean coefficient of variation of 80% and WNS of
+44%; power 1.6%, area 0.3% (5.3, Table 4).</td><td>Expose metric deltas and evaluation costs; the external agent
+decides what to measure and how to rank candidates.</td></tr>
+<tr><td>Candidates of one run are often structurally alike (5.7).</td><td>The structural signature in I.</td></tr>
+<tr><td>Routed refinement improved the incumbent in 11 of 16 cases, is not monotonic, and has little effect
+when the worst paths do not involve macros; the authors name leverage detection as the next step (5.4).</td>
+<td>The leverage query in I, and keeping main's actual result distinct from exploration evidence.</td></tr>
+<tr><td>A WNS-first selection kept a candidate with far worse TNS (5.4, vga_lcd at 2:1).</td><td>Report both
+metrics and their tradeoff in E; the external agent decides what to apply.</td></tr>
+<tr><td>Without the layout image, detailed routing failed on three of the 2:1 designs; without the skill
+pack, timing collapsed on the hardest one (5.6).</td><td>A picture with pin sides in every job result, and the
+agent guide in I.</td></tr>
+<tr><td>A deterministic legalizer follows the model's coordinates (3.2, <code>legalize.py</code>); orientation
+toward the served logic decides routability (5.2).</td><td>The legalization and orientation items in I.</td></tr>
+<tr><td>A try that fails to improve switches from small refinements to a different outline: ring, C, U,
+corner, split (<code>macroflow/explore.py</code>).</td><td>Outlines can be expressed as intent templates (D)
+by the external agent. LiveHD does not decide when to switch strategy.</td></tr>
+<tr><td>Failed and timed-out runs are reported as failures, not replaced with estimates (4).</td><td>The
+ledger rule in E and the terminal states of a job.</td></tr>
+<tr><td>Results are the best of 5 executions per method, about 12 minutes per design, on Nangate45 with
+generated memories (4, 5.5).</td><td>No performance claim is adopted. The benchmark is a later external
+comparison (G).</td></tr>
+</table>
+
+<p>The second paper (arXiv:2611.12048v2) evaluates agents on one industrial floorplan: 99 macros filling 71% of an
+L-shaped region, measured after power grid, placement and a global-route estimate. It gives little method and
+its data are private, but its measurement discipline applies here.</p>
+<table>
+<tr><th>Observation (section)</th><th>Consequence here</th></tr>
+<tr><td>Layouts with nearly equal standard-cell utilization (32.2% and 32.5%) differ 30-fold in routing
+overflow; a peak does not describe spatial extent (5.3, Appendix J).</td><td>An exploration returns the maps
+and local summaries: overflow, share of bins over capacity, peak, hotspots (H8). Utilization is not a
+routability check.</td></tr>
+<tr><td>WNS, TNS and violation counts move differently, and differently per path family; one fix traded
+register-to-register TNS against register-to-memory WNS (5.4, Appendix H).</td><td>Timing per path family in
+every result, exposing the per-family tradeoffs to the agent in E.</td></tr>
+<tr><td>Invalid geometry, a run that did not deliver, a missing measurement and poor quality are four
+outcomes. A layout with 53 macros outside the die had routing overflow 1 (3.3, Figure 8).</td><td>The
+geometry warning and per-metric validity fields. A completed evaluation can have illegal geometry; it is
+neither a tool failure nor a legal final placement.</td></tr>
+<tr><td>A measurement is tied to the submitted layout by hashes of geometry, names and recipe (3.2, Appendix
+E).</td><td>Result identity hashes at DEF precision, and fresh measurements after the agent edits main.</td></tr>
+<tr><td>What is delivered is the selected layout, not the best one seen; a later attempt can be worse, and
+feedback did not by itself give quality: the system without online feedback scored highest (5.1, 5.5).</td>
+<td>Main changes only through explicit agent/user commands, independently of exploration results (P2).
+Feedback tiers and checkers supply evidence; strategy belongs to the external agent.</td></tr>
+<tr><td>Agents that could not read the binary geometry assumed sizes and delivered illegal layouts (Appendix
+J).</td><td>The outline, sizes and pins as agent-readable data (I).</td></tr>
+<tr><td>Three numbers summarize a layout: congestion C, setup timing T and a composite quality Q, with
+wirelength and utilization as minor terms. Q multiplies the component scores, so a good component cannot
+cancel a bad one (3.3, Appendix B).</td><td>Ruling P4 and <a href="#three">the summary below</a>.</td></tr>
+<tr><td>The region is L-shaped: the missing corner is not whitespace, and what matters is whether the
+remaining space is connected or cut into strips (3.1).</td><td>The non-rectangular item and the strip check
+in I.</td></tr>
+<tr><td>Resources are reported beside quality: tokens, CPU core-hours, attempts including failed ones; wall
+time is not CPU time (3.3, Appendix I).</td><td>The cost fields of a result and of the ledger.</td></tr>
+<tr><td>The engineer's reference layout scores well above every agent output (Table 1).</td><td>The person
+can use the same controls: page and agent share one session, and either can explore or edit main.</td></tr>
+</table>
+
+<h3 id="policy">Exploration policy: measurement is independent of mutation</h3>
+<p>The baseline is an already initialized mapped design. “No resynthesis” prevents subsequent exploration
+from remapping it; it does not promise that an uncompiled RTL input can be opened without initial synthesis.
+Entering a preset is explicit and leaves ordinary batch/GUI defaults unchanged. The policy is typed CLI/config
+and session state, not a new environment switch. Exact option names are to be settled during implementation.</p>
+<table>
+<tr><th>Operation / mode</th><th>Allowed work</th><th>Limits and evidence</th></tr>
+<tr><td>Geometry inspection</td><td>Preview proposed positions, legality and cheap geometric metrics.</td>
+<td>No new timing claim; previous timing remains visibly tied to its old revision.</td></tr>
+<tr><td>Frozen-netlist timing</td><td>Apply an explicit movement, update affected RC, propagate timing.</td>
+<td>No remap, resizing, VT swaps, buffer insertion/removal or cleanup. Keep existing buffers. Geometry may
+still need legalization; label that state. Evaluate actual existing cells, not a silently idealized repair.</td></tr>
+<tr><td>Placement relaxation</td><td>Bounded GP/local placement and scoped legalization, with RC/timing cadence.</td>
+<td>Topology and masters remain frozen. Select local or whole-design movement explicitly; timing may have a
+larger scope. Timing-weight updates are separately declared and recorded.</td></tr>
+<tr><td>Repair-enabled exploration</td><td>Selected sizing, buffer edits and/or resynthesis at eligible checkpoints.</td>
+<td>Independent gates and call/time/growth budgets. Preserve proof/acceptance checks and exterior invariants.
+Record a new candidate identity and re-evaluate its RC/timing.</td></tr>
+<tr><td>Full validation</td><td>Explicitly requested normal configured placement/repair and stronger timing/routing.</td>
+<td>Report its actual policy. Do not call a frozen-topology result repaired or a placement proxy routed.</td></tr>
+</table>
+<p>The fast preset blocks all netlist/master mutation, including alternative repair engines, domino sizing,
+buffer cleanup, pin/function swaps and stage-triggered remapping where applicable. Mandatory preparation or
+legality work that cannot honor the policy must be completed before taking the baseline or cause an explicit
+unsupported-operation result. It must not quietly bypass the freeze.</p>
+<p>Use separate budgets for movement and evaluation. Coalesce drag samples and time after a released move;
+allow on-demand evaluation and a bounded refresh cadence while playing. Report queued/running/deferred work,
+actual calls and time by category. Never spend a full STA or repair budget merely to repaint the browser.</p>
+
+<h3 id="parallel">Explorations: scratch copies of main, in the foreground or in parallel</h3>
+<p><strong>Main</strong> is the real plan: its commands are traced and its state is what the run delivers.
+An <strong>exploration</strong> is a scratch copy taken at a named baseline. Its moves, runs, flags, policy and
+repair never change main. The external agent uses the feedback to decide which ordinary commands to issue to
+main itself. There is no attach operation, segment merge or promotion of an exploration process (P2).</p>
+<p>The GUI/socket <strong>controller</strong> is a separate process. It serves published immutable views,
+acknowledges and queues commands, and supervises evaluators even while placement or timing is busy. Main's
+<strong>evaluator</strong> owns computation state and applies commands at safe boundaries. A single-threaded
+snapshot owner provides copy-on-write workers only under H0's lifecycle contract; unsupported threaded
+configurations use spawned replay. An acknowledgement is distinct from an applied edit or a fresh measurement.</p>
+<table>
+<tr><th>Mode</th><th>Who drives it</th><th>Slot</th><th>Use</th></tr>
+<tr><td>Foreground<br><code>explore_begin</code></td><td>The person and agent use ordinary commands targeted
+to the scratch evaluator. The page shows its banner; main waits intact.</td><td>No extra job slot: scratch
+computation uses main's reserved capacity. Memory is still budgeted.</td><td>One interactive exploration at a time.</td></tr>
+<tr><td>Background<br><code>explore {patch, …}</code></td><td>A patch and stop condition given up front;
+a worker publishes results through the controller.</td><td>One <code>lhd.jobs</code> slot each.</td>
+<td>Several candidates side by side. An explicit target identifies the baseline, whether main or a foreground
+exploration; neither is modified by its workers.</td></tr>
+</table>
+
+<h4>Explore, export, return and edit main</h4>
+<table>
+<tr><th>Step</th><th>What happens</th></tr>
+<tr><td>Begin</td><td>Record baseline and target identities. Commands go to the exploration's private
+<code>explore/&lt;id&gt;/segment.jsonl</code>. Main's trace receives no exploration commands. The controller
+shows the target name and “exploration — changes do not affect main” in the page and socket state.</td></tr>
+<tr><td>Inside</td><td>Use ordinary movement, evaluation and explicitly requested legalization/repair under
+the exploration's policy. Illegal intermediate geometry carries a prominent warning and per-metric validity;
+GUI pins follow P12. Ending a computation cannot implicitly finish or modify main.</td></tr>
+<tr><td>Inspect/export</td><td>Read measurements and obtain macro coordinates, orientations, relative commands,
+intent or flags as data. Coordinates retain DEF database-unit precision. Export changes no state and does not
+apply anything to main; the agent retains the data it needs before closing the exploration.</td></tr>
+<tr><td>Discard/return</td><td>Close the scratch evaluator and return the view to main. A foreground
+exploration leaves main at its saved state. Closing a background exploration does not rewind a main that has
+continued independently. No exploration process takes main's place.</td></tr>
+<tr><td>Edit main</td><td>The agent issues chosen ordinary moves or relative commands with an explicit main
+target and expected current revisions. Only those commands enter main's trace. Policy, repair and intent
+changes require their own commands. Main evaluates its new state; matching an exploration's outcome is not
+promised, and its old metrics are not relabelled as main's.</td></tr>
+<tr><td>Cleanup</td><td>The controller reaps the worker and removes its directory. One summary line remains
+in the session until it ends. Controller cleanup handles worker failure; stale-session recovery removes
+abandoned directories after a whole-session crash, checking ownership and a session identity before deletion.
+Temporary-directory placement and parent-death detection alone do not delete files.</td></tr>
+</table>
+<p>A foreground snapshot leaves main's evaluator waiting while the scratch child runs. A foreground replay
+uses a separate evaluator rebuilt to the requested baseline, with its replay cost reported. Both keep the
+controller serving and main's state untouched. Export then discard is the route back to main in either case.</p>
+
+<h4>Tiers</h4>
+<table>
+<tr><th>Tier</th><th>Question</th><th>Where it runs</th><th>Concurrency</th></tr>
+<tr><td>T0 geometry</td><td>What geometry violations and structural findings does the proposal have? (I)</td>
+<td>A controller thread, on the published immutable scene and frame at DEF precision. No evaluator job slot;
+available while the flow runs.</td><td>A small thread cap.</td></tr>
+<tr><td>T1 frozen timing</td><td>What happens to this netlist if these objects move?</td>
+<td>Inline what-if on the evaluator for small moves (H6); otherwise a snapshot or replay worker that moves
+objects, rebuilds RC and evaluates. Unavailable measurements carry the reason.</td><td>One slot per worker.</td></tr>
+<tr><td>T2 lookahead</td><td>What does the flow produce from here with this patch? Bounded GP or local
+placement, legalization, timing; stop at a named gate, an iteration count or the end of placement.</td>
+<td>Snapshot worker; replay when snapshots are unsupported or earlier-stage flags change.</td><td>One slot per worker.</td></tr>
+<tr><td>T3 repair</td><td>What can sizing, buffering or resynthesis recover at these positions?</td>
+<td>Replay worker with its own netlist identity; only the gates the policy opens.</td><td>A lower cap.</td></tr>
+<tr><td>T4 validation</td><td>Routed or otherwise stronger evidence under the fixed downstream flow.</td>
+<td>Replay worker or the external flow.</td><td>One at a time by default.</td></tr>
+</table>
+<p>For example, at the <code>macro</code> gate five arrangements can run bounded placement in workers while
+main stays intact. The agent reads the feedback, issues its chosen moves to main, then requests main's next
+operation. Snapshot workers avoid replaying the baseline; all subsequent evaluation still has a measured cost.</p>
+
+<h4>Workers</h4>
+<table>
+<tr><th>Worker</th><th>Start</th><th>Cost and limits</th></tr>
+<tr><td>Snapshot (H2)</td><td>The isolated single-threaded state owner reaches a gate, pause or edit wait,
+then forks a scratch evaluator. The child has private output handles, receives a patch and stop condition,
+and publishes results to the controller. It never serves or inherits ownership of the public GUI socket.
+A background worker writes its completed result and exits; a foreground worker accepts commands until closed.</td>
+<td>No baseline replay, but start latency and copy-on-write memory are measured rather than assumed constant.
+The controller never forks computation from its threaded state. The owner must satisfy H0's runtime contract;
+threaded libraries may only be initialized in a child under a defined lifecycle that forbids unsafe later forks.
+Configurations without that contract use replay.</td></tr>
+<tr><td>Replay (H3)</td><td><code>posix_spawn</code> of a headless <code>lhd synth</code> in
+<code>explore/&lt;id&gt;/W</code> with the trace cut at the baseline, the candidate patch, flag overrides and a
+stop label. The evaluator communicates with the controller through its private channel.</td>
+<td>Replay time and reconstructed baseline identity are reported. A mismatch is reported instead of claiming
+an exact snapshot. The supervisor holds the slot and assigns the nested job/thread budget because a spawned
+process has its own admission table.</td></tr>
+<tr><td>Region (H4)</td><td>The existing <code>fork</code> command, under session supervision.</td>
+<td>For region-scoped hypotheses, with today's bus-pin limitations. Its cut-pin model is not the parent's
+correctness model. An agent may read positions and issue corresponding edits to main after resolving the
+original identities and current revisions.</td></tr>
+</table>
+
+<h4>Limits: never saturate the host</h4>
+<ul>
+<li><strong>One admission point (ruling P1).</strong> Every background worker takes a <code>Job_manager</code>
+slot of the new class. There is no separate pool: formal, synthesis and exploration jobs of the same session
+compete for <code>lhd.jobs</code>. The manager also refuses when other processes load the machine (load average
+minus its own jobs) or when predicted memory does not fit.</li>
+<li><strong>A configured share.</strong> <code>explore.jobs</code> caps how many of those slots explorations
+may hold, so they cannot starve the rest of the flow; a smaller cap applies to T3 and T4. One CPU stays
+reserved for main's evaluator whenever main is not blocked; controller responsiveness is measured separately.</li>
+<li><strong>Foreground needs no extra slot (ruling P2).</strong> Main waits while its scratch evaluator uses
+main's reserved CPU capacity. Make this reservation explicit across the controller/evaluator boundary; do not
+infer a blocked-parent relationship from process ancestry. Memory admission still applies.</li>
+<li><strong>Threads are divided, not multiplied.</strong> Each worker receives an explicit share for the
+placer, for the timer executor and for its nested <code>lhd.jobs</code>. OpenTimer's default of one thread per
+hardware core in every worker is the saturation to avoid.</li>
+<li><strong>Memory.</strong> Predict snapshot divergence conservatively from H0 measurements and node count;
+predict replay at the measured full evaluator peak. Account for retained main state, parent/child writes and
+all workers in the session budget. Use address-space backstops where supported, plus live host/session memory
+monitoring: a per-process virtual-address limit alone does not bound aggregate copy-on-write memory. Report
+admission failures and terminate over-budget work through the supervised worker lifecycle.</li>
+<li><strong>Bounded queue.</strong> Beyond <code>explore.queue</code> a request is refused at once with the
+reason. Nothing is dropped silently. Clients are served round-robin by their client label, so one agent
+cannot starve another or the person at the page.</li>
+<li><strong>Deadlines and cleanup.</strong> A wall deadline per tier; then a kill of the worker's whole
+process group. Workers watch the session controller and die with it, independently of which evaluator forked
+them. The supervisor reaps children and cleans result directories. At most <code>explore.open</code> finished
+result sets may remain open for inspection/export; further requests are refused until some are closed.
+Bound result bytes/history too; a count alone does not bound temporary storage. Recover abandoned directories
+after a whole-session crash using ownership and session-identity checks.</li>
+<li><strong>Several sessions on one server</strong> do not share a table. They see each other only through
+load and available memory, which the manager reads before every admission; that is sufficient to back off and
+is stated as the guarantee, not more.</li>
+</ul>
+
+<h4>Baseline and queueing</h4>
+<p>A snapshot can only be taken where its eligible single-threaded owner is. While that evaluator is held
+(gate, pause, edit), queued
+background explorations wait for a slot and fork from the same state, so all candidates share one baseline.
+When the parent leaves that state (<em>Run</em>, <em>Continue</em>, an applied edit), running workers are
+unaffected, since each owns its copy; those still queued end as <code>stale</code>, and the reply to the
+command that moved the parent says how many. With an eligible running evaluator a snapshot forks at the next safe poll if a slot
+is free and is refused as <code>busy</code> otherwise. Keeping stopped snapshots for later is a possible
+extension (<code>Job_manager::suspend_child</code> exists) and is not in the first delivery.</p>
+
+<h4>Protocol (agent socket, page and trace share it)</h4>
+<table>
+<tr><th>Command</th><th>Effect</th></tr>
+<tr><td><code>explore_begin {label?, expect?}</code></td><td>Enters a foreground exploration from main and
+returns its id and baseline. Refused inside another foreground exploration.</td></tr>
+<tr><td><code>explore {target, patch, tier, until?, scope?, policy?, set?, budget?, label?, client?, expect?}</code></td>
+<td>Starts a background exploration and returns at once: <code>{id, state: queued|running|refused,
+reason?}</code>. <code>target</code> identifies main or a scratch baseline. <code>patch</code> holds absolute
+or relative moves with optional orientation, pins and hint edits;
+<code>expect</code> the baseline revisions; <code>set</code> flag overrides (forces a replay worker when they
+affect an earlier stage). A list of patches is one atomic submission.</td></tr>
+<tr><td><code>explore_wait {ids?, any?, timeout_ms}</code></td><td>Long poll until one or all finish, like
+<code>wait_version</code>.</td></tr>
+<tr><td><code>explorations {}</code></td><td>The table: mode, state, tier, worker kind, label, client, elapsed,
+deltas against the baseline, and the limits and occupancy.</td></tr>
+<tr><td>Ordinary edits <code>{target, expect, …}</code></td><td>Explicitly name <code>main</code> or an
+exploration id and expected revisions. Support absolute coordinates, relative displacement and named
+edge/alignment/gap relationships; return resolved coordinates and geometry/pin warnings. An edit to main is
+an ordinary traced command, not a merge of exploration state. Refuse a stale or closed target.</td></tr>
+<tr><td><code>legalize {target, expect, scope?}</code></td><td>Explicitly run the existing macro/cell
+legalizer within the declared scope. Report final legality, remaining violations, displacement and failure
+reasons using existing constraints/semantics. Recompute pin suspension/restoration from the resulting geometry.
+The GUI's <em>Legalize</em> button uses this same command.</td></tr>
+<tr><td><code>explore_discard {id? | label | all}</code></td><td>Discards; a running worker's process group is
+killed first.</td></tr>
+<tr><td><code>hello {}</code></td><td>The session described for an agent that has only the socket path: build
+and version, repository root and working directory, workdir, top, the input files (sources, SDC, LEF, LIB,
+floorplan, intent sidecars), the command line and <code>--set</code> values, page URL, capabilities with the
+reason for each missing one, limits and occupancy, policy, the path of the guide.</td></tr>
+<tr><td><code>export {target, what, format?}</code></td><td>Returns data and writes nothing: <code>intent</code> (hint
+records), <code>flags</code> (values that differ from the invocation), <code>macros</code> (name, position,
+orientation and units; <code>format:"placereasoner"</code> or <code>"def"</code>), relative movement/relationship
+records, <code>summary</code> and the score configuration. Precision follows the design's DEF database units;
+export never applies the records to main.</td></tr>
+<tr><td>Read routes with <code>x=&lt;id&gt;</code></td><td><code>/state</code>, <code>/design</code>,
+<code>/frame</code>, <code>/map</code>, <code>/regions</code>, <code>/query</code>,
+<code>/screenshot.png</code> and the agent's <code>critical</code> answer for that exploration instead of main.</td></tr>
+</table>
+
+<h4>What an exploration reports (ruling P3)</h4>
+<p>A worker is a session without a browser. At its stop point, and at each gate it passes, it writes the
+documents the page fetches from main into its directory under the session's temporary directory
+(<code>lhd-gui-&lt;pid&gt;.d/explore/&lt;id&gt;/</code>, beside the socket; nothing under the workdir). The page and
+the socket read them through the routes above, so every layer, map and the scrubber work on an exploration
+exactly as on main. A foreground evaluator can publish live documents over its private controller channel;
+its action segment remains confined to the temporary directory.</p>
+<table>
+<tr><th>Document</th><th>Content</th></tr>
+<tr><td>Summary</td><td>Timing, routing density and Quality (ruling P4), with the goal record they used.</td></tr>
+<tr><td>State</td><td>Target and baseline identity, phase, iteration, HPWL, density overflow, checkpoints,
+stop reason, terminal state, prominent geometry warning and intended/effective/suspended pins with causes.</td></tr>
+<tr><td>Timing</td><td>A full evaluation, not the panel's ranking estimate: WNS, TNS and the number of failing
+endpoints, per clock and per path family (register to register, register to memory, memory to register, IO);
+the clock period and achieved frequency; the most critical cells and the worst paths; engine, corners and
+endpoint population. A worker has an evaluation budget of its own and does not spend main's.</td></tr>
+<tr><td>Placement</td><td>Authoritative coordinates, orientations and units at DEF database-unit precision,
+plus the scene when it differs from the baseline. The page's 16-bit frame and thinned timeline are display
+representations only; commands, exports and result identity never derive from those quantized frames.</td></tr>
+<tr><td>Maps</td><td>Density and every congestion estimator the run has (RUDY, RSMT, URoute when its model is
+loaded), each as the grid plus total overflow, share of bins over capacity, peak, and the worst hotspots as
+boxes with the macros that bound them. The estimator is named; none of them is a routed result.</td></tr>
+<tr><td>Regions and hints</td><td>The region mesh with its crossings; hint results and residuals.</td></tr>
+<tr><td>Checks</td><td>T0 findings with affected objects and causes. Illegal geometry carries
+<code>geometry_status: illegal</code> and a prominent <strong>ILLEGAL GEOMETRY</strong> warning, independent of
+job completion status. Each metric states whether it is meaningful, approximate or unavailable on that
+geometry. No implicit legalization or candidate rejection follows.</td></tr>
+<tr><td>Picture</td><td>PNG renderings with pin sides and the congestion layer.</td></tr>
+<tr><td>Identity and cost</td><td>Hashes of the baseline revisions, the segment or patch, the policy and flags
+and the engine, so a result cannot be attributed to another candidate. Queue, start or replay, run and CPU
+seconds, peak memory, timing calls, GP iterations; failed attempts are counted.</td></tr>
+</table>
+<p>Publish each completed result atomically with its identity. Job outcomes are <code>done</code>,
+<code>failed</code>, <code>timed_out</code>, <code>stale</code>, <code>refused</code> and <code>cancelled</code>;
+geometry legality is a separate field. Earlier complete measurements may remain labelled with their own
+revision, but a killed worker never publishes a partial final measurement as success. Closing an exploration
+discards its private state; there is no attached state.</p>
+<p>The page lists the explorations with a thumbnail and deltas against the baseline. <em>View</em> switches
+the page to one read-only; <em>Compare</em> shows two of them (or one and main) with metric deltas, the
+displacement layer and the difference of a chosen map; <em>Export</em> and <em>Discard</em> send the commands
+above. Local summaries are required because global ones hide the difference: in the second paper two layouts
+with 32.2% and 32.5% standard-cell utilization had 1,587 and 47,124 routing overflow.</p>
+
+<h4 id="three">Three numbers first (ruling P4)</h4>
+<p>The actual objective is a legal placement inside the constrained floorplan and timing after routing.
+Placement timing, congestion, wirelength and utilization are cheaper feedback. The external agent chooses
+which proxies to trust, how to trade them off and when to request expensive routed timing; LiveHD implements
+neither that strategy nor acceptance gates based on proxy improvements.</p>
+<table>
+<tr><th>Number</th><th>Definition</th><th>Behind it</th></tr>
+<tr><td>Timing</td><td>WNS with TNS; frequency only where supported by the declared clock/path coverage.</td>
+<td>Failing endpoints, per-clock and per-family results, stage, model, coverage and validity.</td></tr>
+<tr><td>Routing density</td><td>Share of bins over capacity, total overflow and peak for the explicitly selected
+estimator, named beside the number.</td><td>All available estimator maps and hotspots; no silent substitution
+of one estimator for another.</td></tr>
+<tr><td>Quality</td><td>An informational, agent-configured score from 0 to 100. A supported form is
+<code>100 × product((1 / (1 + loss_i / half_i)) ^ weight_i)</code>, with nonnegative losses and weights,
+weights summing to 1 and positive half-score scales.</td><td>Components, transformations, normalization scales,
+weights, estimator and validity; show “not configured” or “unavailable” when appropriate.</td></tr>
+</table>
+<p>The second paper uses weights 0.35 congestion, 0.50 timing, 0.10 wirelength and 0.05 utilization; these are
+reference values, not this task's selection policy. The agent supplies the score record, including the timing
+loss definition (WNS, TNS or declared combination), endpoint/clock normalization and positive scales. Never
+divide by a zero baseline: use an explicitly supplied positive reference scale or report the score unavailable.
+Missing/stale required components make the score unavailable rather than zero. Any score calculated on illegal
+geometry carries the prominent warning and component validity; it cannot imply final feasibility. Scores do
+not block edits, filter jobs or select a winner. Export the record with the results; comparisons require
+matching score records, estimators, coverage and evaluation levels.</p>
+
+<h4>Contracts</h4>
+<ul>
+<li>Beginning, running and discarding explorations never changes main's placement, timing state or trace.
+Only ordinary commands explicitly targeting main change it. Main's trace records those commands, not any
+scratch computation; batch replay uses main's recorded inputs and settings.</li>
+<li>An exploration carries its own policy. Under the fast preset a worker proves at exit that connectivity and
+masters equal the baseline's. Changes to an exploration's policy never loosen main's policy; the agent must
+explicitly request that on main.</li>
+<li>Lookahead reports its own thread count, engine and complete evaluation identity. Main may produce different
+results after the agent reissues edits, particularly under different settings; it always measures its own state.</li>
+<li>Exploration options are session options like the other <code>--gui</code> flags and are not part of the
+run id.</li>
+<li>No long-term side effect (ruling P6): an exploration writes only inside the session's temporary directory,
+never to the workdir, its caches or the repository. What outlasts a session is main's trace and result, and
+whatever the agent chose to edit in the repository.</li>
+</ul>
+
+<h4>Proposed options (the options are ruled; names and defaults to settle with H0 and first measurements)</h4>
+<table>
+<tr><th>Option (<code>synth.place.explore.</code> prefix)</th><th>Proposed default</th><th>Meaning</th></tr>
+<tr><td><code>jobs</code></td><td>4</td><td>How many <code>lhd.jobs</code> slots background explorations of
+this session may hold at once; 0 leaves only foreground explorations. Load and memory can only lower it.</td></tr>
+<tr><td><code>heavy_jobs</code></td><td>1</td><td>Of those, how many may be T3 or T4.</td></tr>
+<tr><td><code>queue</code></td><td>32</td><td>Explorations waiting; further requests are refused.</td></tr>
+<tr><td><code>threads</code></td><td>0</td><td>Threads per worker; 0 divides the admitted CPUs by <code>jobs</code>.</td></tr>
+<tr><td><code>timeout</code></td><td>per tier</td><td>Wall deadline in seconds.</td></tr>
+<tr><td><code>worker</code></td><td><code>auto</code></td><td><code>snapshot</code>, <code>replay</code> or
+<code>auto</code> (snapshot where allowed).</td></tr>
+<tr><td><code>open</code></td><td>20</td><td>Finished result sets retained for inspection/export until discarded.</td></tr>
+</table>
+
+<h3 id="agent">Connecting an agent (ruling P5)</h3>
+<ol>
+<li><code>lhd synth … --gui</code> prints
+<code>agent socket (local, mode 0600): /…/lhd-gui-&lt;pid&gt;.sock</code>.</li>
+<li>The person opens a coding agent in the repository and pastes that line or the path.</li>
+<li>The agent runs <code>tools/lhd_gui.py --socket &lt;path&gt; hello</code> and from the reply knows the design,
+its files, what the session can do and where the guide is. <code>--socket</code> and
+<code>LHD_GUI_SOCKET</code> exist today; <code>hello</code>, and accepting the whole pasted line, are new.</li>
+<li>The agent explores, reads/exports feedback and discards scratch state through the socket, then issues
+chosen ordinary edits explicitly to main on its own authority. Page and socket identify the same targets.</li>
+<li>What should last is an edit to the repository by the agent: hint records from <code>export</code> into the
+sidecar beside the RTL, flag values into the project's configuration, later source attributes. These are
+ordinary file changes, visible in <code>git diff</code>, and a rerun from the start with them is the check
+that they reproduce the result without the session.</li>
+</ol>
+<p>The socket is local and mode 0600: whoever can open it acts as the user who started <code>lhd</code>. That
+is the whole authorization model; there is no confirmation step. Budgets, the policy gates and the slot limit
+bound what an agent can spend; ordinary commands explicitly targeting main are how it changes main.</p>
+
+<h3 id="bench">Benchmark bring-up and result export (ruling P7)</h3>
+<p>Read on 2026-11-13: <a href="https://github.com/fenggev56/PDAGENT-BENCH">PDAGENT-BENCH</a> (README,
+<code>data/placereasoner_bench.csv</code>, <code>data/placereasoner.json</code>,
+<code>scripts/build_data.py</code>) and the benchmark notes in the local PlaceReasoner-Beta checkout.</p>
+<table>
+<tr><th>Fact</th><th>Consequence</th></tr>
+<tr><td>The repository holds two things. 343 question and script-writing tasks grade a language model with
+single stateless calls. PlaceReasoner-Bench is 16 macro-placement tasks: ariane133, ariane81, bp_be, bp_fe,
+ethernet, swerv_wrapper, VeriGPU, vga_lcd, each at 1:1 and 2:1.</td><td>Only PlaceReasoner-Bench applies to a
+placer. The 343 tasks are not used.</td></tr>
+<tr><td>Task data is on Hugging Face (<code>fenggev566/PlaceReasoner-Bench</code>, about 589 MB, also inside
+<code>PDAgent-Bench_open</code>). Per design: <code>&lt;design&gt;.v</code>, <code>constraint.sdc</code>,
+<code>lef/</code>, <code>lib/</code>, <code>def/1_1_u60_floorplan.def</code>, <code>def/2_1_floorplan.def</code>,
+<code>&lt;design&gt;_macro_clusters.txt</code>. Nangate45 with FakeRAM 2.0 memories, 60% utilization, fixed pins.</td>
+<td>The import step of J. Downloaded outside the repository; never a test dependency.</td></tr>
+<tr><td>A method delivers every macro's position and orientation, nothing else. PlaceReasoner-Beta stores it
+as <code>coords.json</code>, a list of <code>{name, x, y, orient}</code> in microns, and applies it with
+<code>safe_place</code>; instance names carry escaped hierarchy separators.</td><td>The
+<code>placereasoner</code> format of <code>export</code>. Name fidelity is a bring-up check of its own.</td></tr>
+<tr><td>Everything after macro placement is fixed: the detail-place and CTS-and-route templates under
+<code>skills/skills_Nangate45/</code>, run by OpenROAD with bounded timing repair.</td><td>The score step runs
+those templates unchanged on the exported placement. LiveHD's own timing and congestion for the same placement
+are recorded beside it as proxy numbers, in a separate column, to measure how well they rank.</td></tr>
+<tr><td>A result row is <code>aspect, design, method, status, wns, tns, drc, wl_um, power_w, area_um2,
+runtime_s, tokens_k</code>. A run counts as routed when detailed routing completes with fewer than 1,000
+violations. A method is summarized as routed, clean and best-TNS counts out of 16.</td><td>The score step
+writes this schema; the agent's token use fills <code>tokens_k</code>.</td></tr>
+<tr><td>There is no submission endpoint. “Adding a model” is the maintainers' own procedure
+(<code>results/&lt;subset&gt;/&lt;model&gt;/summary.json</code>, then <code>scripts/build_data.py</code>), and the
+placement rows are copied by hand from the paper's tables. No license is stated.</td><td>What can be handed
+over is a row file in their schema with the placements and reports behind each row. How they accept it, and
+the terms for the data, is a question to the maintainers (J).</td></tr>
+</table>
+<p>Nangate45 and these DEFs are supported inputs (ruling P8). Bring-up of a task is therefore also a reader and
+placer test: a construct that fails is reduced, fixed where it belongs and kept as a fixture.</p>
+<p>The benchmark fixes the netlist and compares macro placements only, which is the fast preset of this plan:
+no resynthesis, sizing or buffer edits on LiveHD's side. Bring-up starts with bp_fe (11 macros) and VeriGPU
+(12): import, open the session, let the agent explore at the <code>macro</code> gate, export, score. The
+leaderboard numbers are the best of five executions per method; this plan reports every run.</p>
+
+<h3 id="timing">Large moves, WNS/TNS and repair escalation</h3>
+<p>A fixed-netlist evaluation answers “what happens to this implementation if it moves?” A repaired candidate
+answers “what implementation can we recover at these positions?” Both are useful and neither substitutes for
+the other. New coordinates require fresh RC; stale old timing must never look like a new evaluation.</p>
+<p>Track displacement relative to macro/window size, changed crossing-net lengths and loads, slew/capacitance
+violations, critical-path changes and slack degradation. Use these as configurable, calibrated escalation
+signals rather than an arbitrary universal distance threshold. WNS is sensitive to a single newly long path;
+TNS can be more informative about broad changes, but is also implementation-dependent and can change greatly
+after sizing/buffering. Neither metric exempts a large move from validation.</p>
+<p>When the policy forbids repair, report “repair recommended” with reasons and retain the frozen-netlist
+measurement. The agent can widen the timing scope, request one permitted repair round or stop. Any optional
+virtual-buffer estimate must be a separately named prediction, never substituted for actual-netlist timing.</p>
+<p>Each measurement records placement/topology/master revisions, active and timing scopes, stage, engine/model,
+corner/clock/SDC coverage, units, elapsed time and legal/approximate status. WNS and TNS require a declared,
+consistent endpoint population. A partial cone's TNS is scoped TNS; global TNS needs a maintained global endpoint
+ledger or full evaluation. Missing or stale timing is not zero. Compare candidate improvements only at matched
+coverage and evaluation level. Today's panel refresh is a ranking estimate with no TNS; an exploration runs
+the flow's full evaluation and reports both (ruling P3).</p>
+
+<h3 id="local">Frozen exterior, live electrical boundary</h3>
+<p>There are three separate scopes: objects allowed to move, objects allowed to change implementation, and
+paths/nets whose electrical effect must be evaluated. A selected macro may move alone, with its cluster, or with
+a declared surrounding cell halo. The choice is explicit and shown in the GUI. Fixed exterior objects still
+occupy area and contribute pins, forces, loads and routing demand.</p>
+<p>For a net with an active pin and exterior sinks/driver, retain the exterior pin positions and loads and
+update the affected net's RC, including exterior branches when topology changes. Timing propagation can extend
+outside the movement window through changed arrival times, slews and required times. Freezing coordinates does
+not freeze timing. A local edit may worsen an endpoint far outside the selected region.</p>
+<p>First implement local movement against the retained full design and verify against full timing. Then add
+incremental electrical updates. Chunk execution can use boundary summaries of arrival/required times, slew,
+loads, clock groups and constraints, with an identity and validity condition for each summary. Refresh/invalidate
+summaries when a changed crossing net or feedback dependency invalidates them; iterate boundaries or fall back
+to a declared broader evaluation. Unsupported clock/exception coverage must be reported, not assumed.</p>
+<p>Record explicit outcomes: accepted within scope, infeasible within scope, budget exhausted, boundary summary
+stale, or expansion required. Expansion is a new recorded policy decision within a preauthorized bound or a
+new user/agent request. Region fork is useful for hypotheses but its cut-pin timing and current bus-macro limits
+make it insufficient as the correctness model for this mode. A successful local experiment still needs global
+validation before a final QoR claim.</p>
+<p>A snapshot worker holds the whole design, so a local experiment inside one is checked against full timing
+at no extra design cost. Local kernels reduce the time of a job; they are not what makes jobs parallel.</p>
+
+<h3 id="intent">Portable relationships and source identity</h3>
+<p>Prefer “bank B east of bank A”, “left edges aligned”, “these named banks occupy these matrix slots” and
+“keep this channel open” over stored dx/dy nudges. Nudges remain useful exploratory actions. Save successful
+intent in a versioned sidecar, for example <code>cpu.placement.json</code>, supplied beside RTL through the
+existing positional JSON input. Source annotations later lower to that same intent.</p>
+<ul>
+<li>Matrix membership/order is explicit, not re-sorted from coordinates on each replay. Fixed row/column
+layouts and allowed reflow are separate policies; check capacity and heterogeneous macro sizes.</li>
+<li>Support object/group/boundary anchors and normalized placement within a declared frame. One absolute
+anchor is allowed when intentionally needed. Specify center versus edge and physical body versus halo.</li>
+<li>Positions/preferences can scale; macro dimensions and technology-required clearances do not. Minimum
+channels use physical units or technology pitches. Preferred extra spacing may scale independently.</li>
+<li>Keep hints advisory, with weights and residuals. They cannot redefine physical legality or overwrite pin
+intent. Temporary illegal geometry and suspended pin enforcement follow P11–P12; legalization reports
+conflicting hints and existing failure conditions. A future required-placement mode needs its own approved contract.</li>
+<li>Show intent overlays before applying and residuals afterward. A drag cannot uniquely reveal whether the
+user wanted an edge affinity, a channel or proximity to logic; propose a conversion rather than guessing silently.</li>
+<li>Preserve <code>livehd.placement.hints</code>, <code>livehd.placement.state</code> and
+<code>livehd.placement.hint_results</code> as separate records. A trace describes an execution; it is not the
+portable intent. Keep exact physical names and logical identities distinct.</li>
+<li>The transfer test is a set of replay workers: the same intent under other core areas and aspect ratios,
+side by side, each reporting legal realization or the relaxed relationships.</li>
+</ul>
+
+<h3 id="loop">External agent example and first acceptance milestones</h3>
+<p>The following is an example use of the interface, not an agent implemented or prescribed by this task.
+The agent may accept worse proxy measurements as part of its own long-term plan.</p>
+<ol>
+<li>Inspect a consistent main snapshot: geometry, pins, connectivity, maps, timing, capabilities, policies,
+limits and budgets. Query leverage or candidate similarity if useful.</li>
+<li>Request foreground or background explorations from a named baseline. Geometry findings are feedback;
+the agent may continue with an illegal intermediate state, request legalization or change its proposal.</li>
+<li>Read metrics, warnings, maps and cost. Choose further experiments or stronger evaluation, including routing,
+according to the agent's strategy. LiveHD does not discard candidates for poor TNS or other proxy regressions.</li>
+<li>Export desired moves, coordinates or relationships, close the exploration and return to main. The agent
+issues the selected ordinary edits to main with its current identity, then requests fresh measurements.</li>
+<li>Save useful intent/configuration beside RTL and evaluate transfer to other floorplans as desired. The
+constrained floorplan and post-route timing remain the real objective.</li>
+</ol>
+<p>Planner/checker agent design, training, stopping rules and winner selection are outside this task. The
+session supplies commands, deterministic findings and measured evidence for any external agent or human.</p>
+<ol>
+<li><strong>Fast check:</strong> move a macro, recompute RC/timing and perform bounded placement with all mutation
+gates closed; prove netlist/masters unchanged across a normally eligible repair/resynthesis checkpoint.
+Re-enable one gate and verify its scheduled operation is recorded and budgeted.</li>
+<li><strong>Try and forget:</strong> begin a foreground exploration, move two macros, request legalization and
+read WNS/TNS and congestion. Export the coordinates, then discard: main's next frame and state remain unchanged.
+The agent separately issues those moves to main; only those edits enter main's trace, and main reports fresh
+measurements. Closing the exploration removes its files. No process or command segment is promoted.</li>
+<li><strong>Parallel check:</strong> from one paused macro gate, submit five arrangements plus a baseline with
+a share of two slots. Never more than two workers run; all results include timing, maps and geometry status.
+The controller remains responsive throughout. Main is unaffected until the agent sends an explicit main edit;
+poor results and duplicate proposals are still returned. Killing the controller leaves no running workers;
+cleanup/recovery handles abandoned files. Compare wall time with serial replay.</li>
+<li><strong>Illegal moves and pins:</strong> drag through overlapping, halo-conflicting and excluded positions.
+Each reports the warning. Reject new pins there, preserve existing anchors while enforcement is suspended,
+then restore the pins when the cause moves away. Run the explicit legalizer and verify existing success/failure
+semantics with density and other constraints. Check both GUI and socket feedback.</li>
+<li><strong>Precision and exclusions:</strong> round-trip absolute coordinates through DEF units and export;
+resolve relative displacement, alignment and edge/gap commands using actual macro dimensions. An excluded
+corner must prohibit placement and carry no routing capacity in every estimator.</li>
+<li><strong>Local check:</strong> relax a selected cluster while preserving exterior geometry/masters/connectivity;
+validate crossing-net timing against the full model and measure cost relative to whole-design exploration.</li>
+<li><strong>Transfer:</strong> preserve four macros as a 2×2 arrangement, change core aspect ratio and replay
+without coordinate edits; show legal realization or explicit relaxed/infeasible relationships.</li>
+<li><strong>Benchmark:</strong> import bp_fe at 2:1, let an external agent given only the socket path explore,
+issue its chosen edits to main, export the macro placement, score with the benchmark flow and produce a result
+row. Then the other 15 tasks.</li>
+<li><strong>Quality:</strong> compare ordinary placement, absolute-coordinate replay and relative-intent exploration
+at equal total search budgets, with and without repair and local restriction. Report routed results under a
+fixed downstream flow, proxy-to-routed agreement, costs and all failures. This evaluates the interface and
+feedback quality without prescribing the external agent's strategy.</li>
+</ol>
+
+<p>Measure median and tail latency separately for command acknowledgement, geometry preview, RC/timing,
+relaxation, repair, job start (fork or replay) and queue wait, on small and large designs. Establish achievable
+latency targets from these measurements; do not promise subsecond timing or speed proportional to active-cell
+count before profiling crossing nets and boundary propagation. Keep generated benchmark outputs under ignored
+<code>repros/</code>.</p>
+
+<h3 id="risks">Risks and open points</h3>
+<ul>
+<li><strong>Snapshot lifecycle.</strong> Separating the controller removes GUI threads from the computation
+owner, but timer/OpenMP runtimes also need an explicit safe lifecycle. A paused flow or idle pool is not enough.
+Fork only from the isolated single-threaded owner; configurations that cannot satisfy H0 use spawned replay
+and advertise that reason in <code>state</code>. Measure controller responsiveness during long evaluator work.</li>
+<li><strong>Replay cost.</strong> A replay worker repeats the flow to the baseline (the 668k-cell design of
+2q-fasttimer takes about half an hour end to end). It is the right tool for a few flag-changing or repair
+candidates, not for many quick checks.</li>
+<li><strong>Memory under divergence.</strong> Copy-on-write is cheap only while parent and children leave most
+pages alone. Global placement rewrites the coordinate and field arrays; the graph and libraries stay shared.
+H0 measures the real fraction; the prediction starts conservative.</li>
+<li><strong>Cost of a full evaluation per exploration.</strong> Ruling P3 asks for WNS and TNS, so a T1 result
+costs a full evaluation rather than a ranking pass. Measure it per design size; H6 keeps small moves cheap.</li>
+<li><strong>Main needs fresh evaluation.</strong> The agent applies chosen macro moves or relationships to
+main, which remains authoritative. Its resulting timing may differ from an exploration, and reevaluation has
+a cost. Never avoid that cost by promoting the scratch process or relabelling its measurements.</li>
+<li><strong>One session, several clients.</strong> A foreground exploration changes what everyone connected
+sees. The banner and <code>state</code> must make that impossible to miss, and a client that sends
+<code>expect</code> revisions is refused rather than applied to the wrong line.</li>
+<li><strong>Benchmark import.</strong> Nangate45 with fakeram45 memories is already exercised (the HighTide
+nangate45 designs, the <code>pg_nangate45</code> power grid, the SDC reader), but these 16 netlists and DEFs
+have not been read. Placing the mapped netlist without remapping, the DEFs' rows and pins (the
+<code>synth.place.floorplan</code> option asks for contiguous N/FS rows), and the exact instance names are the
+points to check first; what fails is fixed (ruling P8), so the cost is schedule, not scope.</li>
+<li><strong>Benchmark submission.</strong> No public way to submit and no stated license; a comparison may stay
+a local table.</li>
+<li><strong>Open: defaults.</strong> The proposed share of 4 slots. Snapshots run on the session's host and are
+enabled only where H0's architecture and lifecycle contract is met; other configurations use replay with
+the same isolation semantics and an explicit replay cost.</li>
+<li><strong>Not in scope.</strong> Distributing jobs to other machines; sharing one admission table between
+unrelated <code>lhd</code> processes; implementing the external reasoning agent, its search strategy,
+proxy-selection policy or long-term plan.</li>
+</ul>
+
+<h3 id="references">References and related work</h3>
+<ul>
+<li>Q. Li et al., “PlaceReasoner-Beta: Reasoning-Driven Macro Placement and Benchmarking”, arXiv:2609.21263v2
+(22 Oct 2026); local copy <code>2609.21263v2.pdf</code> at the repository root.</li>
+<li>Nova-Silicon Team, “Evaluating AI Agents for Industrial-Level Chip Floorplanning: A Framework and Empirical
+Study”, arXiv:2611.12048v2 (12 Nov 2026); local copy <code>2611.12048v2.pdf</code> at the repository root.
+Evaluation protocol and one private industrial case; no code. No performance claim is adopted here.</li>
+<li><a href="https://github.com/fenggev56/PDAGENT-BENCH">PDAGENT-BENCH</a> — leaderboard repository with the
+PlaceReasoner-Bench results (Q. Li et al., arXiv:2606.17253); task data at
+<a href="https://huggingface.co/datasets/fenggev566/PlaceReasoner-Bench">fenggev566/PlaceReasoner-Bench</a>.</li>
+<li><a href="https://github.com/fenggev56/PlaceReasoner-Beta">PlaceReasoner-Beta</a> — inspected local checkout
+<code>../PlaceReasoner-Beta</code>, particularly <code>macroflow/agents.py</code>,
+<code>macroflow/orchestrator.py</code>, <code>macroflow/explore.py</code>, <code>macroflow/candidates.py</code>,
+<code>macroflow/goal.py</code>, <code>legalize.py</code>, <code>config.yaml</code> and
+<code>Instructions/macro_placement_loop.md</code>. Planner/placer/checker/optimizer loop with fixed downstream
+routed evaluation, parallel isolated candidate workers and candidate history. Initial plans and saved
+candidates use absolute coordinates; the refiner also supports relative nudges. Its visual gate may proceed
+after a refinement limit, so do not treat a visual verdict as proof of legality or routed quality. No benchmark
+performance claim is adopted here.</li>
+<li><a href="../../docs/placement_regularity.html">Placement regularity and hierarchical hints</a> — implemented
+soft-hint semantics, scope binding, generated state and source-attribute follow-up.</li>
+<li><a href="2i-interact.html">Interactive GUI</a>, <a href="2is-incsynth.html">placement-aware resynthesis</a>,
+<a href="2t-timeclosure.html">timing closure</a>, <a href="2q-fasttimer.html">fast timing</a>,
+<a href="3g-partitions.html">partitions</a> and <a href="2f-scalability.html">chunk scalability</a> — shared
+interfaces and acceptance boundaries; this task does not duplicate their solver or timer implementations.</li>
+</ul>
+</main>
+<footer>LiveHD TODO — 2p-placereason</footer>
+</body>
+</html>
