@@ -1,5 +1,6 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "aegraph.hpp"
+#include "rewriter.hpp"
 
 #include <algorithm>
 #include <array>
@@ -700,7 +701,7 @@ std::optional<Dlop> eval_op(Ntype_op op, std::span<const Eval_arg> args) {
   return std::nullopt;
 }
 
-namespace {
+namespace detail {
 
 // ---------------------------------------------------------------------------
 // check=unions|full: value evidence for the rewrites
@@ -931,6 +932,10 @@ private:
   std::array<std::vector<std::optional<Dlop>>, 8> cached_vals_;
   std::array<std::vector<uint8_t>, 8>             cached_ready_;
 };
+}  // namespace detail
+
+namespace {
+using detail::Checker;
 
 // ---------------------------------------------------------------------------
 // The engine
@@ -949,18 +954,11 @@ private:
   return op == Ntype_op::Sum || op == Ntype_op::Mult || op == Ntype_op::And || op == Ntype_op::Or || op == Ntype_op::Xor;
 }
 
-class Engine final : public rt::Builder {
+class Engine final : public Rewriter {
 public:
   Engine(hhds::Graph& graph, const Cycle_cutter& cut_cycles, const Options& options, std::string name);
 
   Stats run();
-
-  // ---- rt::Builder: what the rules may do ----
-  Class_id           make(Ntype_op op, std::span<const Operand> ops) override;
-  Class_id           konst(const Dlop& value) override { return eg_.add_const(value); }
-  [[nodiscard]] bool single_use(Class_id cls) const override { return cls < readers_.size() && readers_[cls] == 1; }
-  [[nodiscard]] bool chain_inner(Class_id cls) const override { return cls < chain_inner_.size() && chain_inner_[cls] != 0; }
-  [[nodiscard]] bool guard_scope() const override { return opt_.guard_scope && opt_.unstamped_ok && !opt_.preflight; }
 
 private:
   // How a pure node entered the e-graph.
@@ -997,13 +995,8 @@ private:
   [[nodiscard]] size_t                              live_readers(const hhds::Node_class& node) const;
   [[nodiscard]] bool                                is_pure_candidate(const hhds::Node_class& node) const;
   Class_id                                          class_of(const hhds::Pin_class& pin);
-  void                                              ensure(Class_id cls);
+  void                                              ensure(Class_id cls) override;
   std::optional<Built>                              build(const hhds::Node_class& node);
-  // The rewrite rules of one new e-node (depth = rule-built nesting, 0 for an
-  // original node). Returns the class that stands for the node afterwards.
-  Class_id                                          rewrite(Class_id cls, uint32_t depth);
-  void                                              check_pair(Class_id a, Class_id b, rt::Rule_id rule);
-  uint64_t               check_work_ = 0;  // class evaluations spent by check_pair on this graph (bounded: kCheckWorkBudget)
   void                   check_full();
   void                   compute_best();
   // The expression cost of a class's cheapest realization (compute_best), and the width its price is taken at.
@@ -1021,15 +1014,9 @@ private:
   void                                              elaborate();
   Replaced                                          replace(const Member& member, const hhds::Pin_class& target);
   void                                              sweep_dead();
-  [[nodiscard]] std::string                         describe(Class_id cls) const;
 
   hhds::Graph&             g_;
   const Cycle_cutter&      cut_cycles_;
-  Options                  opt_;
-  std::string              name_;
-  Egraph                   eg_;
-  std::unique_ptr<Checker> union_checker_;
-  Stats                    stats_;
 
   std::vector<hhds::Node_class>                    nodes_;
   std::vector<hhds::Node_class>                    cyclic_nodes_;  // members of the remaining cyclic components
@@ -1038,25 +1025,11 @@ private:
   std::vector<hhds::Pin_class>                     rep_pin_;  // class -> the pin that realizes it (invalid until known)
   std::vector<Member>                              members_;
 
-  // ---- rewrite rules ----
-  std::vector<uint8_t>  enabled_;  // per Rule_id
-  bool                  rules_active_ = false;
-  rt::Rule_id           current_rule_ = rt::kNoRule;  // the rule whose body is running
-  Enode_attrs           cur_attrs_;                   // attrs the rule's new e-nodes inherit
-  uint32_t              depth_       = 0;
-  uint64_t              rewrites_    = 0;
-  bool                  cutoff_      = false;  // max_rewrites reached
-  uint64_t              work_used_   = 0;
-  uint64_t              work_budget_ = 0;
-  bool                  budget_hit_  = false;
-  std::vector<uint32_t> readers_;       // per class: readers in the graph being built
-  std::vector<uint32_t> rule_readers_;  // per class: the part of readers_ that are rule-built e-nodes (an alt may lose)
   std::vector<uint32_t> sel_readers_;   // compute_best: readers under the current selection (empty = readers_)
   absl::flat_hash_set<hhds::Class_index>           dead_;         // mark_dead: pure nodes nothing live reads
   absl::flat_hash_set<hhds::Class_index>           latch_holds_;  // pin_latch_holds: Mux nodes that are a latch's own hold mux
   // precount_twins: node -> readers of its whole twin group (0 for a later twin)
   absl::flat_hash_map<hhds::Class_index, uint32_t> twin_readers_;
-  std::vector<uint8_t>      chain_inner_;          // per class: its one reader is a same-op, same-attrs cell (absorbs it)
   std::vector<Operand>      spec_ops_;             // check=full: the operands build() last saw (final classes)
   std::vector<Class_id>     best_;                 // per class: the non-union class that realizes it (once unions exist)
   std::vector<uint32_t>     cost_;                 // per class: the cost of its cheapest realization (compute_best, lazy)
@@ -1257,11 +1230,9 @@ bool Engine::is_pure_candidate(const hhds::Node_class& node) const {
 }
 
 void Engine::ensure(Class_id cls) {
+  Rewriter::ensure(cls);
   if (rep_pin_.size() <= cls) {
     rep_pin_.resize(cls + 1);
-    readers_.resize(cls + 1, 0);
-    rule_readers_.resize(cls + 1, 0);
-    chain_inner_.resize(cls + 1, 0);
   }
 }
 
@@ -1336,9 +1307,11 @@ void eval_view(Ntype_op op, std::span<const Operand> operands, const Egraph& eg,
 }
 }  // namespace
 
+}  // namespace
+
 // A rule-built e-node: fold, normalize, hash-cons and (up to rewrite_depth) run
 // the rules of its own root op. The attrs are the rewritten node's.
-Class_id Engine::make(Ntype_op op, std::span<const Operand> in) {
+Class_id Rewriter::make(Ntype_op op, std::span<const Operand> in) {
   I(op != Ntype_op::Hotmux, "rules do not build Hotmux");
   absl::InlinedVector<Operand, 8> operands(in.begin(), in.end());
   std::ranges::sort(operands);
@@ -1370,6 +1343,8 @@ Class_id Engine::make(Ntype_op op, std::span<const Operand> in) {
   }
   return rewrite(cls, depth_ + 1);
 }
+
+namespace {
 
 std::optional<Engine::Built> Engine::build(const hhds::Node_class& node) {
   const auto op = gu::type_op_of(node);
@@ -1530,8 +1505,31 @@ namespace {
   return false;
 }
 }  // namespace
+}  // namespace
 
-std::string Engine::describe(Class_id cls) const {
+Rewriter::Rewriter(const Options& options, std::string name) : opt_(options), name_(std::move(name)) {
+  auto& reg = rt::Registry::instance();
+  stats_.rule_counts.assign(reg.size() + 1, Rule_counters{});
+  enabled_.assign(reg.size() + 1, 0);
+  for (rt::Rule_id id = 1; id <= reg.size(); ++id) {
+    const auto& info = reg.rule(id);
+    const bool  only = opt_.rules_only.empty() || name_listed(opt_.rules_only, info.name, info.group);
+    enabled_[id]     = only && !name_listed(opt_.rules_disable, info.name, info.group);
+    rules_active_    = rules_active_ || enabled_[id] != 0;
+  }
+}
+
+Rewriter::~Rewriter() = default;
+
+void Rewriter::ensure(Class_id cls) {
+  if (readers_.size() <= cls) {
+    readers_.resize(cls + 1, 0);
+    rule_readers_.resize(cls + 1, 0);
+    chain_inner_.resize(cls + 1, 0);
+  }
+}
+
+std::string Rewriter::describe(Class_id cls) const {
   const auto& c = eg_.cls(cls);
   switch (c.kind) {
     case Egraph::Kind::leaf   : return std::format("c{}:leaf", cls);
@@ -1555,7 +1553,7 @@ std::string Engine::describe(Class_id cls) const {
   return {};
 }
 
-Class_id Engine::rewrite(Class_id cls, uint32_t depth) {
+Class_id Rewriter::rewrite(Class_id cls, uint32_t depth) {
   if (!rules_active_ || cutoff_ || eg_.cls(cls).kind != Egraph::Kind::node) {
     return cls;
   }
@@ -1694,7 +1692,7 @@ Class_id Engine::rewrite(Class_id cls, uint32_t depth) {
 
 // check=unions (and check=full for each rewrite): the two classes must agree on
 // 8 random assignments.
-void Engine::check_pair(Class_id a, Class_id b, rt::Rule_id rule) {
+void Rewriter::check_pair(Class_id a, Class_id b, rt::Rule_id rule) {
   constexpr size_t   kConeFuel        = 4096;
   // The check is a debug-build sanity net, and every union evaluates its whole cone: on a large flat netlist
   // (a 128-bit gate-level adder) that is quadratic and took minutes. A per-graph budget keeps the early unions
@@ -1739,6 +1737,8 @@ void Engine::check_pair(Class_id a, Class_id b, rt::Rule_id rule) {
     }
   }
 }
+
+namespace {
 
 // check=full: every original node, applied to its final operand classes, must
 // equal the class the extraction keeps for it (64 assignments, whole cones).
@@ -2635,16 +2635,7 @@ void Engine::resolve_false_cycles() {
 }
 
 Engine::Engine(hhds::Graph& graph, const Cycle_cutter& cut_cycles, const Options& options, std::string name)
-    : g_(graph), cut_cycles_(cut_cycles), opt_(options), name_(std::move(name)) {
-  auto& reg = rt::Registry::instance();
-  stats_.rule_counts.assign(reg.size() + 1, Rule_counters{});
-  enabled_.assign(reg.size() + 1, 0);
-  for (rt::Rule_id id = 1; id <= reg.size(); ++id) {
-    const auto& info = reg.rule(id);
-    const bool  only = opt_.rules_only.empty() || name_listed(opt_.rules_only, info.name, info.group);
-    enabled_[id]     = only && !name_listed(opt_.rules_disable, info.name, info.group);
-    rules_active_    = rules_active_ || enabled_[id] != 0;
-  }
+    : Rewriter(options, std::move(name)), g_(graph), cut_cycles_(cut_cycles) {
   profile_ = rt::find_cost_profile(profile_name(opt_.cost));
   I(profile_ != nullptr, "cost profile is not registered (is gen/cost_*.gen.cpp linked into pass_aegraph?)");
 }

@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TODO 2a-treeaeg — the aegraph rules on LNAST, then retire classic cprop</title>
+<link rel="stylesheet" href="../todo.css">
+</head>
+<body>
+<nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
+<main>
+<h1><strong class="item-id">2a-treeaeg</strong> The aegraph rules on LNAST (a upass step), then retire classic cprop</h1>
+
+<p><strong>Plan, 2026-11-14.</strong> Two parts, in this order (decided with the owner):
+(A) a fast tree version of <code>pass.aegraph</code> that runs as a upass step, so the
+algebra simplifies before <code>upass.tolg</code> builds the LGraph and less reaches
+lnast2lg and the graph engine; (B) delete the classic cprop engine, now that aegraph is
+the default.</p>
+
+<h2>A. Tree aegraph (upass step)</h2>
+
+<h3>Design</h3>
+<ul>
+<li><strong>One rule source.</strong> The rules (<code>pass/aegraph/rules/*.rules</code> and the
+  hand-written <code>AEG_NATIVE_RULE</code>s) are written against <code>rt::Ctx</code>, which reads the
+  <code>Egraph</code> and builds through the virtual <code>rt::Builder</code>. The tree step builds a small
+  e-graph per straight-line LNAST block (one member per class, no saturation) and runs the same
+  generated rule code; no second rulegen backend, and the rule fuzz/prove tests cover both IRs.</li>
+<li><strong>Shared core.</strong> <code>pass/aegraph/rewriter.hpp</code>: <code>Rewriter</code> (fold, hash-cons,
+  rule application; LGraph-free). The LGraph <code>Engine</code> derives from it; the tree front end
+  will too.</li>
+<li><strong>Op mapping</strong> (the one <code>upass/tolg</code> lowers with): <code>plus</code> → <code>Sum</code> bank a,
+  <code>minus</code> → <code>Sum</code> banks a/b, <code>mult</code>, <code>div</code>, <code>bit_and|log_and</code> → <code>And</code>,
+  <code>bit_or|log_or</code> → <code>Or</code>, <code>bit_xor</code>, <code>eq</code>, <code>lt</code>, <code>gt</code>, <code>shl</code>, <code>sra</code>,
+  <code>ne|le|ge</code> → negated <code>EQ|GT|LT</code>, <code>get_mask</code>, <code>set_mask</code>, <code>sext</code>. Only an
+  <em>untyped</em> <code>bit_not</code> is <code>Not</code> (−x−1); a typed <code>bit_not(dst,x,N)</code> is (2^N−1)−x
+  and stays an opaque leaf.</li>
+<li><strong>Rule subsets.</strong> <em>Pre-bitwidth</em>: <code>simplify</code> rules with no analysis guard
+  (35) or only structural facts (bool01, zero, nonzero, known_zero, distinct: 7). <em>Post-bitwidth</em>:
+  the range-guarded <code>simplify</code> rules (11: div_pow2, rem_pow2, div_shl_pow2, getmask_above,
+  concat_single_fits, concat_zero_top, lt/gt_always/never, sext_fits), reading the ranges upass
+  bitwidth already stamped on the operands. <code>alt</code>/<code>choice</code> rules (17) need extraction
+  with a cost model and stay graph-only: that is what makes the tree step fast.</li>
+<li><strong>Invariant #6</strong> (upass/README: only bitwidth derives ranges, nothing folds on
+  them): the post-bitwidth subset needs it amended. The owner approved running a range
+  subset; it ships behind its own upass label and the README changes in the same commit.</li>
+</ul>
+
+<h3>Constraints found in upass (survey 2026-11-14)</h3>
+<ul>
+<li>A uPass push hook only votes keep/drop and writes the symbol table; the runner copies the
+  SOURCE node (<code>emit_op_with_fold</code>). A rewrite must be a runner pre-dispatch step, like
+  <code>dispatch_bit_not</code> (scratch tree, <code>push_source</code>, re-dispatch to every pass).</li>
+<li>No def table: the step keeps its own <code>name → {op, operands, generation}</code> map, filled per
+  statement, cleared per iteration. Look through tmps (<code>%</code>-prefixed, <code>Lnast::is_tmp</code>),
+  constants and inputs only; a user <code>mut</code> rewritten since, or a write in an uncertain arm,
+  invalidates the entry.</li>
+<li>Limit rewrites to tmp destinations (scratch nodes skip stream-SSA LHS versioning).
+  <code>delay_assign</code> is a barrier; single sweep, no fixed point; regs/wires/io outputs stay.</li>
+</ul>
+
+<h3>Steps</h3>
+<ol>
+<li><strong>Rewriter split</strong> (in review): move <code>make</code>/<code>rewrite</code>/<code>check_pair</code> and the
+  rule state out of the LGraph engine; behavior unchanged, full regression green.</li>
+<li>Tree front end: block → e-graph import (operand classes from the def map; leaves for
+  everything else), the pre-bitwidth subset, write-back of a changed statement as a scratch
+  node through the runner seam. Unit tests on hand-built LNAST; Pyrope fixtures that show the
+  rewrite (e.g. <code>~~x</code>, <code>x*8</code>, <code>x&amp;~x</code>) and LEC against the plain compile.</li>
+<li>upass label (<code>upass.aeg</code>), order entry after constprop; measure lnast2lg node counts and
+  compile time on the prp corpus.</li>
+<li>Post-bitwidth range subset behind its own label; README invariant #6 amended.</li>
+</ol>
+
+<h2>B. Retire classic cprop</h2>
+<ul>
+<li>aegraph still calls cprop's <code>do_scalar</code> (scalar rewrites on combinational SCCs),
+  <code>do_post</code> (region passes) and the <code>cprop_value</code> facts bitwidth reads. Those move under
+  <code>pass/aegraph</code>; what goes: <code>do_trans</code>/<code>cse_pass</code>, <code>pass.cprop</code>, the classic
+  and aegraph+classic engines, <code>compile.cprop.engine</code>, <code>engine_slots</code>,
+  <code>formal.lec.preflight_engine</code> (owner: remove the knobs; a <code>--set</code> of one is a usage
+  error), the parity smoke and the engine sweep script.</li>
+<li>The preflight refusal (a new cell aegraph cannot stamp) no longer hands the graph to
+  classic: aegraph gets a small fast node removal (delete a node and its dead fanin chain).</li>
+</ul>
+</main>
+<footer>LiveHD TODO</footer>
+</body>
+</html>
