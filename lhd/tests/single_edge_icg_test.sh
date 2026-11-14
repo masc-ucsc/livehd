@@ -66,6 +66,21 @@ external_sim() {
     || fail "LHD_EXTERNAL_SIM is set but iverilog/vvp are not on PATH"
 }
 
+# `timeout SECS cmd...` where one exists: GNU coreutils' timeout, or Homebrew's
+# gtimeout on macOS, which ships neither. Without one the command runs
+# unbounded and Bazel's test timeout is the hang guard.
+bounded() {
+  local secs="$1"
+  shift
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$secs" "$@"
+  elif command -v gtimeout >/dev/null 2>&1; then
+    gtimeout "$secs" "$@"
+  else
+    "$@"
+  fi
+}
+
 # The design is VERILOG (slang reader): the hand-built enable latch reads the
 # clock level as data, which Pyrope's `Clock` type forbids (qa.md Appendix 6;
 # Pyrope's ICG is the Clock_cell `Clock(clock_pin=clk, enable=en)`).
@@ -475,7 +490,7 @@ endmodule
 EOF
   iverilog -g2012 -o "$W/ec.vvp" "$W/icg_ec.sv" "$W/ec_norm.v" "$W/ec_tb.v" >"$W/iv_ec.log" 2>&1 \
     || { tail -5 "$W/iv_ec.log"; fail "iverilog could not elaborate the CORE-ET-spelling pair"; }
-  out="$(timeout 120 vvp "$W/ec.vvp" 2>&1)"
+  out="$(bounded 120 vvp "$W/ec.vvp" 2>&1)"
   grep -qE "ICG_EC_OK|ICG_EC_FAIL|ICG_EC_VACUOUS" <<<"$out" \
     || { echo "$out" | head -8; fail "the CORE-ET-spelling differential did not run to a verdict"; }
   grep -q "ICG_EC_VACUOUS" <<<"$out" && { echo "$out" | head -4; fail "the CORE-ET-spelling differential observed too few cycles to mean anything"; }
@@ -619,7 +634,7 @@ endmodule
 EOF
   iverilog -g2012 -o "$W/dual.vvp" "$W/icg_dual.sv" "$W/dual_norm.v" "$W/dual_tb.v" >"$W/iv_dual.log" 2>&1 \
     || { tail -5 "$W/iv_dual.log"; fail "iverilog could not elaborate the dual-edge pair"; }
-  out="$(timeout 120 vvp "$W/dual.vvp" 2>&1)"
+  out="$(bounded 120 vvp "$W/dual.vvp" 2>&1)"
   grep -qE "DUAL_OK|DUAL_FAIL|DUAL_VACUOUS|DUAL_NO_HIGH_MOVES|DUAL_LOCAL_ONESIDED|DUAL_GATE_NEVER_READY|DUAL_PROLOGUE_BAD" <<<"$out" \
     || { echo "$out" | head -8; fail "the dual-edge differential did not run to a verdict"; }
   grep -qE "DUAL_VACUOUS|DUAL_NO_HIGH_MOVES|DUAL_LOCAL_ONESIDED|DUAL_GATE_NEVER_READY|DUAL_PROLOGUE_BAD" <<<"$out" \
@@ -641,7 +656,7 @@ EOF
     && fail "the held-vs-live negative did not apply ($hold -> $live)"
   iverilog -g2012 -o "$W/dual_live.vvp" "$W/icg_dual.sv" "$W/dual_live.v" "$W/dual_tb.v" >"$W/iv_dual_live.log" 2>&1 \
     || { tail -5 "$W/iv_dual_live.log"; fail "could not build the held-vs-live negative"; }
-  out="$(timeout 120 vvp "$W/dual_live.vvp" 2>&1)"
+  out="$(bounded 120 vvp "$W/dual_live.vvp" 2>&1)"
   grep -qE "DUAL_OK|DUAL_FAIL" <<<"$out" || { echo "$out" | head -6; fail "the held-vs-live negative did not run to a verdict"; }
   grep -q "DUAL_FAIL" <<<"$out" \
     || fail "reading the LIVE arm at the falling edge still matched the source -- the harness cannot see the sampling, so the agreement above is not evidence"

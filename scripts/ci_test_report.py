@@ -8,6 +8,7 @@ visible to anyone who can see the run. It also copies each failing test.log
 into --log-dir so the workflow can upload them as an artifact.
 
 Usage: ci_test_report.py BEP_JSON [--log-dir DIR] [--tail N] [--max-annotations N]
+Exits 0 once the report is written (1 only when the build-event file is missing).
 """
 
 import argparse
@@ -122,7 +123,8 @@ def main(argv=None):
                     out.write(f'\n<details><summary>{status} <code>{label}</code></summary>\n\n```\n'
                               f'{tail(logs[-1], args.tail)}\n```\n</details>\n')
     print(f'{len(lines)} failing, {len(flaky)} flaky', file=sys.stderr)
-    return 1 if lines else 0
+    # The regression step already failed the job; a second red step only adds noise.
+    return 0
 
 
 if __name__ == '__main__':
