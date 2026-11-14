@@ -6,6 +6,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <cctype>
 #include <charconv>
 #include <cmath>
 #include <cstdio>
@@ -48,6 +49,7 @@
 #include "lnast_sim.hpp"
 #include "log.hpp"
 #include "node_util.hpp"
+#include "width_validation.hpp"
 #include "pass.hpp"
 #include "pass/place/sdc_subset.hpp"
 #include "pass/timing/sdc.hpp"
@@ -506,6 +508,8 @@ void setup_diag(const Options& opts, std::string_view step) {
   sink.clear();
   sink.set_human_stderr(!opts.quiet);
   sink.set_stderr_jsonl(opts.diag_fmt == Diag_fmt::jsonl);
+  livehd::diag::set_debug(opts.debug);
+  livehd::diag::set_stats(opts.stats);
   const auto* d = find_slot(opts.emits, "diagnostics");
   sink.set_jsonl_path(d ? std::string_view{d->path} : std::string_view{"off"});
   sink.set_step(step);
@@ -753,6 +757,16 @@ void run_step(std::string_view method, Eprp_var& var, const Eprp_var::Eprp_dict&
     // it in the hint) has to happen with fd 1 already restored, and the
     // redirect only lifts when this scope ends.
     try {
+      // Reject unresolved compiled IR before codegen, mapping or proof. This
+      // also covers lg: inputs and cache restores which skip bitwidth.
+      if (mapper_of_method(method) || method == "pass.formal" || method == "pass.lec"
+          || method == "inou.cgen.verilog" || method == "inou.cgen.sim") {
+        for (const auto& graph : var.graphs) {
+          if (graph) {
+            livehd::graph_util::require_sized_design(*graph, method);
+          }
+        }
+      }
       if (const auto* mapper = mapper_of_method(method); mapper != nullptr && !mapper->report.empty()) {
         // A mapper with its own report archives its provenance: the lhd invocation record.
         auto contextual                  = labels;
@@ -887,6 +901,16 @@ livehd::timing::fast::Sdc sdc_alone(const std::string& path) {
   return livehd::timing::fast::read_sdc(text);
 }
 }  // namespace
+
+std::string synth_liberty_or_default(const Options& opts) {
+  auto lib = synth_set(opts, "liberty", "");
+  if (lib.empty()) {
+    if (const char* tech = std::getenv("LHD_TECH_DIR"); tech != nullptr && *tech != '\0') {
+      lib = (fs::path(tech) / std::string{kSynthDefaultLiberty}).string();
+    }
+  }
+  return lib;
+}
 
 livehd::placement::late::Sdc_units liberty_sdc_units(const std::string& liberty_path) {
   livehd::placement::late::Sdc_units units;
@@ -1054,6 +1078,11 @@ void merge_mapper_sets(const Options& opts, std::string_view method, Eprp_var::E
       const double f   = std::strtod(frac.c_str(), &end);
       if (end == frac.c_str() || *end != '\0' || !std::isfinite(f) || !(f > 0.0)) {
         throw Lhd_error{"usage", std::format("synth.delay_frac expects a positive number, got '{}'", frac), ""};
+      }
+      // The SDC time unit is the Liberty unit of the library the mapper reads: synth.liberty, else the
+      // $LHD_TECH_DIR default (an empty path silently meant ps: a 1 ns sky130 clock became 1 ps and `&nf -D 0.400`).
+      if (liberty.empty()) {
+        liberty = synth_liberty_or_default(opts);
       }
       const auto period = sdc.empty() ? std::nullopt : sdc_min_clock_period_ps(sdc, liberty);
       if (!period && explicit_fraction) {
@@ -1818,6 +1847,16 @@ void canonicalize_synth_sets(Options& opts) {
       continue;
     }
     const auto flag = std::string_view{key}.substr(6);
+    // `synth.place.seed` used to name the start-position TSV, which invited `=33` as an RNG seed. A bare
+    // number can only mean the seed, and there is one: the shared `lhd.seed` every pass reads.
+    if (flag == "place.seed" && !value.empty() && std::all_of(value.begin(), value.end(), [](unsigned char c) { return std::isdigit(c); })) {
+      opts.deprecated_sets.emplace_back("synth.place.seed is deprecated; it is not an RNG seed option",
+                                        std::format("use --set lhd.seed={} (the one seed shared by every pass); the start-position file is "
+                                                    "synth.place.start_map",
+                                                    value));
+      key = "lhd.seed";
+      continue;
+    }
     for (const auto& r : kSynthSetRenames) {
       if (r.old_name != flag) {
         continue;
@@ -2995,7 +3034,7 @@ std::vector<std::string> sim_into(Options& opts, Result& res, Eprp_var& var, con
                       std::format("the LNAST sim flow does not cover this run: {}", declined),
                       "unset LHD_SIM_LNAST (or set it to auto) to simulate with inou.cgen.sim"};
     }
-    livehd::diag::info("lhd.sim", "lnast-fallback", "progress")
+    livehd::diag::outcome("lhd.sim", "lnast-fallback", "progress")
         .msg("LNAST sim flow declined ({}); using inou.cgen.sim", declined)
         .emit();
   }

@@ -1924,7 +1924,7 @@ void sim_command(Options& opts, Result& res) {
     if (gen_rc != 0 && built_on_lnast && lnast_sim_may_fall_back()) {
       // The testbench asks for something the LNAST flow's interface does not publish (a register inside a
       // sub-instance, ...): build the design again on inou.cgen.sim, which does.
-      livehd::diag::info("lhd.sim", "lnast-fallback", "progress")
+      livehd::diag::outcome("lhd.sim", "lnast-fallback", "progress")
           .msg("LNAST sim flow cannot serve this testbench ({}); using inou.cgen.sim", err)
           .emit();
       std::error_code rm_ec;

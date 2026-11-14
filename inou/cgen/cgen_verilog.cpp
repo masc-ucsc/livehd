@@ -27,6 +27,7 @@
 #include "sim_program.hpp"
 #include "split_selfref.hpp"  // //graph — pure-comb hierarchy false-loop repair
 #include "str_tools.hpp"
+#include "width_validation.hpp"
 // pass.hpp pulls in the diag reporting surface (livehd::diag) and Pass::info.
 #include "pass.hpp"
 // hlop's Dlop is the Dlop representation; we deserialize node-level
@@ -4960,6 +4961,7 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
 }
 
 void Cgen_verilog::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
+  livehd::graph_util::require_sized_design(*graph, "inou.cgen.verilog");
   TRACE_EVENT("pass", nullptr, [&graph](perfetto::EventContext ctx) {
     std::string converted_str{(char)('A' + (trace_module_cnt++ % 25))};
     ctx.event()->set_name(absl::StrCat(converted_str, graph->get_name()));

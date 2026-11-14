@@ -31,6 +31,7 @@
 #include "liberty_dff.hpp"
 #include "memory_module.hpp"
 #include "node_util.hpp"
+#include "width_validation.hpp"
 #include "occurrence_materialize.hpp"
 #include "pass_liberty.hpp"
 #include "pass_partition.hpp"
@@ -842,6 +843,11 @@ void Pass_abc::work_with(Eprp_var& var, const std::function<void(livehd::abc::Ma
 }
 
 void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map_options&)>& configure) {
+  for (const auto& graph : var.graphs) {
+    if (graph) {
+      livehd::graph_util::require_sized_design(*graph, "pass.abc");
+    }
+  }
   livehd::debug::stage_memory("pass.abc", "entry");
   const auto unroll_carry_text = var.get("unroll_carry", "true");
   if (unroll_carry_text != "true" && unroll_carry_text != "false" && unroll_carry_text != "1" && unroll_carry_text != "0"
@@ -1341,7 +1347,7 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
     // and only now is it visible (the first sweep ran before the memories became modules).
     if (const auto swept = livehd::synth::sweep_unobserved_state(resolve_graphs, top, nullptr);
         swept && swept->registers_removed + swept->registers_trimmed + swept->registers_split + swept->cells_removed > 0) {
-      livehd::diag::info("pass.abc", "state-swept-memory", "progress")
+      livehd::diag::stat("pass.abc", "state-swept-memory", "progress")
           .msg(
               "pass.abc: state sweep of the lowered memories removed {} unobserved register(s) and {} cell(s), narrowed {} and "
               "split {} register(s), dropping {} unobserved register bit(s)",

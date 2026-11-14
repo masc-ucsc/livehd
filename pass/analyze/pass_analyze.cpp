@@ -66,7 +66,7 @@ void Pass_analyze::analyze(Eprp_var& var) {
       kinds += (kinds.empty() ? "" : ",");
       kinds += livehd::analyze::to_string(k);
     }
-    livehd::diag::info("pass.analyze", "analyze-loop", "progress")
+    livehd::diag::outcome("pass.analyze", "analyze-loop", "progress")
         .msg("`{}`: {} word-level cycle ({} of {} comb nodes), class {} — representative node `{}`{}", f.def,
              f.real ? "REAL" : "FALSE", f.n_on_cycle, f.n_comb, kinds, f.node,
              f.real ? " (an event-driven simulator would iterate this)"
@@ -82,7 +82,7 @@ void Pass_analyze::analyze(Eprp_var& var) {
         .emit();
   }
   for (const auto& f : rep.clocks) {
-    livehd::diag::info("pass.analyze", "analyze-clock", "progress")
+    livehd::diag::outcome("pass.analyze", "analyze-clock", "progress")
         .msg("`{}`: {} `{}` clock is {}{} (root `{}`, {} guard(s), chain depth {})", f.def, f.op, f.element,
              livehd::analyze::to_string(f.kind),
              livehd::analyze::sim_can_lower(f.kind) ? "" : " — inou.cgen.sim cannot lower this", f.root, f.n_guards,
@@ -98,7 +98,7 @@ void Pass_analyze::analyze(Eprp_var& var) {
         .emit();
   }
   for (const auto& f : rep.colors) {
-    livehd::diag::info("pass.analyze", "analyze-color", "progress")
+    livehd::diag::outcome("pass.analyze", "analyze-color", "progress")
         .msg("`{}`: Color_acyclic invariant `{}` broken — {} ({} partition(s) over {} node(s))", f.def,
              livehd::analyze::to_string(f.defect), f.detail, f.n_parts, f.n_nodes)
         .attr("def", f.def)
@@ -108,7 +108,7 @@ void Pass_analyze::analyze(Eprp_var& var) {
         .attr("nodes", std::to_string(f.n_nodes))
         .emit();
   }
-  livehd::diag::info("pass.analyze", "analyze-summary", "progress")
+  livehd::diag::outcome("pass.analyze", "analyze-summary", "progress")
       .msg("{} definition(s), {} state element(s): {} loop finding(s), {} clock finding(s), {} color finding(s)",
            rep.n_defs, rep.n_state_elements, rep.loops.size(), rep.clocks.size(), rep.colors.size())
       .attr("defs", std::to_string(rep.n_defs))

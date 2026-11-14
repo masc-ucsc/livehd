@@ -50,7 +50,9 @@ struct Scene {
   std::string                                  phase;  // "fp", "macro", "final", ...
   Box                                          die;    // the placement area (the core: the rows' hull), DBU
   Box                                          frame_die;  // the floorplan's die (the core plus its margin), DBU; zero: not known
-  double                                       cell_area = 0;  // DBU^2 of every movable node (the `area` command's utilization)
+  double                                       cell_area = 0;  // DBU^2 of every cell and macro body, fixed ones too (the `area` command's utilization)
+  double                                       macro_area = 0;  // DBU^2 the macros and memory proxies take WITH their macro-to-macro spacing: what packing needs
+  static constexpr double                      kMacroFillLimit = 0.70;  // the largest share of a core the macro footprints may take (first-fit packing)
   double                                       dbu_per_um = 1;
   std::vector<Node>                            nodes;  // solver node order
   std::vector<Box>                             regions;
@@ -245,6 +247,11 @@ public:
   // an earlier seed) start from it, so an edit survives them.
   void set_placement(std::map<std::string, std::array<std::int64_t, 3>>);
   std::map<std::string, std::array<std::int64_t, 3>> placement_override() const;
+  // Fixed macros (memory proxies packed as obstacles) the user dragged or aligned in the page: name -> lower-left (DBU).
+  // They cannot move inside a running solver, so the flow restarts and the placer starts them here (place.cpp, before the
+  // proxy packing). Read back from the action trace on every restart.
+  // The third number orders them: the larger, the more recent (the placer settles the newest first).
+  std::map<std::string, std::array<double, 3>> macro_moves() const;
   // What the user changed in edit mode (name, drop position), in order; later final passes re-apply it.
   void record_edits(const std::vector<std::pair<std::string, std::pair<double, double>>>&);
   std::vector<std::pair<std::string, std::pair<double, double>>> recorded_edits() const;
@@ -317,6 +324,9 @@ private:
   };
   std::string    parse_command(const std::string& json, Command&) const;
   void           replay_locked(int iteration, Edits&);
+  void           macro_restart_locked();
+  std::map<std::string, std::array<double, 3>> macro_moves_;  // name -> x, y (DBU), recency
+  double                                       macro_order_ = 0;
   void           service_timing(std::unique_lock<std::mutex>&, const Timing_provider*, bool running);
   std::string    node_details_locked(size_t index) const;
   void           set_selection_locked(std::vector<std::string> names);

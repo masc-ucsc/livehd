@@ -2,6 +2,7 @@
 #include "bitwidth_rewrite.hpp"
 
 #include "cprop_value.hpp"
+#include "diag.hpp"
 
 namespace {
 using namespace livehd::graph_util;
@@ -247,5 +248,25 @@ void Bitwidth_rewrite::run(hhds::Graph& graph, const std::function<int(const hhd
   }
   // Disjoint expression groups are considered once against the settled facts.
   vectorize_bit_reductions();
+  // There is no inference sweep after these constructors. Check modified and
+  // freshly allocated cells here, including allocator-recycled node ids, so
+  // a missing stamp is attributed to the producing stage. Callees can still
+  // be awaiting their own bitwidth pass; this check is definition-local.
+  for (auto node : graph.body().nodes()) {
+    if (!facts.generations.contains(node.get_class_index())) {
+      continue;
+    }
+    for (const auto driver : node.out_sorted_pins()) {
+      if (!driver.is_const() && bits_of(driver) <= 0) {
+        livehd::diag::err("pass.bitwidth", "graph-width-unresolved", "internal")
+            .msg("post-bitwidth rewrite left {} driver pin {} in definition '{}' without width/sign",
+                 debug_name(node),
+                 driver.get_port_id(),
+                 graph.get_name())
+            .hint("the rewrite must install width/sign before returning")
+            .fatal();
+      }
+    }
+  }
   current_graph = nullptr;
 }

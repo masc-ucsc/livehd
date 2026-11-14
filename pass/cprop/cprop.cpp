@@ -2981,6 +2981,14 @@ bool Cprop::try_broadcast_or(hhds::Node_class& node, Inp_pins& inp_edges_ordered
     livehd::graph_util::setup_sink_pid(mux, 1).connect_driver(create_const(*current_graph, *Dlop::create_integer(0)));
     livehd::graph_util::setup_sink_pid(mux, 2).connect_driver(create_const(*current_graph, *C));
     auto md = mux.create_driver_pin(0);
+    // This rewrite also runs after bitwidth convergence, with no inference
+    // walk left to size the new Mux. Its arms are exactly zero and C.
+    const int width = std::max(1, C->get_last_bit_set() + 1);
+    livehd::graph_util::set_ubits(md, width);
+    if (livehd::cprop_value::active) {
+      livehd::cprop_value::active->capacities.insert_or_assign(md.get_class_index(), width);
+    }
+    livehd::cprop_value::remember(mux);
     if (collapse_forward_for_pin(node, md)) {
       return true;
     }

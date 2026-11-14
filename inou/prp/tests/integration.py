@@ -80,7 +80,7 @@ def synth_one(lhd, top, ref, meta, base, tech):
         dest = base / tech / lib_name
         dest.mkdir(parents=True)
         lib = Path('inou/prp/tests/abc') / (lib_name + '.lib')
-        run([lhd, 'synth', 'lg:' + str(base / 'source'), '--top', top,
+        run([lhd, 'synth', '-d', 'pass.abc', 'lg:' + str(base / 'source'), '--top', top,
              '--set', 'synth.liberty=' + str(lib), '--set', 'synth.opentimer=false',
              '--set', 'lhd.jobs=1', '--set', 'synth.mapper=' + tech,
              *settings(meta.get('synth_set', '')),

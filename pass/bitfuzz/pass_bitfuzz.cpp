@@ -64,7 +64,7 @@ void Pass_bitfuzz::work(Eprp_var& var) {
     const auto st   = livehd::bitfuzz::strip_annotations(g, p.opts);
     const auto gio  = g->get_io();
     const auto name = gio ? std::string{gio->get_name()} : std::string{"<anon>"};
-    livehd::diag::info("pass.bitfuzz", "bitfuzz-summary", "progress")
+    livehd::diag::stat("pass.bitfuzz", "bitfuzz-summary", "progress")
         .msg("bitfuzz[{}] on `{}`: cleared {} pin(s) ({} state); recovery deferred to cprop/bitwidth",
              livehd::bitfuzz::mode_name(p.opts.mode),
              name,

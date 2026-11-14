@@ -88,7 +88,7 @@ compile_lg mempos
 
 # ---- (1): the pass fires and moves the memory to the fall slot ---------------
 rm -rf "$W/lg_norm"
-"$LHD" pass single_edge --top memneg "lg:$W/lg_memneg" --emit-dir "lg:$W/lg_norm" \
+"$LHD" pass single_edge -d pass.single_edge --top memneg "lg:$W/lg_memneg" --emit-dir "lg:$W/lg_norm" \
   --workdir "$W/pw" >"$W/pass.log" 2>&1 \
   || { tail -4 "$W/pass.log"; fail "pass single_edge refused a falling-edge memory"; }
 grep -q "P=2 slots" "$W/pass.log" || { grep -o "P=[0-9]* slots[^\"]*" "$W/pass.log" | head -1; fail "not a 2-slot time base"; }
@@ -130,7 +130,7 @@ pub mod memonly(d:U8, we:Bool, wa:U2, ra:U2) -> (rd:U8@[0]) {
 }
 EOF
 compile_lg memonly
-"$LHD" pass single_edge --top memonly "lg:$W/lg_memonly" --emit-dir "lg:$W/lg_memonly_norm" \
+"$LHD" pass single_edge -d pass.single_edge --top memonly "lg:$W/lg_memonly" --emit-dir "lg:$W/lg_memonly_norm" \
   --workdir "$W/pwo" >"$W/pass_only.log" 2>&1 \
   || { tail -4 "$W/pass_only.log"; fail "a design whose only state is a negedge memory was refused"; }
 grep -q "P=2 slots" "$W/pass_only.log" \

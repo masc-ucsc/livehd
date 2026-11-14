@@ -178,7 +178,7 @@ void Pass_aegraph::optimize(Eprp_var& var) {
       return;
     }
     if (options.cost == livehd::aegraph::Options::Cost::sim) {
-      livehd::diag::info("pass.aegraph", "aegraph-bit-lanes", "progress")
+      livehd::diag::stat("pass.aegraph", "aegraph-bit-lanes", "progress")
           .msg("aegraph-bit-lanes runs={} lanes={}", bit_lanes.first, bit_lanes.second)
           .attr("runs", std::to_string(bit_lanes.first))
           .attr("lanes", std::to_string(bit_lanes.second))
@@ -192,7 +192,7 @@ void Pass_aegraph::optimize(Eprp_var& var) {
         continue;
       }
       const auto& info = reg.rule(static_cast<livehd::aegraph::rt::Rule_id>(id));
-      livehd::diag::info("pass.aegraph", "aegraph-rule", "progress")
+      livehd::diag::stat("pass.aegraph", "aegraph-rule", "progress")
           .msg("aegraph-rule {} tried={} matched={} applied={} extracted={}", info.name, c.tried, c.matched, c.applied, c.extracted)
           .attr("rule", info.name)
           .attr("group", info.group)

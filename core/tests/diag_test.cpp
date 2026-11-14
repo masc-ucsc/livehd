@@ -237,6 +237,7 @@ TEST(diag, info_is_not_an_error) {
   s.set_human_stderr(false);
   // A progress/info record is below warning: it counts in its own bucket but
   // never flips has_errors() (so the exit code is unaffected).
+  livehd::diag::set_debug("pass.lec");  // info is a `-d` log: it exists only when its category is named
   livehd::diag::info("pass.lec", "lec-block-proven", "progress")
       .msg("lec block 'adder' pass")
       .verdict("pass")
@@ -251,6 +252,7 @@ TEST(diag, info_is_not_an_error) {
   EXPECT_EQ(s.records()[0].verdict, "pass");
   EXPECT_EQ(s.records()[0].engine, "ind");
   EXPECT_EQ(s.records()[0].duration_ms, 42);
+  livehd::diag::set_debug("");
   s.clear();
 }
 
@@ -333,4 +335,49 @@ TEST(diag, category_vocabulary_is_pinned) {
   EXPECT_FALSE(livehd::diag::is_known_category("missing_file"));  // folded into "io"
   EXPECT_FALSE(livehd::diag::is_known_category("attributes"));    // folded into "type"
   EXPECT_FALSE(livehd::diag::is_known_category("bitwdith"));      // typos must not pass
+}
+
+TEST(diag, log_levels_default_to_silent_and_follow_the_d_words) {
+  auto& s = livehd::diag::sink();
+  s.clear();
+  s.set_jsonl_path("off");
+  s.set_human_stderr(false);
+  livehd::diag::set_debug("");
+  livehd::diag::set_stats(false);
+  EXPECT_FALSE(livehd::diag::enabled("pass.abc"));
+  // No -d: info and stat build nothing and record nothing; outcome always does.
+  livehd::diag::info("pass.abc", "x", "progress").msg("detail {}", 1).attr("k", "v").emit();
+  livehd::diag::stat("pass.abc", "x", "progress").msg("summary {}", 1).emit();
+  EXPECT_EQ(s.records().size(), 0u);
+  livehd::diag::outcome("pass.abc", "x", "progress").msg("short").emit();
+  EXPECT_EQ(s.records().size(), 1u);
+  s.clear();
+
+  // --stats shows stat(), still not info().
+  livehd::diag::set_stats(true);
+  livehd::diag::info("pass.abc", "x", "progress").msg("detail").emit();
+  livehd::diag::stat("pass.abc", "x", "progress").msg("summary").emit();
+  ASSERT_EQ(s.records().size(), 1u);
+  EXPECT_EQ(s.records()[0].message, "summary");
+  livehd::diag::set_stats(false);
+  s.clear();
+
+  // A word matches whole dotted segments; several words and `all` work.
+  livehd::diag::set_debug("synth.place,semdiff");
+  EXPECT_TRUE(livehd::diag::enabled("synth.place"));
+  EXPECT_TRUE(livehd::diag::enabled("synth.place.legalize"));
+  EXPECT_TRUE(livehd::diag::enabled("pass.semdiff"));
+  EXPECT_FALSE(livehd::diag::enabled("synth"));
+  EXPECT_FALSE(livehd::diag::enabled("pass.place"));
+  EXPECT_FALSE(livehd::diag::enabled("synth.placement"));
+  EXPECT_FALSE(livehd::diag::enabled("pass.abc"));
+  livehd::diag::add_debug("abc");
+  EXPECT_TRUE(livehd::diag::enabled("pass.abc"));
+  livehd::diag::set_debug("all");
+  EXPECT_TRUE(livehd::diag::enabled("anything.at.all"));
+  livehd::diag::info("pass.abc", "x", "progress").msg("detail").emit();
+  EXPECT_EQ(s.records().size(), 1u);
+  livehd::diag::set_debug("");
+  EXPECT_FALSE(livehd::diag::enabled("pass.abc"));
+  s.clear();
 }

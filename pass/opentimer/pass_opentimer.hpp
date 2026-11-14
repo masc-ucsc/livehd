@@ -3,6 +3,7 @@
 
 #include <array>
 #include <cstdint>
+#include <cstdlib>
 #include <map>
 #include <memory>
 #include <set>
@@ -11,6 +12,7 @@
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
+#include "core/diag.hpp"
 #include "hhds/graph.hpp"
 #include "ot/timer/timer.hpp"
 #include "pass.hpp"
@@ -19,6 +21,18 @@
 #include "timing_feedback.hpp"
 #include "timing_whatif.hpp"
 #include "vcd_power.hpp"
+
+// OpenTimer's own logger writes `I ... celllib.cpp:38]` lines straight to stderr. Like every other log it is
+// a `-d pass.opentimer` category: silenced unless named, or unless OT_LOG_FILE already redirects it. Idempotent.
+inline bool route_opentimer_log() {
+  static const bool done = [] {
+    if (std::getenv("OT_LOG_FILE") == nullptr && !livehd::diag::enabled("pass.opentimer")) {
+      ot::logger.redir("/dev/null");
+    }
+    return true;
+  }();
+  return done;
+}
 
 class Pass_opentimer : public Pass {
 protected:
@@ -44,6 +58,8 @@ protected:
   // in this set, so the hier walk descends into them. Empty in flat mode.
   ankerl::unordered_dense::set<hhds::Gid> opaque_gids_;
 
+  // Declared before `timer`: the Timer constructor already logs (`using N timing worker(s)`).
+  bool                                                ot_log_routed_ = route_opentimer_log();
   ot::Timer                                           timer;
   livehd::timing::Feedback*                           feedback_                   = nullptr;
   size_t                                              physical_updated_nets_      = 0;

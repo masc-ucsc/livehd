@@ -62,7 +62,7 @@ VEOF
 
 ( cd "$W" && "$LHD" compile ms.sv --reader yosys-slang --top ms --set yosys.setundef=zero --emit-dir "lg:$W/lg" \
   --workdir "$W/cw" >"$W/c.log" 2>&1 ) || { tail -6 "$W/c.log"; fail "compile of ms.sv failed"; }
-"$LHD" pass single_edge --top ms "lg:$W/lg" --emit-dir "lg:$W/lg_n" --workdir "$W/pw" >"$W/p.log" 2>&1 \
+"$LHD" pass single_edge -d pass.single_edge --top ms "lg:$W/lg" --emit-dir "lg:$W/lg_n" --workdir "$W/pw" >"$W/p.log" 2>&1 \
   || { grep -o '"message":"[^"]*' "$W/p.log" | head -2; fail "pass single_edge refused ms.sv"; }
 "$LHD" compile "lg:$W/lg_n" --top ms --workdir "$W/lw" --emit-dir "lean:$W/lean" \
   --set formal.lean.mode=verified_compiler >"$W/lean.log" 2>&1 \

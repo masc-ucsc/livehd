@@ -3795,7 +3795,7 @@ TEST(Placement, ATrialInsideTheRunsOwnFrameKeepsTheDensityItWasPlacedWith) {
 }
 
 TEST(Placement, ASeedFileIsTheRestartSeedOfTheRun) {
-  // synth.place.seed (a forked region starts from its parent's placement): the positions are initial coordinates
+  // synth.place.start_map (a forked region starts from its parent's placement): the positions are initial coordinates
   // of the movable cells, applied as a restart seed is, so they are not replaced by the default start of an
   // unplaced cell or by the prototype placement of a fresh design. A name the netlist does not have is ignored.
   hhds::GraphLibrary source, placed, seeded;

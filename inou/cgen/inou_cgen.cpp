@@ -638,7 +638,7 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
       tune.fence = livehd::sim::kTuneNoFences;
       auto_plans.clear();  // measured under the dirty partition
     }
-    livehd::diag::info("inou.cgen.sim", "auto-dirty", "progress")
+    livehd::diag::stat("inou.cgen.sim", "auto-dirty", "progress")
         .msg("sim.tune.dirty=auto: {} GE, {} version site(s) per boundary slot in the dirty partition -> dirty {}{}",
              ge,
              ratio,

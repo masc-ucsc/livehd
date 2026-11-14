@@ -141,6 +141,52 @@ std::string to_jsonl(const Diagnostic& d, uint64_t seq);
 std::string to_text(const Diagnostic& d);
 std::string to_text(const Diagnostic& d, const hhds::Source_locator* sl);
 
+// ---------------------------------------------------------------------------
+// Log levels and the `-d` word filter.
+//
+// Default output is errors and warnings plus very short OUTCOME lines. Anything
+// chattier is opt-in and costs nothing when it is off:
+//
+//   outcome(...)  always shown: one short line about what the run decided or
+//                 produced (a fallback taken, a counterexample file written).
+//   stat(...)     a larger summary: shown with `--stats` (or a matching `-d`).
+//   info(...)     detailed log: shown ONLY when a `-d WORD` matches its pass.
+//
+// `-d WORD[,WORD...]` (repeatable) names categories. A category is the dotted
+// `pass` string every record already carries (`pass.abc`, `synth.place`,
+// `pass.semdiff`, `lhd.sim`). A WORD matches when it is the whole name or whole
+// dotted segments of it: `synth.place` matches `synth.place` and
+// `synth.place.legalize`; `abc` matches `pass.abc`; `all` or `*` matches
+// everything. Without any `-d` the filter is one relaxed atomic load.
+//
+// A call site that would do real work to build its record (a loop over rules,
+// a to_string per attribute) must guard it:
+//
+//     if (livehd::diag::enabled("pass.aegraph")) { ... info(...).msg(...).emit(); }
+//
+// A disabled Builder skips std::format and every append, but C++ still
+// evaluates the arguments at the call site, so only the guard avoids that.
+// ---------------------------------------------------------------------------
+void set_debug(std::string_view words);  // replaces the filter; "" turns every -d log off
+void add_debug(std::string_view words);  // appends (the CLI's repeatable -d)
+void set_stats(bool on);
+
+namespace detail {
+extern std::atomic<bool> g_debug_any;
+extern std::atomic<bool> g_stats;
+bool                     debug_match(std::string_view pass);
+}  // namespace detail
+
+[[nodiscard]] inline bool stats_enabled() { return detail::g_stats.load(std::memory_order_relaxed); }
+
+// True when a `-d` word matches `pass`. The no-`-d` fast path is one atomic load.
+[[nodiscard]] inline bool enabled(std::string_view pass) {
+  return detail::g_debug_any.load(std::memory_order_relaxed) && detail::debug_match(pass);
+}
+
+// True for a stat-level record: `--stats` or a matching `-d`.
+[[nodiscard]] inline bool stat_enabled(std::string_view pass) { return stats_enabled() || enabled(pass); }
+
 // Process-global diagnostic collector. Mirrors how `Pass::eprp` is a static
 // singleton reachable from every pass.
 class Sink {
@@ -289,7 +335,11 @@ private:
 //       .emit();
 class Builder {
 public:
-  Builder(Severity sev, std::string_view pass, std::string_view code, std::string_view category) {
+  // `on == false` makes a disabled builder: every chained call is a no-op and emit() drops it.
+  Builder(Severity sev, std::string_view pass, std::string_view code, std::string_view category, bool on = true) : on_(on) {
+    if (!on_) {
+      return;
+    }
     d_.severity = sev;
     d_.pass     = std::string(pass);
     d_.code     = std::string(code);
@@ -297,6 +347,9 @@ public:
   }
 
   Builder& at(Span span) {
+    if (!on_) {
+      return *this;
+    }
     d_.span = std::move(span);
     return *this;
   }
@@ -304,6 +357,9 @@ public:
   // Primary span + the combined id's related sites as notes, in one call
   // (`Source_locator::resolve_spans`).
   Builder& at(const hhds::Source_locator::Resolved_spans& rs, std::string_view note_msg = "related source") {
+    if (!on_) {
+      return *this;
+    }
     d_.span = rs.primary;
     for (const auto& r : rs.related) {
       d_.notes.push_back(Note{std::string(note_msg), r});
@@ -313,21 +369,33 @@ public:
 
   template <typename... Args>
   Builder& msg(std::format_string<Args...> format, Args&&... args) {
+    if (!on_) {
+      return *this;
+    }
     d_.message = std::format(format, std::forward<Args>(args)...);
     return *this;
   }
 
   Builder& hint(std::string_view h) {
+    if (!on_) {
+      return *this;
+    }
     d_.hint = std::string(h);
     return *this;
   }
 
   Builder& see(std::string_view s) {
+    if (!on_) {
+      return *this;
+    }
     d_.see.emplace_back(s);
     return *this;
   }
 
   Builder& note(std::string_view m, Span span = {}) {
+    if (!on_) {
+      return *this;
+    }
     d_.notes.push_back(Note{std::string(m), std::move(span)});
     return *this;
   }
@@ -336,29 +404,45 @@ public:
   // pass pipeline run to completion (see Diagnostic::deferred). Only meaningful
   // at error severity.
   Builder& deferred(bool on = true) {
+    if (!on_) {
+      return *this;
+    }
     d_.deferred = on;
     return *this;
   }
 
   // Structured-payload chains for an info/progress record (see Diagnostic).
   Builder& verdict(std::string_view v) {
+    if (!on_) {
+      return *this;
+    }
     d_.verdict = std::string(v);
     return *this;
   }
   Builder& engine(std::string_view e) {
+    if (!on_) {
+      return *this;
+    }
     d_.engine = std::string(e);
     return *this;
   }
   Builder& duration_ms(int64_t ms) {
+    if (!on_) {
+      return *this;
+    }
     d_.duration_ms = ms;
     return *this;
   }
   Builder& attr(std::string_view k, std::string_view v) {
+    if (!on_) {
+      return *this;
+    }
     d_.attrs.emplace_back(std::string(k), std::string(v));
     return *this;
   }
 
   Diagnostic build() { return std::move(d_); }
+  [[nodiscard]] bool active() const { return on_; }
 
   void              emit();
   [[noreturn]] void fatal();
@@ -366,6 +450,7 @@ public:
 
 private:
   Diagnostic d_;
+  bool       on_ = true;
 };
 
 inline Builder err(std::string_view pass, std::string_view code, std::string_view category) {
@@ -376,10 +461,22 @@ inline Builder warn(std::string_view pass, std::string_view code, std::string_vi
   return Builder(Severity::warning, pass, code, category);
 }
 
-// A standalone progress/info record (below warning: never an error, never an
-// exit-code change). Chain `.verdict()`/`.engine()`/`.duration_ms()`/`.attr()`
-// for the machine-parseable payload, then `.emit()`.
+// A standalone detail record (below warning: never an error, never an exit-code
+// change). Shown ONLY when a `-d` word matches `pass` (see the filter block above);
+// disabled otherwise, and then it builds nothing. Chain `.verdict()`/`.engine()`/
+// `.duration_ms()`/`.attr()` for the machine-parseable payload, then `.emit()`.
 inline Builder info(std::string_view pass, std::string_view code, std::string_view category) {
+  return Builder(Severity::info, pass, code, category, enabled(pass));
+}
+
+// A larger summary: shown with `--stats` or a matching `-d`.
+inline Builder stat(std::string_view pass, std::string_view code, std::string_view category) {
+  return Builder(Severity::info, pass, code, category, stat_enabled(pass));
+}
+
+// A very short outcome line, always shown (a fallback that was taken, a file
+// that was written). Not for per-item progress or counts: use stat()/info().
+inline Builder outcome(std::string_view pass, std::string_view code, std::string_view category) {
   return Builder(Severity::info, pass, code, category);
 }
 

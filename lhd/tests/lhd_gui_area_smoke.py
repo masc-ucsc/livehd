@@ -21,7 +21,7 @@ lib = Path('inou/lefdef/tests/data')
 command = ['lhd/lhd', 'synth', str(source), '--top', 'dut', '--set', f'synth.liberty={lib}/sky130hd.lib',
            '--set', f'synth.lef={lib}/sky130hd.tlef,{lib}/sky130hd.lef', '--set', f'synth.sdc={sdc}', '--set', 'synth.place=true',
            '--set', 'synth.place.iterations=120', '--set', 'synth.place.grid.density=8', '--set', 'synth.place.timing_driven=false',
-           '--set', 'synth.place.gui.poll=5', '--workdir', str(root / 'W'), '--gui', '--gui-no-open', '-q']
+           '--set', 'synth.place.gui.poll=5', '--workdir', str(root / 'W'), '--set', 'synth.place.gui.pause=true', '--gui', '--gui-no-open', '-q']
 log = open(root / 'err.log', 'w')
 proc = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=log)
 url = None
@@ -87,6 +87,7 @@ try:
             assert e.code == 400
 
     # Shrink the right edge by a quarter of the width: restart, the pin is replayed, the core is narrower.
+    die1_old_xh = die[2]  # DBU, before the shrink
     cut = w0 / 4
     assert post({'cmd': 'area', 'edge': 'right', 'delta': -cut})['ok']
     s = wait(lambda s: s['epoch'] != epoch and s['state'] == 'gate' and s['gate'] == 'final')
@@ -95,6 +96,22 @@ try:
     assert abs((design['die'][3] - design['die'][1]) / dbu - h0) < 0.01
     flags = {o['name']: o['value'] for o in get('/options')}
     assert flags['synth.place.core'] and flags['synth.place.die'], flags
+    # The IO pins ran again for the new frame: the restart re-places them, so none is left on the old (wider) right
+    # edge, and they all sit on the new die boundary.
+    import struct
+    frame = urllib.request.urlopen(f'{host}/frame?t={token}', timeout=20).read()
+    n = (len(frame) - 16) // 8
+    xs = struct.unpack(f'<{n}f', frame[16:16 + 4 * n])
+    ys = struct.unpack(f'<{n}f', frame[16 + 4 * n:16 + 8 * n])
+    fdie = [float(v) * dbu for v in flags['synth.place.die'].split(',')]
+    ios = [i for i, k in enumerate(design['kinds']) if k == '9']
+    assert ios, design['kinds']
+    for i in ios:
+        x, y = xs[i], ys[i]
+        assert fdie[0] - 1 <= x <= fdie[2] + 1 and fdie[1] - 1 <= y <= fdie[3] + 1, ('IO outside the new die', i, x, y, fdie)
+        edge = min(abs(x - fdie[0]), abs(x - fdie[2]), abs(y - fdie[1]), abs(y - fdie[3]))
+        assert edge <= 0.02 * dbu * max(w0, h0) + 2000, ('IO not on the new die boundary', i, x, y, fdie)
+    assert max(xs[i] for i in ios) < die1_old_xh, (max(xs[i] for i in ios), die1_old_xh)
     q = get(f'/query?name={name}')
     assert q['pinned'] and abs(q['x'] - cx) < 1, (q, cx)
     w1, die1 = width(design), design['die']

@@ -381,6 +381,7 @@ cc_test(
     deps = [
         ":lhd_lib",
         "//pass/common:pass",
+        "//graph",
         "@googletest//:gtest_main",
     ],
 )

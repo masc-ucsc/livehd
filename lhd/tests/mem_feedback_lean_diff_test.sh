@@ -155,7 +155,7 @@ emit() {  # <top> -> $T/<top>/{cert.lean,io.json}
   ( cd "$d" && "$LHD" compile verilog "$HERE/$top.v" --top "$top" --reader yosys-slang \
       --set yosys.setundef=zero --workdir w --emit-dir lg:lg ) > "$d/compile.log" 2>&1 \
     || { echo "FAIL: $top did not import"; tail -3 "$d/compile.log"; return 1; }
-  "$LHD" pass single_edge --top "$top" "lg:$d/lg" --emit-dir "lg:$d/lgn" \
+  "$LHD" pass single_edge -d pass.single_edge --top "$top" "lg:$d/lg" --emit-dir "lg:$d/lgn" \
     --set multi_clock=true --workdir "$d/se" > "$d/se.log" 2>&1 \
     || { echo "FAIL: $top: single_edge refused it"; return 1; }
   "$LHD" compile "lg:$d/lgn" --top "$top" --workdir "$d/lw" --emit-dir "lean:$d/lean" \

@@ -615,6 +615,11 @@ Options parse_args(int argc, char** argv) {
       opts.gui_trace = need_value(a, i, argc, argv);
     } else if (a == "--workdir") {
       opts.workdir = need_value(a, i, argc, argv);
+    } else if (a == "-d" || a == "--debug") {  // log categories, e.g. -d synth.place,pass.abc (see core/diag.hpp)
+      if (!opts.debug.empty()) {
+        opts.debug += ',';
+      }
+      opts.debug += std::string{need_value(a, i, argc, argv)};
     } else if (a == "-q" || a == "--quiet") {
       opts.quiet = true;
     } else if (a == "--verbose") {

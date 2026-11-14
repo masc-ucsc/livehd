@@ -120,7 +120,7 @@ public:
 };
 
 inline void emit(std::string_view pass, const Record& r) {
-  livehd::diag::info(pass, "cprop-summary", "progress")
+  livehd::diag::stat(pass, "cprop-summary", "progress")
       .msg("`{}`: {} -> {} nodes, {:.3f} ms, {} creates", r.graph, r.nodes_in, r.nodes_out, r.ms, r.creates)
       .attr("graph", r.graph)
       .attr("nodes_in", std::to_string(r.nodes_in))

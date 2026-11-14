@@ -31,7 +31,7 @@ base = ['lhd/lhd', 'synth', str(source), '--top', 'dut',
 
 work = root / 'W'
 log = open(root / 'err.log', 'w')
-proc = subprocess.Popen(base + ['--workdir', str(work), '--gui', '--gui-no-open', '--result-json', str(root / 'interactive.json')], stdout=subprocess.DEVNULL, stderr=log)
+proc = subprocess.Popen(base + ['--workdir', str(work), '--set', 'synth.place.gui.pause=true', '--gui', '--gui-no-open', '--result-json', str(root / 'interactive.json')], stdout=subprocess.DEVNULL, stderr=log)
 url = None
 for _ in range(400):
     time.sleep(0.05)

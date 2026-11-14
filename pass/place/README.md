@@ -2003,7 +2003,7 @@ selection tools. Design, rulings and open work: `todo/livehd/2i-interact.html`.
 
 - **Keys.** `z` zooms in and `Z` (shift+z) out around the pointer, the wheel too; `f` fits, `u` unpins the
   selection, space runs/pauses, `Esc` clears the selection.
-- **Pause and run.** The session starts paused at the first gate (before the first GP). *Run*
+- **Pause and run.** The session runs on its own; with `--set synth.place.gui.pause=true` it starts paused at the first gate (before the first GP). *Run*
   continues; *Pause* blocks at the next poll (`synth.place.gui.poll`, default 10 GP iterations).
   Stage switches ("stop before stage": `fp`, `macro`, `macro_legalize`, `final`, `legalize`) block the
   flow before that stage until the switch is cleared or *Run* is pressed. When the GP is about to stop
@@ -2047,7 +2047,7 @@ selection tools. Design, rulings and open work: `todo/livehd/2i-interact.html`.
   are real cells), as an lg: netlist `synth/place/forks/fork_<n>/net`, with a floorplan DEF (the box snapped to
   complete rows and sites, the parent's tracks) whose boundary pins are FIXED where the nets crossed the box: a net
   from or to a real top port keeps that port's name (so the SDC still applies), every other crossing net becomes
-  `cut_in_<k>` / `cut_out_<k>` at the nearest box edge point to its far side. `synth.place.seed=<tsv>` starts the
+  `cut_in_<k>` / `cut_out_<k>` at the nearest box edge point to its far side. `synth.place.start_map=<tsv>` starts the
   region's cells where they were: the file is the restart seed of the child's run (initial coordinates of its
   movable cells, nothing fixed), so global placement starts from those positions and not from the default start
   of unplaced cells or the prototype placement of a fresh design. A child `lhd synth --gui` then runs on them (same flags except the frame and the

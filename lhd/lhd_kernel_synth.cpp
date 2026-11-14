@@ -407,7 +407,7 @@ livehd::placement::Options placement_options(const Options& opts) {
   }
   check_inputs_exist(out.lefs);
   out.floorplan = synth_set(opts, "place.floorplan", "");
-  out.seed_file = synth_set(opts, "place.seed", "");
+  out.seed_file = synth_set(opts, "place.start_map", "");
   if (!out.seed_file.empty()) {
     check_inputs_exist({out.seed_file});
   }
@@ -1492,7 +1492,7 @@ std::string timing_target_json(const std::string& abc_qor, const std::string& st
   // choice lands on the same path, so trials rank on noise.
   const bool   unreachable = achieved > target * 1.25;
   if (unreachable) {
-    livehd::diag::info("synth", "synth-target-unreachable", "unsupported")
+    livehd::diag::outcome("synth", "synth-target-unreachable", "unsupported")
         .msg(
             "timing target {:.0f} ps ({}) is out of reach: achieved {:.0f} ps (+{:.0f} %); delay-driven choices "
             "are degenerate here -- relax the target or compare designs by delay instead",
@@ -1628,12 +1628,7 @@ std::string synth_set(const Options& opts, std::string_view flag, std::string_vi
 // of them can ever fall back to a different file. A missing library is a
 // directed missing_file error.
 std::string resolve_liberty(const Options& opts) {
-  std::string lib = synth_set(opts, "liberty", "");
-  if (lib.empty()) {
-    if (const char* tech = std::getenv("LHD_TECH_DIR"); tech != nullptr && *tech != '\0') {
-      lib = (fs::path(tech) / std::string{kSynthDefaultLiberty}).string();
-    }
-  }
+  std::string lib = synth_liberty_or_default(opts);
   if (lib.empty()) {
     throw Lhd_error{"missing_file",
                     "no Liberty cell library: neither --set synth.liberty nor $LHD_TECH_DIR is set",
@@ -1945,6 +1940,7 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
     gc.open_browser = !opts.gui_no_open;
     gc.poll         = std::max(1, std::min(20, std::atoi(synth_set(opts, "place.gui.poll", "10").c_str())));
     gc.min_iters    = std::max(1, std::atoi(synth_set(opts, "place.gui.min_iters", "20").c_str()));
+    gc.start_paused = truthy(synth_set(opts, "place.gui.pause", "false"));  // default: run untouched, the page just watches
     gc.history_every = std::max(1, std::atoi(synth_set(opts, "place.gui.history_every", "50").c_str()));
     gc.history_mb    = std::max(1, std::atoi(synth_set(opts, "place.gui.history_mb", "256").c_str()));
     gc.timing_budget = std::clamp(std::atoi(synth_set(opts, "place.gui.timing_budget", "10").c_str()), 0, 100);
@@ -1962,7 +1958,7 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
         livehd::placement::gui::Fork_launch out;
         const auto bare = [](std::string k) { return k.starts_with("synth.") ? k.substr(6) : k; };
         // What the child must not inherit: the frame (the region has its own), the parent's GUI session and output files.
-        static const std::set<std::string> own{"place.die", "place.core", "place.floorplan", "place.seed", "place.utilization",
+        static const std::set<std::string> own{"place.die", "place.core", "place.floorplan", "place.seed", "place.start_map", "place.utilization",
                                                 "place.aspect", "place.gui.replay", "place.gui.video", "place.gui.poll"};
         std::vector<std::string> args;
         args.push_back(opts.invocation_argv.empty() ? std::string{"lhd"} : opts.invocation_argv[0]);
@@ -1973,7 +1969,7 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
             args.push_back(key + "=" + value);
           }
         }
-        args.insert(args.end(), {"--set", "synth.place.floorplan=" + files.floorplan, "--set", "synth.place.seed=" + files.seed});
+        args.insert(args.end(), {"--set", "synth.place.floorplan=" + files.floorplan, "--set", "synth.place.start_map=" + files.seed});
         const auto log_path = req.dir + "/child.log";
         std::vector<char*> cargs;
         for (auto& a : args) {

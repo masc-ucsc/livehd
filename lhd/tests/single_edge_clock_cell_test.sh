@@ -89,7 +89,7 @@ run_design() { # <name> <expected folded gates>
   local t=$1 gates=$2
   "$LHD" compile "$W/$t.prp" --top "$t" --set compile.flatten=true --emit-dir "lg:$W/${t}_src" \
     --workdir "$W/${t}_cw" > "$W/${t}_compile.log" 2>&1 || { tail -5 "$W/${t}_compile.log"; fail "$t: compile"; }
-  "$LHD" pass single_edge --top "$t" "lg:$W/${t}_src" --emit-dir "lg:$W/${t}_norm" \
+  "$LHD" pass single_edge -d pass.single_edge --top "$t" "lg:$W/${t}_src" --emit-dir "lg:$W/${t}_norm" \
     --workdir "$W/${t}_pw" > "$W/${t}_pass.log" 2>&1 || { tail -4 "$W/${t}_pass.log"; fail "$t: pass single_edge refused"; }
   grep -q "P=1 slots" "$W/${t}_pass.log" || { grep -o '"message":"[^"]*' "$W/${t}_pass.log" | tail -1; fail "$t: the pass did not run"; }
   grep -q "$gates gated clock(s) folded" "$W/${t}_pass.log" \
@@ -110,7 +110,7 @@ run_design gmem 2
 run_design act 1
 
 # ---- the control: the option off restores the skip ----------------------------
-"$LHD" pass single_edge --top chain "lg:$W/chain_src" --emit-dir "lg:$W/chain_off" --set clock_cell_gates=false \
+"$LHD" pass single_edge -d pass.single_edge --top chain "lg:$W/chain_src" --emit-dir "lg:$W/chain_off" --set clock_cell_gates=false \
   --workdir "$W/chain_off_w" > "$W/chain_off.log" 2>&1 || fail "the option-off run failed"
 grep -q "single-edge-skipped" "$W/chain_off.log" || fail "with clock_cell_gates=false the pass still folded"
 echo "ok: --set clock_cell_gates=false skips the design, as before"

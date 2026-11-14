@@ -91,7 +91,7 @@ for m in wce wce_eq wce_bad wce_glitch wce_l1; do build "$m"; done
 
 normalize() { # <name> -> output on stdout, rc as the pass's
   rm -rf "$W/lg_$1_n"
-  "$LHD" pass single_edge --top "$TOP" "lg:$W/lg_$1" --emit-dir "lg:$W/lg_$1_n" --workdir "$W/pw_$1" 2>&1
+  "$LHD" pass single_edge -d pass.single_edge --top "$TOP" "lg:$W/lg_$1" --emit-dir "lg:$W/lg_$1_n" --workdir "$W/pw_$1" 2>&1
 }
 
 # ---- the gate is ACCEPTED, as a window-held gate, at P=2 ----------------------
@@ -119,7 +119,7 @@ echo "ok: by default a reader on the latch's own closing edge is refused (rule 4
 # FORWARDING (decision 3A): that reader alone reads `E ? D : Q`. The
 # differential below checks it against the source.
 rm -rf "$W/lg_wce_l1_n"
-out="$("$LHD" pass single_edge --top "$TOP" "lg:$W/lg_wce_l1" --emit-dir "lg:$W/lg_wce_l1_n" --workdir "$W/pw_wce_l1f" \
+out="$("$LHD" pass single_edge -d pass.single_edge --top "$TOP" "lg:$W/lg_wce_l1" --emit-dir "lg:$W/lg_wce_l1_n" --workdir "$W/pw_wce_l1f" \
         --set forward_same_edge=true 2>&1)"
 [ $? -eq 0 ] || { echo "$out" | grep -o '"message":"[^"]*' | head -2; fail "a flop on the latch's own closing edge was refused instead of forwarded"; }
 grep -q "same-edge reader input(s) forwarded" <<<"$out" \

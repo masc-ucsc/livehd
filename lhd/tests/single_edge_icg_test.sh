@@ -93,7 +93,7 @@ build bad  "$W/icg_bad.sv"
 
 # ---- the pattern is RECOGNIZED and rewritten into an enable -----------------
 rm -rf "$W/lg_norm"
-out="$("$LHD" pass single_edge --top icgf "lg:$W/lg_good" --emit-dir "lg:$W/lg_norm" \
+out="$("$LHD" pass single_edge -d pass.single_edge --top icgf "lg:$W/lg_good" --emit-dir "lg:$W/lg_norm" \
        --workdir "$W/pw" 2>&1)"
 [ $? -eq 0 ] || { echo "$out" | tail -5; fail "pass single_edge failed on a canonical ICG"; }
 grep -q "gated clock(s) folded into an enable" <<<"$out" \
@@ -267,7 +267,7 @@ cellbuild good "$W/cell.v"
 cellbuild bad  "$W/cell_bad.v"
 
 rm -rf "$W/lgc_norm"
-out="$("$LHD" pass single_edge --top dut "lg:$W/lgc_good" --emit-dir "lg:$W/lgc_norm" --workdir "$W/pwc" 2>&1)"
+out="$("$LHD" pass single_edge -d pass.single_edge --top dut "lg:$W/lgc_good" --emit-dir "lg:$W/lgc_norm" --workdir "$W/pwc" 2>&1)"
 [ $? -eq 0 ] || { echo "$out" | tail -5; fail "pass single_edge failed on an INSTANTIATED ICG cell"; }
 grep -q "inlined 1 clock-gate cell" <<<"$out" \
   || { echo "$out" | tail -5; fail "the instantiated clock-gate cell was not inlined, so its gate stayed invisible one module level away"; }
@@ -309,7 +309,7 @@ EOF
 rm -rf "$W/lgcd" "$W/lgcd_n"
 "$LHD" compile "$W/cd.v" --reader slang --top dut --emit-dir "lg:$W/lgcd" --workdir "$W/cwcd" \
   >"$W/ccd.log" 2>&1 || { tail -5 "$W/ccd.log"; fail "compile of the clk-and-data latch failed"; }
-out="$("$LHD" pass single_edge --top dut "lg:$W/lgcd" --emit-dir "lg:$W/lgcd_n" --workdir "$W/pwcd" 2>&1)"
+out="$("$LHD" pass single_edge -d pass.single_edge --top dut "lg:$W/lgcd" --emit-dir "lg:$W/lgcd_n" --workdir "$W/pwcd" 2>&1)"
 [ $? -eq 0 ] || { echo "$out" | tail -5; fail "pass single_edge failed on a clk-and-data gated latch"; }
 grep -q "gated clock(s) folded into an enable" <<<"$out" \
   || { echo "$out" | tail -5; fail "the clock half of a `clk && data` latch gate was not recognized, so the clock stays in the enable as data"; }
@@ -410,7 +410,7 @@ build_top ec_same "$W/icg_ec_same.sv" icgf
 
 # POSITIVE: the event-control / non-blocking / scan-OR spelling is recognized.
 rm -rf "$W/lg_ec_norm"
-out="$("$LHD" pass single_edge --top icgf "lg:$W/lg_ec" --emit-dir "lg:$W/lg_ec_norm" \
+out="$("$LHD" pass single_edge -d pass.single_edge --top icgf "lg:$W/lg_ec" --emit-dir "lg:$W/lg_ec_norm" \
        --workdir "$W/pw_ec" 2>&1)"
 rc=$?
 [ $rc -eq 0 ] \
@@ -486,7 +486,7 @@ fi
 
 # NEGATIVE, and it must fail for the RIGHT reason: a latch transparent on the
 # GATED phase passes an enable change through while the gated clock is high.
-out="$("$LHD" pass single_edge --top icgf "lg:$W/lg_ec_same" --emit-dir "lg:$W/lg_ec_same_norm" \
+out="$("$LHD" pass single_edge -d pass.single_edge --top icgf "lg:$W/lg_ec_same" --emit-dir "lg:$W/lg_ec_same_norm" \
        --workdir "$W/pw_ec_same" 2>&1)"
 rc=$?
 [ $rc -eq 0 ] \
@@ -526,7 +526,7 @@ module icgf(input clk, input reset, input en, input scan, input len, input [7:0]
 endmodule
 EOF
 build_top dual "$W/icg_dual.sv" icgf
-out="$("$LHD" pass single_edge --top icgf "lg:$W/lg_dual" --emit-dir "lg:$W/lg_dual_norm" \
+out="$("$LHD" pass single_edge -d pass.single_edge --top icgf "lg:$W/lg_dual" --emit-dir "lg:$W/lg_dual_norm" \
        --workdir "$W/pw_dual" 2>&1)"
 rc=$?
 [ $rc -eq 0 ] \
@@ -680,7 +680,7 @@ module icgf(input clk, input reset, input en0, input en1, input en2, input [7:0]
 endmodule
 EOF
 build_top share "$W/icg_share.sv" icgf
-out="$("$LHD" pass single_edge --top icgf "lg:$W/lg_share" --emit-dir "lg:$W/lg_share_norm" \
+out="$("$LHD" pass single_edge -d pass.single_edge --top icgf "lg:$W/lg_share" --emit-dir "lg:$W/lg_share_norm" \
        --workdir "$W/pw_share" 2>&1)"
 rc=$?
 [ $rc -eq 0 ] || { echo "$out" | tail -6; fail "two gates with three falling consumers were refused (rc=$rc)"; }
@@ -727,7 +727,7 @@ module memg(input clk, input en, input scan, input [2:0] addr,
 endmodule
 EOF
 build_top mg "$W/memgate.sv" memg
-"$LHD" pass single_edge --top memg "lg:$W/lg_mg" --emit-dir "lg:$W/lg_mg_norm" \
+"$LHD" pass single_edge -d pass.single_edge --top memg "lg:$W/lg_mg" --emit-dir "lg:$W/lg_mg_norm" \
   --workdir "$W/pw_mg" >"$W/p_mg.log" 2>&1 \
   || { tail -6 "$W/p_mg.log"; fail "a memory with a GATED write clock was refused"; }
 grep -q "1 memory(ies) slotted" "$W/p_mg.log" \
@@ -799,7 +799,7 @@ nestbuild() { # <name> <src> <top>
 }
 nestbuild good "$W/nest.v" nest
 rm -rf "$W/lgn_norm"
-out="$("$LHD" pass single_edge --top nest "lg:$W/lgn_good" --emit-dir "lg:$W/lgn_norm" --workdir "$W/pwn" 2>&1)"
+out="$("$LHD" pass single_edge -d pass.single_edge --top nest "lg:$W/lgn_good" --emit-dir "lg:$W/lgn_norm" --workdir "$W/pwn" 2>&1)"
 [ $? -eq 0 ] || { echo "$out" | tail -3; fail "a flop behind a gate of a gated clock was refused"; }
 grep -q "clock nets" <<<"$out" && { echo "$out" | tail -3; fail "the nested gate was counted as a second clock"; }
 grep -q "gated clock(s) folded into an enable" <<<"$out" && grep -q "P=1 slots" <<<"$out" \
@@ -841,7 +841,7 @@ EOF
 for neg in nest_glitch nest_mutual; do
   nestbuild "$neg" "$W/$neg.v" "$neg"
   rm -rf "$W/lgn_${neg}_n"
-  out="$("$LHD" pass single_edge --top "$neg" "lg:$W/lgn_$neg" --emit-dir "lg:$W/lgn_${neg}_n" --workdir "$W/pwn_$neg" 2>&1)"
+  out="$("$LHD" pass single_edge -d pass.single_edge --top "$neg" "lg:$W/lgn_$neg" --emit-dir "lg:$W/lgn_${neg}_n" --workdir "$W/pwn_$neg" 2>&1)"
   [ $? -eq 0 ] && { echo "$out" | tail -3; fail "$neg was ACCEPTED: the nested-gate rule must not lean on an enable that is not itself a steady opposite-phase latch"; }
   grep -q "clock-gate-latch-phase" <<<"$out" \
     || { echo "$out" | tail -3; fail "$neg was refused, but not as clock-gate-latch-phase"; }

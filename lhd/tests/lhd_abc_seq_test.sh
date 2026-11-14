@@ -197,7 +197,7 @@ run_abc_lec() {
   prepare_fixture "$prp" "$top" "$fix" cones
   cp -R "$W/base_$fix/lg" "$d/lg"
   ABCDIAG="$d/diag.jsonl"
-  run pass "$MAPPER" --top "$top" lg:"$d/lg" --emit-dir lg:"$d/net" --emit-dir verilog:"$d/netv" \
+  run pass "$MAPPER" -d pass.abc,pass.usyn --top "$top" lg:"$d/lg" --emit-dir lg:"$d/net" --emit-dir verilog:"$d/netv" \
       --set synth.liberty="$LIB" \
       ${regset[@]+"${regset[@]}"} ${regmaxset[@]+"${regmaxset[@]}"} \
       ${memset[@]+"${memset[@]}"} "$@" --emit diagnostics:"$ABCDIAG" --workdir "$d/w3"

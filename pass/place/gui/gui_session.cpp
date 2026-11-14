@@ -11,6 +11,7 @@
 #include <fstream>
 #include <optional>
 #include <random>
+#include <string_view>
 
 #include "gui_render.hpp"
 #include "rapidjson/document.h"
@@ -84,6 +85,16 @@ Session::Session(Config c) : cfg_(std::move(c)) {
       if (d.HasParseError() || !d.IsObject() || !d["cmd"].IsString()) {
         continue;
       }
+      if (std::string_view{d["cmd"].GetString()} == "macro_move") {
+        // A fixed macro put somewhere by the user stays there for the whole flow, whatever checkpoint is resumed.
+        Command m;
+        if (parse_command(line, m).empty()) {
+          for (size_t i = 0; i < m.nodes.size(); ++i) {
+            macro_moves_[m.nodes[i]] = {m.x[i], m.y[i], ++macro_order_};  // file order is move order
+          }
+        }
+        continue;
+      }
       if (d.HasMember("seq") && d["seq"].IsUint64() && d["seq"].GetUint64() > cfg_.replay_limit_seq) {
         continue;  // after the checkpoint being resumed: not part of this run
       }
@@ -104,6 +115,15 @@ Session::Session(Config c) : cfg_(std::move(c)) {
   }
   if (!cfg_.trace_path.empty()) {
     trace_.open(cfg_.trace_path, std::ios::trunc);
+    // The new trace keeps the macro moves this run started from, so the next restart finds them too.
+    std::vector<std::pair<std::string, std::array<double, 3>>> by_age(macro_moves_.begin(), macro_moves_.end());
+    std::sort(by_age.begin(), by_age.end(), [](const auto& a, const auto& b) { return a.second[2] < b.second[2]; });
+    for (const auto& [name, p] : by_age) {  // oldest first, so the next parse reads the same order
+      trace_ << std::format(R"({{"seq":{},"phase":"fp","iter":0,"cmd":"macro_move","nodes":["{}"],"x":[{}],"y":[{}]}})", ++seq_, esc(name),
+                            num(p[0]), num(p[1]))
+             << "\n";
+    }
+    trace_.flush();
   }
 }
 
@@ -529,13 +549,13 @@ void Session::trace_locked(const Command& c) {
     return;  // intermediate drag positions and view toggles are not part of the trace
   }
   std::string line = std::format(R"({{"seq":{},"phase":"{}","iter":{},"cmd":"{}")", ++seq_, esc(stage_name_), iteration_, esc(c.cmd));
-  if (c.cmd == "move" || c.cmd == "unpin") {
+  if (c.cmd == "move" || c.cmd == "unpin" || c.cmd == "macro_move") {
     line += R"(,"nodes":[)";
     for (size_t i = 0; i < c.nodes.size(); ++i) {
       line += std::format("{}\"{}\"", i ? "," : "", esc(c.nodes[i]));
     }
     line += "]";
-    if (c.cmd == "move") {
+    if (c.cmd == "move" || c.cmd == "macro_move") {
       line += R"(,"x":[)";
       for (size_t i = 0; i < c.x.size(); ++i) {
         line += (i ? "," : "") + num(c.x[i]);
@@ -617,6 +637,11 @@ void Session::area_locked(const Command& c) {
       return;
     }
   }
+  if (sc.macro_area > 0 && sc.macro_area / (w * h) > Scene::kMacroFillLimit) {
+    note_ = std::format("area: the macros and memories need {:.0f}% of the new core {:.1f} x {:.1f} um with their spacing; they cannot be packed above {:.0f}%",
+                        100 * sc.macro_area / (w * h), w / dbu, h / dbu, 100 * Scene::kMacroFillLimit);
+    return;
+  }
   for (const auto& [name, pin] : pins_) {
     const auto found = sc.index.find(name);
     if (found == sc.index.end()) {
@@ -658,6 +683,36 @@ void Session::area_locked(const Command& c) {
   if (!why.empty()) {
     note_ = "area: " + why;
   }
+}
+
+// A fixed macro was moved: re-run the flow to the latest checkpoint (where the user is) with the macro where it was put.
+void Session::macro_restart_locked() {
+  if (!cfg_.restart) {
+    note_ = "macro move: restart is not available in this session";
+    return;
+  }
+  if (checkpoints_.empty()) {
+    note_ = "macro move: wait for the first gate, then move the macro again";
+    return;
+  }
+  Restart_request r;
+  const auto&     cp = checkpoints_.back();
+  r.label            = cp.label;
+  r.nth              = cp.nth;
+  r.seq              = gate_name_ == cp.label ? seq_ : cp.seq;
+  note_              = "macro moved: re-running the flow with it there";
+  if (trace_.is_open()) {
+    trace_.flush();
+  }
+  const auto why = cfg_.restart(r);  // normally re-executes the process and does not return
+  if (!why.empty()) {
+    note_ = "macro move: " + why;
+  }
+}
+
+std::map<std::string, std::array<double, 3>> Session::macro_moves() const {
+  std::lock_guard lk(m_);
+  return macro_moves_;
 }
 
 void Session::set_fork_builder(Fork_builder b) {
@@ -769,7 +824,7 @@ bool shift_trace(const std::string& path, double dx, double dy) {
         d[key].SetDouble(d[key].GetDouble() + by);
       }
     };
-    if (cmd == "move" || cmd == "centroid") {
+    if (cmd == "move" || cmd == "centroid" || cmd == "macro_move") {
       rewrite("x", dx);
       rewrite("y", dy);
       rapidjson::StringBuffer                    buf;
@@ -902,6 +957,31 @@ void Session::apply_locked(const Command& c, Edits&) {
     push_frame_locked(std::move(next));
     if (c.final_) {
       timing_wanted_ = true;  // show what a released edit did to the timing
+    }
+  } else if (c.cmd == "macro_move") {
+    // A FIXED macro cannot move inside a running solver: remember where it goes and re-run the flow with it there.
+    auto next = frame_ ? std::make_shared<Frame>(*frame_) : std::make_shared<Frame>();
+    bool any  = false;
+    for (size_t i = 0; scene_ && i < c.nodes.size() && i < c.x.size() && i < c.y.size(); ++i) {
+      const auto found = scene_->index.find(c.nodes[i]);
+      if (found == scene_->index.end()) {
+        continue;
+      }
+      const auto& n = scene_->nodes[size_t(found->second)];
+      if (n.movable || n.kind != Kind::fixed) {
+        continue;
+      }
+      macro_moves_[c.nodes[i]] = {c.x[i], c.y[i], ++macro_order_};
+      if (size_t(found->second) < next->x.size()) {
+        next->x[size_t(found->second)] = float(c.x[i]);
+        next->y[size_t(found->second)] = float(c.y[i]);
+      }
+      any = true;
+    }
+    if (any) {
+      next->id = ++frame_id_;
+      push_frame_locked(std::move(next));
+      macro_restart_locked();
     }
   } else if (c.cmd == "unpin") {
     for (const auto& name : c.nodes) {
@@ -1375,7 +1455,7 @@ std::string Session::design_json(int cp, int tl) const {
     return R"({"scene":0,"n":0})";
   }
   const auto& s = *sc;
-  out += std::format(R"({{"scene":{},"phase":"{}","dbu":{},"die":[{},{},{},{}],"cell_area":{},"n":{},"kinds":")",
+  out += std::format(R"({{"scene":{},"phase":"{}","dbu":{},"die":[{},{},{},{}],"cell_area":{},"macro_area":{},"macro_limit":{},"n":{},"kinds":")",
                      tl >= 0 ? timeline_[size_t(tl)].scene_id : cp >= 0 ? 0 : scene_version_,
                      esc(s.phase),
                      num(s.dbu_per_um),
@@ -1384,6 +1464,8 @@ std::string Session::design_json(int cp, int tl) const {
                      num(s.die.xh),
                      num(s.die.yh),
                      num(s.cell_area),
+                     num(s.macro_area),
+                     num(Scene::kMacroFillLimit),
                      s.nodes.size());
   for (const auto& n : s.nodes) {
     out += char('0' + int(n.kind) + (n.movable ? 0 : 5));
@@ -1720,7 +1802,7 @@ std::string Session::parse_command(const std::string& json, Command& c) const {
     return "bad command json";
   }
   c.cmd = d["cmd"].GetString();
-  static const std::set<std::string> known{"restart", "map", "centroid", "centroid_release", "run", "continue", "pause", "stage", "move", "unpin", "finish", "screenshot", "timing", "area", "fork", "regions"};
+  static const std::set<std::string> known{"restart", "map", "centroid", "centroid_release", "run", "continue", "pause", "stage", "move", "macro_move", "unpin", "finish", "screenshot", "timing", "area", "fork", "regions"};
   if (!known.contains(c.cmd)) {
     return "unknown command: " + c.cmd;
   }
@@ -1748,7 +1830,7 @@ std::string Session::parse_command(const std::string& json, Command& c) const {
     }
     return true;
   };
-  if (c.cmd == "move") {
+  if (c.cmd == "move" || c.cmd == "macro_move") {
     if (!strings("nodes", c.nodes) || !numbers("x", c.x) || !numbers("y", c.y) || c.x.size() != c.nodes.size()
         || c.y.size() != c.nodes.size()) {
       return "move needs nodes[], x[], y[] of equal length";

@@ -82,7 +82,7 @@ map_design() {
   "$LHD" compile "$src" --reader slang --top "$top" --emit-dir lg:"$d/lg" --workdir "$d/w1" \
       -q --result-json "$r" ${gargs[@]+"${gargs[@]}"} || fail "compile $src $gparam -> $(cat "$r" 2>/dev/null)"
   run pass color synth --top "$top.$top" lg:"$d/lg" --workdir "$d/w2"
-  run pass abc --top "$top.$top" lg:"$d/lg" --emit-dir lg:"$d/net" --set synth.liberty="$LIB" \
+  run pass abc -d pass.abc --top "$top.$top" lg:"$d/lg" --emit-dir lg:"$d/net" --set synth.liberty="$LIB" \
       --emit diagnostics:"$d/diag.jsonl" --workdir "$d/w3" "$@"
   cp "$r" "$d/abc.json"
   run compile lg:"$d/net" --top "$top.$top" --emit-dir verilog:"$d/netv" --workdir "$d/w6"

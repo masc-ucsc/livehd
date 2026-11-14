@@ -120,7 +120,7 @@ echo "ok: pass.single_edge is absent from the lhd compile recipe"
 
 # ---- 3a: SKIPPED on a clean design, and that is falsifiable ------------------
 rm -rf "$W/lg_plain_out"
-out="$("$LHD" pass single_edge --top plain8 "lg:$W/lg_plain" --emit-dir "lg:$W/lg_plain_out" \
+out="$("$LHD" pass single_edge -d pass.single_edge --top plain8 "lg:$W/lg_plain" --emit-dir "lg:$W/lg_plain_out" \
        --workdir "$W/pw_plain" 2>&1)"
 [ $? -eq 0 ] || { echo "$out" | tail -5; fail "pass single_edge failed on a plain posedge design"; }
 grep -q "single-edge-skipped" <<<"$out" \
@@ -141,7 +141,7 @@ echo "ok: skipped really means untouched (byte-identical Verilog emission)"
 # ---- the positive half: it DOES fire where it must --------------------------
 # Without this, 'skipped' above could be a pass that never does anything.
 rm -rf "$W/lg_lat_out"
-out="$("$LHD" pass single_edge --top lat8 "lg:$W/lg_lat" --emit-dir "lg:$W/lg_lat_out" \
+out="$("$LHD" pass single_edge -d pass.single_edge --top lat8 "lg:$W/lg_lat" --emit-dir "lg:$W/lg_lat_out" \
        --workdir "$W/pw_lat" 2>&1)"
 [ $? -eq 0 ] || { echo "$out" | tail -5; fail "pass single_edge failed on a latch design"; }
 grep -q "single-edge-applied" <<<"$out" \
@@ -156,7 +156,7 @@ grep -rq "posedge" "$W/v_lat_out" \
 echo "ok: the normalized graph holds a posedge flop, not a latch"
 
 rm -rf "$W/lg_neg_out"
-out="$("$LHD" pass single_edge --top neg8 "lg:$W/lg_neg" --emit-dir "lg:$W/lg_neg_out" \
+out="$("$LHD" pass single_edge -d pass.single_edge --top neg8 "lg:$W/lg_neg" --emit-dir "lg:$W/lg_neg_out" \
        --workdir "$W/pw_neg" 2>&1)"
 [ $? -eq 0 ] || { echo "$out" | tail -5; fail "pass single_edge failed on a negedge design"; }
 grep -q "single-edge-applied" <<<"$out" \
@@ -192,7 +192,7 @@ rm -rf "$W/lg_l1"
 "$LHD" compile "$W/l1.sv" --reader slang --top l1 --emit-dir "lg:$W/lg_l1" --workdir "$W/cw_l1" >"$W/c_l1.log" 2>&1 \
   || { tail -5 "$W/c_l1.log"; fail "compile of l1.sv failed"; }
 rm -rf "$W/lg_l1_out"
-out="$("$LHD" pass single_edge --top l1 "lg:$W/lg_l1" --emit-dir "lg:$W/lg_l1_out" \
+out="$("$LHD" pass single_edge -d pass.single_edge --top l1 "lg:$W/lg_l1" --emit-dir "lg:$W/lg_l1_out" \
        --workdir "$W/pw_l1" 2>&1)"
 [ $? -eq 0 ] && { echo "$out" | tail -5; fail "a transparent-low latch feeding a POSEDGE flop on the same clock was accepted: the two commit at the same edge, so the model gives the flop the latch's PREVIOUS value — a persistent full-cycle error"; }
 grep -q "coincident-commit-edge" <<<"$out" \
@@ -217,7 +217,7 @@ pub mod mix8(clk:Clock, en:Bool, d:U8) -> (q:U8@[1]) {
 EOF
 compile_lg mix mix8
 rm -rf "$W/lg_mix_out"
-out="$("$LHD" pass single_edge --top mix8 "lg:$W/lg_mix" --emit-dir "lg:$W/lg_mix_out" \
+out="$("$LHD" pass single_edge -d pass.single_edge --top mix8 "lg:$W/lg_mix" --emit-dir "lg:$W/lg_mix_out" \
        --workdir "$W/pw_mix" 2>&1)"
 [ $? -eq 0 ] \
   || { echo "$out" | tail -5; fail "a DATA-gated latch feeding a flop was refused: rule 4 is keyed on the slot instead of the commit class, and it just rejected the latch_mixed_flop shape"; }
@@ -242,7 +242,7 @@ pub mod twoclk(clk:Clock, clkb:Clock, d:U8) -> (qa:U8@[1], qb:U8@[2]) {
 EOF
 compile_lg twoclk twoclk
 rm -rf "$W/lg_twoclk_out"
-out="$("$LHD" pass single_edge --top twoclk "lg:$W/lg_twoclk" --emit-dir "lg:$W/lg_twoclk_out" \
+out="$("$LHD" pass single_edge -d pass.single_edge --top twoclk "lg:$W/lg_twoclk" --emit-dir "lg:$W/lg_twoclk_out" \
        --workdir "$W/pw_twoclk" 2>&1)"
 [ $? -eq 0 ] || { echo "$out" | tail -5; fail "a two-clock design with no latch and no negedge state was REFUSED instead of skipped — that degrades the correct two-clock-vs-one-clock REFUTED into an unsupported exit"; }
 grep -q "single-edge-applied" <<<"$out" \
@@ -267,7 +267,7 @@ pub mod tcl(clk:Clock, clkb:Clock, en:Bool, d:U8) -> (qa:U8@[1], ql:U8@[0]) {
 EOF
 compile_lg twoclk_lat tcl
 rm -rf "$W/lg_tcl_out"
-out="$("$LHD" pass single_edge --top tcl "lg:$W/lg_twoclk_lat" --emit-dir "lg:$W/lg_tcl_out" \
+out="$("$LHD" pass single_edge -d pass.single_edge --top tcl "lg:$W/lg_twoclk_lat" --emit-dir "lg:$W/lg_tcl_out" \
        --workdir "$W/pw_tcl" 2>&1)"
 [ $? -eq 0 ] && { echo "$out" | tail -5; fail "a two-clock design HOLDING A LATCH was skipped: the encoder refuses the Latch cell, so skipping leaves a design nothing can decide"; }
 grep -q "multi-clock-no-ratio" <<<"$out" \

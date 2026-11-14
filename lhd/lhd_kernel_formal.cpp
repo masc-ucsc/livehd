@@ -39,6 +39,7 @@
 #include "lib_cell_prep.hpp"
 #include "lnast.hpp"
 #include "node_util.hpp"
+#include "width_validation.hpp"
 #include "occurrence_materialize.hpp"
 #include "pass.hpp"
 #include "pass_aegraph.hpp"
@@ -5022,7 +5023,7 @@ static void emit_witness_json(const std::string& path, std::string_view kind, st
 void emit_lecfail_witness(Options& opts, Result& res, const livehd::lec::Query_result& r, const std::string& impl_top_full,
                           const std::string& ref_top_full, const std::string& simfail, bool run_sim) {
   auto skip = [&](std::string_view why) {
-    livehd::diag::info("pass.lec", "simfail-skip", "io").msg("formal.simfail testbench not generated: {}", why).emit();
+    livehd::diag::outcome("pass.lec", "simfail-skip", "io").msg("formal.simfail testbench not generated: {}", why).emit();
   };
   if (r.trace.empty()) {
     skip("the verdict carries no reproducible input trace (inductive single-step CEX, or witnesses disabled)");
@@ -5051,7 +5052,7 @@ void emit_lecfail_witness(Options& opts, Result& res, const livehd::lec::Query_r
   // Phase 2/3 of the lec-on-failure flow: re-emitting both sides as Pyrope shells
   // out to `lhd` twice, so announce the target up front (the write itself is quick;
   // the side re-emit is the slow part).
-  livehd::diag::info("pass.lec", "simfail-creating-prp", "progress")
+  livehd::diag::outcome("pass.lec", "simfail-creating-prp", "progress")
       .msg("lec: creating counterexample simulation test {}", simfail_path)
       .emit();
 
@@ -5460,7 +5461,7 @@ void emit_lecfail_witness(Options& opts, Result& res, const livehd::lec::Query_r
   }
   // Phase 3/3 of the lec-on-failure flow: `lhd sim` on the testbench dumps the
   // waveform; announce the target up front (the sim run is the slow part).
-  livehd::diag::info("pass.lec", "simfail-creating-vcd", "progress")
+  livehd::diag::outcome("pass.lec", "simfail-creating-vcd", "progress")
       .msg("lec: creating counterexample waveform {}/{}.vcd", opts.workdir, test_name)
       .emit();
   // Run it: one instance -> one VCD at <workdir>/<test_name>.vcd.
@@ -5598,6 +5599,13 @@ void lec_command(Options& opts, Result& res) {
   load_side_graphs(opts, res, opts.ref_kind, opts.ref_path, "ref", ref_var);
   load_side_graphs(opts, res, opts.impl_kind, opts.impl_path, "impl", impl_var);
   opts.sets.resize(assume_sets);
+  for (const auto* design : {&ref_var, &impl_var}) {
+    for (const auto& graph : design->graphs) {
+      if (graph) {
+        livehd::graph_util::require_sized_design(*graph, "pass.lec");
+      }
+    }
+  }
   dedup_inputs(res);  // each verilog: side re-records the --lib directories it materialized
 
   // "pass.lec" = the proof itself, everything after both sides are loaded. It
@@ -6266,6 +6274,9 @@ void lec_command(Options& opts, Result& res) {
     o._cone_cache = vcache->cone_digests();
   }
 
+  livehd::graph_util::require_sized_design(*ref_g, "pass.lec");
+  livehd::graph_util::require_sized_design(*impl_g, "pass.lec");
+
   livehd::lec::Query_result                    r;
   // lhd.stats: per-def (name, conflicts) ranking, filled by the hierarchical
   // driver only (the flat path is one def, so the totals already say it all).
@@ -6880,14 +6891,14 @@ void lec_command(Options& opts, Result& res) {
       // re-emits the un-normalized sides and drives the trace at the reported
       // index, which after normalization counts SUB-steps. A replay that runs
       // clean would read as "the counterexample was spurious", so skip honestly.
-      livehd::diag::info("pass.lec", "simfail-skip", "io")
+      livehd::diag::outcome("pass.lec", "simfail-skip", "io")
           .msg(
               "formal.simfail testbench not generated: the designs were edge-normalized into {} sub-steps "
               "per clock period, so the witness cycle indices do not line up with the un-normalized sources",
               lec_single_edge_slots)
           .emit();
     } else if (simfail && on_box) {
-      livehd::diag::info("pass.lec", "simfail-skip", "io")
+      livehd::diag::outcome("pass.lec", "simfail-skip", "io")
           .msg(
               "formal.simfail testbench not generated: the counterexample rests on a boxed model (formal.lec.trust, or "
               "cells with no definition), and a source replay cannot drive a box output or show a box-input difference "
@@ -7182,7 +7193,7 @@ void emit_formalfail_witness(Options& opts, Result& res, const livehd::lec::Prop
                              const std::string& design_path, const std::string& top_full, const std::string& simfail, bool run_sim,
                              const std::string& embed_assert) {
   auto skip = [&](std::string_view why) {
-    livehd::diag::info("pass.formal", "simfail-skip", "io").msg("formal.simfail testbench not generated: {}", why).emit();
+    livehd::diag::outcome("pass.formal", "simfail-skip", "io").msg("formal.simfail testbench not generated: {}", why).emit();
   };
   if (prop.trace.empty()) {
     skip("the refuted obligation carries no reproducible input trace (witnesses disabled?)");
@@ -7200,7 +7211,7 @@ void emit_formalfail_witness(Options& opts, Result& res, const livehd::lec::Prop
     test_name = "simfail_" + test_name;
   }
 
-  livehd::diag::info("pass.formal", "simfail-creating-prp", "progress")
+  livehd::diag::outcome("pass.formal", "simfail-creating-prp", "progress")
       .msg("formal verify: creating counterexample simulation test {}", simfail_path)
       .emit();
 
@@ -7511,7 +7522,7 @@ void emit_formalfail_witness(Options& opts, Result& res, const livehd::lec::Prop
   if (!run_sim) {
     return;
   }
-  livehd::diag::info("pass.formal", "simfail-creating-vcd", "progress")
+  livehd::diag::outcome("pass.formal", "simfail-creating-vcd", "progress")
       .msg("formal verify: creating counterexample waveform {}/{}.vcd", opts.workdir, test_name)
       .emit();
   const std::string sim_log = next_log_path(opts, "formal.simfail_run");
@@ -9205,6 +9216,7 @@ void formal_verify_command(Options& opts, Result& res) {
   // after the call rather than at scope end (the verdict reporting below is not
   // proof time); the destructor still records it if prove_properties throws.
   Phase_timer prove_phase(res, "pass.lec");
+  livehd::graph_util::require_sized_design(*g, "pass.formal");
   auto        r = livehd::lec::prove_properties(g.get(), o, sub_lib_ptr, mons.empty() ? nullptr : &mons);
   prove_phase.stop();
   if (vcache) {
@@ -9441,7 +9453,7 @@ void formal_verify_command(Options& opts, Result& res) {
       // REFUTED-cex all the same (the boxed model is the contract), but the
       // replay re-emits the source, where a body-less box has no output to
       // drive: a replay that runs clean would read as "spurious".
-      livehd::diag::info("pass.formal", "simfail-skip", "io")
+      livehd::diag::outcome("pass.formal", "simfail-skip", "io")
           .msg(
               "formal.simfail testbench not generated: the design holds free blackbox outputs and the "
               "counterexample may rely on a box output value, which a source replay cannot drive")
@@ -9454,7 +9466,7 @@ void formal_verify_command(Options& opts, Result& res) {
       // it anyway is worse than emitting nothing: a replay that runs clean reads
       // as "the counterexample was spurious". Honest skip until the trace is
       // decimated back into periods.
-      livehd::diag::info("pass.formal", "simfail-skip", "io")
+      livehd::diag::outcome("pass.formal", "simfail-skip", "io")
           .msg(
               "formal.simfail testbench not generated: the design was edge-normalized into {} sub-steps per "
               "clock period, so the witness cycle indices do not line up with the un-normalized source",
@@ -9478,7 +9490,7 @@ void formal_verify_command(Options& opts, Result& res) {
             // statement, so the refuted obligation cannot be told from its
             // neighbours. Say so — a testbench with no embedded check otherwise
             // reads as "the counterexample was spurious".
-            livehd::diag::info("pass.formal", "simfail-embed-ambiguous", "io")
+            livehd::diag::outcome("pass.formal", "simfail-embed-ambiguous", "io")
                 .msg(
                     "formal.simfail testbench carries no embedded check: {} holds more than one statement of block "
                     "'{}', so the refuted one cannot be identified; put one statement per line to get it back",

@@ -32,6 +32,8 @@ label{display:flex;gap:6px;align-items:center;margin:2px 0} .na{opacity:.45}
 #flags{max-height:230px;overflow:auto;border:1px solid var(--line);border-radius:6px;padding:4px;margin:4px 0}
 #flags .f{padding:2px 0;border-bottom:1px solid var(--line);font-size:12px} #flags .f.chg{background:#e0a02033}
 #flags .f code{font-size:11px} #flags .f .h{color:var(--mut);font-size:11px} #flags input[type=text]{width:100%;box-sizing:border-box;font:inherit;color:var(--fg);background:transparent;border:1px solid var(--line);border-radius:4px;padding:1px 4px}
+#help{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:#0007;z-index:9}
+#help.on{display:flex} #help .hb{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:14px 18px;max-width:600px;font-size:13px;box-shadow:0 8px 30px #0006} #help td{padding:2px 12px 2px 0;vertical-align:top} #help td:first-child{white-space:nowrap;color:var(--mut)}
 #opts{position:absolute;left:50%;top:56px;transform:translateX(-50%);width:min(860px,calc(100% - 340px));max-height:calc(100% - 80px);display:none;flex-direction:column;background:var(--bg);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 30px #0006;z-index:5}
 #opts.on{display:flex} #opts .oh,#opts .of{padding:8px 12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap} #opts .oh{border-bottom:1px solid var(--line)} #opts .of{border-top:1px solid var(--line)}
 #o_list{overflow:auto;padding:4px 12px;flex:1} #o_list summary{cursor:pointer;padding:5px 0;font-weight:600;font-size:12px;color:var(--mut)}
@@ -57,7 +59,7 @@ input[type=number]{width:44px;font:inherit;color:var(--fg);background:transparen
 <h4>Stats</h4>
 <div class="row"><span>HPWL (um)</span><span id="s_hpwl">-</span></div>
 <div class="row"><span>overflow</span><span id="s_ovf">-</span></div>
-<div class="row"><span>Freq (MHz)</span><span id="s_freq">-</span></div>
+<div class="row"><span>Fmax (MHz)</span><span id="s_freq">-</span></div>
 <div class="row"><span>WNS (ps)</span><span id="s_wns">-</span></div>
 <div class="row"><span>TNS (ps)</span><span id="s_tns">-</span></div>
 <div class="row"><span>timing from iter</span><span id="s_titer">-</span></div>
@@ -99,8 +101,22 @@ input[type=number]{width:44px;font:inherit;color:var(--fg);background:transparen
 <button id="o_open" style="width:100%">synth.place options&hellip;</button>
 <div class="mut" style="font-size:11px;margin-top:3px">Every <code>lhd list options synth.place</code> entry, editable; rerun from the start or from the selected checkpoint.</div>
 <h4>Help</h4>
-<div class="mut">Drag an object to move and pin it. Shift+click adds to the selection, shift+drag draws a box. Drag empty space to pan, wheel to zoom. z / + zoom in, shift+Z / - zoom out (around the pointer; the + and - buttons too). The slider under the toolbar replays the recorded history (left/right arrows step, the play button runs it like a video, markers are the phases). Space runs/pauses. U unpins, F fits, Esc clears.</div>
+<div class="mut">? for help</div>
 </div>
+<div id="help"><div class="hb"><b>Keys and mouse</b><table>
+<tr><td>drag an object</td><td>move and pin it (a fixed macro or memory restarts the flow with it there)</td></tr>
+<tr><td>click, shift+click</td><td>select, add to / remove from the selection</td></tr>
+<tr><td>shift+drag</td><td>box select</td></tr>
+<tr><td>drag empty space</td><td>pan</td></tr>
+<tr><td>wheel, z / +, Z / -</td><td>zoom in / out around the pointer</td></tr>
+<tr><td>f</td><td>fit the design</td></tr>
+<tr><td>space</td><td>run / pause</td></tr>
+<tr><td>u</td><td>unpin the selection</td></tr>
+<tr><td>left / right arrow</td><td>step the recorded history</td></tr>
+<tr><td>Esc</td><td>clear the selection, close a panel</td></tr>
+<tr><td>?</td><td>this help</td></tr>
+<tr><td>Align buttons</td><td>line up with the first selected object, which stays put</td></tr>
+</table><div class="mut" style="margin-top:8px">click anywhere or press ? / Esc to close</div></div></div>
 <div id="opts"><div class="oh"><b>synth.place options</b><span id="o_n" class="mut"></span><input type="text" id="o_q" placeholder="filter by name or help"><label><input type="checkbox" id="o_chg">edited only</label><button id="o_close">Close</button></div>
 <div id="o_list" class="mut">-</div>
 <div class="of"><span id="o_info" class="mut" style="flex:1"></span><button id="o_reset">Reset edits</button><button id="o_cp" disabled>Rerun from checkpoint</button><button id="o_start" class="primary">Rerun from start</button></div></div>
@@ -120,7 +136,7 @@ function areaCancel(){if(aPend){aPend=null;dirty=true;areaInfo()}}
 function areaSet(edge,v){if(!aPend){aPend=D.die.slice();aBase=D.die.join()}const m=2*D.dbu;if(edge==='left')aPend[0]=Math.min(v,aPend[2]-m);else if(edge==='right')aPend[2]=Math.max(v,aPend[0]+m);else if(edge==='bottom')aPend[1]=Math.min(v,aPend[3]-m);else aPend[3]=Math.max(v,aPend[1]+m);aEdge=edge;dirty=true;areaInfo()}
 function areaNudge(sign){const st=parseFloat($('a_step').value);if(!(st>0)){$('msg').textContent='area: give a step in um';return}const b=areaBox(),d=sign*st*D.dbu;
  areaSet(aEdge,aEdge==='left'?b[0]-d:aEdge==='right'?b[2]+d:aEdge==='bottom'?b[1]-d:b[3]+d)}
-function areaProblem(){if(!aPend)return'';const[xl,yl,xh,yh]=aPend,w=xh-xl,h=yh-yl;if(D.cell_area>0&&D.cell_area/(w*h)>0.98)return'the cells would fill '+fmt(100*D.cell_area/(w*h),0)+' % of it (limit 98 %)';
+function areaProblem(){if(!aPend)return'';const[xl,yl,xh,yh]=aPend,w=xh-xl,h=yh-yl;if(D.cell_area>0&&D.cell_area/(w*h)>0.98)return'the cells would fill '+fmt(100*D.cell_area/(w*h),0)+' % of it (limit 98 %)';if(D.macro_area>0&&D.macro_limit>0&&D.macro_area/(w*h)>D.macro_limit)return'the macros and memories would need '+fmt(100*D.macro_area/(w*h),0)+' % of it with their spacing (limit '+fmt(100*D.macro_limit,0)+' %)';
  if(X)for(const i of pinned){if(i<X.length&&(X[i]<xl-0.5||Y[i]<yl-0.5||X[i]+D.w[i]>xh+0.5||Y[i]+D.h[i]>yh+0.5))return'a pinned node would lie outside (move or unpin it)'}return''}
 function areaApply(){if(!aPend)return;const bad=areaProblem();if(bad){$('msg').textContent='area: '+bad;return}const box=aPend.map(v=>v/D.dbu);aPend=null;dirty=true;cmd({cmd:'area',box});$('msg').textContent='re-placing with the new area...';areaInfo()}
 function areaInfo(){if(!D||!D.die||!D.dbu)return;if(aPend&&aBase!==D.die.join())aPend=null;const[xl,yl,xh,yh]=D.die,w=(xh-xl)/D.dbu,h=(yh-yl)/D.dbu,fill=(a,b)=>D.cell_area>0?fmt(100*D.cell_area/(a*b),1)+' %':'-';
@@ -148,7 +164,7 @@ function forkView(){if(!D)return;const W=cv.clientWidth,H=cv.clientHeight,[xl,yl
 let forkSeen=-1;
 function forkList(){const f=S.forks||[],el=$('f_list');if(el.dataset.n==String(f.length))return;el.dataset.n=String(f.length);el.textContent='';f.forEach((k,i)=>{const a=document.createElement('a');a.href=k.url;a.target='_blank';a.rel='noopener';a.textContent=k.top+': '+k.cells+' cells, '+k.inputs+' in / '+k.outputs+' out - open';a.style.display='block';el.appendChild(a)});if(forkSeen>=0&&f.length>forkSeen){const k=f[f.length-1];try{window.open(k.url,'_blank','noopener')}catch(e){}}forkSeen=f.length}
 async function cmd(o){try{const r=await api('/cmd',{method:'POST',body:JSON.stringify(o)});if(!r.ok){$('msg').textContent=(await r.json()).error||'error'}}catch(e){$('msg').textContent='disconnected'}}
-const lComb=$('l_comb'),lRegs=$('l_regs'),cellOn=i=>isSeq(i)?lRegs.checked:lComb.checked,isSeq=i=>!!D.seq&&D.seq.charCodeAt(i)===49,kind=i=>D.kinds.charCodeAt(i)-48,isMovable=i=>kind(i)<5,kd=i=>kind(i)%5;
+const lComb=$('l_comb'),lRegs=$('l_regs'),cellOn=i=>isSeq(i)?lRegs.checked:lComb.checked,isSeq=i=>!!D.seq&&D.seq.charCodeAt(i)===49,kind=i=>D.kinds.charCodeAt(i)-48,isMovable=i=>kind(i)<5,isFixedMacro=i=>kind(i)===7,canMove=i=>isMovable(i)||isFixedMacro(i),kd=i=>kind(i)%5;
 const nm=i=>names[i]??('#'+i);
 function resize(){dpr=window.devicePixelRatio||1;cv.width=cv.clientWidth*dpr;cv.height=cv.clientHeight*dpr;dirty=true}
 window.addEventListener('resize',resize);resize();
@@ -211,14 +227,17 @@ function draw(){dirty=false;const W=cv.clientWidth,H=cv.clientHeight;ctx.setTran
  if(drag&&drag.box){ctx.strokeStyle=css('--acc');ctx.setLineDash([5,3]);ctx.strokeRect(drag.bx0,drag.by0,drag.bx1-drag.bx0,drag.by1-drag.by0);ctx.setLineDash([])}areaOverlay()}
 function loop(){if(dirty)draw();requestAnimationFrame(loop)}requestAnimationFrame(loop);
 cv.addEventListener('wheel',e=>{e.preventDefault();const f=Math.exp(-e.deltaY*.0015),x=e.offsetX,y=e.offsetY,ox=wx(x),oy=wy(y);view.s*=f;view.ox=x-ox*view.s;view.oy=y+oy*view.s;dirty=true},{passive:false});
-function selMove(dx,dy,final){const ns=[],xs=[],ys=[];for(const i of drag.items){let x=drag.x0.get(i)+dx,y=drag.y0.get(i)+dy;const[a,b,c,d]=D.die;x=Math.min(Math.max(x,a),c-D.w[i]);y=Math.min(Math.max(y,b),d-D.h[i]);X[i]=x;Y[i]=y;drag.cur.set(i,[x,y]);ns.push(nm(i));xs.push(x);ys.push(y)}
- dirty=true;return{cmd:'move',nodes:ns,x:xs,y:ys,final}}
+function selMove(dx,dy,final){const ns=[],xs=[],ys=[],fn=[],fx=[],fy=[];for(const i of drag.items){let x=drag.x0.get(i)+dx,y=drag.y0.get(i)+dy;const[a,b,c,d]=D.die;x=Math.min(Math.max(x,a),c-D.w[i]);y=Math.min(Math.max(y,b),d-D.h[i]);X[i]=x;Y[i]=y;drag.cur.set(i,[x,y]);if(isMovable(i)){ns.push(nm(i));xs.push(x);ys.push(y)}else{fn.push(nm(i));fx.push(x);fy.push(y)}}
+ dirty=true;return{nodes:ns,x:xs,y:ys,final,fixed:{nodes:fn,x:fx,y:fy}}}
+// Movable nodes are pinned in the running solver; a FIXED macro (a memory) is an obstacle the solver cannot move, so its
+// final position restarts the flow with the macro there (the placer starts it at that spot).
+function sendMove(m){if(m.nodes.length)cmd({cmd:'move',nodes:m.nodes,x:m.x,y:m.y,final:m.final});if(m.final&&m.fixed.nodes.length)cmd({cmd:'macro_move',nodes:m.fixed.nodes,x:m.fixed.x,y:m.fixed.y,final:true})}
 function hitCen(px,py){if(!D||!$('l_cen').checked||!D.centroids.length)return -1;for(let i=D.centroids.length-1;i>=0;i--){const c=C&&C.x.length>i?{x:C.x[i],y:C.y[i]}:D.centroids[i];if(Math.hypot(sx(c.x)-px,sy(c.y)-py)<=10)return i}return -1}
 cv.addEventListener('mousedown',e=>{if(!D||e.button!==0)return;if(rev!==null){drag={pan:true,px:e.offsetX,py:e.offsetY,ox:view.ox,oy:view.oy};return}{const eg=e.shiftKey?null:hitEdge(e.offsetX,e.offsetY);if(eg){aEdge=eg;aStepSet=false;if(!aPend){aPend=D.die.slice();aBase=D.die.join()}drag={edge:eg};areaInfo();dirty=true;return}}const ci=hitCen(e.offsetX,e.offsetY);
  if(ci>=0&&!e.shiftKey){if(!C||C.x.length<=ci)C={x:Float32Array.from(D.centroids,c=>c.x),y:Float32Array.from(D.centroids,c=>c.y),r:Float32Array.from(D.centroids,c=>c.r)};drag={cen:ci,px:e.offsetX,py:e.offsetY,x0:C.x[ci],y0:C.y[ci],t:0,moved:false};dirty=true;return}
  const i=hit(e.offsetX,e.offsetY);
  if(i>=0){if(e.shiftKey){sel.has(i)?sel.delete(i):sel.add(i);selUi();dirty=true;return}
-  if(!sel.has(i)){sel.clear();sel.add(i)}selUi();const items=[...sel].filter(isMovable);
+  if(!sel.has(i)){sel.clear();sel.add(i)}selUi();const items=[...sel].filter(canMove);
   if(!items.length){dirty=true;return}
   drag={items,px:e.offsetX,py:e.offsetY,x0:new Map(items.map(k=>[k,X[k]])),y0:new Map(items.map(k=>[k,Y[k]])),t:0,moved:false,cur:new Map()}}
  else if(e.shiftKey){drag={box:true,bx0:e.offsetX,by0:e.offsetY,bx1:e.offsetX,by1:e.offsetY}}
@@ -235,12 +254,12 @@ window.addEventListener('mousemove',e=>{const r=cv.getBoundingClientRect(),px=e.
  else if(drag.box){drag.bx1=px;drag.by1=py;dirty=true}
  else if(drag.edge){const e2=drag.edge;areaSet(e2,Math.round(e2==='left'||e2==='right'?wx(px):wy(py)))}
  else{const dx=(px-drag.px)/view.s,dy=-(py-drag.py)/view.s;if(!drag.moved&&Math.hypot(px-drag.px,py-drag.py)<3)return;drag.moved=true;const now=performance.now();
-  if(now-drag.t>40){drag.t=now;cmd(selMove(dx,dy,false))}else selMove(dx,dy,false)}});
+  if(now-drag.t>40){drag.t=now;sendMove(selMove(dx,dy,false))}else selMove(dx,dy,false)}});
 window.addEventListener('mouseup',e=>{if(!drag)return;const r=cv.getBoundingClientRect(),px=e.clientX-r.left,py=e.clientY-r.top;
  if(drag.box){const x0=Math.min(drag.bx0,drag.bx1),x1=Math.max(drag.bx0,drag.bx1),y0=Math.min(drag.by0,drag.by1),y1=Math.max(drag.by0,drag.by1);
   for(let i=0;i<X.length;i++){const k=kd(i);if(k===4||k===3)continue;const cx=sx(X[i]+D.w[i]/2),cy=sy(Y[i]+D.h[i]/2);if(cx>=x0&&cx<=x1&&cy>=y0&&cy<=y1)sel.add(i)}selUi()}
  else if(drag.cen!==undefined){if(drag.moved)cmd({cmd:'centroid',name:D.centroids[drag.cen].name,x:C.x[drag.cen],y:C.y[drag.cen],final:true})}
- else if(drag.items&&drag.moved){cmd(selMove((px-drag.px)/view.s,-(py-drag.py)/view.s,true))}
+ else if(drag.items&&drag.moved){sendMove(selMove((px-drag.px)/view.s,-(py-drag.py)/view.s,true))}
  drag=null;dirty=true});
 let HL=[],hlV=-1,selV=-1,selExpect=0,applyingSel=false,selTimer=null;
 function selUi(){$('s_sel').textContent=sel.size;if(!applyingSel){clearTimeout(selTimer);selTimer=setTimeout(()=>{selExpect++;cmd({cmd:'select',names:[...sel].slice(0,5000).map(i=>'#'+i)})},150)}}
@@ -250,31 +269,37 @@ function renderHl(){const box=$('hls');box.innerHTML='';if(!HL.length){box.textC
   const t=document.createElement('span');t.style.flex='1';t.textContent=h.label+' ('+h.count+(h.truncated?'+':'')+')';t.title=(h.regex?'regex '+h.regex+' ':'')+(h.scope?'scope '+h.scope:'');const x=document.createElement('button');x.textContent='x';x.style.padding='0 6px';x.onclick=()=>cmd({cmd:'clear_highlight',id:h.id});row.append(sw,t,x);box.appendChild(row)}}
 async function loadSelection(){const r=await(await api('/selection')).json();applyingSel=true;sel=new Set(r.idx);selUi();applyingSel=false;dirty=true}
 $('al').addEventListener('click',e=>{const a=e.target.dataset?.a;if(a)align(a)});$('al').nextElementSibling.addEventListener('click',e=>{if(e.target.dataset?.a==='matrix')align('matrix')});
-function align(a){if(!D)return;const it=[...sel].filter(isMovable);if(a==='unpin'){const ns=it.filter(i=>pinned.has(i)).map(nm);if(ns.length)cmd({cmd:'unpin',nodes:ns});return}
- if(it.length<2)return;let L=1e300,R=-1e300,B=1e300,Tp=-1e300;for(const i of it){L=Math.min(L,X[i]);R=Math.max(R,X[i]+D.w[i]);B=Math.min(B,Y[i]);Tp=Math.max(Tp,Y[i]+D.h[i])}
+function align(a){if(!D)return;const it=[...sel].filter(canMove);if(a==='unpin'){const ns=it.filter(i=>isMovable(i)&&pinned.has(i)).map(nm);if(ns.length)cmd({cmd:'unpin',nodes:ns});return}
+ if(it.length<2)return;const f=it[0];let L=1e300,R=-1e300,B=1e300,Tp=-1e300;for(const i of it){L=Math.min(L,X[i]);R=Math.max(R,X[i]+D.w[i]);B=Math.min(B,Y[i]);Tp=Math.max(Tp,Y[i]+D.h[i])}
  const nx=new Map(it.map(i=>[i,X[i]])),ny=new Map(it.map(i=>[i,Y[i]]));
- if(a==='left')it.forEach(i=>nx.set(i,L));else if(a==='right')it.forEach(i=>nx.set(i,R-D.w[i]));else if(a==='hcenter')it.forEach(i=>nx.set(i,(L+R)/2-D.w[i]/2));
- else if(a==='bottom')it.forEach(i=>ny.set(i,B));else if(a==='top')it.forEach(i=>ny.set(i,Tp-D.h[i]));else if(a==='vcenter')it.forEach(i=>ny.set(i,(B+Tp)/2-D.h[i]/2));
+ // Like Inkscape: everything lines up with the FIRST selected object, which stays where it is (change the selection to change the reference).
+ if(a==='left')it.forEach(i=>nx.set(i,X[f]));else if(a==='right')it.forEach(i=>nx.set(i,X[f]+D.w[f]-D.w[i]));else if(a==='hcenter')it.forEach(i=>nx.set(i,X[f]+D.w[f]/2-D.w[i]/2));
+ else if(a==='bottom')it.forEach(i=>ny.set(i,Y[f]));else if(a==='top')it.forEach(i=>ny.set(i,Y[f]+D.h[f]-D.h[i]));else if(a==='vcenter')it.forEach(i=>ny.set(i,Y[f]+D.h[f]/2-D.h[i]/2));
  else if(a==='disth'){const s=[...it].sort((p,q)=>X[p]-X[q]);const sum=s.reduce((t,i)=>t+D.w[i],0),gap=(R-L-sum)/(s.length-1);let x=L;for(const i of s){nx.set(i,x);x+=D.w[i]+gap}}
  else if(a==='distv'){const s=[...it].sort((p,q)=>Y[p]-Y[q]);const sum=s.reduce((t,i)=>t+D.h[i],0),gap=(Tp-B-sum)/(s.length-1);let y=B;for(const i of s){ny.set(i,y);y+=D.h[i]+gap}}
  else if(a==='matrix'){const rows=Math.max(1,+$('m_r').value|0),cols=Math.max(1,+$('m_c').value|0),s=[...it].sort((p,q)=>Y[q]-Y[p]||X[p]-X[q]),mw=Math.max(...it.map(i=>D.w[i])),mh=Math.max(...it.map(i=>D.h[i]));
   const px=cols>1?(R-L-mw)/(cols-1):0,py=rows>1?(Tp-B-mh)/(rows-1):0;s.forEach((i,k)=>{const r=Math.min(rows-1,Math.floor(k/cols)),c=k%cols;nx.set(i,L+c*px);ny.set(i,Tp-mh-r*py)})}
- const[a0,b0,c0,d0]=D.die,ns=[],xs=[],ys=[];for(const i of it){const x=Math.min(Math.max(nx.get(i),a0),c0-D.w[i]),y=Math.min(Math.max(ny.get(i),b0),d0-D.h[i]);X[i]=x;Y[i]=y;ns.push(nm(i));xs.push(x);ys.push(y)}
- dirty=true;cmd({cmd:'move',nodes:ns,x:xs,y:ys,final:true})}
+ const[a0,b0,c0,d0]=D.die,ns=[],xs=[],ys=[],fn=[],fx=[],fy=[];for(const i of it){const x=Math.min(Math.max(nx.get(i),a0),c0-D.w[i]),y=Math.min(Math.max(ny.get(i),b0),d0-D.h[i]);X[i]=x;Y[i]=y;if(isMovable(i)){ns.push(nm(i));xs.push(x);ys.push(y)}else{fn.push(nm(i));fx.push(x);fy.push(y)}}
+ // The reference goes LAST among the fixed macros: the placer settles the newest move first, so the reference keeps its spot
+ // and the others find the nearest legal place around it.
+ const fi=fn.indexOf(nm(f));if(fi>=0&&fi<fn.length-1){for(const arr of[fn,fx,fy])arr.push(arr.splice(fi,1)[0])}
+ dirty=true;sendMove({nodes:ns,x:xs,y:ys,final:true,fixed:{nodes:fn,x:fx,y:fy}})}
 $('l_map').onchange=()=>{cmd({cmd:'map',kind:$('l_map').value});if($('l_map').value==='none'){M=null;dirty=true}};
 $('cen_rel').onclick=e=>{e.preventDefault();cmd({cmd:'centroid_release'})};
 $('tim').onclick=()=>cmd({cmd:'timing'});
 $('rp').onclick=sendRestart;$('f_sel').onclick=forkSelection;$('f_view').onclick=forkView;for(const b of document.querySelectorAll('#a_edges button'))b.onclick=()=>{aEdge=b.dataset.e;aStepSet=false;areaInfo();dirty=true};$('a_step').oninput=()=>{aStepSet=true};$('a_shr').onclick=()=>areaNudge(-1);$('a_grow').onclick=()=>areaNudge(1);$('a_apply').onclick=areaApply;$('a_cancel').onclick=areaCancel;$('sb_start').onclick=()=>{stopPlay();scrubTo(0)};$('sb_back').onclick=()=>stepTl(-1);$('sb_fwd').onclick=()=>stepTl(1);$('sb_end').onclick=live;$('sb_play').onclick=togglePlay;$('sb_rng').onpointerdown=()=>{scrubbing=true};window.addEventListener('pointerup',()=>{scrubbing=false});$('sb_rng').oninput=()=>{stopPlay();scrubTo(+$('sb_rng').value)};$('live').onclick=live;$('o_open').onclick=openOptions;$('otog').onclick=()=>{$('opts').className==='on'?$('opts').className='':openOptions()};$('o_close').onclick=()=>{$('opts').className=''};$('o_q').oninput=renderOptions;$('o_chg').onchange=renderOptions;$('o_reset').onclick=()=>{flagEdits={};renderOptions()};$('o_start').onclick=()=>rerun(-1);$('o_cp').onclick=()=>rerun(selCp);
 $('cont').onclick=()=>cmd({cmd:'continue'});
 $('run').onclick=()=>cmd({cmd:S.finished?'finish':S.paused||S.state==='gate'||S.state==='ready'||S.state==='starting'?'run':'pause'});
-$('fit').onclick=fit;$('zin').onclick=()=>zoomBy(1.25);$('zout').onclick=()=>zoomBy(1/1.25);$('ptog').onclick=()=>{const p=$('panel');p.style.display=p.style.display==='none'?'':'none'};
+$('help').onclick=()=>$('help').classList.remove('on');$('fit').onclick=fit;$('zin').onclick=()=>zoomBy(1.25);$('zout').onclick=()=>zoomBy(1/1.25);$('ptog').onclick=()=>{const p=$('panel');p.style.display=p.style.display==='none'?'':'none'};
 $('shot').onclick=()=>{draw();cv.toBlob(b=>{const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='placement_'+(S.phase||'x')+'_'+(S.iter||0)+'.png';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),2000)})};
 for(const id of['l_comb','l_regs','l_macros','l_io','l_reg','l_cen','l_disp','l_dens'])$(id).onchange=()=>{dirty=true};$('l_reg').addEventListener('change',()=>{cmd({cmd:'regions',on:$('l_reg').checked});if(!$('l_reg').checked){R=null;regV=-1;$('reg_note').textContent=''}else $('reg_note').textContent='computing...'});
-window.addEventListener('keydown',e=>{if(e.target.tagName==='INPUT')return;if(e.key==='Escape'&&aPend){areaCancel();return}if(e.key===' '){e.preventDefault();$('run').click()}else if(e.key==='u'){align('unpin')}else if(e.key==='f'){fit()}else if(e.key==='ArrowLeft'){e.preventDefault();stepTl(-1)}else if(e.key==='ArrowRight'){e.preventDefault();stepTl(1)}else if(e.code==='KeyZ'||e.key==='z'||e.key==='Z'||e.key==='+'||e.key==='='||e.key==='-'||e.key==='_'){const out=e.key==='Z'||(e.code==='KeyZ'&&e.shiftKey)||e.key==='-'||e.key==='_';zoomBy(out?1/1.25:1.25)}else if(e.key==='Escape'){if($('opts').className==='on'){$('opts').className=''}else{sel.clear();selUi();dirty=true}}});
+window.addEventListener('keydown',e=>{if(e.target.tagName==='INPUT')return;if(e.key==='?'){e.preventDefault();$('help').classList.toggle('on');return}if(e.key==='Escape'&&$('help').classList.contains('on')){$('help').classList.remove('on');return}if(e.key==='Escape'&&aPend){areaCancel();return}if(e.key===' '){e.preventDefault();$('run').click()}else if(e.key==='u'){align('unpin')}else if(e.key==='f'){fit()}else if(e.key==='ArrowLeft'){e.preventDefault();stepTl(-1)}else if(e.key==='ArrowRight'){e.preventDefault();stepTl(1)}else if(e.code==='KeyZ'||e.key==='z'||e.key==='Z'||e.key==='+'||e.key==='='||e.key==='-'||e.key==='_'){const out=e.key==='Z'||(e.code==='KeyZ'&&e.shiftKey)||e.key==='-'||e.key==='_';zoomBy(out?1/1.25:1.25)}else if(e.key==='Escape'){if($('opts').className==='on'){$('opts').className=''}else{sel.clear();selUi();dirty=true}}});
 function fmt(v,d){return v==null?'-':(+v).toFixed(d)}
 function ui(){areaInfo();forkList();$('s_phase').textContent=S.phase||'-';const st=$('s_state');st.textContent=S.state+(S.gate?' before '+S.gate:'');st.className='st-'+S.state;
  $('s_iter').textContent=S.iter;$('s_pend').textContent=S.pending;$('s_hpwl').textContent=S.hpwl==null?'-':fmt(S.hpwl,1);$('s_ovf').textContent=S.overflow==null||S.overflow<0?'-':fmt(S.overflow,4);
- {const ok=S.has_timing&&S.period>0&&S.period-S.wns>0,f=$('s_freq');f.textContent=ok?(S.timing_est?'~':'')+fmt(1e6/(S.period-S.wns),0):'-';f.title=S.period>0?'achieved 1/(period - WNS); the SDC target is '+fmt(1e6/S.period,0)+' MHz ('+fmt(S.period,0)+' ps)':'no SDC clock period'}
+ {const ok=S.has_timing&&S.period>0&&S.period-S.wns>0,f=$('s_freq'),fmax=ok?1e6/(S.period-S.wns):0,target=S.period>0?1e6/S.period:0;
+  f.textContent=ok?(S.timing_est?'~':'')+fmt(fmax,0):'-';f.style.color=ok?(fmax>=target?'#2a9d4a':'#d6453d'):'';
+  f.title=ok?'the highest clock frequency this placement reaches: 1/(period - WNS)'+(S.timing_est?' (~ = estimated from the placer\'s positions, refreshed by Refresh timing)':'')+'; the SDC target is '+fmt(target,0)+' MHz':'no timing yet'}
  $('s_wns').textContent=S.has_timing?(S.timing_est?'~':'')+fmt(S.wns,1):'-';$('s_tns').textContent=S.has_timing?fmt(S.tns,1):'-';$('s_titer').textContent=S.has_timing?S.timing_iter:'-';
  const b=$('run');b.textContent=S.finished?'Exit lhd':(S.paused||S.state==='gate'||S.state==='ready'||S.state==='starting')?'Run':'Pause';b.disabled=false;const ge=S.state==='gate'&&S.gate==='gp_end',ee=S.state==='gate'&&S.gate==='edit';if(ge)b.textContent='Run (+'+S.min_iters+' iter)';if(ee)b.textContent='Apply edits';$('cont').style.display=ge||ee?'':'none';$('msg').textContent=S.note||'';
  const box=$('stages');if(S.stages&&S.stages.length&&box.dataset.k!==JSON.stringify(S.stages)){box.dataset.k=JSON.stringify(S.stages);box.innerHTML='';

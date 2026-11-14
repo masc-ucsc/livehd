@@ -87,7 +87,7 @@ rm -rf "$W/lg_src"
 
 # ---- (1): policy ---------------------------------------------------------------
 rm -rf "$W/lg_ctl"
-if "$LHD" pass single_edge --top mclk "lg:$W/lg_src" --emit-dir "lg:$W/lg_ctl" --workdir "$W/pw0" >"$W/pass0.log" 2>&1; then
+if "$LHD" pass single_edge -d pass.single_edge --top mclk "lg:$W/lg_src" --emit-dir "lg:$W/lg_ctl" --workdir "$W/pw0" >"$W/pass0.log" 2>&1; then
   fail "without multi_clock the pass must still REFUSE a two-clock design (it applied or skipped instead)"
 fi
 grep -q "multi-clock-no-ratio" "$W/pass0.log" || { tail -6 "$W/pass0.log"; fail "the default refusal is not the named multi-clock one"; }
@@ -96,7 +96,7 @@ grep -q "clk_a" "$W/pass0.log" && grep -q "clk_b" "$W/pass0.log" \
 echo "ok: without multi_clock the design is refused by name, naming clk_a and clk_b"
 
 rm -rf "$W/lg_norm"
-"$LHD" pass single_edge --top mclk "lg:$W/lg_src" --emit-dir "lg:$W/lg_norm" --set multi_clock=true \
+"$LHD" pass single_edge -d pass.single_edge --top mclk "lg:$W/lg_src" --emit-dir "lg:$W/lg_norm" --set multi_clock=true \
   --workdir "$W/pw" >"$W/pass.log" 2>&1 || { tail -8 "$W/pass.log"; fail "pass single_edge refused or failed with multi_clock=true"; }
 grep -q "single-edge-applied" "$W/pass.log" || { tail -6 "$W/pass.log"; fail "the pass did not fire (a negedge flop should force P=2)"; }
 grep -q "P=2 slots" "$W/pass.log" || { grep -o "P=[0-9]* slots[^\"]*" "$W/pass.log" | head -1; fail "the reference domain did not lower into a 2-slot time base"; }
@@ -113,7 +113,7 @@ variant() { # <name> <sed-expr>
   "$LHD" compile "$W/$1.v" --reader yosys-slang --top mclk --emit-dir "lg:$W/lg_$1" --workdir "$W/cw_$1" \
     >"$W/c_$1.log" 2>&1 || { tail -6 "$W/c_$1.log"; fail "compile of $1.v failed"; }
   rm -rf "$W/lg_$1_n"
-  "$LHD" pass single_edge --top mclk "lg:$W/lg_$1" --emit-dir "lg:$W/lg_$1_n" --set multi_clock=true \
+  "$LHD" pass single_edge -d pass.single_edge --top mclk "lg:$W/lg_$1" --emit-dir "lg:$W/lg_$1_n" --set multi_clock=true \
     --workdir "$W/pw_$1" >"$W/p_$1.log" 2>&1
 }
 # A LATCH on the second clock that CLOSES ON THE FALL (open while clk_b is high):

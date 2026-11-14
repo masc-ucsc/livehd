@@ -167,7 +167,7 @@ command -v iverilog >/dev/null 2>&1 && command -v vvp >/dev/null 2>&1 \
   || fail "LHD_EXTERNAL_SIM is set but iverilog/vvp are not on PATH"
 
 rm -rf "$W/lg_four_n"
-"$LHD" pass single_edge --top four8 "lg:$W/lg_four" --emit-dir "lg:$W/lg_four_n" \
+"$LHD" pass single_edge -d pass.single_edge --top four8 "lg:$W/lg_four" --emit-dir "lg:$W/lg_four_n" \
   --workdir "$W/pw" >"$W/pass.log" 2>&1 || { tail -5 "$W/pass.log"; fail "pass single_edge failed"; }
 grep -q "single-edge-applied" "$W/pass.log" || { tail -5 "$W/pass.log"; fail "the pass did not fire on the four-class design"; }
 

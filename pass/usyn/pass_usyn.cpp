@@ -1,5 +1,6 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "pass_usyn.hpp"
+#include "width_validation.hpp"
 
 #include <algorithm>
 #include <charconv>
@@ -844,6 +845,11 @@ void Pass_usyn::work(Eprp_var& var) {
 }
 
 void Pass_usyn::synthesize(Eprp_var& var) {
+  for (const auto& graph : var.graphs) {
+    if (graph) {
+      livehd::graph_util::require_sized_design(*graph, "pass.usyn");
+    }
+  }
   namespace fs   = std::filesystem;
   namespace usyn = livehd::usyn;
   Options options;

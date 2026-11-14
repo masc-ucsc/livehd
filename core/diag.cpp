@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <functional>
+#include <shared_mutex>
 #include <stdexcept>
 
 #include "hhds/source_excerpt.hpp"
@@ -559,9 +560,77 @@ Sink& sink() {
   return s;
 }
 
-void Builder::emit() { sink().emit(std::move(d_)); }
+// ---- `-d` word filter -------------------------------------------------------
+namespace detail {
+std::atomic<bool> g_debug_any{false};
+std::atomic<bool> g_stats{false};
+
+namespace {
+std::shared_mutex        g_debug_mutex;
+std::vector<std::string> g_debug_words;  // guarded by g_debug_mutex
+
+// `word` equals `pass` or whole dotted segments of it.
+bool word_matches(std::string_view word, std::string_view pass) {
+  if (word == "all" || word == "*") {
+    return true;
+  }
+  for (size_t at = pass.find(word); at != std::string_view::npos; at = pass.find(word, at + 1)) {
+    const bool left  = at == 0 || pass[at - 1] == '.';
+    const bool right = at + word.size() == pass.size() || pass[at + word.size()] == '.';
+    if (left && right) {
+      return true;
+    }
+  }
+  return false;
+}
+}  // namespace
+
+bool debug_match(std::string_view pass) {
+  const std::shared_lock lock(g_debug_mutex);
+  for (const auto& w : g_debug_words) {
+    if (word_matches(w, pass)) {
+      return true;
+    }
+  }
+  return false;
+}
+}  // namespace detail
+
+void add_debug(std::string_view words) {
+  std::unique_lock lock(detail::g_debug_mutex);
+  size_t           at = 0;
+  while (at <= words.size()) {
+    auto end = words.find_first_of(", \t", at);
+    if (end == std::string_view::npos) {
+      end = words.size();
+    }
+    if (end > at) {
+      detail::g_debug_words.emplace_back(words.substr(at, end - at));
+    }
+    at = end + 1;
+  }
+  detail::g_debug_any.store(!detail::g_debug_words.empty(), std::memory_order_relaxed);
+}
+
+void set_debug(std::string_view words) {
+  {
+    std::unique_lock lock(detail::g_debug_mutex);
+    detail::g_debug_words.clear();
+    detail::g_debug_any.store(false, std::memory_order_relaxed);
+  }
+  add_debug(words);
+}
+
+void set_stats(bool on) { detail::g_stats.store(on, std::memory_order_relaxed); }
+
+void Builder::emit() {
+  if (on_) {
+    sink().emit(std::move(d_));
+  }
+}
 
 void Builder::fatal() {
+  on_         = true;  // a disabled builder was never an error; fatal() on one is a call-site bug, so report it
   d_.severity = Severity::error;
   sink().fatal(std::move(d_));
 }

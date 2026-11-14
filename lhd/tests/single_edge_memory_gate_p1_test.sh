@@ -59,7 +59,7 @@ rm -rf "$W/lg"
   --workdir "$W/cw" >"$W/c.log" 2>&1 || { tail -6 "$W/c.log"; fail "compile of mg.v failed"; }
 
 rm -rf "$W/lg_n"
-"$LHD" pass single_edge --top mg "lg:$W/lg" --emit-dir "lg:$W/lg_n" --workdir "$W/pw" >"$W/p.log" 2>&1 \
+"$LHD" pass single_edge -d pass.single_edge --top mg "lg:$W/lg" --emit-dir "lg:$W/lg_n" --workdir "$W/pw" >"$W/p.log" 2>&1 \
   || { grep -o '"message":"[^"]*' "$W/p.log" | head -2; fail "pass single_edge refused a gated memory at P=1"; }
 grep -q "P=1 slots" "$W/p.log" || { grep -o 'P=[0-9]* slots[^"]*' "$W/p.log" | head -1; fail "the design did not stay at P=1"; }
 grep -qE "[1-9][0-9]* gated clock\(s\) folded" "$W/p.log" \

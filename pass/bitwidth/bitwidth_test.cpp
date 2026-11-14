@@ -299,6 +299,48 @@ TEST(BitwidthUnbounded, NoWarnWhenAllBounded) {
   sink.clear();
 }
 
+// The settled-range rewrite replaces replicated bits with Mux(bit, 0, mask)
+// after inference has finished. The replacement must carry its own bound.
+TEST(BitwidthUnbounded, BroadcastRewritePublishesItsWidth) {
+  namespace gu = livehd::graph_util;
+  auto& lib    = livehd::Hhds_graph_library::instance("lgdb_bitwidth_broadcast");
+  auto  io     = lib.create_io("broadcast");
+  io->add_input("a", 1);
+  io->set_bits("a", 8);
+  io->set_unsign("a", true);
+  io->add_output("o", 2);
+  io->set_bits("o", 12);
+  auto g   = io->create_graph();
+  auto bit = gu::create_typed_node(*g, Ntype_op::Get_mask);
+  gu::connect_mask_operands(bit, g->get_input_pin("a"), 0, 1);
+  auto broadcast = gu::create_typed_node(*g, Ntype_op::Or);
+  for (int position = 0; position < 12; ++position) {
+    auto shift = gu::create_typed_node(*g, Ntype_op::SHL);
+    bit.create_driver_pin(0).connect_sink(gu::setup_sink_by_name(shift, "a"));
+    gu::create_const(*g, *Dlop::create_integer(position)).connect_sink(gu::setup_sink_by_name(shift, "b"));
+    shift.create_driver_pin(0).connect_sink(gu::append_sink_operand(broadcast, Ntype_op::Or, 0));
+  }
+  broadcast.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
+  auto& sink = livehd::diag::sink();
+  sink.clear();
+  sink.set_jsonl_path("off");
+  sink.set_human_stderr(false);
+
+  Bitwidth(3).do_trans(g);
+
+  const auto result = g->get_output_pin("o").get_driver_pin();
+  ASSERT_FALSE(result.is_invalid());
+  EXPECT_EQ(gu::type_op_of(result.get_master_node()), Ntype_op::Mux);
+  EXPECT_EQ(gu::bits_of(result), 12);
+  EXPECT_TRUE(gu::is_unsign(result));
+  auto mux = result.get_master_node();
+  EXPECT_EQ(mux.get_sink_pin(0).get_driver_pin(), bit.get_driver_pin(0));
+  EXPECT_TRUE(gu::const_of(mux.get_sink_pin(1).get_driver_pin()).is_known_zero());
+  EXPECT_EQ(gu::const_of(mux.get_sink_pin(2).get_driver_pin()).to_just_i64(), 0xfff);
+  EXPECT_FALSE(has_unbounded_warning(sink));
+  sink.clear();
+}
+
 TEST(BitwidthInfer, SignedProductKeepsCrossZeroRange) {
   namespace gu = livehd::graph_util;
   auto& lib    = livehd::Hhds_graph_library::instance("lgdb_bitwidth_test");

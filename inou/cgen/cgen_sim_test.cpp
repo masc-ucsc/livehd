@@ -534,6 +534,8 @@ TEST(CgenSim, HugeFlopSetSplitsIntoBoundedStateBases) {
   auto&             lib    = livehd::Hhds_graph_library::instance("lgdb_" + name);
   auto              io     = lib.create_io(name);
   io->add_input("clk", 0);
+  io->set_bits("clk", 1);
+  io->set_unsign("clk", true);
   io->add_input("d", 1);
   io->set_bits("d", 1);
   io->set_unsign("d", true);
@@ -634,6 +636,8 @@ Tune_hierarchy make_tune_hierarchy(const std::string& tag) {
   auto& lib      = livehd::Hhds_graph_library::instance("lgdb_" + tag);
   auto  child_io = lib.create_io(tag + "_child");
   child_io->add_input("clk", 0);
+  child_io->set_bits("clk", 1);
+  child_io->set_unsign("clk", true);
   child_io->add_input("d", 1);
   child_io->add_output("q", 2);
   for (auto field : {"d", "q"}) {
@@ -650,6 +654,8 @@ Tune_hierarchy make_tune_hierarchy(const std::string& tag) {
 
   auto root_io = lib.create_io(tag + "_top");
   root_io->add_input("clk", 0);
+  root_io->set_bits("clk", 1);
+  root_io->set_unsign("clk", true);
   root_io->add_input("d", 1);
   root_io->add_input("e", 2);
   root_io->add_output("q", 3);

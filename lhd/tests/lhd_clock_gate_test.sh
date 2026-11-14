@@ -30,7 +30,7 @@ synth() {
   shift 3
   local reader=()
   case "$in" in *.v) reader=(--reader slang) ;; esac
-  "$LHD" synth "$in" ${reader[@]+"${reader[@]}"} --top "$top" --workdir "$W/$tag" --set synth.liberty="$LIB" --set synth.opentimer=false \
+  "$LHD" synth -d pass.abc,pass.usyn "$in" ${reader[@]+"${reader[@]}"} --top "$top" --workdir "$W/$tag" --set synth.liberty="$LIB" --set synth.opentimer=false \
     --set lhd.incremental=false "$@" --emit-dir lg:"$W/net_$tag" >"$W/$tag.log" 2>&1 || fail "$tag: synth failed: $(tail -5 "$W/$tag.log")"
 }
 prove() {  # prove <tag> <top>

@@ -358,7 +358,7 @@ pub mod dut::[timecheck=false](d:U4, `reset`:Reset) -> (q:U4@[0], valid:Bool@[0]
   valid = v
 }
 EOF
-OUT=$("$LHD" lec --set formal.effort=proof "${NO_REPLAY[@]}" --ref "$W/aggregate_ref.v" --impl "$W/aggregate_impl.prp" --top dut --workdir "$W/wd11" 2>&1)
+OUT=$("$LHD" lec -d pass.lec --set formal.effort=proof "${NO_REPLAY[@]}" --ref "$W/aggregate_ref.v" --impl "$W/aggregate_impl.prp" --top dut --workdir "$W/wd11" 2>&1)
 RC=$?
 [ "$RC" -eq 0 ] || fail "#11 aggregate recoding should be PROVEN (rc=$RC): $OUT"
 echo "$OUT" | grep -q "lec block 'pipe_cell' pass" || fail "#11 primitive specialization leaf was not paired/proven: $OUT"

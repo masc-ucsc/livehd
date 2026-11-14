@@ -91,7 +91,7 @@ rm -rf "$W/lg_src"
 
 # ---- (2): the pass fires, slots the memory, and lowers to P=2 -----------------
 rm -rf "$W/lg_norm"
-"$LHD" pass single_edge --top memslot "lg:$W/lg_src" --emit-dir "lg:$W/lg_norm" \
+"$LHD" pass single_edge -d pass.single_edge --top memslot "lg:$W/lg_src" --emit-dir "lg:$W/lg_norm" \
   --workdir "$W/pw" >"$W/pass.log" 2>&1 || { tail -8 "$W/pass.log"; fail "pass single_edge refused or failed on a memory design (the pre-fix behaviour)"; }
 grep -q "single-edge-applied" "$W/pass.log" || { tail -6 "$W/pass.log"; fail "the pass did not fire (a negedge flop should force P=2)"; }
 grep -q "P=2 slots" "$W/pass.log" || { grep -o "P=[0-9]* slots[^\"]*" "$W/pass.log" | head -1; fail "the design did not lower into a 2-slot time base"; }

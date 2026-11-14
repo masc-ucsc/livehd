@@ -24,7 +24,7 @@ def session(name, extra):
     command = ['lhd/lhd', 'synth', str(source), '--top', 'dut', '--set', f'synth.liberty={lib}/sky130hd.lib',
                '--set', f'synth.lef={lib}/sky130hd.tlef,{lib}/sky130hd.lef', '--set', f'synth.sdc={sdc}', '--set', 'synth.place=true',
                '--set', 'synth.place.iterations=120', '--set', 'synth.place.grid.density=8', '--set', 'synth.place.timing_driven=false',
-               '--set', 'synth.place.gui.poll=5', '--workdir', str(root / name), '--gui', '--gui-no-open', '-q'] + extra
+               '--set', 'synth.place.gui.poll=5', '--workdir', str(root / name), '--set', 'synth.place.gui.pause=true', '--gui', '--gui-no-open', '-q'] + extra
     log = root / f'{name}.log'
     proc = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=open(log, 'w'))
     for _ in range(400):

@@ -22,7 +22,7 @@ lib = Path('inou/lefdef/tests/data')
 command = ['lhd/lhd', 'synth', str(source), '--top', 'dut', '--set', f'synth.liberty={lib}/sky130hd.lib',
            '--set', f'synth.lef={lib}/sky130hd.tlef,{lib}/sky130hd.lef', '--set', f'synth.sdc={sdc}', '--set', 'synth.place=true',
            '--set', 'synth.place.iterations=120', '--set', 'synth.place.grid.density=8', '--set', 'synth.place.timing_driven=false',
-           '--set', 'synth.place.gui.poll=5', '--workdir', str(root / 'W'), '--gui', '--gui-no-open', '-q']
+           '--set', 'synth.place.gui.poll=5', '--workdir', str(root / 'W'), '--set', 'synth.place.gui.pause=true', '--gui', '--gui-no-open', '-q']
 log = open(root / 'err.log', 'w')
 proc = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=log)
 child_pid = None

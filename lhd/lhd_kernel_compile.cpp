@@ -2041,7 +2041,7 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
           }
         }
         const auto stats = livehd::sweep::flatten(roots);
-        livehd::diag::info("pass.sweep", "flatten", "progress")
+        livehd::diag::stat("pass.sweep", "flatten", "progress")
             .msg("pass.sweep: flattened {} instance(s) into {} root(s); {} instance(s) kept",
                  stats.inlined,
                  roots.size(),
@@ -2072,7 +2072,7 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
         for (const auto& graph : var.graphs) {
           refined += livehd::sweep::refine_unknown(*graph);
         }
-        livehd::diag::info("pass.sweep", "unknown-zero", "progress")
+        livehd::diag::stat("pass.sweep", "unknown-zero", "progress")
             .msg("pass.sweep: {} constant sink(s) with unknown bits read as 0", refined)
             .emit();
         active = &var;
@@ -2289,7 +2289,7 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
         merge_sets(opts, "compile.bitwidth", bw_labels);
         run_step("pass.bitwidth", *active, bw_labels, opts, res);
       }
-      livehd::diag::info("pass.sweep", "state", "progress")
+      livehd::diag::stat("pass.sweep", "state", "progress")
           .msg(
               "pass.sweep: {} constant and {} unobserved flop bit(s) and {} unobserved memorie(s) removed in {} round(s) ({} "
               "fixpoint evaluations)",

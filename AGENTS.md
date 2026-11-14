@@ -202,9 +202,24 @@ salt B looks exactly like "the cache forgot everything".
 
 ## Compiler Warnings Policy
 
+After bitwidth inference, a pass that creates or replaces a value-producing
+cell must install its driver width and sign, or run bitwidth on the affected
+graph before handing it to a consumer. This includes post-convergence
+rewrites inside bitwidth itself. Constants carry their type in their literal;
+unsigned drivers use the absence of `pin_signed`. Unresolved driver widths
+at codegen, synthesis, simulation, or LEC boundaries are internal errors in
+every build mode, not warnings or permission to guess a width.
+
 Always fix source code — never add `-Wno-*` flags to BUILD files. Exception: external deps in `MODULE.bazel`.
 
 ## Contracts
+
+### Acknowledgements
+
+When an agent or human consults a paper or tool and uses it to implement any
+LiveHD feature, update `docs/acknowledgement.html` with the appropriate credit
+as part of that implementation. Do not defer the update to a future scan or
+attribution review.
 
 ### Git branches
 
@@ -230,6 +245,23 @@ The only built-in exception is `MODULE.bazel` (external-dep warning
 suppression — see "Compiler Warnings Policy" above).
 
 Enforced by `scripts/contracts/diff_no_compile_flags_touched.sh`.
+
+### Logging policy (`core/diag.hpp`)
+
+Default stderr is errors, warnings and very short outcome lines, nothing else.
+Pick the level when you add a record:
+
+- `diag::outcome(pass, code, cat)`: always shown, one short line (a fallback taken, a file written).
+- `diag::stat(pass, code, cat)`: a larger summary, shown with `--stats` (or a matching `-d`).
+- `diag::info(pass, code, cat)`: detail, shown ONLY when `-d WORD` matches `pass`.
+
+`-d WORD[,WORD]` (repeatable) names categories: the dotted `pass` string of the record
+(`pass.abc`, `synth.place`, `pass.semdiff`, `lhd.sim`). A word matches whole dotted segments
+(`abc` matches `pass.abc`, `synth.place` matches `synth.place.legalize`); `all` matches
+everything. A disabled builder skips `std::format` and every append, but C++ still evaluates the
+arguments, so wrap anything with a loop or a `to_string` in `if (diag::enabled("pass.x"))`.
+A test that greps a log record must pass the `-d` word (or `--stats`) that enables it. The
+`PROGRESS pass.abc` heartbeat reaches stderr only under `-d pass.abc`; the step log always has it.
 
 ### Defaults are a contract
 

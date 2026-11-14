@@ -821,9 +821,17 @@ TEST(GuiSession, AreaRefusesAFrameTheDesignCannotUseAndNeverRestarts) {
   const int    port = port_of(s.url());
   const auto   t    = "t=" + s.token();
   const double x[4] = {1, 2, 3, 4}, y[4] = {5, 6, 7, 8};
-  s.begin_phase(area_scene(), x, y, 4);
+  auto         with_macros = area_scene();
+  with_macros->macro_area  = 5e10;  // 500 um x 100 um worth of macros and memory proxies, spacing included
+  s.begin_phase(with_macros, x, y, 4);
   s.gate("final", x, y, 4, {});
   const auto note = [&] { return body_of(http(port, "GET", "/state?" + t)); };
+  // The macros cannot be packed into a 200 x 100 um core (they need 250% of it): the cells alone would fit (20%), the
+  // memory proxies are what the restart's packing dies on ("no space for square memory proxy"), so refuse up front.
+  EXPECT_NE(http(port, "POST", "/cmd?" + t, R"({"cmd":"area","box":[10,10,210,110]})").find("200 OK"), std::string::npos);
+  s.poll(4, x, y, 4, {});
+  EXPECT_NE(note().find("macros and memories need"), std::string::npos) << note();
+  EXPECT_EQ(host.calls, 0);
   // 4000 um2 of cells do not fit a 60 x 60 um core
   EXPECT_NE(http(port, "POST", "/cmd?" + t, R"({"cmd":"area","box":[10,10,70,70]})").find("200 OK"), std::string::npos);
   s.poll(5, x, y, 4, {});

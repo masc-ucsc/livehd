@@ -17,6 +17,7 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/strings/str_split.h"
+#include "core/diag.hpp"
 #include "pass/timing/sdc.hpp"
 #include "str_tools.hpp"
 

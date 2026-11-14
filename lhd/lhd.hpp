@@ -195,6 +195,8 @@ struct Options {
 
   bool quiet   = false;
   bool verbose = false;
+  // `-d WORD[,WORD...]` (repeatable): the log categories to show (see core/diag.hpp). Not an input: never hashed.
+  std::string debug;
 
   // `--list-tests`: enumerate the source's TEST UNITS as JSON (or a human list in
   // pretty mode) and exit without building/proving anything. Shared by the two
@@ -876,6 +878,7 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      Synth_set_option::Kind::file,
      "global-placement target density, at least utilization; 0: utilization + 0.05"},
     {"place.snapshots", "false", Synth_set_option::Kind::boolean, "save physical GP coordinates before legalization"},
+    {"place.gui.pause", "false", Synth_set_option::Kind::boolean, "--gui: stop at the first gate (before the first global placement) until Run is pressed; the default runs on its own and the page shows the placer moving"},
     {"place.gui.poll", "10", Synth_set_option::Kind::integer, "--gui: GP iterations between polls of the interactive session (1..20)"},
     {"place.gui.replay", "", Synth_set_option::Kind::file, "replay a --gui action trace (JSONL) in batch: the recorded moves and unpins are applied at the same phase and GP iteration, with no browser"},
     {"place.gui.video", "", Synth_set_option::Kind::file, "replay only: write one PNG per frame to <path>.frames/ (or <path> when it is a directory) and an .mp4 with ffmpeg when <path> ends in .mp4 and ffmpeg is on the PATH"},
@@ -1309,10 +1312,11 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
 #undef H2D_BOOL
 #undef H2D_STRING
     {"place.floorplan", "", Synth_set_option::Kind::file, "optional DEF with contiguous N/FS rows and FIXED pins/macros"},
-    {"place.seed",
+    {"place.start_map",
      "",
      Synth_set_option::Kind::file,
-     "optional TSV (instance, x, y in DBU) of initial cell positions; a forked region starts from its parent's placement"},
+     "optional TSV (instance, x, y in DBU) of initial cell positions; a forked region starts from its parent's placement. "
+     "Not an RNG seed: that is the shared `lhd.seed`"},
     {"place.wire_rc", "", Synth_set_option::Kind::file, "wire RC override: ohm/um,fF/um; empty derives it from LEF"},
     {"place.rc_pessimism",
      "1",
@@ -1381,6 +1385,7 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      "routing grid per axis for RUDY/RSMT/URoute, macro channel pressure, native legalization/detailed placement, terminal "
      "and SAT route-grid bins: inherit follows the density grid (the configured grid.density in dynamic mode), or 2..1024"},
     {"place.bins", "64", Synth_set_option::Kind::integer, "DEPRECATED: use synth.place.grid.density"},
+    {"place.seed", "", Synth_set_option::Kind::file, "DEPRECATED: use synth.place.start_map (a number was never valid: the RNG seed is lhd.seed)"},
     {"place.dynamic_bins", "false", Synth_set_option::Kind::boolean, "DEPRECATED: use synth.place.grid.density_mode=dynamic"},
     {"place.bin_max", "512", Synth_set_option::Kind::integer, "DEPRECATED: use synth.place.grid.density_max"},
     {"place.macro.fill_cell_space",
@@ -2738,6 +2743,7 @@ struct Synth_set_rename {
 };
 inline constexpr Synth_set_rename kSynthSetRenames[] = {
     {"place.bins", "place.grid.density"},
+    {"place.seed", "place.start_map"},  // a numeric value is the RNG seed instead: canonicalize_synth_sets -> lhd.seed
     {"place.bin_max", "place.grid.density_max"},
     {"place.local_density_bins", "place.grid.local"},
     {"place.dynamic_bins", "place.grid.density_mode", "dynamic", "fixed"},

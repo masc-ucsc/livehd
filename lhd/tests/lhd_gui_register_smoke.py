@@ -26,7 +26,7 @@ log = open(root / 'err.log', 'w')
 proc = subprocess.Popen(['lhd/lhd', 'synth', str(source), '--top', 'seq', '--workdir', str(root / 'W'), '--set', f'synth.liberty={lib}/sky130hd.lib',
                          '--set', f'synth.lef={lib}/sky130hd.tlef,{lib}/sky130hd.lef', '--set', f'synth.sdc={sdc}', '--set', 'synth.place=true',
                          '--set', 'synth.place.iterations=120', '--set', 'synth.place.grid.density=8', '--set', 'synth.place.timing_driven=false',
-                         '--set', 'synth.place.gui.poll=5', '--set', 'synth.place.gui.history_every=5', '--gui', '--gui-no-open', '-q'], stdout=subprocess.DEVNULL, stderr=log)
+                         '--set', 'synth.place.gui.poll=5', '--set', 'synth.place.gui.history_every=5', '--set', 'synth.place.gui.pause=true', '--gui', '--gui-no-open', '-q'], stdout=subprocess.DEVNULL, stderr=log)
 try:
     url = None
     for _ in range(600):

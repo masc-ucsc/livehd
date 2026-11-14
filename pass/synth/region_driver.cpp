@@ -516,7 +516,7 @@ bool Region_driver::apply_region_overrides(const livehd::partition::Region_body&
   if (source.contains("abc_pre")) {
     overrides.pre = livehd::synth_attr::get(source, "abc_pre");
     if (source.contains("abc")) {
-      livehd::diag::info("pass.abc", "synth-abc-pre-ignored", "unsupported")
+      livehd::diag::outcome("pass.abc", "synth-abc-pre-ignored", "unsupported")
           .msg("region '{}': synth.abc_pre is ignored because synth.abc supplies the whole flow", rb.module_name)
           .emit();
     }
@@ -1801,27 +1801,30 @@ void Region_driver::report_completion(const Region_qor& q) {
                                  q.ms);
   std::print("{}\n", line);  // captured in the pass's complete internal step log
   std::fflush(stdout);
-  livehd::diag::sink().progress("pass.abc",
-                                line,
-                                {
-                                    {"completed", std::to_string(completed_regions_)},
-                                    {"region", q.module},
-                                    {"color", std::to_string(q.color)},
-                                    {"ctrl", q.ctrl ? "1" : "0"},
-                                    {"resynth", q.resynth ? "1" : "0"},
-                                    {"cache", std::string{cache}},
-                                    {"input_nodes", std::to_string(q.input_nodes)},
-                                    {"input_ge", std::to_string(q.input_ge)},
-                                    {"gates", std::to_string(q.gates)},
-                                    {"bypassed", std::to_string(q.bypassed)},
-                                    {"area", std::format("{:.2f}", q.area)},
-                                    {"delay", std::format("{:.2f}", q.delay)},
-                                    {"ms", std::format("{:.1f}", q.ms)},
-                                    {"color_peak_rss_kb", std::to_string(q.color_peak_rss_kb)},
-                                    {"process_peak_rss_kb", std::to_string(q.peak_rss_kb)},
-                                    {"critical_output", q.crit_output},
-                                    {"critical_src", q.crit_src},
-  });
+  // The live heartbeat on stderr is a `-d pass.abc` log; the step log above always has every region.
+  if (livehd::diag::enabled("pass.abc")) {
+    livehd::diag::sink().progress("pass.abc",
+                                  line,
+                                  {
+                                      {"completed", std::to_string(completed_regions_)},
+                                      {"region", q.module},
+                                      {"color", std::to_string(q.color)},
+                                      {"ctrl", q.ctrl ? "1" : "0"},
+                                      {"resynth", q.resynth ? "1" : "0"},
+                                      {"cache", std::string{cache}},
+                                      {"input_nodes", std::to_string(q.input_nodes)},
+                                      {"input_ge", std::to_string(q.input_ge)},
+                                      {"gates", std::to_string(q.gates)},
+                                      {"bypassed", std::to_string(q.bypassed)},
+                                      {"area", std::format("{:.2f}", q.area)},
+                                      {"delay", std::format("{:.2f}", q.delay)},
+                                      {"ms", std::format("{:.1f}", q.ms)},
+                                      {"color_peak_rss_kb", std::to_string(q.color_peak_rss_kb)},
+                                      {"process_peak_rss_kb", std::to_string(q.peak_rss_kb)},
+                                      {"critical_output", q.crit_output},
+                                      {"critical_src", q.crit_src},
+    });
+  }
 }
 
 // `options` are the REGION's resolved options (map_region's per-region overlay),
@@ -2255,7 +2258,7 @@ void Region_driver::optimize_ware(hhds::GraphLibrary& outlib, std::string_view t
         }
         if (!pin.empty()) {
           for (const auto& site : ware_sites(name)) {
-            livehd::diag::info("pass.abc", "synth-tune-pin", "unsupported")
+            livehd::diag::stat("pass.abc", "synth-tune-pin", "unsupported")
                 .at(site)
                 .msg("exploration chose this for the {} here ({} cells, {} ps); pin it with ::[{}]",
                      kind,

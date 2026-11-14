@@ -39,7 +39,7 @@ synth on --set compile.sweep=true
 # The mapper-private flat sweep must be reachable through both mapper APIs.
 synth flat --set synth.flat_sweep=true
 [ "$(flops "$W/flat/net.v")" = 0 ] || fail "flat: expected the constant register chain to fold"
-"$LHD" synth --reader slang --top sweep_hier_const --workdir "$W/usyn" --emit verilog:"$W/usyn.v" \
+"$LHD" synth -d pass.usyn --reader slang --top sweep_hier_const --workdir "$W/usyn" --emit verilog:"$W/usyn.v" \
   --set synth.mapper=usyn --set pass.usyn.tmap=none --set synth.flat_sweep=true -- "$SRC" > "$W/usyn.log" 2>&1 \
   || fail "usyn: flat_sweep failed"
 grep -q 'flat-swept' "$W/usyn.log" || fail "usyn: flat_sweep was not applied"

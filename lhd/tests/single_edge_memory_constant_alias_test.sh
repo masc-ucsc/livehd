@@ -110,7 +110,7 @@ CONCATS=$(awk -F'\t' '$5=="concat"' "$W/zero_lanes.txt" | wc -l)
 echo "note: $CONCATS of them are concat lanes (B03/B11's instance of this property)"
 
 rm -rf "$W/lg_norm"
-"$LHD" pass single_edge --top mem_slot_constant_alias "lg:$W/lg" \
+"$LHD" pass single_edge -d pass.single_edge --top mem_slot_constant_alias "lg:$W/lg" \
   --emit-dir "lg:$W/lg_norm" --workdir "$W/pw" >"$W/pass.log" 2>&1 \
   || { tail -10 "$W/pass.log"; fail "pass single_edge refused the alias fixture"; }
 grep -q "memory(ies) slotted" "$W/pass.log" \

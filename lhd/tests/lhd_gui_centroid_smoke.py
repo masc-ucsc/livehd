@@ -65,7 +65,7 @@ def command(work, *extra):
 
 def session(work, edit):
     """Runs one GUI session to the gate before `macro` and returns the centroid positions there."""
-    proc = subprocess.Popen(command(work, '--gui', '--gui-no-open'), stdout=subprocess.DEVNULL, stderr=open(root / (work.name + '.log'), 'w'))
+    proc = subprocess.Popen(command(work, '--set', 'synth.place.gui.pause=true', '--gui', '--gui-no-open'), stdout=subprocess.DEVNULL, stderr=open(root / (work.name + '.log'), 'w'))
     url = None
     for _ in range(600):
         time.sleep(0.05)

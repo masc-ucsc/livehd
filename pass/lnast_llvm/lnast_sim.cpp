@@ -19,6 +19,7 @@
 #include "lnast_llvm.hpp"
 #include "lnast_sim_rt.hpp"
 #include "node_util.hpp"
+#include "width_validation.hpp"
 #include "occurrence_materialize.hpp"
 #include "pass_lg2lnast.hpp"
 #include "sim_tune_rt.hpp"
@@ -110,6 +111,11 @@ std::string port_members(const std::vector<Field>& ports) {
 }  // namespace
 
 Sim_emitted emit_sim(const Sim_request& request) {
+  for (const auto& graph : request.graphs) {
+    if (graph) {
+      livehd::graph_util::require_sized_design(*graph, "pass.lnast_sim");
+    }
+  }
   Sim_emitted result;
   // LHD_SIM_LNAST_TIME (debug): where the time before and after the kernels goes.
   const bool  timed = livehd::debug::env<"LHD_SIM_LNAST_TIME">() != nullptr;

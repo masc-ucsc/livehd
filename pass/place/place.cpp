@@ -2392,6 +2392,18 @@ void make_arrays(View& v, const ph::Technology& tech) {
       d.centroid_groups
           = dp::detail::centroid_candidates(d, paths, masters, v.centroid_minimum, v.centroid_min_copies, v.centroid_min_macros);
       v.hierarchy_centroids = d.centroid_groups.size();
+      if (d.centroid_groups.empty()) {
+        // fp=auto (or fp=true) asked for a floorplan, but no repeated hierarchy copy passes the stage's own filters, so it runs
+        // as a plain global placement: no centroid to plan and no macro grouped. Say so instead of looking like a stuck plan.
+        livehd::diag::outcome("pass.place", "fp-no-candidates", "progress")
+            .msg("synth.place.fp: no floorplan centroid candidate (a candidate needs more than {} macros, {} sibling copies and more "
+                 "than {:.0f} equivalent cells per copy): the stage runs as a plain placement; lower synth.place.fp.minimum, "
+                 "fp.min_macros or fp.min_copies to plan this design",
+                 v.centroid_min_macros,
+                 v.centroid_min_copies,
+                 v.centroid_minimum)
+            .emit();
+      }
       if (v.color_centroids && !v.placement_colors) {
         add_color_centroids(d, v.color_minimum);
       }
@@ -4798,8 +4810,17 @@ std::shared_ptr<const gui::Scene> gui_scene(const View& v, const ph::Technology&
   scene->dbu_per_um = tech.dbu;
   scene->die        = {d.layout.xl, d.layout.yl, d.layout.xh, d.layout.yh};
   scene->frame_die  = {v.fp.die.xl, v.fp.die.yl, v.fp.die.xh, v.fp.die.yh};
-  for (int i = 0; i < d.num_movable && size_t(i) < d.node_size_x.size(); ++i) {
-    scene->cell_area += d.node_size_x[size_t(i)] * d.node_size_y[size_t(i)];
+  // Every instance counts, fixed macros and memory proxies too (a core they cannot be packed into dies at the next
+  // restart): the cells by body, the macros by body plus the spacing the packing keeps between two of them.
+  {
+    const double sx = double(std::max(v.channel_x, 2 * v.halo_x)), sy = double(std::max(v.channel_y, 2 * v.halo_y));
+    for (size_t i = 0; i < v.cells.size() && i < d.node_size_x.size(); ++i) {
+      const double w = d.node_size_x[i], h = d.node_size_y[i];
+      scene->cell_area += w * h;
+      if (i < d.node_macro.size() && d.node_macro[i]) {
+        scene->macro_area += (w + sx) * (h + sy);
+      }
+    }
   }
   scene->nodes.reserve(d.node_x.size());
   // Registers: instances with a sink on a net that carries the clock role.
@@ -6860,6 +6881,11 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         p.y           = attr.get().y;
         p.status      = attr.get().status;
         p.orientation = attr.get().orientation;
+        // The timing-seed placement before this one packed the memory proxies and saved them FIXED. The floorplan stage plans
+        // movable macros only (it ignores fixed ones), so it starts them from that packing but lets them move.
+        if (v.centroids && !io && memories.contains(node.get_debug_nid())) {
+          p.status = Status::PLACED;
+        }
       }
       if (p.width <= 0 || p.height <= 0) {
         throw std::runtime_error("invalid LEF cell size: " + name);
@@ -7322,7 +7348,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       const double held = std::min(1., (area - macro_area) / free_area);
       if (options.density < 1.15 * held) {
         const double raised = held + .25 * (1 - held);
-        livehd::diag::info("pass.place", "place-density", "progress")
+        livehd::diag::outcome("pass.place", "place-density", "progress")
             .msg("synth.place.density={:.3f} is too low for a fixed frame holding {:.3f}; using {:.3f}", options.density, held, raised)
             .emit();
         automatic_options->density = raised;
@@ -7946,16 +7972,130 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
   }
   // Square proxy macros are packed first and become obstacles for DREAMPlace.
   // Their exact square dimensions need not be a multiple of the standard site.
+  // Memories the user placed in the page stay where they put them (fixed); only the others are planned by the floorplan stage.
+  const auto         user_macro_moves = options.gui ? options.gui->macro_moves() : std::map<std::string, std::array<double, 3>>{};
   std::vector<Cell*> macros;
   for (auto& c : v.cells) {
-    if (!macro_active && memories.contains(c.node.get_debug_nid())) {
+    // The floorplan stage plans MOVABLE macros (centroid_candidates ignores fixed ones, so packing the memories first left it
+    // nothing to plan: the "fp plan" ran as a plain cell GP and no memory ever moved). With it active they stay movable here;
+    // global placement moves them with their hierarchy copy and the macro stage legalizes them like any LEF macro.
+    if (!macro_active && (!v.centroids || user_macro_moves.contains(c.name)) && memories.contains(c.node.get_debug_nid())) {
       macros.push_back(&c);
     }
   }
   std::sort(macros.begin(), macros.end(), [](const auto* a, const auto* b) {
     return a->place.width != b->place.width ? a->place.width > b->place.width : a->name < b->name;
   });
+  std::vector<Cell*> user_placed;  // memory proxies the user put somewhere: placed at the nearest legal spot below
   std::unordered_set<Cell*> packed_memories;
+  // Only a FIXED/LOCKED cell that is not a soft block can ever block a proxy, so scan those, not every cell:
+  // the packing tries every row x site position per proxy, and a full-design scan per position (two string-keyed
+  // macro lookups each) was ~1e10 operations on a 100k-cell core, before global placement could draw a frame.
+  struct Pack_obstacle {
+    const Cell* cell;
+    int64_t     sx, sy;
+  };
+  std::vector<Pack_obstacle> pack_obstacles;
+  const auto                 add_pack_obstacle = [&](const Cell& c) {
+    if (ph::soft_block(tech.macros.at(c.macro))) {
+      return;  // a soft block may overlap macros
+    }
+    // Body spacing: the halo against cells, max(channel, both halos) against another macro.
+    const bool standard = tech.macros.at(c.macro).klass.starts_with("CORE");
+    pack_obstacles.push_back({&c,
+                              standard ? v.halo_x : std::max(v.channel_x, 2 * v.halo_x),
+                              standard ? v.halo_y : std::max(v.channel_y, 2 * v.halo_y)});
+  };
+  for (const auto& c : v.cells) {
+    if (c.place.status == Status::FIXED || c.place.status == Status::LOCKED) {
+      add_pack_obstacle(c);
+    }
+  }
+  // 2i-interact: a memory proxy the user dragged or aligned in the page goes to the legal spot NEAREST to where it was put
+  // (same rule as the packing: halo against cells, channel against another macro), so a drop that breaks the spacing moves
+  // a little instead of failing the run. They become obstacles for the rest, which is packed around them. The session
+  // replays these positions from its action trace on every restart.
+  if (options.gui && !v.fp.rows.empty()) {
+    const auto  moved = options.gui->macro_moves();
+    const auto& row0  = v.fp.rows.front();
+    const auto  free_at = [&](const Cell* macro, int64_t x, int64_t y) {
+      for (const auto& o : pack_obstacles) {
+        const auto& c = *o.cell;
+        if (&c != macro && x < c.place.x + c.place.width + o.sx && x + macro->place.width + o.sx > c.place.x
+            && y < c.place.y + c.place.height + o.sy && y + macro->place.height + o.sy > c.place.y) {
+          return false;
+        }
+      }
+      return true;
+    };
+    std::vector<Cell*> by_recency;
+    for (auto* macro : macros) {
+      if (moved.contains(macro->name) && macro->place.status != Status::FIXED && macro->place.status != Status::LOCKED) {
+        by_recency.push_back(macro);
+      }
+    }
+    std::sort(by_recency.begin(), by_recency.end(), [&](const auto* a, const auto* b) { return moved.at(a->name)[2] > moved.at(b->name)[2]; });
+    for (auto* macro : by_recency) {
+      const auto it = moved.find(macro->name);
+      const int64_t x0 = row0.x + v.halo_x, x1 = row0.x + row0.count * sw - macro->place.width - v.halo_x;
+      const int64_t y0 = row0.y + v.halo_y, y1 = v.fp.rows.back().y + rh - macro->place.height - v.halo_y;
+      if (x1 < x0 || y1 < y0) {
+        continue;
+      }
+      const auto snap = [&](double want, int64_t lo, int64_t hi, int64_t origin, int64_t step) {
+        return std::clamp<int64_t>(origin + std::llround((want - double(origin)) / double(step)) * step, lo, hi);
+      };
+      const int64_t tx = snap(it->second[0], x0, x1, row0.x, sw), ty = snap(it->second[1], y0, y1, row0.y, rh);
+      int64_t       bx = -1, by = -1, best = std::numeric_limits<int64_t>::max();
+      // rows by distance from the target; in each row walk left and right from the target column until a free site or
+      // the best distance so far is passed
+      for (int64_t k = 0;; ++k) {
+        bool any_row = false;
+        for (const int64_t sign : {1, -1}) {
+          const int64_t y = ty + sign * k * rh;
+          if (y < y0 || y > y1 || (k == 0 && sign == -1)) {
+            continue;
+          }
+          any_row = true;
+          const int64_t dy = std::abs(y - ty);
+          if (dy >= best) {
+            continue;
+          }
+          for (int64_t j = 0;; ++j) {
+            bool any_col = false;
+            for (const int64_t dir : {1, -1}) {
+              const int64_t x = tx + dir * j * sw;
+              if (x < x0 || x > x1 || (j == 0 && dir == -1)) {
+                continue;
+              }
+              any_col = true;
+              const int64_t dist = dy + std::abs(x - tx);
+              if (dist < best && free_at(macro, x, y)) {
+                best = dist;
+                bx   = x;
+                by   = y;
+              }
+            }
+            if (!any_col || std::abs(j * sw) + dy >= best) {
+              break;
+            }
+          }
+        }
+        if (!any_row || (best != std::numeric_limits<int64_t>::max() && k * rh >= best)) {
+          break;
+        }
+      }
+      if (bx < 0) {
+        continue;  // no legal spot near the drop: the macro stays for the normal packing below
+      }
+      macro->place.x           = bx;
+      macro->place.y           = by;
+      macro->place.orientation = Orientation::N;
+      macro->place.status      = Status::FIXED;  // an obstacle for the proxies packed below ...
+      add_pack_obstacle(*macro);
+      user_placed.push_back(macro);
+    }
+  }
   for (auto* macro : macros) {
     if (macro->place.status == Status::FIXED || macro->place.status == Status::LOCKED) {
       continue;
@@ -7965,17 +8105,10 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     for (int64_t y = first.y + v.halo_y; !found && y + macro->place.height + v.halo_y <= v.fp.rows.back().y + rh; y += rh) {
       for (int64_t x = first.x + v.halo_x; !found && x + macro->place.width + v.halo_x <= first.x + first.count * sw; x += sw) {
         bool overlap = false;
-        for (const auto& c : v.cells) {
-          if (ph::soft_block(tech.macros.at(c.macro))) {
-            continue;  // a soft block may overlap macros
-          }
-          // Body spacing: the halo against cells, max(channel, both halos) against another macro.
-          const bool standard = tech.macros.at(c.macro).klass.starts_with("CORE");
-          const auto sx       = standard ? v.halo_x : std::max(v.channel_x, 2 * v.halo_x);
-          const auto sy       = standard ? v.halo_y : std::max(v.channel_y, 2 * v.halo_y);
-          if (&c != macro && (c.place.status == Status::FIXED || c.place.status == Status::LOCKED)
-              && x < c.place.x + c.place.width + sx && x + macro->place.width + sx > c.place.x
-              && y < c.place.y + c.place.height + sy && y + macro->place.height + sy > c.place.y) {
+        for (const auto& o : pack_obstacles) {
+          const auto& c = *o.cell;
+          if (&c != macro && x < c.place.x + c.place.width + o.sx && x + macro->place.width + o.sx > c.place.x
+              && y < c.place.y + c.place.height + o.sy && y + macro->place.height + o.sy > c.place.y) {
             overlap = true;
             break;
           }
@@ -7986,6 +8119,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
           macro->place.orientation = Orientation::N;
           macro->place.status      = Status::FIXED;
           packed_memories.insert(macro);
+          add_pack_obstacle(*macro);  // later proxies keep their distance from this one
           found = true;
         }
       }
@@ -7994,6 +8128,8 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       throw std::runtime_error("no space for square memory proxy: " + macro->name);
     }
   }
+  // ... and, like every packed proxy, legalized to the routing tracks below (an arbitrary drop position misses them).
+  packed_memories.insert(user_placed.begin(), user_placed.end());
   if (!packed_memories.empty()) {
     std::vector<ph::Component> frame;
     std::vector<Cell*>         owners;
@@ -16265,7 +16401,7 @@ static Result place_fp_auto(hhds::Graph& source, hhds::GraphLibrary& library, co
     const auto  decision       = detect_fp_repetition(fp_repetition_design(source, tech, requested.liberty), auto_options);
     resolved.fp_place          = decision.enabled;
     report                     = fp_rep_json(decision, auto_options);
-    livehd::diag::info("pass.place", "fp-auto", "progress")
+    livehd::diag::stat("pass.place", "fp-auto", "progress")
         .msg("synth.place.fp=auto: floorplan {} (repeated flop+memory share {:.1f}%, as floorplan candidates {:.1f}%)",
              decision.enabled ? "on" : "off",
              100 * decision.share,

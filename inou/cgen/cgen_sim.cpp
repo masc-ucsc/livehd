@@ -80,6 +80,7 @@
 #include "inline_sub.hpp"      // //graph — splice a small loop's replicas into the body that held the loop
 #include "latch_contract.hpp"  // //graph — clock_op_of (the ONE shared ICG recognizer)
 #include "node_util.hpp"
+#include "width_validation.hpp"
 #include "occurrence_materialize.hpp"  // //graph — realize native loop groups in the private simulator library
 #include "provisional_cell.hpp"        // //core — refuse provisional domino cells
 #include "sim_color_plan.hpp"
@@ -5026,7 +5027,7 @@ bool Cgen_sim::prepare_graph(const std::shared_ptr<hhds::Graph>& graph) {
     if (const auto st = livehd::clock_gate::infer_clock_gates(std::span{&graph, 1},
                                                               {.min_bits = env_.cg_bits, .min_cone = env_.cg_cone, .depth = 1});
         st.has_value() && st->gates > 0) {
-      livehd::diag::info("inou.cgen.sim", "clock-gated", "progress")
+      livehd::diag::stat("inou.cgen.sim", "clock-gated", "progress")
           .msg("`{}`: clock gating inferred {} gate(s) over {} register(s) ({} bit(s))", gname, st->gates, st->registers, st->bits)
           .emit();
     }
@@ -5167,12 +5168,12 @@ bool Cgen_sim::prepare_graph(const std::shared_ptr<hhds::Graph>& graph) {
     materialized_gate_cells += livehd::latch_contract::materialize_inline_clock_gates(g, "inou.cgen.sim");
   }
   if (materialized_gate_cells > 0) {
-    livehd::diag::info("inou.cgen.sim", "clock-gate-materialized", "progress")
+    livehd::diag::stat("inou.cgen.sim", "clock-gate-materialized", "progress")
         .msg("`{}`: materialized {} clock gate(s) as Clock_cell", gname, materialized_gate_cells)
         .emit();
   }
   if (inlined_gate_cells > 0) {
-    livehd::diag::info("inou.cgen.sim", "clock-gate-inlined", "progress")
+    livehd::diag::stat("inou.cgen.sim", "clock-gate-inlined", "progress")
         .msg("`{}`: inlined {} clock-gate cell(s) so their gate folds into a flop enable", gname, inlined_gate_cells)
         .emit();
   }
@@ -5181,6 +5182,7 @@ bool Cgen_sim::prepare_graph(const std::shared_ptr<hhds::Graph>& graph) {
 }
 
 void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
+  livehd::graph_util::require_sized_design(*graph, "inou.cgen.sim");
   std::vector<std::future<std::string>> object_jobs;
   auto                                  object_workers = shared_gen_ == nullptr ? nullptr : shared_gen_->object_workers;
   if (llvm_backend_ && object_workers == nullptr) {

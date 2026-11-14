@@ -87,7 +87,7 @@ for m in wrc wrci wrs; do build "$m"; done
 
 normalize() { # <name>  -> pass output on stdout, rc as the pass's
   rm -rf "$W/lgn_$1"
-  "$LHD" pass single_edge --top "$1" "lg:$W/lg_$1" --emit-dir "lg:$W/lgn_$1" --workdir "$W/pw_$1" 2>&1
+  "$LHD" pass single_edge -d pass.single_edge --top "$1" "lg:$W/lg_$1" --emit-dir "lg:$W/lgn_$1" --workdir "$W/pw_$1" 2>&1
 }
 
 out="$(normalize wrc)"

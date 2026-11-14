@@ -3403,7 +3403,7 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
           + (r.mems_retyped > 0 ? std::format(", {} falling-edge memory(ies) moved to the fall slot", r.mems_retyped)
                                 : std::string{}),
       need.why.empty() ? "def-driven" : need.why);
-  livehd::diag::info(kPass, "single-edge-applied", "progress")
+  livehd::diag::stat(kPass, "single-edge-applied", "progress")
       .msg("edge normalization on `{}`: {}", g->get_name(), r.reason)
       .emit();
   return r;
@@ -3483,14 +3483,14 @@ void Pass_single_edge::work(Eprp_var& var) {
   // Same pre-step the formal commands run: bring an instantiated clock-gate
   // cell's gate into the body so the fold below can see it.
   if (const int nc = lc::inline_clock_gate_cells(g, "pass.single_edge"); nc > 0) {
-    livehd::diag::info("pass.single_edge", "clock-gate-inlined", "progress")
+    livehd::diag::stat("pass.single_edge", "clock-gate-inlined", "progress")
         .msg("pass.single_edge: inlined {} clock-gate cell(s) into `{}`", nc, g->get_name())
         .emit();
   }
   // ...and lift a LEVEL-RESET latch's reset out of its window (see
   // lift_latch_level_resets): `rst | gate` matches no gate shape, `gate` does.
   if (const int nl = lc::lift_latch_level_resets(g); nl > 0) {
-    livehd::diag::info("pass.single_edge", "latch-reset-lifted", "progress")
+    livehd::diag::stat("pass.single_edge", "latch-reset-lifted", "progress")
         .msg("pass.single_edge: lifted the level reset of {} latch(es) in `{}` onto reset_pin", nl, g->get_name())
         .emit();
   }
@@ -3508,7 +3508,7 @@ void Pass_single_edge::work(Eprp_var& var) {
     return;
   }
   if (!res.applied) {
-    livehd::diag::info("pass.single_edge", "single-edge-skipped", "progress")
+    livehd::diag::stat("pass.single_edge", "single-edge-skipped", "progress")
         .msg("pass.single_edge on `{}`: {}", g->get_name(), res.reason)
         .emit();
   }

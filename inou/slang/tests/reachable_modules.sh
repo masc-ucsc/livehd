@@ -96,7 +96,7 @@ module real_ring(input a,b, output x,y);
  router second(.sel(1'b1),.local_data(b),.peer_data(x),.y(y));
 endmodule
 EOF
-"$LHD" compile "$W/ring.v" --top ring --workdir "$W/ring" \
+"$LHD" compile "$W/ring.v" -d pass.legalize --top ring --workdir "$W/ring" \
   --set compile.specialize_modules=false > "$W/ring.log" 2>&1
 # The benign ring is accepted either through the deferred loop check or because
 # the false-cycle unroller proved the cycle inactive first (selectors 0/1).

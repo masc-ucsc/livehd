@@ -3424,7 +3424,7 @@ int materialize_clock_cells(hhds::Graph* g, std::string_view from_pass, const st
     ++done;
   }
   if (done > 0) {
-    livehd::diag::info(from_pass, "clock-cell-materialized", "progress")
+    livehd::diag::stat(from_pass, "clock-cell-materialized", "progress")
         .msg("{}: materialized {} clock-gate cell(s) as Clock_cell in `{}`", from_pass, done, g->get_name())
         .emit();
   }
@@ -3705,7 +3705,7 @@ int materialize_inline_clock_gates(hhds::Graph* g, std::string_view from_pass) {
     }
     node.del_node();
   }
-  livehd::diag::info(from_pass, "clock-cell-materialized", "progress")
+  livehd::diag::stat(from_pass, "clock-cell-materialized", "progress")
       .msg("{}: materialized {} inline clock gate(s) as Clock_cell in `{}`", from_pass, cell_of.size(), g->get_name())
       .emit();
   return static_cast<int>(cell_of.size());
@@ -4045,7 +4045,7 @@ int gate_activation_clocks(hhds::Graph* g, std::string_view from_pass, Clock_por
   }
 
   if (done > 0) {
-    livehd::diag::info(from_pass, "activation-clock-gated", "progress")
+    livehd::diag::stat(from_pass, "activation-clock-gated", "progress")
         .msg("{}: gated {} conditionally-called instance clock port(s) in `{}`", from_pass, done, g->get_name())
         .emit();
   }

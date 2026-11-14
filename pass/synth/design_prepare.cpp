@@ -245,7 +245,7 @@ std::unique_ptr<Prepared_design> prepare_design(std::span<const std::shared_ptr<
   if (const int specialized
       = specialize ? specialize::specialize_constants(result->definitions, {.inherit_colors = true, .state_free_only = true}) : 0;
       specialized > 0) {
-    livehd::diag::info(from_pass, "constant-specialized", "progress")
+    livehd::diag::stat(from_pass, "constant-specialized", "progress")
         .msg("{}: {} constant-specialized instance definition(s)", from_pass, specialized)
         .emit();
   }
@@ -271,7 +271,7 @@ std::unique_ptr<Prepared_design> prepare_design(std::span<const std::shared_ptr<
           specialize::refold_private_body(root, specialize::Refold_cost::synth, "synth.flat_sweep");
         }
       }
-      livehd::diag::info(from_pass, "flat-swept", "progress")
+      livehd::diag::stat(from_pass, "flat-swept", "progress")
           .msg("{}: flat sweep inlined {} instance(s) into {} root(s)", from_pass, flat.inlined, roots.size())
           .emit();
     }
@@ -287,7 +287,7 @@ std::unique_ptr<Prepared_design> prepare_design(std::span<const std::shared_ptr<
     }
     result->merged = *merged;
     if (merged->registers > 0) {
-      livehd::diag::info(from_pass, "registers-merged", "progress")
+      livehd::diag::stat(from_pass, "registers-merged", "progress")
           .msg("{}: merged {} duplicate register(s) ({} bit(s)) in {} round(s)", from_pass, merged->registers, merged->bits,
                merged->rounds)
           .emit();
@@ -300,7 +300,7 @@ std::unique_ptr<Prepared_design> prepare_design(std::span<const std::shared_ptr<
     }
     result->sweep = *swept;
     if (swept->registers_constant + swept->registers_removed + swept->registers_trimmed + swept->registers_split + swept->cells_removed > 0) {
-      livehd::diag::info(from_pass, "state-swept", "progress")
+      livehd::diag::stat(from_pass, "state-swept", "progress")
           .msg("{}: state sweep folded {} constant register(s) ({} bit(s)), removed {} unobserved register(s) ({} bit(s)) and {} "
                "cell(s), narrowed {} and split {} register(s), dropping {} unobserved register bit(s)",
                from_pass,
@@ -386,7 +386,7 @@ std::unique_ptr<Prepared_design> prepare_design(std::span<const std::shared_ptr<
     }
     result->gating = *gated;
     if (gated->gates + gated->collapsed + gated->duplicates + gated->redundant > 0) {
-      livehd::diag::info(from_pass, "clock-gated", "progress")
+      livehd::diag::stat(from_pass, "clock-gated", "progress")
           .msg("{}: clock gating inferred {} gate(s) over {} register(s) ({} bit(s); {} enable(s) absorbed), collapsed {} gate(s), merged "
                "{} duplicate gate(s), dropped {} implied enable conjunct(s)",
                from_pass,
@@ -408,7 +408,7 @@ std::unique_ptr<Prepared_design> prepare_design(std::span<const std::shared_ptr<
     clock_cells += *expanded;
   }
   if (clock_cells > 0) {
-    livehd::diag::info(from_pass, "clock-cell-expanded", "progress")
+    livehd::diag::stat(from_pass, "clock-cell-expanded", "progress")
         .msg("{}: spelled {} clock gate(s) as `clk & latch` for ICG mapping", from_pass, clock_cells)
         .emit();
   }

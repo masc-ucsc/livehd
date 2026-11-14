@@ -25,7 +25,7 @@ def synth(name, source, *settings):
     # Fine partitioning unless the caller picks one: a repeated --set is a usage error.
     if not any(v.startswith("synth.partition=") for v in settings):
         settings = ["synth.partition=fine", *settings]
-    return run("synth", source, "--top", name, "--workdir", work / name,
+    return run("synth", source, "-d", "pass.abc", "--top", name, "--workdir", work / name,
                "--emit-dir", "lg:" + str(work / (name + "-net")),
                "--set", "synth.liberty=" + lib, "--set", timer,
                *[a for value in settings for a in ("--set", value)])

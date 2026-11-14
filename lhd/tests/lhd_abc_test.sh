@@ -51,7 +51,7 @@ run pass color synth --top "$TOP" lg:"$W/lg" --workdir "$W/w2"
 # 3. ABC technology-map each colored region -> standard-cell netlist. Every
 # completed color must produce one compact, flushed heartbeat with a monotonic
 # completion count; long synthesis wrappers rely on this stable prefix.
-"$LHD" pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net" --set synth.liberty="$LIB" --workdir "$W/w3" \
+"$LHD" pass abc -d pass.abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net" --set synth.liberty="$LIB" --workdir "$W/w3" \
     --diag-fmt pretty --result-json "$W/r.json" >"$W/abc_stdout.log" 2>"$W/abc_progress.log" \
   || fail "pass abc -> $(cat "$W/r.json" 2>/dev/null)"
 awk '

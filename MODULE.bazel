@@ -98,7 +98,7 @@ http_archive(
 # Native CPU placement; the repository uses LiveHD's HHDS/HLOP repositories.
 git_repository(
     name = "dreamplace",
-    commit = "21c563546fdf4f1487adf3bb421c8c6b7d6f3b63",
+    commit = "6d712b378f8af60aa97e98ac37ebcdd76970f278",
     remote = "https://github.com/masc-ucsc/DREAMPlace.git",
 )
 # For local co-development swap the git_repository above for:
@@ -145,7 +145,7 @@ git_repository(
 # hlop (Dlop value type + slop/dlop execution layer)
 git_repository(
     name = "hlop",
-    commit = "3e90be765a75a5639c31ff08352e6033c0d83007",
+    commit = "6211e014300789204e750a11b0b19e80cc4e3773",
     remote = "https://github.com/masc-ucsc/hlop.git",
 )
 # For local co-development swap the git_repository above for:
@@ -199,7 +199,7 @@ http_archive(
 
 git_repository(
     name = "hhds",
-    commit = "7bfe8cf559a564f966c882dc33f47e1a4f7303ac",
+    commit = "161469ef7d8f263b7b5238350ee7573558eaec1b",
     remote = "https://github.com/masc-ucsc/hhds.git",
 )
 # For local co-development swap the git_repository above for:

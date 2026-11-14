@@ -115,6 +115,8 @@ int main(int argc, char** argv) {
     sink.set_human_stderr(!opts.quiet);
     sink.set_stderr_jsonl(opts.diag_fmt == lhd::Diag_fmt::jsonl);
     sink.set_jsonl_path(diag_path);
+    livehd::diag::set_debug(opts.debug);
+    livehd::diag::set_stats(opts.stats);
   }
 
   // `lhd pyrope <lsp|fmt>` — the Pyrope developer tools. `pyrope lsp` is the

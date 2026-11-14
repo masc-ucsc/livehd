@@ -530,6 +530,9 @@ void              emit_deprecated_sets(const Options& opts);
 // in one flow can end up on different files.
 std::string       synth_set(const Options& opts, std::string_view flag, std::string_view def);
 std::string       resolve_liberty(const Options& opts);
+// synth.liberty, else $LHD_TECH_DIR/<default Liberty> when that is set, else empty. No existence check and
+// no error (resolve_liberty adds both); every reader that needs the library's path or units goes through it.
+std::string       synth_liberty_or_default(const Options& opts);
 std::optional<double>              sdc_min_clock_period_ps(const std::string& sdc_path, const std::string& liberty_path);
 // The SDC time and load units: the Liberty's first `time_unit` (ps when
 // absent, as sdc_min_clock_period_ps reads it) and `capacitive_load_unit`

@@ -31,6 +31,7 @@ cc_library(
         "occurrence_materialize.cpp",
         "split_selfref.cpp",
         "loop_split.cpp",
+        "width_validation.cpp",
     ],
     hdrs = [
         "ann_place.hpp",
@@ -44,6 +45,7 @@ cc_library(
         "clock_gate.hpp",
         "inline_sub.hpp",
         "loop_split.hpp",
+        "width_validation.hpp",
         "node_util.hpp",
         "port_reach.hpp",
         "reduce_lower.hpp",
@@ -83,6 +85,7 @@ cc_library(
     "latch_window_smoke",
     "occurrence_materialize_test",
     "port_reach_test",
+    "width_validation_test",
 ]]
 
 # Small header-level graph helper checks in one binary (disjoint gtest suites,

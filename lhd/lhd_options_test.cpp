@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
+#include <filesystem>
 #include <format>
 #include <fstream>
 #include <limits>
@@ -11,11 +13,44 @@
 #include <vector>
 
 #include "core/metadata.hpp"
+#include "diag.hpp"
 #include "gtest/gtest.h"
 #include "lhd.hpp"
 #include "lhd_kernel_internal.hpp"
+#include "node_util.hpp"
 #include "pass.hpp"
 #include "synth_policy.hpp"
+
+TEST(LhdOptions, ConsumersRejectUnresolvedDriverWidths) {
+  (void)lhd::list_set_options();
+  hhds::GraphLibrary library;
+  auto               io = library.create_io("unsized_consumer_input");
+  io->add_output("o", 1);
+  auto graph = io->create_graph();
+  auto cell  = livehd::graph_util::create_typed_node(*graph, Ntype_op::Or);
+  livehd::graph_util::create_const(*graph, *Dlop::create_integer(5)).connect_sink(cell.create_sink_pin(0));
+  cell.create_driver_pin(0).connect_sink(graph->get_output_pin("o"));
+  Eprp_var var;
+  var.add(graph);
+  auto& sink = livehd::diag::sink();
+  sink.set_human_stderr(false);
+  for (const auto method : {"pass.abc", "pass.usyn", "pass.lec", "pass.formal", "inou.cgen.verilog", "inou.cgen.sim"}) {
+    sink.clear();
+    lhd::Options opts;
+    opts.workdir = "width_guard_logs";
+    lhd::Result result;
+    try {
+      lhd::run_step(method, var, {}, opts, result);
+      FAIL() << method << " consumed an unsized cell";
+    } catch (const lhd::Lhd_error& error) {
+      EXPECT_EQ(error.cls, "internal") << method;
+      EXPECT_NE(error.msg.find("unresolved width"), std::string::npos) << method;
+    }
+    ASSERT_FALSE(sink.records().empty());
+    EXPECT_EQ(sink.records().back().code, "graph-width-unresolved") << method;
+  }
+  sink.clear();
+}
 
 TEST(LhdOptions, AutomaticPlacementDensityStaysBelowHardCapAfterRestartSerialization) {
   EXPECT_DOUBLE_EQ(lhd::placement_search_density(.6, .8), .65);
@@ -349,6 +384,25 @@ TEST(LhdOptions, SynthDelayFractionScalesTheSdcClockPeriod) {
   // A period is the number of the file, in double: the domino schedule puts 0.9 ns on a 1e-6 ps grid.
   EXPECT_EQ(lhd::sdc_clocks(dir + "/frac_ns.sdc").at(0).period.value(), 0.9);
   EXPECT_EQ(lhd::sdc_min_clock_period_ps(dir + "/frac_ns.sdc", dir + "/frac_ns.lib").value(), 0.9 * 1e3);
+  // No synth.liberty: the unit comes from the $LHD_TECH_DIR default library the mapper actually reads, not from
+  // an empty path (which meant ps and gave `&nf -D 0.360` for a 0.9 ns clock).
+  {
+    const auto tech = dir + "/tech_ns";
+    std::filesystem::create_directories(tech);
+    std::ofstream(tech + "/" + std::string{lhd::kSynthDefaultLiberty}) << "library (x) {\n  time_unit : \"1ns\";\n}\n";
+    const char* old_tech = std::getenv("LHD_TECH_DIR");
+    const std::string saved = old_tech ? old_tech : "";
+    setenv("LHD_TECH_DIR", tech.c_str(), 1);
+    const auto delay = merged({
+        {"synth.sdc", dir + "/frac_ns.sdc"}
+    }).at("delay");
+    if (old_tech) {
+      setenv("LHD_TECH_DIR", saved.c_str(), 1);
+    } else {
+      unsetenv("LHD_TECH_DIR");
+    }
+    EXPECT_EQ(delay, "360.000");
+  }
   // The SDC unit is the Liberty unit: 0.9 ns is 900 ps.
   EXPECT_EQ(merged({
                        {       "synth.sdc", dir + "/frac_ns.sdc"},
@@ -838,6 +892,31 @@ TEST(LhdOptions, DeprecatedPartitionSpellingsCanonicalize) {
   };
   lhd::canonicalize_synth_sets(opts);
   EXPECT_EQ(value("synth.place.dynamic_bins"), std::vector<std::string>{"true"});
+}
+
+// `synth.place.seed` named the start-position TSV, which invited `=33` as an RNG seed. A number now reaches the
+// shared `lhd.seed`; a path reaches synth.place.start_map. Both warn.
+TEST(LhdOptions, PlaceSeedIsAStartMapFileOrTheSharedSeed) {
+  lhd::Options opts;
+  opts.command = "synth";
+  opts.sets    = {{"synth.place.seed", "33"}};
+  lhd::canonicalize_synth_sets(opts);
+  ASSERT_EQ(opts.sets.size(), 1u);
+  EXPECT_EQ(opts.sets[0].first, "lhd.seed");
+  EXPECT_EQ(opts.sets[0].second, "33");
+  ASSERT_EQ(opts.deprecated_sets.size(), 1u);
+  lhd::apply_lhd_settings(opts);
+  EXPECT_EQ(opts.seed, "33");
+  EXPECT_TRUE(opts.seed_explicit);
+
+  lhd::Options file;
+  file.command = "synth";
+  file.sets    = {{"synth.place.seed", "start.tsv"}};
+  lhd::canonicalize_synth_sets(file);
+  ASSERT_EQ(file.sets.size(), 1u);
+  EXPECT_EQ(file.sets[0].first, "synth.place.start_map");
+  EXPECT_EQ(file.sets[0].second, "start.tsv");
+  EXPECT_EQ(file.deprecated_sets.size(), 1u);
 }
 
 TEST(LhdOptions, PositionalMetadataIsNotSourceAndMergesByClass) {

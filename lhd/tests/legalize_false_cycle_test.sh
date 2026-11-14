@@ -105,7 +105,7 @@ VEOF
 
 compile() { # <name>  -> compile output, rc as lhd's
   rm -rf "$W/lg_$1"
-  "$LHD" compile "$W/$1.sv" --reader yosys-slang --top "$1" --set yosys.setundef=zero --emit-dir "lg:$W/lg_$1" \
+  "$LHD" compile -d pass.legalize "$W/$1.sv" --reader yosys-slang --top "$1" --set yosys.setundef=zero --emit-dir "lg:$W/lg_$1" \
     --workdir "$W/cw_$1" 2>&1
 }
 

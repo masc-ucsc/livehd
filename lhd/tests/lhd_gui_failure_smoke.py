@@ -18,7 +18,7 @@ sdc = root / 'timing.sdc'
 sdc.write_text('create_clock -name virtual -period 10\n')
 log = open(root / 'err.log', 'w')
 proc = subprocess.Popen(['lhd/lhd', 'synth', str(source), '--workdir', str(root / 'W'), '--set', f'synth.liberty={lib}/sky130hd.lib',
-                         '--set', f'synth.lef={lib}/sky130hd.tlef,{lib}/sky130hd.lef', '--set', 'synth.place=true', '--set', f'synth.sdc={sdc}', '--gui', '--gui-no-open', '-q'],
+                         '--set', f'synth.lef={lib}/sky130hd.tlef,{lib}/sky130hd.lef', '--set', 'synth.place=true', '--set', f'synth.sdc={sdc}', '--set', 'synth.place.gui.pause=true', '--gui', '--gui-no-open', '-q'],
                         stdout=subprocess.DEVNULL, stderr=log)
 try:
     url = None

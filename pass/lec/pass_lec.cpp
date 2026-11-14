@@ -1,6 +1,7 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include "pass_lec.hpp"
+#include "width_validation.hpp"
 
 #include <print>
 #include <string>
@@ -288,6 +289,11 @@ void Pass_lec::setup() {
 }
 
 void Pass_lec::lec(Eprp_var& var) {
+  for (const auto& graph : var.graphs) {
+    if (graph) {
+      livehd::graph_util::require_sized_design(*graph, "pass.lec");
+    }
+  }
   if (var.graphs.size() < 2) {
     livehd::diag::err("pass.lec", "lec-needs-pair", "internal")
         .msg("pass.lec needs two designs (ref, impl); got {} graph(s)", var.graphs.size())

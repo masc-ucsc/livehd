@@ -74,7 +74,7 @@ EOF
 norm() { # <out-dir> [--set ...]
   local out=$1
   shift
-  "$LHD" pass single_edge --top dlr "lg:$W/lg" --emit-dir "lg:$out" --workdir "$out.w" "$@" 2>&1
+  "$LHD" pass single_edge -d pass.single_edge --top dlr "lg:$W/lg" --emit-dir "lg:$out" --workdir "$out.w" "$@" 2>&1
 }
 out="$(norm "$W/lgn")"
 [ $? -eq 0 ] || { echo "$out" | grep -o '"message":"[^"]*' | head -3; fail "pass single_edge refused the data-gated latch"; }

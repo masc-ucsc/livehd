@@ -31,7 +31,7 @@ synth() { # <tag> <state_sweep> [extra --set ...]
   local d="$W/$1" sweep="$2"
   shift 2
   mkdir -p "$d"
-  "$LHD" synth --result-json "$d/r.json" --reader slang --top sweep --workdir "$d/W" --emit-dir lg:"$d/net" \
+  "$LHD" synth -d pass.abc,pass.usyn --result-json "$d/r.json" --reader slang --top sweep --workdir "$d/W" --emit-dir lg:"$d/net" \
     --emit-dir verilog:"$d/netv" --set synth.liberty="$LIB" --set synth.state_sweep="$sweep" "$@" \
     -- "$SRC" > "$d/synth.log" 2>&1 || fail "$1: synth -> $(cat "$d/r.json" 2>/dev/null)"
   cat "$d/netv/"*.v > "$d/net.v"
@@ -142,7 +142,7 @@ MERGE_SRC="$PWD/lhd/tests/reg_merge.v"
 for mode in false true; do
   d="$W/merge_$mode"
   mkdir -p "$d"
-  "$LHD" synth --result-json "$d/r.json" --reader slang --top reg_merge --workdir "$d/W" --emit-dir lg:"$d/net" \
+  "$LHD" synth -d pass.abc,pass.usyn --result-json "$d/r.json" --reader slang --top reg_merge --workdir "$d/W" --emit-dir lg:"$d/net" \
     --emit-dir verilog:"$d/netv" --set synth.liberty="$LIB" --set synth.merge_registers="$mode" -- "$MERGE_SRC" > "$d/synth.log" 2>&1 \
     || fail "merge $mode: synth -> $(cat "$d/r.json" 2>/dev/null)"
   cat "$d/netv/"*.v > "$d/net.v"
@@ -170,7 +170,7 @@ if [ "$part" = all ] || [ "$part" = memory ]; then
 for mode in false true; do
   d="$W/mem_$mode"
   mkdir -p "$d"
-  "$LHD" synth --result-json "$d/r.json" --reader slang --top sweep_mem --workdir "$d/W" --emit-dir lg:"$d/net" \
+  "$LHD" synth -d pass.abc,pass.usyn --result-json "$d/r.json" --reader slang --top sweep_mem --workdir "$d/W" --emit-dir lg:"$d/net" \
     --emit-dir verilog:"$d/netv" --set synth.liberty="$LIB" --set synth.memory=flops --set synth.state_sweep="$mode" \
     -- "$MEM_SRC" > "$d/synth.log" 2>&1 || fail "mem $mode: synth -> $(cat "$d/r.json" 2>/dev/null)"
   cat "$d/netv/"*.v > "$d/net.v"

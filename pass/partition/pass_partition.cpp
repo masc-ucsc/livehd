@@ -803,7 +803,9 @@ bool Partitioner::collect() {
       }
     }
   }
-  if (saw_uncolored_) {
+  // The flow mints `cgen_memory_*` modules itself (pass/synth/memory_module.cpp) and never colors them; a
+  // warning there is about the tool's own scaffolding, not the user's design, and repeated per memory.
+  if (saw_uncolored_ && !std::string_view{top_}.starts_with("cgen_memory_")) {
     // One warning per def (not per node): the dedup sink collapses repeats.
     livehd::diag::warn("pass.partition", "uncolored-node", "io")
         .msg(

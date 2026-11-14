@@ -95,24 +95,47 @@ std::map<uint64_t, std::string> memory_proxies(hhds::Graph& graph, physical::Tec
     const auto pins = [&](const std::vector<std::string>& names, int edge) {
       // Route away from the edge on the layer's preferred direction. Putting
       // every edge on the first layer can leave only off-grid planar access.
-      const auto   preferred = edge == 1 ? "VERTICAL" : "HORIZONTAL";
-      const auto   found     = std::find_if(tech.routing_layers.begin(), tech.routing_layers.end(), [&](const auto& name) {
-        return tech.layers.at(name).direction == preferred;
-      });
-      const auto&  layer     = found == tech.routing_layers.end() ? tech.routing_layers.front() : *found;
-      const double half      = std::min(macro.width / 100, std::max(1.0 / tech.dbu, tech.layers.at(layer).width / 2));
-      for (size_t i = 0; i < names.size(); ++i) {
-        const double   pos  = macro.width * (i + 1) / (names.size() + 1);
-        physical::Rect rect = edge == 0   ? physical::Rect{0, pos - half, 2 * half, pos + half}
-                              : edge == 1 ? physical::Rect{pos - half, 0, pos + half, 2 * half}
-                                          : physical::Rect{macro.width - 2 * half, pos - half, macro.width, pos + half};
-        macro.pins.at(names[i]).shapes.push_back({layer, rect});
+      const auto preferred = edge == 1 ? "VERTICAL" : "HORIZONTAL";
+      std::vector<std::string> stack;
+      for (const auto& layer_name : tech.routing_layers) {
+        if (tech.layers.at(layer_name).direction == preferred) {
+          stack.push_back(layer_name);
+        }
+      }
+      if (stack.empty()) {
+        stack.push_back(tech.routing_layers.front());
+      }
+      // The proxy is sized from bit area, so a wide memory can have more pins than one layer has tracks along
+      // its edge (a 30x8 memory with 241 control pins on a 73 um edge). Fill each layer of the preferred
+      // direction up to 80% of its tracks, then the next layer; the last layer takes whatever is left (the
+      // track alignment then reports a real shortage instead of an arbitrary one).
+      size_t at = 0;
+      for (size_t l = 0; l < stack.size() && at < names.size(); ++l) {
+        const auto&  layer = tech.layers.at(stack[l]);
+        const double pitch = edge == 1 ? layer.pitch_x : layer.pitch_y;
+        const size_t cap   = pitch > 0 ? std::max<size_t>(1, static_cast<size_t>(0.8 * macro.width / pitch)) : names.size();
+        const size_t take  = l + 1 == stack.size() ? names.size() - at : std::min(cap, names.size() - at);
+        const double half  = std::min(macro.width / 100, std::max(1.0 / tech.dbu, layer.width / 2));
+        for (size_t i = 0; i < take; ++i) {
+          const double   pos  = macro.width * (i + 1) / (take + 1);
+          physical::Rect rect = edge == 0   ? physical::Rect{0, pos - half, 2 * half, pos + half}
+                                : edge == 1 ? physical::Rect{pos - half, 0, pos + half, 2 * half}
+                                            : physical::Rect{macro.width - 2 * half, pos - half, macro.width, pos + half};
+          macro.pins.at(names[at + i]).shapes.push_back({stack[l], rect});
+        }
+        at += take;
       }
     };
     pins(address, 0);
     pins(data, 1);
     pins(control, 2);
-    const auto master = std::format("__livehd_memory_{}_{}_{}", bits, depth, hash_util::fnv1a64(node.get_name()));
+    // The name keys on the proxy's shape and pins, NOT on the instance: the floorplan stage finds repeated hierarchy
+    // copies by matching macro masters, and a per-instance hash made every copy of a memory look different.
+    std::string signature = std::format("{}x{}:{:.6f}", bits, depth, macro.width);
+    for (const auto& [pin_label, pin_spec] : macro.pins) {
+      signature += std::format("|{}:{}", pin_label, pin_spec.direction);
+    }
+    const auto master = std::format("__livehd_memory_{}_{}_{}", bits, depth, hash_util::fnv1a64(signature));
     tech.macros.emplace(master, std::move(macro));
     result.emplace(node.get_debug_nid(), master);
   }
@@ -200,7 +223,14 @@ void align_memory_proxy_pins(physical::Technology& tech, const physical::Floorpl
         }
       }
       if (candidates.size() < rectangles.size()) {
-        throw std::runtime_error("memory proxy edge has too few routing tracks for its pins: " + name);
+        throw std::runtime_error(std::format("memory proxy edge has too few routing tracks for its pins: {} ({} pins, {} usable tracks on layer {}, "
+                                             "edge {}, macro {:.2f} um)",
+                                             name,
+                                             rectangles.size(),
+                                             candidates.size(),
+                                             key.first,
+                                             key.second,
+                                             macro.width));
       }
       const std::vector<int64_t> positions(candidates.begin(), candidates.end());
       size_t                     next = 0;

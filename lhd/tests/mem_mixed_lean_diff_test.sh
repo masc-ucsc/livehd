@@ -58,7 +58,7 @@ fails=0
 "$LHD" compile verilog "$RTL" --top "$TOP" --reader yosys-slang --set yosys.setundef=zero \
   --workdir "$T/w" --emit-dir "lg:$T/lg" > "$T/compile.log" 2>&1 \
   || { echo "FAIL: the fixture did not import"; tail -3 "$T/compile.log"; exit 1; }
-"$LHD" pass single_edge --top "$TOP" "lg:$T/lg" --emit-dir "lg:$T/lgn" \
+"$LHD" pass single_edge -d pass.single_edge --top "$TOP" "lg:$T/lg" --emit-dir "lg:$T/lgn" \
   --set multi_clock=true --workdir "$T/se" > "$T/se.log" 2>&1 \
   || { echo "FAIL: single_edge refused the fixture"; exit 1; }
 grep -q "P=2 slots" "$T/se.log" \
