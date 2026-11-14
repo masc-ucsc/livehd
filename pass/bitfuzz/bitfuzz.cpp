@@ -97,14 +97,22 @@ struct Snap {
 //                   (process_memory hard-errors otherwise).
 //   Sub           - instance boundary; treated like IO in v1.
 //   Flop/Latch    - state, unless Mode::All.
+//   Rem/LUT/Clock_cell - only when `keep_contract_widths`: bitwidth keeps
+//                   their pre-stamped width as the operation's contract and
+//                   never re-infers it, so with no repair round to put it back
+//                   (strip_annotations) the pin reaches a consumer unsized.
+//                   fuzz() still strips them to report the missing rule.
 //
 // body().nodes() never emits the INPUT/OUTPUT/CONST singletons (hhds graph.hpp),
 // so IO and constant pins are excluded by construction.
-[[nodiscard]] std::vector<Snap> collect(hhds::Graph* g, const Options& opts) {
+[[nodiscard]] std::vector<Snap> collect(hhds::Graph* g, const Options& opts, bool keep_contract_widths) {
   std::vector<Snap> out;
   for (auto node : g->body().nodes()) {
     const auto op = gu::type_op_of(node);
     if (op == Ntype_op::Invalid || op == Ntype_op::Sub || op == Ntype_op::Memory) {
+      continue;
+    }
+    if (keep_contract_widths && has_no_inference_rule(op)) {
       continue;
     }
     const bool is_state = op == Ntype_op::Flop || op == Ntype_op::Fflop || op == Ntype_op::Latch;
@@ -218,7 +226,7 @@ Stats strip_annotations(const std::shared_ptr<hhds::Graph>& g, const Options& op
   if (!g || opts.mode == Mode::Off) {
     return st;
   }
-  for (const auto& s : collect(g.get(), opts)) {
+  for (const auto& s : collect(g.get(), opts, /*keep_contract_widths=*/true)) {
     strip(s);
     ++st.cleared;
     st.cleared_state += s.is_state;
@@ -232,7 +240,7 @@ Stats fuzz(const std::shared_ptr<hhds::Graph>& g, const Options& opts) {
     return st;
   }
 
-  auto snaps = collect(g.get(), opts);
+  auto snaps = collect(g.get(), opts, /*keep_contract_widths=*/false);
   if (snaps.empty()) {
     return st;
   }

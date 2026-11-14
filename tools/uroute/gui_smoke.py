@@ -43,7 +43,9 @@ publish_weights(pool, encode_tensors(tensors()), trained_on="CLI-test-only", pro
 
 def session(extra, kind):
     log = root / ("gui_" + kind + ".log")
-    proc = subprocess.Popen(base + ["--workdir", str(root / ("W_" + kind)), "--gui", "--gui-no-open"] + extra, stdout=subprocess.DEVNULL, stderr=open(log, "w"))
+    # synth.place.gui.pause: the GUI runs untouched by default; this test needs it to stop at a gate.
+    proc = subprocess.Popen(base + ["--workdir", str(root / ("W_" + kind)), "--gui", "--gui-no-open",
+                                    "--set", "synth.place.gui.pause=true"] + extra, stdout=subprocess.DEVNULL, stderr=open(log, "w"))
     url = None
     for _ in range(600):
         time.sleep(0.05)

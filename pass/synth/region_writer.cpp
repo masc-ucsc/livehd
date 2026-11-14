@@ -251,6 +251,15 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
     I(inserted);
     return it->second;
   };
+  // Each splitter output is one unsigned bit. The instance pin carries that
+  // stamp itself: consumers (cgen, lec, abc) read a Sub output's width from
+  // the pin, never from the callee's IO declaration (graph/width_validation).
+  auto splitter_bit = [](hhds::Node_class& inst, hhds::Port_id port) {
+    auto pin = inst.create_driver_pin(port);
+    gu::set_bits(pin, 1);
+    gu::set_unsign(pin);
+    return pin;
+  };
   auto input_bit = [&](size_t port_idx, int b) -> hhds::Pin_class {
     auto&       cache = in_bit[port_idx];
     const auto& port  = rb.inputs[port_idx];
@@ -300,11 +309,11 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
       // unread bit would carry no edge in either case. Retaining every handle
       // also keeps the PI loop from searching the node's long pin list.
       for (int bit : demand) {
-        cache[bit] = inst.create_driver_pin(split.bit_port[bit]);
+        cache[bit] = splitter_bit(inst, split.bit_port[bit]);
       }
     }
     if (cache[b].is_invalid()) {  // a bit outside the precomputed demand
-      cache[b] = inst.create_driver_pin(shared_input_splitter(w).bit_port[b]);
+      cache[b] = splitter_bit(inst, shared_input_splitter(w).bit_port[b]);
     }
     return cache[b];
   };

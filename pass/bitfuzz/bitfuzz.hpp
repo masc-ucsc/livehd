@@ -93,6 +93,9 @@ struct Stats {
 // Pipeline perturbation only: leave eligible pins unsized for cprop/bitwidth.
 // No inference or restoration runs here. IO, constants, memories and instance
 // boundaries stay intact; Wires also preserves all register/latch outputs.
+// Rem, LUT and Clock_cell keep their width too: bitwidth has no rule to
+// re-infer it (the stamp is the cell's contract), so clearing it here would
+// only hand an unsized pin to the next consumer.
 Stats strip_annotations(const std::shared_ptr<hhds::Graph>& g, const Options& opts);
 
 // Standalone inference audit, used by the recovery unit tests. The compile

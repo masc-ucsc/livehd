@@ -84,6 +84,31 @@ TEST(Bitfuzz, PipelinePreservesStateMemoryAndInstanceBoundaries) {
   }
 }
 
+// Rem, LUT and Clock_cell have no bitwidth inference rule: their stamped width
+// is the cell's contract. The pipeline strip has no repair round, so clearing
+// one would hand an unsized pin to the next consumer (pass.formal rejects it).
+TEST(Bitfuzz, PipelineKeepsContractWidths) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_bitfuzz_test");
+  auto  io  = lib.create_io("bf_pipeline_contract_widths");
+  io->add_input("in", 1);
+  io->set_bits("in", 8);
+  auto                         g = io->create_graph();
+  std::vector<hhds::Pin_class> kept;
+  for (auto op : {Ntype_op::Rem, Ntype_op::LUT, Ntype_op::Clock_cell}) {
+    auto node = gu::create_typed_node(*g, op);
+    kept.push_back(node.create_driver_pin(0));
+  }
+  for (auto pin : kept) {
+    gu::set_ubits(pin, 5);
+  }
+  const auto st = livehd::bitfuzz::strip_annotations(g, wires_opts());
+  EXPECT_EQ(st.cleared, 0);
+  for (auto pin : kept) {
+    EXPECT_EQ(gu::bits_of(pin), 5);
+    EXPECT_TRUE(gu::is_unsign(pin));
+  }
+}
+
 // Every finding on one line, so a failing expectation says WHICH pin misbehaved
 // instead of just a count.
 std::string describe(const livehd::bitfuzz::Stats& st) {

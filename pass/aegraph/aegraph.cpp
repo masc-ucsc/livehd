@@ -2109,8 +2109,9 @@ void Engine::create_node(Class_id cls) {
   auto         node = gu::create_typed_node(g_, n.op);
   rewire(node, n.op, eg_.operands(n));
   rep_pin_[cls] = node.create_driver_pin(0);
-  if (opt_.preflight && n.op != Ntype_op::Mux) {
-    // No bitwidth follows: the cell is stamped like every cell classic Cprop{false} makes. The class a member
+  if (opt_.preflight) {
+    // No bitwidth follows: the cell is stamped like every cell classic Cprop{false} makes. A Mux too: every
+    // consumer (pass.lec, pass.formal) rejects an unsized driver (graph/width_validation.hpp). The class a member
     // is realized for is equal to that member as an unbounded integer, so the member's own stamp is valid.
     if (cls == owner_cls_ && !owner_pin_.is_invalid() && gu::bits_of(owner_pin_) != 0) {
       gu::set_bits(rep_pin_[cls], gu::bits_of(owner_pin_));
@@ -2245,12 +2246,10 @@ bool Engine::preflight_ok() {
     if (k.kind != Egraph::Kind::node || !rep_pin_[c].is_invalid()) {
       continue;  // a leaf, a constant, or a class an original node realizes
     }
-    const Enode n = eg_.enode(k.first);
-    if (n.op != Ntype_op::Mux) {
-      const bool member_stamp = top != nullptr && gu::bits_of(top->node.get_driver_pin(0)) != 0;
-      if (!member_stamp && !stamp_for(c)) {
-        return false;
-      }
+    const Enode n            = eg_.enode(k.first);
+    const bool  member_stamp = top != nullptr && gu::bits_of(top->node.get_driver_pin(0)) != 0;
+    if (!member_stamp && !stamp_for(c)) {
+      return false;
     }
     for (const auto& o : eg_.operands(n)) {
       stack.emplace_back(o.cls, nullptr);

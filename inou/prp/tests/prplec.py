@@ -343,6 +343,11 @@ def _run_pair(runner, tmp_dir, base_test, var_test, verbose=False):
                '--ref-top', top, '--impl-top', top, '--workdir', wd] + _set_args(sets)
         for module in (var_test.params.get('lec_collapse') or base_test.params.get('lec_collapse') or '').split():
             cmd += ['--collapse', module]
+        if _tags(base_test, 'lec_grep') + _tags(var_test, 'lec_grep'):
+            # A `:lec_grep:` may name a pass.lec detail record (e.g. the
+            # loop_certificates of a block), which reaches the output only
+            # under its `-d` word (core/diag.hpp logging policy).
+            cmd += ['-d', 'pass.lec']
         result = run_lec(cmd, cwd=tmp_dir, timeout=20)
         rc, out = result.returncode, result.stdout.decode("utf-8", "replace")
         if verbose:
