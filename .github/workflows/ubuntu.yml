@@ -6,9 +6,13 @@ on:
   pull_request:
   workflow_dispatch:
 
+# A PR's new push supersedes its running check. A master run is never
+# cancelled: one takes ~3 hours and master gets several pushes an hour
+# (Renovate included), so cancelling meant almost no run ever finished. GitHub
+# keeps one pending run per group, so the newest push runs next.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test-opt:
