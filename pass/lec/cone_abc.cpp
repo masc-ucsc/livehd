@@ -1820,6 +1820,8 @@ int comb_equal(const Lit_model& a, const Lit_model& b) {
   return rv != 1 ? 0 : same ? 1 : 2;
 }
 
+int dsec_bounded(const Lit_model& a, const Lit_model& b, int timeout_s);
+
 // Sequential equivalence of two models' `target` outputs, inputs matched by
 // name: the structural tier above, then SAT sweeping + induction (ABC's
 // `dsec`, Mishchenko et al.) for register renames and retimed logic.
@@ -1845,6 +1847,11 @@ int seq_equal(const Lit_model& a, const Lit_model& b, int timeout_s) {
   if (inits(a) != inits(b)) {
     return 0;
   }
+  return dsec_bounded(a, b, timeout_s);
+}
+
+// ABC's dsec on the miter of the two targets: 3 if proven equal, else 0.
+int dsec_equal(const Lit_model& a, const Lit_model& b, int timeout_s) {
   Abc_Ntk_t* ntk = build_ntk({&a, &b}, [&](Abc_Aig_t* man, const std::vector<std::vector<Bit>>& val) {
     return Abc_AigXor(man, model_bit(val[0], a.target), model_bit(val[1], b.target));
   });
@@ -1872,6 +1879,37 @@ int seq_equal(const Lit_model& a, const Lit_model& b, int timeout_s) {
   }
   Abc_NtkDelete(ntk);
   return rv == 1 ? 3 : 0;
+}
+
+// dsec overruns its TimeLimit on large models (15 s at a 3 s limit on Rocket):
+// run it in a child and kill it at the limit.
+int dsec_bounded(const Lit_model& a, const Lit_model& b, int timeout_s) {
+  int fds[2];
+  if (pipe(fds) != 0) {
+    return 0;
+  }
+  const pid_t pid = fork();
+  if (pid < 0) {
+    close(fds[0]);
+    close(fds[1]);
+    return 0;
+  }
+  if (pid == 0) {
+    close(fds[0]);
+    const auto r = static_cast<unsigned char>(dsec_equal(a, b, timeout_s));
+    (void)!write(fds[1], &r, 1);
+    _exit(0);
+  }
+  close(fds[1]);
+  unsigned char r  = 0;
+  pollfd        pf = {fds[0], POLLIN, 0};
+  if (poll(&pf, 1, std::max(1, timeout_s) * 1000) <= 0 || read(fds[0], &r, 1) != 1) {
+    r = 0;  // timed out, or the child died
+  }
+  close(fds[0]);
+  kill(pid, SIGKILL);
+  waitpid(pid, nullptr, 0);
+  return r;
 }
 
 constexpr int kKeepModels = 3;  // past models kept per property for reuse=equiv
