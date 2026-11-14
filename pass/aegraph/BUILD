@@ -47,7 +47,7 @@ cc_binary(
     deps = [":rulegen_lib"],
 )
 
-# The process-wide fold-engine setting (classic|aegraph|aegraph+classic), the cache-salt mix and the
+# The process-wide folding configuration (cost profile, rules turned off), the cache-salt mix and the
 # per-site counters. No dependency on the engine or on cprop, so cache code can key on it.
 cc_library(
     name = "fold_engine",

@@ -112,6 +112,11 @@ inline bool set_flag_is_common(std::string_view method, std::string_view flag) {
   if (method == "pass.color") {
     return !in(kColorSynthFlags);
   }
+  if (method == "pass.aegraph") {
+    // The constant-propagation knobs every compile has had: spelled compile.cprop.<flag>. The rule runtime's
+    // own options are compile.aegraph.<flag>.
+    return flag == "low_lanes" || flag == "loop_hoist";
+  }
   return false;
 }
 
@@ -305,8 +310,8 @@ inline std::string_view retired_set_hint(std::string_view method, std::string_vi
 
 inline constexpr Set_pass kSetPasses[] = {
     {     "compile.upass",        "pass.upass",      Set_pass::List::all},
-    {     "compile.cprop",        "pass.cprop",      Set_pass::List::all},
-    {   "compile.aegraph",      "pass.aegraph",      Set_pass::List::all},
+    {     "compile.cprop",      "pass.aegraph",   Set_pass::List::common},  // low_lanes, loop_hoist
+    {   "compile.aegraph",      "pass.aegraph", Set_pass::List::specific},
     {  "compile.bitwidth",     "pass.bitwidth",      Set_pass::List::all},
     {   "compile.bitfuzz",      "pass.bitfuzz",      Set_pass::List::all},
     {    "compile.formal",       "pass.formal", Set_pass::List::specific},
@@ -590,24 +595,11 @@ inline std::vector<bool>                         follows_bitwidth(const std::vec
   }
   return after;
 }
-// `compile.cprop.engine` (classic|aegraph|aegraph+classic, default aegraph) and
-// `compile.cprop.engine_slots` (both|first|second, default both), resolved from
-// the --set entries (last wins). At least one engine always runs: there is no
-// "none" value. Validated eagerly by check_known_set_passes.
-struct Cprop_engine {
-  std::string engine = "aegraph";
-  std::string slots  = "both";
-};
-Cprop_engine             resolve_cprop_engine(const Options& opts);
-// The EPRP methods that run in compile cprop slot `slot` (0 = before
-// pass.legalize, 1 = after enableopt), in order.
-std::vector<std::string> cprop_slot_methods(const Cprop_engine& choice, int slot);
 // `compile.aegraph.cost` (synth|sim|auto, default auto: sim under `lhd sim`, synth elsewhere) resolved to the profile pass.aegraph
 // runs: `auto` is `sim` under `lhd sim` and `synth` everywhere else; an explicit synth|sim overrides it.
 std::string              resolve_aegraph_cost(const Options& opts);
-// The engine identity the compile-cache descriptor names ("classic" or
-// "aegraph+classic:first:cost=sim", ...): what the resolved schedule actually runs, including the resolved
-// extraction cost profile whenever an aegraph step is scheduled.
+// The engine identity the compile-cache descriptor names ("aegraph:both:cost=sim"): the resolved extraction
+// cost profile. The spelling is the one the default had when several engines existed, so caches stay valid.
 std::string              cprop_engine_descriptor(const Options& opts);
 
 void save_ln_dir(Options& opts, Result& res, const std::vector<std::shared_ptr<Lnast>>& units, const std::string& dir);

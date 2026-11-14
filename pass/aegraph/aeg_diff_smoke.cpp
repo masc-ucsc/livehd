@@ -5,9 +5,9 @@
 // Each iteration generates a random combinational DAG over the comb vocabulary
 // in unbounded integers (no truncation: every interior cell is stamped with a
 // sound upper bound), including '?' literals. The DAG is copied twice with
-// hhds::GraphLibrary::copy_from, one copy is optimized by classic cprop and the
-// other by the aegraph (pass.aegraph's per-body path), and both are judged by
-// the shared Dlop vector oracle (pass/cprop/cprop_test_eval.hpp):
+// hhds::GraphLibrary::copy_from and the copy is optimized by the aegraph
+// (pass.aegraph's per-body path), then judged by the shared Dlop vector oracle
+// (pass/cprop/cprop_test_eval.hpp):
 //
 //   For every input vector, the outputs of an optimized graph under SOME value
 //   of its '?' literals must be among the outputs of the ORIGINAL graph under
@@ -462,35 +462,30 @@ TEST(AegDiff, RandomDagsClassicAndAegraphRefineTheOriginal) {
   const uint64_t prove_iteration = pick_rng() % iters;
   bool           proved          = false;
   size_t         with_literals   = 0;
-  size_t         nodes_total = 0, classic_removed = 0, aegraph_removed = 0;
+  size_t         nodes_total = 0, aegraph_removed = 0;
 
   for (uint64_t it = 0; it < iters; ++it) {
     const uint64_t dag_seed = seed + it * 0x10001ULL;
     SCOPED_TRACE("LHD_AEG_FUZZ_SEED=" + std::to_string(seed) + " iteration=" + std::to_string(it)
                  + " (LHD_AEG_FUZZ_ITERS=" + std::to_string(iters) + ")");
-    hhds::GraphLibrary lib_orig, lib_classic, lib_aegraph;
+    hhds::GraphLibrary lib_orig, lib_aegraph;
     Dag                dag(dag_seed);
     dag.build(lib_orig, "fz");
     with_literals += dag.has_literal;
-    ASSERT_TRUE(lib_classic.copy_from(lib_orig, "fz"));
     ASSERT_TRUE(lib_aegraph.copy_from(lib_orig, "fz"));
     auto orig        = lib_orig.find_io("fz")->get_graph();
-    auto classic_dag = lib_classic.find_io("fz")->get_graph();
     auto aegraph_dag = lib_aegraph.find_io("fz")->get_graph();
 
     const size_t nodes_before = count_nodes(orig);
-    Cprop        classic_cprop{};
-    classic_cprop.do_trans(classic_dag);
-    Cprop aegraph_cprop{};
+    Cprop        aegraph_cprop{};
     (void)livehd::aegraph::optimize_body(aegraph_cprop,
                                          aegraph_dag,
                                          livehd::aegraph::Options{.check = livehd::aegraph::Options::Check::full});
 
     nodes_total += nodes_before;
-    classic_removed += nodes_before - std::min(nodes_before, count_nodes(classic_dag));
     aegraph_removed += nodes_before - std::min(nodes_before, count_nodes(aegraph_dag));
     const auto vectors = input_vectors(dag.rng);
-    for (const auto& [name, graph] : {std::pair{"classic", classic_dag}, std::pair{"aegraph", aegraph_dag}}) {
+    for (const auto& [name, graph] : {std::pair{"aegraph", aegraph_dag}}) {
       const auto failure = refinement_failure(orig, graph, vectors);
       if (!failure.empty()) {
         ADD_FAILURE() << name << " is not a refinement of the original: " << failure << "\n  " << proof_text(orig, graph)
@@ -531,8 +526,8 @@ TEST(AegDiff, RandomDagsClassicAndAegraphRefineTheOriginal) {
       proved = true;
     }
   }
-  std::printf("[aeg_diff_smoke] iterations=%llu with_literals=%zu nodes=%zu removed: classic=%zu aegraph=%zu\n",
-              static_cast<unsigned long long>(iters), with_literals, nodes_total, classic_removed, aegraph_removed);
+  std::printf("[aeg_diff_smoke] iterations=%llu with_literals=%zu nodes=%zu removed: aegraph=%zu\n",
+              static_cast<unsigned long long>(iters), with_literals, nodes_total, aegraph_removed);
   EXPECT_TRUE(proved);
   EXPECT_GT(with_literals, 0u) << "the generator should reach '?' literals";
 }

@@ -32,7 +32,6 @@ public:
   using Inp_pins = absl::InlinedVector<hhds::Pin_class, 8>;
 
 private:
-  static inline std::atomic<int> trace_module_cnt = 0;
 
 protected:
   hhds::Graph* current_graph = nullptr;
@@ -68,7 +67,7 @@ protected:
   // when its three-valued value is FULLY KNOWN. true = node replaced.
   bool fold_known_cone(hhds::Node_class& node, const Inp_pins& inp_edges_ordered);
   // Driver pins whose cone reaches a non-constant leaf: fold_known_cone stops
-  // there instead of re-walking it from every root. Cleared per cse_pass sweep.
+  // there instead of re-walking it from every root. Cleared per sweep.
   absl::flat_hash_set<hhds::Class_index> cone_dead;
 
   bool scalar_mux(hhds::Node_class& node, Inp_pins& inp_edges_ordered, bool factor_packs = true);
@@ -107,8 +106,6 @@ protected:
   // Retype And(x, 2^n-1) [binary, one const] into the value-identical
   // Get_mask(x, 0, n) so every low-mask truncation shares ONE shape.
   void canonicalize_and_mask(hhds::Node_class& node);
-  // Hash-cons identical pure combinational nodes (same op, same input pins).
-  void cse_pass(const std::vector<hhds::Node_class>& order);
   // Expected-linear mux sharing over disjoint, single-consumer regions.
   void mux_share_pass();
   // Factor private, same-shape operators out of binary/index mux arms.
@@ -128,7 +125,7 @@ protected:
   // true = node rewritten (it may have been forwarded and deleted).
   bool merge_concat_slices(hhds::Node_class& node);
   void remember_node(const hhds::Node_class& node);
-  // The region passes that follow the forward sweep (do_trans and do_post).
+  // The region passes do_post runs.
   void region_passes();
   bool canonicalize_pack(hhds::Node_class& node);
   // Low-lane narrowing (cprop_lowlane.cpp): an operation reading a value
@@ -165,6 +162,8 @@ public:
   // cells with no width stamp, so only callers that run bitwidth afterwards
   // set it.
   explicit Cprop(bool low_lanes) : low_lanes_(low_lanes) {}
+  [[nodiscard]] bool low_lanes() const { return low_lanes_; }
+  [[nodiscard]] bool has_guard_scope() const { return static_cast<bool>(guard_scope_); }
   // Off for a simulation target: the Hotmux-over-path-conjunctions flattening of mux_share costs more host
   // instructions than the Mux tree it replaces (dino -4%, picorv32 -5% kernel instructions without it).
   void set_hotmux_trees(bool on) { hotmux_trees_ = on; }
@@ -187,13 +186,11 @@ public:
   [[nodiscard]] static Node_scope whole_graph() {
     return [](const hhds::Node_class&) { return true; };
   }
-  // Rewrites unlimited-precision values without consulting width/sign hints.
-  void do_trans(const std::shared_ptr<hhds::Graph>& g);
   // The post steps of the e-graph engine (pass.aegraph): low-lane narrowing
   // and the classic region passes (pack canonicalization, vector-mux
   // narrowing, muxctx, mux/op sharing, flop-enable folding, dead-code sweep)
   // over a graph the engine already elaborated. Skips the forward scalar
-  // sweep and CSE; it is NOT a second do_trans.
+  // sweep and CSE (the engine's job).
   void do_post(const std::shared_ptr<hhds::Graph>& g);
   // pass.aegraph's pre-pass: the classic scalar rewrites (canonicalization and
   // scalar_node: packed-slice resolution, boolean cancellation, constant

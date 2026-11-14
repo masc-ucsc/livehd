@@ -1,6 +1,6 @@
 /*
 :name: aeg_bit_lane_rows
-:set: compile.cprop.engine=classic compile.unroll=true
+:set: compile.aegraph.rules_disable=group:arith+group:div+group:mask+group:mux+group:shift compile.unroll=true
 :type: lec
 */
 // PYROPE-vs-PYROPE group, the fixture of Cprop::vectorize_bit_lanes (pass/cprop/cprop.cpp, the `sim` cost profile's
@@ -8,7 +8,7 @@
 // (`next[i][j] = grant[i] ? 0 : grant[j] ? 1 : state[i][j]` for i < j), and a bit-sliced Mux whose select changes per
 // lane (`m[j] = sel[j] ? a[j] : b[j]`, which becomes `(S & A) | (~S & B)`). The second matrix reads its grant bits
 // as prefix-OR reductions, a different opaque pin per lane: each row GATHERS them into one word, and a later row reads
-// a window of the first row's gather. Each row of consecutive 1-bit writes becomes one word write. REFERENCE = classic engine; `_1` = e-graph engine under `sim`, where the rows vectorize.
+// a window of the first row's gather. Each row of consecutive 1-bit writes becomes one word write. REFERENCE = the e-graph engine with every rule group off; `_1` = e-graph engine under `sim`, where the rows vectorize.
 pub mod top(grant:U8, upd:Bool, sel:U8, a:U8, b:U8, c:U8) -> (state:U64@[0], state2:U64@[0], m:U8@[0]) {
   reg st:U64 = 0
   mut nx:U64 = st

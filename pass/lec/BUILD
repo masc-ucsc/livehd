@@ -188,6 +188,7 @@ cc_test(
     srcs = ["tests/query_test.cpp"],
     copts = COPTS,
     deps = [
+        "//pass/aegraph:pass_aegraph",
         ":lec_query",
         "//graph",
         "//pass/bitwidth:pass_bitwidth",

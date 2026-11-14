@@ -1,14 +1,10 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 //
-// Engine parity (todo/livehd/2a-aegraph.html, milestone C): the value-oracle
-// cprop cases of pass/cprop/cprop_test.cpp, run under BOTH constant-propagation
-// engines through one parameterized fixture. Each case builds a small cone,
-// optimizes it with the engine under test, and checks the result against the
+// Value-oracle cases for the constant-propagation engine (born as the engine
+// parity suite of todo 2a-aegraph, milestone C, when a classic engine existed).
+// Each case builds a small cone, optimizes it, and checks the result against the
 // shared test-only evaluators (pass/cprop/cprop_test_eval.hpp) over every input
-// combination. Only values are checked: the cases that pin a classic-only SHAPE
-// (how many Mux survive, which cell a rewrite mints) stay in cprop_test.cpp and
-// the shape assertions were left out here, so a correct engine that picks
-// another equal-value form passes.
+// combination. Only values are checked, so any equal-value form passes.
 //
 // "aegraph" is exactly pass.aegraph's per-body path (livehd::aegraph::optimize_body:
 // the engine, then the classic post steps).
@@ -38,23 +34,19 @@ using livehd::cprop_testing::mux_eval;
 using livehd::cprop_testing::Test_pin;
 using livehd::cprop_testing::Test_values;
 
-enum class Engine { classic, aegraph };
+enum class Engine { aegraph };
 
 class Aeg_parity : public testing::TestWithParam<Engine> {
 protected:
   void SetUp() override { livehd::cprop_testing::mux_graph_library = lib_name("lgdb_aeg_parity_mux"); }
 
   [[nodiscard]] std::string lib_name(const std::string& base) const {
-    return base + (GetParam() == Engine::classic ? "_classic" : "_aegraph");
+    return base + "_aegraph";
   }
 
   // One engine sweep over a graph body, as the compile schedule runs it.
   void run(Cprop& cp, const std::shared_ptr<hhds::Graph>& g) const {
-    if (GetParam() == Engine::classic) {
-      cp.do_trans(g);
-    } else {
-      (void)livehd::aegraph::optimize_body(cp, g, livehd::aegraph::Options{.check = livehd::aegraph::Options::Check::full});
-    }
+    (void)livehd::aegraph::optimize_body(cp, g, livehd::aegraph::Options{.check = livehd::aegraph::Options::Check::full});
   }
   void run(const std::shared_ptr<hhds::Graph>& g) const {
     Cprop cp{};
@@ -905,9 +897,7 @@ TEST_P(Aeg_parity, CpropMux_GuardedAccumulationNeverLeavesAnUnstampedCell) {
 
 INSTANTIATE_TEST_SUITE_P(Engines,
                          Aeg_parity,
-                         testing::Values(Engine::classic, Engine::aegraph),
-                         [](const testing::TestParamInfo<Engine>& param) {
-                           return param.param == Engine::classic ? "classic" : "aegraph";
-                         });
+                         testing::Values(Engine::aegraph),
+                         [](const testing::TestParamInfo<Engine>&) { return std::string{"aegraph"}; });
 
 }  // namespace

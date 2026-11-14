@@ -9,6 +9,7 @@
 #include <unordered_map>
 
 #include "cprop.hpp"
+#include "pass_aegraph.hpp"
 #include "cprop_test_eval.hpp"
 #include "graph_library_singleton.hpp"
 #include "gtest/gtest.h"
@@ -247,8 +248,10 @@ TEST(CpropLowLane, RewritesKeepTheValue) {
                                  {                                                                                    "as",       f.k(-8)}}),
        5);
        }},
-      {      "get_mask_high",  true, [](Fixture& f) { return f.low(f.orr(f.shl(f.a, 4), f.low(f.c, 0, 4)), 4, 10); }},
-      {       "get_mask_low",  true, [](Fixture& f) { return f.low(f.orr(f.shl(f.a, 4), f.low(f.c, 0, 4)), 0, 3); }},
+      // The e-graph engine resolves these two slices with its own mask rules before low-lane narrowing runs, so
+      // only the value is checked.
+      {      "get_mask_high", false, [](Fixture& f) { return f.low(f.orr(f.shl(f.a, 4), f.low(f.c, 0, 4)), 4, 10); }},
+      {       "get_mask_low", false, [](Fixture& f) { return f.low(f.orr(f.shl(f.a, 4), f.low(f.c, 0, 4)), 0, 3); }},
       {  "get_mask_straddle", false, [](Fixture& f) { return f.low(f.orr(f.shl(f.a, 4), f.low(f.c, 0, 4)), 2, 6); }},
       {               "sext",
        true,                                                                                    [](Fixture& f) {
@@ -286,7 +289,7 @@ TEST(CpropLowLane, RewritesKeepTheValue) {
     const auto top_node = top.get_master_node();
     const auto before   = run(f, vectors);
     Cprop      cp{true};
-    cp.do_trans(f.g);
+    livehd::aegraph::fold_with(cp, f.g);
     const auto after = run(f, vectors);
     ASSERT_EQ(before.size(), after.size());
     for (size_t i = 0; i < before.size(); ++i) {
@@ -310,7 +313,7 @@ TEST(CpropLowLane, OffByDefault) {
   top.connect_sink(f.g->get_output_pin("o"));
   const auto n = top.get_master_node();
   Cprop      cp;
-  cp.do_trans(f.g);
+  livehd::aegraph::fold_with(cp, f.g);
   EXPECT_FALSE(n.is_invalid());
 }
 }  // namespace

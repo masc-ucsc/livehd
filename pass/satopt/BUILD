@@ -93,6 +93,7 @@ cc_test(
     ],
     copts = COPTS,
     deps = [
+        "//pass/aegraph:pass_aegraph",
         ":satopt",
         "//graph",
         "//pass/cprop:pass_cprop",

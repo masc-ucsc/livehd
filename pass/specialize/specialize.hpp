@@ -61,7 +61,7 @@ int specialize_constants(std::vector<std::shared_ptr<hhds::Graph>>& graphs, cons
 // after a callee publishes a constant. Kept here so cgen_sim.cpp does not
 // include the pass headers (pass/common/pass.hpp's `Pass` shadows its locals).
 //
-// The cprop half follows the fold engine (livehd::fold_body: compile.cprop.engine, set once by the kernel).
+// The fold half is livehd::fold_body (the e-graph engine).
 // `cost` picks the engine's extraction profile: `compile` the kernel's resolved compile.aegraph.cost, `synth`
 // and `sim` pin one (the synthesis state sweep and the post-splice sim-time fold). `site` names the call in
 // the fold_body counters.

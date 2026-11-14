@@ -1,12 +1,12 @@
 /*
 :name: aeg_mux_lane_writes
-:set: compile.cprop.engine=classic
+:set: compile.aegraph.rules_disable=group:arith+group:div+group:mask+group:mux+group:shift
 :type: lec
 */
 // PYROPE-vs-PYROPE group, the fixture of the aegraph lane-write rules (pass/aegraph/rules/mux.cpp
 // mux_setmask_arm, mux_setmask_pair; rules/mask.cpp setmask_to_concat): a conditional write of one lane of a
 // packed word keeps the Mux on the lane, two rival writes of the same lane share one lane Mux, and a word built
-// lane by lane is one pack. This is the REFERENCE, compiled by the classic engine; `aeg_mux_lane_writes_1.prp`
+// lane by lane is one pack. This is the REFERENCE, compiled with every e-graph rule group off; `aeg_mux_lane_writes_1.prp`
 // is the same source compiled by the e-graph engine.
 pub comb top(w:U8, c:U1, r:U1, d:U1, e:U2, f:U4, g:U4) -> (o1:U8, o2:U8, o3:U8, o4:U12, o5:U8) {
   mut m:U8 = w

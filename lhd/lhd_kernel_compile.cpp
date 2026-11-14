@@ -2189,21 +2189,14 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
           // steps must not narrow or repack values again (low-lane narrowing).
           labels["after_bitwidth"] = "true";
         }
-        // The engine shares the compile.cprop knobs (one spelling each, copied
-        // above) and adds its own compile.aegraph set. engine_slots is the
-        // kernel's own slot selector, not a pass label.
-        labels.erase("engine_slots");
+        // compile.cprop (low_lanes, loop_hoist, merged above) and compile.aegraph are the
+        // two spellings of the one method's labels.
         merge_sets(opts, "compile.aegraph", labels);
         // The resolved profile (`auto` follows the command), the same one the compile-cache descriptor names.
         labels["cost"] = resolve_aegraph_cost(opts);
-      } else if (method == "pass.cprop" && labels.contains("engine")) {
-        // The kernel did the dispatch: this step is the classic engine, whatever
-        // compile.cprop.engine says for the other steps (a default compile sets
-        // no label, so its recipe is unchanged).
-        labels["engine"] = "classic";
       }
-      if (opts.stats && (method == "pass.cprop" || method == "pass.aegraph")) {
-        // lhd.stats: both engines emit their per-graph cprop-summary diagnostic.
+      if (opts.stats && method == "pass.aegraph") {
+        // lhd.stats: the engine emits its per-graph cprop-summary diagnostic.
         labels["stats"] = "true";
       }
       if (needs_loop_check && method == "pass.enableopt") {
@@ -2214,7 +2207,7 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
       // per-body transform, bitwidth -- which reads a callee only through its
       // declared interface). cprop's loop-invariant hoist edits a loop body and
       // its parents together, so it waits for the cprop after legalize.
-      if ((!legalized || needs_loop_check) && (method == "pass.cprop" || method == "pass.aegraph")) {
+      if ((!legalized || needs_loop_check) && method == "pass.aegraph") {
         labels["loop_hoist"] = "false";
       }
       run_step(method, *active, labels, opts, res);
@@ -2268,23 +2261,14 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
         total_mem   += round.dead_memories;
         total_fix   += round.fix_rounds;
         Eprp_var::Eprp_dict bw_labels;
-        // The sweep's fold follows compile.cprop.engine like the two schedule slots (whatever
-        // compile.cprop.engine_slots says: that selector only picks among the schedule's own slots).
-        Cprop_engine sweep_choice = resolve_cprop_engine(opts);
-        sweep_choice.slots        = "both";
-        for (const auto& method : cprop_slot_methods(sweep_choice, 0)) {
+        {
           Eprp_var::Eprp_dict cp_labels;
           merge_sets(opts, "compile.cprop", cp_labels);
-          cp_labels["loop_hoist"] = "false";
-          if (method == "pass.aegraph") {
-            cp_labels["after_bitwidth"] = "true";
-            cp_labels.erase("engine_slots");
-            merge_sets(opts, "compile.aegraph", cp_labels);
-            cp_labels["cost"] = resolve_aegraph_cost(opts);
-          } else if (cp_labels.contains("engine")) {
-            cp_labels["engine"] = "classic";
-          }
-          run_step(method, *active, cp_labels, opts, res);
+          cp_labels["loop_hoist"]     = "false";
+          cp_labels["after_bitwidth"] = "true";
+          merge_sets(opts, "compile.aegraph", cp_labels);
+          cp_labels["cost"] = resolve_aegraph_cost(opts);
+          run_step("pass.aegraph", *active, cp_labels, opts, res);
         }
         merge_sets(opts, "compile.bitwidth", bw_labels);
         run_step("pass.bitwidth", *active, bw_labels, opts, res);

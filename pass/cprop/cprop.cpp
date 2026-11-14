@@ -25,7 +25,6 @@
 #include "hlop/dlop.hpp"
 #include "mask_eval.hpp"
 #include "node_util.hpp"
-#include "pass_cprop.hpp"
 #include "perf_tracing.hpp"
 
 using livehd::cprop_value::make_node;
@@ -4455,151 +4454,6 @@ void Cprop::canonicalize_and_mask(hhds::Node_class& node) {
                                             livehd::graph_util::mask_window(livehd::graph_util::const_of(mask_pin)).second);
 }
 
-// Hash-cons identical combinational nodes: two nodes with the same op reading
-// the SAME driver pins compute the same unlimited-precision value, so every
-// consumer of the duplicate can read the survivor instead. Sub-inlining and
-// loop replication routinely clone whole expression cones (7.4% of minion's
-// emitted sim statements were byte-identical duplicate defs), and cgen emits
-// one Slop call per surviving node, so each merge is a direct sim-op win --
-// and one node fewer for every other backend.
-//
-// Key = (op, sorted (sink BANK, driver-pin index, producer generation) list) -- the CANONICAL FORM
-// of the node's operand multiset, and an exact map key rather than a digest.
-//
-// BANK, not raw sink pid. A commutative cell spends one sink pid PER OPERAND
-// (graph/cell.hpp's ONE DRIVER PER SINK PIN block), so `Sum(a@0, b@2)` and
-// `Sum(b@0, a@2)` are the SAME node and must produce the SAME key; keying on
-// the raw pid would make every operand reordering a CSE miss. Ntype::sink_bank
-// folds the per-operand pids back to the role (0/1 for Sum/LT/GT, 0 for the
-// single-bank reductions) and is the identity for a positional cell, where the
-// bank half is the pid and disambiguates exactly as before.
-//
-// SORTING IS A CANONICAL FORM HERE, unlike a sort over sink port ids: the pair
-// sorts on the DRIVER's class index, which discriminates every operand even
-// when their roles do not. Within a bank the operands are commutative by the
-// cell's own identity op, so ordering them by driver is value-preserving.
-//
-// The map does the rest: absl hashes the canonical key (a FILTER) and then
-// compares two colliding keys ELEMENT BY ELEMENT before treating them as the
-// same node. A hash collision can therefore never merge two different cells --
-// which matters, because a false CSE merge is a silent miscompile. Duplicated
-// operands survive canonicalization (the list is sorted, never deduped), so
-// `Sum(a, a)` = 2a keeps a different key from `Sum(a)`, and `Xor(a, a)` = 0
-// from `Xor(a)`. And/Or ARE idempotent, but their duplicates are removed by
-// scalar simplification during the forward visit, not by the key.
-//
-// Guards, each load-bearing:
-//  * pure combinational ops only (is_computed_comb_op), minus LUT: its function
-//    table lives in a node attribute the key does not cover;
-//  * names: prefer keeping a named twin (user wires are addressable by sim
-//    queries/VCD); when BOTH carry names, skip rather than pick a loser.
-void Cprop::cse_pass(const std::vector<hhds::Node_class>& order) {
-  namespace gu = livehd::graph_util;
-  using Key    = std::pair<uint16_t, std::vector<std::tuple<uint32_t, uint64_t, uint64_t>>>;
-  struct Entry {
-    hhds::Node_class node;
-    uint64_t         generation;
-  };
-  absl::flat_hash_map<Key, Entry> seen;
-  cone_dead.clear();  // fold_known_cone's unfoldable pins are per sweep
-  auto&      facts      = *livehd::cprop_value::active;
-  const auto generation = [&](const hhds::Node_class& node) {
-    auto it = facts.generations.find(node.get_class_index());
-    return it == facts.generations.end() ? uint64_t{0} : it->second;
-  };
-  for (auto node : order) {
-    // Original-order handles may have been retired and recycled by a consuming
-    // rewrite. New nodes are normalized at emission, never as this old handle.
-    if (node.is_invalid() || generation(node) != 0) {
-      continue;
-    }
-    canonicalize_and_mask(node);
-    scalar_node(node);
-    if (node.is_invalid()) {
-      continue;
-    }
-    remember_node(node);
-    livehd::cprop_profile::Timer timer(livehd::cprop_profile::cse);
-    const auto                   op = type_op_of(node);
-    if (!is_computed_comb_op(op) || op == Ntype_op::LUT || !node.has_out_edges() || gu::has_runtime_check(node)
-        || (op == Ntype_op::Hotmux && !livehd::muxctx::exclusive(node))) {
-      continue;
-    }
-    Key key;
-    key.first   = static_cast<uint16_t>(op);
-    bool usable = true;
-    for (auto sink : node.inp_sorted_pins()) {
-      auto pin = sink.get_driver_pin();
-      if (pin.is_invalid()) {
-        usable = false;
-        break;
-      }
-      key.second.emplace_back(Ntype::sink_bank(op, sink.get_port_id()),
-                              pin.get_class_index().value,
-                              generation(pin.get_master_node()));
-    }
-    if (!usable || key.second.empty()) {
-      continue;
-    }
-    if (op == Ntype_op::Hotmux) {
-      // Whole pairs commute only with established exclusivity. Keep default,
-      // pair association, producer generations and proof provenance distinct.
-      using Pair = std::array<std::tuple<uint64_t, uint64_t>, 2>;
-      std::vector<Pair> pairs;
-      for (size_t i = 0; i + 1 < key.second.size(); i += 2) {
-        const auto& [cp, ci, cg] = key.second[i];
-        const auto& [vp, vi, vg] = key.second[i + 1];
-        if (cp != i || vp != i + 1) {
-          usable = false;
-          break;
-        }
-        pairs.push_back({
-            {{ci, cg}, {vi, vg}}
-        });
-      }
-      if (!usable) {
-        continue;
-      }
-      std::sort(pairs.begin(), pairs.end());
-      for (size_t i = 0; i < pairs.size(); ++i) {
-        for (size_t j = 0; j < 2; ++j) {
-          key.second[2 * i + j] = {2 * i + j, std::get<0>(pairs[i][j]), std::get<1>(pairs[i][j])};
-        }
-      }
-      key.second.emplace_back(std::numeric_limits<uint32_t>::max(), gu::has_proven(node), gu::proven_of(node));
-    } else {
-      std::sort(key.second.begin(), key.second.end());
-    }
-    auto [it, inserted] = seen.try_emplace(std::move(key), Entry{node, generation(node)});
-    if (inserted) {
-      continue;
-    }
-    auto kept = it->second.node;
-    if (kept.is_invalid() || generation(kept) != it->second.generation) {
-      it->second = {node, generation(node)};
-      continue;
-    }
-    if (gu::has_color(node) != gu::has_color(kept) || (gu::has_color(node) && gu::color_of(node) != gu::color_of(kept))) {
-      continue;
-    }
-    const auto kd = kept.get_driver_pin(0), nd = node.get_driver_pin(0);
-    const bool kept_named = gu::has_name(kept) || !gu::pin_name_of(kd).empty();
-    const bool node_named = gu::has_name(node) || !gu::pin_name_of(nd).empty();
-    if (kept_named && node_named) {
-      continue;
-    }
-    // Keep the earlier identity so keys already made from it remain valid.
-    if (node_named) {
-      if (gu::has_name(node)) {
-        kept.attr(hhds::attrs::name).set(std::string{gu::node_name_of(node)});
-      }
-      if (!gu::pin_name_of(nd).empty()) {
-        gu::set_pin_name(kd, gu::pin_name_of(nd));
-      }
-    }
-    collapse_forward_for_pin(node, kd);
-  }
-}
 
 void Cprop::remember_node(const hhds::Node_class& node) {
   livehd::cprop_value::remember(node);
@@ -4833,38 +4687,6 @@ void Cprop::region_passes() {
   cleanup_dead_nodes(current_graph);
 }
 
-void Cprop::do_trans(const std::shared_ptr<hhds::Graph>& g) {
-  if (!g) {
-    return;
-  }
-
-  auto gio  = g->get_io();
-  auto name = gio ? std::string{gio->get_name()} : std::string{};
-
-  TRACE_EVENT("pass", nullptr, [&name](perfetto::EventContext ctx) {
-    std::string converted_str{(char)('A' + (trace_module_cnt++ % 25))};
-    ctx.event()->set_name(absl::StrCat(converted_str, name));
-  });
-
-  livehd::cprop_profile::Invocation profile(name);
-  livehd::cprop_value::Facts        facts;
-  livehd::cprop_value::Scope        fact_scope(facts);
-  current_graph          = g.get();
-  // One ordinary forward sweep, including canonicalization and CSE. Region
-  // passes below each own disjoint candidates and never retry the graph.
-  const auto order       = stable_nodes(current_graph);
-  size_t     edge_budget = 0;
-  for (auto node : order) {
-    for ([[maybe_unused]] auto input : node.inp_sorted_pins()) {
-      ++edge_budget;
-    }
-  }
-  facts.wiring.set_edge_budget(edge_budget);
-  facts.inspection_budget = edge_budget;
-  cse_pass(order);
-  region_passes();
-  current_graph = nullptr;
-}
 
 // pass.aegraph's post steps: the classic region passes over a graph the
 // e-graph engine already elaborated. The forward sweep (scalar rules + CSE) is

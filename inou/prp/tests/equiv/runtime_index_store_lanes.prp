@@ -1,6 +1,6 @@
 /*
 :name: runtime_index_store_lanes
-:set: compile.cprop.engine=classic
+:set: compile.aegraph.rules_disable=group:arith+group:div+group:mask+group:mux+group:shift
 :type: lec
 :lec_top: runtime_index_store_lanes
 */

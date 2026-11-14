@@ -978,17 +978,27 @@ std::shared_ptr<hhds::Graph> packed_ring(hhds::GraphLibrary& lib, const char* na
   return g;
 }
 
-// The pre-pass resolves the packed slices that make the ring a FALSE cycle: no member is left opaque, both
-// engines' results prove equal to each other, and the engine's own packed-slice rules finish the job.
+// The reference for the two ring tests: the same ring with the rule engine off (the pre-pass that cuts the
+// false cycle, CSE and constant folds only). The raw ring is a word-level cycle the LEC encoder refuses.
+std::shared_ptr<hhds::Graph> rules_off_ring(hhds::GraphLibrary& lib, const char* name) {
+  auto                     g = packed_ring(lib, name);
+  Cprop                    cp;
+  livehd::aegraph::Options off;
+  off.rules_off = true;
+  (void)livehd::aegraph::optimize_body(cp, g, off);
+  return g;
+}
+
+// The pre-pass resolves the packed slices that make the ring a FALSE cycle: no member is left opaque, the
+// result proves equal to the rules-off reference, and the engine's own packed-slice rules finish the job.
 TEST(Aegraph, PackedFalseCycleIsResolvedInThePrePass) {
-  hhds::GraphLibrary lib_classic, lib_aeg;
-  auto               classic = packed_ring(lib_classic, "ring_classic");
-  auto               aeg     = packed_ring(lib_aeg, "ring_aeg");
-  Cprop{}.do_trans(classic);
+  hhds::GraphLibrary lib_orig, lib_aeg;
+  auto               orig = rules_off_ring(lib_orig, "ring_orig");
+  auto               aeg  = packed_ring(lib_aeg, "ring_aeg");
   Cprop cp;
   const auto stats = livehd::aegraph::optimize_body(cp, aeg, checked());
   EXPECT_EQ(stats.opaque, 0u) << "the false cycle is cut before the build";
-  for (const auto& g : {classic, aeg}) {
+  for (const auto& g : {aeg}) {
     // No Get_mask reads a Concat any more: every slice of a pack was resolved to its lane.
     for (auto node : g->body().nodes()) {
       if (gu::type_op_of(node) != Ntype_op::Get_mask) {
@@ -1002,18 +1012,16 @@ TEST(Aegraph, PackedFalseCycleIsResolvedInThePrePass) {
   livehd::lec::Lec_options options;
   options.cones   = "false";
   options.timeout = 20;
-  const auto result = livehd::lec::prove_equal(classic.get(), aeg.get(), options);
+  const auto result = livehd::lec::prove_equal(orig.get(), aeg.get(), options);
   EXPECT_EQ(result.verdict, livehd::lec::Verdict::Proven) << result.detail;
 }
 
-// formal.lec.preflight_engine=aegraph runs the engine the way the LEC preflight does (no bitwidth follows):
-// the same ring, optimized with Options::preflight, stays equal to the classic result and leaves no unstamped
-// cell behind.
+// Options::preflight runs the engine the way the LEC preflight does (no bitwidth follows): the same ring stays
+// equal to the rules-off reference and leaves no unstamped cell behind.
 TEST(Aegraph, PreflightEngineOnTheDemuxShapeIsStampedAndEquivalent) {
-  hhds::GraphLibrary lib_classic, lib_aeg;
-  auto               classic = packed_ring(lib_classic, "pf_classic");
-  auto               aeg     = packed_ring(lib_aeg, "pf_aeg");
-  Cprop{}.do_trans(classic);
+  hhds::GraphLibrary lib_orig, lib_aeg;
+  auto               orig = rules_off_ring(lib_orig, "pf_orig");
+  auto               aeg  = packed_ring(lib_aeg, "pf_aeg");
   Cprop                   cp;
   livehd::aegraph::Options options = checked();
   options.preflight                 = true;
@@ -1029,7 +1037,7 @@ TEST(Aegraph, PreflightEngineOnTheDemuxShapeIsStampedAndEquivalent) {
   livehd::lec::Lec_options lec;
   lec.cones   = "false";
   lec.timeout = 20;
-  const auto result = livehd::lec::prove_equal(classic.get(), aeg.get(), lec);
+  const auto result = livehd::lec::prove_equal(orig.get(), aeg.get(), lec);
   EXPECT_EQ(result.verdict, livehd::lec::Verdict::Proven) << result.detail;
 }
 
@@ -1085,12 +1093,13 @@ TEST(Aegraph, PreflightStampsBoundedNewCellsAndRefusesUnboundedOnes) {
     }
   }
 
-  // An undeclared input has no bound: the engine REFUSES the graph and classic keeps it.
+  // An undeclared input has no bound: the engine REFUSES the rewrite and keeps only what needs no new cell.
   hhds::GraphLibrary lib_refuse;
   auto               stamped = build(lib_refuse, "pf_refuse", false);
   const auto         on      = livehd::aegraph::optimize_body(cp, stamped, options);
   EXPECT_EQ(on.refused, 1u) << "Mult(i0, 2) over an undeclared input is unbounded: nothing can stamp it";
-  EXPECT_EQ(count_op(stamped, Ntype_op::Mult), 0u) << "the refused graph is not elaborated";
+  EXPECT_EQ(count_op(stamped, Ntype_op::Mult), 0u) << "the refused rewrite is not elaborated";
+  EXPECT_EQ(count_op(stamped, Ntype_op::Rxor), 1u) << "the original cell stays";
 }
 
 // ---- milestone H -------------------------------------------------------------

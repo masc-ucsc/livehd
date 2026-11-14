@@ -25,7 +25,7 @@ cc_library(
     alwayslink = True,
 )
 
-# The evaluators the cprop gtests and pass/aegraph's parity/differential smokes
+# The evaluators the cprop gtests and pass/aegraph's value-oracle/differential smokes
 # share (mux_eval, Mux_graph, the Dlop evaluator). Test-only: it includes gtest.
 cc_library(
     name = "cprop_test_eval",
@@ -53,6 +53,7 @@ cc_test(
     ],
     copts = COPTS,
     deps = [
+        "//pass/aegraph:pass_aegraph",
         ":cprop_test_eval",
         ":pass_cprop",
         "//core",

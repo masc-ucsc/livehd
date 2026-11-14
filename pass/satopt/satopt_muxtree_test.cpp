@@ -1,5 +1,6 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "cprop.hpp"
+#include "pass_aegraph.hpp"
 #include "gtest/gtest.h"
 #include "node_util.hpp"
 #include "prove.hpp"
@@ -67,7 +68,7 @@ TEST(SatoptMuxTree, CorrelatedSelectAndWideNonzeroAreProvenInContext) {
   for (bool wide : {false, true}) {
     Fixture f(false, wide);
     // A2 cannot infer either arithmetic inequality implication.
-    Cprop{}.do_trans(f.graph);
+    livehd::aegraph::fold_with(f.graph);
     ASSERT_FALSE(f.inner.get_master_node().get_sink_pin(0).get_driver_pin().is_const());
     hhds::GraphLibrary ref_lib;
     ASSERT_TRUE(ref_lib.copy_from(f.lib, "context_satopt"));

@@ -23,14 +23,14 @@ fail() {
   exit 1
 }
 
-# Pinned to the classic engine: the test covers Cprop::try_find_single_driver_pin.
-"$LHD" compile "$PRP" --set compile.cprop.engine=classic \
+# The test covers Cprop::try_find_single_driver_pin, which the e-graph engine's post steps use.
+"$LHD" compile "$PRP" \
   --emit verilog:"$W/bitread.gen.v" --workdir "$W/w" --result-json "$W/r.json" -q 2>/dev/null \
   || fail "compile of setmask_bitread.prp failed"
 [ -s "$W/bitread.gen.v" ] || fail "compile produced empty netlist"
 
-# The recipe must actually have run pass.cprop (not silently a cprop-less one).
-grep -q 'pass.cprop' "$W/r.json" || fail "recipe did not run pass.cprop: $(cat "$W/r.json")"
+# The recipe must actually have run the constant propagation (not silently a fold-less one).
+grep -q 'pass.aegraph' "$W/r.json" || fail "recipe did not run pass.aegraph: $(cat "$W/r.json")"
 
 # try_find_single_driver_pin folded each single-bit read onto its Set_mask
 # writer's value pin: y0 <= a (bit 0), y2 <= c (bit 2). A 1-bit UNSIGNED input
@@ -55,11 +55,11 @@ folds_to y2 c || fail "bit-2 read did not fold to c (Set_mask chain resolver reg
 # plus a zero sign bit). Writing it into low mask [0,95) over zero cannot alter
 # it. Cprop must remove that Set_mask instead of leaving a 95-bit mask/splice in
 # either generated Verilog or the simulator C++.
-"$LHD" compile "$IDENTITY_PRP" --set compile.cprop.engine=classic \
+"$LHD" compile "$IDENTITY_PRP" \
   --emit verilog:"$W/identity.gen.v" --workdir "$W/identity-w" --result-json "$W/identity.json" -q 2>/dev/null \
   || fail "compile of setmask_identity.prp failed"
 [ -s "$W/identity.gen.v" ] || fail "identity compile produced empty netlist"
-grep -q 'pass.cprop' "$W/identity.json" || fail "identity recipe did not run pass.cprop"
+grep -q 'pass.aegraph' "$W/identity.json" || fail "identity recipe did not run pass.aegraph"
 grep -Eqi "95'h0?7f+|0*7fffffffffffffffffffffff" "$W/identity.gen.v" \
   && fail "identity Set_mask survived cprop: $(cat "$W/identity.gen.v")"
 

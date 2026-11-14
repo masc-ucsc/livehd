@@ -70,7 +70,7 @@ std::vector<hhds::Node_class> zero_index_shifts(hhds::Graph& graph, hhds::Port_i
 }  // namespace
 
 namespace {
-// One constant-folding round over a body: the fold engine (classic Cprop{} by default), then width inference follows.
+// One constant-folding round over a body: the e-graph engine (livehd::fold_body), then width inference follows.
 void fold(const std::shared_ptr<hhds::Graph>& graph, Fold_cost cost, std::string_view site) {
   Fold_options options;
   options.cost = cost;

@@ -9,6 +9,7 @@
 #include "bitwidth.hpp"
 #include "cell.hpp"
 #include "cprop.hpp"
+#include "pass_aegraph.hpp"
 #include "diag.hpp"
 #include "graph_library_singleton.hpp"
 #include "gtest/gtest.h"
@@ -54,7 +55,7 @@ TEST(Bitfuzz, PipelineLeavesRecoveryToNormalPasses) {
   EXPECT_EQ(stripped.repaired, 0);
   EXPECT_EQ(gu::bits_of(out), 0);
   EXPECT_FALSE(out.attr(livehd::attrs::pin_signed).has());
-  Cprop{}.do_trans(g);
+  livehd::aegraph::fold_with(g);
   EXPECT_EQ(gu::bits_of(out), 0);
   Bitwidth{10}.do_trans(g);
   EXPECT_EQ(gu::bits_of(out), 8);

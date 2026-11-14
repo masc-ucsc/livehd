@@ -22,6 +22,7 @@
 #include "bitwidth.hpp"
 #include "cell.hpp"
 #include "cprop.hpp"
+#include "pass_aegraph.hpp"
 #include "enableopt.hpp"
 #include "encode.hpp"
 #include "flatten.hpp"
@@ -1236,10 +1237,10 @@ TEST(LecState, CpropMuxSharingPreservesTransition) {
       hhds::GraphLibrary impl_lib;
       ASSERT_TRUE(impl_lib.copy_from(ref_lib, "mux_sharing"));
       auto impl = impl_lib.find_io("mux_sharing")->get_graph();
-      Cprop{}.do_trans(impl);
+      livehd::aegraph::fold_with(impl);
       Bitwidth{10}.do_trans(impl);
       Enableopt{}.do_trans(impl);
-      Cprop{}.do_trans(impl);
+      livehd::aegraph::fold_with(impl);
       Bitwidth{10}.do_trans(impl);
       size_t muxes = 0;
       for (auto n : impl->body().nodes()) {

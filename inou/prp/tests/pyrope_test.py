@@ -28,11 +28,6 @@ parser.add_argument('--bitfuzz', action='store_true', help='strip internal width
 # plain-leg artifact.
 parser.add_argument('--with-bitfuzz', action='store_true', help='after the plain run passes, rerun the same fixture with --bitfuzz')
 
-# The e-graph constant-propagation engine (pass.aegraph) for the design under
-# test only: the reference side and any golden Verilog keep their own flags (aegraph is the default engine).
-# Same as LHD_PRP_COMPILE_SETS=compile.cprop.engine=aegraph (see prplib.py).
-parser.add_argument('--aegraph', action='store_true', help='compile the design under test with compile.cprop.engine=aegraph')
-
 args = parser.parse_args()
 
 
@@ -43,7 +38,7 @@ def load_test(path):
     return test
 
 
-runner = PrpRunner(bitfuzz=args.bitfuzz, aegraph=args.aegraph)
+runner = PrpRunner(bitfuzz=args.bitfuzz)
 rc = 0
 for path in args.input:
     test = load_test(path)
@@ -52,7 +47,7 @@ for path in args.input:
     if not fixture_rc and args.with_bitfuzz:
         test = load_test(path)
         print('{} - rerun with --bitfuzz'.format(test.params['name']))
-        fixture_rc = PrpRunner(bitfuzz=True, aegraph=args.aegraph).run(os.getcwd(), test)
+        fixture_rc = PrpRunner(bitfuzz=True).run(os.getcwd(), test)
 
     rc |= fixture_rc
 

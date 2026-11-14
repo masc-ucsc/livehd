@@ -435,67 +435,18 @@ TEST(LhdOptions, SynthDelayFractionScalesTheSdcClockPeriod) {
                lhd::Lhd_error);
 }
 
-// compile.cprop.engine: the kernel dispatches the cprop slots. At least one
-// engine always runs (there is no "none"), classic stays the default, and
-// aegraph+classic runs the e-graph engine then classic in each slot.
-TEST(LhdOptions, CpropEngineDispatch) {
-  const auto methods = [](const std::vector<std::pair<std::string, std::string>>& sets) {
-    lhd::Options opts;
-    for (const auto& [k, v] : sets) {
-      opts.sets.emplace_back(k, v);
+// The compile schedule's two fold slots both run the e-graph engine under the compile.cprop set name.
+TEST(LhdOptions, FoldSlotsRunTheEgraphEngine) {
+  lhd::Options             opts;
+  std::vector<std::string> methods;
+  for (const auto& [set_name, method] : lhd::compile_graph_passes(opts)) {
+    if (method != "pass.bitwidth" && method != "pass.enableopt") {
+      EXPECT_EQ(set_name, "compile.cprop");
+      methods.push_back(method);
     }
-    std::vector<std::string> out;
-    for (const auto& [set_name, method] : lhd::compile_graph_passes(opts)) {
-      if (method != "pass.bitwidth" && method != "pass.enableopt") {
-        EXPECT_EQ(set_name, "compile.cprop") << "every engine shares the compile.cprop set";
-        out.push_back(method);
-      }
-    }
-    return out;
-  };
-  using V = std::vector<std::string>;
-  EXPECT_EQ(methods({}), (V{"pass.aegraph", "pass.aegraph"})) << "the e-graph engine is the default";
-  EXPECT_EQ(methods({
-                {"compile.cprop.engine", "classic"}
-  }),
-            (V{"pass.cprop", "pass.cprop"}));
-  EXPECT_EQ(methods({
-                {"compile.cprop.engine", "aegraph"}
-  }),
-            (V{"pass.aegraph", "pass.aegraph"}));
-  EXPECT_EQ(methods({
-                {"compile.cprop.engine", "aegraph+classic"}
-  }),
-            (V{"pass.aegraph", "pass.cprop", "pass.aegraph", "pass.cprop"}));
-  EXPECT_EQ(methods({
-                {      "compile.cprop.engine", "aegraph"},
-                {"compile.cprop.engine_slots",   "first"}
-  }),
-            (V{"pass.aegraph", "pass.cprop"}));
-  EXPECT_EQ(methods({
-                {      "compile.cprop.engine", "aegraph"},
-                {"compile.cprop.engine_slots",  "second"}
-  }),
-            (V{"pass.cprop", "pass.aegraph"}));
-  EXPECT_EQ(methods({
-                {      "compile.cprop.engine", "aegraph+classic"},
-                {"compile.cprop.engine_slots",          "second"}
-  }),
-            (V{"pass.cprop", "pass.aegraph", "pass.cprop"}));
-  // The last --set wins, like every other pass flag.
-  EXPECT_EQ(methods({
-                {"compile.cprop.engine", "aegraph"},
-                {"compile.cprop.engine", "classic"}
-  }),
-            (V{"pass.cprop", "pass.cprop"}));
-
-  lhd::Options opts;
-  EXPECT_EQ(lhd::cprop_engine_descriptor(opts), "aegraph:both:cost=synth") << "aegraph is the default engine";
-  opts.sets.emplace_back("compile.cprop.engine", "classic");
-  EXPECT_EQ(lhd::cprop_engine_descriptor(opts), "classic");
-  opts.sets.emplace_back("compile.cprop.engine", "aegraph+classic");
-  opts.sets.emplace_back("compile.cprop.engine_slots", "first");
-  EXPECT_EQ(lhd::cprop_engine_descriptor(opts), "aegraph+classic:first:cost=synth");
+  }
+  EXPECT_EQ(methods, (std::vector<std::string>{"pass.aegraph", "pass.aegraph"}));
+  EXPECT_EQ(lhd::cprop_engine_descriptor(opts), "aegraph:both:cost=synth") << "the spelling compile caches were keyed with";
 }
 
 // compile.aegraph.cost: the default is `auto`, which follows the command (sim under `lhd sim`, synth elsewhere, so a bare
@@ -504,7 +455,6 @@ TEST(LhdOptions, CpropEngineDispatch) {
 TEST(LhdOptions, AegraphCostProfileIsResolvedAndNamedInTheDescriptor) {
   lhd::Options opts;
   opts.command = "sim";
-  opts.sets.emplace_back("compile.cprop.engine", "aegraph");
   EXPECT_EQ(lhd::resolve_aegraph_cost(opts), "sim") << "unset: automatic, sim under `lhd sim`";
   EXPECT_EQ(lhd::cprop_engine_descriptor(opts), "aegraph:both:cost=sim");
   opts.command = "compile";
@@ -522,35 +472,24 @@ TEST(LhdOptions, AegraphCostProfileIsResolvedAndNamedInTheDescriptor) {
   opts.command = "compile";
   opts.sets.emplace_back("compile.aegraph.cost", "sim");
   EXPECT_EQ(lhd::cprop_engine_descriptor(opts), "aegraph:both:cost=sim") << "last --set wins, any command";
-  lhd::Options classic;
-  classic.sets.emplace_back("compile.cprop.engine", "classic");
-  classic.sets.emplace_back("compile.aegraph.cost", "sim");
-  EXPECT_EQ(lhd::cprop_engine_descriptor(classic), "classic") << "the profile only matters when an aegraph step runs";
 }
 
-// pass.aegraph's after_bitwidth label goes to the slot that runs after
-// pass.bitwidth only: the first slot (and any pass.cprop) never gets it.
+// pass.aegraph's after_bitwidth label goes to the slot that runs after pass.bitwidth only.
 TEST(LhdOptions, AfterBitwidthReachesOnlyThePostBitwidthSlot) {
-  const auto slots = [](const std::string& engine) {
-    lhd::Options opts;
-    opts.sets.emplace_back("compile.cprop.engine", engine);
-    const auto passes = lhd::compile_graph_passes(opts);
-    const auto after  = lhd::follows_bitwidth(passes);
-    EXPECT_EQ(after.size(), passes.size());
-    std::string out;
-    for (size_t i = 0; i < passes.size(); ++i) {
-      if (passes[i].second == "pass.aegraph") {
-        out += after[i] ? "A" : "a";
-      }
+  lhd::Options opts;
+  const auto   passes = lhd::compile_graph_passes(opts);
+  const auto   after  = lhd::follows_bitwidth(passes);
+  ASSERT_EQ(after.size(), passes.size());
+  std::string out;
+  for (size_t i = 0; i < passes.size(); ++i) {
+    if (passes[i].second == "pass.aegraph") {
+      out += after[i] ? "A" : "a";
     }
-    return out;
-  };
-  EXPECT_EQ(slots("aegraph"), "aA");
-  EXPECT_EQ(slots("aegraph+classic"), "aA");
-  EXPECT_EQ(slots("classic"), "");
+  }
+  EXPECT_EQ(out, "aA");
 }
 
-TEST(LhdOptions, CpropEngineValuesAreValidatedEagerly) {
+TEST(LhdOptions, FoldOptionsAreValidatedEagerly) {
   const auto check = [](const std::string& key, const std::string& value) {
     std::vector<std::string> args{"lhd", "compile", "unused.prp", "--set", key + "=" + value};
     std::vector<char*>       argv;
@@ -560,25 +499,29 @@ TEST(LhdOptions, CpropEngineValuesAreValidatedEagerly) {
     const auto opts = lhd::parse_args(static_cast<int>(argv.size()), argv.data());
     lhd::check_known_set_passes(opts);
   };
-  for (const auto* ok : {"classic", "aegraph", "aegraph+classic"}) {
-    EXPECT_NO_THROW(check("compile.cprop.engine", ok)) << ok;
-  }
-  for (const auto* ok : {"both", "first", "second"}) {
-    EXPECT_NO_THROW(check("compile.cprop.engine_slots", ok)) << ok;
-  }
   for (const auto* ok : {"synth", "sim", "auto"}) {
     EXPECT_NO_THROW(check("compile.aegraph.cost", ok)) << ok;
   }
   for (const auto* bad : {"fast", "none", "Sim", ""}) {
     EXPECT_THROW(check("compile.aegraph.cost", bad), lhd::Lhd_error) << bad;
   }
-  // No "none": a compile without an engine would silently skip constant propagation.
-  for (const auto* bad : {"none", "off", "Classic", "aegraph,classic", ""}) {
-    EXPECT_THROW(check("compile.cprop.engine", bad), lhd::Lhd_error) << bad;
+  // The classic engine and its selectors are gone: a --set of one says so.
+  for (const auto& [key, value] : std::vector<std::pair<std::string, std::string>>{{"compile.cprop.engine", "classic"},
+                                                                                  {"compile.cprop.engine", "aegraph"},
+                                                                                  {"compile.cprop.engine_slots", "both"},
+                                                                                  {"formal.lec.preflight_engine", "aegraph"}}) {
+    try {
+      check(key, value);
+      FAIL() << key << " accepted";
+    } catch (const lhd::Lhd_error& error) {
+      EXPECT_NE(error.msg.find("was removed"), std::string::npos) << key << ": " << error.msg;
+    }
   }
-  EXPECT_THROW(check("compile.cprop.engine_slots", "third"), lhd::Lhd_error);
-  // One spelling per shared flag.
-  for (const auto* shared : {"low_lanes", "loop_hoist", "engine", "engine_slots"}) {
+  // One spelling per flag: low_lanes/loop_hoist under compile.cprop, the rule runtime under compile.aegraph.
+  EXPECT_NO_THROW(check("compile.cprop.low_lanes", "false"));
+  EXPECT_NO_THROW(check("compile.cprop.loop_hoist", "false"));
+  EXPECT_NO_THROW(check("compile.aegraph.rules_disable", "not_not"));
+  for (const auto* shared : {"low_lanes", "loop_hoist"}) {
     try {
       check(std::string{"compile.aegraph."} + shared, "true");
       FAIL() << shared << " accepted under compile.aegraph";
@@ -586,44 +529,34 @@ TEST(LhdOptions, CpropEngineValuesAreValidatedEagerly) {
       EXPECT_NE(error.hint.find(std::string{"compile.cprop."} + shared), std::string::npos) << error.hint;
     }
   }
+  try {
+    check("compile.cprop.rules_disable", "not_not");
+    FAIL() << "rules_disable accepted under compile.cprop";
+  } catch (const lhd::Lhd_error& error) {
+    EXPECT_NE(error.hint.find("compile.aegraph.rules_disable"), std::string::npos) << error.hint;
+  }
   // after_bitwidth is kernel bookkeeping: not settable by a user.
   EXPECT_THROW(check("compile.aegraph.after_bitwidth", "true"), lhd::Lhd_error);
   const auto listed = lhd::list_set_options();
   const auto has    = [&](std::string_view name) {
     return std::any_of(listed.begin(), listed.end(), [&](const auto& option) { return option.name == name; });
   };
-  EXPECT_TRUE(has("compile.cprop.engine"));
-  EXPECT_TRUE(has("compile.cprop.engine_slots"));
-  EXPECT_FALSE(has("compile.aegraph.engine")) << "INTERNAL shared labels are not listed";
-  EXPECT_FALSE(has("compile.aegraph.low_lanes"));
-  EXPECT_FALSE(has("compile.aegraph.loop_hoist"));
+  EXPECT_TRUE(has("compile.cprop.low_lanes"));
+  EXPECT_TRUE(has("compile.cprop.loop_hoist"));
+  EXPECT_TRUE(has("compile.aegraph.rules_disable"));
+  EXPECT_FALSE(has("compile.cprop.engine"));
+  EXPECT_FALSE(has("compile.cprop.engine_slots"));
+  EXPECT_FALSE(has("compile.cprop.rules_disable")) << "listed once, under compile.aegraph";
+  EXPECT_FALSE(has("compile.aegraph.low_lanes")) << "listed once, under compile.cprop";
   EXPECT_FALSE(has("compile.aegraph.after_bitwidth"));
-  // The LEC preflight engine switch is INTERNAL too: settable, never listed.
   EXPECT_FALSE(has("formal.lec.preflight_engine"));
 }
 
-// The kernel does the engine dispatch, so a non-classic engine reaching
-// pass.cprop means a caller bypassed it: refuse rather than run classic and make
-// an A/B comparison compare nothing.
-TEST(LhdOptions, PassCpropRefusesNonClassicEngine) {
+// The classic engine's method is gone.
+TEST(LhdOptions, PassCpropIsGone) {
   (void)lhd::list_set_options();  // registers every pass method
-  for (const char* engine : {"aegraph", "aegraph+classic", "none"}) {
-    Eprp_var var;
-    EXPECT_THROW(Pass::eprp.run_method_now("pass.cprop",
-                                           var,
-                                           {
-                                               {"engine", engine}
-    }),
-                 std::exception)
-        << engine;
-  }
-  Eprp_var var;
-  EXPECT_NO_THROW(Pass::eprp.run_method_now("pass.cprop",
-                                            var,
-                                            {
-                                                {"engine", "classic"}
-  }));
-  EXPECT_NO_THROW(Pass::eprp.run_method_now("pass.cprop", var, {}));
+  EXPECT_EQ(Pass::eprp.get_method("pass.cprop"), nullptr);
+  EXPECT_NE(Pass::eprp.get_method("pass.aegraph"), nullptr);
 }
 
 TEST(LhdOptions, RecommendedSharedDefaults) {

@@ -1,10 +1,21 @@
-# Constant propagation and mux sharing
+# Constant propagation support: scalar rewrites, region passes and value facts
 
-The compile schedule is `cprop -> bitwidth -> enableopt -> cprop -> bitwidth`.
-Each `Cprop::do_trans` makes one ordinary forward scalar/CSE sweep. It then
-processes explicit wiring and disjoint mux/vector groups, and deletes dead
-nodes. There is no pack fixed point, fresh-node retry sweep, or vectorization
-round loop. Vector mux groups run in dependency-level order within one call.
+The e-graph engine (`pass/aegraph`, `pass.aegraph`) is the only constant-propagation
+engine; the compile schedule is `aegraph -> bitwidth -> enableopt -> aegraph -> bitwidth`.
+The classic engine that lived here (`Cprop::do_trans`, the `pass.cprop` method and
+its `compile.cprop.engine` selector) was removed on 2026-11-14. What remains is the
+library the e-graph engine runs around itself:
+
+- `Cprop::do_scalar`: the scalar rewrites (canonicalization, packed-slice
+  resolution, boolean cancellation, constant folds) over the members of a
+  combinational SCC, the engine's false-cycle cutter before it builds the e-graph;
+- `Cprop::do_post`: low-lane narrowing and the region passes after the engine
+  elaborated a body: explicit wiring, disjoint mux/vector groups, mux and operator
+  sharing, flop-enable folding and the dead-node sweep. There is no pack fixed
+  point, fresh-node retry sweep, or vectorization round loop. Vector mux groups run
+  in dependency-level order within one call;
+- `cprop_value.hpp` (the per-node facts `pass/bitwidth/bitwidth_rewrite.cpp` also
+  reads), `cprop_muxctx`, `cprop_opshare` and `loop_hoist`.
 
 Cprop does not use width/sign annotations as semantic evidence. Literal masks,
 Concat lane contracts, and cached structural facts can justify local rewrites.
@@ -30,8 +41,8 @@ computed forward once, with a bounded representation size.
 
 ## Loop-invariant hoisting (compact loops)
 
-`loop_hoist.cpp` runs serially after the per-graph sweep (`pass.cprop`
-label `loop_hoist`, default true). A compact loop's body sees two kinds of
+`loop_hoist.cpp` runs serially after the per-graph sweep (`pass.aegraph`
+label `loop_hoist`, spelled `compile.cprop.loop_hoist`, default true). A compact loop's body sees two kinds of
 input: the ordinal, the activation and every carry-in change between
 iterations; every other input is bound once per evaluation. A body cell that
 reads only invariant inputs and constants (transitively) computes the same
@@ -47,7 +58,7 @@ compact form is preserved by ruling, so this -- not unrolling -- is where
 the body gets cheaper. Two filters: the value's width must be known (it
 becomes a declared port, and a 0-width port takes the body off the
 simulator's inline pure evaluator, which cost br_arb_lru 18 -> 25 s before
-the filter), so in the compile schedule the move happens in the cprop round
+the filter), so in the compile schedule the move happens in the fold round
 after bitwidth; and the cone must compute something -- a lone slice,
 widening, pack or shift of an invariant mints no gate and would only add a
 bound input per instance. A body also instantiated as an ordinary Sub is

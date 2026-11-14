@@ -160,15 +160,18 @@ module unknown_or(output y);
  assign y = r;
 endmodule
 EOF
-for engine in aegraph classic; do
+# With and without the e-graph rules (rules_off: every rule group disabled).
+for engine in aegraph rules_off; do
+ rules=""
+ if [ "$engine" = rules_off ]; then rules=group:arith+group:div+group:mask+group:mux+group:shift; fi
  for top in ready all_ones all_zero; do
   "$LHD" compile "$W/ready.v" --top "$top" --workdir "$W/$top-$engine" \
-   --set compile.cprop.engine="$engine" --set compile.specialize_modules=true \
+   --set compile.aegraph.rules_disable="$rules" --set compile.specialize_modules=true \
    --emit-dir verilog:"$W/$top-$engine-net" -q -- --ignore-uninstantiated-modules
  done
  for top in wide partial_and unknown_or; do
   if "$LHD" compile "$W/ready.v" --top "$top" --workdir "$W/$top-$engine" \
-   --set compile.cprop.engine="$engine" --set compile.specialize_modules=true \
+   --set compile.aegraph.rules_disable="$rules" --set compile.specialize_modules=true \
    --emit-dir verilog:"$W/$top-$engine-net" -q -- --ignore-uninstantiated-modules; then
    echo "FAIL: unresolved feedback in $top was accepted by $engine"; exit 1
   fi

@@ -1,6 +1,6 @@
 /*
 :name: hotmux_unique
-:set: compile.cprop.engine=classic
+:set: compile.aegraph.rules_disable=group:arith+group:div+group:mask+group:mux+group:shift
 :type: compile equiv
 :verilog_top: hotmux_unique.dec
 :pyrope_top: dec

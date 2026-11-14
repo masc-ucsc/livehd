@@ -1,10 +1,10 @@
 #!/bin/bash
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #
-# compile.cprop.engine reaches EVERY site that folds a graph body, not only the two compile cprop slots
+# The e-graph engine folds EVERY site that folds a graph body, not only the two compile slots
 # (livehd::fold_body, pass/aegraph/fold_body.hpp). With LHD_FOLD_BODY_LOG=1 each call prints
-# `fold_body engine=<engine> site=<site>` on stderr; for each engine this test drives one command per site
-# family and asserts the line appears with exactly that engine and with no other engine's name:
+# `fold_body engine=aegraph site=<site>` on stderr; this test drives one command per site family and
+# asserts the line appears:
 #
 #   specialize.refold + cgen.sim.refold   lhd sim (sim.unroll_sites splices a small loop; sim cost)
 #   synth.loop_cleanup                    pass abc over a rolled loop
@@ -13,8 +13,8 @@
 #   satopt.cleanup                        pass satopt over a design satopt rewrites
 #   formal.lec.preflight                  lhd lec across two hierarchies
 #
-# The results stay sound under every engine (mapped netlists and the LEC are PROVEN), compile.sweep follows the
-# engine too, and the synthesis region cache never replays one engine's regions for another.
+# The results stay sound (mapped netlists and the LEC are PROVEN), compile.sweep runs the engine too, and the
+# synthesis region cache never replays one cost profile's regions for another.
 set -u
 # Pinned to inou.cgen.sim: this test is about that flow's generated sources, color plan, tune/profile
 # machinery or its default undefined-access warnings, none of which the LNAST sim flow (the `lhd sim`
@@ -86,18 +86,18 @@ PRP
 "$LHD" pass color synth --top memtile.memtile lg:"$W/tile_src" --workdir "$W/tile_color" -q >/dev/null 2>&1 || fail "color tile"
 "$LHD" compile "$SATOPT_SRC" --top top --emit-dir lg:"$W/satopt_src" --workdir "$W/satopt_compile" -q >/dev/null 2>&1 || fail "compile satopt"
 
-for engine in classic aegraph aegraph+classic; do
-  tag=${engine//+/_}
-  sets=(--set "compile.cprop.engine=$engine")
+{
+  engine=aegraph
+  tag=aegraph
 
   # -- sim: specialize refolds and the post-splice fold (cost=sim) -----------------------------------------------
-  "$LHD" sim "$SMALL_LOOP" --setup-only --set sim.unroll_sites=100000 "${sets[@]}" --workdir "$W/sim_$tag" -q >"$W/sim_$tag.out" 2>"$W/sim_$tag.log" \
+  "$LHD" sim "$SMALL_LOOP" --setup-only --set sim.unroll_sites=100000 --workdir "$W/sim_$tag" -q >"$W/sim_$tag.out" 2>"$W/sim_$tag.log" \
     || fail "sim engine=$engine failed: $(head -c 600 "$W/sim_$tag.out")"
   expect "$engine" cgen.sim.refold "$W/sim_$tag.log"
   expect "$engine" specialize.refold "$W/sim_$tag.log"
 
   # -- synthesis: loop cleanup, mapped netlist PROVEN against the compiled source ----------------------------------
-  "$LHD" pass abc lg:"$W/loop_src" --top "$LOOP_TOP" --set synth.liberty="$LIB" "${sets[@]}" --emit verilog:"$W/loop_net_$tag.v" \
+  "$LHD" pass abc lg:"$W/loop_src" --top "$LOOP_TOP" --set synth.liberty="$LIB" --emit verilog:"$W/loop_net_$tag.v" \
     --workdir "$W/loop_map_$tag" -q >"$W/loop_map_$tag.out" 2>"$W/loop_map_$tag.log" || fail "loop abc engine=$engine failed: $(head -c 600 "$W/loop_map_$tag.out")"
   expect "$engine" synth.loop_cleanup "$W/loop_map_$tag.log"
   cat "$W/loop_net_$tag.v" "$W/models/"*.v >"$W/loop_impl_$tag.v"
@@ -106,15 +106,15 @@ for engine in classic aegraph aegraph+classic; do
   grep -q '"verdict":"proven-' "$W/loop_lec_$tag.json" || fail "loop engine=$engine: mapped netlist not PROVEN: $(head -c 600 "$W/loop_lec_$tag.json")"
 
   # -- synthesis: memory module lowering ----------------------------------------------------------------------------
-  "$LHD" pass abc --top memtile.memtile lg:"$W/tile_src" --set synth.liberty="$LIB" --set pass.abc.memory=true "${sets[@]}" \
+  "$LHD" pass abc --top memtile.memtile lg:"$W/tile_src" --set synth.liberty="$LIB" --set pass.abc.memory=true \
     --emit-dir lg:"$W/tile_net_$tag" --workdir "$W/tile_map_$tag" -q >"$W/tile_map_$tag.out" 2>"$W/tile_map_$tag.log" || fail "tile abc engine=$engine failed: $(head -c 600 "$W/tile_map_$tag.out")"
   expect "$engine" synth.memory_module "$W/tile_map_$tag.log"
 
   # -- synthesis: private-copy state sweep, PROVEN ------------------------------------------------------------------
   "$LHD" synth --reader slang --top sweep --workdir "$W/state_$tag" --emit-dir lg:"$W/state_net_$tag" --set synth.liberty="$STATE_LIB" \
-    --set synth.state_sweep=true "${sets[@]}" --result-json "$W/state_$tag.json" -q -- "$STATE_SRC" >"$W/state_$tag.out" 2>"$W/state_$tag.log" \
+    --set synth.state_sweep=true --result-json "$W/state_$tag.json" -q -- "$STATE_SRC" >"$W/state_$tag.out" 2>"$W/state_$tag.log" \
     || fail "state sweep engine=$engine failed: $(head -c 600 "$W/state_$tag.json")"
-  "$LHD" synth --reader slang --top cst --workdir "$W/cst_$tag" --set synth.liberty="$STATE_LIB" --set synth.state_sweep=true "${sets[@]}" \
+  "$LHD" synth --reader slang --top cst --workdir "$W/cst_$tag" --set synth.liberty="$STATE_LIB" --set synth.state_sweep=true \
     --result-json "$W/cst_$tag.json" -q -- "$W/cst.sv" >"$W/cst_$tag.out" 2>"$W/cst_$tag.log" \
     || fail "constant-register sweep engine=$engine failed: $(head -c 600 "$W/cst_$tag.json")"
   expect "$engine" synth.state_sweep "$W/cst_$tag.log"
@@ -123,50 +123,42 @@ for engine in classic aegraph aegraph+classic; do
   grep -q '"verdict":"proven-full"' "$W/state_lec_$tag.json" || fail "state sweep engine=$engine: netlist not PROVEN: $(head -c 600 "$W/state_lec_$tag.json")"
 
   # -- satopt cleanup ------------------------------------------------------------------------------------------------
-  "$LHD" pass satopt lg:"$W/satopt_src" --top top "${sets[@]}" --emit-dir lg:"$W/satopt_out_$tag" --workdir "$W/satopt_$tag" -q \
+  "$LHD" pass satopt lg:"$W/satopt_src" --top top --emit-dir lg:"$W/satopt_out_$tag" --workdir "$W/satopt_$tag" -q \
     >"$W/satopt_$tag.out" 2>"$W/satopt_$tag.log" || fail "satopt engine=$engine failed: $(head -c 600 "$W/satopt_$tag.out")"
   expect "$engine" satopt.cleanup "$W/satopt_$tag.log"
 
   # -- LEC preflight (no bitwidth follows): across two hierarchies, PROVEN -------------------------------------------
-  "$LHD" lec --ref "$W/hier.prp" --impl "$W/flat.prp" --top top "${sets[@]}" --set formal.effort=proof --workdir "$W/lec_$tag" \
+  "$LHD" lec --ref "$W/hier.prp" --impl "$W/flat.prp" --top top --set formal.effort=proof --workdir "$W/lec_$tag" \
     --result-json "$W/lec_$tag.json" -q >"$W/lec_$tag.out" 2>"$W/lec_$tag.log" || fail "lec engine=$engine failed: $(head -c 600 "$W/lec_$tag.json")"
   expect "$engine" formal.lec.preflight "$W/lec_$tag.log"
   grep -q '"verdict":"proven-' "$W/lec_$tag.json" || fail "lec engine=$engine: not PROVEN: $(head -c 600 "$W/lec_$tag.json")"
 
-  # -- compile.sweep: its per-round fold follows the engine --------------------------------------------------------
-  "$LHD" compile "$STATE_SRC" --reader slang --top sweep --set compile.sweep=true "${sets[@]}" --workdir "$W/csweep_$tag" -q >/dev/null 2>&1 \
+  # -- compile.sweep: its per-round fold is the engine ------------------------------------------------------------
+  "$LHD" compile "$STATE_SRC" --reader slang --top sweep --set compile.sweep=true --workdir "$W/csweep_$tag" -q >/dev/null 2>&1 \
     || fail "compile.sweep engine=$engine failed"
   n_ae=$(ls "$W/csweep_$tag/logs/" | grep -c 'pass_aegraph')
   n_cp=$(ls "$W/csweep_$tag/logs/" | grep -c 'pass_cprop')
-  case "$engine" in
-    classic) [ "$n_ae" -eq 0 ] || fail "compile.sweep engine=classic ran pass.aegraph" ;;
-    aegraph) [ "$n_cp" -eq 0 ] && [ "$n_ae" -ge 2 ] || fail "compile.sweep engine=aegraph: pass.aegraph x$n_ae pass.cprop x$n_cp" ;;
-    *) [ "$n_cp" -ge 2 ] && [ "$n_ae" -ge 2 ] || fail "compile.sweep engine=$engine: pass.aegraph x$n_ae pass.cprop x$n_cp" ;;
-  esac
-done
+  [ "$n_cp" -eq 0 ] && [ "$n_ae" -ge 2 ] || fail "compile.sweep: pass.aegraph x$n_ae pass.cprop x$n_cp"
+}
 
-# The default is the e-graph engine: no setting, the LEC preflight folds with aegraph; an explicit classic folds with classic.
-"$LHD" lec --ref "$W/hier.prp" --impl "$W/flat.prp" --top top --workdir "$W/lec_default" -q >/dev/null 2>"$W/lec_default.log" || fail "default lec failed"
-expect aegraph formal.lec.preflight "$W/lec_default.log"
-
-# The synthesis region cache never mixes engines: one workdir, same source. A run under a different engine than the one
-# that filled the cache replays nothing (it is salted by engine), and a repeat under the same engine hits every region.
+# The synthesis region cache never mixes cost profiles: one workdir, same source. A run under a different profile than
+# the one that filled the cache replays nothing (it is salted by profile), and a repeat under the same one hits.
 cache_hits() {  # <json>: abc region cache hits
   grep -o '"hits":[0-9]*' "$1" | head -1 | cut -d: -f2
 }
 n=0
-for step in classic:miss classic:hit aegraph:miss aegraph:hit aegraph+classic:miss classic:miss; do
-  engine=${step%%:*}
+for step in synth:miss synth:hit sim:miss sim:hit synth:miss; do
+  cost=${step%%:*}
   want=${step##*:}
   n=$((n + 1))
-  "$LHD" pass abc lg:"$W/loop_src" --top "$LOOP_TOP" --set synth.liberty="$LIB" --set "compile.cprop.engine=$engine" \
-    --emit-dir lg:"$W/cache_net_$n" --workdir "$W/cache_work" --result-json "$W/cache_$n.json" -q >/dev/null 2>&1 || fail "cache run $n engine=$engine failed"
+  "$LHD" pass abc lg:"$W/loop_src" --top "$LOOP_TOP" --set synth.liberty="$LIB" --set "compile.aegraph.cost=$cost" \
+    --emit-dir lg:"$W/cache_net_$n" --workdir "$W/cache_work" --result-json "$W/cache_$n.json" -q >/dev/null 2>&1 || fail "cache run $n cost=$cost failed"
   hits=$(cache_hits "$W/cache_$n.json")
   if [ "$want" = miss ]; then
-    [ "$hits" = 0 ] || fail "cache: run $n engine=$engine replayed another engine's regions (hits=$hits)"
+    [ "$hits" = 0 ] || fail "cache: run $n cost=$cost replayed another profile's regions (hits=$hits)"
   else
-    [ "$hits" != 0 ] || fail "cache: run $n engine=$engine (a repeat) found nothing (hits=$hits)"
+    [ "$hits" != 0 ] || fail "cache: run $n cost=$cost (a repeat) found nothing (hits=$hits)"
   fi
 done
 
-echo "PASS: compile.cprop.engine reaches every fold site (sim, synth, satopt, LEC preflight, compile.sweep), stays sound, and keys the caches"
+echo "PASS: the e-graph engine folds every site (sim, synth, satopt, LEC preflight, compile.sweep), stays sound, and keys the caches"

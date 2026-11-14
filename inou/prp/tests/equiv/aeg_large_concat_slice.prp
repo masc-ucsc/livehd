@@ -1,6 +1,6 @@
 /*
 :name: aeg_large_concat_slice
-:set: compile.cprop.engine=classic
+:set: compile.aegraph.rules_disable=group:arith+group:div+group:mask+group:mux+group:shift
 :type: lec
 */
 // A shared pack with more than 64 lanes, read across two partial byte lanes.

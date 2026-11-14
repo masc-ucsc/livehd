@@ -1,7 +1,7 @@
 /*
 :name: aeg_wide_packed_fields_1
 :type: lec
-:set: compile.cprop.engine=aegraph
+:set: compile.aegraph.rules_disable=
 :compile_grep: aegraph-rule getmask_lane .*extracted=[1-9]
 */
 // HEADER-ONLY variant: aeg_wide_packed_fields.prp compiled by the acyclic e-graph engine; the grep shows

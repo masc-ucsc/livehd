@@ -28,6 +28,7 @@ cc_test(
     srcs = ["bitfuzz_test.cpp"],
     copts = COPTS,
     deps = [
+        "//pass/aegraph:pass_aegraph",
         ":pass_bitfuzz",
         "//pass/cprop:pass_cprop",
         "//core",

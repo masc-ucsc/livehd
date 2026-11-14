@@ -1609,22 +1609,26 @@ void check_known_set_passes(const Options& opts) {
                       std::format("--set/--config '{}' is kernel-managed, not a pass option", key),
                       "the kernel sets it on the pass.aegraph slot that runs after pass.bitwidth"};
     }
-    if (pass == "compile.aegraph" && (flag == "low_lanes" || flag == "loop_hoist" || flag == "engine" || flag == "engine_slots")) {
-      // pass.aegraph registers the shared labels as INTERNAL: every knob has ONE
-      // user-facing spelling, the compile.cprop one, and the kernel copies it.
-      throw Lhd_error{
-          "usage",
-          std::format("--set/--config '{}' has one spelling", key),
-          std::format("use --set compile.cprop.{}={} instead (the aegraph and classic engines share the knob)", flag, value)};
+    if ((pass == "compile.cprop" || pass == "compile.aegraph") && (flag == "engine" || flag == "engine_slots")) {
+      throw Lhd_error{"usage",
+                      std::format("--set/--config '{}' was removed", key),
+                      "the e-graph engine (pass.aegraph) is the only constant-propagation engine; the classic cprop engine and "
+                      "its selectors are gone"};
     }
-    if (pass == "compile.cprop" && flag == "engine") {
-      // Validated eagerly: a typo must not wait for the pass to run. There is no
-      // "none": at least one engine always runs.
-      if (value != "classic" && value != "aegraph" && value != "aegraph+classic") {
-        throw Lhd_error{"usage",
-                        std::format("--set/--config compile.cprop.engine expects classic|aegraph|aegraph+classic, got '{}'", value),
-                        "aegraph is the default; classic is the reference engine; aegraph+classic runs the e-graph engine and then "
-                        "classic in each slot"};
+    if ((pass == "formal.lec" || pass == "formal") && flag == "preflight_engine") {
+      throw Lhd_error{"usage",
+                      std::format("--set/--config '{}' was removed", key),
+                      "the LEC preflight always folds with the e-graph engine (pass.aegraph)"};
+    }
+    if (pass == "compile.cprop" || pass == "compile.aegraph") {
+      // Both namespaces reach the one pass.aegraph method: every option has exactly ONE spelling.
+      if (const auto* am = Pass::eprp.get_method("pass.aegraph"); am != nullptr && am->has_label(flag)) {
+        const std::string_view want = set_flag_is_common("pass.aegraph", flag) ? "compile.cprop" : "compile.aegraph";
+        if (pass != want) {
+          throw Lhd_error{"usage",
+                          std::format("--set/--config '{}' has one spelling", key),
+                          std::format("use --set {}.{}={} instead", want, flag, value)};
+        }
       }
     }
     if (pass == "compile.aegraph" && flag == "cost") {
@@ -1633,13 +1637,6 @@ void check_known_set_passes(const Options& opts) {
             "usage",
             std::format("--set/--config compile.aegraph.cost expects synth|sim|auto, got '{}'", value),
             "auto is the default: sim under `lhd sim`, synth for every other command; an explicit synth|sim overrides it"};
-      }
-    }
-    if (pass == "compile.cprop" && flag == "engine_slots") {
-      if (value != "both" && value != "first" && value != "second") {
-        throw Lhd_error{"usage",
-                        std::format("--set/--config compile.cprop.engine_slots expects both|first|second, got '{}'", value),
-                        "first = the cprop before pass.legalize, second = the one after enableopt"};
       }
     }
     if (is_kernel_label(flag)) {
@@ -1910,39 +1907,18 @@ void apply_lhd_settings(Options& opts) {
   }
   livehd::Job_manager::global().configure(opts.jobs);
 
-  // The constant-folding engine of every fold site outside the two compile cprop slots (specialize refolds,
-  // the sim post-splice fold, synthesis loop cleanup and memory modules, the satopt cleanup, the LEC
-  // preflight): ONE process-wide setting from compile.cprop.engine, set here on every command so a
-  // previous in-process run never leaks its engine. The caches key on it (livehd::fold_salt_mix and the
-  // compile-cache context descriptor).
-  const auto choice = resolve_cprop_engine(opts);
-  livehd::set_fold_engine(livehd::parse_fold_engine(choice.engine).value_or(livehd::Fold_engine::classic));
+  // The cost profile of every fold site outside the two compile slots (specialize refolds, the sim post-splice
+  // fold, synthesis loop cleanup and memory modules, the satopt cleanup, the LEC preflight): ONE process-wide
+  // setting, set here on every command so a previous in-process run never leaks its profile. The caches key
+  // on it (livehd::fold_salt_mix and the compile-cache context descriptor).
   livehd::set_fold_default_cost(resolve_aegraph_cost(opts) == "sim" ? livehd::Fold_cost::sim : livehd::Fold_cost::synth);
-}
-
-Cprop_engine resolve_cprop_engine(const Options& opts) {
-  Cprop_engine choice;
+  std::string rules_disable;
   for (const auto& [key, value] : opts.sets) {
-    if (key == "compile.cprop.engine") {
-      choice.engine = value;
-    } else if (key == "compile.cprop.engine_slots") {
-      choice.slots = value;
+    if (key == "compile.aegraph.rules_disable") {
+      rules_disable = value;  // last wins, like every pass flag
     }
   }
-  return choice;
-}
-
-std::vector<std::string> cprop_slot_methods(const Cprop_engine& choice, int slot) {
-  const bool follows = choice.slots == "both" || (choice.slots == "first" && slot == 0) || (choice.slots == "second" && slot == 1);
-  if (!follows || choice.engine == "classic") {
-    return {"pass.cprop"};
-  }
-  if (choice.engine == "aegraph") {
-    return {"pass.aegraph"};
-  }
-  // aegraph+classic: the aegraph, then classic on its result, to measure what
-  // classic still removes.
-  return {"pass.aegraph", "pass.cprop"};
+  livehd::set_fold_rules_disable(std::move(rules_disable));
 }
 
 std::string resolve_aegraph_cost(const Options& opts) {
@@ -1958,17 +1934,11 @@ std::string resolve_aegraph_cost(const Options& opts) {
   return cost;
 }
 
-std::string cprop_engine_descriptor(const Options& opts) {
-  const auto choice = resolve_cprop_engine(opts);
-  if (choice.engine == "classic") {
-    return "classic";
-  }
-  return std::format("{}:{}:cost={}", choice.engine, choice.slots, resolve_aegraph_cost(opts));
-}
+std::string cprop_engine_descriptor(const Options& opts) { return std::format("aegraph:both:cost={}", resolve_aegraph_cost(opts)); }
 
 // The standard compile pipeline, in (set-name, EPRP method) order. The two
-// cprop slots follow compile.cprop.engine; the set name stays compile.cprop
-// for every engine (the driver merges compile.aegraph into a pass.aegraph step).
+// fold slots run pass.aegraph under the set name compile.cprop (the driver
+// merges compile.aegraph into the step).
 std::vector<std::pair<std::string, std::string>> compile_graph_passes(const Options& opts) {
   // Strip derived annotations immediately after graph lowering. Cprop must
   // preserve integer semantics without them; the normal bitwidth pass recovers
@@ -1981,12 +1951,7 @@ std::vector<std::pair<std::string, std::string>> compile_graph_passes(const Opti
     }
   }
 
-  const auto choice = resolve_cprop_engine(opts);
-  const auto cprop  = [&](int slot) {
-    for (auto& method : cprop_slot_methods(choice, slot)) {
-      steps.emplace_back("compile.cprop", std::move(method));
-    }
-  };
+  const auto cprop = [&](int) { steps.emplace_back("compile.cprop", "pass.aegraph"); };
   cprop(0);
   steps.emplace_back("compile.bitwidth", "pass.bitwidth");
   steps.emplace_back("compile.enableopt", "pass.enableopt");

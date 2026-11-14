@@ -1,7 +1,7 @@
 /*
 :name: aeg_lane_reads_1
 :type: lec
-:set: compile.cprop.engine=aegraph
+:set: compile.aegraph.rules_disable=
 :compile_grep: aegraph-rule sra_lane .*applied=[1-9]
 :compile_grep: aegraph-rule getmask_concat_straddle .*extracted=[1-9]
 :compile_grep: aegraph-rule getmask_not_getmask .*applied=[1-9]

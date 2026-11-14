@@ -2,6 +2,7 @@
 
 #include "bitwidth.hpp"
 #include "cprop.hpp"
+#include "pass_aegraph.hpp"
 #include "gtest/gtest.h"
 #include "node_util.hpp"
 #include "query.hpp"
@@ -110,7 +111,7 @@ TEST(CpropOpSharingProof, MixedSignsAndNarrowObservation) {
       Bitwidth{10}.do_trans(ref);
       ASSERT_TRUE(implementation_library.copy_from(reference_library, "opshare"));
       auto impl = implementation_library.find_io("opshare")->get_graph();
-      Cprop{}.do_trans(impl);
+      livehd::aegraph::fold_with(impl);
       Bitwidth{10}.do_trans(impl);
       size_t operators = 0;
       for (auto n : impl->body().nodes()) {
@@ -243,7 +244,7 @@ TEST(CpropHotmuxOpSharingProof, GroupsPreserveExplicitAndImplicitDefaults) {
       // the exact stamped pre/post graphs before any range-dependent cleanup.
       ASSERT_TRUE(implementation_library.copy_from(reference_library, "hotmux_opshare"));
       auto impl = implementation_library.find_io("hotmux_opshare")->get_graph();
-      Cprop{}.do_trans(impl);
+      livehd::aegraph::fold_with(impl);
       size_t operators = 0;
       for (auto n : impl->body().nodes()) {
         operators += gu::type_op_of(n) == op;

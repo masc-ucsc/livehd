@@ -69,21 +69,16 @@ class PrpRunner:
     LiveHD Pyrope Compilation Runner
     """
 
-    def __init__(self, bitfuzz=False, aegraph=False):
+    def __init__(self, bitfuzz=False):
         self.equiv_sets = ["compile.bitfuzz.mode=wires"] if bitfuzz else []
         # `compile_sets` ride ONLY the compile (and sim) of the design under test.
         # Unlike `equiv_sets` they are never appended to `lhd lec` and never to the
         # compile of a golden Verilog, so an A/B run puts exactly the DUT through
-        # the selected engine: the reference side keeps its own flags (the engine A/B fixtures pin
-        # their base to `:set: compile.cprop.engine=classic`). aegraph is the default engine, so
-        # `--aegraph` is explicit rather than needed; use compile.cprop.engine=classic to run a
-        # fixture's design under test through the classic engine.
-        # `--aegraph` selects the e-graph engine for the whole fixture;
-        # LHD_PRP_COMPILE_SETS="k=v k2=v2" forces any compile sets on every fixture
-        # of an existing target (`bazel test --test_env=LHD_PRP_COMPILE_SETS=
-        # compile.cprop.engine=aegraph //inou/prp:all`), with no BUILD edit.
-        self.compile_sets = ["compile.cprop.engine=aegraph"] if aegraph else []
-        self.compile_sets += os.environ.get('LHD_PRP_COMPILE_SETS', '').split()
+        # the selected flags while the reference side keeps its own.
+        # LHD_PRP_COMPILE_SETS="k=v k2=v2" forces compile sets on every fixture of an
+        # existing target (`bazel test --test_env=LHD_PRP_COMPILE_SETS=
+        # compile.aegraph.cost=sim //inou/prp:all`), with no BUILD edit.
+        self.compile_sets = os.environ.get('LHD_PRP_COMPILE_SETS', '').split()
         # Tests drive the lhd kernel (one stateless invocation per mode); the
         # lgshell REPL is no longer involved.
         if os.path.exists("./bazel-bin/lhd/lhd"):
@@ -149,9 +144,8 @@ class PrpRunner:
     def _extra_sets(self, test):
         """`:set: a.b=c d.e=f` — per-fixture pass flags, appended to every mode.
 
-        A key a harness-wide compile set (--aegraph / LHD_PRP_COMPILE_SETS) also names is dropped here: `lhd`
-        refuses one key given twice with different values, and the harness override must win (that is how an
-        engine-variant fixture, `:set: compile.cprop.engine=...`, also runs under a forced engine).
+        A key a harness-wide compile set (LHD_PRP_COMPILE_SETS) also names is dropped here: `lhd` refuses one
+        key given twice with different values, and the harness override must win.
 
         Used by fixtures that must exercise a non-default lowering (e.g.
         `:set: compile.unroll=true` to unroll a source loop instead of keeping it rolled, or
@@ -235,7 +229,7 @@ class PrpRunner:
     def lhd_lgraph(self, test, mode):
         # LNAST->LGraph: the lg: emit gates the kernel's standalone tolg
         # lowering followed by the standard graph optimization passes
-        # (tolg + pass.cprop + pass.bitwidth). With the optimization-level
+        # (tolg + pass.aegraph + pass.bitwidth). With the optimization-level
         # selection gone there is only ONE lowering command, so the two mode
         # names below resolve to it rather than drifting apart.
         cmd = self.lhd_upass(test, mode)

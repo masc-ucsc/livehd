@@ -2,6 +2,7 @@
 #include "cprop_muxctx.hpp"
 
 #include "cprop.hpp"
+#include "pass_aegraph.hpp"
 #include "cprop_value.hpp"
 #include "gtest/gtest.h"
 #include "query.hpp"
@@ -182,7 +183,7 @@ TEST(CpropHotmuxCse, PairOrderDefaultPairingAndObligations) {
     auto sink = f.graph->get_output_pin("observe");
     sink.get_driver_pin().del_sink(sink);
     second.connect_sink(sink);
-    Cprop{}.do_trans(f.graph);
+    livehd::aegraph::fold_with(f.graph);
     EXPECT_EQ(f.graph->get_output_pin("out").get_driver_pin() == sink.get_driver_pin(), variant == 0);
   }
 }
@@ -191,7 +192,7 @@ TEST(CpropHotmuxCse, IdenticalValuesDoNotEraseUnprovenOverlap) {
   Fixture f;
   auto    root = f.hot(f.a, f.x, f.b, f.x, f.x);
   root.connect_sink(f.graph->get_output_pin("out"));
-  Cprop{}.do_trans(f.graph);
+  livehd::aegraph::fold_with(f.graph);
   EXPECT_FALSE(root.get_master_node().is_invalid());
   EXPECT_EQ(gu::type_op_of(root.get_master_node()), Ntype_op::Hotmux);
   EXPECT_FALSE(gu::has_proven(root.get_master_node()));
@@ -270,7 +271,7 @@ TEST(CpropHotmuxCse, PrunedShapeKeepsStructuralKeyAndProvenance) {
     auto sink = f.graph->get_output_pin("observe");
     sink.get_driver_pin().del_sink(sink);
     h2.connect_sink(sink);
-    Cprop{}.do_trans(f.graph);
+    livehd::aegraph::fold_with(f.graph);
     const auto out     = f.graph->get_output_pin("out").get_driver_pin();
     const auto observe = sink.get_driver_pin();
     EXPECT_EQ(out == observe, variant != 1) << variant;

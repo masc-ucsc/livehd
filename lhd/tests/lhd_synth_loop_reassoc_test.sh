@@ -34,9 +34,9 @@ PY
 synth() {  # synth <mapper> <mode> [--set k=v...]
   local mapper=$1 mode=$2
   shift 2
-  # The merge checks below are about pass/synth/reassoc.cpp, so the legs run the classic engine (whose loop cleanup leaves the
-  # expanded chains for reassoc); the e-graph engine flattens them itself, see the default-engine leg after the loop.
-  "$LHD" synth lg:"$W/src" --top "$TOP" --set synth.liberty="$LIB" --stats --set compile.cprop.engine=classic "$@" \
+  # The merge checks below are about pass/synth/reassoc.cpp, so the legs turn off the e-graph flatten rule (which would
+  # merge the expanded chains in the loop cleanup itself, see the default leg after the loop) and leave them to reassoc.
+  "$LHD" synth lg:"$W/src" --top "$TOP" --set synth.liberty="$LIB" --stats --set compile.aegraph.rules_disable=flatten "$@" \
     --set synth.mapper="$mapper" --set lhd.jobs=1 --emit-dir lg:"$W/net_${mapper}_$mode" \
     --workdir "$W/synth_${mapper}_$mode" --result-json "$W/synth_${mapper}_$mode.json" >"$W/synth_${mapper}_$mode.log" 2>&1 ||
     { cat "$W/synth_${mapper}_$mode.log"; exit 1; }

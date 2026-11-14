@@ -1,7 +1,7 @@
 /*
 :name: aeg_mux_lane_writes_1
 :type: lec
-:set: compile.cprop.engine=aegraph
+:set: compile.aegraph.rules_disable=
 :compile_grep: aegraph-rule mux_setmask_arm .*extracted=[1-9]
 :compile_grep: aegraph-rule mux_setmask_pair .*extracted=[1-9]
 :compile_grep: aegraph-rule setmask_to_concat .*extracted=[1-9]

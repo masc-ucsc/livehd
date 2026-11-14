@@ -22,12 +22,19 @@
 static Pass_plugin sample("pass_aegraph", Pass_aegraph::setup);
 
 void Pass_aegraph::setup() {
-  Eprp_method m1("pass.aegraph", "acyclic e-graph constant propagation (alternative to pass.cprop)", &Pass_aegraph::optimize);
-  // The labels below are the shared spellings of pass.cprop (`compile.cprop.*`):
-  // each knob has ONE user-facing spelling and the kernel copies it here.
-  m1.add_label_optional("low_lanes", "INTERNAL shared with pass.cprop: see compile.cprop.low_lanes", "true");
-  m1.add_label_optional("loop_hoist", "INTERNAL shared with pass.cprop: see compile.cprop.loop_hoist", "true");
-  m1.add_label_optional("engine", "INTERNAL shared with pass.cprop: see compile.cprop.engine", "aegraph");
+  Eprp_method m1("pass.aegraph", "acyclic e-graph constant propagation", &Pass_aegraph::optimize);
+  // low_lanes and loop_hoist are spelled compile.cprop.<flag>, the rest compile.aegraph.<flag>
+  // (lhd: set_flag_is_common).
+  m1.add_label_optional("low_lanes",
+                        "true: narrow operations reading a value with known low bits, Or(Shl(H,k),L), to their H parts "
+                        "(bitwidth runs after the first fold in every compile)",
+                        "true");
+  m1.add_label_optional("loop_hoist",
+                        "true: move a compact loop body's iteration-invariant computations (those reading only invariant "
+                        "inputs and constants, never the ordinal, the activation or a carry) out to every loop instance's "
+                        "parent, computed once per evaluation and fed through a new `__hoist<k>` body input. The compact "
+                        "form is preserved; the values never change",
+                        "true");
   m1.add_label_optional("after_bitwidth",
                         "INTERNAL set by the kernel for the slot that runs after pass.bitwidth: low-lane narrowing stays off there",
                         "false");
@@ -73,7 +80,7 @@ Pass_aegraph::Pass_aegraph(const Eprp_var& var) : Pass("pass.aegraph", var) {}
 namespace {
 
 // The lifted loop bodies among `graphs` (callees of a compact-loop Sub): the
-// post steps' accumulation guard is a rolled-loop rule, as in pass.cprop.
+// post steps' accumulation guard is a rolled-loop rule.
 absl::flat_hash_set<hhds::Gid> lifted_loop_bodies(const std::vector<std::shared_ptr<hhds::Graph>>& graphs) {
   absl::flat_hash_set<hhds::Gid> bodies;
   for (const auto& g : graphs) {
@@ -100,15 +107,19 @@ livehd::aegraph::Options graph_options(livehd::aegraph::Options options, bool lo
 }  // namespace
 
 namespace livehd::aegraph {
+Stats fold_with(Cprop& cp, const std::shared_ptr<hhds::Graph>& g) {
+  Options options;
+  options.preflight    = !cp.low_lanes();
+  options.unstamped_ok = cp.low_lanes();
+  options.guard_scope  = cp.has_guard_scope();
+  return optimize_body(cp, g, options);
+}
+
 Stats optimize_body(Cprop& cp, const std::shared_ptr<hhds::Graph>& g, const Options& options) {
   cp.set_hotmux_trees(options.cost != Options::Cost::sim);
   cp.set_bit_lanes(options.cost == Options::Cost::sim);
   const auto stats = optimize(g, [&](const std::vector<hhds::Node_class>& cyclic) { cp.do_scalar(g, cyclic); }, options);
   livehd::aegraph_profile::Timer post(livehd::aegraph_profile::post);
-  if (stats.refused != 0) {
-    cp.do_trans(g);  // preflight: the engine would have created a cell it cannot stamp; classic does this graph
-    return stats;
-  }
   cp.do_post(g);
   return stats;
 }
@@ -143,7 +154,7 @@ void Pass_aegraph::optimize(Eprp_var& var) {
 
   // One graph: the e-graph engine, then the classic post steps over what it
   // elaborated. Graph bodies are independent, so the per-body work fans out
-  // exactly like pass.cprop's; publication order is untouched.
+  // publication order is untouched.
   std::mutex                 stats_mutex;
   livehd::aegraph::Stats     total;
   std::pair<size_t, size_t>  bit_lanes{0, 0};  // vectorize_bit_lanes: word writes, 1-bit lanes replaced

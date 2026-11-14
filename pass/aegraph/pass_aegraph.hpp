@@ -9,9 +9,8 @@
 #include "pass.hpp"
 #include "runtime/match.hpp"
 
-// pass.aegraph: the e-graph alternative to pass.cprop. The kernel selects it
-// with `--set compile.cprop.engine=aegraph|aegraph+classic` and swaps the
-// method in the compile schedule; there is no user-facing way to run it alone.
+// pass.aegraph: the constant-propagation pass of the compile schedule (both fold
+// slots) and of every fold site (fold_body.hpp).
 class Pass_aegraph : public Pass {
 protected:
   static void optimize(Eprp_var& var);
@@ -27,7 +26,16 @@ namespace livehd::aegraph {
 // (Cprop::do_post) over what it elaborated. The loop-invariant hoist is the
 // library-wide step the caller runs afterwards. Tests drive the engine through
 // this so they exercise exactly the production per-body path. With
-// Options::preflight an engine that would create a cell it cannot stamp leaves
-// the graph to classic (Cprop::do_trans) and reports Stats::refused.
+// Options::preflight an engine that would create a cell it cannot stamp keeps
+// only what needs no new cell (aegraph::optimize) and reports Stats::refused.
 Stats optimize_body(Cprop& cp, const std::shared_ptr<hhds::Graph>& g, const Options& options = {});
+
+// The whole per-body fold (what livehd::fold_body runs) with `cp`'s settings: a `cp` built with low_lanes
+// means a bitwidth pass follows, so cells may stay unstamped; otherwise every created cell is stamped (the
+// preflight contract). A guard scope on `cp` also turns on the engine's accumulation-guard rule.
+Stats fold_with(Cprop& cp, const std::shared_ptr<hhds::Graph>& g);
+inline Stats fold_with(const std::shared_ptr<hhds::Graph>& g, bool low_lanes = false) {
+  Cprop cp{low_lanes};
+  return fold_with(cp, g);
+}
 }  // namespace livehd::aegraph

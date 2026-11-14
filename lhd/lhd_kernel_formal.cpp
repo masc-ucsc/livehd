@@ -135,7 +135,7 @@ bool mixed_loop_structural_identity(hhds::Graph* compact, hhds::Graph* unrolled,
       return false;
     }
   }
-  // Preflight contract (no pass.bitwidth follows): the process-wide fold engine, aegraph by default.
+  // Preflight contract (no pass.bitwidth follows): every cell the e-graph engine creates is stamped.
   livehd::Fold_options fold;
   fold.bitwidth_follows = false;
   fold.site             = "formal.semdiff";
@@ -6046,19 +6046,6 @@ void lec_command(Options& opts, Result& res) {
       //
       // Under the run deadline, checked between graphs (a cprop of one graph
       // cannot stop part-way): on cva6 this step alone ran ~7 min.
-      // formal.lec.preflight_engine: the cprop engine of this re-simplify (INTERNAL). Unset, it follows the
-      // process-wide fold engine (compile.cprop.engine, aegraph by default); set, it overrides it.
-      const std::string preflight_label  = label("preflight_engine", "");
-      auto               preflight_engine = livehd::fold_engine();
-      if (!preflight_label.empty()) {
-        const auto parsed = livehd::parse_fold_engine(preflight_label);
-        if (!parsed) {
-          throw Lhd_error{"usage",
-                          std::format("--set formal.lec.preflight_engine expects classic|aegraph|aegraph+classic, got '{}'", preflight_label),
-                          "classic | aegraph (the e-graph engine, stamping every cell it creates) | aegraph+classic"};
-        }
-        preflight_engine = *parsed;
-      }
       absl::flat_hash_set<hhds::Graph*> simplified;
       auto                              simplify_after_inline = [&](const std::vector<std::shared_ptr<hhds::Graph>>& graphs) {
         for (const auto& sp : graphs) {
@@ -6073,13 +6060,12 @@ void lec_command(Options& opts, Result& res) {
           // front-end graph: it may expose an intentionally truncated Concat
           // lane whose internal carrier has no standalone width stamp. cprop
           // has no entry check on width stamps and keeps only value-preserving
-          // folds, so it runs here unchanged. The e-graph engine runs under the same
-          // contract as Cprop{false}: no pass.bitwidth follows, so every cell it creates is
-          // stamped, and a graph where it cannot is left to classic.
+          // folds, so it runs here unchanged. No pass.bitwidth follows, so every cell the
+          // e-graph engine creates is stamped; a rewrite whose cell cannot be is not applied.
           livehd::Fold_options fold;
           fold.bitwidth_follows = false;
           fold.site             = "formal.lec.preflight";
-          livehd::fold_body(sp, preflight_engine, fold);
+          livehd::fold_body(sp, fold);
         }
         return true;
       };

@@ -1,6 +1,6 @@
 /*
 :name: aeg_pack_slice_lanes
-:set: compile.cprop.engine=classic
+:set: compile.aegraph.rules_disable=group:arith+group:div+group:mask+group:mux+group:shift
 :type: lec
 */
 // PYROPE-vs-PYROPE group, the fixture of the aegraph post step that folds a slice of
@@ -11,7 +11,7 @@
 // is tighter than 54 bits; when the slice is folded into a Concat only AFTER that, the
 // Concat declares its full 55-bit window and the shifted lane driver comes out 56 bits
 // wide: an internal "Concat lane ... occupies 56 bits but its declared window is 55".
-// This is the REFERENCE, compiled by the classic engine; `aeg_pack_slice_lanes_1.prp`
+// This is the REFERENCE, compiled with every e-graph rule group off; `aeg_pack_slice_lanes_1.prp`
 // is the same source compiled by the e-graph engine.
 pub comb top(m:(e12:U1, e11:U1, e10:U1, e9:U1, e8:U1, e7:U1, e6:U1, e5:U1, e4:U1, e3:U1, e2:U1, e1:U1, e0:U1)) -> (y:U110, z:U112) {
   wire mask_csa_ext:U112 = nil

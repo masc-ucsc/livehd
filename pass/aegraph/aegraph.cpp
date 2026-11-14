@@ -1514,7 +1514,7 @@ Rewriter::Rewriter(const Options& options, std::string name) : opt_(options), na
   for (rt::Rule_id id = 1; id <= reg.size(); ++id) {
     const auto& info = reg.rule(id);
     const bool  only = opt_.rules_only.empty() || name_listed(opt_.rules_only, info.name, info.group);
-    enabled_[id]     = only && !name_listed(opt_.rules_disable, info.name, info.group);
+    enabled_[id]     = !opt_.rules_off && only && !name_listed(opt_.rules_disable, info.name, info.group);
     rules_active_    = rules_active_ || enabled_[id] != 0;
   }
 }
@@ -2365,7 +2365,12 @@ Engine::Replaced Engine::replace(const Member& member, const hhds::Pin_class& ta
     }
     target.connect_sink(out.sink);
   }
-  node.del_node();
+  // The node is unread now: delete it and whatever only it kept alive.
+  if (const auto removed = remove_dead_chain(node); removed == 0) {
+    node.del_node();
+  } else {
+    stats_.dead_removed += removed - 1;
+  }
   return Replaced::done;
 }
 
@@ -2411,32 +2416,7 @@ void Engine::sweep_dead() {
     storage.push_back(node);
   }
   for (auto it = storage.rbegin(); it != storage.rend(); ++it) {
-    if (it->is_invalid() || !is_dead_eligible(*it) || it->has_out_edges()) {
-      continue;
-    }
-    std::deque<hhds::Node_class>           work;
-    absl::flat_hash_set<hhds::Class_index> queued;
-    work.push_back(*it);
-    queued.insert(it->get_class_index());
-    while (!work.empty()) {
-      auto cur = work.front();
-      work.pop_front();
-      if (cur.is_invalid() || !is_dead_eligible(cur) || cur.has_out_edges()) {
-        continue;
-      }
-      for (const auto& in_pin : cur.inp_sorted_pins()) {
-        const auto driver = in_pin.get_driver_pin();
-        if (driver.is_invalid() || driver.is_const()) {
-          continue;
-        }
-        const auto master = driver.get_master_node();
-        if (is_dead_eligible(master) && queued.insert(master.get_class_index()).second) {
-          work.push_back(master);
-        }
-      }
-      cur.del_node();
-      ++stats_.dead_removed;
-    }
+    stats_.dead_removed += remove_dead_chain(*it);
   }
 }
 
@@ -2754,13 +2734,52 @@ Stats Engine::run() {
 
 }  // namespace
 
+size_t remove_dead_chain(hhds::Node_class node) {
+  if (node.is_invalid() || !is_dead_eligible(node) || node.has_out_edges()) {
+    return 0;
+  }
+  size_t                                 removed = 0;
+  std::deque<hhds::Node_class>           work;
+  absl::flat_hash_set<hhds::Class_index> queued;
+  work.push_back(node);
+  queued.insert(node.get_class_index());
+  while (!work.empty()) {
+    auto cur = work.front();
+    work.pop_front();
+    if (cur.is_invalid() || !is_dead_eligible(cur) || cur.has_out_edges()) {
+      continue;
+    }
+    for (const auto& in_pin : cur.inp_sorted_pins()) {
+      const auto driver = in_pin.get_driver_pin();
+      if (driver.is_invalid() || driver.is_const()) {
+        continue;
+      }
+      const auto master = driver.get_master_node();
+      if (is_dead_eligible(master) && queued.insert(master.get_class_index()).second) {
+        work.push_back(master);
+      }
+    }
+    cur.del_node();
+    ++removed;
+  }
+  return removed;
+}
+
 Stats optimize(const std::shared_ptr<hhds::Graph>& graph, const Cycle_cutter& cut_cycles, const Options& options) {
   if (!graph) {
     return {};
   }
-  const auto name = graph->get_io() ? std::string{graph->get_io()->get_name()} : std::string{};
-  Engine     engine(*graph, cut_cycles, options, name);
-  return engine.run();
+  const auto name  = graph->get_io() ? std::string{graph->get_io()->get_name()} : std::string{};
+  auto       stats = Engine(*graph, cut_cycles, options, name).run();
+  if (stats.refused == 0 || options.rules_off) {
+    return stats;
+  }
+  // A rewrite would have created a cell that cannot be stamped: keep what needs no new cell.
+  auto retry      = options;
+  retry.rules_off = true;
+  stats           = Engine(*graph, cut_cycles, retry, name).run();
+  stats.refused   = 1;
+  return stats;
 }
 
 Options make_options(std::string_view rules_disable, std::string_view rules_only, std::string_view max_rewrites,

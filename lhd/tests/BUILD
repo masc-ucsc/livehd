@@ -2494,17 +2494,17 @@ sh_test(
     data = _FLOW_DATA,
 )
 
-# pass.aegraph (compile.cprop.engine=aegraph) through the kernel: determinism
-# (tool diff --structural), summary line, LEC equality with classic, cache key.
+# pass.aegraph through the kernel: determinism (tool diff --structural), summary
+# line, LEC equality with the rules-off compile, cache key per cost profile.
 sh_test(
     name = "lhd_aegraph_test",
     srcs = ["lhd_aegraph_test.sh"],
     data = _FLOW_DATA,
 )
 
-# compile.cprop.engine reaches EVERY fold site (livehd::fold_body): sim refolds, synthesis loop cleanup /
-# memory modules / state sweep, the satopt cleanup, the LEC preflight and compile.sweep -- each counted per
-# engine through LHD_FOLD_BODY_LOG -- with the results PROVEN and the region cache keyed by engine.
+# The e-graph engine folds EVERY fold site (livehd::fold_body): sim refolds, synthesis loop cleanup /
+# memory modules / state sweep, the satopt cleanup, the LEC preflight and compile.sweep -- each counted
+# through LHD_FOLD_BODY_LOG -- with the results PROVEN and the region cache keyed by cost profile.
 sh_test(
     name = "lhd_fold_sites_test",
     size = "large",

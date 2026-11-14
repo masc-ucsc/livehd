@@ -1,6 +1,6 @@
 /*
 :name: aeg_and_stamped_lanes
-:set: compile.cprop.engine=classic
+:set: compile.aegraph.rules_disable=group:arith+group:div+group:mask+group:mux+group:shift
 :type: lec
 :lec_top: top
 */
@@ -10,7 +10,7 @@
 // And before it has any range for the Get_mask (its source is an instance output whose boundary range is only
 // seeded when the instance is reached); `adjust_bw` only ever widens, so an And ranged from the Concat alone
 // stayed 2 bits for good and the Concat lane check rejected it ("driver 'and_N' occupies 2 bits but its
-// declared window is 1"). This is the REFERENCE, compiled by the classic engine; `aeg_and_stamped_lanes_1.prp`
+// declared window is 1"). This is the REFERENCE, compiled with every e-graph rule group off; `aeg_and_stamped_lanes_1.prp`
 // is the same source compiled by the e-graph engine.
 pub mod dly::[timecheck=false](clk:Clock, `in`:U1, in_valid:U1, rst:U1) -> (out:U1@[], out_stages:U2@[], out_valid:U1@[], out_valid_stages:U2@[]) {
   reg stage_valid___q:U2 = nil

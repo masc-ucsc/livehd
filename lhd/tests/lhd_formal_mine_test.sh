@@ -20,8 +20,9 @@
 #   * mine=speculative also reports base-proven candidates the step dropped.
 #
 # The stuck obligation is hard BY CONSTRUCTION, not budget-limited: over u32
-# operands `(a*b)*(count+1) == a*b*count + a*b` bit-blasts to a 64x33 multiplier
-# distributivity miter. The identical design with u4 operands is PROVEN
+# operands `(a*b)*(count+1) == a*(b*count + b)` bit-blasts to a multiplier
+# distributivity miter. Neither side repeats a product: a shared `a*b` (the
+# e-graph engine hash-conses it) left mining with no candidate in budget. The identical design with u4 operands is PROVEN
 # inductively in ~2s; u8/u10/u12 already TIMEOUT at 60s per query, and u32
 # stays undecided at 120s per query. The permanent TIMEOUT is the whole point of
 # the fixture (something must stay open for mining to have a target) — do NOT
@@ -48,7 +49,7 @@ cat >"$W/miner.prp" <<'EOF'
 mod miner(a:U32, b:U32, en:Bool) -> (o:U8@[0]) {
   reg count:U8 = 0
   o = count
-  assert((a * b) * (U32(count) + 1) == (a * b * U32(count)) + (a * b), "hard with count")
+  assert((a * b) * (U32(count) + 1) == a * (b * U32(count) + b), "hard with count")
   if en {
     if count == 5 {
       count = 0
@@ -62,10 +63,7 @@ EOF
 WD="$W/wd"
 mkdir -p "$WD"
 OUT="$W/mine.out"
-# The stuck obligation is hard by construction under the classic engine, which keeps the multiplier bank flat. The e-graph engine
-# shares `a * b` across the three uses and the miter is no longer the intended multiplier-distributivity one, so all three
-# runs are pinned to classic (the test is about the mining mechanics, not about which engine builds the graph).
-"$LHD" formal verify "$W/miner.prp" --top miner --set compile.cprop.engine=classic --set formal.timeout=1 \
+"$LHD" formal verify "$W/miner.prp" --top miner --set formal.timeout=1 \
   --set formal.min_timeout=1 --set formal.spec_mining_timeout=2 --set formal.engine=bmc \
   --set formal.mine=speculative --workdir "$WD" >"$OUT" 2>&1
 RC=$?
@@ -107,7 +105,7 @@ PYEOF
 # matters is that adding the mined block does NOT turn it into a refutation
 # (rc=10) and that the assumes are proven and used.
 OUT="$W/roundtrip.out"
-"$LHD" formal verify "$W/miner.prp" "$WD/formal_mined.prp" --top miner --set compile.cprop.engine=classic --set formal.bound=3 \
+"$LHD" formal verify "$W/miner.prp" "$WD/formal_mined.prp" --top miner --set formal.bound=3 \
   --set formal.timeout=1 --set formal.min_timeout=1 --set formal.engine=bmc >"$OUT" 2>&1
 RC=$?
 [ "$RC" -eq "$RC_TIMEOUT" ] \
@@ -128,7 +126,7 @@ grep -qE 'checked assume\(s\): [1-9][0-9]* proven \(used\)' "$OUT" || fail "the 
 sed -e 's/count == 5/count == 7/' \
     -e 's/assert(.*hard with count.*/assert(count != 200, "easy")/' "$W/miner.prp" >"$W/miner7.prp"
 OUT="$W/stale.out"
-"$LHD" formal verify "$W/miner7.prp" "$WD/formal_mined.prp" --top miner --set compile.cprop.engine=classic --set formal.bound=10 \
+"$LHD" formal verify "$W/miner7.prp" "$WD/formal_mined.prp" --top miner --set formal.bound=10 \
   --set formal.timeout=10 --set formal.engine=bmc >"$OUT" 2>&1
 RC=$?
 [ "$RC" -eq "$RC_REFUTED" ] \

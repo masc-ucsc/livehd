@@ -1,12 +1,12 @@
 /*
 :name: aeg_or_pack_to_concat
-:set: compile.cprop.engine=classic
+:set: compile.aegraph.rules_disable=group:arith+group:div+group:mask+group:mux+group:shift
 :type: lec
 */
 // PYROPE-vs-PYROPE group, the fixture of the aegraph rule `or_pack_to_concat` (pass/aegraph/rules/mask.cpp): an Or of
 // fields at disjoint constant windows, each a value of known width optionally shifted left, is the Concat of the fields
 // with zero lanes in the gaps (classic's canonicalize_or_pack). Whole fields, a gap, and a bare low field. REFERENCE =
-// classic engine; `_1` = e-graph engine.
+// the e-graph engine with every rule group off; `_1` = e-graph engine.
 pub comb top(a:U4, b:U4, c:U4, d:U1, e:U1) -> (y:U16, z:U12, w:U18) {
   y = (a << 12) | (b << 8) | (c << 4) | (d << 3) | e
   z = (a << 8) | c | (b << 4)

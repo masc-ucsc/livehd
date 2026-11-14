@@ -3,7 +3,7 @@
 :set: sim.unroll_sites=100000
 :type: simulation
 */
-// UNROLL VARIANT of loop_carry_kinds_sim.prp: classic engine, the small loop is spliced flat at sim time (sim.unroll_sites) and
+// UNROLL VARIANT of loop_carry_kinds_sim.prp: the small loop is spliced flat at sim time (sim.unroll_sites) and
 // refolded; the reference for the aegraph variants.
 // Runtime twin of `inou/prp/tests/equiv/loop_carry_kinds.prp`: the three carry
 // shapes `graph/loop_split.hpp` classifies, checked against hand-computed values

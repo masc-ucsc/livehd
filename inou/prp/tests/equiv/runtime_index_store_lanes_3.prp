@@ -1,9 +1,9 @@
 /*
 :name: runtime_index_store_lanes_3
-:set: compile.cprop.engine=aegraph
+:set: compile.aegraph.rules_disable=
 */
 // HEADER-ONLY variant: runtime_index_store_lanes.prp compiled by the acyclic
-// e-graph engine (pass.aegraph) against the classic compile of the base. A
+// e-graph engine (pass.aegraph) against the base compiled with every rule group off. A
 // runtime-indexed store into a zero-initialized array followed by constant lane
 // reads is Set_mask / Get_mask / Concat traffic over one packed word: the
 // engine must hash-cons it and fold its constants without ever minting a second

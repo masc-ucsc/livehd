@@ -2,8 +2,8 @@
 #pragma once
 
 // pass/aegraph -- a Cranelift-style acyclic e-graph ("aegraph") constant
-// propagation engine for LGraph, the alternative to pass/cprop behind
-// `--set compile.cprop.engine=aegraph` (todo/livehd/2a-aegraph.html).
+// propagation engine for LGraph: the constant-propagation engine of every
+// compile and every fold site (fold_body.hpp).
 //
 // The engine (milestones B, D):
 //
@@ -108,11 +108,13 @@ struct Options {
   uint32_t    edge_budget    = 32;     // rule work (operands scanned) allowed per input edge of the graph
   Cost        cost           = Cost::synth;  // the extraction cost profile (cost/<name>.cost)
   bool        choices        = false;  // `?` choice rules (off until they ship)
-  // The LEC preflight (formal.lec.preflight_engine=aegraph): no pass.bitwidth follows, so every cell the
-  // elaborator creates has to carry a width stamp -- the contract of classic Cprop{false}. A new interior cell
-  // is stamped from the range analysis; when a cell cannot be stamped the engine REFUSES the graph (leaves
-  // it as the pre-pass produced it, Stats::refused = 1) and the caller falls back to classic.
+  // The LEC/semdiff preflight: no pass.bitwidth follows, so every cell the elaborator creates has to carry a
+  // width stamp. A new interior cell is stamped from the range analysis; when one cannot be stamped the
+  // engine REFUSES its rewrites (Stats::refused = 1) and optimize() runs the body again with the rules off:
+  // CSE, constant folds, forwarding and the dead-chain sweep, none of which creates a cell.
   bool        preflight      = false;
+  // No rewrite rule runs (the refusal retry above).
+  bool        rules_off      = false;
   // classic scalar_mux's accumulation guard (`mux(s, a, a OP x)` -> `a OP mux(s, id, x)`) is a rolled-loop rule: it
   // runs only inside a lifted loop body (guard_scope) and only where bitwidth follows and may size the new Mux
   // (unstamped_ok, the pre-bitwidth slot: Cprop's low_lanes).
@@ -384,6 +386,11 @@ using Cycle_cutter = std::function<void(const std::vector<hhds::Node_class>&)>;
 // DIFFERENT graphs (the Dlop pool is thread-local; the rule registry is
 // read-only after startup; nothing else is shared).
 Stats optimize(const std::shared_ptr<hhds::Graph>& graph, const Cycle_cutter& cut_cycles = {}, const Options& options = {});
+
+// Fast node removal: delete `node` when nothing reads it, then every pure combinational producer that only it
+// kept alive (the whole dead fanin chain). IO, state, instances and runtime checks are never deleted. Returns
+// how many nodes went (0 when `node` is still read or is not a pure combinational cell).
+size_t remove_dead_chain(hhds::Node_class node);
 
 // Parse `compile.aegraph.*` label strings into Options (fatal diagnostic on a
 // bad value or an unknown rule name). Empty strings keep the defaults.

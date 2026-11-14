@@ -1,7 +1,7 @@
 /*
 :name: aeg_div_rem_1
 :type: lec
-:set: compile.cprop.engine=aegraph
+:set: compile.aegraph.rules_disable=
 :compile_grep: aegraph-rule div_pow2 .*extracted=[1-9]
 */
 // HEADER-ONLY variant: aeg_div_rem.prp compiled by the acyclic e-graph engine. `a` is a declared U8 input,

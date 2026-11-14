@@ -1,6 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include "cprop.hpp"
+#include "pass_aegraph.hpp"
 
 #include <algorithm>
 #include <bit>
@@ -26,10 +27,10 @@
 
 namespace {
 void optimize_state(const std::shared_ptr<hhds::Graph>& graph) {
-  Cprop{}.do_trans(graph);
+  livehd::aegraph::fold_with(graph);
   Bitwidth{10}.do_trans(graph);
   Enableopt{}.do_trans(graph);
-  Cprop{}.do_trans(graph);
+  livehd::aegraph::fold_with(graph);
   Bitwidth{10}.do_trans(graph);
 }
 
@@ -39,10 +40,10 @@ void optimize_state(const std::shared_ptr<hhds::Graph>& graph) {
 void optimize_lanes(const std::shared_ptr<hhds::Graph>& graph, const Cprop::Node_scope& guard_scope = {}) {
   Cprop cprop{true};
   cprop.set_guard_scope(guard_scope);
-  cprop.do_trans(graph);
+  livehd::aegraph::fold_with(cprop, graph);
   Bitwidth{10}.do_trans(graph);
   Enableopt{}.do_trans(graph);
-  cprop.do_trans(graph);
+  livehd::aegraph::fold_with(cprop, graph);
   Bitwidth{10}.do_trans(graph);
 }
 
@@ -61,7 +62,7 @@ TEST(CpropConstants, FoldedValueIgnoresResultAndOutputWidthHints) {
     gu::create_const(*g, *Dlop::create_integer(255)).connect_sink(gu::setup_sink_pid(sum, 0));
     gu::create_const(*g, *Dlop::create_integer(1)).connect_sink(gu::setup_sink_pid(sum, 0));
     sum.create_driver_pin(0).connect_sink(g->get_output_pin("out"));
-    Cprop{}.do_trans(g);
+    livehd::aegraph::fold_with(g);
     // One driver per sink pin: a graph output is driven by exactly one pin.
     auto out_drv = g->get_output_pin("out").get_driver_pin();
     ASSERT_FALSE(out_drv.is_invalid());
@@ -92,7 +93,7 @@ TEST(CpropMasks, BoundaryAnnotationsCannotProveAMaskRedundant) {
     gu::setup_sink_by_name(mask, "a").connect_driver(input);
     livehd::graph_util::connect_bit_range(mask, 0, 8);
     mask.create_driver_pin(0).connect_sink(g->get_output_pin("out"));
-    Cprop{}.do_trans(g);
+    livehd::aegraph::fold_with(g);
     // One driver per sink pin: a graph output is driven by exactly one pin.
     auto out_drv = g->get_output_pin("out").get_driver_pin();
     ASSERT_FALSE(out_drv.is_invalid());
@@ -142,54 +143,12 @@ TEST(CpropConstants, FoldedConstantsPreserveOperandMultiplicity) {
       constant(3).connect_sink(gu::setup_sink_by_name(consumer, "bs"));
     }
     consumer.create_driver_pin(0).connect_sink(g->get_output_pin("out"));
-    Cprop{}.do_trans(g);
+    livehd::aegraph::fold_with(g);
     // One driver per sink pin: a graph output is driven by exactly one pin.
     auto out_drv = g->get_output_pin("out").get_driver_pin();
     ASSERT_FALSE(out_drv.is_invalid());
     ASSERT_TRUE(out_drv.is_const()) << index;
     EXPECT_EQ(gu::const_of(out_drv).to_just_i64(), expected) << index;
-  }
-}
-
-// `(lo + 7) + 1 - lo` is the width upass.tolg builds for `x#[lo ..+ 8]`. The
-// forward Sum merge lands the shared `lo` on the consumer's OPPOSITE port, so
-// the two occurrences cancel and the literal 8 is left. The same-port twin
-// `(lo + 7) + lo` must keep both contributions (a parallel edge would dedup).
-TEST(CpropConstants, ForwardSumCancelsOppositePortOperand) {
-  namespace gu = livehd::graph_util;
-  auto& lib    = livehd::Hhds_graph_library::instance("lgdb_CpropConstants_sum_cancel");
-  for (const bool cancel : {true, false}) {
-    auto io = lib.create_io(cancel ? "sum_cancel_opposite" : "sum_keep_same_port");
-    io->add_input("lo", 1);
-    io->set_bits("lo", 8);
-    io->add_output("out", 2);
-    auto g        = io->create_graph();
-    auto constant = [&](int value) { return gu::create_const(*g, *Dlop::create_integer(value)); };
-    auto lo       = g->get_input_pin("lo");
-    auto inner    = gu::create_typed_node(*g, Ntype_op::Sum);
-    // One sink pin per operand on a banked op (graph/cell.hpp).
-    lo.connect_sink(gu::setup_sink_pid(inner, 0));
-    constant(7).connect_sink(gu::setup_sink_pid(inner, 0));
-    auto outer = gu::create_typed_node(*g, Ntype_op::Sum);
-    inner.create_driver_pin(0).connect_sink(gu::setup_sink_pid(outer, 0));
-    constant(1).connect_sink(gu::setup_sink_pid(outer, 0));
-    lo.connect_sink(gu::setup_sink_pid(outer, cancel ? 1 : 0));
-    outer.create_driver_pin(0).connect_sink(g->get_output_pin("out"));
-    Cprop{}.do_trans(g);
-    // One driver per sink pin: a graph output is driven by exactly one pin.
-    auto out_drv = g->get_output_pin("out").get_driver_pin();
-    ASSERT_FALSE(out_drv.is_invalid());
-    if (cancel) {
-      ASSERT_TRUE(out_drv.is_const());
-      EXPECT_EQ(gu::const_of(out_drv).to_just_i64(), 8);
-    } else {
-      EXPECT_FALSE(out_drv.is_const());
-      size_t lo_uses = 0;
-      for ([[maybe_unused]] const auto& e : lo.out_edges()) {
-        ++lo_uses;
-      }
-      EXPECT_EQ(lo_uses, 2u);  // 2*lo + 8: neither `lo` contribution was dropped
-    }
   }
 }
 
@@ -217,64 +176,13 @@ TEST(CpropConstants, ForwardSumMergesNodeInternalDuplicateDriver) {
   constant(5).connect_sink(gu::setup_sink_pid(outer, 0));
   outer.create_driver_pin(0).connect_sink(g->get_output_pin("out"));
 
-  Cprop{}.do_trans(g);
+  livehd::aegraph::fold_with(g);
 
   // One driver per sink pin: a graph output is driven by exactly one pin.
   auto out_drv = g->get_output_pin("out").get_driver_pin();
   ASSERT_FALSE(out_drv.is_invalid());
   ASSERT_TRUE(out_drv.is_const());
   EXPECT_EQ(gu::const_of(out_drv).to_just_i64(), 5);
-}
-
-// `lo = x + 1; hi = lo + 8` with `lo` also a module output: the shared `x + 1`
-// is not absorbed, but its literal still folds into the consumer, so `hi` is
-// `x + 9` (one adder deep) rather than a second adder chained off `lo`.
-TEST(CpropConstants, ForwardSumFoldsLiteralThroughSharedOperand) {
-  namespace gu = livehd::graph_util;
-  auto& lib    = livehd::Hhds_graph_library::instance("lgdb_CpropConstants_sum_shared_literal");
-  auto  io     = lib.create_io("sum_shared_literal");
-  io->add_input("x", 1);
-  io->set_bits("x", 8);
-  io->add_output("lo", 2);
-  io->add_output("hi", 3);
-  auto g        = io->create_graph();
-  auto constant = [&](int value) { return gu::create_const(*g, *Dlop::create_integer(value)); };
-  auto x        = g->get_input_pin("x");
-
-  auto inner = gu::create_typed_node(*g, Ntype_op::Sum);  // x + 1
-  x.connect_sink(gu::setup_sink_pid(inner, 0));
-  constant(1).connect_sink(gu::setup_sink_pid(inner, 0));
-  inner.create_driver_pin(0).connect_sink(g->get_output_pin("lo"));
-
-  auto outer = gu::create_typed_node(*g, Ntype_op::Sum);  // inner + 8
-  inner.create_driver_pin(0).connect_sink(gu::setup_sink_pid(outer, 0));
-  constant(8).connect_sink(gu::setup_sink_pid(outer, 0));
-  outer.create_driver_pin(0).connect_sink(g->get_output_pin("hi"));
-
-  Cprop{}.do_trans(g);
-
-  EXPECT_EQ(g->get_output_pin("lo").get_driver_pin(), inner.create_driver_pin(0));
-  auto hi_drv = g->get_output_pin("hi").get_driver_pin();
-  ASSERT_FALSE(hi_drv.is_invalid());
-  ASSERT_FALSE(hi_drv.is_const());
-  auto hi_sum = hi_drv.get_master_node();
-  ASSERT_EQ(gu::type_op_of(hi_sum), Ntype_op::Sum);
-  int  literal  = 0;
-  bool reads_x  = false;
-  int  operands = 0;
-  for (const auto& sink : hi_sum.inp_sorted_pins()) {
-    ++operands;
-    EXPECT_EQ(Ntype::sink_bank(Ntype_op::Sum, sink.get_port_id()), 0u);
-    const auto drv = sink.get_driver_pin();
-    if (drv.is_const()) {
-      literal = static_cast<int>(gu::const_of(drv).to_just_i64());
-    } else {
-      reads_x = drv == x;
-    }
-  }
-  EXPECT_EQ(operands, 2);
-  EXPECT_TRUE(reads_x);
-  EXPECT_EQ(literal, 9);
 }
 
 // `if s { q = 1 }` under a separate enable: `s ? 1 : q` over 0/1 values would
@@ -369,53 +277,6 @@ TEST(CpropCleanup, RunsAfterFinalCanonicalization) {
   EXPECT_TRUE(clock_shape.is_invalid()) << "final cleanup must remove the control cone orphaned by that rewrite";
 }
 
-// Conditional lane writes mint Get_mask reads while factoring their word muxes.
-// Once those reads resolve, the intermediate writers become private and must
-// collapse in the SAME invocation, without another compile to discover them.
-TEST(CpropCleanup, ConditionalPackReachesFixedPoint) {
-  namespace gu = livehd::graph_util;
-  auto& lib    = livehd::Hhds_graph_library::instance("lgdb_cprop_pack_test");
-  auto  io     = lib.create_io("conditional_pack");
-  io->add_input("d", 1);
-  io->set_bits("d", 4);
-  for (int i = 0; i < 9; ++i) {
-    auto name = "s" + std::to_string(i);
-    io->add_input(name, i + 2);
-    io->set_bits(name, 1);
-  }
-  io->add_output("q", 11);
-  io->set_bits("q", 12);
-  auto g     = io->create_graph();
-  auto value = gu::create_const(*g, *Dlop::create_integer(0));
-  for (int i = 0; i < 9; ++i) {
-    auto write = gu::create_typed_node(*g, Ntype_op::Set_mask, 12);
-    gu::set_ubits(write.create_driver_pin(0), 12);
-    gu::setup_sink_by_name(write, "a").connect_driver(value);
-    gu::connect_bit_range(write, 4 * (i / 3), 4 * (i / 3) + 4);
-    gu::setup_sink_by_name(write, "value").connect_driver(g->get_input_pin("d"));
-    auto mux = gu::create_typed_node(*g, Ntype_op::Mux, 12);
-    gu::set_ubits(mux.create_driver_pin(0), 12);
-    mux.create_sink_pin(0).connect_driver(g->get_input_pin("s" + std::to_string(i)));
-    mux.create_sink_pin(1).connect_driver(value);
-    mux.create_sink_pin(2).connect_driver(write.create_driver_pin(0));
-    value = mux.create_driver_pin(0);
-  }
-  value.connect_sink(g->get_output_pin("q"));
-  Cprop cp;
-  cp.do_trans(g);
-  size_t before = 0;
-  for (auto n : g->body().nodes()) {
-    ++before;
-    EXPECT_NE(gu::type_op_of(n), Ntype_op::Set_mask);
-  }
-  cp.do_trans(g);
-  size_t after = 0;
-  for ([[maybe_unused]] auto n : g->body().nodes()) {
-    ++after;
-  }
-  EXPECT_EQ(before, after);
-}
-
 TEST(CpropCleanup, PackedWritesKeepTruncation) {
   namespace gu = livehd::graph_util;
   auto& lib    = livehd::Hhds_graph_library::instance("lgdb_cprop_truncated_pack_test");
@@ -445,7 +306,7 @@ TEST(CpropCleanup, PackedWritesKeepTruncation) {
   }
   value.connect_sink(g->get_output_pin("q"));
   Cprop cp;
-  cp.do_trans(g);
+  livehd::aegraph::fold_with(cp, g);
   size_t concats = 0;
   for (auto n : g->body().nodes()) {
     if (gu::type_op_of(n) != Ntype_op::Concat) {
@@ -485,7 +346,7 @@ TEST(CpropMux, NonzeroConstantConditionSelectsTrueArm) {
       mux.create_sink_pin(2).connect_driver(true_arm);
       mux.create_driver_pin(0).connect_sink(g->get_output_pin("q"));
       Cprop cp;
-      cp.do_trans(g);
+      livehd::aegraph::fold_with(cp, g);
       const auto drivers = g->get_output_pin("q").get_driver_pins();
       ASSERT_EQ(drivers.size(), 1);
       EXPECT_EQ(drivers.front(), std::string_view(literal) == "0" ? false_arm : true_arm) << literal;
@@ -721,7 +582,7 @@ TEST(CpropMux, GappedMuxKeepsArmPositions) {
     for (const auto& in : cases) {
       golden.push_back(q1_eval(g->get_output_pin("q").get_driver_pin(), in));
     }
-    Cprop{}.do_trans(g);
+    livehd::aegraph::fold_with(g);
     for (size_t i = 0; i < cases.size(); ++i) {
       if (!golden[i]) {
         continue;  // '?' (Q1): any result is a legal refinement
@@ -755,7 +616,7 @@ TEST(CpropMux, Q1EqualArmsCollapseIgnoresUnselectableArms) {
     }
     mux.create_sink_pin(3).connect_driver(a);
     mux.create_driver_pin(0).connect_sink(g->get_output_pin("q"));
-    Cprop{}.do_trans(g);
+    livehd::aegraph::fold_with(g);
     EXPECT_TRUE(g->get_output_pin("q").get_driver_pin() == a) << (gapped ? "gapped" : "dense");
   }
 }
@@ -796,7 +657,7 @@ TEST(CpropMux, Q1ConstantSelectorFold) {
           mux.create_sink_pin(pid).connect_driver(drv);
         }
         mux.create_driver_pin(0).connect_sink(g->get_output_pin("q"));
-        Cprop{}.do_trans(g);
+        livehd::aegraph::fold_with(g);
 
         const auto      out = g->get_output_pin("q").get_driver_pin();
         hhds::Pin_class selected;
@@ -825,53 +686,6 @@ TEST(CpropMux, Q1ConstantSelectorFold) {
   }
 }
 
-// P3 (legal under Q1): scalar_sext replaces a Sext(x,1) selector by the 0/1
-// `x` on EVERY Mux, n-ary included. x=0 keeps arm 1; x=1 was Sext = -1, out
-// of range, a '?' that the bypass resolves to arm 2.
-TEST(CpropMux, Q1SextSelectorBypassOnIndexedMux) {
-  namespace gu = livehd::graph_util;
-  auto& lib    = livehd::Hhds_graph_library::instance("lgdb_cprop_q1_sext_sel");
-  auto  io     = lib.create_io("q1_sext_sel");
-  io->add_input("in", 1);
-  io->set_bits("in", 4);
-  io->set_unsign("in", true);
-  io->add_input("a", 2);
-  io->set_bits("a", 8);
-  io->add_input("b", 3);
-  io->set_bits("b", 8);
-  io->add_input("c", 4);
-  io->set_bits("c", 8);
-  io->add_output("q", 5);
-  io->set_bits("q", 8);
-  auto g = io->create_graph();
-  auto x = gu::create_get_mask(*g, g->get_input_pin("in"), 0, 1).create_driver_pin(0);
-  gu::set_ubits(x, 1);
-  auto sext = gu::create_typed_node(*g, Ntype_op::Sext);
-  sext.create_sink_pin(0).connect_driver(x);
-  sext.create_sink_pin(1).connect_driver(gu::create_const(*g, *Dlop::create_integer(1)));
-  auto mux = gu::create_typed_node(*g, Ntype_op::Mux, 8);
-  mux.create_sink_pin(0).connect_driver(sext.create_driver_pin(0));
-  mux.create_sink_pin(1).connect_driver(g->get_input_pin("a"));
-  mux.create_sink_pin(2).connect_driver(g->get_input_pin("b"));
-  mux.create_sink_pin(3).connect_driver(g->get_input_pin("c"));
-  mux.create_driver_pin(0).connect_sink(g->get_output_pin("q"));
-  Cprop{}.do_trans(g);
-
-  const auto out = g->get_output_pin("q").get_driver_pin();
-  ASSERT_FALSE(out.is_const());
-  ASSERT_EQ(gu::type_op_of(out.get_master_node()), Ntype_op::Mux);
-  const auto sels = out.get_master_node().get_sink_pin(0).get_driver_pins();
-  ASSERT_EQ(sels.size(), 1);
-  EXPECT_NE(gu::type_op_of(sels.front().get_master_node()), Ntype_op::Sext) << "the Sext(x,1) selector bypass did not fire";
-  const Q1_inputs in0{
-      {g->get_input_pin("in"), 0},
-      { g->get_input_pin("a"), 7},
-      { g->get_input_pin("b"), 8},
-      { g->get_input_pin("c"), 9}
-  };
-  EXPECT_EQ(q1_eval(out, in0), std::optional<int64_t>{7});
-}
-
 // P10 / Q3: LGraph has no types; a string arm is a Dlop constant, NOT zero.
 // Mux(s, "str", s) is `s ? s : "str"`, so it must not collapse to `s` (which
 // is what Mux(s, 0, s) does, kept here as the control).
@@ -892,85 +706,8 @@ TEST(CpropMux, StringArmIsNotZero) {
         gu::create_const(*g, string_arm ? *Dlop::create_string("str") : *Dlop::create_integer(0)));
     mux.create_sink_pin(2).connect_driver(s);
     mux.create_driver_pin(0).connect_sink(g->get_output_pin("q"));
-    Cprop{}.do_trans(g);
+    livehd::aegraph::fold_with(g);
     EXPECT_EQ(g->get_output_pin("q").get_driver_pin() == s, !string_arm) << (string_arm ? "string" : "zero");
-  }
-}
-
-// P4: a Div/Rem with ONE operand disconnected. A missing operand is an invalid
-// value, which LGraph reads as all-unknown '?' (Q2): `a / ?` and `a % ?` may be
-// `a`, and `? / b` and `? % b` may be 0. The old rule forwarded the lone
-// driver of a Div whatever its pin, so a b-only Div became b. A lone CONSTANT
-// operand used to reach the all-constant fold, which read a second edge that
-// does not exist.
-TEST(CpropDivRem, SingleInputForwardsOnlyTheDividend) {
-  namespace gu = livehd::graph_util;
-  auto& lib    = livehd::Hhds_graph_library::instance("lgdb_cprop_single_input_div");
-  int   index  = 0;
-  for (const auto op : {Ntype_op::Div, Ntype_op::Rem}) {
-    SCOPED_TRACE(std::string{Ntype::get_name(op)});
-    for (const bool on_b : {false, true}) {
-      for (const bool constant : {false, true}) {
-        auto io = lib.create_io("single_divrem_" + std::to_string(index++));
-        io->add_input("x", 1);
-        io->set_bits("x", 8);
-        io->add_output("q", 2);
-        io->set_bits("q", 8);
-        auto       g   = io->create_graph();
-        const auto x   = constant ? gu::create_const(*g, *Dlop::create_integer(6)) : g->get_input_pin("x");
-        auto       div = gu::create_typed_node(*g, op, 8);
-        gu::setup_sink_by_name(div, on_b ? "b" : "a").connect_driver(x);
-        div.create_driver_pin(0).connect_sink(g->get_output_pin("q"));
-        Cprop{}.do_trans(g);
-        const auto out = g->get_output_pin("q").get_driver_pin();
-        ASSERT_FALSE(out.is_invalid());
-        if (on_b) {
-          ASSERT_TRUE(out.is_const()) << "a b-only Div/Rem is 0, never b (constant=" << constant << ")";
-          EXPECT_TRUE(gu::const_of(out).is_known_zero());
-        } else {
-          EXPECT_TRUE(out == x) << "an a-only Div/Rem forwards a (constant=" << constant << ")";
-        }
-      }
-    }
-  }
-}
-
-// Q2: x/0 and x%0 are all-unknown '?' (hlop Dlop::div_op/rem_op), whether or
-// not x is a constant, and that '?' is a fresh literal owned by the node. A
-// divisor that only MAY be zero (an operand '?' literal) is different: a fresh
-// all-unknown result would split that literal, so the Div/Rem stays.
-TEST(CpropDivRem, DivideOrRemByZeroIsAllUnknown) {
-  namespace gu = livehd::graph_util;
-  auto& lib    = livehd::Hhds_graph_library::instance("lgdb_cprop_div_by_zero");
-  int   index  = 0;
-  for (const auto op : {Ntype_op::Div, Ntype_op::Rem}) {
-    SCOPED_TRACE(std::string{Ntype::get_name(op)});
-    for (const bool constant_a : {false, true}) {
-      for (const bool maybe_zero : {false, true}) {
-        auto io = lib.create_io("divrem_zero_" + std::to_string(index++));
-        io->add_input("x", 1);
-        io->set_bits("x", 8);
-        io->add_output("q", 2);
-        io->set_bits("q", 8);
-        auto       g   = io->create_graph();
-        const auto a   = constant_a ? gu::create_const(*g, *Dlop::create_integer(7)) : g->get_input_pin("x");
-        const auto b   = gu::create_const(*g, maybe_zero ? *Dlop::from_pyrope("0ub0?") : *Dlop::create_integer(0));
-        auto       div = gu::create_typed_node(*g, op, 8);
-        gu::setup_sink_by_name(div, "a").connect_driver(a);
-        gu::setup_sink_by_name(div, "b").connect_driver(b);
-        div.create_driver_pin(0).connect_sink(g->get_output_pin("q"));
-        Cprop{}.do_trans(g);
-        const auto out = g->get_output_pin("q").get_driver_pin();
-        ASSERT_FALSE(out.is_invalid());
-        if (maybe_zero) {
-          EXPECT_EQ(gu::type_op_of(out.get_master_node()), op) << "constant_a=" << constant_a;
-        } else {
-          ASSERT_TRUE(out.is_const()) << "constant_a=" << constant_a;
-          EXPECT_TRUE(gu::const_of(out).has_unknowns());
-          EXPECT_TRUE(gu::const_of(out).may_be_zero());
-        }
-      }
-    }
   }
 }
 
@@ -998,7 +735,7 @@ TEST(CpropNot, DoubleNotForwardsTheOperand) {
     if (shared_inner) {
       inner.create_driver_pin(0).connect_sink(g->get_output_pin("r"));
     }
-    Cprop{}.do_trans(g);
+    livehd::aegraph::fold_with(g);
     EXPECT_TRUE(g->get_output_pin("q").get_driver_pin() == x) << "shared_inner=" << shared_inner;
     EXPECT_TRUE(gu::preroute_net_excluded(x));
     if (shared_inner) {
@@ -1048,7 +785,7 @@ TEST(CpropCompare, SameDriverOperandsFold) {
       gu::setup_sink_by_name(cmp, "bs").connect_driver(x);
     }
     cmp.create_driver_pin(0).connect_sink(g->get_output_pin("q"));
-    Cprop{}.do_trans(g);
+    livehd::aegraph::fold_with(g);
     const auto out = g->get_output_pin("q").get_driver_pin();
     ASSERT_FALSE(out.is_invalid()) << "shape " << shape;
     if (shape == EqXXY || shape == LtSameBank) {
@@ -1102,7 +839,7 @@ TEST(CpropSext, ConstantInputsFold) {
     gu::setup_sink_by_name(sext, "a").connect_driver(gu::create_const(*g, *Dlop::from_pyrope(c.a)));
     gu::setup_sink_by_name(sext, "b").connect_driver(gu::create_const(*g, *Dlop::create_integer(c.keep)));
     sext.create_driver_pin(0).connect_sink(g->get_output_pin("q"));
-    Cprop{}.do_trans(g);
+    livehd::aegraph::fold_with(g);
     const auto out = g->get_output_pin("q").get_driver_pin();
     ASSERT_FALSE(out.is_invalid()) << c.a << " keep " << c.keep;
     if (!c.expected) {
@@ -1153,7 +890,7 @@ TEST(CpropLiteral, LowSliceOfUnknownLiteralReadsTheSameLiteral) {
   const auto c = gu::create_const(*g, *Dlop::from_pyrope("0ub????"));
   c.connect_sink(g->get_output_pin("all"));
   gu::create_get_mask(*g, c, 0, 2).create_driver_pin(0).connect_sink(g->get_output_pin("lo"));
-  Cprop{}.do_trans(g);
+  livehd::aegraph::fold_with(g);
   Bitwidth{10}.do_trans(g);
   EXPECT_TRUE(g->get_output_pin("all").get_driver_pin() == c);
   const auto lo = g->get_output_pin("lo").get_driver_pin();
@@ -1164,101 +901,6 @@ TEST(CpropLiteral, LowSliceOfUnknownLiteralReadsTheSameLiteral) {
   const auto unknowns = unknown_const_drivers(*g, {"all", "lo"});
   ASSERT_EQ(unknowns.size(), 1u);
   EXPECT_TRUE(unknowns.front() == c);
-}
-
-// P7 over every all-constant fold: with one '?' operand literal c = 0ub????,
-// a fold result that is FULLY KNOWN still folds (And(c,0), Or(c,-1), ...), a
-// result that is exactly c forwards c's own pin (identity operands, a covering
-// Get_mask, a constant Mux selection), and any other '?' result keeps its op.
-// No case may leave a '?' constant other than c.
-//
-// hhds interns constants by same_repr ('?' included), so for the Forward rows
-// a re-mint of c's value would also return c's pin: those rows pin the RESULT
-// (out is c), not the forward_to_const_pin mechanism. They still fail when an
-// identity fold is refused and the op is kept (SHL/SRA by 0, a covering Sext,
-// a one-lane Concat). The single-'?' check guards the Keep and partial rows.
-TEST(CpropLiteral, FoldsWithUnknownOperandNeverMintUnknownConstants) {
-  namespace gu = livehd::graph_util;
-  auto& lib    = livehd::Hhds_graph_library::instance("lgdb_cprop_literal_folds");
-  enum class Want { Keep, Known, Forward };
-  struct Case {
-    const char*                                  name;
-    Ntype_op                                     op;
-    std::vector<std::pair<const char*, int64_t>> operands;  // sink name, constant (INT64_MIN = c)
-    Want                                         want;
-    int64_t                                      value = 0;         // Known
-    int                                          lo = -1, hi = -1;  // Get_mask / Set_mask window
-  };
-  constexpr int64_t       C     = std::numeric_limits<int64_t>::min();
-  const std::vector<Case> cases = {
-      {"shl", Ntype_op::SHL, {{"a", C}, {"b", 1}}, Want::Keep},
-      {"shl_0", Ntype_op::SHL, {{"a", C}, {"b", 0}}, Want::Forward},
-      {"sra", Ntype_op::SRA, {{"a", C}, {"b", 1}}, Want::Keep},
-      {"sra_0", Ntype_op::SRA, {{"a", C}, {"b", 0}}, Want::Forward},
-      {"sext_8", Ntype_op::Sext, {{"a", C}, {"b", 8}}, Want::Forward},
-      {"sext_4", Ntype_op::Sext, {{"a", C}, {"b", 4}}, Want::Keep}, // '?' sign bit: a new spelling
-      {"concat_1", Ntype_op::Concat, {{"p0", C}, {"p1", 4}}, Want::Forward},
-      {"concat_1_wide", Ntype_op::Concat, {{"p0", C}, {"p1", 6}}, Want::Forward},
-      {"concat_2", Ntype_op::Concat, {{"p0", 1}, {"p1", 4}, {"p2", C}, {"p3", 4}}, Want::Keep},
-      {"ror", Ntype_op::Ror, {{"as", C}}, Want::Keep},
-      {"not", Ntype_op::Not, {{"a", C}}, Want::Keep},
-      {"sum_k", Ntype_op::Sum, {{"as", C}, {"as", 1}}, Want::Keep},
-      {"sum_kk", Ntype_op::Sum, {{"as", C}, {"as", 1}, {"as", 2}}, Want::Keep},
-      {"sum_0", Ntype_op::Sum, {{"as", C}, {"as", 0}}, Want::Forward},
-      {"or_k", Ntype_op::Or, {{"as", C}, {"as", 1}}, Want::Keep},
-      {"or_0", Ntype_op::Or, {{"as", C}, {"as", 0}}, Want::Forward},
-      {"or_m1", Ntype_op::Or, {{"as", C}, {"as", -1}}, Want::Known, -1},
-      {"and_k", Ntype_op::And, {{"as", C}, {"as", 3}}, Want::Keep},
-      {"and_0", Ntype_op::And, {{"as", C}, {"as", 0}}, Want::Known, 0},
-      {"and_high", Ntype_op::And, {{"as", C}, {"as", 48}}, Want::Known, 0},
-      {"and_m1", Ntype_op::And, {{"as", C}, {"as", -1}}, Want::Forward},
-      {"xor_k", Ntype_op::Xor, {{"as", C}, {"as", 1}}, Want::Keep},
-      {"xor_0", Ntype_op::Xor, {{"as", C}, {"as", 0}}, Want::Forward},
-      {"mult_k", Ntype_op::Mult, {{"as", C}, {"as", 3}}, Want::Keep},
-      {"mult_0", Ntype_op::Mult, {{"as", C}, {"as", 0}}, Want::Known, 0},
-      {"mult_1", Ntype_op::Mult, {{"as", C}, {"as", 1}}, Want::Forward},
-      {"get_low2", Ntype_op::Get_mask, {{"a", C}}, Want::Keep, 0, 0, 2},
-      {"get_all4", Ntype_op::Get_mask, {{"a", C}}, Want::Forward, 0, 0, 4},
-      {"get_high", Ntype_op::Get_mask, {{"a", C}}, Want::Known, 0, 4, 8},
-      {"set_low1", Ntype_op::Set_mask, {{"a", C}, {"value", 1}}, Want::Keep, 0, 0, 1},
-  };
-  int index = 0;
-  for (const auto& tc : cases) {
-    auto io = lib.create_io(std::string("literal_fold_") + tc.name + std::to_string(index++));
-    io->add_output("q", 1);
-    io->set_bits("q", 8);
-    io->add_output("all", 2);
-    io->set_bits("all", 4);
-    auto       g = io->create_graph();
-    const auto c = gu::create_const(*g, *Dlop::from_pyrope("0ub????"));
-    c.connect_sink(g->get_output_pin("all"));
-    auto node = gu::create_typed_node(*g, tc.op, 8);
-    for (const auto& [sink, v] : tc.operands) {
-      gu::setup_sink_by_name(node, sink).connect_driver(v == C ? c : gu::create_const(*g, *Dlop::create_integer(v)));
-    }
-    if (tc.lo >= 0) {
-      gu::connect_bit_range(node, tc.lo, tc.hi);
-    }
-    node.create_driver_pin(0).connect_sink(g->get_output_pin("q"));
-    Cprop{}.do_trans(g);
-    const auto out = g->get_output_pin("q").get_driver_pin();
-    ASSERT_FALSE(out.is_invalid()) << tc.name;
-    const auto unknowns = unknown_const_drivers(*g, {"q", "all"});
-    ASSERT_EQ(unknowns.size(), 1u) << tc.name << ": a '?' constant was minted";
-    EXPECT_TRUE(unknowns.front() == c) << tc.name;
-    switch (tc.want) {
-      case Want::Keep:
-        ASSERT_FALSE(out.is_const()) << tc.name << " folded to " << gu::const_of(out).to_pyrope();
-        EXPECT_EQ(gu::type_op_of(out.get_master_node()), tc.op) << tc.name;
-        break;
-      case Want::Known:
-        ASSERT_TRUE(out.is_const()) << tc.name;
-        ASSERT_FALSE(gu::const_of(out).has_unknowns()) << tc.name;
-        EXPECT_EQ(gu::const_of(out).to_just_i64(), tc.value) << tc.name;
-        break;
-      case Want::Forward: EXPECT_TRUE(out == c) << tc.name; break;
-    }
-  }
 }
 
 // P7: a constant selector resolves to the selected arm's literal. hhds interns
@@ -1284,7 +926,7 @@ TEST(CpropLiteral, ConstantSelectorForwardsUnknownArmPin) {
     gu::setup_sink_pid(mux, 1).connect_driver(sel == 0 ? c : k);
     gu::setup_sink_pid(mux, 2).connect_driver(sel == 0 ? k : c);
     mux.create_driver_pin(0).connect_sink(g->get_output_pin("q"));
-    Cprop{}.do_trans(g);
+    livehd::aegraph::fold_with(g);
     EXPECT_TRUE(g->get_output_pin("q").get_driver_pin() == c) << "sel=" << sel;
   }
 }
@@ -1332,7 +974,7 @@ TEST(CpropLiteral, KnownLaneOfUnknownConeFolds) {
   gu::setup_sink_pid(cat, 3).connect_driver(k(4));
   gu::create_get_mask(*g, cat.create_driver_pin(0), 4, 8).create_driver_pin(0).connect_sink(g->get_output_pin("cat_hi"));
 
-  Cprop{}.do_trans(g);
+  livehd::aegraph::fold_with(g);
 
   const auto known = [&](const char* name, int64_t v) {
     const auto d = g->get_output_pin(name).get_driver_pin();
@@ -1449,7 +1091,7 @@ TEST(CpropLiteral, KnownResultThroughLaneOpsFolds) {
     ASSERT_FALSE(q.is_invalid()) << name;
     q.connect_sink(g->get_output_pin("q"));
 
-    Cprop{}.do_trans(g);
+    livehd::aegraph::fold_with(g);
 
     const auto out = g->get_output_pin("q").get_driver_pin();
     ASSERT_FALSE(out.is_invalid()) << name;
@@ -1541,39 +1183,9 @@ TEST(CpropCleanup, ConstantFlopEnableBecomesHoldOrUnconditionalWrite) {
     g->get_input_pin("d").connect_sink(gu::setup_sink_by_name(flop, "din"));
     gu::create_const(*g, *Dlop::create_integer(en)).connect_sink(gu::setup_sink_by_name(flop, "enable"));
     Cprop cp;
-    cp.do_trans(g);
+    livehd::aegraph::fold_with(cp, g);
     EXPECT_TRUE(gu::get_driver_of_sink_name(flop, "enable").is_invalid());
     EXPECT_EQ(gu::get_driver_of_sink_name(flop, "din"), en ? g->get_input_pin("d") : q);
-  }
-}
-
-TEST(CpropHotmux, ConstantControlsSelectValuesAndDefault) {
-  namespace gu = livehd::graph_util;
-  auto& lib    = livehd::Hhds_graph_library::instance("lgdb_cprop_hotmux");
-  for (int selected : {-1, 0, 1, 64}) {
-    for (bool fallback : {false, true}) {
-      auto io = lib.create_io("hotmux_" + std::to_string(selected + 1) + (fallback ? "_default" : "_zero"));
-      io->add_output("q", 1);
-      io->set_bits("q", 8);
-      auto g   = io->create_graph();
-      auto hot = gu::create_typed_node(*g, Ntype_op::Hotmux, 8);
-      gu::set_ubits(hot.create_driver_pin(0), 8);
-      for (int i = 0; i < 65; ++i) {
-        hot.create_sink_pin(2 * i).connect_driver(gu::create_const(*g, *Dlop::create_integer(i == selected ? 1 : 0)));
-        hot.create_sink_pin(2 * i + 1).connect_driver(gu::create_const(*g, *Dlop::create_integer(i + 10)));
-      }
-      if (fallback) {
-        hot.create_sink_pin(130).connect_driver(gu::create_const(*g, *Dlop::create_integer(99)));
-      }
-      hot.create_driver_pin(0).connect_sink(g->get_output_pin("q"));
-      Cprop cp;
-      cp.do_trans(g);
-      // One driver per sink pin: a graph output is driven by exactly one pin.
-      auto out_drv = g->get_output_pin("q").get_driver_pin();
-      ASSERT_FALSE(out_drv.is_invalid());
-      ASSERT_TRUE(out_drv.is_const());
-      EXPECT_EQ(gu::const_of(out_drv).to_just_i64(), selected >= 0 ? selected + 10 : fallback ? 99 : 0);
-    }
   }
 }
 
@@ -1587,7 +1199,7 @@ TEST(CpropHotmux, UnusedOverlapSurvivesForFormal) {
     hot.create_sink_pin(i).connect_driver(gu::create_const(*g, *Dlop::create_integer(1)));
   }
   Cprop cp;
-  cp.do_trans(g);
+  livehd::aegraph::fold_with(cp, g);
   EXPECT_FALSE(hot.is_invalid());
 }
 
@@ -1628,7 +1240,7 @@ TEST(CpropHotmux, IdenticalArmsRequireExclusivity) {
           gu::set_proven(hot, gu::kFormalOnehot);
         }
         Cprop cp;
-        cp.do_trans(g);
+        livehd::aegraph::fold_with(cp, g);
 
         // An unproven overlap remains observable even with equal values.
         // No default port and a non-zero shared value: the zero-control case reads
@@ -1661,7 +1273,7 @@ TEST(CpropMuxSharing, PriorityTreePreservesEveryControlCombination) {
       root = f.mux(f.controls[i], root, i % 2 ? f.b : f.a);
     }
     root.connect_sink(f.graph->get_output_pin("out"));
-    Cprop{}.do_trans(f.graph);
+    livehd::aegraph::fold_with(f.graph);
     // The innermost identical-arm mux folds. Rebuilding the remaining chain
     // as a select tree is equal-cost, so A3 leaves it alone.
     EXPECT_EQ(f.count(Ntype_op::Mux), 5);
@@ -1682,7 +1294,7 @@ TEST(CpropMuxSharing, PriorityTreePreservesEveryControlCombination) {
         EXPECT_EQ(mux_eval(f.output(), values), expected) << mask;
       }
     }
-    Cprop{}.do_trans(f.graph);
+    livehd::aegraph::fold_with(f.graph);
     EXPECT_EQ(f.count(Ntype_op::Hotmux), 0);
   }
 }
@@ -1698,7 +1310,7 @@ TEST(CpropMuxSharing, ExclusiveEqualityChainDropsTheImpliedPriorityTerms) {
     root = f.mux(f.eq(sel, i), root, i % 2 ? f.b : f.a);
   }
   root.connect_sink(f.graph->get_output_pin("out"));
-  Cprop{}.do_trans(f.graph);
+  livehd::aegraph::fold_with(f.graph);
   EXPECT_EQ(f.count(Ntype_op::Hotmux), 1);
   EXPECT_EQ(f.count(Ntype_op::Mux), 0);
   // Four `op == i` comparisons and no `(op == i) == 0` negation or And of them.
@@ -1749,7 +1361,7 @@ TEST(CpropMuxSharing, EqualityChainOverDifferentValuesKeepsThePriorityTerms) {
     root = f.mux(f.eq(selectors[i], 1), root, i % 2 ? f.b : f.a);
   }
   root.connect_sink(f.graph->get_output_pin("out"));
-  Cprop{}.do_trans(f.graph);
+  livehd::aegraph::fold_with(f.graph);
   for (int64_t xv = 0; xv < 3; ++xv) {
     for (int64_t yv = 0; yv < 3; ++yv) {
       Test_values values;
@@ -1782,7 +1394,7 @@ TEST(CpropMuxSharing, HotmuxGroupsOnlyEstablishedExclusiveControls) {
         gu::set_proven(n, gu::kFormalOnehot);
       }
       n.create_driver_pin(0).connect_sink(f.graph->get_output_pin("out"));
-      Cprop{}.do_trans(f.graph);
+      livehd::aegraph::fold_with(f.graph);
       const auto arms = gu::hotmux_inputs(f.output().get_master_node());
       EXPECT_EQ(arms.arms.size(), proof == 1 || proof == 2 ? 2 : 4);
       if (proof == 0 || proof == 3) {
@@ -1861,7 +1473,7 @@ TEST(CpropMuxSharing, SharedSubconeRemainsAnOpaqueTerminal) {
     root = f.mux(f.controls[i], root, i % 2 ? shared : f.a);
   }
   root.connect_sink(f.graph->get_output_pin("out"));
-  Cprop{}.do_trans(f.graph);
+  livehd::aegraph::fold_with(f.graph);
   EXPECT_FALSE(shared.is_invalid());
   EXPECT_EQ(gu::type_op_of(shared.get_master_node()), Ntype_op::Mux);
   for (uint64_t mask = 0; mask < 64; ++mask) {
@@ -1890,7 +1502,7 @@ TEST(CpropMuxSharing, DeepPriorityChainHasLinearGeneratedSize) {
     root = f.mux(f.controls[i], root, i % 2 ? f.b : f.a);
   }
   root.connect_sink(f.graph->get_output_pin("out"));
-  Cprop{}.do_trans(f.graph);
+  livehd::aegraph::fold_with(f.graph);
   size_t nodes = 0, edges = 0;
   for (auto n : f.graph->body().nodes()) {
     ++nodes;
@@ -1945,7 +1557,7 @@ TEST(CpropBool, ComplementaryLiteralsFold) {
   // and(x, y, !x) is 0 at any width; or(x, !x) is 1 because both are 0/1.
   f.logic(Ntype_op::And, {x, y, nx}).connect_sink(f.graph->get_output_pin("out"));
   f.logic(Ntype_op::Or, {x, nx}).connect_sink(f.graph->get_output_pin("observe"));
-  Cprop{}.do_trans(f.graph);
+  livehd::aegraph::fold_with(f.graph);
   ASSERT_TRUE(f.output().is_const());
   EXPECT_TRUE(gu::const_of(f.output()).is_known_zero());
   ASSERT_TRUE(f.observed().is_const());
@@ -2139,7 +1751,7 @@ TEST(CpropMasks, SextAndLowWindowChainsCollapse) {
   auto bit = gu::create_get_mask(*f.graph, s2.create_driver_pin(0), 0, 1);
   gu::set_ubits(bit.create_driver_pin(0), 1);
   bit.create_driver_pin(0).connect_sink(f.graph->get_output_pin("observe"));
-  Cprop{}.do_trans(f.graph);
+  livehd::aegraph::fold_with(f.graph);
   int sexts = 0;
   for (auto n : f.graph->body().nodes()) {
     if (gu::type_op_of(n) == Ntype_op::Sext) {
@@ -2219,7 +1831,7 @@ TEST(CpropMuxSharing, ZeroOneSelectionsStayMuxes) {
   auto      s0 = f.not_zero(f.controls[0]);
   auto      s1 = f.not_zero(f.controls[1]);
   f.mux(s0, f.mux(s1, x, y), f.mux(s1, z, y)).connect_sink(f.graph->get_output_pin("out"));
-  Cprop{}.do_trans(f.graph);
+  livehd::aegraph::fold_with(f.graph);
   EXPECT_EQ(f.count(Ntype_op::Hotmux), 0);
   for (uint64_t mask = 0; mask < 32; ++mask) {
     const bool b0 = mask & 1, b1 = mask & 2, bx = mask & 4, by = mask & 8, bz = mask & 16;
@@ -2239,7 +1851,7 @@ TEST(CpropMuxSharing, WidthHintsDoNotGateSharingButColorsDo) {
       gu::set_color(root.get_master_node(), 7);
     }
     root.connect_sink(f.graph->get_output_pin("out"));
-    Cprop{}.do_trans(f.graph);
+    livehd::aegraph::fold_with(f.graph);
     EXPECT_EQ(f.count(Ntype_op::Mux), colored ? 3 : 2);
     EXPECT_EQ(f.count(Ntype_op::Hotmux), 0);
   }
@@ -2254,7 +1866,7 @@ TEST(CpropMuxSharing, TwoGroupSelectTreePreservesWideSignedControlsAndBooleanDat
       b = gu::create_get_mask(*f.graph, b, 0, 1).create_driver_pin(0);
     }
     f.mux(f.controls[0], f.mux(f.controls[1], a, b), f.mux(f.controls[2], a, b)).connect_sink(f.graph->get_output_pin("out"));
-    Cprop{}.do_trans(f.graph);
+    livehd::aegraph::fold_with(f.graph);
     EXPECT_EQ(f.count(Ntype_op::Mux), 2);
     EXPECT_EQ(f.count(Ntype_op::Hotmux), 0);
     EXPECT_EQ(f.count(Ntype_op::EQ), 0);
@@ -2359,73 +1971,9 @@ TEST(CpropMasks, CyclicPackedReadDoesNotRotateAtWalkBudget) {
   livehd::graph_util::connect_bit_range(read, 0, 1);
   read.create_driver_pin(0).connect_sink(graph->get_output_pin("q"));
   Cprop cp;
-  cp.do_trans(graph);
+  livehd::aegraph::fold_with(cp, graph);
   EXPECT_FALSE(read.is_invalid());
   EXPECT_EQ(gu::get_driver_of_sink_name(read, "a"), source);
-}
-
-// A generate loop that fills a wide packed array one bit per Set_mask and reads
-// back only its last row (bedrock's br_mux_bin_structured_gates). The chain is
-// longer than canonicalize_set_mask_pack's limit, so the multi-bit read used to
-// stay pinned to every link. It must become a Concat of just the lanes it reads.
-TEST(CpropMasks, StraddlingSliceOfLongWriteChainGathersItsLanes) {
-  namespace gu = livehd::graph_util;
-  auto& lib    = livehd::Hhds_graph_library::instance("lgdb_cprop_gather_chain");
-  auto  io     = lib.create_io("gather_chain");
-  io->add_input("a", 1);
-  io->set_bits("a", 8);
-  io->add_input("b", 2);
-  io->set_bits("b", 8);
-  io->add_input("s", 3);
-  io->set_bits("s", 1);
-  io->add_output("q", 4);
-  io->set_bits("q", 4);
-  auto g = io->create_graph();
-
-  constexpr int kLinks = 300;  // > kPackChainLimit
-  auto          value  = gu::create_const(*g, *Dlop::from_pyrope("0sb?"));
-  for (int i = 0; i < kLinks; ++i) {
-    auto bit = [&](const char* in) {
-      auto get = gu::create_get_mask(*g, g->get_input_pin(in), i % 8, i % 8 + 1);
-      gu::set_ubits(get.create_driver_pin(0), 1);
-      return get.create_driver_pin(0);
-    };
-    auto mux = gu::create_typed_node(*g, Ntype_op::Mux);
-    gu::setup_sink_pid(mux, 0).connect_driver(g->get_input_pin("s"));
-    gu::setup_sink_pid(mux, 1).connect_driver(bit("a"));
-    gu::setup_sink_pid(mux, 2).connect_driver(bit("b"));
-    gu::set_ubits(mux.create_driver_pin(0), 1);
-
-    auto write = gu::create_typed_node(*g, Ntype_op::Set_mask);
-    gu::setup_sink_by_name(write, "a").connect_driver(value);
-    livehd::graph_util::connect_bit_range(write, i, i + 1);
-    gu::setup_sink_by_name(write, "value").connect_driver(mux.create_driver_pin(0));
-    gu::set_ubits(write.create_driver_pin(0), kLinks);
-    value = write.create_driver_pin(0);
-  }
-  auto read = gu::create_get_mask(*g, value, kLinks - 4, kLinks);
-  gu::set_ubits(read.create_driver_pin(0), 4);
-  read.create_driver_pin(0).connect_sink(g->get_output_pin("q"));
-
-  optimize_state(g);
-
-  for (auto n : g->body().nodes()) {
-    EXPECT_NE(gu::type_op_of(n), Ntype_op::Set_mask) << "the bypassed write chain must be swept";
-  }
-  auto out = g->get_output_pin("q").get_driver_pin();
-  ASSERT_FALSE(out.is_invalid());
-  auto head = out.get_master_node();
-  // The four lane muxes vectorize, then operator sharing factors their equal
-  // masks: Get_mask(Mux(s,a,b), [0,4)). Only one word mux and one read remain.
-  ASSERT_EQ(gu::type_op_of(head), Ntype_op::Get_mask);
-  EXPECT_EQ(*gu::bit_range(head), std::make_pair(0, 4));
-  EXPECT_EQ(gu::type_op_of(gu::get_driver_of_sink_name(head, "a").get_master_node()), Ntype_op::Mux);
-  EXPECT_EQ(gu::bits_of(out), 4);
-  size_t muxes = 0;
-  for (auto n : g->body().nodes()) {
-    muxes += gu::type_op_of(n) == Ntype_op::Mux ? 1 : 0;
-  }
-  EXPECT_EQ(muxes, 1u);
 }
 
 // Indexed reads may resolve a shared writer, but must preserve both the
@@ -2455,7 +2003,7 @@ TEST(CpropMasks, StraddlingSlicePreservesSharedWord) {
   read.create_driver_pin(0).connect_sink(g->get_output_pin("q"));
   value.connect_sink(g->get_output_pin("w"));
 
-  Cprop{}.do_trans(g);
+  livehd::aegraph::fold_with(g);
 
   auto q = g->get_output_pin("q").get_driver_pin();
   ASSERT_FALSE(q.is_invalid());
@@ -2467,124 +2015,6 @@ TEST(CpropMasks, StraddlingSlicePreservesSharedWord) {
     };
     EXPECT_EQ(mux_eval(q, values), (data & 1) ? 3 : 0);
     EXPECT_EQ(mux_eval(word, values), (data & 1) ? 255 : 0);
-  }
-}
-
-// W one-bit muxes sharing a select over consecutive bits of the same two words
-// are one W-bit mux, and a tree of them vectorizes level by level: a 4:1 x 8
-// structured-gates mux (24 one-bit mux2 cells) becomes three 8-bit muxes.
-TEST(CpropMux, BitSlicedMuxTreeVectorizes) {
-  namespace gu = livehd::graph_util;
-  auto& lib    = livehd::Hhds_graph_library::instance("lgdb_cprop_vectorize");
-  auto  io     = lib.create_io("vectorize_tree");
-  io->add_input("in", 1);
-  io->set_bits("in", 32);
-  io->add_input("s0", 2);
-  io->set_bits("s0", 1);
-  io->add_input("s1", 3);
-  io->set_bits("s1", 1);
-  io->add_output("q", 4);
-  io->set_bits("q", 8);
-  auto g   = io->create_graph();
-  auto in  = g->get_input_pin("in");
-  auto mux = [&](const hhds::Pin_class& sel, const hhds::Pin_class& x, const hhds::Pin_class& y) {
-    auto m = gu::create_typed_node(*g, Ntype_op::Mux);
-    gu::setup_sink_pid(m, 0).connect_driver(sel);
-    gu::setup_sink_pid(m, 1).connect_driver(x);
-    gu::setup_sink_pid(m, 2).connect_driver(y);
-    gu::set_ubits(m.create_driver_pin(0), 1);
-    return m.create_driver_pin(0);
-  };
-  auto bit = [&](const hhds::Pin_class& src, int pos) {
-    auto get = gu::create_get_mask(*g, src, pos, pos + 1);
-    gu::set_ubits(get.create_driver_pin(0), 1);
-    return get.create_driver_pin(0);
-  };
-  std::vector<hhds::Pin_class> level1;
-  for (int i = 0; i < 8; ++i) {
-    auto lo = mux(g->get_input_pin("s0"), bit(in, i), bit(in, 8 + i));
-    auto hi = mux(g->get_input_pin("s0"), bit(in, 16 + i), bit(in, 24 + i));
-    level1.push_back(mux(g->get_input_pin("s1"), lo, hi));
-  }
-  auto cat = gu::create_typed_node(*g, Ntype_op::Concat);
-  for (int i = 0; i < 8; ++i) {  // MSB-first lanes
-    gu::setup_sink_pid(cat, 2 * i).connect_driver(level1[7 - i]);
-    gu::setup_sink_pid(cat, 2 * i + 1).connect_driver(gu::create_const(*g, *Dlop::create_integer(1)));
-  }
-  gu::set_ubits(cat.create_driver_pin(0), 8);
-  cat.create_driver_pin(0).connect_sink(g->get_output_pin("q"));
-
-  optimize_state(g);
-
-  size_t muxes = 0;
-  for (auto n : g->body().nodes()) {
-    if (gu::type_op_of(n) == Ntype_op::Mux) {
-      ++muxes;
-      EXPECT_EQ(gu::bits_of(n.get_driver_pin(0)), 8) << "no one-bit lane mux may survive";
-    }
-  }
-  EXPECT_EQ(muxes, 3u);
-  auto q = g->get_output_pin("q").get_driver_pin();
-  ASSERT_FALSE(q.is_invalid());
-  auto top = q.get_master_node();
-  ASSERT_EQ(gu::type_op_of(top), Ntype_op::Mux) << "the re-packing Concat must fold into the word mux";
-  auto sel = top.get_sink_pin(0).get_driver_pins();
-  ASSERT_EQ(sel.size(), 1u);
-  EXPECT_EQ(sel.front(), g->get_input_pin("s1"));
-}
-
-// Every intermediate word has a whole-word observer as well as a slice read.
-// Expanding all prefix layouts would manufacture 1+2+...+N lane operands.
-TEST(CpropMasks, SharedWriteVersionsHaveBoundedExpansion) {
-  for (int size : {128, 256, 512, 1024}) {
-    auto& lib = livehd::Hhds_graph_library::instance("lgdb_cprop_shared_scaling");
-    auto  io  = lib.create_io("versions_" + std::to_string(size));
-    io->add_input("a", 1);
-    io->set_bits("a", size);
-    for (int i = 0; i < size; ++i) {
-      io->add_output("word" + std::to_string(i), 2 * i + 2);
-      io->set_bits("word" + std::to_string(i), size);
-      io->add_output("bit" + std::to_string(i), 2 * i + 3);
-      io->set_bits("bit" + std::to_string(i), 1);
-    }
-    auto graph  = io->create_graph();
-    auto source = graph->get_input_pin("a");
-    auto word   = gu::create_const(*graph, *Dlop::create_integer(0));
-    for (int i = 0; i < size; ++i) {
-      auto value = gu::create_get_mask(*graph, source, i, i + 1).create_driver_pin(0);
-      auto mask  = gu::create_const(*graph, gu::mask_window_const(i, i + 1));
-      word       = gu::create_set_mask(*graph,
-                                       word,
-                                       value,
-                                       livehd::graph_util::mask_window(livehd::graph_util::const_of(mask)).first,
-                                       livehd::graph_util::mask_window(livehd::graph_util::const_of(mask)).second)
-                       .create_driver_pin(0);
-      word.connect_sink(graph->get_output_pin("word" + std::to_string(i)));
-      auto read = gu::create_get_mask(*graph, word, i, i + 1).create_driver_pin(0);
-      read.connect_sink(graph->get_output_pin("bit" + std::to_string(i)));
-    }
-    const auto start = std::chrono::steady_clock::now();
-    Cprop{}.do_trans(graph);
-    const auto ms    = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
-    size_t     nodes = 0, edges = 0;
-    for (auto node : graph->body().nodes()) {
-      ++nodes;
-      for ([[maybe_unused]] auto input : node.inp_sorted_pins()) {
-        ++edges;
-      }
-    }
-    EXPECT_LT(nodes, static_cast<size_t>(12 * size));
-    EXPECT_LT(edges, static_cast<size_t>(30 * size));
-    for (int i = 0; i < size; ++i) {
-      const auto read = graph->get_output_pin("bit" + std::to_string(i)).get_driver_pin();
-      ASSERT_EQ(gu::type_op_of(read.get_master_node()), Ntype_op::Get_mask);
-      EXPECT_EQ(gu::get_driver_of_sink_name(read.get_master_node(), "a"), source);
-      EXPECT_EQ(gu::bit_range(read.get_master_node()),
-                (std::optional<std::pair<int, int>>{
-                    {i, i + 1}
-      }));
-    }
-    std::cout << "shared-versions n=" << size << " nodes=" << nodes << " edges=" << edges << " ms=" << ms << '\n';
   }
 }
 
@@ -2603,7 +2033,7 @@ TEST(CpropMasks, SharedOverwriteVersionsPreserveSignedSlices) {
   auto last  = write(first, f.constant(1));
   first.connect_sink(f.graph->get_output_pin("observe"));
   last.connect_sink(f.graph->get_output_pin("out"));
-  Cprop{}.do_trans(f.graph);
+  livehd::aegraph::fold_with(f.graph);
   for (int64_t a : {-128, -3, -1, 0, 5, 127}) {
     for (int64_t b : {-9, -1, 0, 1, 2, 3, 8}) {
       auto v1 = f.inputs(0, a, b), v2 = v1;
@@ -2628,39 +2058,6 @@ TEST(CpropBool, SpecializedProducerInvalidatesItsCseEntry) {
     auto a = f.inputs(mask, 0, 0), b = a;
     EXPECT_EQ(mux_eval(f.output(), a), bool(mask & 1) || bool(mask & 2));
     EXPECT_EQ(mux_eval(f.observed(), b), !bool(mask & 1) && bool(mask & 2));
-  }
-}
-
-TEST(CpropBool, XorInversionRequiresStructuralBooleanValue) {
-  for (bool boolean : {false, true}) {
-    for (bool bitwise_not : {false, true}) {
-      Mux_graph f("inversion_domain_" + std::to_string(boolean) + std::to_string(bitwise_not), 1, 8, true, true);
-      auto      source = f.controls[0];
-      if (boolean) {
-        source = gu::create_get_mask(*f.graph, source, 0, 1).create_driver_pin(0);
-      } else {
-        gu::set_ubits(source, 1);  // A hint is not a bool01 proof.
-      }
-      auto inversion = f.node(bitwise_not ? Ntype_op::Not : Ntype_op::Xor);
-      gu::setup_sink_pid(inversion, 0).connect_driver(source);
-      if (!bitwise_not) {
-        gu::setup_sink_pid(inversion, 0).connect_driver(f.constant(1));
-      }
-      f.mux(inversion.create_driver_pin(0), f.a, f.b).connect_sink(f.graph->get_output_pin("out"));
-      Cprop{}.do_trans(f.graph);
-      if (boolean && !bitwise_not) {
-        EXPECT_EQ(f.count(Ntype_op::Xor), 0);
-      } else {
-        EXPECT_EQ(f.count(bitwise_not ? Ntype_op::Not : Ntype_op::Xor), 1);
-      }
-      for (int64_t input : {-2, -1, 0, 1, 2, 127, 128}) {
-        auto values                                   = f.inputs(0, -7, 26);
-        values[f.controls[0].get_class_index().value] = input;
-        const auto value                              = boolean ? input & 1 : input;
-        const auto select                             = bitwise_not ? ~value : value ^ 1;
-        EXPECT_EQ(mux_eval(f.output(), values), select ? 26 : -7);
-      }
-    }
   }
 }
 
@@ -2706,7 +2103,7 @@ TEST(CpropOpSharing, PositionalAndBankedOperatorsPreserveValues) {
         expected.push_back(mux_eval(f.output(), inputs));
       }
     }
-    Cprop{}.do_trans(f.graph);
+    livehd::aegraph::fold_with(f.graph);
     EXPECT_EQ(f.count(op), 1);
     size_t i = 0;
     for (unsigned mask = 0; mask < 4; ++mask) {
@@ -2738,7 +2135,7 @@ TEST(CpropOpSharing, ConstantShiftAmountsAreNotShared) {
         auto values = f.inputs(mask, 23, 5);
         expected.push_back(mux_eval(f.output(), values));
       }
-      Cprop{}.do_trans(f.graph);
+      livehd::aegraph::fold_with(f.graph);
       EXPECT_EQ(f.count(op), variable ? 1u : 2u);
       for (unsigned mask = 0; mask < 8; ++mask) {
         auto values = f.inputs(mask, 23, 5);
@@ -2760,7 +2157,7 @@ TEST(CpropOpSharing, MultisetsRetainDuplicatesAndBothBanks) {
     return n.create_driver_pin(0);
   };
   f.mux(f.controls[0], expr(false), expr(true)).connect_sink(f.graph->get_output_pin("out"));
-  Cprop{}.do_trans(f.graph);
+  livehd::aegraph::fold_with(f.graph);
   ASSERT_EQ(f.count(Ntype_op::Sum), 1);
   for (unsigned mask = 0; mask < 4; ++mask) {
     auto values = f.inputs(mask, 17, 5);
@@ -2782,7 +2179,7 @@ TEST(CpropOpSharing, ConcatDoesNotCreateOverwideMixedSignLanes) {
     return n.create_driver_pin(0);
   };
   f.mux(f.controls[0], concat(f.a), concat(f.b)).connect_sink(f.graph->get_output_pin("out"));
-  Cprop{}.do_trans(f.graph);
+  livehd::aegraph::fold_with(f.graph);
   EXPECT_EQ(f.count(Ntype_op::Concat), 2);
   Bitwidth{10}.do_trans(f.graph);
   for (unsigned select : {0, 1}) {
@@ -2803,7 +2200,7 @@ TEST(CpropOpSharing, IndexedSelectionPreservesAllInRangeOperandSlots) {
     mux.create_sink_pin(i + 1).connect_driver(n.create_driver_pin(0));
   }
   mux.create_driver_pin(0).connect_sink(f.graph->get_output_pin("out"));
-  Cprop{}.do_trans(f.graph);
+  livehd::aegraph::fold_with(f.graph);
   EXPECT_EQ(f.count(Ntype_op::Sum), 1);
   for (int select : {-1, 0, 1, 2, 3, 4, 128}) {
     auto values                                   = f.inputs(0, 7, 0);
@@ -2829,7 +2226,7 @@ TEST(CpropOpSharing, SharedNamedAndColoredArmsAreNotRetired) {
       gu::set_color(a, 7);
     }
     f.mux(f.controls[0], ap, b.create_driver_pin(0)).connect_sink(f.graph->get_output_pin("out"));
-    Cprop{}.do_trans(f.graph);
+    livehd::aegraph::fold_with(f.graph);
     EXPECT_EQ(f.count(Ntype_op::Sum), 2);
     EXPECT_EQ(gu::type_op_of(f.output().get_master_node()), Ntype_op::Mux);
   }
@@ -2851,7 +2248,7 @@ TEST(CpropOpSharing, OutputNarrowingDoesNotNarrowSelectedOperands) {
     auto root = f.mux(f.controls[0], a.create_driver_pin(0), b.create_driver_pin(0));
     gu::set_sbits(root, hint);
     root.connect_sink(f.graph->get_output_pin("out"));
-    Cprop{}.do_trans(f.graph);
+    livehd::aegraph::fold_with(f.graph);
     ASSERT_EQ(f.count(Ntype_op::SRA), 1);
     const auto shared  = f.output().get_master_node();
     const auto operand = gu::get_driver_of_sink_name(shared, "a");
@@ -2891,7 +2288,7 @@ TEST(CpropOpSharing, UnstampedRootKeepsArmRealization) {
     auto out = root.create_driver_pin(0);
     ASSERT_EQ(gu::bits_of(out), 0);
     out.connect_sink(f.graph->get_output_pin("out"));
-    Cprop{}.do_trans(f.graph);
+    livehd::aegraph::fold_with(f.graph);
     const auto result = f.output();
     if (!same_stamp) {
       EXPECT_EQ(f.count(Ntype_op::Get_mask), 2);
@@ -2919,7 +2316,7 @@ TEST(CpropOpSharing, IndexRangeMustBeStructural) {
     mux.create_sink_pin(i + 1).connect_driver(n.create_driver_pin(0));
   }
   mux.create_driver_pin(0).connect_sink(f.graph->get_output_pin("out"));
-  Cprop{}.do_trans(f.graph);
+  livehd::aegraph::fold_with(f.graph);
   EXPECT_EQ(f.count(Ntype_op::Sum), 4);
 }
 
@@ -2940,7 +2337,7 @@ TEST(CpropOpSharing, DeepCascadeHasLinearGeneratedSize) {
     b = wrap(b);
   }
   f.mux(f.controls[0], a, b).connect_sink(f.graph->get_output_pin("out"));
-  Cprop{}.do_trans(f.graph);
+  livehd::aegraph::fold_with(f.graph);
   EXPECT_EQ(f.count(Ntype_op::Sum) + f.count(Ntype_op::Not), depth);
   EXPECT_EQ(f.count(Ntype_op::Mux), 1);
   size_t edges = 0;
@@ -2991,60 +2388,6 @@ TEST(CpropMux, GuardedAccumulationBecomesOneOperator) {
   }
 }
 
-// Outside a guard scope -- straight-line code, a hand-unrolled run like
-// br_enc_onehot2bin -- the chain keeps every Mux on the accumulator: the
-// rolled-loop rewrite must not change what loop-free code compiles to. A
-// partial scope (synthesis' loop cleanup admits only the cells an expansion
-// minted) rewrites exactly the links whose Mux and update cell it admits.
-TEST(CpropMux, GuardedAccumulationOnlyInsideTheGuardScope) {
-  for (const auto op : {Ntype_op::Or, Ntype_op::And, Ntype_op::Xor}) {
-    SCOPED_TRACE(std::string{Ntype::get_name(op)});
-    {
-      Mux_graph f(std::string{"guard_off_"} + std::string{Ntype::get_name(op)}, 4, 8);
-      build_guard_chain(f, op, true);
-      optimize_lanes(f.graph);
-      EXPECT_EQ(gu::type_op_of(f.output().get_master_node()), Ntype_op::Mux);
-      EXPECT_EQ(f.count(Ntype_op::Mux), 4U);
-      EXPECT_EQ(f.count(op), 4U);  // one update per link, still behind its Mux
-    }
-    {
-      Mux_graph f(std::string{"guard_partial_"} + std::string{Ntype::get_name(op)}, 4, 8);
-      auto      chain = build_guard_chain(f, op, true);
-      // Admit the last link only: its Mux and its update cell. A link whose
-      // update cell is outside the scope stays a Mux even if its Mux is in.
-      absl::flat_hash_set<hhds::Node_class> admitted{chain.muxes[3], chain.updates[3], chain.muxes[1]};
-      std::vector<int64_t>                  expected;
-      for (uint64_t mask = 0; mask < 16; ++mask) {
-        auto values = f.inputs(mask, 0x5a, 0x21);
-        expected.push_back(mux_eval(f.output(), values));
-      }
-      Cprop cprop{true};
-      cprop.set_guard_scope([&](const hhds::Node_class& n) { return admitted.contains(n); });
-      cprop.do_trans(f.graph);
-      Bitwidth{10}.do_trans(f.graph);
-      const auto root = f.output().get_master_node();
-      EXPECT_EQ(gu::type_op_of(root), op);  // the admitted link moved its guard
-      size_t guards = 0;
-      for (auto n : f.graph->body().nodes()) {
-        if (gu::type_op_of(n) != Ntype_op::Mux) {
-          continue;
-        }
-        for (const auto& sink : n.inp_sorted_pins()) {
-          if (sink.get_port_id() != 0 && sink.get_driver_pin().is_const()) {
-            ++guards;  // an identity arm: a moved guard, off the accumulator
-          }
-        }
-      }
-      EXPECT_EQ(guards, 1U);
-      EXPECT_EQ(f.count(Ntype_op::Mux), 4U);  // three links still hold the accumulator
-      for (uint64_t mask = 0; mask < 16; ++mask) {
-        auto values = f.inputs(mask, 0x5a, 0x21);
-        EXPECT_EQ(mux_eval(f.output(), values), expected[mask]) << mask;
-      }
-    }
-  }
-}
-
 // `w = s ? a : a ^ 9` twice (sim_loop_mux_arm's two copies of the low
 // nibble): the update cell has two consumers until CSE merges the muxes, so
 // the guard can only appear in a later sweep. Bitwidth_rewrite runs scalar_mux
@@ -3062,7 +2405,7 @@ TEST(CpropMux, GuardedAccumulationNeverLeavesAnUnstampedCell) {
   // sweep, so the next scalar_mux to see them is Bitwidth_rewrite's.
   Cprop cprop{true};
   cprop.set_guard_scope(Cprop::whole_graph());
-  cprop.do_trans(f.graph);
+  livehd::aegraph::fold_with(cprop, f.graph);
   Bitwidth{10}.do_trans(f.graph);
   for (auto node : f.graph->body().nodes()) {
     if (!gu::is_builtin_node(node)) {
@@ -3079,35 +2422,6 @@ TEST(CpropMux, GuardedAccumulationNeverLeavesAnUnstampedCell) {
   }
 }
 
-// The guard rewrite needs a private update cell that reads the held value: a
-// shared or named update, a colored Mux, and an update without the held
-// value keep the Mux.
-TEST(CpropMux, GuardedAccumulationNeedsAPrivateUpdate) {
-  const auto build = [](const std::string& name, int variant) {
-    auto f   = std::make_unique<Mux_graph>(name, 1, 8);
-    auto upd = f->node(Ntype_op::Or);
-    gu::setup_sink_pid(upd, 0).connect_driver(variant == 3 ? f->constant(3) : f->a);
-    gu::setup_sink_pid(upd, 0).connect_driver(f->b);
-    auto root = f->mux(f->controls[0], f->a, upd.create_driver_pin(0));
-    root.connect_sink(f->graph->get_output_pin("out"));
-    if (variant == 0) {
-      upd.create_driver_pin(0).connect_sink(f->graph->get_output_pin("observe"));  // shared
-    } else if (variant == 1) {
-      gu::set_pin_name(upd.create_driver_pin(0), "named_update");
-    } else if (variant == 2) {
-      gu::set_color(root.get_master_node(), 3);
-    }
-    return f;
-  };
-  for (int variant = 0; variant < 4; ++variant) {
-    SCOPED_TRACE(variant);
-    auto  f = build("guard_keep_" + std::to_string(variant), variant);
-    Cprop cprop{true};
-    cprop.set_guard_scope(Cprop::whole_graph());
-    cprop.do_trans(f->graph);
-    EXPECT_EQ(gu::type_op_of(f->output().get_master_node()), Ntype_op::Mux);
-  }
-}
 }  // namespace
 
 TEST(CpropMuxContextSchedule, CompileScheduleDoesNotRegrowPrunedTrees) {

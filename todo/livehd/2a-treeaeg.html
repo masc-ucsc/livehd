@@ -61,7 +61,7 @@ the default.</p>
 
 <h3>Steps</h3>
 <ol>
-<li><strong>Rewriter split</strong> (in review): move <code>make</code>/<code>rewrite</code>/<code>check_pair</code> and the
+<li><strong>Rewriter split</strong> (done 2026-11-14): move <code>make</code>/<code>rewrite</code>/<code>check_pair</code> and the
   rule state out of the LGraph engine; behavior unchanged, full regression green.</li>
 <li>Tree front end: block → e-graph import (operand classes from the def map; leaves for
   everything else), the pre-bitwidth subset, write-back of a changed statement as a scratch
@@ -72,16 +72,42 @@ the default.</p>
 <li>Post-bitwidth range subset behind its own label; README invariant #6 amended.</li>
 </ol>
 
-<h2>B. Retire classic cprop</h2>
+<h2>B. Retire classic cprop — done 2026-11-14</h2>
 <ul>
-<li>aegraph still calls cprop's <code>do_scalar</code> (scalar rewrites on combinational SCCs),
-  <code>do_post</code> (region passes) and the <code>cprop_value</code> facts bitwidth reads. Those move under
-  <code>pass/aegraph</code>; what goes: <code>do_trans</code>/<code>cse_pass</code>, <code>pass.cprop</code>, the classic
-  and aegraph+classic engines, <code>compile.cprop.engine</code>, <code>engine_slots</code>,
-  <code>formal.lec.preflight_engine</code> (owner: remove the knobs; a <code>--set</code> of one is a usage
-  error), the parity smoke and the engine sweep script.</li>
-<li>The preflight refusal (a new cell aegraph cannot stamp) no longer hands the graph to
-  classic: aegraph gets a small fast node removal (delete a node and its dead fanin chain).</li>
+<li>Gone: <code>Cprop::do_trans</code>/<code>cse_pass</code>, the <code>pass.cprop</code> method (<code>lhd pass cprop</code>),
+  the classic and aegraph+classic engines, <code>compile.cprop.engine</code>, <code>compile.cprop.engine_slots</code>,
+  <code>formal.lec.preflight_engine</code> (a <code>--set</code> of one is a "was removed" usage error), the
+  <code>--aegraph</code> harness switch with its two manual twin targets, and <code>scripts/cprop_engine_sweep.py</code>.</li>
+<li>Kept, spelled as before: <code>compile.cprop.low_lanes</code> and <code>compile.cprop.loop_hoist</code> now validate
+  against <code>pass.aegraph</code> (common/specific split with <code>compile.aegraph.*</code>, one spelling each). The
+  compile-cache and fold-salt descriptors keep the spelling the aegraph default had, so caches stay valid.</li>
+<li><code>pass/cprop</code> stays as the support library the engine runs around itself (<code>do_scalar</code>,
+  <code>do_post</code>, <code>cprop_value</code>, muxctx, opshare, loop_hoist); moving and renaming it is cosmetic and was
+  left out to avoid colliding with the uncommitted work of other agents in files that include it.</li>
+<li>Preflight refusal: <code>aegraph::optimize</code> reruns the body with <code>Options::rules_off</code> (CSE, folds,
+  forwarding, dead sweep: no new cell); dead nodes go through <code>remove_dead_chain</code> (the fast node removal with
+  its dead fanin chain), shared by <code>replace()</code> and the final sweep.</li>
+<li><code>compile.aegraph.rules_disable</code> now reaches every fold site (it reached only the two compile slots), and
+  joins the fold salt when set. The engine A/B fixtures compare every rule on against every rule group off
+  (<code>rules_disable=group:arith+group:div+group:mask+group:mux+group:shift</code>) instead of against classic.</li>
+</ul>
+
+<h3>Found while removing it (open)</h3>
+<ul>
+<li><strong>loop_reassoc vs flatten.</strong> The synthesis loop cleanup folds with the e-graph engine, whose
+  <code>flatten</code> rule already merges an expanded same-color accumulation chain into one n-ary op. So
+  <code>Loop_reassoc::none/guarded</code> (USYN runs <code>guarded</code>) and <code>pass.abc.reassoc=false</code> (the A/B
+  switch) no longer keep chains expanded, and <code>pass/synth/reassoc.cpp</code> finds nothing to absorb on those shapes.
+  True since aegraph became the default (2026-10-22); only tests pinned to classic hid it.
+  <code>DesignPrepare.LoopReassoc*</code> now pins the actual behavior; <code>lhd_synth_loop_reassoc_test</code> turns
+  <code>flatten</code> off to exercise reassoc. Decide: disable flatten in that fold (QoR change for USYN), or retire the
+  mode.</li>
+<li><strong>Folds classic had that the engine lacks</strong> (classic-only <code>cprop_test</code> cases deleted; all
+  were shape assertions, no value mismatch): div/rem by a zero divisor to an all-unknown constant, a Hotmux with
+  constant controls, a Sum cancelling an operand across its two banks through a shared operand, the
+  <code>Sext(x,1)</code> selector bypass on an indexed Mux, the guarded-accumulation rewrite inside a guard scope,
+  bit-sliced Mux-tree vectorization to 64-bit, a conditional pack reaching its fixed point, and a straddling slice of a
+  long write chain gathering its lanes. Candidates for rules.</li>
 </ul>
 </main>
 <footer>LiveHD TODO</footer>
