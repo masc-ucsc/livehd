@@ -21,6 +21,12 @@ Optional independent simulator checks require iverilog, vvp, Verilator and ninja
 bazel test --config=all -c opt --test_env=LHD_EXTERNAL_SIM=1 --test_env=PATH //...
 ```
 
+CI job logs are readable only by repository admins, so the workflow writes a
+build-event file (`--build_event_json_file`) and `scripts/ci_test_report.py`
+turns it into one public annotation per failing test (label plus log tail), a
+job-summary table, and a `failed-test-logs` artifact. Run it locally the same
+way: `scripts/ci_test_report.py bep.json`.
+
 Keep Bazel's CPU/memory scheduling automatic and inspect test runtimes. The
 300-second timeout is a hang guard, not a performance target. See `AGENTS.md`
 for coverage, contract and simulator requirements.

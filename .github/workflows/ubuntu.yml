@@ -71,7 +71,25 @@ jobs:
           else
             selection+=(--base "$REGRESSION_BASE" --head "$GITHUB_SHA")
           fi
-          python3 scripts/regression.py "${selection[@]}" -- -c opt --test_output=errors --test_env=LHD_EXTERNAL_SIM=1 --test_env=PATH
+          python3 scripts/regression.py "${selection[@]}" -- -c opt --test_output=errors --test_env=LHD_EXTERNAL_SIM=1 --test_env=PATH \
+            --build_event_json_file="$RUNNER_TEMP/bep.json"
+
+      # Job logs are readable only by repository admins, so without this step a
+      # red run shows nothing but "exit code 3". It annotates each failing test
+      # (label + log tail, public) and writes a table to the job summary.
+      - name: Report failing tests
+        if: ${{ !cancelled() }}
+        run: python3 scripts/ci_test_report.py "$RUNNER_TEMP/bep.json" --log-dir "$RUNNER_TEMP/failed-test-logs"
+
+      - name: Upload failing test logs
+        if: ${{ failure() }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: failed-test-logs
+          path: ${{ runner.temp }}/failed-test-logs
+          if-no-files-found: ignore
+          retention-days: 14
 
       # A full build is expensive and failures tend to happen late. Keep
       # successfully produced Bazel outputs for the next run either way.
