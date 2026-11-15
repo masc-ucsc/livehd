@@ -15,18 +15,14 @@
 
 #include "dreamplace/native/placement.hpp"
 #include "dreamplace/native/rudy.hpp"
-#include "dreamplace/native/uroute_weights.hpp"
 #include "pass/place/steiner_topology.hpp"
 
 namespace dp = DreamPlace::native;
 
 int main(int argc, char** argv) {
   try {
-    const bool learned = argc >= 7 && std::string(argv[3]) == "uroute" && (argc - 5) % 2 == 0 && (argc - 5) / 2 <= 16;
-    if (argc != 3 && argc != 4 && !learned) {
-      throw std::invalid_argument(
-          "usage: rudy_metrics physical_snapshot.txt output_prefix [rudy|rsmt] OR uroute weights.bin features.bin labels.bin "
-          "[features.bin labels.bin ...] (1..16 supports)");
+    if (argc != 3 && argc != 4) {
+      throw std::invalid_argument("usage: rudy_metrics physical_snapshot.txt output_prefix [rudy|rsmt]");
     }
     std::ifstream   input(argv[1]);
     dp::Design      d;
@@ -91,30 +87,12 @@ int main(int argc, char** argv) {
     }
     d.build_maps();
     d.validate();
-    double context_setup_seconds = 0;
-    size_t support_count         = 0;
-    if (learned) {
-      const auto                     started = std::chrono::steady_clock::now();
-      auto                           weights = std::make_shared<const dp::UrouteWeights>(argv[4]);
-      std::vector<dp::UrouteSupport> supports;
-      for (int i = 5; i < argc; i += 2) {
-        supports.push_back({std::to_string((i - 5) / 2), dp::read_uroute_maps(argv[i]), dp::read_uroute_maps(argv[i + 1])});
-      }
-      support_count         = supports.size();
-      options.uroute        = std::make_shared<const dp::UrouteContext>(std::move(weights), std::move(supports));
-      options.model         = dp::RudyModel::uroute;
-      context_setup_seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
-    }
     std::ofstream out(std::string(argv[2]) + ".json");
     out << std::setprecision(17) << "{\"bins\":" << options.bins_x << ",\"hpwl_dbu\":" << dp::hpwl(d) << ",\"nodes\":" << nodes
         << ",\"nets\":" << nets << ",\"pins\":" << d.pin2node.size()
         << ",\"capacity_h_tracks_per_dbu\":" << options.horizontal_capacity
         << ",\"capacity_v_tracks_per_dbu\":" << options.vertical_capacity;
-    out << ",\"route_model\":\"" << (learned ? "uroute" : options.model == dp::RudyModel::rsmt ? "rsmt" : "rudy") << '"';
-    if (learned) {
-      out << ",\"uroute_support_count\":" << support_count << ",\"uroute_context_setup_seconds\":" << context_setup_seconds
-          << ",\"uroute_network_grid\":[" << options.uroute->bins_x() << ',' << options.uroute->bins_y() << ']';
-    }
+    out << ",\"route_model\":\"" << (options.model == dp::RudyModel::rsmt ? "rsmt" : "rudy") << '"';
     out << ",\"degree_histogram\":{";
     std::map<int, int> histogram;
     for (int n = 0; n < nets; ++n) {

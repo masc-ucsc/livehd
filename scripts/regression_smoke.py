@@ -22,7 +22,7 @@ class RegressionSelection(unittest.TestCase):
             (['graph/cell.cpp'], 'frontend'),
             (['pass/place/place.cpp'], 'backend'),
             (['inou/lefdef/lef.cpp'], 'backend'),
-            (['tools/uroute/pool.py'], 'backend'),
+            (['tools/routetruth/extract.py'], 'backend'),
             (['pass/abc/abc.cpp'], 'all'),
             (['pass/usyn/usyn.cpp'], 'all'),
             (['pass/synth/map.cpp'], 'all'),

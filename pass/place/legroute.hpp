@@ -16,7 +16,7 @@ namespace livehd::placement {
 namespace lr {
 struct Critical_cellbox_handoff;
 }
-// legroute: route-aware legalization (todo/livehd/2l-legroute.html). legroute.plan improves coarse routability
+// legroute: route-aware legalization (todo/livehd/2r-route.html). legroute.plan improves coarse routability
 // while cells remain movable, then selects connected regions and their crossings. Optional legroute.global
 // reserves routed pieces before legroute.local jointly places cell-boxes and routes them with regional SAT.
 // A cell-box occupies one tile: two rows tall and twice the widest flop wide. legroute.final places the cells

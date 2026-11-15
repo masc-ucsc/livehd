@@ -1,12 +1,19 @@
 # SPDX-License-Identifier: BSD-3-Clause
-"""Score native bbox/RSMT RUDY against one routed pool sample's wire labels."""
+"""Score native bbox RUDY and RSMT RUDY against the routed wire labels of one layout.
+
+python -m tools.routetruth.baseline --geometry geometry.json --labels labels/labels.bin \
+  --output scores/ [--bins 64] [--rudy-metrics bazel-bin/tools/rudy_metrics]
+
+geometry.json and labels.bin must come from the same routed DEF. --bins is the
+grid the estimators run on (the placer's route grid); their maps are then
+area-resampled to the label grid before scoring.
+"""
 import argparse
 import json
 from pathlib import Path
 import subprocess
 
-from .features import resample
-from .maps import read
+from .maps import read, resample
 from .score import absolute_channel, metrics, read_rudy_tsv
 
 
@@ -31,43 +38,39 @@ def snapshot(geometry, bins):
     return '\n'.join(lines) + '\n'
 
 
-def baseline(sample, output, binary):
-    sample, output = Path(sample), Path(output)
-    metadata = json.loads((sample / 'sample.json').read_text())
-    if metadata['status'] != 'routed':
-        raise ValueError('baseline reference must be routed')
-    nx, ny = metadata['route_grid']
-    if nx != ny:
-        raise ValueError('rudy_metrics currently requires a square source grid')
-    geometry = json.loads((sample / 'geometry.json').read_text())
+def baseline(geometry, labels, output, binary, bins=64):
+    """geometry: the route-geometry document; labels: the label Maps of the same routed DEF."""
+    output = Path(output)
     output.mkdir(parents=True, exist_ok=True)
     physical = output / 'physical.txt'
-    physical.write_text(snapshot(geometry, nx))
-    reference = read(sample / 'labels.bin')
-    report = {'sample_id': metadata['id'], 'source_geometry': metadata['routed_def_sha256'],
+    physical.write_text(snapshot(geometry, bins))
+    report = {'top': geometry.get('top'), 'route_grid': [bins, bins], 'label_grid': [labels.bins_x, labels.bins_y],
               'reference': 'max of directional M2-M3, M4-M5, M6+ nominal-track utilization; M1 access excluded',
               'baseline_capacity': 'native preferred-direction aggregate over all LEF routing layers, including M1',
-              'net_scope': 'same enabled data nets as features and routed wires (clock/reset excluded)', 'models': {}}
+              'net_scope': 'same enabled data nets as the routed wire labels (clock/reset excluded)', 'models': {}}
     for model in ('rudy', 'rsmt'):
         prefix = output / model
         subprocess.run([str(Path(binary).resolve()), str(physical.resolve()), str(prefix.resolve()), model], check=True, timeout=120)
         variants = {}
         for mode in ('base', 'enhanced'):
-            _, _, values = read_rudy_tsv(output / f'{model}_{mode}.tsv', (nx, ny))
-            values = resample(values, nx, ny, reference.bins_x, reference.bins_y)
-            variants[mode] = metrics(absolute_channel(reference, 0), values, reference.bins_x, reference.bins_y)
+            _, _, values = read_rudy_tsv(output / f'{model}_{mode}.tsv', (bins, bins))
+            values = resample(values, bins, bins, labels.bins_x, labels.bins_y)
+            variants[mode] = metrics(absolute_channel(labels, 0), values, labels.bins_x, labels.bins_y)
         report['models'][model] = variants
     (output / 'baseline.json').write_text(json.dumps(report, indent=2, allow_nan=False) + '\n')
     return report
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--sample', type=Path, required=True)
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument('--geometry', type=Path, required=True)
+    parser.add_argument('--labels', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--bins', type=int, default=64, help='estimator grid per axis (rudy_metrics uses a square grid)')
     parser.add_argument('--rudy-metrics', type=Path, default=Path('bazel-bin/tools/rudy_metrics'))
     args = parser.parse_args()
-    print(json.dumps(baseline(args.sample, args.output, args.rudy_metrics), indent=2, allow_nan=False))
+    report = baseline(json.loads(args.geometry.read_text()), read(args.labels), args.output, args.rudy_metrics, args.bins)
+    print(json.dumps(report, indent=2, allow_nan=False))
 
 
 if __name__ == '__main__':

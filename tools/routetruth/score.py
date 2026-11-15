@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 """Router-reference tile scores; constants have explicitly undefined correlation.
 
-python -m tools.uroute.score --reference labels.bin --prediction map.bin
+python -m tools.routetruth.score --reference labels.bin --prediction map.bin
 RUDY TSV exports from tools/rudy_metrics are accepted with --prediction-tsv.
 """
 import argparse
@@ -10,12 +10,7 @@ import json
 import math
 from pathlib import Path
 
-from .features import grid, resample
-from .maps import read
-
-# Every tile score metrics() reports; correlations may be undefined (None).
-METRICS = ('pearson', 'spearman', 'ssim', 'nrms', 'rmse', 'hotspot_top5_overlap')
-
+from .maps import grid, read, resample
 
 def read_rudy_tsv(path, shape=None):
     """(bins_x, bins_y, x-major max(horizontal, vertical)) from a rudy_metrics TSV.
@@ -45,12 +40,6 @@ def read_rudy_tsv(path, shape=None):
     if len(seen) != nx * ny:
         raise ValueError("incomplete RUDY TSV grid")
     return nx, ny, data
-
-
-def defined_mean(values):
-    """(fsum mean of the defined values or None, defined count, undefined count)."""
-    defined = [v for v in values if v is not None]
-    return (math.fsum(defined) / len(defined) if defined else None), len(defined), len(values) - len(defined)
 
 
 def pearson(a, b):

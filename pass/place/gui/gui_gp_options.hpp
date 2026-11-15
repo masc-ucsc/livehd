@@ -65,11 +65,7 @@ void field(A& a, RoutePolicy& v) {
                                  v.degree,
                                  v.accuracy,
                                  v.probe,
-                                 v.probe_iterations,
-                                 v.probe_model,
-                                 v.uroute_switch_overflow,
-                                 v.uroute_hold,
-                                 v.uroute_ladder);
+                                 v.probe_iterations);
 }
 // Same-build numeric recipe. Keep aggregate decomposition exhaustive so adding
 // a DREAMPlace option cannot silently change a private solver's trajectory.
@@ -117,10 +113,10 @@ void field(A& a, Options& o) {
       target_density, stop_overflow, min_iterations, post_density_factor, convergence_tolerance, post_density_patience,            \
       initial_density_weight, density_weight_seed, hold_overflow, fillers_in_whitespace, max_step, filler_width, filler_max_count, \
       filler_area_fraction, filler_cell_space, filler_macro_fraction, filler_cell_scale, filler_bin_fraction, cohesion_weight,     \
-      order_weight, order_growth, schedule_iterations, route, route_external, route_external_interval, uroute, uroute_identity,    \
-      uroute_skipped, route_probe_observer, route_physical_snapshot, route_initialize, routability, route_capacity_h,              \
-      route_capacity_v, density_upper_bound, add_fillers, legalize, macro_only_legalize, detailed_place, detailed_iterations,      \
-      before_legalize, after_macro_legalize, observer, observer_interval, checkpoint_rollback
+      order_weight, order_growth, schedule_iterations, route, route_external, route_external_interval, route_physical_snapshot,    \
+      route_initialize, routability, route_capacity_h, route_capacity_v, density_upper_bound, add_fillers, legalize,               \
+      macro_only_legalize, detailed_place, detailed_iterations, before_legalize, after_macro_legalize, observer,                   \
+      observer_interval, checkpoint_rollback
   auto& [LIVEHD_GP_INPUTS] = o;
   auto apply               = [&](auto&... inputs) { (gp_wire_detail::input(a, inputs), ...); };
   apply(LIVEHD_GP_INPUTS);

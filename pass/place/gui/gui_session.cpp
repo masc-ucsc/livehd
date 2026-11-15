@@ -2066,7 +2066,7 @@ void Session::service_map(std::unique_lock<std::mutex>& lk, const Map_provider* 
   map_dirty_             = false;
   map_frame_             = frame_id;
   if (all_maps_wanted_ && scene_ && frame_) {
-    for (const std::string tag : {"rudy", "rsmt", "uroute"}) {
+    for (const std::string tag : {"rudy", "rsmt"}) {
       if (tag != kind) {
         measured_maps_[tag] = compute(tag);
       }
@@ -3893,8 +3893,8 @@ std::string Session::parse_command(const std::string& json, Command& c) const {
     c.name = d.HasMember("name") && d["name"].IsString() ? d["name"].GetString() : "";
   } else if (c.cmd == "map") {
     c.name = d.HasMember("kind") && d["kind"].IsString() ? d["kind"].GetString() : "none";
-    if (c.name != "none" && c.name != "rudy" && c.name != "rsmt" && c.name != "uroute" && c.name != "all") {
-      return "map kind must be none, rudy, rsmt, uroute or all";
+    if (c.name != "none" && c.name != "rudy" && c.name != "rsmt" && c.name != "all") {
+      return "map kind must be none, rudy, rsmt or all";
     }
   } else if (c.cmd == "stage") {
     if (!d.HasMember("name") || !d["name"].IsString() || !d.HasMember("on") || !d["on"].IsBool()) {

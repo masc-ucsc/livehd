@@ -335,19 +335,14 @@ TEST_F(Buffer_repair, FinalLegalizationPreservesOptimizerProvenanceAndRefreshesG
   graph->get_output_pin("y").connect_driver(gate("sky130_fd_sc_hd__inv_1", "sink", graph->get_input_pin("a")));
   options.density = .5;
   auto initial    = place(*graph, flat, options);
-  // Exercise the report boundary without loading a learned model: inference
-  // and support selection are tested independently of final legalization.
-  for (bool learned : {false, true}) {
+  // The optimizer's route model is provenance: final legalization keeps the
+  // value the prior report recorded, whichever estimator it names.
+  for (const char* model : {"rsmt", "rudy"}) {
     rapidjson::Document prior;
     prior.Parse(initial.qor.c_str());
     ASSERT_TRUE(prior.IsObject());
     auto& allocator = prior.GetAllocator();
-    prior["route_model"].SetString(learned ? "uroute" : "rsmt", allocator);
-    prior["uroute_skipped"].SetString(learned ? "" : "insufficient-support", allocator);
-    prior["uroute_sample_ids"].SetArray();
-    if (learned) {
-      prior["uroute_sample_ids"].PushBack(rapidjson::Value("earlier-placement", allocator), allocator);
-    }
+    prior["route_model"].SetString(model, allocator);
     prior["incremental"]["enabled"].SetBool(true);
     prior["incremental"]["hit"].SetBool(true);
     prior["incremental"]["reused_blocks"].SetUint(1);
@@ -379,9 +374,7 @@ TEST_F(Buffer_repair, FinalLegalizationPreservesOptimizerProvenanceAndRefreshesG
                             "virtual_filler_size_x_um",
                             "virtual_filler_size_y_um",
                             "virtual_filler_count_limited",
-                            "route_model",
-                            "uroute_skipped",
-                            "uroute_sample_ids"}) {
+                            "route_model"}) {
       EXPECT_EQ(final[key], prior[key]) << key;
       EXPECT_EQ(final["before_final_legalization"][key], prior[key]) << key;
     }

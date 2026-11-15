@@ -1,0 +1,73 @@
+# SPDX-License-Identifier: BSD-3-Clause
+load("//tools:regression.bzl", "py_test")
+load("@rules_cc//cc:defs.bzl", "cc_binary")
+load("@rules_python//python:defs.bzl", "py_library")
+load("//tools:copt_default.bzl", "COPTS")
+
+# Per-net FLUTE lengths of a routed geometry: the detour denominator.
+cc_binary(
+    name = "flute_lengths",
+    srcs = ["flute_lengths.cpp"],
+    copts = COPTS,
+    deps = [
+        "//pass/place:steiner_topology",
+        "@dreamplace//dreamplace/native:placer",
+        "@rapidjson",
+    ],
+)
+
+py_library(
+    name = "routetruth",
+    srcs = [
+        "__init__.py",
+        "baseline.py",
+        "extract.py",
+        "maps.py",
+        "score.py",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+py_test(
+    name = "extract_test",
+    timeout = "short",
+    srcs = ["extract_test.py"],
+    args = ["$(location :flute_lengths)"],
+    data = [":flute_lengths"],
+    legacy_create_init = 0,
+    deps = [":routetruth"],
+)
+
+py_test(
+    name = "maps_test",
+    timeout = "short",
+    srcs = ["maps_test.py"],
+    legacy_create_init = 0,
+    deps = [":routetruth"],
+)
+
+py_test(
+    name = "score_test",
+    timeout = "short",
+    srcs = ["score_test.py"],
+    legacy_create_init = 0,
+    deps = [":routetruth"],
+)
+
+py_test(
+    name = "routetruth_smoke",
+    timeout = "short",
+    srcs = ["routetruth_smoke.py"],
+    args = [
+        "$(location :flute_lengths)",
+        "$(location //tools:placement_metrics)",
+        "$(location //tools:rudy_metrics)",
+    ],
+    data = [
+        ":flute_lengths",
+        "//tools:placement_metrics",
+        "//tools:rudy_metrics",
+    ],
+    legacy_create_init = 0,
+    deps = [":routetruth"],
+)

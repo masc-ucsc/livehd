@@ -165,7 +165,6 @@ studied for ideas, without using their code, are under <a href="#tools-inspirati
 <li><a href="https://github.com/The-OpenROAD-Project/OpenROAD">OpenROAD</a> — FastRoute L/Z pattern routing adapted in <code>pass/place/fast_route_pattern.cpp</code>; OpenDB row cutting and tap-cell rules adapted in <code>pass/place/handoff_rows.cpp</code>.</li>
 <li><a href="https://github.com/wangyi-fudan/wyhash">wyhash</a> and <a href="https://github.com/tommyettinger/waterhash">waterhash/woothash</a> — hashing in <code>core/</code>.</li>
 <li><a href="https://www.1024cores.net/home/lock-free-algorithms/queues/bounded-mpmc-queue">Dmitry Vyukov's bounded queue</a> — basis of <code>core/spsc.hpp</code>.</li>
-<li><a href="https://github.com/shibatch/sleef">SLEEF</a> — bit-exact <code>expf</code> ported for URoute inference.</li>
 <li><a href="https://github.com/louiskenzo/dye">dye</a> — colors for Graphviz output; <a href="https://github.com/WojciechMula/toys">Wojciech Muła's linux-perf-events</a> — perf counters; sfc64 from PractRand — <code>core/lrand.hpp</code>.</li>
 <li><a href="https://github.com/google/skywater-pdk">SkyWater SKY130</a> cells, <a href="https://github.com/The-OpenROAD-Project/OpenROAD-flow-scripts">OpenROAD-flow-scripts</a> platform files and the TAU 2015 timing-contest fixtures — hermetic test data.</li>
 <li><a href="https://www.contributor-covenant.org">Contributor Covenant</a> — the code of conduct.</li>
@@ -181,7 +180,7 @@ studied for ideas, without using their code, are under <a href="#tools-inspirati
 <li><a href="https://lean-lang.org">Lean 4</a> with <a href="https://github.com/leanprover-community/mathlib4">Mathlib</a> and <a href="https://isabelle.in.tum.de">Isabelle/HOL</a> — formal semantics and translation validation.</li>
 <li>clang++ / g++ and Ninja — compile the generated simulators.</li>
 <li><a href="https://github.com/zachjs/sv2v">sv2v</a> and <a href="https://github.com/pulp-platform/bender">Bender</a> — CVA6 preparation; <a href="https://graphviz.org">Graphviz</a> — viewing graphs; <a href="https://ffmpeg.org">ffmpeg</a> — placement replay videos.</li>
-<li><a href="https://pytorch.org">PyTorch</a>, <a href="https://numpy.org">NumPy</a> and <a href="https://matplotlib.org">Matplotlib</a> — URoute training and placement analysis.</li>
+<li><a href="https://numpy.org">NumPy</a> and <a href="https://matplotlib.org">Matplotlib</a> — placement analysis.</li>
 <li><a href="https://www.mkdocs.org">MkDocs</a>, GitHub Actions, <a href="https://docs.renovatebot.com">Renovate</a>, <a href="https://codecov.io">Codecov</a> and <a href="https://prometheus.io">Prometheus</a> — documentation, CI and monitoring.</li>
 </ul>
 
@@ -191,7 +190,7 @@ studied for ideas, without using their code, are under <a href="#tools-inspirati
 <li><a href="https://github.com/masc-ucsc/HighTide">HighTide</a> — physical-design benchmark suite.</li>
 <li><a href="https://github.com/OpenXiangShan/XiangShan">XiangShan</a>, <a href="https://github.com/openhwgroup/cva6">CVA6</a>, <a href="https://github.com/YosysHQ/picorv32">PicoRV32</a>, <a href="https://github.com/lowRISC/ibex">Ibex</a>, <a href="https://github.com/nvdla/hw">NVDLA</a>, <a href="https://github.com/vortexgpgpu/vortex">Vortex</a> and CORE-ET <span class="fixme" title="no URL in the repo; add one">fixme</span> — designs for simulation, synthesis, LEC and formal runs.</li>
 <li><a href="https://github.com/lsils/benchmarks">EPFL combinational suite</a>, ISCAS and OpenCores — logic synthesis evaluation.</li>
-<li><a href="https://github.com/circuitnet/CircuitNet">CircuitNet</a> and TimingPredict — datasets for routability and timing models.</li>
+<li>TimingPredict — dataset for timing models.</li>
 </ul>
 
 <h3 id="tools-past">Used in the past</h3>
@@ -500,7 +499,7 @@ Hover a marker for the details; <code>grep -n "todo-check\|fixme" docs/acknowled
 
 <h4>Steiner trees and net topology</h4>
 <ul class="refs">
-<li>C. Chu, Y.-C. Wong. <em>FLUTE: Fast Lookup Table Based Rectilinear Steiner Minimal Tree Algorithm for VLSI Design.</em> IEEE TCAD 27(1), 2008.<span class="use"><code>pass/place/steiner_topology.cpp</code>, signal routing and RSMT-RUDY.</span></li>
+<li>C. Chu, Y.-C. Wong. <em>FLUTE: Fast Lookup Table Based Rectilinear Steiner Minimal Tree Algorithm for VLSI Design.</em> IEEE TCAD 27(1), 2008.<span class="use"><code>pass/place/steiner_topology.cpp</code>, signal routing, RSMT-RUDY and the detour reference in <code>tools/routetruth</code>.</span></li>
 <li>C.J. Alpert, T.C. Hu, J.H. Huang, A.B. Kahng, D. Karger. <em>Prim-Dijkstra Tradeoffs for Improved Performance-Driven Routing Tree Design.</em> IEEE TCAD 14(7), 1995.<span class="use">The driver-aware RC tree in <code>pass/place/steiner_topology.hpp</code>.</span></li>
 <li>C.J. Alpert, W.-K. Chow, K. Han, A.B. Kahng, Z. Li, D. Liu, S. Venkatesh. <em>Prim-Dijkstra Revisited: Achieving Superior Timing-driven Routing Trees.</em> ISPD 2018.</li>
 <li>H. Zhou, N. Shenoy, W. Nicholls. <em>Efficient Minimum Spanning Tree Construction without Delaunay Triangulation.</em> Information Processing Letters 81(5), 2002.<span class="use">Close idea: the quadrant visibility graph in <code>steiner_topology.cpp</code>.</span></li>
@@ -508,12 +507,9 @@ Hover a marker for the details; <code>grep -n "todo-check\|fixme" docs/acknowled
 
 <h4>Routing and congestion</h4>
 <ul class="refs">
-<li>P. Spindler, F.M. Johannes. <em>Fast and Accurate Routing Demand Estimation for Efficient Routability-driven Placement.</em> DATE 2007.<span class="use">RUDY maps (<code>tools/rudy_metrics.cpp</code>, uroute features).</span></li>
-<li>S. Liu, Q. Sun, P. Liao, Y. Lin, B. Yu. <em>Global Placement with Deep Learning-Enabled Explicit Routability Optimization.</em> DATE 2021. <span class="todo-check" title="PinRUDY origin confirmed from a summary, not the full text">todo-check</span><span class="use">PinRUDY (<code>tools/uroute</code>).</span></li>
+<li>P. Spindler, F.M. Johannes. <em>Fast and Accurate Routing Demand Estimation for Efficient Routability-driven Placement.</em> DATE 2007.<span class="use">RUDY maps (<code>tools/rudy_metrics.cpp</code>).</span></li>
 <li>Z. Xie et al. <em>RouteNet: Routability Prediction for Mixed-size Designs Using Convolutional Neural Network.</em> ICCAD 2018. <a href="https://doi.org/10.1145/3240765.3240843">doi</a></li>
-<li>Z. Lin, Y. Lin, G. Liu, G. Du. <em>URoute: Universal Routability Prediction.</em> IEEE TCAD 45(7), 2026. <a href="https://doi.org/10.1109/TCAD.2025.3636449">doi</a><span class="use">Implemented in <code>tools/uroute</code> and <code>pass/place/uroute.cpp</code>.</span></li>
-<li>Z. Chai, Y. Zhao, W. Liu, Y. Lin, R. Wang, R. Huang. <em>CircuitNet: An Open-Source Dataset for Machine Learning in VLSI CAD Applications.</em> IEEE TCAD 42(12), 2023.<span class="use">Training data for uroute.</span></li>
-<li>Z. Wang, A.C. Bovik, H.R. Sheikh, E.P. Simoncelli. <em>Image Quality Assessment: From Error Visibility to Structural Similarity.</em> IEEE TIP 13(4), 2004.<span class="use">SSIM score in <code>tools/uroute/score.py</code>.</span></li>
+<li>Z. Wang, A.C. Bovik, H.R. Sheikh, E.P. Simoncelli. <em>Image Quality Assessment: From Error Visibility to Structural Similarity.</em> IEEE TIP 13(4), 2004.<span class="use">SSIM score in <code>tools/routetruth/score.py</code>.</span></li>
 <li>M. Pan, C. Chu. <em>FastRoute: A Step to Integrate Global Routing into Placement.</em> ICCAD 2006; Y. Xu, Y. Zhang, C. Chu. <em>FastRoute 4.0.</em> ASP-DAC 2009.<span class="use">L/Z pattern routing adapted in <code>pass/place/fast_route_pattern.cpp</code>.</span></li>
 <li>L. McMurchie, C. Ebeling. <em>PathFinder: A Negotiation-Based Performance-Driven Router for FPGAs.</em> FPGA 1995.<span class="use">Negotiated congestion in legroute and buffering.</span></li>
 <li>C.Y. Lee. <em>An Algorithm for Path Connections and Its Applications.</em> IRE Trans. EC-10(3), 1961.<span class="use">Maze routing (<code>signal_maze.cpp</code>).</span></li>

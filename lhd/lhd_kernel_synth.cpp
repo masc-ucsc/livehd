@@ -116,7 +116,6 @@ std::string physical_descriptor(const Options& opts, const livehd::placement::Op
   rapidjson::Writer<rapidjson::StringBuffer> w(buffer);
   w.StartArray();
   w.Uint64(kPhysicalSrcSalt);
-  w.String(livehd::placement::uroute_cache_identity(place_options).c_str());
   w.String(opts.top.c_str());
   const std::array<std::string_view, 2> metadata_classes{"livehd.placement.hints", "livehd.placement.state"};
   w.String(place_options.metadata ? place_options.metadata->identity(metadata_classes, opts.top).c_str() : "[]");
@@ -629,7 +628,6 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.legroute_plan.route_model    = synth_set(opts, "place.legroute.plan.route_model", "legacy");
   out.legroute_plan.route_interval = integer("place.legroute.plan.route_interval", "50");
   out.legroute_plan.route_net_pops = integer("place.legroute.plan.route_net_pops", "2000");
-  out.legroute_plan.export_coarse  = truthy(synth_set(opts, "place.legroute.plan.export_coarse", "false"));
   if ((out.legroute_plan.route_model != "legacy" && out.legroute_plan.route_model != "coarse") || !out.legroute_plan.route_interval
       || !out.legroute_plan.route_net_pops) {
     throw Lhd_error{"usage", "legroute.plan route_model must be legacy or coarse with positive route budgets", ""};
@@ -1004,18 +1002,6 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.route_model            = synth_set(opts, "place.route.model", "rsmt");
   out.route_degree           = integer("place.route.degree", "40");
   out.route_accuracy         = integer("place.route.accuracy", "3");
-  out.uroute.dir             = synth_set(opts, "place.uroute.dir", "@pretrained");
-  out.uroute.export_features = truthy(synth_set(opts, "place.uroute.export", "true"));
-  out.uroute.shots           = integer("place.uroute.shots", "5");
-  out.uroute.min_shots       = integer("place.uroute.min_shots", "1");
-  out.uroute.fallback        = synth_set(opts, "place.uroute.fallback", "nearest");
-  out.uroute.label_policy    = synth_set(opts, "place.uroute.label_policy", "detailed");
-  out.uroute.drc_level       = number("place.uroute.drc_level", "0");
-  try {
-    livehd::placement::validate_uroute_options(out.uroute);
-  } catch (const std::invalid_argument& e) {
-    throw Lhd_error{"usage", e.what(), "check synth.place.uroute controls"};
-  }
   const auto read_route = [&](livehd::placement::Stage_route& stage, const std::string& name) {
     const auto prefix            = "place." + name + ".route.";
     stage.model                  = synth_set(opts, prefix + "model", "inherit");
@@ -1023,30 +1009,20 @@ livehd::placement::Options placement_options(const Options& opts) {
     stage.policy.target_overflow = number(prefix + "target", "0.000000001");
     stage.policy.hold            = integer(prefix + "hold", "1");
     const auto probe             = synth_set(opts, prefix + "probe", "false");
-    if (probe != "false" && probe != "true" && probe != "0" && probe != "1" && probe != "rsmt" && probe != "uroute") {
-      throw Lhd_error{"usage", "invalid synth." + prefix + "probe", "use false, true, rsmt or uroute"};
+    if (probe != "false" && probe != "true" && probe != "0" && probe != "1" && probe != "rsmt") {
+      throw Lhd_error{"usage", "invalid synth." + prefix + "probe", "use false, true or rsmt"};
     }
-    stage.policy.probe       = probe == "true" || probe == "1" || probe == "rsmt" || probe == "uroute";
-    stage.policy.probe_model = probe == "uroute" ? DreamPlace::native::RouteModel::uroute : DreamPlace::native::RouteModel::rsmt;
-    if (name == "final") {
-      stage.policy.uroute_switch_overflow = number(prefix + "uroute_switch", "0.01");
-      stage.policy.uroute_hold            = integer(prefix + "uroute_hold", "2");
-    }
+    stage.policy.probe            = probe == "true" || probe == "1" || probe == "rsmt";
     stage.policy.probe_iterations = integer(prefix + "probe_iterations", "100");
     const auto model              = stage.model == "inherit" ? out.route_model : stage.model;
-    if ((model != "off" && model != "rudy" && model != "rsmt" && model != "auto" && model != "uroute")
+    if ((model != "off" && model != "rudy" && model != "rsmt" && model != "auto")
         || stage.policy.switch_overflow < stage.policy.target_overflow || stage.policy.target_overflow < 0 || stage.policy.hold < 1
-        || stage.policy.hold > 1000 || stage.policy.probe_iterations < 1 || stage.policy.probe_iterations > 10000
-        || stage.policy.uroute_hold < 1 || stage.policy.uroute_hold > 1000 || stage.policy.uroute_switch_overflow < 0
-        || (name == "final" && model == "auto" && stage.policy.uroute_switch_overflow > stage.policy.switch_overflow)) {
-      throw Lhd_error{"usage",
-                      "invalid synth." + prefix + " controls",
-                      "target must be <= switch; model off/rudy/rsmt/uroute/auto; uroute_switch <= switch"};
+        || stage.policy.hold > 1000 || stage.policy.probe_iterations < 1 || stage.policy.probe_iterations > 10000) {
+      throw Lhd_error{"usage", "invalid synth." + prefix + " controls", "target must be <= switch; model off/rudy/rsmt/auto"};
     }
   };
-  if (out.route_model != "off" && out.route_model != "rudy" && out.route_model != "rsmt" && out.route_model != "auto"
-      && out.route_model != "uroute") {
-    throw Lhd_error{"usage", "invalid synth.place.route.model", "use off, rudy, rsmt, uroute or auto"};
+  if (out.route_model != "off" && out.route_model != "rudy" && out.route_model != "rsmt" && out.route_model != "auto") {
+    throw Lhd_error{"usage", "invalid synth.place.route.model", "use off, rudy, rsmt or auto"};
   }
   read_route(out.fp_route, "fp");
   read_route(out.macro_route, "macro");
@@ -1054,7 +1030,7 @@ livehd::placement::Options placement_options(const Options& opts) {
   bool uses_flute = false;
   for (const auto* stage : {&out.fp_route, &out.macro_route, &out.final_route}) {
     const auto model  = stage->model == "inherit" ? out.route_model : stage->model;
-    uses_flute       |= model == "rsmt" || model == "uroute" || model == "auto" || (model != "off" && stage->policy.probe);
+    uses_flute       |= model == "rsmt" || model == "auto" || (model != "off" && stage->policy.probe);
   }
   if (out.route_degree < 2 || out.route_degree > 1000 || out.route_accuracy < 1 || out.route_accuracy > 10
       || (!uses_flute && std::any_of(opts.sets.begin(), opts.sets.end(), [](const auto& kv) {
@@ -2650,10 +2626,8 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
   std::unique_ptr<Physical_cache> physical_cache;
   // An interactive (or replayed) session must run the placement: no whole-flow physical replay, no placement cache.
   if (user_workdir && opts.incremental && run_place && place_options.full && !gui_session) {
-    // Hash the learned-routing pool once: replay identity and placement share it.
-    place_options.uroute_pool = livehd::placement::load_uroute_pool(place_options);
-    auto        dependencies  = place_options.lefs;
-    std::string libraries     = liberty;
+    auto        dependencies = place_options.lefs;
+    std::string libraries    = liberty;
     std::replace(libraries.begin(), libraries.end(), ',', ' ');
     std::istringstream paths(libraries);
     for (std::string path; paths >> path;) {

@@ -7,9 +7,7 @@ import sys
 import tempfile
 import unittest
 
-from tools.uroute.extract import drc_markers, extract, routed_segments, verify_lengths
-from tools.uroute.ingest import feature_gap
-from tools.uroute.features import Maps
+from tools.routetruth.extract import drc_markers, extract, routed_segments, verify_lengths
 
 BINARY = str(Path(sys.argv.pop(1)).resolve()) if len(sys.argv) > 1 else None
 
@@ -29,7 +27,7 @@ class ExtractTest(unittest.TestCase):
     def test_wire_labels(self):
         text = definition('M2 ( 1 0 1 ) ( * 4 ) NEW M3 ( 0 1 ) ( 4 * ) VIA23 NEW M2 ( 1 0 ) RECT ( -1 -1 1 1 )')
         markers = 'violation type: Short\n srcs: net:n\n bbox = (0.004, 0.004) - (0.004, 0.004) on Layer M3\n'
-        labels, groups, report = extract(geometry(), text, markers, [4], 2, 2, 2, 2)
+        labels, groups, report = extract(geometry(), text, markers, [4], 2, 2)
         self.assertEqual(groups.values[:4], [.5, 0, .5, 0])  # M2/3 horizontal
         self.assertEqual(groups.values[4:8], [.5, .5, 0, 0])
         self.assertEqual(labels.values[:4], [.5, .5, .5, 0])
@@ -37,8 +35,9 @@ class ExtractTest(unittest.TestCase):
         self.assertEqual(labels.values[8:], [2, 2, 2, 0])
         self.assertEqual(report['nets'][0]['wirelength_dbu'], 8)
         self.assertEqual((report['vias'], report['rect_patches']), (1, 1))
-        # Labels are measured directly on the requested network grid.
-        large, _, _ = extract(geometry(), text, markers, [4], 2, 2, 8, 8)
+        self.assertEqual((report['label_version'], report['label_grid']), (1, [2, 2]))
+        # Labels are measured directly on the requested label grid.
+        large, _, _ = extract(geometry(), text, markers, [4], 8, 8)
         self.assertEqual(sum(large.values[64:128]), 1)
 
     def test_union_and_reject(self):
@@ -54,7 +53,7 @@ class ExtractTest(unittest.TestCase):
                 drc_markers(report, 1000)
         self.assertEqual(drc_markers('', 1000), [])
         with self.assertRaisesRegex(ValueError, 'no wires'):
-            extract(geometry(), definition('M2 ( 1 1 ) VIA23'), '', [4], 2, 2, 2, 2)
+            extract(geometry(), definition('M2 ( 1 1 ) VIA23'), '', [4], 2, 2)
 
     def test_shape_length_and_ignored_rules(self):
         text = definition('M3 ( 0 0 0 ) ( 10 0 2 ) NEW M3 ( 10 0 ) RECT ( -3 -1 3 1 )')
@@ -82,13 +81,8 @@ class ExtractTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as scratch:
             source, output = Path(scratch) / 'geometry.json', Path(scratch) / 'flute.json'
             source.write_text(json.dumps(doc))
-            subprocess.run([BINARY, 'trees', str(source), str(output)], check=True, timeout=10)
+            subprocess.run([BINARY, str(source), str(output)], check=True, timeout=10)
             self.assertEqual(json.loads(output.read_text()), [4, 30, None])
-
-    def test_gap(self):
-        before = Maps(4, 1, 1, True, [0, 0, 0, 0], [(0, 1)] * 4)
-        after = Maps(4, 1, 1, True, [1, 0, .5, 0], [(0, 2)] * 4)
-        self.assertEqual([v['normalized_rmse'] for v in feature_gap(before, after)], [1, 0, .5, 0])
 
 
 if __name__ == '__main__':

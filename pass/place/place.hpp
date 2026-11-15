@@ -40,7 +40,6 @@
 #include "rc_cache.hpp"
 #include "satlegalize.hpp"
 #include "terminal_legalize.hpp"
-#include "uroute.hpp"
 #include "warpspace.hpp"
 
 namespace livehd::placement {
@@ -304,7 +303,6 @@ struct Options {
     bool        handoff        = false;
     std::string route_model    = "legacy";  // coarse: actual local H/V pressure replaces whole-tree inflation in recovery
     unsigned    route_interval = 50, route_net_pops = 2000;
-    bool        export_coarse = false;  // provenance-tagged utilization-only learning samples
     unsigned    local_tiles = 0;  // bounded hotspot movement radius; 0 keeps whole-placement movement during a local recovery slice
     unsigned    rounds = 3, iterations = 100, net_pops = 100000;
     unsigned    min_iterations = 0, timing_interval = 0;  // recovery: at least 50 steps; timing provider defaults to 5-step refresh
@@ -484,13 +482,6 @@ struct Options {
   bool                       automatic_bins = false, exact_macro_density = true, adaptive_density = true, routability = true;
   std::string                route_model = "rsmt";
   Stage_route                fp_route, macro_route, final_route;
-  Uroute_options             uroute;
-  // Internal: a pool snapshot preloaded by load_uroute_pool(), reused when its
-  // resolved controls match so one run hashes the manifest/weights once.
-  std::optional<Uroute_pool> uroute_pool;
-  // Internal immutable snapshot supplied to the H2D host adapter.
-  Uroute_selection           uroute_selection;
-  Uroute_identity            uroute_stage_identity;
   int                        route_degree = 40, route_accuracy = 3;
   bool                       routability_charge_compensation = true;
   double                     routability_macro_weight = 1, routability_macro_range = 2;  // direct channel pressure; range in bins
@@ -555,11 +546,6 @@ struct Options {
 inline bool pcrs_active(const Options& o) { return o.pcrs && o.reset_fanout >= 2 && o.reset_pins.empty(); }
 DreamPlace::native::RoutePolicy resolve_route_policy(const Options&, const Stage_route&);
 void                            initialize_route_tables();
-// The learned-routing pool snapshot requested by any stage, or nullptr. Store it
-// in Options::uroute_pool to reuse one snapshot for replay identity and placement.
-std::optional<Uroute_pool>      load_uroute_pool(const Options&);
-// Content identity of requested learned routing inputs for whole-flow replay.
-std::string                     uroute_cache_identity(const Options&);
 struct Macro_gp_timing {
   Timing_feedback                                  timing;
   std::shared_ptr<physical::Parasitics>            parasitics;

@@ -42,6 +42,8 @@ def run(name, settings, error=None):
 
 for name, settings, error in [
     ('bad_model', {'route.model': 'typo'}, 'route.model'),
+    ('bad_stage_model', {'macro.route.model': 'typo'}, 'macro.route'),
+    ('bad_probe', {'fp.route.probe': 'sometimes'}, 'fp.route.probe'),
     ('bad_target', {'final.route.switch': '.01', 'final.route.target': '.02'}, 'final.route'),
     ('bad_finite', {'final.route.switch': 'nan'}, 'final.route.switch'),
     ('unused_flute', {'route.model': 'rudy', 'route.degree': '20'}, 'FLUTE'),

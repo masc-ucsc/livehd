@@ -1,5 +1,5 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
-// legroute.dump_regions: a region as a chip of its own (2l-legroute.html), so an external router can be asked about
+// legroute.dump_regions: a region as a chip of its own (2r-route.html), so an external router can be asked about
 // the region alone: its cells at the tiles legroute gave them, every crossing net cut at the region boundary into a
 // die pin on the track the hop took (a track of the tile row or column when the region has no answer), the power
 // grid and the macros that reach into it. Routing the small DEF answers whether the region's tracks carry its

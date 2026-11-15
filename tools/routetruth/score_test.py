@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: BSD-3-Clause
 import unittest
-from tools.uroute.score import metrics, ranks
+from tools.routetruth.score import metrics, ranks
 
 
 class ScoreTest(unittest.TestCase):

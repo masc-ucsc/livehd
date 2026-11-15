@@ -80,7 +80,7 @@ allowed to move:</p>
 <tbody>
 <tr><td>Density grid</td><td>uniform <code>bins×bins</code> (64 default)</td><td><code>bins</code>, or <code>dynamic_bins</code>/<code>auto_bins</code></td><td>Poisson/FFT density force, virtual fillers, macro channel pressure reach</td><td><code>bins</code>, <code>dynamic_bins</code>, <code>bin_max</code>, <code>auto_bins</code></td></tr>
 <tr><td>Local density field</td><td>uniform 512×512</td><td><code>local_density_bins</code></td><td>local spreading (off by default)</td><td><code>local_density_*</code></td></tr>
-<tr><td>Routing (aux) grid</td><td>uniform, <code>= bins</code> unless <code>dynamic_bins</code></td><td><code>auxiliary_bins</code> (internal)</td><td>RUDY, RSMT, URoute (resampled through a fixed 256×256 model), macro channel pressure, terminal legalizer bins, SAT <code>route_grid</code></td><td>none directly; derived in <code>place.cpp</code></td></tr>
+<tr><td>Routing (aux) grid</td><td>uniform, <code>= bins</code> unless <code>dynamic_bins</code></td><td><code>auxiliary_bins</code> (internal)</td><td>RUDY, RSMT, macro channel pressure, terminal legalizer bins, SAT <code>route_grid</code></td><td>none directly; derived in <code>place.cpp</code></td></tr>
 <tr><td>Warp solve grid</td><td>uniform 16×16, 32-bin filter</td><td><code>*.warpspace.bins</code></td><td>FP/macro density-warp targets, terminal remainder warp</td><td><code>fp.warpspace.*</code>, <code>macro.warpspace.*</code>, <code>legalize.warpspace.*</code></td></tr>
 <tr><td>Busorder mesh</td><td>irregular, macro/IO-aligned, ≤10 000 movable cells per rectangle</td><td><code>busorder.max_cells</code>, <code>busorder.merge_um</code></td><td>busorder, boundarypins, pinalign (builds a throwaway <code>Busorder</code> only to read <code>rectangles()</code>, <code>place.cpp:5279</code>)</td><td><code>busorder.*</code>, <code>boundarypins.*</code>, <code>pinalign</code></td></tr>
 <tr><td>Terminal legalizer bins</td><td>uniform, = routing grid</td><td>inherited</td><td>mandatory final legalization: critical locks, capacity cap, remainder redistribution</td><td><code>legalize.max_density</code> etc.</td></tr>
@@ -105,9 +105,7 @@ first needed them. Each role has one option prefix and one C++ type.</p>
 <tr><td>Capacity cells</td><td><strong>bin</strong></td><td>legalization</td><td>Uniform tiles with usable capacity (macro halos, WELLTAP/SPACER footprints removed), before/after occupancy and a hard density cap. Explicit membership by apportioned area.</td><td><code>synth.place.legalize.bin.*</code></td><td><code>Capacity_bins</code> (new, extracted from <code>Terminal_legalize_bin</code>)</td></tr>
 </tbody></table>
 <p>Consequence: <code>satlegalize.region_size</code> is misnamed under this vocabulary. It
-defines <em>bins</em> (uniform, capacity-checked), not regions. URoute's 256×256 is a model
-constant resampled from and back to the routing grid; it is never a user option and never
-appears in the glossary as a partition.</p>
+defines <em>bins</em> (uniform, capacity-checked), not regions.</p>
 
 <h2>Proposed option names (review against pending patches before applying)</h2>
 <table>
@@ -115,7 +113,7 @@ appears in the glossary as a partition.</p>
 <tbody>
 <tr><td>grid</td><td><code>grid.density</code></td><td>64</td><td><code>bins</code></td><td>Square count per axis.</td></tr>
 <tr><td>grid</td><td><code>grid.density_mode</code></td><td><code>fixed</code></td><td><code>dynamic_bins</code>, <code>auto_bins</code></td><td><code>fixed | dynamic | macro</code>; <code>dynamic</code> keeps <code>grid.density_max</code> (= <code>bin_max</code>, 512).</td></tr>
-<tr><td>grid</td><td><code>grid.route</code></td><td><code>inherit</code></td><td>internal <code>auxiliary_bins</code></td><td><code>inherit</code> = the configured density count even when density mode is dynamic (today's rule). An explicit N makes the routing grid independent of the density grid. This is the <strong>one</strong> grid consumed by RUDY/RSMT/URoute, macro channel pressure, terminal bins and SAT route-grid bins.</td></tr>
+<tr><td>grid</td><td><code>grid.route</code></td><td><code>inherit</code></td><td>internal <code>auxiliary_bins</code></td><td><code>inherit</code> = the configured density count even when density mode is dynamic (today's rule). An explicit N makes the routing grid independent of the density grid. This is the <strong>one</strong> grid consumed by RUDY/RSMT, macro channel pressure, terminal bins and SAT route-grid bins.</td></tr>
 <tr><td>grid</td><td><code>grid.local</code></td><td>512</td><td><code>local_density_bins</code></td><td>Other <code>local_density_*</code> keep their names; only the grid count moves.</td></tr>
 <tr><td>grid</td><td><code>&lt;stage&gt;.warpspace.bins</code></td><td>16</td><td>unchanged</td><td>Already stage-scoped; leave as is.</td></tr>
 <tr><td>region</td><td><code>region.max_cells</code></td><td>10000</td><td><code>busorder.max_cells</code></td><td>Cap per rectangle; split along the longest side until met, then merge neighbors back under the cap.</td></tr>
@@ -229,7 +227,6 @@ pre-legalization with virtual pins) built on <code>Region_mesh</code> + <code>Ce
 <ul>
 <li>Changing any default grid count, cap or budget. Steps 2–4 are no-behavior-change refactors.</li>
 <li>Merging the density grid and the region mesh. They answer different questions (force vs membership).</li>
-<li>Exposing URoute's model resolution.</li>
 </ul>
 
 <h2>Implementation entry points</h2>

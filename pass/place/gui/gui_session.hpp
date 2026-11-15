@@ -143,7 +143,7 @@ struct Grid {
   int                bx = 0, by = 0;
   std::vector<float> v;
   double             peak = 0, overflow = 0;
-  std::string        note;  // why the map is empty (e.g. the URoute model is not loaded)
+  std::string        note;  // a line shown with the map, or why it is empty
   // kind "regions" (the region mesh at the current positions): rectangles (xl, yl, xh, yh, cells) and the estimated
   // places where nets cross their boundaries (x, y, axis: 0 a vertical edge, 1 a horizontal one), DBU
   std::vector<float> rects, crossings;

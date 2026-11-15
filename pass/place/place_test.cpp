@@ -526,11 +526,10 @@ TEST(Placement, MovablePlanningPassesItsExactOverlappingFrameToLocalRouting) {
   hhds::GraphLibrary placed;
   options.legroute_plan.handoff = true;
   EXPECT_THROW(place(*graph, placed, options), std::invalid_argument);
-  options.legroute_plan.handoff       = false;
-  options.legroute_plan.export_coarse = true;
-  const auto result                   = place(*graph, placed, options);
-  const auto measured                 = physical::read_def(options.output_dir + "/legroute_plan0/input.def");
-  const auto local                    = physical::read_def(options.output_dir + "/legroute_handoff/input.def");
+  options.legroute_plan.handoff = false;
+  const auto result             = place(*graph, placed, options);
+  const auto measured           = physical::read_def(options.output_dir + "/legroute_plan0/input.def");
+  const auto local              = physical::read_def(options.output_dir + "/legroute_handoff/input.def");
   EXPECT_EQ(measured.components, local.components);
   EXPECT_EQ(measured.terminals, local.terminals);
   EXPECT_EQ(measured.nets, local.nets);
@@ -552,18 +551,9 @@ TEST(Placement, MovablePlanningPassesItsExactOverlappingFrameToLocalRouting) {
   EXPECT_DOUBLE_EQ(report["legalize_seconds"].GetDouble(), 0);
   EXPECT_FALSE(report["pre_sat"]["requires_replan"].GetBool());
   EXPECT_FALSE(std::filesystem::exists(options.output_dir + "/terminal_legalize.json"));
-  size_t coarse_samples = 0;
-  for (const auto& sample : std::filesystem::directory_iterator(options.output_dir + "/legroute_plan0/uroute_coarse")) {
-    ASSERT_TRUE(sample.is_directory());
-    EXPECT_EQ(sample.path().filename().string().size(), 64u);
-    EXPECT_TRUE(std::filesystem::exists(sample.path() / "directional_labels.bin"));
-    EXPECT_TRUE(std::filesystem::exists(sample.path() / "tile_means.json"));
-    ++coarse_samples;
-  }
-  EXPECT_GT(coarse_samples, 0u);
 
-  // A whole-core density rejection must preserve its report while suppressing
-  // training exports: an unattempted route is not an uncongested observation.
+  // A whole-core density rejection must preserve its report: an unattempted
+  // route is not an uncongested observation.
   auto dense_options = options;
   dense_options.core = dense_options.die = {0, 0, 5.52, 2.72};
   dense_options.placement_session        = std::make_shared<Placement_session>();
@@ -587,7 +577,6 @@ TEST(Placement, MovablePlanningPassesItsExactOverlappingFrameToLocalRouting) {
   EXPECT_GT(dense_report["unchecked_signals"].GetUint64(), 0u);
   EXPECT_EQ(dense_report["unchecked_signals"].GetUint64(), dense_report["signals"].GetUint64());
   EXPECT_TRUE(dense_report["pre_sat"]["max_routing_density"].IsNull());
-  EXPECT_FALSE(std::filesystem::exists(dense_options.output_dir + "/legroute_plan0/uroute_coarse"));
   EXPECT_FALSE(std::filesystem::exists(dense_options.output_dir + "/legroute.json"));
 
   // The same feasible coarse/SAT input must not become a successful placement
@@ -7126,12 +7115,10 @@ TEST(Placement, SegmentedImportedRowsConstrainPlacementSnapshotsAndEco) {
     EXPECT_EQ(snapshot.floorplan.components.size(), 2);
     EXPECT_EQ(snapshot.parasitics->cells.size(), 2);
   };
-  options.uroute.export_features = true;
   options.retain_preroute_design = true;
   options.after_stage            = [&](Placement_stage, const Result& result) {
     EXPECT_EQ(result.floorplan.rows, frame.rows);
     EXPECT_EQ(result.floorplan.blockages, frame.blockages);
-    EXPECT_TRUE(std::filesystem::exists(options.output_dir + "/uroute_export/features.bin"));
     return false;
   };
   for (bool terminal : {false, true}) {
@@ -7146,7 +7133,6 @@ TEST(Placement, SegmentedImportedRowsConstrainPlacementSnapshotsAndEco) {
     ASSERT_NE(placed.preroute_design, nullptr);
     EXPECT_NO_THROW(placed.preroute_design->design.validate());
     EXPECT_EQ(bind_preroute(placed.floorplan, *placed.parasitics, *placed.preroute_design).size(), placed.parasitics->nets.size());
-    EXPECT_TRUE(std::filesystem::exists(options.output_dir + "/uroute_export/features.bin"));
     for (const auto& file : {"out.def", "before_legalization.def", "after_legalization.def"}) {
       auto exported = physical::read_def(options.output_dir + "/" + file);
       EXPECT_EQ(exported.rows, frame.rows);

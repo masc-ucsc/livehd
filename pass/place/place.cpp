@@ -108,7 +108,7 @@ using Node        = hhds::Node_class;
 using Pin         = hhds::Pin_class;
 using Orientation = ph::Orientation;
 using Status      = ph::Status;
-// The routing grid (synth.place.grid.route) consumed by RUDY/RSMT/URoute,
+// The routing grid (synth.place.grid.route) consumed by RUDY/RSMT,
 // native legalization/detailed placement, terminal bins and SAT route-grid
 // bins. The native auxiliary grid: an explicit grid.route, or the configured
 // density count when the dynamic density grid would otherwise move it; 0
@@ -1048,7 +1048,7 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
     }
     if (o.legroute_plan.enabled) {
       const auto& p = o.legroute_plan;
-      h             = hash_text(std::format("legroute-plan:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}",
+      h             = hash_text(std::format("legroute-plan:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}",
                                             p.rounds,
                                             p.iterations,
                                             p.net_pops,
@@ -1060,8 +1060,7 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
                                             p.max_degradation_ps,
                                             p.route_model,
                                             p.route_interval,
-                                            p.route_net_pops,
-                                            p.export_coarse),
+                                            p.route_net_pops),
                                 h);
     }
   }
@@ -1230,27 +1229,15 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
                               o.macro_snap_weight),
                   h);
   }
-  h = hash_text(std::format("uroute:{}:{}:{}:{}:{}:{}:{}",
-                            o.uroute.dir,
-                            o.uroute.export_features,
-                            o.uroute.shots,
-                            o.uroute.min_shots,
-                            o.uroute.fallback,
-                            o.uroute.drc_level,
-                            o.uroute.label_policy),
-                h);
   h = hash_text(std::format("route-model:{}:{}:{}", o.route_model, o.route_degree, o.route_accuracy), h);
   for (const auto* stage : {&o.fp_route, &o.macro_route, &o.final_route}) {
-    h = hash_text(std::format("route-stage:{}:{}:{}:{}:{}:{}:{}:{}:{}",
+    h = hash_text(std::format("route-stage:{}:{}:{}:{}:{}:{}",
                               stage->model,
                               stage->policy.switch_overflow,
                               stage->policy.target_overflow,
                               stage->policy.hold,
                               stage->policy.probe,
-                              stage->policy.probe_iterations,
-                              dp::route_model_name(stage->policy.probe_model),
-                              stage->policy.uroute_switch_overflow,
-                              stage->policy.uroute_hold),
+                              stage->policy.probe_iterations),
                   h);
   }
   if (o.routability && !o.routability_charge_compensation) {
@@ -2657,10 +2644,10 @@ void refresh_floorplan_view(View& v, const View& baseline, Result& state, const 
   }
 }
 // Routing-track correction belongs between macro legalization and row packing.
-// Macro tile snap (todo 2l-legroute L1, ruling Q3): a movable macro's halo frame starts on a corner of the
-// legroute tile grid (2 x the widest flop, two rows) so the tiles around it stay whole; the track alignment that
-// follows moves it by less than a pitch. Fixed macros keep their custom location, and a snap that leaves the
-// rows or overlaps another macro's halo frame is skipped.
+// Macro tile snap (legroute item L1, ruling Q3; the plan is now todo/livehd/2r-route.html): a movable macro's halo
+// frame starts on a corner of the legroute tile grid (2 x the widest flop, two rows) so the tiles around it stay
+// whole; the track alignment that follows moves it by less than a pitch. Fixed macros keep their custom location,
+// and a snap that leaves the rows or overlaps another macro's halo frame is skipped.
 static void snap_macros_to_tiles(const View& v, const ph::Technology& tech, std::vector<ph::Component>& frame) {
   if (v.fp.rows.empty()) {
     return;
@@ -3722,25 +3709,12 @@ void assign_io(View& v, const ph::Technology& tech, const Options& options) {
     }
   }
 }
-Uroute_options resolve_uroute_options(Uroute_options resolved_uroute) {
-  // "@pretrained" stays symbolic: Uroute_pool reads the compiled-in manifest.
-  if (resolved_uroute.dir.empty()) {
-    resolved_uroute.export_features = false;
-  }
-  return resolved_uroute;
-}
 dp::RoutePolicy route_policy(const Options& options, const Stage_route& stage) {
   auto       policy = stage.policy;
   const auto model  = stage.model == "inherit" ? options.route_model : stage.model;
   policy.model      = dp::route_model_from_name(model);
-  // Learned feedback is a final-cell rung. Earlier stages can opt into the
-  // same model through their bounded convergence probe.
-  if (model == "uroute") {
-    policy.model = &stage == &options.final_route ? dp::RouteModel::uroute : dp::RouteModel::rsmt;
-  }
-  policy.uroute_ladder = &stage == &options.final_route;
-  policy.degree        = options.route_degree;
-  policy.accuracy      = options.route_accuracy;
+  policy.degree     = options.route_degree;
+  policy.accuracy   = options.route_accuracy;
   dp::validate_route_policy(policy);
   return policy;
 }
@@ -3775,46 +3749,6 @@ void detail::install_handoff_io(dp::Design& design, std::vector<ph::Terminal>& s
 }
 DreamPlace::native::RoutePolicy resolve_route_policy(const Options& options, const Stage_route& stage) {
   return route_policy(options, stage);
-}
-// True when any stage can evaluate the learned model (rung, ladder or probe).
-static bool uroute_requested_by(const Options& options) {
-  for (const auto* stage : {&options.fp_route, &options.macro_route, &options.final_route}) {
-    if (dp::uroute_requested(route_policy(options, *stage))) {
-      return true;
-    }
-  }
-  return false;
-}
-// The preloaded snapshot when it was built from these resolved controls, else a
-// fresh load of the manifest and weights.
-static Uroute_pool uroute_pool_for(const Options& options) {
-  auto resolved = resolve_uroute_options(options.uroute);
-  if (options.uroute_pool && options.uroute_pool->options() == resolved) {
-    return *options.uroute_pool;  // shares the immutable snapshot
-  }
-  return Uroute_pool(std::move(resolved));
-}
-std::optional<Uroute_pool> load_uroute_pool(const Options& options) {
-  if (!uroute_requested_by(options)) {
-    return std::nullopt;
-  }
-  return uroute_pool_for(options);
-}
-// place_single() consults the pool only for a fresh routability solve.
-static bool uroute_pool_used(const Options& options) {
-  return (options.routability || (options.macro_mode == "h2d" && options.macro_parameters.routability)) && !options.timing_seed
-         && !options.retain_placement;
-}
-std::string uroute_cache_identity(const Options& options) {
-  // Whole-flow replay can bypass place() entirely. Validate and fingerprint
-  // the same pool snapshot before looking up that outer cache too.
-  const auto pool = load_uroute_pool(options);
-  if (!pool) {
-    return {};
-  }
-  // An unchanged manifest can become unusable when a sample disappears or
-  // fails its digest. Replay must retain the current fallback diagnostic.
-  return uroute_digest(pool->cache_identity() + ":" + pool->skipped());
 }
 void       initialize_route_tables() { initialize_flute_tables(); }
 // Placement RC uses driver-aware Steiner trees, with half each wire's
@@ -5081,7 +5015,6 @@ struct Gui_map_env {
   double                 ch = 1, cv = 1;
   std::function<void()> init;
   int                   bins = 32, degree = 40, accuracy = 3;
-  std::shared_ptr<const dp::UrouteContext> uroute;  // loaded only when the run uses the URoute model
 };
 // Only numeric placement inputs and pin labels enter the single-threaded owner.
 template <class Archive>
@@ -5206,18 +5139,12 @@ gui::Grid gui_map(const std::string& kind, const dp::Design& base, const double*
     d.node_x[i] = x[i];
     d.node_y[i] = y[i];
   }
-  if (kind == "uroute" && !env.uroute) {
-    gui::Grid none;
-    none.note = "the URoute model is not loaded (synth.place.route.model=uroute or auto)";
-    return none;
-  }
   dp::RudyOptions ro;
   ro.bins_x = ro.bins_y   = env.bins;
   ro.horizontal_capacity  = env.ch;
   ro.vertical_capacity    = env.cv;
   ro.macro_blockages      = ro.pin_access = true;
-  ro.model                = kind == "uroute" ? dp::RudyModel::uroute : kind == "rsmt" ? dp::RudyModel::rsmt : dp::RudyModel::bbox;
-  ro.uroute               = env.uroute;
+  ro.model                = kind == "rsmt" ? dp::RudyModel::rsmt : dp::RudyModel::bbox;
   ro.degree               = env.degree;
   ro.accuracy             = env.accuracy;
   ro.initialize           = env.init;
@@ -5434,11 +5361,10 @@ bool gui_timing(const View& v, const ph::Technology& tech, const Options& option
   q.rc_s = std::chrono::duration<double>(sta_start - rc_start).count();
   const auto fb = prects_data_timing(provider({checkpoint.graph, checkpoint.parasitics, v.ignored}), v.ignored);
   q.sta_s = std::chrono::duration<double>(std::chrono::steady_clock::now() - sta_start).count();
-  if (q.request_checkpoint && (!env || env->uroute)) {
-    q.checkpoint_error
-        = env ? "the loaded URoute model needs a spawned evaluator" : "this gate has no portable placement map provider";
+  if (q.request_checkpoint && !env) {
+    q.checkpoint_error = "this gate has no portable placement map provider";
   }
-  if (q.request_checkpoint && env && !env->uroute && options.gui_journal && *options.gui_journal && fb.wns && fb.tns) {
+  if (q.request_checkpoint && env && options.gui_journal && *options.gui_journal && fb.wns && fb.tns) {
     auto timer = (*options.gui_journal)->frozen_checkpoint();
     if (!timer.empty()) {
       std::vector<std::string> labels, excluded(v.ignored.pins.begin(), v.ignored.pins.end());
@@ -5867,7 +5793,6 @@ std::shared_ptr<Gui_map_env> gui_map_environment(const View& v, const ph::Techno
   env->cv = control.route_capacity_v;
   env->init = control.route_initialize;
   env->bins = std::clamp(route_grid_bins(control.auxiliary_bins, options.bins), 8, 64);
-  env->uroute = control.uroute;
   env->degree = control.route.degree;
   env->accuracy = control.route.accuracy;
   env->dbu = tech.dbu;
@@ -7488,7 +7413,6 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       || options.macro_timing_interval < 0) {
     throw std::invalid_argument("invalid timing weight/smoothing/update budget");
   }
-  validate_uroute_options(options.uroute);
   for (const auto* stage : {&options.fp_route, &options.macro_route, &options.final_route}) {
     route_policy(options, *stage);
   }
@@ -8113,43 +8037,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       macro_area     += double(c.place.width) * c.place.height;
     }
   }
-  auto                       resolved_uroute  = resolve_uroute_options(options.uroute);
-  const bool                 uroute_requested = uroute_requested_by(options);
-  std::optional<Uroute_pool> uroute_data;
-  Uroute_selection           selected_uroute;
-  if (uroute_requested && uroute_pool_used(options)) {
-    uroute_data = uroute_pool_for(options);
-  }
-  std::string uroute_tech;
-  const auto  uroute_id = [&](const View& view) {
-    std::string macros;
-    for (const auto& cell : view.cells) {
-      if (!tech.macros.at(cell.macro).klass.starts_with("CORE")
-          && ph::placement_mask({cell.name, cell.macro, cell.place}, tech) == ph::Placement_mask::none) {
-        macros += std::format("{}:{}:{}:{};", cell.name, cell.macro, cell.place.width, cell.place.height);
-      }
-    }
-    return Uroute_identity{view.fp.design,
-                           uroute_tech,
-                           uroute_digest(macros),
-                           double(view.fp.die.xh - view.fp.die.xl) / tech.dbu,
-                           double(view.fp.die.yh - view.fp.die.yl) / tech.dbu,
-                           options.utilization,
-                           double(tech.dbu)};
-  };
-  // A skipped pool reports its reason without building features. view()
-  // yields the physical View whose features and identity form the query.
-  const auto select_uroute = [&](const auto& view, int bins) {
-    if (!uroute_data->skipped().empty()) {
-      return uroute_data->select({}, {});
-    }
-    const View& physical = view();
-    return uroute_data->select(dp::uroute_features(physical.design, bins, bins), uroute_id(physical));
-  };
   auto env = environment_key(options, tech);
-  if (uroute_data) {
-    env += ":uroute:" + uroute_data->cache_identity();
-  }
   if (options.cohesion > 0 || v.align_macros) {
     uint64_t membership = hash_util::kFnv1a64_offset;
     for (const auto& [name, group] : v.cohesion_owners) {
@@ -8480,11 +8368,8 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
   }
   align_memory_proxy_pins(tech, v.fp);
   // Pin alignment determines the generated LEF contents. Use those exact
-  // bytes for both inference/export identity and the later routed handoff.
+  // bytes for the later routed handoff.
   const auto proxy_lef = memory_proxy_lef(memories, tech);
-  if (uroute_requested || resolved_uroute.export_features || options.legroute_plan.export_coarse) {
-    uroute_tech = uroute_technology(options.lefs, proxy_lef);
-  }
   std::unordered_map<std::string, ph::Terminal> imported_terms;
   for (auto& t : v.fp.terminals) {
     if (options.preserve_imported_io && !options.own_frame && t.status == Status::PLACED) {
@@ -8944,7 +8829,6 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       make_arrays(v, tech);
     }
     Options resolved          = options;
-    resolved.uroute           = resolved_uroute;
     resolved.macro_parameters = macro_parameters(options, tech);
     std::map<std::string, const mp::Hierarchy::Instance*> origin;
     for (const auto& i : hierarchy->hierarchy.instances) {
@@ -8982,12 +8866,6 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     }
     for (const auto& t : v.fp.terminals) {
       identity += std::format(":{}:{},{}", t.name, t.x, t.y);
-    }
-    resolved.uroute_stage_identity = uroute_id(v);
-    if (uroute_data && options.macro_route.policy.probe && options.macro_route.policy.probe_model == dp::RouteModel::uroute) {
-      resolved.uroute_selection  = select_uroute([&]() -> const View& { return v; }, resolved.macro_parameters.bins);
-      const auto& selected       = resolved.uroute_selection;
-      identity                  += ":uroute-selection:" + selected.cache_identity + ":" + selected.skipped;
     }
     macro_run              = place_macros(v.design, macro_report_info, *hierarchy, resolved, identity);
     macro_solved           = !macro_run->cache_hit;
@@ -9217,18 +9095,6 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     }
   }
   std::sort(v.cells.begin(), v.cells.end(), [](const auto& a, const auto& b) { return a.name < b.name; });
-  if (uroute_data) {
-    // Select from a physical pre-cache snapshot. Both the immutable pool digest
-    // and the actual selected IDs are part of the placement cache identity.
-    selected_uroute = select_uroute(
-        [&] {
-          auto snapshot = v;
-          make_arrays(snapshot, tech);
-          return snapshot;
-        },
-        route_grid_bins(auxiliary_route_bins(options), options.bins));
-    env += ":uroute-selection:" + selected_uroute.cache_identity + ":" + selected_uroute.skipped;
-  }
   // The hash of every block matters only to a placement cache that exists; without one only the number of blocks is read.
   const auto hashes = [&] {
     if (!cache_path.empty()) {
@@ -9358,7 +9224,6 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     return options.metadata;
   };
   dp::Options control;
-  double      feature_capacity_h = 0, feature_capacity_v = 0;
   control.max_iterations  = options.iterations;
   control.centroid_weight = v.centroids ? .25 : 0;
   // Fail early only where the final track check will run; timing seeds and
@@ -9477,7 +9342,6 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
   control.route
       = route_policy(options, options.completed_stage == Placement_stage::macro ? options.macro_route : options.final_route);
   control.route_initialize = initialize_flute_tables;
-  selected_uroute.apply(control);
   if (control.route.model == dp::RouteModel::off) {
     control.routability = control.improved_routability = false;
   }
@@ -9488,31 +9352,17 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
   const bool route_capacity_required
       = options.routability
         && (control.routability || (options.fp_place && route_policy(options, options.fp_route).model != dp::RouteModel::off));
-  if (resolved_uroute.export_features || route_capacity_required) {
-    std::tie(feature_capacity_h, feature_capacity_v) = lef_track_capacity(tech);
-    if (route_capacity_required && !(feature_capacity_h > 0 && feature_capacity_v > 0)) {
+  {
+    const auto [capacity_h, capacity_v] = lef_track_capacity(tech);
+    if (route_capacity_required && !(capacity_h > 0 && capacity_v > 0)) {
       throw std::runtime_error("routability requires horizontal and vertical LEF routing pitches");
     }
-    // Feature export retains missing physical capacity as zero. Inactive
-    // routing and timing observers keep the native defaults when the LEF
-    // cannot supply both directions.
-    if (feature_capacity_h > 0 && feature_capacity_v > 0) {
-      control.route_capacity_h = feature_capacity_h;
-      control.route_capacity_v = feature_capacity_v;
+    // Inactive routing and timing observers keep the native defaults when the
+    // LEF cannot supply both directions.
+    if (capacity_h > 0 && capacity_v > 0) {
+      control.route_capacity_h = capacity_h;
+      control.route_capacity_v = capacity_v;
     }
-  }
-  // Probe snapshots export with the final feature capacities and the current
-  // stage identity.
-  const auto probe_exporter = [&](std::string_view stage) {
-    return uroute_probe_exporter(
-        fs::path(options.output_dir) / "uroute_export" / stage,
-        [&] { return uroute_id(v); },
-        feature_capacity_h,
-        feature_capacity_v);
-  };
-  if (resolved_uroute.export_features && control.route.probe) {
-    control.route_probe_observer
-        = probe_exporter(options.completed_stage == Placement_stage::macro ? "macro_probe" : "final_probe");
   }
   control.legalize       = false;
   control.detailed_place = false;
@@ -9595,14 +9445,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
           s.route_calls,
           s.route_rudy_seconds,
           s.route_rsmt_seconds);
-      line += std::format(
-          ",\"route_uroute_seconds\":{},\"route_uroute_switch_iteration\":{},\"route_switch_uroute_rsmt\":{},\"route_switch_"
-          "uroute\":{},\"route_probe_overflow\":{}",
-          s.route_uroute_seconds,
-          s.route_uroute_switch_iteration,
-          s.route_switch_uroute_rsmt,
-          s.route_switch_uroute,
-          s.route_probe_overflow);
+      line += std::format(",\"route_probe_overflow\":{}", s.route_probe_overflow);
       line += std::format(",\"align_force\":{}", s.align_force);
       if (s.centroid_repulsion_weight > 0) {
         line += std::format(",\"centroid_overlap_pairs\":{},\"centroid_max_overlap\":{},\"centroid_repulsion_weight\":{}",
@@ -10373,10 +10216,6 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       fp_control.macro_cell_density_weight = 0;
       fp_control.macro_density_pull_weight = 0;
       fp_control.route                     = route_policy(options, options.fp_route);
-      fp_control.route_probe_observer      = {};
-      if (resolved_uroute.export_features && fp_control.route.probe) {
-        fp_control.route_probe_observer = probe_exporter("fp_probe");
-      }
       fp_control.routability = fp_control.improved_routability
           = options.routability && fp_control.route.model != dp::RouteModel::off;
       // This experiment acts during macro GP, after the optional FP stage.
@@ -12744,96 +12583,8 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
           }
         }
       }
-      const auto export_coarse_sample = [&](const dp::Design&           snapshot,
-                                            const ph::Floorplan&        physical,
-                                            const Legroute_congestion&  tiles,
-                                            const Legroute_plan_report& measured,
-                                            int                         bins_x,
-                                            int                         bins_y,
-                                            const fs::path&             directory) {
-        if (!options.legroute_plan.export_coarse || !measured.route_attempted) {
-          return;
-        }
-        const auto&    layout = snapshot.layout;
-        const auto     maps   = resample_legroute_congestion(tiles, {layout.xl, layout.yl, layout.xh, layout.yh}, bins_x, bins_y);
-        dp::RudyResult labels;
-        labels.horizontal      = maps.horizontal;
-        labels.vertical        = maps.vertical;
-        labels.pin_utilization = maps.pin_utilization;
-        labels.measured_nets   = int(maps.signals);
-        labels.unroutable_nets = int(maps.unrouted);
-        dp::detail::accumulate_overflow(labels);
-        std::ostringstream pose, topology, capacity;
-        pose << std::setprecision(17);
-        capacity << std::setprecision(17) << tiles.bounds.xl << ' ' << tiles.bounds.yl << ' ' << tiles.bounds.xh << ' '
-                 << tiles.bounds.yh << ' ' << tiles.cols << ' ' << tiles.rows << ' ' << tiles.admission_share << '\n';
-        for (const auto& component : physical.components) {
-          pose << std::quoted(component.name.str()) << ' ' << component.place.x << ' ' << component.place.y << ' '
-               << int(component.place.orientation) << '\n';
-          topology << std::quoted(component.name.str()) << ' ' << std::quoted(component.macro.str()) << '\n';
-        }
-        for (const auto& terminal : physical.terminals) {
-          pose << std::quoted(terminal.name) << ' ' << terminal.x << ' ' << terminal.y << '\n';
-        }
-        for (const auto& net : physical.nets) {
-          topology << std::quoted(net.name.str()) << ' ' << std::quoted(net.use.str());
-          for (const auto& pin : net.connections) {
-            topology << ' ' << std::quoted(pin.instance.str()) << ' ' << std::quoted(pin.pin.str());
-          }
-          topology << '\n';
-        }
-        for (size_t k = 0; k < tiles.limit_h.size(); ++k) {
-          capacity << tiles.limit_h[k] << ' ' << tiles.limit_v[k] << '\n';
-        }
-        Uroute_coarse_provenance provenance;
-        provenance.pose_sha256     = uroute_digest(pose.str());
-        provenance.netlist_sha256  = uroute_digest(topology.str());
-        provenance.capacity_sha256 = uroute_digest(capacity.str());
-        provenance.endpoint_basis  = measured.endpoint_basis;
-        provenance.admission_share = tiles.admission_share;
-        provenance.complete        = measured.unrouted == 0;
-        provenance.unrouted        = measured.unrouted;
-        provenance.search_limited  = measured.search_limited;
-        // A later area/recovery pass can reuse this round directory. Preserve
-        // every distinct observation instead of replacing a previous sample.
-        std::ostringstream observation;
-        observation << std::setprecision(17) << kPlaceSalt << ':' << provenance.pose_sha256 << ':' << provenance.netlist_sha256
-                    << ':' << provenance.capacity_sha256 << ':' << uroute_tech << ':' << bins_x << ':' << bins_y << ':'
-                    << measured.unrouted << ':' << measured.search_limited;
-        for (size_t i = 0; i < snapshot.node_x.size(); ++i) {
-          observation << ':' << snapshot.node_x[i] << ':' << snapshot.node_y[i];
-        }
-        for (size_t k = 0; k < maps.horizontal.size(); ++k) {
-          observation << ':' << maps.horizontal[k] << ':' << maps.vertical[k];
-        }
-        const auto destination = directory / uroute_digest(observation.str());
-        export_uroute_coarse(destination,
-                             snapshot,
-                             uroute_id(v),
-                             bins_x,
-                             bins_y,
-                             feature_capacity_h,
-                             feature_capacity_v,
-                             labels,
-                             provenance);
-        std::ofstream means(destination / "tile_means.json");
-        means << std::setprecision(17);
-        means << "{\"aggregation\":\"area_weighted_incident_edge_max\",\"horizontal\":[";
-        for (size_t k = 0; k < maps.mean_horizontal.size(); ++k) {
-          means << (k ? "," : "") << maps.mean_horizontal[k];
-        }
-        means << "],\"vertical\":[";
-        for (size_t k = 0; k < maps.mean_vertical.size(); ++k) {
-          means << (k ? "," : "") << maps.mean_vertical[k];
-        }
-        means << "]}\n";
-        if (!means) {
-          throw std::runtime_error("cannot write coarse congestion tile means");
-        }
-      };
       Legroute_report      probe;
       Legroute_plan_report plan;
-      Legroute_congestion  congestion;
       try {
         if (planning) {
           plan = legroute_plan(tech,
@@ -12843,8 +12594,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
                                regions,
                                profile,
                                options.legroute_plan.net_pops,
-                               options.legroute_plan.handoff,
-                               options.legroute_plan.export_coarse ? &congestion : nullptr);
+                               options.legroute_plan.handoff);
         } else {
           probe = legroute(tech, frame, final_gp_timing, lopt, regions, profile);
         }
@@ -12864,11 +12614,6 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       }
       if (planning && measured_handoff) {
         measured_handoff->critical = plan.cellbox_handoff;
-      }
-      if (planning && options.legroute_plan.export_coarse) {
-        const int nx = route_grid_bins(control.auxiliary_bins, metrics.bins_x ? metrics.bins_x : options.bins);
-        const int ny = route_grid_bins(control.auxiliary_bins, metrics.bins_y ? metrics.bins_y : options.bins);
-        export_coarse_sample(design, frame, congestion, plan, nx, ny, fs::path(lopt.output_dir) / "uroute_coarse");
       }
       // per cell of an unroutable region: r = its region's box fill / target, at most max_inflate; the most timing-critical
       // cells (top 10% by timing weight, GOALPlace's 10-quantile guard) keep their size
@@ -13431,7 +13176,6 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
             return update;
           };
         }
-        size_t coarse_sample = 0;
         if (coarse_feedback) {
           ctl.routability = ctl.improved_routability = true;
           ctl.route.model                            = dp::RouteModel::external;
@@ -13489,16 +13233,6 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
                                                true);
               sample_seconds  += measured.seconds;
             }
-            if (options.legroute_plan.export_coarse) {
-              export_coarse_sample(snapshot,
-                                   routed_frame,
-                                   tiles,
-                                   measured,
-                                   bins_x,
-                                   bins_y,
-                                   fs::path(lopt.output_dir) / std::format("uroute_coarse_gp_{:04}", coarse_sample));
-            }
-            ++coarse_sample;
             const auto&    layout = snapshot.layout;
             const auto     maps = resample_legroute_congestion(tiles, {layout.xl, layout.yl, layout.xh, layout.yh}, bins_x, bins_y);
             dp::RudyResult route_result;
@@ -15257,14 +14991,6 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       json.Double(s.route_probe_overflow);
       json.Key("route_switch_rsmt");
       json.Double(s.route_switch_rsmt);
-      json.Key("route_switch_uroute_rsmt");
-      json.Double(s.route_switch_uroute_rsmt);
-      json.Key("route_switch_uroute");
-      json.Double(s.route_switch_uroute);
-      json.Key("route_uroute_switch_iteration");
-      json.Int(s.route_uroute_switch_iteration);
-      json.Key("route_uroute_seconds");
-      json.Double(s.route_uroute_seconds);
       json.Key("iteration");
       json.Int(s.iteration);
       json.Key("overflow");
@@ -15838,47 +15564,12 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     }
   }
   fs::create_directories(options.output_dir);
-  const bool export_final_features = resolved_uroute.export_features && !options.timing_seed && !options.retain_placement
-                                     && options.completed_stage == Placement_stage::final;
-  if (metrics.uroute_skipped.empty()) {
-    metrics.uroute_skipped = selected_uroute.skipped;
-  }
-  if (metrics.uroute_sample_ids.empty()) {
-    metrics.uroute_sample_ids = selected_uroute.sample_ids;
-  }
   {
     rapidjson::StringBuffer                    buffer;
     rapidjson::Writer<rapidjson::StringBuffer> json(buffer);
     json.StartObject();
     json.Key("schema_version");
     json.Int(1);
-    json.Key("uroute");
-    json.StartObject();
-    json.Key("dir");
-    json.String(resolved_uroute.dir.c_str());
-    json.Key("export");
-    json.Bool(resolved_uroute.export_features);
-    json.Key("shots");
-    json.Int(resolved_uroute.shots);
-    json.Key("min_shots");
-    json.Int(resolved_uroute.min_shots);
-    json.Key("fallback");
-    json.String(resolved_uroute.fallback.c_str());
-    json.Key("label_policy");
-    json.String(resolved_uroute.label_policy.c_str());
-    json.Key("drc_level");
-    json.Double(resolved_uroute.drc_level);
-    json.Key("cache_identity");
-    json.String(selected_uroute.cache_identity.c_str());
-    json.Key("manifest_sha256");
-    json.String(selected_uroute.manifest_sha256.c_str());
-    json.Key("weights_sha256");
-    json.String(selected_uroute.weights_sha256.c_str());
-    json.Key("uroute_skipped");
-    json.String(metrics.uroute_skipped.c_str());
-    json.Key("sample_ids");
-    write_uroute_sample_ids(json, metrics.uroute_sample_ids);
-    json.EndObject();
     json.Key("global_model");
     json.String(options.route_model.c_str());
     json.Key("degree");
@@ -15915,14 +15606,8 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       json.Bool(policy.probe);
       json.Key("probe_iterations");
       json.Int(policy.probe_iterations);
-      json.Key("probe_model");
-      json.String(dp::route_model_name(policy.probe_model));
-      json.Key("uroute_switch");
-      json.Double(policy.uroute_switch_overflow);
-      json.Key("uroute_hold");
-      json.Int(policy.uroute_hold);
-      json.Key("uroute_ladder");
-      json.Bool(policy.uroute_ladder);
+      json.Key("probe_model");  // the convergence probe always measures RSMT
+      json.String(dp::route_model_name(dp::RouteModel::rsmt));
       json.EndObject();
     }
     json.EndObject();
@@ -15941,24 +15626,10 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     json.Int(metrics.bins_x);
     json.Key("route_model");
     json.String(dp::route_model_name(metrics.route_model));
-    json.Key("uroute_skipped");
-    json.String(metrics.uroute_skipped.c_str());
-    json.Key("uroute_manifest_sha256");
-    json.String(selected_uroute.manifest_sha256.c_str());
-    json.Key("uroute_weights_sha256");
-    json.String(selected_uroute.weights_sha256.c_str());
-    json.Key("uroute_sample_ids");
-    write_uroute_sample_ids(json, metrics.uroute_sample_ids);
     json.Key("route_never_switched");
     json.Bool(control.route.model == dp::RouteModel::automatic && metrics.route_switch_iteration < 0);
     json.Key("route_switch_iteration");
     json.Int(metrics.route_switch_iteration);
-    json.Key("route_uroute_switch_iteration");
-    json.Int(metrics.route_uroute_switch_iteration);
-    json.Key("route_switch_uroute_rsmt");
-    json.Double(metrics.route_switch_uroute_rsmt);
-    json.Key("route_switch_uroute");
-    json.Double(metrics.route_switch_uroute);
     json.Key("route_probe_overflow");
     json.Double(metrics.route_probe_overflow);
     json.Key("route_switch_rudy");
@@ -16135,16 +15806,8 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       json.Int(s.route_bins);
       json.Key("route_switch_iteration");
       json.Int(s.route_switch_iteration);
-      json.Key("route_uroute_switch_iteration");
-      json.Int(s.route_uroute_switch_iteration);
-      json.Key("route_switch_uroute_rsmt");
-      json.Double(s.route_switch_uroute_rsmt);
-      json.Key("route_switch_uroute");
-      json.Double(s.route_switch_uroute);
       json.Key("route_probe_overflow");
       json.Double(s.route_probe_overflow);
-      json.Key("route_uroute_seconds");
-      json.Double(s.route_uroute_seconds);
       json.Key("route_switch_rudy");
       json.Double(s.route_switch_rudy);
       json.Key("route_switch_rsmt");
@@ -16480,13 +16143,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
   }
   const auto def = options.output_dir + "/out.def";
   if (handoff_grid) {
-    // Keep the signal-only frame for feature export. The handoff appends
-    // power terminals, which are not part of the placement feature tensor.
-    if (export_final_features) {
-      std::swap(v.fp, *handoff_grid);
-    } else {
-      v.fp = std::move(*handoff_grid);
-    }
+    v.fp = std::move(*handoff_grid);
     write_power_grid_report(v.fp, *pg_profile, options.output_dir + "/power_grid.json", &handoff_channel_stats);
   } else if (final_handoff) {
     std::error_code error;
@@ -16579,7 +16236,6 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
                               : metrics.iterations >= control.max_iterations                              ? "iteration_limit"
                                                                                                           : "stopped";
     json.AddMember("gp_stop_reason", rapidjson::Value(stop_reason, allocator), allocator);
-    add_uroute_status(json, allocator, metrics.uroute_skipped, metrics.uroute_sample_ids);
     json.AddMember(
         "route_model",
         cache.hit ? rapidjson::Value(rapidjson::kNullType) : rapidjson::Value(dp::route_model_name(metrics.route_model), allocator),
@@ -17173,33 +16829,6 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     }
     result.preroute_design = std::move(snapshot);
   }
-  if (export_final_features) {
-    // Reports, cache entries and retained preroute data have consumed the
-    // solver arrays. Rebuild them in place for export instead of copying the
-    // entire View alongside final timing/RC. Only row preparation changes the
-    // returned floorplan; preserve its original segments and blockages.
-    if (handoff_grid) {
-      std::swap(v.fp, *handoff_grid);
-    }
-    auto rows      = v.fp.rows;
-    auto blockages = v.fp.blockages;
-    prepare_rows(tech, v.fp);
-    make_arrays(v, tech);
-    const int nx = route_grid_bins(control.auxiliary_bins, metrics.bins_x ? metrics.bins_x : options.bins);
-    const int ny = route_grid_bins(control.auxiliary_bins, metrics.bins_y ? metrics.bins_y : options.bins);
-    export_uroute(fs::path(options.output_dir) / "uroute_export",
-                  v.design,
-                  uroute_id(v),
-                  nx,
-                  ny,
-                  feature_capacity_h,
-                  feature_capacity_v);
-    v.fp.rows      = std::move(rows);
-    v.fp.blockages = std::move(blockages);
-    if (handoff_grid) {
-      std::swap(v.fp, *handoff_grid);
-    }
-  }
   result.floorplan        = std::move(v.fp);
   result.fp_resized_cells = fp_resized;
   result.fp_repair_edits  = fp_repairs;
@@ -17416,11 +17045,6 @@ static Result place_requested(hhds::Graph& source, hhds::GraphLibrary& library, 
   }
   macro_options.cache_dir.clear();
   macro_options.output_dir += "/macro";
-  // Both staged passes select from one pool snapshot, reusing a matching host
-  // preload, so the manifest and weights are hashed once.
-  if (uroute_pool_used(options)) {
-    macro_options.uroute_pool = load_uroute_pool(options);
-  }
   const auto  start          = std::chrono::steady_clock::now();
   auto        macro          = place_single(source, macro_library, macro_options);
   const auto  macro_end      = std::chrono::steady_clock::now();
@@ -17460,7 +17084,6 @@ static Result place_requested(hhds::Graph& source, hhds::GraphLibrary& library, 
     cell_options.metadata
         = std::make_shared<const metadata::Bundle>(metadata::Bundle::read(macro_options.output_dir + "/metadata.json"));
   }
-  cell_options.uroute_pool      = macro_options.uroute_pool;
   cell_options.stage_pin_status = std::move(pin_status);
   if (!options.final_independent_timing) {
     cell_options.net_weights = macro.net_weights;

@@ -45,7 +45,7 @@ in todo 3g-partitions), two capacity models.
 | `grid.density` | `64` | density-grid bins per axis |
 | `grid.density_mode` | `fixed` | `fixed`, `dynamic` (movable-area grid up to `grid.density_max`), or `macro` (32..64 from the macro size) |
 | `grid.density_max` | `512` | dynamic-grid cap per axis |
-| `grid.route` | `inherit` | the one routing grid for RUDY/RSMT/URoute, macro channel pressure, native legalization/detailed placement, terminal bins and SAT route-grid bins; `inherit` follows the density grid in use (`grid.density`, the chosen count in macro mode, and the configured `grid.density` in dynamic mode), or an explicit 2..1024 |
+| `grid.route` | `inherit` | the one routing grid for RUDY/RSMT, macro channel pressure, native legalization/detailed placement, terminal bins and SAT route-grid bins; `inherit` follows the density grid in use (`grid.density`, the chosen count in macro mode, and the configured `grid.density` in dynamic mode), or an explicit 2..1024 |
 | `grid.local` | `512` | local spreading grid per axis |
 | `region.max_cells` | `10000` | movable-cell cap per region rectangle |
 | `region.merge_um` | `5` | merge macro-edge/IO-span cut lines closer than this |
@@ -57,8 +57,7 @@ in todo 3g-partitions), two capacity models.
 | `satlegalize.bin.grid` | `none` | `route` uses the routing grid for SAT bins; excludes `bin.size_um` |
 
 Stage-scoped grids keep their names: `<stage>.warpspace.bins` (16) and
-`preroute.bins` (64). URoute resamples the routing grid through its fixed model
-resolution; that is not a partition option. The pre-3g spellings (`bins`,
+`preroute.bins` (64). The pre-3g spellings (`bins`,
 `bin_max`, `local_density_bins`, `busorder*`, `boundarypins*`, `pinalign`,
 `legalize.max_density`, `satlegalize.region_size`, `satlegalize.route_grid`) are
 accepted for one release: lhd rewrites them to the names above before anything
@@ -2109,8 +2108,7 @@ selection tools. Design, rulings and open work: `todo/livehd/2i-interact.html`.
   dragged (`centroid` / `centroid_release` commands). The first drag freezes the other groups at their current
   centroids and pulls the dragged group's members to the target; *release* gives the design its own targets
   back. Moving parent-centroid attraction (`fp.parent_weight > 0`) refuses the drag.
-- **Maps and timing.** The *congestion* selector computes RUDY (bounding-box), RSMT (Steiner) or URoute (only
-  when the run loaded the learned model; otherwise the panel says why it is empty) utilization of the solver's
+- **Maps and timing.** The *congestion* selector computes RUDY (bounding-box) or RSMT (Steiner) utilization of the solver's
   current positions on the flow thread (`map` command, `GET /map`), also while paused. A density layer is drawn
   in the page. WNS/TNS in the panel are the numbers the flow's own STA evaluations and GP checkpoints compute,
   plus a budgeted refresh from the solver's current positions: *Refresh timing* (`timing` command), every
@@ -3402,7 +3400,7 @@ behavior.
 
 `synth.place.legroute=true` enables the experimental alternative to terminal legalization.
 It remains a work in progress and is disabled by default. The implementation and plan are
-in `legroute*.cpp` and `todo/livehd/2l-legroute.html`. legroute.local builds 2x2 cell-boxes
+in `legroute*.cpp` and `todo/livehd/2r-route.html`. legroute.local builds 2x2 cell-boxes
 (two widest-flop widths by two rows), merging connected cells before packing partially
 filled boxes. A per-region SAT model places boxes and constrains routing demand against
 tile track capacity. Optional fixed trees, critical-box placement and IO prerouting reduce
@@ -3480,13 +3478,8 @@ edge peaks, and GP bins retain overlapping tile peaks; area-weighted tile means
 are reported separately. Pin utilization is explicitly zero because the coarse
 model does not certify pin/via access. Native inflation uses the maximum H/V
 pressure as a local area factor; anisotropic inflation is not implemented.
-`plan.export_coarse=true` exports feature/label pairs for every plan observation
-and sampled GP route. Labels contain raw H/V utilization, never missing-route
-penalties or invented DRC. Incomplete routes remain auditable but ineligible for
-training. `place.uroute.label_policy=coarse-only` explicitly selects utilization-only
-coarse support; the default remains detailed labels, and calibrated mixing requires
-compatible held-out calibration evidence. Outer candidate routing/timing rollback
-still decides acceptance; no sample authorizes SAT or final routing by itself.
+Outer candidate routing/timing rollback still decides acceptance; no sample
+authorizes SAT or final routing by itself.
 
 With planning enabled, LiveHD owns one `Placement_session` across final-cell GP,
 timing placement, bus-order/boundary refinement and legroute planning. The local
@@ -3541,7 +3534,7 @@ An endpoint below a matched clean OpenROAD density is a diagnostic failure to me
 the target, even when coarse routing succeeds.
 
 This is in-memory reuse; saved DEF/cache files alone do not contain a full optimizer session. See the
-[legroute plan](../../todo/livehd/2l-legroute.html) for benchmark evidence.
+[route plan](../../todo/livehd/2r-route.html) for benchmark evidence.
 The per-net search budget reports unresolved nets separately and budget exhaustion
 alone creates no inflation pressure. The existing `global_share`, `global_rounds`
 and `global_margin` control the routing estimate. `plan` and the earlier SAT
@@ -5443,35 +5436,20 @@ iteration; the footprint reaches full size at start + growth iterations.
 The setting is diagnostic and requires `vanished_memory` when nondefault.
 It does not move the independent final-placement timing warm-up.
 
-### URoute learned congestion (development)
+### Route model in reports and the routed-truth scorer
 
-`--set synth.place.route.model=uroute` selects the learned estimator in final
-cell GP; `auto` enables the one-way `rudy -> rsmt -> uroute` ladder when usable
-weights and support exist in `synth.place.uroute.dir`. Existing RSMT defaults
-remain. Final `uroute_switch=.01` and `uroute_hold=2` gate the second latch.
-FP/macro stages use `S.route.probe=uroute` for a single convergence probe and
-bounded feedback on failure; `true` remains an RSMT probe. Macro channel forces
-and H2D abstract search use RSMT. Learned measurements expand physical macro
-members before extracting features.
-
-The bundled `@pretrained` manifest is compiled into the binary (it cannot
-reference sample or weight files); it currently records training as pending and
-contains no weights. Empty/incompatible pools report `uroute_skipped` and use
-RSMT. A project directory is read-only to LiveHD; the offline publisher owns
-atomic manifest updates. Final physical features and geometry/grid metadata are
-exported by default to `uroute_export/` under the placement workdir. Disable
-export independently with `synth.place.uroute.export=false`. Weight/manifest
-hashes, selected IDs and switch measurements appear in the resolved options,
-GP history and QoR reports.
-Final legalization preserves the optimizer's routing model, support IDs, skip
-reason and incremental reuse accounting in QoR; its geometry and RC metrics
+The resolved estimator of every stage is written to `route_options.json`. The
+model the final stage ended on, its switch iteration and its probe result are in
+`gp_history.json`; QoR records the model. Final legalization preserves the optimizer's routing
+model and incremental reuse accounting in QoR; its geometry and RC metrics
 describe the final legalized placement. The prior report is also retained as
 `before_final_legalization`.
 
-See [the offline tools and format](../../tools/uroute/README.md) for training,
-data ownership, support selection and validation commands. Routed-DEF
-ingestion and partial LFSR baselines are implemented; full router evaluation and
-pretrained weights are still pending.
+To compare an estimator with what a detailed router did on the same layout, use
+the [routed-truth scorer](../../tools/routetruth/README.md): it extracts
+utilization, DRC and detour labels from a routed DEF and scores RUDY, RSMT or
+any other map against them. The learned third estimator was removed;
+[2r-route](../../todo/livehd/2r-route.html) records why.
 
 ## Timing-closure observation controller
 

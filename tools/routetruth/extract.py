@@ -1,9 +1,12 @@
 # SPDX-License-Identifier: BSD-3-Clause
 """Actual routed-wire labels from OpenROAD's regular-net DEF and TR DRC report.
 
-Geometry is produced by placement_metrics --uroute-geometry from this same DEF.
+Geometry is produced by placement_metrics --route-geometry from this same DEF.
 This parser deliberately rejects unsupported wire syntax rather than estimating
 labels from a global-route map or silently skipping unknown path constructs.
+
+python -m tools.routetruth.extract --geometry geometry.json --def routed.def \
+  --drc drc.rpt --flute-lengths flute.json --output labels/
 """
 import argparse
 from collections import defaultdict
@@ -13,8 +16,10 @@ import math
 from pathlib import Path
 import re
 
-from .features import NETWORK_BINS, grid, resample
-from .maps import raw, write
+from .maps import grid, raw, write
+
+LABEL_VERSION = 1
+LABEL_BINS = 256  # the label grid of the first routed corpus
 
 TOKEN = re.compile(r'\\[^\s]+|"(?:\\.|[^"\\])*"|[()+;]|[^\s()+;]+')
 NUMBER = r'[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?'
@@ -207,8 +212,10 @@ def verify_lengths(report, text, dbu):
             'parsed_total_dbu': total, 'odb_total_dbu': odb_total}
 
 
-def extract(geometry, definition, drc, flute_lengths, nx=64, ny=64, ox=NETWORK_BINS, oy=NETWORK_BINS):
+def extract(geometry, definition, drc, flute_lengths, nx=LABEL_BINS, ny=LABEL_BINS):
     """Wire-length/nominal-track-length utilization and length-weighted detour.
+
+    Labels are measured directly on the nx by ny label grid over the core.
 
     Group channels: M2-M3 H,V; M4-M5 H,V; M6+ H,V (LEF stack positions).
     Aggregate is max over all six channels. M1 local access contributes to
@@ -217,11 +224,6 @@ def extract(geometry, definition, drc, flute_lengths, nx=64, ny=64, ox=NETWORK_B
     directional capacity. A nonzero demand with no capacity is an error.
     """
     grid(nx, ny)
-    grid(ox, oy)
-    route_grid = [nx, ny]
-    # Labels measure wires and marker counts directly on the network grid.
-    # Only input features originate on the placer route grid.
-    nx, ny = ox, oy
     if geometry.get('geometry_version') != 1:
         raise ValueError('unsupported routed geometry version')
     lx, ly, hx, hy = geometry['core']
@@ -319,23 +321,27 @@ def extract(geometry, definition, drc, flute_lengths, nx=64, ny=64, ox=NETWORK_B
             drc_map[i] += 1.
     # DRC counts each marker once. Detour is routed-length weighted per tile.
     detour = [s / w if w else 0. for s, w in zip(detour_sum, detour_weight)]
-    grouped = [resample(c, nx, ny, ox, oy) for c in demand]
-    utilization = [max(c[i] for c in grouped) for i in range(ox * oy)]
-    labels = raw([utilization, resample(drc_map, nx, ny, ox, oy), resample(detour, nx, ny, ox, oy)], ox, oy)
+    utilization = [max(c[i] for c in demand) for i in range(size)]
+    labels = raw([utilization, drc_map, detour], nx, ny)
     counts.pop('net_shape_lengths')
-    return labels, raw(grouped, ox, oy), dict(counts, drc_markers=len(markers), drc_outside_core=outside,
-                                                 nets=census, nominal_group_capacity_per_dbu=capacity,
-                                                 route_grid=route_grid, network_grid=[ox, oy])
+    return labels, raw(demand, nx, ny), dict(counts, drc_markers=len(markers), drc_outside_core=outside,
+                                             nets=census, nominal_group_capacity_per_dbu=capacity,
+                                             label_version=LABEL_VERSION, label_grid=[nx, ny])
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ('geometry', 'def', 'drc', 'flute-lengths', 'output'):
         parser.add_argument('--' + name, required=True, type=Path)
-    parser.add_argument('--bins', type=int, default=64)
+    parser.add_argument('--bins', type=int, default=LABEL_BINS, help='label grid per axis')
+    parser.add_argument('--wirelength-report', type=Path,
+                        help='OpenROAD report_wire_length -detailed_route -file output to check the parsed lengths against')
     args = parser.parse_args()
-    labels, groups, report = extract(json.loads(args.geometry.read_text()), text_file(getattr(args, 'def')),
-                                     text_file(args.drc), json.loads(args.flute_lengths.read_text()), args.bins, args.bins)
+    geometry = json.loads(args.geometry.read_text())
+    labels, groups, report = extract(geometry, text_file(getattr(args, 'def')), text_file(args.drc),
+                                     json.loads(args.flute_lengths.read_text()), args.bins, args.bins)
+    if args.wirelength_report:
+        report['wirelength_verification'] = verify_lengths(report, text_file(args.wirelength_report), geometry['dbu'])
     args.output.mkdir(parents=True, exist_ok=True)
     write(args.output / 'labels.bin', labels)
     write(args.output / 'layer_groups.bin', groups)

@@ -61,7 +61,7 @@ std::string unsupported(const dp::Options& o) {
   if (o.gp_search.enabled || o.magnet.enabled || o.trial_tuning) {
     return "native GP has a nested optimizer";
   }
-  if (o.routability && (o.route.model == dp::RouteModel::external || dp::uroute_requested(o.route))) {
+  if (o.routability && o.route.model == dp::RouteModel::external) {
     return "native GP uses an external routing engine";
   }
   return {};
@@ -440,12 +440,6 @@ std::optional<dp::Result> run_native_gp(const std::string& executable, dp::Desig
   }
   if (recipe.route_external) {
     opaque += " route_external";
-  }
-  if (recipe.uroute) {
-    opaque += " uroute";
-  }
-  if (recipe.route_probe_observer) {
-    opaque += " route_probe_observer";
   }
   if (recipe.route_physical_snapshot) {
     opaque += " route_physical_snapshot";

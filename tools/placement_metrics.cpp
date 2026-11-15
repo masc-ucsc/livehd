@@ -49,7 +49,7 @@ struct Displacement {
 
 int main(int argc, char** argv) {
   try {
-    std::string              definition, reference_def, liberty, controls_path, output, snapshot_path, uroute_path;
+    std::string              definition, reference_def, liberty, controls_path, output, snapshot_path, geometry_path;
     std::vector<std::string> lefs;
     bool                     check_native = false;
     for (int i = 1; i < argc; ++i) {
@@ -73,8 +73,8 @@ int main(int argc, char** argv) {
         output = argv[i];
       } else if (key == "--snapshot") {
         snapshot_path = argv[i];
-      } else if (key == "--uroute-geometry") {
-        uroute_path = argv[i];
+      } else if (key == "--route-geometry") {
+        geometry_path = argv[i];
       } else if (key == "--lef") {
         lefs.emplace_back(argv[i]);
       } else {
@@ -84,7 +84,7 @@ int main(int argc, char** argv) {
     if (definition.empty() || liberty.empty() || controls_path.empty() || output.empty() || lefs.empty()) {
       throw std::invalid_argument(
           "usage: placement_metrics --def DEF --liberty LIB --controls QOR --lef LEF [--lef LEF] --output JSON [--check-native] "
-          "[--reference-def BEFORE_DEF]");
+          "[--reference-def BEFORE_DEF] [--snapshot TXT] [--route-geometry JSON]");
     }
     std::ifstream       input(controls_path);
     const std::string   text{std::istreambuf_iterator<char>(input), {}};
@@ -222,7 +222,7 @@ int main(int argc, char** argv) {
           y                = cell.place.y + point.second * fp.dbu;
           node             = &cell - fp.components.data();
         }
-        if (!snapshot_path.empty() || !uroute_path.empty()) {
+        if (!snapshot_path.empty() || !geometry_path.empty()) {
           pins.push_back({node, x, y});
         }
         xl = std::min(xl, x);
@@ -231,7 +231,7 @@ int main(int argc, char** argv) {
         yh = std::max(yh, y);
       }
       const bool clock = policy.ignored[i] && !reset;
-      if (!uroute_path.empty()) {
+      if (!geometry_path.empty()) {
         physical_nets.push_back(pins);
       }
       if (clock) {
@@ -258,7 +258,7 @@ int main(int argc, char** argv) {
     if (check_native && std::abs(data_hpwl - metadata["hpwl_um"].GetDouble()) > 1e-3) {
       throw std::runtime_error("reconstructed data HPWL differs from native placement");
     }
-    if (!snapshot_path.empty() || !uroute_path.empty()) {
+    if (!snapshot_path.empty() || !geometry_path.empty()) {
       if (fp.rows.empty()) {
         throw std::invalid_argument("routing snapshot needs core rows");
       }
@@ -281,8 +281,8 @@ int main(int argc, char** argv) {
       if (!(capacity_h > 0 && capacity_v > 0)) {
         throw std::invalid_argument("routing snapshot needs horizontal and vertical pitches");
       }
-      if (!uroute_path.empty()) {
-        std::ofstream                                geometry(uroute_path);
+      if (!geometry_path.empty()) {
+        std::ofstream                                geometry(geometry_path);
         rapidjson::OStreamWrapper                    stream(geometry);
         rapidjson::Writer<rapidjson::OStreamWrapper> json(stream);
         const auto                                   number = [&](const char* key, double value) {
@@ -448,7 +448,7 @@ int main(int argc, char** argv) {
         json.EndObject();
         geometry << '\n';
         if (!geometry) {
-          throw std::runtime_error("cannot write URoute physical geometry");
+          throw std::runtime_error("cannot write routed physical geometry");
         }
       }
       if (!snapshot_path.empty()) {

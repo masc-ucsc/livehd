@@ -495,7 +495,6 @@ int main(int argc, char** argv) {
     auto& plan = options.legroute_plan;
     boolean_option("legroute_plan", plan.enabled);
     boolean_option("legroute_plan_handoff", plan.handoff);
-    boolean_option("legroute_plan_export_coarse", plan.export_coarse);
     string_option("legroute_plan_route_model", plan.route_model);
     unsigned_option("legroute_plan_route_interval", plan.route_interval);
     unsigned_option("legroute_plan_route_net_pops", plan.route_net_pops);
@@ -638,7 +637,6 @@ int main(int argc, char** argv) {
       emit_uint("final_iterations", unsigned(options.final_iterations));
       emit_bool("legroute_plan", plan.enabled);
       emit_bool("legroute_plan_handoff", plan.handoff);
-      emit_bool("legroute_plan_export_coarse", plan.export_coarse);
       emit_string("legroute_plan_route_model", plan.route_model);
       emit_uint("legroute_plan_route_interval", plan.route_interval);
       emit_uint("legroute_plan_route_net_pops", plan.route_net_pops);

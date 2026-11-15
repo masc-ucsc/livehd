@@ -2520,9 +2520,7 @@ Repair_result finalize_placement(const Result& initial, const Options& requested
                             "virtual_filler_size_x_um",
                             "virtual_filler_size_y_um",
                             "virtual_filler_count_limited",
-                            "route_model",
-                            "uroute_skipped",
-                            "uroute_sample_ids"}) {
+                            "route_model"}) {
       if (prior.HasMember(key)) {
         final.RemoveMember(key);
         final.AddMember(rapidjson::Value(key, final.GetAllocator()),

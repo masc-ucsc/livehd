@@ -342,7 +342,7 @@ wall time.</p>
   <li><strong>Page.</strong> Pan and zoom; macros as outlined boxes with names when
   large enough; cells as points colored by synthesis color, by region or by slack;
   pins marked; selection highlighted. Layers: centroids, regions, worst path, density,
-  RUDY, RSMT congestion, URoute congestion, displacement since the last frame (how the
+  RUDY, RSMT congestion, displacement since the last frame (how the
   other cells moved).</li>
   <li><strong>Screenshot button.</strong> Saves the canvas as shown.</li>
   <li><strong>Rasterizer.</strong> Same layers, simpler look. Feeds
@@ -362,7 +362,7 @@ wall time.</p>
   <tr><td>G3</td><td>done</td><td>Permanent holds for cells and macros; pins re-sent by name to every <code>dp::place</code> call and re-applied at each pass start. Not done: holds becoming FIXED status between passes.</td></tr>
   <tr><td>G4</td><td>done</td><td>Shift+click, box select, align/distribute/matrix, unpin; exercised in headless Chrome over the DevTools protocol.</td></tr>
   <tr><td>G5</td><td>done</td><td>Centroids drawn from the live frame and draggable; DREAMPlace <code>centroid_targets</code>/<code>release_centroids</code> in the interact update (first drag freezes the other groups, targets restored when the loop exits); traced and replayed. <code>lhd_gui_centroid_smoke</code>.</td></tr>
-  <tr><td>G6</td><td>done</td><td>RUDY, RSMT and URoute maps computed on the flow thread on request (also while paused; URoute only with the model loaded, otherwise the panel says why: <code>tools/uroute:gui_smoke</code> covers both with a synthetic model); client-side density layer; WNS/TNS from the flow's own STA evaluations/checkpoints plus the budgeted refresh (<code>timing</code> command, every released edit, automatic while running under <code>synth.place.gui.timing_budget</code> % of wall time). The refresh is a ranking evaluation read-only on the solver (detailed evaluations are a counted shared allowance and are not spent): worst pin slack as an estimate (<code>~WNS</code>), no TNS. A refreshed run's STA result equals its batch replay (<code>lhd_gui_smoke</code>).</td></tr>
+  <tr><td>G6</td><td>done</td><td>RUDY and RSMT maps computed on the flow thread on request (also while paused); client-side density layer; WNS/TNS from the flow's own STA evaluations/checkpoints plus the budgeted refresh (<code>timing</code> command, every released edit, automatic while running under <code>synth.place.gui.timing_budget</code> % of wall time). The refresh is a ranking evaluation read-only on the solver (detailed evaluations are a counted shared allowance and are not spent): worst pin slack as an estimate (<code>~WNS</code>), no TNS. A refreshed run's STA result equals its batch replay (<code>lhd_gui_smoke</code>).</td></tr>
   <tr><td>G7</td><td>done</td><td>Post-legalization edit mode (<code>edit</code> switch): moves accumulate, <em>Apply edits</em> runs <code>local_place</code> with the region rectangle as first window and the moved objects held (no detailed placement), whole core when a move crosses a region edge; edits are recorded and re-applied by later final passes; failures revert and report. <code>lhd_gui_smoke</code> covers it, including a byte-identical replay.</td></tr>
   <tr><td>G8</td><td>done</td><td>Trace and batch replay (moves, unpins, centroid moves, the <code>extend</code> decision, edit-mode moves).</td></tr>
   <tr><td>G9</td><td>done</td><td>Server-side rasterizer, <code>screenshot</code> command, <code>/screenshot.png</code>, replay video frames and mp4.</td></tr>
@@ -481,7 +481,7 @@ through <code>--set</code> by path or by trace content is settled in G8.</p>
   align/distribute/matrix in the page, one multi-node <code>move</code>.</li>
   <li id="G5"><strong>G5 — Centroids.</strong> Overlay, FP candidate targets,
   post-snap <code>centroid_targets</code>, pin and release.</li>
-  <li id="G6"><strong>G6 — Maps and timing.</strong> Density, RUDY, RSMT, URoute
+  <li id="G6"><strong>G6 — Maps and timing.</strong> Density, RUDY, RSMT
   layers on request; budgeted read-only timing refresh; worst-path overlay from
   <code>Feedback::path</code> and <code>Result::pin_locations</code>; cell color by
   slack. Decide here how a macro is unpinned during the final pass (it is FIXED in

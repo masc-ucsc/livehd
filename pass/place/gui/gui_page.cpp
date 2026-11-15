@@ -73,7 +73,7 @@ input[type=number]{width:44px;font:inherit;color:var(--fg);background:transparen
 <div class="row"><span>Quality</span><span id="quality">Not configured</span></div>
 <details id="scoreSettings"><summary>Configure quality score</summary>
 <fieldset id="scoreFields"><legend>Score components</legend>
-<label>Routing estimator <select id="scoreEstimator"><option value="rudy">RUDY</option><option value="rsmt">RSMT</option><option value="uroute">URoute</option></select></label>
+<label>Routing estimator <select id="scoreEstimator"><option value="rudy">RUDY</option><option value="rsmt">RSMT</option></select></label>
 <table><thead><tr><th>Loss</th><th>Weight</th><th>Half-score loss</th></tr></thead><tbody id="scoreTerms"></tbody></table>
 <button id="scoreApply">Apply score</button> <button id="scoreDisable">Disable score</button>
 </fieldset><output id="scoreStatus" aria-live="polite"></output></details>
@@ -100,7 +100,7 @@ input[type=number]{width:44px;font:inherit;color:var(--fg);background:transparen
 <output id="xdiff" class="mut"></output>
 <strong id="xgeometry" style="color:var(--bad)" hidden></strong>
 <div id="xtimingdiff" hidden></div>
-<div id="xplot" hidden><label>Map difference <select id="xlayer"><option value="rudy">RUDY</option><option value="rsmt">RSMT</option><option value="uroute">URoute</option><option value="density">Cell density</option></select></label>
+<div id="xplot" hidden><label>Map difference <select id="xlayer"><option value="rudy">RUDY</option><option value="rsmt">RSMT</option><option value="density">Cell density</option></select></label>
 <canvas id="xmap" width="320" height="160" aria-label="Candidate minus reference utilization with macro displacements" style="width:100%;height:auto"></canvas><output id="xlegend" class="mut"></output></div>
 <button id="xbegin">Begin exploration</button> <button id="xclose" hidden>Discard</button>
 <div class="row"><label>Export <select id="exportKind"><option value="macros">Design metadata + exact macro coordinates</option><option value="relationships">Relative moves</option><option value="flags">Changed flags</option><option value="intent">Placement intent</option></select></label>
@@ -134,7 +134,7 @@ input[type=number]{width:44px;font:inherit;color:var(--fg);background:transparen
 <label><input type="checkbox" id="l_reg">regions <span class="mut" style="font-size:11px">(cuts and boundary pins)</span></label><div id="reg_note" class="mut" style="font-size:11px;margin-left:20px"></div>
 <label><input type="checkbox" id="l_cen" checked>centroids <button id="cen_rel" style="padding:0 6px;font-size:11px">release</button></label>
 <label><input type="checkbox" id="l_dens">density</label>
-<label>congestion <select id="l_map"><option value="none">off</option><option value="rudy">RUDY</option><option value="rsmt">RSMT</option><option value="uroute">URoute</option></select> <span id="s_map" class="mut"></span></label>
+<label>congestion <select id="l_map"><option value="none">off</option><option value="rudy">RUDY</option><option value="rsmt">RSMT</option></select> <span id="s_map" class="mut"></span></label>
 <label><input type="checkbox" id="l_disp">displacement</label>
 <h4>Highlights</h4><div id="hls" class="mut" style="font-size:12px">none (an assistant can paint cells here)</div>
 <h4>Selection (<span id="s_sel">0</span>)</h4>

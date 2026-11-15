@@ -500,7 +500,7 @@ with temp as long_temp, log.open('w') as output:
         validity=result['result']['summary']['validity']
         assert validity['wns_ps']==validity['tns_ps']=='meaningful' and validity['score']=='unavailable',validity
         grids={g['kind']:g for g in call('maps',target=job['id'])['maps']}
-        assert set(grids)=={'density','rudy','rsmt','uroute'} and grids['density']['available'],grids
+        assert set(grids)=={'density','rudy','rsmt'} and grids['density']['available'],grids
         for kind in ('density','rudy','rsmt'):
             data=urllib.request.urlopen(base+'/map?kind='+kind+'&x='+job['id']+'&t='+token).read()
             assert data.startswith(b'LHM1') and len(data)>24,(kind,len(data))

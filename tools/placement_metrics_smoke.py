@@ -75,7 +75,7 @@ def main():
         command = [binary, "--lef", str(root / "tech.lef"), "--def", str(root / "placed.def"),
                    "--liberty", str(root / "model.lib"), "--controls", str(root / "controls.json"),
                    "--output", str(root / "metrics.json"), "--check-native",
-                   "--snapshot", str(root / "snapshot.txt"), "--uroute-geometry", str(root / "geometry.json")]
+                   "--snapshot", str(root / "snapshot.txt"), "--route-geometry", str(root / "geometry.json")]
         subprocess.run(command, check=True)
         result = json.loads((root / "metrics.json").read_text())
         for name, expected in [("all_hpwl_um", 150), ("clock_excluded_hpwl_um", 119),

@@ -185,7 +185,7 @@ cc_binary(
     name = "placement_metrics",
     srcs = ["placement_metrics.cpp"],
     copts = COPTS,
-    visibility = ["//tools/uroute:__pkg__"],
+    visibility = ["//tools/routetruth:__pkg__"],
     deps = ["//pass/place:prects_networks", "//pass/place:track_capacity", "//inou/lefdef:inou_lefdef", "@rapidjson"],
 )
 

@@ -490,8 +490,6 @@ filegroup(
         "placement_technology.hpp",
         "growth_budget.cpp",
         "growth_budget.hpp",
-        "uroute.cpp",
-        "uroute.hpp",
         "rc_cache.cpp",
         "rc_cache.hpp",
         "clock_constraints.cpp",
@@ -870,7 +868,6 @@ cc_library(
     deps = [
         ":gui",
         ":macro_dead_space",
-        ":uroute",
         ":region_mesh",
         ":custom_cells",
         ":multirow",
@@ -1151,7 +1148,7 @@ cc_library(
     copts = COPTS,
     deps = [":cell_criticality", ":prects_networks", ":sat_solver", ":signal_router", "//core", "//inou/lefdef:inou_lefdef"],
 )
-# legroute: route-aware legalization with 2x2 cell-boxes on a tile grid (todo/livehd/2l-legroute.html)
+# legroute: route-aware legalization with 2x2 cell-boxes on a tile grid (todo/livehd/2r-route.html)
 cc_library(
     name = "legroute_track_repair",
     srcs = ["legroute_track_repair.cpp"],
@@ -1451,26 +1448,6 @@ cc_test(
     copts = COPTS,
     deps = [":signal_router", "@googletest//:gtest_main"],
 )
-
-# The bundled @pretrained manifest as a C++ raw string literal, so binaries do
-# not depend on locating runfiles.
-genrule(
-    name = "uroute_pretrained_manifest",
-    srcs = ["uroute/pretrained/manifest.json"],
-    outs = ["uroute_pretrained_manifest.inc"],
-    cmd = "{ printf 'R\"lhd_manifest('; cat $<; printf ')lhd_manifest\"\\n'; } > $@",
-)
-
-cc_library(
-    name = "uroute",
-    srcs = ["uroute.cpp"],
-    hdrs = ["uroute.hpp"],
-    textual_hdrs = [":uroute_pretrained_manifest"],
-    copts = COPTS,
-    visibility = ["//visibility:public"],
-    deps = ["@dreamplace//dreamplace/native:placer", "@rapidjson", "@llvm-project//llvm:Support"],
-)
-
 
 cc_test(
     name = "placement_technology_test",

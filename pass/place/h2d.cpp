@@ -213,18 +213,13 @@ Macro_run place_macros(dp::Design& d, const std::vector<mp::NodeInfo>& info, con
           }
         }
       }
-      out.cache_hit                       = true;
-      out.result.topology                 = std::move(topology);
-      out.result.resolved                 = p;
-      out.result.legal                    = true;
-      out.result.placement.route_model    = active;
-      out.result.placement.uroute_skipped    = o.uroute_selection.skipped;
-      out.result.placement.uroute_sample_ids = o.uroute_selection.sample_ids;
+      out.cache_hit                    = true;
+      out.result.topology              = std::move(topology);
+      out.result.resolved              = p;
+      out.result.legal                 = true;
+      out.result.placement.route_model = active;
       if (json.HasMember("route_probe_overflow") && json["route_probe_overflow"].IsNumber()) {
         out.result.placement.route_probe_overflow = json["route_probe_overflow"].GetDouble();
-      }
-      if (json.HasMember("route_uroute_switch_iteration") && json["route_uroute_switch_iteration"].IsInt()) {
-        out.result.placement.route_uroute_switch_iteration = json["route_uroute_switch_iteration"].GetInt();
       }
       d = std::move(candidate);
       return out;
@@ -240,14 +235,6 @@ Macro_run place_macros(dp::Design& d, const std::vector<mp::NodeInfo>& info, con
   dp::Options cells;
   cells.route            = resolve_route_policy(o, o.macro_route);
   cells.route_initialize = initialize_route_tables;
-  o.uroute_selection.apply(cells);
-  if (o.uroute.export_features && cells.route.probe && !o.uroute_stage_identity.top.empty()) {
-    cells.route_probe_observer = uroute_probe_exporter(
-        fs::path(o.output_dir) / "uroute_export/macro_probe",
-        [identity = o.uroute_stage_identity] { return identity; },
-        p.route_cap_h,
-        p.route_cap_v);
-  }
   cells.max_iterations = o.iterations;
   cells.bins_x = cells.bins_y = o.bins;
   cells.num_threads           = o.threads;
@@ -301,9 +288,7 @@ void write_macro_report(const Macro_run& run, const dp::Design& d, const std::ve
   json.AddMember("route_score_model",
                  rapidjson::Value(route_options.model == dp::RudyModel::rsmt ? "rsmt" : "rudy", allocator),
                  allocator);
-  add_uroute_status(json, allocator, result.placement.uroute_skipped, result.placement.uroute_sample_ids);
   json.AddMember("route_probe_overflow", result.placement.route_probe_overflow, allocator);
-  json.AddMember("route_uroute_switch_iteration", result.placement.route_uroute_switch_iteration, allocator);
   json["units"].AddMember("dbu_per_um", dbu_per_um, allocator);
   rapidjson::StringBuffer                    buffer;
   rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);

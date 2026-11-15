@@ -40,14 +40,10 @@ and the first debug-suite fixes are merged and published in LiveHD
 advanced the shared checkout to <code>8e017a011da96f09fda4111d9aad4af2db6fd871</code>
 while validation was running. The full debug run was interrupted at the user's
 pause request, after reporting 3,009 passes
-and one failure, <code>//tools/uroute:inference_test</code>; this is not a
-completed suite. An uncommitted numerical fix is preserved in the owning
-<code>../DREAMPlace/dreamplace/native/rudy_uroute.cpp</code>. All five standalone
-golden cases pass in debug and optimized builds, without changing tolerances
-or reference data. Review and publish that fix, update LiveHD's DREAMPlace pin
-(currently <code>5ddd24ed57e3b0a6e8e090d85e496bbab85431b9</code>), run the actual
-Bazel inference test and a complete final debug suite, fix any remaining
-failures, then finish review and commit/push. Logs, source fingerprints and
+and one failure in the inference test of the learned route model; this is not a
+completed suite. That model and its test have since been removed
+(<a href="2r-route.html">2r-route</a>). Run a complete final debug suite, fix
+any remaining failures, then finish review and commit/push. Logs, source fingerprints and
 numeric evidence are under <code>repros/dbg_review_20261025/</code>.</li>
 <li><strong>A–D: timing correctness and incremental acceptance.</strong> Finish
 the supported-coverage, calibration/invalidation and shared objective/LR

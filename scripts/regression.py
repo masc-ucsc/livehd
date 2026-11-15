@@ -9,7 +9,7 @@ import sys
 
 BACKEND = (
     'inou/lefdef/', 'pass/place/', 'pass/domplace/', 'pass/opentimer/',
-    'pass/liberty/', 'tools/uroute/', 'tools/spef/', 'scripts/domplace/',
+    'pass/liberty/', 'tools/routetruth/', 'tools/spef/', 'scripts/domplace/',
 )
 FRONTEND = ('core/', 'graph/', 'lnast/', 'parser/', 'upass/', 'inou/', 'pass/')
 SHARED = ('lhd/', 'pass/abc/', 'pass/usyn/', 'pass/synth/', 'pass/domino/')

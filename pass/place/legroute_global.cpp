@@ -1,5 +1,5 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
-// legroute.global: the region-crossing nets routed over the tile grid ahead of the regions (2l-legroute.html).
+// legroute.global: the region-crossing nets routed over the tile grid ahead of the regions (2r-route.html).
 //
 // Every crossing net gets a tree of tile edges joining its endpoint tiles, by shortest paths on the edges with room:
 // an edge carries at most a share of its tracks (the rest stays for the regions' own routes), the fuller an edge the

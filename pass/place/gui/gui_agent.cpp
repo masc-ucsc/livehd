@@ -2047,7 +2047,7 @@ std::string Session::agent_call(const std::string& json, int timeout_ms) {
       return err_json("score_config requires a components array");
     }
     const auto estimator = str("estimator", "rudy");
-    if (estimator != "rudy" && estimator != "rsmt" && estimator != "uroute") {
+    if (estimator != "rudy" && estimator != "rsmt") {
       return err_json("unknown score estimator");
     }
     Score_components config;
