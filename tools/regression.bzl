@@ -22,6 +22,10 @@ def _under(path, prefix):
     return path == prefix or path.startswith(prefix + "/")
 
 def _tags(name, tags):
+    # A scalability contract test (several input sizes, tens of seconds) runs
+    # only under --config=all: no domain tag and never in the smoke sample.
+    if "scalability" in tags:
+        return sorted({tag: True for tag in tags}.keys())
     package = native.package_name()
     label = "//" + package + ":" + name
     if any([_under(package, prefix) for prefix in _BACKEND]):

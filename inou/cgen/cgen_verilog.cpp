@@ -4694,6 +4694,65 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
     }
   }
 
+  // Bound the inlined expression size. An undeclared driver's text is copied
+  // into its reader, so a chain of d single-use operators (`e = e ^ k` repeated)
+  // builds texts of size 1, 2, ..., d: O(d^2) bytes and time, and a fanout-2
+  // bitwise inline doubles the text per level. Give a net to any driver whose
+  // inlined operator count reaches kMaxInlineOps; its readers then count it as
+  // one leaf, so every emitted expression is bounded and cgen stays linear.
+  // The cycles are broken above, so the undeclared inline cone is a DAG; the
+  // postorder walk below memoizes each driver once.
+  {
+    constexpr int                               kMaxInlineOps = 64;
+    absl::flat_hash_map<hhds::Class_index, int> weight;  // inlined operators under a driver
+    const auto                                  leaf = [&](const hhds::Pin_class& p) {
+      return p.is_invalid() || p.is_const() || pin2var.contains(p.get_class_index()) || !expression_inlines(p);
+    };
+    std::vector<std::pair<hhds::Pin_class, bool>> stack;
+    for (auto node : graph->body().nodes()) {
+      const auto op = type_op_of(node);
+      if (op == Ntype_op::Clock_cell || Ntype::has_multiple_driver_pins(op) || !node.has_out_edges()) {
+        continue;
+      }
+      const auto root = node.get_driver_pin(0);
+      if (leaf(root) || weight.contains(root.get_class_index())) {
+        continue;
+      }
+      stack.emplace_back(root, false);
+      while (!stack.empty()) {
+        const auto [pin, expanded] = stack.back();
+        stack.pop_back();
+        const auto key = pin.get_class_index();
+        if (weight.contains(key)) {
+          continue;
+        }
+        const auto master = pin.get_master_node();
+        if (!expanded) {
+          stack.emplace_back(pin, true);
+          for (const auto& sink : master.inp_sorted_pins()) {
+            const auto drv = sink.get_driver_pin();
+            if (!leaf(drv) && !weight.contains(drv.get_class_index())) {
+              stack.emplace_back(drv, false);
+            }
+          }
+          continue;
+        }
+        int w = 1;
+        for (const auto& sink : master.inp_sorted_pins()) {
+          const auto drv = sink.get_driver_pin();
+          if (!leaf(drv)) {
+            const auto it  = weight.find(drv.get_class_index());
+            w             += it == weight.end() ? 1 : it->second;
+          }
+        }
+        if (w >= kMaxInlineOps) {
+          add_to_pin2var(fout, pin, get_scaped_name(pin_wire_name(pin)), is_unsign(pin));
+        }
+        weight.emplace(key, pin2var.contains(key) ? 0 : w);
+      }
+    }
+  }
+
   // Second pass — a shift's AMOUNT operand must never be an inlined expression.
   //
   // The RHS of `<<` / `>>` / `>>>` is the one binary operand Verilog

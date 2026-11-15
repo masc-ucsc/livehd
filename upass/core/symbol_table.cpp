@@ -27,70 +27,105 @@ static void assert_no_prefix(std::string_view key) {
 //     shared table reads outer comptime consts directly (closure capture —
 //     what lets func_extract drop its capture maps).
 Symbol_table::Scope* Symbol_table::find_decl_scope(std::string_view var) {
-  if (stack.empty()) {
+  const auto it = bindings_.find(var);
+  if (it == bindings_.end() || it->second.empty()) {
     return nullptr;
   }
-  for (auto* s = stack.back(); s != nullptr; s = s->parent) {
-    if (s->varmap.find(var) != s->varmap.end()) {
-      return s;
-    }
-    if (s->type == Scope_type::Function) {
-      return nullptr;
-    }
-  }
-  return nullptr;
+  Scope* s = it->second.back();                                                     // the innermost active scope declaring `var`
+  return s->depth >= (func_depth_.empty() ? 0 : func_depth_.back()) ? s : nullptr;  // never past the Function barrier
 }
 
 const Symbol_table::Scope* Symbol_table::find_decl_scope(std::string_view var) const {
-  if (stack.empty()) {
+  const auto it = bindings_.find(var);
+  if (it == bindings_.end() || it->second.empty()) {
     return nullptr;
   }
-  for (const auto* s = stack.back(); s != nullptr; s = s->parent) {
-    if (s->varmap.find(var) != s->varmap.end()) {
-      return s;
-    }
-    if (s->type == Scope_type::Function) {
-      return nullptr;
-    }
-  }
-  return nullptr;
+  const Scope* s = it->second.back();
+  return s->depth >= (func_depth_.empty() ? 0 : func_depth_.back()) ? s : nullptr;
 }
 
 bool Symbol_table::crosses_uncertain_scope(const Scope* decl) const {
-  if (stack.empty()) {
-    return false;
-  }
-  for (const auto* s = stack.back(); s != nullptr && s != decl; s = s->parent) {
-    if (s->uncertain_cond) {
-      return true;
-    }
-  }
-  return false;
+  // An uncertain arm strictly inside `decl` (the walk from the innermost
+  // scope out to, not including, `decl`).
+  return !uncertain_depth_.empty() && uncertain_depth_.back() > (decl == nullptr ? -1 : decl->depth);
 }
 
 const Symbol_table::Scope* Symbol_table::find_decl_scope_read(std::string_view var) const {
-  if (stack.empty()) {
-    return nullptr;
-  }
-  for (const auto* s = stack.back(); s != nullptr; s = s->parent) {
-    if (s->varmap.find(var) != s->varmap.end()) {
-      return s;
-    }
-    // Read-transparent across Function barriers (closure capture).
-  }
-  return nullptr;
+  // Read-transparent across Function barriers (closure capture).
+  const auto it = bindings_.find(var);
+  return it == bindings_.end() || it->second.empty() ? nullptr : it->second.back();
 }
 
 const std::shared_ptr<Bundle>* Symbol_table::find_slot_read(std::string_view var) const {
-  if (stack.empty()) {
-    return nullptr;
+  const auto* s = find_decl_scope_read(var);
+  return s == nullptr ? nullptr : &s->varmap.find(var)->second;
+}
+
+void Symbol_table::bind(Scope* s, std::string_view var) {
+  if (s->depth < 0) {
+    return;  // bound when the scope is pushed
   }
-  for (const auto* s = stack.back(); s != nullptr; s = s->parent) {
-    if (const auto it = s->varmap.find(var); it != s->varmap.end()) {
-      return &it->second;
+  auto& v   = bindings_[var];
+  auto  pos = v.end();
+  while (pos != v.begin() && (*(pos - 1))->depth > s->depth) {
+    --pos;
+  }
+  if (pos != v.begin() && *(pos - 1) == s) {
+    return;
+  }
+  v.insert(pos, s);
+}
+
+void Symbol_table::push_scope(Scope* s) {
+  I(s->depth < 0);  // a scope is active at most once
+  s->depth = static_cast<int>(stack.size());
+  stack.emplace_back(s);
+  if (s->type == Scope_type::Function) {
+    func_depth_.push_back(s->depth);
+  }
+  for (const auto& [name, bundle] : s->varmap) {
+    (void)bundle;
+    bind(s, name);  // a re-entered block scope keeps its earlier names
+  }
+}
+
+void Symbol_table::pop_scope() {
+  Scope* s = stack.back();
+  stack.pop_back();
+  for (const auto& [name, bundle] : s->varmap) {
+    (void)bundle;
+    const auto it = bindings_.find(name);
+    if (it == bindings_.end()) {
+      continue;
+    }
+    auto& v = it->second;
+    if (!v.empty() && v.back() == s) {
+      v.pop_back();
+    } else {
+      v.erase(std::remove(v.begin(), v.end(), s), v.end());
+    }
+    if (v.empty()) {
+      bindings_.erase(it);
     }
   }
-  return nullptr;
+  if (s->type == Scope_type::Function) {
+    I(!func_depth_.empty() && func_depth_.back() == s->depth);
+    func_depth_.pop_back();
+  }
+  if (s->uncertain_cond) {
+    I(!uncertain_depth_.empty() && uncertain_depth_.back() == s->depth);
+    uncertain_depth_.pop_back();
+  }
+  s->depth = -1;
+}
+
+Symbol_table::Scope* Symbol_table::anchor(std::string_view var) {
+  // Compiler temps (`%`-prefixed; see Lnast::is_tmp) anchor at the function
+  // scope (the root when there is none); ordinary names live in the innermost.
+  if (!Lnast::is_tmp(var)) {
+    return stack.back();
+  }
+  return func_depth_.empty() ? stack.front() : stack[func_depth_.back()];
 }
 
 bool Symbol_table::var(std::string_view key) {
@@ -108,11 +143,10 @@ bool Symbol_table::var(std::string_view key) {
   auto bundle = std::make_shared<Bundle>(var);
   bundle->var(bundle_path::of_string(field), invalid_lconst);
   cur.varmap.emplace(var, bundle);
+  bind(&cur, var);
   cur.declared.emplace_back(std::string(var));
   return true;
 }
-
-static Symbol_table::Scope* anchor_for(Symbol_table::Scope* innermost, std::string_view var);
 
 bool Symbol_table::declare_bare(std::string_view var) {
   // Declaration pre-step binding: install a TRULY EMPTY bundle (no
@@ -128,12 +162,13 @@ bool Symbol_table::declare_bare(std::string_view var) {
   // an extraction tmp (`declare(___3, …, mut)`, the per-field-mode lowering)
   // must hit the SAME binding constprop's value store creates/created, or
   // the table ends up with two shadowing bindings in different scopes.
-  auto&      cur = *anchor_for(stack.back(), var);
+  auto&      cur = *anchor(var);
   const auto it  = cur.varmap.find(var);
   if (unlikely(it != cur.varmap.end())) {
     return false;
   }
   cur.varmap.emplace(std::string(var), std::make_shared<Bundle>(var));
+  bind(&cur, var);
   cur.declared.emplace_back(std::string(var));
   return true;
 }
@@ -161,18 +196,6 @@ static std::shared_ptr<Bundle>& unshare_for_write(std::shared_ptr<Bundle>& slot)
 // the inner block was left (block scope no longer reachable from the outer).
 // Anchor every tmp at the nearest Function scope so it stays visible until
 // the surrounding function returns.
-static Symbol_table::Scope* anchor_for(Symbol_table::Scope* innermost, std::string_view var) {
-  // Compiler temps (`%`-prefixed; see Lnast::is_tmp) anchor at the function
-  // scope; ordinary names live in the innermost scope.
-  if (!Lnast::is_tmp(var)) {
-    return innermost;
-  }
-  Symbol_table::Scope* s = innermost;
-  while (s->parent != nullptr && s->type != Symbol_table::Scope_type::Function) {
-    s = s->parent;
-  }
-  return s;
-}
 
 bool Symbol_table::set(std::string_view key, std::shared_ptr<Bundle> bundle) {
   I(bundle);
@@ -187,7 +210,7 @@ bool Symbol_table::set(std::string_view key, std::shared_ptr<Bundle> bundle) {
   // anchor_for).
   Scope* target = find_decl_scope(var);
   if (target == nullptr) {
-    target = anchor_for(stack.back(), var);
+    target = anchor(var);
   }
   // Preserve the written field path.  Invalidating only the root would make a
   // conditional write to `packet.opcode` erase independently-known siblings
@@ -200,10 +223,12 @@ bool Symbol_table::set(std::string_view key, std::shared_ptr<Bundle> bundle) {
     target->declared.emplace_back(std::string(var));
     if (var == key) {
       target->varmap.emplace(std::string(var), bundle);
+      bind(target, var);
       return true;
     }
     var_bundle = std::make_shared<Bundle>(var);
     target->varmap.emplace(std::string(var), var_bundle);
+    bind(target, var);
   } else {
     if (var == key) {
       // A whole-bundle assignment preserves the DECLARATION-PERSISTENT
@@ -348,7 +373,7 @@ bool Symbol_table::set(std::string_view key, const Dlop& trivial) {
 
   Scope* target = find_decl_scope(var);
   if (target == nullptr) {
-    target = anchor_for(stack.back(), var);
+    target = anchor(var);
   }
   record_uncertain_modification(key);
 
@@ -358,6 +383,7 @@ bool Symbol_table::set(std::string_view key, const Dlop& trivial) {
     target->declared.emplace_back(std::string(var));
     bundle = std::make_shared<Bundle>(var);
     target->varmap.emplace(std::string(var), bundle);
+    bind(target, var);
   } else {
     bundle = unshare_for_write(it->second);
   }
@@ -382,7 +408,7 @@ void Symbol_table::function_scope(std::string_view func_id) {
   scope_storage.emplace_back(Scope_type::Function, func_id, scope);
   auto* s   = &scope_storage.back();
   s->parent = stack.empty() ? nullptr : stack.back();
-  stack.emplace_back(s);
+  push_scope(s);
 }
 
 Symbol_table::Scope* Symbol_table::block_scope(uint64_t key) {
@@ -408,13 +434,16 @@ Symbol_table::Scope* Symbol_table::block_scope(uint64_t key) {
   // runner each time and the modification list is rebuilt each time.
   s->uncertain_cond = false;
   s->modified_under_uncertainty.clear();
-  stack.emplace_back(s);
+  push_scope(s);
   return s;
 }
 
 void Symbol_table::mark_current_uncertain() {
   I(!stack.empty());
-  stack.back()->uncertain_cond = true;
+  if (!stack.back()->uncertain_cond) {
+    stack.back()->uncertain_cond = true;
+    uncertain_depth_.push_back(stack.back()->depth);
+  }
 }
 
 void Symbol_table::record_uncertain_modification(std::string_view name) {
@@ -429,11 +458,8 @@ void Symbol_table::record_uncertain_modification(std::string_view name) {
   // Innermost uncertain scope wins: when an outer uncertain scope eventually
   // leaves, anything set after the inner left will get re-recorded if the
   // outer arm is still active. No need to mark on every uncertain ancestor.
-  for (auto it = stack.rbegin(); it != stack.rend(); ++it) {
-    if ((*it)->uncertain_cond) {
-      (*it)->modified_under_uncertainty.emplace(name);  // set dedups in O(1)
-      return;
-    }
+  if (!uncertain_depth_.empty()) {
+    stack[uncertain_depth_.back()]->modified_under_uncertainty.emplace(name);  // set dedups in O(1)
   }
 }
 
@@ -581,7 +607,7 @@ std::shared_ptr<Bundle> Symbol_table::leave_scope() {
   // the next iteration can re-enter it (block_scope) and accumulated state
   // remains consistent.
   Scope* popped = stack.back();
-  stack.pop_back();
+  pop_scope();
 
   // Drop this scope's still-unapplied dotted-field facts (pending_decl_facts)
   // whose root no longer resolves in any live write-scope. Without this the

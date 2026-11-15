@@ -196,6 +196,49 @@ TEST(CpropMuxTreeProof, TwoGroupSelectionAndExclusiveDefaults) {
 }
 }  // namespace
 
+// A narrowing constant slice under each Hotmux arm is wiring: lifting it out
+// would make the inner Hotmux as wide as the producers (minion's vector lanes:
+// a 32-bit slice of a 4128-bit shift became a 4128-bit Hotmux). Each arm keeps
+// its own slice and no Hotmux is wider than the result.
+TEST(CpropHotmuxOpSharing, NarrowingSliceIsNotLiftedAboveTheHotmux) {
+  hhds::GraphLibrary library;
+  auto               io = library.create_io("hotmux_slice");
+  io->add_input("s", 1);
+  io->set_bits("s", 2);
+  io->add_input("a", 2);
+  io->set_bits("a", 64);
+  io->add_input("b", 3);
+  io->set_bits("b", 64);
+  io->add_output("out", 4);
+  io->set_bits("out", 8);
+  auto g = io->create_graph();
+  gu::set_ubits(g->get_input_pin("s"), 2);
+  gu::set_ubits(g->get_input_pin("a"), 64);
+  gu::set_ubits(g->get_input_pin("b"), 64);
+  auto hot = gu::create_typed_node(*g, Ntype_op::Hotmux);
+  for (int i = 0; i < 2; ++i) {
+    auto eq = gu::create_typed_node(*g, Ntype_op::EQ);
+    gu::setup_sink_pid(eq, 0).connect_driver(g->get_input_pin("s"));
+    gu::setup_sink_pid(eq, 0).connect_driver(gu::create_const(*g, *Dlop::create_integer(i)));
+    gu::set_ubits(eq.create_driver_pin(0), 1);
+    auto slice = gu::create_get_mask(*g, g->get_input_pin(i ? "b" : "a"), 0, 8);
+    gu::set_ubits(slice.create_driver_pin(0), 8);
+    hot.create_sink_pin(2 * i).connect_driver(eq.create_driver_pin(0));
+    hot.create_sink_pin(2 * i + 1).connect_driver(slice.create_driver_pin(0));
+  }
+  gu::set_ubits(hot.create_driver_pin(0), 8);
+  hot.create_driver_pin(0).connect_sink(g->get_output_pin("out"));
+  livehd::aegraph::fold_with(g);
+  size_t slices = 0;
+  for (auto n : g->body().nodes()) {
+    slices += gu::type_op_of(n) == Ntype_op::Get_mask;
+    if (gu::type_op_of(n) == Ntype_op::Hotmux || gu::type_op_of(n) == Ntype_op::Mux) {
+      EXPECT_LE(gu::bits_of(n.get_driver_pin(0)), 8) << "a mux carries the bits the slices drop";
+    }
+  }
+  EXPECT_EQ(slices, 2u);
+}
+
 TEST(CpropHotmuxOpSharingProof, GroupsPreserveExplicitAndImplicitDefaults) {
   for (auto op : {Ntype_op::Sum, Ntype_op::Div, Ntype_op::SRA}) {
     for (int default_kind = 0; default_kind < 3; ++default_kind) {

@@ -65,9 +65,11 @@ for design in "$W/dup.prp:dup" "inou/prp/tests/equiv/loop_carry_kinds.prp:top"; 
   [ "$rc" -eq 0 ] || fail "$name: the rules changed the design (lec rc=$rc): $(head -c 600 "$W/lec_${name}.json")"
 done
 
-# The engine shares duplicated subexpressions: the summary must report the merges.
-grep -h '^\[pass.aegraph\] graphs=' "$W/dup_a/w/logs/"*pass_aegraph.log | head -1 | grep -Eq 'cse=[1-9]' \
-  || fail "dup: the engine reported no shared subexpression: $(cat "$W/dup_a/w/logs/"*pass_aegraph.log)"
+# The duplicated subexpressions are shared: by the LGraph engine (cse=) or, a step earlier, by the tree aegraph
+# (upass/aeg forwards a repeated expression to its first spelling; it runs on a comb's private lowering copy too).
+{ grep -h '^\[pass.aegraph\] graphs=' "$W/dup_a/w/logs/"*pass_aegraph.log | head -1 | grep -Eq 'cse=[1-9]' \
+  || grep -h '^\[upass.aeg\] ' "$W/dup_a/w/logs/"*pass_upass.log | grep -Eq 'forwarded=[1-9]'; } \
+  || fail "dup: no engine reported a shared subexpression: $(cat "$W/dup_a/w/logs/"*pass_upass.log "$W/dup_a/w/logs/"*pass_aegraph.log | grep -E 'upass.aeg|pass.aegraph')"
 
 # The compile cache keys on the cost profile (it keeps the latest one per workdir): a profile switch misses,
 # a repeat of the same profile hits.

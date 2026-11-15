@@ -2,8 +2,10 @@
 :name: aeg_lane_reads_1
 :type: lec
 :set: compile.aegraph.rules_disable=
-:compile_grep: aegraph-rule sra_lane .*applied=[1-9]
+:compile_grep: (aegraph-rule sra_lane|treeaeg-rule getmask_sra) .*applied=[1-9]
 :compile_grep: aegraph-rule getmask_concat_straddle .*extracted=[1-9]
 :compile_grep: aegraph-rule getmask_not_getmask .*applied=[1-9]
 */
+// The rewrite may land a step earlier: a comb's private lowering copy runs the tree aegraph (upass/aeg) with the
+// same rules, so the grep accepts either census.
 // HEADER-ONLY variant: aeg_lane_reads.prp compiled by the acyclic e-graph engine.

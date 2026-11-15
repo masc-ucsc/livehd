@@ -607,6 +607,31 @@ class Mux_sharing {
       emitted[i] = node.create_driver_pin(0);
       if (expression.op == Ntype_op::EQ) {
         gu::set_ubits(emitted[i], 1);
+      } else {
+        // A Mux/Hotmux predicate is a truth value, but a data input can be a
+        // wide or signed selector (mux(s,0,1) is s). Not every consumer re-runs
+        // bitwidth (the LEC/semdiff preflight fold re-simplifies with cprop
+        // alone and requires every cell sized), so stamp it losslessly: unsigned
+        // at the widest data input, which keeps every nonzero input nonzero.
+        // An unsized input leaves the predicate for bitwidth, as before.
+        int  bits  = 1;
+        bool sized = true;
+        for (size_t j = 0; j < expression.inputs.size() && sized; ++j) {
+          const bool data = expression.op == Ntype_op::Mux ? j != 0 : (j % 2 == 1 || j + 1 == expression.inputs.size());
+          if (!data) {
+            continue;
+          }
+          const auto p = pin(expression.inputs[j]);
+          int        w = p.is_const() ? livehd::cprop_value::unsigned_width(p) : gu::bits_of(p);
+          if (w == 0 && gu::is_graph_input_pin(p) && graph.get_io()) {
+            w = static_cast<int>(graph.get_io()->get_bits(p.get_pin_name()));  // an input's width is its io decl
+          }
+          sized = w >= 0 && (p.is_const() || w > 0);
+          bits  = std::max(bits, w);
+        }
+        if (sized) {
+          gu::set_ubits(emitted[i], bits);
+        }
       }
       livehd::cprop_value::remember(node);
     }

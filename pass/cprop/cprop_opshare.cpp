@@ -246,6 +246,18 @@ void share_hotmux_operators(hhds::Graph& graph, size_t& budget) {
       if (!shape) {
         return;
       }
+      // A constant-range slice is wiring: sharing it saves no gate, and the
+      // inner Hotmux would carry every bit the slice drops while the wide
+      // producer loses its narrowing reader (a 32-bit slice of a 4128-bit
+      // shift became a 4128-bit Hotmux, and the region's GE estimate sent
+      // minion's vector lanes to pass.abc's unoptimized large flow).
+      if (shape->op == Ntype_op::Get_mask) {
+        for (const auto& operand : shape->operands) {
+          if (operand.role == 0 && gu::bits_of(operand.value) > gu::bits_of(value) + 1) {
+            return;
+          }
+        }
+      }
       // Keep each operator's realized output boundary. This also avoids
       // inventing a common finite carrier for unstamped/differently stamped
       // operator results in clients that do not rerun bitwidth.

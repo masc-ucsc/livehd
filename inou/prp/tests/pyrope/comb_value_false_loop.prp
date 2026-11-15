@@ -1,0 +1,15 @@
+/*
+:name: comb_value_false_loop
+:type: compile
+*/
+
+// `w - w` is 0, so w = x: the loop through `w` exists only in the spelling.
+// A mod accepts it (the tree aegraph folds its body before tolg's wire-loop
+// check); a comb gets the same step on a private copy of its body that only
+// its own lowering reads, so it accepts it too. The body callers splice in
+// keeps the source form.
+pub comb top(x:U8) -> (z:U8) {
+  wire w:U8 = nil
+  w = x + (w - w)
+  z = w
+}

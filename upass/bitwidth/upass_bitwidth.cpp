@@ -249,9 +249,7 @@ void uPass_bitwidth::write_bw(std::string_view name, Bundle& dst, Lnast_range r,
     r = *env;
   }
   note_pre_if_range(name);
-  if (!guard_stack_.empty()) {
-    retire_guards(name);  // the guard spoke of the value `name` held before
-  }
+  retire_guards(name);  // a guard spoke of the value `name` held before
 
   // Narrow-vs-replace against what the bundle already holds.
   const auto& e0  = dst.get_entry(bundle_path::of_string("0"));
@@ -345,9 +343,10 @@ void uPass_bitwidth::clear_range(std::string_view name) {
   if (Lnast::is_tmp(name)) {
     cleared_tmps_.emplace(name);
   }
-  if (!guard_stack_.empty()) {
-    retire_guards(name);
+  if (!arm_write_stack_.empty()) {
+    trail_.emplace_back(name);  // a later arm restores it (if an open if captured it)
   }
+  retire_guards(name);
 }
 
 // ── If-arm value-range merge ─────────────────────────────────────────────────
@@ -357,37 +356,46 @@ void uPass_bitwidth::record_arm_write(std::string_view name, const Lnast_range& 
     return;  // not inside an uncertain if-arm
   }
   arm_write_stack_.back()[std::string(name)] = r;  // latest write in this arm wins
+  trail_.emplace_back(name);
 }
 
 void uPass_bitwidth::note_pre_if_range(std::string_view name) {
-  if (arm_write_stack_.empty()) {
+  if (arm_write_stack_.empty() || if_merge_stack_.empty()) {
     return;  // not inside an uncertain if-arm
   }
-  // bw_meta still holds the last committed range from before the enclosing
-  // if: write_bw writes through on every write, and this is the first write
-  // of `name` that if has seen.
-  std::optional<Lnast_range> before;
-  for (auto& f : if_merge_stack_) {
-    if (f.pre_if.contains(name)) {
-      continue;
-    }
-    if (!before) {
-      before           = Lnast_range::make_unbounded();
-      const auto& meta = lm->get_lnast()->bw_meta();
-      if (auto it = meta.ranges.find(std::string(name)); it != meta.ranges.end() && !it->second.unbounded) {
-        before->min       = it->second.min;
-        before->max       = it->second.max;
-        before->unbounded = false;
-      }
-    }
-    if (Lnast::is_tmp(name) && !cleared_tmps_.contains(name) && !lm->get_lnast()->bw_meta().ranges.contains(std::string(name))) {
-      f.fresh_tmps.emplace(name);
-    }
-    f.pre_if.emplace(std::string(name), *before);
-    if (before->is_unbounded() && name_is_wide(name)) {
-      f.pre_if_wide.emplace(name);
-    }
+  // bw_meta still holds the last committed range from before every open if
+  // that has not seen `name` written yet; one capture serves them all.
+  const auto& inner = if_merge_stack_.back();
+  auto        it    = pre_caps_.find(name);
+  if (it != pre_caps_.end() && !it->second.empty() && it->second.back().stamp >= inner.serial) {
+    return;  // the innermost if (and so every open one) has it already
   }
+  Pre_cap c;
+  c.stamp          = inner.serial;
+  c.pre            = Lnast_range::make_unbounded();
+  const auto& meta = lm->get_lnast()->bw_meta();
+  const auto  m    = meta.ranges.find(std::string(name));
+  if (m != meta.ranges.end() && !m->second.unbounded) {
+    c.pre.min       = m->second.min;
+    c.pre.max       = m->second.max;
+    c.pre.unbounded = false;
+  }
+  c.fresh = Lnast::is_tmp(name) && !cleared_tmps_.contains(name) && m == meta.ranges.end();
+  c.wide  = c.pre.is_unbounded() && name_is_wide(name);
+  if (it == pre_caps_.end()) {
+    it = pre_caps_.try_emplace(std::string(name)).first;
+  }
+  it->second.push_back(c);
+}
+
+const uPass_bitwidth::Pre_cap* uPass_bitwidth::pre_cap(std::string_view name, const If_merge_frame& f) const {
+  const auto it = pre_caps_.find(name);
+  if (it == pre_caps_.end()) {
+    return nullptr;
+  }
+  const auto& caps = it->second;
+  const auto  at   = std::ranges::lower_bound(caps, f.serial, {}, &Pre_cap::stamp);
+  return at == caps.end() ? nullptr : &*at;
 }
 
 void uPass_bitwidth::commit_merged(std::string_view name, const Lnast_range& r, bool wide) {
@@ -420,7 +428,11 @@ void uPass_bitwidth::set_range(std::string_view name, const Lnast_range& r, bool
   publish_range(name, r, wide);
 }
 
-void uPass_bitwidth::notify_if_merge_begin() { if_merge_stack_.emplace_back(); }
+void uPass_bitwidth::notify_if_merge_begin() {
+  auto& f      = if_merge_stack_.emplace_back();
+  f.serial     = ++frame_serial_;
+  f.trail_mark = trail_.size();
+}
 
 void uPass_bitwidth::notify_uncertain_arm_begin() {
   if (if_merge_stack_.empty()) {
@@ -429,26 +441,84 @@ void uPass_bitwidth::notify_uncertain_arm_begin() {
   // A later arm starts from the values the if was entered with, never from
   // what an earlier arm wrote: where a name is not SSA-renamed per arm (a
   // loop body, the lifted body of a rolled loop) both arms share its binding.
+  // Only a name touched since the previous arm began can differ from its
+  // pre-if value (every other captured name was restored at an earlier arm,
+  // or never changed): restore those, each trail entry once.
   auto& f = if_merge_stack_.back();
   if (f.uncertain_arms > 0) {
-    for (const auto& [var, pre] : f.pre_if) {
-      set_range(var, pre, f.pre_if_wide.contains(var));
+    std::vector<std::string> keep;
+    for (size_t i = f.trail_mark; i < trail_.size(); ++i) {
+      const auto& v = trail_[i];
+      if (const auto* c = pre_cap(v, f)) {
+        set_range(v, c->pre, c->wide);
+      } else if (pre_caps_.contains(v)) {
+        keep.push_back(v);  // an outer if captured it: its next arm restores it
+      }
+    }
+    trail_.resize(f.trail_mark);
+    for (auto& v : keep) {
+      trail_.push_back(std::move(v));
     }
   }
   arm_write_stack_.emplace_back();
-  guard_stack_.emplace_back(std::move(pending_guards_));
-  pending_guards_.clear();
+  f.arm_start = ++guard_clock_;
+  for (const auto& g : pending_own_) {
+    push_guard(f, g, true);
+  }
+  pending_own_.clear();
   ++f.uncertain_arms;
 }
 
 void uPass_bitwidth::notify_arm_guard(std::string_view cond, bool negated) {
   const auto it = cmp_facts_.find(cond);
-  if (it == cmp_facts_.end()) {
+  if (it == cmp_facts_.end() || if_merge_stack_.empty()) {
     return;
   }
   const auto& f = it->second;
-  // not(big > small) == small >= big; not(big >= small) == small > big.
-  pending_guards_.push_back(negated ? Order_fact{.big = f.small, .small = f.big, .strict = !f.strict} : f);
+  if (negated) {
+    // not(big > small) == small >= big; not(big >= small) == small > big.
+    // An earlier condition of the chain: false on every later arm of this if.
+    push_guard(if_merge_stack_.back(), Order_fact{.big = f.small, .small = f.big, .strict = !f.strict}, false);
+  } else {
+    pending_own_.push_back(f);  // the next arm's own condition
+  }
+}
+
+void uPass_bitwidth::push_guard(If_merge_frame& f, const Order_fact& g, bool own) {
+  std::string key = g.big;
+  key.push_back('\0');
+  key      += g.small;
+  auto& st  = guards_[key];
+  if (st.all.empty()) {
+    st.big   = g.big;
+    st.small = g.small;
+  }
+  const Guard_entry e{static_cast<size_t>(&f - if_merge_stack_.data()), g.strict};
+  st.all.push_back(e);
+  if (g.strict) {
+    st.strict.push_back(e);
+  }
+  (own ? f.own_pairs : f.negated_pairs).push_back(std::move(key));
+  ++live_guards_;
+}
+
+void uPass_bitwidth::pop_guards(std::vector<std::string>& pairs) {
+  for (auto k = pairs.rbegin(); k != pairs.rend(); ++k) {
+    auto it = guards_.find(*k);
+    I(it != guards_.end() && !it->second.all.empty());
+    if (it->second.all.back().strict) {
+      it->second.strict.pop_back();
+    }
+    it->second.all.pop_back();
+    if (it->second.all.empty()) {
+      guards_.erase(it);
+    }
+    --live_guards_;
+  }
+  pairs.clear();
+  if (live_guards_ == 0) {
+    last_write_.clear();  // a fact pushed later starts after every recorded write
+  }
 }
 
 void uPass_bitwidth::note_order_fact(std::string_view dst, upass::Src_span src, bool swap, bool strict) {
@@ -462,20 +532,34 @@ void uPass_bitwidth::note_order_fact(std::string_view dst, upass::Src_span src, 
 }
 
 std::optional<bool> uPass_bitwidth::guard_orders(std::string_view big, std::string_view small) const {
-  std::optional<bool> out;
-  for (const auto& frame : guard_stack_) {
-    for (const auto& g : frame) {
-      if (g.big == big && g.small == small) {
-        out = out.value_or(false) || g.strict;
-      }
-    }
+  if (live_guards_ == 0) {
+    return std::nullopt;
   }
-  return out;
+  std::string key{big};
+  key.push_back('\0');
+  key           += small;
+  const auto it  = guards_.find(key);
+  if (it == guards_.end()) {
+    return std::nullopt;
+  }
+  const auto written = [&](std::string_view n) {
+    const auto w = last_write_.find(n);
+    return w == last_write_.end() ? uint64_t{0} : w->second;
+  };
+  const uint64_t last = std::max(written(big), written(small));
+  // The top of a stack started latest (inner frames push last, and a frame's
+  // own and negated facts share its arm start): if it is retired, so is
+  // every older entry.
+  const auto     live = [&](const Guard_entry& e) { return if_merge_stack_[e.frame].arm_start > last; };
+  if (!live(it->second.all.back())) {
+    return std::nullopt;
+  }
+  return !it->second.strict.empty() && live(it->second.strict.back());
 }
 
 void uPass_bitwidth::retire_guards(std::string_view name) {
-  for (auto& frame : guard_stack_) {
-    std::erase_if(frame, [&](const Order_fact& g) { return g.big == name || g.small == name; });
+  if (live_guards_ > 0) {
+    last_write_[std::string(name)] = ++guard_clock_;
   }
 }
 
@@ -485,10 +569,8 @@ void uPass_bitwidth::notify_uncertain_arm_end() {
   }
   const auto arm = std::move(arm_write_stack_.back());
   arm_write_stack_.pop_back();
-  if (!guard_stack_.empty()) {
-    guard_stack_.pop_back();
-  }
   auto& f = if_merge_stack_.back();
+  pop_guards(f.own_pairs);
   for (const auto& [var, r] : arm) {
     const auto it    = f.arm_union.find(var);
     f.arm_union[var] = (it == f.arm_union.end()) ? r : it->second.join(r);  // join = [min,max] over paths
@@ -503,8 +585,9 @@ void uPass_bitwidth::notify_if_merge_end(bool all_paths_covered) {
   if (if_merge_stack_.empty()) {
     return;
   }
-  const auto f = std::move(if_merge_stack_.back());
-  if_merge_stack_.pop_back();
+  auto& f = if_merge_stack_.back();
+  pop_guards(f.own_pairs);  // an arm left open (no notify_uncertain_arm_end)
+  pop_guards(f.negated_pairs);
   for (const auto& [var, arm_union] : f.arm_union) {
     // The arms' union alone is sound ONLY when every runtime path assigns
     // `var`: a fully-covered if (real else, no comptime-decided arm) where
@@ -515,16 +598,21 @@ void uPass_bitwidth::notify_if_merge_end(bool all_paths_covered) {
     // A fresh result temp (a `match` expression has no `else`) is covered
     // too: no path keeps a pre-if value it never had (suggestions6 1.8: the
     // match EXPRESSION used to skip the overflow check its arms deserve).
-    const bool all_arms = f.arm_writes.at(var) == f.uncertain_arms;
-    const bool covered  = all_arms && (all_paths_covered || f.fresh_tmps.contains(var));
+    const auto* cap      = pre_cap(var, f);
+    const bool  all_arms = f.arm_writes.at(var) == f.uncertain_arms;
+    const bool  covered  = all_arms && (all_paths_covered || (cap != nullptr && cap->fresh));
     if (covered) {
       commit_merged(var, arm_union, f.arm_wide.contains(var));
       continue;
     }
-    const auto it = f.pre_if.find(var);
     commit_merged(var,
-                  it == f.pre_if.end() ? Lnast_range::make_unbounded() : arm_union.join(it->second),
-                  f.arm_wide.contains(var) || f.pre_if_wide.contains(var));
+                  cap == nullptr ? Lnast_range::make_unbounded() : arm_union.join(cap->pre),
+                  f.arm_wide.contains(var) || (cap != nullptr && cap->wide));
+  }
+  if_merge_stack_.pop_back();
+  if (if_merge_stack_.empty()) {
+    pre_caps_.clear();  // no open if reads a capture any more
+    trail_.clear();
   }
 }
 

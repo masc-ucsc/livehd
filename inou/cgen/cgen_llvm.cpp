@@ -458,6 +458,61 @@ std::string llvm_debug_args() {
   return args == nullptr ? std::string{} : std::string{args};
 }
 
+// Instruction selection schedules each IR block as one SelectionDAG, and the
+// pre-RA list scheduler (ScheduleDAGRRList, source order) scans its ready
+// queue per pick: superlinear in the block. A kernel is mostly straight-line
+// code, so one block can hold thousands of instructions; when a few select
+// conditions are shared across the whole block (CSE'd compares, e.g. after the
+// tree aegraph), scheduling it took seconds (boom e1: 9.1 s for one 8.3k
+// instruction block, 0.07 s once split; a 2.8k block took 0.19 s). So a block
+// longer than kIselBlock * 3/2 is split into fall-through chunks of kIselBlock.
+// A chunk boundary has a cost (values crossing it go through registers, not
+// one DAG: a 1.6k block cut once grew matched_filter's kernel by 17%), so only
+// a block well past where scheduling turns superlinear is cut. Each new
+// chunk is address-taken (a private table of blockaddresses), which keeps
+// CodeGenPrepare's eliminateFallThrough from merging it back; nothing else in
+// the pipeline changes, and a kernel without such a block compiles exactly as
+// before. Fall-through edges emit no jump.
+constexpr size_t kIselBlock = 4096;
+void             split_oversized_blocks(llvm::Module& module) {
+  std::vector<llvm::Constant*> anchors;
+  for (auto& function : module) {
+    if (function.isDeclaration()) {
+      continue;
+    }
+    std::vector<llvm::BasicBlock*> blocks;
+    for (auto& block : function) {
+      blocks.push_back(&block);
+    }
+    for (auto* block : blocks) {
+      // BasicBlock::size() walks the list: count once, then track the tail.
+      size_t size = block->size();
+      while (size > kIselBlock + kIselBlock / 2) {
+        auto   at    = block->getFirstNonPHIIt();
+        size_t index = static_cast<size_t>(std::distance(block->begin(), at));
+        for (; index < kIselBlock && at != block->end(); ++index) {
+          ++at;
+        }
+        if (at == block->end() || at->isTerminator() || at->isEHPad()) {
+          break;
+        }
+        block = llvm::SplitBlock(block, at);  // the tail: every instruction from `at` on
+        anchors.push_back(llvm::BlockAddress::get(&function, block));
+        size -= index;
+      }
+    }
+  }
+  if (!anchors.empty()) {
+    auto* type = llvm::ArrayType::get(llvm::PointerType::getUnqual(module.getContext()), anchors.size());
+    new llvm::GlobalVariable(module,
+                             type,
+                             true,
+                             llvm::GlobalValue::PrivateLinkage,
+                             llvm::ConstantArray::get(type, anchors),
+                             "lhd.isel_split");
+  }
+}
+
 // 0 = disabled.
 unsigned branch_min_cost() {
   if (livehd::debug::env<"LHD_SIM_LLVM_NO_BRANCH">() != nullptr) {
@@ -5120,6 +5175,7 @@ bool Cgen_llvm::write_module(std::string_view path, std::string& error, bool tra
         }
       }
     }
+    split_oversized_blocks(*impl_->module);
     llvm::legacy::PassManager emit;
     if (machine->addPassesToEmitFile(emit, object, nullptr, llvm::CodeGenFileType::ObjectFile)) {
       error = "LLVM target cannot emit native color objects";
@@ -5331,6 +5387,7 @@ bool Cgen_llvm::link_bitcode_object(std::string_view host_path, const std::vecto
 
   llvm::SmallVector<char, 0> native_buffer;
   llvm::raw_svector_ostream  native(native_buffer);
+  split_oversized_blocks(*module);
   llvm::legacy::PassManager  emit;
   if (machine->addPassesToEmitFile(emit, native, nullptr, llvm::CodeGenFileType::ObjectFile)) {
     error = "LLVM target cannot emit linked simulator objects";

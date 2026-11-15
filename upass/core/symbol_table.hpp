@@ -32,6 +32,7 @@ public:
     std::vector<std::string>                                  declared;
     absl::flat_hash_map<std::string, std::shared_ptr<Bundle>> varmap;  // field, value, path_scope (case-sensitive)
     Scope*                                                    parent{nullptr};
+    int                                                       depth{-1};  // index in `stack` while active, else -1
     // Set by the caller (constprop's process_stmts) when this scope is the
     // body of an if-arm whose condition is not a comptime-known true/false.
     // On leave_scope, every var listed in modified_under_uncertainty is
@@ -89,14 +90,7 @@ public:
   // write under uncertainty must invalidate the lhs's stale comptime value
   // (comptime writes get this via record_uncertain_modification; runtime
   // writes never touch the varmap, so the caller checks this explicitly).
-  [[nodiscard]] bool in_uncertain_scope() const {
-    for (const auto* s : stack) {
-      if (s->uncertain_cond) {
-        return true;
-      }
-    }
-    return false;
-  }
+  [[nodiscard]] bool in_uncertain_scope() const { return !uncertain_depth_.empty(); }
 
   // How many active scopes are uncertain. `in_uncertain_scope` alone cannot
   // answer "is THIS statement's guard runtime", only "is anything enclosing it
@@ -104,15 +98,7 @@ public:
   // `if` reads as uncertain either way. A caller that snapshots this count at a
   // known point (e.g. loop-iteration entry) and compares later sees only the
   // scopes entered SINCE.
-  [[nodiscard]] std::size_t uncertain_scope_count() const {
-    std::size_t n = 0;
-    for (const auto* s : stack) {
-      if (s->uncertain_cond) {
-        ++n;
-      }
-    }
-    return n;
-  }
+  [[nodiscard]] std::size_t uncertain_scope_count() const { return uncertain_depth_.size(); }
 
   // True when `var` is declared in an ENCLOSING scope (not the innermost
   // active one) — i.e. writing it here mutates an outer variable from inside a
@@ -422,6 +408,20 @@ private:
   // Scope object that represents that block. Re-pushing the same key on a
   // later iteration recovers the same Scope.
   absl::flat_hash_map<uint64_t, Scope*> block_scope_index;
+
+  // Name -> the active scopes whose varmap holds it, in stack order (innermost
+  // last), kept in step with every varmap insert and every scope push/pop; and
+  // the stack depths of the active Function scopes and uncertain-arm scopes.
+  // Every lookup used to walk the scope chain (O(depth) per access, cubic on a
+  // deep if nest); with this the innermost declaring scope is the back of the
+  // name's list, checked against the innermost Function barrier.
+  absl::flat_hash_map<std::string, absl::InlinedVector<Scope*, 2>> bindings_;
+  std::vector<int>                                                 func_depth_;
+  std::vector<int>                                                 uncertain_depth_;
+  void                                                             bind(Scope* s, std::string_view var);
+  void                                                             push_scope(Scope* s);
+  void                                                             pop_scope();
+  [[nodiscard]] Scope*                                             anchor(std::string_view var);
 
   // Walks the active stack from innermost outward, stopping at and including
   // the nearest Function scope. This is the WRITE/anchor variant —

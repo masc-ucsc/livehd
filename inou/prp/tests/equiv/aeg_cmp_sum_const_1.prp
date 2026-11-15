@@ -3,6 +3,8 @@
 :type: lec
 :set: compile.aegraph.rules_disable=
 :compile_grep: aegraph-rule eq_sum_const_add .*extracted=[1-9]
-:compile_grep: aegraph-rule eq_diff_zero .*extracted=[1-9]
+:compile_grep: (aegraph-rule eq_diff_zero .*extracted|treeaeg-rule eq_diff_zero .*applied)=[1-9]
 */
+// The rewrite may land a step earlier: a comb's private lowering copy runs the tree aegraph (upass/aeg) with the
+// same rules, so the grep accepts either census.
 // HEADER-ONLY variant: aeg_cmp_sum_const.prp compiled by the acyclic e-graph engine; the greps show the rules did the work.

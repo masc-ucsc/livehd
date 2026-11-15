@@ -7,7 +7,7 @@
 // compare of one value with itself is `true` (e), products by powers of two are shifts rewritten in place (m, n),
 // and a const alias is read through its name (w). The pyrope-vs-pyrope aeg_tree_* groups LEC a forwarded
 // compile against a forwarded one; the forwarding has no knob, so this golden is its independent reference.
-// A `mod`: the step rewrites only a body tolg alone reads (a comb's body is inlined and cached as walked).
+// A `mod`: the step rewrites its body in place (a comb's shared body is inlined and cached as walked, so the step runs on its private lowering copy).
 pub mod top(a:U8, b:U8, c:U8, s:S8) -> (x:U11@[0], y:U12@[0], z:U9@[0], p:S10@[0], m:U11@[0], n:S18@[0], e:Bool@[0], w:U9@[0]) {
   x = (a + b) * 3
   y = (b + a) * 5

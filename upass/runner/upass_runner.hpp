@@ -169,6 +169,9 @@ public:
   // engine; the stats of the last run() are kept for its step-log summary.
   void set_staging_rewrite(upass::Staging_rewrite_fn fn) { staging_rewrite_ = fn; }
   [[nodiscard]] const upass::Staging_rewrite_stats& staging_rewrite_stats() const { return staging_rewrite_stats_; }
+  // A comb's private lowering body (Lnast::set_lowering_body), built at the
+  // end of run(); null for every other unit.
+  [[nodiscard]] std::shared_ptr<Lnast>              take_lowering_staging() { return std::move(lowering_staging_); }
 
   // Named-constant provenance (the Pyrope counterpart of inou.slang's
   // `preserve_param_provenance`): materialize a folded `pkg.PARAM` read as the
@@ -271,6 +274,7 @@ protected:
   bool                                preserve_param_provenance_{false};  // see set_preserve_param_provenance()
   upass::Staging_rewrite_fn           staging_rewrite_{nullptr};          // see set_staging_rewrite()
   upass::Staging_rewrite_stats        staging_rewrite_stats_;
+  std::shared_ptr<Lnast>              lowering_staging_;
   // constprop is in the resolved order: the post-walk DCE and the staging
   // rewrite rely on its folds (pruned arms, expanded tuple_gets).
   [[nodiscard]] bool                  has_constprop() const;

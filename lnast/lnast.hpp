@@ -422,6 +422,9 @@ private:
   // (see is_dce_dead above). In-memory only — lg-only flows drop the LNAST
   // after tolg, and any body swap invalidates the ids.
   absl::flat_hash_set<int64_t>                     dce_dead_stmts_;
+  // See set_lowering_body / Lowering_scope.
+  std::shared_ptr<hhds::Tree>                      lowering_tree_;
+  absl::flat_hash_set<int64_t>                     lowering_dead_stmts_;
   // Blackbox (unknown-definition) modules this unit instantiates — stamped by
   // inou.slang when slang elaborates with --ignore-unknown-modules. The pyrope
   // re-emission imports these exactly like emitted submodules (the definition
@@ -538,6 +541,28 @@ public:
   // replace_body(staging->tree_ptr()) whenever the new body came from a
   // separately-built Lnast.
   void replace_body(const std::shared_ptr<Lnast>& staging);
+
+  // A comb's private lowering body: its post-walk body after the tree aegraph
+  // and DCE (uPass_runner builds it on a copy). The body above stays the
+  // source form: it is what callers splice in, what the compile cache stores
+  // and what ln:/lnast-dump emit. Only tolg's build of this unit's own graph
+  // reads the private one, inside a Lowering_scope. In memory only; every
+  // replace_body drops it.
+  void               share_name_pool_with(const Lnast& other) noexcept { name_pool_ = other.name_pool_; }
+  void               set_lowering_body(Lnast& lowering);
+  [[nodiscard]] bool has_lowering_body() const noexcept { return lowering_tree_ != nullptr; }
+  class Lowering_scope {
+  public:
+    explicit Lowering_scope(Lnast& ln);
+    ~Lowering_scope();
+    Lowering_scope(const Lowering_scope&)            = delete;
+    Lowering_scope& operator=(const Lowering_scope&) = delete;
+
+  private:
+    Lnast*                         ln_;
+    bool                           active_ = false;
+    std::optional<Tolg_scan_cache> saved_scan_;
+  };
 
   std::string get_simulation_init() const {
     const auto root = get_root();

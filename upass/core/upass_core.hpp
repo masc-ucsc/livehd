@@ -224,11 +224,13 @@ public:
   // written in ALL arms drop its pre-if value from the union. Default: no-op.
   virtual void notify_if_merge_begin() {}
   virtual void notify_if_merge_end(bool /*all_paths_covered*/) {}
-  // Called just before notify_uncertain_arm_begin, once per condition that
-  // holds on that arm's path: the arm's own condition (`negated == false`)
-  // and every earlier condition of the same if/elif chain, which is false
-  // there (`negated == true`). `cond` names the condition's ref. Bitwidth
-  // uses it to narrow a guarded subtraction (`if a > b { a - b }`).
+  // Called just before notify_uncertain_arm_begin with what holds on that
+  // arm's path: the arm's own condition (`negated == false`, for that arm
+  // only), and, once each, the earlier conditions of the same if/elif chain
+  // not sent before (`negated == true`): false on this arm and on every later
+  // arm of the same if (until notify_if_merge_end). `cond` names the
+  // condition's ref. Bitwidth uses it to narrow a guarded subtraction
+  // (`if a > b { a - b }`).
   virtual void notify_arm_guard(std::string_view /*cond*/, bool /*negated*/) {}
 
   // Init-construction window. The runner synthesizes the `init(ref x, …)`

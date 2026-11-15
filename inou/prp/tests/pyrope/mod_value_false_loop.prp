@@ -1,0 +1,11 @@
+/*
+:name: mod_value_false_loop
+:type: compile
+*/
+
+// The mod twin of comb_value_false_loop.
+pub mod top(x:U8) -> (z:U8@[0]) {
+  wire w:U8 = nil
+  w = x + (w - w)
+  z = w
+}

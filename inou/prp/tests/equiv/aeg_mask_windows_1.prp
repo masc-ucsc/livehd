@@ -2,6 +2,8 @@
 :name: aeg_mask_windows_1
 :type: lec
 :set: compile.aegraph.rules_disable=
-:compile_grep: aegraph-rule getmask_getmask .*extracted=[1-9]
+:compile_grep: (aegraph-rule getmask_getmask .*extracted|treeaeg-rule getmask_getmask .*applied)=[1-9]
 */
+// The rewrite may land a step earlier: a comb's private lowering copy runs the tree aegraph (upass/aeg) with the
+// same rules, so the grep accepts either census.
 // HEADER-ONLY variant: aeg_mask_windows.prp compiled by the acyclic e-graph engine.

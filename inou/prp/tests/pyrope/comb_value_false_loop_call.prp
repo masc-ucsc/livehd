@@ -1,0 +1,22 @@
+/*
+:name: comb_value_false_loop_call
+:type: compile
+*/
+
+// A comb with a value-false loop, instanced from a mod (lowered on its own)
+// and inlined into it (a defaulted argument forces the splice of its source
+// body, which the mod's own tree step then folds).
+comb lp(x:U8) -> (z:U8) {
+  wire w:U8 = nil
+  w = x + (w - w)
+  z = w
+}
+pub comb li(x:U8, y:U8 = 0) -> (z:U8) {
+  wire w:U8 = nil
+  w = (x ^ y) + (w - w)
+  z = w
+}
+pub mod top(x:U8) -> (z:U8@[0], q:U8@[0]) {
+  z = lp(x)
+  q = li(x) ^ 2
+}

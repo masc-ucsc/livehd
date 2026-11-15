@@ -9,6 +9,15 @@ The wrappers in `tools/regression.bzl` preserve existing test attributes and tag
 add domain tags, and select named integration checks plus a stable 10% sample
 as smoke tests. They never change test timeouts or resource requirements.
 
+Tests tagged `scalability` are the exception: they get no domain tag and are
+never sampled as smoke, so only `--config=all` runs them. Each one is a
+scalability contract for the passes that must be linear (pass.upass,
+lnast.tolg, pass.aegraph, pass.bitwidth, Verilog cgen): it generates
+synthetic LNAST and LGraph inputs in C++ at 1x, 4x and 16x size, runs the
+passes in-process, and fails when a pass grows faster than linear
+(`//lhd/tests:scalability_test`). Aggregate new linear passes into it rather
+than adding tests.
+
 `python3 scripts/regression.py -- -c opt` selects groups from staged, unstaged
 and untracked changes. CI uses `--base REV --head HEAD`. Deleted paths and both
 sides of renames count. Shared/unknown paths, missing history and an empty change

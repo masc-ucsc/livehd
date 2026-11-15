@@ -4,7 +4,7 @@
 :type: lec
 */
 // PYROPE-vs-PYROPE group, the fixture of the tree aegraph (upass/aeg, todo 2a-treeaeg): the typed `~` of a U8 is Get_mask(Not x, 0, 8): twice is the low 8 bits of the value.
-// A `mod`: the step rewrites only a body tolg alone reads (a comb's body is inlined and cached as walked).
+// A `mod`: the step rewrites its body in place (a comb's shared body is inlined and cached as walked, so the step runs on its private lowering copy).
 // REFERENCE = every rule group off, so the tree step still shares and forwards but rewrites nothing; `_1` = the rules on.
 pub mod top(a:U8, b:U4) -> (y:U8@[0], z:U4@[0]) {
   y = ~~a

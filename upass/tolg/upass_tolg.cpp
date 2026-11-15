@@ -16366,24 +16366,30 @@ std::shared_ptr<hhds::Graph> uPass_tolg::run(const std::shared_ptr<Lnast>& lnast
   }
   auto g_shared = gio->create_graph();
 
-  Tolg builder(lnast, g_shared.get(), std::move(io_setup), &registry, &lib, reset_style == "async");
-  builder.build();
-
-  // The combined pipe/mod time checker at the tolg seam. A `comb` runs it too
-  // (2c-wire) — but only its acyclicity phase — to catch a combinational loop
-  // through a self-feeding wire in a standalone-compiled comb top.
   {
-    const auto kind = lnast->get_lambda_kind();
-    if (kind == "pipe" || kind == "mod" || kind == "comb") {
-      Time_checker checker(g_shared.get(),
-                           lnast,
-                           builder.take_pending_checks(),
-                           builder.take_flop_depths(),
-                           builder.take_sub_times(),
-                           builder.take_plain_reg_flops(),
-                           builder.take_inserted_flops(),
-                           builder.take_wire_cuts());
-      checker.run();
+    // A comb lowers its private body (the tree-aegraph'd copy, see
+    // Lnast::set_lowering_body) for its own graph; every cross-unit scan
+    // (ABI flags, lowering order, inlining) keeps reading the shared body.
+    Lnast::Lowering_scope lowering_body(*lnast);
+    Tolg                  builder(lnast, g_shared.get(), std::move(io_setup), &registry, &lib, reset_style == "async");
+    builder.build();
+
+    // The combined pipe/mod time checker at the tolg seam. A `comb` runs it too
+    // (2c-wire) — but only its acyclicity phase — to catch a combinational loop
+    // through a self-feeding wire in a standalone-compiled comb top.
+    {
+      const auto kind = lnast->get_lambda_kind();
+      if (kind == "pipe" || kind == "mod" || kind == "comb") {
+        Time_checker checker(g_shared.get(),
+                             lnast,
+                             builder.take_pending_checks(),
+                             builder.take_flop_depths(),
+                             builder.take_sub_times(),
+                             builder.take_plain_reg_flops(),
+                             builder.take_inserted_flops(),
+                             builder.take_wire_cuts());
+        checker.run();
+      }
     }
   }
   lowering_pass().pending.erase(lnast->get_graph_name());  // its body is final now

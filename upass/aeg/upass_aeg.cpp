@@ -292,6 +292,8 @@ struct Name_info {
   bool     time_src  = false;  // may sit at a non-zero cycle on its own (see time_taint)
   bool     timed     = false;  // time_src, or computed from one
   bool     pin_seen  = false;
+  uint32_t twin_group = kNone;  // the twin group of its latest definition (see twin_key)
+  uint32_t io_pos     = 0;      // an input port's declaration position (tolg's input pin order)
 };
 
 struct Stmt_info {
@@ -313,6 +315,7 @@ struct Stmt_info {
   bool     arm_seen   = false;  // time_taint visited it as part of a timed if's arms
   bool     if_up      = false;  // time_taint marked this if (and its enclosing ifs) a W-seed
   bool     no_slice   = false;  // ends a cycle-check chain: never respelled to a get_mask or sext
+  uint32_t twin       = kNone;  // twin group: statements that will hash-cons to one class
 };
 
 class Prescan {
@@ -320,8 +323,10 @@ public:
   // `timed`: the unit's cycle checks run on the post-step body (see
   // time_taint); `pipe`: its plain regs are feedforward stages.
   Prescan(const Lnast& ln, const Lnast_tree_io& io, bool timed = false, bool pipe = false) : ln_(ln), timed_(timed), pipe_(pipe) {
+    uint32_t io_pos = 0;
     for (const auto& e : io.inputs) {
       auto& n    = info(name_local(e.name));
+      n.io_pos    = io_pos++;
       n.io_input  = e.array_size == 0 && e.sig == Io_sig::none;
       n.input     = true;
       n.clock     = e.sig != Io_sig::none;
@@ -367,6 +372,7 @@ public:
       stmt_[s].pinned = true;  // after the closure: a chain link pins itself, not its cone
     }
     clock_taint();
+    finalize_twins();
   }
 
   [[nodiscard]] Name_info&       info(uint32_t n) { return name_[n]; }
@@ -380,6 +386,19 @@ public:
   [[nodiscard]] bool             worth_walking() const { return mapped_ != 0 || tmp_stores_ != 0; }
   [[nodiscard]] std::span<const uint32_t> reads_of(uint32_t s) const {
     return {reads_.data() + stmt_[s].read_begin, stmt_[s].read_end - stmt_[s].read_begin};
+  }
+  // Readers to credit when statement s imports (precount_twins): its group's
+  // total for the first member, its own live readers otherwise.
+  [[nodiscard]] uint32_t twin_readers(uint32_t s) const {
+    const auto g   = stmt_[s].twin;
+    const auto own = stmt_[s].dst == kNone ? 0 : name_[stmt_[s].dst].live;
+    return g != kNone && g < twin_first_.size() && twin_first_[g] == s ? twin_total_[g] : own;
+  }
+  // A later member of a twin group: its readers were credited to the first,
+  // unless its import makes a class of its own.
+  [[nodiscard]] bool later_twin(uint32_t s) const {
+    const auto g = stmt_[s].twin;
+    return g != kNone && g < twin_first_.size() && twin_first_[g] != kNone && twin_first_[g] != s;
   }
 
   uint32_t local(int32_t id) {
@@ -418,6 +437,60 @@ public:
     return Kind::unknown;
   }
   uint32_t name_local(std::string_view text) { return local(ln_.intern_name(text)); }
+
+  // Readers are counted when a statement is imported, but a structural twin
+  // can come AFTER the first reader of its class was built: t1 = a | b read by
+  // t2 = t1 | c, and a later t1' = a | b. `flatten` asking "does t1 have one
+  // reader?" while importing t2 would absorb t1 and leave t1' as a second a | b
+  // (the LGraph engine's precount_twins). So statements that will hash-cons to
+  // one class -- same op and region, same operand groups -- share one reader
+  // total, credited to the first. The key ignores operand order and treats a
+  // multi-def name by its id, so it can only group too much: that blocks a
+  // flatten, never allows a wrong one.
+  [[nodiscard]] uint32_t twin_group_of(const Lnast_nid& dst, Ltype t) {
+    absl::InlinedVector<uint64_t, 4> ids;
+    for (auto c = dst.next_sibling(); !c.is_invalid(); c = c.next_sibling()) {
+      const auto ct = ln_.get_type(c);
+      if (N::is_ref(ct)) {
+        const auto x = local(ln_.get_name_id(c));
+        const auto g = name_[x].twin_group;
+        ids.push_back(g != kNone && name_[x].defs == 1 ? (uint64_t{1} << 40) | g : (uint64_t{1} << 62) | x);
+      } else if (N::is_const(ct)) {
+        ids.push_back((uint64_t{1} << 61) | (std::hash<std::string_view>{}(ln_.get_name(c)) & ((uint64_t{1} << 60) - 1)));
+      } else {
+        return kNone;
+      }
+    }
+    std::ranges::sort(ids);
+    uint64_t key = mix64(0x7477696eULL ^ static_cast<uint64_t>(t), region_);
+    for (const auto id : ids) {
+      key = mix64(key, id);
+    }
+    const auto [it, fresh] = twin_ids_.try_emplace(key, static_cast<uint32_t>(twin_ids_.size()));
+    return it->second;
+  }
+  static uint64_t mix64(uint64_t a, uint64_t b) {
+    uint64_t x  = a ^ (b + 0x9E3779B97F4A7C15ULL + (a << 6) + (a >> 2));
+    x          ^= x >> 31;
+    x          *= 0xBF58476D1CE4E5B9ULL;
+    return x ^ (x >> 29);
+  }
+  // After the DCE marks and the cycle-check freezes: the first imported member
+  // of each group carries the group's live readers.
+  void finalize_twins() {
+    twin_first_.assign(twin_ids_.size(), kNone);
+    twin_total_.assign(twin_ids_.size(), 0);
+    for (uint32_t s = 0; s < stmt_.size(); ++s) {
+      const auto g = stmt_[s].twin;
+      if (g == kNone || stmt_[s].dead || time_frozen(s) || stmt_[s].dst == kNone) {
+        continue;
+      }
+      if (twin_first_[g] == kNone) {
+        twin_first_[g] = s;
+      }
+      twin_total_[g] += name_[stmt_[s].dst].live;
+    }
+  }
 
   // A declaration attribute (`const n::[synth.adder="prefix"] = a + b`) is an
   // attr_set next to n's declaration, and tolg applies it to n's whole fan-in
@@ -648,11 +721,14 @@ private:
       return;
     }
     const auto n        = local(ln_.get_name_id(dst));
+    const auto twin     = is_mapped_op(t) && name_[n].tmp ? twin_group_of(dst, t) : kNone;
     auto&      ni       = name_[n];
     stmt_[s].dst        = n;
     stmt_[s].next_def   = ni.def_head;
     ni.def_head         = s;
     ++ni.defs;
+    stmt_[s].twin = twin;
+    ni.twin_group = twin;
     if (special_dst(t) || (N::is_get_mask(t) && reads_special)) {
       ni.special = true;  // a slice of a memory read or partial-write chain extends tolg's chain by name
     }
@@ -1128,6 +1204,9 @@ private:
   std::vector<Stmt_info>                     stmt_;
   std::vector<uint32_t>                      reads_;
   std::vector<uint32_t>                      attributed_;  // targets of a synth.* attr_set
+  absl::flat_hash_map<uint64_t, uint32_t>    twin_ids_;    // twin key -> group
+  std::vector<uint32_t>                      twin_first_;  // per group: its first imported statement
+  std::vector<uint32_t>                      twin_total_;  // per group: live readers of all its statements
   std::vector<uint32_t>                      scratch_;
   std::vector<uint32_t>                      agg_reads_;
   std::vector<std::pair<uint32_t, uint32_t>> agg_def_;  // (name, aggregate statement)
@@ -1612,7 +1691,7 @@ private:
     ag::Enode_attrs attrs;
     attrs.has_color = si.region != 0;
     attrs.color     = static_cast<int32_t>(si.region);
-    const auto imp  = import(t, ops, attrs, pre_.info(n).live, pre_.chain_inner(s));
+    const auto imp  = import(t, ops, attrs, pre_.twin_readers(s), pre_.later_twin(s), pre_.chain_inner(s));
     if (!imp) {
       kill(n);
       return;
@@ -1646,7 +1725,7 @@ private:
   // The import table: exactly the cells upass.tolg lowers each statement to.
   // Returns (the statement's own class, the class after the rules).
   std::optional<std::pair<Class_id, Class_id>> import(Ltype t, std::span<const Opnd> o, const ag::Enode_attrs& attrs,
-                                                      uint32_t readers, bool chain) {
+                                                      uint32_t readers, bool later_twin, bool chain) {
     absl::InlinedVector<ag::Operand, 8> v;
     Ntype_op                            op = Ntype_op::Invalid;
     const size_t                        k  = o.size();
@@ -1821,7 +1900,7 @@ private:
     if (top.folded) {
       return std::pair{top.cls, top.cls};
     }
-    readers_[top.raw] += readers;
+    readers_[top.raw] += later_twin && !top.created ? 0 : readers;  // a twin hash-consed into the first's class
     Class_id r = top.cls;
     if (top.created) {
       chain_inner_[top.raw] = chain ? 1 : 0;
@@ -1936,6 +2015,9 @@ private:
         return false;
       }
       lt = cmp->op == Ntype_op::EQ ? N::Lnast_ntype_ne : cmp->op == Ntype_op::GT ? N::Lnast_ntype_le : N::Lnast_ntype_ge;
+      if (cmp->op == Ntype_op::EQ && eg_.cls(a).kind == ag::Egraph::Kind::konst && eg_.cls(b).kind != ag::Egraph::Kind::konst) {
+        std::swap(a, b);  // `x != 3`, the constant last as the plain EQ spelling has it
+      }
       return spell_compare(a, b);
     };
 
@@ -1988,9 +2070,57 @@ private:
         const bool bitwise = en->op != Ntype_op::Mult;
         const Kind ctx     = bitwise && k_dst != Kind::unknown ? k_dst : Kind::integer;
         ok                 = true;
-        // Constants last, as the front ends spell an n-ary op (the bank is a multiset).
+        // Pin order is what tolg, the LGraph passes and the ABC AIG walk see (the
+        // e-node keeps a commutative bank sorted by class, which perturbed
+        // ibex's critical path and its simulator kernel order). The same
+        // multiset as the statement reads keeps the statement's order. A changed
+        // one (a flatten absorbed a chain link) takes the order the LGraph
+        // engine's rewire() gives the same rewrite, so the result is what
+        // the LGraph flatten would have built: drivers in creation order --
+        // here the holder's statement, inputs first in port order -- newest
+        // first for And/Or, oldest first for Xor/Mult, constants last.
         absl::InlinedVector<ag::Operand, 8> ordered(ops.begin(), ops.end());
-        std::ranges::stable_partition(ordered, [&](const ag::Operand& o) { return eg_.cls(o.cls).kind != ag::Egraph::Kind::konst; });
+        absl::InlinedVector<uint64_t, 8>                                rank(ordered.size(), 0);
+        absl::flat_hash_map<Class_id, absl::InlinedVector<uint32_t, 2>> read_pos;  // a class read twice keeps both slots
+        for (uint32_t j = static_cast<uint32_t>(reads.size()); j-- > 0;) {
+          if (reads[j].cls != kNoClass) {
+            read_pos[eg_.resolve(reads[j].cls)].push_back(j);  // reversed: pop_back yields the earliest
+          }
+        }
+        bool same_multiset = ordered.size() == reads.size();
+        for (size_t i = 0; i < ordered.size(); ++i) {
+          if (auto it = read_pos.find(eg_.resolve(ordered[i].cls)); it != read_pos.end() && !it->second.empty()) {
+            rank[i] = it->second.back();
+            it->second.pop_back();
+          } else {
+            same_multiset = false;
+          }
+        }
+        if (!same_multiset) {
+          const bool newest_first = en->op == Ntype_op::And || en->op == Ntype_op::Or;
+          for (size_t i = 0; i < ordered.size(); ++i) {
+            const auto c = ordered[i].cls;
+            if (eg_.cls(c).kind == ag::Egraph::Kind::konst) {
+              rank[i] = ~uint64_t{0};
+              continue;
+            }
+            const uint32_t h       = c < holder_.size() ? holder_[c].name : kNone;
+            // created: an input pin first (by port), then a holder by its statement
+            const uint64_t created = h != kNone && io_leaf_[c] != 0 ? pre_.info(h).io_pos
+                                     : h != kNone                   ? (uint64_t{1} << 32) | holder_[c].seq
+                                                                    : (uint64_t{1} << 33) - 1;
+            rank[i]                = newest_first ? ((uint64_t{1} << 34) - 1 - created) : created;
+          }
+        }
+        absl::InlinedVector<size_t, 8> perm(ordered.size());
+        for (size_t i = 0; i < perm.size(); ++i) {
+          perm[i] = i;
+        }
+        std::ranges::stable_sort(perm, [&](size_t x, size_t y) { return rank[x] < rank[y]; });
+        const absl::InlinedVector<ag::Operand, 8> by_class(ordered.begin(), ordered.end());
+        for (size_t i = 0; i < perm.size(); ++i) {
+          ordered[i] = by_class[perm[i]];
+        }
         for (const auto& x : ordered) {
           Spelled sp;
           if (!spell_operand(x.cls, ctx, reads, sp)) {

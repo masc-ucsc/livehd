@@ -17556,33 +17556,43 @@ void uPass_runner::run() {
   // read as written. The DCE's own gates (a materialized body, constprop's
   // folds); a provenance emission keeps the source spelling.
   //
-  // Only a body tolg alone reads (a concrete mod/pipe: the compile cache's
-  // metadata-only rule). A comb's post-walk body is what the inliner splices
-  // into callers and what the compile cache restores for a warm caller, so it
-  // must stay what a caller's walk reaches from the source body. The step
-  // simplifies with this unit's own facts (its port kinds and widths), which an
-  // inlined copy no longer has: a warm caller re-walking a simplified body
-  // differed from a cold one inlining the source. The caller's own step
-  // simplifies the inlined copy, identically warm or cold.
+  // In place only on a body tolg alone reads (a concrete mod/pipe: the
+  // compile cache's metadata-only rule). A comb's post-walk body is what the
+  // inliner splices into callers and what the compile cache restores for a
+  // warm caller, so it stays what a caller's walk reaches from the source
+  // body (the step simplifies with this unit's own facts -- its port kinds
+  // and widths -- which an inlined copy no longer has; the caller's own step
+  // simplifies the inlined copy, identically warm or cold). A comb gets the
+  // step on a private copy instead, used only for its own standalone
+  // lowering (below), so a value-false structural loop (`w = x + (w - w)`)
+  // is accepted in a comb exactly as in a mod.
   const auto lambda_kind = lm->get_lnast()->get_lambda_kind();
   const bool tolg_only   = lambda_kind == "mod" || lambda_kind == "pipe";
+  const bool aeg_gate    = materialize_ && staging && staging_rewrite_ != nullptr && has_constprop() && !preserve_param_provenance_;
   staging_rewrite_stats_ = {};
-  if (materialize_ && staging && staging_rewrite_ != nullptr && tolg_only && has_constprop() && !preserve_param_provenance_) {
-    staging_rewrite_stats_ = staging_rewrite_({*staging,
-                                               lm->get_lnast()->io_meta(),
-                                               lm->get_top_module_name(),
-                                               !lm->get_lnast()->get_skip_timecheck(),
-                                               lambda_kind == "pipe"});
+  lowering_staging_.reset();
+  const auto run_aeg = [&](bool pipe, std::string_view what) {
+    const auto st = staging_rewrite_(
+        {*staging, lm->get_lnast()->io_meta(), lm->get_top_module_name(), !lm->get_lnast()->get_skip_timecheck(), pipe});
+    staging_rewrite_stats_ += st;
     if (dispatch_stats_) {
       std::print(stderr,
-                 "uPass stats [{}]:   tree-aeg    {:9.1f}s  ({} stmts, {} forwarded, {} respelled, {} budget hit)\n",
+                 "uPass stats [{}]:   tree-aeg{}    {:9.1f}s  ({} stmts, {} forwarded, {} respelled, {} budget hit)\n",
                  lm->get_top_module_name(),
-                 static_cast<double>(staging_rewrite_stats_.ns) / 1e9,
-                 staging_rewrite_stats_.stmts,
-                 staging_rewrite_stats_.forwarded,
-                 staging_rewrite_stats_.respelled,
-                 staging_rewrite_stats_.budget_hit);
+                 what,
+                 static_cast<double>(st.ns) / 1e9,
+                 st.stmts,
+                 st.forwarded,
+                 st.respelled,
+                 st.budget_hit);
     }
+  };
+  std::shared_ptr<Lnast> lowering;
+  if (aeg_gate && tolg_only) {
+    run_aeg(lambda_kind == "pipe", "");
+  } else if (aeg_gate && lambda_kind == "comb") {
+    lowering = std::make_shared<Lnast>(staging->tree_ptr()->clone(), lm->get_top_module_name());
+    lowering->share_name_pool_with(*staging);
   }
 
   // Post-walk DCE on staging — removes definition statements (assign,
@@ -17612,6 +17622,19 @@ void uPass_runner::run() {
     for (auto& entry : upasses) {
       entry.pass->walk_dest(staging);
     }
+  }
+
+  // The comb's private lowering copy takes a mod's tail: tree aegraph, DCE,
+  // dest-walk. A pure function of this unit's post-walk body, so warm == cold.
+  if (lowering) {
+    std::swap(staging, lowering);
+    run_aeg(false, " (lowering copy)");
+    dead_code_eliminate_staging();
+    for (auto& entry : upasses) {
+      entry.pass->walk_dest(staging);
+    }
+    std::swap(staging, lowering);
+    lowering_staging_ = std::move(lowering);
   }
 
   // Per-pass finalization. Runs after the walk finishes — passes use
@@ -20937,11 +20960,20 @@ void uPass_runner::tick_uncertain_body() {
   while (lm->move_to_sibling()) {
     symbol_table_.block_scope(lm->current_scope_uid());
     symbol_table_.mark_current_uncertain();
+    // The body is an uncertain arm of its own one-arm merge (it may not run):
+    // without a frame, bitwidth would treat it as another arm of an enclosing
+    // if -- restarting that arm's guard window and popping its own condition.
+    for (auto& e : upasses) {
+      e.pass->notify_if_merge_begin();
+    }
     dispatch_to_passes(&upass::uPass::notify_uncertain_arm_begin);
     register_tick_body_writes();
     check_tick_body_kinds();
     emit_subtree_verbatim();
     dispatch_to_passes(&upass::uPass::notify_uncertain_arm_end);
+    for (auto& e : upasses) {
+      e.pass->notify_if_merge_end(/*all_paths_covered=*/false);
+    }
     symbol_table_.leave_scope();
   }
 
@@ -21606,6 +21638,7 @@ void uPass_runner::process_if() {
     // The ref of every condition seen so far (the last one is the current
     // arm's): what holds on an arm's path, for notify_arm_guard.
     std::vector<std::string> cond_refs;
+    std::size_t              negated_sent = 0;  // cond_refs[0..negated_sent) went out negated (notify_arm_guard)
 
     auto cond_value = [this]() -> std::optional<Dlop> {
       if (lm->get_raw_ntype() == Lnast_ntype::Lnast_ntype_const) {
@@ -21669,13 +21702,21 @@ void uPass_runner::process_if() {
         if (uncertain) {
           next_block_uncertain_ = true;  // The arm's stmts scope gets mark_current_uncertain
           // An arm's own condition holds on its path (a trailing else has
-          // none); every earlier condition of the chain is false there.
+          // none); every earlier condition of the chain is false there and on
+          // every later arm, so each is sent negated once, when it first
+          // becomes an earlier condition (resending all of them per arm was
+          // O(arms^2) on a long elif/match chain).
           const std::size_t own = is_trailing_else ? cond_refs.size() : cond_refs.size() - 1;
-          for (std::size_t i = 0; i < cond_refs.size(); ++i) {
-            if (!cond_refs[i].empty()) {
+          for (; negated_sent < own; ++negated_sent) {
+            if (!cond_refs[negated_sent].empty()) {
               for (auto& e : upasses) {
-                e.pass->notify_arm_guard(cond_refs[i], /*negated=*/i != own);
+                e.pass->notify_arm_guard(cond_refs[negated_sent], /*negated=*/true);
               }
+            }
+          }
+          if (own < cond_refs.size() && !cond_refs[own].empty()) {
+            for (auto& e : upasses) {
+              e.pass->notify_arm_guard(cond_refs[own], /*negated=*/false);
             }
           }
           dispatch_to_passes(&upass::uPass::notify_uncertain_arm_begin);

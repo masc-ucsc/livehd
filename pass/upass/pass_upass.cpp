@@ -838,6 +838,11 @@ void Pass_upass::work(Eprp_var& var) {
       auto staged = runner.take_staging();
       if (staged) {
         ln->replace_body(staged);  // adopts staged's name pool with the body
+        // After replace_body (which drops any older copy): a comb's private
+        // lowering body, which only its own tolg build reads.
+        if (auto low = runner.take_lowering_staging()) {
+          ln->set_lowering_body(*low);
+        }
       }
     }
     if (is_template) {

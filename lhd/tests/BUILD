@@ -16,7 +16,8 @@
 #    LEC of each against the golden verilog0.
 
 
-load("//tools:regression.bzl", "py_test", "sh_test")
+load("//tools:regression.bzl", "cc_test", "py_test", "sh_test")
+load("//tools:copt_default.bzl", "COPTS")
 load("//tools:lhd.bzl", "lhd_verilog")
 
 # The technology mappers `lhd synth --set synth.mapper=` / `lhd pass <mapper>`
@@ -3884,5 +3885,32 @@ sh_test(
     data = [
         "//lhd",
         "//inou/lefdef:test_data",
+    ],
+)
+
+# Scalability contract (tools/regression.md): synthetic LNAST and LGraph inputs
+# generated in C++ at 1x/4x/16x through every pass that must be linear.
+# --config=all only.
+cc_test(
+    name = "scalability_test",
+    size = "large",
+    srcs = ["scalability_test.cpp"],
+    copts = COPTS,
+    # Timing ratios: run alone, not beside the rest of --config=all.
+    tags = [
+        "exclusive",
+        "scalability",
+    ],
+    deps = [
+        "//core",
+        "//graph",
+        "//inou/cgen:inou_cgen",
+        "//lnast",
+        "//pass/aegraph:pass_aegraph",
+        "//pass/bitwidth:pass_bitwidth",
+        "//pass/upass:pass_upass",
+        "//upass/tolg:upass_tolg",
+        "@googletest//:gtest_main",
+        "@hhds//hhds:graph",
     ],
 )

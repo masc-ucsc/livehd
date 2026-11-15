@@ -1885,6 +1885,22 @@ TEST(CpropMuxSharing, TwoGroupSelectTreePreservesWideSignedControlsAndBooleanDat
   }
 }
 
+// The LEC/semdiff preflight fold re-simplifies with cprop alone (no bitwidth
+// follows) and requires every cell sized: the predicate Mux that
+// mux(s,mux(c,a,b),mux(d,a,b)) -> mux(mux(s,c,d),a,b) builds must carry a
+// width. Its data inputs here are 8-bit graph inputs (io decl width only).
+TEST(CpropMuxSharing, TwoGroupPredicateIsStamped) {
+  Mux_graph f("two_group_stamped", 3, 8, true, true);
+  f.mux(f.controls[0], f.mux(f.controls[1], f.a, f.b), f.mux(f.controls[2], f.a, f.b)).connect_sink(f.graph->get_output_pin("out"));
+  livehd::share_mux_regions(*f.graph, false);
+  ASSERT_EQ(f.count(Ntype_op::Mux), 2);
+  for (auto node : f.graph->body().nodes()) {
+    if (gu::type_op_of(node) == Ntype_op::Mux || gu::type_op_of(node) == Ntype_op::Hotmux || gu::type_op_of(node) == Ntype_op::EQ) {
+      EXPECT_GT(gu::bits_of(node.get_driver_pin(0)), 0) << "unsized " << Ntype::get_name(gu::type_op_of(node));
+    }
+  }
+}
+
 TEST(CpropMuxSharing, TwoGroupEqualCostRejectionLeavesNoResidue) {
   Mux_graph f("two_group_no_gain", 3);
   auto      left  = f.mux(f.controls[1], f.a, f.b);

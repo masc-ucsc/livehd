@@ -4,7 +4,7 @@
 :type: lec
 */
 // PYROPE-vs-PYROPE group, the fixture of the tree aegraph (upass/aeg, todo 2a-treeaeg): the double complement of a signed (untyped `~`) value is the value.
-// A `mod`: the step rewrites only a body tolg alone reads (a comb's body is inlined and cached as walked).
+// A `mod`: the step rewrites its body in place (a comb's shared body is inlined and cached as walked, so the step runs on its private lowering copy).
 // REFERENCE = every rule group off, so the tree step still shares and forwards but rewrites nothing; `_1` = the rules on.
 pub mod top(a:S8, b:S8) -> (y:S8@[0], z:S9@[0]) {
   const t:S9 = a + b

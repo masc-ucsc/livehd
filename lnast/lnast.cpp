@@ -91,6 +91,39 @@ void Lnast::replace_body(std::shared_ptr<hhds::Tree> new_body) {
   // staging's own marks after this).
   dce_dead_stmts_.clear();
   tolg_scan_cache_ = {};
+  lowering_tree_.reset();  // built against the body just replaced
+  lowering_dead_stmts_.clear();
+}
+
+void Lnast::set_lowering_body(Lnast& lowering) {
+  I(lowering.name_pool_ == name_pool_, "set_lowering_body: the copy must share this Lnast's name pool");
+  lowering_tree_       = lowering.tree_ptr();
+  lowering_dead_stmts_ = std::move(lowering.dce_dead_stmts_);
+  // The root carries the unit's simulation program; the copy predates the
+  // body swap that re-attached it to this body's root.
+  if (const auto init = get_simulation_init(); !init.empty()) {
+    lowering_tree_->get_root_node().attr(lnast_attrs::simulation_init).set(init);
+  }
+}
+
+Lnast::Lowering_scope::Lowering_scope(Lnast& ln) : ln_(&ln) {
+  if (ln.lowering_tree_ == nullptr) {
+    return;
+  }
+  active_     = true;
+  saved_scan_ = ln.tolg_scan_cache_;
+  std::swap(ln.tree_, ln.lowering_tree_);
+  std::swap(ln.dce_dead_stmts_, ln.lowering_dead_stmts_);
+  ln.tolg_scan_cache_ = {};  // nothing memoized off the private body outlives the scope
+}
+
+Lnast::Lowering_scope::~Lowering_scope() {
+  if (!active_) {
+    return;
+  }
+  std::swap(ln_->tree_, ln_->lowering_tree_);
+  std::swap(ln_->dce_dead_stmts_, ln_->lowering_dead_stmts_);
+  ln_->tolg_scan_cache_ = *saved_scan_;
 }
 
 void Lnast::replace_body(const std::shared_ptr<Lnast>& staging) {

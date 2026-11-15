@@ -166,21 +166,47 @@ private:
   struct If_merge_frame {
     absl::flat_hash_map<std::string, Lnast_range> arm_union;
     absl::flat_hash_map<std::string, int>         arm_writes;
-    // The range each arm-written var had BEFORE this if (captured at its first
-    // write inside it): the value a path that skips every write keeps, and the
-    // value every later arm starts from. pre_if_wide: those that were too wide.
-    absl::flat_hash_map<std::string, Lnast_range> pre_if;
-    absl::flat_hash_set<std::string>              pre_if_wide;
     // The vars some arm left too wide / unknown-wide (its last write was): the
     // merge keeps them wide, since a later bounded arm only covers its path.
     absl::flat_hash_set<std::string>              arm_wide;
-    // Compiler temps first written INSIDE this if (no value of their own
-    // before it): an if/match EXPRESSION's result. A path that skips every arm
-    // leaves such a temp with no value at all -- a `match` is exhaustive, so
-    // that path does not exist -- hence the arms' union alone is its range.
-    absl::flat_hash_set<std::string>              fresh_tmps;
     int                                           uncertain_arms = 0;
+    // Identity for pre_caps_ (Pre_cap::stamp), increasing across frames.
+    uint32_t                                      serial         = 0;
+    // trail_ size when the current arm began: the names touched since are
+    // exactly those the next arm must restore to their pre-if values.
+    size_t                                        trail_mark     = 0;
+    // Guards (see Order_fact): when the current arm began (a fact is live only
+    // if neither of its names was written after that), and the guard pairs this
+    // frame pushed for the whole if (earlier conditions, negated) and for the
+    // current arm (its own condition).
+    uint64_t                                      arm_start      = 0;
+    std::vector<std::string>                      negated_pairs;
+    std::vector<std::string>                      own_pairs;
   };
+  // The range a var had BEFORE an if (captured at its first write inside it):
+  // the value a path that skips every write keeps, and the value every later
+  // arm starts from. One capture serves every frame open at that moment that
+  // had not seen the var yet: frame F's pre-if value is the earliest capture
+  // with stamp >= F.serial (stamps are the innermost frame's serial at
+  // capture, so they increase). `wide`: too wide for a range; `fresh`: a
+  // compiler temp with no value of its own before the if -- an if/match
+  // EXPRESSION's result, whose arms' union alone is its range (a `match` is
+  // exhaustive, so no path keeps a pre-if value). Was a per-frame map filled
+  // for every enclosing frame on each first write (cubic on a deep if nest).
+  struct Pre_cap {
+    uint32_t    stamp = 0;
+    Lnast_range pre;
+    bool        wide  = false;
+    bool        fresh = false;
+  };
+  absl::flat_hash_map<std::string, std::vector<Pre_cap>> pre_caps_;
+  uint32_t                                               frame_serial_ = 0;
+  [[nodiscard]] const Pre_cap*                           pre_cap(std::string_view name, const If_merge_frame& f) const;
+  // Names whose state changed inside an uncertain arm (writes, merge commits,
+  // clears), in order; each frame restores the tail past its trail_mark at
+  // its next arm and truncates it. Was: re-publish every pre-if value at
+  // every arm (quadratic on an elif/match chain).
+  std::vector<std::string>                               trail_;
   // Guarded subtraction (suggestions6 1.8): `if a > b { a - b }` is never
   // negative. cmp_facts_ maps a comparison result (or its log_not) to the
   // ordering it asserts when true, as `big > small` (strict) or `big >= small`.
@@ -193,8 +219,27 @@ private:
     bool        strict{false};
   };
   absl::flat_hash_map<std::string, Order_fact> cmp_facts_;
-  std::vector<Order_fact>                      pending_guards_;
-  std::vector<std::vector<Order_fact>>         guard_stack_;
+  // Live guards, per (big, small) pair, in push order (inner frames last), so
+  // the top of a stack is its latest-starting fact: a fact is live while
+  // neither name was written after its arm began (last_write_), and if the
+  // top is not live no older one is. `strict` keeps the strict ones apart.
+  struct Guard_entry {
+    size_t frame  = 0;  // if_merge_stack_ index: live from that frame's arm_start
+    bool   strict = false;
+  };
+  struct Guard_stacks {
+    std::string              big;
+    std::string              small;
+    std::vector<Guard_entry> all;
+    std::vector<Guard_entry> strict;
+  };
+  absl::flat_hash_map<std::string, Guard_stacks> guards_;
+  absl::flat_hash_map<std::string, uint64_t>     last_write_;
+  uint64_t                                       guard_clock_ = 0;
+  size_t                                         live_guards_ = 0;
+  std::vector<Order_fact>                        pending_own_;  // the next arm's own condition
+  void                                           push_guard(If_merge_frame& f, const Order_fact& g, bool own);
+  void                                           pop_guards(std::vector<std::string>& pairs);
   void note_order_fact(std::string_view dst, upass::Src_span src, bool swap, bool strict);
   [[nodiscard]] std::optional<bool> guard_orders(std::string_view big, std::string_view small) const;  // nullopt / strict?
   void retire_guards(std::string_view name);

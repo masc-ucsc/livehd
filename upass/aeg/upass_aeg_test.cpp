@@ -647,6 +647,50 @@ TEST(TreeAegScope, SynthAttributeCoversStreamSsaVersions) {
   EXPECT_EQ(rhs(*t.ln, sm), "%b");
 }
 
+TEST(TreeAegScope, LaterTwinBlocksAnEarlierFlatten) {
+  // t = a | b read by x = t | c, and a later twin y = a | b: t has two
+  // readers in total, so x keeps or(t, c) and the shared a | b stays one cell
+  // (picorv32 mem_done: flattening first left two ORs of rinst, rdata).
+  Tree t;
+  t.in("a");
+  t.in("b");
+  t.in("c");
+  t.op(N::Lnast_ntype_bit_or, "%t", {"a", "b"});
+  auto x = t.op(N::Lnast_ntype_bit_or, "%x", {"%t", "c"});
+  t.store("o1", "%x");
+  t.op(N::Lnast_ntype_bit_or, "%y", {"a", "b"});
+  t.store("o2", "%y");
+  const auto st = t.run();
+  EXPECT_EQ(applied(st, "flatten"), 0u);
+  EXPECT_EQ(kids(*t.ln, x).size(), 3u);
+  EXPECT_EQ(kids(*t.ln, x)[1], "%t");
+}
+
+TEST(TreeAegScope, RespellOrdersAFlattenLikeTheLGraphEngine) {
+  // `c | (a | b)` flattens to Or(a, b, c). The tree writes the operands in the
+  // order the LGraph engine's rewire() gives the same flatten (drivers newest
+  // first for And/Or; inputs by port), so the pin order -- which tolg, the
+  // simulator kernel order and the ABC AIG walk follow -- is what the LGraph
+  // flatten would have built, never e-graph class order.
+  Tree t;
+  t.in("a");
+  t.in("b");
+  t.in("c");
+  t.op(N::Lnast_ntype_bit_and, "%p", {"a", "b"});
+  t.op(N::Lnast_ntype_bit_and, "%q", {"%p", "c"});
+  t.store("o0", "%q");
+  t.op(N::Lnast_ntype_bit_or, "%t", {"a", "b"});
+  auto x = t.op(N::Lnast_ntype_bit_or, "%x", {"c", "%t"});
+  t.store("o1", "%x");
+  const auto st = t.run();
+  ASSERT_GT(applied(st, "flatten"), 0u);
+  const auto k = kids(*t.ln, x);
+  ASSERT_EQ(k.size(), 4u);
+  EXPECT_EQ(k[1], "c");
+  EXPECT_EQ(k[2], "b");
+  EXPECT_EQ(k[3], "a");
+}
+
 TEST(TreeAegScope, RefusedRespellNeverHoldsTheValue) {
   // `w + x + y + z - w` is Sum(x,y,z), three operands: the respell is refused
   // and `%h4` still reads `w`. Were it the holder of x+y+z, `w = x + y + z`
@@ -1485,10 +1529,13 @@ TEST(TreeAegRunner, OrphansAreSweptInRebuildAndMarkMode) {
   }
 }
 
-// The step runs only on a body tolg alone reads (a concrete mod or pipe). A
-// comb's post-walk body is spliced by the inliner and restored by the compile
-// cache for a warm caller, so it keeps the walk's spelling: simplified with
-// the comb's own port facts, a warm caller's re-walk differed from a cold one.
+// The step rewrites in place only a body tolg alone reads (a concrete mod or
+// pipe). A comb's post-walk body is spliced by the inliner and restored by the
+// compile cache for a warm caller, so it keeps the walk's spelling (simplified
+// with the comb's own port facts, a warm caller's re-walk differed from a cold
+// one); the step runs on a private lowering copy that only the comb's own tolg
+// build reads, so a value-false loop lowers in a comb as in a mod. Other kinds
+// are not rewritten at all.
 TEST(TreeAegRunner, OnlyABodyTolgAloneReadsIsRewritten) {
   for (const std::string_view kind : {"mod", "pipe", "comb", ""}) {
     auto ln = cse_unit();
@@ -1498,7 +1545,14 @@ TEST(TreeAegRunner, OnlyABodyTolgAloneReadsIsRewritten) {
     runner.set_staging_rewrite(&upass::aeg::rewrite_staging);
     runner.run();
     const bool tolg_only = kind == "mod" || kind == "pipe";
-    EXPECT_EQ(runner.staging_rewrite_stats().units, tolg_only ? 1U : 0U) << kind;
+    const bool comb      = kind == "comb";
+    EXPECT_EQ(runner.staging_rewrite_stats().units, tolg_only || comb ? 1U : 0U) << kind;
+    auto lowering = runner.take_lowering_staging();
+    EXPECT_EQ(lowering != nullptr, comb) << kind;
+    if (lowering) {
+      EXPECT_FALSE(defines(*lowering, "%b", true)) << kind;
+      EXPECT_TRUE(has_type(*lowering, N::Lnast_ntype_shl)) << kind;
+    }
     auto staging = runner.take_staging();
     ASSERT_NE(staging, nullptr);
     EXPECT_EQ(defines(*staging, "%b", true), !tolg_only) << kind;
