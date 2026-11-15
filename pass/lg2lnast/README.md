@@ -268,6 +268,24 @@ when a memory write asks for it; and only the modules the roots still call after
 lowered (a module spliced into its parent needs no LNAST of its own: minion's frontend was lowered
 three times). minion: 18.7M tape ops -> 318k, the walk 7.4 s -> 0.4 s.
 
+Nested mux arms and the LNAST tree aegraph (2026-11-15). Under `lhd sim` a cell whose every use is
+one data arm of one `Mux` (directly or through other cells of that arm) is lowered INSIDE that arm's
+`if` block, so a mux tree is nested ifs (`Lowering::nest_arms`). The walk computes the same values
+(an arm-local temp is not merged past its `if`, which also keeps the walk linear on a deep tree:
+xs_mini16 went 0.8 s -> 17.9 s before that rule, 0.9 s after). Then, on a design of 50k lowered
+statements or more, lnast_sim runs the tree aegraph (`upass::aeg::rewrite_staging`) on every module.
+Its sharing is scoped to an `if` arm, so it never merges the exclusive cones cgen_llvm's conditional
+regions skip; its gain is sharing across kernels, which LLVM cannot do. Below 50k statements every
+lhdsuite design is one kernel, where LLVM's GVN already shares the same values (rocket, ibex: post-O2
+instruction counts within 0.3%) and the step only reorders the kernel (rocket ran 11% slower). Same
+output on every lhdsuite core; multi-copy medians vs before (an identical `drv.bin` copied to another
+file can time up to 9% apart on this host, so a single copy cannot resolve a few percent): minion
+-3.7%, cva6 -2.8%, boom +0.7%, xs_mini16 0.0%, xs_renametable +3.7% (open: the step forwards 31% of
+its statements but removes 0.1% of the live ops, so it only reorders), single-kernel cores unchanged
+(rocket's kernel is byte-identical). The step's clock inputs are a flop's clock_pin, a latch's enable
+and every memory port's clock; treating register ENABLES as clocks too (which keeps their cones as
+written) measured boom -1.3% instead, within noise of the correct model.
+
 Timing switches: `LHD_SIM_LNAST_TIME=1` (phases), `LHD_SIM_LLVM_TIME=1` (per kernel); use an optimized
 `lhd` (`bazel build -c opt`): a fastbuild `lhd` is 10-30x slower in LLVM and misleads.
 

@@ -11,6 +11,7 @@
 #include <map>
 #include <sstream>
 
+#include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "cpp_ident.hpp"
 #include "debug_env.hpp"
@@ -19,10 +20,11 @@
 #include "lnast_llvm.hpp"
 #include "lnast_sim_rt.hpp"
 #include "node_util.hpp"
-#include "width_validation.hpp"
 #include "occurrence_materialize.hpp"
 #include "pass_lg2lnast.hpp"
 #include "sim_tune_rt.hpp"
+#include "upass_aeg.hpp"
+#include "width_validation.hpp"
 
 namespace livehd::lnast_llvm {
 
@@ -314,6 +316,114 @@ Sim_emitted emit_sim(const Sim_request& request) {
     }
   }
   lap("lower to LNAST (pass.lg2lnast)");
+  // The LNAST tree aegraph (upass/aeg) on each lowered module. It only retypes and renames statements
+  // (order_view emits just what a root needs, so what it orphans is dropped there). lg2lnast nests a
+  // Mux arm's own cells inside the arm and the step scopes its sharing to an arm, so it never merges
+  // the exclusive cones cgen_llvm's conditional regions skip when the arm is not taken.
+  //
+  // Its gain is sharing ACROSS kernels, which LLVM cannot do (minion -3.7%, cva6 -2.8%). A
+  // design under kTreeAegMinStmts lowered statements is one kernel, where LLVM's GVN shares the same
+  // values (rocket and ibex: post-O2 instruction counts within 0.3%): there the step can only reorder
+  // the kernel, and rocket's single kernel ran 11% slower reordered. Every multi-kernel lhdsuite
+  // design has 82k statements or more, every single-kernel one 21k or fewer.
+  constexpr size_t kTreeAegMinStmts = 50000;
+  size_t           lowered_stmts    = 0;
+  {
+    // Statements, nested blocks and arms included (the step's own `stmts` count); stops at the cutoff.
+    std::vector<std::pair<const Lnast*, Lnast_nid>> blocks;
+    for (const auto& ln : lnasts) {
+      if (const auto root = ln->get_root(); !root.is_invalid()) {
+        for (auto c = root.first_child(); !c.is_invalid(); c = c.next_sibling()) {
+          if (ln->get_type(c) == Lnast_ntype::Lnast_ntype_stmts) {
+            blocks.emplace_back(ln.get(), c);
+          }
+        }
+      }
+    }
+    while (!blocks.empty() && lowered_stmts < kTreeAegMinStmts) {
+      const auto [ln, block] = blocks.back();
+      blocks.pop_back();
+      for (auto st = block.first_child(); !st.is_invalid(); st = st.next_sibling()) {
+        ++lowered_stmts;
+        const auto t = ln->get_type(st);
+        if (t == Lnast_ntype::Lnast_ntype_stmts) {
+          blocks.emplace_back(ln, st);
+        } else if (Lnast_ntype::is_if(t) || t == Lnast_ntype::Lnast_ntype_unique_if || t == Lnast_ntype::Lnast_ntype_for) {
+          for (auto arm = st.first_child(); !arm.is_invalid(); arm = arm.next_sibling()) {
+            if (ln->get_type(arm) == Lnast_ntype::Lnast_ntype_stmts) {
+              blocks.emplace_back(ln, arm);
+            }
+          }
+        }
+      }
+    }
+  }
+  if (lowered_stmts >= kTreeAegMinStmts) {
+    upass::Staging_rewrite_stats                                   total;
+    absl::flat_hash_map<std::string, std::shared_ptr<hhds::Graph>> by_name;
+    for (const auto& g : graphs) {
+      by_name.emplace(std::string(g->get_name()), g);
+    }
+    for (const auto& ln : lnasts) {
+      Lnast_tree_io io;
+      if (const auto it = by_name.find(ln->get_top_module_name()); it != by_name.end() && it->second->get_io()) {
+        const auto&                      g   = it->second;
+        auto                             gio = g->get_io();
+        // lg2lnast types every port as an integer; an input that clocks state is a clock to the step:
+        // a flop's clock_pin, a latch's enable (its gate) and every memory port's clock (offset 2 of
+        // each port block). A flop's or memory's enable is data.
+        absl::flat_hash_set<std::string> clocks;
+        const auto                       note_clock = [&](const hhds::Pin_class& d) {
+          if (!d.is_invalid() && livehd::graph_util::is_graph_input_pin(d)) {
+            clocks.emplace(std::string(d.get_pin_name()));
+          }
+        };
+        for (auto node : g->body().nodes()) {
+          const auto op = livehd::graph_util::type_op_of(node);
+          if (op == Ntype_op::Flop) {
+            note_clock(livehd::graph_util::get_driver_of_sink_name(node, "clock_pin"));
+          } else if (op == Ntype_op::Latch) {
+            note_clock(livehd::graph_util::get_driver_of_sink_name(node, "enable"));
+          } else if (op == Ntype_op::Memory) {
+            for (const auto& sink : node.inp_sorted_pins()) {
+              const auto pid = sink.get_port_id();
+              if (pid < Ntype::Memory_readall_pid && pid % Ntype::Memory_port_stride == 2) {
+                note_clock(sink.get_driver_pin());
+              }
+            }
+          }
+        }
+        for (const auto& d : gio->get_input_pin_decls()) {
+          Lnast_io_entry e;
+          e.name      = std::string(d.name);
+          e.bits      = static_cast<int32_t>(d.bits);
+          e.is_signed = !d.unsign;
+          e.kind      = Io_kind::integer;
+          e.sig       = clocks.contains(e.name) ? Io_sig::clock : Io_sig::none;
+          io.inputs.push_back(std::move(e));
+        }
+        for (const auto& d : gio->get_output_pin_decls()) {
+          Lnast_io_entry e;
+          e.name      = std::string(d.name);
+          e.bits      = static_cast<int32_t>(d.bits);
+          e.is_signed = !d.unsign;
+          e.kind      = Io_kind::integer;
+          io.outputs.push_back(std::move(e));
+        }
+      }
+      total += upass::aeg::rewrite_staging({*ln, io, ln->get_top_module_name(), false, false});
+    }
+    if (timed) {
+      std::fprintf(stderr,
+                   "lnast_sim: tree-aeg units=%llu stmts=%llu forwarded=%llu renamed=%llu respelled=%llu\n",
+                   static_cast<unsigned long long>(total.units),
+                   static_cast<unsigned long long>(total.stmts),
+                   static_cast<unsigned long long>(total.forwarded),
+                   static_cast<unsigned long long>(total.renamed),
+                   static_cast<unsigned long long>(total.respelled));
+    }
+    lap("tree aegraph (upass/aeg)");
+  }
   absl::flat_hash_set<std::string> mine{"lnast_sim_rt.hpp"};
   std::error_code                  ec;
   fs::create_directories(request.odir, ec);

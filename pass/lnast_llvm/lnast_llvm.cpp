@@ -1552,7 +1552,16 @@ void Gen::exec_if(const std::vector<Lnast_nid>& c, size_t at, Env& env) {
     auto        ti    = then_vals.find(n);
     auto        ei    = else_vals.find(n);
     if (!prior && (ti == then_vals.end() || ei == else_vals.end())) {
-      // written in one arm only and undefined before: the other arm leaves it undefined
+      // Written in one arm only and undefined before: a compiler temp there is (nearly always) that
+      // arm's own value -- lg2lnast nests a Mux arm's cells inside the arm. The merge is the arm's
+      // value either way (both sides are it), but logging it made every enclosing if merge it again,
+      // O(depth) per nested cell (xs_mini16: walk 0.8 -> 17.9 s). It is stored in this frame's env
+      // without a log entry: a later read still finds it, and no enclosing arm carries it up.
+      if (Lnast::is_tmp(n)) {
+        env[n] = ti != then_vals.end() ? ti->second : ei->second;
+        continue;
+      }
+      // Anything else: the other arm leaves it undefined.
     }
     V tv = ti != then_vals.end() ? ti->second : (prior ? *prior : ei->second);
     V ev = ei != else_vals.end() ? ei->second : (prior ? *prior : ti->second);

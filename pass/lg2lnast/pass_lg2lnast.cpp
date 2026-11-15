@@ -45,9 +45,18 @@ public:
   // out-of-range memory access, a sim.warn_undefined site) is kept as `fcall(<marker name>, lgundef,
   // store(cond, c))`, which pass/lnast_llvm reports. Otherwise it is dropped: tolg has no such module.
   bool                   sim_markers = false;
+  // `lhd sim` only: a cell whose every use is one data arm of one Mux (directly, or through other
+  // cells of that arm) is emitted inside that arm's `if` block instead of before the `if`, so a mux
+  // tree becomes nested ifs. pass/lnast_llvm computes the same values either way; the LNAST tree
+  // aegraph that runs before it scopes its sharing to an arm, so it no longer merges values across
+  // exclusive arms -- the cones cgen_llvm's conditional regions skip when the arm is not taken.
+  bool                   nest_arms   = false;
 
 private:
   hhds::Graph&   graph_;
+  // nest_arms: (Mux, data sink port id) -> the cells emitted inside that arm, in dependency order.
+  absl::flat_hash_map<std::pair<hhds::Class_index, int>, std::vector<hhds::Node_class>> arm_cells_;
+  bool           emit_arm(const hhds::Node_class& mux, int port);
   Lnast_builder  own_b_;
   Lnast_builder& b_;
   Lowering*      parent_ = nullptr;  // set for a loop body
@@ -528,6 +537,36 @@ bool Lowering::lower_node(const hhds::Node_class& node) {
       if (pins.size() != 3) {
         why = "mux with more than two data inputs";
         return false;
+      }
+      if (!arm_cells_.empty()
+          && (arm_cells_.contains({node.get_class_index(), pins[1].get_port_id()})
+              || arm_cells_.contains({node.get_class_index(), pins[2].get_port_id()}))) {
+        // nest_arms: an arm's own cells go inside its block, then the arm's value is read there.
+        auto s = operand(pins[0].get_driver_pin());
+        if (!s) {
+          return false;
+        }
+        const auto sel = emit(Lnast_ntype::create_ne(), {*s, "0"}, dpin, false);
+        out            = b_.create_lnast_tmp();
+        auto if_n      = b_.create_if_stmt(false);
+        b_.add_if_cond(if_n, sel);
+        for (const int k : {2, 1}) {  // then = data 1, else = data 0
+          auto arm = b_.add_if_stmts(if_n);
+          b_.push_stmts(arm);
+          if (!emit_arm(node, pins[k].get_port_id())) {
+            b_.pop_stmts();
+            return false;
+          }
+          auto d = operand(pins[k].get_driver_pin());
+          if (!d) {
+            b_.pop_stmts();
+            return false;
+          }
+          store_raw(out, *d);
+          b_.pop_stmts();
+        }
+        type_spec(out, dpin);
+        break;
       }
       auto s = operand(pins[0].get_driver_pin());
       auto d0 = operand(pins[1].get_driver_pin());
@@ -2235,6 +2274,19 @@ bool Lowering::lower_flop_next(const Flop_rec& f) {
   return true;
 }
 
+bool Lowering::emit_arm(const hhds::Node_class& mux, int port) {
+  const auto it = arm_cells_.find({mux.get_class_index(), port});
+  if (it == arm_cells_.end()) {
+    return true;
+  }
+  for (const auto& cell : it->second) {
+    if (!lower_node(cell)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 bool Lowering::lower_cells() {
   if (parent_ == nullptr) {
     find_overlays();
@@ -2407,7 +2459,79 @@ bool Lowering::lower_cells() {
         }
       }
     }
+    // nest_arms: each cell's arm (the one Mux data input all its uses reach), consumers first.
+    absl::flat_hash_set<size_t> sunk;
+    if (root_->nest_arms) {
+      using Arm = std::pair<hhds::Class_index, int>;
+      absl::flat_hash_map<hhds::Class_index, Arm> home;  // cell -> its arm
+      const auto                                  movable = [](Ntype_op op) {
+        switch (op) {
+          case Ntype_op::Sum:
+          case Ntype_op::Mult:
+          case Ntype_op::And:
+          case Ntype_op::Or:
+          case Ntype_op::Xor:
+          case Ntype_op::Not:
+          case Ntype_op::Concat:
+          case Ntype_op::SHL:
+          case Ntype_op::SRA:
+          case Ntype_op::Sext:
+          case Ntype_op::Get_mask:
+          case Ntype_op::Set_mask:
+          case Ntype_op::LT:
+          case Ntype_op::GT:
+          case Ntype_op::EQ:
+          case Ntype_op::Mux:
+          case Ntype_op::Rxor:
+          case Ntype_op::Popcount:
+          case Ntype_op::Ror     : return true;
+          default                : return false;  // instances, state, division (its undefined-value report), ...
+        }
+      };
+      for (auto r = ready.size(); r-- > 0;) {
+        const auto i = ready[r];
+        if (nodes[i].mem >= 0 || forced[i] != 0) {
+          continue;
+        }
+        const auto node = nodes[i].node;
+        // A recognized memory overlay is lowered as a view alias (its Mux) and placeholders (its
+        // cone): neither is an ordinary cell, so neither moves nor takes arm cells.
+        if (!movable(type_op_of(node)) || skip_.contains(node.get_debug_nid()) || overlay_at_.contains(node.get_debug_nid())) {
+          continue;
+        }
+        std::optional<Arm> arm;
+        bool               ok   = true;
+        bool               used = false;
+        for (const auto& e : node.out_edges()) {
+          used                    = true;
+          const auto         user = e.sink.get_master_node();
+          std::optional<Arm> a;
+          if (type_op_of(user) == Ntype_op::Mux && e.sink.get_port_id() != 0 && !overlay_at_.contains(user.get_debug_nid())) {
+            a = Arm{user.get_class_index(), static_cast<int>(e.sink.get_port_id())};
+          } else if (const auto h = home.find(user.get_class_index()); h != home.end()) {
+            a = h->second;
+          }
+          if (!a || (arm && *arm != *a)) {
+            ok = false;
+            break;
+          }
+          arm = a;
+        }
+        if (ok && used && arm) {
+          home.emplace(node.get_class_index(), *arm);
+          sunk.insert(i);
+        }
+      }
+      for (const auto i : ready) {  // dependency order inside each arm
+        if (sunk.contains(i)) {
+          arm_cells_[home.at(nodes[i].node.get_class_index())].push_back(nodes[i].node);
+        }
+      }
+    }
     for (const auto i : ready) {
+      if (sunk.contains(i)) {
+        continue;  // emitted inside its Mux arm (emit_arm)
+      }
       // An instance called before a driver it reads exists (it was called early, or it reads one of
       // its own outputs): that driver is a net read at its settled value.
       std::vector<hhds::Class_index> borrowed;
@@ -2641,6 +2765,7 @@ bool Pass_lg2lnast::lower(const std::vector<std::shared_ptr<hhds::Graph>>& graph
     }
     Lowering lw(*g);
     lw.sim_markers = sim_markers;
+    lw.nest_arms   = sim_markers;
     // `passes`: comma separated stream passes (lnast/lnast_stream.hpp) run on the
     // statements as they are produced; the output is what the last one forwards.
     livehd::lnast_stream::Chain     chain;
