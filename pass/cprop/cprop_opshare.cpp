@@ -261,11 +261,19 @@ void share_hotmux_operators(hhds::Graph& graph, size_t& budget) {
       }
       buckets[std::move(key)].push_back({sink, control, value.get_master_node(), std::move(*shape)});
     };
+    // The sink pins by port, in one walk of the sorted pin list: a per-port
+    // get_sink_pin rescans that list from its head, O(arms^2) on a wide Hotmux.
+    std::vector<Pin> sinks(2 * inputs.arms.size() + 1);
+    for (auto sink : root.inp_sorted_pins()) {
+      if (const auto pid = sink.get_port_id(); pid < sinks.size()) {
+        sinks[pid] = sink;
+      }
+    }
     for (size_t i = 0; i < inputs.arms.size(); ++i) {
-      collect(root.get_sink_pin(2 * i + 1), inputs.arms[i].first, inputs.arms[i].second);
+      collect(sinks[2 * i + 1], inputs.arms[i].first, inputs.arms[i].second);
     }
     if (!inputs.fallback.is_invalid()) {
-      collect(root.get_sink_pin(2 * inputs.arms.size()), {}, inputs.fallback);
+      collect(sinks[2 * inputs.arms.size()], {}, inputs.fallback);
     }
     for (auto& [key, group] : buckets) {
       (void)key;

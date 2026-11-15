@@ -34,6 +34,8 @@ lhd pyrope style dir/*.prp --emit diagnostics:style.jsonl
 
 Start with the highest-ranked findings: repeated statement blocks (with
 strides in literals and numbered identifiers) and flattened bundle arguments.
+The style command exits 2 for suggestions and 1 for input failure. Check
+the diagnostics for a partial parse even when it exits 0.
 The suggested templates describe the pattern; they are not code to paste. Zero
 findings says nothing about naming, types, structure or correctness.
 
@@ -89,9 +91,8 @@ findings says nothing about naming, types, structure or correctness.
   per-lane ports and families as `[N]UW` (`io_in_a:[4]U8`,
   `const bCur:[16]U32 = [r0, r1, ...]`) and read `x[i]`, not
   `x#[(i*W)..<((i+1)*W)]`. Same logic, but in sim every slice is a
-  shift-and-mask over the whole vector; a lane array is a plain read. Gemmini
-  Mesh 8x8: 13.2k -> 27.6k cycles/s, LEC unchanged. Keep packing only at real
-  bit-vector boundaries (above).
+  shift-and-mask over the whole vector; a lane array is a plain read. Keep
+  packing only at real bit-vector boundaries (above).
 * Derive widths and counts from declarations (`x.[bits]`, `std.clog2(N)`)
   instead of restating literals; bind them to a `comptime const` before use as
   a generic argument.
@@ -166,7 +167,7 @@ findings says nothing about naming, types, structure or correctness.
   simulation, and exercise the parameter combinations the cleanup touched. For
   a Verilog-backed cleanup also emit Verilog from the final Pyrope and check it
   against the original sources with an independent tool.
-* Never weaken assertions, change the reference, or alter benchmark settings to
+* Never weaken assertions, change the reference, or alter the reference setup to
   get a pass. Translate checks on a changed internal interface to the new
   representation, keeping their assertions and stimulus.
 

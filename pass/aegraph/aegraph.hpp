@@ -108,6 +108,10 @@ struct Options {
   uint32_t    edge_budget    = 32;     // rule work (operands scanned) allowed per input edge of the graph
   Cost        cost           = Cost::synth;  // the extraction cost profile (cost/<name>.cost)
   bool        choices        = false;  // `?` choice rules (off until they ship)
+  // Every cell the elaborator creates carries a width stamp: from the member it realizes, or from the range
+  // analysis. A member whose kept form needs a cell that cannot be stamped keeps its original node instead (a
+  // per-member decision; preflight below refuses the whole body). The slot after pass.bitwidth sets it.
+  bool        stamp_new      = false;
   // The LEC/semdiff preflight: no pass.bitwidth follows, so every cell the elaborator creates has to carry a
   // width stamp. A new interior cell is stamped from the range analysis; when one cannot be stamped the
   // engine REFUSES its rewrites (Stats::refused = 1) and optimize() runs the body again with the rules off:
@@ -150,7 +154,8 @@ struct Stats {
   size_t checks         = 0;  // check=: vector comparisons done
   size_t check_skipped  = 0;  // check=: comparisons skipped (a '?' or an unevaluable cone)
   size_t refused        = 0;  // preflight: graphs left unelaborated because a new cell could not be stamped
-  size_t stamped        = 0;  // preflight: new interior cells stamped from the range analysis
+  size_t stamped        = 0;  // preflight / stamp_new: new interior cells stamped from the range analysis
+  size_t stamp_kept     = 0;  // stamp_new: members that kept their original node (a needed cell had no stamp)
   std::vector<Rule_counters> rule_counts;  // indexed by Rule_id (slot 0 unused)
 
   Stats& operator+=(const Stats& o) {
@@ -178,6 +183,7 @@ struct Stats {
     check_skipped  += o.check_skipped;
     refused        += o.refused;
     stamped        += o.stamped;
+    stamp_kept     += o.stamp_kept;
     if (rule_counts.size() < o.rule_counts.size()) {
       rule_counts.resize(o.rule_counts.size());
     }

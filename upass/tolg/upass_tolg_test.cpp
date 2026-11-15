@@ -537,3 +537,169 @@ TEST(UpassTolgCall, ReassignedCallResultsHaveDistinctInstanceNames) {
     EXPECT_EQ(names, (std::vector<std::string>{"r", "r__call1", "r__call2", "r__call3"}));
   }
 }
+
+namespace {
+
+// Arm-local merges: a comb `arm.<tag>` with `c`, `d` (Bool) and `a`, `b` (u8)
+// in and `y` (u8) out, whose body the test writes with the helpers below.
+struct Arm_unit {
+  std::shared_ptr<Lnast> ln;
+  Lnast_nid              stmts;
+};
+
+Arm_unit arm_unit(std::string_view tag) {
+  auto ln    = std::make_shared<Lnast>(std::format("arm.{}", tag));
+  auto root  = ln->set_root(Lnast_ntype::create_top());
+  auto stmts = ln->add_child(root, Lnast_ntype::create_stmts());
+  ln->set_lambda_kind("comb");
+  for (const auto* name : {"c", "d"}) {
+    ln->io_meta().inputs.push_back(Lnast_io_entry{.name = name, .bits = 1, .is_signed = false, .kind = Io_kind::boolean});
+  }
+  for (const auto* name : {"a", "b"}) {
+    ln->io_meta().inputs.push_back(Lnast_io_entry{.name = name, .bits = 8, .is_signed = false, .kind = Io_kind::integer});
+  }
+  ln->io_meta().outputs.push_back(Lnast_io_entry{.name = "y", .bits = 8, .is_signed = false, .kind = Io_kind::integer});
+  return {ln, stmts};
+}
+
+// `op(dst, srcs...)` (every child a ref) appended to `parent`.
+Lnast_nid arm_op(Lnast& ln, const Lnast_nid& parent, Lnast_ntype::Lnast_ntype_int type,
+                 std::initializer_list<std::string_view> refs) {
+  auto n = ln.add_child(parent, type);
+  for (const auto r : refs) {
+    ln.add_child(n, Lnast_node::create_ref(r));
+  }
+  return n;
+}
+
+// `if`/`unique_if` over `conds`, one empty arm stmts per condition; returns the arms.
+std::vector<Lnast_nid> arm_if(Lnast& ln, const Lnast_nid& parent, bool unique, std::initializer_list<std::string_view> conds) {
+  auto                   n = ln.add_child(parent, unique ? Lnast_ntype::create_unique_if() : Lnast_ntype::create_if());
+  std::vector<Lnast_nid> arms;
+  for (const auto c : conds) {
+    ln.add_child(n, Lnast_node::create_ref(c));
+    arms.push_back(ln.add_child(n, Lnast_ntype::create_stmts()));
+  }
+  return arms;
+}
+
+// Mux and Hotmux cells of the lowered unit.
+std::pair<int, int> arm_muxes(const Arm_unit& u, std::string_view tag) {
+  const auto                 path = fresh_lib_dir(tag);
+  const uPass_tolg::Registry registry{u.ln};
+  register_all(registry, path);
+  auto graph = uPass_tolg::run(u.ln, path, registry);
+  EXPECT_TRUE(graph);
+  int mux = 0, hot = 0;
+  if (graph) {
+    for (auto node : graph->body().nodes()) {
+      mux += gu::type_op_of(node) == Ntype_op::Mux ? 1 : 0;
+      hot += gu::type_op_of(node) == Ntype_op::Hotmux ? 1 : 0;
+    }
+  }
+  return {mux, hot};
+}
+
+}  // namespace
+
+TEST(UpassTolgArmLocal, NamesOnlyAnArmReadsAreNotMerged) {
+  // if c { %t = a + b; y = %t } else { %u = a - b; y = %u }: %t and %u are
+  // dead past the `if`, only `y` needs a Mux.
+  auto       u    = arm_unit("plain");
+  const auto arms = arm_if(*u.ln, u.stmts, false, {"c"});
+  auto       els  = u.ln->add_child(u.ln->get_parent(arms[0]), Lnast_ntype::create_stmts());
+  arm_op(*u.ln, arms[0], Lnast_ntype::create_plus(), {"%t", "a", "b"});
+  arm_op(*u.ln, arms[0], Lnast_ntype::create_store(), {"y", "%t"});
+  arm_op(*u.ln, els, Lnast_ntype::create_minus(), {"%u", "a", "b"});
+  arm_op(*u.ln, els, Lnast_ntype::create_store(), {"y", "%u"});
+  EXPECT_EQ(arm_muxes(u, "arm_plain"), std::make_pair(1, 0));
+}
+
+TEST(UpassTolgArmLocal, AReadAfterTheIfKeepsTheMerge) {
+  // if c { %t = a + b } else { %t = a - b }; y = %t
+  auto       u    = arm_unit("live");
+  const auto arms = arm_if(*u.ln, u.stmts, false, {"c"});
+  auto       els  = u.ln->add_child(u.ln->get_parent(arms[0]), Lnast_ntype::create_stmts());
+  arm_op(*u.ln, arms[0], Lnast_ntype::create_plus(), {"%t", "a", "b"});
+  arm_op(*u.ln, els, Lnast_ntype::create_minus(), {"%t", "a", "b"});
+  arm_op(*u.ln, u.stmts, Lnast_ntype::create_store(), {"y", "%t"});
+  EXPECT_EQ(arm_muxes(u, "arm_live"), std::make_pair(1, 0));
+}
+
+TEST(UpassTolgArmLocal, NestedIfMergesOnlyWhereTheNameIsStillRead) {
+  // if c { if d { %t = a + b } else { %t = a - b }; y = %t } else { y = a }:
+  // the inner `if` merges %t (read after it, inside the outer arm), the outer
+  // one does not (nothing past it reads %t). Before: 3 Muxes.
+  auto       u     = arm_unit("nested");
+  const auto outer = arm_if(*u.ln, u.stmts, false, {"c"});
+  auto       oels  = u.ln->add_child(u.ln->get_parent(outer[0]), Lnast_ntype::create_stmts());
+  const auto inner = arm_if(*u.ln, outer[0], false, {"d"});
+  auto       iels  = u.ln->add_child(u.ln->get_parent(inner[0]), Lnast_ntype::create_stmts());
+  arm_op(*u.ln, inner[0], Lnast_ntype::create_plus(), {"%t", "a", "b"});
+  arm_op(*u.ln, iels, Lnast_ntype::create_minus(), {"%t", "a", "b"});
+  arm_op(*u.ln, outer[0], Lnast_ntype::create_store(), {"y", "%t"});
+  arm_op(*u.ln, oels, Lnast_ntype::create_store(), {"y", "a"});
+  EXPECT_EQ(arm_muxes(u, "arm_nested"), std::make_pair(2, 0));
+}
+
+TEST(UpassTolgArmLocal, UniqueIfKeepsOneOneHotCarrier) {
+  // unique if c { %t = a + b } elif d { %u = a - b }; y = a: nothing is read
+  // past the `if`, but its one-hot obligation still needs a Hotmux over the
+  // whole control list -- exactly one.
+  {
+    auto       u    = arm_unit("uif_dead");
+    const auto arms = arm_if(*u.ln, u.stmts, true, {"c", "d"});
+    arm_op(*u.ln, arms[0], Lnast_ntype::create_plus(), {"%t", "a", "b"});
+    arm_op(*u.ln, arms[1], Lnast_ntype::create_minus(), {"%u", "a", "b"});
+    arm_op(*u.ln, u.stmts, Lnast_ntype::create_store(), {"y", "a"});
+    EXPECT_EQ(arm_muxes(u, "arm_uif_dead"), std::make_pair(0, 1));
+  }
+  // With a live merge (`y`) that Hotmux is the carrier: no extra one.
+  {
+    auto       u    = arm_unit("uif_live");
+    const auto arms = arm_if(*u.ln, u.stmts, true, {"c", "d"});
+    arm_op(*u.ln, arms[0], Lnast_ntype::create_plus(), {"%t", "a", "b"});
+    arm_op(*u.ln, arms[0], Lnast_ntype::create_store(), {"y", "%t"});
+    arm_op(*u.ln, arms[1], Lnast_ntype::create_minus(), {"%u", "a", "b"});
+    arm_op(*u.ln, arms[1], Lnast_ntype::create_store(), {"y", "%u"});
+    EXPECT_EQ(arm_muxes(u, "arm_uif_live"), std::make_pair(0, 1));
+  }
+}
+
+TEST(UpassTolgArmLocal, AnAttributeTargetKeepsItsMerge) {
+  // apply_synth_targets roots `t`'s policy at its final driver (pin_map_ and
+  // logical_last_ by SSA base): the merge of t___ssa_1 must stay, or the policy
+  // lands on the last arm's adder. Both arms write `t___ssa_1`; only `y` and
+  // the attribute target name it.
+  auto       u    = arm_unit("attr");
+  const auto arms = arm_if(*u.ln, u.stmts, false, {"c"});
+  auto       els  = u.ln->add_child(u.ln->get_parent(arms[0]), Lnast_ntype::create_stmts());
+  arm_op(*u.ln, arms[0], Lnast_ntype::create_plus(), {"t___ssa_1", "a", "b"});
+  auto attr = u.ln->add_child(arms[0], Lnast_ntype::create_attr_set());
+  u.ln->add_child(attr, Lnast_node::create_ref("t"));
+  u.ln->add_child(attr, Lnast_node::create_const("synth.preroute_exclude"));
+  u.ln->add_child(attr, Lnast_node::create_const("true"));
+  arm_op(*u.ln, arms[0], Lnast_ntype::create_store(), {"y", "t___ssa_1"});
+  arm_op(*u.ln, els, Lnast_ntype::create_minus(), {"t___ssa_1", "a", "b"});
+  arm_op(*u.ln, els, Lnast_ntype::create_store(), {"y", "t___ssa_1"});
+  EXPECT_EQ(arm_muxes(u, "arm_attr"), std::make_pair(2, 0));
+}
+
+TEST(UpassTolgArmLocal, ADceDeadReaderKeepsNothingAlive) {
+  // dce:mark leaves dead statements in the tree for tolg to skip: a dead read
+  // of %t after the `if` must not keep its merge. Live, the same read does.
+  for (const bool dead : {false, true}) {
+    SCOPED_TRACE(dead);
+    auto       u    = arm_unit(dead ? "dce_dead" : "dce_live");
+    const auto arms = arm_if(*u.ln, u.stmts, false, {"c"});
+    auto       els  = u.ln->add_child(u.ln->get_parent(arms[0]), Lnast_ntype::create_stmts());
+    arm_op(*u.ln, arms[0], Lnast_ntype::create_plus(), {"%t", "a", "b"});
+    arm_op(*u.ln, els, Lnast_ntype::create_minus(), {"%t", "a", "b"});
+    const auto reader = arm_op(*u.ln, u.stmts, Lnast_ntype::create_store(), {"%r", "%t"});
+    arm_op(*u.ln, u.stmts, Lnast_ntype::create_store(), {"y", "a"});
+    if (dead) {
+      u.ln->set_dce_dead_stmts(absl::flat_hash_set<int64_t>{reader.get_class_index().value});
+    }
+    EXPECT_EQ(arm_muxes(u, dead ? "arm_dce_dead" : "arm_dce_live"), std::make_pair(dead ? 0 : 1, 0));
+  }
+}

@@ -23,20 +23,12 @@ static Pass_plugin sample("pass_aegraph", Pass_aegraph::setup);
 
 void Pass_aegraph::setup() {
   Eprp_method m1("pass.aegraph", "acyclic e-graph constant propagation", &Pass_aegraph::optimize);
-  // low_lanes and loop_hoist are spelled compile.cprop.<flag>, the rest compile.aegraph.<flag>
-  // (lhd: set_flag_is_common).
-  m1.add_label_optional("low_lanes",
-                        "true: narrow operations reading a value with known low bits, Or(Shl(H,k),L), to their H parts "
-                        "(bitwidth runs after the first fold in every compile)",
-                        "true");
-  m1.add_label_optional("loop_hoist",
-                        "true: move a compact loop body's iteration-invariant computations (those reading only invariant "
-                        "inputs and constants, never the ordinal, the activation or a carry) out to every loop instance's "
-                        "parent, computed once per evaluation and fed through a new `__hoist<k>` body input. The compact "
-                        "form is preserved; the values never change",
-                        "true");
+  // Every step of the pass runs on every invocation, before and after pass.bitwidth alike: low-lane narrowing
+  // (an operation reading Or(Shl(H,k),L) runs on the H parts), the post region passes, and the library-wide
+  // loop-invariant hoist (a compact loop body's iteration-invariant computations move to every loop instance's
+  // parent through a `__hoist<k>` body input). A step that has to be switched off for some LGraph is a bug in it.
   m1.add_label_optional("after_bitwidth",
-                        "INTERNAL set by the kernel for the slot that runs after pass.bitwidth: low-lane narrowing stays off there",
+                        "INTERNAL set by the kernel for a run that follows pass.bitwidth: every cell the engine creates is stamped",
                         "false");
   m1.add_label_optional("stats", "INTERNAL set by the kernel from lhd.stats: emit one cprop-summary diagnostic per graph", "false");
 
@@ -132,10 +124,14 @@ void Pass_aegraph::optimize(Eprp_var& var) {
   // declares its full window while bitwidth has already dropped the masks the
   // tighter, unpacked range justified: a lane driver then comes out wider than its
   // window (XiangShan fpsqrt_r16_block, an internal "Concat lane" error).
-  const auto   low_lanes   = var.get("low_lanes", "true") != "false" && var.get("after_bitwidth", "false") != "true";
+  // Every caller of this method runs pass.bitwidth afterwards (the compile slots, the state-sweep rounds, the
+  // memory-module lowering), so the steps that mint cells bitwidth sizes (low-lane narrowing, the accumulation
+  // guard) always run.
+  const auto   low_lanes   = true;
   const auto   loop_bodies = lifted_loop_bodies(var.graphs);
   const auto   want_stats  = var.get("stats", "false") == "true";
-  const auto   options     = livehd::aegraph::make_options(var.get("rules_disable", ""),
+  const bool   after_bw    = var.get("after_bitwidth", "false") == "true";
+  auto         options     = livehd::aegraph::make_options(var.get("rules_disable", ""),
                                                        var.get("rules_only", ""),
                                                        var.get("max_rewrites", "0"),
                                                        var.get("bisect_graph", ""),
@@ -148,6 +144,10 @@ void Pass_aegraph::optimize(Eprp_var& var) {
                                                        var.get("edge_budget", "32"),
                                                        var.get("cost", "auto"),
                                                        var.get("choices", "off"));
+  // After pass.bitwidth every rule runs again (the bit rules now see the stamped state widths, and the generic ones
+  // fold what the first run exposed and what bitwidth, legalize and enableopt built), and every cell the engine
+  // creates carries a width stamp: bitwidth's sizes are what the rest of the flow reads.
+  options.stamp_new = after_bw;
   // One cprop-summary record per graph (indexed like var.graphs), emitted
   // serially after the workers join so the order is the graph order.
   std::vector<livehd::cprop_summary::Record> records(want_stats ? var.graphs.size() : 0);
@@ -218,12 +218,7 @@ void Pass_aegraph::optimize(Eprp_var& var) {
     }
   };
 
-  const auto hoist_after = [&] {
-    if (var.get("loop_hoist", "true") == "false") {
-      return;
-    }
-    livehd::cprop::hoist_loop_invariants(var.graphs);
-  };
+  const auto hoist_after = [&] { livehd::cprop::hoist_loop_invariants(var.graphs); };
   const auto summary = [&] {
     std::printf(
         "[pass.aegraph] graphs=%zu nodes_in=%zu nodes_out=%zu pure=%zu skeleton=%zu opaque=%zu classes=%zu cse=%zu const=%zu "

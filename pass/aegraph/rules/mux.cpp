@@ -22,7 +22,7 @@ namespace {
 
 // Mux(s, 1, 0) = EQ(s, 0), and Mux(s, 0, 1) = s for a 0/1 selector (a wider
 // selector must keep the Mux: it reads any nonzero value as true).
-AEG_NATIVE_RULE(mux_bool_const_arms, simplify, 30, Ntype_op::Mux) {
+AEG_NATIVE_BIT_RULE(mux_bool_const_arms, simplify, 30, Ntype_op::Mux) {
   if (!two_arm(root)) {
     return;
   }
@@ -38,7 +38,7 @@ AEG_NATIVE_RULE(mux_bool_const_arms, simplify, 30, Ntype_op::Mux) {
 //   s ? 1 : f = s | f      s ? 0 : f = !s & f      s ? t : 0 = s & t      s ? t : 1 = !s | t
 // Only over a computed (e-node) value: a latch Q is a leaf here, and `s | q` on a
 // latch's hold arm would be a Q -> D path through logic.
-AEG_NATIVE_RULE(mux_const_arm_logic, simplify, 30, Ntype_op::Mux) {
+AEG_NATIVE_BIT_RULE(mux_const_arm_logic, simplify, 30, Ntype_op::Mux) {
   if (!two_arm(root)) {
     return;
   }

@@ -1,0 +1,14 @@
+/*
+:name: mod_output_reg_mask_state
+:type: compile
+*/
+
+// A mod output masked from a plain reg reads the reg as cycle-0 state (only a
+// chain of copies and bit slices makes it a feedforward stage), so `@[0]`
+// holds. The tree aegraph must not respell `r & 0xF` as the slice `r#[0..<4]`,
+// which would land the output at cycle 1.
+mod top(a:U8) -> (o:U4@[0]) {
+  reg r:U8 = 0
+  r = a
+  o = r & 0xF
+}

@@ -23,6 +23,7 @@
 #include "perf_tracing.hpp"  // TRACE_EVENT — no-op unless built with --define profiling=1
 #include "range_bits.hpp"
 #include "str_tools.hpp"
+#include "upass_aeg.hpp"
 #include "upass_attributes.hpp"  // NOLINT: ensures plugin "attributes" is linked
 #include "upass_bitwidth.hpp"    // NOLINT: ensures plugin "bitwidth" is linked
 #include "upass_constprop.hpp"
@@ -693,6 +694,9 @@ void Pass_upass::work(Eprp_var& var) {
     }
   }
 
+  // The tree aegraph's per-unit stats, summarized once after the queue below.
+  upass::Staging_rewrite_stats aeg_total;
+
   // Walk as a queue: structural passes can append new LNASTs (e.g. extracted
   // comb functions), and those generated trees should run through the same
   // configured upass pipeline before downstream stages see them.
@@ -814,12 +818,14 @@ void Pass_upass::work(Eprp_var& var) {
     runner.set_is_function_body(is_function_body);
     runner.set_function_registry(function_registry);  // 1i: comb bodies to inline from (shared, built once)
     runner.set_detuple_registry(detuple_registry);
+    runner.set_staging_rewrite(&upass::aeg::rewrite_staging);  // the tree aegraph: no switch, gated by the runner
     if (runner.has_configuration_error()) {
       fail_upass_runtime("bad-configuration",
                          "io",
                          std::format("pass.upass invalid pass configuration: {}", runner.get_configuration_error()));
     }
     runner.run();
+    aeg_total += runner.staging_rewrite_stats();
 
     // Swap the rewritten staging tree into the existing Lnast so downstream
     // passes (lnast.dump, …) see the folded/DCE'd IR. Slot identity (the
@@ -865,6 +871,8 @@ void Pass_upass::work(Eprp_var& var) {
       var.add(new_ln);
     }
   }
+
+  upass::aeg::report(aeg_total);
 
   // ── LNAST timecheck discharge. Verifies + marks-checked every
   // statically-derivable `@[N]` obligation (and the mod declared-output /

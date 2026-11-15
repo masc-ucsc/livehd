@@ -1,0 +1,20 @@
+/*
+:name: aeg_tree_refused_respell_hier
+:type: compile
+*/
+
+// The hierarchical twin of aeg_tree_refused_respell_wire: renaming `o` onto
+// `h` (whose refused respell still reads `i`) would make the child's output
+// depend on its input structurally, and the top feeds `c.o` back into `i`.
+mod child(i:U8, x:U8, y:U8, z:U8) -> (o:U10@[0], d:S12@[0]) {
+  const h = i + x + y + z - i
+  o = x + y + z
+  d = h
+}
+pub mod top(x:U8, y:U8, z:U8) -> (q:U10@[0], e:S12@[0]) {
+  wire w:U10 = nil
+  const c = child(i=w#[0..<8], x=x, y=y, z=z)
+  w = c.o
+  q = w
+  e = c.d
+}

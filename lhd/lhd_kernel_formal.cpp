@@ -332,6 +332,7 @@ static void adopt_cause(livehd::lec::Query_result& dst, const livehd::lec::Query
 // So K one-sided inputs cost O(budget + N), never O(K * N). Both stop at the
 // wall deadline (timed_out(): the caller reports TIMEOUT-time).
 class Lec_input_observability {
+  using Sub_out_fn = std::function<void(const hhds::Node_class&, hhds::Port_id)>;
 public:
   struct Reach {
     std::vector<hhds::Port_id> outs;              // outputs of the walked definition the input reaches
@@ -392,6 +393,43 @@ public:
 
   [[nodiscard]] bool timed_out() const { return timed_out_; }
 
+  // ONE backward walk of `g`'s body from its compared points and the drivers of
+  // its outputs that `out_observed` accepts; `on_sub_out` sees every bodied
+  // instance output on such a path (the instance outputs whose value can reach
+  // something observed). One walk of this body; an instance output steps
+  // through ins_of_output, memoized per (def, output), so each child output's
+  // cone is walked once however many instances reach it. The per-instance
+  // forward cones it replaces (one walk per instance output pin) were quadratic
+  // on a wide parent (xs_exu's ExuBlock, ~400 instances: the whole 120 s
+  // budget, every run).
+  // false when the deadline passed (timed_out()).
+  [[nodiscard]] bool observed_instance_outputs(hhds::Graph* g, const std::function<bool(std::string_view)>& out_observed,
+                                               const Sub_out_fn& on_sub_out) {
+    try {
+      std::vector<hhds::Pin_class> seeds;
+      sub_compare_seeds(g, seeds);
+      if (auto gio = g->get_io(); gio != nullptr) {
+        for (const auto& d : gio->get_output_pin_decls()) {
+          if (!out_observed(d.name)) {
+            continue;
+          }
+          if (auto o = g->get_output_pin(d.name); !o.is_invalid()) {
+            for (const auto& drv : o.get_driver_pins()) {
+              seeds.push_back(drv);
+            }
+          }
+        }
+      }
+      (void)back_walk(seeds, &on_sub_out);
+      return true;
+    } catch (const Abort&) {
+      timed_out_ = true;
+      back_busy_.clear();
+      cmp_busy_.clear();
+      return false;
+    }
+  }
+
   // Everything the driver pin `seed` reaches inside its own body: the body's
   // output ports and whether a compared point is hit (the whole cone, no early
   // stop, no forward step budget). nullopt when the deadline passed.
@@ -450,6 +488,22 @@ private:
       }
     }
     return it->second;
+  }
+  const absl::flat_hash_map<hhds::Port_id, std::string>& outputs_of(hhds::Graph* g) {
+    auto [it, fresh] = outputs_.try_emplace(g);
+    if (fresh && g->get_io() != nullptr) {
+      for (const auto& d : g->get_io()->get_output_pin_decls()) {
+        it->second.emplace(d.port_id, d.name);
+      }
+    }
+    return it->second;
+  }
+  static void output_drivers(hhds::Graph* g, std::string_view name, std::vector<hhds::Pin_class>& out) {
+    if (auto o = g->get_output_pin(name); !o.is_invalid()) {
+      for (const auto& drv : o.get_driver_pins()) {
+        out.push_back(drv);
+      }
+    }
   }
   hhds::Pin_class input_pin(hhds::Graph* g, hhds::Port_id pid) {
     const auto& ins = inputs_of(g);
@@ -561,11 +615,15 @@ private:
   // cones reach. A bodied instance output steps to the instance inputs its
   // definition carries there (ins_of_output); a blackbox output and a property
   // marker end a path (the forward walk's rules, reversed).
-  std::vector<hhds::Port_id> back_walk(const std::vector<hhds::Pin_class>& seeds) {
+  // `on_sub_out`, when given, sees every bodied instance output the walk steps
+  // through (the instance and its output port): those are the instance outputs
+  // on a path to a seed.
+  std::vector<hhds::Port_id> back_walk(const std::vector<hhds::Pin_class>& seeds, const Sub_out_fn* on_sub_out = nullptr) {
     std::vector<hhds::Port_id>             found;
     absl::flat_hash_set<hhds::Port_id>     found_set;
     absl::flat_hash_set<hhds::Class_index> seen;      // driver pins queued
     absl::flat_hash_set<hhds::Class_index> expanded;  // non-Sub cells whose inputs were queued
+    absl::flat_hash_map<hhds::Class_index, std::vector<hhds::Pin_class>> sinks_of;
     std::vector<hhds::Pin_class>           stk;
     auto                                   push = [&](const hhds::Pin_class& d) {
       if (!d.is_invalid() && seen.insert(d.get_class_index()).second) {
@@ -608,14 +666,37 @@ private:
       if (!cg) {
         continue;  // a blackbox output: its inputs are compared points already
       }
+      if (on_sub_out != nullptr) {
+        (*on_sub_out)(m, d.get_port_id());
+      }
+      // The instance's sink pins by port, built once per instance and walk:
+      // try_get_sink_pin(pid) rescans the node's pin list, O(ports^2) over
+      // the answer of a wide instance.
+      auto [si, fresh] = sinks_of.try_emplace(m.get_class_index());
+      if (fresh) {
+        for (auto sink : m.inp_sorted_pins()) {
+          const auto pid = sink.get_port_id();
+          if (pid >= si->second.size()) {
+            si->second.resize(pid + 1);
+          }
+          si->second[pid] = sink;
+        }
+      }
+      const auto& by_port = si->second;  // ins_of_output walks with its own map: no insert here
       for (const auto pid : ins_of_output(cg, d.get_port_id())) {
-        push_sink(m.try_get_sink_pin(pid));
+        if (pid < by_port.size()) {
+          push_sink(by_port[pid]);
+        }
       }
     }
     return found;
   }
 
-  // The input ports of `g` whose cone reaches output `opid` (memoized).
+  // The input ports of `g` whose cone reaches output `opid` (memoized). Exact
+  // per output: the observed sets, unobserved_outputs and the interface check
+  // depend on per-output precision (a union answer turns an unread port's
+  // difference into a block refutation). Cost is the reached outputs' cones,
+  // once per (def, output).
   std::vector<hhds::Port_id> ins_of_output(const std::shared_ptr<hhds::Graph>& g, hhds::Port_id opid) {
     const Key key{g.get(), opid};
     if (auto it = back_memo_.find(key); it != back_memo_.end()) {
@@ -629,15 +710,10 @@ private:
       return r;
     }
     std::vector<hhds::Pin_class> seeds;
-    if (auto gio = g->get_io(); gio != nullptr) {
-      for (const auto& d : gio->get_output_pin_decls()) {
-        if (d.port_id == opid) {
-          if (auto o = g->get_output_pin(d.name); !o.is_invalid()) {
-            for (const auto& drv : o.get_driver_pins()) {
-              seeds.push_back(drv);
-            }
-          }
-        }
+    {
+      const auto& outs = outputs_of(g.get());
+      if (const auto f = outs.find(opid); f != outs.end()) {
+        output_drivers(g.get(), f->second, seeds);
       }
     }
     r = back_walk(seeds);
@@ -675,6 +751,7 @@ private:
   absl::flat_hash_map<const hhds::Graph*, std::vector<hhds::Port_id>> cmp_memo_;
   absl::flat_hash_set<const hhds::Graph*>                             cmp_busy_;
   absl::flat_hash_map<const hhds::Graph*, absl::flat_hash_map<hhds::Port_id, std::string>> inputs_;
+  absl::flat_hash_map<const hhds::Graph*, absl::flat_hash_map<hhds::Port_id, std::string>> outputs_;
 };
 
 // REFUTED-interface: the selected tops' port NAMES (owner ruling 2026-10-14).
@@ -1743,22 +1820,25 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
   absl::flat_hash_map<std::string, absl::flat_hash_set<std::string>> observed_outputs;
   absl::flat_hash_set<std::string>                                   all_outputs_observed;
   {
-    struct Seed {
-      std::string              parent;  // canonical key of the graph holding the instance
-      std::string              child;   // canonical key of the instantiated def
-      std::string              port;    // the child's output port
-      bool                     compared = false;
-      std::vector<std::string> parent_outs;  // parent output ports the cone reaches
-    };
-    std::vector<Seed>       seeds;
+    // Top-down over the def DAG of both libraries (canonical names): a def is
+    // walked only after every def instantiating it, so its observed set is
+    // final; one backward walk per body (observed_instance_outputs) then marks
+    // the instance outputs that reach a compared point or an observed output.
+    // Same least fixpoint as the per-pin forward cones this replaced: one walk
+    // per body instead of one per instance output pin. Conservative where it
+    // cannot tell: a loop-subnode instance, an instantiation cycle, or a walk
+    // past the deadline marks every port of the defs involved observed.
     Lec_input_observability reach(base._deadline);
-    auto                    collect_seeds = [&](const std::string& pkey, hhds::Graph* pg, bool ref_side) {
-      absl::flat_hash_map<hhds::Port_id, std::string> pouts;
-      if (pg->get_io() != nullptr) {
-        for (const auto& d : pg->get_io()->get_output_pin_decls()) {
-          pouts.emplace(d.port_id, d.name);
-        }
-      }
+    struct Def_ports {
+      std::string                                     cn;
+      absl::flat_hash_map<hhds::Port_id, std::string> outs;
+    };
+    absl::flat_hash_map<std::pair<const void*, bool>, Def_ports> def_ports;
+    // parent -> tracked children (canonical), from both libraries
+    absl::flat_hash_map<std::string, absl::flat_hash_set<std::string>> kids;
+    absl::flat_hash_map<std::string, int>                              indeg;
+    auto add_edges = [&](const std::string& pkey, hhds::Graph* pg, bool ref_side) {
+      indeg.try_emplace(pkey, 0);
       for (auto node : pg->body().nodes(hhds::Node_order::forward)) {
         if (gu::type_op_of(node) != Ntype_op::Sub) {
           continue;
@@ -1776,59 +1856,87 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
         }
         if (node.is_loop_subnode()) {
           all_outputs_observed.insert(cn);
-          continue;
         }
-        for (const auto& d : sio->get_output_pin_decls()) {
-          const auto p = node.try_get_driver_pin(d.port_id);
-          if (p.is_invalid()) {
-            continue;
-          }
-          const auto r = reach.of_pin(p);
-          if (!r) {
-            all_outputs_observed.insert(cn);
-            continue;
-          }
-          Seed sd{pkey, cn, d.name, r->compared, {}};
-          for (const auto o : r->outs) {
-            if (auto f = pouts.find(o); f != pouts.end()) {
-              sd.parent_outs.push_back(f->second);
-            }
-          }
-          if (sd.compared || !sd.parent_outs.empty()) {
-            seeds.push_back(std::move(sd));
-          }
+        if (kids[pkey].insert(cn).second) {
+          ++indeg[cn];
         }
       }
     };
     for (const auto& [key, g] : ref_by_name) {
-      collect_seeds(key, g, true);
+      add_edges(key, g, true);
     }
     for (const auto& [key, g] : impl_by_name) {
-      collect_seeds(key, g, false);
+      add_edges(key, g, false);
     }
-    for (bool changed = true; changed;) {
-      changed = false;
-      for (const auto& sd : seeds) {
-        auto& obs = observed_outputs[sd.child];
-        if (obs.contains(sd.port)) {
+    std::vector<std::string> ready;
+    for (const auto& [k, d] : indeg) {
+      if (d == 0) {
+        ready.push_back(k);
+      }
+    }
+    std::sort(ready.begin(), ready.end());  // deterministic order
+    absl::flat_hash_set<std::string> done;
+    while (!ready.empty()) {
+      const std::string pkey = ready.back();
+      ready.pop_back();
+      done.insert(pkey);
+      const bool all_obs = pkey == top_key || all_outputs_observed.contains(pkey);
+      auto out_observed = [&](std::string_view port) {
+        // Recording a child output can rehash the map during either walk.
+        const auto parent = observed_outputs.find(pkey);
+        return all_obs || (parent != observed_outputs.end() && parent->second.contains(std::string{port}));
+      };
+      for (const bool ref_side : {true, false}) {
+        auto& lib = ref_side ? ref_by_name : impl_by_name;
+        auto  it  = lib.find(pkey);
+        if (it == lib.end() || it->second == nullptr) {
           continue;
         }
-        bool hit = sd.compared;
-        if (!hit) {
-          if (sd.parent == top_key || all_outputs_observed.contains(sd.parent)) {
-            hit = true;
-          } else if (auto po = observed_outputs.find(sd.parent); po != observed_outputs.end()) {
-            hit = std::any_of(sd.parent_outs.begin(), sd.parent_outs.end(), [&](const auto& n) { return po->second.contains(n); });
+        bool walked = false;
+        if (!reach.timed_out()) {
+          walked = reach.observed_instance_outputs(it->second, out_observed, [&](const hhds::Node_class& inst, hhds::Port_id pid) {
+            auto sio = inst.get_subnode_io();
+            if (sio == nullptr) {
+              return;
+            }
+            // One name map per def and side: a per-call scan of the decls was
+            // O(ports) per reached output, O(ports^2) per wide instance.
+            auto [di, fresh] = def_ports.try_emplace(std::pair{static_cast<const void*>(sio.get()), ref_side});
+            if (fresh) {
+              di->second.cn = ref_side ? canon_ref(sio->get_name()) : canon_impl(sio->get_name());
+              for (const auto& d : sio->get_output_pin_decls()) {
+                di->second.outs.emplace(d.port_id, d.name);
+              }
+            }
+            if (const auto f = di->second.outs.find(pid); f != di->second.outs.end()) {
+              observed_outputs[di->second.cn].insert(f->second);
+            }
+          });
+        }
+        if (!walked) {
+          if (auto k = kids.find(pkey); k != kids.end()) {
+            all_outputs_observed.insert(k->second.begin(), k->second.end());
           }
         }
-        if (hit) {
-          obs.insert(sd.port);
-          changed = true;
+      }
+      if (auto k = kids.find(pkey); k != kids.end()) {
+        std::vector<std::string> now;
+        for (const auto& c : k->second) {
+          if (--indeg[c] == 0) {
+            now.push_back(c);
+          }
         }
+        std::sort(now.begin(), now.end());
+        ready.insert(ready.end(), now.begin(), now.end());
+      }
+    }
+    // An instantiation cycle never drains: everything left (and below) is observed.
+    for (const auto& [k, d] : indeg) {
+      if (!done.contains(k)) {
+        all_outputs_observed.insert(k);
       }
     }
   }
-
   // Topo-order leaves-first (DFS post-order; the in-progress mark guards cycles),
   // rooted at the TOP pair only: `order` is exactly the top and its transitive
   // shared descendants. Defs that merely coexist in the two libraries (a
@@ -2607,6 +2715,11 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     }
     const auto& name = order[def_ix];
     const auto  unobserved = unobserved_of(name);
+    // When this def was dispatched: the known-timeout ledger measures an
+    // attempt from here, the same point its skip check reads the clock, so the
+    // seconds recorded and the seconds a later run asks with are comparable
+    // (preparation/encoding before the solver's own t0 counts on both sides).
+    const auto  def_dispatch = std::chrono::steady_clock::now();
 
     // A non-top definition with no output ports has no hardware observation at
     // its instance boundary. Its inputs may feed simulation-only DPI calls or
@@ -3004,7 +3117,20 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
       // does not. Self-defeating, too -- the better the cache works, the more
       // budget is left, the less the ledger fires. Measured on minion: 169/169
       // verdicts hit, and one 127s def re-ground anyway on sub-second jitter.
-      if (!retry_all && vcache->skip_timeout(ckey, ledger_budget_s)) {
+      // Ask with the time this run can still GIVE the def, not the run's
+      // budget: the ledger records the seconds an attempt actually had (see
+      // note_timeout below), so a def a busy cold run cut short is retried
+      // once the cache frees the budget, while one that already had all the
+      // time this run has left (a top behind fixed load/inline overhead,
+      // xs_rob's Rob: ~95 of 120 s) is skipped instead of re-ground. 10% of
+      // slack absorbs dispatch jitter (the 119-vs-120 case above).
+      int ask_s = ledger_budget_s;
+      if (ask_s > 0 && base._deadline != std::chrono::steady_clock::time_point{}) {
+        const auto left = base._deadline - std::chrono::steady_clock::now();
+        const auto tolerated = std::chrono::ceil<std::chrono::seconds>((left / 11) * 10).count();
+        ask_s = static_cast<int>(std::clamp<long long>(tolerated, 1, ask_s));
+      }
+      if (!retry_all && vcache->skip_timeout(ckey, ask_s)) {
         livehd::lec::Query_result ur;
         ur.verdict    = Verdict::Undecided;
         ur.engine     = "cache-skip";
@@ -3707,7 +3833,23 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
         // Only a TIMEOUT-time result: any other cause (a refusal, a memory
         // limit, a witness-carrying partial-miter diff) must re-surface on
         // every run, never replay as "known timeout".
-        vcache->note_timeout(ckey, {ledger_budget_s, ms});  // the budget this attempt had; see skip_timeout above
+        // The budget this attempt actually HAD. A def the SHARED run deadline
+        // cut short (queued past it, or dispatched late behind its siblings)
+        // did not exhaust its own budget: ledgering the run's budget made every
+        // later run with that budget skip it, so a warm run stopped seconds in
+        // with most of its budget unspent and those defs were never attempted
+        // again (xs_exu: 182 defs skipped, 2.9 s of a 120 s run). Within 10% of
+        // the budget is scheduling jitter (see skip_timeout above): the full
+        // budget. Under a second is no attempt at all: nothing is ledgered.
+        const long long spent_ms
+            = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - def_dispatch).count();
+        int had_s = ledger_budget_s;
+        if (ledger_budget_s > 0 && spent_ms < 900LL * ledger_budget_s) {
+          had_s = static_cast<int>(spent_ms / 1000);
+        }
+        if (had_s > 0 || ledger_budget_s == 0) {
+          vcache->note_timeout(ckey, {had_s, ms});
+        }
       }
       if (pairs_from_hint && vcache != nullptr) {
         // Self-heal: the replayed pair hint validated but its solve did NOT
@@ -6242,7 +6384,14 @@ void lec_command(Options& opts, Result& res) {
     o._deadline = run_deadline;  // armed before the interface check: one budget for the whole run
   }
   std::unique_ptr<livehd::formal::Verdict_cache> vcache;
-  if (workdir_set && opts.incremental && !sampled_effort) {
+  // Opened for every PROOF run: a requested proof effort, or a sampled one that
+  // escalated to the proof engines below (gemmini's trusted SRAM box makes
+  // every `test` run one). Gating on the requested effort left an escalated run
+  // re-proving every def on every warm run, the cache never opened.
+  auto open_verdict_cache = [&] {
+    if (!workdir_set || !opts.incremental || vcache != nullptr) {
+      return;
+    }
     // MATERIALIZE the workdir before the cache opens it. Verdict_cache::save()
     // treats an unopenable path as "the cache is only ever a speedup" and
     // returns silently -- so without this, every run stored to memory, wrote
@@ -6258,6 +6407,9 @@ void lec_command(Options& opts, Result& res) {
     // so no worker ever opens this file -- it just checks membership and skips
     // abc for a cone whose obligation is already settled.
     o._cone_cache = vcache->cone_digests();
+  };
+  if (!sampled_effort) {
+    open_verdict_cache();
   }
 
   livehd::graph_util::require_sized_design(*ref_g, "pass.lec");
@@ -6299,6 +6451,7 @@ void lec_command(Options& opts, Result& res) {
       }
       r               = livehd::lec::Query_result{};
       sampled_verdict = false;
+      open_verdict_cache();  // a proof run now: reuse and store verdicts like one
     }
   }
   if (sampled_verdict) {

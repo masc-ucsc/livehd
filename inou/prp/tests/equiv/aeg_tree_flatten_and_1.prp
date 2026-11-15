@@ -1,0 +1,7 @@
+/*
+:name: aeg_tree_flatten_and_1
+:type: lec
+:set: compile.aegraph.rules_disable=
+:compile_grep: treeaeg-rule flatten .*applied=[1-9]
+*/
+// HEADER-ONLY variant: aeg_tree_flatten_and.prp with every rule on; the grep shows the tree step did the work.

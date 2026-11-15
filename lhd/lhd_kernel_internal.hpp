@@ -112,11 +112,6 @@ inline bool set_flag_is_common(std::string_view method, std::string_view flag) {
   if (method == "pass.color") {
     return !in(kColorSynthFlags);
   }
-  if (method == "pass.aegraph") {
-    // The constant-propagation knobs every compile has had: spelled compile.cprop.<flag>. The rule runtime's
-    // own options are compile.aegraph.<flag>.
-    return flag == "low_lanes" || flag == "loop_hoist";
-  }
   return false;
 }
 

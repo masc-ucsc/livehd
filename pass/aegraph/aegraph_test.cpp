@@ -852,8 +852,8 @@ TEST(Aegraph, ProbeReportsTheLargestFootprintAndInUseBytes) {
 
 // ---- pass.aegraph's after_bitwidth label ------------------------------------------
 
-// Sum(a << 4, b): low-lane narrowing (Cprop{true}) rewrites it into
-// Or(Shl(Sum(a, b >> 4), 4), Get_mask(b)), which the post-bitwidth slot must not do.
+// Sum(a << 4, b): low-lane narrowing rewrites it into Or(Shl(Sum(a, b >> 4), 4), Get_mask(b)). It runs in every
+// slot, before and after pass.bitwidth alike.
 std::string run_pass_aegraph(const Eprp_var::Eprp_dict& labels) {
   static std::once_flag once;
   std::call_once(once, [] { Pass_aegraph::setup(); });
@@ -872,12 +872,11 @@ std::string run_pass_aegraph(const Eprp_var::Eprp_dict& labels) {
          + std::to_string(count_op(g, Ntype_op::Sum));
 }
 
-TEST(PassAegraph, AfterBitwidthKeepsLowLaneNarrowingOff) {
-  const auto narrowed = run_pass_aegraph({{"low_lanes", "true"}, {"after_bitwidth", "false"}});
-  const auto plain    = run_pass_aegraph({{"low_lanes", "false"}});
-  const auto after    = run_pass_aegraph({{"low_lanes", "true"}, {"after_bitwidth", "true"}});
-  EXPECT_NE(narrowed, plain) << "low_lanes=true before bitwidth must narrow the fixture";
-  EXPECT_EQ(after, plain) << "after_bitwidth=true must behave as low_lanes=false";
+TEST(PassAegraph, LowLaneNarrowingRunsBeforeAndAfterBitwidth) {
+  const auto before = run_pass_aegraph({{"after_bitwidth", "false"}});
+  const auto after  = run_pass_aegraph({{"after_bitwidth", "true"}});
+  EXPECT_EQ(before, "1/1/1") << "the fixture narrows: one Get_mask, one Or, one (narrower) Sum";
+  EXPECT_EQ(after, before) << "the slot after pass.bitwidth runs the same steps";
 }
 
 // The engine followed by the classic post steps (Cprop::do_post) is still sound
@@ -1100,6 +1099,44 @@ TEST(Aegraph, PreflightStampsBoundedNewCellsAndRefusesUnboundedOnes) {
   EXPECT_EQ(on.refused, 1u) << "Mult(i0, 2) over an undeclared input is unbounded: nothing can stamp it";
   EXPECT_EQ(count_op(stamped, Ntype_op::Mult), 0u) << "the refused rewrite is not elaborated";
   EXPECT_EQ(count_op(stamped, Ntype_op::Rxor), 1u) << "the original cell stays";
+
+  // Options::stamp_new (the run after pass.bitwidth): the same stamps, but an unstampable rewrite only keeps THAT
+  // member's original node; the body is never refused and the rest of the run still elaborates.
+  livehd::aegraph::Options after = checked();
+  after.rules_only               = "test_rxor_via_mult";
+  after.stamp_new                = true;
+  hhds::GraphLibrary lib_new_ok;
+  auto               new_ok = build(lib_new_ok, "sn_declared", true);
+  const auto         sn_ok  = livehd::aegraph::optimize_body(cp, new_ok, after);
+  EXPECT_EQ(sn_ok.refused, 0u);
+  EXPECT_EQ(sn_ok.stamp_kept, 0u);
+  EXPECT_GE(sn_ok.stamped, 1u);
+  for (auto node : new_ok->body().nodes()) {
+    if (gu::type_op_of(node) == Ntype_op::Mult) {
+      EXPECT_EQ(gu::bits_of(node.create_driver_pin(0)), 9) << "a cell the run after bitwidth creates carries its width";
+    }
+  }
+  hhds::GraphLibrary lib_new_keep;
+  auto               new_keep = build(lib_new_keep, "sn_keep", false);
+  const auto         sn_keep  = livehd::aegraph::optimize_body(cp, new_keep, after);
+  EXPECT_EQ(sn_keep.refused, 0u) << "stamp_new decides per member, never for the whole body";
+  EXPECT_EQ(sn_keep.stamp_kept, 1u);
+  EXPECT_EQ(count_op(new_keep, Ntype_op::Mult), 0u) << "no unstamped cell is created";
+  EXPECT_EQ(count_op(new_keep, Ntype_op::Rxor), 1u) << "the member keeps its original (stamped) node";
+}
+
+// The width tag of the rule table (RULES.md `width`): a rule that reads a width fact is a bit rule.
+TEST(Aegraph, RuleTableTagsTheRulesThatReadWidthFacts) {
+  auto&      reg = livehd::aegraph::rt::Registry::instance();
+  const auto id  = reg.find("ident_drop");
+  ASSERT_TRUE(id.has_value());
+  EXPECT_FALSE(reg.rule(*id).bits) << "ident_drop needs no width fact";
+  const auto bit = reg.find("getmask_fits");
+  ASSERT_TRUE(bit.has_value());
+  EXPECT_TRUE(reg.rule(*bit).bits) << "getmask_fits reads the range analysis";
+  const auto gen = reg.find("xor_bool_one");
+  ASSERT_TRUE(gen.has_value());
+  EXPECT_TRUE(reg.rule(*gen).bits) << "a generated rule guarded by bool01";
 }
 
 // ---- milestone H -------------------------------------------------------------

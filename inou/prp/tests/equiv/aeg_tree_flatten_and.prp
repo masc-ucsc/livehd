@@ -1,0 +1,12 @@
+/*
+:name: aeg_tree_flatten_and
+:set: compile.aegraph.rules_disable=group:arith+group:div+group:mask+group:mux+group:shift
+:type: lec
+*/
+// PYROPE-vs-PYROPE group, the fixture of the tree aegraph (upass/aeg, todo 2a-treeaeg): an And chain of single-use temps becomes one n-ary And at its top.
+// A `mod`: the step rewrites only a body tolg alone reads (a comb's body is inlined and cached as walked).
+// REFERENCE = every rule group off, so the tree step still shares and forwards but rewrites nothing; `_1` = the rules on.
+pub mod top(a:U8, b:U8, c:U8, d:U8) -> (o:U8@[0], q:U8@[0]) {
+  o = ((a & b) & c) & d
+  q = ((a | b) | c) | d
+}

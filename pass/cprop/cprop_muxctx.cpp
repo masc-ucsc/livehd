@@ -142,6 +142,7 @@ size_t prune(hhds::Graph& graph, const Decode& decode, const Boolean& boolean) {
     std::vector<Pin> pins;
     bool             hot;
     bool             owned = false;
+    std::vector<Pin> sinks;  // by port: get_sink_pin(i) rescans the pin list, O(arms^2) on a wide Hotmux
   };
   std::vector<Candidate>                         nodes;
   absl::flat_hash_map<hhds::Class_index, size_t> ids;
@@ -166,6 +167,7 @@ size_t prune(hhds::Graph& graph, const Decode& decode, const Boolean& boolean) {
         break;
       }
       c.pins.push_back(pin);
+      c.sinks.push_back(sink);
     }
     if (!valid || (!c.hot && c.pins.size() != 3) || (c.hot && c.pins.size() < 2)) {
       continue;
@@ -249,7 +251,7 @@ size_t prune(hhds::Graph& graph, const Decode& decode, const Boolean& boolean) {
       for (size_t i = 1; i < 3; ++i) {
         auto facts = visit.facts;
         facts.assume(c.pins[0], i == 2, decode);
-        descend(c.node.get_sink_pin(i), c.pins[i], facts);
+        descend(c.sinks[i], c.pins[i], facts);
       }
     } else {
       auto fallback_facts = visit.facts;
@@ -264,16 +266,16 @@ size_t prune(hhds::Graph& graph, const Decode& decode, const Boolean& boolean) {
           // code (kFormalAssumeUnchecked must stay disclosed as unchecked) or
           // re-key the Hotmux in the next CSE (the key carries has_proven/
           // proven_of, and cse_pass runs before this prune).
-          replace(c.node.get_sink_pin(i), zero);
+          replace(c.sinks[i], zero);
           I(exclusive(c.node));
         }
         auto facts = visit.facts;
         facts.assume(c.pins[i], true, decode);
-        descend(c.node.get_sink_pin(i + 1), c.pins[i + 1], facts);
+        descend(c.sinks[i + 1], c.pins[i + 1], facts);
         fallback_facts.assume(c.pins[i], false, decode);
       }
       if (c.pins.size() % 2) {
-        descend(c.node.get_sink_pin(c.pins.size() - 1), c.pins.back(), fallback_facts);
+        descend(c.sinks.back(), c.pins.back(), fallback_facts);
       }
     }
   }

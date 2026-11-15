@@ -1,0 +1,14 @@
+/*
+:name: aeg_tree_and_not_self
+:set: compile.aegraph.rules_disable=group:arith+group:div+group:mask+group:mux+group:shift
+:type: lec
+*/
+// PYROPE-vs-PYROPE group, the fixture of the tree aegraph (upass/aeg, todo 2a-treeaeg): x & ~x is 0 (and x | ~x is -1): every reader takes the constant.
+// A `mod`: the step rewrites only a body tolg alone reads (a comb's body is inlined and cached as walked).
+// REFERENCE = every rule group off, so the tree step still shares and forwards but rewrites nothing; `_1` = the rules on.
+pub mod top(a:S8, b:S8) -> (z:S8@[0], o:S8@[0], w:S9@[0]) {
+  const t:S9 = a + b
+  z = a & ~a
+  o = a | ~a
+  w = t & ~t
+}

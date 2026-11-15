@@ -3813,6 +3813,14 @@ Canonical_digest digest_one(hhds::Graph* g, const Digest_resolver& resolve, absl
   // keyed by its def name when that def is instantiated exactly once here --
   // the def name is then a unique, content-stable instance identity. Several
   // anonymous instances of one def stay structural (no stable tiebreak).
+  // A NAMED compact loop (`u_loop_<n>`) is a cut point the same way: its carry
+  // output feeds its own carry input, a self-edge the forward pass reads as a
+  // combinational cycle, so every cone behind a carried loop stalled and the
+  // def -- and through the Merkle fold every ancestor -- was undigestable: a
+  // rolled design never reused one LEC verdict (gemmini's Mesh, MeshWithDelays
+  // and top re-proved on every warm run). Nothing is lost: node_kind_key folds
+  // the loop descriptor (count, index, carries), the operands are folded as
+  // the instance's obligation and the body digest by the Merkle step.
   absl::flat_hash_map<hhds::Class_index, uint64_t> seeds;
   absl::flat_hash_set<hhds::Class_index>           named_cuts;
   absl::flat_hash_map<hhds::Gid, int>              anonymous_uses;
@@ -3825,7 +3833,7 @@ Canonical_digest digest_one(hhds::Graph* g, const Digest_resolver& resolve, absl
     const auto op = gu::type_op_of(node);
     if (is_state(op)) {
       seeds.emplace(node.get_class_index(), hcombine(hstr("\x01state"), hstr(state_key(g, node))));
-    } else if (op == Ntype_op::Sub && !node.is_loop_subnode()) {
+    } else if (op == Ntype_op::Sub) {
       uint64_t seed = 0;
       if (!node.get_name().empty()) {
         seed = hcombine(hcombine(hstr("\x01inst"), hstr(node.get_name())), node_kind_key(node));
@@ -3877,6 +3885,8 @@ Canonical_digest digest_one(hhds::Graph* g, const Digest_resolver& resolve, absl
       // same information an unseeded stalled instance contributed before.
       if (uint64_t cs = 0; cut_signature(s, node, cs)) {
         tok = hcombine(hcombine(tok, hstr("\x01instcut")), cs);
+      } else if (node.is_loop_subnode()) {
+        return {};  // a loop cut newly made digestable must key on its operands, never under-key
       }
     }
     // interface mode: a Sub folds ONLY its def identity (the gid in node_kind_key)

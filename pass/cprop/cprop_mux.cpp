@@ -3,6 +3,7 @@
 #include <limits>
 #include <map>
 #include <optional>
+#include <tuple>
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
@@ -64,12 +65,20 @@ class Mux_sharing {
     std::optional<livehd::muxctx::Equality> equal;    // positive: the single arm is `v == k`
     std::vector<livehd::muxctx::Equality>   unequal;  // negative: every arm is `v == k`
     bool                                    unequal_all = false;
+    Pin                                     uniform;  // negative over ONE value v (every arm `v == k_i`): v
   };
   // A path is a persistent list: siblings share their prefix, and each node memoizes the conjunction up to it.
   struct Path_node {
     size_t literal;
     size_t parent;
     Pin    condition;
+    // The trailing run of negatives over this node's `uniform` value (a decode
+    // chain's `!(v == 0) & !(v == 1) & ...`): its first node above. Lets
+    // extend_path skip a whole implied run at once.
+    size_t run_top = absent;
+    // Skew-binary jump pointer (O(log depth) ancestor queries, O(1) per append).
+    size_t depth = 0;
+    size_t jump  = absent;
   };
   struct Visit {
     size_t                     candidate;
@@ -99,6 +108,12 @@ class Mux_sharing {
   std::vector<Literal>                                   literals;
   std::vector<Pin>                                       literal_pins;
   std::vector<Path_node>                                 path_nodes;
+  absl::flat_hash_map<std::pair<size_t, size_t>, size_t> path_ids;  // (parent, literal) -> path node
+  // (run_top, v, k) -> the path nodes of that run whose literal is a uniform
+  // negative over v naming k. Keyed by run: a lookup sees only the nodes that
+  // share the run's first node above (siblings of one prefix), never every
+  // `!(v == k)` of every region or outer arm.
+  absl::flat_hash_map<std::tuple<size_t, uint64_t, int64_t>, std::vector<size_t>> negated_at;
 
   size_t literal_id(std::vector<Pin> arms, bool positive) {
     std::vector<size_t> key;
@@ -120,6 +135,15 @@ class Mux_sharing {
           } else {
             lit.unequal_all = false;
             break;
+          }
+        }
+        if (lit.unequal_all && !lit.unequal.empty()) {
+          lit.uniform = lit.unequal.front().value;
+          for (const auto& eq : lit.unequal) {
+            if (eq.value != lit.uniform) {
+              lit.uniform = Pin{};
+              break;
+            }
           }
         }
       }
@@ -151,26 +175,95 @@ class Mux_sharing {
     return true;
   }
 
+  // Hash-consed: a path is its literals, so equal paths share one node and one
+  // memoized conjunction. extend_path rebuilds the kept prefix every time an
+  // equality drops earlier conjuncts; fresh nodes there cost a new And per kept
+  // literal per arm (a decode chain under a shared prefix grew 7.9k cells into
+  // 122k on XiangShan DecodeUnit).
   size_t append(size_t parent, size_t literal) {
-    path_nodes.push_back({literal, parent, {}});
-    return path_nodes.size() - 1;
+    const auto [it, fresh] = path_ids.try_emplace({parent, literal}, path_nodes.size());
+    if (fresh) {
+      const size_t id = path_nodes.size();
+      Path_node    node{literal, parent, {}};
+      node.run_top = parent;
+      if (parent != absent) {
+        const auto& p = path_nodes[parent];
+        node.depth    = p.depth + 1;
+        const bool skew
+            = p.jump != absent && path_nodes[p.jump].jump != absent
+              && p.depth - path_nodes[p.jump].depth == path_nodes[p.jump].depth - path_nodes[path_nodes[p.jump].jump].depth;
+        node.jump = skew ? path_nodes[p.jump].jump : parent;
+      }
+      if (const auto& lit = literals[literal]; !lit.uniform.is_invalid()) {
+        if (parent != absent && literals[path_nodes[parent].literal].uniform == lit.uniform) {
+          node.run_top = path_nodes[parent].run_top;
+        }
+        for (const auto& eq : lit.unequal) {
+          negated_at[{node.run_top, lit.uniform.get_class_index().value, eq.constant}].push_back(id);
+        }
+      }
+      path_nodes.push_back(node);
+    }
+    return it->second;
   }
 
-  // The path with `literal` appended, minus the earlier conjuncts it makes redundant.
+  // `x` is `at` or one of its ancestors.
+  bool on_path(size_t x, size_t at) const {
+    const auto target = path_nodes[x].depth;
+    if (at == absent || path_nodes[at].depth < target) {
+      return false;
+    }
+    while (path_nodes[at].depth > target) {
+      const auto j = path_nodes[at].jump;
+      at           = j != absent && path_nodes[j].depth >= target ? j : path_nodes[at].parent;
+    }
+    return at == x;
+  }
+
+  // The path with `literal` appended, minus the earlier conjuncts it makes
+  // redundant. One walk up the path, skipping each run of negatives over the
+  // literal's own value as a whole: every one is implied unless it names the
+  // same constant k. Whether the run holds such a `!(v == k)` is one lookup
+  // in negated_at (keyed by the run) plus an O(log) ancestor test per hit;
+  // a run that does (a contradiction) is walked node by node. Every other
+  // conjunct is kept. A decode chain's arm (`v == k` under `!(v == 0) & ... &
+  // !(v == k-1)`) costs O(log k), not O(k).
   size_t extend_path(size_t path, size_t literal) {
     const auto& lit = literals[literal];
     if (lit.equal) {
-      bool redundant = false;
-      for (size_t at = path; at != absent && !redundant; at = path_nodes[at].parent) {
-        redundant = implies_negation(lit, literals[path_nodes[at].literal]);
+      const auto          v    = lit.equal->value;
+      const auto          vkey = v.get_class_index().value;
+      bool                redundant = false;
+      std::vector<size_t> kept;
+      for (size_t at = path; at != absent;) {
+        const auto& node = path_nodes[at];
+        const auto& cur  = literals[node.literal];
+        if (!cur.uniform.is_invalid() && cur.uniform == v) {
+          bool contra = false;
+          if (const auto hit = negated_at.find({node.run_top, vkey, lit.equal->constant}); hit != negated_at.end()) {
+            for (const auto x : hit->second) {
+              if (on_path(x, at)) {
+                contra = true;
+                break;
+              }
+            }
+          }
+          if (!contra) {
+            redundant = true;  // no `!(v == k)` in this run: all of it is implied
+            at        = node.run_top;
+            continue;
+          }
+          if (implies_negation(lit, cur)) {
+            redundant = true;
+          } else {
+            kept.push_back(node.literal);
+          }
+        } else {
+          kept.push_back(node.literal);  // implies_negation needs every equality over v
+        }
+        at = node.parent;
       }
       if (redundant) {
-        std::vector<size_t> kept;
-        for (size_t at = path; at != absent; at = path_nodes[at].parent) {
-          if (!implies_negation(lit, literals[path_nodes[at].literal])) {
-            kept.push_back(path_nodes[at].literal);
-          }
-        }
         size_t rebuilt = absent;
         for (size_t i = kept.size(); i-- > 0;) {
           rebuilt = append(rebuilt, kept[i]);
@@ -260,8 +353,14 @@ class Mux_sharing {
     }
     auto n = livehd::cprop_value::make_node(graph, Ntype_op::Or, 1);
     gu::set_ubits(n.create_driver_pin(0), 1);
+    // A fresh cell: operand k sits on slot k * stride. setup_sink_pid scans the
+    // pins already there for the next free slot, O(m^2) on an m-arm OR (a
+    // value group's conditions, a Hotmux none-of literal).
+    const auto    stride = static_cast<hhds::Port_id>(Ntype::sink_bank_count(Ntype_op::Or));
+    hhds::Port_id slot   = 0;
     for (auto p : pins) {
-      livehd::graph_util::setup_sink_pid(n, 0).connect_driver(p);
+      n.create_sink_pin(slot).connect_driver(p);
+      slot = static_cast<hhds::Port_id>(slot + stride);
     }
     return n.create_driver_pin(0);
   }
@@ -700,9 +799,21 @@ class Mux_sharing {
     // SNAPSHOT: del_sink() is structural, so a lazy pin view would be
     // invalidated by the first disconnect. Only EDGES go, never a pin or the
     // node, so the later elements stay valid.
+    // The old pins stay (only their edges go) and are reused by port below: a
+    // per-port create_sink_pin finds an existing pin by rescanning the pin list
+    // from its head, O(arms^2) when a wide Hotmux is rebuilt in place.
+    std::vector<Pin> old_sinks;
     for (const auto& spin : root.node.inp_pins_snapshot()) {
       spin.del_sink();
+      const auto pid = spin.get_port_id();
+      if (pid >= old_sinks.size()) {
+        old_sinks.resize(pid + 1);
+      }
+      old_sinks[pid] = spin;
     }
+    const auto sink_at = [&](hhds::Port_id pid) {
+      return pid < old_sinks.size() && !old_sinks[pid].is_invalid() ? old_sinks[pid] : root.node.create_sink_pin(pid);
+    };
     gu::clear_proven(root.node);
     if (data.size() == 1) {
       gu::set_type_op(root.node, Ntype_op::Or);
@@ -710,10 +821,10 @@ class Mux_sharing {
     } else {
       gu::set_type_op(root.node, Ntype_op::Hotmux);
       for (size_t i = 0; i + 1 < data.size(); ++i) {
-        livehd::graph_util::setup_sink_pid(root.node, 2 * i).connect_driver(controls[i]);
-        livehd::graph_util::setup_sink_pid(root.node, 2 * i + 1).connect_driver(data[i]);
+        sink_at(static_cast<hhds::Port_id>(2 * i)).connect_driver(controls[i]);
+        sink_at(static_cast<hhds::Port_id>(2 * i + 1)).connect_driver(data[i]);
       }
-      livehd::graph_util::setup_sink_pid(root.node, 2 * (data.size() - 1)).connect_driver(data.back());
+      sink_at(static_cast<hhds::Port_id>(2 * (data.size() - 1))).connect_driver(data.back());
       // Binary mux paths partition the input space; absorbed Hotmuxes already
       // had an exclusivity proof. Grouping these disjoint predicates preserves it.
       gu::set_proven(root.node, gu::kFormalOnehot);

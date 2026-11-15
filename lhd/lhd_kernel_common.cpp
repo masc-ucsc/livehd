@@ -1609,6 +1609,12 @@ void check_known_set_passes(const Options& opts) {
                       std::format("--set/--config '{}' is kernel-managed, not a pass option", key),
                       "the kernel sets it on the pass.aegraph slot that runs after pass.bitwidth"};
     }
+    if ((pass == "compile.cprop" || pass == "compile.aegraph") && (flag == "low_lanes" || flag == "loop_hoist")) {
+      throw Lhd_error{"usage",
+                      std::format("--set/--config '{}' was removed", key),
+                      "low-lane narrowing and the loop-invariant hoist always run in every pass.aegraph slot (before and after "
+                      "pass.bitwidth); a design that needs one off is a bug to report"};
+    }
     if ((pass == "compile.cprop" || pass == "compile.aegraph") && (flag == "engine" || flag == "engine_slots")) {
       throw Lhd_error{"usage",
                       std::format("--set/--config '{}' was removed", key),

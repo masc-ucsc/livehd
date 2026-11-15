@@ -499,6 +499,9 @@ mut m2:[4][8]U8 = 13       // multi-dimensional, row-major
 Read `mem[addr]`; write `if we { mem[addr] = din }`. Indices can be enum- or
 range-constrained (`mut x:[X]U3`, `mut s:[-8..<7]U3`).
 
+Make the address provably in bounds to avoid `mem-address-overflow`. For
+simulation debugging, `--set sim.debug=true` checks unproven addresses at runtime.
+
 **Same-cycle read/write semantics** — the `ordering` attribute (replaces the
 old `fwd=` attribute): `reg mem:[4]U2:[ordering="fwd"] = 0`.
 

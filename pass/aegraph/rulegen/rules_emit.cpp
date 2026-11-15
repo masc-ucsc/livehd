@@ -21,6 +21,19 @@ namespace {
 // One rule -> C++
 // ---------------------------------------------------------------------------
 
+// True when a guard or a let of `r` asks a width fact: an analysis (range, known bits, layout, ...) or the
+// bool01 builtin. Those facts come from declared leaf widths, so such a rule gains from pass.bitwidth's stamps.
+bool expr_reads_widths(const Expr& e, const Analyses& a) {
+  if (e.kind == Expr::Kind::call && (e.name == "bool01" || a.find(e.name) != nullptr)) {
+    return true;
+  }
+  return std::ranges::any_of(e.args, [&](const Expr& x) { return expr_reads_widths(x, a); });
+}
+bool rule_reads_widths(const Rule& r, const Analyses& a) {
+  return std::ranges::any_of(r.whens, [&](const Expr& e) { return expr_reads_widths(e, a); })
+         || std::ranges::any_of(r.lets, [&](const auto& l) { return expr_reads_widths(l.second, a); });
+}
+
 class Rule_emitter {
 public:
   Rule_emitter(const Rules_file& f, const Rule& r, const Analyses& a) : file_(f), rule_(r), analyses_(a) {}
@@ -52,6 +65,14 @@ public:
     tasks.push_back(Task::of(&rule_.lhs, "", true));
     tasks_(std::move(tasks), "return;");
     out_ += "}\n";
+    // A guard that reads a width fact makes this a bit rule (Rule_info::bits): the compile slot after
+    // pass.bitwidth runs it again, with the stamped state widths.
+    if (rule_reads_widths(rule_, analyses_)) {
+      const auto head = out_.find("AEG_RULE(");
+      if (head != std::string::npos) {
+        out_.replace(head, std::string_view{"AEG_RULE("}.size(), "AEG_BIT_RULE(");
+      }
+    }
     return out_;
   }
 
@@ -575,6 +596,7 @@ std::string base_name(const std::string& path) {
 struct Row {
   std::string name, tag, root, proof, source, what;
   int         prio = 0;
+  bool        bits = false;  // reads width facts (they grow once pass.bitwidth stamped the state pins)
 };
 
 }  // namespace
@@ -590,7 +612,10 @@ std::string emit_rules_md(const std::vector<Rules_file>& files, const Analyses& 
     << "`choice` is an alt carrying a `?` assignment.\n\n"
     << "Proof tier: `bv-swept` = the rule's instances are LEC-checked by `aeg_prove_<group>_smoke` over widths\n"
     << "{1,2,3,8,16,65} (bounded evidence, not a proof for all widths); `native-unverified` = hand-written, covered by the\n"
-    << "union-invariant fuzz and an equiv fixture only; `none` = the rule opted out.\n\n";
+    << "union-invariant fuzz and an equiv fixture only; `none` = the rule opted out.\n\n"
+    << "Width: `+bits` = the guard reads width facts (an analysis or `bool01`); they seed from declared IO widths and,\n"
+    << "once `pass.bitwidth` ran, from the stamped state pins, so the compile slot after bitwidth (which runs every rule\n"
+    << "again) can fire them where the first slot could not; `generic` = no width fact.\n\n";
 
   std::vector<std::string> groups;
   for (const auto& f : files) {
@@ -618,6 +643,7 @@ std::string emit_rules_md(const std::vector<Rules_file>& files, const Analyses& 
         row.tag    = r.tag == Rule::Tag::simplify ? "simplify" : (r.tag == Rule::Tag::alt ? "alt" : "choice");
         row.root   = op_spelling(r.lhs.op);
         row.proof  = proof_tier(r);
+        row.bits   = rule_reads_widths(r, analyses);
         row.source = base_name(f.path) + ":" + std::to_string(r.line);
         const auto rhs = r.arms.empty() ? std::string{} : pat_text(r.arms[0].rhs);
         row.what       = r.doc.empty() ? "`" + pat_text(r.lhs) + " => " + rhs + "`" : r.doc;
@@ -645,6 +671,7 @@ std::string emit_rules_md(const std::vector<Rules_file>& files, const Analyses& 
         row.root += (i != 0 ? ", " : "") + n.roots[i];
       }
       row.proof  = n.native ? "native-unverified" : "hand-written";
+      row.bits   = n.bits;
       row.source = n.file + ":" + std::to_string(n.line);
       row.what   = n.doc;
       rows.push_back(std::move(row));
@@ -656,10 +683,10 @@ std::string emit_rules_md(const std::vector<Rules_file>& files, const Analyses& 
       return a.name < b.name;
     });
     o << "## Group `" << g << "`\n\n";
-    o << "| rule | tag | prio | root | proof | source | what it does |\n| --- | --- | ---: | --- | --- | --- | --- |\n";
+    o << "| rule | tag | prio | root | width | proof | source | what it does |\n| --- | --- | ---: | --- | --- | --- | --- | --- |\n";
     for (const auto& r : rows) {
-      o << "| `" << r.name << "` | " << r.tag << " | " << r.prio << " | " << r.root << " | " << r.proof << " | " << r.source
-        << " | " << md_escape(r.what) << " |\n";
+      o << "| `" << r.name << "` | " << r.tag << " | " << r.prio << " | " << r.root << " | " << (r.bits ? "+bits" : "generic")
+        << " | " << r.proof << " | " << r.source << " | " << md_escape(r.what) << " |\n";
     }
     o << "\n";
     total += rows.size();

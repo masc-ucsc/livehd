@@ -140,7 +140,7 @@ struct Analyses {
   [[nodiscard]] const Analysis* find(std::string_view name) const;
 };
 
-// A hand-written rule found in a rules/*.cpp file (AEG_NATIVE_RULE / AEG_RULE).
+// A hand-written rule found in a rules/*.cpp file (AEG_NATIVE_RULE / AEG_RULE, or their _BIT_ spellings).
 struct Native_rule {
   std::string              name;
   std::string              tag;
@@ -151,6 +151,7 @@ struct Native_rule {
   std::vector<std::string> roots;
   std::string              doc;  // the comment right above it
   bool                     native = true;
+  bool                     bits   = false;  // AEG_NATIVE_BIT_RULE / AEG_BIT_RULE: reads width facts
 };
 
 [[nodiscard]] Rules_file parse_rules(std::string_view text, std::string_view path, std::string_view group, Diags& diags);

@@ -62,6 +62,18 @@ A single `pass.upass` invocation processes each LNAST in `var.lnasts`:
                            selected by (2), while it emits 0..N nodes into the staging
                            tree, folding ref operands through try_fold_ref
                            (a direct table read) on the way out.
+(3b) tree aegraph        ─ upass/aeg (injected by pass.upass, same gates as the
+                           DCE): the allowlisted aegraph simplify rules, CSE
+                           and forwarding over the complete staging tree in
+                           tolg's name model. In place only: reader operands
+                           renamed or made constant, statements retyped to a
+                           rule's result; the defs it leaves unread go to (4).
+                           The walk's passes already judged the source form;
+                           the cycle checks (upass/timecheck, tolg's `@[N]`
+                           and LG checker) judge this body by its
+                           dependencies, so in a timed unit what they read
+                           (the cones of timed values, `@[N]` checks, output
+                           chains) stays as written.
 (4) post-walk DCE        ─ dead_code_eliminate_staging: liveness backstop.
                            Graph-only compilation records dead statement IDs
                            for tolg to skip and does not copy the tree. LNAST

@@ -919,6 +919,7 @@ public:
     auto top = lnast_->get_root();
     decl_reset_pin_.clear();  // one unit per walk; never carry a name across modules
     collect_decl_reset_pins(top);
+    scan_arm_scopes(top);
     for (auto c = lnast_->get_first_child(top); !c.is_invalid(); c = lnast_->get_sibling_next(c)) {
       if (Lnast_ntype::is_stmts(lnast_->get_type(c))) {
         mark_default_only_prologue(c);
@@ -4061,7 +4062,9 @@ private:
     if (path_terms_.empty()) {
       return Pin{};
     }
-    size_t i = 0;
+    // Resume after the prefix already folded (a flat elif chain keeps its
+    // negated prefix across arms: a scan from 0 per consumer was O(arms^2)).
+    size_t i = std::min(path_folded_valid_, path_folded_.size());
     while (i < path_folded_.size() && !path_folded_[i].is_invalid()) {
       ++i;
     }
@@ -4076,6 +4079,7 @@ private:
       acc             = and2(acc, one);
       path_folded_[i] = acc;
     }
+    path_folded_valid_ = path_folded_.size();
     return acc;
   }
 
@@ -4095,6 +4099,7 @@ private:
   void truncate_path_terms(size_t depth) {
     path_terms_.resize(depth);
     path_folded_.resize(depth);
+    path_folded_valid_ = std::min(path_folded_valid_, depth);
   }
 
   // a AND b as a 1-bit unsigned pin; an invalid operand means "true".
@@ -11383,11 +11388,19 @@ private:
     bool    any_negative   = false;  // at least one operand may carry a negative value
     int32_t signed_mw      = 0;      // width needed if the result must use a signed carrier
     bool    first_negative = false;  // shifts take their result sign from the value operand
+    bool    neg_divisor    = false;  // Div: a negative divisor flips the dividend's sign
     int32_t first_mw       = 0;
     int32_t second_mw      = 0;   // shift-amount magnitude width (shlw)
     int64_t shl_amt        = -1;  // shift-amount value when constant (shlw); <0 = dynamic
     bool    first          = true;
     int     opnd_idx       = 0;
+
+    // The cell is fresh and every operand is connected as it is created (leaf()
+    // always answers a pin), so each bank's next free slot is known here:
+    // setup_sink_pid would rescan every pin already on the node per operand,
+    // quadratic on a wide n-ary statement (a chain the tree aegraph flattened).
+    const int     banks        = Ntype::sink_bank_count(op);
+    hhds::Port_id next_slot[2] = {0, 1};
     for (auto c = lnast_->get_sibling_next(dst); !c.is_invalid(); c = lnast_->get_sibling_next(c)) {
       auto v        = leaf(c);
       max_mw        = std::max(max_mw, v.mw);
@@ -11428,6 +11441,9 @@ private:
           any_nonneg    = true;
         }
       }
+      if (opnd_idx == 1) {
+        neg_divisor = pin_can_be_negative(v.pin);
+      }
       if (first) {
         first_mw       = v.mw;
         first_negative = pin_can_be_negative(v.pin);
@@ -11455,19 +11471,34 @@ private:
       }
       // op varies (Sum/Mult/And/.../Div/SHL/SRA): address by pid so the right
       // sink name resolves per op (pid 0 = a/as, pid 1 = b) without hardcoding.
-      livehd::graph_util::setup_sink_pid(node, (commutative || first) ? 0 : 1).connect_driver(v.pin);
+      // A banked op appends to its bank (Sum adds 0, 2, 4, ..., subtracts 1, 3,
+      // ...; a one-bank op 0, 1, 2, ...), the same pids setup_sink_pid picks.
+      const hhds::Port_id pid = (commutative || first) ? 0 : 1;
+      if (banks == 0) {
+        node.create_sink_pin(pid).connect_driver(v.pin);
+      } else {
+        const auto bank = Ntype::sink_bank(op, pid);
+        node.create_sink_pin(next_slot[bank]).connect_driver(v.pin);
+        next_slot[bank] = static_cast<hhds::Port_id>(next_slot[bank] + banks);
+      }
       first = false;
       ++opnd_idx;
     }
     int32_t mw = 1;
     switch (wmode) {
-      case OpW::add   : mw = static_cast<int32_t>(max_mw + 1); break;
+      // A signed carrier holds a uW operand only in W+1 bits: an S8 plus a U8
+      // reaches 382, which needs s10, not max_mw+1 = s9. The width is the
+      // value wherever tolg's driver bits become semantics (an output with no
+      // declared width takes them as its port).
+      case OpW::add   : mw = static_cast<int32_t>((any_negative ? signed_mw : max_mw) + 1); break;
       case OpW::mul   : mw = sum_mw > 0 ? sum_mw : int32_t{1}; break;
       case OpW::maxw  : mw = max_mw; break;
       // AND narrows: bounded by the narrowest non-negative operand when there is
       // one, else (no operand proven non-negative) it keeps the widest.
       case OpW::andw  : mw = any_nonneg ? min_nonneg_mw : max_mw; break;
-      case OpW::firstw: mw = first_mw; break;
+      // A quotient never outgrows its dividend, except through a negative
+      // divisor: U8 / -1 is -255 (s9), S8 -128 / -1 is 128 (s9).
+      case OpW::firstw: mw = first_mw + (op == Ntype_op::Div && neg_divisor ? 1 : 0); break;
       case OpW::boolw : mw = 1; break;
       case OpW::shlw  : {
         // A left shift GROWS: out = a_width + shift_amount. A constant amount is
@@ -12142,6 +12173,177 @@ private:
     return range_of_name(lnast_->get_name(nid));
   }
 
+  // ── arm-local names
+  // ─────────────────────────────────────────────────────────
+  // lower_if merges every name an arm wrote, but a name whose every reference
+  // (its writes included) lies inside that `if` is dead once it ends: its
+  // merge has no reader, and a dead Hotmux even survives aegraph for its
+  // obligation. scan_arm_scopes numbers the body once in preorder, giving each
+  // name its first and last reference and each if/unique_if its subtree range,
+  // so lower_if tests a name in O(1) (arm_local). A loop-carried or forward
+  // read sits outside the range and keeps the name live. A dce:mark dead
+  // statement is not numbered: lower_stmts never lowers it, so its reads keep
+  // nothing alive.
+  struct Ref_span {
+    int32_t first  = 0;
+    int32_t last   = -1;     // -1: never referenced
+    bool    pinned = false;  // also read by name after the walk (attribute, io port): never arm-local
+  };
+  std::vector<Ref_span>                                     ref_spans_;  // by span slot
+  absl::flat_hash_map<int64_t, std::pair<int32_t, int32_t>> if_spans_;   // if class index -> preorder [first, last]
+  uint32_t                                                  span_epoch_ = 0;
+  int32_t                                                   span_pos_   = 0;
+
+  // abs(pool id) -> {epoch, span slot}. Every Lnast on the thread shares one
+  // name pool, so the table is reset by a new epoch instead of cleared: a unit
+  // pays for its own names, not for the whole compile's.
+  struct Span_slots {
+    std::vector<std::pair<uint32_t, int32_t>> slot;
+    uint32_t                                  epoch = 0;
+  };
+  static Span_slots& span_slots() {
+    static thread_local Span_slots s;
+    return s;
+  }
+  [[nodiscard]] int32_t span_slot(int32_t id) const {
+    const auto& t = span_slots();
+    const auto  i = static_cast<size_t>(id < 0 ? -static_cast<int64_t>(id) : id);
+    return id != 0 && i < t.slot.size() && t.slot[i].first == span_epoch_ ? t.slot[i].second : -1;
+  }
+  int32_t span_slot_add(int32_t id) {
+    auto&      t = span_slots();
+    const auto i = static_cast<size_t>(id < 0 ? -static_cast<int64_t>(id) : id);
+    if (i >= t.slot.size()) {
+      t.slot.resize(std::max(i + 1, t.slot.size() + t.slot.size() / 2));
+    }
+    if (auto& e = t.slot[i]; e.first != span_epoch_) {
+      e = {span_epoch_, static_cast<int32_t>(ref_spans_.size())};
+      ref_spans_.emplace_back();
+    }
+    return t.slot[i].second;
+  }
+  void span_ref(int32_t slot) {
+    auto& s = ref_spans_[static_cast<size_t>(slot)];
+    if (s.last < 0) {
+      s.first = span_pos_;
+    }
+    s.last = span_pos_;
+  }
+  // logical_last_ and apply_synth_targets read a name through its SSA base,
+  // so a pin covers every version of that base.
+  void span_pin(std::string_view canon) {
+    const auto base = canon.substr(0, canon.find("___ssa_"));
+    if (!base.empty()) {
+      ref_spans_[static_cast<size_t>(span_slot_add(lnast_->intern_name(base)))].pinned = true;
+    }
+  }
+
+  void scan_arm_scopes(const Lnast_nid& top) {
+    ref_spans_.clear();
+    if_spans_.clear();
+    auto& t = span_slots();
+    if (++t.epoch == 0) {  // wrapped: an entry left from an old epoch could match a reused one
+      t.slot.clear();
+      t.epoch = 1;
+    }
+    span_epoch_ = t.epoch;
+    span_pos_   = 0;
+    scan_arm_node(top, false);
+    // Read by name after the walk: the output wiring, the inputs, and an io
+    // port's deferred width bound (default_prologue keeps those live too).
+    for (const auto* ports : {&lnast_->io_meta().inputs, &lnast_->io_meta().outputs}) {
+      for (const auto& e : *ports) {
+        span_pin(canon_io_name(e.name));
+        for (const auto* bound : {&e.bound_max_text, &e.bound_min_text}) {
+          if (!bound->empty()) {
+            span_pin(canon_io_name(*bound));
+          }
+        }
+      }
+    }
+  }
+
+  void scan_arm_node(const Lnast_nid& nid, bool in_attr) {
+    const auto t   = lnast_->get_type(nid);
+    const auto pos = span_pos_;
+    if (const auto id = lnast_->get_name_id(nid); id != 0) {
+      // Keyed like pin_map_ (canon_io_name); canon is raw or a substring of it.
+      const auto raw   = lnast_->get_name(nid);
+      const auto canon = canon_io_name(raw);
+      span_ref(span_slot_add(canon.size() == raw.size() ? id : lnast_->intern_name(canon)));
+      // A dotted name is a field of its root, so it also references the root:
+      // a whole-value read of `t` after the `if` must keep `t` merged.
+      if (const auto dot = canon.find('.'); dot != std::string_view::npos && dot > 0 && Lnast_ntype::is_ref(t)) {
+        span_ref(span_slot_add(lnast_->intern_name(canon.substr(0, dot))));
+      }
+      // An attribute's target and value are resolved by name at the end of
+      // the walk (apply_synth_targets, finalize_regs, resolve_reset_signal).
+      if (in_attr) {
+        span_pin(canon);
+      }
+    }
+    ++span_pos_;
+    const bool stmts = Lnast_ntype::is_stmts(t);
+    const bool attr  = Lnast_ntype::is_attr_set(t);
+    for (auto c = lnast_->get_first_child(nid); !c.is_invalid(); c = lnast_->get_sibling_next(c)) {
+      if (stmts && lnast_->is_dce_dead(c)) {
+        continue;  // what lower_stmts skips
+      }
+      scan_arm_node(c, attr);
+    }
+    if (Lnast_ntype::is_if_like(t)) {
+      if_spans_.insert_or_assign(nid.get_class_index().value, std::pair{pos, span_pos_ - 1});
+    }
+  }
+
+  // Can lower_if drop the merge of `var` (a pin_map_ key some arm wrote) for
+  // the `if` spanning preorder [lo, hi]?
+  [[nodiscard]] bool arm_local(std::string_view var, int32_t lo, int32_t hi) {
+    // A shadow key (\x01din:/\x01en:) is no reference; a dotted name may be
+    // read through a field path; state, arrays and memories are read by name
+    // after the walk (finalize_regs/wires/mems, output_array_mems_).
+    if (var.empty() || var.front() == '\x01' || var.find('.') != std::string_view::npos || reg_map_.contains(var)
+        || wire_names_.contains(var) || mem_map_.contains(var) || array_scalar_views_.contains(var)) {
+      return false;
+    }
+    const auto slot = span_slot(lnast_->intern_name(var));
+    if (slot < 0) {
+      return false;
+    }
+    const auto& s = ref_spans_[static_cast<size_t>(slot)];
+    if (s.pinned || s.last < 0 || s.first < lo || s.last > hi) {
+      return false;
+    }
+    if (const auto p = var.find("___ssa_"); p != std::string_view::npos) {
+      const auto b = span_slot(lnast_->intern_name(var.substr(0, p)));
+      return b < 0 || !ref_spans_[static_cast<size_t>(b)].pinned;
+    }
+    return true;
+  }
+
+  // Move the arm-local names of `vars` (sorted) to `local`, keeping the order.
+  // `keep` are names merged regardless.
+  void drop_arm_local(const Lnast_nid& nid, std::vector<std::string>& vars, std::vector<std::string>& local,
+                      const absl::flat_hash_set<std::string_view>& keep) {
+    const auto it = if_spans_.find(nid.get_class_index().value);
+    if (it == if_spans_.end()) {
+      return;
+    }
+    const auto [lo, hi] = it->second;
+    size_t kept         = 0;
+    for (size_t i = 0; i < vars.size(); ++i) {
+      if (!keep.contains(vars[i]) && arm_local(vars[i], lo, hi)) {
+        local.push_back(std::move(vars[i]));
+      } else {
+        if (kept != i) {
+          vars[kept] = std::move(vars[i]);
+        }
+        ++kept;
+      }
+    }
+    vars.resize(kept);
+  }
+
   // Lower an if-branch body into a fresh write scope; rolls pin_map_ back so
   // branch-local writes don't leak. Returns the names the branch bound. The
   // rollback restores only the names this branch wrote (recorded lazily in
@@ -12205,6 +12407,10 @@ private:
     if (child.is_invalid()) {
       return;
     }
+    // A field read deferred to the end of the body (resolve_pending_tgets) is
+    // lowered there against the final name state, not at its reference.
+    const size_t tgets_base = pending_tgets_.size();
+
     // 1a-mem — memory write enables need each branch's full path condition;
     // R1 — so do assert/assume guards (lower_cassert turns the path condition
     // into an IMPLICATION, where a memory enable uses it as a CONJUNCTION).
@@ -12229,16 +12435,21 @@ private:
     std::vector<Lane_coverage> arm_cov;
     // Per arm (parallel to `branches`): the instance-result views it rebound.
     std::vector<absl::flat_hash_map<std::string, Sub_view>> arm_views;
+    // The negated prefix stays on the stack from arm to arm (one push per
+    // condition, and its memoized fold is kept): re-pushing every earlier
+    // condition per arm was O(arms^2) on a flat elif chain.
+    size_t                     negated   = 0;
     auto                       lower_arm = [&](const Lnast_nid& stmts, const Pin& cond, bool is_else) {
-      for (const auto& pc : prior_conds) {
-        push_path_term(pc, /*negated=*/true);
+      for (; negated < prior_conds.size(); ++negated) {
+        push_path_term(prior_conds[negated], /*negated=*/true);
       }
+      const size_t arm_base = path_terms_.size();
       if (!is_else) {
         push_path_term(cond, /*negated=*/false);
       }
       nil_array_output_lanes_ = pre_cov;
       auto w                  = lower_branch(stmts);
-      truncate_path_terms(path_base);
+      truncate_path_terms(arm_base);
       arm_cov.push_back(std::exchange(nil_array_output_lanes_, pre_cov));
       arm_views.push_back(std::exchange(last_arm_sub_views_, {}));
       return w;
@@ -12279,6 +12490,7 @@ private:
       prior_conds.push_back(elif_cond);
       child = lnast_->get_sibling_next(child);
     }
+    truncate_path_terms(path_base);
 
     merge_arm_coverage(pre_cov, arm_cov, !branches.empty() && branches.back().is_else);
 
@@ -12304,8 +12516,22 @@ private:
     // arms of a unique_if are exclusive, so that order is equivalent there).
     merge_sub_views(branches, arm_views, has_else);
 
-    if (unique && !all_vars.empty()) {
-      lower_unique_merge(branches, all_vars, has_else, else_writes);
+    // A name referenced only inside this `if` is dead past it: no merge. Not
+    // when an arm deferred a field read (it reads the names after the walk),
+    // and never for an instance result an arm rebound (merge_sub_views).
+    std::vector<std::string> arm_local_vars;
+    if (pending_tgets_.size() == tgets_base) {
+      absl::flat_hash_set<std::string_view> views;
+      for (const auto& av : arm_views) {
+        for (const auto& [name, _] : av) {
+          views.insert(name);
+        }
+      }
+      drop_arm_local(nid, all_vars, arm_local_vars, views);
+    }
+
+    if (unique && (!all_vars.empty() || !arm_local_vars.empty())) {
+      lower_unique_merge(branches, all_vars, has_else, else_writes, arm_local_vars);
       return;
     }
 
@@ -12708,13 +12934,23 @@ private:
   }
 
   // unique_if merge: direct control/value pairs plus a fall-through value.
+  // The `unique` claim is a one-hot obligation on the control list (pass.formal
+  // proves it, the sim runtime check catches the rest), and it rides on any
+  // Hotmux over the full list. So when no name in `all_vars` builds one, the
+  // arm-local names lower_if dropped (`carriers`) are merged until one does:
+  // dead, it still carries the obligation.
   void lower_unique_merge(const std::vector<Branch>& branches, const std::vector<std::string>& all_vars, bool has_else,
-                          const WriteMap& else_writes) {
+                          const WriteMap& else_writes, const std::vector<std::string>& carriers) {
     const int n_conds = static_cast<int>(branches.size()) - (has_else ? 1 : 0);
     I(n_conds >= 1);
     const bool exhaustive = covers_input_domain(branches, n_conds);
 
-    for (const auto& var : all_vars) {
+    bool carried = false;
+    for (size_t vi = 0; vi < all_vars.size() + carriers.size(); ++vi) {
+      if (vi >= all_vars.size() && carried) {
+        break;
+      }
+      const auto& var     = vi < all_vars.size() ? all_vars[vi] : carriers[vi - all_vars.size()];
       auto       base    = pin_map_.find(var);
       bool       has_pre = base != pin_map_.end();
       // A reg's din shadow with no recorded pre-value still HOLDS on an
@@ -12842,6 +13078,7 @@ private:
       const auto mw = std::max<int32_t>(1, any_signed ? std::max(signed_mw, unsigned_mw > 0 ? unsigned_mw + 1 : 0) : unsigned_mw);
 
       auto hot = make_node(Ntype_op::Hotmux);
+      carried  = true;
       for (int i = 0; i < n_conds; ++i) {
         const Pin val = arm_values[i].is_invalid() ? create_const(*g_, *Dlop::unknown(mw)) : arm_values[i];
         livehd::graph_util::setup_sink_pid(hot, static_cast<hhds::Port_id>(2 * i)).connect_driver(branches[i].cond);
@@ -13005,6 +13242,7 @@ private:
   };
   std::vector<Path_term>                                                          path_terms_;
   std::vector<Pin>                                                                path_folded_;
+  size_t path_folded_valid_ = 0;  // leading path_folded_ entries current_path_cond already folded
   absl::flat_hash_map<std::string, Tuple_rec>                                     tuple_recs_;
   absl::flat_hash_map<std::string, Mem_result>                                    mem_results_;
   // attr_set seen before its target's declare (memory fwd overrides etc).

@@ -373,9 +373,30 @@ void sweep_dead_node(const hhds::Node_class& n) {
 // rewrites normally collect their own obsolete fan-in, but region rewrites
 // can expose a dead leaf after its forward visit. One explicit final phase
 // collects those leaves independently of rewrite order.
-void cleanup_dead_nodes(hhds::Graph* g) {
+void cleanup_dead_nodes(hhds::Graph* g, const std::vector<hhds::Node_class>* before = nullptr) {
   livehd::cprop_profile::Timer timer(livehd::cprop_profile::dead);
-  auto                         order = storage_nodes(g);
+  std::vector<hhds::Node_class> order;
+  if (before == nullptr) {
+    order = storage_nodes(g);
+  } else {
+    // Fast path (pass.aegraph's post step): the nodes the step started from, which it already holds, plus the
+    // cells it minted or rewired (Facts::generations). No fresh walk of the body.
+    order = *before;
+    if (const auto* facts = livehd::cprop_value::active; facts != nullptr) {
+      std::vector<std::pair<uint64_t, hhds::Class_index>> fresh;
+      fresh.reserve(facts->generations.size());
+      for (const auto& [idx, gen] : facts->generations) {
+        fresh.emplace_back(gen, idx);
+      }
+      // Generations are unique: oldest first, so the latest is swept first below (deterministic).
+      std::sort(fresh.begin(), fresh.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+      for (const auto& [gen, idx] : fresh) {
+        if (const auto node = g->get_node(idx); !node.is_invalid()) {
+          order.push_back(node);
+        }
+      }
+    }
+  }
   // Deletion owns its complete backward closure; storage order is sufficient.
   for (auto it = order.rbegin(); it != order.rend(); ++it) {
     auto candidate = *it;
@@ -4684,7 +4705,7 @@ void Cprop::region_passes() {
     }
   }
   fold_constant_flop_enables(current_graph);
-  cleanup_dead_nodes(current_graph);
+  cleanup_dead_nodes(current_graph, post_nodes_);
 }
 
 
@@ -4725,7 +4746,9 @@ void Cprop::do_post(const std::shared_ptr<hhds::Graph>& g) {
       remember_node(node);
     }
   }
+  post_nodes_ = &order;
   region_passes();
+  post_nodes_   = nullptr;
   current_graph = nullptr;
 }
 

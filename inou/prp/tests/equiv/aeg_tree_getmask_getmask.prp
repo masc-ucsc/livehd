@@ -1,0 +1,12 @@
+/*
+:name: aeg_tree_getmask_getmask
+:set: compile.aegraph.rules_disable=group:arith+group:div+group:mask+group:mux+group:shift
+:type: lec
+*/
+// PYROPE-vs-PYROPE group, the fixture of the tree aegraph (upass/aeg, todo 2a-treeaeg): a window of a window reads the same bits of the source once.
+// A `mod`: the step rewrites only a body tolg alone reads (a comb's body is inlined and cached as walked).
+// REFERENCE = every rule group off, so the tree step still shares and forwards but rewrites nothing; `_1` = the rules on.
+pub mod top(a:U16) -> (o:U3@[0], p:U4@[0]) {
+  o = (a#[2..<10])#[1..<4]
+  p = (a#[4..<12])#[0..<4]
+}

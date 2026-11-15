@@ -244,16 +244,34 @@ TEST(RulegenEmit, DeterministicAndLineMapped) {
   EXPECT_NE(fuzz.find("not_not_equal"), std::string::npos);
   EXPECT_NE(fuzz.find("not_not_example_fires"), std::string::npos);
   const auto md = emit_rules_md({a.file}, a.analyses, {});
-  EXPECT_NE(md.find("| `not_not` | simplify | 30 | Not | bv-swept | g.rules:2 |"), std::string::npos);
+  EXPECT_NE(md.find("| `not_not` | simplify | 30 | Not | generic | bv-swept | g.rules:2 |"), std::string::npos);
+}
+
+// A guard that asks a width fact (an analysis, or bool01) makes a bit rule: AEG_BIT_RULE in the generated code and
+// `+bits` in RULES.md.
+TEST(RulegenEmit, GuardOnAnAnalysisMakesABitRule) {
+  const char* text = R"(
+(simplify not_not 30 (Not (Not x)) => x :example (Not (Not $x)))
+(simplify xor_bool 30 (Xor (as x 1)) :when (bool01 x) => (EQ x 0) :example (Xor (EQ $x 0) 1))
+)";
+  const auto p = tst::parse_all("pass/aegraph/rules/g.rules", text, kAnalyses);
+  ASSERT_TRUE(p.diags.empty());
+  const auto cpp = emit_rules_cpp(p.file, p.analyses);
+  EXPECT_NE(cpp.find("AEG_RULE(not_not, simplify, 30, Ntype_op::Not)"), std::string::npos);
+  EXPECT_NE(cpp.find("AEG_BIT_RULE(xor_bool, simplify, 30, Ntype_op::Xor)"), std::string::npos);
+  const auto md = emit_rules_md({p.file}, p.analyses, {});
+  EXPECT_NE(md.find("| `xor_bool` | simplify | 30 | Xor | +bits |"), std::string::npos);
+  EXPECT_NE(md.find("| `not_not` | simplify | 30 | Not | generic |"), std::string::npos);
 }
 
 TEST(RulegenEmit, ScansHandWrittenRules) {
   const auto found = scan_native(
       "AEG_RULE_GROUP(arith);\n\n// first line\n// second line\n"
       "AEG_NATIVE_RULE(annihilate, simplify, 90, Ntype_op::Mult, Ntype_op::And) {\n}\n"
-      "AEG_RULE(not_not, simplify, 30, Ntype_op::Not) {\n}\n",
+      "AEG_RULE(not_not, simplify, 30, Ntype_op::Not) {\n}\n"
+      "AEG_NATIVE_BIT_RULE(bool_complement, simplify, 40, Ntype_op::And) {\n}\n",
       "rules/arith.cpp");
-  ASSERT_EQ(found.size(), 2u);
+  ASSERT_EQ(found.size(), 3u);
   EXPECT_EQ(found[0].name, "annihilate");
   EXPECT_EQ(found[0].group, "arith");
   EXPECT_EQ(found[0].prio, 90);
@@ -261,7 +279,10 @@ TEST(RulegenEmit, ScansHandWrittenRules) {
   EXPECT_EQ(found[0].doc, "first line second line");
   EXPECT_EQ(found[0].line, 5);
   EXPECT_TRUE(found[0].native);
+  EXPECT_FALSE(found[0].bits);
   EXPECT_FALSE(found[1].native);
+  EXPECT_TRUE(found[2].native);
+  EXPECT_TRUE(found[2].bits);  // AEG_NATIVE_BIT_RULE: reads width facts
   // a name that a pattern rule also uses is a lint error
   auto  p = parse_text("(alt annihilate (Not x) => (Xor x -1) :example (Not $x))");
   Diags diags;

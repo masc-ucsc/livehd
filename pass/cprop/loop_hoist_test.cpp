@@ -228,3 +228,59 @@ TEST(LoopHoist, BodyWithAPlainCallIsLeftAlone) {
   EXPECT_EQ(count_op(f.body, Ntype_op::Not), 1u);
   EXPECT_EQ(f.body->get_io()->get_input_pin_decls().size(), 3u);
 }
+
+// A warm compile hands the hoist only the graphs the compile cache did not
+// restore. An unrelated graph left out of scope must not stop the move (the
+// warm netlist would differ from the cold one); a body some out-of-scope graph
+// instantiates, or a body itself out of scope, is left alone.
+TEST(LoopHoist, PartialScopeHoistsUnlessAnOutsideGraphInstantiatesTheBody) {
+  {
+    auto  f     = make("partial_unrelated", false);
+    auto& lib   = livehd::Hhds_graph_library::instance("lgdb_loop_hoist_partial_unrelated");
+    auto  oio   = lib.create_io("partial_unrelated_other");
+    oio->add_input("a", 0);
+    oio->add_output("b", 1);
+    auto other = oio->create_graph();
+    other->get_input_pin("a").connect_sink(other->get_output_pin("b"));
+
+    const auto stats = livehd::cprop::hoist_loop_invariants({f.parent, f.body});
+    EXPECT_EQ(stats.hoisted_values, 1u) << "an unrelated out-of-scope graph does not block the body";
+    EXPECT_EQ(count_op(f.body, Ntype_op::Not), 0u);
+  }
+  {
+    auto  f   = make("partial_caller", false);
+    auto& lib = livehd::Hhds_graph_library::instance("lgdb_loop_hoist_partial_caller");
+    auto  oio = lib.create_io("partial_caller_other");
+    oio->add_input("x", 0);
+    oio->add_input("seed", 1);
+    oio->add_output("r", 2);
+    oio->set_bits("x", 8);
+    oio->set_bits("seed", 8);
+    oio->set_bits("r", 8);
+    auto other = oio->create_graph();
+    auto sub   = gu::create_typed_node(*other, Ntype_op::Sub);
+    sub.set_name("u_other");
+    hhds::Subnode_loop desc;
+    desc.count       = 2;
+    desc.index_input = hhds::Port_id{1};
+    sub.set_subnode(f.body->get_io(), desc);
+    other->get_input_pin("x").connect_sink(sub.create_sink_pin(0));
+    other->get_input_pin("seed").connect_sink(sub.create_sink_pin(2));
+    auto out = sub.create_driver_pin(3);
+    gu::set_ubits(out, 8);
+    out.connect_sink(other->get_output_pin("r"));
+    out.connect_sink(sub.create_sink_pin(2));
+    sub.subnode_group().validate();
+
+    const auto stats = livehd::cprop::hoist_loop_invariants({f.parent, f.body});
+    EXPECT_EQ(stats.hoisted_values, 0u) << "an out-of-scope instance would read the new port undriven";
+    EXPECT_EQ(count_op(f.body, Ntype_op::Not), 1u);
+    EXPECT_EQ(f.body->get_io()->get_input_pin_decls().size(), 3u);
+  }
+  {
+    auto       f     = make("partial_body", false);
+    const auto stats = livehd::cprop::hoist_loop_invariants({f.parent});
+    EXPECT_EQ(stats.hoisted_values, 0u) << "a body outside the scope is never rewritten";
+    EXPECT_EQ(count_op(f.body, Ntype_op::Not), 1u);
+  }
+}

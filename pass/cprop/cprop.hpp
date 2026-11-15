@@ -127,6 +127,8 @@ protected:
   void remember_node(const hhds::Node_class& node);
   // The region passes do_post runs.
   void region_passes();
+  // do_post's node snapshot, handed to the final dead-code cleanup so it needs no fresh walk of the body.
+  const std::vector<hhds::Node_class>* post_nodes_ = nullptr;
   bool canonicalize_pack(hhds::Node_class& node);
   // Low-lane narrowing (cprop_lowlane.cpp): an operation reading a value
   // spelled Or(Shl(H, k), L) runs on the H parts, k bits narrower, and

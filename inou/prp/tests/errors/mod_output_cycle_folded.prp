@@ -1,0 +1,12 @@
+/*
+:name: mod_output_cycle_folded
+:type: error
+:tolg: 1
+:error: lands at cycle 0 but its interface declares @\[3\]
+*/
+
+// The output is computed from the cycle-0 input, whatever its value: folded to
+// a constant (the tree aegraph runs before the check) it would have no cycle.
+mod top(in1:U16) -> (out:U16@[3]) {
+  out = (in1 - in1) & 0xFFFF
+}

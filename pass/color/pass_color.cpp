@@ -800,11 +800,17 @@ void Pass_color::color(Eprp_var& var) {
   // implementation together; ordinary synthesis cuts and size windows must not
   // split the body into independently mapped regions.
   std::unordered_set<hhds::Gid> loop_bodies;
+  // Loop bodies that stand for more than one occurrence: every instance they
+  // hold is physically replicated, even though it is ONE Sub node.
+  std::unordered_set<hhds::Gid> replicated_loop_bodies;
   if (alg == "synth") {
     for (const auto& [gid, graph] : gid2graph) {
       for (auto node : graph->body().nodes()) {
         if (node.is_loop_subnode() && gid2graph.contains(node.get_subnode_gid())) {
           loop_bodies.insert(node.get_subnode_gid());
+          if (const auto loop = node.subnode_loop(); loop && loop->count > 1) {
+            replicated_loop_bodies.insert(node.get_subnode_gid());
+          }
         }
       }
     }
@@ -826,6 +832,23 @@ void Pass_color::color(Eprp_var& var) {
     for (const auto& [gid, count] : references) {
       if (count > 1 && gid2graph.contains(gid) && !loop_bodies.contains(gid) && !is_clock_gate_definition(gid2graph.at(gid))) {
         reused_bodies.insert(gid);
+      }
+    }
+    // A definition instantiated inside a replicated loop body is reused as
+    // much as one an unrolled design instantiates once per iteration: its one
+    // Sub node stands for `count` physical instances. Counting Sub nodes alone
+    // dissolved it into the loop body, so the netlist of the rolled source
+    // lost the definition the unrolled source keeps (a gemmini PE, proven once
+    // per definition by netlist LEC, became flat per-iteration logic).
+    for (const auto body_gid : replicated_loop_bodies) {
+      for (auto node : gid2graph.at(body_gid)->body().nodes()) {
+        if (livehd::graph_util::type_op_of(node) != Ntype_op::Sub || node.is_loop_subnode()) {
+          continue;
+        }
+        auto gid = node.get_subnode_gid();
+        if (gid2graph.contains(gid) && !loop_bodies.contains(gid) && !is_clock_gate_definition(gid2graph.at(gid))) {
+          reused_bodies.insert(gid);
+        }
       }
     }
     std::vector<hhds::Gid> todo(reused_bodies.begin(), reused_bodies.end());

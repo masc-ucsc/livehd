@@ -1,0 +1,16 @@
+/*
+:name: cycle_check_folded_value
+:type: error
+:tolg: 1
+:error: lands at cycle 3, not 2
+*/
+
+// `z` is a constant 0, but it is computed from res1 at cycle 3, so the `@[2]`
+// check fails. A fold to `z = 0` (the tree aegraph runs before the check)
+// would leave nothing to check.
+mod top(in1:U16) -> (out:U16@[3], o2:U16@[3]) {
+  stage[3] res1 = in1
+  const z = (res1 - res1) & 0xFFFF
+  o2 = z
+  out = z@[2]
+}

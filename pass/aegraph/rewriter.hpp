@@ -46,6 +46,24 @@ public:
   [[nodiscard]] std::string   describe(Class_id cls) const;
 
 protected:
+  // Import one ORIGINAL e-node (a statement of the front end's IR, not a rule
+  // result): constant analysis, normalization (operands sorted by bank then class)
+  // and hash-consing with `attrs`, with NO readers bump and NO rules. The front end
+  // then sets readers_[raw] / chain_inner_[raw] from what it knows about the
+  // node's readers and, for a created node, calls rewrite(cls, 0) with
+  // cur_attrs_ = attrs, current_rule_ = kNoRule and depth_ = 0: chain_inner must be
+  // in place before the rules run, which make() cannot do (flatten absorbs a whole
+  // chain at its top only when the inner links say so, keeping the pool linear).
+  // folded: a forward or a fully known constant; `cls` is then the operand class or
+  // the constant and no e-node exists.
+  struct Original {
+    Class_id cls     = kNoClass;
+    Class_id raw     = kNoClass;  // the hash-consed class before any alias
+    bool     created = false;     // a new e-node (false: a hash-cons hit, or folded)
+    bool     folded  = false;
+  };
+  Original add_original(Ntype_op op, std::span<const Operand> ops, const Enode_attrs& attrs);
+
   // Per-class side tables grow with the e-graph; a front end with tables of its
   // own extends this.
   virtual void ensure(Class_id cls);

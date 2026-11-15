@@ -1,0 +1,14 @@
+/*
+:name: unbounded_out_width
+:type: equiv
+*/
+// An output with no declared width (`Signed`) takes its driver's width and sign from upass.tolg as its port,
+// so tolg's width of the driver is the value. A signed carrier holds a U8 only in 9 bits: S8 + U8 reaches 382
+// and S8 - U8 reaches -383, both s10, not the s9 an operand-width-plus-one gives. A quotient by a signed divisor
+// outgrows its dividend by one bit: U8 / -1 is -255 (s9). The divisor is odd, so never zero (cgen's `/` by zero
+// is X to the yosys oracle). The golden computes each value exactly.
+pub comb top(a:S8, b:U8, d:S8) -> (s:Signed, u:Signed, t:Signed) {
+  s = a + b
+  u = a - b
+  t = b / (d | 1)
+}

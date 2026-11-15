@@ -14,6 +14,7 @@
 // over a bank or a region walk.
 
 #include <algorithm>
+#include <span>
 #include <vector>
 
 #include "node_util.hpp"
@@ -172,40 +173,46 @@ AEG_NATIVE_RULE(xor_pair_cancel, simplify, 60, Ntype_op::Xor) {
   }
 }
 
-// Sum(x, y) - x = y: an operand in both banks cancels against itself.
+// Sum(x, y) - x = y: an operand in both banks cancels against itself. An e-node
+// keeps its operands sorted by (bank, class), so the added run and the
+// subtracted run pair up in one merge: linear in the arity, which a flattened
+// +/- chain makes as wide as the chain (a scan of the subtracted bank per added
+// operand was quadratic there).
 AEG_NATIVE_RULE(sum_cancel, simplify, 60, Ntype_op::Sum) {
-  std::vector<Operand> added, subtracted;
-  for (const auto& o : root.ops) {
-    (o.bank == 0 ? added : subtracted).push_back(o);
+  std::span<const Operand> ops = root.ops;
+  std::vector<Operand>     sorted;
+  if (!std::ranges::is_sorted(ops)) {
+    sorted.assign(ops.begin(), ops.end());
+    std::ranges::sort(sorted);
+    ops = sorted;
   }
-  if (added.empty() || subtracted.empty()) {
+  const size_t mid
+      = static_cast<size_t>(std::ranges::partition_point(ops, [](const Operand& o) { return o.bank == 0; }) - ops.begin());
+  if (mid == 0 || mid == ops.size()) {
     return;
   }
   std::vector<Operand> rest;
-  std::vector<bool>    used(subtracted.size(), false);
+  std::vector<Operand> rest_sub;
+  size_t               i       = 0;
+  size_t               j       = mid;
   bool                 changed = false;
-  for (const auto& a : added) {
-    bool cancelled = false;
-    for (size_t j = 0; j < subtracted.size() && !cancelled; ++j) {
-      if (!used[j] && subtracted[j].cls == a.cls) {
-        used[j]   = true;
-        cancelled = true;
-      }
-    }
-    if (cancelled) {
+  while (i < mid && j < ops.size()) {
+    if (ops[i].cls == ops[j].cls) {
+      ++i;
+      ++j;
       changed = true;
+    } else if (ops[i].cls < ops[j].cls) {
+      rest.push_back(ops[i++]);
     } else {
-      rest.push_back(a);
+      rest_sub.push_back(ops[j++]);
     }
   }
   if (!changed) {
     return;
   }
-  for (size_t j = 0; j < subtracted.size(); ++j) {
-    if (!used[j]) {
-      rest.push_back(subtracted[j]);
-    }
-  }
+  rest.insert(rest.end(), ops.begin() + static_cast<std::ptrdiff_t>(i), ops.begin() + static_cast<std::ptrdiff_t>(mid));
+  rest.insert(rest.end(), rest_sub.begin(), rest_sub.end());
+  rest.insert(rest.end(), ops.begin() + static_cast<std::ptrdiff_t>(j), ops.end());
   out.subsume(ctx.make_bank(root.op, std::move(rest)));
 }
 
@@ -292,7 +299,7 @@ AEG_NATIVE_RULE(and_absorb, simplify, 40, Ntype_op::And) { absorb(ctx, root, Nty
 
 // And(c, EQ(c, 0), ..) = 0 for any c (one of the pair is 0); Or(c, EQ(c, 0), ..) = 1
 // when every operand is a 0/1 value.
-AEG_NATIVE_RULE(bool_complement, simplify, 40, Ntype_op::And, Ntype_op::Or) {
+AEG_NATIVE_BIT_RULE(bool_complement, simplify, 40, Ntype_op::And, Ntype_op::Or) {
   if (root.ops.size() > 64) {
     return;
   }
@@ -367,7 +374,7 @@ AEG_NATIVE_RULE(cmp_same, simplify, 30, Ntype_op::EQ, Ntype_op::LT, Ntype_op::GT
 
 // EQ(b, 1) = b and EQ(EQ(y, 0), 0) = y for 0/1 values: the boolean EQ chains a
 // lowered `!x` and to-bool leave behind.
-AEG_NATIVE_RULE(eq_bool_chain, simplify, 30, Ntype_op::EQ) {
+AEG_NATIVE_BIT_RULE(eq_bool_chain, simplify, 30, Ntype_op::EQ) {
   if (root.ops.size() != 2) {
     return;
   }

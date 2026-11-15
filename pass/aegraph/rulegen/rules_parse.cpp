@@ -791,8 +791,14 @@ std::vector<Native_rule> scan_native(std::string_view cpp, std::string_view path
       continue;
     }
     bool native = false;
+    bool bits   = false;
     if (line.starts_with("AEG_NATIVE_RULE(")) {
       native = true;
+    } else if (line.starts_with("AEG_NATIVE_BIT_RULE(")) {
+      native = true;
+      bits   = true;
+    } else if (line.starts_with("AEG_BIT_RULE(")) {
+      bits = true;
     } else if (!line.starts_with("AEG_RULE(")) {
       continue;
     }
@@ -823,6 +829,7 @@ std::vector<Native_rule> scan_native(std::string_view cpp, std::string_view path
     n.line   = static_cast<int>(ln + 1);
     n.prio   = std::atoi(args[2].c_str());
     n.native = native;
+    n.bits   = bits;
     for (size_t i = 3; i < args.size(); ++i) {
       auto r = args[i];
       if (r.starts_with("Ntype_op::")) {

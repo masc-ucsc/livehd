@@ -1,0 +1,16 @@
+/*
+:name: mod_output_reg_mask_cycle
+:type: error
+:tolg: 1
+:error: lands at cycle\(s\) \(0,0\) but \(1,1\) is declared at the interface
+*/
+
+// A mod output reads a plain reg as a feedforward stage only through copies and
+// bit slices; through an `&` mask the reg is cycle-0 state. The tree aegraph
+// must not respell the mask as a slice (`r#[0..<4]`), which would turn the reg
+// into a stage and accept this.
+mod top(a:U8) -> (o:U4@[1]) {
+  reg r:U8 = 0
+  r = a
+  o = r & 0xF
+}

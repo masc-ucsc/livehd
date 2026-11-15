@@ -66,4 +66,22 @@ int materialize_occurrences(hhds::Graph* g, std::string_view from_pass);
 // same factor.
 bool materialize_occurrences_all(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, std::string_view from_pass);
 
+// The UNROLLED spelling of a hierarchical name that crosses ROLLED loop
+// wrappers. A rolled comptime loop is ONE replicated `__loop<n>` Sub named
+// `u_loop_<n>` (upass_runner.cpp), whose k-th occurrence hhds spells
+// `u_loop_<n>__li<k>`; the unrolled lowering of the same source stamps the k-th
+// body copy's instances `<lhs>__li<k>` with no wrapper level, over the same
+// ordinal space. Dropping each wrapper segment and carrying its tag onto the
+// next segment (before that segment's own, inner, `__li` tags) maps one onto the
+// other exactly:
+//   u_loop_0__li1.lane_q.acc           -> lane_q__li1.acc
+//   u_loop_0__li0.u_loop_0__li1.t.acc  -> t__li0__li1.acc    (nested)
+//   u_loop_0__li0.t__li1.acc           -> t__li0__li1.acc    (inner loop already folded)
+// A wrapper that is the LAST segment (the box instance itself) is left as-is.
+// LEC canonicalizes state names with it (pass/lec/encode.cpp), and synthesis
+// renames what it inlines from expanded loop bodies with it
+// (pass/synth/loop_cleanup.cpp), so a rolled source's netlist names its
+// instances and registers as the unrolled source's netlist does.
+[[nodiscard]] std::string fold_rolled_loop_wrappers(std::string_view s);
+
 }  // namespace livehd::graph_util

@@ -2202,8 +2202,7 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
           // steps must not narrow or repack values again (low-lane narrowing).
           labels["after_bitwidth"] = "true";
         }
-        // compile.cprop (low_lanes, loop_hoist, merged above) and compile.aegraph are the
-        // two spellings of the one method's labels.
+        // compile.aegraph: the rule runtime's labels (compile.cprop carries none any more).
         merge_sets(opts, "compile.aegraph", labels);
         // The resolved profile (`auto` follows the command), the same one the compile-cache descriptor names.
         labels["cost"] = resolve_aegraph_cost(opts);
@@ -2215,13 +2214,6 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
       if (needs_loop_check && method == "pass.enableopt") {
         delayed_enableopt = true;
         continue;
-      }
-      // Before legalize only INTRA-module work may run (bitfuzz, cprop's
-      // per-body transform, bitwidth -- which reads a callee only through its
-      // declared interface). cprop's loop-invariant hoist edits a loop body and
-      // its parents together, so it waits for the cprop after legalize.
-      if ((!legalized || needs_loop_check) && method == "pass.aegraph") {
-        labels["loop_hoist"] = "false";
       }
       run_step(method, *active, labels, opts, res);
       if (!legalized && method == "pass.bitwidth") {
@@ -2277,7 +2269,6 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
         {
           Eprp_var::Eprp_dict cp_labels;
           merge_sets(opts, "compile.cprop", cp_labels);
-          cp_labels["loop_hoist"]     = "false";
           cp_labels["after_bitwidth"] = "true";
           merge_sets(opts, "compile.aegraph", cp_labels);
           cp_labels["cost"] = resolve_aegraph_cost(opts);

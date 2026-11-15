@@ -17546,6 +17546,45 @@ void uPass_runner::run() {
     }
   }
 
+  // The tree aegraph (upass/aeg, injected by pass.upass). The staging tree is
+  // complete here and every pass of the walk has judged the source form; it
+  // edits statements in place and leaves the definitions it replaces unread,
+  // which the DCE below sweeps in both mark and rebuild mode. The cycle checks
+  // are not done yet: upass/timecheck (pass.upass, after the queue) and tolg's
+  // `@[N]` lowering and LG checker judge the post-step body by its
+  // dependencies, so a timed unit (its checks on) has the step keep what they
+  // read as written. The DCE's own gates (a materialized body, constprop's
+  // folds); a provenance emission keeps the source spelling.
+  //
+  // Only a body tolg alone reads (a concrete mod/pipe: the compile cache's
+  // metadata-only rule). A comb's post-walk body is what the inliner splices
+  // into callers and what the compile cache restores for a warm caller, so it
+  // must stay what a caller's walk reaches from the source body. The step
+  // simplifies with this unit's own facts (its port kinds and widths), which an
+  // inlined copy no longer has: a warm caller re-walking a simplified body
+  // differed from a cold one inlining the source. The caller's own step
+  // simplifies the inlined copy, identically warm or cold.
+  const auto lambda_kind = lm->get_lnast()->get_lambda_kind();
+  const bool tolg_only   = lambda_kind == "mod" || lambda_kind == "pipe";
+  staging_rewrite_stats_ = {};
+  if (materialize_ && staging && staging_rewrite_ != nullptr && tolg_only && has_constprop() && !preserve_param_provenance_) {
+    staging_rewrite_stats_ = staging_rewrite_({*staging,
+                                               lm->get_lnast()->io_meta(),
+                                               lm->get_top_module_name(),
+                                               !lm->get_lnast()->get_skip_timecheck(),
+                                               lambda_kind == "pipe"});
+    if (dispatch_stats_) {
+      std::print(stderr,
+                 "uPass stats [{}]:   tree-aeg    {:9.1f}s  ({} stmts, {} forwarded, {} respelled, {} budget hit)\n",
+                 lm->get_top_module_name(),
+                 static_cast<double>(staging_rewrite_stats_.ns) / 1e9,
+                 staging_rewrite_stats_.stmts,
+                 staging_rewrite_stats_.forwarded,
+                 staging_rewrite_stats_.respelled,
+                 staging_rewrite_stats_.budget_hit);
+    }
+  }
+
   // Post-walk DCE on staging — removes definition statements (assign,
   // tuple_add, attr_set, etc.) whose dst has no surviving downstream
   // reader. Constprop is conservative about multi-entry tuple bundles
@@ -17681,6 +17720,10 @@ bool dce_is_keepalive_attr_set(const Lnast& staging, const Lnast_nid& node) {
 
 }  // namespace
 
+bool uPass_runner::has_constprop() const {
+  return std::any_of(upasses.begin(), upasses.end(), [](const Pass_entry& e) { return e.name == "constprop"; });
+}
+
 void uPass_runner::dead_code_eliminate_staging() {
   if (!staging) {
     return;
@@ -17689,14 +17732,7 @@ void uPass_runner::dead_code_eliminate_staging() {
   // settle if-bodies and tuple_get expansions; without it the runner's
   // branch-elimination hasn't pruned dead arms and the use-count would
   // be wildly off.
-  bool has_constprop = false;
-  for (auto& e : upasses) {
-    if (e.name == "constprop") {
-      has_constprop = true;
-      break;
-    }
-  }
-  if (!has_constprop) {
+  if (!has_constprop()) {
     return;
   }
   // Every materialized body, including a fully typed comb, can reach tolg.

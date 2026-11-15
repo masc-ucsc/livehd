@@ -54,16 +54,14 @@ echo "$out" | grep -q '"name":"pass.abc.unroll_carry","method":"pass.abc","defau
   || fail "ABC carry expansion default missing: $out"
 # Compile-only passes live under compile.*; lec/pass passes keep their own namespace.
 echo "$out" | grep -q '"name":"compile.bitwidth.max_iterations"' || fail "compile.bitwidth.* missing: $out"
-# The e-graph engine is the only constant-propagation engine: its constant-propagation
-# knobs are listed once, as compile.cprop.<flag> (method pass.aegraph); the rule runtime
-# as compile.aegraph.<flag>. The classic engine's selectors are gone.
-echo "$out" | grep -q '"name":"compile.cprop.low_lanes","method":"pass.aegraph","default":"true"' \
-  || fail "compile.cprop.low_lanes must be listed on pass.aegraph: $out"
-echo "$out" | grep -q '"name":"compile.cprop.loop_hoist","method":"pass.aegraph","default":"true"' \
-  || fail "compile.cprop.loop_hoist must be listed on pass.aegraph: $out"
-echo "$out" | grep -Eq '"name":"compile.cprop.(engine|engine_slots)"' && fail "the engine selectors must be gone: $out"
+# The e-graph engine is the only constant-propagation engine; the rule runtime is
+# compile.aegraph.<flag>. The classic engine's selectors are gone, and so are the
+# switches of low-lane narrowing and the loop hoist (they always run, before and
+# after pass.bitwidth).
+echo "$out" | grep -Eq '"name":"compile.cprop.(engine|engine_slots|low_lanes|loop_hoist)"' \
+  && fail "the engine selectors and the low_lanes/loop_hoist switches must be gone: $out"
 echo "$out" | grep -Eq '"name":"compile.aegraph.(low_lanes|loop_hoist|engine|engine_slots)"' \
-  && fail "low_lanes/loop_hoist are spelled compile.cprop.* only: $out"
+  && fail "no compile.aegraph spelling of the removed switches: $out"
 echo "$out" | grep -q '"name":"compile.aegraph.after_bitwidth"' \
   && fail "after_bitwidth must stay INTERNAL (kernel bookkeeping, not listed): $out"
 "$LHD" compile "$PRP" --set compile.aegraph.after_bitwidth=true --workdir "$W/dup_after_bitwidth" -q >"$W/dup_after_bitwidth.json" 2>&1 \
@@ -73,10 +71,10 @@ for removed in compile.cprop.engine=classic compile.cprop.engine=aegraph compile
     && fail "$removed must be rejected"
   grep -q 'was removed' "$W/removed_engine.json" || fail "$removed must say it was removed: $(cat "$W/removed_engine.json")"
 done
-for shared in low_lanes loop_hoist; do
-  "$LHD" compile "$PRP" --set "compile.aegraph.$shared=true" --workdir "$W/dup_$shared" -q >"$W/dup_$shared.json" 2>&1 \
-    && fail "compile.aegraph.$shared must be rejected: each flag has one spelling"
-  grep -q "compile.cprop.$shared" "$W/dup_$shared.json" || fail "compile.aegraph.$shared must name compile.cprop.$shared: $(cat "$W/dup_$shared.json")"
+for removed in compile.cprop.low_lanes=false compile.cprop.loop_hoist=false compile.aegraph.low_lanes=false; do
+  "$LHD" compile "$PRP" --set "$removed" --workdir "$W/removed_switch" -q >"$W/removed_switch.json" 2>&1 \
+    && fail "$removed must be rejected"
+  grep -q 'was removed' "$W/removed_switch.json" || fail "$removed must say it was removed: $(cat "$W/removed_switch.json")"
 done
 # hier standardization: the vestigial per-def toggles are deleted, the real
 # hier options all spell it `hier` and default true.

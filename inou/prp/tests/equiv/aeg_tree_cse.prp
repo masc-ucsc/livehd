@@ -1,0 +1,15 @@
+/*
+:name: aeg_tree_cse
+:set: compile.aegraph.rules_disable=group:arith+group:div+group:mask+group:mux+group:shift
+:type: equiv
+*/
+// PYROPE-vs-PYROPE group, the fixture of the tree aegraph (upass/aeg, todo 2a-treeaeg): the same expression spelled twice reads one name; the copy is left unread for the DCE.
+// A `mod`: the step rewrites only a body tolg alone reads (a comb's body is inlined and cached as walked).
+// REFERENCE = every rule group off, so the tree step still shares and forwards but rewrites nothing; `_1` = the rules on.
+// The forwarding has no knob, so `_1` LECs a forwarded compile against a forwarded one: the golden aeg_tree_cse.v,
+// read by both lhd lec and the yosys oracle, is the reference that never went through the step.
+pub mod top(a:U8, b:U8, c:U8) -> (x:U11@[0], y:U12@[0], z:U9@[0]) {
+  x = (a + b) * 3
+  y = (b + a) * 5
+  z = (a + b) ^ c
+}

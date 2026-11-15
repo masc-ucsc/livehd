@@ -96,7 +96,7 @@ struct Slice {
 // Get_mask(x, lo, hi) where x's lane layout (a Concat, a Set_mask chain, a SHL, a packed Or/Sum of disjoint
 // shifted fields) holds the whole window in one lane: read the lane's source instead, or zero for an empty
 // lane. The persistent layout is built once per class, so a window read of a deep packed word is a lookup.
-AEG_NATIVE_RULE(getmask_lane, simplify, 40, Ntype_op::Get_mask) {
+AEG_NATIVE_BIT_RULE(getmask_lane, simplify, 40, Ntype_op::Get_mask) {
   Class_id x = kNoClass;
   int64_t  lo = 0, hi = 0;
   if (!get_mask_window(ctx, root, x, lo, hi)) {
@@ -139,7 +139,7 @@ AEG_NATIVE_RULE(getmask_lane, simplify, 40, Ntype_op::Get_mask) {
 // too: a mask between two additions is what stops the chain from merging into one wide Sum, and the low-lane
 // narrowing (which runs before bitwidth deletes the redundant masks, as it does in classic) works on each partial
 // sum (loop_ref_arg: +26% pred_aig when the chain was flattened first).
-AEG_NATIVE_RULE(getmask_fits, simplify, 30, Ntype_op::Get_mask) {
+AEG_NATIVE_BIT_RULE(getmask_fits, simplify, 30, Ntype_op::Get_mask) {
   Class_id y = kNoClass;
   int64_t  lo = 0, hi = 0;
   if (!get_mask_window(ctx, root, y, lo, hi) || lo != 0) {
@@ -177,7 +177,7 @@ AEG_NATIVE_RULE(getmask_fits, simplify, 30, Ntype_op::Get_mask) {
 // The bit-gather ladder `((m[63] << 63) | .. | (m[1] << 1) | m[0])[0]` reads one bit of 64 shifted rows, and classic's
 // demanded-bits narrowing leaves only the row that owns the bit. Sole readers, or a window that keeps at most half of
 // the terms, replace the read (simplify); otherwise the narrower Or is an alternative the extraction prices.
-AEG_NATIVE_RULE(getmask_drop_terms, simplify, 36, Ntype_op::Get_mask) {
+AEG_NATIVE_BIT_RULE(getmask_drop_terms, simplify, 36, Ntype_op::Get_mask) {
   Class_id x = kNoClass;
   int64_t  lo = 0, hi = 0;
   if (!get_mask_window(ctx, root, x, lo, hi) || hi > kMaxLaneBit) {
@@ -274,7 +274,7 @@ AEG_NATIVE_RULE(getmask_drop_terms, simplify, 36, Ntype_op::Get_mask) {
 // Sext(y, k) is the signed form of the same modular boundary: for k >= hi its
 // low hi bits also equal y's. Keeping those boundaries serialized signed MAC
 // reductions even though only the final low bits are observed.
-AEG_NATIVE_RULE(getmask_sum_chain, simplify, 37, Ntype_op::Get_mask) {
+AEG_NATIVE_BIT_RULE(getmask_sum_chain, simplify, 37, Ntype_op::Get_mask) {
   Class_id x = kNoClass;
   int64_t  lo = 0, hi = 0;
   if (!get_mask_window(ctx, root, x, lo, hi) || lo != 0 || hi <= 0 || hi > 4096) {
@@ -621,7 +621,7 @@ AEG_NATIVE_RULE(or_shifted_windows, alt, 21, Ntype_op::Or) {
 // profile prices a constant shift and a Concat as wiring (synth) or as one instruction per lane (sim), and an Or of n
 // shifted fields as n - 1 gates, so the original stays when a field is shared and the Concat would not be cheaper.
 // Every field needs a proven width (unsigned_bits) and the windows must not overlap, or the rule declines.
-AEG_NATIVE_RULE(or_pack_to_concat, alt, 19, Ntype_op::Or) {
+AEG_NATIVE_BIT_RULE(or_pack_to_concat, alt, 19, Ntype_op::Or) {
   constexpr size_t kMinFields = 3;
   constexpr size_t kMaxFields = 1024;
   if (root.ops.size() < kMinFields || root.ops.size() > kMaxFields) {
@@ -752,7 +752,7 @@ struct Pack_lane {
 // window covers whole, or extends, is the pack with that lane replaced: a chain of constant, disjoint lane writes
 // (a packed array or struct built field by field) becomes one Concat, as classic's pack canonicalization makes it.
 // A write that cuts a lane in two, or a base that is anything else, keeps the Set_mask.
-AEG_NATIVE_RULE(setmask_to_concat, simplify, 20, Ntype_op::Set_mask) {
+AEG_NATIVE_BIT_RULE(setmask_to_concat, simplify, 20, Ntype_op::Set_mask) {
   if (root.ops.size() != 4 || root.ops[0].bank != 0 || root.ops[1].bank != 2 || root.ops[2].bank != 3 || root.ops[3].bank != 4) {
     return;
   }
@@ -811,7 +811,7 @@ AEG_NATIVE_RULE(setmask_to_concat, simplify, 20, Ntype_op::Set_mask) {
 // lane layout of x holds that window in one lane of another class (or zero): the packed read an array element
 // or a struct field makes (`m[3]` of a Set_mask / Concat word is a shift by the lane offset). A plain right
 // shift of an unstructured value stays a shift, which costs one operation less than shift-and-mask.
-AEG_NATIVE_RULE(sra_lane, simplify, 40, Ntype_op::SRA) {
+AEG_NATIVE_BIT_RULE(sra_lane, simplify, 40, Ntype_op::SRA) {
   if (root.ops.size() != 2 || root.ops[0].bank != 0 || root.ops[1].bank != 1) {
     return;
   }
@@ -847,7 +847,7 @@ AEG_NATIVE_RULE(sra_lane, simplify, 40, Ntype_op::SRA) {
 // Concat clean-ups on the lane list: leading zero padding adds nothing (a Concat is non-negative); two adjacent
 // constant lanes are one constant lane; adjacent windows of the same source, reassembled in order, are one
 // wider window. Only the leading lane can lose padding: every interior width fixes the offsets above it.
-AEG_NATIVE_RULE(concat_lanes, simplify, 30, Ntype_op::Concat) {
+AEG_NATIVE_BIT_RULE(concat_lanes, simplify, 30, Ntype_op::Concat) {
   std::vector<Lane_in> lanes;
   if (!concat_lanes(ctx, root, lanes)) {
     return;

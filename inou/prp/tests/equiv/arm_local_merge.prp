@@ -1,0 +1,76 @@
+/*
+:name: arm_local_merge
+:type: compile equiv
+:verilog_top: arm_local_merge.arm
+:pyrope_top: arm
+*/
+
+// upass.tolg merges, after an `if`, only the names something past it still
+// reads: a temporary every reference of which lies inside the `if` (an
+// arm-local) gets no Mux / Hotmux. Each output here is computed through such
+// temporaries -- declared in an arm, reassigned there (SSA versions), read by
+// a nested `if` in the same arm, written by every arm of a `unique if` or a
+// `match`, feeding a register's conditional write -- so a dropped merge that
+// was still read, or an arm's value leaking past its `if`, breaks the proof
+// against the hand-written golden.
+pub mod arm(s:U2, c:Bool, d:Bool, a:U8, b:U8) -> (x:U9@[0], y:U8@[0], z:U8@[0], w:U8@[0], q:U8@[0]) {
+  if c {
+    const t = a + b
+    mut u = t ^ 3
+    u = u | 0x100
+    x = u
+  } elif d {
+    const t = a & b
+    x = t | 1
+  } else {
+    x = 0
+  }
+
+  // `k` is read after the inner `if` (merged there) but not past the outer one.
+  if c {
+    mut k = 0
+    if d {
+      const e = a ^ b
+      k = e
+    } else {
+      k = b
+    }
+    y = k ^ 0x5a
+  } else {
+    const f = a & 0x0f
+    y = f
+  }
+
+  mut zz = a
+  unique if s == 0 {
+    const p = a & 0x0f
+    zz = p | 0x10
+  } elif s == 1 {
+    const p = b ^ a
+    zz = p
+  } elif s == 2 {
+    const p = b & 0xf0
+    zz = p
+  }
+  z = zz
+
+  mut ww = b
+  match s {
+    == 0 {
+      const m = a | b
+      ww = m
+    }
+    == 1 {
+      const m = a & b
+      ww = m ^ 0xff
+    }
+  }
+  w = ww
+
+  reg r:U8 = 0
+  if c {
+    const n = a ^ b
+    r = n
+  }
+  q = r
+}

@@ -3,7 +3,9 @@
 #include "occurrence_materialize.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <exception>
+#include <optional>
 #include <format>
 #include <string>
 #include <utility>
@@ -493,6 +495,69 @@ bool materialize_occurrences_all(const std::vector<std::shared_ptr<hhds::Graph>>
     }
   }
   return true;
+}
+
+namespace {
+// `u_loop_<n>__li<k>` -> `__li<k>`; anything else -> nullopt.
+std::optional<std::string_view> rolled_loop_wrapper_tag(std::string_view seg) {
+  constexpr std::string_view inst = "u_loop_";  // upass_runner.cpp std::format("u_loop_{}", roll_seq_)
+  constexpr std::string_view li   = "__li";     // hhds loop_prefix == uPass loop_inst_suffix()
+  if (!seg.starts_with(inst)) {
+    return std::nullopt;
+  }
+  size_t       i  = inst.size();
+  const size_t d0 = i;
+  while (i < seg.size() && std::isdigit(static_cast<unsigned char>(seg[i]))) {
+    ++i;
+  }
+  const auto tag = seg.substr(i);
+  if (i == d0 || !tag.starts_with(li) || tag.size() == li.size()
+      || !std::all_of(tag.begin() + static_cast<std::ptrdiff_t>(li.size()), tag.end(), [](unsigned char c) {
+           return std::isdigit(c) != 0;
+         })) {
+    return std::nullopt;
+  }
+  return tag;
+}
+}  // namespace
+
+std::string fold_rolled_loop_wrappers(std::string_view s) {
+  if (s.find("u_loop_") == std::string_view::npos) {
+    return std::string{s};  // fast path: nothing to fold
+  }
+  std::string out, carry;
+  size_t      pos = 0;
+  for (;;) {
+    const size_t           dot = s.find('.', pos);
+    const std::string_view seg = s.substr(pos, (dot == std::string_view::npos ? s.size() : dot) - pos);
+    if (const auto tag = rolled_loop_wrapper_tag(seg); tag && dot != std::string_view::npos) {
+      carry += *tag;  // wrapper level: drop the segment, carry its ordinal tag
+    } else {
+      if (!out.empty()) {
+        out += '.';
+      }
+      // Start of the segment's trailing `__li<k>` run (its own, inner tags).
+      size_t own = seg.size();
+      for (;;) {
+        size_t d = own;
+        while (d > 0 && std::isdigit(static_cast<unsigned char>(seg[d - 1]))) {
+          --d;
+        }
+        if (d == own || d < 4 || seg.substr(d - 4, 4) != "__li") {
+          break;
+        }
+        own = d - 4;
+      }
+      out += seg.substr(0, own);
+      out += carry;
+      out += seg.substr(own);
+      carry.clear();
+    }
+    if (dot == std::string_view::npos) {
+      return out;
+    }
+    pos = dot + 1;
+  }
 }
 
 }  // namespace livehd::graph_util

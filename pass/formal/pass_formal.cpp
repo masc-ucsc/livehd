@@ -765,7 +765,14 @@ void Pass_formal::work(Eprp_var& var) {
     // first so attribute writes never perturb the forward_class walk.
     std::vector<hhds::Node_class> hotmuxes;
     for (auto node : g->body().nodes(hhds::Node_order::forward)) {
-      if (gu::type_op_of(node) == Ntype_op::Hotmux) {
+      // A Hotmux already stamped one-hot is discharged: cprop's Mux_sharing builds
+      // its Hotmuxes over the paths of a binary Mux tree (exclusive by
+      // construction) and stamps them, as this pass does with a proof. Asking cvc5
+      // again only re-proves it -- or, when the path conjunctions are deep, gives
+      // up and DEMOTES a proven Hotmux to a runtime check (XiangShan DecodeUnit:
+      // one ~2 s undecided query was the whole pass, every compile).
+      if (gu::type_op_of(node) == Ntype_op::Hotmux
+          && !(gu::has_proven(node) && gu::proven_of(node) == gu::kFormalOnehot)) {
         hotmuxes.push_back(node);
       }
     }

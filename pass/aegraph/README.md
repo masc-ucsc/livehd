@@ -27,10 +27,11 @@ lhd sim foo.prp --set compile.aegraph.cost=sim                   # price the LLV
 * The compile schedule runs `pass.aegraph` in both fold slots under the set name
   `compile.cprop` (`compile_graph_passes`, `lhd/lhd_kernel_common.cpp`); the driver
   merges the `compile.aegraph` set into each step.
-* Two namespaces reach the one method, each option with ONE spelling: the
-  constant-propagation knobs `compile.cprop.low_lanes` and `compile.cprop.loop_hoist`,
-  and the rule runtime `compile.aegraph.*`. The other spelling is rejected with a
-  hint. `compile.cprop.engine`, `compile.cprop.engine_slots` and
+* The method's options are the rule runtime's, `compile.aegraph.*`. Every step of the
+  pass (the engine, low-lane narrowing, the post region passes, the loop-invariant
+  hoist) runs on every invocation, before and after `pass.bitwidth` alike: a step
+  that has to be off for some LGraph is a bug in it. `compile.cprop.low_lanes`,
+  `compile.cprop.loop_hoist`, `compile.cprop.engine`, `compile.cprop.engine_slots` and
   `formal.lec.preflight_engine` are rejected as removed.
 * The compile-cache descriptor names the resolved cost profile
   (`pipeline=cprop[aegraph:both:cost=synth],bitwidth`), so a profile switch never replays
@@ -92,16 +93,39 @@ lhd sim foo.prp --set compile.aegraph.cost=sim                   # price the LLV
 After elaboration `Cprop::do_post` runs the classic region passes (pack
 canonicalization, vector-mux narrowing, muxctx, mux/op sharing, flop-enable
 folding, dead-code sweep) and, with `low_lanes`, low-lane narrowing; then the
-library-wide `loop_hoist`. Low-lane narrowing runs only in the slot BEFORE
-`pass.bitwidth`: the kernel hands the second slot the INTERNAL label
-`after_bitwidth=true`, which turns `low_lanes` off. After bitwidth a slice of a pack
-that low-lane narrowing re-spells becomes a Concat declaring its full window, while
-bitwidth has already dropped the `#[0..<n]` masks that only the unpacked spelling's
-tighter range justified, so a lane driver can come out wider than its window (an
-internal "Concat lane" error on XiangShan `fpsqrt_r16_block`; fixture
-`inou/prp/tests/equiv/aeg_pack_slice_lanes`). The region passes are the sub-routines
+library-wide `loop_hoist`. Both run in every slot. Low-lane narrowing used to be off
+after `pass.bitwidth`: a slice of a pack it re-spells became a Concat declaring its full
+window after bitwidth had dropped the masks only the unpacked spelling's tighter range
+justified, so a lane driver came out wider than its window (XiangShan
+`fpsqrt_r16_block`, fixture `inou/prp/tests/equiv/aeg_pack_slice_lanes`). The elaborator
+now reads such a lane through `Get_mask(target, 0, window)` (`replace`), so the slot
+after bitwidth narrows too; `fpsqrt_r16_block` compiles and proves against its Verilog.
+The loop hoist also runs in the first slot, before legalize. The region passes are the sub-routines
 the classic engine ran after its forward sweep (`Cprop::region_passes`); the
 forward sweep itself is gone with that engine.
+
+**The two compile slots.** Both run every rule and every step. The slot after
+`pass.bitwidth` (`after_bitwidth=true`) also stamps every cell the engine creates
+(`Options::stamp_new`): from the member it realizes, or from the range analysis; a
+member whose kept form needs a cell no width can be given keeps its original node
+(`Stats::stamp_kept`, a per-member decision; the LEC `preflight` refuses the whole
+body instead). A rule whose guard reads a width fact (an analysis or `bool01`:
+`AEG_BIT_RULE` / `AEG_NATIVE_BIT_RULE`, the `+bits` column of RULES.md) gains from
+bitwidth's stamped state pins. The width-generic rules run again there too: the
+second slot is their second iteration (the acyclic e-graph never revisits a parent in
+one run; slot 1's `setmask_to_concat` leaves Concats that `getmask_concat_straddle`
+folds in slot 2) and they fold what bitwidth, legalize and enableopt built between the
+slots. Limiting slot 2 to the bit rules was measured: it lost those folds
+(`aeg_large_concat_slice_1`, `aeg_mux_lane_writes_2`), a clock-gate merge
+(`lhd_clock_gate_test`, 4 gates for 3) and left a gated clock LEC could not model
+(`lhd_prp_writer_roundtrip_b_test`).
+
+**Dead code.** Neither the engine nor the post steps walk the whole body for dead
+nodes. The engine sweeps a worklist: the nodes dead on arrival (collected during the
+build walk it already does), nodes a replace leaves unread, the operands a rebuild in
+place drops, and the cells it realized; `remove_dead_chain` takes each one's fan-in
+along. The post steps' final cleanup reuses the node snapshot `do_post` already holds
+plus the cells the region passes minted or rewired (`Facts::generations`).
 
 With every rule off (`rules_only=` naming no rule, or `rules_disable` listing
 them all) the result is the input graph except for shared and folded nodes. The

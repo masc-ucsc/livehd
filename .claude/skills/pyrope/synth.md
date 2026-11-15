@@ -76,33 +76,29 @@ Rules:
    noticeably worse.
 5. **Prove it.** Attributes are semantics-free by construction, but run LEC of
    the mapped netlist against the source anyway (it catches compiler bugs).
-   Source rewrites must prove against the previous version. `TIMEOUT-time` /
-   `TIMEOUT-memory` prove nothing (back them with simulation); `REFUTED-cex` is
+   Source rewrites must prove against the previous version. `TIMEOUT-*` prove nothing (back them with simulation); `REFUTED-cex` is
    a bug to find, never a result; any other `REFUTED-<why>` means the check
    did not reach an answer (fix the setup, or report `REFUTED-unexplained`).
 6. **Record** before/after (cells, area, delay) and the reason for each pin, in
    a comment next to it when it is not obvious.
 
-A useful acceptance rule: keep a change when area x delay improves and neither
-term regresses beyond what the design's goal tolerates (for example area
-<= 0.95x at delay <= 1.05x for an area pass).
+Acceptance rule: keep a change when area x delay improves and neither term
+regresses beyond what the design's goal tolerates.
 
 ## Levers, by what is on the path
 
 **Region granularity (try first).** Partitioning is usually the largest lever.
 `fine` cuts regions at wide arithmetic, shifters, compares and muxes and maps
 them separately; `coarse` keeps register-to-register cones whole so the mapper
-can optimize across them. Control-heavy and CPU-like modules typically gain a
-lot from `synth.partition="coarse"` (large area and delay reductions are
-common); small arithmetic blocks can go either way. One explicit `synth.color`
+can optimize across them. Control-heavy modules often gain from
+`synth.partition="coarse"`; small arithmetic blocks can go either way. One explicit `synth.color`
 on a module's top merges its logic into one region with a similar effect. Do
 not nest colors inside a colored module.
 
 **A wide adder or comparator.** Try `synth.adder` on the declaration that owns
 it: `cla` is a cheap improvement over ripple; `prefix`/`brent` are fastest and
-cost area. Pin only the critical adder: a module-wide `prefix` can cost far
-more area than it saves in delay, while pinning the one counter or address
-adder on the path gets most of the gain. If the adder choice barely moves the
+cost area. Pin only the critical adder: a module-wide `prefix` can cost more
+area than it saves in delay. If the adder choice barely moves the
 delay, the adder is not the limit; look at what feeds it (bypass muxes,
 select decoding).
 
@@ -113,9 +109,9 @@ runtime shifter is on the path.
 **Technology-independent clean-up.** `synth.abc_pre` runs extra ABC passes
 before mapping (`dc2`, `resyn2`, `compress2rs`, `&dch`, `&synch2`, ...). No step
 helps on average, but the best of a small sweep often wins a few percent on a
-given design, and the winner differs by design. Sweep 5-7 candidates run-wide
-(`--set synth.abc_pre=...`), then pin the winner. Steps that restructure
-heavily (`&synch2`) can lose badly on some designs.
+given design, and the winner differs by design. Sweep a few candidates run-wide
+(`--set synth.abc_pre=...`), then pin the winner; heavy restructuring steps
+can lose badly on some designs.
 
 **Fanout and clocks.** A high-fanout select or enable shows up as long buffer
 chains on the path; restructure (duplicate the select, register it) rather
@@ -144,9 +140,6 @@ Equivalent formulations that map much better (prove each with LEC):
 * Operator sharing across exclusive arms (one adder for add/sub/compare, one
   shifter for all shift kinds) saves area but can lengthen the path; measure
   both before keeping it.
-* A long counter or address increment on the critical path: pin a faster
-  adder on just that declaration
-  (`const next::[synth.adder="prefix"] = count + 1`).
 
 ## Pitfalls
 

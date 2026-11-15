@@ -67,6 +67,10 @@ private:
 
   // Does the invariant cone under `root` hold at least one computing cell?
   bool cone_computes(const hhds::Node_class& root);
+  // `root`'s value reaches, through the body's combinational cells, a memory address sink.
+  bool reaches_memory_address(const hhds::Node_class& root);
+  absl::flat_hash_set<hhds::Class_index> addr_cone_;  // reaches_memory_address: built once per body
+  bool                                   addr_cone_built_ = false;
 
   // The cone of `pin` rebuilt in an instance's parent, fed from what the parent
   // drives into the instance's invariant inputs. `memo` is per instance and
@@ -235,6 +239,48 @@ hhds::Pin_class Hoister::clone(const hhds::Pin_class& pin, const Instance& inst,
   return neo.create_driver_pin(0);
 }
 
+bool Hoister::reaches_memory_address(const hhds::Node_class& root) {
+  if (!addr_cone_built_) {
+    // ONE backward pass over the body from every memory address sink: the cells whose value reaches an address.
+    // Each candidate then asks a set (a forward walk per candidate was O(candidates x body)).
+    addr_cone_built_ = true;
+    std::vector<hhds::Node_class> work;
+    const auto                    enqueue = [&](const hhds::Pin_class& driver) {
+      if (driver.is_invalid() || driver.is_const() || gu::is_graph_input_pin(driver)) {
+        return;
+      }
+      const auto m = driver.get_master_node();
+      if (!m.is_invalid() && !gu::is_builtin_node(m) && Ntype::is_comb(gu::type_op_of(m)) && gu::type_op_of(m) != Ntype_op::Sub
+          && addr_cone_.insert(m.get_class_index()).second) {
+        work.push_back(m);
+      }
+    };
+    for (const auto n : body_.graph->body().nodes()) {
+      if (gu::type_op_of(n) != Ntype_op::Memory) {
+        continue;
+      }
+      for (const auto& sink : n.inp_sorted_pins()) {
+        const auto field = Ntype::get_sink_name(Ntype_op::Memory, static_cast<int>(sink.get_port_id()) % Ntype::Memory_port_stride);
+        if (field.ends_with("addr")) {
+          for (const auto& d : sink.get_driver_pins()) {
+            enqueue(d);
+          }
+        }
+      }
+    }
+    while (!work.empty()) {
+      const auto n = work.back();
+      work.pop_back();
+      for (const auto& sink : n.inp_sorted_pins()) {
+        for (const auto& d : sink.get_driver_pins()) {
+          enqueue(d);
+        }
+      }
+    }
+  }
+  return addr_cone_.contains(root.get_class_index());
+}
+
 bool Hoister::run() {
   auto io = body_.graph->get_io();
   if (!io || body_.instances.empty() || body_.plain_call) {
@@ -286,6 +332,14 @@ bool Hoister::run() {
   for (auto f : frontier) {
     absl::flat_hash_set<uint32_t> ports;
     if (!cone_inputs_bound(f, ports)) {
+      continue;
+    }
+    // The new body input is an interface port, and pass.bitwidth reads a callee only through its declared
+    // interface: the body sees the hoisted value as [0, 2^bits) (or signed), not its own range. An unsized cone
+    // would be an undeclared input; and a value that reaches a memory address (the one place bitwidth rejects a
+    // widened range) must keep its exact range: loop_carry_wide_ref's `v[r * 3 + c]` with the invariant `r * 3`
+    // ([0, 3], stamped 3 bits) moved out read as [0..9] for a 6-entry memory. Such a cone stays in the body.
+    if (gu::bits_of(f.create_driver_pin(0)) <= 0 || reaches_memory_address(f)) {
       continue;
     }
     std::string name;
@@ -364,13 +418,22 @@ bool Hoister::run() {
 Loop_hoist_stats hoist_loop_invariants(const std::vector<std::shared_ptr<hhds::Graph>>& graphs) {
   Loop_hoist_stats stats;
   const bool       debug = livehd::debug::env<"LHD_LOOP_HOIST_DEBUG">() != nullptr;
-  // A body's new port must be driven by EVERY parent. Parents are found only
-  // in `graphs`, so the move is sound only when `graphs` is each touched
-  // library's whole graph set: a parent left outside (an unloaded unit, a
-  // partial pass run) would read the new input undriven. all_gids() lists
-  // the library without materializing bodies, so the check is cheap.
+  // A body's new port must be driven by EVERY parent, and the body itself
+  // must be in scope (a graph outside it -- a compile-cache restored FINAL
+  // body, an unloaded unit -- is never rewritten). With the whole library in
+  // scope that holds for every body. A warm compile runs this on the graphs
+  // the cache did not restore, so `graphs` is a strict subset there: rather
+  // than skipping every body (a warm netlist that differs from the cold one),
+  // only a body some out-of-scope graph instantiates is left alone. Loop
+  // bodies are derived trees of their owner unit (restored or re-extracted
+  // together), so on a warm compile that blocks none. The out-of-scope scan
+  // runs only when an in-scope graph holds a loop instance, and visits each
+  // such graph once: linear in the library.
+  absl::flat_hash_set<const hhds::Graph*> in_scope;
+  absl::flat_hash_set<const hhds::Graph*> blocked;
   {
     absl::flat_hash_map<hhds::GraphLibrary*, size_t> seen;
+    bool                                             any_loop = false;
     for (const auto& g : graphs) {
       if (!g) {
         continue;
@@ -379,14 +442,37 @@ Loop_hoist_stats hoist_loop_invariants(const std::vector<std::shared_ptr<hhds::G
       if (!io || io->get_library() == nullptr) {
         return stats;
       }
-      ++seen[io->get_library()];
+      if (in_scope.insert(g.get()).second) {
+        ++seen[io->get_library()];
+      }
+      any_loop = any_loop || g->has_loop_subnodes();
+    }
+    if (!any_loop) {
+      return stats;
     }
     for (const auto& [lib, count] : seen) {
-      if (lib->all_gids().size() != count) {
-        if (debug) {
-          std::println(stderr, "loop_hoist: skipped -- {} of {} library graphs in scope", count, lib->all_gids().size());
+      const auto gids = lib->all_gids();
+      if (gids.size() == count) {
+        continue;
+      }
+      size_t outside = 0;
+      for (const auto gid : gids) {
+        auto og = lib->get_graph(gid);
+        if (!og || in_scope.contains(og.get())) {
+          continue;
         }
-        return stats;
+        ++outside;
+        for (auto n : og->body().nodes()) {
+          if (gu::type_op_of(n) != Ntype_op::Sub) {
+            continue;
+          }
+          if (auto child = n.get_subnode_graph()) {
+            blocked.insert(child.get());
+          }
+        }
+      }
+      if (debug) {
+        std::println(stderr, "loop_hoist: {} of {} library graphs out of scope; {} callee(s) blocked", outside, gids.size(), blocked.size());
       }
     }
   }
@@ -426,7 +512,7 @@ Loop_hoist_stats hoist_loop_invariants(const std::vector<std::shared_ptr<hhds::G
     }
     bool changed = false;
     for (auto& body : bodies) {
-      if (body.instances.empty()) {
+      if (body.instances.empty() || !in_scope.contains(body.graph.get()) || blocked.contains(body.graph.get())) {
         continue;
       }
       Hoister hoister(body, stats, debug);

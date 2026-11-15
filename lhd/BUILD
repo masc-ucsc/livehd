@@ -101,6 +101,7 @@ genrule(
         "//pass/semdiff",
         "//pass/upass:pass_upass",
         "//upass/runner:upass_runner",  # the lowering itself: a genrule src of a cc_library hashes only THAT target's archive, and pass_upass's does not contain upass_runner.o
+        "//upass/aeg:upass_aeg",  # the tree aegraph step the runner runs before its DCE
         "//upass/tolg:upass_tolg",
     ] + select({
         "//:without_abc": [],
@@ -362,8 +363,8 @@ config_setting(
     visibility = ["//visibility:public"],
     deps = [
         ":lhd_lib",
-        "//inou/prp:pyrope_style",
         "//pass/place:gui",
+        "//inou/prp:pyrope_style",
         "//lsp",
         "//pass/cost:host_mem",
         "@tree_sitter",

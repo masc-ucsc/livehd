@@ -1,0 +1,17 @@
+/*
+:name: unbounded_out_cone
+:type: equiv
+*/
+// The tree aegraph (upass/aeg) keeps the cone of an output with no declared width exactly as written: tolg gives
+// such a port its driver's width and sign, so folding `(a + b + 1) - 1` to the `a + b` already computed, or a
+// quotient plus zero to the quotient, would change the port and could pick a spelling whose width does not hold
+// the value (S8 + U8 is 382; U8 / -1 is -255). A `mod`, since the step rewrites only a body tolg alone reads. The
+// divisor is odd, so never zero (cgen's `/` by zero is X to the yosys oracle).
+pub mod top(a:S8, b:U8, c:U8, d:S8) -> (o:Signed@[0], p:Signed@[0], q:Signed@[0], r:Signed@[0], s:Signed@[0], t:Signed@[0]) {
+  o = (a + b + 1) - 1
+  p = (c + a) - 0
+  q = a - (0 - c)
+  r = (b / (d | 1)) + 0
+  s = a + b
+  t = b / (d | 1)
+}

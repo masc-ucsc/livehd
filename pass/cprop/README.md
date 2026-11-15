@@ -41,8 +41,8 @@ computed forward once, with a bounded representation size.
 
 ## Loop-invariant hoisting (compact loops)
 
-`loop_hoist.cpp` runs serially after the per-graph sweep (`pass.aegraph`
-label `loop_hoist`, spelled `compile.cprop.loop_hoist`, default true). A compact loop's body sees two kinds of
+`loop_hoist.cpp` runs serially after the per-graph sweep of every `pass.aegraph`
+invocation (both compile slots; there is no switch). A compact loop's body sees two kinds of
 input: the ordinal, the activation and every carry-in change between
 iterations; every other input is bound once per evaluation. A body cell that
 reads only invariant inputs and constants (transitively) computes the same
@@ -65,7 +65,7 @@ bound input per instance. A body also instantiated as an ordinary Sub is
 left alone (that call's inputs may all vary); a cone reading an input some
 instance leaves unconnected stays. Sweeps repeat while a hoisted cone lands
 in a parent that is itself a body. `LHD_LOOP_HOIST_DEBUG=1` prints each
-move; `--set compile.cprop.loop_hoist=false` disables it. On the lhdtrack
+move. On the lhdtrack
 `for`-loop designs the bodies are ordinal-indexed slices with little
 invariant computation, so the move is neutral there; the rolled form's
 remaining cost is the simulator's per-call protocol (invariant binds, carry

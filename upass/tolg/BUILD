@@ -86,3 +86,12 @@ sh_test(
     srcs = ["tests/reg_initial_attr_warning_test.sh"],
     data = ["//lhd"],
 )
+
+# A `unique if` whose every written name is arm-local (no merge past the `if`)
+# still keeps one Hotmux over its conditions, so an overlap remains a
+# `onehot-violated` error (tests/arm_local_onehot_test.sh).
+sh_test(
+    name = "arm_local_onehot_test",
+    srcs = ["tests/arm_local_onehot_test.sh"],
+    data = ["//lhd"],
+)

@@ -325,6 +325,10 @@ struct Rule_info {
   Tag                   tag   = Tag::simplify;
   int                   prio  = 0;      // higher is tried first
   bool                  native = false; // AEG_NATIVE_RULE: no pattern, no proof obligation
+  // AEG_BIT_RULE / AEG_NATIVE_BIT_RULE: the guard reads width facts (range, known bits, bool01, the lane layout),
+  // which come from declared leaf widths and grow once pass.bitwidth has stamped the state pins: the reason the
+  // compile slot after bitwidth runs the rules again (documentation: RULES.md `width` column).
+  bool                  bits   = false;
   std::vector<Ntype_op> roots;
   Rule_fn               fn    = nullptr;
   const char*           file  = "";
@@ -357,14 +361,15 @@ private:
 };
 
 struct Registrar {
-  Registrar(const char* name, const char* group, Tag tag, int prio, bool native, std::initializer_list<Ntype_op> roots, Rule_fn fn,
-            const char* file, int line) {
+  Registrar(const char* name, const char* group, Tag tag, int prio, bool native, bool bits, std::initializer_list<Ntype_op> roots,
+            Rule_fn fn, const char* file, int line) {
     Rule_info info;
     info.name   = name;
     info.group  = group;
     info.tag    = tag;
     info.prio   = prio;
     info.native = native;
+    info.bits   = bits;
     info.roots  = roots;
     info.fn     = fn;
     info.file   = file;
@@ -381,17 +386,21 @@ struct Registrar {
 // AEG_RULE(name, priority, root ops...) with the tag first:
 //   AEG_RULE(name, simplify|alt|choice, priority, root ops...) { body }
 // In the body: `ctx` (Ctx&), `root` (const Root&), `out` (Results&).
-#define AEG_RULE_IMPL(NAME, TAG, PRIO, NATIVE, ...)                                                            \
+#define AEG_RULE_IMPL(NAME, TAG, PRIO, NATIVE, BITS, ...)                                                      \
   static void aeg_rule_fn_##NAME(::livehd::aegraph::rt::Ctx&, const ::livehd::aegraph::rt::Root&,              \
                                  ::livehd::aegraph::rt::Results&);                                              \
   static const ::livehd::aegraph::rt::Registrar aeg_rule_reg_##NAME{                                           \
-      #NAME, aeg_rule_group, ::livehd::aegraph::rt::Tag::TAG, PRIO, NATIVE, {__VA_ARGS__}, &aeg_rule_fn_##NAME, \
-      __FILE__, __LINE__};                                                                                      \
+      #NAME, aeg_rule_group, ::livehd::aegraph::rt::Tag::TAG, PRIO, NATIVE, BITS, {__VA_ARGS__},               \
+      &aeg_rule_fn_##NAME, __FILE__, __LINE__};                                                                 \
   static void aeg_rule_fn_##NAME([[maybe_unused]] ::livehd::aegraph::rt::Ctx&           ctx,                    \
                                  [[maybe_unused]] const ::livehd::aegraph::rt::Root&    root,                   \
                                  [[maybe_unused]] ::livehd::aegraph::rt::Results&       out)
 
-#define AEG_RULE(NAME, TAG, PRIO, ...) AEG_RULE_IMPL(NAME, TAG, PRIO, false, __VA_ARGS__)
+#define AEG_RULE(NAME, TAG, PRIO, ...) AEG_RULE_IMPL(NAME, TAG, PRIO, false, false, __VA_ARGS__)
+// A pattern rule whose guard reads width facts (rulegen emits it for a guard naming an analysis).
+#define AEG_BIT_RULE(NAME, TAG, PRIO, ...) AEG_RULE_IMPL(NAME, TAG, PRIO, false, true, __VA_ARGS__)
 // A rule no pattern can express (region producers, bank algebra): the same
 // runtime, counters and knobs, but no generated proof obligation.
-#define AEG_NATIVE_RULE(NAME, TAG, PRIO, ...) AEG_RULE_IMPL(NAME, TAG, PRIO, true, __VA_ARGS__)
+#define AEG_NATIVE_RULE(NAME, TAG, PRIO, ...) AEG_RULE_IMPL(NAME, TAG, PRIO, true, false, __VA_ARGS__)
+// A native rule that reads width facts (Ctx::bool01, facts_of, unsigned_bits, layout_of, polarity_of, an::*).
+#define AEG_NATIVE_BIT_RULE(NAME, TAG, PRIO, ...) AEG_RULE_IMPL(NAME, TAG, PRIO, true, true, __VA_ARGS__)

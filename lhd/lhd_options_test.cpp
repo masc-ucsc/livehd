@@ -517,16 +517,16 @@ TEST(LhdOptions, FoldOptionsAreValidatedEagerly) {
       EXPECT_NE(error.msg.find("was removed"), std::string::npos) << key << ": " << error.msg;
     }
   }
-  // One spelling per flag: low_lanes/loop_hoist under compile.cprop, the rule runtime under compile.aegraph.
-  EXPECT_NO_THROW(check("compile.cprop.low_lanes", "false"));
-  EXPECT_NO_THROW(check("compile.cprop.loop_hoist", "false"));
+  // Low-lane narrowing and the loop hoist always run (before and after pass.bitwidth): their switches are gone
+  // under either spelling. The rule runtime is compile.aegraph.<flag>.
   EXPECT_NO_THROW(check("compile.aegraph.rules_disable", "not_not"));
-  for (const auto* shared : {"low_lanes", "loop_hoist"}) {
+  for (const auto* key : {"compile.cprop.low_lanes", "compile.cprop.loop_hoist", "compile.aegraph.low_lanes",
+                          "compile.aegraph.loop_hoist"}) {
     try {
-      check(std::string{"compile.aegraph."} + shared, "true");
-      FAIL() << shared << " accepted under compile.aegraph";
+      check(key, "false");
+      FAIL() << key << " accepted";
     } catch (const lhd::Lhd_error& error) {
-      EXPECT_NE(error.hint.find(std::string{"compile.cprop."} + shared), std::string::npos) << error.hint;
+      EXPECT_NE(error.msg.find("was removed"), std::string::npos) << key << ": " << error.msg;
     }
   }
   try {
@@ -541,13 +541,13 @@ TEST(LhdOptions, FoldOptionsAreValidatedEagerly) {
   const auto has    = [&](std::string_view name) {
     return std::any_of(listed.begin(), listed.end(), [&](const auto& option) { return option.name == name; });
   };
-  EXPECT_TRUE(has("compile.cprop.low_lanes"));
-  EXPECT_TRUE(has("compile.cprop.loop_hoist"));
+  EXPECT_FALSE(has("compile.cprop.low_lanes"));
+  EXPECT_FALSE(has("compile.cprop.loop_hoist"));
   EXPECT_TRUE(has("compile.aegraph.rules_disable"));
   EXPECT_FALSE(has("compile.cprop.engine"));
   EXPECT_FALSE(has("compile.cprop.engine_slots"));
   EXPECT_FALSE(has("compile.cprop.rules_disable")) << "listed once, under compile.aegraph";
-  EXPECT_FALSE(has("compile.aegraph.low_lanes")) << "listed once, under compile.cprop";
+  EXPECT_FALSE(has("compile.aegraph.low_lanes"));
   EXPECT_FALSE(has("compile.aegraph.after_bitwidth"));
   EXPECT_FALSE(has("formal.lec.preflight_engine"));
 }

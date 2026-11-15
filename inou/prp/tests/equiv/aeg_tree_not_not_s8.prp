@@ -1,0 +1,13 @@
+/*
+:name: aeg_tree_not_not_s8
+:set: compile.aegraph.rules_disable=group:arith+group:div+group:mask+group:mux+group:shift
+:type: lec
+*/
+// PYROPE-vs-PYROPE group, the fixture of the tree aegraph (upass/aeg, todo 2a-treeaeg): the double complement of a signed (untyped `~`) value is the value.
+// A `mod`: the step rewrites only a body tolg alone reads (a comb's body is inlined and cached as walked).
+// REFERENCE = every rule group off, so the tree step still shares and forwards but rewrites nothing; `_1` = the rules on.
+pub mod top(a:S8, b:S8) -> (y:S8@[0], z:S9@[0]) {
+  const t:S9 = a + b
+  y = ~~a
+  z = ~(~t)
+}

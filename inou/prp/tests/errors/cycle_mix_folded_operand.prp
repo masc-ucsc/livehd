@@ -1,0 +1,14 @@
+/*
+:name: cycle_mix_folded_operand
+:type: error
+:tolg: 1
+:error: mixes operands at different cycles \(3 vs 0\)
+*/
+
+// The cycle check reads dependencies, not values: `res1 - res1` is 0, yet it
+// is res1's value at cycle 3, so adding the cycle-0 in2 mixes cycles. The
+// tree aegraph runs before the check and must not fold the difference away.
+mod top(in1:U16, in2:U16) -> (out:U16@[0]) {
+  stage[3] res1 = in1
+  out = ((res1 - res1) + in2) & 0xFFFF
+}

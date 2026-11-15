@@ -263,6 +263,33 @@ bool cleanup_loop_bodies(const std::vector<std::shared_ptr<hhds::Graph>>& graphs
       changed = true;
     }
     if (changed) {
+      // Spell what the iterations brought in as the UNROLLED source does:
+      // `u_loop_0__li1.pe.acc` -> `pe__li1.acc`. Children are visited first, so
+      // an inner loop's copies already read `pe__li1` and the outer wrapper's
+      // tag lands before it (`pe__li0__li1`), the front end's unroll order. A
+      // rolled and an unrolled source then name their netlist instances and
+      // registers alike, which is what netlist LEC, semdiff and timing reports
+      // pair and print.
+      for (const auto node : graph->body().nodes()) {
+        if (gu::has_name(node)) {
+          const auto nm = gu::node_name_of(node);
+          if (nm.find("u_loop_") != std::string_view::npos && nm.find('\x1f') == std::string_view::npos) {
+            const auto folded = gu::fold_rolled_loop_wrappers(nm);
+            if (folded != nm) {
+              node.attr(hhds::attrs::name).set(folded);
+            }
+          }
+        }
+        for (const auto& pin : node.out_sorted_pins()) {
+          const auto pn = gu::pin_name_of(pin);
+          if (pn.find("u_loop_") != std::string_view::npos) {
+            const auto folded = gu::fold_rolled_loop_wrappers(pn);
+            if (folded != pn) {
+              gu::set_pin_name(pin, folded);
+            }
+          }
+        }
+      }
       // The inlined iterations took their instance's color; the cells the
       // folding below creates (a constant-position slice or splice of a packed
       // word the iteration read or wrote at its index, an accumulation guard

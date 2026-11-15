@@ -1008,6 +1008,9 @@ private:
   [[nodiscard]] std::optional<std::pair<bool, int>> stamp_for(Class_id cls) const;
   // preflight: true when every cell elaborate() would create can be stamped.
   [[nodiscard]] bool                                preflight_ok();
+  // stamp_new: true when every cell realizing `kept` for `member` can be stamped (the top takes the member's stamp).
+  [[nodiscard]] bool                                member_stampable(const Member& member, Class_id kept);
+  [[nodiscard]] bool                                interior_stampable(Class_id cls);
   [[nodiscard]] bool                                adopt(const Member& member, Class_id target);
   void                                              create_node(Class_id cls);
   void                                              rewire(const hhds::Node_class& node, Ntype_op op, std::span<const Operand> ops);
@@ -1027,6 +1030,12 @@ private:
 
   std::vector<uint32_t> sel_readers_;   // compute_best: readers under the current selection (empty = readers_)
   absl::flat_hash_set<hhds::Class_index>           dead_;         // mark_dead: pure nodes nothing live reads
+  // The dead-code sweep's worklist: the nodes this run found or made unread (dead on arrival, retired by a
+  // replace, dropped operands of a rebuilt node, cells realized for a member that declined them). sweep_dead()
+  // visits only these and their fan-in, never the whole body.
+  std::vector<hhds::Node_class>                    dead_candidates_;
+  // interior_stampable's per-class verdict (indexed by class id; 0 unknown, 1 visiting, 2 ok, 3 bad).
+  std::vector<uint8_t>                             stampable_;
   absl::flat_hash_set<hhds::Class_index>           latch_holds_;  // pin_latch_holds: Mux nodes that are a latch's own hold mux
   // precount_twins: node -> readers of its whole twin group (0 for a later twin)
   absl::flat_hash_map<hhds::Class_index, uint32_t> twin_readers_;
@@ -1342,6 +1351,40 @@ Class_id Rewriter::make(Ntype_op op, std::span<const Operand> in) {
     ++rule_readers_[operand.cls];
   }
   return rewrite(cls, depth_ + 1);
+}
+
+Rewriter::Original Rewriter::add_original(Ntype_op op, std::span<const Operand> in, const Enode_attrs& attrs) {
+  I(op != Ntype_op::Hotmux, "a tree front end does not import Hotmux");
+  absl::InlinedVector<Operand, 8> operands(in.begin(), in.end());
+  std::ranges::sort(operands);
+
+  absl::InlinedVector<Eval_operand, 8> eval;
+  eval_view(op, operands, eg_, eval);
+  const Fold fold = fold_node(op, eval, eg_);
+  Original   out;
+  if (fold.kind == Fold::Kind::forward) {
+    out.cls    = fold.fwd;
+    out.raw    = fold.fwd;
+    out.folded = true;
+    return out;
+  }
+  if (fold.kind == Fold::Kind::value && !fold.value.has_unknowns()) {
+    out.cls    = eg_.add_const(fold.value);
+    out.raw    = out.cls;
+    out.folded = true;
+    ensure(out.cls);
+    return out;
+  }
+  out.cls = eg_.intern(op, attrs, operands, out.created, &out.raw);
+  ensure(out.cls);
+  ensure(out.raw);
+  for (const auto& operand : operands) {
+    ensure(operand.cls);
+  }
+  if (out.created && fold.kind == Fold::Kind::value) {
+    eg_.set_value(out.cls, fold.value);  // three-valued: never materialized (P7)
+  }
+  return out;
 }
 
 namespace {
@@ -2109,7 +2152,8 @@ void Engine::create_node(Class_id cls) {
   auto         node = gu::create_typed_node(g_, n.op);
   rewire(node, n.op, eg_.operands(n));
   rep_pin_[cls] = node.create_driver_pin(0);
-  if (opt_.preflight) {
+  dead_candidates_.push_back(node);  // realized for a member that may still decline it: the sweep re-checks
+  if (opt_.preflight || opt_.stamp_new) {
     // No bitwidth follows: the cell is stamped like every cell classic Cprop{false} makes. A Mux too: every
     // consumer (pass.lec, pass.formal) rejects an unsized driver (graph/width_validation.hpp). The class a member
     // is realized for is equal to that member as an unbounded integer, so the member's own stamp is valid.
@@ -2219,6 +2263,83 @@ std::optional<std::pair<bool, int>> Engine::stamp_for(Class_id cls) const {
   return std::pair{false, width};
 }
 
+// Whether a new cell for class `c` (and every new cell below it) can take a width from its own range. A property
+// of the class alone, so it is computed once per class, in post-order, and read by every member: O(classes +
+// operand edges) for the whole body, whatever the members share.
+bool Engine::interior_stampable(Class_id root) {
+  enum : uint8_t { unknown = 0, visiting, ok, bad };
+  std::vector<std::pair<Class_id, bool>> stack{{root, false}};  // (class, its operands were pushed)
+  while (!stack.empty()) {
+    auto [c, expanded] = stack.back();
+    ensure(c);
+    if (stampable_.size() <= c) {
+      stampable_.resize(c + 1, unknown);
+    }
+    if (stampable_[c] == ok || stampable_[c] == bad) {
+      stack.pop_back();
+      continue;
+    }
+    const auto& k = eg_.cls(c);
+    if (k.kind == Egraph::Kind::uni) {
+      const auto side = has_best_ ? best_[c] : k.alt_a;
+      ensure(side);
+      if (stampable_.size() <= side) {
+        stampable_.resize(side + 1, unknown);
+      }
+      if (stampable_[side] == ok || stampable_[side] == bad) {
+        stampable_[c] = stampable_[side];
+        stack.pop_back();
+      } else {
+        stack.emplace_back(side, false);  // an acyclic e-graph: the side settles before c is seen again
+      }
+      continue;
+    }
+    if (k.kind != Egraph::Kind::node || !rep_pin_[c].is_invalid()) {
+      stampable_[c] = ok;  // a leaf, a constant, or a class an existing cell realizes: no new cell
+      stack.pop_back();
+      continue;
+    }
+    if (!expanded) {
+      stack.back().second = true;
+      stampable_[c]       = visiting;
+      for (const auto& o : eg_.operands(eg_.enode(k.first))) {
+        stack.emplace_back(o.cls, false);
+      }
+      continue;
+    }
+    bool good = stamp_for(c).has_value();
+    for (const auto& o : eg_.operands(eg_.enode(k.first))) {
+      good = good && stampable_[o.cls] == ok;
+    }
+    stampable_[c] = good ? ok : bad;
+    stack.pop_back();
+  }
+  return stampable_[root] == ok;
+}
+
+bool Engine::member_stampable(const Member& member, Class_id kept) {
+  // The member's own top takes the member's stamp; everything below must stamp from its own range.
+  ensure(kept);
+  Class_id top = kept;
+  while (eg_.cls(top).kind == Egraph::Kind::uni) {
+    top = has_best_ ? best_[top] : eg_.cls(top).alt_a;
+    ensure(top);
+  }
+  const auto& k = eg_.cls(top);
+  if (k.kind != Egraph::Kind::node || !rep_pin_[top].is_invalid()) {
+    return true;
+  }
+  if (gu::bits_of(member.node.get_driver_pin(0)) == 0) {
+    return interior_stampable(top);
+  }
+  for (const auto& o : eg_.operands(eg_.enode(k.first))) {
+    if (!interior_stampable(o.cls)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 // Walk what elaborate() is about to realize and check every cell it would create can carry a stamp: a member's
 // own top class takes the member's stamp (if the member has one), every other new cell needs a bounded range.
 bool Engine::preflight_ok() {
@@ -2276,6 +2397,12 @@ bool Engine::adopt(const Member& member, Class_id target) {
   }
   const Enode n   = eg_.enode(k.first);  // realize() may not grow the e-graph, but copy anyway
   const auto  ops = eg_.operands(n);
+  for (const auto& in_pin : member.node.inp_sorted_pins()) {
+    const auto driver = in_pin.get_driver_pin();
+    if (!driver.is_invalid() && !driver.is_const() && !gu::is_graph_input_pin(driver)) {
+      dead_candidates_.push_back(driver.get_master_node());  // may lose its last reader to the rebuild
+    }
+  }
   rewire(member.node, n.op, ops);
   rep_pin_[target] = member.node.get_driver_pin(0);
   ++stats_.rule_counts[n.rule].extracted;
@@ -2288,6 +2415,7 @@ Engine::Replaced Engine::replace(const Member& member, const hhds::Pin_class& ta
   auto       node   = member.node;
   const auto source = node.get_driver_pin(0);
   if (!node.has_out_edges()) {
+    dead_candidates_.push_back(node);
     return Replaced::dead;  // the sweep deletes it
   }
 
@@ -2382,6 +2510,18 @@ void Engine::elaborate() {
       kept = best_[kept];
     }
     ensure(kept);
+    if (opt_.stamp_new && rep_pin_[kept].is_invalid() && !member_stampable(member, kept)) {
+      // A rewrite that would create a cell no width can be given: keep the original node, which bitwidth already
+      // stamped and which equals the class, and let it realize the class for every later reader too.
+      const auto own = member.node.get_driver_pin(0);
+      rep_pin_[kept] = own;
+      ensure(member.cls);
+      if (rep_pin_[member.cls].is_invalid()) {
+        rep_pin_[member.cls] = own;
+      }
+      ++stats_.stamp_kept;
+      continue;
+    }
     if (rep_pin_[kept].is_invalid() && adopt(member, kept)) {
       ++stats_.rewritten;
       continue;
@@ -2411,13 +2551,11 @@ void Engine::elaborate() {
 // Dead pure nodes: a node nobody reads is deleted, and so is any pure producer
 // that loses its last consumer. State, IO, Sub and every obligation are roots.
 void Engine::sweep_dead() {
-  std::vector<hhds::Node_class> storage;
-  for (auto node : g_.body().nodes()) {
-    storage.push_back(node);
-  }
-  for (auto it = storage.rbegin(); it != storage.rend(); ++it) {
+  // Latest first: a cell realized late reads cells realized before it, so its chain takes them along.
+  for (auto it = dead_candidates_.rbegin(); it != dead_candidates_.rend(); ++it) {
     stats_.dead_removed += remove_dead_chain(*it);
   }
+  dead_candidates_.clear();
 }
 
 // Build every candidate of `producers_first` in order.
@@ -2428,10 +2566,14 @@ void Engine::build_all(const std::vector<hhds::Node_class>& producers_first) {
     }
     if (!is_pure_candidate(node)) {
       ++stats_.skeleton;
+      if (!node.has_out_edges() && is_dead_eligible(node)) {
+        dead_candidates_.push_back(node);
+      }
       continue;
     }
     if (!node.has_out_edges() || dead_.contains(node.get_class_index())) {
-      continue;  // dead on arrival: the sweep deletes it
+      dead_candidates_.push_back(node);  // dead on arrival: the sweep deletes it
+      continue;
     }
     const auto cls = build(node);
     if (!cls) {

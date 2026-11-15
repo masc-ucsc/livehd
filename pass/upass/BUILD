@@ -18,6 +18,7 @@ cc_library(
         "//core",
         "//lnast",
         "//pass/common:pass",
+        "//upass/aeg:upass_aeg",
         "//upass/assert:upass_assert",
         "//upass/attributes:upass_attributes",
         "//upass/bitwidth:upass_bitwidth",

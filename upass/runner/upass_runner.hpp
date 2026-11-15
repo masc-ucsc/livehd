@@ -21,6 +21,7 @@
 #include "lnast.hpp"
 #include "lnast_manager.hpp"
 #include "lnast_ntype.hpp"
+#include "staging_rewrite.hpp"
 #include "upass_core.hpp"
 
 // ── Shared comb-call-inliner registry ───────────────────────────────────────
@@ -162,6 +163,13 @@ public:
   // for the func_extract pre-loop and whenever take_staging() is consumed.
   void set_materialize(bool m) { materialize_ = m; }
 
+  // The post-walk staging rewrite (the tree aegraph, upass/aeg): run on the
+  // complete staging tree right before the post-walk DCE, under the DCE's own
+  // gates. Injected by pass.upass so the runner does not link the e-graph
+  // engine; the stats of the last run() are kept for its step-log summary.
+  void set_staging_rewrite(upass::Staging_rewrite_fn fn) { staging_rewrite_ = fn; }
+  [[nodiscard]] const upass::Staging_rewrite_stats& staging_rewrite_stats() const { return staging_rewrite_stats_; }
+
   // Named-constant provenance (the Pyrope counterpart of inou.slang's
   // `preserve_param_provenance`): materialize a folded `pkg.PARAM` read as the
   // SYMBOLIC ref `pkg.PARAM` instead of its value, so `--emit-dir pyrope:`
@@ -261,6 +269,11 @@ protected:
   std::vector<std::shared_ptr<Lnast>> new_lnasts;
   bool                                materialize_{true};                 // see set_materialize()
   bool                                preserve_param_provenance_{false};  // see set_preserve_param_provenance()
+  upass::Staging_rewrite_fn           staging_rewrite_{nullptr};          // see set_staging_rewrite()
+  upass::Staging_rewrite_stats        staging_rewrite_stats_;
+  // constprop is in the resolved order: the post-walk DCE and the staging
+  // rewrite rely on its folds (pruned arms, expanded tuple_gets).
+  [[nodiscard]] bool                  has_constprop() const;
   absl::flat_hash_set<std::string>    preserved_param_names_;
   bool                                track_param_provenance();
 

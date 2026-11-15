@@ -1,0 +1,18 @@
+/*
+:name: aeg_tree_refused_respell_wire
+:type: compile
+*/
+
+// `w + x + y + z - w` is the 3-operand Sum(x,y,z), which the tree aegraph
+// cannot respell (tolg sizes a Sum as max+1 whatever its arity), so `h` keeps
+// its spelling and still reads `w`. Were `h` the holder of x+y+z, the later
+// `w = x + y + z` would be renamed to `w = h`: a structural read of `w` by its
+// own driver, a comb loop the program does not have. Only a name whose spelling
+// is its value may hold a class.
+pub mod top(x:U8, y:U8, z:U8) -> (o1:U10@[0], o2:S12@[0]) {
+  wire w:U10 = nil
+  const h = w + x + y + z - w
+  w = x + y + z
+  o1 = w
+  o2 = h
+}
