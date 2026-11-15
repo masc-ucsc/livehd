@@ -273,7 +273,7 @@ public:
       }
       timing_s_ = elapsed(t);
       t         = Clock::now();
-      if (phases.find('a') != std::string::npos) {
+      if (!options_.mutation_policy().no_sizing && phases.find('a') != std::string::npos) {
         recovery_phase();
       }
       recovery_s_ = elapsed(t);
@@ -844,7 +844,7 @@ private:
   // its Liberty limits at the present load, otherwise a fanout tree.
   unsigned quick_electrical(const std::string& driver, std::vector<std::string>& created) {
     const auto owner = instance_of(driver);
-    if (editable(owner) && insts_.at(owner).output == driver) {
+    if (!options_.mutation_policy().no_sizing && editable(owner) && insts_.at(owner).output == driver) {
       const auto& inst    = insts_.at(owner);
       const auto* current = inst.cell;
       const auto  l       = load(driver);
@@ -871,6 +871,9 @@ private:
         ++upsized_;
         return 1;
       }
+    }
+    if (options_.mutation_policy().no_buffer_edits) {
+      return 0;
     }
     if (nets_.at(driver).size() >= 4 && build_tree(driver, nets_.at(driver), 0, owner, created)) {
       return 1;
@@ -999,7 +1002,7 @@ private:
     }
     const auto owner = instance_of(driver);
     // 1. A stronger driver, smallest first.
-    if (editable(owner) && insts_.at(owner).output == driver) {
+    if (!options_.mutation_policy().no_sizing && editable(owner) && insts_.at(owner).output == driver) {
       const auto*                current = insts_.at(owner).cell;
       // Probe two drives: the smallest that meets the limits at this load and the strongest.
       std::vector<const Buffer*> tries;
@@ -1031,6 +1034,9 @@ private:
           return true;
         }
       }
+    }
+    if (options_.mutation_policy().no_buffer_edits) {
+      return false;
     }
     // 2. A variable-base buffer tree over the sinks, 3. a repeater chain.
     for (const bool tree : {true, false}) {
@@ -1733,14 +1739,21 @@ private:
   }
   std::vector<Move> path_moves(const std::vector<Stage>& stages, double slack, bool feasible) {
     std::vector<Move> moves;
+    const auto policy = options_.mutation_policy();
     for (size_t k = 0; k < stages.size(); ++k) {
-      upsize_moves(stages, k, moves);
-      bypass_moves(stages, k, moves);
-      shed_moves(stages, k, slack, moves);
+      if (!policy.no_sizing) {
+        upsize_moves(stages, k, moves);
+      }
+      if (!policy.no_buffer_edits) {
+        bypass_moves(stages, k, moves);
+      }
+      if (!policy.no_sizing) {
+        shed_moves(stages, k, slack, moves);
+      }
       // Wire buffers (isolation, repeaters) only on the legal placement: at FP
       // checkpoints cells still move, and buffers inserted there pile up as GP
       // stretches the wires again (sizing and fanout trees remain).
-      if (feasible && stage_ == Resize_stage::placed) {
+      if (!policy.no_buffer_edits && feasible && stage_ == Resize_stage::placed) {
         isolate_moves(stages, k, slack, moves);
         repeater_moves(stages, k, moves);
       }
@@ -2277,6 +2290,9 @@ std::string smallest_buffer(const Options& options) {
 
 Resize_plan plan_resize(const Result& state, const Options& options, const Timing_feedback& timing, Whatif& whatif,
                         Resize_stage stage) {
+  if (options.mutation_policy().no_sizing && options.mutation_policy().no_buffer_edits) {
+    return {};
+  }
   const auto lib = library(options);
   Planner    planner(state, options, timing, whatif, stage, *lib);
   return planner.run();
@@ -2443,6 +2459,9 @@ Repair_result resize_placed(Result initial, const Options& requested, const Eval
     for (unsigned attempt = 0; groups > 0 && attempt < 4; ++attempt) {
       const auto edits = prefix(plan.edits, groups);
       if (edits.empty()) {
+        break;
+      }
+      if (!options.take_repair_trial()) {
         break;
       }
       const auto t = Clock::now();

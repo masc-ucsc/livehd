@@ -1,6 +1,8 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 #include <cstddef>
+#include <functional>
+#include <map>
 #include <optional>
 #include <string>
 #include <utility>
@@ -38,6 +40,23 @@ public:
   virtual Pin_timing                                  pin(const std::string& label)      = 0;
   virtual std::optional<double>                       load(const std::string& driver)    = 0;  // driven net load incl. wire
   virtual std::vector<std::pair<std::string, double>> failing_endpoints(double below_ps) = 0;  // ascending slack
+  // One worst setup check per constrained endpoint. A path can be unresolved
+  // when the available arrival provenance ties or belongs to a different corner.
+  using Setup_visitor = std::function<void(const std::string& endpoint, double slack_ps, const std::string& capture_clock,
+                                           const std::vector<std::string>& path)>;
+  // A checkpoint is numeric timing state for a freshly spawned, single-threaded owner.
+  // An empty value asks the placement supervisor to replay this timer configuration.
+  virtual std::string frozen_checkpoint() const { return {}; }
+  virtual bool                                        visit_setup_paths(const Setup_visitor&) { return false; }
+  struct Setup_analysis {
+    std::string                   engine;
+    std::vector<std::string>      corners;
+    std::map<std::string, double> periods_ps;
+    std::vector<std::string>      constraint_issues;
+    // True when changing the one clock period shifts every measured setup requirement by the same amount.
+    bool                          full_cycle = false;
+  };
+  virtual Setup_analysis setup_analysis() { return {}; }
   // Liberty slew/capacitance/fanout checks of these pins exactly as the full
   // evaluation counts them: {violations, normalized excess}.
   virtual std::pair<unsigned, double>                 electrical(const std::vector<std::string>& labels) = 0;

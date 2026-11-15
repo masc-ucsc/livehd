@@ -91,6 +91,11 @@ off = run('off', ['--set', 'synth.place.pcrs=false'])
 assert 'pcrs' not in off['qor']['place'] and stage_flops('off') == 0, off['qor']['place'].keys()
 assert off['qor']['place']['prects_controls']['ignored_nets'] > place['prects_controls']['ignored_nets'], off['qor']['place']
 
+# PCRS changes both logic and buffering. Either prohibition prevents reset pipeline insertion.
+for policy in ('no_resynthesis', 'no_buffer_edits'):
+    frozen = run(policy, ['--set', f'synth.place.policy.{policy}=true'])
+    assert 'pcrs' not in frozen['qor']['place'] and stage_flops(policy) == 0, frozen['qor']['place'].keys()
+
 # Formal: the placed netlist with its reset pipeline is the source function (the tagged flops are wires).
 subprocess.run(['lhd/lhd', 'pass', 'liberty', 'gensim', str(root / 'arst.lib'), '--emit-dir', f'lg:{root}/models',
                 '--workdir', str(root / 'gensim'), '-q'], check=True, capture_output=True, timeout=30)

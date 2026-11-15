@@ -542,6 +542,7 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
     // Recognized SDC, not modelled here. Say so once: a dropped exception or
     // load changes the number this pass reports.
     if (reported_ignored.insert(directive).second) {
+      sdc_issues_.insert(std::format("{}:{}: {} {}", sdc_file, lineno, directive, why));
       livehd::diag::warn("pass.opentimer", "sdc-ignored", "unsupported")
           .msg("{}:{}: SDC command '{}' {} and was ignored", sdc_file, lineno, directive, why)
           .emit();
@@ -854,6 +855,7 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
             similar += (shown++ ? ", " : "") + key;
           }
         }
+        sdc_issues_.insert(std::format("{}:{}: create_clock {} has no unique source pin", sdc_file, lineno, pname));
         livehd::diag::warn("pass.opentimer", "sdc-clock-pin-missing", "unsupported")
             .msg("{}:{}: create_clock {} names no single pin of the timing graph; the clock stays virtual{}",
                  sdc_file,
@@ -887,6 +889,9 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
           = waveform.empty() || (waveform[0] == 0 && std::abs(waveform[1] - period / 2) <= 1e-6f * std::max(1.0f, period));
       if (!default_waveform && source_ports.empty() && clock_pin.empty()) {
         supported = false;  // a virtual clock has no source to carry its edges
+      }
+      if (!supported) {
+        sdc_issues_.insert(std::format("{}:{}: create_clock {} uses unsupported constraints", sdc_file, lineno, pname));
       }
       timing_targets_[pname] = {period, source_ports, clock_pin};
       if (supported && source_ports.empty() && clock_pin.empty() && have_period && have_name && !pname.empty()

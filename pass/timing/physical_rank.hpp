@@ -67,6 +67,8 @@ public:
   };
 
   explicit Physical_ranker(Options options);
+  static std::unique_ptr<Physical_ranker> from_frozen_checkpoint(std::string_view);
+  livehd::timing::Feedback                evaluate_frozen(const std::vector<physical::Rc_net>& changed);
   ~Physical_ranker();
 
   [[nodiscard]] livehd::timing::Feedback rank(const std::shared_ptr<hhds::Graph>&                  graph,
@@ -99,6 +101,7 @@ public:
   [[nodiscard]] std::vector<std::string> unsupported() const;
 
 private:
+  livehd::timing::Feedback detailed_feedback();
   class Whatif_impl;
   struct Mapping {
     std::vector<Pin_label> labels;      // per RC node of every net, in order (empty for a junction)
@@ -123,6 +126,7 @@ private:
   struct Solved {
     std::vector<float> cap, delay, slew;
   };
+  void install_net(Wire_model&, const physical::Rc_net&, std::span<const uint32_t> pins, uint32_t root, uint32_t driver, Solved&);
   bool solve_net(const physical::Rc_net& net, std::span<const uint32_t> node_pins, uint32_t root, uint32_t driver, Solved& out);
   bool solve_arrays(std::span<const float> wire_cap, std::span<const Wire_edge> edges, std::span<const uint32_t> node_pins,
                     uint32_t root, uint32_t driver, Solved& out);
@@ -131,6 +135,8 @@ private:
   void remap_trees(const std::shared_ptr<const Tree_topology>& topology);
   Wire_model wire_model_trees(const Wire_trees& trees);
 
+  std::vector<std::string>                        frozen_names_;
+  std::unordered_map<std::string, uint32_t>       frozen_cells_;
   Options                    options_;
   std::vector<liberty::timing::Library> libraries_;
   Cell_types                 types_;

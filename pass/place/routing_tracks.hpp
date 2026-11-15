@@ -10,6 +10,8 @@ namespace livehd::placement {
 // Literal make_tracks layer -x_offset/-x_pitch/-y_offset/-y_pitch data in um.
 // Never executes Tcl. Replaces tracks atomically; origins are relative to DIEAREA.
 void                                   apply_routing_tracks(const physical::Technology&, physical::Floorplan&, std::string_view);
+// With no explicit/imported grid, populate a recognized platform's reference patterns for layers present in the LEF.
+void                                   apply_default_routing_tracks(const physical::Technology&, physical::Floorplan&);
 // One routing-track lattice in DBU: start + i*step for i in [0, count).
 struct Track_pattern {
   int64_t start = 0, step = 0, count = 0;

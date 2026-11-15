@@ -323,8 +323,10 @@ config_setting(
     values = {"compilation_mode": "dbg"},
 )
 
-cc_binary(
-    name = "lhd",
+[cc_binary(
+    name = name,
+    testonly = test_fixture,
+    local_defines = ["LHD_TEST_GUI_JOB_PROBE"] if test_fixture else [],
     srcs = [
         "lhd_main.cpp",
         "lhd_pyrope.cpp",
@@ -361,12 +363,13 @@ cc_binary(
     deps = [
         ":lhd_lib",
         "//inou/prp:pyrope_style",
+        "//pass/place:gui",
         "//lsp",
         "//pass/cost:host_mem",
         "@tree_sitter",
         "@tree_sitter_pyrope//:prpfmt",
     ],
-)
+) for name, test_fixture in [("lhd", False), ("lhd_gui_fixture", True)]]
 
 # Validate the full retired-option matrix without a process per spelling.
 cc_test(

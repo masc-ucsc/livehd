@@ -9,6 +9,9 @@ namespace livehd::physical {
 // Exact signal-cell and net import. No HDL reader, synthesis, cprop or removal
 // of redundant/dangling cells. Flat Sub instances retain DEF instance names and
 // LEF signal-pin declarations. Undriven nets with sinks and multiple signal
-// drivers are rejected rather than silently changing connectivity.
-std::shared_ptr<hhds::Graph> mapped_graph(hhds::GraphLibrary& library, const Floorplan& floorplan, const Technology& technology);
+// drivers require a physical netlist owner. When supplied, unresolved receives
+// their complete DEF hyperedges. Its caller must retain that physical model
+// and exclude unsupported directed timing or logic operations on it.
+std::shared_ptr<hhds::Graph> mapped_graph(hhds::GraphLibrary& library, const Floorplan& floorplan, const Technology& technology,
+                                          std::vector<Net>* unresolved = nullptr);
 }  // namespace livehd::physical

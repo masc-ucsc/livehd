@@ -653,6 +653,16 @@ bool force_diag_graphs(const Options& opts);  // fwd (defined below)
 // --reader slang: the direct inou.slang SV -> LNAST front-end. From here the
 // design is LNAST units, so the rest of the flow is the pyrope one (lnastfmt,
 // upass, emit-gated tolg). The yosys-* readers above elaborate to LGraphs.
+// The frontend needs the standard-cell and macro interfaces when reading a
+// mapped design. Keep their separate paths for dependency tracking.
+static std::string frontend_liberties(const Options& opts) {
+  auto files = synth_set(opts, "liberty", "");
+  if (const auto macros = synth_set(opts, "macro_liberty", ""); !macros.empty()) {
+    files += (files.empty() ? "" : ",") + macros;
+  }
+  std::replace(files.begin(), files.end(), ',', ' ');
+  return files;
+}
 void slang_parse(Options& opts, Result& res, Eprp_var& var) {
   check_inputs_exist(opts.files);
   res.inputs = opts.files;
@@ -686,11 +696,14 @@ void slang_parse(Options& opts, Result& res, Eprp_var& var) {
   }
 
   merge_sets(opts, "compile.slang", labels);  // e.g. --set compile.slang.preserve_param_provenance=false
-  const auto liberty = synth_set(opts, "liberty", "");
+  const auto liberty = frontend_liberties(opts);
   if (!liberty.empty()) {
-    check_inputs_exist({liberty});
+    std::istringstream list(liberty);
+    for (std::string path; list >> path;) {
+      check_inputs_exist({path});
+      res.inputs.push_back(path);
+    }
     labels["liberty"] = liberty;
-    res.inputs.push_back(liberty);
   }
   // Named-constant provenance (symbolic pkg.PARAM refs + pub-comptime-const
   // package units) is ON BY DEFAULT for a pyrope-emitting, no-graphs compile —
@@ -2775,7 +2788,7 @@ void compile_sources(Options& opts, Result& res, const Ir_inputs& ir) {
       const auto* lg_out   = find_slot(opts.emit_dirs, "lg");
       const auto* ln_out   = find_slot(opts.emit_dirs, "ln");
       std::string lib_path = lg_out ? lg_out->path : workdir(opts) + "/lgdb";
-      const auto  liberty  = synth_set(opts, "liberty", "");
+      const auto  liberty  = frontend_liberties(opts);
       if (!liberty.empty()) {
         auto& glib = livehd::Hhds_graph_library::instance(lib_path);
         livehd::liberty::declare_memory_cells(glib, livehd::liberty::scan_memory_cells(liberty));

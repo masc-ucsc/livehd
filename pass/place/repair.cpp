@@ -964,6 +964,10 @@ std::optional<Buffer_tree> apply(hhds::Graph& graph, const Inventory& cells, con
                                  const std::set<std::string>& protected_names, const Result& placed, const Timing_feedback& timing,
                                  const Options& options, const physical::Technology& tech, Apply_index* shared = nullptr,
                                  bool preserve_chains = false) {
+  const bool size_edit = edit.kind == "resize" || edit.kind == "gate_resize";
+  if (size_edit ? options.mutation_policy().no_sizing : options.mutation_policy().no_buffer_edits) {
+    return {};
+  }
   std::optional<Apply_index> owned;
   if (!shared) {
     owned.emplace(graph, placed);
@@ -1839,7 +1843,10 @@ static Floorplan_library read_floorplan_library(const Options& options) {
 }
 static Floorplan_resize resize_floorplan(Result& state, const Options& options, const Timing_feedback& before,
                                          const Evaluate& evaluate, const std::function<void(Result&)>& refresh,
-                                         const Floorplan_library& library) {
+                                         const Floorplan_library& library, const std::map<std::string, double>* width_limits = nullptr) {
+  if (options.mutation_policy().no_sizing) {
+    return {.timing = before};
+  }
   const auto& tech            = library.tech;
   const auto& cells           = library.cells;
   const auto  protected_names = protected_buffers(*state.graph, cells, library.special, true, options.control_ports);
@@ -1904,6 +1911,12 @@ static Floorplan_resize resize_floorplan(Result& state, const Options& options, 
         continue;
       }
       const auto& master = tech.macros.at(edit.master);
+      if (width_limits) {
+        const auto limit = width_limits->find(edit.node);
+        if (limit == width_limits->end() || std::llround(master.width * tech.dbu) > limit->second) {
+          continue;
+        }
+      }
       if (std::abs(master.height * tech.dbu - component->place.height) > 1e-6) {
         continue;
       }
@@ -1942,8 +1955,8 @@ static Floorplan_resize resize_floorplan(Result& state, const Options& options, 
   }
 }
 Floorplan_resize resize_floorplan(Result& state, const Options& options, const Timing_feedback& before, const Evaluate& evaluate,
-                                  const std::function<void(Result&)>& refresh) {
-  return resize_floorplan(state, options, before, evaluate, refresh, read_floorplan_library(options));
+                                  const std::function<void(Result&)>& refresh, const std::map<std::string, double>* width_limits) {
+  return resize_floorplan(state, options, before, evaluate, refresh, read_floorplan_library(options), width_limits);
 }
 Floorplan_resize repair_floorplan(Result& state, const Options& options, const Timing_feedback& before, const Evaluate& evaluate,
                                   const std::function<void(Result&)>& refresh) {
@@ -1959,7 +1972,8 @@ Floorplan_resize repair_floorplan(Result& state, const Options& options, const T
   w.String("fp_placement_rc_gate_buffer_steiner_repair");
   w.Key("trials");
   w.StartArray();
-  if (result.timing.has_pins()) {
+  const bool allow_buffers = !options.mutation_policy().no_buffer_edits;
+  if (allow_buffers && result.timing.has_pins()) {
     w.StartObject();
     w.Key("kind");
     w.String("forest_sweep");
@@ -2039,7 +2053,7 @@ Floorplan_resize repair_floorplan(Result& state, const Options& options, const T
   // trial only the wiring/masters, seeded Steiner buffers and fresh physical RC.
   unsigned individual          = 0;  // the forest batch above is not charged against the individual trials
   unsigned individual_accepted = 0;
-  while (individual < 8 && individual_accepted < 4) {
+  while (allow_buffers && individual < 8 && individual_accepted < 4) {
     const auto protected_names = protected_buffers(*state.graph, cells, scanned.special, true, options.control_ports);
     const auto candidates      = edits(*state.graph, cells, result.timing, protected_names, state, options, tech, &scanned.drives);
     bool       progress        = false;
@@ -2675,7 +2689,7 @@ Repair_result repair_buffers(Result initial, const Options& requested, const Eva
     return scope == Repair_scope::recovery || !score.wns || *score.wns < 0 || score.violations > 0
            || score.electrical_excess > 1e-6;
   };
-  const auto     trial_available   = [&] { return !admit_trial || admit_trial(); };
+  const auto     trial_available   = [&] { return options.trial_available() && (!admit_trial || admit_trial()); };
   const bool     physical_recovery = score.has_pins() && scope != Repair_scope::sizing && scope != Repair_scope::forest;
   const unsigned sweep_budget      = physical_recovery ? 12 : 24;
   const auto     directory         = options.output_dir + "/" + report_key;
@@ -2778,7 +2792,7 @@ Repair_result repair_buffers(Result initial, const Options& requested, const Eva
       pending.front().resize(selected.size());
       std::iota(pending.front().begin(), pending.front().end(), 0);
       const auto run = [&](const std::vector<size_t>& batch) {
-        if (batch.empty() || attempt >= phase_limit || !trial_available()) {
+        if (batch.empty() || attempt >= phase_limit || !trial_available() || !options.take_repair_trial()) {
           return;
         }
         w.StartObject();
@@ -3048,6 +3062,9 @@ Repair_result repair_buffers(Result initial, const Options& requested, const Eva
       }
       first = group.front() + 1;
       const auto& edit = candidates[group.front()];
+      if (!options.take_repair_trial()) {
+        break;
+      }
       ++attempt;
       recovery_attempts += physical_recovery;
       w.StartObject();

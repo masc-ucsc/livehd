@@ -369,11 +369,17 @@ This is a placement estimate, with no routing, via, coupling or clock-tree model
 before macro alignment. It accepts literal `make_tracks LAYER -x_offset N
 -x_pitch N -y_offset N -y_pitch N` records in microns, with comments and line
 continuations; it does not execute Tcl. Every record requires all four values.
-An explicit file replaces imported tracks; without it, imported DEF tracks and
-then LEF pitch/offset data retain their existing precedence. File contents are
+An explicit file replaces imported tracks. Otherwise an imported DEF grid is preserved.
+For an ASAP7 design without tracks, LiveHD uses its platform grid, including the
+seven M2 row phases, before legalization and DEF export. Other technologies
+without a platform grid fall back to LEF pitch and offset. File contents are
 included in placement-cache identity. Tracks are exported in DEF and must be
 preserved by the downstream flow rather than regenerated after changing DIEAREA.
 This matters when platform track offsets differ from technology LEF offsets.
+At final placement, movable IO pins use the registered horizontal/vertical edge
+layers when both track grids are present, even without a native power grid.
+The handoff sizes and spaces the pin metal for routing; fixed IOs keep their
+supplied shapes and locations.
 
 `synth.place.tech_rc=path/to/setRC.tcl` reads characterized technology data when
 RC is not supplied by LEF. The reader accepts literal `set_wire_rc` / `set_layer_rc`
@@ -424,7 +430,9 @@ radius constraint, and solver momentum is not reused across calls.
 
 Floorplan input requires the same DBU as LEF and N/FS rows on a common site
 lattice. Segmented rows and missing row bands are supported: the solver uses
-a rectangular frame with hard exclusions for absent sites. Exported DEFs,
+a rectangular frame with hard exclusions for absent sites. A row cut under an originally fixed macro
+still excludes standard cells. Macro checks and routing use the macro body and its LEF obstructions there;
+the surrounding notch and any explicit hard blockage remain excluded. Exported DEFs,
 timing snapshots and repair handoffs retain the original row segments and
 blockages. Overlapping segments, inconsistent orientations within a row band,
 off-grid segments and rotated rows are refused.
@@ -492,6 +500,8 @@ With an explicit `halo=0`, macros previously could touch; the channel now keeps
 them apart. This is a legality fix, not a default change: touching macros were
 never legal. The `tools/physical_repair` JSON config takes `"macro_channel"` as
 a number or `[x, y]`, and its `"halo"` also accepts `[x, y]`.
+
+After track alignment, the default macro legalizer checks whether a movable macro's halo leaves less than one usable row (top/bottom) or site (left/right) opposite a placed perimeter signal pin. It tries an inward move that preserves the routing phase, sizing local buffer space from the number of pins facing the macro. It skips blocked moves and keeps fixed macros and the selected power-grid alignment. This screens a common source of post-CTS placement failures; detailed placement and routing still require downstream checks.
 
 #### Power-grid aware macro spacing (`synth.place.macro.pdn`)
 
@@ -585,6 +595,18 @@ A channel below one site/row per side adds no padding, and with the default
 frame is fixed, only the halo keeps standard cells out: cells (wires, buffers)
 may use the channel in final placement, as OpenROAD's macro channel. The
 planning pad also keeps a movable macro that far from the core edge.
+
+Track alignment prefers a full wire width inside a signal pin. When snapping one
+macro at a time leaves only a partial-width connection, the legalizer tries moving
+neighboring macros together onto their best track phases. Fixed neighbors, hard
+placement blockages and required channels still take precedence. At perimeter IOs
+the legalizer can also leave rows for downstream buffer placement; those moves
+preserve both signal-track phase and standard-cell row or site pitch.
+If signal pins on both outward faces of a corner macro lie close to the same
+corner, the legalizer also tries to open one face for buffers. It tries the
+face with more pins first and moves obstructing movable neighbors only as far
+as their clearances require. If neither face can open legally, the original
+placement stands. This does not reserve sites for clocks inserted later by CTS.
 
 `synth.place.macro.edge_snap` (default `off`) removes slivers between macros
 and the core boundary after native macro legalization (ordinary native macro
@@ -5447,8 +5469,7 @@ describe the final legalized placement. The prior report is also retained as
 `before_final_legalization`.
 
 See [the offline tools and format](../../tools/uroute/README.md) for training,
-data ownership, support selection and validation commands. The implementation
-currently needs the local DREAMPlace override during co-development. Routed-DEF
+data ownership, support selection and validation commands. Routed-DEF
 ingestion and partial LFSR baselines are implemented; full router evaluation and
 pretrained weights are still pending.
 

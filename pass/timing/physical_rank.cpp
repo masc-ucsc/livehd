@@ -7,12 +7,69 @@
 #include <limits>
 
 #include "absl/container/flat_hash_map.h"
+#include "core/binary_message.hpp"
 
 namespace livehd::timing::fast {
 namespace {
 using Steady = std::chrono::steady_clock;
 double since(Steady::time_point start) { return std::chrono::duration<double>(Steady::now() - start).count(); }
 }  // namespace
+
+// Only numeric state, resolved constraints, Liberty, and stable names cross
+// exec. No graph handle, task executor, lock or library callback crosses it.
+template <class A>
+void field(A& a, Clock& v) {
+  binary_message::fields(a, v.name, v.port, v.period_ps, v.uncertainty_ps, v.slew_ps, v.source_pins, v.group);
+}
+template <class A>
+void field(A& a, Input_delay& v) {
+  binary_message::fields(a,
+                         v.port,
+                         v.clock,
+                         v.delay_ps,
+                         v.slew_ps,
+                         v.group,
+                         v.late,
+                         v.early,
+                         v.early_delay_ps,
+                         v.early_set,
+                         v.drive_type,
+                         v.drive_pin);
+}
+template <class A>
+void field(A& a, Output_delay& v) {
+  binary_message::fields(a, v.port, v.clock, v.delay_ps, v.load_ff, v.check, v.clocked);
+}
+template <class A>
+void field(A& a, Endpoint_relation& v) {
+  binary_message::fields(a, v.pin, v.group, v.setup_ps);
+}
+template <class A>
+void field(A& a, Constraints& v) {
+  binary_message::fields(a,
+                         v.clocks,
+                         v.inputs,
+                         v.outputs,
+                         v.default_input_slew_ps,
+                         v.cut_pins,
+                         v.excluded_endpoints,
+                         v.groups,
+                         v.default_input_group,
+                         v.setup_relation_ps,
+                         v.hold_relation_ps,
+                         v.endpoint_relations,
+                         v.max_fanout,
+                         v.unsupported,
+                         v.has_absolute_setup);
+}
+template <class A>
+void field(A& a, Options& v) {
+  binary_message::fields(a, v.setup_corners, v.hold_corner, v.path_corner, v.window_fraction, v.true_slack_in_rank, v.depth_margin);
+}
+template <class A>
+void field(A& a, Wire_model& v) {
+  binary_message::fields(a, v.net_cap_ff, v.sink_delay_ps, v.sink_slew_ps);
+}
 
 std::vector<std::string> Physical_ranker::unsupported() const {
   std::vector<std::string> out = constraints_.unsupported;
@@ -52,6 +109,10 @@ uint32_t Physical_ranker::resolve_label(const Pin_label& label) const {
     if (const auto added = added_cells_.find(label.instance().str()); added != added_cells_.end()) {
       return netlist.pin(added->second, label.pin().view());
     }
+  }
+  if (!names_) {
+    const auto cell = frozen_cells_.find(label.instance().str());
+    return cell == frozen_cells_.end() ? no_index : netlist.pin(cell->second, label.pin().view());
   }
   const auto cell = names_->cell(label.instance().view());
   return cell == no_index ? no_index : netlist.pin(cell, label.pin().view());
@@ -222,6 +283,30 @@ bool Physical_ranker::solve_arrays(std::span<const float> wire_cap, std::span<co
   return true;
 }
 
+void Physical_ranker::install_net(Wire_model& wire, const physical::Rc_net& net, std::span<const uint32_t> pins, uint32_t root,
+                                  uint32_t driver, Solved& solved) {
+  const auto& netlist = *bound_->netlist;
+  const auto  C       = types_.corners();
+  if (!solve_net(net, pins, root, driver, solved)) {
+    ++stats_.bad_trees;
+    return;
+  }
+  const auto engine_net = netlist.net_of(driver);
+  for (size_t k = 0; k < C; ++k) {
+    wire.net_cap_ff[engine_net * C + k] = solved.cap[k];
+  }
+  for (size_t i = 0; i < net.nodes.size(); ++i) {
+    const auto pin = pins[i];
+    if (pin == no_index || pin == driver) {
+      continue;
+    }
+    for (size_t k = 0; k < C; ++k) {
+      wire.sink_delay_ps[static_cast<size_t>(pin) * C + k] = solved.delay[i * C + k];
+      wire.sink_slew_ps[static_cast<size_t>(pin) * C + k]  = solved.slew[i * C + k];
+    }
+  }
+}
+
 Wire_model Physical_ranker::wire_model(const physical::Parasitics& rc) {
   const auto  start   = Steady::now();
   const auto& netlist = *bound_->netlist;
@@ -239,24 +324,7 @@ Wire_model Physical_ranker::wire_model(const physical::Parasitics& rc) {
       continue;
     }
     const auto first = m.net_start[n];
-    if (!solve_net(net, std::span<const uint32_t>(m.pin.data() + first, net.nodes.size()), m.net_root[n], driver, solved)) {
-      ++stats_.bad_trees;
-      continue;
-    }
-    const auto engine_net = netlist.net_of(driver);
-    for (size_t k = 0; k < C; ++k) {
-      wire.net_cap_ff[engine_net * C + k] = solved.cap[k];
-    }
-    for (size_t i = 0; i < net.nodes.size(); ++i) {
-      const auto pin = m.pin[first + i];
-      if (pin == no_index || pin == driver) {
-        continue;
-      }
-      for (size_t k = 0; k < C; ++k) {
-        wire.sink_delay_ps[static_cast<size_t>(pin) * C + k] = solved.delay[i * C + k];
-        wire.sink_slew_ps[static_cast<size_t>(pin) * C + k]  = solved.slew[i * C + k];
-      }
-    }
+    install_net(wire, net, std::span<const uint32_t>(m.pin.data() + first, net.nodes.size()), m.net_root[n], driver, solved);
   }
   stats_.wire_seconds += since(start);
   return wire;
@@ -439,6 +507,10 @@ livehd::timing::Feedback Physical_ranker::evaluate(const std::shared_ptr<hhds::G
   engine_->evaluate();
   stats_.engine_seconds += since(engine_start);
 
+  return detailed_feedback();
+}
+
+livehd::timing::Feedback Physical_ranker::detailed_feedback() {
   const auto feedback_start = Steady::now();
   const auto& netlist       = *bound_->netlist;
   const auto& types         = netlist.types();
@@ -582,6 +654,43 @@ public:
       added_log_.pop_back();
     }
   }
+  std::string frozen_checkpoint() const override {
+    if (!o_.bound_ || !o_.names_ || !added_log_.empty() || !rc_log_.empty()) {
+      return {};
+    }
+    const auto&              net = *o_.bound_->netlist;
+    std::vector<std::string> names(net.cells());
+    std::vector<uint32_t>    types;
+    for (uint32_t c = 0; c < net.cells(); ++c) {
+      const auto t = net.type_of(c);
+      types.push_back(t);
+      if (t != Cell_types::input_port_type && t != Cell_types::output_port_type) {
+        names[c] = o_.bound_->cell_node[c].get_name();
+      }
+    }
+    for (const auto& port : net.ports()) {
+      names[port.cell] = port.name;
+    }
+    std::vector<std::pair<uint32_t, uint32_t>> links;
+    for (uint32_t n = 0; n < net.nets(); ++n) {
+      for (const auto sink : net.sinks_of(n)) {
+        links.emplace_back(net.driver_of(n), sink);
+      }
+    }
+    binary_message::Encoder a;
+    binary_message::put(a,
+                        o_.options_.liberty_texts,
+                        o_.options_.corner_names,
+                        o_.options_.engine,
+                        names,
+                        types,
+                        links,
+                        engine().constraints(),
+                        engine().wire(),
+                        o_.mapping_.layout->labels,
+                        o_.mapping_.layout_pin);
+    return std::move(a.bytes);
+  }
   void resize(const std::string& instance, const std::string& master) override {
     auto&      e    = engine();
     const auto cell = cell_of(instance);
@@ -707,6 +816,48 @@ public:
     }
     return out;
   }
+  Setup_analysis setup_analysis() override {
+    Setup_analysis out;
+    out.engine = "fast";
+    const auto& constraints = engine().constraints();
+    out.constraint_issues = constraints.unsupported;
+    for (size_t i = 0; i < o_.types_.corners(); ++i) {
+      if ((o_.options_.engine.setup_corners >> i) & 1u) {
+        out.corners.push_back(o_.types_.corner_name(i));
+      }
+    }
+    for (const auto& clock : constraints.clocks) {
+      out.periods_ps.emplace(clock.name, clock.period_ps);
+    }
+    if (constraints.clocks.size() == 1 && !constraints.has_absolute_setup && constraints.unsupported.empty()) {
+      const float period = constraints.clocks.front().period_ps;
+      out.full_cycle = std::ranges::all_of(constraints.setup_relation_ps, [period](float edge) {
+        return edge == period || edge == std::numeric_limits<float>::infinity();
+      }) && std::ranges::none_of(constraints.endpoint_relations, [](const auto& edge) { return std::isfinite(edge.setup_ps); });
+    }
+    return out;
+  }
+  bool visit_setup_paths(const Setup_visitor& visit) override {
+    auto&                                     e = engine();
+    std::unordered_map<uint32_t, std::string> labels;
+    auto                                      label = [&](uint32_t pin) -> const std::string& {
+      auto [it, added] = labels.try_emplace(pin);
+      if (added) {
+        it->second = label_of(pin);
+      }
+      return it->second;
+    };
+    for (const auto& [pin, slack] : e.failing_endpoints(std::numeric_limits<float>::infinity())) {
+      std::vector<std::string> path;
+      if (e.endpoint_path_covers_worst(pin)) {
+        for (const auto& point : e.worst_path(pin)) {
+          path.push_back(label(point.pin));
+        }
+      }
+      visit(label(pin), slack, e.endpoint_clock(pin), path);
+    }
+    return true;
+  }
   std::pair<unsigned, double> electrical(const std::vector<std::string>& labels) override {
     unsigned violations = 0;
     double   excess     = 0;
@@ -800,14 +951,22 @@ private:
   std::string label_of(uint32_t pin) const {
     const auto& netlist = *o_.bound_->netlist;
     const auto  cell    = netlist.cell_of(pin);
-    for (const auto& port : netlist.ports()) {
-      if (port.cell == cell) {
-        return port.name;
+    const auto  type    = netlist.type_of(cell);
+    if (type == Cell_types::input_port_type || type == Cell_types::output_port_type) {
+      if (!o_.frozen_names_.empty()) {
+        return o_.frozen_names_.at(cell);
+      }
+      for (const auto& port : netlist.ports()) {
+        if (port.cell == cell) {
+          return port.name;
+        }
       }
     }
     std::string name;
     if (const auto it = o_.added_names_.find(cell); it != o_.added_names_.end()) {
       name = it->second;
+    } else if (!o_.frozen_names_.empty()) {
+      name = o_.frozen_names_[cell];
     } else {
       name = std::string(o_.bound_->cell_node[cell].get_name());
     }
@@ -901,6 +1060,82 @@ Physical_ranker::Physical_ranker(Options options) : options_(std::move(options))
   types_ = Cell_types::build(pointers, names);
   options_.engine.true_slack_in_rank = true;  // the placer's consumers read the slack's sign and size
   sdc_units_ = {libraries_.front().time_unit_ps, libraries_.front().capacitance_unit_ff};
+}
+
+std::unique_ptr<Physical_ranker> Physical_ranker::from_frozen_checkpoint(std::string_view bytes) {
+  binary_message::Decoder reader{bytes};
+  Options                 options;
+  binary_message::fields(reader, options.liberty_texts, options.corner_names, options.engine);
+  auto                                       owner = std::make_unique<Physical_ranker>(std::move(options));
+  std::vector<uint32_t>                      types;
+  std::vector<std::pair<uint32_t, uint32_t>> links;
+  Wire_model                                 wire;
+  auto                                       layout = std::make_shared<Feedback::Ranking::Layout>();
+  binary_message::fields(reader,
+                         owner->frozen_names_,
+                         types,
+                         links,
+                         owner->constraints_,
+                         wire,
+                         layout->labels,
+                         owner->mapping_.layout_pin);
+  auto labels            = std::make_shared<Feedback::Pin_index>();
+  labels->labels         = layout->labels;
+  owner->mapping_.index  = std::move(labels);
+  owner->mapping_.layout = std::move(layout);
+  if (!reader.bytes.empty() || types.size() != owner->frozen_names_.size()) {
+    throw std::runtime_error("invalid frozen timer checkpoint");
+  }
+  owner->bound_          = std::make_unique<Bound_graph>();
+  owner->bound_->netlist = std::make_unique<Netlist>(owner->types_);
+  auto& net              = *owner->bound_->netlist;
+  for (uint32_t c = 0; c < types.size(); ++c) {
+    const auto& name = owner->frozen_names_[c];
+    if (types[c] == Cell_types::input_port_type || types[c] == Cell_types::output_port_type) {
+      const auto id = types[c] == Cell_types::input_port_type ? net.add_input_port(name) : net.add_output_port(name);
+      owner->port_index_.emplace(name, net.first_pin(id));
+    } else {
+      net.add_cell(types[c]);
+      owner->frozen_cells_.emplace(name, c);
+    }
+  }
+  for (const auto& [driver, sink] : links) {
+    net.connect(driver, sink);
+  }
+  net.finalize();
+  owner->engine_ = std::make_unique<Engine>(net, owner->constraints_, owner->options_.engine);
+  owner->engine_->set_wire(std::move(wire));
+  owner->engine_->evaluate();
+  return owner;
+}
+
+livehd::timing::Feedback Physical_ranker::evaluate_frozen(const std::vector<physical::Rc_net>& changed) {
+  if (frozen_names_.empty()) {
+    throw std::logic_error("missing frozen timing netlist");
+  }
+  if (!changed.empty()) {
+    auto        wire    = engine_->wire();
+    const auto& netlist = *bound_->netlist;
+    Solved      solved;
+    for (const auto& net : changed) {
+      const auto driver = resolve_label(net.driver);
+      if (driver == no_index || netlist.net_of(driver) == no_index) {
+        continue;
+      }
+      std::vector<uint32_t> pins;
+      uint32_t              root = 0;
+      for (const auto& node : net.nodes) {
+        if (node.pin == net.driver) {
+          root = pins.size();
+        }
+        pins.push_back(node.pin.empty() ? no_index : resolve_label(node.pin));
+      }
+      install_net(wire, net, pins, root, driver, solved);
+    }
+    engine_->set_wire(std::move(wire));
+  }
+  engine_->evaluate();
+  return detailed_feedback();
 }
 
 Physical_ranker::~Physical_ranker() = default;

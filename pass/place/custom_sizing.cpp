@@ -226,7 +226,8 @@ Repair_result size_custom_placed(Result legal, const Options& requested, const E
   for (const auto& row : result.placed.floorplan.rows) {
     widest_row = std::max(widest_row, row.count * row.step);
   }
-  const auto buffer = sizing.buffers ? smallest_buffer(options) : std::string{};
+  const auto policy = options.mutation_policy();
+  const auto buffer = sizing.buffers && !policy.no_buffer_edits ? smallest_buffer(options) : std::string{};
 
   // Per instance: the moves tried or taken, so no move repeats or undoes another.
   std::set<std::string>           up_rejected, down_rejected, buffered, moved_up, moved_down;
@@ -274,7 +275,7 @@ Repair_result size_custom_placed(Result legal, const Options& requested, const E
       (void)slack;
       const auto& instance = instances.at(name);
       const auto* up       = catalog.step(instance.variant->name, 1);
-      if (up && !up_rejected.contains(name) && !moved_down.contains(name)) {
+      if (!policy.no_sizing && up && !up_rejected.contains(name) && !moved_down.contains(name)) {
         variant_move(Move_kind::up, name, *instance.variant, *up);
       } else if (!buffer.empty() && !buffered.contains(name)) {
         if (auto edit = output_buffer(result.placed, score, name, instance, buffer, names)) {
@@ -287,7 +288,7 @@ Repair_result size_custom_placed(Result legal, const Options& requested, const E
       (void)slack;
       const auto& instance = instances.at(name);
       const auto* down     = catalog.step(instance.variant->name, -1);
-      if (down && !down_rejected.contains(name) && !moved_up.contains(name)) {
+      if (!policy.no_sizing && down && !down_rejected.contains(name) && !moved_up.contains(name)) {
         variant_move(Move_kind::down, name, *instance.variant, *down);
       }
     }

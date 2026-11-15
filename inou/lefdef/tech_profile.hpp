@@ -85,14 +85,21 @@ enum class Tech_policy {
   power_grid,  // native power-grid strategy (Pg_strategy)
 };
 // Process policy that LEF does not state: which layers, masters and reference
-// strategies the physical flow uses. Geometry, tracks, vias and DRC remain in
+// strategies the physical flow uses, including reference track patterns when DEF
+// omits them. Geometry, imported tracks, vias and DRC remain in
 // LEF/DEF; electrical characterization remains in Route_technology_rc. All
 // technology-specific names live in the registry in tech_profile.cpp; callers
 // take a resolved profile and never infer a process from layer or cell names.
 struct Tech_profile {
-  std::string                name;
+  std::string              name;
   // Auto detection: any of these LEF sites or macros identifies the profile.
-  std::vector<std::string>   detect_sites, detect_macros;
+  std::vector<std::string> detect_sites, detect_macros;
+  // Reference track patterns in microns when the LEF alone does not describe the router's grid.
+  struct Routing_grid {
+    std::string layer;
+    double      x_offset, x_pitch, y_offset, y_pitch;
+  };
+  std::vector<Routing_grid>  routing_grids;
   Route_policy               route;
   std::array<std::string, 2> io_pin_layers;     // horizontal, vertical
   std::string                tap_master;        // endcap and well-tap master

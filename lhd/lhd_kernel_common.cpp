@@ -1905,7 +1905,10 @@ void apply_lhd_settings(Options& opts) {
       opts.incremental = value != "false" && value != "0" && value != "off";
     }
   }
-  livehd::Job_manager::global().configure(opts.jobs);
+  auto& jobs = livehd::Job_manager::global(-1, opts.gui);
+  if (opts.gui_worker_id.empty()) {
+    jobs.configure(opts.jobs);
+  }
 
   // The cost profile of every fold site outside the two compile slots (specialize refolds, the sim post-splice
   // fold, synthesis loop cleanup and memory modules, the satopt cleanup, the LEC preflight): ONE process-wide

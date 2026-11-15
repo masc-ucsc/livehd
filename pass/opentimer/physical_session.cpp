@@ -765,11 +765,7 @@ struct Physical_session::Impl : Pass_opentimer {
           add(test.constrained_pin().name(), test.slack(ot::MAX, tran));
         }
       }
-      if (reverse_pins.empty()) {
-        for (size_t index = 0; index < s.physical_timing_pins_.size(); ++index) {
-          reverse_pins.emplace(s.physical_timing_pins_[index]->name(), s.physical_feedback_index_->labels[index]);
-        }
-      }
+      index_reverse_pins();
       std::vector<std::pair<std::string, double>> result;
       for (const auto& [pin, slack] : worst) {
         if (slack * scale >= below_ps) {
@@ -782,6 +778,141 @@ struct Physical_session::Impl : Pass_opentimer {
         return std::tie(a.second, a.first) < std::tie(b.second, b.first);
       });
       return result;
+    }
+    void index_reverse_pins() {
+      if (!reverse_pins.empty()) {
+        return;
+      }
+      for (size_t i = 0; i < s.physical_timing_pins_.size(); ++i) {
+        reverse_pins.emplace(s.physical_timing_pins_[i]->name(), s.physical_feedback_index_->labels[i]);
+      }
+    }
+    Setup_analysis setup_analysis() override {
+      Setup_analysis out;
+      out.engine = "opentimer";
+      out.constraint_issues.assign(s.sdc_issues_.begin(), s.sdc_issues_.end());
+      if (const auto& lib = s.timer.celllib(ot::MAX)) {
+        out.corners.push_back(lib->name);
+      }
+      for (const auto& [clock, target] : s.timing_targets_) {
+        out.periods_ps.emplace(clock, target.period * unit_ps());
+      }
+      out.full_cycle = s.constraints_complete_ && s.virtual_clock_period_ > 0 && s.native_state_nodes_ == 0
+                       && s.opaque_logic_nodes_ == 0 && s.timer.tests().empty();
+      return out;
+    }
+    bool visit_setup_paths(const Setup_visitor& visit) override {
+      update();
+      index_reverse_pins();
+      const auto label = [&](const ot::Pin& pin) -> const std::string& {
+        auto it = reverse_pins.find(pin.name());
+        return it == reverse_pins.end() ? pin.name() : it->second;
+      };
+      // Recover a path only for unique tight, propagating arcs. Equal arrivals
+      // through different predecessors have no unique path in the public API.
+      struct Predecessor {
+        const ot::Pin* pin        = nullptr;
+        ot::Tran       transition = ot::RISE;
+        bool           ambiguous  = false;
+      };
+      std::unordered_map<const ot::Pin*, std::array<Predecessor, 2>> predecessors;
+      for (const auto& arc : s.timer.arcs()) {
+        const auto& to = arc.to();
+        const auto  tv = arc.timing_view();
+        if (to.is_datapath_source() || arc.is_loop_breaker() || (tv[ot::MAX] && tv[ot::MAX]->is_constraint())) {
+          continue;
+        }
+        for (auto tr : {ot::RISE, ot::FALL}) {
+          const auto arrival = to.at(ot::MAX, tr);
+          if (!arrival) {
+            continue;
+          }
+          for (auto from : {ot::RISE, ot::FALL}) {
+            const auto delay = arc.delay(ot::MAX, from, tr), at = arc.from().at(ot::MAX, from);
+            if (!delay || !at || *delay + *at != *arrival) {
+              continue;
+            }
+            auto& pred = predecessors[&to][tr];
+            if (pred.pin && (pred.pin != &arc.from() || pred.transition != from)) {
+              pred.ambiguous = true;
+            } else {
+              pred.pin        = &arc.from();
+              pred.transition = from;
+            }
+          }
+        }
+      }
+      struct Check {
+        float       slack      = std::numeric_limits<float>::infinity();
+        ot::Tran    transition = ot::RISE;
+        std::string clock;
+        bool        tied = false;
+      };
+      std::unordered_map<const ot::Pin*, Check> checks;
+      auto check = [&](const ot::Pin& pin, ot::Tran tr, std::optional<float> slack, const std::string& clock) {
+        if (!slack || !std::isfinite(*slack)) {
+          return;
+        }
+        auto& best = checks[&pin];
+        if (*slack < best.slack) {
+          best = {*slack, tr, clock, false};
+        } else if (*slack == best.slack) {
+          if (best.clock != clock) {
+            best.clock.clear();
+          }
+          best.tied |= best.transition != tr;
+        }
+      };
+      for (const auto& [name, output] : s.timer.primary_outputs()) {
+        const auto clock = s.output_clocks_.find(name);
+        for (auto tr : {ot::RISE, ot::FALL}) {
+          check(s.timer.pins().at(name), tr, output.slack(ot::MAX, tr), clock == s.output_clocks_.end() ? "" : clock->second);
+        }
+      }
+      for (const auto& test : s.timer.tests()) {
+        const auto& clk = test.related_pin();
+        std::string clock;
+        if (s.timing_targets_.size() == 1) {
+          clock = s.timing_targets_.begin()->first;
+        } else if (clk.net()) {
+          const auto& wire = clk.net()->name();
+          for (const auto& [name, target] : s.timing_targets_) {
+            if (target.pin != label(clk) && std::ranges::find(target.ports, wire) == target.ports.end()) {
+              continue;
+            }
+            if (!clock.empty()) {
+              clock.clear();
+              break;
+            }
+            clock = name;
+          }
+        }
+        for (auto tr : {ot::RISE, ot::FALL}) {
+          check(test.constrained_pin(), tr, test.slack(ot::MAX, tr), clock);
+        }
+      }
+      const double scale = unit_ps();
+      for (const auto& [pin, check_value] : checks) {
+        std::vector<std::string> path;
+        auto                     tr = check_value.transition;
+        for (auto at = pin; at && !check_value.tied;) {
+          path.push_back(label(*at));
+          if (at->is_datapath_source()) {
+            break;
+          }
+          const auto it = predecessors.find(at);
+          if (it == predecessors.end() || it->second[tr].ambiguous || !it->second[tr].pin || path.size() > s.timer.num_pins()) {
+            path.clear();
+            break;
+          }
+          const auto& pred = it->second[tr];
+          at               = pred.pin;
+          tr               = pred.transition;
+        }
+        std::ranges::reverse(path);
+        visit(label(*pin), check_value.slack * scale, check_value.clock, path);
+      }
+      return true;
     }
     std::unordered_map<std::string, std::string> reverse_pins;
     double                                       clock_period() override {
@@ -1118,6 +1249,8 @@ struct Physical_session::Proxy final : livehd::timing::Whatif {
                                                double slew_ps, double load_ff) override {
     return w().arc(master, from, to, slew_ps, load_ff);
   }
+  bool                  visit_setup_paths(const Setup_visitor& visit) override { return w().visit_setup_paths(visit); }
+  Setup_analysis        setup_analysis() override { return w().setup_analysis(); }
   std::optional<double> pin_capacitance(const std::string& master, const std::string& pin) override {
     return w().pin_capacitance(master, pin);
   }

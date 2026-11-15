@@ -118,6 +118,98 @@ floorplan=root/'mirrored.def';floorplan.write_text(def_text)
 run('fixed_mirror',['--set','synth.place.macro=none','--set','lhd.incremental=false','--set',f'synth.place.floorplan={floorplan}','--set','synth.place.snapshots=true'])
 frame=json.loads((root/'W/synth/place/gp.json').read_text())
 assert next(n for n in frame['nodes'] if n[0]==ram_name)[3]==4,frame['stage']
+# A fresh placement accepts one complete design metadata array. Swap two identical macros to make the
+# requested placement distinct from the solver's original answer; check every pose in the delivered DEF.
+def macro_poses(text):
+ return {n:(int(x),int(y),o) for n,x,y,o in re.findall(r'^- (\S+) test_sram \+ (?:PLACED|FIXED) \( (-?\d+) (-?\d+) \) ([A-Z]+) ;',text,re.M)}
+wanted=macro_poses(def_text)
+assert len(wanted)==4
+a,b=sorted(wanted)[:2]
+wanted[a],wanted[b]=wanted[b],wanted[a]
+dbu=int(re.search(r'UNITS DISTANCE MICRONS (\d+)',def_text)[1])
+poses=[dict(id=n,kind='position',subject=[n],frame='floorplan',anchor='lower_left',
+            master='test_sram',x_um=x/dbu,y_um=y/dbu,orientation=o) for n,(x,y,o) in wanted.items()]
+# Even an unannotated batch produces a reusable design record, using the physical handoff as the source of truth.
+generated=json.loads((root/'W/synth/place/metadata.json').read_text())
+saved=next(r for r in generated if r['class']=='livehd.placement.state' and r['design']=='top')['templates'][0]['hints']
+assert {p['subject'][0]:(round(p['x_um']*dbu),round(p['y_um']*dbu),p['orientation']) for p in saved}==macro_poses((root/'W/synth/place/out.def').read_text())
+foreign={'class':'example.review','id':'keep-this','design':'top','value':[3,1,4]}
+sim={'class':'livehd.sim.tuning','design':'top','id':'sim','schema':'lhd-sim-tune-file-1','knobs':{'dirty':True,'fence':0}}
+other={'class':'livehd.placement.state','design':'another','id':'macro-positions','schema_version':1,'templates':[]}
+# Join positional files from different passes; even independently named, disjoint macro records can be consolidated.
+collateral=root/'sim-and-review.json'
+collateral.write_text(json.dumps([sim,foreign,other]))
+metadata=root/'design.json'
+def save_poses():
+ metadata.write_text(json.dumps([{'class':'livehd.placement.state','id':f'bank-{i}',
+  'schema_version':1,'design':'top','templates':[{'module':'top','hints':[p]}]} for i,p in enumerate(poses)]))
+save_poses()
+cmd=base.copy()
+cmd[cmd.index('--workdir')+1]=str(root/'replayed')
+cmd[cmd.index('synth.place.macro=h2d')]='synth.place.macro=none'
+cmd+= [str(metadata),str(collateral)]
+def replay(cmd):
+ return subprocess.run(cmd,capture_output=True,text=True,timeout=30)
+def check_run(cmd,work):
+ done=replay(cmd)
+ assert not done.returncode,(done.stdout,done.stderr)
+ dest=work/'synth/place'
+ text=(dest/'out.def').read_text()
+ assert macro_poses(text)==wanted
+ records=json.loads((dest/'metadata.json').read_text())
+ assert all(r in records for r in [sim,foreign,other]),records
+ assert len([r for r in records if r.get('class')=='livehd.placement.state' and r.get('design')=='top'])==1,records
+ return dest
+dest=check_run(cmd,root/'replayed')
+check_run(cmd,root/'replayed')  # the placement-cache merge has the same contract
+joined=cmd[:-2]+[str(dest/'metadata.json')]
+joined[joined.index('--workdir')+1]=str(root/'single_file')
+single_dest=check_run(joined,root/'single_file')
+# Changing metadata outside placement keeps the same physical cache key, but output follows this invocation.
+collateral.write_text(json.dumps([sim,other]))
+without_review=replay(cmd)
+assert not without_review.returncode,(without_review.stdout,without_review.stderr)
+assert foreign not in json.loads((dest/'metadata.json').read_text())
+collateral.write_text(json.dumps([sim,foreign,other]))
+# The imported benchmark pins remain exactly where the downstream scorer reads them, including their orientations.
+pin_frame=root/'placed-ports.def'
+with_pins=joined[:-1]+[str(single_dest/'metadata.json'),'--set',f'synth.place.floorplan={pin_frame}','--set','synth.place.preserve_imported_io=true']
+with_pins[with_pins.index('--workdir')+1]=str(root/'ports')
+def pin_poses(t):
+ section=t.split('\nPINS ',1)[1].split('END PINS')[0]
+ return {m[1]:(m[2],m[3],m[4],m[5]) for m in re.finditer(r'^- (\S+).*?\+ (PLACED|FIXED) \( (-?\d+) (-?\d+) \) (\w+) ;',section,re.M|re.S)}
+# Use a port-only frame; the imported design's fixed macro constraints deliberately differ from the swapped poses.
+frame_text=re.sub(r'\nCOMPONENTS \d+ ;.*?END COMPONENTS', '\nCOMPONENTS 0 ;\nEND COMPONENTS', def_text,flags=re.S)
+pin_frame.write_text(re.sub(r'\nPINS \d+ ;.*?END PINS',lambda m:m[0].replace('+ FIXED (','+ PLACED ('),frame_text,flags=re.S))
+port_dest=check_run(with_pins,root/'ports')
+initial=pin_poses(pin_frame.read_text())
+assert initial and any(p[0]=='PLACED' for p in initial.values()),initial
+assert pin_poses((port_dest/'out.def').read_text())=={n:('FIXED',*p[1:]) for n,p in initial.items()}
+# Exact replay must diagnose conflicts, including hard exclusions that imported FIXED macros can ordinarily occupy.
+def rejected_frame(frame,expected_message):
+ command=with_pins.copy()
+ command[command.index(f'synth.place.floorplan={pin_frame}')]=f'synth.place.floorplan={frame}'
+ command[command.index('--workdir')+1]=str(root/('reject-'+frame.stem))
+ bad=replay(command)
+ assert bad.returncode and expected_message in bad.stdout+bad.stderr,(bad.stdout,bad.stderr)
+rejected_frame(floorplan,'conflicts with fixed floorplan macro')
+bx,by,_=wanted[a]
+blocked=root/'excluded.def'
+blocked.write_text(pin_frame.read_text().replace('END DESIGN',f'BLOCKAGES 1 ;\n- PLACEMENT RECT ( {bx} {by} ) ( {bx+100} {by+100} ) ;\nEND BLOCKAGES\nEND DESIGN'))
+rejected_frame(blocked,'overlaps a hard floorplan exclusion')
+# A matching originally FIXED pose also cannot override an explicit hard area.
+fixed_blocked=root/'fixed-excluded.def'
+fixed_blocked.write_text(blocked.read_text().replace('COMPONENTS 0 ;',f'COMPONENTS 1 ;\n- {a} test_sram + FIXED ( {bx} {by} ) {wanted[a][2]} ;',1))
+rejected_frame(fixed_blocked,'overlaps a hard floorplan exclusion')
+# At the same input path, an impossible or unresolved new pose must not return the cached success.
+poses[0]['x_um']=-1000
+save_poses()
+bad=replay(cmd)
+assert bad.returncode and 'outside the core' in bad.stdout+bad.stderr,(bad.stdout,bad.stderr)
+poses[0]['subject']=['absent_bank']
+save_poses()
+bad=replay(cmd)
+assert bad.returncode and 'absent_bank' in bad.stdout+bad.stderr,(bad.stdout,bad.stderr)
 # Two replicated three-SRAM scopes exceed the equivalent-cell threshold.
 lef.write_text(lef.read_text().replace('SIZE 16 BY 16','SIZE 160 BY 160'))
 source.write_text("""module bank(input clk,we,input [2:0] a,input [4:0] d,output [4:0] q);

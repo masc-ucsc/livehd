@@ -118,6 +118,50 @@ TEST(RoutingTracks, ExplicitPhaseSurvivesDieTranslationAndWireMargin) {
   EXPECT_EQ(fp.tracks[3], (physical::Track{"Y", "M6", 2016, 3875, 64}));
 }
 
+TEST(RoutingTracks, DefaultPlatformGridPreservesImportedTracksAndMakesSramPinsAccessible) {
+  physical::Technology tech;
+  tech.dbu                = 1000;
+  tech.layers["M2"].width = tech.layers["M3"].width = .018;
+  tech.layers["M3"].direction                       = "VERTICAL";
+  physical::Floorplan fp;
+  fp.dbu = 1000;
+  fp.die = {0, 0, 250000, 250000};
+  apply_default_routing_tracks(tech, fp);
+  EXPECT_TRUE(fp.tracks.empty());  // Layer names alone do not imply ASAP7.
+  tech.sites["asap7sc7p5t"] = {.054, .270, true};
+  fp.tracks.push_back({"X", "M3", 21, 42, 36});
+  const auto imported = fp.tracks;
+  apply_default_routing_tracks(tech, fp);
+  EXPECT_EQ(fp.tracks, imported);
+  fp.tracks.clear();
+  apply_default_routing_tracks(tech, fp);
+  std::vector<int64_t> m2_y;
+  for (const auto& t : fp.tracks) {
+    if (t.layer == "M2" && t.axis == "Y") {
+      EXPECT_EQ(t.step, 270);
+      m2_y.push_back(t.start);
+    }
+  }
+  EXPECT_EQ(m2_y, (std::vector<int64_t>{45, 81, 117, 153, 189, 225, 270}));
+  auto& m = tech.macros["sram"];
+  m.klass = "BLOCK";
+  m.width = m.height = 1;
+  m.pins["clock"]    = {"INPUT", "SIGNAL", {{"M3", {.207, 0, .225, .054}}}};
+  fp.rows.push_back({"row", "asap7sc7p5t", 0, 0, 4600, 54, physical::Orientation::N});
+  fp.rows.push_back({"last", "asap7sc7p5t", 0, 249480, 4600, 54, physical::Orientation::N});
+  Ann_place pose(36000, 36000, 1000, 1000);
+  pose.status = Ann_place::Status::FIXED;
+  std::vector<physical::Component> cells{
+      {"ram0", "sram", pose}
+  };
+  EXPECT_THROW(legalize_macro_tracks(tech, fp, cells, 0, 0, true), std::runtime_error);
+  cells.front().place.status = Ann_place::Status::PLACED;
+  legalize_macro_tracks(tech, fp, cells, 0, 0, true);
+  EXPECT_EQ((cells.front().place.x + 216 - 9) % 36, 0);
+  cells.front().place.status = Ann_place::Status::FIXED;
+  EXPECT_NO_THROW(legalize_macro_tracks(tech, fp, cells, 0, 0, true));
+}
+
 TEST(RoutingTracks, MalformedOrExecutableInputLeavesExistingGridUnchanged) {
   physical::Technology tech;
   tech.dbu                = 1000;

@@ -1488,7 +1488,7 @@ std::vector<Placement_exclusion> placement_exclusions(const Floorplan& fp, const
   }
   return result;
 }
-Floorplan rectangular_placement_frame(const Floorplan& original, const Technology& technology) {
+Floorplan rectangular_placement_frame(const Floorplan& original, const Technology& technology, std::vector<Rect>* routing_gaps) {
   validate_blockages(original);
   if (original.rows.empty() || original.dbu != technology.dbu) {
     throw std::invalid_argument("placement frame needs original rows and matching LEF/DEF units");
@@ -1565,6 +1565,37 @@ Floorplan rectangular_placement_frame(const Floorplan& original, const Technolog
     previous = std::move(current);
     result.rows.push_back(
         {"__lhd_rect_row_" + std::to_string(result.rows.size()), first.site, xl, y, (xh - xl) / sw, sw, orientation});
+  }
+  if (routing_gaps) {
+    routing_gaps->clear();
+    if (!missing.rectangles.empty()) {
+      std::vector<Rect> bodies;
+      for (const auto& c : original.components) {
+        if (c.place.status != Status::FIXED && c.place.status != Status::LOCKED) {
+          continue;
+        }
+        const auto m = technology.macros.find(c.macro);
+        if (m == technology.macros.end() || !hard_macro(m->second) || placement_mask(c, technology) != Placement_mask::none) {
+          continue;
+        }
+        const auto& p = c.place;
+        const bool swap = swaps_axes(p.orientation);
+        const auto w = std::llround((swap ? m->second.height : m->second.width) * original.dbu);
+        const auto h = std::llround((swap ? m->second.width : m->second.height) * original.dbu);
+        bodies.push_back({double(p.x), double(p.y), double(p.x + w), double(p.y + h)});
+      }
+      if (bodies.empty()) {
+        *routing_gaps = missing.rectangles;
+      } else {
+        // Only subtract from inferred missing sites. DEF BLOCKAGES, including any
+        // explicit hard rectangle inside a macro, remain authoritative.
+        Floorplan inferred;
+        inferred.blockages.push_back(missing);
+        for (const auto& e : placement_exclusions(inferred, original.die, bodies)) {
+          routing_gaps->push_back(e.rect);
+        }
+      }
+    }
   }
   if (!missing.rectangles.empty()) {
     result.blockages.push_back(std::move(missing));

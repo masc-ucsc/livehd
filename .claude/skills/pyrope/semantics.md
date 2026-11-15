@@ -4,7 +4,7 @@ The working subset of the language needed to write correct code. Every
 construct elaborates to wires, muxes, flops and memories. The full spec lives at
 <https://masc-ucsc.github.io/docs/> (Pyrope chapters; `pyrope/01b-quick_intro/`
 is the condensed tour, `pyrope/15-tbd/` the not-implemented list). The compiler
-is the final judge: check every edit with `lhd` (see `lhd.md`).
+is the final judge. Check each edit with `lhd` using the [CLI reference](../livehd/lhd.md).
 
 ## Ground rules
 

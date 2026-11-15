@@ -93,6 +93,7 @@ struct Constraints {
   float                     max_fanout = 0;
   // Items the constraint reader could not honor; copied into the report so that nothing is dropped silently.
   std::vector<std::string>  unsupported;
+  bool                      has_absolute_setup = false;  // A set_max_delay stays fixed when a clock period changes.
 };
 // Interconnect, from the wire trees of step D. Empty vectors are zero.
 struct Wire_model {
@@ -156,6 +157,8 @@ public:
   Engine(Netlist& netlist, Constraints constraints, Options options = {});
 
   void set_wire(Wire_model wire);
+  [[nodiscard]] const Wire_model& wire() const { return wire_; }
+  [[nodiscard]] const Constraints& constraints() const { return constraints_; }
   // Setup only: late walk, endpoint slacks, criticality. Required times are left rebased (the worst path of
   // each clock and corner has zero slack), which is what criticality is measured on.
   void rank();
@@ -288,6 +291,8 @@ public:
   [[nodiscard]] float                   arc_delay(uint32_t cell, uint32_t arc, size_t corner, unsigned in, unsigned out) const;
   // The worst setup path of the path corner ending at `endpoint` (or at the worst endpoint), start first.
   [[nodiscard]] std::vector<Path_point> worst_path(uint32_t endpoint = no_index) const;
+  [[nodiscard]] bool                               endpoint_path_covers_worst(uint32_t pin) const;
+  [[nodiscard]] std::string                        endpoint_clock(uint32_t pin) const;
   [[nodiscard]] size_t                  bytes() const;
 
 private:

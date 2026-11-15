@@ -76,6 +76,275 @@ TEST(Placement, MacroTrackAlignmentUsesOrientedPinsAndImportedTrackPhase) {
   }
 }
 
+TEST(Placement, PinlessMovableMacroKeepsItsHaloInsideTheCore) {
+  auto [tech, fp] = track_fixture();
+  tech.macros.at("ram").pins.clear();
+  auto macro = track_macro();
+  macro.place.x = 0;
+  std::vector<physical::Component> cells{macro};
+  legalize_macro_tracks(tech, fp, cells, 2, 2, true);
+  EXPECT_EQ(cells[0].place.x, 2);
+  EXPECT_EQ(cells[0].place.y, macro.place.y);
+}
+
+TEST(Placement, MacroTrackAlignmentLeavesLandingRowsAtSignalIOs) {
+  auto [tech, fp] = track_fixture();
+  auto macro = track_macro();
+  macro.place.y = 83;  // the aligned top halo leaves less than one complete row
+  auto quiet = macro;
+  quiet.name = "quiet";
+  quiet.place.x = 80;
+  for (int x : {32, 33, 34, 35}) {
+    fp.terminals.push_back({std::to_string(x), "", "INPUT", x, 100, physical::Orientation::N, physical::Status::FIXED});
+  }
+  fp.terminals.push_back({"VDD", "", "INOUT", 82, 100, physical::Orientation::N, physical::Status::FIXED, {}, "POWER"});
+  std::vector<physical::Component> cells{macro, quiet};
+  auto no_io = fp;
+  no_io.terminals.clear();
+  auto reference = cells;
+  legalize_macro_tracks(tech, no_io, reference, 2, 2, true);
+  legalize_macro_tracks(tech, fp, cells, 2, 2, true);
+  EXPECT_EQ(cells[1].place, reference[1].place);
+  EXPECT_EQ(cells[0].place.x, reference[0].place.x);
+  EXPECT_GE(100 - cells[0].place.y - cells[0].place.height - 2, 30);
+  EXPECT_EQ((cells[0].place.y - reference[0].place.y) % 6, 0);   // routing-track phase
+  EXPECT_EQ((cells[0].place.y - reference[0].place.y) % 10, 0);  // standard-cell row phase
+  auto fixed = reference;
+  fixed[0].place.status = physical::Status::FIXED;
+  legalize_macro_tracks(tech, fp, fixed, 2, 2, true);
+  EXPECT_EQ(fixed[0].place.y, reference[0].place.y);
+  fp.blockages.push_back({false, "", {{0, 30, 60, 80}}});
+  auto blocked = reference;
+  legalize_macro_tracks(tech, fp, blocked, 2, 2, true);
+  EXPECT_EQ(blocked[0].place, reference[0].place);
+}
+
+TEST(Placement, CornerMacroSignalFacesLeaveRoomForBuffersWithoutMovingFixedNeighbors) {
+  auto [tech, fp] = track_fixture();
+  auto& macro = tech.macros.at("ram");
+  macro.pins.clear();
+  macro.pins["right0"] = {"INPUT", "SIGNAL", {{"H", {9, 1, 11, 3}}}};
+  macro.pins["right1"] = {"INPUT", "SIGNAL", {{"H", {9, 7, 11, 9}}}};
+  macro.pins["top"] = {"INPUT", "SIGNAL", {{"V", {5, 11, 7, 13}}}};
+  auto corner = track_macro(), neighbor = track_macro();
+  corner.place.x = 105;
+  corner.place.y = 84;
+  neighbor.name = "neighbor";
+  neighbor.place.x = 89;
+  neighbor.place.y = 84;
+  std::vector<physical::Component> cells{corner, neighbor};
+  legalize_macro_tracks(tech, fp, cells, 2, 2, true);
+  EXPECT_EQ(cells[0].place.x, 69);
+  EXPECT_EQ(cells[0].place.y, corner.place.y);
+  EXPECT_EQ(cells[1].place.x, 53);
+  EXPECT_EQ(cells[1].place.y, neighbor.place.y);
+  // On replay the full channel is already present; the preference must not drift.
+  const auto saved = cells;
+  legalize_macro_tracks(tech, fp, cells, 2, 2, true);
+  EXPECT_EQ(cells, saved);
+
+  // One neighbor needs no vertical metal phase of its own. Preserve its relative phase
+  // to the access channel (12 DBU), even though six DBU would put it on the next site.
+  auto finer_neighbor = neighbor;
+  finer_neighbor.macro = "side";
+  tech.macros["side"] = macro;
+  tech.macros.at("side").pins.erase("top");
+  finer_neighbor.place.x -= 6;
+  cells = {corner, finer_neighbor};
+  legalize_macro_tracks(tech, fp, cells, 2, 2, true);
+  EXPECT_LT(cells[1].place.x, finer_neighbor.place.x);
+  EXPECT_EQ((finer_neighbor.place.x - cells[1].place.x) % 12, 0);
+  neighbor.place.status = physical::Status::FIXED;
+  cells = {corner, neighbor};
+  legalize_macro_tracks(tech, fp, cells, 2, 2, true);
+  EXPECT_EQ(cells[1].place, neighbor.place);
+  EXPECT_EQ(cells[0].place.x, corner.place.x);  // try the other face without leaving a partial x move
+  EXPECT_EQ(cells[0].place.y, 54);
+  macro.pins["top"].use = "POWER";
+  cells = {corner, neighbor};
+  legalize_macro_tracks(tech, fp, cells, 2, 2, true);
+  EXPECT_EQ(cells[0].place, corner.place);  // a PG pin does not create a trapped signal corner
+}
+
+TEST(Placement, DenseSignalFaceLeavesRowsForBuffersAcrossTheBank) {
+  auto [tech, fp] = track_fixture();
+  auto& m = tech.macros.at("ram");
+  m.width = 48;
+  m.pins.clear();
+  const auto pin = [&](int x) {
+    return physical::Pin{"OUTPUT", "SIGNAL", {{"V", {double(x - 1), 0, double(x + 1), 3}}}};
+  };
+  for (int x : {6, 10, 14, 18, 22, 26, 30, 34, 38}) {
+    m.pins.emplace(std::to_string(x), pin(x));
+  }
+  auto bank = track_macro();
+  bank.place = Ann_place(45, 2, 48, 13);
+  bank.place.status = physical::Status::PLACED;
+  std::vector<physical::Component> cells{bank};
+  legalize_macro_tracks(tech, fp, cells, 2, 2, true);
+  EXPECT_EQ(cells[0].place.x, bank.place.x);
+  EXPECT_EQ(cells[0].place.y, 52);  // Three rows of buffer demand plus the two access rows.
+  const auto saved = cells;
+  legalize_macro_tracks(tech, fp, cells, 2, 2, true);
+  EXPECT_EQ(cells, saved);
+  // Distant pin shapes on only one half of the face, and the PG pin on the other half, do not qualify.
+  for (auto& [name, p] : m.pins) {
+    if (std::stoi(name) >= 24) {
+      p.use = "GROUND";
+    }
+  }
+  cells = {bank};
+  legalize_macro_tracks(tech, fp, cells, 2, 2, true);
+  EXPECT_EQ(cells[0].place, bank.place);
+}
+
+TEST(Placement, ContinuousBoundaryBankOpensRowsWithoutMovingAnchors) {
+  auto [tech, fp] = track_fixture();
+  tech.macros.at("ram").pins.clear();  // CTS demand is independent of signal pins on this face.
+  for (const bool top : {false, true}) {
+    std::vector<physical::Component> bank;
+    for (int i = 0; i < 5; ++i) {
+      auto c = track_macro();
+      c.name = "bank" + std::to_string(i);
+      c.place.x = 2 + 15 * i;  // each pair of halos meets exactly
+      c.place.y = top ? 85 : 2;
+      bank.push_back(c);
+    }
+    bank[2].place.status = physical::Status::FIXED;
+    auto trial = bank;
+    legalize_macro_tracks(tech, fp, trial, 2, 2, true);
+    for (int i : {0, 2, 4}) {
+      EXPECT_EQ(trial[i].place, bank[i].place);
+    }
+    for (int i : {1, 3}) {
+      const auto inward = (trial[i].place.y - bank[i].place.y) * (top ? -1 : 1);
+      EXPECT_GE(inward, 20);
+      EXPECT_EQ(inward % 10, 0);
+      EXPECT_EQ(trial[i].place.x, bank[i].place.x);
+    }
+    const auto saved = trial;
+    legalize_macro_tracks(tech, fp, trial, 2, 2, true);
+    EXPECT_EQ(trial, saved);
+
+    // An opening wide enough for a complete row breaks the run into short groups.
+    for (size_t i = 2; i < bank.size(); ++i) {
+      bank[i].place.x += 10;
+    }
+    trial = bank;
+    legalize_macro_tracks(tech, fp, trial, 2, 2, true);
+    EXPECT_EQ(trial, bank);
+  }
+}
+
+TEST(Placement, DeepBoundaryColumnKeepsAnEntranceToItsInnerBanks) {
+  auto [tech, fp] = track_fixture();
+  auto& ram = tech.macros.at("ram");
+  ram.pins.clear();
+  for (const bool left : {false, true}) {
+    for (int width : {11, 32}) {
+      ram.width = width;
+      std::vector<physical::Component> bank;
+      for (int i = 0; i < 5; ++i) {
+        auto c = track_macro();
+        c.name = "bank" + std::to_string(i);
+        c.place.width = width;
+        c.place.x = left ? 3 : 120 - width - 3;
+        c.place.y = 2 + 17 * i;
+        bank.push_back(c);
+      }
+      bank[2].place.status = physical::Status::FIXED;
+      auto trial = bank;
+      legalize_macro_tracks(tech, fp, trial, 2, 2, true);
+      if (width == 11) {
+        EXPECT_EQ(trial, bank);  // Cells can approach these shallow macros along the interior rows.
+        continue;
+      }
+      for (int i : {0, 2, 4}) {
+        EXPECT_EQ(trial[i].place, bank[i].place);
+      }
+      for (int i : {1, 3}) {
+        const auto inward = (trial[i].place.x - bank[i].place.x) * (left ? 1 : -1);
+        EXPECT_GE(inward, 39);  // Keep row ends for both nearby cells and post-CTS buffers.
+        EXPECT_EQ(inward % 6, 0);  // Keep the horizontal site phase.
+        EXPECT_EQ(trial[i].place.y, bank[i].place.y);
+      }
+      const auto saved = trial;
+      legalize_macro_tracks(tech, fp, trial, 2, 2, true);
+      EXPECT_EQ(trial, saved);
+    }
+  }
+}
+
+TEST(Placement, InteriorOfTallCoreBankKeepsAnAccessibleSideChannel) {
+  auto [tech, fp] = track_fixture();
+  auto& ram       = tech.macros.at("ram");
+  ram.pins.clear();
+  ram.width  = 32;
+  ram.height = 26;
+  fp.die.yh  = 300;
+  for (int r = 10; r < 30; ++r) {
+    fp.rows.push_back(
+        {"r" + std::to_string(r), "grid", 0, r * 10, 20, 6, r % 2 ? physical::Orientation::FS : physical::Orientation::N});
+  }
+  std::vector<physical::Component> bank;
+  for (int i = 0; i < 3; ++i) {
+    auto c         = track_macro();
+    c.name         = "bank" + std::to_string(i);
+    c.place.width  = 32;
+    c.place.height = 26;
+    c.place.x      = 85;
+    c.place.y      = 82 + 31 * i;
+    bank.push_back(c);
+  }
+  // The three halos cover 92 of 300 DBU. The middle SRAM is 46 DBU from either
+  // entrance and 36 DBU deep; only one DBU remains for cells behind its halo.
+  auto trial = bank;
+  legalize_macro_tracks(tech, fp, trial, 2, 2, true);
+  EXPECT_EQ(trial.front().place, bank.front().place);
+  EXPECT_EQ(trial.back().place, bank.back().place);
+  EXPECT_GT(bank[1].place.x - trial[1].place.x, 10);
+  EXPECT_EQ((bank[1].place.x - trial[1].place.x) % 6, 0);
+  EXPECT_EQ(trial[1].place.y, bank[1].place.y);
+
+  // With a full row between the banks, all three already have an entrance.
+  bank.back().place.y += 10;
+  trial                = bank;
+  legalize_macro_tracks(tech, fp, trial, 2, 2, true);
+  EXPECT_EQ(trial, bank);
+}
+
+TEST(Placement, WideSideHaloNeverClosesAnExistingChannel) {
+  auto [tech, fp] = track_fixture();
+  fp.die.xh = 360;
+  for (auto& row : fp.rows) {
+    row.count = 60;
+  }
+  tech.macros.at("ram").pins.clear();
+  tech.macros.at("ram").width = 40;
+  const int64_t halo = 36;
+  for (bool left : {false, true}) {
+    std::vector<physical::Component> bank;
+    for (int i = 0; i < 5; ++i) {
+      auto c = track_macro();
+      c.name = "bank" + std::to_string(i);
+      c.place.width = 40;
+      c.place.x = left ? 66 : 360 - 40 - 66;  // 30 DBU free beyond the halo, greater than two rows.
+      c.place.y = 2 + 17 * i;
+      bank.push_back(c);
+    }
+    auto trial = bank;
+    legalize_macro_tracks(tech, fp, trial, halo, 2, true);
+    for (int i : {1, 2, 3}) {
+      const auto free = (left ? trial[i].place.x : 360 - trial[i].place.x - 40) - halo;
+      EXPECT_GE(free, halo);
+      EXPECT_EQ((free - 30) % 6, 0);
+    }
+    const auto saved = trial;
+    legalize_macro_tracks(tech, fp, trial, halo, 2, true);
+    EXPECT_EQ(trial, saved);
+  }
+}
+
 // Track alignment never leaves two macro bodies closer than the macro channel, even with zero halos.
 TEST(Placement, MacroTrackAlignmentKeepsTheMacroChannel) {
   const auto [tech, fp] = track_fixture();
@@ -369,6 +638,43 @@ TEST(Placement, NativeMacroLegalityUsesExactRectanglesWithOffRowOrigins) {
 }  // namespace livehd::placement
 
 namespace livehd::placement {
+TEST(Placement, CompactStripPrefersFullWidthPinAccessOverAGreedySliver) {
+  auto [tech, fp] = track_fixture();
+  auto& ram = tech.macros.at("ram");
+  ram.pins.clear();
+  ram.pins["A"] = {"INPUT", "SIGNAL", {{"V", {0, 0, 4, 4}}}};
+  tech.layers.at("V").width = 4;
+  // The preferred track phase is x=1 mod 4. Moving just the left macro to that phase would violate its
+  // channel; its current origin still admits a track center near the edge. Moving the neighbor makes room.
+  auto left = track_macro(), right = track_macro();
+  left.place.x = 4;
+  right.name = "neighbor";
+  right.place.x = 19;
+  std::vector<physical::Component> cells{left, right};
+  legalize_macro_tracks(tech, fp, cells, 2, 2, true);
+  EXPECT_EQ((cells[0].place.x - 1) % 4, 0);
+  EXPECT_EQ((cells[1].place.x - 1) % 4, 0);
+  EXPECT_GE(cells[1].place.x - cells[0].place.x - cells[0].place.width, 4);
+  // The same joint move would enter a hard placement blockage. A soft one may release its sites for legalization.
+  fp.blockages.push_back({false, "", {{15, 0, 16, 100}}});
+  cells = {left, right};
+  legalize_macro_tracks(tech, fp, cells, 2, 2, true);
+  EXPECT_EQ(cells[0].place.x, left.place.x);
+  fp.blockages.front().soft = true;
+  cells = {left, right};
+  legalize_macro_tracks(tech, fp, cells, 2, 2, true);
+  EXPECT_EQ((cells[0].place.x - 1) % 4, 0);
+  fp.blockages.clear();
+  // A fixed neighbor takes precedence over the full-width preference.
+  right.macro = "cell";
+  right.place.status = physical::Status::FIXED;
+  right.place.x = 17;
+  cells = {left, right};
+  legalize_macro_tracks(tech, fp, cells, 2, 2, true);
+  EXPECT_EQ(cells[1].place.x, right.place.x);
+  EXPECT_EQ(cells[0].place.x, left.place.x);
+}
+
 TEST(Placement, CompactMacroStripMovesCoherentlyOntoTracksOrFailsAtomically) {
   auto [tech, fp] = track_fixture();
   fp.rows.resize(2);

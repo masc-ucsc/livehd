@@ -1260,6 +1260,19 @@ std::vector<Path_point> Engine::worst_path(uint32_t endpoint) const {
   return path;
 }
 
+bool Engine::endpoint_path_covers_worst(uint32_t pin) const {
+  auto id = endpoint_of(pin);
+  return id != no_endpoint && endpoint_path_slack_[id] == endpoint_slack_[id];
+}
+
+std::string Engine::endpoint_clock(uint32_t pin) const {
+  auto id = endpoint_of(pin);
+  if (id == no_endpoint || endpoints_[id].unclocked || endpoints_[id].clock >= constraints_.clocks.size()) {
+    return {};
+  }
+  return constraints_.clocks[endpoints_[id].clock].name;
+}
+
 size_t Engine::bytes() const {
   const auto of
       = [](const auto& vector) { return vector.capacity() * sizeof(typename std::decay_t<decltype(vector)>::value_type); };

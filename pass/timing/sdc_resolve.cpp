@@ -63,6 +63,7 @@ class Resolver {
 public:
   Resolver(const Sdc& sdc, const Netlist& netlist, const Design_names* names) : sdc_(sdc), netlist_(netlist), types_(netlist.types()), names_(names) {
     out_.unsupported = sdc.unsupported;
+    out_.has_absolute_setup = !sdc.max_delays.empty();
     noted_.insert(sdc.unsupported.begin(), sdc.unsupported.end());
     for (const auto& port : netlist_.ports()) {
       ports_.emplace(port.name, &port);

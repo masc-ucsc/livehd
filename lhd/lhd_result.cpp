@@ -763,7 +763,7 @@ std::string compute_run_id(const Options& opts) {
   if (opts.metadata) {
     rapidjson::Document records;
     const auto          text = opts.metadata->json();
-    records.Parse(text.c_str());
+    records.Parse<rapidjson::kParseFullPrecisionFlag>(text.c_str());
     std::vector<std::string> canonical;
     for (const auto& record : records.GetArray()) {
       canonical.push_back(livehd::metadata::canonical(record));

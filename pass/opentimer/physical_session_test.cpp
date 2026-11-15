@@ -2295,6 +2295,32 @@ TEST_F(PhysicalSession, IntegratedPreroutePublishesOnlyAcceptedGeometryAndRestor
     EXPECT_TRUE(input.floorplan.nets.front().wires.empty());
     EXPECT_EQ(bt.mark(), 0);
     EXPECT_NEAR(bt.wns(), original_wns, 1e-6);
+    // Honor the same runtime policy even when this net has just proven eligible for an accepted repeater tree.
+    auto frozen_config                            = stage_config;
+    frozen_config.runtime_policy                  = std::make_shared<pl::Mutation_policy>();
+    frozen_config.runtime_policy->no_buffer_edits = true;
+    Insertion_probe frozen_probe(bt);
+    bo.timing.deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    const auto frozen  = pl::detail::preroute_stage(input,
+                                                   buffered_tech,
+                                                   brc,
+                                                    {
+                                                       {0, 0, 1}
+    },
+                                                   frozen_probe,
+                                                   frozen_config,
+                                                   bo,
+                                                   before);
+    EXPECT_EQ(frozen_probe.additions, 0);
+    EXPECT_EQ(frozen.repeater_attempted, 0);
+    EXPECT_EQ(frozen.repeater_cells, 0);
+    EXPECT_EQ(frozen.placed.graph, input.graph);
+    EXPECT_EQ(frozen.placed.floorplan.components, input.floorplan.components);
+    ASSERT_EQ(frozen.records.size(), 1);
+    EXPECT_EQ(frozen.records.front().net, input.floorplan.nets.front().name);
+    EXPECT_TRUE(frozen.records.front().attempted) << frozen.records.front().reason;
+    EXPECT_EQ(bt.mark(), 0);
+    EXPECT_NEAR(bt.wns(), original_wns, 1e-6);
     // The final additions install the accepted tree in the stage journal.
     // Fail after its first cell, rather than during a proposal check.
     Insertion_probe broken(bt);

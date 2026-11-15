@@ -322,6 +322,23 @@ END )" << name
     ++rows;
   }
   EXPECT_EQ(rows, 3u);
+  // The same live GP still ranks timing while buffer generation is frozen.
+  auto frozen_settings = std::make_shared<b::Checkpoint_settings>(f.settings);
+  unsigned frozen_calls = 0;
+  frozen_settings->generate = [&](const b::Checkpoint_input& input) {
+    ++frozen_calls;
+    return f.problem(input.locations);
+  };
+  o.native_gp_buffering = frozen_settings;
+  o.runtime_policy = std::make_shared<livehd::placement::Mutation_policy>();
+  o.runtime_policy->no_buffer_edits = true;
+  o.output_dir = (root / "frozen").string();
+  hhds::GraphLibrary frozen_owner;
+  const auto frozen = livehd::placement::place(*graph, frozen_owner, o);
+  EXPECT_EQ(frozen_calls, 0u);
+  EXPECT_EQ(frozen.floorplan.components.size(), result.floorplan.components.size());
+  EXPECT_TRUE(std::filesystem::is_regular_file(root / "frozen/native_gp_startup.json"));
+  o.runtime_policy.reset();
   auto bad      = std::make_shared<b::Checkpoint_settings>(f.settings);
   bad->generate = [&](const b::Checkpoint_input& input) {
     auto problem                    = f.problem(input.locations);

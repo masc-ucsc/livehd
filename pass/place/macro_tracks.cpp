@@ -36,6 +36,7 @@ struct Profile {
   std::vector<Pin>   pins;
   int64_t            period[2] = {1, 1};
   std::vector<Phase> phases[2];
+  unsigned           min_misses[2] = {};
 };
 // Line center must be inside the pin. Full-width landing is preferred when the
 // abstract permits it; narrower abstracts still admit an interior connection.
@@ -151,6 +152,9 @@ Profile profile(const ph::Technology& tech, const ph::Floorplan& fp, const ph::C
         return !pin.mixed && pin.access.front().x == (axis == 0) && std::none_of(pin.access.begin(), pin.access.end(), served);
       });
       --axis;  // re-derive this axis' phases (and coverage) from the kept pins
+    } else {
+      p.min_misses[axis] = std::min_element(p.phases[axis].begin(), p.phases[axis].end(),
+                                           [](const auto& a, const auto& b) { return a.misses < b.misses; })->misses;
     }
   }
   return p;
@@ -166,6 +170,12 @@ std::optional<std::string> inaccessible(const Profile& p, int64_t x, int64_t y) 
 struct Box {
   int64_t xl, yl, xh, yh;
 };
+bool excluded(const ph::Floorplan& layout, const Box& b) {
+  const ph::Rect rect{double(b.xl), double(b.yl), double(b.xh), double(b.yh)};
+  return std::ranges::any_of(layout.blockages, [&](const auto& block) {
+    return !block.soft && std::ranges::any_of(block.rectangles, [&](const auto& r) { return r.overlaps(rect); });
+  });
+}
 // The power-grid strap lattice a movable macro's edges must respect along each axis (optional).
 // Rigid track groups: per proxy master, every member body as {offset from the proxy origin, size} per axis.
 using Member_spans = std::map<std::string, std::array<std::vector<std::array<int64_t, 2>>, 2>>;
@@ -383,11 +393,8 @@ bool coherent_macro_tracks(const ph::Technology& tech, const ph::Floorplan& layo
       if (fixed(i)) {
         return old(i) >= lo && old(i) <= hi ? std::optional<int64_t>{old(i)} : std::nullopt;
       }
-      const auto& p           = *profiles[i];
-      unsigned    best_misses = std::numeric_limits<unsigned>::max();
-      for (const auto& phase : p.phases[axis]) {
-        best_misses = std::min(best_misses, phase.misses);
-      }
+      const auto& p          = *profiles[i];
+      const auto best_misses = p.min_misses[axis];
       std::optional<int64_t> best;
       for (const auto& phase : p.phases[axis]) {
         if (phase.misses != best_misses) {
@@ -469,6 +476,7 @@ bool coherent_macro_tracks(const ph::Technology& tech, const ph::Floorplan& layo
                && !inaccessible(*profiles[i], cells[i].place.x, cells[i].place.y)
                && pdn.ok(0, cells[i].place.x, cells[i].place.width, cells[i].macro)
                && pdn.ok(1, cells[i].place.y, cells[i].place.height, cells[i].macro);
+      valid &= !excluded(layout, box(tech, cells[i], 0, 0));
     }
     for (size_t j = 0; j < i; ++j) {
       if (!fixed(i) || !fixed(j)) {
@@ -582,7 +590,7 @@ std::function<bool(const std::vector<ph::Component>&)> make_rigid_macro_track_ch
 
 void legalize_macro_tracks_impl(const ph::Technology& tech, const ph::Floorplan& layout, std::vector<ph::Component>& cells,
                                 const Clearance& k, bool move_macros, bool repack, const Pg_macro_alignment* alignment,
-                                const Member_spans* members = nullptr) {
+                                const Member_spans* members = nullptr, bool* pin_fallback = nullptr) {
   const auto halo_x = k.hx, halo_y = k.hy;
   if (layout.rows.empty()) {
     return;
@@ -627,6 +635,13 @@ void legalize_macro_tracks_impl(const ph::Technology& tech, const ph::Floorplan&
         && !(pdn.ok(0, c.place.x, c.place.width, c.macro) && pdn.ok(1, c.place.y, c.place.height, c.macro))) {
       return true;  // off the power-grid strap lattice
     }
+    const auto bounds = box(tech, c, halo_x, halo_y);
+    if (!fixed(c) && (bounds.xl < core.xl || bounds.yl < core.yl || bounds.xh > core.xh || bounds.yh > core.yh)) {
+      return true;
+    }
+    if (!fixed(c) && excluded(layout, box(tech, c, 0, 0))) {
+      return true;
+    }
     // A pinless body on a unit grid has no phase to correct; it still moves when it violates a clearance.
     return !fixed(c) && std::any_of(blockers.begin(), blockers.end(), [&](size_t j) {
       return &cells[j] != &c && conflicts(tech, c, cells[j], k);
@@ -660,18 +675,30 @@ void legalize_macro_tracks_impl(const ph::Technology& tech, const ph::Floorplan&
     // the bounded nearest search remains the common path.
     std::vector<int64_t> x_edges{core.xl + halo_x, core.xh - c.place.width - halo_x};
     std::vector<int64_t> y_edges{core.yl + halo_y, core.yh - c.place.height - halo_y};
-    for (size_t j : blockers) {
-      if (j == i || (j > i && repacked[j])) {
-        continue;
-      }
-      const auto& o       = cells[j].place;
-      const auto [sx, sy] = spacing(tech, c, cells[j], k);
-      x_edges.push_back(o.x - sx - c.place.width);
-      x_edges.push_back(o.x + o.width + sx);
-      y_edges.push_back(o.y - sy - c.place.height);
-      y_edges.push_back(o.y + o.height + sy);
-    }
     for (int pass = 0; pass < 2 && !placed; ++pass) {
+      if (pass) {
+        for (const auto& block : layout.blockages) {
+          if (!block.soft) {
+            for (const auto& r : block.rectangles) {
+              x_edges.push_back(std::floor(r.xl) - c.place.width);
+              x_edges.push_back(std::ceil(r.xh));
+              y_edges.push_back(std::floor(r.yl) - c.place.height);
+              y_edges.push_back(std::ceil(r.yh));
+            }
+          }
+        }
+        for (size_t j : blockers) {
+          if (j == i || (j > i && repacked[j])) {
+            continue;
+          }
+          const auto& o       = cells[j].place;
+          const auto [sx, sy] = spacing(tech, c, cells[j], k);
+          x_edges.push_back(o.x - sx - c.place.width);
+          x_edges.push_back(o.x + o.width + sx);
+          y_edges.push_back(o.y - sy - c.place.height);
+          y_edges.push_back(o.y + o.height + sy);
+        }
+      }
       const auto xs = candidates(p,
                                  0,
                                  original.x,
@@ -718,6 +745,9 @@ void legalize_macro_tracks_impl(const ph::Technology& tech, const ph::Floorplan&
         }
         c.place.x    = candidate.x;
         c.place.y    = candidate.y;
+        if (excluded(layout, box(tech, c, 0, 0))) {
+          continue;
+        }
         bool blocked = false;
         for (size_t j : blockers) {
           if (j == i || (j > i && repacked[j])) {
@@ -729,6 +759,10 @@ void legalize_macro_tracks_impl(const ph::Technology& tech, const ph::Floorplan&
           }
         }
         if (!blocked) {
+          if (pin_fallback && candidate.misses > p.min_misses[0] + p.min_misses[1]
+              && std::ranges::none_of(p.pins, [](const auto& pin) { return pin.mixed; })) {
+            *pin_fallback = true;
+          }
           placed = true;
           break;
         }
@@ -751,7 +785,16 @@ void legalize_macro_tracks_with(const ph::Technology& tech, const ph::Floorplan&
     if (move_macros) {
       legalize_macro_tracks_impl(tech, layout, cells, k, false, false, nullptr);
     }
-    legalize_macro_tracks_impl(tech, layout, cells, k, move_macros, false, pdn, members);
+    bool pin_fallback = false;
+    legalize_macro_tracks_impl(tech, layout, cells, k, move_macros, false, pdn, members, &pin_fallback);
+    if (pin_fallback) {
+      // A greedy move can strand a neighbor with only a sliver of signal-pin access. Try translating the
+      // compact strip together onto its best track phases. Keep the proven greedy result if it cannot fit.
+      auto trial = cells;
+      if (coherent_macro_tracks(tech, layout, trial, k, pdn, members)) {
+        cells = std::move(trial);
+      }
+    }
   } catch (const std::runtime_error& failure) {
     cells = original;
     if (!move_macros || !std::string(failure.what()).starts_with("no legal macro routing-track alignment near ")) {
@@ -772,9 +815,351 @@ void legalize_macro_tracks_with(const ph::Technology& tech, const ph::Floorplan&
     }
   }
 }
+// Open one macro face without breaking a neighbor's halo. Displacement travels only inward, on
+// the affected macro's existing track and site/row phase. Check the whole proposal before writing.
+template <typename Profile_of>
+bool shift_pin_channel(const ph::Technology& tech, const ph::Floorplan& layout, std::vector<ph::Component>& cells,
+                       size_t root, int side, int64_t target_delta, int64_t pitch, const Box& core, const Clearance& k,
+                       const Pdn_check& pdn, Profile_of profile_of) {
+  const bool x = side < 2, increasing = side % 2 == 0;
+  const auto axis = x ? 0 : 1;
+  const auto pos = [&](size_t i) { return x ? cells[i].place.x : cells[i].place.y; };
+  const auto size = [&](size_t i) { return x ? cells[i].place.width : cells[i].place.height; };
+  std::vector<size_t> order;
+  for (size_t i = 0; i < cells.size(); ++i) {
+    if (is_macro(tech, cells[i]) || cells[i].place.status == ph::Status::FIXED || cells[i].place.status == ph::Status::LOCKED) {
+      order.push_back(i);
+    }
+  }
+  std::ranges::sort(order, [&](size_t i, size_t j) { return increasing ? pos(i) < pos(j) : pos(i) > pos(j); });
+  std::vector<int64_t> shift(cells.size());
+  shift[root] = target_delta;
+  const auto channel_period = std::lcm(profile_of(cells[root]).period[axis], pitch);
+  for (size_t i : order) {
+    if (!shift[i]) {
+      continue;
+    }
+    const auto& c = cells[i];
+    if (!is_macro(tech, c) || c.place.status != ph::Status::PLACED) {
+      return false;
+    }
+    const auto& p = profile_of(c);
+    // Preserve the relative pin/row phase of the channel as well as each displaced macro's own phase.
+    // A neighbor with a finer routing pitch must not consume a fractional channel period.
+    const auto step = std::lcm(channel_period, p.period[axis]);
+    shift[i] = (shift[i] + step - 1) / step * step;
+    auto trial = c;
+    (x ? trial.place.x : trial.place.y) += increasing ? shift[i] : -shift[i];
+    const auto b = box(tech, trial, k.hx, k.hy);
+    if (b.xl < core.xl || b.xh > core.xh || b.yl < core.yl || b.yh > core.yh || excluded(layout, b)
+        || inaccessible(p, trial.place.x, trial.place.y)
+        || !pdn.ok(axis, x ? trial.place.x : trial.place.y, size(i), c.macro)) {
+      return false;
+    }
+    for (size_t j : order) {
+      if (j == i) {
+        continue;
+      }
+      const auto& a = c.place;
+      const auto& d = cells[j].place;
+      const auto [sx, sy] = spacing(tech, c, cells[j], k);
+      if (x ? (a.y >= d.y + d.height + sy || d.y >= a.y + a.height + sy)
+            : (a.x >= d.x + d.width + sx || d.x >= a.x + a.width + sx)) {
+        continue;
+      }
+      const bool ahead = increasing ? pos(j) >= pos(i) + size(i) : pos(j) + size(j) <= pos(i);
+      if (ahead) {
+        const auto gap = increasing ? pos(j) - pos(i) - size(i) : pos(i) - pos(j) - size(j);
+        shift[j] = std::max(shift[j], shift[i] + (x ? sx : sy) - gap);
+      } else if (!(increasing ? pos(j) + size(j) <= pos(i) : pos(j) >= pos(i) + size(i))) {
+        return false;  // no separable starting order on this axis
+      }
+    }
+  }
+  for (size_t i : order) {
+    (x ? cells[i].place.x : cells[i].place.y) += increasing ? shift[i] : -shift[i];
+  }
+  return true;
+}
+
+// A long bank can strand cells behind its middle even when the pins face inward.
+// A horizontal bank needs actual rows. At a side boundary, a shallow bank can be
+// reached along the rows from the other side; a deep bank may need its own strip.
+template <typename Profile_of>
+void open_boundary_bank(const ph::Technology& tech, const ph::Floorplan& layout, std::vector<ph::Component>& cells,
+                        int side, int64_t sw, int64_t rh, const Box& core, const Clearance& k, const Pdn_check& pdn, Profile_of profile_of) {
+  const bool vertical = side < 2;
+  const auto edge_gap = [&](const Box& b) {
+    return vertical ? (side == 0 ? b.xl - core.xl : core.xh - b.xh) : (side == 2 ? b.yl - core.yl : core.yh - b.yh);
+  };
+  // Leave at least one row's worth of clearance; a sliver narrower than its
+  // placement halo on a vertical face may have no surviving row fragments.
+  const auto usable_width = vertical ? std::max(rh, k.hx) : rh;
+  const auto length = vertical ? core.yh - core.yl : core.xh - core.xl;
+  struct Span {
+    int64_t left, right;
+    size_t  cell;
+  };
+  std::vector<Span> edges;
+  for (size_t i = 0; i < cells.size(); ++i) {
+    const auto& c = cells[i];
+    if ((c.place.status != ph::Status::PLACED && c.place.status != ph::Status::FIXED && c.place.status != ph::Status::LOCKED)
+        || !ph::hard_macro(tech.macros.at(c.macro))) {
+      continue;
+    }
+    const auto b = box(tech, c, k.hx, k.hy);
+    if (const auto gap = edge_gap(b); gap >= 0 && gap < usable_width) {
+      edges.push_back({vertical ? b.yl : b.xl, vertical ? b.yh : b.xh, i});
+    }
+  }
+  std::ranges::sort(edges, [](const Span& a, const Span& b) { return std::tie(a.left, a.cell) < std::tie(b.left, b.cell); });
+  for (size_t first = 0; first < edges.size();) {
+    const auto left = edges[first].left;
+    auto right = edges[first].right;
+    size_t end = first + 1;
+    while (end < edges.size() && edges[end].left - right < rh) {
+      right = std::max(right, edges[end++].right);
+    }
+    const auto span = right - left;
+    if (end - first >= 3) {
+      for (size_t j = first + 1; j + 1 < end; ++j) {
+        const auto& [xl, xh, i] = edges[j];
+        const auto center = xl + (xh - xl) / 2;
+        // Approaching a side bank from the open interior runs along a row. Avoid displacing
+        // a shallow bank when its cell rows can already be reached from that side.
+        // On a tall core, a bank can cut off row ends well before it covers half
+        // the long edge. Compare the distance to an entrance with the bank depth.
+        const auto depth = cells[i].place.width + 2 * k.hx;
+        const auto to_entrance = std::min(center - left, right - center);
+        if ((span < length / 2 && (!vertical || span < (core.xh - core.xl) / 2 || to_entrance < depth))
+            || (vertical && depth < (core.xh - core.xl) / 4)
+            || cells[i].place.status != ph::Status::PLACED || to_entrance < span / 4) {
+          continue;
+        }
+        // A preceding shift can already have moved this macro. Round the
+        // desired strip to whole rows; shift_pin_channel enforces all lattices.
+        const auto gap = edge_gap(box(tech, cells[i], k.hx, k.hy));
+        if (gap >= 0 && gap < usable_width) {
+          const auto rows = std::max<int64_t>(2, std::ceil(std::sqrt(double(xh - xl) / rh)));
+          // In a deep side pocket the row ends must serve both the initial cells
+          // and the buffers added after timing repair. Vertical displacement from
+          // a horizontal bank instead opens complete rows toward the interior.
+          const auto target = std::max(usable_width, (vertical ? 2 : 1) * rows * rh);
+          shift_pin_channel(tech, layout, cells, i, side, target - gap, vertical ? sw : rh, core, k, pdn, profile_of);
+        }
+      }
+    }
+    first = end;
+  }
+}
+
+// A macro halo can fit inside the core yet consume the last usable row in front of a bank of IO pins.
+// Leave local space for downstream buffer insertion. This is a placement preference: never displace a
+// fixed macro, break the admitted pin/strap phase or introduce an overlap to make room for future cells.
+void open_io_channels(const ph::Technology& tech, const ph::Floorplan& layout, std::vector<ph::Component>& cells,
+                      const Clearance& k, const Pg_macro_alignment* alignment, const Member_spans* members) {
+  if (layout.rows.empty() || layout.die.empty()) {
+    return;
+  }
+  const auto& row = layout.rows.front();
+  const int64_t sw = row.step, rh = std::llround(tech.sites.at(row.site).height * tech.dbu);
+  if (sw <= 0 || rh <= 0) {
+    return;
+  }
+  Box core{row.x, row.y, row.x, row.y};
+  for (const auto& r : layout.rows) {
+    core.xl = std::min(core.xl, r.x);
+    core.yl = std::min(core.yl, r.y);
+    core.xh = std::max(core.xh, r.x + r.count * r.step);
+    core.yh = std::max(core.yh, r.y + rh);
+  }
+  // Only perimeter pins (on or outside the row core). Choose the nearest die edge at corners.
+  std::array<std::vector<int64_t>, 4> pins;
+  for (const auto& t : layout.terminals) {
+    if (t.status == ph::Status::UNPLACED || t.use == "POWER" || t.use == "GROUND") {
+      continue;
+    }
+    const std::array<bool, 4> edge{t.x <= core.xl, t.x >= core.xh, t.y <= core.yl, t.y >= core.yh};
+    const std::array<double, 4> dist{std::abs(t.x - layout.die.xl), std::abs(t.x - layout.die.xh),
+                                     std::abs(t.y - layout.die.yl), std::abs(t.y - layout.die.yh)};
+    int side = -1;
+    for (int j = 0; j < 4; ++j) {
+      if (edge[j] && (side < 0 || dist[j] < dist[side])) {
+        side = j;
+      }
+    }
+    if (side >= 0) {
+      pins[side].push_back(side < 2 ? t.y : t.x);
+    }
+  }
+  for (auto& side : pins) {
+    std::ranges::sort(side);
+  }
+  const Pdn_check pdn{alignment, core, members};
+  std::map<std::pair<std::string, ph::Orientation>, Profile> cache;
+  const auto profile_of = [&](const auto& c) -> const Profile& {
+    const auto key = std::pair{c.macro, c.place.orientation};
+    if (!cache.contains(key)) {
+      cache.emplace(key, profile(tech, layout, c));
+    }
+    return cache.at(key);
+  };
+  for (auto& c : cells) {
+    if (c.place.status != ph::Status::PLACED || !is_macro(tech, c)) {
+      continue;
+    }
+    for (int side = 0; side < 4; ++side) {
+      const bool horizontal = side < 2, low = side % 2 == 0;
+      const auto b = box(tech, c, k.hx, k.hy);
+      const int64_t gap = horizontal ? (low ? b.xl - core.xl : core.xh - b.xh) : (low ? b.yl - core.yl : core.yh - b.yh);
+      const int64_t pitch = horizontal ? sw : rh;
+      if (gap >= pitch || gap < 0) {
+        continue;
+      }
+      const auto lo = horizontal ? c.place.y : c.place.x;
+      const auto hi = lo + (horizontal ? c.place.height : c.place.width);
+      const auto count = std::lower_bound(pins[side].begin(), pins[side].end(), hi)
+                         - std::lower_bound(pins[side].begin(), pins[side].end(), lo);
+      if (!count) {
+        continue;
+      }
+      const auto& p = profile_of(c);
+      // Keep both the signal-pin track phase and the row/site phase. A fraction of a row does not
+      // supply a new landing row, and it changes which rows are cut by the macro at the opposite edge.
+      const int64_t period = std::lcm(p.period[horizontal ? 0 : 1], pitch);
+      const int64_t target = (1 + int64_t(std::ceil(std::sqrt(double(count))))) * pitch;
+      const int64_t delta = (target - gap + period - 1) / period * period;
+      auto trial = c;
+      (horizontal ? trial.place.x : trial.place.y) += low ? delta : -delta;
+      const auto area = box(tech, trial, k.hx, k.hy);
+      if (area.xl < core.xl || area.yl < core.yl || area.xh > core.xh || area.yh > core.yh
+          || inaccessible(p, trial.place.x, trial.place.y)
+          || !pdn.ok(horizontal ? 0 : 1, horizontal ? trial.place.x : trial.place.y,
+                     horizontal ? trial.place.width : trial.place.height, trial.macro)) {
+        continue;
+      }
+      if (!excluded(layout, area) && std::ranges::none_of(cells, [&](const auto& o) {
+            return &o != &c && (is_macro(tech, o) || o.place.status == ph::Status::FIXED || o.place.status == ph::Status::LOCKED)
+                   && conflicts(tech, trial, o, k);
+          })) {
+        c.place = trial.place;
+      }
+    }
+  }
+  // Remember only dense outward-facing pin banks. Global coordinates and footprints are still
+  // taken from the live cells when applying the preference, after opening corner channels.
+  std::vector<std::pair<size_t, std::array<size_t, 2>>> row_banks;
+  // A corner macro with externally facing signal pins on both edges can strand its input buffers
+  // even when there are no die IOs on either edge. Reserve one service strip, starting with the
+  // face carrying the most pins. Use row heights as the physical depth, including on a vertical face.
+  for (size_t i = 0; i < cells.size(); ++i) {
+    const auto& c = cells[i];
+    if (c.place.status != ph::Status::PLACED || !is_macro(tech, c)) {
+      continue;
+    }
+    const auto b = box(tech, c, k.hx, k.hy);
+    const std::array<int64_t, 4> gaps{b.xl - core.xl, core.xh - b.xh, b.yl - core.yl, core.yh - b.yh};
+    if (std::min(gaps[2], gaps[3]) >= rh) {
+      continue;
+    }
+    const auto& m = tech.macros.at(c.macro);
+    std::array<size_t, 4> count{};
+    std::array<bool, 4> near_corner{};
+    std::array<std::array<bool, 2>, 2> halves{};
+    const int64_t dx_corner = gaps[0] < gaps[1] ? 0 : c.place.width;
+    const int64_t dy_corner = gaps[2] < gaps[3] ? 0 : c.place.height;
+    for (const auto& [name, pin] : m.pins) {
+      if (pin.use == "POWER" || pin.use == "GROUND") {
+        continue;
+      }
+      std::array<bool, 4> touched{};
+      for (const auto& shape : pin.shapes) {
+        const auto layer = tech.layers.find(shape.layer);
+        if (layer == tech.layers.end() || (layer->second.direction != "HORIZONTAL" && layer->second.direction != "VERTICAL")) {
+          continue;
+        }
+        const auto r = ph::orient_rect(shape.rect.translated(m.origin_x, m.origin_y), m.width, m.height, c.place.orientation);
+        const std::array<double, 4> distances{r.xl, double(c.place.width) / tech.dbu - r.xh,
+                                              r.yl, double(c.place.height) / tech.dbu - r.yh};
+        for (int side = 0; side < 4; ++side) {
+          if (std::abs(distances[side]) * tech.dbu <= .5) {
+            touched[side] = true;
+            // A far-away pin on a long face does not concentrate buffer demand at the trapped corner.
+            const auto along = side < 2 ? (r.yl + r.yh) / 2 : (r.xl + r.xh) / 2;
+            if (side >= 2 && along * tech.dbu >= .25 * c.place.width && along * tech.dbu <= .75 * c.place.width) {
+              halves[side - 2][along * tech.dbu >= .5 * c.place.width] = true;
+            }
+            const auto reach = side < 2 ? std::max(k.hy, rh) : std::max(k.hx, sw);
+            near_corner[side] |= std::abs(along * tech.dbu - (side < 2 ? dy_corner : dx_corner)) <= reach;
+          }
+        }
+      }
+      for (int side = 0; side < 4; ++side) {
+        count[side] += touched[side] && gaps[side] >= 0 && gaps[side] < rh;
+      }
+    }
+    std::array<size_t, 2> bank{};
+    for (int side = 2; side < 4; ++side) {
+      // Is the middle of the face populated on both sides of its center, at least one signal
+      // per halo or row height on average? Isolated corner pins do not need a whole row strip.
+      if (halves[side - 2][0] && halves[side - 2][1]
+          && double(count[side]) * std::max(k.hx, rh) >= c.place.width) {
+        bank[side - 2] = count[side];
+      }
+    }
+    if (bank[0] || bank[1]) {
+      row_banks.emplace_back(i, bank);
+    }
+    for (int side = 0; side < 4; ++side) {
+      if (!near_corner[side]) {
+        count[side] = 0;
+      }
+    }
+    if (!(count[0] + count[1]) || !(count[2] + count[3])) {
+      continue;
+    }
+    std::array<int, 4> sides{0, 1, 2, 3};
+    std::stable_sort(sides.begin(), sides.end(), [&](int lhs, int rhs) { return count[lhs] > count[rhs]; });
+    for (int side : sides) {
+      if (!count[side]) {
+        break;
+      }
+      const auto target = (1 + int64_t(std::ceil(std::sqrt(double(count[side]))))) * rh;
+      if (shift_pin_channel(tech, layout, cells, i, side, target - gaps[side], side < 2 ? sw : rh, core, k, pdn, profile_of)) {
+        break;
+      }
+    }
+  }
+  // Reserve complete rows for repair cells, leaving fixed macros and existing obstacles intact.
+  for (const auto& [i, bank] : row_banks) {
+    for (int side : {2, 3}) {
+      const auto count = bank[side - 2];
+      if (!count) {
+        continue;
+      }
+      const auto b = box(tech, cells[i], k.hx, k.hy);
+      const auto gap = side == 2 ? b.yl - core.yl : core.yh - b.yh;
+      if (gap < 0 || gap >= rh) {
+        continue;
+      }
+      const auto rows = 2 + int64_t(std::ceil(std::sqrt(double(count))));
+      // A hard exclusion or a finite track lattice can make feasibility non-monotone. If the
+      // preferred strip will not fit, test successively smaller depths, with bounded work.
+      for (auto depth = rows; depth >= 2; depth = depth == rows && depth > 2 ? depth - 1 : (depth + 1) / 2) {
+        if (shift_pin_channel(tech, layout, cells, i, side, depth * rh - gap, rh, core, k, pdn, profile_of)) {
+          break;
+        }
+      }
+    }
+  }
+  for (int side : {2, 3, 0, 1}) {
+    open_boundary_bank(tech, layout, cells, side, sw, rh, core, k, pdn, profile_of);
+  }
+}
+
 void legalize_macro_tracks_lattice(const ph::Technology& tech, const ph::Floorplan& layout, std::vector<ph::Component>& cells,
                                    int64_t halo_x, int64_t halo_y, bool move_macros, int64_t channel_x, int64_t channel_y,
-                                   const Pg_macro_alignment* pdn, bool* pdn_aligned, const Member_spans* members) {
+                                   const Pg_macro_alignment* pdn, bool* pdn_aligned, const Member_spans* members, bool complete_macro_frame = true) {
   if (halo_x < 0 || halo_y < 0 || channel_x < 0 || channel_y < 0) {
     throw std::invalid_argument("macro halo and channel must be nonnegative");
   }
@@ -785,11 +1170,17 @@ void legalize_macro_tracks_lattice(const ph::Technology& tech, const ph::Floorpl
   }
   if (!lattice) {
     legalize_macro_tracks_with(tech, layout, cells, k, move_macros, nullptr);
+    if (move_macros && complete_macro_frame) {
+      open_io_channels(tech, layout, cells, k, nullptr, members);
+    }
     return;
   }
   const auto original = cells;
   try {
     legalize_macro_tracks_with(tech, layout, cells, k, move_macros, pdn, members);
+    if (complete_macro_frame) {
+      open_io_channels(tech, layout, cells, k, pdn, members);
+    }
   } catch (const std::runtime_error& failure) {
     if (!std::string(failure.what()).starts_with("no legal macro routing-track alignment near ")) {
       throw;
@@ -801,13 +1192,16 @@ void legalize_macro_tracks_lattice(const ph::Technology& tech, const ph::Floorpl
       *pdn_aligned = false;
     }
     legalize_macro_tracks_with(tech, layout, cells, k, move_macros, nullptr);
+    if (complete_macro_frame) {
+      open_io_channels(tech, layout, cells, k, nullptr, members);
+    }
   }
 }
 }  // namespace
 void legalize_macro_tracks(const ph::Technology& tech, const ph::Floorplan& layout, std::vector<ph::Component>& cells,
                            int64_t halo_x, int64_t halo_y, bool move_macros, int64_t channel_x, int64_t channel_y,
-                           const Pg_macro_alignment* pdn, bool* pdn_aligned) {
-  legalize_macro_tracks_lattice(tech, layout, cells, halo_x, halo_y, move_macros, channel_x, channel_y, pdn, pdn_aligned, nullptr);
+                           const Pg_macro_alignment* pdn, bool* pdn_aligned, bool complete_macro_frame) {
+  legalize_macro_tracks_lattice(tech, layout, cells, halo_x, halo_y, move_macros, channel_x, channel_y, pdn, pdn_aligned, nullptr, complete_macro_frame);
 }
 
 void legalize_rigid_macro_tracks(const ph::Technology& tech, const ph::Floorplan& layout, std::vector<ph::Component>& cells,

@@ -60,6 +60,19 @@ lhd('cell_opt_in', [*synth, '--set', 'compile.slang.liberty_cells=true', '--work
 net = verilog('cell-net')
 assert 'sky130_fd_sc_hd__buf_1 b(' in net and '.A(a)' in net and 'module sky130_fd_sc_hd__buf_1' not in net, net
 
+# A separately supplied macro Liberty must declare its cell to both the
+# Verilog elaborator and the graph importer. Keep its escaped instance name.
+macro_lib = root / 'sram.lib'
+macro_lib.write_text('library (sram) { cell (SRAMX) { area : 4; '
+                     'pin (A) { direction : input; } pin (Q) { direction : output; } } }')
+mapped = root / 'mapped.v'
+mapped.write_text('module mapped(input a,output y); SRAMX '+chr(92)+'bank/ram (.A(a),.Q(y)); endmodule')
+lhd('mapped_macro', ['synth', str(mapped), '--top', 'mapped', '--set', f'synth.liberty={lib}',
+                     '--set', f'synth.macro_liberty={macro_lib}', '--set', 'compile.slang.liberty_cells=true',
+                     '--set', 'synth.input_mapped=true', '--set', 'synth.opentimer=false',
+                     '--workdir', str(root/'mappedW'), '--emit-dir', f'verilog:{root}/mapped-net'])
+assert 'bank/ram' in verilog('mapped-net') and 'SRAMX' in verilog('mapped-net')
+
 # A module the sources define always wins over the Liberty cell of the same name.
 own = root / 'own.v'
 own.write_text(cell.read_text() + 'module sky130_fd_sc_hd__buf_1(input A, output X);\n  assign X = A;\nendmodule\n')

@@ -2,18 +2,19 @@
 // Hand-written HTTP/1.1 server for the placement GUI: localhost only, a random
 // per-run token in every request, small fixed request limits, no file serving.
 #include <arpa/inet.h>
+#include <fcntl.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
-#include <fcntl.h>
 #include <poll.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cerrno>
-#include <algorithm>
+#include <charconv>
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
@@ -22,6 +23,7 @@
 #include <system_error>
 #include <thread>
 
+#include "gui_ipc.hpp"
 #include "gui_page.hpp"
 #include "gui_session.hpp"
 
@@ -35,8 +37,10 @@ struct Session::Server {
   std::atomic<bool>        stop{false};
   std::atomic<int>         active{0};
   std::thread              accept_thread;
-  ~Server() {
-    stop = true;
+  void                     close_listeners() {
+    if (stop.exchange(true)) {
+      return;
+    }
     if (fd >= 0) {
       ::shutdown(fd, SHUT_RDWR);
       ::close(fd);
@@ -50,8 +54,12 @@ struct Session::Server {
     }
     if (!upath.empty()) {
       ::unlink(upath.c_str());
+      upath.clear();
     }
-    for (int i = 0; i < 100 && active.load() > 0; ++i) {  // handlers poll `stop` every 200 ms at most
+  }
+  ~Server() {
+    close_listeners();
+    while (active.load() > 0) {  // handlers poll `stop` every 200 ms at most
       std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
   }
@@ -63,14 +71,31 @@ struct Request {
   bool        ok = false;
 };
 
-std::string query_value(const std::string& query, const std::string& key) {
+std::string query_value(const std::string& query, const std::string& key, size_t* start = nullptr) {
   size_t pos = 0;
   while (pos <= query.size()) {
     const auto amp  = query.find('&', pos);
     const auto part = query.substr(pos, amp == std::string::npos ? std::string::npos : amp - pos);
     const auto eq   = part.find('=');
     if (eq != std::string::npos && part.substr(0, eq) == key) {
-      return part.substr(eq + 1);
+      if (start) {
+        *start = pos;
+      }
+      std::string value;
+      for (size_t i = eq + 1; i < part.size(); ++i) {
+        if (part[i] == '%' && i + 2 < part.size()) {
+          unsigned byte = 0;
+          const char* end = part.data() + i + 3;
+          const auto parsed = std::from_chars(end - 2, end, byte, 16);
+          if (parsed.ec == std::errc{} && parsed.ptr == end) {
+            value += static_cast<char>(byte);
+            i += 2;
+            continue;
+          }
+        }
+        value += part[i] == '+' ? ' ' : part[i];
+      }
+      return value;
     }
     if (amp == std::string::npos) {
       break;
@@ -191,82 +216,132 @@ void handle(Session& s, const std::string& token, int fd, std::atomic<bool>& sto
     respond(fd, 403, "text/plain", "forbidden");
     return;
   }
+  size_t target_pos = 0;
+  const auto target = query_value(req.query, "x", &target_pos);
+  if (req.method == "GET" && req.path != "/" && req.path != "/index.html" && !target.empty() && target != s.config().target) {
+    try {
+      // Private evaluators see the same document query without the parent's
+      // target selector. The worker only listens on its private Unix socket.
+      auto query = req.query;
+      const auto end = query.find('&', target_pos);
+      query.erase(target_pos, end == query.npos ? end : end + 1 - target_pos);
+      const auto body = s.exploration_get(target, req.path + "?" + query);
+      respond(fd,
+              200,
+              req.path.starts_with("/validation/")           ? "application/octet-stream"
+              : req.path == "/screenshot.png"                ? "image/png"
+              : (req.path == "/frame" || req.path == "/map") ? "application/octet-stream"
+                                                             : "application/json",
+              body);
+    } catch (const std::exception& e) {
+      respond(fd, 404, "text/plain", e.what());
+    }
+    return;
+  }
   if (req.method == "GET" && (req.path == "/" || req.path == "/index.html")) {
     respond(fd, 200, "text/html; charset=utf-8", page_html());
-  } else if (req.method == "GET" && req.path == "/design") {
-    const auto cp = query_value(req.query, "cp"), tl = query_value(req.query, "tl");
-    respond(fd, 200, "application/json", s.design_json(cp.empty() ? -1 : std::atoi(cp.c_str()), tl.empty() ? -1 : std::atoi(tl.c_str())));
-  } else if (req.method == "GET" && req.path == "/state") {
+  } else if (req.method == "GET" && req.path == "/baseline.snapshot" && trusted && s.config().target != "main") {
+    try {
+      respond(fd, 200, "application/octet-stream", s.capture_baseline());
+    } catch (const std::exception& e) {
+      respond(fd, 400, "text/plain", e.what());
+    }
+  } else if (req.method == "GET" && req.path == "/result.snapshot" && trusted && s.config().target != "main") {
+    try {
+      respond(fd, 200, "application/octet-stream", s.result_snapshot());
+    } catch (const std::exception& e) {
+      respond(fd, 404, "text/plain", e.what());
+    }
+  } else if (req.method == "GET") {
     const auto since = std::strtoull(query_value(req.query, "since").c_str(), nullptr, 10);
-    if (since) {
-      for (int waited = 0; waited < 20000 && !stop.load(); waited += 500) {
-        if (s.wait_version(since, 500) != since) {
-          break;
-        }
+    if (req.path == "/state" && since) {
+      for (int waited = 0; waited < 20000 && !stop.load() && s.wait_version(since, 500) == since; waited += 500) {
       }
     }
-    respond(fd, 200, "application/json", s.state_json());
-  } else if (req.method == "GET" && req.path == "/frame") {
-    respond(fd, 200, "application/octet-stream", s.frame_binary(nullptr, query_value(req.query, "q") == "16", std::strtoull(query_value(req.query, "since").c_str(), nullptr, 10),
-                                                            query_value(req.query, "cp").empty() ? -1 : std::atoi(query_value(req.query, "cp").c_str()),
-                                                            query_value(req.query, "tl").empty() ? -1 : std::atoi(query_value(req.query, "tl").c_str())));
-  } else if (req.method == "GET" && req.path == "/screenshot.png") {
-    Box        view;
-    const Box* pv = nullptr;
-    const auto x0 = query_value(req.query, "x0"), y0 = query_value(req.query, "y0"), x1 = query_value(req.query, "x1"),
-               y1 = query_value(req.query, "y1");
-    if (!x0.empty() && !y0.empty() && !x1.empty() && !y1.empty()) {
-      view = {std::atof(x0.c_str()), std::atof(y0.c_str()), std::atof(x1.c_str()), std::atof(y1.c_str())};
-      pv   = &view;
+    try {
+      const auto body = s.read_document(req.path + "?" + req.query);
+      respond(fd,
+              200,
+              req.path == "/screenshot.png"                  ? "image/png"
+              : (req.path == "/frame" || req.path == "/map") ? "application/octet-stream"
+                                                             : "application/json",
+              body);
+    } catch (const std::exception& e) {
+      respond(fd, 404, "text/plain", e.what());
     }
-    const auto png = s.screenshot_png(std::atoi(query_value(req.query, "w").c_str()),
-                                      std::atoi(query_value(req.query, "h").c_str()),
-                                      query_value(req.query, "layers"),
-                                      pv);
-    if (png.empty()) {
-      respond(fd, 404, "text/plain", "no frame yet");
-    } else {
-      respond(fd, 200, "image/png", png);
-    }
-  } else if (req.method == "GET" && req.path == "/query") {
-    Box        box;
-    const Box* pb = nullptr;
-    const auto x0 = query_value(req.query, "x0"), y0 = query_value(req.query, "y0"), x1 = query_value(req.query, "x1"),
-               y1 = query_value(req.query, "y1");
-    if (!x0.empty() && !y0.empty() && !x1.empty() && !y1.empty()) {
-      box = {std::atof(x0.c_str()), std::atof(y0.c_str()), std::atof(x1.c_str()), std::atof(y1.c_str())};
-      pb  = &box;
-    }
-    const int limit = std::clamp(std::atoi(query_value(req.query, "limit").c_str()), 1, 1000);
-    respond(fd, 200, "application/json", s.query_json(query_value(req.query, "name"), pb, query_value(req.query, "limit").empty() ? 100 : limit));
-  } else if (req.method == "GET" && req.path == "/regions") {
-    respond(fd, 200, "application/json", s.regions_json());
-  } else if (req.method == "GET" && req.path == "/map") {
-    respond(fd, 200, "application/octet-stream", s.map_binary());
   } else if (req.method == "POST" && req.path == "/agent") {
     respond(fd, 200, "application/json", s.agent_call(req.body));
-  } else if (req.method == "GET" && req.path == "/highlights") {
-    respond(fd, 200, "application/json", s.highlights_json());
-  } else if (req.method == "GET" && req.path == "/selection") {
-    respond(fd, 200, "application/json", s.selection_json());
-  } else if (req.method == "GET" && req.path == "/timeline") {
-    respond(fd, 200, "application/json", s.timeline_json());
-  } else if (req.method == "GET" && req.path == "/options") {
-    respond(fd, 200, "application/json", s.options_json());
-  } else if (req.method == "GET" && req.path == "/node") {
-    respond(fd, 200, "application/json", s.node_json(std::atoi(query_value(req.query, "i").c_str())));
   } else if (req.method == "POST" && req.path == "/cmd") {
-    const auto err = s.submit(req.body);
-    if (err.empty()) {
-      respond(fd, 200, "application/json", R"({"ok":true})");
-    } else {
-      respond(fd, 400, "application/json", std::format(R"({{"ok":false,"error":"{}"}})", err));
-    }
+    bool accepted;
+    const auto reply = s.submit_reply(req.body, &accepted);
+    respond(fd, accepted ? 200 : 400, "application/json", accepted ? R"({"ok":true})" : reply);
   } else {
     respond(fd, 404, "text/plain", "not found");
   }
 }
 }  // namespace
+
+std::string Session::read_document(const std::string& route) const {
+  const auto at    = route.find('?');
+  const auto path  = route.substr(0, at);
+  const auto query = at == route.npos ? std::string{} : route.substr(at + 1);
+  if (path == "/design") {
+    const auto cp = query_value(query, "cp"), tl = query_value(query, "tl");
+    return this->design_json(cp.empty() ? -1 : std::atoi(cp.c_str()), tl.empty() ? -1 : std::atoi(tl.c_str()));
+  } else if (path == "/state") {
+    return this->state_json();
+  } else if (path == "/frame") {
+    return this->frame_binary(nullptr,
+                              query_value(query, "q") == "16",
+                              std::strtoull(query_value(query, "since").c_str(), nullptr, 10),
+                              query_value(query, "cp").empty() ? -1 : std::atoi(query_value(query, "cp").c_str()),
+                              query_value(query, "tl").empty() ? -1 : std::atoi(query_value(query, "tl").c_str()));
+  } else if (path == "/screenshot.png") {
+    Box        view;
+    const Box* pv = nullptr;
+    const auto x0 = query_value(query, "x0"), y0 = query_value(query, "y0"), x1 = query_value(query, "x1"),
+               y1 = query_value(query, "y1");
+    if (!x0.empty() && !y0.empty() && !x1.empty() && !y1.empty()) {
+      view = {std::atof(x0.c_str()), std::atof(y0.c_str()), std::atof(x1.c_str()), std::atof(y1.c_str())};
+      pv   = &view;
+    }
+    const auto png = this->screenshot_png(std::atoi(query_value(query, "w").c_str()),
+                                          std::atoi(query_value(query, "h").c_str()),
+                                          query_value(query, "layers"),
+                                          pv);
+    if (png.empty()) {
+      throw std::runtime_error("no frame yet");
+    } else {
+      return png;
+    }
+  } else if (path == "/query") {
+    Box        box;
+    const Box* pb = nullptr;
+    const auto x0 = query_value(query, "x0"), y0 = query_value(query, "y0"), x1 = query_value(query, "x1"),
+               y1 = query_value(query, "y1");
+    if (!x0.empty() && !y0.empty() && !x1.empty() && !y1.empty()) {
+      box = {std::atof(x0.c_str()), std::atof(y0.c_str()), std::atof(x1.c_str()), std::atof(y1.c_str())};
+      pb  = &box;
+    }
+    const int limit = std::clamp(std::atoi(query_value(query, "limit").c_str()), 1, 1000);
+    return this->query_json(query_value(query, "name"), pb, query_value(query, "limit").empty() ? 100 : limit);
+  } else if (path == "/regions") {
+    return this->regions_json();
+  } else if (path == "/map") {
+    return this->map_binary(query_value(query, "kind"), std::strtoull(query_value(query, "frame").c_str(), nullptr, 10));
+  } else if (path == "/highlights") {
+    return this->highlights_json();
+  } else if (path == "/selection") {
+    return this->selection_json();
+  } else if (path == "/timeline") {
+    return this->timeline_json();
+  } else if (path == "/options") {
+    return this->options_json();
+  } else if (path == "/node") {
+    return this->node_json(std::atoi(query_value(query, "i").c_str()));
+  }
+  throw std::runtime_error("unknown placement document");
+}
 
 bool Session::start(std::string* error) {
   const auto fail = [&](const std::string& why) {
@@ -275,14 +350,28 @@ bool Session::start(std::string* error) {
     }
     return false;
   };
+  if (!cfg_.controller_executable.empty()) {
+    try {
+      controller_   = std::make_shared<Controller_link>(cfg_);
+      url_          = controller_->url;
+      token_        = controller_->token;
+      port_         = controller_->port;
+      agent_socket_ = cfg_.agent_socket;
+      return true;
+    } catch (const std::exception& e) {
+      return fail(e.what());
+    }
+  }
+  std::erase_if(retired_servers_, [](const auto& s) { return !s->active.load(); });
   auto server     = std::make_shared<Server>();
   server->session = this;
-  server->fd      = ::socket(AF_INET, SOCK_STREAM, 0);
-  if (server->fd < 0) {
-    return fail("socket() failed");
-  }
-  const int one = 1;
-  ::setsockopt(server->fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+  if (cfg_.target == "main") {
+    server->fd = ::socket(AF_INET, SOCK_STREAM, 0);
+    if (server->fd < 0) {
+      return fail("socket() failed");
+    }
+    const int one = 1;
+    ::setsockopt(server->fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
 #ifdef SO_NOSIGPIPE
   ::setsockopt(server->fd, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof(one));
 #endif
@@ -303,6 +392,7 @@ bool Session::start(std::string* error) {
   port_ = ntohs(addr.sin_port);
   ::fcntl(server->fd, F_SETFD, FD_CLOEXEC);  // a restart re-executes the process and rebinds the same port
   url_ = std::format("http://127.0.0.1:{}/?t={}", ntohs(addr.sin_port), token_);
+  }
   if (!cfg_.agent_socket.empty()) {
     sockaddr_un ua{};
     ua.sun_family = AF_UNIX;
@@ -364,7 +454,25 @@ bool Session::start(std::string* error) {
   return true;
 }
 
-void Session::stop_serving() { server_.reset(); }
+void Session::suspend_listeners() {
+  // A restart callback holds the state lock. Existing handlers may need that
+  // lock to finish, so keep their Server alive until the callback returns.
+  if (server_) {
+    server_->close_listeners();
+    retired_servers_.push_back(std::move(server_));
+  }
+}
+void Session::stop_serving() {
+  controller_.reset();
+  server_.reset();
+}
+
+void Session::shutdown() {
+  exit_.store(true);
+  cv_.notify_all();
+  crit_cv_.notify_all();
+  updates_.notify_all();
+}
 
 bool make_video(const std::string& frames_dir, const std::string& out) {
   if (std::system("command -v ffmpeg >/dev/null 2>&1") != 0) {

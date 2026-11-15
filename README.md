@@ -184,9 +184,8 @@ persistent way is a *skills-directory plugin*: a folder under
 auto-loads it in **every** project as `pyrope-lsp@skills-dir` — no marketplace,
 no `/plugin install`, no per-session `--plugin-dir` flag.
 
-The same `~/.claude/skills/` directory also holds the **`pyrope` skill** (it
-teaches Claude how to write and check Pyrope), so Step 2 installs it alongside
-the LSP plugin — both become personal-scope and work in every project.
+Step 2 installs the **`pyrope` skill** for writing the language and the
+**`livehd` skill** for using the toolchain and exploring floorplans.
 
 **Step 1 — make sure `prplsp` and `lhd` are on your `$PATH`.** See
 [`prplsp` launcher](#prplsp-launcher) above. Quick check:
@@ -195,12 +194,11 @@ the LSP plugin — both become personal-scope and work in every project.
 command -v prplsp && command -v lhd     # both must print a path
 ```
 
-**Step 2 — install the `pyrope` skill (one time).** From the root of your
-livehd checkout, copy the bundled skill into your personal skills directory:
+**Step 2 — install the skills.** From the root of your LiveHD checkout, run
 
 ```bash
 mkdir -p ~/.claude/skills
-cp -r .claude/skills/pyrope ~/.claude/skills/pyrope
+cp -r .claude/skills/{pyrope,livehd} ~/.claude/skills/
 ```
 
 **Step 3 — create the plugin (one time).** Copy-paste this whole block:
@@ -230,7 +228,7 @@ then:
 claude plugin validate ~/.claude/skills/pyrope-lsp   # → ✔ Validation passed
 claude plugin list                                   # → pyrope-lsp@skills-dir   ✔ loaded
 claude plugin details pyrope-lsp@skills-dir          # → LSP servers (1)  pyrope
-ls ~/.claude/skills/pyrope/SKILL.md                  # → the pyrope skill is installed
+ls ~/.claude/skills/{pyrope,livehd}/SKILL.md         # → both skills are installed
 ```
 
 That's it. Editing a `.prp` file now surfaces Pyrope diagnostics to Claude

@@ -45,6 +45,11 @@ for filename in ('io_timing.json', 'wire_load.json'):
 warm = run('plain')
 assert warm['qor']['place']['legal'], warm
 assert warm['incremental']['abc']['hits'] > 0, warm['incremental']
+# The same workdir already has learned IO timing and wire-load feedback.
+# Freezing resynthesis must suppress the warm callback, all later stage triggers and restarts.
+frozen = run('plain', ['--set', 'synth.place.policy.no_resynthesis=true'])
+frozen_io = frozen['qor']['place']['io_resynth']
+assert frozen['qor']['place']['legal'] and (frozen_io['checked'], frozen_io['fired'], frozen_io['restarts']) == (0, 0, 0), frozen_io
 off = run('off', ['--set', 'synth.place.io_resynth=0'])
 assert off['qor']['place']['legal'] and 'io_resynth' not in off['qor']['place'], off
 assert not (root/'off/abc_cache/io_timing.json').exists()

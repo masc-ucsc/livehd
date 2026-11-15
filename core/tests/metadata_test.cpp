@@ -15,6 +15,17 @@ TEST(Metadata, CompactCanonicalAndUnrelatedRecords) {
   EXPECT_NE(a.json().find("9007199254740993"), std::string::npos);
   EXPECT_TRUE(a.select("hint", "other").empty());
 }
+TEST(Metadata, JoiningPreservesAdjacentFloatingPointValues) {
+  Bundle joined(R"([{"class":"measurement","design":"top","value":929.1233919228121,"stamp":18446744073709551615}])");
+  joined.merge(Bundle(R"([{"class":"hint","id":"h","x":929.123391922812}])"));
+  const Bundle replay(joined.json());
+  const auto* sample = replay.select("measurement", "top").at(0);
+  EXPECT_EQ((*sample)["value"].GetDouble(), 929.1233919228121);
+  EXPECT_EQ((*sample)["stamp"].GetUint64(), UINT64_MAX);
+  EXPECT_EQ((*replay.select("hint", "top").at(0))["x"].GetDouble(), 929.123391922812);
+  EXPECT_EQ(joined.json(), replay.json());
+}
+
 TEST(Metadata, RejectAmbiguityAndMalformedInput) {
   EXPECT_THROW(Bundle("{}"), std::invalid_argument);
   EXPECT_THROW(Bundle(R"([{"class":"x","class":"y"}])"), std::invalid_argument);

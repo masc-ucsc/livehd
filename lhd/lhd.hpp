@@ -178,6 +178,10 @@ struct Options {
   // Resume after a restart from a checkpoint (set by the page's "replay from here"; hidden flags): replay gui_replay's
   // actions up to gui_replay_seq without blocking, then become interactive at the checkpoint gui_resume ("label:nth").
   std::string   gui_resume, gui_replay, gui_token;
+  std::string   gui_worker_socket, gui_worker_id, gui_worker_tier;
+  int gui_timing_call_limit = -1;
+  unsigned gui_repair_limit=0;
+  std::string gui_repair_mode;
   std::uint64_t gui_replay_seq = 0;
   std::string gui_trace;            // JSONL action trace path (default <workdir>/synth/place/gui_trace.jsonl)
   std::string workdir;
@@ -792,6 +796,35 @@ inline constexpr Mapper kMappers[] = {
 }
 
 inline constexpr Synth_set_option kSynthSetOptions[] = {
+    {"input_mapped_def", "", Synth_set_option::Kind::file, "use this complete DEF signal netlist as the exact mapped placement implementation"},
+    {"input_mapped", "false", Synth_set_option::Kind::boolean,
+     "use the compiled technology-cell graph directly, preserving its instance names and masters and skipping coloring and mapping"},
+    {"place.tie_low", "", Synth_set_option::Kind::file, "physical constant-zero master selected by the platform"},
+    {"place.tie_high", "", Synth_set_option::Kind::file, "physical constant-one master selected by the platform"},
+    {"place.policy.fast", "false", Synth_set_option::Kind::boolean, "freeze resynthesis, sizing and buffer edits after mapping"},
+    {"place.policy.no_resynthesis", "false", Synth_set_option::Kind::boolean, "defer placement-triggered remapping"},
+    {"place.policy.no_sizing", "false", Synth_set_option::Kind::boolean, "defer drive and master changes"},
+    {"place.policy.no_buffer_edits", "false", Synth_set_option::Kind::boolean, "preserve the buffer network"},
+    {"place.explore.scorer", "", Synth_set_option::Kind::file, "trusted PlaceReasoner validation script for the current benchmark task"},
+    {"place.explore.flow", "", Synth_set_option::Kind::file, "PlaceReasoner-Beta checkout for T4 validation"},
+    {"place.explore.openroad", "openroad", Synth_set_option::Kind::file, "OpenROAD executable for T4 validation"},
+    {"place.explore.heavy_jobs","1",Synth_set_option::Kind::integer,"maximum concurrent repair/validation explorations within the exploration share"},
+    {"place.explore.queue", "8", Synth_set_option::Kind::integer, "maximum pending background placements waiting for admission"},
+    {"place.explore.open", "12", Synth_set_option::Kind::integer, "maximum open exploration results per GUI session"},
+    {"place.explore.threads", "1", Synth_set_option::Kind::integer, "CPU shares per spawned background evaluator, bounded by lhd.jobs with one share reserved for main"},
+    {"place.explore.jobs", "2", Synth_set_option::Kind::integer, "maximum concurrent background replay evaluators within lhd.jobs"},
+    {"place.explore.worker", "auto", Synth_set_option::Kind::file, "T1 evaluator selection: auto, snapshot or replay"},
+    {"place.explore.memory_mb", "0", Synth_set_option::Kind::integer, "resident-memory limit per admitted evaluator process tree in MiB (0 uses the session budget)"},
+    {"place.explore.session_memory_mb", "0", Synth_set_option::Kind::integer, "aggregate RSS budget for the main evaluator, controller and all their descendants in MiB (0 uses half host or cgroup RAM)"},
+    {"place.explore.disk_mb", "4096", Synth_set_option::Kind::integer, "private scratch disk limit per evaluator in MiB"},
+    {"place.explore.history_mb", "16", Synth_set_option::Kind::integer, "closed exploration detail budget in MiB; older entries retain compact metrics"},
+    {"place.explore.timeout.t1", "0", Synth_set_option::Kind::integer, "wall deadline for t1 workers in seconds (0 inherits explore.timeout)"},
+    {"place.explore.timeout.t2", "0", Synth_set_option::Kind::integer, "wall deadline for t2 workers in seconds (0 inherits explore.timeout)"},
+    {"place.explore.timeout.t3", "0", Synth_set_option::Kind::integer, "wall deadline for t3 workers in seconds (0 inherits explore.timeout)"},
+    {"place.explore.timeout.t4", "0", Synth_set_option::Kind::integer, "wall deadline for t4 workers in seconds (0 inherits explore.timeout)"},
+    {"place.explore.timeout.foreground", "0", Synth_set_option::Kind::integer, "wall deadline for foreground workers in seconds (0 inherits explore.timeout)"},
+    {"place.explore.timeout.region", "0", Synth_set_option::Kind::integer, "wall deadline for region workers in seconds (0 inherits explore.timeout)"},
+    {"place.explore.timeout", "600", Synth_set_option::Kind::integer, "maximum elapsed seconds for a replay exploration"},
     {"place", "false", Synth_set_option::Kind::boolean, "place mapped cells with native DREAMPlace before final STA"},
     {"lef",
      "",
@@ -1311,6 +1344,7 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
 #undef H2D_REAL
 #undef H2D_BOOL
 #undef H2D_STRING
+    {"place.preserve_imported_io", "false", Synth_set_option::Kind::boolean, "hold placed ports at the positions supplied by the input floorplan DEF"},
     {"place.floorplan", "", Synth_set_option::Kind::file, "optional DEF with contiguous N/FS rows and FIXED pins/macros"},
     {"place.start_map",
      "",

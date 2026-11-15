@@ -28,11 +28,13 @@
 #include "legroute.hpp"
 #include "macro_anchor.hpp"
 #include "macro_dead_space.hpp"
+#include "macro_state.hpp"
 #include "multirow.hpp"
 #include "multirow_eco.hpp"
+#include "pass/pcrs/pcrs.hpp"
+#include "pass/place/gui/gui_policy.hpp"
 #include "placement_session.hpp"
 #include "power_grid.hpp"
-#include "pass/pcrs/pcrs.hpp"
 #include "prects_networks.hpp"
 #include "preroute_design.hpp"
 #include "rc_cache.hpp"
@@ -126,12 +128,34 @@ struct Preroute_settings {
   int         max_rows = 0, max_sites = 0;  // Zero leaves original-net pin spans unlimited.
 };
 namespace gui {
+int serve_frozen_owner(int socket, int parent, uint64_t native_identity = 0);
 class Session;  // pass/place/gui/gui_session.hpp (2i-interact)
 }
 struct Options {
   // Interactive session (lhd synth --gui): live frames, stage gates, pins. Null: batch.
   std::shared_ptr<gui::Session>                         gui;
+  std::shared_ptr<const std::vector<physical::Net>>     unresolved_def_nets;
+  struct Repair_trials {
+    unsigned limit = 0, used = 0;
+    bool     started = false;
+  };
+  bool capture_exploration_end = false;
+  std::shared_ptr<Repair_trials> repair_trials;  // shared by copies of a bounded experimental repair
+  bool trial_available() const { return !repair_trials || !repair_trials->started || repair_trials->used < repair_trials->limit; }
+  bool take_repair_trial() const {
+    if (!trial_available()) {
+      return false;
+    }
+    if (repair_trials && repair_trials->started) {
+      ++repair_trials->used;
+    }
+    return true;
+  }
+  std::shared_ptr<Mutation_policy> runtime_policy;
+  Mutation_policy                  mutation_policy() const { return runtime_policy ? *runtime_policy : Mutation_policy{}; }
   std::shared_ptr<const metadata::Bundle>               metadata;
+  // Parsed only from positional user inputs. Internal state emitted between stages is not a new constraint.
+  std::shared_ptr<const std::vector<Macro_pose>>        fixed_macro_poses;
   std::shared_ptr<const std::vector<Hint_scope>>        metadata_scopes;             // Before timing seed flattens hierarchy.
   bool                                                  metadata_finalized = false;  // Internal macro-to-final handoff.
   std::shared_ptr<Growth_budget>                        growth_budget;
@@ -186,6 +210,7 @@ struct Options {
   // TSV (instance, x, y DBU): initial positions of movable cells (a forked region starts from its parent's placement)
   std::string                                               seed_file;
   std::string                                               liberty, tech_rc_file, tracks_file;
+  std::array<std::string, 2>                                tie_masters;  // explicit platform tie-low and tie-high masters
   std::string                                               macro_mode = "none";
   Warp_options                      fp_warp{.weight = 1}, macro_warp{.weight = .7, .start_stability = .2, .refresh_interval = 25};
   // macro.anchor: moving legalized-target soft anchors inside macro GP (macro_anchor.hpp); off by default.
@@ -203,6 +228,7 @@ struct Options {
   bool                              analyze_colors_only = false;  // diagnostic: no GP/LG/STA or cache
   double                            fp_color_maximum    = 30000;  // memory-first logic area in equivalent cells
   double                            fp_color_minimum    = -1;     // inherit fp_minimum; physical member area only
+  bool                              preserve_imported_io = false;
   bool                              fp_pin_adjust       = true;
   int                               fp_pin_interval     = 50;
   double                            fp_pin_step = .01, fp_pin_improvement = .001;  // perimeter fraction, relative gain
@@ -329,6 +355,8 @@ struct Options {
   // remains available through fp_evaluate for resizing and resynthesis.
   Rank                                            gp_rank;
   Rank_trees                                      gp_rank_trees;  // when set, GP timing checkpoints rank from numeric trees
+  std::shared_ptr<timing::Whatif*>                gui_journal;    // owned by the private detailed evaluator
+  Rank                                            gui_evaluate;   // explicit full timing at published coordinates
   Rank                                            gui_rank;  // 2i-interact: read-only timing refresh for the panel
   double                                          fp_minimum = 3000, fp_attraction = .25, fp_repulsion = 5, fp_anchor = .25;
   bool                                            fp_distance_attraction = true;
@@ -538,6 +566,9 @@ struct Macro_gp_timing {
   physical::Pin_locations                          pin_locations;
 };
 struct Result {
+  // For a supervised repair worker only. Captures immutable geometry from this
+  // candidate. Publishing takes the accepted Result's graph/RC after final legalization.
+  std::function<void(const Result&, const Options&)> publish_exploration;
   std::shared_ptr<const Preroute_design>           preroute_design;
   // What pass.pcrs built or kept in this call (null when it did not run): which cells serve which domain.
   std::shared_ptr<const pcrs::Stats>               pcrs_stats;

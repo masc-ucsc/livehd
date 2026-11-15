@@ -316,6 +316,16 @@ TEST(ColorCentroids, ColorLeafInheritsParentSnapTranslationOnly) {
   }
 }
 
+TEST(ColorCentroids, InfeasibleSiblingSeparationStillContainsFittableCircles) {
+  const dp::Layout layout{0, 0, 100, 100, 1, 1};
+  const std::vector<dp::FloorplanCircle> circles = {
+      {"left", -10, 50, 46, 100, 0, -1}, {"right", 95, 50, 46, 100, 0, -1}};
+  const auto result = snap_centroid_targets(circles, circles.size(), layout, {});
+  EXPECT_FALSE(result.feasible);
+  EXPECT_GT(result.maximum_overlap, 0);
+  EXPECT_EQ(result.maximum_boundary_violation, 0);
+}
+
 TEST(ColorCentroids, WholeCirclesFitCoreAfterParentTranslation) {
   const dp::Layout                       layout{0, 0, 100, 100, 1, 1};
   const std::vector<dp::FloorplanCircle> circles = {

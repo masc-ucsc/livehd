@@ -226,6 +226,8 @@ TEST_F(Resize_engine, MetTimingAddsNoCellsDownsizesAndNeverWorsensSetup) {
   period_ns         = (chain + 120) / 1000;
   const auto before = timing(placed);
   ASSERT_GT(ps(before, before.wns), 0);
+  options.runtime_policy = std::make_shared<Mutation_policy>();
+  options.runtime_policy->no_buffer_edits = true;
   auto       result = resize_placed(std::move(placed), options, [&](const Result& r) { return timing(r); });
   EXPECT_EQ(result.placed.gp_density_weight, density_weight);
   const auto after  = timing(result.placed);
@@ -251,6 +253,8 @@ TEST_F(Resize_engine, LongFailingWireGetsRepeatersSeededOnTheCutEdge) {
   options.capacitance_ff_um = 1;
   period_ns                 = 1.2;
   auto       placed         = long_wires(1, 230000);
+  options.runtime_policy = std::make_shared<Mutation_policy>();
+  options.runtime_policy->no_sizing = true;
   for (auto node : placed.graph->body().nodes()) {
     if (node.get_name() == "root") {
       for (auto pin : node.out_sorted_pins()) {

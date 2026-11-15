@@ -153,6 +153,7 @@ protected:
   uint64_t                                  ambiguous_or_nodes_   = 0;
   uint64_t                                  native_state_nodes_   = 0;
   bool                                      constraints_complete_ = true;
+  std::set<std::string>                     sdc_issues_;
   uint32_t                                  sdc_clocks_           = 0;
   std::string                               virtual_clock_name_;
   float                                     virtual_clock_period_ = 0;

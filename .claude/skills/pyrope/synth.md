@@ -62,15 +62,10 @@ Rules:
    Always record cells, area and STA delay together, and the mapper used.
    Pick a period the design misses (or a realistic SDC); with an unreachable
    target, delay-driven choices degenerate.
-2. **Find the critical path before touching anything** (see `lhd.md`):
-   ```sh
-   lhd synth top.prp --top top --set synth.liberty=cells.lib --emit-dir lg:net --workdir W
-   lhd pass opentimer lg:net cells.lib top.sdc --top top.top --set pass.opentimer.critical=true
-   lhd tool sta paths=5 lg:net --top top.top
-   ```
-   The start and end state names say which logic is on the path; the attached
-   source lines say which declarations own it. Decide whether it is an adder,
-   a shifter, a mux tree, a decoder, or fanout.
+2. Identify the critical path and use its launching and capturing state to
+   find the Pyrope declaration to tune. Decide whether the delay comes from an
+   adder, a shifter, a mux tree, a decoder or fanout. Follow the
+   [LiveHD timing workflow](../livehd/lhd.md#synthesis-and-timing).
 3. **Choose the lever that matches the path** (next section) and apply it to
    the narrowest scope that covers the path: a declaration beats a block,
    which beats a module.

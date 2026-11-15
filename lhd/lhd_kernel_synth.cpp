@@ -35,19 +35,18 @@
 // as a cold one (the abc region digest is content-based, the coloring is
 // seeded and deterministic).
 
+#include <fcntl.h>
 #include <spawn.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
-#include <cerrno>
-#include <fcntl.h>
-#include <thread>
-#include <chrono>
-#include <cstring>
 #include <algorithm>
+#include <cerrno>
 #include <charconv>
+#include <chrono>
 #include <cmath>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -58,18 +57,21 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 #include "absl/container/flat_hash_set.h"
 #include "absl/strings/str_split.h"
 #include "attrs.hpp"
+#include "compile_salt.hpp"
+#include "core/job_manager.hpp"
 #include "debug_env.hpp"
 #include "diag.hpp"
 #include "domino_bundle.hpp"
-#include "compile_salt.hpp"
 #include "export_file.hpp"
 #include "file_utils.hpp"
 #include "graph_library_singleton.hpp"
+#include "inou/lefdef/mapped_graph.hpp"
 #include "inou/lefdef/route_store.hpp"
 #include "lhd_kernel_internal.hpp"
 #include "liberty_dff.hpp"
@@ -80,7 +82,6 @@
 #include "pass/domplace/timing/stage_timing.hpp"
 #include "pass/domplace/timing/stage_timing_salt.hpp"
 #include "pass/opentimer/pass_opentimer.hpp"
-#include "pass/timing/physical_rank.hpp"
 #include "pass/opentimer/sta_salt.hpp"
 #include "pass/place/custom_sizing.hpp"
 #include "pass/place/growth_budget.hpp"
@@ -91,15 +92,16 @@
 #include "pass/place/placement_technology.hpp"
 #include "pass/place/preroute_host.hpp"
 #include "pass/place/repair.hpp"
-#include "pass/synth/sram_macro.hpp"
 #include "pass/place/resize_engine.hpp"
+#include "pass/synth/sram_macro.hpp"
+#include "pass/timing/physical_rank.hpp"
 #include "physical_cache.hpp"
 #include "physical_salt.hpp"
-#include "woothash.hpp"
 #include "rapidjson/document.h"
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
 #include "synth_policy.hpp"
+#include "woothash.hpp"
 
 extern char** environ;
 
@@ -116,7 +118,7 @@ std::string physical_descriptor(const Options& opts, const livehd::placement::Op
   w.Uint64(kPhysicalSrcSalt);
   w.String(livehd::placement::uroute_cache_identity(place_options).c_str());
   w.String(opts.top.c_str());
-  const std::array<std::string_view, 1> metadata_classes{"livehd.placement.hints"};
+  const std::array<std::string_view, 2> metadata_classes{"livehd.placement.hints", "livehd.placement.state"};
   w.String(place_options.metadata ? place_options.metadata->identity(metadata_classes, opts.top).c_str() : "[]");
   w.String(opts.seed.c_str());
   w.Uint(opts.jobs);
@@ -1195,6 +1197,7 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.fp_color_source       = synth_set(opts, "place.fp.color_source", "synthesis");
   out.fp_color_minimum      = number("place.fp.color_minimum", "-1");
   out.fp_color_maximum      = number("place.fp.color_maximum", "30000");
+  out.preserve_imported_io  = truthy(synth_set(opts, "place.preserve_imported_io", "false"));
   out.fp_pin_adjust         = truthy(synth_set(opts, "place.fp.pin_adjust", "true"));
   out.fp_pin_interval       = integer("place.fp.pin_interval", "50");
   out.fp_pin_step           = number("place.fp.pin_step", "0.01");
@@ -1244,6 +1247,7 @@ livehd::placement::Options placement_options(const Options& opts) {
   if (!std::isfinite(out.growth_fraction) || out.growth_fraction < 0 || out.growth_fraction > 4) {
     throw Lhd_error{"usage", "synth.place.growth expects a fraction in [0,4]", ""};
   }
+  out.tie_masters    = {synth_set(opts, "place.tie_low", ""), synth_set(opts, "place.tie_high", "")};
   out.resize_vt_swap = truthy(synth_set(opts, "place.resize.vt_swap", "false"));
   for (const auto& pattern : absl::StrSplit(synth_set(opts, "place.resize.dont_use", ""), ',', absl::SkipWhitespace())) {
     out.resize_dont_use.emplace_back(pattern);
@@ -1397,6 +1401,11 @@ livehd::placement::Options placement_options(const Options& opts) {
     }
     if (!std::any_of(opts.sets.begin(), opts.sets.end(), [](const auto& s) { return s.first == "synth.place.macro.threads"; })) {
       out.macro_parameters.threads = out.threads;
+    }
+    if (!opts.gui_worker_id.empty()) {
+      out.macro_parameters.threads = std::clamp(out.macro_parameters.threads, 1, out.threads);
+      out.legroute_options.threads = out.legroute_options.threads < 1 ? out.threads
+                                     : std::min(out.legroute_options.threads, unsigned(out.threads));
     }
     out.macro_parameters.validate();
   } catch (const std::invalid_argument& error) {
@@ -1877,6 +1886,7 @@ bool density_failure(const std::exception& e, const livehd::placement::Options& 
 }
 void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd::placement::Placement_session>& placement_session,
                         bool placement_area_resume) {
+  const double gui_invocation_start_s = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
   setup_diag(opts, "synth");
 
   auto       ir          = gather_ir_inputs(opts, "synth");
@@ -1892,15 +1902,24 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
   // synth.liberty is the one spelling, so no two Liberty readers can disagree.)
   const auto*       mapper        = find_mapper(synth_set(opts, "mapper", "abc"));  // validated by check_known_set_passes
   const auto        mapper_method = std::string{mapper->method};
-  const bool        mapped_output = mapper_maps_cells(opts, mapper_method);
+  const auto        mapped_def    = synth_set(opts, "input_mapped_def", "");
+  const bool        input_mapped  = !mapped_def.empty() || truthy(synth_set(opts, "input_mapped", "false"));
+  const bool        mapped_output = input_mapped || mapper_maps_cells(opts, mapper_method);
   const std::string liberty       = mapped_output ? resolve_liberty(opts) : std::string{};
-  const bool        run_sta       = mapped_output && truthy(synth_set(opts, "opentimer", "true"));
+  bool              run_sta       = mapped_output && truthy(synth_set(opts, "opentimer", "true"));
   const bool        run_place     = truthy(synth_set(opts, "place", "false"));
   auto              place_options = run_place ? placement_options(opts) : livehd::placement::Options{};
+  place_options.liberty           = liberty;
+  const bool fast_policy          = truthy(synth_set(opts, "place.policy.fast", "false"));
+  place_options.runtime_policy    = std::make_shared<livehd::placement::Mutation_policy>(
+      livehd::placement::Mutation_policy{fast_policy || truthy(synth_set(opts, "place.policy.no_resynthesis", "false")),
+                                         fast_policy || truthy(synth_set(opts, "place.policy.no_sizing", "false")),
+                                         fast_policy || truthy(synth_set(opts, "place.policy.no_buffer_edits", "false"))});
   if (run_place && place_options.legroute_plan.enabled && placement_session) {
     place_options.placement_session     = placement_session;
     place_options.placement_area_resume = placement_area_resume;
   }
+  const bool run_resize   = truthy(synth_set(opts, "place.resize", run_place && run_sta && place_options.full ? "true" : "false"));
   const bool run_resynth  = truthy(synth_set(opts, "place.resynth", "false"));
   // 2i-interact: the interactive session serves the whole run and keeps the process alive afterwards.
   std::shared_ptr<livehd::placement::gui::Session> gui_session;
@@ -1911,6 +1930,57 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
       throw Lhd_error{"usage", "--gui needs placement", "add --set synth.place=true"};
     }
     livehd::placement::gui::Config gc;
+    // A replay may run later, after an input file was replaced at the same path.
+    // Compare the physical inputs by content. Execution shares are local to the worker.
+    auto                           inputs = place_options.lefs;
+    inputs.insert(inputs.end(), opts.files.begin(), opts.files.end());
+    for (const auto& list : {liberty, synth_set(opts, "macro_liberty", "")}) {
+      std::istringstream paths(list);
+      for (std::string file; std::getline(paths, file, ',');) {
+        inputs.push_back(std::move(file));
+      }
+    }
+    for (const auto& file : {mapped_def,
+                             synth_set(opts, "sdc", ""),
+                             place_options.floorplan,
+                             place_options.seed_file,
+                             place_options.tech_rc_file,
+                             place_options.tracks_file}) {
+      if (!file.empty()) {
+        inputs.push_back(file);
+      }
+    }
+    std::ranges::sort(inputs);
+    auto hash = kPhysicalSrcSalt;
+    for (const auto& file : inputs) {
+      if (file.empty()) {
+        continue;
+      }
+      hash = lh::woothash64(file.data(), file.size(), hash);
+      if (auto bytes = livehd::file_utils::read_file(file)) {
+        hash = lh::woothash64(bytes->data(), bytes->size(), hash);
+      }
+    }
+    gc.source_identity = std::format("{:016x}", hash);
+    for (const auto& [key, value] : opts.sets) {
+      if (key == "lhd.jobs" || key == "synth.place.threads" || key == "place.threads" || key.starts_with("synth.place.gui.")
+          || key.starts_with("synth.place.explore.")) {
+        continue;
+      }
+      hash = lh::woothash64(key.data(), key.size(), hash);
+      hash = lh::woothash64(value.data(), value.size(), hash);
+    }
+    for (const auto& arg : opts.raw_args) {
+      hash = lh::woothash64(arg.data(), arg.size(), hash);
+    }
+    gc.input_identity = std::format("{:016x}", lh::woothash64(opts.seed.data(), opts.seed.size(), hash));
+    if (opts.metadata) {
+      // The session binds applicable records once it knows the resolved design
+      // name. JSON filenames and records belonging to other passes are not inputs.
+      gc.intent = opts.metadata->json();
+    }
+    gc.policy              = *place_options.runtime_policy;
+    gc.evaluator_policy    = place_options.runtime_policy;
     const bool resuming    = !opts.gui_replay.empty();  // after "replay from a checkpoint": replay, then interactive
     const bool pure_replay = !gui_replay.empty() && !resuming;
     gc.replay_path  = resuming ? opts.gui_replay : gui_replay;
@@ -1921,11 +1991,148 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
       gc.replay_limit_seq = opts.gui_replay_seq;
     }
     if (!pure_replay) {  // a local agent (an assistant, a script) talks to the page's session through this Unix socket
-      auto socket_path = (std::filesystem::temp_directory_path() / std::format("lhd-gui-{}.sock", int(::getpid()))).string();
-      if (socket_path.size() > 90) {
-        socket_path = std::format("/tmp/lhd-gui-{}.sock", int(::getpid()));  // sun_path is short (104 bytes on macOS)
+      gc.controller_executable = opts.invocation_argv.at(0);
+      gc.agent_socket          = opts.gui_worker_socket.empty() ? livehd::placement::gui::default_agent_socket() : opts.gui_worker_socket;
+      gc.target                = opts.gui_worker_id.empty() ? "main" : opts.gui_worker_id;
+      gc.batch_worker = opts.gui_worker_tier.starts_with("T");
+      gc.timing_call_limit = opts.gui_timing_call_limit;
+      gc.scoped_repair_worker   = opts.gui_worker_tier == "T3-scoped";
+      gc.resynthesis_available = livehd::synth::has_cone_provider("abc");
+      const bool repair_worker = opts.gui_worker_tier == "T3" || gc.scoped_repair_worker;
+      gc.terminal_sizing = repair_worker ? opts.gui_repair_mode.contains("sizing") : run_resize;
+      gc.terminal_buffering = repair_worker ? opts.gui_repair_mode.contains("buffering") : run_resize;
+      gc.terminal_resynthesis = repair_worker ? opts.gui_repair_mode.contains("resynthesis") : run_resynth;
+      gc.repair_limit = repair_worker ? opts.gui_repair_limit : 0;
+      gc.repair_available      = place_options.full && place_options.final_cells && run_sta && !place_options.unresolved_def_nets;
+      gc.heavy_jobs            = std::clamp(std::atoi(synth_set(opts, "place.explore.heavy_jobs", "1").c_str()), 0, 128);
+      gc.explore_timeout       = std::max(1, std::atoi(synth_set(opts, "place.explore.timeout", "600").c_str()));
+      gc.explore_worker        = synth_set(opts, "place.explore.worker", "auto");
+      if (gc.explore_worker != "auto" && gc.explore_worker != "replay" && gc.explore_worker != "snapshot") {
+        throw Lhd_error{"usage", "place.explore.worker expects auto, snapshot or replay", ""};
       }
-      gc.agent_socket = socket_path;
+      gc.snapshot_available = gc.target == "main" && run_sta && synth_set(opts, "timing.engine", "opentimer") == "fast";
+      gc.worker_memory_mb   = std::max(0, std::atoi(synth_set(opts, "place.explore.memory_mb", "0").c_str()));
+      if (opts.gui_worker_id.empty()) {
+        const auto mb = std::max(0, std::atoi(synth_set(opts, "place.explore.session_memory_mb", "0").c_str()));
+        gc.session_root_pid = ::getpid();
+        gc.session_memory_bytes = mb ? uint64_t(mb) << 20 : livehd::host_resources().ram / 2;
+      }
+      gc.worker_disk_mb     = std::max(1, std::atoi(synth_set(opts, "place.explore.disk_mb", "4096").c_str()));
+      gc.history_result_mb  = std::max(1, std::atoi(synth_set(opts, "place.explore.history_mb", "16").c_str()));
+      for (const std::string tier : {"T1", "T2", "T3", "T4", "foreground", "region"}) {
+        auto key = tier;
+        if (key[0] == 'T') {
+          key[0] = 't';
+        }
+        const auto seconds = std::atoi(synth_set(opts, "place.explore.timeout." + key, "0").c_str());
+        if (seconds > 0) {
+          gc.tier_timeout[tier] = seconds;
+        }
+      }
+      gc.explore_queue = std::clamp(std::atoi(synth_set(opts, "place.explore.queue", "8").c_str()), 1, 1024);
+      gc.explore_open  = std::clamp(std::atoi(synth_set(opts, "place.explore.open", "12").c_str()), 1, 1024);
+      const auto worker_threads = std::atoi(synth_set(opts, "place.explore.threads", "1").c_str());
+      if (worker_threads < 1) {
+        throw Lhd_error{"usage", "place.explore.threads requires a positive thread count", ""};
+      }
+      const auto ceiling = livehd::Job_manager::global().ceiling();
+      gc.explore_threads = std::min(unsigned(worker_threads), std::max(1u, ceiling - 1));
+      gc.explore_jobs  = std::clamp(std::atoi(synth_set(opts, "place.explore.jobs", "2").c_str()), 0, 128);
+      if (opts.gui_worker_id.empty()) {
+        const auto scorer = synth_set(opts, "place.explore.scorer", "");
+        if (!scorer.empty()) {
+          const std::filesystem::path floorplan
+              = mapped_def.empty() ? std::filesystem::path{} : std::filesystem::absolute(mapped_def);
+          const auto flow = synth_set(opts, "place.explore.flow", "");
+          const auto name = floorplan.filename().string();
+          if (mapped_def.empty() || flow.empty() || (name != "1_1_u60_floorplan.def" && name != "2_1_floorplan.def")) {
+            throw Lhd_error{"usage", "T4 validation needs a PlaceReasoner-Bench mapped DEF and synth.place.explore.flow", ""};
+          }
+          gc.invocation_start_s = gui_invocation_start_s;
+          gc.validation_args    = {"python3",
+                                   std::filesystem::absolute(scorer).string(),
+                                   floorplan.parent_path().parent_path().string(),
+                                   "--flow",
+                                   std::filesystem::absolute(flow).string(),
+                                   "--aspect",
+                                name == "2_1_floorplan.def" ? "2:1" : "1:1",
+                                   "--openroad",
+                                   synth_set(opts, "place.explore.openroad", "openroad")};
+        }
+        // Reconstruct normalized inputs; emit slots, result paths and mutable
+        // caches are outputs of the parent and never enter the replay recipe.
+        gc.worker_args = {gc.controller_executable, "synth", "--reader", opts.reader, "--seed", opts.seed};
+        auto& args     = gc.worker_args;
+        if (!opts.top.empty()) {
+          args.insert(args.end(), {"--top", opts.top});
+        }
+        args.insert(args.end(), opts.files.begin(), opts.files.end());
+        args.insert(args.end(), opts.metadata_files.begin(), opts.metadata_files.end());
+        for (const auto& in : ir.lg_dirs) {
+          args.push_back("lg:" + in);
+        }
+        for (const auto& in : ir.ln_dirs) {
+          args.push_back("ln:" + in);
+        }
+        for (const auto& lib : opts.libs) {
+          args.insert(args.end(), {"--lib", lib.kind + ":" + lib.path});
+        }
+        for (const auto& [key, val] : opts.sets) {
+          if (key == "synth.place.gui.video" || key == "synth.place.gui.replay" || key == "synth.place.legroute.dump_regions") {
+            continue;
+          }
+          args.insert(args.end(), {"--set", key + "=" + val});
+        }
+        if (!opts.raw_args.empty()) {
+          args.push_back("--");
+          args.insert(args.end(), opts.raw_args.begin(), opts.raw_args.end());
+        }
+      }
+    }
+    {
+      rapidjson::StringBuffer                    buf;
+      rapidjson::Writer<rapidjson::StringBuffer> w(buf);
+      w.StartObject();
+      const auto entry = [&](const char* name, const std::string& value) {
+        w.Key(name);
+        w.String(value.c_str());
+      };
+      const auto paths = [&](const char* name, const auto& values) {
+        w.Key(name);
+        w.StartArray();
+        for (const auto& value : values) {
+          w.String(value.c_str());
+        }
+        w.EndArray();
+      };
+      auto cwd  = fs::current_path();
+      auto repo = cwd;
+      while (repo != repo.root_path() && !fs::exists(repo / ".git")) {
+        repo = repo.parent_path();
+      }
+      entry("version", std::string(kVersion));
+      entry("build", std::format("{:016x}", kPhysicalSrcSalt));
+      entry("repository", fs::exists(repo / ".git") ? repo.string() : "");
+      entry("cwd", cwd.string());
+      entry("workdir", fs::absolute(workdir(opts)).string());
+      entry("top", opts.top);
+      paths("sources", opts.files);
+      paths("sidecars", opts.metadata_files);
+      paths("lefs", place_options.lefs);
+      entry("liberty", liberty);
+      entry("macro_liberty", synth_set(opts, "macro_liberty", ""));
+      entry("sdc", synth_set(opts, "sdc", ""));
+      entry("floorplan", place_options.floorplan);
+      paths("argv", opts.invocation_argv);
+      w.Key("set");
+      w.StartObject();
+      for (const auto& [key, value] : opts.sets) {
+        entry(key.c_str(), value);
+      }
+      w.EndObject();
+      entry("guide", "pass/place/PLACEREASON.md");
+      w.EndObject();
+      gc.hello = buf.GetString();
     }
     gc.token = opts.gui_token;  // a restart keeps the page's URL (and so its token); empty: a fresh random one
     const std::string gui_video = synth_set(opts, "place.gui.video", "");
@@ -1950,68 +2157,41 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
     }
     // Fork a region: the placer wrote its netlist, floorplan and seed positions; start a new `lhd synth --gui` on them
     // (a child process with its own page, port and token, free to run with other flags) and hand back its page.
-    if (!opts.workdir.empty()) {
-      gc.fork_dir = opts.workdir + "/synth/place/forks";
-      gc.fork     = [&opts](const livehd::placement::gui::Fork_files& files, const livehd::placement::gui::Fork_request& req)
-          -> livehd::placement::gui::Fork_launch {
-        namespace fs = std::filesystem;
-        livehd::placement::gui::Fork_launch out;
-        const auto bare = [](std::string k) { return k.starts_with("synth.") ? k.substr(6) : k; };
-        // What the child must not inherit: the frame (the region has its own), the parent's GUI session and output files.
-        static const std::set<std::string> own{"place.die", "place.core", "place.floorplan", "place.seed", "place.start_map", "place.utilization",
-                                                "place.aspect", "place.gui.replay", "place.gui.video", "place.gui.poll"};
-        std::vector<std::string> args;
-        args.push_back(opts.invocation_argv.empty() ? std::string{"lhd"} : opts.invocation_argv[0]);
-        args.insert(args.end(), {"synth", "lg:" + files.net_dir, "--top", files.top, "--workdir", req.dir + "/W", "--gui", "--gui-no-open"});
-        for (const auto& [key, value] : opts.sets) {
-          if (!own.contains(bare(key))) {
-            args.push_back("--set");
-            args.push_back(key + "=" + value);
-          }
+    if (!opts.workdir.empty() && opts.gui_worker_id.empty()) {
+      gc.region_args = {gc.controller_executable, "synth"};
+      for (const auto& [key, value] : opts.sets) {
+        const auto                         bare = key.starts_with("synth.") ? key.substr(6) : key;
+        static const std::set<std::string> region_owned{"input_mapped_def",
+                                                        "place.die",
+                                                        "place.core",
+                                                        "place.floorplan",
+                                                        "place.seed",
+                                                        "place.start_map",
+                                                        "place.utilization",
+                                                        "place.aspect",
+                                                        "place.gui.replay",
+                                                        "place.gui.video",
+                                                        "place.gui.poll",
+                                                        "place.threads",
+                                                        "lhd.jobs",
+                                                        "place.legroute.dump_regions"};
+        if (!region_owned.contains(bare)) {
+          gc.region_args.insert(gc.region_args.end(), {"--set", key + "=" + value});
         }
-        args.insert(args.end(), {"--set", "synth.place.floorplan=" + files.floorplan, "--set", "synth.place.start_map=" + files.seed});
-        const auto log_path = req.dir + "/child.log";
-        std::vector<char*> cargs;
-        for (auto& a : args) {
-          cargs.push_back(a.data());
-        }
-        cargs.push_back(nullptr);
-        posix_spawn_file_actions_t actions;
-        posix_spawn_file_actions_init(&actions);
-        posix_spawn_file_actions_addopen(&actions, STDIN_FILENO, "/dev/null", O_RDONLY, 0);
-        posix_spawn_file_actions_addopen(&actions, STDOUT_FILENO, "/dev/null", O_WRONLY, 0);
-        posix_spawn_file_actions_addopen(&actions, STDERR_FILENO, log_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
-        pid_t pid = 0;
-        const int rc = posix_spawn(&pid, cargs[0], &actions, nullptr, cargs.data(), environ);
-        posix_spawn_file_actions_destroy(&actions);
-        if (rc != 0) {
-          out.error = std::string("cannot start lhd: ") + std::strerror(rc);
-          return out;
-        }
-        for (int i = 0; i < 1200; ++i) {  // up to 60 s for its page
-          std::this_thread::sleep_for(std::chrono::milliseconds(50));
-          std::ifstream log(log_path);
-          const std::string text{std::istreambuf_iterator<char>(log), {}};
-          if (const auto at = text.find("http://127"); at != std::string::npos) {
-            const auto end = text.find_first_of(" \r\n", at);
-            out.url        = text.substr(at, end == std::string::npos ? std::string::npos : end - at);
-            return out;
-          }
-          int status = 0;
-          if (::waitpid(pid, &status, WNOHANG) == pid) {
-            const auto tail = text.size() > 600 ? text.substr(text.size() - 600) : text;
-            out.error       = "the new session exited before it started: " + tail;
-            return out;
-          }
-        }
-        out.error = "the new session did not start within 60 s (see " + log_path + ")";
-        return out;
-      };
+      }
     }
-    gc.restart = [&opts, &gui_session, trace_path = gc.trace_path](const livehd::placement::gui::Restart_request& r) -> std::string {
+    gc.restart = [worker_id      = opts.gui_worker_id,
+                  worker_socket  = opts.gui_worker_socket,
+                  worker_tier    = opts.gui_worker_tier,
+                  repair_limit   = opts.gui_repair_limit,
+                  timing_limit   = opts.gui_timing_call_limit,
+                  repair_mode    = opts.gui_repair_mode,
+                  invocation     = opts.invocation_argv,
+                  work_directory = opts.workdir,
+                  trace_path     = gc.trace_path](const livehd::placement::gui::Restart_request& r) -> std::string {
       // Re-run the flow with the recorded actions up to the checkpoint under other flags: re-execute this process (same
       // pid, port and token, so the open page just reconnects). Caches that would skip the placement are removed.
-      if (!r.from_start && (opts.workdir.empty() || trace_path.empty())) {
+      if (!r.from_start && (work_directory.empty() || trace_path.empty())) {
         return "restart needs --workdir (the action trace is what gets replayed)";
       }
       namespace fs = std::filesystem;
@@ -2026,13 +2206,13 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
           return "cannot move the recorded actions into the new frame";
         }
       }
-      if (!opts.workdir.empty()) {
-        fs::remove_all(fs::path(opts.workdir) / "place_cache", ec);
-        fs::remove_all(fs::path(opts.workdir) / "physical_cache", ec);
+      if (!work_directory.empty()) {
+        fs::remove_all(fs::path(work_directory) / "place_cache", ec);
+        fs::remove_all(fs::path(work_directory) / "physical_cache", ec);
       }
       const auto bare = [](std::string k) { return k.starts_with("synth.") ? k.substr(6) : k; };
       std::vector<std::string> args;
-      const auto&              in = opts.invocation_argv;
+      const auto&              in = invocation;
       args.push_back(in.empty() ? std::string{"lhd"} : in[0]);
       for (size_t i = 1; i < in.size(); ++i) {
         const auto& t = in[i];
@@ -2052,13 +2232,34 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
         }
         args.push_back(t);
       }
+      auto                     raw = std::find(args.begin(), args.end(), "--");
+      std::vector<std::string> tail(raw, args.end());
+      args.erase(raw, args.end());
       for (const auto& [key, value] : r.set) {
         args.push_back("--set");
         args.push_back(key + "=" + value);
       }
-      args.insert(args.end(), {"--gui", "--gui-no-open", "--gui-port", std::to_string(gui_session->port()), "--gui-token", gui_session->token()});
+      args.insert(args.end(), {"--gui", "--gui-no-open", "--gui-port", std::to_string(r.listen_port), "--gui-token", r.token});
       if (!r.from_start) {
         args.insert(args.end(), {"--gui-resume", r.label + ":" + std::to_string(r.nth), "--gui-replay", resume_trace, "--gui-replay-seq", std::to_string(r.seq)});
+      }
+      args.insert(args.end(), tail.begin(), tail.end());
+      int inherited_table = -1;
+      if (!worker_id.empty()) {
+        inherited_table = fcntl(livehd::Job_manager::global().shared_fd(), F_DUPFD, 3);
+        if (inherited_table < 0) {
+          return "could not retain admission table across restart";
+        }
+        args.insert(args.begin() + 1,
+                    {"--placement-worker",
+                     std::to_string(getppid()),
+                     worker_socket,
+                     worker_id,
+                     std::to_string(inherited_table),
+                     worker_tier,
+                     std::to_string(repair_limit),
+                     repair_mode,
+                     std::to_string(timing_limit)});
       }
       std::vector<char*> cargs;
       for (auto& a : args) {
@@ -2066,17 +2267,15 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
       }
       cargs.push_back(nullptr);
       std::fflush(nullptr);
-      // The server stops first: the answer to this very command is written to its end, and no request arrives
-      // while the process image is replaced (the kernel refuses a new thread during an exec, and a handler
-      // thread that cannot start would end the run instead of restarting it).
-      gui_session->stop_serving();
       ::execv(cargs[0], cargs.data());
-      const std::string why = std::string("cannot re-execute lhd: ") + std::strerror(errno);
-      gui_session->start(nullptr);  // still this run: serve again so the page shows why
-      return why;
+      const int error = errno;
+      if (inherited_table >= 0) {
+        close(inherited_table);
+      }
+      return std::string("cannot re-execute lhd: ") + std::strerror(error);
     };
     gui_session = std::make_shared<livehd::placement::gui::Session>(gc);
-    livehd::placement::gui::set_active_session(gui_session);
+
     {  // the flags the page may edit: synth.place.* with the values this run uses
       std::string json = "[";
       bool        first = true;
@@ -2109,13 +2308,16 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
                             esc(opt.help));
         first = false;
       }
+      if (!pure_replay) {
+        std::string error;
+        if (!gui_session->start(&error)) {
+          throw Lhd_error{"usage", "--gui: " + error, "check the socket and port"};
+        }
+      }
       gui_session->set_options_json(json + "]");
     }
     if (!pure_replay) {
-      std::string gui_error;
-      if (!gui_session->start(&gui_error)) {
-        throw Lhd_error{"usage", "--gui: " + gui_error, "pick another --gui-port"};
-      }
+      livehd::placement::gui::set_active_session(gui_session);
       gui_session->set_stages({{"fp", true, true}, {"macro", true, true}, {"macro_legalize", true, true}, {"final", true, true}, {"legalize", true, true}, {"edit", false, true}});
       std::fprintf(stderr, "lhd synth --gui: %s\n", gui_session->url().c_str());
       if (!gui_session->agent_socket().empty()) {
@@ -2149,11 +2351,15 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
       }
     }
   } gui_finish{gui_session, std::uncaught_exceptions(), gui_video_out};
-  const bool run_resize   = truthy(synth_set(opts, "place.resize", run_place && run_sta && place_options.full ? "true" : "false"));
+  place_options.capture_exploration_end = opts.gui_worker_tier == "T2-end";
+  if (opts.gui_worker_tier == "T3") {
+    place_options.repair_trials = std::make_shared<livehd::placement::Options::Repair_trials>(
+        livehd::placement::Options::Repair_trials{opts.gui_repair_limit, 0, false});
+  }
   place_options.gp_resize = run_resize && place_options.gp_resize;
   // Timing weights are the normal full-placement objective. Synthesis-only
   // and GP-only commands do not enter the full-placement refinement loop.
-  const bool run_timing_place = truthy(synth_set(opts, "place.timing_driven", run_place && place_options.full ? "true" : "false"));
+  bool       run_timing_place = truthy(synth_set(opts, "place.timing_driven", run_place && place_options.full ? "true" : "false"));
   const bool macro_plan_only  = run_place && place_options.full && !place_options.final_cells;
   // The provisional domino profile (pass.usyn.physical=domino_provisional,
   // pass/domplace) is opt-in, and every consumer it does not support is an
@@ -2297,7 +2503,7 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
       = std::any_of(opts.sets.begin(), opts.sets.end(), [](const auto& value) { return value.first == "synth.place.io_resynth"; });
   double io_resynth_percent = 0;
   try {
-    const auto text    = synth_set(opts, "place.io_resynth", "5");
+    const auto text    = synth_set(opts, "place.io_resynth", input_mapped ? "0" : "5");
     size_t     end     = 0;
     io_resynth_percent = std::stod(text, &end);
     if (end != text.size() || !std::isfinite(io_resynth_percent) || io_resynth_percent < 0 || io_resynth_percent > 100) {
@@ -2306,6 +2512,9 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
   } catch (const std::exception&) {
     throw Lhd_error{"usage", "synth.place.io_resynth expects a percent in [0,100]", "0 disables whole-color feedback"};
   }
+  if (input_mapped && (io_resynth_percent > 0 || domino || run_reduce)) {
+    throw Lhd_error{"usage", "synth.input_mapped cannot use mapping, cone reduction or whole-color feedback options", ""};
+  }
   if (explicit_io_resynth && io_resynth_percent > 0 && !user_workdir) {
     throw Lhd_error{"usage", "synth.place.io_resynth needs --workdir", "use a separate workdir for each placement configuration"};
   }
@@ -2313,7 +2522,7 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
       && (!run_place || !place_options.full || !run_sta || mapper_method != "pass.abc")) {
     throw Lhd_error{"usage", "synth.place.io_resynth requires ABC full placement and OpenTimer", "use 0 to disable"};
   }
-  if (gui_session && !sdc.empty()) {  // the page shows the achieved frequency against this period
+  if (gui_session && !sdc.empty()) {
     if (const auto clock_period = sdc_min_clock_period_ps(sdc, liberty)) {
       gui_session->set_clock_period_ps(*clock_period);
     }
@@ -2337,13 +2546,13 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
   const auto*       report_emit = find_slot(opts.emit_dirs, "report");
   // --emit-dir lg: RELOCATES the mapped netlist (one copy, not two).
   const std::string net_dir     = lg_emit != nullptr ? lg_emit->path : root + "/net";
-  if (canon(net_dir) == canon(lg_dir)) {
+  if (paths_nest(net_dir, lg_dir)) {
     throw Lhd_error{"usage",
                     std::format("--emit-dir lg:{} is the flow's own compiled-design directory", net_dir),
                     "the mapped netlist goes to <workdir>/synth/net by default; name another directory"};
   }
   for (const auto& in : ir.lg_dirs) {
-    if (canon(in) == canon(lg_dir)) {
+    if (paths_nest(in, lg_dir)) {
       throw Lhd_error{"usage",
                       std::format("lg:{} is the flow's own compiled-design directory under --workdir", in),
                       "synth never rewrites an lg: input; point it at the design library, or at a different --workdir"};
@@ -2431,6 +2640,12 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
   auto              top_g = pick_top_graph(var, "", opts.top, "", "synth", "synth");
   const std::string top{top_g->get_name()};
   opts.top = top;
+  if (run_place && opts.metadata) {
+    auto poses = livehd::placement::read_macro_state(*opts.metadata, top);
+    if (!poses.empty()) {
+      place_options.fixed_macro_poses = std::make_shared<const std::vector<livehd::placement::Macro_pose>>(std::move(poses));
+    }
+  }
 
   std::unique_ptr<Physical_cache> physical_cache;
   // An interactive (or replayed) session must run the placement: no whole-flow physical replay, no placement cache.
@@ -2444,7 +2659,12 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
     for (std::string path; paths >> path;) {
       dependencies.push_back(path);
     }
-    for (const auto& path : {sdc, place_options.tech_rc_file, place_options.tracks_file, place_options.floorplan, place_options.seed_file}) {
+    for (const auto& path : {mapped_def,
+                             sdc,
+                             place_options.tech_rc_file,
+                             place_options.tracks_file,
+                             place_options.floorplan,
+                             place_options.seed_file}) {
       if (!path.empty()) {
         dependencies.push_back(path);
       }
@@ -2499,7 +2719,7 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
   }
   // Kept for the join trials below: they color again with the same options.
   Eprp_var::Eprp_dict color_labels;
-  {
+  if (!input_mapped) {
     Eprp_var::Eprp_dict labels;
     labels["alg"]        = "synth";
     labels["seed"]       = opts.seed;
@@ -2636,13 +2856,66 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
       res.outputs.push_back(path);
     }
   };
-  write_groups();
+  if (!input_mapped) {
+    write_groups();
+  }
 
   // ---- 3. ABC tech-map --------------------------------------------------------
   const std::string qor_path = root + "/qor.json";
   var.synthesis_feedback     = io_store;
   std::map<std::string, std::string> io_mapper_options;
-  {
+  if (input_mapped) {
+    if (std::any_of(ir.lg_dirs.begin(), ir.lg_dirs.end(), [&](const auto& in) { return paths_nest(in, net_dir); })) {
+      throw Lhd_error{"usage", "mapped output overlaps the input graph library", "choose another --emit-dir lg:"};
+    }
+    if (paths_nest(lg_dir, net_dir)) {
+      throw Lhd_error{"usage", "mapped output overlaps the compiled input library", "choose another --emit-dir lg:"};
+    }
+    std::error_code ec;
+    fs::remove_all(net_dir, ec);
+    if (ec) {
+      throw Lhd_error{"config", "cannot clear stale mapped output " + net_dir, ec.message()};
+    }
+    ensure_dir(net_dir);
+    auto& output = livehd::Hhds_graph_library::instance(net_dir);
+    if (!mapped_def.empty()) {
+      if (!run_place) {
+        throw Lhd_error{"usage", "synth.input_mapped_def requires placement and LEF technology", "set synth.place=true"};
+      }
+      const auto frame = livehd::physical::read_def(mapped_def);
+      if (frame.design != top) {
+        throw Lhd_error{"usage", "DEF DESIGN differs from the selected Verilog top", frame.design + " vs " + top};
+      }
+      try {
+        auto unresolved = std::make_shared<std::vector<livehd::physical::Net>>();
+        livehd::physical::mapped_graph(output, frame, place_options.technology().lef, unresolved.get());
+        if (!unresolved->empty()) {
+          if (run_resize || run_resynth || run_stage_timing) {
+            throw std::invalid_argument("directed repair or stage timing requires a unique driver on every connected net");
+          }
+          place_options.unresolved_def_nets = std::move(unresolved);
+          run_sta = run_timing_place = false;
+          const auto message
+              = std::format("{} undriven or multiply driven DEF nets retained for placement; directed timing unavailable",
+                            place_options.unresolved_def_nets->size());
+          livehd::diag::warn("pass.place", "unresolved-physical-net", "unsupported").msg("{}", message).emit();
+          if (gui_session) {
+            gui_session->set_note(message);
+          }
+        }
+      } catch (const std::exception& error) {
+        throw Lhd_error{"unsupported", std::string("exact DEF netlist import failed: ") + error.what(), mapped_def};
+      }
+      res.inputs.push_back(mapped_def);
+    } else if (!livehd::copy_with_callees(output, livehd::Hhds_graph_library::instance(lg_dir), top)) {
+      throw Lhd_error{"config", "could not import mapped design " + top, lg_dir};
+    }
+    livehd::Hhds_graph_library::save(net_dir);
+    if (user_workdir || lg_emit != nullptr) {
+      res.outputs.push_back(net_dir);
+    }
+    res.recipe_steps.emplace_back("synth.input_mapped");
+  } else {
     std::error_code ec;
     fs::remove_all(net_dir, ec);  // a stale netlist must never shadow a region shell the mapper fills
     ensure_dir(net_dir);
@@ -2884,7 +3157,7 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
       res.outputs.push_back(qor_path);
     }
   }
-  const std::string abc_qor         = mapped_output ? slurp_json(qor_path) : std::string{};
+  const std::string abc_qor         = mapped_output && !input_mapped ? slurp_json(qor_path) : std::string{};
   // The mapper's own report (USYN endpoint selection and residual optimization).
   const bool        has_report      = !mapper->report.empty();
   const std::string report_path     = has_report ? std::format("{}.{}.json", qor_path, mapper->report) : std::string{};
@@ -3073,40 +3346,39 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
       const auto  restored_net = root + "/repaired_net";
       restored                 = physical_cache->restore(restored_net, root + "/place");
       if (restored) {
-        if (place_options.metadata) {
-          for (const auto* suffix : {"/place/macro/metadata.json", "/place/metadata.json"}) {
-            const auto               path = root + suffix;
-            livehd::metadata::Bundle merged(place_options.metadata->json());
-            if (fs::is_regular_file(path)) {
-              auto cached = livehd::metadata::Bundle::read(path);
-              for (const auto* klass : {"livehd.placement.state", "livehd.placement.hint_results"}) {
-                for (const auto* record : cached.select(klass, top)) {
-                  merged.replace(*record);
-                }
+        for (const auto* suffix : {"/place/macro/metadata.json", "/place/metadata.json"}) {
+          const auto               path = root + suffix;
+          livehd::metadata::Bundle merged(place_options.metadata ? place_options.metadata->json() : "[]");
+          if (fs::is_regular_file(path)) {
+            auto cached = livehd::metadata::Bundle::read(path);
+            merged.erase_selected("livehd.placement.state", top);
+            for (const auto* klass : {"livehd.placement.state", "livehd.placement.hint_results"}) {
+              for (const auto* record : cached.select(klass, top)) {
+                merged.replace(*record);
               }
-              // Replay advisory diagnostics once, from the final bundle only.
-              if (std::string_view(suffix) == "/place/metadata.json") {
-                for (const auto* record : cached.select("livehd.placement.hint_results", top)) {
-                  if (!record->HasMember("hints") || !(*record)["hints"].IsArray()) {
+            }
+            // Replay advisory diagnostics once, from the final bundle only.
+            if (std::string_view(suffix) == "/place/metadata.json") {
+              for (const auto* record : cached.select("livehd.placement.hint_results", top)) {
+                if (!record->HasMember("hints") || !(*record)["hints"].IsArray()) {
+                  continue;
+                }
+                for (const auto& h : (*record)["hints"].GetArray()) {
+                  if (!h.IsObject() || !h.HasMember("status") || !h["status"].IsString()) {
                     continue;
                   }
-                  for (const auto& h : (*record)["hints"].GetArray()) {
-                    if (!h.IsObject() || !h.HasMember("status") || !h["status"].IsString()) {
-                      continue;
-                    }
-                    const std::string_view status = h["status"].GetString();
-                    if ((status == "discarded" || status == "relaxed") && h.HasMember("id") && h["id"].IsString()
-                        && h.HasMember("reason") && h["reason"].IsString()) {
-                      livehd::diag::warn("pass.place", "placement-hint", "unsupported")
-                          .msg("placement hint '{}': {} (cached {})", h["id"].GetString(), h["reason"].GetString(), status)
-                          .emit();
-                    }
+                  const std::string_view status = h["status"].GetString();
+                  if ((status == "discarded" || status == "relaxed") && h.HasMember("id") && h["id"].IsString()
+                      && h.HasMember("reason") && h["reason"].IsString()) {
+                    livehd::diag::warn("pass.place", "placement-hint", "unsupported")
+                        .msg("placement hint '{}': {} (cached {})", h["id"].GetString(), h["reason"].GetString(), status)
+                        .emit();
                   }
                 }
               }
             }
-            merged.write(path);
           }
+          merged.write(path);
         }
         restored_library = std::make_unique<hhds::GraphLibrary>();
         restored_library->load(restored_net);
@@ -3167,7 +3439,6 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
       if (found == net.graphs.end()) {
         throw Lhd_error{"internal", "mapped top missing before placement", ""};
       }
-      place_options.liberty    = liberty;
       place_options.output_dir = root + "/place";
       if (place_options.full) {
         livehd::placement::initialize_growth_budget(**found, place_options);
@@ -3251,33 +3522,37 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
         throw Lhd_error{"usage", "synth.timing.engine expects opentimer, fast or compare, got '" + timing_engine + "'", ""};
       }
       std::unique_ptr<livehd::timing::fast::Physical_ranker> fast_ranker;
+      const auto                                             make_fast_ranker = [&]() {
+        const auto read_text = [](std::string_view path) {
+          auto text = livehd::file_utils::read_file(std::string(path));
+          if (!text) {
+            throw Lhd_error{"io", "synth.timing.engine=fast cannot read " + std::string(path), ""};
+          }
+          return std::move(*text);
+        };
+        livehd::timing::fast::Physical_ranker::Options ranker_options;
+        bool                                           first_file = true;
+        for (const auto path : absl::StrSplit(liberty, absl::ByAnyChar(", \t\n"), absl::SkipEmpty())) {
+          auto text = read_text(path);
+          if (first_file) {
+            // Macro libraries (SRAM, hard macros) join the setup corner.
+            for (const auto extra : absl::StrSplit(extra_libs(), absl::ByAnyChar(", \t\n"), absl::SkipEmpty())) {
+              text += "\n" + read_text(extra);
+            }
+            first_file = false;
+          }
+          ranker_options.liberty_texts.push_back(std::move(text));
+          ranker_options.corner_names.emplace_back(path);
+          break;  // one corner for ranking; the min corner joins with hold (step H)
+        }
+        if (!sdc.empty()) {
+          ranker_options.sdc_text = read_text(sdc);
+        }
+        return std::make_unique<livehd::timing::fast::Physical_ranker>(std::move(ranker_options));
+      };
       const auto ensure_fast_ranker = [&] {
         if (!fast_ranker) {
-          const auto read_text = [](std::string_view path) {
-            auto text = livehd::file_utils::read_file(std::string(path));
-            if (!text) {
-              throw Lhd_error{"io", "synth.timing.engine=fast cannot read " + std::string(path), ""};
-            }
-            return std::move(*text);
-          };
-          livehd::timing::fast::Physical_ranker::Options ranker_options;
-          bool                                           first_file = true;
-          for (const auto path : absl::StrSplit(liberty, absl::ByAnyChar(", \t\n"), absl::SkipEmpty())) {
-            auto text = read_text(path);
-            if (first_file) {
-              // Macro libraries (SRAM, hard macros) join the setup corner.
-              for (const auto extra : absl::StrSplit(extra_libs(), absl::ByAnyChar(", \t\n"), absl::SkipEmpty())) {
-                text += "\n" + read_text(extra);
-              }
-              first_file = false;
-            }
-            ranker_options.liberty_texts.push_back(std::move(text));
-            break;  // one corner for ranking; the min corner joins with hold (step H)
-          }
-          if (!sdc.empty()) {
-            ranker_options.sdc_text = read_text(sdc);
-          }
-          fast_ranker = std::make_unique<livehd::timing::fast::Physical_ranker>(std::move(ranker_options));
+          fast_ranker = make_fast_ranker();
         }
       };
       if (timing_engine == "fast") {
@@ -3392,7 +3667,7 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
       // 2i-interact: the panel shows the numbers every STA evaluation of the flow already computes (read-only).
       const auto show_timing = [&](const livehd::timing::Feedback& fb) {
         if (gui_session && fb.wns) {
-          gui_session->set_timing(*fb.wns * fb.time_unit_ps, fb.tns ? *fb.tns * fb.time_unit_ps : 0., -1);
+          gui_session->set_timing(*fb.wns * fb.time_unit_ps, fb.tns ? *fb.tns * fb.time_unit_ps : std::nan(""), -1);
         }
       };
       const auto compare_detailed = [&](const livehd::timing::Feedback& reference, const livehd::timing::Feedback& fast) {
@@ -3446,6 +3721,9 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
         std::print("compare detailed: labels only in reference {}\n", missing);
       };
       const auto evaluate = [&](const livehd::placement::Result& state) {
+        if (gui_session) {
+          gui_session->solver_timing_call(true);
+        }
         Phase_timer phase(res, "pass.opentimer.incremental");
         const auto  controls = livehd::placement::prects_networks(timing_tech, state.floorplan, state.prects);
         if (timing_engine == "fast") {
@@ -3474,6 +3752,9 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
         return fb;
       };
       const auto rank = [&](const livehd::placement::Ranking_view& state) {
+        if (gui_session) {
+          gui_session->solver_timing_call(false);
+        }
         if (timing_engine == "fast") {
           Phase_timer phase(res, "pass.timing.fast_ranking");
           return fast_rank(state);
@@ -3519,8 +3800,10 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
         }
         return used < eval_budget || used - state.base < repair_allowance;
       };
-      const livehd::placement::Trial_admission admit_sizing    = [&] { return own_allowance(sizing_allowance); };
-      const livehd::placement::Trial_admission admit_buffering = [&] { return own_allowance(buffering_allowance); };
+      const livehd::placement::Trial_admission admit_sizing
+          = [&] { return !place_options.mutation_policy().no_sizing && own_allowance(sizing_allowance); };
+      const livehd::placement::Trial_admission admit_buffering
+          = [&] { return !place_options.mutation_policy().no_buffer_edits && own_allowance(buffering_allowance); };
       const livehd::placement::Trial_admission admit_refinement = [&] {
         // Leave room for sizing and buffer repair. Rejected placement trials
         // must not consume the entire shared allowance on overloaded designs.
@@ -3537,11 +3820,13 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
                                                                       io_mapper_options,
                                                                       evaluate,
                                                                       io_resynth_percent);
-        (void)io_flow->before_placement();
+        if (!place_options.mutation_policy().no_resynthesis) {
+          (void)io_flow->before_placement();
+        }
         place_options.after_stage = [&, io_log](auto stage, const auto& state) {
           Phase_timer   io_phase(res, "pass.place.io_resynth");
           Stdout_to_log io_redirect(io_log);
-          return io_flow->after_stage(stage, state);
+          return !place_options.mutation_policy().no_resynthesis && io_flow->after_stage(stage, state);
         };
       }
       // `synth.place.unknown_const=zero` is a refinement of a don't-care, so say how many bits it touched.
@@ -3568,7 +3853,7 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
       std::vector<std::unique_ptr<hhds::GraphLibrary>> prepared_libraries;
       bool                                             prepared_before = false;
       const auto                                       prepare_input   = [&]() {
-        if (!place_options.full || !run_buffer_cleanup) {
+        if (!place_options.full || !run_buffer_cleanup || place_options.mutation_policy().no_buffer_edits) {
           return *found;
         }
         Phase_timer phase(res, "pass.place.buffer_cleanup");
@@ -3586,7 +3871,7 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
         prepared_before = true;
         return cleaned.graph;
       };
-      if (place_options.metadata) {
+      if (gui_session || (place_options.metadata && !place_options.metadata->select("livehd.placement.hints", top).empty())) {
         // Both buffer cleanup and the timing seed flatten this hierarchy.
         place_options.metadata_scopes = std::make_shared<const std::vector<livehd::placement::Hint_scope>>(
             livehd::placement::placement_hint_scopes(**found, place_options.technology().lef));
@@ -3598,6 +3883,9 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
         if (timing_engine == "fast") {
           // GP checkpoints rank from numeric wire trees: no RC strings are built for them.
           place_options.gp_rank_trees = [&](const livehd::placement::Trees_view& state) {
+            if (gui_session) {
+              gui_session->solver_timing_call(false);
+            }
             Phase_timer   phase(res, "pass.timing.fast_ranking");
             Stdout_to_log redirect(timing_log);
             ensure_fast_ranker();
@@ -3608,8 +3896,38 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
         // GP consumes criticality only. Physical resizing runs after legal GP.
         place_options.fp_resize   = false;
       }
-      if (gui_session) {
-        place_options.gui_rank = rank;  // read-only timing refresh for the panel (never the flow's own gp_rank)
+      if (gui_session && !place_options.unresolved_def_nets) {
+        // Each GUI timer owns its incremental state and its evaluation counters.
+        // A drag or a full timing request must never perturb a flow checkpoint.
+        place_options.gui_journal = std::make_shared<livehd::timing::Whatif*>(nullptr);
+        auto measure              = [&,
+                        journal = place_options.gui_journal,
+                        timer   = std::shared_ptr<livehd::opentimer::Physical_session>{},
+                        fast    = std::shared_ptr<livehd::timing::fast::Physical_ranker>{}](
+                           const livehd::placement::Ranking_view& state,
+                           bool                                   full) mutable {
+          Stdout_to_log redirect(timing_log);
+          const auto&   cuts = state.controls.timing_cuts;
+          if (timing_engine == "fast") {
+            if (!fast) {
+              fast = make_fast_ranker();
+            }
+            if (full) {
+              *journal = &fast->whatif();
+            }
+            return full ? fast->evaluate(state.graph, state.parasitics, cuts) : fast->rank(state.graph, state.parasitics, cuts);
+          }
+          if (!timer) {
+            timer = std::make_shared<livehd::opentimer::Physical_session>(timing_options, place_options.threads);
+          }
+          using Purpose = livehd::opentimer::Physical_session::Purpose;
+          if (full) {
+            *journal = &timer->whatif();
+          }
+          return timer->evaluate(state.graph, state.parasitics, cuts, full ? Purpose::detailed : Purpose::ranking);
+        };
+        place_options.gui_evaluate = [measure](const auto& state) mutable { return measure(state, true); };
+        place_options.gui_rank     = [measure](const auto& state) mutable { return measure(state, false); };
       }
       if (io_flow && !place_options.macro_legalize_cells && !place_options.fp_evaluate) {
         // Resynthesis still needs one selected GP measurement when periodic
@@ -3790,7 +4108,14 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
       if (io_flow) {
         timed_placement.timing = io_flow->take_final_timing();
       }
-      if (!macro_plan_only && (run_resize || run_timing_place || run_resynth)) {
+      // A T3 request can ask for a bounded terminal repair on a no-resize run.
+      // It starts after replay and legalization; all changes use the ordinary timing acceptance checks.
+      const bool experimental_repair = bool(place_options.repair_trials);
+      const bool terminal_resize     = experimental_repair
+                                           ? opts.gui_repair_mode.contains("sizing") || opts.gui_repair_mode.contains("buffering")
+                                           : run_resize;
+      const bool terminal_resynth    = experimental_repair ? opts.gui_repair_mode.contains("resynthesis") : run_resynth;
+      if (!macro_plan_only && (terminal_resize || run_timing_place || terminal_resynth)) {
         // Every round/trial below re-runs placement (and resynth a fresh ABC frame
         // per cone): keep their output off the protocol stdout, as for pass.place.
         phase_step = "pass.place.optimize";
@@ -3836,12 +4161,20 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
               res.recipe_steps.emplace_back("pass.place.timing_driven.regions");
             }
           }
-          if (run_resize && place_options.resize_engine == "new") {
+          if (experimental_repair) {
+            const auto& mode = opts.gui_repair_mode;
+            if (!terminal_resize && !terminal_resynth) {
+              throw std::runtime_error("invalid terminal repair policy");
+            }
+            place_options.repair_trials->started = true;
+            gui_session->begin_terminal_repair({!terminal_resynth, !mode.contains("sizing"), !mode.contains("buffering")});
+          }
+          if (terminal_resize && place_options.resize_engine == "new") {
             Phase_timer phase(res, "pass.place.resize");
             repaired = livehd::placement::resize_placed(std::move(placed), place_options, evaluate);
             placed   = std::move(repaired.placed);
             res.recipe_steps.emplace_back("pass.place.resize");
-          } else if (run_resize) {
+          } else if (terminal_resize) {
             Phase_timer phase(res, "pass.place.resize");
             repaired = livehd::placement::repair_buffers(std::move(placed),
                                                          place_options,
@@ -3852,7 +4185,7 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
             placed   = std::move(repaired.placed);
             res.recipe_steps.emplace_back("pass.place.resize");
           }
-          if (run_resize && place_options.resize_engine != "new") {
+          if (terminal_resize && place_options.resize_engine != "new") {
             Phase_timer phase(res, "pass.place.repair");
             design_repaired = livehd::placement::repair_buffers(std::move(placed),
                                                                 place_options,
@@ -3867,8 +4200,8 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
           // computed for is stale. Re-place with the weights of the repaired result (a new buffer is a timed net, so
           // its slack rank pulls it to its loads), repair again, and keep the iteration only while it improves timing.
           // Each iteration may use a larger multiple of the growth allowance: the loop stops when more does not help.
-          if (run_resize && place_options.resize_engine != "new" && place_options.repair_iterations > 0 && design_repaired.timing
-              && !design_repaired.timing->ranking_only) {
+          if (!experimental_repair && run_resize && place_options.resize_engine != "new" && place_options.repair_iterations > 0
+              && design_repaired.timing && !design_repaired.timing->ranking_only) {
             Phase_timer phase(res, "pass.place.repair_loop");
             auto        best_timing = *design_repaired.timing;
             repair_loop_report      = "[";
@@ -3886,7 +4219,8 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
                 iter_options.growth_budget->fraction = place_options.growth_budget->fraction * (it + 2);
               }
               const auto base = detailed_count();
-              const livehd::placement::Trial_admission admit_iteration = [&] { return detailed_count() - base < loop_allowance / 2; };
+              const livehd::placement::Trial_admission admit_iteration
+                  = [&] { return !place_options.mutation_policy().no_sizing && detailed_count() - base < loop_allowance / 2; };
               Own_allowance                            loop_buffering;
               const livehd::placement::Trial_admission admit_loop_buffering = [&] {
                 const size_t used = detailed_count();
@@ -3894,7 +4228,7 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
                   loop_buffering.started = true;
                   loop_buffering.base    = used;
                 }
-                return used - loop_buffering.base < loop_allowance / 2;
+                return !place_options.mutation_policy().no_buffer_edits && used - loop_buffering.base < loop_allowance / 2;
               };
               const auto  before_wns = best_timing.wns.value_or(0), before_tns = best_timing.tns.value_or(0);
               // a rejected iteration takes its reset-tree depth decisions back with its placement
@@ -3940,11 +4274,11 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
             design_repaired.timing = std::move(best_timing);  // the prior of the final legalization
             res.recipe_steps.emplace_back("pass.place.repair_loop");
           }
-          if (run_resynth) {
+          if (terminal_resynth && !place_options.mutation_policy().no_resynthesis) {
             Phase_timer phase(res, "pass.place.resynth");
-            auto        prior = run_resize ? (place_options.resize_engine == "new" ? std::move(repaired.timing)
-                                                                                   : std::move(design_repaired.timing))
-                                           : std::move(timed_placement.timing);
+            auto        prior = terminal_resize ? (place_options.resize_engine == "new" ? std::move(repaired.timing)
+                                                                                        : std::move(design_repaired.timing))
+                                                : std::move(timed_placement.timing);
             resynthesized     = livehd::placement::resynthesize_cones(
                 std::move(placed),
                 place_options,
@@ -3981,23 +4315,25 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
         phase_log.clear();
         set_crash_context({}, {});
       }
-      if (place_options.optimization_pending) {
+      if (place_options.optimization_pending || experimental_repair) {
         Phase_timer   phase(res, "pass.place.final_legalize");
         const auto    final_log = next_log_path(opts, "pass.place.final_legalize");
         Stdout_to_log redirect(final_log);
         // Intermediate timing and repair borrowed Result::parasitics. Persist
         // the accepted final geometry before saving or invoking standalone STA.
         place_options.persist_parasitics = true;
-        auto prior = sat_step_ran  ? std::move(sat_aligned.timing)
-                     : run_resynth ? std::move(resynthesized.timing)
-                     : run_resize
-                         ? (place_options.resize_engine == "new" ? std::move(repaired.timing) : std::move(design_repaired.timing))
-                         : std::move(timed_placement.timing);
+        auto prior                       = sat_step_ran       ? std::move(sat_aligned.timing)
+                                           : terminal_resynth ? std::move(resynthesized.timing)
+                                           : terminal_resize
+                                               ? (place_options.resize_engine == "new" ? std::move(repaired.timing) : std::move(design_repaired.timing))
+                                               : std::move(timed_placement.timing);
         finalized  = livehd::placement::finalize_placement(placed, place_options, evaluate, std::move(prior));
         placed     = std::move(finalized.placed);
         res.recipe_steps.emplace_back("pass.place.final_legalize");
       }
-      if (run_domino_sizing) {
+      const auto terminal_policy = place_options.mutation_policy();
+      if (!experimental_repair && run_domino_sizing
+          && (!terminal_policy.no_sizing || (domino_sizing.buffers && !terminal_policy.no_buffer_edits))) {
         // Post-legal domino sizing on native stage timing: every trial is
         // re-placed through the two-row ECO and re-timed with this timer.
         if (!stage_timer) {
@@ -4041,6 +4377,15 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
           res.outputs.push_back(root + "/place/domino_sizing.json");
         }
       }
+      if (experimental_repair || place_options.capture_exploration_end) {
+        if (!placed.publish_exploration) {
+          throw Lhd_error{"unsupported", "no current final placement document for exploration", ""};
+        }
+        if (experimental_repair) {
+          gui_session->set_repair_trials(place_options.repair_trials->used);
+        }
+        placed.publish_exploration(placed, place_options);
+      }
       net.graphs = {placed.graph};
       if (!repair_loop_report.empty()) {
         rapidjson::Document q, loop;
@@ -4057,7 +4402,9 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
       if (io_flow) {
         const auto    io_log = next_log_path(opts, "pass.place.io_resynth.final");
         Stdout_to_log redirect(io_log);
-        (void)io_flow->after_stage(livehd::placement::Placement_stage::final, placed, std::move(finalized.timing));
+        if (!place_options.mutation_policy().no_resynthesis) {
+          (void)io_flow->after_stage(livehd::placement::Placement_stage::final, placed, std::move(finalized.timing));
+        }
         rapidjson::Document q, feedback;
         q.Parse(placed.qor.c_str());
         feedback.Parse(io_flow->report().c_str());
@@ -4420,7 +4767,13 @@ void gui_report_failure(const Result& res) {
       detail += "\n" + rec.message;
     }
   }
-  std::fprintf(stderr, "lhd synth --gui: the run failed; the page shows the error. Exit it in the page (or restart with other flags).\n");
-  session->fail("The run failed (" + res.error_class + ")", detail);
+  std::fprintf(stderr, "lhd synth --gui: the run failed. If the page is open, use it to exit or restart.\n");
+  try {
+    session->fail("The run failed (" + res.error_class + ")", detail);
+  } catch (const std::exception& e) {
+    // The CLI has already emitted the original failure and its exit code. Its
+    // controller may itself have died, including while displaying that failure.
+    std::fprintf(stderr, "lhd synth --gui: could not display the failure: %s\n", e.what());
+  }
 }
 }  // namespace lhd

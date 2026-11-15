@@ -71,7 +71,7 @@ std::string canonical(const rapidjson::Value& value) {
 }
 Bundle::Bundle() { entries_.SetArray(); }
 Bundle::Bundle(std::string_view json) {
-  entries_.Parse(json.data(), json.size());
+  entries_.Parse<rapidjson::kParseFullPrecisionFlag>(json.data(), json.size());
   if (entries_.HasParseError() || !entries_.IsArray()) {
     throw std::invalid_argument("metadata must be an array of class-tagged records");
   }
@@ -154,6 +154,17 @@ void Bundle::erase_selected(std::string_view klass, std::string_view design) {
     } else {
       ++i;
     }
+  }
+}
+void Bundle::replace_selected(std::string_view klass, std::string_view design, const Bundle& source) {
+  if (&source == this) {
+    return;
+  }
+  const auto records = source.select(klass, design);
+  erase_selected(klass, design);
+  auto& a = entries_.GetAllocator();
+  for (const auto* entry : records) {
+    entries_.PushBack(rapidjson::Value(*entry, a), a);
   }
 }
 void Bundle::replace(const rapidjson::Value& record) {

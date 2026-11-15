@@ -440,7 +440,7 @@ Repair_result resynthesize_cones(Result initial, const Options& requested, const
   w.StartArray();
   std::set<std::string> tried;
   unsigned              attempts = 0, accepted = 0;
-  while (attempts < 4) {
+  while (attempts < 4 && options.trial_available() && !options.mutation_policy().no_resynthesis) {
     if (admit_trial && !admit_trial()) {
       break;
     }
@@ -464,7 +464,7 @@ Repair_result resynthesize_cones(Result initial, const Options& requested, const
         break;
       }
     }
-    if (root.empty()) {
+    if (root.empty() || !options.take_repair_trial()) {
       break;
     }
     tried.insert(root);

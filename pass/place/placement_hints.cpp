@@ -1,6 +1,7 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "placement_hints.hpp"
 
+
 #include <algorithm>
 #include <cmath>
 #include <functional>
@@ -10,6 +11,7 @@
 
 #include "core/diag.hpp"
 #include "dreamplace/native/orientation.hpp"
+#include "graph/attrs.hpp"
 #include "graph/node_util.hpp"
 namespace livehd::placement {
 namespace dp = DreamPlace::native;
@@ -84,23 +86,59 @@ Box bounds(const dp::Design& d, const std::vector<int>& nodes) {
   }
   return b;
 }
+std::pair<double, double> group_center(const dp::Design& d, const std::vector<int>& nodes) {
+  double x = 0, y = 0;
+  for (int i : nodes) {
+    const auto b = box(d, i, false);
+    x += (b.xl + b.xh) / 2;
+    y += (b.yl + b.yh) / 2;
+  }
+  return {x / nodes.size(), y / nodes.size()};
+}
+
+// Automatic snapping chooses the nearest parallel edges, then centers the
+// orthogonal axis. Its residual must use the same side as the actual pull.
+std::pair<double, double> relative_shift(Box a, Box b, std::string_view kind, std::string_view side, double gap) {
+  if (side.empty()) {
+    side = std::min({std::pair<double, std::string_view>{std::abs(b.xh - a.xl), "east"},
+                     {std::abs(b.xl - a.xh), "west"}, {std::abs(b.yh - a.yl), "north"}, {std::abs(b.yl - a.yh), "south"}}).second;
+  }
+  const bool horizontal = side == "east" || side == "west";
+  const bool positive   = side == "east" || side == "north";
+  double delta = side == "east" ? b.xh - a.xl : side == "west" ? b.xl - a.xh : side == "north" ? b.yh - a.yl : b.yl - a.yh;
+  double across = 0;
+  if (kind == "direction") {
+    delta = positive ? std::max(0., delta) : std::min(0., delta);
+  } else if (kind == "gap") {
+    delta += positive ? gap : -gap;
+  } else {
+    across = horizontal ? (b.yl + b.yh - a.yl - a.yh) / 2 : (b.xl + b.xh - a.xl - a.xh) / 2;
+  }
+  return horizontal ? std::pair{delta, across} : std::pair{across, delta};
+}
 bool overlap(Box a, Box b) { return a.xl < b.xh && b.xl < a.xh && a.yl < b.yh && b.yl < a.yh; }
 bool movable_macro(const dp::Design& d, int i) { return i >= 0 && i < d.num_movable && !d.node_macro.empty() && d.node_macro[i]; }
 }  // namespace
 std::vector<Hint_scope> placement_hint_scopes(hhds::Graph& top, const physical::Technology& tech) {
-  std::vector<Hint_scope>                                     out;
-  std::set<hhds::Gid>                                         active;
-  std::function<void(hhds::Graph&, std::vector<std::string>)> walk = [&](hhds::Graph& g, std::vector<std::string> p) {
+  std::vector<Hint_scope> out;
+  std::set<hhds::Gid> active;
+  std::vector<size_t> memories;
+  auto walk = [&](auto&& self, hhds::Graph& g, std::vector<std::string> p, bool named_instance) -> void {
     if (!active.insert(g.get_gid()).second) {
       return;
     }
     out.push_back({std::string(g.get_name()), p});
+    const bool memory = named_instance && g.get_input_node().attr(attrs::memory_module).has();
+    if (memory) {
+      memories.push_back(out.size() - 1);
+      out.back().memory_banks.emplace();
+    }
     for (auto n : g.body().nodes()) {
       if (gu::type_op_of(n) != Ntype_op::Sub || n.is_loop_subnode()) {
         continue;
       }
-      auto child = n.get_subnode_graph();
-      if (!child || tech.macros.contains(std::string(child->get_name()))) {
+      auto io = n.get_subnode_io();
+      if (!io) {
         continue;
       }
       auto next = p;
@@ -111,11 +149,24 @@ std::vector<Hint_scope> placement_hint_scopes(hhds::Graph& top, const physical::
           next.push_back(std::move(name));
         }
       }
-      walk(*child, std::move(next));
+      const bool named = next.size() > p.size();
+      if (const auto macro = tech.macros.find(std::string(io->get_name())); macro != tech.macros.end()) {
+        if (!memories.empty() && macro->second.klass.starts_with("BLOCK") && physical::hard_macro(macro->second)) {
+          for (const auto owner : memories) {
+            // An unnamed bank makes its entire logical binding unresolved.
+            out[owner].memory_banks->push_back(named ? scoped({}, next) : std::string{});
+          }
+        }
+      } else if (auto child = n.get_subnode_graph()) {
+        self(self, *child, std::move(next), named);
+      }
+    }
+    if (memory) {
+      memories.pop_back();
     }
     active.erase(g.get_gid());
   };
-  walk(top, {});
+  walk(walk, top, {}, false);
   return out;
 }
 void Placement_hints::reject(Hint& h, const std::string& reason) {
@@ -136,10 +187,17 @@ Placement_hints::Placement_hints(std::shared_ptr<const metadata::Bundle> input, 
   for (size_t i = 0; i < objects_.size(); ++i) {
     names[gu::logical_hier_name(objects_[i].name, true)].push_back(int(i));
   }
+  std::map<std::string, std::vector<const Hint_scope*>> memories;
+  for (const auto& scope : scopes) {
+    if (scope.memory_banks) {
+      memories[scoped({}, scope.path)].push_back(&scope);
+    }
+  }
   struct Template {
     const J*    value;
     std::string id;
     Hint_scope  scope;
+    int         version;
   };
   std::vector<Template> templates;
   for (const auto* record : input_->select("livehd.placement.hints", design_)) {
@@ -152,7 +210,7 @@ Placement_hints::Placement_hints(std::shared_ptr<const metadata::Bundle> input, 
         throw std::invalid_argument("placement record needs a nonempty id");
       }
       if (!record->HasMember("schema_version") || !(*record)["schema_version"].IsInt()
-          || (*record)["schema_version"].GetInt() != 1) {
+          || ((*record)["schema_version"].GetInt() != 1 && (*record)["schema_version"].GetInt() != 2)) {
         throw std::invalid_argument("unsupported placement hints schema_version");
       }
       if (!record->HasMember("templates") || !(*record)["templates"].IsArray()) {
@@ -178,7 +236,7 @@ Placement_hints::Placement_hints(std::shared_ptr<const metadata::Bundle> input, 
         }
         for (const auto& s : scopes) {
           if (s.module == *matched.begin()) {
-            templates.push_back({&t, invalid.id, s});
+            templates.push_back({&t, invalid.id, s, (*record)["schema_version"].GetInt()});
           }
         }
       }
@@ -189,13 +247,32 @@ Placement_hints::Placement_hints(std::shared_ptr<const metadata::Bundle> input, 
     }
   }
   std::map<std::string, std::vector<std::vector<int>>> groups;
-  auto                                                 resolve_object = [&](const std::vector<std::string>& scope, const J& ref) {
-    auto key = scoped(scope, path(ref));
+  auto physical_index = [&](const std::string& key) {
     auto it  = names.find(key);
-    if (it == names.end() || it->second.size() != 1) {
+    if (key.empty() || it == names.end() || it->second.size() != 1) {
       throw std::invalid_argument("physical instance '" + key + "' is missing or ambiguous");
     }
-    return std::vector<int>{it->second.front()};
+    return it->second.front();
+  };
+  auto resolve_object = [&](const std::vector<std::string>& scope, const J& ref) {
+    auto key = scoped(scope, path(ref));
+    auto memory = memories.find(key);
+    if (memory == memories.end()) {
+      return std::vector<int>{physical_index(key)};
+    }
+    if (memory->second.size() != 1 || names.contains(key)) {
+      throw std::invalid_argument("ambiguous logical memory '" + key + "'");
+    }
+    std::set<int> members;
+    for (const auto& bank : *memory->second.front()->memory_banks) {
+      if (!members.insert(physical_index(bank)).second) {
+        throw std::invalid_argument("ambiguous bank '" + bank + "' in logical memory '" + key + "'");
+      }
+    }
+    if (members.empty()) {
+      throw std::invalid_argument("logical memory '" + key + "' has no bound physical banks");
+    }
+    return std::vector<int>(members.begin(), members.end());
   };
   for (const auto& t : templates) {
     if (t.value->HasMember("groups")) {
@@ -230,7 +307,7 @@ Placement_hints::Placement_hints(std::shared_ptr<const metadata::Bundle> input, 
     auto key = scoped(t.scope.path, path(ref));
     auto g   = groups.find(key);
     if (g != groups.end()) {
-      if (g->second.size() != 1 || names.contains(key)) {
+      if (g->second.size() != 1 || names.contains(key) || memories.contains(key)) {
         throw std::invalid_argument("ambiguous group '" + key + "'");
       }
       return g->second.front();
@@ -246,15 +323,86 @@ Placement_hints::Placement_hints(std::shared_ptr<const metadata::Bundle> input, 
       hints_.push_back(std::move(h));
       continue;
     }
-    for (const auto& v : (*t.value)["hints"].GetArray()) {
+    std::map<std::string, const J*> overrides;
+    if (t.version >= 2 && t.value->HasMember("overrides")) {
+      Hint invalid;
+      invalid.id = t.id + ":" + join(t.scope.path, '/') + ":overrides";
+      try {
+        const auto& entries = (*t.value)["overrides"];
+        if (!entries.IsArray()) {
+          throw std::invalid_argument("overrides must be an array");
+        }
+        for (const auto& entry : entries.GetArray()) {
+          if (!entry.IsObject() || !entry.HasMember("instance") || !entry["instance"].IsArray()) {
+            throw std::invalid_argument("override requires an exact instance path array");
+          }
+          std::vector<std::string> instance;
+          for (const auto& part : entry["instance"].GetArray()) {
+            if (!part.IsString()) {
+              throw std::invalid_argument("invalid override path");
+            }
+            instance.emplace_back(part.GetString());
+          }
+          if (std::ranges::none_of(scopes, [&](const Hint_scope& scope) {
+                return scope.module == t.scope.module && scope.path == instance;
+              })) {
+            throw std::invalid_argument("unbound override instance " + join(instance, '/'));
+          }
+          if (instance != t.scope.path) {
+            continue;
+          }
+          const auto id = str(entry, "id");
+          if (id.empty() || !overrides.emplace(id, &entry).second) {
+            throw std::invalid_argument("duplicate or missing override ID");
+          }
+          if (entry.HasMember("disabled") && !entry["disabled"].IsBool()) {
+            throw std::invalid_argument("disabled must be boolean");
+          }
+          if (entry.HasMember("set") && !entry["set"].IsObject()) {
+            throw std::invalid_argument("override set must be an object");
+          }
+        }
+      } catch (const std::exception& e) {
+        reject(invalid, e.what());
+        hints_.push_back(std::move(invalid));
+        continue;
+      }
+    }
+    for (const auto& authored : (*t.value)["hints"].GetArray()) {
+      rapidjson::Document merged;
+      const J*            value = &authored;
+
       Hint h;
       h.id = t.id + ":" + join(t.scope.path, '/') + ":";
       try {
-        auto id  = str(v, "id");
+        auto id  = str(authored, "id");
         h.id    += id;
         if (id.empty() || !ids.insert(h.id).second) {
           throw std::invalid_argument("missing or duplicate hint id");
         }
+        if (auto found = overrides.find(id); found != overrides.end()) {
+          const auto& edit = *found->second;
+          overrides.erase(found);
+          if (edit.HasMember("disabled") && edit["disabled"].GetBool()) {
+            h.kind   = str(authored, "kind");
+            h.status = "discarded";
+            h.reason = "disabled by instance override";
+            hints_.push_back(std::move(h));
+            continue;
+          }
+          if (edit.HasMember("set")) {
+            merged.CopyFrom(authored, merged.GetAllocator());
+            for (const auto& field : edit["set"].GetObject()) {
+              if (std::string_view(field.name.GetString()) == "id") {
+                throw std::invalid_argument("override cannot rename a hint");
+              }
+              merged.RemoveMember(field.name);
+              merged.AddMember(J(field.name, merged.GetAllocator()), J(field.value, merged.GetAllocator()), merged.GetAllocator());
+            }
+            value = &merged;
+          }
+        }
+        const auto& v = *value;
         h.kind = str(v, "kind");
         if (v.HasMember("weight")) {
           if (!v["weight"].IsNumber()) {
@@ -265,7 +413,93 @@ Placement_hints::Placement_hints(std::shared_ptr<const metadata::Bundle> input, 
             throw std::invalid_argument("weight must be in (0,1]");
           }
         }
-        if (h.kind == "cluster") {
+        const auto finite = [&](const char* field, double fallback) {
+          if (!v.HasMember(field)) {
+            return fallback;
+          }
+          if (!v[field].IsNumber() || !std::isfinite(v[field].GetDouble())) {
+            throw std::invalid_argument(std::string("invalid ") + field);
+          }
+          return v[field].GetDouble();
+        };
+        if (h.kind == "pin_facing" && t.version >= 2) {
+          if (!v.HasMember("subject") || !v.HasMember("pins") || !v["pins"].IsArray() || v["pins"].Empty()) {
+            throw std::invalid_argument("pin_facing needs a macro subject and signal pin names");
+          }
+          h.subject = resolve(t, v["subject"]);
+          h.side    = str(v, "side");
+          if (h.subject.size() != 1 || (h.side != "north" && h.side != "south" && h.side != "west" && h.side != "east")) {
+            throw std::invalid_argument("pin_facing needs one bound macro and a core compass side");
+          }
+          for (const auto& pin : v["pins"].GetArray()) {
+            if (!pin.IsString() || !objects_[h.subject[0]].signal_pin_centers.contains(pin.GetString())) {
+              throw std::invalid_argument("unknown signal pin in pin_facing");
+            }
+            h.pins.emplace_back(pin.GetString());
+          }
+          std::ranges::sort(h.pins);
+          if (std::adjacent_find(h.pins.begin(), h.pins.end()) != h.pins.end()) {
+            throw std::invalid_argument("repeated signal pin");
+          }
+        } else if (h.kind == "anchor" && t.version >= 2) {
+          if (!v.HasMember("subject") || str(v, "frame") != "core") {
+            throw std::invalid_argument("anchor requires subject and core frame");
+          }
+          h.subject  = resolve(t, v["subject"]);
+          h.anchor_x = finite("anchor_x", .5);
+          h.anchor_y = finite("anchor_y", .5);
+          h.x        = finite("offset_x_um", 0) * dbu_;
+          h.y        = finite("offset_y_um", 0) * dbu_;
+          if (h.anchor_x < 0 || h.anchor_x > 1 || h.anchor_y < 0 || h.anchor_y > 1) {
+            throw std::invalid_argument("invalid normalized anchor");
+          }
+        } else if (h.kind == "distribute" && t.version >= 2) {
+          h.axis = str(v, "axis");
+          if ((h.axis != "x" && h.axis != "y") || !v.HasMember("members") || !v["members"].IsArray()) {
+            throw std::invalid_argument("distribution needs ordered members and an axis");
+          }
+          std::set<int> unique;
+          for (const auto& m : v["members"].GetArray()) {
+            const auto member = resolve_object(t.scope.path, m);
+            if (member.size() != 1) {
+              throw std::invalid_argument("each ordered distribution member must select one physical instance");
+            }
+            int i = member.front();
+            if (!unique.insert(i).second) {
+              throw std::invalid_argument("duplicate distribution member");
+            }
+            h.subject.push_back(i);
+          }
+          if (h.subject.size() < 2) {
+            throw std::invalid_argument("distribution needs at least two members");
+          }
+        } else if (h.kind == "matrix" && t.version >= 2) {
+          if (!v.HasMember("members") || !v["members"].IsArray() || !v.HasMember("columns") || !v["columns"].IsInt()) {
+            throw std::invalid_argument("matrix requires ordered members and columns");
+          }
+          std::set<int> unique;
+          for (const auto& member : v["members"].GetArray()) {
+            auto ids_for_member = resolve_object(t.scope.path, member);
+            if (ids_for_member.size() != 1) {
+              throw std::invalid_argument("each ordered matrix slot must select one physical instance");
+            }
+            if (!unique.insert(ids_for_member.front()).second) {
+              throw std::invalid_argument("duplicate matrix member");
+            }
+            h.subject.push_back(ids_for_member.front());
+          }
+          h.columns = v["columns"].GetInt();
+          if (h.columns < 1 || size_t(h.columns) > h.subject.size()) {
+            throw std::invalid_argument("invalid matrix columns");
+          }
+          h.gap_x    = finite("gap_x_um", 0) * dbu_;
+          h.gap_y    = finite("gap_y_um", 0) * dbu_;
+          h.anchor_x = finite("anchor_x", .5);
+          h.anchor_y = finite("anchor_y", .5);
+          if (h.anchor_x < 0 || h.anchor_x > 1 || h.anchor_y < 0 || h.anchor_y > 1 || h.gap_x < 0 || h.gap_y < 0) {
+            throw std::invalid_argument("invalid normalized matrix anchor or physical clearance");
+          }
+        } else if (h.kind == "cluster") {
           if (!v.HasMember("group")) {
             throw std::invalid_argument("cluster needs group");
           }
@@ -286,7 +520,7 @@ Placement_hints::Placement_hints(std::shared_ptr<const metadata::Bundle> input, 
           if ((h.axis != "x" && h.axis != "y") || (h.anchor != "center" && h.anchor != "min" && h.anchor != "max")) {
             throw std::invalid_argument("align needs axis x/y and anchor center/min/max");
           }
-        } else if (h.kind == "position" || h.kind == "direction" || h.kind == "snap") {
+        } else if (h.kind == "position" || h.kind == "direction" || h.kind == "snap" || (t.version >= 2 && h.kind == "gap")) {
           if (!v.HasMember("subject")) {
             throw std::invalid_argument("hint needs subject");
           }
@@ -312,6 +546,12 @@ Placement_hints::Placement_hints(std::shared_ptr<const metadata::Bundle> input, 
               throw std::invalid_argument("hint needs relative_to");
             }
             h.reference = resolve(t, v["relative_to"]);
+            if (h.kind == "gap") {
+              h.gap_x = finite("gap_um", -1) * dbu_;
+              if (h.gap_x < 0) {
+                throw std::invalid_argument("gap requires a nonnegative physical gap_um");
+              }
+            }
             for (int i : h.subject) {
               if (std::find(h.reference.begin(), h.reference.end(), i) != h.reference.end()) {
                 throw std::invalid_argument("relationship contains the same physical object on both sides");
@@ -326,12 +566,20 @@ Placement_hints::Placement_hints(std::shared_ptr<const metadata::Bundle> input, 
         } else {
           throw std::invalid_argument("unknown hint kind '" + h.kind + "'");
         }
-        std::sort(h.subject.begin(), h.subject.end());
-        h.subject.erase(std::unique(h.subject.begin(), h.subject.end()), h.subject.end());
+        if (h.kind != "matrix" && h.kind != "distribute") {
+          std::sort(h.subject.begin(), h.subject.end());
+          h.subject.erase(std::unique(h.subject.begin(), h.subject.end()), h.subject.end());
+        }
       } catch (const std::exception& e) {
         reject(h, e.what());
       }
       hints_.push_back(std::move(h));
+    }
+    for (const auto& [id, unused] : overrides) {
+      Hint missing;
+      missing.id = t.id + ":" + join(t.scope.path, '/') + ":" + id;
+      reject(missing, "instance override names an unknown hint");
+      hints_.push_back(std::move(missing));
     }
   }
   std::map<std::string, int> counts;
@@ -375,6 +623,26 @@ void Placement_hints::rebind(std::vector<Hint_object> objects) {
   }
   objects_ = std::move(objects);
 }
+double Placement_hints::pin_distance(const Hint& h, const dp::Design& d, dp::Orientation orient) const {
+  const int    i    = h.subject.front();
+  const auto&  pins = objects_[i].signal_pin_centers;
+  const double w = d.node_size_x[i], height = d.node_size_y[i];
+  double       sum = 0;
+  for (const auto& pin : h.pins) {
+    if (!pins.contains(pin)) {
+      return std::numeric_limits<double>::infinity();
+    }
+    auto [x, y] = pins.at(pin);
+    if (orient == dp::Orientation::S || orient == dp::Orientation::FN) {
+      x = w - x;
+    }
+    if (orient == dp::Orientation::S || orient == dp::Orientation::FS) {
+      y = height - y;
+    }
+    sum += h.side == "west" ? x : h.side == "east" ? w - x : h.side == "north" ? height - y : y;
+  }
+  return sum / h.pins.size();
+}
 void Placement_hints::seed(dp::Design& d) {
   struct Candidate {
     Hint*           hint;
@@ -384,9 +652,14 @@ void Placement_hints::seed(dp::Design& d) {
   };
   std::vector<Candidate> candidates;
   std::map<int, int>     coordinate_counts;
+  std::map<int, std::vector<Hint*>> facing;
+  std::set<int>                     positioned_orientation;
   for (const auto& h : hints_) {
     if (h.status != "discarded" && h.kind == "position") {
       ++coordinate_counts[h.subject.front()];
+      if (!h.orientation.empty()) {
+        positioned_orientation.insert(h.subject.front());
+      }
     }
   }
   for (auto& h : hints_) {
@@ -407,6 +680,9 @@ void Placement_hints::seed(dp::Design& d) {
     if (!valid) {
       reject(h, "this stage supports movable hard-macro subjects only");
       continue;
+    }
+    if (h.kind == "pin_facing") {
+      facing[h.subject.front()].push_back(&h);
     }
     if (h.kind != "position") {
       continue;
@@ -477,6 +753,106 @@ void Placement_hints::seed(dp::Design& d) {
     d.node_y[c.node] = h.y;
     h.applied        = true;
   }
+  for (const auto& [i, hints] : facing) {
+    if (positioned_orientation.contains(i) || (!d.node_orientation_fixed.empty() && d.node_orientation_fixed[i])) {
+      continue;
+    }
+    const auto current = d.node_orientation.empty() ? dp::Orientation::N : d.node_orientation[i];
+    if (current != dp::Orientation::N && current != dp::Orientation::FN && current != dp::Orientation::S
+        && current != dp::Orientation::FS) {
+      continue;
+    }
+    const auto& m    = objects_[i];
+    auto        cost = [&](auto orient) {
+      double total = 0;
+      for (const Hint* h : hints) {
+        total += h->weight * pin_distance(*h, d, orient);
+      }
+      return total;
+    };
+    auto   best    = current;
+    double minimum = cost(current);
+    for (auto orient : {dp::Orientation::N, dp::Orientation::FN, dp::Orientation::FS, dp::Orientation::S}) {
+      if ((orient == dp::Orientation::FN || orient == dp::Orientation::S) && !m.symmetry_y) {
+        continue;
+      }
+      if ((orient == dp::Orientation::FS || orient == dp::Orientation::S) && !m.symmetry_x) {
+        continue;
+      }
+      const auto c = cost(orient);
+      if (c < minimum) {
+        minimum = c;
+        best    = orient;
+      }
+    }
+    if (std::isfinite(minimum)) {
+      dp::set_orientation_unchecked(d, i, best);
+      for (auto* hint : hints) {
+        hint->applied = true;
+      }
+    }
+  }
+}
+// Row-major membership is authored once. The matrix envelope uses real sizes
+// and halos; the normalized anchor locates it in the remaining core space.
+std::vector<std::pair<double, double>> Placement_hints::matrix_targets(const Hint& hint, const dp::Design& d, bool* fits_core) const {
+  const size_t        cols = hint.columns, rows = (hint.subject.size() + cols - 1) / cols;
+  std::vector<double> widths(cols), heights(rows);
+  for (size_t k = 0; k < hint.subject.size(); ++k) {
+    const auto b      = box(d, hint.subject[k]);
+    widths[k % cols]  = std::max(widths[k % cols], b.xh - b.xl);
+    heights[k / cols] = std::max(heights[k / cols], b.yh - b.yl);
+  }
+  const double                           width  = std::accumulate(widths.begin(), widths.end(), hint.gap_x * (cols - 1));
+  const double                           height = std::accumulate(heights.begin(), heights.end(), hint.gap_y * (rows - 1));
+  if (fits_core) {
+    *fits_core = width <= d.layout.xh - d.layout.xl && height <= d.layout.yh - d.layout.yl;
+  }
+  const double left = d.layout.xl + hint.anchor_x * (d.layout.xh - d.layout.xl - width);
+  double                                 y = d.layout.yl + hint.anchor_y * (d.layout.yh - d.layout.yl - height), x = left;
+  std::vector<std::pair<double, double>> targets;
+  for (size_t k = 0; k < hint.subject.size(); ++k) {
+    const size_t row = k / cols, col = k % cols;
+    if (col == 0 && row) {
+      y += heights[row - 1] + hint.gap_y;
+      x  = left;
+    }
+    targets.emplace_back(x + .5 * widths[col], y + .5 * heights[row]);
+    x += widths[col] + hint.gap_x;
+  }
+  return targets;
+}
+std::vector<std::pair<double, double>> Placement_hints::relationship_targets(const Hint& hint, const dp::Design& d) const {
+  if (hint.kind == "matrix") {
+    return matrix_targets(hint, d);
+  }
+  const auto envelope = bounds(d, hint.subject);
+  double     dx = 0, dy = 0;
+  const bool horizontal = hint.axis == "x";
+  double     cursor = horizontal ? envelope.xl : envelope.yl, gap = 0;
+  if (hint.kind == "anchor") {
+    dx = d.layout.xl + hint.anchor_x * (d.layout.xh - d.layout.xl - (envelope.xh - envelope.xl)) + hint.x - envelope.xl;
+    dy = d.layout.yl + hint.anchor_y * (d.layout.yh - d.layout.yl - (envelope.yh - envelope.yl)) + hint.y - envelope.yl;
+  } else {
+    double available = horizontal ? envelope.xh - envelope.xl : envelope.yh - envelope.yl;
+    for (int node : hint.subject) {
+      const auto b  = box(d, node);
+      available    -= horizontal ? b.xh - b.xl : b.yh - b.yl;
+    }
+    gap = std::max(0., available / (hint.subject.size() - 1));
+  }
+  std::vector<std::pair<double, double>> targets;
+  for (int node : hint.subject) {
+    const auto b = box(d, node);
+    double     x = (b.xl + b.xh) / 2 + dx, y = (b.yl + b.yh) / 2 + dy;
+    if (hint.kind == "distribute") {
+      const double dimension  = horizontal ? b.xh - b.xl : b.yh - b.yl;
+      (horizontal ? x : y)    = cursor + dimension / 2;
+      cursor                 += dimension + gap;
+    }
+    targets.emplace_back(x, y);
+  }
+  return targets;
 }
 std::vector<dp::MacroPull> Placement_hints::pulls(const dp::Design& d) const {
   struct Sum {
@@ -490,6 +866,9 @@ std::vector<dp::MacroPull> Placement_hints::pulls(const dp::Design& d) const {
     auto   b  = box(d, i);
     double cx = d.node_x[i] + d.node_size_x[i] / 2, cy = d.node_y[i] + d.node_size_y[i] / 2;
     // Clamp displacement to the legal core for the full halo envelope.
+    if (b.xh - b.xl > d.layout.xh - d.layout.xl || b.yh - b.yl > d.layout.yh - d.layout.yl) {
+      return;
+    }
     dx       = std::clamp(dx, d.layout.xl - b.xl, d.layout.xh - b.xh);
     dy       = std::clamp(dy, d.layout.yl - b.yl, d.layout.yh - b.yh);
     auto& s  = sums[i];
@@ -498,18 +877,18 @@ std::vector<dp::MacroPull> Placement_hints::pulls(const dp::Design& d) const {
     s.w     += weight;
   };
   for (const auto& h : hints_) {
-    if (h.status == "discarded" || h.kind == "position" || h.subject.empty()) {
+    if (h.status == "discarded" || h.kind == "position" || h.kind == "pin_facing" || h.subject.empty()) {
       continue;
     }
-    if (h.kind == "cluster" || h.kind == "align") {
-      double tx = 0, ty = 0;
-      for (int i : h.subject) {
-        auto b  = box(d, i, false);
-        tx     += (b.xl + b.xh) / 2;
-        ty     += (b.yl + b.yh) / 2;
+    if (h.kind == "matrix" || h.kind == "distribute" || h.kind == "anchor") {
+      const auto targets = relationship_targets(h, d);
+      for (size_t k = 0; k < h.subject.size(); ++k) {
+        const auto i = h.subject[k];
+        const auto b = box(d, i, false);
+        add(i, targets[k].first - (b.xl + b.xh) / 2, targets[k].second - (b.yl + b.yh) / 2, h.weight);
       }
-      tx /= h.subject.size();
-      ty /= h.subject.size();
+    } else if (h.kind == "cluster" || h.kind == "align") {
+      auto [tx, ty] = group_center(d, h.subject);
       if (h.kind == "align" && h.anchor != "center") {
         double total = 0;
         for (int i : h.subject) {
@@ -533,37 +912,7 @@ std::vector<dp::MacroPull> Placement_hints::pulls(const dp::Design& d) const {
         add(i, h.kind == "align" && h.axis == "y" ? 0 : tx - x, h.kind == "align" && h.axis == "x" ? 0 : ty - y, h.weight);
       }
     } else {
-      auto a = bounds(d, h.subject), b = bounds(d, h.reference);
-      auto side = h.side;
-      if (side.empty()) {
-        std::vector<std::pair<double, std::string>> choices = {
-            {std::abs(b.xh - a.xl),  "east"},
-            {std::abs(b.xl - a.xh),  "west"},
-            {std::abs(b.yh - a.yl), "north"},
-            {std::abs(b.yl - a.yh), "south"}
-        };
-        side = std::min_element(choices.begin(), choices.end())->second;
-      }
-      double dx = 0, dy = 0;
-      if (side == "east") {
-        dx = h.kind == "snap" ? b.xh - a.xl : std::max(0., b.xh - a.xl);
-      }
-      if (side == "west") {
-        dx = h.kind == "snap" ? b.xl - a.xh : std::min(0., b.xl - a.xh);
-      }
-      if (side == "north") {
-        dy = h.kind == "snap" ? b.yh - a.yl : std::max(0., b.yh - a.yl);
-      }
-      if (side == "south") {
-        dy = h.kind == "snap" ? b.yl - a.yh : std::min(0., b.yl - a.yh);
-      }
-      if (h.kind == "snap") {
-        if (side == "east" || side == "west") {
-          dy = (b.yl + b.yh - a.yl - a.yh) / 2;
-        } else {
-          dx = (b.xl + b.xh - a.xl - a.xh) / 2;
-        }
-      }
+      const auto [dx, dy] = relative_shift(bounds(d, h.subject), bounds(d, h.reference), h.kind, h.side, h.gap_x);
       for (int i : h.subject) {
         add(i, dx, dy, h.weight);
       }
@@ -575,7 +924,13 @@ std::vector<dp::MacroPull> Placement_hints::pulls(const dp::Design& d) const {
   }
   return out;
 }
-void Placement_hints::attach(dp::Options& control, std::function<std::vector<Hint_object>()> objects) {
+bool Placement_hints::has_pull_hints() const {
+  return std::any_of(hints_.begin(), hints_.end(), [](const auto& h) {
+    return h.status != "discarded" && !h.subject.empty() && h.kind != "position" && h.kind != "pin_facing";
+  });
+}
+
+void Placement_hints::attach(dp::Options& control, std::function<std::vector<Hint_object>()> objects, bool dynamic) {
   if (control.magnet.enabled) {
     // Native magnet callbacks address contracted nodes, which are not source
     // instances. Coordinates have already seeded the uncontracted design.
@@ -586,31 +941,44 @@ void Placement_hints::attach(dp::Options& control, std::function<std::vector<Hin
     }
     return;
   }
-  if (std::none_of(hints_.begin(), hints_.end(), [](const auto& h) { return h.status != "discarded" && h.kind != "position"; })) {
+  if (!dynamic && !has_pull_hints()) {
     return;
   }
-  const auto prior            = control.macro_pull_update;
-  // Preserve the previous producer's cadence and density gate. The native
-  // callback itself is still gated by that producer's density policy.
-  const int  interval         = std::max(1, control.macro_pull_interval);
-  control.macro_pull_interval = 1;
-  control.macro_pull_update   = [this, prior, interval, objects, old = std::vector<dp::MacroPull>{}](
+  constexpr int hint_interval = 25;
+  const int     interval      = control.macro_pull_interval;
+  const auto    prior         = interval > 0 ? control.macro_pull_update : nullptr;
+  // DREAMPlace constructs a physical snapshot when the interval expires.
+  // Keep both producers' due iterations without requesting every iteration.
+  control.macro_pull_interval = prior ? std::gcd(interval, hint_interval) : hint_interval;
+  control.macro_pull_update   = [this, prior, interval, objects, old = std::vector<dp::MacroPull>{}, had_hint_pulls = false](
                                     const dp::Design& d,
                                     int               iteration) mutable -> std::optional<std::vector<dp::MacroPull>> {
     bool changed = false;
+    for (auto& p : old) {
+      p.jump = false;  // A cached anchor persists; its one-shot move has already been delivered.
+    }
     if (prior && iteration % interval == 0) {
       if (auto p = prior(d, iteration)) {
         old     = std::move(*p);
         changed = true;
       }
     }
-    if (iteration % 25 != 0 && !changed) {
+    if (iteration % hint_interval != 0 && !changed) {
       return std::nullopt;
     }
-    if (objects) {
-      rebind(objects());
+    std::vector<dp::MacroPull> out;
+    if (has_pull_hints()) {
+      if (objects) {
+        rebind(objects());
+      }
+      out = pulls(d);
     }
-    auto out = pulls(d);
+    // An empty replacement explicitly clears anchors and restarts momentum.
+    // Return it once when a hint disappears, never just because the GUI is open.
+    if (out.empty() && !changed && !had_hint_pulls) {
+      return std::nullopt;
+    }
+    had_hint_pulls = !out.empty();
     for (const auto& p : old) {
       auto found = std::find_if(out.begin(), out.end(), [&](const auto& q) { return p.node == q.node; });
       if (found == out.end()) {
@@ -627,11 +995,47 @@ void Placement_hints::attach(dp::Options& control, std::function<std::vector<Hin
     return out;
   };
 }
-void Placement_hints::write(const dp::Design& d, const std::string& filename) {
-  if (!input_) {
-    return;
+rapidjson::Document Placement_hints::preview(const dp::Design& d) const {
+  auto report = this->report(d);
+  auto& alloc = report.GetAllocator();
+  J targets(rapidjson::kArrayType);
+  auto target = [&](int i, double x, double y, std::string_view kind) {
+    J t(rapidjson::kObjectType), from(rapidjson::kArrayType), to(rapidjson::kArrayType);
+    const auto b = box(d, i, false);
+    from.PushBack((b.xl + b.xh) / 2, alloc).PushBack((b.yl + b.yh) / 2, alloc);
+    to.PushBack(x, alloc).PushBack(y, alloc).PushBack(b.xh - b.xl, alloc).PushBack(b.yh - b.yl, alloc);
+    t.AddMember("name", J(objects_.at(i).name.c_str(), alloc), alloc);
+    t.AddMember("kind", J(kind.data(), kind.size(), alloc), alloc);
+    t.AddMember("from_center", from, alloc);
+    t.AddMember("target_center_size", to, alloc);
+    targets.PushBack(t, alloc);
+  };
+  for (const auto& pull : pulls(d)) {
+    target(pull.node, pull.x, pull.y, "pull");
   }
-  metadata::Bundle    out(input_->json());
+  for (size_t k = 0; k < hints_.size(); ++k) {
+    const auto& hint = hints_[k];
+    if (hint.subject.empty() || hint.status == "discarded") {
+      continue;
+    }
+    const int i = hint.subject.front();
+    if (hint.kind == "position") {
+      target(i, hint.x + d.node_size_x.at(i) / 2, hint.y + d.node_size_y.at(i) / 2, "position");
+    } else if (hint.kind == "pin_facing") {
+      auto& row = report["hints"][k];
+      row.AddMember("side", J(hint.side.c_str(), alloc), alloc);
+      const auto b = box(d, i, false);
+      J edge(rapidjson::kArrayType);
+      edge.PushBack(hint.side == "east" ? b.xh : b.xl, alloc).PushBack(hint.side == "north" ? b.yh : b.yl, alloc);
+      edge.PushBack(hint.side == "west" ? b.xl : b.xh, alloc).PushBack(hint.side == "south" ? b.yl : b.yh, alloc);
+      row.AddMember("pin_facing_edge_dbu", edge, alloc);
+    }
+  }
+  report.AddMember("targets_dbu", targets, alloc);
+  return report;
+}
+
+rapidjson::Document Placement_hints::report(const dp::Design& d, bool warnings) const {
   rapidjson::Document report;
   report.SetObject();
   auto& a      = report.GetAllocator();
@@ -641,9 +1045,31 @@ void Placement_hints::write(const dp::Design& d, const std::string& filename) {
   report.AddMember("id", "placement", a);
   report.AddMember("design", string(design_), a);
   J results(rapidjson::kArrayType);
-  for (auto& h : hints_) {
+  for (auto h : hints_) {
     double residual = 0;
-    if (h.status != "discarded" && h.kind == "align") {
+    bool fits_core = true;
+    if (h.status != "discarded" && h.kind == "pin_facing") {
+      int        i      = h.subject.front();
+      const auto orient = d.node_orientation.empty() ? dp::Orientation::N : d.node_orientation.at(i);
+      if (orient != dp::Orientation::N && orient != dp::Orientation::S && orient != dp::Orientation::FS
+          && orient != dp::Orientation::FN) {
+        h.status = "discarded";
+        h.reason = "rotated macro pin geometry unsupported";
+      } else {
+        residual = pin_distance(h, d, orient);
+        if (!std::isfinite(residual)) {
+          residual = 0;
+          h.status = "discarded";
+          h.reason = "signal pin disappeared";
+        }
+      }
+    } else if (h.status != "discarded" && (h.kind == "matrix" || h.kind == "distribute" || h.kind == "anchor")) {
+      const auto targets = h.kind == "matrix" ? matrix_targets(h, d, &fits_core) : relationship_targets(h, d);
+      for (size_t k = 0; k < h.subject.size(); ++k) {
+        const auto b = box(d, h.subject[k], false);
+        residual     = std::max(residual, std::hypot(targets[k].first - (b.xl + b.xh) / 2, targets[k].second - (b.yl + b.yh) / 2));
+      }
+    } else if (h.status != "discarded" && h.kind == "align") {
       double lo = std::numeric_limits<double>::infinity(), hi = -lo;
       for (int i : h.subject) {
         auto   b = box(d, i, false);
@@ -657,30 +1083,34 @@ void Placement_hints::write(const dp::Design& d, const std::string& filename) {
         hi       = std::max(hi, v);
       }
       residual = hi - lo;
-    } else if (h.status != "discarded" && (h.kind == "direction" || h.kind == "snap")) {
-      const auto x = bounds(d, h.subject), y = bounds(d, h.reference);
-      auto       distance = [&](std::string_view side) {
-        double gap = side == "east" ? x.xl - y.xh : side == "west" ? y.xl - x.xh : side == "north" ? x.yl - y.yh : y.yl - x.yh;
-        if (h.kind == "direction") {
-          return std::max(0., -gap);
-        }
-        double offset = (side == "east" || side == "west") ? (x.yl + x.yh - y.yl - y.yh) / 2 : (x.xl + x.xh - y.xl - y.xh) / 2;
-        return std::hypot(gap, offset);
-      };
-      if (h.side.empty()) {
-        residual = std::min({distance("north"), distance("south"), distance("east"), distance("west")});
-      } else {
-        residual = distance(h.side);
+    } else if (h.status != "discarded" && (h.kind == "direction" || h.kind == "snap" || h.kind == "gap")) {
+      const auto [dx, dy] = relative_shift(bounds(d, h.subject), bounds(d, h.reference), h.kind, h.side, h.gap_x);
+      residual = std::hypot(dx, dy);
+    } else if (h.status != "discarded" && h.kind == "cluster") {
+      const auto [cx, cy] = group_center(d, h.subject);
+      for (int i : h.subject) {
+        const auto b = box(d, i, false);
+        residual = std::max(residual, std::hypot((b.xl + b.xh) / 2 - cx, (b.yl + b.yh) / 2 - cy));
+      }
+    } else if (h.status != "discarded" && h.kind == "position") {
+      const int i = h.subject.front();
+      residual = std::hypot(d.node_x[i] - h.x, d.node_y[i] - h.y);
+    }
+    // Clusters request attraction without a maximum radius. An advisory seed
+    // is applied only at initialization. Neither requires zero final distance.
+    if (h.status == "accepted" && h.kind != "cluster" && h.kind != "position"
+        && (!fits_core || residual > std::max(d.layout.site_width, d.layout.row_height))) {
+      h.status = "relaxed";
+      h.reason = fits_core ? "soft relationship exceeds one placement pitch in the measured frame"
+                           : "matrix with the requested gaps and macro halos is larger than the core";
+      if (warnings) {
+        diag::warn("pass.place", "placement-hint-relaxed", "unsupported")
+            .msg("placement hint '{}': {}; residual {} um", h.id, h.reason, residual / dbu_)
+            .emit();
       }
     }
-    if (h.status == "accepted" && residual > std::max(d.layout.site_width, d.layout.row_height)) {
-      h.status = "relaxed";
-      h.reason = "soft relationship not met within one placement pitch after legalization";
-      diag::warn("pass.place", "placement-hint-relaxed", "unsupported")
-          .msg("placement hint '{}': {}; residual {} um", h.id, h.reason, residual / dbu_)
-          .emit();
-    }
     J r(rapidjson::kObjectType);
+    r.AddMember("weight", h.weight, a);
     r.AddMember("residual_um", residual / dbu_, a);
     r.AddMember("id", string(h.id), a);
     r.AddMember("kind", string(h.kind), a);
@@ -695,46 +1125,9 @@ void Placement_hints::write(const dp::Design& d, const std::string& filename) {
     results.PushBack(r, a);
   }
   report.AddMember("hints", results, a);
-  out.replace(report);
-  rapidjson::Document state;
-  state.SetObject();
-  auto& b = state.GetAllocator();
-  state.AddMember("class", "livehd.placement.state", b);
-  state.AddMember("schema_version", 1, b);
-  state.AddMember("id", "macro-positions", b);
-  state.AddMember("design", J(design_.c_str(), b), b);
-  state.AddMember("automatic_reuse", false, b);  // Existing physical cache owns dependency-checked reuse.
-  J templates(rapidjson::kArrayType), t(rapidjson::kObjectType), positions(rapidjson::kArrayType);
-  t.AddMember("module", J(design_.c_str(), b), b);
-  for (size_t i = 0; i < objects_.size() && i < d.node_x.size(); ++i) {
-    if (!d.node_macro.empty() && d.node_macro[i]) {
-      J p(rapidjson::kObjectType);
-      p.AddMember("id", J(objects_[i].name.c_str(), b), b);
-      p.AddMember("kind", "position", b);
-      // Exact physical names are a single path component; never invent a
-      // different hierarchy by splitting escaped instance identifiers.
-      J subject(rapidjson::kArrayType);
-      subject.PushBack(J(objects_[i].name.c_str(), b), b);
-      p.AddMember("subject", subject, b);
-      p.AddMember("frame", "floorplan", b);
-      p.AddMember("anchor", "lower_left", b);
-      p.AddMember("x_um", d.node_x[i] / dbu_, b);
-      p.AddMember("y_um", d.node_y[i] / dbu_, b);
-      const auto o = d.node_orientation.empty() ? dp::Orientation::N : d.node_orientation[i];
-      p.AddMember("orientation",
-                  J(o == dp::Orientation::N    ? "N"
-                    : o == dp::Orientation::FN ? "FN"
-                    : o == dp::Orientation::FS ? "FS"
-                                               : "S",
-                    b),
-                  b);
-      positions.PushBack(p, b);
-    }
-  }
-  t.AddMember("hints", positions, b);
-  templates.PushBack(t, b);
-  state.AddMember("templates", templates, b);
-  out.replace(state);
-  out.write(filename);
+  return report;
+}
+void Placement_hints::append_results(metadata::Bundle& out, const dp::Design& d) {
+  out.replace(report(d, true));
 }
 }  // namespace livehd::placement

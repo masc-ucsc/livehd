@@ -3352,6 +3352,86 @@ sh_test(
     ],
 )
 
+sh_test(
+    name = "lhd_gui_explore_smoke",
+    size = "small",
+    timeout = "short",
+    srcs = ["lhd_gui_explore_smoke.py"],
+    data = ["//inou/lefdef:test_data", "//lhd:lhd_gui_fixture"],
+)
+
+sh_test(
+    name = "lhd_gui_joined_metadata_smoke",
+    args = ["--joined-metadata"],
+    size = "small",
+    timeout = "short",
+    srcs = ["lhd_gui_explore_smoke.py"],
+    data = ["//inou/lefdef:test_data", "//lhd:lhd_gui_fixture"],
+)
+
+sh_test(
+    name = "lhd_gui_native_continuation_smoke",
+    args = ["--native-gp"],
+    size = "small",
+    timeout = "short",
+    srcs = ["lhd_gui_explore_smoke.py"],
+    data = ["//inou/lefdef:test_data", "//lhd:lhd_gui_fixture"],
+)
+
+sh_test(
+    name = "lhd_gui_snapshot_smoke",
+    args = ["--snapshot"],
+    size = "small",
+    timeout = "short",
+    srcs = ["lhd_gui_explore_smoke.py"],
+    data = ["//inou/lefdef:test_data", "//lhd:lhd_gui_fixture"],
+)
+
+sh_test(
+    name = "lhd_gui_unavailable_timing_smoke",
+    args = ["--unavailable-timing"],
+    size = "small",
+    timeout = "short",
+    srcs = ["lhd_gui_explore_smoke.py"],
+    data = ["//inou/lefdef:test_data", "//lhd:lhd_gui_fixture"],
+)
+
+sh_test(
+    name = "lhd_gui_lifecycle_smoke",
+    size = "small",
+    timeout = "short",
+    args = ["--lifecycle"],
+    srcs = ["lhd_gui_explore_smoke.py"],
+    data = ["//inou/lefdef:test_data", "//lhd:lhd_gui_fixture"],
+)
+
+sh_test(
+    name = "lhd_gui_memory_limit_smoke",
+    size = "small",
+    timeout = "short",
+    args = ["--memory-limit"],
+    srcs = ["lhd_gui_explore_smoke.py"],
+    data = ["//inou/lefdef:test_data", "//lhd:lhd_gui_fixture"],
+)
+
+sh_test(
+    name = "lhd_gui_session_memory_smoke",
+    size = "small",
+    timeout = "short",
+    args = ["--session-memory-limit"],
+    srcs = ["lhd_gui_explore_smoke.py"],
+    data = ["//inou/lefdef:test_data", "//lhd:lhd_gui_fixture"],
+)
+
+sh_test(
+    name = "lhd_gui_disk_limit_smoke",
+    size = "small",
+    timeout = "short",
+    args = ["--disk-limit"],
+    srcs = ["lhd_gui_explore_smoke.py"],
+    data = ["//inou/lefdef:test_data", "//lhd:lhd_gui_fixture"],
+)
+
 # 2i-interact: timeline checkpoints and "replay from here" with edited flags (the process re-executes).
 sh_test(
     name = "lhd_gui_timeline_smoke",
@@ -3384,7 +3464,7 @@ sh_test(
     srcs = ["lhd_gui_fork_smoke.py"],
     data = [
         "//inou/lefdef:test_data",
-        "//lhd",
+        "//lhd:lhd_gui_fixture",
     ],
 )
 

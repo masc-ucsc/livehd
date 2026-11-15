@@ -245,6 +245,11 @@ buffered_base = [fanout if word == str(source) else 'dobuf' if word == 'doms' el
 buffered = run('buffered', coefficients + sizing + ['--set', 'synth.place.utilization=0.3',
                                                     '--set', 'synth.place.buffer_cleanup=true'],
                command=buffered_base)['qor']['place']
+# The same fanout can still try an output buffer while master changes are prohibited.
+buffer_only = run('bufferonly', coefficients + sizing + ['--set', 'synth.place.utilization=0.3',
+                  '--set', 'synth.place.buffer_cleanup=true', '--set', 'synth.place.policy.no_sizing=true'],
+                  command=buffered_base)['qor']['place']
+assert buffer_only['legal'] and {t['move'] for t in buffer_only['domino_sizing']['trials']} == {'buffer'}, buffer_only
 sized = buffered['domino_sizing']
 assert [(t['move'], t['outcome']) for t in sized['trials']] == [('up', 'accepted'), ('buffer', 'accepted')], sized['trials']
 assert sized['trials'][1]['buffer'] == 'q1_obuf0' and sized['trials'][1]['moved_sinks'] > 0, sized['trials'][1]

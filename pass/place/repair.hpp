@@ -53,7 +53,8 @@ struct Floorplan_resize {
 // Load-ranked size-only sweep at overlapping GP coordinates. refresh rebuilds physical
 // geometry/RC; no legalization, topology edits or macro movement are permitted.
 Floorplan_resize resize_floorplan(Result& state, const Options& options, const Timing_feedback& before, const Evaluate& evaluate,
-                                  const std::function<void(Result&)>& refresh);
+                                  const std::function<void(Result&)>& refresh,
+                                  const std::map<std::string, double>* width_limits = nullptr);
 // Size plus whole-forest repair (with bounded fallback trials) at current GP coordinates.
 // refresh must rebuild the physical view after topology changes without legalization.
 Floorplan_resize repair_floorplan(Result& state, const Options& options, const Timing_feedback& before, const Evaluate& evaluate,

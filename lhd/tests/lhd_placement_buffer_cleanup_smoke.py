@@ -55,6 +55,9 @@ run('off', ['--set', 'synth.place.buffer_cleanup=false'])
 assert buffers('off') == kept and cleanup('off') is None
 run('forced', ['--set', 'synth.place.buffer_cleanup=true'])
 assert buffers('forced') == 0 and cleanup('forced')['removed'] == kept, (buffers('forced'), cleanup('forced'))
+# A forced cleanup still cannot remove mapped buffers when buffer edits are frozen.
+run('frozen', ['--set', 'synth.place.buffer_cleanup=true', '--set', 'synth.place.policy.no_buffer_edits=true'])
+assert buffers('frozen') == kept and cleanup('frozen') is None, (kept, buffers('frozen'), cleanup('frozen'))
 error = run('bad', ['--set', 'synth.place.buffer_cleanup=maybe'], False)['error']
 assert error['class'] == 'usage' and 'buffer_cleanup' in error['message'], error
 print(f'buffer_cleanup: {kept} synthesis buffers kept without a rebuild phase, removed when forced')

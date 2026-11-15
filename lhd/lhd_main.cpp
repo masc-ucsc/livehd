@@ -1,9 +1,14 @@
+#include "pass/place/place.hpp"
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 // lhd — the stateless, hermetic LiveHD CLI kernel.
 // See lhd.hpp and the LiveHD docs.
 
+#include <spawn.h>
+#include <sys/wait.h>
+extern char** environ;
 #include <algorithm>
+#include <cerrno>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -16,7 +21,9 @@
 #include "job_manager.hpp"
 #include "lhd.hpp"
 #include "lhd_pyrope.hpp"
+#include "pass/place/gui/gui_ipc.hpp"
 #include "perf_tracing.hpp"
+#include "process_group.hpp"
 
 namespace {
 
@@ -40,6 +47,56 @@ struct Trace_guard {
 }  // namespace
 
 int main(int argc, char** argv) {
+  if (argc == 4 && std::string_view(argv[1]) == "--placement-snapshot-owner") {
+    return livehd::placement::gui::serve_frozen_owner(std::atoi(argv[2]), std::atoi(argv[3]));
+  }
+  if (argc >= 5 && std::string_view(argv[1]) == "--placement-validation") {
+    const auto parent = std::atoi(argv[2]);
+    if (parent <= 1 || getppid() != parent) {
+      return 1;
+    }
+    livehd::process_group::watch_parent(parent);
+    pid_t child = -1;
+    if (posix_spawnp(&child, argv[3], nullptr, nullptr, argv + 3, environ) != 0) {
+      return 1;
+    }
+    int status = 0;
+    while (waitpid(child, &status, 0) < 0) {
+      if (errno != EINTR) {
+        return 1;
+      }
+    }
+    return WIFEXITED(status) ? WEXITSTATUS(status) : 1;
+  }
+  if (argc == 4 && std::string_view(argv[1]) == "--placement-controller") {
+    livehd::Job_manager::Probe admission_probe;
+#ifdef LHD_TEST_GUI_JOB_PROBE
+    // Smoke tests run concurrently with thousands of unrelated Bazel jobs.
+    // Exercise actual shared-table admission using a measured-host fixture.
+    admission_probe = [] { return livehd::Host_resources{4, 0, 16ULL << 30, 8ULL << 30, 64ULL << 20}; };
+#endif
+    return livehd::placement::gui::serve_controller(std::atoi(argv[2]), std::atoi(argv[3]), std::move(admission_probe));
+  }
+  std::string worker_socket, worker_id, worker_tier, repair_mode;
+  unsigned    repair_limit = 0;
+  int         timing_call_limit = -1;
+  if (argc >= 11 && std::string_view(argv[1]) == "--placement-worker") {
+    const auto parent = std::atoi(argv[2]);
+    if (parent <= 1 || getppid() != parent) {
+      return 1;
+    }
+    livehd::process_group::watch_parent(parent);
+    worker_socket = argv[3];
+    worker_id     = argv[4];
+    livehd::Job_manager::global(std::atoi(argv[5]));
+    worker_tier   = argv[6];
+    repair_limit  = std::atoi(argv[7]);
+    repair_mode   = argv[8];
+    timing_call_limit = std::atoi(argv[9]);
+    argv[9]       = argv[0];
+    argv         += 9;
+    argc         -= 9;
+  }
   const auto invocation_started = std::chrono::steady_clock::now();
   I_setup();
   // AFTER I_setup: on platforms where iassert's SIGSEGV handler renders nothing
@@ -80,6 +137,12 @@ int main(int argc, char** argv) {
   // reconciliation after run_engine_command below).
   try {
     opts = lhd::parse_args(argc, argv);
+    opts.gui_worker_socket = worker_socket;
+    opts.gui_worker_id     = worker_id;
+    opts.gui_worker_tier   = worker_tier;
+    opts.gui_repair_limit  = repair_limit;
+    opts.gui_timing_call_limit = timing_call_limit;
+    opts.gui_repair_mode   = repair_mode;
     lhd::replay_recorded_invocation(opts);  // `lhd sim|synth` with no sources inside its generated dir
   } catch (const lhd::Lhd_error& e) {
     res.command  = "usage";

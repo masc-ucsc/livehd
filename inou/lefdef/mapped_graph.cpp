@@ -8,7 +8,8 @@
 #include "node_util.hpp"
 
 namespace livehd::physical {
-std::shared_ptr<hhds::Graph> mapped_graph(hhds::GraphLibrary& library, const Floorplan& fp, const Technology& tech) {
+std::shared_ptr<hhds::Graph> mapped_graph(hhds::GraphLibrary& library, const Floorplan& fp, const Technology& tech,
+                                          std::vector<Net>* unresolved) {
   // One-bit signal pins; other LEF/DEF directions are not imported.
   const auto declare = [](const auto& io, const std::string& name, const std::string& direction) {
     if (direction == "INPUT") {
@@ -44,7 +45,7 @@ std::shared_ptr<hhds::Graph> mapped_graph(hhds::GraphLibrary& library, const Flo
     nodes.emplace(cell.name, node);
   }
   for (const auto& net : fp.nets) {
-    hhds::Pin_class              driver;
+    std::vector<hhds::Pin_class> drivers;
     std::vector<hhds::Pin_class> sinks;
     for (const auto& pin : net.connections) {
       bool            output = false;
@@ -70,19 +71,23 @@ std::shared_ptr<hhds::Graph> mapped_graph(hhds::GraphLibrary& library, const Flo
       }
       if (output) {
         livehd::graph_util::set_bits(physical, 1);
-        if (!driver.is_invalid()) {
-          throw std::runtime_error("multiple DEF signal drivers: " + net.name);
-        }
-        driver = physical;
+        drivers.push_back(physical);
       } else {
         sinks.push_back(physical);
       }
     }
-    if (driver.is_invalid() && !sinks.empty()) {
-      throw std::runtime_error("undriven DEF signal net cannot be imported exactly: " + net.name);
+    if (drivers.size() > 1 || (drivers.empty() && !sinks.empty())) {
+      if (!unresolved) {
+        throw std::runtime_error(
+            (drivers.empty() ? "undriven DEF signal net cannot be imported exactly: " : "multiple DEF signal drivers: ")
+            + net.name);
+      }
+      unresolved->push_back(net);
     }
     for (auto sink : sinks) {
-      sink.connect_driver(driver);
+      for (auto source : drivers) {
+        sink.connect_driver(source);
+      }
     }
   }
   // DEF is also the authority for deliberately unused inputs (for example a

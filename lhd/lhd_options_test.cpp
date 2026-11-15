@@ -876,6 +876,9 @@ TEST(LhdOptions, PositionalMetadataIsNotSourceAndMergesByClass) {
   auto split        = opts;
   split.files.clear();
   EXPECT_EQ(lhd::compute_run_id(combined), lhd::compute_run_id(split));
+  combined.metadata = std::make_shared<const livehd::metadata::Bundle>(R"([{"class":"hint","x":929.1233919228121}])");
+  split.metadata = std::make_shared<const livehd::metadata::Bundle>(R"([{"class":"hint","x":929.123391922812}])");
+  EXPECT_NE(lhd::compute_run_id(combined), lhd::compute_run_id(split));
 
   for (const auto* key : {"synth.metadata", "synth.tune.file", "sim.tune.file", "synth.place.row_access"}) {
     args = {"lhd", "synth", "top.v", "--set", std::string(key) + "=" + file};

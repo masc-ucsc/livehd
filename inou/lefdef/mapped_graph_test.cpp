@@ -103,4 +103,22 @@ TEST(MappedGraph, MultiplePhysicalDriversAreRejected) {
   hhds::GraphLibrary library;
   EXPECT_THROW(mapped_graph(library, fp, {}), std::runtime_error);
 }
+TEST(MappedGraph, PhysicalOwnerRetainsAmbiguousNets) {
+  Floorplan fp;
+  fp.design = "physical_only";
+  for (const auto* name : {"a", "b", "y", "z"}) {
+    Terminal port;
+    port.name      = name;
+    port.direction = (port.name == "a" || port.name == "b") ? "INPUT" : "OUTPUT";
+    fp.terminals.push_back(port);
+  }
+  fp.nets = {
+      {"undriven",                             {{"PIN", "y"}}},
+      {"multiple", {{"PIN", "a"}, {"PIN", "b"}, {"PIN", "z"}}}
+  };
+  hhds::GraphLibrary library;
+  std::vector<Net>   unresolved;
+  ASSERT_TRUE(mapped_graph(library, fp, {}, &unresolved));
+  EXPECT_EQ(unresolved, fp.nets);
+}
 }  // namespace livehd::physical

@@ -17,11 +17,15 @@ struct Host_resources {
   uint64_t ram = 0, available = 0, rss = 0;
 };
 Host_resources host_resources();
-enum class Job_class : unsigned { formal_arm, sim_compile, usyn_region, count };
+uint64_t process_rss(pid_t pid);
+// Resident bytes of a local process and its descendants, shared pages counted per mapping.
+uint64_t process_tree_rss(pid_t root);
+enum class Job_class : unsigned { formal_arm, sim_compile, usyn_region, place_explore, count };
 struct Job_stats {
   uint64_t admitted = 0, queued = 0, memory_waits = 0, cpu_waits = 0;
   unsigned active = 0, peak = 0;
   double   bytes_per_unit = 0;
+  uint64_t predicted_bytes(uint64_t units) const;
 };
 class Job_manager;
 class Job_slot {
@@ -54,7 +58,10 @@ public:
   ~Job_manager();
   Job_manager(const Job_manager&)                   = delete;
   Job_manager&        operator=(const Job_manager&) = delete;
-  static Job_manager& global();
+  // An exec child can attach the same admission table using an inherited fd.
+  // The coordinator opts into file-backed storage before any workers start.
+  static Job_manager& global(int inherited_fd = -1, bool share_across_exec = false);
+  int                 shared_fd() const { return fd_; }
   void                configure(unsigned ceiling);
   Probe               exchange_probe(Probe probe);  // change injected measurements only while idle
   unsigned            ceiling() const;
@@ -67,7 +74,8 @@ public:
   // would wait for can be held by the very callers waiting on it.
   bool                nested() const;
   bool                owns_slot() const;
-  Job_slot            try_acquire(Job_class cls, uint64_t units = 1, uint64_t prediction = 0, bool record_queue = true);
+  Job_slot            try_acquire(Job_class cls, uint64_t units = 1, uint64_t prediction = 0, bool record_queue = true,
+                                  unsigned reserve_cpus = 0, unsigned threads = 1);
   Job_slot            acquire(Job_class cls, uint64_t units = 1, uint64_t prediction = 0, Clock::time_point deadline = {});
   std::array<Job_stats, static_cast<unsigned>(Job_class::count)> stats() const;
   void                                                           report() const;
@@ -95,6 +103,8 @@ public:
 private:
   friend class Job_slot;
   struct Shared;
+  Job_manager(Probe, int inherited_fd, bool share_across_exec);
+  int     fd_ = -1;
   Shared* shared_;
   Probe   probe_;
   void    release(unsigned id, uint64_t generation, uint64_t peak);

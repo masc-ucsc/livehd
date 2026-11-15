@@ -11,7 +11,7 @@ workdir shards. The current readers do not yet support that uniformly.</p>
 <p>CLI input cleanup: pass one or more JSON paths beside the design inputs, for example
 <code>lhd synth top.v intent.json tuning.json --top top</code>. Combining their arrays into one file is equivalent.
 <code>livehd.placement.hints</code>, <code>livehd.synth.tuning</code>, and <code>livehd.sim.tuning</code>
-select their consumers; <code>livehd.physical.row_access</code> supplies a strict <code>convention</code> object for domino generation. Unrelated classes are retained. Conflicting record identities are rejected.
+select their consumers; <code>livehd.physical.row_access</code> supplies a strict <code>convention</code> object for domino generation. Unrelated classes are retained. Joining or re-exporting records preserves 64-bit integers and round-trips binary64 values at full precision. Conflicting record identities are rejected.
 The removed <code>synth.metadata</code>, <code>synth.tune.file</code>, <code>sim.tune.file</code>, and <code>synth.place.row_access</code>
 options produce a migration diagnostic. Tuning export paths remain outputs, and private workdir caches retain
 validation gates. Generic attribute-loader file labels, external JSON protocols, query arguments, and JSON design
@@ -25,6 +25,8 @@ formats are not tuning-file selection options.</p>
 <p>Record presence activates that consumer's metadata, not an unrelated pipeline stage: placement hints do not
 turn synthesis-only runs into placement runs, and row-access records do not select the domino mapper.
 Tuning exports consolidate the consumed tuning section and retain unrelated records and other design scopes.
+Pass an exported <code>livehd.placement.state</code> record explicitly to reproduce its macro poses on a clean run.
+It can share a file with placement hints and other passes’ records. See <a href="../../pass/place/PLACEREASON.md#replay-exact-coordinates">exact replay</a>.
 Internal validated trial files and workdir cache shards remain implementation details. Inline JSON value options
 such as per-color <code>region_opts</code> are not file selectors and are unchanged.</p>
 <h2>Depends on</h2>
@@ -58,7 +60,7 @@ agreed. Existing contract tests remain unchanged.</li>
 <h2>Subtasks — landed</h2>
 <ul><li>Shared <code>core/metadata</code> bundle reader/writer: canonical compact records, duplicate validation, unknown-record preservation, atomic publication and selected-class identity.</li>
 <li>positional JSON placement consumer: hierarchical templates, groups, soft cluster/direction/snap/alignment, validated movable coordinate seeds, structured diagnostics and generated state/results.</li>
-<li>Completed-placement cache keys include only consumed hint records. Cache restore merges generated records into the current input bundle; inner block reuse is bypassed for hints.</li>
+<li>Completed-placement cache keys include the selected design’s hints and explicitly supplied macro state. Cache restore merges generated records into the current input bundle; inner block reuse is bypassed for hints.</li>
 <li>Unit coverage for repeated hierarchy, name rebinding, invalid/overlapping coordinates, contradictory soft relationships, and metadata round trips. Synthetic and CoralNPU experiments are tracked in the placement guide.</li></ul>
 <p>This is an incremental migration. Existing standalone synthesis/simulation tuning, report and cache formats are still read through their original APIs. Source HDL attributes and automatic admission of exported coordinate-state bundles are not implemented. No existing option default changed.</p>
 <h2>Design notes: findings</h2>
@@ -146,13 +148,11 @@ Per-class versions evolve independently; no whole-tool format version is needed.
      {"id":"pair","kind":"snap","subject":"data","relative_to":"tag","side":"east"}
    ]}]},
   {"class":"livehd.placement.state","schema_version":1,
-   "id":"macro_plan","design":"chip.top",
-   "depends_on":[{"class":"livehd.placement.hints","design":"chip.top",
-                  "id":"floorplan-intent","digest":"sha256:EXAMPLE"}],
-   "netlist_digest":"sha256:EXAMPLE","technology_digest":"sha256:EXAMPLE",
-   "options_digest":"sha256:EXAMPLE","code_salt":"EXAMPLE",
-   "hints":[{"id":"data-start","kind":"position","subject":["bank0","data"],
-             "frame":"floorplan","anchor":"lower_left","x_um":120,"y_um":80,"orientation":"N"}]},
+   "id":"macro-positions","design":"chip.top","automatic_reuse":false,
+   "templates":[{"module":"chip.top","hints":[{
+     "id":"bank0.data","kind":"position","subject":["bank0.data"],"master":"sram",
+     "frame":"floorplan","anchor":"lower_left","x_um":120,"y_um":80,"orientation":"N"
+   }]}]},
   {"class":"livehd.placement.hint_results","schema_version":1,
    "id":"macro_plan","design":"chip.top",
    "results":[{"hint":"floorplan-intent","template":"bank","instance":["bank0"],

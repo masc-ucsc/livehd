@@ -9,9 +9,25 @@ namespace {
 // ASAP7 7.5-track R library, following the pinned ORFS platform scripts.
 Tech_profile asap7() {
   Tech_profile p;
-  p.name                = "asap7";
-  p.detect_sites        = {"asap7sc7p5t"};
-  p.detect_macros       = {"TAPCELL_ASAP7_75t_R"};
+  p.name          = "asap7";
+  p.detect_sites  = {"asap7sc7p5t"};
+  p.detect_macros = {"TAPCELL_ASAP7_75t_R"};
+  // ORFS fb65d5b, flow/platforms/asap7/openRoad/make_tracks.tcl. In particular M2 has
+  // seven separate Y patterns per row, and M3's track centers differ from the LEF OFFSET.
+  p.routing_grids = {
+      {"Pad", .116, .080, .116, .080},
+      { "M9", .116, .080, .116, .080},
+      { "M8", .116, .080, .116, .080},
+      { "M7", .016, .064, .016, .064},
+      { "M6", .012, .048, .016, .064},
+      { "M5", .012, .048, .012, .048},
+      { "M4", .009, .036, .012, .048},
+      { "M3", .009, .036, .009, .036},
+  };
+  for (double y : {.045, .081, .117, .153, .189, .225, .270}) {
+    p.routing_grids.push_back({"M2", .009, .036, y, .270});
+  }
+  p.routing_grids.push_back({"M1", .009, .036, .009, .036});
   p.route.access        = {"M1", "M2", "V1"};
   p.route.branch_layer  = "M3";
   p.route.branch_cut    = "V2";

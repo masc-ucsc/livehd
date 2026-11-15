@@ -473,6 +473,40 @@ Grid build_grid(const Design& d, const Legroute_regions& regions) {
       throw std::invalid_argument("legroute requires rows on one site and row grid");
     }
   }
+  // Use the same row complement and hard DEF blockages as the placer.
+  // Derive on a frame-only copy, never copy a large routed netlist.
+  ph::Floorplan row_frame;
+  row_frame.rows      = fp.rows;
+  row_frame.die       = fp.die;
+  row_frame.dbu       = fp.dbu;
+  row_frame.blockages = fp.blockages;
+  std::set<std::string_view> associated;
+  for (const auto& b : fp.blockages) {
+    if (!b.component.empty()) {
+      associated.insert(b.component);
+    }
+  }
+  for (const auto& c : fp.components) {
+    if (associated.contains(c.name.view())
+        || ((c.place.status == ph::Status::FIXED || c.place.status == ph::Status::LOCKED) && ph::hard_macro(tech.macros.at(c.macro)))) {
+      row_frame.components.push_back(c);
+    }
+    if (ph::placement_mask(c, tech) == ph::Placement_mask::hard) {
+      row_frame.blockages.push_back({false, {}, {obstacle_rect(tech, c, 0, 0)}});
+    }
+  }
+  std::vector<ph::Rect> routing_gaps;
+  ph::rectangular_placement_frame(row_frame, tech, &routing_gaps);
+  // rows already contain only the original site segments and have reserved fixed occupancy.
+  // Keep the true notches blocked on every layer; per-master LEF geometry governs a fixed macro.
+  if (!routing_gaps.empty()) {
+    row_frame.blockages.push_back({false, {}, std::move(routing_gaps)});
+  }
+  auto exclusions = ph::placement_exclusions(row_frame, {double(g.x0), double(g.y0), double(xh), double(yh)});
+  std::erase_if(exclusions, [](const auto& e) { return e.kind != ph::Placement_mask::hard; });
+  for (const auto& e : exclusions) {
+    reserve_gaps(rows, e.rect);
+  }
   const auto widest = std::max({2 * d.flop_w, d.widest, g.site});
   g.rows_per_tile   = d.opt.critical_cellboxes ? d.opt.cellbox_rows : 2;
   g.tile_w          = d.opt.critical_cellboxes ? int64_t(d.opt.cellbox_sites) * g.site : (widest + g.site - 1) / g.site * g.site;
@@ -716,10 +750,10 @@ Grid build_grid(const Design& d, const Legroute_regions& regions) {
   // PG paths and via landings can overlap. Their physical track is unavailable
   // once, including when the generic reservation already selected that track.
   std::vector<std::unordered_map<int, std::set<int64_t>>> taken(g.layers.size());
-  const auto                                              take = [&](size_t l, const ph::Rect& r, Track_exclusion reason) {
+  const auto take = [&](size_t l, const ph::Rect& r, Track_exclusion reason, bool all_directions = false) {
     const auto& L = g.layers[l];
     g.obstacles[l].push_back(r);
-    if (L.horizontal != (r.xh - r.xl >= r.yh - r.yl)) {
+    if (!all_directions && L.horizontal != (r.xh - r.xl >= r.yh - r.yl)) {
       return;  // a via landing or a perpendicular strap: it blocks its span, not whole tracks
     }
     const double lo = (L.horizontal ? r.yl : r.xl) - L.pitch / 2.0, hi = (L.horizontal ? r.yh : r.xh) + L.pitch / 2.0;
@@ -745,6 +779,11 @@ Grid build_grid(const Design& d, const Legroute_regions& regions) {
       }
     }
   };
+  for (const auto& e : exclusions) {
+    for (size_t layer = 0; layer < g.layers.size(); ++layer) {
+      take(layer, e.rect, Track_exclusion::region_obstacle, true);
+    }
+  }
   for (const auto& net : fp.special_nets) {
     if (net.wires.empty()) {
       continue;
@@ -850,6 +889,10 @@ Grid build_grid(const Design& d, const Legroute_regions& regions) {
     }
     for (const auto& s : regions.obstacles) {
       add_rail(s, Track_exclusion::region_obstacle);
+    }
+    for (const auto& e : exclusions) {
+      rails.push_back(e.rect);
+      rail_reasons.push_back(Track_exclusion::region_obstacle);
     }
     // the rails by tile row (a rail's spacing band reaches the rows it touches): a tile checks its own row's rails.
     // Every rail of the die per tile and track was hours on a large design

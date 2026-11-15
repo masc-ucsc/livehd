@@ -244,12 +244,12 @@ belong to <code>livehd.placement.state</code>; achieved/relaxed relations belong
 to <code>livehd.placement.hint_results</code>. Neither is implicitly promoted into
 user intent. Incremental state may include <code>kind=position</code> hints
 with exactly the same coordinate fields and validation as authored hints; it
-remains generated state. Automatic import of this exported state is not enabled yet.
+remains generated state. When the user explicitly supplies that state in a positional design JSON, the placer holds the named macros at those coordinates and orientations. An incompatible pose fails replay. A later ordinary run does not implicitly adopt generated state.
 An exported relative or coordinate suggestion can reuse the hints payload shape
 under <code>livehd.placement.suggestions</code>, requiring explicit selection
 before it influences a future run.</p>
 <p>The existing completed-placement cache records netlist, technology, relevant options and
-consumed-hint identity; the exported coordinate record is an observation, not a self-admitting cache. Changed intent invalidates affected placement reuse; it
+the identity of consumed hints and explicitly supplied macro state. Exported coordinates do not authorize cache reuse by themselves. Changed intent invalidates affected placement reuse; it
 must not be overwritten by old saved coordinates. Unrelated report changes
 must not invalidate placement. A single combined metadata file is the placement
 external interface; separate compact JSON/JSONL workdir shards remain permitted.

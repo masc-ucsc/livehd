@@ -1410,7 +1410,8 @@ std::vector<Comb_cell> scan_comb_cells_text(const std::string& contents) {
 
 std::vector<Comb_cell> scan_comb_cells(const std::string& lib_files) { return scan_comb_cells_text(read_files(lib_files)); }
 
-static std::vector<Constant_cell> scan_constant_cells_text(const std::string& contents) {
+static std::vector<Constant_cell> scan_constant_cells_text(const std::string&           contents,
+                                                           const std::set<std::string>& physical_ties = {}) {
   const auto                 text = strip_comments(contents);
   std::vector<Constant_cell> result;
   std::string                args;
@@ -1421,8 +1422,8 @@ static std::vector<Constant_cell> scan_constant_cells_text(const std::string& co
     }
     const auto  body = text.substr(p + 1, end - p - 1);
     std::string ignored;
-    if (cell_is_dont_use(body) || find_group(body, "ff", 0, ignored) != std::string::npos
-        || find_group(body, "latch", 0, ignored) != std::string::npos
+    if ((cell_is_dont_use(body) && !physical_ties.contains(unquote_trim(args)))
+        || find_group(body, "ff", 0, ignored) != std::string::npos || find_group(body, "latch", 0, ignored) != std::string::npos
         || find_group(body, "ff_bank", 0, ignored) != std::string::npos
         || find_group(body, "latch_bank", 0, ignored) != std::string::npos
         || find_group(body, "statetable", 0, ignored) != std::string::npos
@@ -1460,14 +1461,15 @@ std::vector<Constant_cell> scan_constant_cells(const std::string& lib_files) {
   return scan_constant_cells_text(read_files(lib_files));
 }
 
-Cell_library::Cell_library(const std::string& lib_files) : contents(read_files(lib_files, &file_reads)) {
+Cell_library::Cell_library(const std::string& lib_files, const std::set<std::string>& physical_ties)
+    : contents(read_files(lib_files, &file_reads)) {
   auto state    = scan_cells_text(contents);
   dffs          = std::move(state.dffs);
   async_dffs    = std::move(state.async);
   latches       = std::move(state.latches);
   icgs          = std::move(state.icgs);
   combinational = scan_comb_cells_text(contents);
-  constants     = scan_constant_cells_text(contents);
+  constants     = scan_constant_cells_text(contents, physical_ties);
   memories      = scan_memory_cells_text(contents);
   drives        = scan_output_drives_text_impl(contents, &memories);
 }

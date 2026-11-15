@@ -71,6 +71,11 @@ assert 'reset_tree' not in off['qor']['place'], off['qor']['place']
 loads, buffers = reset_loads('off')
 assert loads >= 48 and buffers == 0, (loads, buffers)
 
+frozen = run('frozen', ['--set', 'synth.place.reset_fanout=8', '--set', 'synth.place.policy.no_buffer_edits=true'])
+info = frozen['qor']['place']['reset_tree']
+assert info['fanout'] == 8 and info['added'] == info['buffers'] == 0, info
+assert reset_loads('frozen') == reset_loads('off'), (reset_loads('frozen'), reset_loads('off'))
+
 tree = run('tree', ['--set', 'synth.place.reset_fanout=8'])
 info = tree['qor']['place']['reset_tree']
 assert info['fanout'] == 8 and info['buffers'] >= 6, info

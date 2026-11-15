@@ -7,9 +7,10 @@ namespace livehd::placement {
 struct Technology {
   std::vector<std::string> lefs;
   std::string              liberty_path;
+  std::array<std::string, 2> tie_masters;
   physical::Technology     lef;
   liberty::Cell_library    cells;
   uint64_t                 content_hash = 0;
-  Technology(const std::vector<std::string>& paths, const std::string& lib);
+  Technology(const std::vector<std::string>& paths, const std::string& lib, const std::array<std::string, 2>& ties = {});
 };
 }  // namespace livehd::placement

@@ -9,8 +9,12 @@
 #include "place.hpp"
 
 namespace livehd::placement {
-Technology::Technology(const std::vector<std::string>& paths, const std::string& lib)
-    : lefs(paths), liberty_path(lib), lef(paths.empty() ? physical::Technology{} : physical::read_lef(paths)), cells(lib) {
+Technology::Technology(const std::vector<std::string>& paths, const std::string& lib, const std::array<std::string, 2>& ties)
+    : lefs(paths)
+    , liberty_path(lib)
+    , tie_masters(ties)
+    , lef(paths.empty() ? physical::Technology{} : physical::read_lef(paths))
+    , cells(lib, {ties[0], ties[1]}) {
   content_hash = hash_util::fnv1a64(cells.contents);
   for (const auto& path : paths) {
     std::ifstream input(path, std::ios::binary);
@@ -27,8 +31,9 @@ Technology::Technology(const std::vector<std::string>& paths, const std::string&
   }
 }
 const Technology& Options::technology() const {
-  if (!technology_cache || technology_cache->lefs != lefs || technology_cache->liberty_path != liberty) {
-    technology_cache = std::make_shared<const Technology>(lefs, liberty);
+  if (!technology_cache || technology_cache->lefs != lefs || technology_cache->liberty_path != liberty
+      || technology_cache->tie_masters != tie_masters) {
+    technology_cache = std::make_shared<const Technology>(lefs, liberty, tie_masters);
   }
   return *technology_cache;
 }

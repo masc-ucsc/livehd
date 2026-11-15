@@ -399,6 +399,7 @@ std::vector<Placement_exclusion> placement_exclusions(const Floorplan& floorplan
                                                       const std::vector<Rect>& fixed_occupancy = {});
 // Stage adapter preserving available sites and orientations on a rectangular
 // row grid. Missing sites become hard placement rectangles. Restore original
-// rows/blockages on final DEF export.
-Floorplan                        rectangular_placement_frame(const Floorplan& original, const Technology& technology);
+// rows/blockages on final DEF export. Optional routing gaps omit only the bodies
+// of original fixed hard macros: LEF obstructions govern routing there.
+Floorplan rectangular_placement_frame(const Floorplan& original, const Technology& technology, std::vector<Rect>* routing_gaps = nullptr);
 }  // namespace livehd::physical

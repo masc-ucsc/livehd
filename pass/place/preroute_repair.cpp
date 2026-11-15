@@ -269,7 +269,8 @@ Preroute_stage_result preroute_stage(const Result& original, const physical::Tec
       || initial_timing.time_unit_ps <= 0) {
     throw std::invalid_argument("pre-route stage requires physical snapshots, timing units and finite budgets");
   }
-  if (options.straight_only) {
+  // With frozen buffers, route existing nets and evaluate their RC without proposing new repeater cells.
+  if (options.straight_only || placement_options.mutation_policy().no_buffer_edits) {
     auto routed
         = preroute(tech, original.floorplan, *original.parasitics, *original.preroute_design, bindings, wire, timer, options);
     Preroute_stage_result result;

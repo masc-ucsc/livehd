@@ -1,6 +1,7 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "job_manager.hpp"
 
+#include <fcntl.h>
 #include <signal.h>
 #include <sys/mman.h>
 #include <sys/wait.h>
@@ -12,11 +13,13 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <limits>
 #include <new>
 #include <stdexcept>
 #include <thread>
+#include <unordered_set>
 #include <utility>
 #ifdef __linux__
 #include <sched.h>
@@ -88,6 +91,41 @@ struct Lock {
 };
 static_assert(std::atomic<unsigned>::is_always_lock_free);
 }  // namespace
+uint64_t process_rss(pid_t pid) { return rss_of(pid); }
+uint64_t process_tree_rss(pid_t root) {
+  std::vector<pid_t>        pending{root};
+  std::unordered_set<pid_t> visited;
+  uint64_t                  rss = 0;
+  while (!pending.empty()) {
+    const auto pid = pending.back();
+    pending.pop_back();
+    if (pid <= 0 || !visited.insert(pid).second) {
+      continue;
+    }
+    rss = sat_add(rss, rss_of(pid));
+#ifdef __linux__
+    // A child spawned by a non-leader thread belongs to that thread's list.
+    std::error_code                     ec;
+    std::filesystem::directory_iterator threads("/proc/" + std::to_string(pid) + "/task", ec);
+    for (std::filesystem::directory_iterator end; !ec && threads != end; threads.increment(ec)) {
+      std::ifstream children(threads->path() / "children");
+      for (pid_t child; children >> child;) {
+        pending.push_back(child);
+      }
+    }
+#elif defined(__APPLE__)
+    const int needed = proc_listchildpids(pid, nullptr, 0);
+    if (needed > 0) {
+      std::vector<pid_t> children(static_cast<size_t>(needed) + 16);
+      const int          count = proc_listchildpids(pid, children.data(), static_cast<int>(children.size() * sizeof(pid_t)));
+      if (count > 0) {
+        pending.insert(pending.end(), children.begin(), children.begin() + std::min<size_t>(count, children.size()));
+      }
+    }
+#endif
+  }
+  return rss;
+}
 static unsigned affinity_cpus() {
   unsigned count = std::max(1u, std::thread::hardware_concurrency());
 #ifdef __linux__
@@ -153,6 +191,7 @@ struct Job_manager::Shared {
   struct Entry {
     std::atomic<bool> active{false}, paused{false};
     Job_class         cls{};
+    unsigned          threads = 1;
     uint64_t          units = 0, predicted = 0, baseline = 0, generation = 0;
     pid_t             owner = 0, parent = 0;
   };
@@ -168,24 +207,27 @@ struct Job_manager::Shared {
         e.active = e.paused = false;
       }
       if (e.active) {
-        ++active;
+        active += e.threads;
         ++stats[static_cast<unsigned>(e.cls)].active;
         reserved = sat_add(reserved, e.predicted);
       }
     }
   }
-  bool fits(const Host_resources& h, uint64_t prediction, bool& memory) const {
-    if (!active) {
+  bool fits(const Host_resources& h, uint64_t prediction, bool& memory, unsigned threads) const {
+    if (threads > ceiling) {
+      return false;
+    }
+    if (!active && threads == 1) {
       return true;  // one job globally, even if its prediction exceeds RAM
     }
-    if (active >= ceiling) {
+    if (threads > ceiling - std::min(active, ceiling)) {
       return false;
     }
     // loadavg already includes our running work. Remove that occupancy before
     // estimating spare capacity, so our own jobs do not shrink the pool twice.
     const double external = std::max(0.0, h.load - active);
     const auto   capacity = std::max(1.0, static_cast<double>(h.cpus) - std::ceil(external));
-    if (active >= capacity) {
+    if (active + threads > capacity) {
       return false;
     }
     uint64_t           actual = getpid() == root ? h.rss : rss_of(root);
@@ -203,10 +245,34 @@ struct Job_manager::Shared {
     return !memory;
   }
 };
-Job_manager::Job_manager(Probe probe) : probe_(std::move(probe)) {
-  void* p = mmap(nullptr, sizeof(Shared), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+Job_manager::Job_manager(Probe probe) : Job_manager(std::move(probe), -1, false) {}
+Job_manager::Job_manager(Probe probe, int inherited_fd, bool share_across_exec) : probe_(std::move(probe)) {
+  if (inherited_fd >= 0) {
+    fd_ = inherited_fd;
+    fcntl(fd_, F_SETFD, FD_CLOEXEC);
+  } else if (share_across_exec) {
+    auto* backing = std::tmpfile();  // unlinked; dies with the session, including after a crash
+    if (!backing) {
+      throw std::runtime_error("cannot create placement admission table");
+    }
+    if (ftruncate(fileno(backing), sizeof(Shared)) == 0) {
+      fd_ = fcntl(fileno(backing), F_DUPFD_CLOEXEC, 3);
+    }
+    std::fclose(backing);
+    if (fd_ < 0) {
+      throw std::runtime_error("cannot allocate placement admission table");
+    }
+  }
+  void* p = mmap(nullptr, sizeof(Shared), PROT_READ | PROT_WRITE, MAP_SHARED | (fd_ < 0 ? MAP_ANONYMOUS : 0), fd_, 0);
   if (p == MAP_FAILED) {
+    if (fd_ >= 0) {
+      close(fd_);
+    }
     throw std::bad_alloc();
+  }
+  if (inherited_fd >= 0) {
+    shared_ = static_cast<Shared*>(p);
+    return;
   }
   shared_                          = new (p) Shared{};
   shared_->root                    = getpid();
@@ -214,10 +280,16 @@ Job_manager::Job_manager(Probe probe) : probe_(std::move(probe)) {
   shared_->stats[0].bytes_per_unit = 256;
   shared_->stats[1].bytes_per_unit = 2048;
   shared_->stats[2].bytes_per_unit = 4096;
+  shared_->stats[static_cast<unsigned>(Job_class::place_explore)].bytes_per_unit = 4096;
 }
-Job_manager::~Job_manager() { munmap(shared_, sizeof(Shared)); }
-Job_manager& Job_manager::global() {
-  static Job_manager manager;
+Job_manager::~Job_manager() {
+  munmap(shared_, sizeof(Shared));
+  if (fd_ >= 0) {
+    close(fd_);
+  }
+}
+Job_manager& Job_manager::global(int inherited_fd, bool share_across_exec) {
+  static Job_manager manager(host_resources, inherited_fd, share_across_exec);
   return manager;
 }
 void Job_manager::configure(unsigned n) {
@@ -293,17 +365,27 @@ void Job_slot::complete(uint64_t peak) {
     manager->release(id_, generation_, peak);
   }
 }
-Job_slot Job_manager::try_acquire(Job_class cls, uint64_t units, uint64_t prediction, bool record_queue) {
+uint64_t Job_stats::predicted_bytes(uint64_t units) const {
+  return static_cast<uint64_t>(
+      std::min<double>(static_cast<double>(UINT64_MAX / 2), (64ull << 20) + std::max<uint64_t>(1, units) * bytes_per_unit));
+}
+Job_slot Job_manager::try_acquire(Job_class cls, uint64_t units, uint64_t prediction, bool record_queue, unsigned reserve_cpus, unsigned threads) {
+  if (!threads || threads > slots) {
+    return {};
+  }
   const auto host = probe_();
   Lock       lock(shared_->lock);
   shared_->reap_dead();
   auto& stat = shared_->stats[static_cast<unsigned>(cls)];
   if (!prediction) {
-    prediction = static_cast<uint64_t>(
-        std::min<double>(static_cast<double>(UINT64_MAX / 2), (64ull << 20) + std::max<uint64_t>(1, units) * stat.bytes_per_unit));
+    prediction = stat.predicted_bytes(units);
   }
   bool memory = false;
-  if (!shared_->fits(host, prediction, memory)) {
+  const bool reserved = reserve_cpus
+                        && (uint64_t(shared_->active) + reserve_cpus + threads > std::min(host.cpus, shared_->ceiling) || prediction > host.available
+                            || sat_add(host.rss, prediction) > host.ram / 2
+                            || std::max(0.0, host.load - shared_->active) + shared_->active + reserve_cpus + threads > host.cpus);
+  if (reserved || !shared_->fits(host, prediction, memory, threads)) {
     if (record_queue) {
       ++stat.queued;
     }
@@ -323,6 +405,7 @@ Job_slot Job_manager::try_acquire(Job_class cls, uint64_t units, uint64_t predic
       shared_->baseline = host.rss;
     }
     e.cls        = cls;
+    e.threads    = threads;
     e.units      = std::max<uint64_t>(1, units);
     e.predicted  = prediction;
     e.baseline   = host.rss;
@@ -332,7 +415,7 @@ Job_slot Job_manager::try_acquire(Job_class cls, uint64_t units, uint64_t predic
     // Publish only after metadata is complete; killed owners cannot leave
     // a half-filled reservation visible to lock recovery.
     e.active.store(true, std::memory_order_release);
-    ++shared_->active;
+    shared_->active += e.threads;
     shared_->reserved = sat_add(shared_->reserved, prediction);
     ++stat.admitted;
     ++stat.active;
@@ -383,7 +466,7 @@ void Job_manager::release(unsigned id, uint64_t generation, uint64_t peak) {
   }
   auto& stat = shared_->stats[static_cast<unsigned>(e.cls)];
   if (e.active) {
-    --shared_->active;
+    shared_->active -= e.threads;
     --stat.active;
     shared_->reserved -= e.predicted;
   }
@@ -401,7 +484,7 @@ std::array<Job_stats, classes> Job_manager::stats() const {
 }
 void Job_manager::report() const {
   const auto  all     = stats();
-  const char* names[] = {"formal", "sim_compile", "usyn"};
+  const char* names[] = {"formal", "sim_compile", "usyn", "place_explore"};
   for (unsigned i = 0; i < classes; ++i) {
     if (all[i].admitted) {
       std::printf("jobs[stats]: %s %llu admitted, %u peak, %llu queued, %llu memory waits, %llu CPU waits, %.1f bytes/unit\n",
@@ -426,7 +509,7 @@ void Job_manager::reap_tree(pid_t pid) {
           dead.push_back(e.owner);
         }
         if (e.active) {
-          --shared_->active;
+          shared_->active -= e.threads;
           --shared_->stats[static_cast<unsigned>(e.cls)].active;
           shared_->reserved -= e.predicted;
         }
@@ -460,7 +543,7 @@ Job_manager::Yield::Yield(Job_manager& manager) : manager_(manager) {
     auto& e = manager_.shared_->entries[id];
     e.active = false;
     e.paused = true;
-    --manager_.shared_->active;
+    manager_.shared_->active -= e.threads;
     --manager_.shared_->stats[static_cast<unsigned>(e.cls)].active;
     manager_.shared_->reserved -= e.predicted;
     tickets_.push_back({id, e.generation});
@@ -492,12 +575,12 @@ bool Job_manager::resume(unsigned id, uint64_t generation) {
     return true;
   }
   bool memory = false;
-  if (!shared_->fits(h, e.predicted, memory)) {
+  if (!shared_->fits(h, e.predicted, memory, e.threads)) {
     return false;
   }
   e.paused = false;
   e.active = true;
-  ++shared_->active;
+  shared_->active += e.threads;
   auto& stat = shared_->stats[static_cast<unsigned>(e.cls)];
   ++stat.active;
   stat.peak         = std::max(stat.peak, stat.active);

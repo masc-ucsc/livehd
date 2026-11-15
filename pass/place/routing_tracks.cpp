@@ -1,6 +1,8 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "routing_tracks.hpp"
 
+#include "inou/lefdef/tech_profile.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
@@ -128,6 +130,54 @@ Track_pattern lef_track_pattern(const physical::Technology& tech, const physical
           std::numeric_limits<int32_t>::max()};
 }
 
+namespace {
+void append_grid(const physical::Technology& tech, const physical::Floorplan& fp, const std::string& layer, int64_t x_offset,
+                 int64_t x_pitch, int64_t y_offset, int64_t y_pitch, std::vector<physical::Track>& tracks) {
+  const double half_width = tech.layers.at(layer).width * tech.dbu / 2;
+  for (bool x : {true, false}) {
+    const auto   pitch  = x ? x_pitch : y_pitch;
+    const auto   offset = x ? x_offset : y_offset;
+    const double lo = x ? fp.die.xl : fp.die.yl, hi = x ? fp.die.xh : fp.die.yh;
+    // Keep the full wire inside the die, preserving the requested phase.
+    const double skip  = std::max(0.0, std::ceil((half_width - offset) / pitch));
+    const double first = lo + offset + skip * pitch;
+    const double count = std::floor((hi - half_width - first) / pitch) + 1;
+    if (!std::isfinite(first) || !std::isfinite(count) || count < 1 || count > std::numeric_limits<int32_t>::max()
+        || std::abs(first - std::round(first)) > 1e-7 || std::abs(first) > double(std::numeric_limits<int64_t>::max() / 4)) {
+      throw std::invalid_argument("track grid does not fit the die or DBU range on layer " + layer);
+    }
+    tracks.push_back({x ? "X" : "Y", layer, std::llround(first), std::llround(count), pitch});
+  }
+}
+}  // namespace
+
+void apply_default_routing_tracks(const physical::Technology& tech, physical::Floorplan& fp) {
+  if (!fp.tracks.empty()) {
+    return;
+  }
+  const auto* profile = physical::detect_tech_profile(tech, physical::Tech_policy::power_grid);
+  if (!profile || profile->routing_grids.empty()) {
+    return;
+  }
+  if (fp.dbu <= 0 || fp.dbu != tech.dbu || fp.die.xh <= fp.die.xl || fp.die.yh <= fp.die.yl) {
+    throw std::invalid_argument("routing tracks require a finite die with matching technology DBU");
+  }
+  const auto dbu = [&](double um) {
+    const auto n = std::llround(um * fp.dbu);
+    if (std::abs(um * fp.dbu - n) > 1e-7) {
+      throw std::invalid_argument("platform routing tracks are not representable in floorplan DBU");
+    }
+    return n;
+  };
+  std::vector<physical::Track> tracks;
+  for (const auto& g : profile->routing_grids) {
+    if (tech.layers.contains(g.layer)) {
+      append_grid(tech, fp, g.layer, dbu(g.x_offset), dbu(g.x_pitch), dbu(g.y_offset), dbu(g.y_pitch), tracks);
+    }
+  }
+  fp.tracks = std::move(tracks);
+}
+
 void apply_routing_tracks(const physical::Technology& tech, physical::Floorplan& fp, std::string_view input) {
   if (fp.dbu <= 0 || fp.dbu != tech.dbu || fp.die.xh <= fp.die.xl || fp.die.yh <= fp.die.yl) {
     throw std::invalid_argument("routing tracks require a finite die with matching technology DBU");
@@ -170,21 +220,8 @@ void apply_routing_tracks(const physical::Technology& tech, physical::Floorplan&
     if (values.size() != 4 || values.at("-x_pitch") == 0 || values.at("-y_pitch") == 0) {
       fail("supply all four offset/pitch options with positive pitches");
     }
-    const double half_width = tech.layers.at(layer).width * tech.dbu / 2;
-    for (bool x : {true, false}) {
-      const auto   pitch  = values.at(x ? "-x_pitch" : "-y_pitch");
-      const auto   offset = values.at(x ? "-x_offset" : "-y_offset");
-      const double lo = x ? fp.die.xl : fp.die.yl, hi = x ? fp.die.xh : fp.die.yh;
-      // Keep the full wire inside the die, preserving the requested phase.
-      const double skip  = std::max(0.0, std::ceil((half_width - offset) / pitch));
-      const double first = lo + offset + skip * pitch;
-      const double count = std::floor((hi - half_width - first) / pitch) + 1;
-      if (!std::isfinite(first) || !std::isfinite(count) || count < 1 || count > std::numeric_limits<int32_t>::max()
-          || std::abs(first - std::round(first)) > 1e-7 || std::abs(first) > double(std::numeric_limits<int64_t>::max() / 4)) {
-        fail("track grid does not fit the die or DBU range");
-      }
-      tracks.push_back({x ? "X" : "Y", layer, std::llround(first), std::llround(count), pitch});
-    }
+    append_grid(tech, fp, layer, values.at("-x_offset"), values.at("-x_pitch"),
+                values.at("-y_offset"), values.at("-y_pitch"), tracks);
   }
   if (tracks.empty()) {
     throw std::invalid_argument("routing tracks file contains no make_tracks data");

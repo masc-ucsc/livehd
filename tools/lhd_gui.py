@@ -18,6 +18,7 @@ import argparse
 import http.client
 import json
 import os
+import re
 import socket
 import sys
 
@@ -35,7 +36,9 @@ class Unix_connection(http.client.HTTPConnection):
 
 def find_socket(args):
     if args.socket:
-        return args.socket
+        # The log line is commonly pasted verbatim, including the usage hint.
+        pasted = re.search(r'agent socket \(local, mode 0600\): (.+?\.sock)(?:\s|$)', args.socket)
+        return pasted.group(1) if pasted else args.socket
     if os.environ.get('LHD_GUI_SOCKET'):
         return os.environ['LHD_GUI_SOCKET']
     if args.workdir:

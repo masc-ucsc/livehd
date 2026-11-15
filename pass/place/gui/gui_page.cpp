@@ -46,11 +46,14 @@ input[type=number]{width:44px;font:inherit;color:var(--fg);background:transparen
 .mut{color:var(--mut)} .st-paused,.st-gate{color:var(--macro)} .st-running{color:var(--io)} .st-finished{color:var(--mut)}
 </style></head><body>
 <canvas id="cv"></canvas>
-<div id="bar"><button id="run" class="primary">Run</button><button id="cont" style="display:none">Continue</button><button id="fit">Fit</button><button id="zin" title="zoom in (z or +)">+</button><button id="zout" title="zoom out (Z or -)">&minus;</button><button id="shot">Screenshot</button><button id="live" style="display:none">Live</button><button id="rp" disabled title="Re-run the flow with the recorded actions up to the selected checkpoint, using the flags edited in the panel">Replay from here</button><button id="otog" title="synth.place options: edit and rerun">Options</button><button id="ptog">Panel</button><span id="msg" class="mut"></span></div>
+<div id="bar"><button id="run" class="primary">Run</button><button id="cont" style="display:none">Continue</button><button id="fit">Fit</button><button id="zin" title="zoom in (z or +)">+</button><button id="zout" title="zoom out (Z or -)">&minus;</button><button id="shot">Screenshot</button><button id="live" style="display:none">Live</button><button id="rp" disabled title="Re-run the flow with the recorded actions up to the selected checkpoint, using the flags edited in the panel">Replay from here</button><button id="otog" title="synth.place options: edit and rerun">Options</button><button id="ptog">Panel</button><strong id="viewName" hidden></strong><span id="msg" class="mut"></span></div>
 <div id="tl"></div>
 <div id="scrub"><button id="sb_start" title="first snapshot">|&lt;</button><button id="sb_back" title="one snapshot back (left arrow)">&lt;</button><button id="sb_play" title="play the recorded history like a video">&#9654;</button><button id="sb_fwd" title="one snapshot forward (right arrow)">&gt;</button><button id="sb_end" title="back to live">&gt;|</button><span class="sbox"><input type="range" id="sb_rng" min="0" max="0" value="0"><div id="sb_marks"></div></span><span id="sb_cnt" class="mut"></span></div>
 <div id="err" style="display:none;position:absolute;left:12px;top:150px;max-width:calc(100% - 330px);white-space:pre-wrap;background:var(--pan);border:2px solid var(--bad);border-radius:8px;padding:10px 14px;color:var(--fg);font-size:13px"></div>
 <div id="panel">
+<details id="geom" hidden style="color:var(--bad);overflow-wrap:anywhere"><summary><strong id="geomSummary" role="alert"></strong></summary><ul id="geomList" style="padding-left:1.2em"></ul></details>
+<details id="pinInspector" hidden><summary id="pinSummary">Pin anchors</summary>
+<div id="pinAnchors" style="white-space:pre-wrap;overflow-wrap:anywhere"></div></details>
 <h4>Status</h4>
 <div class="row"><span>phase</span><span id="s_phase">-</span></div>
 <div class="row"><span>state</span><span id="s_state">-</span></div>
@@ -58,13 +61,50 @@ input[type=number]{width:44px;font:inherit;color:var(--fg);background:transparen
 <div class="row"><span>pending edits</span><span id="s_pend">0</span></div>
 <h4>Stats</h4>
 <div class="row"><span>HPWL (um)</span><span id="s_hpwl">-</span></div>
-<div class="row"><span>overflow</span><span id="s_ovf">-</span></div>
+<div class="row"><span>Placement density overflow</span><span id="s_ovf">-</span></div>
 <div class="row"><span>Fmax (MHz)</span><span id="s_freq">-</span></div>
+<div id="clockCoverage" class="mut"></div>
+<details id="frameTimingGroups" hidden><summary>Placement setup timing by clock and path family</summary><div></div></details>
+<details id="sdcCoverage" hidden><summary id="sdcCount"></summary><ul id="sdcIssues"></ul></details>
 <div class="row"><span>WNS (ps)</span><span id="s_wns">-</span></div>
 <div class="row"><span>TNS (ps)</span><span id="s_tns">-</span></div>
+<div id="repairAdvice" class="mut" hidden></div>
+<div class="row"><span>Routing bins over capacity</span><span id="routing_share">–</span></div>
+<div class="row"><span>Quality</span><span id="quality">Not configured</span></div>
+<details id="scoreSettings"><summary>Configure quality score</summary>
+<fieldset id="scoreFields"><legend>Score components</legend>
+<label>Routing estimator <select id="scoreEstimator"><option value="rudy">RUDY</option><option value="rsmt">RSMT</option><option value="uroute">URoute</option></select></label>
+<table><thead><tr><th>Loss</th><th>Weight</th><th>Half-score loss</th></tr></thead><tbody id="scoreTerms"></tbody></table>
+<button id="scoreApply">Apply score</button> <button id="scoreDisable">Disable score</button>
+</fieldset><output id="scoreStatus" aria-live="polite"></output></details>
 <div class="row"><span>timing from iter</span><span id="s_titer">-</span></div>
-<div class="row"><span></span><span><button id="tim" style="padding:0 8px;font-size:12px">Refresh timing</button></span></div>
+<div class="row"><span></span><span><button id="tim" style="padding:0 8px;font-size:12px">Refresh timing</button> <button id="evaluate">Full timing</button> <button id="legalize">Legalize</button></span></div>
+<h4>Implementation changes</h4>
+<label><input type="checkbox" id="no_resynthesis">No resynthesis</label>
+<label><input type="checkbox" id="no_sizing">No sizing</label>
+<label><input type="checkbox" id="no_buffer_edits">No buffer edits</label>
+<button id="freeze">Freeze implementation</button>
+<div id="slowwork" class="mut"></div>
 <h4>Stop before stage</h4><div id="stages" class="mut">-</div>
+<h4>Explorations</h4>
+<div id="explist" aria-live="polite"></div>
+<fieldset id="xeval"><legend>Evaluate this frame</legend>
+<label>Evaluation <select id="xtier"><option value="T0">Geometry</option><option value="T1">Frozen timing</option><option value="T2">Placement relaxation</option><option value="T3">Implementation repair</option><option value="T4">Downstream routing</option></select></label>
+<label id="xbudget" hidden><span id="xunit"></span> <input type="number" id="xcount" min="1" max="64" value="1" style="width:4em"></label>
+<label id="xscope" hidden><input type="checkbox" id="xselected">Limit to selected cells</label>
+<div id="xrepairs" hidden><label>Timing call limit <input type="number" id="xtiminglimit" min="1" step="1" style="width:5em"></label><label><input type="checkbox" id="xsize" checked>Sizing</label> <label><input type="checkbox" id="xbuffer">Buffer edits</label> <label><input type="checkbox" id="xresynth">Resynthesis</label></div>
+<details><summary>Placement patch</summary><textarea id="xpatch" aria-label="Placement patch JSON" rows="3" style="width:100%" placeholder="Move commands or an exported relative-moves document"></textarea></details>
+<button id="xsubmit">Evaluate candidate</button> <output id="xstatus" aria-live="polite"></output>
+</fieldset>
+<div class="row"><label>Reference <select id="xref"></select></label><label>Candidate <select id="xcandidate"></select></label><button id="xcompare">Compare</button></div>
+<output id="xdiff" class="mut"></output>
+<strong id="xgeometry" style="color:var(--bad)" hidden></strong>
+<div id="xtimingdiff" hidden></div>
+<div id="xplot" hidden><label>Map difference <select id="xlayer"><option value="rudy">RUDY</option><option value="rsmt">RSMT</option><option value="uroute">URoute</option><option value="density">Cell density</option></select></label>
+<canvas id="xmap" width="320" height="160" aria-label="Candidate minus reference utilization with macro displacements" style="width:100%;height:auto"></canvas><output id="xlegend" class="mut"></output></div>
+<button id="xbegin">Begin exploration</button> <button id="xclose" hidden>Discard</button>
+<div class="row"><label>Export <select id="exportKind"><option value="macros">Design metadata + exact macro coordinates</option><option value="relationships">Relative moves</option><option value="flags">Changed flags</option><option value="intent">Placement intent</option></select></label>
+<button id="exportData">Download JSON</button></div>
 <h4>Fork region</h4>
 <div class="mut" style="font-size:12px">Take the cells of a region as a design of its own, in a new page: boundary pins fixed where the nets crossed, cells starting where they are. Change the options there and compare.</div>
 <div class="row" style="margin-top:4px"><span></span><span><button id="f_sel" title="the box around the selected nodes">Fork selection</button> <button id="f_view" title="what is on screen">Fork view</button></span></div>
@@ -79,10 +119,17 @@ input[type=number]{width:44px;font:inherit;color:var(--fg);background:transparen
 <div class="row"><span></span><span><button id="a_shr" title="move the selected edge inward by the step (preview)">Shrink</button> <button id="a_grow" title="move the selected edge outward by the step (preview)">Grow</button></span></div>
 <div class="row"><span></span><span><button id="a_apply" class="primary" title="re-place the design in the previewed area (restarts at the latest checkpoint)">Apply</button> <button id="a_cancel" title="drop the preview (Esc)">Cancel</button></span></div>
 <div id="a_warn" style="font-size:12px;color:var(--bad)"></div>
+<details id="stripInspector"><summary>Macro channels</summary>
+<button id="stripRead">Measure channels</button>
+<output id="stripStatus" aria-live="polite" style="display:block"></output>
+<select id="stripSelect" aria-label="Measured macro channel" style="width:100%" hidden></select>
+<div id="stripDetail"></div><div id="edgeClearance"></div>
+<label id="faceSelector" hidden>Macro faces <select id="faceMacro"></select></label><div id="faceSummary"></div></details>
 <h4>Layers</h4>
 <label><input type="checkbox" id="l_comb" checked>comb</label>
 <label><input type="checkbox" id="l_regs" checked><span style="color:var(--seq)">regs</span></label>
 <label><input type="checkbox" id="l_macros" checked>macros</label>
+<label><input type="checkbox" id="l_pins">macro signal pins</label>
 <label><input type="checkbox" id="l_io" checked>IO</label>
 <label><input type="checkbox" id="l_reg">regions <span class="mut" style="font-size:11px">(cuts and boundary pins)</span></label><div id="reg_note" class="mut" style="font-size:11px;margin-left:20px"></div>
 <label><input type="checkbox" id="l_cen" checked>centroids <button id="cen_rel" style="padding:0 6px;font-size:11px">release</button></label>
@@ -97,6 +144,13 @@ input[type=number]{width:44px;font:inherit;color:var(--fg);background:transparen
 <button data-a="disth">Distribute H</button><button data-a="distv">Distribute V</button><button data-a="unpin">Unpin</button>
 </div>
 <div class="row" style="margin-top:6px;align-items:center"><span>matrix</span><span><input type="number" id="m_r" value="2" min="1"> x <input type="number" id="m_c" value="2" min="1"> <button data-a="matrix">Go</button></span></div>
+<label><input type="checkbox" id="ipreserve">Preserve as relationship</label>
+<h4>Placement intent</h4>
+<button id="iread">Inspect</button> <button id="ipreview">Preview</button> <button id="iapply">Apply records</button>
+<textarea id="irecords" aria-label="Authored placement records" rows="4" style="width:100%"></textarea>
+<label id="ioverlayControl" hidden><input type="checkbox" id="ioverlay" checked> Show intent targets</label>
+<output id="ilegend" class="mut" aria-live="polite"></output>
+<pre id="ibind" style="white-space:pre-wrap;max-height:12em;overflow:auto"></pre>
 <h4>Options <span id="f_n" class="mut"></span></h4>
 <button id="o_open" style="width:100%">synth.place options&hellip;</button>
 <div class="mut" style="font-size:11px;margin-top:3px">Every <code>lhd list options synth.place</code> entry, editable; rerun from the start or from the selected checkpoint.</div>
@@ -129,20 +183,415 @@ const cv=$('cv'),ctx=cv.getContext('2d');
 let D=null,X=null,Y=null,PX=null,PY=null,S={},names={},pinned=new Set(),sel=new Set();
 let view={s:1,ox:0,oy:0},dpr=1,dirty=true,frameId=-1,sceneId=-1,ver=0,drag=null,hover=-1,grid=null;
 const css=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
-function api(p,o){return fetch(p+(p.includes('?')?'&':'?')+'t='+T,o)}
+const exploration = new URLSearchParams(location.search).get('x');
+function api(p,o){const q=new URLSearchParams({t:T});if(exploration&&p!='/agent')q.set('x',exploration);return fetch(p+(p.includes('?')?'&':'?')+q,o)}
+async function xcommand(o){const r=await(await api('/agent',{method:'POST',body:JSON.stringify(o)})).json();if(r.ok===false)throw Error(r.error);return r}
+function documentUrl(path,target,params={}){
+ const u=new URL(path,location.href);u.searchParams.set('t',T);
+ if(target && target!=='main')u.searchParams.set('x',target);
+ for(const [k,v] of Object.entries(params))u.searchParams.set(k,v);
+ return u;
+}
+async function readGrid(target,kind,frame){
+ const res=await fetch(documentUrl('/map',target,frame==null?{kind}:{kind,frame}));if(!res.ok)return null;
+ const bytes=await res.arrayBuffer();if(bytes.byteLength<24)return null;
+ const view=new DataView(bytes),bx=view.getUint32(4,true),by=view.getUint32(8,true);
+ if(!bx||!by||bytes.byteLength!==24+4*bx*by)return null;
+ return {bx,by,peak:view.getFloat32(12,true),ovf:view.getFloat32(16,true),v:new Float32Array(bytes,24)};
+}
+function gotoExploration(id){const u=new URL(location.href);if(id)u.searchParams.set('x',id);else u.searchParams.delete('x');location.href=u}
+async function discardCandidate(id,button){
+ button.disabled=true;
+ try{
+  await xcommand({cmd:'explore_discard',id});
+  if(id===exploration){gotoExploration(null);return}
+  await explorations();
+ }catch(e){$('xstatus').textContent=e.message;button.disabled=false}
+}
+async function downloadExport(target,what){
+ try{
+  const text=what==='macros'||what==='intent'?
+    (await xcommand({cmd:'export',target,what,format:'metadata',encoding:'json_text'})).records_json:
+    JSON.stringify(what==='record'?(await xcommand({cmd:'explorations',ids:[target]})).explorations[0]:await xcommand({cmd:'export',target,what}),null,2);
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([text+'\n'],{type:'application/json'}));
+  a.download=target+'-'+what+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+ }catch(e){$('xstatus').textContent=e.message}
+}
+$('exportData').onclick=()=>downloadExport(exploration||'main',$('exportKind').value);
+let openingForeground=null,ledgerEpoch='',ledgerRequest=0,ledgerApplied=0,ledgerPolling=false;
+const ledgerRows=new Map();
+// Show absolute measurements as well as pairwise deltas. Build the tables
+// only when requested; large multi-clock runs do not slow down ledger polling.
+function fillTimingBreakdown(panel,endpoints){
+   panel.replaceChildren();
+  for(const [kind,groups] of [['Capture clock',endpoints.capture_clocks],['Path family',endpoints.path_families]]){
+   if(!groups||!Object.keys(groups).length)continue;
+   const table=document.createElement('table'),header=table.createTHead().insertRow();
+   for(const text of [kind,'WNS (ps)','TNS (ps)','Failing / constrained']){
+    const th=document.createElement('th');th.textContent=text;header.append(th);
+   }
+   const body=table.createTBody();
+   for(const [name,g] of Object.entries(groups)){
+    if(!g)continue;
+    const tr=body.insertRow();
+    for(const text of [name||'(no clock)',fmt(g.wns_ps,2),fmt(g.tns_ps,2),(g.failing??'–')+' / '+(g.endpoints??'–')])tr.insertCell().textContent=text;
+   }
+   panel.append(table);
+  }
+}
+function addTimingBreakdown(row,endpoints,label){
+ if(!endpoints?.total?.endpoints)return;
+ const details=document.createElement('details'),title=document.createElement('summary'),panel=document.createElement('div');
+ title.textContent=label+' by clock and path family';details.append(title,panel);row.append(details);
+ details.ontoggle=()=>{if(details.open&&!panel.childElementCount)fillTimingBreakdown(panel,endpoints)};
+}
+async function explorations(){
+ const known=Object.create(null),request=++ledgerRequest;
+ for(const [id,entry] of ledgerRows)if(entry.cache)known[id]=entry.cache;
+ const r=await xcommand({cmd:'explorations',epoch:ledgerEpoch,known});
+ if(request<ledgerApplied)return;
+ ledgerApplied=request;
+ const box=$('explist');
+ if(ledgerEpoch!==r.epoch){ledgerRows.clear();box.replaceChildren();ledgerEpoch=r.epoch}
+ const visible=new Set(r.unchanged);
+ for(const x of r.explorations){const row=document.createElement('div');row.textContent=x.id+' '+x.state+(x.reason?' · '+x.reason:'');
+ if(x.label)row.append(' · '+x.label);
+ if(x.queue_s!=null)row.append(' · queue '+x.queue_s.toFixed(2)+' s');
+ if(x.startup_s!=null)row.append(' · '+(x.worker==='replay'?'replay ':'start ')+x.startup_s.toFixed(2)+' s');
+ if(x.run_s!=null)row.append(' · run '+x.run_s.toFixed(2)+' s');
+ if(x.cpu_s!=null)row.append(' · CPU '+x.cpu_s.toFixed(2)+' s');
+ if(x.work)row.append(' · '+x.work.full_calls+' full / '+x.work.ranking_calls+' ranking calls · '+x.work.gp_iterations+' GP iterations');
+ if(x.sampled_session_rss_bytes>0){
+   const mib=bytes=>Math.ceil(bytes/1048576);
+   row.append(' · sampled session peak '+mib(x.sampled_session_rss_bytes)+' / '+mib(r.limits.session_memory_bytes)+' MiB');
+ }
+ if(!x.closed && x.state==='done' && x.tier!=='region'){
+ const img=document.createElement('img');img.src=documentUrl('/screenshot.png',x.id,{w:96,h:64,layers:'congestion,pin_sides'});img.alt='Placement '+x.id;img.loading='lazy';img.width=48;row.prepend(img,' ');
+ const download=document.createElement('button');download.textContent='Export';download.onclick=()=>downloadExport(x.id,'macros');row.append(' ',download);
+}
+const evidence=x.last_measurement||x.result;
+if(x.last_measurement)row.append(' · last full timing at '+(evidence.gate||'iteration '+evidence.iteration)+', frame '+evidence.frame);
+if(evidence?.geometry_status==='illegal'){const warning=document.createElement('strong');warning.textContent=' · ILLEGAL GEOMETRY'+(x.tier==='T4'?' at route input':'');row.append(warning)}
+if(evidence?.summary){const t=evidence.summary.timing,r=evidence.summary.routing,q=evidence.summary.quality;
+ const routed=t.model==='final_downstream_sta';
+ row.append(' · '+(routed?'Routed setup WNS ':'WNS ')+(t.wns_ps??'–')+' ps · TNS '+(t.tns_ps??'–')+' ps · '+r.estimator+' '+(r.overflow_bin_share==null?'unavailable':(100*r.overflow_bin_share).toFixed(1)+'% over capacity')+' · quality '+(q.score==null?(q.status==='not_configured'?'not configured':'unavailable'):fmt(q.score,2)));
+ if(t.repair_advice?.recommended)row.append(' · '+repairAdviceText(t));
+ if(!routed)addTimingBreakdown(row,t.endpoints,'Placement setup timing')}
+if(x.result?.validation){const q=x.result.validation.row, t=x.result.validation.setup_timing;
+ row.append(' · '+q.status+' · DRC '+(q.drc??'–'));
+ if(t?.status!=='measured'&&q.status==='routed')row.append(' · Setup timing unavailable: '+(t?.reason||'no final setup measurement'));
+ if(t?.status==='measured'&&t.endpoints?.status==='measured'&&t.endpoints.total){
+  row.append(' · '+t.endpoints.total.failing+' failing / '+t.endpoints.total.endpoints+' constrained endpoints');
+  addTimingBreakdown(row,t.endpoints,'Routed setup timing');
+ }else if(t?.status==='measured')row.append(' · Endpoint breakdown unavailable'+(t.endpoints?.reason?': '+t.endpoints.reason:''));
+ const checks=x.result.validation.placement_checks;
+ if(checks){const failures=Array.isArray(checks.legalization_failure_counts)?checks.legalization_failure_counts.filter(n=>n>0):[];
+ row.append(' · final placement: '+String(checks.final_legality??'not reported').replace('_',' ')+' · macro poses (applied/final): '+(checks.applied_macro_poses??'not reported')+'/'+(checks.routed_macro_poses??'not reported'));
+ if(failures.length)row.append(' · earlier legalization failures per pass: '+failures.join(', '));}
+ if(!x.closed){const a=document.createElement('a');a.href=documentUrl('/validation/receipt.json',x.id);a.textContent='Receipt';row.append(' ',a)}}
+if(x.page_url){const a=document.createElement('a');a.href=x.page_url;a.textContent='Region page';row.append(' ',a)}
+ if(x.closed){const b=document.createElement('button');b.textContent='Save record';b.onclick=()=>downloadExport(x.id,'record');row.append(' ',b)}
+ if(x.tier!=='region'&&!x.closed&&(x.state==='ready'||x.state==='done')&&x.id!==exploration){const b=document.createElement('button');b.textContent='View';b.onclick=()=>gotoExploration(x.id);row.append(' ',b)}
+ if(!x.closed && x.id!==exploration && x.mode!=='foreground'){
+   const button=document.createElement('button');
+   button.textContent=['queued','starting','configuring','running'].includes(x.state)?'Cancel':'Discard';
+   button.setAttribute('aria-label',button.textContent+' '+x.id);button.onclick=()=>discardCandidate(x.id,button);
+   row.append(' ',button);
+ }
+ const previous=ledgerRows.get(x.id);
+ if(previous)previous.row.replaceWith(row);else box.append(row);
+ const terminal=!['running','queued','starting','configuring','ready'].includes(x.state);
+ const cache=x.details_evicted?'evicted':x.closed?'closed':terminal&&x.mode!=='foreground'?'terminal':'';
+ ledgerRows.set(x.id,{id:x.id,state:x.state,mode:x.mode,closed:x.closed,reason:x.reason,
+   measured:!!(x.result?.summary||x.result?.validation),row,cache});
+ visible.add(x.id)}
+ for(const [id,entry] of ledgerRows)if(!visible.has(id)){entry.row.remove();ledgerRows.delete(id)}
+ const entries=Array.from(ledgerRows.values());
+ if(openingForeground){
+   const row=ledgerRows.get(openingForeground);
+   if(row?.state==='ready'&&!row.closed){openingForeground=null;gotoExploration(row.id);return}
+   if(row&&(row.closed||['failed','stale','cancelled','timed_out','budget_exhausted'].includes(row.state))){
+     openingForeground=null;$('xstatus').textContent=row.reason||row.state;
+   }
+ }
+ const closed=new Set(entries.filter(x=>x.closed).map(x=>x.id));
+ for(const name of ['xref','xcandidate']){
+   const select=$(name),value=select.value;
+   const ids=entries.filter(x=>x.mode!=='foreground'&&x.state==='done'&&x.measured).map(x=>x.id);
+   if(r.main.timing.wns_ps!=null&&r.main.timing.model==='placement_rc')ids.unshift('main');
+   if(Array.from(select.options,o=>o.value).join()!==ids.join()){
+     select.replaceChildren(...ids.map(id=>new Option(id,id)));
+     if(ids.includes(value))select.value=value;else if(name==='xcandidate')select.selectedIndex=ids.length-1;
+   }
+   for(const option of select.options)option.dataset.closed=String(closed.has(option.value));
+ }
+ $('xcompare').disabled=!$('xref').value||!$('xcandidate').value;
+ if(!exploration){const open=entries.find(x=>!x.closed&&x.mode==='foreground');$('xbegin').disabled=!!open;$('xclose').hidden=!open;if(open){$('xclose').disabled=false;$('xclose').onclick=()=>discardCandidate(open.id,$('xclose'))}}
+}
+let xcap={},submitting=false;
+const scoreLosses={negative_wns_ps:'Negative WNS (ps)',negative_tns_ps:'Negative TNS (ps)',overflow_bin_share:'Over-capacity bin share',routing_overflow:'Routing overflow',hpwl_um:'HPWL (µm)'};
+function loadScore(){
+ const q=S.summary?.quality;if(!q)return;
+ $('scoreEstimator').value=q.estimator;$('scoreTerms').replaceChildren();
+ for(const [loss,label] of Object.entries(scoreLosses)){
+  const term=q.components.find(t=>t.loss===loss),row=$('scoreTerms').insertRow();
+  row.dataset.loss=loss;row.insertCell().textContent=label;
+  for(const field of ['weight','half']){
+   const input=document.createElement('input');input.type='number';input.min='0';input.step='any';
+   input.setAttribute('aria-label',label+' '+(field==='half'?'half-score loss':field));
+   input.value=term?.[field]??'';row.insertCell().append(input);
+  }
+ }
+}
+$('scoreSettings').ontoggle=()=>{if($('scoreSettings').open){loadScore();$('scoreStatus').textContent=''}};
+async function setScore(disable){
+ const terms=[];
+ if(!disable)for(const row of $('scoreTerms').rows){
+  const [w,h]=row.querySelectorAll('input');
+  if(w.value===''&&h.value==='')continue;
+  if(w.value===''||!w.validity.valid||!(h.valueAsNumber>0)){
+   $('scoreStatus').textContent='Enter a nonnegative weight and positive half-score loss for '+scoreLosses[row.dataset.loss]+'.';return;
+  }
+  terms.push({loss:row.dataset.loss,weight:w.valueAsNumber,half:h.valueAsNumber});
+ }
+ try{
+  const reply=await xcommand({cmd:'score_config',target:exploration||'main',estimator:$('scoreEstimator').value,components:terms});
+  S.summary=reply.summary;loadScore();$('scoreStatus').textContent=terms.length?'Score applied.':'Score disabled.';
+ }catch(e){$('scoreStatus').textContent=e.message}
+}
+$('scoreApply').onclick=()=>setScore(false);$('scoreDisable').onclick=()=>setScore(true);
+function candidateControls(){
+ $('exportData').disabled=$('stripRead').disabled=rev!==null||!S.frame;
+ const tier=$('xtier').value,relax=tier==='T2',repair=tier==='T3',scoped=(relax||repair)&&$('xselected').checked;
+ $('xbudget').hidden=$('xscope').hidden=!(relax||repair);$('xrepairs').hidden=!repair;
+ $('xunit').textContent=relax?'GP iterations':'Trial limit';
+ $('xcount').max=relax?10000:64;
+ $('xbuffer').disabled=scoped;$('xresynth').disabled=scoped||!xcap.repair_operations?.includes('resynthesis');
+ for(const o of $('xtier').options)o.disabled=o.value==='T3'&&!xcap.terminal_repair || o.value==='T4'&&!xcap.external_validation || o.value==='T2'&&!S.legalize_available;
+ const gate=S.state==='gate'||S.state==='paused',live=rev===null&&(!exploration||gate);
+ $('xeval').disabled=!live;
+ $('scoreFields').disabled=!live||(!exploration&&!!S.foreground);
+ $('xsubmit').disabled=!live||submitting||!S.frame||$('xtier').selectedOptions[0].disabled || tier!=='T0'&&!gate || scoped&&!sel.size;
+}
+$('xtier').onchange=$('xselected').onchange=candidateControls;
+$('xsubmit').onclick=async()=>{
+ const tier=$('xtier').value,request={cmd:'explore',tier,patch:[],target:exploration||'main',client:'browser',expect:{frame:S.frame,baseline:S.baseline_identity}};
+ const count=Number($('xcount').value);
+ if(tier==='T2')request.budget={iterations:count};
+ if(tier==='T3'){
+   request.budget={repair_trials:count};
+   const limit=$('xtiminglimit');
+   if(!limit.validity.valid){limit.reportValidity();return}
+   if(limit.value!=='')request.budget.timing_calls=limit.valueAsNumber;
+   request.policy={sizing:$('xsize').checked,buffering:!$('xbuffer').disabled&&$('xbuffer').checked,resynthesis:!$('xresynth').disabled&&$('xresynth').checked};
+ }
+ if((tier==='T2'||tier==='T3')&&$('xselected').checked)request.scope={nodes:[...sel].map(i=>'#'+i)};
+ submitting=true;candidateControls();
+ try{
+  if($('xpatch').value.trim()){
+   const patch=JSON.parse($('xpatch').value);
+   if(patch?.units==='dbu'&&patch.dbu_per_um!==D.dbu)throw Error('Patch and design use different database units per micron');
+   request.patch=Array.isArray(patch?.moves)&&!patch.cmd?patch.moves:patch;
+  }
+  const row=await xcommand(request);$('xstatus').textContent=row.id+' · '+row.state;await explorations()
+ }
+ catch(e){$('xstatus').textContent=e.message}
+ finally{submitting=false;candidateControls()}
+};
+let comparisonEpoch=0;
+function repairAdviceText(t){
+ const reasons={negative_setup_slack:'setup slack '+fmt(t.wns_ps,1)+' ps',negative_hold_slack:'hold slack '+fmt(t.hold_wns_ps,1)+' ps',electrical_violations:t.electrical_violations+' electrical violations'};
+ return 'Consider a repair trial: '+t.repair_advice.reasons.map(r=>reasons[r]).join(', ')+'.'+(t.repair_advice.mutations_frozen?' Implementation edits are frozen.':'');
+}
+function showTimingDeltas(delta,fmt){
+ const panel=$('xtimingdiff');panel.replaceChildren();
+ for(const [label,groups] of [['Path family',delta.path_families],['Capture clock',delta.capture_clocks]]){
+  if(!groups||!Object.keys(groups).length)continue;
+  const table=document.createElement('table'),header=table.createTHead().insertRow();
+  for(const name of [label,'Δ WNS (ps)','Δ TNS (ps)','Δ failing']){
+   const th=document.createElement('th');th.textContent=name;header.append(th);
+  }
+  const body=table.createTBody();
+  for(const [name,group] of Object.entries(groups)){
+   const row=body.insertRow();row.insertCell().textContent=name;
+   if(group.coverage==='matched'){
+    for(const value of [group.wns_ps,group.tns_ps,group.failing])row.insertCell().textContent=fmt(value,'');
+   }else{const cell=row.insertCell();cell.colSpan=3;cell.textContent='Endpoint set changed ('+group.reference_endpoints+' → '+group.candidate_endpoints+')'}
+  }
+  panel.append(table);
+ }
+ panel.hidden=!panel.childElementCount;
+}
+async function comparePlacement(){
+ const epoch=++comparisonEpoch,left=$('xref').value,right=$('xcandidate').value;
+ $('xplot').hidden=true;$('xtimingdiff').hidden=true;$('xgeometry').hidden=true;
+ try{
+  const result=await xcommand({cmd:'compare',reference:left,candidate:right});
+  if(epoch!==comparisonEpoch)return;
+  const fmt=(x,unit)=>x==null?'unavailable':x.toLocaleString(undefined,{maximumFractionDigits:4})+unit;
+  const d=result.delta;
+  const illegal=Object.entries(result.geometry||{}).filter(([,status])=>status==='illegal').map(([side])=>side);
+  if(illegal.length){
+   $('xgeometry').textContent='ILLEGAL GEOMETRY · '+illegal.join(' and ')+(result.tier==='T4'?' at route input':'');
+   $('xgeometry').hidden=false;
+  }
+  const layer=$('xlayer');
+  for(const option of layer.options)option.disabled=result.tier==='T0'&&option.value!=='density';
+  if(result.tier==='T0'){
+   layer.value='density';
+   $('xdiff').textContent='Geometry · reference '+result.geometry.reference+' · candidate '+result.geometry.candidate;
+  }else if(result.tier==='T4'){
+   $('xdiff').textContent='Δ WNS '+fmt(d.wns_ns,' ns')+' · Δ TNS '+fmt(d.tns_ns,' ns')+' · Δ DRC '+fmt(d.drc,'')+' · Δ wirelength '+fmt(d.wl_um,' µm')+' · Δ quality '+fmt(d.quality,'');
+   if(result.timing_coverage!=='matched')$('xdiff').append(' · Endpoint coverage '+result.timing_coverage);
+   showTimingDeltas(d,fmt);
+   return;
+  }else{
+   $('xdiff').textContent='Δ WNS '+fmt(d.wns_ps,' ps')+' · Δ TNS '+fmt(d.tns_ps,' ps')+' · Δ over-capacity share '+fmt(d.overflow_bin_share,'')+' · Δ quality '+fmt(d.quality,'');
+   if(result.timing_coverage!=='matched')$('xdiff').append(' · Endpoint coverage '+result.timing_coverage);
+   showTimingDeltas(d,fmt);
+  }
+  // Closed candidates still have measured timing; their maps and physical scenes have been released.
+  if($('xref').selectedOptions[0]?.dataset.closed==='true'||$('xcandidate').selectedOptions[0]?.dataset.closed==='true')return;
+  const [a,b,pa,pb]=await Promise.all([readGrid(left,layer.value,result.reference_frame),readGrid(right,layer.value,result.candidate_frame),xcommand({cmd:'export',target:left,what:'macros'}),xcommand({cmd:'export',target:right,what:'macros'})]);
+  if(epoch!==comparisonEpoch||!pa.macros||!pb.macros)return;
+  if((result.reference_frame!=null&&pa.frame!==result.reference_frame)||(result.candidate_frame!=null&&pb.frame!==result.candidate_frame)){
+   $('xdiff').append(' · Placement changed since comparison.');return;
+  }
+  if(JSON.stringify(pa.core_dbu)!==JSON.stringify(pb.core_dbu)||JSON.stringify(pa.outline)!==JSON.stringify(pb.outline)){
+   $('xdiff').append(' · Map difference unavailable for different floorplans.');return;
+  }
+  $('xplot').hidden=false;
+  const canvas=$('xmap'),g=canvas.getContext('2d'),[xl,yl,xh,yh]=pa.core_dbu;
+  canvas.height=Math.max(48,Math.min(400,Math.round(canvas.width*(yh-yl)/(xh-xl))));
+  const w=canvas.width,h=canvas.height,px=x=>(x-xl)*w/(xh-xl),py=y=>h-(y-yl)*h/(yh-yl);
+  g.clearRect(0,0,w,h);const outline=floorplanPath(px,py,pa.outline);g.fillStyle='#ececec';g.fill(outline,'evenodd');
+  let scale=0;
+  const available=a&&b&&a.bx===b.bx&&a.by===b.by;
+  if(available){
+   g.save();g.clip(outline,'evenodd');
+   for(let i=0;i<a.v.length;i++)scale=Math.max(scale,Math.abs(b.v[i]-a.v[i]));
+   for(let x=0;x<a.bx;x++)for(let y=0;y<a.by;y++){
+    const k=x*a.by+y,diff=b.v[k]-a.v[k];
+    g.fillStyle=diff>=0?'#bd4b34':'#287f9b';g.globalAlpha=scale?Math.abs(diff)/scale:0;
+    g.fillRect(x*w/a.bx,h-(y+1)*h/a.by,Math.ceil(w/a.bx),Math.ceil(h/a.by));
+   }
+   g.restore();
+  }
+  g.globalAlpha=1;g.strokeStyle='#272727';g.fillStyle='#272727';
+  const ref=new Map(pa.macros.map(m=>[m.name,m]));let moved=0,reoriented=0;
+  for(const m of pb.macros){const old=ref.get(m.name);if(!old)continue;
+   if(old.x!==m.x||old.y!==m.y){
+    moved++;g.beginPath();g.moveTo(px(old.x),py(old.y));g.lineTo(px(m.x),py(m.y));g.stroke();g.beginPath();g.arc(px(m.x),py(m.y),2.5,0,2*Math.PI);g.fill();
+   }
+   if(old.orient!==m.orient){reoriented++;g.strokeRect(px(m.x)-4,py(m.y)-4,8,8)}
+  }
+  $('xlegend').textContent=(available?'Red increases, blue decreases. Peak |Δ| '+fmt(scale,'')+'.':'Map unavailable.')+
+    ' '+moved+' displaced (dots), '+reoriented+' reoriented (squares).';
+ }catch(e){if(epoch===comparisonEpoch)$('xdiff').textContent=e.message}
+}
+$('xcompare').onclick=comparePlacement;$('xlayer').onchange=comparePlacement;
+let intentOverlay=null,intentRequest=0;
+function clearIntentOverlay(){
+ intentOverlay=null;$('ioverlayControl').hidden=true;$('ilegend').textContent='';dirty=true;
+}
+function displayIntent(r){
+ clearIntentOverlay();
+ const hints=r.bindings?.hints||[],targets=r.bindings?.targets_dbu||[];
+ const summary=h=>h.id+' · '+h.kind+' · '+h.status+' · weight '+h.weight+
+   (h.status==='discarded'?'':' · residual '+h.residual_um.toFixed(3)+' µm')+
+   (h.reason?' · '+h.reason:'')+'\n'+h.subjects.join(', ');
+ $('ibind').textContent=[r.status,...hints.map(summary)].filter(Boolean).join('\n');
+ if(r.frame && r.frame!==S.frame){$('ilegend').textContent='Measured at frame '+r.frame;return}
+ const edges=hints.filter(h=>h.status!=='discarded'&&h.pin_facing_edge_dbu).map(h=>h.pin_facing_edge_dbu);
+ if(!targets.length&&!edges.length)return;
+ intentOverlay={frame:r.frame,epoch:S.epoch,targets,edges};
+ $('ioverlayControl').hidden=false;
+ $('ilegend').textContent=[targets.length?targets.length+' dashed target outlines':'',edges.length?edges.length+' requested pin-facing edges':''].filter(Boolean).join(' · ');
+}
+function drawIntentOverlay(){
+ if(!intentOverlay||!$('ioverlay').checked||rev!==null||intentOverlay.frame!==haveFrame||intentOverlay.epoch!==S.epoch)return;
+ ctx.save();ctx.strokeStyle=css('--acc');ctx.lineWidth=2;
+ for(const t of intentOverlay.targets){
+   const [x,y,w,h]=t.target_center_size,[cx,cy]=t.from_center;
+   ctx.setLineDash([]);ctx.beginPath();ctx.moveTo(sx(cx),sy(cy));ctx.lineTo(sx(x),sy(y));ctx.stroke();
+   ctx.setLineDash([6,4]);ctx.strokeRect(sx(x-w/2),sy(y+h/2),w*view.s,h*view.s);
+ }
+ ctx.strokeStyle=css('--io');ctx.lineWidth=4;ctx.setLineDash([]);ctx.beginPath();
+ for(const [x,y,u,v] of intentOverlay.edges){ctx.moveTo(sx(x),sy(y));ctx.lineTo(sx(u),sy(v))}
+ ctx.stroke();ctx.restore();
+}
+$('ioverlay').onchange=()=>{dirty=true};
+$('irecords').oninput=()=>{++intentRequest;clearIntentOverlay();$('ibind').textContent=''};
+$('iread').onclick=async()=>{
+ const request=++intentRequest;
+ try{
+   const r=await xcommand({cmd:'export',target:exploration||'main',what:'intent',encoding:'json_text'});
+   if(request===intentRequest){$('irecords').value=r.records_json;displayIntent(r)}
+ }catch(e){if(request===intentRequest)$('ibind').textContent=e.message}
+};
+for(const [button,action] of [['ipreview','intent_preview'],['iapply','intent_apply']]){
+ $(button).onclick=async()=>{
+   const request=++intentRequest,target=exploration||'main',epoch=S.epoch;
+   clearIntentOverlay();
+   try{
+     const accepted=await xcommand({cmd:action,target,expect:{frame:S.frame,intent:S.intent_revision},records_json:$('irecords').value});
+     if(request!==intentRequest)return;
+     $('ibind').textContent='Queued';
+     for(;;){
+       const receipt=await xcommand({cmd:'command_status',target,sequence:accepted.sequence});
+       if(request!==intentRequest||S.epoch!==epoch)return;
+       if(receipt.status!=='queued'){
+         if(receipt.status!=='applied')throw Error(receipt.reason||receipt.status);
+         break;
+       }
+       await new Promise(resolve=>setTimeout(resolve,100));
+     }
+     const r=await xcommand({cmd:'export',target,what:'intent'});
+     if(request===intentRequest && S.epoch===epoch){
+       if(r.sequence===accepted.sequence)displayIntent(r);
+       else $('ibind').textContent='A newer intent report is available. Use Inspect to view it.';
+     }
+   }catch(e){if(request===intentRequest)$('ibind').textContent=e.message}
+ }
+}
+$('legalize').onclick=()=>cmd({cmd:'legalize'});
+$('xbegin').onclick=async()=>{
+ const button=$('xbegin');button.disabled=true;
+ try{
+  const x=await xcommand({cmd:'explore_begin',expect:{frame:S.frame}});
+  openingForeground=x.id;$('xstatus').textContent='Opening '+x.id+'…';
+  await explorations();
+ }catch(e){$('xstatus').textContent=e.message;button.disabled=false}
+};
+if(exploration){
+ $('xbegin').hidden=true;$('xclose').hidden=false;$('xclose').onclick=()=>discardCandidate(exploration,$('xclose'));
+}
+explorations().catch(e=>{$('xstatus').textContent=e.message});
+setInterval(async()=>{if(ledgerPolling)return;ledgerPolling=true;try{await explorations()}catch{}finally{ledgerPolling=false}},2000);
 let aEdge='right',aStepSet=false,aPend=null,aBase='';
 const areaBox=()=>aPend||D.die;
 function areaCancel(){if(aPend){aPend=null;dirty=true;areaInfo()}}
 function areaSet(edge,v){if(!aPend){aPend=D.die.slice();aBase=D.die.join()}const m=2*D.dbu;if(edge==='left')aPend[0]=Math.min(v,aPend[2]-m);else if(edge==='right')aPend[2]=Math.max(v,aPend[0]+m);else if(edge==='bottom')aPend[1]=Math.min(v,aPend[3]-m);else aPend[3]=Math.max(v,aPend[1]+m);aEdge=edge;dirty=true;areaInfo()}
 function areaNudge(sign){const st=parseFloat($('a_step').value);if(!(st>0)){$('msg').textContent='area: give a step in um';return}const b=areaBox(),d=sign*st*D.dbu;
  areaSet(aEdge,aEdge==='left'?b[0]-d:aEdge==='right'?b[2]+d:aEdge==='bottom'?b[1]-d:b[3]+d)}
-function areaProblem(){if(!aPend)return'';const[xl,yl,xh,yh]=aPend,w=xh-xl,h=yh-yl;if(D.cell_area>0&&D.cell_area/(w*h)>0.98)return'the cells would fill '+fmt(100*D.cell_area/(w*h),0)+' % of it (limit 98 %)';if(D.macro_area>0&&D.macro_limit>0&&D.macro_area/(w*h)>D.macro_limit)return'the macros and memories would need '+fmt(100*D.macro_area/(w*h),0)+' % of it with their spacing (limit '+fmt(100*D.macro_limit,0)+' %)';
+function usableArea(box){
+ if(box===D.die)return D.usable_area;
+ const [xl,yl,xh,yh]=box;
+ if(!D.exclusions?.length)return (xh-xl)*(yh-yl);
+ const rects=D.exclusions.map(([a,b,c,d])=>[Math.max(a,xl),Math.max(b,yl),Math.min(c,xh),Math.min(d,yh)]).filter(([a,b,c,d])=>a<c&&b<d);
+ if(!rects.length)return (xh-xl)*(yh-yl);
+ const xs=[...new Set([xl,xh,...rects.flatMap(r=>[r[0],r[2]])])].sort((a,b)=>a-b);let area=0;
+ for(let i=1;i<xs.length;i++){let y=yl;const spans=rects.filter(r=>r[0]<xs[i]&&r[2]>xs[i-1]).sort((a,b)=>a[1]-b[1]);
+  for(const r of spans){area+=(xs[i]-xs[i-1])*Math.max(0,r[1]-y);y=Math.max(y,r[3])}area+=(xs[i]-xs[i-1])*(yh-y)}
+ return area}
+function areaProblem(){if(!aPend)return'';const[xl,yl,xh,yh]=aPend,area=usableArea(aPend);if(area<=0)return'no usable placement area';if(D.cell_area>0&&D.cell_area/area>0.98)return'the cells would fill '+fmt(100*D.cell_area/area,0)+' % of it (limit 98 %)';if(D.macro_area>0&&D.macro_limit>0&&D.macro_area/area>D.macro_limit)return'the macros and memories would need '+fmt(100*D.macro_area/area,0)+' % of it with their spacing (limit '+fmt(100*D.macro_limit,0)+' %)';
  if(X)for(const i of pinned){if(i<X.length&&(X[i]<xl-0.5||Y[i]<yl-0.5||X[i]+D.w[i]>xh+0.5||Y[i]+D.h[i]>yh+0.5))return'a pinned node would lie outside (move or unpin it)'}return''}
 function areaApply(){if(!aPend)return;const bad=areaProblem();if(bad){$('msg').textContent='area: '+bad;return}const box=aPend.map(v=>v/D.dbu);aPend=null;dirty=true;cmd({cmd:'area',box});$('msg').textContent='re-placing with the new area...';areaInfo()}
-function areaInfo(){if(!D||!D.die||!D.dbu)return;if(aPend&&aBase!==D.die.join())aPend=null;const[xl,yl,xh,yh]=D.die,w=(xh-xl)/D.dbu,h=(yh-yl)/D.dbu,fill=(a,b)=>D.cell_area>0?fmt(100*D.cell_area/(a*b),1)+' %':'-';
+function areaInfo(){if(!D||!D.die||!D.dbu)return;if(aPend&&aBase!==D.die.join())aPend=null;const[xl,yl,xh,yh]=D.die,w=(xh-xl)/D.dbu,h=(yh-yl)/D.dbu,fill=b=>D.cell_area>0&&usableArea(b)>0?fmt(100*D.cell_area/usableArea(b),1)+' %':'–';
  $('a_size').textContent=fmt(w,1)+' x '+fmt(h,1);
- if(aPend){const nw=(aPend[2]-aPend[0])/D.dbu,nh=(aPend[3]-aPend[1])/D.dbu;$('a_new').textContent=fmt(nw,1)+' x '+fmt(nh,1)+' ('+fmt(100*nw*nh/(w*h)-100,0)+' %)';$('a_fill').textContent=fill(xh-xl,yh-yl)+' -> '+fill(aPend[2]-aPend[0],aPend[3]-aPend[1])}
- else{$('a_new').textContent='-';$('a_fill').textContent=fill(xh-xl,yh-yl)}
+ if(aPend){const nw=(aPend[2]-aPend[0])/D.dbu,nh=(aPend[3]-aPend[1])/D.dbu;$('a_new').textContent=fmt(nw,1)+' x '+fmt(nh,1)+' ('+fmt(100*nw*nh/(w*h)-100,0)+' %)';$('a_fill').textContent=fill(D.die)+' -> '+fill(aPend)}
+ else{$('a_new').textContent='-';$('a_fill').textContent=fill(D.die)}
  const bad=areaProblem();$('a_warn').textContent=bad?'Cannot apply: '+bad:'';$('a_apply').disabled=!aPend||!!bad;$('a_cancel').disabled=!aPend;
  if(!aStepSet&&document.activeElement!==$('a_step'))$('a_step').value=fmt((aEdge==='left'||aEdge==='right'?w:h)*0.05,1).replace(/,/g,'');
  for(const b of document.querySelectorAll('#a_edges button'))b.className=b.dataset.e===aEdge?'primary':''}
@@ -163,7 +612,12 @@ function forkSelection(){if(!sel.size||!X){$('msg').textContent='select cells fi
 function forkView(){if(!D)return;const W=cv.clientWidth,H=cv.clientHeight,[xl,yl,xh,yh]=D.die;forkBox([Math.max(xl,wx(0)),Math.max(yl,wy(H)),Math.min(xh,wx(W)),Math.min(yh,wy(0))])}
 let forkSeen=-1;
 function forkList(){const f=S.forks||[],el=$('f_list');if(el.dataset.n==String(f.length))return;el.dataset.n=String(f.length);el.textContent='';f.forEach((k,i)=>{const a=document.createElement('a');a.href=k.url;a.target='_blank';a.rel='noopener';a.textContent=k.top+': '+k.cells+' cells, '+k.inputs+' in / '+k.outputs+' out - open';a.style.display='block';el.appendChild(a)});if(forkSeen>=0&&f.length>forkSeen){const k=f[f.length-1];try{window.open(k.url,'_blank','noopener')}catch(e){}}forkSeen=f.length}
-async function cmd(o){try{const r=await api('/cmd',{method:'POST',body:JSON.stringify(o)});if(!r.ok){$('msg').textContent=(await r.json()).error||'error'}}catch(e){$('msg').textContent='disconnected'}}
+const resultView=()=>!!exploration&&S.state==='done';
+async function cmd(o){
+ if(resultView())return;
+ try{return await xcommand({cmd:'cmd',target:exploration||'main',command:o})}
+ catch(e){$('msg').textContent=e.message}
+}
 const lComb=$('l_comb'),lRegs=$('l_regs'),cellOn=i=>isSeq(i)?lRegs.checked:lComb.checked,isSeq=i=>!!D.seq&&D.seq.charCodeAt(i)===49,kind=i=>D.kinds.charCodeAt(i)-48,isMovable=i=>kind(i)<5,isFixedMacro=i=>kind(i)===7,canMove=i=>isMovable(i)||isFixedMacro(i),kd=i=>kind(i)%5;
 const nm=i=>names[i]??('#'+i);
 function resize(){dpr=window.devicePixelRatio||1;cv.width=cv.clientWidth*dpr;cv.height=cv.clientHeight*dpr;dirty=true}
@@ -172,12 +626,74 @@ function fit(){if(!D)return;const[xl,yl,xh,yh]=D.die,w=cv.clientWidth,h=cv.clien
  const pw=$('panel').style.display==='none'?0:290,aw=w-pw,s=Math.min((aw-2*pad)/Math.max(1,xh-xl),(h-2*pad)/Math.max(1,yh-yl));view.s=s;view.ox=(aw-(xh-xl)*s)/2-xl*s;view.oy=(h+(yh-yl)*s)/2+yl*s;dirty=true}
 const sx=x=>x*view.s+view.ox,sy=y=>view.oy-y*view.s,wx=x=>(x-view.ox)/view.s,wy=y=>(view.oy-y)/view.s;
 let R=null,regV=-1,M=null,mapV=-1,C=null,epoch=null,CP=[],selCp=-1,rev=null,flagDefs=null,flagEdits={},cpKey="";
+let stripReport=null,stripEpoch=0;
+function showMacroFaces(){
+ const out=$('faceSummary');out.replaceChildren();
+ const m=stripReport?.macros[$('faceMacro').selectedIndex];
+ if(!m)return;
+ for(const [side,f] of Object.entries(m.pin_access_proxy)){
+  const line=document.createElement('div'),unit=side==='bottom'||side==='top'?'row heights':'site widths';
+  line.textContent=side+': '+f.pins+' signal pins · '+(f.edge_pitch_capacity==null?'no full outline edge':('at most '+f.edge_pitch_capacity+' '+unit));
+  out.append(line);
+ }
+}
+$('faceMacro').onchange=showMacroFaces;
+function selectStrip(){
+ const edge=$('edgeClearance');edge.textContent='';
+ if(stripReport&&D){
+  const macro=stripReport.macros.reduce((best,m)=>m.edge_halo_clearance_dbu!=null&&(!best||m.edge_halo_clearance_dbu<best.edge_halo_clearance_dbu)?m:best,null);
+  if(macro)edge.textContent='Smallest halo-to-edge gap: '+macro.name+' · '+macro.halo_boundary_side+' · '+fmt(macro.edge_halo_clearance_dbu/D.dbu,3)+' µm'+(macro.edge_pitch_capacity==null?'':' · at most '+macro.edge_pitch_capacity+(['bottom','top'].includes(macro.halo_boundary_side)?' row heights':' site widths'));
+ }
+ const strip=stripReport?.strips[$('stripSelect').selectedIndex];
+ const detail=$('stripDetail');detail.replaceChildren();dirty=true;
+ if(!strip||!D)return;
+ const area=strip.standard_cell_area_dbu2/(D.dbu*D.dbu);
+ detail.textContent=strip.standard_cells+' cells · '+fmt(area,2)+' µm² · '+fmt(100*strip.standard_cell_utilization,1)+'% occupied · '+strip.entrances.length+' open entrances';
+}
+$('stripRead').onclick=async()=>{
+ const generation=++stripEpoch;
+ try{
+  const report=await xcommand({cmd:'geometry',target:exploration||'main'});
+  if(generation!==stripEpoch)return;
+  const oldName=stripReport?.macros[$('faceMacro').selectedIndex]?.name;
+  stripReport=report;
+  const faceSelect=$('faceMacro');
+  faceSelect.replaceChildren(...report.macros.map(m=>new Option(m.name,m.name)));
+  const chosen=report.macros.findIndex(m=>m.name===oldName);
+  if(chosen>=0)faceSelect.selectedIndex=chosen;
+  $('faceSelector').hidden=!report.macros.length;showMacroFaces();
+  const select=$('stripSelect');
+  select.replaceChildren(...report.strips.map((s,i)=>new Option(s.members.join(' ↔ '),i)));
+  select.hidden=!report.strips.length;
+  $('stripStatus').textContent='Frame '+report.frame+' · '+report.strips.length+' channels';
+  selectStrip();
+ }catch(e){if(generation===stripEpoch)$('stripStatus').textContent=e.message}
+};
+$('stripSelect').onchange=selectStrip;
+$('stripInspector').ontoggle=()=>{dirty=true};
+function drawSelectedStrip(){
+ if(!$('stripInspector').open||!stripReport||rev!==null||stripReport.frame!==haveFrame)return;
+ const strip=stripReport.strips[$('stripSelect').selectedIndex];if(!strip)return;
+ const [l,b,r,t]=strip.box;
+ ctx.save();ctx.strokeStyle=css('--acc');ctx.setLineDash([4,3]);ctx.strokeRect(sx(l),sy(t),(r-l)*view.s,(t-b)*view.s);
+ ctx.setLineDash([]);ctx.lineWidth=3;ctx.strokeStyle=css('--io');ctx.beginPath();
+ for(const [x0,y0,x1,y1] of strip.entrances){ctx.moveTo(sx(x0),sy(y0));ctx.lineTo(sx(x1),sy(y1))}
+ ctx.stroke();ctx.restore();
+}
 let dens={b:48,v:null,max:1},densFrame=-2;
-function densMap(){const B=dens.b,v=new Float32Array(B*B),[xl,yl,xh,yh]=D.die,bw=(xh-xl)/B,bh=(yh-yl)/B;
- for(let i=0;i<X.length;i++){const k=kd(i);if(k===4||D.w[i]<=0)continue;const x0=X[i],x1=x0+D.w[i],y0=Y[i],y1=y0+D.h[i];
+function densMap(){const B=dens.b,v=new Float64Array(B*B),[xl,yl,xh,yh]=D.die,bw=(xh-xl)/B,bh=(yh-yl)/B;
+ for(let i=0;i<X.length;i++){const k=kd(i);if(k===3||k===4||D.w[i]<=0||D.h[i]<=0)continue;const x0=X[i],x1=x0+D.w[i],y0=Y[i],y1=y0+D.h[i];
   const i0=Math.max(0,Math.floor((x0-xl)/bw)),i1=Math.min(B-1,Math.floor((x1-xl)/bw)),j0=Math.max(0,Math.floor((y0-yl)/bh)),j1=Math.min(B-1,Math.floor((y1-yl)/bh));
-  for(let j=j0;j<=j1;j++)for(let a=i0;a<=i1;a++){const ox=Math.min(x1,xl+(a+1)*bw)-Math.max(x0,xl+a*bw),oy=Math.min(y1,yl+(j+1)*bh)-Math.max(y0,yl+j*bh);if(ox>0&&oy>0)v[a+j*B]+=ox*oy}}
- let m=0;for(let i=0;i<v.length;i++){v[i]/=bw*bh;if(v[i]>m)m=v[i]}dens.v=v;dens.max=Math.max(1,m);densFrame=frameId}
+  for(let j=j0;j<=j1;j++)for(let a=i0;a<=i1;a++){
+   const l=Math.max(x0,xl+a*bw),r=Math.min(x1,xl+(a+1)*bw),b=Math.max(y0,yl+j*bh),t=Math.min(y1,yl+(j+1)*bh);
+   if(l<r&&b<t)v[a+j*B]+=D.exclusions?.length?usableArea([l,b,r,t]):(r-l)*(t-b);
+  }
+ }
+ let m=0;for(let j=0;j<B;j++)for(let a=0;a<B;a++){
+  const i=a+j*B,area=D.exclusions?.length?usableArea([xl+a*bw,yl+j*bh,xl+(a+1)*bw,yl+(j+1)*bh]):bw*bh;
+  v[i]=area>0?v[i]/area:0;m=Math.max(m,v[i]);
+ }
+ dens.v=v;dens.max=Math.max(1,m);densFrame=frameId}
 function buildGrid(){grid=null;if(!X)return;const n=X.length;let xl=1e300,yl=1e300,xh=-1e300,yh=-1e300;
  for(let i=0;i<n;i++){if(kd(i)!==0)continue;if(X[i]<xl)xl=X[i];if(X[i]>xh)xh=X[i];if(Y[i]<yl)yl=Y[i];if(Y[i]>yh)yh=Y[i]}
  if(xl>xh)return;const m=Math.max(1,Math.ceil(Math.sqrt(n)/2)),gw=(xh-xl)/m||1,gh=(yh-yl)/m||1,b=new Map();
@@ -193,9 +709,18 @@ function hit(px,py){if(!D||!X)return -1;const n=X.length,x=wx(px),y=wy(py);
    for(const i of a){if(!cellOn(i))continue;const cx=X[i]+D.w[i]/2,cy=Y[i]+D.h[i]/2,d=(cx-x)**2+(cy-y)**2;if(d<bd&&Math.sqrt(d)<=r+Math.max(D.w[i],D.h[i])/2){bd=d;best=i}}}
   if(best>=0)return best}
  return -1}
+function floorplanPath(px,py,rings=D?.outline){
+ const outline=new Path2D();
+ for(const ring of rings||[]){
+  ring.forEach(([x,y],i)=>i?outline.lineTo(px(x),py(y)):outline.moveTo(px(x),py(y)));
+  outline.closePath();
+ }
+ return outline;
+}
 function draw(){dirty=false;const W=cv.clientWidth,H=cv.clientHeight;ctx.setTransform(dpr,0,0,dpr,0,0);ctx.fillStyle=css('--bg');ctx.fillRect(0,0,W,H);
  if(!D||!X){ctx.fillStyle=css('--mut');ctx.fillText('waiting for the placer...',20,60);return}
- const[xl,yl,xh,yh]=D.die;ctx.fillStyle=css('--die');ctx.fillRect(sx(xl),sy(yh),(xh-xl)*view.s,(yh-yl)*view.s);
+ const[xl,yl,xh,yh]=D.die,outline=floorplanPath(sx,sy);
+ ctx.fillStyle=css('--die');ctx.fill(outline,'evenodd');ctx.strokeStyle=css('--line');ctx.stroke(outline);
  ctx.strokeStyle=css('--line');ctx.strokeRect(sx(xl),sy(yh),(xh-xl)*view.s,(yh-yl)*view.s);
  {const e=aEdge;ctx.save();ctx.strokeStyle=css('--acc');ctx.lineWidth=4;ctx.beginPath();if(e==='left'){ctx.moveTo(sx(xl),sy(yl));ctx.lineTo(sx(xl),sy(yh))}else if(e==='right'){ctx.moveTo(sx(xh),sy(yl));ctx.lineTo(sx(xh),sy(yh))}else if(e==='bottom'){ctx.moveTo(sx(xl),sy(yl));ctx.lineTo(sx(xh),sy(yl))}else{ctx.moveTo(sx(xl),sy(yh));ctx.lineTo(sx(xh),sy(yh))}ctx.stroke();ctx.restore()}
  if($('l_reg').checked){ctx.save();
@@ -205,8 +730,10 @@ function draw(){dirty=false;const W=cv.clientWidth,H=cv.clientHeight;ctx.setTran
    ctx.fillStyle=css('--sel');const q=Math.max(2,Math.min(4,view.s*(xh-xl)/300));for(const[x,y,ax]of R.pins){const px=sx(x),py=sy(y);if(ax===0)ctx.fillRect(px-q,py-q/2,2*q,q);else ctx.fillRect(px-q/2,py-q,q,2*q)}}
   ctx.restore()}
  const n=X.length,cell=css('--cell'),fx=css('--fixedc');
- if(M&&S.map){const bw=(xh-xl)/M.bx,bh=(yh-yl)/M.by;for(let i=0;i<M.bx;i++)for(let j=0;j<M.by;j++){const u=M.v[i*M.by+j];if(u<=.05)continue;const t=Math.min(1,u/Math.max(1,M.peak));ctx.fillStyle='rgba('+(u>1?'255,60,60':'255,170,40')+','+(.1+.55*t).toFixed(3)+')';ctx.fillRect(sx(xl+i*bw),sy(yl+(j+1)*bh),bw*view.s+.5,bh*view.s+.5)}}
+ ctx.save();ctx.clip(outline,'evenodd');
+ if(M&&(S.map||resultView())){const bw=(xh-xl)/M.bx,bh=(yh-yl)/M.by;for(let i=0;i<M.bx;i++)for(let j=0;j<M.by;j++){const u=M.v[i*M.by+j];if(u<=.05)continue;const t=Math.min(1,u/Math.max(1,M.peak));ctx.fillStyle='rgba('+(u>1?'255,60,60':'255,170,40')+','+(.1+.55*t).toFixed(3)+')';ctx.fillRect(sx(xl+i*bw),sy(yl+(j+1)*bh),bw*view.s+.5,bh*view.s+.5)}}
  if($('l_dens').checked){if(densFrame!==frameId)densMap();const B=dens.b,bw=(xh-xl)/B,bh=(yh-yl)/B;for(let j=0;j<B;j++)for(let i=0;i<B;i++){const v=Math.min(1,dens.v[i+j*B]/dens.max);if(v<=.02)continue;ctx.fillStyle='rgba(224,36,94,'+(.08+.6*v).toFixed(3)+')';ctx.fillRect(sx(xl+i*bw),sy(yl+(j+1)*bh),bw*view.s+.5,bh*view.s+.5)}}
+ ctx.restore();
  if(lComb.checked||lRegs.checked){const sz=Math.max(1.4,Math.min(4,view.s*3));
   const vx0=wx(0),vx1=wx(W),vy1=wy(0),vy0=wy(H),seqc=css('--seq');for(let i=0;i<n;i++){if(kd(i)!==0||!cellOn(i))continue;if(X[i]>vx1||Y[i]>vy1||X[i]+D.w[i]<vx0||Y[i]+D.h[i]<vy0)continue;ctx.fillStyle=isSeq(i)?seqc:isMovable(i)?cell:fx;const w=D.w[i]*view.s,h=D.h[i]*view.s;
    if(w>3||h>3)ctx.fillRect(sx(X[i]),sy(Y[i])-h,w,h);else ctx.fillRect(sx(X[i]+D.w[i]/2)-sz/2,sy(Y[i]+D.h[i]/2)-sz/2,sz,sz)}}
@@ -216,6 +743,8 @@ function draw(){dirty=false;const W=cv.clientWidth,H=cv.clientHeight;ctx.setTran
   ctx.globalAlpha=k===3?.25:.35;ctx.fillStyle=k===3?css('--reg'):mv?css('--macro'):css('--macrof');ctx.fillRect(sx(X[i]),sy(Y[i])-h,w,h);ctx.globalAlpha=1;
   ctx.strokeStyle=mv?css('--macro'):css('--macrof');ctx.lineWidth=1;ctx.strokeRect(sx(X[i]),sy(Y[i])-h,w,h);
   if(k!==3&&w>46&&h>14){ctx.fillStyle=css('--fg');ctx.font='11px system-ui';ctx.fillText(nm(i),sx(X[i])+4,sy(Y[i])-h+13,w-8)}}
+ if($('l_pins').checked){ctx.fillStyle=css('--io');for(const [i,ox,oy] of D.macro_pins)ctx.fillRect(sx(X[i]+ox)-1,sy(Y[i]+oy)-1,3,3)}
+ drawSelectedStrip();
  if($('l_io').checked){ctx.fillStyle=css('--io');for(let i=0;i<n;i++){if(kd(i)!==4)continue;ctx.fillRect(sx(X[i])-2.5,sy(Y[i])-2.5,5,5)}}
  if($('l_cen').checked&&D.centroids.length){ctx.strokeStyle=css('--sel');ctx.fillStyle=css('--sel');D.centroids.forEach((c0,ci)=>{const c=C&&C.x.length>ci?{x:C.x[ci],y:C.y[ci],r:C.r[ci]}:c0;const x=sx(c.x),y=sy(c.y),r=Math.max(4,c.r*view.s);
   ctx.beginPath();ctx.arc(x,y,r,0,7);ctx.globalAlpha=.12;ctx.fill();ctx.globalAlpha=1;ctx.stroke();ctx.beginPath();ctx.moveTo(x-5,y);ctx.lineTo(x+5,y);ctx.moveTo(x,y-5);ctx.lineTo(x,y+5);ctx.stroke()})}
@@ -224,6 +753,7 @@ function draw(){dirty=false;const W=cv.clientWidth,H=cv.clientHeight;ctx.setTran
   else{ctx.globalAlpha=.45;ctx.fillRect(x,y-hh,w,hh);ctx.globalAlpha=1;ctx.lineWidth=2;ctx.strokeRect(x,y-hh,w,hh)}}}}
  ctx.lineWidth=1.5;ctx.strokeStyle=css('--pin');for(const i of pinned){if(i>=n)continue;const w=Math.max(6,D.w[i]*view.s),h=Math.max(6,D.h[i]*view.s);ctx.strokeRect(sx(X[i])-1,sy(Y[i])-h-1,w+2,h+2)}
  ctx.strokeStyle=css('--sel');ctx.lineWidth=2;for(const i of sel){if(i>=n)continue;const w=Math.max(8,D.w[i]*view.s),h=Math.max(8,D.h[i]*view.s);ctx.strokeRect(sx(X[i])-2,sy(Y[i])-h-2,w+4,h+4)}
+ drawIntentOverlay();
  if(drag&&drag.box){ctx.strokeStyle=css('--acc');ctx.setLineDash([5,3]);ctx.strokeRect(drag.bx0,drag.by0,drag.bx1-drag.bx0,drag.by1-drag.by0);ctx.setLineDash([])}areaOverlay()}
 function loop(){if(dirty)draw();requestAnimationFrame(loop)}requestAnimationFrame(loop);
 cv.addEventListener('wheel',e=>{e.preventDefault();const f=Math.exp(-e.deltaY*.0015),x=e.offsetX,y=e.offsetY,ox=wx(x),oy=wy(y);view.s*=f;view.ox=x-ox*view.s;view.oy=y+oy*view.s;dirty=true},{passive:false});
@@ -233,11 +763,11 @@ function selMove(dx,dy,final){const ns=[],xs=[],ys=[],fn=[],fx=[],fy=[];for(cons
 // final position restarts the flow with the macro there (the placer starts it at that spot).
 function sendMove(m){if(m.nodes.length)cmd({cmd:'move',nodes:m.nodes,x:m.x,y:m.y,final:m.final});if(m.final&&m.fixed.nodes.length)cmd({cmd:'macro_move',nodes:m.fixed.nodes,x:m.fixed.x,y:m.fixed.y,final:true})}
 function hitCen(px,py){if(!D||!$('l_cen').checked||!D.centroids.length)return -1;for(let i=D.centroids.length-1;i>=0;i--){const c=C&&C.x.length>i?{x:C.x[i],y:C.y[i]}:D.centroids[i];if(Math.hypot(sx(c.x)-px,sy(c.y)-py)<=10)return i}return -1}
-cv.addEventListener('mousedown',e=>{if(!D||e.button!==0)return;if(rev!==null){drag={pan:true,px:e.offsetX,py:e.offsetY,ox:view.ox,oy:view.oy};return}{const eg=e.shiftKey?null:hitEdge(e.offsetX,e.offsetY);if(eg){aEdge=eg;aStepSet=false;if(!aPend){aPend=D.die.slice();aBase=D.die.join()}drag={edge:eg};areaInfo();dirty=true;return}}const ci=hitCen(e.offsetX,e.offsetY);
- if(ci>=0&&!e.shiftKey){if(!C||C.x.length<=ci)C={x:Float32Array.from(D.centroids,c=>c.x),y:Float32Array.from(D.centroids,c=>c.y),r:Float32Array.from(D.centroids,c=>c.r)};drag={cen:ci,px:e.offsetX,py:e.offsetY,x0:C.x[ci],y0:C.y[ci],t:0,moved:false};dirty=true;return}
+cv.addEventListener('mousedown',e=>{if(!D||e.button!==0)return;if(rev!==null){drag={pan:true,px:e.offsetX,py:e.offsetY,ox:view.ox,oy:view.oy};return}{const eg=e.shiftKey||resultView()?null:hitEdge(e.offsetX,e.offsetY);if(eg){aEdge=eg;aStepSet=false;if(!aPend){aPend=D.die.slice();aBase=D.die.join()}drag={edge:eg};areaInfo();dirty=true;return}}const ci=hitCen(e.offsetX,e.offsetY);
+ if(ci>=0&&!e.shiftKey&&!resultView()){if(!C||C.x.length<=ci)C={x:Float32Array.from(D.centroids,c=>c.x),y:Float32Array.from(D.centroids,c=>c.y),r:Float32Array.from(D.centroids,c=>c.r)};drag={cen:ci,px:e.offsetX,py:e.offsetY,x0:C.x[ci],y0:C.y[ci],t:0,moved:false};dirty=true;return}
  const i=hit(e.offsetX,e.offsetY);
  if(i>=0){if(e.shiftKey){sel.has(i)?sel.delete(i):sel.add(i);selUi();dirty=true;return}
-  if(!sel.has(i)){sel.clear();sel.add(i)}selUi();const items=[...sel].filter(canMove);
+  if(!sel.has(i)){sel.clear();sel.add(i)}selUi();const items=resultView()?[]:[...sel].filter(canMove);
   if(!items.length){dirty=true;return}
   drag={items,px:e.offsetX,py:e.offsetY,x0:new Map(items.map(k=>[k,X[k]])),y0:new Map(items.map(k=>[k,Y[k]])),t:0,moved:false,cur:new Map()}}
  else if(e.shiftKey){drag={box:true,bx0:e.offsetX,by0:e.offsetY,bx1:e.offsetX,by1:e.offsetY}}
@@ -246,7 +776,7 @@ let mx=-1,my=-1;
 function zoomBy(f){const inside=mx>=0&&my>=0&&mx<=cv.clientWidth&&my<=cv.clientHeight;zoomAt(f,inside?mx:cv.clientWidth/2,inside?my:cv.clientHeight/2)}
 function zoomAt(f,x,y){const ox=wx(x),oy=wy(y);view.s*=f;view.ox=x-ox*view.s;view.oy=y+oy*view.s;dirty=true}
 window.addEventListener('mousemove',e=>{const r=cv.getBoundingClientRect(),px=e.clientX-r.left,py=e.clientY-r.top;mx=px;my=py;
- if(!drag&&D){const eg=hitEdge(px,py);cv.style.cursor=eg?(eg==='left'||eg==='right'?'ew-resize':'ns-resize'):''}else if(drag&&drag.edge){cv.style.cursor=drag.edge==='left'||drag.edge==='right'?'ew-resize':'ns-resize'}
+ if(!drag&&D){const eg=resultView()||rev!==null?null:hitEdge(px,py);cv.style.cursor=eg?(eg==='left'||eg==='right'?'ew-resize':'ns-resize'):''}else if(drag&&drag.edge){cv.style.cursor=drag.edge==='left'||drag.edge==='right'?'ew-resize':'ns-resize'}
  if(!drag){if(!D||!X)return;const i=hit(px,py);if(i!==hover){hover=i;const t=$('tip');if(i<0)t.style.display='none';else{showTip(i);t.style.display='block';if(names[i]===undefined&&rev===null)fetchName(i)}}
   if(hover>=0){const t=$('tip');t.style.left=px+14+'px';t.style.top=py+14+'px'}return}
  if(drag.cen!==undefined){if(!drag.moved&&Math.hypot(px-drag.px,py-drag.py)<3)return;drag.moved=true;const x=drag.x0+(px-drag.px)/view.s,y=drag.y0-(py-drag.py)/view.s;C.x[drag.cen]=x;C.y[drag.cen]=y;dirty=true;const now=performance.now();if(now-drag.t>40){drag.t=now;cmd({cmd:'centroid',name:D.centroids[drag.cen].name,x,y,final:false})}}
@@ -262,14 +792,14 @@ window.addEventListener('mouseup',e=>{if(!drag)return;const r=cv.getBoundingClie
  else if(drag.items&&drag.moved){sendMove(selMove((px-drag.px)/view.s,-(py-drag.py)/view.s,true))}
  drag=null;dirty=true});
 let HL=[],hlV=-1,selV=-1,selExpect=0,applyingSel=false,selTimer=null;
-function selUi(){$('s_sel').textContent=sel.size;if(!applyingSel){clearTimeout(selTimer);selTimer=setTimeout(()=>{selExpect++;cmd({cmd:'select',names:[...sel].slice(0,5000).map(i=>'#'+i)})},150)}}
+function selUi(){candidateControls();$('s_sel').textContent=sel.size;if(!applyingSel&&!resultView()&&rev===null){clearTimeout(selTimer);selTimer=setTimeout(()=>{selExpect++;cmd({cmd:'select',names:[...sel].slice(0,5000).map(i=>'#'+i)})},150)}}
 async function loadHighlights(){const r=await(await api('/highlights')).json();HL=r.h;hlV=r.v;renderHl();dirty=true}
 function renderHl(){const box=$('hls');box.innerHTML='';if(!HL.length){box.textContent='none (an assistant can paint cells here)';return}
  for(const h of HL){const row=document.createElement('div');row.style.cssText='display:flex;gap:6px;align-items:center;margin:2px 0';const sw=document.createElement('span');sw.style.cssText='width:12px;height:12px;border-radius:2px;flex:none;background:'+h.color;
   const t=document.createElement('span');t.style.flex='1';t.textContent=h.label+' ('+h.count+(h.truncated?'+':'')+')';t.title=(h.regex?'regex '+h.regex+' ':'')+(h.scope?'scope '+h.scope:'');const x=document.createElement('button');x.textContent='x';x.style.padding='0 6px';x.onclick=()=>cmd({cmd:'clear_highlight',id:h.id});row.append(sw,t,x);box.appendChild(row)}}
 async function loadSelection(){const r=await(await api('/selection')).json();applyingSel=true;sel=new Set(r.idx);selUi();applyingSel=false;dirty=true}
 $('al').addEventListener('click',e=>{const a=e.target.dataset?.a;if(a)align(a)});$('al').nextElementSibling.addEventListener('click',e=>{if(e.target.dataset?.a==='matrix')align('matrix')});
-function align(a){if(!D)return;const it=[...sel].filter(canMove);if(a==='unpin'){const ns=it.filter(i=>isMovable(i)&&pinned.has(i)).map(nm);if(ns.length)cmd({cmd:'unpin',nodes:ns});return}
+async function align(a){if(!D||resultView()||rev!==null)return;const it=[...sel].filter(canMove);if(a==='unpin'){const ns=it.filter(i=>isMovable(i)&&pinned.has(i)).map(nm);if(ns.length)cmd({cmd:'unpin',nodes:ns});return}
  if(it.length<2)return;const f=it[0];let L=1e300,R=-1e300,B=1e300,Tp=-1e300;for(const i of it){L=Math.min(L,X[i]);R=Math.max(R,X[i]+D.w[i]);B=Math.min(B,Y[i]);Tp=Math.max(Tp,Y[i]+D.h[i])}
  const nx=new Map(it.map(i=>[i,X[i]])),ny=new Map(it.map(i=>[i,Y[i]]));
  // Like Inkscape: everything lines up with the FIRST selected object, which stays where it is (change the selection to change the reference).
@@ -279,32 +809,156 @@ function align(a){if(!D)return;const it=[...sel].filter(canMove);if(a==='unpin')
  else if(a==='distv'){const s=[...it].sort((p,q)=>Y[p]-Y[q]);const sum=s.reduce((t,i)=>t+D.h[i],0),gap=(Tp-B-sum)/(s.length-1);let y=B;for(const i of s){ny.set(i,y);y+=D.h[i]+gap}}
  else if(a==='matrix'){const rows=Math.max(1,+$('m_r').value|0),cols=Math.max(1,+$('m_c').value|0),s=[...it].sort((p,q)=>Y[q]-Y[p]||X[p]-X[q]),mw=Math.max(...it.map(i=>D.w[i])),mh=Math.max(...it.map(i=>D.h[i]));
   const px=cols>1?(R-L-mw)/(cols-1):0,py=rows>1?(Tp-B-mh)/(rows-1):0;s.forEach((i,k)=>{const r=Math.min(rows-1,Math.floor(k/cols)),c=k%cols;nx.set(i,L+c*px);ny.set(i,Tp-mh-r*py)})}
+ if($('ipreserve').checked){
+   try{
+     const target=exploration||'main';
+     if(!S.intent_available || it.some(i=>kind(i)!==1))throw Error('Select movable hard macros at a placement intent gate');
+     const hello=await xcommand({cmd:'hello',target});
+     const current=await xcommand({cmd:'export',what:'intent',target,encoding:'json_text'});
+     const module=hello.session.top||current.bindings.design;
+     if(!module)throw Error('No bound top module');
+     const horizontal=['left','hcenter','right','disth'].includes(a);
+     let order=[...it],hint={kind:'align',axis:horizontal?'x':'y',anchor:['left','bottom'].includes(a)?'min':['right','top'].includes(a)?'max':'center'};
+     if(a==='disth'||a==='distv'){
+       order.sort((p,q)=>horizontal?X[p]-X[q]:Y[p]-Y[q]);hint={kind:'distribute',axis:horizontal?'x':'y'};
+     }else if(a==='matrix'){
+       order.sort((p,q)=>ny.get(p)-ny.get(q)||nx.get(p)-nx.get(q));
+       const cols=Math.min(order.length,Math.max(1,+$('m_c').value|0));
+       if(order.length%cols!==0)throw Error('Preserving the displayed matrix requires complete rows');
+       const rows=order.length/cols;
+       if(rows!==Math.max(1,+$('m_r').value|0))throw Error('Set rows and columns to fit the selected macros');
+       const sx=c=>Math.max(...order.filter((_,k)=>k%cols===c).map(i=>D.w[i]+2*(D.halo?.[0]||0)));
+       const sy=r=>Math.max(...order.slice(r*cols,(r+1)*cols).map(i=>D.h[i]+2*(D.halo?.[1]||0)));
+       const w=Array.from({length:cols},(_,c)=>sx(c)).reduce((x,y)=>x+y,0),h=Array.from({length:rows},(_,r)=>sy(r)).reduce((x,y)=>x+y,0);
+       const gx=cols>1?Math.max(0,(R-L-w)/(cols-1)):0,gy=rows>1?Math.max(0,(Tp-B-h)/(rows-1)):0;
+       const [xl,yl,xh,yh]=D.die;
+       const normalized=(val,span)=>span>0?Math.min(1,Math.max(0,val/span)):.5;
+       hint={kind:'matrix',columns:cols,gap_x_um:gx/D.dbu,gap_y_um:gy/D.dbu,
+          anchor_x:normalized(L-xl,xh-xl-w-gx*(cols-1)),anchor_y:normalized(B-yl,yh-yl-h-gy*(rows-1))};
+     }
+     hint.members=order.map(i=>[nm(i)]);hint.id='relationship-'+crypto.randomUUID();
+     const record={class:'livehd.placement.hints',schema_version:2,id:hint.id,design:module,templates:[{module,hints:[hint]}]};
+     const array=current.records_json.trim().slice(0,-1).trimEnd();
+     await xcommand({cmd:'intent_apply',target,records_json:array+(array==='['?'':',')+JSON.stringify(record)+']',expect:{frame:S.frame,intent:current.revision}});
+   }catch(e){$('ibind').textContent=e.message}
+   return;
+ }
+ const axes={left:'left',right:'right',hcenter:'center_x',top:'top',bottom:'bottom',vcenter:'center_y'};
+ if(axes[a]&&it.every(i=>isMovable(i)&&nx.get(i)>=D.die[0]&&ny.get(i)>=D.die[1]&&nx.get(i)+D.w[i]<=D.die[2]&&ny.get(i)+D.h[i]<=D.die[3])){
+   await cmd({cmd:'move',nodes:it.map(nm),reference:nm(f),align:axes[a],expect:{frame:S.frame}});
+   return;
+ }
  const[a0,b0,c0,d0]=D.die,ns=[],xs=[],ys=[],fn=[],fx=[],fy=[];for(const i of it){const x=Math.min(Math.max(nx.get(i),a0),c0-D.w[i]),y=Math.min(Math.max(ny.get(i),b0),d0-D.h[i]);X[i]=x;Y[i]=y;if(isMovable(i)){ns.push(nm(i));xs.push(x);ys.push(y)}else{fn.push(nm(i));fx.push(x);fy.push(y)}}
  // The reference goes LAST among the fixed macros: the placer settles the newest move first, so the reference keeps its spot
  // and the others find the nearest legal place around it.
  const fi=fn.indexOf(nm(f));if(fi>=0&&fi<fn.length-1){for(const arr of[fn,fx,fy])arr.push(arr.splice(fi,1)[0])}
  dirty=true;sendMove({nodes:ns,x:xs,y:ys,final:true,fixed:{nodes:fn,x:fx,y:fy}})}
-$('l_map').onchange=()=>{cmd({cmd:'map',kind:$('l_map').value});if($('l_map').value==='none'){M=null;dirty=true}};
+$('l_map').onchange=async()=>{
+ const kind=$('l_map').value;
+ if(exploration&&S.state==='done'){M=kind==='none'?null:await readGrid(exploration,kind);$('s_map').textContent=M?'peak '+M.peak.toFixed(2):kind==='none'?'':'unavailable';dirty=true;return}
+ cmd({cmd:'map',kind});if(kind==='none'){M=null;dirty=true}
+};
 $('cen_rel').onclick=e=>{e.preventDefault();cmd({cmd:'centroid_release'})};
+$('evaluate').onclick=()=>cmd({cmd:'evaluate'});
+for(const gate of ['no_resynthesis','no_sizing','no_buffer_edits']) $(gate).onchange=()=>cmd({cmd:'policy',[gate]:$(gate).checked});
+$('freeze').onclick=()=>cmd({cmd:'policy',fast:true});
 $('tim').onclick=()=>cmd({cmd:'timing'});
 $('rp').onclick=sendRestart;$('f_sel').onclick=forkSelection;$('f_view').onclick=forkView;for(const b of document.querySelectorAll('#a_edges button'))b.onclick=()=>{aEdge=b.dataset.e;aStepSet=false;areaInfo();dirty=true};$('a_step').oninput=()=>{aStepSet=true};$('a_shr').onclick=()=>areaNudge(-1);$('a_grow').onclick=()=>areaNudge(1);$('a_apply').onclick=areaApply;$('a_cancel').onclick=areaCancel;$('sb_start').onclick=()=>{stopPlay();scrubTo(0)};$('sb_back').onclick=()=>stepTl(-1);$('sb_fwd').onclick=()=>stepTl(1);$('sb_end').onclick=live;$('sb_play').onclick=togglePlay;$('sb_rng').onpointerdown=()=>{scrubbing=true};window.addEventListener('pointerup',()=>{scrubbing=false});$('sb_rng').oninput=()=>{stopPlay();scrubTo(+$('sb_rng').value)};$('live').onclick=live;$('o_open').onclick=openOptions;$('otog').onclick=()=>{$('opts').className==='on'?$('opts').className='':openOptions()};$('o_close').onclick=()=>{$('opts').className=''};$('o_q').oninput=renderOptions;$('o_chg').onchange=renderOptions;$('o_reset').onclick=()=>{flagEdits={};renderOptions()};$('o_start').onclick=()=>rerun(-1);$('o_cp').onclick=()=>rerun(selCp);
 $('cont').onclick=()=>cmd({cmd:'continue'});
 $('run').onclick=()=>cmd({cmd:S.finished?'finish':S.paused||S.state==='gate'||S.state==='ready'||S.state==='starting'?'run':'pause'});
 $('help').onclick=()=>$('help').classList.remove('on');$('fit').onclick=fit;$('zin').onclick=()=>zoomBy(1.25);$('zout').onclick=()=>zoomBy(1/1.25);$('ptog').onclick=()=>{const p=$('panel');p.style.display=p.style.display==='none'?'':'none'};
 $('shot').onclick=()=>{draw();cv.toBlob(b=>{const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='placement_'+(S.phase||'x')+'_'+(S.iter||0)+'.png';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),2000)})};
-for(const id of['l_comb','l_regs','l_macros','l_io','l_reg','l_cen','l_disp','l_dens'])$(id).onchange=()=>{dirty=true};$('l_reg').addEventListener('change',()=>{cmd({cmd:'regions',on:$('l_reg').checked});if(!$('l_reg').checked){R=null;regV=-1;$('reg_note').textContent=''}else $('reg_note').textContent='computing...'});
-window.addEventListener('keydown',e=>{if(e.target.tagName==='INPUT')return;if(e.key==='?'){e.preventDefault();$('help').classList.toggle('on');return}if(e.key==='Escape'&&$('help').classList.contains('on')){$('help').classList.remove('on');return}if(e.key==='Escape'&&aPend){areaCancel();return}if(e.key===' '){e.preventDefault();$('run').click()}else if(e.key==='u'){align('unpin')}else if(e.key==='f'){fit()}else if(e.key==='ArrowLeft'){e.preventDefault();stepTl(-1)}else if(e.key==='ArrowRight'){e.preventDefault();stepTl(1)}else if(e.code==='KeyZ'||e.key==='z'||e.key==='Z'||e.key==='+'||e.key==='='||e.key==='-'||e.key==='_'){const out=e.key==='Z'||(e.code==='KeyZ'&&e.shiftKey)||e.key==='-'||e.key==='_';zoomBy(out?1/1.25:1.25)}else if(e.key==='Escape'){if($('opts').className==='on'){$('opts').className=''}else{sel.clear();selUi();dirty=true}}});
+for(const id of['l_comb','l_regs','l_macros','l_pins','l_io','l_reg','l_cen','l_disp','l_dens'])$(id).onchange=()=>{dirty=true};$('l_reg').addEventListener('change',()=>{if(resultView()){dirty=true;return}cmd({cmd:'regions',on:$('l_reg').checked});if(!$('l_reg').checked){R=null;regV=-1;$('reg_note').textContent=''}else $('reg_note').textContent='computing...'});
+window.addEventListener('keydown',e=>{if(['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName))return;if(e.key==='?'){e.preventDefault();$('help').classList.toggle('on');return}if(e.key==='Escape'&&$('help').classList.contains('on')){$('help').classList.remove('on');return}if(e.key==='Escape'&&aPend){areaCancel();return}if(e.key===' '){e.preventDefault();$('run').click()}else if(e.key==='u'){align('unpin')}else if(e.key==='f'){fit()}else if(e.key==='ArrowLeft'){e.preventDefault();stepTl(-1)}else if(e.key==='ArrowRight'){e.preventDefault();stepTl(1)}else if(e.code==='KeyZ'||e.key==='z'||e.key==='Z'||e.key==='+'||e.key==='='||e.key==='-'||e.key==='_'){const out=e.key==='Z'||(e.code==='KeyZ'&&e.shiftKey)||e.key==='-'||e.key==='_';zoomBy(out?1/1.25:1.25)}else if(e.key==='Escape'){if($('opts').className==='on'){$('opts').className=''}else{sel.clear();selUi();dirty=true}}});
 function fmt(v,d){return v==null?'-':(+v).toFixed(d)}
+let pinView='', priorSuspended=new Set(), restoredPins=[];
+function pinInfo(){
+ const key=(S.epoch||'')+'/'+(S.target||'main'), pins=S.pin_intent||[], suspended=pins.filter(p=>p.suspended);
+ if(key!==pinView){pinView=key;priorSuspended.clear();restoredPins=[]}
+ const restored=pins.filter(p=>!p.suspended&&priorSuspended.has(p.name)).map(p=>p.name);
+ if(restored.length)restoredPins=restored;
+ const active=new Set(pins.filter(p=>!p.suspended).map(p=>p.name));
+ restoredPins=restoredPins.filter(n=>active.has(n));priorSuspended=new Set(suspended.map(p=>p.name));
+ const box=$('pinInspector');box.hidden=!pins.length;
+ const summary='Pin anchors: '+active.size+' active, '+suspended.length+' suspended'+(restoredPins.length?' · restored: '+restoredPins.join(', '):'');
+ if($('pinSummary').textContent!==summary)$('pinSummary').textContent=summary;
+ if(box.open){const lines=pins.map(p=>p.name+' @ ('+p.x+', '+p.y+') DBU · '+(p.suspended?'suspended: '+(S.geometry_conflicts?.[p.name]||[]).join(', '):'active')).join('\n');
+  if($('pinAnchors').textContent!==lines)$('pinAnchors').textContent=lines}
+}
+$('pinInspector').ontoggle=()=>{if(S)pinInfo()};
+function geometryWarning(){
+ const box=$('geom'),list=$('geomList'),summary=$('geomSummary');
+ box.hidden=S.geometry_status!=='illegal';
+ if(box.hidden){
+  if(summary.textContent){summary.textContent='';list.replaceChildren();box.open=false;delete list.dataset.frame}
+  return;
+ }
+ const conflicts=S.geometry_conflicts,names=Object.keys(conflicts),key=[S.epoch,S.scene,S.frame].join(':');
+ const label='ILLEGAL GEOMETRY · '+names.length+' affected '+(names.length===1?'instance':'instances');
+ if(summary.textContent!==label)summary.textContent=label;
+ if(list.dataset.frame===key)return;
+ if(list.childElementCount)list.replaceChildren();
+ delete list.dataset.frame;
+ if(!box.open&&names.length>2)return;
+ for(const n of names){const li=document.createElement('li');li.textContent=n+': '+conflicts[n].join('; ');list.append(li)}
+ list.dataset.frame=key;
+}
+$('geom').ontoggle=()=>{if(S)geometryWarning()};
+function frameTimingBreakdown(){
+ const details=$('frameTimingGroups'),timing=S.summary?.timing,e=timing?.endpoints;
+ details.hidden=!e?.total?.endpoints;
+ if(details.hidden){delete details.dataset.frame;return}
+ const label=(timing.model==='final_downstream_sta'?'Routed':'Placement')+' setup timing by clock and path family';
+ if(details.firstElementChild.textContent!==label)details.firstElementChild.textContent=label;
+ if(!details.open)return;
+ const key=[S.epoch,timing.frame,S.evaluation_seq].join(':');
+ if(key!==details.dataset.frame){fillTimingBreakdown(details.lastElementChild,e);details.dataset.frame=key}
+}
+$('frameTimingGroups').ontoggle=()=>{if(S)frameTimingBreakdown()};
 function ui(){areaInfo();forkList();$('s_phase').textContent=S.phase||'-';const st=$('s_state');st.textContent=S.state+(S.gate?' before '+S.gate:'');st.className='st-'+S.state;
+ pinInfo();frameTimingBreakdown();geometryWarning();
+ const routed=S.summary?.timing.model==='final_downstream_sta';
  $('s_iter').textContent=S.iter;$('s_pend').textContent=S.pending;$('s_hpwl').textContent=S.hpwl==null?'-':fmt(S.hpwl,1);$('s_ovf').textContent=S.overflow==null||S.overflow<0?'-':fmt(S.overflow,4);
- {const ok=S.has_timing&&S.period>0&&S.period-S.wns>0,f=$('s_freq'),fmax=ok?1e6/(S.period-S.wns):0,target=S.period>0?1e6/S.period:0;
-  f.textContent=ok?(S.timing_est?'~':'')+fmt(fmax,0):'-';f.style.color=ok?(fmax>=target?'#2a9d4a':'#d6453d'):'';
-  f.title=ok?'the highest clock frequency this placement reaches: 1/(period - WNS)'+(S.timing_est?' (~ = estimated from the placer\'s positions, refreshed by Refresh timing)':'')+'; the SDC target is '+fmt(target,0)+' MHz':'no timing yet'}
- $('s_wns').textContent=S.has_timing?(S.timing_est?'~':'')+fmt(S.wns,1):'-';$('s_tns').textContent=S.has_timing?fmt(S.tns,1):'-';$('s_titer').textContent=S.has_timing?S.timing_iter:'-';
+ {const e=S.summary?.timing.endpoints,f=$('s_freq'),periods=Object.entries((routed?e?.clock_periods_ns:e?.clock_periods_ps)||{});
+  f.textContent=fmt(e?.frequency_mhz,0);f.style.color='';
+  const reasons={multiple_clocks:'Multiple clock domains have no single reported frequency.',unresolved_clock:'Capture clock unresolved.',
+   unverified_period_dependence:'The timer cannot verify full-cycle coverage.',nonpositive_period:'The derived period is nonpositive.',
+   no_constrained_endpoints:'No constrained setup endpoints.'};
+  f.title=e?.frequency_mhz!=null?'From the period and worst setup slack of the measured endpoints.':routed?'No frequency derived from the routed setup report.':reasons[e?.frequency_status]||'Requires full timing on this frame.';
+  $('clockCoverage').textContent=e?[e.engine,...(e.setup_corners||[]),...periods.map(([clock,period])=>clock+' '+fmt(period,2)+(routed?' ns':' ps')),e.frequency_mhz==null?f.title:''].filter(Boolean).join(' · '):'';
+  const issues=e?.constraint_issues||[],list=$('sdcIssues');
+  $('sdcCoverage').hidden=!issues.length;
+  if(list.dataset.hash!==(e?.constraint_issues_hash||'')){
+   list.replaceChildren(...issues.map(issue=>{const li=document.createElement('li');li.textContent=issue;return li}));
+   list.dataset.hash=e?.constraint_issues_hash||'';
+   $('sdcCount').textContent=issues.length+' SDC '+(issues.length===1?'issue':'issues');
+  }
+ }
+ $('s_wns').textContent=routed?fmt(S.summary.timing.wns_ps,1):S.has_timing?(S.timing_est?'~':'')+fmt(S.wns,1):'-';$('s_tns').textContent=routed?fmt(S.summary.timing.tns_ps,1):S.has_timing?fmt(S.tns,1):'-';$('s_titer').textContent=routed?'Final downstream STA':S.has_timing?S.timing_iter:'-';
+ const measured=S.summary?.timing,advice=$('repairAdvice');advice.hidden=!measured?.repair_advice?.recommended;advice.textContent=advice.hidden?'':repairAdviceText(measured);
+ if(S.summary){const r=S.summary.routing,q=S.summary.quality;$('routing_share').textContent=r.overflow_bin_share==null?'–':(100*r.overflow_bin_share).toFixed(1)+'% ('+r.estimator+')';$('quality').textContent=q.score==null?q.status.replace('_',' '):q.score.toFixed(2)}
+ candidateControls();
+ if(S.slow_work){
+   const steps=S.slow_work.operations.filter(op=>op.configured);
+   $('slowwork').textContent=steps.map(op=>op.operation+' · '+(op.deferred?'deferred by policy':op.trigger.replaceAll('_',' '))).join(' | ');
+   if(S.slow_work.timing!=='idle')$('slowwork').textContent+=' '+S.slow_work.timing.replaceAll('_',' ');
+ }
+ $('legalize').disabled=!S.legalize_available;
+ $('ipreview').disabled=$('iapply').disabled=!S.intent_available;
+ if(intentOverlay&&(S.epoch!==intentOverlay.epoch||S.frame!==intentOverlay.frame)){const frame=intentOverlay.frame;clearIntentOverlay();$('ilegend').textContent='Measured at frame '+frame}
+ if(S.policy)for(const gate of ['no_resynthesis','no_sizing','no_buffer_edits'])$(gate).checked=S.policy[gate];
  const b=$('run');b.textContent=S.finished?'Exit lhd':(S.paused||S.state==='gate'||S.state==='ready'||S.state==='starting')?'Run':'Pause';b.disabled=false;const ge=S.state==='gate'&&S.gate==='gp_end',ee=S.state==='gate'&&S.gate==='edit';if(ge)b.textContent='Run (+'+S.min_iters+' iter)';if(ee)b.textContent='Apply edits';$('cont').style.display=ge||ee?'':'none';$('msg').textContent=S.note||'';
  const box=$('stages');if(S.stages&&S.stages.length&&box.dataset.k!==JSON.stringify(S.stages)){box.dataset.k=JSON.stringify(S.stages);box.innerHTML='';
-  for(const s of S.stages){const l=document.createElement('label');if(!s.available)l.className='na';const c=document.createElement('input');c.type='checkbox';c.checked=!s.on;c.disabled=!s.available;
+  for(const s of S.stages){const l=document.createElement('label');if(!s.available)l.className='na';const c=document.createElement('input');c.type='checkbox';c.checked=!s.on;c.disabled=resultView()||!s.available;
    c.onchange=()=>cmd({cmd:'stage',name:s.name,on:!c.checked});l.appendChild(c);l.appendChild(document.createTextNode(s.name));box.appendChild(l)}}
+ const label=$('viewName');label.hidden=!exploration;
+ if(exploration)label.textContent=routed?'Routed result '+exploration+' · showing route input geometry':resultView()?'Result '+exploration+' · read only':'Exploring '+exploration;
+ if(resultView()){
+  for(const id of ['run','rp','tim','evaluate','legalize','freeze','no_sizing','no_buffer_edits','no_resynthesis',
+    'ipreview','iapply','ipreserve','m_r','m_c','a_step','a_shr','a_grow','a_apply','a_cancel','cen_rel',
+    'f_sel','f_view','o_cp','o_start'])$(id).disabled=true;
+  for(const button of document.querySelectorAll('[data-a],[data-e]'))button.disabled=true;
+ }
  pinned=new Set(S.pins||[]);dirty=true}
 let haveFrame=-1;
 function applyFrame(buf,q16){const dv=new DataView(buf),mg=String.fromCharCode(dv.getUint8(0),dv.getUint8(1),dv.getUint8(2),dv.getUint8(3)),n=dv.getUint32(4,true);let off;
@@ -314,7 +968,7 @@ function applyFrame(buf,q16){const dv=new DataView(buf),mg=String.fromCharCode(d
   if(mg==='LHQ1'){const bx=new Float32Array(buf,16,4),qx=new Uint16Array(buf,32,n),qy=new Uint16Array(buf,32+n*2,n),kx=(bx[2]-bx[0])/65535,ky=(bx[3]-bx[1])/65535;X=new Float32Array(n);Y=new Float32Array(n);for(let i=0;i<n;i++){X[i]=bx[0]+qx[i]*kx;Y[i]=bx[1]+qy[i]*ky}off=32+n*4}
   else{X=new Float32Array(buf,16,n).slice();Y=new Float32Array(buf,16+n*4,n).slice();off=16+n*8}}
  if(drag&&drag.items&&drag.moved)for(const[i,p]of drag.cur){X[i]=p[0];Y[i]=p[1]}
- buildGrid();haveFrame=Number(dv.getBigUint64(8,true));
+ buildGrid();densFrame=-2;haveFrame=Number(dv.getBigUint64(8,true));
  if(buf.byteLength>=off+4){const m=dv.getUint32(off,true);if(m>0&&buf.byteLength>=off+4+m*12&&!(drag&&drag.cen!==undefined&&drag.moved)){C={x:new Float32Array(buf,off+4,m).slice(),y:new Float32Array(buf,off+4+m*4,m).slice(),r:new Float32Array(buf,off+4+m*8,m).slice()}}}
  return true}
 function showTip(i){const t=$('tip');if(hover!==i)return;t.textContent=(names[i]??('cell #'+i))+(isSeq(i)?' (register)':'')+(pinned.has(i)?' (pinned)':'')}
@@ -369,13 +1023,13 @@ function openOptions(){$('opts').className='on';renderOptions()}
 function rerun(cp){const set={};for(const[k,v]of Object.entries(flagEdits))set[k]=v;cmd({cmd:'restart',checkpoint:cp,set});$('opts').className='';$('msg').textContent='restarting...'}
 async function sync(){for(;;){try{
  const r=await api('/state?since='+ver);S=await r.json();ver=S.v;if(S.hpwl<0)S.hpwl=null;
- if(S.epoch!==epoch){epoch=S.epoch;D=null;X=null;Y=null;sceneId=-1;frameId=-1;haveFrame=-1;rev=null;selCp=-1;cpKey='';flagEdits={};flagDefs=null;TL=null;tlIdx=null;designCache={};tlCache=new Map();tlBytes=0;mkKey='';shownScene=null;try{flagDefs=await(await api('/options')).json();renderOptions()}catch(e){}}
+ if(S.epoch!==epoch){epoch=S.epoch;stripEpoch++;stripReport=null;$('faceSelector').hidden=true;$('faceMacro').replaceChildren();showMacroFaces();$('stripSelect').hidden=true;$('stripStatus').textContent='';selectStrip();D=null;X=null;Y=null;sceneId=-1;frameId=-1;haveFrame=-1;rev=null;selCp=-1;cpKey='';flagEdits={};flagDefs=null;TL=null;tlIdx=null;designCache={};tlCache=new Map();tlBytes=0;mkKey='';shownScene=null;try{xcap=(await xcommand({cmd:'hello',target:'main'})).capabilities;flagDefs=await(await api('/options')).json();renderOptions()}catch(e){}}
  if(rev===null&&S.scene!==sceneId){sceneId=S.scene;hlV=-1;if(S.scene>0){D=await(await api('/design')).json();names=D.names;sel.clear();selUi();PX=null;fit()}}
  if(rev===null&&S.frame!==frameId&&D&&D.n){frameId=S.frame;const q16=D.n>50000,buf=await(await api('/frame?'+(q16?'q=16&':'')+(haveFrame>0&&X?'since='+haveFrame:''))).arrayBuffer();if(!applyFrame(buf,q16))haveFrame=-1}
  if(S.regions_on){if(S.regions_v!==regV){regV=S.regions_v;R=await(await api('/regions')).json();$('reg_note').textContent=R.note||'';dirty=true}}else if(R){R=null;regV=-1;$('reg_note').textContent='';dirty=true}
- if(S.map&&S.map_v!==mapV){mapV=S.map_v;const mb=await(await api('/map')).arrayBuffer(),h=new DataView(mb);if(mb.byteLength>=24&&h.getUint32(4,true)>0){const bx=h.getUint32(4,true),by=h.getUint32(8,true);M={bx,by,peak:h.getFloat32(12,true),ovf:h.getFloat32(16,true),v:new Float32Array(mb.slice(24))};$('s_map').textContent='peak '+M.peak.toFixed(2)+' ovf '+M.ovf.toFixed(3)}else{M=null;$('s_map').textContent=S.map_note||'no data'}dirty=true}else if(!S.map&&M){M=null;mapV=S.map_v;$('s_map').textContent='';dirty=true}
+ if(S.map&&S.map_v!==mapV){mapV=S.map_v;const mb=await(await api('/map')).arrayBuffer(),h=new DataView(mb);if(mb.byteLength>=24&&h.getUint32(4,true)>0){const bx=h.getUint32(4,true),by=h.getUint32(8,true);M={bx,by,peak:h.getFloat32(12,true),ovf:h.getFloat32(16,true),v:new Float32Array(mb.slice(24))};$('s_map').textContent='peak '+M.peak.toFixed(2)+' ovf '+M.ovf.toFixed(3)}else{M=null;$('s_map').textContent=S.map_note||'no data'}dirty=true}else if(!S.map&&M&&!(exploration&&S.state==='done')){M=null;mapV=S.map_v;$('s_map').textContent='';dirty=true}
  if(S.hl_v!==undefined&&S.hl_v!==hlV&&rev===null)await loadHighlights();if(S.sel_v!==undefined&&S.sel_v!==selV){if(selExpect>0){selExpect--;selV=S.sel_v}else if(D&&rev===null){selV=S.sel_v;await loadSelection()}else selV=S.sel_v}
- CP=S.cps||[];if(S.tl_n>0&&(!TL||TL.e.length!==S.tl_n)){if(!TL||performance.now()-tlLast>500)await loadTimeline();else if(!tlTimer)tlTimer=setTimeout(async()=>{tlTimer=null;try{await loadTimeline()}catch(e){}},600)}else if(TL)renderScrub();renderCp();{const e=$('err'),f=S.state==='failed';e.style.display=f?'':'none';if(f){e.textContent=S.error;$('rp').disabled=false;$('rp').textContent='Restart (edited flags)';$('run').disabled=true}else if($('rp').textContent!=='Replay from here'){$('rp').textContent='Replay from here'}}ui()}catch(e){console.error(e);window.__lastError=String(e&&e.stack||e);ver=0;$('msg').textContent='disconnected';await new Promise(r=>setTimeout(r,1000))}}}
+ CP=S.cps||[];if(S.tl_n>0&&(!TL||TL.e.length!==S.tl_n)){if(!TL||performance.now()-tlLast>500)await loadTimeline();else if(!tlTimer)tlTimer=setTimeout(async()=>{tlTimer=null;try{await loadTimeline()}catch(e){}},600)}else if(TL)renderScrub();renderCp();{const e=$('err'),f=S.state==='failed';e.style.display=f?'':'none';if(f){e.textContent=S.error;$('rp').disabled=false;$('rp').textContent='Restart (edited flags)';$('run').disabled=true}else if($('rp').textContent!=='Replay from here'){$('rp').textContent='Replay from here'}}ui();if(exploration&&S.state==='done')return}catch(e){console.error(e);window.__lastError=String(e&&e.stack||e);ver=0;$('msg').textContent='disconnected';await new Promise(r=>setTimeout(r,1000))}}}
 sync();
 </script></body></html>)HTML";
   return page;

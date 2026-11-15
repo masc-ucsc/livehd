@@ -151,6 +151,61 @@ void uniform_paired_design(Fixture& f) {
 }
 }  // namespace
 
+TEST(LegrouteResources, MissingCornerHasNoTracksOnAnyLayer) {
+  Fixture fixture;
+  // Bottom half uses all 64 sites; top half only the left 32.
+  for (size_t row = 4; row < fixture.fp.rows.size(); ++row) {
+    fixture.fp.rows[row].count = 32;
+  }
+  auto      grid   = fixture.grid();
+  const int corner = grid.tile(grid.col_of(2850), grid.row_of(1700));
+  const int inside = grid.tile(grid.col_of(400), grid.row_of(1700));
+  for (const auto& r : grid.resources.layers) {
+    EXPECT_EQ(r.usable_capacity(corner), 0) << r.name;
+    EXPECT_GT(r.usable_capacity(inside), 0) << r.name;
+  }
+  for (const auto& obstacles : grid.obstacles) {
+    EXPECT_TRUE(std::ranges::any_of(obstacles, [](const ph::Rect& r) {
+      return r.xl <= 2850 && r.xh >= 2850 && r.yl <= 1700 && r.yh >= 1700;
+    }));
+  }
+}
+
+TEST(LegrouteResources, RowsCutUnderFixedMacroUseLayerObstructionsAndPreserveAdjacentNotch) {
+  Fixture f;
+  auto&   ram = f.tech.macros["bank"];
+  ram.klass   = "BLOCK";
+  ram.width   = .8;
+  ram.height  = .5;
+  ram.blocked_layers.insert("M4");
+  Ann_place p(800, 1000, 800, 500);
+  p.status = ph::Status::FIXED;
+  f.fp.components.push_back({"bank", "bank", p});
+  const auto full = f.grid();
+  for (int row : {4, 5}) {
+    auto tail = f.fp.rows[row];
+    tail.x = 2400;
+    tail.count = 16;
+    tail.name += "_tail";
+    f.fp.rows[row].count = 16;  // Omit both the bank (800..1600) and an actual notch (1600..2400).
+    f.fp.rows.push_back(tail);
+  }
+  const auto cut = f.grid();
+  const auto bank = cut.tile(cut.col_of(1200), cut.row_of(1250));
+  const auto notch = cut.tile(cut.col_of(2000), cut.row_of(1250));
+  for (const auto& r : cut.resources.layers) {
+    EXPECT_EQ(r.usable_capacity(bank), layer(full, r.name).usable_capacity(bank)) << r.name;
+    EXPECT_EQ(r.usable_capacity(notch), 0) << r.name;
+  }
+  EXPECT_GT(layer(cut, "M3").usable_capacity(bank), 0);
+  EXPECT_EQ(layer(cut, "M4").usable_capacity(bank), 0);
+  f.fp.blockages.push_back({false, {}, {{800, 1000, 1600, 1500}}});
+  const auto blocked = f.grid();
+  for (const auto& r : blocked.resources.layers) {
+    EXPECT_EQ(r.usable_capacity(bank), 0) << r.name;
+  }
+}
+
 TEST(LegrouteResources, FiniteM2UnionRetainsCoordinateReasonsAndAnonymousLegacyHeadroom) {
   for (int64_t origin : {int64_t(-1000), int64_t(0), int64_t(1000)}) {
     SCOPED_TRACE(origin);

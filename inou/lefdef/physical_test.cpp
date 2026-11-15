@@ -748,6 +748,36 @@ TEST(Physical, SegmentedRowAdapterPreservesEveryAvailableSiteAndOrientation) {
   EXPECT_NO_THROW(verify_def_roundtrip(adapted, read_def(path.string())));
   EXPECT_EQ(fp.rows.size(), 5);  // original input was never rewritten
 }
+TEST(Physical, PrecutRowsPreserveFixedMacroRoutingAndRealExclusions) {
+  Technology tech;
+  tech.sites["core"] = {1, 1, true};
+  auto& bank = tech.macros["SRAM"];
+  bank.klass  = "BLOCK";
+  bank.width  = 1;
+  bank.height = 2;
+  Floorplan fp;
+  fp.die = {0, 0, 8000, 2000};
+  fp.rows = {{"a", "core", 0, 0, 1, 1000}, {"b", "core", 6000, 0, 2, 1000}, {"c", "core", 0, 1000, 8, 1000}};
+  Ann_place fixed(2000, 0, 0, 0);  // A read DEF supplies no dimensions; the rotated LEF footprint is authoritative.
+  fixed.orientation = Orientation::E;
+  fixed.status = Status::FIXED;
+  auto movable = fixed;
+  movable.status = Status::PLACED;
+  movable.x = 4000;
+  fp.components = {{"sram", "SRAM", fixed}, {"trial", "SRAM", movable}};
+  fp.blockages = {{false, {}, {{2500, 0, 3000, 1000}}}};
+  std::vector<Rect> gaps;
+  const auto solver = rectangular_placement_frame(fp, tech, &gaps);
+  const auto covered = [](const std::vector<Rect>& rects, double x) {
+    return std::any_of(rects.begin(), rects.end(), [&](const Rect& r) { return r.xl <= x && x < r.xh && r.yl <= 500 && 500 < r.yh; });
+  };
+  EXPECT_TRUE(covered(solver.blockages.back().rectangles, 3500));  // No standard-cell site under the macro.
+  EXPECT_FALSE(covered(gaps, 2250));
+  EXPECT_FALSE(covered(gaps, 3500));  // Routing there follows the actual rotated macro obstruction.
+  EXPECT_TRUE(covered(gaps, 1500));   // The true notch still excludes all routing.
+  EXPECT_TRUE(covered(gaps, 4750));   // A movable candidate cannot punch a hole in the notch.
+  EXPECT_TRUE(covered(solver.blockages.front().rectangles, 2750));  // Explicit hard overlap is preserved.
+}
 TEST(Physical, SegmentedRowAdapterRejectsAmbiguousOrOffGridFrames) {
   Technology tech;
   tech.sites["core"] = {1, 1, true};

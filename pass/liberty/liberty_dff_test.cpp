@@ -809,6 +809,9 @@ TEST(LibertyDff, ConstantInventoryExcludesDisabledStateAndThreeStateCells) {
     cell(extra_input) {pin(A) {direction:input;} pin(Y) {direction:output; function:"0";} }
   )"));
   const auto cells = livehd::liberty::scan_constant_cells(path);
+  const livehd::liberty::Cell_library platform(path, {"disabled", "extra_input"});
+  ASSERT_EQ(platform.constants.size(), 3);
+  EXPECT_EQ(platform.constants.back().name, "disabled");
   ASSERT_EQ(cells.size(), 2);
   EXPECT_EQ(cells[0].name, "arbitrary_high");
   EXPECT_EQ(cells[0].outputs,

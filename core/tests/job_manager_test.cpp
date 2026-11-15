@@ -19,6 +19,26 @@ TEST(JobManager, MixedClassesShareOneCeiling) {
   EXPECT_TRUE(third);
   EXPECT_EQ(manager.stats()[0].admitted, 1u);
 }
+TEST(JobManager, PlacementThreadSharesLeaveCapacityForMainAndCompetingJobs) {
+  auto host = roomy();
+  Job_manager manager([&] { return host; });
+  manager.configure(5);
+  auto wide = manager.try_acquire(Job_class::place_explore, 1, 0, true, 1, 3);
+  ASSERT_TRUE(wide);
+  EXPECT_FALSE(manager.try_acquire(Job_class::place_explore, 1, 0, true, 1, 2));
+  auto other = manager.try_acquire(Job_class::sim_compile);
+  ASSERT_TRUE(other);
+  EXPECT_FALSE(manager.try_acquire(Job_class::place_explore, 1, 0, true, 1));
+  EXPECT_TRUE(manager.try_acquire(Job_class::formal_arm));
+  wide.complete();
+  host.load = 7;
+  EXPECT_FALSE(manager.try_acquire(Job_class::place_explore, 1, 0, true, 1, 2));
+  host.load = 0;
+  host.available = 1;
+  EXPECT_FALSE(manager.try_acquire(Job_class::place_explore, 1, 0, true, 1, 2));
+  host.available = 24ull << 30;
+  EXPECT_TRUE(manager.try_acquire(Job_class::place_explore, 1, 0, true, 1, 3));
+}
 TEST(JobManager, AlwaysOneAndMeasuredMemoryAdmission) {
   auto host      = roomy();
   host.ram       = 16ull << 20;

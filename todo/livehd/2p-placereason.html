@@ -16,14 +16,14 @@ side under a host limit. Preserve useful relationships beside RTL so they can be
 floorplan change. The actual goal is to fit the constrained floorplan and achieve good timing after routing.
 Because routed timing is expensive, LiveHD exposes cheaper measurements with their limitations; the external
 agent chooses proxies, search strategy and when to route. Implementing that agent is outside this task.</p>
-<p><span class="status">Implementation plan — not implemented. Written 2026-11-13, revised 2026-11-13.</span>
+<p><span class="status">Implemented and verified on Linux, 2026-11-14. macOS validation remains open. The original plan was written 2026-11-13.</span>
 The revision follows a reading of two papers (arXiv:2609.21263v2 and arXiv:2611.12048v2), of the first one's
 code, of the PDAGENT-BENCH repository and of the GUI session code, and the <a href="#rulings">rulings</a> below. It adds explorations, scratch
 copies of the main line used for feedback and then discarded, in the foreground or as parallel workers
 (<a href="#h">H</a>, <a href="#parallel">design</a>); deterministic checkers and a leverage test
 (<a href="#i">I</a>); a table of <a href="#foundation">code facts with their source lines</a>; and a
 <a href="#order">delivery order</a>.
-All new commands, policy fields, options and UI controls are proposals. This task changes no existing defaults.
+The design notes below retain the original proposals. The <a href="../../pass/place/PLACEREASON.md">GUI guide</a> describes the implemented interface.
 Initial scope is macro placement and the surrounding cell placement; source attributes and memory-bounded
 execution follow after the basic experiment loop works.</p>
 
@@ -111,7 +111,7 @@ what to evaluate; LiveHD does not select candidates.</li>
 own downstream flow (J) come last.</li>
 </ol>
 
-<h2>Subtasks — pending</h2>
+<h2>Implementation requirements</h2>
 <ul class="subtasks">
 <li id="a"><strong>A — Define and enforce the exploration transaction.</strong>
 <ul>
@@ -270,8 +270,8 @@ macros, with the benchmark's instance names restored exactly.</li>
 <li>Score: run the benchmark's fixed downstream flow on the exported placement and write one row per task in
 its result schema, with the evidence files. External tools and data; outputs under ignored <code>repros/</code>.</li>
 <li>Bring up on the two smallest tasks, then all 16. Report every run, not the best of several.</li>
-<li>Ask the maintainers how an outside result is accepted and under what terms the data may be used; the
-repository states neither.</li>
+<li>Use the published results for internal comparisons. Keep placements, reports and score rows local;
+contacting maintainers and submitting results are outside the current scope.</li>
 </ul></li>
 <li id="i"><strong>I — Deterministic checkers, leverage and pictures (from the two papers).</strong>
 <ul>
@@ -347,8 +347,13 @@ as required by AGENTS.md; this page records the research reference now.</li>
 </ul></li>
 </ul>
 
-<h2>Subtasks — landed</h2>
-<p>None yet. The facilities below predate this task and do not constitute its completion.</p>
+<h2>Implementation and verification</h2>
+<p>The <a href="../../pass/place/PLACEREASON.md">placement GUI guide</a> covers the browser and socket workflows,
+private candidates, timing tiers, macro pinning, and clean replay from one design metadata file.
+The <a href="../../lhd/tests/lhd_gui_explore_smoke.py">Linux integration checks</a> exercise exploration, isolation,
+and exact replay. The <a href="../../tools/placereason_score.py">downstream scorer</a> checks the requested macro
+poses in OpenDB immediately after import and again after routing; the final placement must be legal.
+Keep benchmark placements, comparisons and routing reports in the local experiment directory.</p>
 
 <h2 id="design">Design notes</h2>
 <h3 id="foundation">Existing foundation and gaps (source inspection, 2026-11-13)</h3>
@@ -695,8 +700,7 @@ floorplan, intent sidecars), the command line and <code>--set</code> values, pag
 reason for each missing one, limits and occupancy, policy, the path of the guide.</td></tr>
 <tr><td><code>export {target, what, format?}</code></td><td>Returns data and writes nothing: <code>intent</code> (hint
 records), <code>flags</code> (values that differ from the invocation), <code>macros</code> (name, position,
-orientation and units; <code>format:"placereasoner"</code> or <code>"def"</code>), relative movement/relationship
-records, <code>summary</code> and the score configuration. Precision follows the design's DEF database units;
+orientation and units; <code>format:"placereasoner"</code> or <code>"def"</code>), <code>relationships</code> (ordered relative move records), <code>summary</code> and the score configuration. Precision follows the design's DEF database units;
 export never applies the records to main.</td></tr>
 <tr><td>Read routes with <code>x=&lt;id&gt;</code></td><td><code>/state</code>, <code>/design</code>,
 <code>/frame</code>, <code>/map</code>, <code>/regions</code>, <code>/query</code>,
@@ -851,9 +855,8 @@ violations. A method is summarized as routed, clean and best-TNS counts out of 1
 writes this schema; the agent's token use fills <code>tokens_k</code>.</td></tr>
 <tr><td>There is no submission endpoint. “Adding a model” is the maintainers' own procedure
 (<code>results/&lt;subset&gt;/&lt;model&gt;/summary.json</code>, then <code>scripts/build_data.py</code>), and the
-placement rows are copied by hand from the paper's tables. No license is stated.</td><td>What can be handed
-over is a row file in their schema with the placements and reports behind each row. How they accept it, and
-the terms for the data, is a question to the maintainers (J).</td></tr>
+placement rows are copied by hand from the paper's tables. No license is stated.</td><td>For internal
+comparison, keep a row in their schema with the placements and reports behind it.</td></tr>
 </table>
 <p>Nangate45 and these DEFs are supported inputs (ruling P8). Bring-up of a task is therefore also a reader and
 placer test: a construct that fails is reduced, fixed where it belongs and kept as a fixture.</p>
@@ -917,7 +920,7 @@ anchor is allowed when intentionally needed. Specify center versus edge and phys
 channels use physical units or technology pitches. Preferred extra spacing may scale independently.</li>
 <li>Keep hints advisory, with weights and residuals. They cannot redefine physical legality or overwrite pin
 intent. Temporary illegal geometry and suspended pin enforcement follow P11–P12; legalization reports
-conflicting hints and existing failure conditions. A future required-placement mode needs its own approved contract.</li>
+conflicting hints and existing failure conditions. Exact replay applies only when the user supplies a <code>livehd.placement.state</code> record: it fixes the named poses and reports incompatible constraints.</li>
 <li>Show intent overlays before applying and residuals afterward. A drag cannot uniquely reveal whether the
 user wanted an edge affinity, a channel or proximity to logic; propose a conversion rather than guessing silently.</li>
 <li>Preserve <code>livehd.placement.hints</code>, <code>livehd.placement.state</code> and

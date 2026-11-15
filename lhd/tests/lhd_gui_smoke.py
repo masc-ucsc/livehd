@@ -102,7 +102,7 @@ try:
     assert post({'cmd': 'timing'})['ok']
     s = wait(lambda s: s['has_timing'])
     assert s['wns'] > 0 and s['timing_iter'] == 0 and s['timing_est'] and s['tns'] is None, s
-    assert abs(s['period'] - 10000) < 1, s  # the SDC clock (10 ns) the page turns into the achieved frequency 1/(period - WNS)
+    assert abs(s['period'] - 10000) < 1 and s['summary']['timing']['endpoints'] is None, s
     die = design['die']
     target = ((die[0] + die[2]) / 2, (die[1] + die[3]) / 2)
     name = get(f'/node?i={cells[0]}')['name']

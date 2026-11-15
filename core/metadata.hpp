@@ -24,6 +24,8 @@ public:
   std::string                          identity(std::span<const std::string_view> classes, std::string_view design) const;
   std::string                          json() const;
   void                                 merge(const Bundle& other);
+  // Change one consumer's records, retaining every other class and design in this bundle.
+  void                                 replace_selected(std::string_view klass, std::string_view design, const Bundle& source);
   void                                 erase_selected(std::string_view klass, std::string_view design);
   void                                 replace(const rapidjson::Value& record);
   void                                 write(const std::string& path) const;

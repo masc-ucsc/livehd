@@ -19,7 +19,7 @@ source.write_text('module dut(input [15:0] a,b, output [15:0] y);\n'
 sdc = root / 'timing.sdc'
 sdc.write_text('create_clock -name virtual -period 10\nset_input_delay -clock virtual 0 [all_inputs]\nset_output_delay -clock virtual 0 [all_outputs]\n')
 lib = Path('inou/lefdef/tests/data')
-command = ['lhd/lhd', 'synth', str(source), '--top', 'dut', '--set', f'synth.liberty={lib}/sky130hd.lib',
+command = ['lhd/lhd_gui_fixture', 'synth', str(source), '--top', 'dut', '--set', f'synth.liberty={lib}/sky130hd.lib',
            '--set', f'synth.lef={lib}/sky130hd.tlef,{lib}/sky130hd.lef', '--set', f'synth.sdc={sdc}', '--set', 'synth.place=true',
            '--set', 'synth.place.iterations=120', '--set', 'synth.place.grid.density=8', '--set', 'synth.place.timing_driven=false',
            '--set', 'synth.place.gui.poll=5', '--workdir', str(root / 'W'), '--set', 'synth.place.gui.pause=true', '--gui', '--gui-no-open', '-q']
@@ -126,7 +126,9 @@ try:
     cs = child.wait(lambda s: s['finished'])
     assert cs['hpwl'] > 0
     assert child.post({'cmd': 'finish'})['ok']
-    out = (root / 'W/synth/place/forks/fork_1/W/synth/place/out.def').read_text()
+    fork_dir=Path(fork['dir'])
+    assert root/'W' not in fork_dir.parents
+    out = (fork_dir/'W/synth/place/out.def').read_text()
     assert out.count('+ PLACED') >= fork['cells'] and 'PINS' in out
     # the parent is untouched: it still runs to the end
     assert parent.post({'cmd': 'continue'})['ok']
@@ -135,6 +137,7 @@ try:
     parent.wait(lambda s: s['finished'])
     assert parent.post({'cmd': 'finish'})['ok']
     assert proc.wait(timeout=60) == 0
+    assert not fork_dir.exists()
 finally:
     if proc.poll() is None:
         proc.kill()

@@ -224,6 +224,50 @@ TEST_F(Buffer_repair, SynthesisBufferCleanupPreservesFixedAndControlCones) {
   EXPECT_EQ(cleaned.removed, 0U);
   EXPECT_EQ(cleaned.protected_cells, 4U);
 }
+TEST_F(Buffer_repair, FrozenRailDistributionDoesNotReuseBufferedPlacement) {
+  auto driver = gate("sky130_fd_sc_hd__buf_1", "rail_source", graph->get_input_pin("a"));
+  for (int i = 0; i < 9; ++i) {
+    const auto name = i ? "y" + std::to_string(i) : std::string("y");
+    if (i) {
+      graph->get_io()->add_output(name, i);
+      graph->get_io()->set_bits(name, 1);
+    }
+    graph->get_output_pin(name).connect_driver(gate("sky130_fd_sc_hd__inv_1", "sink" + std::to_string(i), driver));
+  }
+  options.domino_rail_pins["sky130_fd_sc_hd__inv_1"] = {"A"};
+  options.domino_rail_fanout                         = 3;
+  options.cache_dir                                  = options.output_dir + "/cache";
+  std::filesystem::create_directories(options.cache_dir);
+  options.runtime_policy = std::make_shared<Mutation_policy>();
+  auto run               = [&](bool buffer_freeze, bool size_freeze, unsigned expected_min) -> std::string {
+    options.runtime_policy->no_buffer_edits = buffer_freeze;
+    options.runtime_policy->no_sizing       = size_freeze;
+    hhds::GraphLibrary owner;
+    const auto         result  = place(*graph, owner, options);
+    const auto         buffers = count(result, "__place_railtree");
+    if (buffer_freeze) {
+      EXPECT_EQ(buffers, 0u);
+    } else {
+      EXPECT_GE(buffers, expected_min);
+    }
+    std::ifstream       in(options.cache_dir + "/placement.json");
+    const std::string   text{std::istreambuf_iterator<char>(in), {}};
+    rapidjson::Document cached;
+    cached.Parse(text.c_str());
+    if (!cached.IsObject() || !cached.HasMember("environment")) {
+      ADD_FAILURE() << "placement did not write its cache environment";
+      return {};
+    }
+    return cached["environment"].GetString();
+  };
+  const auto buffered = run(false, false, 1);
+  const auto frozen   = run(true, false, 0);
+  EXPECT_NE(buffered, frozen);
+  EXPECT_EQ(frozen, run(true, false, 0));
+  EXPECT_NE(frozen, run(true, true, 0));  // Same rail topology, different repair permission.
+  EXPECT_EQ(buffered, run(false, false, 1));
+}
+
 TEST_F(Buffer_repair, SynthesisBufferCleanupProtectsControlsAcrossHierarchy) {
   const auto top      = graph;
   auto       child_io = source.create_io("region");
@@ -1335,6 +1379,9 @@ TEST_F(Buffer_repair, FloorplanTimingCheckpointsAreScopedAndResizeRunsStaTwice) 
     const bool resize = mode != 0, accept = mode == 1;
     unsigned   calls    = 0;
     options.fp_resize   = resize;
+    // Conversely, a frozen buffer topology must still permit measured master changes.
+    options.runtime_policy = std::make_shared<Mutation_policy>();
+    options.runtime_policy->no_buffer_edits = true;
     options.output_dir  = directory + (resize ? (accept ? "/resize" : "/reject") : "/weights");
     options.fp_evaluate = [&](const Result& snapshot) {
       ++calls;
@@ -1515,6 +1562,9 @@ TEST_F(Buffer_repair, FloorplanRemovesBuffersAndRollsBackRejectedTopology) {
   for (const auto* source_name : {"synthesis", "placement", "memory_first"}) {
     options.fp_color_source = source_name;
     options.fp_pin_adjust   = options.fp_color_source != "synthesis";
+    // Disabling master changes must leave eligible FP buffer removal working.
+    options.runtime_policy = std::make_shared<Mutation_policy>();
+    options.runtime_policy->no_sizing = true;
     for (bool accept : {false, true}) {
       options.output_dir  = directory + "/" + source_name + (accept ? "/accepted" : "/rejected");
       options.fp_evaluate = [&](const Result& state) {

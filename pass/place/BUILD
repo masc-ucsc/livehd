@@ -466,8 +466,13 @@ filegroup(
         "macro_snap.cpp",
         "macro_tracks.cpp",
         "macro_snap.hpp",
+        "macro_state.hpp",
         "macro_tracks.hpp",
         "magnet_report.cpp",
+        "gui/gui_gp_options.hpp",
+        "gui/gui_gp_reports.hpp",
+        "gui/gui_gp_owner.hpp",
+        "gui/gui_native_wire.hpp",
         "magnet_report.hpp",
         "memory_proxy.cpp",
         "memory_proxy.hpp",
@@ -475,6 +480,7 @@ filegroup(
         "pin_adjust.hpp",
         "prects_networks.cpp",
         "prects_networks.hpp",
+        "gui/gui_gp_owner.cpp",
         "place.cpp",
         "placement_hints.cpp",
         "placement_technology.cpp",
@@ -751,14 +757,22 @@ cc_test(
     deps = [":fp_repetition", "@googletest//:gtest_main"],
 )
 
+cc_library(
+    name = "macro_dead_space",
+    srcs = ["macro_dead_space.cpp"],
+    hdrs = ["macro_dead_space.hpp"],
+    copts = COPTS,
+    deps = ["@dreamplace//dreamplace/native:placer"],
+)
+
 # 2i-interact: the interactive placement session, its HTTP server and the embedded page.
 cc_library(
     name = "gui",
-    srcs = ["gui/gui_session.cpp", "gui/gui_server.cpp", "gui/gui_page.cpp", "gui/gui_render.cpp", "gui/gui_agent.cpp"],
-    hdrs = ["gui/gui_session.hpp", "gui/gui_page.hpp", "gui/gui_render.hpp"],
+    srcs = ["gui/gui_worker.cpp","gui/gui_geometry.cpp","gui/gui_session.cpp", "gui/gui_server.cpp", "gui/gui_page.cpp", "gui/gui_render.cpp", "gui/gui_agent.cpp", "gui/gui_ipc.cpp"],
+    hdrs = ["macro_state.hpp", "gui/gui_policy.hpp","gui/gui_worker.hpp","gui/gui_geometry.hpp","gui/gui_session.hpp", "gui/gui_page.hpp", "gui/gui_render.hpp", "gui/gui_ipc.hpp", "gui/gui_wire.hpp"],
     copts = COPTS,
     visibility = ["//visibility:public"],
-    deps = ["@rapidjson"],
+    deps = [":macro_dead_space", "//core", "@rapidjson"],
 )
 
 cc_test(
@@ -766,6 +780,15 @@ cc_test(
     srcs = ["gui/gui_session_test.cpp"],
     copts = COPTS,
     deps = [":gui", "@googletest//:gtest_main"],
+)
+
+cc_test(
+    name = "gui_native_gp_smoke",
+    srcs = ["gui/gui_native_gp_smoke.cpp"],
+    args = ["$(location //lhd:lhd)"],
+    data = ["//lhd:lhd"],
+    copts = COPTS,
+    deps = [":place", ":gui", "@dreamplace"],
 )
 
 cc_library(
@@ -781,7 +804,6 @@ cc_library(
         "color_centroids.cpp",
         "h2d.cpp",
         "io_timing.cpp",
-        "macro_dead_space.cpp",
         "macro_anchor.cpp",
         "macro_edge.cpp",
         "macro_snap.cpp",
@@ -790,6 +812,7 @@ cc_library(
         "fp_repetition_graph.cpp",
         "memory_proxy.cpp",
         "pin_adjust.cpp",
+        "gui/gui_gp_owner.cpp",
         "place.cpp",
         "placement_hints.cpp",
         "placement_technology.cpp",
@@ -814,11 +837,15 @@ cc_library(
         "color_centroids.hpp",
         "h2d.hpp",
         "io_timing.hpp",
-        "macro_dead_space.hpp",
         "macro_anchor.hpp",
         "macro_edge.hpp",
         "macro_snap.hpp",
+        "macro_state.hpp",
         "macro_tracks.hpp",
+        "gui/gui_gp_options.hpp",
+        "gui/gui_gp_reports.hpp",
+        "gui/gui_gp_owner.hpp",
+        "gui/gui_native_wire.hpp",
         "magnet_report.hpp",
         "fp_repetition_graph.hpp",
         "memory_proxy.hpp",
@@ -842,6 +869,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":gui",
+        ":macro_dead_space",
         ":uroute",
         ":region_mesh",
         ":custom_cells",

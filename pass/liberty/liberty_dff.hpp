@@ -343,7 +343,7 @@ struct Cell_library {
   std::vector<Constant_cell> constants;
   std::vector<Memory_cell>   memories;
   std::vector<Output_drive>  drives;
-  explicit Cell_library(const std::string& lib_files);
+  explicit Cell_library(const std::string& lib_files, const std::set<std::string>& physical_ties = {});
 };
 
 }  // namespace livehd::liberty

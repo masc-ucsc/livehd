@@ -151,6 +151,10 @@ Render_options parse_layers(const std::string& csv, Render_options o) {
       o.regions = on;
     } else if (item == "centroids") {
       o.centroids = on;
+    } else if (item == "pin_sides") {
+      o.pin_sides = on;
+    } else if (item == "congestion") {
+      o.congestion = on;
     } else if (item == "pins") {
       o.pins = on;
     }
@@ -158,7 +162,8 @@ Render_options parse_layers(const std::string& csv, Render_options o) {
   return o;
 }
 
-std::string render_png(const Scene& scene, const Frame& frame, const std::set<int>& pinned, const Render_options& opt) {
+std::string render_png(const Scene& scene, const Frame& frame, const std::set<int>& pinned, const Render_options& opt,
+                       const Grid* map) {
   const int w = std::clamp(opt.width, 64, 4096), h = std::clamp(opt.height, 64, 4096);
   Canvas    c(w, h, kBg);
   const Box view = opt.has_view ? opt.view : scene.die;
@@ -169,7 +174,33 @@ std::string render_png(const Scene& scene, const Frame& frame, const std::set<in
   const auto   sx = [&](double x) { return int(std::lround(x * s + ox)); };
   const auto   sy = [&](double y) { return int(std::lround(oy - y * s)); };
   c.fill(sx(scene.die.xl), sy(scene.die.yh), sx(scene.die.xh), sy(scene.die.yl), kDie);
-  c.outline(sx(scene.die.xl), sy(scene.die.yh), sx(scene.die.xh), sy(scene.die.yl), kLine);
+  if (opt.congestion && map && map->bx > 0 && map->by > 0 && map->v.size() == size_t(map->bx) * map->by) {
+    const auto dx = (scene.die.xh - scene.die.xl) / map->bx, dy = (scene.die.yh - scene.die.yl) / map->by;
+    for (int i = 0; i < map->bx; ++i) {
+      for (int j = 0; j < map->by; ++j) {
+        const auto use = map->v[size_t(i) * map->by + j];
+        if (use <= 0.05) {
+          continue;
+        }
+        c.fill(sx(scene.die.xl + i * dx),
+               sy(scene.die.yl + (j + 1) * dy),
+               sx(scene.die.xl + (i + 1) * dx),
+               sy(scene.die.yl + j * dy),
+               use > 1 ? Rgb{255, 60, 60} : Rgb{255, 170, 40},
+               .1 + .55 * std::min(1., use / std::max(1., map->peak)));
+      }
+    }
+  }
+  for (const auto& b : scene.exclusions) {
+    c.fill(sx(b.xl), sy(b.yh), sx(b.xh), sy(b.yl), kBg);
+  }
+  for (const auto& ring : scene.outline) {
+    for (size_t i = 0; i < ring.size(); ++i) {
+      const auto& a = ring[i];
+      const auto& b = ring[(i + 1) % ring.size()];
+      c.fill(sx(std::min(a[0], b[0])), sy(std::max(a[1], b[1])), sx(std::max(a[0], b[0])), sy(std::min(a[1], b[1])), kLine);
+    }
+  }
   if (opt.regions) {
     for (const auto& r : scene.regions) {
       c.outline(sx(r.xl), sy(r.yh), sx(r.xh), sy(r.yl), kRegion);
@@ -201,6 +232,14 @@ std::string render_png(const Scene& scene, const Frame& frame, const std::set<in
       const Rgb col = nd.kind == Kind::blockage ? kRegion : nd.movable ? kMacro : kMacroFixed;
       c.fill(x0, y0, x1, y1, col, nd.kind == Kind::blockage ? 0.25 : 0.35);
       c.outline(x0, y0, x1, y1, col);
+    }
+  }
+  if (opt.pin_sides) {
+    for (size_t i = 0; i < n; ++i) {
+      for (const auto& pin : scene.nodes[i].signal_pins) {
+        const auto x = sx(frame.x[i] + pin.x), y = sy(frame.y[i] + pin.y);
+        c.fill(x - 1, y - 1, x + 1, y + 1, kIo);
+      }
     }
   }
   if (opt.io) {
