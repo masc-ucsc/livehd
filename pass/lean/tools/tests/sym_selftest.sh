@@ -43,6 +43,12 @@ set -euo pipefail
 #   bulk_ok / bulk_bad: a whole-memory load from a bus, read back onto a bus, equals the bus
 #          PROVED; with the load enable an input COUNTEREXAMPLE (on fp: mulI / divI / modI by
 #          powers of two)
+#   ram12  a 12-entry RAM addressed by {ptr, wid} (two 2-bit fields, Vortex's ipdom stack), read
+#          and written past its last entry. The yosys reader drops such a write, reads 0 there,
+#          and gives the Memory cell the clamped address `index < 12 ? index : 0`, which
+#          pass.bitwidth proves inside the array. A read past the end is 0, and entry 0 never
+#          holds 0xff although every write past the end stores 0xff (the clamp sends that address
+#          to entry 0), PROVED; a read of entry 11 is 0 COUNTEREXAMPLE
 #   mul4 bad_lsb on ir with sf:1 wf:1: fp cannot specialize the replay simulator, so the run
 #          is COUNTEREXAMPLE NOT REPLAYED and names that reason (not "did not reproduce")
 #   tests/fp_symbolic.lean checks fp's symbolic primitives and terms against evalPrim / evalFuel.
@@ -204,8 +210,23 @@ module rem3(input clk, input signed [3:0] a, output ok_neg, output ok_rng, outpu
   assign r_o = rr;
 endmodule
 EOF
+# A depth that is not a power of two: the address reaches 12..15 (see the header).
+cat > "$OUT/ram12.sv" <<'EOF'
+module ram12(input clk, input we, input [1:0] wp, input [1:0] ww, input [7:0] wd,
+             input [1:0] rp, input [1:0] rw, output ok_rd, output ok_w0, output bad_rd, output [7:0] rd_o);
+  wire [3:0] wa = {wp, ww};
+  wire [3:0] ra = {rp, rw};
+  reg [7:0] mem [0:11];
+  always @(posedge clk) if (we) mem[wa] <= (wa >= 4'd12) ? 8'hff : (wd == 8'hff) ? 8'hfe : wd;
+  wire [7:0] rd = mem[ra];
+  assign ok_rd = (ra < 4'd12) | (rd == 8'd0);
+  assign ok_w0 = mem[0] != 8'hff;
+  assign bad_rd = (ra < 4'd11) | (rd == 8'd0);
+  assign rd_o = rd;
+endmodule
+EOF
 
-for d in cnt10 pair twocore ram4 ram4b mul4 udiv4 sdiv4 rem3; do
+for d in cnt10 pair twocore ram4 ram4b mul4 udiv4 sdiv4 rem3 ram12; do
   "$LHD" compile "$OUT/$d.sv" --reader yosys-slang --top "$d" --set yosys.setundef=zero \
     --emit-dir "lg:$OUT/${d}_lg" --workdir "$OUT/${d}_cw" > "$OUT/$d.compile.log" 2>&1 \
     || { tail -5 "$OUT/$d.compile.log"; echo "FAIL: compile $d"; exit 1; }
@@ -350,6 +371,10 @@ run sym_verify "INVARIANT PROVED"    "$R3" ok_reg k:1
 run sym_verify "COUNTEREXAMPLE"      "$R3" bad_pos k:1
 run sym_verify "COUNTEREXAMPLE"      "$R3" bad_sign k:1
 run sym_verify "COUNTEREXAMPLE"      "$R3" bad_eu k:1
+R12="$OUT/ram12_lean/ram12.dcert"
+run sym_verify "INVARIANT PROVED"    "$R12" ok_rd k:1
+run sym_verify "INVARIANT PROVED"    "$R12" ok_w0 k:1
+run sym_verify "COUNTEREXAMPLE"      "$R12" bad_rd k:3
 G="$OUT/gap"
 run sym_verify "INVARIANT PROVED"    "$G/getmask_sym.dcert" 0 k:1
 run sym_verify "COUNTEREXAMPLE"      "$G/getmask_sym.dcert" 1 k:1

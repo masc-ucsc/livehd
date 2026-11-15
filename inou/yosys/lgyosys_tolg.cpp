@@ -3102,6 +3102,31 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
         return low_dpin;
       };
       const auto mem_index = [&](hhds::Pin_class addr) { return offset_low(addr, index_bits); };
+      // pass.bitwidth must PROVE every Memory address inside [0, depth)
+      // (mem-address-overflow). Past a depth that is not a power of two the
+      // decoded index above can still name no entry, so the cell gets it
+      // through the clamp the slang reader generates and bitwidth recognizes:
+      //   index < depth ? index : 0
+      // The clamp changes no value: an out-of-range write has its enables
+      // gated off (below) and an out-of-range read returns 0 (the
+      // mem_rd_past_depth mux), so whatever entry the clamped address names is
+      // never written or seen. Returns the index the cell gets and the
+      // `index < depth` test (invalid when the width alone proves the range).
+      const int  index_width = offset == 0 && abits <= index_bits ? static_cast<int>(abits) : index_bits;
+      const auto clamp_index = [&](hhds::Pin_class index) -> std::pair<hhds::Pin_class, hhds::Pin_class> {
+        if (index.is_const() || index_width >= 63 || (int64_t{1} << index_width) <= static_cast<int64_t>(depth)) {
+          return {index, hhds::Pin_class{}};
+        }
+        const auto in_range = lt_node(index, int_const(static_cast<int64_t>(depth)));
+        auto       clamp    = create_typed_node(*g, Ntype_op::Mux, index_width);
+        setup_sink_by_name(clamp, "s").connect_driver(in_range);
+        setup_sink_by_name(clamp, "p1").connect_driver(int_const(0));
+        setup_sink_by_name(clamp, "p2").connect_driver(index);
+        auto clamped = clamp.create_driver_pin(0);
+        set_ubits(clamped, index_width);
+        explicit_pin_signs.insert(clamped.get_class_index());
+        return {clamped, in_range};
+      };
 
       for (int i = 0; i < wrports; i++) {
         auto port_n = i * static_cast<int>(Ntype::Memory_port_stride);
@@ -3127,7 +3152,7 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
         }
         livehd::graph_util::setup_sink_pid(exit_node, static_cast<hhds::Port_id>(4 + port_n)).connect_driver(wr_en_dpin);
         livehd::graph_util::setup_sink_pid(exit_node, static_cast<hhds::Port_id>(0 + port_n))
-            .connect_driver(mem_index(wr_addr_dpin));
+            .connect_driver(clamp_index(mem_index(wr_addr_dpin)).first);
         livehd::graph_util::setup_sink_pid(exit_node, static_cast<hhds::Port_id>(2 + port_n))
             .connect_driver(port_clock(
                 create_pick_concat_dpin(g, cell->getPort(ID::WR_CLK).extract(i, 1), false),
@@ -3145,10 +3170,12 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
             .connect_driver(create_const(*g, *Dlop::create_integer(rd_timing)));
         livehd::graph_util::setup_sink_pid(exit_node, static_cast<hhds::Port_id>(4 + port_n))
             .connect_driver(create_pick_concat_dpin(g, cell->getPort(ID::RD_EN).extract(i, 1), false));
-        const auto rd_index = mem_index(create_pick_concat_dpin(g, cell->getPort(ID::RD_ADDR).extract(i * abits, abits), false));
-        livehd::graph_util::setup_sink_pid(exit_node, static_cast<hhds::Port_id>(0 + port_n)).connect_driver(rd_index);
+        const auto rd_index             = mem_index(create_pick_concat_dpin(g, cell->getPort(ID::RD_ADDR).extract(i * abits, abits), false));
+        const auto [rd_cell_addr, rd_lt] = clamp_index(rd_index);
+        livehd::graph_util::setup_sink_pid(exit_node, static_cast<hhds::Port_id>(0 + port_n)).connect_driver(rd_cell_addr);
         if (const auto& zero_mux = mem_rd_past_depth[cell].at(static_cast<size_t>(i)); !zero_mux.is_invalid()) {
-          auto sel = lt_node(rd_index, int_const(static_cast<int64_t>(depth)));
+          // The zero mux and the clamp test the same `rd_index < depth`.
+          auto sel = rd_lt.is_invalid() ? lt_node(rd_index, int_const(static_cast<int64_t>(depth))) : rd_lt;
           if (param_bit(ID::RD_CLK_ENABLE, i)) {
             // A clocked read port registers its data (Memory type=1): select
             // with the address sampled at the same edge, held while RD_EN is low.

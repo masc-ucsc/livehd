@@ -268,6 +268,22 @@ private:
   std::vector<Node> made_;
 };
 
+// `node` gives a Memory one of its port addresses.
+bool drives_memory_address(const Node& node) {
+  for (const auto& out_pin : node.out_sorted_pins()) {
+    for (const auto& e : out_pin.out_edges()) {
+      if (gu::type_op_of(e.sink.get_master_node()) != Ntype_op::Memory) {
+        continue;
+      }
+      const auto name = Ntype::get_sink_name(Ntype_op::Memory, e.sink.get_port_id() % Ntype::Memory_port_stride);
+      if (name.ends_with("addr")) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 }  // namespace
 
 bool Cprop::low_lane(hhds::Node_class& node) {
@@ -467,6 +483,16 @@ bool Cprop::low_lane(hhds::Node_class& node) {
     // Every arm a constant or a low-lane form: one narrower Mux of the H
     // parts, and the low parts (one value, or their own Mux).
     if (k == 0 || ops.size() < 3 || ops[0].first != 0) {
+      return false;
+    }
+    // A Mux that gives a Memory its address keeps its shape. It is the
+    // reader's clamp `a < size ? a : 0` (upass_tolg clamp_mem_addr, the yosys
+    // reader's $mem import), from which pass.bitwidth proves the address inside
+    // [0, size) (refine_by_guard). Split over the lanes of a concatenated `a`
+    // ({ptr, wid} = Or(Shl(H, k), L)) it became an Or of two lane muxes, which
+    // bitwidth bounds only by [0, 2^w): the memory stopped with
+    // mem-address-overflow although every address stays inside it.
+    if (drives_memory_address(node)) {
       return false;
     }
     auto parts = parts_at(k);

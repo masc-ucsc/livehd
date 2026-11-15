@@ -159,6 +159,22 @@ sh_test(
     deps = [":scripts"],
 )
 
+# A memory whose depth is not a power of two (a 12-entry array, a 4-bit address) compiles through
+# the yosys readers. pass.bitwidth must prove every Memory address inside the array; the reader gave
+# the cell the decoded index, [0..15], and now gives it `index < depth ? index : 0`, the clamp the
+# slang reader generates. A write past the end is still dropped and a read past the end still 0.
+sh_test(
+    name = "yosys_mem_past_depth_test",
+    srcs = ["tests/yosys_mem_past_depth_test.sh"],
+    data = [
+        "tests/mem_past_depth.sv",
+        "tests/mem_past_depth_ref.sv",
+        "//lhd",
+        "//ware:cgen_memory_rtl",
+    ],
+    deps = [":scripts"],
+)
+
 # A case that lists every selector value has no unmatched path. read_slang --no-proc leaves the block's "hold
 # the previous value" start in front of it and proc_mux wires that into the dead path, which was a false
 # combinational loop (Vortex FPU/ALU). lhd_full_case marks such cases full_case before proc; cases that miss a
