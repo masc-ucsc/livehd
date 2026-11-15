@@ -12,14 +12,17 @@
 <h1><strong class="item-id">2r-route</strong> Legroute as the final routability step of placement</h1>
 <p><span class="status">Plan written 2026-11-15 from a question-and-answer session, after the URoute
 calibration (3u-uroute) and the SAT legroute work (2l-legroute) both failed their goals. This page
-replaces those two pages; their history is in git. Nothing on this page is implemented yet. Names of options, targets and directories are proposals.</span></p>
+replaces those two pages; their history is in git. Nothing on this page is implemented yet. Names of options, targets and directories are proposals.
+Updated 2026-11-15 with the first routed-cohort snapshot (<a href="#cohort">Cohort evidence</a>).
+The items C1–C5 come from that snapshot and are proposals: they are not ruled yet.</span></p>
 
 <p>Remove the learned congestion model (URoute) and the SAT-based legroute stages, and rebuild legroute
 as one step at the end of placement: a FastRoute-style global router and a per-grid-cell
 legality check alternate until the placement is as dense as it can be while still routable. The
 router proves that routes fit the track capacity of every grid cell. The legality check proves that
 the standard cells the router assumed inside a grid cell can really be placed there, which a
-global router never checks. The name legroute stays: it is still route-aware legalization.</p>
+global router never checks. Both proofs hold back a reserve for the buffers that CTS and hold repair
+add after placement (C1). The name legroute stays: it is still route-aware legalization.</p>
 
 <h2>Why</h2>
 <ul>
@@ -45,6 +48,83 @@ with a negotiated A* router with rip-up, has an opt-in port of FastRoute's L/Z p
 (<code>fast_route_pattern.cpp</code>), a window fit check (<code>assess_window_fit</code>) and can
 feed its congestion back into DREAMPlace (<code>plan.route_model=coarse</code>).</li>
 </ul>
+
+<h2 id="cohort">Cohort evidence (2026-11-15)</h2>
+<p>A routed cohort ran LiveHD-origin and OpenROAD-origin placements of the HighTide asap7 designs
+through one frozen OpenROAD backend: CTS, timing repair, global and detailed routing, and a zero-DRC
+check, with 8 threads and a 7200 s budget per run. LiveHD was at commit <code>84f093365</code> and
+the recorded LiveHD commands set no legroute option, so the LiveHD arm is the "without the step"
+arm. The snapshot has 17 of 36 runs complete and 9 failures; the other runs were active or queued.
+Commands, logs and artifact paths are in <code>issues.md</code> at the repository root (not
+committed).</p>
+<table>
+<tr><th>Origin</th><th>Design</th><th>Where it stopped</th><th>Meaning for this plan</th></tr>
+<tr><td>livehd</td><td>sha3</td><td>Detailed routing. It keeps returning to 3–6 violations until
+the 7200 s budget ends. The last saved report has four Min Step markers on M9, on three nets. The
+OpenROAD-origin run completes (1271.7 MHz, 438 s).</td>
+<td>The log shows no congestion. Classify it in step B (C4). The step is not expected to fix
+it.</td></tr>
+<tr><td>livehd</td><td>NVDLA/partition_a</td><td>CTS. Hold repair reaches the buffer limit after
+4,823 buffers (+4.6% area) with hold WNS −136 ps left. No router ran.</td>
+<td>Repair reserve (C1). The number of hold violations is not this task.</td></tr>
+<tr><td>livehd</td><td>gemmini</td><td>CTS. 82,892 hold buffers raise utilization from 49.1% to
+53.2%; legalization then leaves 1,819 violations (909 overlap-check failures). No router
+ran.</td>
+<td>Repair reserve (C1).</td></tr>
+<tr><td>livehd</td><td>NVDLA/partition_c, partition_o, partition_p, coralnpu</td><td>Before
+placement: <code>duplicate Liberty cell name across libraries/corners</code>.</td>
+<td>No placement to measure. Not this task, but four designs are missing from the gate until it is
+fixed (<a href="#notthis">Not this task</a>).</td></tr>
+<tr><td>openroad</td><td>NVDLA/partition_c</td><td>Global routing. Congestion is zero at 5.29%
+resource usage before timing repair and 17,299 after it at 5.46% usage, 7,484 on M2 and 7,145 on M3.
+The run then times out.</td>
+<td>A reference-flow failure, but it shows how this backend fails: locally, on the low layers, and
+after repair (C2, C3).</td></tr>
+<tr><td>openroad</td><td>minimax</td><td>Floorplan. The macro with its halo is 0.74 µm taller than
+the core. The LiveHD-origin run completes (1190.0 MHz, 64.7 s).</td>
+<td>Reference flow only. No change here.</td></tr>
+</table>
+<ul>
+<li><strong>No LiveHD failure in the snapshot is a global-route congestion failure.</strong> The
+step as first written would not have changed any of the seven. The nangate45 and sky130hd cases in
+<a href="#gate">Gate</a> remain the reason for the step; the asap7 cohort adds what the step must
+not break.</li>
+<li><strong>Two of the three LiveHD failures that reached the backend stop in CTS.</strong> The
+backend adds cell area after placement (8% on gemmini), and legalization fails where there is no
+room for it. A step that packs grid cells and freezes them makes this worse unless it holds room
+back.</li>
+<li><strong>The one congestion failure appears after repair, on M2 and M3, at 5% overall
+usage.</strong> A test on the layer sum, or only on the netlist before repair, would call that
+placement routable.</li>
+<li><strong>A violation count does not describe sha3.</strong> It has few markers and never
+converges. The gate needs the stage, and the type, layer and net of the markers.</li>
+</ul>
+
+<h3>Proposals from the cohort (not ruled yet)</h3>
+<table>
+<tr><th>#</th><th>Topic</th><th>Proposal</th></tr>
+<tr><td>C1</td><td>Repair reserve</td><td>The site capacity of a grid cell is its free sites minus a
+reserve for CTS and hold buffers. The edge capacity keeps the clock charge and adds a share for the
+nets of those buffers. A grid cell is frozen only if it fits under the reduced capacity, so the
+"dense" of R8 means dense under the reserve. The first version uses one fraction for the design,
+set from measurement (gemmini needed 8% more cell area; NVDLA/partition_a took 4.6% and was still
+short). It becomes a per-grid-cell value, for example by flop count, only if step B shows that the
+buffers cluster.</td></tr>
+<tr><td>C2</td><td>Per-layer test</td><td>The grid already keeps capacity and demand per layer
+(<code>Grid::layers</code>, <code>layer_dem</code>). The freeze test and the final report use the
+per-layer numbers, at least for the low layers that pins escape through, not only the 2D
+sum.</td></tr>
+<tr><td>C3</td><td>Measure after repair</td><td>The gate reads the backend's congestion report
+both before and after timing repair, and the legalization result after each insertion phase. A step
+that passes before repair and fails after it has not passed.</td></tr>
+<tr><td>C4</td><td>Outcome by stage</td><td>Every gate run records the first stage that fails:
+load, placement, handoff, floorplan, CTS, global routing, detailed routing or timeout. For detailed
+routing it keeps the marker type, layer, box and net of each saved report. This replaces a bare
+violation count as the first thing compared.</td></tr>
+<tr><td>C5</td><td>Cohort in the gate</td><td>The cohort designs join the gate as a second table.
+With the step on, no design may stop at an earlier stage than without it, and no completed design
+may be lost.</td></tr>
+</table>
 
 <h2>Decisions (2026-11-15)</h2>
 <table>
@@ -104,26 +184,29 @@ grid, and the routing tracks. Output: a legal placement and a global route that 
 report of the grid cells that could not be closed.</p>
 <ol>
 <li><strong>Grid.</strong> Build the routing grid with a grid cell of <code>N</code> tracks per side.
-Edge capacity comes from the real tracks minus power, macros, blockages and the clock charge.
-Cell capacity is the free row sites inside the grid cell.</li>
+Edge capacity comes from the real tracks minus power, macros, blockages and the clock charge, kept
+per layer (C2). Cell capacity is the free row sites inside the grid cell minus the repair reserve
+(C1).</li>
 <li><strong>Assign.</strong> Every movable cell belongs to the grid cell that holds it. A grid cell
 over its site capacity sends its excess to nearby grid cells that have both site room and routing
 slack (minimum displacement, timing-critical cells last).</li>
 <li><strong>Route.</strong> Route all nets on the grid: pattern seeds where enabled, then negotiated
 rip-up and reroute. Later rounds reroute only the nets whose pins moved.</li>
-<li><strong>Prove and freeze.</strong> A grid cell whose cells fit and whose edges have slack is
-legalized with greedy plus Abacus restricted to that grid cell. If the legalizer succeeds, the
+<li><strong>Prove and freeze.</strong> A grid cell whose cells fit under the reserve and whose edges
+have slack on every layer is legalized with greedy plus Abacus restricted to that grid cell. If the legalizer succeeds, the
 cells are frozen there and the routes through it are kept.</li>
 <li><strong>Repair.</strong> For grid cells that fail (sites or routing), free only the cells in and
 around them, inflate where routing is short, and resume global placement with everything else
 fixed. Then go back to step 2 for the freed cells.</li>
 <li><strong>Finish.</strong> Stop when every grid cell is frozen or the round budget is spent.
-Legalize what is left with the regular legalizer, route once on the legal pins and report overflow,
-unfrozen grid cells, displacement, HPWL and timing.</li>
+Legalize what is left with the regular legalizer, route once on the legal pins and report overflow
+per layer, unfrozen grid cells, the reserve left in each grid cell, displacement, HPWL and
+timing.</li>
 </ol>
 <p>Decisions that stay open inside the step, to be settled by measurement: the grid-cell size, how
-much routing slack a grid cell needs before it is frozen, how far the repair region extends around
-a failing grid cell, and whether a frozen grid cell may be reopened when a neighbour cannot close.</p>
+much routing slack a grid cell needs before it is frozen, the size and shape of the repair reserve
+(C1), how far the repair region extends around a failing grid cell, and whether a frozen grid cell
+may be reopened when a neighbour cannot close.</p>
 
 <h2>Work plan</h2>
 <table>
@@ -139,9 +222,14 @@ pushed. Only this task's files are staged.</td></tr>
 <tr><td>B</td><td><strong>Measure what exists.</strong> With Local and Final off
 (<code>legroute.plan=true</code>, <code>legal_boxes=true</code>, no core growth), run the arms:
 plan off, plan rounds, plan with <code>route_model=coarse</code>, each with pattern seeds on and
-off. Route every arm in OpenROAD.</td>
-<td>The table in <a href="#gate">Gate</a> is filled for the hard cases and the controls, and it
-says which existing pieces help.</td></tr>
+off. Route every arm in OpenROAD. On the cohort (C3, C4): count per grid cell where the CTS and
+hold buffers landed on gemmini and NVDLA/partition_a, read the congestion report before and after
+repair, and classify the sha3 markers. The global-route report of the same backend lists M2 to M7
+only (seen on partition_c), so first find how shapes of signal nets reach M9: handoff pins,
+pre-routes or the layer range of the recipe.</td>
+<td>The tables in <a href="#gate">Gate</a> are filled for the hard cases, the controls and the
+completed cohort runs, and they say which existing pieces help. The reserve has a measured first
+value. The sha3 stall is classified as caused by placement or not.</td></tr>
 <tr><td>C</td><td><strong>Delete SAT legroute.</strong> Remove Local, Final and the SAT-only
 machinery down to the minimal core (R7). Untangle the shared pieces first:
 <code>clock_tree_charge</code> out of <code>legroute_route.cpp</code>,
@@ -151,12 +239,14 @@ and <code>area_fit</code>'s dependency on Plan. Drop <code>//third_party/viecut<
 <td>The build has no Local or Final code, the legroute option table is a handful of entries, and
 the step B arms that survive give the same numbers as before the deletion.</td></tr>
 <tr><td>D</td><td><strong>Build the step.</strong> Free grid-cell size (R9), per-grid-cell site
-capacity and assignment, the windowed greedy plus Abacus call (R11), freezing, and the incremental
-global-placement repair (R10).</td>
+capacity with the repair reserve (C1) and assignment, the per-layer freeze test (C2), the windowed
+greedy plus Abacus call (R11), freezing, and the incremental global-placement repair (R10).</td>
 <td>The step closes the hard cases or reports exactly which grid cells it could not close, with
-unit tests for assignment, freezing, the windowed legalizer and the repair region.</td></tr>
-<tr><td>E</td><td><strong>Gate and default.</strong> Run the gate, then the backend regression with
-the step on. Turn it on by default (R14) and update the tests and docs that state the default.</td>
+unit tests for assignment, the reserve, freezing, the windowed legalizer and the repair
+region.</td></tr>
+<tr><td>E</td><td><strong>Gate and default.</strong> Run both gate tables, then the backend
+regression with the step on. Turn it on by default (R14) and update the tests and docs that state
+the default.</td>
 <td>Gate passed, regression green, default changed in one reviewed commit.</td></tr>
 </table>
 
@@ -180,6 +270,56 @@ wirelength, and the cost in HPWL, WNS and placement runtime is reported and acce
 not enough for a small difference: minimax at utilization 60 moved HPWL between 111k and 129k µm
 from a density change of 0.0002, so close results need several runs.</p>
 
+<h3>Cohort cases (C5)</h3>
+<p>These use the cohort's own frozen backend and options, unchanged, with the step off and on. Each
+table compares arms inside its own recipe; numbers are not compared across the two tables. Every
+run records its first failing stage (C4) and the congestion report before and after repair (C3).</p>
+<table>
+<tr><th>Case (asap7)</th><th>Without the step (snapshot 2026-11-15)</th><th>Needed</th></tr>
+<tr><td>minimax</td><td>completes, 1190.0 MHz, 64.7 s</td><td>still completes with zero DRC;
+frequency and runtime reported</td></tr>
+<tr><td>sha3</td><td>detailed routing stalls on 3–6 violations at 7200 s</td><td>does not stop
+earlier; the marker list (type, layer, net) is compared. It counts as improved only if it completes
+with zero DRC</td></tr>
+<tr><td>gemmini</td><td>CTS: 82,892 hold buffers, 1,819 legalization violations left</td><td>does
+not stop earlier, and the violations left after repair do not grow. This case sizes the reserve;
+the step alone is not expected to make it complete</td></tr>
+<tr><td>NVDLA/partition_a</td><td>CTS: hold buffer limit after 4,823 buffers</td><td>same</td></tr>
+<tr><td>NVDLA/partition_c, partition_o, partition_p, coralnpu</td><td>no placement (Liberty
+error)</td><td>added when the error is fixed</td></tr>
+<tr><td>the 19 runs not finished at the snapshot</td><td>unknown</td><td>added when the cohort
+finishes</td></tr>
+</table>
+<p>The step passes this table when no design stops at an earlier stage with the step on, no
+completed design is lost, and congestion after repair is not worse. Each run keeps the ODB and SDC
+before and after CTS, the DEF and macro poses that were handed off, the global-route congestion
+reports and the detailed-route markers with coordinates and net names.</p>
+
+<h2 id="notthis">Not this task</h2>
+<p>The cohort also surfaced problems that the step cannot fix. They are listed so that they are not
+mistaken for routing results.</p>
+<table>
+<tr><th>Problem</th><th>What is known</th><th>Effect on this task</th></tr>
+<tr><td>Duplicate Liberty cell name (4 LiveHD runs)</td><td>Raised in
+<code>pass/liberty/timing_model.cpp</code> without the cell name or the two files. All four
+commands pass explicit fakeram libraries in <code>synth.macro_liberty</code>; the three LiveHD runs
+that got past loading pass none to the backend (sha3 and gemmini have no extra library,
+NVDLA/partition_a only generated ones). That is a lead, not a cause.</td>
+<td>Fix it first, with an error that names the cell and both files. Until then four cohort designs
+give no placement.</td></tr>
+<tr><td>Number of hold violations after CTS</td><td>82,892 buffers on gemmini; the limit on
+NVDLA/partition_a. Clock skew and short paths after OpenROAD CTS on a LiveHD placement are not
+examined yet.</td>
+<td>This task only reserves room (C1). Reducing the count belongs to timing closure
+(2t-timeclosure) and to PCRS below.</td></tr>
+<tr><td>Macro plus halo does not fit (OpenROAD-origin minimax)</td><td>A floorplan feasibility
+failure of the reference flow. The LiveHD-origin run completes.</td>
+<td>None. The halo is a benchmark constraint and stays.</td></tr>
+<tr><td>Congestion after repair (OpenROAD-origin NVDLA/partition_c)</td><td>See
+<a href="#cohort">Cohort evidence</a>.</td>
+<td>Used as evidence for C2 and C3 only.</td></tr>
+</table>
+
 <h2>What is kept from the URoute work</h2>
 <ul>
 <li>The routing recipes (prebuilt OpenROAD plus ORFS scripts, LiveHD placement handoff) and the
@@ -196,7 +336,9 @@ OpenROAD CTS writes.</li>
 <p>Once the step is on by default, the next goal is PCRS: native distribution of power, clock, reset
 and scan chains, as an alternative to OpenROAD CTS and a stepping stone to native routing in
 LiveHD. The SAT attempt at native routing failed, so that needs a new plan. It is recorded here
-only to keep the direction clear; it is not part of this task.</p>
+only to keep the direction clear; it is not part of this task. The cohort supports the order: on
+asap7, two of the three LiveHD failures that reached the backend stopped in OpenROAD's CTS and hold
+repair, before any signal was routed.</p>
 </main>
 </body>
 </html>
