@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TODO 2r-route — legroute as the final routability step of placement</title>
+<link rel="stylesheet" href="../todo.css">
+</head>
+<body>
+<nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
+<main>
+<h1><strong class="item-id">2r-route</strong> Legroute as the final routability step of placement</h1>
+<p><span class="status">Plan written 2026-11-15 from a question-and-answer session, after the URoute
+calibration (3u-uroute) and the SAT legroute work (2l-legroute) both failed their goals. This page
+replaces those two pages; their history is in git. Nothing on this page is implemented yet. Names of options, targets and directories are proposals.</span></p>
+
+<p>Remove the learned congestion model (URoute) and the SAT-based legroute stages, and rebuild legroute
+as one step at the end of placement: a FastRoute-style global router and a per-grid-cell
+legality check alternate until the placement is as dense as it can be while still routable. The
+router proves that routes fit the track capacity of every grid cell. The legality check proves that
+the standard cells the router assumed inside a grid cell can really be placed there, which a
+global router never checks. The name legroute stays: it is still route-aware legalization.</p>
+
+<h2>Why</h2>
+<ul>
+<li><strong>URoute did not earn its place.</strong> Trained on 121 routed HighTide layouts
+(10 designs, asap7 / nangate45 / sky130hd, macros, high-density and aspect-ratio stress cases),
+the best recipe reached parity with RSMT on map correlation for unseen designs (Pearson 0.662 vs
+0.659) and stayed below it on Spearman, SSIM and hotspot overlap. RSMT ordered placements of the
+same design by routed congestion far better (pairwise concordance 0.90–0.98 vs 0.4–0.7). In
+the placement loop URoute left lfsr, minimax and liteeth bit-identical to RSMT while costing 6–59×
+the wall time (about 15 s per call on x86).</li>
+<li><strong>RSMT cannot trigger.</strong> The same study measured RSMT's utilization at about 0.33 of
+the routed value, so its <code>util &gt; 1</code> overflow test almost never fires. Placement needs
+a signal with a real capacity scale. A global router on the track grid has one.</li>
+<li><strong>SAT legroute did not close.</strong> Local and Final never produced complete native
+routing on SHA3, minimax or ternip (2l-legroute). The code is about 20k lines plus about 11k
+lines of tests, and Plan carries more machinery (cell boxes, partitions, admission) that only
+exists to feed it.</li>
+<li><strong>LiveHD placements are hard to route.</strong> With OpenROAD routing LiveHD's placement,
+nangate45 minimax had 112K detailed-route violations at iteration 3, nangate45 liteeth 38K, and
+sky130hd liteeth failed global routing on congestion. These are the cases the new step must fix.</li>
+<li><strong>Most of the router exists.</strong> Legroute Plan already routes the converged placement
+with a negotiated A* router with rip-up, has an opt-in port of FastRoute's L/Z patterns
+(<code>fast_route_pattern.cpp</code>), a window fit check (<code>assess_window_fit</code>) and can
+feed its congestion back into DREAMPlace (<code>plan.route_model=coarse</code>).</li>
+</ul>
+
+<h2>Decisions (2026-11-15)</h2>
+<table>
+<tr><th>#</th><th>Topic</th><th>Decision</th></tr>
+<tr><td>R1</td><td>URoute</td><td>Delete it from LiveHD and DREAMPlace: the model, training, pool,
+bundle, native inference, the <code>uroute</code> route-model value, <code>uroute.*</code> options,
+the <code>route.probe=uroute</code> probes and the GUI reports. Commit and push DREAMPlace first,
+then LiveHD with the new pin.</td></tr>
+<tr><td>R2</td><td>Routed-truth scorer</td><td>Keep a slim scorer under a new name (proposal
+<code>tools/routetruth</code>): label extraction from a routed DEF, map scoring and the RSMT
+baseline. It is the only way to score an estimator against real OpenROAD routing.</td></tr>
+<tr><td>R3</td><td><code>route.model=auto</code></td><td>Stays valid as the one-way ladder
+rudy → rsmt. Only the third rung and its options go. The default stays <code>rsmt</code>.</td></tr>
+<tr><td>R4</td><td>This session's URoute work</td><td>Not committed. The trained model, bundle,
+corpus pool, patches and reports are archived under <code>/lscratch/renau/uroute_train</code>
+(raw routed runs pruned); the findings are recorded here.</td></tr>
+<tr><td>R5</td><td>Position in the flow</td><td>The step runs on the converged placement, before
+the final legalization. After legalization the router runs once more on the legal pins to measure
+what is left.</td></tr>
+<tr><td>R6</td><td>Success test</td><td>Routed outcome in OpenROAD with the same die and density in
+both arms: global-route overflow, detailed-route violations at a fixed iteration, final DRC and
+wirelength. HPWL, WNS and runtime are reported next to them. The estimator does not grade
+itself.</td></tr>
+<tr><td>R7</td><td>Deletion depth</td><td>Keep a minimal core: grid and capacity, clock charge,
+the global router with patterns, congestion maps, round selection, the placement session and
+<code>area_fit</code>'s measure-only oracle. Delete Local, Final, the SAT model, cell boxes,
+partitions and the mesh, admission, the SAT gates, the probe, and their options and tests.</td></tr>
+<tr><td>R8</td><td>The loop</td><td>Router and legality check alternate. Routing is cheap to redo; a
+legality decision is cheap to make but hard to undo. The goal is a dense design that is still
+routable.</td></tr>
+<tr><td>R9</td><td>Grid</td><td>The legality check uses the router's own grid cells. The grid-cell
+size becomes a free parameter in routing tracks (FastRoute uses about 15); it is no longer derived
+from a cell box. The first version runs one size. A coarse-to-fine schedule is added only if one
+level leaves overflow or costs too much.</td></tr>
+<tr><td>R10</td><td>Remedy</td><td>Assign cells to grid cells, then route. When a round fails, run
+global placement again <em>incrementally</em>: most assignments stay fixed and only the cells
+around the failing routes or densities may move, so the next assignment picks locations the placer
+wants.</td></tr>
+<tr><td>R11</td><td>Legality proof</td><td>Use the existing greedy plus Abacus legalizer (DREAMPlace
+<code>kernels.cpp</code>), run inside a grid cell with everything outside it fixed. A grid cell
+that passes the density and routing estimate is legalized for real, during the iterations, and its
+cells are frozen.</td></tr>
+<tr><td>R12</td><td>FastRoute code</td><td>The existing L/Z pattern port stays and is measured on
+and off. More FastRoute stages (monotonic or maze routing, layer assignment) may be ported with
+BSD-3 provenance if the native router turns out to be the weak point. Credits go in
+<code>docs/acknowledgement.html</code>.</td></tr>
+<tr><td>R13</td><td>Area</td><td>No core growth. The die and core are fixed inputs; the step may
+raise density or move cells, and reports what it could not fix.</td></tr>
+<tr><td>R14</td><td>Default</td><td>The goal is default on. It is turned on when the gate in
+<a href="#gate">Gate</a> passes and the backend regression is green, with the measured numbers
+reported at that point.</td></tr>
+</table>
+
+<h2>The step</h2>
+<p>Input: the converged global placement (not legal), the fixed die, core, rows, macros and power
+grid, and the routing tracks. Output: a legal placement and a global route that fits it, or a
+report of the grid cells that could not be closed.</p>
+<ol>
+<li><strong>Grid.</strong> Build the routing grid with a grid cell of <code>N</code> tracks per side.
+Edge capacity comes from the real tracks minus power, macros, blockages and the clock charge.
+Cell capacity is the free row sites inside the grid cell.</li>
+<li><strong>Assign.</strong> Every movable cell belongs to the grid cell that holds it. A grid cell
+over its site capacity sends its excess to nearby grid cells that have both site room and routing
+slack (minimum displacement, timing-critical cells last).</li>
+<li><strong>Route.</strong> Route all nets on the grid: pattern seeds where enabled, then negotiated
+rip-up and reroute. Later rounds reroute only the nets whose pins moved.</li>
+<li><strong>Prove and freeze.</strong> A grid cell whose cells fit and whose edges have slack is
+legalized with greedy plus Abacus restricted to that grid cell. If the legalizer succeeds, the
+cells are frozen there and the routes through it are kept.</li>
+<li><strong>Repair.</strong> For grid cells that fail (sites or routing), free only the cells in and
+around them, inflate where routing is short, and resume global placement with everything else
+fixed. Then go back to step 2 for the freed cells.</li>
+<li><strong>Finish.</strong> Stop when every grid cell is frozen or the round budget is spent.
+Legalize what is left with the regular legalizer, route once on the legal pins and report overflow,
+unfrozen grid cells, displacement, HPWL and timing.</li>
+</ol>
+<p>Decisions that stay open inside the step, to be settled by measurement: the grid-cell size, how
+much routing slack a grid cell needs before it is frozen, how far the repair region extends around
+a failing grid cell, and whether a frozen grid cell may be reopened when a neighbour cannot close.</p>
+
+<h2>Work plan</h2>
+<table>
+<tr><th>Step</th><th>Work</th><th>Done when</th></tr>
+<tr><td>A</td><td><strong>Delete URoute.</strong> DREAMPlace: <code>rudy_uroute.cpp</code>,
+<code>uroute_*</code>, the ladder rung and h2d hooks in <code>placement.cpp</code>. LiveHD:
+<code>pass/place/uroute*</code>, <code>tools/uroute/</code> except the scorer (R2), the option
+table and kernel validation, GUI reports, <code>rudy_metrics</code> and
+<code>placement_metrics</code> hooks and docs. Retarget the code comments and READMEs that still
+name the removed 3u-uroute and 2l-legroute pages.</td>
+<td>Both repositories build and pass their regressions; DREAMPlace pushed, LiveHD pin bumped and
+pushed. Only this task's files are staged.</td></tr>
+<tr><td>B</td><td><strong>Measure what exists.</strong> With Local and Final off
+(<code>legroute.plan=true</code>, <code>legal_boxes=true</code>, no core growth), run the arms:
+plan off, plan rounds, plan with <code>route_model=coarse</code>, each with pattern seeds on and
+off. Route every arm in OpenROAD.</td>
+<td>The table in <a href="#gate">Gate</a> is filled for the hard cases and the controls, and it
+says which existing pieces help.</td></tr>
+<tr><td>C</td><td><strong>Delete SAT legroute.</strong> Remove Local, Final and the SAT-only
+machinery down to the minimal core (R7). Untangle the shared pieces first:
+<code>clock_tree_charge</code> out of <code>legroute_route.cpp</code>,
+<code>final_net_scope</code> out of <code>legroute_grid.cpp</code>, the critical-cellbox Plan path,
+and <code>area_fit</code>'s dependency on Plan. Drop <code>//third_party/viecut</code>.
+<code>sat_solver</code> and <code>satlegalize</code> stay: the regular legalizer uses them.</td>
+<td>The build has no Local or Final code, the legroute option table is a handful of entries, and
+the step B arms that survive give the same numbers as before the deletion.</td></tr>
+<tr><td>D</td><td><strong>Build the step.</strong> Free grid-cell size (R9), per-grid-cell site
+capacity and assignment, the windowed greedy plus Abacus call (R11), freezing, and the incremental
+global-placement repair (R10).</td>
+<td>The step closes the hard cases or reports exactly which grid cells it could not close, with
+unit tests for assignment, freezing, the windowed legalizer and the repair region.</td></tr>
+<tr><td>E</td><td><strong>Gate and default.</strong> Run the gate, then the backend regression with
+the step on. Turn it on by default (R14) and update the tests and docs that state the default.</td>
+<td>Gate passed, regression green, default changed in one reviewed commit.</td></tr>
+</table>
+
+<h2 id="gate">Gate</h2>
+<p>Both arms use the same die, core, density and seed. No core growth. OpenROAD does CTS, global
+and detailed routing with the frozen ORFS recipes from the URoute work.</p>
+<table>
+<tr><th>Case</th><th>Role</th><th>Without the step (measured 2026-11-14)</th><th>Needed</th></tr>
+<tr><td>nangate45 minimax</td><td>hard</td><td>112K detailed-route violations at iteration 3</td>
+<td>routes, or clearly fewer violations at the same iteration</td></tr>
+<tr><td>nangate45 liteeth (5 macros)</td><td>hard</td><td>38K violations at iteration 3</td>
+<td>same</td></tr>
+<tr><td>sky130hd liteeth (5 macros)</td><td>hard</td><td>global routing fails on congestion
+(GRT-0232)</td><td>global routing passes</td></tr>
+<tr><td>asap7 minimax</td><td>control</td><td>routes; 48 DRC markers, 151,512 µm at utilization 45</td>
+<td>not worse</td></tr>
+<tr><td>asap7 liteeth (5 macros)</td><td>control</td><td>routes, 0 DRC markers</td><td>not worse</td></tr>
+</table>
+<p>The step passes when the hard cases clearly improve, the controls do not get worse on DRC or
+wirelength, and the cost in HPWL, WNS and placement runtime is reported and acceptable. One seed is
+not enough for a small difference: minimax at utilization 60 moved HPWL between 111k and 129k µm
+from a density change of 0.0002, so close results need several runs.</p>
+
+<h2>What is kept from the URoute work</h2>
+<ul>
+<li>The routing recipes (prebuilt OpenROAD plus ORFS scripts, LiveHD placement handoff) and the
+121-layout corpus, under <code>/lscratch/renau/uroute_train</code>.</li>
+<li>The scorer (R2), so the router's congestion map can be compared with routed utilization when a
+result needs explaining.</li>
+<li>Three tool defects found on the way, to fix or drop with the scorer: 4 of 7 nangate45 liteeth
+layouts fail the Python-versus-native feature check, the label extractor rejects non-preferred
+wires on sky130's single top layer, and the DEF reader rejects the non-default routing rules that
+OpenROAD CTS writes.</li>
+</ul>
+
+<h2>Direction after this</h2>
+<p>Once the step is on by default, the next goal is PCRS: native distribution of power, clock, reset
+and scan chains, as an alternative to OpenROAD CTS and a stepping stone to native routing in
+LiveHD. The SAT attempt at native routing failed, so that needs a new plan. It is recorded here
+only to keep the direction clear; it is not part of this task.</p>
+</main>
+</body>
+</html>
