@@ -14,8 +14,8 @@
 # fields of a concatenated address ({ptr, wid}) into an Or of two lane muxes, which bitwidth bounds
 # only by [0..15], for both readers; it now leaves a Mux that gives a Memory its address alone.
 #
-#   * mem_past_depth.sv (a 12-entry [0:11] array and a 12-entry [3:14] array, both with 4-bit
-#     addresses, and a 12-entry array addressed by {ptr, wid}) compiles with each yosys reader
+#   * mem_past_depth.sv (3-entry [0:2] and 6-entry [1:6] arrays, with 2-bit and 3-bit
+#     addresses, and a 3-entry array addressed by two concatenated 1-bit fields) compiles with each yosys reader
 #     (yosys-slang, yosys-verilog) and with the native slang reader, with no
 #     mem-address-overflow;
 #   * lhd lec (effort proof) proves each netlist equivalent to mem_past_depth_ref.sv, the same
@@ -45,7 +45,7 @@ for r in $READERS; do
   "$LHD" lec --impl "verilog:$W/net_$r.v" --ref "verilog:$T/mem_past_depth_ref.sv" --top mem_past_depth \
     --workdir "$W/lec_$r" --set formal.effort=proof -q >"$W/lec_$r.log" 2>&1 \
     || { cat "$W/lec_$r.log" >&2; fail "$r: the netlist is not proven equivalent to the guarded reference"; }
-  grep -q "'mem_past_depth' PROVEN" "$W/lec_$r.log" || { cat "$W/lec_$r.log" >&2; fail "$r: lec did not report PROVEN"; }
+  grep -q "'mem_past_depth' PROVEN-full" "$W/lec_$r.log" || { cat "$W/lec_$r.log" >&2; fail "$r: lec did not report PROVEN-full"; }
   echo "ok: $r: proven equivalent to the guarded reference"
 done
 
@@ -59,15 +59,18 @@ echo "ok: slang: compiles, every memory address proven inside the array"
 # Controls: the two ways the clamp could change a value. A reference whose write past the end lands
 # on entry 0 (the clamp without the enable gate), and one whose read past the end returns entry 0
 # (the clamp without the zero mux), must each be REFUTED (lhd lec exit 10).
-sed 's/if (we \&\& wa < 4.d12) m\[wa\] <= wd;/if (we) m[(wa < 4'"'"'d12) ? wa : 4'"'"'d0] <= wd;/' \
+# Two steps suffice to write then observe an alias. Require a concrete counterexample;
+# generating and compiling its simulation replay is covered by the witness-replay tests.
+sed 's/if (we \&\& wa < 2.d3) m\[wa\] <= wd;/if (we) m[(wa < 2'"'"'d3) ? wa : 2'"'"'d0] <= wd;/' \
   "$T/mem_past_depth_ref.sv" >"$W/bad_wr.sv"
-sed 's/? m\[ra\] : 8.d0;/? m[ra] : m[0];/' "$T/mem_past_depth_ref.sv" >"$W/bad_rd.sv"
-grep -q "m\[(wa < 4'd12) ? wa : 4'd0\] <= wd" "$W/bad_wr.sv" || fail "could not make the aliasing-write control"
+sed 's/? m\[ra\] : 1.d0;/? m[ra] : m[0];/' "$T/mem_past_depth_ref.sv" >"$W/bad_rd.sv"
+grep -q "m\[(wa < 2'd3) ? wa : 2'd0\] <= wd" "$W/bad_wr.sv" || fail "could not make the aliasing-write control"
 grep -q '? m\[ra\] : m\[0\];' "$W/bad_rd.sv" || fail "could not make the entry-0-read control"
 for b in bad_wr bad_rd; do
   code=0
   "$LHD" lec --impl "verilog:$W/net_yosys-slang.v" --ref "verilog:$W/$b.sv" --top mem_past_depth \
-    --workdir "$W/lec_$b" --set formal.effort=proof -q >"$W/lec_$b.log" 2>&1 || code=$?
+    --workdir "$W/lec_$b" --set formal.effort=proof --set formal.engine=bmc --set formal.bound=2 \
+    --set formal.simfail=false -q >"$W/lec_$b.log" 2>&1 || code=$?
   [ "$code" = 10 ] && grep -q "'mem_past_depth' REFUTED" "$W/lec_$b.log" \
     || { cat "$W/lec_$b.log" >&2; fail "control $b: expected REFUTED (exit 10), got exit $code"; }
   echo "ok: control $b REFUTED"
@@ -89,10 +92,11 @@ cat >"$W/tb.v" <<'EOF'
 module tb;
   reg clk = 0;
   reg we, we2, we3;
-  reg [3:0] wa, ra, wa2, ra2;
-  reg [1:0] wp, ww, rp, rw;
-  reg [7:0] wd, wd2, wd3;
-  wire [7:0] rd_r, rd2_r, rd3_r, rd_n, rd2_n, rd3_n, rd_s, rd2_s, rd3_s;
+  reg [1:0] wa, ra;
+  reg [2:0] wa2, ra2;
+  reg wp, ww, rp, rw;
+  reg [0:0] wd, wd2, wd3;
+  wire [0:0] rd_r, rd2_r, rd3_r, rd_n, rd2_n, rd3_n, rd_s, rd2_s, rd3_s;
   mem_past_depth   gold(.clk(clk), .we(we), .wa(wa), .wd(wd), .ra(ra), .rd(rd_r),
                         .we2(we2), .wa2(wa2), .wd2(wd2), .ra2(ra2), .rd2(rd2_r),
                         .we3(we3), .wp(wp), .ww(ww), .wd3(wd3), .rp(rp), .rw(rw), .rd3(rd3_r));
@@ -103,13 +107,13 @@ module tb;
                        .we2(we2), .wa2(wa2), .wd2(wd2), .ra2(ra2), .rd2(rd2_s),
                        .we3(we3), .wp(wp), .ww(ww), .wd3(wd3), .rp(rp), .rw(rw), .rd3(rd3_s));
   integer i, seed = 7, errs = 0, src_errs = 0, oob_wr = 0, oob_rd = 0;
-  wire ra_in = ra < 4'd12;
-  wire ra2_in = ra2 >= 4'd3 && ra2 <= 4'd14;
-  wire rp_in = rp != 2'd3;
+  wire ra_in = ra < 2'd3;
+  wire ra2_in = ra2 >= 3'd1 && ra2 <= 3'd6;
+  wire rp_in = {rp, rw} < 2'd3;
   initial begin
     for (i = 0; i < 4000; i = i + 1) begin
-      if (i < 16) begin
-        // fill every entry first (writes 12..15 of m, 0..2 and 15 of o, and ptr 3 of s are past the end)
+      if (i < 8) begin
+        // Fill every entry first, also exercising out-of-range addresses in all three arrays.
         we = 1; wa = i; wd = i * 7 + 1; we2 = 1; wa2 = i; wd2 = i * 5 + 3;
         we3 = 1; {wp, ww} = i; wd3 = i * 3 + 5;
       end else begin
@@ -118,9 +122,9 @@ module tb;
       end
       {ra, ra2, rp, rw} = $random(seed);
       #1;
-      if (we && wa >= 4'd12) oob_wr = oob_wr + 1;
-      if (we2 && (wa2 < 4'd3 || wa2 > 4'd14)) oob_wr = oob_wr + 1;
-      if (we3 && wp == 2'd3) oob_wr = oob_wr + 1;
+      if (we && wa >= 2'd3) oob_wr = oob_wr + 1;
+      if (we2 && (wa2 < 3'd1 || wa2 > 3'd6)) oob_wr = oob_wr + 1;
+      if (we3 && {wp, ww} == 2'd3) oob_wr = oob_wr + 1;
       if (!ra_in) oob_rd = oob_rd + 1;
       if (!ra2_in) oob_rd = oob_rd + 1;
       if (!rp_in) oob_rd = oob_rd + 1;

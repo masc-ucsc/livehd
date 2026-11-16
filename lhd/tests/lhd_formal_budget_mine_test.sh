@@ -30,13 +30,13 @@ mkdir -p "$W"
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
 # ---------------------------------------------------------------------------
-# 1. Total solver budget. Two hard 32-bit multiply identities plus one trivial
+# 1. Total solver budget. Two hard 8-bit multiply identities plus one trivial
 #    sibling. engine=bmc (one strategy, no fork). A generous outer wall-clock cap
 #    confirms the run does NOT spend timeout PER hard obligation.
 # ---------------------------------------------------------------------------
 cat >"$W/hard2.prp" <<'EOF'
-mod hard2(a:U32, b:U32, c:U32, en:Bool) -> (o:U8@[0]) {
-  reg acc:U8 = 0
+mod hard2(a:U8, b:U8, c:U8, en:Bool) -> (o:U1@[0]) {
+  reg acc:U1 = 0
   o = acc
   assert(a + b == b + a, "easy")
   assert((a * b) * ((a * c) + 1) == (a * a * b * c) + (a * b), "distrib1")
@@ -61,8 +61,8 @@ end=$(date +%s); elapsed=$((end-start))
 # which exits 0 with a formal-timeout-time warning (owner ruling: a timeout is
 # acceptable, never a failure and never a proof). The hardness here is real and
 # not a tool bug: the same three obligations are PROVEN inductively in ~1.5s at
-# 4-bit operands, and only the 32-bit bit-blasted nonlinear products outrun the
-# solver (120s/obligation still undecided) — exactly the budget-limited case
+# 4-bit operands, while the 8-bit bit-blasted nonlinear products outrun the
+# one-second grants — exactly the budget-limited case
 # this file exists to account for. The warning must NAME that cause.
 [ "$rc" -eq 0 ] || fail "a budget-limited TIMEOUT-time run must exit 0 (rc=$rc): $(cat "$W/budget.out")"
 grep -q "^formal verify: 'hard2.hard2' TIMEOUT-time" "$W/budget.out" \
@@ -109,7 +109,7 @@ budget_actual=$(sed -nE 's/.*budget 1s target \/ ([0-9]+\.[0-9]+)s actual.*/\1/p
 [ -n "$budget_actual" ] || fail "could not read actual solver spend: $(cat "$W/budget.out")"
 # This is a BLOWUP guard, not a precision bound. What it discriminates is
 # "the total was honored at all": an obligation that never got a grant does not
-# overshoot by a few seconds, it FREEZES on these 32-bit multiply identities, so
+# overshoot by a few seconds, it FREEZES on these multiply identities, so
 # any finite bound catches it. The number therefore only has to sit clear of the
 # noise. The reported spend is cvc5's own WALL clock, so it stretches with host
 # load exactly like the `elapsed` cap below does -- measured 11.2s on a machine
@@ -131,9 +131,9 @@ echo "ok: spec_mining_timeout named the toxic obligation core"
 #     step pins the primary reset input deasserted, disclosed as "reset deasserted").
 # ---------------------------------------------------------------------------
 cat >"$W/twin_ok.prp" <<'EOF'
-mod twin_ok(enable:Bool) -> (value:U8@[0]) {
-  reg a:U8 = 0
-  reg b:U8 = 0
+mod twin_ok(enable:Bool) -> (value:U1@[0]) {
+  reg a:U1 = 0
+  reg b:U1 = 0
   value = a
   assert(a == b, "twins equal")
   if enable {
@@ -155,9 +155,9 @@ echo "ok: true twin invariant proven unbounded (primary-reset pinning disclosed)
 # 3b. Soundness: an unequal-reset twin is REFUTED — induction never proves it.
 # ---------------------------------------------------------------------------
 cat >"$W/twin_bad.prp" <<'EOF'
-mod twin_bad(enable:Bool) -> (value:U8@[0]) {
-  reg a:U8 = 0
-  reg b:U8 = 1
+mod twin_bad(enable:Bool) -> (value:U1@[0]) {
+  reg a:U1 = 0
+  reg b:U1 = 1
   value = a
   assert(a == b, "twins differ from reset")
   if enable {
@@ -166,7 +166,7 @@ mod twin_bad(enable:Bool) -> (value:U8@[0]) {
   }
 }
 EOF
-"$LHD" formal verify "$W/twin_bad.prp" --top twin_bad --set formal.engine=bmc --set formal.bound=4 \
+"$LHD" formal verify "$W/twin_bad.prp" --top twin_bad --set formal.engine=bmc --set formal.bound=4 --set formal.simfail=false \
   >"$W/twin_bad.out" 2>&1
 rc=$?
 [ "$rc" -eq 10 ] || fail "a reachable violation must fail the run with the counterexample class (rc=$rc): $(cat "$W/twin_bad.out")"

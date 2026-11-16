@@ -159,9 +159,9 @@ sh_test(
     deps = [":scripts"],
 )
 
-# A memory whose depth is not a power of two (a 12-entry array, a 4-bit address) compiles through
+# A minimal non-power-of-two memory (3 entries, a 2-bit address) compiles through
 # the yosys readers. pass.bitwidth must prove every Memory address inside the array; the reader gave
-# the cell the decoded index, [0..15], and now gives it `index < depth ? index : 0`, the clamp the
+# the cell the decoded index, [0..3], and now gives it `index < depth ? index : 0`, the clamp the
 # slang reader generates. A write past the end is still dropped and a read past the end still 0.
 sh_test(
     name = "yosys_mem_past_depth_test",
