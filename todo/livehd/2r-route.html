@@ -42,9 +42,11 @@ a signal with a real capacity scale. A global router on the track grid has one.<
 routing on SHA3, minimax or ternip (2l-legroute). The code is about 20k lines plus about 11k
 lines of tests, and Plan carries more machinery (cell boxes, partitions, admission) that only
 exists to feed it.</li>
-<li><strong>LiveHD placements are hard to route.</strong> With OpenROAD routing LiveHD's placement,
-nangate45 minimax had 112K detailed-route violations at iteration 3, nangate45 liteeth 38K, and
-sky130hd liteeth failed global routing on congestion. These are the cases the new step must fix.</li>
+<li><strong>LiveHD placements are hard to route.</strong> With OpenROAD routing LiveHD's placement and
+the platform's global-route derating applied, nangate45 minimax, nangate45 liteeth and sky130hd
+liteeth all fail global routing on congestion (<a href="#stepb">Step B results</a>). These are the
+cases the new step must fix. The first measurements (112K and 38K detailed-route violations at
+iteration 3) came from a handoff recipe that skipped that derating; see B1.</li>
 <li><strong>Most of the router exists.</strong> Legroute Plan already routes the converged placement
 with a negotiated A* router with rip-up, has an opt-in port of FastRoute's L/Z patterns
 (<code>fast_route_pattern.cpp</code>), a window fit check (<code>assess_window_fit</code>) and can
@@ -127,6 +129,57 @@ violation count as the first thing compared.</td></tr>
 With the step on, no design may stop at an earlier stage than without it, and no completed design
 may be lost.</td></tr>
 </table>
+
+<h2 id="stepb">Step B results (2026-11-15, hard cases and controls)</h2>
+<p>Five arms per case with the SAT stages off and the die fixed: plan off (P0), Plan rounds without
+and with FastRoute pattern seeds (P1, P1p), and Plan with in-loop coarse feedback without and with
+the seeds (P2, P2p). Plan produced a placement in 3 of 20 arms. The full report, per-run metrics and
+artifacts are under <code>/lscratch/renau/uroute_train/stepB/</code> (<code>report.md</code>).</p>
+<table>
+<tr><th>#</th><th>Finding</th><th>Consequence</th></tr>
+<tr><td>B1</td><td><strong>The LiveHD handoff recipe skipped the platform's global-route setup.</strong>
+ORFS sources <code>FASTROUTE_TCL</code> in <code>floorplan.tcl</code>; the handoff replaces that script,
+so layer derating and the signal layer range never ran for LiveHD placements. OpenROAD-placed runs
+were not affected.</td>
+<td>The gate baselines are re-measured with the setup restored (table in <a href="#gate">Gate</a>).
+The hard cases are global-route congestion failures after all. The 48 markers of the asap7 minimax
+control were on Pad, M8 and M9 and disappear with the layer range restored. The recipe is fixed
+before step D is measured.</td></tr>
+<tr><td>B2</td><td><strong>Legroute cannot run on nangate45.</strong> Its technology profile there is
+power-grid only, so the grid gets an empty layer stack (<code>legroute needs horizontal and vertical
+routing layers</code>). On sky130hd a LEF-stack guess leaves out met1.</td>
+<td>Step D builds the grid from the LEF routing layers and tracks for any technology, calibrated
+against OpenROAD's derated per-layer capacity.</td></tr>
+<tr><td>B3</td><td><strong>On a fixed core Plan stops the run</strong> unless its own router reports zero
+overflow ("area recovery is unavailable"), and its window-density check rejects a pose before it is
+routed (asap7 liteeth).</td>
+<td>R13 needs "report what could not be fixed and continue". The stop gate and the window check go
+in step C.</td></tr>
+<tr><td>B4</td><td><strong>Plan's capacity numbers do not track OpenROAD.</strong> With the defaults it
+reports 26,688 overflow tracks on asap7 minimax, which OpenROAD routes with zero; the default
+<code>plan.iterations=100</code> makes a round a no-op.</td>
+<td>The reserves that existed for Local and Final go; capacity comes from the tracks (B2).</td></tr>
+<tr><td>B5</td><td><strong>Pattern seeds help the router itself.</strong> On the same placement the
+maze-only router leaves 545 overflow tracks and the pattern-seeded one 20, three times
+faster.</td>
+<td>Keep the router with pattern seeds on (R12).</td></tr>
+<tr><td>B6</td><td><strong>Inflation rounds work as a mechanism.</strong> On the same netlist the pose
+Plan selects has 14–44% fewer detailed-route violations at iteration 0 than its round 0, for about
+1% more wire. On sky130hd liteeth, poses Plan rejected cut derated global-route overflow from 27,691
+to 3,198, still a failure.</td>
+<td>Keep rounds, round selection and the placement session; replace the acceptance rules around
+them.</td></tr>
+<tr><td>B7</td><td><strong>Coarse in-loop feedback spreads everything.</strong> It gives the fewest early
+violations on asap7 minimax and 7% more routed wire, with worse WNS.</td>
+<td>Not the default remedy.</td></tr>
+<tr><td>B8</td><td><strong>Noise.</strong> A density change of 0.0002 moves asap7 minimax between 17 and
+65 final markers and 797–979 violations at iteration 3.</td>
+<td>From iteration 5 on, every Plan arm that ran is inside that band. Close results need several
+runs.</td></tr>
+</table>
+<p>Not done yet in step B: the cohort part (where the CTS and hold buffers landed on gemmini and
+NVDLA/partition_a, congestion before and after repair, the sha3 marker classification). The cohort
+artifacts and <code>issues.md</code> are not on the machine where step B ran.</p>
 
 <h2>Decisions (2026-11-15)</h2>
 <table>
@@ -254,18 +307,22 @@ the default.</td>
 
 <h2 id="gate">Gate</h2>
 <p>Both arms use the same die, core, density and seed. No core growth. OpenROAD does CTS, global
-and detailed routing with the frozen ORFS recipes from the URoute work.</p>
+and detailed routing with the ORFS recipes from the URoute work, with the platform's global-route
+setup restored (B1).</p>
 <table>
-<tr><th>Case</th><th>Role</th><th>Without the step (measured 2026-11-14)</th><th>Needed</th></tr>
-<tr><td>nangate45 minimax</td><td>hard</td><td>112K detailed-route violations at iteration 3</td>
-<td>routes, or clearly fewer violations at the same iteration</td></tr>
-<tr><td>nangate45 liteeth (5 macros)</td><td>hard</td><td>38K violations at iteration 3</td>
+<tr><th>Case</th><th>Role</th><th>Without the step (re-measured 2026-11-15, B1)</th><th>Needed</th></tr>
+<tr><td>nangate45 minimax</td><td>hard</td><td>global routing fails (GRT-0116), overflow 3,763, on every
+layer from metal2 to metal10</td><td>global routing passes; detailed-route violations per iteration
+reported</td></tr>
+<tr><td>nangate45 liteeth (5 macros)</td><td>hard</td><td>global routing fails, overflow 4,198</td>
 <td>same</td></tr>
-<tr><td>sky130hd liteeth (5 macros)</td><td>hard</td><td>global routing fails on congestion
-(GRT-0232)</td><td>global routing passes</td></tr>
-<tr><td>asap7 minimax</td><td>control</td><td>routes; 48 DRC markers, 151,512 µm at utilization 45</td>
-<td>not worse</td></tr>
-<tr><td>asap7 liteeth (5 macros)</td><td>control</td><td>routes, 0 DRC markers</td><td>not worse</td></tr>
+<tr><td>sky130hd liteeth (5 macros)</td><td>hard</td><td>global routing fails, overflow 27,691</td>
+<td>same</td></tr>
+<tr><td>asap7 minimax</td><td>control</td><td>completes with 0 DRC markers at iteration 8, 151,720 µm
+at utilization 45</td><td>not worse</td></tr>
+<tr><td>asap7 liteeth (5 macros)</td><td>control</td><td>global routing passes with zero overflow;
+detailed routing was stopped at iteration 13 with 602 violations left, so the final state is not
+measured yet</td><td>not worse, once the baseline is run to the end</td></tr>
 </table>
 <p>The step passes when the hard cases clearly improve, the controls do not get worse on DRC or
 wirelength, and the cost in HPWL, WNS and placement runtime is reported and acceptable. One seed is
