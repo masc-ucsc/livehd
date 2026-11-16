@@ -1,10 +1,27 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 #include <functional>
+#include <memory>
+#include <optional>
+#include <string>
+#include <utility>
+#include <vector>
 
 #include "inou/lefdef/physical.hpp"
 #include "power_grid_rules.hpp"
 namespace livehd::placement {
+// The origins at which a macro's signal pins land on routing tracks, as `legalize_macro_tracks` demands of a FIXED
+// macro: per axis the lower-left origin must be phases[axis][i] + k * period[axis] for some i and integer k (pins that
+// need either axis are not separated, so a macro with such pins is judged by its single-axis pins). Plain data: it
+// keeps no reference to the technology or the floorplan. nullopt: the macro has no track-constrained signal pins (no
+// track data for their layers), so any origin is accepted.
+struct Macro_track_lattice {
+  int64_t              period[2] = {1, 1};
+  std::vector<int64_t> phases[2];
+  unsigned             pins = 0;  // signal pins that constrain the origin
+};
+std::optional<Macro_track_lattice> macro_track_lattice(const physical::Technology&, const physical::Floorplan&, const std::string& master,
+                                                       physical::Orientation);
 // Cached periodic feasibility, independent of absolute origin, core bounds and
 // obstacles. Every original member keeps its standalone supported-pin profile.
 // The technology and floorplan must outlive the serially invoked checker.

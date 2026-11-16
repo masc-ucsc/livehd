@@ -16,6 +16,7 @@ class Bundle {
 
 public:
   Bundle();
+  const rapidjson::Value& records() const { return entries_; }
   explicit Bundle(std::string_view json);
   static Bundle                        read(const std::string& path);
   std::vector<const rapidjson::Value*> select(std::string_view klass, std::string_view design) const;

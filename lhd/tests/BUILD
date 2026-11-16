@@ -3868,6 +3868,13 @@ sh_test(
 )
 
 sh_test(
+    name = "lhd_placement_chunks_smoke",
+    size = "small",
+    srcs = ["lhd_placement_chunks_smoke.py"],
+    data = ["//inou/lefdef:test_data", "//lhd", "//tools:synth_chunk_implementations"],
+)
+
+sh_test(
     name = "lhd_placement_macro_smoke",
     size = "small",
     timeout = "short",

@@ -11,6 +11,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -1068,6 +1069,254 @@ TEST(GuiAgent, FindAndHighlightByRegexScopeAndField) {
   EXPECT_FALSE(ok(s.agent_call(R"j({"cmd":"highlight","regex":"c","color":"red;alert(1)"})j")));
   EXPECT_TRUE(ok(s.agent_call(R"({"cmd":"clear_highlight","label":"pc"})")));
   EXPECT_NE(s.highlights_json().find("\"h\":[]"), std::string::npos);
+}
+
+// 2026-11-15 adversarial pass over the agent socket (todo/gui-work.html).
+TEST(GuiAgent, RegexSearchRunsInLinearTimeAndRefusesWhatRe2CannotMatch) {
+  Session s(Config{.open_browser = false, .start_paused = false});
+  const double x[4] = {1, 2, 3, 4}, y[4] = {5, 6, 7, 8};
+  auto         sc = agent_scene();
+  sc->nodes[0].name = std::string(4000, 'a');  // (a*)*c over this takes forever with a backtracking engine
+  sc->build_index();
+  s.begin_phase(sc, x, y, 4);
+  const auto t0    = std::chrono::steady_clock::now();
+  const auto nest  = s.agent_call(R"({"cmd":"find","regex":"^(a*)*c$","scope":"all"})");
+  const auto nest2 = s.agent_call(R"({"cmd":"find","regex":"^(.*)*Q$","field":"any"})");
+  EXPECT_LT(std::chrono::steady_clock::now() - t0, std::chrono::seconds(5));
+  EXPECT_TRUE(ok(nest)) << nest;
+  EXPECT_NE(nest.find("\"count\":0"), std::string::npos) << nest;
+  EXPECT_TRUE(ok(nest2)) << nest2;
+  // lookaround and backreferences do not exist in RE2: a clear refusal, never a silent miss
+  EXPECT_NE(s.agent_call(R"({"cmd":"find","regex":"(a)\\1"})").find("bad regex"), std::string::npos);
+  EXPECT_NE(s.agent_call(R"j({"cmd":"find","regex":"(?=a)"})j").find("bad regex"), std::string::npos);
+  // the usual patterns of the docs still work
+  EXPECT_NE(s.agent_call(R"({"cmd":"find","regex":"^c","scope":"cells"})").find("\"count\":1"), std::string::npos);
+  EXPECT_NE(s.agent_call(R"({"cmd":"find","regex":"ram|c1","scope":"all"})").find("\"count\":2"), std::string::npos);
+}
+
+TEST(GuiAgent, ArgumentsAreCheckedNotIgnoredOrClamped) {
+  Session s(Config{.open_browser = false, .start_paused = false});
+  const double x[4] = {1, 2, 3, 4}, y[4] = {5, 6, 7, 8};
+  s.begin_phase(agent_scene(), x, y, 4);
+  for (const char* bad : {R"({"cmd":"find","regex":".","limit":0})", R"({"cmd":"find","regex":".","limit":-5})", R"({"cmd":"find","regex":".","limit":"x"})",
+                          R"({"cmd":"find","regex":".","limit":2.7})", R"({"cmd":"find","regex":".","limit":1001})", R"({"cmd":"critical","n":0})",
+                          R"({"cmd":"critical","n":"abc"})", R"({"cmd":"critical","n":1e18})"}) {
+    const auto reply = s.agent_call(bad);
+    EXPECT_FALSE(ok(reply)) << bad << " -> " << reply;
+    EXPECT_NE(reply.find("must be an integer in"), std::string::npos) << reply;
+  }
+  const auto one = s.agent_call(R"({"cmd":"find","regex":".","limit":1})");
+  EXPECT_TRUE(ok(one)) << one;
+  EXPECT_NE(one.find("\"count\":4"), std::string::npos);  // four nodes match, one name is shown
+  EXPECT_EQ(one.find("\"c1\""), std::string::npos);
+  // a NUL inside the command does not shorten it to a valid one
+  EXPECT_NE(s.agent_call("{\"cmd\":\"state\\u0000x\"}").find("unknown cmd"), std::string::npos);
+  // describe takes #index like move, select and highlight_names
+  const auto d = s.agent_call(R"({"cmd":"describe","name":"#2"})");
+  EXPECT_TRUE(ok(d)) << d;
+  EXPECT_NE(d.find("sram_16x32"), std::string::npos);
+  EXPECT_FALSE(ok(s.agent_call(R"({"cmd":"describe","name":"#99"})")));
+}
+
+TEST(GuiAgent, ColourValidationAcceptsOnlyHexAndNames) {
+  Session s(Config{.open_browser = false, .start_paused = false});
+  const double x[4] = {1, 2, 3, 4}, y[4] = {5, 6, 7, 8};
+  s.begin_phase(agent_scene(), x, y, 4);
+  for (const char* good : {"#fff", "#ffd23f", "#ffd23fcc", "orange", "red"}) {
+    EXPECT_TRUE(ok(s.agent_call(std::string(R"({"cmd":"highlight","regex":"c","color":")") + good + R"("})"))) << good;
+  }
+  for (const char* bad : {"#ff", "#fffffffff0", "#ggg", "re", "orange-red", "red;x", "url(x)"}) {
+    EXPECT_FALSE(ok(s.agent_call(std::string(R"({"cmd":"highlight","regex":"c","color":")") + bad + R"("})"))) << bad;
+  }
+}
+
+TEST(GuiAgent, MoveRefusesAPlacedMacroInsteadOfSkippingItSilently) {
+  auto sc               = scene();
+  sc->nodes[2].movable  = false;
+  sc->nodes[2].kind     = Kind::fixed;  // a macro the macro stage already placed
+  Session s(Config{.open_browser = false, .start_paused = false});
+  const double x[4] = {1, 2, 500, 0}, y[4] = {5, 6, 200, 0};
+  s.begin_phase(sc, x, y, 4);
+  const auto refused = s.submit(R"({"cmd":"move","nodes":["ram"],"x":[300],"y":[300]})");
+  EXPECT_NE(refused.find("macro_move"), std::string::npos) << refused;
+  EXPECT_NE(s.submit(R"({"cmd":"move","nodes":["c0","ram"],"x":[300,300],"y":[300,300]})").find("macro_move"), std::string::npos);
+  EXPECT_EQ(s.submit(R"({"cmd":"move","nodes":["c0"],"x":[300],"y":[300]})"), "");  // a cell still moves
+  EXPECT_TRUE(ok(s.agent_call(R"({"cmd":"help"})")));
+  EXPECT_NE(s.agent_call(R"({"cmd":"help"})").find("macro_move"), std::string::npos);
+}
+
+TEST(GuiSession, MoveTakesOneNumberForEveryNodeOrOnePerNode) {
+  Session s(Config{.open_browser = false, .start_paused = false});
+  const double x[4] = {1, 2, 3, 4}, y[4] = {5, 6, 7, 8};
+  s.begin_phase(scene(), x, y, 4);
+  EXPECT_EQ(s.submit(R"({"cmd":"move","nodes":["c0","c1"],"x":500,"y":600})"), "");
+  const auto edits = s.poll(10, x, y, 4, {});
+  ASSERT_EQ(edits.pins.size(), 2u);
+  for (const auto& p : edits.pins) {
+    EXPECT_EQ(p.x, 500);
+    EXPECT_EQ(p.y, 600);
+  }
+  EXPECT_EQ(s.submit(R"({"cmd":"move","nodes":["c0","c1"],"x":[1,2],"y":[3,4]})"), "");
+  EXPECT_NE(s.submit(R"({"cmd":"move","nodes":["c0","c1"],"x":[1,2,3],"y":[3,4,5]})"), "");  // a length that matches nothing
+  EXPECT_NE(s.submit(R"({"cmd":"move","nodes":["c0"],"x":"1","y":2})"), "");
+  EXPECT_NE(s.submit(R"({"cmd":"move","nodes":["c0"],"x":1})"), "");
+}
+
+TEST(GuiSession, RestartRefusesFlagsAndCheckpointsThatWouldKillOrEraseTheSession) {
+  int    calls = 0;
+  Config cfg{.open_browser = false, .start_paused = false};
+  cfg.restart = [&](const Restart_request&) {
+    ++calls;
+    return std::string{};
+  };
+  Session s(cfg);
+  ASSERT_TRUE(s.start());
+  const int port = port_of(s.url());
+  const auto t   = "t=" + s.token();
+  const double x[4] = {1, 2, 3, 4}, y[4] = {5, 6, 7, 8};
+  s.begin_phase(scene(), x, y, 4);
+  s.gate("final", x, y, 4, {});
+  s.poll(5, x, y, 4, {});
+  s.gp_end(x, y, 4, {});
+  s.set_options_json(R"([{"name":"synth.place.iterations","value":"80","kind":"integer","ro":false},)"
+                     R"({"name":"synth.place.timing_driven","value":"true","kind":"boolean","ro":false},)"
+                     R"({"name":"synth.place.tech_rc","value":"","kind":"text","ro":false},)"
+                     R"({"name":"synth.place","value":"true","kind":"boolean","ro":true}])");
+  const auto restart = [&](const std::string& body) { return http(port, "POST", "/cmd?" + t, body); };
+  // each of these used to be queued as "ok" and then exit the re-executed lhd on its flag parser
+  EXPECT_NE(restart(R"({"cmd":"restart","set":{"no.such.option":"1"}})").find("400"), std::string::npos);
+  EXPECT_NE(restart(R"({"cmd":"restart","set":{"synth.place.iterations":"abc"}})").find("400"), std::string::npos);
+  EXPECT_NE(restart(R"({"cmd":"restart","set":{"synth.place.iterations":""}})").find("400"), std::string::npos);
+  EXPECT_NE(restart(R"({"cmd":"restart","set":{"synth.place.iterations":"1e3"}})").find("400"), std::string::npos);
+  EXPECT_NE(restart(R"({"cmd":"restart","set":{"synth.place.timing_driven":"maybe"}})").find("400"), std::string::npos);
+  EXPECT_NE(restart(R"({"cmd":"restart","set":{"synth.place":"false"}})").find("400"), std::string::npos);
+  EXPECT_NE(restart(R"({"cmd":"restart","checkpoint":"x"})").find("400"), std::string::npos);
+  EXPECT_NE(restart(R"({"cmd":"restart","checkpoint":-5})").find("400"), std::string::npos);
+  s.poll(10, x, y, 4, {});
+  EXPECT_EQ(calls, 0);
+  // a checkpoint that does not exist is not "from the start" (that would drop every edit): a note and no restart
+  EXPECT_NE(restart(R"({"cmd":"restart","checkpoint":99})").find("200 OK"), std::string::npos);
+  s.poll(20, x, y, 4, {});
+  EXPECT_EQ(calls, 0);
+  EXPECT_NE(body_of(http(port, "GET", "/state?" + t)).find("no checkpoint 99"), std::string::npos);
+  // valid ones pass, with or without the synth. prefix and with boolean spellings
+  EXPECT_NE(restart(R"({"cmd":"restart","checkpoint":1,"set":{"synth.place.iterations":"60","place.timing_driven":"false","synth.place.tech_rc":"/x/y.tcl"}})").find("200 OK"), std::string::npos);
+  s.poll(30, x, y, 4, {});
+  EXPECT_EQ(calls, 1);
+}
+
+TEST(GuiRender, PngIsCompressedAndStillAValidPng) {
+  const int   w = 64, h = 48;
+  std::string rgb(size_t(w) * h * 3, '\x10');
+  const auto  png = encode_png(w, h, rgb);
+  ASSERT_GT(png.size(), 8u);
+  EXPECT_EQ(png.substr(1, 3), "PNG");
+  EXPECT_LT(png.size(), rgb.size() / 10);  // a flat picture: the stored (uncompressed) form was larger than the pixels
+  EXPECT_NE(png.find("IDAT"), std::string::npos);
+  EXPECT_NE(png.find("IEND"), std::string::npos);
+}
+
+TEST(GuiAgent, MacroScanRanksLegalPositionsAndOrientationsByPinWirelength) {
+  Session s(Config{.open_browser = false, .start_paused = false});
+  auto    sc = agent_scene();
+  // the macro's one pin sits near its left edge and talks to both cells, which are far to the right
+  sc->nodes[2].signal_pins = {{"d0", 10, 50, {0, 1}}};
+  sc->nodes[2].orient      = "N";
+  s.begin_phase(sc, std::array<double, 4>{800, 820, 100, 0}.data(), std::array<double, 4>{800, 820, 100, 0}.data(), 4);
+  const auto grid = s.agent_call(R"({"cmd":"macro_scan","node":"ram","grid":{"nx":10,"ny":10},"top":3})");
+  ASSERT_TRUE(ok(grid)) << grid;
+  rapidjson::Document d;
+  d.Parse(grid.c_str());
+  ASSERT_TRUE(d.IsObject());
+  EXPECT_EQ(d["nets"].GetUint64(), 1u);
+  EXPECT_EQ(d["peers"].GetUint64(), 2u);
+  EXPECT_EQ(d["evaluated"].GetUint64(), 101u);  // the grid and the current pose
+  EXPECT_TRUE(d["current"]["legal"].GetBool());
+  ASSERT_EQ(d["best"].Size(), 3u);
+  const double here = d["current"]["hpwl_dbu"].GetDouble();
+  EXPECT_LT(d["best"][0]["hpwl_dbu"].GetDouble(), here);
+  EXPECT_LT(d["best"][0]["delta_dbu"].GetDouble(), 0);
+  EXPECT_GE(d["best"][0]["x"].GetDouble(), 600);  // next to the cells, not at the far corner
+  EXPECT_LE(d["best"][0]["hpwl_dbu"].GetDouble(), d["best"][1]["hpwl_dbu"].GetDouble());  // ranked
+  // the net's half-perimeter is exact for one pin: macro at (500,500), pin at (510,550), peer centers (805,805) and (825,825)
+  const auto exact = s.agent_call(R"({"cmd":"macro_scan","node":"ram","positions":[[500,500]]})");
+  EXPECT_NE(exact.find("\"hpwl_dbu\":590"), std::string::npos) << exact;
+  // this session is not at an fp or macro gate: an orientation change would be refused, so it is not ranked
+  const auto flip = s.agent_call(R"({"cmd":"macro_scan","node":"ram","positions":[[500,500]],"orientations":["N","FN"]})");
+  ASSERT_TRUE(ok(flip)) << flip;
+  EXPECT_NE(flip.find("\"orientations_dropped\":[\"FN\"]"), std::string::npos) << flip;
+  EXPECT_EQ(flip.find("\"orientation\":\"FN\""), std::string::npos) << flip;
+  // the current pose is always a candidate and the best is refined downhill: from (500,500) toward the cells
+  const auto stay = s.agent_call(R"({"cmd":"macro_scan","node":"ram","positions":[[500,500]],"top":1})");
+  rapidjson::Document st;
+  st.Parse(stay.c_str());
+  ASSERT_TRUE(st.IsObject()) << stay;
+  ASSERT_TRUE(st.HasMember("refined")) << stay;
+  EXPECT_LT(st["refined"]["hpwl_dbu"].GetDouble(), st["best"][0]["hpwl_dbu"].GetDouble());
+  EXPECT_GT(st["refined"]["x"].GetDouble(), 500);
+  const auto plain = s.agent_call(R"({"cmd":"macro_scan","node":"ram","positions":[[500,500]],"refine":false})");
+  EXPECT_EQ(plain.find("refined"), std::string::npos);
+  EXPECT_NE(s.agent_call(R"({"cmd":"macro_scan","node":"ram","refine":"yes"})").find("refine must be"), std::string::npos);
+  // positions outside the core are not offered
+  const auto out = s.agent_call(R"({"cmd":"macro_scan","node":"ram","positions":[[2000,2000],[500,500]]})");
+  ASSERT_TRUE(ok(out)) << out;
+  EXPECT_NE(out.find("\"illegal\":1"), std::string::npos);
+  EXPECT_NE(out.find("\"legal_candidates\":2"), std::string::npos);  // (500,500) and the current pose
+  // refusals say why
+  EXPECT_NE(s.agent_call(R"({"cmd":"macro_scan","node":"c0"})").find("not a macro"), std::string::npos);
+  EXPECT_NE(s.agent_call(R"({"cmd":"macro_scan","node":"nope"})").find("no such node"), std::string::npos);
+  EXPECT_NE(s.agent_call(R"({"cmd":"macro_scan"})").find("needs node"), std::string::npos);
+  EXPECT_NE(s.agent_call(R"({"cmd":"macro_scan","node":"ram","orientations":["R90"]})").find("orientations must be"), std::string::npos);
+  EXPECT_NE(s.agent_call(R"({"cmd":"macro_scan","node":"ram","grid":{"nx":0,"ny":3}})").find("grid needs"), std::string::npos);
+  EXPECT_NE(s.agent_call(R"({"cmd":"macro_scan","node":"ram","grid":{"nx":2,"ny":2},"positions":[[1,1]]})").find("not both"), std::string::npos);
+  EXPECT_NE(s.agent_call(R"({"cmd":"macro_scan","node":"ram","top":0})").find("top must be"), std::string::npos);
+  EXPECT_NE(s.agent_call(R"({"cmd":"macro_scan","node":"#2","positions":[[1,"x"]]})").find("positions must be"), std::string::npos);
+}
+
+namespace {
+// One macro master (the "ram" macro, orientation N): origins are accepted on a 100 DBU lattice in both axes.
+void add_lattice_100(Scene& sc) {
+  Macro_tracks t;
+  t.orient   = "N";
+  t.period_x = t.period_y = 100;
+  t.phases_x = t.phases_y = {0};
+  t.pins     = 1;
+  sc.track_lattices[sc.nodes[2].master].push_back(t);
+}
+}  // namespace
+
+TEST(GuiAgent, MacroPosesMustLandOnRoutingTracksOrAreNotPinnedAndNotOffered) {
+  auto sc                  = agent_scene();
+  add_lattice_100(*sc);
+  sc->nodes[2].signal_pins = {{"d0", 10, 50, {0, 1}}};
+  Session      s(Config{.open_browser = false, .start_paused = false});
+  const double x[4] = {800, 820, 100, 0}, y[4] = {800, 820, 100, 0};
+  s.begin_phase(sc, x, y, 4);
+  // the scan snaps what it is given onto the lattice and never offers an off-track pose
+  const auto scan = s.agent_call(R"({"cmd":"macro_scan","node":"ram","positions":[[530,570],[433,288]],"refine":false,"top":10})");
+  ASSERT_TRUE(ok(scan)) << scan;
+  rapidjson::Document d;
+  d.Parse(scan.c_str());
+  ASSERT_TRUE(d.IsObject());
+  EXPECT_GE(d["snapped_to_tracks"].GetUint64(), 2u);
+  for (const auto& b : d["best"].GetArray()) {
+    EXPECT_EQ(std::llround(b["x"].GetDouble()) % 100, 0) << scan;
+    EXPECT_EQ(std::llround(b["y"].GetDouble()) % 100, 0) << scan;
+  }
+  EXPECT_TRUE(d["current"]["legal"].GetBool());
+  // a move to an off-track pose is applied but not pinned (a pin would be held exactly and end the run later), and says where to go
+  uint64_t sequence = 0;
+  ASSERT_EQ(s.submit(R"({"cmd":"move","nodes":["ram"],"x":[530],"y":[570]})", &sequence), "");
+  s.poll(10, x, y, 4, {});
+  const auto status = s.agent_call(std::format(R"({{"cmd":"command_status","sequence":{}}})", sequence));
+  EXPECT_NE(status.find("misses_tracks (x axis; nearest aligned origin 500,600)"), std::string::npos) << status;
+  EXPECT_NE(status.find("\"pinned\":false"), std::string::npos) << status;
+  // an aligned one pins
+  ASSERT_EQ(s.submit(R"({"cmd":"move","nodes":["ram"],"x":[500],"y":[600]})", &sequence), "");
+  s.poll(20, x, y, 4, {});
+  const auto ok_status = s.agent_call(std::format(R"({{"cmd":"command_status","sequence":{}}})", sequence));
+  EXPECT_EQ(ok_status.find("misses_tracks"), std::string::npos) << ok_status;
+  EXPECT_NE(ok_status.find("\"pinned\":true"), std::string::npos) << ok_status;
 }
 
 TEST(GuiAgent, SelectionRoundTripAndDescribe) {

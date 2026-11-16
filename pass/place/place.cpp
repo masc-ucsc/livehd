@@ -44,6 +44,10 @@
 #include "forces/gp_rejection.hpp"
 #include "forces/gp_timing.hpp"
 #include "forces/legalization.hpp"
+#include "fp_chunks.hpp"
+#include "core/job_manager.hpp"
+#include "chunk_refine.hpp"
+#include "chunk_measure.hpp"
 #include "fp_repetition_graph.hpp"
 #include "growth_budget.hpp"
 #include "gui/gui_geometry.hpp"
@@ -1572,6 +1576,8 @@ struct View {
   };
   std::vector<Refine_round>                 refine_rounds;
   std::map<Endpoint, Bus_bit>               bus_names;
+  std::string                               chunk_results;
+  std::shared_ptr<const std::string>        chunk_plan; // shared with subsequent GUI scenes and the final metadata bundle
   ph::Floorplan                             fp;
   // Solver rows span a rectangle; exports retain the imported row segments.
   std::shared_ptr<const Input_row_frame>    original_row_frame;
@@ -4633,11 +4639,428 @@ bool legalize_edits(View& v, const ph::Technology& tech, const ph::Floorplan& re
 }
 // ---- 2i-interact: the adapter between the solver and gui::Session ---------------------------------------------------
 // Pins and the action trace use node *names*; the scene maps them to this phase's solver indices.
+// Project the physical netlist once, then GUI previews and density edits operate only on the quotient hypergraph.
+bool plan_color_chunks(View& v, const Options& options, const std::vector<Hint_scope>& scopes, const std::string& design,
+                       double dbu, bool restored) {
+  Chunk_model                                  model;
+  auto&                                        d = v.design;
+  std::map<std::string, std::set<std::string>> modules;
+  for (const auto& s : scopes) {
+    std::string path;
+    for (const auto& part : s.path) {
+      if (!path.empty()) {
+        path += '.';
+      }
+      path += part;
+    }
+    if (!path.empty()) {
+      modules[s.module].insert(original_hierarchy_path(path));
+    }
+  }
+  std::map<std::string, std::string> copies;
+  for (const auto& [module, paths] : modules) {
+    if (paths.size() > 1) {
+      for (const auto& path : paths) {
+        copies.emplace(path, module);
+      }
+    }
+  }
+  std::vector<int>                                    owner(v.cells.size(), -1), pins;
+  // Flattening inserts anonymous wrappers before real hierarchy. Drop those tokens from selectors
+  // only when the logical spelling is unique, so two different colors never silently coalesce.
+  std::map<std::pair<bool, std::string>, std::string> spellings;
+  std::unordered_set<uint64_t>                        seen_groups;
+  auto                                                group_key = [](const Cell& c) {
+    auto col = gu::Color_group::id_of(c.node);
+    return col ? uint64_t(col) * 2 : uint64_t(gu::Placement_block::id_of(c.node)) * 2 + 1;
+  };
+  auto object_name = [](const Cell& c, bool macro) {
+    return macro ? c.name.str() : gu::Color_group::has(c.node) ? std::string(gu::Color_group::text(c.node)) : c.block.str();
+  };
+  for (size_t i = 0; i < v.cells.size(); ++i) {
+    if (d.placement_mask(i) != dp::PlacementMask::none) {
+      continue;
+    }
+    const bool  macro = d.node_macro[i];
+    const auto& cell  = v.cells[i];
+    if (!macro && !seen_groups.insert(group_key(cell)).second) {
+      continue;
+    }
+    auto raw         = object_name(cell, macro);
+    auto [it, added] = spellings.try_emplace({macro, gu::logical_hier_name(raw, true)}, raw);
+    if (!added && it->second != raw) {
+      it->second.clear();
+    }
+  }
+  absl::flat_hash_map<uint64_t, int> color_nodes;
+  for (size_t i = 0; i < v.cells.size(); ++i) {
+    if (d.placement_mask(i) != dp::PlacementMask::none) {
+      continue;
+    }
+    const auto&              c     = v.cells[i];
+    bool                     macro = d.node_macro[i];
+    const double             w = d.node_size_x[i], h = d.node_size_y[i];
+    std::optional<Chunk_box> fixed;
+    if (i >= static_cast<size_t>(d.num_movable)) {
+      fixed = Chunk_box{d.node_x[i], d.node_y[i], d.node_x[i] + w, d.node_y[i] + h};
+    }
+    const auto group = group_key(c);
+    if (!macro) {
+      if (auto it = color_nodes.find(group); it != color_nodes.end()) {
+        owner[i] = it->second;
+        model.add_member(owner[i], w, h, fixed);
+        continue;
+      }
+    }
+    auto        raw        = object_name(c, macro);
+    auto        normalized = gu::logical_hier_name(raw, true);
+    std::string id         = spellings.at({macro, normalized}).empty() ? raw : normalized;
+    std::string scope, module;
+    // Prefer the outermost repeated module: two whole cores are a better reusable unit than each nested ALU.
+    auto        path = original_hierarchy_path(id);
+    for (auto at = path.find('.'); at != path.npos; at = path.find('.', at + 1)) {
+      auto it = copies.find(path.substr(0, at));
+      if (it != copies.end()) {
+        std::tie(scope, module) = *it;
+        break;
+      }
+    }
+    owner[i] = model.cell(std::move(id), std::move(scope), std::move(module), macro, w, h, fixed);
+    if (!macro) {
+      color_nodes.emplace(group, owner[i]);
+    }
+  }
+  if (model.objects.empty()) {
+    return false;
+  }
+  for (size_t n = 0; n + 1 < d.flat_net2pin_start.size(); ++n) {
+    pins.clear();
+    std::array<double, 2> anchor{};
+    Chunk_box terminal_bounds{};
+    size_t                count = 0;
+    for (auto j = d.flat_net2pin_start[n]; j < d.flat_net2pin_start[n + 1]; ++j) {
+      auto ni = static_cast<size_t>(d.pin2node[d.flat_net2pin[j]]);
+      if (ni < owner.size()) {
+        if (owner[ni] >= 0) {
+          pins.push_back(owner[ni]);
+        }
+      } else if (ni >= v.terminal_begin) {
+        if (!count) {
+          terminal_bounds = {d.node_x[ni], d.node_y[ni], d.node_x[ni], d.node_y[ni]};
+        } else {
+          terminal_bounds[0] = std::min(terminal_bounds[0], double(d.node_x[ni]));
+          terminal_bounds[1] = std::min(terminal_bounds[1], double(d.node_y[ni]));
+          terminal_bounds[2] = std::max(terminal_bounds[2], double(d.node_x[ni]));
+          terminal_bounds[3] = std::max(terminal_bounds[3], double(d.node_y[ni]));
+        }
+        anchor[0] += d.node_x[ni];
+        anchor[1] += d.node_y[ni];
+        ++count;
+      }
+    }
+    if (count) {
+      anchor[0] /= count;
+      anchor[1] /= count;
+    }
+    model.net(pins, d.net_mask.empty() || d.net_mask[n], count ? std::optional{anchor} : std::nullopt, v.drivers[n].label(),
+              count > 1 ? std::optional{terminal_bounds} : std::nullopt);
+  }
+  // The floorplanner normally needs only color incidences. Resolve pin identities
+  // only for an explicit interface comparison, and cache them across geometry previews.
+  // Interned physical cell names live for the duration of this view.
+  std::vector<int>         last_home;
+  Contact_taps             last_taps;
+  std::vector<std::string> last_keys;
+  model.contact_keys = [&](const Chunk_plan& plan, const Contact_taps& taps) {
+    if (last_home == plan.home && last_taps == taps) {
+      return last_keys;
+    }
+    std::set<int> selected;
+    for (auto [n, h] : taps) {
+      selected.insert(h);
+    }
+    auto physical = [](const Name& n) {
+      auto name = n.view();
+      while (name.starts_with(gu::transparent_instance_prefix)) {
+        auto dot = name.find('.');
+        if (dot == name.npos) {
+          break;
+        }
+        name.remove_prefix(dot + 1);
+      }
+      return name;
+    };
+    struct Scope {
+      bool                                 started = false;
+      std::string_view                     common;
+      std::unordered_set<std::string_view> names, duplicates;
+    };
+    std::map<int, Scope> key_scopes;
+    for (size_t i = 0; i < owner.size(); ++i) {
+      if (owner[i] < 0 || !selected.contains(plan.home[owner[i]])) {
+        continue;
+      }
+      auto  h    = plan.home[owner[i]];
+      auto& sc   = key_scopes[h];
+      auto  name = physical(v.cells[i].name);
+      auto  dot  = name.rfind('.');
+      auto  path = dot == name.npos ? std::string_view{} : name.substr(0, dot + 1);
+      if (!sc.started) {
+        sc.common  = path;
+        sc.started = true;
+      } else if (!path.starts_with(sc.common)) {
+        size_t at = 0, cut = 0;
+        while (at < std::min(sc.common.size(), path.size()) && sc.common[at] == path[at]) {
+          if (path[at] == '.') {
+            cut = at + 1;
+          }
+          ++at;
+        }
+        sc.common = sc.common.substr(0, cut);
+      }
+      if (!sc.names.insert(name).second) {
+        sc.duplicates.insert(name);
+      }
+    }
+    std::vector<std::string> keys;
+    keys.reserve(taps.size());
+    for (auto [net, h] : taps) {
+      const auto&              sc = key_scopes.at(h);
+      std::vector<std::string> ends;
+      bool                     valid = !sc.common.empty();
+      for (int at = d.flat_net2pin_start[net]; valid && at < d.flat_net2pin_start[net + 1]; ++at) {
+        auto pin = d.flat_net2pin[at], ni = d.pin2node[pin];
+        if (size_t(ni) >= owner.size() || owner[ni] < 0 || plan.home[owner[ni]] != h) {
+          continue;
+        }
+        auto name = physical(v.cells[ni].name);
+        if (sc.duplicates.contains(name) || v.pins[pin].pin.empty()) {
+          valid = false;
+          break;
+        }
+        auto rel = name.substr(sc.common.size()), master = v.cells[ni].macro.view(), signal = v.pins[pin].pin.view();
+        ends.push_back(std::format("{}:{}{}:{}{}:{}", rel.size(), rel, master.size(), master, signal.size(), signal));
+      }
+      std::string key;
+      if (valid) {
+        std::sort(ends.begin(), ends.end());
+        for (auto& e : ends) {
+          key += e;
+        }
+      }
+      keys.push_back(std::move(key));
+    }
+    last_home = plan.home;
+    last_taps = taps;
+    last_keys = keys;
+    return keys;
+  };
+  const auto& l      = d.layout;
+  auto        sizing = options.chunk_predictor ? *options.chunk_predictor : Chunk_predictor{};
+  const auto  solve  = [&](const metadata::Bundle* b) {
+    return model
+        .plan({l.xl, l.yl, l.xh, l.yh}, l.site_width, l.row_height, options.chunk_memory_bytes, options.density, b, design, sizing);
+  };
+  auto input        = options.gui ? std::make_shared<const metadata::Bundle>(options.gui->intent()) : options.metadata;
+  auto plan         = solve(input.get());
+  // On replay, measurements can update the next fresh plan. Applying a GUI
+  // edit to this plan must still address the homes the user is looking at.
+  sizing            = plan.predictor;
+  auto       record = model.record(plan, design);
+  // A small automatic run needs a home assignment but no extra stop or placement work.
+  const bool passthrough
+      = plan.chunks.size() == 1 && !options.explicit_chunk_gate && (!input || input->select(chunk_guidance_class, design).empty());
+  if (auto session = options.gui; session && !passthrough) {
+    // Measured results belong to the accepted geometry. Never present an old
+    // measurement as feedback on a drag, split, or changed boundary assignment.
+    auto feedback = input ? input->select("livehd.placement.chunk_feedback", design) : std::vector<const rapidjson::Value*>{};
+    auto display  = [&](const rapidjson::Value& plan_record) {
+      auto json = metadata::canonical(plan_record);
+      if (feedback.empty()) {
+        return json;
+      }
+      auto                revision = std::format("{:016x}", hash_util::fnv1a64(json));
+      rapidjson::Document view;
+      view.CopyFrom(plan_record, view.GetAllocator());
+      rapidjson::Value measured(rapidjson::kArrayType);
+      for (const auto* r : feedback) {
+        if (r->HasMember("plan_revision") && (*r)["plan_revision"].IsString() && (*r)["plan_revision"].GetString() == revision) {
+          rapidjson::Value row(rapidjson::kObjectType);
+          for (const char* field :
+               {"id", "status", "reason", "hpwl_dbu", "peak_rss_bytes", "dbu_per_um", "worker_seconds", "boundary_contacts"}) {
+            if (r->HasMember(field)) {
+              row.AddMember(rapidjson::StringRef(field), rapidjson::Value((*r)[field], view.GetAllocator()), view.GetAllocator());
+            }
+          }
+          measured.PushBack(row, view.GetAllocator());
+        }
+      }
+      view.AddMember("local_placement", measured, view.GetAllocator());
+      return metadata::canonical(view);
+    };
+    // Only the coarse objects cross the GUI process boundary at this gate.
+    auto scene        = std::make_shared<gui::Scene>();
+    scene->phase      = "fp";
+    scene->design     = design;
+    scene->dbu_per_um = dbu;
+    scene->die        = {l.xl, l.yl, l.xh, l.yh};
+    scene->frame_die  = scene->die;
+    scene->site_width = l.site_width;
+    scene->row_height = l.row_height;
+    scene->chunk_plan = display(record);
+    std::vector<double> x, y;
+    for (size_t i = 0; i < model.objects.size(); ++i) {
+      const auto& o = model.objects[i];
+      const auto& b = plan.seeds[i];
+      gui::Node   node;
+      node.name          = (o.macro ? "macro:" : "color:") + o.id;
+      node.kind          = !o.macro ? gui::Kind::cell : o.fixed ? gui::Kind::fixed : gui::Kind::macro;
+      node.w            = o.macro ? o.width : std::min(std::sqrt(o.area / plan.density[i]), b[2] - b[0]);
+      node.h            = o.macro ? o.height : std::min(o.area / (plan.density[i] * node.w), b[3] - b[1]);
+      node.movable      = false;
+      scene->cell_area += o.area;
+      x.push_back(o.macro && o.fixed ? (*o.fixed)[0] : (b[0] + b[2] - node.w) / 2);
+      y.push_back(o.macro && o.fixed ? (*o.fixed)[1] : (b[1] + b[3] - node.h) / 2);
+      scene->nodes.push_back(std::move(node));
+    }
+    scene->build_index();
+    session->begin_phase(scene, x.data(), y.data(), x.size());
+    session->set_intent_provider([&](const std::string& json, const gui::Frame&, bool apply) {
+      metadata::Bundle trial(json);
+      auto             next    = solve(&trial);
+      auto             r       = model.record(next, design);
+      auto             preview = display(r);
+      if (apply) {
+        plan   = std::move(next);
+        record = std::move(r);
+      }
+      return preview;
+    });
+    try {
+      session->gate("fp", x.data(), y.data(), x.size(), {});
+    } catch (...) {
+      session->set_intent_provider({});
+      throw;
+    }
+    session->set_intent_provider({});
+  }
+  v.chunk_plan = std::make_shared<const std::string>(metadata::canonical(record));
+  if (!options.output_dir.empty()) {
+    metadata::Bundle out;
+    out.replace(record);
+    if (options.gui) {
+      out.replace_selected(chunk_guidance_class, design, metadata::Bundle(options.gui->intent()));
+    } else if (input) {
+      out.replace_selected(chunk_guidance_class, design, *input);
+    }
+    if (options.chunk_predictor) options.chunk_predictor->append_evidence(out);
+    out.write(options.output_dir + "/fp_chunks.json");
+  }
+  // Historical estimates may reproduce an explicitly requested layout. Admission
+  // always uses the current model trained on actual observations.
+  const auto& admission = options.chunk_predictor ? *options.chunk_predictor : plan.predictor;
+  if (options.chunk_manifest.empty() && options.chunk_require_fit
+      && (!plan.budget || !admission.covers(plan.counts) || admission.peak(plan.counts) > plan.budget
+          || livehd::process_tree_rss(getpid()) > plan.budget)) {
+    throw std::runtime_error(
+        std::format("floorplan saved; refusing whole-design placement: coverage and measured/predicted memory must fit ({} "
+                    "matching samples, estimate {} bytes, budget {} bytes)",
+                    admission.samples,
+                    admission.peak(plan.counts),
+                    plan.budget));
+  }
+  if (options.chunk_manifest.empty() && (passthrough || restored)) {
+    return false;
+  }
+  // Seed each occurrence in local coordinates. Fixed inputs (including replayed macro poses) are never moved.
+  for (int i = 0; i < d.num_movable && static_cast<size_t>(i) < owner.size(); ++i) {
+    if (owner[i] < 0) {
+      continue;
+    }
+    const auto&      o           = model.objects[owner[i]];
+    const auto&      b           = plan.seeds[owner[i]];
+    const auto       stable_name = gu::logical_hier_name(v.cells[i].name.view(), true);
+    std::string_view key         = stable_name;
+    if (!o.instance.empty() && key.starts_with(o.instance + ".")) {
+      key.remove_prefix(o.instance.size() + 1);
+    }
+    uint64_t h     = hash_text(key);
+    auto     coord = [&](int k, double size) {
+      const double frac = o.macro ? .5 : double(uint32_t(h >> (32 * k))) / double(UINT32_MAX);
+      return std::round(b[k] + frac * std::max(0., b[k + 2] - b[k] - size));
+    };
+    d.node_x[i] = v.cells[i].place.x = coord(0, d.node_size_x[i]);
+    d.node_y[i] = v.cells[i].place.y = coord(1, d.node_size_y[i]);
+  }
+  if (!options.chunk_manifest.empty()) {
+    std::vector<std::string> names(owner.size());
+    for (size_t i = 0; i < owner.size(); ++i) {
+      if (owner[i] >= 0 && (options.chunk_only.empty() || plan.chunks[plan.home[owner[i]]].id == options.chunk_only)) {
+        names[i] = v.cells[i].name.str();
+      }
+    }
+    metadata::Bundle joined(input ? input->json() : "[]");
+    if (options.gui) {
+      joined.replace_selected(chunk_guidance_class, design, metadata::Bundle(options.gui->intent()));
+    }
+    joined.replace(record);
+    auto path = write_chunk_jobs(options.chunk_manifest,
+                                 joined,
+                                 model,
+                                 plan,
+                                 d,
+                                 owner,
+                                 names,
+                                 design,
+                                 dbu,
+                                 options.iterations,
+                                 options.threads,
+                                 options.chunk_seed_detail,
+                                 options.chunk_require_fit,
+                                 options.chunk_only,
+                                 options.chunk_predictor.get());
+    throw Chunk_jobs_ready{path};
+  }
+  if (plan.chunks.size() > 1) {
+    std::vector<std::string> local_names(owner.size());
+    for (size_t i = 0; i < owner.size(); ++i) {
+      if (owner[i] >= 0) {
+        const auto&      obj         = model.objects[owner[i]];
+        const auto       stable_name = gu::logical_hier_name(v.cells[i].name.view(), true);
+        std::string_view name        = stable_name;
+        if (!obj.instance.empty() && name.starts_with(obj.instance + ".")) {
+          name.remove_prefix(obj.instance.size() + 1);
+        }
+        local_names[i] = name;
+      }
+    }
+    const auto detail = refine_chunk_seeds(d, model, plan, owner, local_names, options.iterations, options.threads, options.chunk_seed_detail);
+    for (int i = 0; i < d.num_movable && static_cast<size_t>(i) < owner.size(); ++i) {
+      v.cells[i].place.x = std::llround(d.node_x[i]);
+      v.cells[i].place.y = std::llround(d.node_y[i]);
+    }
+    if (!options.output_dir.empty()) {
+      std::ofstream out(options.output_dir + "/chunk_refinement.json");
+      if (!(out << std::format(R"({{"solved":{},"reused":{},"refined":{},"deferred":{},"detailed":{}}})",
+                               detail.solved,
+                               detail.reused,
+                               detail.refined,
+                               detail.deferred,
+                               options.chunk_seed_detail)
+                << '\n')) {
+        throw std::runtime_error("cannot write chunk refinement report");
+      }
+    }
+  }
+  return true;
+}
 std::shared_ptr<const gui::Scene> gui_scene(const View& v, const ph::Technology& tech, const std::string& phase,
                                             const Options& options) {
   auto        scene = std::make_shared<gui::Scene>();
   const auto& d     = v.design;
   scene->phase      = phase;
+  if (v.chunk_plan) scene->chunk_plan = *v.chunk_plan;
+  scene->chunk_results = v.chunk_results;
   const auto limits           = dead_space_limits(v, tech, d, options.macro_dead_space.value_or(Dead_space_options{}));
   scene->dead_pitch           = limits.pitch;
   scene->dead_narrow_x        = limits.narrow_x;
@@ -4794,6 +5217,37 @@ std::shared_ptr<const gui::Scene> gui_scene(const View& v, const ph::Technology&
     }
   }
   scene->build_index();
+  {
+    // What the flow demands of a FIXED macro, as data (the flow and the session may be different processes): a pose the
+    // agent or the page pins is held exactly through legalization, so one that misses the tracks ends the run later
+    // ("fixed macro pin misses routing tracks"). One lattice per master and orientation the macro may take.
+    std::set<std::pair<std::string, std::string>> done;
+    for (size_t i = 0; i < scene->nodes.size() && i < v.cells.size(); ++i) {
+      const auto& n = scene->nodes[i];
+      if ((n.kind != gui::Kind::macro && n.kind != gui::Kind::fixed) || n.exclusion) {
+        continue;
+      }
+      std::vector<std::string> orients{n.orient};
+      orients.insert(orients.end(), n.allowed_orientations.begin(), n.allowed_orientations.end());
+      for (const auto& orient : orients) {
+        if (!done.emplace(n.master, orient).second) {
+          continue;
+        }
+        const auto lattice = macro_track_lattice(tech, v.fp, n.master, ph::parse_orientation(orient));
+        if (!lattice) {
+          continue;
+        }
+        gui::Macro_tracks tracks;
+        tracks.orient   = orient;
+        tracks.period_x = lattice->period[0];
+        tracks.period_y = lattice->period[1];
+        tracks.phases_x = lattice->phases[0];
+        tracks.phases_y = lattice->phases[1];
+        tracks.pins     = lattice->pins;
+        scene->track_lattices[n.master].push_back(std::move(tracks));
+      }
+    }
+  }
   return scene;
 }
 // Edits from the session -> what the solver applies (pins, releases, centroid targets).
@@ -7361,13 +7815,19 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     pg_profile->channel_max_ir_drop_v      = options.pg_channel_max_ir_drop_v;
     pg_profile->tolerate_macro_pin_overlap = options.pg_tolerate_macro_pin_overlap;
   }
+  const bool chunk_stage = options.fp_chunks && !options.fp_place && options.full && !options.previous && !options.retain_placement
+                           && !options.timing_seed && !options.cell_stage && !options.metadata_finalized && !macro_active;
+  if (!options.chunk_manifest.empty() && !chunk_stage) {
+    throw std::invalid_argument(
+        "chunk export requires the initial chunk floorplan; restart or macro-only placement cannot produce independent homes");
+  }
   const bool has_hints = options.metadata && !options.metadata->select("livehd.placement.hints", source.get_name()).empty();
   if (macro_active && has_hints) {
     livehd::diag::warn("pass.place", "placement-hint-mode", "unsupported")
         .msg("placement metadata hints are supported by native FP/macro GP, not the experimental h2d solver; hints ignored")
         .emit();
   }
-  const auto hint_scopes = (has_hints || options.gui) && !macro_active && !options.timing_seed && !options.retain_placement
+  const auto hint_scopes = (chunk_stage || has_hints || options.gui) && !macro_active && !options.timing_seed && !options.retain_placement
                                    && !options.metadata_finalized
                                ? (options.metadata_scopes ? *options.metadata_scopes : placement_hint_scopes(source, tech))
                                : std::vector<Hint_scope>{};
@@ -7401,6 +7861,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
   }
   remove_transparent_latches(graph);
   View       v;
+  v.chunk_plan=options.accepted_chunk_plan;
   auto weight_roles       = prects_library(options.technology().cells, options.control_ports);
   weight_roles.reset_is_data = pcrs_active(options);
   v.prects                = weight_roles;
@@ -7832,8 +8293,18 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     }
     env += std::format(":groups:{:016x}", membership);
   }
+  if (options.fp_chunks && !options.fp_place) {
+    env += std::format(":chunks3:{}:{}:{}", options.chunk_memory_bytes, options.explicit_chunk_gate, options.chunk_seed_detail);
+    if (options.metadata) {
+      for (const char* cls : {chunk_guidance_class, chunk_plan_class}) {
+        for (const auto* record : options.metadata->select(cls, hint_design)) {
+          env += std::format(":{:016x}", hash_text(metadata::canonical(*record)));
+        }
+      }
+    }
+  }
   const auto cache_path       = (options.timing_seed || options.retain_placement || options.restart_seed || options.handoff_taps
-                                 || options.cache_dir.empty() || has_hints || options.fixed_macro_poses)
+                                 || options.cache_dir.empty() || (chunk_stage && options.gui) || has_hints || options.fixed_macro_poses)
                                     ? std::string{}
                                     : options.cache_dir + "/placement.json";
   auto       previous         = options.previous;
@@ -8062,6 +8533,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       }
     }
   }
+  std::map<std::string, std::string> rebound_macro_names;
   if (options.fixed_macro_poses) {
     std::unordered_map<std::string_view, const ph::Component*> fixed_input;
     if (imported_frame && !options.own_frame) {
@@ -8073,23 +8545,44 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     }
     std::unordered_map<std::string_view, Cell*> macros;
     for (auto& c : v.cells) {
-      if (ph::hard_macro(tech.macros.at(c.macro)) && ph::placement_mask({c.name, c.macro, c.place}, tech) == ph::Placement_mask::none) {
+      if (ph::hard_macro(tech.macros.at(c.macro))
+          && ph::placement_mask({c.name, c.macro, c.place}, tech) == ph::Placement_mask::none) {
         macros.emplace(c.name.view(), &c);
       }
     }
+    std::map<std::string, Cell*> logical;
+    std::set<Cell*>              applied;
     for (const auto& pose : *options.fixed_macro_poses) {
-      const auto found = macros.find(pose.name);
-      if (found == macros.end()) {
-        throw std::invalid_argument("placement state macro absent from mapped design: " + pose.name);
+      Cell* candidate = nullptr;
+      if (auto it = macros.find(pose.name); it != macros.end()) {
+        candidate = it->second;
+      } else if (pose.name.find(gu::transparent_instance_prefix) != std::string::npos) {
+        // Anonymous synthesis region numbers can change between clean builds. Only remove
+        // generated wrapper components, and only accept an unambiguous logical identity.
+        if (logical.empty()) {
+          for (auto [name, cell] : macros) {
+            auto [entry, unique] = logical.emplace(gu::logical_hier_name(name, true), cell);
+            if (!unique) {
+              entry->second = nullptr;
+            }
+          }
+        }
+        if (auto bound = logical.find(gu::logical_hier_name(pose.name, true)); bound != logical.end()) {
+          candidate = bound->second;
+        }
       }
-      auto& c = *found->second;
+      if (!candidate || !applied.insert(candidate).second) {
+        throw std::invalid_argument("placement state macro absent or ambiguous in mapped design: " + pose.name);
+      }
+      auto& c = *candidate;
+      rebound_macro_names.emplace(pose.name, c.name.str());
       const auto& m = tech.macros.at(c.macro);
-      const auto x = ph::rounded_dbu(pose.x_um * tech.dbu, 1e-6), y = ph::rounded_dbu(pose.y_um * tech.dbu, 1e-6);
-      const auto o = ph::parse_orientation(pose.orientation);
+      const auto  x = ph::rounded_dbu(pose.x_um * tech.dbu, 1e-6), y = ph::rounded_dbu(pose.y_um * tech.dbu, 1e-6);
+      const auto  o = ph::parse_orientation(pose.orientation);
       if ((!pose.master.empty() && pose.master != c.macro) || !x || !y || !ph::orientation_allowed(m, o)) {
         throw std::invalid_argument("placement state master, coordinate or orientation is incompatible with " + pose.name);
       }
-      const auto original = fixed_input.find(pose.name);
+      const auto original = fixed_input.find(c.name.view());
       if (original != fixed_input.end()) {
         const auto& p = original->second->place;
         if (p.x != *x || p.y != *y || p.orientation != o) {
@@ -8962,6 +9455,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     }
   }
   make_arrays(v, tech);
+  const bool chunk_seeded = chunk_stage && plan_color_chunks(v, options, hint_scopes, hint_design, tech.dbu, cache.reused != 0);
   const auto hint_objects = [&] {
     std::vector<Hint_object> objects;
     objects.reserve(v.cells.size());
@@ -9766,7 +10260,14 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
   } else if (!cache.hit && multirow_cells && options.multirow_eco) {
     throw std::invalid_argument("the two-row ECO requires the full-placement ECO branch (fixed IO, valid macro tracks)");
   } else if (!cache.hit) {
-    if (!macro_active && !options.restart_seed) {
+    if (chunk_seeded && !options.restart_seed) {
+      if (macro_pin_adjust) {
+        adjust_pins(v.design, 0, true, true);
+      } else {
+        assign_io(v, tech, options);
+      }
+      make_arrays(v,tech);
+    } else if (!macro_active && !options.restart_seed) {
       // This prototype determines automatic IO locations. Keep it a plain GP
       // (no post-density continuation) so a cohesion comparison starts with the
       // same fixed IOs and GP seed.
@@ -10138,7 +10639,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         };
       }
       const bool fp_hint_only = !fp_control.macro_pull_update || fp_control.macro_pull_interval <= 0;
-      if (!hint_scopes.empty()) {
+      if (!hint_scopes.empty() && (has_hints || options.gui)) {
         placement_hints.emplace(hint_input(), hint_design, hint_scopes, hint_objects(), tech.dbu);
         placement_hints->seed(v.design);
         placement_hints->attach(fp_control, hint_objects, bool(options.gui));
@@ -11772,7 +12273,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       }
     }
     const bool standalone_hints = !control.macro_pull_update || control.macro_pull_interval <= 0;
-    if (!hint_scopes.empty()) {
+    if (!hint_scopes.empty() && (has_hints || options.gui)) {
       if (!placement_hints) {
         placement_hints.emplace(hint_input(), hint_design, hint_scopes, hint_objects(), tech.dbu);
         placement_hints->seed(v.design);
@@ -12765,9 +13266,28 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
                result,
                options.completed_stage == Placement_stage::macro ? "macro" : "final",
                gui_intent(control));
+    // A placed input DEF can provide a second starting point when GP collapses a dense
+    // macro array. Keep every hard constraint; this is only a legalizer restart.
+    std::map<int, std::array<double, 2>> imported_starts;
+    if (chunk_seeded && control.legalize && !live_session && !options.own_frame && imported_frame && !options.restart_seed) {
+      for (const auto& c : imported_frame->components) {
+        if (c.place.status != Status::PLACED) {
+          continue;
+        }
+        auto it = v.cell.find(c.name);
+        if (it == v.cell.end() || it->second >= size_t(v.design.num_movable)) {
+          continue;
+        }
+        const auto i = it->second;
+        if (v.design.node_macro[i] && !v.design.legalization_fixed(i) && c.macro == v.cells[i].macro
+            && !ph::swaps_axes(c.place.orientation) && !ph::swaps_axes(v.cells[i].place.orientation)) {
+          imported_starts.emplace(int(i), std::array{double(c.place.x), double(c.place.y)});
+        }
+      }
+    }
     // The retry must keep edits and restored anchors delivered by the GUI gate.
     std::optional<dp::Design> pdn_legalize_input;
-    if (pdn_degradable) {
+    if (pdn_degradable || !imported_starts.empty()) {
       const auto prior        = control.before_legalize;
       control.before_legalize = [&, prior](dp::Design& physical) {
         if (prior) {
@@ -12776,10 +13296,29 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         pdn_legalize_input = physical;
       };
     }
+    auto retry_imported = [&](dp::Design& input) {
+      for (const auto& [i, xy] : imported_starts) {
+        if (!input.legalization_fixed(i)) {
+          input.node_x[i] = xy[0];
+          input.node_y[i] = xy[1];
+        }
+      }
+      v.design              = std::move(input);
+      auto retry            = control;
+      retry.max_iterations  = 0;
+      retry.before_legalize = {};
+      anchor_final_override = nullptr;
+      livehd::diag::warn("pass.place", "macro-restart", "unsupported")
+          .msg("retrying macro legalization from {} imported PLACED starts at the same halo and channel", imported_starts.size())
+          .emit();
+      return dp::place(v.design, retry);
+    };
     try {
       metrics = run_main_gp();
     } catch (const std::runtime_error& error) {
-      if (macro_legalization_failure(error) && pdn_legalize_input) {
+      if (macro_legalization_failure(error) && pdn_legalize_input && !pdn_degradable) {
+        metrics = retry_imported(*pdn_legalize_input);
+      } else if (macro_legalization_failure(error) && pdn_legalize_input) {
         // Degrade one level at a time (gap -> align -> off), each attempt legalizing the same GP pose with the
         // weaker channel; the first level that legalizes stays for the rest of the placement.
         auto input = std::move(*pdn_legalize_input);
@@ -12819,8 +13358,23 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
             metrics = dp::place(v.design, retry);
             legal   = true;
           } catch (const std::runtime_error& again) {
-            if (!macro_legalization_failure(again) || v.pdn_level + 1 >= v.pdn_ladder.size()) {
+            if (!macro_legalization_failure(again)) {
               throw;
+            }
+            if (v.pdn_level + 1 >= v.pdn_ladder.size()) {
+              if (imported_starts.empty()) {
+                throw;
+              }
+              // input still carries the level-0 halos (the ladder above edited copies): apply the final level to
+              // every movable macro, as each ladder attempt did, not only to the imported starts.
+              for (int i = 0; i < input.num_movable; ++i) {
+                if ((input.node_macro[i] && input.placement_mask(i) == dp::PlacementMask::none) || imported_starts.contains(i)) {
+                  input.node_halo_x[i] = double(std::max(v.halo_x, v.plan_pad_x));
+                  input.node_halo_y[i] = double(std::max(v.halo_y, v.plan_pad_y));
+                }
+              }
+              metrics = retry_imported(input);
+              legal   = true;
             }
           }
         }
@@ -13996,7 +14550,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
   sync_rail_twins(v, tech, options);
   if (options.fixed_macro_poses) {
     for (const auto& pose : *options.fixed_macro_poses) {
-      const auto it = v.cell.find(pose.name);
+      const auto it = v.cell.find(rebound_macro_names.at(pose.name));
       if (it == v.cell.end()) {
         throw std::runtime_error("placement lost saved macro: " + pose.name);
       }
@@ -14773,6 +15327,41 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
   }
   if (const auto input = hint_input(); input || (options.full && !options.timing_seed && !options.retain_placement)) {
     metadata::Bundle out(input ? input->json() : "[]");
+    if (v.chunk_plan) {
+      result.accepted_chunk_plan = v.chunk_plan;
+      rapidjson::Document planned;
+      planned.Parse<rapidjson::kParseFullPrecisionFlag>(v.chunk_plan->c_str());
+      out.replace(planned);
+      Chunk_measure                                   occupancy(planned);
+      std::map<std::string, std::string, std::less<>> color_ids;
+      for (const auto& row : planned["chunks"].GetArray()) {
+        for (const auto& member : row["members"].GetArray()) {
+          if (!member["macro"].GetBool()) {
+            color_ids.emplace(member["id"].GetString(), member["id"].GetString());
+          }
+        }
+      }
+      for (const auto& c : v.cells) {
+        const bool macro = ph::hard_macro(tech.macros.at(c.macro));
+        if (ph::placement_mask({c.name, c.macro, c.place}, tech) != ph::Placement_mask::none) {
+          continue;
+        }
+        auto raw = macro                          ? std::string_view{}
+                   : gu::Color_group::has(c.node) ? std::string_view(gu::Color_group::text(c.node))
+                                                  : c.block.view();
+        auto it  = color_ids.find(raw);
+        if (it == color_ids.end()) {
+          it = color_ids.emplace(raw, gu::logical_hier_name(raw, true)).first;
+        }
+        occupancy.cell(
+            {double(c.place.x), double(c.place.y), double(c.place.x + c.place.width), double(c.place.y + c.place.height)},
+            macro,
+            it->second);
+      }
+      auto observed = occupancy.record(hint_design);
+      out.replace(observed);
+      v.chunk_results = metadata::canonical(observed);
+    }
     if (placement_hints) {
       placement_hints->rebind(hint_objects());
       placement_hints->append_results(out, v.design);
@@ -14787,6 +15376,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     }
     out.erase_selected("livehd.placement.state", hint_design);
     out.replace(macro_state(hint_design, poses));
+    if (options.chunk_predictor) options.chunk_predictor->append_evidence(out);
     out.write(options.output_dir + "/metadata.json");
   }
   if (options.full && !options.timing_seed && !options.retain_placement) {
@@ -15614,6 +16204,9 @@ static Result place_requested(hhds::Graph& source, hhds::GraphLibrary& library, 
       && !options.retain_placement) {
     throw std::invalid_argument("cell halo with a previous macro frame requires explicit final_cell_options context");
   }
+  if (!options.chunk_manifest.empty()) {
+    return place_single(source, library, options, release_source);
+  }
   if (stage_macros && options.full && !options.final_cells && !options.timing_seed && !options.retain_placement && !options.previous
       && !options.cell_stage) {
     auto macro_options            = options;
@@ -15687,7 +16280,8 @@ static Result place_requested(hhds::Graph& source, hhds::GraphLibrary& library, 
   ph::write_def(macro.floorplan, frame);
   auto cell_options               = final_cell_options(staged_options);
   cell_options.metadata_finalized = true;
-  if (options.metadata && fs::is_regular_file(macro_options.output_dir + "/metadata.json")) {
+  cell_options.accepted_chunk_plan=macro.accepted_chunk_plan;
+  if ((options.metadata || options.fp_chunks) && fs::is_regular_file(macro_options.output_dir + "/metadata.json")) {
     cell_options.metadata
         = std::make_shared<const metadata::Bundle>(metadata::Bundle::read(macro_options.output_dir + "/metadata.json"));
   }
@@ -15819,6 +16413,11 @@ static Result place_requested(hhds::Graph& source, hhds::GraphLibrary& library, 
 // there as well.
 static Result place_fp_auto(hhds::Graph& source, hhds::GraphLibrary& library, const Options& requested,
                             const std::function<void()>& release_source) {
+  if (requested.fp_chunks && requested.fp_auto && !requested.fp_place) {
+    auto resolved=requested;
+    resolved.fp_auto=false;
+    return place_requested(source,library,resolved,release_source);
+  }
   if (!requested.fp_auto) {
     return place_requested(source, library, requested, release_source);
   }

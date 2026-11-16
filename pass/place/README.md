@@ -3,11 +3,9 @@
 With ABC, OpenTimer and an explicit workdir, the default runs macro placement,
 fixes the macros, and then places the cells. Without macros it uses a single
 placement stage. Macro snapping remains enabled. The default `synth.place.fp=auto`
-adds centroid floorplanning and the separate macro-refinement/final-cell passes
-only for designs dominated by repeated hierarchy (see "Automatic floorplan
-selection"); `synth.place.fp=true` forces them and `synth.place.fp=false` is the
-legacy default (never floorplan). The legacy `r8h2`/`r8h3` macro modes and manual
-macro-centroid diagnostic have been removed.
+plans chunks before native full placement. A small design can use one chunk. To edit even a
+single chunk at the floorplan GUI gate, set `synth.place.fp=chunks`. Set it to `false` to
+bypass floorplanning, or `centroid` to use the older centroid experiment.
 
 GP timing feedback is approximate critical-path ranking. It uses characterized
 gate delay at total load and a closed-form Elmore wire estimate, updates the
@@ -2097,10 +2095,31 @@ selection tools. Design, rulings and open work: `todo/livehd/2i-interact.html`.
   `pause`, `run`, `move`, `restart`, ...). The page posts its selection as the user clicks, so "what is this macro?" is
   `tools/lhd_gui --workdir W selection`, answered in the terminal while the page shows the same object.
   `tools/lhd_gui --workdir W highlight regex='^pc' scope=regs color=orange label=pc`.
+- **Agent search and scan (2026-11-15, [todo/gui-work.html](../../todo/gui-work.html)).** `find`, `highlight` and
+  `select` take an RE2 pattern: it runs in linear time, so a nested quantifier such as `(.*)*x` cannot hold the
+  session lock (and with it the page and the flow) for minutes as the earlier backtracking engine did; backreferences
+  and lookaround do not exist in RE2 and are refused with a message. `limit` (`find`, 1 to 1000) and `n` (`critical`,
+  1 to 500) must be integers in range: a string, a fraction or 0 is an error, not a silent default. `describe`
+  takes `#index` like `move` and `select`. `move` takes one number for every node or one per node (`"x":500` or
+  `"x":[500,600]`). `evaluate` with `wait_ms` returns the measured summary instead of leaving the caller to poll
+  `state.evaluation_seq`. `macro_scan {node, grid:{nx,ny} | positions:[[x,y],...], orientations?, top?}` ranks
+  positions (and mirrored orientations) of one macro, lower-left in DBU, by the sum of its pin nets' half-perimeters
+  (each connected pin joined with the box of the logic cells on its net, so a clock or enable that reaches
+  thousands of cells costs about the same everywhere and does not drown the nets that pull the macro), keeping only
+  positions the floorplan checks accept (core, halo, channel, exclusions, other macros); the cells stay where they
+  are, there is no timing and no congestion, so it screens hundreds of positions in milliseconds and `whatif` or
+  `explore` verify the best few. `restart` refuses an unknown,
+  read-only or mistyped `set` flag and a checkpoint that does not exist (both used to be queued as `ok`: the first
+  exited the re-executed `lhd` and ended the session, the second restarted from the beginning and dropped every
+  edit). Screenshots are zlib-compressed. A session that ends leaves no `/tmp/lhd-gui-<pid>.sock` behind for the next
+  one to find: dead sessions' sockets are removed when a new session starts. `tools/lhd_gui.py` adds `screenshot
+  out=FILE`, `wait state=gate`, `macros` and `--retry SECONDS` (rides out the moments the socket is down during a
+  restart).
 - **Agent interface.** The same JSON commands (`POST /cmd`: `run`, `continue`, `pause`, `stage`, `move`
   with node names or `#index`, `unpin`, `screenshot`, `finish`) and read endpoints (`GET /state`,
   `/design`, `/frame`, `/node?i=`, `/query?name=` or `x0,y0,x1,y1`, `/screenshot.png?w=&h=&layers=`)
-  drive the session from a script or an agent; the server-side rasterizer needs no browser.
+  drive the session from a script or an agent. The PNG includes chunk boundaries when a plan is present;
+  use `layers=-chunks` to hide them. The server-side rasterizer needs no browser.
 - **Security.** The server binds 127.0.0.1 only and every request needs the random per-run token.
   `--gui*` flags are not part of the run id.
 
@@ -2599,7 +2618,304 @@ All future Eyeriss comparisons explicitly set `synth.place.grid.density=64` and
 `synth.place.grid.density_mode=fixed` for every GP stage. The native default grid is unchanged;
 earlier mixed-grid results are historical.
 
-### Automatic floorplan selection (`fp=auto`)
+### Color and macro chunk floorplan
+
+`--set synth.place.fp=chunks --set synth.place.chunk.memory_gb=1` plans rectangular
+chunks for downstream placement. Common budgets are 1, 2, 4 (default), 8 and 16
+decimal GB; zero requests one chunk. A design that fits stays whole. Otherwise
+chunks need not match in cell count, estimated bytes, or physical area. An
+indivisible oversized color gets a larger allowance in its home chunk. A hard
+macro counts as one body plus its connectivity regardless of its physical area.
+The budget does not cap the color floorplanner's own memory.
+
+**Place the chunks independently.** Add `--set synth.place.chunk.run=feedback`
+to a normal `lhd synth` placement invocation with `--workdir W` and
+`--set synth.place.fp=chunks`. The accepted FP plan feeds the native placer.
+Each process reads one physical home, places and legalizes its owned cells and
+macros, writes its result, and exits before the next starts. No whole-design
+placement or DEF is produced. With the GUI, accept the edited plan at the FP
+gate first. For fast trials, `--set synth.place.chunk.seed_detail=false`
+skips the post-legalization detailed swaps; the legality check still runs.
+
+Use `--set synth.place.chunk.run=export` to save the jobs without running them:
+
+```sh
+lhd place-chunks W/synth/place/chunks.json --out batch
+lhd place-chunks batch/metadata.json --out retry --chunk 'physical-id-from-jobs'
+```
+
+For a **changed plan**, `--set synth.place.chunk.only=ID` in either export or
+feedback mode constructs only that home's worker packet, retaining the complete
+FP plan. It still projects exterior obstacles and external contacts, and uses
+the reverse pin index when available to visit just incident nets. For an
+**unchanged plan**, the `place-chunks --chunk` command above skips projection
+and synthesis entirely.
+
+The jobs record lists the physical IDs, boxes and packet paths. Keep the binary
+packets with the manifest for a same-build, same-host retry. To regenerate them
+on another machine, run synthesis with the saved floorplan metadata. Use a fresh
+output directory per measurement. A retry reads no sibling packet and retains
+its siblings' prior measurements if they were in the input index.
+
+The automatic run writes `W/synth/place/feedback/metadata.json` (numbered on
+repeat). This is an ordinary joined metadata bundle. Open it as a synth input
+with the same FP settings: the GUI chunk selector shows the measured local
+HPWL, peak RSS and fixed contact count only for a matching plan. The per-home
+report links to legal cell/macro origins in design DBU. For each cut net it
+records the fixed contact and the mean signed displacement of the internal pins
+from that contact. HPWL is local and includes these terminals; summed local
+HPWL is neither whole-chip wirelength nor a timing or routing result.
+
+With a positive budget, independent placement refuses an over-budget estimate
+and polls the active worker's resident size; an exceeded budget fails that
+home without publishing a legal pose. Polling is not an OS-enforced memory
+reservation. For deliberate measurements above a small target set
+`--set synth.place.chunk.require_fit=false`: the result records the overrun.
+Worker peak RSS samples in the output index train subsequent isolated plans
+when supplied as input. They are kept separate from whole-flow memory samples.
+The current export still projects a flat physical view; its memory is not
+bounded by the per-worker budget. Contacts and overlap reservations are fixed
+in this pass. There is no timing exchange or cross-chunk cell migration yet.
+
+To share measured peaks between runs, use `--set synth.place.chunk.profile=history.json`.
+The workdir default is `place_memory.json`. A fresh, successful headless single-chunk
+placement also writes a `livehd.placement.chunk_memory_sample` in the ordinary
+metadata bundle. The measurement starts before physical preparation and ends after
+downstream timing and reports, sampling the process tree's RSS every 50 ms and
+including new parent high-water marks. Cache restores, GUI previews and the ordinary whole-design flow with multiple chunks
+do not supply isolated-worker samples. The model separates technology (LEF/Liberty),
+platform and placement recipe. Its inputs are logic and macro bodies and their
+respective pin/net incidences. A nonnegative linear fit includes a fixed footprint
+per worker and 25% headroom above every retained peak (up to 32 recent runs).
+The plan retains the sizing decision for exact replay, and the full output bundle
+carries the observations used. Fresh exploration (omit the saved chunk plan or
+change its budget) uses the updated history. The plan reports the coefficients,
+whole-design forecast and whether it is
+extrapolating. Neither an untrained estimate nor an upper envelope over past
+measurements guarantees a future run will fit.
+
+In the ordinary whole-design flow, `--set synth.place.chunk.require_fit=true` requires a positive budget and an
+observation covering the current counts. It saves the floorplan and refuses to
+start a solver if the whole-design forecast or current RSS exceeds the budget.
+This checks the whole design because the final timing/legalization flow still
+operates on it. Train a new technology/recipe first on a machine and budget with
+adequate memory. This is model-based admission, not an operating-system limit.
+
+To run only the color planner, build `//pass/place:fp_plan_summary`, then run
+`fp_plan_summary input.json design 4 fp_chunks.json`. Its input is a normal
+metadata array with one `livehd.placement.color_graph` record (schema version 1)
+for the selected design. Provide a core rectangle in DBU, site and row pitches,
+density, color/macro summaries (including their internal pin and net incidences)
+and named object endpoints per crossing net. The optional `terminals` array
+binds a named external port to a color or macro and a fixed point on the block
+edge, e.g. `{"name":"host_req","object":"soc.gateway","xy_dbu":[36000,31500]}`.
+A terminal influences its chunk's boundary contact without adding a synthetic
+cell. Moving an external port invalidates the saved geometry. The planner only materializes the
+summaries. Other bundle records can supply chunk guidance and a saved plan.
+The standalone runner uses the cold estimate unless the graph specifies the
+`memory_context` of the intended downstream technology/recipe and the bundle
+includes matching `chunk_memory_sample` records. Physical hierarchy supplies
+soft starting neighborhoods; fixed macros retain their actual coordinates.
+The lhdsuite `mixed_soc` benchmark generates a shared Rocket/BOOM/Gemmini workload
+in this format and validates saved plans across all five budgets.
+
+The timing-free floorplan works on a graph of scoped synthesis colors and independent
+macros. Colors have exactly one home. Repeated modules get the same partition in distinct
+rectangles. Small, single-color peripheral wrappers join the surrounding logic when their
+module family is a negligible share of the design. When fixed macros span the core, the
+planner finds legal rectangles around those macros and joins adjacent rectangles
+when their combined load fits. Preplaced standard cells stay fixed and do not fence their entire color.
+Each chunk's macro plan uses one contact per crossing net at its boundary.
+Multi-chunk runs place cells locally against those contacts. For faster exploration,
+`synth.place.chunk.seed_detail=false` skips detailed swaps on these temporary local seeds.
+Local row legalization and the downstream macro and final placement stages still run.
+The default, `true`, keeps the detailed local solve. If a rectangular cut would force a dense home's macros onto the same start,
+the planner instead tries to pack the physical footprints in shelves while letting logic use
+disconnected whitespace. These are starting positions, not obstacles or fixed DEF poses.
+If macro legalization fails on a chunk-seeded run with a placed input DEF, compatible
+movable macro locations in that input can serve as a recovery start. The legalizer reports
+the retry; fixed macros, required spacing, blocked rows and the final legality checks still apply. A compatible core can reuse
+a representative detailed placement; with different boundary conditions it refines that
+seed. The ordinary whole-design timing and legalization flow still owns final correctness.
+Independent timed workers and overlapping refinement rounds are follow-up work.
+
+The **Floorplan chunks** panel shows boundaries and lets you change a chunk or color
+target at the FP gate. Choose a partition or template color to change all its copies,
+or an individual chunk or color for one occurrence. **Inherit** clears the override.
+Lowering a color's target reserves more space for it. A chunk's target controls its
+overall fill; physical macros retain their footprint. The panel identifies the source
+of the effective density. After placement, the chunk result reports standard-cell area
+over rectangle area less physical macro area, and how much of each color lies outside
+its home. The floorplan-stage fill is a prediction.
+
+`fp_chunks.json` contains the saved `livehd.placement.chunk_plan` record (under
+`macro/` in the staged flow). The final `metadata.json` combines it with
+`livehd.placement.chunk_results`, macro poses and other design records. To rerun,
+pass this JSON beside the RTL with the same technology, frame and budget. The
+planner validates saved rectangles and membership, and replans when design or
+density inputs change. A saved plan is independent of macro poses that moved during
+later refinement. For a density edit, copy a selector from the plan:
+
+```json
+[{"class":"livehd.placement.chunk_guidance","design":"top","id":"explore",
+  "targets":[{"kind":"color","selector":"u0.core:color:1","density":0.45}]}]
+```
+
+To reuse the *interface* of a physical home without moving its neighbors:
+
+```json
+[{"class":"livehd.placement.chunk_guidance","design":"top","id":"pins",
+  "interface_copies":[{"source":"source-id","target":"target-id","orientation":"auto"}]}]
+```
+
+On a mapped design, match the complete unordered set of local cell names,
+masters and pin names on each cut net. Ambiguous or different sets stay at
+their own contacts. A color-only summary can compare unambiguous named driver
+roles; the result identifies which matching method was used. The planner
+maps a matched pin by side and normalized offset to the target perimeter.
+N, FN, FS and S preserve horizontal rows (unchanged, left/right mirror,
+top/bottom mirror, 180°); quarter turns are refused. Auto tries those four
+against crossing hypernet HPWL with other homes in place, iterating if targets
+share nets. It is a bounded search. Source and target must be distinct physical
+homes; a source cannot depend on another copy. The resulting contact locations
+feed the local workers. Interface reuse is not a claim that an already placed
+or routed implementation, or its power grid, can be copied unchanged.
+
+At the live FP gate, drag a physical rectangle to move all its colors. **Alt-drag**
+pans the canvas. The ghost shows the rigid move and the rubber-band lines show up
+to 32 incident connections. Its live estimate sums the bounding-box half-perimeter
+of every incident hypernet, including fixed block terminals. Pick a **Peer** for
+the sum and worst Manhattan distance between the two chunks' boundary contacts.
+These are wiring distances in DBU, not timing in picoseconds. On release the solver
+refines the neighbors, local color slots and boundary pins; the GUI reports the
+actual lower-left coordinate and the change in whole-design wire estimate. The
+selected copy keeps both dimensions; other chunks retain area and can change aspect
+unless locked. An aspect lock allows translation. A fixed macro keeps its box in
+place. If an exact drop cannot fit, the solver looks for a closer legal exchange;
+if none is available the live plan stays unchanged. Exact local recuts inspect at
+most nine neighbors. Undo removes the last geometry edit.
+
+By default chunks tile without overlap. The optional **Allow overlap** percentage
+limits the total shared fraction of each moved chunk, up to 25%. Two owners each
+get half of a shared strip, and their remaining effective areas must both meet the
+requested density. A third owner at the same point and overlap involving macro
+chunks are not supported. Distinct pairwise overlaps can form a ring: the coarse
+color solver uses eight synchronous rounds with damped overlap pressure, never a
+recursive round trip. Local cell placement reserves complementary halves of each
+strip. Final whole-design placement still owns legalization. This does not migrate
+colors or launch alternating timed chunk workers.
+
+Geometry is an ordered array in the ordinary chunk guidance. Use physical chunk IDs
+from the plan, DBU lower-left coordinates, and a fraction for `max_overlap`. Preview
+and apply use the same agent commands as implementation edits. Other guidance records
+and related metadata are retained. For example:
+
+```json
+[{"class":"livehd.placement.chunk_guidance","design":"top","id":"geometry",
+  "geometry":[{"lock_aspect":true,"chunks":["1:b0"]},
+              {"move":"1:a0","to_dbu":[100,20],"max_overlap":0.08}]}]
+```
+
+The plan reports the starting tiling (`reference_box_dbu`), final boxes, shared strips
+and independent overlap cycles. `effective_area_dbu2` subtracts each chunk's neighbor
+share; post-placement occupancy also counts shared space only once. Each port's
+`net_index` identifies its hypernet across homes; `communication.fixed_contacts`
+preserves its external anchor bounds for independent estimates.
+
+The **Physical homes** panel changes membership. Select whole colors or macros to
+split into a new home, or fuse a second home into the selected one. **Preview**
+rebinds the crossing nets, draws the changed boxes and connections, and reports
+home and implementation counts, predicted maximum chunk memory, crossing-net
+HPWL, and peak horizontal and vertical routing demand. A fusion that exceeds the
+downstream budget is rejected. **Apply** accepts the result; **Undo home edit**
+removes the last structural change. A local split or rectangular fusion can keep
+all other rectangles exactly as displayed. A nonrectangular fusion can require a
+wider retile. Density and implementation rules for retired homes remain in the
+metadata and reactivate if an undo restores their home. Selectors that never
+existed still produce an error. An aspect lock protects against reshaping during
+moves; **Lock other aspects** leaves the selected copy free. At least one aspect
+must remain unlocked.
+
+The agent uses the same commands and a `topology` array in chunk guidance, for example
+`{"split":"1:a0","new_id":"A2","members":[{"id":"a.color1","macro":false}]}`,
+then `{"fuse":["1:a0","A2"]}`. These are physical IDs and indivisible members, not
+A1/A2 implementation labels. The optional `before` array captures each live chunk's
+`id` and disjoint `box_dbu` (use `reference_box_dbu` when present), as the GUI does
+for a local edit. Splitting the same local colors of repeated module instances
+produces the same logical partition ID.
+
+The 16×16 **estimated routing demand** overlay distributes each crossing net's
+horizontal and vertical spans across its pin bounding box. Each tile reports how
+many tile widths or heights of wire it contains; larger values indicate more
+competition for routing in that direction. External spans outside the core are
+charged to the edge. This uses no PDK routing capacity, timing, or detailed
+routes. Changes are comparable on the same frame; a hot tile is a reason to
+investigate rather than a routing failure.
+
+A logical `partition` identifies reusable logic; a chunk `id` identifies one placed
+occurrence. The pair `(partition, implementation)` identifies its physical implementation.
+At the FP gate double-click a rectangle, or choose **Chunk implementations** and a partition, to inspect its
+instances, actual width/height ratios, and pins on the canvas. Select copies and assign
+them to a name such as A1; assign the rest to A2. Selecting an existing group lets
+you edit its target aspect or a common interface pin. Moving all copies back to
+**Share all copies**, **Separate every copy** or **Automatically group all copies**
+replaces that partition's named overrides. Preview reports the resulting number of
+implementations and the change in design pin HPWL before Apply. None of these operations
+changes color membership. For a drag, the instantaneous estimate holds peers still. Their boxes and pins may move on
+release, even reversing the sign of the estimate. Enable **Preview drop before applying**
+to see the landed boxes, shared area and refined design wire proxy without editing the live
+floorplan. Apply that move or discard it; an applied move can also be undone. Fixed macro
+homes are labeled before dragging. Compare wire and demand proxies across moves of the
+same partition; a split or fusion changes which nets contribute.
+
+The agent uses the same `intent_preview`, `intent_apply` and
+`export what:floorplan` operations; retain other chunk guidance records with your edit.
+
+```json
+[{"class":"livehd.placement.chunk_guidance","design":"top","id":"implementations",
+  "implementations":[{"partition":"3:cpu0","mode":"shared","groups":[
+    {"name":"A1","instances":["1:a0","1:b0"],"aspect_ratio":1.2,
+     "pins":[{"role":"pin:result","side":"right","offset":0.25}]},
+    {"name":"A2","instances":["1:c0"]}]}]}]
+```
+
+Copy partition, instance and pin role strings from the plan. Mode applies to unassigned
+copies. Named groups override it. Aspect is width/height and is a soft target: the
+planner considers legal recuts and protects macros, IO, area and center wire length.
+Pin offsets run bottom-to-top on vertical edges and left-to-right on horizontal edges.
+An authored pin must exist unambiguously on every selected copy. Auto groups copies by
+shape and the normalized positions of identifiable interface pins. Unmatched signals
+keep their own contacts. Shared roles use a common side and normalized offset (rounded
+to the nearest DBU); boundary contacts are estimates and may coincide before pin access
+or routing. `communication.pin_hpwl_dbu` sums the bounding-box half-perimeter once per
+crossing hypernet, including fixed block terminals; `center_hpwl_dbu` uses chunk centers.
+The report includes the number of pin sweeps and whether a sweep made no further changes.
+Neither length measures routed length or timing.
+
+For independent synthesis, join one `livehd.synth.chunk_source` record per logical
+partition to the saved design metadata. It identifies **the RTL of the chunk itself**.
+An optional `implementation` picks different sources or synthesis settings for one
+variant. Source paths are relative to the joined metadata file; an arbitrary partial
+color partition needs extracted RTL. A color summary alone cannot be synthesized.
+
+```json
+[{"class":"livehd.synth.chunk_source","id":"cpu","design":"top","partition":"3:cpu0",
+  "top":"cpu","sources":["cpu.sv"],"settings":{"synth.place":"false"}}]
+```
+
+`bazel run //tools:synth_chunk_implementations -- /abs/path/design.json --design top`
+lists the jobs. Add `--run --lhd /abs/path/lhd --workdir /abs/path/jobs` to synthesize
+each selected implementation once in its own workdir. `--partition` and
+`--implementation` select a single variant for iteration. The runner does not
+replace the parent netlist or launch a full-design placement.
+
+Selectors are exact identities. The accepted kinds are `color`, `chunk`, `template_color`
+and `partition`. Unknown or duplicate targets produce a diagnostic. The GUI exports the
+same bundle as the CLI; no secondary constraints file is needed. Explicit legacy
+`synth.place.fp.*` experiment controls select the older solver unless `fp=chunks`
+or a chunk budget explicitly selects the chunk planner.
+
+### Legacy centroid experiment: automatic candidate selection
 
 Centroid floorplanning only pays off when copies of one hierarchy block hold a
 large part of the design (Eyeriss: four ClusterGroups). `synth.place.fp=auto`
@@ -2608,7 +2924,7 @@ netlist before fresh full placement and sets `fp` from its decision; explicit
 `true`/`false` are unchanged. ECO, timing-seed, placed-context and H2D calls never
 start a floorplan, so auto resolves to off there without detection.
 
-**Default.** `auto` is the default of `synth.place.fp`, of `placement::Options`
+**Historical baseline.** `auto` is the default of `synth.place.fp`, of `placement::Options`
 (`fp_auto=true`; `fp_place=true` forces the stage, a forced off sets both false)
 and of physical_repair's floorplan mode `"fp_place"` (was `true` there). The
 user approved this default-contract change on 2026-11-07; before it the default

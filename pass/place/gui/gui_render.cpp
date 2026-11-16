@@ -1,11 +1,15 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "gui_render.hpp"
 
+#include <zlib.h>
+
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
 #include <sstream>
+
+#include "rapidjson/document.h"
 
 namespace livehd::placement::gui {
 
@@ -13,15 +17,16 @@ namespace {
 struct Rgb {
   std::uint8_t r, g, b;
 };
-constexpr Rgb kBg{16, 19, 26}, kDie{11, 14, 20}, kLine{44, 52, 70}, kCell{91, 155, 255}, kFixed{107, 114, 133}, kMacro{240, 164, 60},
-    kMacroFixed{185, 120, 42}, kIo{63, 207, 130}, kRegion{74, 83, 106}, kPin{255, 255, 255}, kCentroid{255, 92, 138}, kSeq{210, 140, 255};
+constexpr Rgb kBg{16, 19, 26}, kDie{11, 14, 20}, kLine{44, 52, 70}, kCell{91, 155, 255}, kFixed{107, 114, 133},
+    kMacro{240, 164, 60}, kMacroFixed{185, 120, 42}, kIo{63, 207, 130}, kRegion{74, 83, 106}, kPin{255, 255, 255},
+    kCentroid{255, 92, 138}, kSeq{210, 140, 255};
 
 struct Canvas {
   int         w, h;
   std::string px;
   Canvas(int width, int height, Rgb bg) : w(width), h(height), px(size_t(width) * size_t(height) * 3, 0) {
     for (size_t i = 0; i < px.size(); i += 3) {
-      px[i] = char(bg.r);
+      px[i]     = char(bg.r);
       px[i + 1] = char(bg.g);
       px[i + 2] = char(bg.b);
     }
@@ -79,8 +84,8 @@ void be32(std::string& s, std::uint32_t v) {
 }
 void chunk(std::string& out, const char* type, const std::string& data) {
   be32(out, std::uint32_t(data.size()));
-  std::string body = std::string(type, 4) + data;
-  out += body;
+  std::string body  = std::string(type, 4) + data;
+  out              += body;
   be32(out, crc32(body));
 }
 }  // namespace
@@ -92,27 +97,14 @@ std::string encode_png(int width, int height, const std::string& rgb) {
     raw += char(0);
     raw.append(rgb, size_t(y) * size_t(width) * 3, size_t(width) * 3);
   }
-  std::string z = "\x78\x01";
-  for (size_t at = 0; at < raw.size() || at == 0;) {
-    const size_t n     = std::min<size_t>(65535, raw.size() - at);
-    const bool   final = at + n >= raw.size();
-    z += char(final ? 1 : 0);
-    z += char(n & 0xff);
-    z += char((n >> 8) & 0xff);
-    z += char(~n & 0xff);
-    z += char((~n >> 8) & 0xff);
-    z.append(raw, at, n);
-    at += n;
-    if (final) {
-      break;
-    }
+  // zlib at a fast level: the screenshot a local agent pulls over the socket shrinks from width*height*3 bytes to
+  // a few percent (flat background, few colours), which also keeps an image read into a conversation cheap.
+  uLongf      bound = compressBound(uLong(raw.size()));
+  std::string z(bound, '\0');
+  if (compress2(reinterpret_cast<Bytef*>(z.data()), &bound, reinterpret_cast<const Bytef*>(raw.data()), uLong(raw.size()), 3) != Z_OK) {
+    return {};
   }
-  std::uint32_t a = 1, b = 0;
-  for (const unsigned char c : raw) {
-    a = (a + c) % 65521;
-    b = (b + a) % 65521;
-  }
-  be32(z, (b << 16) | a);
+  z.resize(bound);
   std::string out = "\x89PNG\r\n\x1a\n";
   std::string ihdr;
   be32(ihdr, std::uint32_t(width));
@@ -147,6 +139,8 @@ Render_options parse_layers(const std::string& csv, Render_options o) {
       o.macros = on;
     } else if (item == "io") {
       o.io = on;
+    } else if (item == "chunks") {
+      o.chunks = on;
     } else if (item == "regions") {
       o.regions = on;
     } else if (item == "centroids") {
@@ -164,13 +158,13 @@ Render_options parse_layers(const std::string& csv, Render_options o) {
 
 std::string render_png(const Scene& scene, const Frame& frame, const std::set<int>& pinned, const Render_options& opt,
                        const Grid* map) {
-  const int w = std::clamp(opt.width, 64, 4096), h = std::clamp(opt.height, 64, 4096);
-  Canvas    c(w, h, kBg);
-  const Box view = opt.has_view ? opt.view : scene.die;
+  const int    w = std::clamp(opt.width, 64, 4096), h = std::clamp(opt.height, 64, 4096);
+  Canvas       c(w, h, kBg);
+  const Box    view = opt.has_view ? opt.view : scene.die;
   const double vw = std::max(1.0, view.xh - view.xl), vh = std::max(1.0, view.yh - view.yl);
   const int    pad = 12;
   const double s   = std::min((w - 2.0 * pad) / vw, (h - 2.0 * pad) / vh);
-  const double ox  = (w - vw * s) / 2 - view.xl * s, oy = (h + vh * s) / 2 + view.yl * s;
+  const double ox = (w - vw * s) / 2 - view.xl * s, oy = (h + vh * s) / 2 + view.yl * s;
   const auto   sx = [&](double x) { return int(std::lround(x * s + ox)); };
   const auto   sy = [&](double y) { return int(std::lround(oy - y * s)); };
   c.fill(sx(scene.die.xl), sy(scene.die.yh), sx(scene.die.xh), sy(scene.die.yl), kDie);
@@ -267,8 +261,31 @@ std::string render_png(const Scene& scene, const Frame& frame, const std::set<in
       }
       const auto& nd = scene.nodes[size_t(i)];
       const int   x0 = sx(frame.x[size_t(i)]) - 2, y1 = sy(frame.y[size_t(i)]) + 2;
-      const int   x1 = std::max(sx(frame.x[size_t(i)] + nd.w), x0 + 5) + 2, y0 = std::min(sy(frame.y[size_t(i)] + nd.h), y1 - 5) - 2;
+      const int x1 = std::max(sx(frame.x[size_t(i)] + nd.w), x0 + 5) + 2, y0 = std::min(sy(frame.y[size_t(i)] + nd.h), y1 - 5) - 2;
       c.outline(x0, y0, x1, y1, kPin);
+    }
+  }
+  if (opt.chunks && !scene.chunk_plan.empty()) {
+    rapidjson::Document plan;
+    plan.Parse(scene.chunk_plan.c_str());
+    if (plan.IsObject() && plan.HasMember("chunks") && plan["chunks"].IsArray()) {
+      constexpr Rgb edge{100, 211, 224};
+      for (const auto& part : plan["chunks"].GetArray()) {
+        if (!part.IsObject() || !part.HasMember("box_dbu")) {
+          continue;
+        }
+        const auto& b = part["box_dbu"];
+        if (!b.IsArray() || b.Size() != 4 || !std::all_of(b.Begin(), b.End(), [](const auto& v) { return v.IsNumber(); })) {
+          continue;
+        }
+        const int left = sx(b[0].GetDouble()), right = sx(b[2].GetDouble()), top = sy(b[3].GetDouble()),
+                  bottom = sy(b[1].GetDouble());
+        // Clip the strokes, not the rectangle: zoomed screenshots must not invent boundaries at the viewport.
+        c.fill(left, top, right, top + 1, edge);
+        c.fill(left, bottom - 1, right, bottom, edge);
+        c.fill(left, top, left + 1, bottom, edge);
+        c.fill(right - 1, top, right, bottom, edge);
+      }
     }
   }
   return encode_png(w, h, c.px);

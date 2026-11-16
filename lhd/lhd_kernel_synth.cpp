@@ -65,6 +65,9 @@
 #include "attrs.hpp"
 #include "compile_salt.hpp"
 #include "core/job_manager.hpp"
+#include "pass/place/chunk_memory.hpp"
+#include "pass/place/chunk_jobs.hpp"
+#include "core/hash_util.hpp"
 #include "debug_env.hpp"
 #include "diag.hpp"
 #include "domino_bundle.hpp"
@@ -117,7 +120,7 @@ std::string physical_descriptor(const Options& opts, const livehd::placement::Op
   w.StartArray();
   w.Uint64(kPhysicalSrcSalt);
   w.String(opts.top.c_str());
-  const std::array<std::string_view, 2> metadata_classes{"livehd.placement.hints", "livehd.placement.state"};
+  const std::array<std::string_view, 4> metadata_classes{"livehd.placement.hints", "livehd.placement.state", "livehd.placement.chunk_guidance", "livehd.placement.chunk_plan"};
   w.String(place_options.metadata ? place_options.metadata->identity(metadata_classes, opts.top).c_str() : "[]");
   w.String(opts.seed.c_str());
   w.Uint(opts.jobs);
@@ -1016,11 +1019,48 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.final_iterations      = integer("place.final.iterations", "0");
   const auto fp_mode        = synth_set(opts, "place.fp", "auto");
   if (fp_mode != "true" && fp_mode != "false" && fp_mode != "1" && fp_mode != "0" && fp_mode != "on" && fp_mode != "off"
-      && fp_mode != "auto") {
-    throw Lhd_error{"usage", "invalid synth.place.fp: " + fp_mode, "expected true, false, on, off or auto"};
+      && fp_mode != "auto" && fp_mode != "centroid" && fp_mode != "chunks") {
+    throw Lhd_error{"usage", "invalid synth.place.fp: " + fp_mode, "expected true, false, on, off, auto, chunks or centroid"};
   }
-  out.fp_auto         = fp_mode == "auto";
-  out.fp_place        = !out.fp_auto && truthy(fp_mode);
+  const double chunk_gb = number("place.chunk.memory_gb", "4");
+  // Compare the product: chunk_gb * 1e9 can round up to exactly 2^64, and that cast to uint64_t is undefined.
+  if (!std::isfinite(chunk_gb) || chunk_gb < 0 || chunk_gb * 1e9 >= 0x1p64 || (chunk_gb > 0 && chunk_gb < 1e-9)) {
+    throw Lhd_error{"usage", "invalid synth.place.chunk.memory_gb", "expected a nonnegative, representable memory budget in GB"};
+  }
+  const auto chunk_run = synth_set(opts, "place.chunk.run", "flow");
+  out.chunk_require_fit
+      = truthy(synth_set(opts, "place.chunk.require_fit", chunk_run != "flow" && chunk_gb > 0 ? "true" : "false"));
+  out.chunk_seed_detail  = truthy(synth_set(opts, "place.chunk.seed_detail", "true"));
+  out.chunk_memory_bytes = static_cast<uint64_t>(chunk_gb * 1e9);
+  // Explicit centroid experiment settings still select the experimental solver.
+  const bool centroid_options
+      = std::any_of(opts.sets.begin(), opts.sets.end(), [](const auto& kv) { return kv.first.starts_with("synth.place.fp."); });
+  const bool chunk_budget_set
+      = std::any_of(opts.sets.begin(), opts.sets.end(), [](const auto& kv) { return kv.first == "synth.place.chunk.memory_gb"; });
+  out.fp_chunks = truthy(fp_mode) && fp_mode != "centroid" && (!centroid_options || fp_mode == "chunks" || chunk_budget_set);
+  if (out.chunk_require_fit && (!out.fp_chunks || out.chunk_memory_bytes == 0)) {
+    throw Lhd_error{"usage", "chunk.require_fit requires a chunk floorplan and a positive memory budget", ""};
+  }
+  out.chunk_only = synth_set(opts, "place.chunk.only", "");
+  if (!out.chunk_only.empty() && chunk_run == "flow") {
+    throw Lhd_error{"usage", "chunk.only requires chunk.run=feedback or export", ""};
+  }
+  if (chunk_run != "flow") {
+    if ((chunk_run != "export" && chunk_run != "feedback") || !out.fp_chunks || !out.full || opts.workdir.empty()) {
+      throw Lhd_error{"usage",
+                      "chunk.run requires feedback or export, a full chunk floorplan, and a named workdir",
+                      "use --set synth.place.fp=chunks --workdir W"};
+    }
+    for (const auto& e : opts.emit_dirs) {
+      if (e.kind == "def") {
+        throw Lhd_error{"usage", "a chunk feedback run cannot emit a whole-design DEF", "use the saved per-home placements"};
+      }
+    }
+    out.chunk_manifest = (fs::absolute(opts.workdir) / "synth/place/chunks.json").string();
+  }
+  out.explicit_chunk_gate = out.fp_chunks && (fp_mode != "auto" || chunk_budget_set);
+  out.fp_auto             = !out.fp_chunks && fp_mode == "auto";
+  out.fp_place            = !out.fp_chunks && !out.fp_auto && truthy(fp_mode);
   out.fp_auto_options = {.share          = number("place.fp.auto_share", "0.2"),
                          .min_copies     = static_cast<int>(integer("place.fp.auto_min_copies", "2")),
                          .min_copy_share = number("place.fp.auto_min_copy_share", "0.02"),
@@ -1155,6 +1195,9 @@ livehd::placement::Options placement_options(const Options& opts) {
                     "expected nonnegative values; attraction/repulsion must be positive"};
   }
   out.macro_mode = synth_set(opts, "place.macro", "none");
+  if (!out.chunk_manifest.empty() && out.macro_mode != "none") {
+    throw Lhd_error{"usage", "independent chunk placement requires synth.place.macro=none", ""};
+  }
   if (out.fp_place && out.macro_mode == "h2d") {
     throw Lhd_error{"usage", "synth.place.fp requires the native plain placer", "use synth.place.macro=none"};
   }
@@ -1683,9 +1726,10 @@ void synth_command(Options& opts, Result& res) {
     std::error_code ec;
     root = fs::absolute(opts.workdir, ec).string() + "/synth";
   }
-  if (opts.replayed && !fingerprint.empty() && opts.incremental && opts.emits.empty() && opts.emit_dirs.empty()) {
+  if (synth_set(opts,"place.chunk.run","flow")=="flow" && opts.replayed && !fingerprint.empty() && opts.incremental && opts.emits.empty() && opts.emit_dirs.empty()) {
     std::error_code ec;
-    if (const auto entry = manifest_get(root, "synth"); entry && fs::exists(root + "/qor.json", ec) && fs::exists(root + "/net", ec)) {
+    if (const auto entry = manifest_get(root, "synth");
+        entry && fs::exists(root + "/qor.json", ec) && fs::exists(root + "/net", ec)) {
       rapidjson::Document doc;
       doc.Parse(entry->c_str());
       if (!doc.HasParseError() && doc.IsObject() && doc.HasMember("fingerprint") && doc["fingerprint"].IsString()
@@ -1699,7 +1743,56 @@ void synth_command(Options& opts, Result& res) {
       }
     }
   }
-  synth_command_flow(opts, res);
+  try {
+    synth_command_flow(opts, res);
+  } catch (const livehd::placement::Chunk_jobs_ready& ready) {
+    set_crash_context({}, {});
+    std::erase_if(res.outputs, [](const auto& path) { return !fs::exists(path); });
+    res.outputs.push_back(ready.manifest);
+    res.recipe_steps.emplace_back("pass.place.chunk_export");
+    if (synth_set(opts, "place.chunk.run", "flow") == "feedback") {
+      auto dir = fs::path(ready.manifest).parent_path() / "feedback";
+      for (unsigned i = 1; fs::exists(dir); ++i) {
+        dir = fs::path(ready.manifest).parent_path() / ("feedback-" + std::to_string(i));
+      }
+      // wait4 may include the pre-exec image's resident size on Linux.
+      // Start a lightweight scheduler so the synthesis heap is never the
+      // worker's starting image, even for the first tiny home.
+      // A replay changes cwd first, so a relative argv[0] may no longer resolve: prefer the running image.
+      std::error_code self_ec;
+      const auto      self = fs::read_symlink("/proc/self/exe", self_ec);
+      auto  exe = self_ec ? opts.invocation_argv.at(0) : self.string(), manifest = ready.manifest, destination = dir.string();
+      char* argv[] = {exe.data(),
+                      const_cast<char*>("place-chunks"),
+                      manifest.data(),
+                      const_cast<char*>("--out"),
+                      destination.data(),
+                      nullptr};
+      pid_t child;
+      // stdout carries lhd's result protocol; the scheduler and its workers (DREAMPlace prints to stdout) log to stderr.
+      posix_spawn_file_actions_t actions;
+      posix_spawn_file_actions_init(&actions);
+      posix_spawn_file_actions_adddup2(&actions, STDERR_FILENO, STDOUT_FILENO);
+      int error = posix_spawnp(&child, argv[0], &actions, nullptr, argv, environ);
+      posix_spawn_file_actions_destroy(&actions);
+      if (error) {
+        throw Lhd_error{"io", "could not start chunk scheduler: " + std::string(std::strerror(error)), ""};
+      }
+      int   status = 0;
+      pid_t waited;
+      do {
+        waited = waitpid(child, &status, 0);
+      } while (waited < 0 && errno == EINTR);
+      const bool rc = waited != child || !WIFEXITED(status) || WEXITSTATUS(status) != 0;
+      res.outputs.push_back((dir / "metadata.json").string());
+      res.recipe_steps.emplace_back("pass.place.chunk_feedback");
+      if (rc) {
+        throw Lhd_error{"unsupported", "one or more local placements did not pass", "see " + (dir / "metadata.json").string()};
+      }
+    }
+    res.qor_json = R"({"kind":"chunk_handoff","whole_design_placed":false})";
+    return;
+  }
   if (!root.empty() && !fingerprint.empty() && !livehd::diag::sink().has_errors() && !res.qor_json.empty()) {
     rapidjson::StringBuffer                    sb;
     rapidjson::Writer<rapidjson::StringBuffer> w(sb);
@@ -1746,9 +1839,14 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
   bool              run_sta       = mapped_output && truthy(synth_set(opts, "opentimer", "true"));
   const bool        run_place     = truthy(synth_set(opts, "place", "false"));
   auto              place_options = run_place ? placement_options(opts) : livehd::placement::Options{};
-  place_options.liberty           = liberty;
-  const bool fast_policy          = truthy(synth_set(opts, "place.policy.fast", "false"));
-  place_options.runtime_policy    = std::make_shared<livehd::placement::Mutation_policy>(
+  const bool isolated = !place_options.chunk_manifest.empty();
+  if (!run_place && (synth_set(opts, "place.chunk.run", "flow") != "flow" || !synth_set(opts, "place.chunk.only", "").empty())) {
+    throw Lhd_error{"usage", "chunk runs require synth.place=true", ""};
+  }
+  if(isolated)run_sta=false;
+  place_options.liberty        = liberty;
+  const bool fast_policy       = truthy(synth_set(opts, "place.policy.fast", "false"));
+  place_options.runtime_policy = std::make_shared<livehd::placement::Mutation_policy>(
       livehd::placement::Mutation_policy{fast_policy || truthy(synth_set(opts, "place.policy.no_resynthesis", "false")),
                                          fast_policy || truthy(synth_set(opts, "place.policy.no_sizing", "false")),
                                          fast_policy || truthy(synth_set(opts, "place.policy.no_buffer_edits", "false"))});
@@ -1756,8 +1854,8 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
     place_options.placement_session     = placement_session;
     place_options.placement_area_resume = placement_area_resume;
   }
-  const bool run_resize   = truthy(synth_set(opts, "place.resize", run_place && run_sta && place_options.full ? "true" : "false"));
-  const bool run_resynth  = truthy(synth_set(opts, "place.resynth", "false"));
+  const bool run_resize   = !isolated && truthy(synth_set(opts, "place.resize", run_place && run_sta && place_options.full ? "true" : "false"));
+  const bool run_resynth  = !isolated && truthy(synth_set(opts, "place.resynth", "false"));
   // 2i-interact: the interactive session serves the whole run and keeps the process alive afterwards.
   std::shared_ptr<livehd::placement::gui::Session> gui_session;
   std::string                                      gui_video_out;
@@ -2195,7 +2293,7 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
   place_options.gp_resize = run_resize && place_options.gp_resize;
   // Timing weights are the normal full-placement objective. Synthesis-only
   // and GP-only commands do not enter the full-placement refinement loop.
-  bool       run_timing_place = truthy(synth_set(opts, "place.timing_driven", run_place && place_options.full ? "true" : "false"));
+  bool       run_timing_place = !isolated && truthy(synth_set(opts, "place.timing_driven", run_place && place_options.full ? "true" : "false"));
   const bool macro_plan_only  = run_place && place_options.full && !place_options.final_cells;
   // The provisional domino profile (pass.usyn.physical=domino_provisional,
   // pass/domplace) is opt-in, and every consumer it does not support is an
@@ -3151,6 +3249,9 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
     }
   }
 
+  std::unique_ptr<livehd::placement::Placement_peak> placement_peak;
+  std::string                                        memory_profile_path, memory_context;
+  std::shared_ptr<const std::string>                 measured_plan;
   // ---- placement: one persistent flat graph for physical outputs and STA ----
   hhds::GraphLibrary                  placed_library;
   std::unique_ptr<hhds::GraphLibrary> restored_library;
@@ -3172,7 +3273,7 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
   const std::string                   place_qor_path = root + "/place/qor.json";
   if (run_place) {
     bool restored = false;
-    if (physical_cache) {
+    if (physical_cache && place_options.chunk_manifest.empty()) {
       Phase_timer phase(res, "pass.place.restore");
       const auto  restored_net = root + "/repaired_net";
       restored                 = physical_cache->restore(restored_net, root + "/place");
@@ -3183,7 +3284,7 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
           if (fs::is_regular_file(path)) {
             auto cached = livehd::metadata::Bundle::read(path);
             merged.erase_selected("livehd.placement.state", top);
-            for (const auto* klass : {"livehd.placement.state", "livehd.placement.hint_results"}) {
+            for (const auto* klass : {"livehd.placement.state", "livehd.placement.hint_results", "livehd.placement.chunk_plan", "livehd.placement.chunk_results", livehd::placement::memory_sample_class}) {
               for (const auto* record : cached.select(klass, top)) {
                 merged.replace(*record);
               }
@@ -3271,6 +3372,58 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
         throw Lhd_error{"internal", "mapped top missing before placement", ""};
       }
       place_options.output_dir = root + "/place";
+      if(place_options.fp_chunks){
+        memory_profile_path = synth_set(opts, "place.chunk.profile", "");
+        if (memory_profile_path.empty() && user_workdir) {
+          memory_profile_path = opts.workdir + "/place_memory.json";
+        }
+        // Content of all LEF and Liberty views, platform and the downstream schedule.
+        // Exclude the budget and metadata paths: one population can train many budgets.
+        std::map<std::string, std::string> schedule;
+        for (const auto& [key, val] : opts.sets) {
+          if ((key.starts_with("synth.place.") || key.starts_with("synth.timing.") || key == "lhd.jobs")
+              && !key.starts_with("synth.place.chunk.") && !key.starts_with("synth.place.gui.") && key != "synth.place.fp") {
+            schedule[key] = val;
+          }
+        }
+        std::string policy = std::format("placement-rss-v1:{}:{}:{}:{}:{}:{}:{}:{}",
+                                         run_sta,
+                                         run_timing_place,
+                                         run_resize,
+                                         run_resynth,
+                                         synth_set(opts, "timing.engine", "opentimer"),
+                                         place_options.threads,
+                                         place_options.bins,
+                                         place_options.macro_mode);
+        for (const auto& [key, value] : schedule) {
+          policy += std::format(":{}:{}:{}:{}", key.size(), key, value.size(), value);
+        }
+#ifdef __APPLE__
+        policy += ":darwin";
+#else
+        policy += ":linux";
+#endif
+        memory_context
+            = std::format("{:016x}-{:016x}", place_options.technology().content_hash, livehd::hash_util::fnv1a64(policy));
+        if (isolated) {
+          memory_context = std::format("home-v1:{:016x}:{}:{}:{}:{}",
+                                       place_options.technology().content_hash,
+                                       place_options.threads,
+                                       place_options.chunk_seed_detail,
+                                       place_options.iterations,
+#ifdef __APPLE__
+                                       "darwin"
+#else
+                                       "linux"
+#endif
+          );
+        }
+        place_options.chunk_predictor = std::make_shared<const livehd::placement::Chunk_predictor>(
+            livehd::placement::load_chunk_predictor(memory_context, memory_profile_path, place_options.metadata.get()));
+        if (!gui_session && !isolated) {
+          placement_peak = std::make_unique<livehd::placement::Placement_peak>();
+        }
+      }
       if (place_options.full) {
         livehd::placement::initialize_growth_budget(**found, place_options);
         place_options.growth_budget->fraction     = place_options.growth_fraction;
@@ -3702,7 +3855,7 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
         prepared_before = true;
         return cleaned.graph;
       };
-      if (gui_session || (place_options.metadata && !place_options.metadata->select("livehd.placement.hints", top).empty())) {
+      if (place_options.fp_chunks || gui_session || (place_options.metadata && !place_options.metadata->select("livehd.placement.hints", top).empty())) {
         // Both buffer cleanup and the timing seed flatten this hierarchy.
         place_options.metadata_scopes = std::make_shared<const std::vector<livehd::placement::Hint_scope>>(
             livehd::placement::placement_hint_scopes(**found, place_options.technology().lef));
@@ -3936,6 +4089,11 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
       // Cell-only timing/repair trials must retain that decision, rather than
       // replaying the hints against now-fixed macros and reporting them invalid.
       place_options.metadata_finalized = true;
+      measured_plan = placed.accepted_chunk_plan;
+      place_options.accepted_chunk_plan=placed.accepted_chunk_plan;
+      if (place_options.fp_chunks && fs::is_regular_file(root + "/place/metadata.json")) {
+        place_options.metadata = std::make_shared<const livehd::metadata::Bundle>(livehd::metadata::Bundle::read(root + "/place/metadata.json"));
+      }
       if (io_flow) {
         timed_placement.timing = io_flow->take_final_timing();
       }
@@ -4515,6 +4673,36 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
   if (!place_qor.empty()) {
     res.qor_json.pop_back();
     res.qor_json += ",\"place\":" + place_qor + "}";
+  }
+  if (placement_peak) {
+    const auto peak = placement_peak->finish();
+    const auto path = root + "/place/metadata.json";
+    // An incremental placement that reused blocks skipped GP work: its peak is not evidence for a fresh run.
+    bool reused = false;
+    {
+      rapidjson::Document q;
+      q.Parse(place_qor.c_str());
+      if (!q.HasParseError() && q.IsObject() && q.HasMember("incremental") && q["incremental"].IsObject()) {
+        const auto& inc = q["incremental"];
+        reused          = inc.HasMember("reused_blocks") && inc["reused_blocks"].IsUint64() && inc["reused_blocks"].GetUint64() > 0;
+      }
+    }
+    if (measured_plan && !reused && fs::is_regular_file(path)) {
+      auto       bundle = livehd::metadata::Bundle::read(path);
+      const auto plans  = bundle.select("livehd.placement.chunk_plan", top);
+      // Until timed workers are isolated, a multi-chunk run measures the whole
+      // pipeline. Do not mislabel that number as training evidence for each worker.
+      if (plans.size() == 1 && (*plans[0])["chunks"].Size() == 1 && plans[0]->HasMember("memory_prediction")) {
+        const auto& pred = (*plans[0])["memory_prediction"];
+        if (memory_context == pred["context"].GetString()) {
+          livehd::placement::Memory_counts n{};
+          for (unsigned j = 0; j < 4; ++j) {
+            n[j] = pred["counts"][j].GetUint64();
+          }
+          livehd::placement::save_chunk_sample(memory_context, n, placement_peak->start, peak, memory_profile_path, path);
+        }
+      }
+    }
   }
   harvest_abc_incremental(res);           // the envelope's `incremental.abc` (one place for every reuse tier)
   harvest_sta_incremental(res, sta_qor);  // ... and `incremental.sta`

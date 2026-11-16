@@ -76,6 +76,48 @@ TEST(Placement, MacroTrackAlignmentUsesOrientedPinsAndImportedTrackPhase) {
   }
 }
 
+TEST(Placement, MacroTrackLatticeAgreesWithWhatTheLegalizerDemandsOfAFixedMacro) {
+  const auto [tech, fp] = track_fixture();
+  const auto on = [](const Macro_track_lattice& l, int64_t x, int64_t y) {
+    const auto hit = [](const std::vector<int64_t>& phases, int64_t period, int64_t v) {
+      return std::ranges::any_of(phases, [&](int64_t phase) { return ((v - phase) % period + period) % period == 0; });
+    };
+    return hit(l.phases[0], l.period[0], x) && hit(l.phases[1], l.period[1], y);
+  };
+  for (auto orientation :
+       {physical::Orientation::N, physical::Orientation::S, physical::Orientation::FN, physical::Orientation::FS}) {
+    const auto lattice = macro_track_lattice(tech, fp, "ram", orientation);
+    ASSERT_TRUE(lattice.has_value());
+    EXPECT_EQ(lattice->pins, 3u);  // the power pin does not constrain
+    // an origin the legalizer moves a macro to is on the lattice
+    std::vector<physical::Component> cells{track_macro(orientation)};
+    legalize_macro_tracks(tech, fp, cells, 2, 2, true);
+    EXPECT_TRUE(on(*lattice, cells.front().place.x, cells.front().place.y));
+    // and the lattice is exactly what a FIXED macro there is not rejected for
+    bool any_miss = false, any_hit = false;
+    for (int dx = 0; dx < 12; ++dx) {
+      for (int dy = 0; dy < 12; ++dy) {
+        const auto x = 30 + dx, y = 30 + dy;
+        std::vector<physical::Component> fixed{track_macro(orientation)};
+        fixed.front().place.x      = x;
+        fixed.front().place.y      = y;
+        fixed.front().place.status = Ann_place::Status::FIXED;
+        if (on(*lattice, x, y)) {
+          any_hit = true;
+          EXPECT_NO_THROW(legalize_macro_tracks(tech, fp, fixed, 2, 2, true)) << x << "," << y;
+        } else {
+          any_miss = true;
+          EXPECT_THROW(legalize_macro_tracks(tech, fp, fixed, 2, 2, true), std::runtime_error) << x << "," << y;
+        }
+      }
+    }
+    EXPECT_TRUE(any_miss);
+    EXPECT_TRUE(any_hit);
+  }
+  // no such master, or no pins that constrain: nothing to check
+  EXPECT_FALSE(macro_track_lattice(tech, fp, "nope", physical::Orientation::N).has_value());
+  EXPECT_FALSE(macro_track_lattice(tech, fp, "cell", physical::Orientation::N).has_value());
+}
 TEST(Placement, PinlessMovableMacroKeepsItsHaloInsideTheCore) {
   auto [tech, fp] = track_fixture();
   tech.macros.at("ram").pins.clear();

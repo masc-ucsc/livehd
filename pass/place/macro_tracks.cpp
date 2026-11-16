@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <format>
 #include <limits>
 #include <map>
 #include <numeric>
@@ -1316,4 +1317,31 @@ void legalize_rigid_macro_tracks(const ph::Technology& tech, const ph::Floorplan
   cells = std::move(result);
 }
 
+
+std::optional<Macro_track_lattice> macro_track_lattice(const physical::Technology& tech, const physical::Floorplan& fp, const std::string& master,
+                                                       physical::Orientation orientation) {
+  if (!tech.macros.contains(master)) {
+    return std::nullopt;
+  }
+  ph::Component c;
+  c.macro             = master;
+  c.place.orientation = orientation;
+  try {
+    const auto p = profile(tech, fp, c);
+    if (p.pins.empty()) {
+      return std::nullopt;
+    }
+    Macro_track_lattice lattice;
+    lattice.pins = unsigned(p.pins.size());
+    for (int axis = 0; axis < 2; ++axis) {
+      lattice.period[axis] = p.period[axis];
+      for (const auto& phase : p.phases[axis]) {
+        lattice.phases[axis].push_back(phase.value);
+      }
+    }
+    return lattice;
+  } catch (const std::exception&) {
+    return std::nullopt;  // the flow reports why when it needs the macro; here it constrains nothing
+  }
+}
 }  // namespace livehd::placement

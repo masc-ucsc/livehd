@@ -73,6 +73,57 @@ The three mutation controls are `no_resynthesis`, `no_sizing` and `no_buffer_edi
 
 Open **Configure quality score** to choose the routing estimator, enter loss weights that sum to one and set each half-score loss in the indicated units. The socket accepts the same settings through `score_config`. A queued candidate retains the settings from submission. The routing summary measures the configured estimator independently of the congestion map selected for display.
 
+## Inspect and edit an FP chunk
+
+At an FP gate, start with `export what=chunks limit=16`. It returns a page of
+physical IDs, bounds, estimated bytes, port/member counts, the design’s crossing
+HPWL (DBU), and any measured local result for this plan. Page with `offset` or
+request a single `chunk=ID`. These reads omit the individual pins and cells.
+Use `export what=floorplan encoding=json_text` for the full, replayable bundle.
+
+Select a home on the floorplan or in **Target** to locate its peers. Gray
+shading and ↔ count shared crossing nets; teal dashed bounds (L) mark the
+same logical partition; purple inset bounds (P) mark the same planned physical
+implementation within that partition. Pink dotted bounds (I) mean the homes
+share a boundary interface; they can still have different implementations.
+The marks can coincide. **Find a related home** lists peers by relationship
+and selects them directly. A preview shows the trial relationships.
+Agents can request the same IDs, bounds, net counts and flags with
+`export what=chunk_peers chunk=ID view=live` (or `preview`, with `offset` and `limit`).
+
+In the **Copy a boundary interface** panel, select a target home, its source
+and an orientation. The same socket operation needs only the home IDs. For
+example, using the IDs and revisions returned by the first read:
+
+```json
+{"cmd":"chunk_interface","chunk":"target-id","source":"source-id","orientation":"auto","apply":false,"expect":{"frame":12,"intent":2}}
+```
+
+Wait for `command_status` on the returned sequence. Read
+`export what=chunks view=preview chunk=target-id`: `interface_copy` gives
+the selected orientation and the source, target and matched contact counts.
+Open **Inspect boundary contacts**, or page through
+`export what=chunk_pins chunk=target-id view=preview match=local` to see the
+signals that kept their own locations. With `match=copied` each target pin
+also names its corresponding source net and gives both coordinates in DBU.
+Ordinary reads still describe the live plan. Repeat with `apply:true` to use
+the result, or use `orientation:"clear"` to remove it. Save the floorplan to
+keep the edit. A receipt acknowledges a plan edit; it does not run placement
+or routing. To measure just this home in a fresh run, pass the saved bundle
+beside the original design and use `synth.place.chunk.run=feedback` with
+`synth.place.chunk.only=target-id`.
+
+In the five-home ASAP7 Eyeriss trial, H2 → H4 matched 1,000 of 1,064 target
+contacts; H5 → H3 matched all 998. A straight copy of both interfaces gave
+1.914 m of crossing-pin HPWL. Auto chose a top-to-bottom mirror for each,
+bringing that to 0.905 m; independent interfaces gave 0.871 m. Compare all
+three: a mirror can recover most of the wirelength cost of reuse without
+beating independent placement. These are floorplan estimates. With its
+colors and box held fixed, the H4 worker actually measured **higher** local
+HPWL for the auto mirror (3.282 m) than for the straight interface (2.197 m).
+The proxy and worker measure different nets. Compare both before accepting
+a change; neither is routed length or delay.
+
 ## Try candidates and discard them
 
 Choose **Begin exploration** to open a private foreground evaluator. **Evaluate this frame** submits a background geometry, timing, relaxation, repair or downstream-routing candidate from the displayed live frame. Select the operation and its budget. For bounded relaxation or sizing, **Limit to selected cells** resolves the current selection to exact names when the candidate is submitted. A terminal repair can use sizing, buffering and resynthesis when the build supports them. For a scoped repair, only sizing is available. Inspect the saved membership with `export what=scope target=ID`.

@@ -22,6 +22,7 @@
 #include "gui_geometry.hpp"
 #include "gui_ipc.hpp"
 #include "gui_render.hpp"
+#include "gui_tracks.hpp"
 #include "gui_wire.hpp"
 #include "gui_worker.hpp"
 #include "rapidjson/document.h"
@@ -31,10 +32,35 @@
 namespace livehd::placement::gui {
 
 namespace {
-constexpr std::array<std::string_view, 1> hint_class{"livehd.placement.hints"};
+constexpr std::array<std::string_view, 2> hint_class{"livehd.placement.hints","livehd.placement.chunk_guidance"};
 // These inputs may change the graph, the legal sites, or the initial macro poses.
-constexpr std::array<std::string_view, 4> synthesis_placement_classes{
-    "livehd.synth.tuning", "livehd.physical.row_access", "livehd.placement.hints", "livehd.placement.state"};
+constexpr std::array<std::string_view, 5> synthesis_placement_classes{
+    "livehd.synth.tuning", "livehd.physical.row_access", "livehd.placement.hints", "livehd.placement.state","livehd.placement.chunk_guidance"};
+
+// Workers may have a different thread allowance and RSS model. Those observations
+// are not placement, but a different partition, pose, or pin location is.
+uint64_t physical_scene_identity(const Scene& scene) {
+  wire::Encoder enc;
+  physical_scene_fields(enc, const_cast<Scene&>(scene));
+  auto hash = hash_util::fnv1a64(enc.bytes);
+  if (scene.chunk_plan.empty()) {
+    return hash;
+  }
+  rapidjson::Document plan;
+  plan.Parse<rapidjson::kParseFullPrecisionFlag>(scene.chunk_plan.c_str());
+  if (!plan.IsObject() || !plan.HasMember("chunks") || !plan["chunks"].IsArray()) {
+    throw std::runtime_error("invalid GUI chunk plan");
+  }
+  for (const char* key : {"memory_prediction", "input_key", "budget_bytes", "local_placement"}) {
+    plan.RemoveMember(key);
+  }
+  for (auto& c : plan["chunks"].GetArray()) {
+    c.RemoveMember("estimated_bytes");
+    c.RemoveMember("allowance_bytes");
+    c.RemoveMember("oversized_object");
+  }
+  return hash_util::fnv1a64(metadata::canonical(plan), hash);
+}
 
 std::string esc(const std::string& s) {
   std::string out;
@@ -284,8 +310,52 @@ void Session::set_options_json(std::string json) {
     controller_->call("options", json);
     return;
   }
+  {
+    rapidjson::Document options;
+    options.Parse(json.c_str());
+    std::lock_guard flags(flags_m_);
+    flag_specs_.clear();
+    if (options.IsArray()) {
+      for (const auto& opt : options.GetArray()) {
+        if (opt.IsObject() && opt.HasMember("name") && opt["name"].IsString()) {
+          flag_specs_[opt["name"].GetString()]
+              = {opt.HasMember("kind") && opt["kind"].IsString() ? opt["kind"].GetString() : "text", opt.HasMember("ro") && opt["ro"].IsBool() && opt["ro"].GetBool()};
+        }
+      }
+    }
+  }
   std::lock_guard lk(m_);
   options_json_ = std::move(json);
+}
+
+// "" when `name=value` is something a restart can set. With no option table (a session the host did not describe)
+// nothing is known and everything passes.
+std::string Session::validate_flag(const std::string& name, const std::string& value) const {
+  std::lock_guard flags(flags_m_);
+  if (flag_specs_.empty()) {
+    return {};
+  }
+  auto found = flag_specs_.find(name);
+  if (found == flag_specs_.end() && !name.starts_with("synth.")) {
+    found = flag_specs_.find("synth." + name);
+  }
+  if (found == flag_specs_.end()) {
+    return "unknown option " + name + " (the options panel lists the ones a restart can set)";
+  }
+  if (found->second.ro) {
+    return "option " + name + " is read-only in a placement session";
+  }
+  if (found->second.kind == "boolean" && value != "true" && value != "false" && value != "1" && value != "0") {
+    return "option " + name + " is boolean: use true or false, not '" + value + "'";
+  }
+  if (found->second.kind == "integer") {
+    long long number = 0;
+    const auto [end, ec] = std::from_chars(value.data(), value.data() + value.size(), number);
+    if (value.empty() || ec != std::errc{} || end != value.data() + value.size()) {
+      return "option " + name + " is an integer, not '" + value + "'";
+    }
+  }
+  return {};
 }
 
 std::string Session::options_json() const {
@@ -453,6 +523,23 @@ void Session::push_frame_locked(std::shared_ptr<const Frame> f) {
         if (!other.exclusion) {
           geometry_conflicts_[other.name].push_back(issue.cause + " with " + node);
         }
+      }
+    }
+  }
+  if (scene_ && !scene_->track_lattices.empty()) {
+    // A pinned macro is held exactly through legalization and a FIXED one is taken as it is: both must already put every
+    // signal pin on a routing track, or the run ends later with "fixed macro pin misses routing tracks". A movable,
+    // unpinned macro is aligned by the flow's own legalizer and is not checked here.
+    for (size_t i = 0; i < scene_->nodes.size() && i < f->x.size(); ++i) {
+      const auto& node = scene_->nodes[i];
+      if ((node.kind != Kind::macro && node.kind != Kind::fixed) || node.exclusion || (node.kind == Kind::macro && !pins_.contains(node.name))) {
+        continue;
+      }
+      const auto x = std::round(f->x[i]), y = std::round(f->y[i]);
+      if (const auto axis = track_miss(*scene_, i, node.orient, x, y); !axis.empty()) {
+        const auto near = track_nearest(*scene_, i, node.orient, x, y);
+        geometry_conflicts_[node.name].push_back(
+            std::format("misses_tracks ({} axis; nearest aligned origin {},{})", axis, std::llround(near[0]), std::llround(near[1])));
       }
     }
   }
@@ -899,7 +986,7 @@ void Session::begin_phase(std::shared_ptr<const Scene> scene, const double* x, c
     hint_hash_ = hash_util::fnv1a64(bundle.identity(hint_class, scene->design));
   }
   scene_      = std::move(scene);
-  design_hash_ = hash_util::fnv1a64(wire::pack(*scene_));
+  design_hash_ = physical_scene_identity(*scene_);
   stage_name_ = scene_->phase;
   pending_moves_.clear();
   ++scene_version_;
@@ -1254,9 +1341,9 @@ std::string Session::intent() const {
   return cfg_.intent;
 }
 void Session::intent_unlocked(const Command& cmd, std::unique_lock<std::mutex>& lock) {
-  intent_report_frame_ = frame_ ? frame_->id : 0;
+  intent_report_frame_    = frame_ ? frame_->id : 0;
   intent_report_sequence_ = cmd.sequence;
-  intent_report_ = "{}";
+  intent_report_          = "{}";
   if (!intent_provider_ || !frame_) {
     intent_status_ = "intent unavailable at this gate";
     bump_locked();
@@ -1266,18 +1353,27 @@ void Session::intent_unlocked(const Command& cmd, std::unique_lock<std::mutex>& 
   auto       frame    = frame_;
   auto       current  = cfg_.intent;
   const auto design   = scene_->design;
+  const bool chunks   = scene_->phase == "fp" && !scene_->chunk_plan.empty();
   const bool apply    = cmd.cmd == "intent_apply";
   lock.unlock();
   std::string report, error;
-  uint64_t hint_hash = 0;
+  uint64_t    hint_hash = 0;
   try {
-    metadata::Bundle bundle(current);
-    bundle.replace_selected("livehd.placement.hints", design, metadata::Bundle(cmd.file));
+    metadata::Bundle       bundle(current);
+    const metadata::Bundle incoming(cmd.file);
+    // replace_selected erases the whole class first: a hints-only payload at the chunk gate would silently drop
+    // every chunk edit and still report "applied".
+    if (chunks && incoming.select("livehd.placement.chunk_guidance", design).empty()
+        && !incoming.select("livehd.placement.hints", design).empty()) {
+      throw std::runtime_error(
+          "placement hints do not apply at the chunk floorplan gate; send livehd.placement.chunk_guidance records");
+    }
+    bundle.replace_selected(chunks ? "livehd.placement.chunk_guidance" : "livehd.placement.hints", design, incoming);
     if (apply) {
       hint_hash = hash_util::fnv1a64(bundle.identity(hint_class, design));
     }
     current = bundle.json();
-    report = provider(current, *frame, apply);
+    report  = provider(current, *frame, apply);
   } catch (const std::exception& ex) {
     error = ex.what();
   }
@@ -1290,8 +1386,43 @@ void Session::intent_unlocked(const Command& cmd, std::unique_lock<std::mutex>& 
   intent_report_ = std::move(report);
   intent_status_ = apply ? "applied" : "preview";
   if (apply) {
+    if (chunks) {
+      // Replace only the live coarse scene. Historical scenes retain the boundaries of their own frame.
+      rapidjson::Document plan;
+      plan.Parse<rapidjson::kParseFullPrecisionFlag>(intent_report_.c_str());
+      auto updated          = std::make_shared<Scene>(*scene_);
+      updated->chunk_plan   = intent_report_;
+      std::vector<double> x = frame->x, y = frame->y;
+      for (const auto& c : plan["chunks"].GetArray()) {
+        for (const auto& member : c["members"].GetArray()) {
+          bool macro = member["macro"].GetBool();
+          int  i     = updated->node_index(std::string(macro ? "macro:" : "color:") + member["id"].GetString());
+          if (i < 0) {
+            continue;
+          }
+          auto& node = updated->nodes[i];
+          if (macro && node.kind == Kind::fixed) {
+            continue;  // Density edits move slot boundaries; the imported macro retains its physical pose.
+          }
+          const auto& box = member["box_dbu"];
+          double      w = box[2].GetDouble() - box[0].GetDouble(), h = box[3].GetDouble() - box[1].GetDouble();
+          if (!macro) {
+            const double area = member["reserved_dbu2"].GetDouble();
+            node.w            = std::min(w, std::sqrt(area));
+            node.h            = std::min(h, area / node.w);
+          }
+          x[i] = box[0].GetDouble() + (w - node.w) / 2;
+          y[i] = box[1].GetDouble() + (h - node.h) / 2;
+        }
+      }
+      scene_ = std::move(updated);
+      ++scene_version_;
+      design_hash_ = physical_scene_identity(*scene_);
+      publish_locked(x.data(), y.data(), x.size(), frame->stats, state_name_);
+      intent_report_frame_ = frame_->id;
+    }
     cfg_.intent = std::move(current);
-    hint_hash_ = hint_hash;
+    hint_hash_  = hint_hash;
     ++intent_revision_;
     trace_locked(cmd);
   }
@@ -1652,7 +1783,7 @@ void Session::apply_locked(const Command& c, Edits&) {
       }
       scene_ = std::move(updated);
       ++scene_version_;
-      design_hash_ = hash_util::fnv1a64(wire::pack(*scene_));
+      design_hash_ = physical_scene_identity(*scene_);
     }
   }
   if (!c.relationship.empty()) {
@@ -1723,7 +1854,12 @@ void Session::apply_locked(const Command& c, Edits&) {
     // re-executes the process (same pid, port and token), so this returns only when it could not.
     Restart_request r;
     r.set = c.set;
-    if (c.cp < 0 || size_t(c.cp) >= checkpoints_.size()) {
+    if (c.cp >= 0 && size_t(c.cp) >= checkpoints_.size()) {  // not "from the start": that would drop every edit
+      note_ = std::format("restart: no checkpoint {} (state.cps has {})", c.cp, checkpoints_.size());
+      bump_locked();
+      return;
+    }
+    if (c.cp < 0) {
       r.from_start = true;
     } else {
       const auto& cp = checkpoints_[size_t(c.cp)];
@@ -1898,7 +2034,12 @@ void Session::apply_locked(const Command& c, Edits&) {
       std::error_code ec;
       std::filesystem::create_directories(cfg_.shot_dir, ec);
       const auto png = render_png(*scene_, *frame_, pinned, ro, map_frame_ == frame_->id ? map_.get() : nullptr);
-      std::ofstream(std::filesystem::path(cfg_.shot_dir) / std::filesystem::path(c.file).filename(), std::ios::binary) << png;
+      const auto path = std::filesystem::path(cfg_.shot_dir) / std::filesystem::path(c.file).filename();
+      std::ofstream(path, std::ios::binary) << png;
+      note_ = "screenshot: " + path.string();  // the agent reads it back; the name is reduced to its basename
+    } else {
+      note_ = cfg_.shot_dir.empty() ? "screenshot: this session has no work directory to write into; GET /screenshot.png returns the picture"
+                                    : "screenshot needs a file name (written under " + cfg_.shot_dir + ")";
     }
   } else if (c.cmd == "finish") {
     finishing_ = true;
@@ -2735,7 +2876,7 @@ std::string Session::design_json(int cp, int tl) const {
     }
     out += "]";
   }
-  out += R"(],"exclusions":[)";
+  out += R"(],"chunk_plan":)" + (s.chunk_plan.empty() ? std::string("null") : s.chunk_plan) + R"(,"chunk_results":)" + (s.chunk_results.empty()?std::string("null"):s.chunk_results) + R"(,"exclusions":[)";
   for (size_t i = 0; i < s.exclusions.size(); ++i) {
     const auto& b  = s.exclusions[i];
     out           += std::format("{}[{},{},{},{}]", i ? "," : "", b.xl, b.yl, b.xh, b.yh);
@@ -3604,7 +3745,7 @@ std::string Session::parse_command(const std::string& json, Command& c) const {
   if (d.HasParseError() || !d.IsObject() || !d.HasMember("cmd") || !d["cmd"].IsString()) {
     return "bad command json";
   }
-  c.cmd = d["cmd"].GetString();
+  c.cmd.assign(d["cmd"].GetString(), d["cmd"].GetStringLength());
   if (d.HasMember("target") && (!d["target"].IsString() || d["target"].GetString() != cfg_.target)) {
     return "unknown placement target";
   }
@@ -3676,6 +3817,10 @@ std::string Session::parse_command(const std::string& json, Command& c) const {
     return true;
   };
   const auto numbers = [&](const char* key, std::vector<double>& out) {
+    if (d.HasMember(key) && d[key].IsNumber() && std::isfinite(d[key].GetDouble())) {
+      out.assign(std::max<size_t>(1, c.nodes.size()), d[key].GetDouble());  // one number: every node gets it
+      return true;
+    }
     if (!d.HasMember(key) || !d[key].IsArray()) {
       return false;
     }
@@ -3827,7 +3972,7 @@ std::string Session::parse_command(const std::string& json, Command& c) const {
       }
       if (!numbers(c.relative ? "dx" : "x", c.x) || !numbers(c.relative ? "dy" : "y", c.y) || c.x.size() != c.nodes.size()
           || c.y.size() != c.nodes.size()) {
-        return "move needs nodes[], x[], y[] or dx[], dy[] of equal length";
+        return "move needs nodes[] with x and y, or dx and dy: one number for every node or one number per node";
       }
     }
     if (d.HasMember("final") && d["final"].IsBool()) {
@@ -3880,11 +4025,20 @@ std::string Session::parse_command(const std::string& json, Command& c) const {
       c.delta = d["delta"].GetDouble();
     }
   } else if (c.cmd == "restart") {
-    c.cp = d.HasMember("checkpoint") && d["checkpoint"].IsInt() ? d["checkpoint"].GetInt() : -1;
+    if (d.HasMember("checkpoint") && !d["checkpoint"].IsInt()) {
+      return "checkpoint must be the index of a recorded checkpoint (state.cps); absent or -1 restarts from the start";
+    }
+    c.cp = d.HasMember("checkpoint") ? d["checkpoint"].GetInt() : -1;
+    if (c.cp < -1) {
+      return "checkpoint must be the index of a recorded checkpoint (state.cps); absent or -1 restarts from the start";
+    }
     if (d.HasMember("set") && d["set"].IsObject()) {
       for (const auto& m : d["set"].GetObject()) {
         if (!m.value.IsString()) {
           return "restart set values must be strings";
+        }
+        if (auto why = validate_flag(m.name.GetString(), m.value.GetString()); !why.empty()) {
+          return why;
         }
         c.set[m.name.GetString()] = m.value.GetString();
       }
@@ -4000,8 +4154,13 @@ std::string Session::resolve_move_locked(Command& c, const Frame* basis, bool ca
       return "unknown node " + c.nodes[k];
     }
     const size_t i = it->second;
+    if (c.cmd == "move" && !scene_->nodes[i].movable && scene_->nodes[i].kind == Kind::fixed && state_name_ != "done") {
+      // The solver cannot move a placed macro: `move` used to skip it and still answer "applied" with its old pose.
+      return c.nodes[k] + " is a placed macro at this gate and move cannot move it: use macro_move (it re-runs the flow to the latest gate with the macro there)";
+    }
     if (!c.relationship.empty() && !scene_->nodes[i].movable && state_name_ != "done") {
-      return "relative move requires a movable node at this gate: " + c.nodes[k];
+      return "a relative or aligned move needs a movable node and " + c.nodes[k]
+             + " is fixed at this gate (a placed macro): give it absolute x and y, or move it at the fp or macro gate";
     }
     if (!c.orientations.empty()) {
       const auto& node     = scene_->nodes[i];

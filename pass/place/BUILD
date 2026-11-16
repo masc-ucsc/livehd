@@ -1,5 +1,5 @@
 load("//tools:regression.bzl", "cc_test", "py_test")
-load("@rules_cc//cc:defs.bzl", "cc_library")
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
 load("@rules_python//python:defs.bzl", "py_binary", "py_library")
 load("//tools:copt_default.bzl", "COPTS")
 
@@ -731,11 +731,11 @@ cc_library(
 # 2i-interact: the interactive placement session, its HTTP server and the embedded page.
 cc_library(
     name = "gui",
-    srcs = ["gui/gui_worker.cpp","gui/gui_geometry.cpp","gui/gui_session.cpp", "gui/gui_server.cpp", "gui/gui_page.cpp", "gui/gui_render.cpp", "gui/gui_agent.cpp", "gui/gui_ipc.cpp"],
-    hdrs = ["macro_state.hpp", "gui/gui_policy.hpp","gui/gui_worker.hpp","gui/gui_geometry.hpp","gui/gui_session.hpp", "gui/gui_page.hpp", "gui/gui_render.hpp", "gui/gui_ipc.hpp", "gui/gui_wire.hpp"],
+    srcs = ["gui/gui_worker.cpp","gui/gui_geometry.cpp","gui/gui_session.cpp", "gui/gui_server.cpp", "gui/gui_page.cpp", "gui/gui_render.cpp", "gui/gui_agent.cpp", "gui/gui_ipc.cpp", "gui/gui_scan.cpp"],
+    hdrs = ["gui/gui_scan.hpp", "gui/gui_tracks.hpp", "macro_state.hpp", "gui/gui_policy.hpp","gui/gui_worker.hpp","gui/gui_geometry.hpp","gui/gui_session.hpp", "gui/gui_page.hpp", "gui/gui_render.hpp", "gui/gui_ipc.hpp", "gui/gui_wire.hpp"],
     copts = COPTS,
     visibility = ["//visibility:public"],
-    deps = [":macro_dead_space", "//core", "@rapidjson"],
+    deps = [":macro_dead_space", "//core", "@rapidjson", "@re2//:re2", "@zlib//:zlib"],
 )
 
 cc_test(
@@ -752,6 +752,37 @@ cc_test(
     data = ["//lhd:lhd"],
     copts = COPTS,
     deps = [":place", ":gui", "@dreamplace"],
+)
+
+cc_library(
+    name = "fp_chunks",
+    srcs = ["fp_chunks.cpp", "chunk_geometry.cpp", "chunk_topology.cpp", "chunk_templates.cpp", "chunk_refine.cpp", "chunk_jobs.cpp", "chunk_measure.cpp", "chunk_memory.cpp"],
+    hdrs = ["fp_chunks.hpp", "chunk_geometry.hpp", "chunk_topology.hpp", "chunk_templates.hpp", "chunk_refine.hpp", "chunk_jobs.hpp", "chunk_measure.hpp", "chunk_memory.hpp"],
+    copts = COPTS,
+    deps = ["//core", "@rapidjson", "@dreamplace"],
+)
+
+cc_binary(
+    name = "fp_plan_summary",
+    srcs = ["fp_plan_summary.cpp"],
+    visibility = ["//visibility:public"],
+    copts = COPTS,
+    deps = [":fp_chunks"],
+)
+
+py_test(
+    name = "fp_plan_summary_smoke",
+    size = "small",
+    srcs = ["tests/fp_plan_summary_smoke.py"],
+    main = "tests/fp_plan_summary_smoke.py",
+    data = [":fp_plan_summary"],
+)
+
+cc_test(
+    name = "fp_chunks_test",
+    srcs = ["fp_chunks_test.cpp"],
+    copts = COPTS,
+    deps = [":fp_chunks", "@googletest//:gtest_main"],
 )
 
 cc_library(
@@ -854,6 +885,7 @@ cc_library(
         ":terminal_legalize",
         ":legroute",
         ":fp_repetition",
+        ":fp_chunks",
         "//pass/pcrs",
         "//core",
         "//graph",

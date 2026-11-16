@@ -17,7 +17,7 @@ button{font:inherit;color:var(--fg);background:transparent;border:1px solid var(
 button:hover{border-color:var(--acc)} button.primary{background:var(--acc);color:#fff;border-color:var(--acc)}
 button:disabled{opacity:.45;cursor:default}
 #panel{position:absolute;right:12px;top:12px;bottom:12px;width:268px;overflow:auto;background:var(--pan);border:1px solid var(--line);border-radius:8px;padding:10px 12px}
-#panel h4{margin:12px 0 4px;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--mut)} #panel h4:first-child{margin-top:0}
+#implEditor label, #chunks fieldset label{flex-wrap:wrap} #chunks fieldset select{max-width:100%;min-width:0} #panel h4{margin:12px 0 4px;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--mut)} #panel h4:first-child{margin-top:0}
 .row{display:flex;justify-content:space-between;gap:8px} .row span:first-child{color:var(--mut)}
 label{display:flex;gap:6px;align-items:center;margin:2px 0} .na{opacity:.45}
 #tl{position:absolute;left:12px;top:58px;max-width:calc(100% - 310px);display:flex;gap:4px;align-items:center;overflow-x:auto;background:var(--pan);border:1px solid var(--line);border-radius:8px;padding:4px 6px}
@@ -151,6 +151,73 @@ input[type=number]{width:44px;font:inherit;color:var(--fg);background:transparen
 <label id="ioverlayControl" hidden><input type="checkbox" id="ioverlay" checked> Show intent targets</label>
 <output id="ilegend" class="mut" aria-live="polite"></output>
 <pre id="ibind" style="white-space:pre-wrap;max-height:12em;overflow:auto"></pre>
+<details id="chunks" hidden><summary>Floorplan chunks</summary>
+<label><input type="checkbox" id="chunkLines" checked> Show boundaries</label>
+<label>Target <select id="chunkSelect" style="max-width:100%"></select></label>
+<fieldset id="peerLegend" style="min-width:0"><legend>Chunk relationships</legend>
+<label><input type="checkbox" id="peerOverlay" checked> Highlight peers on the floorplan</label>
+<div id="peerCounts" aria-live="polite"></div>
+<div><b style="color:#d27713">▣</b> Selected · <b style="color:#778593">▧</b> Connected</div>
+<div><b style="color:#078b74">┄ L</b> Same logical partition</div>
+<div><b style="color:#9854cc">━ P</b> Same physical implementation</div>
+<div><b style="color:#c94f83">·· I</b> Shared pin interface</div>
+<details id="peerDetails"><summary>Find a related home</summary>
+<select id="peerFilter" aria-label="Relationship"><option value="nets">Connected</option><option value="logical">Logical partition</option><option value="physical">Physical implementation</option><option value="pins">Pin interface</option></select>
+<div id="peerList"></div><button id="peerPrev">Previous</button> <button id="peerNext">Next</button></details></fieldset>
+<div id="chunkInfo" class="mut"></div>
+<label>Density <input id="chunkDensity" type="number" min="0.001" max="1" step="any"></label>
+<button id="chunkApply">Apply</button> <button id="chunkClear">Inherit</button>
+<fieldset style="min-width:0"><legend>Move a physical chunk</legend>
+<label><input type="checkbox" id="chunkDrag" checked>Drag chunks (Alt-drag to pan)</label>
+<label><input type="checkbox" id="reviewDrop">Preview drop before applying</label>
+<span id="dropActions" hidden><button id="dropApply">Apply this move</button> <button id="dropDiscard">Discard preview</button></span>
+<label>Allow overlap <input type="number" id="chunkOverlap" min="0" max="25" step="1" value="0"> % per chunk</label>
+<label>Peer <select id="geometryPeer" style="max-width:100%"></select></label><output id="geometryPair" style="display:block" class="mut"></output>
+<button id="geometryLock">Lock aspect</button> <button id="geometryOthers">Lock other aspects</button>
+<button id="geometryUnlock">Unlock all</button> <button id="geometryUndo">Undo last geometry edit</button>
+<output id="geometryInfo" aria-live="polite" style="display:block">Drag to estimate wire spans with peers held still. Drop to refine boxes and pins.</output>
+</fieldset>
+<fieldset style="min-width:0"><legend>Physical homes</legend>
+<label><input id="homeLinks" type="checkbox" checked>Show selected interconnects</label>
+<label><input id="homeHeat" type="checkbox">Show estimated routing demand</label>
+<div id="homeMetrics" class="mut"></div><small>Wire and route proxies count crossing nets only. Split or fuse changes that set. Final placement checks row cutouts and fixed-cell obstacles.</small>
+<label>Edit <select id="homeAction"><option value="split">Split this home</option><option value="fuse">Fuse with another home</option></select></label>
+<div id="homeSplit"><label>Move to new home <select id="homeMembers" multiple size="4" style="max-width:100%"></select></label>
+<label>New home ID <input id="homeName" style="min-width:0;width:9em"></label></div>
+<div id="homeFuse" hidden><label>Fuse into selected home <select id="homePeer" style="max-width:100%"></select></label></div>
+<button id="homePreview">Preview</button> <button id="homeApply">Apply</button> <button id="homeUndo">Undo home edit</button>
+<output id="homeStatus" aria-live="polite" style="display:block"></output></fieldset>
+<fieldset style="min-width:0"><legend>Copy a boundary interface</legend>
+<div id="copyTarget" class="mut"></div>
+<label>Source home <select id="copySource" style="max-width:100%"></select></label>
+<label>Orientation <select id="copyOrientation"><option value="auto">Lowest crossing HPWL</option><option value="N">Unchanged (N)</option><option value="FN">Mirror left/right (FN)</option><option value="FS">Mirror top/bottom (FS)</option><option value="S">Rotate 180° (S)</option></select></label>
+<div class="mut">Only matching pins move. Unmatched contacts keep their own locations.</div>
+<button id="copyPreview">Preview pins</button> <button id="copyApply">Apply pins</button> <button id="copyClear">Remove copy</button>
+<output id="copyStatus" aria-live="polite" style="display:block"></output>
+<details id="copyContacts"><summary>Inspect boundary contacts</summary>
+<label>Show <select id="copyFilter"><option value="local">Kept local</option><option value="copied">Copied from source</option></select></label>
+<button id="copyPrev">Previous</button> <button id="copyNext">Next</button>
+<div id="copyRange" aria-live="polite"></div><ol id="copyPins" style="padding-left:2em;overflow-wrap:anywhere"></ol></details></fieldset>
+<fieldset style="min-width:0"><legend>Chunk implementations</legend>
+<label>Logical partition <select id="implFamily" style="max-width:100%"></select></label>
+<div id="implSummary" class="mut"></div>
+<label>Instances <select id="implCopies" aria-label="Instances of this logical partition" multiple size="5" style="width:100%"></select></label>
+<label>Change <select id="implAction">
+<option value="group">Group selected copies</option>
+<option value="shared">Share all copies</option><option value="separate">Separate every copy</option>
+<option value="auto">Automatically group all copies</option></select></label>
+<div id="implEditor">
+<label>Existing group <select id="implExisting"></select></label>
+<label>Group name <input id="implName" placeholder="e.g. A1" style="width:7em"></label>
+<label>Target width / height <input id="implAspect" type="number" step="any" min="0" placeholder="Automatic" style="width:6em"></label>
+<label>Interface pin <select id="implRole" style="max-width:100%"></select></label>
+<label>Side <select id="implSide"><option value="">Automatic</option><option>left</option><option>right</option><option>bottom</option><option>top</option></select>
+ Offset <input id="implOffset" type="number" min="0" max="1" step="any" value=".5" style="width:5em"></label>
+</div>
+<button id="implPreview">Preview change</button> <button id="implApply">Apply change</button>
+</fieldset>
+<button id="chunkSave">Save design metadata</button><output id="chunkStatus" aria-live="polite"></output>
+</details>
 <h4>Options <span id="f_n" class="mut"></span></h4>
 <button id="o_open" style="width:100%">synth.place options&hellip;</button>
 <div class="mut" style="font-size:11px;margin-top:3px">Every <code>lhd list options synth.place</code> entry, editable; rerun from the start or from the selected checkpoint.</div>
@@ -491,6 +558,534 @@ async function comparePlacement(){
  }catch(e){if(epoch===comparisonEpoch)$('xdiff').textContent=e.message}
 }
 $('xcompare').onclick=comparePlacement;$('xlayer').onchange=comparePlacement;
+let chunkPlan=null,homeLabels=new Map();
+function homeLabel(c,index){
+ const paths=c.instances||[],first=(paths[0]||'').split('.');
+ let n=first.length;
+ for(const path of paths){const parts=path.split('.');let k=0;while(k<n&&k<parts.length&&parts[k]===first[k])++k;n=k}
+ const common=first.slice(0,n).slice(-2).reverse().join(' / ');
+ return 'H'+(index+1)+(common?' · '+common:'');
+}
+function showChunks(plan) {
+ const select=$('chunkSelect'),previous=select.value; chunkPlan=plan;
+ homeLabels=new Map((plan?.chunks||[]).map((c,i)=>[c.id,homeLabel(c,i)]));
+ $('chunks').hidden=!plan;select.replaceChildren();if(!plan){dirty=true;return}
+ const added=new Set();
+ function add(kind,key,label,density,info){
+   const value=JSON.stringify([kind,key]);if(added.has(value))return;added.add(value);
+   const opt=new Option(label,value);opt.title=key;opt.dataset.density=density;opt.dataset.info=info;select.add(opt);
+ }
+ const local=new Map((plan.local_placement||[]).map(r=>[r.id,r]));
+ const actual=new Map((D?.chunk_results?.chunks||[]).map(c=>[c.id,c]));
+ const colors=new Map((D?.chunk_results?.colors||[]).map(c=>[c.id,c]));
+ for(const c of plan.chunks){
+   const measured=actual.get(c.id)?.fill;
+   const fill=c.planned_fill===undefined?'':'; planned fill '+(100*c.planned_fill).toFixed(1)+'%';
+   const mem=plan.memory_prediction;
+   const basis=!mem?'':(mem.samples?'; based on '+mem.samples+' measured run(s)'+(mem.extrapolating?' (design outside measured sizes)':''):'; cold estimate, no matching measured runs');
+   const msg='Target '+(100*c.density).toFixed(1)+'% ('+c.density_source+')'+fill+'; estimated '+(c.estimated_bytes/1e6).toFixed(2)+' MB'+basis+(measured===undefined?'':'; measured fill '+(100*measured).toFixed(1)+'%')+
+     (c.allowance_bytes>plan.budget_bytes?' (single-object allowance)':'')+
+     (c.reserved_dbu2>(c.box_dbu[2]-c.box_dbu[0])*(c.box_dbu[3]-c.box_dbu[1])?' · requested area exceeds available space':'');
+   const r=local.get(c.id),result=!r?'; no local placement measured for this plan':r.status==='placed'?
+     '; local placement legal · HPWL '+num(r.hpwl_dbu/r.dbu_per_um)+' µm · peak '+(r.peak_rss_bytes/1e6).toFixed(1)+' MB · '+r.boundary_contacts+' fixed boundary contacts':
+     '; local placement: '+r.status+(r.reason?' · '+r.reason:'');
+   add('chunk',c.id,homeLabels.get(c.id)+(c.fixed_macros?' (fixed)':''),c.density,msg+result+(c.fixed_macros?'; position fixed by '+c.fixed_macros+' macro(s)':''));
+   if(c.partition!==c.id)add('partition',c.partition,'Partition '+c.partition,c.density,'Shared by matching instances');
+   for(const m of c.members)if(!m.macro){
+     const msg='Home '+c.id+'; '+m.cells+' cells; effective density '+(100*m.density).toFixed(1)+'% ('+m.density_source+')'+(colors.has(m.id)?'; measured slot fill '+(100*colors.get(m.id).slot_fill).toFixed(1)+'%':'');
+     add('color',m.id,'Color '+m.id,m.density,msg);
+     if(m.template_color)add('template_color',m.template_color,'Template color '+m.template_color,m.density,'Shared by matching instances');
+   }
+ }
+ if(added.has(previous))select.value=previous;
+ const families=[...new Set(plan.chunks.map(c=>c.partition))], picker=$('implFamily'), saved=picker.value;
+ picker.replaceChildren(...families.map(f=>new Option(f,f)));if(families.includes(saved))picker.value=saved;
+ select.onchange();
+ if(saved&&families.includes(saved)&&picker.value!==saved){picker.value=saved;showImplementations()}
+ dirty=true;
+}
+$('chunkSelect').onchange=()=>{const opt=$('chunkSelect').selectedOptions[0];if(opt){$('chunkDensity').value=opt.dataset.density;$('chunkInfo').textContent=opt.dataset.info;
+ const [kind,id]=JSON.parse(opt.value);
+ const c=chunkPlan.chunks.find(c=>kind==='chunk'?c.id===id:kind==='partition'?c.partition===id:c.members.some(m=>kind==='color'?m.id===id:m.template_color===id));
+ if(c){$('implFamily').value=c.partition;geomFocus=c.id;$('geometryLock').textContent=c.aspect_locked?'Unlock aspect':'Lock aspect';geometryPeers(c);homeControls(c)}
+ showImplementations(c?.id);dirty=true}};
+$('chunkLines').onchange=()=>{dirty=true};
+// The pin identity is per net and the physical implementation name is scoped
+// to its logical partition. An interface copy alone never implies cell reuse.
+let relationCache=null,legendCache=null,peerStart=0;
+function relatedHomes(plan,id){
+ if(relationCache?.plan===plan&&relationCache.id===id)return relationCache;
+ const c=plan.chunks.find(h=>h.id===id),rows=new Map(),totals={nets:0,logical:0,physical:0,pins:0};
+ if(c){
+   const counts=new Map(),root=c.interface_copy?.source||c.id;
+   if(peerCache?.plan===plan&&peerCache.id===id){
+     for(const [key,pairs] of peerCache.map)counts.set(key,pairs.length);
+   }else{
+     const {nets}=geometryIndex(plan);
+     for(const p of c.ports)for(const [other] of nets.get(p.net_index??p.net)||[])
+       if(other!==c)counts.set(other.id,(counts.get(other.id)||0)+1);
+   }
+   for(const h of plan.chunks){if(h===c)continue;
+     const logical=h.partition===c.partition,physical=logical&&h.implementation===c.implementation;
+     const pins=(h.interface_copy?.source||h.id)===root,nets=counts.get(h.id)||0;
+     if(!nets&&!logical&&!pins)continue;
+     const rec={id:h.id,nets,logical,physical,pins};rows.set(h.id,rec);
+     for(const key of Object.keys(totals))if(rec[key])++totals[key];
+   }
+ }
+ return relationCache={plan,id,rows,totals,present:!!c};
+}
+function peerListing(r){
+ const list=$('peerList'),key=$('peerFilter').value;list.replaceChildren();
+ const rows=[...r.rows.values()].filter(p=>p[key]);
+ if(key==='nets')rows.sort((a,b)=>b.nets-a.nets);
+ for(const p of rows.slice(peerStart,peerStart+8)){
+   const btn=document.createElement('button');btn.textContent=(homeLabels.get(p.id)||p.id)+(key==='nets'?' · '+p.nets+' nets':'');btn.title=p.id;
+   const c=chunkPlan.chunks.find(c=>c.id===p.id);btn.disabled=!c;if(!c)btn.title='New in this preview: '+p.id;btn.onclick=()=>focusGeometry(c);list.append(btn);
+ }
+ if(rows.length===0)list.textContent='None.';
+ $('peerPrev').disabled=peerStart===0;$('peerNext').disabled=peerStart+8>=rows.length;
+}
+function peerLegend(plan,id){
+ const r=relatedHomes(plan,id);
+ if(legendCache!==r){
+   legendCache=r;peerStart=0;const t=r.totals;
+   const preview=homePreview?.base===chunkPlan&&plan===homePreview.plan;
+   $('peerCounts').textContent=!r.present?(preview?'Selected home is absent from this preview.':'Choose a home in this frame.'):(preview?'Preview · ':'')+(homeLabels.get(id)||id||'No home')+' · '+t.nets+' connected · '+t.logical+' logical · '+t.physical+' physical · '+t.pins+' interface';
+   if($('peerDetails').open)peerListing(r);
+ }
+ return r;
+}
+$('peerOverlay').onchange=()=>{dirty=true};
+$('peerFilter').onchange=$('peerDetails').ontoggle=()=>{peerStart=0;if(legendCache&&$('peerDetails').open)peerListing(legendCache)};
+$('peerPrev').onclick=()=>{peerStart=Math.max(0,peerStart-8);if(legendCache)peerListing(legendCache)};
+$('peerNext').onclick=()=>{peerStart+=8;if(legendCache)peerListing(legendCache)};
+function drawChunks(){
+ if(!D?.chunk_plan)return;
+ const trial=rev===null&&homePreview?.base===chunkPlan?homePreview.plan:null;
+ const plan=trial||(rev===null&&chunkPlan?chunkPlan:D.chunk_plan);
+ const [kind,key]=JSON.parse($('chunkSelect').value||'["",""]');
+ const focus=kind==='chunk'?key:geomFocus,relations=peerLegend(plan,focus),overlay=$('peerOverlay').checked;
+ const boundaries=$('chunkLines').checked;if(!boundaries&&!overlay)return;
+ ctx.save();
+ const selected=new Set(Array.from($('implCopies').selectedOptions,o=>o.value));
+ function outline(x,y,w,h,inset,color,thick,dash){
+   const d=Math.min(inset,w/5,h/5);ctx.lineWidth=thick;ctx.strokeStyle=color;ctx.setLineDash(dash);ctx.strokeRect(x+d,y+d,w-2*d,h-2*d);
+ }
+ for(let i=0;i<plan.chunks.length;++i){const c=plan.chunks[i],b=c.box_dbu,marked=selected.has(c.id);
+   const x=sx(b[0]),y=sy(b[3]),w=(b[2]-b[0])*view.s,h=(b[3]-b[1])*view.s;
+   const r=overlay&&relations.rows.get(c.id),active=c.id===focus;
+   if(r?.nets){ctx.fillStyle='rgba(83,99,117,.29)';ctx.fillRect(x,y,w,h)}
+   if(boundaries)outline(x,y,w,h,1,css('--acc'),1.5,[6,3]);
+   if(r?.logical)outline(x,y,w,h,3,'#078b74',3,[7,4]);
+   if(r?.physical)outline(x,y,w,h,7,'#9854cc',3,[]);
+   if(r?.pins)outline(x,y,w,h,10,'#c94f83',3,[2,3]);
+   if(active)outline(x,y,w,h,2,'#d27713',4,[]);
+   if((boundaries||active||r)&&w>23&&h>18){
+     const id=(homeLabels.get(c.id)||('H'+(i+1))).split(' · ')[0],roles=(!r?'':[r.logical?'L':'',r.physical?'P':'',r.pins?'I':''].join(''));
+     ctx.font='bold 12px sans-serif';let label=id+(r?.nets?' ↔'+r.nets:'')+(roles?' · '+roles:'');
+     if(ctx.measureText(label).width+12>w)label=roles?id+' '+roles:id;
+     if(ctx.measureText(label).width+12>w)label=id;
+     const px=x+2,py=y+2;ctx.save();ctx.beginPath();ctx.rect(x,y,w,h);ctx.clip();
+     ctx.fillStyle=active?'#915008':'#182735';ctx.fillRect(px,py,ctx.measureText(label).width+8,17);ctx.fillStyle='white';ctx.textAlign='left';ctx.textBaseline='top';ctx.fillText(label,px+4,py+2);ctx.restore()
+   }
+   if(marked){ctx.fillStyle=css('--macro');for(const port of c.ports)ctx.fillRect(sx(port.xy_dbu[0])-2,sy(port.xy_dbu[1])-2,4,4)}
+   if(kind==='color'||kind==='template_color')for(const m of c.members)if(!m.macro&&(m.id===key||m.template_color===key)){
+     const a=m.box_dbu;outline(sx(a[0]),sy(a[3]),(a[2]-a[0])*view.s,(a[3]-a[1])*view.s,0,css('--macro'),2,[]);
+   }
+ }ctx.restore();
+}
+// Keep the drag loop local: fixed bounds and all remote contacts of an incident
+// hypernet are constant until release. A drag need not re-read every design net.
+let geomFocus=null,geomBusy=false;const wireIndexes=new WeakMap();
+function geometryChunk(){
+ const [kind,id]=JSON.parse($('chunkSelect').value||'["",""]');
+ return chunkPlan?.chunks.find(c=>c.id===(kind==='chunk'?id:geomFocus));
+}
+function geometryIndex(plan=chunkPlan){
+ if(wireIndexes.has(plan))return wireIndexes.get(plan);
+ const nets=new Map(),anchors=new Map((plan.communication?.fixed_contacts||[]).map(t=>[t.net_index,t.box_dbu]));
+ const bounds=[Infinity,Infinity,-Infinity,-Infinity];
+ for(const c of plan.chunks){const b=c.box_dbu;for(let k=0;k<2;++k){bounds[k]=Math.min(bounds[k],b[k]);bounds[k+2]=Math.max(bounds[k+2],b[k+2])}
+   for(const p of c.ports){const key=p.net_index??p.net;if(!nets.has(key))nets.set(key,[]);nets.get(key).push([c,p])}}
+ const index={nets,anchors,bounds};wireIndexes.set(plan,index);return index;
+}
+let peerCache=null;
+function geometryPeers(c){
+ const select=$('geometryPeer'),saved=select.value;
+ if(peerCache?.plan===chunkPlan&&peerCache.id===c.id)return;
+ const map=new Map(),{nets}=geometryIndex();
+ for(const pin of c.ports)for(const [other,p] of nets.get(pin.net_index??pin.net)||[]){
+   if(other.id===c.id)continue;
+   if(!map.has(other.id))map.set(other.id,[]);map.get(other.id).push([pin.xy_dbu,p.xy_dbu]);
+ }
+ peerCache={plan:chunkPlan,id:c.id,map};
+ select.replaceChildren(new Option('All incident nets',''),...[...map].sort((a,b)=>b[1].length-a[1].length).map(([id,pairs])=>new Option((homeLabels.get(id)||id)+' · '+pairs.length+' nets',id)));
+ if(map.has(saved))select.value=saved;
+ geometryPair(0,0);
+}
+function geometryPair(dx,dy){
+ const pairs=peerCache?.map.get($('geometryPeer').value);let text='';
+ if(pairs){
+   let span=0,worst=0;
+   for(const [a,b] of pairs){const d=Math.abs(a[0]+dx-b[0])+Math.abs(a[1]+dy-b[1]);span+=d;worst=Math.max(worst,d)}
+   text=pairs.length+' shared nets · pin-to-pin sum '+num(span)+' DBU; longest '+num(worst)+' DBU.';
+ }
+ $('geometryPair').textContent=text;return pairs;
+}
+$('geometryPeer').onchange=()=>{geometryPair(drag?.dx||0,drag?.dy||0);dirty=true};
+function focusGeometry(c){
+ geomFocus=c.id;$('chunkSelect').value=JSON.stringify(['chunk',c.id]);$('chunkSelect').onchange();
+}
+function beginGeometry(e){
+ if(rev!==null||D?.phase!=='fp'||!chunkPlan||!$('chunkDrag').checked||geomBusy||e.altKey||e.shiftKey||S.state!=='gate')return false;
+ const x=wx(e.offsetX),y=wy(e.offsetY),hits=chunkPlan.chunks.filter(c=>{const b=c.box_dbu;return x>=b[0]&&x<b[2]&&y>=b[1]&&y<b[3]});
+ if(!hits.length)return false;
+ const c=hits.find(c=>c.id===geometryChunk()?.id)||hits[0];focusGeometry(c);
+ if(c.fixed_macros){$('chunks').open=true;$('geometryInfo').textContent='Position fixed by '+c.fixed_macros+' macro(s). Select a different chunk or start from an unfixed macro plan.';dirty=true;return true}
+ const {nets,anchors,bounds}=geometryIndex(),incident=[];
+ for(const p of c.ports){
+   const key=p.net_index??p.net,remote=(anchors.get(key)||[Infinity,Infinity,-Infinity,-Infinity]).slice();
+   for(const [other,pin] of nets.get(key))if(other!==c){for(let k=0;k<2;++k){remote[k]=Math.min(remote[k],pin.xy_dbu[k]);remote[k+2]=Math.max(remote[k+2],pin.xy_dbu[k])}}
+   if(Number.isFinite(remote[0]))incident.push([p.xy_dbu,remote]);
+ }
+ drag={chunk:c,x,y,dx:0,dy:0,incident,bounds,moved:false,frame:S.frame,intent:S.intent_revision};dirty=true;return true;
+}
+function geometryMotion(g,x,y){
+ const b=g.chunk.box_dbu,f=g.bounds;
+ g.dx=Math.max(f[0]-b[0],Math.min(f[2]-b[2],Math.round(x-g.x)));g.dy=Math.max(f[1]-b[1],Math.min(f[3]-b[3],Math.round(y-g.y)));
+ if(!g.moved && Math.hypot(g.dx,g.dy)*view.s<3)return;
+ g.moved=true;geometryPair(g.dx,g.dy);let sum=0,worst=0;
+ for(const [p,r] of g.incident){const x=p[0]+g.dx,y=p[1]+g.dy;
+   const span=Math.max(r[2],x)-Math.min(r[0],x)+Math.max(r[3],y)-Math.min(r[1],y);
+   sum+=span;worst=Math.max(worst,span)}
+ const delta=sum-g.chunk.incident_pin_hpwl_dbu;
+ $('geometryInfo').textContent='Drag estimate · '+g.incident.length+' incident nets, peers held still · span sum '+num(sum)+' DBU ('+signed(delta)+'); longest '+num(worst)+' DBU. Release to refine.';
+ dirty=true;
+}
+function num(v){return Math.round(v).toLocaleString()}
+function signed(v){return (v>=0?'+':'')+num(v)}
+function geometryOverlay(){
+ if(rev!==null||!chunkPlan)return;
+ ctx.save();ctx.fillStyle='rgba(148,74,204,.34)';
+ if($('chunkLines').checked&&D?.phase==='fp')for(const o of chunkPlan.geometry?.overlaps||[]){const b=o.box_dbu;ctx.fillRect(sx(b[0]),sy(b[3]),(b[2]-b[0])*view.s,(b[3]-b[1])*view.s)}
+ if(drag?.chunk&&drag.moved){
+   const {chunk:c,dx,dy,incident}=drag;
+   const rect=b=>[sx(b[0]+dx),sy(b[3]+dy),(b[2]-b[0])*view.s,(b[3]-b[1])*view.s];
+   ctx.fillStyle='rgba(17,143,171,.25)';ctx.fillRect(...rect(c.box_dbu));ctx.strokeStyle=css('--io');ctx.lineWidth=3;ctx.strokeRect(...rect(c.box_dbu));
+   ctx.lineWidth=1;for(const m of c.members)ctx.strokeRect(...rect(m.box_dbu));
+   const peer=peerCache?.map.get($('geometryPeer').value);
+   const lines=peer?peer.slice(0,32).map(([p,q])=>[p,[q[0],q[1],q[0],q[1]]]):incident.slice(0,32);
+   ctx.setLineDash([4,4]);for(const [p,r] of lines){ctx.beginPath();ctx.moveTo(sx(p[0]+dx),sy(p[1]+dy));
+     ctx.lineTo(sx((r[0]+r[2])/2),sy((r[1]+r[3])/2));ctx.stroke()}
+ }
+ ctx.restore();
+}
+let homePreview=null,homeControlsCache=null,homeLinkCache=null,dropPreview=null;
+function discardDrop(){
+ if(dropPreview&&homePreview===dropPreview.overlay){homePreview=null;dirty=true}
+ dropPreview=null;$('dropActions').hidden=true;
+}
+$('dropDiscard').onclick=()=>{discardDrop();$('geometryInfo').textContent='Preview discarded. Live boxes and costs are unchanged.'};
+$('dropApply').onclick=()=>{
+ const d=dropPreview;
+ if(!d)return;
+ if(d.overlay!==homePreview||d.overlay.base!==chunkPlan||d.target!==(exploration||'main')){
+   discardDrop();$('geometryInfo').textContent='The floorplan changed. Preview the drop again.';return;
+ }
+ geometryEdit(d.op,d.who,d.expect);
+};
+function planSummary(plan){
+ const chunks=plan.chunks,route=plan.route_demand;
+ let largest=0;for(const c of chunks)largest=Math.max(largest,c.estimated_bytes);
+ const unique=new Set(chunks.map(c=>JSON.stringify([c.partition,c.implementation]))).size;
+ const memory=largest>=1e9?(largest/1e9).toFixed(2)+' GB':(largest/1e6).toFixed(2)+' MB';
+ return chunks.length+(chunks.length===1?' home · ':' homes · ')+unique+(unique===1?' implementation':' implementations')+
+   ' · peak predicted '+memory+' · '+plan.communication.crossing_nets.toLocaleString()+
+   ' crossing nets · pin HPWL '+num(plan.communication.pin_hpwl_dbu)+' DBU'+(route?
+   ' · peak route demand H '+route.peak_horizontal.toFixed(1)+' / V '+route.peak_vertical.toFixed(1):'');
+}
+function homeControls(c){
+ if(homeControlsCache?.plan===chunkPlan&&homeControlsCache.id===c.id)return;
+ homeControlsCache={plan:chunkPlan,id:c.id};homePreview=null;
+ const copy=c.interface_copy,choices=chunkPlan.chunks.filter(r=>r.id!==c.id&&!r.interface_copy);
+ choices.sort((a,b)=>Number(b.partition===c.partition)-Number(a.partition===c.partition)||Math.abs(a.members.length-c.members.length)-Math.abs(b.members.length-c.members.length));
+ $('copyTarget').textContent='Target: '+(homeLabels.get(c.id)||c.id);
+ $('copySource').replaceChildren(...choices.map(r=>new Option(homeLabels.get(r.id)||r.id,r.id)));
+ if(copy)$('copySource').value=copy.source;
+ $('copyOrientation').value=copy?.requested||'auto';
+ $('copyPreview').disabled=$('copyApply').disabled=!choices.length;$('copyClear').disabled=!copy;
+ $('copyStatus').textContent=copy?copyResult(copy):'Local interface';
+ resetCopyPins();
+ const peers=$('homePeer'), members=$('homeMembers'), old=peers.value;
+ let list=chunkPlan.chunks.filter(x=>x.id!==c.id);
+ const b=c.box_dbu;
+ function gap(x){const a=x.box_dbu;return Math.max(0,b[0]-a[2],a[0]-b[2])+Math.max(0,b[1]-a[3],a[1]-b[3])}
+ list.sort((a,b)=>gap(a)-gap(b));
+ peers.replaceChildren(...list.map(x=>new Option((homeLabels.get(x.id)||x.id)+(gap(x)===0?' (touches)':''),x.id)));
+ if(list.some(x=>x.id===old))peers.value=old;
+ members.replaceChildren(...c.members.map(m=>new Option((m.macro?'Macro ':'Color ')+m.id,JSON.stringify({id:m.id,macro:m.macro}))));
+ let name=c.id+'.2',n=2;const ids=new Set(chunkPlan.chunks.map(c=>c.id));while(ids.has(name))name=c.id+'.'+(++n);$('homeName').value=name;
+ $('homeMetrics').textContent='Live: '+planSummary(chunkPlan);
+}
+function clearHomePreview(){homePreview=null;dirty=true}
+function homeAction(apply,undo=false){
+ const c=geometryChunk();if(!c)return;
+ let op='undo';
+ if(!undo){
+   if($('homeAction').value==='split'){
+     const selected=Array.from($('homeMembers').selectedOptions,o=>JSON.parse(o.value)),name=$('homeName').value.trim();
+     if(!name||!selected.length||selected.length===c.members.length){$('homeStatus').textContent='Name a new home and select some, but not all, of the members.';return}
+     op={split:c.id,new_id:name,members:selected};
+   }else{
+     const other=$('homePeer').value;if(!other){$('homeStatus').textContent='Choose another home to fuse.';return}
+     op={fuse:[c.id,other]};
+   }
+   op.before=chunkPlan.chunks.map(c=>({id:c.id,box_dbu:c.reference_box_dbu||c.box_dbu}));
+ }
+ geometryEdit(op,c.id,null,'topology',apply);
+}
+function drawHomePreview(){
+ if(rev!==null||!chunkPlan||D?.phase!=='fp')return;
+ const trial=homePreview?.base===chunkPlan?homePreview.plan:null,plan=trial||chunkPlan;
+ const grid=plan.route_demand;
+ ctx.save();
+ if(grid&&$('homeHeat').checked){
+   const [l,b,r,t]=grid.frame_dbu,n=grid.bins,w=(r-l)/n,h=(t-b)/n,peak=Math.max(grid.peak_horizontal,grid.peak_vertical,chunkPlan.route_demand?.peak_horizontal||0,chunkPlan.route_demand?.peak_vertical||0);
+   if(peak>0)grid.loads.forEach(([a,v],i)=>{const q=Math.max(a,v)/peak;if(!q)return;
+     ctx.fillStyle='rgba(216,85,25,'+(.45*q)+')';ctx.fillRect(sx(l+i%n*w),sy(b+(Math.floor(i/n)+1)*h),w*view.s,h*view.s)});
+ }
+ if(trial){
+   ctx.strokeStyle=css('--io');ctx.lineWidth=3;ctx.setLineDash([8,3]);const old=new Map(chunkPlan.chunks.map(c=>[c.id,c.box_dbu]));
+   for(const c of trial.chunks){if(old.get(c.id)?.every((x,i)=>x===c.box_dbu[i]))continue;
+     const [x,y,r,t]=c.box_dbu;ctx.strokeRect(sx(x),sy(t),(r-x)*view.s,(t-y)*view.s)}
+ }
+ if($('homeLinks').checked&&!drag?.chunk){
+   const c=plan.chunks.find(c=>c.id===geomFocus);
+   if(c){
+     // Preview connectivity comes from the trial homes; a fused internal net disappears immediately.
+     const peer=$('geometryPeer').value;
+     if(homeLinkCache?.plan!==plan||homeLinkCache.id!==c.id||homeLinkCache.peer!==peer){
+       const nets=new Map(c.ports.map(p=>[p.net_index,p.xy_dbu])),lines=[];
+       for(const other of plan.chunks){if(other===c||(peer&&other.id!==peer))continue;
+         for(const p of other.ports){const a=nets.get(p.net_index);if(a)lines.push([a,p.xy_dbu]);if(lines.length===96)break}
+         if(lines.length===96)break}
+       homeLinkCache={plan,id:c.id,peer,lines};
+     }
+     ctx.lineWidth=1;ctx.setLineDash([]);ctx.strokeStyle='rgba(34,103,163,.7)';
+     for(const [a,b] of homeLinkCache.lines){ctx.beginPath();ctx.moveTo(sx(a[0]),sy(a[1]));ctx.lineTo(sx(b[0]),sy(b[1]));ctx.stroke()}
+   }
+ }
+ ctx.restore();
+}
+$('homeAction').onchange=()=>{const split=$('homeAction').value==='split';$('homeSplit').hidden=!split;$('homeFuse').hidden=split;clearHomePreview()};
+for(const id of ['homeMembers','homePeer','homeName'])$(id).oninput=clearHomePreview;
+$('homeHeat').onchange=$('homeLinks').onchange=()=>{dirty=true};
+$('homePreview').onclick=()=>homeAction(false);$('homeApply').onclick=()=>homeAction(true);
+$('homeUndo').onclick=()=>homeAction(true,true);
+async function geometryEdit(op,who,expect,field='geometry',apply=true){
+ const topology=field==='topology',status=$(topology?'homeStatus':'geometryInfo');if(geomBusy)return;
+ try{
+   discardDrop();
+   if(rev!==null||D?.phase!=='fp'||!chunkPlan||S.state!=='gate')throw Error('Edit at the live floorplan gate.');
+   geomBusy=true;const target=exploration||'main',frame=expect?.frame??S.frame,design=chunkPlan.design,before=chunkPlan.communication.pin_hpwl_dbu;
+   const old=await xcommand({cmd:'export',target,what:'intent',encoding:'json_text'});
+   if(expect&&expect.intent!==old.revision)throw Error('Floorplan changed during drag. Try again.');
+   const records=JSON.parse(old.records_json).filter(r=>r.class==='livehd.placement.chunk_guidance'&&(!r.design||r.design===design));
+   let record=records.find(r=>r[field])||records.find(r=>r.id==='gui'&&r.design===design);
+   if(!record){record={class:'livehd.placement.chunk_guidance',id:'gui',design,targets:[]};records.push(record)}
+   const ops=record[field]??=[];
+   if(op==='undo'){if(!ops.length)throw Error('No edit of this kind to undo.');ops.pop()}else ops.push(op);
+   status.textContent='Refining chunk boxes, colors and pins…';
+   const a=await xcommand({cmd:apply?'intent_apply':'intent_preview',target,expect:{frame,intent:old.revision},records_json:JSON.stringify(records)});
+   for(;;){const r=await xcommand({cmd:'command_status',target,sequence:a.sequence});
+     if(r.status!=='queued'){if(r.status!=='applied')throw Error(r.reason||r.status);break}await new Promise(resolve=>setTimeout(resolve,60))}
+   const r=await xcommand({cmd:'export',target,what:'intent'});
+   if(r.sequence!==a.sequence)throw Error('A newer edit replaced this report.');
+   if(!r.bindings?.chunks)throw Error(r.status||'Move rejected.');
+   const plan=r.bindings;
+   if(topology){
+     const delta=plan.communication.pin_hpwl_dbu-before;
+     if(apply){homePreview=null;showChunks(plan);const c=plan.chunks.find(c=>c.id===who);if(c)focusGeometry(c)}
+     else homePreview={base:chunkPlan,plan};
+     status.textContent=(apply?'Applied: ':'Preview: ')+planSummary(plan)+'; wire change '+signed(delta)+' DBU.';return;
+   }
+   const c=plan.chunks.find(c=>c.id===who);
+   if(apply){showChunks(plan);if(c)focusGeometry(c)}
+   else{
+     homePreview={base:chunkPlan,plan};
+     dropPreview={op,who,expect:{frame,intent:old.revision},target,overlay:homePreview};
+     $('dropActions').hidden=false;dirty=true;
+   }
+   const landed=c?.box_dbu;
+   const at=v=>'('+v.slice(0,2).map(num).join(', ')+')';
+   const msg=c&&op.move?(apply?'Placed at ':'Preview only: would land at ')+at(landed)+' DBU'+(landed[0]!==op.to_dbu[0]||landed[1]!==op.to_dbu[1]?'; requested '+at(op.to_dbu)+' DBU':'')+'; longest incident span '+num(c.longest_net_span_dbu)+' DBU. ':'';
+   const delta=plan.communication.pin_hpwl_dbu-before;
+   const change=before&&delta?' · '+(Math.abs(delta)/before<.0001?'<0.01':(100*Math.abs(delta)/before).toFixed(2))+'% '+(delta>0?'longer':'shorter'):'';
+   status.textContent=msg+'Refined design HPWL '+num(plan.communication.pin_hpwl_dbu)+' DBU ('+signed(delta)+change+'). Shared area '+num(plan.geometry?.shared_dbu2||0)+' DBU²; cycles '+(plan.geometry?.independent_cycles||0)+'.';
+ }catch(e){status.textContent=e.message}finally{geomBusy=false;geometryPair(0,0);dirty=true}
+}
+function geometryLock(what){
+ const c=geometryChunk();if(!c){$('geometryInfo').textContent='Select a physical chunk first.';return}
+ if(what==='others'){geometryEdit({lock_others:c.id},c.id);return}
+ const ids=what==='one'?[c.id]:chunkPlan.chunks.filter(x=>what==='unlock'||x.id!==c.id).map(x=>x.id);
+ if(!ids.length)return;geometryEdit({lock_aspect:what==='one'?!c.aspect_locked:what==='others',chunks:ids},c.id);
+}
+$('geometryLock').onclick=()=>geometryLock('one');$('geometryOthers').onclick=()=>geometryLock('others');
+$('geometryUnlock').onclick=()=>geometryLock('unlock');$('geometryUndo').onclick=()=>geometryEdit('undo',geometryChunk()?.id);
+async function editChunk(clear){
+ const status=$('chunkStatus');try{
+   if(rev!==null||D?.phase!=='fp'||!D?.chunk_plan)throw Error('Edit at the live floorplan gate.');
+   const [kind,selector]=JSON.parse($('chunkSelect').value),density=$('chunkDensity').valueAsNumber;
+   if(!clear&&!(density>0&&density<=1))throw Error('Density must be greater than 0 and at most 1.');
+   const target=exploration||'main',frame=S.frame;
+   const old=await xcommand({cmd:'export',target,what:'intent',encoding:'json_text'});
+   // Only typed density records cross the browser number parser. The server retains all other records losslessly.
+   const records=JSON.parse(old.records_json).filter(r=>r.class==='livehd.placement.chunk_guidance'&&(!r.design||r.design===chunkPlan.design));
+   for(const r of records)r.targets=(r.targets||[]).filter(t=>!(t.kind===kind&&t.selector===selector));
+   if(!clear){let r=records.find(r=>r.id==='gui'&&r.design===chunkPlan.design);
+     if(!r){r={class:'livehd.placement.chunk_guidance',design:chunkPlan.design,id:'gui',targets:[]};records.push(r)}
+     (r.targets??=[]).push({kind,selector,density});}
+   const a=await xcommand({cmd:'intent_apply',target,expect:{frame,intent:old.revision},records_json:JSON.stringify(records)});
+   for(;;){const receipt=await xcommand({cmd:'command_status',target,sequence:a.sequence});
+     if(receipt.status!=='queued'){if(receipt.status!=='applied')throw Error(receipt.reason||receipt.status);break}
+     await new Promise(resolve=>setTimeout(resolve,80));}
+   const result=await xcommand({cmd:'export',target,what:'intent'});
+   if(result.sequence!==a.sequence)throw Error('A newer edit replaced this report. Inspect again.');
+   if(!result.bindings?.chunks)throw Error(result.status||'The planner rejected the edit.');
+   showChunks(result.bindings);
+   status.textContent='Floorplan updated.';
+ }catch(e){status.textContent=e.message}
+}
+function copyResult(r){
+ return r.orientation+' from '+(homeLabels.get(r.source)||r.source)+' · '+r.matched+'/'+r.target_ports+' target contacts matched · '+(r.target_ports-r.matched)+' kept local';
+}
+let copyOffset=0,copyPinPage=0;
+async function showCopyPins(){
+ const epoch=++copyPinPage,details=$('copyContacts');
+ if(!details.open)return;
+ const target=geometryChunk()?.id,ctx=chunkPlan,trial=homePreview,view=trial?.base===ctx?'preview':'live';
+ const list=$('copyPins');list.replaceChildren();$('copyRange').textContent='Reading contacts…';$('copyPrev').disabled=$('copyNext').disabled=true;
+ try{
+   if(!target)throw Error('Select a physical home.');
+   const r=await xcommand({cmd:'export',target:exploration||'main',what:'chunk_pins',chunk:target,view,match:$('copyFilter').value,offset:copyOffset,limit:8});
+   if(epoch!==copyPinPage||ctx!==chunkPlan||trial!==homePreview||target!==geometryChunk()?.id)return;
+   list.start=copyOffset+1;
+   for(const p of r.pins){const li=document.createElement('li');li.textContent=p.net+' at ('+p.xy_dbu.join(', ')+') DBU'+
+      (p.source_net===undefined?' · local':' ← '+p.source_net+' at ('+p.source_xy_dbu.join(', ')+') DBU');list.append(li)}
+   $('copyRange').textContent=(view==='preview'?'Preview':'Live')+' · '+(r.total===0?'no contacts':(copyOffset+1)+'–'+(copyOffset+r.pins.length)+' of '+r.total);
+   $('copyPrev').disabled=copyOffset===0;$('copyNext').disabled=copyOffset+r.pins.length>=r.total;
+ }catch(e){if(epoch===copyPinPage)$('copyRange').textContent=e.message}
+}
+function resetCopyPins(){copyOffset=0;showCopyPins()}
+$('copyContacts').ontoggle=resetCopyPins;$('copyFilter').onchange=resetCopyPins;
+$('copyPrev').onclick=()=>{copyOffset=Math.max(0,copyOffset-8);showCopyPins()};
+$('copyNext').onclick=()=>{copyOffset+=8;showCopyPins()};
+async function editCopy(apply,clear=false){
+ const status=$('copyStatus');
+ try{
+   const c=geometryChunk(),target=exploration||'main',frame=S.frame;
+   if(!c||rev!==null||D?.phase!=='fp'||S.state!=='gate')throw Error('Select a home at the live floorplan gate.');
+   const source=$('copySource').value,orientation=clear?'clear':$('copyOrientation').value,before=chunkPlan.communication.pin_hpwl_dbu;
+   const old=await xcommand({cmd:'export',what:'chunks',target,chunk:c.id});
+   const receipt=await xcommand({cmd:'chunk_interface',target,chunk:c.id,source,orientation,apply,expect:{frame,intent:old.intent_revision}});
+   status.textContent='Matching pins…';
+   for(;;){const s=await xcommand({cmd:'command_status',target,sequence:receipt.sequence});if(s.status!=='queued'){if(s.status!=='applied')throw Error(s.reason||s.status);break}await new Promise(r=>setTimeout(r,80))}
+   const r=await xcommand({cmd:'export',target,what:'intent'});
+   if(r.sequence!==receipt.sequence||!r.bindings?.chunks)throw Error('The displayed floorplan changed; inspect again.');
+   const plan=r.bindings,changed=plan.chunks.find(x=>x.id===c.id);
+   if(apply){showChunks(plan);focusGeometry(changed)}else{homePreview={base:chunkPlan,plan};dirty=true}
+   resetCopyPins();
+   status.textContent=(apply?'Applied: ':'Preview: ')+(changed.interface_copy?copyResult(changed.interface_copy):'local interface')+
+     '; crossing HPWL '+num(plan.communication.pin_hpwl_dbu)+' DBU ('+signed(plan.communication.pin_hpwl_dbu-before)+').';
+ }catch(e){status.textContent=e.message}
+}
+$('copyPreview').onclick=()=>editCopy(false);$('copyApply').onclick=()=>editCopy(true);$('copyClear').onclick=()=>editCopy(true,true);
+const implSelected=()=>new Set(Array.from($('implCopies').selectedOptions,o=>o.value));
+let implGroups=[],implEpoch=0;
+function formPins(){
+ const group=implGroups.find(g=>g.name===$('implName').value), pin=group?.pins?.find(p=>p.role===$('implRole').value);
+ $('implSide').value=pin?.side||'';$('implOffset').value=pin?.offset??.5;
+}
+function commonRoles(){
+ const selected=implSelected(), rows=chunkPlan.chunks.filter(c=>selected.has(c.id));
+ const sets=rows.map(c=>new Set(c.ports.map(p=>p.role).filter(Boolean)));
+ const roles=sets.length?[...sets[0]].filter(r=>sets.every(set=>set.has(r))):[];
+ const old=$('implRole').value;
+ $('implRole').replaceChildren(new Option('Choose a common pin',''),...roles.sort().map(r=>new Option(r,r)));
+ if(roles.includes(old))$('implRole').value=old;formPins();dirty=true;
+}
+async function showImplementations(focus){
+ const family=$('implFamily').value, rows=chunkPlan.chunks.filter(c=>c.partition===family);
+ const sub=$('implCopies'), old=implSelected();
+ sub.replaceChildren(...rows.map(c=>{const o=new Option((c.instances?.join(', ')||c.id)+' → '+(c.implementation||'shared')+' · '+((c.box_dbu[2]-c.box_dbu[0])/(c.box_dbu[3]-c.box_dbu[1])).toFixed(2)+':1',c.id);o.title=c.id;o.selected=focus?focus===c.id:old.has(c.id);return o}));
+ $('implSummary').textContent=rows.length+' copies · '+new Set(rows.map(c=>c.implementation)).size+' implementations'+(chunkPlan.communication?
+    ' · design pin HPWL '+chunkPlan.communication.pin_hpwl_dbu.toLocaleString()+' DBU':'');
+ $('implName').value='';$('implAspect').value='';implGroups=[];commonRoles();
+ const seq=++implEpoch, existing=$('implExisting');
+ existing.disabled=false;const effective=[...new Set(rows.map(c=>c.implementation).filter(Boolean))];
+ existing.replaceChildren(new Option('Select copies…',''),...effective.map(n=>new Option(n,n)));
+ if(rev!==null||!family||D?.phase!=='fp')return;
+ existing.disabled=true;try{const r=await xcommand({cmd:'export',target:exploration||'main',what:'intent',encoding:'json_text'});
+   if(seq===implEpoch)implGroups=JSON.parse(r.records_json).filter(r=>r.class==='livehd.placement.chunk_guidance'&&(!r.design||r.design===chunkPlan.design))
+     .flatMap(r=>r.implementations||[]).find(r=>r.partition===family)?.groups||[];
+ }catch(e){if(seq===implEpoch)$('chunkStatus').textContent=e.message}
+ finally{if(seq===implEpoch)existing.disabled=false}
+}
+$('implFamily').onchange=()=>showImplementations();
+$('implCopies').onchange=commonRoles;$('implRole').onchange=formPins;
+$('implExisting').onchange=()=>{
+ const n=$('implExisting').value, g=implGroups.find(g=>g.name===n);
+ const ids=new Set(chunkPlan.chunks.filter(c=>c.partition===$('implFamily').value&&c.implementation===n).map(c=>c.id));
+ for(const o of $('implCopies').options)o.selected=ids.has(o.value);
+ $('implName').value=g?.name||'';$('implAspect').value=g?.aspect_ratio??'';commonRoles();
+};
+$('implAction').onchange=()=>{$('implEditor').hidden=$('implAction').value!=='group'};
+async function editImplementation(apply){
+ const status=$('chunkStatus');try{
+   if(rev!==null||D?.phase!=='fp')throw Error('Edit at the live floorplan gate.');
+   const target=exploration||'main',frame=S.frame,family=$('implFamily').value,action=$('implAction').value,before=chunkPlan.communication?.pin_hpwl_dbu;
+   const old=await xcommand({cmd:'export',target,what:'intent',encoding:'json_text'});
+   const records=JSON.parse(old.records_json).filter(r=>r.class==='livehd.placement.chunk_guidance'&&(!r.design||r.design===chunkPlan.design));
+   let record=records.find(r=>r.implementations?.some(i=>i.partition===family));
+   if(!record){record=records.find(r=>r.id==='gui'&&r.design===chunkPlan.design);
+     if(!record){record={class:'livehd.placement.chunk_guidance',id:'gui',design:chunkPlan.design};records.push(record)}}
+   const policies=record.implementations??=[];let rule=policies.find(r=>r.partition===family);
+   if(!rule){rule={partition:family,mode:'auto',groups:[]};policies.push(rule)}
+   if(action==='group'){
+     const ids=implSelected(),name=$('implName').value.trim(), aspect=$('implAspect').valueAsNumber;
+     if(!ids.size||!name)throw Error('Select the copies and enter a group name.');
+     if($('implAspect').value&&!(aspect>0))throw Error('Target aspect ratio must be positive.');
+     const groups=rule.groups??=[];let g=groups.find(g=>g.name===name);
+     if(!g){g={name,instances:[]};groups.push(g)}
+     for(const other of groups)if(other!==g)other.instances=other.instances.filter(id=>!ids.has(id));
+     g.instances=[...new Set([...g.instances,...ids])].sort();rule.groups=groups.filter(g=>g.instances.length);
+     if(aspect>0)g.aspect_ratio=aspect;else if($('implExisting').value===name)delete g.aspect_ratio;
+     const role=$('implRole').value,side=$('implSide').value,offset=$('implOffset').valueAsNumber;
+     if(role){g.pins=(g.pins||[]).filter(p=>p.role!==role);if(side){if(!(offset>=0&&offset<=1))throw Error('Pin offset must be between 0 and 1.');g.pins.push({role,side,offset})}}
+   }else{rule.mode=action;rule.groups=[]}
+   status.textContent=apply?'Applying…':'Comparing…';
+   const accepted=await xcommand({cmd:apply?'intent_apply':'intent_preview',target,expect:{frame,intent:old.revision},records_json:JSON.stringify(records)});
+   for(;;){const r=await xcommand({cmd:'command_status',target,sequence:accepted.sequence});
+     if(r.status!=='queued'){if(r.status!=='applied')throw Error(r.reason||r.status);break}await new Promise(resolve=>setTimeout(resolve,80))}
+   const r=await xcommand({cmd:'export',target,what:'intent'});
+   if(r.sequence!==accepted.sequence)throw Error('A newer edit replaced this report. Inspect again.');
+   if(!r.bindings?.chunks)throw Error(r.status||'The planner rejected the edit.');
+   const next=r.bindings, after=next.communication.pin_hpwl_dbu;
+   const count=new Set(next.chunks.filter(c=>c.partition===family).map(c=>c.implementation)).size;
+   if(apply){showChunks(next);$('implFamily').value=family;showImplementations()}else{homePreview={base:chunkPlan,plan:next};dirty=true}
+   status.textContent=(apply?'Applied':'Preview')+': '+count+' implementations; design pin HPWL '+after.toLocaleString()+' DBU'+
+      (before===undefined?'':' ('+(after-before>=0?'+':'')+(after-before).toLocaleString()+' DBU)')+(next.route_demand?'; peak route demand H '+next.route_demand.peak_horizontal.toFixed(1)+' / V '+next.route_demand.peak_vertical.toFixed(1):'')+'.';
+ }catch(e){status.textContent=e.message}
+}
+$('implPreview').onclick=()=>editImplementation(false);$('implApply').onclick=()=>editImplementation(true);
+$('chunkApply').onclick=()=>editChunk(false);$('chunkClear').onclick=()=>editChunk(true);
+$('chunkSave').onclick=async()=>{try{
+ const what=D?.phase==='fp'?'floorplan':'macros';
+ const r=await xcommand({cmd:'export',target:exploration||'main',what,format:'metadata',encoding:'json_text'});
+ const url=URL.createObjectURL(new Blob([r.records_json+'\n'],{type:'application/json'}));
+ const a=document.createElement('a');a.href=url;a.download='placement-guidance.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+}catch(e){$('chunkStatus').textContent=e.message}};
 let intentOverlay=null,intentRequest=0;
 function clearIntentOverlay(){
  intentOverlay=null;$('ioverlayControl').hidden=true;$('ilegend').textContent='';dirty=true;
@@ -753,7 +1348,7 @@ function draw(){dirty=false;const W=cv.clientWidth,H=cv.clientHeight;ctx.setTran
   else{ctx.globalAlpha=.45;ctx.fillRect(x,y-hh,w,hh);ctx.globalAlpha=1;ctx.lineWidth=2;ctx.strokeRect(x,y-hh,w,hh)}}}}
  ctx.lineWidth=1.5;ctx.strokeStyle=css('--pin');for(const i of pinned){if(i>=n)continue;const w=Math.max(6,D.w[i]*view.s),h=Math.max(6,D.h[i]*view.s);ctx.strokeRect(sx(X[i])-1,sy(Y[i])-h-1,w+2,h+2)}
  ctx.strokeStyle=css('--sel');ctx.lineWidth=2;for(const i of sel){if(i>=n)continue;const w=Math.max(8,D.w[i]*view.s),h=Math.max(8,D.h[i]*view.s);ctx.strokeRect(sx(X[i])-2,sy(Y[i])-h-2,w+4,h+4)}
- drawIntentOverlay();
+ drawChunks();drawHomePreview();geometryOverlay();drawIntentOverlay();
  if(drag&&drag.box){ctx.strokeStyle=css('--acc');ctx.setLineDash([5,3]);ctx.strokeRect(drag.bx0,drag.by0,drag.bx1-drag.bx0,drag.by1-drag.by0);ctx.setLineDash([])}areaOverlay()}
 function loop(){if(dirty)draw();requestAnimationFrame(loop)}requestAnimationFrame(loop);
 cv.addEventListener('wheel',e=>{e.preventDefault();const f=Math.exp(-e.deltaY*.0015),x=e.offsetX,y=e.offsetY,ox=wx(x),oy=wy(y);view.s*=f;view.ox=x-ox*view.s;view.oy=y+oy*view.s;dirty=true},{passive:false});
@@ -763,7 +1358,7 @@ function selMove(dx,dy,final){const ns=[],xs=[],ys=[],fn=[],fx=[],fy=[];for(cons
 // final position restarts the flow with the macro there (the placer starts it at that spot).
 function sendMove(m){if(m.nodes.length)cmd({cmd:'move',nodes:m.nodes,x:m.x,y:m.y,final:m.final});if(m.final&&m.fixed.nodes.length)cmd({cmd:'macro_move',nodes:m.fixed.nodes,x:m.fixed.x,y:m.fixed.y,final:true})}
 function hitCen(px,py){if(!D||!$('l_cen').checked||!D.centroids.length)return -1;for(let i=D.centroids.length-1;i>=0;i--){const c=C&&C.x.length>i?{x:C.x[i],y:C.y[i]}:D.centroids[i];if(Math.hypot(sx(c.x)-px,sy(c.y)-py)<=10)return i}return -1}
-cv.addEventListener('mousedown',e=>{if(!D||e.button!==0)return;if(rev!==null){drag={pan:true,px:e.offsetX,py:e.offsetY,ox:view.ox,oy:view.oy};return}{const eg=e.shiftKey||resultView()?null:hitEdge(e.offsetX,e.offsetY);if(eg){aEdge=eg;aStepSet=false;if(!aPend){aPend=D.die.slice();aBase=D.die.join()}drag={edge:eg};areaInfo();dirty=true;return}}const ci=hitCen(e.offsetX,e.offsetY);
+cv.addEventListener('mousedown',e=>{if(!D||e.button!==0)return;if(beginGeometry(e))return;if(e.altKey&&D.phase==='fp'){drag={pan:true,px:e.offsetX,py:e.offsetY,ox:view.ox,oy:view.oy};return}if(rev!==null){drag={pan:true,px:e.offsetX,py:e.offsetY,ox:view.ox,oy:view.oy};return}{const eg=e.shiftKey||resultView()?null:hitEdge(e.offsetX,e.offsetY);if(eg){aEdge=eg;aStepSet=false;if(!aPend){aPend=D.die.slice();aBase=D.die.join()}drag={edge:eg};areaInfo();dirty=true;return}}const ci=hitCen(e.offsetX,e.offsetY);
  if(ci>=0&&!e.shiftKey&&!resultView()){if(!C||C.x.length<=ci)C={x:Float32Array.from(D.centroids,c=>c.x),y:Float32Array.from(D.centroids,c=>c.y),r:Float32Array.from(D.centroids,c=>c.r)};drag={cen:ci,px:e.offsetX,py:e.offsetY,x0:C.x[ci],y0:C.y[ci],t:0,moved:false};dirty=true;return}
  const i=hit(e.offsetX,e.offsetY);
  if(i>=0){if(e.shiftKey){sel.has(i)?sel.delete(i):sel.add(i);selUi();dirty=true;return}
@@ -772,6 +1367,13 @@ cv.addEventListener('mousedown',e=>{if(!D||e.button!==0)return;if(rev!==null){dr
   drag={items,px:e.offsetX,py:e.offsetY,x0:new Map(items.map(k=>[k,X[k]])),y0:new Map(items.map(k=>[k,Y[k]])),t:0,moved:false,cur:new Map()}}
  else if(e.shiftKey){drag={box:true,bx0:e.offsetX,by0:e.offsetY,bx1:e.offsetX,by1:e.offsetY}}
  else{if(sel.size){sel.clear();selUi()}drag={pan:true,px:e.offsetX,py:e.offsetY,ox:view.ox,oy:view.oy}}dirty=true});
+cv.addEventListener('dblclick',e=>{
+ if(rev!==null||D?.phase!=='fp'||!chunkPlan)return;
+ const x=wx(e.offsetX),y=wy(e.offsetY),c=chunkPlan.chunks.find(c=>{const b=c.box_dbu;return x>=b[0]&&x<=b[2]&&y>=b[1]&&y<=b[3]});
+ if(!c)return;
+ $('chunks').open=true;$('chunkSelect').value=JSON.stringify(['chunk',c.id]);$('chunkSelect').onchange();
+ $('implFamily').scrollIntoView({block:'nearest'});
+});
 let mx=-1,my=-1;
 function zoomBy(f){const inside=mx>=0&&my>=0&&mx<=cv.clientWidth&&my<=cv.clientHeight;zoomAt(f,inside?mx:cv.clientWidth/2,inside?my:cv.clientHeight/2)}
 function zoomAt(f,x,y){const ox=wx(x),oy=wy(y);view.s*=f;view.ox=x-ox*view.s;view.oy=y+oy*view.s;dirty=true}
@@ -779,6 +1381,7 @@ window.addEventListener('mousemove',e=>{const r=cv.getBoundingClientRect(),px=e.
  if(!drag&&D){const eg=resultView()||rev!==null?null:hitEdge(px,py);cv.style.cursor=eg?(eg==='left'||eg==='right'?'ew-resize':'ns-resize'):''}else if(drag&&drag.edge){cv.style.cursor=drag.edge==='left'||drag.edge==='right'?'ew-resize':'ns-resize'}
  if(!drag){if(!D||!X)return;const i=hit(px,py);if(i!==hover){hover=i;const t=$('tip');if(i<0)t.style.display='none';else{showTip(i);t.style.display='block';if(names[i]===undefined&&rev===null)fetchName(i)}}
   if(hover>=0){const t=$('tip');t.style.left=px+14+'px';t.style.top=py+14+'px'}return}
+ if(drag.chunk){geometryMotion(drag,wx(px),wy(py));return}
  if(drag.cen!==undefined){if(!drag.moved&&Math.hypot(px-drag.px,py-drag.py)<3)return;drag.moved=true;const x=drag.x0+(px-drag.px)/view.s,y=drag.y0-(py-drag.py)/view.s;C.x[drag.cen]=x;C.y[drag.cen]=y;dirty=true;const now=performance.now();if(now-drag.t>40){drag.t=now;cmd({cmd:'centroid',name:D.centroids[drag.cen].name,x,y,final:false})}}
  else if(drag.pan){view.ox=drag.ox+px-drag.px;view.oy=drag.oy+py-drag.py;dirty=true}
  else if(drag.box){drag.bx1=px;drag.by1=py;dirty=true}
@@ -786,6 +1389,11 @@ window.addEventListener('mousemove',e=>{const r=cv.getBoundingClientRect(),px=e.
  else{const dx=(px-drag.px)/view.s,dy=-(py-drag.py)/view.s;if(!drag.moved&&Math.hypot(px-drag.px,py-drag.py)<3)return;drag.moved=true;const now=performance.now();
   if(now-drag.t>40){drag.t=now;sendMove(selMove(dx,dy,false))}else selMove(dx,dy,false)}});
 window.addEventListener('mouseup',e=>{if(!drag)return;const r=cv.getBoundingClientRect(),px=e.clientX-r.left,py=e.clientY-r.top;
+ if(drag.chunk){const g=drag;geometryMotion(g,wx(px),wy(py));drag=null;dirty=true;
+   if(g.moved){const cap=$('chunkOverlap').valueAsNumber/100;
+     if(!(cap>=0&&cap<=.25)){$('geometryInfo').textContent='Overlap must be from 0 to 25%.';return}
+     geometryEdit({move:g.chunk.id,to_dbu:[g.chunk.box_dbu[0]+g.dx,g.chunk.box_dbu[1]+g.dy],max_overlap:cap},g.chunk.id,g,'geometry',!$('reviewDrop').checked)}
+   return}
  if(drag.box){const x0=Math.min(drag.bx0,drag.bx1),x1=Math.max(drag.bx0,drag.bx1),y0=Math.min(drag.by0,drag.by1),y1=Math.max(drag.by0,drag.by1);
   for(let i=0;i<X.length;i++){const k=kd(i);if(k===4||k===3)continue;const cx=sx(X[i]+D.w[i]/2),cy=sy(Y[i]+D.h[i]/2);if(cx>=x0&&cx<=x1&&cy>=y0&&cy<=y1)sel.add(i)}selUi()}
  else if(drag.cen!==undefined){if(drag.moved)cmd({cmd:'centroid',name:D.centroids[drag.cen].name,x:C.x[drag.cen],y:C.y[drag.cen],final:true})}
@@ -1024,7 +1632,9 @@ function rerun(cp){const set={};for(const[k,v]of Object.entries(flagEdits))set[k
 async function sync(){for(;;){try{
  const r=await api('/state?since='+ver);S=await r.json();ver=S.v;if(S.hpwl<0)S.hpwl=null;
  if(S.epoch!==epoch){epoch=S.epoch;stripEpoch++;stripReport=null;$('faceSelector').hidden=true;$('faceMacro').replaceChildren();showMacroFaces();$('stripSelect').hidden=true;$('stripStatus').textContent='';selectStrip();D=null;X=null;Y=null;sceneId=-1;frameId=-1;haveFrame=-1;rev=null;selCp=-1;cpKey='';flagEdits={};flagDefs=null;TL=null;tlIdx=null;designCache={};tlCache=new Map();tlBytes=0;mkKey='';shownScene=null;try{xcap=(await xcommand({cmd:'hello',target:'main'})).capabilities;flagDefs=await(await api('/options')).json();renderOptions()}catch(e){}}
- if(rev===null&&S.scene!==sceneId){sceneId=S.scene;hlV=-1;if(S.scene>0){D=await(await api('/design')).json();names=D.names;sel.clear();selUi();PX=null;fit()}}
+ if(rev===null&&S.scene!==sceneId){sceneId=S.scene;hlV=-1;if(S.scene>0){const prev=D;D=await(await api('/design')).json();showChunks(D.chunk_plan);names=D.names;PX=null;
+   // A chunk edit replaces the scene in the same phase and die: keep the user's zoom and selection.
+   if(!(prev&&prev.phase===D.phase&&String(prev.die)===String(D.die)&&prev.names?.length===D.names?.length)){sel.clear();selUi();fit()}}}
  if(rev===null&&S.frame!==frameId&&D&&D.n){frameId=S.frame;const q16=D.n>50000,buf=await(await api('/frame?'+(q16?'q=16&':'')+(haveFrame>0&&X?'since='+haveFrame:''))).arrayBuffer();if(!applyFrame(buf,q16))haveFrame=-1}
  if(S.regions_on){if(S.regions_v!==regV){regV=S.regions_v;R=await(await api('/regions')).json();$('reg_note').textContent=R.note||'';dirty=true}}else if(R){R=null;regV=-1;$('reg_note').textContent='';dirty=true}
  if(S.map&&S.map_v!==mapV){mapV=S.map_v;const mb=await(await api('/map')).arrayBuffer(),h=new DataView(mb);if(mb.byteLength>=24&&h.getUint32(4,true)>0){const bx=h.getUint32(4,true),by=h.getUint32(8,true);M={bx,by,peak:h.getFloat32(12,true),ovf:h.getFloat32(16,true),v:new Float32Array(mb.slice(24))};$('s_map').textContent='peak '+M.peak.toFixed(2)+' ovf '+M.ovf.toFixed(3)}else{M=null;$('s_map').textContent=S.map_note||'no data'}dirty=true}else if(!S.map&&M&&!(exploration&&S.state==='done')){M=null;mapV=S.map_v;$('s_map').textContent='';dirty=true}

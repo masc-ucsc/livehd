@@ -58,6 +58,7 @@ struct Checkpoint_settings;
 }
 inline constexpr double max_net_weight = 100;  // physical net weight ceiling shared by option checks and the placement database
 struct Technology;
+struct Chunk_predictor;
 struct Growth_budget;
 struct Result;
 struct Hint_scope;
@@ -156,6 +157,7 @@ struct Options {
   // Parsed only from positional user inputs. Internal state emitted between stages is not a new constraint.
   std::shared_ptr<const std::vector<Macro_pose>>        fixed_macro_poses;
   std::shared_ptr<const std::vector<Hint_scope>>        metadata_scopes;             // Before timing seed flattens hierarchy.
+  std::shared_ptr<const std::string>                      accepted_chunk_plan;  // validated FP -> detail/repair handoff
   bool                                                  metadata_finalized = false;  // Internal macro-to-final handoff.
   std::shared_ptr<Growth_budget>                        growth_budget;
   double                                                growth_fraction = 0.05;  // synth.place.growth
@@ -215,6 +217,15 @@ struct Options {
   // macro.anchor: moving legalized-target soft anchors inside macro GP (macro_anchor.hpp); off by default.
   Macro_anchor_options                  macro_anchor;
   DreamPlace::native::MagnetOptions macro_magnet;
+  // Color-level floorplan. The centroid experiments use fp_place. lhd's placement_options() sets it for
+  // synth.place.fp=auto|true|chunks; direct callers that force fp off (fp_place = fp_auto = false) keep the legacy path.
+  bool                              fp_chunks = false;
+  bool                              explicit_chunk_gate = false;  // Even on a trivial one-chunk floorplan.
+  std::shared_ptr<const Chunk_predictor> chunk_predictor;
+  bool chunk_require_fit=false;
+  std::string                       chunk_manifest, chunk_only;  // nonempty manifest: export the accepted home jobs before whole-chip placement
+  bool                              chunk_seed_detail = true;
+  uint64_t                          chunk_memory_bytes = 4000000000ULL;
   bool                              fp_place = false, fp_snap_enabled = true;
   // synth.place.fp=auto (the default): when fp_place is false, place() sets it
   // from detect_fp_repetition on the source netlist (fp_repetition.hpp) and
@@ -521,6 +532,7 @@ struct Macro_gp_timing {
   physical::Pin_locations                          pin_locations;
 };
 struct Result {
+  std::shared_ptr<const std::string> accepted_chunk_plan;
   // For a supervised repair worker only. Captures immutable geometry from this
   // candidate. Publishing takes the accepted Result's graph/RC after final legalization.
   std::function<void(const Result&, const Options&)> publish_exploration;

@@ -17,7 +17,9 @@
 #include <charconv>
 #include <chrono>
 #include <cstdlib>
+#include <csignal>
 #include <cstring>
+#include <filesystem>
 #include <format>
 #include <string_view>
 #include <system_error>
@@ -28,6 +30,33 @@
 #include "gui_session.hpp"
 
 namespace livehd::placement::gui {
+
+namespace {
+// A session killed (or crashed) leaves its lhd-gui-<pid>.sock behind: a long run of sessions fills /tmp with them.
+// Remove the sockets in `dir` of this naming that belong to a process that no longer exists and to this user.
+void remove_stale_agent_sockets(const std::filesystem::path& dir) {
+  std::error_code ec;
+  for (std::filesystem::directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec)) {
+    const auto name = it->path().filename().string();
+    if (!name.starts_with("lhd-gui-") || !name.ends_with(".sock")) {
+      continue;
+    }
+    const auto digits = std::string_view(name).substr(8, name.size() - 8 - 5);
+    long       pid    = 0;
+    const auto [end_of, rc] = std::from_chars(digits.data(), digits.data() + digits.size(), pid);
+    if (digits.empty() || rc != std::errc{} || end_of != digits.data() + digits.size() || pid <= 0) {
+      continue;
+    }
+    struct stat st{};
+    if (::lstat(it->path().c_str(), &st) != 0 || !S_ISSOCK(st.st_mode) || st.st_uid != ::getuid()) {
+      continue;
+    }
+    if (::kill(pid_t(pid), 0) != 0 && errno == ESRCH) {
+      ::unlink(it->path().c_str());
+    }
+  }
+}
+}  // namespace
 
 struct Session::Server {
   Session*                 session = nullptr;
@@ -400,6 +429,7 @@ bool Session::start(std::string* error) {
       return fail("agent socket path is too long: " + cfg_.agent_socket);
     }
     std::strncpy(ua.sun_path, cfg_.agent_socket.c_str(), sizeof(ua.sun_path) - 1);
+    remove_stale_agent_sockets(std::filesystem::path(cfg_.agent_socket).parent_path());
     ::unlink(cfg_.agent_socket.c_str());  // a stale socket from a previous run (or the process before a restart)
     server->ufd = ::socket(AF_UNIX, SOCK_STREAM, 0);
     if (server->ufd < 0) {

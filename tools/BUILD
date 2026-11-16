@@ -31,6 +31,12 @@ py_binary(
     visibility = ["//visibility:public"],
 )
 
+py_binary(
+    name = "synth_chunk_implementations",
+    srcs = ["synth_chunk_implementations.py"],
+    visibility = ["//visibility:public"],
+)
+
 py_test(
     name = "placereason_score_test",
     srcs = ["placereason_score_test.py", "placereason_score.py"],

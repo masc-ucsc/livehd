@@ -11,6 +11,11 @@ paints (highlights, selection) shows up in the page at once.
   tools/lhd_gui.py --workdir W selection            # what the user clicked: name, master, class, size, position, pins
   tools/lhd_gui.py --workdir W describe name=ram0
   tools/lhd_gui.py --workdir W '{"cmd":"cmd","command":{"cmd":"pause"}}'
+  tools/lhd_gui.py --workdir W screenshot out=/tmp/fp.png w=900 h=900 layers=macros,comb,regs   # a PNG to look at
+  tools/lhd_gui.py --workdir W wait state=gate timeout=300   # until the flow reaches a gate (also phase=, gate=)
+  tools/lhd_gui.py --workdir W macros                        # every macro: pose, size, orientation, pinned
+  tools/lhd_gui.py --workdir W macro_scan node=ram0 grid='{"nx":12,"ny":12}' top=5   # ranked positions by pin wirelength
+  tools/lhd_gui.py --retry 120 --workdir W state             # any command, riding out a restart: the socket is down for a moment
 
 Values are JSON when they parse (numbers, true/false, lists), else strings. The reply is printed as JSON; the exit
 status is 1 when it says "ok": false."""
@@ -21,6 +26,7 @@ import os
 import re
 import socket
 import sys
+import time
 
 
 class Unix_connection(http.client.HTTPConnection):
@@ -70,14 +76,88 @@ def request(path, payload, timeout=30):
     return json.loads(reply)
 
 
+def fetch(path, route, timeout=30):
+    """GET a route of the session (the socket serves them without a token): the bytes and the status."""
+    conn = Unix_connection(path, timeout)
+    conn.request('GET', route)
+    response = conn.getresponse()
+    body = response.read()
+    conn.close()
+    return response.status, body
+
+
+def with_retry(args, action):
+    """Run action(socket path); with --retry N, ride out the moments the socket is down (a restart or area change
+    re-executes lhd, and the pointer file names the new socket)."""
+    deadline = time.time() + args.retry
+    while True:
+        try:
+            return action(find_socket(args))
+        except (ConnectionRefusedError, FileNotFoundError, ConnectionResetError, http.client.RemoteDisconnected, json.JSONDecodeError):
+            if time.time() >= deadline:
+                raise
+            time.sleep(0.5)
+
+
+def local_command(args):
+    """Commands that are a few agent calls or a file download put together; None for a plain agent command."""
+    pairs = {}
+    for pair in args.pairs:
+        key, _, value = pair.partition('=')
+        pairs[key] = parse_value(value)
+    call = lambda payload: with_retry(args, lambda sock: request(sock, payload, args.timeout))
+    if args.command == 'screenshot':
+        out = pairs.pop('out', 'lhd_screenshot.png')
+        query = '&'.join(f'{k}={v}' for k, v in pairs.items())
+        status, body = with_retry(args, lambda sock: fetch(sock, '/screenshot.png' + ('?' + query if query else ''), args.timeout))
+        if status != 200 or not body.startswith(b'\x89PNG'):
+            return {'ok': False, 'error': f'screenshot failed ({status}): {body[:200].decode("latin1")}'}
+        with open(out, 'wb') as f:
+            f.write(body)
+        return {'ok': True, 'path': os.path.abspath(out), 'bytes': len(body)}
+    if args.command == 'wait':
+        timeout = float(pairs.pop('timeout', 300))
+        deadline = time.time() + timeout
+        while True:
+            try:
+                state = with_retry(args, lambda sock: request(sock, {'cmd': 'state'}, args.timeout))
+            except (ConnectionRefusedError, FileNotFoundError, ConnectionResetError, http.client.RemoteDisconnected, json.JSONDecodeError, SystemExit):
+                state = {}  # restarting
+            if state and all(state.get(k) == v for k, v in (pairs or {'state': 'gate'}).items()):
+                keys = ('state', 'phase', 'gate', 'iter', 'frame', 'hpwl', 'wns', 'tns', 'paused', 'finished', 'note', 'error')
+                return {'ok': True, **{k: state.get(k) for k in keys}}
+            if state.get('error'):
+                return {'ok': False, 'error': state['error'], 'state': state.get('state')}
+            if time.time() >= deadline:
+                return {'ok': False, 'error': f'timed out after {timeout:g}s waiting for {pairs or {"state": "gate"}}', 'state': state.get('state'), 'phase': state.get('phase')}
+            time.sleep(1)
+    if args.command == 'macros':
+        listing = call({'cmd': 'export', 'what': 'macros'})
+        if not listing.get('ok'):
+            return listing
+        rows = []
+        for m in listing.get('macros', []):
+            node = call({'cmd': 'describe', 'name': m['name']}).get('node', {})
+            rows.append({'name': m['name'], 'x': m['x'], 'y': m['y'], 'orient': m['orient'],
+                         **{k: node[k] for k in ('master', 'w_um', 'h_um', 'pins', 'pinned', 'movable') if k in node}})
+        return {'ok': True, 'units': listing.get('units'), 'dbu_per_um': listing.get('dbu_per_um'), 'frame': listing.get('frame'),
+                'core': listing.get('core_dbu'), 'macros': rows}
+    return None
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--socket')
     ap.add_argument('--workdir')
     ap.add_argument('--timeout', type=float, default=30)
+    ap.add_argument('--retry', type=float, default=0, help='seconds to keep retrying while the socket is down (a restart)')
     ap.add_argument('command', help='a command (help, find, highlight, critical, selection, ...) or a JSON object')
     ap.add_argument('pairs', nargs='*', metavar='key=value')
     args = ap.parse_args(argv)
+    local = local_command(args)
+    if local is not None:
+        print(json.dumps(local, indent=2))
+        return 0 if local.get('ok', True) else 1
     if args.command.lstrip().startswith('{'):
         payload = json.loads(args.command)
     else:
@@ -85,7 +165,7 @@ def main(argv=None):
         for pair in args.pairs:
             key, _, value = pair.partition('=')
             payload[key] = parse_value(value)
-    reply = request(find_socket(args), payload, args.timeout)
+    reply = with_retry(args, lambda sock: request(sock, payload, args.timeout))
     print(json.dumps(reply, indent=2))
     return 0 if reply.get('ok', True) else 1
 

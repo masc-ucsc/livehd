@@ -13,6 +13,7 @@ extern char** environ;
 #include <cstdio>
 #include <cstdlib>
 #include <exception>
+#include <filesystem>
 
 #include "debug_env.hpp"
 #include "diag.hpp"
@@ -21,6 +22,7 @@ extern char** environ;
 #include "job_manager.hpp"
 #include "lhd.hpp"
 #include "lhd_pyrope.hpp"
+#include "pass/place/chunk_jobs.hpp"
 #include "pass/place/gui/gui_ipc.hpp"
 #include "perf_tracing.hpp"
 #include "process_group.hpp"
@@ -47,6 +49,29 @@ struct Trace_guard {
 }  // namespace
 
 int main(int argc, char** argv) {
+  if (argc >= 2 && (std::string_view(argv[1]) == "place-chunks" || std::string_view(argv[1]) == "--place-one-chunk")) {
+    try {
+      (void)livehd::cost::install_memory_backstop();
+      if (std::string_view(argv[1]) == "--place-one-chunk" && argc == 5) {
+        return livehd::placement::place_chunk_worker(argv[2], argv[3], argv[4]);
+      }
+      if (std::string_view(argv[1]) == "place-chunks" && (argc == 5 || (argc == 7 && std::string_view(argv[5]) == "--chunk"))
+          && std::string_view(argv[3]) == "--out") {
+        // Workers are spawned from this path: prefer the running image over a relative or rewritten argv[0].
+        std::error_code ec;
+        const auto      self = std::filesystem::read_symlink("/proc/self/exe", ec);
+        return livehd::placement::place_chunk_batch(ec ? std::string(argv[0]) : self.string(),
+                                                    argv[2],
+                                                    argv[4],
+                                                    argc == 7 ? std::optional<std::string>(argv[6]) : std::nullopt);
+      }
+      std::fprintf(stderr, "usage: lhd place-chunks MANIFEST --out DIR [--chunk PHYSICAL_ID]\n");
+      return argc == 3 && std::string_view(argv[2]) == "--help" ? 0 : 2;
+    } catch (const std::exception& e) {
+      std::fprintf(stderr, "lhd place-chunks: %s\n", e.what());
+      return 1;
+    }
+  }
   if (argc == 4 && std::string_view(argv[1]) == "--placement-snapshot-owner") {
     return livehd::placement::gui::serve_frozen_owner(std::atoi(argv[2]), std::atoi(argv[3]));
   }

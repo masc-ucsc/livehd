@@ -3,22 +3,27 @@
 // questions and paints on the page. Highlights and the selection live in the session, so the page and the agent see the
 // same thing; "critical" is answered by the flow thread through the timing provider.
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <cstring>
 #include <format>
-#include <regex>
+#include <memory>
+#include <thread>
 #include <unordered_set>
 
 #include "core/hash_util.hpp"
 #include "core/job_manager.hpp"
 #include "gui_geometry.hpp"
+#include "gui_scan.hpp"
+#include "gui_tracks.hpp"
 #include "gui_session.hpp"
 #include "gui_worker.hpp"
 #include "gui_wire.hpp"
 #include "pass/place/macro_state.hpp"
 #include "rapidjson/document.h"
 #include "rapidjson/stringbuffer.h"
+#include "re2/re2.h"
 #include "rapidjson/writer.h"
 
 namespace livehd::placement::gui {
@@ -143,7 +148,13 @@ const char* kind_name(Kind k) {
   }
   return "?";
 }
-bool valid_color(const std::string& c) { return std::regex_match(c, std::regex(R"(^(#[0-9a-fA-F]{3,8}|[a-zA-Z]{3,20})$)")); }
+// #rgb .. #rrggbbaa, or a CSS colour name; nothing else reaches the page's style.
+bool valid_color(const std::string& c) {
+  if (c.size() >= 4 && c.size() <= 9 && c[0] == '#') {
+    return std::all_of(c.begin() + 1, c.end(), [](unsigned char ch) { return std::isxdigit(ch) != 0; });
+  }
+  return c.size() >= 3 && c.size() <= 20 && std::all_of(c.begin(), c.end(), [](unsigned char ch) { return std::isalpha(ch) != 0; });
+}
 // Full result details have a byte budget. Every closed experiment keeps its
 // identifying fields, final status, measured metrics and cost for the life of the session.
 std::string compact_history(const std::string& record) {
@@ -238,7 +249,7 @@ std::string Session::node_details_locked(size_t i) const {
                              num(x + pin.x),
                              num(y + pin.y));
   }
-  return std::format(
+  auto out = std::format(
       R"({{"name":"{}","kind":"{}","register":{},"master":"{}","class":"{}","x_um":{},"y_um":{},"w_um":{},"h_um":{},"area_um2":{},"movable":{},"pinned":{},"pins":{},"orient":"{}","allowed_orientations":[{}],"signal_pins_dbu":[{}],"pin_sides":{{"left":{},"right":{},"bottom":{},"top":{}}}}})",
       esc(n.name),
       kind_name(n.kind),
@@ -260,6 +271,11 @@ std::string Session::node_details_locked(size_t i) const {
       sides[1],
       sides[2],
       sides[3]);
+  if (n.kind == Kind::macro || n.kind == Kind::fixed) {
+    out.pop_back();  // the routing-track constraint a pinned or fixed pose must meet
+    out += std::format(R"(,"track_check":"{}"}})", esc(track_describe(*scene_, i, n.orient)));
+  }
+  return out;
 }
 
 void Session::set_selection_locked(std::vector<std::string> names) {
@@ -731,11 +747,24 @@ std::string Session::agent_call(const std::string& json, int timeout_ms) {
   if (d.HasParseError() || !d.IsObject() || !d.HasMember("cmd") || !d["cmd"].IsString()) {
     return err_json("send a JSON object with a \"cmd\" (see cmd=help)");
   }
-  const std::string cmd = d["cmd"].GetString();
+  // The length matters: a "\u0000" inside the text must not shorten it ("state\u0000x" is not "state").
+  const std::string cmd(d["cmd"].GetString(), d["cmd"].GetStringLength());
   const auto        str = [&](const char* key, const std::string& def = "") {
-    return d.HasMember(key) && d[key].IsString() ? std::string(d[key].GetString()) : def;
+    return d.HasMember(key) && d[key].IsString() ? std::string(d[key].GetString(), d[key].GetStringLength()) : def;
   };
   const auto integer = [&](const char* key, int def) { return d.HasMember(key) && d[key].IsInt() ? d[key].GetInt() : def; };
+  // A bounded integer argument. Absent: the default. Present but not an integer in [lo, hi] (a string, 2.7, 0, -1,
+  // 1e300): `why` says so, instead of the value being ignored or clamped to something the caller did not ask for.
+  const auto bounded = [&](const char* key, int def, int lo, int hi, std::string& why) {
+    if (!d.HasMember(key)) {
+      return def;
+    }
+    if (!d[key].IsInt() || d[key].GetInt() < lo || d[key].GetInt() > hi) {
+      why = std::format("{} must be an integer in [{}, {}]", key, lo, hi);
+      return def;
+    }
+    return d[key].GetInt();
+  };
   const auto number  = [&](const char* key, double def) { return d.HasMember(key) && d[key].IsNumber() ? d[key].GetDouble() : def; };
   // A browser cannot round-trip arbitrary 64-bit JSON integers through Number.
   // Offer the serialized array for downloads/editors; normal socket clients still get records.
@@ -1978,10 +2007,15 @@ std::string Session::agent_call(const std::string& json, int timeout_ms) {
     for (const auto& candidate : d["candidates"].GetArray()) {
       rapidjson::StringBuffer                    buf;
       rapidjson::Writer<rapidjson::StringBuffer> writer(buf);
-      candidate.Accept(writer);
+      rapidjson::Document                        copy;  // a candidate is a move unless it says it is a batch
+      copy.CopyFrom(candidate, copy.GetAllocator());
+      if (copy.IsObject() && !copy.HasMember("cmd")) {
+        copy.AddMember("cmd", "move", copy.GetAllocator());
+      }
+      copy.Accept(writer);
       Command move;
       if (auto why = parse_command(buf.GetString(), move); !why.empty()) {
-        return err_json(why);
+        return err_json("candidate " + std::to_string(request->trials.size()) + ": " + why);
       }
       if (move.cmd != "move" && move.cmd != "batch") {
         return err_json("inline candidates require move or batch");
@@ -2143,6 +2177,25 @@ std::string Session::agent_call(const std::string& json, int timeout_ms) {
     }
     return std::format(R"({{"ok":true,"maps":[{}]}})", maps);
   }
+  if (cmd == "macro_scan") {
+    std::shared_ptr<const Scene> scene;
+    std::shared_ptr<const Frame> frame;
+    bool                         orientation_editable = false;
+    {
+      std::lock_guard lock(m_);
+      if (auto why = expected_revision_locked(); !why.empty()) {
+        return err_json(why);
+      }
+      scene = scene_;
+      frame = frame_;
+      // the same condition resolve_move_locked applies to an orientation change
+      orientation_editable = bool(orientation_provider_) && state_name_ == "gate" && (gate_name_ == "fp" || gate_name_ == "macro");
+    }
+    if (!scene || !frame) {
+      return err_json("no published placement");
+    }
+    return macro_scan(*scene, *frame, d, orientation_editable);
+  }
   if (cmd == "clusters") {
     std::lock_guard lk(m_);
     if (!scene_) {
@@ -2181,6 +2234,83 @@ std::string Session::agent_call(const std::string& json, int timeout_ms) {
         options_json(),
         state_json());
   }
+  if (cmd == "chunk_interface") {
+    std::string design, intent;
+    uint64_t    frame = 0, revision = 0;
+    {
+      std::lock_guard lock(m_);
+      if (!scene_ || !frame_ || scene_->phase != "fp" || scene_->chunk_plan.empty() || state_name_ != "gate") {
+        return err_json("interface edits require the live chunk floorplan gate");
+      }
+      if (auto why = expected_revision_locked(); !why.empty()) {
+        return err_json(why);
+      }
+      design   = scene_->design;
+      intent   = cfg_.intent;
+      frame    = frame_->id;
+      revision = intent_revision_;
+    }
+    auto dst = str("chunk"), src = str("source"), ori = str("orientation", "auto");
+    if (dst.empty() || (ori != "clear" && src.empty()) || (d.HasMember("orientation") && !d["orientation"].IsString())
+        || (d.HasMember("apply") && !d["apply"].IsBool())) {
+      return err_json("supply chunk, source and orientation (or clear), and an optional boolean apply");
+    }
+    const bool       apply = d.HasMember("apply") && d["apply"].GetBool();
+    metadata::Bundle prior(intent), edits;
+    bool             removed = false;
+    for (auto* record : prior.select("livehd.placement.chunk_guidance", design)) {
+      rapidjson::Document r;
+      r.CopyFrom(*record, r.GetAllocator());
+      if (r.HasMember("interface_copies") && r["interface_copies"].IsArray()) {
+        auto& a = r["interface_copies"];
+        for (auto it = a.Begin(); it != a.End();) {
+          if (it->IsObject() && it->HasMember("target") && (*it)["target"].IsString() && dst == (*it)["target"].GetString()) {
+            if (!r.HasMember("design") || r["design"].IsNull()) {
+              return err_json("this interface is set by design-wide default metadata; edit that input explicitly");
+            }
+            it      = a.Erase(it);
+            removed = true;
+          } else {
+            ++it;
+          }
+        }
+      }
+      edits.replace(r);
+    }
+    if (ori == "clear" && !removed) {
+      return err_json("this home has no authored interface copy");
+    }
+    if (ori != "clear") {
+      const auto          id = "interface:" + dst;
+      rapidjson::Document r(rapidjson::kObjectType);
+      auto&               a = r.GetAllocator();
+      for (auto* e : edits.select("livehd.placement.chunk_guidance", design)) {
+        if (e->HasMember("id") && (*e)["id"].IsString() && id == (*e)["id"].GetString() && e->HasMember("design")
+            && (*e)["design"].IsString()) {
+          r.CopyFrom(*e, a);
+        }
+      }
+      if (!r.HasMember("class")) {
+        r.AddMember("class", "livehd.placement.chunk_guidance", a)
+            .AddMember("design", rapidjson::Value(design.c_str(), a), a)
+            .AddMember("id", rapidjson::Value(id.c_str(), a), a);
+      }
+      if (!r.HasMember("interface_copies")) {
+        r.AddMember("interface_copies", rapidjson::Value(rapidjson::kArrayType), a);
+      }
+      rapidjson::Value op(rapidjson::kObjectType);
+      op.AddMember("source", rapidjson::Value(src.c_str(), a), a)
+          .AddMember("target", rapidjson::Value(dst.c_str(), a), a)
+          .AddMember("orientation", rapidjson::Value(ori.c_str(), a), a);
+      r["interface_copies"].PushBack(op, a);
+      edits.replace(r);
+    }
+    return submit_reply(std::format(R"({{"cmd":"{}","expect":{{"frame":{},"intent":{}}},"records":{}}})",
+                                    apply ? "intent_apply" : "intent_preview",
+                                    frame,
+                                    revision,
+                                    edits.json()));
+  }
   if (cmd == "export" && str("what") != "macros") {
     std::lock_guard lock(m_);
     const auto      what = str("what");
@@ -2196,7 +2326,209 @@ std::string Session::agent_call(const std::string& json, int timeout_ms) {
         moves += move;
       }
       return std::format(R"({{"ok":true,"target":"{}","frame":{},"units":"dbu","dbu_per_um":{},"moves":[{}]}})",
-                         esc(cfg_.target), frame_->id, scene_->dbu_per_um, moves);
+                         esc(cfg_.target),
+                         frame_->id,
+                         scene_->dbu_per_um,
+                         moves);
+    }
+    if (what == "chunks" || what == "chunk_pins" || what == "chunk_peers") {
+      if (!scene_ || scene_->chunk_plan.empty()) {
+        return err_json("no chunk floorplan at this frame");
+      }
+      auto view    = str("view", "live");
+      bool preview = view == "preview";
+      if (view != "live" && !preview) {
+        return err_json("chunk view must be live or preview");
+      }
+      if (preview && (intent_status_ != "preview" || !frame_ || intent_report_frame_ != frame_->id)) {
+        return err_json("no current chunk preview");
+      }
+      rapidjson::Document plan;
+      plan.Parse<rapidjson::kParseFullPrecisionFlag>((preview ? intent_report_ : scene_->chunk_plan).c_str());
+      if (!plan.IsObject() || !plan.HasMember("chunks")) {
+        return err_json("no chunk plan in this result");
+      }
+      auto filter = str("chunk");
+      int  start = integer("offset", 0), limit = integer("limit", 64);
+      if (start < 0 || limit < 1 || limit > 256 || (d.HasMember("offset") && !d["offset"].IsInt())
+          || (d.HasMember("limit") && !d["limit"].IsInt())) {
+        return err_json("use a nonnegative offset and a limit between 1 and 256");
+      }
+      if (what == "chunk_peers") {
+        auto homes = plan["chunks"].GetArray();
+        auto src   = std::find_if(homes.Begin(), homes.End(), [&](const auto& c) { return filter == c["id"].GetString(); });
+        if (src == homes.End()) {
+          return err_json("chunk_peers requires a known physical chunk");
+        }
+        auto root = [](const auto& c) -> std::string_view {
+          return (c.HasMember("interface_copy") ? c["interface_copy"]["source"] : c["id"]).GetString();
+        };
+        // The planner emits one boundary contact per (home, crossing net).
+        std::unordered_set<uint64_t> incident;
+        for (const auto& p : (*src)["ports"].GetArray()) {
+          incident.insert(p["net_index"].GetUint64());
+        }
+        rapidjson::Document reply(rapidjson::kObjectType);
+        auto&               a = reply.GetAllocator();
+        rapidjson::Value    peers(rapidjson::kArrayType);
+        unsigned            total = 0;
+        for (const auto& c : homes) {
+          if (&c == &*src) {
+            continue;
+          }
+          const bool logical  = c["partition"] == (*src)["partition"];
+          const bool physical = logical && c["implementation"] == (*src)["implementation"];
+          const bool pins     = root(c) == root(*src);
+          unsigned   shared   = 0;
+          for (const auto& p : c["ports"].GetArray()) {
+            shared += incident.contains(p["net_index"].GetUint64());
+          }
+          if (!shared && !logical && !pins) {
+            continue;
+          }
+          if (total++ < unsigned(start) || peers.Size() >= unsigned(limit)) {
+            continue;
+          }
+          rapidjson::Value row(rapidjson::kObjectType);
+          row.AddMember("id", rapidjson::Value(c["id"], a), a)
+              .AddMember("box_dbu", rapidjson::Value(c["box_dbu"], a), a)
+              .AddMember("shared_nets", shared, a)
+              .AddMember("same_partition", logical, a)
+              .AddMember("same_implementation", physical, a)
+              .AddMember("shared_interface", pins, a);
+          peers.PushBack(row, a);
+        }
+        reply.AddMember("ok", true, a)
+            .AddMember("view", rapidjson::Value(view.c_str(), a), a)
+            .AddMember("chunk", rapidjson::Value(filter.c_str(), a), a)
+            .AddMember("frame", frame_ ? frame_->id : 0, a)
+            .AddMember("intent_revision", intent_revision_, a)
+            .AddMember("sequence", preview ? intent_report_sequence_ : 0, a)
+            .AddMember("total", total, a)
+            .AddMember("peers", peers, a);
+        return metadata::canonical(reply);
+      }
+      if (what == "chunk_pins") {
+        auto match = str("match", "all");
+        if (filter.empty() || (match != "all" && match != "copied" && match != "local")) {
+          return err_json("supply a physical chunk and match=all, copied or local");
+        }
+        auto homes = plan["chunks"].GetArray();
+        auto c     = std::find_if(homes.Begin(), homes.End(), [&](const auto& h) { return filter == h["id"].GetString(); });
+        if (c == homes.End()) {
+          return err_json("unknown physical chunk: " + filter);
+        }
+        rapidjson::Document          reply(rapidjson::kObjectType);
+        auto&                        a = reply.GetAllocator();
+        rapidjson::Value             rows(rapidjson::kArrayType);
+        size_t                       total = 0;
+        std::map<uint64_t, unsigned> page_sources;
+        for (const auto& pin : (*c)["ports"].GetArray()) {
+          bool copied = pin.HasMember("copy_source_net");
+          if ((match == "copied" && !copied) || (match == "local" && copied)) {
+            continue;
+          }
+          if (total++ < unsigned(start) || rows.Size() >= unsigned(limit)) {
+            continue;
+          }
+          if (copied) {
+            page_sources.emplace(pin["copy_source_net"].GetUint64(), rows.Size());
+          }
+          rows.PushBack(rapidjson::Value(pin, a), a);
+        }
+        if (c->HasMember("interface_copy")) {
+          const auto& copy = (*c)["interface_copy"];
+          reply.AddMember("interface_copy", rapidjson::Value(copy, a), a);
+          for (const auto& h : homes) {
+            if (std::string_view(h["id"].GetString()) != copy["source"].GetString() || page_sources.empty()) {
+              continue;
+            }
+            for (const auto& pin : h["ports"].GetArray()) {
+              auto found = page_sources.find(pin["net_index"].GetUint64());
+              if (found != page_sources.end()) {
+                rows[found->second]
+                    .AddMember("source_net", rapidjson::Value(pin["net"], a), a)
+                    .AddMember("source_xy_dbu", rapidjson::Value(pin["xy_dbu"], a), a);
+              }
+            }
+            break;
+          }
+        }
+        reply.AddMember("ok", true, a)
+            .AddMember("view", rapidjson::Value(view.c_str(), a), a)
+            .AddMember("chunk", rapidjson::Value(filter.c_str(), a), a)
+            .AddMember("frame", frame_ ? frame_->id : 0, a)
+            .AddMember("intent_revision", intent_revision_, a)
+            .AddMember("sequence", preview ? intent_report_sequence_ : 0, a)
+            .AddMember("total", uint64_t(total), a)
+            .AddMember("pins", rows, a);
+        return metadata::canonical(reply);
+      }
+      std::map<std::string_view, const rapidjson::Value*> measurements;
+      if (plan.HasMember("local_placement")) {
+        for (const auto& r : plan["local_placement"].GetArray()) {
+          measurements.emplace(r["id"].GetString(), &r);
+        }
+      }
+      rapidjson::Document reply(rapidjson::kObjectType);
+      auto&               a = reply.GetAllocator();
+      rapidjson::Value    rows(rapidjson::kArrayType);
+      int                 seen = 0;
+      for (const auto& c : plan["chunks"].GetArray()) {
+        auto id = c["id"].GetString();
+        if (!filter.empty() && filter != id) {
+          continue;
+        }
+        if (seen++ < start || rows.Size() >= unsigned(limit)) {
+          continue;
+        }
+        rapidjson::Value row(rapidjson::kObjectType);
+        for (const auto* f : {"id",
+                              "partition",
+                              "implementation",
+                              "box_dbu",
+                              "density",
+                              "estimated_bytes",
+                              "incident_pin_hpwl_dbu",
+                              "interface_copy"}) {
+          if (c.HasMember(f)) {
+            row.AddMember(rapidjson::StringRef(f), rapidjson::Value(c[f], a), a);
+          }
+        }
+        row.AddMember("members", c["members"].Size(), a).AddMember("ports", c["ports"].Size(), a);
+        if (auto it = measurements.find(id); it != measurements.end()) {
+          row.AddMember("measurement", rapidjson::Value(*it->second, a), a);
+        }
+        rows.PushBack(row, a);
+      }
+      if (!filter.empty() && !seen) {
+        return err_json("unknown physical chunk: " + filter);
+      }
+      reply.AddMember("ok", true, a)
+          .AddMember("view", rapidjson::Value(view.c_str(), a), a)
+          .AddMember("frame", frame_ ? frame_->id : 0, a)
+          .AddMember("intent_revision", intent_revision_, a)
+          .AddMember("sequence", preview ? intent_report_sequence_ : 0, a)
+          .AddMember("dbu_per_um", scene_->dbu_per_um, a)
+          .AddMember("crossing_pin_hpwl_dbu", plan["communication"]["pin_hpwl_dbu"].GetDouble(), a)
+          .AddMember("total", seen, a)
+          .AddMember("chunks", rows, a);
+      return metadata::canonical(reply);
+    }
+    if (what == "floorplan") {
+      if (!scene_ || scene_->chunk_plan.empty()) {
+        return err_json("no floorplan chunks in this scene");
+      }
+      metadata::Bundle bundle(cfg_.intent);
+      for (const auto* value : {&scene_->chunk_plan, &scene_->chunk_results}) {
+        if (!value->empty()) {
+          rapidjson::Document r;
+          r.Parse<rapidjson::kParseFullPrecisionFlag>(value->c_str());
+          r.RemoveMember("local_placement");
+          bundle.replace(r);
+        }
+      }
+      return std::format(R"({{"ok":true,{}}})", record_field(bundle.json()));
     }
     if (what == "intent") {
       return std::format(R"({{"ok":true,"revision":{},"frame":{},"sequence":{},{},"bindings":{},"status":"{}"}})",
@@ -2276,6 +2608,10 @@ std::string Session::agent_call(const std::string& json, int timeout_ms) {
         return err_json("no design name for placement metadata");
       }
       metadata::Bundle bundle(cfg_.intent);
+      if (!scene_->chunk_plan.empty()) {
+        if(scene_->phase=="fp")return err_json("coarse chunk objects have no final macro poses; export floorplan at this gate");
+        rapidjson::Document r;r.Parse<rapidjson::kParseFullPrecisionFlag>(scene_->chunk_plan.c_str());r.RemoveMember("local_placement");bundle.replace(r);
+      }
       bundle.erase_selected("livehd.placement.state", scene_->design);
       bundle.replace(macro_state(scene_->design, poses));
       return std::format(R"({{"ok":true,{}}})", record_field(bundle.json()));
@@ -2313,8 +2649,44 @@ std::string Session::agent_call(const std::string& json, int timeout_ms) {
                        view,
                        rows);
   }
+  if (cmd == "evaluate" && d.HasMember("wait_ms")) {
+    // Full timing is asynchronous: the command is queued and `state.evaluation_seq` moves when the flow has measured.
+    // With wait_ms the call returns the measurement (the summary) instead of leaving the caller to poll for it.
+    std::string bad;
+    const int   wait = bounded("wait_ms", 0, 0, 600000, bad);
+    if (!bad.empty()) {
+      return err_json(bad);
+    }
+    uint64_t before = 0;
+    {
+      std::lock_guard lk(m_);
+      before = evaluation_seq_;
+    }
+    bool       accepted = false;
+    const auto reply    = submit_reply(json, &accepted);
+    if (!accepted || wait == 0) {
+      return reply;
+    }
+    const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(wait);
+    for (;;) {
+      {
+        std::lock_guard lk(m_);
+        if (evaluation_seq_ != before) {
+          return std::format(R"({{"ok":true,"evaluation_seq":{},"evaluation_frame":{},"frame":{},"summary":{}}})", evaluation_seq_, evaluated_frame_,
+                             frame_ ? frame_->id : 0, summary_locked());
+        }
+        if (exit_.load()) {
+          return err_json("session closed");
+        }
+      }
+      if (std::chrono::steady_clock::now() >= until) {
+        return err_json("evaluation did not finish within wait_ms; it is still queued, poll state.evaluation_seq");
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(25));
+    }
+  }
   if (cmd == "repair_scope" || cmd == "intent_apply" || cmd == "intent_preview" || cmd == "batch" || cmd == "relax" || cmd == "legalize" || cmd == "policy"
-      || cmd == "evaluate" || cmd == "move" || cmd == "pin" || cmd == "unpin") {
+      || cmd == "evaluate" || cmd == "move" || cmd == "macro_move" || cmd == "pin" || cmd == "unpin") {
     return submit_reply(json);
   }
   if (cmd == "help") {
@@ -2322,6 +2694,7 @@ std::string Session::agent_call(const std::string& json, int timeout_ms) {
 "explore":"{tier:T0|T1|T2|T3|T4, target:main, patch, expect?, label?, client?} -> isolated geometry or frozen-netlist evaluation",
 "geometry":"{target?} -> outline, utilization, macro periphery, cluster bounds, facing strips with standard-cell occupancy and open entrances, and rasterized dead space in DBU",
 "whatif":"{candidates:[move or batch,...], max_nets?, expect?, timeout_ms?} -> measured journal trials and rollback at one gate",
+"macro_scan":"{node, positions?:[[x,y],...] | grid?:{nx,ny}, orientations?:[N|FN|FS|S,...], top?, refine?, expect?} -> positions (DBU, lower-left) of one macro ranked by its pin nets' half-perimeter, legal ones only, the current pose included, the best refined downhill; cells frozen, no timing, other macros' pins not counted: screen here, then whatif the best",
 "maps":"{} -> frame, availability, peak, overflow, over-capacity share and hotspot boxes of each measured grid",
 "clusters":"{} -> available placement cluster names and member counts",
 "explore_begin":"{expect?:{frame},set?:{physical_option:CLI_value}} -> start a private foreground replay at this gate",
@@ -2332,7 +2705,8 @@ std::string Session::agent_call(const std::string& json, int timeout_ms) {
 "score_config":"{estimator,components:[{loss,weight,half}]} -> set an informational score; empty components disables it",
 "summary":"{} -> current timing, routing and configured quality with measurement frame IDs",
 "hello":"{} -> invocation, files, capabilities, options and state",
-"export":"{what:macros|relationships|intent|flags|summary|score|scope, format?:metadata|dbu|placereasoner|def, encoding?:json_text} -> placement or session data",
+"export":"{what:macros|relationships|intent|floorplan|chunks|chunk_pins|chunk_peers|flags|summary|score|scope, format?:metadata|dbu|placereasoner|def, encoding?:json_text} -> placement or session data",
+"chunk_interface":"{chunk,source?,orientation:auto|N|FN|FS|S|clear,apply?:false,expect?} -> preview or apply a physical home interface; inspect export what=chunks or what=chunk_pins (chunk required, match=all|copied|local), view=preview or live, offset?, limit?",
 "intent_apply":"{records or records_json,expect?} -> replace the applicable placement hints; preserve other design metadata",
 "intent_preview":"{records or records_json,expect?} -> bind records and measure residuals; export intent returns the preview report",
 "signature":"{} -> macro side, order, orientation and quantized position by logical group",
@@ -2344,6 +2718,7 @@ std::string Session::agent_call(const std::string& json, int timeout_ms) {
 "legalize":"{scope?:{nodes:[names] | box:[xl,yl,xh,yh]}} -> legalize the placement at a gate, preserving active pins; see state.legalization",
 "evaluate":"{expect?:{frame,baseline?,target?,intent?,evaluation?}} -> request full timing; state.evaluation_seq identifies the completed attempt, evaluation_frame its placement",
 "move":"{nodes,x/y or dx/dy or align+reference, gap?, edges?:body|halo, orientation?, final?, expect?} -> queue a DBU edit; command_status returns resolved coordinates",
+"macro_move":"{nodes,x,y (DBU, lower-left),final?} -> place a PLACED (fixed) macro, which move cannot: remembers the pose and re-runs the flow to the latest gate with it there (the session restarts: tools/lhd_gui.py --retry rides it out)",
 "pin":"{nodes} -> anchor legal objects at their published positions",
 "unpin":"{nodes} -> release selected anchors",
 "find":"{regex, scope?, field?, limit?} -> the matching nodes (nothing is painted). scope: all|cells|comb|regs|macros|io|movable|fixed|selected; field: name (default)|master|any",
@@ -2450,7 +2825,14 @@ std::string Session::agent_call(const std::string& json, int timeout_ms) {
     if (!scene_) {
       return err_json("no design yet");
     }
-    const auto it = scene_->index.find(str("name"));
+    auto name = str("name");
+    if (!name.empty() && name[0] == '#') {  // node N of the current scene, as move/select/highlight_names take them
+      const auto i = scene_->node_index(name);
+      if (i >= 0) {
+        name = scene_->nodes[size_t(i)].name;
+      }
+    }
+    const auto it = scene_->index.find(name);
     if (it == scene_->index.end()) {
       return err_json("no such node in the current phase: " + str("name"));
     }
@@ -2475,7 +2857,11 @@ std::string Session::agent_call(const std::string& json, int timeout_ms) {
         valid ? endpoint_report_ : "null");
   }
   if (cmd == "critical") {
-    const int n = std::clamp(integer("n", 25), 1, 500);
+    std::string bad;
+    const int   n = bounded("n", 25, 1, 500, bad);
+    if (!bad.empty()) {
+      return err_json(bad);
+    }
     std::unique_lock lk(m_);
     const bool       archived = state_name_ == "done";
     if (!archived) {
@@ -2525,6 +2911,28 @@ std::string Session::agent_call(const std::string& json, int timeout_ms) {
   }
 
   // The rest select nodes by name/regex: find, highlight, highlight_names, select.
+  // The pattern is RE2 (linear time, no backtracking): a nested quantifier such as (.*)*x cannot hold the session
+  // lock, and with it the page and the flow, for minutes. It is compiled before the lock is taken. Backreferences
+  // and lookaround do not exist in RE2 and are refused with its message.
+  std::unique_ptr<RE2> re;
+  std::string          limit_error;
+  const int            limit = cmd == "find" ? bounded("limit", 50, 1, 1000, limit_error) : 15;
+  if (!limit_error.empty()) {
+    return err_json(limit_error);
+  }
+  if (!(cmd == "highlight_names" || (cmd == "select" && d.HasMember("names"))) && (cmd == "find" || cmd == "highlight" || cmd == "select")) {
+    if (str("regex").empty()) {
+      return err_json(cmd + " needs a regex");
+    }
+    RE2::Options options;
+    options.set_log_errors(false);
+    options.set_max_mem(16 << 20);
+    options.set_never_capture(true);
+    re = std::make_unique<RE2>(str("regex"), options);
+    if (!re->ok()) {
+      return err_json("bad regex (RE2 syntax, no backreferences or lookaround): " + re->error());
+    }
+  }
   std::lock_guard lk(m_);
   if (!scene_) {
     return err_json("no design yet");
@@ -2559,15 +2967,6 @@ std::string Session::agent_call(const std::string& json, int timeout_ms) {
       names.push_back(std::move(name));
     }
   } else if (cmd == "find" || cmd == "highlight" || cmd == "select") {
-    if (regex_text.empty()) {
-      return err_json(cmd + " needs a regex");
-    }
-    std::regex re;
-    try {
-      re = std::regex(regex_text, std::regex::ECMAScript | std::regex::optimize);
-    } catch (const std::regex_error& e) {
-      return err_json(std::string("bad regex: ") + e.what());
-    }
     static const std::unordered_set<std::string> scopes{"all", "cells", "comb", "regs", "macros", "io", "movable", "fixed", "selected"};
     if (!scopes.contains(scope)) {
       return err_json("scope must be one of all, cells, comb, regs, macros, io, movable, fixed, selected");
@@ -2604,7 +3003,7 @@ std::string Session::agent_call(const std::string& json, int timeout_ms) {
       if (!in) {
         continue;
       }
-      const bool hit = (field != "master" && std::regex_search(n.name, re)) || (field != "name" && std::regex_search(n.master, re));
+      const bool hit = (field != "master" && RE2::PartialMatch(n.name, *re)) || (field != "name" && RE2::PartialMatch(n.master, *re));
       if (hit) {
         if (names.size() >= kMaxNames) {
           truncated = true;
@@ -2617,7 +3016,7 @@ std::string Session::agent_call(const std::string& json, int timeout_ms) {
     return err_json("unknown cmd '" + cmd + "' (see cmd=help)");
   }
   std::string sample;
-  for (size_t k = 0; k < names.size() && k < (cmd == "find" ? size_t(std::clamp(integer("limit", 50), 1, 1000)) : size_t(15)); ++k) {
+  for (size_t k = 0; k < names.size() && k < size_t(limit); ++k) {
     sample += std::format("{}\"{}\"", k ? "," : "", esc(names[k]));
   }
   if (cmd == "find") {

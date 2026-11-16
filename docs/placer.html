@@ -56,16 +56,14 @@ Small labels under a step show the forces and options that the step uses. Click 
 <li class="step k-on"><span class="tag">on</span><a href="#timing">Timing seed</a><small>Post-synthesis STA sets the first net weights · timing_driven</small></li>
 <li class="step k-auto"><span class="tag">auto</span><a href="#flow">IO prototype GP</a><small>Puts movable IO pins on the die edge · io_iterations=500</small></li>
 </ol></li>
-<li class="link"><span>fp=true (or fp=auto, the default, selects it) and FP has candidates → <b>1</b>. Movable macros only → <b>2</b>. Standard cells only → <b>3</b>.</span>
-<a class="alt k-off" href="#h2d"><span class="tag">off</span> <b>H2D</b> (macro=h2d) replaces fp_plan and macro GP</a></li>
-<li class="stage k-auto"><div class="stage-head"><span class="num">1</span><h3>fp_plan</h3><span class="tag">auto</span><code>fp=auto</code><small>Centroid floorplanning for repeated hierarchy</small><span class="moves">Moves: cells · macros · IO pins · centroids</span></div>
+<li class="link"><span>Native fresh placement → <b>1</b>. With fp=false, skip to macro or cell placement.</span>
+<a class="alt k-off" href="#h2d"><b>H2D</b> selects the separate macro solver.</a></li>
+<li class="stage k-auto"><div class="stage-head"><span class="num">1</span><h3>fp_plan</h3><code>fp=auto</code><small>Rectangular chunks of whole synthesis colors and independent macros</small></div>
 <ol class="steps">
-<li class="step k-always"><span class="tag">always</span><a href="#centroids">FP global placement</a><small>Hierarchy/color centroids pull their members</small>
-<ul class="uses"><li class="k-on"><a href="#timing">timing checkpoints</a></li><li class="k-on"><a href="#recovery">sizing at checkpoints</a></li><li class="k-on"><a href="#pins">IO bus adjustment</a></li><li class="k-on"><a href="#route">congestion spreading</a></li><li class="k-off"><a href="#centroid-align">centroid alignment</a></li></ul></li>
-<li class="step k-off"><span class="tag">off</span><a href="#warp">Density warp</a><small>Moves the centroid targets · fp.warpspace</small></li>
-<li class="step k-on"><span class="tag">on</span><a href="#centroid-snap">Centroid snap</a><small>Aligns the targets, then freezes them · fp.snap</small></li>
+<li class="step k-always"><a href="#flow">Choose chunks</a><small>Memory is a ceiling. Repeated cores can use smaller chunks with a shared partition.</small></li>
+<li class="step k-always">Plan within each chunk<small>Place colors and macros against edge pins without timing. Reuse compatible cell placements in local coordinates.</small></li>
+<li class="step k-auto">Explore density<small>At the GUI floorplan gate, select a color or chunk, edit its target and save the design metadata for replay.</small></li>
 </ol></li>
-<li class="link"><span>The frozen targets become anchors for macro_plan (fp.anchor=0.25).</span></li>
 <li class="stage k-auto"><div class="stage-head"><span class="num">2</span><h3>macro_plan</h3><span class="tag">auto</span><code>movable macros</code><small>Macro placement and refinement</small><span class="moves">Moves: cells · macros · IO pins</span></div>
 <ol class="steps">
 <li class="step k-always"><span class="tag">always</span><a href="#flow">Macro global placement</a><small>Macros and cells move</small>
@@ -111,6 +109,23 @@ Small labels under a step show the forces and options that the step uses. Click 
 </ol>
 <p class="meta">The diagram does not show two other runs. mode=gp stops after global placement and does not write DEF.
 An <a href="#eco">ECO run</a> (lhd.incremental=true) uses a previous placement again.</p>
+<p><strong>Drag a physical chunk</strong> at the FP gate to move its colors together.
+Select a peer for pin-to-pin communication distance; the live drag shows incident net spans
+in DBU. Drop to refine positions and pins and see the resulting wire estimate. Aspect locks
+protect neighbors from reshaping. Overlap defaults to zero; if enabled, shared space is charged
+once, and the GUI reports the overlap and any cycles. Undo restores the previous geometry.</p>
+<p><strong>Physical homes</strong> lets you split off whole colors or macros, or fuse two
+homes within the memory budget. Preview shows the new interconnects and updates the
+placement and routing estimates before Apply. The routing overlay shows horizontal and
+vertical wire demand in 16 × 16 bins; it does not run a router. Use <strong>Chunk implementations</strong>
+when only reuse or pin standardization should change.</p>
+<p>At the live FP gate, open <strong>Floorplan chunks → Chunk implementations</strong>.
+Choose a logical partition to see each copy, its shape and its current implementation.
+Share all copies, separate every copy, or select instances and name groups such as A1 and A2.
+Each group can set a target aspect ratio and normalized pin positions. <strong>Preview change</strong>
+shows the implementation count and estimated wire length before you apply it.
+Save the design metadata to reproduce the choices or edit them through the agent interface.
+Wire length is the sum of crossing-net half-perimeters at chunk contacts, in DBU.</p>
 <h3 id="phase-compare">How fp_plan, macro_plan and final are different</h3>
 <p>The three phases use the same GP engine. They are different in three items: the objects that can move, the forces in GP, and the steps after GP.
 Each phase fixes more objects than the phase before it. The table shows only the differences. The shared settings are in the first row.</p>
@@ -175,7 +190,7 @@ A <strong>bin</strong> is a uniform legalization tile with usable capacity, befo
 <p>Each cell shows the default state and the option or phase override that controls it. The linked panels show the shared tuning values and the values that an enabled feature uses.</p>
 <div class="toolbar"><label for="search">Find a feature or option</label><input id="search" type="search" placeholder="e.g. fillers, recovery, local_density, timing_interval" autocomplete="off"><button id="clear" type="button">Clear</button><span id="count" aria-live="polite"></span></div>
 <div class="table-wrap"><table id="matrix"><caption>Normal full-placement flow. For an optional phase, the column shows the defaults if that phase runs.</caption><thead><tr><th scope="col">Algorithm / feature</th><th scope="col">fp_plan</th><th scope="col">macro_plan</th><th scope="col">final</th></tr></thead><tbody>
-<tr><th scope="row"><a href="#flow">Placement stages and budgets</a></th><td>Automatic for repeated hierarchy · fp=auto; fp.iterations=1500</td><td>Automatic when there are movable macros · iterations=1500</td><td>Always in the normal full flow · final=true; final.iterations=0 → iterations=1500</td></tr>
+<tr><th scope="row"><a href="#flow">Placement stages and budgets</a></th><td>Color/macro chunk plan · fp=auto; chunk.memory_gb=4</td><td>Automatic when there are movable macros · iterations=1500</td><td>Always in the normal full flow · final=true; final.iterations=0 → iterations=1500</td></tr>
 <tr><th scope="row"><a href="#frame">Floorplan, macro clearance and technology</a></th><td>Shared frame · halo=auto → 10 row heights/side</td><td>Shared frame · halo=auto → 10 row heights/side</td><td>Fixed macros · cell_halo=empty → halo=auto → 10 row heights/side</td></tr>
 <tr><th scope="row"><a href="#density">Global density and adaptive penalty</a></th><td>Active · density=0.5; adaptive_density=true</td><td>Active · same shared settings</td><td>Active · same shared settings</td></tr>
 <tr><th scope="row"><a href="#bins">Grids: density, routing, local</a></th><td>Fixed · grid.density=64</td><td>Fixed · grid.density=64</td><td>Fixed · grid.density=64</td></tr>
@@ -214,10 +229,13 @@ A <strong>bin</strong> is a uniform legalization tile with usable capacity, befo
 <h2 id="parameters">Enabled-feature tuning and complete option list</h2>
 <p>The tables show the <em>registered</em> defaults. They also show the parameters that have no effect while their feature is off. The panel text explains forced overrides, inherited values and execution gates. An empty value shows as <code>(empty)</code>.</p>
 <div class="toolbar"><button id="expand" type="button">Expand visible features</button><button id="collapse" type="button">Collapse all</button></div>
-<details id="flow"><summary>Placement stages and budgets <span class="phase-label">· 9 options</span></summary><div class="content"><p>To enable placement, set place=true (default false). To request centroid floorplanning, set fp=true. The macro refinement and the final cell phase then follow. FP GP runs only when it has centroid candidates or adjustable IOs. A design without macros uses only one final solve.</p>
+<details id="flow"><summary>Placement stages and budgets <span class="phase-label">· 12 options</span></summary><div class="content"><p>To enable placement, set place=true (default false). Native fp=auto plans one home chunk per color. Set fp=chunks to explicitly select it, including a GUI gate on small designs. The memory setting sizes chunks; the downstream full-design timing and legality checks still run. See the <a href="../pass/place/README.md#color-and-macro-chunk-floorplan">chunk metadata and replay guide</a>.</p>
 <p>final=false and mode=gp are diagnostic alternatives. They do not give the normal final-cell flow with fixed macros. threads=1 applies to all phases. io_iterations=500 is the limit for the first IO placement solve.</p><div class="table-wrap"><table class="params"><thead><tr><th scope="col">Option (synth.place. prefix)</th><th scope="col">Registered default</th><th scope="col">Meaning / enabled-feature parameter</th></tr></thead><tbody><tr><th scope="row"><code>final</code></th><td><code>true</code></td><td>after floorplan/macro placement, fix the macros and place the cells without centroid anchors</td></tr>
 <tr><th scope="row"><code>final.iterations</code></th><td><code>0</code></td><td>GP iteration limit for final cells; zero uses place.iterations</td></tr>
-<tr><th scope="row"><code>fp</code></th><td><code>auto</code></td><td>true|false|auto: repelling-centroid floorplan GP, centroid snap and macro refinement; auto (default) runs it only for repeated hierarchy (fp.auto_share); false is the legacy default</td></tr>
+<tr><th scope="row"><code>fp</code></th><td><code>auto</code></td><td>auto, true or chunks: color/macro chunk plan; false: bypass; centroid: legacy centroid experiment</td></tr>
+<tr><th scope="row"><code>chunk.memory_gb</code></th><td><code>4</code></td><td>Downstream placement budget per chunk (1, 2, 4, 8 or 16 decimal GB); 0 requests one chunk. Chunks need not be equal. A single oversized color gets its own allowance.</td></tr>
+<tr><th scope="row"><code>chunk.profile</code></th><td>workdir/place_memory.json</td><td>Shared JSON history of headless single-chunk placement peaks by technology and recipe. The floorplan reports its estimate and sample coverage.</td></tr>
+<tr><th scope="row"><code>chunk.require_fit</code></th><td>false</td><td>Save the plan, then refuse a solver run without sample coverage or if the conservative whole-design estimate or current RSS exceeds the budget.</td></tr>
 <tr><th scope="row"><code>fp.iterations</code></th><td><code>1500</code></td><td>floorplan GP iteration limit; zero uses place.iterations</td></tr>
 <tr><th scope="row"><code>io_iterations</code></th><td><code>500</code></td><td>GP budget for the automatic IO prototype; zero uses place.iterations</td></tr>
 <tr><th scope="row"><code>iterations</code></th><td><code>1500</code></td><td>GP iteration budget for each call (0 runs only legalization in full mode)</td></tr>
@@ -340,7 +358,7 @@ A <strong>bin</strong> is a uniform legalization tile with usable capacity, befo
 </tbody></table></div></div></details>
 <details id="timing-rounds"><summary>Additional timing-driven placement rounds <span class="phase-label">· 1 option</span></summary><div class="content"><p>timing_driven=true enables the checkpoint weighting, independently of these extra rounds. timing_rounds=3 is the limit for the enabled post-placement timing_place loop. This loop runs before the mandatory final legalization. It is not the number of GP timing checkpoints.</p><div class="table-wrap"><table class="params"><thead><tr><th scope="col">Option (synth.place. prefix)</th><th scope="col">Registered default</th><th scope="col">Meaning / enabled-feature parameter</th></tr></thead><tbody><tr><th scope="row"><code>timing_rounds</code></th><td><code>3</code></td><td>maximum number of timing-driven placement rounds (1..8)</td></tr>
 </tbody></table></div></div></details>
-<details id="centroids"><summary>Hierarchy/color centroid floorplanning <span class="phase-label">· 16 options</span></summary><div class="content"><p>fp=auto (the default since 2026-11-07) runs this phase only when copies of one repeated hierarchy block hold at least fp.auto_share of the flop+memory area (pass/place/README.md). Set fp=false for the legacy default, which never runs it. Hierarchy scopes split instance names on both . and / outside brackets. When fp=true, a hierarchy candidate must have minimum=3000 equivalent cell area, min_copies=4 and more than min_macros=2 movable macros. The default is fp.colors=false. If you enable it, the placer adds the eligible color leaves (source=synthesis, maximum=30000, minimum=-1 uses fp.minimum). distance_attraction=true and attraction_outside=4 set the shape of the member force. If no candidate is eligible, this phase does not run, also when you request it.</p><div class="table-wrap"><table class="params"><thead><tr><th scope="col">Option (synth.place. prefix)</th><th scope="col">Registered default</th><th scope="col">Meaning / enabled-feature parameter</th></tr></thead><tbody><tr><th scope="row"><code>fp.attraction</code></th><td><code>0.25</code></td><td>floorplan member attraction relative to the GP forces</td></tr>
+<details id="centroids"><summary>Hierarchy/color centroid floorplanning <span class="phase-label">· 16 options</span></summary><div class="content"><p>These settings select the legacy centroid experiment. Its auto mode runs only when copies of one repeated hierarchy block hold at least fp.auto_share of the flop+memory area (pass/place/README.md). Set fp=false for the legacy default, which never runs it. Hierarchy scopes split instance names on both . and / outside brackets. When fp=true, a hierarchy candidate must have minimum=3000 equivalent cell area, min_copies=4 and more than min_macros=2 movable macros. The default is fp.colors=false. If you enable it, the placer adds the eligible color leaves (source=synthesis, maximum=30000, minimum=-1 uses fp.minimum). distance_attraction=true and attraction_outside=4 set the shape of the member force. If no candidate is eligible, this phase does not run, also when you request it.</p><div class="table-wrap"><table class="params"><thead><tr><th scope="col">Option (synth.place. prefix)</th><th scope="col">Registered default</th><th scope="col">Meaning / enabled-feature parameter</th></tr></thead><tbody><tr><th scope="row"><code>fp.attraction</code></th><td><code>0.25</code></td><td>floorplan member attraction relative to the GP forces</td></tr>
 <tr><th scope="row"><code>fp.auto_candidates</code></th><td><code>true</code></td><td>with fp=auto, count only repeated groups that form floorplan candidates (more than fp.min_macros memories per copy, fp.min_copies copies)</td></tr>
 <tr><th scope="row"><code>fp.auto_min_copies</code></th><td><code>2</code></td><td>with fp=auto, minimum number of matching sibling copies in a group</td></tr>
 <tr><th scope="row"><code>fp.auto_min_copy_share</code></th><td><code>0.02</code></td><td>with fp=auto, minimum share of the flop+memory area in each copy</td></tr>
@@ -606,8 +624,8 @@ A <strong>bin</strong> is a uniform legalization tile with usable capacity, befo
   --set synth.liberty=cells.lib --set synth.lef=tech.lef,cells.lef,macros.lef \
   --set synth.sdc=design.sdc --set synth.place=true</pre>
 <p>Add the switches that you want to the end of that command:</p>
-<pre># Force the FP phase (default fp=auto runs it only for repeated hierarchy). The macro and final phases follow.
---set synth.place.fp=true
+<pre># Plan color/macro chunks under a 1 GB data budget and open the FP gate in a GUI run.
+--set synth.place.fp=chunks --set synth.place.chunk.memory_gb=1
 
 # Legacy default: never run the FP phase.
 --set synth.place.fp=false

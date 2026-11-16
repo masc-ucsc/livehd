@@ -46,11 +46,15 @@ void field(A& a, Node& v) {
          v.group);
 }
 template <class A>
+void field(A& a, Macro_tracks& v) {
+  fields(a, v.orient, v.period_x, v.period_y, v.phases_x, v.phases_y, v.pins);
+}
+template <class A>
 void field(A& a, Centroid& v) {
   fields(a, v.name, v.x, v.y, v.radius, v.movable);
 }
 template <class A>
-void field(A& a, Scene& v) {
+void physical_scene_fields(A& a, Scene& v) {
   fields(a,
          v.design,
          v.phase,
@@ -77,6 +81,11 @@ void field(A& a, Scene& v) {
          v.centroids,
          v.topology_hash,
          v.masters_hash);
+}
+template <class A>
+void field(A& a, Scene& v) {
+  physical_scene_fields(a, v);
+  fields(a, v.chunk_plan, v.chunk_results, v.track_lattices);
   if constexpr (std::is_same_v<A, Decoder>) {
     v.build_index();
   }

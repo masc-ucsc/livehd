@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TODO gui-work — agent socket: adversarial test, fixes and wanted features</title>
+<link rel="stylesheet" href="todo.css">
+</head>
+<body>
+<nav><span class="brand">LiveHD TODO</span><a href="index.html">← All tasks</a></nav>
+<main>
+<h1><strong class="item-id">gui-work</strong> Agent socket and floorplanning: adversarial test, fixes, wanted features</h1>
+<p><span class="status">In progress (opened 2026-11-15)</span> An agent drove <code>lhd synth --gui</code> through
+its Unix-domain agent socket (<code>tools/lhd_gui.py</code>) on HighTide designs (liteeth, 5 macros and 17k cells, first),
+to improve floorplans and macro placement. It attacked the socket with malformed, hostile and out-of-range requests,
+fixed what broke, and wrote down what an agent still lacks. Sources: <code>pass/place/gui/</code>,
+<a href="livehd/2i-interact.html">2i-interact</a> (the GUI), <a href="livehd/2p-placereason.html">2p-placereason</a> (the explore tiers).</p>
+
+<p>Drafting: this page is being filled while the work runs. Sections below are final only where they carry a measurement.</p>
+
+<h2 id="done">Done</h2>
+<ul>
+  <li><strong class="item-id">G1</strong> <code>find</code> / <code>highlight</code> / <code>select</code> regex could freeze the whole
+  GUI. A nested quantifier (<code>(.*)*x</code>) ran in <code>std::regex</code> (backtracking) under the session lock: the
+  agent socket, the token-protected page port and the flow all stopped, <code>lhd</code> spun at 100% CPU, and only a kill
+  recovered it. Now RE2 (linear time, compiled before the lock): the same request answers in 48 ms.
+  Backreferences and lookaround are refused with a message.</li>
+  <li><strong class="item-id">G2</strong> <code>restart</code> with a <code>set</code> flag that does not exist (or is read-only, or cannot
+  hold the value) was answered <code>ok</code> and queued; the re-executed <code>lhd</code> then exited with status 2 and the
+  session was gone with its pins and edits. The flag name, read-only bit, boolean and integer values are checked against
+  the options table before anything is queued.</li>
+  <li><strong class="item-id">G3</strong> <code>restart</code> with a checkpoint that does not exist (99, a string, -5) restarted from the
+  beginning, dropping every edit. Out-of-range is now a refusal / note; absent or -1 still means the start.</li>
+  <li><strong class="item-id">G4</strong> <code>find limit</code> and <code>critical n</code> silently ignored a string or a fraction and clamped 0
+  or a negative number to 1. They are bounded integers now and say what is wrong.</li>
+  <li><strong class="item-id">G5</strong> A <code>"state\u0000x"</code> command ran as <code>state</code> (C-string truncation). Strings keep
+  their length now.</li>
+  <li><strong class="item-id">G6</strong> <code>move</code> rejected scalar <code>x</code>/<code>y</code> with an unhelpful message although the
+  help text shows them; one number now applies to every node. A relative or aligned move of a placed macro
+  says it is fixed and to use absolute x/y.</li>
+  <li><strong class="item-id">G7</strong> <code>describe</code> did not accept <code>#index</code> (which <code>move</code>, <code>select</code> and
+  <code>highlight_names</code> do).</li>
+  <li><strong class="item-id">G8</strong> A <code>whatif</code> candidate without <code>"cmd"</code> failed with "bad command json"; it is a move now and a bad
+  candidate is named by its position.</li>
+  <li><strong class="item-id">G9</strong> The <code>screenshot</code> page command did nothing visible: a missing file name or work directory was
+  silent. It now sets the note with the path it wrote (under <code>&lt;workdir&gt;/synth/place/gui</code>, basename only).</li>
+  <li><strong class="item-id">G10</strong> Screenshots were stored (uncompressed) PNGs: 2.4 MB for 900x900. zlib level 3 now.</li>
+  <li><strong class="item-id">G11</strong> Dead sessions left their <code>/tmp/lhd-gui-&lt;pid&gt;.sock</code>: 1,089 had piled up. A new session removes the sockets
+  of processes that no longer exist (same user, <code>lstat</code> socket, <code>kill(pid,0)</code> says ESRCH).</li>
+  <li><strong class="item-id">G12</strong> <code>valid_color</code> ran a <code>std::regex</code> on caller text; it is a plain character check now.</li>
+  <li><strong class="item-id">F1</strong> New <code>macro_scan {node, grid | positions, orientations?, top?}</code>: ranks legal positions (and mirrored
+  orientations) of one macro by pin-to-logic wirelength in milliseconds; a first screen before <code>whatif</code> and <code>explore</code>.</li>
+  <li><strong class="item-id">F2</strong> <code>evaluate wait_ms=N</code> returns the measured summary; before, <code>evaluate</code> answered
+  "processed" at once and the numbers appeared later in <code>state.evaluation_seq</code>.</li>
+  <li><strong class="item-id">F3</strong> <code>tools/lhd_gui.py</code>: <code>screenshot out=FILE</code> (PNG over the socket), <code>wait state=gate</code>, <code>macros</code>,
+  <code>--retry SECONDS</code> (the socket is down while a restart re-executes <code>lhd</code>).</li>
+</ul>
+
+<h2 id="not-done">Not done (wanted)</h2>
+<ul>
+  <li>To be filled with the measured findings of the floorplan loop.</li>
+</ul>
+</main>
+<footer>LiveHD TODO</footer>
+</body>
+</html>

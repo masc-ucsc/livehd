@@ -62,9 +62,23 @@ struct Centroid {
   double      x = 0, y = 0, radius = 0;
   bool        movable = true;
 };
+// The lower-left origins at which a macro's signal pins land on routing tracks, for one orientation: along each axis
+// an origin is allowed when it is phases[axis][i] + k * period[axis]. Empty phases on an axis: not constrained there.
+// This is what the flow demands of a FIXED macro; a pose pinned in the session is held exactly through legalization,
+// so one that misses it ends the run later with "fixed macro pin misses routing tracks".
+struct Macro_tracks {
+  std::string          orient;
+  std::int64_t         period_x = 1, period_y = 1;
+  std::vector<std::int64_t> phases_x, phases_y;
+  std::uint32_t        pins = 0;
+};
 // Everything that is fixed for the duration of one placement phase.
 struct Scene {
+  // Macro master -> its track lattice per orientation. A master that is absent has no track constraint. Serialized
+  // with the scene (the flow and the session may be different processes), so it is data, not a callback.
+  std::map<std::string, std::vector<Macro_tracks>> track_lattices;
   std::string                                  design;
+  std::string                                  chunk_plan, chunk_results;  // fp_plan record, DBU boundaries and scoped targets
   std::string                                  phase;  // "fp", "macro", "final", ...
   Box                                          die;    // the placement area (the core: the rows' hull), DBU
   Box                                          frame_die;  // the floorplan's die (the core plus its margin), DBU; zero: not known
@@ -628,6 +642,16 @@ private:
   std::atomic<bool>              replay_active_{false};
   bool                           resumed_ = false;
   std::string                    options_json_ = "[]", epoch_;
+  // The kind and read-only bit of every editable flag (from options_json_), so that a restart naming a flag that does
+  // not exist, is read-only or cannot hold the value is refused up front: the re-executed process would otherwise
+  // exit on the bad flag and take the whole session with it. Its own mutex: parse_command runs with m_ held.
+  struct Flag_spec {
+    std::string kind;
+    bool        ro = false;
+  };
+  mutable std::mutex               flags_m_;
+  std::map<std::string, Flag_spec> flag_specs_;
+  std::string                      validate_flag(const std::string& name, const std::string& value) const;
   int                            port_ = 0;
   std::string                    wanted_map_, map_kind_, map_note_;
   bool                           regions_wanted_ = false, regions_dirty_ = false;
