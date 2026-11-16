@@ -47,10 +47,10 @@ def sha256(p):
 
 def parse(path):
     """(magic, sources, nNodes, nOutputs, flops).  DCERT1 flops have 8 fields,
-    DCERT2 and DCERT3 have 10 -- the two extra are `clock` and `asyncReset`.
-    (DCERT3 changed only the memory record, which comes after the flops.)"""
+    DCERT2, DCERT3 and DCERT4 have 10 -- the two extra are `clock` and `asyncReset`.
+    (DCERT3 and DCERT4 changed only the memory record, which comes after the flops.)"""
     t = open(path).read().split()
-    if not t or t[0] not in ('DCERT1', 'DCERT2', 'DCERT3'):
+    if not t or t[0] not in ('DCERT1', 'DCERT2', 'DCERT3', 'DCERT4'):
         raise ValueError(f'{path}: bad magic')
     magic, i = t[0], [1]
 

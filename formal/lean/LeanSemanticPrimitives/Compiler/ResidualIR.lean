@@ -136,6 +136,10 @@ structure ResidualMemoryUpdate where
   /-- an asynchronous whole-array reset's image (`MemoryDesc.asyncImg`): what the
   memory keeps on a step it does not commit -/
   asyncImg : Option Nat := none
+  /-- the memory's real depth (`MemoryDesc.depth`, DCERT4): not part of a step
+  (the load-time check bounds every address by it), carried so the certificate's
+  memories are restated exactly -/
+  depth    : Nat := 2 ^ aw
 deriving Repr, Inhabited, DecidableEq
 
 /-- The `MemoryDesc` view of an update: what `MemoryDesc.allFire` / `firedIs`

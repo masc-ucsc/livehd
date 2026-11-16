@@ -9,7 +9,7 @@ it only measures churn.
 THE GRAMMAR IS THE NORMATIVE ONE.  `Compiler.CertIO.renderCert` defines the
 wire format and this reader follows it field for field:
 
-    DCERT3
+    DCERT4
     <nSources>  then per source, a tag and its fields:
        0 idx width                                   input
        1 width value                                 const
@@ -22,7 +22,7 @@ wire format and this reader follows it field for field:
     <nFlops>    then per flop:
                   width din hasEn en hasRst rst resetValue activeLow clock asyncReset
     <nMemories> then per memory:
-                  aw dw nextImg clock nInit i0 .. nCommits (mask nextImg).. hasAsync asyncImg
+                  aw dw nextImg clock nInit i0 .. nCommits (mask nextImg).. hasAsync asyncImg depth
     <nClocks>   then per clock:   <nameBytes> <name>
 
 RESTORED from pinned D4 f6ad1fe29f8f15aeda045115864fd81a34c33aef and adapted to
@@ -32,6 +32,8 @@ REFUSED by magic -- never re-read as a one-clock design, which would invent a
 domain the bytes do not state. DCERT3 extends only the memory record (its
 power-on words, then a commit table for a memory on more than one clock, then an
 async-reset image that is reserved); a DCERT2 file is refused by magic too.
+DCERT4 adds the memory's real depth at the end of the memory record; a DCERT3
+file is still read (no depth) and rendered back as DCERT3.
 
 The clock NAME forced one structural change: it is a byte count, one space and
 exactly that many raw bytes, so a name may contain a space or a newline and the
@@ -71,7 +73,9 @@ import json
 import sys
 from collections import Counter
 
-MAGIC = b"DCERT3\n"
+MAGIC = b"DCERT4\n"
+# DCERT3 is still read: its memory record lacks the trailing depth (`readMemory3`).
+MAGIC3 = b"DCERT3\n"
 MAX_OPCODE = 30  # Op_MemToBus; `CertIO.opOfCode` returns none above this.
 
 
@@ -94,9 +98,13 @@ class Cursor:
     def __init__(self, blob: bytes, path: str):
         self.path = path
         self.blob = blob
-        if not blob.startswith(MAGIC):
-            raise Refused(f"{path}: bad magic: expected DCERT3")
-        # Past "DCERT3"; the magic's newline is leading whitespace to the first
+        if blob.startswith(MAGIC):
+            self.magic = MAGIC
+        elif blob.startswith(MAGIC3):
+            self.magic = MAGIC3
+        else:
+            raise Refused(f"{path}: bad magic: expected DCERT4 or DCERT3")
+        # Past "DCERT4"; the magic's newline is leading whitespace to the first
         # read, which is how the Lean reader starts too.
         self.i = len(MAGIC) - 1
 
@@ -323,7 +331,9 @@ def read_cert(path: str) -> dict:
         if has_async == 0 and async_img != 0:
             raise Refused(f"{path}: memory {k}: asyncImg is {async_img} with its presence flag 0; "
                           f"renderCert writes slot 0 for an absent image")
-        mems.append((aw, dw, nxt, mclk, init, commits, has_async, async_img))
+        # DCERT4: the memory's real depth, last (None: a DCERT3 record has none).
+        depth = c.nat(f"memory {k} depth") if c.magic == MAGIC else None
+        mems.append((aw, dw, nxt, mclk, init, commits, has_async, async_img, depth))
 
     # DCERT2's new section, LAST because it is the one this version added.
     n_clk = c.count("nClocks")
@@ -347,7 +357,7 @@ def read_cert(path: str) -> dict:
     c.done()
     cert = {"path": path, "bytes": len(blob), "sources": sources, "nodes": nodes,
             "outputs": outputs, "flops": flops, "memories": mems, "clocks": clocks,
-            "n_slots": n_slots}
+            "n_slots": n_slots, "magic": c.magic}
 
     # THE COMPLETE-FORMAT CHECK.  The field rules above each give a precise
     # diagnostic, but they are a list and a list can be short.  This closes it:
@@ -375,7 +385,7 @@ def render_cert(c: dict) -> bytes:
     the whole file, and `dcert_mutate.py` imports THIS one so there is a single
     renderer rather than two that can drift apart.
     """
-    out = [MAGIC]
+    out = [c.get("magic", MAGIC)]
 
     def rec(*fs):
         out.append(" ".join(str(f) for f in fs).encode() + b"\n")
@@ -393,9 +403,9 @@ def render_cert(c: dict) -> bytes:
     for f in c["flops"]:
         rec(*f)
     out.append(f"{len(c['memories'])}\n".encode())
-    for (aw, dw, nxt, mclk, init, commits, has_async, async_img) in c["memories"]:
+    for (aw, dw, nxt, mclk, init, commits, has_async, async_img, depth) in c["memories"]:
         rec(aw, dw, nxt, mclk, len(init), *init, len(commits), *[x for cm in commits for x in cm],
-            has_async, async_img)
+            has_async, async_img, *([] if depth is None else [depth]))
     out.append(f"{len(c['clocks'])}\n".encode())
     for nm in c["clocks"]:
         # Raw, by count: no escaping and no re-encoding, so a name containing a
@@ -483,9 +493,10 @@ def structural_multiset(cert: dict, sig: list) -> Counter:
     for (w, din, he, en, hr, rst, rv, alow, clk, arst) in cert["flops"]:
         c[_h("F", w, sig[din], he, sig[en] if he else "-", hr,
              sig[rst] if hr else "-", rv, alow, ck(clk), arst)] += 1
-    for (aw, dw, nxt, mclk, init, commits, has_async, async_img) in cert["memories"]:
+    for (aw, dw, nxt, mclk, init, commits, has_async, async_img, depth) in cert["memories"]:
         c[_h("M", aw, dw, sig[nxt], ck(mclk), init,
-             tuple((mask, sig[img]) for mask, img in commits), has_async, sig[async_img] if has_async else "-")] += 1
+             tuple((mask, sig[img]) for mask, img in commits), has_async, sig[async_img] if has_async else "-",
+             2 ** aw if depth is None else depth)] += 1
     # The table itself is records too: a design that declares a domain nothing
     # commits on still declares it, and losing one is a change.
     for nm in cert["clocks"]:

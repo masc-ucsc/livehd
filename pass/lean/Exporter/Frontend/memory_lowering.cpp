@@ -267,6 +267,7 @@ void lower_memory_writes(CertificateBuilder& b, const Memory& m) {
     next = chain(b, m, st, all);
   }
   MemoryDriver md{m.addr_width, m.bits, next, m.id, m.clock_ordinal, m.init_contents, {}, {}};
+  md.depth = m.size;
   if (m.async_reset && m.bulk_reset) {
     md.async_img = visible(b, m, st, st.image);
   }

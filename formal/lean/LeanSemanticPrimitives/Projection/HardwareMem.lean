@@ -338,7 +338,7 @@ image. -/
 private def fMemNext : SFun :=
   { name := "memNext", params := ["m", "edges", "env", "n", "ms", "idx"], inline := true
   , body := .switch (R "m")
-              [(tagMemory, ["aw", "dw", "nxt", "ck", "init", "cms", "aimg"],
+              [(tagMemory, ["aw", "dw", "nxt", "ck", "init", "cms", "aimg", "depth"],
                 .ite (P .isNil [R "cms"])
                   (.ite (C "firesAt" [R "edges", R "ck"])
                         (C "slot" [R "env", R "n", R "nxt"])

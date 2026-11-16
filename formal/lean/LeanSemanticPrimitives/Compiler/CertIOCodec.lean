@@ -1,5 +1,5 @@
 /-
-# The DCERT3 codec -- Mathlib-free
+# The DCERT4 codec (it reads DCERT3 too) -- Mathlib-free
 
 The wire format, the pure writer, the TOTAL reader, checked admission
 (`certWfError` / `readCertChecked`), `loadCert`, and the deterministic stimulus
@@ -19,6 +19,7 @@ verified entry point (`runChecked`, `runChecked_correct`, `loadAndRun`,
 only.
 -/
 import LeanSemanticPrimitives.Compiler.DesignSemantics
+import LeanSemanticPrimitives.Compiler.MemAddr
 
 namespace Compiler
 namespace CertIO
@@ -33,7 +34,7 @@ record.  Deliberately dull: `pass_lean.cpp` already walks exactly these fields
 to print the Lean literal, so emitting this instead is a change of punctuation
 in the printer, not a change of structure.
 
-  DCERT3
+  DCERT4
   <nSources>   then per source, a tag and its fields:
      0 idx width                                   input
      1 width value                                 const
@@ -48,7 +49,7 @@ in the printer, not a change of structure.
      width din hasEn en hasRst rst resetValue activeLow clock asyncReset
   <nMemories>  then per memory:
      aw dw nextImg clock nInit i0 .. i(n-1) nCommits (mask nextImg)..
-     hasAsync asyncImg
+     hasAsync asyncImg depth
   <nClocks>    then per clock:   <nameBytes> <name>
 
 `hasEn`/`hasRst` keep the arity fixed so the reader never branches on shape.
@@ -73,6 +74,10 @@ then the commit table of a memory on more than one clock (a count, then `mask
 nextImg` pairs), then the async-reset image of a whole-array cell with an
 asynchronous reset (`hasAsync asyncImg`, as a flop spells `enable`).  A DCERT2
 stream is refused by magic: its memory record is a different length.
+
+DCERT4 extends ONLY the memory record again: its last field is the memory's
+real `depth` (the LGraph Memory cell's `size`). A DCERT3 stream is still read,
+with every memory at the whole `2 ^ aw` table (see `magicBytes`).
 -/
 
 /-- Operator tag and its payload.  The payload slot is always present and is `0`
@@ -249,6 +254,8 @@ def memBody (m : MemoryDesc) : List UInt8 :=
     ++ spc (natBytes m.init.size) ++ (m.init.toList.map (fun v => spc (natBytes v))).flatten
     ++ spc (natBytes m.commits.size) ++ (m.commits.toList.map commitBody).flatten
     ++ spc (natBytes ha) ++ spc (natBytes a)
+    -- DCERT4: how many words the memory really has.
+    ++ spc (natBytes m.depth)
 
 def memBytes (m : MemoryDesc) : List UInt8 := memBody m ++ [chNL]
 
@@ -256,7 +263,15 @@ def memBytes (m : MemoryDesc) : List UInt8 := memBody m ++ [chNL]
 @[inline] def section' {α : Type} (f : α → List UInt8) (xs : Array α) : List UInt8 :=
   natBytes xs.size ++ [chNL] ++ (xs.toList.map f).flatten
 
-/-- "DCERT3\n" -- spelled as bytes so the proof never unfolds `String.toUTF8`.
+/-- "DCERT4\n" -- spelled as bytes so the proof never unfolds `String.toUTF8`.
+
+VERSION 4. The memory record ends with the memory's real depth
+(`MemoryDesc.depth`), which `aw = ceil_log2 depth` cannot carry. Unlike the
+earlier bumps, DCERT3 is still READ: its memory record is the DCERT4 record
+without the depth, and a DCERT3 memory means what it always meant -- the whole
+`2 ^ aw` table, the field's default. That is not an assumption added about the
+design: it is the meaning every DCERT3 certificate was written and checked
+under. `readMemory3` reads it; nothing writes it.
 
 VERSION 3. DCERT2 carried no `MemoryDesc.init`, `commits` or `asyncImg`; its
 memory record is shorter, so it is refused by name like DCERT1.
@@ -267,7 +282,7 @@ VERSION 2. DCERT1 carried no `clocks` section, no `FlopDesc.clock`, no
 design would be an assumption about the DESIGN, not a default of the record, so
 the version is bumped rather than extended in place and DCERT1 is refused by
 name. -/
-def magicBytes : List UInt8 := [68, 67, 69, 82, 84, 51, 10]
+def magicBytes : List UInt8 := [68, 67, 69, 82, 84, 52, 10]
 
 /-- The certificate as bytes.  This is the thing `parseCert` is proved to invert. -/
 def certBytes (D : DesignCert) : List UInt8 :=
@@ -425,6 +440,23 @@ def readMemory (b : ByteArray) (i : Nat) : Option (MemoryDesc × Nat) := do
   let (cs, i) ← readMany readCommit b i nc #[]
   let (ha, i) ← readNat b i
   let (a, i)  ← readNat b i
+  let (dp, i) ← readNat b i
+  some ({ aw := aw, dw := dw, nextImg := nx, clock := ck, init := iv, commits := cs,
+          asyncImg := if ha != 0 then some a else none, depth := dp }, i)
+
+/-- A DCERT3 memory record: the DCERT4 one without the depth, which is then the
+field's default, the whole `2 ^ aw` table (see `magicBytes`). -/
+def readMemory3 (b : ByteArray) (i : Nat) : Option (MemoryDesc × Nat) := do
+  let (aw, i) ← readNat b i
+  let (dw, i) ← readNat b i
+  let (nx, i) ← readNat b i
+  let (ck, i) ← readNat b i
+  let (ni, i) ← readNat b i
+  let (iv, i) ← readMany readNat b i ni #[]
+  let (nc, i) ← readNat b i
+  let (cs, i) ← readMany readCommit b i nc #[]
+  let (ha, i) ← readNat b i
+  let (a, i)  ← readNat b i
   some ({ aw := aw, dw := dw, nextImg := nx, clock := ck, init := iv, commits := cs,
           asyncImg := if ha != 0 then some a else none }, i)
 
@@ -443,20 +475,33 @@ def readClock (b : ByteArray) (i : Nat) : Option (ClockDesc × Nat) := do
 
 /-- Check the magic without materialising a `String` for the whole buffer. -/
 def hasMagic (b : ByteArray) : Bool :=
+  let m := "DCERT4".toUTF8
+  b.size ≥ m.size && (List.range m.size).all fun k => b[k]! == m[k]!
+
+/-- The previous version's magic: DCERT3 is still read (`readMemory3`). -/
+def hasMagic3 (b : ByteArray) : Bool :=
   let m := "DCERT3".toUTF8
   b.size ≥ m.size && (List.range m.size).all fun k => b[k]! == m[k]!
 
 /-- Parse a whole certificate.  The CODEC: a faithful decoding that judges
 nothing.  Every semantic refusal lives in `certWfError` / `readCertChecked`. -/
 def parseCert (b : ByteArray) : Except String DesignCert :=
-  if !hasMagic b then .error "bad magic: expected DCERT3" else
-  match go b with
+  if !hasMagic b then
+    -- DCERT3: the same sections, a memory record without the depth.
+    if hasMagic3 b then
+      match go readMemory3 b with
+      | some D => .ok D
+      | none   => .error "malformed certificate"
+    else .error "bad magic: expected DCERT4 or DCERT3"
+  else
+  match go readMemory b with
   | some D => .ok D
   | none   => .error "malformed certificate"
 where
-  go (b : ByteArray) : Option DesignCert := do
-    -- Past the six bytes of "DCERT3"; the magic's trailing newline is consumed
-    -- as leading whitespace by the first `readNat`.
+  go (readMem : ByteArray → Nat → Option (MemoryDesc × Nat)) (b : ByteArray) :
+      Option DesignCert := do
+    -- Past the six bytes of "DCERT4" (or "DCERT3"); the magic's trailing newline
+    -- is consumed as leading whitespace by the first `readNat`.
     let i := 6
     let (ns, i)   ← readNat b i
     let (srcs, i) ← readMany readSource b i ns #[]
@@ -467,7 +512,7 @@ where
     let (nf, i)   ← readNat b i
     let (fls, i)  ← readMany readFlop b i nf #[]
     let (nm, i)   ← readNat b i
-    let (mems, i) ← readMany readMemory b i nm #[]
+    let (mems, i) ← readMany readMem b i nm #[]
     let (nc, i)   ← readNat b i
     let (clks, i) ← readMany readClock b i nc #[]
     -- Nothing but whitespace may follow: a truncated or padded file is an error,
@@ -489,8 +534,13 @@ is a perfectly good inhabitant of the type, so it is itself a counterexample
 the moment the parser rejects it.
 
 So `parseCert` is a faithful encoding and judges nothing, and every semantic
-refusal lives here. -/
-def certWfError (D : DesignCert) : Option String :=
+refusal lives here.
+
+The clock, slot and commit-table checks are `certShapeError`; then (DCERT4)
+every memory's depth fits its table and no read, write or whole-array access can
+reach a word at or past it (`MemAddr`; sound by
+`Projection.MemAddrSound.memAccess_lt_depth`). -/
+def certShapeError (D : DesignCert) : Option String :=
   let nclk := D.clocks.size
   if nclk == 0 then
     some "no clock domains: a certificate must declare at least one"
@@ -521,6 +571,16 @@ def certWfError (D : DesignCert) : Option String :=
         | some k => some s!"output {k} reads slot {D.outputs[k]!.slot}, \
                             outside the {slots} that exist"
         | none   => none
+
+/-- See `certShapeError` and `MemAddr`: the shape checks first, then the memory
+depth and the memory addresses. -/
+def certWfError (D : DesignCert) : Option String :=
+  match certShapeError D with
+  | some w => some w
+  | none   =>
+    match MemAddr.depthError D with
+    | some w => some w
+    | none   => MemAddr.addrError D
 
 /-- Parse, then admit. A refusal here is a SEMANTIC verdict and says so; it is
 never reported as a parse failure, and it never silently repairs a field. -/

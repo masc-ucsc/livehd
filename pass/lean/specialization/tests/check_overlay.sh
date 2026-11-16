@@ -13,7 +13,8 @@
 # whole-array memory operators of decision #2),
 # Translation/OpBridge.lean (the bridges re-proved for them), and
 # Compiler/DesignCert.lean and Compiler/DesignSemantics.lean (DCERT3: the
-# memory record's power-on words, commit table and async-reset image; the
+# memory record's power-on words, commit table and async-reset image, and
+# DCERT4's memory depth; the
 # power-on image every runner starts from, and the memory step for a commit
 # table and for an asynchronous whole-array reset) -- and are checked against recorded sha256 values.  One is
 # MASTER-ONLY -- Compiler/MemDomains.lean, new with decision #9 (which clock
@@ -47,7 +48,9 @@ EXPECTED_OPBRIDGE_SHA256=fc9366004cb12f1d96ae8624aaea4187960939d67c5b2b0c0b3bd34
 # an empty table steps as before, srcMemNext_of_empty), and the async
 # whole-array reset (#2 stage 3: a memory that does not commit keeps
 # srcMemHeld, the asyncImg slot when present; srcMemHeld_of_none)
-EXPECTED_DESIGNCERT_SHA256=17f25c67a3139f33e9984b018c0d32d412138929f122df4cd33b732d8d6d47a8
+# DCERT4: MemoryDesc.depth (default the whole 2^aw table; checked at load by
+# Compiler/MemAddr, never read by a step)
+EXPECTED_DESIGNCERT_SHA256=7a7fd08f1361112252f3ed76e36b21e74247f7da9b2ae544dfc1febc5b881e17
 EXPECTED_DESIGNSEMANTICS_SHA256=5cc0e84870cdf026271aea38725d06ea19a408df1e8f451000c83cbddb798e34
 # master-only file (not in the base): recorded sha256
 EXPECTED_MEMDOMAINS_SHA256=72ede618a667aec0ec885e58934999dd68f64af3f480819983eb76b4fee70858

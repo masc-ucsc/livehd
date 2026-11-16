@@ -188,7 +188,7 @@ def ResidualFlopUpdate.asFlop (f : ResidualFlopUpdate) : FlopDesc :=
 
 def ResidualMemoryUpdate.asMemory (m : ResidualMemoryUpdate) : MemoryDesc :=
   { aw := m.aw, dw := m.dw, nextImg := m.nextImg, clock := m.clock, commits := m.commits,
-    init := m.init, asyncImg := m.asyncImg }
+    init := m.init, asyncImg := m.asyncImg, depth := m.depth }
 
 def vcStepper (R : ResidualProgram) : Stepper where
   run := runWith vcBinding R.sources R.bindings.toList

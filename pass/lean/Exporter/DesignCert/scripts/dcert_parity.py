@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Cross-language DCERT3 parity: C++ bytes against the verified Lean codec.
+"""Cross-language DCERT4 parity: C++ bytes against the verified Lean codec.
 
 WHAT IS COMPARED, AND WHAT THAT PROVES.
 
 `pass.lean` walks a `CertificateIR` and publishes two descriptions of it: the
-Lean SOURCE literal (`<base>_designCert`) and the DCERT3 byte stream
+Lean SOURCE literal (`<base>_designCert`) and the DCERT4 byte stream
 (`<base>.dcert`).  This harness elaborates the literal, renders it with the
 library's own `renderCert`, and compares the result to the C++ bytes.
 
@@ -95,7 +95,7 @@ def main : IO UInt32 := do
   let lg : Log ← IO.mkRef #[]
   let raw ← IO.FS.readBinFile certPath
   let mine := renderCert %(base)s_designCert
-  IO.println s!"DCERT3 parity: %(base)s  ({raw.size} bytes from C++, {mine.size} from renderCert)"
+  IO.println s!"DCERT4 parity: %(base)s  ({raw.size} bytes from C++, {mine.size} from renderCert)"
 
   -- 1. BYTE PARITY. By `renderCert_injective` this is field equality.
   match firstDiff raw mine with
@@ -137,7 +137,7 @@ def main : IO UInt32 := do
     -- that names no slot of the design, or a malformed commit-table entry, is
     -- a good record (the codec reads it) and a refused design (admission).
     if D.memories.isEmpty then
-      IO.println "  --   no memories: DCERT3 memory controls skipped"
+      IO.println "  --   no memories: DCERT3/DCERT4 memory controls skipped"
     else
       let mem0 := fun (f : MemoryDesc → MemoryDesc) => { D with memories := D.memories.modify 0 f }
       let pw := mem0 (fun m => { m with init := m.init.push 1 })
@@ -164,6 +164,16 @@ def main : IO UInt32 := do
         (readCertChecked (entry { mask := 2 ^ D.clocks.size, nextImg := img }))
       expectError lg "admission refuses a commit-table entry whose image slot is out of range"
         (readCertChecked (entry { mask := 1, nextImg := D.numSlots }))
+      -- DCERT4: the memory's real depth reaches the bytes; a depth of 0 or past
+      -- the 2^aw table is a good record and a refused design.
+      let dd := mem0 (fun m => { m with depth := m.depth + 1 })
+      if renderCert dd == raw then bad lg "changing a memory's depth left the bytes identical"
+        else ok lg "sensitive to a memory's depth"
+      let d0 := renderCert (mem0 (fun m => { m with depth := 0 }))
+      expectOk    lg "codec reads a memory of depth 0 (it judges nothing)" (parseCert d0)
+      expectError lg "admission refuses a memory of depth 0" (readCertChecked d0)
+      expectError lg "admission refuses a depth past the 2^aw table"
+        (readCertChecked (renderCert (mem0 (fun m => { m with depth := 2 ^ m.aw + 1 }))))
 
   -- 5. REFUSAL CONTROLS on the production bytes.
   expectError lg "DCERT1 magic" (parseCert (raw.set! 5 49))
@@ -183,10 +193,10 @@ def main : IO UInt32 := do
 
   let fails ← lg.get
   if fails.isEmpty then
-    IO.println "DCERT3-PARITY OK"
+    IO.println "DCERT4-PARITY OK"
     return 0
   else
-    IO.println s!"DCERT3-PARITY FAILED ({fails.size})"
+    IO.println s!"DCERT4-PARITY FAILED ({fails.size})"
     return 1
 '''
 

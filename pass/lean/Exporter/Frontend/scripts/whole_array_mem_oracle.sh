@@ -156,7 +156,7 @@ if verb == "stim":   # stim <io.json> <cycles> <dir> <row> <golden.v> <verilog_t
 elif verb == "mutate":   # mutate <in.dcert> <out.dcert> <opcode> <new count>
     src, dst, opc, new = sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5]
     lines = open(src).read().split("\n")
-    assert lines[0] == "DCERT3", lines[0]
+    assert lines[0] == "DCERT4", lines[0]
     nsrc = int(lines[1])
     i = 2 + nsrc
     nnodes = int(lines[i])
@@ -172,15 +172,15 @@ elif verb == "mutate":   # mutate <in.dcert> <out.dcert> <opcode> <new count>
 elif verb == "noasync":   # noasync <in.dcert> <out.dcert>: every memory's asyncImg -> none
     src, dst = sys.argv[2], sys.argv[3]
     lines = open(src).read().split("\n")
-    assert lines[0] == "DCERT3", lines[0]
+    assert lines[0] == "DCERT4", lines[0]
     i = 1
     for _ in range(4):            # sources, nodes, outputs, flops: one line each
         i += 1 + int(lines[i])
     nmem, hits = int(lines[i]), 0
     for j in range(i + 1, i + 1 + nmem):
-        f = lines[j].split()
-        if f[-2] == "1":
-            f[-2:] = ["0", "0"]
+        f = lines[j].split()     # ... hasAsync asyncImg depth (DCERT4)
+        if f[-3] == "1":
+            f[-3:-1] = ["0", "0"]
             hits += 1
         lines[j] = " ".join(f)
     if not hits:

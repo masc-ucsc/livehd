@@ -21,7 +21,7 @@ own; the projection consumes them unchanged.  Against the base:
 
     Translation/LGraphModel.lean      MASTER-ADAPTED (operator boundary repairs; whole-array memory operators)
     Translation/OpBridge.lean         MASTER-ADAPTED (bridges re-proved for them)
-    Compiler/DesignCert.lean          MASTER-ADAPTED (DCERT3 memory fields; recorded hash)
+    Compiler/DesignCert.lean          MASTER-ADAPTED (DCERT3 and DCERT4 memory fields; recorded hash)
     Compiler/DesignSemantics.lean     MASTER-ADAPTED (power-on image, commit table, async reset; recorded hash)
     Compiler/MemDomains.lean          MASTER-ONLY (new; which domains of a memory fire; recorded hash)
 
@@ -43,6 +43,15 @@ slot is out of range, and an `asyncImg` slot out of range.  (Until decision #2
 stage 3 it refused every `asyncImg`; that field had no step meaning then.
 `reservedFree` now only names "no async reset".)  The check pins the bytes with
 a recorded hash.
+
+DCERT4 adds `MemoryDesc.depth`, the number of words the memory really has (the
+Memory cell's `size`); `aw = ceil_log2 depth` rounds a depth that is not a power
+of two up.  It defaults to the whole `2 ^ aw` table, which is what a DCERT3
+memory meant, so DCERT3 is still read.  The step semantics never read it:
+admission (`certWfError`, via `Compiler/MemAddr`) refuses a depth of 0 or past
+`2 ^ aw`, and any read or write whose address bound is not below the depth,
+and `Projection/MemAddrSound` proves that on every step of `interpretDesign` of
+an admitted certificate every such address is below its memory's depth.
 
 ### `Compiler/DesignSemantics.lean`
 
@@ -188,7 +197,8 @@ the same commit, and say why.
 | `Compiler/DesignSemantics.lean` | **`interpretDesign`** — the reference one-cycle semantics |
 | `Compiler/MemDomains.lean` | which clock domains of a memory fire (read by `srcMemNext`) |
 | `Compiler/DirectCheck.lean` | the checker's slot kinds (memory route only) |
-| `Compiler/CertIOV1` / `CertIOCodec` / `CertIORoute` | the DCERT1 and DCERT3 codecs and the router |
+| `Compiler/MemAddr` | the load-time memory-address check (DCERT4) |
+| `Compiler/CertIOV1` / `CertIOCodec` / `CertIORoute` | the DCERT1 and DCERT4 codecs (DCERT4 also reads DCERT3) and the router |
 | `Compiler/ResetPolarity` / `RunAdmission` | the drivers' run-admission checks |
 
 `Translation/OpBridge.lean` needs Mathlib and is not imported by any Projection

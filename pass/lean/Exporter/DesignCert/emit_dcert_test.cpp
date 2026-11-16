@@ -1,6 +1,6 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 //
-// The C++ side of DCERT3 parity.
+// The C++ side of DCERT4 parity.
 //
 // Three different things are checked here, and they are NOT the same check:
 //
@@ -161,7 +161,7 @@ CertificateIR full_fixture() {
 }
 
 const char* const kGolden =
-    "DCERT3\n"
+    "DCERT4\n"
     "7\n"
     "0 0 8\n"
     "1 16 -42\n"
@@ -182,7 +182,7 @@ const char* const kGolden =
     "8 7 0 0 0 0 0 0 0 0\n"
     "4 1 1 2 1 3 -5 1 2 1\n"
     "1\n"
-    "3 16 8 1 3 5 0 65535 2 2 7 4 9 0 0\n"
+    "3 16 8 1 3 5 0 65535 2 2 7 4 9 0 0 8\n"
     "4\n"
     "5 clock\n"
     "0 \n"
@@ -199,7 +199,7 @@ public:
   explicit Reader(std::string_view text) : text_(text) {}
 
   void expect_magic() {
-    ASSERT_EQ(text_.substr(0, 7), "DCERT3\n");
+    ASSERT_EQ(text_.substr(0, 7), "DCERT4\n");
     at_ = 7;
   }
   // Numbers are whitespace-delimited; a leading '-' is part of the number.
@@ -339,6 +339,8 @@ TEST(DcertParity, IndependentReaderAgreesFieldByField) {
     }
     EXPECT_EQ(r.count(), m.async_img ? 1u : 0u);                    // hasAsync
     EXPECT_EQ(r.count(), m.async_img ? c.slot_of.at(*m.async_img) : 0u);  // asyncImg
+    // DCERT4: the real depth, last; unset is the whole 2^aw table.
+    EXPECT_EQ(r.count(), m.depth != 0 ? m.depth : (uint64_t{1} << m.addr_w));  // depth
   }
 
   ASSERT_EQ(r.count(), c.clocks.size());
@@ -419,14 +421,15 @@ TEST(DcertParity, WholeArrayOperatorsCarryTheirEntryCount) {
 }
 
 // An ASYNCHRONOUS whole-array reset (decision #2): the memory record ends
-// `1 <slot>` -- hasAsync, then the slot of the image with the reset applied --
-// and the Lean literal spells `asyncImg := some <slot>`. Without one it ends
-// `0 0` and the literal has no `asyncImg`.
+// `1 <slot> <depth>` -- hasAsync, then the slot of the image with the reset
+// applied, then the DCERT4 depth -- and the Lean literal spells
+// `asyncImg := some <slot>`. Without one it ends `0 0 <depth>` and the literal
+// has no `asyncImg`.
 TEST(DcertParity, AsyncResetImageIsCarried) {
   CertificateIR c         = full_fixture();
   c.memories[0].async_img = 201;  // the MemWriteBE node, slot 8
-  EXPECT_NE(render_dcert(c).find("\n3 16 8 1 3 5 0 65535 2 2 7 4 9 1 8\n"), std::string::npos);
-  EXPECT_NE(render_dcert(full_fixture()).find("\n3 16 8 1 3 5 0 65535 2 2 7 4 9 0 0\n"), std::string::npos);
+  EXPECT_NE(render_dcert(c).find("\n3 16 8 1 3 5 0 65535 2 2 7 4 9 1 8 8\n"), std::string::npos);
+  EXPECT_NE(render_dcert(full_fixture()).find("\n3 16 8 1 3 5 0 65535 2 2 7 4 9 0 0 8\n"), std::string::npos);
   std::ostringstream literal;
   emit_design_cert("fixture", c, literal);
   EXPECT_NE(literal.str().find("commits := #[{ mask := 2, nextImg := 7 }, { mask := 4, nextImg := 9 }], "
@@ -439,6 +442,25 @@ TEST(DcertParity, AsyncResetImageIsCarried) {
   EXPECT_THROW(render_dcert(c), std::invalid_argument);
 }
 
+// DCERT4: a memory's real depth ends its record, and the Lean literal states it
+// when it is not the whole 2^aw table (here 6 of 8 words). Unset (0) is the
+// whole table in both.
+TEST(DcertParity, DepthIsCarried) {
+  CertificateIR c     = full_fixture();
+  c.memories[0].depth = 6;
+  EXPECT_NE(render_dcert(c).find("\n3 16 8 1 3 5 0 65535 2 2 7 4 9 0 0 6\n"), std::string::npos);
+  std::ostringstream literal;
+  emit_design_cert("fixture", c, literal);
+  EXPECT_NE(literal.str().find("nextImg := 9 }], depth := 6 }"), std::string::npos);
+  std::ostringstream whole;
+  c.memories[0].depth = 8;
+  emit_design_cert("fixture", c, whole);
+  EXPECT_EQ(whole.str().find("depth :="), std::string::npos);
+  std::ostringstream plain;
+  emit_design_cert("fixture", full_fixture(), plain);
+  EXPECT_EQ(plain.str().find("depth :="), std::string::npos);
+}
+
 TEST(DcertParity, UnresolvableIdIsRefused) {
   CertificateIR c = full_fixture();
   c.outputs.push_back({9999, 8});  // never declared
@@ -448,7 +470,7 @@ TEST(DcertParity, UnresolvableIdIsRefused) {
 TEST(DcertParity, EmptyCertificateStillStatesEverySection) {
   CertificateIR c;  // default: no records, one clock named "clock"
   index_certificate(c);
-  EXPECT_EQ(render_dcert(c), "DCERT3\n0\n0\n0\n0\n0\n1\n5 clock\n");
+  EXPECT_EQ(render_dcert(c), "DCERT4\n0\n0\n0\n0\n0\n1\n5 clock\n");
 }
 
 // The two emitters walk the same IR; where they both carry a field, they must

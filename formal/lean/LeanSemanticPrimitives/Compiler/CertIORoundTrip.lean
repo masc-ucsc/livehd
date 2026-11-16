@@ -716,7 +716,7 @@ theorem memBody_shape (m : MemoryDesc) :
         ++ spc (natBytes m.clock)
         ++ spc (natBytes m.init.size) ++ (m.init.toList.map (fun v => spc (natBytes v))).flatten
         ++ spc (natBytes m.commits.size) ++ (m.commits.toList.map commitBody).flatten
-        ++ spc (natBytes ha) ++ spc (natBytes a) := by
+        ++ spc (natBytes ha) ++ spc (natBytes a) ++ spc (natBytes m.depth) := by
   cases ha : m.asyncImg
   · exact ⟨0, 0, Or.inl ⟨rfl, rfl, rfl⟩, by simp [memBody, ha]⟩
   · next x => exact ⟨1, x, Or.inr ⟨x, rfl, rfl, rfl⟩, by simp [memBody, ha]⟩
@@ -733,7 +733,8 @@ theorem readMemory_reads (l : List UInt8) (i : Nat) (ws : List UInt8) (m : Memor
       (natBytes m.nextImg ++ chSpace :: (natBytes m.clock ++ chSpace ::
       (natBytes m.init.size ++ ((m.init.toList.map (fun v => chSpace :: natBytes v)).flatten
         ++ chSpace :: (natBytes m.commits.size ++ ((m.commits.toList.map commitBody).flatten
-        ++ chSpace :: (natBytes ha ++ chSpace :: (natBytes a ++ chNL :: rest))))))))) := by
+        ++ chSpace :: (natBytes ha ++ chSpace :: (natBytes a ++ chSpace ::
+        (natBytes m.depth ++ chNL :: rest)))))))))) := by
     simpa [spc, List.append_assoc] using hd
   obtain ⟨h1, r1⟩ := headNat l i ws m.aw _ chSpace hws (Or.inl rfl) (by simpa using hd')
   obtain ⟨h2, r2⟩ := fieldNat l _ m.dw _ chSpace (Or.inl rfl) (by simpa using r1)
@@ -742,25 +743,28 @@ theorem readMemory_reads (l : List UInt8) (i : Nat) (ws : List UInt8) (m : Memor
   obtain ⟨h5, r5⟩ := fieldNat' l _ m.init.size
     ((m.init.toList.map (fun v => chSpace :: natBytes v)).flatten
       ++ chSpace :: (natBytes m.commits.size ++ ((m.commits.toList.map commitBody).flatten
-      ++ chSpace :: (natBytes ha ++ chSpace :: (natBytes a ++ chNL :: rest)))))
+      ++ chSpace :: (natBytes ha ++ chSpace :: (natBytes a ++ chSpace ::
+        (natBytes m.depth ++ chNL :: rest))))))
     (head_sep_run natBytes m.init.toList chSpace _ (Or.inl rfl)) (by simpa using r4)
   obtain ⟨j₀, hj₀, hj₀r⟩ := readMany_nats l m.init.toList _ #[] chSpace _ (Or.inl rfl)
     (by simpa using r5)
   obtain ⟨h6, r6⟩ := fieldNat' l j₀ m.commits.size
     ((m.commits.toList.map commitBody).flatten
-      ++ chSpace :: (natBytes ha ++ chSpace :: (natBytes a ++ chNL :: rest)))
+      ++ chSpace :: (natBytes ha ++ chSpace :: (natBytes a ++ chSpace ::
+        (natBytes m.depth ++ chNL :: rest))))
     (head_commit_run m.commits.toList chSpace _ (Or.inl rfl)) (by simpa using hj₀r)
   obtain ⟨j₁, hj₁, hj₁r⟩ := readMany_commits l m.commits.toList _ #[] chSpace _ (Or.inl rfl)
     (by simpa using r6)
   obtain ⟨h7, r7⟩ := fieldNat l j₁ ha _ chSpace (Or.inl rfl) (by simpa using hj₁r)
-  obtain ⟨h8, r8⟩ := fieldNat l _ a rest chNL (Or.inr rfl) (by simpa using r7)
-  refine ⟨_, ?_, r8⟩
+  obtain ⟨h8, r8⟩ := fieldNat l _ a _ chSpace (Or.inl rfl) (by simpa using r7)
+  obtain ⟨h9, r9⟩ := fieldNat l _ m.depth rest chNL (Or.inr rfl) (by simpa using r8)
+  refine ⟨_, ?_, r9⟩
   rw [Array.length_toList] at hj₀ hj₁
   simp [readMemory, h1, h2, h3, h4, h5]
   erw [hj₀]
   simp [h6]
   erw [hj₁]
-  simp [h7, h8]
+  simp [h7, h8, h9]
   rcases hA with ⟨hN, h0, h0'⟩ | ⟨x, hS, h1', h1''⟩
   · subst h0; subst h0'; cases m; simp_all
   · subst h1'; subst h1''; cases m; simp_all
@@ -1071,12 +1075,12 @@ theorem hasMagic_render (D : DesignCert) : hasMagic (renderCert D) = true := by
       ++ section' outBytes D.outputs ++ section' flopBytes D.flops
       ++ section' memBytes D.memories ++ section' clkBytes D.clocks with ht
   rw [hb, hasMagic]
-  have hsz : (ofList (magicBytes ++ t)).size ≥ ("DCERT3".toUTF8).size := by
-    rw [show "DCERT3".toUTF8.size = 6 from rfl]; simp [magicBytes]
+  have hsz : (ofList (magicBytes ++ t)).size ≥ ("DCERT4".toUTF8).size := by
+    rw [show "DCERT4".toUTF8.size = 6 from rfl]; simp [magicBytes]
   refine Bool.and_eq_true _ _ |>.mpr ⟨by simpa using hsz, ?_⟩
   simp only [List.all_eq_true, List.mem_range]
   intro k hk
-  rw [show "DCERT3".toUTF8.size = 6 from rfl] at hk
+  rw [show "DCERT4".toUTF8.size = 6 from rfl] at hk
   have hk6 : k < magicBytes.length := by simp [magicBytes]; omega
   rw [getElem!_prefix magicBytes t k hk6]
   interval_cases k <;> rfl
@@ -1129,8 +1133,8 @@ theorem parseCert_renderCert (D : DesignCert) : parseCert (renderCert D) = .ok D
     (fun i ws x rest h1 h2 => readClock_reads l i ws x rest h1 h2) clkBytes (fun _ => rfl)
     D.clocks [chNL] j5 [] hws (by simpa [section', clkBytes, List.append_assoc] using hr5)
   have hend : skipWs (ofList l) j6 = (ofList l).size := skipWs_final l j6 (by simpa using hr6)
-  have hgo : parseCert.go (renderCert D) = some D := by
-    show parseCert.go (ofList l) = some D
+  have hgo : parseCert.go readMemory (renderCert D) = some D := by
+    show parseCert.go readMemory (ofList l) = some D
     simp [parseCert.go, hk1, hj1, hk2, hj2, hk3, hj3, hk4, hj4, hk5, hj5, hk6, hj6, hend]
   rw [parseCert, if_neg (by simp [hasMagic_render D]), hgo]
 

@@ -469,20 +469,22 @@ def decCommit : Val → Option MemCommit
 /-- DCERT3's three memory fields ride along so `decDesign_encDesign` stays a
 round trip for EVERY certificate. The object program's `fMemNext` reads `nxt`,
 `ck`, the commit table `cms` (decision #9) and the async-reset image `aimg`
-(decision #2); `init` is a start-state fact. -/
+(decision #2); `init` is a start-state fact, and `depth` (DCERT4) is checked at
+load (`Compiler.MemAddr`), never read by a step. -/
 def encMemory (m : MemoryDesc) : Val :=
   .ctor tagMemory [encNat m.aw, encNat m.dw, encNat m.nextImg, encNat m.clock,
-                   encArr encNat m.init, encArr encCommit m.commits, encONat m.asyncImg]
+                   encArr encNat m.init, encArr encCommit m.commits, encONat m.asyncImg,
+                   encNat m.depth]
 
 def decMemory : Val → Option MemoryDesc
-  | .ctor tg [a, d, n, ck, iv, cs, ai] =>
+  | .ctor tg [a, d, n, ck, iv, cs, ai, dp] =>
     if tg = tagMemory then
       match decNat a, decNat d, decNat n, decNat ck, decArr decNat iv, decArr decCommit cs,
-            decONat ai with
-      | some a', some d', some n', some ck', some iv', some cs', some ai' =>
+            decONat ai, decNat dp with
+      | some a', some d', some n', some ck', some iv', some cs', some ai', some dp' =>
           some { aw := a', dw := d', nextImg := n', clock := ck', init := iv', commits := cs',
-                 asyncImg := ai' }
-      | _, _, _, _, _, _, _ => none
+                 asyncImg := ai', depth := dp' }
+      | _, _, _, _, _, _, _, _ => none
     else none
   | _ => none
 

@@ -75,8 +75,8 @@ def remap(c: dict, f) -> dict:
     c["flops"] = [(w, f(din), he, f(en), hr, f(rst), rv, al, ck, ar)
                   for (w, din, he, en, hr, rst, rv, al, ck, ar) in c["flops"]]
     # DCERT3: a commit's image and the async image are slots too.
-    c["memories"] = [(aw, dw, f(nxt), ck, init, tuple((mk, f(img)) for mk, img in cms), ha, f(ai) if ha else ai)
-                     for (aw, dw, nxt, ck, init, cms, ha, ai) in c["memories"]]
+    c["memories"] = [(aw, dw, f(nxt), ck, init, tuple((mk, f(img)) for mk, img in cms), ha, f(ai) if ha else ai, dp)
+                     for (aw, dw, nxt, ck, init, cms, ha, ai, dp) in c["memories"]]
     return c
 
 

@@ -174,6 +174,21 @@ structure MemoryDesc where
   it does not commit (`srcMemHeld`), so an asserted reset acts with no clock
   edge.  `none`: the memory holds its stored image. -/
   asyncImg : Option Nat := none
+  /-- How many words the memory REALLY has (DCERT4): the `size` of the LGraph
+  Memory cell.  `aw = ceil_log2 depth`, so `2 ^ aw` rounds a depth that is not a
+  power of two up: a 12-entry array has `aw = 4`, and its words 12..15 do not
+  exist in the hardware.
+
+  The step semantics never read this field.  The table stays a total
+  `Int → BV`, and the load-time check (`MemAddr.addrError`, run by
+  `CertIO.certWfError`) proves instead that no address any step computes reaches
+  a word at or past `depth` (`Projection.MemAddrSound.memAccess_lt_depth`).  So
+  the words the hardware lacks are never written or read, and the table and the
+  array agree on every word a step can see.
+
+  The default is the whole table: a DCERT3 certificate does not state a depth
+  and keeps the meaning it always had. -/
+  depth    : Nat := 2 ^ aw
 deriving Repr, Inhabited, DecidableEq
 
 /-- The memory has no asynchronous whole-array reset (`asyncImg` at its

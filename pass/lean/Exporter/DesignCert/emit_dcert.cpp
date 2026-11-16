@@ -145,7 +145,7 @@ std::string dcert_oparg(const Op& op) {
 }
 
 void render_dcert(const CertificateIR& d, std::ostream& os) {
-  os << "DCERT3\n";
+  os << "DCERT4\n";
 
   section_count(os, d.sources.size());
   for (const auto& s : d.sources) {
@@ -260,6 +260,11 @@ void render_dcert(const CertificateIR& d, std::ostream& os) {
     }
     r.field(m.async_img ? size_t{1} : size_t{0});                              // hasAsync
     r.field(m.async_img ? std::to_string(slot(d, *m.async_img)) : std::string("0"));  // asyncImg
+    // DCERT4: the memory's real depth, last. Unset (0) is the whole table.
+    if (m.depth == 0 && m.addr_w >= 64) {
+      throw std::invalid_argument("DCERT4: a memory with a " + std::to_string(m.addr_w) + "-bit address has no depth");
+    }
+    r.field(std::to_string(m.depth != 0 ? m.depth : (uint64_t{1} << m.addr_w)));
     r.finish(os);
   }
 

@@ -37,13 +37,23 @@ open Compiler Compiler.RunAdmission
 -- the drivers can apply it without importing the memory route; this module
 -- proves what it buys.
 
+/-- `certWfError` runs the shape checks (`certShapeError`) first; the memory
+depth and address checks after them (DCERT4) say nothing about clocks. -/
+theorem certShape_of_certWf {D : DesignCert} (h : CertIO.certWfError D = none) :
+    CertIO.certShapeError D = none := by
+  unfold CertIO.certWfError at h
+  cases hs : CertIO.certShapeError D with
+  | some w => simp [hs] at h
+  | none => rfl
+
 /-- What `certWfError D = none` says about clocks: at least one is declared, and
 every flop and every memory commits on a declared one. -/
 theorem certWf_clocks {D : DesignCert} (h : CertIO.certWfError D = none) :
     0 < D.clocks.size ∧
     (∀ f ∈ D.flops, f.clock < D.clocks.size) ∧
     (∀ m ∈ D.memories, m.clock < D.clocks.size) := by
-  unfold CertIO.certWfError at h
+  replace h := certShape_of_certWf h
+  unfold CertIO.certShapeError at h
   simp only at h
   split at h
   · simp at h
@@ -73,7 +83,8 @@ theorem certWf_clocks {D : DesignCert} (h : CertIO.certWfError D = none) :
 /-- …and every commit-table mask names declared clocks only (decision #9). -/
 theorem certWf_commits {D : DesignCert} (h : CertIO.certWfError D = none) :
     ∀ m ∈ D.memories, ∀ c ∈ m.commits, c.mask < 2 ^ D.clocks.size := by
-  unfold CertIO.certWfError at h
+  replace h := certShape_of_certWf h
+  unfold CertIO.certShapeError at h
   simp only at h
   split at h
   · simp at h

@@ -52,6 +52,7 @@ set -euo pipefail
 #   mul4 bad_lsb on ir with sf:1 wf:1: fp cannot specialize the replay simulator, so the run
 #          is COUNTEREXAMPLE NOT REPLAYED and names that reason (not "did not reproduce")
 #   tests/fp_symbolic.lean checks fp's symbolic primitives and terms against evalPrim / evalFuel.
+#   tests/mem_addr_check.lean checks DCERT4's memory depth and the load-time address check.
 # The default route is vc (`sim:` absent); a run naming closed / emit: / route: and no sim: uses fp.
 # ROUTES (default "fp ir vc"): every sym_verify case that names no `emit:` or `route:` also
 # runs on the IR and VC symbolic routes (`sim:ir`, `sim:vc`) and must give the same verdict
@@ -247,6 +248,12 @@ echo "ok: $(tail -1 "$OUT/native_symbolic.log")"
   > "$OUT/fp_symbolic.log" 2>&1 && grep -q '^PASS fp symbolic' "$OUT/fp_symbolic.log" \
   || { tail -5 "$OUT/fp_symbolic.log"; echo "FAIL: fp_symbolic"; exit 1; }
 echo "ok: $(tail -1 "$OUT/fp_symbolic.log")"
+# DCERT4: the memory depth and the load-time address check, and DCERT3 read as the whole table
+# (tests/mem_addr_check.lean)
+(cd "$ROOT/formal/lean" && LEAN_PATH="$PWD/.olean-dev" lean --run "$ROOT/pass/lean/tools/tests/mem_addr_check.lean") \
+  > "$OUT/mem_addr_check.log" 2>&1 && grep -q '^PASS mem_addr_check' "$OUT/mem_addr_check.log" \
+  || { tail -5 "$OUT/mem_addr_check.log"; echo "FAIL: mem_addr_check"; exit 1; }
+echo "ok: $(tail -1 "$OUT/mem_addr_check.log")"
 # certificates no Verilog front end emits (symbolic masks, whole-memory load)
 (cd "$ROOT/formal/lean" && LEAN_PATH="$PWD/.olean-dev" lean --run "$ROOT/pass/lean/tools/tests/gen_gap_certs.lean" "$OUT/gap") \
   > "$OUT/gen_gap_certs.log" 2>&1 || { tail -5 "$OUT/gen_gap_certs.log"; echo "FAIL: gen_gap_certs"; exit 1; }

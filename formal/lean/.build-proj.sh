@@ -31,6 +31,8 @@ MODULES=(
   Compiler/MemDomains
   Compiler/DesignCertWF
   Compiler/DesignSemantics
+  # Load-time check: every memory address stays inside the memory's depth (DCERT4).
+  Compiler/MemAddr
   # Compiler/CertIO itself is NOT built here: its verified entry point
   # (runChecked_correct) imports Compiler/CompileDesign, whose chain imports
   # Mathlib, so it belongs to `lake build`. The DCERT2 CODEC it used to
@@ -99,6 +101,8 @@ MODULES=(
   Projection/HardwareMemOutFlop
   Projection/HardwareMemMain
   Projection/HardwareMemWidth
+  # The load-time memory-address check is sound for interpretDesign.
+  Projection/MemAddrSound
   Projection/HardwareMemAdmit
   Projection/HardwareMemChecks
   Projection/HardwareMemCycle

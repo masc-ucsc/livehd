@@ -25,14 +25,15 @@ inductive Format where
     v1
   | /-- The clock-aware codec (`Compiler.CertIO`), named for DCERT2, where it
     began: the clock table, `FlopDesc.clock`/`asyncReset` and `MemoryDesc.clock`.
-    It is DCERT3 now (the memory record gained `init`, `commits`, `asyncImg`);
-    a DCERT2 stream matches neither magic and is refused. What the C++ pass
+    It was DCERT3 (the memory record gained `init`, `commits`, `asyncImg`) and
+    is DCERT4 now (the memory record gained `depth`); `parseCert` still reads
+    DCERT3. A DCERT2 stream matches no magic and is refused. What the C++ pass
     emits. -/
     v2
 deriving Repr, DecidableEq, Inhabited
 
 def detect (b : ByteArray) : Option Format :=
-  if hasMagic b then some .v2
+  if hasMagic b || hasMagic3 b then some .v2
   else if V1.hasMagic b then some .v1
   else none
 
@@ -44,7 +45,7 @@ def parseAny (b : ByteArray) : Except String (Format × DesignCert) :=
   match detect b with
   | some .v2 => (parseCert b).map (fun D => (Format.v2, D))
   | some .v1 => (V1.parseCert b).map (fun D => (Format.v1, D))
-  | none     => .error "unrecognised certificate: expected DCERT3 or DCERT1"
+  | none     => .error "unrecognised certificate: expected DCERT4, DCERT3 or DCERT1"
 
 /-- D4's admission, unchanged. -/
 def admitV2 (b : ByteArray) : Except String DesignCert := readCertChecked b
@@ -66,7 +67,7 @@ def admitAny (b : ByteArray) : Except String (Format × DesignCert) :=
   match detect b with
   | some .v2 => (admitV2 b).map (fun D => (Format.v2, D))
   | some .v1 => (admitV1 b).map (fun D => (Format.v1, D))
-  | none     => .error "unrecognised certificate: expected DCERT3 or DCERT1"
+  | none     => .error "unrecognised certificate: expected DCERT4, DCERT3 or DCERT1"
 
 end CertIO
 end Compiler

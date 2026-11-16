@@ -874,6 +874,10 @@ def elabProveReifiedChunked : CommandElab := fun stx => do
         match mu.asyncImg with
         | none   => pure t
         | some a => `({ $t with asyncImg := some $(quote a) })
+      -- `depth` (DCERT4), only when it is not the whole `2 ^ aw` table
+      let ms ← (R.memoryUpdates.zip ms).mapM fun (mu, t) =>
+        if mu.depth == 2 ^ mu.aw then pure t
+        else `({ $t with depth := $(quote mu.depth) })
       `(#[$ms,*])
     elabCommand (← `(command| theorem $dmNm : ($d).memories = $memsLit := rfl))
     let doNm := mkIdent (base ++ `D_outputs)
@@ -1465,6 +1469,10 @@ def elabProveReifiedIncr : CommandElab := fun stx => do
         match mu.asyncImg with
         | none   => pure t
         | some a => `({ $t with asyncImg := some $(quote a) })
+      -- `depth` (DCERT4), only when it is not the whole `2 ^ aw` table
+      let ms ← (R.memoryUpdates.zip ms).mapM fun (mu, t) =>
+        if mu.depth == 2 ^ mu.aw then pure t
+        else `({ $t with depth := $(quote mu.depth) })
       `(#[$ms,*])
     elabCommand (← `(command| theorem $dmNm : ($d).memories = $memsLit := rfl))
     let doNm := mkIdent (base ++ `D_outputs)

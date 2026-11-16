@@ -67,7 +67,7 @@ EOF
 D="$OUT/vc/ram2c.dcert"
 grep -q 'commits := #\[{ mask := 1, nextImg := [0-9]* }, { mask := 2, nextImg := [0-9]* }\]' "$OUT/vc/ram2c_Lgraph.lean" \
   || { echo "FAIL: the Lean literal carries no two-entry commit table"; exit 1; }
-# The DCERT3 memory record: aw dw nextImg clock nInit [init..] nCommits (mask img).. hasAsync asyncImg.
+# The DCERT4 memory record: aw dw nextImg clock nInit [init..] nCommits (mask img).. hasAsync asyncImg depth.
 rec=$(python3 -I - "$D" <<'PY'
 import sys
 lines = open(sys.argv[1], "rb").read()[7:].split(b"\n")
@@ -79,8 +79,8 @@ print(lines[i + 1].decode())
 PY
 )
 read -r -a f <<< "$rec"
-(( ${#f[@]} == 12 && f[4] == 0 && f[5] == 2 && f[6] == 1 && f[8] == 2 && f[10] == 0 )) \
-  || { echo "FAIL: unexpected DCERT3 memory record: $rec"; exit 1; }
+(( ${#f[@]} == 13 && f[4] == 0 && f[5] == 2 && f[6] == 1 && f[8] == 2 && f[10] == 0 && f[12] >= 1 )) \
+  || { echo "FAIL: unexpected DCERT4 memory record: $rec"; exit 1; }
 echo "ok: export -- one memory with a two-entry commit table ($rec)"
 
 # ---- stimulus, schedules and the source testbenches -------------------------------
@@ -167,11 +167,11 @@ echo "ok: control -- the random schedule differs from both clocks every step on 
 
 # ---- controls: the commit table changed -------------------------------------------
 # Record fields: 0 aw, 1 dw, 2 nextImg, 3 clock, 4 nInit, 5 nCommits, 6 mask, 7 image,
-# 8 mask, 9 image, 10 hasAsync, 11 asyncImg.
+# 8 mask, 9 image, 10 hasAsync, 11 asyncImg, 12 depth (DCERT4).
 for c in swap none; do
   case $c in
-    swap) new="${f[*]:0:7} ${f[9]} ${f[8]} ${f[7]} ${f[10]} ${f[11]}"; what="its two entries' images swapped" ;;
-    none) new="${f[*]:0:5} 0 0 0"; what="no commit table (the one-clock rule)" ;;
+    swap) new="${f[*]:0:7} ${f[9]} ${f[8]} ${f[7]} ${f[10]} ${f[11]} ${f[12]}"; what="its two entries' images swapped" ;;
+    none) new="${f[*]:0:5} 0 0 0 ${f[12]}"; what="no commit table (the one-clock rule)" ;;
   esac
   python3 -I - "$D" "$OUT/$c.dcert" "$rec" "$new" <<'PY'
 import sys

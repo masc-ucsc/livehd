@@ -48,7 +48,7 @@ def loadAny (p : System.FilePath) : IO (CertIO.Format × DesignCert) := do
       | .ok D    => pure (.v2, D)
       | .error e => throw (IO.userError s!"{p}: {e}")
   | none =>
-      throw (IO.userError s!"{p}: unrecognised certificate: expected DCERT3 or DCERT1")
+      throw (IO.userError s!"{p}: unrecognised certificate: expected DCERT4, DCERT3 or DCERT1")
 
 /-- Drop-in for `CertIO.V1.loadCert` in the probes.  On a DCERT1 file it is
 exactly that function (same parse, same error text); on DCERT3 it admits
@@ -145,7 +145,7 @@ def runOneAny (path : String) (cycles : Nat) (seed : Nat) : IO UInt32 := do
   | some .v2 => runV2 path bytes cycles seed
   | none     => do
       say s!"=== {path}"
-      say "  PARSE FAILED: unrecognised certificate: expected DCERT3 or DCERT1"
+      say "  PARSE FAILED: unrecognised certificate: expected DCERT4, DCERT3 or DCERT1"
       return 1
 
 /-- The same three shared fixtures as `CertLoad.emitFixtures`, written as

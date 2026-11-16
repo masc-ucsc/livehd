@@ -40,7 +40,8 @@ MODULES=(
   # MemDomains (decision #9: which clock domains of a memory fire) before the
   # step semantics that reads it.
   Compiler/MemDomains
-  Compiler/DesignSemantics Compiler/CertIOV1 Compiler/CertIOCodec Compiler/CertIORoute
+  # MemAddr (DCERT4): the load-time memory-address check the codec runs.
+  Compiler/DesignSemantics Compiler/MemAddr Compiler/CertIOV1 Compiler/CertIOCodec Compiler/CertIORoute
   Compiler/ResetPolarity Compiler/RunAdmission
   Projection/ObjectLanguage Projection/ObjectLanguageSemantics
   Projection/BindingTime Projection/Encoding Projection/Surface

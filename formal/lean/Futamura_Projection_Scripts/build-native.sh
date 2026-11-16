@@ -20,6 +20,7 @@ MODULES=(
   Compiler/Runtime
   Compiler/DesignCertWF
   Compiler/DesignSemantics
+  Compiler/MemAddr
   Compiler/CertIOV1
   Compiler/CertIOCodec
   Compiler/CertIORoute

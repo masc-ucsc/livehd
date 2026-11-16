@@ -97,6 +97,12 @@ struct MemoryDriver {
   // image with the reset applied to the held one, taken when the memory's
   // clock does not fire. Absent: the memory holds.
   std::optional<uint32_t> async_img;
+  // How many words the memory really has (DCERT4 `MemoryDesc.depth`): the
+  // Memory cell's `size`. `addr_w = ceil_log2(depth)` rounds a depth that is
+  // not a power of two up, so the table has words the hardware does not; the
+  // Lean loader checks that no address reaches them (`Compiler.MemAddr`).
+  // 0: not set, written as the whole `2 ^ addr_w` table.
+  uint64_t depth = 0;
 };
 // One emitted clock. Mirrors DesignScan::ClockDomain, minus the structural key:
 // the key is the scan's grouping identity and has no meaning in the certificate,

@@ -110,9 +110,13 @@ void emit_design_cert(const std::string& base, const CertificateIR& d, std::ostr
     // `asyncImg` only when present (an asynchronous whole-array reset).
     const std::string async_img
         = m.async_img ? ", asyncImg := some " + std::to_string(d.slot_of.at(*m.async_img)) : std::string();
+    // `depth` (DCERT4) only when it is not the field's default, the whole
+    // `2 ^ aw` table: a power-of-two memory prints exactly as before.
+    const bool        part_table = m.depth != 0 && m.addr_w < 64 && m.depth != (uint64_t{1} << m.addr_w);
+    const std::string depth      = part_table ? ", depth := " + std::to_string(m.depth) : std::string();
     mem_lines.push_back("{ aw := " + std::to_string(m.addr_w) + ", dw := " + std::to_string(m.data_w) + ", nextImg := "
                         + std::to_string(d.slot_of.at(m.next_img)) + ", clock := " + std::to_string(m.clock) + init
-                        + commits + async_img + " }");
+                        + commits + async_img + depth + " }");
   }
 
   auto emit_array = [&os](const char* field, const std::vector<std::string>& lines, bool) {
