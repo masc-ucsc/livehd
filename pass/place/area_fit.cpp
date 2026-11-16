@@ -287,22 +287,14 @@ Area_fit_route area_fit_route(const ph::Technology& tech, ph::Floorplan fp, cons
   std::string error;
   if (options.oracle == "legroute") {
     try {
+      // The oracle keeps the capacity model its thresholds were tuned with: half of each edge's tracks and one
+      // reserved track per layer and tile. Only the comparison against the full core's route uses the numbers.
       Legroute_options lopt;
-      lopt.output_dir     = "";
-      lopt.global_pattern = options.pattern;
-      const auto plan     = legroute_plan(tech,
-                                          fp,
-                                          timing::Feedback{},
-                                          lopt,
-                                          {},
-                                          ph::detect_tech_profile(tech),
-                                          options.net_pops,
-                                          false,
-                                          nullptr,
-                                          true);
-      if (!plan.route_attempted) {
-        throw std::runtime_error(std::format("legroute plan skipped the route ({})", plan.route_skip_name()));
-      }
+      lopt.capacity_share  = .5;
+      lopt.reserved_tracks = 1;
+      lopt.global_pattern  = options.pattern;
+      const auto plan
+          = legroute_plan(tech, fp, timing::Feedback{}, lopt, {}, ph::detect_tech_profile(tech), options.net_pops);
       Area_fit_route out;
       out.oracle          = "legroute";
       out.signals         = plan.signals;

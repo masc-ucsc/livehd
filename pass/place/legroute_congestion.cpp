@@ -12,7 +12,7 @@ Legroute_congestion route_congestion(const Design& d, const Grid& g, const Globa
   out.bounds          = {double(g.x0), double(g.y0), double(g.left(g.cols)), double(g.bottom(g.rows))};
   out.cols            = g.cols;
   out.rows            = g.rows;
-  out.admission_share = admission_share(d.opt);
+  out.admission_share = d.opt.capacity_share;
   out.signals         = nets.size();
   out.unrouted        = routes.unrouted;
   out.search_limited  = routes.search_limited;

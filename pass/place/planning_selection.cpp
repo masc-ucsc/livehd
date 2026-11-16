@@ -85,7 +85,7 @@ bool Planning_selection::consider(unsigned round, size_t routing_score, const ti
   return samples.back().accepted;
 }
 
-std::string Planning_selection::recovery_stop_reason(bool continue_rejected, unsigned last_round, bool plan_pass) const {
+std::string Planning_selection::recovery_stop_reason(unsigned last_round, bool plan_pass) const {
   if (samples.empty()) {
     throw std::logic_error("planning recovery needs a measured candidate");
   }
@@ -93,7 +93,7 @@ std::string Planning_selection::recovery_stop_reason(bool continue_rejected, uns
   if (candidate.accepted && plan_pass) {
     return "plan_pass";
   }
-  if (!candidate.accepted && !continue_rejected) {
+  if (!candidate.accepted) {
     return "candidate_rejected_" + candidate.reason;
   }
   if (candidate.round >= last_round) {

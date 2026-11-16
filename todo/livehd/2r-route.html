@@ -13,7 +13,9 @@
 <p><span class="status">Plan written 2026-11-15 from a question-and-answer session, after the URoute
 calibration (3u-uroute) and the SAT legroute work (2l-legroute) both failed their goals. This page
 replaces those two pages; their history is in git. Step A is done (2026-11-15: DREAMPlace <code>ea2d85a</code>,
-LiveHD <code>3c45f532c</code>, scorer kept as <code>tools/routetruth</code>); steps B to E are not implemented yet.
+LiveHD <code>3c45f532c</code>, scorer kept as <code>tools/routetruth</code>). Step B is measured
+(<a href="#stepb">Step B results</a>) and step C is done (2026-11-15, <a href="#stepc">Step C results</a>);
+steps D and E are not implemented yet.
 Names of options, targets and directories are proposals.
 Updated 2026-11-15 with the first routed-cohort snapshot (<a href="#cohort">Cohort evidence</a>).
 The items C1–C5 come from that snapshot and were accepted as written on 2026-11-15.</span></p>
@@ -180,6 +182,45 @@ runs.</td></tr>
 <p>Not done yet in step B: the cohort part (where the CTS and hold buffers landed on gemmini and
 NVDLA/partition_a, congestion before and after repair, the sha3 marker classification). The cohort
 artifacts and <code>issues.md</code> are not on the machine where step B ran.</p>
+
+<h2 id="stepc">Step C results (2026-11-15, the SAT stages are deleted)</h2>
+<p>What <code>synth.place.legroute=true</code> runs now: the plan rounds on the converged placement (global route,
+cell inflation, resumed global placement, round selection), then the regular terminal legalizer. Nothing else is
+left of Local, Final, cell boxes, partitions, admission, the gates or the probe.</p>
+<table>
+<tr><th>Topic</th><th>State after step C</th></tr>
+<tr><td>Kept code</td><td><code>pass/place/legroute_grid.cpp</code> (netlist view, tile grid, free row sites and
+track capacity per layer), <code>legroute_clock.cpp</code> (clock charge), <code>legroute_global.cpp</code> with
+<code>fast_route_pattern.*</code>, <code>legroute_congestion.cpp</code>, <code>legroute_plan.cpp</code>; the rounds
+in <code>place.cpp</code> with <code>planning_selection.*</code> and <code>placement_session.*</code>; the
+measure-only oracle of <code>place.area=auto</code>.</td></tr>
+<tr><td>Options</td><td>17 under <code>synth.place.legroute</code>: the enable, <code>plan.rounds</code>,
+<code>plan.iterations</code>, <code>plan.min_iterations</code>, <code>plan.timing_interval</code>,
+<code>plan.max_degradation_ps</code>, <code>plan.max_inflate</code>, <code>plan.local_tiles</code>,
+<code>plan.net_pops</code>, <code>plan.route_model</code>, <code>plan.route_interval</code>,
+<code>plan.route_net_pops</code>, <code>capacity_share</code>, <code>global_rounds</code>,
+<code>global_margin</code>, <code>global_pattern</code>, <code>global_astar_weight</code>. The enable alone
+selects the plan rounds. The table had 119 entries; <code>legroute.plan</code>, <code>legal_boxes</code>,
+<code>partition_cells</code>, the probe and every SAT, box and reserve option are gone.</td></tr>
+<tr><td>Capacity</td><td>The reserves that existed for Local and Final are gone (B4): no box or track reserve, and
+<code>capacity_share</code> (default 1) replaces <code>global_share</code> and <code>density_ceiling</code>. This is
+the setting the step B arms used. The <code>place.area=auto</code> oracle keeps the model its thresholds were
+tuned with (half the tracks, one reserved track per layer and tile), so its results do not change.</td></tr>
+<tr><td>B3, R13</td><td>The window-fit and density checks that rejected a pose before routing are deleted. On a
+fixed die or core the rounds keep the best measured round, report the overflow that is left
+(<code>legroute_plan_selection.json</code>, <code>qor.json</code>) and continue to the terminal legalizer. A
+generated core that may grow still restarts at a lower utilization.</td></tr>
+<tr><td>Same numbers</td><td>The three step B arms that produced a placement on asap7 minimax (P1p, P2, P2p) give a
+byte-identical placed DEF and the same plan telemetry with the new option names. P1, which stopped in step B, now
+selects the same round (95 overflow tracks left) and writes a legal placement. With legroute off, placements are
+byte-identical.</td></tr>
+</table>
+<p>Left for step D in the kept code: the tile is still two rows by two flop widths (R9); the router keeps demand
+per direction, so overflow is reported per direction and only capacity per layer (C2); the capacity is not
+calibrated against OpenROAD and nangate45 still has no routing profile (B2); round selection ranks by the
+router's own residual (B6); the clock charge models a spine tree, not what CTS builds; and
+<code>legroute=true</code> still turns on <code>region.cleancuts</code> and the macro tile snap before the
+rounds (anomaly A16 of the step B report).</p>
 
 <h2>Decisions (2026-11-15)</h2>
 <table>

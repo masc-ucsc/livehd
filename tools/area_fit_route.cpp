@@ -1,6 +1,6 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 // Routability oracle of place.area=auto on a placed DEF: measurement for comparing
-// placements (legroute global route with measure_only, RUDY fallback). Prints one JSON line.
+// placements (legroute global route, RUDY fallback). Prints one JSON line.
 // usage: area_fit_route [--oracle legroute|rudy] [--net-pops N] [--pattern] placed.def lef...
 #include <cstdio>
 #include <exception>

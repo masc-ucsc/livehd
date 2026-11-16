@@ -431,70 +431,15 @@ int main(int argc, char** argv) {
     }
     number_option("region_merge_um", options.region.merge_um);
     boolean_option("legroute", options.legroute);
-    boolean_option("legroute_final", options.legroute_options.final);
-    boolean_option("legroute_clock_spine", options.legroute_options.clock_spine);
-    number_option("legroute_box_fill", options.legroute_options.box_fill);
-    number_option("legroute_merge_cost", options.legroute_options.merge_cost);
     auto& lr = options.legroute_options;
-    unsigned_option("legroute_route_ms", lr.route_ms);
-    unsigned_option("legroute_route_access", lr.route_access);
-    unsigned_option("legroute_route_patterns", lr.route_patterns);
-    unsigned_option("legroute_route_passes", lr.route_passes);
-    boolean_option("legroute_final_box_report", lr.final_box_report);
-    boolean_option("legroute_l5_fallback_shadow", lr.l5_fallback_shadow);
-    unsigned_option("legroute_l5_repair_ms", lr.l5_repair_ms);
-    boolean_option("critical_cellboxes", lr.critical_cellboxes);
-    unsigned_option("cellbox_sites", lr.cellbox_sites);
-    unsigned_option("cellbox_rows", lr.cellbox_rows);
-    unsigned_option("cellbox_external_pins", lr.cellbox_external_pins);
-    unsigned_option("cellbox_connections", lr.cellbox_connections);
-    unsigned_option("cellbox_critical_choices", lr.cellbox_critical_choices);
-    unsigned_option("cellbox_other_choices", lr.cellbox_other_choices);
-    boolean_option("cellbox_wide_exceptions", lr.cellbox_wide_exceptions);
-    boolean_option("cellbox_far_fallback", lr.cellbox_far_fallback);
-    boolean_option("cellbox_full_flow", lr.cellbox_full_flow);
-    boolean_option("cellbox_diagnostic_final", lr.cellbox_diagnostic_final);
-    boolean_option("cellbox_relocate", lr.cellbox_relocate);
-    unsigned_option("cellbox_relocate_window", lr.cellbox_relocate_window);
-    boolean_option("cellbox_local_replan", lr.cellbox_local_replan);
-    unsigned_option("cellbox_local_detour_rounds", lr.cellbox_local_detour_rounds);
-    boolean_option("cellbox_local_detour_boost", lr.cellbox_local_detour_boost);
-    boolean_option("cellbox_local_detour_incremental", lr.cellbox_local_detour_incremental);
-    boolean_option("cellbox_local_box_moves", lr.cellbox_local_box_moves);
-    boolean_option("cellbox_tile_capacity", lr.cellbox_tile_capacity);
-    boolean_option("cellbox_plan_only", lr.cellbox_plan_only);
-    unsigned_option("cellbox_reserve_tracks", lr.cellbox_reserve_tracks);
-    unsigned_option("cellbox_preroute_tiles", lr.cellbox_preroute_tiles);
-    unsigned_option("cellbox_preroute_max_pins", lr.cellbox_preroute_max_pins);
-    unsigned_option("cellbox_fixed_regions", lr.cellbox_fixed_regions);
-    unsigned_option("cellbox_fixed_min_regions", lr.cellbox_fixed_min_regions);
-    unsigned_option("cellbox_local_move_window", lr.cellbox_local_move_window);
-    if (config.HasMember("cellbox_final_retry")) {
-      throw std::invalid_argument("cellbox_final_retry is runtime-only and cannot be configured");
-    }
-    boolean_option("legroute_global_route", lr.global_route);
-    boolean_option("legroute_global_all", lr.global_all);
-    boolean_option("legroute_global_keep", lr.global_keep);
-    boolean_option("legroute_global_pattern", lr.global_pattern);
-    boolean_option("legroute_region_pins", lr.region_pins);
-    boolean_option("legroute_legal_boxes", lr.legal_boxes);
-    boolean_option("legroute_paired_pin_reserve", lr.paired_pin_reserve);
-    boolean_option("legroute_box_route_seed", lr.box_route_seed);
-    boolean_option("legroute_fit_first", lr.fit_first);
-    unsigned_option("legroute_partition_cells", lr.partition_cells);
+    number_option("legroute_capacity_share", lr.capacity_share);
+    unsigned_option("legroute_global_margin", lr.global_margin);
     unsigned_option("legroute_global_rounds", lr.global_rounds);
-    unsigned_option("legroute_global_net_pops", lr.global_net_pops);
-    unsigned_option("legroute_reserved_tracks", lr.reserved_tracks);
-    number_option("legroute_reserved_tracks_per_um", lr.reserved_tracks_per_um);
-    unsigned_option("legroute_threads", lr.threads);
-    number_option("legroute_global_share", lr.global_share);
-    number_option("legroute_density_ceiling", lr.density_ceiling);
-    string_option("legroute_box_reserve", lr.box_reserve);
+    boolean_option("legroute_global_pattern", lr.global_pattern);
+    number_option("legroute_global_astar_weight", lr.global_astar_weight);
     string_option("pg", options.pg);
     boolean_option("allow_increase_area", options.allow_increase_area);
     auto& plan = options.legroute_plan;
-    boolean_option("legroute_plan", plan.enabled);
-    boolean_option("legroute_plan_handoff", plan.handoff);
     string_option("legroute_plan_route_model", plan.route_model);
     unsigned_option("legroute_plan_route_interval", plan.route_interval);
     unsigned_option("legroute_plan_route_net_pops", plan.route_net_pops);
@@ -506,153 +451,15 @@ int main(int argc, char** argv) {
     unsigned_option("legroute_plan_net_pops", plan.net_pops);
     number_option("legroute_plan_max_inflate", plan.max_inflate);
     number_option("legroute_plan_max_degradation_ps", plan.max_degradation_ps);
-    if (plan.enabled) {
-      if (!options.legroute || !plan.rounds || !plan.iterations || plan.min_iterations > plan.iterations || !plan.net_pops
-          || !std::isfinite(plan.max_inflate) || plan.max_inflate <= 1 || lr.region_pins
-          || (!lr.critical_cellboxes && !lr.partition_cells) || !std::isfinite(plan.max_degradation_ps)
+    if (options.legroute) {
+      if (!plan.rounds || !plan.iterations || plan.min_iterations > plan.iterations || !plan.net_pops
+          || !std::isfinite(plan.max_inflate) || plan.max_inflate <= 1 || !std::isfinite(plan.max_degradation_ps)
           || (plan.max_degradation_ps < 0 && plan.max_degradation_ps != -1)) {
-        throw std::invalid_argument(
-            "legroute_plan requires legroute, valid positive budgets, max_inflate > 1, "
-            "region_pins=false and partition_cells > 0 outside critical_cellboxes");
+        throw std::invalid_argument("legroute requires valid positive plan budgets and legroute_plan_max_inflate > 1");
       }
       options.placement_session = std::make_shared<pl::Placement_session>();
     }
-    if (lr.cellbox_full_flow && (!lr.critical_cellboxes || !plan.enabled || !options.legroute || !lr.final)) {
-      throw std::invalid_argument("cellbox_full_flow requires critical_cellboxes, legroute_plan and legroute_final");
-    }
-    if (lr.cellbox_diagnostic_final && (!lr.cellbox_full_flow || !lr.final)) {
-      throw std::invalid_argument("cellbox_diagnostic_final requires cellbox_full_flow and legroute_final");
-    }
-    if (lr.cellbox_far_fallback && (!lr.critical_cellboxes || !plan.enabled || plan.rounds != 3)) {
-      throw std::invalid_argument("cellbox_far_fallback requires critical_cellboxes and legroute_plan with exactly three rounds");
-    }
-    if (lr.critical_cellboxes) {
-      bool source_def = false, cell_place = false, timing_driven = true;
-      boolean_option("source_def", source_def);
-      boolean_option("cell_place", cell_place);
-      boolean_option("timing_driven", timing_driven);
-      if (!source_def || !cell_place || !timing_driven || floorplan_mode || !plan.enabled || plan.rounds > 3 || plan.handoff
-          || lr.legal_boxes || options.pg != "none" || options.iterations < 0 || options.min_iterations < 0
-          || options.final_iterations < 0) {
-        throw std::invalid_argument(
-            "critical_cellboxes requires source_def, cell_place, timing_driven, "
-            "legroute_plan with at most three retries, pg=none, no floorplan_place/legal_boxes/handoff");
-      }
-      for (const auto* key : {"resize", "fp_resize", "remove_synthesis_buffers", "allow_increase_area"}) {
-        bool forbidden = false;
-        boolean_option(key, forbidden);
-        if (forbidden) {
-          throw std::invalid_argument(std::string("critical_cellboxes forbids ") + key);
-        }
-      }
-      unsigned timing_rounds = 0;
-      unsigned_option("timing_rounds", timing_rounds);
-      if (timing_rounds) {
-        throw std::invalid_argument("critical_cellboxes uses only legroute_plan_rounds, not timing_rounds");
-      }
-      lr.box_reserve              = "M2:20,M3:20";
-      lr.reserved_tracks          = 0;
-      lr.reserved_tracks_per_um   = -1;
-      options.allow_increase_area = false;
-    }
     pl::validate_legroute_options(lr);
-    if (lr.critical_cellboxes) {
-      rapidjson::StringBuffer                    buffer;
-      rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-      writer.StartObject();
-      const auto emit_bool = [&](const char* key, bool value) {
-        writer.Key(key);
-        writer.Bool(value);
-      };
-      const auto emit_uint = [&](const char* key, unsigned value) {
-        writer.Key(key);
-        writer.Uint(value);
-      };
-      const auto emit_number = [&](const char* key, double value) {
-        writer.Key(key);
-        writer.Double(value);
-      };
-      const auto emit_string = [&](const char* key, const std::string& value) {
-        writer.Key(key);
-        writer.String(value.c_str());
-      };
-      emit_bool("critical_cellboxes", lr.critical_cellboxes);
-      emit_uint("cellbox_sites", lr.cellbox_sites);
-      emit_uint("cellbox_rows", lr.cellbox_rows);
-      emit_uint("cellbox_external_pins", lr.cellbox_external_pins);
-      emit_uint("cellbox_connections", lr.cellbox_connections);
-      emit_uint("cellbox_critical_choices", lr.cellbox_critical_choices);
-      emit_uint("cellbox_other_choices", lr.cellbox_other_choices);
-      emit_bool("cellbox_wide_exceptions", lr.cellbox_wide_exceptions);
-      emit_bool("cellbox_far_fallback", lr.cellbox_far_fallback);
-      emit_bool("cellbox_full_flow", lr.cellbox_full_flow);
-      emit_bool("cellbox_diagnostic_final", lr.cellbox_diagnostic_final);
-      emit_bool("cellbox_relocate", lr.cellbox_relocate);
-      emit_uint("cellbox_relocate_window", lr.cellbox_relocate_window);
-      emit_bool("cellbox_local_replan", lr.cellbox_local_replan);
-      emit_uint("cellbox_local_detour_rounds", lr.cellbox_local_detour_rounds);
-      emit_bool("cellbox_local_detour_boost", lr.cellbox_local_detour_boost);
-      emit_bool("cellbox_local_detour_incremental", lr.cellbox_local_detour_incremental);
-      emit_bool("cellbox_local_box_moves", lr.cellbox_local_box_moves);
-      emit_bool("cellbox_tile_capacity", lr.cellbox_tile_capacity);
-      emit_bool("cellbox_plan_only", lr.cellbox_plan_only);
-      emit_uint("cellbox_reserve_tracks", lr.cellbox_reserve_tracks);
-      emit_uint("cellbox_preroute_tiles", lr.cellbox_preroute_tiles);
-      emit_uint("cellbox_preroute_max_pins", lr.cellbox_preroute_max_pins);
-      emit_uint("cellbox_fixed_regions", lr.cellbox_fixed_regions);
-      emit_uint("cellbox_fixed_min_regions", lr.cellbox_fixed_min_regions);
-      emit_uint("cellbox_local_move_window", lr.cellbox_local_move_window);
-      emit_bool("legroute", options.legroute);
-      emit_bool("legroute_final", lr.final);
-      emit_uint("legroute_route_ms", lr.route_ms);
-      emit_uint("legroute_route_access", lr.route_access);
-      emit_uint("legroute_route_patterns", lr.route_patterns);
-      emit_uint("legroute_route_passes", lr.route_passes);
-      emit_bool("legroute_final_box_report", lr.final_box_report);
-      emit_bool("legroute_l5_fallback_shadow", lr.l5_fallback_shadow);
-      emit_uint("legroute_l5_repair_ms", lr.l5_repair_ms);
-      emit_bool("legroute_clock_spine", lr.clock_spine);
-      emit_bool("legroute_global_route", lr.global_route);
-      emit_bool("legroute_global_all", lr.global_all);
-      emit_bool("legroute_global_keep", lr.global_keep);
-      emit_bool("legroute_global_pattern", lr.global_pattern);
-      emit_bool("legroute_region_pins", lr.region_pins);
-      emit_bool("legroute_legal_boxes", lr.legal_boxes);
-      emit_bool("legroute_paired_pin_reserve", lr.paired_pin_reserve);
-      emit_bool("legroute_box_route_seed", lr.box_route_seed);
-      emit_bool("legroute_fit_first", lr.fit_first);
-      emit_uint("legroute_partition_cells", lr.partition_cells);
-      emit_uint("legroute_global_rounds", lr.global_rounds);
-      emit_uint("legroute_global_net_pops", lr.global_net_pops);
-      emit_uint("legroute_reserved_tracks", lr.reserved_tracks);
-      emit_number("legroute_reserved_tracks_per_um", lr.reserved_tracks_per_um);
-      emit_uint("legroute_threads", lr.threads);
-      emit_number("legroute_global_share", lr.global_share);
-      emit_number("legroute_density_ceiling", lr.density_ceiling);
-      emit_string("legroute_box_reserve", lr.box_reserve);
-      emit_string("pg", options.pg);
-      emit_bool("allow_increase_area", options.allow_increase_area);
-      emit_uint("iterations", unsigned(options.iterations));
-      emit_uint("min_iterations", unsigned(options.min_iterations));
-      emit_uint("final_iterations", unsigned(options.final_iterations));
-      emit_bool("legroute_plan", plan.enabled);
-      emit_bool("legroute_plan_handoff", plan.handoff);
-      emit_string("legroute_plan_route_model", plan.route_model);
-      emit_uint("legroute_plan_route_interval", plan.route_interval);
-      emit_uint("legroute_plan_route_net_pops", plan.route_net_pops);
-      emit_uint("legroute_plan_local_tiles", plan.local_tiles);
-      emit_uint("legroute_plan_rounds", plan.rounds);
-      emit_uint("legroute_plan_iterations", plan.iterations);
-      emit_uint("legroute_plan_min_iterations", plan.min_iterations);
-      emit_uint("legroute_plan_timing_interval", plan.timing_interval);
-      emit_uint("legroute_plan_net_pops", plan.net_pops);
-      emit_number("legroute_plan_max_inflate", plan.max_inflate);
-      emit_number("legroute_plan_max_degradation_ps", plan.max_degradation_ps);
-      writer.EndObject();
-      if (!(std::ofstream(root + "/critical_cellbox_options.json") << buffer.GetString() << '\n')) {
-        throw std::runtime_error("cannot write effective critical cellbox options");
-      }
-    }
     auto& terminal_options = options.terminal_legalize_options;
     boolean_option("legalize_joint_minimize_total", terminal_options.joint_minimize_total);
     number_option("legalize_remainder_wire_weight", terminal_options.remainder_wire_weight);

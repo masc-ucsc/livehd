@@ -14,7 +14,7 @@ _SMOKE = [
     "//graph:cell_test",
     "//lhd:lhd_options_test",
     "//pass/place:place_test",
-    "//pass/place:legroute_test",
+    "//pass/place:legroute_plan_test",
     "//inou/lefdef:signal_via_test",
 ]
 

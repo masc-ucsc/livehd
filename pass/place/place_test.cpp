@@ -192,9 +192,12 @@ TEST(Placement, ExperimentalBoundaryRefinementsRunOnlyAtTheFinalStage) {
   }
 }
 
-TEST(Placement, PreSatRejectsMissingGlobalPathsRegardlessOfStrictness) {
+// todo/livehd/2r-route.html B3/R13: on a fixed core the plan rounds never end the run. The best measured round is
+// kept, what the router could not fit is reported, and the regular terminal legalizer legalizes it. A generated
+// core that may grow still restarts at a lower utilization.
+TEST(Placement, LegrouteKeepsItsBestRoundOnAFixedCoreAndReportsTheRemainingOverflow) {
   hhds::GraphLibrary source;
-  auto               io  = source.create_io("strict_global_capacity");
+  auto               io  = source.create_io("legroute_fixed_core");
   auto               inv = source.create_io("sky130_fd_sc_hd__inv_1");
   inv->add_input("A", 0);
   inv->add_output("Y", 0);
@@ -226,51 +229,67 @@ TEST(Placement, PreSatRejectsMissingGlobalPathsRegardlessOfStrictness) {
   }
   auto options = plain_options();
   options.lefs = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
-  options.core = options.die           = {0, 0, 55.2, 43.52};
-  options.density                      = .5;
-  options.iterations                   = 0;
-  options.bins                         = 4;
-  options.optimization_pending         = false;
-  options.restart_seed                 = seed;
-  options.legroute                     = true;
-  options.allow_increase_area          = false;
-  options.legroute_probe.strict        = false;
-  options.legroute_options.legal_boxes = true;
-  options.legroute_options.global_all = options.legroute_options.global_route = true;
-  options.legroute_options.region_pins                                        = false;
-  options.legroute_options.global_share                                       = .01;
-  options.legroute_options.global_rounds                                      = 1;
-  options.legroute_options.final = options.legroute_options.clock_spine = false;
-  options.legroute_options.spill_rounds                                 = 0;
-  options.legroute_options.threads                                      = 1;
-  options.snapshots                                                     = true;
-  for (bool strict : {false, true}) {
-    options.legroute_probe.strict = strict;
-    options.output_dir
-        = std::string(std::getenv("TEST_TMPDIR")) + (strict ? "/strict_global_capacity" : "/relaxed_global_capacity");
-    hhds::GraphLibrary placed_library;
-    try {
-      (void)place(*graph, placed_library, options);
-      FAIL() << "missing global paths entered regional SAT, strict=" << strict;
-    } catch (const Legroute_replan& e) {
-      EXPECT_GT(e.gates.unrouted, 0u);
-      EXPECT_EQ(e.gates.topology_disconnected, e.gates.unrouted);
-      EXPECT_EQ(e.gates.search_limited, 0u);
-      EXPECT_NE(std::string_view(e.what()).find("not admitted to SAT"), std::string_view::npos);
-    }
-    std::ifstream       input(options.output_dir + "/pre_sat.json");
+  options.core = options.die              = {0, 0, 55.2, 43.52};
+  options.density                         = .5;
+  options.iterations                      = 0;
+  options.bins                            = 4;
+  options.optimization_pending            = false;
+  options.restart_seed                    = seed;
+  options.legroute                        = true;
+  options.legroute_plan.rounds            = 1;
+  options.legroute_options.capacity_share = .01;  // every edge rounds down to zero tracks: nothing can be routed
+  options.legroute_options.global_rounds  = 1;
+  options.legroute_options.clock_charge   = false;
+  options.snapshots                       = true;
+  const auto read_json                    = [](const std::string& path) {
+    std::ifstream       input(path);
     const std::string   text{std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
     rapidjson::Document report;
     report.Parse(text.c_str());
-    ASSERT_FALSE(report.HasParseError());
-    EXPECT_TRUE(report["requires_replan"].GetBool());
-    EXPECT_GT(report["unrouted"].GetUint64(), 0u);
-    EXPECT_FALSE(std::filesystem::exists(options.output_dir + "/legroute.json"));
-    const auto handoff = physical::read_def(options.output_dir + "/legroute_handoff/input.def");
-    ASSERT_EQ(handoff.terminals.size(), 2 * pairs);
-    for (const auto& terminal : handoff.terminals) {
-      const auto net = std::ranges::find(handoff.nets, terminal.net, &physical::Net::name);
-      ASSERT_NE(net, handoff.nets.end()) << terminal.name;
+    return report;
+  };
+  for (bool allow_increase_area : {false, true}) {  // an explicit die/core never grows, whatever the switch says
+    SCOPED_TRACE(allow_increase_area);
+    options.allow_increase_area = allow_increase_area;
+    options.output_dir
+        = std::string(std::getenv("TEST_TMPDIR")) + (allow_increase_area ? "/legroute_fixed_a" : "/legroute_fixed_b");
+    hhds::GraphLibrary placed_library;
+    const auto         placed = place(*graph, placed_library, options);
+    EXPECT_NO_THROW(check_legality(options.technology().lef, placed.floorplan));
+    EXPECT_TRUE(std::filesystem::exists(options.output_dir + "/terminal_legalize.json"));
+    const auto selection = read_json(options.output_dir + "/legroute_plan_selection.json");
+    ASSERT_FALSE(selection.HasParseError());
+    EXPECT_TRUE(selection["overflow_left"].GetBool());
+    EXPECT_STREQ(selection["outcome"].GetString(), "continued_with_overflow");
+    EXPECT_GT(selection["unrouted"].GetUint64(), 0u);
+    EXPECT_EQ(selection["topology_disconnected"].GetUint64(), selection["unrouted"].GetUint64());
+    EXPECT_EQ(selection["routing_residual"].GetUint64(), selection["residual"].GetUint64());
+    EXPECT_EQ(selection["rounds_run"].GetUint(), 2u);  // round 0, one feedback slice, and the measure-only round 1
+    ASSERT_TRUE(selection["overflow"]["horizontal"].HasMember("tracks"));
+    ASSERT_TRUE(selection["layers"].IsArray());
+    EXPECT_GT(selection["layers"].Size(), 1u);
+    const auto round = read_json(options.output_dir + "/legroute_plan0/plan.json");
+    ASSERT_FALSE(round.HasParseError());
+    EXPECT_EQ(round["signals"].GetUint64(), 3u * pairs);
+    EXPECT_GT(round["unrouted"].GetUint64(), 0u);
+    EXPECT_DOUBLE_EQ(round["capacity_share"].GetDouble(), .01);
+    EXPECT_TRUE(std::filesystem::exists(options.output_dir + "/legroute_plan0/feedback.json"));
+    EXPECT_TRUE(std::filesystem::exists(options.output_dir + "/legroute_plan0/plan_failures.tsv"));
+    rapidjson::Document qor;
+    qor.Parse(placed.qor.c_str());
+    ASSERT_FALSE(qor.HasParseError());
+    EXPECT_TRUE(qor["legal"].GetBool());
+    EXPECT_TRUE(qor["cells_legalized"].GetBool());
+    ASSERT_TRUE(qor.HasMember("legroute"));
+    EXPECT_TRUE(qor["legroute"]["overflow_left"].GetBool());
+    EXPECT_EQ(qor["legroute"]["unrouted"].GetUint64(), selection["unrouted"].GetUint64());
+    EXPECT_EQ(qor["legroute"]["selected_round"].GetUint(), selection["selected_round"].GetUint());
+    // the pose the round measured: every signal IO on a net with a cell
+    const auto measured = physical::read_def(options.output_dir + "/legroute_plan0/input.def");
+    ASSERT_EQ(measured.terminals.size(), 2 * pairs);
+    for (const auto& terminal : measured.terminals) {
+      const auto net = std::ranges::find(measured.nets, terminal.net, &physical::Net::name);
+      ASSERT_NE(net, measured.nets.end()) << terminal.name;
       EXPECT_TRUE(std::ranges::any_of(net->connections, [&](const auto& endpoint) {
         return endpoint.instance == "PIN" && endpoint.pin == terminal.name;
       })) << terminal.name;
@@ -278,6 +297,45 @@ TEST(Placement, PreSatRejectsMissingGlobalPathsRegardlessOfStrictness) {
           << terminal.name;
     }
   }
+  // With the router's full capacity the same placement fits: nothing is left to report.
+  options.legroute_options.capacity_share = 1;
+  options.output_dir                      = std::string(std::getenv("TEST_TMPDIR")) + "/legroute_fixed_fits";
+  hhds::GraphLibrary fits_library;
+  const auto         fits = place(*graph, fits_library, options);
+  EXPECT_NO_THROW(check_legality(options.technology().lef, fits.floorplan));
+  const auto fit_selection = read_json(options.output_dir + "/legroute_plan_selection.json");
+  ASSERT_FALSE(fit_selection.HasParseError());
+  EXPECT_FALSE(fit_selection["overflow_left"].GetBool());
+  EXPECT_STREQ(fit_selection["outcome"].GetString(), "fits");
+  EXPECT_STREQ(fit_selection["stop_reason"].GetString(), "plan_pass");
+  EXPECT_EQ(fit_selection["selected_round"].GetUint(), 0u);
+  EXPECT_EQ(fit_selection["moved_cells"].GetUint64(), 0u);
+  rapidjson::Document fit_qor;
+  fit_qor.Parse(fits.qor.c_str());
+  ASSERT_FALSE(fit_qor.HasParseError());
+  EXPECT_FALSE(fit_qor["legroute"]["overflow_left"].GetBool());
+  // A generated core (no die, core or floorplan) that may grow restarts instead; with growth off it continues.
+  options.core.clear();
+  options.die.clear();
+  options.utilization                     = .2;
+  options.legroute_options.capacity_share = .01;
+  options.allow_increase_area             = true;
+  options.output_dir                      = std::string(std::getenv("TEST_TMPDIR")) + "/legroute_generated_grows";
+  hhds::GraphLibrary grown_library;
+  try {
+    (void)place(*graph, grown_library, options);
+    FAIL() << "a generated core with routing overflow left must ask for a larger core";
+  } catch (const Placement_area_restart& restart) {
+    EXPECT_DOUBLE_EQ(restart.utilization, options.utilization * options.area_step);
+    EXPECT_EQ(restart.mesh_variant, 0u);
+  }
+  EXPECT_STREQ(read_json(options.output_dir + "/legroute_plan_selection.json")["outcome"].GetString(), "area_restart");
+  options.allow_increase_area = false;
+  options.output_dir          = std::string(std::getenv("TEST_TMPDIR")) + "/legroute_generated_fixed";
+  hhds::GraphLibrary kept_library;
+  const auto         kept = place(*graph, kept_library, options);
+  EXPECT_NO_THROW(check_legality(options.technology().lef, kept.floorplan));
+  EXPECT_STREQ(read_json(options.output_dir + "/legroute_plan_selection.json")["outcome"].GetString(), "continued_with_overflow");
 }
 
 TEST(Placement, GeneratedPlanningFrameDoesNotShrinkAfterResynthesis) {
@@ -315,12 +373,8 @@ TEST(Placement, GeneratedPlanningFrameDoesNotShrinkAfterResynthesis) {
   options.density                          = .5;
   options.optimization_pending             = true;
   options.legroute                         = true;
-  options.legroute_plan.enabled            = true;
   options.legroute_plan.iterations         = 50;
   options.legroute_plan.min_iterations     = 50;
-  options.legroute_options.partition_cells = 32;
-  options.legroute_options.global_route    = true;
-  options.legroute_options.region_pins     = false;
   options.placement_session                = std::make_shared<Placement_session>();
   EXPECT_FALSE(options.placement_session->current_layout());
   options.output_dir = std::string(std::getenv("TEST_TMPDIR")) + "/retained_generated_frame_initial";
@@ -371,9 +425,9 @@ TEST(Placement, GeneratedPlanningFrameDoesNotShrinkAfterResynthesis) {
   EXPECT_LT(small.xh, retained.xh);
   EXPECT_LT(small.yh, retained.yh);
   auto nonplan     = independent;
-  nonplan.legroute = nonplan.legroute_plan.enabled  = false;
-  nonplan.placement_session                         = options.placement_session;
-  nonplan.output_dir                               += "_nonplan";
+  nonplan.legroute           = false;
+  nonplan.placement_session  = options.placement_session;
+  nonplan.output_dir        += "_nonplan";
   hhds::GraphLibrary nonplan_output;
   const auto         without_planning = place(*remapped, nonplan_output, nonplan);
   EXPECT_EQ(without_planning.floorplan.rows, smaller.floorplan.rows);
@@ -387,9 +441,11 @@ TEST(Placement, GeneratedPlanningFrameDoesNotShrinkAfterResynthesis) {
   EXPECT_DOUBLE_EQ(options.placement_session->current_layout()->xh, retained.xh);
 }
 
-TEST(Placement, MovablePlanningPassesItsExactOverlappingFrameToLocalRouting) {
+// The plan rounds measure the raw global-placement pose (cells may overlap, off the rows); only the terminal
+// legalizer moves cells onto sites, and every stage in between legalizes as it does without legroute.
+TEST(Placement, LegroutePlanMeasuresTheRawPoseAndTheTerminalLegalizerLegalizesIt) {
   hhds::GraphLibrary source;
-  auto               io  = source.create_io("raw_legroute_handoff");
+  auto               io  = source.create_io("legroute_raw_pose");
   auto               inv = source.create_io("sky130_fd_sc_hd__inv_1");
   inv->add_input("A", 0);
   inv->add_output("Y", 0);
@@ -416,290 +472,84 @@ TEST(Placement, MovablePlanningPassesItsExactOverlappingFrameToLocalRouting) {
   graph->get_output_pin("y").connect_driver(signal);
   auto options = plain_options();
   options.lefs = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
-  options.core = options.die               = {0, 0, 55.2, 43.52};
-  options.iterations                       = 0;
-  options.bins                             = 4;
-  options.optimization_pending             = false;
-  options.restart_seed                     = seed;
-  options.legroute                         = true;
-  options.allow_increase_area              = false;
-  options.legroute_plan.enabled            = true;
-  options.legroute_options.partition_cells = 8;
-  options.legroute_options.global_route    = true;
-  options.legroute_options.region_pins     = false;
-  options.legroute_options.global_share    = .9;
-  options.legroute_options.final = options.legroute_options.clock_spine = false;
-  options.legroute_options.threads                                      = 1;
-  options.snapshots                                                     = true;
-  options.output_dir = std::string(std::getenv("TEST_TMPDIR")) + "/raw_legroute_handoff";
+  options.core = options.die             = {0, 0, 55.2, 43.52};
+  options.density                        = .5;
+  options.iterations                     = 0;
+  options.bins                           = 4;
+  options.optimization_pending           = false;
+  options.restart_seed                   = seed;
+  options.legroute                       = true;
+  options.allow_increase_area            = false;
+  options.legroute_options.clock_charge  = false;
+  options.snapshots                      = true;
+  options.output_dir = std::string(std::getenv("TEST_TMPDIR")) + "/legroute_raw_pose";
   const auto tech    = physical::read_lef(options.lefs);
 
-  // A real optimization-pending solve must preserve this overlapping GP pose.
-  // The retained-session finish used to legalize here, before planning had any
-  // chance to measure or move these boxes, and could request needless area.
+  // An optimization-pending stage legalizes natively, with or without legroute: nothing is deferred.
   options.placement_session                  = std::make_shared<Placement_session>();
   auto intermediate_options                  = options;
   intermediate_options.optimization_pending  = true;
-  intermediate_options.iterations            = 1;  // initialize a live optimizer for the area-resume leg
+  intermediate_options.iterations            = 1;
   intermediate_options.output_dir           += "_intermediate";
   hhds::GraphLibrary intermediate_library;
   const auto         intermediate = place(*graph, intermediate_library, intermediate_options);
-  bool               raw_overlap  = false;
-  for (size_t i = 0; i < intermediate.floorplan.components.size(); ++i) {
-    const auto& a = intermediate.floorplan.components[i].place;
-    for (size_t j = i + 1; j < intermediate.floorplan.components.size(); ++j) {
-      const auto& b  = intermediate.floorplan.components[j].place;
-      raw_overlap   |= a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
-    }
-  }
-  ASSERT_TRUE(raw_overlap) << "the intermediate fixture must still require CORE legalization";
-  EXPECT_THROW(check_legality(tech, intermediate.floorplan), std::runtime_error);
+  EXPECT_NO_THROW(check_legality(tech, intermediate.floorplan));
   EXPECT_NO_THROW(check_placed_legality(intermediate, intermediate_options));
   rapidjson::Document intermediate_qor;
   intermediate_qor.Parse(intermediate.qor.c_str());
   ASSERT_FALSE(intermediate_qor.HasParseError());
-  EXPECT_FALSE(intermediate_qor["legal"].GetBool());
-  EXPECT_FALSE(intermediate_qor["cells_legalized"].GetBool());
-  EXPECT_TRUE(intermediate_qor["cell_legalization_deferred"].GetBool());
-  EXPECT_FALSE(std::filesystem::exists(intermediate_options.output_dir + "/after_legalization.def"));
-  EXPECT_FALSE(std::filesystem::exists(intermediate_options.output_dir + "/after_detailed.def"));
-  EXPECT_FALSE(std::filesystem::exists(intermediate_options.output_dir + "/legroute.json"));
-  std::ifstream session_file(intermediate_options.output_dir + "/placement_session.json");
-  ASSERT_TRUE(session_file.is_open());
-  const std::string session_text{std::istreambuf_iterator<char>(session_file), std::istreambuf_iterator<char>()};
-  EXPECT_EQ(session_text.find("stage_legal_pose"), std::string::npos);
-  auto bad_fixed = intermediate;
-  for (auto& cell : bad_fixed.floorplan.components) {
-    cell.place.status = physical::Status::FIXED;
-  }
-  EXPECT_THROW(check_placed_legality(bad_fixed, intermediate_options), std::runtime_error);
+  EXPECT_TRUE(intermediate_qor["legal"].GetBool());
+  EXPECT_TRUE(intermediate_qor["cells_legalized"].GetBool());
+  EXPECT_FALSE(intermediate_qor.HasMember("legroute"));  // the plan rounds belong to the terminal stage
+  EXPECT_FALSE(std::filesystem::exists(intermediate_options.output_dir + "/legroute_plan0"));
 
-  // The explicit legalized-witness mode keeps its existing intermediate
-  // legalization policy, even when planning and the retained optimizer are on.
-  auto legal_options                          = intermediate_options;
-  legal_options.legroute_options.legal_boxes  = true;
-  legal_options.placement_session             = std::make_shared<Placement_session>();
-  legal_options.output_dir                   += "_legal";
-  hhds::GraphLibrary legal_library;
-  const auto         legal = place(*graph, legal_library, legal_options);
-  EXPECT_NO_THROW(check_legality(tech, legal.floorplan));
-  rapidjson::Document legal_qor;
-  legal_qor.Parse(legal.qor.c_str());
-  ASSERT_FALSE(legal_qor.HasParseError());
-  EXPECT_TRUE(legal_qor["legal"].GetBool());
-  EXPECT_TRUE(legal_qor["cells_legalized"].GetBool());
-  EXPECT_FALSE(legal_qor["cell_legalization_deferred"].GetBool());
-
-  // A core-growth continuation still performs its required GP work without
-  // inserting stage legalization. Restoring the selected optimizer afterward
-  // must not change the exact overlapping pose eventually measured by plan.
-  const auto raw_optimizer            = options.placement_session->snapshot();
-  const auto spent_before             = options.placement_session->spent_iterations();
-  auto       grown_options            = intermediate_options;
-  grown_options.placement_area_resume = true;
-  grown_options.core = grown_options.die  = {0, 0, 66.24, 54.4};
-  grown_options.restart_seed              = std::make_shared<physical::Floorplan>(intermediate.floorplan);
-  grown_options.output_dir               += "_area";
-  hhds::GraphLibrary grown_library;
-  const auto         grown = place(*graph, grown_library, grown_options);
-  EXPECT_GE(options.placement_session->spent_iterations() - spent_before, 50u);
-  rapidjson::Document grown_qor;
-  grown_qor.Parse(grown.qor.c_str());
-  ASSERT_FALSE(grown_qor.HasParseError());
-  EXPECT_FALSE(grown_qor["cells_legalized"].GetBool());
-  EXPECT_TRUE(grown_qor["cell_legalization_deferred"].GetBool());
-  EXPECT_FALSE(std::filesystem::exists(grown_options.output_dir + "/after_legalization.def"));
-  EXPECT_FALSE(std::filesystem::exists(grown_options.output_dir + "/after_detailed.def"));
-  EXPECT_FALSE(std::filesystem::exists(grown_options.output_dir + "/terminal_legalize.json"));
-  std::ifstream       grown_history_file(grown_options.output_dir + "/gp_history.json");
-  const std::string   grown_history_text{std::istreambuf_iterator<char>(grown_history_file), std::istreambuf_iterator<char>()};
-  rapidjson::Document grown_history;
-  grown_history.Parse(grown_history_text.c_str());
-  ASSERT_FALSE(grown_history.HasParseError());
-  EXPECT_DOUBLE_EQ(grown_history["cell_legalization_seconds"].GetDouble(), 0);
-  EXPECT_DOUBLE_EQ(grown_history["detailed_placement_seconds"].GetDouble(), 0);
-  EXPECT_TRUE(std::ranges::none_of(options.placement_session->history(),
-                                   [](const auto& event) { return event.phase == "stage_legal_pose"; }));
-  options.placement_session->restore(raw_optimizer);
-
-  options.restart_seed = std::make_shared<physical::Floorplan>(intermediate.floorplan);
+  // The terminal stage: round 0 measures the overlapping seed pose as it is, then the cells are legalized.
+  options.placement_session = std::make_shared<Placement_session>();
   hhds::GraphLibrary placed;
-  options.legroute_plan.handoff = true;
-  EXPECT_THROW(place(*graph, placed, options), std::invalid_argument);
-  options.legroute_plan.handoff = false;
-  const auto result             = place(*graph, placed, options);
-  const auto measured           = physical::read_def(options.output_dir + "/legroute_plan0/input.def");
-  const auto local              = physical::read_def(options.output_dir + "/legroute_handoff/input.def");
-  EXPECT_EQ(measured.components, local.components);
-  EXPECT_EQ(measured.terminals, local.terminals);
-  EXPECT_EQ(measured.nets, local.nets);
-  EXPECT_EQ(measured.rows, local.rows);
-  EXPECT_EQ(measured.special_nets, local.special_nets);
-  EXPECT_EQ(measured.vias, local.vias);
-  // DEF omits LEF-derived width/height; compare the same serialized form.
-  EXPECT_EQ(measured.components, physical::read_def(intermediate_options.output_dir + "/out.def").components);
+  const auto         result   = place(*graph, placed, options);
+  const auto         measured = physical::read_def(options.output_dir + "/legroute_plan0/input.def");
+  ASSERT_EQ(measured.components.size(), 4u);
+  for (const auto& cell : measured.components) {
+    EXPECT_EQ(cell.place.x, 1401);
+    EXPECT_EQ(cell.place.y, 21);
+  }
   EXPECT_THROW(check_legality(tech, measured), std::runtime_error);
   EXPECT_NO_THROW(check_legality(tech, result.floorplan));
-  EXPECT_NE(measured.components, result.floorplan.components) << "local SAT must actually move and legalize the overlapping cells";
   std::ifstream       input(options.output_dir + "/legroute_plan0/plan.json");
   const std::string   text{std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
   rapidjson::Document report;
   report.Parse(text.c_str());
   ASSERT_FALSE(report.HasParseError());
-  EXPECT_STREQ(report["endpoint_basis"].GetString(), "box_centroids");
-  EXPECT_FALSE(report["handoff_legalized"].GetBool());
-  EXPECT_DOUBLE_EQ(report["legalize_seconds"].GetDouble(), 0);
-  EXPECT_FALSE(report["pre_sat"]["requires_replan"].GetBool());
-  EXPECT_FALSE(std::filesystem::exists(options.output_dir + "/terminal_legalize.json"));
+  EXPECT_STREQ(report["backend"].GetString(), "native");
+  EXPECT_EQ(report["signals"].GetUint64(), 5u);
+  EXPECT_EQ(report["unrouted"].GetUint64(), 0u);
+  EXPECT_EQ(report["overflow_tracks"].GetUint64(), 0u);
+  EXPECT_EQ(report["residual"].GetUint64(), 0u);
+  EXPECT_FALSE(report["measure_only"].GetBool());
+  EXPECT_FALSE(std::filesystem::exists(options.output_dir + "/legroute_plan1"));  // round 0 fits: no further round
+  EXPECT_TRUE(std::filesystem::exists(options.output_dir + "/terminal_legalize.json"));
+  EXPECT_FALSE(std::filesystem::exists(options.output_dir + "/legroute.json"));
+  rapidjson::Document qor;
+  qor.Parse(result.qor.c_str());
+  ASSERT_FALSE(qor.HasParseError());
+  EXPECT_TRUE(qor["legal"].GetBool());
+  ASSERT_TRUE(qor.HasMember("legroute"));
+  EXPECT_FALSE(qor["legroute"]["overflow_left"].GetBool());
+  EXPECT_EQ(qor["legroute"]["rounds_run"].GetUint(), 1u);
+  EXPECT_TRUE(std::filesystem::exists(options.output_dir + "/placement_session.json"));
 
-  // A whole-core density rejection must preserve its report: an unattempted
-  // route is not an uncongested observation.
-  auto dense_options = options;
-  dense_options.core = dense_options.die = {0, 0, 5.52, 2.72};
-  dense_options.placement_session        = std::make_shared<Placement_session>();
-  auto dense_seed                        = std::make_shared<physical::Floorplan>(*seed);
-  for (auto& cell : dense_seed->components) {
-    cell.place.x = cell.place.y = 0;
+  // Without legroute the same seed gives the same legal placement: a plan round that fits moves nothing.
+  auto plain                = options;
+  plain.legroute            = false;
+  plain.placement_session   = nullptr;
+  plain.output_dir         += "_plain";
+  hhds::GraphLibrary plain_library;
+  const auto         unplanned = place(*graph, plain_library, plain);
+  ASSERT_EQ(unplanned.floorplan.components.size(), result.floorplan.components.size());
+  for (size_t i = 0; i < result.floorplan.components.size(); ++i) {
+    EXPECT_EQ(unplanned.floorplan.components[i].place.x, result.floorplan.components[i].place.x);
+    EXPECT_EQ(unplanned.floorplan.components[i].place.y, result.floorplan.components[i].place.y);
   }
-  dense_options.restart_seed          = dense_seed;
-  dense_options.legroute_plan.rounds  = 0;
-  dense_options.output_dir           += "_density";
-  hhds::GraphLibrary dense_library;
-  EXPECT_THROW(place(*graph, dense_library, dense_options), std::runtime_error);
-  std::ifstream dense_report_file(dense_options.output_dir + "/legroute_plan0/plan.json");
-  ASSERT_TRUE(dense_report_file.is_open());
-  const std::string   dense_report_text{std::istreambuf_iterator<char>(dense_report_file), std::istreambuf_iterator<char>()};
-  rapidjson::Document dense_report;
-  dense_report.Parse(dense_report_text.c_str());
-  ASSERT_FALSE(dense_report.HasParseError());
-  EXPECT_FALSE(dense_report["route_attempted"].GetBool());
-  EXPECT_STREQ(dense_report["route_skip_reason"].GetString(), "physical_density");
-  EXPECT_GT(dense_report["unchecked_signals"].GetUint64(), 0u);
-  EXPECT_EQ(dense_report["unchecked_signals"].GetUint64(), dense_report["signals"].GetUint64());
-  EXPECT_TRUE(dense_report["pre_sat"]["max_routing_density"].IsNull());
-  EXPECT_FALSE(std::filesystem::exists(dense_options.output_dir + "/legroute.json"));
-
-  // The same feasible coarse/SAT input must not become a successful placement
-  // result when only a prefix of its physical nets was checked.
-  options.output_dir                       += "_incomplete";
-  options.legroute_options.final            = true;
-  options.legroute_options.final_net_limit  = 1;
-  options.legroute_probe.strict             = true;
-  hhds::GraphLibrary incomplete;
-  try {
-    (void)place(*graph, incomplete, options);
-    FAIL() << "strict final routing accepted unchecked physical nets";
-  } catch (const std::runtime_error& e) {
-    EXPECT_NE(std::string_view(e.what()).find("strict detailed closure incomplete"), std::string_view::npos);
-    EXPECT_NE(std::string_view(e.what()).find("do not establish insufficient area"), std::string_view::npos);
-  }
-  std::ifstream       failed_input(options.output_dir + "/legroute.json");
-  const std::string   failed_text{std::istreambuf_iterator<char>(failed_input), std::istreambuf_iterator<char>()};
-  rapidjson::Document failed;
-  failed.Parse(failed_text.c_str());
-  ASSERT_FALSE(failed.HasParseError());
-  EXPECT_EQ(failed["sat_unsat_regions"].GetUint64(), 0u);
-  EXPECT_EQ(failed["sat_unknown_regions"].GetUint64(), 0u);
-  EXPECT_GT(failed["unchecked_nets"].GetUint64(), 0u);
-  EXPECT_FALSE(failed["wires_emitted"].GetBool());
-  EXPECT_FALSE(std::filesystem::exists(options.output_dir + "/out.def"));
-  EXPECT_FALSE(std::filesystem::exists(options.output_dir + "/after_legalization.def"));
-}
-
-TEST(Placement, UnknownSatSearchDoesNotGrowAGeneratedCore) {
-  hhds::GraphLibrary source;
-  auto               io  = source.create_io("unknown_sat_recovery");
-  auto               inv = source.create_io("sky130_fd_sc_hd__inv_1");
-  inv->add_input("A", 0);
-  inv->add_output("Y", 0);
-  for (int i = 0; i < 4; ++i) {
-    io->add_input("a" + std::to_string(i), i);
-    io->add_output("y" + std::to_string(i), i);
-    io->set_bits("a" + std::to_string(i), 1);
-    io->set_bits("y" + std::to_string(i), 1);
-  }
-  auto graph = io->create_graph();
-  auto seed  = std::make_shared<physical::Floorplan>();
-  for (int i = 0; i < 4; ++i) {
-    auto node = gu::create_typed_node(*graph, Ntype_op::Sub);
-    node.set_subnode(inv);
-    node.set_name("inv" + std::to_string(i));
-    auto input = graph->get_input_pin("a" + std::to_string(i));
-    gu::set_bits(input, 1);
-    node.create_sink_pin("A").connect_driver(input);
-    auto output = node.create_driver_pin("Y");
-    gu::set_bits(output, 1);
-    graph->get_output_pin("y" + std::to_string(i)).connect_driver(output);
-    Ann_place pose(1401, 21, 1380, 2720);
-    pose.status = Ann_place::Status::PLACED;
-    seed->components.push_back({"inv" + std::to_string(i), "sky130_fd_sc_hd__inv_1", pose});
-  }
-  auto options       = plain_options();
-  options.lefs       = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
-  options.iterations = options.min_iterations = 0;
-  options.bins                                = 4;
-  options.utilization                         = .02;
-  options.optimization_pending                = false;
-  options.restart_seed                        = seed;
-  options.allow_increase_area                 = true;
-  options.legroute                            = true;
-  options.legroute_probe.strict               = true;
-  options.legroute_plan.enabled               = true;
-  options.legroute_options.partition_cells    = 8;
-  options.legroute_options.global_route       = true;
-  options.legroute_options.region_pins        = false;
-  options.legroute_options.global_share       = .9;
-  options.legroute_options.final = options.legroute_options.clock_spine = false;
-  options.legroute_options.threads                                      = 1;
-  options.output_dir = std::string(std::getenv("TEST_TMPDIR")) + "/generated_core_sat_budget_control";
-  hhds::GraphLibrary control_library;
-  const auto         control = place(*graph, control_library, options);
-  EXPECT_NO_THROW(check_legality(options.technology().lef, control.floorplan));
-  const auto read_report = [](const std::string& path) {
-    std::ifstream       input(path);
-    std::string         text{std::istreambuf_iterator<char>(input), {}};
-    rapidjson::Document report;
-    report.Parse(text.c_str());
-    return report;
-  };
-  const auto good = read_report(options.output_dir + "/legroute.json");
-  ASSERT_FALSE(good.HasParseError());
-  ASSERT_GT(good["sat_regions"].GetUint64(), 0u);
-  ASSERT_EQ(good["sat_unsat_regions"].GetUint64(), 0u);
-  ASSERT_EQ(good["sat_unknown_regions"].GetUint64(), 0u);
-
-  options.output_dir                     += "_limited";
-  // Zero is Sat_solver's explicit exhausted budget. A positive conflict
-  // limit can still solve the preserved-backbone model without any conflict.
-  options.legroute_options.sat_conflicts  = 0;
-  hhds::GraphLibrary limited_library;
-  try {
-    (void)place(*graph, limited_library, options);
-    FAIL() << "the deliberately exhausted SAT search must not produce a successful placement";
-  } catch (const Placement_area_restart&) {
-    FAIL() << "UNKNOWN-only SAT results must not request a mesh or area restart";
-  } catch (const std::runtime_error& e) {
-    EXPECT_NE(std::string_view(e.what()).find("SAT search budget exhausted"), std::string_view::npos);
-    EXPECT_NE(std::string_view(e.what()).find("no model UNSAT result justifies area growth"), std::string_view::npos);
-  }
-  const auto failed = read_report(options.output_dir + "/legroute.json");
-  ASSERT_FALSE(failed.HasParseError());
-  EXPECT_GT(failed["sat_unknown_regions"].GetUint64(), 0u);
-  EXPECT_EQ(failed["sat_unsat_regions"].GetUint64(), 0u);
-  EXPECT_EQ(failed["global_unrouted"].GetUint64(), 0u);
-  EXPECT_EQ(failed["global_overflow_tracks"].GetUint64(), 0u);
-  const auto selection = read_report(options.output_dir + "/legroute_plan_selection.json");
-  ASSERT_FALSE(selection.HasParseError());
-  ASSERT_TRUE(selection.HasMember("selected_round"));
-  ASSERT_TRUE(selection["selected_round"].IsUint());
-  EXPECT_FALSE(selection["requires_replan"].GetBool());
-  // Earlier measured rounds may need pressure recovery. The bounded Local
-  // search consumes the selected passing Plan, not necessarily round zero.
-  const auto plan
-      = read_report(options.output_dir + "/legroute_plan" + std::to_string(selection["selected_round"].GetUint()) + "/plan.json");
-  ASSERT_FALSE(plan.HasParseError());
-  EXPECT_FALSE(plan["pre_sat"]["requires_replan"].GetBool());
-  EXPECT_FALSE(std::filesystem::exists(options.output_dir + "/out.def"));
 }
 
 TEST(Placement, RowLegalityAcceptsOnlyTechnologyPermittedHorizontalMirrors) {
@@ -6865,12 +6715,9 @@ TEST(Placement, WarmAreaRecoveryRanksPeriodicallyAfterDensityMilestonesAreConsum
   options.final_timing_start                  = 0;
   options.macro_timing_interval               = 5;
   options.legroute                            = true;
-  options.legroute_plan.enabled               = true;
   options.legroute_plan.iterations            = 50;
   options.legroute_plan.min_iterations        = 50;
   options.legroute_plan.timing_interval       = 5;
-  options.legroute_options.partition_cells    = 32;
-  options.legroute_options.global_route       = true;
   options.placement_session                   = std::make_shared<Placement_session>();
   unsigned rankings                           = 0;
   options.fp_evaluate                         = [](const Result&) { return Timing_feedback{}; };
@@ -6884,11 +6731,14 @@ TEST(Placement, WarmAreaRecoveryRanksPeriodicallyAfterDensityMilestonesAreConsum
     return feedback;  // Criticality feedback does not require a WNS result.
   };
   const auto initial = place(*graph, initial_library, options);
-  const auto before  = options.placement_session->snapshot();
   ASSERT_TRUE(options.placement_session->live());
-  ASSERT_EQ(before.optimizer.convergence.checkpoint_milestone, 2u);
   ASSERT_GT(rankings, 0u);
-  ASSERT_LE(rankings, 2u);
+  ASSERT_LE(rankings, 4u);  // at the density milestones and at the stage's legal pose, not periodically
+  // The stage's legal pose rebinds the optimizer; put it back in the state a solve leaves that consumed both
+  // density milestones, which is what the warm recovery below must not depend on.
+  auto before                                      = options.placement_session->snapshot();
+  before.optimizer.convergence.checkpoint_milestone = 2;
+  options.placement_session->restore(before);
   const auto spent               = options.placement_session->spent_iterations();
   rankings                       = 0;
   options.core                   = {0, 0, 40, 40};

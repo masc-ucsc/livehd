@@ -7,7 +7,7 @@ TEST(LegrouteCongestion, DirectionalIncidentEdgesUseAdmittedMinimumAndPreserveZe
   physical::Technology tech;
   physical::Floorplan  fp;
   Legroute_options     options;
-  options.global_share = .95;
+  options.capacity_share = .95;
   lr::Design d{tech, fp, options};
   d.nets.resize(1);
   lr::Grid g;

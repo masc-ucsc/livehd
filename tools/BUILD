@@ -175,13 +175,6 @@ cc_binary(
 )
 
 cc_binary(
-    name = "legroute_replay",
-    srcs = ["legroute_replay.cpp"],
-    copts = COPTS,
-    deps = ["//pass/place:legroute", "//pass/place:power_grid", "//inou/lefdef:inou_lefdef", "@rapidjson"],
-)
-
-cc_binary(
     name = "placement_metrics",
     srcs = ["placement_metrics.cpp"],
     copts = COPTS,
@@ -285,29 +278,4 @@ cc_binary(
     srcs = ["signal_route_bench.cpp"],
     copts = COPTS,
     deps = ["//pass/place:signal_router", "//inou/lefdef:inou_lefdef", "@rapidjson"],
-)
-
-cc_binary(
-    name = "legroute_box_probe",
-    srcs = ["legroute_box_probe.cpp"],
-    copts = COPTS,
-    deps = ["//pass/place:legroute", "//pass/place:signal_router", "//inou/lefdef:inou_lefdef", "@rapidjson"],
-)
-
-py_test(
-    name = "legroute_box_probe_smoke",
-    srcs = ["legroute_box_probe_smoke.py"],
-    args = ["$(location :legroute_box_probe)"],
-    data = [":legroute_box_probe"],
-    legacy_create_init = 0,
-    timeout = "short",
-)
-
-py_test(
-    name = "legroute_calibrate_test",
-    srcs = ["legroute_calibrate.py", "legroute_calibrate_test.py"],
-    main = "legroute_calibrate_test.py",
-    imports = ["."],
-    legacy_create_init = 0,
-    timeout = "short",
 )

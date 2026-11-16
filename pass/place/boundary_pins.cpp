@@ -314,7 +314,7 @@ Boundary_pin_model split_boundary_nets(const dp::Design& original, const Region_
           continue;
         }
         // a dip into one neighbor: its crossings join there; a dip between two neighbors (the tree bent below their
-        // shared boundary line): the crossings go, the neighbors' pieces stay apart (legroute joins them by a hop)
+        // shared boundary line): the crossings go, the neighbors' pieces stay apart (the router joins them)
         for (int i : at) {
           dropped[i] = 1;
           if (same) {

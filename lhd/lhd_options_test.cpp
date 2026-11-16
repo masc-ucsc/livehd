@@ -616,23 +616,37 @@ TEST(LhdOptions, WarpspaceStagesAreIndependentAndOptIn) {
   }
 }
 
-TEST(LhdOptions, CriticalCellboxOptionsAreTypedAndOptIn) {
+// legroute is opt-in and its option table is the minimal core's (todo/livehd/2r-route.html, step C): the options of
+// the removed SAT stages are unknown keys.
+TEST(LhdOptions, LegrouteOptionsAreTheMinimalCoreAndOptIn) {
   const auto   listed = lhd::list_set_options();
   lhd::Options opts;
   opts.command = "synth";
-  for (const auto& [suffix, value] : std::vector<std::pair<std::string, std::string>>{
-           {      "critical_cellboxes", "false"},
-           {           "cellbox_sites",    "22"},
-           {            "cellbox_rows",     "4"},
-           {   "cellbox_external_pins",    "28"},
-           {     "cellbox_connections",    "10"},
-           {"cellbox_critical_choices",     "4"},
-           {   "cellbox_other_choices",     "8"},
-           { "cellbox_wide_exceptions",  "true"},
-           {    "cellbox_far_fallback", "false"},
-           {       "cellbox_full_flow", "false"},
-  }) {
-    const auto key = "synth.place.legroute." + suffix;
+  const std::vector<std::pair<std::string, std::string>> expected{
+      {                        "synth.place.legroute",  "false"},
+      {            "synth.place.legroute.plan.rounds",      "3"},
+      {        "synth.place.legroute.plan.iterations",    "100"},
+      {    "synth.place.legroute.plan.min_iterations",      "0"},
+      {   "synth.place.legroute.plan.timing_interval",      "0"},
+      {       "synth.place.legroute.plan.route_model", "legacy"},
+      {    "synth.place.legroute.plan.route_interval",     "50"},
+      {    "synth.place.legroute.plan.route_net_pops",   "2000"},
+      {"synth.place.legroute.plan.max_degradation_ps",     "-1"},
+      {       "synth.place.legroute.plan.local_tiles",      "0"},
+      {          "synth.place.legroute.plan.net_pops", "100000"},
+      {       "synth.place.legroute.plan.max_inflate",    "1.5"},
+      {         "synth.place.legroute.capacity_share",      "1"},
+      {          "synth.place.legroute.global_margin",      "8"},
+      {          "synth.place.legroute.global_rounds",     "16"},
+      {         "synth.place.legroute.global_pattern",  "false"},
+      {    "synth.place.legroute.global_astar_weight",      "1"},
+  };
+  size_t count = 0;
+  for (const auto& option : listed) {
+    count += option.name.starts_with("synth.place.legroute");
+  }
+  EXPECT_EQ(count, expected.size());
+  for (const auto& [key, value] : expected) {
     SCOPED_TRACE(key);
     const auto found = std::find_if(listed.begin(), listed.end(), [&](const auto& option) { return option.name == key; });
     ASSERT_NE(found, listed.end());
@@ -641,35 +655,48 @@ TEST(LhdOptions, CriticalCellboxOptionsAreTypedAndOptIn) {
         {key, value}
     };
     EXPECT_NO_THROW(lhd::check_known_set_passes(opts));
-    const bool boolean = suffix == "critical_cellboxes" || suffix == "cellbox_wide_exceptions" || suffix == "cellbox_far_fallback"
-                         || suffix == "cellbox_full_flow";
+  }
+  for (const auto* key : {"synth.place.legroute", "synth.place.legroute.global_pattern"}) {
+    SCOPED_TRACE(key);
     for (const auto* bad : {"-1", "1.5", "invalid"}) {
       opts.sets = {
           {key, bad}
       };
       EXPECT_THROW(lhd::check_known_set_passes(opts), lhd::Lhd_error);
     }
-    if (boolean) {
+    opts.sets = {
+        {key, "true"}
+    };
+    EXPECT_NO_THROW(lhd::check_known_set_passes(opts));
+  }
+  for (const auto* key : {"synth.place.legroute.plan.rounds", "synth.place.legroute.global_rounds"}) {
+    SCOPED_TRACE(key);
+    for (const auto* bad : {"1.5", "invalid"}) {
       opts.sets = {
-          {key, "false"}
+          {key, bad}
       };
-      EXPECT_NO_THROW(lhd::check_known_set_passes(opts));
-      opts.sets = {
-          {key, "true"}
-      };
-      EXPECT_NO_THROW(lhd::check_known_set_passes(opts));
+      EXPECT_THROW(lhd::check_known_set_passes(opts), lhd::Lhd_error);
     }
   }
-  // Enabling a separate preset must not rewrite the advertised legacy defaults.
-  for (const auto& [key, value] : std::vector<std::pair<std::string, std::string>>{
-           {           "synth.place.legroute.box_reserve", "M2:1,M3:1"},
-           {       "synth.place.legroute.reserved_tracks",         "1"},
-           {"synth.place.legroute.reserved_tracks_per_um",        "-1"},
-           {           "synth.place.legroute.plan.rounds",         "3"},
-  }) {
-    const auto found = std::find_if(listed.begin(), listed.end(), [&](const auto& option) { return option.name == key; });
-    ASSERT_NE(found, listed.end());
-    EXPECT_EQ(found->default_value, value);
+  for (const auto* removed : {"synth.place.legroute.plan",
+                              "synth.place.legroute.final",
+                              "synth.place.legroute.legal_boxes",
+                              "synth.place.legroute.sat_ms",
+                              "synth.place.legroute.partition_cells",
+                              "synth.place.legroute.critical_cellboxes",
+                              "synth.place.legroute.probe",
+                              "synth.place.legroute.box_reserve",
+                              "synth.place.legroute.reserved_tracks",
+                              "synth.place.legroute.fit_density",
+                              "synth.place.legroute.global_share",
+                              "synth.place.legroute.density_ceiling",
+                              "synth.place.legroute.strict"}) {
+    SCOPED_TRACE(removed);
+    EXPECT_TRUE(std::none_of(listed.begin(), listed.end(), [&](const auto& option) { return option.name == removed; }));
+    opts.sets = {
+        {removed, "0"}
+    };
+    EXPECT_THROW(lhd::check_known_set_passes(opts), lhd::Lhd_error);
   }
 }
 

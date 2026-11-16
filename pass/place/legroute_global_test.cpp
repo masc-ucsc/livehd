@@ -11,10 +11,8 @@ namespace livehd::placement::lr {
 namespace {
 Grid grid(int cols, int rows) {
   Grid g;
-  g.cols    = cols;
-  g.rows    = rows;
-  g.regions = 1;
-  g.region.assign(size_t(cols * rows), 0);
+  g.cols = cols;
+  g.rows = rows;
   return g;
 }
 
@@ -50,22 +48,19 @@ TEST(LegrouteGlobal, DenseBroadcastDoesNotRebuildTheTreeForEverySink) {
   Global_net       net;
   net.endpoints.resize(g.size());
   std::iota(net.endpoints.begin(), net.endpoints.end(), 0);
-  for (bool own : {false, true}) {
-    net.own_regions = own ? std::vector<int>{0} : std::vector<int>{};
-    const auto r    = global_route(g, cap, cap, .5, 0, {net}, 0, 0);
-    ASSERT_EQ(r.unrouted, 0u);
-    EXPECT_EQ(r.overflow_edges, 0u);
-    check_tree(g, r.trees[0], net.endpoints);
-    EXPECT_EQ(r.trees[0].edges.size(), g.size() - 1);
-    EXPECT_EQ(r.search_restarts, 1u);
-    EXPECT_GT(r.search_pops, g.size());
-    RecordProperty(own ? "own_region_pops" : "counted_pops", int(r.search_pops));
-    RecordProperty(own ? "own_region_pushes" : "counted_pushes", int(r.search_pushes));
-    // An operation bound, independent of build mode or machine speed. Rebuilding the old tree per sink
-    // takes over two million pops here; retaining the frontier needs only a small multiple of the grid.
-    EXPECT_LT(r.search_pops, 12 * g.size());
-    EXPECT_LT(r.search_pushes, 12 * g.size());
-  }
+  const auto r = global_route(g, cap, cap, .5, {net}, 0, 0);
+  ASSERT_EQ(r.unrouted, 0u);
+  EXPECT_EQ(r.overflow_edges, 0u);
+  check_tree(g, r.trees[0], net.endpoints);
+  EXPECT_EQ(r.trees[0].edges.size(), g.size() - 1);
+  EXPECT_EQ(r.search_restarts, 1u);
+  EXPECT_GT(r.search_pops, g.size());
+  RecordProperty("pops", int(r.search_pops));
+  RecordProperty("pushes", int(r.search_pushes));
+  // An operation bound, independent of build mode or machine speed. Rebuilding the old tree per sink
+  // takes over two million pops here; retaining the frontier needs only a small multiple of the grid.
+  EXPECT_LT(r.search_pops, 12 * g.size());
+  EXPECT_LT(r.search_pushes, 12 * g.size());
 }
 
 TEST(LegrouteGlobal, PatternDisabledPreservesMazeOrderingAndAccounting) {
@@ -75,8 +70,8 @@ TEST(LegrouteGlobal, PatternDisabledPreservesMazeOrderingAndAccounting) {
   std::vector<int> cap(g.size(), 2);
   Global_net       net;
   net.endpoints                                   = {0, 5};
-  const auto                             baseline = global_route(g, cap, cap, 1, 0, {net}, 0, 0);
-  const auto                             disabled = global_route(g, cap, cap, 1, 0, {net}, 0, 0, 0, 1, false);
+  const auto                             baseline = global_route(g, cap, cap, 1, {net}, 0, 0);
+  const auto                             disabled = global_route(g, cap, cap, 1, {net}, 0, 0, 0, 1, false);
   const std::vector<std::pair<int, int>> expected{
       {4, 5},
       {3, 4},
@@ -100,7 +95,7 @@ TEST(LegrouteGlobal, PatternUsesZWhenBothLsAreBlockedAndCommitsOnlyAvailableCapa
   h[size_t(g.tile(1, 0))] = h[size_t(g.tile(1, 4))] = 0;
   Global_net net;
   net.endpoints = {g.tile(0, 0), g.tile(4, 4)};
-  const auto z  = global_route(g, h, v, 1, 0, {net}, 0, 0, 0, 1, true);
+  const auto z  = global_route(g, h, v, 1, {net}, 0, 0, 0, 1, true);
   ASSERT_EQ(z.pattern_completed, 1u);
   EXPECT_EQ(z.pattern_fallbacks, 0u);
   EXPECT_EQ(z.search_pops, 0u);
@@ -113,7 +108,7 @@ TEST(LegrouteGlobal, PatternUsesZWhenBothLsAreBlockedAndCommitsOnlyAvailableCapa
   g = grid(6, 1);
   h.assign(g.size(), 1);
   net.endpoints   = {0, 5};
-  const auto full = global_route(g, h, h, 1, 0, {net, net}, 0, 0, 0, 1, true);
+  const auto full = global_route(g, h, h, 1, {net, net}, 0, 0, 0, 1, true);
   EXPECT_EQ(full.pattern_attempts, 2u);
   EXPECT_EQ(full.pattern_completed, 1u);
   EXPECT_EQ(full.pattern_fallbacks, 1u);
@@ -130,8 +125,8 @@ TEST(LegrouteGlobal, PatternFallbackPreservesMazeDetourAndLeavesNoPartialReserva
   }
   Global_net detour, next;
   detour.endpoints    = {g.tile(3, 3), g.tile(3, 6)};
-  const auto maze     = global_route(g, h, v, 1, 0, {detour}, 0, 0);
-  const auto fallback = global_route(g, h, v, 1, 0, {detour}, 0, 0, 0, 1, true);
+  const auto maze     = global_route(g, h, v, 1, {detour}, 0, 0);
+  const auto fallback = global_route(g, h, v, 1, {detour}, 0, 0, 0, 1, true);
   ASSERT_EQ(fallback.pattern_fallbacks, 1u);
   EXPECT_EQ(fallback.pattern_work_limited, 0u);
   EXPECT_EQ(fallback.trees[0].edges, maze.trees[0].edges);
@@ -141,8 +136,8 @@ TEST(LegrouteGlobal, PatternFallbackPreservesMazeDetourAndLeavesNoPartialReserva
   detour.crit = 1;
   detour.endpoints.insert(detour.endpoints.begin() + 1, g.tile(4, 3));
   next.endpoints     = {g.tile(3, 3), g.tile(4, 3)};
-  const auto bounded = global_route(g, h, v, 1, 0, {detour, next}, 0, 0, 12, 1, true);
-  const auto before  = global_route(g, h, v, 1, 0, {detour, next}, 0, 0, 12);
+  const auto bounded = global_route(g, h, v, 1, {detour, next}, 0, 0, 12, 1, true);
+  const auto before  = global_route(g, h, v, 1, {detour, next}, 0, 0, 12);
   EXPECT_FALSE(bounded.trees[0].routed);
   EXPECT_TRUE(bounded.trees[0].edges.empty());
   EXPECT_TRUE(bounded.trees[0].search_limited);
@@ -159,7 +154,7 @@ TEST(LegrouteGlobal, PatternWorkLimitDoesNotBecomeAMazeSearchLimit) {
   std::vector<int> cap(g.size(), 4);
   Global_net       net;
   net.endpoints = {0, 23};
-  const auto r  = global_route(g, cap, cap, 1, 0, {net}, 0, 0, 64, 1, true);
+  const auto r  = global_route(g, cap, cap, 1, {net}, 0, 0, 64, 1, true);
   EXPECT_EQ(r.pattern_work_limited, 1u);
   EXPECT_EQ(r.pattern_fallbacks, 1u);
   EXPECT_EQ(r.pattern_work, 64u);
@@ -169,32 +164,17 @@ TEST(LegrouteGlobal, PatternWorkLimitDoesNotBecomeAMazeSearchLimit) {
   check_tree(g, r.trees[0], net.endpoints);
 }
 
-TEST(LegrouteGlobal, PatternBypassesFixedOwnRegionAndLargeFanoutRequests) {
+TEST(LegrouteGlobal, PatternBypassesLargeFanoutRequests) {
   auto             g = grid(7, 5);
   std::vector<int> cap(g.size(), 4);
   Global_net       net;
-  net.endpoints = {0, 20, 34};
-  for (int mode = 0; mode < 3; ++mode) {
-    if (mode == 0) {
-      net.fixed_edges = {
-          {0, 1}
-      };
-    }
-    if (mode == 1) {
-      net.fixed_edges.clear();
-      net.own_regions = {0};
-    }
-    if (mode == 2) {
-      net.own_regions.clear();
-      net.endpoints.resize(33);
-      std::iota(net.endpoints.begin(), net.endpoints.end(), 0);
-    }
-    const auto before  = global_route(g, cap, cap, 1, 0, {net}, 0, 0);
-    const auto enabled = global_route(g, cap, cap, 1, 0, {net}, 0, 0, 0, 1, true);
-    EXPECT_EQ(enabled.pattern_attempts, 0u);
-    EXPECT_EQ(enabled.search_pops, before.search_pops);
-    EXPECT_EQ(enabled.trees[0].edges, before.trees[0].edges);
-  }
+  net.endpoints.resize(33);
+  std::iota(net.endpoints.begin(), net.endpoints.end(), 0);
+  const auto before  = global_route(g, cap, cap, 1, {net}, 0, 0);
+  const auto enabled = global_route(g, cap, cap, 1, {net}, 0, 0, 0, 1, true);
+  EXPECT_EQ(enabled.pattern_attempts, 0u);
+  EXPECT_EQ(enabled.search_pops, before.search_pops);
+  EXPECT_EQ(enabled.trees[0].edges, before.trees[0].edges);
 }
 
 TEST(LegrouteGlobal, PatternTreesAreAcyclicAndPrunedForArbitraryTerminalTopologies) {
@@ -211,7 +191,7 @@ TEST(LegrouteGlobal, PatternTreesAreAcyclicAndPrunedForArbitraryTerminalTopologi
       endpoints.insert(int(random() % g.size()));
     }
     net.endpoints.assign(endpoints.begin(), endpoints.end());
-    const auto r = global_route(g, cap, cap, 1, 0, {net}, 0, 0, 0, 1, true);
+    const auto r = global_route(g, cap, cap, 1, {net}, 0, 0, 0, 1, true);
     ASSERT_EQ(r.pattern_completed, 1u);
     EXPECT_EQ(r.search_pops, 0u);
     EXPECT_LE(r.pattern_work, 100000u);
@@ -228,7 +208,7 @@ TEST(LegrouteGlobal, PatternTreesAreAcyclicAndPrunedForArbitraryTerminalTopologi
     }
     auto transposed_metric = g;
     std::swap(transposed_metric.tile_w, transposed_metric.tile_h);
-    const auto other = global_route(transposed_metric, cap, cap, 1, 0, {net}, 0, 0, 0, 1, true);
+    const auto other = global_route(transposed_metric, cap, cap, 1, {net}, 0, 0, 0, 1, true);
     ASSERT_EQ(other.pattern_completed, 1u);
     aspect_changed_tree |= other.trees[0].edges != r.trees[0].edges;
   }
@@ -243,7 +223,7 @@ TEST(LegrouteGlobal, GrowingTheWindowRetainsPreviouslyConnectedBranches) {
   }
   Global_net net;
   net.endpoints = {g.tile(3, 3), g.tile(4, 3), g.tile(3, 6)};
-  const auto r  = global_route(g, h, v, 1, 0, {net}, 0, 0);
+  const auto r  = global_route(g, h, v, 1, {net}, 0, 0);
   ASSERT_EQ(r.unrouted, 0u);
   EXPECT_EQ(r.search_restarts, 3u);
   check_tree(g, r.trees[0], net.endpoints);
@@ -260,7 +240,7 @@ TEST(LegrouteGlobal, AnUnreachableSinkDoesNotReserveItsPartialTree) {
   blocked.crit      = 1;
   blocked.endpoints = {g.tile(2, 2), g.tile(3, 2), g.tile(2, 5)};
   next.endpoints    = {g.tile(2, 2), g.tile(3, 2)};
-  const auto r      = global_route(g, h, v, 1, 0, {blocked, next}, 2, 0);
+  const auto r      = global_route(g, h, v, 1, {blocked, next}, 2, 0);
   EXPECT_EQ(r.unrouted, 1u);
   EXPECT_EQ(r.topology_disconnected, 1u);
   EXPECT_TRUE(r.trees[0].topology_disconnected);
@@ -273,7 +253,7 @@ TEST(LegrouteGlobal, AnUnreachableSinkDoesNotReserveItsPartialTree) {
   check_tree(g, r.trees[1], next.endpoints);
   EXPECT_EQ(r.trees[1].edges.size(), 1u);
   EXPECT_EQ(r.overflow_edges, 0u);
-  const auto alone = global_route(g, h, v, 1, 0, {next}, 2, 0);
+  const auto alone = global_route(g, h, v, 1, {next}, 2, 0);
   EXPECT_EQ(r.trees[1].edges, alone.trees[0].edges);
   EXPECT_EQ(r.search_pops, alone.search_pops);
   EXPECT_EQ(r.search_pushes, alone.search_pushes);
@@ -288,7 +268,7 @@ TEST(LegrouteGlobal, TopologyPrecheckDistinguishesZeroCapacityFromSearchBudget) 
   Global_net net;
   net.endpoints = {g.tile(2, 2), g.tile(70, 58)};
   for (unsigned rounds : {0u, 4u}) {
-    const auto r = global_route(g, h, v, 1, 0, {net}, 1, rounds, 1);
+    const auto r = global_route(g, h, v, 1, {net}, 1, rounds, 1);
     EXPECT_EQ(r.unrouted, 1u);
     EXPECT_EQ(r.topology_disconnected, 1u);
     EXPECT_EQ(r.search_limited, 0u);
@@ -299,30 +279,17 @@ TEST(LegrouteGlobal, TopologyPrecheckDistinguishesZeroCapacityFromSearchBudget) 
   }
 }
 
-TEST(LegrouteGlobal, TopologyPrecheckDoesNotRejectOwnRegionsOrZeroCapacityFixedBridges) {
+TEST(LegrouteGlobal, TopologyPrecheckCountsAShareRoundedToZero) {
   const auto       g = grid(3, 1);
   std::vector<int> h(g.size(), 1), v(g.size(), 0);
   Global_net       net;
   net.endpoints     = {0, 2};
-  const auto closed = global_route(g, h, v, .5, 0, {net}, 0, 0);
-  EXPECT_EQ(closed.topology_disconnected, 1u);  // global share rounds one track to zero
-  net.own_regions = {0};
-  for (double own_share : {0., .5}) {
-    const auto own = global_route(g, h, v, .5, own_share, {net}, 0, 0);
-    check_tree(g, own.trees[0], net.endpoints);
-    EXPECT_EQ(own.topology_disconnected, 0u);
-    EXPECT_GT(own.search_pops, 0u);
-  }
-  net.own_regions.clear();
-  h[1]            = 0;
-  net.fixed_edges = {
-      {0, 1},
-      {1, 2}
-  };
-  const auto fixed = global_route(g, h, v, 1, 0, {net}, 0, 0);
-  check_tree(g, fixed.trees[0], net.endpoints);
-  EXPECT_EQ(fixed.topology_disconnected, 0u);
-  EXPECT_GT(fixed.search_pops, 0u);
+  const auto closed = global_route(g, h, v, .5, {net}, 0, 0);
+  EXPECT_EQ(closed.topology_disconnected, 1u);  // the share rounds one track to zero
+  const auto open = global_route(g, h, v, 1, {net}, 0, 0);
+  check_tree(g, open.trees[0], net.endpoints);
+  EXPECT_EQ(open.topology_disconnected, 0u);
+  EXPECT_GT(open.search_pops, 0u);
 }
 
 TEST(LegrouteGlobal, NegotiationStillRespectsPerEdgeCapacity) {
@@ -332,7 +299,7 @@ TEST(LegrouteGlobal, NegotiationStillRespectsPerEdgeCapacity) {
   net.endpoints = {0, 2};
   // Both rows must be in the initial window: negotiation can use an overflowing path, so it need not
   // trigger the disconnected-search window expansion exercised separately above.
-  const auto r  = global_route(g, cap, cap, .5, 0, {net, net}, 1, 4);
+  const auto r  = global_route(g, cap, cap, .5, {net, net}, 1, 4);
   ASSERT_EQ(r.unrouted, 0u);
   EXPECT_EQ(r.overflow_edges, 0u);
   std::set<std::pair<int, int>> used;
@@ -344,31 +311,13 @@ TEST(LegrouteGlobal, NegotiationStillRespectsPerEdgeCapacity) {
   }
 }
 
-TEST(LegrouteGlobal, ZeroCostFixedEdgesDoNotCreateParentCycles) {
-  const auto       g = grid(6, 1);
-  std::vector<int> cap(g.size(), 4);
-  Global_net       net;
-  net.endpoints   = {0, 2, 5};
-  net.fixed_edges = {
-      {0, 1},
-      {1, 2},
-      {2, 3},
-      {3, 4},
-      {4, 5}
-  };
-  const auto r = global_route(g, cap, cap, 1, 0, {net}, 0, 0);
-  ASSERT_EQ(r.unrouted, 0u);
-  check_tree(g, r.trees[0], net.endpoints);
-  EXPECT_EQ(r.trees[0].edges.size(), 5u);
-}
-
 TEST(LegrouteGlobal, DistantTwoPinSearchFollowsTheGoal) {
   const auto       g = grid(160, 160);
   std::vector<int> cap(g.size(), 8);
   Global_net       net;
-  net.endpoints   = {g.tile(8, 8), g.tile(148, 148)};
-  net.own_regions = {0};  // unit-cost interior edges
-  const auto r    = global_route(g, cap, cap, 1, 0, {net}, 0, 0);
+  net.endpoints = {g.tile(8, 8), g.tile(148, 148)};
+  // An empty edge of eight tracks costs 1.25: with the heuristic weighted to that cost the search is exact here.
+  const auto r  = global_route(g, cap, cap, 1, {net}, 0, 0, 0, 1.25);
   ASSERT_EQ(r.unrouted, 0u);
   check_tree(g, r.trees[0], net.endpoints);
   EXPECT_EQ(r.trees[0].edges.size(), 280u);
@@ -380,9 +329,8 @@ TEST(LegrouteGlobal, RemainingGoalsRekeyAfterEachAttachment) {
   const auto       g = grid(80, 80);
   std::vector<int> cap(g.size(), 8);
   Global_net       net;
-  net.own_regions = {0};
-  net.endpoints   = {g.tile(10, 10), g.tile(60, 10), g.tile(10, 60), g.tile(60, 60)};
-  const auto r    = global_route(g, cap, cap, 1, 0, {net}, 0, 0);
+  net.endpoints = {g.tile(10, 10), g.tile(60, 10), g.tile(10, 60), g.tile(60, 60)};
+  const auto r  = global_route(g, cap, cap, 1, {net}, 0, 0, 0, 1.25);
   ASSERT_EQ(r.unrouted, 0u);
   check_tree(g, r.trees[0], net.endpoints);
   EXPECT_EQ(r.trees[0].edges.size(), 150u);
@@ -396,7 +344,7 @@ TEST(LegrouteGlobal, SearchBudgetLeavesNoPartialReservation) {
   far.crit       = 1;
   far.endpoints  = {0, 399};
   near.endpoints = {0, 1};
-  const auto r   = global_route(g, cap, cap, 1, 0, {far, near}, 0, 0, 4);
+  const auto r   = global_route(g, cap, cap, 1, {far, near}, 0, 0, 4);
   EXPECT_EQ(r.search_limited, 1u);
   EXPECT_EQ(r.unrouted, 1u);
   EXPECT_TRUE(r.trees[0].search_limited);
@@ -406,11 +354,7 @@ TEST(LegrouteGlobal, SearchBudgetLeavesNoPartialReservation) {
 }
 
 TEST(LegrouteGlobal, GuidedPathsMatchIndependentWeightedShortestPaths) {
-  auto g    = grid(12, 10);
-  g.regions = 3;  // third region has no tiles: permits an exact precheck-bypass control below
-  for (size_t t = 0; t < g.size(); ++t) {
-    g.region[t] = g.col(int(t)) >= 6;
-  }
+  const auto   g = grid(12, 10);
   std::mt19937 random(71);
   for (int sample = 0; sample < 20; ++sample) {
     std::vector<int> cap(g.size());
@@ -427,7 +371,7 @@ TEST(LegrouteGlobal, GuidedPathsMatchIndependentWeightedShortestPaths) {
     queue.emplace(0, 0);
     const auto cost = [&](int a, int b) {
       const int capacity = std::min(cap[size_t(a)], cap[size_t(b)]);
-      return capacity ? 1 + 2.0 / capacity + (g.region[a] != g.region[b]) : INFINITY;
+      return capacity ? 1 + 2.0 / capacity : INFINITY;
     };
     while (!queue.empty()) {
       const auto [d, t] = queue.top();
@@ -447,7 +391,7 @@ TEST(LegrouteGlobal, GuidedPathsMatchIndependentWeightedShortestPaths) {
     }
     for (double weight : {1., 2., 4., 8.}) {
       SCOPED_TRACE(weight);
-      const auto result = global_route(g, cap, cap, 1, 0, {net}, 20, 0, 0, weight);
+      const auto result = global_route(g, cap, cap, 1, {net}, 20, 0, 0, weight);
       if (!std::isfinite(distance.back())) {
         EXPECT_EQ(result.unrouted, 1u);
         EXPECT_EQ(result.topology_disconnected, 1u);
@@ -458,13 +402,6 @@ TEST(LegrouteGlobal, GuidedPathsMatchIndependentWeightedShortestPaths) {
         continue;
       }
       ASSERT_EQ(result.unrouted, 0u);
-      auto bypass          = net;
-      bypass.own_regions   = {2};  // unused region changes no search edge predicate or cost
-      const auto unchanged = global_route(g, cap, cap, 1, 0, {bypass}, 20, 0, 0, weight);
-      EXPECT_EQ(result.trees[0].edges, unchanged.trees[0].edges);
-      EXPECT_EQ(result.search_pops, unchanged.search_pops);
-      EXPECT_EQ(result.search_pushes, unchanged.search_pushes);
-      EXPECT_EQ(result.search_restarts, unchanged.search_restarts);
       EXPECT_EQ(result.overflow_edges, 0u);
       check_tree(g, result.trees[0], net.endpoints);
       double actual = 0;
@@ -488,13 +425,13 @@ TEST(LegrouteGlobal, WeightedSearchReducesExpansionsWithoutChangingDefault) {
   net.endpoints               = {g.tile(8, 8), g.tile(148, 148)};
   // Counted interior edges cost 1.25. Unit Manhattan is conservative and can
   // expand much of the grid even though an unobstructed route is available.
-  const auto baseline         = global_route(g, cap, cap, 1, 0, {net}, 0, 0);
-  const auto explicit_default = global_route(g, cap, cap, 1, 0, {net}, 0, 0, 0, 1);
+  const auto baseline         = global_route(g, cap, cap, 1, {net}, 0, 0);
+  const auto explicit_default = global_route(g, cap, cap, 1, {net}, 0, 0, 0, 1);
   EXPECT_EQ(baseline.trees[0].edges, explicit_default.trees[0].edges);
   EXPECT_EQ(baseline.search_pops, explicit_default.search_pops);
   EXPECT_EQ(baseline.search_pushes, explicit_default.search_pushes);
   for (double weight : {2., 4., 8.}) {
-    const auto result = global_route(g, cap, cap, 1, 0, {net}, 0, 0, 0, weight);
+    const auto result = global_route(g, cap, cap, 1, {net}, 0, 0, 0, weight);
     ASSERT_EQ(result.unrouted, 0u);
     EXPECT_EQ(result.overflow_tracks, 0u);
     check_tree(g, result.trees[0], net.endpoints);
@@ -503,25 +440,19 @@ TEST(LegrouteGlobal, WeightedSearchReducesExpansionsWithoutChangingDefault) {
   }
 }
 
-TEST(LegrouteGlobal, WeightedSearchKeepsZeroCostFixedEdgesAndBroadcastsUnguided) {
+TEST(LegrouteGlobal, WeightedSearchLeavesBroadcastsUnguided) {
   const auto       g = grid(40, 1);
   std::vector<int> cap(g.size(), 4);
-  Global_net       fixed, broadcast;
-  fixed.endpoints = {0, 20, 39};
-  for (int t = 0; t < 39; ++t) {
-    fixed.fixed_edges.emplace_back(t, t + 1);
-  }
+  Global_net       broadcast;
   broadcast.endpoints.resize(40);
   std::iota(broadcast.endpoints.begin(), broadcast.endpoints.end(), 0);
-  for (const auto& net : {fixed, broadcast}) {
-    const auto baseline = global_route(g, cap, cap, 1, 0, {net}, 0, 0);
-    for (double weight : {2., 4., 8.}) {
-      const auto result = global_route(g, cap, cap, 1, 0, {net}, 0, 0, 0, weight);
-      check_tree(g, result.trees[0], net.endpoints);
-      EXPECT_EQ(result.trees[0].edges, baseline.trees[0].edges);
-      EXPECT_EQ(result.search_pops, baseline.search_pops);
-      EXPECT_EQ(result.search_pushes, baseline.search_pushes);
-    }
+  const auto baseline = global_route(g, cap, cap, 1, {broadcast}, 0, 0);
+  for (double weight : {2., 4., 8.}) {
+    const auto result = global_route(g, cap, cap, 1, {broadcast}, 0, 0, 0, weight);
+    check_tree(g, result.trees[0], broadcast.endpoints);
+    EXPECT_EQ(result.trees[0].edges, baseline.trees[0].edges);
+    EXPECT_EQ(result.search_pops, baseline.search_pops);
+    EXPECT_EQ(result.search_pushes, baseline.search_pushes);
   }
 }
 
@@ -533,14 +464,14 @@ TEST(LegrouteGlobal, WeightedSearchRetainsHardCapacityAndBudgetFailures) {
   far.endpoints  = {0, 19};
   near.endpoints = {0, 1};
   for (double weight : {1., 2., 4., 8.}) {
-    const auto bounded = global_route(g, cap, cap, 1, 0, {far, near}, 0, 0, 4, weight);
+    const auto bounded = global_route(g, cap, cap, 1, {far, near}, 0, 0, 4, weight);
     EXPECT_EQ(bounded.search_limited, 1u);
     EXPECT_EQ(bounded.topology_disconnected, 0u);
     EXPECT_EQ(bounded.unrouted, 1u);
     EXPECT_TRUE(bounded.trees[0].edges.empty());
     check_tree(g, bounded.trees[1], near.endpoints);
     EXPECT_EQ(bounded.overflow_tracks, 0u);
-    const auto full = global_route(g, cap, cap, 1, 0, {far, near}, 0, 0, 0, weight);
+    const auto full = global_route(g, cap, cap, 1, {far, near}, 0, 0, 0, weight);
     check_tree(g, full.trees[0], far.endpoints);
     EXPECT_EQ(full.unrouted, 1u);
     EXPECT_EQ(full.topology_disconnected, 0u);  // occupancy closes edges, but the static graph stays connected
@@ -555,7 +486,7 @@ TEST(LegrouteGlobal, InvalidWeightsAreRejectedBeforeSearching) {
   const auto       g = grid(1, 1);
   std::vector<int> cap(1, 1);
   for (double weight : {0., .5, double(INFINITY), double(NAN)}) {
-    EXPECT_THROW(global_route(g, cap, cap, 1, 0, {}, 0, 0, 0, weight), std::invalid_argument);
+    EXPECT_THROW(global_route(g, cap, cap, 1, {}, 0, 0, 0, weight), std::invalid_argument);
     Legroute_options options;
     options.global_astar_weight = weight;
     EXPECT_THROW(validate_legroute_options(options), std::invalid_argument);
@@ -567,7 +498,7 @@ TEST(LegrouteGlobal, PerNetWorkCountsAllAttemptsAndKeepsLastAttemptSeparate) {
   std::vector<int> cap(g.size(), 1);
   Global_net       net;
   net.endpoints     = {0, 1};
-  const auto result = global_route(g, cap, cap, 1, 0, {net, net}, 0, 3);
+  const auto result = global_route(g, cap, cap, 1, {net, net}, 0, 3);
   EXPECT_EQ(result.unrouted, 0u);
   EXPECT_EQ(result.overflow_tracks, 1u);
   EXPECT_EQ(result.rounds, 3u);
@@ -579,7 +510,7 @@ TEST(LegrouteGlobal, PerNetWorkCountsAllAttemptsAndKeepsLastAttemptSeparate) {
     total += tree.search_pops;
   }
   EXPECT_EQ(result.search_pops, total);
-  const auto limited = global_route(g, cap, cap, 1, 0, {net}, 0, 3, 1);
+  const auto limited = global_route(g, cap, cap, 1, {net}, 0, 3, 1);
   EXPECT_EQ(limited.unrouted, 1u);
   EXPECT_EQ(limited.trees[0].last_attempt_pops, 1u);
   EXPECT_EQ(limited.trees[0].search_pops, 1u);

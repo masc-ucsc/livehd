@@ -5,8 +5,8 @@
 // An imported floorplan (the DEF fixes die, core and rows) may be larger than the design needs. With
 // place.area=auto the placer searches for the smallest placement region (a fence: a sub-rectangle of the core,
 // rows and sites clipped to it) that still routes: each probe is a complete placement (macros, global placement,
-// legalization) inside the fence, and the oracle is the native legroute global router (legroute_plan with
-// measure_only: maze routing of every signal net over the whole core's tile grid, so the wires may
+// legalization) inside the fence, and the oracle is the native legroute global router (legroute_plan:
+// maze routing of every signal net over the whole core's tile grid, so the wires may
 // use the tracks above the empty area outside the fence). The region area is bisected between the full core
 // (the reference probe) and the densest region the utilization ceiling allows. The chosen region's placement
 // is returned with the core's original rows, so the result is legal in the real core.

@@ -483,18 +483,16 @@ Hover a marker for the details; <code>grep -n "todo-check\|fixme" docs/acknowled
 <li>Y. Lin, W. Li, J. Gu, H. Ren, B. Khailany, D.Z. Pan. <em>ABCDPlace: Accelerated Batch-Based Concurrent Detailed Placement on Multithreaded CPUs and GPUs.</em> IEEE TCAD 39(12), 2020.<span class="use">k-reorder, independent-set matching and global swap.</span></li>
 <li>M. Pan, N. Viswanathan, C. Chu. <em>An Efficient and Effective Detailed Placement Algorithm.</em> ICCAD 2005.</li>
 <li>T.-C. Chen, Z.-W. Jiang, T.-C. Hsu, H.-C. Chen, Y.-W. Chang. <em>NTUplace3: An Analytical Placer for Large-Scale Mixed-Size Designs.</em> IEEE TCAD 27(7), 2008.</li>
-<li>S. Devadas. <em>Optimal Layout via Boolean Satisfiability.</em> ICCAD 1989.<span class="use">Close idea: SAT legalization and route-aware legalization (<code>pass/place/satlegalize.cpp</code>, <code>legroute_sat.cpp</code>).</span></li>
+<li>S. Devadas. <em>Optimal Layout via Boolean Satisfiability.</em> ICCAD 1989.<span class="use">Close idea: SAT legalization (<code>pass/place/satlegalize.cpp</code>).</span></li>
 <li>N. Eén, N. Sörensson. <em>Translating Pseudo-Boolean Constraints into SAT.</em> JSAT 2, 2006.<span class="use">The displacement bound encoding in <code>pass/place/sat_solver.cpp</code>.</span></li>
 <li>H.W. Kuhn. <em>The Hungarian Method for the Assignment Problem.</em> Naval Research Logistics Quarterly 2, 1955.<span class="use">IO pin assignment in <code>pass/place/place.cpp</code>.</span></li>
 </ul>
 
 <h4>Partitioning and min-cut</h4>
 <ul class="refs">
-<li>M. Henzinger, A. Noe, C. Schulz, D. Strash. <em>Practical Minimum Cut Algorithms.</em> ACM JEA 23, 2018. <a href="https://arxiv.org/abs/1708.06127">arXiv</a><span class="use">VieCut in <code>third_party/viecut</code>, used by <code>pass/color/color_mincut.cpp</code> and legroute.</span></li>
+<li>M. Henzinger, A. Noe, C. Schulz, D. Strash. <em>Practical Minimum Cut Algorithms.</em> ACM JEA 23, 2018. <a href="https://arxiv.org/abs/1708.06127">arXiv</a><span class="use">VieCut in <code>third_party/viecut</code>, used by <code>pass/color/color_mincut.cpp</code>.</span></li>
 <li>M. Henzinger, A. Noe, C. Schulz. <em>Shared-Memory Exact Minimum Cuts.</em> IPDPS 2019. <a href="https://arxiv.org/abs/1808.05458">arXiv</a> <span class="todo-check" title="venue not checked">todo-check</span></li>
 <li>V. Batagelj, M. Zaversnik. <em>An O(m) Algorithm for Cores Decomposition of Networks.</em> 2003. <a href="https://arxiv.org/abs/cs/0310049">arXiv</a></li>
-<li>A.V. Goldberg, R.E. Tarjan. <em>A New Approach to the Maximum-Flow Problem.</em> J. ACM 35(4), 1988.<span class="use">Push-relabel min cuts for legroute spill boxes.</span></li>
-<li>E. Dahlhaus, D.S. Johnson, C.H. Papadimitriou, P.D. Seymour, M. Yannakakis. <em>The Complexity of Multiterminal Cuts.</em> SIAM J. Computing 23(4), 1994.<span class="use">Isolating cuts in <code>legroute_sat.cpp</code>.</span></li>
 </ul>
 
 <h4>Steiner trees and net topology</h4>

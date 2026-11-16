@@ -110,7 +110,7 @@ public:
               const std::vector<std::string>& identities = {});
   void                                    observe(const DreamPlace::native::Design&, const std::string& stage);
   const std::vector<Boundary_pin_sample>& samples() const { return history; }
-  // The fixed virtual pins (anchors) with their original nets, as refined: legroute cuts region routes there.
+  // The fixed virtual pins (anchors) with their original nets, as refined.
   const Boundary_pin_model&               pin_model() const { return model; }
   // After refine(): drop the split design and its net tables. The anchors, the edges and the report stay, and
   // observe() still works. A caller that only needs those gives back a full copy of the placement arrays.

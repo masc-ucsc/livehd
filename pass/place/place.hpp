@@ -68,8 +68,8 @@ struct Placement_restart : std::exception {
   Placement_restart(physical::Floorplan frame, Placement_stage s) : seed(std::move(frame)), stage(s) {}
   const char* what() const noexcept override { return "placement restarted after whole-color resynthesis"; }
 };
-// legroute.probe with allow_increase_area: the probe's target box fill needs a lower GP target density (or the
-// inflation does not fit) in a generated core; placement runs again with this utilization and density (a larger core)
+// legroute with allow_increase_area: the selected plan round still has routing overflow on a generated core, or the
+// terminal legalizer does not fit; placement runs again with this utilization and density (a larger core)
 struct Placement_area_restart : std::exception {
   double   utilization, density;  // the new utilization and GP target density
   unsigned mesh_variant = 0;      // the region mesh to place with next (0: the given one; see Options::mesh_variant)
@@ -267,40 +267,13 @@ struct Options {
   DreamPlace::native::GpSearch      gp_search;               // opt-in final-GP A/B trials
   DreamPlace::native::MacroTransparency macro_transparency;  // diagnostic final-GP barrier schedule
   Terminal_legalize_options             terminal_legalize_options;
-  // synth.place.legroute: route-aware legalization replaces terminal legalization; out.def carries its routes
+  // synth.place.legroute: the routability step at the end of placement (todo/livehd/2r-route.html). On the
+  // converged global placement the plan rounds route the placement on a tile grid, widen the cells of congested
+  // nets and resume global placement; the best measured round is kept and the regular terminal legalizer
+  // legalizes it. What the router could not fit is reported (legroute_plan_selection.json, qor.json), not fatal.
   bool                                  legroute = false;
   Legroute_options                      legroute_options;
-  // legroute.probe: before bus order, a quick legroute on small regions (no virtual pins); the cells of the regions
-  // it cannot route widen (x only, r = box fill / target up to max_inflate, the target lowered to the median fill of
-  // the regions the probe solved; the top 10% timing-critical cells keep their size) and GP resumes for at most
-  // `iterations`, then the widths return. Regions at or under `fill` box occupancy skip the SAT.
-  struct Legroute_probe {
-    bool     enabled = false;
-    unsigned cells = 1200, sat_ms = 20000, iterations = 100;  // cells 0: the region mesh's own size
-    unsigned rounds = 1;  // probe, inflate and resume GP this many times, until every region routes
-    // real: the probe is the real legroute's twin (its region mesh with bus-ordered virtual pins, refined at the
-    // placement of each round, every region solved), so the regions it finds unroutable are the ones the real run
-    // would fail; false: small regions without virtual pins
-    bool     real = false;
-    // repulsion: the GP resume after the inflation runs at this multiple of the converged density weight (above one
-    // the cells spread harder around the widened ones)
-    double   repulsion = 1;
-    // shuffle: this many cells of each unroutable region move from its densest patch to its sparsest one and anchor
-    // there for the GP resume (a slightly different placement for the SAT's limited movement; the anchors pull their
-    // nets toward the empty area). 0: off
-    unsigned shuffle = 0;
-    double   fill = 0.5, target = 0.6, max_inflate = 1.5;
-    double   tree_congestion = 1;  // the real legroute's tree congestion weight once the probe ran
-    // false (experiments): a legroute run with regions left without a routable answer keeps its placement (boxes on
-    // their nearest tiles) with a warning instead of stopping as not routable
-    bool     strict          = true;
-  } legroute_probe;
   struct Legroute_plan {
-    bool        enabled        = false;
-    // With legal_boxes=false the ordinary plan retains the exact raw frame and
-    // PG resources for movable local routing. This switch instead measures a
-    // legalized diagnostic handoff and requires legal_boxes=true.
-    bool        handoff        = false;
     std::string route_model    = "legacy";  // coarse: actual local H/V pressure replaces whole-tree inflation in recovery
     unsigned    route_interval = 50, route_net_pops = 2000;
     unsigned    local_tiles = 0;  // bounded hotspot movement radius; 0 keeps whole-placement movement during a local recovery slice
@@ -389,10 +362,6 @@ struct Options {
   // pending only this call runs bus ordering / boundary pins / pin alignment, so they run once, on the
   // timing-driven result, instead of in every first-placement, timing-round and resize-trial call.
   bool                                                       region_refine = false;
-  // region_seed_dir: the region refinement's outputs (region_mesh.json, boundarypins/pins.tsv) of an earlier placement
-  // call; a terminal stage without its own refinement takes its mesh and bus-ordered virtual pins from there, so
-  // legroute (and the real probe) see the pins the refinement placed the cells toward
-  std::string                                                region_seed_dir;
   // Internal: this call is the dedicated SAT-legalization step (sat_align_placed), run after resize/repair and
   // immediately before final legalization. While optimization is pending only this call runs the SAT pass.
   bool                                                       region_sat    = false;
@@ -405,8 +374,8 @@ struct Options {
   std::vector<std::string>                                   eco_trace_cells;
   std::map<std::string, double>                              net_weights;
   double                                                     utilization = 0.30, aspect = 1, density = 0.5;
-  // a generated core (no die, core or floorplan given) may grow when routability needs it (legroute.probe): placement
-  // restarts at the utilization that fits the inflated cells (Placement_area_restart)
+  // a generated core (no die, core or floorplan given) may grow when routability needs it (legroute): placement
+  // restarts at a lower utilization (Placement_area_restart)
   bool                                                       allow_increase_area = true;
   unsigned                                 area_restarts  = 12;   // placements at a lower utilization before stopping
   double                                   area_step      = .92;  // the utilization factor per push-back step
@@ -416,8 +385,8 @@ struct Options {
   // place.area=auto: an imported (fixed) core places in the smallest region that still routes (area_fit.hpp)
   Area_fit_options                                           area_fit;
   unsigned                                 mesh_variants  = 0;  // region meshes tried at the same core before it grows (0..2)
-  // legroute push-back: a region without a routable answer first tries other region meshes at the same core (1:
-  // regions a quarter larger, 2: a fifth smaller), then the core grows; the driver scales region.max_cells by it
+  // the region mesh to place with (1: regions a quarter larger, 2: a fifth smaller); the driver scales
+  // region.max_cells by it
   unsigned                                 mesh_variant   = 0;
   // no frame given by the user (die, core, floorplan): set by lhd and by the outermost place(); nested calls inherit it
   bool                                     generated_core = false;
@@ -595,13 +564,7 @@ Result       place(hhds::Graph& source, hhds::GraphLibrary& flat_library, const 
 // Mark a final/placed context without losing the original macro spacing request.
 Options      final_cell_options(const Options& options);
 // Regenerate native memory geometry as well as external LEFs for placed-API checks.
-// An optimization-pending movable legroute stage checks macros and fixed cells;
-// its movable CORE legality is deferred to local SAT. check_legality always
-// checks the complete physical frame independently of that stage policy.
 void         check_placed_legality(const Result& result, const Options& options);
-// Raw critical-cellbox Plan output: real dimensions/core bounds and fixed/
-// macro legality, with movable CORE row/site/overlap deferred to Local.
-void         check_critical_plan_frame(const physical::Technology&, const physical::Floorplan&, const Options&);
 // Independent physical check against the LEF/DEF model, after DBU rounding.
 // channel_x/y (microns, rounded up to the manufacturing grid) is the minimum clear spacing between non-CORE bodies.
 void         check_legality(const physical::Technology& tech, const physical::Floorplan& fp, double halo_x = 0, double halo_y = 0,

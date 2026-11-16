@@ -1,18 +1,18 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
-// legroute.global: the region-crossing nets routed over the tile grid ahead of the regions (2r-route.html).
+// legroute global router: every signal net routed over the tile grid (todo/livehd/2r-route.html).
 //
-// Every crossing net gets a tree of tile edges joining its endpoint tiles, by shortest paths on the edges with room:
-// an edge carries at most a share of its tracks (the rest stays for the regions' own routes), the fuller an edge the
-// costlier, most critical nets first. The regions then see the tree's boundary crossings as hops and its runs through
-// the regions holding none of the net's pins as fixed pieces, so a thin region between two macros is never asked to
-// carry what its tracks cannot: the paths go around it here.
+// A net gets a tree of tile edges joining its endpoint tiles, by shortest paths on the edges with room: an edge
+// carries at most a share of its tracks, the fuller an edge the costlier, most critical nets first. Nets on edges
+// over their share are ripped up and rerouted under a rising congestion cost (negotiation).
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdio>
+#include <functional>
 #include <map>
 #include <numeric>
 #include <queue>
-#include <set>
+#include <stdexcept>
 #include <tuple>
 #include <unordered_set>
 
@@ -128,8 +128,8 @@ Pattern_route pattern_tree(const Grid& g, const Global_net& net, const std::func
 }  // namespace
 
 Global_routes global_route(const Grid& g, const std::vector<int>& cap_h, const std::vector<int>& cap_v, double share,
-                           double own_share, const std::vector<Global_net>& nets, unsigned margin_tiles, unsigned rounds,
-                           size_t net_pops, double astar_weight, bool pattern_seed, bool tile_capacity) {
+                           const std::vector<Global_net>& nets, unsigned margin_tiles, unsigned rounds, size_t net_pops,
+                           double astar_weight, bool pattern_seed) {
   if (!std::isfinite(astar_weight) || astar_weight < 1) {
     throw std::invalid_argument("legroute: global_astar_weight must be finite and at least 1");
   }
@@ -145,18 +145,6 @@ Global_routes global_route(const Grid& g, const std::vector<int>& cap_h, const s
   // the edge (PathFinder / FastRoute). With rounds == 0 a full edge is closed and a net without a path keeps the chain
   std::vector<double> hist_h(N, 0), hist_v(N, 0);
   double              pres = 1;
-  // tile_capacity: a tile's interior also carries every net that ends, bends or branches in it, not only the nets
-  // passing straight through (what its edges count). A net uses one track of a direction in a tile when any of its
-  // edges of that direction touches the tile; that use stays within the same share of the tile's tracks.
-  std::vector<int>      tlim_h(N, 0), tlim_v(N, 0), tuse_h(N, 0), tuse_v(N, 0);
-  std::vector<double>   thist_h(N, 0), thist_v(N, 0);
-  std::vector<unsigned> tmark_h(N, 0), tmark_v(N, 0);  // the routed net already uses the tile in that direction
-  if (tile_capacity) {
-    for (size_t t = 0; t < N; ++t) {
-      tlim_h[t] = int(std::floor(share * double(cap_h[t])));
-      tlim_v[t] = int(std::floor(share * double(cap_v[t])));
-    }
-  }
   for (size_t t = 0; t < N; ++t) {
     const int c = g.col(int(t)), r = g.row(int(t));
     if (c + 1 < g.cols) {
@@ -166,13 +154,11 @@ Global_routes global_route(const Grid& g, const std::vector<int>& cap_h, const s
       lim_v[t] = int(std::floor(share * double(std::min(cap_v[t], cap_v[t + size_t(g.cols)]))));
     }
   }
-  const auto       check_topology = [](const Global_net& net) { return net.fixed_edges.empty() && net.own_regions.empty(); };
   std::vector<int> component;
-  if (std::ranges::any_of(nets, [&](const auto& net) { return net.endpoints.size() > 1 && check_topology(net); })) {
-    // This whole-grid graph contains every edge a counted search can use in
-    // any window/negotiation round. Occupancy can only remove edges; costs do
-    // not change connectivity. Fixed hops may bridge zero capacity, and own
-    // regions may bypass a rounded-to-zero share, so those nets bypass it.
+  if (std::ranges::any_of(nets, [&](const auto& net) { return net.endpoints.size() > 1; })) {
+    // This whole-grid graph contains every edge a search can use in any
+    // window/negotiation round. Occupancy can only remove edges; costs do
+    // not change connectivity.
     component.assign(N, -1);
     std::vector<int> queue;
     int              label = 0;
@@ -232,67 +218,27 @@ Global_routes global_route(const Grid& g, const std::vector<int>& cap_h, const s
   using Item = std::tuple<double, double, int, size_t>;  // f, -g, tile, goal epoch
   std::vector<int>      tree_tiles;
   std::vector<unsigned> pend(N, 0);  // pending endpoint: pend[t] == this net's mark
-  std::vector<unsigned> own(size_t(g.regions), 0);  // own region of the net: own[r] == mark
   unsigned              mark = 0;
-  unsigned              tile_mark = 0;  // this net's tile marks (tmark_h/v)
   double                next_progress = 30;
-  // an edge inside a region of the net's own pins takes no room (the region routes it) unless own_share counts it
-  const auto counted = [&](const Global_net& net, int a, int b) {
-    return own_share > 0 || g.region[a] != g.region[b] || std::ranges::find(net.own_regions, g.region[a]) == net.own_regions.end();
-  };
-  // the tiles (and directions) a tree's counted edges touch, each once
-  const auto charge_tiles = [&](size_t k, int sign) {
-    if (!tile_capacity) {
-      return;
-    }
-    std::set<std::pair<int, bool>> touched;
-    for (const auto& [a, b] : out.trees[k].edges) {
-      if (counted(nets[k], a, b)) {
-        const bool h = g.row(a) == g.row(b);
-        touched.emplace(a, h);
-        touched.emplace(b, h);
-      }
-    }
-    for (auto [t, h] : touched) {
-      (h ? tuse_h : tuse_v)[size_t(t)] += sign;
-    }
-  };
   const auto unroute = [&](size_t k) {
     auto& tree = out.trees[k];
-    charge_tiles(k, -1);
     for (const auto& [a, b] : tree.edges) {
-      if (counted(nets[k], a, b)) {
-        --(g.row(a) == g.row(b) ? use_h : use_v)[size_t(a)];
-      }
+      --(g.row(a) == g.row(b) ? use_h : use_v)[size_t(a)];
     }
     tree.edges.clear();
     tree.routed = false;
     tree.search_limited = false;
   };
-  const auto counted_cost = [&](int a, int b, int e, int h, bool allow_over, double length) -> double {
+  const auto edge_cost = [&](int e, int h, bool allow_over, double length) -> double {
     const int lim = (h ? lim_h : lim_v)[size_t(e)], use = (h ? use_h : use_v)[size_t(e)];
     if (lim <= 0 || (!allow_over && use >= lim)) {
       return INFINITY;
     }
-    double cost = length + 2.0 * double(use + 1) / double(lim) + (g.region[a] != g.region[b] ? 1 : 0);
+    double cost = length + 2.0 * double(use + 1) / double(lim);
     if (const int over = use + 1 - lim; over > 0) {
       cost += pres * double(over);
     }
     cost += (h ? hist_h : hist_v)[size_t(e)];
-    if (tile_capacity) {  // half of each end tile the edge adds a track to (a straight pass charges its tile once)
-      for (int x : {a, b}) {
-        const int tl = (h ? tlim_h : tlim_v)[size_t(x)];
-        if (tl <= 0 || (h ? tmark_h : tmark_v)[size_t(x)] == tile_mark) {
-          continue;
-        }
-        const int tu  = (h ? tuse_h : tuse_v)[size_t(x)];
-        double    add = 2.0 * double(tu + 1) / double(tl) + (h ? thist_h : thist_v)[size_t(x)];
-        if (const int over = tu + 1 - tl; over > 0) {
-          add += pres * double(over);
-        }
-        cost += .5 * add;
-      }
-    }
     return cost;
   };
   // the net's tree: a search joins the nearest pending endpoint to the tree; the box grows twice (4x and 16x the
@@ -310,13 +256,12 @@ Global_routes global_route(const Grid& g, const std::vector<int>& cap_h, const s
       tree.routed = true;
       return true;
     }
-    if (check_topology(net) && std::ranges::any_of(net.endpoints, [&](int t) {
-          return component[size_t(t)] != component[size_t(net.endpoints.front())];
-        })) {
+    if (std::ranges::any_of(net.endpoints,
+                            [&](int t) { return component[size_t(t)] != component[size_t(net.endpoints.front())]; })) {
       tree.topology_disconnected = true;
       return false;  // zero queue pops, no partial reservation, not a search-budget failure
     }
-    if (pattern_seed && check_topology(net) && net.endpoints.size() <= 32) {
+    if (pattern_seed && net.endpoints.size() <= 32) {
       ++out.pattern_attempts;
       const double unit = double(std::max<int64_t>(1, std::min(g.tile_w, g.tile_h)));
       const auto   cost = [&](int a, int b) {
@@ -324,7 +269,7 @@ Global_routes global_route(const Grid& g, const std::vector<int>& cap_h, const s
         // Pattern candidates respect hard remaining capacity, even during a
         // negotiated round; the unchanged maze may negotiate after fallback.
         const double length = double(std::max<int64_t>(1, h ? g.tile_w : g.tile_h)) / unit;
-        return counted_cost(a, b, a, h, false, length);
+        return edge_cost(a, h, false, length);
       };
       const auto budget  = net_pops ? std::min<size_t>(net_pops, 100000) : 100000;
       auto       seed    = pattern_tree(g, net, cost, budget);
@@ -336,22 +281,12 @@ Global_routes global_route(const Grid& g, const std::vector<int>& cap_h, const s
         for (const auto& [a, b] : tree.edges) {
           ++(g.row(a) == g.row(b) ? use_h : use_v)[size_t(a)];
         }
-        charge_tiles(k, 1);
         return true;
       }
       ++out.pattern_fallbacks;
       out.pattern_work_limited += seed.status == Pattern_route_status::work_limit;
     }
     ++mark;
-    ++tile_mark;
-    for (int r : net.own_regions) {
-      own[size_t(r)] = mark;
-    }
-    std::unordered_set<int64_t> free_edges;  // (lower tile, h): the net's own fixed edges cost nothing
-    for (const auto& [a, b] : net.fixed_edges) {
-      const int lo = std::min(a, b);
-      free_edges.insert(int64_t(lo) * 2 + (g.row(a) == g.row(b) ? 1 : 0));
-    }
     const auto sp = span(net);
     for (int t : net.endpoints) {
       pend[size_t(t)] = mark;
@@ -362,7 +297,7 @@ Global_routes global_route(const Grid& g, const std::vector<int>& cap_h, const s
     size_t                           left         = net.endpoints.size() - 1;
     const size_t                     initial_pops = out.search_pops;
     bool                             limited      = false;
-    const bool                       guided       = net.fixed_edges.empty() && net.endpoints.size() <= 32;
+    const bool                       guided       = net.endpoints.size() <= 32;
     const auto                       heuristic    = [&](int t) {
       int nearest = g.cols + g.rows;
       if (!guided || !left) {
@@ -373,7 +308,7 @@ Global_routes global_route(const Grid& g, const std::vector<int>& cap_h, const s
           nearest = std::min(nearest, std::abs(g.col(t) - g.col(goal)) + std::abs(g.row(t) - g.row(goal)));
         }
       }
-      // Every nonfixed edge costs at least one. A weight above one deliberately
+      // Every edge costs at least one. A weight above one deliberately
       // sacrifices shortest-path optimality, while the same edge checks and
       // complete-tree construction still determine whether this net is routed.
       return astar_weight * double(nearest);
@@ -434,11 +369,6 @@ Global_routes global_route(const Grid& g, const std::vector<int>& cap_h, const s
           for (int q = t; S.tree_stamp[size_t(q)] != S.gen;) {
             const int p = S.parent[size_t(q)];
             edges.emplace_back(std::min(p, q), std::max(p, q));
-            if (tile_capacity) {
-              auto& marks             = g.row(p) == g.row(q) ? tmark_h : tmark_v;
-              marks[size_t(p)]        = tile_mark;
-              marks[size_t(q)]        = tile_mark;
-            }
             S.tree_stamp[size_t(q)] = S.gen;
             tree_tiles.push_back(q);
             S.dist[size_t(q)]   = 0;
@@ -461,27 +391,9 @@ Global_routes global_route(const Grid& g, const std::vector<int>& cap_h, const s
           if (q < 0 || (S.stamp[size_t(q)] == S.gen && S.tree_stamp[size_t(q)] == S.gen)) {
             continue;
           }
-          double cost = 0;
-          if (free_edges.contains(int64_t(e) * 2 + h)) {
-          } else if (g.region[t] == g.region[q] && own[size_t(g.region[t])] == mark) {
-            // inside a region of the net's own pins: the region routes it, nothing is reserved here; an edge
-            // without tracks (a macro) stays closed, or a hop could land in a pocket the region cannot reach.
-            // With own_share the edge's load still costs (never closes): the exit that loads the region's
-            // internal cuts least wins
-            const int mc = std::min((h ? cap_h : cap_v)[size_t(t)], (h ? cap_h : cap_v)[size_t(q)]);
-            if (mc <= 0) {
-              continue;
-            }
-            cost = 1;
-            if (own_share > 0) {
-              const int lim_own  = std::max(1, int(std::floor(own_share * mc)));
-              cost              += 2.0 * double((h ? use_h : use_v)[size_t(e)] + 1) / double(lim_own);
-            }
-          } else {
-            cost = counted_cost(t, q, e, h, allow_over, 1);
-            if (!std::isfinite(cost)) {
-              continue;  // no tracks at all, or no room and no negotiation
-            }
+          const double cost = edge_cost(e, h, allow_over, 1);
+          if (!std::isfinite(cost)) {
+            continue;  // no tracks at all, or no room and no negotiation
           }
           const double nd = dd + cost;
           if (S.stamp[size_t(q)] != S.gen || nd < S.dist[size_t(q)]) {
@@ -505,12 +417,9 @@ Global_routes global_route(const Grid& g, const std::vector<int>& cap_h, const s
     }
     tree.routed = true;
     tree.edges  = std::move(edges);
-    for (const auto& [a, b] : tree.edges) {  // the hops and the pass-through runs take room
-      if (counted(net, a, b)) {
-        ++(g.row(a) == g.row(b) ? use_h : use_v)[size_t(a)];
-      }
+    for (const auto& [a, b] : tree.edges) {
+      ++(g.row(a) == g.row(b) ? use_h : use_v)[size_t(a)];
     }
-    charge_tiles(k, 1);
     return true;
   };
   for (const size_t k : order) {
@@ -529,14 +438,6 @@ Global_routes global_route(const Grid& g, const std::vector<int>& cap_h, const s
         hist_v[t] += double(use_v[t] - lim_v[t]) / double(std::max(1, lim_v[t]));
         ++over_edges;
       }
-      if (tile_capacity && tuse_h[t] > tlim_h[t]) {
-        thist_h[t] += double(tuse_h[t] - tlim_h[t]) / double(std::max(1, tlim_h[t]));
-        ++over_edges;
-      }
-      if (tile_capacity && tuse_v[t] > tlim_v[t]) {
-        thist_v[t] += double(tuse_v[t] - tlim_v[t]) / double(std::max(1, tlim_v[t]));
-        ++over_edges;
-      }
     }
     if (over_edges == 0) {
       break;
@@ -547,13 +448,7 @@ Global_routes global_route(const Grid& g, const std::vector<int>& cap_h, const s
     for (size_t k = 0; k < nets.size(); ++k) {
       for (const auto& [a, b] : out.trees[k].edges) {
         const bool h = g.row(a) == g.row(b);
-        if (!counted(nets[k], a, b)) {
-          continue;
-        }
-        if ((h ? use_h : use_v)[size_t(a)] > (h ? lim_h : lim_v)[size_t(a)]
-            || (tile_capacity
-                && ((h ? tuse_h : tuse_v)[size_t(a)] > (h ? tlim_h : tlim_v)[size_t(a)]
-                    || (h ? tuse_h : tuse_v)[size_t(b)] > (h ? tlim_h : tlim_v)[size_t(b)]))) {
+        if ((h ? use_h : use_v)[size_t(a)] > (h ? lim_h : lim_v)[size_t(a)]) {
           rip[k] = 1;
           break;
         }
@@ -577,22 +472,11 @@ Global_routes global_route(const Grid& g, const std::vector<int>& cap_h, const s
   for (size_t t = 0; t < N; ++t) {
     for (int h : {1, 0}) {
       const int lim = (h ? lim_h : lim_v)[t], use = (h ? use_h : use_v)[t];
-      if (lim > 0 && use >= lim) {
-        ++out.edges_full;
-      }
       if (use > lim) {
         ++out.overflow_edges;
-        out.overflow_tracks += size_t(use - lim);
-        out.over.emplace_back(int(t), h);
-      }
-      if (tile_capacity) {  // a tile over its share counts as an overflowing edge at that tile
-        const int tl = (h ? tlim_h : tlim_v)[t], tu = (h ? tuse_h : tuse_v)[t];
-        if (tu > tl) {
-          ++out.overflow_edges;
-          ++out.overflow_tiles;
-          out.overflow_tracks += size_t(tu - tl);
-          out.over.emplace_back(int(t), h);
-        }
+        ++(h ? out.overflow_edges_h : out.overflow_edges_v);
+        out.overflow_tracks                                 += size_t(use - lim);
+        (h ? out.overflow_tracks_h : out.overflow_tracks_v) += size_t(use - lim);
       }
     }
   }
