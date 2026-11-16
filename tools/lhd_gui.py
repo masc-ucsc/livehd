@@ -12,6 +12,9 @@ paints (highlights, selection) shows up in the page at once.
   tools/lhd_gui.py --workdir W describe name=ram0
   tools/lhd_gui.py --workdir W '{"cmd":"cmd","command":{"cmd":"pause"}}'
 
+`help` returns an overview (command groups, the usual loop) and the full command reference. Guide:
+.claude/skills/livehd/agent_socket.md
+
 Values are JSON when they parse (numbers, true/false, lists), else strings. The reply is printed as JSON; the exit
 status is 1 when it says "ok": false."""
 import argparse

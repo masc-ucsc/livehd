@@ -2469,9 +2469,15 @@ Repair_result finalize_placement(const Result& initial, const Options& requested
   options.output_dir  = requested.output_dir + "/final";
   fs::create_directories(options.output_dir);
   auto frame = initial.floorplan;
-  // Preserve IO locations while rebuilding RC and legalizing the repaired cells.
+  // Preserve IO locations while rebuilding RC and legalizing the repaired cells. The freeze is for this solve
+  // only: the status restored afterwards is the user's. A pin is a user constraint only through an imported
+  // floorplan; without one every pin is the placer's own, even when an earlier stage froze it (the macro-to-cell
+  // handoff writes FIXED pins and the repair steps inherit them). Restoring that freeze kept the final handoff
+  // from shaping the pins on the IO layers, and the router found no access point (partition_a, DRT-0074).
+  const bool user_pins = !requested.floorplan.empty();
   for (auto& terminal : frame.terminals) {
-    options.stage_pin_status[terminal.name] = terminal.status;
+    const bool supply                       = terminal.use == "POWER" || terminal.use == "GROUND";
+    options.stage_pin_status[terminal.name] = user_pins || supply ? terminal.status : physical::Status::PLACED;
     terminal.status                         = physical::Status::FIXED;
   }
   options.floorplan = options.output_dir + "/input.def";

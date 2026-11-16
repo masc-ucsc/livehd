@@ -280,4 +280,83 @@ Reset_tree_stats buffer_pin_nets(hhds::Graph& graph, const physical::Technology&
                                  unsigned cap, const Reset_pins& pins, std::string_view tag, const Constant_test& is_constant) {
   return buffer_nets(graph, tech, cells.combinational, cap, is_constant, pins, false, tag);
 }
+
+Reset_tree_stats buffer_port_feedthroughs(hhds::Graph& graph, const physical::Technology& tech, const liberty::Cell_library& cells) {
+  Reset_tree_stats stats;
+  const auto       buffer = smallest_buffer(cells.combinational, tech);
+  if (!buffer) {
+    return stats;
+  }
+  const auto& minted = tech.macros.at(buffer->name);
+  stats.buffer_um2   = minted.width * minted.height;
+  const auto            prefix = std::string("__place_portbuf");
+  std::set<std::string> names;
+  for (auto n : graph.body().nodes()) {
+    if (const auto name = std::string(n.get_name()); name.find(prefix) != std::string::npos) {
+      names.insert(name);
+    }
+  }
+  std::map<std::string, std::string> clock_pins;  // register cell -> its clock pin
+  for (const auto* list : {&cells.dffs, &cells.async_dffs}) {
+    for (const auto& dff : *list) {
+      if (!dff.clk_pin.empty()) {
+        clock_pins.emplace(dff.name, dff.clk_pin);
+      }
+    }
+  }
+  const auto clocks_registers = [&](const Pin& driver) {
+    for (const auto& edge : driver.out_edges()) {
+      const auto sink = edge.sink;
+      if (const auto sio = sink.get_master_node().get_subnode_io()) {
+        const auto it = clock_pins.find(std::string(sio->get_name()));
+        if (it != clock_pins.end() && sink.get_pin_name() == it->second) {
+          return true;
+        }
+      }
+    }
+    return false;
+  };
+  std::shared_ptr<hhds::GraphIO>          io;
+  std::set<std::pair<uint64_t, uint64_t>> feeding;  // drivers that already feed one graph output directly
+  unsigned                                serial = 0;
+  for (const auto& decl : graph.get_io()->get_output_pin_decls()) {
+    auto       out     = graph.get_output_pin(decl.name);
+    const auto drivers = out.get_driver_pins();
+    if (drivers.size() != 1 || drivers.front().is_invalid() || drivers.front().is_const()) {
+      continue;
+    }
+    const auto driver = drivers.front();
+    const auto key    = std::make_pair(driver.get_master_node().get_debug_nid(), uint64_t(driver.get_port_id()));
+    const bool shared = !feeding.insert(key).second;
+    if (!gu::is_graph_input_pin(driver) && !shared && !clocks_registers(driver)) {
+      continue;  // a cell drives this output (and maybe logic): an ordinary output net, as synthesis leaves it
+    }
+    auto width = gu::bits_of(driver);
+    if (width == 0 && gu::is_graph_input_pin(driver)) {
+      width = graph.get_io()->get_bits(driver.get_pin_name());  // an input pin's width lives on its declaration
+    }
+    if (width != 1 || decl.bits > 1) {
+      ++stats.skipped;  // a bus feed-through: not a net this pass can split bit by bit
+      continue;
+    }
+    if (!io) {
+      io = buffer_io(graph, *buffer);
+    }
+    auto        cell = gu::create_typed_node(graph, Ntype_op::Sub);
+    std::string name;
+    do {
+      name = std::format("{}{}", prefix, serial++);
+    } while (!names.insert(name).second);
+    cell.set_subnode(io);
+    cell.set_name(name);
+    out.del_sink(driver);
+    auto buffered = cell.create_driver_pin(buffer->output);
+    gu::set_bits(buffered, 1);
+    out.connect_driver(buffered);
+    cell.create_sink_pin(buffer->inputs.front()).connect_driver(driver);
+    ++stats.buffers;
+    ++stats.nets;
+  }
+  return stats;
+}
 }  // namespace livehd::placement

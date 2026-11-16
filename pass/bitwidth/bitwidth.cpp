@@ -2823,26 +2823,24 @@ void Bitwidth::try_delete_attr_node(hhds::Node_class& node) {
 }
 
 void Bitwidth::set_subgraph_boundary_bw(hhds::Node_class& node) {
-  // Look up the sub-graph via library.
-  auto sub_graph = node.get_subnode_graph();
-  if (!sub_graph) {
-    Pass::info("Global IO connection pass cannot find existing subgraph in lgdb");
-    return;
-  }
-  auto sub_gio2 = sub_graph->get_io();
+  // The instance's declared interface is the contract. A body-less child (a
+  // blackbox stub, a Liberty cell) has an IO but no graph, and its instance
+  // outputs still have the declared width: seeding only from a child graph left
+  // every reader of a blackbox output unsized (litepci: `~pcie_us.x` reached
+  // pass.formal with width 0).
+  auto sub_gio2 = node.get_subnode_io();
   if (!sub_gio2) {
+    Pass::info("Global IO connection pass cannot find the subnode interface");
     return;
   }
 
   for (const auto& d : sub_gio2->get_output_pin_decls()) {
-    auto top_dpin = node.create_driver_pin(d.name);
-    auto sub_out  = sub_graph->get_output_pin(d.name);
-
     Bitwidth_range bw;
     auto           bits = static_cast<int32_t>(d.bits);
-    if (sub_out.is_invalid() || bits == 0) {
+    if (bits == 0) {
       continue;
     }
+    auto top_dpin = node.create_driver_pin(d.name);
     // Same rule as the top-level IO seeding: an instance port's `bits` is the
     // LITERAL declared bus width, so unsigned takes ubits(bits) and signed
     // takes sbits(bits). The old `bits - 1` seeded a 9-bit unsigned child port

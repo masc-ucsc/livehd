@@ -369,9 +369,9 @@ These tests include successful and rejected calls with one driver and one to
 eight sinks; they exclude PG wiring and committed-route updates. Regression tests
 cover updates. See <code>pass/place/README.md</code> for the components and
 remaining bottlenecks. Broader routing and power-grid acceptance belongs to
-<a href="3x-reroute.html">3x-reroute</a>.</p>
+3x-reroute.</p>
 
-<h2 id="related">Relation to <a class="xref" href="2t-timeclosure.html">2t-timeclosure</a></h2>
+<h2 id="related">Relation to 2t-timeclosure</h2>
 <p>2t-timeclosure is the opt-in redesign of the GP timing loop (<code>synth.place.timeclosure</code>; CNN and litepci
 from OpenROAD's preCTS netlist, no resynthesis): a cheap in-memory late-mode proxy, incremental wire and timing
 updates, a stability-gated phase controller and phase-7 buffering/sizing. Its premise — no external timer in the
@@ -384,31 +384,31 @@ worker paths” that 2t's item A asks for.</p>
 <table>
 <thead><tr><th>1f item</th><th>2t item / landed foundation</th><th>Tie</th></tr></thead>
 <tbody>
-<tr><td><a href="#A">A</a> evaluation count</td><td><a href="2t-timeclosure.html#A">2t A</a>, <a href="2t-timeclosure.html#H">2t H</a></td>
+<tr><td><a href="#A">A</a> evaluation count</td><td>2t A, 2t H</td>
 <td>2t A forbids a per-sample or trial-scoring external timer; 2t H separates cheap sampling, decision checkpoints and
 expensive Steiner refresh, gated on stability and overflow milestones. The legacy <code>repair_gp_buffers</code> trial
 loop is the hidden trial-scoring timer 2t A says to audit.</td></tr>
-<tr><td><a href="#B">B</a> evaluation cost</td><td><a href="2t-timeclosure.html#B">2t B</a> (<code>pass/place/late_timing</code> proxy, landed),
-<a href="2t-timeclosure.html#C">2t C</a> (<code>rc_cache</code>, <code>star_rc</code> landed; incremental propagation pending)</td>
+<tr><td><a href="#B">B</a> evaluation cost</td><td>2t B (<code>pass/place/late_timing</code> proxy, landed),
+2t C (<code>rc_cache</code>, <code>star_rc</code> landed; incremental propagation pending)</td>
 <td>The native proxy is the candidate cheap in-loop timer for B(2); <code>rc_cache</code> already tells unchanged wire
 trees from changed ones across snapshots, which <code>apply_physical_rc</code> should reuse for B(1). 2t's driver-fit
 work (charge-matched effective-C, positive-ramp infeasibility) and the OpenTimer fork's <code>RcDriver::crossing</code>
 are the same class of iterative waveform model; <code>timing_closure_plan.md</code> (“OpenTimer as a regression test”)
 already puts it at sign-off, not at every checkpoint.</td></tr>
-<tr><td><a href="#E">E</a> convergence veto, continuation</td><td><a href="2t-timeclosure.html#H">2t H</a>; landed <code>native_timing_max_overflow</code> and rollback</td>
+<tr><td><a href="#E">E</a> convergence veto, continuation</td><td>2t H; landed <code>native_timing_max_overflow</code> and rollback</td>
 <td>2t H: “never extend the hard budget through restarts, rollback, dwell or post-density continuation”. The legacy
 <code>timing_satisfied</code> veto and the 5× <code>post_density_factor</code> continuation are what that rule excludes;
 2t's density-bounded retention is the replacement acceptance model.</td></tr>
-<tr><td><a href="#F">F</a> cold-restart rounds</td><td><a href="2t-timeclosure.html#D">2t D</a>, <a href="2t-timeclosure.html#H">2t H</a>; landed <code>native_timing_final_guard</code></td>
+<tr><td><a href="#F">F</a> cold-restart rounds</td><td>2t D, 2t H; landed <code>native_timing_final_guard</code></td>
 <td>2t D: compare candidate and retained state under the same timing generation and compatible density/legality, and
 guard the best period rather than WNS against a moving target. The rounds violate both. 2t's own weighted
 experiments show the same wirelength trade (HPWL +18.6 % and +48 % on CNN), so F's HPWL-bounded acceptance applies to
 2t as well.</td></tr>
-<tr><td><a href="#G">G</a> timing target, <code>io_resynth</code></td><td><a href="2t-timeclosure.html#D">2t D</a>, <a href="2t-timeclosure.html#K">2t K</a></td>
+<tr><td><a href="#G">G</a> timing target, <code>io_resynth</code></td><td>2t D, 2t K</td>
 <td>2t D defines one period objective from the SDC (<code>T* = T_SDC − worst slack</code>); 2t K keeps once-per-run
 <code>io_resynth</code> as “the legacy policy” and asks to define its interaction with stage restarts — ablation 1b
 (accepted remaps, byte-identical output) is a defect in that legacy policy.</td></tr>
-<tr><td><a href="#H">H</a> repair budget</td><td><a href="2t-timeclosure.html#J">2t J</a>, <a href="2t-timeclosure.html#I">2t I</a></td>
+<tr><td><a href="#H">H</a> repair budget</td><td>2t J, 2t I</td>
 <td>2t J: “do not mutate cell sizes in phases 1–6 through a leftover legacy repair hook” — <code>repair_gp_buffers</code>
 at every checkpoint is that hook. 2t I/J move buffering and sizing to phase 7 under a worst-period guard with area
 recovery.</td></tr>
@@ -540,7 +540,7 @@ default, <code>lhd/lhd_kernel_synth.cpp:644</code>).</li>
 and at the end), never on an iteration clock; score trial edits with the existing what-if timer
 (<code>Physical_session::Proxy</code>, <code>physical_session.cpp:877</code>; the <code>new</code> resize engine already
 requires it, <code>resize_engine.cpp:2308-2330</code>) instead of a full re-evaluation; one evaluation per outer stage.
-Budget: ≤ 8 full evaluations for the whole flow on any design. Reuse the cheap-sampling / decision-checkpoint split of <a class="xref" href="2t-timeclosure.html#H">2t H</a>.</li>
+Budget: ≤ 8 full evaluations for the whole flow on any design. Reuse the cheap-sampling / decision-checkpoint split of 2t H.</li>
 <li><strong>Acceptance:</strong> <code>pass.opentimer.incremental</code> count ≤ 8 on lfsr and minimax with WNS within
 5 ps of today's B result.</li>
 </ul></li>
@@ -567,7 +567,7 @@ waveform fit for the final STA); (2) a closed-form driver model (Elmore + Dartu-
 in-loop evaluations, with the iterative fit reserved for sign-off; (3) index-based pin/net identity between the
 placer and the timer — no string maps on the per-evaluation path. Measure with the existing
 <code>Physical_session::Statistics</code> buckets (<code>pass_opentimer.hpp:246-254</code>), which already split
-validation / reconcile / propagation / feedback time but are not reported in <code>result.json</code>. The native proxy of <a class="xref" href="2t-timeclosure.html#B">2t B</a> and the <code>rc_cache</code> of <a class="xref" href="2t-timeclosure.html#C">2t C</a> are the landed building blocks.</li>
+validation / reconcile / propagation / feedback time but are not reported in <code>result.json</code>. The native proxy of 2t B and the <code>rc_cache</code> of 2t C are the landed building blocks.</li>
 <li><strong>Acceptance:</strong> a GP-checkpoint evaluation on minimax ≤ 1 s; the final evaluation ≤ 3 s; total STA time
 ≤ 10 % of the placer on every design.</li>
 </ul></li>
@@ -636,7 +636,7 @@ momentum (<code>placement.hpp:196, 372</code>), so the objective never settles e
 <li><strong>What has to change:</strong> convergence = overflow ≤ target (plus routability if enabled); timing may
 re-weight nets but must never veto convergence; weight refreshes without momentum restart and only at density
 milestones; continuation bounded to a small fraction (≤ 25 %) of the density-settling iteration; the
-<code>iteration cap</code> warning should be an exceptional outcome, not the normal one. <a class="xref" href="2t-timeclosure.html#H">2t H</a> states the same rule for the new controller.</li>
+<code>iteration cap</code> warning should be an exceptional outcome, not the normal one. 2t H states the same rule for the new controller.</li>
 <li><strong>Acceptance:</strong> no cap warning on any benchmark design; GP iterations ≤ 600 on minimax.</li>
 </ul></li>
 
@@ -653,7 +653,7 @@ worse” (<code>repair.cpp:1271</code>); HPWL, area and power are never consulte
 <li><strong>What has to change:</strong> rounds off by default when the first STA shows positive WNS; when on, warm
 start from the converged placement with the density weight preserved, a short refinement budget, and an acceptance
 test that bounds HPWL and area growth. OpenROAD's model — re-weight inside the same Nesterov run with a virtual
-repair, twice — is the reference, and the same-generation, density-compatible acceptance of <a class="xref" href="2t-timeclosure.html#D">2t D</a> is the model.</li>
+repair, twice — is the reference, and the same-generation, density-compatible acceptance of 2t D is the model.</li>
 <li><strong>Acceptance:</strong> HPWL after the physical stage ≤ +3 % of the pure-GP HPWL on lfsr and minimax.</li>
 </ul></li>
 
@@ -670,7 +670,7 @@ never applied when GP checkpoints are off.</li>
 weights, convergence, resynthesis triggers and repair; the 0.4× budget stays a synthesis-internal hint and must not
 leak into placement decisions; GP-time timing feedback only once the placement is near-legal (overflow ≤ 0.2);
 <code>io_resynth</code> must be verified to apply what it accepts, and a restart of the whole final stage (minimax:
-+1 500 iterations and +131 evaluations = 1 786 s) needs a measured benefit before it is automatic. See <a class="xref" href="2t-timeclosure.html#D">2t D</a> (one period objective) and <a class="xref" href="2t-timeclosure.html#K">2t K</a> (restart interaction of the legacy <code>io_resynth</code> policy).</li>
++1 500 iterations and +131 evaluations = 1 786 s) needs a measured benefit before it is automatic. See 2t D (one period objective) and 2t K (restart interaction of the legacy <code>io_resynth</code> policy).</li>
 <li><strong>Acceptance:</strong> internal WNS within 10 % of <code>score.tcl</code> on the final placement at every
 checkpoint that feeds a decision; no “unreachable target” for a design that meets its SDC in OpenROAD.</li>
 </ul></li>
@@ -684,7 +684,7 @@ negative internal slack (<a href="#G">G</a>) and so keep inserting.</li>
 <li><strong>Where:</strong> <code>repair_gp_buffers</code> (<code>repair.cpp:1815-2080</code>) at every checkpoint;
 <code>resize_placed</code> / repair pass after the rounds (<code>resize_engine.cpp</code>, <code>repair.cpp:2148-2560</code>).</li>
 <li><strong>What has to change:</strong> electrical repair (slew, cap, fanout) once after GP; setup repair only against
-the SDC target and only on legal geometry; an explicit area/cell growth budget reported in <code>placement.json</code>. <a class="xref" href="2t-timeclosure.html#J">2t J</a>: no sizing or buffering through a legacy hook before phase 7.</li>
+the SDC target and only on legal geometry; an explicit area/cell growth budget reported in <code>placement.json</code>. 2t J: no sizing or buffering through a legacy hook before phase 7.</li>
 <li><strong>Acceptance:</strong> cells ≤ +3 % and area ≤ +3 % over the synthesized netlist on minimax, as in flow D.</li>
 </ul></li>
 
@@ -710,7 +710,7 @@ SB</code> once <a href="#A">A</a>–<a href="#E">E</a> land.</li>
 yosys-slang); NyuziProcessor and bp_uno <code>unmapped physical object: flop</code> after ABC.</li>
 <li><code>physical_repair</code>: <code>floorplan requires contiguous equal-width N/FS rows</code> for every design whose
 rows OpenROAD cut around macros — the flow-C comparison is impossible on cnn, partition_c, NyuziProcessor, bp_uno,
-eyeriss until imported row fragments are supported. The segmented-row adapter first landed for the <a class="xref" href="2t-timeclosure.html#H">2t H</a> GP probe. It is now integrated into the shared production placement import path, with a completed coralnpu flow-C import check; the other named designs remain to be checked.</li>
+eyeriss until imported row fragments are supported. The segmented-row adapter first landed for the 2t H GP probe. It is now integrated into the shared production placement import path, with a completed coralnpu flow-C import check; the other named designs remain to be checked.</li>
 </ul></li>
 </ul>
 
@@ -729,7 +729,7 @@ algorithm work; it decides whether the targets are met.</li>
 OpenROAD's level once the loops are gone.</li>
 <li><strong>I</strong>: run the three big designs; fix <strong>J</strong> in parallel to add the macro designs.</li>
 </ol>
-<p><a class="xref" href="2t-timeclosure.html">2t-timeclosure</a> stays opt-in and does not gate any of this. When its
+<p>2t-timeclosure stays opt-in and does not gate any of this. When its
 controller becomes the default loop it supersedes A, E, F and H on that path; B(2), C, D and J are needed either way, and
 every change here is measured against the same control artifacts 2t A records.</p>
 

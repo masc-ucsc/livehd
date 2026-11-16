@@ -3232,8 +3232,31 @@ TEST(Placement, MappedBusGraphLegalityRcAndReuse) {
   options.cache_dir  = (root / "cache").string();
   options.iterations = 30;
   options.bins       = 8;
+  options.core_margin = 0;  // the frame checks below move rows against a die that equals the core
   hhds::GraphLibrary first;
   const auto         placed = place(*graph, first, options);
+  {
+    // ORFS CORE_MARGIN: 1 um rounds up to whole sky130 sites (460) and rows (2720) on every side of the core.
+    auto margin        = options;
+    margin.core_margin = 1.0;
+    margin.cache_dir.clear();
+    margin.output_dir = (root / "margin").string();
+    hhds::GraphLibrary with_margin;
+    const auto         framed = place(*graph, with_margin, margin);
+    const auto&        rows   = framed.floorplan.rows;
+    ASSERT_FALSE(rows.empty());
+    EXPECT_EQ(rows.front().x, 1380);
+    EXPECT_EQ(rows.front().y, 2720);
+    EXPECT_EQ(framed.floorplan.die.xl, 0);
+    EXPECT_EQ(framed.floorplan.die.yl, 0);
+    EXPECT_EQ(framed.floorplan.die.xh - (rows.front().x + rows.front().count * rows.front().step), 1380);
+    EXPECT_EQ(framed.floorplan.die.yh - (rows.back().y + 2720), 2720);
+    EXPECT_EQ(placed.floorplan.rows.front().x, 0);  // core_margin=0: the die is the core
+    auto bad_margin        = margin;
+    bad_margin.core_margin = -2;
+    hhds::GraphLibrary rejected;
+    EXPECT_THROW(place(*graph, rejected, bad_margin), std::invalid_argument);
+  }
   EXPECT_EQ(placed.floorplan.components.size(), 2);
   EXPECT_EQ(placed.floorplan.terminals.size(), 3);
   {

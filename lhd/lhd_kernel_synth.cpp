@@ -630,6 +630,12 @@ livehd::placement::Options placement_options(const Options& opts) {
     }
   }
   out.aspect = number("place.aspect", "1");
+  if (const auto margin = synth_set(opts, "place.core_margin", "auto"); margin != "auto") {
+    out.core_margin = number("place.core_margin", "auto");
+    if (!(out.core_margin >= 0)) {
+      throw Lhd_error{"usage", "invalid synth.place.core_margin: " + margin, "expected auto or microns >= 0"};
+    }
+  }
   for (const auto& [key, frame] : {
            std::pair<const char*, std::vector<double>*>{ "place.die",  &out.die},
            std::pair<const char*, std::vector<double>*>{"place.core", &out.core}
@@ -1716,10 +1722,12 @@ void synth_command(Options& opts, Result& res) {
 }
 
 namespace {
-// A placement the legalizer cannot close (DREAMPlace: insufficient row space) on a generated core with legroute is
-// too dense for the core: placement runs again at a lower utilization, like a region without a routable answer.
+// A placement the legalizer cannot close (DREAMPlace: insufficient row space, or macros that find no legal position
+// at a high utilization: litepci's fakerams at 75%) on a generated core that may grow is too dense for the core:
+// placement runs again at a lower utilization (place.area_step, at most place.area_restarts times). A given
+// die/core/floorplan never grows.
 bool density_failure(const std::exception& e, const livehd::placement::Options& po) {
-  return po.legroute && po.allow_increase_area && po.generated_core
+  return po.allow_increase_area && po.generated_core
          && std::string_view(e.what()).find("legalization failed") != std::string_view::npos;
 }
 void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd::placement::Placement_session>& placement_session,
@@ -2007,6 +2015,7 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
                                                         "place.start_map",
                                                         "place.utilization",
                                                         "place.aspect",
+                                                        "place.core_margin",
                                                         "place.gui.replay",
                                                         "place.gui.video",
                                                         "place.gui.poll",

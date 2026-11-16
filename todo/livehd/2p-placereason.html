@@ -29,7 +29,7 @@ execution follow after the basic experiment loop works.</p>
 
 <h2>Depends on</h2>
 <ul>
-<li><a href="2i-interact.html">2i-interact</a> — reuse the live session, agent socket, shared selection,
+<li><code>lhd synth --gui</code> (<a href="../../.claude/skills/livehd/agent_socket.md">agent socket</a>) — reuse the live session, agent socket, shared selection,
 phase gates, replay and region edit path; this task adds exploration policy, explorations and persistent intent.</li>
 <li><a href="../../core/job_manager.hpp">core/job_manager.hpp</a> and
 <a href="../../pass/lec/fork_race.hpp">pass/lec/fork_race.hpp</a> — the admission control (<code>lhd.jobs</code>,
@@ -38,9 +38,9 @@ and synthesis already use. Explore jobs are a new job class on the same manager,
 <li><a href="json-metadata.html">json-metadata</a> and the existing
 <a href="../../docs/placement_regularity.html#placement-hints">placement hints</a> — extend the
 class-tagged bundle and scope binding instead of introducing another constraint-file format.</li>
-<li><a href="3g-partitions.html">3g-partitions</a> — reuse Region_mesh and legality capacity accounting
+<li>Placement partitions (<code>Region_mesh</code>, <code>Capacity_bins</code>) — reuse Region_mesh and legality capacity accounting
 for local active sets. A synthesis color, geometric region and memory chunk are distinct selectors.</li>
-<li><a href="2is-incsynth.html">2is-incsynth</a> and <a href="2t-timeclosure.html">2t-timeclosure</a>
+<li><a href="2is-incsynth.html">2is-incsynth</a> and 2t-timeclosure
 — gate every resynthesis, sizing and buffering entry point; reuse their acceptance and proof checks.</li>
 <li><a href="2q-fasttimer.html">2q-fasttimer</a> — coordinate incremental RC/timing and boundary timing
 contracts. Its single-threaded engine (ruling R11) fits the separate snapshot owner in H0; a single-threaded
@@ -1041,9 +1041,9 @@ after a refinement limit, so do not treat a visual verdict as proof of legality 
 performance claim is adopted here.</li>
 <li><a href="../../docs/placement_regularity.html">Placement regularity and hierarchical hints</a> — implemented
 soft-hint semantics, scope binding, generated state and source-attribute follow-up.</li>
-<li><a href="2i-interact.html">Interactive GUI</a>, <a href="2is-incsynth.html">placement-aware resynthesis</a>,
-<a href="2t-timeclosure.html">timing closure</a>, <a href="2q-fasttimer.html">fast timing</a>,
-<a href="3g-partitions.html">partitions</a> and <a href="2f-scalability.html">chunk scalability</a> — shared
+<li>Interactive GUI (<code>lhd synth --gui</code>), <a href="2is-incsynth.html">placement-aware resynthesis</a>,
+timing closure, <a href="2q-fasttimer.html">fast timing</a>
+and <a href="2f-scalability.html">chunk scalability</a> — shared
 interfaces and acceptance boundaries; this task does not duplicate their solver or timer implementations.</li>
 </ul>
 </main>

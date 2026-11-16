@@ -101,6 +101,13 @@ namespace livehd::placement {
 namespace {
 namespace ph      = physical;
 namespace gu      = graph_util;
+// One bit of a bus as its own sized driver: every consumer of a mapped netlist (cgen.verilog, pass.lec) refuses a
+// width-0 pin, so a Get_mask minted after bitwidth must carry its width (partition_a's tie remap emitted 0-bit ones).
+hhds::Pin_class one_bit_of(hhds::Graph& graph, const hhds::Pin_class& bus, int bit) {
+  auto out = graph_util::create_get_mask(graph, bus, bit).get_driver_pin(0);
+  graph_util::set_ubits(out, 1);
+  return out;
+}
 namespace dp      = DreamPlace::native;
 namespace mp      = dp::macro;
 namespace fs      = std::filesystem;
@@ -549,6 +556,9 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
                             o.halo_x,
                             o.halo_y),
                 h);
+  if (o.core_margin != -1) {
+    h = hash_text(std::format("core-margin:{}", o.core_margin), h);
+  }
   if (o.cell_halo) {
     h = hash_text(std::format("cell-halo:{}:{}:{}", o.cell_halo->first, o.cell_halo->second, o.cell_stage), h);
   }
@@ -7159,6 +7169,9 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
   if (options.retain_placement && (!options.previous || options.timing_seed || options.fp_place || options.macro_mode != "none")) {
     throw std::invalid_argument("timing snapshot requires an explicit previous placement and no placement stages");
   }
+  if (!(options.core_margin == -1 || (options.core_margin >= 0 && std::isfinite(options.core_margin)))) {
+    throw std::invalid_argument("invalid generated core margin (microns >= 0, or -1 for auto)");
+  }
   if (!(options.utilization > 0 && options.utilization < 1) || !(options.aspect > 0 && std::isfinite(options.aspect))
       || !(options.density > 0 && options.density <= 1) || options.iterations < 0 || options.bins < 2 || options.threads < 1
       || (options.route_bins && (options.route_bins < 2 || options.route_bins > 1024)) || options.legalize_bins < 0
@@ -7520,7 +7533,11 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
                               "railtree",
                               reset_constant)
             : Reset_tree_stats{};
-  if (const auto minted = std::max(reset_tree.buffer_um2, rail_tree.buffer_um2); options.growth_budget && minted > 0) {
+  const auto port_buffers = !options.mutation_policy().no_buffer_edits
+                                ? buffer_port_feedthroughs(graph, tech, options.technology().cells)
+                                : Reset_tree_stats{};
+  if (const auto minted = std::max({reset_tree.buffer_um2, rail_tree.buffer_um2, port_buffers.buffer_um2});
+      options.growth_budget && minted > 0) {
     // Both trees mint the smallest buffer: only an upsize above it is growth.
     options.growth_budget->tree_master_um2 = minted;
   }
@@ -7878,12 +7895,19 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       const double core_area = std::max(area / options.utilization, occupancy_area / options.density);
       columns                = std::max<int64_t>(std::ceil(std::sqrt(core_area * options.aspect) / sw), (max_width + sw - 1) / sw);
       rows = std::max<int64_t>({2, static_cast<int64_t>(std::ceil(core_area / (columns * sw * rh))), (max_height + rh - 1) / rh});
-      if (pg_profile) {
-        // Keep the same usable core area, but reserve a site/row of die margin
-        // for physical edge rails and via enclosures. Explicit frames are never
-        // resized and must supply their own inset.
-        origin_x = sw;
-        origin_y = rh;
+      // Keep the same usable core area inside a die margin (ORFS CORE_MARGIN, default 1 um): the edge rails
+      // and their vias stay inside the die, so a downstream power grid reaches them, and IO pins on the die
+      // edge get room to escape. The native power grid needs at least a site/row. Explicit frames are never
+      // resized and must supply their own inset.
+      {
+        const double margin_um = options.core_margin < 0 ? 1.0 : options.core_margin;
+        const auto   margin    = static_cast<int64_t>(std::llround(margin_um * tech.dbu));
+        origin_x               = ((margin + sw - 1) / sw) * sw;
+        origin_y               = ((margin + rh - 1) / rh) * rh;
+        if (pg_profile) {
+          origin_x = std::max<int64_t>(origin_x, sw);
+          origin_y = std::max<int64_t>(origin_y, rh);
+        }
       }
       // IO resynthesis may reduce mapped area after an area-resume slice has
       // advanced the retained optimizer. Regenerating solely from that smaller
@@ -8453,7 +8477,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         if (constants[b]) {
           values.push_back(tie_drivers.at(Endpoint{c.name, tie_sink_pin(b), -1}));
         } else {
-          values.push_back(width == 1 ? original : gu::create_get_mask(graph, original, b).get_driver_pin(0));
+          values.push_back(width == 1 ? original : one_bit_of(graph, original, b));
         }
       }
       gu::drop_drivers(sink);
@@ -8505,7 +8529,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       if (constants[b]) {
         values.push_back(tie_drivers.at(Endpoint{"PIN", bit_name(decl.name, width, b), -1}));
       } else {
-        values.push_back(width == 1 ? original : gu::create_get_mask(graph, original, b).get_driver_pin(0));
+        values.push_back(width == 1 ? original : one_bit_of(graph, original, b));
       }
     }
     gu::drop_drivers(target);

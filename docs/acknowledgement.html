@@ -330,7 +330,7 @@ Hover a marker for the details; <code>grep -n "todo-check\|fixme" docs/acknowled
 <h4>RTL simulation</h4>
 <ul class="refs">
 <li>S. Beamer, D. Donofrio. <em>Efficiently Exploiting Low Activity Factors to Accelerate RTL Simulation.</em> DAC 2020. <a href="https://escholarship.org/uc/item/64x147r1">pdf</a> <span class="todo-check" title="DAC DOI not confirmed (escholarship link only)">todo-check</span><span class="use">ESSENT; acyclic coarsened colors, a static schedule and skipping idle colors (<code>inou/cgen/sim_color_plan.cpp</code>, <code>docs/simopt.md</code>).</span></li>
-<li>H. Wang, S. Beamer. <em>RepCut: Superlinear Parallel RTL Simulation with Replication-Aided Partitioning.</em> ASPLOS 2023. <a href="https://doi.org/10.1145/3582016.3582034">doi</a><span class="use">Partitioning that limits boundary traffic (<code>todo/livehd/llvm-native-runtime.html</code>).</span></li>
+<li>H. Wang, S. Beamer. <em>RepCut: Superlinear Parallel RTL Simulation with Replication-Aided Partitioning.</em> ASPLOS 2023. <a href="https://doi.org/10.1145/3582016.3582034">doi</a><span class="use">Partitioning that limits boundary traffic.</span></li>
 <li>L. Chen, D. Zhao, Z. Yu, N. Sun, Y. Bao. <em>GSIM: Accelerating RTL Simulation for Large-Scale Designs.</em> DAC 2025. <a href="https://arxiv.org/abs/2508.02236">arXiv</a><span class="use">Supernode partitioning and bit-level optimizations.</span></li>
 <li>H. Wang, T. Nijssen, S. Beamer. <em>Don't Repeat Yourself! Coarse-Grained Circuit Deduplication to Accelerate RTL Simulation.</em> ASPLOS 2024. <a href="https://doi.org/10.1145/3622781.3674184">doi</a><span class="use">One shared kernel for repeated module occurrences.</span></li>
 <li>K. Zhou, Y. Liang, Y. Lin, R. Wang, R. Huang. <em>Khronos: Fusing Memory Access for Improved Hardware RTL Simulation.</em> MICRO 2023. <a href="https://doi.org/10.1145/3613424.3614301">doi</a><span class="use">Close idea: state locality in the native frame layout.</span></li>
@@ -538,6 +538,10 @@ Hover a marker for the details; <code>grep -n "todo-check\|fixme" docs/acknowled
 <li>A. Marquardt, V. Betz, J. Rose. <em>Timing-Driven Placement for FPGAs.</em> FPGA 2000.<span class="use">Criticality with an exponent, as in VPR.</span></li>
 <li>L.P.P.P. van Ginneken. <em>Buffer Placement in Distributed RC-Tree Networks for Minimal Elmore Delay.</em> ISCAS 1990.<span class="use"><code>pass/place/buffering</code>.</span></li>
 <li>W. Chen, M. Pedram, P. Buch. <em>Buffered Routing Tree Construction Under Buffer Placement Blockages.</em> ASP-DAC 2002.<span class="use">The topology search in <code>pass/place/buffering/graph_search</code>.</span></li>
+<li>H. Theil. <em>A Rank-Invariant Method of Linear and Polynomial Regression Analysis.</em> Proc. KNAW 53, 1950; P.K. Sen. <em>Estimates of the Regression Coefficient Based on Kendall's Tau.</em> J. American Statistical Association 63(324), 1968.<span class="use">Theil–Sen trend of the placement gate controller in <code>pass/place/timeclosure.cpp</code>.</span></li>
+<li>F.R. Hampel. <em>The Influence Curve and Its Role in Robust Estimation.</em> J. American Statistical Association 69(346), 1974.<span class="use">Median absolute deviation as the noise level in <code>timeclosure.cpp</code>.</span></li>
+<li>M.G. Kendall. <em>The Treatment of Ties in Ranking Problems.</em> Biometrika 33(3), 1945.<span class="use">Tau-b rank agreement of near-critical endpoints in <code>pass/place/timing_comparison.cpp</code>.</span></li>
+<li>P. Jaccard. <em>The Distribution of the Flora in the Alpine Zone.</em> New Phytologist 11(2), 1912.<span class="use">Near-critical set overlap in <code>timing_comparison.cpp</code> and the gate controller.</span></li>
 <li>J.P. Fishburn, A.E. Dunlop. <em>TILOS: A Posynomial Programming Approach to Transistor Sizing.</em> ICCAD 1985.<span class="use">Greedy critical-path sizing in <code>pass/place/resize_engine.cpp</code>.</span></li>
 </ul>
 
@@ -549,7 +553,7 @@ Hover a marker for the details; <code>grep -n "todo-check\|fixme" docs/acknowled
 </ul>
 
 <h4>Cited by open plans (not implemented yet)</h4>
-<p class="note">Referenced from <code>todo/</code> plans such as <code>timing_closure_plan.md</code>, <code>2q-fasttimer</code> and <code>2t-timeclosure</code>.</p>
+<p class="note">Referenced from <code>todo/</code> plans such as <code>timing_closure_plan.md</code>, <code>2q-fasttimer</code> and <code>2t-timing_closure_plan</code>.</p>
 <ul class="refs compact">
 <li>G. Chen, P. Tu, E.F.Y. Young. <em>SALT: Provably Good Routing Topology by a Novel Steiner Shallow-Light Tree Algorithm.</em> ICCAD 2017.</li>
 <li>H. Wu, X. Li, L. Chen, B. Yu, W. Zhu. <em>Delay-Driven Rectilinear Steiner Tree Construction.</em> IEEE TCAD 44(5), 2025. <a href="https://doi.org/10.1109/TCAD.2024.3501932">doi</a></li>

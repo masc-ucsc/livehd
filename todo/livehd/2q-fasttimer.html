@@ -119,8 +119,8 @@ listed</td><td>Per trial / per stage</td></tr>
 ABC's SCL timer (<code>Abc_backend::score</code>), and <code>pass.usyn</code> compares
 <code>Mapped_cost::maximum_region_delay</code>. A native timer already exists
 (<code>placement::late::Proxy</code>): setup only, full walks, with the same accuracy-first driver
-model that dominates OpenTimer's cost. It serves the domino stage timer and the paused
-<a href="2t-timeclosure.html">2t-timeclosure</a> experiment.</p>
+model that dominates OpenTimer's cost. It serves the domino stage timer and the experimental
+GP timing forces (<a href="2t-timing_closure_plan.html">2t-timing_closure_plan</a> step T1 moves them to this engine).</p>
 
 <h2>Design</h2>
 
@@ -628,10 +628,9 @@ supported; register-to-pin is not needed yet.</li>
 <li><a href="1f-fixes.html">1f-fixes</a> — measurements of the OpenTimer loop this plan replaces.</li>
 <li><a href="2f-scalability.html">2f-scalability</a> — chunks, memory per cell, numbers instead of
 names. Its F6 (cost of timing per cell) and its timing-memory risk are answered by this plan.</li>
-<li><a href="2t-timeclosure.html">2t-timeclosure</a> and
-<a href="timing_closure_plan.md">timing_closure_plan</a> — paused. Its subtask B (the proxy timer) is
-superseded by this engine. Its controller, virtual buffering and LR sizing remain paused and would
-use this engine when resumed. The rebased-period objective is adopted here.</li>
+<li><a href="2t-timing_closure_plan.html">2t-timing_closure_plan</a> and
+<a href="timing_closure_plan.md">timing_closure_plan</a> — the timing forces in GP that build on this engine.
+Its proxy timer is superseded by this engine; the rebased-period objective is adopted here.</li>
 <li><a href="2is-incsynth.html">2is-incsynth</a> — per-color port times, the boundary interface the
 engine shares.</li>
 <li><code>pass/opentimer/README.md</code> — the report, the STA cache and the session this plan

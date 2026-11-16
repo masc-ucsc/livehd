@@ -1048,6 +1048,13 @@ void merge_mapper_sets(const Options& opts, std::string_view method, Eprp_var::E
     if (sram) {
       labels["memory"]          = "sram";
       labels["memory_max_bits"] = min_bits;
+    } else if (const auto place = synth_set(opts, "place", "false");
+               !place.empty() && place != "false" && place != "0" && place != "off") {
+      // A placed netlist goes to a physical flow: a memory left native becomes a virtual proxy block that no
+      // backend can implement (cnn's FIFOs reached the OpenROAD handoff as `__livehd_memory_*`, ODB-0092). Without
+      // generated SRAM macros, `auto` folds every memory to flops, as the ORFS flows do; synth.memory=macro (or an
+      // explicit pass.abc.memory, merged below) still keeps a memory native on purpose.
+      labels["memory"] = "true";
     }
   }
   // A placed netlist goes on to clock-tree synthesis (OpenROAD CTS after the DEF handoff), which owns every clock

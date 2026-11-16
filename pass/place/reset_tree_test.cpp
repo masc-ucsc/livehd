@@ -108,12 +108,14 @@ protected:
     n.create_sink_pin("RESETN").connect_driver(rst_driver);
     gu::set_bits(n.create_driver_pin("QN"), 1);
   }
-  void inverter(const std::string& name, Pin driver) {
+  Pin inverter(const std::string& name, Pin driver) {
     auto n = gu::create_typed_node(*graph, Ntype_op::Sub);
     n.set_subnode(io_of("INVx1", {"A"}, "Y"));
     n.set_name(name);
     n.create_sink_pin("A").connect_driver(driver);
-    gu::set_bits(n.create_driver_pin("Y"), 1);
+    auto y = n.create_driver_pin("Y");
+    gu::set_bits(y, 1);
+    return y;
   }
   static size_t fanout(Pin driver) {
     size_t n = 0;
@@ -136,6 +138,42 @@ protected:
     return driver;
   }
 };
+
+TEST_F(Reset_tree, PortFeedthroughsGetTheirOwnNet) {
+  // o_feed = clk (input feed-through), o_cell = !rst (a cell drives it alone), o_shared = !tie, which also feeds
+  // another inverter (an ordinary output net), o_clk = !clk, which also clocks a register: the first and the last
+  // need their own net, as ORFS's synthesis gives such assigns with insbuf.
+  auto io = graph->get_io();
+  for (const auto* name : {"o_feed", "o_cell", "o_shared", "o_clk"}) {
+    io->add_output(name, io->get_output_pin_decls().size());
+    io->set_bits(name, 1);
+  }
+  graph->get_output_pin("o_feed").connect_driver(clock);
+  graph->get_output_pin("o_cell").connect_driver(inverter("cell", reset));
+  const auto shared = inverter("shared", tie);
+  graph->get_output_pin("o_shared").connect_driver(shared);
+  inverter("reader", shared);
+  const auto gated = inverter("gclk", clock);
+  graph->get_output_pin("o_clk").connect_driver(gated);
+  auto reg = gu::create_typed_node(*graph, Ntype_op::Sub);
+  reg.set_subnode(io_of("DFFASRNx1", {"CLK", "D", "RESETN", "SETN"}, "QN"));
+  reg.set_name("reg");
+  reg.create_sink_pin("CLK").connect_driver(gated);
+  const liberty::Cell_library cells(liberty);
+  const auto                  stats = buffer_port_feedthroughs(*graph, tech, cells);
+  EXPECT_EQ(stats.buffers, 2);
+  const auto driver_master = [&](const char* port) {
+    const auto d = graph->get_output_pin(port).get_driver_pins().front();
+    return d.get_master_node().is_input_node() ? std::string("input") : std::string(d.get_master_node().get_subnode_io()->get_name());
+  };
+  EXPECT_EQ(driver_master("o_feed"), "BUFx1");
+  EXPECT_EQ(driver_master("o_cell"), "INVx1");
+  EXPECT_EQ(driver_master("o_shared"), "INVx1");
+  EXPECT_EQ(driver_master("o_clk"), "BUFx1");
+  EXPECT_EQ(root_of(graph->get_output_pin("o_feed")), clock);  // the same logical net
+  EXPECT_EQ(fanout(gated), 2);                                  // the register and the port buffer
+  EXPECT_EQ(buffer_port_feedthroughs(*graph, tech, cells).buffers, 0);  // idempotent
+}
 
 TEST_F(Reset_tree, SharedLibraryBuffersResetAndRailsWithoutReopeningFile) {
   const liberty::Cell_library cells(liberty);

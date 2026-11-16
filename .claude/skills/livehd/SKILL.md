@@ -9,6 +9,9 @@ Use `lhd help <command>` for the current build’s accepted arguments. For incre
 
 ## Explore a floorplan
 
+The agent socket of `lhd synth --gui` (how to start it, the `tools/lhd_gui.py` client, command groups, exporting collaterals): [agent_socket.md](agent_socket.md).
+
+
 1. Start the design’s existing synthesis recipe with `--set synth.place=true --gui --set synth.place.gui.pause=true`. At a stable gate, inspect `hello`, `state` and the macro inventory. Check units, allowed orientations, pin access, floorplan exclusions and clock constraints. Use the router’s actual track grid before saving exact poses; a legal row placement alone does not prove a macro pin is reachable. Keep the executable and physical inputs unchanged across replay. Run an empty patch from the same baseline at the fidelity you plan to compare.
 2. Give each candidate one hypothesis. For example, face two banks’ data pins toward their consumers, then check whether that shortens critical nets or crowds the channel between them. Inspect halo clearance, channel entrances, standard-cell occupancy and congestion alongside wirelength. A small gap between bodies can leave too little room for pin access or routing.
 3. **Screen cheaply.** Branch from the same paused frame. Use T0 for geometry and `whatif` for batches of small translations on a measured, frozen design. Group related moves into one patch. T1 evaluates placement RC once at the resulting coordinates. Automatic worker selection can reuse a timing snapshot when supported. Check startup, timing-call counts and run time to see where iteration time goes.

@@ -885,17 +885,23 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
     {"place.area_restarts",
      "12",
      Synth_set_option::Kind::integer,
-     "placements at a lower utilization (legroute core growth) before stopping as not routable"},
+     "placements at a lower utilization (core growth: legroute, or a generated core whose cells or macros do not "
+     "legalize) before stopping"},
     {"place.area_step",
      "0.92",
      Synth_set_option::Kind::file,
-     "legroute core growth: the utilization is multiplied by this per step"},
+     "core growth: the utilization is multiplied by this per step"},
     {"place.allow_increase_area",
      "true",
      Synth_set_option::Kind::boolean,
-     "a generated core (no die/core/floorplan given) may grow when routability needs it: with legroute, placement "
-     "restarts at a lower utilization when the plan rounds leave routing overflow or the cells do not legalize"},
+     "a generated core (no die/core/floorplan given) may grow: placement restarts at a lower utilization when its "
+     "cells or macros do not legalize, and with legroute also when the plan rounds leave routing overflow"},
     {"place.aspect", "1", Synth_set_option::Kind::file, "generated core width / height"},
+    {"place.core_margin",
+     "auto",
+     Synth_set_option::Kind::file,
+     "generated frame only: microns between the core rows and the die edge on every side (ORFS CORE_MARGIN), rounded up "
+     "to whole sites/rows; auto = 1 (ORFS's default). The native power grid always keeps at least one site/row"},
     {"place.die",
      "",
      Synth_set_option::Kind::file,

@@ -410,8 +410,7 @@ records the arithmetic-role fingerprint bug, allocator changes, and edit measure
 
 ## Native state/runtime migration
 
-The normal LLVM simulator still uses generated C++ support. The next conversion
-is tracked in [llvm-native-runtime](../../todo/livehd/llvm-native-runtime.html).
+The normal LLVM simulator still uses generated C++ support.
 `Cgen_llvm::State_layout` emits kernels that read/write shared packed storage
 directly and update dirty flags in the object. Native commit functions handle
 contiguous register copies and staged memory entries. `sim_native_rt` loads those
