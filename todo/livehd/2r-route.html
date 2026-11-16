@@ -12,9 +12,11 @@
 <h1><strong class="item-id">2r-route</strong> Legroute as the final routability step of placement</h1>
 <p><span class="status">Plan written 2026-11-15 from a question-and-answer session, after the URoute
 calibration (3u-uroute) and the SAT legroute work (2l-legroute) both failed their goals. This page
-replaces those two pages; their history is in git. Nothing on this page is implemented yet. Names of options, targets and directories are proposals.
+replaces those two pages; their history is in git. Step A is done (2026-11-15: DREAMPlace <code>ea2d85a</code>,
+LiveHD <code>3c45f532c</code>, scorer kept as <code>tools/routetruth</code>); steps B to E are not implemented yet.
+Names of options, targets and directories are proposals.
 Updated 2026-11-15 with the first routed-cohort snapshot (<a href="#cohort">Cohort evidence</a>).
-The items C1–C5 come from that snapshot and are proposals: they are not ruled yet.</span></p>
+The items C1–C5 come from that snapshot and were accepted as written on 2026-11-15.</span></p>
 
 <p>Remove the learned congestion model (URoute) and the SAT-based legroute stages, and rebuild legroute
 as one step at the end of placement: a FastRoute-style global router and a per-grid-cell
@@ -100,9 +102,9 @@ placement routable.</li>
 converges. The gate needs the stage, and the type, layer and net of the markers.</li>
 </ul>
 
-<h3>Proposals from the cohort (not ruled yet)</h3>
+<h3>Decisions from the cohort (accepted 2026-11-15)</h3>
 <table>
-<tr><th>#</th><th>Topic</th><th>Proposal</th></tr>
+<tr><th>#</th><th>Topic</th><th>Decision</th></tr>
 <tr><td>C1</td><td>Repair reserve</td><td>The site capacity of a grid cell is its free sites minus a
 reserve for CTS and hold buffers. The edge capacity keeps the clock charge and adds a share for the
 nets of those buffers. A grid cell is frozen only if it fits under the reduced capacity, so the
