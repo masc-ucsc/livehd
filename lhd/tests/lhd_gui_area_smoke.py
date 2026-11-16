@@ -19,7 +19,7 @@ sdc = root / 'timing.sdc'
 sdc.write_text('create_clock -name virtual -period 10\nset_input_delay -clock virtual 0 [all_inputs]\nset_output_delay -clock virtual 0 [all_outputs]\n')
 lib = Path('inou/lefdef/tests/data')
 command = ['lhd/lhd', 'synth', str(source), '--top', 'dut', '--set', f'synth.liberty={lib}/sky130hd.lib',
-           '--set', f'synth.lef={lib}/sky130hd.tlef,{lib}/sky130hd.lef', '--set', f'synth.sdc={sdc}', '--set', 'synth.place=true',
+           '--set', f'synth.lef={lib}/sky130hd.tlef,{lib}/sky130hd.lef', '--set', f'synth.sdc={sdc}', '--set', 'synth.place=true', '--set', 'synth.place.core_margin=0',
            '--set', 'synth.place.iterations=120', '--set', 'synth.place.grid.density=8', '--set', 'synth.place.timing_driven=false',
            '--set', 'synth.place.gui.poll=5', '--workdir', str(root / 'W'), '--set', 'synth.place.gui.pause=true', '--gui', '--gui-no-open', '-q']
 log = open(root / 'err.log', 'w')

@@ -405,6 +405,9 @@ struct Options {
   // `core` is snapped inward to the site/row grid; with only one of the two given the other equals it.
   // An imported `floorplan` (also what the staged macro/cell passes feed themselves) wins over both.
   std::vector<double>                      die, core;
+  // Generated frames only: microns between the core rows and the die edge on every side (ORFS CORE_MARGIN), rounded
+  // up to whole sites/rows. -1 (auto) is ORFS's default 1 um. The native power grid always gets at least one site/row.
+  double                                   core_margin = -1;
   double                                   stop_overflow = .1, initial_density_weight = .01;
   // -1 resolves to ten placement-row heights; nonnegative values are explicit microns per side.
   double                                   halo_x = -1, halo_y = -1;

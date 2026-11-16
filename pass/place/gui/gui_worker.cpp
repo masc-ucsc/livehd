@@ -750,6 +750,7 @@ Replay_worker::Replay_worker(const Config& cfg, const fs::path& root, std::strin
                              score_config,
                              label   = base.label,
                              deadline = deadline_for(cfg, tier_.empty() ? "foreground" : tier_, start_),
+                             memory   = uint64_t(cfg.worker_memory_mb) << 20,
                              until   = until == "end" ? "placement_end" : std::move(until),
                              patch   = std::move(patch),
                              relax   = std::move(relax)](std::stop_token stop) {
@@ -1037,6 +1038,14 @@ Replay_worker::Replay_worker(const Config& cfg, const fs::path& root, std::strin
               while (wait_worker(nullptr, 0) < 0 && errno == EINTR) {
               }
               pid_ = -1;
+            }
+            // A worker that finishes between two resource polls (the watcher samples every 500 ms) was never
+            // measured; the reaped peak RSS (wait4) still tells whether it overran, so it publishes nothing.
+            if (memory && peak_rss_bytes_ > memory && status_ != "failed") {
+              peak_tree_rss_bytes_ = std::max(peak_tree_rss_bytes_, peak_rss_bytes_);
+              status_              = "budget_exhausted";
+              reason_              = "worker process tree exceeded memory limit";
+              result_.clear();
             }
             end_ = std::chrono::steady_clock::now();
             slot_.complete(std::max(peak_tree_rss_bytes_, peak_rss_bytes_));

@@ -1,5 +1,5 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
-// The agent channel of the placement GUI (todo/livehd/2i-interact.html): a local process (an assistant, a script) asks
+// The agent channel of the placement GUI (.claude/skills/livehd/agent_socket.md): a local process (an assistant, a script) asks
 // questions and paints on the page. Highlights and the selection live in the session, so the page and the agent see the
 // same thing; "critical" is answered by the flow thread through the timing provider.
 #include <algorithm>
@@ -2690,7 +2690,18 @@ std::string Session::agent_call(const std::string& json, int timeout_ms) {
     return submit_reply(json);
   }
   if (cmd == "help") {
-    return R"HELP({"ok":true,"commands":{
+    // "overview" is the short map an agent reads first; "commands" is the full argument reference.
+    return R"HELP({"ok":true,
+"client":"tools/lhd_gui.py --workdir W <command> key=value ... (or --socket PATH, or LHD_GUI_SOCKET); a JSON object as <command> is sent verbatim. Guide: .claude/skills/livehd/agent_socket.md",
+"overview":{
+"start":["hello","state","summary"],
+"inspect":["find","describe","selection","critical","geometry","maps","clusters","signature","leverage","evidence"],
+"paint":["highlight","highlight_names","select","clear_highlight","highlights"],
+"edit":["move","batch","pin","unpin","relax","legalize","evaluate","command_status","cmd"],
+"explore":["whatif","explore","explore_begin","explore_wait","explorations","compare","similarity","explore_discard","score_config"],
+"collateral":["export","intent_preview","intent_apply"],
+"loop":"hello -> state (wait for a gate) -> inspect -> whatif/explore candidates -> compare -> apply with move/batch + evaluate -> export what=macros|intent|flags"},
+"commands":{
 "explore":"{tier:T0|T1|T2|T3|T4, target:main, patch, expect?, label?, client?} -> isolated geometry or frozen-netlist evaluation",
 "geometry":"{target?} -> outline, utilization, macro periphery, cluster bounds, facing strips with standard-cell occupancy and open entrances, and rasterized dead space in DBU",
 "whatif":"{candidates:[move or batch,...], max_nets?, expect?, timeout_ms?} -> measured journal trials and rollback at one gate",

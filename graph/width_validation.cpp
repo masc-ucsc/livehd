@@ -1,6 +1,9 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "width_validation.hpp"
 
+#include <format>
+#include <string>
+
 #include "diag.hpp"
 #include "node_util.hpp"
 
@@ -18,15 +21,34 @@ void require_sized_design(hhds::Graph& graph, std::string_view consumer) {
       if (width > 0) {
         return;
       }
-      const auto producer = is_graph_input_pin(driver) ? std::string{"input "} + std::string{driver.get_pin_name()}
-                                                       : debug_name(driver.get_master_node());
+      const auto  producer = is_graph_input_pin(driver) ? std::string{"input "} + std::string{driver.get_pin_name()}
+                                                        : debug_name(driver.get_master_node());
+      // The operands say which input never got a width (a zero-width source, a dangling sink).
+      std::string operands;
+      if (!is_graph_input_pin(driver)) {
+        size_t shown = 0;
+        for (const auto sink : driver.get_master_node().inp_sorted_pins()) {
+          for (const auto& in : sink.get_driver_pins()) {
+            if (shown++ == 6) {
+              operands += ", ...";
+              break;
+            }
+            const auto name = in.is_const() ? std::string{"const"}
+                              : is_graph_input_pin(in) ? std::string{"input "} + std::string{in.get_pin_name()}
+                                                       : debug_name(in.get_master_node());
+            operands += std::format("{}{}:{}={}b", operands.empty() ? "" : ", ", sink.get_port_id(), name, bits_of(in));
+          }
+        }
+        operands = operands.empty() ? " (no operands)" : " (operands " + operands + ")";
+      }
       livehd::diag::err(consumer, "graph-width-unresolved", "internal")
-          .msg("{} cannot consume definition '{}': {} driver pin {} has unresolved width {}",
+          .msg("{} cannot consume definition '{}': {} driver pin {} has unresolved width {}{}",
                consumer,
                definition->get_name(),
                producer,
                driver.get_port_id(),
-               width)
+               width,
+               operands)
           .hint("the producing pass must install width/sign or run bitwidth before handing the graph to a consumer")
           .fatal();
     };

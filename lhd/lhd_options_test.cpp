@@ -435,6 +435,44 @@ TEST(LhdOptions, SynthDelayFractionScalesTheSdcClockPeriod) {
                lhd::Lhd_error);
 }
 
+// A placed netlist goes to CTS: no mapper clock fanout tree unless the user asks for one.
+TEST(LhdOptions, SynthPlaceTurnsOffTheMapperClockTree) {
+  const auto merged = [](std::vector<std::pair<std::string, std::string>> sets, std::string_view method = "pass.abc") {
+    lhd::Options opts;
+    for (auto& [k, v] : sets) {
+      opts.sets.emplace_back(std::move(k), std::move(v));
+    }
+    Eprp_var::Eprp_dict labels;
+    lhd::merge_mapper_sets(opts, method, labels);
+    return labels;
+  };
+  EXPECT_FALSE(merged({}).contains("icg_fanout"));
+  EXPECT_FALSE(merged({{"synth.place", "false"}}).contains("icg_fanout"));
+  EXPECT_EQ(merged({{"synth.place", "true"}}).at("icg_fanout"), "0");
+  EXPECT_EQ(merged({{"synth.place", "true"}, {"pass.abc.icg_fanout", "32"}}).at("icg_fanout"), "32");
+  EXPECT_FALSE(merged({{"synth.place", "true"}}, "pass.usyn").contains("icg_fanout"));
+}
+
+// A placed netlist cannot carry a native memory into a physical flow: `auto` folds memories to flops there, unless
+// generated SRAM macros are on or the user asks for native memories.
+TEST(LhdOptions, SynthPlaceFoldsAutoMemoriesWithoutSram) {
+  const auto merged = [](std::vector<std::pair<std::string, std::string>> sets) {
+    lhd::Options opts;
+    for (auto& [k, v] : sets) {
+      opts.sets.emplace_back(std::move(k), std::move(v));
+    }
+    Eprp_var::Eprp_dict labels;
+    lhd::merge_mapper_sets(opts, "pass.abc", labels);
+    return labels;
+  };
+  EXPECT_FALSE(merged({}).contains("memory"));
+  EXPECT_EQ(merged({{"synth.place", "true"}}).at("memory"), "true");
+  EXPECT_EQ(merged({{"synth.place", "true"}, {"synth.memory", "auto"}}).at("memory"), "true");
+  EXPECT_EQ(merged({{"synth.place", "true"}, {"synth.memory", "macro"}}).at("memory"), "false");
+  EXPECT_EQ(merged({{"synth.place", "true"}, {"synth.sram", "true"}}).at("memory"), "sram");
+  EXPECT_EQ(merged({{"synth.place", "true"}, {"pass.abc.memory", "false"}}).at("memory"), "false");
+}
+
 // The compile schedule's two fold slots both run the e-graph engine under the compile.cprop set name.
 TEST(LhdOptions, FoldSlotsRunTheEgraphEngine) {
   lhd::Options             opts;

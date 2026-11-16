@@ -45,6 +45,15 @@ Reset_tree_stats buffer_reset_nets(hhds::Graph& graph, const physical::Technolog
 Reset_tree_stats buffer_pin_nets(hhds::Graph& graph, const physical::Technology& tech, const std::string& liberty, unsigned cap,
                                  const Reset_pins& pins, std::string_view tag, const Constant_test& is_constant = {});
 
+// A primary output whose net is not its own -- fed straight by a primary input (`assign user_clk = clk`),
+// shared with another output, or on a clock net that also clocks registers (`assign clk = pcie_us.user_clk`)
+// -- gets the library's smallest buffer in front of it (`__place_portbuf<n>`), as ORFS's synthesis does for
+// such assigns with `insbuf`.
+// Otherwise a clock the SDC defines on the output port (a forwarded or generated clock) sits on the same net as
+// its source clock and OpenROAD CTS stops with CTS-0114 (litedram, litepci). Single-bit ports only (a bus
+// feed-through is counted in `skipped`); a library without a placeable buffer does nothing. Idempotent.
+Reset_tree_stats buffer_port_feedthroughs(hhds::Graph& graph, const physical::Technology& tech, const liberty::Cell_library& cells);
+
 // Reuse the placement technology snapshot without reopening or reparsing Liberty.
 Reset_tree_stats buffer_reset_nets(hhds::Graph& graph, const physical::Technology& tech, const liberty::Cell_library& cells,
                                    unsigned cap, const Constant_test& is_constant = {}, const Reset_pins& extra_reset_pins = {});

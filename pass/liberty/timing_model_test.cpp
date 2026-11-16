@@ -200,7 +200,33 @@ TEST(TimingModel, InvalidSyntaxUnitsAndDimensionsAreRejected) {
                            "library(x){cell(X){pin(Y){timing(){cell_rise(scalar){values(\"1,2\");}}}}}"}) {
     EXPECT_THROW(nldm::parse(text), std::invalid_argument) << text;
   }
-  EXPECT_THROW(nldm::parse("library(a){cell(X){}} library(b){cell(X){}}"), std::invalid_argument);
+  EXPECT_THROW(nldm::parse("library(a){cell(X){area:1;}} library(b){cell(X){area:2;}}"), std::invalid_argument);
+}
+TEST(TimingModel, IdenticalDuplicateCellIsKeptOnceAndAConflictNamesTheCell) {
+  // A macro library appended to a merged synth.liberty and also given as synth.macro_liberty.
+  const std::string macro = R"(library(sram) {time_unit:"1ns"; capacitive_load_unit(1,pf);
+      cell(RAM) {area:7; pin(CLK){direction:input;clock:true;capacitance:.002;}
+        pin(Q){direction:output;timing(){related_pin:CLK;timing_type:rising_edge;
+          cell_rise(scalar){values(".1");} cell_fall(scalar){values(".2");}}}}})";
+  const auto library = nldm::parse(model + macro + macro);
+  ASSERT_EQ(library.cells.count("RAM"), 1);
+  EXPECT_EQ(library.cells.at("RAM").pins.at("Q").arcs[0].delay[0]->lookup({}), 100);
+  // Same model under another library name (a merged file renames its group): still one cell.
+  EXPECT_NO_THROW(nldm::parse(macro + "library(merged) {time_unit:\"1ns\"; capacitive_load_unit(1,pf);"
+                  + macro.substr(macro.find("cell(RAM)"))));
+  // The same name with another unit scale is a different model: rejected, and the message says which cell and libraries.
+  auto other = macro;
+  other.replace(other.find("library(sram)"), 13, "library(slow)");
+  other.replace(other.find("\"1ns\""), 5, "\"10ns\"");
+  try {
+    (void)nldm::parse(macro + other);
+    FAIL() << "conflicting duplicate accepted";
+  } catch (const std::invalid_argument& error) {
+    const std::string what = error.what();
+    EXPECT_NE(what.find("'RAM'"), std::string::npos) << what;
+    EXPECT_NE(what.find("'sram'"), std::string::npos) << what;
+    EXPECT_NE(what.find("'slow'"), std::string::npos) << what;
+  }
 }
 TEST(TimingModel, UnsupportedTablesStayExplicitAndDoNotBecomeZeroDelay) {
   const auto library = nldm::parse(R"(

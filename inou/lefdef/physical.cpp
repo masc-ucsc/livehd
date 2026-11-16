@@ -841,7 +841,7 @@ std::string identifier(const std::string& text) {
       out += i + 1 < text.size() ? text[++i] : '\\';
       continue;
     }
-    if (c <= ' ' || c == '(' || c == ')' || c == ';' || c == '+') {
+    if (c <= ' ' || c == '(' || c == ')' || c == ';' || c == '+' || c == '/') {  // `/` is the DIVIDERCHAR
       out += '\\';
     }
     out += char(c);
@@ -1077,7 +1077,9 @@ void      write_def(const Floorplan& fp, const std::string& path) {
   const auto corners = [](const Rect& r) {
     return std::format("( {} {} ) ( {} {} )", std::llround(r.xl), std::llround(r.yl), std::llround(r.xh), std::llround(r.yh));
   };
-  out << "VERSION 5.8 ;\nDIVIDERCHAR \".\" ;\nBUSBITCHARS \"[]\" ;\nDESIGN " << identifier(fp.design)
+  // "/" like every ORFS/Yosys netlist: OpenROAD splits `inst/pin` (findITerm, the SDC and platform scripts) on the
+  // divider, and LiveHD's flattened instance names keep their own `.` path inside one name, as Yosys's do.
+  out << "VERSION 5.8 ;\nDIVIDERCHAR \"/\" ;\nBUSBITCHARS \"[]\" ;\nDESIGN " << identifier(fp.design)
       << " ;\nUNITS DISTANCE MICRONS " << fp.dbu << " ;\nDIEAREA " << corners(fp.die) << " ;\n";
   for (const auto& row : fp.rows) {
     out << "ROW " << identifier(row.name) << ' ' << identifier(row.site) << ' ' << row.x << ' ' << row.y << ' '

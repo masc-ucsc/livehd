@@ -2018,7 +2018,7 @@ The final `out.def` also contains accepted later sizing/buffer-repair edits.
 browser) and keeps the process alive after the flow until the page's *Exit lhd* button (or the
 `finish` command). The page shows macros, cells, IO, pins, a density layer, regions and
 displacement, and a side panel with the phase, iteration, HPWL, the stage switches and the
-selection tools. Design, rulings and open work: `todo/livehd/2i-interact.html`.
+selection tools. Agent channel: `.claude/skills/livehd/agent_socket.md`.
 
 - **Keys.** `z` zooms in and `Z` (shift+z) out around the pointer, the wheel too; `f` fits, `u` unpins the
   selection, space runs/pauses, `Esc` clears the selection.
@@ -4399,7 +4399,7 @@ The physical DEF reader/writer preserves Manhattan `FIXED`, `ROUTED` and `COVER`
 paths, explicit endpoint extensions, oriented vias, rectangular and generated
 DEF via definitions, routed SPECIALNETS, and POWER/GROUND pin uses. Unsupported
 route features fail explicitly rather than disappearing on export. This is the
-serialization foundation for `todo/livehd/3x-reroute.html`; the automatic
+serialization foundation for 3x-reroute; the automatic
 pre-router, aligned power-grid generator and their acceptance checks are still
 in development.
 
@@ -5404,7 +5404,7 @@ any other map against them. The learned third estimator was removed;
 ## Timing-closure observation controller
 
 `//pass/place:timeclosure` is the independent observation/controller foundation
-for [2t-timeclosure](../../todo/livehd/2t-timeclosure.html). It has no timer,
+for 2t-timeclosure. It has no timer,
 placement, thread-pool or graph dependency. Existing placement defaults and
 callbacks are unchanged. Production `synth.place.timeclosure` integration is
 pending the native proxy; the current interface is an offline replay:

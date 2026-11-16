@@ -9,8 +9,10 @@ root = Path(os.environ['TEST_TMPDIR']) / 'unknown_constant'
 root.mkdir()
 source = root / 'dut.v'
 # An undriven signal in valid RTL is a don't-care; mapping keeps the cell and its x input.
-source.write_text('module dut(input a, input b, output y, output z);\n'
+# w mixes tie-cell constants with live bits on one bus port: the placed netlist must still be emittable.
+source.write_text('module dut(input a, input b, output y, output z, output [3:0] w);\n'
                   'assign y = a & b;\n'
+                  "assign w = {a, 1'b0, b, 1'b1};\n"
                   'sky130_fd_sc_hd__inv_1 spare (.A(1\'bx), .Y(z));\nendmodule\n')
 sdc = root / 'timing.sdc'
 sdc.write_text('create_clock -name virtual -period 10\n'
@@ -45,8 +47,10 @@ explicit, data = run('explicit_error', ['--set', 'synth.place.unknown_const=erro
 assert explicit.returncode != 0 and 'unknown constant' in data['error']['message'], data['error']
 
 diag = root / 'zero.diagnostics.jsonl'
-tied, data = run('zero', ['--set', 'synth.place.unknown_const=zero', '--emit', f'diagnostics:{diag}'])
+tied, data = run('zero', ['--set', 'synth.place.unknown_const=zero', '--emit', f'diagnostics:{diag}',
+                          '--emit-dir', f'verilog:{root}/placed'])
 assert tied.returncode == 0, (tied.returncode, data, tied.stderr)
+assert list((root / 'placed').glob('*.v')), 'the placed netlist with tied bus bits must emit'
 assert data['qor']['place']['legal'], data['qor']['place']
 warnings = [json.loads(line) for line in diag.read_text().splitlines() if line.strip()]
 assert any(w['code'] == 'unknown-const-tied-low' and 'tied low' in w['message'] for w in warnings), warnings

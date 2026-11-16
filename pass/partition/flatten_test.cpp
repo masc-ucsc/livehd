@@ -156,10 +156,34 @@ TEST_F(FlattenAdmission, AnonymousPhysicalScopesAreTransparent) {
   }
   std::sort(names.begin(), names.end());
   ASSERT_EQ(names.size(), 2);
-  EXPECT_TRUE(names[0].starts_with(gu::transparent_instance_prefix) && names[0].ends_with(".same_leaf")) << names[0];
-  EXPECT_EQ(gu::logical_hier_name(names[0]), "same_leaf");
-  EXPECT_EQ(names[1], "named.same_leaf");
-  EXPECT_EQ(gu::logical_hier_name(names[1]), "named.same_leaf");
+  // The transparent scope only keeps region-local names apart: a leaf whose logical name is unique drops it, so
+  // name-based references (an SDC get_pins/get_cells) see the source name.
+  EXPECT_EQ(names[0], "named.same_leaf");
+  EXPECT_EQ(names[1], "same_leaf");
+  EXPECT_EQ(gu::logical_hier_name(names[1]), "same_leaf");
+}
+
+TEST_F(FlattenAdmission, AnonymousScopeStaysWhenTheLogicalNameIsTaken) {
+  // Two anonymous wrappers with the same leaf, and a leaf named like a port: each keeps its physical scope.
+  invert.set_name("y");
+  auto root  = make_graph(source, "taken_root");
+  auto left  = instance(*root, child->get_io());
+  auto right = instance(*root, child->get_io());
+  left.connect_sink(root->get_output_pin("y"));
+  (void)right;
+  hhds::GraphLibrary destination;
+  const auto         flat = flatten_hierarchy(root.get(), &destination, "taken", nullptr, false, {}, {}, true);
+  ASSERT_TRUE(flat);
+  std::vector<std::string> names;
+  for (auto node : flat->body().nodes()) {
+    if (gu::type_op_of(node) == Ntype_op::Not) {
+      names.emplace_back(node.get_name());
+    }
+  }
+  ASSERT_EQ(names.size(), 2);
+  for (const auto& name : names) {
+    EXPECT_TRUE(name.starts_with(gu::transparent_instance_prefix) && name.ends_with(".y")) << name;
+  }
 }
 
 TEST_F(FlattenAdmission, SynthesisColorGroupsAreScopedPerPhysicalInstance) {

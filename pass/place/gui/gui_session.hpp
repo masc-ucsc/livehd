@@ -2,7 +2,7 @@
 #pragma once
 #include "gui_policy.hpp"
 #include "rapidjson/fwd.h"
-// Interactive placement session (`lhd synth --gui`, todo/livehd/2i-interact.html).
+// Interactive placement session (`lhd synth --gui`; agent channel: .claude/skills/livehd/agent_socket.md).
 //
 // The flow thread publishes frames and blocks inside poll()/gate() while the
 // user has paused; one server thread (gui_server.cpp) turns HTTP requests into

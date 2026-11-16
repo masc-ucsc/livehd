@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TODO 2t-timing_closure_plan — what remains of the timing-closure plan</title>
+<link rel="stylesheet" href="../todo.css">
+</head>
+<body>
+<nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
+<main>
+<h1><strong class="item-id">2t-timing_closure_plan</strong> Timing forces in global placement: what remains of the timing-closure plan</h1>
+<p><span class="status">Written 2026-11-15 from <a href="timing_closure_plan.md">timing_closure_plan.md</a>
+(design, 2026-10-24) and the closed 2t-timeclosure page (paused 2026-10-25). Nothing below is started.
+Option and step names are proposals.</span></p>
+
+<p>The 2026-10-24 plan describes a single-threaded timing loop inside global placement (GP). It has a
+cheap timer, timing forces on the placer, early virtual buffers, a latched phase controller, and
+buffering and sizing during GP. Part of it was built as an experiment. Today the native GP timing
+loop runs only from <code>tools/timeclosure_gp_probe</code>; <code>lhd</code> cannot turn it on.
+The timer part has moved to <a href="2q-fasttimer.html">2q-fasttimer</a>. This page keeps what
+is still pending and worth doing. It also lists what is dropped, and why.</p>
+
+<h2>Where the plan stands</h2>
+<table>
+<tr><th>Plan section</th><th>State</th><th>Where</th></tr>
+<tr><td>Late-mode timing proxy (rise/fall, unateness, NLDM, worst predecessor)</td><td>Done as <code>late::Proxy</code>
+with an effective-capacitance driver fit. 2q replaces it with a lean engine (total load, N corners).</td><td><code>pass/place/late_timing</code>; 2q</td></tr>
+<tr><td>Star wire model with cached Steiner correction</td><td>Done (calibrated admittance, per-net load ratio, refresh by overflow drop and age)</td><td><code>star_rc</code>, <code>rc_cache</code></td></tr>
+<tr><td>Incremental timing</td><td>Not in <code>late::Proxy</code> (full walks)</td><td>2q step G</td></tr>
+<tr><td>Path-style wire factors, offline fit against routed runs</td><td>Not done</td><td>2q step I (offline OpenSTA calibration)</td></tr>
+<tr><td>Fidelity metrics against a reference timer</td><td>Done: near-critical Jaccard and Kendall tau-b</td><td><code>timing_comparison</code></td></tr>
+<tr><td>Rebased achievable period, 10% window, soft maximum, flow-conserving multipliers</td><td>Done (experimental)</td><td><code>objective/period</code></td></tr>
+<tr><td>WNS guard (best snapshot, revert, shrink temperature)</td><td>Done (experimental)</td><td><code>Period_guard</code></td></tr>
+<tr><td>Hybrid pin weights, per-pin smoothing, driver-to-sink wirelength (t = 0.25)</td><td>Done (experimental)</td><td><code>forces/pin_weights</code>, <code>forces/gp_timing</code></td></tr>
+<tr><td>Timing priorities in legalization</td><td>Done (experimental, off)</td><td><code>Legalization_strength</code> in <code>gp_timing</code></td></tr>
+<tr><td>Gate controller (Theil–Sen trend, latched phases, budget)</td><td>Done as an offline replay only; GP uses a fixed start (200) and interval (10)</td><td><code>timeclosure</code>, <code>tools/timeclosure_replay</code>; step T4</td></tr>
+<tr><td>Buffering candidates by net class</td><td>Partial: local stage evaluator, exact bounded CPB-style topology search, row-site reservations, a negotiation ledger. No scalable van Ginneken/CPB/BEN, and no virtual buffers in the timing model or the density map.</td><td><code>pass/place/buffering</code>; steps T5, T6</td></tr>
+<tr><td>Phase-7 buffers and LR sizing inside GP</td><td>Not done</td><td>Dropped (below)</td></tr>
+<tr><td>Resynthesis phases 4–5</td><td>Not done</td><td><a href="2is-incsynth.html">2is-incsynth</a></td></tr>
+<tr><td>Hold</td><td>Not done</td><td>2q step J (guard, best effort)</td></tr>
+</table>
+
+<h2>What the experiments showed</h2>
+<p>The experiments ran on HighTide asap7 CNN and litepci, from OpenROAD's preCTS netlist, without
+resynthesis. The numbers come from the closed 2t page. Its evidence directory,
+<code>repros/timeclosure_20261024/</code>, is no longer in the tree.</p>
+<ul>
+<li><strong>Mixed, unconverged results.</strong> CNN, 20 GP steps with weights: OpenSTA setup WNS improved
+by 690 ps, but HPWL rose 18.6%. Over 40 steps WNS regressed by 135 ps. A run bounded by density overflow
+improved WNS by 319 ps, with HPWL up 48%. No run reached GP convergence, and no routed win was shown.</li>
+<li><strong>Legalization ate the gain.</strong> On the 40-step pair, legalization lost 1.85–2.26 ns of
+modeled WNS.</li>
+<li><strong>Timer coverage blocked most runs.</strong> Litepci aborted on effective-capacitance driver-fit
+failures, and strict legal references failed coverage on both designs. 2q's total-load model removes
+this failure class.</li>
+</ul>
+
+<h2>Steps</h2>
+<ul class="subtasks">
+<li><strong>T1 — Move the timing forces to the 2q engine.</strong> <code>Pin_weight_bank</code>,
+<code>Period_guard</code> and <code>Gp_timing_session</code> take <code>late::Result</code>. After 2q step E,
+switch them to the engine's numeric pins, criticality and worst predecessors, and drop the
+<code>late::Proxy</code> and <code>sdc_subset</code> dependencies so 2q's cleanup can delete them.
+Exit: the same weights on the existing fixtures within tolerance; CNN and litepci run with no
+unsupported coverage.</li>
+<li><strong>T2 — One opt-in option in <code>lhd</code>.</strong> For example <code>synth.place.timing_forces=true</code>,
+with typed settings under it. Off leaves today's flow unchanged. Reject explicit settings that conflict with
+the legacy checkpoint and repair policies, so two timing loops cannot run at once. Move the probe's
+needed setup into the flow, then delete <code>tools/timeclosure_gp_probe</code>.</li>
+<li><strong>T3 — Keep the gain, bound the cost.</strong> Cap the driver-to-sink coefficient and the pin
+weights by their effect on HPWL outside the window. Turn on timing priorities in legalization under the
+option. Measure WNS before and after legalization on every run. Exit (proposal): the final legal WNS keeps at
+least half of the GP-modeled gain, and HPWL grows at most 5%.</li>
+<li><strong>T4 — Live gate controller.</strong> Feed <code>timeclosure::Controller</code> from GP samples and let
+it decide when timing forces start, replacing the fixed start and interval. Replay saved traces first, then
+confirm on live runs. Phases: initial, memory growth and RUDY, timing, end of GP. Phases 4–7 of the old plan
+are gone.</li>
+<li><strong>T5 — Early buffered delay for long nets.</strong> In the engine's wire model, time a net longer than the
+maximum unbuffered length L with the linear delay of an optimally buffered line (Otten–Brayton) instead of the
+quadratic RC delay. Fit the per-unit delay to what the resize engine actually inserts. Without this, the
+forces pull hard on long nets that buffering fixes later anyway. Exit: buffered nets rank the same before and
+after the resize engine runs.</li>
+<li><strong>T6 — Gap slots for gap-crossing nets (only if T5 shows these nets matter).</strong> For window nets
+with fanout ≤ 3 that cross a macro gap, choose the gap with <code>buffering/graph_search</code>. Reserve the
+buffer area in the density bins over that gap, and price contested gaps with PathFinder-style history costs
+on <code>Site_reservations</code>. Exit: fewer buffers legalized out of their gap, and no HPWL growth on
+nets outside the window.</li>
+<li><strong>T7 — Acceptance.</strong> Run end to end against the default flow (DREAMPlace timing-driven weights,
+the 1f loop, the resize engine) on HighTide asap7 CNN, litepci and minimax. Compare final legal WNS and TNS,
+routed WNS, HPWL and wall time, using the 2q R9 protocol. Flip the default only on a win.</li>
+<li><strong>T8 — Cleanup.</strong> Delete what is not adopted: the experimental <code>gp_timing</code> paths
+that T1–T4 do not keep, the diagnostic <code>buffering/gap_forces</code> carrier if T6 is skipped, and
+<code>tools/timeclosure_replay</code> if T4 is not adopted.</li>
+</ul>
+
+<h2>Dropped from the old plan</h2>
+<ul>
+<li><strong>Buffers and LR sizing inside GP (old phase 7)</strong>: a masked buffer pool, transactional
+materialization, and Lagrangian sizing (Chen–Chu–Wong, Flach et al., Sharma–Chu). After GP, the resize engine
+(<code>synth.place.resize.engine=new</code>) already does path-based sizing and buffering, with legalization,
+and 2q step G moves it to the new engine. Revisit only if T7 shows a gap. Vt swap already exists as
+<code>synth.place.resize.vt_swap</code>.</li>
+<li><strong>BEN for fanout ≥ 4, and full Hanan-graph negotiation</strong>: no design has shown a need.</li>
+<li><strong>Resynthesis during GP (old phases 4–5)</strong>: owned by <a href="2is-incsynth.html">2is-incsynth</a>.</li>
+<li><strong>Post-route hold ECO and useful skew</strong>: left to the OpenROAD flow now that 3x-reroute is
+dropped. Hold before routing is a best-effort guard in 2q step J.</li>
+<li><strong>Timer, incremental updates, calibration and path-style factors</strong>: owned by
+<a href="2q-fasttimer.html">2q-fasttimer</a>.</li>
+</ul>
+
+<h2>Related</h2>
+<ul>
+<li><a href="timing_closure_plan.md">timing_closure_plan.md</a>: the design rationale, formulas and references.</li>
+<li><a href="2q-fasttimer.html">2q-fasttimer</a>: the timing engine these steps build on (T1 waits for its step E).</li>
+<li><a href="1f-fixes.html">1f-fixes</a>: the default timing loop that T7 compares against.</li>
+<li><code>pass/place/README.md</code>, "Timing-closure observation controller": acceptance gates and the
+current interfaces.</li>
+</ul>
+</main>
+<footer>LiveHD TODO · 2t-timing_closure_plan</footer>
+</body>
+</html>

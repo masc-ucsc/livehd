@@ -40,6 +40,7 @@ protected:
     options.macro_overlap_weight = options.macro_jitter = 0;
     options.io_iterations = options.schedule_iterations = 0;
     options.halo_x = options.halo_y = 0;
+    options.core_margin             = 0;  // tiny frames sized for the repairs below, die == core
     options.utilization             = .5;
     options.density                 = .8;
     options.lefs                    = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
@@ -330,6 +331,34 @@ TEST_F(Buffer_repair, FinalLegalizationReusesTimingOnlyForIdenticalPhysicalState
   EXPECT_NE(retimed.placed.parasitics->nets, initial.parasitics->nets);
   report.Parse(retimed.report.c_str());
   EXPECT_FALSE(report["reused_timing"].GetBool());
+}
+TEST_F(Buffer_repair, FinalLegalizationRestoresThePlacersOwnPins) {
+  // The macro-to-cell handoff freezes pins for its solve; without an imported floorplan they stay the placer's
+  // own, so the final handoff may still shape them on the IO layers. Restoring the freeze left asap7 pins on the
+  // seed layer, with no router access point (partition_a, DRT-0074).
+  options.density = .5;
+  graph->get_output_pin("y").connect_driver(gate("sky130_fd_sc_hd__inv_1", "sink", graph->get_input_pin("a")));
+  auto initial = place(*graph, flat, options);
+  ASSERT_FALSE(initial.floorplan.terminals.empty());
+  for (auto& terminal : initial.floorplan.terminals) {
+    terminal.status = physical::Status::FIXED;  // a stage freeze
+  }
+  const auto evaluate = [&](const Result& state) { return timing(state); };
+  const auto own      = finalize_placement(initial, options, evaluate);
+  for (size_t i = 0; i < own.placed.floorplan.terminals.size(); ++i) {
+    const auto& t = own.placed.floorplan.terminals[i];
+    EXPECT_EQ(t.status, physical::Status::PLACED) << t.name;
+    EXPECT_EQ(std::pair(t.x, t.y), std::pair(initial.floorplan.terminals[i].x, initial.floorplan.terminals[i].y)) << t.name;
+  }
+  // Pins of an imported floorplan are the user's: their FIXED status survives.
+  const auto def = std::filesystem::path(std::getenv("TEST_TMPDIR")) / "user_pins.def";
+  physical::write_def(initial.floorplan, def.string());
+  auto user      = options;
+  user.floorplan = def.string();
+  const auto kept = finalize_placement(initial, user, evaluate);
+  for (const auto& t : kept.placed.floorplan.terminals) {
+    EXPECT_EQ(t.status, physical::Status::FIXED) << t.name;
+  }
 }
 TEST_F(Buffer_repair, FinalLegalizationPreservesOptimizerProvenanceAndRefreshesGeometry) {
   graph->get_output_pin("y").connect_driver(gate("sky130_fd_sc_hd__inv_1", "sink", graph->get_input_pin("a")));

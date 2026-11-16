@@ -173,6 +173,7 @@ private:
   void  wire_edges(Ictx* ctx);
   void  wire_top_outputs(Ictx* top_ctx);
   void  complete_bbox_outputs(Ictx* ctx);
+  void  drop_unneeded_transparent_scopes();
 
   [[nodiscard]] hhds::Pin_class resolve_driver(Ictx* ctx, const hhds::Pin_class& d);
   [[nodiscard]] hhds::Pin_class resolve_output_of(Ictx* cctx, std::string_view oname);
@@ -823,10 +824,53 @@ std::shared_ptr<hhds::Graph> Flattener::run(std::string_view flat_name) {
   if (failed_) {
     return nullptr;
   }
+  if (physical_names_) {
+    drop_unneeded_transparent_scopes();
+  }
   admit("flatten-complete", 0);
   groups_->flush();
   blocks_->flush();
   return flat;
+}
+
+// A region wrapper's transparent scope (`__flat___sub_<nid>.`) only keeps region-local names apart. A cell whose
+// logical name (transparent components dropped) is unique in the flat graph does not need it, and keeping it
+// breaks every name-based reference downstream: an SDC `get_pins pcie_us/user_clk`, a set_false_path to a
+// register, a macro placement script. Rename exactly those cells; a logical name two cells share (the ABC gates
+// of two regions, `g238_NAND2x1`) keeps the physical scope on both, so no name ever collides.
+void Flattener::drop_unneeded_transparent_scopes() {
+  absl::flat_hash_map<std::string, uint32_t>                  uses;
+  std::vector<std::pair<hhds::Node_class, std::string>> candidates;
+  // A port name is taken too: Verilog shares one namespace between instances and nets, and a register named like
+  // its output port (`q1`) would come out renamed (`q1_cgen1`) by the writer instead.
+  for (const auto* decls : {&flat_->get_io()->get_input_pin_decls(), &flat_->get_io()->get_output_pin_decls()}) {
+    for (const auto& d : *decls) {
+      ++uses[d.name];
+    }
+  }
+  for (auto n : flat_->body().nodes()) {
+    if (!gu::has_name(n)) {
+      ++uses[gu::default_instance_name(n)];
+      continue;
+    }
+    const auto name = std::string{gu::node_name_of(n)};
+    if (name.find('\x1f') != std::string::npos || name.find(gu::transparent_instance_prefix) == std::string::npos) {
+      ++uses[name];
+      continue;
+    }
+    auto logical = gu::logical_hier_name(name, true);
+    if (logical.empty() || logical == name) {
+      ++uses[name];
+      continue;
+    }
+    ++uses[logical];
+    candidates.emplace_back(n, std::move(logical));
+  }
+  for (auto& [n, logical] : candidates) {
+    if (uses[logical] == 1) {
+      n.attr(hhds::attrs::name).set(logical);
+    }
+  }
 }
 
 }  // namespace

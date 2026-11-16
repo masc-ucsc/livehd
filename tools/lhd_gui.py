@@ -17,6 +17,9 @@ paints (highlights, selection) shows up in the page at once.
   tools/lhd_gui.py --workdir W macro_scan node=ram0 grid='{"nx":12,"ny":12}' top=5   # ranked positions by pin wirelength
   tools/lhd_gui.py --retry 120 --workdir W state             # any command, riding out a restart: the socket is down for a moment
 
+`help` returns an overview (command groups, the usual loop) and the full command reference. Guide:
+.claude/skills/livehd/agent_socket.md
+
 Values are JSON when they parse (numbers, true/false, lists), else strings. The reply is printed as JSON; the exit
 status is 1 when it says "ok": false."""
 import argparse

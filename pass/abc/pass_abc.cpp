@@ -155,7 +155,8 @@ void Pass_abc::add_mapping_labels(Eprp_method& m) {
   m.add_label_optional("icg_fanout",
                        "max register clock pins one clock net drives inside a region (a region input or a clock gate's "
                        "output): past it the net is dealt out through a tree of the library's smallest buffer. One ICG or "
-                       "input on thousands of flops is an unbuffered net that dominates gate-level timing (0 disables)",
+                       "input on thousands of flops is an unbuffered net that dominates gate-level timing (0 disables; lhd synth with "
+                       "synth.place=true defaults it to 0, since CTS owns the clock nets of a placed netlist)",
                        "16");
   m.add_label_optional("icg_input_min",
                        "register bits in the design past which the primary clock net is also dealt out through the "

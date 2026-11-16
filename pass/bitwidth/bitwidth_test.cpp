@@ -362,6 +362,33 @@ TEST(BitwidthInfer, SignedProductKeepsCrossZeroRange) {
   EXPECT_EQ(gu::bits_of(product.get_driver_pin(0)), 8);  // [-56,64], not [49,64]
 }
 
+// A body-less child (a blackbox stub, a Liberty cell) has an interface but no graph. Its declared output width
+// still seeds the instance output: `~pcie_us.x` reached pass.formal unsized on litepci.
+TEST(BitwidthInfer, BlackboxInstanceOutputSeedsItsReaders) {
+  namespace gu = livehd::graph_util;
+  auto& lib   = livehd::Hhds_graph_library::instance("lgdb_bitwidth_test");
+  auto  stub  = lib.create_io("bw_blackbox_stub");
+  stub->add_input("i", 1);
+  stub->set_bits("i", 1);
+  stub->add_output("x", 2);
+  stub->set_bits("x", 4);
+  stub->set_unsign("x", true);
+  auto gio = lib.create_io("bw_blackbox_reader");
+  gio->add_input("a", 1);
+  gio->set_bits("a", 1);
+  gio->add_output("o", 2);
+  auto g    = gio->create_graph();
+  auto inst = gu::create_typed_node(*g, Ntype_op::Sub);
+  inst.set_subnode(stub);
+  ASSERT_EQ(inst.get_subnode_graph(), nullptr);
+  g->get_input_pin("a").connect_sink(inst.create_sink_pin("i"));
+  auto inv = gu::create_typed_node(*g, Ntype_op::Not);
+  inst.create_driver_pin("x").connect_sink(gu::setup_sink_pid(inv, 0));
+  inv.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
+  Bitwidth(10).do_trans(g);
+  EXPECT_EQ(gu::bits_of(inv.get_driver_pin(0)), 5);  // ~[0,15] = [-16,-1]: signed 5 bits
+}
+
 TEST(BitwidthInfer, MaskDoesNotFoldNonmonotoneInterval) {
   namespace gu = livehd::graph_util;
   auto& lib    = livehd::Hhds_graph_library::instance("lgdb_bitwidth_test");
