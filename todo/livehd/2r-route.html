@@ -334,12 +334,22 @@ and <code>area_fit</code>'s dependency on Plan. Drop <code>//third_party/viecut<
 <code>sat_solver</code> and <code>satlegalize</code> stay: the regular legalizer uses them.</td>
 <td>The build has no Local or Final code, the legroute option table is a handful of entries, and
 the step B arms that survive give the same numbers as before the deletion.</td></tr>
-<tr><td>D</td><td><strong>Build the step.</strong> Free grid-cell size (R9), per-grid-cell site
-capacity with the repair reserve (C1) and assignment, the per-layer freeze test (C2), the windowed
-greedy plus Abacus call (R11), freezing, and the incremental global-placement repair (R10).</td>
-<td>The step closes the hard cases or reports exactly which grid cells it could not close, with
-unit tests for assignment, the reserve, freezing, the windowed legalizer and the repair
-region.</td></tr>
+<tr><td>D1</td><td><strong>Grid and capacity.</strong> Grid-cell size as a free parameter in tracks
+(R9). Layers, tracks and blockages from the LEF and DEF for any technology (B2), capacity and
+overflow per layer (C2), calibrated against OpenROAD's derated global router. Fix the handoff recipe
+(B1) first.</td>
+<td>On the five gate cases the router's per-layer overflow agrees with OpenROAD's global router on
+which cases fail and on which layers, including nangate45; unit tests for the grid on three
+technologies.</td></tr>
+<tr><td>D2</td><td><strong>Assign, prove, freeze.</strong> Per-grid-cell site capacity with the repair
+reserve (C1), assignment of excess cells, the per-layer freeze test (C2), and the windowed greedy
+plus Abacus call (R11).</td>
+<td>Unit tests for assignment, the reserve, freezing and the windowed legalizer; frozen cells do not
+move in later rounds.</td></tr>
+<tr><td>D3</td><td><strong>Repair loop.</strong> Incremental global placement on the cells around
+failing grid cells with everything else fixed (R10), round budget, and the final report.</td>
+<td>The step closes the hard cases or reports exactly which grid cells it could not close, with a
+unit test for the repair region.</td></tr>
 <tr><td>E</td><td><strong>Gate and default.</strong> Run both gate tables, then the backend
 regression with the step on. Turn it on by default (R14) and update the tests and docs that state
 the default.</td>
