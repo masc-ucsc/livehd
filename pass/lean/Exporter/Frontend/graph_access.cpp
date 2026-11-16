@@ -368,6 +368,18 @@ Memory_info parse_memory_info(LeanCtx& ctx, const Node& node) {
   if (mi.bits == 0 || mi.size == 0) {
     fatal(ctx, "Memory node n_" + std::to_string(mi.nid) + " is missing constant bits/size policy.");
   }
+  // pass.bitwidth proves every port address inside [0, size) and records it on
+  // the node (Bitwidth::check_mem_address). Without that proof an address may
+  // reach a word the memory does not have -- the certificate's table is
+  // 2^addr_width words, and the address resize below wraps a wider index --
+  // so no certificate is written. `--set sim.debug=true` lets a debug simulator
+  // run unproven memories with a run-time check; it cannot make a certificate.
+  if (!node.attr(livehd::attrs::mem_address_proven).has()) {
+    fatal(ctx,
+          "Memory node n_" + std::to_string(mi.nid) + " (size " + std::to_string(mi.size)
+              + "): pass.bitwidth did not prove every port address inside [0, size), so no certificate is written"
+              + " (was the design compiled with --set sim.debug=true?)");
+  }
   check_width(ctx, node, mi.bits, "memory data");
   mi.addr_width = ceil_log2_u64(mi.size);
   if (mi.addr_width == 0 || mi.addr_width > ctx.max_width) {

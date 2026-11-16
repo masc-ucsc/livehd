@@ -27,6 +27,15 @@ namespace lean_export {
 namespace {
 using livehd::graph_util::create_typed_node;
 using livehd::graph_util::set_bits;
+
+// A Memory node as pass.bitwidth leaves it: every port address proven inside
+// [0, size) (Bitwidth::check_mem_address). pass.lean writes no certificate for a
+// memory without that mark (UnprovenMemoryIsRefused).
+auto create_proven_memory(auto& g) {
+  auto m = create_typed_node(g, Ntype_op::Memory);
+  m.attr(livehd::attrs::mem_address_proven).set(uint32_t{1});
+  return m;
+}
 TEST(DesignScan, OwnsPinsAndPreservesPortDeclarationRoots) {
   DesignScan design;
   {
@@ -865,7 +874,7 @@ TEST(DesignScan, SynchronousRomRetainsContentsAndEnable) {
   io->add_output("data", 1);
   io->set_bits("data", 8);
   auto g      = io->create_graph();
-  auto memory = create_typed_node(*g, Ntype_op::Memory);
+  auto memory = create_proven_memory(*g);
   set_bits(memory.create_driver_pin(0), 8);
   auto policy = [&](std::string_view name, int64_t value) {
     auto pin = livehd::graph_util::create_const(*g, *Dlop::create_integer(value));
@@ -885,6 +894,43 @@ TEST(DesignScan, SynchronousRomRetainsContentsAndEnable) {
   EXPECT_TRUE(cert.memories.empty());
   EXPECT_EQ(cert.sources[0].rom_contents, (std::vector<std::string>{"1", "2", "3"}));
   EXPECT_EQ(cert.nodes.back().op.kind, Operation::MuxBool);
+}
+
+// The same ROM WITHOUT pass.bitwidth's address proof (what `--set
+// sim.debug=true` leaves): no certificate is written, and the refusal says why.
+TEST(DesignScan, UnprovenMemoryIsRefused) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_scan_unproven");
+  auto  io  = lib.create_io("unproven_rom");
+  io->add_input("address", 1);
+  io->set_bits("address", 2);
+  io->add_input("enable", 2);
+  io->set_bits("enable", 1);
+  io->add_output("data", 1);
+  io->set_bits("data", 8);
+  auto g      = io->create_graph();
+  auto memory = create_typed_node(*g, Ntype_op::Memory);
+  set_bits(memory.create_driver_pin(0), 8);
+  auto policy = [&](std::string_view name, int64_t value) {
+    auto pin = livehd::graph_util::create_const(*g, *Dlop::create_integer(value));
+    pin.connect_sink(memory.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Memory, name)));
+  };
+  policy("bits", 8);
+  policy("size", 3);
+  policy("type", 1);
+  policy("rdport", 1);
+  policy("initial", 0x030201);
+  g->get_input_pin("address").connect_sink(memory.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Memory, "addr")));
+  g->get_input_pin("enable").connect_sink(memory.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Memory, "enable")));
+  memory.create_driver_pin(0).connect_sink(g->get_output_pin("data"));
+  try {
+    const auto design = scan_design(*g, {});
+    (void)build_certificate(design, {});
+    FAIL() << "a memory pass.bitwidth did not prove was exported";
+  } catch (const std::exception& e) {
+    EXPECT_NE(std::string(e.what()).find("pass.bitwidth did not prove every port address inside [0, size)"),
+              std::string::npos)
+        << e.what();
+  }
 }
 // Three transparent wrappers may sit between a primary input and an
 // asynchronous reset pin: the emitter's arity-1 Or resize, a zero-based
@@ -1951,7 +1997,7 @@ std::shared_ptr<hhds::Graph> build_mem_fixture(std::string_view lgdb, bool read_
   auto g = io->create_graph();
 
   // -- the RAM: write port 0, synchronous read port 1, both on clk_a ---------
-  auto ram = create_typed_node(*g, Ntype_op::Memory);
+  auto ram = create_proven_memory(*g);
   const uint32_t wport = read_port_first ? 1 : 0;
   const uint32_t rport = 1 - wport;
   // The read port's data output: pin (#write ports + read ordinal) = 1, which
@@ -1989,7 +2035,7 @@ std::shared_ptr<hhds::Graph> build_mem_fixture(std::string_view lgdb, bool read_
   ram.create_driver_pin(1).connect_sink(g->get_output_pin("rdata"));
 
   // -- the ROM on the OTHER domain -----------------------------------------
-  auto rom = create_typed_node(*g, Ntype_op::Memory);
+  auto rom = create_proven_memory(*g);
   set_bits(rom.create_driver_pin(0), 8);
   auto osink = [&](std::string_view n) { return rom.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Memory, n)); };
   auto oconst = [&](std::string_view n, int64_t v) {
@@ -3072,7 +3118,7 @@ TEST(DesignScanClocks, PerReadRowForwardingValueOracle) {
   io->add_output("rd1", 2);
   io->set_bits("rd1", 8);
   auto       g       = io->create_graph();
-  auto       mem     = create_typed_node(*g, Ntype_op::Memory);
+  auto       mem     = create_proven_memory(*g);
   const auto mstride = static_cast<uint32_t>(Ntype::Memory_port_stride);
   auto       sink    = [&](std::string_view n, uint32_t port) {
     return mem.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Memory, n) + port * mstride);
@@ -3214,7 +3260,7 @@ TEST(DesignScanClocks, TwoWriteTwoReadCollisionValueOracle) {
   io->add_output("rd1", 2);
   io->set_bits("rd1", 8);
   auto       g       = io->create_graph();
-  auto       mem     = create_typed_node(*g, Ntype_op::Memory);
+  auto       mem     = create_proven_memory(*g);
   const auto mstride = static_cast<uint32_t>(Ntype::Memory_port_stride);
   auto       sink    = [&](std::string_view n, uint32_t port) {
     return mem.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Memory, n) + port * mstride);
@@ -3385,7 +3431,7 @@ TEST(DesignScanClocks, WideMatrixHighBitForwardingValueOracle) {
   io->add_output("rd1", 2);
   io->set_bits("rd1", 8);
   auto       g       = io->create_graph();
-  auto       mem     = create_typed_node(*g, Ntype_op::Memory);
+  auto       mem     = create_proven_memory(*g);
   const auto mstride = static_cast<uint32_t>(Ntype::Memory_port_stride);
   auto       sink    = [&](std::string_view n, uint32_t port) {
     return mem.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Memory, n) + port * mstride);
@@ -3578,7 +3624,7 @@ MemFix build_mem(hhds::GraphLibrary& lib, const std::string& mod, bool sync_read
   MemFix f;
   f.g       = io->create_graph();
   auto* g   = f.g.get();
-  f.mem     = create_typed_node(*g, Ntype_op::Memory);
+  f.mem     = create_proven_memory(*g);
   const int stride = static_cast<int>(Ntype::Memory_port_stride);
   auto      konst  = [&](int64_t v) { return livehd::graph_util::create_const(*g, *Dlop::create_integer(v)); };
   auto      global = [&](const char* name, int64_t v) {
@@ -3980,7 +4026,7 @@ std::shared_ptr<hhds::Graph> build_chained_memories(hhds::GraphLibrary& lib, con
   const int stride = static_cast<int>(Ntype::Memory_port_stride);
   auto      konst  = [&](int64_t v) { return livehd::graph_util::create_const(*g, *Dlop::create_integer(v)); };
   auto      build  = [&](const hhds::Pin_class& wr_data, hhds::Node_class* out_mem) {
-    auto mem    = create_typed_node(*g, Ntype_op::Memory);
+    auto mem    = create_proven_memory(*g);
     if (out_mem != nullptr) {
       *out_mem = mem;
     }
