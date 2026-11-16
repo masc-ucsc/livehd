@@ -1050,6 +1050,18 @@ void merge_mapper_sets(const Options& opts, std::string_view method, Eprp_var::E
       labels["memory_max_bits"] = min_bits;
     }
   }
+  // A placed netlist goes on to clock-tree synthesis (OpenROAD CTS after the DEF handoff), which owns every clock
+  // net. The mapper's clock fanout tree (pass.abc.icg_fanout, past icg_input_min register bits even on the primary
+  // clock) splits one clock into hundreds of pre-buffered 16-sink nets that CTS can only balance net by net: on
+  // NVDLA partition_p it left 1 ns of skew and hold repair ran out of buffers (RSZ-0060). The native placement
+  // timer treats clock networks as ideal, so the tree buys placement nothing. An explicit pass.abc.icg_fanout,
+  // merged below, still wins.
+  if (method == "pass.abc") {
+    const auto place = synth_set(opts, "place", "false");
+    if (!place.empty() && place != "false" && place != "0" && place != "off") {
+      labels["icg_fanout"] = "0";
+    }
+  }
   // The shared clock fraction applies when an SDC actually defines a clock.
   // Explicit mapper budgets win; an explicit fraction without a clock is an
   // error, while an untimed/default invocation remains supported.

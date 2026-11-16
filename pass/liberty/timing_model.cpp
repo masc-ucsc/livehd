@@ -5,6 +5,7 @@
 #include <cctype>
 #include <charconv>
 #include <cmath>
+#include <format>
 #include <sstream>
 #include <stdexcept>
 #include <utility>
@@ -667,8 +668,20 @@ Library parse(std::string_view text) {
           throw std::invalid_argument("duplicate Liberty pin");
         }
       }
-      if (!result.cells.emplace(cell.name, std::move(cell)).second) {
-        throw std::invalid_argument("duplicate Liberty cell name across libraries/corners");
+      const auto cell_name = cell.name;
+      if (const auto [it, inserted] = result.cells.try_emplace(cell_name, std::move(cell)); !inserted) {
+        // try_emplace leaves `cell` intact when the name exists. The same model loaded twice is harmless;
+        // only the owning library name may differ (a merged file renames its library group).
+        auto same    = cell;
+        same.library = it->second.library;
+        if (!(same == it->second)) {
+          throw std::invalid_argument(std::format(
+              "duplicate Liberty cell name across libraries/corners: cell '{}' is defined in library '{}' and again, with a "
+              "different model, in library '{}'",
+              cell_name,
+              it->second.library,
+              library_name));
+        }
       }
     }
   }

@@ -1461,8 +1461,13 @@ double time_nested_ifs(int depth) {
 // output, live past every if, is killed per level.
 TEST(TreeAegScale, NestedIfsAreLinearInDepth) {
   time_nested_ifs(500);  // warm the pools
-  const double t1 = time_nested_ifs(1000);
-  const double t4 = time_nested_ifs(4000);
+  // Best of three: a loaded machine (a whole-repo `bazel test`) only ever makes a sample slower, and a 5 ms
+  // baseline is easily doubled by one scheduling hiccup. Linear is 4x, quadratic 16x.
+  double t1 = 1e9, t4 = 1e9;
+  for (int i = 0; i < 3; ++i) {
+    t1 = std::min(t1, time_nested_ifs(1000));
+    t4 = std::min(t4, time_nested_ifs(4000));
+  }
   EXPECT_LT(t4, 8.0 * std::max(t1, 1e-3)) << "depth 1000 " << t1 << "s, depth 4000 " << t4 << "s";
 }
 

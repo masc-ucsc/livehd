@@ -61,6 +61,7 @@
 #include <vector>
 
 #include "absl/container/flat_hash_set.h"
+#include "absl/strings/str_join.h"
 #include "absl/strings/str_split.h"
 #include "attrs.hpp"
 #include "compile_salt.hpp"
@@ -3362,15 +3363,19 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
           return std::move(*text);
         };
         livehd::timing::fast::Physical_ranker::Options ranker_options;
-        bool                                           first_file = true;
+        std::vector<std::string>                       loaded;  // the files of the setup corner, in order
         for (const auto path : absl::StrSplit(liberty, absl::ByAnyChar(", \t\n"), absl::SkipEmpty())) {
           auto text = read_text(path);
-          if (first_file) {
-            // Macro libraries (SRAM, hard macros) join the setup corner.
-            for (const auto extra : absl::StrSplit(extra_libs(), absl::ByAnyChar(", \t\n"), absl::SkipEmpty())) {
-              text += "\n" + read_text(extra);
+          loaded.emplace_back(path);
+          // Macro libraries (SRAM, hard macros) join the setup corner. A path listed twice (or equal to
+          // synth.liberty) is read once; a macro library that synth.liberty already contains is merged by
+          // the parser, which keeps an identical cell once and rejects a conflicting one.
+          for (const auto extra : absl::StrSplit(extra_libs(), absl::ByAnyChar(", \t\n"), absl::SkipEmpty())) {
+            if (std::ranges::find(loaded, extra) != loaded.end()) {
+              continue;
             }
-            first_file = false;
+            text += "\n" + read_text(extra);
+            loaded.emplace_back(extra);
           }
           ranker_options.liberty_texts.push_back(std::move(text));
           ranker_options.corner_names.emplace_back(path);
@@ -3379,7 +3384,15 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
         if (!sdc.empty()) {
           ranker_options.sdc_text = read_text(sdc);
         }
-        return std::make_unique<livehd::timing::fast::Physical_ranker>(std::move(ranker_options));
+        try {
+          return std::make_unique<livehd::timing::fast::Physical_ranker>(std::move(ranker_options));
+        } catch (const std::invalid_argument& error) {
+          throw Lhd_error{"config",
+                          std::string("synth.timing.engine=fast cannot load the Liberty corner: ") + error.what(),
+                          "files read (synth.liberty, then generated SRAM and synth.macro_liberty): " + absl::StrJoin(loaded, ", ")
+                              + ". A macro library already appended to synth.liberty need not be listed again in "
+                                "synth.macro_liberty; two different models of one cell must not both be loaded."};
+        }
       };
       const auto ensure_fast_ranker = [&] {
         if (!fast_ranker) {

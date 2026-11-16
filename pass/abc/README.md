@@ -322,7 +322,9 @@ keeps a gate's latch in its AND's color so the two meet in one region.
 DFF / clear / preset cells instead, clocked by the mapped clock logic: the clock
 net crosses ABC as one PO per net (`__dclk<n>`, after the latch-cell POs), the
 read-back wires every cell's clock pin to that mapped net in pass 2b and the
-clock fanout tree buffers it like an ICG output. It needs a DFF cell and a flow
+clock fanout tree buffers it like an ICG output (`icg_fanout`; `lhd synth` with
+`synth.place=true` turns that tree off unless `pass.abc.icg_fanout` is set, because the
+placed netlist goes to CTS, which owns every clock net). It needs a DFF cell and a flow
 that keeps every latch as crossed, like the ICG and async cells; a negedge
 register (the cells are posedge-only) and a multi-bit clock stay native. Use it
 when a physical flow follows (placement refuses a native flop) and the Liberty

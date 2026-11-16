@@ -26,17 +26,20 @@ struct Table {
   // Fix every coordinate except output load. This owned scalar/1D projection
   // preserves interpolation and extrapolation for repeated load queries.
   Table               output_load_slice(const Query& fixed) const;
+  bool                operator==(const Table&) const = default;
 };
 struct Thresholds {
   std::array<double, 2> input{.5, .5}, output{.5, .5}, lower{.2, .2}, upper{.8, .8};
   double                slew_derate = 1;
   void                  validate() const;
+  bool                  operator==(const Thresholds&) const = default;
 };
 struct Arc {
   std::string                         related_pin, type, when;
   Sense                               sense = Sense::unknown;
   std::array<std::optional<Table>, 2> delay, slew, constraint;
   std::vector<std::string>            unsupported;
+  bool                                operator==(const Arc&) const = default;
 };
 struct Pin {
   std::string                          name, direction, function;
@@ -44,6 +47,7 @@ struct Pin {
   std::array<std::optional<double>, 2> capacitance_ff;
   std::optional<double>                max_capacitance_ff, max_transition_ps;
   std::vector<Arc>                     arcs;
+  bool                                 operator==(const Pin&) const = default;
 };
 struct Cell {
   std::string                name, library;
@@ -55,6 +59,7 @@ struct Cell {
   bool                       clock_gate = false;
   std::map<std::string, Pin> pins;
   std::vector<std::string>   unsupported;
+  bool                       operator==(const Cell&) const = default;
 };
 struct Library {
   Thresholds                  default_thresholds;
@@ -66,7 +71,10 @@ struct Library {
 // external process, synthesis, global cache, or mutable model is involved.
 // Malformed syntax/data throws. Unsupported models are attached to their cells
 // or arcs so an unused unsupported cell does not invalidate a usable library.
-// Duplicate cell names across libraries/corners are rejected: choose a corner
-// explicitly rather than depending on file order.
+// Duplicate cell names across libraries/corners are rejected when their models
+// differ: choose a corner explicitly rather than depending on file order. A cell
+// whose normalized model is identical (the same macro library loaded twice, e.g.
+// appended to a merged synth.liberty and also listed in synth.macro_liberty) does
+// not depend on order and is kept once. The error names the cell and both libraries.
 Library parse(std::string_view text);
 }  // namespace livehd::liberty::timing
