@@ -34,7 +34,10 @@ uint64_t         bytes(long double value) {
   if (!(value >= 0)) {
     throw std::invalid_argument("invalid chunk memory prediction");
   }
-  return value >= UINT64_MAX ? UINT64_MAX : static_cast<uint64_t>(std::ceil(value));
+  // 2^64 is exact even when long double has only double precision. Check
+  // after rounding so the integer conversion always remains in range.
+  const auto rounded = std::ceil(value);
+  return rounded >= 0x1p64L ? UINT64_MAX : static_cast<uint64_t>(rounded);
 }
 std::vector<Memory_sample> read_samples(const std::string& context, const metadata::Bundle& b) {
   std::vector<Memory_sample> out;

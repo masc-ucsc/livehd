@@ -1,7 +1,9 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "fp_chunks.hpp"
 
+#include <cmath>
 #include <filesystem>
+#include <limits>
 
 #include "chunk_geometry.hpp"
 #include "chunk_measure.hpp"
@@ -323,6 +325,21 @@ TEST(FpChunks, LogicHasUsableAreaBetweenFixedMacrosAndReplaysItsIslands) {
   auto             record = m.record(plan, "top");
   saved.replace(record);
   EXPECT_EQ(metadata::canonical(record), metadata::canonical(m.record(run(&saved), "top")));
+}
+
+TEST(FpChunks, MemoryPredictionRoundsUpAndSaturates) {
+  Chunk_predictor predictor;
+  predictor.rate = {1.25, 0, 0, 0};
+  EXPECT_EQ(predictor.variable({1, 0, 0, 0}), 2);
+  EXPECT_EQ(predictor.variable({0, 0, 0, 0}), 0);
+
+  predictor.rate[0] = std::nextafter(0x1p64, 0.);
+  EXPECT_EQ(predictor.variable({1, 0, 0, 0}), UINT64_MAX - 2047);
+  predictor.rate[0] = 0x1p64;
+  EXPECT_EQ(predictor.variable({1, 0, 0, 0}), UINT64_MAX);
+  EXPECT_EQ(predictor.variable({2, 0, 0, 0}), UINT64_MAX);
+  predictor.rate[0] = std::numeric_limits<double>::infinity();
+  EXPECT_EQ(predictor.variable({1, 0, 0, 0}), UINT64_MAX);
 }
 
 TEST(FpChunks, UpperEnvelopeBoundsSamplesAndRefusesUnsupportedMix) {
