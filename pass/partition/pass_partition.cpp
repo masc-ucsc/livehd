@@ -1,8 +1,11 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include "pass_partition.hpp"
+#include "nest_regions.hpp"
 
 #include <rapidjson/document.h>
+#include <rapidjson/stringbuffer.h>
+#include <rapidjson/writer.h>
 
 #include <algorithm>
 #include <array>
@@ -14,8 +17,10 @@
 #include <limits>
 #include <optional>
 #include <print>
+#include <set>
 #include <sstream>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -57,7 +62,7 @@ void Pass_partition::setup() {
   m.add_label_optional("flatten",
                        "auto|true|false whole-design flatten: inline the instance hierarchy and partition the flat "
                        "design as one def (auto = flatten exactly when the active coloring is `pass.color flat`); a "
-                       "single resulting region is emitted directly under the top name — one output module",
+                       "single resulting region is emitted directly under the top name — one output module (synth.flatten)",
                        "auto");
   register_pass(m);
 }
@@ -601,6 +606,10 @@ private:
   // a hash probe inside the per-edge hot loop; a whole-graph replica behind a
   // hash map is exactly the shape that explodes on a multi-million-node def.
   std::vector<std::vector<hhds::Node_class>> region_nodes_;
+  // Source files of each region's logic (the color index), collected before build_module releases its nodes.
+  std::vector<std::vector<std::string>>      region_files_;
+  absl::flat_hash_map<uint64_t, std::string> file_of_srcid_;
+  void                                       collect_region_files(uint32_t r);
   std::vector<int>                           region_color_;
   std::vector<bool>                          region_ctrl_;
   // Per-region reuse eligibility for incremental synth: cleared when two
@@ -1822,8 +1831,31 @@ hhds::Graph* Partitioner::build_pre_body_into(uint32_t r, hhds::GraphLibrary& ds
   return body.get();
 }
 
+void Partitioner::collect_region_files(uint32_t r) {
+  if (region_files_.size() <= r) {
+    region_files_.resize(region_nodes_.size());
+  }
+  std::set<std::string> files;
+  for (const auto& node : region_nodes_[r]) {
+    const auto a = node.attr(hhds::attrs::srcid);
+    if (!a.has() || a.get() == 0) {
+      continue;
+    }
+    auto it = file_of_srcid_.find(a.get());
+    if (it == file_of_srcid_.end()) {
+      const auto span = g_->source_locator().resolve_spans(static_cast<hhds::SourceId>(a.get())).primary;
+      it              = file_of_srcid_.emplace(a.get(), span.is_null() ? std::string{} : std::string{span.file}).first;
+    }
+    if (!it->second.empty()) {
+      files.insert(it->second);
+    }
+  }
+  region_files_[r].assign(files.begin(), files.end());
+}
+
 void Partitioner::build_module(uint32_t r) {
   admit("build_module", 0);
+  collect_region_files(r);
   int         color = region_color_[r];
   auto        group = livehd::synth_attr::group_name(g_, color);
   std::string name;
@@ -2317,6 +2349,96 @@ void Partitioner::build_top(const std::vector<uint32_t>& regs) {
     } else {  // Const
       gu::create_const(*t, gu::const_of(ow.cdriver)).connect_sink(out_sink);
     }
+  }
+
+  // The region index on the wrapper (pass/partition/nest_regions.hpp): every region's color, synthesis-group path and
+  // source files (the incremental color index), and the nested groups -- a child color's region is instantiated by
+  // its parent color's region, not by this wrapper (nest_regions applies it once the run's region cache has
+  // persisted the bodies).
+  absl::flat_hash_map<int, std::vector<std::string>> path_of_color;
+  std::vector<std::pair<std::string, std::string>>   pairs;
+  if (auto info = g_->get_input_node().attr(livehd::attrs::coloring_info); info.has()) {
+    rapidjson::Document d;
+    const std::string   json{info.get()};
+    d.Parse(json.c_str());
+    if (d.IsObject() && d.HasMember("synth_groups") && d["synth_groups"].IsObject()) {
+      absl::flat_hash_map<std::string, int> color_of_path;
+      for (const auto& m : d["synth_groups"].GetObject()) {
+        if (!m.value.IsObject() || !m.value.HasMember("path") || !m.value["path"].IsArray()) {
+          continue;
+        }
+        const int                color = std::atoi(m.name.GetString());
+        std::vector<std::string> path;
+        for (const auto& e : m.value["path"].GetArray()) {
+          rapidjson::StringBuffer                    b;
+          rapidjson::Writer<rapidjson::StringBuffer> w(b);
+          e.Accept(w);
+          path.emplace_back(b.GetString());
+        }
+        std::string key;
+        for (const auto& p : path) {
+          key += p + "\x1f";
+        }
+        color_of_path[key]   = color;
+        path_of_color[color] = std::move(path);
+      }
+      absl::flat_hash_map<int, std::vector<uint32_t>> regions_of_color;
+      for (const auto r : regs) {
+        regions_of_color[region_color_[r]].push_back(r);
+      }
+      std::vector<std::tuple<size_t, std::string, std::string>> nested;
+      for (const auto& [color, path] : path_of_color) {
+        const auto child = regions_of_color.find(color);
+        if (path.size() < 2 || child == regions_of_color.end() || child->second.size() != 1) {
+          continue;
+        }
+        for (size_t len = path.size() - 1; len >= 1; --len) {
+          std::string key;
+          for (size_t i = 0; i < len; ++i) {
+            key += path[i] + "\x1f";
+          }
+          const auto parent_color = color_of_path.find(key);
+          if (parent_color == color_of_path.end()) {
+            continue;
+          }
+          const auto parent = regions_of_color.find(parent_color->second);
+          if (parent != regions_of_color.end() && parent->second.size() == 1) {
+            nested.emplace_back(path.size(),
+                                std::string(module_gio_[child->second.front()]->get_name()),
+                                std::string(module_gio_[parent->second.front()]->get_name()));
+          }
+          break;
+        }
+      }
+      std::sort(nested.begin(), nested.end(), [](const auto& a, const auto& b) {
+        return std::get<0>(a) != std::get<0>(b) ? std::get<0>(a) > std::get<0>(b) : std::get<1>(a) < std::get<1>(b);
+      });
+      for (auto& [depth, child, parent] : nested) {
+        pairs.emplace_back(std::move(child), std::move(parent));
+      }
+    }
+  }
+  {
+    absl::flat_hash_map<std::string, std::string> parent_of(pairs.begin(), pairs.end());
+    std::vector<livehd::partition::Region_entry>  entries;
+    entries.reserve(regs.size());
+    for (const auto r : regs) {
+      admit("build_top-step");
+      livehd::partition::Region_entry e;
+      e.module = std::string(module_gio_[r]->get_name());
+      e.color  = region_color_[r];
+      if (const auto it = path_of_color.find(e.color); it != path_of_color.end()) {
+        e.path = it->second;
+      }
+      if (const auto it = parent_of.find(e.module); it != parent_of.end()) {
+        e.parent = it->second;
+      }
+      if (r < region_files_.size()) {
+        e.files = region_files_[r];
+      }
+      entries.push_back(std::move(e));
+    }
+    livehd::partition::record_region_index(*t, pairs, entries);
   }
 
   admit("commit", 0);

@@ -79,7 +79,7 @@ public:
   // whether to build each region's pre-body (the cache's compare artifact).
   [[nodiscard]] bool incremental() const { return incr_ != nullptr; }
 
-  // CLI-level per-region overrides (--set pass.abc.region_opts). Graph-embedded
+  // CLI-level per-region overrides (--set synth.region_opts). Graph-embedded
   // overrides (coloring_info "region_opts") are read per region in map_region.
   void set_region_opts(Region_opts_map m) { region_opts_cli_ = std::move(m); }
   // Preload source attributes before the shared timing model starts.

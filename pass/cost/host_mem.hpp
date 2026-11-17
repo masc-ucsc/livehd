@@ -25,7 +25,7 @@
 //    kills only this process; today's uncapped run drags the whole machine
 //    through swap/jetsam. That trade is the entire point of the backstop.
 //
-//  - SAMPLED ADMISSION -- process_footprint_bytes() + budget_bytes(), sampled by
+//  - SAMPLED ADMISSION -- process_footprint_bytes() + configured_budget_bytes(), sampled by
 //    pass/abc while it bit-blasts. This is what produces a *diagnosable* refusal
 //    before the backstop ever fires (see over_budget in pass/abc). It is sampled,
 //    not predicted, because the ABC mapping peak is not a constant multiple of
@@ -102,18 +102,22 @@ namespace livehd::cost {
 // PHYSICAL footprint at `budget`. Linux: the value is `budget` absolute
 // (baseline VA is a few MB). This is the HARD BACKSTOP described in the file
 // header: it protects the host, it does not produce a clean error.
-[[nodiscard]] uint64_t arm_address_space_limit(uint64_t budget);
+[[nodiscard]] uint64_t arm_address_space_limit(uint64_t budget, bool replace = false);
 
-// The budget this process is configured for: env LHD_MEMORY_BUDGET_MB when
-// set (clamped to physical - reserve), else budget_bytes(0) = physical - reserve. 0 means "unenforceable -- do
-// not gate". The environment override is read once per process; the physical
-// ceiling is rechecked on each call.
+// lhd.ram_max_mb, the process RAM ceiling: 0 = auto (default_ram_max_bytes).
+// The kernel sets it once, after option parsing, then re-installs the backstop.
+void set_ram_max_mb(uint64_t mb);
+
+// The ceiling this process is configured for: lhd.ram_max_mb when set (clamped
+// to physical RAM), else default_ram_max_bytes(). 0 means "unenforceable -- do
+// not gate". It is checked against MEASURED footprint, never a projection.
 [[nodiscard]] uint64_t configured_budget_bytes();
 
-// Convenience wrapper for process startup: resolve the budget
-// (configured_budget_bytes) and arm the RLIMIT_AS backstop. Returns the
-// installed limit (0 = not armed). Safe to call before any engine/diag init.
-[[nodiscard]] uint64_t install_memory_backstop();
+// Resolve the ceiling (configured_budget_bytes) and arm the RLIMIT_AS
+// backstop. Returns the installed limit (0 = not armed). Safe to call before
+// any engine/diag init. `replace` lets a later call (after lhd.ram_max_mb is
+// parsed) loosen the startup cap as well as tighten it, within the hard limit.
+[[nodiscard]] uint64_t install_memory_backstop(bool replace = false);
 
 // Re-arm THIS process (a just-forked child) at its 1/nsiblings share of the
 // budget. Returns the installed limit, or 0 if nothing was armed.
@@ -138,19 +142,11 @@ namespace livehd::cost {
 // Proven). Host survival is worth a lost verdict; the reverse is not.
 [[nodiscard]] uint64_t arm_child_share(int nsiblings);
 
-// Headroom left to the OS and the rest of the machine: max(2 GiB, 25% of
-// physical), capped at half of physical so a small host still gets a usable
-// budget. Not tunable -- `budget_mb` below is the tunable.
-[[nodiscard]] uint64_t reserve_bytes();
+// The default lhd.ram_max_mb: 80% of physical (or cgroup) RAM, 0 when unknown.
+[[nodiscard]] uint64_t default_ram_max_bytes();
 
-// The memory ceiling pass.abc admits against. ONE number, applied to two
-// readings (Mapper::over_budget): a single region's GROWTH over its entry RSS,
-// and the process's TOTAL footprint -- either crossing it is a refusal, because
-// growth alone cannot bound a long multi-color run whose footprint is sticky
-// after free, and total alone cannot tell one oversize region from a large run.
-// `budget_mb > 0` pins it explicitly (reproducible hosts and CI); otherwise it
-// is physical - reserve. Returns 0 when physical RAM is unknown and no explicit
-// budget was given, meaning "unenforceable -- do not gate".
+// `budget_mb` MiB when positive (an explicit limit for a tool or a test), else
+// default_ram_max_bytes().
 [[nodiscard]] uint64_t budget_bytes(int budget_mb);
 
 }  // namespace livehd::cost

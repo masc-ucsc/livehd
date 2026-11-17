@@ -67,7 +67,7 @@ for kind in test test_qn native; do
   [ "$kind" != native ] || LIB="$W/native.lib"
   D="$W/$kind"
   mkdir -p "$D"
-  run synth lg:"$W/ref" --top edges --set synth.liberty="$LIB" --set synth.opentimer=false \
+  run synth lg:"$W/ref" --top edges --set synth.liberty="$LIB" --set synth.timing=false \
     --emit-dir lg:"$D/net" --emit verilog:"$D/net.v" --workdir "$D/synth"
   run pass liberty gensim "$LIB" --emit-dir lg:"$D/models" --emit verilog:"$D/models.v" --workdir "$D/gensim"
   if [ -n "$sim_iv" ]; then

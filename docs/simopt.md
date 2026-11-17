@@ -697,7 +697,7 @@ let the ladder take them to L0; and the native LLVM color backend, ruling
 `fence` today; `live_words` and `backend` are applied from `--set` or a tune
 file and are never trialed on their own.
 
-Never tunable, and so never under `tune`: `sim.unknown_zero`, `sim.init_zero`
+Never tunable, and so never under `tune`: `compile.unknown_zero`, `sim.init_zero`
 and `lhd.seed` (they change simulated values), `sim.vcd*` and `sim.checkpoint*`
 (observability), `lhd.jobs`, `sim.hlop_dir`, `sim.iassert_dir` and
 `sim.compile_only` (build plumbing), and `sim.slop_u` / `sim.debug` (validation
@@ -753,7 +753,7 @@ envelope:
 
 - drv.bin samples pairs of consecutive cycles (hashing the state and the root
   inputs at t and t+1) on a jittered stride calibrated to at most 1% overhead;
-- unless the user set `sim.unknown_zero`, every `?` literal bit is ZERO-filled
+- unless the user set `compile.unknown_zero`, every `?` literal bit is ZERO-filled
   at run time (`--set sim.unknown_zero=true` to drv.bin), so two vectors can be
   compared byte for byte. An explicit user setting is always followed; an
   explicit `false` profiles with random fill and the verdict then decides on
@@ -940,7 +940,7 @@ for: no label, another design's tree, a refused trial tree), the run's stats (`I
 `I_sites`, `I_cost`, `I_cost_flat`, `I`, `q`, `pairs`, `qualifies`,
 `judgeable`), any trial and verdict, the rejected list, the pending trial,
 `converged`, and `reproduce`: the exact `--set` list that rebuilds the applied
-vector, including `sim.unknown_zero=true` when the binary zero-filled (`fill`
+vector, including `compile.unknown_zero=true` when the binary zero-filled (`fill`
 reports what the binary actually got: baked at setup, forwarded because the
 user set it, or the implicit zero fill of a profiling run). The pretty output
 prints one line such as:

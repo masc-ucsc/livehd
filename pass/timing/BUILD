@@ -126,6 +126,25 @@ cc_binary(
     deps = [":fast_timing"],
 )
 
+# lhd synth's timing.json from the fast engine (the Physical_ranker placement uses), synth.timing.engine=fast.
+cc_library(
+    name = "timing_report",
+    srcs = ["report.cpp"],
+    hdrs = ["report.hpp"],
+    copts = COPTS,
+    includes = ["."],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":physical_rank",
+        "//core",
+        "//graph",
+        "//inou/lefdef:inou_lefdef",
+        "//pass/partition:flatten",
+        "@hhds//hhds:graph",
+        "@rapidjson",
+    ],
+)
+
 # The fast engine behind the placement rank callback: placed graph + RC snapshot in, Feedback::Ranking out.
 cc_library(
     name = "physical_rank",

@@ -18,8 +18,8 @@ with open(sys.argv[1], 'w') as f:
 PY
 run_synth() {
   "$LHD" synth "$W/parallel.prp" --top parallel --workdir "$W/$1" \
-    --set synth.liberty="$LIB" --set synth.opentimer=false --set abc.threads="$2" \
-    --set abc.adder=rca --set abc.multiplier=array --set abc.barrel=log --set abc.boundary=false --emit verilog:"$W/$1.v" --result-json "$W/$1-result.json" -q
+    --set synth.liberty="$LIB" --set synth.timing=false --set abc.threads="$2" \
+    --set synth.adder=rca --set synth.multiplier=array --set synth.barrel=log --set synth.boundary=false --emit verilog:"$W/$1.v" --result-json "$W/$1-result.json" -q
 }
 run_synth serial 1
 run_synth parallel 2
@@ -83,7 +83,7 @@ for threads in 1 2 0; do
   [ "$threads" = "0" ] || thread_args=(--set "abc.threads=$threads")
   "$LHD" pass abc lg:"$W/pass-input" --top parallel --emit-dir lg:"$W/pass-$threads-net" \
     --workdir "$W/pass-$threads" --set synth.liberty="$LIB" ${thread_args[@]+"${thread_args[@]}"} \
-    --set abc.adder=rca --set abc.multiplier=array --set abc.barrel=log --set abc.boundary=false -q
+    --set synth.adder=rca --set synth.multiplier=array --set synth.barrel=log --set synth.boundary=false -q
   python3 - "$W/pass-$threads/qor.json" "$threads" <<'CHECK_PASS_THREADS'
 import json, os, sys
 q = json.load(open(sys.argv[1]))
@@ -95,7 +95,7 @@ done
 
 # A worker error must join the other workers before destroying region storage.
 if "$LHD" synth "$W/parallel.prp" --top parallel --set synth.liberty="$LIB" \
-    --set synth.opentimer=false --set abc.threads=2 --set abc.adder=rca --set abc.multiplier=array --set abc.barrel=log \
+    --set synth.timing=false --set abc.threads=2 --set synth.adder=rca --set synth.multiplier=array --set synth.barrel=log \
     --set abc.flow=invalid_parallel_test_command --workdir "$W/worker-error" \
     --result-json "$W/worker-error.json" -q; then
   echo 'invalid ABC command unexpectedly succeeded' >&2

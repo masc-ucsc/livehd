@@ -17,7 +17,7 @@
 #   7. a direct `drv.bin --set sim.tune.profile=on` run is ingested by the next
 #      `lhd sim` in that workdir -- of that design only: another design sharing
 #      the workdir discards it;
-#   8. an explicit sim.unknown_zero is forwarded to drv.bin whenever the user set
+#   8. an explicit compile.unknown_zero is forwarded to drv.bin whenever the user set
 #      it, and the envelope's fill/reproduce say what the binary actually got;
 #   9. a run that will not profile (explicit checkpoint settings) never applies a
 #      pending trial; pinning the knob the trial moves (the L2 trial moves the
@@ -363,7 +363,7 @@ done
 fi
 
 if selected unknown_zero; then
-# ---- 8. explicit sim.unknown_zero reaches drv.bin (options-ux:F1) ------------------
+# ---- 8. explicit compile.unknown_zero reaches drv.bin (options-ux:F1) ------------------
 cat >"$W/uz.prp" <<'PRP'
 pub mod uz(a:U64) -> (r:U64@[0]) {
   mut c:U64 = 0sb?
@@ -384,23 +384,23 @@ test uz.show {
 }
 PRP
 sim "$W/uz0.json" "$W/uz.prp" --workdir "$W/uz" --setup-only || fail "uz setup failed: $(cat "$W/uz0.json")"
-sim "$W/uz1.json" "$W/uz.prp" --workdir "$W/uz" --run-only --set sim.unknown_zero=true || fail "uz run 1 failed"
+sim "$W/uz1.json" "$W/uz.prp" --workdir "$W/uz" --run-only --set compile.unknown_zero=true || fail "uz run 1 failed"
 [ "$(tune "$W/uz1.json" profiling)" = "true" ] || fail "uz run 1 must profile (auto, not converged)"
-[ "$(row "$W/uz1.json" rng_draws)" = "0" ] || fail "explicit sim.unknown_zero=true under profiling drew random bits"
+[ "$(row "$W/uz1.json" rng_draws)" = "0" ] || fail "explicit compile.unknown_zero=true under profiling drew random bits"
 [ "$(tune "$W/uz1.json" fill)" = "zero" ] || fail "uz run 1: fill must be zero"
 sim "$W/uz2.json" "$W/uz.prp" --workdir "$W/uz" --run-only --set sim.tune.profile=off || fail "uz run 2 failed"
-[ "$(row "$W/uz2.json" rng_draws)" != "0" ] || fail "an unprofiled run with no sim.unknown_zero must draw random bits"
+[ "$(row "$W/uz2.json" rng_draws)" != "0" ] || fail "an unprofiled run with no compile.unknown_zero must draw random bits"
 [ "$(tune "$W/uz2.json" fill)" = "random" ] || fail "uz run 2: the envelope must report fill=random"
-tune "$W/uz2.json" reproduce | grep -q unknown_zero && fail "uz run 2: reproduce must not claim sim.unknown_zero"
-sim "$W/uz3.json" "$W/uz.prp" --workdir "$W/uz" --run-only --set sim.unknown_zero=false || fail "uz run 3 failed"
-[ "$(row "$W/uz3.json" rng_draws)" != "0" ] || fail "explicit sim.unknown_zero=false under profiling must draw"
+tune "$W/uz2.json" reproduce | grep -q unknown_zero && fail "uz run 2: reproduce must not claim compile.unknown_zero"
+sim "$W/uz3.json" "$W/uz.prp" --workdir "$W/uz" --run-only --set compile.unknown_zero=false || fail "uz run 3 failed"
+[ "$(row "$W/uz3.json" rng_draws)" != "0" ] || fail "explicit compile.unknown_zero=false under profiling must draw"
 [ "$(tune "$W/uz3.json" fill)" = "random" ] || fail "uz run 3: fill must be random"
-sim "$W/uzb0.json" "$W/uz.prp" --workdir "$W/uzb" --setup-only --set sim.unknown_zero=true || fail "uz baked setup failed"
-sim "$W/uzb1.json" "$W/uz.prp" --workdir "$W/uzb" --run-only --set sim.unknown_zero=false \
-  && fail "sim.unknown_zero=false on a binary generated with true must be refused"
+sim "$W/uzb0.json" "$W/uz.prp" --workdir "$W/uzb" --setup-only --set compile.unknown_zero=true || fail "uz baked setup failed"
+sim "$W/uzb1.json" "$W/uz.prp" --workdir "$W/uzb" --run-only --set compile.unknown_zero=false \
+  && fail "compile.unknown_zero=false on a binary generated with true must be refused"
 grep -q '"class":"usage"' "$W/uzb1.json" || fail "baked unknown_zero=false: not a usage error $(cat "$W/uzb1.json")"
 sim "$W/uzb2.json" "$W/uz.prp" --workdir "$W/uzb" --run-only --set sim.tune.profile=off || fail "uz baked run failed"
-[ "$(tune "$W/uzb2.json" fill)" = "zero" ] || fail "a binary generated with sim.unknown_zero=true zero-fills"
+[ "$(tune "$W/uzb2.json" fill)" = "zero" ] || fail "a binary generated with compile.unknown_zero=true zero-fills"
 [ "$(row "$W/uzb2.json" rng_draws)" = "0" ] || fail "a baked unknown_zero binary drew random bits"
 fi
 

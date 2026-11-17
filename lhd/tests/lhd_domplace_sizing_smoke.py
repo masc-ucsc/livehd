@@ -78,7 +78,7 @@ sdc.write_text('create_clock -name clk -period 0.3 [get_ports clk]\n')
 base = [lhd, 'synth', str(source), '--top', 'doms', '-q',
         '--set', 'synth.mapper=usyn', '--set', 'pass.usyn.clock_phases=1', '--set', 'pass.usyn.tmap=abc',
         '--set', f'synth.liberty={two_rung_lib}', '--set', f'synth.lef={libdir}/sky130hd.tlef,{two_rung_lef}',
-        '--set', f'synth.sdc={sdc}', '--set', 'pass.usyn.physical=domino_provisional', '--set', 'synth.opentimer=false',
+        '--set', f'synth.sdc={sdc}', '--set', 'pass.usyn.physical=domino_provisional', '--set', 'synth.timing=false',
         '--set', 'pass.usyn.domino_area_margin_pct=5',
         '--set', 'synth.place=true', '--set', 'synth.place.core_margin=0', '--set', 'synth.place.timing_driven=false', '--set', 'synth.place.iterations=80',
         '--set', 'synth.place.grid.density=8', '--set', 'synth.place.stage_timing=true']

@@ -129,7 +129,9 @@ void Pass_aegraph::optimize(Eprp_var& var) {
   // guard) always run.
   const auto   low_lanes   = true;
   const auto   loop_bodies = lifted_loop_bodies(var.graphs);
-  const auto   want_stats  = var.get("stats", "false") == "true";
+  const auto   want_stats  = var.get("stats", "false") == "true" || livehd::diag::enabled("pass.aegraph", "aegraph-rule")
+                             || livehd::diag::enabled("pass.aegraph", "aegraph-bit-lanes")
+                             || livehd::diag::enabled("pass.aegraph", "cprop-summary");
   const bool   after_bw    = var.get("after_bitwidth", "false") == "true";
   auto         options     = livehd::aegraph::make_options(var.get("rules_disable", ""),
                                                        var.get("rules_only", ""),

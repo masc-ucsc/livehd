@@ -388,10 +388,13 @@ void Sink::emit(Diagnostic d) {
     case Severity::info   : ++info_count_; break;  // never an error / exit-code change
   }
   init_output();
-  if (json_out_ != Json::none) {
+  // Apply the current filter here as well as in the builders: cached diagnostics
+  // and direct Sink callers bypass the builders. Keep file records for reports.
+  const bool show_stderr = d.severity != Severity::info || enabled(d.pass, d.code);
+  if (json_out_ != Json::none && (json_out_ != Json::stderr_ || show_stderr)) {
     write_json(to_jsonl(d, seq_));
   }
-  if (human_stderr_) {
+  if (human_stderr_ && show_stderr) {
     if (!stderr_jsonl_) {
       std::fputs(to_text(d, tls_locator).c_str(), stderr);
       std::fputc('\n', stderr);

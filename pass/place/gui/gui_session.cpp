@@ -96,6 +96,25 @@ std::string make_token() {
   }
   return t;
 }
+// macro_move orientations, as Ann_place::Orientation values (N, W, S, E, FN, FW, FS, FE). A fixed macro keeps its axes:
+// only the mirrors and the 180-degree turn are accepted, which a square memory proxy can always take.
+constexpr std::array<std::pair<std::string_view, int>, 4> macro_move_orientations{{{"N", 0}, {"S", 2}, {"FN", 4}, {"FS", 6}}};
+int macro_move_orientation(std::string_view name) {
+  for (const auto& [text, value] : macro_move_orientations) {
+    if (text == name) {
+      return value;
+    }
+  }
+  return -1;
+}
+std::string_view macro_move_orientation_name(double value) {
+  for (const auto& [text, code] : macro_move_orientations) {
+    if (code == int(value)) {
+      return text;
+    }
+  }
+  return "N";
+}
 }  // namespace
 
 std::string Evaluation_work::json() const {
@@ -182,7 +201,8 @@ Session::Session(Config c) : cfg_(std::move(c)) {
         Command m;
         if (parse_command(line, m).empty()) {
           for (size_t i = 0; i < m.nodes.size(); ++i) {
-            macro_moves_[m.nodes[i]] = {m.x[i], m.y[i], ++macro_order_};  // file order is move order
+            const double orient = m.orientations.empty() ? 0 : std::max(0, macro_move_orientation(m.orientations[i]));
+            macro_moves_[m.nodes[i]] = {m.x[i], m.y[i], ++macro_order_, orient};  // file order is move order
           }
         }
         continue;
@@ -214,11 +234,11 @@ Session::Session(Config c) : cfg_(std::move(c)) {
   if (!cfg_.trace_path.empty()) {
     trace_.open(cfg_.trace_path, std::ios::trunc);
     // The new trace keeps the macro moves this run started from, so the next restart finds them too.
-    std::vector<std::pair<std::string, std::array<double, 3>>> by_age(macro_moves_.begin(), macro_moves_.end());
+    std::vector<std::pair<std::string, std::array<double, 4>>> by_age(macro_moves_.begin(), macro_moves_.end());
     std::sort(by_age.begin(), by_age.end(), [](const auto& a, const auto& b) { return a.second[2] < b.second[2]; });
     for (const auto& [name, p] : by_age) {  // oldest first, so the next parse reads the same order
-      trace_ << std::format(R"({{"seq":{},"phase":"fp","iter":0,"cmd":"macro_move","nodes":["{}"],"x":[{}],"y":[{}]}})", ++seq_, esc(name),
-                            num(p[0]), num(p[1]))
+      trace_ << std::format(R"({{"seq":{},"phase":"fp","iter":0,"cmd":"macro_move","nodes":["{}"],"x":[{}],"y":[{}],"orientation":["{}"]}})",
+                            ++seq_, esc(name), num(p[0]), num(p[1]), macro_move_orientation_name(p[3]))
              << "\n";
     }
     trace_.flush();
@@ -1317,7 +1337,7 @@ void Session::macro_restart_locked() {
   }
 }
 
-std::map<std::string, std::array<double, 3>> Session::macro_moves() const {
+std::map<std::string, std::array<double, 4>> Session::macro_moves() const {
   if (controller_) {
     return wire::read<decltype(macro_moves())>(controller_->call("macro_moves"));
   }
@@ -1752,7 +1772,7 @@ void Session::apply_locked(const Command& c, Edits&) {
     bump_locked();
     return;
   }
-  if (!c.orientations.empty()) {
+  if (!c.orientations.empty() && c.cmd != "macro_move") {  // a macro_move orientation is applied by the restart
     Orientation_edits flips;
     auto              updated = std::make_shared<Scene>(*scene_);
     for (size_t i = 0; i < c.nodes.size(); ++i) {
@@ -1978,7 +1998,8 @@ void Session::apply_locked(const Command& c, Edits&) {
       if (n.movable || n.kind != Kind::fixed) {
         continue;
       }
-      macro_moves_[c.nodes[i]] = {c.x[i], c.y[i], ++macro_order_};
+      const double orient = c.orientations.empty() ? 0 : std::max(0, macro_move_orientation(c.orientations[i]));
+      macro_moves_[c.nodes[i]] = {c.x[i], c.y[i], ++macro_order_, orient};
       if (size_t(found->second) < next->x.size()) {
         next->x[size_t(found->second)] = c.x[i];
         next->y[size_t(found->second)] = c.y[i];
@@ -3921,7 +3942,7 @@ std::string Session::parse_command(const std::string& json, Command& c) const {
       return "move needs nodes[]";
     }
     if (d.HasMember("orientation")) {
-      if (c.cmd != "move") {
+      if (c.cmd != "move" && c.cmd != "macro_move") {
         return "orientation requires a movable macro";
       }
       if (d["orientation"].IsString()) {
@@ -3940,8 +3961,12 @@ std::string Session::parse_command(const std::string& json, Command& c) const {
       }
       c.halo_edges = edges == "halo";
     }
-    if (!c.orientations.empty() && !d.HasMember("align") && !d.HasMember("x") && !d.HasMember("y") && !d.HasMember("dx")
-        && !d.HasMember("dy")) {
+    if (c.cmd == "macro_move" && !c.orientations.empty()
+        && std::ranges::any_of(c.orientations, [](const auto& o) { return macro_move_orientation(o) < 0; })) {
+      return "macro_move orientation must be N, S, FN or FS";
+    }
+    if (c.cmd != "macro_move" && !c.orientations.empty() && !d.HasMember("align") && !d.HasMember("x") && !d.HasMember("y")
+        && !d.HasMember("dx") && !d.HasMember("dy")) {
       c.relative = true;
       c.x.resize(c.nodes.size());
       c.y.resize(c.nodes.size());
@@ -4162,7 +4187,7 @@ std::string Session::resolve_move_locked(Command& c, const Frame* basis, bool ca
       return "a relative or aligned move needs a movable node and " + c.nodes[k]
              + " is fixed at this gate (a placed macro): give it absolute x and y, or move it at the fp or macro gate";
     }
-    if (!c.orientations.empty()) {
+    if (!c.orientations.empty() && c.cmd != "macro_move") {  // the restarted placer checks a macro_move orientation
       const auto& node     = scene_->nodes[i];
       const bool  proposal = state_name_ == "done";
       if (!proposal && ((!orientation_provider_ && !captured_orientation) || state_name_ != "gate" || (gate_name_ != "fp" && gate_name_ != "macro"))) {

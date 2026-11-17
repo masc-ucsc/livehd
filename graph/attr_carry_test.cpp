@@ -59,6 +59,7 @@ TEST(AttrCarry, EveryNodeAttributeSurvivesARebuild) {
   src.attr(la::native_comb_boundary).set(la::native_comb_boundary_t::value_type{});
   src.attr(la::place).set(Ann_place{1.0F, 2.0F, 3.0F, 4.0F});
   src.attr(la::coloring_info).set(std::string{"info_blob"});
+  src.attr(la::region_nesting).set(std::string{"nesting_blob"});
   src.attr(la::placement_rc).set(std::string{"physical_rc_blob"});
   livehd::graph_util::Placement_block::set(src, std::string{"region:7"});
   src.attr(la::simulation_init).set(std::string{"simulation_init_blob"});
@@ -81,7 +82,7 @@ TEST(AttrCarry, EveryNodeAttributeSurvivesARebuild) {
   src.attr(la::comb_reach).set(std::string{"s 0 1\no 2 0\n"});
   src.attr(la::physical_open_inputs).set(std::vector<std::string>{"A", "B2"});
   gu::set_match(src, 9);  // the NODE overload of the dual-role `match`
-  static_assert(kNodeTagsStamped == 37, "a node-kind tag was added to LIVEHD_FOR_EACH_ATTR_TAG: stamp and check it here");
+  static_assert(kNodeTagsStamped == 38, "a node-kind tag was added to LIVEHD_FOR_EACH_ATTR_TAG: stamp and check it here");
 
   gu::carry_node_attrs(src, dst);
 
@@ -101,6 +102,7 @@ TEST(AttrCarry, EveryNodeAttributeSurvivesARebuild) {
   EXPECT_TRUE(dst.attr(la::place).has());
   EXPECT_EQ(dst.attr(la::place).get(), Ann_place(1.0F, 2.0F, 3.0F, 4.0F));
   EXPECT_EQ(dst.attr(la::coloring_info).get(), "info_blob");
+  EXPECT_EQ(dst.attr(la::region_nesting).get(), "nesting_blob");
   EXPECT_EQ(dst.attr(la::placement_rc).get(), "physical_rc_blob");
   EXPECT_EQ(livehd::graph_util::Placement_block::text(dst), "region:7");
   EXPECT_EQ(dst.attr(la::simulation_init).get(), "simulation_init_blob");
@@ -186,5 +188,6 @@ TEST(AttrCarry, AbsentAttributesAreNotMaterialized) {
   EXPECT_FALSE(dst.attr(la::proven).has());
   EXPECT_FALSE(dst.attr(la::lut).has());
   EXPECT_FALSE(dst.attr(la::coloring_info).has());
+  EXPECT_FALSE(dst.attr(la::region_nesting).has());
   EXPECT_FALSE(dst.attr(la::simulation_init).has());
 }

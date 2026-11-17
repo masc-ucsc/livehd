@@ -18,6 +18,7 @@
 #include <utility>
 #include <vector>
 
+#include "nest_regions.hpp"
 #include "absl/container/flat_hash_map.h"
 #include "debug_env.hpp"
 #include "eprp.hpp"
@@ -285,9 +286,70 @@ inline constexpr Retired_set_option kRetiredSetOptions[] = {
     {        "pass.usyn",
      "witness_bytes",              "pass.usyn no longer writes a witness archive; verify the mapped netlist with `lhd lec`. Drop the setting."                                 },
 };
+// synth.<key> options both mappers read as their label <key> (merge_mapper_sets forwards them to `lhd synth`
+// and to `lhd pass abc|usyn` alike). The pass.abc.<key> / pass.usyn.<key> spellings are retired: one knob,
+// one name, whichever mapper runs.
+inline constexpr std::string_view kSynthMapperLabels[] = {
+    "adder",           "multiplier",      "barrel",          "block_size", "specialize",    "state_sweep",
+    "merge_registers", "flat_sweep",      "clock_gate",      "clock_gate_depth", "clock_gate_min_bits",
+    "unroll_carry",    "drop_init",       "port_bypass",     "boundary_buffer",  "boundary_drive",
+    "boundary_rounds", "max_fanout",      "reg_margin",      "region_opts",      "area_relax",      "boundary",        "derived_clock",   "flatten",
+};
 inline std::string_view retired_set_hint(std::string_view method, std::string_view flag) {
   if ((method == "pass.abc" || method == "pass.usyn") && flag == "satopt") {
     return "use --set pass.satopt=true|false (satopt runs in the compile step; default false for every command)";
+  }
+  if (method == "pass.abc" || method == "pass.usyn") {
+    for (const auto key : kSynthMapperLabels) {
+      if (key == flag) {
+        return "use --set synth.<same name>: one spelling shared by `lhd synth` and `lhd pass abc|usyn`";
+      }
+    }
+    if (flag == "delay") {
+      return "use --set synth.delay (ps) or synth.delay_frac: one spelling shared by `lhd synth` and `lhd pass abc|usyn`";
+    }
+    if (flag == "reset_fanout") {
+      return "the mapper reset trees were removed: placement's pcrs rebuilds every reset tree under synth.max_fanout "
+             "(synth.place.pcrs.reset_pipeline pipelines it)";
+    }
+    if (flag == "io_load") {
+      return "use --set synth.io_load=<fF>|auto: one primary-output load for pass.abc, pass.usyn and pass.opentimer";
+    }
+    if (flag == "memory_budget_mb") {
+      return "the per-color/per-invocation memory-growth gate was removed: use --set lhd.ram_max_mb=<MiB> (the measured "
+             "process ceiling) and lhd.ram_budget_mb (the soft sizing target)";
+    }
+    if (flag == "time_budget_ms") {
+      return "the per-color/per-invocation wall-time limit was removed (no defined recovery when exceeded); drop the setting";
+    }
+    if (method == "pass.usyn" && flag == "adder_block") {
+      return "use --set synth.block_size: one spelling shared by `lhd synth` and `lhd pass abc|usyn`";
+    }
+  }
+  if (method == "pass.partition" && flag == "flatten") {
+    return "use --set synth.flatten=true|false: one whole-design flatten switch for pass.partition, pass.abc and pass.usyn";
+  }
+  if (method == "pass.opentimer" && flag == "io_load") {
+    return "use --set synth.io_load=<fF>|auto: one primary-output load for pass.abc, pass.usyn and pass.opentimer";
+  }
+  if (method == "synth" && flag == "opentimer") {
+    return "use --set synth.timing=true|false (the engine is synth.timing.engine: fast, or opentimer for debugging)";
+  }
+  if (method == "synth" && (flag == "place.wire_rc" || flag == "place.tech_rc")) {
+    return "use --set synth.wire_rc=<ohm/um,fF/um | RC file | auto>: one wire RC for synthesis timing and placement";
+  }
+  if (method == "synth" && flag == "place.reset_fanout") {
+    return "a reset tree is ordinary logic now: its cap per driver is synth.max_fanout (pipelining: synth.place.pcrs.reset_pipeline)";
+  }
+  if (method == "synth" && flag == "place.repair.reset") {
+    return "this retired control was removed (clock/reset networks are never sized pre-CTS); drop the setting";
+  }
+  if (method == "synth" && flag == "place.chunk.memory_gb") {
+    return "use --set lhd.ram_budget_mb=<MiB>: the one soft RAM target that sizes placement chunks";
+  }
+  if (method == "sim" && flag == "unknown_zero") {
+    return "use --set compile.unknown_zero=true: one switch zero-fills unknown bits at compile time and `?` draws in "
+           "the simulator";
   }
   for (int pass = 0; pass < 2; ++pass) {
     for (const auto& option : kRetiredSetOptions) {
@@ -513,6 +575,12 @@ void              merge_sets(const Options& opts, std::string_view pass_name, Ep
 // Merge mapper options using kMappers. Native USYN has its own vocabulary and
 // does not inherit ABC synthesis recipes. Both CLI entry points use this seam.
 void              merge_mapper_sets(const Options& opts, std::string_view method, Eprp_var::Eprp_dict& labels);
+// synth.io_load as the io_load label every reader shares (pass.abc, pass.usyn, pass.opentimer): an explicit fF value,
+// else auto = 16 input capacitances of `liberty`'s smallest NOT (a 4xFO4 load), else "-1" (each pass's fallback).
+std::string       resolve_io_load(const Options& opts, const std::string& liberty);
+// synth.flatten as the flatten label of pass.partition/abc/usyn: "true" (one region for the whole design) or "auto"
+// (a color graph is always flat: re-inline exactly where the coloring spans modules or is one color).
+std::string       flatten_label(const Options& opts);
 bool              mapper_maps_cells(const Options& opts, std::string_view method);
 // merge_sets for pass.color: its generic options (`pass.color.*`) and the synth
 // coloring's own (`pass.color.synth.*`) both feed the one pass.color method.
@@ -705,6 +773,12 @@ void        lec_command(Options& opts, Result& res);
 void        formal_command(Options& opts, Result& res);
 void        semdiff_command(Options& opts, Result& res);
 void        load_lg_into_var(const std::string& library_path, Eprp_var& var);
+// Apply the nested-color moves recorded by pass.partition (pass/partition/nest_regions.hpp) to the in-memory library
+// at `library_path`; call it on a run's final netlist, after any region cache has been saved.
+std::vector<livehd::partition::Region_entry> apply_region_nesting(const std::string& library_path);
+// <workdir>/synth/color_index.json: every region (color) of the run with its group path, parent region and source
+// files, plus a content hash per file; a rerun reports how many colors depend only on unchanged sources.
+void        write_color_index(const std::vector<livehd::partition::Region_entry>& regions, const std::string& path);
 void        pass_command(Options& opts, Result& res);
 // Stamp labels["top"] with --top resolved once against the graphs in `var`
 // (full internal `file.entity` name; an unresolvable name passes through).

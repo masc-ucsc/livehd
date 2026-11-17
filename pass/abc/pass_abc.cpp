@@ -163,13 +163,6 @@ void Pass_abc::add_mapping_labels(Eprp_method& m) {
                        "icg_fanout buffer tree. The primary clock port is an ideal driver in a timer, so below this a tree "
                        "only adds launch latency (0 = always buffer it)",
                        "8192");
-  m.add_label_optional("reset_fanout",
-                       "max asynchronous clear/preset pins one reset net drives inside a region (a region input, a reset "
-                       "polarity inverter or a mapped reset cone): past it the net is dealt out through a tree of the "
-                       "library's smallest buffer, this many pins per buffer, level by level. The pins never enter the "
-                       "logic network, so max_fanout cannot bound them; one weak gate on thousands of flops is a "
-                       "multi-nanosecond recovery violation (0 disables, the default)",
-                       "0");
   m.add_label_optional("max_fanout",
                        "cap the fanout of every net ABC maps, by appending `buffer -N <n>; dnsize {B}` to the "
                        "built-in flows (0 disables the tail, sizing included). A custom `flow` places `{F}` -- the bare "
@@ -185,7 +178,7 @@ void Pass_abc::add_mapping_labels(Eprp_method& m) {
                        "delay budget, pass.abc re-maps with ABC's `&nf -R <pct>` relaxation (a percentage of the "
                        "mapper's own logic depth on the unit-delay GENLIB), bounded by both this cap and the real slack, "
                        "then re-sizes to the budget. 0 disables it. Requires `delay` and an NLDM Liberty",
-                       "0");
+                       "100");
   // With no target this is the primary objective; with a target it is a
   // second candidate, accepted only when smaller and still inside the budget.
   m.add_label_optional("area_flow",
@@ -323,32 +316,24 @@ void Pass_abc::add_mapping_labels(Eprp_method& m) {
       "auto|rca|cska|cla|prefix|brent: auto uses the heuristic choice (smallest, or fastest for a timed region); it compares "
       "mapped area or critical-path timing, including inlined arithmetic, only under synth.tune.profile=on",
       "auto");
-  m.add_label_optional("tune_profile", "internal synth.tune.profile", "auto");
-  m.add_label_optional("tune_validate", "internal synth.tune.validate", "structural");
+  m.add_label_optional("tune_profile", "INTERNAL: synth.tune.profile", "auto");
+  m.add_label_optional("tune_validate", "INTERNAL: synth.tune.validate", "structural");
   m.add_label_optional("tune_metadata", "INTERNAL class-tagged metadata", "[]");
   m.add_label_optional("tune_design", "INTERNAL metadata design scope", "");
   m.add_label_optional("tune_file", "INTERNAL validated trial selection file", "");
-  m.add_label_optional("tune_export", "internal synth.tune.export", "");
-  m.add_label_optional("tune_finalize", "internal canonical mapping after explicit exploration", "false");
-  m.add_label_optional("tune_dir", "internal workdir synthesis tune root", "");
-  m.add_label_optional("tune_persist", "internal lhd.incremental gate", "true");
-  m.add_label_optional("tune_attempts", "internal synth.tune.attempts", "24");
-  m.add_label_optional("tune_time_ms", "internal synth.tune.time_ms", "60000");
-  m.add_label_optional("tune_patience", "internal synth.tune.patience", "3");
-  m.add_label_optional("tune_min_share", "internal synth.tune.min_share", "0.02");
+  m.add_label_optional("tune_export", "INTERNAL: synth.tune.export", "");
+  m.add_label_optional("tune_finalize", "INTERNAL: canonical mapping after explicit exploration", "false");
+  m.add_label_optional("tune_dir", "INTERNAL: workdir synthesis tune root", "");
+  m.add_label_optional("tune_persist", "INTERNAL: lhd.incremental gate", "true");
+  m.add_label_optional("tune_attempts", "INTERNAL: synth.tune.attempts", "24");
+  m.add_label_optional("tune_time_ms", "INTERNAL: synth.tune.time_ms", "60000");
+  m.add_label_optional("tune_patience", "INTERNAL: synth.tune.patience", "3");
+  m.add_label_optional("tune_min_share", "INTERNAL: synth.tune.min_share", "0.02");
   m.add_label_optional("barrel", "auto|log|reverse: barrel mux stage order; explicit selection disables trials", "auto");
   m.add_label_optional("block_size", "CSKA skip-block / CLA lookahead-group width (0 => auto: W/4|W/2|W)", "0");
   m.add_label_optional("threads",
                        "maximum concurrent ABC workers (0 = automatic, up to 8); admission uses half of physical RAM",
                        "1");
-  m.add_label_optional("memory_budget_mb",
-                       "memory-admission ceiling (additional process RSS, MiB) for one ABC color; "
-                       "default 16384 MiB (16 GiB soft target); 0 uses physical RAM minus max(2 GiB, 25%) reserve",
-                       "16384");
-  m.add_label_optional("time_budget_ms",
-                       "soft wall-time limit for one mapped color in milliseconds (0 disables); a completed "
-                       "oversize color fails with its name so pass.color.synth.max_gate can be reduced",
-                       "0");
   m.add_label_optional(
       "multiplier",
       "auto|array|tree|csa|tdm (alias sn): partial-product summation; auto trials a balanced tree on critical paths. An explicit "
@@ -368,7 +353,7 @@ void Pass_abc::add_mapping_labels(Eprp_method& m) {
   m.add_label_optional("flatten",
                        "auto|true|false whole-design flatten: inline the instance hierarchy and map the flat design as "
                        "one region (auto = flatten exactly when the active coloring is `pass.color flat`); the result "
-                       "is a single netlist module named after the top",
+                       "is a single netlist module named after the top (synth.flatten)",
                        "auto");
   m.add_label_optional("region_opts",
                        "per-region option overrides as JSON keyed by color id, e.g. "
@@ -816,8 +801,8 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
       .msg("{}: pass.abc ran out of memory (an allocation failed) under {}",
            livehd::lec::outcome_word(livehd::lec::Outcome::Timeout_memory),
            budget == 0 ? std::string{"the host's memory (no process memory budget could be computed)"}
-                       : std::format("the process memory budget of {} MiB (the RLIMIT_AS backstop: LHD_MEMORY_BUDGET_MB, "
-                                     "else physical RAM minus max(2 GiB, 25%))",
+                       : std::format("the process RAM ceiling of {} MiB (lhd.ram_max_mb, auto = 80% of physical RAM; "
+                                     "also the RLIMIT_AS backstop)",
                                      budget >> 20))
       .hint(
           "color into smaller regions and map those (`lhd pass color synth --top <top> lg:... --stats` sizes them first), "
@@ -833,8 +818,8 @@ void Pass_abc::work(Eprp_var& var) { work_with(var, {}); }
 // allocation failure -- the unsampled whole-design flatten and partition, a
 // bit-blast, a graph copy -- unwinds to here as std::bad_alloc and leaves as a
 // clean TIMEOUT-memory diagnostic rather than an exception the kernel can only
-// call internal. The per-region admission (memory_budget_mb, the process
-// ceiling) refuses before ABC's own C allocations get near the backstop.
+// call internal. The sampled admission (the lhd.ram_max_mb process ceiling)
+// refuses before ABC's own C allocations get near the backstop.
 void Pass_abc::work_with(Eprp_var& var, const std::function<void(livehd::abc::Map_options&)>& configure) {
   try {
     map_with(var, configure);
@@ -854,7 +839,7 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
   if (unroll_carry_text != "true" && unroll_carry_text != "false" && unroll_carry_text != "1" && unroll_carry_text != "0"
       && unroll_carry_text != "on" && unroll_carry_text != "off") {
     livehd::diag::err("pass.abc", "bad-unroll-carry", "syntax")
-        .msg("pass.abc.unroll_carry expects true|false, got '{}'", unroll_carry_text)
+        .msg("synth.unroll_carry expects true|false, got '{}'", unroll_carry_text)
         .emit();
     return;
   }
@@ -950,13 +935,11 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
   auto       region_opts_s       = std::string{var.get("region_opts", "")};
   auto       area_flow           = std::string{var.get("area_flow", "")};
   auto       reg_margin          = std::string{var.get("reg_margin", "auto")};
-  auto       mem_budget_s        = std::string{var.get("memory_budget_mb", "16384")};
-  auto       time_budget_s       = std::string{var.get("time_budget_ms", "0")};
   auto       flatten             = livehd::partition::parse_flatten_mode(var.get("flatten", "auto"), "pass.abc");
 
   livehd::abc::Region_opts_map region_opts;
   if (!region_opts_s.empty()) {
-    auto parsed = livehd::abc::parse_region_opts(region_opts_s, "--set pass.abc.region_opts");
+    auto parsed = livehd::abc::parse_region_opts(region_opts_s, "--set synth.region_opts");
     if (!parsed.has_value()) {
       return;  // diag already emitted
     }
@@ -991,30 +974,7 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
       return;
     }
   }
-  int memory_budget_mb = 0;
-  {
-    auto* b      = mem_budget_s.data();
-    auto* e      = mem_budget_s.data() + mem_budget_s.size();
-    auto [p, ec] = std::from_chars(b, e, memory_budget_mb);
-    if (ec != std::errc{} || p != e || memory_budget_mb < 0) {
-      livehd::diag::err("pass.abc", "bad-memory-budget", "io")
-          .msg("pass.abc: memory_budget_mb must be a non-negative integer, got '{}'", mem_budget_s)
-          .fatal();
-      return;
-    }
-  }
-  uint64_t time_budget_ms = 0;
-  {
-    auto* b      = time_budget_s.data();
-    auto* e      = time_budget_s.data() + time_budget_s.size();
-    auto [p, ec] = std::from_chars(b, e, time_budget_ms);
-    if (ec != std::errc{} || p != e) {
-      livehd::diag::err("pass.abc", "bad-time-budget", "io")
-          .msg("pass.abc: time_budget_ms must be a non-negative integer, got '{}'", time_budget_s)
-          .fatal();
-      return;
-    }
-  }
+
   uint64_t ware_max_cells = 0;
   {
     const auto text = std::string{var.get("ware_max_cells", "200000")};
@@ -1052,18 +1012,6 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
           .fatal();
     }
   }
-  // Same contract as icg_fanout: 0 (off) or a tree that can shrink, never a silent fallback.
-  uint64_t reset_fanout = 0;
-  if (auto s = std::string{var.get("reset_fanout", "0")}; !s.empty()) {
-    const char* b = s.data();
-    const char* e = s.data() + s.size();
-    auto [p, ec]  = std::from_chars(b, e, reset_fanout);
-    if (ec != std::errc{} || p != e || reset_fanout == 1 || reset_fanout > std::numeric_limits<uint32_t>::max()) {
-      livehd::diag::err("pass.abc", "bad-reset-fanout", "syntax")
-          .msg("pass.abc.reset_fanout '{}' must be 0 (off) or an integer >= 2", s)
-          .fatal();
-    }
-  }
   uint64_t input_clock_min = 8192;
   if (auto s = std::string{var.get("icg_input_min", "8192")}; !s.empty()) {
     const char* b = s.data();
@@ -1093,7 +1041,7 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
   }
   uint64_t area_relax_pct = 0;
   {
-    const auto s_ar = std::string{var.get("area_relax", "0")};
+    const auto s_ar = std::string{var.get("area_relax", "100")};
     auto*      b    = s_ar.data();
     auto*      e    = s_ar.data() + s_ar.size();
     auto [p, ec]    = std::from_chars(b, e, area_relax_pct);
@@ -1205,7 +1153,6 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
   opts.max_fanout         = static_cast<uint32_t>(max_fanout);
   opts.icg_fanout         = static_cast<uint32_t>(icg_fanout);
   opts.input_clock_min    = static_cast<uint32_t>(input_clock_min);
-  opts.reset_fanout       = static_cast<uint32_t>(reset_fanout);
   opts.area_relax_pct     = static_cast<uint32_t>(area_relax_pct);
   opts.area_flow          = area_flow;
   opts.reg_margin         = reg_margin;
@@ -1252,9 +1199,7 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
   opts.reverse_barrel   = barrel == "reverse";
   opts.block_size       = block_size;
   opts.multiplier       = multiplier.value();
-  opts.memory_budget_mb = memory_budget_mb;
   opts.threads          = threads;
-  opts.time_budget_ms   = time_budget_ms;
   if (configure) {
     configure(opts);
   }
@@ -1685,8 +1630,7 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
                           "`pass.color.synth.max_ge` is what splits a region instead",
                           top))
         .hint(
-            "--set pass.abc.memory_budget_mb=N raises or pins the per-color growth ceiling (reproducible hosts, CI); "
-            "the process ceiling is the memory backstop and has no override")
+            "--set lhd.ram_max_mb=N raises or pins the measured process RAM ceiling (auto = 80% of the machine)")
         .fatal();
   }
 

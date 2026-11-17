@@ -109,7 +109,7 @@ TEST(GrowthBudget, ResetAndRailTreeBuffersAreNotGrowth) {
     instance(*top, buf);
   }
   const Growth_budget budget{physical_size(*top, tech)};
-  // The placement trees (synth.place.reset_fanout/domino_rail_fanout) mint
+  // The placement trees (the reset tree under synth.max_fanout, domino_rail_fanout) mint
   // these names, flattened with or without a hierarchy prefix.
   for (const auto* name : {"__place_rsttree0", "u0.__place_rsttree3", "__place_railtree1"}) {
     instance(*top, buf).set_name(name);

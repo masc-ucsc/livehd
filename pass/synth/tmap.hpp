@@ -20,12 +20,11 @@ struct Tmap_options {
   // buffer and size mapped cells against the delay budget and the partition
   // environment; none restructures the Boolean network the caller hands over.
   uint32_t                              max_fanout      = 16;       // `buffer -N` cap; 0 disables buffering
-  uint32_t                              reset_fanout    = 0;        // async clear/preset pins per buffer of a reset tree; 0 off
   bool                                  boundary        = true;     // static + exact boundary re-size
   bool                                  boundary_buffer = true;     // tree region inputs past max_fanout
   bool                                  port_bypass     = false;    // a region output reads the root of its buffer chain
   // A resetless register with a power-on `initial` value maps to a plain DFF cell and drops the value
-  // (pass.abc.drop_init); otherwise it stays a native flop, which physical synthesis cannot place.
+  // (synth.drop_init); otherwise it stays a native flop, which physical synthesis cannot place.
   bool                                  drop_init       = false;
   // A register clocked by logic that is not a recognized clock gate maps to a plain DFF cell whose clock pin
   // the mapped logic drives (pass.abc.derived_clock); otherwise it stays a native flop.
@@ -46,8 +45,6 @@ struct Tmap_options {
   // region cut are untouched; only the allow-listed commands of pass.usyn are
   // accepted.
   std::string                           pre              = "&dch -f -C 500";
-  int                                   memory_budget_mb = 16384;   // per-region growth; process ceiling is shared
-  uint64_t                              time_budget_ms   = 0;
   std::string                           cache_directory;  // internal; empty disables mapped reuse
   std::function<bool(std::string_view)> admission;        // optional cancellation/resource admission
 };

@@ -37,7 +37,7 @@ result = root / 'r.json'
 argv = [lhd, 'synth', str(source), '--top', 'rst', '-q', '--workdir', str(work), '--set', 'synth.mapper=usyn',
         '--set', 'pass.usyn.clock_phases=1', '--set', 'pass.usyn.tmap=abc', '--set', f'synth.liberty={root}/seq.lib',
         '--set', f'synth.lef={libdir}/sky130hd.tlef,{root}/seq.lef', '--set', f'synth.sdc={sdc}',
-        '--set', 'pass.usyn.physical=domino_provisional', '--set', 'synth.opentimer=false', '--set', 'pass.usyn.domino_select=all',
+        '--set', 'pass.usyn.physical=domino_provisional', '--set', 'synth.timing=false', '--set', 'pass.usyn.domino_select=all',
         '--set', 'synth.place=true', '--set', 'synth.place.timing_driven=false', '--set', 'synth.place.iterations=80',
         '--set', 'synth.place.grid.density=8', '--set', 'synth.place.stage_timing=true',
         '--emit-dir', f'verilog:{root}/out', '--result-json', str(result)]
@@ -99,11 +99,11 @@ lec = json.loads(lec_json.read_text())['lec']
 assert lec['verdict'] == 'proven-full' and not lec['bounded'], lec
 
 # The reset net stays CMOS and gets the reset tree of every mapper
-# (synth.place.reset_fanout, U23): two loads per buffer turns rst's three RST
+# (capped by synth.max_fanout, U23): two loads per buffer turns rst's three RST
 # pins into a tree, and the netlist still proves.
 tree_argv = [a.replace(str(work), str(root / 'T')).replace(str(result), str(root / 't.json')) for a in argv]
 tree_argv[tree_argv.index(f'verilog:{root}/out')] = f'verilog:{root}/tout'
-tree_argv += ['--set', 'synth.place.reset_fanout=2']
+tree_argv += ['--set', 'synth.max_fanout=2']
 completed = subprocess.run(tree_argv, capture_output=True, text=True, timeout=25)
 tree = json.loads((root / 't.json').read_text())
 assert completed.returncode == 0, tree.get('error')

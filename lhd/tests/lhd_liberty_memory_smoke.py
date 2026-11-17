@@ -43,7 +43,7 @@ def invoke(name, command, *, success=True):
     return data
 
 invoke('synth', ['synth', str(source), '--top', 'top', '--set', f'synth.liberty={library}',
-                '--set', 'synth.opentimer=false', '--workdir', str(root/'W'),
+                '--set', 'synth.timing=false', '--workdir', str(root/'W'),
                 '--emit-dir', f'verilog:{root}/net'])
 text = '\n'.join(p.read_text() for p in (root/'net').glob('*.v'))
 assert text.count('test_sram ') == 2, text
@@ -84,7 +84,7 @@ for name, extra, code in [('collide', [], 'DuplicateDefinition'),
 # behavioral model, as in the Yosys/ORFS flow where the Liberty cell replaces the Verilog
 # definition. The model is never elaborated, so its wider address port is irrelevant.
 invoke('precedence', ['synth', str(collide), '--top', 'top', '--set', f'synth.liberty={library}',
-                      '--set', 'compile.slang.liberty_macro_precedence=true', '--set', 'synth.opentimer=false',
+                      '--set', 'compile.slang.liberty_macro_precedence=true', '--set', 'synth.timing=false',
                       '--workdir', str(root/'precedenceW'), '--emit-dir', f'verilog:{root}/precedence-net'])
 text = '\n'.join(p.read_text() for p in (root/'precedence-net').glob('*.v'))
 assert text.count('test_sram ') == 2 and 'module test_sram' not in text and 'always' not in text, text
@@ -95,7 +95,7 @@ wrapper.write_text(source.read_text() + '''module test_sram(input clk,we,input [
 endmodule
 ''')
 invoke('wrapper', ['synth', str(wrapper), '--top', 'top', '--set', f'synth.liberty={library}',
-                   '--set', 'compile.slang.liberty_macro_precedence=true', '--set', 'synth.opentimer=false',
+                   '--set', 'compile.slang.liberty_macro_precedence=true', '--set', 'synth.timing=false',
                    '--workdir', str(root/'wrapperW'), '--emit-dir', f'verilog:{root}/wrapper-net'])
 text = '\n'.join(p.read_text() for p in (root/'wrapper-net').glob('*.v'))
 assert text.count('test_sram ') == 2 and 'module test_sram' not in text, text
@@ -104,14 +104,14 @@ bad = root/'bad.v'
 bad.write_text(source.read_text().replace('[2:0] a,b', '[5:0] a,b'))
 diag = root/'bad.diagnostics.jsonl'
 failure = invoke('truncation', ['synth', str(bad), '--top', 'top', '--set', f'synth.liberty={library}',
-                     '--set', 'synth.opentimer=false', '--workdir', str(root/'badW'),
+                     '--set', 'synth.timing=false', '--workdir', str(root/'badW'),
                      '--emit', f'diagnostics:{diag}'], success=False)
 assert diag.is_file(), failure
 assert 'liberty-memory-port-truncation' in diag.read_text(), diag.read_text()
 # Opt-in (compile.slang.liberty_allow_truncation): Verilog keeps the low bits; a warning remains.
 diag = root/'truncate.diagnostics.jsonl'
 invoke('truncate', ['synth', str(bad), '--top', 'top', '--set', f'synth.liberty={library}',
-                    '--set', 'compile.slang.liberty_allow_truncation=true', '--set', 'synth.opentimer=false',
+                    '--set', 'compile.slang.liberty_allow_truncation=true', '--set', 'synth.timing=false',
                     '--workdir', str(root/'truncateW'), '--emit-dir', f'verilog:{root}/truncate-net',
                     '--emit', f'diagnostics:{diag}'])
 assert '"severity":"warning","code":"liberty-memory-port-truncation"' in diag.read_text(), diag.read_text()
@@ -152,7 +152,7 @@ module feedback(input clk,we,input [4:0] d,output [4:0] q);
 endmodule
 ''')
 invoke('feedback', ['synth', str(feedback), '--top', 'feedback', '--set', f'synth.liberty={library}',
-                    '--set', 'synth.opentimer=false', '--workdir', str(root/'feedbackW'),
+                    '--set', 'synth.timing=false', '--workdir', str(root/'feedbackW'),
                     '--emit-dir', f'verilog:{root}/feedback-net'])
 text = '\n'.join(p.read_text() for p in (root/'feedback-net').glob('*.v'))
 assert text.count('test_sram ') == 1 and 'cgen_memory' not in text, text

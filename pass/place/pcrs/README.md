@@ -1,6 +1,7 @@
 # pass.pcrs — power, clock, reset and scan-chain networks
 
-Only the reset network exists so far. The placer calls it (`synth.place.pcrs`, default on); `pass/pcrs/pcrs.hpp` is the API.
+Only the reset network exists so far. The placer calls it once per placement call through `pcrs::distribute_resets`
+(`synth.place.pcrs`, default on); `pass/place/pcrs/pcrs.hpp` is the API, and the pass reads no placement options.
 
 ## Reset
 
@@ -13,11 +14,11 @@ call**: the previous buffers, inverters and pass flops are stripped, the loads a
   pin) or of the flops its reset logic feeds (the D pins within four cells, majority). The root clock is found through
   integrated clock gates and identity buffers, so a gated flop uses the ungated clock and the reset still arrives while
   the clock is stopped. Reset crossing domains is a clock-domain-crossing problem and is not synchronised here.
-* **N flop levels, same N for every sink of a domain.** The domain's reset is delayed exactly N cycles everywhere, so the
+* **N flop levels, same N for every sink of a domain** (`synth.place.pcrs.reset_pipeline`, default true; false = 0 levels). The domain's reset is delayed exactly N cycles everywhere, so the
   design behaves as before after a longer reset. N is a timing choice (0 is a plain buffer tree). Both polarities of a
   domain share N; an inverter in front of the tree (or the parity of an inverting-Q flop family) keeps each sink's
   polarity. Asynchronous reset pins are served the same way: the reset is registered to the clock edge.
-* **Fanout.** No driver of the tree carries more than `synth.place.reset_fanout` loads (default 32). Level sizes follow
+* **Fanout.** No driver of the tree carries more than `synth.max_fanout` loads (default 16): a reset tree is ordinary logic. Level sizes follow
   from the sink count: `ceil(sinks/f)` leaf flops, `ceil(that/f)` above, and a buffer tree in front of level 1 if needed.
   Sinks cluster by placement when positions are known (recursive bisection), else by instance name (source hierarchy):
   the placer passes the positions of the placement a call starts from, and the first such call rebuilds every tree

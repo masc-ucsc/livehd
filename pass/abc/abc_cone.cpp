@@ -36,8 +36,6 @@ std::optional<synth::Cone_mapping> map_cone(const synth::Lnet& logic, const synt
   options.boundary_drive   = "none";
   options.area_flow        = "none";
   options.area_relax_pct   = 0;
-  options.time_budget_ms   = 5000;
-  options.memory_budget_mb = 12288;
   partition::Region_body body;
   body.module_name = "placed_critical_cone";
   synth::Region_ctx ctx(body, options);

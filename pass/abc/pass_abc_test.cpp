@@ -468,7 +468,7 @@ TEST(WareModule, ColorNamesTheModuleOnlyWithSectionOptions) {
   }
   {
     hhds::GraphLibrary lib;
-    EXPECT_EQ(build(lib, {8}, nullptr).size(), 2u);  // --set pass.abc.region_opts for color 8
+    EXPECT_EQ(build(lib, {8}, nullptr).size(), 2u);  // --set synth.region_opts for color 8
   }
   {
     hhds::GraphLibrary lib;
@@ -565,7 +565,7 @@ TEST(MemoryBoundary, AllocationFailureIsTimeoutMemory) {
   EXPECT_EQ(rec->category, "unsupported");
   EXPECT_TRUE(rec->message.starts_with("TIMEOUT-memory: pass.abc ran out of memory")) << rec->message;
   // It names the limit it ran into.
-  EXPECT_TRUE(rec->message.find("process memory budget of") != std::string::npos
+  EXPECT_TRUE(rec->message.find("process RAM ceiling of") != std::string::npos
               || rec->message.find("the host's memory") != std::string::npos)
       << rec->message;
   sink.clear();

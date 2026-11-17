@@ -13,7 +13,7 @@ tech = Path('inou/lefdef/tests/data')
 base = ['lhd/lhd', 'synth', str(source), '--top', 'dut', '-q',
         '--set', f'synth.liberty={tech}/sky130hd.lib',
         '--set', f'synth.lef={tech}/sky130hd.tlef,{tech}/sky130hd.lef',
-        '--set', 'synth.place=true', '--set', 'synth.opentimer=false',
+        '--set', 'synth.place=true', '--set', 'synth.timing=false',
         '--set', 'synth.place.timing_driven=false', '--set', 'synth.place.resize=false',
         '--set', 'synth.place.io_resynth=0', '--set', 'synth.place.grid.density=8',
         '--set', 'synth.place.iterations=100', '--set', 'synth.place.density=0.9',

@@ -144,9 +144,9 @@ sta net "$LIB" --set pass.opentimer.margin=50
 expect_sta 0 1 "changed margin"
 sta net "$LIB"
 expect_sta 1 0 "back to the default margin"
-sta net "$LIB" --set pass.opentimer.io_load=4
+sta net "$LIB" --set synth.io_load=4
 expect_sta 0 1 "changed output load"
-sta net "$LIB" --set pass.opentimer.io_load=4
+sta net "$LIB" --set synth.io_load=4
 expect_sta 1 0 "warm output load"
 sta net "$LIB"
 expect_sta 1 0 "back to the default output load"

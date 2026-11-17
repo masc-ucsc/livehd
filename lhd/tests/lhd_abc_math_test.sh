@@ -14,7 +14,7 @@
 #   pass liberty gensim test.lib --emit-dir lg:models
 #   pass <mapper> --emit-dir lg:net              (bit-blast mult/sra/div)
 #   lhd lec --impl lg:net --ref lg:re --lib lg:models   (complete hierarchy)
-#   MAPPER=abc: + a non-default adder (pass.abc.adder=cska), lec --lib
+#   MAPPER=abc: + a non-default adder (synth.adder=cska), lec --lib
 #   MAPPER=usyn: + pass usyn --set pass.usyn.tmap=none, lec without --lib
 #
 # Coverage: unsigned + signed + n-ary multiply (array multiplier), logical +
@@ -84,7 +84,7 @@ grep -qE '"verdict":"proven-(full|bounded)"' "$W/r.json" \
 
 if [ "$MAPPER" = abc ]; then
   # A non-default adder still proves equivalent (the multiplier's partial-product
-  # additions use pass.abc.adder).
+  # additions use synth.adder).
   rm -rf "$W/net_cska"
   run pass "$MAPPER" --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_cska" --set synth.liberty="$LIB" --set adder=cska \
     --workdir "$W/w6"

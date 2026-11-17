@@ -22,7 +22,7 @@ sdc.write_text('create_clock -name virtual_clock -period 1\nset_input_delay 0.1 
 work = root/'W'
 argv = ['lhd/lhd_gui_fixture', 'synth', str(dut), '--top', 'chip', '--workdir', str(work), '--gui', '--gui-no-open',
         '--set', f'synth.sdc={sdc}', '--set', f'synth.liberty={tech}/sky130hd.lib', '--set', f'synth.lef={tech}/sky130hd.tlef,{tech}/sky130hd.lef',
-        '--set', 'synth.place=true', '--set', 'synth.opentimer=true','--set','synth.place.resize=false', '--set', 'synth.place.timing_driven=false',
+        '--set', 'synth.place=true', '--set', 'synth.timing=true','--set','synth.place.resize=false', '--set', 'synth.place.timing_driven=false',
         '--set', 'synth.place.explore.history_mb=1', '--set', 'synth.place.gui.pause=true','--set','synth.place.iterations=20','--set','synth.place.grid.density=8']
 native = '--native-gp' in sys.argv
 snapshot = '--snapshot' in sys.argv
@@ -487,7 +487,7 @@ with temp as long_temp, log.open('w') as output:
         result=next(row for row in done['explorations'] if row['id']==job['id'])
         assert result['state']=='done' and result['deadline_s']==30,result
         endpoints=call('leverage',target=job['id'])['endpoints']
-        assert endpoints['engine']=='opentimer' and endpoints['setup_corners'],endpoints
+        assert endpoints['engine']=='fast' and endpoints['setup_corners'],endpoints
         assert set(endpoints['clock_periods_ps'])=={'virtual_clock'} and abs(endpoints['clock_periods_ps']['virtual_clock']-1000)<1e-9,endpoints
         assert endpoints['frequency_status']=='available' and endpoints['frequency_mhz']>0,endpoints
         assert endpoints['total']['endpoints']>0 and 'io' in endpoints['path_families'],endpoints

@@ -10,6 +10,7 @@
 #include "design_prepare.hpp"
 #include "diag.hpp"
 #include "fold_engine.hpp"
+#include "host_mem.hpp"
 #include "memory_module.hpp"
 #include "sharing_hint.hpp"
 #include "tmap.hpp"
@@ -75,8 +76,6 @@ synth::Tmap_result map_design(const std::shared_ptr<hhds::Graph>& top, const syn
   // ABC reads `&nf -D` as an integer (atoi): a whole-picosecond target, never
   // scientific notation such as `1e+05`. A sub-picosecond target rounds up.
   options.delay   = request.delay_ps > 0 ? std::format("{}", std::max<int64_t>(1, static_cast<int64_t>(request.delay_ps))) : "";
-  options.memory_budget_mb = request.memory_budget_mb;
-  options.time_budget_ms   = request.time_budget_ms;
   options.admission        = request.admission;
   options.threads          = 1;
   options.ware_trials      = false;
@@ -87,7 +86,6 @@ synth::Tmap_result map_design(const std::shared_ptr<hhds::Graph>& top, const syn
   // Physical techniques only: buffering, gate sizing to the budget, boundary
   // environment/re-size and the mapping-only slack-to-area re-map.
   options.max_fanout       = request.max_fanout;
-  options.reset_fanout     = request.reset_fanout;
   options.boundary         = request.boundary;
   options.boundary_buffer  = request.boundary_buffer;
   options.port_bypass      = request.port_bypass;
@@ -103,7 +101,7 @@ synth::Tmap_result map_design(const std::shared_ptr<hhds::Graph>& top, const syn
   // region key) and the cache salt below both carry it verbatim.
   const auto physical      = std::format(
       "max_fanout={}|boundary={}|boundary_buffer={}|boundary_drive={}|io_load={}|"
-      "boundary_rounds={}|reg_margin={}|area_relax={}|pre={}{}{}{}{}{}",
+      "boundary_rounds={}|reg_margin={}|area_relax={}|pre={}{}{}{}{}",
       request.max_fanout,
       request.boundary,
       request.boundary_buffer,
@@ -113,8 +111,6 @@ synth::Tmap_result map_design(const std::shared_ptr<hhds::Graph>& top, const syn
       request.reg_margin,
       request.area_relax_pct,
       request.pre,
-      // Absent when off: the default recipe, and the cache salt made of it, stay what they were.
-      request.reset_fanout != 0 ? std::format("|reset_fanout={}", request.reset_fanout) : std::string{},
       request.port_bypass ? "|port_bypass=1" : "",
       request.drop_init ? "|drop_init=1" : "",
       request.derived_clock ? "|derived_clock=1" : "",
@@ -143,7 +139,7 @@ synth::Tmap_result map_design(const std::shared_ptr<hhds::Graph>& top, const syn
         liberty::dff_selection_descriptor(cells, options.dff_cell) + "|" + options.region_hook_recipe);
     cache                 = std::make_unique<synth::Tmap_cache>(request.cache_directory,
                                                                 salt,
-                                                                uint64_t(request.memory_budget_mb) << 20,
+                                                                livehd::cost::configured_budget_bytes(),
                                                                 request.admission);
     output->cache_invalid = cache->invalid();
     if (cache->refused()) {

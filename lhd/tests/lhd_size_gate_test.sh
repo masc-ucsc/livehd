@@ -70,7 +70,7 @@ run pass color flat --top "$TOP" lg:"$W/lg" --workdir "$W/w2b"  # (re-color for 
 # 2. pass.abc whole-design flatten over the threshold: ATTEMPTED, not refused.
 # ---------------------------------------------------------------------------
 LHD_LARGE_DESIGN_NODES=1 "$LHD" pass abc --top "$TOP" lg:"$W/lg" \
-  --emit-dir lg:"$W/abc_flat" --set synth.liberty="$LIB" --set abc.flatten=true \
+  --emit-dir lg:"$W/abc_flat" --set synth.liberty="$LIB" --set synth.flatten=true \
   --emit diagnostics:"$W/abc.jsonl" --workdir "$W/w3" -q --result-json "$W/abc.json" \
   || fail "pass.abc refused an over-threshold whole-design flatten: $(cat "$W/abc.json" 2>/dev/null)"
 [ -n "$(ls -A "$W/abc_flat" 2>/dev/null)" ] || fail "the over-threshold whole-design flatten produced no netlist"
@@ -87,10 +87,10 @@ rejected abc_short pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/abc_reject
 [ -z "$(ls -A "$W/abc_rejected" 2>/dev/null)" ] || fail "a rejected pass.abc run published a netlist"
 
 # ---------------------------------------------------------------------------
-# 4. per-def abc (flatten=false) maps the same over-threshold design.
+# 4. abc with synth.flatten=false maps the same over-threshold design (the flat coloring is still one flat region).
 # ---------------------------------------------------------------------------
 LHD_LARGE_DESIGN_NODES=1 run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/abc_perdef" \
-  --set synth.liberty="$LIB" --set abc.flatten=false --workdir "$W/w5"
+  --set synth.liberty="$LIB" --set synth.flatten=false --workdir "$W/w5"
 [ -n "$(ls -A "$W/abc_perdef" 2>/dev/null)" ] || fail "per-def abc produced no netlist"
 
 # ---------------------------------------------------------------------------
@@ -118,7 +118,7 @@ rejected lec_override lec --impl "$PRP" --ref "$PRP" \
 # 7. the default threshold run maps the same tiny design.
 # ---------------------------------------------------------------------------
 run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/abc_default" \
-  --set synth.liberty="$LIB" --set abc.flatten=true --workdir "$W/w8"
+  --set synth.liberty="$LIB" --set synth.flatten=true --workdir "$W/w8"
 [ -n "$(ls -A "$W/abc_default" 2>/dev/null)" ] || fail "the default-threshold abc run produced no netlist"
 
 echo "PASS: no design-size gate (color warns; abc/lec attempt an over-threshold design; allow_oversize is rejected)"

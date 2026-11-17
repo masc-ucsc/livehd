@@ -17,13 +17,13 @@ python3 pass/usyn/compare.py "$W/shared.v" --top shared \
 for mapper in usyn abc; do
   pass/usyn/measure_synth --archive "$W/fused-$mapper-measurement" --seconds 30 --memory-mb 4096 -- \
     lhd/lhd synth "$W/shared.v" --top shared --set "synth.mapper=$mapper" \
-    --set synth.liberty=inou/prp/tests/abc/timing.lib --set "pass.$mapper.delay=120" \
+    --set synth.liberty=inou/prp/tests/abc/timing.lib --set "synth.delay=120" \
     --workdir "$W/fused-$mapper" --emit "verilog:$W/fused-$mapper.v" \
     --result-json "$W/fused-$mapper.json" -q || { cat "$W/fused-$mapper-measurement/command.log" "$W/fused-$mapper.json"; exit 1; }
 done
 pass/usyn/measure_synth --archive "$W/override-measurement" --seconds 30 --memory-mb 4096 -- \
   lhd/lhd synth "$W/shared.v" --top shared --set synth.mapper=usyn \
-  --set synth.liberty=inou/prp/tests/abc/timing.lib --set abc.delay=120 --set pass.usyn.delay=160 \
+  --set synth.liberty=inou/prp/tests/abc/timing.lib --set synth.delay=160 \
   --workdir "$W/override" --result-json "$W/override.json" -q \
   || { cat "$W/override-measurement/command.log" "$W/override.json"; exit 1; }
 python3 - "$W" <<'PY'

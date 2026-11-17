@@ -31,7 +31,7 @@
 #include "macro_state.hpp"
 #include "multirow.hpp"
 #include "multirow_eco.hpp"
-#include "pass/pcrs/pcrs.hpp"
+#include "pass/place/pcrs/pcrs.hpp"
 #include "pass/place/gui/gui_policy.hpp"
 #include "placement_session.hpp"
 #include "power_grid.hpp"
@@ -74,6 +74,7 @@ struct Placement_restart : std::exception {
 struct Placement_area_restart : std::exception {
   double   utilization, density;  // the new utilization and GP target density
   unsigned mesh_variant = 0;      // the region mesh to place with next (0: the given one; see Options::mesh_variant)
+  bool     routing      = false;  // legroute's leftover overflow asked for it (counts against legroute_area_restarts)
   Placement_area_restart(double u, double d, unsigned v = 0) : utilization(u), density(d), mesh_variant(v) {}
   const char* what() const noexcept override { return "placement restarted with a larger core for routability"; }
 };
@@ -119,9 +120,12 @@ struct Gp_observation {
   std::optional<Rc_reuse_stats> rc_reuse;
   bool                          rc_reuse_verified = false;
 };
+inline constexpr double kPrerouteSetupFo4 = 1.5;
 struct Preroute_settings {
   bool        enabled         = false;
-  double      setup_margin_ps = 20, hold_margin_ps = -1, nominal_slew_ps = 20;
+  // -1 = auto: setup = kPrerouteSetupFo4 FO4 of the Liberty's smallest NOT; hold = two HOLD_BUF delays;
+  // nominal slew = the HOLD_BUF's output slew into one copy of itself
+  double      setup_margin_ps = -1, hold_margin_ps = -1, nominal_slew_ps = -1;
   double      capacity_fraction = .30;
   std::string hold_buffer       = "auto";
   int         budget_ms = 10, stage_budget_ms = 10000, bins = 64;
@@ -225,7 +229,7 @@ struct Options {
   bool chunk_require_fit=false;
   std::string                       chunk_manifest, chunk_only;  // nonempty manifest: export the accepted home jobs before whole-chip placement
   bool                              chunk_seed_detail = true;
-  uint64_t                          chunk_memory_bytes = 4000000000ULL;
+  uint64_t                          chunk_memory_bytes = uint64_t{8192} << 20;  // lhd.ram_budget_mb
   bool                              fp_place = false, fp_snap_enabled = true;
   // synth.place.fp=auto (the default): when fp_place is false, place() sets it
   // from detect_fp_repetition on the source netlist (fp_repetition.hpp) and
@@ -288,7 +292,7 @@ struct Options {
     std::string route_model    = "legacy";  // coarse: actual local H/V pressure replaces whole-tree inflation in recovery
     unsigned    route_interval = 50, route_net_pops = 2000;
     unsigned    local_tiles = 0;  // bounded hotspot movement radius; 0 keeps whole-placement movement during a local recovery slice
-    unsigned    rounds = 3, iterations = 100, net_pops = 100000;
+    unsigned    rounds = 2, iterations = 100, net_pops = 100000;
     unsigned    min_iterations = 0, timing_interval = 0;  // recovery: at least 50 steps; timing provider defaults to 5-step refresh
     double      max_inflate        = 1.5;
     double      max_degradation_ps = -1;  // estimated data-pin slack versus first candidate; -1 disables
@@ -305,7 +309,6 @@ struct Options {
   int    gp_buffer_trials      = 4;    // maximum attempts per insertion/removal phase
   double gp_buffer_margin      = .01;  // fraction of clock period (path delay without clocks)
 
-  bool                     repair_reset   = false;  // retired: true is rejected before pre-CTS optimization
   // synth.place.resize.engine: "new" = path-based sizing/buffering on the
   // incremental what-if timer (resize_engine.hpp); "legacy" = batch sweeps.
   std::string              resize_engine  = "legacy";
@@ -389,6 +392,10 @@ struct Options {
   // restarts at a lower utilization (Placement_area_restart)
   bool                                                       allow_increase_area = true;
   unsigned                                 area_restarts  = 12;   // placements at a lower utilization before stopping
+  // core growths legroute's leftover overflow may ask for; once used up the best plan round continues (with its
+  // overflow reported) to the terminal legalizer, as on a fixed core
+  unsigned                                 legroute_area_restarts      = 1;
+  unsigned                                 legroute_area_restarts_used = 0;  // runtime: growths already taken (driver)
   double                                   area_step      = .92;  // the utilization factor per push-back step
   // place.utilization=0: the driver bisects the utilization; placement never retries in place, every failure goes
   // back to the driver as a failed point

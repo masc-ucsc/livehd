@@ -9,7 +9,7 @@ for seed in 123 124; do
     --set sim.tune.backend="$backend" --set sim.checkpoint=false \
     --workdir "$work/random" --result-json "$work/seed-$seed.json" -q
 done
-"$LHD" sim lhd/tests/sim_unknown_outputs.prp --set sim.unknown_zero=true \
+"$LHD" sim lhd/tests/sim_unknown_outputs.prp --set compile.unknown_zero=true \
   --set sim.tune.backend="$backend" --set sim.checkpoint=false \
   --arg expect_zero=1 \
   --workdir "$work/zero" --result-json "$work/zero.json" -q

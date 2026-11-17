@@ -46,7 +46,7 @@
 #include "pass_single_edge.hpp"
 #include "proof_prep.hpp"
 #include "query.hpp"
-#include "pass/pcrs/pcrs.hpp"
+#include "pass/place/pcrs/pcrs.hpp"
 #include "semdiff.hpp"
 #include "solve_stats.hpp"
 #include "split_selfref.hpp"  // //graph — repair a self-ref exposed by flattening a comb instance
@@ -7090,7 +7090,7 @@ void lec_command(Options& opts, Result& res) {
         break;
       case livehd::lec::Outcome::Timeout_memory:
         msg  = std::format("'{}' ran out of memory before a verdict; equivalence is neither proved nor refuted", name);
-        hint = "run on a host with more memory (or a larger LHD_MEMORY_BUDGET_MB), or decompose the check";
+        hint = "run on a host with more memory (or a larger --set lhd.ram_max_mb), or decompose the check";
         break;
       case livehd::lec::Outcome::Refuted_cex:
         msg  = std::format("'{}' is not equivalent ({} vs {})", name, opts.impl_path, opts.ref_path);
@@ -9790,7 +9790,7 @@ void formal_verify_command(Options& opts, Result& res) {
       break;
     case livehd::lec::Outcome::Timeout_memory:
       msg  = std::format("'{}' ran out of memory before every obligation was decided", name);
-      hint = std::format("{}. Run on a host with more memory (or a larger LHD_MEMORY_BUDGET_MB), or lower formal.bound",
+      hint = std::format("{}. Run on a host with more memory (or a larger --set lhd.ram_max_mb), or lower formal.bound",
                          r.detail);
       break;
     case livehd::lec::Outcome::Refuted_cex:

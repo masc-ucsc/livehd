@@ -381,3 +381,77 @@ TEST(diag, log_levels_default_to_silent_and_follow_the_d_words) {
   EXPECT_FALSE(livehd::diag::enabled("pass.abc"));
   s.clear();
 }
+
+TEST(diag, stderr_info_filter_covers_all_producers_and_renderers) {
+  auto& s = livehd::diag::sink();
+  for (bool json : {false, true}) {
+    for (const auto filter : {"", "unrelated", "aegraph-rule", "aegraph", "all"}) {
+      s.clear();
+      s.set_jsonl_path("off");
+      s.set_human_stderr(true);
+      s.set_stderr_jsonl(json);
+      livehd::diag::set_debug(filter);
+      livehd::diag::set_stats(true);
+      testing::internal::CaptureStderr();
+      livehd::diag::info("pass.aegraph", "aegraph-rule", "progress").msg("detail record").emit();
+      livehd::diag::stat("pass.aegraph", "aegraph-rule", "progress").msg("statistics record").emit();
+      livehd::diag::outcome("pass.aegraph", "aegraph-rule", "progress").msg("outcome record").emit();
+      // Direct emission models cache replay: the record was collected in an
+      // earlier invocation, potentially with a different debug filter.
+      s.emit(Diagnostic{.severity = Severity::info,
+                        .code     = "aegraph-rule",
+                        .category = "progress",
+                        .pass     = "pass.aegraph",
+                        .message  = "replayed record"});
+      livehd::diag::warn("pass.other", "warning", "internal").msg("visible warning").emit();
+      s.emit(make_error());
+      const auto output   = testing::internal::GetCapturedStderr();
+      const bool selected = std::string_view{filter} != "" && std::string_view{filter} != "unrelated";
+      for (const auto message : {"detail record", "statistics record", "outcome record", "replayed record"}) {
+        EXPECT_EQ(output.find(message) != std::string::npos, selected) << filter << ": " << output;
+      }
+      EXPECT_NE(output.find("visible warning"), std::string::npos);
+      EXPECT_NE(output.find("value -1 does not fit"), std::string::npos);
+      EXPECT_EQ(s.count(Severity::info), selected ? 4u : 3u);  // reports retain collected records
+    }
+  }
+  livehd::diag::set_debug("");
+  livehd::diag::set_stats(false);
+  s.set_human_stderr(false);
+  s.set_stderr_jsonl(false);
+  s.clear();
+}
+
+TEST(diag, jsonl_destination_filters_stderr_but_retains_file_records) {
+  livehd::diag::set_debug("");
+  Diagnostic d{.severity = Severity::info,
+               .code     = "cached-detail",
+               .category = "progress",
+               .pass     = "pass.abc",
+               .message  = "saved detail"};
+  Sink       s;
+  s.set_jsonl_path("-");
+  s.set_human_stderr(true);
+  s.set_stderr_jsonl(true);
+  testing::internal::CaptureStderr();
+  s.emit(d);
+  EXPECT_TRUE(testing::internal::GetCapturedStderr().empty());
+  s.clear();
+  livehd::diag::set_debug("cached-detail");
+  testing::internal::CaptureStderr();
+  s.emit(d);
+  EXPECT_EQ(testing::internal::GetCapturedStderr(), livehd::diag::to_jsonl(d, 0) + "\n");
+  livehd::diag::set_debug("");
+  s.clear();
+  const auto path = testing::TempDir() + "/filtered_info.jsonl";
+  s.set_jsonl_path(path);
+  testing::internal::CaptureStderr();
+  s.emit(d);
+  EXPECT_TRUE(testing::internal::GetCapturedStderr().empty());
+  s.clear();
+  std::ifstream f(path);
+  std::string   line;
+  std::getline(f, line);
+  EXPECT_EQ(line, livehd::diag::to_jsonl(d, 0));
+  std::remove(path.c_str());
+}

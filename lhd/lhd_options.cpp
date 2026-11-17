@@ -110,7 +110,21 @@ bool route_positional(Options& opts, std::string_view a) {
   return true;
 }
 
-std::string_view need_value(std::string_view flag, int& i, int argc, char** argv) {
+// The `=value` half of a `--flag=value` token. parse_args splits the token so
+// both spellings (`--diag-fmt pretty` and `--diag-fmt=pretty`) reach the same
+// branch; need_value hands out the inline value instead of the next argv, and
+// a flag that never asks for it rejects the `=value` after dispatch.
+struct Inline_value {
+  std::string_view value;
+  bool             present  = false;
+  bool             consumed = false;
+};
+
+std::string_view need_value(std::string_view flag, int& i, int argc, char** argv, Inline_value& inl) {
+  if (inl.present) {
+    inl.consumed = true;
+    return inl.value;
+  }
   if (i + 1 >= argc) {
     throw Lhd_error{"usage", std::format("{} requires a value", flag), ""};
   }
@@ -410,16 +424,26 @@ Options parse_args(int argc, char** argv) {
       continue;
     }
 
+    // `--flag=value` == `--flag value` for every value-taking long option.
+    Inline_value inl;
+    if (a.starts_with("--")) {
+      if (auto eq = a.find('='); eq != std::string_view::npos && eq > 2) {
+        inl.value   = a.substr(eq + 1);
+        inl.present = true;
+        a           = a.substr(0, eq);
+      }
+    }
+
     if (a == "--emit") {
-      opts.emits.emplace_back(parse_emit_arg(a, need_value(a, i, argc, argv)));
+      opts.emits.emplace_back(parse_emit_arg(a, need_value(a, i, argc, argv, inl)));
     } else if (a == "--emit-dir") {
-      opts.emit_dirs.emplace_back(parse_typed(a, need_value(a, i, argc, argv), true));
+      opts.emit_dirs.emplace_back(parse_typed(a, need_value(a, i, argc, argv, inl), true));
     } else if (a == "--in") {
-      opts.ins.emplace_back(parse_typed(a, need_value(a, i, argc, argv), false));
+      opts.ins.emplace_back(parse_typed(a, need_value(a, i, argc, argv, inl), false));
     } else if (a == "--lib") {
-      opts.libs.emplace_back(parse_typed(a, need_value(a, i, argc, argv), false));
+      opts.libs.emplace_back(parse_typed(a, need_value(a, i, argc, argv, inl), false));
     } else if (a == "--collapse") {  // lec: proven def(s) to force-blackbox (repeatable / comma-sep)
-      std::string v{need_value(a, i, argc, argv)};
+      std::string v{need_value(a, i, argc, argv, inl)};
       size_t      pos = 0;
       while (pos < v.size()) {
         size_t c   = v.find(',', pos);
@@ -430,7 +454,7 @@ Options parse_args(int argc, char** argv) {
         pos = end + 1;
       }
     } else if (a == "--trust") {  // lec: def(s) ASSUMED equal without proof (latch escape hatch; repeatable / comma-sep)
-      std::string v{need_value(a, i, argc, argv)};
+      std::string v{need_value(a, i, argc, argv, inl)};
       size_t      pos = 0;
       while (pos < v.size()) {
         size_t c   = v.find(',', pos);
@@ -441,9 +465,9 @@ Options parse_args(int argc, char** argv) {
         pos = end + 1;
       }
     } else if (a == "--top") {
-      opts.top = need_value(a, i, argc, argv);
+      opts.top = need_value(a, i, argc, argv, inl);
     } else if (a == "--target") {  // `lhd tool`: node|pin|edge|all, or tree's kind:<X>
-      auto v = std::string{need_value(a, i, argc, argv)};
+      auto v = std::string{need_value(a, i, argc, argv, inl)};
       // `tool tree --target kind:register --target kind:memory` (repeatable):
       // a kind:<X> / kind=<X> value selects node kinds to surface in the tree;
       // anything else is the cat/grep/diff node|pin|edge|all target.
@@ -453,7 +477,7 @@ Options parse_args(int argc, char** argv) {
         opts.tool_target = std::move(v);
       }
     } else if (a == "--attr") {  // explicit display column CSV
-      opts.tool_attr = need_value(a, i, argc, argv);
+      opts.tool_attr = need_value(a, i, argc, argv, inl);
     } else if (a == "-v" || a == "--invert-match") {  // `tool grep -v`: keep non-matching records
       opts.tool_invert = true;
     } else if (a == "--match") {  // `tool diff --match`: visualize via the semdiff `match` attribute
@@ -461,7 +485,7 @@ Options parse_args(int argc, char** argv) {
     } else if (a == "--structural") {  // `tool diff --structural`: strict compile-cache H5 comparison
       opts.tool_structural = true;
     } else if (a == "--max" || a == "-C" || a == "--context") {  // row cap / diff context
-      auto   v        = std::string{need_value(a, i, argc, argv)};
+      auto   v        = std::string{need_value(a, i, argc, argv, inl)};
       size_t consumed = 0;
       long   n        = 0;
       try {
@@ -478,7 +502,14 @@ Options parse_args(int argc, char** argv) {
         opts.tool_context = static_cast<int>(n);
       }
     } else if (a == "--hier") {  // optional integer depth; bare = all levels
-      if (i + 1 < argc) {
+      if (inl.present) {
+        inl.consumed = true;
+        const auto v = inl.value;
+        if (v.empty() || !std::all_of(v.begin(), v.end(), [](unsigned char c) { return std::isdigit(c) != 0; })) {
+          throw Lhd_error{"usage", std::format("--hier expects a non-negative integer depth, got '{}'", v), ""};
+        }
+        opts.tool_hier = static_cast<int>(std::stol(std::string{v}));
+      } else if (i + 1 < argc) {
         std::string_view nx{argv[i + 1]};
         if (!nx.empty() && std::all_of(nx.begin(), nx.end(), [](unsigned char c) { return std::isdigit(c) != 0; })) {
           opts.tool_hier = static_cast<int>(std::stol(std::string{nx}));
@@ -490,7 +521,7 @@ Options parse_args(int argc, char** argv) {
         opts.tool_hier = std::numeric_limits<int>::max();
       }
     } else if (a == "--reader") {
-      opts.reader = need_value(a, i, argc, argv);
+      opts.reader = need_value(a, i, argc, argv, inl);
       if (opts.reader == "yosys") {
         opts.reader = "yosys-slang";
       }
@@ -500,11 +531,11 @@ Options parse_args(int argc, char** argv) {
                         "yosys-* elaborate to LGraphs via yosys; slang is the direct SV -> LNAST front-end"};
       }
     } else if (a == "--config") {
-      opts.config = need_value(a, i, argc, argv);
+      opts.config = need_value(a, i, argc, argv, inl);
     } else if (a == "--depfile") {
-      opts.depfile = need_value(a, i, argc, argv);
+      opts.depfile = need_value(a, i, argc, argv, inl);
     } else if (a == "--unused-inputs") {  // Bazel unused_inputs_list (compile)
-      opts.unused_inputs = need_value(a, i, argc, argv);
+      opts.unused_inputs = need_value(a, i, argc, argv, inl);
       // The consuming pass decides what the report is: pass.semdiff the aggregate
       // match report, pass.color the partition-size report, and lec / formal verify
       // (lhd.stats) the cvc5 solve-insight report — that last one costs ~8x.
@@ -517,7 +548,7 @@ Options parse_args(int argc, char** argv) {
     } else if (a == "--stats") {
       add_cli_set(opts, "lhd.stats", "true");
     } else if (a == "--set") {
-      auto kv  = std::string{need_value(a, i, argc, argv)};
+      auto kv  = std::string{need_value(a, i, argc, argv, inl)};
       auto pos = kv.find('=');
       if (pos == std::string::npos || pos == 0) {
         throw Lhd_error{"usage", std::format("--set expects pass.flag=value, got '{}'", kv), ""};
@@ -530,7 +561,7 @@ Options parse_args(int argc, char** argv) {
       add_cli_set(opts, std::move(key), std::move(val));
     } else if (a == "--dump") {
       // Repeatable, comma-separable: --dump parse --dump lg == --dump parse,lg
-      std::string v{need_value(a, i, argc, argv)};
+      std::string v{need_value(a, i, argc, argv, inl)};
       size_t      start = 0;
       while (start <= v.size()) {
         auto        end  = v.find(',', start);
@@ -555,7 +586,7 @@ Options parse_args(int argc, char** argv) {
       // top missing (random Pyrope round-trip fuzz, 2026-10-08): the same
       // ambiguity add_cli_set rejects for --set.
       const bool  impl = a == "--impl";
-      auto        tp   = parse_check_side(a, need_value(a, i, argc, argv));
+      auto        tp   = parse_check_side(a, need_value(a, i, argc, argv, inl));
       const auto& prev = impl ? opts.impl_path : opts.ref_path;
       if (!prev.empty() && prev != tp.path) {
         throw Lhd_error{"usage",
@@ -567,15 +598,15 @@ Options parse_args(int argc, char** argv) {
       (impl ? opts.impl_path : opts.ref_path) = tp.path;
     } else if (a == "--formal") {  // formal verify / lec: fnmatch glob over formal-block dotted names
       // Block names are canonical (`cnt`.`bounded` == cnt.bounded), so is the glob.
-      opts.formal_filter = str_tools::canonical_escaped_path(need_value(a, i, argc, argv));
+      opts.formal_filter = str_tools::canonical_escaped_path(need_value(a, i, argc, argv, inl));
     } else if (a == "--impl-top") {
-      opts.impl_top = need_value(a, i, argc, argv);
+      opts.impl_top = need_value(a, i, argc, argv, inl);
     } else if (a == "--ref-top") {
-      opts.ref_top = need_value(a, i, argc, argv);
+      opts.ref_top = need_value(a, i, argc, argv, inl);
     } else if (a == "--result-json") {
-      opts.result_json = need_value(a, i, argc, argv);
+      opts.result_json = need_value(a, i, argc, argv, inl);
     } else if (a == "--diag-fmt") {
-      auto v = need_value(a, i, argc, argv);
+      auto v = need_value(a, i, argc, argv, inl);
       if (v == "json" || v == "jsonl") {
         opts.diag_fmt = Diag_fmt::jsonl;
       } else if (v == "pretty") {
@@ -590,7 +621,7 @@ Options parse_args(int argc, char** argv) {
     } else if (a == "--gui-no-open") {
       opts.gui = opts.gui_no_open = true;
     } else if (a == "--gui-port") {
-      const std::string v{need_value(a, i, argc, argv)};
+      const std::string v{need_value(a, i, argc, argv, inl)};
       char*             end  = nullptr;
       const long        port = std::strtol(v.c_str(), &end, 10);
       if (v.empty() || *end != '\0' || port < 0 || port > 65535) {
@@ -599,7 +630,7 @@ Options parse_args(int argc, char** argv) {
       opts.gui      = true;
       opts.gui_port = int(port);
     } else if (a == "--gui-resume" || a == "--gui-replay" || a == "--gui-token" || a == "--gui-replay-seq") {
-      const std::string v{need_value(a, i, argc, argv)};
+      const std::string v{need_value(a, i, argc, argv, inl)};
       opts.gui = true;
       if (a == "--gui-resume") {
         opts.gui_resume = v;
@@ -612,14 +643,21 @@ Options parse_args(int argc, char** argv) {
       }
     } else if (a == "--gui-trace") {
       opts.gui       = true;
-      opts.gui_trace = need_value(a, i, argc, argv);
+      opts.gui_trace = need_value(a, i, argc, argv, inl);
     } else if (a == "--workdir") {
-      opts.workdir = need_value(a, i, argc, argv);
+      opts.workdir = need_value(a, i, argc, argv, inl);
     } else if (a == "-d" || a == "--debug") {  // log categories, e.g. -d synth.place,pass.abc (see core/diag.hpp)
       if (!opts.debug.empty()) {
         opts.debug += ',';
       }
-      opts.debug += std::string{need_value(a, i, argc, argv)};
+      // A trailing -d or one immediately before another option selects all.
+      // Use --debug=WORD to make an explicit value unambiguous.
+      if (!inl.present && (i + 1 == argc || std::string_view{argv[i + 1]}.starts_with("-"))) {
+        opts.debug += "all";
+      } else {
+        const auto words = need_value(a, i, argc, argv, inl);
+        opts.debug += words.empty() ? "all" : std::string{words};
+      }
     } else if (a == "-q" || a == "--quiet") {
       opts.quiet = true;
     } else if (a == "--verbose") {
@@ -631,7 +669,7 @@ Options parse_args(int argc, char** argv) {
     } else if (a == "--list-tests") {  // `sim`/`formal verify`: print the test units as JSON, then exit (no build/proof)
       opts.list_tests = true;
     } else if (a == "--arg") {  // `sim`: bind a test parameter, repeatable: --arg key=value
-      auto v  = std::string{need_value(a, i, argc, argv)};
+      auto v  = std::string{need_value(a, i, argc, argv, inl)};
       auto eq = v.find('=');
       if (eq == std::string::npos || eq == 0) {
         throw Lhd_error{"usage",
@@ -640,36 +678,36 @@ Options parse_args(int argc, char** argv) {
       }
       opts.sim_plusargs.emplace_back("+" + v);
     } else if (a == "--restart-cycle") {  // `sim`: resume from the nearest checkpoint <= N
-      opts.sim_restart_cycle = parse_nonneg(a, need_value(a, i, argc, argv));
+      opts.sim_restart_cycle = parse_nonneg(a, need_value(a, i, argc, argv, inl));
     } else if (a == "--vcd-from") {  // `sim`: trace VCD starting at cycle N (restart to N first)
-      opts.sim_vcd_from = parse_nonneg(a, need_value(a, i, argc, argv));
+      opts.sim_vcd_from = parse_nonneg(a, need_value(a, i, argc, argv, inl));
     } else if (a == "--vcd-to") {  // `sim`: trace VCD up to cycle N (with --vcd-from)
-      opts.sim_vcd_to = parse_nonneg(a, need_value(a, i, argc, argv));
+      opts.sim_vcd_to = parse_nonneg(a, need_value(a, i, argc, argv, inl));
     } else if (a == "--vcd-on-fail") {  // `sim`: re-run a failed test with a VCD of the failure region
       opts.sim_vcd_on_fail = true;
     } else if (a == "--vcd-fail-window") {  // `sim`: cycles before the failure to trace (with --vcd-on-fail)
-      opts.sim_vcd_fail_window = parse_nonneg(a, need_value(a, i, argc, argv));
+      opts.sim_vcd_fail_window = parse_nonneg(a, need_value(a, i, argc, argv, inl));
     } else if (a == "--list-signals") {  // `sim`: enumerate observable signals, then exit
       opts.sim_list_signals = true;
     } else if (a == "--probe") {  // `sim`: per-cycle JSON trajectory of SIG,... (no re-instrumenting)
-      opts.sim_probe = need_value(a, i, argc, argv);
+      opts.sim_probe = need_value(a, i, argc, argv, inl);
     } else if (a == "--probe-from") {  // `sim`: probe trajectory start cycle
-      opts.sim_probe_from = parse_nonneg(a, need_value(a, i, argc, argv));
+      opts.sim_probe_from = parse_nonneg(a, need_value(a, i, argc, argv, inl));
     } else if (a == "--probe-to") {  // `sim`: probe trajectory end cycle
-      opts.sim_probe_to = parse_nonneg(a, need_value(a, i, argc, argv));
+      opts.sim_probe_to = parse_nonneg(a, need_value(a, i, argc, argv, inl));
     } else if (a == "--break-when") {  // `sim`: first cycle a `SIG OP VALUE|SIG` condition holds
-      opts.sim_break_when = need_value(a, i, argc, argv);
+      opts.sim_break_when = need_value(a, i, argc, argv, inl);
     } else if (a == "--query") {  // `sim`: batched JSON query request — a path, `-` for stdin, or inline `{...}`
       // need_value takes the NEXT argv verbatim, so `--query -` (stdin) survives.
       // An empty value would silently read as "no query at all", so reject it.
-      opts.sim_query = need_value(a, i, argc, argv);
+      opts.sim_query = need_value(a, i, argc, argv, inl);
       if (opts.sim_query.empty()) {
         throw Lhd_error{"usage",
                         "--query expects a file path, `-` for stdin, or an inline JSON object",
                         "e.g. --query q.json, --query -, or --query '{\"schema_version\":1,\"kind\":\"sim_query\",...}'"};
       }
     } else if (a == "--seed") {  // shared RNG seed (alias for `--set lhd.seed=N`); `sim` forwards it to drivers
-      auto   v        = std::string{need_value(a, i, argc, argv)};
+      auto   v        = std::string{need_value(a, i, argc, argv, inl)};
       size_t consumed = 0;
       try {
         (void)std::stoull(v, &consumed, 0);  // base 0: decimal or 0x.. ; validate the whole token
@@ -686,15 +724,15 @@ Options parse_args(int argc, char** argv) {
     } else if (a == "-i" || a == "--inplace") {  // `pyrope fmt`: rewrite the input file(s) in place
       opts.fmt_inplace = true;
     } else if (a == "-o" || a == "--output") {  // `pyrope fmt`: write to a file instead of stdout
-      opts.fmt_output = need_value(a, i, argc, argv);
+      opts.fmt_output = need_value(a, i, argc, argv, inl);
     } else if (a == "--mode") {  // `pyrope fmt`: layout mode
-      const auto v = std::string{need_value(a, i, argc, argv)};
+      const auto v = std::string{need_value(a, i, argc, argv, inl)};
       if (v != "ai" && v != "human") {
         throw Lhd_error{"usage", std::format("--mode expects ai or human, got '{}'", v), ""};
       }
       opts.fmt_human = v == "human";
     } else if (a == "--indent" || a == "--width") {  // `pyrope fmt`: indent size / wrap column
-      auto   v        = std::string{need_value(a, i, argc, argv)};
+      auto   v        = std::string{need_value(a, i, argc, argv, inl)};
       size_t consumed = 0;
       long   n        = 0;
       try {
@@ -711,7 +749,7 @@ Options parse_args(int argc, char** argv) {
         opts.fmt_width = static_cast<int>(n);
       }
     } else if (a == "--min-repeats" || a == "--max-block-statements" || a == "--max-findings") {
-      auto   v        = std::string{need_value(a, i, argc, argv)};
+      auto   v        = std::string{need_value(a, i, argc, argv, inl)};
       size_t consumed = 0;
       long   n        = 0;
       try {
@@ -824,6 +862,11 @@ Options parse_args(int argc, char** argv) {
       }
     } else {
       opts.files.emplace_back(a);
+    }
+    if (inl.present && !inl.consumed) {
+      throw Lhd_error{"usage",
+                      std::format("option '{}' does not take a value (got '{}={}')", a, a, inl.value),
+                      std::format("drop the '={}'", inl.value)};
     }
   }
 

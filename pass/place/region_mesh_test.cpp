@@ -66,14 +66,18 @@ TEST(Region_mesh, MembershipPartitionsMovableCellsUnderTheCap) {
 TEST(Region_mesh, RejectsMovableMacrosAndBadOptions) {
   auto d = fixture();
   EXPECT_THROW(Region_mesh::build(d, {40}, {}, {.max_cells = 0}, 1), std::invalid_argument);
-  EXPECT_THROW(Region_mesh::build(d, {3}, {}, {}, 1), std::invalid_argument);
+  EXPECT_THROW(Region_mesh::build(d, {3}, {}, {.merge_um = 5}, 1), std::invalid_argument);
   d.node_macro[0] = 1;
-  EXPECT_THROW(Region_mesh::build(d, {40}, {}, {}, 1), std::invalid_argument);
+  EXPECT_THROW(Region_mesh::build(d, {40}, {}, {.merge_um = 5}, 1), std::invalid_argument);
+}
+
+TEST(Region_mesh, RefusesUnresolvedAutoMerge) {
+  EXPECT_THROW(Region_mesh::build(fixture(), {40}, {}, {.max_cells = 10}, 1), std::invalid_argument);
 }
 
 TEST(Region_mesh, WritesOneSharedReport) {
   const auto dir  = std::filesystem::path(::testing::TempDir()) / "region_mesh";
-  const auto mesh = Region_mesh::build(fixture(), {40}, {}, {.max_cells = 10}, 1);
+  const auto mesh = Region_mesh::build(fixture(), {40}, {}, {.max_cells = 10, .merge_um = 5}, 1);
   mesh.write(dir.string());
   std::ifstream file(dir / "region_mesh.json");
   std::string   text((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());

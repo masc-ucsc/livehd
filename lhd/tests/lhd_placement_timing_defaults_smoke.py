@@ -73,7 +73,8 @@ assert [entry['stage'] for entry in legal_timing] == ['global_placement', 'legal
 assert all(entry['ranking_only'] and entry['wns'] is None and entry['tns'] is None
            for entry in legal_timing), legal_timing
 assert native['qor']['sta']['designs'][0]['wns'] is not None, native
-assert native['qor']['sta']['physical_session_reused'], native
+# OpenTimer reuses the placement session for the final report; the fast engine (default) re-binds, cheaply.
+assert native['qor']['sta']['engine'] == 'fast' or native['qor']['sta']['physical_session_reused'], native
 
 assert json.loads((root/'terminal_default/synth/place/route_options.json').read_text())['stages']['final']['model'] == 'rsmt'
 phases = [p['name'] for p in native['phases']]
@@ -88,7 +89,7 @@ track_def = (root/'explicit_tracks/synth/place/out.def').read_text()
 assert re.search(r'^TRACKS X 170 DO \d+ STEP 340 LAYER met1 ;$', track_def, re.M), track_def[:1000]
 assert re.search(r'^TRACKS Y 170 DO \d+ STEP 340 LAYER met1 ;$', track_def, re.M), track_def[:1000]
 native_debug = run('terminal_debug', ['--set', 'synth.place=true', '--set', 'synth.place.timing_driven=false',
-                                    '--set', 'synth.opentimer=false'])
+                                    '--set', 'synth.timing=false'])
 assert native_debug['qor']['place']['legal'], native_debug
 assert json.loads((root/'terminal_debug/synth/place/terminal_legalize.json').read_text())['timed_nets'] == 0
 run('terminal_gp_only', ['--set', 'synth.place=true', '--set', 'synth.place.mode=gp'])
@@ -118,8 +119,8 @@ plain = run('synthesis_only', [])
 assert 'place' not in plain['qor']
 gp = run('gp_only', ['--set', 'synth.place=true', '--set', 'synth.place.mode=gp'])
 assert 'timing_driven' not in gp['qor']['place']
-run('no_sta', ['--set', 'synth.place=true', '--set', 'synth.opentimer=false'], success=False, expect='OpenTimer')
-no_sta_debug = run('no_sta_debug', ['--set', 'synth.place=true', '--set', 'synth.opentimer=false',
+run('no_sta', ['--set', 'synth.place=true', '--set', 'synth.timing=false'], success=False, expect='OpenTimer')
+no_sta_debug = run('no_sta_debug', ['--set', 'synth.place=true', '--set', 'synth.timing=false',
                                   '--set', 'synth.place.timing_driven=false'])
 assert no_sta_debug['qor']['place']['legal'] and 'sta' not in no_sta_debug['qor']
 # A real Liberty cell classified as a macro supplies an FP candidate without a

@@ -297,7 +297,7 @@ p=json.load(open(sys.argv[2])); assert p['tmap']=='abc' and p['output']=='mapped
 assert p['totals']['register_bits']==1,p
 PY
 run synth "$W/pipe.v" --top pipe --set synth.mapper=usyn --set synth.liberty="$LIB" \
-  --set synth.opentimer=false --workdir "$W/fused_mapping"
+  --set synth.timing=false --workdir "$W/fused_mapping"
 python3 - "$W/result.json" <<'PY'
 import json,sys
 r=json.load(open(sys.argv[1]))
@@ -311,7 +311,7 @@ cp "$LIB" "$W/changed.lib"
 printf '\n/* mapping cache invalidation */\n' >> "$W/changed.lib"
 for library in "$LIB" "$W/changed.lib"; do
   run synth "$W/pipe.v" --top pipe --set synth.mapper=usyn --set "synth.liberty=$library" \
-    --set synth.opentimer=false --workdir "$W/fused_mapping"
+    --set synth.timing=false --workdir "$W/fused_mapping"
   python3 - "$W/result.json" "$library" "$LIB" <<'PYTHON'
 import json,sys
 result=json.load(open(sys.argv[1])); native=result['qor']['usyn']; mapped=result['qor']['abc']
@@ -332,7 +332,7 @@ grep -q 'usyn\[stats\]:' "$W/pretty_logical"
   --diag-fmt pretty -q >"$W/pretty_standalone"
 grep -q "qor: usyn 'pipe' (logical-cmos)" "$W/pretty_standalone"
 "$LHD" synth "lg:$W/logical/synth/lg" --top pipe --set synth.mapper=usyn \
-  --set synth.liberty="$LIB" --set synth.opentimer=false --diag-fmt pretty --stats -q >"$W/pretty_mapped"
+  --set synth.liberty="$LIB" --set synth.timing=false --diag-fmt pretty --stats -q >"$W/pretty_mapped"
 grep -q "qor: usyn 'pipe' (mapped-cmos)" "$W/pretty_mapped"
 grep -q "qor: technology-map 'pipe' provider=abc:" "$W/pretty_mapped"
 grep -q 'tmap\[stats\]:' "$W/pretty_mapped"
@@ -346,7 +346,7 @@ records=[json.loads(line) for line in open(sys.argv[1])]
 assert any(r.get('code')=='obsolete-option' for r in records),records
 PY
 if "$LHD" synth "$W/pipe.v" --top pipe --set synth.mapper=usyn --set pass.usyn.tmap=none \
-  --set synth.opentimer=true -q >"$W/fail.log" 2>&1; then
+  --set synth.timing=true -q >"$W/fail.log" 2>&1; then
   echo 'logical-only output was accepted for STA' >&2; exit 1
 fi
 echo 'PASS: native USYN logical/mapped output, reports, state semantics and option migration'

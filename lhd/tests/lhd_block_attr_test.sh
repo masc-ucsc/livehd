@@ -108,7 +108,7 @@ def synth(name, attrs, *opts, explore=True):
     d = w/name; d.mkdir(exist_ok=True)
     source = d/'abc_ware_attr.prp'
     source.write_text(fixture.replace('color=2, ware=true, delay=500',attrs))
-    j = run('synth',source,'--top',top,'--set',f'synth.liberty={lib}','--set','synth.opentimer=false',
+    j = run('synth',source,'--top',top,'--set',f'synth.liberty={lib}','--set','synth.timing=false',
             '--workdir',d/'work','--emit-dir',f'lg:{d}/net', '--emit',f'verilog:{d}/mapped.v',
             *(('--set','synth.tune.profile=on') if explore else ()),*opts)
     rows = j['qor']['abc']['regions']
@@ -122,7 +122,7 @@ def synth(name, attrs, *opts, explore=True):
 cases = {}
 for enabled in ('true','false'):
     cases['attr_'+enabled] = synth('attr_'+enabled, f'color=2, ware={enabled}, delay=500')
-    cases['cli_'+enabled] = synth('cli_'+enabled,'color=2','--set','abc.region_opts='+json.dumps({'2': {'ware':enabled=='true'}}),'--set','abc.delay=500')
+    cases['cli_'+enabled] = synth('cli_'+enabled,'color=2','--set','synth.region_opts='+json.dumps({'2': {'ware':enabled=='true'}}),'--set','synth.delay=500')
     a, b = cases['attr_'+enabled][0], cases['cli_'+enabled][0]
     for key in ('ware_trials','ware_selected','gates','area','logic_depth','delay','budget'):
         assert a[key] == b[key], (key,a,b)
@@ -137,12 +137,12 @@ assert cases['attr_true'][0]['delay'] <= 500 < cases['attr_false'][0]['delay']
 assert 'objective=timing' in cases['attr_true'][1]
 # Zero clears timing and chooses area. CLI and source remain interchangeable.
 a, log = synth('attr_area','color=2, ware=true, delay=0')
-b, _ = synth('cli_area','color=2','--set','abc.region_opts='+json.dumps({'2': {'ware':True}}))
+b, _ = synth('cli_area','color=2','--set','synth.region_opts='+json.dumps({'2': {'ware':True}}))
 for key in ('ware_trials','ware_selected','gates','area','logic_depth','delay'):
     assert a[key]==b[key], (key,a,b)
 assert 'objective=area' in log and a['area'] < cases['attr_true'][0]['area']
 # Clearing an inherited target still uses area as its objective.
-a, log = synth('clear_target','color=2, ware=true, delay=0','--set','abc.delay=500')
+a, log = synth('clear_target','color=2, ware=true, delay=0','--set','synth.delay=500')
 assert 'objective=area' in log and 'objective=timing' not in log, log
 # Sibling sections retain independent switches. The disabled section's long
 # path must not prevent improving a tied endpoint in the enabled section.
@@ -154,12 +154,12 @@ source.write_text("""mod mixed(a:U64,b:U64,c:U64,d:U64) -> (y:U1@[0],z:U1@[0]) {
 }
 """)
 j=run('synth',source,'--top','mixed.mixed','--set',f'synth.liberty={lib}',
-      '--set','synth.opentimer=false','--set','synth.tune.profile=on','--workdir',d/'work','--emit-dir',f'lg:{d}/net')
+      '--set','synth.timing=false','--set','synth.tune.profile=on','--workdir',d/'work','--emit-dir',f'lg:{d}/net')
 rows={r['color']:r for r in j['qor']['abc']['regions'] if r['module'].startswith('__ware_lt_')}
 assert rows[2]['ware_trials']==0 and rows[3]['ware_trials']>0,rows
 assert rows[3]['delay'] < rows[2]['delay'],rows
 # Explicit region_opts overrides source attributes (global knobs are defaults).
-a, _ = synth('region_override','color=2, ware=true, delay=500','--set','abc.region_opts={"2":{"ware":false}}')
+a, _ = synth('region_override','color=2, ware=true, delay=500','--set','synth.region_opts={"2":{"ware":false}}')
 assert a['ware_trials']==0
 # Warm replay retains source policy even when baseline mapping hits the cache.
 a, _ = synth('attr_true','color=2, ware=true, delay=500')

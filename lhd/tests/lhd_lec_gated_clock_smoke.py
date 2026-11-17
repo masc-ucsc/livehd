@@ -67,7 +67,7 @@ def synth(name):
     argv = [lhd, 'synth', str(root / f'{name}.v'), '--top', name, '-q', '--workdir', str(work),
             '--set', 'synth.mapper=usyn', '--set', 'pass.usyn.clock_phases=1', '--set', 'pass.usyn.tmap=abc',
             '--set', f'synth.liberty={root}/seq.lib', '--set', f'synth.lef={libdir}/sky130hd.tlef,{root}/seq.lef',
-            '--set', f'synth.sdc={sdc}', '--set', 'synth.opentimer=false', '--set', 'compile.slang.liberty_cells=true',
+            '--set', f'synth.sdc={sdc}', '--set', 'synth.timing=false', '--set', 'compile.slang.liberty_cells=true',
             '--result-json', str(result)]
     completed = subprocess.run(argv, capture_output=True, text=True, timeout=20)
     assert completed.returncode == 0, (name, completed.stdout[-2000:], completed.stderr[-2000:])

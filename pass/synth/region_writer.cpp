@@ -435,8 +435,6 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
   double latch_area      = 0.0;
   int    clock_tree_cells = 0;
   double clock_tree_area  = 0.0;
-  int    reset_tree_cells = 0;
-  double reset_tree_area  = 0.0;
   int    latch_inv_cells = 0;  // D-side inverters (QN cells) and enable/reset level inverters
   // One min-size library inverter (the same cell a negedge clock or a reset
   // polarity takes), shared per source where the caller caches it.
@@ -821,8 +819,6 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
   // Register clock pins by driver, for the clock-fanout tree built once every
   // cell exists (see Driver_options::icg_fanout).
   absl::flat_hash_map<hhds::Pin_class, std::vector<hhds::Pin_class>> clock_sinks;
-  // Asynchronous clear/preset pins by driver, for the reset-fanout tree (Driver_options::reset_fanout).
-  absl::flat_hash_map<hhds::Pin_class, std::vector<hhds::Pin_class>> reset_sinks;
 
   // --- latch cells: enable and reset pins (Latch_map) ---
   // A traced source reaches the pin natively (one shared inverter when its
@@ -875,7 +871,6 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
             const auto rdrv  = level(rst_src, pin_low != lm.rst_src_low, "rst");
             auto       rsink = sub.create_sink_pin(cell.reset_pin(v));
             rdrv.connect_sink(rsink);
-            reset_sinks[rdrv].push_back(rsink);
           } else {
             I(lm.rst_po[pin_low ? 1 : 0] >= 0);
             icg_en_pending.emplace_back(sub, cell.reset_pin(v), lm.rst_po[pin_low ? 1 : 0], true);
@@ -997,7 +992,7 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
   };
   // resetless power-on init: such a bit must keep a native flop so the value
   // survives (a plain DFF cell has no init pin)
-  // (pass.abc.drop_init maps it to a plain DFF cell and drops the value instead.)
+  // (synth.drop_init maps it to a plain DFF cell and drops the value instead.)
   auto needs_native = [&](int k) -> bool { return !registers.drop_init && source_init_bit(k).has_value(); };
   // The asynchronous-reset register latch k belongs to (Seq_flop::async_reset),
   // or null. Only reachable with the latch count preserved: the guard in pass
@@ -1537,7 +1532,6 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
           } else if (auto rdrv = reset_drive(*af, cell.reset_low(aval)); !rdrv.is_invalid()) {
             auto rsink = sub.create_sink_pin(cell.reset_pin(aval));
             rdrv.connect_sink(rsink);
-            reset_sinks[rdrv].push_back(rsink);
           }
           if (const auto& other = cell.reset_pin(!aval); !other.empty()) {
             gu::create_const(*body, *Dlop::create_integer(cell.reset_low(!aval) ? 1 : 0)).connect_sink(sub.create_sink_pin(other));
@@ -1747,7 +1741,7 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
   }
   // The cheapest identity buffer of the library: the cell of every fanout tree below.
   std::optional<uint32_t> tree_buf;
-  if (registers.icg_fanout != 0 || registers.reset_fanout != 0) {
+  if (registers.icg_fanout != 0) {
     for (size_t t = 0; t < lib.size(); ++t) {
       const auto id = static_cast<uint32_t>(t);
       if (lib.is_identity(id) && (!tree_buf || lib.type(id).area < lib.type(*tree_buf).area)) {
@@ -1854,29 +1848,18 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
     }
     auto rsink = pr.sub.create_sink_pin(pr.pin);
     drv.connect_sink(rsink);
-    if (pr.async_reset) {
-      reset_sinks[drv].push_back(rsink);
-    }
   }
-  // Asynchronous-reset fanout tree (pass.abc.reset_fanout). The clear/preset pins never entered the logic network,
-  // so no mapper fanout cap reaches them: a region input, a polarity inverter or a mapped reset cone drives every
-  // flop of the region on one net. Same tree as the clock's, applied to the nets that are now all wired.
-  if (registers.reset_fanout != 0 && tree_buf.has_value()) {
-    const size_t cap = std::max<size_t>(2, registers.reset_fanout);
-    for (const auto& driver : sorted_drivers(reset_sinks)) {
-      deal_out(driver, reset_sinks[driver], cap, "rstbuf", reset_tree_cells, reset_tree_area);
-    }
-  }
+  // Reset distribution (clear/preset pins included) is placement's: pass.pcrs rebuilds every reset tree under
+  // synth.max_fanout and pipelines it by timing.
   // Those inverters are minted standard cells the mapped LOGIC network never
   // saw: count them where the identity-buffer bypass corrected the same row,
   // so abc.json `gates`/`area` (what lhdtrack scores as lhd_area, and what the
   // incremental cache persists) describe the netlist that was actually written.
   if (qn_inv_cells != 0 || clock_inv_cells != 0 || reset_inv_cells != 0 || icg_cells != 0 || latch_cells != 0
-      || clock_tree_cells != 0 || reset_tree_cells != 0) {
-    counts.gates += qn_inv_cells + clock_inv_cells + reset_inv_cells + icg_cells + latch_cells + latch_inv_cells + clock_tree_cells
-                    + reset_tree_cells;
+      || clock_tree_cells != 0) {
+    counts.gates += qn_inv_cells + clock_inv_cells + reset_inv_cells + icg_cells + latch_cells + latch_inv_cells + clock_tree_cells;
     counts.area  += qn_inv_area + (clock_inv_cells + reset_inv_cells + latch_inv_cells) * inv_area + icg_area + latch_area
-                    + clock_tree_area + reset_tree_area;
+                    + clock_tree_area;
   }
   trace_stage("readback-fanins");
 

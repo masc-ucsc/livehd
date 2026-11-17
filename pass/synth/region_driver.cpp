@@ -591,106 +591,48 @@ void qor_src_of_output(const livehd::partition::Region_body& rb, size_t po, Regi
 
 }  // namespace
 
-// Memory admission (2opt-incr subtask 0). Deliberately MEASURED, not predicted:
-// a static op/width model cannot see the phase that actually blows up. The peak
-// is inside Cmd_CommandExecute's strash/&dch/&nf, which hold several network
-// forms at once -- and an external calibration of "bytes per gate" is not even
-// well defined here, because ABC's read_lib fixed cost dominates small designs
-// (measured: a 96-gate region and a 4640-gate region had comparable RSS).
-// What IS reliable is our own RSS while we translate.
-//
-// Projection: RSS grows roughly linearly in nodes blasted, so
-//   projected_translation = rss_before + growth_so_far * total / blasted
-// The projection can reject a clearly hopeless translation early, while the
-// repeated exact samples and process backstop police later ABC network forms.
+// Memory admission (2opt-incr subtask 0). MEASURED, never predicted: a static
+// op/width model cannot see the phase that actually blows up (the peak is inside
+// Cmd_CommandExecute's strash/&dch/&nf, which hold several network forms at
+// once), so the gate reads this process's own footprint at every stage and
+// refuses only once it crosses lhd.ram_max_mb (configured_budget_bytes) or comes
+// within a margin of the RLIMIT_AS backstop. lhd.ram_budget_mb is a sizing
+// target elsewhere, never a refusal here.
 bool Region_driver::over_budget(std::string_view region, uint64_t rss_before, size_t blasted, size_t total,
                                 uint64_t pending_bytes) {
-  const uint64_t budget = cost::budget_bytes(opts_.memory_budget_mb);
-  if (budget == 0 || blasted == 0) {
-    return false;  // unknown host and no explicit budget: unenforceable, do not gate
+  if (blasted == 0) {
+    return false;
   }
-  // Sample phys_footprint, not resident_size: it is the metric macOS jetsam
-  // charges (and it counts compressed/paged pages resident_size drops under
-  // pressure), so it is the number that actually decides whether we get killed.
-  // NB it is equally STICKY after free() -- freed pages linger until the
-  // allocator returns them. Subtract the color-entry baseline so a long run is
-  // not refused merely because completed mapped modules remain in its output
-  // library; this is still conservative within one color.
+  // phys_footprint, not resident_size: the metric macOS jetsam charges (it
+  // counts compressed/paged pages resident_size drops under pressure). It is
+  // sticky after free(), which is why the allocator-pressure relief at a color
+  // boundary is part of the guarantee.
   const uint64_t sampled = cost::process_footprint_bytes();
   if (sampled == 0) {
     return false;
   }
-  const uint64_t rss = sampled + pending_bytes;
-
-  // RSS at the first sample moves in large allocator/startup steps. Multiplying
-  // that extrapolation by a guessed post-translation ABC factor produced severe
-  // false positives (ROB: 8.3 GiB measured, 363 GiB predicted at a 16 GiB
-  // ceiling). Use translation growth itself, require a large signal, and refuse
-  // early only when even the projection clears the budget by a wide margin.
-  // The exact live-RSS check remains the resource guarantee.
-  constexpr uint64_t kMinGrowthToProject = uint64_t{256} << 20;
-  constexpr uint64_t kProjectionMargin   = 4;
-
-  const uint64_t grown            = rss > rss_before ? rss - rss_before : 0;
-  const double   fraction         = static_cast<double>(blasted) / static_cast<double>(total);
-  const uint64_t projected_growth = static_cast<uint64_t>(static_cast<double>(grown) / fraction);
-
-  // The exact reading is the guarantee; the projection is only allowed to make a
-  // hopeless region die sooner.
-  //
-  // TWO ceilings, each measured against its OWN number. Per-color GROWTH is what
-  // tells a single oversize region from a merely large run, but growth alone has
-  // no ceiling on the accumulated footprint: process_footprint_bytes() is sticky
-  // after free (host_mem.hpp), so the allocator-pressure relief at the color
-  // boundary is part of the resource guarantee. Without it, a many-color run
-  // whose colors each add well under the budget can still walk the process into
-  // the address-space limit lhd_main armed as RLIMIT_AS -- and ABC does not
-  // null-check its allocations, so that lands as a bare SIGSEGV with no
-  // diagnostic and no qor.json.
-  //
-  // The absolute test must NOT reuse `budget`: pass.abc.memory_budget_mb is
-  // documented and used as a per-color GROWTH knob, and lhd's own ~23 MiB
-  // baseline already exceeds a modestly pinned one, so measuring TOTAL rss
-  // against it would refuse the first region of every such run. Measure it
-  // against the process-wide PHYSICAL budget instead. On Darwin RLIMIT_AS has
-  // separate VA-only allocator headroom (host_mem.cpp); admission must not count
-  // that as physical capacity. A zero budget still means "unenforceable".
-  uint64_t total_ceiling = cost::configured_budget_bytes();
+  const uint64_t rss           = sampled + pending_bytes;
+  uint64_t       total_ceiling = cost::configured_budget_bytes();
   if (coordinator_ && coordinator_->parallel_stats_.memory_limit != 0) {
     total_ceiling = total_ceiling ? std::min(total_ceiling, coordinator_->parallel_stats_.memory_limit)
                                   : coordinator_->parallel_stats_.memory_limit;
   }
-  // Concurrent colors share the process reading; their growth cannot be
-  // attributed to one region. Keep the aggregate allowance under the absolute
-  // process ceiling above.
-  const uint64_t growth_budget = gu::sat_mul(budget, coordinator_ ? coordinator_->parallel_stats_.limit : 1U);
-  const bool     over_growth   = grown > growth_budget;
-  const bool     over_total    = total_ceiling != 0 && rss > total_ceiling;
-  // A THIRD reading, against the backstop itself: lhd_main arms RLIMIT_AS on
-  // VIRTUAL address space, which is always above the footprint sampled above
-  // (glibc reserves a 64 MiB malloc arena per allocating thread, plus thread
-  // stacks and untouched reservations). ABC does not null-check its mallocs, so
-  // an allocation the backstop denies is a bare SIGSEGV, never an error. Refuse
-  // while a margin of the configured budget is still left below the cap, so the
-  // admission fires (a clean TIMEOUT-memory) before the backstop can.
-  const uint64_t as_cap        = cost::address_space_limit_bytes();
-  const uint64_t as_used       = as_cap != 0 ? cost::process_virtual_bytes() : 0;
-  const uint64_t as_margin     = std::max<uint64_t>(uint64_t{256} << 20, cost::configured_budget_bytes() / 8);
-  const bool     over_va  = as_cap != 0 && as_used != 0 && gu::sat_add(gu::sat_add(as_used, pending_bytes), as_margin) > as_cap;
-  const bool     over_now = over_growth || over_total || over_va;
-  const bool     over_projected
-      = coordinator_ == nullptr && grown >= kMinGrowthToProject && projected_growth / kProjectionMargin > budget;
-  if (!over_now && !over_projected) {
+  const bool over_total = total_ceiling != 0 && rss > total_ceiling;
+  // The backstop itself: RLIMIT_AS caps VIRTUAL address space, which is always
+  // above the footprint (malloc arenas, stacks, reservations), and ABC does not
+  // null-check its mallocs, so an allocation the backstop denies is a bare
+  // SIGSEGV. Refuse while a margin is still left below the cap.
+  const uint64_t as_cap    = cost::address_space_limit_bytes();
+  const uint64_t as_used   = as_cap != 0 ? cost::process_virtual_bytes() : 0;
+  const uint64_t as_margin = std::max<uint64_t>(uint64_t{256} << 20, cost::configured_budget_bytes() / 8);
+  const bool over_va = as_cap != 0 && as_used != 0 && gu::sat_add(gu::sat_add(as_used, pending_bytes), as_margin) > as_cap;
+  if (!over_total && !over_va) {
     return false;
   }
 
   const auto        mib = [](uint64_t b) { return b >> 20; };
-  // Name the ceiling the refusal actually came from, or the message describes a
-  // derivation that never happened. An explicit memory_budget_mb is taken
-  // verbatim and no reserve is subtracted, so quoting a reserve there would be
-  // a second such invention.
   const std::string budget_desc
-      = (over_va && !over_growth && !over_total)
+      = over_va && !over_total
             ? std::format(
                   "process address space {} MiB{} is within {} MiB of the RLIMIT_AS memory backstop {} MiB (virtual "
                   "memory, above the footprint: malloc arenas, stacks, reservations) -- a further allocation there "
@@ -699,45 +641,28 @@ bool Region_driver::over_budget(std::string_view region, uint64_t rss_before, si
                   pending_bytes ? std::format(" (+{} MiB pending)", mib(pending_bytes)) : std::string{},
                   mib(as_margin),
                   mib(as_cap))
-        : coordinator_
-            ? (over_total ? std::format("parallel process physical-memory ceiling {} MiB (half of physical RAM or the smaller "
-                                        "configured process budget)",
-                                        mib(total_ceiling))
-                          : std::format("aggregate worker growth budget {} MiB ({} workers; process-wide growth since color entry)",
-                                        mib(growth_budget),
-                                        coordinator_->parallel_stats_.limit))
-        : (!over_growth && over_total)
-            ? std::format(
-                  "process physical-memory ceiling {} MiB (LHD_MEMORY_BUDGET_MB, else physical minus reserve; Darwin "
-                  "RLIMIT_AS has separate VA-only allocator headroom) -- the whole-PROCESS footprint, not this color's growth",
-                  mib(total_ceiling))
-        : opts_.memory_budget_mb > 0 ? std::format("per-color growth budget {} MiB (pass.abc.memory_budget_mb)", mib(budget))
-                                     : std::format("per-color growth budget {} MiB (physical {} MiB minus a {} MiB reserve)",
-                                                   mib(budget),
-                                                   mib(cost::physical_ram_bytes()),
-                                                   mib(cost::reserve_bytes()));
+        : coordinator_ ? std::format("parallel process RAM ceiling {} MiB (half of physical RAM or lhd.ram_max_mb, whichever "
+                                     "is smaller)",
+                                     mib(total_ceiling))
+                       : std::format("process RAM ceiling {} MiB (lhd.ram_max_mb)", mib(total_ceiling));
   // Once earlier colors exist to blame, say so: their retained memory is the
-  // cost, and the caller's stock `pass.color.synth.max_gate=<smaller>` hint is then the
+  // cost, and the stock `pass.color.synth.max_gate=<smaller>` hint is then the
   // wrong advice.
-  const std::string cause = (coordinator_ || over_growth || qor_.empty())
+  const std::string cause = coordinator_ || qor_.empty()
                                 ? std::string{}
                                 : std::format(" (after {} completed color(s), whose retained memory is the cost)", qor_.size());
-  refusal_                = std::format(
-      "region '{}' does not fit in memory: {} of {} node(s) translated ({:.0f}%), RSS {} MiB{} "
-      "(was {} MiB, {} added {} MiB){}, {}{}",
-      region,
-      blasted,
-      total,
-      100.0 * fraction,
-      mib(rss),
-      pending_bytes ? std::format(" (incl. {} MiB estimated for the ABC netlist not yet built)", mib(pending_bytes))
-                    : std::string{},
-      mib(rss_before),
-      coordinator_ ? "process" : "color",
-      mib(grown),
-      over_now ? std::string{} : std::format(", projected color growth {} MiB", mib(projected_growth)),
-      budget_desc,
-      cause);
+  refusal_ = std::format("region '{}' does not fit in memory: {} of {} node(s) translated ({:.0f}%), RSS {} MiB{} (was {} MiB at "
+                         "entry), {}{}",
+                         region,
+                         blasted,
+                         total,
+                         100.0 * static_cast<double>(blasted) / static_cast<double>(total),
+                         mib(rss),
+                         pending_bytes ? std::format(" (incl. {} MiB estimated for the ABC netlist not yet built)", mib(pending_bytes))
+                                       : std::string{},
+                         mib(rss_before),
+                         budget_desc,
+                         cause);
   return true;
 }
 
@@ -1366,9 +1291,6 @@ void Region_driver::map_region(const livehd::partition::Region_body& rb) {
       += std::format("|source={}/{}/{}/{}", opts_.source_adder, opts_.source_multiplier, opts_.source_barrel, opts_.source_block);
   // The clock tree is written after mapping and cached with the body.
   recipe += std::format("|clktree={}/{}", opts_.icg_fanout, design_state_bits_ >= opts_.input_clock_min ? 1 : 0);
-  if (opts_.reset_fanout != 0) {  // absent when off, so existing cache rows keep their identity
-    recipe += std::format("|rsttree={}", opts_.reset_fanout);
-  }
   if (opts_.derived_clock) {
     recipe += "|dclk=1";
   }
@@ -1620,15 +1542,6 @@ void Region_driver::map_region(const livehd::partition::Region_body& rb) {
       refusal_ = std::format("region '{}': caller refused mapping at {}", rb.module_name, stage);
       return false;
     }
-    const auto elapsed = since();
-    if (opts_.time_budget_ms != 0 && elapsed > static_cast<double>(opts_.time_budget_ms)) {
-      time_refusal_ = std::format("region '{}' took {:.0f} ms in ABC (soft limit {} ms), stopped at {}",
-                                  rb.module_name,
-                                  elapsed,
-                                  opts_.time_budget_ms,
-                                  stage);
-      return false;
-    }
     return !over_budget(rb.module_name, blast.rss_before, blast.blast_total, blast.blast_total);
   };
   ctx.refuse_time     = [&](std::string why) { time_refusal_ = std::format("region '{}': {}", rb.module_name, why); };
@@ -1682,7 +1595,6 @@ void Region_driver::map_region(const livehd::partition::Region_body& rb) {
                                      &derived_ports_};
   registers.drop_init    = opts_.drop_init;
   registers.port_bypass  = opts_.port_bypass;
-  registers.reset_fanout = opts_.reset_fanout;
   writer_.set_outlib(outlib_);
   writer_.set_flat(flat_);
   if (!writer_.write(rb, blast, *cells, backend_->cells(), registers, counts, trace_stage)) {
@@ -1713,12 +1625,6 @@ void Region_driver::map_region(const livehd::partition::Region_body& rb) {
   const uint64_t color_peak     = process_peak > process_peak_before ? process_peak : sampled_peak_rss;
   qor_.back().color_peak_rss_kb = coordinator_ == nullptr && color_peak > rss_entry ? (color_peak - rss_entry) >> 10 : 0;
   backend_->end_region();  // release the region's workspace, keep the session
-  if (opts_.time_budget_ms != 0 && qor_.back().ms > static_cast<double>(opts_.time_budget_ms)) {
-    time_refusal_ = std::format("region '{}' took {:.0f} ms in synthesis (soft limit {} ms)",
-                                rb.module_name,
-                                qor_.back().ms,
-                                opts_.time_budget_ms);
-  }
   // Publish the completed color before allocator housekeeping: a pressure scan
   // can itself take time, and the heartbeat should identify the finished work
   // immediately rather than making that pause look like part of ABC mapping.

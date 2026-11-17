@@ -71,7 +71,7 @@ def run(label, args):
 
 run("models", ["pass", "liberty", "gensim", library, "--emit-dir", "lg:" + str(root / "models")])
 base = ["synth", str(source), "--top", "top", "--set", "compile.upass.inline=false",
-        "--set", "synth.mapper=usyn", "--set", "synth.liberty=" + library, "--set", "synth.opentimer=false"]
+        "--set", "synth.mapper=usyn", "--set", "synth.liberty=" + library, "--set", "synth.timing=false"]
 if per_definition:
     base += ["--set", "pass.color.hier=false"]
 if per_occurrence:

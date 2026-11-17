@@ -51,7 +51,7 @@
   `LHD_SIM_LNAST=0` forces inou.cgen.sim, `=1` requires the LNAST flow (a decline
   is an error: the way to find out why a design is not covered). A test about
   inou.cgen.sim itself (the sim.tune driver, its generated C++) pins
-  `LHD_SIM_LNAST=0`. Known semantic difference: with `sim.unknown_zero` off each
+  `LHD_SIM_LNAST=0`. Known semantic difference: with `compile.unknown_zero` off each
   `?` literal is drawn ONCE per run from the seed in both flows, but a `?` the
   LNAST flow meets outside an operand literal is 0. `sim.vcd` is supported (ports
   and registers, one scope per instance path, edge-aligned: no `sim.vcd_fake_delay`
@@ -248,20 +248,23 @@ Enforced by `scripts/contracts/diff_no_compile_flags_touched.sh`.
 
 ### Logging policy (`core/diag.hpp`)
 
-Default stderr is errors, warnings and very short outcome lines, nothing else.
-Pick the level when you add a record:
+Info-severity records reach stderr ONLY with a matching `-d`, including outcomes,
+statistics and diagnostics replayed from a cache. Errors, warnings and notes do
+not require `-d`. Diagnostic-file collection is separate from stderr filtering:
 
-- `diag::outcome(pass, code, cat)`: always shown, one short line (a fallback taken, a file written).
-- `diag::stat(pass, code, cat)`: a larger summary, shown with `--stats` (or a matching `-d`).
-- `diag::info(pass, code, cat)`: detail, shown ONLY when `-d WORD` matches `pass`.
+- `diag::outcome(pass, code, cat)`: always collected, one short line (a fallback taken, a file written).
+- `diag::stat(pass, code, cat)`: a larger summary, collected with `--stats` or a matching `-d`.
+- `diag::info(pass, code, cat)`: detail, built and collected ONLY with a matching `-d`.
 
-`-d WORD[,WORD]` (repeatable) names categories: the dotted `pass` string of the record
-(`pass.abc`, `synth.place`, `pass.semdiff`, `lhd.sim`). A word matches whole dotted segments
-(`abc` matches `pass.abc`, `synth.place` matches `synth.place.legalize`); `all` matches
-everything. A disabled builder skips `std::format` and every append, but C++ still evaluates the
-arguments, so wrap anything with a loop or a `to_string` in `if (diag::enabled("pass.x"))`.
-A test that greps a log record must pass the `-d` word (or `--stats`) that enables it. The
-`PROGRESS pass.abc` heartbeat reaches stderr only under `-d pass.abc`; the step log always has it.
+`-d [WORD[,WORD]]` (repeatable) selects the dotted `pass` string or the diagnostic
+`code` (`-d aegraph-rule`). A word matches whole dotted segments (`abc` matches
+`pass.abc`, `synth.place` matches `synth.place.legalize`); `all` or `*` matches
+everything. Bare `-d` at the end or before another option also enables all info.
+A disabled builder skips `std::format` and every append, but C++ still evaluates
+the arguments, so guard expensive detail with `if (diag::enabled("pass.x", "code"))`.
+A test that greps stderr info must pass the matching `-d`; `--stats` alone only
+collects statistics for reports. The `PROGRESS pass.abc` heartbeat reaches stderr
+only under `-d pass.abc`; the step log always has it.
 
 ### Defaults are a contract
 

@@ -1774,7 +1774,7 @@ TEST(SimTuneEnvelope, JsonAndNote) {
   EXPECT_STREQ(d["pending"].GetString(), "tv1:d=off;f=none;lw=512;be=llvm");
   EXPECT_STREQ(d["reproduce"].GetString(),
                "--set sim.tune.dirty=on --set sim.tune.fence=16 --set sim.tune.live_words=512 --set sim.tune.backend=llvm "
-               "--set sim.unknown_zero=true");
+               "--set compile.unknown_zero=true");
   EXPECT_STREQ(d["note"].GetString(), note.c_str());
 
   // a trial a --setup-only applied is still pending: it awaits its run, not a setup

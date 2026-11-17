@@ -1844,7 +1844,7 @@ std::string short_vector(const Tune_vector& v) {
 std::string reproduce(const Tune_vector& v, std::string_view fill) {
   auto s = v.reproduce();
   if (fill == "zero") {
-    s += " --set sim.unknown_zero=true";
+    s += " --set compile.unknown_zero=true";
   }
   return s;
 }

@@ -12,7 +12,7 @@ root = Path(os.environ['TEST_TMPDIR']) / 'buffer_cleanup'
 root.mkdir()
 libdir = Path('inou/lefdef/tests/data')
 source = root / 'fan.v'
-# One internal net with 64 loads: the mapper buffers it (pass.abc.max_fanout=16).
+# One internal net with 64 loads: the mapper buffers it (synth.max_fanout=16).
 source.write_text('module fan(input clk, input a, input b, input [63:0] d, output reg [63:0] q);\n'
                   '  wire e = a ^ b;\n'
                   '  always @(posedge clk) q <= d & {64{e}};\n'
@@ -22,7 +22,7 @@ sdc.write_text('create_clock -name clk -period 10 [get_ports clk]\n')
 # No OpenTimer, so synth.place.resize defaults false: nothing rebuilds buffering.
 base = ['lhd/lhd', 'synth', str(source), '--top', 'fan', '--set', f'synth.liberty={libdir}/sky130hd.lib',
         '--set', f'synth.lef={libdir}/sky130hd.tlef,{libdir}/sky130hd.lef', '--set', f'synth.sdc={sdc}',
-        '--set', 'synth.place=true', '--set', 'synth.opentimer=false', '--set', 'synth.place.timing_driven=false',
+        '--set', 'synth.place=true', '--set', 'synth.timing=false', '--set', 'synth.place.timing_driven=false',
         '--set', 'synth.place.iterations=80', '--set', 'synth.place.grid.density=8', '-q']
 
 

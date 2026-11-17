@@ -26,7 +26,7 @@
 # the envelope's qor is the technology-map report with its own
 # incremental.{hits,misses} and per-region cache=hit|miss|disabled). Every
 # property above is asserted per tier. ABC-only facts stay gated: the
-# abc.adder/multiplier/barrel recipe options (USYN does not inherit abc.*), the
+# synth.adder/multiplier/barrel recipe options (USYN does not inherit abc.*), the
 # abc-map `resynth` rows / `abc_started` / abc[stats] rendering, and
 # <workdir>/abc_cache/abc_cache.json. "Starts no ABC" becomes "every
 # technology-map row is a cache hit" (nothing is mapped).
@@ -46,7 +46,7 @@ esac
 
 # pass.abc recipe options (word-split on purpose; no value holds a space).
 if [ "$MAPPER" = abc ]; then
-  MAP_OPTS="--set abc.adder=rca --set abc.multiplier=array --set abc.barrel=log"
+  MAP_OPTS="--set synth.adder=rca --set synth.multiplier=array --set synth.barrel=log"
 else
   MAP_OPTS=""
 fi

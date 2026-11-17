@@ -417,8 +417,9 @@ public:
   // Fixed macros (memory proxies packed as obstacles) the user dragged or aligned in the page: name -> lower-left (DBU).
   // They cannot move inside a running solver, so the flow restarts and the placer starts them here (place.cpp, before the
   // proxy packing). Read back from the action trace on every restart.
-  // The third number orders them: the larger, the more recent (the placer settles the newest first).
-  std::map<std::string, std::array<double, 3>> macro_moves() const;
+  // The third number orders them: the larger, the more recent (the placer settles the newest first). The fourth is the
+  // requested orientation as an Ann_place::Orientation value (0 = N; macro_move accepts N, S, FN and FS).
+  std::map<std::string, std::array<double, 4>> macro_moves() const;
   // What the user changed in edit mode (name, drop position), in order; later final passes re-apply it.
   void record_edits(const std::vector<std::pair<std::string, std::pair<double, double>>>&);
   std::vector<std::pair<std::string, std::pair<double, double>>> recorded_edits() const;
@@ -518,7 +519,7 @@ private:
   std::string    parse_command(const std::string& json, Command&) const;
   void                                         replay_locked(int iteration, Edits&, std::unique_lock<std::mutex>&);
   void           macro_restart_locked();
-  std::map<std::string, std::array<double, 3>> macro_moves_;  // name -> x, y (DBU), recency
+  std::map<std::string, std::array<double, 4>> macro_moves_;  // name -> x, y (DBU), recency, orientation
   double                                       macro_order_ = 0;
   struct Inline_request {
     uint64_t                  frame = 0;

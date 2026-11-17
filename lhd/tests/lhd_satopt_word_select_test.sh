@@ -22,7 +22,7 @@ for s in on off; do
   sat=true
   [ "$s" = off ] && sat=false
   "$LHD" synth --reader slang "$SRC" --top word_select --workdir "$W/w$s" --emit-dir "lg:$W/net$s" \
-    --result-json "$W/r$s.json" -q --set synth.mapper=abc --set "synth.liberty=$LIB" --set synth.opentimer=false \
+    --result-json "$W/r$s.json" -q --set synth.mapper=abc --set "synth.liberty=$LIB" --set synth.timing=false \
     --set "pass.satopt=$sat" --set pass.abc.verbose=true > "$W/log$s.txt" 2>&1 &
 done
 wait

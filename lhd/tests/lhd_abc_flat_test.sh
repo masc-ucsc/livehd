@@ -64,13 +64,13 @@ run pass color flat --set color.ware_arith=false --set color.ware_cmp=false --se
 
 # Ware preservation is disabled above to request a truly single-module netlist.
 # pass.abc: flatten=auto must fire on the flat coloring -> one netlist module.
-run pass "$MAPPER" --top "$TOP" lg:"$D/lg" --emit-dir lg:"$D/net" --set synth.liberty="$LIB" --workdir "$D/w3"
+run pass "$MAPPER" --top "$TOP" lg:"$D/lg" --emit-dir lg:"$D/net" --set synth.liberty="$LIB" --set synth.flatten=true --workdir "$D/w3"
 NET_DEFS=$(live_defs "$D/net")
 [ "$NET_DEFS" = "$TOP" ] || fail "flat abc netlist must hold exactly '$TOP', got: $(echo $NET_DEFS)"
 echo "PASS: pass.abc + flat coloring emits a single flat netlist module"
 
 # pass.partition twin: same flatten, original logic.
-run pass partition --top "$TOP" lg:"$D/lg" --emit-dir lg:"$D/re" --workdir "$D/w4"
+run pass partition --set synth.flatten=true --top "$TOP" lg:"$D/lg" --emit-dir lg:"$D/re" --workdir "$D/w4"
 RE_DEFS=$(live_defs "$D/re")
 [ "$RE_DEFS" = "$TOP" ] || fail "flat partition twin must hold exactly '$TOP', got: $(echo $RE_DEFS)"
 echo "PASS: pass.partition + flat coloring emits a single flat twin module"
@@ -117,8 +117,8 @@ D2="$W/flatnames"
 mkdir -p "$D2"
 run compile "$FIX2" --top "$TOP2" --emit-dir lg:"$D2/lg" --workdir "$D2/w1"
 run pass color flat --set color.ware_arith=false --set color.ware_cmp=false --set color.ware_shift=false --top "$TOP2" lg:"$D2/lg" --workdir "$D2/w2"
-run pass "$MAPPER" --top "$TOP2" lg:"$D2/lg" --emit-dir lg:"$D2/net" --set synth.liberty="$LIB" --workdir "$D2/w3"
-run pass partition --top "$TOP2" lg:"$D2/lg" --emit-dir lg:"$D2/re" --workdir "$D2/w4"
+run pass "$MAPPER" --top "$TOP2" lg:"$D2/lg" --emit-dir lg:"$D2/net" --set synth.liberty="$LIB" --set synth.flatten=true --workdir "$D2/w3"
+run pass partition --set synth.flatten=true --top "$TOP2" lg:"$D2/lg" --emit-dir lg:"$D2/re" --workdir "$D2/w4"
 run compile lg:"$D2/net" --top "$TOP2" --emit-dir verilog:"$D2/netv" --workdir "$D2/w5"
 run compile lg:"$D2/re" --top "$TOP2" --emit-dir verilog:"$D2/rev" --workdir "$D2/w6"
 # `a`/`b` are the INSTANCE names (the LHS variable of each `holder(...)` call),
@@ -179,8 +179,8 @@ D3="$W/flatconst"
 mkdir -p "$D3"
 run compile "$FIX3" --top "$TOP3" --emit-dir lg:"$D3/lg" --workdir "$D3/w1"
 run pass color flat --set color.ware_arith=false --set color.ware_cmp=false --set color.ware_shift=false --top "$TOP3" lg:"$D3/lg" --workdir "$D3/w2"
-run pass "$MAPPER" --top "$TOP3" lg:"$D3/lg" --emit-dir lg:"$D3/net" --set synth.liberty="$LIB" --workdir "$D3/w3"
-run pass partition --top "$TOP3" lg:"$D3/lg" --emit-dir lg:"$D3/re" --workdir "$D3/w4"
+run pass "$MAPPER" --top "$TOP3" lg:"$D3/lg" --emit-dir lg:"$D3/net" --set synth.liberty="$LIB" --set synth.flatten=true --workdir "$D3/w3"
+run pass partition --set synth.flatten=true --top "$TOP3" lg:"$D3/lg" --emit-dir lg:"$D3/re" --workdir "$D3/w4"
 run compile lg:"$D3/net" --top "$TOP3" --emit-dir verilog:"$D3/netv" --workdir "$D3/w5"
 run compile lg:"$D3/re" --top "$TOP3" --emit-dir verilog:"$D3/rev" --workdir "$D3/w6"
 cat "$D3/netv/"*.v "$D/modelsv/"*.v > "$D3/impl.v"
@@ -189,15 +189,7 @@ run lec --set formal.effort=proof --impl verilog:"$D3/impl.v" --ref verilog:"$D3
     --workdir "$D3/wc"
 echo "PASS: a constant instance-port actual survives the whole-design flatten (LEC-proven)"
 
-# Escape hatch: flatten=false keeps the per-def hierarchy instead of collapsing
-# it into one flat module. Each def is one region here, so it is emitted under
-# its own name (delayer, stage_unit, top) -- no pointless __c wrapper.
-run pass "$MAPPER" --top "$TOP" lg:"$D/lg" --emit-dir lg:"$D/net_hier" --set synth.liberty="$LIB" \
-    --set pass.$MAPPER.flatten=false --workdir "$D/w9"
-HIER_DEFS=$(live_defs "$D/net_hier")
-echo "$HIER_DEFS" | grep -q "stage_unit" || fail "flatten=false must keep the per-def hierarchy (child defs), got: $(echo $HIER_DEFS)"
-N_HIER=$(echo "$HIER_DEFS" | wc -l | tr -d ' ')
-[ "$N_HIER" -gt 2 ] || fail "flatten=false must keep the per-def decomposition, got only: $(echo $HIER_DEFS)"
-echo "PASS: pass.abc.flatten=false keeps the classic per-def decomposition"
+# No escape hatch: a color is always one flat graph, so `color flat` maps as one
+# region whatever synth.flatten says (true only forces it without such a coloring).
 
 echo "PASS: whole-design flatten (color flat -> single netlist module, LEC-proven)"

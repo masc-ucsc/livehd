@@ -886,7 +886,7 @@ cc_library(
         ":legroute",
         ":fp_repetition",
         ":fp_chunks",
-        "//pass/pcrs",
+        "//pass/place/pcrs",
         "//core",
         "//graph",
         "//inou/lefdef:index_union_find",

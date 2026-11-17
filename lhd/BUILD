@@ -40,7 +40,7 @@ genrule(
         "//pass/aegraph:pass_aegraph",  # the e-graph engine of the post-inline re-simplify (archive)
         "//pass/cprop:pass_cprop",  # post-inline folds + mixed-loop normalization (archive)
         "//pass/lec:formal_srcs",
-        "//pass/pcrs:formal_srcs",
+        "//pass/place/pcrs:formal_srcs",
         "//pass/semdiff:formal_srcs",
         "//pass/single_edge:pass_single_edge",  # proof_prep: time base, clock gates, lib-cell splicing (archive)
         "//pass/synth:arith.hpp",  # cone_abc blasts bvmul/bvadd through the synthesis arithmetic builders
@@ -97,7 +97,7 @@ genrule(
         "//pass/legalize",
         "//pass/liberty:liberty_dff",
         "//pass/lnastfmt:pass_lnastfmt",
-        "//pass/pcrs",
+        "//pass/place/pcrs",
         "//pass/semdiff",
         "//pass/upass:pass_upass",
         "//upass/runner:upass_runner",  # the lowering itself: a genrule src of a cc_library hashes only THAT target's archive, and pass_upass's does not contain upass_runner.o
@@ -267,6 +267,7 @@ cc_library(
         "//pass/sweep",
         "//pass/opentimer:pass_opentimer",
         "//pass/timing:physical_rank",
+        "//pass/timing:timing_report",
         "//inou/lefdef:inou_lefdef",
         "//pass/place",
         "//pass/place:preroute_host",

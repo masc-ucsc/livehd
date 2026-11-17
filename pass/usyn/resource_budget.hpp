@@ -14,17 +14,15 @@ struct Resource_observation {
 
 // Cooperative admission at bounded-work checkpoints. Samples include the
 // original region's baseline mapping, not just the alternative optimizer.
-// Zero limits disable their gate; zero footprint means an unavailable sample.
+// The one gate is the measured process ceiling (lhd.ram_max_mb); zero disables it, and a zero footprint means an
+// unavailable sample.
 struct Resource_budget {
-  double      time_limit_ms       = 0;
-  uint64_t    growth_limit_bytes  = 0;
   uint64_t    process_limit_bytes = 0;
   uint64_t    entry_bytes         = 0;
   double      elapsed_ms          = 0;
   uint64_t    peak_bytes          = 0;
   uint64_t    samples             = 0;
   std::string reason;
-  bool        out_of_time = false;  // reason is the wall-time gate (else a memory gate)
   bool        admit(double elapsed, uint64_t footprint);
 };
 }  // namespace livehd::usyn

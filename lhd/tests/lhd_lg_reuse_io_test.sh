@@ -118,7 +118,7 @@ cmp -s "$W/L/library.txt" "$W/F/library.txt" \
 [ -s "$W/fresh.v" ] || fail "fresh compile emitted no Verilog"
 cmp -s "$W/reused.v" "$W/fresh.v" || fail "reused Verilog differs from a fresh one: $(diff "$W/reused.v" "$W/fresh.v")"
 
-"$LHD" synth lg:"$W/L" --set synth.liberty="$LIB" --set synth.opentimer=false --emit verilog:"$W/net.v" --workdir "$W/ws" -q --result-json "$W/rs.json" >"$W/s.log" 2>&1
+"$LHD" synth lg:"$W/L" --set synth.liberty="$LIB" --set synth.timing=false --emit verilog:"$W/net.v" --workdir "$W/ws" -q --result-json "$W/rs.json" >"$W/s.log" 2>&1
 st=$?
 not_a_crash "$st" "$W/s.log"
 [ "$st" -eq 0 ] || fail "synth of the reused library failed: $(cat "$W/rs.json" 2>/dev/null)"
@@ -158,7 +158,7 @@ EOF
   || fail "fresh pyrope compile failed: $(cat "$W/p3.json" 2>/dev/null)"
 cmp -s "$W/L2/library.txt" "$W/F2/library.txt" \
   || fail "redefined lg: module differs from a fresh compile: $(diff "$W/L2/library.txt" "$W/F2/library.txt")"
-"$LHD" synth "$W/psub.prp" "$W/ptop.prp" lg:"$W/L1" --top ptop --set synth.liberty="$LIB" --set synth.opentimer=false \
+"$LHD" synth "$W/psub.prp" "$W/ptop.prp" lg:"$W/L1" --top ptop --set synth.liberty="$LIB" --set synth.timing=false \
   --emit verilog:"$W/pnet.v" --workdir "$W/pws" -q \
   --result-json "$W/ps.json" >"$W/ps.log" 2>&1
 st=$?
@@ -203,7 +203,7 @@ EOF
   --result-json "$W/y2.json" >/dev/null || fail "yosys recompile failed: $(cat "$W/y2.json" 2>/dev/null)"
 clash=$(awk '/^graph_io /{g=$3} /^  (input|output) /{k=g" "$2; if (seen[k]++) print k}' "$W/Ly/library.txt")
 for mapper in abc usyn; do
-  "$LHD" synth lg:"$W/Ly" --set synth.liberty="$LIB" --set synth.opentimer=false --set synth.mapper="$mapper" \
+  "$LHD" synth lg:"$W/Ly" --set synth.liberty="$LIB" --set synth.timing=false --set synth.mapper="$mapper" \
     --workdir "$W/wys_$mapper" -q \
     --result-json "$W/ys_$mapper.json" >"$W/ys_$mapper.log" 2>&1
   st=$?
@@ -382,7 +382,7 @@ EOF
   --result-json "$W/k2.json" >/dev/null || fail "yosys recompile of k2 failed: $(cat "$W/k2.json" 2>/dev/null)"
 kclash=$(awk '/^graph_io /{g=$3} /^  (input|output) /{k=g" "$2; if (seen[k]++) print k}' "$W/Lk/library.txt")
 for mapper in abc usyn; do
-  "$LHD" synth lg:"$W/Lk" --top top --set synth.liberty="$LIB" --set synth.opentimer=false --set synth.mapper="$mapper" \
+  "$LHD" synth lg:"$W/Lk" --top top --set synth.liberty="$LIB" --set synth.timing=false --set synth.mapper="$mapper" \
     --workdir "$W/wks_$mapper" -q --result-json "$W/ks_$mapper.json" >"$W/ks_$mapper.log" 2>&1
   st=$?
   not_a_crash "$st" "$W/ks_$mapper.log"

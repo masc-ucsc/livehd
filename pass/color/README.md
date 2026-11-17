@@ -23,7 +23,7 @@ each other, and the worst path changed region 58 times; every region met its
 own delay target while the path missed by 1.3 ns.
 
 `pass.color.synth.convex=true` makes `max_gate` a soft bound. `lhd synth` sets
-it (with `flop_to_flop=false` and `pass.abc.port_bypass=true`) for the ABC
+it (with `flop_to_flop=false` and `synth.port_bypass=true`) for the ABC
 mapper's coarse partition; `flop_to_flop=true` still asks for one color per
 overlapping cone set and makes `convex` moot. The bound is tried, and exceeded
 wherever no cut is free:

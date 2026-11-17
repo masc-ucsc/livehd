@@ -52,7 +52,7 @@ cell.write_text('''module cellmod(input a, output y);
   sky130_fd_sc_hd__buf_1 b(.A(a), .X(y));
 endmodule
 ''')
-synth = ['synth', str(cell), '--top', 'cellmod', '--set', f'synth.liberty={lib}', '--set', 'synth.opentimer=false']
+synth = ['synth', str(cell), '--top', 'cellmod', '--set', f'synth.liberty={lib}', '--set', 'synth.timing=false']
 diag = lhd('cell_default', [*synth, '--workdir', str(root / 'cellW0')], success=False)
 assert 'unknown-module' in diag, diag
 lhd('cell_opt_in', [*synth, '--set', 'compile.slang.liberty_cells=true', '--workdir', str(root / 'cellW1'),
@@ -69,14 +69,14 @@ mapped = root / 'mapped.v'
 mapped.write_text('module mapped(input a,output y); SRAMX '+chr(92)+'bank/ram (.A(a),.Q(y)); endmodule')
 lhd('mapped_macro', ['synth', str(mapped), '--top', 'mapped', '--set', f'synth.liberty={lib}',
                      '--set', f'synth.macro_liberty={macro_lib}', '--set', 'compile.slang.liberty_cells=true',
-                     '--set', 'synth.input_mapped=true', '--set', 'synth.opentimer=false',
+                     '--set', 'synth.input_mapped=true', '--set', 'synth.timing=false',
                      '--workdir', str(root/'mappedW'), '--emit-dir', f'verilog:{root}/mapped-net'])
 assert 'bank/ram' in verilog('mapped-net') and 'SRAMX' in verilog('mapped-net')
 
 # A module the sources define always wins over the Liberty cell of the same name.
 own = root / 'own.v'
 own.write_text(cell.read_text() + 'module sky130_fd_sc_hd__buf_1(input A, output X);\n  assign X = A;\nendmodule\n')
-lhd('cell_own', ['synth', str(own), '--top', 'cellmod', '--set', f'synth.liberty={lib}', '--set', 'synth.opentimer=false',
+lhd('cell_own', ['synth', str(own), '--top', 'cellmod', '--set', f'synth.liberty={lib}', '--set', 'synth.timing=false',
                  '--set', 'compile.slang.liberty_cells=true', '--workdir', str(root / 'ownW')])
 
 # ---- compile.slang.unconnected_input ----------------------------------------------------------------
@@ -160,7 +160,7 @@ golden.write_text('''module arr(input clk, input [1:0] sel, input [1:0] ws, inpu
 endmodule
 ''')
 for name, flag in [('array_mem', 'false'), ('array_flat', 'true')]:
-    lhd(name, ['synth', str(array), '--top', 'arr', '--set', f'synth.liberty={lib}', '--set', 'synth.opentimer=false',
+    lhd(name, ['synth', str(array), '--top', 'arr', '--set', f'synth.liberty={lib}', '--set', 'synth.timing=false',
                '--set', 'synth.memory=flops', '--set', f'compile.slang.flatten_state_arrays={flag}',
                '--workdir', str(root / (name + 'W')), '--emit-dir', f'verilog:{root}/{name}-net'])
     assert ('cgen_memory' in verilog(name + '-net')) == (flag == 'false'), (name, verilog(name + '-net'))
@@ -178,7 +178,7 @@ module top(input clk, input d, output q);
   ff u(.clk(clk), .rst(1'b0), .d(d), .q(q));
 endmodule
 ''')
-diag = lhd('reset', ['synth', str(reset), '--top', 'top', '--set', f'synth.liberty={lib}', '--set', 'synth.opentimer=false',
+diag = lhd('reset', ['synth', str(reset), '--top', 'top', '--set', f'synth.liberty={lib}', '--set', 'synth.timing=false',
                      '--set', 'compile.specialize_modules=true', '--workdir', str(root / 'resetW'),
                      '--emit-dir', f'verilog:{root}/reset-net'])
 net = verilog('reset-net')

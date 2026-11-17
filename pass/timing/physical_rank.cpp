@@ -95,6 +95,93 @@ void Physical_ranker::bind(const std::shared_ptr<hhds::Graph>& graph) {
   }
   // The constraint file is run against this netlist: its object queries and its own checks see these names.
   constraints_ = read_constraints(options_.sdc_text, sdc_units_, netlist, names_.get());
+  if (options_.sdc_text.empty() && options_.default_constraints) {
+    // Ideal clocks on the input ports that reach a clock pin: walk back from every clock pin through one-input
+    // cells (buffers, inverters) to the port.
+    absl::flat_hash_map<uint32_t, std::string> port_of_cell;
+    for (const auto& port : netlist.ports()) {
+      if (port.input) {
+        port_of_cell.emplace(port.cell, port.name);
+      }
+    }
+    std::set<std::string> clock_ports;
+    for (uint32_t cell = 0; cell < netlist.cells(); ++cell) {
+      const auto& type = netlist.types().type(netlist.type_of(cell));
+      for (uint32_t local = 0; local < type.pin_count; ++local) {
+        const auto pin = netlist.pin(cell, local);
+        if (!netlist.pin_type(pin).clock) {
+          continue;
+        }
+        auto at = pin;
+        for (int hop = 0; hop < 32; ++hop) {
+          const auto net = netlist.net_of(at);
+          if (net == no_index) {
+            break;
+          }
+          const auto driver = netlist.driver_of(net);
+          const auto owner  = netlist.cell_of(driver);
+          if (const auto it = port_of_cell.find(owner); it != port_of_cell.end()) {
+            clock_ports.insert(it->second);
+            break;
+          }
+          // Continue through a cell with exactly one input pin.
+          const auto& otype  = netlist.types().type(netlist.type_of(owner));
+          uint32_t    inputs = 0, input = no_index;
+          for (uint32_t l = 0; l < otype.pin_count; ++l) {
+            if (netlist.pin_type(netlist.pin(owner, l)).direction == Direction::input) {
+              ++inputs;
+              input = netlist.pin(owner, l);
+            }
+          }
+          if (inputs != 1) {
+            break;
+          }
+          at = input;
+        }
+      }
+    }
+    for (const auto& port : clock_ports) {
+      Clock clock;
+      clock.name      = port;
+      clock.port      = port;
+      clock.period_ps = options_.default_period_ps;
+      clock.source_pins.push_back(port_index_.at(port));
+      constraints_.clocks.push_back(std::move(clock));
+    }
+    if (constraints_.clocks.empty()) {
+      // A purely combinational design: its outputs are checked against one virtual clock, so the report still
+      // carries the worst input-to-output arrival.
+      Clock clock;
+      clock.name      = "virtual_clock";
+      clock.period_ps = options_.default_period_ps;
+      constraints_.clocks.push_back(std::move(clock));
+    }
+    for (const auto& port : netlist.ports()) {
+      if (!port.input) {
+        constraints_.outputs.push_back({port.name, constraints_.clocks.empty() ? "" : constraints_.clocks.front().name, 0.f,
+                                        options_.output_load_ff});
+      }
+    }
+  }
+  if (options_.output_load_ff > 0) {
+    // An output the constraints give no load (or none at all) sees synth.io_load.
+    std::set<std::string> seen;
+    for (auto& out : constraints_.outputs) {
+      seen.insert(out.port);
+      if (out.load_ff == 0) {
+        out.load_ff = options_.output_load_ff;
+      }
+    }
+    for (const auto& port : netlist.ports()) {
+      if (!port.input && !seen.contains(port.name)) {
+        Output_delay load_only;
+        load_only.port    = port.name;
+        load_only.load_ff = options_.output_load_ff;
+        load_only.check   = false;
+        constraints_.outputs.push_back(std::move(load_only));
+      }
+    }
+  }
   ++stats_.binds;
   stats_.bind_seconds += since(start);
 }

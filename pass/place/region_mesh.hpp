@@ -13,9 +13,11 @@ namespace livehd::placement {
 // the legalization `bin`s, a region has explicit cell membership; crossings,
 // virtual pins and bus order live on its edges. Built once per detail-final
 // phase and shared by bus order, boundary pins and pin alignment.
+// merge_um=auto: placement-row heights (asap7: 20 x 0.27 = 5.4 um).
+inline constexpr double kRegionMergeRows = 20;
 struct Region_options {
   unsigned    max_cells = 10000;  // split along the longest side until met, then merge back under the cap
-  double      merge_um  = 5;      // macro-edge/IO-span cut lines closer than this merge
+  double      merge_um  = -1;     // macro-edge/IO-span cut lines closer than this merge; -1 = kRegionMergeRows row heights
   // cut = "macro": the cut lines start from every macro edge and IO bus span (the rectangles merge back under the
   // cap), then the longest side splits at its middle. "mincut": no line is forced; each split takes the position in
   // the middle half of the longest side that the fewest nets cross (the nets with cells on both sides, weighted),

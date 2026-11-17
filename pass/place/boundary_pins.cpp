@@ -75,7 +75,8 @@ void validate_boundary_pin_options(const Boundary_pin_options& o) {
   if (!std::isfinite(o.align_near) || o.align_near < 0) {
     throw std::invalid_argument("invalid pinalign near distance");
   }
-  if (!o.iterations || o.iterations > 2000 || !std::isfinite(o.max_displacement_um) || o.max_displacement_um <= 0
+  if (!o.iterations || o.iterations > 2000 || !std::isfinite(o.max_displacement_um)
+      || (o.max_displacement_um <= 0 && o.max_displacement_um != -1)
       || o.settle_iterations > 2000 || !std::isfinite(o.pitch_um) || o.pitch_um < 0) {
     throw std::invalid_argument("invalid boundary-pin iteration/displacement/pitch controls");
   }
@@ -614,6 +615,9 @@ Boundary_pins::Boundary_pins(const Region_mesh& regions, Busorder_route router, 
     , macros(std::move(macro_nodes))
     , drivers(std::move(net_drivers)) {
   validate_boundary_pin_options(options);
+  if (options.max_displacement_um <= 0) {
+    throw std::invalid_argument("boundary pins need a resolved max displacement (auto is per technology)");
+  }
   if (!std::isfinite(dbu) || dbu <= 0) {
     throw std::invalid_argument("invalid boundary-pin units");
   }

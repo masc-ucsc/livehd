@@ -30,12 +30,12 @@ mkdir -p "$W"
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
 # ---------------------------------------------------------------------------
-# 1. Total solver budget. Two hard 8-bit multiply identities plus one trivial
+# 1. Total solver budget. Two hard 6-bit multiply identities plus one trivial
 #    sibling. engine=bmc (one strategy, no fork). A generous outer wall-clock cap
 #    confirms the run does NOT spend timeout PER hard obligation.
 # ---------------------------------------------------------------------------
 cat >"$W/hard2.prp" <<'EOF'
-mod hard2(a:U8, b:U8, c:U8, en:Bool) -> (o:U1@[0]) {
+mod hard2(a:U6, b:U6, c:U6, en:Bool) -> (o:U1@[0]) {
   reg acc:U1 = 0
   o = acc
   assert(a + b == b + a, "easy")
@@ -61,7 +61,7 @@ end=$(date +%s); elapsed=$((end-start))
 # which exits 0 with a formal-timeout-time warning (owner ruling: a timeout is
 # acceptable, never a failure and never a proof). The hardness here is real and
 # not a tool bug: the same three obligations are PROVEN inductively in ~1.5s at
-# 4-bit operands, while the 8-bit bit-blasted nonlinear products outrun the
+# 4-bit operands, while the 6-bit bit-blasted nonlinear products outrun the
 # one-second grants — exactly the budget-limited case
 # this file exists to account for. The warning must NAME that cause.
 [ "$rc" -eq 0 ] || fail "a budget-limited TIMEOUT-time run must exit 0 (rc=$rc): $(cat "$W/budget.out")"

@@ -99,7 +99,7 @@ for mode in on off explicit default-synth; do
   [[ "$mode" != on ]] || extra+=(--set pass.satopt=true)
   [[ "$mode" != off ]] || extra+=(--set pass.satopt=false)
   [[ "$mode" != explicit ]] || extra+=(--config "$W/satopt-off.toml" --set pass.satopt=true)
-  run synth "$SRC" --top top --set synth.liberty="$LIB" --set synth.opentimer=false \
+  run synth "$SRC" --top top --set synth.liberty="$LIB" --set synth.timing=false \
     --set lhd.jobs=1 ${extra[@]+"${extra[@]}"} --emit-dir lg:"$W/$mode-mapped" \
     --workdir "$W/$mode" --result-json "$W/$mode.json"
 done
@@ -109,10 +109,10 @@ for mode in on off explicit default-synth; do
     --top instance_out_struct_ident.top --set formal.timeout=60 \
     --workdir "$W/lec-$mode" --result-json "$W/lec-$mode.json"
 done
-run synth "$SRC" --top top --set synth.liberty="$LIB" --set synth.opentimer=false \
+run synth "$SRC" --top top --set synth.liberty="$LIB" --set synth.timing=false \
   --set pass.satopt=true --set lhd.jobs=1 --workdir "$W/on" --result-json "$W/warm.json"
 # Synthesis of an lg: input maps what compile produced: no satopt by default.
-run synth lg:"$W/original" --top instance_out_struct_ident.top --set synth.liberty="$LIB" --set synth.opentimer=false \
+run synth lg:"$W/original" --top instance_out_struct_ident.top --set synth.liberty="$LIB" --set synth.timing=false \
   --set lhd.jobs=1 --workdir "$W/lgin" --result-json "$W/lgin.json"
 python3 - "$W" "$CTRL_CONES" <<'PY'
 import json, pathlib, re, sys

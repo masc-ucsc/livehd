@@ -40,6 +40,24 @@ void check_tree(const Grid& g, const Global_tree& tree, const std::vector<int>& 
     EXPECT_EQ(root(t), root(endpoints.front()));
   }
 }
+TEST(LegrouteGlobal, NegotiationStopsWhenARoundCutsLittleOverflow) {
+  // a detour row exists for one of the two nets (3x2 grid, one-track share, search margin 1): negotiation resolves it
+  const auto       g = grid(3, 2);
+  std::vector<int> cap(g.size(), 2);
+  Global_net       net;
+  net.endpoints     = {0, 2};
+  const auto result = global_route(g, cap, cap, .5, {net, net}, 1, 16);
+  EXPECT_EQ(result.overflow_tracks, 0u);
+  EXPECT_FALSE(result.stalled);
+  // a one-track edge cannot hold both nets and has no detour: the negotiation stops after three flat rounds
+  const auto line  = grid(3, 1);
+  std::vector<int> one(line.size(), 1);
+  const auto stuck = global_route(line, one, one, 1, {net, net}, 0, 16);
+  EXPECT_EQ(stuck.overflow_tracks, 2u);  // one over on each of the two edges
+  EXPECT_TRUE(stuck.stalled);
+  EXPECT_EQ(stuck.rounds, 3u);
+}
+
 }  // namespace
 
 TEST(LegrouteGlobal, DenseBroadcastDoesNotRebuildTheTreeForEverySink) {
@@ -502,6 +520,7 @@ TEST(LegrouteGlobal, PerNetWorkCountsAllAttemptsAndKeepsLastAttemptSeparate) {
   EXPECT_EQ(result.unrouted, 0u);
   EXPECT_EQ(result.overflow_tracks, 1u);
   EXPECT_EQ(result.rounds, 3u);
+  EXPECT_FALSE(result.stalled);  // three rounds asked, three run: the stall needs three flat rounds after the first
   size_t total = 0;
   for (const auto& tree : result.trees) {
     EXPECT_EQ(tree.search_attempts, 4u);

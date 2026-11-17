@@ -233,7 +233,7 @@ void Abc_backend::resolve_boundary_defaults() {
     const int id = Abc_SclCellFind(scl, const_cast<char*>(want.c_str()));
     if (id < 0) {
       livehd::diag::err("pass.abc", "boundary-drive", "io")
-          .msg("pass.abc.boundary_drive names '{}', which is not a combinational cell of '{}'", want, base_.library)
+          .msg("synth.boundary_drive names '{}', which is not a combinational cell of '{}'", want, base_.library)
           .hint("name a single-output cell of the Liberty (a buffer or inverter), or `none` for an ideal driver")
           .fatal();
       return;
@@ -1774,19 +1774,18 @@ synth::Ware_score Abc_backend::score(hhds::GraphLibrary& outlib, std::string_vie
   if (!start_for_design(design) || (timing && (!scl_lib_ok_ || !scl_timing_ok_))) {
     return {};
   }
+  // The measured process ceiling (lhd.ram_max_mb) is the only memory refusal.
   const uint64_t memory_entry  = cost::process_footprint_bytes();
-  const uint64_t budget        = cost::budget_bytes(base_.memory_budget_mb);
-  const auto     within_budget = [&] {
-    auto rss = cost::process_footprint_bytes();
-    return budget == 0 || rss <= memory_entry || rss - memory_entry < budget;
-  };
+  const uint64_t ceiling       = cost::configured_budget_bytes();
+  const uint64_t budget        = ceiling > memory_entry ? ceiling - memory_entry : 0;  // headroom left at entry
+  const auto     within_budget = [&] { return ceiling == 0 || cost::process_footprint_bytes() < ceiling; };
   uint64_t cells = 0;
   for (const auto& q : design.rows) {
     cells += static_cast<uint64_t>(std::max(q.gates, 0));
   }
   // ABC netlist objects plus per-occurrence DFS arrays. Admission is repeated
   // during import; this estimate avoids allocating an obviously overlarge score.
-  if (budget && cells > budget / synth::kAbcImportNodeBytes) {
+  if (ceiling && cells > budget / synth::kAbcImportNodeBytes) {
     std::print("[pass.abc] ware: QoR import estimate exceeds memory budget\n");
     return {};
   }
@@ -2591,13 +2590,8 @@ synth::Io_decision Abc_backend::io_region(hhds::Graph& graph, const synth::Io_en
     flow.wire_loads             = wire.enabled();
     flow.annotate_wire_commands = tool_owned_flow_;
     flow.size_to_budget         = std::format("upsize {}; dnsize {}", budget_flag_, budget_flag_);
-    const auto rss              = cost::process_footprint_bytes();
-    const auto admission        = [&](std::string_view) {
-      const auto now     = cost::process_footprint_bytes();
-      const auto elapsed = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
-      return (!base_.time_budget_ms || elapsed <= base_.time_budget_ms)
-             && (now <= rss || now - rss <= uint64_t(base_.memory_budget_mb) * 1024 * 1024);
-    };
+    const auto ceiling          = cost::configured_budget_bytes();
+    const auto admission        = [&](std::string_view) { return ceiling == 0 || cost::process_footprint_bytes() <= ceiling; };
     const auto mapped        = execute_flow(frame, flow, admission);
     auto*      candidate     = Abc_FrameReadNtk(frame);
     const auto after         = physical_flow_qor(candidate, wire.enabled());

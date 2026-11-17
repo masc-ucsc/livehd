@@ -227,6 +227,38 @@ TEST(LhdOptions, LeanChunkControlsAreListedAndAccepted) {
   }
 }
 
+TEST(LhdOptions, LongOptionsAcceptEqualsSpelling) {
+  const auto parse = [](std::vector<std::string> args) {
+    std::vector<char*> argv;
+    for (auto& arg : args) {
+      argv.push_back(arg.data());
+    }
+    return lhd::parse_args(static_cast<int>(argv.size()), argv.data());
+  };
+  const auto spaced = parse({"lhd", "list", "options", "--diag-fmt", "pretty", "--top", "alu"});
+  const auto joined = parse({"lhd", "list", "options", "--diag-fmt=pretty", "--top=alu"});
+  EXPECT_EQ(joined.diag_fmt, lhd::Diag_fmt::pretty);
+  EXPECT_EQ(joined.diag_fmt, spaced.diag_fmt);
+  EXPECT_EQ(joined.top, "alu");
+  EXPECT_EQ(joined.command, "list");
+
+  // Only the first `=` splits: the value keeps its own `=`.
+  const auto set = parse({"lhd", "compile", "unused.prp", "--set=synth.adder=cla"});
+  ASSERT_FALSE(set.sets.empty());
+  EXPECT_EQ(set.sets.back().second, "cla");
+
+  EXPECT_EQ(parse({"lhd", "tool", "tree", "--hier=2"}).tool_hier, 2);
+  EXPECT_EQ(parse({"lhd", "compile", "unused.prp", "--top="}).top, "");
+
+  // A boolean flag rejects an inline value rather than ignoring it.
+  EXPECT_THROW(parse({"lhd", "list", "options", "--verbose=yes"}), lhd::Lhd_error);
+  EXPECT_THROW(parse({"lhd", "list", "options", "--diag-fmt=bogus"}), lhd::Lhd_error);
+  // After `--` tokens stay raw.
+  const auto raw = parse({"lhd", "compile", "unused.v", "--", "--top=x"});
+  ASSERT_EQ(raw.raw_args.size(), 1u);
+  EXPECT_EQ(raw.raw_args[0], "--top=x");
+}
+
 TEST(LhdOptions, HelpDoesNotAdvertiseRemovedLecNamespace) {
   const std::regex removed{R"((^|[^.a-z_])lec\.flag|--set lec\.|legacy lec\.)"};
   for (const auto& command : std::vector<std::vector<std::string>>{
@@ -343,20 +375,21 @@ TEST(LhdOptions, SynthDelayFractionScalesTheSdcClockPeriod) {
             "360.000");
   EXPECT_EQ(merged({
                        {     "synth.sdc", dir + "/frac.sdc"},
-                       {"pass.abc.delay",             "222"}
+                       {"synth.delay",             "222"}
   })
                 .at("delay"),
             "222");
   {
+    // pass.usyn reads the same synth.delay spelling as pass.abc.
     lhd::Options opts;
     opts.sets = {
         {     "synth.sdc",    dir + "/frac.sdc"},
         { "synth.liberty", dir + "/frac_ps.lib"},
-        {"pass.abc.delay",                "222"}
+        {"synth.delay",                "222"}
     };
     Eprp_var::Eprp_dict labels;
     lhd::merge_mapper_sets(opts, "pass.usyn", labels);
-    EXPECT_EQ(labels.at("delay"), "360.000");
+    EXPECT_EQ(labels.at("delay"), "222");
   }
   EXPECT_EQ(merged({
                        {       "synth.sdc",    dir + "/frac.sdc"},
@@ -469,7 +502,7 @@ TEST(LhdOptions, SynthPlaceFoldsAutoMemoriesWithoutSram) {
   EXPECT_EQ(merged({{"synth.place", "true"}}).at("memory"), "true");
   EXPECT_EQ(merged({{"synth.place", "true"}, {"synth.memory", "auto"}}).at("memory"), "true");
   EXPECT_EQ(merged({{"synth.place", "true"}, {"synth.memory", "macro"}}).at("memory"), "false");
-  EXPECT_EQ(merged({{"synth.place", "true"}, {"synth.sram", "true"}}).at("memory"), "sram");
+  EXPECT_EQ(merged({{"synth.place", "true"}, {"synth.memory.sram", "true"}}).at("memory"), "sram");
   EXPECT_EQ(merged({{"synth.place", "true"}, {"pass.abc.memory", "false"}}).at("memory"), "false");
 }
 
@@ -601,12 +634,12 @@ TEST(LhdOptions, RecommendedSharedDefaults) {
   const auto listed = lhd::list_set_options();
   for (const auto& [key, value] : std::vector<std::pair<std::string, std::string>>{
            {                "compile.specialize_modules",   "true"},
-           {                       "pass.abc.area_relax",      "0"},
-           {                         "pass.abc.boundary",  "false"},
-           {                       "pass.abc.max_fanout",     "16"},
+           {                          "synth.area_relax",    "100"},
+           {                            "synth.boundary",  "false"},
+           {                       "synth.max_fanout",     "16"},
            {                          "synth.delay_frac",    "0.4"},
            {                           "synth.partition", "coarse"},
-           {                  "synth.place.reset_fanout",     "32"},
+           {         "synth.place.pcrs.reset_pipeline",   "true"},
            {                         "synth.place.pcrs",   "true"},
            {                       "synth.place.growth",   "0.05"},
            {         "synth.place.growth.sizing_share",    "0.3"},
@@ -662,7 +695,8 @@ TEST(LhdOptions, LegrouteOptionsAreTheMinimalCoreAndOptIn) {
   opts.command = "synth";
   const std::vector<std::pair<std::string, std::string>> expected{
       {                        "synth.place.legroute",  "false"},
-      {            "synth.place.legroute.plan.rounds",      "3"},
+      {            "synth.place.legroute.plan.rounds",      "2"},
+      {          "synth.place.legroute.area_restarts",      "1"},
       {        "synth.place.legroute.plan.iterations",    "100"},
       {    "synth.place.legroute.plan.min_iterations",      "0"},
       {   "synth.place.legroute.plan.timing_interval",      "0"},
@@ -966,4 +1000,27 @@ TEST(LhdOptions, PositionalMetadataIsNotSourceAndMergesByClass) {
     }
   }
   std::remove(file.c_str());
+}
+
+TEST(LhdOptions, DebugAcceptsBareRepeatedAndExplicitSelectors) {
+  const auto parse = [](std::vector<std::string> args) {
+    std::vector<char*> argv;
+    for (auto& arg : args) {
+      argv.push_back(arg.data());
+    }
+    return lhd::parse_args(static_cast<int>(argv.size()), argv.data());
+  };
+  EXPECT_TRUE(parse({"lhd", "compile", "input.v"}).debug.empty());
+  EXPECT_EQ(parse({"lhd", "compile", "input.v", "-d"}).debug, "all");
+  const auto before_option = parse({"lhd", "compile", "input.v", "-d", "--stats"});
+  EXPECT_EQ(before_option.debug, "all");
+  EXPECT_EQ(parse({"lhd", "compile", "input.v", "--debug"}).debug, "all");
+  EXPECT_EQ(parse({"lhd", "compile", "input.v", "--debug="}).debug, "all");
+  EXPECT_EQ(parse({"lhd", "compile", "input.v", "--debug=aegraph-rule"}).debug, "aegraph-rule");
+  EXPECT_EQ(parse({"lhd", "compile", "input.v", "-d", "aegraph-rule", "-d", "pass.abc"}).debug,
+            "aegraph-rule,pass.abc");
+  const auto positional = parse({"lhd", "compile", "-d", "aegraph-rule", "input.v"});
+  EXPECT_EQ(positional.debug, "aegraph-rule");
+  ASSERT_EQ(positional.files.size(), 1u);
+  EXPECT_EQ(positional.files.front(), "input.v");
 }

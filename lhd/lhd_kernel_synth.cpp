@@ -45,6 +45,7 @@
 #include <charconv>
 #include <chrono>
 #include <cmath>
+#include <optional>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -80,6 +81,9 @@
 #include "lhd_kernel_internal.hpp"
 #include "liberty_dff.hpp"
 #include "node_util.hpp"
+#include "pass/semdiff/semdiff.hpp"
+#include "pass/place/technology_rc.hpp"
+#include "report.hpp"
 #include "pass.hpp"
 #include "pass/abc/abc_salt.hpp"
 #include "pass/domplace/timing/domino_liberty.hpp"
@@ -149,7 +153,6 @@ std::string physical_descriptor(const Options& opts, const livehd::placement::Op
       {"LHD_ABC_INCR_NO_TRAVERSAL", livehd::debug::env<"LHD_ABC_INCR_NO_TRAVERSAL">()},
       {        "LHD_RESIZE_PHASES",         livehd::debug::env<"LHD_RESIZE_PHASES">()},
       {          "OMP_NUM_THREADS",                    std::getenv("OMP_NUM_THREADS")},
-      {     "LHD_MEMORY_BUDGET_MB",               std::getenv("LHD_MEMORY_BUDGET_MB")},
   };
   for (const auto& [name, value] : env_overrides) {
     w.String(name);
@@ -276,7 +279,7 @@ stage::Clock_spec stage_timing_clock(const std::string& port, const Eprp_var::Ep
 std::unique_ptr<stage::Stage_timer> make_stage_timer(const std::string& liberty, const std::string& sdc, const std::string& top,
                                                      const std::string& bundle, std::vector<std::string> lefs,
                                                      const std::string& place_dir, const stage::Clock_spec& clock,
-                                                     double clock_uncertainty_ps) {
+                                                     double clock_uncertainty_ps, double output_load_ff) {
   if (const auto proxy_lef = fs::path(place_dir) / "memory_proxies.lef"; fs::is_regular_file(proxy_lef)) {
     lefs.push_back(proxy_lef.string());
   }
@@ -303,6 +306,7 @@ std::unique_ptr<stage::Stage_timer> make_stage_timer(const std::string& liberty,
   inputs.units                = liberty_sdc_units(first_liberty);
   inputs.clock                = clock;
   inputs.clock_uncertainty_ps = clock_uncertainty_ps;
+  inputs.output_load_ff       = output_load_ff;
   try {
     inputs.technology = livehd::physical::read_lef(lefs);
     return std::make_unique<stage::Stage_timer>(std::move(inputs));
@@ -338,10 +342,116 @@ std::string write_domino_liberty(const std::string& liberty, const std::string& 
   } catch (const std::exception& error) {
     throw Lhd_error{"unsupported",
                     std::string("domino cells cannot be timed by OpenTimer: ") + error.what(),
-                    "use synth.opentimer=false, or fix the bundle's stage coefficients"};
+                    "use synth.timing=false, or fix the bundle's stage coefficients"};
   }
   return path;
 }
+// Bumped whenever the fast report's content changes for the same inputs: stale sta_cache records then miss.
+constexpr std::string_view kFastReportSalt = "fast-report-1";
+
+// synth.wire_rc: auto (derive from the tech LEF), `R,C` in ohm/um and fF/um (`0` = no wire), or a technology RC file
+// (literal set_wire_rc / set_layer_rc data, as OpenROAD's setRC.tcl).
+struct Wire_rc_setting {
+  bool        automatic = true;
+  double      res_ohm_um = -1, cap_ff_um = -1;  // explicit R,C (>= 0) when set
+  std::string file;
+};
+Wire_rc_setting wire_rc_setting(const Options& opts) {
+  Wire_rc_setting out;
+  const auto      text = synth_set(opts, "wire_rc", "auto");
+  if (text == "auto" || text.empty()) {
+    return out;
+  }
+  out.automatic = false;
+  if (text == "0") {
+    out.res_ohm_um = out.cap_ff_um = 0;
+    return out;
+  }
+  char*        end = nullptr;
+  const double r   = std::strtod(text.c_str(), &end);
+  if (end != text.c_str() && *end == ',') {
+    const char*  cap = end + 1;
+    const double c   = std::strtod(cap, &end);
+    if (end == cap || *end != '\0' || !std::isfinite(r) || !std::isfinite(c) || r < 0 || c < 0) {
+      throw Lhd_error{"usage", "invalid synth.wire_rc: " + text, "expected auto, nonnegative ohm/um,fF/um, 0, or an RC file"};
+    }
+    out.res_ohm_um = r;
+    out.cap_ff_um  = c;
+    return out;
+  }
+  check_inputs_exist({text});
+  out.file = text;
+  return out;
+}
+
+// The synthesis wire estimate of the timing report (no placement yet): an average wire R and C per um and a
+// fanout -> length predictor. The R and C come from the tech LEF (synth.lef, else the $LHD_TECH_DIR default), else
+// from the Liberty's default_wire_load model; the lengths from that model's fanout_length table, else from sky130hd's
+// "Small" table expressed in placement-row heights and scaled to this technology's row. Nothing known: zero wire.
+livehd::liberty::Wire_load_model synth_wire_estimate(const Options& opts, const std::string& liberty) {
+  livehd::liberty::Wire_load_model wire;
+  const auto                       setting = wire_rc_setting(opts);
+  // The fanout -> length predictor: the Liberty default_wire_load table (its lengths; its per-length R and C are
+  // not trusted -- sky130's are 74.5 ohm/um and 0.014 fF/um).
+  if (const auto model = livehd::liberty::default_wire_load(liberty)) {
+    wire.length_um = model->length_um;
+    wire.slope_um  = model->slope_um;
+  }
+  if (!setting.automatic && setting.file.empty()) {
+    wire.res_ohm_um = setting.res_ohm_um;
+    wire.cap_ff_um  = setting.cap_ff_um;
+  }
+  std::string lefs = synth_set(opts, "lef", "");
+  if (lefs.empty()) {
+    if (const char* tech = std::getenv("LHD_TECH_DIR"); tech != nullptr && *tech != '\0') {
+      const auto t = (fs::path(tech) / "../techlef/sky130_fd_sc_hd__nom.tlef").string();
+      const auto c = (fs::path(tech) / "../lef/sky130_fd_sc_hd.lef").string();
+      if (fs::exists(t) && fs::exists(c)) {
+        lefs = t + "," + c;
+      }
+    }
+  }
+  if (!lefs.empty()) {
+    try {
+      std::vector<std::string> files;
+      for (const auto f : absl::StrSplit(lefs, ',', absl::SkipEmpty())) {
+        files.emplace_back(f);
+      }
+      const auto tech = livehd::physical::read_lef(files);
+      if (setting.automatic || !setting.file.empty()) {
+        const auto rc = livehd::placement::technology_wire_rc(tech, liberty, setting.file);
+        if (rc.horizontal_c + rc.vertical_c > 0) {
+          wire.cap_ff_um  = (rc.horizontal_c + rc.vertical_c) / 2;
+          wire.res_ohm_um = (rc.horizontal_r + rc.vertical_r) / 2;
+        }
+      }
+      if (wire.length_um.empty()) {
+        // sky130hd "Small" (row 2.72 um): fanout -> length in rows, scaled to this technology's core row.
+        double row = 0;
+        for (const auto& [name, site] : tech.sites) {
+          if (site.height > 0 && (row == 0 || site.height < row)) {
+            row = site.height;
+          }
+        }
+        if (row > 0) {
+          constexpr double kRefRow = 2.72;
+          for (const auto& [fanout, um] :
+               std::map<unsigned, double>{{1, 23.2746}, {2, 32.1136}, {3, 48.4862}, {4, 64.0974}, {5, 86.2649}}) {
+            wire.length_um[fanout] = um / kRefRow * row;
+          }
+          wire.slope_um = 8.3631 / kRefRow * row;
+        }
+      }
+    } catch (const std::exception&) {
+      // An unreadable LEF: no LEF-derived R, C or row.
+    }
+  }
+  if (wire.cap_ff_um < 0 || wire.res_ohm_um < 0) {
+    wire.cap_ff_um = wire.res_ohm_um = 0;  // auto without a tech LEF: no wire
+  }
+  return wire;
+}
+
 // Native stage timing of the final placed netlist: the same timer for every
 // arm, with the bundle's provisional cells when the domino profile is on. A
 // netlist that keeps word-valued ports is timed on its bit-level DEF import.
@@ -378,6 +488,17 @@ livehd::placement::Options placement_options(const Options& opts) {
     const double value = std::strtod(text.c_str(), &end);
     if (end != text.c_str() + text.size() || end == text.c_str() || !std::isfinite(value)) {
       throw Lhd_error{"usage", "invalid synth." + std::string(key) + ": " + text, "expected a finite number"};
+    }
+    return value;
+  };
+  // auto -> -1 (the placer resolves it per technology), else a nonnegative number
+  auto auto_number = [&](std::string_view key) {
+    if (synth_set(opts, key, "auto") == "auto") {
+      return -1.0;
+    }
+    const double value = number(key, "auto");
+    if (value < 0) {
+      throw Lhd_error{"usage", "invalid synth." + std::string(key), "expected auto or a nonnegative number"};
     }
     return value;
   };
@@ -488,14 +609,14 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.mesh_variant     = integer("place.mesh_variant", "0");  // no effect (the legroute regional retry was removed)
   out.mesh_variants    = integer("place.mesh_variants", "0");
   out.area_search      = truthy(synth_set(opts, "place.area_search", "false"));  // set by the driver's search
-  out.region.merge_um  = number("place.region.merge_um", "5");
+  out.region.merge_um  = auto_number("place.region.merge_um");
   out.region.cut       = synth_set(opts, "place.region.cut", "macro");
   livehd::placement::validate_region_options(out.region);
   out.boundarypins.enabled             = truthy(synth_set(opts, "place.region.boundarypins", "false"));
   out.boundarypins.split               = truthy(synth_set(opts, "place.region.boundarypins.split", "true"));
   out.boundarypins.order               = truthy(synth_set(opts, "place.region.boundarypins.order", "false"));
   out.boundarypins.iterations          = integer("place.region.boundarypins.iterations", "50");
-  out.boundarypins.max_displacement_um = number("place.region.boundarypins.max_displacement_um", "20");
+  out.boundarypins.max_displacement_um = auto_number("place.region.boundarypins.max_displacement_um");
   out.boundarypins.settle_iterations   = integer("place.region.boundarypins.settle_iterations", "20");
   out.boundarypins.pitch_um            = number("place.region.boundarypins.pitch_um", "0");
   out.boundarypins.align               = truthy(synth_set(opts, "place.region.pinalign", "false"));
@@ -528,7 +649,7 @@ livehd::placement::Options placement_options(const Options& opts) {
       || !out.legroute_plan.route_net_pops) {
     throw Lhd_error{"usage", "legroute.plan route_model must be legacy or coarse with positive route budgets", ""};
   }
-  out.legroute_plan.rounds             = integer("place.legroute.plan.rounds", "3");
+  out.legroute_plan.rounds             = integer("place.legroute.plan.rounds", "2");
   out.legroute_plan.iterations         = integer("place.legroute.plan.iterations", "100");
   out.legroute_plan.min_iterations     = integer("place.legroute.plan.min_iterations", "0");
   out.legroute_plan.timing_interval    = integer("place.legroute.plan.timing_interval", "0");
@@ -607,6 +728,7 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.utilization         = number("place.utilization", "0.30");
   out.allow_increase_area = truthy(synth_set(opts, "place.allow_increase_area", "true"));
   out.area_restarts       = integer("place.area_restarts", "12");
+  out.legroute_area_restarts = integer("place.legroute.area_restarts", "1");
   out.area_step           = number("place.area_step", "0.92");
   if (!(out.area_step > 0 && out.area_step < 1)) {
     throw Lhd_error{"usage", "synth.place.area_step must be in (0, 1)", ""};
@@ -714,9 +836,9 @@ livehd::placement::Options placement_options(const Options& opts) {
   }
   out.preroute.enabled         = truthy(synth_set(opts, "place.preroute", "false"));
   out.retain_preroute_design   = out.preroute.enabled;
-  out.preroute.setup_margin_ps = number("place.preroute.setup_margin", "20");
+  out.preroute.setup_margin_ps = auto_number("place.preroute.setup_margin");
   out.preroute.hold_margin_ps  = number("place.preroute.hold_margin", "-1");
-  out.preroute.nominal_slew_ps = number("place.preroute.nominal_slew", "20");
+  out.preroute.nominal_slew_ps = auto_number("place.preroute.nominal_slew");
   out.preroute.hold_buffer     = synth_set(opts, "place.preroute.hold_buffer", "auto");
   out.preroute.budget_ms       = integer("place.preroute.budget_ms", "10");
   out.preroute.stage_budget_ms = integer("place.preroute.stage_budget_ms", "10000");
@@ -1029,21 +1151,18 @@ livehd::placement::Options placement_options(const Options& opts) {
       && fp_mode != "auto" && fp_mode != "centroid" && fp_mode != "chunks") {
     throw Lhd_error{"usage", "invalid synth.place.fp: " + fp_mode, "expected true, false, on, off, auto, chunks or centroid"};
   }
-  const double chunk_gb = number("place.chunk.memory_gb", "4");
-  // Compare the product: chunk_gb * 1e9 can round up to exactly 2^64, and that cast to uint64_t is undefined.
-  if (!std::isfinite(chunk_gb) || chunk_gb < 0 || chunk_gb * 1e9 >= 0x1p64 || (chunk_gb > 0 && chunk_gb < 1e-9)) {
-    throw Lhd_error{"usage", "invalid synth.place.chunk.memory_gb", "expected a nonnegative, representable memory budget in GB"};
-  }
+  // lhd.ram_budget_mb (validated by check_known_set_passes) is the soft target a chunk is sized to.
+  const double chunk_bytes = opts.ram_budget_mb * 1048576.0;
   const auto chunk_run = synth_set(opts, "place.chunk.run", "flow");
   out.chunk_require_fit
-      = truthy(synth_set(opts, "place.chunk.require_fit", chunk_run != "flow" && chunk_gb > 0 ? "true" : "false"));
+      = truthy(synth_set(opts, "place.chunk.require_fit", chunk_run != "flow" && chunk_bytes > 0 ? "true" : "false"));
   out.chunk_seed_detail  = truthy(synth_set(opts, "place.chunk.seed_detail", "true"));
-  out.chunk_memory_bytes = static_cast<uint64_t>(chunk_gb * 1e9);
+  out.chunk_memory_bytes = static_cast<uint64_t>(chunk_bytes);
   // Explicit centroid experiment settings still select the experimental solver.
   const bool centroid_options
       = std::any_of(opts.sets.begin(), opts.sets.end(), [](const auto& kv) { return kv.first.starts_with("synth.place.fp."); });
   const bool chunk_budget_set
-      = std::any_of(opts.sets.begin(), opts.sets.end(), [](const auto& kv) { return kv.first == "synth.place.chunk.memory_gb"; });
+      = std::any_of(opts.sets.begin(), opts.sets.end(), [](const auto& kv) { return kv.first == "lhd.ram_budget_mb"; });
   out.fp_chunks = truthy(fp_mode) && fp_mode != "centroid" && (!centroid_options || fp_mode == "chunks" || chunk_budget_set);
   if (out.chunk_require_fit && (!out.fp_chunks || out.chunk_memory_bytes == 0)) {
     throw Lhd_error{"usage", "chunk.require_fit requires a chunk floorplan and a positive memory budget", ""};
@@ -1103,7 +1222,6 @@ livehd::placement::Options placement_options(const Options& opts) {
       || out.fp_pin_step <= 0 || out.fp_pin_step > .5 || out.fp_pin_improvement < 0 || out.fp_pin_improvement >= 1) {
     throw Lhd_error{"usage", "invalid FP color/pin adjustment settings", ""};
   }
-  out.repair_reset  = truthy(synth_set(opts, "place.repair.reset", "false"));
   out.resize_engine = synth_set(opts, "place.resize.engine", "legacy");
   if (out.resize_engine != "new" && out.resize_engine != "legacy") {
     throw Lhd_error{"usage", "invalid synth.place.resize.engine: " + out.resize_engine, "expected new or legacy"};
@@ -1139,15 +1257,15 @@ livehd::placement::Options placement_options(const Options& opts) {
     out.resize_dont_use.emplace_back(pattern);
   }
   {
-    const auto fanout = integer("place.reset_fanout", "32");
-    if (fanout < 0 || fanout == 1) {
-      throw Lhd_error{"usage",
-                      std::format("invalid synth.place.reset_fanout: {}", fanout),
-                      "expected 0 (off) or an integer >= 2: loads per reset buffer"};
+    // A reset tree is ordinary logic: its cap per driver is the design's net fanout cap, synth.max_fanout
+    // (0 there disables the mapper's buffering tail; the reset tree still needs a cap, so it keeps 16).
+    const auto fanout = integer("max_fanout", "16");
+    out.reset_fanout  = fanout >= 2 ? static_cast<unsigned>(fanout) : 16U;
+    out.pcrs          = truthy(synth_set(opts, "place.pcrs", "true"));
+    out.pcrs_depth    = std::make_shared<livehd::pcrs::Depth_state>();
+    if (!truthy(synth_set(opts, "place.pcrs.reset_pipeline", "true"))) {
+      out.pcrs_depth->max_depth = 0;
     }
-    out.reset_fanout = static_cast<unsigned>(fanout);
-    out.pcrs         = truthy(synth_set(opts, "place.pcrs", "true"));
-    out.pcrs_depth   = std::make_shared<livehd::pcrs::Depth_state>();
     const auto rails = integer("place.domino_rail_fanout", "32");
     if (rails < 0 || rails == 1) {
       throw Lhd_error{"usage",
@@ -1157,9 +1275,6 @@ livehd::placement::Options placement_options(const Options& opts) {
     out.domino_rail_fanout = static_cast<unsigned>(rails);
   }
   out.control_ports = synth_set(opts, "place.control_ports", "");
-  if (out.repair_reset) {
-    throw Lhd_error{"usage", "pre-CTS clock/reset sizing is disabled", "use place.repair.reset=false"};
-  }
   out.fp_iterations   = integer("place.fp.iterations", "1500");
   out.fp_minimum      = number("place.fp.minimum", "3000");
   out.fp_min_copies   = integer("place.fp.min_copies", "4");
@@ -1306,22 +1421,12 @@ livehd::placement::Options placement_options(const Options& opts) {
   if (!std::isfinite(out.rc_pessimism) || out.rc_pessimism < 1) {
     throw Lhd_error{"usage", "invalid synth.place.rc_pessimism", "expected a finite multiplier >=1"};
   }
-  out.tech_rc_file = synth_set(opts, "place.tech_rc", "");
-  if (!out.tech_rc_file.empty()) {
-    check_inputs_exist({out.tech_rc_file});
-  }
-  const auto rc = synth_set(opts, "place.wire_rc", "");
-  if (!rc.empty()) {
-    char* end             = nullptr;
-    out.resistance_ohm_um = std::strtod(rc.c_str(), &end);
-    if (end == rc.c_str() || *end != ',') {
-      throw Lhd_error{"usage", "invalid synth.place.wire_rc", "expected ohm/um,fF/um"};
-    }
-    const auto* cap       = end + 1;
-    out.capacitance_ff_um = std::strtod(cap, &end);
-    if (end == cap || *end != '\0' || !std::isfinite(out.resistance_ohm_um) || !std::isfinite(out.capacitance_ff_um)
-        || out.resistance_ohm_um < 0 || out.capacitance_ff_um < 0) {
-      throw Lhd_error{"usage", "invalid synth.place.wire_rc", "expected nonnegative ohm/um,fF/um"};
+  {
+    const auto wire = wire_rc_setting(opts);  // synth.wire_rc: one wire RC for synthesis and placement
+    out.tech_rc_file = wire.file;
+    if (!wire.automatic && wire.file.empty()) {
+      out.resistance_ohm_um = wire.res_ohm_um;
+      out.capacitance_ff_um = wire.cap_ff_um;
     }
   }
 
@@ -1331,7 +1436,7 @@ livehd::placement::Options placement_options(const Options& opts) {
 // The timing target the run was asked to meet against what STA measured, so a
 // reader (and the delay-driven decisions that feed on it) can tell "target met",
 // "slightly missed" and "out of reach at this partition" apart. The target is the
-// mapper's explicit `abc.delay` budget (ps) when set, else the first
+// mapper's explicit `synth.delay` budget (ps) when set, else the first
 // `create_clock -period` of the SDC (Liberty time units). Achieved is STA's
 // worst endpoint delay of the top design. Empty when there is nothing to compare.
 std::string timing_target_json(const std::string& abc_qor, const std::string& sta_qor, const std::string& sdc_path) {
@@ -1362,7 +1467,7 @@ std::string timing_target_json(const std::string& abc_qor, const std::string& st
       const double      v   = std::strtod(t.c_str(), &end);
       if (!t.empty() && end != t.c_str() && v > 0) {
         target = v;
-        source = "abc.delay";
+        source = "synth.delay";
       }
     }
   }
@@ -1845,7 +1950,7 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
   const bool        input_mapped  = !mapped_def.empty() || truthy(synth_set(opts, "input_mapped", "false"));
   const bool        mapped_output = input_mapped || mapper_maps_cells(opts, mapper_method);
   const std::string liberty       = mapped_output ? resolve_liberty(opts) : std::string{};
-  bool              run_sta       = mapped_output && truthy(synth_set(opts, "opentimer", "true"));
+  bool              run_sta       = mapped_output && truthy(synth_set(opts, "timing", "true"));
   const bool        run_place     = truthy(synth_set(opts, "place", "false"));
   auto              place_options = run_place ? placement_options(opts) : livehd::placement::Options{};
   const bool isolated = !place_options.chunk_manifest.empty();
@@ -1954,7 +2059,7 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
       if (gc.explore_worker != "auto" && gc.explore_worker != "replay" && gc.explore_worker != "snapshot") {
         throw Lhd_error{"usage", "place.explore.worker expects auto, snapshot or replay", ""};
       }
-      gc.snapshot_available = gc.target == "main" && run_sta && synth_set(opts, "timing.engine", "opentimer") == "fast";
+      gc.snapshot_available = gc.target == "main" && run_sta && synth_set(opts, "timing.engine", "fast") == "fast";
       gc.worker_memory_mb   = std::max(0, std::atoi(synth_set(opts, "place.explore.memory_mb", "0").c_str()));
       if (opts.gui_worker_id.empty()) {
         const auto mb = std::max(0, std::atoi(synth_set(opts, "place.explore.session_memory_mb", "0").c_str()));
@@ -2230,6 +2335,9 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
         if (std::any_of(std::begin(kSynthSetRenames), std::end(kSynthSetRenames), [&](const auto& r) { return r.old_name == opt.name; })) {
           continue;  // a deprecated spelling: `list options` leaves it out and so does the panel
         }
+        if (std::string_view{opt.help}.starts_with("INTERNAL")) {
+          continue;  // driver state, hidden from `list options` and from the panel
+        }
         const auto esc = [](std::string_view s) {
           std::string out;
           for (const char c : s) {
@@ -2358,8 +2466,8 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
   if (find_slot(opts.emit_dirs, "def") && (!run_place || !place_options.full)) {
     throw Lhd_error{"usage", "def: output requires synth.place=true and synth.place.mode=full", ""};
   }
-  if (!mapped_output && truthy(synth_set(opts, "opentimer", ""))) {
-    throw Lhd_error{"usage", "logical-only USYN cannot run OpenTimer", "use tmap=abc or synth.opentimer=false"};
+  if (!mapped_output && truthy(synth_set(opts, "timing", ""))) {
+    throw Lhd_error{"usage", "logical-only USYN has no cells to time", "use tmap=abc or synth.timing=false"};
   }
   const bool        run_reduce = truthy(synth_set(opts, "reduce", "false"));
   const std::string sdc        = synth_set(opts, "sdc", "");
@@ -2612,6 +2720,32 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
                                                       lg_dir,
                                                       physical_descriptor(opts, place_options),
                                                       std::move(dependencies));
+  }
+
+  // A small hierarchical design often maps better flat (constants and logic fold across instance ports, one
+  // region instead of a wrapper per def); synth.flatten is off by default, so suggest it here.
+  if (std::none_of(opts.sets.begin(), opts.sets.end(), [](const auto& kv) { return kv.first == "synth.flatten"; })) {
+    constexpr uint64_t                         kSmallFlattenNodes = 10000;
+    absl::flat_hash_map<hhds::Gid, hhds::Graph*> by_gid;
+    hhds::Graph*                               flat_top = nullptr;
+    for (const auto& g : var.graphs) {
+      by_gid[g->get_gid()] = g.get();
+      if (g->get_name() == top) {
+        flat_top = g.get();
+      }
+    }
+    if (flat_top != nullptr && flat_top->grouped_hierarchy().instances().begin() != flat_top->grouped_hierarchy().instances().end()) {
+      const auto nodes = livehd::graph_util::flat_node_count(flat_top, [&](hhds::Gid gid) -> hhds::Graph* {
+        const auto it = by_gid.find(gid);
+        return it == by_gid.end() ? nullptr : it->second;
+      });
+      if (nodes <= kSmallFlattenNodes) {
+        livehd::diag::warn("synth", "synth-flatten-small", "unsupported")
+            .msg("'{}' is small ({} nodes flattened) and hierarchical: it may map better flat", top, nodes)
+            .hint("--set synth.flatten=true (off by default; --set synth.flatten=false silences this)")
+            .emit();
+      }
+    }
   }
 
   // ---- 2. repeated-cone reduction + coloring ---------------------------------
@@ -2880,8 +3014,8 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
     // Each mapper receives its own labels. Native USYN does not inherit
     // ABC optimization settings; standalone dispatch uses the same rule.
     // Several coarse regions meet at ports the mapper buffered blind: with the soft bound the outputs read the
-    // root of their buffer chain (pass.abc.port_bypass; vortex -738 -> -177 ps). An explicit setting wins.
-    if (mapper_method == "pass.abc" && synth_set(opts, "partition", "coarse") == "coarse") {
+    // root of their buffer chain (synth.port_bypass; vortex -738 -> -177 ps). An explicit setting wins.
+    if (mapper_method == "pass.abc" && synth_set(opts, "partition", "coarse") == "coarse" && synth_set(opts, "port_bypass", "").empty()) {
       labels["port_bypass"] = "true";
     }
     merge_mapper_sets(opts, mapper_method, labels);
@@ -2981,6 +3115,7 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
         sta["top"]   = top;
         sta["qor"]   = dir + "/timing.json";
         sta["stats"] = "true";
+        sta["io_load"] = resolve_io_load(opts, liberty);
         merge_sets(opts, "pass.opentimer", sta);
         if (const auto macros = synth_set(opts, "macro_liberty", ""); !macros.empty()) {
           sta["extra_libs"] = macros;
@@ -3087,6 +3222,12 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
       }
     }
     run_step(mapper_method, var, labels, opts, res);
+    const auto regions = apply_region_nesting(net_dir);  // a nested color becomes a submodule of its parent color
+    if (user_workdir && !regions.empty()) {
+      ensure_dir(root);
+      write_color_index(regions, root + "/color_index.json");
+      res.outputs.push_back(root + "/color_index.json");
+    }
     if (user_workdir || lg_emit != nullptr) {
       Phase_timer phase(res, "lg.save");
       livehd::Hhds_graph_library::save(net_dir);
@@ -3119,7 +3260,7 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
   std::string       domino_liberty_path;
   // hard macros (blackbox cells with a LEF MACRO): their Liberty files, read by the timers after synth.liberty
   const std::string macro_liberty = synth_set(opts, "macro_liberty", "");
-  std::string       sram_liberty_path;  // the generated SRAM macros' Liberty (synth.sram)
+  std::string       sram_liberty_path;  // the generated SRAM macros' Liberty (synth.memory.sram)
   const auto        extra_libs    = [&] {
     std::string list = domino_liberty_path;
     if (!sram_liberty_path.empty()) {
@@ -3210,14 +3351,45 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
   if (net.graphs.empty()) {
     throw Lhd_error{"internal", mapper_method + " produced an empty netlist library", ""};
   }
-  if (mapped_output && truthy(synth_set(opts, "sram", "false"))) {
+  if (mapped_output && truthy(synth_set(opts, "memory.sram", "false"))) {
     livehd::synth::Sram_tech tech;
-    tech.um2_per_bit = std::stod(synth_set(opts, "sram.um2_per_bit", "0.49"));
-    tech.clk_to_q_ns = std::stod(synth_set(opts, "sram.access_ns", "0.218"));
-    tech.min_bits    = static_cast<uint64_t>(std::stoull(synth_set(opts, "sram.min_bits", "2048")));
+    // Area, timing, pin loads and voltage scale with the mapped Liberty's smallest NOT
+    // (liberty::tech_proxy); an explicit number overrides one quantity.
+    std::string proxy_why;
+    const auto  proxy = livehd::liberty::tech_proxy(liberty, &proxy_why);
+    if (!proxy) {
+      throw Lhd_error{"usage", "synth.memory.sram cannot derive the macro model from " + liberty + ": " + proxy_why, ""};
+    }
+    livehd::synth::scale_to_technology(tech, proxy->not_area, proxy->not_fo4_ps, proxy->not_cin_ff, proxy->voltage);
+    const auto explicit_number = [&](const char* key) -> std::optional<double> {
+      const auto text = synth_set(opts, key, "auto");
+      if (text == "auto") {
+        return std::nullopt;
+      }
+      char*      end   = nullptr;
+      const auto value = std::strtod(text.c_str(), &end);
+      if (text.empty() || *end != '\0' || !std::isfinite(value) || value <= 0) {
+        throw Lhd_error{"usage", std::format("synth.{} must be auto or a positive number, not '{}'", key, text), ""};
+      }
+      return value;
+    };
+    if (const auto v = explicit_number("memory.um2_per_bit")) {
+      tech.um2_per_bit = *v;
+    }
+    if (const auto v = explicit_number("memory.access_ns")) {
+      tech.clk_to_q_ns = *v;
+    } else if (!(proxy->not_fo4_ps > 0)) {
+      throw Lhd_error{"usage",
+                      std::format("synth.memory.sram: the Liberty NOT {} has no delay tables for an FO4 estimate", proxy->not_cell),
+                      "set synth.memory.access_ns"};
+    }
+    tech.min_bits = static_cast<uint64_t>(std::stoull(synth_set(opts, "memory.min_bits", "2048")));
+    std::fprintf(stderr,
+                 "lhd synth: synth.memory.sram: model from %s (%.4g um2, FO4 %.3g ps): %.3g um2/bit, access %.3g ns\n",
+                 proxy->not_cell.c_str(), proxy->not_area, proxy->not_fo4_ps, tech.um2_per_bit, tech.clk_to_q_ns);
     const auto sram  = livehd::synth::macro_memories(net.graphs, tech);
     for (const auto& [module, why] : sram.kept) {
-      std::fprintf(stderr, "lhd synth: synth.sram: '%s' stays a native memory instance: %s\n", module.c_str(), why.c_str());
+      std::fprintf(stderr, "lhd synth: synth.memory.sram: '%s' stays a native memory instance: %s\n", module.c_str(), why.c_str());
     }
     if (!sram.macros.empty()) {
       ensure_dir(root);
@@ -3254,7 +3426,7 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
         area += m.width_um * m.height_um;
         bits += m.bits * m.size;
       }
-      std::fprintf(stderr, "lhd synth: synth.sram: %zu memories became macros (%.0f Kib, %.0f um2): %s/*.lib, %s\n", sram.macros.size(),
+      std::fprintf(stderr, "lhd synth: synth.memory.sram: %zu memories became macros (%.0f Kib, %.0f um2): %s/*.lib, %s\n", sram.macros.size(),
                    static_cast<double>(bits) / 1024.0, area, lib_dir.c_str(), lef_path.c_str());
     }
   }
@@ -3401,7 +3573,7 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
                                          run_timing_place,
                                          run_resize,
                                          run_resynth,
-                                         synth_set(opts, "timing.engine", "opentimer"),
+                                         synth_set(opts, "timing.engine", "fast"),
                                          place_options.threads,
                                          place_options.bins,
                                          place_options.macro_mode);
@@ -3470,6 +3642,7 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
           {  "top",                                      top},
           { "hier",                                  "false"}
       };
+      timing_options.dict["io_load"] = resolve_io_load(opts, liberty);
       merge_sets(opts, "pass.opentimer", timing_options.dict);
       if (const auto extra = extra_libs(); !extra.empty()) {
         timing_options.dict["extra_libs"] = extra;
@@ -3511,7 +3684,7 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
               return livehd::placement::prects_data_timing(std::move(feedback), controls);
             };
       // The ranking engine (2q-fasttimer E): OpenTimer's Elmore ranking, the native engine, or both with a comparison.
-      const auto timing_engine = synth_set(opts, "timing.engine", "opentimer");
+      const auto timing_engine = synth_set(opts, "timing.engine", "fast");
       if (timing_engine != "opentimer" && timing_engine != "fast" && timing_engine != "compare") {
         throw Lhd_error{"usage", "synth.timing.engine expects opentimer, fast or compare, got '" + timing_engine + "'", ""};
       }
@@ -3546,6 +3719,9 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
         if (!sdc.empty()) {
           ranker_options.sdc_text = read_text(sdc);
         }
+        // The same no-SDC defaults as the synthesis report: ideal clocks on the clock ports, every output loaded.
+        ranker_options.default_constraints = true;
+        ranker_options.output_load_ff      = static_cast<float>(std::max(0.0, std::strtod(resolve_io_load(opts, liberty).c_str(), nullptr)));
         try {
           return std::make_unique<livehd::timing::fast::Physical_ranker>(std::move(ranker_options));
         } catch (const std::invalid_argument& error) {
@@ -4046,6 +4222,9 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
             place_options.utilization           = restart.utilization;
             place_options.density               = std::min(place_options.density, restart.density);
             place_options.placement_area_resume = true;
+            if (restart.routing) {
+              ++place_options.legroute_area_restarts_used;
+            }
             // the region mesh variant: regions a quarter larger (1) or a fifth smaller (2) than asked, the given mesh (0)
             place_options.mesh_variant          = restart.mesh_variant;
             place_options.region.max_cells      = unsigned(std::lround(double(mesh_max_cells)
@@ -4355,7 +4534,8 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
                                          place_options.lefs,
                                          root + "/place",
                                          *stage_clock,
-                                         stage_timing_uncertainty);
+                                         stage_timing_uncertainty,
+                                         std::max(0.0, std::strtod(resolve_io_load(opts, usyn_liberty).c_str(), nullptr)));
         }
         const livehd::placement::Evaluate stage_evaluate = [&](const livehd::placement::Result& state) {
           const auto timing = stage_timer->evaluate(*state.graph, state.parasitics.get(), &state.floorplan, {.classes = false});
@@ -4448,7 +4628,20 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
       {
         rapidjson::Document report, statistics;
         report.Parse(placed.qor.c_str());
-        statistics.Parse(timing_session.statistics_json().c_str());
+        if (timing_engine == "fast") {
+          // The native ranker's counters, in the OpenTimer session's field names.
+          const auto  st = fast_ranker ? fast_ranker->statistics() : livehd::timing::fast::Physical_ranker::Statistics{};
+          const auto  js = std::format(
+              R"({{"engine":"fast","evaluations":{},"builds":{},"ranking_evaluations":{},"detailed_evaluations":{},)"
+              R"("ranking_seconds":{:.6f},"seconds":{:.6f},"bind_seconds":{:.6f},"wire_seconds":{:.6f},"engine_seconds":{:.6f},)"
+              R"("feedback_seconds":{:.6f}}})",
+              st.ranks + st.evaluations, st.binds, st.ranks, st.evaluations, st.engine_seconds,
+              st.bind_seconds + st.map_seconds + st.wire_seconds + st.engine_seconds + st.feedback_seconds, st.bind_seconds,
+              st.wire_seconds, st.engine_seconds, st.feedback_seconds);
+          statistics.Parse(js.c_str());
+        } else {
+          statistics.Parse(timing_session.statistics_json().c_str());
+        }
         report.AddMember("physical_timing", rapidjson::Value(statistics, report.GetAllocator()), report.GetAllocator());
         rapidjson::StringBuffer                    buffer;
         rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
@@ -4525,9 +4718,144 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
   }
 
   // ---- 4. STA -----------------------------------------------------------------
-  const std::string timing_path = root + "/timing.json";
+  const std::string timing_path   = root + "/timing.json";
   std::string       sta_qor;
-  if (run_sta && !macro_plan_only) {
+  const auto        report_engine = synth_set(opts, "timing.engine", "fast");
+  if (run_sta && !macro_plan_only && report_engine == "fast") {
+    // The native engine (pass/timing): the placed RC after placement, else the synthesis wire estimate.
+    {
+      Eprp_var::Eprp_dict ot;
+      merge_sets(opts, "pass.opentimer", ot);
+      for (const auto* key : {"critical", "critical_percent", "targets"}) {
+        if (ot.contains(key)) {
+          throw Lhd_error{"usage",
+                          std::format("pass.opentimer.{} (critical-path annotations) is an OpenTimer report feature", key),
+                          "add --set synth.timing.engine=opentimer; the fast engine does not write critical annotations yet"};
+        }
+      }
+      if (!spef.empty()) {
+        throw Lhd_error{"usage", "synth.spef is read by the OpenTimer report only",
+                        "add --set synth.timing.engine=opentimer, or drop synth.spef (placement provides RC)"};
+      }
+    }
+    Phase_timer                              phase(res, "pass.timing");
+    livehd::timing::fast::Report_inputs      in;
+    for (const auto path : absl::StrSplit(liberty + "," + extra_libs(), absl::ByAnyChar(", \t\n"), absl::SkipEmpty())) {
+      auto text = livehd::file_utils::read_file(std::string(path));
+      if (!text) {
+        throw Lhd_error{"io", "the timing report cannot read " + std::string(path), ""};
+      }
+      in.liberty_text += *text + "\n";
+      if (in.corner_name.empty()) {
+        in.corner_name = std::string(path);
+      }
+    }
+    if (!sdc.empty()) {
+      auto text = livehd::file_utils::read_file(sdc);
+      if (!text) {
+        throw Lhd_error{"io", "the timing report cannot read " + sdc, ""};
+      }
+      in.sdc_text = std::move(*text);
+    }
+    in.io_load_ff   = static_cast<float>(std::max(0.0, std::strtod(resolve_io_load(opts, liberty).c_str(), nullptr)));
+    in.time_unit_ps = liberty_sdc_units(liberty).time_ps;
+    if (!run_place) {
+      const auto wire     = synth_wire_estimate(opts, liberty);
+      in.wire_cap_ff_um   = wire.cap_ff_um;
+      in.wire_res_ohm_um  = wire.res_ohm_um;
+      in.wire_slope_um    = wire.slope_um;
+      in.wire_length_um   = wire.length_um;
+    }
+    const auto graph  = net.graphs.front();
+    auto*      lib    = graph->get_io()->get_library();
+    // The placed RC: this run's placement, else the one persisted on the placed graph (a placement-cache hit);
+    // none: the synthesis wire estimate.
+    auto placed_rc = net.physical_rc;
+    if (!placed_rc) {
+      if (auto stored = graph->get_input_node().attr(livehd::attrs::placement_rc); stored.has()) {
+        placed_rc = std::make_shared<livehd::physical::Parasitics>(livehd::physical::deserialize_parasitics(stored.get()));
+      }
+    }
+    // Incremental reuse (<workdir>/sta_cache, the compile/abc tiers' gate): keyed on the netlist's canonical digest
+    // (Merkle-folded through every region body) plus every report input, so a hit is exactly what re-timing writes.
+    const bool  cache_on = user_workdir && opts.incremental;
+    std::string cache_file;
+    bool        digestable = false, hit = false;
+    const auto  lookup_t0  = std::chrono::steady_clock::now();
+    if (cache_on) {
+      std::shared_ptr<hhds::Graph> digest_top = graph;
+      if (const auto io = lib->find_io(top); io && io->get_graph()) {
+        digest_top = io->get_graph();
+      }
+      const auto d = livehd::semdiff::canonical_digest(
+          digest_top.get(),
+          [lib](hhds::Gid gid) -> hhds::Graph* { return lib->has_graph(gid) ? lib->get_graph(gid).get() : nullptr; },
+          livehd::semdiff::Sub_fold::merkle,
+          /*matching_io_names=*/true);
+      digestable = d.valid;
+      if (d.valid) {
+        uint64_t h = livehd::hash_util::fnv1a64(in.liberty_text);
+        h          = livehd::hash_util::fnv1a64(in.sdc_text, h);
+        h = livehd::hash_util::fnv1a64(std::format("{}|{}|{}|{}|{}|{}|{}|{}", top, in.io_load_ff, in.time_unit_ps,
+                                                   in.wire_cap_ff_um, in.wire_res_ohm_um, in.wire_slope_um,
+                                                   placed_rc ? placed_rc->identity : std::string{}, kFastReportSalt),
+                                       h);
+        for (const auto& [fanout, um] : in.wire_length_um) {
+          h = livehd::hash_util::fnv1a64(std::format("{}:{}", fanout, um), h);
+        }
+        cache_file = (fs::path(opts.workdir) / "sta_cache" / std::format("fast_{:016x}{:016x}{:016x}.json", d.h0, d.h1, h)).string();
+        if (auto text = livehd::file_utils::read_file(cache_file)) {
+          // Replay; `resynth` is THIS run's (the cached run's would be stale).
+          rapidjson::Document doc;
+          doc.Parse<rapidjson::kParseFullPrecisionFlag>(text->c_str());  // the replay rewrites doubles bit-exactly
+          if (!doc.HasParseError() && doc.IsObject() && doc.HasMember("designs") && doc["designs"].IsArray()) {
+            for (auto& design : doc["designs"].GetArray()) {
+              if (!design.HasMember("colors") || !design["colors"].IsArray()) {
+                continue;
+              }
+              for (auto& row : design["colors"].GetArray()) {
+                const auto io  = lib->find_io(row["module"].GetString());
+                const auto def = io ? io->get_graph() : nullptr;
+                row["resynth"] = def && def->get_input_node().attr(livehd::attrs::resynth).has() ? 1 : 0;
+              }
+            }
+            rapidjson::StringBuffer                    buffer;
+            rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+            doc.Accept(writer);
+            sta_qor = buffer.GetString();
+            hit     = true;
+          }
+        }
+      }
+    }
+    const double lookup_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - lookup_t0).count();
+    if (!hit) {
+      try {
+        sta_qor = livehd::timing::fast::report_json(*lib, top, in, placed_rc);
+      } catch (const std::exception& error) {
+        throw Lhd_error{"unsupported", std::string("timing report: ") + error.what(), ""};
+      }
+      if (!cache_file.empty()) {
+        std::error_code ec;
+        fs::create_directories(fs::path(cache_file).parent_path(), ec);
+        const auto tmp = cache_file + ".tmp";
+        std::ofstream(tmp) << sta_qor;
+        fs::rename(tmp, cache_file, ec);
+      }
+    }
+    // The tier's counters, where pass.opentimer put them (harvest_sta_incremental reads them).
+    if (!sta_qor.empty() && sta_qor.back() == '}') {
+      sta_qor.pop_back();
+      sta_qor += std::format(R"(,"incremental":{{"enabled":{},"hits":{},"misses":{},"digestable":{},"lookup_ms":{:.3f}}}}})",
+                             cache_on ? "true" : "false", hit ? 1 : 0, cache_on && !hit ? 1 : 0, digestable ? "true" : "false",
+                             lookup_ms);
+    }
+    std::ofstream(timing_path) << sta_qor << '\n';
+    res.recipe_steps.emplace_back("pass.timing engine:fast");
+    if (user_workdir) {
+      res.outputs.push_back(timing_path);
+    }
+  } else if (run_sta && !macro_plan_only) {
     std::string files = liberty;
     if (!sdc.empty()) {
       files += "," + sdc;
@@ -4540,6 +4868,7 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
     };
     labels["top"] = top;
     labels["qor"] = timing_path;
+    labels["io_load"] = resolve_io_load(opts, liberty);
     merge_sets(opts, "pass.opentimer", labels);
     if (const auto extra = extra_libs(); !extra.empty()) {
       labels["extra_libs"] = extra;
@@ -4581,7 +4910,8 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
                                        place_options.lefs,
                                        root + "/place",
                                        *stage_clock,
-                                       stage_timing_uncertainty);
+                                       stage_timing_uncertainty,
+                                       std::max(0.0, std::strtod(resolve_io_load(opts, usyn_liberty).c_str(), nullptr)));
       }
       const auto                                          graph = net.graphs.front();
       std::shared_ptr<const livehd::physical::Parasitics> rc    = net.physical_rc;

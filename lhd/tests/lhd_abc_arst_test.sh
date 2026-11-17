@@ -77,7 +77,7 @@ run_lib() {
     --set color.ware_cmp=false --set color.ware_shift=false --workdir "$d/Wcolor"
   run pass "$MAPPER" --top "$TOP" lg:"$d/ref" --emit-dir lg:"$d/net" \
     --emit-dir verilog:"$d/netv" --emit diagnostics:"$d/diag.jsonl" \
-    --set synth.liberty="$lib" --workdir "$d/W"
+    --set synth.liberty="$lib" --set synth.flatten=true --workdir "$d/W"
   ! grep -q '"reset-native"' "$d/diag.jsonl" \
     || fail "$tag: an async-reset register stayed native: $(grep '"reset-native"' "$d/diag.jsonl")"
   cat "$d/netv/"*.v > "$d/net.v"

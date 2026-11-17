@@ -354,7 +354,7 @@ PY
 # and host build per tune vector.
 DIRTY_ON=(--set sim.tune.dirty=on --set sim.tune.fence=16)
 # Keep power-on state deterministic for the constant-data fixtures.
-FILL=(--set sim.unknown_zero=true --set sim.init_zero=true)
+FILL=(--set compile.unknown_zero=true --set sim.init_zero=true)
 run lw_all lw256 "${FILL[@]}" --set sim.tune.live_words=256 --set sim.tune.dirty=off
 tags=(lw256)
 if [ "$part" = all ] || [ "$part" = clean ] || [ "$part" = 1 ]; then

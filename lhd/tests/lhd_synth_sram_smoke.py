@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""synth.sram turns a memory kept native into a generated macro: any port count, a Liberty and a LEF view,
-a body-less instance in the netlist; a memory below synth.sram.min_bits is flops."""
+"""synth.memory.sram turns a memory kept native into a generated macro: any port count, a Liberty and a LEF view,
+a body-less instance in the netlist; a memory below synth.memory.min_bits is flops."""
 import json
 import os
 from pathlib import Path
@@ -25,7 +25,7 @@ lib = Path('inou/lefdef/tests/data/sky130hd.lib')
 def synth(name, *sets):
     result = root / (name + '.json')
     cmd = ['lhd/lhd', 'synth', str(source), '--top', 'top', '--workdir', str(root / name), '--result-json', str(result),
-           '--emit-dir', f'verilog:{root}/{name}_net', '--set', f'synth.liberty={lib}', '--set', 'synth.opentimer=false']
+           '--emit-dir', f'verilog:{root}/{name}_net', '--set', f'synth.liberty={lib}', '--set', 'synth.timing=false']
     for s in sets:
         cmd += ['--set', s]
     run = subprocess.run(cmd + ['--', '--compat=vcs'], capture_output=True, text=True, timeout=300)
@@ -34,10 +34,10 @@ def synth(name, *sets):
 
 # off by default: the memory stays a cgen_memory instance, no macro views
 err = synth('plain', 'synth.memory=macro')
-assert 'synth.sram' not in err, err
+assert 'synth.memory.sram' not in err, err
 assert not (root / 'plain/synth/sram.lef').exists()
 
-err = synth('sram', 'synth.sram=true')
+err = synth('sram', 'synth.memory.sram=true')
 assert '1 memories became macros' in err, err
 lef = (root / 'sram/synth/sram.lef').read_text()
 lib_files = sorted((root / 'sram/synth/sram').glob('*.lib'))
@@ -54,5 +54,5 @@ assert f'module {name}' not in net, 'the macro has no body'
 # the register file went to flops
 assert len(re.findall(r'^cgen_memory_\w+ ', net, re.M)) == 1 or '_blasted' in net
 
-err = synth('min', 'synth.sram=true', 'synth.sram.min_bits=100000')
+err = synth('min', 'synth.memory.sram=true', 'synth.memory.min_bits=100000')
 assert 'became macros' not in err, err

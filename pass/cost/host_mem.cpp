@@ -3,6 +3,7 @@
 #include "host_mem.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <charconv>
 #include <cstdlib>
 
@@ -182,7 +183,7 @@ uint64_t address_space_limit_bytes() {
   return static_cast<uint64_t>(rl.rlim_cur);
 }
 
-uint64_t arm_address_space_limit(uint64_t budget) {
+uint64_t arm_address_space_limit(uint64_t budget, bool replace) {
   if (budget == 0) {
     return 0;  // nothing to enforce
   }
@@ -223,7 +224,7 @@ uint64_t arm_address_space_limit(uint64_t budget) {
   if (rl.rlim_max != RLIM_INFINITY && limit > static_cast<uint64_t>(rl.rlim_max)) {
     return 0;
   }
-  if (rl.rlim_cur != RLIM_INFINITY && static_cast<uint64_t>(rl.rlim_cur) <= limit) {
+  if (!replace && rl.rlim_cur != RLIM_INFINITY && static_cast<uint64_t>(rl.rlim_cur) <= limit) {
     return 0;  // an existing cap is already at least as strict
   }
   rl.rlim_cur = static_cast<rlim_t>(limit);
@@ -233,29 +234,24 @@ uint64_t arm_address_space_limit(uint64_t budget) {
   return limit;
 }
 
+namespace {
+std::atomic<uint64_t> ram_max_mb{0};
+}  // namespace
+
+void set_ram_max_mb(uint64_t mb) { ram_max_mb.store(mb, std::memory_order_relaxed); }
+
 uint64_t configured_budget_bytes() {
-  // The override is a process-startup setting; region/racer admission must
-  // not repeatedly scan the environment. Keep the physical ceiling live.
-  static const int budget_mb = [] {
-    if (const char* env = std::getenv("LHD_MEMORY_BUDGET_MB"); env != nullptr && *env != '\0') {
-      int         v   = 0;
-      const char* end = env;
-      while (*end != '\0') {
-        ++end;
-      }
-      auto [p, ec] = std::from_chars(env, end, v);
-      if (ec == std::errc{} && p == end && v >= 0) {
-        return v;  // 0 is a valid "use the default budget" value
-      }
-    }
-    return 0;
-  }();
-  const auto ceiling   = budget_bytes(0);
-  const auto requested = budget_bytes(budget_mb);
-  return ceiling == 0 ? requested : std::min(requested, ceiling);
+  const uint64_t mb      = ram_max_mb.load(std::memory_order_relaxed);
+  const uint64_t ceiling = default_ram_max_bytes();
+  if (mb == 0) {
+    return ceiling;
+  }
+  const uint64_t requested = mb > (UINT64_MAX >> 20) ? UINT64_MAX : mb << 20;
+  const uint64_t phys      = physical_ram_bytes();
+  return phys == 0 ? requested : std::min(requested, phys);
 }
 
-uint64_t install_memory_backstop() { return arm_address_space_limit(configured_budget_bytes()); }
+uint64_t install_memory_backstop(bool replace) { return arm_address_space_limit(configured_budget_bytes(), replace); }
 
 uint64_t arm_child_share(int nsiblings) {
   if (nsiblings <= 1) {
@@ -268,29 +264,16 @@ uint64_t arm_child_share(int nsiblings) {
   return arm_address_space_limit(budget / static_cast<uint64_t>(nsiblings));
 }
 
-uint64_t reserve_bytes() {
-  constexpr uint64_t kFloor = uint64_t{2} << 30;  // 2 GiB
-  const uint64_t     phys   = physical_ram_bytes();
-  if (phys == 0) {
-    return kFloor;
-  }
-  // max(2 GiB, 25% of physical) -- but never so much that nothing is left to
-  // work with. Without the half-of-physical cap, the 2 GiB floor swallows a
-  // <=2 GiB host entirely, budget_bytes returns 0, and the guard silently turns
-  // itself OFF on the machine most likely to run out of memory.
-  return std::min(std::max(kFloor, phys / 4), phys / 2);
+uint64_t default_ram_max_bytes() {
+  const uint64_t phys = physical_ram_bytes();
+  return phys / 5 * 4;  // 80%; 0 when unknown (unenforceable)
 }
 
 uint64_t budget_bytes(int budget_mb) {
   if (budget_mb > 0) {
     return static_cast<uint64_t>(budget_mb) << 20;
   }
-  const uint64_t phys = physical_ram_bytes();
-  if (phys == 0) {
-    return 0;  // unknown host: unenforceable
-  }
-  const uint64_t reserve = reserve_bytes();
-  return reserve >= phys ? 0 : phys - reserve;
+  return default_ram_max_bytes();
 }
 
 }  // namespace livehd::cost

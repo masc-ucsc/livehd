@@ -75,7 +75,7 @@
 #include "node_util.hpp"
 #include "pass/liberty/liberty_dff.hpp"
 #include "pass/partition/flatten.hpp"
-#include "pass/pcrs/pcrs.hpp"
+#include "pass/place/pcrs/pcrs.hpp"
 #include "pass/place/place_salt.hpp"
 #include "pass/timing/physical_rank.hpp"
 #include "pg_rails.hpp"
@@ -1016,9 +1016,6 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
   }
   if (o.fp_place) {
     h = hash_text(std::format("fp-timing:{}:{}:{}:{}", o.fp_timing_interval, bool(o.fp_evaluate), o.fp_resize, bool(o.gp_rank)), h);
-    if (o.repair_reset) {
-      h = hash_text("repair-reset", h);  // FP resize may then touch reset cones
-    }
     if (o.fp_resize && o.resize_engine != "legacy") {
       h = hash_text(std::format("resize-engine:{}:{}", o.resize_engine, o.resize_vt_swap), h);
     }
@@ -4353,8 +4350,15 @@ void take_rail_twin(View& v, size_t i, const std::string& macro) {
 // Region_options for the mesh: with cut = "ratio", the tracks a cut line crosses per micron come from the routing
 // stack legroute routes on (the horizontal layers above the escape layer for a vertical line, the vertical ones for a
 // horizontal line), so a split weighs the two axes by what the region can carry.
-Region_options region_options_with_tracks(const ph::Technology& tech, const Region_options& o) {
+Region_options region_options_with_tracks(const ph::Technology& tech, const ph::Floorplan& fp, const Region_options& o) {
   Region_options ro = o;
+  if (ro.merge_um == -1) {
+    const auto site = fp.rows.empty() ? tech.sites.end() : tech.sites.find(fp.rows.front().site);
+    if (site == tech.sites.end() || !(site->second.height > 0)) {
+      throw std::invalid_argument("region.merge_um=auto requires a positive placement-row height");
+    }
+    ro.merge_um = kRegionMergeRows * site->second.height;
+  }
   if (ro.cut == "ratio" && ro.h_tracks_per_um <= 0 && ro.v_tracks_per_um <= 0) {
     size_t k = 0;
     for (const auto& name : tech.routing_layers) {
@@ -6087,7 +6091,7 @@ std::shared_ptr<Gui_map_env> gui_map_environment(const View& v, const ph::Techno
   env->degree = control.route.degree;
   env->accuracy = control.route.accuracy;
   env->dbu = tech.dbu;
-  env->region = region_options_with_tracks(tech, options.region);
+  env->region = region_options_with_tracks(tech, v.fp, options.region);
   for (size_t i = size_t(std::max(0, d.num_movable)); i < v.cells.size(); ++i) {  // the fixed macros (not placement masks)
     if (!tech.macros.at(v.cells[i].macro).klass.starts_with("CORE") && !v.cells[i].name.starts_with("__lhd_frame_mask_")) {
       env->region_macros.push_back(int(i));
@@ -6888,7 +6892,7 @@ bool gui_apply_edits(View& v, const ph::Technology& tech, const Options& options
   for (const auto& c : v.cells) {
     reference.components.push_back({c.name, c.macro, c.place});
   }
-  const auto               mesh = Region_mesh::build(d, macros(), ios(), region_options_with_tracks(tech, options.region), tech.dbu);
+  const auto               mesh = Region_mesh::build(d, macros(), ios(), region_options_with_tracks(tech, v.fp, options.region), tech.dbu);
   auto                     held = session->pin_positions();
   std::vector<std::string> forced;
   std::optional<ph::Rect>  window;
@@ -7935,49 +7939,22 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     }
   }
   if (use_pcrs) {
-    // A tree built before the first placement groups its sinks by instance name. The first call that starts
-    // from a placement regroups them by position, once: a reset hop then spans neighbours, not the die.
-    std::unordered_map<std::string_view, std::pair<double, double>> placed_at;
-    if (const auto* seed = options.previous ? options.previous.get() : options.restart_seed.get()) {
-      placed_at.reserve(seed->components.size());
-      for (const auto& c : seed->components) {
-        if (c.place.status != Status::UNPLACED) {
-          placed_at.emplace(c.name, std::pair{double(c.place.x), double(c.place.y)});
-        }
-      }
-    }
-    const pcrs::Position_of position_of = [&](std::string_view instance) -> std::optional<std::pair<double, double>> {
-      const auto found = placed_at.find(instance);
-      return found == placed_at.end() ? std::nullopt : std::optional{found->second};
-    };
-    // A pass with no GP iterations (final legalization, region refinement) cannot place a new tree: whatever the
-    // depth state says, a tree in the graph stays as it is there.
-    const bool frozen  = !placed_at.empty() && options.iterations == 0;
-    const bool regroup = !frozen && !placed_at.empty() && options.pcrs_depth && !options.pcrs_depth->clustered;
-    pcrs::Depth_policy depth_of = options.pcrs_depth ? options.pcrs_depth->policy(options.reset_fanout) : pcrs::Depth_policy{};
-    if (frozen && depth_of) {
-      depth_of = [wanted = std::move(depth_of)](std::string_view domain, size_t sinks, std::optional<unsigned> current) {
-        return current ? *current : wanted(domain, sinks, current);
-      };
-    }
     // The tree's cells are sized by pcrs for the pins and the wire they drive (positions are in DBU).
-    const auto   reset_wire = technology_wire_rc(tech,
-                                                 options.liberty,
-                                                 options.tech_rc_file,
-                                                 missing_wire_rc ? 0 : options.resistance_ohm_um,
-                                                 missing_wire_rc ? 0 : options.capacitance_ff_um,
-                                                 options.rc_pessimism,
-                                                 options.technology().cells.contents);
-    const double reset_c    = std::max(reset_wire.horizontal_c, reset_wire.vertical_c) / tech.dbu;
-    pcrs_stats = pcrs::build_reset(graph,
-                                   tech,
-                                   options.technology().cells,
-                                   {.fanout = options.reset_fanout, .regroup = regroup, .wire_ff_per_unit = reset_c},
-                                   depth_of,
-                                   placed_at.empty() ? pcrs::Position_of{} : position_of);
-    if (regroup) {
-      options.pcrs_depth->clustered = true;
-    }
+    const auto reset_wire = technology_wire_rc(tech,
+                                               options.liberty,
+                                               options.tech_rc_file,
+                                               missing_wire_rc ? 0 : options.resistance_ohm_um,
+                                               missing_wire_rc ? 0 : options.capacitance_ff_um,
+                                               options.rc_pessimism,
+                                               options.technology().cells.contents);
+    pcrs_stats        = pcrs::distribute_resets(graph,
+                                         tech,
+                                         options.technology().cells,
+                                         {.fanout           = options.reset_fanout,
+                                          .depth            = options.pcrs_depth.get(),
+                                          .seed             = options.previous ? options.previous.get() : options.restart_seed.get(),
+                                          .no_gp            = options.iterations == 0,
+                                          .wire_ff_per_unit = std::max(reset_wire.horizontal_c, reset_wire.vertical_c) / tech.dbu});
     result.pcrs_stats = std::make_shared<const pcrs::Stats>(pcrs_stats);
   }
   const auto reset_tree
@@ -8603,7 +8580,8 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       const auto& m = tech.macros.at(c.macro);
       const auto  x = ph::rounded_dbu(pose.x_um * tech.dbu, 1e-6), y = ph::rounded_dbu(pose.y_um * tech.dbu, 1e-6);
       const auto  o = ph::parse_orientation(pose.orientation);
-      if ((!pose.master.empty() && pose.master != c.macro) || !x || !y || !ph::orientation_allowed(m, o)) {
+      const bool  oriented = ph::orientation_allowed(m, o) || (m.virtual_proxy && !ph::swaps_axes(o));  // a proxy is synthetic
+      if ((!pose.master.empty() && pose.master != c.macro) || !x || !y || !oriented) {
         throw std::invalid_argument("placement state master, coordinate or orientation is incompatible with " + pose.name);
       }
       const auto original = fixed_input.find(c.name.view());
@@ -9203,7 +9181,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
   // Square proxy macros are packed first and become obstacles for DREAMPlace.
   // Their exact square dimensions need not be a multiple of the standard site.
   // Memories the user placed in the page stay where they put them (fixed); only the others are planned by the floorplan stage.
-  const auto         user_macro_moves = options.gui ? options.gui->macro_moves() : std::map<std::string, std::array<double, 3>>{};
+  const auto         user_macro_moves = options.gui ? options.gui->macro_moves() : std::map<std::string, std::array<double, 4>>{};
   std::vector<Cell*> macros;
   for (auto& c : v.cells) {
     // The floorplan stage plans MOVABLE macros (centroid_candidates ignores fixed ones, so packing the memories first left it
@@ -9318,9 +9296,15 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       if (bx < 0) {
         continue;  // no legal spot near the drop: the macro stays for the normal packing below
       }
+      // The requested mirror or turn, when the master can take it: a virtual memory proxy is synthetic, so any of them
+      // (macro_move accepts only orientations that keep the axes, and the proxy is square).
+      const auto  wanted = static_cast<Orientation>(int(it->second[3]));
+      const auto& master    = tech.macros.at(macro->macro);
       macro->place.x           = bx;
       macro->place.y           = by;
-      macro->place.orientation = Orientation::N;
+      macro->place.orientation = (master.virtual_proxy && !ph::swaps_axes(wanted)) || ph::orientation_allowed(master, wanted)
+                                     ? wanted
+                                     : Orientation::N;
       macro->place.status      = Status::FIXED;  // an obstacle for the proxies packed below ...
       add_pack_obstacle(*macro);
       user_placed.push_back(macro);
@@ -9981,7 +9965,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       }
       return segments;
     };
-    const auto regions = Region_mesh::build(physical, bus_macros, ios, region_options_with_tracks(tech, options.region), tech.dbu);
+    const auto regions = Region_mesh::build(physical, bus_macros, ios, region_options_with_tracks(tech, v.fp, options.region), tech.dbu);
     regions.write(options.output_dir);
     final_regions = regions;
     if (regions.rects.size() < 2) {
@@ -10000,6 +9984,13 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       // pins spaced one 2x2 cell-box apart by default (twice the widest flop): bits stay separable for
       // region-local placement and routing; a crowded edge narrows it
       auto pin_options = options.boundarypins;
+      if (pin_options.max_displacement_um == -1) {
+        const auto site = v.fp.rows.empty() ? tech.sites.end() : tech.sites.find(v.fp.rows.front().site);
+        if (site == tech.sites.end() || !(site->second.height > 0)) {
+          throw std::invalid_argument("boundarypins.max_displacement_um=auto requires a positive placement-row height");
+        }
+        pin_options.max_displacement_um = kBoundaryDisplacementRows * site->second.height;
+      }
       if (pin_options.pitch_um <= 0) {
         double flop = 0;
         for (const auto& cell : v.cells) {
@@ -13151,7 +13142,8 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
                    moved,
                    displacement);
       const bool overflow_left = best != 0;
-      const bool may_grow      = options.allow_increase_area && options.generated_core;
+      const bool may_grow      = options.allow_increase_area && options.generated_core
+                            && options.legroute_area_restarts_used < options.legroute_area_restarts;
       if (!options.output_dir.empty()) {
         std::ofstream report(options.output_dir + "/legroute_plan_selection.json");
         report << std::format(
@@ -13187,10 +13179,14 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
                         selected_report.search_limited,
                         selected_report.topology_disconnected);
       if (!may_grow) {
-        // No core growth (R13): keep the best measured round, report what could not be fixed and legalize it.
+        // No core growth (R13, or legroute.area_restarts used up): keep the best measured round, report what could
+        // not be fixed and legalize it.
         std::fprintf(stderr,
-                     "legroute plan: %s; the core is fixed, so placement continues to the terminal legalizer with that round\n",
-                     why.c_str());
+                     "legroute plan: %s; %s, so placement continues to the terminal legalizer with that round\n",
+                     why.c_str(),
+                     options.allow_increase_area && options.generated_core
+                         ? std::format("legroute.area_restarts ({}) is used up", options.legroute_area_restarts).c_str()
+                         : "the core is fixed");
         return;
       }
       verify_physical_gp_input(design);
@@ -13199,7 +13195,9 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
                    "legroute plan: %s; retained global placement retries at utilization %.3f\n",
                    why.c_str(),
                    utilization);
-      throw Placement_area_restart(utilization, std::min(options.density, utilization + .05));
+      Placement_area_restart restart(utilization, std::min(options.density, utilization + .05));
+      restart.routing = true;
+      throw restart;
     };
     if (live_session && control.checkpoint) {
       session_checkpoint = [&](const dp::Design& physical, int iteration) {
@@ -16144,10 +16142,6 @@ static Result place_requested(hhds::Graph& source, hhds::GraphLibrary& library, 
       || (requested.vanished_memory_local_floor != 0 && !requested.vanished_memory)) {
     throw std::invalid_argument(
         "vanished_memory_local_floor requires vanished_memory and a value from zero to local_density_weight");
-  }
-  if (requested.repair_reset) {
-    throw std::invalid_argument(
-        "pre-CTS clock/reset sizing is disabled; repair_reset must be false (reset_fanout builds the reset tree)");
   }
   validate_region_options(requested.region);
   validate_boundary_pin_options(requested.boundarypins);

@@ -90,7 +90,7 @@ unsigned bypass_stages(hhds::Graph& graph);
 // made in a timing round survives the next build. Unknown domains start by the default policy.
 class Depth_state {
 public:
-  unsigned max_depth = 8;
+  unsigned max_depth = 8;  // 0: no flop levels (synth.place.pcrs.reset_pipeline=false), a balanced buffer tree
   [[nodiscard]] std::optional<unsigned> get(std::string_view domain) const;
   void                                  set(std::string_view domain, unsigned depth);
   // Explicit entry first, else the depth already in the graph, else the default start.
@@ -120,6 +120,23 @@ std::string retarget_for_wns(const Stats& stats, const std::vector<std::string>&
 // exceed the longest hop arrival plus `margin` (merging two hops costs about one more hop). Meant for
 // the last timing iteration, when the placement is settled. Returns the domains that shrank.
 std::vector<std::string> retarget_shrink(const Stats& stats, const Timing_of& timing, double margin, Depth_state& state);
+
+// One placement call's reset distribution, the placer's only entry into this pass. Everything it knows comes
+// in as values (no placement Options): the tree cap (synth.max_fanout), the flow's shared depth decisions
+// (synth.place.pcrs.reset_pipeline=false caps them at 0), the placement the call starts from, and the wire
+// capacitance per DBU the cells are sized for. A tree built before the first placement groups its sinks by
+// instance name; the first call that starts from a placement regroups them by position, once. A call without
+// GP iterations (final legalization, region refinement) cannot place a new tree, so a tree in the graph keeps
+// its depth there.
+struct Place_call {
+  unsigned                   fanout           = 16;
+  Depth_state*               depth            = nullptr;
+  const physical::Floorplan* seed             = nullptr;
+  bool                       no_gp            = false;
+  double                     wire_ff_per_unit = 0;
+};
+Stats distribute_resets(hhds::Graph& graph, const physical::Technology& tech, const liberty::Cell_library& cells,
+                        const Place_call& call);
 
 // A cell minted by this pass, by its instance name (leaf segment after the hierarchy prefix).
 std::string_view instance_leaf(std::string_view instance);

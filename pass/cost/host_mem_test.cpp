@@ -66,28 +66,14 @@ TEST(HostMem, RssTracksATouchedAllocation) {
   EXPECT_GT(after, before + (64 * kMiB)) << "RSS did not follow a 128 MiB touched allocation";
 }
 
-TEST(HostMem, ReserveIsTheLargerOfTwoGiBAndAQuarter) {
-  const auto phys    = livehd::cost::physical_ram_bytes();
-  const auto reserve = livehd::cost::reserve_bytes();
-  EXPECT_EQ(reserve, std::min(std::max<uint64_t>(uint64_t{2} << 30, phys / 4), phys / 2));
-}
-
-// The reserve must never eat the whole host: a <=2 GiB machine would otherwise
-// get budget 0, which every caller reads as "unenforceable, do not gate" --
-// turning the guard OFF on the host most likely to run out of memory.
-TEST(HostMem, ReserveNeverConsumesTheWholeHost) {
+// lhd.ram_max_mb=auto: 80% of the host, never 0 on a real host (0 reads as
+// "unenforceable, do not gate").
+TEST(HostMem, DefaultRamMaxIsEightyPercent) {
   const auto phys = livehd::cost::physical_ram_bytes();
   ASSERT_NE(0U, phys);
-  EXPECT_LT(livehd::cost::reserve_bytes(), phys) << "reserve >= physical would zero the budget";
-  EXPECT_NE(0U, livehd::cost::budget_bytes(0)) << "a real host must always get an enforceable budget";
-}
-
-TEST(HostMem, DefaultBudgetLeavesHeadroom) {
-  const auto phys   = livehd::cost::physical_ram_bytes();
-  const auto budget = livehd::cost::budget_bytes(0);
-  ASSERT_NE(0U, budget);
-  EXPECT_LE(budget, phys - phys / 4) << "the hard ceiling must reserve at least one quarter of RAM";
-  EXPECT_EQ(budget, phys - livehd::cost::reserve_bytes());
+  EXPECT_EQ(livehd::cost::default_ram_max_bytes(), phys / 5 * 4);
+  EXPECT_EQ(livehd::cost::budget_bytes(0), livehd::cost::default_ram_max_bytes());
+  EXPECT_EQ(livehd::cost::configured_budget_bytes(), livehd::cost::default_ram_max_bytes());
 }
 
 TEST(HostMem, ExplicitBudgetWinsAndIsMiB) {
@@ -165,7 +151,7 @@ TEST(HostMem, ChildShareTightensTheInheritedLimit) {
   const pid_t pid = ::fork();
   ASSERT_GE(pid, 0) << "fork failed";
   if (pid == 0) {
-    ::setenv("LHD_MEMORY_BUDGET_MB", "4096", 1);
+    livehd::cost::set_ram_max_mb(4096);
     const uint64_t parent_limit = livehd::cost::install_memory_backstop();  // Darwin: vsize + budget + VA slack
     if (parent_limit == 0) {
       _exit(10);  // could not arm at all
@@ -193,7 +179,7 @@ TEST(HostMem, ChildShareEnforcesTheDividedBudget) {
   const pid_t pid = ::fork();
   ASSERT_GE(pid, 0) << "fork failed";
   if (pid == 0) {
-    ::setenv("LHD_MEMORY_BUDGET_MB", "1024", 1);  // 1 GiB total => 256 MiB per racer
+    livehd::cost::set_ram_max_mb(1024);  // 1 GiB total => 256 MiB per racer
     if (livehd::cost::arm_child_share(4) == 0) {
       _exit(10);
     }
@@ -210,14 +196,21 @@ TEST(HostMem, ChildShareEnforcesTheDividedBudget) {
   EXPECT_EQ(42, WEXITSTATUS(status)) << "a 512 MiB alloc survived a 256 MiB share (10=arm failed, 11=not enforced)";
 }
 
-// The startup wrapper resolves a budget from the env and arms; likewise forked so
-// it never leaves a limit on the test process.
-TEST(HostMem, InstallBackstopArmsFromEnvInChild) {
+// The wrapper resolves lhd.ram_max_mb and arms; a later replace may loosen the
+// startup cap (the option is parsed after it). Forked so it never leaves a
+// limit on the test process.
+TEST(HostMem, InstallBackstopArmsFromRamMaxInChild) {
   const pid_t pid = ::fork();
   ASSERT_GE(pid, 0) << "fork failed";
   if (pid == 0) {
-    ::setenv("LHD_MEMORY_BUDGET_MB", "4096", 1);  // 4 GiB headroom
-    _exit(livehd::cost::install_memory_backstop() != 0 ? 42 : 11);
+    livehd::cost::set_ram_max_mb(4096);  // 4 GiB headroom
+    const uint64_t tight = livehd::cost::install_memory_backstop();
+    if (tight == 0) {
+      _exit(11);
+    }
+    livehd::cost::set_ram_max_mb(8192);
+    const uint64_t loose = livehd::cost::install_memory_backstop(true);
+    _exit(loose > tight ? 42 : 12);
   }
   int status = 0;
   ASSERT_EQ(pid, ::waitpid(pid, &status, 0));
@@ -225,24 +218,23 @@ TEST(HostMem, InstallBackstopArmsFromEnvInChild) {
   EXPECT_EQ(42, WEXITSTATUS(status)) << "install_memory_backstop did not arm under an explicit env budget";
 }
 
-TEST(HostMem, ConfiguredBudgetCannotRaiseThePhysicalCeiling) {
-  for (const bool small : {false, true}) {
-    const pid_t pid = ::fork();
-    ASSERT_GE(pid, 0);
-    if (pid == 0) {
-      ::setenv("LHD_MEMORY_BUDGET_MB", small ? "1" : "2147483647", 1);
-      const auto expected = small ? kMiB : livehd::cost::budget_bytes(0);
-      if (livehd::cost::configured_budget_bytes() != expected) {
-        _exit(10);
-      }
-      // Admission keeps the startup override even if another library mutates
-      // the process environment between regions.
-      ::setenv("LHD_MEMORY_BUDGET_MB", small ? "2147483647" : "1", 1);
-      _exit(livehd::cost::configured_budget_bytes() == expected ? 42 : 11);
+TEST(HostMem, ConfiguredRamMaxIsClampedToPhysical) {
+  const pid_t pid = ::fork();
+  ASSERT_GE(pid, 0);
+  if (pid == 0) {
+    livehd::cost::set_ram_max_mb(1);
+    if (livehd::cost::configured_budget_bytes() != kMiB) {
+      _exit(10);
     }
-    int status = 0;
-    ASSERT_EQ(pid, ::waitpid(pid, &status, 0));
-    ASSERT_TRUE(WIFEXITED(status));
-    EXPECT_EQ(42, WEXITSTATUS(status));
+    livehd::cost::set_ram_max_mb(uint64_t{1} << 40);  // far above any host
+    if (livehd::cost::configured_budget_bytes() != livehd::cost::physical_ram_bytes()) {
+      _exit(11);
+    }
+    livehd::cost::set_ram_max_mb(0);
+    _exit(livehd::cost::configured_budget_bytes() == livehd::cost::default_ram_max_bytes() ? 42 : 12);
   }
+  int status = 0;
+  ASSERT_EQ(pid, ::waitpid(pid, &status, 0));
+  ASSERT_TRUE(WIFEXITED(status));
+  EXPECT_EQ(42, WEXITSTATUS(status));
 }

@@ -24,9 +24,9 @@ lib = Path('inou/lefdef/tests/data').resolve()
 args = ['lhd/lhd', 'synth', str(rtl), '--top', 'top', '-q']
 for setting in (f'synth.liberty={lib}/sky130hd.lib', f'synth.lef={lib}/sky130hd.tlef,{lib}/sky130hd.lef',
                 'compile.specialize_modules=true', 'synth.place=true', 'synth.place.fp=true',
-                'synth.place.chunk.memory_gb=0.0004', 'synth.place.utilization=0.15', 'synth.place.density=0.5',
+                'lhd.ram_budget_mb=0.38147', 'synth.place.utilization=0.15', 'synth.place.density=0.5',
                 'synth.place.iterations=12', 'synth.place.grid.density=8', 'synth.place.io_resynth=0',
-                'synth.opentimer=false', 'synth.place.resize=false', 'synth.place.timing_driven=false'):
+                'synth.timing=false', 'synth.place.resize=false', 'synth.place.timing_driven=false'):
     args.extend(['--set', setting])
 
 log = root / 'gui.log'
@@ -191,7 +191,7 @@ assert actual==updated, [(k,actual[k],updated[k]) for k in actual if actual[k]!=
 def synth_jobs(plan, execute):
     source = {'class':'livehd.synth.chunk_source','id':'core','design':'top','partition':family,
               'top':'core','sources':['cores.v'], 'settings':{'synth.liberty': str(lib/'sky130hd.lib'),
-              'synth.place':'false','synth.opentimer':'false'}}
+              'synth.place':'false','synth.timing':'false'}}
     jobs_file = root/'jobs.json'
     jobs_file.write_text(json.dumps([plan, source]))
     command = ['tools/synth_chunk_implementations', str(jobs_file), '--design','top','--partition', family,
@@ -208,7 +208,7 @@ assert all((Path(j['workdir'])/'synth/net').is_dir() and len(j['instances']) == 
 # A fresh whole design teaches the portable metadata. A subsequent process
 # can use the sample without sharing its workdir, but cannot start a solver if
 # its baseline alone exceeds the requested budget.
-cal_args = [s.replace('chunk.memory_gb=0.0004', 'chunk.memory_gb=4') for s in args]
+cal_args = [s.replace('lhd.ram_budget_mb=0.38147', 'lhd.ram_budget_mb=3814.7') for s in args]
 trained = subprocess.run(cal_args + ['--workdir', str(root/'train')], capture_output=True, text=True, timeout=20)
 assert trained.returncode == 0, trained.stderr
 trained_records = json.loads((root/'train/synth/place/metadata.json').read_text())

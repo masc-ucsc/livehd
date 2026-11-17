@@ -17,7 +17,7 @@ run pass liberty gensim "$LIB" --emit-dir verilog:"$W/models" --workdir "$W/mode
 # readback as well as the fresh mapping and final physical stitching.
 for mode in true false off; do
   option_args=()
-  [ "$mode" = "true" ] || option_args=(--set "pass.abc.unroll_carry=$mode")
+  [ "$mode" = "true" ] || option_args=(--set "synth.unroll_carry=$mode")
   for iteration in 1 2; do
     run pass abc lg:"$W/src" --top "$TOP" --set synth.liberty="$LIB" \
       ${option_args[@]+"${option_args[@]}"} --stats --emit-dir lg:"$W/net" \
@@ -38,9 +38,9 @@ for mode in true false off; do
   done
 done
 if "$LHD" pass abc lg:"$W/src" --top "$TOP" --set synth.liberty="$LIB" \
-    --set pass.abc.unroll_carry=typo --workdir "$W/bad" -q >"$W/bad.log" 2>&1; then
+    --set synth.unroll_carry=typo --workdir "$W/bad" -q >"$W/bad.log" 2>&1; then
   echo "FAIL: invalid carry mode accepted" >&2
   exit 1
 fi
-grep -q 'pass.abc.unroll_carry expects true|false' "$W/bad.log"
+grep -q 'synth.unroll_carry expects true|false' "$W/bad.log"
 echo "PASS: carry expansion modes, physical stitching, cache readback, and mapped equivalence"

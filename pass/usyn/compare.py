@@ -138,7 +138,7 @@ def main():
         shutil.copytree(root / "colored", root / f"{label}-input")
         options = ["--set", f"synth.liberty={liberty}"]
         if args.delay is not None:
-            options += ["--set", f"pass.{mapper}.delay={args.delay}"]
+            options += ["--set", f"synth.delay={args.delay}"]
         effective = dict(settings, **overrides) if mapper == "usyn" else {}
         if mapper == "usyn":
             for key, value in effective.items():

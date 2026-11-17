@@ -11,7 +11,7 @@
 #   pass partition --emit-dir lg:re   (the original-logic twin)
 #   pass liberty gensim test.lib --emit-dir lg:models   (cell behavioural models)
 #   MAPPER=abc: for adder in rca, cska, cla (+ a non-default block_size):
-#       pass abc --set pass.abc.adder=<a> [--set pass.abc.block_size=<n>] -> lg:net
+#       pass abc --set synth.adder=<a> [--set synth.block_size=<n>] -> lg:net
 #       lhd lec --impl lg:net --ref lg:re --lib lg:models   (per region)
 #   MAPPER=usyn: pass usyn (default; residual=false) -> lg:net, lec --lib
 #       as above; pass usyn --set pass.usyn.tmap=none -> lec without --lib
@@ -104,16 +104,16 @@ usyn_report_field() {
 
 if [ "$MAPPER" = abc ]; then
   # Default (rca; block_size ignored). Fully-qualified flag.
-  map_and_lec rca default --set pass.$MAPPER.adder=rca
+  map_and_lec rca default --set synth.adder=rca
   # Carry-skip, auto block_size and an explicit one.
-  map_and_lec cska auto --set pass.$MAPPER.adder=cska
-  map_and_lec cska 4 --set pass.$MAPPER.adder=cska --set pass.$MAPPER.block_size=4
+  map_and_lec cska auto --set synth.adder=cska
+  map_and_lec cska 4 --set synth.adder=cska --set synth.block_size=4
   # Carry-lookahead, auto and explicit. Also exercise the 2h-set_path abbreviation
-  # (`--set adder=cla` after `pass <mapper>` resolves to pass.abc.adder).
+  # (`--set adder=cla` after `pass <mapper>` resolves to synth.adder).
   map_and_lec cla auto --set adder=cla
-  map_and_lec cla 3 --set pass.$MAPPER.adder=cla --set pass.$MAPPER.block_size=3
+  map_and_lec cla 3 --set synth.adder=cla --set synth.block_size=3
   # Fixed Brent-Kung implementation, with every arithmetic trial selector pinned.
-  map_and_lec brent fixed --set pass.abc.adder=brent --set pass.abc.multiplier=array --set pass.abc.barrel=log
+  map_and_lec brent fixed --set synth.adder=brent --set synth.multiplier=array --set synth.barrel=log
   NET_CTRL="$W/net_rca_default"
 else
   # Default native flow (tmap=abc: the selected logical network is only
@@ -143,11 +143,11 @@ else
     run lec --set formal.effort=proof --impl lg:"$W/net_usyn_none" --ref lg:"$W/re" --top "$r" --workdir "$W/wlec_usyn_none"
   done
   echo "LEC PASS (lhd lec): usyn tmap=none logical output, no --lib"
-  map_and_lec usyn rca --set pass.usyn.adder=rca
+  map_and_lec usyn rca --set synth.adder=rca
   map_and_lec usyn prefix --set adder=prefix
   # block_size is the shared registry spelling of adder_block: accepted, with an
   # explicit carry-skip width mapped and proven equivalent.
-  map_and_lec usyn cska4 --set pass.usyn.adder=cska --set block_size=4
+  map_and_lec usyn cska4 --set synth.adder=cska --set block_size=4
   # A flag pass.usyn does not register stays a usage error (exit 2) naming the
   # flag, with no netlist emitted.
   for opt in not_a_usyn_flag=4; do
@@ -225,7 +225,7 @@ mod sn_mul(a:S4, b:S5, c:U3) -> (s:S12@[0], u:U12@[0], m:S12@[0], q:S12@[0], k:S
 PRP
   run compile "$S/sn_mul.prp" --top sn_mul.sn_mul --emit-dir lg:"$S/lg" --workdir "$S/compile"
   run pass abc --top sn_mul.sn_mul lg:"$S/lg" --emit-dir lg:"$S/net" --set synth.liberty="$LIB" \
-    --set pass.abc.adder=brent --set pass.abc.multiplier=tdm --set pass.abc.barrel=log --workdir "$S/map"
+    --set synth.adder=brent --set synth.multiplier=tdm --set synth.barrel=log --workdir "$S/map"
   run pass partition --top sn_mul.sn_mul lg:"$S/lg" --emit-dir lg:"$S/re" --workdir "$S/partition"
   run lec --set formal.effort=proof --impl lg:"$S/net" --ref lg:"$S/re" --lib lg:"$W/models" --top sn_mul.sn_mul --workdir "$S/lec"
   python3 - "$S/map/qor.json" <<'JSON'

@@ -197,8 +197,9 @@ cache hit is 0. Pretty mode renders each object on one `sta[stats]` line.
 - Primary inputs arrive at 0 with slew 0 unless an `.sdc` overrides them
   (`create_clock -period`, `set_input_delay/-transition`, `set_output_delay`;
   `[get_ports X]`, `[all_inputs]` and `[all_outputs]` targeting).
-- `pass.opentimer.io_load` sets primary-output load in fF; a negative value
-  preserves the timer default. The load participates in the STA cache key.
+- `synth.io_load` (shared with pass.abc and pass.usyn) sets primary-output load
+  in fF; `auto` = 16 input capacitances of the Liberty's smallest NOT cell (a
+  4xFO4 load). The load participates in the STA cache key.
   Outputs attach to resolved driver nets after wiring-node traversal, so output
   aliases and internal readers all contribute load to their shared producer.
 - Timing JSON includes physical cell area/count, native-state and opaque-logic

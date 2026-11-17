@@ -44,7 +44,7 @@ void validate_region_options(const Region_options& o) {
   if (o.cut != "macro" && o.cut != "mincut" && o.cut != "ratio" && o.cut != "ratio_through") {
     throw std::invalid_argument("region cut must be macro, mincut, ratio or ratio_through");
   }
-  if (!o.max_cells || o.max_cells > 1000000 || !std::isfinite(o.merge_um) || o.merge_um < 0) {
+  if (!o.max_cells || o.max_cells > 1000000 || !std::isfinite(o.merge_um) || (o.merge_um < 0 && o.merge_um != -1)) {
     throw std::invalid_argument("invalid region cell cap/merge distance");
   }
 }
@@ -126,6 +126,9 @@ Region_mesh Region_mesh::build(const dp::Design& d, const std::vector<int>& macr
   using Clock      = std::chrono::steady_clock;
   const auto start = Clock::now();
   validate_region_options(options);
+  if (options.merge_um < 0) {
+    throw std::invalid_argument("region mesh needs a resolved merge distance (merge_um=auto is per technology)");
+  }
   d.validate();
   if (!(std::isfinite(dbu) && dbu > 0)) {
     throw std::invalid_argument("invalid region mesh units");

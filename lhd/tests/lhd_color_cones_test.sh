@@ -163,7 +163,7 @@ mkdir -p "$D"
 [ -f "$LIB" ] || fail "missing liberty $LIB"
 "$LHD" synth "inou/prp/tests/pyrope/hier_seq.prp" --top hier_seq.top --workdir "$D/w" \
    --set synth.liberty="$LIB"  --set color.synth.max_gate=40 \
-   --set synth.opentimer=false \
+   --set synth.timing=false \
    -q --result-json "$D/r.json" || fail "lhd synth with cones -> $(cat "$D/r.json" 2>/dev/null)"
 grep -q '"regions":' "$D/w/synth/qor.json" || fail "lhd synth --set color.synth.mode=cones produced no abc regions"
 python3 - "$D/w/synth/qor.json" <<'EOF' || fail "lhd synth cones qor.json has no mapped regions"
@@ -222,7 +222,7 @@ LC_ALL=C grep -raq '"ctrl_cones":false' "$D/lg_off" || fail 'explicit ctrl_cones
 run pass partition lg:"$D/lg" --top ctrl_shared --emit-dir lg:"$D/part" --workdir "$D/w3"
 run compile lg:"$D/part" --top ctrl_shared --emit verilog:"$D/post.v" --workdir "$D/w4"
 run lec --set formal.effort=proof --impl verilog:"$D/post.v" --ref verilog:"$D/ref.v" --top ctrl_shared --workdir "$D/lec"
-run synth "$D/ref.v" --top ctrl_shared --workdir "$D/syn" --set synth.liberty="$LIB" --set synth.opentimer=false  --set color.synth.max_gate=40 --emit verilog:"$D/mapped.v"
+run synth "$D/ref.v" --top ctrl_shared --workdir "$D/syn" --set synth.liberty="$LIB" --set synth.timing=false  --set color.synth.max_gate=40 --emit verilog:"$D/mapped.v"
 python3 - "$D/syn/synth/qor.json" <<'PY' || fail 'missing control-tier QoR rows'
 import json,sys
 q=json.load(open(sys.argv[1]));assert any(r['ctrl'] for r in q['regions'])
@@ -263,7 +263,7 @@ run pass color synth --set color.synth.min_color_nodes=0 lg:"$D/lg" --top ctrl_f
 run pass partition lg:"$D/lg" --top ctrl_families --emit-dir lg:"$D/part" --workdir "$D/w3"
 run compile lg:"$D/part" --top ctrl_families --emit verilog:"$D/post.v" --workdir "$D/w4"
 run lec --set formal.effort=proof --impl verilog:"$D/post.v" --ref verilog:"$D/ref.v" --top ctrl_families --workdir "$D/lec"
-run synth "$D/ref.v" --top ctrl_families --workdir "$D/syn" --set synth.liberty="$LIB" --set synth.opentimer=false   --set color.synth.max_gate=40 --emit verilog:"$D/mapped.v"
+run synth "$D/ref.v" --top ctrl_families --workdir "$D/syn" --set synth.liberty="$LIB" --set synth.timing=false   --set color.synth.max_gate=40 --emit verilog:"$D/mapped.v"
 cat "$W/ctrl_shared/models.v" >> "$D/mapped.v"
 run lec --set formal.effort=proof --impl verilog:"$D/mapped.v" --ref verilog:"$D/ref.v" --top ctrl_families --workdir "$D/mapped_lec"
 echo 'PASS: mux chains and shared mux/enable control groups remain equivalent after partition and ABC'
@@ -290,7 +290,7 @@ run pass color synth --set color.synth.min_color_nodes=0 lg:"$D/lg" --top ctrl_n
 run pass partition lg:"$D/lg" --top ctrl_normalizer --emit-dir lg:"$D/part" --workdir "$D/w3"
 run compile lg:"$D/part" --top ctrl_normalizer --emit verilog:"$D/post.v" --workdir "$D/w4"
 run lec --set formal.effort=proof --impl verilog:"$D/post.v" --ref verilog:"$D/ref.v" --top ctrl_normalizer --workdir "$D/lec"
-run synth "$D/ref.v" --top ctrl_normalizer --workdir "$D/syn" --set synth.liberty="$LIB" --set synth.opentimer=false --emit verilog:"$D/mapped.v"
+run synth "$D/ref.v" --top ctrl_normalizer --workdir "$D/syn" --set synth.liberty="$LIB" --set synth.timing=false --emit verilog:"$D/mapped.v"
 cat "$W/ctrl_shared/models.v" >> "$D/mapped.v"
 run lec --set formal.effort=proof --impl verilog:"$D/mapped.v" --ref verilog:"$D/ref.v" --top ctrl_normalizer --workdir "$D/mapped_lec"
 echo 'PASS: default mux groups preserve normalizer wiring through partition and ABC'

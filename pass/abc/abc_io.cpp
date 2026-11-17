@@ -30,8 +30,6 @@ synth::Io_mapper make_mapper(const std::map<std::string, std::string>& values) {
   integer("max_fanout", options.max_fanout);
   integer("area_relax", options.area_relax_pct);
   integer("large_ge", options.large_ge);
-  integer("time_budget_ms", options.time_budget_ms);
-  integer("memory_budget_mb", options.memory_budget_mb);
   auto             shared_options = std::make_shared<Map_options>(options);
   auto             backend        = std::make_shared<Abc_backend>(options);
   synth::Io_mapper result;

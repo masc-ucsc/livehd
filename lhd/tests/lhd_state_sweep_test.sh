@@ -124,7 +124,7 @@ fi
 if [ "$part" = all ] || [ "$part" = validation ]; then
 
 # A misspelt pass-level switch is an error, not a silent "off" that keeps the dead state.
-for spelling in pass.usyn.state_sweep pass.usyn.merge_registers; do
+for spelling in synth.state_sweep synth.merge_registers; do
   if "$LHD" synth --result-json "$W/bad.json" --reader slang --top sweep --workdir "$W/bad" --emit verilog:"$W/bad.v" \
     --set synth.mapper=usyn --set pass.usyn.tmap=none --set "$spelling=maybe" -- "$SRC" > "$W/bad.log" 2>&1; then
     fail "$spelling=maybe was accepted"

@@ -14,7 +14,7 @@ endmodule
 RTL
 LIB=inou/prp/tests/abc/test.lib
 "$LHD" synth "$W/quadratic.v" --top quadratic --set synth.liberty="$LIB" \
-  --set synth.opentimer=false --emit verilog:"$W/net.v" --workdir "$W/synth" -q
+  --set synth.timing=false --emit verilog:"$W/net.v" --workdir "$W/synth" -q
 "$LHD" pass liberty gensim "$LIB" --emit verilog:"$W/models.v" --workdir "$W/gensim" -q
 cat "$W/net.v" "$W/models.v" > "$W/impl.v"
 "$LHD" compile "$W/impl.v" --top quadratic --emit-dir lg:"$W/impl" --workdir "$W/reload" -q

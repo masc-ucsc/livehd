@@ -413,6 +413,7 @@ TEST(BoundaryPins, LiveSessionPreservesFillersAcrossOrderingAndRelease) {
   options.order             = true;
   options.settle_iterations = 20;
   options.iterations        = 50;
+  options.max_displacement_um = 20;
   Boundary_pins boundary(boxes, rsmt, 1, options);
   boundary.refine(d, base, &session, names);
   EXPECT_GT(boundary.pin_model().anchors.size(), 0u);

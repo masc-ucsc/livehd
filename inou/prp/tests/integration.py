@@ -81,7 +81,7 @@ def synth_one(lhd, top, ref, meta, base, tech):
         dest.mkdir(parents=True)
         lib = Path('inou/prp/tests/abc') / (lib_name + '.lib')
         run([lhd, 'synth', '-d', 'pass.abc', 'lg:' + str(base / 'source'), '--top', top,
-             '--set', 'synth.liberty=' + str(lib), '--set', 'synth.opentimer=false',
+             '--set', 'synth.liberty=' + str(lib), '--set', 'synth.timing=false',
              '--set', 'lhd.jobs=1', '--set', 'synth.mapper=' + tech,
              *settings(meta.get('synth_set', '')),
              '--emit-dir', 'lg:' + str(dest / 'mapped'), '--emit', 'verilog:' + str(dest / 'mapped.v'),

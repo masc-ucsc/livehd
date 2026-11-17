@@ -314,6 +314,14 @@ struct coloring_info_t {
 };
 inline constexpr coloring_info_t coloring_info{};
 
+// On a decomposed def's wrapper: the nested synthesis groups as JSON [[child_region, parent_region], ...], deepest
+// first. pass/partition/nest_regions.hpp moves each child region into its parent region's module and clears it.
+struct region_nesting_t {
+  using value_type = std::string;
+  using storage    = hhds::flat_storage;
+};
+inline constexpr region_nesting_t region_nesting{};
+
 // Serialized simulation-only initialization program (core/sim_program.hpp),
 // stored on the module input node. It has no circuit-net references.
 struct simulation_init_t {
@@ -575,6 +583,8 @@ inline constexpr Attr_kind attr_kind<hier_color_t> = Attr_kind::node;
 template <>
 inline constexpr Attr_kind attr_kind<coloring_info_t> = Attr_kind::node;
 template <>
+inline constexpr Attr_kind attr_kind<region_nesting_t> = Attr_kind::node;
+template <>
 inline constexpr Attr_kind attr_kind<simulation_init_t> = Attr_kind::node;
 template <>
 inline constexpr Attr_kind attr_kind<legalize_inlined_t> = Attr_kind::node;
@@ -671,6 +681,7 @@ inline constexpr bool carry_on_rebuild<placement_block_names_t> = false;
   X(native_comb_boundary)           \
   X(hier_color)                     \
   X(coloring_info)                  \
+  X(region_nesting)                 \
   X(simulation_init)                \
   X(legalize_inlined)               \
   X(comb_reach)                     \

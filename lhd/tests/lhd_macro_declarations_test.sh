@@ -39,7 +39,7 @@ for reader in yosys-verilog yosys-slang; do
       --emit-dir "lg:$W/$reader-lg" --workdir "$W/$reader-compile" >"$W/$reader-compile.log" 2>&1 \
       || { cat "$W/$reader-compile.log"; exit 1; }
     "$LHD" synth "lg:$W/$reader-lg" --top macro_declarations \
-      --set synth.liberty=inou/prp/tests/abc/test.lib --set synth.opentimer=false \
+      --set synth.liberty=inou/prp/tests/abc/test.lib --set synth.timing=false \
       --emit verilog:"$W/$reader.v" --workdir "$W/$reader" > "$W/$reader.log" 2>&1 \
       || { cat "$W/$reader.log"; exit 1; }
     if [ "$temperature" = cold ]; then

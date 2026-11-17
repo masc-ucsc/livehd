@@ -2,6 +2,7 @@
 // Public engine initialization, option discovery, and command dispatch.
 
 #include <algorithm>
+#include <cstdlib>
 #include <format>
 #include <vector>
 
@@ -73,6 +74,17 @@ std::string canonical_set_key(std::string_view key, std::string_view ctx) {
   while (!prefix.empty()) {
     std::string candidate = prefix + "." + std::string{key};
     if (names_a_pass(candidate)) {
+      // An abbreviation that lands on a mapper label shared through synth.<flag> (`--set adder=cla` after
+      // `lhd pass abc`, `--set synth.delay=1` under `lhd synth`) means that one spelling; a fully qualified
+      // pass.abc.<flag> keeps its retired-option error.
+      const auto dot  = candidate.rfind('.');
+      const auto pass = std::string_view{candidate}.substr(0, dot);
+      const auto flag = std::string_view{candidate}.substr(dot + 1);
+      if ((pass == "pass.abc" || pass == "pass.usyn")
+          && (flag == "delay" || std::find(std::begin(kSynthMapperLabels), std::end(kSynthMapperLabels), flag)
+                                     != std::end(kSynthMapperLabels))) {
+        return "synth." + std::string{flag};
+      }
       return candidate;
     }
     auto pos = prefix.rfind('.');
@@ -172,6 +184,17 @@ std::vector<Set_option> list_set_options() {
                            "0",
                            "maximum concurrent jobs across formal, LLVM compilation and USYN; 0 selects affinity-aware CPUs; load "
                            "and measured memory can lower admission"});
+  out.push_back(Set_option{"lhd.ram_max_mb",
+                           "lhd",
+                           "auto",
+                           "hard RAM ceiling of the whole process tree in MiB, checked against the MEASURED footprint (never a "
+                           "prediction) and armed as the RLIMIT_AS backstop: work over it stops with a clean TIMEOUT-memory "
+                           "instead of driving the machine into swap. auto = 80% of physical (or cgroup) RAM"});
+  out.push_back(Set_option{"lhd.ram_budget_mb",
+                           "lhd",
+                           "8192",
+                           "soft RAM target in MiB that sizes work units (placement chunks); never a refusal -- lhd.ram_max_mb is "
+                           "the limit. 0 = no split by memory"});
   out.push_back(Set_option{"lhd.seed",
                            "lhd",
                            "0",
@@ -236,7 +259,8 @@ std::vector<Set_option> list_set_options() {
                            "true|false: read every constant bit that is unknown (x: an undriven output, an unconnected input, "
                            "an explicit 'x) as 0 right after the first cprop+bitwidth, like Yosys `setundef -zero` run before "
                            "optimization instead of after it, so constants fold across what were x-driven ports. A legal "
-                           "refinement of a don't-care"});
+                           "refinement of a don't-care. `lhd sim` also zero-fills every remaining `?` literal bit (testbench "
+                           "included) instead of drawing it from the seeded PRNG (false: drawn once per literal per run)"});
   out.push_back(Set_option{"compile.sweep",
                            "compile",
                            "false",
@@ -275,7 +299,7 @@ std::vector<Set_option> list_set_options() {
   }
   // The `synth.*` command namespace (synth_command), same single-source rule.
   for (const auto& s : kSynthSetOptions) {
-    if (std::string_view{s.help}.starts_with("DEPRECATED")) {
+    if (std::string_view{s.help}.starts_with("DEPRECATED") || std::string_view{s.help}.starts_with("INTERNAL")) {
       continue;  // accepted spelling, canonical name listed instead
     }
     auto help = std::string{s.help};
@@ -334,6 +358,11 @@ void warn_no_artifacts(const Options& opts) {
 }  // namespace
 
 void run_engine_command(Options& opts, Result& res) {
+  if (const char* env = std::getenv("LHD_MEMORY_BUDGET_MB"); env != nullptr && *env != '\0') {
+    throw Lhd_error{"usage",
+                    "the LHD_MEMORY_BUDGET_MB environment variable was removed",
+                    std::format("use --set lhd.ram_max_mb={} (the measured RAM ceiling; auto = 80% of the machine)", env)};
+  }
   validate_emits(opts);
   validate_dumps(opts);
   check_known_set_passes(opts);  // --set AND --config table names: a typo'd pass must error, not no-op

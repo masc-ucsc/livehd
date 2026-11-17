@@ -1,7 +1,7 @@
 // Registers whose clock is computed INSIDE the module that holds them (no hierarchy
 // boundary to make it a region input): a latch-based gate `clk & latch`, and a plain
 // combinational derived clock. With no integrated clock-gate cell in the Liberty they stay
-// native flops (derived-clock-native); with pass.abc.derived_clock=true they map to DFF
+// native flops (derived-clock-native); with synth.derived_clock=true they map to DFF
 // cells whose clock pin the mapped logic drives (lhd_abc_derived_clock_test.sh).
 module abc_derived_clock(input clk, input rst_n, input en0, input en1, input [3:0] d,
                          output [3:0] qa, output [3:0] qb, output [3:0] qc);

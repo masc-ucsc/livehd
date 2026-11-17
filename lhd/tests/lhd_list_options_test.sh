@@ -50,7 +50,7 @@ for obsolete in roll roll_arrays roll_cap unroll; do
     >"$W/removed_$obsolete.json" 2>&1 && fail "compile.upass.$obsolete must be rejected"
   grep -q 'compile.unroll' "$W/removed_$obsolete.json" || fail "missing canonical loop option hint for $obsolete"
 done
-echo "$out" | grep -q '"name":"pass.abc.unroll_carry","method":"pass.abc","default":"true"' \
+echo "$out" | grep -q '"name":"synth.unroll_carry","method":"synth","default":"true"' \
   || fail "ABC carry expansion default missing: $out"
 # Compile-only passes live under compile.*; lec/pass passes keep their own namespace.
 echo "$out" | grep -q '"name":"compile.bitwidth.max_iterations"' || fail "compile.bitwidth.* missing: $out"
@@ -92,7 +92,7 @@ echo "$out" | grep -q '"name":"pass.opentimer.top"' && fail "pass.opentimer.top 
 echo "$out" | grep -q '"name":"lhd.top"' || fail "lhd.top missing: $out"
 echo "$out" | grep -q '"name":"lhd.stats"' || fail "lhd.stats missing: $out"
 # Incremental partition defaults and the separate per-color memory target.
-for entry in 'pass.color.synth.min_ge:500' 'pass.color.synth.max_ge:5000' 'pass.color.synth.max_gate:30000' 'pass.abc.memory_budget_mb:16384'; do
+for entry in 'pass.color.synth.min_ge:500' 'pass.color.synth.max_ge:5000' 'pass.color.synth.max_gate:30000' 'lhd.ram_budget_mb:8192'; do
   flag=${entry%:*}
   expected=${entry##*:}
   description=$("$LHD" describe "$flag") || fail "cannot describe $flag"
@@ -108,7 +108,7 @@ echo "$out" | grep -q '"name":"pass.abc.cache"' && fail "pass.abc.cache must be 
 echo "$out" | grep -q '"name":"formal.cache"' && fail "formal.cache must be gone (use lhd.incremental): $out"
 # The synth.* command namespace (kSynthSetOptions), like sim.*.
 echo "$out" | grep -q '"name":"synth.liberty","method":"synth","default":""' || fail "synth.liberty missing/wrong: $out"
-echo "$out" | grep -q '"name":"synth.opentimer","method":"synth","default":"true"' || fail "synth.opentimer missing/wrong: $out"
+echo "$out" | grep -q '"name":"synth.timing","method":"synth","default":"true"' || fail "synth.timing missing/wrong: $out"
 echo "$out" | grep -q '"name":"compile.prp_writer.debug"' || fail "compile.prp_writer.debug missing: $out"
 echo "$out" | grep -q '"name":"formal.solver"' || fail "formal.solver (shared formal vocabulary) missing: $out"
 echo "$out" | grep -q '"name":"formal.assume_check","method":"pass.lec","default":"true"' \
@@ -267,7 +267,7 @@ id_b=$(sed 's/.*"run_id":"\([^"]*\)".*/\1/' "$W/r9b.json")
 help=$("$LHD" pass abc --help --diag-fmt pretty 2>&1)
 echo "$help" | grep -qF 'options (--set pass.abc.flag=value; `lhd describe pass.abc.flag` for each listed flag option in `lhd list options pass.abc`):' \
   || fail "pass abc --help: namespaced options header missing -> $help"
-echo "$help" | grep -q 'pass.abc.adder=' || fail "pass abc --help: the options block must list a registered flag -> $help"
+echo "$help" | grep -q 'pass.abc.area_flow=' || fail "pass abc --help: the options block must list a registered flag -> $help"
 echo "$help" | grep -q 'more; `lhd list options pass.abc`' || fail "pass abc --help: >5 flags must show a '... more' pointer -> $help"
 "$LHD" lec --help --diag-fmt pretty 2>&1 | grep -q 'options (--set formal.flag=value;' || fail "lec --help: formal-namespaced options header missing"
 

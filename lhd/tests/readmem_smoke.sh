@@ -44,7 +44,7 @@ PRP
 # Run from another directory: relative image paths belong to the source file.
 cd "$W/cwd"
 if [ "$part" = all ] || [ "$part" = native ] || [ "$part" = runtime ]; then
-"$LHD" sim "$W/load.prp" --workdir "$W/run" --set sim.init_zero=true --set sim.unknown_zero=true --result-json "$W/result.json"
+"$LHD" sim "$W/load.prp" --workdir "$W/run" --set sim.init_zero=true --set compile.unknown_zero=true --result-json "$W/result.json"
 python3 - "$W/result.json" <<'PY'
 import json,sys
 r=json.load(open(sys.argv[1])); assert r['status']=='pass',r
@@ -92,7 +92,7 @@ fi
 if [ "$part" = all ] || [ "$part" = imports ]; then
 for kind in ln lg; do
   { printf 'const load = import("%s:load.load")\n' "$kind"; sed -n '/^test preload/,$p' "$W/load.prp"; } > "$W/imported.prp"
-  "$LHD" sim "$W/imported.prp" "$kind:$W/$kind" --workdir "$W/imported-run" --set sim.init_zero=true --set sim.unknown_zero=true --result-json "$W/$kind.json"
+  "$LHD" sim "$W/imported.prp" "$kind:$W/$kind" --workdir "$W/imported-run" --set sim.init_zero=true --set compile.unknown_zero=true --result-json "$W/$kind.json"
 done
 fi
 # Slang imports both system tasks into the same startup representation.
@@ -113,7 +113,7 @@ SV
 "$LHD" compile "$W/slang.sv" --reader slang --top load --workdir "$W/sv-compile" --emit-dir lg:"$W/sv-lg" --emit diagnostics:"$W/slang.jsonl" --result-json "$W/slang.json"
 if grep -q 'initial-ignored' "$W/slang.jsonl"; then echo 'Slang ignored file preload' >&2; exit 1; fi
 { printf 'const load = import("lg:load")\n'; sed -n '/^test preload/,$p' "$W/load.prp"; } > "$W/sv-tb.prp"
-"$LHD" sim "$W/sv-tb.prp" "lg:$W/sv-lg" --workdir "$W/sv-run" --set sim.init_zero=true --set sim.unknown_zero=true --result-json "$W/sv-sim.json"
+"$LHD" sim "$W/sv-tb.prp" "lg:$W/sv-lg" --workdir "$W/sv-run" --set sim.init_zero=true --set compile.unknown_zero=true --result-json "$W/sv-sim.json"
 # Unsupported placement/bounds fail explicitly instead of ignoring the load.
 for shape in bounds conditional mixed; do
   if [ "$shape" = bounds ]; then
@@ -152,7 +152,7 @@ import json,sys
 assert json.load(open(sys.argv[1]))['lec']['verdict']=='proven-full'
 assert json.load(open(sys.argv[2]))['lec']['verdict']=='refuted-cex'
 PYTHON
-"$LHD" synth "$W/state.prp" --top state --set synth.liberty="$LIB" --set synth.opentimer=false --workdir "$W/synth" --emit verilog:"$W/mapped.v" --result-json "$W/synth.json" > "$W/synth.log" 2>&1
+"$LHD" synth "$W/state.prp" --top state --set synth.liberty="$LIB" --set synth.timing=false --workdir "$W/synth" --emit verilog:"$W/mapped.v" --result-json "$W/synth.json" > "$W/synth.log" 2>&1
 grep -q 'blackbox, keep' "$W/mapped.v"
 grep -q '\.INIT_FILE(' "$W/mapped.v"
 # Optional independent simulation of the emitted Verilog.

@@ -8,7 +8,7 @@ run() { "$LHD" "$@" -q; }
 run compile inou/prp/tests/equiv/loop_break_leftover.prp --emit-dir lg:"$W/source" --workdir "$W/c"
 # Partition uses its existing private occurrence expansion; the source library
 # remains compact. Recompilation must preserve every constant carry operand.
-run pass partition lg:"$W/source" --top top --set pass.partition.flatten=true \
+run pass partition lg:"$W/source" --top top --set synth.flatten=true \
   --emit-dir lg:"$W/partitioned" --workdir "$W/p"
 run compile lg:"$W/partitioned" --top top --emit-dir lg:"$W/cleaned" --emit verilog:"$W/cleaned.v" --workdir "$W/cleanup"
 run lec --set formal.effort=proof --impl lg:"$W/cleaned" --ref pyrope:inou/prp/tests/equiv/loop_break_leftover_1.prp \
@@ -17,7 +17,7 @@ run lec --set formal.effort=proof --impl lg:"$W/cleaned" --ref pyrope:inou/prp/t
 # ABC must specialize its own private iteration bodies before mapping: the
 # compact source stays intact while constant indices and break conditions fold.
 LIB=inou/prp/tests/abc/test.lib
-run synth lg:"$W/source" --top top --set synth.liberty="$LIB" --set synth.opentimer=false \
+run synth lg:"$W/source" --top top --set synth.liberty="$LIB" --set synth.timing=false \
   --emit-dir lg:"$W/mapped" --workdir "$W/synth" --result-json "$W/synth.json"
 python3 - "$W/synth.json" <<'PYQ'
 import json,sys

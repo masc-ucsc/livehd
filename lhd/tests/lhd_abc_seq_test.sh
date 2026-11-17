@@ -432,7 +432,7 @@ if selected qn; then
       || fail "qn user flow: more read-back inverters than DFFNx1 cells: $(count "$QNV" "__dinv(")"
     echo "PASS: QN-only DFF cell under a user flow absorbs the inversion on read-back, LEC proven"
   fi
-  run_qn timing abc_resetless_sync abc_resetless_sync --set pass.$MAPPER.delay=1000
+  run_qn timing abc_resetless_sync abc_resetless_sync --set synth.delay=1000
   has "$QNV" "DFFNx1 " || fail "qn timing flow: DFFNx1 not mapped"
   echo "PASS: timing flow preserves QN register semantics, LEC proven"
 

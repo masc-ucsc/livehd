@@ -48,6 +48,8 @@ struct Constraints {
   // Explicit boundaries alone are useful observations, not certified Fmax.
   bool                                          complete = false;
   std::vector<std::string>                      unsupported;
+  // Load on an output port the SDC gives no set_load (synth.io_load, shared with OpenTimer and the mappers).
+  double                                        default_output_load_ff = 0;
 };
 // A capture endpoint's share of its clock period: the setup requirement is
 // fraction * period - uncertainty - setup, and the endpoint's period estimate

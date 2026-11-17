@@ -144,20 +144,18 @@ std::string to_text(const Diagnostic& d, const hhds::Source_locator* sl);
 // ---------------------------------------------------------------------------
 // Log levels and the `-d` word filter.
 //
-// Default output is errors and warnings plus very short OUTCOME lines. Anything
-// chattier is opt-in and costs nothing when it is off:
+// Info-severity records reach stderr ONLY when selected by `-d`, including
+// stat/outcome records and diagnostics replayed from a cache. Errors, warnings
+// and notes do not require `-d`. Collection for diagnostic files is separate:
 //
-//   outcome(...)  always shown: one short line about what the run decided or
-//                 produced (a fallback taken, a counterexample file written).
-//   stat(...)     a larger summary: shown with `--stats` (or a matching `-d`).
-//   info(...)     detailed log: shown ONLY when a `-d WORD` matches its pass.
+//   outcome(...)  always collected: one short line about what the run decided.
+//   stat(...)     collected with `--stats` or a matching `-d`.
+//   info(...)     built and collected only with a matching `-d`.
 //
-// `-d WORD[,WORD...]` (repeatable) names categories. A category is the dotted
-// `pass` string every record already carries (`pass.abc`, `synth.place`,
-// `pass.semdiff`, `lhd.sim`). A WORD matches when it is the whole name or whole
-// dotted segments of it: `synth.place` matches `synth.place` and
-// `synth.place.legalize`; `abc` matches `pass.abc`; `all` or `*` matches
-// everything. Without any `-d` the filter is one relaxed atomic load.
+// `-d [WORD[,WORD...]]` (repeatable) selects a dotted pass name or message code.
+// A WORD matches whole dotted segments: `abc` matches `pass.abc`, `synth.place`
+// matches `synth.place.legalize`; `aegraph-rule` selects that exact record code.
+// Bare `-d`, `all`, or `*` selects everything. Without `-d` stderr has no info.
 //
 // A call site that would do real work to build its record (a loop over rules,
 // a to_string per attribute) must guard it:
@@ -184,8 +182,13 @@ bool                     debug_match(std::string_view pass);
   return detail::g_debug_any.load(std::memory_order_relaxed) && detail::debug_match(pass);
 }
 
-// True for a stat-level record: `--stats` or a matching `-d`.
-[[nodiscard]] inline bool stat_enabled(std::string_view pass) { return stats_enabled() || enabled(pass); }
+// A record may also be selected by its stable diagnostic code.
+[[nodiscard]] inline bool enabled(std::string_view pass, std::string_view code) { return enabled(pass) || enabled(code); }
+
+// True for collecting a stat-level record: `--stats` or a matching `-d`.
+[[nodiscard]] inline bool stat_enabled(std::string_view pass, std::string_view code = {}) {
+  return stats_enabled() || enabled(pass, code);
+}
 
 // Process-global diagnostic collector. Mirrors how `Pass::eprp` is a static
 // singleton reachable from every pass.
@@ -462,20 +465,20 @@ inline Builder warn(std::string_view pass, std::string_view code, std::string_vi
 }
 
 // A standalone detail record (below warning: never an error, never an exit-code
-// change). Shown ONLY when a `-d` word matches `pass` (see the filter block above);
+// change). Shown ONLY when a `-d` word matches `pass` or `code` (see the filter block above);
 // disabled otherwise, and then it builds nothing. Chain `.verdict()`/`.engine()`/
 // `.duration_ms()`/`.attr()` for the machine-parseable payload, then `.emit()`.
 inline Builder info(std::string_view pass, std::string_view code, std::string_view category) {
-  return Builder(Severity::info, pass, code, category, enabled(pass));
+  return Builder(Severity::info, pass, code, category, enabled(pass, code));
 }
 
-// A larger summary: shown with `--stats` or a matching `-d`.
+// A larger summary: collected with `--stats` or a matching `-d`; stderr requires `-d`.
 inline Builder stat(std::string_view pass, std::string_view code, std::string_view category) {
-  return Builder(Severity::info, pass, code, category, stat_enabled(pass));
+  return Builder(Severity::info, pass, code, category, stat_enabled(pass, code));
 }
 
-// A very short outcome line, always shown (a fallback that was taken, a file
-// that was written). Not for per-item progress or counts: use stat()/info().
+// A very short outcome, always collected (a fallback taken, a file written).
+// Stderr requires a matching `-d`. For per-item progress/counts use stat()/info().
 inline Builder outcome(std::string_view pass, std::string_view code, std::string_view category) {
   return Builder(Severity::info, pass, code, category);
 }

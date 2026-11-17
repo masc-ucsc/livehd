@@ -2,6 +2,7 @@
 #pragma once
 
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <optional>
 #include <set>
@@ -233,6 +234,34 @@ std::optional<Dff_cell> find_dff_cell(const std::string& lib_files, std::string_
 // otherwise sit on the weakest drive (measured br_amba_axi2axil 542 -> 637
 // ps on x1 alone; x3 574).
 std::vector<Dff_cell> find_dff_ladder(const std::string& lib_files, const Dff_cell& base);
+
+// The technology proxy the built-in physical defaults are expressed in, so
+// that no default is a number from one PDK (`auto` options, generated SRAM
+// macros): the smallest-area single-input NOT cell and the register-mapping
+// flop (find_dff_cell). The NOT's FO4 delay is the Comb_cell first-slew
+// estimate intrinsic + R * 4 * C_in, a proxy, not an STA value. A value the
+// Liberty does not characterize stays zero / nullopt; callers refuse or fall
+// back explicitly, never to another PDK's constant.
+struct Tech_proxy {
+  std::string           not_cell;
+  double                not_area   = 0;  // Liberty area units (um2 in every PDK the flows use)
+  double                not_cin_ff = 0;  // the largest input capacitance entry
+  double                not_fo4_ps = 0;  // 0 when the NOT has no delay tables or input capacitance
+  std::string           flop_cell;       // empty when the Liberty has no plain posedge flop
+  double                flop_area = 0, flop_clk_to_q_ps = 0, flop_setup_ps = 0;
+  std::optional<double> voltage;         // library nom_voltage
+};
+// nullopt (with the reason in `why`) only when the Liberty has no NOT cell with an area.
+std::optional<Tech_proxy> tech_proxy(const std::string& lib_files, std::string* why = nullptr);
+
+// The library's `default_wire_load` model: wire capacitance and resistance per unit length (fF/um, ohm/um; the
+// library's capacitive_load_unit and pulling_resistance_unit, 1 kohm when absent) and the fanout -> length table
+// (um), extended past its last entry by `slope`. nullopt when the Liberty names no default model.
+struct Wire_load_model {
+  double                     cap_ff_um = 0, res_ohm_um = 0, slope_um = 0;
+  std::map<unsigned, double> length_um;
+};
+std::optional<Wire_load_model> default_wire_load(const std::string& lib_files);
 
 // One scan, both answers. With an explicit `prefer` the ladder is just that
 // cell: a user naming a drive strength gets exactly it.

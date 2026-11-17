@@ -17,34 +17,27 @@ TEST(ResourceBudget, ObservationKeepsThePeakAndCountsMissingReadings) {
   EXPECT_EQ(phase.sample(std::numeric_limits<uint64_t>::max()), std::numeric_limits<uint64_t>::max());
   EXPECT_EQ(phase.peak_bytes, std::numeric_limits<uint64_t>::max());
 }
-TEST(ResourceBudget, SharesBaselineTimeAndStopsPermanently) {
+TEST(ResourceBudget, SharesBaselineAndStopsPermanently) {
   Resource_budget b;
-  b.time_limit_ms = 10;
+  b.process_limit_bytes = 120;
   EXPECT_TRUE(b.admit(9, 100));
   EXPECT_FALSE(b.admit(10, 150));
-  EXPECT_EQ(b.reason, "region wall-time budget exhausted");
+  EXPECT_EQ(b.reason, "process physical-memory budget exhausted");
   EXPECT_FALSE(b.admit(0, 1));
   EXPECT_EQ(b.elapsed_ms, 10);
   EXPECT_EQ(b.peak_bytes, 150);
 }
-TEST(ResourceBudget, GrowthAndProcessCeilingsAreDistinct) {
+TEST(ResourceBudget, OnlyTheMeasuredProcessCeilingRefuses) {
   Resource_budget b;
   b.entry_bytes         = 1000;
-  b.growth_limit_bytes  = 100;
   b.process_limit_bytes = 2000;
-  EXPECT_TRUE(b.admit(1, 1100));
-  EXPECT_FALSE(b.admit(2, 1101));
-  EXPECT_EQ(b.reason, "region memory-growth budget exhausted");
-  Resource_budget absolute;
-  absolute.entry_bytes         = 1999;
-  absolute.growth_limit_bytes  = 100;
-  absolute.process_limit_bytes = 2000;
-  EXPECT_FALSE(absolute.admit(0, 2001));
-  EXPECT_EQ(absolute.reason, "process physical-memory budget exhausted");
+  EXPECT_TRUE(b.admit(1, 1999));  // large growth over entry is not a refusal
+  EXPECT_FALSE(b.admit(2, 2001));
+  EXPECT_EQ(b.reason, "process physical-memory budget exhausted");
 }
 TEST(ResourceBudget, MissingSamplesDoNotInventGrowth) {
   Resource_budget b;
-  b.growth_limit_bytes = 1;
+  b.process_limit_bytes = 2000;
   EXPECT_TRUE(b.admit(0, 1000));
   EXPECT_TRUE(b.admit(1, 0));
   EXPECT_EQ(b.samples, 2);

@@ -55,7 +55,8 @@ subprocess.run(['lhd/lhd', 'pass', 'opentimer', f'lg:{root}/W/synth/net',
                check=True, capture_output=True, timeout=15)
 replayed = json.loads(replay_result.read_text())['qor']['designs'][0]
 assert replayed['parasitics']['identity'] == place['rc_identity']
-assert replayed['max_delay'] == sta['max_delay']
+# OpenTimer (the replay) cross-checks the fast engine (lhd synth's default) on the same placed RC.
+assert abs(replayed['max_delay'] - sta['max_delay']) <= max(0.005, 0.05 * abs(sta['max_delay'])), (replayed['max_delay'], sta['max_delay'])
 # Independent logical equivalence includes the hierarchy flattening and the
 # physical graph that was actually saved, rather than comparing checksums.
 subprocess.run(['lhd/lhd', 'pass', 'liberty', 'gensim', str(libdir/'sky130hd.lib'),
@@ -104,7 +105,7 @@ if os.environ.get('MAPPER', 'abc') == 'abc':
     assert not edited['qor']['place'].get('reused_final_state', False), edited['qor']['place']
     assert (root/'edited.v').read_bytes() != cold_netlist
     source.write_text(original_source)
-rc = run('rc_change', ['--set', 'synth.place=true', '--set', 'synth.place.wire_rc=50,5'])
+rc = run('rc_change', ['--set', 'synth.place=true', '--set', 'synth.wire_rc=50,5'])
 assert rc['qor']['place']['rc_identity'] != place['rc_identity']
 assert rc['incremental']['sta']['hits'] == 0, rc['incremental']
 assert rc['qor']['sta']['designs'][0]['max_delay'] != sta['max_delay']

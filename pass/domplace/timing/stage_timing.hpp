@@ -102,6 +102,7 @@ struct Stage_timer_inputs {
   late::Sdc_units                      units;
   std::optional<Clock_spec>            clock;
   double                               clock_uncertainty_ps = 0;
+  double                               output_load_ff       = 0;  // synth.io_load: an output port without set_load
   // The RC cell sizes' DBU and the bit-level import of word-port netlists.
   std::optional<physical::Technology>  technology;
 };

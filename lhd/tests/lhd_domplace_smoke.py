@@ -31,7 +31,7 @@ base = [lhd, 'synth', str(source), '--top', 'dom',
         '--set', 'synth.mapper=usyn', '--set', 'pass.usyn.clock_phases=1', '--set', 'pass.usyn.tmap=abc',
         '--set', f'synth.liberty={libdir}/sky130hd.lib',
         '--set', f'synth.lef={libdir}/sky130hd.tlef,{libdir}/sky130hd.lef', '--set', f'synth.sdc={sdc}', '-q']
-domino = ['--set', 'pass.usyn.physical=domino_provisional', '--set', 'synth.opentimer=false']
+domino = ['--set', 'pass.usyn.physical=domino_provisional', '--set', 'synth.timing=false']
 
 
 def run(name, args, success=True):

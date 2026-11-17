@@ -77,9 +77,6 @@ std::vector<Pin> sinks(Pin driver) {
   return result;
 }
 Inventory inventory(const Options& options, const physical::Technology& tech) {
-  if (options.repair_reset) {
-    throw std::invalid_argument("pre-CTS clock/reset sizing is disabled");
-  }
   Inventory result;
   for (auto cell : options.technology().cells.combinational) {
     if (cell.physical_barrier || !tech.macros.contains(cell.name) || !liberty::cell_truth(cell)) {
@@ -1837,7 +1834,7 @@ static Floorplan_library read_floorplan_library(const Options& options) {
   Floorplan_library library;
   library.tech    = options.technology().lef;
   library.cells   = inventory(options, library.tech);
-  library.special = scan_special_pins(options.technology().cells, !options.repair_reset);
+  library.special = scan_special_pins(options.technology().cells, true);
   library.drives  = options.technology().cells.drives;
   return library;
 }

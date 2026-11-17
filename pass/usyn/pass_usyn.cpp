@@ -129,7 +129,7 @@ bool read_options(const Eprp_var& var, Options& options) {
     return false;
   }
   if (const auto text = var.get_stage("region_opts", ""); !text.empty()) {
-    auto parsed = livehd::synth::parse_region_opts(text, "pass.usyn.region_opts");
+    auto parsed = livehd::synth::parse_region_opts(text, "synth.region_opts");
     if (!parsed) {
       return false;
     }
@@ -191,8 +191,7 @@ bool read_options(const Eprp_var& var, Options& options) {
       || !read("tmap_sharing_fanout", "16", options.mapping.sharing_fanout) || !read("tmap_trials", "2", options.tmap_trials)
       || !options.tmap_trials || options.tmap_trials > 2
       || (options.mapping.sharing_fanout && (options.mapping.sharing_fanout < 2 || options.mapping.sharing_fanout > 4096))
-      || !read("memory_budget_mb", "16384", options.mapping.memory_budget_mb) || options.mapping.memory_budget_mb <= 0
-      || !read("time_budget_ms", "0", options.mapping.time_budget_ms) || !read("delay", "0", options.mapping.delay_ps)
+      || !read("delay", "0", options.mapping.delay_ps)
       || !std::isfinite(options.mapping.delay_ps) || options.mapping.delay_ps < 0 || !flag("residual", logical.optimize_residual)
       || !flag("p1", logical.pre_optimize, "false") || !flag("sop_tree", options.design.sop_tree, "false")
       || !flag("multi_rep", options.design.multi_rep, "false") || !flag("cmos_cleanup", options.design.cmos_cleanup, "true")
@@ -218,9 +217,6 @@ bool read_options(const Eprp_var& var, Options& options) {
   if (!read("max_fanout", "16", mapping.max_fanout)) {
     return invalid_option("max_fanout", "an integer in [0, 4294967295]; 0 disables the `buffer -N` tail");
   }
-  if (!read("reset_fanout", "0", mapping.reset_fanout) || mapping.reset_fanout == 1) {
-    return invalid_option("reset_fanout", "0 (off) or an integer >= 2: asynchronous clear/preset pins per reset-tree buffer");
-  }
   mapping.pre = std::string(var.get_stage("tmap_pre", "&dch -f -C 500"));
   {
     // Allow-listed GIA commands only: the mapper never runs an arbitrary string.
@@ -238,7 +234,7 @@ bool read_options(const Eprp_var& var, Options& options) {
       rest = cut == std::string_view::npos ? std::string_view{} : rest.substr(cut + 1);
     }
   }
-  if (!read("area_relax", "200", mapping.area_relax_pct)) {
+  if (!read("area_relax", "100", mapping.area_relax_pct)) {
     return invalid_option("area_relax", "an integer in [0, 4294967295]; 0 always maps for minimum delay");
   }
   if (!read("boundary_rounds", "1", mapping.boundary_rounds) || mapping.boundary_rounds < 1 || mapping.boundary_rounds > 64) {
@@ -247,7 +243,7 @@ bool read_options(const Eprp_var& var, Options& options) {
   if (!read("io_load", "-1", mapping.io_load) || !std::isfinite(mapping.io_load)) {
     return invalid_option("io_load", "a load in fF; negative = one typical input pin of the library");
   }
-  if (!flag("boundary", mapping.boundary)) {
+  if (!flag("boundary", mapping.boundary, "false")) {
     return invalid_option("boundary", "true|false");
   }
   if (!flag("boundary_buffer", mapping.boundary_buffer)) {
@@ -259,7 +255,7 @@ bool read_options(const Eprp_var& var, Options& options) {
   if (!flag("drop_init", mapping.drop_init, "false")) {
     return invalid_option("drop_init", "true|false");
   }
-  if (!flag("derived_clock", mapping.derived_clock, "false")) {
+  if (!flag("derived_clock", mapping.derived_clock, "true")) {
     return invalid_option("derived_clock", "true|false");
   }
   mapping.memory = std::string(var.get_stage("memory", "false"));
@@ -329,8 +325,7 @@ bool read_options(const Eprp_var& var, Options& options) {
   if (!options.design.cache.directory.empty()) {
     options.mapping.cache_directory = (options.design.cache.directory / "tmap").string();
   }
-  options.design.cache.context = std::to_string(options.mapping.memory_budget_mb) + "/"
-                                 + std::to_string(options.mapping.time_budget_ms) + "/unroll-"
+  options.design.cache.context = std::string("unroll-")
                                  + (options.design.unroll_carry ? "1" : "0");
   endpoint.cost_nodes          = logical.max_nodes;
   residual.max_nodes           = logical.max_nodes;
@@ -530,8 +525,8 @@ bool mapped_better(const livehd::synth::Mapped_cost& candidate, const livehd::sy
       .msg("{}: pass.usyn ran out of memory (an allocation failed) under {}",
            livehd::lec::outcome_word(livehd::lec::Outcome::Timeout_memory),
            budget == 0 ? std::string{"the host's memory (no process memory budget could be computed)"}
-                       : std::format("the process memory budget of {} MiB (the RLIMIT_AS backstop: LHD_MEMORY_BUDGET_MB, "
-                                     "else physical RAM minus max(2 GiB, 25%))",
+                       : std::format("the process RAM ceiling of {} MiB (lhd.ram_max_mb, auto = 80% of physical RAM; "
+                                     "also the RLIMIT_AS backstop)",
                                      budget >> 20))
       .hint("color into smaller regions and synthesize those, or synthesize on a host with more memory")
       .fatal();
@@ -544,9 +539,7 @@ std::string refusal_prefix(const livehd::usyn::Resource_budget& resources) {
   if (resources.reason.empty()) {
     return {};
   }
-  return livehd::lec::outcome_word(resources.out_of_time ? livehd::lec::Outcome::Timeout_time
-                                                         : livehd::lec::Outcome::Timeout_memory)
-         + ": ";
+  return livehd::lec::outcome_word(livehd::lec::Outcome::Timeout_memory) + ": ";
 }
 }  // namespace
 
@@ -658,17 +651,17 @@ void Pass_usyn::setup() {
       "adder",
       "Native arithmetic: auto (Brent-Kung wide sums, comparisons and multiplier carry), rca, cska, cla, prefix or brent",
       "auto");
-  m.add_label_optional("tune_profile", "internal synth.tune.profile", "auto");
-  m.add_label_optional("tune_validate", "internal synth.tune.validate", "structural");
+  m.add_label_optional("tune_profile", "INTERNAL: synth.tune.profile", "auto");
+  m.add_label_optional("tune_validate", "INTERNAL: synth.tune.validate", "structural");
   m.add_label_optional("tune_metadata", "INTERNAL class-tagged metadata", "[]");
   m.add_label_optional("tune_design", "INTERNAL metadata design scope", "");
   m.add_label_optional("tune_file", "INTERNAL validated trial selection file", "");
-  m.add_label_optional("tune_export", "internal synth.tune.export", "");
-  m.add_label_optional("tune_dir", "internal workdir synthesis tune root", "");
-  m.add_label_optional("tune_persist", "internal lhd.incremental gate", "true");
-  m.add_label_optional("tune_attempts", "internal synth.tune.attempts", "24");
-  m.add_label_optional("tune_patience", "internal synth.tune.patience", "3");
-  m.add_label_optional("tune_time_ms", "internal synth.tune.time_ms", "60000");
+  m.add_label_optional("tune_export", "INTERNAL: synth.tune.export", "");
+  m.add_label_optional("tune_dir", "INTERNAL: workdir synthesis tune root", "");
+  m.add_label_optional("tune_persist", "INTERNAL: lhd.incremental gate", "true");
+  m.add_label_optional("tune_attempts", "INTERNAL: synth.tune.attempts", "24");
+  m.add_label_optional("tune_patience", "INTERNAL: synth.tune.patience", "3");
+  m.add_label_optional("tune_time_ms", "INTERNAL: synth.tune.time_ms", "60000");
   m.add_label_optional("barrel", "auto|log|reverse shared barrel architecture", "auto");
   m.add_label_optional("block_size", "Shared CSKA/CLA width (alias of adder_block)", "");
   m.add_label_optional("adder_block", "Native CSKA/CLA group width (0: derive from operating width)", "0");
@@ -755,7 +748,7 @@ void Pass_usyn::setup() {
   m.add_label_optional("residual_divisors", "Maximum residual resubstitution divisors", "32");
   m.add_label_optional("residual_inserted", "Maximum inserted nodes in a residual replacement (0..2)", "2");
   m.add_label_optional("residual_depth_slack", "Allowed residual depth increase", "0");
-  m.add_label_optional("flatten", "Hierarchy policy: auto follows coloring, true flattens, false preserves hierarchy", "auto");
+  m.add_label_optional("flatten", "Hierarchy policy (synth.flatten): true flattens, auto re-inlines what the coloring spans", "auto");
   m.add_label_optional("delay",
                        "Optional tmap timing BUDGET in ps (0: none), passed to the provider: buffering/sizing target, "
                        "minus reg_margin for flop-bearing regions. Untimed mapping reports logic levels, not ps",
@@ -765,11 +758,6 @@ void Pass_usyn::setup() {
   m.add_label_optional("max_fanout",
                        "tmap fanout cap: `buffer -N <n>` plus down-sizing to the budget after mapping (0 disables)",
                        "16");
-  m.add_label_optional("reset_fanout",
-                       "tmap asynchronous-reset buffer tree: a reset net driving more clear/preset pins than this in a region is "
-                       "dealt out through the library's smallest buffer, this many pins per buffer (0 disables; same as "
-                       "pass.abc.reset_fanout)",
-                       "0");
   m.add_label_optional("tmap_pre",
                        "`;`-separated ABC GIA commands run on the logic handed to the mapper just before `&nf` (default: "
                        "structural choices, so `&nf` can pick among equivalent structures). Empty maps the network as is. "
@@ -779,7 +767,7 @@ void Pass_usyn::setup() {
   m.add_label_optional("area_relax",
                        "max percent of measured slack a timed tmap region trades back for area by re-running the same "
                        "mapping-only `&nf -R <pct>`, then re-sizing to the budget (0 disables; needs delay and NLDM)",
-                       "200");
+                       "100");
   m.add_label_optional("reg_margin",
                        "register overhead subtracted from delay for a flop-bearing tmap region: auto = mapped DFF clk->Q + "
                        "setup, a number = ps, 0 = none",
@@ -787,7 +775,7 @@ void Pass_usyn::setup() {
   m.add_label_optional("boundary",
                        "size every tmap region against its partition environment, then re-size each in place against the "
                        "exact stitched loads/drivers (exact re-size needs delay and an NLDM Liberty)",
-                       "true");
+                       "false");
   m.add_label_optional("boundary_buffer",
                        "tree every tmap region input's fanout past max_fanout by declaring boundary_drive as its driver",
                        "true");
@@ -799,16 +787,16 @@ void Pass_usyn::setup() {
   m.add_label_optional("memory_max_bits", "the `auto` storage threshold in bits; 0 = no limit", "1024");
   m.add_label_optional("derived_clock",
                        "map a register clocked by logic that is not a recognized clock gate to a plain DFF cell whose clock "
-                       "pin the mapped logic drives (pass.abc.derived_clock), instead of keeping a native flop that cannot be "
+                       "pin the mapped logic drives (synth.derived_clock), instead of keeping a native flop that cannot be "
                        "placed",
-                       "false");
+                       "true");
   m.add_label_optional("drop_init",
                        "map a resetless register with a power-on `initial` value to a plain DFF cell and drop the value "
-                       "(pass.abc.drop_init), instead of keeping it on a native flop that cannot be placed",
+                       "(synth.drop_init), instead of keeping it on a native flop that cannot be placed",
                        "false");
   m.add_label_optional("port_bypass",
                        "a tmap region output reads the signal at the root of the buffer chain that leads to it, not the "
-                       "chain's last buffer (pass.abc.port_bypass); what is beyond a port is buffered by placement",
+                       "chain's last buffer (synth.port_bypass); what is beyond a port is buffered by placement",
                        "false");
   m.add_label_optional("boundary_drive",
                        "stand-in Liberty cell driving a tmap region input without a mapped driver (empty: smallest buffer; "
@@ -816,8 +804,6 @@ void Pass_usyn::setup() {
                        "");
   m.add_label_optional("boundary_rounds", "rounds of the exact tmap boundary re-size (1..64)", "1");
   m.add_label_optional("io_load", "load in fF on a primary output for tmap sizing; negative = one typical input pin", "-1");
-  m.add_label_optional("memory_budget_mb", "Invocation memory-growth admission limit in MiB", "16384");
-  m.add_label_optional("time_budget_ms", "Invocation wall-time admission limit (0: unlimited)", "0");
   m.add_label_optional("threads", "INTERNAL shared worker setting; USYN currently serializes synthesis", "1");
   m.add_label_optional("region_opts", "Per-color targeted synthesis options JSON", "");
   m.add_label_optional("library", "INTERNAL Liberty from synth.liberty; required only for tmap=abc", "");
@@ -966,9 +952,7 @@ void Pass_usyn::synthesize(Eprp_var& var) {
   const auto elapsed = [&] { return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count(); };
   usyn::Resource_budget resources;
   resources.entry_bytes         = livehd::cost::process_footprint_bytes();
-  resources.growth_limit_bytes  = livehd::cost::budget_bytes(options.mapping.memory_budget_mb);
   resources.process_limit_bytes = livehd::cost::configured_budget_bytes();
-  resources.time_limit_ms       = options.mapping.time_budget_ms;
   usyn::Budget work{options.work};
   work.admission             = [&] { return resources.admit(elapsed(), livehd::cost::process_footprint_bytes()); };
   // One Liberty content snapshot prices native cells. cost_mode ranks logical
@@ -1128,7 +1112,13 @@ void Pass_usyn::synthesize(Eprp_var& var) {
     options.mapping.admission     = [&](std::string_view) { return work.admission(); };
     auto result                   = livehd::synth::technology_map(options.tmap, selected.design->top, options.mapping);
     if (!result.design) {
-      livehd::diag::err("pass.usyn", "tmap-refused", "unsupported").msg("technology mapping failed: {}", result.reason).emit();
+      // A memory refusal from the mapping regions (the lhd.ram_max_mb ceiling) carries the formal tools' word for it.
+      const bool memory = result.reason.find("does not fit in memory") != std::string::npos;
+      livehd::diag::err("pass.usyn", "tmap-refused", "unsupported")
+          .msg("{}technology mapping failed: {}",
+               memory ? livehd::lec::outcome_word(livehd::lec::Outcome::Timeout_memory) + ": " : std::string{},
+               result.reason)
+          .emit();
       return;
     }
     mapped = std::move(result.design);

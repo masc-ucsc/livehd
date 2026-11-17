@@ -37,7 +37,7 @@ struct Ware_score : Ware_qor {
 // region (2opt-freq C). Unset fields inherit the run-level options. Two
 // sources, later wins: a "region_opts" member inside the source graph's
 // coloring_info JSON (the block-attribute channel, 2opt-freq B), then the
-// --set pass.abc.region_opts CLI JSON. `flow` and `load` are the backend's own
+// --set synth.region_opts CLI JSON. `flow` and `load` are the backend's own
 // command strings; the driver carries them to the backend unread.
 struct Region_opts {
   std::optional<bool>              ware;

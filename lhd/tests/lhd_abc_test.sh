@@ -135,10 +135,10 @@ echo "PASS: pass.abc tech-map LEC-equivalent to original logic (+ negative contr
 T="$W/timing"
 mkdir -p "$T"
 run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$T/unit" --set synth.liberty="$TIMING_LIB" \
-    --set abc.max_fanout=0 --set abc.verbose=true --workdir "$T/w_unit"
+    --set synth.max_fanout=0 --set abc.verbose=true --workdir "$T/w_unit"
 unit_delay=$(grep -o '"max_delay":[0-9.]*' "$W/r.json" | head -1 | cut -d: -f2)
 run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$T/timed" --set synth.liberty="$TIMING_LIB" \
-    --set abc.delay=1000 --set abc.verbose=true --workdir "$T/w_timed"
+    --set synth.delay=1000 --set abc.verbose=true --workdir "$T/w_timed"
 timed_delay=$(grep -o '"max_delay":[0-9.]*' "$W/r.json" | head -1 | cut -d: -f2)
 grep -q 'resolved flow: .*&synch2 -K 6 -C 500' "$T/w_timed/logs/"*_lhd_pass_abc.log \
   || fail "delay did not select the flow2/K6 timing default"
@@ -358,7 +358,7 @@ lec_proven --impl lg:"$FT/net" --ref lg:"$FT/re" --lib lg:"$FT/models" --top abc
 echo "PASS: feed-through wires map to no buffer cell (identity-buffer bypass) and the netlist stays LEC-equivalent"
 
 # ---------------------------------------------------------------------------
-# pass.abc.port_bypass: a region output reads the ROOT of the buffer chain
+# synth.port_bypass: a region output reads the ROOT of the buffer chain
 # that leads to it. d[5] drives 64 gates and the `thru` output; with a fanout
 # cap of 4 ABC buffers that net as a chain and leaves the output behind
 # several buffers -- it has no way to know whether the reader beyond the port
@@ -378,7 +378,7 @@ EOF
 run compile "$PB/abc_port_bypass.v" --top abc_port_bypass --emit-dir lg:"$PB/lg" --workdir "$PB/w1"
 for pb in false true; do
   "$LHD" pass abc --top abc_port_bypass lg:"$PB/lg" --emit-dir verilog:"$PB/netv_$pb" --set synth.liberty="$TIMING_LIB" \
-      --set pass.abc.delay=100 --set pass.abc.max_fanout=4 --set pass.abc.port_bypass=$pb \
+      --set synth.delay=100 --set synth.max_fanout=4 --set synth.port_bypass=$pb \
       -q --result-json "$PB/r_$pb.json" --workdir "$PB/w_$pb" \
     || fail "pass abc port_bypass=$pb -> $(cat "$PB/r_$pb.json" 2>/dev/null)"
 done
@@ -393,7 +393,7 @@ run pass liberty gensim "$TIMING_LIB" --emit-dir lg:"$PB/models" --workdir "$PB/
 run compile lg:"$PB/models" --emit-dir verilog:"$PB/modelsv" --workdir "$PB/w_modelsv"
 cat "$PB/netv_true/"*.v "$PB/modelsv/"*.v > "$PB/impl.v"
 lec_proven --impl verilog:"$PB/impl.v" --ref verilog:"$PB/abc_port_bypass.v" --top abc_port_bypass --workdir "$PB/w_lec"
-echo "PASS: pass.abc.port_bypass moves a region output to the root of its buffer chain (same cells, LEC-equivalent)"
+echo "PASS: synth.port_bypass moves a region output to the root of its buffer chain (same cells, LEC-equivalent)"
 
 # Reduce-OR survives lowering in loop predicates and bit selections. Test
 # both a wide unsigned input and a signed input, including its sign bit.
@@ -406,7 +406,7 @@ comb reduce_or(a:U65, b:S9) -> (y:U3) {
 PRP
 run compile "$RO/reduce_or.prp" --emit-dir lg:"$RO/lg" --workdir "$RO/w1"
 run synth lg:"$RO/lg" --top reduce_or.reduce_or --emit-dir lg:"$RO/net" \
-    --set synth.liberty="$LIB" --set synth.opentimer=false --workdir "$RO/w2"
+    --set synth.liberty="$LIB" --set synth.timing=false --workdir "$RO/w2"
 lec_proven --impl lg:"$RO/net" --ref lg:"$RO/lg" --lib lg:"$W/models" --top reduce_or.reduce_or \
     --workdir "$RO/w3"
 echo "PASS: wide and signed reduce-OR map and remain equivalent"

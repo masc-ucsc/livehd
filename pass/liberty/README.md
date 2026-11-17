@@ -55,7 +55,7 @@ Two opt-ins (`--set compile.slang.<flag>=true`, default off) match a Yosys/ORFS 
 `inou/slang/README.md`.
 
 This is binding of an explicitly instantiated macro, not automatic substitution
-of an inferred array based on dimensions (`synth.sram` generates its own macro views for
+of an inferred array based on dimensions (`synth.memory.sram` generates its own macro views for
 arrays that have no cell here: `pass/synth/README.md`). A Liberty `memory()` group and its
 timing arcs do not establish read/write collision, forwarding, reset or
 cross-port priority semantics. Such inference needs a compatible functional

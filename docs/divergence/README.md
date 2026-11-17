@@ -8,7 +8,7 @@ difference, or a simulator bug, which is for a person to decide.
 Flow (`/var/tmp/renau/prpfuzz/vfuzz.py`): a random `module fz` that `yosys
 read_verilog -sv` accepts → `lhd compile` must accept → Icarus (`iverilog
 -g2012`), Verilator 5.040 (`--binary --timing --x-initial 0 --x-assign 0`) and
-`lhd sim` (slop and llvm, `sim.unknown_zero=true`) run the same testbench:
+`lhd sim` (slop and llvm, `compile.unknown_zero=true`) run the same testbench:
 reset for two cycles, then each cycle sets the inputs, rises `clock`, waits #1
 and prints every output. All registers have a synchronous reset, divisors are
 forced non-zero.

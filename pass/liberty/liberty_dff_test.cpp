@@ -1182,3 +1182,42 @@ TEST(LibertyDff, CellLibraryOwnsOneSnapshotAcrossFileReplacement) {
   std::filesystem::remove(path);
   EXPECT_EQ(first.combinational.front().function, "A'");
 }
+
+// The technology proxy: the smallest-area NOT (not the first, not a buffer),
+// its FO4 estimate intrinsic + R * 4 * C_in, the register-mapping flop and the
+// library nom_voltage, all on the Liberty's own units.
+TEST(LibertyFunction, TechProxyPicksSmallestNotFlopAndVoltage) {
+  const auto path = write_lib("proxy.lib", R"(
+    library (p) { time_unit : "1ps"; capacitive_load_unit (1, "ff"); nom_voltage : 0.77;
+      cell (INVx2) { area : 2; pin(A) { direction : input; capacitance : 1; }
+        pin(Y) { direction : output; function : "!A";
+          timing () { cell_rise(t) { index_2("1, 5"); values("4, 8"); } } } }
+      cell (INVx1) { area : 1; pin(A) { direction : input; capacitance : 0.5; }
+        pin(Y) { direction : output; function : "!A";
+          timing () { cell_rise(t) { index_2("1, 3"); values("5, 9"); } } } }
+      cell (BUFx1) { area : 0.5; pin(A) { direction : input; capacitance : 0.5; }
+        pin(Y) { direction : output; function : "A"; } }
+      cell (DFF) { area : 6; ff(IQ, IQN) { next_state : "D"; clocked_on : "CLK"; }
+        pin(CLK) { direction : input; clock : true; capacitance : 1; }
+        pin(D) { direction : input; capacitance : 1; }
+        pin(Q) { direction : output; function : "IQ"; } }
+    }
+  )");
+  std::string why;
+  const auto  proxy = livehd::liberty::tech_proxy(path, &why);
+  ASSERT_TRUE(proxy) << why;
+  EXPECT_EQ(proxy->not_cell, "INVx1");
+  EXPECT_DOUBLE_EQ(proxy->not_area, 1);
+  EXPECT_DOUBLE_EQ(proxy->not_cin_ff, 0.5);
+  // intrinsic 5 ps, R = (9 - 5) ps / 2 fF = 2 kohm: 5 + 2000 * 4 * 0.5 / 1000 = 9 ps
+  EXPECT_NEAR(proxy->not_fo4_ps, 9, 1e-9);
+  EXPECT_EQ(proxy->flop_cell, "DFF");
+  EXPECT_DOUBLE_EQ(proxy->flop_area, 6);
+  ASSERT_TRUE(proxy->voltage);
+  EXPECT_DOUBLE_EQ(*proxy->voltage, 0.77);
+
+  const auto none = write_lib("proxy-none.lib", R"(library (n) { cell (BUF) { area : 1; pin(A) { direction : input; }
+    pin(Y) { direction : output; function : "A"; } } })");
+  EXPECT_FALSE(livehd::liberty::tech_proxy(none, &why));
+  EXPECT_NE(why.find("NOT"), std::string::npos);
+}

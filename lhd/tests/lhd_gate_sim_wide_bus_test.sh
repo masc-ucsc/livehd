@@ -16,7 +16,7 @@ module wide(input [299:0] a, input [7:0] k, output [299:0] y);
 endmodule
 RTL
 LIB=inou/prp/tests/abc/test.lib
-"$LHD" synth "$W/wide.v" --top wide --set synth.liberty="$LIB" --set synth.opentimer=false \
+"$LHD" synth "$W/wide.v" --top wide --set synth.liberty="$LIB" --set synth.timing=false \
   --emit-dir lg:"$W/net" --workdir "$W/synth" -q
 "$LHD" tool tree lg:"$W/net" --top wide > "$W/tree.txt"
 grep -q '__livehd_abc_input_bits_300' "$W/tree.txt" || { cat "$W/tree.txt"; echo "FAIL: no shared input splitter" >&2; exit 1; }

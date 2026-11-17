@@ -1145,6 +1145,28 @@ TEST(GuiAgent, MoveRefusesAPlacedMacroInsteadOfSkippingItSilently) {
   EXPECT_NE(s.agent_call(R"({"cmd":"help"})").find("macro_move"), std::string::npos);
 }
 
+TEST(GuiAgent, MacroMoveCarriesAMirrorToTheRestartedPlacer) {
+  auto sc              = scene();
+  sc->nodes[2].movable = false;
+  sc->nodes[2].kind    = Kind::fixed;  // a memory proxy the packer placed
+  Session s(Config{.open_browser = false, .start_paused = false});
+  const double x[4] = {1, 2, 500, 0}, y[4] = {5, 6, 200, 0};
+  s.begin_phase(sc, x, y, 4);
+  // a quarter turn would swap the proxy's axes; only mirrors and the half turn are accepted
+  EXPECT_NE(s.submit(R"({"cmd":"macro_move","nodes":["ram"],"x":[300],"y":[300],"orientation":"W"})").find("N, S, FN or FS"),
+            std::string::npos);
+  EXPECT_TRUE(s.macro_moves().empty());
+  EXPECT_EQ(s.submit(R"({"cmd":"macro_move","nodes":["ram"],"x":[300],"y":[300],"orientation":["FS"]})"), "");
+  s.poll(1, x, y, 4, {});  // the page thread applies queued commands
+  const auto moved = s.macro_moves();
+  ASSERT_TRUE(moved.contains("ram"));
+  EXPECT_EQ(moved.at("ram")[0], 300);
+  EXPECT_EQ(moved.at("ram")[3], 6);  // Ann_place::Orientation::FS
+  EXPECT_EQ(s.submit(R"({"cmd":"macro_move","nodes":["ram"],"x":[310],"y":[300]})"), "");
+  s.poll(2, x, y, 4, {});
+  EXPECT_EQ(s.macro_moves().at("ram")[3], 0);  // no orientation means N
+}
+
 TEST(GuiSession, MoveTakesOneNumberForEveryNodeOrOnePerNode) {
   Session s(Config{.open_browser = false, .start_paused = false});
   const double x[4] = {1, 2, 3, 4}, y[4] = {5, 6, 7, 8};

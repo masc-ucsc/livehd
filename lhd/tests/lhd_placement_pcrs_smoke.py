@@ -69,7 +69,7 @@ def widest_driver(name):
 default = run('default', [])
 place = default['qor']['place']
 info = place['pcrs']
-assert info['fanout'] == 32 and info['networks'] == 1 and info['skipped'] == 0, info
+assert info['fanout'] == 16 and info['networks'] == 1 and info['skipped'] == 0, info
 assert len(info['domains']) == 1, info
 domain = info['domains'][0]
 assert domain['name'] == 'rst_n@clk' and domain['depth'] == 1 and domain['sinks'] >= 48, domain
@@ -77,14 +77,19 @@ assert domain['name'] == 'rst_n@clk' and domain['depth'] == 1 and domain['sinks'
 # first and kept it in the second. `flops` counts what is in the placed netlist.
 assert info['flops'] == domain['flops'] >= 2 and info['max_depth'] == 1, info
 assert stage_flops('default') == info['flops'], (stage_flops('default'), info)
-assert widest_driver('default') <= 32, widest_driver('default')
+assert widest_driver('default') <= 16, widest_driver('default')  # synth.max_fanout
 # The reset is data now: only the clock net stays out of wirelength and timing.
 assert place['prects_controls']['ignored_nets'] <= 2, place['prects_controls']
 
 # A smaller cap needs more leaf flops; the depth stays at one level for every sink.
-narrow = run('narrow', ['--set', 'synth.place.reset_fanout=8'])['qor']['place']['pcrs']
+narrow = run('narrow', ['--set', 'synth.max_fanout=8'])['qor']['place']['pcrs']
 assert narrow['flops'] > info['flops'] and narrow['max_depth'] == 1 and narrow['fanout'] == 8, narrow
 assert widest_driver('narrow') <= 8, widest_driver('narrow')
+
+# No pipeline: pcrs still rebuilds the tree as data, with 0 flop levels.
+flat = run('flat', ['--set', 'synth.place.pcrs.reset_pipeline=false'])['qor']['place']['pcrs']
+assert flat['max_depth'] == 0 and stage_flops('flat') == 0, flat
+assert widest_driver('flat') <= 16, widest_driver('flat')
 
 # Off: the pre-pcrs buffer tree and the reset exclusion come back (nothing of pcrs in the report or the netlist).
 off = run('off', ['--set', 'synth.place.pcrs=false'])

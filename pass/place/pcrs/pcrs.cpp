@@ -9,6 +9,7 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -926,7 +927,7 @@ Depth_policy Depth_state::policy(unsigned fanout) const {
     if (const auto wanted = get(domain)) {
       return *wanted;
     }
-    return current ? *current : (sinks <= fanout ? 0u : 1u);
+    return std::min(max_depth, current ? *current : (sinks <= fanout ? 0u : 1u));
   };
 }
 
@@ -1209,6 +1210,41 @@ Stats build_reset(hhds::Graph& graph, const physical::Technology& tech, const li
     if (!p.keep && stats.domains.size() > first_domain) {
       builder.cap_head(p.net.head, position_of, stats.domains[first_domain]);
     }
+  }
+  return stats;
+}
+
+Stats distribute_resets(hhds::Graph& graph, const physical::Technology& tech, const liberty::Cell_library& cells,
+                        const Place_call& call) {
+  std::unordered_map<std::string_view, std::pair<double, double>> placed_at;
+  if (call.seed) {
+    placed_at.reserve(call.seed->components.size());
+    for (const auto& c : call.seed->components) {
+      if (c.place.status != physical::Status::UNPLACED) {
+        placed_at.emplace(c.name, std::pair{double(c.place.x), double(c.place.y)});
+      }
+    }
+  }
+  const Position_of position_of = [&](std::string_view instance) -> std::optional<std::pair<double, double>> {
+    const auto found = placed_at.find(instance);
+    return found == placed_at.end() ? std::nullopt : std::optional{found->second};
+  };
+  const bool   frozen   = !placed_at.empty() && call.no_gp;
+  const bool   regroup  = !frozen && !placed_at.empty() && call.depth && !call.depth->clustered;
+  Depth_policy depth_of = call.depth ? call.depth->policy(call.fanout) : Depth_policy{};
+  if (frozen && depth_of) {
+    depth_of = [wanted = std::move(depth_of)](std::string_view domain, size_t sinks, std::optional<unsigned> current) {
+      return current ? *current : wanted(domain, sinks, current);
+    };
+  }
+  auto stats = build_reset(graph,
+                           tech,
+                           cells,
+                           {.fanout = call.fanout, .regroup = regroup, .wire_ff_per_unit = call.wire_ff_per_unit},
+                           depth_of,
+                           placed_at.empty() ? Position_of{} : position_of);
+  if (regroup) {
+    call.depth->clustered = true;
   }
   return stats;
 }

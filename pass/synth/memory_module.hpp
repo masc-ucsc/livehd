@@ -17,7 +17,7 @@ namespace livehd::synth {
 //   Auto   (`auto`, the default) fold only what a macro would never be: storage
 //                    at or below memory_max_bits, or more ports than any SRAM
 //                    offers (kAutoFoldPortsAbove).
-//   Sram   (`sram`)  the synth.sram flow: fold only a memory under memory_max_bits (the smallest
+//   Sram   (`sram`)  the synth.memory.sram flow: fold only a memory under memory_max_bits (the smallest
 //                    macro) or one no generated macro can realize (sram_macro.hpp); every other
 //                    memory stays native whatever its port count, for macro_memories to convert.
 enum class Memory_fold : uint8_t { Never = 0, Always = 1, Auto = 2, Sram = 3 };

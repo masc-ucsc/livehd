@@ -382,8 +382,12 @@ struct Proxy::Impl {
     if (pin.model) {
       return Pair{pin.model->capacitance_ff[0].value_or(0), pin.model->capacitance_ff[1].value_or(0)};
     }
-    if (const auto boundary = constraints.outputs.find(pin.name); boundary != constraints.outputs.end()) {
+    if (const auto boundary = constraints.outputs.find(pin.name);
+        boundary != constraints.outputs.end() && (boundary->second.load_ff[0] != 0 || boundary->second.load_ff[1] != 0)) {
       return boundary->second.load_ff;
+    }
+    if (pin.output_port && constraints.default_output_load_ff > 0) {
+      return Pair{constraints.default_output_load_ff, constraints.default_output_load_ff};
     }
     return std::nullopt;
   }

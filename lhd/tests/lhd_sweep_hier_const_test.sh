@@ -45,7 +45,7 @@ synth flat --set synth.flat_sweep=true
 grep -q 'flat-swept' "$W/usyn.log" || fail "usyn: flat_sweep was not applied"
 grep -q '^always @' "$W/usyn.v" && fail "usyn: the constant register chain survived flat_sweep"
 if "$LHD" synth --reader slang --top sweep_hier_const --workdir "$W/bad" \
-  --set synth.mapper=usyn --set pass.usyn.tmap=none --set pass.usyn.flat_sweep=maybe -- "$SRC" > "$W/bad.log" 2>&1; then
+  --set synth.mapper=usyn --set pass.usyn.tmap=none --set synth.flat_sweep=maybe -- "$SRC" > "$W/bad.log" 2>&1; then
   fail "usyn: invalid flat_sweep value was accepted"
 fi
 echo "PASS: compile.sweep crosses registers through pass.specialize (18 flops -> 0, hierarchy kept)"

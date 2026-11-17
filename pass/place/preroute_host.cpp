@@ -60,8 +60,9 @@ void preroute_placed(Result& placed, const Options& options, const Evaluate& eva
     throw std::invalid_argument("pre-routing requires completed final placement, timing, taps and native power grid");
   }
   if (cfg.budget_ms <= 0 || cfg.stage_budget_ms <= 0 || cfg.bins <= 0 || cfg.bins > 512 || !std::isfinite(cfg.setup_margin_ps)
-      || cfg.setup_margin_ps < 0 || !std::isfinite(cfg.hold_margin_ps) || (cfg.hold_margin_ps < 0 && cfg.hold_margin_ps != -1)
-      || !std::isfinite(cfg.nominal_slew_ps) || cfg.nominal_slew_ps < 0 || !std::isfinite(cfg.capacity_fraction)
+      || (cfg.setup_margin_ps < 0 && cfg.setup_margin_ps != -1) || !std::isfinite(cfg.hold_margin_ps)
+      || (cfg.hold_margin_ps < 0 && cfg.hold_margin_ps != -1) || !std::isfinite(cfg.nominal_slew_ps)
+      || (cfg.nominal_slew_ps < 0 && cfg.nominal_slew_ps != -1) || !std::isfinite(cfg.capacity_fraction)
       || cfg.capacity_fraction < 0 || cfg.capacity_fraction > 1 || cfg.max_rows < 0 || cfg.max_sites < 0) {
     throw std::invalid_argument("invalid pre-route budgets, grid or margins");
   }
@@ -75,8 +76,18 @@ void preroute_placed(Result& placed, const Options& options, const Evaluate& eva
   route.per_net_budget         = std::chrono::milliseconds(cfg.budget_ms);
   route.timing.setup_margin_ps = cfg.setup_margin_ps;
   route.timing.hold_margin_ps  = cfg.hold_margin_ps;
+  if (cfg.setup_margin_ps == -1) {
+    std::string why;
+    const auto  proxy = liberty::tech_proxy(options.liberty, &why);
+    if (!proxy || !(proxy->not_fo4_ps > 0)) {
+      throw std::invalid_argument("preroute.setup_margin=auto needs an FO4 estimate of the Liberty's smallest NOT cell ("
+                                  + (proxy ? proxy->not_cell + " has no delay tables" : why) + "); set preroute.setup_margin");
+    }
+    route.timing.setup_margin_ps = kPrerouteSetupFo4 * proxy->not_fo4_ps;
+  }
   std::string buffer_name;
   double      nominal_load = 0;
+  double      nominal_slew = cfg.nominal_slew_ps;
   if (cfg.hold_margin_ps < 0) {
     buffer_name = cfg.hold_buffer == "auto" ? tech_profile.hold_buffer : cfg.hold_buffer;
     bool found  = false;
@@ -92,8 +103,23 @@ void preroute_placed(Result& placed, const Options& options, const Evaluate& eva
         throw std::invalid_argument("HOLD_BUF nominal fanout-one load is uncharacterized");
       }
       nominal_load = *cap;
+      if (nominal_slew == -1) {
+        // A chain of HOLD_BUFs: the input slew equals the output slew into one copy of itself.
+        nominal_slew = 0;
+        for (int i = 0; i < 32; ++i) {
+          const auto arc = timer.arc(cell.name, cell.inputs.front(), cell.output, nominal_slew, nominal_load);
+          if (!arc || !std::isfinite(arc->second) || arc->second <= 0) {
+            throw std::invalid_argument("HOLD_BUF has no characterized output slew; set preroute.nominal_slew");
+          }
+          const bool settled = std::abs(arc->second - nominal_slew) < 0.01;
+          nominal_slew       = arc->second;
+          if (settled) {
+            break;
+          }
+        }
+      }
       route.timing.hold_margin_ps
-          = preroute_hold_margin(timer, cell.name, cell.inputs.front(), cell.output, cfg.nominal_slew_ps, nominal_load);
+          = preroute_hold_margin(timer, cell.name, cell.inputs.front(), cell.output, nominal_slew, nominal_load);
       found = true;
       break;
     }
@@ -222,7 +248,7 @@ void preroute_placed(Result& placed, const Options& options, const Evaluate& eva
   report.AddMember("max_rows", cfg.max_rows, alloc);
   report.AddMember("max_sites", cfg.max_sites, alloc);
   report.AddMember("hold_buffer", rapidjson::Value(buffer_name.c_str(), alloc), alloc);
-  report.AddMember("nominal_slew_ps", cfg.nominal_slew_ps, alloc);
+  report.AddMember("nominal_slew_ps", nominal_slew, alloc);
   report.AddMember("nominal_load_ff", nominal_load, alloc);
   rapidjson::Value records(rapidjson::kArrayType);
   size_t           accepted = 0, attempted = 0, via_count = 0;

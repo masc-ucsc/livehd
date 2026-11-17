@@ -24,15 +24,12 @@ bool source_xor_nodes(const Search_options& search) {
 livehd::synth::Region_rewrite rewrite_region(const livehd::synth::Lnet& net, const livehd::synth::Region_ctx& ctx,
                                              const Search_options& search, std::string& report) {
   using Map                 = livehd::synth::Region_rewrite::Map;
-  const auto&          opts = ctx.options;
   const auto           region = std::string_view{ctx.rb.module_name};
   const auto           start  = std::chrono::steady_clock::now();
   const double         entry_ms = ctx.elapsed_ms ? ctx.elapsed_ms() : 0.0;
   Resource_budget      effort;
   Resource_observation observed;
-  effort.time_limit_ms = static_cast<double>(opts.time_budget_ms);
   effort.entry_bytes   = ctx.rss_entry;
-  effort.growth_limit_bytes  = livehd::cost::budget_bytes(opts.memory_budget_mb);
   effort.process_limit_bytes = livehd::cost::configured_budget_bytes();
   const auto sample = [&] { return observed.sample(livehd::cost::process_footprint_bytes()); };
   const auto since  = [&] {
@@ -124,20 +121,13 @@ livehd::synth::Region_rewrite rewrite_region(const livehd::synth::Lnet& net, con
     reason = effort.reason;
   }
   if (status == "abc_fallback" && !search.fallback && !effort.reason.empty() && reason == effort.reason) {
-    // A time or memory budget is a resource refusal, reported exactly as the
-    // pass.abc flow reports one (memory-oversize / time budget), never mapped.
-    const bool process_gate = reason.starts_with("process");
-    const auto limit_mib    = (process_gate ? effort.process_limit_bytes : effort.growth_limit_bytes) >> 20;
-    const auto used_mib     = (process_gate || effort.peak_bytes < effort.entry_bytes ? effort.peak_bytes
-                                                                                      : effort.peak_bytes - effort.entry_bytes)
-                          >> 20;
-    const auto why = effort.out_of_time
-                         ? std::format("the usyn cover ran out of time: {:.0f} ms, budget {:.0f} ms ({})",
-                                       effort.elapsed_ms, effort.time_limit_ms, reason)
-                         : std::format("the usyn cover does not fit in memory: {} MiB, budget {} MiB ({})",
-                                       used_mib, limit_mib, reason);
-    if (effort.out_of_time ? static_cast<bool>(ctx.refuse_time) : static_cast<bool>(ctx.refuse_memory)) {
-      (effort.out_of_time ? ctx.refuse_time : ctx.refuse_memory)(why);
+    // The measured process ceiling (lhd.ram_max_mb) is a resource refusal,
+    // reported exactly as the pass.abc flow reports one, never mapped.
+    const auto limit_mib = effort.process_limit_bytes >> 20;
+    const auto used_mib  = effort.peak_bytes >> 20;
+    const auto why = std::format("the usyn cover does not fit in memory: {} MiB, budget {} MiB ({})", used_mib, limit_mib, reason);
+    if (ctx.refuse_memory) {
+      ctx.refuse_memory(why);
       rewrite.map = Map::refused;
       sample();
       report = std::format(R"({{"region":"{}","status":"refused","reason":"{}"}})",

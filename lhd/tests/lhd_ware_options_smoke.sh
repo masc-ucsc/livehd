@@ -33,7 +33,7 @@ def combo(job):
     kind,macro,ware,stop = job
     src=w/f'{macro}.v'
     name=f'{macro}-{ware}-{stop}'
-    args=['synth',src,'--top','top','--set',f'synth.liberty={lib}','--set','synth.opentimer=false',
+    args=['synth',src,'--top','top','--set',f'synth.liberty={lib}','--set','synth.timing=false',
           '--set','lhd.jobs=1','--set',f'color.ware_{kind}={ware}','--set',f'color.synth.stop_{kind}={stop}',
           '--workdir',w/name,'--emit-dir',f'lg:{w}/{name}-net','--emit',f'verilog:{w}/{name}.v']
     if stop=='false' and ware=='true':
@@ -57,7 +57,7 @@ def narrow(job):
     name=f'narrow-{data_bits}-{count_bits}-'+('shl' if shift=='<<' else 'shr')+'-'+(signed or 'unsigned')
     src=w/f'{name}.v'
     src.write_text(f'module top(input {signed} [{data_bits-1}:0] a, input [{count_bits-1}:0] s, output [8:0] y); assign y=a {shift} {amount}; endmodule\n')
-    run('synth',src,'--top','top','--set',f'synth.liberty={lib}','--set','synth.opentimer=false',
+    run('synth',src,'--top','top','--set',f'synth.liberty={lib}','--set','synth.timing=false',
         '--set','lhd.jobs=1','--workdir',w/name,'--emit-dir',f'lg:{w}/{name}-net')
     lec(name, src)
     return src

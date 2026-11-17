@@ -139,7 +139,7 @@ TEST(PassUsynMemory, AllocationFailureAnywhereIsTimeoutMemory) {
       ASSERT_NE(rec, nullptr) << (sink.records().empty() ? std::string{} : sink.records().back().message);
       EXPECT_EQ(rec->category, "unsupported");
       EXPECT_TRUE(rec->message.starts_with("TIMEOUT-memory: pass.usyn ran out of memory")) << rec->message;
-      EXPECT_TRUE(rec->message.find("process memory budget of") != std::string::npos
+      EXPECT_TRUE(rec->message.find("process RAM ceiling of") != std::string::npos
                   || rec->message.find("the host's memory") != std::string::npos)
           << rec->message;
     }

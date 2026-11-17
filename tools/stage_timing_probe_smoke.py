@@ -23,7 +23,7 @@ subprocess.run([lhd, 'synth', str(source), '--top', 'domp', '-q', '--workdir', s
                 '--set', 'synth.mapper=usyn', '--set', 'pass.usyn.clock_phases=1', '--set', 'pass.usyn.tmap=abc',
                 '--set', f'synth.liberty={libdir}/sky130hd.lib',
                 '--set', f'synth.lef={libdir}/sky130hd.tlef,{libdir}/sky130hd.lef', '--set', f'synth.sdc={sdc}',
-                '--set', 'pass.usyn.physical=domino_provisional', '--set', 'synth.opentimer=false',
+                '--set', 'pass.usyn.physical=domino_provisional', '--set', 'synth.timing=false',
                 '--set', 'pass.usyn.domino_select=all', '--set', 'synth.place=true',
                 '--set', 'synth.place.timing_driven=false', '--set', 'synth.place.iterations=80',
                 '--set', 'synth.place.grid.density=8', '--set', 'synth.place.stage_timing=true',

@@ -73,7 +73,7 @@ def synth(tag, top, *extra):
     result = root / f'{tag}.json'
     argv = [lhd, 'synth', str(root / f'{top}.v'), '--top', top, '-q', '--workdir', str(work), '--set',
             f'synth.liberty={root}/seq.lib', '--set', f'synth.lef={libdir}/sky130hd.tlef,{root}/seq.lef', '--set',
-            f'synth.sdc={sdc}', '--set', 'synth.opentimer=false', '--set', 'compile.slang.liberty_cells=true', '--emit-dir',
+            f'synth.sdc={sdc}', '--set', 'synth.timing=false', '--set', 'compile.slang.liberty_cells=true', '--emit-dir',
             f'verilog:{root}/v_{tag}', '--result-json', str(result)] + USYN + list(extra)
     completed = subprocess.run(argv, capture_output=True, text=True, timeout=25)
     assert result.is_file(), (tag, completed.returncode, completed.stdout[-2000:], completed.stderr[-2000:])

@@ -328,8 +328,17 @@ TEST(Placement, LegrouteKeepsItsBestRoundOnAFixedCoreAndReportsTheRemainingOverf
   } catch (const Placement_area_restart& restart) {
     EXPECT_DOUBLE_EQ(restart.utilization, options.utilization * options.area_step);
     EXPECT_EQ(restart.mesh_variant, 0u);
+    EXPECT_TRUE(restart.routing);
   }
   EXPECT_STREQ(read_json(options.output_dir + "/legroute_plan_selection.json")["outcome"].GetString(), "area_restart");
+  // Once legroute.area_restarts growths are used up, the best round continues with its overflow (no endless growth).
+  options.legroute_area_restarts_used = options.legroute_area_restarts;
+  options.output_dir                  = std::string(std::getenv("TEST_TMPDIR")) + "/legroute_generated_used_up";
+  hhds::GraphLibrary used_up_library;
+  const auto         used_up = place(*graph, used_up_library, options);
+  EXPECT_NO_THROW(check_legality(options.technology().lef, used_up.floorplan));
+  EXPECT_STREQ(read_json(options.output_dir + "/legroute_plan_selection.json")["outcome"].GetString(), "continued_with_overflow");
+  options.legroute_area_restarts_used = 0;
   options.allow_increase_area = false;
   options.output_dir          = std::string(std::getenv("TEST_TMPDIR")) + "/legroute_generated_fixed";
   hhds::GraphLibrary kept_library;
@@ -2767,7 +2776,7 @@ TEST(Placement, PartitionGridsAreValidatedUpFront) {
   auto               graph = io->create_graph();
   for (const auto& edit : std::vector<std::function<void(Options&)>>{
            [](Options& o) { o.region.max_cells = 0; },  // no region consumer enabled
-           [](Options& o) { o.region.merge_um = -1; },
+           [](Options& o) { o.region.merge_um = -2; },
            [](Options& o) { o.route_bins = 1; },
            [](Options& o) { o.legalize_bins = 1025; },
        }) {

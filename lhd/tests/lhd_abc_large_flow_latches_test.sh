@@ -28,7 +28,7 @@ synth() { # <tag> [extra --set ...]
   shift
   mkdir -p "$d"
   "$LHD" synth --result-json "$d/r.json" --reader slang --top abc_derived_clock --workdir "$d/W" --emit-dir lg:"$d/net" \
-    --emit-dir verilog:"$d/netv" --set synth.mapper=abc --set synth.liberty="$LIB" --set pass.abc.derived_clock=true \
+    --emit-dir verilog:"$d/netv" --set synth.mapper=abc --set synth.liberty="$LIB" --set synth.derived_clock=true \
     --set pass.abc.large_ge=1 "$@" -- "$SRC" > "$d/synth.log" 2>&1 || fail "$d: synth -> $(cat "$d/r.json" 2>/dev/null)"
   cat "$d/netv/"*.v > "$d/net.v"
 }

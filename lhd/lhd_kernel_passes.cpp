@@ -9,8 +9,13 @@
 #include <functional>
 #include <iterator>
 
+#include "nest_regions.hpp"
 #include "color_common.hpp"
 #include "graph_library_singleton.hpp"
+#include "diag.hpp"
+#include "core/hash_util.hpp"
+#include "file_utils.hpp"
+#include "synth_policy.hpp"
 #include "hhds/graph.hpp"
 #include "lhd_kernel_internal.hpp"
 #include "lnast_llvm.hpp"
@@ -619,6 +624,105 @@ void semdiff_command(Options& opts, Result& res) {
 // ---- pass (graph-pass plumbing: color / partition) --------------------------
 
 // Load every graph of an lg: library into `var` (mirrors synth's lg branch).
+std::vector<livehd::partition::Region_entry> apply_region_nesting(const std::string& lib_path) {
+  auto&                                     lib = livehd::Hhds_graph_library::instance(lib_path);
+  std::vector<std::shared_ptr<hhds::Graph>> wrappers;
+  for (const hhds::Gid id : lib.all_gids()) {
+    if (auto g = lib.get_graph(id); g && g->get_input_node().attr(livehd::attrs::region_nesting).has()) {
+      wrappers.push_back(std::move(g));
+    }
+  }
+  std::vector<livehd::partition::Region_entry> entries;
+  for (const auto& g : wrappers) {
+    auto own = livehd::partition::region_entries(*g);
+    entries.insert(entries.end(), std::make_move_iterator(own.begin()), std::make_move_iterator(own.end()));
+    (void)livehd::partition::nest_regions(lib, *g);
+  }
+  std::sort(entries.begin(), entries.end(), [](const auto& a, const auto& b) { return a.module < b.module; });
+  return entries;
+}
+
+void write_color_index(const std::vector<livehd::partition::Region_entry>& regions, const std::string& path) {
+  // Previous run: file -> content hash, and region -> its files.
+  absl::flat_hash_map<std::string, uint64_t>                 old_hash;
+  absl::flat_hash_map<std::string, std::vector<std::string>> old_files;
+  if (const auto text = livehd::file_utils::read_file(path)) {
+    rapidjson::Document doc;
+    doc.Parse(text->c_str());
+    if (doc.IsObject() && doc.HasMember("files") && doc["files"].IsObject() && doc.HasMember("regions") && doc["regions"].IsArray()) {
+      for (const auto& f : doc["files"].GetObject()) {
+        old_hash[f.name.GetString()] = std::strtoull(f.value.GetString(), nullptr, 16);
+      }
+      for (const auto& r : doc["regions"].GetArray()) {
+        auto& files = old_files[r["module"].GetString()];
+        for (const auto& f : r["files"].GetArray()) {
+          files.emplace_back(f.GetString());
+        }
+      }
+    }
+  }
+  absl::flat_hash_map<std::string, uint64_t> hash;
+  for (const auto& r : regions) {
+    for (const auto& f : r.files) {
+      if (!hash.contains(f)) {
+        // The source locator may keep an absolute path without its leading '/'.
+        auto contents = livehd::file_utils::read_file(f);
+        if (!contents && !f.starts_with('/')) {
+          contents = livehd::file_utils::read_file("/" + f);
+        }
+        hash[f] = contents ? livehd::hash_util::fnv1a64(*contents) : 0;
+      }
+    }
+  }
+  size_t clean = 0, known = 0;
+  for (const auto& r : regions) {
+    const auto it = old_files.find(r.module);
+    if (it == old_files.end()) {
+      continue;
+    }
+    ++known;
+    clean += it->second == r.files && std::all_of(r.files.begin(), r.files.end(), [&](const auto& f) {
+               const auto o = old_hash.find(f);
+               return hash[f] != 0 && o != old_hash.end() && o->second == hash[f];
+             });
+  }
+  std::string out = "{\"schema_version\":1,\"files\":{";
+  std::vector<std::string> names;
+  for (const auto& [f, h] : hash) {
+    names.push_back(f);
+  }
+  std::sort(names.begin(), names.end());
+  for (size_t i = 0; i < names.size(); ++i) {
+    out += std::format("{}{}:\"{:016x}\"", i ? "," : "", livehd::synth_attr::quote(names[i]), hash[names[i]]);
+  }
+  out += "},\"regions\":[";
+  for (size_t i = 0; i < regions.size(); ++i) {
+    const auto& r = regions[i];
+    out += std::format("{}{{\"module\":{},\"color\":{},\"parent\":{},\"path\":[",
+                       i ? "," : "",
+                       livehd::synth_attr::quote(r.module),
+                       r.color,
+                       livehd::synth_attr::quote(r.parent));
+    for (size_t j = 0; j < r.path.size(); ++j) {
+      out += (j ? "," : "") + r.path[j];  // each path element is already JSON
+    }
+    out += "],\"files\":[";
+    for (size_t j = 0; j < r.files.size(); ++j) {
+      out += (j ? "," : "") + livehd::synth_attr::quote(r.files[j]);
+    }
+    out += "]}";
+  }
+  out += "]}\n";
+  if (!(std::ofstream(path) << out)) {
+    throw Lhd_error{"config", "cannot write " + path, "check workdir permissions"};
+  }
+  if (known != 0) {
+    livehd::diag::outcome("synth", "color-index", "progress")
+        .msg("color index: {} of {} colors depend only on unchanged sources", clean, regions.size())
+        .emit();
+  }
+}
+
 void load_lg_into_var(const std::string& lib_path, Eprp_var& var) {
   auto& lib = livehd::Hhds_graph_library::instance(lib_path);
   for (const hhds::Gid id : lib.all_gids()) {  // gids are sparse name-hashes
@@ -957,9 +1061,11 @@ void pass_command(Options& opts, Result& res) {
       ensure_dir(lg_out->path);
       Eprp_var::Eprp_dict plabels;
       set_top_label(opts, var, plabels, "pass.partition");
-      plabels["out"] = lg_out->path;
+      plabels["out"]     = lg_out->path;
+      plabels["flatten"] = flatten_label(opts);
       merge_sets(opts, "pass.partition", plabels);
       run_step("pass.partition", var, plabels, opts, res);
+      apply_region_nesting(lg_out->path);
       {
         Phase_timer phase(res, "lg.save");
         livehd::Hhds_graph_library::save(lg_out->path);
@@ -984,9 +1090,11 @@ void pass_command(Options& opts, Result& res) {
       ensure_dir(lg_out->path);
       labels["out"] = lg_out->path;
     }
+    labels["flatten"] = flatten_label(opts);
     merge_sets(opts, "pass.partition", labels);
     run_step("pass.partition", var, labels, opts, res);
     if (lg_out != nullptr) {
+      apply_region_nesting(lg_out->path);
       {
         Phase_timer phase(res, "lg.save");
         livehd::Hhds_graph_library::save(lg_out->path);
@@ -1077,6 +1185,7 @@ void pass_command(Options& opts, Result& res) {
       }
     }
     if (lg_out != nullptr) {
+      apply_region_nesting(lg_out->path);  // after the mapper's region cache persisted the un-nested bodies
       {
         Phase_timer phase(res, "lg.save");
         livehd::Hhds_graph_library::save(lg_out->path);
@@ -1133,6 +1242,15 @@ void pass_command(Options& opts, Result& res) {
     // after, so an explicit `--set pass.opentimer.qor=FILE` still overrides.
     const std::string ephemeral_qor = opts.workdir.empty() ? (fs::path(workdir(opts)) / "timing.json").string() : std::string{};
     labels["qor"]                   = ephemeral_qor.empty() ? (fs::path(opts.workdir) / "timing.json").string() : ephemeral_qor;
+    {
+      std::string first_lib;
+      for (const auto& f : tfiles) {
+        if (first_lib.empty() && f.ends_with(".lib")) {
+          first_lib = f;
+        }
+      }
+      labels["io_load"] = resolve_io_load(opts, first_lib);
+    }
     merge_sets(opts, "pass.opentimer", labels);
     if (opts.stats) {
       labels["stats"] = "true";

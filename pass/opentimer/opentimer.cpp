@@ -1936,7 +1936,7 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
       if (livehd::is_provisional_domino_cell(type_name)) {
         livehd::diag::err("pass.opentimer", "netlist-unsupported", "unsupported")
             .msg("'{}' (instance {}) is a provisional domino cell with no Liberty timing model", type_name, instance_name)
-            .hint("time domino designs with the provisional stage model (pass/domplace); run them with synth.opentimer=false")
+            .hint("time domino designs with the provisional stage model (pass/domplace); run them with synth.timing=false")
             .fatal();
         return;
       }

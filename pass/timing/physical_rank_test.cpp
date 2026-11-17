@@ -120,7 +120,7 @@ TEST(PhysicalRank, StructuralChangeRebindsAndCutsRemoveTheStart) {
   EXPECT_EQ(ranker.statistics().binds, 1u);
   // A structural edit advances the body epoch: the next call binds again.
   auto extra = gu::create_typed_node(*design.graph, Ntype_op::Sub);
-  extra.set_subnode(design.library.create_io("INV"));
+  extra.set_subnode(design.library.find_io("INV"));
   const auto after = ranker.rank(design.graph, rc(5, 2000), {});
   EXPECT_EQ(ranker.statistics().binds, 2u);
   EXPECT_TRUE(std::isfinite(after.ranking->find("ub:D")->slack));

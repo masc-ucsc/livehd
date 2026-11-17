@@ -4,10 +4,12 @@
 
 namespace livehd::placement {
 class Placement_session;
+inline constexpr double kBoundaryDisplacementRows = 75;
 struct Boundary_pin_options {
   bool     enabled = false, split = true, order = false, align = false;
   unsigned iterations          = 50;
-  double   max_displacement_um = 20;
+  // -1 = auto: kBoundaryDisplacementRows placement-row heights (asap7: 75 x 0.27 = 20.25 um)
+  double   max_displacement_um = -1;
   // With order: GP iterations at the original crossings before the bus order is chosen, so the order follows where
   // the settled cells pull (0 orders at once).
   unsigned settle_iterations   = 20;

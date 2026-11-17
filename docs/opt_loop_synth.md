@@ -354,11 +354,11 @@ today, for the record:
 |---|---|---|
 | `pass.abc.flow` (comb) | empty => the built-in `kCombFlow`: `strash; &get -n; &sweep; &synch2 -K 6 -C 500; &if -m -K 6; &mfs; &save; &dch -C 500; &if -m -K 6; &mfs; &save; &load; &st; &sopb -R 10 -C 4; &synch2 -K 6 -C 500; &if -m -K 6; &mfs; &save; &dch -C 500; &if -m -K 6; &mfs; &save; &load; &st; &nf {D}; &put -o`. With the DEFAULT empty `delay` the mapper actually runs `kAreaFlow` (`strash; &get -n; &fraig -x -C 500; &put; dc2; strash; &get -n; &dch -f -C 500; &nf {D}; &put -o`); a built-in flow also gets the `kBufferTail` `; buffer -N {F}; dnsize {B}` when `max_fanout != 0` | `abc_map.cpp` (`kCombFlow`, `kAreaFlow`, `kBufferTail`) |
 | `pass.abc.flow` (seq) | same string (`kSeqFlow = kCombFlow`, and `seq_flow()` just returns `comb_flow()`) | `abc_map.cpp` (`kSeqFlow`) |
-| `pass.abc.delay` `{D}` | **empty — i.e. `&nf` runs UNCONSTRAINED** | `pass_abc.cpp` (`delay`) |
+| `synth.delay` `{D}` | **empty — i.e. `&nf` runs UNCONSTRAINED** | `pass_abc.cpp` (`delay`) |
 | `pass.abc.load` `{L}` | empty | `pass_abc.cpp` (`load`) |
-| `pass.abc.adder` | **`auto`** (starts ripple-carry, trials `cla`/`cska`) | `pass_abc.cpp` (`adder`) |
-| `pass.abc.block_size` | `0` (auto) | `pass_abc.cpp` (`block_size`) |
-| `pass.abc.multiplier` | **`auto`** (serial partial-product addition, trials a balanced `tree`) | `pass_abc.cpp` (`multiplier`) |
+| `synth.adder` | **`auto`** (starts ripple-carry, trials `cla`/`cska`) | `pass_abc.cpp` (`adder`) |
+| `synth.block_size` | `0` (auto) | `pass_abc.cpp` (`block_size`) |
+| `synth.multiplier` | **`auto`** (serial partial-product addition, trials a balanced `tree`) | `pass_abc.cpp` (`multiplier`) |
 | `pass.abc.register` | `true` (flops map to Liberty DFF cells) | `pass_abc.cpp` (`register`) |
 | `pass.abc.memory` | `auto` (fold a memory within `memory_max_bits`, or over 3 ports whatever the size) | `pass_abc.cpp` (`memory`) |
 | `pass.abc.memory_max_bits` | `1024` | `pass_abc.cpp` (`memory_max_bits`) |

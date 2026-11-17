@@ -32,7 +32,7 @@ fi
 
 for mapper in abc usyn; do
   run synth "$FIX" --reader slang --top "$TOP" --workdir "$W/w_$mapper" --emit-dir lg:"$W/net_$mapper" \
-    --set synth.liberty="$LIB" --set synth.mapper="$mapper" --set synth.opentimer=false
+    --set synth.liberty="$LIB" --set synth.mapper="$mapper" --set synth.timing=false
 done
 
 run pass liberty gensim "$LIB" --emit-dir lg:"$W/models" --workdir "$W/w_models"

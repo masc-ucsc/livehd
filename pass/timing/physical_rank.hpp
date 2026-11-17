@@ -60,6 +60,12 @@ public:
     std::string              sdc_text;
     // Unit-less SDC numbers are in the units of the first Liberty (as every SDC consumer reads them).
     fast::Options            engine;
+    // Without an SDC (`sdc_text` empty): every input port whose net reaches a Liberty clock pin, through cells with
+    // one input, is an ideal clock of `default_period_ps`; inputs launch at 0 and every output port is an endpoint.
+    bool                     default_constraints = false;
+    float                    default_period_ps   = 1e6f;
+    // The load of an output port the constraints give none (synth.io_load, shared with the mappers), in fF.
+    float                    output_load_ff      = 0;
   };
   struct Statistics {
     size_t binds = 0, ranks = 0, evaluations = 0, remaps = 0, bad_trees = 0, unresolved_labels = 0;

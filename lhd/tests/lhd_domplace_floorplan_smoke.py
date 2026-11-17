@@ -33,7 +33,7 @@ args = ['lhd/lhd', 'synth', str(source), '--top', 'domf', '--set', f'synth.liber
         '--set', f'synth.lef={libdir}/sky130hd.tlef,{libdir}/sky130hd.lef', '--set', f'synth.sdc={sdc}', '-q',
         '--set', 'synth.mapper=usyn', '--set', 'pass.usyn.clock_phases=1', '--set', 'pass.usyn.tmap=abc',
         '--set', 'pass.usyn.physical=domino_provisional', '--set', 'pass.usyn.domino_select=all',
-        '--set', 'synth.opentimer=false', '--set', 'synth.place.timing_driven=false',
+        '--set', 'synth.timing=false', '--set', 'synth.place.timing_driven=false',
         '--set', 'synth.place.iterations=80', '--set', 'synth.place.grid.density=8',
         '--set', f'synth.place.legalize.padding_sites={padding}', '--workdir', str(root / 'W')]
 

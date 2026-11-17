@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstdio>
 #include <functional>
+#include <limits>
 #include <map>
 #include <numeric>
 #include <queue>
@@ -427,19 +428,33 @@ Global_routes global_route(const Grid& g, const std::vector<int>& cap_h, const s
   }
   // negotiation: the nets through an edge over its room reroute under the raised cost, until no edge is over
   std::vector<char> rip(nets.size(), 0);
+  // Three rounds in a row that leave the overflow (in tracks) within 2% of the best round so far have stalled: the
+  // history costs had their chance to open detours, the rest is structural (macro channels, pin edges) and more
+  // rounds only burn the per-net search budgets again.
+  size_t   best_over_tracks = std::numeric_limits<size_t>::max();
+  unsigned flat_rounds      = 0;
   for (unsigned round = 1; round <= rounds; ++round) {
-    size_t over_edges = 0;
+    size_t over_edges = 0, over_tracks = 0;
     for (size_t t = 0; t < N; ++t) {
       if (use_h[t] > lim_h[t]) {
         hist_h[t] += double(use_h[t] - lim_h[t]) / double(std::max(1, lim_h[t]));
         ++over_edges;
+        over_tracks += size_t(use_h[t] - lim_h[t]);
       }
       if (use_v[t] > lim_v[t]) {
         hist_v[t] += double(use_v[t] - lim_v[t]) / double(std::max(1, lim_v[t]));
         ++over_edges;
+        over_tracks += size_t(use_v[t] - lim_v[t]);
       }
     }
     if (over_edges == 0) {
+      break;
+    }
+    if (double(over_tracks) <= .98 * double(best_over_tracks)) {
+      best_over_tracks = over_tracks;
+      flat_rounds      = 0;
+    } else if (++flat_rounds >= 3) {
+      out.stalled = true;
       break;
     }
     out.rounds = round;

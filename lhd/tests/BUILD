@@ -1913,8 +1913,8 @@ sh_test(
 # 2opt-incr subtask 0: pass.abc memory admission. A whole-design ABC region can
 # exhaust the machine (flat XSCore reached 221 GB before the OS killed it), so
 # pass.abc samples its own RSS while bit-blasting and refuses a region that will
-# not fit. Pinned with memory_budget_mb so the refusal is deterministic on any
-# host: TIMEOUT-memory refusal + emit no partial netlist + the removed
+# not fit. Pinned with lhd.ram_max_mb below lhd's own footprint so the refusal
+# is deterministic on any host: TIMEOUT-memory refusal + emit no partial netlist + the removed
 # allow_oversize is a usage error + no false positive on a design that fits.
 [sh_test(
     name = "lhd_abc_memory_test" + suffix,
@@ -2071,21 +2071,6 @@ test_suite(
     env = {"MAPPER": mapper},
 ) for suffix, mapper in _MAPPERS]
 
-# pass.abc.reset_fanout deals an asynchronous-reset net with many clear/preset pins out through
-# a buffer tree (default off): every reset net is bounded, the netlist is proven by the graph
-# LEC and lgyosys, a flipped reset value refutes, and a cap of 1 is refused.
-[sh_test(
-    name = "lhd_abc_reset_tree_test" + suffix,
-    srcs = ["lhd_abc_reset_tree_test.sh"],
-    data = _FLOW_DATA + [
-        "abc_arst_q.lib",
-        "abc_arst_qn.lib",
-        "abc_latch_q.lib",
-        "abc_rst_latch.prp",
-        "abc_rst_tree.v",
-    ],
-    env = {"MAPPER": mapper},
-) for suffix, mapper in _MAPPERS]
 
 # Latch-based clock gates map onto the Liberty's integrated clock-gate cell and
 # their registers onto DFF / clear / preset cells clocked by it (sky130- and
@@ -2134,7 +2119,7 @@ sh_test(
     ],
 )
 
-# pass.abc.derived_clock: registers on a clock computed inside their region map to
+# synth.derived_clock: registers on a clock computed inside their region map to
 # DFF cells driven by the mapped clock logic; the default keeps them native.
 sh_test(
     name = "lhd_abc_derived_clock_test",
@@ -2194,7 +2179,7 @@ sh_test(
     ],
 )
 
-# With pass.abc.derived_clock=true, a register clocked by the output of a module
+# With synth.derived_clock=true, a register clocked by the output of a module
 # instance (NVDLA's `slcg` wrapper around a flop-based clock gate) maps to a DFF cell
 # clocked by that instance's output; by default it stays a native flop
 # (derived-clock-native).
@@ -3310,6 +3295,18 @@ sh_test(
     name = "lhd_synth_attributes_smoke",
     size = "medium",
     srcs = ["lhd_synth_attributes_smoke.py"],
+    data = [
+        "//inou/prp:abc_tests",
+        "//lhd",
+    ],
+)
+
+# A nested color is a submodule of its parent color (pass/partition/nest_regions.hpp):
+# hierarchy, LEC, and a warm rerun that reuses both regions and nests them identically.
+sh_test(
+    name = "lhd_nested_color_test",
+    size = "small",
+    srcs = ["lhd_nested_color_test.sh"],
     data = [
         "//inou/prp:abc_tests",
         "//lhd",

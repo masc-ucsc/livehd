@@ -1773,7 +1773,7 @@ void sim_command(Options& opts, Result& res) {
       init_zero = (v == "true" || v == "1" || v == "on");
     } else if (k == "sim.warn_undefined") {
       warn_undefined = (v == "true" || v == "1" || v == "on") ? "true" : "false";
-    } else if (k == "sim.unknown_zero") {
+    } else if (k == "compile.unknown_zero") {
       // Read here for the TESTBENCH literals (prp_sim); the DUT side gets the
       // same flag as an inou.cgen.sim label (lhd_kernel_common's sim.* mapping).
       unknown_zero     = (v == "true" || v == "1" || v == "on");

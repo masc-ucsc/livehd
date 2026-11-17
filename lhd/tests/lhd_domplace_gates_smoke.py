@@ -117,7 +117,7 @@ def synth(name, *extra):
     argv = [lhd, 'synth', str(root / f'{name}.v'), '--top', name, '-q', '--workdir', str(work),
             '--set', 'synth.mapper=usyn', '--set', 'pass.usyn.clock_phases=1', '--set', 'pass.usyn.tmap=abc',
             '--set', f'synth.liberty={root}/seq.lib', '--set', f'synth.lef={libdir}/sky130hd.tlef,{root}/seq.lef',
-            '--set', f'synth.sdc={sdc}', '--set', 'pass.usyn.physical=domino_provisional', '--set', 'synth.opentimer=false',
+            '--set', f'synth.sdc={sdc}', '--set', 'pass.usyn.physical=domino_provisional', '--set', 'synth.timing=false',
             '--set', 'pass.usyn.domino_select=all', '--set', 'compile.slang.liberty_cells=true',
             '--emit-dir', f'verilog:{work}/out', '--result-json', str(result)] + list(extra)
     completed = subprocess.run(argv, capture_output=True, text=True, timeout=20)

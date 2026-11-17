@@ -1,7 +1,7 @@
 #!/bin/bash
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #
-# pass.abc.derived_clock: a register clocked by logic computed inside its own region
+# synth.derived_clock: a register clocked by logic computed inside its own region
 # (a `clk & latch` gate with no integrated clock-gate cell in the Liberty, or any other
 # combinational derived clock) stays a native flop by default (derived-clock-native) --
 # physical synthesis cannot place that. With the option it maps to a plain DFF / clear /
@@ -26,7 +26,7 @@ synth() { # <tag> <top> <option>
   local d="$W/$1"
   mkdir -p "$d"
   "$LHD" synth --result-json "$d/r.json" --reader slang --top "$2" --workdir "$d/W" --emit-dir lg:"$d/net" \
-    --emit-dir verilog:"$d/netv" --set synth.mapper=abc --set synth.liberty="$LIB" --set pass.abc.derived_clock="$3" \
+    --emit-dir verilog:"$d/netv" --set synth.mapper=abc --set synth.liberty="$LIB" --set synth.derived_clock="$3" \
     -- "$SRC" > "$d/synth.log" 2>&1 || fail "$1: synth -> $(cat "$d/r.json" 2>/dev/null)"
   cat "$d/netv/"*.v > "$d/net.v"
 }
@@ -64,4 +64,4 @@ synth neg abc_derived_clock_neg true
 [ "$(count "$W/neg/net.v" '^always @(negedge ')" = 1 ] || fail "neg: expected the native negedge flop: $(grep 'always @' "$W/neg/net.v")"
 grep -q '"derived-clock-native"' "$W/neg/synth.log" || fail "neg: the negedge register must be reported native"
 
-echo "PASS: pass.abc.derived_clock maps derived-clock registers to DFF cells"
+echo "PASS: synth.derived_clock maps derived-clock registers to DFF cells"

@@ -25,7 +25,7 @@ EOF
 "$LHD" compile verilog --top dut --emit-dir "lg:$W/lg" --workdir "$W/compile" -- "$W/dut.sv"
 for backend in llvm slop; do
   common=("lg:$W/lg" "$W/tb.prp" --workdir "$W/$backend" --set sim.tune.profile=off
-          --set "sim.tune.backend=$backend" --set sim.init_zero=true --set sim.unknown_zero=true)
+          --set "sim.tune.backend=$backend" --set sim.init_zero=true --set compile.unknown_zero=true)
   "$LHD" sim "${common[@]}" --set sim.checkpoint_every=4 --result-json "$W/$backend-full.json"
   "$LHD" sim "${common[@]}" --run-only --restart-cycle 17 --result-json "$W/$backend-replay.json"
   python3 - "$W/$backend-full.json" "$W/$backend-replay.json" <<'PY'

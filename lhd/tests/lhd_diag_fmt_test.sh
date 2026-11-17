@@ -78,4 +78,37 @@ EOF
 "$LHD" compile "$W/loop.prp" --workdir "$W/w7" -q 2>/dev/null >"$W/r7.json" && fail "loop.prp must fail"
 grep -q '"class":"unsupported"' "$W/r7.json" || fail "a comptime-loop failure must be class unsupported: $(cat "$W/r7.json")"
 
+# 8. Every info producer, including --stats and cached records, obeys -d.
+# Reuse one workdir to cover replay with a changed filter as well as cold runs.
+for mode in pretty json; do
+  for selector in aegraph-rule none unrelated all none; do
+    set --
+    case "$selector" in
+      aegraph-rule) set -- -d aegraph-rule ;;
+      unrelated) set -- -d unrelated ;;
+      all) set -- -d ;;
+    esac
+    "$LHD" compile "$PRP" --workdir "$W/info_$mode" --stats --diag-fmt "$mode" "$@" \
+      >"$W/info_out" 2>"$W/info_err" || fail "info-filter compile failed"
+    case "$selector" in
+      none|unrelated)
+        grep -Eq 'livehd:.*info:|"severity":"info"' "$W/info_err" \
+          && fail "unselected info leaked ($mode/$selector): $(cat "$W/info_err")"
+        ;;
+      aegraph-rule|all)
+        grep -q 'aegraph-rule' "$W/info_err" || fail "selected aegraph-rule missing ($mode/$selector)"
+        ;;
+    esac
+    if [ "$selector" = aegraph-rule ]; then
+      # All info records in this stream must have the selected code/message.
+      grep -E 'livehd:.*info:|"severity":"info"' "$W/info_err" | grep -v 'aegraph-rule' \
+        && fail "a different info record escaped the code filter"
+    fi
+  done
+done
+# A selector alone must enable collection, without needing --stats.
+"$LHD" compile "$PRP" --workdir "$W/info_code_only" --diag-fmt pretty -d aegraph-rule \
+  >"$W/info_out" 2>"$W/info_err" || fail "code-only debug compile failed"
+grep -q 'livehd:info:aegraph-rule' "$W/info_err" || fail "-d aegraph-rule did not enable rule records"
+
 echo "PASS: --diag-fmt auto|json|pretty"

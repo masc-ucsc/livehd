@@ -30,7 +30,7 @@ synth() {
   shift 3
   local reader=()
   case "$in" in *.v) reader=(--reader slang) ;; esac
-  "$LHD" synth -d pass.abc,pass.usyn "$in" ${reader[@]+"${reader[@]}"} --top "$top" --workdir "$W/$tag" --set synth.liberty="$LIB" --set synth.opentimer=false \
+  "$LHD" synth -d pass.abc,pass.usyn "$in" ${reader[@]+"${reader[@]}"} --top "$top" --workdir "$W/$tag" --set synth.liberty="$LIB" --set synth.timing=false \
     --set lhd.incremental=false "$@" --emit-dir lg:"$W/net_$tag" >"$W/$tag.log" 2>&1 || fail "$tag: synth failed: $(tail -5 "$W/$tag.log")"
 }
 prove() {  # prove <tag> <top>
@@ -74,11 +74,11 @@ for mapper in abc usyn; do
     for value in 0 -1 4294967296 999999999999999999999999 2junk; do
       tag="invalid_${mapper}_${option}_${value}"
       if "$LHD" pass "$mapper" lg:"$W/on/synth/lg" --top clock_gate_share \
-          --set synth.liberty="$LIB" --set "pass.$mapper.$option=$value" \
+          --set synth.liberty="$LIB" --set "synth.$option=$value" \
           --workdir "$W/$tag" >"$W/$tag.log" 2>&1; then
         fail "$mapper accepted $option=$value"
       fi
-      grep -q 'positive 32-bit whole number' "$W/$tag.log" || fail "missing threshold diagnostic: $(tail -3 "$W/$tag.log")"
+      grep -qE 'positive 32-bit whole number|expects a non-negative integer' "$W/$tag.log" || fail "missing threshold diagnostic: $(tail -3 "$W/$tag.log")"
     done
   done
 done

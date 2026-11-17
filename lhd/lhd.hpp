@@ -71,6 +71,7 @@ struct Options {
   // (the driver seeds hlop's PRNG) only when `seed_explicit` — otherwise the
   // driver keeps its own default seed.
   unsigned    jobs          = 0;  // shared cross-domain ceiling; 0 = affinity-aware CPU count
+  double      ram_budget_mb = 8192;  // lhd.ram_budget_mb: soft RAM target that sizes chunks; 0 = no split
   std::string seed          = "0";
   bool        seed_explicit = false;  // user passed `--seed`/`--set lhd.seed=`
   // Verilog front-end. Default `slang` — the direct inou.slang SV -> LNAST
@@ -630,14 +631,6 @@ inline constexpr Sim_set_option kSimSetOptions[] = {
      "false", Sim_set_option::Kind::boolean,
      "use zero as the power-on value only for flops and memories that have neither an initializer nor a reset. "
      "Explicit initial values and runtime reset values are unchanged", Sim_set_option::Stage::run},
-    {"unknown_zero",
-     "false", Sim_set_option::Kind::boolean,
-     "fill every unknown (`?`) literal bit with 0 instead of a random 0/1. Slop carries no runtime X, so a `?` must "
-     "become some concrete bit; the default DRAWS it from the run's seeded PRNG (--seed / lhd.seed, reported as "
-     "run.seed + rng_draws) so an unspecified bit cannot be silently relied on, and the draw is once per literal "
-     "per run — the value is stable across cycles. true restores the deterministic-zero fill, which also lets the "
-     "literal fold at C++ compile time. Orthogonal to sim.init_zero, which covers the power-on value of state "
-     "having neither an initializer nor a reset", Sim_set_option::Stage::both},
     {"warn_undefined",
      "true", Sim_set_option::Kind::boolean,
      "print a warning on stderr the FIRST time each site computes a value the source leaves undefined -- a division "
@@ -666,7 +659,7 @@ inline constexpr Sim_set_option kSimSetOptions[] = {
      "auto", Sim_set_option::Kind::tune_mode,
      "auto|on|off — profile-guided tuning of the sim.tune.* speed knobs; needs a user --workdir and lhd.incremental. "
      "auto: while the workdir holds no CONVERGED tune data, runs profile (drv.bin samples state activity; `?` "
-     "literals zero-fill unless sim.unknown_zero is set; checkpoints are skipped) and the next setup may trial ONE "
+     "literals zero-fill unless compile.unknown_zero is set; checkpoints are skipped) and the next setup may trial ONE "
      "better vector, kept only if >= 7% cheaper per simulated cycle with byte-identical results; converged data is "
      "reused with no sampling. on: profile and learn even when converged. off: ignore the workdir's tune data. An "
      "explicit sim.tune.X or positional simulation tuning always wins. The envelope's `sim_tune` member reports what was applied", Sim_set_option::Stage::both},
@@ -745,7 +738,7 @@ static_assert(sim_tune_registry_ok(), "sim.tune.* holds only speed knobs (with a
 // not pass labels). Same contract as kSimSetOptions: this array is the single
 // source of truth for --set validation, `lhd list options`, and the
 // `lhd synth --help` options block. Pass-level tuning still rides the pass
-// namespaces (`--set abc.adder=cla`, `--set color.hier=false`, ...).
+// namespaces (`--set synth.adder=cla`, `--set color.hier=false`, ...).
 struct Synth_set_option {
   // `source_only`: a source attribute with no run-wide value; --set is refused.
   enum class Kind { boolean, file, integer, mapper, source_only };
@@ -842,7 +835,7 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
     {"place.area_search",
      "false",
      Synth_set_option::Kind::boolean,
-     "core search state, set by the driver: failures go back to the search"},
+     "INTERNAL: core search state, set by the driver: failures go back to the search"},
     {"place.area_search.start", "0.8", Synth_set_option::Kind::file, "core search: the first utilization tried"},
     {"place.area_search.min", "0.4", Synth_set_option::Kind::file, "core search: the lowest utilization considered"},
     {"place.area_search.max", "0.99", Synth_set_option::Kind::file, "core search: the highest utilization considered"},
@@ -876,17 +869,21 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
     {"place.mesh_variants",
      "0",
      Synth_set_option::Kind::integer,
-     "no effect: the legroute regional retry that tried other region meshes was removed (kept so command lines still "
-     "parse)"},
+     "INTERNAL: no effect (the legroute regional retry that tried other region meshes was removed)"},
     {"place.mesh_variant",
      "0",
      Synth_set_option::Kind::integer,
-     "no effect: restart-loop state of the removed legroute regional retry (kept so command lines still parse)"},
+     "INTERNAL: restart-loop state the driver sets (the legroute regional retry was removed)"},
     {"place.area_restarts",
      "12",
      Synth_set_option::Kind::integer,
      "placements at a lower utilization (core growth: legroute, or a generated core whose cells or macros do not "
      "legalize) before stopping"},
+    {"place.legroute.area_restarts",
+     "1",
+     Synth_set_option::Kind::integer,
+     "with legroute and allow_increase_area on a generated core: core growths the plan's leftover routing overflow "
+     "may ask for; after that the best measured round goes to the terminal legalizer with its overflow reported"},
     {"place.area_step",
      "0.92",
      Synth_set_option::Kind::file,
@@ -973,8 +970,6 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      Synth_set_option::Kind::file,
      "optional final-cell clearance around fixed macros: H or X,Y microns; empty inherits place.halo; "
      "each axis must not exceed place.halo; macro placement and macro-to-macro spacing retain place.halo"},
-    {"place.chunk.memory_gb", "4", Synth_set_option::Kind::file,
-     "resident memory target in decimal GB per placement chunk; 0 requests one chunk; a larger single color gets its own allowance"},
     {"place.chunk.only", "", Synth_set_option::Kind::file, "physical home ID to project and place in export or feedback mode; default: all homes"},
     {"place.chunk.run", "flow", Synth_set_option::Kind::file, "flow: full placement; feedback: place isolated homes in sequence; export: write standalone home jobs"},
     {"place.chunk.seed_detail", "true", Synth_set_option::Kind::boolean,
@@ -1032,24 +1027,19 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      "",
      Synth_set_option::Kind::file,
      "optional comma-separated clock/reset root-port override; absent uses synthesis and Liberty/LEF metadata"},
-    {"place.repair.reset",
-     "false",
-     Synth_set_option::Kind::boolean,
-     "retired control; must be false because pre-CTS clock/reset networks are not sized (synth.place.reset_fanout builds the reset "
-     "tree)"},
     {"place.pcrs",
      "true",
      Synth_set_option::Kind::boolean,
-     "pass.pcrs: rebuild every reset distribution (reset-role nets and asynchronous clear/preset pins) as one balanced tree of "
-     "flop levels and buffers per (reset root, clock domain), with place.reset_fanout loads per driver; every sink of a domain "
-     "sees the reset the same number of cycles late, and the reset is ordinary data for placement and timing. false: the "
-     "pre-pcrs buffer tree with reset networks excluded from placement and timing"},
-    {"place.reset_fanout",
-     "32",
-     Synth_set_option::Kind::integer,
-     "before placement, every flat reset net (asynchronous clear/preset pins, domino storage RST pins, synthesis reset "
-     "roles such as a synchronous reset) with more cell loads is dealt through a tree of the library's smallest buffer, "
-     "at most this many loads per buffer, for every mapper (abc, usyn, domino profile); 0 = off, else >= 2"},
+     "pass.pcrs (power, clock, reset and scan-chain networks; only reset exists so far): rebuild every reset distribution "
+     "(reset-role nets and asynchronous clear/preset pins) as one balanced tree per (reset root, clock domain), at most "
+     "synth.max_fanout loads per driver, timed and repaired as ordinary data. false: no pcrs (the legacy buffer tree, outside "
+     "timing)"},
+    {"place.pcrs.reset_pipeline",
+     "true",
+     Synth_set_option::Kind::boolean,
+     "with synth.place.pcrs: pipeline the reset tree with flop levels chosen by placement timing feedback (a level is added "
+     "while the tree is on the worst path, taken back where slack allows); every sink of a domain sees the reset the same "
+     "number of cycles late, so release stays synchronous. false: 0 levels, a balanced buffer tree"},
     {"place.eval_budget",
      "6",
      Synth_set_option::Kind::integer,
@@ -1362,12 +1352,10 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      Synth_set_option::Kind::file,
      "optional TSV (instance, x, y in DBU) of initial cell positions; a forked region starts from its parent's placement. "
      "Not an RNG seed: that is the shared `lhd.seed`"},
-    {"place.wire_rc", "", Synth_set_option::Kind::file, "wire RC override: ohm/um,fF/um; empty derives it from LEF"},
     {"place.rc_pessimism",
      "1",
      Synth_set_option::Kind::file,
      "wire RC product multiplier >=1; scales wire R and C by its square root"},
-    {"place.tech_rc", "", Synth_set_option::Kind::file, "characterized technology RC file: literal set_wire_rc/set_layer_rc data"},
     {"place.tracks",
      "",
      Synth_set_option::Kind::file,
@@ -1394,7 +1382,7 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      "32",
      Synth_set_option::Kind::integer,
      "pass.usyn.physical=domino_provisional: a net on domino data rails with more cell loads is dealt through the "
-     "pre-placement buffer tree of synth.place.reset_fanout, at most this many loads per buffer (the per-region mapping "
+     "pre-placement buffer tree, at most this many loads per buffer (the per-region mapping "
      "never buffers a rail); 0 leaves rails as the mapping emitted them. No effect without domino cells"},
     {"place.domino_sizing",
      "false",
@@ -1507,9 +1495,10 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      Synth_set_option::Kind::integer,
      "movable-cell cap per detail-final region rectangle (shared by region.busorder, region.boundarypins, region.pinalign)"},
     {"place.region.merge_um",
-     "5",
+     "auto",
      Synth_set_option::Kind::file,
-     "merge region cut lines from macro edges and IO bus spans within this distance in microns"},
+     "merge region cut lines from macro edges and IO bus spans within this distance in microns; auto = 20 placement-row "
+     "heights (asap7: 5.4)"},
     {"place.region.cut",
      "macro",
      Synth_set_option::Kind::file,
@@ -1550,9 +1539,10 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      Synth_set_option::Kind::integer,
      "extra final GP iterations with frozen boundary pins"},
     {"place.region.boundarypins.max_displacement_um",
-     "20",
+     "auto",
      Synth_set_option::Kind::file,
-     "maximum extra GP movement per axis, reduced by timing criticality"},
+     "maximum extra GP movement per axis in microns, reduced by timing criticality; auto = 75 placement-row heights "
+     "(asap7: 20.25)"},
     {"place.region.boundarypins.settle_iterations",
      "20",
      Synth_set_option::Kind::integer,
@@ -1575,7 +1565,7 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      "the regular terminal legalizer. Remaining routing overflow is reported (qor.json, legroute_plan_selection.json); "
      "on a fixed die/core it never stops the run"},
     {"place.legroute.plan.rounds",
-     "3",
+     "2",
      Synth_set_option::Kind::integer,
      "with legroute: maximum routing-feedback placement rounds; each candidate is rerouted before acceptance"},
     {"place.legroute.plan.iterations",
@@ -1998,10 +1988,21 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      "200",
      Synth_set_option::Kind::integer,
      "minimum final GP iterations before timing checkpoints or adaptive timing trials; final reports remain enabled"},
-    {"timing.engine",
-     "opentimer",
+    {"wire_rc",
+     "auto",
      Synth_set_option::Kind::file,
-     "opentimer|fast|compare: the engine behind the placement ranking callback; compare runs both and logs the agreement"},
+     "the wire RC of synthesis timing and placement (OpenROAD's set_wire_rc / set_layer_rc): auto = the tech LEF's average "
+     "routing-layer R and C (no tech LEF: no wire), `R,C` in ohm/um,fF/um (`0` = no wire), or a technology RC file "
+     "with literal set_wire_rc / set_layer_rc data (e.g. ORFS setRC.tcl). Before placement every net gets that RC times "
+     "a fanout-length estimate (the Liberty default_wire_load table, else sky130hd's scaled by the placement-row height)"},
+    {"timing.engine",
+     "fast",
+     Synth_set_option::Kind::file,
+     "fast|opentimer|compare: the timing engine of `lhd synth` -- the synthesis timing report (timing.json) and the placement "
+     "ranking. fast = the native engine (pass/timing: SDC, placed RC, or the synthesis wire estimate before placement: the "
+     "tech LEF's average wire RC per um times a fanout-length predictor, the Liberty default_wire_load table or, without "
+     "one, that table scaled by the placement-row height). opentimer = OpenTimer, for debugging and validation; compare "
+     "runs both for the placement ranking and logs the agreement"},
     {"place.timing_profile",
      "false",
      Synth_set_option::Kind::boolean,
@@ -2037,10 +2038,17 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      "0.30",
      Synth_set_option::Kind::file,
      "maximum fraction of usable tracks reserved per layer and gcell, 0..1"},
-    {"place.preroute.setup_margin", "20", Synth_set_option::Kind::file, "minimum pre-route setup slack in ps"},
+    {"place.preroute.setup_margin",
+     "auto",
+     Synth_set_option::Kind::file,
+     "minimum pre-route setup slack in ps; auto = 1.5 FO4 of the Liberty's smallest NOT cell (asap7: 18)"},
     {"place.preroute.hold_margin", "-1", Synth_set_option::Kind::file, "minimum hold slack in ps; -1 uses two HOLD_BUF delays"},
     {"place.preroute.hold_buffer", "auto", Synth_set_option::Kind::file, "Liberty hold buffer; auto uses the profile default"},
-    {"place.preroute.nominal_slew", "20", Synth_set_option::Kind::file, "HOLD_BUF nominal input slew in ps, at fanout-one load"},
+    {"place.preroute.nominal_slew",
+     "auto",
+     Synth_set_option::Kind::file,
+     "HOLD_BUF nominal input slew in ps, at fanout-one load; auto = the HOLD_BUF's own output slew driving one copy of "
+     "itself (the fixed point of a buffer chain)"},
     {"place.preroute.budget_ms", "10", Synth_set_option::Kind::integer, "per-net pre-route search budget in milliseconds"},
     {"place.preroute.stage_budget_ms", "10000", Synth_set_option::Kind::integer, "whole pre-route search budget in milliseconds"},
     {"place.preroute.bins", "64", Synth_set_option::Kind::integer, "pre-route capacity/RSMT bins per axis, 1..512"},
@@ -2105,6 +2113,83 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
     {"multiplier", "auto", Synth_set_option::Kind::file, "shared default: auto|array|tree|csa|tdm"},
     {"barrel", "auto", Synth_set_option::Kind::file, "shared default: auto|log|reverse"},
     {"block_size", "0", Synth_set_option::Kind::integer, "shared CSKA/CLA block width; 0 derives it from width"},
+    {"area_relax",
+     "100",
+     Synth_set_option::Kind::integer,
+     "max percent of measured timing slack a timed region trades back for area (either mapper): when the mapped region "
+     "beats its delay budget it is re-mapped with ABC's `&nf -R <pct>` relaxation, bounded by this cap and the real "
+     "slack, then re-sized to the budget. 0 always maps for minimum delay. Needs a delay budget and an NLDM Liberty"},
+    {"boundary",
+     "false",
+     Synth_set_option::Kind::boolean,
+     "size every region against what lies beyond its partition boundary (either mapper): a static estimate of the "
+     "consumer pins per output bit and a stand-in driver per input while it maps, then the exact drivers and sink "
+     "capacitances read off the stitched netlist, against which each region is re-sized in place (needs an NLDM "
+     "Liberty; the exact re-size also needs a delay budget)"},
+    {"derived_clock",
+     "true",
+     Synth_set_option::Kind::boolean,
+     "map a register clocked by logic that is not a recognized clock gate (a gated or derived clock, e.g. `clk & latch` "
+     "when the Liberty has no integrated clock-gate cell) to a plain DFF cell whose clock pin the mapped logic drives, "
+     "instead of a native flop that physical synthesis cannot place (either mapper)"},
+    {"io_load",
+     "auto",
+     Synth_set_option::Kind::file,
+     "load in fF on every primary output of --top (and on a port whose sink cannot be resolved), the same for pass.abc, "
+     "pass.usyn and pass.opentimer: the mappers size against the load the timer measures. auto = 16 input capacitances of "
+     "the synth.liberty smallest NOT cell (a 4xFO4 load)"},
+    {"flatten",
+     "false",
+     Synth_set_option::Kind::boolean,
+     "true: map the whole design as one flat region, one output module named after the top (pass.partition, pass.abc, "
+     "pass.usyn). Off by default: only some small designs gain from it (set it per design). Either way a color is always "
+     "one flat graph -- a coloring that crosses module boundaries is re-inlined for its regions -- and only the hierarchy "
+     "calling the colors stays. compile.flatten is the compile-time splice of the compiled graphs"},
+    {"unroll_carry",
+     "true",
+     Synth_set_option::Kind::boolean,
+     "expand carry-dependent loops before mapping (either mapper). false maps their bodies separately and stitches the "
+     "carry connections afterwards, for benchmarking; independent loops always map separately"},
+    {"drop_init",
+     "false",
+     Synth_set_option::Kind::boolean,
+     "map a resetless register with a power-on `initial` value to a plain DFF cell and drop the value (what Yosys does "
+     "for an ASIC), instead of keeping it on a native flop that cannot be placed"},
+    {"port_bypass",
+     "",
+     Synth_set_option::Kind::file,
+     "true|false: a region output reads the signal at the root of the buffer chain that leads to it, not the chain's last "
+     "buffer (placement buffers what is beyond a port). Empty = true for the abc mapper with synth.partition=coarse, else "
+     "false"},
+    {"boundary_buffer",
+     "true",
+     Synth_set_option::Kind::boolean,
+     "tree every region input's fanout inside the region past synth.max_fanout by declaring synth.boundary_drive as its "
+     "driver; false leaves inputs unbuffered and relies on the exact re-size to upsize the driver"},
+    {"boundary_drive",
+     "",
+     Synth_set_option::Kind::file,
+     "stand-in Liberty cell driving a region input whose real driver is not a mapped cell (a primary input, a flop, a "
+     "memory or child output): empty = the library's smallest buffer, `none` = an ideal zero-slew driver"},
+    {"boundary_rounds",
+     "1",
+     Synth_set_option::Kind::integer,
+     "rounds of the exact boundary re-size: each round sizes every region under the loads and drivers as they stand plus "
+     "the budgets the previous round propagated across the hierarchy (a path through k regions needs k rounds), 1..64"},
+    {"max_fanout",
+     "16",
+     Synth_set_option::Kind::integer,
+     "cap the fanout of every mapped net (`buffer -N <n>` plus down-sizing after mapping; 0 disables)"},
+    {"reg_margin",
+     "auto",
+     Synth_set_option::Kind::file,
+     "register overhead subtracted from the delay budget of a flop-bearing region: auto = the mapped DFF cell's clk->Q + "
+     "setup from its Liberty tables, a number = that many ps, 0 = no margin"},
+    {"region_opts",
+     "",
+     Synth_set_option::Kind::file,
+     "per-region option overrides as JSON keyed by color id, e.g. '{\"4\":{\"adder\":\"cla\"}}'; overridable per region: "
+     "flow|delay|load|adder|block_size|multiplier|barrel|ware (unknown keys or malformed values are hard errors)"},
     {"memory",
      "auto",
      Synth_set_option::Kind::file,
@@ -2113,13 +2198,13 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      "the port count decide (auto); an explicit pass.abc.memory wins; source pins override it per memory"},
     {"delay",
      "",
-     Synth_set_option::Kind::integer,
-     "timing budget in ps for every region (= pass.abc.delay); source pins override it"},
+     Synth_set_option::Kind::file,
+     "timing budget in ps for every region, read by either mapper (`lhd synth`, `lhd pass abc|usyn`); source pins override it"},
     {"delay_frac",
      "0.4",
      Synth_set_option::Kind::file,
      "timing budget as a fraction of the smallest create_clock period of synth.sdc (e.g. 0.4); used only when no "
-     "synth.delay or pass.abc.delay is set, so one value can be shared by designs with different clocks"},
+     "synth.delay is set, so one value can be shared by designs with different clocks"},
     {"stop_mux",
      "",
      Synth_set_option::Kind::boolean,
@@ -2167,7 +2252,7 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      "auto|fine|coarse: region granularity, independent of the mapper. fine cuts at wide arithmetic/shifters/compares/muxes "
      "and extracts ware modules (small ABC regions); coarse keeps register-to-register cones and extracts nothing. With "
      "the ABC mapper coarse cones are bounded softly (pass.color.synth.convex: a region passes max_gate only where no cut "
-     "is free) and region outputs skip the mapper's buffer chains (pass.abc.port_bypass). "
+     "is free) and region outputs skip the mapper's buffer chains (synth.port_bypass). "
      "auto = the mapper's own profile (abc: fine, usyn: coarse). Explicit color.* settings still win"},
     {"tune.profile",
      "auto",
@@ -2198,16 +2283,23 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      Synth_set_option::Kind::file,
      "comma-separated Liberty files of hard macros (blackbox modules with a MACRO in synth.lef), read by the timers "
      "after synth.liberty"},
-    {"sram",
+    {"memory.sram",
      "false",
      Synth_set_option::Kind::boolean,
      "true: a memory kept native (synth.memory=macro, or auto above pass.abc.memory_max_bits) becomes a generated SRAM "
      "macro -- any port count, a Liberty and LEF view written under --workdir/synth and handed to the timers and the "
      "placer -- instead of a cgen_memory RTL instance. Forwarding between ports, power-on contents, whole-array "
      "update/reset and several write clocks keep the native instance"},
-    {"sram.um2_per_bit", "0.49", Synth_set_option::Kind::file, "generated SRAM macro area per stored bit, um2 (asap7 fakeram)"},
-    {"sram.access_ns", "0.218", Synth_set_option::Kind::file, "generated SRAM macro read delay (clock to data, or address to data for an asynchronous read), ns"},
-    {"sram.min_bits", "2048", Synth_set_option::Kind::integer, "with synth.sram, a memory with fewer bits than this is bit-blasted to flops (the smallest macro)"},
+    {"memory.um2_per_bit",
+     "auto",
+     Synth_set_option::Kind::file,
+     "generated SRAM macro area per stored bit, um2; auto = 11 areas of the synth.liberty smallest NOT cell (asap7: 0.48)"},
+    {"memory.access_ns",
+     "auto",
+     Synth_set_option::Kind::file,
+     "generated SRAM macro read delay (clock to data, or address to data for an asynchronous read), ns; auto = 18 FO4 of "
+     "the synth.liberty smallest NOT cell (asap7: 0.22). Setup/hold, pin loads and voltage scale with the same cell"},
+    {"memory.min_bits", "2048", Synth_set_option::Kind::integer, "with synth.memory.sram, a memory with fewer bits than this is bit-blasted to flops (the smallest macro)"},
     {"liberty",
      "",
      Synth_set_option::Kind::file,
@@ -2215,11 +2307,11 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      "and `lhd pass opentimer` (times with it, when no .lib positional is given). Empty = "
      "$LHD_TECH_DIR/sky130_fd_sc_hd__tt_025C_1v80.lib (install a PDK with `ciel`). It is the ONE spelling -- a "
      "`pass.abc.library` --set is refused -- so no two readers in a flow can land on different cells"},
-    {"opentimer",
+    {"timing",
      "true",
      Synth_set_option::Kind::boolean,
-     "run OpenTimer STA on the mapped netlist (timing.json under --workdir/synth, the critical path in the "
-     "report). false stops after the ABC map"},
+     "time the mapped netlist (synth.timing.engine; timing.json under --workdir/synth, the critical path in the "
+     "report). false stops after the technology map"},
     {"reduce",
      "false",
      Synth_set_option::Kind::boolean,

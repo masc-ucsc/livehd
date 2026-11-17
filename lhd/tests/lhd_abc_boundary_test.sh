@@ -27,9 +27,9 @@
 # testing the default, not this contract.
 #
 # MAPPER=usyn: native USYN's optional ABC tmap maps the selected network under
-# the USYN timing target `pass.usyn.delay` (abc.* options are not inherited) and
+# the USYN timing target `synth.delay` (abc.* options are not inherited) and
 # applies the same PHYSICAL-only techniques under pass.usyn spellings: the
-# boundary environment and exact re-size (`pass.usyn.boundary`,
+# boundary environment and exact re-size (`synth.boundary`,
 # `boundary_rounds`), fanout buffering (`max_fanout`, `boundary_buffer`) and
 # sizing to the budget. So the NAND2x1 -> NAND2x2 upsize and both switches hold
 # for USYN too. The qor.json scoreboard and pass.abc's dont-use diagnostic are
@@ -55,11 +55,11 @@ esac
 # The rounds the propagated-budget contract needs; NOT the default (see above).
 # Both are word-split on purpose (no value holds a space).
 if [ "$MAPPER" = abc ]; then
-  ROUNDS="--set abc.boundary=true --set abc.boundary_rounds=3"
-  DELAY="--set abc.delay=25"
+  ROUNDS="--set synth.boundary=true --set synth.boundary_rounds=3"
+  DELAY="--set synth.delay=25"
 else
-  ROUNDS="--set pass.usyn.boundary_rounds=3"
-  DELAY="--set pass.usyn.delay=25"
+  ROUNDS="--set synth.boundary=true --set synth.boundary_rounds=3"
+  DELAY="--set synth.delay=25"
 fi
 
 LHD=lhd/lhd
@@ -106,7 +106,7 @@ else
   # budget of every mapped region, and the crossing driver is timed under the
   # real library.
   python3 - "$W/w_on/qor.json" "$W/w_on/qor.json.usyn.json" "$TOP" <<'PY' \
-    || fail "pass.usyn.delay=25 did not reach the technology-map regions"
+    || fail "synth.delay=25 did not reach the technology-map regions"
 import json, sys
 q = json.load(open(sys.argv[1]))
 n = json.load(open(sys.argv[2]))
@@ -132,7 +132,7 @@ fi
 # noticing, not a silent improvement.
 if [ "$MAPPER" = abc ]; then
   run pass "$MAPPER" --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_1r" --set synth.liberty="$LIB" \
-      --set abc.boundary=true --set abc.delay=25 --workdir "$W/w_1r"
+      --set synth.boundary=true --set synth.delay=25 --workdir "$W/w_1r"
   python3 - "$W/w_1r/qor.json" "$TOP" <<'PY' || fail "the default single round lost the boundary environment"
 import json, sys
 q = json.load(open(sys.argv[1]))
@@ -164,9 +164,8 @@ PY
 fi
 
 # 2. boundary off: the old behaviour, load-free ports (both mappers' switch)
-PREFIX=$([ "$MAPPER" = abc ] && echo abc || echo pass.usyn)
 run pass "$MAPPER" --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_off" --set synth.liberty="$LIB" \
-    $DELAY --set "$PREFIX.boundary_rounds=3" --set "$PREFIX.boundary=false" --workdir "$W/w_off"
+    $DELAY --set "synth.boundary_rounds=3" --set "synth.boundary=false" --workdir "$W/w_off"
 if [ "$MAPPER" = abc ]; then
   grep -q '"boundary"' "$W/w_off/qor.json" && fail "boundary=false still reports a boundary scoreboard"
 fi
@@ -188,7 +187,7 @@ run compile lg:"$W/net_fan" --top "$TOP2" --emit-dir verilog:"$W/v_fan" --workdi
 n=$(cat "$W/v_fan/"*.v | grep -cE '^\s*BUFx1\s')
 [ "$n" -ge 4 ] || fail "primary input with fanout 64 got $n buffer(s), expected a tree of >= 4"
 run pass "$MAPPER" --top "$TOP2" lg:"$W/lg2" --emit-dir lg:"$W/net_fan_off" --set synth.liberty="$LIB" \
-    --set "$PREFIX.boundary_buffer=false" --workdir "$W/w_fan_off"
+    --set "synth.boundary_buffer=false" --workdir "$W/w_fan_off"
 run compile lg:"$W/net_fan_off" --top "$TOP2" --emit-dir verilog:"$W/v_fan_off" --workdir "$W/wv_fan_off"
 cat "$W/v_fan_off/"*.v | grep -qE '^\s*BUFx1\s' && fail "boundary_buffer=false still buffered the primary input"
 

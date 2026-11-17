@@ -26,7 +26,7 @@ run() {
 
 run compile "$FIX" --top "$TOP" --emit-dir lg:"$W/lg" --workdir "$W/w_compile"
 run pass color flat --top "$TOP" lg:"$W/lg" --workdir "$W/w_color"
-run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net" --set synth.liberty="$LIB" --workdir "$W/w_abc"
+run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net" --set synth.liberty="$LIB" --set synth.flatten=true --workdir "$W/w_abc"
 
 TREE=$("$LHD" tool tree lg:"$W/net" --top "$TOP") || fail "could not inspect mapped graph"
 NODES=$(printf '%s\n' "$TREE" | sed -n '1s/.*\[\([0-9][0-9]*\) nodes\].*/\1/p')

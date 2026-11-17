@@ -38,7 +38,7 @@ endmodule
     foreign.write_text(json.dumps([{'class':'foreign.second','id':'other','value':3}]))
     cmd=[str(lhd),'synth',str(rtl),str(fixture/'macros.v'),'--top','hint_top','--workdir',str(root/'work'),'-q']
     settings={'synth.liberty':fixture/'fake.lib','synth.lef':fixture/'fake.lef','synth.place':'true',
-              'compile.slang.blackbox_attribute':'true','synth.opentimer':'false','synth.place.resize':'false',
+              'compile.slang.blackbox_attribute':'true','synth.timing':'false','synth.place.resize':'false',
               'synth.place.timing_driven':'false','synth.place.io_resynth':0,'synth.place.fp':'true',
               'synth.place.fp.minimum':0,'synth.place.fp.min_macros':0,'synth.place.fp.snap':'false',
               'synth.place.iterations':50,'synth.place.fp.iterations':50,'synth.place.final.iterations':50,
@@ -94,7 +94,7 @@ endmodule
     assert next(x for x in bundle if x['class']=='foreign.example')['value']==2
     assert next(x for x in bundle if x['class']=='livehd.placement.hints')==hints[1]
     # Cell-only timing refinements must keep the macro-stage hint report.
-    timed=run('timed', extra=['--set','synth.opentimer=true',
+    timed=run('timed', extra=['--set','synth.timing=true',
                              '--set','synth.place.timing_driven=true',
                              '--set','synth.place.buffer_cleanup=true',
                              '--set','lhd.incremental=false'])

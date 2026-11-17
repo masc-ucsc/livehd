@@ -2338,9 +2338,6 @@ TEST_F(Buffer_repair, ResetLogicIsProtectedAndRepairOverrideIsRejected) {
   report.Parse(protected_.report.c_str());
   EXPECT_EQ(report["attempts"].GetUint(), 0);
 
-  options.repair_reset = true;
-  EXPECT_THROW((void)place(*graph, flat, options), std::invalid_argument);
-  options.repair_reset = false;
   options.reset_fanout = 32;  // the reset tree (reset_tree.hpp) is not reset repair: a small net stays as it is
   hhds::GraphLibrary treed_flat;
   const auto         treed = repair_buffers(place(*graph, treed_flat, options), options, evaluate);

@@ -149,9 +149,9 @@ Remaining native synthesis work is tracked in [2u-usyn](../../todo/livehd/2u-usy
    instances. They bypass native-array lowering; their physical geometry is
    supplied by the corresponding LEF. The library interface alone does not
    authorize replacing an inferred array with unspecified collision semantics.
-   **`synth.sram=true` (default false) is that authorization, for an array with no SRAM cell to bind**
+   **`synth.memory.sram=true` (default false) is that authorization, for an array with no SRAM cell to bind**
    (`sram_macro.cpp`): a memory the fold policy keeps native becomes a generated macro, whatever its port
-   count. `synth.memory=auto` then folds (`pass.abc.memory=sram`) only a memory below `synth.sram.min_bits`
+   count. `synth.memory=auto` then folds (`pass.abc.memory=sram`) only a memory below `synth.memory.min_bits`
    (2048, the smallest macro) or one no macro can realize -- forwarding between ports, power-on contents, a
    whole-array update/reset/read, a loader image, an unknown size -- and keeps every other native, so the
    over-3-port arrays `auto` bit-blasts (register files, rename tables) are macros too; `synth.memory=flops`
@@ -162,7 +162,10 @@ Remaining native synthesis work is tracked in [2u-usyn](../../todo/livehd/2u-usy
    (the register the source puts after it stays a flop), setup/hold against `clk` for everything else. The
    files join the timers' extra libraries and the placement LEFs, so the macro is placed fixed like an
    explicit fakeram. The physical model is analytic (area per bit and per port, pins over the four edges,
-   constant delays; `synth.sram.um2_per_bit`, `synth.sram.access_ns`, defaults from asap7's bsg_fakeram);
+   constant delays). Area, access/setup/hold times, pin loads and voltage are multiples of the
+   `synth.liberty` smallest NOT cell (`liberty::tech_proxy`: 11 NOT areas per bit, an 18 FO4 access, ...,
+   ratios that reproduce asap7's bsg_fakeram); `synth.memory.um2_per_bit` and `synth.memory.access_ns`
+   override one quantity each;
    same-edge collisions are the macro's contract, as for any SRAM, which is why forwarding stays native.
 
 3. **Regions.** `pass/partition` cuts the colored source into region bodies;

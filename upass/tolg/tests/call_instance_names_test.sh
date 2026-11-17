@@ -27,7 +27,7 @@ lhd/lhd synth "$W/calls.prp" --top top --workdir "$W/work" \
   --set "synth.sdc=$W/clock.sdc" \
   --set synth.place=true --set synth.place.mode=full --set synth.place.final=true \
   --set synth.place.unknown_const=zero --set synth.memory=flops \
-  --set pass.abc.drop_init=true --set pass.abc.derived_clock=true --set lhd.jobs=8 \
+  --set synth.drop_init=true --set synth.derived_clock=true --set lhd.jobs=8 \
   --result-json "$W/result.json" > "$W/run.log" 2>&1 || {
     cat "$W/result.json" "$W/run.log"
     exit 1

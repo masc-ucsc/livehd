@@ -34,7 +34,7 @@ endmodule
 ''')
 net = W / 'net'
 run('synth', source, '--top', 'top', '--emit-dir', f'lg:{net}', '--workdir', W/'synth',
-    '--set', f'synth.liberty={LIB}', '--set', 'synth.opentimer=false',
+    '--set', f'synth.liberty={LIB}', '--set', 'synth.timing=false',
     '--set', 'compile.upass.inline=false')
 run('tool', 'sta', f'lg:{net}', success=False)
 
@@ -115,7 +115,7 @@ endmodule
 ''')
 snet = W/'state_net'
 run('synth', seq, '--top', 'state', '--emit-dir', f'lg:{snet}', '--workdir', W/'state_synth',
-    '--set', f'synth.liberty={LIB}', '--set', 'synth.opentimer=false', '--set', 'pass.abc.register=false')
+    '--set', f'synth.liberty={LIB}', '--set', 'synth.timing=false', '--set', 'pass.abc.register=false')
 sdc.write_text('''create_clock -name first -period 100 [get_ports clk_a]
 create_clock -name second -period 100 [get_ports clk_b]
 set_output_delay -clock first 0 [get_ports q q.1 q.2 q.3]
@@ -130,7 +130,7 @@ assert not query(snet, 'clock=second', top='state')
 # intentionally lacks setup checks: critical marking must reject that gap.
 mapped_state = W/'mapped_state'
 run('synth', seq, '--top', 'state', '--emit-dir', f'lg:{mapped_state}', '--workdir', W/'mapped_synth',
-    '--set', f'synth.liberty={LIB}', '--set', 'synth.opentimer=false')
+    '--set', f'synth.liberty={LIB}', '--set', 'synth.timing=false')
 sta(sdc, design=mapped_state, top='state', work='missing-setup', success=False)
 assert 'critical-coverage' in (W/'diag.jsonl').read_text()
 # Supply a proper setup table for the same DFF in a private fixture library.
@@ -149,8 +149,11 @@ assert not query(mapped_state, 'clock=second', top='state')
 # The fused flow must save the annotations after its STA step, too.
 fused = W/'fused_net'
 run('synth', source, '--top', 'top', '--emit-dir', f'lg:{fused}', '--workdir', W/'fused',
-    '--set', f'synth.liberty={LIB}', '--set', 'pass.opentimer.critical=true', *low)
+    '--set', f'synth.liberty={LIB}', '--set', 'pass.opentimer.critical=true', '--set', 'synth.timing.engine=opentimer', *low)
 assert query(fused)
+# The fast engine (the default) refuses critical annotations instead of dropping them silently.
+run('synth', source, '--top', 'top', '--workdir', W/'fused_fast', '--set', f'synth.liberty={LIB}',
+    '--set', 'pass.opentimer.critical=true', *low, success=False)
 
 # Unsupported exceptions must not silently result in a false critical set.
 sdc.write_text('create_clock -name v -period 1\nset_false_path -from [all_inputs]\n')

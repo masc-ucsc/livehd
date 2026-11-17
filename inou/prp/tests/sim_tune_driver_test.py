@@ -189,7 +189,7 @@ def main():
         print(out)
         sys.exit('setup failed')
     if args.part != "profile":
-        rc, out = setup(lhd, prp, wz, ['--set', 'sim.unknown_zero=true'])
+        rc, out = setup(lhd, prp, wz, ['--set', 'compile.unknown_zero=true'])
         if rc != 0:
             print(out)
             sys.exit('setup (unknown_zero=true) failed')

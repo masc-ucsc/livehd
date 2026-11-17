@@ -8,6 +8,7 @@
 #include <charconv>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <format>
 #include <fstream>
 #include <initializer_list>
@@ -2262,6 +2263,97 @@ std::optional<uint64_t> cell_truth(const Comb_cell& cell) {
     return {};
   }
   return Expression(cell.function, cell.inputs).parse();
+}
+
+std::optional<Wire_load_model> default_wire_load(const std::string& lib_files) {
+  const auto text = strip_comments(read_files(lib_files));
+  std::string args;
+  const auto  lib = find_group(text, "library", 0, args);
+  if (lib == std::string::npos) {
+    return std::nullopt;
+  }
+  const auto close  = match_brace(text, lib);
+  const auto header = top_level_only(text.substr(lib + 1, close - lib - 1));
+  const auto name   = unquote_trim(scalar_attr(header, "default_wire_load"));
+  if (name.empty()) {
+    return std::nullopt;
+  }
+  const auto units    = electrical_units(text);
+  const double cap_ff = units.empty() ? 1000 : units.begin()->second.cap;
+  double       res_ohm = 1000;
+  if (const auto unit = unquote_trim(scalar_attr(header, "pulling_resistance_unit")); !unit.empty()) {
+    res_ohm = unit.ends_with("kohm") ? 1000 * std::strtod(unit.c_str(), nullptr) : std::strtod(unit.c_str(), nullptr);
+  }
+  for (auto g = find_group(text, "wire_load", lib + 1, args); g != std::string::npos && g < close;
+       g      = find_group(text, "wire_load", g + 1, args)) {
+    if (unquote_trim(args) != name) {
+      continue;
+    }
+    const auto      end  = match_brace(text, g);
+    const auto      body = text.substr(g + 1, end - g - 1);
+    Wire_load_model m;
+    m.cap_ff_um  = std::strtod(scalar_attr(body, "capacitance").c_str(), nullptr) * cap_ff;
+    m.res_ohm_um = std::strtod(scalar_attr(body, "resistance").c_str(), nullptr) * res_ohm;
+    m.slope_um   = std::strtod(scalar_attr(body, "slope").c_str(), nullptr);
+    for (size_t at = body.find("fanout_length"); at != std::string::npos; at = body.find("fanout_length", at + 1)) {
+      const auto open = body.find('(', at), comma = body.find(',', open), stop = body.find(')', comma);
+      if (open == std::string::npos || comma == std::string::npos || stop == std::string::npos) {
+        break;
+      }
+      const auto fanout = std::strtoul(body.substr(open + 1, comma - open - 1).c_str(), nullptr, 10);
+      const auto length = std::strtod(body.substr(comma + 1, stop - comma - 1).c_str(), nullptr);
+      if (fanout > 0 && length >= 0) {
+        m.length_um[static_cast<unsigned>(fanout)] = length;
+      }
+    }
+    if (m.length_um.empty()) {
+      return std::nullopt;
+    }
+    return m;
+  }
+  return std::nullopt;
+}
+
+std::optional<Tech_proxy> tech_proxy(const std::string& lib_files, std::string* why) {
+  const auto contents = read_files(lib_files);
+  Tech_proxy proxy;
+  // cell_truth repeats a one-input table over 64 bits: f(0)=1, f(1)=0.
+  const Comb_cell* pick = nullptr;
+  const auto       cells = scan_comb_cells_text(contents);
+  for (const auto& cell : cells) {
+    if (cell.inputs.size() == 1 && !cell.physical_barrier && cell.area > 0 && cell_truth(cell) == 0x5555555555555555ULL
+        && (!pick || std::tie(cell.area, cell.name) < std::tie(pick->area, pick->name))) {
+      pick = &cell;
+    }
+  }
+  if (!pick) {
+    if (why) {
+      *why = "the Liberty has no single-input NOT cell with an area";
+    }
+    return std::nullopt;
+  }
+  proxy.not_cell = pick->name;
+  proxy.not_area = pick->area;
+  for (const auto c : pick->input_capacitance_ff) {
+    proxy.not_cin_ff = std::max(proxy.not_cin_ff, c);
+  }
+  if (proxy.not_cin_ff > 0 && pick->intrinsic_ps > 0) {
+    // ohm * fF = 1e-3 ps
+    proxy.not_fo4_ps = pick->intrinsic_ps + pick->resistance_ohm * 4 * proxy.not_cin_ff / 1000;
+  }
+  if (const auto flop = find_dff_cell(lib_files)) {
+    proxy.flop_cell        = flop->name;
+    proxy.flop_area        = flop->area;
+    proxy.flop_clk_to_q_ps = flop->clk_to_q_ps;
+    proxy.flop_setup_ps    = flop->setup_ps;
+  }
+  const auto voltage = scalar_attr(strip_comments(contents), "nom_voltage");
+  char*      end     = nullptr;
+  const auto v       = std::strtod(voltage.c_str(), &end);
+  if (!voltage.empty() && end != voltage.c_str() && std::isfinite(v) && v > 0) {
+    proxy.voltage = v;
+  }
+  return proxy;
 }
 
 }  // namespace livehd::liberty

@@ -36,7 +36,7 @@ def run(*args):
 PROFILE = ('--set', 'synth.tune.profile=on')  # trials run only on explicit request
 
 def synth(name, src, lib, *opts):
-    j = run('synth', src, '--top', 'top', '--set', f'synth.liberty={lib}', '--set', 'synth.opentimer=false', '--set', 'synth.partition=fine',
+    j = run('synth', src, '--top', 'top', '--set', f'synth.liberty={lib}', '--set', 'synth.timing=false', '--set', 'synth.partition=fine',
             '--workdir', w/name, '--emit', f'verilog:{w/name}_mapped.v', '--emit-dir', f'lg:{w/name}-net', *opts)
     return j['qor']['abc']['regions']
 
@@ -69,7 +69,7 @@ module top(input [15:0] a,b,c, output [15:0] y); wire [15:0] mid; add x(a,b,mid)
 ''')
 
 def section_area():
-    base = synth('base', src, test_lib, '--set', 'abc.adder=rca', '--set', 'abc.multiplier=array', '--set', 'abc.barrel=log')
+    base = synth('base', src, test_lib, '--set', 'synth.adder=rca', '--set', 'synth.multiplier=array', '--set', 'synth.barrel=log')
     default = synth('default', src, test_lib)
     assert trials(default) == 0, default  # no exploration unless requested
     auto = synth('auto', src, test_lib, *PROFILE)
@@ -80,18 +80,18 @@ def section_area():
     warm = synth('auto', src, test_lib, *PROFILE)
     assert (w/'auto_mapped.v').read_bytes() == net, 'warm result changed'
     assert trials(warm) == trials(auto)
-    fixed = synth('fixed', src, test_lib, '--set', 'abc.adder=rca')
+    fixed = synth('fixed', src, test_lib, '--set', 'synth.adder=rca')
     assert trials(fixed) == 0 and depth(fixed) == depth(base), fixed
     # Per-color selectors suppress searching too, including an explicit RCA.
     overrides = json.dumps({str(r['color']): {'adder':'rca'} for r in base})
-    region_fixed = synth('region_fixed', src, test_lib, '--set', f'abc.region_opts={overrides}')
+    region_fixed = synth('region_fixed', src, test_lib, '--set', f'synth.region_opts={overrides}')
     assert trials(region_fixed) == 0, region_fixed
     lec('auto-net', src, test_lib, 'lec')
 
 def section_timed():
     # Timing uses NLDM, including passthrough outputs and a short off-path adder.
     # This loose target is already met: the worst timed path still gets trials.
-    timed = synth('timed', src, timing_lib, '--set', 'abc.delay=100000', *PROFILE)
+    timed = synth('timed', src, timing_lib, '--set', 'synth.delay=100000', *PROFILE)
     assert trials(timed) > 0, timed
     assert any(r['ware_trials'] == 0 and r['input_ge'] < 16 for r in timed), timed
     logs = '\n'.join(p.read_text() for p in (w/'timed'/'logs').glob('*.log'))
@@ -114,7 +114,7 @@ def section_hier():
     assert trials(rows)>0, rows
     lec('hier-net', hier, test_lib, 'lec-hier')
     # Time repeated occurrences: the timer must cross both instances.
-    rows = synth('hier-timed', hier, timing_lib, '--set', 'compile.upass.inline=false', '--set', 'abc.delay=1', *PROFILE)
+    rows = synth('hier-timed', hier, timing_lib, '--set', 'compile.upass.inline=false', '--set', 'synth.delay=1', *PROFILE)
     assert trials(rows) > 0, rows
     logs = '\n'.join(p.read_text() for p in (w/'hier-timed'/'logs').glob('*.log'))
     assert 'objective=timing' in logs and 'missed (fastest measured retained)' in logs, logs
@@ -126,7 +126,7 @@ def section_seq():
     # rejecting a cycle.
     seq = w/'seq.v'
     seq.write_text('module top(input clk, input [15:0] a, output reg [15:0] q); always @(posedge clk) q <= q+a; endmodule\n')
-    rows = synth('seq-timed', seq, timing_lib, '--set', 'abc.delay=1', *PROFILE)
+    rows = synth('seq-timed', seq, timing_lib, '--set', 'synth.delay=1', *PROFILE)
     assert trials(rows) > 0, rows
     logs = '\n'.join(p.read_text() for p in (w/'seq-timed'/'logs').glob('*.log'))
     assert 'objective=timing' in logs and 'QoR unavailable' not in logs, logs
@@ -135,7 +135,7 @@ def section_seq():
 def section_mulshr():
     # Multiplier and barrel alternatives both reach mapping, and their explicit
     # selectors suppress automatic trials of those blocks.
-    for name, expr, knobs in [('mul','a*b',['abc.multiplier=tree']), ('shr','a>>b',['abc.barrel=reverse'])]:
+    for name, expr, knobs in [('mul','a*b',['synth.multiplier=tree']), ('shr','a>>b',['synth.barrel=reverse'])]:
         f=w/f'{name}.v'; f.write_text(f'module top(input [7:0] a, input [3:0] b, output [7:0] y); assign y={expr}; endmodule\n')
         rows=synth(name,f,test_lib,*PROFILE)
         assert trials(rows)>0, rows

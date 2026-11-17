@@ -329,7 +329,8 @@ bool seed_groups(hhds::Graph* g) {
     }
   }
   // An explicit group nested inside another explicit group is mapped as its own
-  // region, so the outer group is cut at its boundary. That is sometimes the
+  // module, instantiated by the outer group's region (pass/partition/nest_regions.hpp),
+  // so the outer group's logic does not optimize across its boundary. That is sometimes the
   // intent (an arithmetic block the user wants isolated) and often an accident:
   // dino with a top color plus inner ALU/NextPC colors was 23477 cells against
   // 17678 for the top color alone. Say so, at the inner attribute, with the
@@ -370,8 +371,9 @@ bool seed_groups(hhds::Graph* g) {
       }
     }
     auto b = livehd::diag::warn("pass.color", "synth-nested-group", "unsupported");
-    b.msg("explicit group {} is nested inside explicit group {}: its {} node(s) map as a separate region and cut {} connection(s) "
-          "out of the outer one; drop the inner color if the outer region should cover it",
+    b.msg("explicit group {} is nested inside explicit group {}: its {} node(s) map as their own module, instantiated by the outer "
+          "region, and {} connection(s) cross that boundary (no optimization across it); drop the inner color if the outer region "
+          "should cover it",
           id,
           parent_id,
           inner,

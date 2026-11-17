@@ -18,6 +18,7 @@
 #include <fstream>
 #include <iostream>
 #include <map>
+#include <mutex>
 #include <optional>
 #include <regex>
 #include <set>
@@ -42,6 +43,7 @@
 #include "hhds/graph.hpp"
 #include "hhds/tree.hpp"
 #include "host_mem.hpp"
+#include "liberty_dff.hpp"
 #include "job_manager.hpp"
 #include "lhd_kernel_internal.hpp"
 #include "lhd_sim_tune_session.hpp"
@@ -610,8 +612,8 @@ static void crash_handler(int sig, siginfo_t* info, void* uctx) {
       crash_write("\n");
     }
     crash_write(
-        "lhd: hint: run on a host with more memory or a larger LHD_MEMORY_BUDGET_MB, lower "
-        "pass.abc.memory_budget_mb so admission refuses earlier, or color/decompose into smaller pieces\n");
+        "lhd: hint: run on a host with more memory or a larger --set lhd.ram_max_mb, lower it so admission "
+        "refuses earlier, or color/decompose into smaller pieces\n");
     ::_exit(::getpid() != crash_main_pid_ ? livehd::lec::kChildExitBadAlloc : 7);
   }
 #if defined(__GLIBC__)
@@ -835,8 +837,9 @@ void install_crash_reporter() {
 // lets a user drop any leading segment the command words to the left already
 // supply, so after `lhd compile` `--set compile.bitwidth.max_iterations` and
 // `--set bitwidth.max_iterations` both resolve to `compile.bitwidth`, and
-// after `lhd pass abc` `--set pass.abc.adder`,
-// `--set abc.adder`, `--set adder` all resolve to `pass.abc`.
+// after `lhd pass abc` `--set pass.abc.flow`,
+// `--set abc.flow`, `--set flow` all resolve to `pass.abc` (a shared mapper
+// label -- kSynthMapperLabels -- resolves to synth.<flag> instead).
 std::string_view set_pass_method(std::string_view set_name) {
   for (const auto& sp : kSetPasses) {
     if (sp.set_name == set_name) {
@@ -1016,6 +1019,32 @@ std::optional<Sdc_clock> sdc_single_clock(const std::string& sdc_path) {
   return std::nullopt;
 }
 
+std::string flatten_label(const Options& opts) {
+  const auto v = synth_set(opts, "flatten", "false");
+  return v == "true" || v == "1" || v == "on" ? "true" : "auto";
+}
+
+std::string resolve_io_load(const Options& opts, const std::string& liberty) {
+  if (const auto v = synth_set(opts, "io_load", "auto"); v != "auto") {
+    return v;  // validated by check_known_set_passes
+  }
+  // tech_proxy scans the whole Liberty: one scan per file per process.
+  static std::mutex                         mutex;
+  static std::map<std::string, std::string> cache;
+  std::lock_guard                           lock(mutex);
+  if (const auto it = cache.find(liberty); it != cache.end()) {
+    return it->second;
+  }
+  std::string load = "-1";
+  if (!liberty.empty()) {
+    if (const auto proxy = livehd::liberty::tech_proxy(liberty); proxy && proxy->not_cin_ff > 0) {
+      load = std::format("{:.6g}", 16 * proxy->not_cin_ff);
+    }
+  }
+  cache.emplace(liberty, load);
+  return load;
+}
+
 void merge_mapper_sets(const Options& opts, std::string_view method, Eprp_var::Eprp_dict& labels) {
   // synth.delay / synth.memory are the run-wide spellings of source attributes;
   // the pass's own namespace (merged below) wins over them.
@@ -1033,15 +1062,15 @@ void merge_mapper_sets(const Options& opts, std::string_view method, Eprp_var::E
       labels["memory"] = v == "flops" ? "true" : "false";
     }
   }
-  // synth.sram: memories are generated macros (pass/synth/sram_macro.hpp), so `auto` folds only a memory below
+  // synth.memory.sram: memories are generated macros (pass/synth/sram_macro.hpp), so `auto` folds only a memory below
   // the smallest macro or one no macro can realize. An explicit flops/macro still wins.
   if (method == "pass.abc" && (!labels.contains("memory") || labels["memory"] == "auto")) {
     bool        sram     = false;
     std::string min_bits = "2048";
     for (const auto& [k, v] : opts.sets) {
-      if (k == "synth.sram") {
+      if (k == "synth.memory.sram") {
         sram = v == "true" || v == "1" || v == "on" || v == "yes";
-      } else if (k == "synth.sram.min_bits") {
+      } else if (k == "synth.memory.min_bits") {
         min_bits = v;
       }
     }
@@ -1072,14 +1101,7 @@ void merge_mapper_sets(const Options& opts, std::string_view method, Eprp_var::E
   // The shared clock fraction applies when an SDC actually defines a clock.
   // Explicit mapper budgets win; an explicit fraction without a clock is an
   // error, while an untimed/default invocation remains supported.
-  const auto* descriptor    = mapper_of_method(method);
-  const bool  abc_namespace = method == "pass.abc" || (descriptor && descriptor->inherits_abc);
-  const bool  mapper_delay  = std::any_of(opts.sets.begin(), opts.sets.end(), [&](const auto& value) {
-    return !value.second.empty()
-           && (value.first == std::string(method) + ".delay"
-               || (abc_namespace && (value.first == "pass.abc.delay" || value.first == "abc.delay")));
-  });
-  if (!have_delay && !mapper_delay) {
+  if (!have_delay) {
     std::string frac              = "0.4", sdc, liberty;
     bool        explicit_fraction = false;
     for (const auto& [k, v] : opts.sets) {
@@ -1119,15 +1141,35 @@ void merge_mapper_sets(const Options& opts, std::string_view method, Eprp_var::E
     // the shared spelling; the pass's own namespace is merged last and wins.
     merge_sets(opts, "pass.abc", labels);
   }
-  // Canonical synthesis defaults are below mapper-local legacy spellings.
-  for (const auto key : {"adder", "multiplier", "barrel", "block_size"}) {
-    const auto full = std::string("synth.") + key;
+  // The shared synth.<key> spellings (kSynthMapperLabels). A label the caller already resolved (`lhd synth`
+  // reads synth_set with its own defaults, and gates clock_gate on the Liberty's ICG cell) stays.
+  for (const auto key : kSynthMapperLabels) {
+    const auto full = std::string("synth.") + std::string(key);
+    if (labels.contains(std::string(key))) {
+      continue;
+    }
     for (const auto& [k, v] : opts.sets) {
       if (k == full) {
-        labels[key] = v;
+        labels[std::string(key)] = v;
       }
     }
   }
+  if (!labels.contains("io_load")) {
+    std::string liberty = synth_set(opts, "liberty", "");
+    labels["io_load"]   = resolve_io_load(opts, liberty.empty() ? synth_liberty_or_default(opts) : liberty);
+  }
+  // One default for both mappers where the passes used to differ (an explicit synth.<key> was forwarded above).
+  for (const auto& [key, def] : {std::pair{"area_relax", "100"},
+                                  std::pair{"boundary", "false"},
+                                  std::pair{"derived_clock", "true"},
+                                  std::pair{"flatten", "false"}}) {
+    if (!labels.contains(key)) {
+      labels[key] = synth_set(opts, key, def);
+    }
+  }
+  // A color is always one flat graph: synth.flatten=false still re-inlines a coloring that spans modules (or is one
+  // color), only true forces the whole design into one region. There is no never-flatten mode.
+  labels["flatten"] = flatten_label(opts);
   merge_sets(opts, method, labels);
   const auto profile  = synth_set(opts, "tune.profile", "auto");
   const auto validate = synth_set(opts, "tune.validate", "structural");
@@ -1289,10 +1331,26 @@ void check_known_set_passes(const Options& opts) {
       // The `lhd.*` kernel namespace: shared, cross-pass settings folded into
       // Options by apply_lhd_settings (not consumed by any single pass). Keep
       // this list in sync with apply_lhd_settings / list_set_options.
-      if (flag != "seed" && flag != "top" && flag != "stats" && flag != "incremental" && flag != "jobs") {
+      if (flag != "seed" && flag != "top" && flag != "stats" && flag != "incremental" && flag != "jobs" && flag != "ram_max_mb"
+          && flag != "ram_budget_mb") {
         throw Lhd_error{"usage",
                         std::format("--set/--config references unknown kernel flag 'lhd.{}'", flag),
-                        "the lhd.* namespace takes: seed, top, stats, incremental, jobs (`lhd list options lhd`)"};
+                        "the lhd.* namespace takes: seed, top, stats, incremental, jobs, ram_max_mb, ram_budget_mb (`lhd list "
+                        "options lhd`)"};
+      }
+      if (flag == "ram_max_mb" && value != "auto") {
+        uint64_t mb             = 0;
+        const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), mb);
+        if (error != std::errc{} || end != value.data() + value.size() || mb == 0) {
+          throw Lhd_error{"usage", "lhd.ram_max_mb expects auto or a positive number of MiB", "auto = 80% of the machine's RAM"};
+        }
+      }
+      if (flag == "ram_budget_mb") {
+        char*        end = nullptr;
+        const double mb  = std::strtod(value.c_str(), &end);
+        if (value.empty() || *end != '\0' || !std::isfinite(mb) || mb < 0 || mb * 1048576.0 >= 0x1p64) {
+          throw Lhd_error{"usage", "lhd.ram_budget_mb expects a non-negative number of MiB", "0 = no split by memory"};
+        }
       }
       if ((flag == "stats" || flag == "incremental") && value != "true" && value != "false" && value != "1" && value != "0"
           && value != "on" && value != "off") {
@@ -1433,6 +1491,20 @@ void check_known_set_passes(const Options& opts) {
       }
       if (flag == "memory" && value != "auto" && value != "flops" && value != "macro") {
         throw Lhd_error{"usage", std::format("synth.memory expects auto|flops|macro, got '{}'", value), ""};
+      }
+      if (flag == "io_load" && value != "auto") {
+        char*        end = nullptr;
+        const double ff  = std::strtod(value.c_str(), &end);
+        if (value.empty() || *end != '\0' || !std::isfinite(ff) || ff < 0) {
+          throw Lhd_error{"usage", std::format("--set/--config synth.io_load expects auto or a non-negative load in fF, got '{}'", value), ""};
+        }
+      }
+      if (flag == "delay" && !value.empty()) {
+        char*        end = nullptr;
+        const double ps  = std::strtod(value.c_str(), &end);
+        if (end == value.c_str() || *end != '\0' || !std::isfinite(ps) || ps < 0) {
+          throw Lhd_error{"usage", std::format("--set/--config synth.delay expects a non-negative number of ps, got '{}'", value), ""};
+        }
       }
       if (flag == "partition" && value != "auto" && value != "fine" && value != "coarse") {
         throw Lhd_error{"usage",
@@ -1928,6 +2000,13 @@ void apply_lhd_settings(Options& opts) {
       opts.jobs = static_cast<unsigned>(std::stoul(value));
     } else if (key == "lhd.incremental") {
       opts.incremental = value != "false" && value != "0" && value != "off";
+    } else if (key == "lhd.ram_budget_mb") {
+      opts.ram_budget_mb = std::stod(value);
+    } else if (key == "lhd.ram_max_mb") {
+      // The measured hard ceiling: every footprint check and the RLIMIT_AS backstop (armed at startup at the
+      // default, re-armed here so a larger value loosens it as well).
+      livehd::cost::set_ram_max_mb(value == "auto" ? 0 : std::stoull(value));
+      (void)livehd::cost::install_memory_backstop(true);
     }
   }
   auto& jobs = livehd::Job_manager::global(-1, opts.gui);
@@ -2943,7 +3022,7 @@ std::vector<std::string> sim_into(Options& opts, Result& res, Eprp_var& var, con
       labels["slop_u"] = v;
     } else if (k == "sim.debug") {
       labels["debug"] = v;
-    } else if (k == "sim.unknown_zero") {
+    } else if (k == "compile.unknown_zero") {
       labels["unknown_zero"] = v;
     } else if (k == "sim.unroll_sites") {
       labels["unroll_sites"] = v;

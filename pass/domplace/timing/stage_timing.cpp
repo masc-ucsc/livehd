@@ -1102,6 +1102,7 @@ Stage_timing Stage_timer::evaluate(const hhds::Graph& graph, const physical::Par
     options.dbu = inputs_.technology->dbu;
   }
   auto source = stage_constraints(*timed, inputs_.sdc, inputs_.design, inputs_.units, inputs_.clock, inputs_.clock_uncertainty_ps);
+  source.constraints.default_output_load_ff = inputs_.output_load_ff;
   return evaluate_stage_timing(*timed, parasitics, library_, cells_, view(), std::move(source), 0, options);
 }
 

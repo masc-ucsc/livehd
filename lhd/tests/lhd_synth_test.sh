@@ -11,7 +11,7 @@
 #      (compile cache hit, every abc region a hit) and byte-identical Verilog.
 #   3. lhd.incremental=false is an honest cold run: no reuse, same netlist.
 #   4. No --workdir: scratch dir, nothing durable except --emit-dir lg:/report:;
-#      synth.opentimer=false skips STA (no timing.json, no sta member).
+#      synth.timing=false skips STA (no timing.json, no sta member).
 #   5. An lg: INPUT is never rewritten (the coloring stays in memory).
 #   6. Negative controls: pass.abc.library refused (synth.liberty is the one
 #      spelling), a missing Liberty is `missing_file`, a non-synth coloring is
@@ -122,7 +122,7 @@ for f in qor.json timing.json; do [ -s "$W/w/synth/$f" ] || fail "missing <workd
 grep -qE "INVx1|NAND2x1|XOR2x1|DFFx1" "$W/net0.v" || fail "the Verilog is not the MAPPED netlist (no Liberty cells): $(head -c 300 "$W/net0.v")"
 [ "$(jget "$W/r.json" qor.kind)" = synth ] || fail "envelope qor.kind != synth: $(head -c 400 "$W/r.json")"
 [ "$(jget "$W/r.json" qor.top)" = dut.top ] || fail "--top was not resolved once to the full name: $(jget "$W/r.json" qor.top)"
-[ "$(jget "$W/r.json" qor.sta.kind)" = sta ] || fail "qor.sta is not the pass.opentimer report"
+[ "$(jget "$W/r.json" qor.sta.kind)" = sta ] || fail "qor.sta is not the timing report"
 [ -n "$(jget "$W/r.json" qor.sta.designs)" ] || fail "sta report carries no designs"
 if [ "$MAPPER" = abc ]; then
   [ "$(jget "$W/r.json" qor.abc.kind)" = abc-map ] || fail "qor.abc is not the pass.abc report"
@@ -158,7 +158,7 @@ else
     || fail "cold run: the USYN logical cache must miss and store all $REGIONS region(s): $(jeval "$W/r.json" 'u["cache"]')"
   [ -d "$W/w/usyn_cache/tmap" ] || fail "the tmap mapping cache was not created under usyn_cache/"
 fi
-for p in pass.color "pass.$MAPPER" pass.opentimer lg.save; do has_phase "$W/r.json" $p || fail "phase $p missing from the envelope"; done
+for p in pass.color "pass.$MAPPER" pass.timing lg.save; do has_phase "$W/r.json" $p || fail "phase $p missing from the envelope"; done
 [ "$(jget "$W/r.json" incremental.compile.enabled)" = true ] || fail "compile tier not enabled under a user --workdir"
 [ "$(jget "$W/r.json" qor.abc.incremental.hits)" = 0 ] || fail "cold run reported abc hits"
 [ "$(jget "$W/r.json" qor.abc.incremental.misses)" = "$TREGIONS" ] || fail "cold run: every one of the $TREGIONS regions must miss, got '$(jget "$W/r.json" qor.abc.incremental.misses)'"
@@ -250,7 +250,7 @@ spawn() {
 anon_synth() {  # <tag> [extra --set ...]
   local RJ="$W/anon_$1.json" tag=$1
   shift
-  run synth "$ANON" --workdir "$W/wa_$tag" --set synth.liberty="$LIB" --set synth.mapper="$MAPPER" --set synth.opentimer=false \
+  run synth "$ANON" --workdir "$W/wa_$tag" --set synth.liberty="$LIB" --set synth.mapper="$MAPPER" --set synth.timing=false \
       "$@" --emit verilog:"$W/anon_$tag.v"
 }
 group_anon() {
@@ -276,12 +276,12 @@ spawn group_anon
 # --- 4. no --workdir: scratch; --emit-dir lg:/report:; opentimer off ----------
 group_scratch() {
   local RJ="$W/scratch.json"
-  run "${SYNTH[@]}" --emit-dir lg:"$W/net_only" --emit-dir report:"$W/rep" --set synth.opentimer=false
+  run "${SYNTH[@]}" --emit-dir lg:"$W/net_only" --emit-dir report:"$W/rep" --set synth.timing=false
   [ -d "$W/net_only" ] || fail "--emit-dir lg: netlist missing without --workdir"
   [ -s "$W/rep/qor.json" ] || fail "--emit-dir report: qor.json missing"
-  [ -e "$W/rep/timing.json" ] && fail "synth.opentimer=false still produced timing.json"
-  [ -z "$(jget "$RJ" qor.sta)" ] || fail "synth.opentimer=false still embedded an sta report"
-  has_phase "$RJ" pass.opentimer && fail "synth.opentimer=false still ran pass.opentimer"
+  [ -e "$W/rep/timing.json" ] && fail "synth.timing=false still produced timing.json"
+  [ -z "$(jget "$RJ" qor.sta)" ] || fail "synth.timing=false still embedded an sta report"
+  has_phase "$RJ" pass.timing && fail "synth.timing=false still ran pass.timing"
   [ -z "$(jget "$RJ" incremental.compile.enabled)" ] || fail "no --workdir must report no compile tier"
   grep -q "\"$W/net_only\"" "$RJ" || fail "--emit-dir lg: not declared as an output"
   grep -q "synth/net" "$RJ" && fail "a scratch workdir path leaked into the declared outputs: $(cat "$RJ")"
@@ -305,7 +305,7 @@ group_logic() {
       --emit verilog:"$W/logic.v"
   [ "$(jeval "$RJ" 'q["abc"],"sta" in q,u["tmap"],u["output"]')" = "(None, False, 'none', 'logical-cmos')" ] \
     || fail "tmap=none: expected qor.abc=null, no STA and a logical-cmos USYN report: $(head -c 600 "$RJ")"
-  has_phase "$RJ" pass.opentimer && fail "tmap=none still ran pass.opentimer"
+  has_phase "$RJ" pass.timing && fail "tmap=none still ran pass.timing"
   [ -e "$W/w_logic/synth/timing.json" ] && fail "tmap=none produced timing.json"
   [ "$(jget "$W/w_logic/synth/qor.json" kind)" = usyn ] || fail "tmap=none: qor.json must be the native USYN report"
   # the same original registers, now native (one always block per bit), no cells
@@ -414,7 +414,7 @@ endmodule
 V
 packed_direct() {
   local RJ="$W/packed_direct.json"
-  run synth "$W/packed_mux.v" --top packed_mux --set synth.liberty="$LIB" --set synth.mapper="$MAPPER" --set synth.opentimer=false \
+  run synth "$W/packed_mux.v" --top packed_mux --set synth.liberty="$LIB" --set synth.mapper="$MAPPER" --set synth.timing=false \
       --set lhd.incremental=false --workdir "$W/packed_direct" --emit verilog:"$W/packed_direct.v"
 }
 group_packed() {
@@ -422,7 +422,7 @@ group_packed() {
   packed_direct &
   p=$!
   run compile "$W/packed_mux.v" --emit-dir lg:"$W/packed_lg" --workdir "$W/packed_compile" --set lhd.incremental=false
-  run synth lg:"$W/packed_lg" --top packed_mux --set synth.liberty="$LIB" --set synth.mapper="$MAPPER" --set synth.opentimer=false \
+  run synth lg:"$W/packed_lg" --top packed_mux --set synth.liberty="$LIB" --set synth.mapper="$MAPPER" --set synth.timing=false \
       --set lhd.incremental=false --workdir "$W/packed_staged" --emit verilog:"$W/packed_staged.v"
   wait "$p" || exit 1
   if [ "$MAPPER" = abc ]; then
@@ -549,10 +549,10 @@ if [ "$MAPPER" = usyn ]; then
   spawn expect_fail usage "synth.liberty" "${USYN_SYNTH[@]}" --set pass.usyn.library="$LIB"
   spawn expect_fail missing_file "Liberty" "${USYN_SYNTH[@]}" --set synth.liberty="$W/no_such.lib"
   spawn expect_fail syntax "replaced whole-region cover" "${USYN_SYNTH[@]}" --set synth.liberty="$LIB" --set pass.usyn.support=4
-  spawn expect_fail syntax "invalid native USYN" "${USYN_SYNTH[@]}" --set synth.liberty="$LIB" --set pass.usyn.adder=potato
+  spawn expect_fail syntax "invalid native USYN" "${USYN_SYNTH[@]}" --set synth.liberty="$LIB" --set synth.adder=potato
   spawn expect_fail usage "pass.usyn.cache' was removed" "${USYN_SYNTH[@]}" --set synth.liberty="$LIB" --set usyn.cache=false
   spawn expect_fail usage "expects none|abc" "${USYN_SYNTH[@]}" --set synth.liberty="$LIB" --set pass.usyn.tmap=potato
-  spawn expect_fail usage "cannot run OpenTimer" "${USYN_SYNTH[@]}" --set pass.usyn.tmap=none --set synth.opentimer=true
+  spawn expect_fail usage "no cells to time" "${USYN_SYNTH[@]}" --set pass.usyn.tmap=none --set synth.timing=true
 fi
 
 # --- 7. the help surface ------------------------------------------------------
@@ -569,7 +569,7 @@ spawn help_check '"report"' "report: missing from the emit-kind vocabulary" list
 # Experimental extraction remains available through an explicit opt-in.
 group_reduce() {
   local RJ="$W/reduce.json"
-  run "${SYNTH[@]}" --set synth.reduce=true --set synth.opentimer=false --workdir "$W/reduce-opt-in"
+  run "${SYNTH[@]}" --set synth.reduce=true --set synth.timing=false --workdir "$W/reduce-opt-in"
   grep -q 'pass.color [^"]*alg:reduce' "$RJ" || fail "synth.reduce=true must enable extraction"
 }
 spawn group_reduce

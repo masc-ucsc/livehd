@@ -167,7 +167,7 @@ std::string liberty_of(const std::string& name, const std::vector<Pin>& pins, co
                        const std::map<std::string, bool>& sync_out) {
   const uint32_t aw = static_cast<uint32_t>(std::max<uint64_t>(1, static_cast<uint64_t>(std::ceil(std::log2(static_cast<double>(s.size))))));
   std::string    o;
-  o += std::format("library({}) {{\n    technology (cmos);\n    delay_model : table_lookup;\n    revision : 1.0;\n    comment : \"generated SRAM macro (synth.sram)\";\n"
+  o += std::format("library({}) {{\n    technology (cmos);\n    delay_model : table_lookup;\n    revision : 1.0;\n    comment : \"generated SRAM macro (synth.memory.sram)\";\n"
                    "    time_unit : \"1ns\";\n    voltage_unit : \"1V\";\n    current_unit : \"1uA\";\n    leakage_power_unit : \"1uW\";\n    nom_process : 1;\n"
                    "    nom_temperature : 25.000;\n    nom_voltage : {};\n    capacitive_load_unit (1,pf);\n    pulling_resistance_unit : \"1kohm\";\n"
                    "    operating_conditions(tt_1.0_25.0) {{\n        process : 1;\n        temperature : 25.000;\n        voltage : {};\n        tree_type : balanced_tree;\n    }}\n"
@@ -281,6 +281,26 @@ Shape shape_of_module(const hhds::Graph& g) {
 
 std::string sram_macro_refusal(const hhds::Node_class& mem) { return shape_of(mem).refuse; }
 
+void scale_to_technology(Sram_tech& tech, double not_area, double fo4_ps, double cin_ff, std::optional<double> voltage) {
+  using R = Sram_proxy_ratios;
+  if (not_area > 0) {
+    tech.um2_per_bit = R::area_not_per_bit * not_area;
+  }
+  if (fo4_ps > 0) {
+    tech.clk_to_q_ns   = R::access_fo4 * fo4_ps / 1000;
+    tech.setup_ns      = R::setup_fo4 * fo4_ps / 1000;
+    tech.hold_ns       = R::hold_fo4 * fo4_ps / 1000;
+    tech.min_period_ns = R::min_period_fo4 * fo4_ps / 1000;
+  }
+  if (cin_ff > 0) {
+    tech.pin_cap_pf = R::pin_cin * cin_ff / 1000;
+    tech.clk_cap_pf = R::clk_cin * cin_ff / 1000;
+  }
+  if (voltage && *voltage > 0) {
+    tech.voltage = *voltage;
+  }
+}
+
 Sram_result macro_memories(const std::vector<std::shared_ptr<hhds::Graph>>& input, const Sram_tech& tech) {
   Sram_result result;
   std::set<std::string> done;
@@ -300,7 +320,7 @@ Sram_result macro_memories(const std::vector<std::shared_ptr<hhds::Graph>>& inpu
       const auto shape = shape_of(mem);
       if (!shape.refuse.empty() || shape.bits * shape.size < tech.min_bits) {
         result.kept.emplace_back(std::string(graph->get_name()) + "/" + std::string(gu::default_instance_name(mem)),
-                                 shape.refuse.empty() ? "below synth.sram.min_bits" : shape.refuse);
+                                 shape.refuse.empty() ? "below synth.memory.min_bits" : shape.refuse);
         continue;
       }
       graphs.push_back(enclose_native_memory(*graph, mem));
@@ -323,7 +343,7 @@ Sram_result macro_memories(const std::vector<std::shared_ptr<hhds::Graph>>& inpu
       continue;
     }
     if (shape.bits * shape.size < tech.min_bits) {
-      result.kept.emplace_back(name, "below synth.sram.min_bits");
+      result.kept.emplace_back(name, "below synth.memory.min_bits");
       continue;
     }
     auto io = graph->get_io();

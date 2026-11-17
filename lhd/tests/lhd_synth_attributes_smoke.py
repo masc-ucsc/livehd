@@ -20,8 +20,8 @@ def run(*args, ok=True):
     return json.loads(report.read_text()), result.stdout + result.stderr
 
 def synth(name, source, *settings):
-    timer = "synth.opentimer=true" if "synth.opentimer=true" in settings else "synth.opentimer=false"
-    settings = [v for v in settings if v != "synth.opentimer=true"]
+    timer = "synth.timing=true" if "synth.timing=true" in settings else "synth.timing=false"
+    settings = [v for v in settings if v != "synth.timing=true"]
     # Fine partitioning unless the caller picks one: a repeated --set is a usage error.
     if not any(v.startswith("synth.partition=") for v in settings):
         settings = ["synth.partition=fine", *settings]
@@ -322,11 +322,11 @@ _, nested_log = synth("nested", nested)
 hit = [json.loads(l) for l in nested_log.splitlines() if '"synth-nested-group"' in l]
 assert len(hit) == 1 and Path(hit[0]["span"]["file"]).name == "nested.prp" and hit[0]["span"]["start_line"] == 1, hit
 # The timing target against what STA measured.
-tight, tight_log = synth("nested", nested, "synth.opentimer=true", "pass.abc.delay=100")
+tight, tight_log = synth("nested", nested, "synth.timing=true", "synth.delay=100")
 tt = tight["qor"]["timing_target"]
-assert tt["source"] == "abc.delay" and tt["met"] is False and tt["unreachable"] is True and tt["slack_ps"] < 0, tt
+assert tt["source"] == "synth.delay" and tt["met"] is False and tt["unreachable"] is True and tt["slack_ps"] < 0, tt
 assert "synth-target-unreachable" in tight_log
-loose, _ = synth("nested", nested, "synth.opentimer=true", "pass.abc.delay=100000")
+loose, _ = synth("nested", nested, "synth.timing=true", "synth.delay=100000")
 tt = loose["qor"]["timing_target"]
 assert tt["met"] is True and tt["unreachable"] is False and tt["slack_ps"] > 0, tt
 # Attributes never change compilation (nicesynth C12): a callee carrying a pin is
@@ -379,7 +379,7 @@ pre_ok.write_text('''pub comb pre_ok::[timecheck=false](a:U16,b:U16,c:U16)->(x:U
 }''')
 synth("pre_ok", pre_ok)
 _, usyn_log = run("synth", pre_ok, "--top", "pre_ok", "--workdir", work / "pre_ok_usyn", "--set", "synth.liberty=" + lib,
-                  "--set", "synth.opentimer=false", "--set", "synth.mapper=usyn")
+                  "--set", "synth.timing=false", "--set", "synth.mapper=usyn")
 assert "synth-abc-ignored" in usyn_log, usyn_log
 pre_bad = work / "pre_bad.prp"
 pre_bad.write_text('''pub comb pre_bad::[timecheck=false](a:U16,b:U16,c:U16)->(x:U16,y:U16) {
@@ -392,7 +392,7 @@ pre_bad.write_text('''pub comb pre_bad::[timecheck=false](a:U16,b:U16,c:U16)->(x
 }''')
 for mapper in ("abc", "usyn"):
     _, log = run("synth", pre_bad, "--top", "pre_bad", "--workdir", work / ("pre_bad_" + mapper),
-                 "--set", "synth.liberty=" + lib, "--set", "synth.opentimer=false", "--set", "synth.mapper=" + mapper, ok=False)
+                 "--set", "synth.liberty=" + lib, "--set", "synth.timing=false", "--set", "synth.mapper=" + mapper, ok=False)
     conflict = [json.loads(l) for l in log.splitlines() if '"synth-group-conflict"' in l]
     assert conflict and Path(conflict[0]["span"]["file"]).name == "pre_bad.prp" and conflict[0]["span"]["start_line"] == 6, log
 bad_doc, _ = run("synth", pre_ok, "--top", "pre_ok", "--workdir", work / "pre_cli", "--set", "synth.liberty=" + lib,
@@ -424,17 +424,17 @@ wide.write_text('''pub mod wide_clk::[timecheck=false](clk:Clock, d:U200, rst:Re
 }''')
 small_doc, _ = synth("wide_clk", wide)
 flat_doc, _ = run("synth", wide, "--top", "wide_clk", "--workdir", work / "wide_clk_flat", "--set", "synth.liberty=" + lib,
-                  "--set", "synth.opentimer=false", "--set", "pass.abc.icg_fanout=0")
+                  "--set", "synth.timing=false", "--set", "pass.abc.icg_fanout=0")
 tree_doc, _ = run("synth", wide, "--top", "wide_clk", "--workdir", work / "wide_clk_tree", "--set", "synth.liberty=" + lib,
-                  "--set", "synth.opentimer=false", "--set", "pass.abc.icg_input_min=1")
+                  "--set", "synth.timing=false", "--set", "pass.abc.icg_input_min=1")
 gates = lambda d: d["qor"]["abc"]["total"]["gates"]
 assert gates(small_doc) == gates(flat_doc), (gates(small_doc), gates(flat_doc))
 assert gates(tree_doc) > gates(flat_doc), (gates(tree_doc), gates(flat_doc))
 # A fan-out cap of 1 would never shrink a tree level: refused, not looped on.
 one_doc, _ = run("synth", wide, "--top", "wide_clk", "--workdir", work / "wide_clk_one", "--set", "synth.liberty=" + lib,
-                 "--set", "synth.opentimer=false", "--set", "pass.abc.icg_fanout=1", ok=False)
+                 "--set", "synth.timing=false", "--set", "pass.abc.icg_fanout=1", ok=False)
 assert "icg_fanout" in json.dumps(one_doc), one_doc
 two_doc, _ = run("synth", wide, "--top", "wide_clk", "--workdir", work / "wide_clk_two", "--set", "synth.liberty=" + lib,
-                 "--set", "synth.opentimer=false", "--set", "pass.abc.icg_fanout=2", "--set", "pass.abc.icg_input_min=1")
+                 "--set", "synth.timing=false", "--set", "pass.abc.icg_fanout=2", "--set", "pass.abc.icg_input_min=1")
 assert gates(two_doc) > gates(tree_doc), (gates(two_doc), gates(tree_doc))
 print("region contraction A -> B -> A and module-scope isolation passed")

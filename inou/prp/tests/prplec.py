@@ -174,7 +174,7 @@ class _Side:
         self.arg   = ('pyrope:' if src.endswith('.prp') else 'verilog:') + src   # replaced by `lg:<dir>` when pre-compiled
 
 
-def _precompile(runner, tmp_dir, side, top, odir, forced=False):
+def _precompile(runner, tmp_dir, side, top, odir, forced=False, debug=False):
     """Elaborate one side into its own `lg:` library (needed only when the two
     sides disagree on COMPILE flags — a single `lhd lec --set` cannot).
 
@@ -188,7 +188,7 @@ def _precompile(runner, tmp_dir, side, top, odir, forced=False):
     wdir = odir + '_w'
     def compile_cmd(more=()):
         return [runner.lhd, 'compile', side.src, '--top', top,
-                '--emit-dir', 'lg:' + odir, '--workdir', wdir] + _set_args(
+                '--emit-dir', 'lg:' + odir, '--workdir', wdir] + (['-d', 'all'] if debug else []) + _set_args(
                     _merge_sets(['lhd.incremental=false'], side.sets, runner.equiv_sets, more))
     cmd = compile_cmd()
     rc, log = _run(cmd, tmp_dir)
@@ -313,14 +313,16 @@ def _run_pair(runner, tmp_dir, base_test, var_test, verbose=False):
             compile_greps = []
     if compile_greps:
         # A grep on the compile output needs that output: compile the sides separately, and ask
-        # the impl compile for the pass census records (`lhd.stats`).
+        # the impl compile for the pass census records (`lhd.stats`) and enable
+        # stderr info explicitly with -d; --stats alone only collects report records.
         impl.sets = _merge_sets(impl.sets, ['lhd.stats=true'])
     if impl.sets != ref.sets:
         # Different compile flags per side: one `lhd lec --set` cannot say two
         # things, so each side is compiled into its own library first.
         shared_compile = []
         for side in (ref, impl):
-            err, log = _precompile(runner, tmp_dir, side, top, os.path.join(scratch, side.label), forced)
+            err, log = _precompile(runner, tmp_dir, side, top, os.path.join(scratch, side.label), forced,
+                                   debug=bool(compile_greps) and side is impl)
             if err:
                 print('{} - lec - FAILED: {}'.format(name, err))
                 return 1

@@ -2729,7 +2729,7 @@ std::string Session::agent_call(const std::string& json, int timeout_ms) {
 "legalize":"{scope?:{nodes:[names] | box:[xl,yl,xh,yh]}} -> legalize the placement at a gate, preserving active pins; see state.legalization",
 "evaluate":"{expect?:{frame,baseline?,target?,intent?,evaluation?}} -> request full timing; state.evaluation_seq identifies the completed attempt, evaluation_frame its placement",
 "move":"{nodes,x/y or dx/dy or align+reference, gap?, edges?:body|halo, orientation?, final?, expect?} -> queue a DBU edit; command_status returns resolved coordinates",
-"macro_move":"{nodes,x,y (DBU, lower-left),final?} -> place a PLACED (fixed) macro, which move cannot: remembers the pose and re-runs the flow to the latest gate with it there (the session restarts: tools/lhd_gui.py --retry rides it out)",
+"macro_move":"{nodes,x,y (DBU, lower-left),orientation?:N|S|FN|FS (one or one per node; memory proxies only),final?} -> place a PLACED (fixed) macro, which move cannot: remembers the pose and re-runs the flow to the latest gate with it there (the session restarts: tools/lhd_gui.py --retry rides it out)",
 "pin":"{nodes} -> anchor legal objects at their published positions",
 "unpin":"{nodes} -> release selected anchors",
 "find":"{regex, scope?, field?, limit?} -> the matching nodes (nothing is painted). scope: all|cells|comb|regs|macros|io|movable|fixed|selected; field: name (default)|master|any",

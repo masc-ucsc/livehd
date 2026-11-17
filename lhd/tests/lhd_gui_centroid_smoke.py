@@ -55,7 +55,7 @@ endmodule
 def command(work, *extra):
     return ['lhd/lhd', 'synth', str(source), '--top', 'top', '--workdir', str(work),
             '--set', f'synth.liberty={library}', '--set', f'synth.lef={data}/sky130hd.tlef,{data}/sky130hd.lef,{lef}',
-            '--set', 'synth.opentimer=false', '--set', 'synth.place.timing_driven=false', '--set', 'compile.specialize_modules=true',
+            '--set', 'synth.timing=false', '--set', 'synth.place.timing_driven=false', '--set', 'compile.specialize_modules=true',
             '--set', 'synth.place=true', '--set', 'synth.place.macro=none', '--set', 'synth.place.fp=true',
             '--set', 'synth.place.fp.iterations=40', '--set', 'synth.place.fp.minimum=1000', '--set', 'synth.place.fp.min_copies=2',
             '--set', 'lhd.incremental=false', '--set', 'synth.place.iterations=20', '--set', 'synth.place.grid.density=32',

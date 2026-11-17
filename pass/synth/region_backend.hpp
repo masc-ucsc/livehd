@@ -66,12 +66,6 @@ struct Driver_options {
   // port). Trees are built under a primary clock net only past this many register
   // bits in the source graph; a derived clock (gate output) is always bounded.
   uint32_t                  input_clock_min    = 8192;
-  // An asynchronous-reset net (a region input, a reset inverter or a mapped reset cone) that drives more
-  // clear/preset pins than this is dealt out through a tree of the library's smallest buffer, `reset_fanout`
-  // pins per buffer, level by level (the clock tree's mechanism). The pins never enter the logic network, so the
-  // mapper's `max_fanout` cannot bound them: one weak gate otherwise drives thousands of flops (a 439-pin
-  // AO21x1 gave a 4 ns slew and a -1 ns recovery slack). 0 (the default) disables the tree.
-  uint32_t                  reset_fanout       = 0;
   // Optional region hook, and its identity in the region-cache recipe (two
   // regions with equal logic but different hook settings never share a body).
   Region_hook               region_hook;
@@ -114,10 +108,10 @@ struct Driver_options {
   // Map a resetless register that carries a power-on `initial` value to a plain
   // DFF cell and drop the value (the Yosys/ORFS ASIC behavior), instead of
   // rebuilding it as a native flop that physical synthesis cannot place. The
-  // default keeps the value (pass.abc.drop_init=false).
+  // default keeps the value (synth.drop_init=false).
   bool                                  drop_init         = false;
   // A region output reads the root of the buffer chain that leads to it
-  // (pass.abc.port_bypass): see Region_writer::Registers::port_bypass.
+  // (synth.port_bypass): see Region_writer::Registers::port_bypass.
   bool                                  port_bypass       = false;
   // Map a register clocked by region-internal logic that is not a recognized
   // clock gate (a derived/gated clock) to a plain DFF cell whose clock pin is
@@ -166,17 +160,12 @@ struct Driver_options {
   // Ware trials are skipped when the baseline design maps to more cells than
   // this: each trial re-scores the whole stitched design. 0 disables the limit.
   uint64_t                              ware_max_cells   = 0;
-  // Memory admission (2opt-incr subtask 0). A region is bit-blasted, which for
-  // a whole-design region means millions of gates and several network forms
-  // held at once; an XSCore flat run reached 221 GB on a 64 GiB host and was
-  // SIGKILLed by the OS. `memory_budget_mb` pins the ceiling for reproducible
-  // hosts/CI (0 => physical RAM minus an OS reserve). There is no override:
-  // the admission always runs, and an allocation that still fails is caught
-  // at the pass entry as TIMEOUT-memory.
-  int                                   memory_budget_mb = 16384;
+  // Memory admission (2opt-incr subtask 0) is the MEASURED process ceiling,
+  // lhd.ram_max_mb (cost::configured_budget_bytes): an XSCore flat run once
+  // reached 221 GB on a 64 GiB host and was SIGKILLed by the OS. An allocation
+  // that still fails is caught at the pass entry as TIMEOUT-memory.
   unsigned                              threads          = 1;  // 0: available CPUs; synth defaults to automatic
-  uint64_t                              time_budget_ms   = 0;  // per mapped color; 0 disables the soft gate
-  // Optional caller admission in addition to the normal memory/time gates.
+  // Optional caller admission in addition to the normal memory gates.
   // False refuses the result; it never switches to an alternative flow.
   std::function<bool(std::string_view)> admission;
 };

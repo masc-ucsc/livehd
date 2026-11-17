@@ -134,6 +134,7 @@ struct Global_routes {
   size_t                   overflow_edges = 0, overflow_tracks = 0;  // edges over their share after the rounds, by how much
   size_t                   overflow_edges_h = 0, overflow_edges_v = 0, overflow_tracks_h = 0, overflow_tracks_v = 0;
   unsigned                 rounds      = 0;  // negotiation rounds run
+  bool                     stalled     = false;  // negotiation stopped: a round cut the overflow tracks by under 2%
   size_t                   search_pops = 0, search_pushes = 0, search_restarts = 0;
   size_t                   search_limited        = 0;
   size_t                   topology_disconnected = 0;  // final nets rejected by the static capacity precheck

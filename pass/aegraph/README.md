@@ -535,7 +535,11 @@ With `lhd.stats` the pass emits one `aegraph-rule` diagnostic per rule that ran
 (message `aegraph-rule NAME tried=N matched=N applied=N extracted=N`; attrs `rule group
 tag tried matched applied subsumed limit_rejected extracted`, which the sweep script parses),
 and `rules_fired` of `cprop-summary` is the sum of `applied`. Counters are local
-to one engine run and are merged after the workers join.
+to one engine run and are merged after the workers join. These info diagnostics
+appear on stderr only with `-d aegraph-rule` (rule counters), `-d aegraph` (all
+pass diagnostics), or bare `-d` (all info). A matching `-d` also enables counter
+collection without `--stats`; `--stats` alone retains the records in diagnostic
+files without printing info to stderr.
 
 ## Files
 

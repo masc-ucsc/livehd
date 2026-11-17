@@ -259,7 +259,7 @@ bool parse_bool(std::string_view v) { return v != "false" && v != "0" && !v.empt
 // A size-window bound. A silent fallback here is a wrong ANSWER rather than a
 // wrong flag: `max=200O00` (letter O) parsed leniently would read as 200, and
 // pass.color would happily shred the design into thousands of tiny regions and
-// report success. Same shape as pass.abc's memory_budget_mb.
+// report success. Same shape as pass.abc's memory refusal.
 uint64_t parse_ge_bound(const Eprp_var& var, std::string_view label, std::string_view dflt) {
   const auto s = std::string{var.get(label, std::string{dflt})};
   uint64_t   v = 0;

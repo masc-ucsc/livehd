@@ -17,7 +17,7 @@ The check is cycle-level only:
   toggles are not observable here.
 - Any other clock input is an ordinary input: it sees an edge when its value
   changes between consecutive vectors.
-- sim.unknown_zero does not zero register power-on state: mask such outputs or
+- compile.unknown_zero does not zero register power-on state: mask such outputs or
   drive a reset before checking them.
 """
 import argparse
@@ -64,7 +64,7 @@ def simulate(lhd, source, top, vectors, work):
     result = subprocess.run([str(lhd), "sim", "lg:" + str(graph), str(bench),
                     "--set", "sim.tune.profile=off",
                     "--set", "compile.upass.inline=false",
-                    "--set", "sim.unknown_zero=true", "--workdir", str(work / "sim"),
+                    "--set", "compile.unknown_zero=true", "--workdir", str(work / "sim"),
                     "--result-json", str(report), "-q"])
     if result.returncode and report.exists():
         print(report.read_text(), flush=True)

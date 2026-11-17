@@ -60,7 +60,7 @@ Tmap_result technology_map(std::string_view name, const std::shared_ptr<hhds::Gr
     provider = found->second;
   }
   if (!top || !top->get_io() || !top->get_io()->get_library() || options.library.empty() || !std::isfinite(options.delay_ps)
-      || options.delay_ps < 0 || options.delay_ps > std::numeric_limits<int>::max() || options.memory_budget_mb <= 0
+      || options.delay_ps < 0 || options.delay_ps > std::numeric_limits<int>::max()
       || !std::isfinite(options.io_load) || options.boundary_rounds < 1 || options.boundary_rounds > 64
       || (options.sharing_fanout && (options.sharing_fanout < 2 || options.sharing_fanout > 4096))) {
     return {Tmap_status::invalid, {}, "invalid technology-mapping source, library or limits"};

@@ -46,7 +46,7 @@ in todo 3g-partitions), two capacity models.
 | `grid.route` | `inherit` | the one routing grid for RUDY/RSMT, macro channel pressure, native legalization/detailed placement, terminal bins and SAT route-grid bins; `inherit` follows the density grid in use (`grid.density`, the chosen count in macro mode, and the configured `grid.density` in dynamic mode), or an explicit 2..1024 |
 | `grid.local` | `512` | local spreading grid per axis |
 | `region.max_cells` | `10000` | movable-cell cap per region rectangle |
-| `region.merge_um` | `5` | merge macro-edge/IO-span cut lines closer than this |
+| `region.merge_um` | `auto` | merge macro-edge/IO-span cut lines closer than this (auto: 20 row heights) |
 | `region.busorder` | `true` | bus order (boundary pins with order); skipped when the mesh has one rectangle |
 | `region.boundarypins`, `region.pinalign` | `false` | the other mesh consumers; their sub-options keep their names under the same prefix |
 | `legalize.bin.grid` | `route` | terminal legalization bins only: the routing grid (bounded for tiny cores) or an explicit 1..1024 used as given. SAT route-grid bins keep `grid.route` |
@@ -186,7 +186,7 @@ phase rebuilds the buffering, `remove_synthesis_buffers` makes a private
 physical copy and bypasses internal, scalar, non-inverting Liberty buffers.
 `synth.place.buffer_cleanup` (`auto`, the default) runs it only then: timing-
 driven placement and resynthesis do not re-buffer, so without resize (for
-example `synth.opentimer=false`) the synthesis buffers stay; `true` forces the
+example `synth.timing=false`) the synthesis buffers stay; `true` forces the
 cleanup and `false` never runs it. Input/output binding cells, fixed cells and clock/reset distribution
 cones remain, including controls crossing region boundaries. Logical mapped
 definitions and their resynthesis identities/history are unchanged. The cleanup
@@ -359,7 +359,7 @@ universal tuning recommendation.
 
 Parasitics use FLUTE with the first horizontal routing layer and the following
 vertical layer in LEF stack order. Sheet resistance/width and area/edge
-capacitance become ohm/um and fF/um. `synth.place.wire_rc=R,C` overrides both
+capacitance become ohm/um and fF/um. `synth.wire_rc=R,C` overrides both
 directions. RC enters OpenTimer in memory; there is no SPEF file round trip.
 This is a placement estimate, with no routing, via, coupling or clock-tree model.
 `synth.place.tracks=path/to/make_tracks.tcl` supplies the router's actual grid
@@ -378,7 +378,7 @@ layers when both track grids are present, even without a native power grid.
 The handoff sizes and spaces the pin metal for routing; fixed IOs keep their
 supplied shapes and locations.
 
-`synth.place.tech_rc=path/to/setRC.tcl` reads characterized technology data when
+`synth.wire_rc=path/to/setRC.tcl` reads characterized technology data when
 RC is not supplied by LEF. The reader accepts literal `set_wire_rc` / `set_layer_rc`
 commands and explicit `set_cmd_units` / `set_units`; it parses data without running
 Tcl or OpenROAD. Resistance/capacitance units otherwise come from the first main
@@ -898,7 +898,7 @@ no internal memory delay. This does not provide characterized memory timing.
 
 Full placement uses slack-weighted placement by default
 (`synth.place.timing_driven=true`). Set it to `false` for geometric/debug
-experiments, including runs with `synth.opentimer=false`. Synthesis-only and
+experiments, including runs with `synth.timing=false`. Synthesis-only and
 GP-only commands do not enter this refinement loop by default. Full timing-driven
 placement requires OpenTimer and constrained data nets (normally from
 `synth.sdc`). OpenTimer
@@ -1666,7 +1666,7 @@ still performed by the existing outer flow.
 
 `synth.place.resize=true` enables bounded sizing and buffer optimization after
 legal placement. Clock/reset distribution logic is protected from sizing, buffering and
-buffer bypass. `synth.place.repair.reset=true` is rejected. Equivalent scalar logic cells must have the same ordered pin
+buffer bypass. Equivalent scalar logic cells must have the same ordered pin
 interface, footprint and exact Liberty truth table (up to six inputs). Drive
 variants may have different widths. Sizing and redundant-buffer bypass run first,
 followed by a separate design-repair pass that splits fanout on FLUTE Steiner
@@ -1691,28 +1691,19 @@ of the best original candidate. That fixed reference prevents a timing-only
 choice from adding overlapping wire. These are internal candidate-generation
 and acceptance rules; public option defaults are unchanged.
 
-**Reset buffer tree (`synth.place.reset_fanout`, default 32; 2d-domplace U23).** One
-mechanism for every mapper (`abc`, `usyn`, the `domino_provisional` profile): right after
-the mapped hierarchy is flattened, before the first cell is read, every reset net with more
-than N cell loads is dealt out through the library's smallest placeable buffer
-(`reset_tree.hpp`), N pins per buffer, level by level until the driver carries at most N
-loads. A reset net is a net that drives an asynchronous clear/preset pin of a Liberty
-register, a domino storage reset `RST` pin (U22: the reset stays CMOS), or whose driver
-carries the synthesis reset role (a synchronous reset folded into data logic); every other
-load of that net (the synchronous-reset logic of the same signal) moves behind the tree too.
-Pins are grouped in instance-name order, which follows the source hierarchy; graph outputs,
-bus-wiring aliases, macros and constant (tie) drivers keep their direct connection. It is
-pure fanout restructuring (a chain of identity buffers per pin, LEC-proven in
-`lhd_placement_reset_tree_smoke`), idempotent (a timing-driven run builds it in the seed
-placement), and it composes with the mapper's region trees (`pass.abc.reset_fanout`,
-`pass.usyn.reset_fanout`, default 0), which bound a reset inside one region; this one bounds
-the sum across regions. `synth.place.reset_fanout=0` turns it off (the pre-U23 behaviour for
-the CMOS flows); 1 is refused. `qor.place.reset_tree` records `fanout`, `nets`, `sinks`,
-`added`, `levels`, `skipped` (pins left alone behind a multi-bit or multi-driver bus alias)
-of that placement call and `buffers`, the `__place_rsttree*` cells in the placed netlist; the
-value is part of the placement cache identity. The tree is not reset repair:
-`synth.place.repair.reset=true` (sizing reset cones) stays rejected, and the tree's nets
-keep the pre-CTS exclusion below (the buffers are reset-network cells). The tree's buffers
+**Reset distribution.** With `synth.place.pcrs` (default true) the placer hands every reset
+network to `pass.pcrs` (`pcrs::distribute_resets`, pass/place/pcrs/README.md): one balanced tree
+per (reset root, clock domain) at most `synth.max_fanout` loads per driver, timed and repaired
+as data, with flop levels chosen by placement timing feedback
+(`synth.place.pcrs.reset_pipeline`, default true; false = 0 levels). With `synth.place.pcrs=false`,
+and always for the domino storage reset `RST` pins (U22/U23, which pcrs does not serve yet), the
+legacy tree runs instead: right after the mapped hierarchy is flattened, every reset net with more
+than `synth.max_fanout` cell loads is dealt out through the library's smallest placeable buffer
+(`reset_tree.hpp`), level by level, outside timing (the pre-CTS exclusion below). It is pure fanout
+restructuring (LEC-proven in `lhd_placement_reset_tree_smoke`); `qor.place.reset_tree` records
+`fanout`, `nets`, `sinks`, `added`, `levels`, `skipped` and `buffers` (the `__place_rsttree*`
+cells), part of the placement cache identity. The tree's buffers
+are not growth for the shared cell/area growth budget above.
 are not growth for the shared cell/area growth budget above.
 
 `synth.place.domino_rail_fanout` (default 32 since 2d-domplace U24, 0 off) applies the same tree
@@ -1724,7 +1715,7 @@ violations from 51/78 to 0/0 for 170 buffers (16 loads: 2210 ps, 444 buffers; 64
 69/62); lfsr has no rail above 32 loads, so it is unchanged.
 
 **pass.pcrs (default).** With `synth.place.pcrs=true` every reset distribution is rebuilt as a balanced pipelined tree
-(`pass/pcrs/README.md`) and the reset is ordinary data: only clock networks are excluded as described next. The exclusion
+(`pass/place/pcrs/README.md`) and the reset is ordinary data: only clock networks are excluded as described next. The exclusion
 below applies to reset networks only with `synth.place.pcrs=false`, or for the domino storage resets that keep the legacy
 tree.
 
@@ -2620,7 +2611,7 @@ earlier mixed-grid results are historical.
 
 ### Color and macro chunk floorplan
 
-`--set synth.place.fp=chunks --set synth.place.chunk.memory_gb=1` plans rectangular
+`--set synth.place.fp=chunks --set lhd.ram_budget_mb=1024` plans rectangular
 chunks for downstream placement. Common budgets are 1, 2, 4 (default), 8 and 16
 decimal GB; zero requests one chunk. A design that fits stays whole. Otherwise
 chunks need not match in cell count, estimated bytes, or physical area. An
@@ -4796,10 +4787,11 @@ Pins sharing an M2 track share one branch and one trunk via; every endpoint
 must be connected, and all new cuts are checked against each other. General
 multi-pin Steiner/maze routing and repeaters remain under development.
 
-`preroute.setup_margin` is 20 ps; `preroute.hold_margin=-1` computes two buffer
+`preroute.setup_margin=auto` is 1.5 FO4 of the Liberty's smallest NOT cell
+(`liberty::tech_proxy`; asap7 ~18 ps); `preroute.hold_margin=-1` computes two buffer
 delays. `preroute.hold_buffer=auto` selects the technology profile's hold
-buffer (ASAP7: `BUFx2_ASAP7_75t_R`), at
-`preroute.nominal_slew=20` ps and the buffer's own input capacitance (fanout one).
+buffer (ASAP7: `BUFx2_ASAP7_75t_R`), at its own input capacitance (fanout one)
+and `preroute.nominal_slew=auto`: the buffer's output slew into one copy of itself.
 Explicit nonnegative hold margins bypass this characterization. Eligibility
 checks timing on every connected data pin of each endpoint cell:
 committing a route locks the whole cell, so unrelated data pins must retain
@@ -4915,7 +4907,7 @@ macro and IO positions stay fixed. The boundary-pin options
 
 The region mesh (`Region_mesh`, built once per detail-final phase and shared by bus
 order, boundary pins and pin alignment) comes from that run's cell coordinates, macro
-edges, and IO bus spans. Cuts within `region.merge_um=5` um merge; regions over
+edges, and IO bus spans. Cuts within `region.merge_um` (auto: 20 placement-row heights) merge; regions over
 `region.max_cells=10000` movable cells split along their longest dimension.
 Pruning alternates H/V candidates sorted by their initial neighbor distance,
 without reranking. The mesh then stays fixed; `region_mesh.json` describes it.

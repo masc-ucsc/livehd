@@ -69,7 +69,7 @@ for mapper in ('abc', 'usyn'):
     p = subprocess.run(['lhd/lhd', 'synth', str(source), '--top', 'top', '--workdir', str(work),
                         '--set', f'synth.liberty={liberty}', '--set', f'synth.lef={DATA}/sky130hd.tlef,{cells_lef}',
                         '--set', f'synth.sdc={sdc}', '--set', 'synth.memory=macro', '--set', f'synth.mapper={mapper}',
-                        '--set', 'compile.slang.liberty_cells=true', '--set', 'synth.opentimer=false',
+                        '--set', 'compile.slang.liberty_cells=true', '--set', 'synth.timing=false',
                         '--set', 'synth.place=true', '--set', 'synth.place.timing_driven=false',
                         '--set', 'synth.place.iterations=40', '--set', 'synth.place.grid.density=8',
                         '--emit-dir', f'def:{root}/{mapper}_def', '--result-json', str(report), '-q'] + extra,

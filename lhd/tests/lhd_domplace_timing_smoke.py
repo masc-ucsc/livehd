@@ -44,7 +44,7 @@ def synth(source, top, constraints):
             '-q']
 
 
-domino = ['--set', 'pass.usyn.physical=domino_provisional', '--set', 'synth.opentimer=false',
+domino = ['--set', 'pass.usyn.physical=domino_provisional', '--set', 'synth.timing=false',
           '--set', 'pass.usyn.domino_select=all']
 # Explicit coefficients: each option overrides its built-in logical-effort
 # estimate (pass/domplace/domino_delay.hpp).
@@ -92,7 +92,7 @@ for leg, args, needle in (
 # A clock the SDC scan cannot resolve can be named; it is timed as the SDC
 # clock on that port.
 named = run('named_port', synth(domp, 'domp', two) + stage_timing + ['--set', 'synth.place.stage_timing.clock_port=clk',
-                                                                     '--set', 'synth.opentimer=false',
+                                                                     '--set', 'synth.timing=false',
                                                                      '--workdir', str(root / 'N')])
 named_timing = report(root / 'N')
 assert list(named_timing['clocks']) == ['a'] and named_timing['clocks']['a']['roots'] == ['clk'], named_timing['clocks']
@@ -100,7 +100,7 @@ assert named_timing['clocks']['a']['period_ps'] == 10000, named_timing['clocks']
 # Several clocks and none on the named port: no period is borrowed from
 # another clock, and the SDC outside the saved subset is refused.
 unresolved = run('unresolved_port', synth(domp, 'domp', two) + stage_timing
-                 + ['--set', 'synth.place.stage_timing.clock_port=x', '--set', 'synth.opentimer=false',
+                 + ['--set', 'synth.place.stage_timing.clock_port=x', '--set', 'synth.timing=false',
                     '--workdir', str(root / 'N')], False)['error']
 assert 'the SDC has 2 clocks and none resolves on port x' in unresolved['message'], unresolved
 assert named['qor']['place']['stage_timing']['status'] == 'partial', named['qor']['place']['stage_timing']
@@ -184,7 +184,8 @@ assert abs(bare_stages['q1']['internal']['eval_delay_ps'] - 133.2680096998603) <
 # so the comparison is over the native flop->flop endpoints, within the
 # declared max(5 ps, 5%) arrival/required tolerance (timing_comparison.hpp).
 C = root / 'C'
-cmos = run('arm2', synth(counter, 'cnt', fast) + stage_timing + ['--workdir', str(C)])
+# The stage timer is certified against OpenTimer (the validation engine), so this run selects it explicitly.
+cmos = run('arm2', synth(counter, 'cnt', fast) + stage_timing + ['--workdir', str(C), '--set', 'synth.timing.engine=opentimer'])
 native = report(C)
 assert native['model']['netlist'].startswith('DEF import'), native['model']  # word-valued ports
 assert native['model']['provisional'] is None and native['coverage']['certified'], native['coverage']
@@ -200,4 +201,15 @@ for endpoint in compared:
 expected_wns = min(reference[e['pin']] for e in compared)
 assert abs(flops['wns_ps'] - expected_wns) <= max(5, 0.05 * abs(expected_wns)), (flops, expected_wns)
 assert cmos['qor']['place']['stage_timing']['status'] == 'partial', cmos['qor']['place']['stage_timing']
+# The fast engine (lhd synth's default report) on the same design agrees with OpenTimer's arrivals within 2%
+# (measured: 0.8-1.0% more pessimistic on these flop paths).
+F = root / 'F'
+run('arm2_fast', synth(counter, 'cnt', fast) + stage_timing + ['--workdir', str(F)])
+fast_sta = json.loads((F / 'synth/timing.json').read_text())
+assert fast_sta['engine'] == 'fast', fast_sta.get('engine')
+fast_pins = {p['pin']: p for p in fast_sta['designs'][0]['physical_pins']}
+ot_pins = {p['pin']: p for p in sta['physical_pins']}
+for endpoint in compared:
+    ot, fa = ot_pins[endpoint['pin']], fast_pins[endpoint['pin']]
+    assert abs(fa['arrival'] - ot['arrival']) <= 0.02 * abs(ot['arrival']), (endpoint['pin'], fa, ot)
 print('lhd_domplace_timing_smoke: ok')

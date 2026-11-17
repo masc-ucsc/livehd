@@ -47,34 +47,34 @@ run compile "$SRC" --reader slang --top br_mux_onehot \
 run pass color synth --top "$TOP" lg:"$W/lg" --workdir "$W/color"
 
 run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/default" \
-  --set synth.liberty="$LIB" --set abc.delay=1000 --set abc.register=false \
+  --set synth.liberty="$LIB" --set synth.delay=1000 --set abc.register=false \
   --workdir "$W/default_work"
 cp "$W/result.json" "$W/default.json"
 
 run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/no_fanout" \
-  --set synth.liberty="$LIB" --set abc.delay=1000 --set abc.register=false \
-  --set abc.max_fanout=0 --workdir "$W/no_fanout_work"
+  --set synth.liberty="$LIB" --set synth.delay=1000 --set abc.register=false \
+  --set synth.max_fanout=0 --workdir "$W/no_fanout_work"
 cp "$W/result.json" "$W/no_fanout.json"
 
 # The same cone under an impossible target must still exercise the conditional
 # speed-grade sweep; removing upsize altogether would trade away timing on every
 # genuinely failing region.
 run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/tight" \
-  --set synth.liberty="$LIB" --set abc.delay=1 --set abc.register=false \
+  --set synth.liberty="$LIB" --set synth.delay=1 --set abc.register=false \
   --workdir "$W/tight_work"
 cp "$W/result.json" "$W/tight.json"
 
 # The budget's OTHER half. `&nf -D` is silently ignored by ABC's mapper, so
 # without an explicit relaxation the flow always chases MINIMUM delay and spends
-# area no constraint asked for. `abc.area_relax=0` switches the `&nf -R` remap
+# area no constraint asked for. `synth.area_relax=0` switches the `&nf -R` remap
 # off, so the default must never come out LARGER than it -- and must still be
 # inside the budget. (How much smaller depends on the cell library: this
 # hermetic Liberty has six cells and one alternative drive strength, so it has
 # almost no area/delay curve to trade along. The measured effect is in
 # //pass/abc:abc_incr_test's policy tests and external benchmark sweeps.)
 run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/norelax" \
-  --set synth.liberty="$LIB" --set abc.delay=1000 --set abc.register=false \
-  --set abc.area_relax=0 --workdir "$W/norelax_work"
+  --set synth.liberty="$LIB" --set synth.delay=1000 --set abc.register=false \
+  --set synth.area_relax=0 --workdir "$W/norelax_work"
 cp "$W/result.json" "$W/norelax.json"
 
 # And the area CANDIDATE: `abc.area_flow=none` keeps only the delay flow's
@@ -82,7 +82,7 @@ cp "$W/result.json" "$W/norelax.json"
 # so the default can never be larger than this run, and its region row must
 # say which mapping it kept.
 run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/nocand" \
-  --set synth.liberty="$LIB" --set abc.delay=1000 --set abc.register=false \
+  --set synth.liberty="$LIB" --set synth.delay=1000 --set abc.register=false \
   --set abc.area_flow=none --workdir "$W/nocand_work"
 cp "$W/result.json" "$W/nocand.json"
 
@@ -107,7 +107,7 @@ norelax_delay=$(metric max_delay "$W/norelax.json")
 [ -n "$norelax_area" ] && [ -n "$norelax_delay" ] \
   || fail "missing QoR metric for area_relax=0 (area=$norelax_area delay=$norelax_delay)"
 awk -v area="$default_area" -v base="$norelax_area" 'BEGIN { exit !(area <= base) }' \
-  || fail "budget-aware area recovery INFLATED the netlist (area_relax=200 -> $default_area, =0 -> $norelax_area)"
+  || fail "budget-aware area recovery INFLATED the netlist (area_relax=100 -> $default_area, =0 -> $norelax_area)"
 awk -v delay="$norelax_delay" 'BEGIN { exit !(delay > 0 && delay <= 1000) }' \
   || fail "area_relax=0 one-hot mux missed its 1000 ps budget (delay=$norelax_delay)"
 

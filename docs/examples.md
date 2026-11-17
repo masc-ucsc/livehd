@@ -60,7 +60,7 @@ same netlist):
 #   W/synth/qor.json  pass.abc QoR;  W/synth/timing.json  the OpenTimer critical path
 ./bazel-bin/lhd/lhd synth lg:dino_lg --top PipelinedDualIssueCPU --emit-dir lg:dino_net --emit-dir report:rep
 ./bazel-bin/lhd/lhd synth dino_prp/PipelinedDualIssueCPU.prp --top PipelinedDualIssueCPU \
-    --set abc.adder=cla --set synth.opentimer=false --emit verilog:net.v --result-json r.json
+    --set synth.adder=cla --set synth.timing=false --emit verilog:net.v --result-json r.json
 ```
 
 `--result-json`'s `qor` member is `{kind:"synth", abc:{...}, sta:{...}}` — each
@@ -105,7 +105,7 @@ Steering ABC without touching the source — per-region overrides keyed by color
 
 ```
 ./bazel-bin/lhd/lhd pass abc --top Alu.Alu lg:alu_lg --emit-dir lg:alu_net2 --workdir alu_w3 \
-    --set abc.region_opts='{"0":{"flow":"strash; &get -n; &fraig -x; &put; &get -n; &dc4; &dch -f; &nf {D}; &put","delay":"10"}}'
+    --set synth.region_opts='{"0":{"flow":"strash; &get -n; &fraig -x; &put; &get -n; &dc4; &dch -f; &nf {D}; &put","delay":"10"}}'
 ```
 
 Or from the Pyrope source, a block attribute makes a code snippet its own
