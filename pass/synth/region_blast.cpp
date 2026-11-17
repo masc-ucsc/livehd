@@ -961,8 +961,10 @@ Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_
         } else if (options.derived_clock && options.icg_flow_ok && real_width(f.clk_drv) == 1
                    && gu::type_op_of(f.clk_drv.get_master_node()) == Ntype_op::Sub) {
           // synth.derived_clock: keep the register mapped; clk_drv resolves to the instance's output pin.
-        } else if (options.derived_clock && options.icg_flow_ok && !f.neg_clock && real_width(f.clk_drv) == 1) {
-          // synth.derived_clock: keep the register mapped; its clock crosses as an ABC PO below.
+        } else if (options.derived_clock && options.icg_flow_ok && real_width(f.clk_drv) == 1) {
+          // synth.derived_clock: keep the register mapped; its clock crosses as an ABC PO below. A falling-edge
+          // register (e.g. the negedge-flop clock gate `always @(negedge clk) en_q <= en; gclk = clk & en_q`)
+          // takes the inverted mapped net: the read-back adds the clock inverter like a region-input clock's.
           f.clk_derived = true;
         } else {
           auto why = icg_rejected.find(f.clk_drv);

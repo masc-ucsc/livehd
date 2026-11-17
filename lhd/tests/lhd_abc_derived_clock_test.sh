@@ -59,9 +59,23 @@ if lec.get('verdict') != 'proven-full' or lec.get('bounded'):
     raise SystemExit('FAIL: expected an unbounded LEC proof, got {}'.format(lec))
 CHECK
 
-# A negedge register on a derived clock stays native even with the option.
-synth neg abc_derived_clock_neg true
-[ "$(count "$W/neg/net.v" '^always @(negedge ')" = 1 ] || fail "neg: expected the native negedge flop: $(grep 'always @' "$W/neg/net.v")"
-grep -q '"derived-clock-native"' "$W/neg/synth.log" || fail "neg: the negedge register must be reported native"
+# Falling-edge registers on a derived clock map too (no native flop): a negedge register on a latch
+# gate, and the negedge-flop clock gate with posedge and negedge registers behind it.
+for spec in abc_derived_clock_neg:4 abc_derived_clock_negff:9 abc_reset_edge_matrix:20; do
+  top=${spec%%:*}; want=${spec##*:}
+  synth "$top" "$top" true
+  N="$W/$top/net.v"
+  [ "$(count "$N" '^always @')" = 0 ] || fail "$top: a register stayed native: $(grep '^always @' "$N" | head -3)"
+  grep -q '"derived-clock-native"' "$W/$top/synth.log" && fail "$top: registers were reported native"
+  [ "$(count "$N" '^DFF')" = "$want" ] || fail "$top: expected $want DFF cells, got $(count "$N" '^DFF')"
+  "$LHD" lec --set formal.effort=proof --impl lg:"$W/$top/net" --ref lg:"$W/$top/W/synth/lg" --lib lg:"$W/models" --top "$top" \
+    --workdir "$W/lec_$top" -q --result-json "$W/lec_$top.json" > "$W/lec_$top.log" 2>&1 || fail "$top: LEC -> $(cat "$W/lec_$top.json" 2>/dev/null)"
+  python3 - "$W/lec_$top.json" <<'CHECK' || exit 1
+import json, sys
+lec = json.load(open(sys.argv[1])).get('lec', {})
+if lec.get('verdict') != 'proven-full' or lec.get('bounded'):
+    raise SystemExit('FAIL: expected an unbounded LEC proof, got {}'.format(lec))
+CHECK
+done
 
-echo "PASS: synth.derived_clock maps derived-clock registers to DFF cells"
+echo "PASS: synth.derived_clock maps derived-clock registers (either edge) to DFF cells"

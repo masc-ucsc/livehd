@@ -1172,6 +1172,7 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
     std::string      pin;
     int32_t          po;
     bool             async_reset = false;  // a flop's clear/preset pin: dealt out by the reset-fanout tree
+    bool             invert      = false;  // a falling-edge register on a posedge-only cell: clock through an inverter
   };
   std::vector<Pending_reset> pending_resets;
   // A register on a derived clock (Seq_flop::clk_po) takes its clock pin from the mapped net of that PO, which
@@ -1520,7 +1521,7 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
           lclk.connect_sink(csink);
           clock_sinks[lclk].push_back(csink);
         } else if (const auto po = owner_clk_po(k); po >= 0) {
-          pending_clocks.push_back({sub, cell.clk_pin, po});  // a derived clock: wired in pass 2b
+          pending_clocks.push_back({sub, cell.clk_pin, po, false, owner_negedge(k)});  // a derived clock: wired in pass 2b
         }
         if (af != nullptr) {
           // The pin that loads this bit's reset value takes the register's
@@ -1722,6 +1723,7 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
   // Registers on a derived clock: the clock pin reads the mapped net of the clock's PO (synth.derived_clock).
   // Wired before the fanout tree below so a gated clock feeding thousands of registers is buffered like an ICG
   // output.
+  absl::flat_hash_map<hhds::Pin_class, hhds::Pin_class> derived_inverted;  // derived clock net -> its shared inverter
   for (const auto& pc : pending_clocks) {
     auto drv = pc.po < static_cast<int32_t>(mapped.outputs.size()) ? get_net_driver(mapped.outputs[static_cast<size_t>(pc.po)])
                                                                    : hhds::Pin_class{};
@@ -1734,6 +1736,24 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
     if (gu::type_op_of(pc.sub) == Ntype_op::Flop) {
       drv.connect_sink(gu::setup_sink_by_name(pc.sub, pc.pin));  // a native flop: not part of the cell fanout tree
     } else {
+      if (pc.invert) {
+        // The selected cell is posedge-only: one shared clock inverter per derived clock net (as for a region
+        // input clock, mapped_owner_clk).
+        auto it = derived_inverted.find(drv);
+        if (it == derived_inverted.end()) {
+          I(mio_inv.has_value());
+          const auto& desc = cell_desc(*mio_inv);
+          auto        inv  = gu::create_typed_node(*body, Ntype_op::Sub);
+          inv.set_subnode(desc.io);
+          inv.attr(hhds::attrs::name).set(std::format("abc_clock_inv_{}", clock_inv_cells));
+          drv.connect_sink(inv.create_sink_pin(desc.input_names.front()));
+          auto inverted = inv.create_driver_pin(desc.output_name);
+          gu::set_ubits(inverted, 1);
+          ++clock_inv_cells;
+          it = derived_inverted.emplace(drv, inverted).first;
+        }
+        drv = it->second;
+      }
       auto csink = pc.sub.create_sink_pin(pc.pin);
       drv.connect_sink(csink);
       clock_sinks[drv].push_back(csink);
