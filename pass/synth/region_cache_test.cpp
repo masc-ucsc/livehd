@@ -191,6 +191,57 @@ TEST(AbcIncr, StructuralEqualReuse) {
   EXPECT_FALSE(livehd::graph_util::preroute_net_excluded(f2.rb.body->get_input_pin("a")));
 }
 
+TEST(AbcIncr, IdenticalRoutingAnnotationsReuseAcrossRebuild) {
+  for (bool net_marker : {false, true}) {
+    for (bool input_marker : {false, true}) {
+      const auto tag = std::string("lgdb_route_equal_") + (net_marker ? "net_" : "cell_")
+                       + (input_marker ? "input" : "internal");
+      auto& out1 = livehd::Hhds_graph_library::instance(tag + "_out1");
+      auto& out2 = livehd::Hhds_graph_library::instance(tag + "_out2");
+      auto old = make_region((tag + "_src1").c_str(), out1, "top__c1");
+      auto fresh = make_region((tag + "_src2").c_str(), out2, "top__c1");
+      for (auto* f : {&old, &fresh}) {
+        auto driver = input_marker ? f->src->get_input_pin("a") : f->src->get_output_pin("y").get_driver_pin();
+        if (net_marker) {
+          driver.attr(livehd::attrs::preroute_net_exclude).set();
+        } else {
+          driver.get_master_node().attr(livehd::attrs::preroute_exclude).set();
+        }
+        f->src->commit();
+      }
+      Region_cache writer(tag + "_cache", 7);
+      ASSERT_TRUE(writer.store(old.rb, *old.slib, old.src_name, Region_qor{}, "R", &out1));
+      writer.save();
+      Region_cache reader(tag + "_cache", 7);
+      EXPECT_TRUE(reader.lookup_compare(fresh.rb, fresh.src.get(), "R").hit);
+    }
+  }
+}
+
+TEST(AbcIncr, MovingRoutingAnnotationsInvalidatesReuse) {
+  for (bool net_marker : {false, true}) {
+    const auto tag = std::string("lgdb_route_moved_") + (net_marker ? "net" : "cell");
+    auto& out1 = livehd::Hhds_graph_library::instance(tag + "_out1");
+    auto& out2 = livehd::Hhds_graph_library::instance(tag + "_out2");
+    auto old = make_region((tag + "_src1").c_str(), out1, "top__c1");
+    auto fresh = make_region((tag + "_src2").c_str(), out2, "top__c1");
+    for (auto driver : {old.src->get_output_pin("y").get_driver_pin(), fresh.src->get_input_pin("a")}) {
+      if (net_marker) {
+        driver.attr(livehd::attrs::preroute_net_exclude).set();
+      } else {
+        driver.get_master_node().attr(livehd::attrs::preroute_exclude).set();
+      }
+    }
+    old.src->commit();
+    fresh.src->commit();
+    Region_cache writer(tag + "_cache", 7);
+    ASSERT_TRUE(writer.store(old.rb, *old.slib, old.src_name, Region_qor{}, "R", &out1));
+    writer.save();
+    Region_cache reader(tag + "_cache", 7);
+    EXPECT_FALSE(reader.lookup_compare(fresh.rb, fresh.src.get(), "R").hit);
+  }
+}
+
 TEST(AbcIncr, RoutingAnnotationChangesCannotReuseLogicOnlyProof) {
   for (bool old_marked : {false, true}) {
     for (bool net_marker : {false, true}) {

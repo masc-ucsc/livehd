@@ -3469,7 +3469,8 @@ bool folded_loop_identical(hhds::Graph* compact, hhds::Graph* unrolled, bool sta
   return true;
 }
 
-bool structural_equivalent_traversal(hhds::Graph* a, hhds::Graph* b, const Semdiff_options& opts) {
+bool structural_equivalent_traversal(hhds::Graph* a, hhds::Graph* b, const Semdiff_options& opts,
+                                     const Node_pair_check& node_check) {
   if (a == nullptr || b == nullptr) {
     return false;
   }
@@ -3744,6 +3745,9 @@ bool structural_equivalent_traversal(hhds::Graph* a, hhds::Graph* b, const Semdi
   }
   for (auto na : a->body().nodes(hhds::Node_order::forward)) {
     auto nb = b->get_node(ab.at(na.get_class_index()));
+    if (node_check && !node_check(na, nb)) {
+      return fail(std::format("node annotation mismatch at ref node {}", na.get_debug_nid()));
+    }
     if (gu::type_op_of(na) != gu::type_op_of(nb)) {
       return fail(std::format("op mismatch at ref node {}", na.get_debug_nid()));
     }
@@ -3760,6 +3764,10 @@ bool structural_equivalent_traversal(hhds::Graph* a, hhds::Graph* b, const Semdi
     if (!oka || !okb || da != db) {
       return fail(std::format("input-edge mismatch at ref node {}", na.get_debug_nid()));
     }
+  }
+  if (node_check && (!node_check(a->get_input_node(), b->get_input_node())
+                     || !node_check(a->get_output_node(), b->get_output_node()))) {
+    return fail("graph IO annotation mismatch");
   }
   // Graph outputs are compare points too (not forward_class nodes): the output
   // node's input-edge multiset must correspond, or a swapped/rewired output slips

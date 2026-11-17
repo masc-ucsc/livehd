@@ -36,9 +36,9 @@ namespace {
 
 namespace gu = livehd::graph_util;
 
-// Logic equivalence does not establish correspondence of physical exclusions.
-// Until the cache has an annotation-aware correspondence proof, refuse reuse
-// when either pre-body carries them (including when an annotation was removed).
+// Logic equivalence alone does not establish correspondence of physical
+// exclusions. Annotated bodies additionally need an exact node/edge bijection
+// whose paired nodes and driver pins carry the same exclusions.
 bool has_preroute_exclusions(hhds::Graph& graph) {
   const auto marked = [](const hhds::Node_class& node) {
     if (node.attr(livehd::attrs::preroute_exclude).has()) {
@@ -51,7 +51,7 @@ bool has_preroute_exclusions(hhds::Graph& graph) {
     }
     return false;
   };
-  if (marked(graph.get_input_node())) {
+  if (marked(graph.get_input_node()) || marked(graph.get_output_node())) {
     return true;
   }
   for (auto node : graph.body().nodes()) {
@@ -60,6 +60,27 @@ bool has_preroute_exclusions(hhds::Graph& graph) {
     }
   }
   return false;
+}
+
+// Called only under the verified traversal bijection. Internal Sub outputs
+// follow their interface names; enclosing graph inputs follow the cache's IO
+// identity policy. Other outputs retain their operator-defined numeric ports.
+bool same_preroute_annotations(const hhds::Node_class& a, const hhds::Node_class& b, bool matching_io_names) {
+  if (a.attr(livehd::attrs::preroute_exclude).has() != b.attr(livehd::attrs::preroute_exclude).has()) {
+    return false;
+  }
+  auto excluded_outputs = [matching_io_names](const hhds::Node_class& node) {
+    std::vector<std::string> marked;
+    const bool by_name = gu::type_op_of(node) == Ntype_op::Sub || (node.is_input_node() && matching_io_names);
+    for (auto pin : node.out_sorted_pins()) {
+      if (gu::preroute_net_excluded(pin)) {
+        marked.push_back(by_name ? std::string{pin.get_pin_name()} : std::to_string(static_cast<uint32_t>(pin.get_port_id())));
+      }
+    }
+    std::sort(marked.begin(), marked.end());
+    return marked;
+  };
+  return excluded_outputs(a) == excluded_outputs(b);
 }
 
 // LHD_ABC_INCR_DEBUG: print, per region, which compare gate rejected a reuse. A
@@ -307,10 +328,7 @@ Region_cache::Compare_result Region_cache::lookup_compare(const livehd::partitio
     dbg("pre-body rebuild failed");
     return res;
   }
-  if (has_preroute_exclusions(*pre_body)) {
-    dbg("pre-body routing exclusions need annotation-aware comparison");
-    return res;
-  }
+  const bool annotated = has_preroute_exclusions(*pre_body);
   const auto digest
       = livehd::semdiff::canonical_digest(pre_body, {}, livehd::semdiff::Sub_fold::interface, /*matching_io_names=*/false);
   std::vector<const Row*> candidates;
@@ -354,10 +372,7 @@ Region_cache::Compare_result Region_cache::lookup_compare(const livehd::partitio
     if (!cached_pre) {
       continue;
     }
-    if (has_preroute_exclusions(*cached_pre)) {
-      dbg("cached routing exclusions need annotation-aware comparison");
-      continue;
-    }
+
     if (!row.stored_this_run && instantiates_refreshed_child(cached_pre.get())) {
       dbg("cached pre-body instantiates a child whose interface changed this run");
       continue;
@@ -398,7 +413,17 @@ Region_cache::Compare_result Region_cache::lookup_compare(const livehd::partitio
     so.matching_names    = true;
     so.matching_io_names = !cross_name;
     so.blackbox_subs     = livehd::debug::env<"LHD_ABC_INCR_NO_BLACKBOX">() == nullptr;
-    if (!livehd::semdiff::structural_identical(cached_pre.get(), pre_body, so)) {
+    if (annotated || has_preroute_exclusions(*cached_pre)) {
+      // The logical fast path deliberately ignores these physical annotations.
+      // Verify every marked location under an exact graph bijection instead;
+      // adding, removing, or moving a marker must invalidate the cache.
+      if (!livehd::semdiff::structural_equivalent_traversal(
+              cached_pre.get(), pre_body, so,
+              [&](const auto& a, const auto& b) { return same_preroute_annotations(a, b, so.matching_io_names); })) {
+        dbg("routing annotations or exact structural correspondence changed");
+        continue;
+      }
+    } else if (!livehd::semdiff::structural_identical(cached_pre.get(), pre_body, so)) {
       bool rescued = livehd::debug::env<"LHD_ABC_INCR_NO_TRAVERSAL">() == nullptr
                      && livehd::semdiff::structural_equivalent_traversal(cached_pre.get(), pre_body, so);
       if (!rescued) {

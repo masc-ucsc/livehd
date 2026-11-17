@@ -309,7 +309,11 @@ Match_result structural_match(hhds::Graph* a, hhds::Graph* b, const Semdiff_opti
 // width/value anchors as structural_identical (opts.blackbox_subs applies), so
 // call it only when structural_identical() returns false: it rescues cyclic
 // regions without ever admitting one that differs.
-[[nodiscard]] bool structural_equivalent_traversal(hhds::Graph* a, hhds::Graph* b, const Semdiff_options& opts = {});
+// An optional read-only check extends the exact proof to caller-owned node/pin
+// annotations. It is checked on every paired node, including graph IO nodes.
+using Node_pair_check = std::function<bool(const hhds::Node_class&, const hhds::Node_class&)>;
+[[nodiscard]] bool structural_equivalent_traversal(hhds::Graph* a, hhds::Graph* b, const Semdiff_options& opts = {},
+                                                  const Node_pair_check& node_check = {});
 
 // A process-independent 128-bit structural digest of a module def: op kinds,
 // pin widths, connectivity (commutative-normalized within each sink port,
