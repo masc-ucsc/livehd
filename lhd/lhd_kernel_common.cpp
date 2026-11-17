@@ -1046,6 +1046,11 @@ std::string resolve_io_load(const Options& opts, const std::string& liberty) {
 }
 
 void merge_mapper_sets(const Options& opts, std::string_view method, Eprp_var::Eprp_dict& labels) {
+  // Concurrency is lhd.jobs alone (0 = the available CPUs): ABC's worker cap follows it; its RAM admission still
+  // gates each worker.
+  if (method == "pass.abc") {
+    labels["threads"] = std::to_string(std::max(1u, livehd::Job_manager::global().ceiling()));
+  }
   // synth.delay / synth.memory are the run-wide spellings of source attributes;
   // the pass's own namespace (merged below) wins over them.
   bool have_delay = false;
@@ -1056,21 +1061,19 @@ void merge_mapper_sets(const Options& opts, std::string_view method, Eprp_var::E
     } else if (k == "synth.abc_pre" && method == "pass.abc" && !v.empty()) {
       labels["pre"] = v;
     } else if (k == "synth.memory" && method == "pass.abc") {
-      labels["memory"] = v == "flops" ? "true" : v == "macro" ? "false" : "auto";
+      labels["memory"] = v == "flops" ? "true" : v == "macro" ? "false" : "auto";  // sram: resolved below
     } else if (k == "synth.memory" && method == "pass.usyn" && (v == "flops" || v == "macro")) {
       // USYN keeps memories native unless asked: only an explicit flops/macro reaches its mapping step.
       labels["memory"] = v == "flops" ? "true" : "false";
     }
   }
-  // synth.memory.sram: memories are generated macros (pass/synth/sram_macro.hpp), so `auto` folds only a memory below
-  // the smallest macro or one no macro can realize. An explicit flops/macro still wins.
+  // synth.memory=sram: memories are generated macros (pass/synth/sram_macro.hpp), so the mapper folds only a memory
+  // below the smallest macro or one no macro can realize.
   if (method == "pass.abc" && (!labels.contains("memory") || labels["memory"] == "auto")) {
-    bool        sram     = false;
+    const bool  sram     = synth_set(opts, "memory", "auto") == "sram";
     std::string min_bits = "2048";
     for (const auto& [k, v] : opts.sets) {
-      if (k == "synth.memory.sram") {
-        sram = v == "true" || v == "1" || v == "on" || v == "yes";
-      } else if (k == "synth.memory.min_bits") {
+      if (k == "synth.memory.min_bits") {
         min_bits = v;
       }
     }
@@ -1323,7 +1326,9 @@ void check_known_set_passes(const Options& opts) {
       pass = "sim";
       flag = key.substr(4);
     }
-    const auto option_method = pass == "sim" ? std::string_view{"sim"} : set_pass_method(pass);
+    const auto option_method = pass == "sim"     ? std::string_view{"sim"}
+                               : pass == "synth" ? std::string_view{"synth"}  // retired synth.* keys carry hints too
+                                                 : set_pass_method(pass);
     if (const auto hint = retired_set_hint(option_method, flag); !hint.empty()) {
       throw Lhd_error{"usage", std::format("--set/--config '{}' is no longer a public option", key), std::string{hint}};
     }
@@ -1489,8 +1494,8 @@ void check_known_set_passes(const Options& opts) {
                         std::format("synth.abc_pre '{}' is not a ';'-separated list of allow-listed ABC optimization steps", value),
                         "e.g. `dc2`, `fraig; dc2`, `resyn2`, `&dch -f`, `&synch2 -K 6 -C 500`"};
       }
-      if (flag == "memory" && value != "auto" && value != "flops" && value != "macro") {
-        throw Lhd_error{"usage", std::format("synth.memory expects auto|flops|macro, got '{}'", value), ""};
+      if (flag == "memory" && value != "auto" && value != "flops" && value != "macro" && value != "sram") {
+        throw Lhd_error{"usage", std::format("synth.memory expects auto|flops|macro|sram, got '{}'", value), ""};
       }
       if (flag == "io_load" && value != "auto") {
         char*        end = nullptr;

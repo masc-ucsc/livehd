@@ -156,10 +156,28 @@ void Physical_ranker::bind(const std::shared_ptr<hhds::Graph>& graph) {
       clock.period_ps = options_.default_period_ps;
       constraints_.clocks.push_back(std::move(clock));
     }
+  }
+  if (options_.default_constraints && !constraints_.clocks.empty()) {
+    // An output the constraints leave unchecked is checked against the first clock with a zero output delay
+    // (an unconstrained input already arrives at 0): a constraint file that only creates the clock still times
+    // its input-to-output paths, as the OpenTimer flow did.
+    std::set<std::string> constrained;
+    for (const auto& out : constraints_.outputs) {
+      if (out.check) {
+        constrained.insert(out.port);
+      }
+    }
+    for (auto& out : constraints_.outputs) {
+      if (!out.check && !constrained.contains(out.port)) {  // a set_load alone: keep its load, add the check
+        out.check   = true;
+        out.clocked = true;
+        out.clock   = constraints_.clocks.front().name;
+        constrained.insert(out.port);
+      }
+    }
     for (const auto& port : netlist.ports()) {
-      if (!port.input) {
-        constraints_.outputs.push_back({port.name, constraints_.clocks.empty() ? "" : constraints_.clocks.front().name, 0.f,
-                                        options_.output_load_ff});
+      if (!port.input && !constrained.contains(port.name)) {
+        constraints_.outputs.push_back({port.name, constraints_.clocks.front().name, 0.f, options_.output_load_ff});
       }
     }
   }

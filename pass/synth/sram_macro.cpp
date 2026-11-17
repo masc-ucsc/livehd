@@ -167,7 +167,7 @@ std::string liberty_of(const std::string& name, const std::vector<Pin>& pins, co
                        const std::map<std::string, bool>& sync_out) {
   const uint32_t aw = static_cast<uint32_t>(std::max<uint64_t>(1, static_cast<uint64_t>(std::ceil(std::log2(static_cast<double>(s.size))))));
   std::string    o;
-  o += std::format("library({}) {{\n    technology (cmos);\n    delay_model : table_lookup;\n    revision : 1.0;\n    comment : \"generated SRAM macro (synth.memory.sram)\";\n"
+  o += std::format("library({}) {{\n    technology (cmos);\n    delay_model : table_lookup;\n    revision : 1.0;\n    comment : \"generated SRAM macro (synth.memory=sram)\";\n"
                    "    time_unit : \"1ns\";\n    voltage_unit : \"1V\";\n    current_unit : \"1uA\";\n    leakage_power_unit : \"1uW\";\n    nom_process : 1;\n"
                    "    nom_temperature : 25.000;\n    nom_voltage : {};\n    capacitive_load_unit (1,pf);\n    pulling_resistance_unit : \"1kohm\";\n"
                    "    operating_conditions(tt_1.0_25.0) {{\n        process : 1;\n        temperature : 25.000;\n        voltage : {};\n        tree_type : balanced_tree;\n    }}\n"

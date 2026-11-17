@@ -1477,7 +1477,7 @@ void Region_driver::map_region(const livehd::partition::Region_body& rb) {
   // per-latch attribution reason as the async cells.
   blast_options.icg            = dff_.has_value() && plan.preserves_latches && !icg_ladder_.empty();
   blast_options.icg_flow_ok    = plan.preserves_latches;
-  // pass.abc.derived_clock: a register on any other derived clock maps to a DFF cell too (needs a DFF cell
+  // synth.derived_clock: a register on any other derived clock maps to a DFF cell too (needs a DFF cell
   // and the same latch-preserving flow as the ICG/async cells).
   blast_options.derived_clock  = opts_.derived_clock && dff_.has_value() && plan.preserves_latches;
   // Level-sensitive latches never cross ABC (they stay boundaries), so any

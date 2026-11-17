@@ -1719,7 +1719,7 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
     }
     d.connect_sink(rd.sub.create_sink_pin(rd.cell->d_pin));
   }
-  // Registers on a derived clock: the clock pin reads the mapped net of the clock's PO (pass.abc.derived_clock).
+  // Registers on a derived clock: the clock pin reads the mapped net of the clock's PO (synth.derived_clock).
   // Wired before the fanout tree below so a gated clock feeding thousands of registers is buffered like an ICG
   // output.
   for (const auto& pc : pending_clocks) {

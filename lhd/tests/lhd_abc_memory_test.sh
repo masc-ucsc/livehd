@@ -57,7 +57,7 @@ run compile "$PRP" --top "$TOP" --emit-dir lg:"$W/lg" --workdir "$W/w1"
 run pass color synth --top "$TOP" lg:"$W/lg" --workdir "$W/w2"
 
 # 1 + 2. lhd's own footprint is well above 64 MiB, so this ceiling cannot hold.
-if "$LHD" pass "$MAPPER" --set lhd.jobs=1 --set abc.threads=1 --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_refused" \
+if "$LHD" pass "$MAPPER" --set lhd.jobs=1 --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_refused" \
     --set synth.liberty="$LIB" --set lhd.ram_max_mb=64 \
     --workdir "$W/w3" -q --result-json "$W/refused.json" 2>"$W/refused.err"; then
   fail "pass.$MAPPER ran under a 64 MiB lhd.ram_max_mb (the guard did not fire)"
@@ -69,7 +69,7 @@ if [ -d "$W/net_refused" ] && [ -n "$(ls -A "$W/net_refused" 2>/dev/null)" ]; th
 fi
 
 # 3. no escape hatch: the removed allow_oversize option is REJECTED.
-"$LHD" pass "$MAPPER" --set lhd.jobs=1 --set abc.threads=1 --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_forced" \
+"$LHD" pass "$MAPPER" --set lhd.jobs=1 --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_forced" \
   --set synth.liberty="$LIB" --set abc.allow_oversize=true \
   --workdir "$W/w4o" -q --result-json "$W/forced.json" 2>/dev/null
 rc=$?
@@ -78,7 +78,7 @@ grep -q 'allow_oversize' "$W/forced.json" || fail "the rejection does not name a
 [ -z "$(ls -A "$W/net_forced" 2>/dev/null)" ] || fail "a rejected allow_oversize run published a netlist"
 
 # 4. a generous ceiling must NOT false-positive on a design that plainly fits.
-run pass "$MAPPER" --set lhd.jobs=1 --set abc.threads=1 --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_ok" \
+run pass "$MAPPER" --set lhd.jobs=1 --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_ok" \
   --set synth.liberty="$LIB" --set lhd.ram_max_mb=65536 --workdir "$W/w5"
 [ -n "$(ls -A "$W/net_ok" 2>/dev/null)" ] || fail "a 64 GiB ceiling produced no netlist"
 

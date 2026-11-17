@@ -191,6 +191,11 @@ Cell_types Cell_types::build(std::span<const lt::Library* const> corners, std::s
         const auto related = local.find(arc.related_pin);
         const auto sort    = classify(arc.type);
         entry.kind         = sort.kind;
+        if (sort.kind == Arc_kind::ignored && sort.why == nullptr) {
+          // min_pulse_width, minimum_period, ...: checks that no arrival or required time depends on. Leaving them
+          // out does not make the timing incomplete.
+          continue;
+        }
         if (!arc.unsupported.empty()) {
           entry.kind = Arc_kind::ignored;
           types.diagnostics_.push_back(std::format("{}: arc {} -> {} ({}) uses an unsupported model: {}",

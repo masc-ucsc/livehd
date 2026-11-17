@@ -149,7 +149,7 @@ Remaining native synthesis work is tracked in [2u-usyn](../../todo/livehd/2u-usy
    instances. They bypass native-array lowering; their physical geometry is
    supplied by the corresponding LEF. The library interface alone does not
    authorize replacing an inferred array with unspecified collision semantics.
-   **`synth.memory.sram=true` (default false) is that authorization, for an array with no SRAM cell to bind**
+   **`synth.memory=sram` (default auto) is that authorization, for an array with no SRAM cell to bind**
    (`sram_macro.cpp`): a memory the fold policy keeps native becomes a generated macro, whatever its port
    count. `synth.memory=auto` then folds (`pass.abc.memory=sram`) only a memory below `synth.memory.min_bits`
    (2048, the smallest macro) or one no macro can realize -- forwarding between ports, power-on contents, a

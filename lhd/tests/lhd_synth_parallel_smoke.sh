@@ -18,7 +18,7 @@ with open(sys.argv[1], 'w') as f:
 PY
 run_synth() {
   "$LHD" synth "$W/parallel.prp" --top parallel --workdir "$W/$1" \
-    --set synth.liberty="$LIB" --set synth.timing=false --set abc.threads="$2" \
+    --set synth.liberty="$LIB" --set synth.timing=false --set lhd.jobs="$2" \
     --set synth.adder=rca --set synth.multiplier=array --set synth.barrel=log --set synth.boundary=false --emit verilog:"$W/$1.v" --result-json "$W/$1-result.json" -q
 }
 run_synth serial 1
@@ -56,8 +56,9 @@ run_synth parallel 0
 python3 - "$W/parallel/synth/qor.json" <<'CHECK_AUTO'
 import json, os, sys
 q = json.load(open(sys.argv[1]))
-assert q['parallel']['requested'] == 0, q['parallel']
-assert q['parallel']['limit'] == min(8, os.cpu_count() or 1), q['parallel']
+# lhd.jobs=0: the available CPUs (the job manager's ceiling) is the worker cap.
+assert q['parallel']['requested'] >= 1, q['parallel']
+assert q['parallel']['limit'] == min(q['parallel']['requested'], os.cpu_count() or 1), q['parallel']
 assert q['incremental']['misses'] == 0, q['incremental']
 assert q['incremental']['abc_started'] == 0, q['incremental']
 CHECK_AUTO
@@ -76,26 +77,27 @@ q = json.load(open(sys.argv[1]))
 assert q['status'] == 'pass', q
 PY
 
-# The standalone pass uses the same worker setting and default as synth.
+# The standalone pass uses the same worker setting (lhd.jobs, 0 = the available CPUs) as synth.
 "$LHD" compile "$W/parallel.prp" --top parallel --emit-dir lg:"$W/pass-input" --workdir "$W/pass-compile" -q
 for threads in 1 2 0; do
   thread_args=()
-  [ "$threads" = "0" ] || thread_args=(--set "abc.threads=$threads")
+  thread_args=(--set "lhd.jobs=$threads")
   "$LHD" pass abc lg:"$W/pass-input" --top parallel --emit-dir lg:"$W/pass-$threads-net" \
     --workdir "$W/pass-$threads" --set synth.liberty="$LIB" ${thread_args[@]+"${thread_args[@]}"} \
     --set synth.adder=rca --set synth.multiplier=array --set synth.barrel=log --set synth.boundary=false -q
   python3 - "$W/pass-$threads/qor.json" "$threads" <<'CHECK_PASS_THREADS'
 import json, os, sys
 q = json.load(open(sys.argv[1]))
-requested = int(sys.argv[2])
-assert q['parallel']['requested'] == requested, q['parallel']
-assert q['parallel']['limit'] == min(requested or 8, os.cpu_count() or 1), q['parallel']
+jobs = int(sys.argv[2])
+requested = q['parallel']['requested']
+assert requested == jobs if jobs else requested >= 1, (jobs, q['parallel'])
+assert q['parallel']['limit'] == min(requested, os.cpu_count() or 1), q['parallel']
 CHECK_PASS_THREADS
 done
 
 # A worker error must join the other workers before destroying region storage.
 if "$LHD" synth "$W/parallel.prp" --top parallel --set synth.liberty="$LIB" \
-    --set synth.timing=false --set abc.threads=2 --set synth.adder=rca --set synth.multiplier=array --set synth.barrel=log \
+    --set synth.timing=false --set lhd.jobs=2 --set synth.adder=rca --set synth.multiplier=array --set synth.barrel=log \
     --set abc.flow=invalid_parallel_test_command --workdir "$W/worker-error" \
     --result-json "$W/worker-error.json" -q; then
   echo 'invalid ABC command unexpectedly succeeded' >&2
@@ -109,12 +111,21 @@ assert q['diagnostics_count']['errors'] > 0, q
 CHECK_ERROR
 
 for bad in -1 1.5 wrong 4294967296; do
-  if "$LHD" synth "$W/parallel.prp" --set abc.threads="$bad" --set synth.liberty="$LIB" \
+  if "$LHD" synth "$W/parallel.prp" --set lhd.jobs="$bad" --set synth.liberty="$LIB" \
       --workdir "$W/bad" --result-json "$W/bad.json" -q; then
-    echo "invalid thread count accepted: $bad" >&2
+    echo "invalid job count accepted: $bad" >&2
     exit 1
   fi
-  grep -q 'non-negative integer' "$W/bad.json"
+  grep -q 'lhd.jobs expects an integer' "$W/bad.json"
 done
-"$LHD" list options | grep -q 'abc.threads'
+# One concurrency knob: the per-pass thread counts are retired with a hint.
+for retired in abc.threads synth.place.threads; do
+  if "$LHD" synth "$W/parallel.prp" --set "$retired=2" --set synth.liberty="$LIB" \
+      --workdir "$W/retired" --result-json "$W/retired.json" -q; then
+    echo "retired $retired accepted" >&2
+    exit 1
+  fi
+  grep -q 'lhd.jobs' "$W/retired.json"
+done
+! "$LHD" list options | grep -q 'abc.threads\|place.threads'
 echo 'PASS: parallel synthesis, worker limits, serial equivalence and cache reuse'

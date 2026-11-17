@@ -78,7 +78,7 @@ struct Seq_flop {
   // its cell from that gate's ICG cell output (clk_drv is then the gate's
   // source-side output pin, not a region input). -1 otherwise.
   int32_t                 icg = -1;
-  // pass.abc.derived_clock: the register's clock is computed inside the region by
+  // synth.derived_clock: the register's clock is computed inside the region by
   // logic that is not a recognized clock gate (clk_drv is that logic's
   // source-side output pin). The clock crosses ABC as one PO (`clk_po`, an index
   // into the Lnet outputs, after the latch-cell POs) and the read-back drives the

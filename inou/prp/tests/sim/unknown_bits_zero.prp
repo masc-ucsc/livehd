@@ -1,10 +1,10 @@
 /*
 :name: unknown_bits_zero
 :type: simulation
-:set: sim.unknown_zero=true
+:set: compile.unknown_zero=true
 */
 
-// sim.unknown_zero=true: every `?` literal bit is the deterministic 0 the
+// compile.unknown_zero=true: every `?` literal bit is the deterministic 0 the
 // simulator used before the knob existed (which also lets the literal fold at
 // C++ compile time instead of taking a runtime parse). Twin of
 // unknown_bits_random, which pins the default random-draw policy.

@@ -296,6 +296,14 @@ inline constexpr std::string_view kSynthMapperLabels[] = {
     "boundary_rounds", "max_fanout",      "reg_margin",      "region_opts",      "area_relax",      "boundary",        "derived_clock",   "flatten",
 };
 inline std::string_view retired_set_hint(std::string_view method, std::string_view flag) {
+  if ((method == "pass.abc" && flag == "threads") || (method == "synth" && flag == "place.threads")) {
+    return "use --set lhd.jobs=<N> (0 = the available CPUs): the one concurrency knob for ABC, placement, USYN, formal "
+           "and the LLVM build";
+  }
+  if ((method == "pass.abc" || method == "pass.usyn" || method == "pass.opentimer") && flag == "qor") {
+    return "the report path is not an option: qor.json (timing.json) is written under --workdir; use --workdir DIR "
+           "or --emit-dir report:DIR to keep it";
+  }
   if ((method == "pass.abc" || method == "pass.usyn") && flag == "satopt") {
     return "use --set pass.satopt=true|false (satopt runs in the compile step; default false for every command)";
   }
@@ -331,6 +339,9 @@ inline std::string_view retired_set_hint(std::string_view method, std::string_vi
   }
   if (method == "pass.opentimer" && flag == "io_load") {
     return "use --set synth.io_load=<fF>|auto: one primary-output load for pass.abc, pass.usyn and pass.opentimer";
+  }
+  if (method == "synth" && flag == "memory.sram") {
+    return "use --set synth.memory=sram (synth.memory is auto|flops|macro|sram)";
   }
   if (method == "synth" && flag == "opentimer") {
     return "use --set synth.timing=true|false (the engine is synth.timing.engine: fast, or opentimer for debugging)";
@@ -785,7 +796,7 @@ void        pass_command(Options& opts, Result& res);
 void        set_top_label(const Options& opts, const Eprp_var& var, Eprp_var::Eprp_dict& labels, std::string_view diag_pass);
 // Slurp a pass's "qor" sidecar label into the envelope's "qor" member.
 void        embed_qor_sidecar(const Eprp_var::Eprp_dict& labels, Result& res);
-// Fill res.abc_incr from the abc-map report in res.qor_json (a bare abc-map
+// Fill res.abc_incr from the technology-map report in res.qor_json (a bare technology-map
 // or the `abc` member of a synth report); no-op when there is none.
 void        harvest_abc_incremental(Result& res);
 // pass.opentimer's STA reuse counters, from the `sta` qor object (its own

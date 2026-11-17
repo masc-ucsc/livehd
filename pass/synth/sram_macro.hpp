@@ -11,7 +11,7 @@
 
 namespace livehd::synth {
 
-// synth.memory.sram: an inferred memory kept native (see build_memory_modules) becomes a generated SRAM
+// synth.memory=sram: an inferred memory kept native (see build_memory_modules) becomes a generated SRAM
 // macro instead of a `cgen_memory_*` RTL instance, whatever its port count: the module that
 // enclosed the memory is replaced by a body-less cell with the same pins, and a Liberty and a LEF
 // view of it are generated for the timers and the placer, exactly as for an explicit fakeram cell.

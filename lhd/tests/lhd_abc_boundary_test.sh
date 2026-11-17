@@ -75,7 +75,7 @@ fail() {
 }
 run() {
   if [ "${1:-}" = pass ] && [ "${2:-}" = abc ] && [ -n "${ABC_TEST_THREADS:-}" ]; then
-    set -- "$@" --set "abc.threads=$ABC_TEST_THREADS"
+    set -- "$@" --set "lhd.jobs=$ABC_TEST_THREADS"
   fi
   "$LHD" "$@" -q --result-json "$W/r.json" || fail "$* -> $(cat "$W/r.json" 2>/dev/null)"
 }
@@ -167,7 +167,7 @@ fi
 run pass "$MAPPER" --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_off" --set synth.liberty="$LIB" \
     $DELAY --set "synth.boundary_rounds=3" --set "synth.boundary=false" --workdir "$W/w_off"
 if [ "$MAPPER" = abc ]; then
-  grep -q '"boundary"' "$W/w_off/qor.json" && fail "boundary=false still reports a boundary scoreboard"
+  grep -q '"boundary":{"bits"' "$W/w_off/qor.json" && fail "boundary=false still reports a boundary scoreboard"
 fi
 run compile lg:"$W/net_off" --top "$TOP" --emit-dir verilog:"$W/v_off" --workdir "$W/wv_off"
 grep -q "NAND2x2" "$W/v_off/${TOP}__c1.v" && fail "boundary=false sized the crossing driver up"
@@ -244,7 +244,7 @@ run compile lg:"$I/net1" --top "$TOP" --emit-dir verilog:"$I/v1" --workdir "$I/w
 run pass "$MAPPER" --top "$TOP" lg:"$W/lg" --emit-dir lg:"$I/net2" --set synth.liberty="$LIB" \
     $DELAY $ROUNDS --workdir "$I/w"
 if [ "$MAPPER" = abc ]; then
-  grep -q '"incremental":{"hits":[1-9][0-9]*,"misses":0' "$I/w/qor.json" || fail "second run was not all hits: $(grep -o '"incremental":{[^}]*}' "$I/w/qor.json")"
+  grep -q '"incremental":{"enabled":true,"regions":[0-9]*,"hits":[1-9][0-9]*,"misses":0' "$I/w/qor.json" || fail "second run was not all hits: $(grep -o '"incremental":{[^}]*}' "$I/w/qor.json")"
   grep -q '"abc_started":0' "$I/w/qor.json" || fail "all-hit run started ABC"
   grep -q "pass.abc boundary:" "$I/w/logs/"*_lhd_pass_${MAPPER}.log && {
     n=$(grep -c "pass.abc boundary:" "$I/w/logs/"*_lhd_pass_${MAPPER}.log | awk -F: '{s+=$NF} END {print s}')

@@ -827,6 +827,33 @@ void harvest_abc_incremental(Result& res) {
   }
 }
 
+// --emit-dir report:DIR for `lhd pass abc|usyn|opentimer`: the report files (and directory sidecars) the pass wrote,
+// copied under DIR -- the way to keep a report without --workdir (the report path itself is not an option).
+void export_pass_reports(const Options& opts, const std::vector<std::string>& files, Result& res) {
+  const auto* slot = find_slot(opts.emit_dirs, "report");
+  if (slot == nullptr) {
+    return;
+  }
+  ensure_dir(slot->path);
+  for (const auto& src : files) {
+    if (src.empty() || !fs::exists(src)) {
+      continue;
+    }
+    const auto      dst = fs::path(slot->path) / fs::path(src).filename();
+    std::error_code ec;
+    if (fs::is_directory(src)) {
+      fs::remove_all(dst, ec);
+      fs::copy(src, dst, fs::copy_options::recursive, ec);
+    } else {
+      fs::copy_file(src, dst, fs::copy_options::overwrite_existing, ec);
+    }
+    if (ec) {
+      throw Lhd_error{"config", std::format("could not write {}: {}", dst.string(), ec.message()), "check --emit-dir report: permissions"};
+    }
+    res.outputs.push_back(dst.string());
+  }
+}
+
 void harvest_sta_incremental(Result& res, std::string_view sta_json) {
   if (sta_json.empty()) {
     return;
@@ -1126,7 +1153,8 @@ void pass_command(Options& opts, Result& res) {
     // mapped USYN output that is the technology-map report), while the native
     // decision report and its artifacts survive only under a user --workdir.
     const bool        user_workdir  = !opts.workdir.empty() && !opts.workdir_scratch;
-    const std::string ephemeral_qor = (opts.stats || !mapper->report.empty()) && !user_workdir
+    const bool        report_dir    = find_slot(opts.emit_dirs, "report") != nullptr;
+    const std::string ephemeral_qor = (opts.stats || !mapper->report.empty() || report_dir) && !user_workdir
                                           ? (fs::path(workdir(opts)) / "qor.json").string()
                                           : std::string{};
     if (user_workdir || !ephemeral_qor.empty()) {
@@ -1196,6 +1224,13 @@ void pass_command(Options& opts, Result& res) {
     if (mapped_output) {
       harvest_abc_incremental(res);
     }
+    if (labels.contains("qor")) {
+      const auto& q = labels["qor"];
+      export_pass_reports(opts,
+                          {q, q + ".provenance", mapper->report.empty() ? std::string{} : q + "." + std::string{mapper->report} + ".json",
+                           mapper->report.empty() ? std::string{} : q + "." + std::string{mapper->report} + ".artifacts", q + ".domino"},
+                          res);
+    }
     if (!ephemeral_qor.empty() && labels["qor"] == ephemeral_qor) {
       std::erase(res.outputs, ephemeral_qor);
     }
@@ -1239,7 +1274,7 @@ void pass_command(Options& opts, Result& res) {
     // Timing sidecar: always defaulted — workdir() mints the same ephemeral
     // scratch dir run_step's logs land in when --workdir is absent — so the
     // pretty/jsonl report always has timing data to render. merge_sets runs
-    // after, so an explicit `--set pass.opentimer.qor=FILE` still overrides.
+    // (The path is not an option: --emit-dir report:DIR keeps a copy.)
     const std::string ephemeral_qor = opts.workdir.empty() ? (fs::path(workdir(opts)) / "timing.json").string() : std::string{};
     labels["qor"]                   = ephemeral_qor.empty() ? (fs::path(opts.workdir) / "timing.json").string() : ephemeral_qor;
     {
@@ -1290,6 +1325,7 @@ void pass_command(Options& opts, Result& res) {
 
     embed_qor_sidecar(labels, res);
     harvest_sta_incremental(res, res.qor_json);
+    export_pass_reports(opts, {labels["qor"]}, res);
     if (!ephemeral_qor.empty() && labels["qor"] == ephemeral_qor) {
       // The scratch-dir sidecar only exists to feed the report renderer: keep
       // the embedded qor JSON but do not advertise the ephemeral path as an

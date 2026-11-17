@@ -189,7 +189,7 @@ run_abc_lec() {
     [ "$reg_max" = 0 ] || fail "run_abc_lec: USYN has no register_max_bits (ABC-only)"
     [ "$reg" = true ] || tmap=none
     QOR="$d/qor.json"
-    regset=(--set "pass.usyn.tmap=$tmap" --set "pass.usyn.qor=$QOR")
+    regset=(--set "pass.usyn.tmap=$tmap" --emit-dir report:"$d")
   fi
 
   [ -f "$prp" ] || fail "missing fixture $prp"
@@ -319,7 +319,7 @@ if selected registers; then
   rsrun pass color synth --top abc_resetless_sync lg:"$RSD/lg" --workdir "$RSD/w2"
   rsrun pass partition --top abc_resetless_sync lg:"$RSD/lg" --emit-dir lg:"$RSD/re" --workdir "$RSD/w3"
   rsqor=()
-  [ "$MAPPER" = abc ] || rsqor=(--set pass.usyn.qor="$RSD/qor.json")
+  [ "$MAPPER" = abc ] || rsqor=(--emit-dir report:"$RSD")
   rsrun pass "$MAPPER" --top abc_resetless_sync lg:"$RSD/lg" --emit-dir lg:"$RSD/net" --set synth.liberty="$LIB" \
     ${rsqor[@]+"${rsqor[@]}"} --workdir "$RSD/w4"
   prepare_models "$LIB" plain
@@ -384,8 +384,7 @@ run_qn() {
   prepare_models "$QLIB" qn
   prepare_fixture "lhd/tests/${fix}.prp" "$top" "qn_$fix" synth
   cp -R "$W/base_qn_$fix/lg" "$d/lg"
-  local qorset=(--set abc.qor="$d/abc.json")
-  [ "$MAPPER" = abc ] || qorset=(--set pass.usyn.qor="$d/abc.json")
+  local qorset=(--emit-dir report:"$d/rep")
   qrun pass "$MAPPER" --top "$top" lg:"$d/lg" --emit-dir lg:"$d/net" --emit-dir verilog:"$d/netv" \
     --set synth.liberty="$QLIB" "${qorset[@]}" "$@" --workdir "$d/w4"
   qrun lec --impl lg:"$d/net" --ref lg:"$W/base_qn_$fix/re" --lib lg:"$W/models_qn" --top "$top" \
@@ -393,15 +392,15 @@ run_qn() {
   QNV="$d/netv"
   QNM="$W/modelsv_qn"
   if [ "$MAPPER" != abc ]; then
-    usyn_report "$d/abc.json" abc "$(qn_register_bits "$fix")"
+    usyn_report "$d/rep/qor.json" abc "$(qn_register_bits "$fix")"
     return 0
   fi
-  grep -q '"dff":{"cell":"DFFNx1","q_inverted":true,"ladder":\["DFFNx1","DFFNx2"\]' "$d/abc.json" \
-    || fail "qn_$tag: abc.json does not report the QN cell pick: $(grep -o '"dff":{[^}]*}[^}]*}' "$d/abc.json")"
+  grep -q '"dff":{"cell":"DFFNx1","q_inverted":true,"ladder":\["DFFNx1","DFFNx2"\]' "$d/rep/qor.json" \
+    || fail "qn_$tag: abc.json does not report the QN cell pick: $(grep -o '"dff":{[^}]*}[^}]*}' "$d/rep/qor.json")"
   # register_max_bits defaults to 0 (disabled): every flop maps, as yosys does.
   # The old 4096-bit guard was tripped by one bit-blasted 64x64 memory.
-  grep -q '"register_max_bits":0,' "$d/abc.json" \
-    || fail "qn_$tag: abc.json does not report register_max_bits=0 as the default: $(grep -o '"register_max_bits":[0-9]*' "$d/abc.json")"
+  grep -q '"register_max_bits":0,' "$d/rep/qor.json" \
+    || fail "qn_$tag: abc.json does not report register_max_bits=0 as the default: $(grep -o '"register_max_bits":[0-9]*' "$d/rep/qor.json")"
 }
 
 if selected qn; then
@@ -490,7 +489,7 @@ if selected registers; then
   arrun pass color synth --top abc_async_reset lg:"$ARD/lg" --workdir "$ARD/w2"
   arrun pass partition --top abc_async_reset lg:"$ARD/lg" --emit-dir lg:"$ARD/re" --workdir "$ARD/w3"
   arqor=()
-  [ "$MAPPER" = abc ] || arqor=(--set pass.usyn.qor="$ARD/qor.json")
+  [ "$MAPPER" = abc ] || arqor=(--emit-dir report:"$ARD")
   arrun pass "$MAPPER" --top abc_async_reset lg:"$ARD/lg" --emit-dir lg:"$ARD/net" --set synth.liberty="$LIB" \
     ${arqor[@]+"${arqor[@]}"} --workdir "$ARD/w4"
   prepare_models "$LIB" plain

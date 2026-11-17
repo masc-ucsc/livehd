@@ -530,10 +530,12 @@ std::string mapping_report(const synth::Mapped_design& design, std::string_view 
   rapidjson::StringBuffer buffer;
   Writer                  w(buffer);
   w.StartObject();
-  number(w, "schema_version", 1);
+  number(w, "schema_version", 2);
   number(w, "sharing_fanout", options.sharing_fanout);
   w.Key("kind");
   text(w, "technology-map");
+  w.Key("mapper");  // the synthesis pass (provider: its cell-mapping engine)
+  text(w, "usyn");
   w.Key("provider");
   text(w, provider);
   w.Key("top");
@@ -593,6 +595,33 @@ std::string mapping_report(const synth::Mapped_design& design, std::string_view 
   w.Key("miss_ms");
   w.Double(miss_ms);
   w.EndObject();
+  // The shared `total` (the same block pass.abc writes): definition sums -- USYN maps each definition once.
+  {
+    uint64_t    gates = 0;
+    double      area = 0, worst = -1;
+    std::string critical;
+    for (const auto& row : design.regions) {
+      gates += row.gates;
+      area  += row.area;
+      if (design.delay_ps && row.delay > worst) {
+        worst    = row.delay;
+        critical = row.module;
+      }
+    }
+    w.Key("total");
+    w.StartObject();
+    number(w, "regions", design.regions.size());
+    number(w, "gates", gates);
+    w.Key("area");
+    w.Double(area);
+    if (worst >= 0) {
+      w.Key("max_delay");
+      w.Double(worst);
+      w.Key("critical_region");
+      text(w, critical);
+    }
+    w.EndObject();
+  }
   w.Key("regions");
   w.StartArray();
   for (const auto& row : design.regions) {

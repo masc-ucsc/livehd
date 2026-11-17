@@ -117,7 +117,7 @@ struct Driver_options {
   // clock gate (a derived/gated clock) to a plain DFF cell whose clock pin is
   // driven by the mapped logic, instead of keeping a native flop that physical
   // synthesis cannot place. The default keeps those registers native
-  // (pass.abc.derived_clock=false).
+  // (synth.derived_clock=false).
   bool                                  derived_clock     = false;
   // Optional explicit DFF cell name for register mapping (empty => auto-detect a
   // plain posedge D-flop from the Liberty).

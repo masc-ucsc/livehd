@@ -68,7 +68,7 @@ struct Blast_options {
   // Why `icg` is off, for the derived-clock-native report: false = the flow may
   // reshape latches, true = the Liberty has no ICG cell (or no DFF cell).
   bool                             icg_flow_ok      = true;
-  // pass.abc.derived_clock: a register clocked by region-internal logic that is
+  // synth.derived_clock: a register clocked by region-internal logic that is
   // not a recognized clock gate (a derived/gated clock, e.g. `clk & latch` with
   // no integrated clock-gate cell in the Liberty) still crosses as a latch, and
   // its DFF cell takes the clock from the mapped logic (Seq_flop::clk_po)

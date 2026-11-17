@@ -34,8 +34,8 @@ lhd pass opentimer --top 'm__c0' lg:net cells.lib --workdir W
   hier walk for debugging; its multi-bit module-boundary buses are not
   stitched.)
 - Options: `--set pass.opentimer.critical=true` (persist critical-path
-  annotations), `--set pass.opentimer.qor=FILE` (report path; `lhd pass
-  opentimer` defaults it to `<workdir>/timing.json` under `--workdir`).
+  annotations). The report is `<workdir>/timing.json`; `--emit-dir report:DIR`
+  keeps a copy without `--workdir` (the path is not an option).
   `--stats` adds one row per mapped `(definition,color)` while retaining the
   whole-design critical-path report.
 
@@ -172,7 +172,7 @@ time units, e.g. ns). `endpoints` lists the 10 worst arrivals. `src` resolves
 each gate's `srcid` — pass.abc's source-map carry-through — so the critical
 path points back at the pre-synthesis RTL line an agent should edit. Under
 `lhd pass opentimer --workdir W` the report is also embedded verbatim as the
-result envelope's `"qor"` member (same channel as pass.abc's `abc-map` QoR;
+result envelope's `"qor"` member (same channel as pass.abc's `technology-map` QoR;
 discriminate by `"kind"`). Every annotated gate output also gets the
 `pin_delay` pin attribute in-graph.
 

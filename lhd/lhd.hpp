@@ -1875,10 +1875,6 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      Synth_set_option::Kind::integer,
      "automatic IO prototype iteration cap; zero uses place.iterations"},
     {"place.schedule_iterations", "500", Synth_set_option::Kind::integer, "GP annealing horizon; zero uses iteration budget"},
-    {"place.threads",
-     "1",
-     Synth_set_option::Kind::integer,
-     "CPU worker count; threading needs --define=dreamplace_openmp=true at build time"},
     {"place.timing_driven",
      "true",
      Synth_set_option::Kind::boolean,
@@ -2195,9 +2191,12 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
     {"memory",
      "auto",
      Synth_set_option::Kind::file,
-     "auto|flops|macro: bit-blast memories to flops + decode (flops), keep the native macro (macro), or let "
-     "pass.abc.memory_max_bits and "
-     "the port count decide (auto); an explicit pass.abc.memory wins; source pins override it per memory"},
+     "auto|flops|macro|sram: bit-blast memories to flops + decode (flops), keep the native memory instance (macro), "
+     "let the size threshold and the port count decide (auto), or generate an SRAM macro -- any port count, a Liberty "
+     "and LEF view written under --workdir/synth and handed to the timers and the placer -- for every memory of at "
+     "least synth.memory.min_bits (smaller ones become flops; forwarding between ports, power-on contents, whole-array "
+     "update/reset and several write clocks keep the native instance) (sram); an explicit pass.abc.memory wins; "
+     "source pins override it per memory"},
     {"delay",
      "",
      Synth_set_option::Kind::file,
@@ -2285,13 +2284,6 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      Synth_set_option::Kind::file,
      "comma-separated Liberty files of hard macros (blackbox modules with a MACRO in synth.lef), read by the timers "
      "after synth.liberty"},
-    {"memory.sram",
-     "false",
-     Synth_set_option::Kind::boolean,
-     "true: a memory kept native (synth.memory=macro, or auto above pass.abc.memory_max_bits) becomes a generated SRAM "
-     "macro -- any port count, a Liberty and LEF view written under --workdir/synth and handed to the timers and the "
-     "placer -- instead of a cgen_memory RTL instance. Forwarding between ports, power-on contents, whole-array "
-     "update/reset and several write clocks keep the native instance"},
     {"memory.um2_per_bit",
      "auto",
      Synth_set_option::Kind::file,
@@ -2301,7 +2293,7 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      Synth_set_option::Kind::file,
      "generated SRAM macro read delay (clock to data, or address to data for an asynchronous read), ns; auto = 18 FO4 of "
      "the synth.liberty smallest NOT cell (asap7: 0.22). Setup/hold, pin loads and voltage scale with the same cell"},
-    {"memory.min_bits", "2048", Synth_set_option::Kind::integer, "with synth.memory.sram, a memory with fewer bits than this is bit-blasted to flops (the smallest macro)"},
+    {"memory.min_bits", "2048", Synth_set_option::Kind::integer, "with synth.memory=sram, a memory with fewer bits than this is bit-blasted to flops (the smallest macro)"},
     {"liberty",
      "",
      Synth_set_option::Kind::file,

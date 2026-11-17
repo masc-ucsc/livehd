@@ -136,6 +136,12 @@ TEST(LhdOptions, SynthCommandAndPassKeepSeparateNamespaces) {
   EXPECT_EQ(lhd::canonical_set_key("pass.synth.support", "synth"), "pass.synth.support");
   EXPECT_FALSE(lhd::retired_set_hint("pass.usyn", "out").empty());
   EXPECT_FALSE(lhd::retired_set_hint("pass.usyn", "threads").empty());
+  // Retired synth.* keys (the hint, not the generic unknown-flag error).
+  for (const auto* flag : {"place.threads", "place.wire_rc", "place.tech_rc", "opentimer", "place.reset_fanout"}) {
+    EXPECT_FALSE(lhd::retired_set_hint("synth", flag).empty()) << flag;
+  }
+  EXPECT_FALSE(lhd::retired_set_hint("pass.abc", "threads").empty());
+  EXPECT_FALSE(lhd::retired_set_hint("pass.abc", "qor").empty());
 }
 
 // Keep the full retired-option matrix in one process. The CLI integration
@@ -502,7 +508,7 @@ TEST(LhdOptions, SynthPlaceFoldsAutoMemoriesWithoutSram) {
   EXPECT_EQ(merged({{"synth.place", "true"}}).at("memory"), "true");
   EXPECT_EQ(merged({{"synth.place", "true"}, {"synth.memory", "auto"}}).at("memory"), "true");
   EXPECT_EQ(merged({{"synth.place", "true"}, {"synth.memory", "macro"}}).at("memory"), "false");
-  EXPECT_EQ(merged({{"synth.place", "true"}, {"synth.memory.sram", "true"}}).at("memory"), "sram");
+  EXPECT_EQ(merged({{"synth.place", "true"}, {"synth.memory", "sram"}}).at("memory"), "sram");
   EXPECT_EQ(merged({{"synth.place", "true"}, {"pass.abc.memory", "false"}}).at("memory"), "false");
 }
 

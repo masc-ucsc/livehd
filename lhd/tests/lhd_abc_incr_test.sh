@@ -27,7 +27,7 @@
 # incremental.{hits,misses} and per-region cache=hit|miss|disabled). Every
 # property above is asserted per tier. ABC-only facts stay gated: the
 # synth.adder/multiplier/barrel recipe options (USYN does not inherit abc.*), the
-# abc-map `resynth` rows / `abc_started` / abc[stats] rendering, and
+# technology-map `resynth` rows / `abc_started` / tmap[stats] rendering, and
 # <workdir>/abc_cache/abc_cache.json. "Starts no ABC" becomes "every
 # technology-map row is a cache hit" (nothing is mapped).
 set -u
@@ -292,7 +292,7 @@ echo "PASS: NoChange run is all hits and byte-identical Verilog"
     --workdir "$W/wabc" --stats --diag-fmt pretty -q >"$W/pretty.out" \
     || fail "pretty stats run failed"
 if [ "$MAPPER" = abc ]; then
-  [ "$(grep -c '^  abc\[stats\]:' "$W/pretty.out")" = "$N" ] \
+  [ "$(grep -c '^  tmap\[stats\]:' "$W/pretty.out")" = "$N" ] \
     || fail "pretty stats did not print exactly one line per color: $(cat "$W/pretty.out")"
   [ "$(grep -c 'resynth=0$' "$W/pretty.out")" = "$N" ] \
     || fail "pretty all-hit rows did not all say resynth=0: $(cat "$W/pretty.out")"
@@ -359,7 +359,7 @@ fi
 run pass "$MAPPER" --top "$TOP" lg:"$W/lg1" --emit-dir lg:"$W/net4" --set synth.liberty="$LIB" $MAP_OPTS \
     --set lhd.incremental=false --workdir "$W/wabc" --stats
 if [ "$MAPPER" = abc ]; then
-  [ -z "$(incr_field hits)" ] || fail "lhd.incremental=false still ran the cache"
+  [ "$(incr_field enabled)" = False ] && [ "$(incr_field hits)" = 0 ] || fail "lhd.incremental=false still ran the cache"
   expect_resynth "$N" "$N" "cache-disabled full run"
 else
   # USYN keeps its counters, reporting enabled=false with no reuse at either tier.
@@ -369,17 +369,17 @@ else
 fi
 # No user --workdir: nowhere durable to cache, so the cache stays off even at
 # its default of true. USYN's native decision report survives only under a
-# user --workdir, so pass.usyn.qor puts it where the native tier can be checked
+# user --workdir, so --emit-dir report: copies it where the native tier can be checked
 # too (a fresh directory: a stale report must not pass for this run's).
 if [ "$MAPPER" = abc ]; then
   run pass "$MAPPER" --top "$TOP" lg:"$W/lg1" --emit-dir lg:"$W/net5" --set synth.liberty="$LIB" $MAP_OPTS --stats
-  [ -z "$(incr_field hits)" ] || fail "no --workdir must mean no cache"
+  [ "$(incr_field enabled)" = False ] && [ "$(incr_field hits)" = 0 ] || fail "no --workdir must mean no cache"
   expect_resynth "$N" "$N" "no-workdir full run"
 else
   rm -rf "$W/nowd"
   run pass "$MAPPER" --top "$TOP" lg:"$W/lg1" --emit-dir lg:"$W/net5" --set synth.liberty="$LIB" $MAP_OPTS \
-      --set pass.usyn.qor="$W/nowd/qor.json" --stats
-  [ -f "$W/nowd/qor.json.usyn.json" ] || fail "no-workdir run wrote no native report under pass.usyn.qor"
+      --emit-dir report:"$W/nowd" --stats
+  [ -f "$W/nowd/qor.json.usyn.json" ] || fail "no-workdir run wrote no native report under --emit-dir report:"
   usyn_disabled "no-workdir full run" native "$W/nowd/qor.json.usyn.json" \
     || fail "no --workdir must mean no USYN cache at either tier"
   [ "$(tmap_regions)" = "$N" ] || fail "no-workdir run reported $(tmap_regions) technology-map region(s), expected $N"

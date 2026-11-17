@@ -675,9 +675,7 @@ Replay_worker::Replay_worker(const Config& cfg, const fs::path& root, std::strin
     std::vector<std::string> options = {"--result-json",
                                         (dir_ / "flow.json").string(),
                                         "--set",
-                                        std::format("synth.place.threads={}", threads_),
-                                        "--set",
-                                        "lhd.jobs=1",
+                                        std::format("lhd.jobs={}", threads_),  // the worker's thread budget
                                         "--workdir",
                                         (dir_ / "W").string(),
                                         "--gui",
@@ -1090,9 +1088,7 @@ Replay_worker::Replay_worker(const Config& cfg, std::string id, const Fork_files
                "--set",
                "synth.place.start_map=" + files.seed,
                "--set",
-               std::format("synth.place.threads={}", threads_),
-               "--set",
-               "lhd.jobs=1"});
+               std::format("lhd.jobs={}", threads_)});  // the worker's thread budget
   std::vector<char*> argv;
   for (auto& arg : args) {
     argv.push_back(arg.data());

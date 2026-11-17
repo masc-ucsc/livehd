@@ -35,7 +35,7 @@ case "$(recipe "$W/warm.json")" in
 esac
 [ -z "$(find "$S" -type f -newer "$W/marker" ! -name '*.json' | head -1)" ] || fail "an unchanged replay rewrote artifacts"
 (cd "$S" && "$LHD_ABS" synth --stats --diag-fmt pretty -q >"$W/stats.out" 2>&1) || fail "replay with --stats failed"
-grep -q '^  qor: abc-map' "$W/stats.out" || fail "the replay did not show the stored qor: $(head -5 "$W/stats.out")"
+grep -q '^  qor: technology-map' "$W/stats.out" || fail "the replay did not show the stored qor: $(head -5 "$W/stats.out")"
 
 # 2. a source edit, then a Liberty edit, each re-run the flow.
 echo "// edit" >>"$W/dut.prp"

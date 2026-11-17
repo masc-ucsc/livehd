@@ -284,6 +284,6 @@ Wire_rc technology_wire_rc(const physical::Technology& tech, const std::string& 
     }
   }
   throw std::runtime_error(
-      "technology has no characterized signal or horizontal/vertical wire RC; supply synth.place.tech_rc or synth.place.wire_rc");
+      "technology has no characterized signal or horizontal/vertical wire RC; supply synth.wire_rc");
 }
 }  // namespace livehd::placement

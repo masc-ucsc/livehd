@@ -238,6 +238,10 @@ cc_library(
     local_defines = select({
         "//:without_abc": ["LIVEHD_WITH_ABC=0"],
         "//conditions:default": ["LIVEHD_WITH_ABC=1"],
+    }) + select({
+        # DREAMPlace threads only when it is built with OpenMP; otherwise placement stays serial whatever lhd.jobs is.
+        ":dreamplace_openmp": ["LHD_DREAMPLACE_OPENMP=1"],
+        "//conditions:default": ["LHD_DREAMPLACE_OPENMP=0"],
     }),
     includes = ["."],
     visibility = ["//visibility:public"],
@@ -317,6 +321,11 @@ filegroup(
         "@iassert//:sim_runtime_hdrs",
     ],
     visibility = ["//visibility:public"],
+)
+
+config_setting(
+    name = "dreamplace_openmp",
+    define_values = {"dreamplace_openmp": "true"},
 )
 
 config_setting(

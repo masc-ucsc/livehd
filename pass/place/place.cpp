@@ -7956,7 +7956,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
                                options.rc_pessimism, options.technology().cells.contents);
     } catch (const std::runtime_error& e) {
       if (std::string_view(e.what())
-          != "technology has no characterized signal or horizontal/vertical wire RC; supply synth.place.tech_rc or synth.place.wire_rc") {
+          != "technology has no characterized signal or horizontal/vertical wire RC; supply synth.wire_rc") {
         throw;
       }
       missing_wire_rc = true;

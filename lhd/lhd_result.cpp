@@ -383,90 +383,6 @@ bool write_pretty_sta(const rapidjson::Value& d, bool stats) {
   return true;
 }
 
-// kind:"abc-map" (pass.abc qor.json): the compact one-line summary (the same
-// shape as the pass's own step-log line, which fd redirection keeps off the
-// terminal).
-bool write_pretty_abc_map(const rapidjson::Value& d, bool stats) {
-  auto tit = d.FindMember("total");
-  if (tit == d.MemberEnd() || !tit->value.IsObject()) {
-    return false;
-  }
-  const auto& t       = tit->value;
-  double      regions = 0;
-  double      gates   = 0;
-  double      area    = 0;
-  json_num(t, "regions", regions);
-  json_num(t, "gates", gates);
-  json_num(t, "area", area);
-  std::string line
-      = std::format("  qor: abc-map '{}': {:.0f} region(s), {:.0f} gates, area {:.2f}", json_str(d, "top"), regions, gates, area);
-  if (double md = 0; json_num(t, "max_delay", md)) {
-    line += std::format(", max delay {:.2f}", md);
-    std::string crit;
-    if (auto r = json_str(t, "critical_region"); !r.empty()) {
-      crit += std::format("region '{}'", r);
-    }
-    if (auto o = json_str(t, "critical_output"); !o.empty()) {
-      crit += std::format("{}output '{}'", crit.empty() ? "" : " ", o);
-    }
-    if (auto s = json_str(t, "critical_src"); !s.empty()) {
-      crit += std::format(" @ {}", s);
-    }
-    if (!crit.empty()) {
-      line += std::format(" ({})", crit);
-    }
-  }
-  if (double depth = 0; json_num(t, "max_region_depth", depth)) {
-    line += std::format(", max region depth {:.0f}", depth);
-  }
-  if (double bb = 0; json_num(t, "div_blackbox", bb) && bb > 0) {
-    line += std::format("  [PARTIAL: {:.0f} blackboxed div/mod cone(s) unscored]", bb);
-  }
-  std::print("{}\n", line);
-  if (stats) {
-    if (auto rit = d.FindMember("regions"); rit != d.MemberEnd() && rit->value.IsArray()) {
-      for (const auto& r : rit->value.GetArray()) {
-        if (!r.IsObject()) {
-          continue;
-        }
-        double color        = 0;
-        double input_nodes  = 0;
-        double input_ge     = 0;
-        double region_gates = 0;
-        double region_area  = 0;
-        double ms           = 0;
-        double resynth      = 0;
-        json_num(r, "color", color);
-        json_num(r, "input_nodes", input_nodes);
-        json_num(r, "input_ge", input_ge);
-        json_num(r, "gates", region_gates);
-        json_num(r, "area", region_area);
-        json_num(r, "ms", ms);
-        json_num(r, "resynth", resynth);
-        std::string row
-            = std::format("  abc[stats]: module='{}' color={:.0f} input_nodes={:.0f} input_ge={:.0f} gates={:.0f} area={:.2f}",
-                          json_str(r, "module"),
-                          color,
-                          input_nodes,
-                          input_ge,
-                          region_gates,
-                          region_area);
-        if (double depth = 0; json_num(r, "logic_depth", depth)) {
-          row += std::format(" logic_depth={:.0f}", depth);
-        }
-        if (double delay = 0; json_num(r, "delay", delay)) {
-          row += std::format(" delay={:.3f}", delay);
-        } else {
-          row += " delay=n/a";
-        }
-        row += std::format(" ms={:.1f} resynth={:.0f}", ms, resynth);
-        std::print("{}\n", row);
-      }
-    }
-  }
-  return true;
-}
-
 bool write_pretty_usyn(const rapidjson::Value& d, bool stats) {
   const auto totals = d.FindMember("totals");
   if (totals == d.MemberEnd() || !totals->value.IsObject()) {
@@ -504,30 +420,83 @@ bool write_pretty_usyn(const rapidjson::Value& d, bool stats) {
   return true;
 }
 
+// kind:"technology-map" (pass.abc and pass.usyn qor.json, one shared core): the one-line summary from `total`
+// (the same shape as the pass's own step-log line), then one tmap[stats] row per region under --stats.
 bool write_pretty_tmap(const rapidjson::Value& d, bool stats) {
   const auto rows = d.FindMember("regions");
   if (rows == d.MemberEnd() || !rows->value.IsArray()) {
     return false;
   }
-  // Definition counts are not instance-weighted physical area or design timing.
-  std::print("  qor: technology-map '{}' provider={}: {} definition region(s)\n",
-             json_str(d, "top"),
-             json_str(d, "provider"),
-             rows->value.Size());
+  double regions = rows->value.Size(), gates = 0, area = 0;
+  auto   tit     = d.FindMember("total");
+  const bool has_total = tit != d.MemberEnd() && tit->value.IsObject();
+  std::string line;
+  if (has_total) {
+    const auto& t = tit->value;
+    json_num(t, "regions", regions);
+    json_num(t, "gates", gates);
+    json_num(t, "area", area);
+  }
+  const auto provider = json_str(d, "provider");
+  line = std::format("  qor: technology-map '{}' provider={}: {:.0f} region(s), {:.0f} gates, area {:.2f}",
+                     json_str(d, "top"), provider.empty() ? std::string{"abc"} : provider, regions, gates, area);
+  if (has_total) {
+    const auto& t = tit->value;
+    if (double md = 0; json_num(t, "max_delay", md)) {
+      line += std::format(", max delay {:.2f}", md);
+      std::string crit;
+      if (auto r = json_str(t, "critical_region"); !r.empty()) {
+        crit += std::format("region '{}'", r);
+      }
+      if (auto o = json_str(t, "critical_output"); !o.empty()) {
+        crit += std::format("{}output '{}'", crit.empty() ? "" : " ", o);
+      }
+      if (auto s = json_str(t, "critical_src"); !s.empty()) {
+        crit += std::format(" @ {}", s);
+      }
+      if (!crit.empty()) {
+        line += std::format(" ({})", crit);
+      }
+    }
+    if (double depth = 0; json_num(t, "max_region_depth", depth)) {
+      line += std::format(", max region depth {:.0f}", depth);
+    }
+    if (double bb = 0; json_num(t, "div_blackbox", bb) && bb > 0) {
+      line += std::format("  [PARTIAL: {:.0f} blackboxed div/mod cone(s) unscored]", bb);
+    }
+  }
+  std::print("{}\n", line);
   if (stats) {
-    for (const auto& row : rows->value.GetArray()) {
-      if (!row.IsObject()) {
+    for (const auto& r : rows->value.GetArray()) {
+      if (!r.IsObject()) {
         continue;
       }
-      double gates = 0, area = 0, depth = 0;
-      json_num(row, "gates", gates);
-      json_num(row, "area", area);
-      json_num(row, "logic_depth", depth);
-      std::print("  tmap[stats]: module='{}' gates={:.0f} area={:.2f} logic_depth={:.0f}\n",
-                 json_str(row, "module"),
-                 gates,
-                 area,
-                 depth);
+      double region_gates = 0, region_area = 0;
+      json_num(r, "gates", region_gates);
+      json_num(r, "area", region_area);
+      std::string row = std::format("  tmap[stats]: module='{}'", json_str(r, "module"));
+      // Fields only one mapper reports are printed when present.
+      for (const auto* key : {"color", "input_nodes", "input_ge"}) {
+        if (double v = 0; json_num(r, key, v)) {
+          row += std::format(" {}={:.0f}", key, v);
+        }
+      }
+      row += std::format(" gates={:.0f} area={:.2f}", region_gates, region_area);
+      if (double depth = 0; json_num(r, "logic_depth", depth)) {
+        row += std::format(" logic_depth={:.0f}", depth);
+      }
+      if (double delay = 0; json_num(r, "delay", delay)) {
+        row += std::format(" delay={:.3f}", delay);
+      } else {
+        row += " delay=n/a";
+      }
+      if (double ms = 0; json_num(r, "ms", ms)) {
+        row += std::format(" ms={:.1f}", ms);
+      }
+      if (double resynth = 0; json_num(r, "resynth", resynth)) {
+        row += std::format(" resynth={:.0f}", resynth);
+      }
+      std::print("{}\n", row);
     }
   }
   return true;
@@ -541,8 +510,8 @@ void write_pretty_qor(const std::string& qor_json, bool stats) {
     const auto kind = json_str(d, "kind");
     if (kind == "sta") {
       rendered = write_pretty_sta(d, stats);
-    } else if (kind == "abc-map") {
-      rendered = write_pretty_abc_map(d, stats);
+    } else if (kind == "abc-map") {  // a report stored by an older binary (replayed from a workdir)
+      rendered = write_pretty_tmap(d, stats);
     } else if (kind == "usyn") {
       rendered = write_pretty_usyn(d, stats);
     } else if (kind == "technology-map") {
@@ -555,9 +524,7 @@ void write_pretty_qor(const std::string& qor_json, bool stats) {
         rendered = write_pretty_usyn(u->value, stats) && rendered;
       }
       if (auto a = d.FindMember("abc"); a != d.MemberEnd() && a->value.IsObject()) {
-        const bool mapped = json_str(a->value, "kind") == "technology-map" ? write_pretty_tmap(a->value, stats)
-                                                                           : write_pretty_abc_map(a->value, stats);
-        rendered          = mapped && rendered;
+        rendered = write_pretty_tmap(a->value, stats) && rendered;
       }
       if (auto s = d.FindMember("sta"); s != d.MemberEnd() && s->value.IsObject()) {
         rendered = write_pretty_sta(s->value, stats) && rendered;
@@ -983,7 +950,7 @@ void write_result(const Options& opts, const Result& res) {
       w.EndObject();
     }
     if (res.abc_incr.present) {
-      // Mirrors the abc-map report's own `incremental` object (qor.abc),
+      // Mirrors the technology-map report's own `incremental` object (qor.abc),
       // so a report builder keys on ONE member for every tier.
       w.Key("abc");
       w.StartObject();

@@ -26,7 +26,7 @@ def run(name, args):
     return data
 
 run('synth', ['synth', str(source), '--top', 'remainder', '--set', f'synth.liberty={library}',
-              '--set', 'synth.timing=false', '--set', 'abc.threads=1', '--workdir', str(root/'synth'),
+              '--set', 'synth.timing=false', '--set', 'lhd.jobs=1', '--workdir', str(root/'synth'),
               '--emit', f'verilog:{root}/mapped.v'])
 text = (root/'mapped.v').read_text()
 assert '%' not in text, text

@@ -1,7 +1,7 @@
 /*
 :name: concat_unknown_mux_lane
 :type: simulation
-:set: sim.unknown_zero=true
+:set: compile.unknown_zero=true
 */
 
 // The match lowers `hi` to a Hotmux with an unsigned-unknown default arm.

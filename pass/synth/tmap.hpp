@@ -27,7 +27,7 @@ struct Tmap_options {
   // (synth.drop_init); otherwise it stays a native flop, which physical synthesis cannot place.
   bool                                  drop_init       = false;
   // A register clocked by logic that is not a recognized clock gate maps to a plain DFF cell whose clock pin
-  // the mapped logic drives (pass.abc.derived_clock); otherwise it stays a native flop.
+  // the mapped logic drives (synth.derived_clock); otherwise it stays a native flop.
   bool                                  derived_clock   = false;
   // How a native Memory is realized by the mapping step: `false` keeps it a native block (the default),
   // `true` lowers it to registers and decode and maps those, `auto` lowers what no macro could be

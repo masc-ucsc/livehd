@@ -1202,7 +1202,7 @@ TEST(GuiSession, RestartRefusesFlagsAndCheckpointsThatWouldKillOrEraseTheSession
   s.gp_end(x, y, 4, {});
   s.set_options_json(R"([{"name":"synth.place.iterations","value":"80","kind":"integer","ro":false},)"
                      R"({"name":"synth.place.timing_driven","value":"true","kind":"boolean","ro":false},)"
-                     R"({"name":"synth.place.tech_rc","value":"","kind":"text","ro":false},)"
+                     R"({"name":"synth.wire_rc","value":"","kind":"text","ro":false},)"
                      R"({"name":"synth.place","value":"true","kind":"boolean","ro":true}])");
   const auto restart = [&](const std::string& body) { return http(port, "POST", "/cmd?" + t, body); };
   // each of these used to be queued as "ok" and then exit the re-executed lhd on its flag parser
@@ -1222,7 +1222,7 @@ TEST(GuiSession, RestartRefusesFlagsAndCheckpointsThatWouldKillOrEraseTheSession
   EXPECT_EQ(calls, 0);
   EXPECT_NE(body_of(http(port, "GET", "/state?" + t)).find("no checkpoint 99"), std::string::npos);
   // valid ones pass, with or without the synth. prefix and with boolean spellings
-  EXPECT_NE(restart(R"({"cmd":"restart","checkpoint":1,"set":{"synth.place.iterations":"60","place.timing_driven":"false","synth.place.tech_rc":"/x/y.tcl"}})").find("200 OK"), std::string::npos);
+  EXPECT_NE(restart(R"({"cmd":"restart","checkpoint":1,"set":{"synth.place.iterations":"60","place.timing_driven":"false","synth.wire_rc":"/x/y.tcl"}})").find("200 OK"), std::string::npos);
   s.poll(30, x, y, 4, {});
   EXPECT_EQ(calls, 1);
 }

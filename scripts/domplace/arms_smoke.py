@@ -59,7 +59,7 @@ for name, leg in legs.items():
     assert ('pass.usyn.tmap_trials=1' in settings(leg)) == (leg['arm'] != 1), name
     assert ('pass.usyn.physical=domino_provisional' in settings(leg)) == (leg['arm'] == 3), name
     assert ('pass.usyn.domino_eval_fo4=2' in settings(leg)) == (leg['arm'] == 3), name
-    assert ('synth.opentimer=false' in settings(leg)) == (name != 'arm2-sta'), name
+    assert ('synth.timing=false' in settings(leg)) == (name != 'arm2-sta'), name
     assert ('synth.place.utilization=0.30' in settings(leg)) == (leg['core'] == 'area'), name
     assert (leg['command'][-1] == '<core and die of arm1-area>') == (leg['core'] == 'fixed'), name
 assert plan['options']['warm'] and plan['inputs'][str(source)], plan['options']

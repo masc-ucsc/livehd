@@ -75,7 +75,7 @@ if native:
     initial = root/'empty.jsonl'
     initial.write_text('')
     argv += ['--gui-resume','pause_final_10:1','--gui-replay',str(initial),'--gui-replay-seq','0']
-    for setting in ('synth.place.fp=false','synth.place.threads=1','synth.place.policy.fast=true',
+    for setting in ('synth.place.fp=false','synth.place.policy.fast=true',
                     'synth.place.gui.poll=5','synth.place.gui.timing_budget=0',
                     'synth.place.macro.pin_adjust=false','synth.place.macro.timing_interval=0'):
         argv += ['--set',setting]

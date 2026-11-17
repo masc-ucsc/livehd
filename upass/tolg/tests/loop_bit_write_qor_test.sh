@@ -55,7 +55,7 @@ run compile "$SRC" --top "$TOP" --set compile.unroll=true --emit-dir lg:"$W/lg_u
 
 # 2. Rolled synthesis input within a small factor of the unrolled one.
 synth() {
-  run synth "$SRC" --top "$TOP" --set synth.liberty="$LIB" --set synth.opentimer=false --set lhd.incremental=false \
+  run synth "$SRC" --top "$TOP" --set synth.liberty="$LIB" --set synth.timing=false --set lhd.incremental=false \
     --workdir "$W/$1" --result-json "$W/$1.json" "${@:2}"
 }
 synth rolled

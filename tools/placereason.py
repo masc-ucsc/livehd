@@ -59,7 +59,7 @@ def prepare(args):
     flags['synth.place.halo'] = '5,5'
     flags['synth.place.macro.pdn'] = 'off'
     if args.rc:
-        flags['synth.place.tech_rc'] = args.rc.resolve()
+        flags['synth.wire_rc'] = args.rc.resolve()
     command = [args.lhd, 'synth', str(task / f'{task.name}.v'), str(metadata), '--top', top,
                '--workdir', str(work), '--result-json', str(work/'result.json'), '--emit-dir', 'def:'+str(work/'def')]
     if not args.batch:

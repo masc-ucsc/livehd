@@ -987,7 +987,7 @@ std::vector<std::shared_ptr<hhds::Graph>> build_memory_modules(const std::vector
       const bool many_ports = ports > kAutoFoldPortsAbove;
       bool       map        = mode == Memory_fold::Always;
       if (mode == Memory_fold::Sram) {
-        // The synth.memory.sram flow: a generated macro has any number of ports, so neither `oversized` nor
+        // The synth.memory=sram flow: a generated macro has any number of ports, so neither `oversized` nor
         // `many_ports` applies. A memory folds when it is below the smallest macro (memory_max_bits)
         // or when no macro can realize it.
         const auto why_not = sram_macro_refusal(mem);

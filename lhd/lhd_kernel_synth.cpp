@@ -83,6 +83,7 @@
 #include "liberty_dff.hpp"
 #include "node_util.hpp"
 #include "pass/semdiff/semdiff.hpp"
+#include "job_manager.hpp"
 #include "pass/place/technology_rc.hpp"
 #include "report.hpp"
 #include "pass.hpp"
@@ -1050,7 +1051,9 @@ livehd::placement::Options placement_options(const Options& opts) {
       || out.io_iterations < 0) {
     throw Lhd_error{"usage", "invalid synth.place repulsion controls", ""};
   }
-  out.threads           = integer("place.threads", "1");
+  // lhd.jobs is the one concurrency knob; DREAMPlace threads only when built with OpenMP
+  // (--define=dreamplace_openmp=true). Serial placement also keeps the GUI's native-GP snapshots available.
+  out.threads = LHD_DREAMPLACE_OPENMP ? static_cast<int>(std::max(1u, livehd::Job_manager::global().ceiling())) : 1;
   const auto parse_halo = [](const std::string& value, const char* name) {
     const auto invalid
         = [&]() { return Lhd_error{"usage", std::string("invalid synth.") + name, "expected nonnegative microns: H or X,Y"}; };
@@ -2026,7 +2029,7 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
     }
     gc.source_identity = std::format("{:016x}", hash);
     for (const auto& [key, value] : opts.sets) {
-      if (key == "lhd.jobs" || key == "synth.place.threads" || key == "place.threads" || key.starts_with("synth.place.gui.")
+      if (key == "lhd.jobs" || key.starts_with("synth.place.gui.")
           || key.starts_with("synth.place.explore.")) {
         continue;
       }
@@ -2236,7 +2239,6 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
                                                         "place.gui.replay",
                                                         "place.gui.video",
                                                         "place.gui.poll",
-                                                        "place.threads",
                                                         "lhd.jobs"};
         if (!region_owned.contains(bare)) {
           gc.region_args.insert(gc.region_args.end(), {"--set", key + "=" + value});
@@ -3274,7 +3276,7 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
   std::string       domino_liberty_path;
   // hard macros (blackbox cells with a LEF MACRO): their Liberty files, read by the timers after synth.liberty
   const std::string macro_liberty = synth_set(opts, "macro_liberty", "");
-  std::string       sram_liberty_path;  // the generated SRAM macros' Liberty (synth.memory.sram)
+  std::string       sram_liberty_path;  // the generated SRAM macros' Liberty (synth.memory=sram)
   const auto        extra_libs    = [&] {
     std::string list = domino_liberty_path;
     if (!sram_liberty_path.empty()) {
@@ -3365,14 +3367,14 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
   if (net.graphs.empty()) {
     throw Lhd_error{"internal", mapper_method + " produced an empty netlist library", ""};
   }
-  if (mapped_output && truthy(synth_set(opts, "memory.sram", "false"))) {
+  if (mapped_output && synth_set(opts, "memory", "auto") == "sram") {
     livehd::synth::Sram_tech tech;
     // Area, timing, pin loads and voltage scale with the mapped Liberty's smallest NOT
     // (liberty::tech_proxy); an explicit number overrides one quantity.
     std::string proxy_why;
     const auto  proxy = livehd::liberty::tech_proxy(liberty, &proxy_why);
     if (!proxy) {
-      throw Lhd_error{"usage", "synth.memory.sram cannot derive the macro model from " + liberty + ": " + proxy_why, ""};
+      throw Lhd_error{"usage", "synth.memory=sram cannot derive the macro model from " + liberty + ": " + proxy_why, ""};
     }
     livehd::synth::scale_to_technology(tech, proxy->not_area, proxy->not_fo4_ps, proxy->not_cin_ff, proxy->voltage);
     const auto explicit_number = [&](const char* key) -> std::optional<double> {
@@ -3394,16 +3396,16 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
       tech.clk_to_q_ns = *v;
     } else if (!(proxy->not_fo4_ps > 0)) {
       throw Lhd_error{"usage",
-                      std::format("synth.memory.sram: the Liberty NOT {} has no delay tables for an FO4 estimate", proxy->not_cell),
+                      std::format("synth.memory=sram: the Liberty NOT {} has no delay tables for an FO4 estimate", proxy->not_cell),
                       "set synth.memory.access_ns"};
     }
     tech.min_bits = static_cast<uint64_t>(std::stoull(synth_set(opts, "memory.min_bits", "2048")));
     std::fprintf(stderr,
-                 "lhd synth: synth.memory.sram: model from %s (%.4g um2, FO4 %.3g ps): %.3g um2/bit, access %.3g ns\n",
+                 "lhd synth: synth.memory=sram: model from %s (%.4g um2, FO4 %.3g ps): %.3g um2/bit, access %.3g ns\n",
                  proxy->not_cell.c_str(), proxy->not_area, proxy->not_fo4_ps, tech.um2_per_bit, tech.clk_to_q_ns);
     const auto sram  = livehd::synth::macro_memories(net.graphs, tech);
     for (const auto& [module, why] : sram.kept) {
-      std::fprintf(stderr, "lhd synth: synth.memory.sram: '%s' stays a native memory instance: %s\n", module.c_str(), why.c_str());
+      std::fprintf(stderr, "lhd synth: synth.memory=sram: '%s' stays a native memory instance: %s\n", module.c_str(), why.c_str());
     }
     if (!sram.macros.empty()) {
       ensure_dir(root);
@@ -3440,7 +3442,7 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
         area += m.width_um * m.height_um;
         bits += m.bits * m.size;
       }
-      std::fprintf(stderr, "lhd synth: synth.memory.sram: %zu memories became macros (%.0f Kib, %.0f um2): %s/*.lib, %s\n", sram.macros.size(),
+      std::fprintf(stderr, "lhd synth: synth.memory=sram: %zu memories became macros (%.0f Kib, %.0f um2): %s/*.lib, %s\n", sram.macros.size(),
                    static_cast<double>(bits) / 1024.0, area, lib_dir.c_str(), lef_path.c_str());
     }
   }
@@ -5024,7 +5026,7 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
   }
 
   // ---- reports ----------------------------------------------------------------
-  // The envelope's "qor" member: {kind:"synth", abc:<abc-map>, sta:<sta>} (plus
+  // The envelope's "qor" member: {kind:"synth", abc:<technology-map>, sta:<sta>} (plus
   // the mapper's own report under its name, e.g. usyn:<decision report>) —
   // each sub-report byte-identical to what its pass alone embeds, so a
   // consumer checks each report kind before reading its fields. USYN mapping

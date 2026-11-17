@@ -6,7 +6,7 @@
 # incremental switch (`lhd.incremental`) it shares with the manual steps.
 #
 #   1. --workdir layout (<W>/synth/{lg,net,qor.json,timing.json}) + the
-#      envelope's {kind:synth, abc:{abc-map}, sta:{sta}} qor member + phases.
+#      envelope's {kind:synth, abc:{technology-map}, sta:{sta}} qor member + phases.
 #   2. A warm re-run over the same workdir is INCREMENTAL at both tiers
 #      (compile cache hit, every abc region a hit) and byte-identical Verilog.
 #   3. lhd.incremental=false is an honest cold run: no reuse, same netlist.
@@ -26,7 +26,7 @@ set -u
 # generates the `_usyn` twin from this same file. The workdir layout, the qor
 # envelope, warm/cold/disabled reuse, byte-identical netlists, the lg:-input
 # contract, the memory LEC and the negative controls hold for both. Only the
-# REPORT SHAPE differs: under abc, qor.abc is pass.abc's abc-map report (its
+# REPORT SHAPE differs: under abc, qor.abc is pass.abc's technology-map report (its
 # `total` block, one abc[stats] row per region); under usyn (default
 # tmap=abc), qor.usyn is the schema-5 native decision report (definition
 # regions, preserved register bits, the logical usyn_cache counters) and qor.abc
@@ -125,7 +125,7 @@ grep -qE "INVx1|NAND2x1|XOR2x1|DFFx1" "$W/net0.v" || fail "the Verilog is not th
 [ "$(jget "$W/r.json" qor.sta.kind)" = sta ] || fail "qor.sta is not the timing report"
 [ -n "$(jget "$W/r.json" qor.sta.designs)" ] || fail "sta report carries no designs"
 if [ "$MAPPER" = abc ]; then
-  [ "$(jget "$W/r.json" qor.abc.kind)" = abc-map ] || fail "qor.abc is not the pass.abc report"
+  [ "$(jget "$W/r.json" qor.abc.kind)" = technology-map ] && [ "$(jget "$W/r.json" qor.abc.mapper)" = abc ] || fail "qor.abc is not the pass.abc report"
   REGIONS=$(jget "$W/r.json" qor.abc.total.regions)
   [ -n "$REGIONS" ] && [ "$REGIONS" -gt 0 ] || fail "qor.abc.total.regions missing or zero, got '$REGIONS'"
   TREGIONS=$REGIONS
@@ -169,12 +169,12 @@ grep -q 'pass.color [^"]*alg:reduce' "$W/r.json" && fail "default synthesis must
 [ "$(jget "$W/r.json" incremental.abc.store_failed)" = 0 ] || fail "incremental.abc.store_failed wrong"
 [ -d "$W/w/${MAPPER}_cache" ] || fail "$MAPPER region cache not created under --workdir"
 grep -q '"qor":{"schema_version":1,"kind":"synth"' "$W/r.json" || fail "qor member not embedded verbatim"
-# pretty rendering: the abc-map line (usyn: the native and technology-map
-# lines), the STA critical path, and --stats rows
+# pretty rendering: the technology-map line (usyn: plus the native
+# line), the STA critical path, and --stats rows
 "$LHD" "${SYNTH[@]}" --workdir "$W/w" --stats --diag-fmt pretty -q >"$W/pretty.out" || fail "pretty run failed"
 if [ "$MAPPER" = abc ]; then
-  grep -q '^  qor: abc-map' "$W/pretty.out" || fail "pretty report lacks the abc-map line: $(cat "$W/pretty.out")"
-  [ "$(grep -c '^  abc\[stats\]:' "$W/pretty.out")" = "$REGIONS" ] || fail "--stats did not print one abc row per region: $(cat "$W/pretty.out")"
+  grep -q "^  qor: technology-map 'dut.top' provider=abc: " "$W/pretty.out" || fail "pretty report lacks the technology-map line: $(cat "$W/pretty.out")"
+  [ "$(grep -c '^  tmap\[stats\]:' "$W/pretty.out")" = "$REGIONS" ] || fail "--stats did not print one tmap row per region: $(cat "$W/pretty.out")"
 else
   grep -q "^  qor: usyn 'dut.top' (mapped-cmos): $REGIONS definition region(s), $RBITS register bits" "$W/pretty.out" \
     || fail "pretty report lacks the usyn line: $(cat "$W/pretty.out")"
@@ -210,7 +210,8 @@ run "${SYNTH[@]}" --workdir "$W/w" --set lhd.incremental=false --emit verilog:"$
 [ "$(jget "$W/r.json" incremental.compile.enabled)" = false ] || fail "lhd.incremental=false left the compile tier on"
 [ "$(jget "$W/r.json" incremental.compile.hits)" = 0 ] || fail "lhd.incremental=false still reported compile hits"
 if [ "$MAPPER" = abc ]; then
-  [ -z "$(jget "$W/r.json" qor.abc.incremental.hits)" ] || fail "lhd.incremental=false still ran the abc region cache"
+  [ "$(jeval "$W/r.json" 't["incremental"]["enabled"],t["incremental"]["hits"]')" = "(False, 0)" ] \
+    || fail "lhd.incremental=false still ran the abc region cache: $(jeval "$W/r.json" 't["incremental"]')"
 else
   # the technology-map cache reports itself disabled with no hit; the logical
   # cache performs neither reads nor writes (no reuse, no store, no cache I/O)
@@ -389,7 +390,7 @@ V
     # next to the ABC run's qor.json (it would be declared as this run's).
     [ -f "$d/w/synth/qor.json.usyn.json" ] || fail "the usyn run wrote no qor.json.usyn.json to go stale"
     run synth "$d/d.v" --top reuse_top --set synth.liberty="$LIB" --set synth.mapper=abc --workdir "$d/w"
-    [ "$(jget "$RJ" qor.abc.kind)" = abc-map ] && [ -z "$(jget "$RJ" qor.usyn.kind)" ] \
+    [ "$(jget "$RJ" qor.abc.mapper)" = abc ] && [ -z "$(jget "$RJ" qor.usyn.kind)" ] \
       || fail "the switched run did not map with abc: $(jget "$RJ" recipe)"
     [ -f "$d/w/synth/qor.json" ] || fail "the abc run after usyn wrote no qor.json"
     [ -z "$(ls "$d/w/synth" | grep '^qor\.json\.usyn')" ] \

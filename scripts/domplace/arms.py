@@ -138,7 +138,7 @@ def sets(pairs):
 def common_sets(args, core):
     pins = [f'synth.liberty={args.liberty}', f'synth.lef={args.lef}', f'synth.sdc={args.sdc}', 'synth.place=true',
             'synth.place.timing_driven=false', 'synth.place.resize=false', 'synth.place.resynth=false',
-            'synth.place.io_resynth=0', 'synth.opentimer=false', 'synth.place.stage_timing=true',
+            'synth.place.io_resynth=0', 'synth.timing=false', 'synth.place.stage_timing=true',
             f'synth.place.iterations={args.iterations}', f'synth.place.density={args.density}',
             f'synth.place.grid.density={args.grid_density}']
     if args.clock_port:
@@ -167,8 +167,8 @@ def legs(args):
             extra = list(args.arm3_set or []) if arm == 3 else []
             out.append((f'arm{arm}-{core}', arm, core, common_sets(args, core) + ARMS[arm][1] + extra))
     if args.sta_leg:  # U16: one report-only OpenTimer run of arm 2
-        out.append(('arm2-sta', 2, 'area', [s for s in common_sets(args, 'area') if s != 'synth.opentimer=false']
-                    + ['synth.opentimer=true'] + ARMS[2][1]))
+        out.append(('arm2-sta', 2, 'area', [s for s in common_sets(args, 'area') if s != 'synth.timing=false']
+                    + ['synth.timing=true'] + ARMS[2][1]))
     return out
 
 

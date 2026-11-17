@@ -332,7 +332,7 @@ void Pass_abc::add_mapping_labels(Eprp_method& m) {
   m.add_label_optional("barrel", "auto|log|reverse: barrel mux stage order; explicit selection disables trials", "auto");
   m.add_label_optional("block_size", "CSKA skip-block / CLA lookahead-group width (0 => auto: W/4|W/2|W)", "0");
   m.add_label_optional("threads",
-                       "maximum concurrent ABC workers (0 = automatic, up to 8); admission uses half of physical RAM",
+                       "INTERNAL: maximum concurrent ABC workers, set by the kernel from lhd.jobs; admission uses half of physical RAM",
                        "1");
   m.add_label_optional(
       "multiplier",
@@ -548,9 +548,24 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
     return;
   }
   std::string j  = "{";
-  j             += "\"schema_version\":1,\"kind\":\"abc-map\",";
+  // The shared technology-map report (the same core as pass.usyn's: kind, provider, top, library, delay target,
+  // physical knobs, scope, total, regions, incremental); register/memory/dff/parallel are ABC's own fields.
+  j             += "\"schema_version\":2,\"kind\":\"technology-map\",\"mapper\":\"abc\",\"provider\":\"abc\",";
   j             += std::format("\"top\":\"{}\",", jesc(top));
   j             += std::format("\"library\":\"{}\",", jesc(opts.library));
+  {
+    char*        end = nullptr;
+    const double ps  = opts.delay.empty() ? 0.0 : std::strtod(opts.delay.c_str(), &end);
+    j += std::format("\"delay_target_ps\":{},\"delay_unit\":\"ps\",\"scope\":\"definition-regions\",",
+                     opts.delay.empty() || end == opts.delay.c_str() ? std::string{"null"} : std::format("{:.6g}", ps));
+    j += std::format(
+        "\"physical\":{{\"max_fanout\":{},\"boundary\":{},\"boundary_buffer\":{},\"port_bypass\":{},\"drop_init\":{},"
+        "\"derived_clock\":{},\"memory\":\"{}\",\"boundary_drive\":\"{}\",\"io_load\":{:.6g},\"boundary_rounds\":{},"
+        "\"reg_margin\":\"{}\",\"area_relax\":{},\"tmap_pre\":\"{}\"}},",
+        opts.max_fanout, opts.boundary, opts.boundary_buffer, opts.port_bypass, opts.drop_init, opts.derived_clock,
+        livehd::synth::memory_fold_name(opts.memory_fold), jesc(opts.boundary_drive), opts.io_load, opts.boundary_rounds,
+        jesc(opts.reg_margin), opts.area_relax_pct, jesc(opts.pre));
+  }
   j             += std::format("\"register\":{},\"memory\":\"{}\",",
                                opts.map_register ? "true" : "false",
                                livehd::synth::memory_fold_name(opts.memory_fold));
@@ -611,7 +626,6 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
     }
     j += "}},";
   }
-  j += std::format("\"delay_target\":\"{}\",", jesc(opts.delay));
   // `gates`/`area` are PHYSICAL (region x instantiations); `module_gates`/
   // `module_area` are the per-mapped-module sums (what abc worked on once).
   j += std::format(
@@ -669,12 +683,19 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
   if (incr != nullptr) {
     // The agent loop reads its "did the edit change anything" answer here: a
     // NoChange edit is hits == regions, misses == 0, in O(#regions) lookups.
-    j += std::format(",\"incremental\":{{\"hits\":{},\"misses\":{},\"hit_ms\":{:.1f},\"miss_ms\":{:.1f},\"abc_started\":{}}}",
+    j += std::format(",\"incremental\":{{\"enabled\":true,\"regions\":{},\"hits\":{},\"misses\":{},\"hit_ms\":{:.1f},"
+                     "\"miss_ms\":{:.1f},\"abc_started\":{}}}",
+                     qor.size(),
                      incr->hits(),
                      incr->misses(),
                      hit_ms,
                      miss_ms,
                      abc_started ? 1 : 0);
+  } else {
+    // The cache is off (no --workdir, or lhd.incremental=false): the same object, honestly disabled.
+    j += std::format(",\"incremental\":{{\"enabled\":false,\"regions\":{},\"hits\":0,\"misses\":0,\"hit_ms\":0,\"miss_ms\":0,"
+                     "\"abc_started\":1}}",
+                     qor.size());
   }
   j += std::format(
       ",\"parallel\":{{\"requested\":{},\"limit\":{},\"peak_workers\":{},\"peak_abc\":{},\"memory_limit_bytes\":{},\"memory_"
