@@ -1,0 +1,10 @@
+// A comb with a compact (rolled) loop whose carried `mut` is seeded by a comptime constant, read by the loop
+// and then by the code after it. Compiled to ln: and recompiled to lg: the seed store is a comptime constant the
+// runner used to drop while the loop payload still read it, leaving `le` without a driver.
+pub comb rolled_rt(hash:U64, target:U64) -> (below:Bool) {
+  mut le:U64 = 0
+  for i in 0..<8 {
+    le#[i*8..+8] = hash#[(7 - i)*8..+8]
+  }
+  below = le <= target
+}

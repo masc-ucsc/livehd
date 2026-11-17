@@ -2011,6 +2011,13 @@ sh_test(
     ],
 )
 
+# A rolled loop compiled to ln: and lowered from the ln: unit: the carry seed must survive.
+sh_test(
+    name = "lhd_rolled_ln_roundtrip_test",
+    srcs = ["lhd_rolled_ln_roundtrip_test.sh"],
+    data = _FLOW_DATA + ["rolled_ln_roundtrip.prp"],
+)
+
 # pass.abc.ware_zero_bits / pass.abc.memory_prune_reads: a barrel shifter over a vector
 # with one live lane and a lowered memory with narrow read windows map to fewer cells
 # when the module boundary no longer hides what the parent knows, and the mapped

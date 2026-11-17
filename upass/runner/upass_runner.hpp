@@ -382,6 +382,9 @@ protected:
   void emit_leaf(const Lnast_node& node);
   void emit_current_leaf();
   void emit_subtree_verbatim();
+  // A rolled_for that is copied through (not replayed): its payload reads carry seeds the runner may have
+  // dropped as comptime stores, and it rewrites the carried names, so fold the former and forget the latter.
+  void emit_rolled_for_verbatim(bool parent_is_stmts = false);
 
   // Returns the first non-nullopt result from any pass's fold_ref(name).
   std::optional<Dlop> try_fold_ref(std::string_view name);

@@ -655,6 +655,47 @@ void uPass_runner::emit_current_leaf() {
   staging->set_name_id(nid, lm->get_lnast()->get_name_id(lm->get_current_nid()));
 }
 
+void uPass_runner::emit_rolled_for_verbatim(bool parent_is_stmts) {
+  if (!materialize_) {
+    return;
+  }
+  const auto type = lm->current_type();
+  if (!lm->has_child()) {
+    if (Lnast_ntype::is_ref(type) || Lnast_ntype::is_const(type)) {
+      emit_current_leaf();
+    } else {
+      emit_leaf(type);
+    }
+    return;
+  }
+  // `store(dst, ref src)`: a src whose value is a known comptime constant was
+  // (or may have been) dropped from the output as a store, so substitute it.
+  const bool scalar_store = Lnast_ntype::is_store(type) && lm->current_num_children() == 2;
+  emit_push(type);
+  lm->move_to_child();
+  size_t      pos = 0;
+  std::string dst;
+  do {
+    const auto ct = lm->current_type();
+    if (scalar_store && pos == 0 && Lnast_ntype::is_ref(ct)) {
+      dst = std::string(lm->current_text());
+      emit_current_leaf();
+    } else if (scalar_store && pos == 1 && Lnast_ntype::is_ref(ct)) {
+      emit_ref_or_folded(lm->current_text());
+    } else {
+      emit_rolled_for_verbatim(Lnast_ntype::is_stmts(type));
+    }
+    ++pos;
+  } while (lm->move_to_sibling());
+  lm->move_to_parent();
+  emit_pop();
+  // A write in the payload block is the loop's result: the pre-loop comptime
+  // value of that name no longer holds.
+  if (scalar_store && parent_is_stmts && !dst.empty() && !Lnast::is_tmp(dst)) {
+    (void)symbol_table_.set(dst, Bundle::invalid_lconst);
+  }
+}
+
 void uPass_runner::emit_subtree_verbatim() {
   if (!materialize_) {
     return;  // pure emission, no dispatch — cursor untouched (the walk is balanced)
@@ -20148,7 +20189,8 @@ void uPass_runner::process_lnast() {
       }
       if (!lm->in_inline_frame() || kids.size() != lnast_rolled_for::arity
           || !source->get_name(kids[lnast_rolled_for::activation]).empty()) {
-        emit_subtree_verbatim();
+        flush_deferred_emits();
+        emit_rolled_for_verbatim();
         break;
       }
       // A previously processed comb may already contain a compact loop.

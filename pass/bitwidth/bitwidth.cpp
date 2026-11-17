@@ -2497,6 +2497,11 @@ void Bitwidth::bw_pass(hhds::Graph* g) {
                                       it->second.get_sbits(),
                                       it->second.is_always_positive());
                                 }
+                                if (p.is_const()) {
+                                  rng += std::format(" const={}{}",
+                                                     livehd::graph_util::const_of(p).to_pyrope(),
+                                                     livehd::graph_util::const_of(p).has_unknowns() ? " (has unknown bits)" : "");
+                                }
                                 return std::format("drv={} bits={} unsign={} {}",
                                                                          livehd::graph_util::wire_name(p),
                                                                          livehd::graph_util::bits_of(p),
