@@ -53,6 +53,7 @@
 #include <fstream>
 #include <functional>
 #include <iterator>
+#include <regex>
 #include <map>
 #include <set>
 #include <sstream>
@@ -82,8 +83,8 @@
 #include "lhd_kernel_internal.hpp"
 #include "liberty_dff.hpp"
 #include "node_util.hpp"
-#include "pass/semdiff/semdiff.hpp"
 #include "job_manager.hpp"
+#include "pass/semdiff/semdiff.hpp"
 #include "pass/place/technology_rc.hpp"
 #include "report.hpp"
 #include "pass.hpp"
@@ -999,6 +1000,34 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.route_model            = synth_set(opts, "place.route.model", "rsmt");
   out.route_degree           = integer("place.route.degree", "40");
   out.route_accuracy         = integer("place.route.accuracy", "3");
+  out.route_pin_capacity     = auto_number("place.route.pin_capacity");
+  out.tile_spread            = truthy(synth_set(opts, "place.tile_spread", "true"));
+  {
+    // auto: the value an ORFS fastroute.tcl gives set_global_routing_layer_adjustment (the largest when it sets
+    // several), else the ORFS asap7 0.25
+    const auto adjustment_text = synth_set(opts, "place.route.layer_adjustment", "auto");
+    const auto fastroute       = synth_set(opts, "place.route.fastroute", "");
+    if (adjustment_text != "auto") {
+      out.route_layer_adjustment = number("place.route.layer_adjustment", "auto");
+    } else if (!fastroute.empty()) {
+      std::ifstream in(fastroute);
+      if (!in) {
+        throw Lhd_error{"usage", "cannot read synth.place.route.fastroute: " + fastroute, ""};
+      }
+      const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+      const std::regex  rule(R"(set_global_routing_layer_adjustment\s+\S+\s+([0-9]*\.?[0-9]+))");
+      double            found = -1;
+      for (auto it = std::sregex_iterator(text.begin(), text.end(), rule); it != std::sregex_iterator(); ++it) {
+        found = std::max(found, std::stod((*it)[1].str()));
+      }
+      if (found >= 0) {
+        out.route_layer_adjustment = found;
+      }
+    }
+    if (!(out.route_layer_adjustment >= 0 && out.route_layer_adjustment < 1)) {
+      throw Lhd_error{"usage", "synth.place.route.layer_adjustment must be in [0, 1)", ""};
+    }
+  }
   const auto read_route = [&](livehd::placement::Stage_route& stage, const std::string& name) {
     const auto prefix            = "place." + name + ".route.";
     stage.model                  = synth_set(opts, prefix + "model", "inherit");
@@ -1107,6 +1136,7 @@ livehd::placement::Options placement_options(const Options& opts) {
   } else {
     out.macro_edge_snap = parse_halo(edge_snap_text, "place.macro.edge_snap");
   }
+  out.macro_slivers    = truthy(synth_set(opts, "place.macro.slivers", "true"));
   out.macro_dead_space = livehd::placement::parse_dead_space_options(synth_set(opts, "place.macro.dead_space", "off"));
   for (const auto& [key, fallback, target] : {
            std::tuple{    "place.macro.refine_rounds",  "0",     &out.macro_refine_rounds},

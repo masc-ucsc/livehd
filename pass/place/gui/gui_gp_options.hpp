@@ -114,7 +114,8 @@ void field(A& a, Options& o) {
       initial_density_weight, density_weight_seed, hold_overflow, fillers_in_whitespace, max_step, filler_width, filler_max_count, \
       filler_area_fraction, filler_cell_space, filler_macro_fraction, filler_cell_scale, filler_bin_fraction, cohesion_weight,     \
       order_weight, order_growth, schedule_iterations, route, route_external, route_external_interval, route_physical_snapshot,    \
-      route_initialize, routability, route_capacity_h, route_capacity_v, density_upper_bound, add_fillers, legalize,               \
+      route_initialize, routability, route_capacity_h, route_capacity_v, route_cell_pin_capacity, density_upper_bound, add_fillers, \
+      legalize,                                                                                                                    \
       macro_only_legalize, detailed_place, detailed_iterations, before_legalize, after_macro_legalize, observer,                   \
       observer_interval, checkpoint_rollback
   auto& [LIVEHD_GP_INPUTS] = o;

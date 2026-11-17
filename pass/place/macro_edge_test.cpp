@@ -86,3 +86,55 @@ TEST(MacroEdgeSnap, GridAndDisabledAxis) {
   limits.grid = 0;
   EXPECT_THROW(pl::snap_macros_to_edges(objects, limits), std::invalid_argument);
 }
+
+TEST(MacroEdgeSnap, SliversCloseWithoutAnEdgeAnchor) {
+  auto limits    = core(0);  // edge snap off: only slivers move
+  limits.halo_x  = limits.halo_y = 5;
+  limits.space_x = limits.space_y = 10;
+  limits.slivers = true;
+  // An interior pair 15 apart (sliver 5 < space 10) closes to the spacing; a pair 30 apart (sliver 20) stays.
+  std::vector<pl::Edge_object> objects{box(300, 500, 50, 50), box(365, 500, 50, 50), box(300, 700, 50, 50),
+                                       box(380, 700, 50, 50)};
+  const auto                   report = pl::snap_macros_to_edges(objects, limits);
+  EXPECT_EQ(objects[0].xl, 300);  // its own sliver to the core edge (295) is far above the halo
+  EXPECT_EQ(objects[1].xl, objects[0].xh + 10);
+  EXPECT_EQ(objects[3].xl, 380);
+  EXPECT_EQ(report.moved, 1);
+  // Near the core edge: a body 8 from it (under 2 * halo) goes flush with its halo inside the core.
+  std::vector<pl::Edge_object> edge{box(8, 500, 50, 50)};
+  pl::snap_macros_to_edges(edge, limits);
+  EXPECT_EQ(edge[0].xl, 5);
+}
+
+TEST(MacroEdgeSnap, SliversKeepAChannelBetweenTwoPinnedFaces) {
+  auto limits    = core(0);
+  limits.halo_x  = limits.halo_y = 5;
+  limits.space_x = limits.space_y = 10;
+  limits.slivers = true;
+  auto left      = box(300, 500, 50, 50);
+  auto right     = box(365, 500, 50, 50);
+  left.pin_faces  = 2;  // pins on its right face
+  right.pin_faces = 1;  // pins on its left face: the two face each other
+  std::vector<pl::Edge_object> objects{left, right};
+  pl::snap_macros_to_edges(objects, limits);
+  EXPECT_EQ(objects[1].xl, 365);
+  // Only one pinned face: the sliver closes.
+  objects[0].pin_faces = 0;
+  pl::snap_macros_to_edges(objects, limits);
+  EXPECT_EQ(objects[1].xl, objects[0].xh + 10);
+}
+
+TEST(MacroEdgeSnap, SliversLandOnTheTrackLattice) {
+  auto limits    = core(0);
+  limits.halo_x  = limits.halo_y = 5;
+  limits.space_x = limits.space_y = 10;
+  limits.slivers = true;
+  auto moving    = box(368, 500, 50, 50);
+  moving.period[0] = 4;
+  moving.phases[0] = {1};  // x = 1 + 4k
+  std::vector<pl::Edge_object> objects{box(300, 500, 50, 50), moving};
+  pl::snap_macros_to_edges(objects, limits);
+  // the spacing allows 360; the nearest lattice origin at or above it is 361
+  EXPECT_EQ(objects[1].xl, 361);
+  EXPECT_EQ((objects[1].xl - 1) % 4, 0);
+}

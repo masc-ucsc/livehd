@@ -448,7 +448,9 @@ filegroup(
         "macro_anchor.cpp",
         "macro_anchor.hpp",
         "macro_edge.cpp",
+        "tile_spread.cpp",
         "macro_edge.hpp",
+        "tile_spread.hpp",
         "macro_snap.cpp",
         "macro_tracks.cpp",
         "macro_snap.hpp",
@@ -800,6 +802,7 @@ cc_library(
         "io_timing.cpp",
         "macro_anchor.cpp",
         "macro_edge.cpp",
+        "tile_spread.cpp",
         "macro_snap.cpp",
         "macro_tracks.cpp",
         "magnet_report.cpp",
@@ -833,6 +836,7 @@ cc_library(
         "io_timing.hpp",
         "macro_anchor.hpp",
         "macro_edge.hpp",
+        "tile_spread.hpp",
         "macro_snap.hpp",
         "macro_state.hpp",
         "macro_tracks.hpp",
@@ -1071,6 +1075,14 @@ cc_test(
     name = "macro_edge_test",
     size = "small",
     srcs = ["macro_edge_test.cpp"],
+    copts = COPTS,
+    deps = [":place", "@googletest//:gtest_main"],
+)
+
+cc_test(
+    name = "tile_spread_test",
+    size = "small",
+    srcs = ["tile_spread_test.cpp"],
     copts = COPTS,
     deps = [":place", "@googletest//:gtest_main"],
 )

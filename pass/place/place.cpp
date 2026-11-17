@@ -99,6 +99,7 @@
 #include "steiner_topology.hpp"
 #include "technology_rc.hpp"
 #include "thirdparty/flute/flute.hpp"
+#include "tile_spread.hpp"
 #include "track_capacity.hpp"
 
 namespace livehd::placement {
@@ -578,6 +579,9 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
   }
   if (o.macro_edge_snap) {
     h = hash_text(std::format("macro-edge-snap:{}:{}", o.macro_edge_snap->first, o.macro_edge_snap->second), h);
+  }
+  if (o.macro_slivers) {
+    h = hash_text("macro-slivers:v1", h);
   }
   if (o.macro_refine_rounds) {
     h = hash_text(std::format("macro-refine:{}:{}", o.macro_refine_rounds, o.macro_refine_iterations), h);
@@ -1118,6 +1122,10 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
                   h);
   }
   h = hash_text(std::format("route-model:{}:{}:{}", o.route_model, o.route_degree, o.route_accuracy), h);
+  h = hash_text(std::format("route-pin-capacity:{}:{}", o.route_pin_capacity, o.route_layer_adjustment), h);
+  if (o.tile_spread) {
+    h = hash_text("tile-spread:v1", h);
+  }
   for (const auto* stage : {&o.fp_route, &o.macro_route, &o.final_route}) {
     h = hash_text(std::format("route-stage:{}:{}:{}:{}:{}:{}",
                               stage->model,
@@ -1568,6 +1576,7 @@ struct View {
   std::vector<Pdn_attempt>                      pdn_attempts;
   // macro.edge_snap: resolved sliver limits (DBU, 0 = off) and what the snap did over the stage.
   int64_t                                       edge_snap_x = 0, edge_snap_y = 0;
+  bool                                          sliver_snap = false;  // macro.slivers (Edge_snap_limits::slivers)
   // Native padding of a movable hard macro per side while macros are planned: the halo, or half the macro channel
   // rounded up to sites/rows when that is larger, so the native macro legalizer already keeps the channel.
   int64_t                                       plan_pad_x = 0, plan_pad_y = 0;
@@ -2614,11 +2623,38 @@ void snap_macros_to_core_edges(View& v, const ph::Technology& tech, dp::Design& 
   if (v.edge_snap_y < 0) {
     v.edge_snap_y = std::llround(l.yh - l.yl) / 10;
   }
-  if ((v.edge_snap_x <= 0 && v.edge_snap_y <= 0) || physical.node_macro.empty()) {
+  if ((v.edge_snap_x <= 0 && v.edge_snap_y <= 0 && !v.sliver_snap) || physical.node_macro.empty()) {
     return;
   }
   std::vector<Edge_object> objects;
   std::vector<size_t>      indexes;
+  // per master and orientation: the faces with signal pins and the routing-track lattice of the origin
+  struct Face_lattice {
+    unsigned                            faces = 0;
+    std::optional<Macro_track_lattice> lattice;
+  };
+  std::map<std::pair<std::string, int>, Face_lattice> masters;
+  const auto face_lattice = [&](const std::string& master, ph::Orientation orientation) -> const Face_lattice& {
+    auto [it, fresh] = masters.try_emplace({master, int(orientation)});
+    if (!fresh) {
+      return it->second;
+    }
+    const auto& m    = tech.macros.at(master);
+    const auto  w    = ph::swaps_axes(orientation) ? m.height : m.width;
+    const auto  h    = ph::swaps_axes(orientation) ? m.width : m.height;
+    for (const auto& [name, pin] : m.pins) {
+      if (pin.use == "POWER" || pin.use == "GROUND") {
+        continue;
+      }
+      for (const auto& shape : pin.shapes) {
+        const auto r = ph::orient_rect(shape.rect.translated(m.origin_x, m.origin_y), m.width, m.height, orientation);
+        // a pin within a micron of a face serves that face
+        it->second.faces |= (r.xl <= 1 ? 1u : 0u) | (w - r.xh <= 1 ? 2u : 0u) | (r.yl <= 1 ? 4u : 0u) | (h - r.yh <= 1 ? 8u : 0u);
+      }
+    }
+    it->second.lattice = macro_track_lattice(tech, v.fp, master, orientation);
+    return it->second;
+  };
   for (size_t i = 0; i < physical.node_x.size(); ++i) {
     const bool cell = i < v.cells.size();
     if ((cell && ph::soft_block(tech.macros.at(v.cells[i].macro))) || physical.placement_mask(i) == dp::PlacementMask::soft) {
@@ -2635,7 +2671,20 @@ void snap_macros_to_core_edges(View& v, const ph::Technology& tech, dp::Design& 
     }
     const auto x = std::llround(physical.node_x[i]), y = std::llround(physical.node_y[i]);
     const bool grouped = !physical.node_group_id.empty() && physical.node_group_id[i] != 0;
-    objects.push_back({x, y, x + w, y + h, macro && movable && !grouped, macro});
+    Edge_object object{x, y, x + w, y + h, macro && movable && !grouped, macro};
+    if (macro && cell) {
+      const auto orientation = physical.node_orientation.empty() ? ph::Orientation::N
+                                                                 : physical_orientation(physical.node_orientation[i]);
+      const auto& fl         = face_lattice(v.cells[i].macro, orientation);
+      object.pin_faces       = fl.faces;
+      if (fl.lattice) {
+        for (int axis = 0; axis < 2; ++axis) {
+          object.period[axis] = fl.lattice->period[axis];
+          object.phases[axis] = fl.lattice->phases[axis];
+        }
+      }
+    }
+    objects.push_back(std::move(object));
     indexes.push_back(i);
   }
   Edge_snap_limits limits;
@@ -2648,8 +2697,9 @@ void snap_macros_to_core_edges(View& v, const ph::Technology& tech, dp::Design& 
   limits.halo_y     = std::max(v.halo_y, v.plan_pad_y);
   limits.space_x    = std::max(v.channel_x, 2 * limits.halo_x);
   limits.space_y    = std::max(v.channel_y, 2 * limits.halo_y);
-  limits.max_gap_x  = v.edge_snap_x;
-  limits.max_gap_y  = v.edge_snap_y;
+  limits.max_gap_x  = std::max<int64_t>(0, v.edge_snap_x);
+  limits.max_gap_y  = std::max<int64_t>(0, v.edge_snap_y);
+  limits.slivers    = v.sliver_snap;
   limits.grid       = channel_grid(tech);
   const auto report = snap_macros_to_edges(objects, limits);
   for (size_t j = 0; j < objects.size(); ++j) {
@@ -8277,6 +8327,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
                                             std::llround(options.macro_pdn_origin->second * tech.dbu)};
     }
   }
+  v.sliver_snap = options.macro_slivers;
   if (options.macro_edge_snap) {
     // Explicit microns now; auto (-1) resolves against the placement core when the snap runs.
     v.edge_snap_x = options.macro_edge_snap->first < 0 ? -1 : channel_dbu(options.macro_edge_snap->first, tech);
@@ -9675,9 +9726,13 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     // Inactive routing and timing observers keep the native defaults when the
     // LEF cannot supply both directions.
     if (capacity_h > 0 && capacity_v > 0) {
-      control.route_capacity_h = capacity_h;
-      control.route_capacity_v = capacity_v;
+      // the capacity OpenROAD's FastRoute measures against: the layer adjustment withholds a share of every layer
+      control.route_capacity_h = capacity_h * (1 - options.route_layer_adjustment);
+      control.route_capacity_v = capacity_v * (1 - options.route_layer_adjustment);
     }
+    // Cell-pin access: dense pin clusters (flop arrays, mux trees) inflate even when their wires are short.
+    const double pins_um2          = options.route_pin_capacity < 0 ? lef_pin_capacity_um2(tech) : options.route_pin_capacity;
+    control.route_cell_pin_capacity = pins_um2 > 0 ? pins_um2 / (double(tech.dbu) * tech.dbu) : 0;
   }
   control.legalize       = false;
   control.detailed_place = false;
@@ -13673,8 +13728,50 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         release_multirow_anchors(frame, *multirow_report);
         adopt_rail_twins(v, frame);
       }
+      std::optional<std::vector<ph::Component>> before_spread;
+      if (options.tile_spread) {
+        // Abutting cells leave the detailed router no room for pin access: share each routing tile's whitespace.
+        // Keep-outs the terminal legalizer honored: macro bodies with their halo and hard placement exclusions.
+        std::vector<Spread_rect> keep_out;
+        for (const auto& c : frame.components) {
+          const auto m = tech.macros.find(c.macro);
+          if (m != tech.macros.end() && ph::hard_macro(m->second) && c.place.is_valid()) {
+            keep_out.push_back({c.place.x - v.halo_x, c.place.y - v.halo_y, c.place.x + c.place.width + v.halo_x,
+                                c.place.y + c.place.height + v.halo_y});
+          }
+        }
+        for (const auto& e : ph::placement_exclusions(frame, frame.die)) {
+          if (e.kind == ph::Placement_mask::hard) {
+            keep_out.push_back({std::llround(e.rect.xl), std::llround(e.rect.yl), std::llround(e.rect.xh), std::llround(e.rect.yh)});
+          }
+        }
+        std::vector<char> frozen;
+        if (!terminal_options.domains.empty()) {
+          frozen.assign(frame.components.size(), 0);
+          for (size_t i = 0; i < frame.components.size() && i < terminal_options.domains.size(); ++i) {
+            frozen[i] = terminal_options.domains[i].hold || terminal_options.domains[i].origins.has_value();
+          }
+        }
+        before_spread      = frame.components;
+        const auto spread  = spread_cells_in_tiles(tech, frame, 0, keep_out, frozen);
+        std::fprintf(stderr,
+                     "tile spread: %lld cells moved (%lld pin-aligned), %.1f um total, routing tile %.2f um\n",
+                     static_cast<long long>(spread.moved),
+                     static_cast<long long>(spread.aligned),
+                     double(spread.distance) / tech.dbu,
+                     double(spread.tile_w) / tech.dbu);
+      }
       sat_install(v.design, frame);
       metrics.legal = native_legal(v, tech, v.design);
+      if (!metrics.legal && before_spread) {
+        // A keep-out the spread does not model: keep the legalizer's pose rather than fail the run.
+        std::string reason;
+        dp::is_legal(v.design, &reason);
+        std::fprintf(stderr, "tile spread: reverted, the spread pose is not legal (%s)\n", reason.c_str());
+        frame.components = std::move(*before_spread);
+        sat_install(v.design, frame);
+        metrics.legal = native_legal(v, tech, v.design);
+      }
       metrics.hpwl  = dp::hpwl(v.design);
       metrics.alignment.cell_legalization_seconds = terminal_report ? terminal_report->seconds : 0;
       if (!metrics.legal) {

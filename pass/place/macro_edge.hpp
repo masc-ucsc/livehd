@@ -11,6 +11,11 @@ struct Edge_object {
   int64_t xl = 0, yl = 0, xh = 0, yh = 0;
   bool    movable = false;
   bool    macro   = true;
+  // faces with signal pins: left 1, right 2, bottom 4, top 8 (sliver snap keeps a channel between two pinned faces)
+  unsigned pin_faces = 0;
+  // routing-track lattice of the origin per axis (x 0, y 1): phases[a][i] + k * period[a]; period 0 = any origin
+  int64_t              period[2] = {0, 0};
+  std::vector<int64_t> phases[2];
 };
 struct Edge_snap_limits {
   int64_t core_xl = 0, core_yl = 0, core_xh = 0, core_yh = 0;
@@ -18,6 +23,10 @@ struct Edge_snap_limits {
   int64_t space_x = 0, space_y = 0;      // macro-to-macro clear spacing per axis
   int64_t max_gap_x = 0, max_gap_y = 0;  // largest sliver that is collapsed; 0 disables that axis
   int64_t grid = 1;                      // origin grid (manufacturing grid), relative to the core corner
+  // Sliver snap: also close, toward the macro's core edge, any clear sliver narrower than the clearance it faces
+  // (a body gap under 2 * space to a macro, under 2 * halo to the core edge), anchored to the edge or not, unless both
+  // facing faces carry signal pins. Such a sliver is too narrow for cells and only makes a routing bottleneck.
+  bool slivers = false;
 };
 struct Edge_snap_report {
   int64_t moved    = 0;  // macros displaced on at least one axis
@@ -32,6 +41,9 @@ struct Edge_snap_report {
 // and the clear sliver it removes is positive and at most `max_gap`. Moving
 // toward the edge never brings two macros closer than `space`; objects outside
 // its path are unaffected. A macro that already touches its anchor anchors the
-// next one. The result keeps every pairwise clearance that held before.
+// next one. With `slivers`, narrower slivers also close without an edge anchor.
+// Moved origins land on the origin grid and on the macro's track lattice (the
+// sliver may then stay open by less than one track period). The result keeps
+// every pairwise clearance that held before.
 Edge_snap_report snap_macros_to_edges(std::vector<Edge_object>& objects, const Edge_snap_limits& limits);
 }  // namespace livehd::placement

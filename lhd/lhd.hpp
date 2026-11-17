@@ -952,6 +952,12 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      Synth_set_option::Kind::file,
      "after native macro legalization, slide macros toward their nearest core edge across slivers of at most this "
      "width: off, auto (one tenth of the core extent per axis), or X / X,Y microns; keeps halo, channel and legality"},
+    {"place.macro.slivers",
+     "true",
+     Synth_set_option::Kind::boolean,
+     "after native macro legalization, close any clear sliver narrower than the clearance it faces (macro bodies "
+     "under 2x their spacing max(channel, 2*halo) apart, or a body under 2x halo from the core edge) by sliding the "
+     "macro toward its core edge onto its track lattice; a channel between two faces that both have signal pins stays"},
     {"place.macro.refine_rounds",
      "0",
      Synth_set_option::Kind::file,
@@ -1784,6 +1790,30 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      Synth_set_option::Kind::integer,
      "maximum FLUTE net degree (2..1000); larger nets use weighted RUDY"},
     {"place.route.accuracy", "3", Synth_set_option::Kind::integer, "FLUTE accuracy (1..10)"},
+    {"place.route.layer_adjustment",
+     "auto",
+     Synth_set_option::Kind::file,
+     "share of the LEF routing tracks the routability estimate withholds, as OpenROAD's "
+     "set_global_routing_layer_adjustment does for FastRoute: auto (the value in place.route.fastroute, else 0.25, the "
+     "ORFS asap7 setting) or a number in [0, 1)"},
+    {"place.route.fastroute",
+     "",
+     Synth_set_option::Kind::file,
+     "ORFS FASTROUTE_TCL (platforms/<pdk>/fastroute.tcl) whose set_global_routing_layer_adjustment sets "
+     "place.route.layer_adjustment=auto"},
+    {"place.tile_spread",
+     "true",
+     Synth_set_option::Kind::boolean,
+     "after cell legalization, inside each routing tile (the global router's GCell: 15 pitches of the 4th routing "
+     "layer) and row, spread the cells evenly over the free sites instead of abutting them, and line up the pins of "
+     "cells that share a net with a cell in the row below"},
+    {"place.route.pin_capacity",
+     "auto",
+     Synth_set_option::Kind::file,
+     "standard-cell pins per um^2 a routability bin holds before its cells inflate (dense flop arrays and mux trees "
+     "fail detailed-route pin access although their wires are short): auto (on advanced nodes, first horizontal and "
+     "vertical layers above the pin layer at a pitch <= 50 nm: 0.3 x sqrt of their tracks/um, ~8.3 on asap7; off on "
+     "older nodes), a number, or 0 to ignore cell pins"},
     {"place.fp.route.model",
      "inherit",
      Synth_set_option::Kind::file,

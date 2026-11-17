@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <numeric>
+#include <optional>
 #include <stdexcept>
 
 namespace livehd::placement {
@@ -18,6 +19,33 @@ int64_t round_up(int64_t value, int64_t origin, int64_t grid) {
 int64_t round_down(int64_t value, int64_t origin, int64_t grid) {
   const auto offset = value - origin;
   return origin + (offset >= 0 ? offset / grid : -((-offset + grid - 1) / grid)) * grid;
+}
+int64_t floor_div(int64_t a, int64_t b) { return a >= 0 ? a / b : -((-a + b - 1) / b); }
+// The admissible origin nearest `value` on the far side of it (at or above when `up`, at or below otherwise): on the
+// origin grid and on the object's track lattice for this axis. nullopt when no lattice phase meets the grid.
+std::optional<int64_t> admissible(const Edge_object& o, int axis, int64_t value, bool up, int64_t origin, int64_t grid) {
+  const auto snapped = up ? round_up(value, origin, grid) : round_down(value, origin, grid);
+  const auto period  = o.period[axis];
+  if (period <= 0 || o.phases[axis].empty()) {
+    return snapped;
+  }
+  std::optional<int64_t> best;
+  for (const auto phase : o.phases[axis]) {
+    auto k = floor_div(snapped - phase, period);
+    if (up && phase + k * period < snapped) {
+      ++k;
+    }
+    for (int step = 0; step < 64; ++step, k += up ? 1 : -1) {  // the lattice and the grid meet within lcm/period steps
+      const auto candidate = phase + k * period;
+      if (((candidate - origin) % grid + grid) % grid == 0) {
+        if (!best || (up ? candidate < *best : candidate > *best)) {
+          best = candidate;
+        }
+        break;
+      }
+    }
+  }
+  return best;
 }
 // One axis pass. Returns the macros moved on this axis.
 std::vector<int64_t> snap_axis(std::vector<Edge_object>& objects, bool x_axis, const Edge_snap_limits& l,
@@ -38,9 +66,10 @@ std::vector<int64_t> snap_axis(std::vector<Edge_object>& objects, bool x_axis, c
     a       = lo;
   };
   std::vector<int64_t> moved;
-  if (max_gap <= 0) {
+  if (max_gap <= 0 && !l.slivers) {
     return moved;
   }
+  const int axis = x_axis ? 0 : 1;
   const auto mid = core_lo + (core_hi - core_lo) / 2;
   // Low side: macros whose center is below the core middle slide toward core_lo.
   for (int side = 0; side < 2; ++side) {
@@ -63,6 +92,9 @@ std::vector<int64_t> snap_axis(std::vector<Edge_object>& objects, bool x_axis, c
       // The core edge (keeping the halo inside the core) anchors the chain.
       int64_t    limit = low ? core_lo + halo : core_hi - halo;
       bool       chain = true;
+      int64_t    anchor_clear = halo;  // the clearance the tightest anchor imposes (a sliver is narrower than it)
+      bool       anchor_macro = false;
+      unsigned   anchor_faces = 0;
       for (size_t j = 0; j < n; ++j) {
         if (j == i) {
           continue;
@@ -77,32 +109,44 @@ std::vector<int64_t> snap_axis(std::vector<Edge_object>& objects, bool x_axis, c
           const auto candidate = low ? o.hi + clear : o.lo - clear;
           const bool tighter   = low ? candidate > limit : candidate < limit;
           if (tighter) {
-            limit = candidate;
-            chain = anchored[j];
+            limit        = candidate;
+            chain        = anchored[j];
+            anchor_clear = clear;
+            anchor_macro = objects[j].macro;
+            anchor_faces = objects[j].pin_faces;
           } else if (candidate == limit && anchored[j]) {
             chain = true;
           }
         }
       }
       const auto gap = low ? s.lo - limit : limit - s.hi;
-      if (!chain || gap < 0) {
-        continue;  // not anchored to the edge, or already overlapping its anchor
+      if (gap < 0) {
+        continue;  // already overlapping its anchor
       }
       if (gap == 0) {
-        anchored[i] = 1;
+        anchored[i] = chain;
         continue;
       }
-      if (gap > max_gap || !objects[i].movable) {
+      // the face of this macro toward the anchor, and the anchor's face toward it
+      const unsigned own_face   = x_axis ? (low ? 1u : 2u) : (low ? 4u : 8u);
+      const unsigned other_face = x_axis ? (low ? 2u : 1u) : (low ? 8u : 4u);
+      const bool     pinned     = anchor_macro && (objects[i].pin_faces & own_face) && (anchor_faces & other_face);
+      const bool     edge_move  = chain && gap <= max_gap;
+      const bool     sliver     = l.slivers && gap < anchor_clear && !pinned;
+      if ((!edge_move && !sliver) || !objects[i].movable) {
         continue;
       }
-      // Stay on the origin grid without crossing the anchor's clearance.
-      const auto target = low ? round_up(limit, core_lo, l.grid) : round_down(limit - (s.hi - s.lo), core_lo, l.grid);
-      const auto delta  = low ? s.lo - target : target - s.lo;
+      // Stay on the origin grid and the track lattice without crossing the anchor's clearance.
+      const auto target = admissible(objects[i], axis, low ? limit : limit - (s.hi - s.lo), low, core_lo, l.grid);
+      if (!target) {
+        continue;
+      }
+      const auto delta = low ? s.lo - *target : *target - s.lo;
       if (delta <= 0) {
         continue;
       }
-      set_lo(objects[i], target);
-      anchored[i]      = 1;
+      set_lo(objects[i], *target);
+      anchored[i]      = chain;
       report.distance += delta;
       ++report.moves;
       moved.push_back(static_cast<int64_t>(i));

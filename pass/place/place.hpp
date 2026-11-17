@@ -443,6 +443,7 @@ struct Options {
   // disables it (the default); a negative axis is `auto`: one tenth of the core extent on that axis (OpenROAD mpl's
   // notch threshold).
   std::optional<std::pair<double, double>> macro_edge_snap;
+  bool macro_slivers = true;  // close macro slivers narrower than their clearance (macro_edge.hpp Edge_snap_limits::slivers)
   // macro.dead_space: unset (off, the default) changes nothing. Set: QoR
   // reports the dead-space metric of the final macro frame (`macro_dead_space`), and with `collapse` the native macro
   // flow runs the collapse pass after the edge snap and before routing-track alignment. See macro_dead_space.hpp and
@@ -475,6 +476,13 @@ struct Options {
   std::string                route_model = "rsmt";
   Stage_route                fp_route, macro_route, final_route;
   int                        route_degree = 40, route_accuracy = 3;
+  // standard-cell pins per um^2 the routability estimate allows per bin (track_capacity.hpp lef_pin_capacity_um2);
+  // -1 auto (from the LEF pitches), 0 leaves standard-cell pins out
+  double                     route_pin_capacity = -1;
+  // FastRoute layer adjustment the routability estimate shares with OpenROAD: RUDY capacity is (1 - this) of the LEF
+  // tracks, as `set_global_routing_layer_adjustment` reduces FastRoute's (ORFS asap7: 0.25)
+  double                     route_layer_adjustment = .25;
+  bool                       tile_spread        = true;  // share routing-tile whitespace after cell legalization (tile_spread.hpp)
   bool                       routability_charge_compensation = true;
   double                     routability_macro_weight = 1, routability_macro_range = 2;  // direct channel pressure; range in bins
   double                     macro_overlap_weight = 50, macro_jitter = .01;

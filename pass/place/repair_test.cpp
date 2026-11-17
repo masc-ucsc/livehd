@@ -304,7 +304,8 @@ TEST_F(Buffer_repair, SynthesisBufferCleanupProtectsControlsAcrossHierarchy) {
   EXPECT_EQ(protected_copy.protected_cells, 2U);
 }
 TEST_F(Buffer_repair, FinalLegalizationReusesTimingOnlyForIdenticalPhysicalState) {
-  options.density = .5;
+  options.density     = .5;
+  options.tile_spread = false;  // the spread re-runs on the final pass; this test needs an identical physical state
   graph->get_output_pin("y").connect_driver(gate("sky130_fd_sc_hd__inv_1", "sink", graph->get_input_pin("a")));
   auto           initial  = place(*graph, flat, options);
   ASSERT_TRUE(initial.gp_density_weight);
