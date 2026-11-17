@@ -2422,6 +2422,11 @@ Floorplan_resize repair_gp_buffers(Result& state, const Options& options, const 
 static Options zero_gp_options(const Options& requested, const Result& initial) {
   auto options            = final_cell_options(requested);
   options.gp_resize       = false;
+  // No GP is run here. Its requested target may equal/exceed the terminal
+  // legalizer's hard bin cap (e.g. ORFS PLACE_DENSITY=.8). Give this internal
+  // terminal solve a target strictly inside that cap without relaxing the cap
+  // or changing the caller's GP options.
+  options.density = std::min(options.density, std::nextafter(options.terminal_legalize_options.max_density, 0.0));
   options.completed_stage = Placement_stage::final;
   options.cell_stage      = true;
   options.fp_place = options.final_cells = options.timing_seed = options.retain_placement = options.fp_auto = false;

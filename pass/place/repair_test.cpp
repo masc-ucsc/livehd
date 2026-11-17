@@ -332,6 +332,19 @@ TEST_F(Buffer_repair, FinalLegalizationReusesTimingOnlyForIdenticalPhysicalState
   report.Parse(retimed.report.c_str());
   EXPECT_FALSE(report["reused_timing"].GetBool());
 }
+TEST_F(Buffer_repair, FinalLegalizationAcceptsGpTargetAtTheTerminalCap) {
+  graph->get_output_pin("y").connect_driver(gate("sky130_fd_sc_hd__inv_1", "sink", graph->get_input_pin("a")));
+  options.density = options.terminal_legalize_options.max_density;
+  const auto initial = place(*graph, flat, options);
+  const auto result = finalize_placement(initial, options, [](const Result&) { return Timing_feedback{}; });
+  EXPECT_EQ(options.density, options.terminal_legalize_options.max_density);
+  EXPECT_EQ(result.placed.floorplan.die.xl, initial.floorplan.die.xl);
+  EXPECT_EQ(result.placed.floorplan.die.yl, initial.floorplan.die.yl);
+  EXPECT_EQ(result.placed.floorplan.die.xh, initial.floorplan.die.xh);
+  EXPECT_EQ(result.placed.floorplan.die.yh, initial.floorplan.die.yh);
+  EXPECT_NO_THROW(check_placed_legality(result.placed, options));
+}
+
 TEST_F(Buffer_repair, FinalLegalizationRestoresThePlacersOwnPins) {
   // The macro-to-cell handoff freezes pins for its solve; without an imported floorplan they stay the placer's
   // own, so the final handoff may still shape them on the IO layers. Restoring the freeze left asap7 pins on the
