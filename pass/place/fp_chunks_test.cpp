@@ -1,8 +1,12 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "fp_chunks.hpp"
 
+#include <unistd.h>
+
 #include <cmath>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <limits>
 
 #include "chunk_geometry.hpp"
@@ -279,6 +283,149 @@ TEST(FpChunks, ReusesDetailedCoreAndMeasuresCrossingCellArea) {
     EXPECT_DOUBLE_EQ(c["cell_area_dbu2"].GetDouble(), 1);
   }
   EXPECT_DOUBLE_EQ(result["colors"][0]["outside_home_dbu2"].GetDouble(), 1);
+}
+
+namespace {
+// Two chunks of different modules (so nothing is shared inside one run), two cells and one net each.
+struct Seed_fixture {
+  Chunk_model                     m;
+  Chunk_plan                      plan;
+  DreamPlace::native::Design      d;
+  std::vector<int>                owners{0, 0, 1, 1};
+  std::vector<std::string>        names{"inv", "buf", "inv", "buf"};
+  Seed_fixture() {
+    for (std::string core : {"a", "b"}) {
+      for (int i = 0; i < 2; ++i) {
+        m.cell(core + ".x", core, "cpu_" + core, false, 2, 1);
+      }
+    }
+    plan                 = m.plan({0, 0, 80, 20}, 1, 1, 30000, .5, nullptr, "top");
+    d.layout             = {0, 0, 80, 20, 1, 1};
+    d.num_movable        = 4;
+    d.node_size_x        = {2, 2, 2, 2};
+    d.node_size_y        = {1, 1, 1, 1};
+    d.pin2node           = {0, 1, 2, 3};
+    d.flat_net2pin       = {0, 1, 2, 3};
+    d.flat_net2pin_start = {0, 2, 4};
+    d.pin_offset_x = d.pin_offset_y = {0, 0, 0, 0};
+    start();
+  }
+  // Every cell where the plan's start would put it: the chunk's lower-left plus a small offset.
+  void start() {
+    const auto& a = plan.chunks[plan.home[0]].box;
+    const auto& b = plan.chunks[plan.home[1]].box;
+    d.node_x      = {a[0] + 1, a[0] + 4, b[0] + 1, b[0] + 4};
+    d.node_y      = {1, 1, 1, 1};
+    d.build_maps();
+  }
+};
+}  // namespace
+
+TEST(FpChunks, SeedStorePersistsLocalPlacementsAndReplacesAMovedChunk) {
+  const auto dir = std::filesystem::temp_directory_path() / ("chunk_seeds_" + std::to_string(::getpid()));
+  std::filesystem::remove_all(dir);
+  Seed_fixture f;
+  std::vector<double> first_x, first_y;
+  {  // the first run places both chunks and writes the store
+    Chunk_seed_store store(dir.string(), Chunk_seed_store::Mode::translate);
+    auto             stats = refine_chunk_seeds(f.d, f.m, f.plan, f.owners, f.names, 4, 1, true, {}, std::nullopt, &store);
+    EXPECT_EQ(stats.solved, 2);
+    EXPECT_EQ(stats.reused, 0);
+    EXPECT_EQ(stats.persisted, 0);
+    EXPECT_EQ(store.size(), 2u);
+    EXPECT_FALSE(store.dirty());  // saved at the end of the run
+    first_x = f.d.node_x;
+    first_y = f.d.node_y;
+  }
+  EXPECT_TRUE(std::filesystem::exists(dir / "chunk_seeds.bin"));
+  {  // a new process finds them: nothing is placed, the cells come back where they were
+    Seed_fixture g;
+    Chunk_seed_store store(dir.string(), Chunk_seed_store::Mode::translate);
+    ASSERT_EQ(store.size(), 2u);
+    auto stats = refine_chunk_seeds(g.d, g.m, g.plan, g.owners, g.names, 4, 1, true, {}, std::nullopt, &store);
+    EXPECT_EQ(stats.solved, 0);
+    EXPECT_EQ(stats.refined, 0);
+    EXPECT_EQ(stats.reused, 2);
+    EXPECT_EQ(stats.persisted, 2);
+    for (size_t i = 0; i < first_x.size(); ++i) {
+      EXPECT_NEAR(g.d.node_x[i], first_x[i], 1e-9) << "cell " << i;
+      EXPECT_NEAR(g.d.node_y[i], first_y[i], 1e-9) << "cell " << i;
+    }
+  }
+  {  // a chunk that was only moved (same shape, same contents) is replaced, relative to its own box
+    Seed_fixture g;
+    const auto   before = g.plan.chunks[g.plan.home[0]].box;
+    for (auto& c : g.plan.chunks) {
+      if (c.id == g.plan.chunks[g.plan.home[0]].id) {
+        c.box[0] += 5;  // the box slides right inside the 80 x 20 core; width and height are unchanged
+        c.box[2] += 5;
+      }
+    }
+    g.start();
+    Chunk_seed_store store(dir.string(), Chunk_seed_store::Mode::translate);
+    auto             stats = refine_chunk_seeds(g.d, g.m, g.plan, g.owners, g.names, 4, 1, true, {}, std::nullopt, &store);
+    EXPECT_EQ(stats.solved, 0);
+    EXPECT_EQ(stats.reused, 2);
+    const auto& moved = g.plan.chunks[g.plan.home[0]].box;
+    for (int i : {0, 1}) {
+      EXPECT_NEAR(g.d.node_x[i] - moved[0], first_x[i] - before[0], 1e-9) << "cell " << i;
+      EXPECT_NEAR(g.d.node_y[i] - moved[1], first_y[i] - before[1], 1e-9) << "cell " << i;
+    }
+  }
+  {  // different contents are a different chunk: nothing is reused
+    Seed_fixture g;
+    g.names = {"inv", "and", "inv", "buf"};
+    Chunk_seed_store store(dir.string(), Chunk_seed_store::Mode::translate);
+    auto             stats = refine_chunk_seeds(g.d, g.m, g.plan, g.owners, g.names, 4, 1, true, {}, std::nullopt, &store);
+    EXPECT_EQ(stats.reused, 1);  // chunk b did not change
+    EXPECT_EQ(stats.solved, 1);  // chunk a is new
+  }
+  {  // off keeps the old behavior: no file is read
+    Seed_fixture g;
+    Chunk_seed_store off(dir.string(), Chunk_seed_store::Mode::off);
+    EXPECT_FALSE(off.enabled());
+    auto stats = refine_chunk_seeds(g.d, g.m, g.plan, g.owners, g.names, 4, 1, true, {}, std::nullopt, &off);
+    EXPECT_EQ(stats.solved, 2);
+    EXPECT_EQ(stats.persisted, 0);
+  }
+  std::filesystem::remove_all(dir);
+}
+
+TEST(FpChunks, SeedStoreIgnoresDamagedFilesAndRefusesUnknownModes) {
+  const auto dir = std::filesystem::temp_directory_path() / ("chunk_seeds_bad_" + std::to_string(::getpid()));
+  std::filesystem::remove_all(dir);
+  std::filesystem::create_directories(dir);
+  EXPECT_EQ(Chunk_seed_store::parse_mode("off"), Chunk_seed_store::Mode::off);
+  EXPECT_EQ(Chunk_seed_store::parse_mode(""), Chunk_seed_store::Mode::off);
+  EXPECT_EQ(Chunk_seed_store::parse_mode("exact"), Chunk_seed_store::Mode::exact);
+  EXPECT_EQ(Chunk_seed_store::parse_mode("translate"), Chunk_seed_store::Mode::translate);
+  EXPECT_THROW(Chunk_seed_store::parse_mode("always"), std::invalid_argument);
+  Chunk_seed_store good(dir.string(), Chunk_seed_store::Mode::exact);
+  good.put("p", "auto:1", 7, {1, 2, 10, 20, {{0.25, 0.5}}});
+  ASSERT_TRUE(good.save());
+  {
+    Chunk_seed_store again(dir.string(), Chunk_seed_store::Mode::exact);
+    ASSERT_EQ(again.size(), 1u);
+    const auto* e = again.find("p", "auto:1", 7);
+    ASSERT_NE(e, nullptr);
+    EXPECT_EQ(e->shape, 1u);
+    EXPECT_EQ(e->ports, 2u);
+    EXPECT_DOUBLE_EQ(e->xy[0][1], 0.5);
+    EXPECT_EQ(again.find("p", "auto:1", 8), nullptr);
+    EXPECT_EQ(again.find("q", "auto:1", 7), nullptr);
+  }
+  const auto file = dir / "chunk_seeds.bin";
+  std::string bytes;
+  {
+    std::ifstream in(file, std::ios::binary);
+    bytes.assign(std::istreambuf_iterator<char>(in), {});
+  }
+  for (const auto& broken : {bytes.substr(0, bytes.size() - 3), std::string("not a seed file"), std::string{}, "LHCSEED1" + std::string(4, '\xff')}) {
+    std::ofstream(file, std::ios::binary | std::ios::trunc) << broken;
+    Chunk_seed_store again(dir.string(), Chunk_seed_store::Mode::exact);
+    EXPECT_EQ(again.size(), 0u) << "a damaged file must be ignored whole";
+  }
+  std::filesystem::remove_all(dir);
 }
 
 TEST(FpChunks, SmallPeripheralWrappersShareAHomeWithoutLosingTheirColor) {

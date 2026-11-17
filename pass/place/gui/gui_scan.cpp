@@ -40,7 +40,7 @@ bool mirrors_y(const std::string& s) { return s == "FS" || s == "S"; }
 bool finite_number(const rapidjson::Value& v) { return v.IsNumber() && std::isfinite(v.GetDouble()); }
 }  // namespace
 
-std::string macro_scan(const Scene& scene, const Frame& frame, const rapidjson::Value& request, bool orientation_editable) {
+std::string macro_scan(const Scene& scene, const Frame& frame, const rapidjson::Value& request, bool orientation_editable, const Chunk_frame* chunks) {
   const auto string_of = [&](const char* key) { return request.HasMember(key) && request[key].IsString() ? std::string(request[key].GetString(), request[key].GetStringLength()) : std::string{}; };
   auto       name      = string_of("node");
   if (name.empty()) {
@@ -54,6 +54,27 @@ std::string macro_scan(const Scene& scene, const Frame& frame, const rapidjson::
   if (macro.kind != Kind::macro && macro.kind != Kind::fixed) {
     return error(macro.name + " is not a macro");
   }
+
+  // The frame of the positions: the die (DBU) or the macro's home chunk, relative to its lower-left corner.
+  const auto frame_name = string_of("frame").empty() ? std::string("die") : string_of("frame");
+  if (frame_name != "die" && frame_name != "chunk") {
+    return error("frame must be die or chunk");
+  }
+  const Chunk_frame::Chunk* home = nullptr;
+  if (frame_name == "chunk" || request.HasMember("chunk")) {
+    if (!chunks) {
+      return error("this scene has no chunk plan: the design is one home, so use die coordinates");
+    }
+    const auto named = string_of("chunk");
+    home             = named.empty() ? chunks->of(macro.name) : chunks->find(named);
+    if (!home) {
+      return error(named.empty() ? macro.name + " belongs to no chunk of the plan: name one with chunk" : "unknown chunk " + named + " (export chunks lists the ids)");
+    }
+  } else if (chunks) {
+    home = chunks->of(macro.name);  // reported, not used
+  }
+  const bool   in_chunk = frame_name == "chunk";
+  const double ox = in_chunk ? home->box[0] : 0, oy = in_chunk ? home->box[1] : 0;  // origin of the positions given and of the grid
 
   // The candidate orientations: the current one unless asked; the mirrored ones a macro may take.
   std::vector<std::string> orients;
@@ -104,9 +125,9 @@ std::string macro_scan(const Scene& scene, const Frame& frame, const rapidjson::
     }
     for (const auto& p : request["positions"].GetArray()) {
       if (p.IsArray() && p.Size() == 2 && finite_number(p[0]) && finite_number(p[1])) {
-        positions.push_back({p[0].GetDouble(), p[1].GetDouble()});
+        positions.push_back({p[0].GetDouble() + ox, p[1].GetDouble() + oy});
       } else if (p.IsObject() && p.HasMember("x") && p.HasMember("y") && finite_number(p["x"]) && finite_number(p["y"])) {
-        positions.push_back({p["x"].GetDouble(), p["y"].GetDouble()});
+        positions.push_back({p["x"].GetDouble() + ox, p["y"].GetDouble() + oy});
       } else {
         return error("positions must be entries of [x, y] or {x, y} in DBU");
       }
@@ -122,14 +143,15 @@ std::string macro_scan(const Scene& scene, const Frame& frame, const rapidjson::
       nx = g["nx"].GetInt();
       ny = g["ny"].GetInt();
     }
-    const double xs = scene.die.xh - scene.die.xl - macro.w, ys = scene.die.yh - scene.die.yl - macro.h;
+    const Box    area = in_chunk ? Box{home->box[0], home->box[1], home->box[2], home->box[3]} : scene.die;
+    const double xs = area.xh - area.xl - macro.w, ys = area.yh - area.yl - macro.h;
     if (xs < 0 || ys < 0) {
-      return error(macro.name + " does not fit in the core");
+      return error(macro.name + (in_chunk ? " does not fit in its chunk " + home->id : " does not fit in the core"));
     }
     grid_step = std::min(nx > 1 ? xs / (nx - 1) : xs, ny > 1 ? ys / (ny - 1) : ys);
     for (int j = 0; j < ny; ++j) {
       for (int i = 0; i < nx; ++i) {
-        positions.push_back({std::round(scene.die.xl + (nx == 1 ? xs / 2 : xs * i / (nx - 1))), std::round(scene.die.yl + (ny == 1 ? ys / 2 : ys * j / (ny - 1)))});
+        positions.push_back({std::round(area.xl + (nx == 1 ? xs / 2 : xs * i / (nx - 1))), std::round(area.yl + (ny == 1 ? ys / 2 : ys * j / (ny - 1)))});
       }
     }
   }
@@ -193,14 +215,45 @@ std::string macro_scan(const Scene& scene, const Frame& frame, const rapidjson::
 
   // Legality at DEF precision is the checker the page uses (outline, halo, channel, exclusions, other macros), plus the
   // routing-track access the flow demands of a macro held where it is put. The poses offered are on the tracks.
-  Frame scratch = frame;
+  // The checker looks only at macros and exclusions, so it runs on a scene reduced to them: over every node of a
+  // four-million-cell design one check took 66 ms, a 16 x 16 grid 17 s.
+  Scene reduced;
+  Frame scratch;
+  int   self = -1;
+  {
+    reduced.die = scene.die;
+    reduced.halo_x = scene.halo_x;
+    reduced.halo_y = scene.halo_y;
+    reduced.channel_x = scene.channel_x;
+    reduced.channel_y = scene.channel_y;
+    reduced.exclusions = scene.exclusions;
+    for (size_t i = 0; i < scene.nodes.size() && i < frame.x.size() && i < frame.y.size(); ++i) {
+      const auto& n = scene.nodes[i];
+      if (n.kind != Kind::macro && n.kind != Kind::fixed && !n.exclusion) {
+        continue;
+      }
+      if (int(i) == index) {
+        self = int(reduced.nodes.size());
+      }
+      Node copy;  // what macro_geometry reads: not the pins, whose logic lists are long
+      copy.name      = n.name;
+      copy.kind      = n.kind;
+      copy.movable   = n.movable;
+      copy.exclusion = n.exclusion;
+      copy.w         = n.w;
+      copy.h         = n.h;
+      reduced.nodes.push_back(std::move(copy));
+      scratch.x.push_back(frame.x[i]);
+      scratch.y.push_back(frame.y[i]);
+    }
+  }
   const auto legal = [&](double x, double y, const std::string& orient, std::string* why = nullptr) {
-    scratch.x[size_t(index)] = x;
-    scratch.y[size_t(index)] = y;
+    scratch.x[size_t(self)] = x;
+    scratch.y[size_t(self)] = y;
     bool                  ok = true;
     std::set<std::string> causes;
-    for (const auto& issue : macro_geometry(scene, scratch)) {
-      if (issue.node == index || issue.other == index) {
+    for (const auto& issue : macro_geometry(reduced, scratch)) {
+      if (issue.node == self || issue.other == self) {
         ok = false;
         causes.insert(issue.cause);
       }
@@ -208,6 +261,10 @@ std::string macro_scan(const Scene& scene, const Frame& frame, const rapidjson::
     if (!track_miss(scene, size_t(index), orient, x, y).empty()) {
       ok = false;
       causes.insert("misses_tracks");
+    }
+    if (in_chunk && (x < home->box[0] || y < home->box[1] || x + macro.w > home->box[2] || y + macro.h > home->box[3])) {
+      ok = false;  // the macro belongs to this chunk: its body stays inside it
+      causes.insert("outside_chunk");
     }
     if (why) {
       for (const auto& c : causes) {
@@ -323,12 +380,31 @@ std::string macro_scan(const Scene& scene, const Frame& frame, const rapidjson::
   w.Uint64(nets.size());
   w.Key("peers");
   w.Uint64(peers);
+  text("frame", frame_name);
+  if (home) {
+    text("chunk", home->id);
+    w.Key("chunk_box_dbu");
+    w.StartArray();
+    for (double v : home->box) {
+      w.Double(v);
+    }
+    w.EndArray();
+  }
+  const auto chunk_pose = [&](double x, double y) {
+    if (home) {
+      w.Key("chunk_x");
+      w.Double(x - home->box[0]);
+      w.Key("chunk_y");
+      w.Double(y - home->box[1]);
+    }
+  };
   w.Key("current");
   w.StartObject();
   w.Key("x");
   w.Double(here_x);
   w.Key("y");
   w.Double(here_y);
+  chunk_pose(here_x, here_y);
   text("orientation", macro.orient);
   w.Key("hpwl_dbu");
   w.Double(here_wl);
@@ -361,6 +437,7 @@ std::string macro_scan(const Scene& scene, const Frame& frame, const rapidjson::
     w.Double(refined->x);
     w.Key("y");
     w.Double(refined->y);
+    chunk_pose(refined->x, refined->y);
     text("orientation", refined->orient);
     w.Key("hpwl_dbu");
     w.Double(refined->wl);
@@ -381,6 +458,7 @@ std::string macro_scan(const Scene& scene, const Frame& frame, const rapidjson::
     w.Double(c.x);
     w.Key("y");
     w.Double(c.y);
+    chunk_pose(c.x, c.y);
     text("orientation", c.orient);
     w.Key("hpwl_dbu");
     w.Double(c.wl);

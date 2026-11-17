@@ -1,8 +1,6 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "gui_render.hpp"
 
-#include <zlib.h>
-
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -90,21 +88,115 @@ void chunk(std::string& out, const char* type, const std::string& data) {
 }
 }  // namespace
 
+namespace {
+// A minimal zlib stream with no library behind it (two zlib implementations in one static link, LLVM's zlib-ng and a
+// separate zlib, collide at link time): one deflate block with the fixed Huffman code, literals and run matches at
+// distance 1. Fed PNG's Sub-filtered rows, flat parts of a floorplan picture are runs of zeros and shrink to a few percent.
+class Bit_writer {
+public:
+  void bits(std::uint32_t value, int count) {  // LSB first
+    for (int i = 0; i < count; ++i) {
+      acc_ |= ((value >> i) & 1U) << used_;
+      if (++used_ == 8) {
+        out_ += char(acc_);
+        acc_ = used_ = 0;
+      }
+    }
+  }
+  void code(std::uint32_t value, int count) {  // Huffman codes go out MSB first
+    for (int i = count - 1; i >= 0; --i) {
+      bits((value >> i) & 1U, 1);
+    }
+  }
+  std::string finish() {
+    if (used_) {
+      out_ += char(acc_);
+    }
+    return std::move(out_);
+  }
+
+private:
+  std::string   out_;
+  std::uint32_t acc_ = 0;
+  int           used_ = 0;
+};
+void fixed_symbol(Bit_writer& w, unsigned sym) {
+  if (sym < 144) {
+    w.code(0x30 + sym, 8);
+  } else if (sym < 256) {
+    w.code(0x190 + (sym - 144), 9);
+  } else if (sym < 280) {
+    w.code(sym - 256, 7);
+  } else {
+    w.code(0xC0 + (sym - 280), 8);
+  }
+}
+std::string zlib_fixed(const std::string& raw, size_t row_bytes) {
+  static constexpr std::array<unsigned, 30> dist_base{1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577};
+  static constexpr std::array<int, 30>      dist_extra{0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13};
+  static constexpr std::array<unsigned, 29> base{3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258};
+  static constexpr std::array<int, 29>      extra{0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0};
+  Bit_writer                                w;
+  w.bits(1, 1);  // the only block
+  w.bits(1, 2);  // fixed Huffman
+  for (size_t i = 0; i < raw.size();) {
+    // Two places to copy from: the byte before (a run) and the same place one row up (an unchanged stretch of picture).
+    size_t run = 0, same = 0;
+    if (i > 0) {
+      while (i + run < raw.size() && run < 258 && raw[i + run] == raw[i - 1]) {
+        ++run;
+      }
+    }
+    if (row_bytes <= 32768 && i >= row_bytes) {
+      while (i + same < raw.size() && same < 258 && raw[i + same] == raw[i + same - row_bytes]) {
+        ++same;
+      }
+    }
+    const size_t length = std::max(run, same);
+    if (length >= 3) {
+      const size_t distance = same > run ? row_bytes : 1;
+      size_t       k = base.size() - 1;
+      while (base[k] > length) {
+        --k;
+      }
+      fixed_symbol(w, unsigned(257 + k));
+      w.bits(unsigned(length - base[k]), extra[k]);
+      size_t d = dist_base.size() - 1;
+      while (dist_base[d] > distance) {
+        --d;
+      }
+      w.code(unsigned(d), 5);
+      w.bits(unsigned(distance - dist_base[d]), dist_extra[d]);
+      i += length;
+    } else {
+      fixed_symbol(w, static_cast<unsigned char>(raw[i]));
+      ++i;
+    }
+  }
+  fixed_symbol(w, 256);
+  std::string z = "\x78\x01" + w.finish();
+  std::uint32_t a = 1, b = 0;
+  for (const unsigned char c : raw) {
+    a = (a + c) % 65521;
+    b = (b + a) % 65521;
+  }
+  be32(z, (b << 16) | a);
+  return z;
+}
+}  // namespace
+
 std::string encode_png(int width, int height, const std::string& rgb) {
+  // PNG filter 1 (Sub): each byte minus the same channel of the pixel to its left. A flat area becomes zeros.
   std::string raw;
   raw.reserve(size_t(height) * (size_t(width) * 3 + 1));
   for (int y = 0; y < height; ++y) {
-    raw += char(0);
-    raw.append(rgb, size_t(y) * size_t(width) * 3, size_t(width) * 3);
+    raw += char(1);
+    const auto* row = reinterpret_cast<const unsigned char*>(rgb.data()) + size_t(y) * size_t(width) * 3;
+    for (size_t i = 0; i < size_t(width) * 3; ++i) {
+      raw += char(static_cast<unsigned char>(row[i] - (i >= 3 ? row[i - 3] : 0)));
+    }
   }
-  // zlib at a fast level: the screenshot a local agent pulls over the socket shrinks from width*height*3 bytes to
-  // a few percent (flat background, few colours), which also keeps an image read into a conversation cheap.
-  uLongf      bound = compressBound(uLong(raw.size()));
-  std::string z(bound, '\0');
-  if (compress2(reinterpret_cast<Bytef*>(z.data()), &bound, reinterpret_cast<const Bytef*>(raw.data()), uLong(raw.size()), 3) != Z_OK) {
-    return {};
-  }
-  z.resize(bound);
+  const std::string z = zlib_fixed(raw, size_t(width) * 3 + 1);
   std::string out = "\x89PNG\r\n\x1a\n";
   std::string ihdr;
   be32(ihdr, std::uint32_t(width));

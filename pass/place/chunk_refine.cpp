@@ -4,7 +4,11 @@
 #include <algorithm>
 #include <bit>
 #include <cmath>
+#include <cstdio>
+#include <cstring>
+#include <filesystem>
 #include <map>
+#include <stdexcept>
 #include <tuple>
 
 namespace livehd::placement {
@@ -26,9 +30,148 @@ struct Local_net {
   std::optional<Point> port;
 };
 }  // namespace
+namespace {
+constexpr char     kSeedMagic[8]  = {'L', 'H', 'C', 'S', 'E', 'E', 'D', '1'};
+constexpr uint32_t kSeedMaxCount  = 1u << 24;  // a sanity bound for a damaged file, far above any plan
+template <class T>
+void put_raw(std::string& out, const T& v) {
+  out.append(reinterpret_cast<const char*>(&v), sizeof(T));
+}
+struct Reader {
+  const std::string& data;
+  size_t             at = 0;
+  template <class T>
+  bool get(T& v) {
+    if (at + sizeof(T) > data.size()) {
+      return false;
+    }
+    std::memcpy(&v, data.data() + at, sizeof(T));
+    at += sizeof(T);
+    return true;
+  }
+  bool text(std::string& out) {
+    uint32_t n = 0;
+    if (!get(n) || n > (1u << 20) || at + n > data.size()) {
+      return false;
+    }
+    out.assign(data.data() + at, n);
+    at += n;
+    return true;
+  }
+};
+}  // namespace
+
+Chunk_seed_store::Mode Chunk_seed_store::parse_mode(std::string_view text) {
+  if (text.empty() || text == "off" || text == "false") {
+    return Mode::off;
+  }
+  if (text == "exact") {
+    return Mode::exact;
+  }
+  if (text == "translate") {
+    return Mode::translate;
+  }
+  throw std::invalid_argument("synth.place.chunk.seed_cache must be off, exact or translate");
+}
+
+Chunk_seed_store::Chunk_seed_store(std::string dir, Mode mode) : dir_(std::move(dir)), mode_(mode) {
+  if (!enabled()) {
+    return;
+  }
+  std::FILE* f = std::fopen((std::filesystem::path(dir_) / "chunk_seeds.bin").c_str(), "rb");
+  if (!f) {
+    return;
+  }
+  std::string data;
+  char        buf[1 << 16];
+  for (size_t n; (n = std::fread(buf, 1, sizeof(buf), f)) > 0;) {
+    data.append(buf, n);
+  }
+  std::fclose(f);
+  Reader   in{data};
+  char     magic[8];
+  uint32_t count = 0;
+  if (!in.get(magic) || std::memcmp(magic, kSeedMagic, sizeof(magic)) != 0 || !in.get(count) || count > kSeedMaxCount) {
+    return;  // not ours, or from another version: start empty
+  }
+  std::map<Key, Entry> loaded;
+  for (uint32_t i = 0; i < count; ++i) {
+    std::string partition, implementation;
+    uint64_t    key = 0;
+    Entry       e;
+    uint32_t    n = 0;
+    if (!in.text(partition) || !in.text(implementation) || !in.get(key) || !in.get(e.shape) || !in.get(e.ports) || !in.get(e.w) || !in.get(e.h)
+        || !in.get(n) || n > (1u << 28) || in.at + size_t(n) * sizeof(double) * 2 > data.size()) {
+      return;  // truncated: ignore the whole file rather than half of it
+    }
+    e.xy.resize(n);
+    for (auto& p : e.xy) {
+      in.get(p[0]);
+      in.get(p[1]);
+    }
+    loaded.emplace(Key{std::move(partition), std::move(implementation), key}, std::move(e));
+  }
+  entries_ = std::move(loaded);
+}
+
+const Chunk_seed_store::Entry* Chunk_seed_store::find(std::string_view partition, std::string_view implementation, uint64_t key) const {
+  const auto found = entries_.find(Key{std::string(partition), std::string(implementation), key});
+  return found == entries_.end() ? nullptr : &found->second;
+}
+
+void Chunk_seed_store::put(std::string_view partition, std::string_view implementation, uint64_t key, Entry entry) {
+  entries_[Key{std::string(partition), std::string(implementation), key}] = std::move(entry);
+  dirty_                                                                  = true;
+}
+
+bool Chunk_seed_store::save() {
+  if (!enabled()) {
+    return false;
+  }
+  std::string out(kSeedMagic, sizeof(kSeedMagic));
+  put_raw(out, uint32_t(entries_.size()));
+  for (const auto& [key, e] : entries_) {
+    for (const auto* text : {&std::get<0>(key), &std::get<1>(key)}) {
+      put_raw(out, uint32_t(text->size()));
+      out += *text;
+    }
+    put_raw(out, std::get<2>(key));
+    put_raw(out, e.shape);
+    put_raw(out, e.ports);
+    put_raw(out, e.w);
+    put_raw(out, e.h);
+    put_raw(out, uint32_t(e.xy.size()));
+    for (const auto& p : e.xy) {
+      put_raw(out, p[0]);
+      put_raw(out, p[1]);
+    }
+  }
+  std::error_code ec;
+  std::filesystem::create_directories(dir_, ec);
+  const auto path = std::filesystem::path(dir_) / "chunk_seeds.bin";
+  const auto temp = std::filesystem::path(dir_) / "chunk_seeds.bin.tmp";
+  std::FILE* f    = std::fopen(temp.c_str(), "wb");
+  if (!f) {
+    return false;
+  }
+  const bool wrote = std::fwrite(out.data(), 1, out.size(), f) == out.size();
+  const bool closed = std::fclose(f) == 0;
+  if (!wrote || !closed) {
+    std::filesystem::remove(temp, ec);
+    return false;
+  }
+  std::filesystem::rename(temp, path, ec);
+  if (ec) {
+    return false;
+  }
+  dirty_ = false;
+  return true;
+}
+
 Chunk_refine_stats refine_chunk_seeds(dp::Design& d, const Chunk_model& model, const Chunk_plan& plan, std::span<const int> owners,
                                       std::span<const std::string> names, int iterations, int threads, bool detailed,
-                                      const std::function<void(size_t, Chunk_job&)>& export_job, std::optional<size_t> only) {
+                                      const std::function<void(size_t, Chunk_job&)>& export_job, std::optional<size_t> only,
+                                      Chunk_seed_store* store) {
   Chunk_refine_stats stats;
   if (!export_job && (plan.chunks.size() < 2 || iterations <= 0)) {
     return stats;
@@ -156,7 +299,8 @@ Chunk_refine_stats refine_chunk_seeds(dp::Design& d, const Chunk_model& model, c
     Chunk_job job;
     auto&     local = job.physical;
     local.layout    = {0, 0, w, h, d.layout.site_width, d.layout.row_height};
-    uint64_t key = 14695981039346656037ULL, context = number(number(number(key, w), h), c.density);
+    // `context` is the local problem (shape); `port_context` is where the boundary contacts of the cut nets are.
+    uint64_t key = 14695981039346656037ULL, context = number(number(number(key, w), h), c.density), port_context = 0;
     context  = number(context, c.shared_dbu2);
     auto add = [&](double x, double y, double sx, double sy, bool macro) {
       local.node_x.push_back(x);
@@ -193,6 +337,7 @@ Chunk_refine_stats refine_chunk_seeds(dp::Design& d, const Chunk_model& model, c
     // Stepped multi-height rows are handled by the final row-aware legalizer.
     if (multirow && !export_job) {
       ++stats.deferred;
+      stats.decisions.push_back({c.id, "deferred", false, false, false});
       continue;
     }
     for (const auto& strip : excluded[j]) {
@@ -243,7 +388,8 @@ Chunk_refine_stats refine_chunk_seeds(dp::Design& d, const Chunk_model& model, c
         double px = (*part.port)[0] - b[0], py = (*part.port)[1] - b[1];
         add(px, py, 0, 0, false);
         pin(i, 0, 0);
-        context += number(number(edge, px), py);
+        context += edge;  // that this net reaches the boundary is structure; where its contact sits is not
+        port_context += number(number(edge, px), py);
       }
       key += mix(edge, part.pins.size());
       local.net_weights.push_back(export_job && !d.net_weights.empty() ? d.net_weights[part.net] : 1);
@@ -269,16 +415,43 @@ Chunk_refine_stats refine_chunk_seeds(dp::Design& d, const Chunk_model& model, c
     }
     auto family = std::tuple{c.partition, c.implementation, key};
     auto cached = representatives.find(family);
+    // A repeated module finds its sibling's placement in this run; otherwise the persistent store may hold this very
+    // chunk's last placement, whatever the plan was when it was made.
+    const Chunk_seed_store::Entry* stored = nullptr;
+    if (cached == representatives.end() && store && store->enabled()) {
+      stored = store->find(c.partition, c.implementation, key);
+      if (stored && stored->xy.size() != size_t(local.num_movable)) {
+        stored = nullptr;
+      }
+    }
+    const bool have_seed = cached != representatives.end() || stored;
     if (cached != representatives.end()) {
       for (int i = 0; i < local.num_movable; ++i) {
         local.node_x[i] = std::clamp(cached->second.xy[i][0] * w, 0., std::max(0., w - local.node_size_x[i]));
         local.node_y[i] = std::clamp(cached->second.xy[i][1] * h, 0., std::max(0., h - local.node_size_y[i]));
       }
+    } else if (stored) {
+      for (int i = 0; i < local.num_movable; ++i) {
+        local.node_x[i] = std::clamp(stored->xy[i][0] * w, 0., std::max(0., w - local.node_size_x[i]));
+        local.node_y[i] = std::clamp(stored->xy[i][1] * h, 0., std::max(0., h - local.node_size_y[i]));
+      }
     }
-    if (cached == representatives.end() || cached->second.context != context) {
+    const uint64_t full_context = number(context, port_context);
+    Chunk_refine_decision decision{c.id, "", stored != nullptr, false, false};
+    if (cached != representatives.end()) {
+      decision.shape_same = decision.ports_same = cached->second.context == full_context;
+    } else if (stored) {
+      decision.shape_same = stored->shape == context;
+      decision.ports_same = stored->ports == port_context;
+    }
+    const bool     seed_fits
+        = cached != representatives.end()
+              ? cached->second.context == full_context
+              : stored && stored->shape == context && (stored->ports == port_context || store->mode() == Chunk_seed_store::Mode::translate);
+    if (!have_seed || !seed_fits) {
       local.build_maps();
       dp::Options opts;
-      opts.max_iterations = std::min(cached == representatives.end() ? 24 : 8, iterations);
+      opts.max_iterations = std::min(!have_seed ? 24 : 8, iterations);
       opts.min_iterations = std::min(opts.min_iterations, opts.max_iterations);
       opts.target_density = c.density;
       opts.num_threads    = threads;
@@ -289,6 +462,8 @@ Chunk_refine_stats refine_chunk_seeds(dp::Design& d, const Chunk_model& model, c
       try {
         if (!dp::place(local, opts).legal) {
           ++stats.deferred;
+          decision.action = "deferred";
+          stats.decisions.push_back(decision);
           continue;
         }
       } catch (const std::runtime_error& error) {
@@ -297,12 +472,15 @@ Chunk_refine_stats refine_chunk_seeds(dp::Design& d, const Chunk_model& model, c
           throw;
         }
         ++stats.deferred;
+        decision.action = "deferred";
+        stats.decisions.push_back(decision);
         continue;
       }
-      if (cached == representatives.end()) {
+      decision.action = have_seed ? "refined" : "solved";
+      if (!have_seed) {
         ++stats.solved;
         if (!model.objects[owners[ids.front()]].module.empty()) {
-          Seed seed{context, {}};
+          Seed seed{full_context, {}};
           for (int i = 0; i < local.num_movable; ++i) {
             seed.xy.push_back({local.node_x[i] / w, local.node_y[i] / h});
           }
@@ -310,14 +488,32 @@ Chunk_refine_stats refine_chunk_seeds(dp::Design& d, const Chunk_model& model, c
         }
       } else {
         ++stats.refined;
+        stats.persisted += stored != nullptr;
+      }
+      if (store && store->enabled()) {
+        Chunk_seed_store::Entry entry;
+        entry.shape = context;
+        entry.ports = port_context;
+        entry.w     = w;
+        entry.h     = h;
+        for (int i = 0; i < local.num_movable; ++i) {
+          entry.xy.push_back({local.node_x[i] / w, local.node_y[i] / h});
+        }
+        store->put(c.partition, c.implementation, key, std::move(entry));
       }
     } else {
       ++stats.reused;
+      stats.persisted += stored != nullptr;
+      decision.action = "reused";
     }
+    stats.decisions.push_back(decision);
     for (int i = 0; i < local.num_movable; ++i) {
       d.node_x[ids[i]] = local.node_x[i] + b[0];
       d.node_y[ids[i]] = local.node_y[i] + b[1];
     }
+  }
+  if (store && store->dirty()) {
+    store->save();
   }
   return stats;
 }

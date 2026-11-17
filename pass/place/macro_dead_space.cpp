@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <exception>
+#include <format>
 #include <limits>
 #include <map>
 #include <memory>
@@ -36,6 +37,13 @@ void check(const Dead_space_limits& l) {
   if (l.pitch <= 0 || l.core_xh <= l.core_xl || l.core_yh <= l.core_yl || l.channel_x < 0 || l.channel_y < 0 || l.narrow_x < 0
       || l.narrow_y < 0 || l.min_area < 0 || !(l.pocket_fraction >= 0 && l.pocket_fraction <= 1)) {
     throw std::invalid_argument("invalid macro dead-space limits");
+  }
+  // The raster is one byte per cell several times over: refuse a pitch that would ask for more memory than a machine
+  // has (a pitch of 1 DBU over a 3.6 mm core is 1.3e13 cells) instead of failing inside the allocation.
+  const auto cells = static_cast<double>(ceil_div(l.core_xh - l.core_xl, l.pitch)) * static_cast<double>(ceil_div(l.core_yh - l.core_yl, l.pitch));
+  if (cells > double(int64_t{1} << 27)) {
+    throw std::invalid_argument(std::format("macro dead-space raster too large: {:.3g} cells at pitch {} DBU; use a pitch of at least {} DBU", cells, l.pitch,
+                                            static_cast<int64_t>(std::sqrt(cells / double(int64_t{1} << 27)) * double(l.pitch)) + 1));
   }
 }
 

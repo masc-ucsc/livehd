@@ -295,7 +295,7 @@ std::string floorplan_findings(const Scene& scene, const Frame& frame) {
   };
   const auto body
       = [&](size_t i) { return Box{frame.x[i], frame.y[i], frame.x[i] + scene.nodes[i].w, frame.y[i] + scene.nodes[i].h}; };
-  const auto                   limits = Dead_space_limits{std::llround(scene.die.xl),
+  auto                         limits = Dead_space_limits{std::llround(scene.die.xl),
                                         std::llround(scene.die.yl),
                                         std::llround(scene.die.xh),
                                         std::llround(scene.die.yh),
@@ -492,6 +492,17 @@ std::string floorplan_findings(const Scene& scene, const Frame& frame) {
     w.EndObject();
   }
   w.EndArray();
+  // The scene's pitch is the flow's; one far finer than the core (an unset pitch is 1 DBU) would ask for a raster of
+  // billions of cells. Coarsen to at most about four million, and report the pitch used.
+  {
+    const auto cells = [&](int64_t p) {
+      return double((limits.core_xh - limits.core_xl + p - 1) / p) * double((limits.core_yh - limits.core_yl + p - 1) / p);
+    };
+    limits.pitch = std::max<int64_t>(1, limits.pitch);
+    while (limits.pitch < (int64_t{1} << 40) && cells(limits.pitch) > 4.0e6) {
+      limits.pitch *= 2;
+    }
+  }
   auto report = measure_dead_space(blocked, limits, false);
   w.Key("dead_space");
   w.StartObject();

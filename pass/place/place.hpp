@@ -229,6 +229,8 @@ struct Options {
   bool chunk_require_fit=false;
   std::string                       chunk_manifest, chunk_only;  // nonempty manifest: export the accepted home jobs before whole-chip placement
   bool                              chunk_seed_detail = true;
+  // synth.place.chunk.seed_cache: off, exact or translate (see Chunk_seed_store); the directory is set by the driver.
+  std::string                       chunk_seed_cache = "off", chunk_seed_dir;
   uint64_t                          chunk_memory_bytes = uint64_t{8192} << 20;  // lhd.ram_budget_mb
   bool                              fp_place = false, fp_snap_enabled = true;
   // synth.place.fp=auto (the default): when fp_place is false, place() sets it

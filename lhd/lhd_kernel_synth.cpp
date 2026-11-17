@@ -68,6 +68,7 @@
 #include "compile_salt.hpp"
 #include "core/job_manager.hpp"
 #include "pass/place/chunk_memory.hpp"
+#include "pass/place/chunk_refine.hpp"
 #include "pass/place/chunk_jobs.hpp"
 #include "core/hash_util.hpp"
 #include "debug_env.hpp"
@@ -1157,6 +1158,15 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.chunk_require_fit
       = truthy(synth_set(opts, "place.chunk.require_fit", chunk_run != "flow" && chunk_bytes > 0 ? "true" : "false"));
   out.chunk_seed_detail  = truthy(synth_set(opts, "place.chunk.seed_detail", "true"));
+  out.chunk_seed_cache   = synth_set(opts, "place.chunk.seed_cache", "off");
+  try {
+    (void)livehd::placement::Chunk_seed_store::parse_mode(out.chunk_seed_cache);
+  } catch (const std::invalid_argument& e) {
+    throw Lhd_error{"usage", e.what(), "use off, exact or translate"};
+  }
+  if (out.chunk_seed_cache != "off" && !opts.workdir.empty()) {
+    out.chunk_seed_dir = opts.workdir + "/chunk_seed_cache";  // beside place_cache, which a GUI restart removes: this survives it
+  }
   out.chunk_memory_bytes = static_cast<uint64_t>(chunk_bytes);
   // Explicit centroid experiment settings still select the experimental solver.
   const bool centroid_options

@@ -4921,6 +4921,16 @@ bool plan_color_chunks(View& v, const Options& options, const std::vector<Hint_s
     scene->frame_die  = scene->die;
     scene->site_width = l.site_width;
     scene->row_height = l.row_height;
+    {
+      // The dead-space raster of `geometry` needs a pitch (a whole number of rows, at most 512 cells per axis, as
+      // dead_space_limits gives the other scenes): this builder left it at the scene default of 1 DBU, and a 3.6 mm core
+      // is then 1.3e13 raster cells.
+      const double row    = std::max(1.0, std::round(l.row_height));
+      const double extent = std::max(l.xh - l.xl, l.yh - l.yl);
+      scene->dead_pitch   = row * std::max(1.0, std::ceil(extent / (row * 512)));
+      scene->dead_narrow_x = (l.xh - l.xl) / 10;
+      scene->dead_narrow_y = (l.yh - l.yl) / 10;
+    }
     scene->chunk_plan = display(record);
     std::vector<double> x, y;
     for (size_t i = 0; i < model.objects.size(); ++i) {
@@ -5048,19 +5058,33 @@ bool plan_color_chunks(View& v, const Options& options, const std::vector<Hint_s
         local_names[i] = name;
       }
     }
-    const auto detail = refine_chunk_seeds(d, model, plan, owner, local_names, options.iterations, options.threads, options.chunk_seed_detail);
+    Chunk_seed_store seeds(options.chunk_seed_dir, Chunk_seed_store::parse_mode(options.chunk_seed_cache));
+    const auto       detail = refine_chunk_seeds(d, model, plan, owner, local_names, options.iterations, options.threads, options.chunk_seed_detail, {},
+                                                 std::nullopt, seeds.enabled() ? &seeds : nullptr);
     for (int i = 0; i < d.num_movable && static_cast<size_t>(i) < owner.size(); ++i) {
       v.cells[i].place.x = std::llround(d.node_x[i]);
       v.cells[i].place.y = std::llround(d.node_y[i]);
     }
     if (!options.output_dir.empty()) {
       std::ofstream out(options.output_dir + "/chunk_refinement.json");
-      if (!(out << std::format(R"({{"solved":{},"reused":{},"refined":{},"deferred":{},"detailed":{}}})",
+      std::string per_chunk;
+      for (const auto& x : detail.decisions) {
+        std::string id;
+        for (const char ch : x.id) {
+          id += (ch == '"' || ch == '\\') ? std::string{'\\', ch} : std::string{ch};
+        }
+        per_chunk += std::format(R"({}{{"id":"{}","action":"{}","stored":{},"shape_same":{},"ports_same":{}}})", per_chunk.empty() ? "" : ",", id, x.action,
+                                 x.stored, x.shape_same, x.ports_same);
+      }
+      if (!(out << std::format(R"({{"solved":{},"reused":{},"refined":{},"deferred":{},"detailed":{},"persisted":{},"seed_cache":"{}","chunks":[{}]}})",
                                detail.solved,
                                detail.reused,
                                detail.refined,
                                detail.deferred,
-                               options.chunk_seed_detail)
+                               options.chunk_seed_detail,
+                               detail.persisted,
+                               seeds.enabled() ? options.chunk_seed_cache : "off",
+                               per_chunk)
                 << '\n')) {
         throw std::runtime_error("cannot write chunk refinement report");
       }
@@ -8289,6 +8313,9 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
   }
   if (options.fp_chunks && !options.fp_place) {
     env += std::format(":chunks3:{}:{}:{}", options.chunk_memory_bytes, options.explicit_chunk_gate, options.chunk_seed_detail);
+    if (options.chunk_seed_cache != "off") {
+      env += ":seedcache:" + options.chunk_seed_cache;  // the seeds change with it; the default keeps the old identity
+    }
     if (options.metadata) {
       for (const char* cls : {chunk_guidance_class, chunk_plan_class}) {
         for (const auto* record : options.metadata->select(cls, hint_design)) {
@@ -9985,11 +10012,11 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       // region-local placement and routing; a crowded edge narrows it
       auto pin_options = options.boundarypins;
       if (pin_options.max_displacement_um == -1) {
-        const auto site = v.fp.rows.empty() ? tech.sites.end() : tech.sites.find(v.fp.rows.front().site);
-        if (site == tech.sites.end() || !(site->second.height > 0)) {
+        const auto row_site = v.fp.rows.empty() ? tech.sites.end() : tech.sites.find(v.fp.rows.front().site);
+        if (row_site == tech.sites.end() || !(row_site->second.height > 0)) {
           throw std::invalid_argument("boundarypins.max_displacement_um=auto requires a positive placement-row height");
         }
-        pin_options.max_displacement_um = kBoundaryDisplacementRows * site->second.height;
+        pin_options.max_displacement_um = kBoundaryDisplacementRows * row_site->second.height;
       }
       if (pin_options.pitch_um <= 0) {
         double flop = 0;

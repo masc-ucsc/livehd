@@ -1227,15 +1227,132 @@ TEST(GuiSession, RestartRefusesFlagsAndCheckpointsThatWouldKillOrEraseTheSession
   EXPECT_EQ(calls, 1);
 }
 
-TEST(GuiRender, PngIsCompressedAndStillAValidPng) {
+namespace {
+// Inflates the one fixed-Huffman block encode_png writes, then undoes PNG's Sub filter: the pixels it was given.
+std::string decode_fixed_png(const std::string& png, int width, int height) {
+  size_t at = 8;
+  std::string idat;
+  while (at + 12 <= png.size()) {
+    std::uint32_t n = 0;
+    for (int i = 0; i < 4; ++i) {
+      n = (n << 8) | static_cast<unsigned char>(png[at + size_t(i)]);
+    }
+    if (png.compare(at + 4, 4, "IDAT") == 0) {
+      idat.append(png, at + 8, n);
+    }
+    at += 12 + n;
+  }
+  size_t pos = 16;  // two zlib header bytes, in bits
+  const auto bit = [&] {
+    const size_t byte = pos / 8;
+    const int    value = byte < idat.size() ? (static_cast<unsigned char>(idat[byte]) >> (pos % 8)) & 1 : 0;
+    ++pos;
+    return value;
+  };
+  const auto bits = [&](int count) {
+    unsigned v = 0;
+    for (int i = 0; i < count; ++i) {
+      v |= unsigned(bit()) << i;
+    }
+    return v;
+  };
+  const auto code = [&](int count) {
+    unsigned v = 0;
+    for (int i = 0; i < count; ++i) {
+      v = (v << 1) | unsigned(bit());
+    }
+    return v;
+  };
+  static constexpr unsigned base[29] = {3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258};
+  static constexpr int      extra[29] = {0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0};
+  EXPECT_EQ(bits(1), 1u);  // final block
+  EXPECT_EQ(bits(2), 1u);  // fixed Huffman
+  std::string raw;
+  for (;;) {
+    unsigned sym = code(7);
+    if (sym <= 23) {
+      sym += 256;
+    } else {
+      sym = (sym << 1) | unsigned(bit());
+      if (sym >= 0x30 && sym <= 0xBF) {
+        sym -= 0x30;
+      } else if (sym >= 0xC0 && sym <= 0xC7) {
+        sym = sym - 0xC0 + 280;
+      } else {
+        sym = ((sym << 1) | unsigned(bit())) - 0x190 + 144;
+      }
+    }
+    if (sym == 256) {
+      break;
+    }
+    if (sym < 256) {
+      raw += char(sym);
+      continue;
+    }
+    static constexpr unsigned dist_base[30] = {1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577};
+    static constexpr int      dist_extra[30] = {0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13};
+    const auto k   = sym - 257;
+    const auto len = base[k] + bits(extra[k]);
+    const auto dc  = code(5);
+    EXPECT_LT(dc, 30u);
+    if (dc >= 30) {
+      break;
+    }
+    const auto distance = dist_base[dc] + bits(dist_extra[dc]);
+    EXPECT_LE(distance, raw.size());
+    if (distance > raw.size()) {
+      break;
+    }
+    for (unsigned i = 0; i < len; ++i) {
+      raw += raw[raw.size() - distance];
+    }
+  }
+  std::string rgb;
+  const size_t stride = size_t(width) * 3;
+  EXPECT_EQ(raw.size(), size_t(height) * (stride + 1));
+  for (int y = 0; y < height; ++y) {
+    EXPECT_EQ(raw[size_t(y) * (stride + 1)], 1);
+    for (size_t i = 0; i < stride; ++i) {
+      const auto left = i >= 3 ? static_cast<unsigned char>(rgb[size_t(y) * stride + i - 3]) : 0;
+      rgb += char(static_cast<unsigned char>(raw[size_t(y) * (stride + 1) + 1 + i]) + left);
+    }
+  }
+  return rgb;
+}
+}  // namespace
+
+TEST(GuiRender, PngIsCompressedAndRoundTripsExactly) {
   const int   w = 64, h = 48;
-  std::string rgb(size_t(w) * h * 3, '\x10');
-  const auto  png = encode_png(w, h, rgb);
+  std::string flat(size_t(w) * h * 3, '\x10');
+  const auto  png = encode_png(w, h, flat);
   ASSERT_GT(png.size(), 8u);
   EXPECT_EQ(png.substr(1, 3), "PNG");
-  EXPECT_LT(png.size(), rgb.size() / 10);  // a flat picture: the stored (uncompressed) form was larger than the pixels
-  EXPECT_NE(png.find("IDAT"), std::string::npos);
+  EXPECT_LT(png.size(), flat.size() / 10);  // a flat picture: the stored (uncompressed) form was larger than the pixels
   EXPECT_NE(png.find("IEND"), std::string::npos);
+  EXPECT_EQ(decode_fixed_png(png, w, h), flat);
+  // every byte value, long runs and noise: all of the literal and match codes
+  std::string mixed;
+  unsigned    seed = 12345;
+  for (size_t i = 0; i < size_t(w) * h * 3; ++i) {
+    seed = seed * 1664525u + 1013904223u;
+    mixed += (i / 300) % 3 == 0 ? char(seed >> 24) : char((i / 7) % 251);
+  }
+  const auto png2 = encode_png(w, h, mixed);
+  EXPECT_EQ(decode_fixed_png(png2, w, h), mixed);
+  EXPECT_EQ(decode_fixed_png(encode_png(1, 1, std::string("\xff\x80\x00", 3)), 1, 1), std::string("\xff\x80\x00", 3));
+  // a picture of rectangles: whole rows repeat, so a row-up match makes it far smaller than runs alone
+  const int   pw = 200, ph = 150;
+  std::string picture(size_t(pw) * ph * 3, '\x0a');
+  for (int y = 20; y < 120; ++y) {
+    for (int x = 30; x < 170; ++x) {
+      for (int c = 0; c < 3; ++c) {
+        picture[(size_t(y) * pw + x) * 3 + c] = char((x * 7 + c * 40) % 200 + 20 + (x / 10) % 3);  // varies along the row, not down it
+      }
+    }
+  }
+  const auto png3 = encode_png(pw, ph, picture);
+  EXPECT_EQ(decode_fixed_png(png3, pw, ph), picture);
+  EXPECT_LT(png3.size(), picture.size() / 20) << png3.size();
 }
 
 TEST(GuiAgent, MacroScanRanksLegalPositionsAndOrientationsByPinWirelength) {
@@ -1339,6 +1456,136 @@ TEST(GuiAgent, MacroPosesMustLandOnRoutingTracksOrAreNotPinnedAndNotOffered) {
   const auto ok_status = s.agent_call(std::format(R"({{"cmd":"command_status","sequence":{}}})", sequence));
   EXPECT_EQ(ok_status.find("misses_tracks"), std::string::npos) << ok_status;
   EXPECT_NE(ok_status.find("\"pinned\":true"), std::string::npos) << ok_status;
+}
+
+TEST(GuiAgent, GeometryOnAHugeCoreWithAnUnsetPitchAnswersInsteadOfAllocatingTheRaster) {
+  // 3.6 mm of 1 DBU raster cells is 1.3e13 bytes: this used to end the process with std::bad_alloc at the fp gate.
+  auto sc         = agent_scene();
+  sc->die         = {0, 0, 3.6e6, 3.6e6};
+  sc->dead_pitch  = 1;
+  Session      s(Config{.open_browser = false, .start_paused = false});
+  const double x[4] = {1, 2, 3, 4}, y[4] = {5, 6, 7, 8};
+  s.begin_phase(sc, x, y, 4);
+  const auto reply = s.agent_call(R"({"cmd":"geometry"})");
+  ASSERT_TRUE(ok(reply)) << reply.substr(0, 300);
+  rapidjson::Document d;
+  d.Parse(reply.c_str());
+  ASSERT_TRUE(d.IsObject());
+  const auto pitch = d["dead_space"]["pitch"].GetInt64();
+  EXPECT_GT(pitch, 1);
+  EXPECT_LE((3.6e6 / double(pitch)) * (3.6e6 / double(pitch)), 4.2e6);  // the coarsened raster is a few million cells
+}
+
+TEST(GuiAgent, StateSaysHowLongTheFlowHasNotPublished) {
+  // A stage that does not poll (chunked floorplan placement on a large design) leaves iter and hpwl frozen for tens of
+  // minutes and a queued pause waiting; since_flow_s is the sign an agent can read.
+  Session      s(Config{.open_browser = false, .start_paused = false});
+  const double x[4] = {1, 2, 3, 4}, y[4] = {5, 6, 7, 8};
+  s.begin_phase(agent_scene(), x, y, 4);
+  s.poll(1, x, y, 4, {});
+  const auto seconds = [&] {
+    rapidjson::Document d;
+    d.Parse(s.state_json().c_str());
+    return d["since_flow_s"].GetDouble();
+  };
+  EXPECT_LT(seconds(), 0.2);
+  std::this_thread::sleep_for(std::chrono::milliseconds(400));
+  EXPECT_GE(seconds(), 0.35);
+  s.poll(2, x, y, 4, {});
+  EXPECT_LT(seconds(), 0.2);
+}
+
+namespace {
+// Two chunks: A (lower left, 500 x 500) owns the macro "ram" and the cell c0; B owns c1. "a" (an IO) belongs to none.
+std::shared_ptr<Scene> chunked_scene() {
+  auto sc        = agent_scene();
+  sc->chunk_plan = R"({"chunks":[{"id":"A","box_dbu":[100,100,600,600],"members":[{"id":"ram","macro":true},{"id":"c0","macro":false}]},)"
+                   R"({"id":"B","box_dbu":[600,100,1000,600],"members":[{"id":"c1","macro":false}]}]})";
+  return sc;
+}
+}  // namespace
+
+TEST(GuiAgent, PosesAreRelativeToTheHomeChunkWhenAskedAndStayRecordedThatWay) {
+  Session      s(Config{.open_browser = false, .start_paused = false});
+  const double x[4] = {200, 700, 150, 0}, y[4] = {200, 200, 200, 0};
+  s.begin_phase(chunked_scene(), x, y, 4);
+  // every macro row says where it lives and where it sits inside it
+  const auto rows = s.agent_call(R"({"cmd":"export","what":"macros"})");
+  EXPECT_NE(rows.find(R"("chunk":"A","chunk_x":50,"chunk_y":100)"), std::string::npos) << rows;
+  // the fp gate names its coarse objects macro:<id> and color:<id>; the plan's members are plain ids
+  const auto frame_of_plan = Chunk_frame::parse(chunked_scene()->chunk_plan);
+  ASSERT_NE(frame_of_plan, nullptr);
+  ASSERT_NE(frame_of_plan->of("macro:ram"), nullptr);
+  EXPECT_EQ(frame_of_plan->of("macro:ram")->id, "A");
+  EXPECT_EQ(frame_of_plan->of("color:c1")->id, "B");
+  EXPECT_EQ(frame_of_plan->of("macro:nope"), nullptr);
+  // frame chunk: x and y are measured from the chunk's lower-left corner (here 100,100)
+  uint64_t sequence = 0;
+  ASSERT_EQ(s.submit(R"({"cmd":"move","nodes":["ram"],"frame":"chunk","x":[10],"y":[20]})", &sequence), "");
+  const auto edits = s.poll(10, x, y, 4, {});
+  ASSERT_EQ(edits.pins.size(), 1u);
+  EXPECT_EQ(edits.pins[0].x, 110);
+  EXPECT_EQ(edits.pins[0].y, 120);
+  // the instruction is kept relative: the exported relationship still says "10, 20 inside the chunk"
+  const auto rel = s.agent_call(R"({"cmd":"export","what":"relationships"})");
+  EXPECT_NE(rel.find(R"("frame":"chunk")"), std::string::npos) << rel;
+  EXPECT_NE(rel.find(R"("x":[10],"y":[20])"), std::string::npos) << rel;
+  // one number for every node, and a named chunk
+  ASSERT_EQ(s.submit(R"({"cmd":"move","nodes":["c0","c1"],"frame":"chunk","chunk":"B","x":5,"y":6})", &sequence), "");
+  const auto both = s.poll(20, x, y, 4, {});
+  bool       found = false;
+  for (const auto& p : both.pins) {
+    EXPECT_EQ(p.x, 605);
+    EXPECT_EQ(p.y, 106);
+    found = true;
+  }
+  EXPECT_TRUE(found);
+  // refusals say why
+  const auto io_move = s.submit(R"({"cmd":"move","nodes":["a"],"frame":"chunk","x":[1],"y":[1]})");
+  EXPECT_NE(io_move.find("belongs to no chunk"), std::string::npos) << io_move;
+  EXPECT_NE(s.submit(R"({"cmd":"move","nodes":["ram"],"frame":"chunk","chunk":"nope","x":[1],"y":[1]})").find("unknown chunk"), std::string::npos);
+  EXPECT_NE(s.submit(R"({"cmd":"move","nodes":["ram"],"frame":"plane","x":[1],"y":[1]})").find("frame must be"), std::string::npos);
+  EXPECT_NE(s.submit(R"({"cmd":"move","nodes":["ram"],"chunk":"A","x":[1],"y":[1]})").find("goes with"), std::string::npos);
+  EXPECT_NE(s.submit(R"({"cmd":"move","nodes":["ram"],"frame":"chunk","dx":[1],"dy":[1]})").find("already relative"), std::string::npos);
+  EXPECT_NE(s.submit(R"({"cmd":"move","nodes":["ram"],"frame":"chunk","align":"left","reference":"c0"})").find("already relative"), std::string::npos);
+  // a scene with no plan has no chunk frame
+  Session plain(Config{.open_browser = false, .start_paused = false});
+  plain.begin_phase(agent_scene(), x, y, 4);
+  EXPECT_NE(plain.submit(R"({"cmd":"move","nodes":["ram"],"frame":"chunk","x":[1],"y":[1]})").find("no chunk plan"), std::string::npos);
+}
+
+TEST(GuiAgent, MacroScanInAChunkFrameSpansAndStaysInsideItsHome) {
+  Session s(Config{.open_browser = false, .start_paused = false});
+  auto    sc = chunked_scene();
+  sc->nodes[2].signal_pins = {{"d0", 10, 50, {0, 1}}};
+  const double x[4] = {500, 520, 150, 0}, y[4] = {400, 420, 200, 0};
+  s.begin_phase(sc, x, y, 4);
+  const auto reply = s.agent_call(R"({"cmd":"macro_scan","node":"ram","frame":"chunk","grid":{"nx":5,"ny":5},"top":3,"refine":false})");
+  ASSERT_TRUE(ok(reply)) << reply;
+  rapidjson::Document d;
+  d.Parse(reply.c_str());
+  ASSERT_TRUE(d.IsObject());
+  EXPECT_STREQ(d["chunk"].GetString(), "A");
+  EXPECT_STREQ(d["frame"].GetString(), "chunk");
+  EXPECT_DOUBLE_EQ(d["current"]["chunk_x"].GetDouble(), 50);   // 150 - 100
+  EXPECT_DOUBLE_EQ(d["current"]["chunk_y"].GetDouble(), 100);  // 200 - 100
+  EXPECT_EQ(d["evaluated"].GetUint64(), 26u);  // the 5 x 5 grid over the chunk and the current pose
+  for (const auto& b : d["best"].GetArray()) {
+    EXPECT_GE(b["x"].GetDouble(), 100);
+    EXPECT_LE(b["x"].GetDouble() + 100, 600);  // the 100 x 100 body stays in chunk A (100..600)
+    EXPECT_DOUBLE_EQ(b["chunk_x"].GetDouble(), b["x"].GetDouble() - 100);
+  }
+  // positions are chunk-relative too, and one that leaves the chunk is not offered
+  const auto pos = s.agent_call(R"({"cmd":"macro_scan","node":"ram","frame":"chunk","positions":[[450,10],[300,300]],"refine":false})");
+  ASSERT_TRUE(ok(pos)) << pos;
+  EXPECT_NE(pos.find("\"illegal\":1"), std::string::npos) << pos;  // 450 + 100 leaves a 500 wide chunk
+  EXPECT_NE(pos.find("\"x\":400.0,\"y\":400.0"), std::string::npos) << pos;
+  // the default frame is unchanged, and it still names the chunk the macro is in
+  const auto die = s.agent_call(R"({"cmd":"macro_scan","node":"ram","positions":[[300,300]],"refine":false})");
+  EXPECT_NE(die.find("\"frame\":\"die\""), std::string::npos) << die;
+  EXPECT_NE(die.find("\"chunk\":\"A\""), std::string::npos) << die;
+  EXPECT_NE(s.agent_call(R"({"cmd":"macro_scan","node":"ram","frame":"chunk","chunk":"nope"})").find("unknown chunk"), std::string::npos);
+  EXPECT_NE(s.agent_call(R"({"cmd":"macro_scan","node":"ram","frame":"plane"})").find("frame must be"), std::string::npos);
 }
 
 TEST(GuiAgent, SelectionRoundTripAndDescribe) {

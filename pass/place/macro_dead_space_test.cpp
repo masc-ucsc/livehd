@@ -2,6 +2,7 @@
 #include "macro_dead_space.hpp"
 
 #include <stdexcept>
+#include <string>
 
 #include "dreamplace/native/placement.hpp"
 #include "gtest/gtest.h"
@@ -45,6 +46,21 @@ void expect_legal(const std::vector<pl::Dead_space_object>& o, const pl::Dead_sp
   }
 }
 }  // namespace
+
+TEST(MacroDeadSpace, ARasterTooLargeForMemoryIsRefusedWithTheMinimumPitchNotAllocated) {
+  auto l   = core();
+  l.core_xh = l.core_yh = 3'600'000;
+  l.pitch  = 1;
+  try {
+    (void)pl::measure_dead_space({}, l, false);
+    FAIL() << "a 1.3e13 cell raster was accepted";
+  } catch (const std::invalid_argument& e) {
+    EXPECT_NE(std::string(e.what()).find("raster too large"), std::string::npos) << e.what();
+    EXPECT_NE(std::string(e.what()).find("pitch of at least"), std::string::npos) << e.what();
+  }
+  l.pitch = 10'000;  // 360 x 360 cells
+  EXPECT_NO_THROW((void)pl::measure_dead_space({}, l, false));
+}
 
 TEST(MacroDeadSpace, LargeOpenRegionIsNotDead) {
   // One macro in the middle: every free run is wide, nothing is dead.

@@ -2102,10 +2102,32 @@ selection tools. Agent channel: `.claude/skills/livehd/agent_socket.md`.
   `explore` verify the best few. `restart` refuses an unknown,
   read-only or mistyped `set` flag and a checkpoint that does not exist (both used to be queued as `ok`: the first
   exited the re-executed `lhd` and ended the session, the second restarted from the beginning and dropped every
-  edit). Screenshots are zlib-compressed. A session that ends leaves no `/tmp/lhd-gui-<pid>.sock` behind for the next
+  edit). Screenshots are zlib-compressed. `state.since_flow_s` is the time since the flow last published a frame: while the
+  state is `running` and it keeps growing the flow is inside a stage that does not poll (the chunked floorplan stage of a
+  multi-million-cell design runs for tens of minutes, `synth.place.chunk.seed_detail=false` cuts it to minutes), so a queued
+  `pause` or stage switch waits and `iter`/`hpwl` stay put. A request handler that throws answers `500` and the session lives on;
+  `geometry` coarsens a dead-space raster that would pass about four million cells and reports the pitch it used;
+  `find`/`highlight`/`select` scan a snapshot of the scene without the session lock, and `macro_scan` checks legality on the
+  macros alone, so both stay interactive at four million nodes. A session that ends leaves no `/tmp/lhd-gui-<pid>.sock` behind for the next
   one to find: dead sessions' sockets are removed when a new session starts. `tools/lhd_gui.py` adds `screenshot
   out=FILE`, `wait state=gate`, `macros` and `--retry SECONDS` (rides out the moments the socket is down during a
   restart).
+- **Incremental chunks and chunk-relative poses (2026-11-16).** Synthesis is already incremental per region (the abc cache: a
+  warm rerun of the 4M-cell mixed_soc maps in about 35 s). The chunk placement is now too, opt-in:
+  `--set synth.place.chunk.seed_cache=exact|translate` (default `off`) keeps every chunk's finished local placement in
+  `<workdir>/chunk_seed_cache/chunk_seeds.bin` (beside `place_cache`, which a GUI restart removes; this survives it), keyed by what the
+  chunk contains (partition, implementation, a hash of member names, sizes and net structure) and stored as positions relative to
+  the chunk's own box. The key says nothing about where the chunk sits, so a chunk that was only moved, or whose neighbors moved, finds its
+  interior again and is *replaced* instead of placed: when the shape (box size, densities, fixed obstacles and strips in chunk
+  coordinates, which nets reach the boundary) is the same, `translate` reuses it even though the boundary contacts moved, `exact` also
+  needs the same contacts and otherwise refines from the stored placement (8 iterations, not 24 from scratch); a reshaped chunk always
+  refines. `chunk_refinement.json` reports `solved`, `reused`, `refined` and `persisted`. Replays that must be byte-identical keep it off
+  (a stored placement is a different start than a solved one). In the agent, a pose may be given relative to a chunk instead of the
+  die: `move` takes `"frame":"chunk"` (x and y measured from the lower-left corner of the chunk, the one named by `"chunk"` or each
+  node's home chunk; the instruction is kept recorded that way in `export relationships` and the trace), `macro_scan` takes the same
+  (the grid is the chunk, the macro's body must stay inside it, every pose is reported in both frames), and `export macros` gives each macro
+  its `chunk`, `chunk_x` and `chunk_y`. The pose then means the same thing when the chunk is moved or reshaped. What is not done: the
+  flow-side binder of saved `livehd.placement.hints` still reads die coordinates, and pins are stored in die DBU.
 - **Agent interface.** The same JSON commands (`POST /cmd`: `run`, `continue`, `pause`, `stage`, `move`
   with node names or `#index`, `unpin`, `screenshot`, `finish`) and read endpoints (`GET /state`,
   `/design`, `/frame`, `/node?i=`, `/query?name=` or `x0,y0,x1,y1`, `/screenshot.png?w=&h=&layers=`)

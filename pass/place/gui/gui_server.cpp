@@ -209,6 +209,21 @@ Request read_request(int fd, std::atomic<bool>& stop) {
   return req;
 }
 
+std::string json_text(std::string_view text) {
+  std::string out;
+  for (const unsigned char c : text) {
+    if (c == '"' || c == '\\') {
+      out += '\\';
+      out += char(c);
+    } else if (c < 0x20) {
+      out += ' ';
+    } else {
+      out += char(c);
+    }
+  }
+  return out;
+}
+
 void send_all(int fd, std::string_view data) {
   size_t sent = 0;
   while (sent < data.size()) {
@@ -415,7 +430,7 @@ bool Session::start(std::string* error) {
   }
   socklen_t len = sizeof(addr);
   ::getsockname(server->fd, reinterpret_cast<sockaddr*>(&addr), &len);
-  if (::listen(server->fd, 16) != 0) {
+  if (::listen(server->fd, 128) != 0) {
     return fail("listen() failed");
   }
   port_ = ntohs(addr.sin_port);
@@ -438,7 +453,7 @@ bool Session::start(std::string* error) {
     const mode_t old = ::umask(0177);  // created 0600: only the user running lhd can talk to it
     const int    rc  = ::bind(server->ufd, reinterpret_cast<sockaddr*>(&ua), sizeof(ua));
     ::umask(old);
-    if (rc != 0 || ::listen(server->ufd, 8) != 0) {
+    if (rc != 0 || ::listen(server->ufd, 128) != 0) {
       return fail("cannot listen on the agent socket " + cfg_.agent_socket);
     }
     ::chmod(cfg_.agent_socket.c_str(), 0600);
@@ -465,10 +480,25 @@ bool Session::start(std::string* error) {
       ::setsockopt(client, SOL_SOCKET, SO_NOSIGPIPE, &on, sizeof(on));
 #endif
       ::fcntl(client, F_SETFD, FD_CLOEXEC);
+      // One thread per request, each waiting up to ten seconds for a slow client: a few hundred idle connections must not
+      // become a few hundred threads. Past the cap the connection is closed at once and the client retries.
+      constexpr int kMaxHandlers = 256;
+      if (raw->active.load() >= kMaxHandlers) {
+        ::close(client);
+        continue;
+      }
       raw->active.fetch_add(1);
       try {
         std::thread([raw, self, client, local] {
-          handle(*self, self->token(), client, raw->stop, local);
+          try {
+            handle(*self, self->token(), client, raw->stop, local);
+          } catch (const std::exception& e) {
+            // Whatever a command throws (an allocation that cannot be satisfied, a bad index) answers this request
+            // and nothing more: an exception leaving a detached thread ends the whole process, the flow with it.
+            respond(client, 500, "application/json", std::format(R"({{"ok":false,"error":"internal error: {}"}})", json_text(e.what())));
+          } catch (...) {
+            respond(client, 500, "application/json", R"({"ok":false,"error":"internal error"})");
+          }
           ::close(client);
           raw->active.fetch_sub(1);
         }).detach();

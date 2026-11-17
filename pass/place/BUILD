@@ -732,10 +732,10 @@ cc_library(
 cc_library(
     name = "gui",
     srcs = ["gui/gui_worker.cpp","gui/gui_geometry.cpp","gui/gui_session.cpp", "gui/gui_server.cpp", "gui/gui_page.cpp", "gui/gui_render.cpp", "gui/gui_agent.cpp", "gui/gui_ipc.cpp", "gui/gui_scan.cpp"],
-    hdrs = ["gui/gui_scan.hpp", "gui/gui_tracks.hpp", "macro_state.hpp", "gui/gui_policy.hpp","gui/gui_worker.hpp","gui/gui_geometry.hpp","gui/gui_session.hpp", "gui/gui_page.hpp", "gui/gui_render.hpp", "gui/gui_ipc.hpp", "gui/gui_wire.hpp"],
+    hdrs = ["gui/gui_scan.hpp", "gui/gui_tracks.hpp", "gui/gui_chunks.hpp", "macro_state.hpp", "gui/gui_policy.hpp","gui/gui_worker.hpp","gui/gui_geometry.hpp","gui/gui_session.hpp", "gui/gui_page.hpp", "gui/gui_render.hpp", "gui/gui_ipc.hpp", "gui/gui_wire.hpp"],
     copts = COPTS,
     visibility = ["//visibility:public"],
-    deps = [":macro_dead_space", "//core", "@rapidjson", "@re2//:re2", "@zlib//:zlib"],
+    deps = [":macro_dead_space", "//core", "@rapidjson", "@re2//:re2"],
 )
 
 cc_test(

@@ -974,6 +974,8 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
     {"place.chunk.run", "flow", Synth_set_option::Kind::file, "flow: full placement; feedback: place isolated homes in sequence; export: write standalone home jobs"},
     {"place.chunk.seed_detail", "true", Synth_set_option::Kind::boolean,
      "run detailed swaps on local chunk placements; false still runs local legalization"},
+    {"place.chunk.seed_cache", "off", Synth_set_option::Kind::file,
+     "off|exact|translate: keep each chunk's finished local placement in <workdir>/chunk_seed_cache, keyed by what the chunk contains and stored relative to its box, so a chunk that was only moved or reshaped is replaced instead of placed again (exact: also needs the same boundary contacts; translate: keeps the interior when they moved). Not for byte-identical replays"},
     {"place.chunk.profile", "", Synth_set_option::Kind::file, "shared JSON history of observed placement peaks; default: place_memory.json in the workdir"},
     {"place.chunk.require_fit", "false", Synth_set_option::Kind::boolean, "guard whole-flow admission; default on for independent workers with a positive budget (check estimate and RSS)"},
     {"place.fp", "auto", Synth_set_option::Kind::file,

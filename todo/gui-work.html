@@ -3,62 +3,222 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>TODO gui-work — agent socket: adversarial test, fixes and wanted features</title>
+<title>TODO gui-work — agent socket: adversarial test, fixes, wanted features</title>
 <link rel="stylesheet" href="todo.css">
 </head>
 <body>
 <nav><span class="brand">LiveHD TODO</span><a href="index.html">← All tasks</a></nav>
 <main>
 <h1><strong class="item-id">gui-work</strong> Agent socket and floorplanning: adversarial test, fixes, wanted features</h1>
-<p><span class="status">In progress (opened 2026-11-15)</span> An agent drove <code>lhd synth --gui</code> through
-its Unix-domain agent socket (<code>tools/lhd_gui.py</code>) on HighTide designs (liteeth, 5 macros and 17k cells, first),
-to improve floorplans and macro placement. It attacked the socket with malformed, hostile and out-of-range requests,
-fixed what broke, and wrote down what an agent still lacks. Sources: <code>pass/place/gui/</code>,
+<p><span class="status">Fixes in the working tree (2026-11-16); incremental chunks started; wanted features open</span>
+An agent drove <code>lhd synth --gui</code> through its Unix-domain agent socket (<code>tools/lhd_gui.py</code>) on the
+HighTide asap7 design <strong>liteeth</strong> (5 fakeram macros, 17k cells, about 100 s from start to the <code>edit</code>
+gate), to improve its floorplan and macro placement. It attacked the socket with malformed, hostile and out-of-range
+requests, fixed what broke, built a macro screening command, and measured whether the agent could beat the flow's own
+macro placement. Result: <strong>it could not</strong>; the measurements are in <a href="#measured">What the agent
+measured</a>. Then the lhdsuite <strong>mixed_soc</strong> (12 Rocket, 4 BOOM and 3 Gemmini on a mesh; <a href="#mixed">below</a>) stressed the fp-plan GUI at scale. coralnpu, eyeriss, NVDLA, vortex and the other HighTide designs were not run.
+Code: <code>pass/place/gui/</code>, <code>pass/place/macro_tracks.*</code>, <code>tools/lhd_gui.py</code>. Background:
 <a href="livehd/2i-interact.html">2i-interact</a> (the GUI), <a href="livehd/2p-placereason.html">2p-placereason</a> (the explore tiers).</p>
 
-<p>Drafting: this page is being filled while the work runs. Sections below are final only where they carry a measurement.</p>
+<h2 id="measured">What the agent measured (liteeth, same recipe, same binary)</h2>
+<table>
+<tr><th>Run</th><th>HPWL (um)</th><th>setup WNS / TNS (ps), full timing</th><th>Note</th></tr>
+<tr><td>Baseline: the flow's own placement</td><td>201,451</td><td>-602 / -4,383</td><td>335 electrical violations; deterministic: three sessions gave the same HPWL to 10 digits</td></tr>
+<tr><td>5 macros moved at the macro gate to the best <code>macro_scan</code> pose (aligned to tracks), orientations mirrored</td><td>245,633 (+22%)</td><td>-939 / -66,333 (15x worse TNS)</td><td>the scan promised -3% to -25% per macro; the macros crowd the IO edge and squeeze the logic into thin channels (picture in the session workdir)</td></tr>
+<tr><td>The same moves with unaligned poses</td><td colspan="2">run ended: <code>fixed macro pin misses routing tracks</code></td><td>found by the attack; now a conflict, see G13</td></tr>
+<tr><td>Orientation-only changes at the macro gate</td><td>201,451</td><td>-602 / -4,383</td><td>at the flow's own positions every other orientation scored +1% to +88% on the net model, so none was applied</td></tr>
+<tr><td><code>macro_move</code> of two macros at the <code>edit</code> gate</td><td>201,451</td><td>-602 / -4,383</td><td>the flow restarted and replayed; the macros came back where they were (W3)</td></tr>
+</table>
+<p>Reading: a frozen-cell wirelength screen is a good <em>filter</em> (it found the legality and track problems fast) and a
+bad <em>objective</em>: the placer moves every cell when a macro moves, and a macro that is closer to its logic on paper
+leaves the logic no room. What an agent needs is a loop that measures with the cells re-placed, at a price it can
+pay a hundred times (W1, W2).</p>
 
+<h2 id="mixed">Stress with lhdsuite mixed_soc (2026-11-16)</h2>
+<p><em>Note (2026-11-16, later):</em> every number in this section was measured on the first mixed_soc, with three 8&times;8 Gemmini accelerators on a 5&times;4 mesh, in which the mesh inputs were tied off and synthesis removed the PE arrays. lhdsuite now has one full 16&times;16 Gemmini on a 6&times;3 mesh with a live mesh (about 6M gates plus SRAMs expected), so the cell counts, ABC time and the 4M-node scene size will be larger on a re-run; the incremental and chunk-frame findings do not depend on it.</p>
+<p>The real design, <code>lhdsuite/mixed_soc/pyrope/MixedSocTop.prp</code> (not the 324M-cell planner model): compile 10 s;
+<code>lhd synth --gui</code> on asap7 (the merged <code>sha3.v2.lib</code>, <code>synth.sram=true</code>: 11 generated SRAMs, 139 macro nodes counting the memory proxies): ABC 583 regions in 21 min on one
+thread, <strong>30 min and 51 GB resident to the fp gate</strong>, 9 min when the abc cache is warm. Under sky130hd it stops earlier: a memory proxy with 158
+pins has 127 usable met4 tracks on its 117 um edge (W17).</p>
+<table>
+<tr><th>At the fp gate (4,637 nodes: 4,498 color nodes and 139 macros, 28 chunks, 3.6 mm core)</th><th>Latency</th></tr>
+<tr><td><code>state</code>, <code>describe</code>, <code>selection</code>, <code>highlight</code>, <code>find</code> (any scope, nested-quantifier regex)</td><td>0.5 to 4 ms</td></tr>
+<tr><td><code>geometry</code> (193 KB) / <code>export chunks</code> / <code>chunk_pins</code> / <code>chunk_peers</code> / <code>export floorplan</code> (15 MB)</td><td>160 ms / 28 ms / 34 ms / 34 ms / 219 ms</td></tr>
+<tr><td>screenshot 400 / 1000 / 2000 px (19 / 82 / 230 KB)</td><td>23 / 44 / 75 ms</td></tr>
+<tr><td>16 parallel clients for 20 s (<code>state</code>, <code>find</code>, <code>describe</code>, 500 px screenshots): 44,000 requests</td><td>p99 3.5 / 4.5 / 3.6 / 43 ms, max 75 ms; 28 refused connects (backlog 8, G17)</td></tr>
+<tr><td>idle connections, a half request, a 4 GB <code>Content-Length</code>, a 64 MB body, 1 MB header, random bytes</td><td>answered or dropped; the session kept serving</td></tr>
+<tr><td>45 hostile chunk edits (<code>geometry</code> moves and locks, <code>topology</code> split/fuse, <code>interface_copies</code>, density targets, 5,000 entries)</td><td>each rejected with a reason or accepted; the plan was bit-for-bit unchanged afterwards</td></tr>
+</table>
+<table>
+<tr><th>Macro phase of the same run (4,035,632 nodes, the flow iterating)</th><th>Latency</th></tr>
+<tr><td><code>state</code> (16.8 KB), <code>describe</code>, <code>selection</code>, <code>export macros</code> / <code>signature</code> / <code>export chunks</code></td><td>1.5 / 1.4 / 6 / 36 / 25 / 22 ms</td></tr>
+<tr><td><code>find</code> over all 4M nodes (any scope or regex; <code>count</code> stops at 200,000, W11)</td><td>22 to 100 ms</td></tr>
+<tr><td><code>maps</code> / <code>geometry</code> (sorts every cell) / screenshot 400, 1000, 2000 px</td><td>260 ms / 1.6 s / 240, 260, 290 ms</td></tr>
+<tr><td><code>/frame</code> (32 MB) / <code>/design</code> (124 MB: names 68 MB, <code>w</code>, <code>h</code>, <code>kinds</code>, <code>seq</code> 20 MB each, <code>chunk_plan</code> 15 MB)</td><td>78 ms / 1.1 s</td></tr>
+<tr><td><code>macro_scan</code> 16x16 on one macro: before G19 / after</td><td>16.9 s / 53 ms (64x64 and 4 orientations, 16,384 poses: 84 ms)</td></tr>
+<tr><td>16 parallel clients, 20 s: <code>state</code> p50 / p99, before G20 / after</td><td>60 / 314 ms / 0.8 / 4.4 ms (<code>find</code> p50 157 / 34 ms)</td></tr>
+</table>
+<p>What broke: <code>geometry</code> at the fp gate ended the process (G15). What does not scale: the flow sits in the fp stage for <strong>more than 40 minutes
+in <code>refine_chunk_seeds</code></strong>, single-threaded detailed swaps over the multi-million-cell chunk seeds (<code>synth.place.chunk.seed_detail=false</code> skips them),
+and for that whole time the GUI shows <code>iter 0</code>, <code>hpwl -1</code>, no note, and a queued <code>pause</code> stays queued (W15). A second session with
+<code>seed_detail=false</code> was started for comparison: the default run was stopped after <strong>55 minutes</strong> in the fp stage, the <code>seed_detail=false</code> runs left it
+in <strong>about 7 minutes</strong> (then the macro stage showed <code>iter 40</code> unchanged for the next 15+ minutes, again with no poll: <code>since_flow_s</code> says so now).</p>
+
+<h2 id="incremental">Incremental chunks and chunk-relative poses (2026-11-16)</h2>
+<p>Direction from the user: whatever is synthesized or placed per chunk should be remembered, so moving or reshaping a chunk <em>replaces</em> it instead of redoing it, and macro alignment and pins
+should be relative to themselves or to their chunk (absolute coordinates are chunk-absolute; die-absolute is the rare case). The target flow is in
+<a href="livehd/2p-placereason.html#chunk-flow">2p-placereason</a>. What exists, measured on the real mixed_soc (28 chunks, 4M cells):</p>
+<table>
+<tr><th>Step</th><th>Cost</th><th>Incremental today?</th></tr>
+<tr><td>Compile, aegraph, color</td><td>about 45 s</td><td>per unit (<code>lhd.incremental</code>)</td></tr>
+<tr><td>ABC, per color region</td><td>21 min cold (583 regions), <strong>about 35 s warm</strong></td><td>yes: the abc cache, per region; a chunk's regions are mapped once per content</td></tr>
+<tr><td>Full-design STA (<code>opentimer_incremental</code>) and the flat physical view</td><td><strong>about 7 minutes every start</strong>, 51 GB</td><td>no: the whole design again, before the agent sees a plan (target flow step 1)</td></tr>
+<tr><td>fp stage, local chunk placement (<code>seed_detail=false</code>), seed cache <code>off</code></td><td>138 s</td><td>no: 27 solved, 1 refined</td></tr>
+<tr><td>the same with <code>seed_cache=translate</code>, a rocket chunk moved (swapped into another slot; 2 of 28 boxes changed, none reshaped)</td><td><strong>25 s</strong></td><td>yes: 0 solved, <strong>21 reused</strong>, 7 refined from their stored placement, 28 of 28 found</td></tr>
+</table>
+<p>Seven refined, not two: the per-chunk report (<code>chunk_refinement.json</code> now lists every chunk's action and whether its shape and contacts matched) shows five chunks that were not moved
+(three BOOM chunks of tile 15, two accelerators, a Rocket) differing in their local problem too, with the box size equal. The likely cause is that macro seed slots are recomputed over the die in order, so one move shifts
+some other chunks' macro positions by a little; that is a guess, not established. A refined chunk starts from its stored placement (8 iterations), it is not placed from scratch.</p>
 <h2 id="done">Done</h2>
+<h3>Bugs the attack found, fixed</h3>
 <ul>
-  <li><strong class="item-id">G1</strong> <code>find</code> / <code>highlight</code> / <code>select</code> regex could freeze the whole
-  GUI. A nested quantifier (<code>(.*)*x</code>) ran in <code>std::regex</code> (backtracking) under the session lock: the
-  agent socket, the token-protected page port and the flow all stopped, <code>lhd</code> spun at 100% CPU, and only a kill
-  recovered it. Now RE2 (linear time, compiled before the lock): the same request answers in 48 ms.
-  Backreferences and lookaround are refused with a message.</li>
-  <li><strong class="item-id">G2</strong> <code>restart</code> with a <code>set</code> flag that does not exist (or is read-only, or cannot
-  hold the value) was answered <code>ok</code> and queued; the re-executed <code>lhd</code> then exited with status 2 and the
-  session was gone with its pins and edits. The flag name, read-only bit, boolean and integer values are checked against
-  the options table before anything is queued.</li>
-  <li><strong class="item-id">G3</strong> <code>restart</code> with a checkpoint that does not exist (99, a string, -5) restarted from the
-  beginning, dropping every edit. Out-of-range is now a refusal / note; absent or -1 still means the start.</li>
-  <li><strong class="item-id">G4</strong> <code>find limit</code> and <code>critical n</code> silently ignored a string or a fraction and clamped 0
-  or a negative number to 1. They are bounded integers now and say what is wrong.</li>
-  <li><strong class="item-id">G5</strong> A <code>"state\u0000x"</code> command ran as <code>state</code> (C-string truncation). Strings keep
-  their length now.</li>
-  <li><strong class="item-id">G6</strong> <code>move</code> rejected scalar <code>x</code>/<code>y</code> with an unhelpful message although the
-  help text shows them; one number now applies to every node. A relative or aligned move of a placed macro
-  says it is fixed and to use absolute x/y.</li>
-  <li><strong class="item-id">G7</strong> <code>describe</code> did not accept <code>#index</code> (which <code>move</code>, <code>select</code> and
-  <code>highlight_names</code> do).</li>
-  <li><strong class="item-id">G8</strong> A <code>whatif</code> candidate without <code>"cmd"</code> failed with "bad command json"; it is a move now and a bad
+  <li><strong class="item-id">G1</strong> <code>find</code>/<code>highlight</code>/<code>select</code> regex froze the whole GUI. A nested quantifier
+  (<code>(.*)*x</code>) ran in <code>std::regex</code> (backtracking) while the session lock was held: the agent socket, the
+  token page port and the flow all stopped, <code>lhd</code> spun at 100% CPU, only a kill recovered it. Now RE2 (linear
+  time), compiled before the lock: the same request answers in 48 ms. Backreferences and lookaround are refused with a
+  message. New dependency <code>re2</code> (already in the resolved module graph; credited in
+  <code>docs/acknowledgement.html</code>).</li>
+  <li><strong class="item-id">G2</strong> <code>restart</code> with a <code>set</code> flag that does not exist, is read-only, or cannot
+  hold the value (<code>iterations=abc</code>, <code>timing_driven=maybe</code>) was answered <code>ok</code> and queued; the
+  re-executed <code>lhd</code> then exited with status 2 and the session was gone with its pins and edits. The flag, its
+  read-only bit and its boolean/integer type are checked before anything is queued.</li>
+  <li><strong class="item-id">G3</strong> <code>restart</code> with a checkpoint that does not exist (99) restarted from the beginning and dropped every
+  edit. It is a note and no restart now; a string or a number below -1 is refused; absent or -1 still means the start.</li>
+  <li><strong class="item-id">G4</strong> <code>find limit</code> and <code>critical n</code> ignored a string or a fraction and clamped 0 or a
+  negative number to 1. They are bounded integers now and say what is wrong.</li>
+  <li><strong class="item-id">G5</strong> <code>{"cmd":"state\u0000x"}</code> ran as <code>state</code> (C-string truncation); strings keep their length.</li>
+  <li><strong class="item-id">G6</strong> <code>move</code> with scalar <code>x</code>/<code>y</code> (as the help shows) was refused with
+  "equal length"; one number now applies to every node.</li>
+  <li><strong class="item-id">G7</strong> <code>describe</code> did not take <code>#index</code> (<code>move</code>, <code>select</code>, <code>highlight_names</code> do).</li>
+  <li><strong class="item-id">G8</strong> A <code>whatif</code> candidate without <code>"cmd"</code> failed as "bad command json"; it is a move now and a bad
   candidate is named by its position.</li>
-  <li><strong class="item-id">G9</strong> The <code>screenshot</code> page command did nothing visible: a missing file name or work directory was
-  silent. It now sets the note with the path it wrote (under <code>&lt;workdir&gt;/synth/place/gui</code>, basename only).</li>
-  <li><strong class="item-id">G10</strong> Screenshots were stored (uncompressed) PNGs: 2.4 MB for 900x900. zlib level 3 now.</li>
-  <li><strong class="item-id">G11</strong> Dead sessions left their <code>/tmp/lhd-gui-&lt;pid&gt;.sock</code>: 1,089 had piled up. A new session removes the sockets
-  of processes that no longer exist (same user, <code>lstat</code> socket, <code>kill(pid,0)</code> says ESRCH).</li>
-  <li><strong class="item-id">G12</strong> <code>valid_color</code> ran a <code>std::regex</code> on caller text; it is a plain character check now.</li>
-  <li><strong class="item-id">F1</strong> New <code>macro_scan {node, grid | positions, orientations?, top?}</code>: ranks legal positions (and mirrored
-  orientations) of one macro by pin-to-logic wirelength in milliseconds; a first screen before <code>whatif</code> and <code>explore</code>.</li>
-  <li><strong class="item-id">F2</strong> <code>evaluate wait_ms=N</code> returns the measured summary; before, <code>evaluate</code> answered
-  "processed" at once and the numbers appeared later in <code>state.evaluation_seq</code>.</li>
-  <li><strong class="item-id">F3</strong> <code>tools/lhd_gui.py</code>: <code>screenshot out=FILE</code> (PNG over the socket), <code>wait state=gate</code>, <code>macros</code>,
-  <code>--retry SECONDS</code> (the socket is down while a restart re-executes <code>lhd</code>).</li>
+  <li><strong class="item-id">G9</strong> The <code>screenshot</code> page command was silent when it could not write; it sets the note with the path it wrote
+  (<code>&lt;workdir&gt;/synth/place/gui/&lt;basename&gt;</code>) or why not.</li>
+  <li><strong class="item-id">G10</strong> Screenshots were stored (uncompressed) PNGs: 2.4 MB at 900x900. They are compressed now by a built-in encoder (PNG Sub filter, then one deflate block with the fixed
+  Huffman code and matches against the previous byte and the same place one row up): 63.7 KB for the 1000x1000 fp-plan picture, against 81.7 KB for the first zlib version; the round trip is exact (a small inflater in the
+  unit test) and the Python smokes inflate it with real zlib. See G21 for why it is not zlib.</li>
+  <li><strong class="item-id">G11</strong> Dead sessions left their <code>/tmp/lhd-gui-&lt;pid&gt;.sock</code>: 1,089 had piled up. A new session removes the sockets of
+  processes that no longer exist (same user, a socket, <code>kill(pid,0)</code> says ESRCH); 2 were left after the run.</li>
+  <li><strong class="item-id">G12</strong> <code>highlight color</code> ran a <code>std::regex</code> on caller text; it is a plain character check.</li>
+  <li><strong class="item-id">G13</strong> A macro pose that passes every geometry check can still end the run: a pinned macro is held exactly through
+  legalization and then rejected as a fixed macro whose pins miss the routing tracks (the live session died with
+  <code>fixed macro pin misses routing tracks: ...u_storage_64w1024d_6:r0_addr_in[0]</code>). The session now carries the
+  macro's track lattice as data (<code>Scene::track_lattices</code>, built from the flow's own profile in
+  <code>macro_tracks.cpp</code>, serialized because the flow and the session are different processes). A pinned or fixed
+  macro off the lattice is a conflict <code>misses_tracks (x axis; nearest aligned origin X,Y)</code>: the move is applied but not
+  pinned, and the answer says where to go. A unit test shows the lattice is exactly what <code>legalize_macro_tracks</code>
+  accepts for a fixed macro at every origin of a 12x12 window and four orientations.</li>
+  <li><strong class="item-id">G14</strong> <code>move</code> of a placed (fixed) macro after the macro stage was skipped but still answered <code>applied</code>, with the
+  old pose and a new frame number. It is refused now, naming <code>macro_move</code> (which was missing from the agent's
+  <code>help</code> and is listed now). See W3: <code>macro_move</code> does not move flow-placed LEF macros either.</li>
+  <li><strong class="item-id">G15</strong> <code>geometry</code> at the fp gate ended the whole GUI controller with <code>std::bad_alloc</code> (<code>gdb</code> catch throw:
+  <code>floorplan_findings</code> &rarr; <code>measure_dead_space</code> &rarr; <code>classify</code> &rarr; <code>vector::assign</code>). The fp-gate scene builder (<code>place.cpp</code>, the one for
+  chunked plans) never set <code>dead_pitch</code>, so it stayed at 1 DBU and a 3.6 mm core asked for 1.3e13 raster cells. It sets the pitch and the notch width now;
+  <code>floorplan_findings</code> coarsens a pitch that would exceed about four million cells and reports the pitch used (it answered 2,048 on mixed_soc, which is how the unset 1 was
+  recognised); <code>measure_dead_space</code> refuses more than 2^27 cells with the minimum pitch in the message. The same unset pitch applies to any chunked fp gate; liteeth's was never queried.</li>
+  <li><strong class="item-id">G16</strong> Any exception inside a request handler (<code>POST /agent</code> and <code>/cmd</code> had no <code>try</code>) left a detached thread and ended the process, taking the flow with it.
+  Every request now answers <code>500 {"ok":false,"error":"internal error: ..."}</code> and the session lives on.</li>
+  <li><strong class="item-id">G17</strong> The Unix socket's listen backlog was 8 (the TCP port 16): a burst of parallel agents got <code>EAGAIN</code> (28 of 44,000). Both are 128 now, and the server stops spawning a
+  thread per connection past 256 concurrent handlers (idle connections wait up to 10 s each).</li>
+  <li><strong class="item-id">G19</strong> <code>macro_scan</code> checked each candidate against every node of the design (66 ms at 4M nodes: a 16x16 grid took 16.9 s). The check reads only macros and exclusions, so it
+  runs on a scene reduced to them: 53 ms for the same scan.</li>
+  <li><strong class="item-id">G20</strong> <code>find</code>, <code>highlight</code> and <code>select</code> scanned the node names with the session lock held, so every other request, the page and the flow's own publish waited behind a
+  100 ms scan (<code>state</code> p99 314 ms with 16 clients at 4M nodes). They scan an immutable snapshot of the scene and take the lock only to store the selection or the highlight (<code>state</code> p99 4.4 ms).</li>
+  <li><strong class="item-id">G21</strong> A regression of mine: G10 first added <code>@zlib</code> to the <code>gui</code> library, and a statically linked test (<code>//lhd:lhd_options_test</code>) then failed to link, because LLVM already brings <code>zlib-ng</code> in zlib-compat mode (duplicate
+  <code>zlibVersion</code>, <code>zError</code>, ...). The shipped <code>lhd</code> linked, so the 113-test run that followed missed it; running that test found it. The encoder has no library behind it now.</li>
+  <li><strong class="item-id">G18</strong> <code>state.since_flow_s</code>: seconds since the flow last published a frame. While <code>state</code> is <code>running</code> and this keeps growing the flow is inside a stage that does not poll;
+  a queued <code>pause</code>, stage switch or timing request waits for it.</li>
 </ul>
+<h3>Features</h3>
+<ul>
+  <li><strong class="item-id">F1</strong> <code>macro_scan {node, grid:{nx,ny} | positions:[[x,y],...], orientations?, top?, refine?}</code>: ranks poses of one
+  macro by the sum of its pin nets' half-perimeters (each connected pin joined with the box of the cells on its net, so a
+  clock or an enable reaching thousands of cells costs about the same everywhere); only poses the floorplan checks accept
+  (core, halo, channel, exclusions, other macros, <strong>routing tracks</strong>, positions snapped to the lattice); the current pose is
+  always a candidate; the best is walked downhill; orientation changes are offered only at the gates that accept them
+  (<code>orientations_dropped</code> otherwise). Milliseconds for 576 poses. The net half-perimeter is checked exactly against a
+  hand computation in the unit test.</li>
+  <li><strong class="item-id">F2</strong> <code>evaluate wait_ms=N</code> returns the measured summary (2 s on liteeth); before, it answered "processed" at once and
+  the numbers showed up later in <code>state.evaluation_seq</code>.</li>
+  <li><strong class="item-id">F5</strong> <code>synth.place.chunk.seed_cache=off|exact|translate</code> (default <code>off</code>): a persistent store of each chunk's finished local placement in
+  <code>&lt;workdir&gt;/chunk_seed_cache/chunk_seeds.bin</code> (not removed by a GUI restart), keyed by what the chunk contains (partition, implementation, a hash of member names, sizes and net structure) and kept as positions relative to the
+  chunk's own box. Same shape: <code>translate</code> reuses it even when the boundary contacts moved, <code>exact</code> needs the same contacts and otherwise refines; a reshaped chunk refines. Opt-in because a stored placement is a different
+  start than a solved one, so replays that must be byte-identical keep it off. Unit tests: persistence across stores, a moved chunk replaced relative to its box, a chunk with different contents solved alone, damaged and foreign files ignored whole.</li>
+  <li><strong class="item-id">F6</strong> Poses relative to the chunk: <code>move</code> takes <code>"frame":"chunk"</code> (x and y from the chunk's lower-left corner; <code>"chunk"</code> names it, else each node's home chunk) and the instruction stays recorded that way in
+  <code>export relationships</code>; <code>macro_scan</code> takes the same (the grid is the chunk, the body must stay inside it, every pose is reported in both frames); <code>export macros</code> gives each macro its <code>chunk</code>, <code>chunk_x</code> and <code>chunk_y</code>.
+  Live on the 4,035,632-node scene: all 139 macros carry a chunk, a 16x16 scan of one macro took 53 ms, and a chunk-relative move of the best pose resolved to the right absolute DBU, pinned, and was recorded as <code>"frame":"chunk"</code>.</li>
+  <li><strong class="item-id">F3</strong> <code>tools/lhd_gui.py</code>: <code>screenshot out=FILE</code>, <code>wait state=gate phase=edit</code>, <code>macros</code> (pose, size, orientation, pinned for
+  every macro), <code>--retry SECONDS</code> (the socket is down while a restart re-executes <code>lhd</code>; a restart takes about 18 s here).</li>
+  <li><strong class="item-id">F4</strong> <code>describe</code> of a macro and <code>macro_scan</code> report <code>track_check</code>: the pins that constrain it and its periods and phases.</li>
+</ul>
+<p>Tests added: <code>gui_session_test</code> (regex time bound over a 4,000-character name, argument checks, NUL, <code>#index</code>, colours, scalar
+move, restart refusals, placed-macro move, macro_scan ranking/orientation/refinement/tracks, PNG), <code>macro_tracks_test</code> (lattice
+vs legalizer). <code>README.md</code> of <code>pass/place</code> and the <code>livehd</code> skill describe the new surface.</p>
 
 <h2 id="not-done">Not done (wanted)</h2>
+<h3>Floorplanning loop</h3>
 <ul>
-  <li>To be filled with the measured findings of the floorplan loop.</li>
+  <li><strong class="item-id">W1</strong> A candidate evaluation with the cells re-placed that an agent can afford many times. <code>whatif</code> is 0.5 s per candidate on 17k
+  cells but only re-times at frozen coordinates; <code>explore T1/T2</code> is a spawned replay of the whole flow ("the configured timing
+  engine requires spawned replay"): <strong>76 s of start-up before the candidate runs</strong> on liteeth, minutes on the large designs. Wanted: a warm
+  worker (or snapshot fork after the macro gate) so a macro edit plus bounded GP plus timing is seconds.</li>
+  <li><strong class="item-id">W2</strong> A better objective in <code>macro_scan</code>: free area and channel capacity between macros (cells need rows), a congestion term (RUDY of the
+  moved nets), IO pin attraction, other macros' pins, joint moves of a group and swaps of equal macros. Measured here: the net model alone is
+  +22% HPWL and 15x TNS when applied (table above).</li>
+  <li><strong class="item-id">W3</strong> <code>macro_move</code> after the macro stage restarts the flow and then does nothing for macros the flow placed: it only places memory proxies and
+  preplaced fixed macros (<code>place.cpp</code>, user_macro_moves). To change a flow-placed LEF macro, the agent has to restart at the macro gate and pin there. Wanted: one
+  command, "restart at the macro gate with these poses pinned", or make <code>macro_move</code> pin at the macro stage; and an error, not a silent no-op, until then.</li>
+  <li><strong class="item-id">W4</strong> The flow-side half of G13: <code>gui_legalization_holds</code> holds a pinned macro exactly. The session now refuses to pin an off-track pose, but a pose snapped
+  to the nearest aligned origin automatically (pinned there, reported) would save the agent a round trip. Also open: macros whose pins need either axis (the lattice is per axis),
+  and the finite track count near the die edge (the flow clamps it, the lattice does not).</li>
+  <li><strong class="item-id">W5</strong> Resolve a node by a unique suffix (<code>u_storage_64w64d_3</code> for <code>__flat___sub_16.__flat___sub_552.__flat___sub_256.u_storage_64w64d_3</code>) in every command that takes a name.</li>
+  <li><strong class="item-id">W6</strong> <code>whatif</code>: partial results when the time runs out (64 candidates at 0.55 s overrun the default timeout and the whole answer is dropped), a legality verdict per candidate (an off-core
+  candidate is timed as if it were fine), and HPWL and congestion deltas next to the timing.</li>
+</ul>
+<h3>Incremental and relative (next)</h3>
+<ul>
+  <li><strong class="item-id">W20</strong> The part of the start that is not incremental: the full-design STA and the flat physical view (about 7 of the 9 warm minutes). Per the target flow they belong after the plan and per chunk, or behind a cache keyed by chunk content.</li>
+  <li><strong class="item-id">W21</strong> No per-chunk <code>macro_plan</code> on the agent socket: isolated per-chunk placement exists only from the CLI (<code>chunk.run=feedback</code>, <code>chunk.only</code>, <code>place-chunks --chunk</code>). The chunk synthesis and its incremental reuse would hang on that command.</li>
+  <li><strong class="item-id">W22</strong> The seed cache covers the fp stage's local seeds only; the macro stage and the final placement still start from them each run. Chunk contacts are kept fixed in <code>translate</code>; a seed whose neighbors moved a lot is not re-checked against its new contacts.</li>
+  <li><strong class="item-id">W23</strong> Pins are stored in die DBU, and saved <code>livehd.placement.hints</code> are bound by the flow in die coordinates: a chunk that moves leaves its pinned macros behind. The chunk-relative form is recorded (<code>relationships</code>, trace) but the flow-side binder does not read it. Alignment already is relative to its reference.</li>
+  <li><strong class="item-id">W24</strong> Why seven chunks refined when two moved (the macro-slot guess above) and a chunk-local macro seed that does not depend on where the chunk sits; the <code>porous</code> flag of the target flow (cells crossing chunk edges, contacts following) and macros that float between chunks.</li>
+</ul>
+<h3>Scale (mixed_soc)</h3>
+<ul>
+  <li><strong class="item-id">W15</strong> Progress and interruption inside chunked floorplan placement: chunks done of total, the chunk in progress, a time estimate, and a poll point (or a cooperative cancel) between chunks and
+  inside <code>refine_chunk_seeds</code> so <code>pause</code> and <code>stage</code> work. Today the GUI is silent for 40+ minutes and only a kill stops it. Also decide the default of
+  <code>chunk.seed_detail</code> for a design this size.</li>
+  <li><strong class="item-id">W16</strong> The page's <code>/design</code> is 14.7 MB for 4,637 nodes, nearly all <code>chunk_plan</code> (the saved plan with every port and membership); every <code>chunk_*</code> export
+  re-parses it (30 ms each, linear in the design). Serve the plan to the page in pieces and keep the parsed plan.</li>
+  <li><strong class="item-id">W17</strong> sky130hd cannot take this design's memory proxies (158 pins, 127 usable met4 tracks on a 117 um edge); a proxy should grow to fit its pins, or the message should name the option that
+  helps. <code>macro_scan</code> has nothing to measure at the fp gate (macros there carry no pin connectivity): scan from the macro gate on.</li>
+  <li><strong class="item-id">W18</strong> When the GUI controller process died (the <code>bad_alloc</code> of G15) the flow process, 51 GB of it, kept running headless and the controller stayed a zombie. The flow should notice and exit, or restart the controller.</li>
+  <li><strong class="item-id">W19</strong> Guidance for a design name the plan does not have is accepted silently (<code>"design":"other"</code> applied); the record is retained, but the agent is not told it matched nothing.</li>
+</ul>
+<h3>API behavior left as found</h3>
+<ul>
+  <li><strong class="item-id">W7</strong> <code>state.wns</code> flips between a ranking estimate (-1,360 ps) and the full measurement (-602 ps) with only <code>timing_est</code> to tell; a <code>wns_kind</code> and the frame it belongs to belong next to the number.</li>
+  <li><strong class="item-id">W8</strong> A <code>restart</code> or <code>area</code> change has no progress or estimate; <code>command_status</code> of the commands queued before it is lost, and <code>gui_agent.json</code> names a dead pid after a crash
+  (<code>lhd_gui.py</code> checks it; other clients should).</li>
+  <li><strong class="item-id">W9</strong> A move is accepted at a fractional DBU (1000.7), outside the core (applied with <code>outside_core</code>, not refused), and with the same node twice (the last wins); decide which of these are errors.</li>
+  <li><strong class="item-id">W10</strong> <code>summary</code> and <code>explorations</code> answer 6 KB or more per call; a <code>brief</code> flag.</li>
+  <li><strong class="item-id">W11</strong> <code>find</code> reports <code>count</code> as the names it collected, which stops at 200,000 (<code>truncated</code> says so); a true match count, and <code>geometry</code> sorting all 4M cells for its strip report (1.6 s), are not done.</li>
+</ul>
+<h3>Testing not done</h3>
+<ul>
+  <li><strong class="item-id">W12</strong> Parallel clients on the socket, a slow or half-open request, an oversized body, and a sustained fuzz of the JSON commands were not run; only single-client malformed input (about 150 cases) was.</li>
+  <li><strong class="item-id">W13</strong> Live runs on the other HighTide designs (coralnpu, eyeriss, NVDLA partitions, vortex, bp) and on designs with hundreds of macros.</li>
+  <li><strong class="item-id">W14</strong> <code>/node?i=abc</code> reads as node 0 and <code>/screenshot.png?w=-5</code> is accepted (token or socket protected, harmless, not tightened).</li>
 </ul>
 </main>
 <footer>LiveHD TODO</footer>

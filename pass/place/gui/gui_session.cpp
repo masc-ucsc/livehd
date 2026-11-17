@@ -869,6 +869,7 @@ void Session::set_timing_locked(double wns_ps, double tns_ps, int iteration) {
 }
 
 void Session::publish_locked(const double* x, const double* y, size_t n, const Stats& st_in, const std::string& state) {
+  last_flow_ = std::chrono::steady_clock::now();  // the flow is alive and polling (see state.since_flow_s)
   Stats st = st_in;
   if (has_timing_) {  // timing is sampled by the flow's checkpoints, not by every poll
     st.has_timing       = true;
@@ -1114,8 +1115,26 @@ std::string Session::Command::move_fields_json() const {
   } else if (cmd == "move" || cmd == "place_positions" || cmd == "macro_move") {
     numbers(relative ? "dx" : "x", x);
     numbers(relative ? "dy" : "y", y);
+    if (in_chunk) {
+      out += R"(,"frame":"chunk")";
+      if (!chunk.empty()) {
+        out += std::format(R"(,"chunk":"{}")", esc(chunk));
+      }
+    }
   }
   return out;
+}
+
+std::shared_ptr<const Chunk_frame> Session::chunk_frame_of(const std::shared_ptr<const Scene>& scene) const {
+  if (!scene) {
+    return nullptr;
+  }
+  std::lock_guard lk(chunk_frame_m_);
+  if (chunk_frame_scene_.lock() != scene) {
+    chunk_frame_       = Chunk_frame::parse(scene->chunk_plan);
+    chunk_frame_scene_ = scene;
+  }
+  return chunk_frame_;
 }
 
 void Session::trace_locked(const Command& c) {
@@ -3446,6 +3465,10 @@ std::string Session::state_json() const {
                      cfg_.policy.no_buffer_edits);
   out += std::format(R"(,"work":{},"replay_work":{},"timing_budget_exhausted":{})",
                      work_.json(), replay_work_.json(), timing_budget_exhausted_);
+  // Seconds since the flow last published a frame. While it is "running" and this keeps growing the flow is inside a stage
+  // that does not poll (chunked floorplan placement on a large design runs for tens of minutes): a queued pause, stage
+  // switch or timing request waits for the next poll, and `iter` and `hpwl` do not move.
+  out += std::format(R"(,"since_flow_s":{:.1f})", std::chrono::duration<double>(std::chrono::steady_clock::now() - last_flow_).count());
   const auto operation = [&](const char* name, bool configured, bool deferred) {
     return std::format(R"({{"operation":"{}","configured":{},"deferred":{},"trigger":"{}"}})", name, configured, deferred,
                        cfg_.scoped_repair_worker ? "requested_scope_at_gate" : "after_legal_placement");
@@ -3951,6 +3974,21 @@ std::string Session::parse_command(const std::string& json, Command& c) const {
         return "provide one orientation per node";
       }
     }
+    if (d.HasMember("frame")) {
+      if (!d["frame"].IsString() || (std::string_view(d["frame"].GetString()) != "die" && std::string_view(d["frame"].GetString()) != "chunk")) {
+        return "frame must be \"die\" (x and y are die DBU, the default) or \"chunk\" (relative to the lower-left corner of the chunk)";
+      }
+      c.in_chunk = std::string_view(d["frame"].GetString()) == "chunk";
+    }
+    if (d.HasMember("chunk")) {
+      if (!d["chunk"].IsString() || !d["chunk"].GetStringLength() || !c.in_chunk) {
+        return "chunk names a physical chunk id and goes with \"frame\":\"chunk\"";
+      }
+      c.chunk.assign(d["chunk"].GetString(), d["chunk"].GetStringLength());
+    }
+    if (c.in_chunk && (d.HasMember("align") || d.HasMember("dx") || d.HasMember("dy"))) {
+      return "frame chunk gives absolute x and y inside the chunk; align and dx/dy are already relative to other things";
+    }
     if (d.HasMember("edges")) {
       if (!d.HasMember("align") || !d["edges"].IsString()) {
         return "edges requires a named alignment and body or halo";
@@ -4165,9 +4203,20 @@ std::string Session::resolve_move_locked(Command& c, const Frame* basis, bool ca
   if (!c.align.empty() && ref < 0) {
     return "unknown reference " + c.reference;
   }
-  if (c.relative || !c.align.empty()) {
+  if (c.relative || !c.align.empty() || c.in_chunk) {
     // Keep the instruction before replacing its arguments with execution coordinates.
     c.relationship = R"({"cmd":"move")" + c.move_fields_json() + (c.final_ ? "}" : R"(,"final":false})");
+  }
+  std::shared_ptr<const Chunk_frame> chunks;
+  const Chunk_frame::Chunk*          named = nullptr;
+  if (c.in_chunk) {
+    chunks = chunk_frame_of(scene_);
+    if (!chunks) {
+      return "this scene has no chunk plan: the design is one home, so use die coordinates";
+    }
+    if (!c.chunk.empty() && !(named = chunks->find(c.chunk))) {
+      return "unknown chunk " + c.chunk + " (export chunks lists the ids)";
+    }
   }
   if (!c.align.empty()) {
     c.x.resize(c.nodes.size());
@@ -4183,7 +4232,7 @@ std::string Session::resolve_move_locked(Command& c, const Frame* basis, bool ca
       // The solver cannot move a placed macro: `move` used to skip it and still answer "applied" with its old pose.
       return c.nodes[k] + " is a placed macro at this gate and move cannot move it: use macro_move (it re-runs the flow to the latest gate with the macro there)";
     }
-    if (!c.relationship.empty() && !scene_->nodes[i].movable && state_name_ != "done") {
+    if ((c.relative || !c.align.empty()) && !scene_->nodes[i].movable && state_name_ != "done") {
       return "a relative or aligned move needs a movable node and " + c.nodes[k]
              + " is fixed at this gate (a placed macro): give it absolute x and y, or move it at the fp or macro gate";
     }
@@ -4201,6 +4250,14 @@ std::string Session::resolve_move_locked(Command& c, const Frame* basis, bool ca
     if (c.relative) {
       c.x[k] += coordinates.x.at(i);
       c.y[k] += coordinates.y.at(i);
+    }
+    if (c.in_chunk) {
+      const auto* home = named ? named : chunks->of(c.nodes[k]);
+      if (!home) {
+        return c.nodes[k] + " belongs to no chunk of the plan: name one with \"chunk\", or use die coordinates";
+      }
+      c.x[k] += home->box[0];  // relative to the chunk's lower-left corner
+      c.y[k] += home->box[1];
     }
     if (!c.align.empty()) {
       const size_t j  = ref;
@@ -4241,6 +4298,7 @@ std::string Session::resolve_move_locked(Command& c, const Frame* basis, bool ca
     }
   }
   c.relative = false;
+  c.in_chunk = false;
   c.align.clear();
   return {};
 }

@@ -2181,6 +2181,7 @@ std::string Session::agent_call(const std::string& json, int timeout_ms) {
     std::shared_ptr<const Scene> scene;
     std::shared_ptr<const Frame> frame;
     bool                         orientation_editable = false;
+    std::shared_ptr<const Chunk_frame> chunks;
     {
       std::lock_guard lock(m_);
       if (auto why = expected_revision_locked(); !why.empty()) {
@@ -2191,10 +2192,11 @@ std::string Session::agent_call(const std::string& json, int timeout_ms) {
       // the same condition resolve_move_locked applies to an orientation change
       orientation_editable = bool(orientation_provider_) && state_name_ == "gate" && (gate_name_ == "fp" || gate_name_ == "macro");
     }
+    chunks = chunk_frame_of(scene);
     if (!scene || !frame) {
       return err_json("no published placement");
     }
-    return macro_scan(*scene, *frame, d, orientation_editable);
+    return macro_scan(*scene, *frame, d, orientation_editable, chunks.get());
   }
   if (cmd == "clusters") {
     std::lock_guard lk(m_);
@@ -2571,6 +2573,7 @@ std::string Session::agent_call(const std::string& json, int timeout_ms) {
     std::vector<Macro_pose> poses;
     std::string rows, components;
     size_t      count = 0;
+    const auto  chunks = format == "dbu" ? chunk_frame_of(scene_) : nullptr;  // each macro's home chunk and its place in it
     for (size_t i = 0; i < scene_->nodes.size(); ++i) {
       const auto& n = scene_->nodes[i];
       if ((n.kind != Kind::fixed && n.kind != Kind::macro) || n.name.starts_with("__lhd_frame_mask_")) {
@@ -2594,12 +2597,17 @@ std::string Session::agent_call(const std::string& json, int timeout_ms) {
         components += std::format("- {} {} + FIXED ( {} {} ) {} ;\n", name, n.master, x, y, n.orient);
       } else {
         const double scale  = format == "placereasoner" ? scene_->dbu_per_um : 1;
-        rows               += std::format(R"({}{{"name":"{}","x":{},"y":{},"orient":"{}"}})",
+        std::string home;
+        if (const auto* chunk = chunks ? chunks->of(n.name) : nullptr) {
+          home = std::format(R"(,"chunk":"{}","chunk_x":{},"chunk_y":{})", esc(chunk->id), num(double(x) - chunk->box[0]), num(double(y) - chunk->box[1]));
+        }
+        rows               += std::format(R"({}{{"name":"{}","x":{},"y":{},"orient":"{}"{}}})",
                             count ? "," : "",
                             esc(name),
                             num(x / scale),
                             num(y / scale),
-                            format == "placereasoner" ? odb_orient.at(n.orient) : n.orient);
+                            format == "placereasoner" ? odb_orient.at(n.orient) : n.orient,
+                            home);
       }
       ++count;
     }
@@ -2705,7 +2713,7 @@ std::string Session::agent_call(const std::string& json, int timeout_ms) {
 "explore":"{tier:T0|T1|T2|T3|T4, target:main, patch, expect?, label?, client?} -> isolated geometry or frozen-netlist evaluation",
 "geometry":"{target?} -> outline, utilization, macro periphery, cluster bounds, facing strips with standard-cell occupancy and open entrances, and rasterized dead space in DBU",
 "whatif":"{candidates:[move or batch,...], max_nets?, expect?, timeout_ms?} -> measured journal trials and rollback at one gate",
-"macro_scan":"{node, positions?:[[x,y],...] | grid?:{nx,ny}, orientations?:[N|FN|FS|S,...], top?, refine?, expect?} -> positions (DBU, lower-left) of one macro ranked by its pin nets' half-perimeter, legal ones only, the current pose included, the best refined downhill; cells frozen, no timing, other macros' pins not counted: screen here, then whatif the best",
+"macro_scan":"{node, positions?:[[x,y],...] | grid?:{nx,ny}, orientations?:[N|FN|FS|S,...], top?, refine?, frame?:die|chunk, chunk?, expect?} -> positions (DBU, lower-left; with frame chunk relative to the home chunk, whose box is the grid and the limit) of one macro ranked by its pin nets' half-perimeter, legal ones only, the current pose included, the best refined downhill; cells frozen, no timing, other macros' pins not counted: screen here, then whatif the best",
 "maps":"{} -> frame, availability, peak, overflow, over-capacity share and hotspot boxes of each measured grid",
 "clusters":"{} -> available placement cluster names and member counts",
 "explore_begin":"{expect?:{frame},set?:{physical_option:CLI_value}} -> start a private foreground replay at this gate",
@@ -2728,7 +2736,7 @@ std::string Session::agent_call(const std::string& json, int timeout_ms) {
 "relax":"{iterations,scope?} -> bounded GP and legalization with frozen exterior and implementation",
 "legalize":"{scope?:{nodes:[names] | box:[xl,yl,xh,yh]}} -> legalize the placement at a gate, preserving active pins; see state.legalization",
 "evaluate":"{expect?:{frame,baseline?,target?,intent?,evaluation?}} -> request full timing; state.evaluation_seq identifies the completed attempt, evaluation_frame its placement",
-"move":"{nodes,x/y or dx/dy or align+reference, gap?, edges?:body|halo, orientation?, final?, expect?} -> queue a DBU edit; command_status returns resolved coordinates",
+"move":"{nodes, x/y (one number for every node, or one per node) or dx/dy or align+reference, gap?, edges?:body|halo, orientation?, frame?:die|chunk, chunk?, final?, expect?} -> queue a DBU edit; with frame chunk, x and y are measured from the lower-left corner of the chunk (the one named by chunk, else each node's home chunk) and the instruction stays recorded that way; command_status returns resolved coordinates",
 "macro_move":"{nodes,x,y (DBU, lower-left),orientation?:N|S|FN|FS (one or one per node; memory proxies only),final?} -> place a PLACED (fixed) macro, which move cannot: remembers the pose and re-runs the flow to the latest gate with it there (the session restarts: tools/lhd_gui.py --retry rides it out)",
 "pin":"{nodes} -> anchor legal objects at their published positions",
 "unpin":"{nodes} -> release selected anchors",
@@ -2944,14 +2952,19 @@ std::string Session::agent_call(const std::string& json, int timeout_ms) {
       return err_json("bad regex (RE2 syntax, no backreferences or lookaround): " + re->error());
     }
   }
-  std::lock_guard lk(m_);
+  std::unique_lock lk(m_);
   if (!scene_) {
     return err_json("no design yet");
   }
   if (auto why = expected_revision_locked(); !why.empty()) {
     return err_json(why);
   }
-  const auto& s = *scene_;
+  // The scene is immutable: scan it without the session lock. On a four-million-node design a scan is 100 ms or more, and
+  // with the lock held every other client, the page and the flow's own publish waited behind it.
+  const auto scene_hold    = scene_;
+  const auto selection_now = selection_;
+  lk.unlock();
+  const auto&              s = *scene_hold;
   std::vector<std::string> names;
   bool                     truncated = false;
   std::string              regex_text = str("regex"), scope = str("scope", "all");
@@ -2988,7 +3001,7 @@ std::string Session::agent_call(const std::string& json, int timeout_ms) {
     }
     std::unordered_set<std::string> chosen;
     if (scope == "selected") {
-      chosen.insert(selection_.begin(), selection_.end());
+      chosen.insert(selection_now.begin(), selection_now.end());
     }
     for (const auto& n : s.nodes) {
       bool in = false;
@@ -3033,6 +3046,7 @@ std::string Session::agent_call(const std::string& json, int timeout_ms) {
   if (cmd == "find") {
     return std::format(R"({{"ok":true,"count":{},"truncated":{},"names":[{}]}})", names.size(), truncated ? "true" : "false", sample);
   }
+  lk.lock();  // the page's selection and highlights are session state
   if (cmd == "select") {
     const size_t count = names.size();
     set_selection_locked(std::move(names));

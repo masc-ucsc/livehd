@@ -16,6 +16,35 @@ The <a href="../../pass/place/README.md#color-and-macro-chunk-floorplan">chunk g
 home edits and local worker measurements. Keep scheduling and physical correctness work in
 <a href="2f-scalability.html">2f-scalability</a>.</p>
 
+<h2 id="chunk-flow">Target flow for large designs: chunk-first, agent-driven</h2>
+<p>Principle: <code>synth --gui</code> must not synthesize and time the whole design flat before the agent sees a floorplan.
+That works only when the chunk memory budget is set to the machine's memory (the whole design is then one chunk).
+Today it is flat: on the real mixed_soc, ABC, a full-design STA and the flat physical view come first, and the fp gate arrives after
+about 30 minutes and 51 GB (9 minutes when the abc cache is warm).</p>
+<ol>
+  <li><strong>Compile and color.</strong> Colors (synthesis partitions) and the color graph, with no mapping of the whole design.</li>
+  <li><strong>fp_plan</strong> on the color graph: chunks, the macros as independent objects, boundary contacts. <em>Today:</em> the planner
+  and the GUI/agent edits (move, split, fuse, density, interface copies) exist; they run after full synthesis.</li>
+  <li><strong>The agent works the plan.</strong> It may trigger <strong>macro_plan for one chunk</strong>, not the whole design. That
+  synthesizes only that chunk's regions (incremental: the abc cache, so unchanged regions are not mapped again) and skips costly steps:
+  no timing feedback and no resynthesis, unless it reuses a previous run that already had resynthesis incorporated.
+  <em>Today:</em> isolated per-chunk placement exists only from the CLI (<code>chunk.run=feedback</code>, <code>chunk.only=ID</code>,
+  <code>place-chunks --chunk</code>); the agent socket has no per-chunk macro_plan command.</li>
+  <li><strong>Chunks and most macros decided.</strong> Macros that float between chunks are left for the final stage.
+  <em>Today:</em> not seen as an option.</li>
+  <li><strong>Chunk IOs decided</strong> (one fixed contact per crossing net). <em>Today:</em> done at fp_plan.</li>
+  <li><strong>Final placement per chunk.</strong> Cells do not leave their chunk. <em>Today:</em> matches (no cross-chunk migration).
+  <strong>Wanted:</strong> a <code>porous</code> flag that lets cells cross chunk edges, with the chunk IOs moving and adjusting as cells move.</li>
+</ol>
+<h3>Rules for the agent</h3>
+<ul>
+  <li><strong>Incremental.</strong> A chunk is synthesized once per content; moving or reshaping a chunk replaces it instead of re-synthesizing or re-placing it.
+  A stored local placement is keyed by chunk content and kept relative to the chunk (<code>synth.place.chunk.seed_cache</code>, in progress).</li>
+  <li><strong>Relative coordinates.</strong> Macro alignment and pins are relative to themselves or to their chunk. Absolute coordinates are chunk-absolute;
+  die-absolute is the rare case. <em>Today:</em> <code>frame:"chunk"</code> for <code>move</code> and <code>macro_scan</code> and per-macro chunk coordinates exist.
+  Pins and saved hints are still die DBU.</li>
+</ul>
+
 <h2>Remaining work</h2>
 <ol>
 <li><strong>Measure a home while the FP gate stays open.</strong> Submit a placement worker for

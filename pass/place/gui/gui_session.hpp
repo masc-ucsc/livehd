@@ -1,5 +1,6 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
+#include "gui_chunks.hpp"
 #include "gui_policy.hpp"
 #include "rapidjson/fwd.h"
 // Interactive placement session (`lhd synth --gui`; agent channel: .claude/skills/livehd/agent_socket.md).
@@ -486,6 +487,9 @@ private:
     std::vector<std::string>           orientations;
     std::string                        align, reference, relationship;
     double                             gap = 0;
+    // x and y are relative to a chunk's lower-left corner: the named chunk, or the home chunk of each node.
+    bool                               in_chunk = false;
+    std::string                        chunk;
     std::string                cmd;
     std::vector<std::string>   nodes;
     std::vector<double>        x, y;
@@ -650,6 +654,11 @@ private:
     std::string kind;
     bool        ro = false;
   };
+  // The parsed chunk plan of the current scene, built once per scene (the plan can be tens of MB of JSON).
+  mutable std::mutex                                chunk_frame_m_;
+  mutable std::weak_ptr<const Scene>                chunk_frame_scene_;
+  mutable std::shared_ptr<const Chunk_frame>        chunk_frame_;
+  std::shared_ptr<const Chunk_frame>                chunk_frame_of(const std::shared_ptr<const Scene>&) const;
   mutable std::mutex               flags_m_;
   std::map<std::string, Flag_spec> flag_specs_;
   std::string                      validate_flag(const std::string& name, const std::string& value) const;
@@ -691,6 +700,7 @@ private:
   double                         timing_spent_s_ = 0, snapshot_setup_s_ = 0;
   int                            polls_since_timing_ = 0;
   std::chrono::steady_clock::time_point t_start_;
+  std::chrono::steady_clock::time_point last_flow_ = std::chrono::steady_clock::now();  // the flow's last publish
   bool                           has_timing_ = false, timing_est_ = false;
   double                         period_ps_ = 0;
   double                         wns_ps_ = 0, tns_ps_ = 0;
