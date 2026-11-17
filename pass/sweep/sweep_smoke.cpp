@@ -124,6 +124,49 @@ TEST(SweepFlatten, SplicesTheCalleeBodyAndKeepsBlackBoxes) {
   EXPECT_EQ(livehd::sweep::reachable_closure({top}).size(), 1u);
 }
 
+TEST(SweepFlatten, KeepsAClockGateLeafAsAnInstance) {
+  auto& lib      = livehd::Hhds_graph_library::instance("lgdb_sweep_flatten_cg");
+  auto  child_io = lib.create_io("cg");
+  child_io->add_input("CP", 1);
+  child_io->set_bits("CP", 1);
+  child_io->add_input("E", 2);
+  child_io->set_bits("E", 1);
+  child_io->add_output("Q", 3);
+  child_io->set_bits("Q", 1);
+  auto child = child_io->create_graph();
+  // qd <= E @(CP); Q = CP & qd  (the NVDLA CKLNQD12 shape)
+  auto flop = gu::create_typed_node(*child, Ntype_op::Flop);
+  auto qd   = flop.create_driver_pin(0);
+  gu::set_ubits(qd, 1);
+  gu::setup_sink_by_name(flop, "clock_pin").connect_driver(child->get_input_pin("CP"));
+  gu::setup_sink_by_name(flop, "din").connect_driver(child->get_input_pin("E"));
+  auto gate = gu::create_typed_node(*child, Ntype_op::And);
+  gu::setup_sink_by_name(gate, "as").connect_driver(child->get_input_pin("CP"));
+  gu::setup_sink_by_name(gate, "as").connect_driver(qd);
+  auto q = gate.create_driver_pin(0);
+  gu::set_ubits(q, 1);
+  q.connect_sink(child->get_output_pin("Q"));
+
+  auto top_io = lib.create_io("top");
+  top_io->add_input("CP", 1);
+  top_io->add_input("E", 2);
+  top_io->add_output("Q", 3);
+  auto top  = top_io->create_graph();
+  auto inst = gu::create_typed_node(*top, Ntype_op::Sub);
+  inst.set_subnode(child_io);
+  top->get_input_pin("CP").connect_sink(inst.create_sink_pin(child_io->get_input_port_id("CP")));
+  top->get_input_pin("E").connect_sink(inst.create_sink_pin(child_io->get_input_port_id("E")));
+  auto out = inst.create_driver_pin(child_io->get_output_port_id("Q"));
+  gu::set_ubits(out, 1);
+  out.connect_sink(top->get_output_pin("Q"));
+
+  const auto stats = livehd::sweep::flatten({top});
+  EXPECT_EQ(stats.inlined, 0u);
+  EXPECT_EQ(stats.kept, 1u);
+  EXPECT_EQ(count_op(*top, Ntype_op::Sub), 1u);
+  EXPECT_EQ(count_op(*top, Ntype_op::And), 0u);
+}
+
 TEST(SweepState, HoldRegisterAtItsResetValueBecomesAConstant) {
   auto graph = make_graph("lgdb_sweep_hold", "hold", 4);
   auto flop  = gu::create_typed_node(*graph, Ntype_op::Flop);  // placeholder to get Q before din exists
