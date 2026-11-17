@@ -1915,16 +1915,20 @@ void synth_command(Options& opts, Result& res) {
     res.qor_json = R"({"kind":"chunk_handoff","whole_design_placed":false})";
     return;
   }
-  if (!root.empty() && !fingerprint.empty() && !livehd::diag::sink().has_errors() && !res.qor_json.empty()) {
-    rapidjson::StringBuffer                    sb;
-    rapidjson::Writer<rapidjson::StringBuffer> w(sb);
-    w.StartObject();
-    w.Key("fingerprint");
-    w.String(fingerprint.c_str());
-    w.Key("qor");
-    w.RawValue(res.qor_json.data(), res.qor_json.size(), rapidjson::kObjectType);
-    w.EndObject();
-    manifest_put(root, "synth", std::string_view{sb.GetString(), sb.GetSize()});
+  if (!root.empty() && !livehd::diag::sink().has_errors() && !res.qor_json.empty()) {
+    // A Verilog filelist prevents the whole-flow shortcut, but not replay of
+    // the command: the front end must inspect those dependencies again.
+    if (!fingerprint.empty()) {
+      rapidjson::StringBuffer                    sb;
+      rapidjson::Writer<rapidjson::StringBuffer> w(sb);
+      w.StartObject();
+      w.Key("fingerprint");
+      w.String(fingerprint.c_str());
+      w.Key("qor");
+      w.RawValue(res.qor_json.data(), res.qor_json.size(), rapidjson::kObjectType);
+      w.EndObject();
+      manifest_put(root, "synth", std::string_view{sb.GetString(), sb.GetSize()});
+    }
     record_invocation(opts, "synth", opts.workdir, root);
   }
 }

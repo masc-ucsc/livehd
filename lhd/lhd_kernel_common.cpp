@@ -2394,6 +2394,12 @@ void record_invocation(const Options& opts, std::string_view command, const std:
   const auto& argv = opts.invocation_argv;
   for (size_t i = 1; i < argv.size(); ++i) {
     const auto& a = argv[i];
+    if (a == "--") {
+      for (; i < argv.size(); ++i) {
+        w.String(argv[i].c_str());
+      }
+      break;
+    }
     if (a == "--setup-only" || a == "--run-only") {
       continue;
     }
@@ -2438,9 +2444,12 @@ bool replay_recorded_invocation(Options& opts) {
   }
   std::vector<std::string> args;
   args.emplace_back(opts.invocation_argv.empty() ? std::string{"lhd"} : opts.invocation_argv[0]);
+  std::vector<std::string> raw_args;
+  bool after_separator = false;
   for (const auto& v : doc["argv"].GetArray()) {
     if (v.IsString()) {
-      args.emplace_back(v.GetString());
+      after_separator = after_separator || std::string_view{v.GetString()} == "--";
+      (after_separator ? raw_args : args).emplace_back(v.GetString());
     }
   }
   args.emplace_back("--workdir");
@@ -2453,6 +2462,9 @@ bool replay_recorded_invocation(Options& opts) {
     }
     args.push_back(opts.invocation_argv[i]);
   }
+  // LiveHD overrides belong before the source-reader separator. In particular,
+  // --workdir and --result-json must not become slang options on replay.
+  args.insert(args.end(), raw_args.begin(), raw_args.end());
   // Sources were recorded as typed, so they resolve from the original cwd.
   std::filesystem::current_path(doc["cwd"].GetString(), ec);
   if (ec) {

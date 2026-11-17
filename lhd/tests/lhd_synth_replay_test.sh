@@ -56,4 +56,30 @@ case "$(recipe "$W/again.json")" in
   *) fail "the run after the edits did not record itself as done" ;;
 esac
 
-echo "PASS: lhd synth in the generated synth dir replays, skips when done, re-shows stats, reruns on a change"
+# Verilog filelists cannot use the whole-flow shortcut: includes may change.
+# They must still record a replayable invocation, with LiveHD overrides before
+# the `--` separator and source flags preserved after it.
+mkdir -p "$W/verilog"
+cat >"$W/verilog/dut.v" <<'VERILOG'
+`include "op.vh"
+module top(input a, b, output y);
+  assign y = a `OP b;
+endmodule
+VERILOG
+echo '`define OP &' >"$W/verilog/op.vh"
+printf '+incdir+.\ndut.v\n' >"$W/verilog/files.f"
+V="$W/verilog/wd/synth"
+(cd "$W/verilog" && "$LHD_ABS" synth --top top --set synth.liberty="$LIB" --workdir wd -q -- -F files.f -DREPLAY_TEST >"$W/vfirst.log" 2>&1) \
+  || { cat "$W/vfirst.log" >&2; fail "filelist synthesis failed"; }
+(cd "$V" && "$LHD_ABS" synth --result-json "$W/vwarm.json" -q >"$W/vwarm.log" 2>&1) \
+  || { cat "$W/vwarm.log" >&2; fail "filelist replay failed"; }
+cp -r "$V/net" "$W/net-before-include-edit"
+echo '`define OP ^' >"$W/verilog/op.vh"
+(cd "$V" && "$LHD_ABS" synth --result-json "$W/vedit.json" -q >"$W/vedit.log" 2>&1) \
+  || { cat "$W/vedit.log" >&2; fail "replay after an include edit failed"; }
+case "$(recipe "$W/vedit.json")" in
+  "synth: up to date"*) fail "an included source edit was not noticed" ;;
+esac
+diff -qr "$W/net-before-include-edit" "$V/net" >"$W/vnet.diff" && fail "include edit did not change the mapped netlist"
+
+echo "PASS: synthesis replay skips safe unchanged inputs, preserves filelists, and notices source/Liberty/include edits"
