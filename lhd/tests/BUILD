@@ -2168,6 +2168,18 @@ sh_test(
     ],
 )
 
+# A latch with a constant enable (never open: a constant; always open: a buffer) is folded before partitioning so it
+# never reaches the placer as an unmapped `latch` (LiteX always @(*) shapes).
+sh_test(
+    name = "lhd_abc_dead_latch_test",
+    size = "small",
+    srcs = ["lhd_abc_dead_latch_test.sh"],
+    data = _FLOW_DATA + [
+        "abc_dead_latch.v",
+        "abc_latch_q.lib",
+    ],
+)
+
 # compile.sweep + pass.specialize: the per-definition state sweep lets a constant cross registers without compile.flatten.
 sh_test(
     name = "lhd_sweep_hier_const_test",

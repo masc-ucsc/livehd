@@ -1273,6 +1273,7 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
   uint64_t dead_nodes = 0;
   for (const auto& graph : scratch_graphs) {
     dead_nodes += livehd::satopt::drop_dead_logic(graph.get());
+    livehd::synth::rewrite_unplaceable_latches(graph.get());
   }
   if (dead_nodes != 0) {
     std::print("[pass.abc] dropped {} dead combinational node(s) before mapping\n", dead_nodes);

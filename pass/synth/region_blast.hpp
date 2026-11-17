@@ -243,6 +243,10 @@ bool rewrite_single_shift(const livehd::partition::Region_body& rb);
 // `a % 2^k` over a non-negative dividend becomes `a & (2^k - 1)`, in place.
 void rewrite_trivial_rems(hhds::Graph* g);
 
+// Fold latches that are not latches (enable absent/constant) into a buffer or a constant. Run on a graph
+// BEFORE it is partitioned: a region's node list would otherwise name the deleted node.
+void rewrite_unplaceable_latches(hhds::Graph* g);
+
 // Per-node diagnostic provenance shared by the translation and the read-back.
 [[nodiscard]] int                pipeline_depth(const hhds::Node_class& node);
 [[nodiscard]] livehd::diag::Span node_span(const livehd::partition::Region_body& rb, const hhds::Node_class& n);

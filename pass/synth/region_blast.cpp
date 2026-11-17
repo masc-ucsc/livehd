@@ -271,6 +271,68 @@ void rewrite_trivial_rems(hhds::Graph* g) {
   }
 }
 
+// A latch whose enable is absent or constant has no latch cell and no place on a die. Always
+  // transparent (enable absent / non-zero) it is a buffer; never open (enable 0) it holds its
+// power-on value for ever, i.e. a constant (`initial`, else any value: 0 refines the undefined one,
+// the policy the ASIC flows already apply). Left native either shape reaches the placer as an
+// unmapped `latch` (LiteX `always @(*)` blocks that read a reg they also assign produce it).
+void rewrite_unplaceable_latches(hhds::Graph* g) {
+  struct Latch_fold {
+    hhds::Node_class n;
+    bool             never_open;
+  };
+  std::vector<Latch_fold> folds;
+  for (auto n : g->body().nodes()) {
+    if (gu::type_op_of(n) != Ntype_op::Latch) {
+      continue;
+    }
+    const auto en  = gu::get_driver_of_sink_name(n, "enable");
+    const auto din = gu::get_driver_of_sink_name(n, "din");
+    const auto ini = gu::get_driver_of_sink_name(n, "initial");
+    const auto q   = n.get_driver_pin(0);
+    if (din.is_invalid() || (!en.is_invalid() && !en.is_const())) {
+      continue;  // a variable enable is a real latch
+    }
+    if (!gu::get_driver_of_sink_name(n, "reset_pin").is_invalid() || !gu::get_driver_of_sink_name(n, "clock_pin").is_invalid()) {
+      continue;
+    }
+    bool never_open = false;
+    if (!en.is_invalid()) {
+      const auto& ec = gu::const_of(en);
+      if (ec.has_unknowns()) {
+        continue;
+      }
+      never_open = ec.is_known_false();
+    }
+    if (never_open) {
+      if (!ini.is_invalid() && (!ini.is_const() || gu::const_of(ini).has_unknowns())) {
+        continue;
+      }
+    } else if (!ini.is_invalid() || gu::bits_of(din) != gu::bits_of(q) || gu::is_unsign(din) != gu::is_unsign(q)) {
+      continue;  // a power-on value makes the transparent form observable only before the first eval; keep it native
+    }
+    folds.push_back({n, never_open});
+  }
+  for (const auto& f : folds) {
+    const auto                   n   = f.n;
+    const auto                   ini = gu::get_driver_of_sink_name(n, "initial");
+    hhds::Pin_class              repl;
+    if (f.never_open) {
+      repl = gu::create_const(*g, ini.is_invalid() ? *Dlop::create_integer(0) : gu::const_of(ini));
+    } else {
+      repl = gu::get_driver_of_sink_name(n, "din");
+    }
+    std::vector<hhds::Pin_class> readers;
+    for (const auto& e : n.get_driver_pin(0).out_edges()) {
+      readers.push_back(e.sink);
+    }
+    for (const auto& reader : readers) {
+      reader.connect_driver(repl);
+    }
+    n.del_node();
+  }
+}
+
 // A region consisting solely of a constant shift is pure bus wiring (plus
 // sign extension for SRA). ABC turns its padding into one mapped object per
 // output bit (Rob has hundreds of these regions, growing to 10k bits each).
