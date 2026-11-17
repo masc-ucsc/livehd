@@ -5,6 +5,13 @@ load("@rules_cc//cc:defs.bzl", "cc_library")
 
 load("//tools:copt_default.bzl", "COPTS")
 
+# The reuse proof is part of the synthesis cache's code identity.
+filegroup(
+    name = "semdiff_srcs",
+    srcs = ["semdiff.cpp", "semdiff.hpp"],
+    visibility = ["//visibility:public"],
+)
+
 # Reusable engine: structural_match(a, b) stamps the `match` attribute. Free of
 # the cvc5-heavy pass/lec dep (the name normalization is replicated locally), so
 # `lec` can call it cheaply to pre-match before building its miter (v2).

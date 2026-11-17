@@ -64,6 +64,7 @@ genrule(
         "//pass/liberty:liberty_dff_srcs",
         "//pass/formal",  # memory and selector proof semantics
         "//pass/partition:partition_srcs",
+        "//pass/semdiff:semdiff_srcs",  # the exact proof authorizing cache reuse
         "//pass/specialize:specialize_srcs",  # constants specialized into the private copy
     ],
     outs = ["synth_salt.hpp"],
