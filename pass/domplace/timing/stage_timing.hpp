@@ -61,6 +61,7 @@ struct Stage_timing_options {
   uint64_t               model_generation = 0;
   std::optional<int64_t> dbu;                         // LEF units per micron of the RC cell sizes; the bundle's when absent
   std::string            netlist = "mapped netlist";  // what the graph is, for the report
+  double                 output_load_ff = 0;  // the inputs' output-port load, recorded so an offline replay matches
 };
 struct Stage_timing {
   std::string              status;     // complete | partial (IO cut) | incomplete

@@ -163,6 +163,7 @@ int main(int argc, char** argv) {
       }
     }
     inputs.clock_uncertainty_ps = number(config, "clock_uncertainty_ps").value_or(0);
+    inputs.output_load_ff       = number(config, "output_load_ff").value_or(0);  // lhd's synth.io_load (model.output_load_ff)
 
     // The netlist: the placed lg (its placement_rc attribute is the RC), and/or
     // the bit-level DEF import, which a netlist with word-valued ports needs.

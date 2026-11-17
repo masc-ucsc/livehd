@@ -37,7 +37,8 @@ bundle = W / 'synth/qor.json.domino'
 # (outside the saved subset, so one clock on its port) and the bundle.
 base = {'liberty': [str(libdir / 'sky130hd.lib')], 'lg_dir': str(W / 'synth/net'), 'top': 'domp', 'bundle': str(bundle),
         'sdc': str(sdc), 'sdc_units': {'time_ps': 1000, 'capacitance_ff': 1000},
-        'clock': {'name': 'clk', 'port': 'clk', 'period_ps': 10000}}
+        'clock': {'name': 'clk', 'port': 'clk', 'period_ps': 10000},
+        'output_load_ff': json.loads(placed)['model']['output_load_ff']}  # lhd's synth.io_load
 
 
 def run(name, config, success=True):
