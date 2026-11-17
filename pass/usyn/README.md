@@ -46,11 +46,12 @@ still requires nonincreasing whole-network cost/depth before acceptance.
 `synth.mapper=usyn` selects the register-to-register USYN coloring profile.
 Configure the pass with `pass.usyn.*`; ABC options are not inherited.
 
-Memories stay native blocks unless asked otherwise. The logical synthesis never
-lowers a Memory into registers and decode, whatever its size or port count:
-a memory is a native barrier of its region. The mapping step can lower it
-afterwards (`pass.usyn.memory=true|auto`, with `memory_max_bits`; an explicit
-`synth.memory=flops` selects `true`), using pass.abc's `memory_module.cpp`, so
+The logical synthesis never lowers a Memory into registers and decode,
+whatever its size or port count: a memory is a native barrier of its region.
+The mapping step then realizes it as `synth.memory` says, the same as pass.abc:
+`auto` (the default) lowers a memory within `synth.memory.max_bits` (or over 3
+ports), `flops` lowers every memory, `macro` keeps every memory native. It uses
+pass.abc's `memory_module.cpp`, so
 the mapped design holds the same registers and decode the ABC flow and a
 Yosys/ORFS flow build -- which is what a comparison against them needs (the
 HighTide harness passes `synth.memory=flops` to every arm). `synth.drop_init`

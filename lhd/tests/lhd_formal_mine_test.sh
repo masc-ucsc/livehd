@@ -64,7 +64,7 @@ WD="$W/wd"
 mkdir -p "$WD"
 OUT="$W/mine.out"
 "$LHD" formal verify "$W/miner.prp" --top miner --set formal.timeout=1 \
-  --set formal.min_timeout=1 --set formal.spec_mining_timeout=2 --set formal.engine=bmc \
+  --set formal.spec_mining_timeout=2 --set formal.engine=bmc \
   --set formal.mine=speculative --workdir "$WD" >"$OUT" 2>&1
 RC=$?
 # Exit policy (owner ruling): a budget-limited run is TIMEOUT-time — exit 0 with a
@@ -106,7 +106,7 @@ PYEOF
 # (rc=10) and that the assumes are proven and used.
 OUT="$W/roundtrip.out"
 "$LHD" formal verify "$W/miner.prp" "$WD/formal_mined.prp" --top miner --set formal.bound=3 \
-  --set formal.timeout=1 --set formal.min_timeout=1 --set formal.engine=bmc >"$OUT" 2>&1
+  --set formal.timeout=1 --set formal.engine=bmc >"$OUT" 2>&1
 RC=$?
 [ "$RC" -eq "$RC_TIMEOUT" ] \
   || fail "the round-trip must stay merely TIMEOUT-time (rc=$RC_TIMEOUT), not break the run; got rc=$RC: $(cat "$OUT")"

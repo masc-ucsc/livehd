@@ -69,11 +69,6 @@ void Pass_lec::setup() {
                        "elapsed wall time once. Sampled efforts start sampling immediately and use this as their "
                        "backstop. Legacy property verification retains its soft solver-time budget and per-unit floors",
                        "120");
-  m.add_label_optional("hard_timeout_mult",
-                       "additional backstop multiplier for legacy property verification (0 disables that backstop). "
-                       "It never extends LEC or explicit proof effort's shared formal.timeout wall limit; killed workers "
-                       "report TIMEOUT",
-                       "3");
   m.add_label_optional("witness", "print the counterexample/witness on Refuted (and gate simfail/simfail_run)", "true");
   m.add_label_optional("simfail",
                        "true|false — with --workdir, write Pyrope simulation tests for REFUTED formal results. "
@@ -179,10 +174,6 @@ void Pass_lec::setup() {
                        "check random input vectors against the miter, bounded by timeout, and report TESTED <level>, "
                        "never PROVEN",
                        "");
-  m.add_label_optional("min_timeout",
-                       "minimum per-unit solver allowance for legacy property's soft budget and hierarchical scheduling. "
-                       "A requested floor is always clamped by LEC or explicit proof effort's shared wall deadline",
-                       "20");
   m.add_label_optional("confirm_timeout",
                        "hierarchical top-down driver: wall budget (seconds, 0 = uncapped) for ONE in-context confirmation of a "
                        "refuted block (its parent re-proved with the block inlined). When it stays undecided and every other "
@@ -258,7 +249,7 @@ void Pass_lec::setup() {
                        "seq");
   m.add_label_optional("int_blast",
                        "cvc5 int-blasting (solve-bv-as-int): auto (default) = solve bit-vector-first, and a "
-                       "a solver give-up earns ONE int-blasted re-solve at the formal.min_timeout budget "
+                       "a solver give-up earns ONE int-blasted re-solve at the per-unit floor budget "
                        "(arithmetic-rewrite miters — reassociated/distributed/commuted multiplies — that "
                        "bit-blasting cannot finish prove in <1s as unbounded integers, while mask/extract-heavy "
                        "cones stay undecided, so the retry only ever adds information) | off = never | "
@@ -302,7 +293,6 @@ void Pass_lec::lec(Eprp_var& var) {
   o.gold_x            = std::string{var.get("gold_x", "ignore")};
   o.bound             = str_tools::to_i(var.get("bound", "6"));
   o.timeout           = str_tools::to_i(var.get("timeout", "120"));
-  o.hard_timeout_mult = str_tools::to_i(var.get("hard_timeout_mult", "3"));
   o.witness           = parse_bool(var.get("witness", "true"));
   o.phase             = std::string{var.get("phase", "after_reset")};
   o.reset_cycles      = str_tools::to_i(var.get("reset_cycles", "2"));

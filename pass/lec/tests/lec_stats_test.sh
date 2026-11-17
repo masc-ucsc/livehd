@@ -166,7 +166,7 @@ mod hard(a:U32, b:U32, en:Bool) -> (o:U8@[0]) {
 }
 EOF
 "$LHD" formal verify "$W/hard.prp" --top hard --set formal.engine=bmc \
-  --set formal.bound=3 --set formal.timeout=20 --set formal.min_timeout=1 --stats \
+  --set formal.bound=3 --set formal.timeout=20 --stats \
   --set "formal.report=$W/report.json" --workdir "$W/w_verify" > "$W/out_verify.txt" 2>&1
 VSOLVERS=$(sed -nE 's/.*formal\[stats\]: cvc5 +([0-9,]+) solver\(s\).*/\1/p' "$W/out_verify.txt" | head -1 | tr -d ,)
 if [ "${VSOLVERS:-0}" -ge 1 ]; then
@@ -190,7 +190,7 @@ fi
 # ...and it must be ABSENT when stats are off, so the schema does not grow a
 # permanently-empty member.
 "$LHD" formal verify "$W/hard.prp" --top hard --set formal.engine=bmc \
-  --set formal.bound=3 --set formal.timeout=20 --set formal.min_timeout=1 \
+  --set formal.bound=3 --set formal.timeout=20 \
   --set "formal.report=$W/report_off.json" --workdir "$W/w_verify_off" > /dev/null 2>&1
 if [ -f "$W/report_off.json" ] && python3 -c "
 import json,sys

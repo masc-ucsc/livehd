@@ -1,7 +1,7 @@
 #!/bin/bash
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #
-# pass.abc memory bit-blast (`pass.abc.memory=true`, explicitly enabled; pass/abc/
+# pass.abc memory bit-blast (`synth.memory=flops`, explicitly enabled; pass/abc/
 # mem_lower.cpp) on the shapes that were wrong or refused before the
 # constant-address / per-lane rework:
 #
@@ -164,15 +164,15 @@ map_wait() {  # map_wait <dir>: block until <dir>'s mapping finished (once)
   return 0
 }
 
-map_bg "$W/tile32"         "$TILE"          memtile -GN=32 --set pass.abc.memory=true
-map_bg "$W/tile8"          "$TILE"          memtile -GN=8  --set pass.abc.memory=true
-map_bg "$W/memall"         "$MEMALL"        memall  ""     --set pass.abc.memory=true
-map_bg "$W/tile8_off"      "$TILE"          memtile -GN=8  --set pass.abc.memory=false
-map_bg "$W/mem_auto_over"  "$W/mem1r1w.sv"  mem1r1w ""     --set pass.abc.memory_max_bits=63
-map_bg "$W/mem_auto_under" "$W/mem1r1w.sv"  mem1r1w ""     --set pass.abc.memory_max_bits=64
-map_bg "$W/mem_true_over"  "$W/mem1r1w.sv"  mem1r1w ""     --set pass.abc.memory=true --set pass.abc.memory_max_bits=63
-map_bg "$W/tile32_max"     "$TILE"          memtile -GN=32 --set pass.abc.memory_max_bits=255
-map_bg "$W/tile32_max0"    "$TILE"          memtile -GN=32 --set pass.abc.memory_max_bits=0
+map_bg "$W/tile32"         "$TILE"          memtile -GN=32 --set synth.memory=flops
+map_bg "$W/tile8"          "$TILE"          memtile -GN=8  --set synth.memory=flops
+map_bg "$W/memall"         "$MEMALL"        memall  ""     --set synth.memory=flops
+map_bg "$W/tile8_off"      "$TILE"          memtile -GN=8  --set synth.memory=macro
+map_bg "$W/mem_auto_over"  "$W/mem1r1w.sv"  mem1r1w ""     --set synth.memory.max_bits=63
+map_bg "$W/mem_auto_under" "$W/mem1r1w.sv"  mem1r1w ""     --set synth.memory.max_bits=64
+map_bg "$W/mem_true_over"  "$W/mem1r1w.sv"  mem1r1w ""     --set synth.memory=flops --set synth.memory.max_bits=63
+map_bg "$W/tile32_max"     "$TILE"          memtile -GN=32 --set synth.memory.max_bits=255
+map_bg "$W/tile32_max0"    "$TILE"          memtile -GN=32 --set synth.memory.max_bits=0
 map_bg "$W/eqt"            "$W/eqt.sv"      eqt     ""
 
 # ---------------------------------------------------------------------------
@@ -266,11 +266,11 @@ D="$W/tile32_max0"
 map_wait "$D"
 ! grep -hq '`include.*cgen_memory' "$D/netv/"*.v || fail "memory_max_bits=0 must lift the size limit"
 if "$LHD" pass abc --top memtile.memtile lg:"$W/tile32/lg" --emit-dir lg:"$W/bad_net" --set synth.liberty="$LIB" \
-    --set pass.abc.memory_max_bits=lots --workdir "$W/bad_w" -q --result-json "$W/bad.json" 2>/dev/null; then
-  fail "pass.abc accepted memory_max_bits=lots"
+    --set synth.memory.max_bits=lots --workdir "$W/bad_w" -q --result-json "$W/bad.json" 2>/dev/null; then
+  fail "pass.abc accepted synth.memory.max_bits=lots"
 fi
 if "$LHD" pass abc --top memtile.memtile lg:"$W/tile32/lg" --emit-dir lg:"$W/bad_net2" --set synth.liberty="$LIB" \
-    --set pass.abc.memory=maybe --workdir "$W/bad_w2" -q --result-json "$W/bad2.json" 2>/dev/null; then
+    --set synth.memory=maybe --workdir "$W/bad_w2" -q --result-json "$W/bad2.json" 2>/dev/null; then
   fail "pass.abc accepted memory=maybe"
 fi
 echo "PASS: memory_max_bits=0 lifts the size limit; malformed memory/memory_max_bits rejected"

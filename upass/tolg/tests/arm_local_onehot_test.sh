@@ -42,8 +42,9 @@ grep -q '"code":"onehot-violated"' "$W/overlap.jsonl" \
   || { cat "$W/overlap.jsonl" >&2; fail "overlap: the one-hot obligation was lost with the arm-local merges"; }
 # The first aegraph slot's census: one Hotmux carries the claim, the merges of
 # t, u and their temporaries are gone.
-grep '"code":"cprop-summary"' "$W/overlap.log" | head -1 | grep -q '"by_op":"[^"]*hotmux=1[,"]' \
-  || { grep '"code":"cprop-summary"' "$W/overlap.log" >&2; fail "overlap: expected exactly one Hotmux after tolg"; }
+# Stat records are collected in the diagnostics file (stderr shows them only with -d).
+grep '"code":"cprop-summary"' "$W/overlap.jsonl" | head -1 | grep -q '"by_op":"[^"]*hotmux=1[,"]' \
+  || { grep '"code":"cprop-summary"' "$W/overlap.jsonl" >&2; fail "overlap: expected exactly one Hotmux after tolg"; }
 
 rc=$(unit disjoint 's == 0' 's == 1')
 [ "$rc" -eq 0 ] || { tail -5 "$W/disjoint.log" >&2; fail "disjoint: exclusive conditions must compile (rc=$rc)"; }

@@ -298,7 +298,7 @@ TEST_F(ForkRace, DeadlineFormula) {
 }
 
 // The verify strategy race may legitimately run to formal.timeout +
-// (unsettled units x formal.min_timeout) (Lec_options::min_timeout). Its wall
+// (unsettled units x the per-unit min_timeout) (Lec_options::min_timeout). Its wall
 // deadline must never undercut that: a flat floor killed ind-first at 14 s on a
 // 24-obligation design whose documented bound was 1 + 24x3 = 73 s, throwing
 // away every unbounded induction proof.

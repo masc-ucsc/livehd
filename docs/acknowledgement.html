@@ -151,7 +151,6 @@ studied for ideas, without using their code, are under <a href="#tools-inspirati
 <li><a href="https://github.com/llvm/llvm-project">LLVM</a> — native code generation and ORC JIT for <code>lhd sim</code>.</li>
 <li><a href="https://github.com/OpenTimer/OpenTimer">OpenTimer</a> (masc-ucsc fork) with <a href="https://github.com/taskflow/taskflow">Taskflow</a> — static timing analysis (<code>pass/opentimer</code>).</li>
 <li><a href="https://github.com/limbo018/DREAMPlace">DREAMPlace</a> (masc-ucsc fork) — global, macro and detailed placement and routability kernels. Brings <a href="https://home.engineering.iastate.edu/~cnchu/flute.html">FLUTE</a>, <a href="https://lemon.cs.elte.hu">LEMON</a> and OpenMP.</li>
-<li><a href="https://github.com/ERGO-Code/HiGHS">HiGHS</a> — the LP solver for density warping (<code>pass/place/density_warp.cpp</code>).</li>
 <li><a href="https://github.com/tree-sitter/tree-sitter">tree-sitter</a> — runtime for the Pyrope formatter.</li>
 <li><a href="https://github.com/abseil/abseil-cpp">Abseil</a>, <a href="https://github.com/ktprime/emhash">emhash</a>, <a href="https://github.com/microsoft/mimalloc">mimalloc</a>, <a href="https://github.com/Tencent/rapidjson">RapidJSON</a>, <a href="https://github.com/google/re2">RE2</a> (linear-time regular expressions in the placement GUI agent search), <a href="https://github.com/google/perfetto">Perfetto</a>, <a href="https://github.com/kainjow/Mustache">Mustache</a>, zlib, zlib-ng and zstd — containers, allocation, JSON, tracing, templates and compression.</li>
 <li><a href="https://github.com/google/googletest">GoogleTest</a> and <a href="https://github.com/google/benchmark">Google Benchmark</a> — tests and benchmarks.</li>
@@ -467,7 +466,6 @@ Hover a marker for the details; <code>grep -n "todo-check\|fixme" docs/acknowled
 <li>Y. Nesterov. <em>A Method for Solving the Convex Programming Problem with Convergence Rate O(1/k²).</em> Soviet Math. Doklady 27, 1983.</li>
 <li>J. Barzilai, J.M. Borwein. <em>Two-Point Step Size Gradient Methods.</em> IMA J. Numerical Analysis 8(1), 1988.<span class="use">The step-size estimate in global placement.</span></li>
 <li>R.W. Hockney, J.W. Eastwood. <em>Computer Simulation Using Particles.</em> McGraw-Hill, 1981.<span class="use">Close idea: cloud-in-cell deposition for the local density force (<code>docs/placer.html</code>).</span></li>
-<li>N. Viswanathan, C. Chu. <em>FastPlace: Efficient Analytical Placement Using Cell Shifting, Iterative Local Refinement and a Hybrid Net Model.</em> IEEE TCAD 24(5), 2005.<span class="use">Close idea: area-conserving density warp (<code>pass/place/density_warp.cpp</code>, solved as an LP).</span></li>
 </ul>
 
 <h4>Macro placement and floorplanning</h4>
@@ -547,7 +545,6 @@ Hover a marker for the details; <code>grep -n "todo-check\|fixme" docs/acknowled
 
 <h4>Solvers and geometry</h4>
 <ul class="refs">
-<li>Q. Huangfu, J.A.J. Hall. <em>Parallelizing the Dual Revised Simplex Method.</em> Math. Programming Computation 10(1), 2018.<span class="use">HiGHS, the density-warp LP.</span></li>
 <li>B. Dezső, A. Jüttner, P. Kovács. <em>LEMON – an Open Source C++ Graph Template Library.</em> ENTCS 264(5), 2011.<span class="use">Network simplex for the macro displacement LP.</span></li>
 <li>S. Umeyama. <em>Least-Squares Estimation of Transformation Parameters Between Two Point Patterns.</em> IEEE TPAMI 13(4), 1991.<span class="use">Close idea: the pattern fit in <code>docs/placement_regularity.html</code>.</span></li>
 </ul>

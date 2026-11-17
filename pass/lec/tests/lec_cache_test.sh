@@ -140,11 +140,11 @@ EOF
 C "$WORK/H1.v" --top hard --emit-dir "lg:$WORK/H1" --workdir "$WORK/ch1"
 C "$WORK/H2.v" --top hard --emit-dir "lg:$WORK/H2" --workdir "$WORK/ch2"
 WDU="$WORK/wdu"; mkdir -p "$WDU"
-# formal.min_timeout=1: the int-blast retry leg spends the WHOLE floor on every
+# the fixed 1s per-unit min_timeout: the int-blast retry leg spends the WHOLE floor on every
 # def that comes back Unknown, so the 20s default would add 20s to each U run
 # below for no extra coverage — the ledger is what is under test here.
 U() { TO=$1; shift; OUT=$("$LHD" lec --set formal.effort=proof --ref "lg:$WORK/H1" --impl "lg:$WORK/H2" --top hard \
-       --set "formal.timeout=$TO" --set formal.min_timeout=1 \
+       --set "formal.timeout=$TO" \
       "$@" --workdir "$WDU" 2>&1); RC=$?; }
 
 # 8) First run: Unknown, and the attempt is ledgered (not a verdict).

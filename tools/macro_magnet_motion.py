@@ -96,12 +96,7 @@ def render(report_path, output, title):
     summary.update(source_sha256=hashlib.sha256(raw).hexdigest(),
                    renderer_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest())
     output.mkdir(parents=True, exist_ok=True)
-    warp_trace = report.get('warp_stability', [])
-    if warp_trace:
-        summary['scope'] += ' Additional markers show the recorded window means; the per-step curves remain unsmoothed.'
-        if warp_trace[0].get('policy') == 'constant':
-            summary['scope'] += ' Stability controls activation only; strength and subsequent refresh cadence are constant.'
-    fig, axes = plt.subplots(3 if warp_trace else 2, 1, figsize=(12, 9.0 if warp_trace else 7.3), sharex=True)
+    fig, axes = plt.subplots(2, 1, figsize=(12, 7.3), sharex=True)
     labels = ('Total SRAM center movement\n(µm / GP step)', 'Macro stability\n(% of first-50 peak)')
     iterations = [s['iteration'] for s in steps]
     for ax, values, label in zip(axes, (absolute, relative), labels):
@@ -115,34 +110,12 @@ def render(report_path, output, title):
         ax.set_ylim(bottom=0)
         seen = set()
         for event in report['events']:
-            style = {'pull': ('#7a3bb2', 'Warpspace anchors'), 'timing': ('#777777', 'Timing update'),
+            style = {'pull': ('#7a3bb2', 'Macro pull targets'), 'timing': ('#777777', 'Timing update'),
                      'magnet': ('#e18a16', 'Magnet merge'), 'snap': ('#111111', 'Macro snap/LP')}.get(event['event'])
             if style:
                 ax.axvline(event['iteration'], color=style[0], lw=.7, alpha=.45,
                            label=style[1] if event['event'] not in seen else None)
                 seen.add(event['event'])
-    if warp_trace:
-        checks = [s for s in warp_trace if s['macro_stability_fraction'] is not None]
-        axes[1].plot([s['iteration'] for s in checks], [100*s['macro_stability_fraction'] for s in checks],
-                     color='#c47713', marker='o', ms=3, lw=.8, ls='--',
-                     label=f"Recorded {warp_trace[0]['window']}-step mean at refresh")
-        axes[2].step([s['iteration'] for s in warp_trace] + [max(iterations)],
-                     [s['weight'] for s in warp_trace] + [warp_trace[-1]['weight']],
-                     where='post', color='#7a3bb2', label='Warpspace strength')
-        axes[2].set_ylabel('Warpspace strength')
-        axes[2].set_ylim(0, 1.05)
-        axes[2].grid(alpha=.2)
-        rollbacks = [s for s in warp_trace if s['decision'] == 'rollback']
-        if rollbacks:
-            axes[2].scatter([s['iteration'] for s in rollbacks], [s['weight'] for s in rollbacks], color='#b52125', marker='D', s=30, zorder=4, label='Rollback: motion worsened')
-        trials = [s for s in warp_trace if s.get('trial_reference_fraction') is not None and s['decision'] in ('increase', 'rollback', 'hold_maximum')]
-        if trials:
-            axes[1].plot([s['iteration'] for s in trials], [100*s['trial_reference_fraction'] for s in trials], color='#777777', marker='x', lw=.7, ls=':', label='Pre-increase motion reference')
-        if warp_trace[0].get('target', 0) > 0:
-            axes[1].axhline(100 * warp_trace[0]['target'], color='#25834e', ls=':', lw=1, label='Motion reference (ramp)' if warp_trace[0].get('ramp_up') else 'Adaptive stability target')
-        start_target = warp_trace[0].get('start_stability_target', 0)
-        if start_target > 0:
-            axes[1].axhline(100 * start_target, color='#ab681b', ls='--', lw=1, label='Warpspace start threshold')
     if relative is not None:
         axes[1].axhline(100, color='#b52125', ls='--', lw=1, label='First-50 peak = 100%')
     axes[-1].set_xlabel('Macro GP iteration')
@@ -155,10 +128,6 @@ def render(report_path, output, title):
             if label not in labels:
                 handles.append(handle)
                 labels.append(label)
-    if warp_trace:
-        h, l = axes[2].get_legend_handles_labels()
-        handles.extend(h)
-        labels.extend(l)
     fig.legend(handles, labels, loc='lower center', ncol=3, fontsize=8, bbox_to_anchor=(.5, .01))
     fig.tight_layout(rect=(0, .1, 1, 1))
     fig.savefig(output / 'center_step.svg')

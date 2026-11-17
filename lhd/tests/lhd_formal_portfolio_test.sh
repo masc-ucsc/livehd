@@ -95,7 +95,7 @@ grep -qE "^formal verify: 'inv.inv' PROVEN-(full|bounded)" "$OUT" || fail "engin
 # Step 6's run (see below) is launched now so its 12 s wall wait overlaps step 5's.
 rm -rf "$W/wd6"
 LHD_LEC_RACER_STALL_ONLY=0 LHD_LEC_RACER_STALL_S=60 "$LHD" formal verify "$W/portfolio.prp" --top portfolio \
-  --workdir "$W/wd6" --set formal.bound=10 --set formal.timeout=1 --set formal.min_timeout=1 >"$W/out6" 2>&1 &
+  --workdir "$W/wd6" --set formal.bound=10 --set formal.timeout=1 >"$W/out6" 2>&1 &
 WD6_PID=$!
 
 # 5. bmc-first WALL-KILLED, ind-first survives. The race deadline SIGKILLs a
@@ -109,7 +109,7 @@ WD6_PID=$!
 #    TIMEOUT-time ("proven to cycle k"), so the run is TIMEOUT-time: exit 0 with
 #    a formal-timeout-time warning (owner ruling), never a PROVEN-* headline.
 LHD_LEC_RACER_STALL_ONLY=0 LHD_LEC_RACER_STALL_S=60 "$LHD" formal verify "$W/portfolio.prp" --top portfolio \
-  --set formal.bound=10 --set formal.timeout=1 --set formal.min_timeout=1 >"$OUT" 2>&1
+  --set formal.bound=10 --set formal.timeout=1 >"$OUT" 2>&1
 RC=$?
 [ "$RC" -eq 0 ] || fail "a wall-killed bmc-first is a TIMEOUT-time run (rc 0), not a refusal or refute (rc=$RC): $(cat "$OUT")"
 grep -q "^formal verify: 'portfolio.portfolio' TIMEOUT-time" "$OUT" \

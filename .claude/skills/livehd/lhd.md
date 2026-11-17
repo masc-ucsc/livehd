@@ -115,7 +115,7 @@ region (`--set synth.mapper=abc|usyn`), then STA over a Liberty
   achieved timing, and the memory table.
 - Target: `--set synth.delay=PS` or an SDC clock. An unreachable target is
   reported, not hidden; pick one the design misses when hunting paths.
-- `--set pass.abc.memory=false` keeps memories as black boxes (use when
+- `--set synth.memory=macro` keeps memories as black boxes (use when
   comparing logic QoR or for macro flows). Confirm expected SRAMs survived
   mapping before placing them.
 - Keep mapper, Liberty, clock targets and memory realization fixed when

@@ -139,13 +139,14 @@ lgcheck() {
   esac
 }
 
+# Preserve the gate modules: USYN's native-barrier assertions inspect that hierarchy.
 # Each negative-control case needs the mapped netlist/models, but the positive
 # case owns the original-vs-mapped proof and independent Verilog check.
 prepare() {
   local d="$1" lib="$2" top="$3"
   mkdir -p "$d"
   "$LHD" synth --result-json "$d/r.json" --reader slang --top "$top" --workdir "$d/W" --emit-dir lg:"$d/net" \
-    --emit-dir verilog:"$d/netv" --set synth.mapper="$MAPPER" --set synth.liberty="$lib" -- "$SRC" > "$d/synth.log" 2>&1 \
+    --emit-dir verilog:"$d/netv" --set synth.flat_sweep=false --set synth.mapper="$MAPPER" --set synth.liberty="$lib" -- "$SRC" > "$d/synth.log" 2>&1 \
     || fail "$d: synth -> $(cat "$d/r.json" 2>/dev/null)"
   cat "$d/netv/"*.v > "$d/net.v"
   "$LHD" pass liberty gensim "$lib" --emit-dir lg:"$d/models" --emit verilog:"$d/models.v" --workdir "$d/Wm" -q \

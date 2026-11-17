@@ -320,7 +320,7 @@ Sram_result macro_memories(const std::vector<std::shared_ptr<hhds::Graph>>& inpu
       const auto shape = shape_of(mem);
       if (!shape.refuse.empty() || shape.bits * shape.size < tech.min_bits) {
         result.kept.emplace_back(std::string(graph->get_name()) + "/" + std::string(gu::default_instance_name(mem)),
-                                 shape.refuse.empty() ? "below synth.memory.min_bits" : shape.refuse);
+                                 shape.refuse.empty() ? "below synth.memory.max_bits" : shape.refuse);
         continue;
       }
       graphs.push_back(enclose_native_memory(*graph, mem));
@@ -343,7 +343,7 @@ Sram_result macro_memories(const std::vector<std::shared_ptr<hhds::Graph>>& inpu
       continue;
     }
     if (shape.bits * shape.size < tech.min_bits) {
-      result.kept.emplace_back(name, "below synth.memory.min_bits");
+      result.kept.emplace_back(name, "below synth.memory.max_bits");
       continue;
     }
     auto io = graph->get_io();

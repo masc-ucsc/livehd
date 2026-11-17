@@ -29,9 +29,7 @@
 # product under an `iand` lazy refinement, where int-blasting lands in undecidable
 # nonlinear integer arithmetic. Measured UNKNOWN on BOTH legs (int_blast=off and
 # int_blast=iand) at formal.timeout=30.
-# `formal.min_timeout` is pinned small in run() for the same reason the timeout is: the
-# int-blast retry's whole budget IS the min_timeout floor, so the 20s default would add
-# ~20s to each of the three UNKNOWN cases.
+# The int-blast retry's whole budget is the fixed 1s per-unit floor.
 
 set -u
 LHD=./bazel-bin/lhd/lhd
@@ -114,16 +112,8 @@ run() {  # $1=label $2..=lhd args ; sets RC/OUT
   case " ${*:2} " in
     *" --set formal.timeout="*) to=() ;;
   esac
-  # Same last-wins guard for the int-blast retry's budget (see the header): its
-  # whole grant is the min_timeout floor, so the 20s default would add ~20s to
-  # every UNKNOWN case here. min_timeout is a FLOOR, never a cap, so pinning it
-  # low cannot take a verdict away from the cases that do settle (7).
-  local mt=(--set formal.min_timeout=1)
-  case " ${*:2} " in
-    *" --set formal.min_timeout="*) mt=() ;;
-  esac
   OUT=$("$LHD" lec --set formal.effort=proof "${@:2}" --top foo --set formal.lec.hier=false ${to[@]+"${to[@]}"} \
-        ${mt[@]+"${mt[@]}"} --workdir "$WORK/w_$1" 2>&1); RC=$?
+        --workdir "$WORK/w_$1" 2>&1); RC=$?
 }
 
 # 1) TIMEOUT (the hard miter below outlives formal.timeout): reported as TIMEOUT, exit 0 --
@@ -190,16 +180,14 @@ elif ! echo "$OUT" | grep -q "one-sided internal state is unobservable"; then
   echo "FAIL: dead one-sided state proof did not disclose why the unmatched cut is safe: $OUT"; fail=1
 else echo "ok: dead one-sided internal state -> unbounded PROVEN"; fi
 
-# 9) The hard worker backstop is a real registered option, and invalid negative
-# multipliers fail during option validation instead of wrapping into a huge
-# alarm duration.
-run bad_hard_mult --ref "$WORK/eq_impl.v" --impl "$WORK/eq_impl.v" \
-  --set formal.hard_timeout_mult=-1
-if [ "$RC" -eq 0 ]; then
-  echo "FAIL: negative formal.hard_timeout_mult unexpectedly succeeded: $OUT"; fail=1
-elif ! echo "$OUT" | grep -q "formal.hard_timeout_mult must be >= 0"; then
-  echo "FAIL: negative hard-timeout multiplier lacked the validation diagnostic: $OUT"; fail=1
-else echo "ok: formal.hard_timeout_mult is registered and range-checked"; fi
+# 9) The worker backstop multiplier and the per-unit floor are fixed internals:
+# formal.timeout is the one budget knob, and the retired keys say so.
+for retired in formal.hard_timeout_mult=3 formal.min_timeout=1; do
+  run "retired_${retired%%=*}" --ref "$WORK/eq_impl.v" --impl "$WORK/eq_impl.v" --set "$retired"
+  if [ "$RC" -eq 0 ] || ! echo "$OUT" | grep -q "no longer a public option"; then
+    echo "FAIL: retired $retired was not refused with a hint: $OUT"; fail=1
+  else echo "ok: $retired is retired"; fi
+done
 
 if [ $fail -ne 0 ]; then echo "lec_verdict_policy_test: FAILED"; exit 1; fi
 echo "lec_verdict_policy_test: PASSED"; exit 0

@@ -73,11 +73,11 @@ else echo "ok: mism REFUTED with a concrete counterexample"; fi
 
 # ── 4. int_blast=auto (the default): a BV timeout earns the int-blast retry ──
 # formal.timeout=3 starves the BV solve of the multiply miter (measured: it
-# cannot finish in 60s); the retry at the min_timeout floor proves it in <1s.
+# cannot finish in 60s); the retry at the fixed 1s per-unit floor proves it in <1s.
 # No int_blast set — this pins the DEFAULT behavior.
 out=$("$LHD" lec --set formal.effort=proof --ref "verilog:$WORK/ref/distrib.v" --impl "verilog:$WORK/impl/distrib.v" \
       --workdir "$WORK/w_auto" --set formal.lec.cones=false \
-      --set formal.timeout=3 --set formal.min_timeout=10 2>&1); rc=$?
+      --set formal.timeout=3 2>&1); rc=$?
 if [ "$rc" -ne 0 ] || ! echo "$out" | grep -qE "^lec: .* PROVEN-(full|bounded)"; then
   echo "FAIL: auto default expected retry PROVEN (rc=$rc)"; echo "$out" | grep -aE "^lec: " | tail -2; fail=1
 elif ! echo "$out" | grep -q "int-blast retry"; then
@@ -87,7 +87,7 @@ else echo "ok: auto default converts a BV timeout via the int-blast retry"; fi
 # ── 5. int_blast=off: same starved budget, NO retry — stays inconclusive ─────
 out=$("$LHD" lec --set formal.effort=proof --ref "verilog:$WORK/ref/distrib.v" --impl "verilog:$WORK/impl/distrib.v" \
       --workdir "$WORK/w_off" --set formal.lec.int_blast=off --set formal.lec.cones=false \
-      --set formal.timeout=3 --set formal.min_timeout=1 2>&1); rc=$?
+      --set formal.timeout=3 2>&1); rc=$?
 if echo "$out" | grep -q "^lec: .* PROVEN-" || echo "$out" | grep -q "int-blast retry" \
    || ! echo "$out" | grep -q "^lec: .* TIMEOUT-time"; then
   echo "FAIL: int_blast=off must not retry nor prove (want TIMEOUT; rc=$rc)"; echo "$out" | grep -aE "^lec: " | tail -2; fail=1

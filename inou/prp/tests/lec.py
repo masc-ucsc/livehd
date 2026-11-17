@@ -71,6 +71,14 @@ def run_lec(cmd, cwd=None, timeout=5, scale=None):
     no_replay = not any(arg.startswith('formal.simfail_run=') for arg in cmd)
     if no_replay:
         cmd += ['--set', 'formal.simfail_run=false']
+    # Bazel budgets one CPU per test and runs one test per CPU, while lhd.jobs=0
+    # races every proof profile on all of them. On these fixtures two workers
+    # (one ind, one bmc) reach the same verdict as many in the same wall time,
+    # at well under half the CPU (mem_partial_write_lanes: 5.0 s / 9.9 s CPU at
+    # 2 jobs, 6.3 s / 24.4 s CPU at 18), so a full regression stops starving
+    # itself. A test that names its own lhd.jobs keeps it.
+    if not any(arg.startswith('lhd.jobs=') for arg in cmd):
+        cmd += ['--set', 'lhd.jobs=2']
     watchdog = 2 * timeout * dbg
     proc = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                             start_new_session=True)

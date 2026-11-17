@@ -1,5 +1,5 @@
 /*
-:lec_set: formal.engine=bmc formal.min_timeout=1 formal.simfail=false
+:lec_set: formal.engine=bmc formal.simfail=false
 A reset array `hd` is written under an enable that reads `sel_d`, a data
 stage with NO reset (it loads only behind the reset valid `sv`, the bedrock
 br_delay_valid shape). Right after reset `sel_d` still holds its power-on

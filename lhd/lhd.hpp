@@ -194,9 +194,6 @@ struct Options {
   bool        workdir_scratch = false;
 
   std::vector<std::string>                         raw_args;  // after `--` (elaborate verilog: raw slang args)
-  // (message, hint) of each deprecated synth.* spelling canonicalize_synth_sets
-  // rewrote; emitted after the command's setup_diag. Not an input: never hashed.
-  std::vector<std::pair<std::string, std::string>> deprecated_sets;
 
   bool quiet   = false;
   bool verbose = false;
@@ -807,16 +804,16 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
     {"place.explore.threads", "1", Synth_set_option::Kind::integer, "CPU shares per spawned background evaluator, bounded by lhd.jobs with one share reserved for main"},
     {"place.explore.jobs", "2", Synth_set_option::Kind::integer, "maximum concurrent background replay evaluators within lhd.jobs"},
     {"place.explore.worker", "auto", Synth_set_option::Kind::file, "T1 evaluator selection: auto, snapshot or replay"},
-    {"place.explore.memory_mb", "0", Synth_set_option::Kind::integer, "resident-memory limit per admitted evaluator process tree in MiB (0 uses the session budget)"},
-    {"place.explore.session_memory_mb", "0", Synth_set_option::Kind::integer, "aggregate RSS budget for the main evaluator, controller and all their descendants in MiB (0 uses half host or cgroup RAM)"},
+    {"place.explore.memory_mb", "auto", Synth_set_option::Kind::file, "resident-memory limit per admitted evaluator process tree in MiB; auto = the session budget"},
+    {"place.explore.session_memory_mb", "auto", Synth_set_option::Kind::file, "aggregate RSS budget for the main evaluator, controller and all their descendants in MiB; auto = half the host or cgroup RAM"},
     {"place.explore.disk_mb", "4096", Synth_set_option::Kind::integer, "private scratch disk limit per evaluator in MiB"},
     {"place.explore.history_mb", "16", Synth_set_option::Kind::integer, "closed exploration detail budget in MiB; older entries retain compact metrics"},
-    {"place.explore.timeout.t1", "0", Synth_set_option::Kind::integer, "wall deadline for t1 workers in seconds (0 inherits explore.timeout)"},
-    {"place.explore.timeout.t2", "0", Synth_set_option::Kind::integer, "wall deadline for t2 workers in seconds (0 inherits explore.timeout)"},
-    {"place.explore.timeout.t3", "0", Synth_set_option::Kind::integer, "wall deadline for t3 workers in seconds (0 inherits explore.timeout)"},
-    {"place.explore.timeout.t4", "0", Synth_set_option::Kind::integer, "wall deadline for t4 workers in seconds (0 inherits explore.timeout)"},
-    {"place.explore.timeout.foreground", "0", Synth_set_option::Kind::integer, "wall deadline for foreground workers in seconds (0 inherits explore.timeout)"},
-    {"place.explore.timeout.region", "0", Synth_set_option::Kind::integer, "wall deadline for region workers in seconds (0 inherits explore.timeout)"},
+    {"place.explore.timeout.t1", "auto", Synth_set_option::Kind::file, "wall deadline for t1 workers in seconds; auto = explore.timeout"},
+    {"place.explore.timeout.t2", "auto", Synth_set_option::Kind::file, "wall deadline for t2 workers in seconds; auto = explore.timeout"},
+    {"place.explore.timeout.t3", "auto", Synth_set_option::Kind::file, "wall deadline for t3 workers in seconds; auto = explore.timeout"},
+    {"place.explore.timeout.t4", "auto", Synth_set_option::Kind::file, "wall deadline for t4 workers in seconds; auto = explore.timeout"},
+    {"place.explore.timeout.foreground", "auto", Synth_set_option::Kind::file, "wall deadline for foreground workers in seconds; auto = explore.timeout"},
+    {"place.explore.timeout.region", "auto", Synth_set_option::Kind::file, "wall deadline for region workers in seconds; auto = explore.timeout"},
     {"place.explore.timeout", "600", Synth_set_option::Kind::integer, "maximum elapsed seconds for a replay exploration"},
     {"place", "false", Synth_set_option::Kind::boolean, "place mapped cells with native DREAMPlace before final STA"},
     {"lef",
@@ -866,10 +863,6 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
     {"place.area.overflow_floor", "0.001", Synth_set_option::Kind::file, "area=auto: overflow allowance per signal net"},
     {"place.area.anchor", "io", Synth_set_option::Kind::file, "area=auto: region center, io (pin centroid) or center"},
     {"place.area.oracle", "legroute", Synth_set_option::Kind::file, "area=auto: routability oracle, legroute or rudy"},
-    {"place.mesh_variants",
-     "0",
-     Synth_set_option::Kind::integer,
-     "INTERNAL: no effect (the legroute regional retry that tried other region meshes was removed)"},
     {"place.mesh_variant",
      "0",
      Synth_set_option::Kind::integer,
@@ -1068,49 +1061,6 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      Synth_set_option::Kind::file,
      "part of place.growth that gate sizing may use, in (0,1]; buffer insertion may use all of it, so a smaller share keeps more "
      "headroom for the buffer trees of high-fanout nets"},
-    {"place.fp.warpspace", "false", Synth_set_option::Kind::boolean, "enable density warp for this placement stage"},
-    {"place.fp.warpspace.weight",
-     "1",
-     Synth_set_option::Kind::file,
-     "warp target gain (FP) or relative virtual pull strength (macro), 0..1"},
-    {"place.fp.warpspace.bins",
-     "16",
-     Synth_set_option::Kind::integer,
-     "warp density grid per axis, 2..64; smoothing remains 32 bins"},
-    {"place.fp.warpspace.iterations", "2", Synth_set_option::Kind::integer, "alternating warp solve rounds, 1..6"},
-    {"place.fp.warpspace.seconds", "3", Synth_set_option::Kind::file, "time limit per warp axis solve, (0,30] seconds"},
-    {"place.macro.warpspace", "false", Synth_set_option::Kind::boolean, "enable density warp for this placement stage"},
-    {"place.macro.warpspace.weight",
-     "0.7",
-     Synth_set_option::Kind::file,
-     "warp target gain (FP) or relative virtual pull strength (macro), 0..1"},
-    {"place.macro.warpspace.bins",
-     "16",
-     Synth_set_option::Kind::integer,
-     "warp density grid per axis, 2..64; smoothing remains 32 bins"},
-    {"place.macro.warpspace.iterations", "2", Synth_set_option::Kind::integer, "alternating warp solve rounds, 1..6"},
-    {"place.macro.warpspace.seconds", "3", Synth_set_option::Kind::file, "time limit per warp axis solve, (0,30] seconds"},
-    {"place.macro.warpspace.updates",
-     "10",
-     Synth_set_option::Kind::integer,
-     "legacy maximum macro attempts when refresh_interval=0, 1..30; FP samples once"},
-    {"place.macro.warpspace.once_after_density",
-     "false",
-     Synth_set_option::Kind::boolean,
-     "freeze macro anchors after GP reaches stop_overflow"},
-    {"place.macro.warpspace.warmup", "0.1", Synth_set_option::Kind::file, "macro warmup fraction of iteration budget, [0,1)"},
-    {"place.macro.warpspace.start_stability",
-     "0.20",
-     Synth_set_option::Kind::file,
-     "one-shot start gate: mean macro motion relative to first-50 peak; 0 uses warmup, [0,1]"},
-    {"place.macro.warpspace.stability_window",
-     "10",
-     Synth_set_option::Kind::integer,
-     "consecutive GP steps averaged for the start gate and recorded diagnostics, 1..100"},
-    {"place.macro.warpspace.refresh_interval",
-     "25",
-     Synth_set_option::Kind::integer,
-     "GP iterations between constant-strength target updates after activation; 0 uses legacy updates budget"},
     {"place.macro.anchor",
      "false",
      Synth_set_option::Kind::boolean,
@@ -1205,9 +1155,9 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      Synth_set_option::Kind::file,
      "memory-first color growth cap in equivalent standard-cell logic area; SRAM area only affects centroid size"},
     {"place.fp.color_minimum",
-     "-1",
+     "auto",
      Synth_set_option::Kind::file,
-     "color centroid minimum physical equivalent area; -1 inherits fp.minimum"},
+     "color centroid minimum physical equivalent area; auto = fp.minimum"},
     {"place.fp.pin_adjust", "true", Synth_set_option::Kind::boolean, "adjust ordered IO buses along the perimeter during FP"},
     {"place.fp.pin_interval", "50", Synth_set_option::Kind::integer, "FP IO adjustment interval, independently of STA"},
     {"place.fp.pin_step",
@@ -1425,19 +1375,15 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      Synth_set_option::Kind::file,
      "routing grid per axis for RUDY/RSMT, macro channel pressure, native legalization/detailed placement, terminal "
      "and SAT route-grid bins: inherit follows the density grid (the configured grid.density in dynamic mode), or 2..1024"},
-    {"place.bins", "64", Synth_set_option::Kind::integer, "DEPRECATED: use synth.place.grid.density"},
-    {"place.seed", "", Synth_set_option::Kind::file, "DEPRECATED: use synth.place.start_map (a number was never valid: the RNG seed is lhd.seed)"},
-    {"place.dynamic_bins", "false", Synth_set_option::Kind::boolean, "DEPRECATED: use synth.place.grid.density_mode=dynamic"},
-    {"place.bin_max", "512", Synth_set_option::Kind::integer, "DEPRECATED: use synth.place.grid.density_max"},
     {"place.macro.fill_cell_space",
      "false",
      Synth_set_option::Kind::boolean,
      "macro-plan filler budget: (1-cell density) times core space excluding physical macro bodies; scaled by "
      "virtual_filler_fraction"},
     {"place.macro.filler_fraction",
-     "0",
+     "auto",
      Synth_set_option::Kind::file,
-     "macro-plan virtual filler axes as a fraction of the smallest memory's physical axes, [0,1]; 0 uses cell sizing"},
+     "macro-plan virtual filler axes as a fraction of the smallest memory's physical axes, (0,1]; auto = cell sizing"},
     {"place.virtual_fillers",
      "true",
      Synth_set_option::Kind::boolean,
@@ -1463,11 +1409,10 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      Synth_set_option::Kind::file,
      "screened local electrostatic force relative to ordinary GP force; zero disables"},
     {"place.grid.local", "512", Synth_set_option::Kind::integer, "local spreading grid per axis (power of two, 8..1024)"},
-    {"place.local_density_bins", "512", Synth_set_option::Kind::integer, "DEPRECATED: use synth.place.grid.local"},
     {"place.local_density_target",
-     "-1",
+     "auto",
      Synth_set_option::Kind::file,
-     "extra cell-spreading density threshold in [0,1]; -1 inherits global density without changing its target"},
+     "extra cell-spreading density threshold in [0,1]; auto = the global density, without changing its target"},
     {"place.macro.cell_density_weight",
      "0",
      Synth_set_option::Kind::file,
@@ -1556,10 +1501,10 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      Synth_set_option::Kind::integer,
      "with order: GP iterations at the original crossings before each bus is ordered by where its cells pull"},
     {"place.region.boundarypins.pitch_um",
-     "0",
+     "auto",
      Synth_set_option::Kind::file,
-     "with order: spacing of the virtual pins on an edge (0 = twice the widest flop, one 2x2 cell-box; a crowded edge "
-     "halves it down to one site)"},
+     "with order: spacing of the virtual pins on an edge in um (auto = twice the widest flop, one 2x2 cell-box; a "
+     "crowded edge halves it down to one site)"},
     {"place.region.busorder",
      "true",
      Synth_set_option::Kind::boolean,
@@ -1603,10 +1548,10 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      "with legroute.plan.route_model=coarse: per-net search budget of a route sample; unresolved requests remain "
      "penalties; the measured rounds use plan.net_pops"},
     {"place.legroute.plan.max_degradation_ps",
-     "-1",
+     "off",
      Synth_set_option::Kind::file,
-     "with legroute: maximum estimated worst data-pin slack degradation versus the first measured round, in ps; "
-     "-1 disables; requires comparable finite timing feedback, not routed WNS"},
+     "with legroute: maximum estimated worst data-pin slack degradation versus the first measured round, in ps, or "
+     "off; requires comparable finite timing feedback, not routed WNS"},
     {"place.legroute.plan.local_tiles",
      "0",
      Synth_set_option::Kind::integer,
@@ -1644,21 +1589,6 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      Synth_set_option::Kind::file,
      "with legroute: A* heuristic weight of the global router (finite, >=1); 1 preserves shortest-path ordering, >1 "
      "favors faster goal-directed search without relaxing capacity or connectivity checks; large-fanout nets use Dijkstra"},
-    {"place.boundarypins", "false", Synth_set_option::Kind::boolean, "DEPRECATED: use synth.place.region.boundarypins"},
-    {"place.boundarypins.split", "true", Synth_set_option::Kind::boolean, "DEPRECATED: use synth.place.region.boundarypins.split"},
-    {"place.pinalign", "false", Synth_set_option::Kind::boolean, "DEPRECATED: use synth.place.region.pinalign"},
-    {"place.boundarypins.order", "false", Synth_set_option::Kind::boolean, "DEPRECATED: use synth.place.region.boundarypins.order"},
-    {"place.boundarypins.iterations",
-     "50",
-     Synth_set_option::Kind::integer,
-     "DEPRECATED: use synth.place.region.boundarypins.iterations"},
-    {"place.boundarypins.max_displacement_um",
-     "20",
-     Synth_set_option::Kind::file,
-     "DEPRECATED: use synth.place.region.boundarypins.max_displacement_um"},
-    {"place.busorder", "true", Synth_set_option::Kind::boolean, "DEPRECATED: use synth.place.region.busorder"},
-    {"place.busorder.max_cells", "10000", Synth_set_option::Kind::integer, "DEPRECATED: use synth.place.region.max_cells"},
-    {"place.busorder.merge_um", "5", Synth_set_option::Kind::file, "DEPRECATED: use synth.place.region.merge_um"},
     {"place.post_density_factor",
      "4",
      Synth_set_option::Kind::file,
@@ -1721,10 +1651,6 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      "none",
      Synth_set_option::Kind::file,
      "route uses the exact RSMT routing grid for SAT bins; none keeps bin.size_um or pair-centered windows"},
-    {"place.satlegalize.route_grid",
-     "false",
-     Synth_set_option::Kind::boolean,
-     "DEPRECATED: use synth.place.satlegalize.bin.grid=route"},
     {"place.satlegalize.route_guidance",
      "true",
      Synth_set_option::Kind::boolean,
@@ -1737,7 +1663,6 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      "",
      Synth_set_option::Kind::file,
      "fixed SAT bin width,height in microns, anchored at the die origin; empty preserves pair-centered windows"},
-    {"place.satlegalize.region_size", "", Synth_set_option::Kind::file, "DEPRECATED: use synth.place.satlegalize.bin.size_um"},
     {"place.satlegalize.spill_neighbors",
      "false",
      Synth_set_option::Kind::boolean,
@@ -1766,7 +1691,6 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      "true",
      Synth_set_option::Kind::boolean,
      "scale movable macro occupancy by target density and compensate fillers"},
-    {"place.auto_bins", "false", Synth_set_option::Kind::boolean, "DEPRECATED: use synth.place.grid.density_mode=macro"},
     {"place.exact_macro_density",
      "true",
      Synth_set_option::Kind::boolean,
@@ -1919,7 +1843,6 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      "route",
      Synth_set_option::Kind::file,
      "terminal legalization bins per axis: route = the routing grid (bounded for tiny cores), or an explicit 1..1024"},
-    {"place.legalize.max_density", "0.8", Synth_set_option::Kind::file, "DEPRECATED: use synth.place.legalize.bin.max_density"},
     {"place.legalize.critical_fraction",
      "0.1",
      Synth_set_option::Kind::file,
@@ -1932,16 +1855,6 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      "1",
      Synth_set_option::Kind::integer,
      "reserved sites on each side of terminally legalized cells"},
-    {"place.legalize.warpspace",
-     "false",
-     Synth_set_option::Kind::boolean,
-     "warp unprotected cell targets before terminal legalization"},
-    {"place.legalize.warpspace.weight", "1", Synth_set_option::Kind::file, "unprotected cell warp displacement gain, 0..1"},
-    {"place.legalize.warpspace.seconds",
-     "3",
-     Synth_set_option::Kind::file,
-     "time limit per terminal warp axis solve, (0,30] seconds"},
-    {"place.legalize.warpspace.bins", "16", Synth_set_option::Kind::integer, "terminal warp grid bins per axis, 2..64"},
     {"place.legalize.remainder_wire_weight",
      "4",
      Synth_set_option::Kind::file,
@@ -2070,7 +1983,7 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      "auto",
      Synth_set_option::Kind::file,
      "minimum pre-route setup slack in ps; auto = 1.5 FO4 of the Liberty's smallest NOT cell (asap7: 18)"},
-    {"place.preroute.hold_margin", "-1", Synth_set_option::Kind::file, "minimum hold slack in ps; -1 uses two HOLD_BUF delays"},
+    {"place.preroute.hold_margin", "auto", Synth_set_option::Kind::file, "minimum hold slack in ps; auto = two HOLD_BUF delays"},
     {"place.preroute.hold_buffer", "auto", Synth_set_option::Kind::file, "Liberty hold buffer; auto uses the profile default"},
     {"place.preroute.nominal_slew",
      "auto",
@@ -2107,18 +2020,6 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      "true",
      Synth_set_option::Kind::boolean,
      "timing-checked gate sizing, buffer removal and Steiner repair with single-cell legalization"},
-    {"place.resize.gp",
-     "true",
-     Synth_set_option::Kind::boolean,
-     "legacy GP repair switch retained for compatibility; buffering runs after placement"},
-    {"place.resize.gp_margin",
-     "0.01",
-     Synth_set_option::Kind::file,
-     "legacy GP buffering slack dead band retained for compatibility; range [0,1]"},
-    {"place.resize.gp_trials",
-     "4",
-     Synth_set_option::Kind::integer,
-     "legacy GP buffer trial budget retained for compatibility; range [1,16]"},
     {"place.buffer_cleanup",
      "false",
      Synth_set_option::Kind::file,
@@ -2140,7 +2041,7 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
     {"adder", "auto", Synth_set_option::Kind::file, "shared default: auto|rca|cska|cla|prefix|brent; source pins override it"},
     {"multiplier", "auto", Synth_set_option::Kind::file, "shared default: auto|array|tree|csa|tdm"},
     {"barrel", "auto", Synth_set_option::Kind::file, "shared default: auto|log|reverse"},
-    {"block_size", "0", Synth_set_option::Kind::integer, "shared CSKA/CLA block width; 0 derives it from width"},
+    {"block_size", "auto", Synth_set_option::Kind::file, "shared CSKA/CLA block width; auto derives it from the operand width"},
     {"area_relax",
      "100",
      Synth_set_option::Kind::integer,
@@ -2224,8 +2125,8 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      "auto|flops|macro|sram: bit-blast memories to flops + decode (flops), keep the native memory instance (macro), "
      "let the size threshold and the port count decide (auto), or generate an SRAM macro -- any port count, a Liberty "
      "and LEF view written under --workdir/synth and handed to the timers and the placer -- for every memory of at "
-     "least synth.memory.min_bits (smaller ones become flops; forwarding between ports, power-on contents, whole-array "
-     "update/reset and several write clocks keep the native instance) (sram); an explicit pass.abc.memory wins; "
+     "least synth.memory.max_bits (smaller ones become flops; forwarding between ports, power-on contents, whole-array "
+     "update/reset and several write clocks keep the native instance) (sram); "
      "source pins override it per memory"},
     {"delay",
      "",
@@ -2323,7 +2224,12 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      Synth_set_option::Kind::file,
      "generated SRAM macro read delay (clock to data, or address to data for an asynchronous read), ns; auto = 18 FO4 of "
      "the synth.liberty smallest NOT cell (asap7: 0.22). Setup/hold, pin loads and voltage scale with the same cell"},
-    {"memory.min_bits", "2048", Synth_set_option::Kind::integer, "with synth.memory=sram, a memory with fewer bits than this is bit-blasted to flops (the smallest macro)"},
+    {"memory.max_bits",
+     "auto",
+     Synth_set_option::Kind::file,
+     "the memory size threshold in bits (bits x entries): with synth.memory=auto a memory within it folds to flops and a "
+     "larger one stays native; with synth.memory=sram a memory below it folds to flops (the smallest macro). auto = "
+     "1024 (auto) or 2048 (sram); 0 = no threshold (auto folds every memory, sram makes every memory a macro)"},
     {"liberty",
      "",
      Synth_set_option::Kind::file,
@@ -2360,11 +2266,11 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      "opt in to merging registers that are the same machine (same clock, enable, reset, reset value, width and D driver) on the "
      "mapper's private copy, repeating until nothing merges: Yosys's opt_merge on flops. Enabled by default"},
     {"flat_sweep",
-     "false",
+     "true",
      Synth_set_option::Kind::boolean,
      "opt in to flattening the mapper's private copy of the top and folding the registers that are constant jointly across the "
      "instance boundaries (router rings, tied-off clusters): the proof compile.flatten + compile.sweep make, without flattening "
-     "the compiled graphs, so the compile cache stays hierarchical and incremental. Disabled by default"},
+     "the compiled graphs, so the compile cache stays hierarchical and incremental. Enabled by default"},
     {"clock_gate",
      "true",
      Synth_set_option::Kind::boolean,
@@ -2392,37 +2298,30 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
 // Placement partitions are named by role (todo 3g-partitions): `grid` for the
 // uniform GP force fields (synth.place.grid.*), `region` for the detail-final
 // rectangles (synth.place.region.*), `bin` for legalization capacity cells
-// (synth.place.legalize.bin.*, synth.place.satlegalize.bin.*). An old spelling
-// stays accepted, as a DEPRECATED registry entry, for one release:
-// canonicalize_synth_sets warns and rewrites it to the new name before
-// anything reads it, so every consumer and cache key sees one spelling. A
-// boolean that became an enum value maps through true_value/false_value.
-// dynamic_bins and auto_bins both map to grid.density_mode; they merge into
-// one mode unless both are true or grid.density_mode is also given, and then
-// placement_options reads them (rejecting a mix with the mode).
+// (synth.place.legalize.bin.*, synth.place.satlegalize.bin.*). The pre-3g
+// spellings are RETIRED: --set refuses each one with this hint (retired_set_hint).
 struct Synth_set_rename {
-  std::string_view old_name, new_name;
-  std::string_view true_value = {}, false_value = {};
+  std::string_view old_name, hint;
 };
 inline constexpr Synth_set_rename kSynthSetRenames[] = {
-    {"place.bins", "place.grid.density"},
-    {"place.seed", "place.start_map"},  // a numeric value is the RNG seed instead: canonicalize_synth_sets -> lhd.seed
-    {"place.bin_max", "place.grid.density_max"},
-    {"place.local_density_bins", "place.grid.local"},
-    {"place.dynamic_bins", "place.grid.density_mode", "dynamic", "fixed"},
-    {"place.auto_bins", "place.grid.density_mode", "macro", "fixed"},
-    {"place.busorder.max_cells", "place.region.max_cells"},
-    {"place.busorder.merge_um", "place.region.merge_um"},
-    {"place.busorder", "place.region.busorder"},
-    {"place.boundarypins", "place.region.boundarypins"},
-    {"place.boundarypins.split", "place.region.boundarypins.split"},
-    {"place.boundarypins.order", "place.region.boundarypins.order"},
-    {"place.boundarypins.iterations", "place.region.boundarypins.iterations"},
-    {"place.boundarypins.max_displacement_um", "place.region.boundarypins.max_displacement_um"},
-    {"place.pinalign", "place.region.pinalign"},
-    {"place.legalize.max_density", "place.legalize.bin.max_density"},
-    {"place.satlegalize.region_size", "place.satlegalize.bin.size_um"},
-    {"place.satlegalize.route_grid", "place.satlegalize.bin.grid", "route", "none"},
+    {"place.bins", "use --set synth.place.grid.density=<bins>"},
+    {"place.seed", "the start-position file is synth.place.start_map; the RNG seed is lhd.seed"},
+    {"place.bin_max", "use --set synth.place.grid.density_max"},
+    {"place.local_density_bins", "use --set synth.place.grid.local"},
+    {"place.dynamic_bins", "use --set synth.place.grid.density_mode=dynamic (false: fixed)"},
+    {"place.auto_bins", "use --set synth.place.grid.density_mode=macro (false: fixed)"},
+    {"place.busorder.max_cells", "use --set synth.place.region.max_cells"},
+    {"place.busorder.merge_um", "use --set synth.place.region.merge_um"},
+    {"place.busorder", "use --set synth.place.region.busorder"},
+    {"place.boundarypins", "use --set synth.place.region.boundarypins"},
+    {"place.boundarypins.split", "use --set synth.place.region.boundarypins.split"},
+    {"place.boundarypins.order", "use --set synth.place.region.boundarypins.order"},
+    {"place.boundarypins.iterations", "use --set synth.place.region.boundarypins.iterations"},
+    {"place.boundarypins.max_displacement_um", "use --set synth.place.region.boundarypins.max_displacement_um"},
+    {"place.pinalign", "use --set synth.place.region.pinalign"},
+    {"place.legalize.max_density", "use --set synth.place.legalize.bin.max_density"},
+    {"place.satlegalize.region_size", "use --set synth.place.satlegalize.bin.size_um"},
+    {"place.satlegalize.route_grid", "use --set synth.place.satlegalize.bin.grid=route (false: none)"},
 };
 
 // The `lhd pass` subcommand vocabulary (pass_command dispatches exactly these).

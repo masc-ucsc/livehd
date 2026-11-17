@@ -35,11 +35,11 @@ Remaining native synthesis work is tracked in [2u-usyn](../../todo/livehd/2u-usy
    ([`pass/satopt`](../satopt/README.md)) already ran in the compile step when
    explicitly enabled (`pass.satopt` defaults off for every command); the mapper maps what
    compile produced.
-   **Flat constant-state sweep** (`synth.flat_sweep`, default false). ABC and native
+   **Flat constant-state sweep** (`synth.flat_sweep`, default true under `lhd synth`, off in `State_options` and the pass-level labels). ABC and native
    USYN can flatten the mapper's private top, refine undriven bits to zero, and
    alternate constant folding with constant-register proofs for up to 16 rounds.
    This lets constants cross instance boundaries while the compiled graphs and
-   compile cache remain hierarchical. It is opt-in because it includes unknown-bit
+   compile cache remain hierarchical. It includes unknown-bit
    refinement. Separately, `compile.sweep=true` enables per-definition constant-state
    proofs during specialization without requiring flattening. The hierarchical
    register-chain regression is `//lhd/tests:lhd_sweep_hier_const_test`.
@@ -151,7 +151,7 @@ Remaining native synthesis work is tracked in [2u-usyn](../../todo/livehd/2u-usy
    authorize replacing an inferred array with unspecified collision semantics.
    **`synth.memory=sram` (default auto) is that authorization, for an array with no SRAM cell to bind**
    (`sram_macro.cpp`): a memory the fold policy keeps native becomes a generated macro, whatever its port
-   count. `synth.memory=auto` then folds (`pass.abc.memory=sram`) only a memory below `synth.memory.min_bits`
+   count. `synth.memory=auto` then folds (the mappers' `memory=sram`) only a memory below `synth.memory.max_bits`
    (2048, the smallest macro) or one no macro can realize -- forwarding between ports, power-on contents, a
    whole-array update/reset/read, a loader image, an unknown size -- and keeps every other native, so the
    over-3-port arrays `auto` bit-blasts (register files, rename tables) are macros too; `synth.memory=flops`

@@ -1417,8 +1417,14 @@ TEST(TreeAegScale, LinearInTheTree) {
   upass::Staging_rewrite_stats s10;
   upass::Staging_rewrite_stats s100;
   time_chain(2000, s10);  // warm the pools
-  const double t10  = time_chain(10000, s10);
-  const double t100 = time_chain(100000, s100);
+  // Best of a few runs: a test sharing the machine with a full regression is
+  // preempted at random, and the ratio of two single samples then measures the
+  // load, not the growth.
+  double t10 = time_chain(10000, s10), t100 = time_chain(100000, s100);
+  for (int rep = 0; rep < 2; ++rep) {
+    t10  = std::min(t10, time_chain(10000, s10));
+    t100 = std::min(t100, time_chain(100000, s100));
+  }
   EXPECT_EQ(s10.budget_hit, 0U);
   EXPECT_EQ(s100.budget_hit, 0U);
   EXPECT_EQ(s100.respelled, 1U);  // the whole chain absorbed by its top link

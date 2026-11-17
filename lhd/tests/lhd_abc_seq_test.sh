@@ -9,9 +9,9 @@
 #   pass.abc.register=true   flops -> library DFF cells (DFFx1 in the test lib;
 #                            the QN-only DFFNx1 + DFFNx2 drive ladder in test_qn.lib)
 #   pass.abc.register=false  flops kept native (`always @(posedge)`)
-#   pass.abc.memory=true     memory RTL lowered and mapped inside a child module
-#   pass.abc.memory=false    memory kept as a native boundary instance
-#   pass.abc.memory=auto     (the default) per memory: fold within memory_max_bits
+#   synth.memory=flops     memory RTL lowered and mapped inside a child module
+#   synth.memory=macro    memory kept as a native boundary instance
+#   synth.memory=auto     (the default) per memory: fold within memory_max_bits
 #                            (1024) or over 3 ports, keep the rest native
 #
 # Registers cross into ABC as 1-bit latches (so ABC can optimize the
@@ -183,9 +183,11 @@ run_abc_lec() {
   if [ "$MAPPER" = abc ]; then
     [ "$reg" = true ] || regset=(--set "pass.$MAPPER.register=$reg")
     [ "$reg_max" = 0 ] || regmaxset=(--set "pass.$MAPPER.register_max_bits=$reg_max")
-    [ "$mem" = "default" ] || [ "$mem" = auto ] || memset=(--set "pass.$MAPPER.memory=$mem")
+    case "$mem" in true) memset=(--set synth.memory=flops) ;; false) memset=(--set synth.memory=macro) ;; esac
   else
     case "$mem" in default | false) ;; *) fail "run_abc_lec: USYN has no memory=$mem mode (ABC-only)" ;; esac
+    # synth.memory=auto folds a small memory in USYN too; memory=false asks for the native barrier.
+    [ "$mem" = false ] && memset=(--set synth.memory=macro)
     [ "$reg_max" = 0 ] || fail "run_abc_lec: USYN has no register_max_bits (ABC-only)"
     [ "$reg" = true ] || tmap=none
     QOR="$d/qor.json"
@@ -595,10 +597,10 @@ if selected memory || [[ "$group" = memory_* ]]; then
     usyn_native_mem none
     echo "PASS: USYN keeps the memory native in logical CMOS (tmap=none) (abc_mem)"
 
-    # Asked to (pass.usyn.memory=true, what an explicit synth.memory=flops selects), the mapping step lowers
+    # Asked to (synth.memory=flops), the mapping step lowers
     # the memory to registers and decode like pass.abc does, and the result is still equivalent. The logical
     # synthesis before it kept the memory a barrier either way.
-    run_abc_lec abc_mem abc_mem.abc_mem true false 0 --set pass.usyn.memory=true
+    run_abc_lec abc_mem abc_mem.abc_mem true default 0 --set synth.memory=flops
     has "$NETV" "_blasted" || fail "abc_mem (usyn memory=true): the memory was not lowered to registers"
     ! has "$NETV" "\[waddr\] <= wdata;" || fail "abc_mem (usyn memory=true): a native array remains next to the lowered memory"
     echo "PASS: USYN lowers the memory in the mapping step when asked and remains equivalent (abc_mem)"
@@ -606,7 +608,7 @@ if selected memory || [[ "$group" = memory_* ]]; then
     mkdir -p "$UMD"
     cp -R "$W/base_abc_mem/lg" "$UMD/lg"
     if "$LHD" pass usyn --top abc_mem.abc_mem lg:"$UMD/lg" --emit-dir lg:"$UMD/net" --set synth.liberty="$LIB" \
-        --set pass.usyn.memory=sometimes --workdir "$UMD/w" -q --result-json "$UMD/r.json" 2>/dev/null; then
+        --set synth.memory=sometimes --workdir "$UMD/w" -q --result-json "$UMD/r.json" 2>/dev/null; then
       fail "pass.usyn accepted memory=sometimes"
     fi
     echo "PASS: USYN memory stays a native barrier and remains equivalent"
@@ -639,7 +641,7 @@ if selected memory || [[ "$group" = memory_* ]]; then
     if selected memory || selected memory_limited; then
     # ...and `auto` keeps the SAME memory native once it is over memory_max_bits,
     # with the one-line note naming it. memory=true ignores the threshold entirely.
-    run_abc_lec abc_mem abc_mem.abc_mem true auto 0 --set pass.$MAPPER.memory_max_bits=31
+    run_abc_lec abc_mem abc_mem.abc_mem true auto 0 --set synth.memory.max_bits=31
     # Native = the shipped wrapper (`include cgen_memory_*.v) for a reset-less
     # memory, or the boundary module a memory with a whole-array reset is enclosed in
     # (the wrappers have no reset port). That boundary module is the macro-instance
@@ -653,7 +655,7 @@ if selected memory || [[ "$group" = memory_* ]]; then
       || fail "abc_mem auto/max_bits=31: no memory-max-bits note: $(cat "$ABCDIAG")"
     echo "PASS: auto keeps an over-memory_max_bits memory native with a note (abc_mem)"
 
-    run_abc_lec abc_mem abc_mem.abc_mem true true 0 --set pass.$MAPPER.memory_max_bits=31
+    run_abc_lec abc_mem abc_mem.abc_mem true true 0 --set synth.memory.max_bits=31
     has "$NETV" "cgen_memory_.*_blasted" || fail "abc_mem memory=true: memory_max_bits was consulted"
     echo "PASS: memory=true folds regardless of memory_max_bits (abc_mem)"
     fi

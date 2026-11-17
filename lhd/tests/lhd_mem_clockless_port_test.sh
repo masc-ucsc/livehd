@@ -41,7 +41,7 @@ synth() {  # synth <dir> [--set ...]
   local d="$1"
   shift
   "$LHD" synth "$SRC" --reader slang --top "$TOP" --workdir "$d/w" --emit-dir lg:"$d/net" \
-      --set synth.liberty="$LIB" --set synth.timing=false --set pass.abc.memory=true "$@" \
+      --set synth.liberty="$LIB" --set synth.timing=false --set synth.memory=flops "$@" \
       -q --result-json "$d/r.json" || fail "synth $* -> $(cat "$d/r.json" 2>/dev/null)"
 }
 synth "$W/abc" --set synth.mapper=abc &

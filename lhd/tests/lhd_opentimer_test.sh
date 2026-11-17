@@ -163,11 +163,11 @@ pub mod ot_const_splitter() -> (y:U300@[0]) {
 }
 EOF
 CSTOP=const_splitter.ot_const_splitter
-# synth.specialize=false: the fixture is ABOUT a parent constant reaching the
-# child's input splitter, so pass.specialize must not fold it into the child.
+# Preserve the parent/child boundary: specialization and flat sweep would fold
+# the parent constant into the child before its input splitter reaches timing.
 run synth "$CSPR" --top ot_const_splitter --workdir "$W/csw" --emit-dir lg:"$W/csnet" \
     --set synth.liberty="$LIB" --set color.synth.max_ge=1 --set color.synth.min_ge=0 --set synth.specialize=false \
-    --set compile.specialize_modules=false
+    --set compile.specialize_modules=false --set synth.flat_sweep=false
 "$LHD" tool tree lg:"$W/csnet" --top "$CSTOP" >"$W/cs.tree" \
     || fail "could not inspect constant-splitter mapped hierarchy"
 grep -q '__livehd_abc_input_bits_300' "$W/cs.tree" || fail "constant-splitter fixture did not instantiate dense input helper"

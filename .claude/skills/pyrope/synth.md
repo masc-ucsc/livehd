@@ -58,7 +58,7 @@ Rules:
 ## Method
 
 1. **Fix the measurement.** One Liberty, one target period, memories black-boxed
-   (`--set pass.abc.memory=false`) unless memory realization is the question.
+   (`--set synth.memory=macro`) unless memory realization is the question.
    Always record cells, area and STA delay together, and the mapper used.
    Pick a period the design misses (or a realistic SDC); with an unreachable
    target, delay-driven choices degenerate.

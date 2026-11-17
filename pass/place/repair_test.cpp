@@ -460,7 +460,6 @@ TEST_F(Buffer_repair, FinalGpPreservesTopologyUntilLegalRepair) {
     }
     graph->get_output_pin(name).connect_driver(gate("sky130_fd_sc_hd__inv_1", "sink" + std::to_string(i), root));
   }
-  options.gp_resize       = true;
   options.virtual_fillers = false;
   // Depth two runs at iteration one. Timing starts at two, so depths three
   // and four must not inspect the subsequently repaired topology.
@@ -503,8 +502,6 @@ TEST_F(Buffer_repair, FinalGpPreservesTopologyUntilLegalRepair) {
   equivalent(placed);
   check_legality(physical::read_lef(options.lefs), placed.floorplan);
   EXPECT_EQ(count(Result{.graph = graph}, "__place_rebuffer"), 0U);
-  EXPECT_FALSE(std::filesystem::exists(options.output_dir + "/gp_buffer_repair_2.json"));
-  EXPECT_FALSE(std::filesystem::exists(options.output_dir + "/gp_buffer_repair_4.json"));
 }
 TEST_F(Buffer_repair, FinalGpDoesNotRemoveBuffersOnProvisionalTiming) {
   auto b = gate("sky130_fd_sc_hd__buf_1", "buffer", graph->get_input_pin("a"));
@@ -516,9 +513,7 @@ TEST_F(Buffer_repair, FinalGpDoesNotRemoveBuffersOnProvisionalTiming) {
   const auto directory                        = options.output_dir;
   for (unsigned mode = 0; mode < 4; ++mode) {
     options.output_dir       = directory + "/" + std::to_string(mode);
-    options.gp_resize        = mode != 0;
-    options.gp_buffer_trials = mode == 2 ? 1 : 4;
-    // Timing precedes the default jump schedule, even with GP repair disabled.
+    // Timing precedes the default jump schedule.
     // The short run need not budget for depths that timing will cancel.
     options.cell_jump.depth  = 4;
     options.fp_evaluate      = [&](const Result& state) {
@@ -544,7 +539,6 @@ TEST_F(Buffer_repair, FinalGpDoesNotRemoveBuffersOnProvisionalTiming) {
     const auto         placed = place(*graph, owner, options);
     EXPECT_FALSE(std::filesystem::exists(options.output_dir + "/cell_jump.jsonl"));
     EXPECT_EQ(count(placed, "buffer"), 1U) << mode;
-    EXPECT_FALSE(std::filesystem::exists(options.output_dir + "/gp_buffer_repair_4.json"));
     EXPECT_NO_THROW(timing(placed));
     equivalent(placed);
     check_legality(physical::read_lef(options.lefs), placed.floorplan);

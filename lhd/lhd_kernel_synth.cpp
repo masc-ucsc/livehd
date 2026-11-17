@@ -505,6 +505,18 @@ livehd::placement::Options placement_options(const Options& opts) {
     }
     return value;
   };
+  // auto -> the internal `sentinel` (0 = derive/inherit), else a positive number; the sentinel itself is refused
+  // so it can never be mistaken for a real value.
+  auto auto_value = [&](std::string_view key, double sentinel) {
+    if (synth_set(opts, key, "auto") == "auto") {
+      return sentinel;
+    }
+    const double value = number(key, "auto");
+    if (value == sentinel) {
+      throw Lhd_error{"usage", std::format("synth.{}={} is no longer the automatic value", key, value), "use auto"};
+    }
+    return value;
+  };
   auto integer = [&](std::string_view key, std::string_view fallback) {
     const double value = number(key, fallback);
     if (value < 0 || value > 1000000 || std::floor(value) != value) {
@@ -556,24 +568,6 @@ livehd::placement::Options placement_options(const Options& opts) {
     throw Lhd_error{"usage", "invalid ECO connectivity weight", "expected 0..100"};
   }
   out.legalize_timing_corrections = integer("place.legalize.timing_corrections", "0");
-  for (const auto& stage : {std::string("fp"), std::string("macro")}) {
-    auto&      policy = stage == "fp" ? out.fp_warp : out.macro_warp;
-    const auto key    = "place." + stage + ".warpspace";
-    policy.enabled    = truthy(synth_set(opts, key, "false"));
-    policy.weight     = number(key + ".weight", stage == "fp" ? "1" : "0.7");
-    policy.bins       = integer(key + ".bins", "16");
-    policy.iterations = integer(key + ".iterations", "2");
-    policy.seconds    = number(key + ".seconds", "3");
-    if (stage == "macro") {
-      policy.once_after_density = truthy(synth_set(opts, key + ".once_after_density", "false"));
-      policy.updates            = integer(key + ".updates", "10");
-      policy.warmup             = number(key + ".warmup", "0.1");
-      policy.start_stability    = number(key + ".start_stability", "0.20");
-      policy.stability_window   = integer(key + ".stability_window", "10");
-      policy.refresh_interval   = integer(key + ".refresh_interval", "25");
-    }
-    livehd::placement::validate_warp_options(policy);
-  }
   {
     auto& anchor            = out.macro_anchor;
     anchor.enabled          = truthy(synth_set(opts, "place.macro.anchor", "false"));
@@ -610,7 +604,6 @@ livehd::placement::Options placement_options(const Options& opts) {
   }
   out.region.max_cells = integer("place.region.max_cells", "10000");
   out.mesh_variant     = integer("place.mesh_variant", "0");  // no effect (the legroute regional retry was removed)
-  out.mesh_variants    = integer("place.mesh_variants", "0");
   out.area_search      = truthy(synth_set(opts, "place.area_search", "false"));  // set by the driver's search
   out.region.merge_um  = auto_number("place.region.merge_um");
   out.region.cut       = synth_set(opts, "place.region.cut", "macro");
@@ -621,7 +614,7 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.boundarypins.iterations          = integer("place.region.boundarypins.iterations", "50");
   out.boundarypins.max_displacement_um = auto_number("place.region.boundarypins.max_displacement_um");
   out.boundarypins.settle_iterations   = integer("place.region.boundarypins.settle_iterations", "20");
-  out.boundarypins.pitch_um            = number("place.region.boundarypins.pitch_um", "0");
+  out.boundarypins.pitch_um            = auto_value("place.region.boundarypins.pitch_um", 0);
   out.boundarypins.align               = truthy(synth_set(opts, "place.region.pinalign", "false"));
   out.boundarypins.align_near          = number("place.region.pinalign.near", "0");
   out.boundarypins.clean_cuts          = truthy(synth_set(opts, "place.region.cleancuts", "false"));
@@ -658,7 +651,14 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.legroute_plan.timing_interval    = integer("place.legroute.plan.timing_interval", "0");
   out.legroute_plan.net_pops           = integer("place.legroute.plan.net_pops", "100000");
   out.legroute_plan.max_inflate        = number("place.legroute.plan.max_inflate", "1.5");
-  out.legroute_plan.max_degradation_ps = number("place.legroute.plan.max_degradation_ps", "-1");
+  if (synth_set(opts, "place.legroute.plan.max_degradation_ps", "off") == "off") {
+    out.legroute_plan.max_degradation_ps = -1;
+  } else {
+    out.legroute_plan.max_degradation_ps = number("place.legroute.plan.max_degradation_ps", "off");
+    if (out.legroute_plan.max_degradation_ps < 0) {
+      throw Lhd_error{"usage", "invalid synth.place.legroute.plan.max_degradation_ps", "expected off or a nonnegative number"};
+    }
+  }
   if (!std::isfinite(out.legroute_plan.max_degradation_ps)
       || (out.legroute_plan.max_degradation_ps < 0 && out.legroute_plan.max_degradation_ps != -1)) {
     throw Lhd_error{"usage", "legroute.plan.max_degradation_ps must be -1 (disabled) or finite and nonnegative", ""};
@@ -675,11 +675,6 @@ livehd::placement::Options placement_options(const Options& opts) {
     throw Lhd_error{"usage", error.what(), ""};
   }
   auto& terminal                  = out.terminal_legalize_options;
-  terminal.remainder_warp.enabled = truthy(synth_set(opts, "place.legalize.warpspace", "false"));
-  terminal.remainder_warp.weight  = number("place.legalize.warpspace.weight", "1");
-  terminal.remainder_warp.bins    = integer("place.legalize.warpspace.bins", "16");
-  terminal.remainder_warp.seconds = number("place.legalize.warpspace.seconds", "3");
-  livehd::placement::validate_warp_options(terminal.remainder_warp);
   terminal.max_density = number("place.legalize.bin.max_density", "0.8");
   if (const auto grid = synth_set(opts, "place.legalize.bin.grid", "route"); grid != "route") {
     out.legalize_bins = integer("place.legalize.bin.grid", grid);
@@ -840,7 +835,7 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.preroute.enabled         = truthy(synth_set(opts, "place.preroute", "false"));
   out.retain_preroute_design   = out.preroute.enabled;
   out.preroute.setup_margin_ps = auto_number("place.preroute.setup_margin");
-  out.preroute.hold_margin_ps  = number("place.preroute.hold_margin", "-1");
+  out.preroute.hold_margin_ps  = auto_number("place.preroute.hold_margin");
   out.preroute.nominal_slew_ps = auto_number("place.preroute.nominal_slew");
   out.preroute.hold_buffer     = synth_set(opts, "place.preroute.hold_buffer", "auto");
   out.preroute.budget_ms       = integer("place.preroute.budget_ms", "10");
@@ -947,23 +942,12 @@ livehd::placement::Options placement_options(const Options& opts) {
   const bool h2d_macro    = synth_set(opts, "place.macro", "none") == "h2d";
   const auto plain        = [&](const char* on) { return h2d_macro ? "false" : on; };
   out.bins                = integer("place.grid.density", "64");
-  // grid.density_mode is one choice; the deprecated booleans it replaces could
-  // be combined, so they are still read when it is absent.
-  const auto density_mode = synth_set(opts, "place.grid.density_mode", "");
-  out.dynamic_bins        = truthy(synth_set(opts, "place.dynamic_bins", "false"));
-  out.automatic_bins      = truthy(synth_set(opts, "place.auto_bins", "false"));
-  if (!density_mode.empty()) {
-    if (density_mode != "fixed" && density_mode != "dynamic" && density_mode != "macro") {
-      throw Lhd_error{"usage", "invalid synth.place.grid.density_mode: " + density_mode, "expected fixed, dynamic or macro"};
-    }
-    if (out.dynamic_bins || out.automatic_bins) {
-      throw Lhd_error{"usage",
-                      "synth.place.grid.density_mode conflicts with deprecated synth.place.dynamic_bins/auto_bins",
-                      "set only synth.place.grid.density_mode"};
-    }
-    out.dynamic_bins   = density_mode == "dynamic";
-    out.automatic_bins = density_mode == "macro";
+  const auto density_mode = synth_set(opts, "place.grid.density_mode", "fixed");
+  if (density_mode != "fixed" && density_mode != "dynamic" && density_mode != "macro") {
+    throw Lhd_error{"usage", "invalid synth.place.grid.density_mode: " + density_mode, "expected fixed, dynamic or macro"};
   }
+  out.dynamic_bins   = density_mode == "dynamic";
+  out.automatic_bins = density_mode == "macro";
   if (const auto route = synth_set(opts, "place.grid.route", "inherit"); route != "inherit") {
     out.route_bins = integer("place.grid.route", route);
     if (out.route_bins < 2 || out.route_bins > 1024) {
@@ -971,7 +955,7 @@ livehd::placement::Options placement_options(const Options& opts) {
     }
   }
   out.macro_fill_cell_space       = truthy(synth_set(opts, "place.macro.fill_cell_space", "false"));
-  out.macro_filler_fraction       = number("place.macro.filler_fraction", "0");
+  out.macro_filler_fraction       = auto_value("place.macro.filler_fraction", 0);
   out.virtual_fillers             = truthy(synth_set(opts, "place.virtual_fillers", "true"));
   out.virtual_filler_max_count    = integer("place.virtual_filler_max_count", "0");
   out.virtual_filler_fraction     = number("place.virtual_filler_fraction", "1");
@@ -979,7 +963,7 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.virtual_filler_bin_fraction = number("place.virtual_filler_bin_fraction", "0.25");
   out.bin_max                     = integer("place.grid.density_max", "512");
   out.local_density_weight        = number("place.local_density_weight", "0");
-  out.local_density_target        = number("place.local_density_target", "-1");
+  out.local_density_target        = auto_number("place.local_density_target");
   out.local_density_bins          = integer("place.grid.local", "512");
   out.local_density_range         = number("place.local_density_range", "4");
   out.local_density_jitter        = number("place.local_density_jitter", "0.01");
@@ -1243,7 +1227,7 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.fp_snap_enabled       = truthy(synth_set(opts, "place.fp.snap", "true"));
   out.fp_colors             = truthy(synth_set(opts, "place.fp.colors", "false"));
   out.fp_color_source       = synth_set(opts, "place.fp.color_source", "synthesis");
-  out.fp_color_minimum      = number("place.fp.color_minimum", "-1");
+  out.fp_color_minimum      = auto_number("place.fp.color_minimum");
   out.fp_color_maximum      = number("place.fp.color_maximum", "30000");
   out.preserve_imported_io  = truthy(synth_set(opts, "place.preserve_imported_io", "false"));
   out.fp_pin_adjust         = truthy(synth_set(opts, "place.fp.pin_adjust", "true"));
@@ -1268,15 +1252,6 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.resize_engine = synth_set(opts, "place.resize.engine", "legacy");
   if (out.resize_engine != "new" && out.resize_engine != "legacy") {
     throw Lhd_error{"usage", "invalid synth.place.resize.engine: " + out.resize_engine, "expected new or legacy"};
-  }
-  out.gp_resize        = truthy(synth_set(opts, "place.resize.gp", "true"));
-  out.gp_buffer_trials = integer("place.resize.gp_trials", "4");
-  if (out.gp_buffer_trials < 1 || out.gp_buffer_trials > 16) {
-    throw Lhd_error{"usage", "synth.place.resize.gp_trials expects an integer in [1,16]", ""};
-  }
-  out.gp_buffer_margin = number("place.resize.gp_margin", "0.01");
-  if (!std::isfinite(out.gp_buffer_margin) || out.gp_buffer_margin < 0 || out.gp_buffer_margin > 1) {
-    throw Lhd_error{"usage", "synth.place.resize.gp_margin expects a fraction in [0,1]", ""};
   }
   out.eval_budget     = static_cast<unsigned>(std::max<int64_t>(4, integer("place.eval_budget", "6")));
   out.growth_fraction = number("place.growth", "0.05");
@@ -1504,11 +1479,13 @@ std::string timing_target_json(const std::string& abc_qor, const std::string& st
   if (!abc_qor.empty()) {
     rapidjson::Document abc;
     abc.Parse(abc_qor.c_str());
-    if (!abc.HasParseError() && abc.IsObject() && abc.HasMember("delay_target") && abc["delay_target"].IsString()) {
-      const std::string t   = abc["delay_target"].GetString();
-      char*             end = nullptr;
-      const double      v   = std::strtod(t.c_str(), &end);
-      if (!t.empty() && end != t.c_str() && v > 0) {
+    // The technology-map report carries `delay_target_ps` (number or null); a
+    // usyn report without a Liberty delay model says delay_unit=logic-levels.
+    if (!abc.HasParseError() && abc.IsObject() && abc.HasMember("delay_target_ps") && abc["delay_target_ps"].IsNumber()
+        && (!abc.HasMember("delay_unit") || !abc["delay_unit"].IsString()
+            || std::string_view(abc["delay_unit"].GetString()) == "ps")) {
+      const double v = abc["delay_target_ps"].GetDouble();
+      if (v > 0) {
         target = v;
         source = "synth.delay";
       }
@@ -2107,9 +2084,22 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
         throw Lhd_error{"usage", "place.explore.worker expects auto, snapshot or replay", ""};
       }
       gc.snapshot_available = gc.target == "main" && run_sta && synth_set(opts, "timing.engine", "fast") == "fast";
-      gc.worker_memory_mb   = std::max(0, std::atoi(synth_set(opts, "place.explore.memory_mb", "0").c_str()));
+      // auto -> 0 (inherit); an explicit value is a positive integer.
+      const auto explore_auto = [&](const std::string& key) {
+        const auto text = synth_set(opts, key, "auto");
+        if (text == "auto") {
+          return 0;
+        }
+        char*      end   = nullptr;
+        const long value = std::strtol(text.c_str(), &end, 10);
+        if (end == text.c_str() || *end != '\0' || value < 1 || value > 1000000000) {
+          throw Lhd_error{"usage", std::format("synth.{} expects auto or a positive integer, got '{}'", key, text), ""};
+        }
+        return static_cast<int>(value);
+      };
+      gc.worker_memory_mb   = explore_auto("place.explore.memory_mb");
       if (opts.gui_worker_id.empty()) {
-        const auto mb = std::max(0, std::atoi(synth_set(opts, "place.explore.session_memory_mb", "0").c_str()));
+        const auto mb = explore_auto("place.explore.session_memory_mb");
         gc.session_root_pid = ::getpid();
         gc.session_memory_bytes = mb ? uint64_t(mb) << 20 : livehd::host_resources().ram / 2;
       }
@@ -2120,7 +2110,7 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
         if (key[0] == 'T') {
           key[0] = 't';
         }
-        const auto seconds = std::atoi(synth_set(opts, "place.explore.timeout." + key, "0").c_str());
+        const auto seconds = explore_auto("place.explore.timeout." + key);
         if (seconds > 0) {
           gc.tier_timeout[tier] = seconds;
         }
@@ -2261,7 +2251,6 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
                                                         "place.die",
                                                         "place.core",
                                                         "place.floorplan",
-                                                        "place.seed",
                                                         "place.start_map",
                                                         "place.utilization",
                                                         "place.aspect",
@@ -2378,9 +2367,6 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
         if (opt.name != "place" && !std::string_view{opt.name}.starts_with("place.")) {
           continue;  // exactly what `lhd list options synth.place` lists
         }
-        if (std::any_of(std::begin(kSynthSetRenames), std::end(kSynthSetRenames), [&](const auto& r) { return r.old_name == opt.name; })) {
-          continue;  // a deprecated spelling: `list options` leaves it out and so does the panel
-        }
         if (std::string_view{opt.help}.starts_with("INTERNAL")) {
           continue;  // driver state, hidden from `list options` and from the panel
         }
@@ -2454,7 +2440,6 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
     place_options.repair_trials = std::make_shared<livehd::placement::Options::Repair_trials>(
         livehd::placement::Options::Repair_trials{opts.gui_repair_limit, 0, false});
   }
-  place_options.gp_resize = run_resize && place_options.gp_resize;
   // Timing weights are the normal full-placement objective. Synthesis-only
   // and GP-only commands do not enter the full-placement refinement loop.
   bool       run_timing_place = !isolated && truthy(synth_set(opts, "place.timing_driven", run_place && place_options.full ? "true" : "false"));
@@ -2713,7 +2698,6 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
     return;
   }
   livehd::diag::sink().set_step("synth");
-  emit_deprecated_sets(opts);  // after compile_command, whose setup_diag clears the sink
 
   Eprp_var var;
   load_lg_into_var(lg_dir, var);
@@ -3047,7 +3031,7 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
     labels["specialize"]      = synth_set(opts, "specialize", "true");
     labels["state_sweep"]     = synth_set(opts, "state_sweep", "true");
     labels["merge_registers"] = synth_set(opts, "merge_registers", "true");
-    labels["flat_sweep"]      = synth_set(opts, "flat_sweep", "false");
+    labels["flat_sweep"]      = synth_set(opts, "flat_sweep", "true");
     // Clock gating needs the Liberty's integrated clock-gate cell: without one the gated registers' clock would be computed
     // logic and the registers would stay native flops (no mapped DFF, no timing). The library decides, the user can still say
     // false.
@@ -3429,7 +3413,7 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
                       std::format("synth.memory=sram: the Liberty NOT {} has no delay tables for an FO4 estimate", proxy->not_cell),
                       "set synth.memory.access_ns"};
     }
-    tech.min_bits = static_cast<uint64_t>(std::stoull(synth_set(opts, "memory.min_bits", "2048")));
+    tech.min_bits = memory_max_bits(opts);
     std::fprintf(stderr,
                  "lhd synth: synth.memory=sram: model from %s (%.4g um2, FO4 %.3g ps): %.3g um2/bit, access %.3g ns\n",
                  proxy->not_cell.c_str(), proxy->not_area, proxy->not_fo4_ps, tech.um2_per_bit, tech.clk_to_q_ns);

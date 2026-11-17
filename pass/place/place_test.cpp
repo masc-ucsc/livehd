@@ -1614,19 +1614,6 @@ TEST(Placement, MacroCellWorkCanBeDeferredWithoutSkippingGpTimingOrFinalLegaliza
     options.macro_filler_fraction = .125;
     options.macro_fill_cell_space = true;
     options.iterations            = 20;
-    const bool warp_preview       = !legalize && !terminal;
-    if (warp_preview) {
-      options.iterations = options.min_iterations = 100;
-      options.macro_warp.enabled                  = true;
-      options.macro_warp.weight                   = 1;
-      options.macro_warp.start_stability          = 0;
-      options.macro_warp.refresh_interval         = 20;
-      options.macro_warp.bins                     = 4;
-      options.macro_warp.iterations               = 1;
-      options.macro_warp.seconds                  = 1;
-      options.macro_warp.warmup                   = .6;
-      options.macro_warp.updates                  = 2;
-    }
     options.bins     = 2;
     options.fp_place = options.fp_colors = fp;
     options.fp_auto                      = false;
@@ -1674,24 +1661,6 @@ TEST(Placement, MacroCellWorkCanBeDeferredWithoutSkippingGpTimingOrFinalLegaliza
         EXPECT_EQ(q["cells_legalized"].GetBool(), legalize);
         EXPECT_DOUBLE_EQ(q["macro_filler_fraction"].GetDouble(), .125);
         EXPECT_TRUE(q["macro_fill_cell_space"].GetBool());
-        if (warp_preview) {
-          std::ifstream trace(options.output_dir + "/macro/macro_warp_stability.jsonl");
-          std::string   last, line;
-          while (std::getline(trace, line)) {
-            last = line;
-          }
-          rapidjson::Document decision;
-          decision.Parse(last.c_str());
-          EXPECT_FALSE(decision.HasParseError());
-          const bool has_fraction = decision.IsObject() && decision.HasMember("macro_stability_fraction");
-          EXPECT_TRUE(has_fraction);
-          // A replay recorder must not deliver a second same-step callback,
-          // which would rebase the controller's window at every GP iteration.
-          if (has_fraction) {
-            EXPECT_TRUE(decision["macro_stability_fraction"].IsNumber());
-            EXPECT_EQ(decision["iteration"].GetInt(), 80);
-          }
-        }
         if (!legalize && result.macro_gp_timing) {
           EXPECT_NE(result.macro_gp_timing->parasitics, nullptr);
         }
@@ -2702,7 +2671,6 @@ END )" << name
   options.final_cells        = false;
   options.output_dir         = (root / "macro_only").string();
   options.snapshots          = false;
-  options.macro_warp.enabled = true;
   int completed              = 0;
   options.after_stage        = [&](Placement_stage stage, const Result&) {
     EXPECT_EQ(stage, Placement_stage::macro);
@@ -2714,7 +2682,6 @@ END )" << name
   EXPECT_EQ(completed, 1);
   EXPECT_FALSE(std::filesystem::exists(options.output_dir + "/macro"));
   EXPECT_TRUE(std::filesystem::exists(options.output_dir + "/macro_animation.html"));
-  EXPECT_TRUE(std::filesystem::exists(options.output_dir + "/warp_nodes.tsv"));
   rapidjson::Document macro_report;
   macro_report.Parse(macro_only.qor.c_str());
   ASSERT_TRUE(macro_report.HasMember("macro_magnet"));
@@ -2724,7 +2691,6 @@ END )" << name
   options.snapshots            = true;
   options.output_dir           = (root / "macro_only_no_magnet").string();
   std::filesystem::create_directories(options.output_dir);
-  std::ofstream(options.output_dir + "/macro_warp_stability.jsonl") << "stale trace from an earlier solve\n";
   completed = 0;
   hhds::GraphLibrary ordinary_macro_library;
   const auto         ordinary_macro = place(*graph, ordinary_macro_library, options);
@@ -6299,45 +6265,21 @@ TEST(Placement, PlacementColorsUseLibertyRolesAndPinsMoveWithoutSta) {
       EXPECT_EQ(it->y, t.y);
     }
   }
-  // Exercise both stage controls independently without a timing callback.
+  // Two identical runs without a timing callback place identically.
   std::optional<physical::Floorplan> off_frame;
-  for (unsigned mask : {0U, 1U, 2U, 3U, 0U}) {
-    auto warped               = o;
-    warped.fp_warp.enabled    = mask & 1;
-    warped.macro_warp.enabled = mask & 2;
-    warped.fp_warp.bins = warped.macro_warp.bins = 4;
-    warped.fp_warp.iterations = warped.macro_warp.iterations = 1;
-    warped.macro_warp.updates                                = 2;
-    warped.fp_snap_enabled                                   = false;  // shifted unsnapped targets must survive handoff
-    warped.output_dir                                        = (dir / ("warp_" + std::to_string(mask))).string();
-    hhds::GraphLibrary warped_flat;
-    const auto         result = place(*graph, warped_flat, warped);
-    EXPECT_NO_THROW(check_legality(physical::read_lef(warped.lefs), result.floorplan));
+  for (unsigned run = 0; run < 2; ++run) {
+    auto plain       = o;
+    plain.output_dir = (dir / ("repeat_" + std::to_string(run))).string();
+    hhds::GraphLibrary plain_flat;
+    const auto         result = place(*graph, plain_flat, plain);
+    EXPECT_NO_THROW(check_legality(physical::read_lef(plain.lefs), result.floorplan));
     EXPECT_EQ(result.floorplan.nets.size(), result.parasitics->nets.size());
-    EXPECT_EQ(std::filesystem::exists(warped.output_dir + "/fp_warp_field.json"), bool(mask & 1));
-    EXPECT_EQ(std::filesystem::exists(warped.output_dir + "/macro_warp_summary.json"), bool(mask & 2));
-    if (mask & 1) {
-      std::ifstream targets(warped.output_dir + "/fp_warp_targets.tsv");
-      std::string   line;
-      std::getline(targets, line);
-      while (std::getline(targets, line)) {
-        std::istringstream row(line);
-        std::string        name;
-        double             bx, by, wx, wy, sx, sy;
-        ASSERT_TRUE(bool(row >> name >> bx >> by >> wx >> wy >> sx >> sy));
-        EXPECT_DOUBLE_EQ(wx, sx);
-        EXPECT_DOUBLE_EQ(wy, sy);
-      }
-    }
-
-    if (!mask) {
-      if (!off_frame) {
-        off_frame = result.floorplan;
-      } else {
-        ASSERT_EQ(off_frame->components.size(), result.floorplan.components.size());
-        for (size_t n = 0; n < off_frame->components.size(); ++n) {
-          EXPECT_EQ(off_frame->components[n].place, result.floorplan.components[n].place);
-        }
+    if (!off_frame) {
+      off_frame = result.floorplan;
+    } else {
+      ASSERT_EQ(off_frame->components.size(), result.floorplan.components.size());
+      for (size_t n = 0; n < off_frame->components.size(); ++n) {
+        EXPECT_EQ(off_frame->components[n].place, result.floorplan.components[n].place);
       }
     }
   }
@@ -7643,15 +7585,11 @@ END LIBRARY
   options.final_cells = true;
   options.cache_dir.clear();
   options.output_dir      = (dir / "staged").string();
-  options.fp_warp.enabled = options.macro_warp.enabled = true;
   hhds::GraphLibrary  staged_library;
   const auto          staged = place(*graph, staged_library, options);
   rapidjson::Document staged_qor;
   staged_qor.Parse(staged.qor.c_str());
   EXPECT_TRUE(staged_qor["cell_halo"]["active"].GetBool());
-  EXPECT_FALSE(staged_qor["fp_warpspace"].GetBool());
-  EXPECT_FALSE(staged_qor["macro_warpspace"].GetBool());
-  EXPECT_FALSE(std::filesystem::exists(options.output_dir + "/macro_warp_summary.json"));
   EXPECT_FALSE(std::filesystem::exists(options.output_dir + "/fp_place.json"));
   std::ifstream       macro_report(options.output_dir + "/macro/qor.json");
   rapidjson::Document macro_qor;
@@ -8029,29 +7967,7 @@ TEST(Placement, RelativeFillerChargeScalesInPreliminaryAndFinalGp) {
 
 }  // namespace livehd::placement
 
-TEST(Placement, MacroWarpDefaultsUseConstantStrengthAndStabilityStart) {
-  const livehd::placement::Options o;
-  EXPECT_DOUBLE_EQ(o.macro_warp.weight, .7);
-  EXPECT_DOUBLE_EQ(o.macro_warp.start_stability, .2);
-  EXPECT_EQ(o.macro_warp.refresh_interval, 25);
-  EXPECT_DOUBLE_EQ(o.fp_warp.weight, 1);
-  EXPECT_DOUBLE_EQ(o.fp_warp.start_stability, 0);
-  EXPECT_EQ(o.fp_warp.refresh_interval, 0);
-}
 
-TEST(Placement, AdaptiveSearchRejectsTopologyChangingGpRepairBeforePlacement) {
-  hhds::GraphLibrary         source, placed;
-  auto                       graph = source.create_io("adaptive_repair")->create_graph();
-  livehd::placement::Options options;
-  options.gp_search.enabled = true;
-  options.gp_resize         = true;
-  try {
-    livehd::placement::place(*graph, placed, options);
-    FAIL() << "adaptive search accepted topology-changing repair";
-  } catch (const std::invalid_argument& error) {
-    EXPECT_NE(std::string(error.what()).find("disable gp_resize"), std::string::npos);
-  }
-}
 namespace livehd::placement {
 TEST(Placement, CutRowsRequireActualSiteCoverageAndUseSegmentOrientations) {
   physical::Technology tech;

@@ -131,11 +131,11 @@ echo "$out" | grep -q '"name":"formal.strict"' && fail "removed formal.strict is
 echo "$out" | grep -q '"name":"formal.simfail","method":"pass.lec","default":"true"' || fail "formal.simfail missing or wrong: $out"
 echo "$out" | grep -q '"name":"formal.simfail_run","method":"pass.lec","default":"true"' || fail "formal.simfail_run missing or wrong: $out"
 echo "$out" | grep -q '"name":"formal.lec.simfail"' && fail "simfail must be shared as formal.simfail, not formal.lec.simfail: $out"
-# the verify engine reads ignore_memory / hard_timeout_mult too, so they are
-# COMMON (bare formal.*) -- the spelling every diagnostic already prints.
+# the verify engine reads ignore_memory too, so it is COMMON (bare formal.*) -- the spelling every diagnostic
+# already prints. min_timeout / hard_timeout_mult are fixed internals now (formal.timeout is the one budget).
 echo "$out" | grep -q '"name":"formal.ignore_memory","method":"pass.lec"' || fail "formal.ignore_memory (common) missing: $out"
-echo "$out" | grep -q '"name":"formal.hard_timeout_mult","method":"pass.lec","default":"3"' \
-  || fail "formal.hard_timeout_mult (common) missing: $out"
+! echo "$out" | grep -q '"name":"formal.hard_timeout_mult"\|"name":"formal.min_timeout"' \
+  || fail "retired formal.hard_timeout_mult/min_timeout still listed: $out"
 # the REVERSE of the guards above: every pass.lec label is listed under exactly
 # ONE of formal.<f> / formal.lec.<f> -- never both, and a pairing knob never bare.
 echo "$out" | grep -o '"name":"formal\.[a-z_]*","method":"pass.lec"' | sed 's/"name":"formal\.\([a-z_]*\)".*/\1/' | sort >"$W/common_leaves"

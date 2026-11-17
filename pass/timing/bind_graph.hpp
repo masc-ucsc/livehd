@@ -21,15 +21,20 @@
 // get_mask / set_mask / concat nodes and constant shifts, is resolved bit by bit down to the driving cell
 // pin or port bit, so a sink pin is connected to its real driver.
 //
+// Memories are clock boundaries with zero internal delay: each consumed read-data bit is a start point (an
+// input port cell named `<memory>:out_<pid>[<bit>]`) and each runtime data/address/enable bit it samples is an
+// endpoint (an output port cell `<memory>:in_<pid>[<bit>]`). The names are the placement labels of the memory
+// macro pins, so placed RC binds to them.
+//
 // What is not, is counted and listed: cells with no Liberty model, instances that are not flat, logic that
-// was not mapped (the sink behind it is left undriven), sinks driven by a constant, memories.
+// was not mapped (the sink behind it is left undriven), sinks driven by a constant.
 namespace livehd::timing::fast {
 
 struct Bound_graph {
   std::unique_ptr<Netlist>      netlist;
   std::vector<hhds::Node_class> cell_node;  // per netlist cell; an invalid node for a port cell
   std::vector<std::string>      unsupported;
-  size_t                        mapped_cells = 0, opaque_cells = 0, unmapped_nodes = 0;
+  size_t                        mapped_cells = 0, opaque_cells = 0, unmapped_nodes = 0, memory_nodes = 0;
   size_t                        constant_sinks = 0, undriven_sinks = 0, multiple_driver_sinks = 0, unresolved_sinks = 0;
 };
 

@@ -1479,7 +1479,7 @@ namespace {
 template <class R>
 std::string race_timeout_note(const Race_result<R>& race, const Lec_options& opts) {
   return std::format(
-      "racer exceeded formal.timeout: killed at the {:.1f}s wall deadline (formal.timeout={}s + formal.min_timeout floor(s) + "
+      "racer exceeded formal.timeout: killed at the {:.1f}s wall deadline (formal.timeout={}s + the per-unit min_timeout floor(s) + "
       "grace; "
       "cvc5's tlimit-per cannot preempt its preprocessing or one eager CaDiCaL solve)",
       static_cast<double>(race.deadline_ms) / 1000.0,
@@ -2271,6 +2271,11 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
   };
   struct Arm {
     std::string engine, profile;
+    // "" = the run's own formal.lec.decompose. "false" = this BMC arm skips the
+    // per-cut sweep and asks the one monolithic query (see the mono-arm note
+    // where the sequential auto arms are built).
+    std::string decompose;
+    std::string label() const { return engine + ":" + profile + (decompose == "false" ? "/mono" : ""); }
   };
   std::vector<Arm> arms;
   // Work already spent before the race below (a case split that did not settle).
@@ -2317,6 +2322,25 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
         {"bmc", opts.profile},
         {"bmc",       "lazy"}
     };
+    // The two shapes of the SAME bounded check. The per-cut sweep re-runs cvc5
+    // preprocessing over the unrolling once per (output, cycle); the monolithic
+    // query pays it once but leaves one large miter to the SAT search. Neither
+    // proves more and neither is always faster (measured on lhdsuite picorv32,
+    // bound 6: monolithic 6 s refuting / 16 s bounded-proving, sweep 35+ s /
+    // over 120 s; the sweep exists for miters the search chokes on). So under
+    // decompose=auto both race when lhd.jobs allows a second solver. With one
+    // job the primary BMC arm is the monolithic one -- BMC only decides once
+    // induction has not proven, where a real difference is likely and one
+    // query finds it -- and the lazy-profile arm keeps the sweep.
+    // LHD_LEC_MONO_ARM=0 keeps the sweep-only arms, for an A/B of the two.
+    const char* mono_env = livehd::debug::env<"LHD_LEC_MONO_ARM">();
+    if (opts.decompose == "auto" && !(mono_env != nullptr && std::string_view{mono_env} == "0")) {
+      if (livehd::Job_manager::global().ceiling() >= 2) {
+        arms.insert(arms.begin() + 2, Arm{"bmc", opts.profile, "false"});
+      } else {
+        arms[1].decompose = "false";
+      }
+    }
     if (hint == "bmc") {
       std::swap(arms[0], arms[1]);
     }
@@ -2356,6 +2380,9 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
     o.profile    = arms[i].profile;
     o.partitions = 1;
     o.portfolio  = "auto";
+    if (!arms[i].decompose.empty()) {
+      o.decompose = arms[i].decompose;
+    }
     if (o.profile == "intblast") {
       o.int_blast = "iand";
     }
@@ -2452,7 +2479,7 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
     auto& r = race.results[i];
     if (box_stop && !race.done[i]) {
       r.verdict = Verdict::Undecided;
-      r.detail  = "stopped: " + arms[race.winner].engine + ":" + arms[race.winner].profile
+      r.detail  = "stopped: " + arms[race.winner].label()
                  + " found one-sided box compare points, which no engine can pair on this miter";
     } else if (race.timed_out[i]) {
       r.verdict     = Verdict::Undecided;
@@ -2468,7 +2495,7 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
     total    += r.cvc5;
     solve_ms += r.solve_ms;
     reports.push_back({arms[i].engine,
-                       arms[i].profile,
+                       arms[i].profile + (arms[i].decompose == "false" ? "/mono" : ""),
                        vname(r),
                        race.arm_ms[i],
                        !box_stop && race.winner == static_cast<int>(i),
@@ -2506,7 +2533,7 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
                         : std::string{})
                  + r.detail;
     } else {
-      r.detail = "auto: " + arms[race.winner].engine + ":" + arms[race.winner].profile + " reached " + vname(r)
+      r.detail = "auto: " + arms[race.winner].label() + " reached " + vname(r)
                  + " first (raced ind|bmc profiles); " + r.detail;
     }
     hint_note(r, arms[race.winner].engine);
@@ -2553,7 +2580,7 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
   for (size_t i = 0; i < arms.size(); ++i) {
     const auto& r = race.results[i];
     legs.push_back(&r);
-    undecided.detail += "; " + arms[i].engine + ":" + arms[i].profile + "=" + vname(r) + ": " + r.detail;
+    undecided.detail += "; " + arms[i].label() + "=" + vname(r) + ": " + r.detail;
     // One encoder and one miter serve every arm: a refusal in any arm is a
     // design-level refusal, and the miter is empty only if every arm saw it so.
     undecided.unsupported      = undecided.unsupported || r.unsupported;
@@ -2574,7 +2601,7 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
   }
   if (const int k = deciding_attempt(legs); k >= 0) {
     const auto& leg        = *legs[static_cast<size_t>(k)];
-    undecided.cause_detail = "auto: " + arms[static_cast<size_t>(k)].engine + ":" + arms[static_cast<size_t>(k)].profile + ": "
+    undecided.cause_detail = "auto: " + arms[static_cast<size_t>(k)].label() + ": "
                              + (leg.cause_detail.empty() ? leg.detail : leg.cause_detail);
   }
   if (comb) {
@@ -4826,7 +4853,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   // rlimit/compile tier and for timeout==0 (unbounded), so CI stays reproducible.
   const bool                          budget_on       = opts.timeout > 0 && opts.compile_resource_limit == 0;
   const long long                     budget_ms       = static_cast<long long>(opts.timeout) * 1000;
-  // formal.min_timeout: the floor this query never drops below once the shared
+  // the per-unit min_timeout: the floor this query never drops below once the shared
   // allowance is spent (>=1ms — 0 reads as UNBOUNDED to cvc5).
   const long long                     budget_floor_ms = std::max<long long>(1, static_cast<long long>(opts.min_timeout) * 1000);
   std::chrono::steady_clock::duration solve_spent{};
@@ -11211,9 +11238,19 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
                    terms.size(),
                    congruence_terms.size());
     }
+    // ABC first: it settles bit-level obligations (an adder against its gates)
+    // in milliseconds, where a fresh cvc5 slice can spend its 500 ms limit and
+    // split again (loop_roll_carry: 15 ms against 2-3 s per definition). The
+    // speculative cvc5 slices below then only see what ABC left open (symbolic
+    // arrays, cones past ABC's limits).
+    std::vector<Cone_verdict> r1 = abc_prove_unsat_batch(terms, opts.conelimit, cone_budget_left(), &stats, direct_merge);
+    for (size_t job = 0; job < terms.size(); ++job) {
+      if (r1[job] == Cone_verdict::Proven) {
+        terms[job] = tm.mkFalse();
+      }
+    }
     {
-      // Leave room for the original ABC obligations after the speculative
-      // slice proofs. A few hard slices must not consume the entire pass.
+      // A few hard slices must not consume the entire pass.
       const auto fresh_deadline
           = std::chrono::steady_clock::now() + std::chrono::milliseconds(std::max<int64_t>(1, cone_budget_left() / 2));
       bool fresh_budget_spent = false;
@@ -11232,10 +11269,13 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           ranges.pop_back();
           cvc5::Term group;
           for (size_t k = first; k < last; ++k) {
+            if (terms[jobs[k]] == tm.mkFalse() || r1[jobs[k]] == Cone_verdict::Refuted) {
+              continue;  // already settled by congruence or ABC
+            }
             group = group.isNull() ? terms[jobs[k]] : tm.mkTerm(cvc5::Kind::OR, {group, terms[jobs[k]]});
           }
-          if (group == tm.mkFalse()) {
-            continue;  // already discharged by congruence
+          if (group.isNull()) {
+            continue;
           }
           cvc5::Solver slice_solver(tm);
           configure_solver(slice_solver, solver_profile(opts.profile), {.has_mem = true, .has_boxes = true, .witness = false});
@@ -11277,9 +11317,8 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         }
       }
     }
-    std::vector<Cone_verdict> r1 = abc_prove_unsat_batch(terms, opts.conelimit, cone_budget_left(), &stats, direct_merge);
-    // The isolated ABC batch may expire before reporting even a constant
-    // false. A later timeout cannot invalidate an already-discharged proof.
+    // A job discharged by congruence or a fresh slice is proven whatever the
+    // ABC batch reported for it (it may have expired before reaching it).
     for (size_t job = 0; job < terms.size(); ++job) {
       if (terms[job] == tm.mkFalse()) {
         r1[job] = Cone_verdict::Proven;
@@ -11359,7 +11398,8 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     // than a vague "unknown". Only obligations that are NECESSARY for array
     // equality may do that (`can_refute`): a bulk-update obligation is merely
     // sufficient, so a SAT one leaves the parent Unknown for cvc5 to settle.
-    absl::flat_hash_set<std::string> mem_proven;  // mem keys whose next-state arrays are proven equal
+    absl::flat_hash_set<std::string> mem_proven;    // mem keys whose next-state arrays are proven equal
+    absl::flat_hash_set<size_t>      entry_proven;  // memory cuts proven entry by entry (below)
     auto                             aggregate_mem = [&]() {
       mem_proven = mem_equal_terms;  // no cut was built for these: equal by construction
       for (const auto& [parent, ix] : subs_of) {
@@ -11373,8 +11413,132 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           mem_proven.insert(mem_key_of[parent]);
         }
       }
+      for (const size_t parent : entry_proven) {
+        verdicts[parent] = Cone_verdict::Proven;
+        mem_proven.insert(mem_key_of[parent]);
+      }
     };
     aggregate_mem();
+
+    // ---- small memories, entry by entry ---------------------------------------
+    // Over a finite index sort two arrays are equal iff they agree at EVERY
+    // index, so a memory cut whose per-port obligations differ structurally (a
+    // Verilog part-select write against a Pyrope read-modify-write) is the
+    // conjunction of one bit-vector obligation per entry. Each read is pushed
+    // through the STORE/ITE next-state term (read over write), down to reads of
+    // the shared current array, which ABC abstracts to free inputs keyed by the
+    // term: the same entry on both sides is the same input. Every index of the
+    // sort is enumerated, and an entry obligation only drops premises (or
+    // inlines asserted definitions), so its UNSAT is exact; anything else leaves
+    // the cut with cvc5. mem_partial_write_lanes: five 4x16 cuts in ~1-2 s of
+    // per-entry checks instead of ~8.5 s of array theory.
+    {
+      constexpr uint32_t        max_index_bits = 6;     // 64 entries
+      constexpr uint64_t        max_entry_bits = 4096;  // entries * width
+      std::vector<size_t>       e_parent;
+      std::vector<cvc5::Term>   e_terms;
+      for (size_t i = 0; i < ind_diffs.size(); ++i) {
+        if (cached[i] || !ind_diffs[i].first.starts_with("mem:") || verdicts[i] == Cone_verdict::Proven
+            || verdicts[i] == Cone_verdict::Refuted) {
+          continue;
+        }
+        const auto& diff = ind_diffs[i].second;
+        if (diff.getKind() != cvc5::Kind::DISTINCT || diff.getNumChildren() != 2 || !diff[0].getSort().isArray()
+            || diff[0].getSort() != diff[1].getSort()) {
+          continue;
+        }
+        const auto index_sort = diff[0].getSort().getArrayIndexSort();
+        const auto elem_sort  = diff[0].getSort().getArrayElementSort();
+        if (!index_sort.isBitVector() || !elem_sort.isBitVector() || index_sort.getBitVectorSize() > max_index_bits
+            || (uint64_t{1} << index_sort.getBitVectorSize()) * elem_sort.getBitVectorSize() > max_entry_bits) {
+          continue;
+        }
+        const uint32_t                             w = index_sort.getBitVectorSize();
+        std::unordered_map<cvc5::Term, cvc5::Term> memo;
+        std::function<cvc5::Term(const cvc5::Term&, const cvc5::Term&)> read = [&](const cvc5::Term& array,
+                                                                                    const cvc5::Term& index) -> cvc5::Term {
+          if (const auto it = memo.find(array); it != memo.end()) {
+            return it->second;
+          }
+          cvc5::Term out;
+          if (array.getKind() == cvc5::Kind::STORE) {
+            const auto& at = array[1];
+            if (at == index) {
+              out = array[2];
+            } else if (at.isBitVectorValue()) {
+              out = read(array[0], index);  // a different constant entry
+            } else {
+              out = tm.mkTerm(cvc5::Kind::ITE, {tm.mkTerm(cvc5::Kind::EQUAL, {at, index}), array[2], read(array[0], index)});
+            }
+          } else if (array.getKind() == cvc5::Kind::ITE) {
+            out = tm.mkTerm(cvc5::Kind::ITE, {array[0], read(array[1], index), read(array[2], index)});
+          } else {
+            out = tm.mkTerm(cvc5::Kind::SELECT, {array, index});
+          }
+          memo.emplace(array, out);
+          return out;
+        };
+        for (uint64_t entry = 0; entry < (uint64_t{1} << w); ++entry) {
+          memo.clear();  // one index per pass: the memo is keyed by array alone
+          const auto index = tm.mkBitVector(w, entry);
+          e_parent.push_back(i);
+          e_terms.push_back(tm.mkTerm(cvc5::Kind::DISTINCT, {read(diff[0], index), read(diff[1], index)}));
+        }
+      }
+      if (!e_terms.empty()) {
+        // Inline the read-port douts and other scalar definitions, and expand the
+        // reads nested in the written values (read-modify-write) the same way.
+        auto definitions = re.equalities;
+        definitions.insert(definitions.end(), ie.equalities.begin(), ie.equalities.end());
+        e_terms       = expand_cone_definitions(tm, definitions, e_terms);
+        const auto ev = abc_prove_unsat_batch(e_terms, opts.conelimit, cone_budget_left(), nullptr, direct_merge);
+        // ABC gives up on some of these read-modify-write entries that cvc5
+        // settles in milliseconds as plain bit-vector formulas (no array left
+        // but reads of the shared current array). Ask it per entry, briefly;
+        // the first entry it does not prove leaves the cut whole.
+        const auto entry_deadline
+            = std::chrono::steady_clock::now() + std::chrono::milliseconds(std::max<int64_t>(500, cone_budget_left() / 2));
+        absl::flat_hash_map<size_t, bool> all;
+        size_t                            by_cvc5 = 0;
+        for (size_t k = 0; k < e_terms.size(); ++k) {
+          auto [it, fresh] = all.emplace(e_parent[k], true);
+          if (!it->second || ev[k] == Cone_verdict::Proven) {
+            continue;
+          }
+          if (ev[k] == Cone_verdict::Refuted || std::chrono::steady_clock::now() >= entry_deadline) {
+            it->second = false;
+            continue;
+          }
+          cvc5::Solver entry_solver(tm);
+          entry_solver.setLogic("QF_AUFBV");
+          entry_solver.setOption("tlimit-per", "1000");
+          entry_solver.assertFormula(e_terms[k]);
+          if (acc != nullptr) {
+            ++acc->checks;
+          }
+          const auto check_t0  = std::chrono::steady_clock::now();
+          const bool unsat     = entry_solver.checkSat().isUnsat();
+          solve_spent         += std::chrono::steady_clock::now() - check_t0;
+          res.solve_ms         = std::chrono::duration_cast<std::chrono::milliseconds>(solve_spent).count();
+          it->second           = unsat;
+          by_cvc5             += unsat ? 1 : 0;
+        }
+        for (const auto& [parent, proven] : all) {
+          if (proven) {
+            entry_proven.insert(parent);
+          }
+        }
+        if (livehd::debug::env<"LHD_LEC_CONE_LOG">() != nullptr) {
+          std::fprintf(stderr,
+                       "[LEC_CONE] -- small memories entry by entry: %zu/%zu cut(s) proven from %zu entry obligation(s) (%zu by cvc5)\n",
+                       entry_proven.size(),
+                       all.size(),
+                       e_terms.size(),
+                       by_cvc5);
+        }
+        aggregate_mem();
+      }
+    }
 
     // A memory proof made under exact dout correspondence is sound, but its
     // standalone cone digest does not include the surrounding address/read-port
@@ -11387,6 +11551,11 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         if (verdicts[parent] == Cone_verdict::Proven) {
           merge_assisted[parent] = true;
         }
+      }
+    }
+    if (direct_merge != nullptr) {
+      for (const size_t parent : entry_proven) {
+        merge_assisted[parent] = true;  // the entry proofs assumed the discharged dout merges
       }
     }
     if (!first_direct_merge.empty() || !direct_coherence.empty()) {
@@ -13882,7 +14051,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
   const bool                                   solve_budget_on = opts.timeout > 0 && opts.compile_resource_limit == 0;
   const long long             solve_budget_ms = static_cast<long long>(opts.timeout) * 1000;
   // The floor every unsettled obligation is guaranteed once the total is spent
-  // (formal.min_timeout). Clamped to >=1ms because 0 reads as UNBOUNDED to cvc5,
+  // (the per-unit min_timeout). Clamped to >=1ms because 0 reads as UNBOUNDED to cvc5,
   // which would turn the floor into "no limit at all" — the exact opposite.
   const long long             min_ms          = std::max<long long>(1, static_cast<long long>(opts.min_timeout) * 1000);
   long long                   solve_spent_ms  = 0;
@@ -16661,7 +16830,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
   // Soft-budget accounting. `timeout` is a TARGET, so the honest report is what
   // was actually spent against it, over how many units, and how many of those
   // ran on the min_timeout floor (i.e. are the reason for any overrun). Without
-  // the actual figure an agent tuning formal.timeout / formal.min_timeout is
+  // the actual figure an agent tuning formal.timeout / the per-unit min_timeout is
   // guessing: "budget reached" alone never said whether the run then spent 2s or
   // 300s more.
   if (solve_budget_on) {

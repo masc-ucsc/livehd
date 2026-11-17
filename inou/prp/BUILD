@@ -816,7 +816,12 @@ _EQUIV_SIM = [
 
 # Keep the two independent proofs below the per-test runtime budget. The
 # original target remains a suite so requesting it retains both legs.
-_EQUIV_SPLIT_BITFUZZ = ["mem_partial_write_lanes", "mem_partial_write_mixed", "shl_not_wide_amount"]
+_EQUIV_SPLIT_BITFUZZ = [
+    "mem_dynamic_splice_after_write",
+    "mem_partial_write_lanes",
+    "mem_partial_write_mixed",
+    "shl_not_wide_amount",
+]
 
 [
     sh_test(
@@ -851,6 +856,7 @@ _EQUIV_SPLIT_BITFUZZ = ["mem_partial_write_lanes", "mem_partial_write_mixed", "s
             [prp_file[:-len(".prp")] + "/*.prp"],
             allow_empty = True,
         ),
+        tags = ["cpu:2"] if prp_file.split("/")[-1].split(".")[0] in _EQUIV_SPLIT_BITFUZZ else [],
         deps = ["//inou/yosys:scripts"],
     )
     for prp_file in glob(
@@ -945,6 +951,7 @@ _EQUIV_SPLIT_BITFUZZ = ["mem_partial_write_lanes", "mem_partial_write_mixed", "s
         name = "prp-equiv-%s-bitfuzz" % stem,
         srcs = ["tests/pyrope_test.py"],
         args = ["-i", "$(location tests/equiv/%s.prp)" % stem, "--mode", "equiv", "--bitfuzz"],
+        tags = ["cpu:2"],  # lec.py runs two proof workers
         data = [
             "tests/prplib.py",
             "tests/lec.py",
@@ -1615,6 +1622,15 @@ _V2PRP2V_VERILOG_FIXME = [
 # prp-equiv-<stem> still proves that .prp against the same golden, so the fixtures
 # and every other target stay. 2026-10-17; the representative that stays follows
 # each name.
+# Round trips whose native-Pyrope and original-Verilog checks are each a
+# memory proof of several seconds: one target per leg keeps both below the
+# per-test runtime budget; the suite of the plain name runs both.
+_V2PRP2V_SPLIT = [
+    "generic_mem_byte_lanes",
+    "mem_dynamic_splice_after_write",
+    "mem_partial_write_lanes",
+]
+
 _V2PRP2V_DUP = [
     "bitsel_idx",  # bitsel_dyn
     "dyn_tuple_mut_ro",  # dyn_tuple_const
@@ -1658,10 +1674,10 @@ _V2PRP2V_DUP = [
             ["tests/equiv/%s/*.prp" % base],
             allow_empty = True,
         ),
-        tags = ["fixme"] if (
+        tags = (["fixme"] if (
             base in _V2PRP2V_NATIVE_FIXME or
             base in _V2PRP2V_VERILOG_FIXME
-        ) else [],
+        ) else []) + (["cpu:2"] if base in _V2PRP2V_SPLIT else []),  # lec.py runs two proof workers
         deps = ["//inou/yosys:scripts"],
     )
     for base in [
@@ -1683,13 +1699,16 @@ _V2PRP2V_DUP = [
             ] + ["tests/equiv/%s.v" % s for s in _V2PRP2V_DUP],
         )
     ]
-    for part in (["native", "verilog"] if base == "mem_partial_write_lanes" else ["all"])
+    for part in (["native", "verilog"] if base in _V2PRP2V_SPLIT else ["all"])
 ]
 
-test_suite(
-    name = "prp-v2prp2v-mem_partial_write_lanes",
-    tests = [":prp-v2prp2v-mem_partial_write_lanes-" + part for part in ["native", "verilog"]],
-)
+[
+    test_suite(
+        name = "prp-v2prp2v-%s" % base,
+        tests = [":prp-v2prp2v-%s-%s" % (base, part) for part in ["native", "verilog"]],
+    )
+    for base in _V2PRP2V_SPLIT
+]
 
 # lhd-sim known-failing trackers. These are separate from `prp-equiv-*`: the
 # paired .prp/.v files live in tests/equiv and LEC where possible, but these

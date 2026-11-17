@@ -651,26 +651,6 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
                                           m.before_snap),
                               h);
   }
-  for (const auto& [stage, policy] : {
-           std::pair{   "fp",    o.fp_warp},
-           std::pair{"macro", o.macro_warp}
-  }) {
-    if (policy.enabled) {
-      h = hash_text(std::format("warp-once-after-density:{}", policy.once_after_density), h);
-      h = hash_text(
-          std::format("warp-constant-v1:{}:{}:{}", policy.start_stability, policy.stability_window, policy.refresh_interval),
-          h);
-      h = hash_text(std::format("density-warp-v6-constant-projected:{}:{}:{}:{}:{}:{}:{}",
-                                stage,
-                                policy.bins,
-                                policy.iterations,
-                                policy.weight,
-                                policy.warmup,
-                                policy.updates,
-                                policy.seconds),
-                    h);
-    }
-  }
 
   h = hash_text("prects-controls:" + o.control_ports, h);
   if (o.reset_fanout) {
@@ -756,14 +736,6 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
   }
   if (!o.optimization_pending) {
     const auto& t = o.terminal_legalize_options;
-    if (t.remainder_warp.enabled) {
-      h = hash_text(std::format("remainder-warp:{}:{}:{}:{}",
-                                t.remainder_warp.bins,
-                                t.remainder_warp.weight,
-                                t.remainder_warp.iterations,
-                                t.remainder_warp.seconds),
-                    h);
-    }
     h = hash_text(std::format("terminal-legalize:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}",
                               t.max_density,
                               t.critical_fraction,
@@ -1009,13 +981,6 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
     h = hash_text(std::format("centroid-copies:per-parent:{}", o.fp_min_copies), h);
     if (o.fp_min_macros != 2) {
       h = hash_text(std::format("centroid-min-macros:{}", o.fp_min_macros), h);
-    }
-  }
-  if (o.gp_resize) {
-    h = hash_text(std::format("gp-buffer-repair:{}", o.gp_buffer_margin), h);
-    h = hash_text(std::format("gp-buffer-trials:{}", o.gp_buffer_trials), h);
-    for (const auto& pattern : o.resize_dont_use) {
-      h = hash_text("gp-dont-use:" + pattern, h);
     }
   }
   if (o.fp_place) {
@@ -7413,9 +7378,6 @@ void check_legality(const ph::Technology& tech, const ph::Floorplan& fp, double 
 
 Options final_cell_options(const Options& options) {
   validate_cell_halo(options);
-  if (options.gp_buffer_trials < 1 || options.gp_buffer_trials > 16) {
-    throw std::invalid_argument("GP buffer trial budget must be between 1 and 16");
-  }
   if (!options.cell_halo) {
     return options;  // Unset must preserve every existing staged/default decision.
   }
@@ -7667,8 +7629,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
 #if !defined(DREAMPLACE_NATIVE_PIN_TIMING_API)
     throw std::invalid_argument("native GP pin timing requires the DREAMPlace pin-timing API; published dependency lacks it");
 #endif
-    if (options.threads != 1 || options.fp_evaluate || options.whatif || options.after_stage || options.gp_resize
-        || options.fp_resize || options.gp_search.enabled || options.vanished_memory || options.macro_transparency.enabled()
+    if (options.threads != 1 || options.fp_evaluate || options.whatif || options.after_stage || options.fp_resize || options.gp_search.enabled || options.vanished_memory || options.macro_transparency.enabled()
         || options.routability || options.fp_place || options.macro_mode != "none" || !options.cache_dir.empty()
         || options.retain_placement || options.timing_seed || options.cell_jump.depth > 1 || options.iterations <= 0
         || options.output_dir.empty() || !options.optimization_pending || !options.preserve_imported_ties
@@ -7690,9 +7651,6 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
   }
   if (options.final_timing_schedule != "fixed" && options.final_timing_schedule != "late") {
     throw std::invalid_argument("final timing schedule must be fixed or late");
-  }
-  if (!std::isfinite(options.gp_buffer_margin) || options.gp_buffer_margin < 0 || options.gp_buffer_margin > 1) {
-    throw std::invalid_argument("GP buffer relative slack margin must be finite and in [0,1]");
   }
   if (!std::isfinite(options.eco_connectivity_weight) || options.eco_connectivity_weight < 0
       || options.eco_connectivity_weight > 100) {
@@ -9829,9 +9787,6 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
   }
   std::vector<CentroidSample> centroid_initial, centroid_gp;
   dp::Result                  metrics, fp_metrics;
-  // Diagnostics describe this solve only, including when a reused output
-  // directory previously had warpspace enabled and now has it disabled.
-  fs::remove(options.output_dir + "/macro_warp_stability.jsonl");
   std::optional<dp::MagnetReport>               macro_replay;
   std::shared_ptr<dp::detail::MagnetRuntime>    macro_replay_motion;
   std::optional<Satlegalize_report>             sat_report;
@@ -10209,26 +10164,6 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       }
       return updates;
     };
-  };
-  const auto write_warp_nodes = [&] {
-    fs::create_directories(options.output_dir);
-    std::ofstream nodes(options.output_dir + "/warp_nodes.tsv");
-    nodes << "node\tname\n";
-    for (size_t n = 0; n < v.cells.size(); ++n) {
-      nodes << n << '\t' << v.cells[n].name << '\n';
-    }
-    if (!nodes) {
-      throw std::runtime_error("cannot write warp node identities");
-    }
-  };
-  const auto warp_memories = [](const dp::Design& design) {
-    std::vector<int> ids;
-    for (int n = 0; n < design.num_movable; ++n) {
-      if (!design.node_macro.empty() && design.node_macro[n]) {
-        ids.push_back(n);
-      }
-    }
-    return ids;
   };
   std::vector<dp::FloorplanCircle> fp_before;
   std::vector<CentroidSample>      fp_gp, fp_final;
@@ -10776,23 +10711,6 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
                              g.family,
                              g.parent});
       }
-      const auto                       fp_before_warp = fp_before;
-      std::vector<Warp_centroid_shift> warp_shifts;
-      if (options.fp_warp.enabled && !warp_memories(v.design).empty()) {
-        try {
-          write_warp_nodes();
-          auto fp_policy       = options.fp_warp;
-          fp_policy.dbu_per_um = tech.dbu;
-          const auto field     = placement_warp(v.design, warp_memories(v.design), fp_policy);
-          warp_shifts          = shift_warp_centroids(v.design, field.delta, fp_before, options.fp_warp.weight);
-          write_warp_field(field, options.fp_warp, options.output_dir + "/fp_warp_field.json", fp_metrics.iterations, v.design);
-        } catch (const std::exception& error) {
-          fp_before = fp_before_warp;
-          warp_shifts.clear();
-          write_warp_status(options.output_dir + "/fp_warp_field.json", "retained", error.what());
-          std::print(stderr, "WARNING: FP warpspace retained original targets: {}\n", error.what());
-        }
-      }
       const auto& l = v.design.layout;
       if (options.fp_snap_enabled) {
         // A centroid radius estimates dispersed cell area. A wide hierarchy
@@ -10810,20 +10728,6 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         fp_snap.emplace();
         fp_snap->circles         = fp_before;
         fp_snap->maximum_overlap = fp_metrics.centroid.max_circle_overlap;
-      }
-      if (options.fp_warp.enabled) {
-        std::ofstream report(options.output_dir + "/fp_warp_targets.tsv");
-        report << "name\tbefore_x\tbefore_y\twarped_x\twarped_y\tsnapped_x\tsnapped_y\tsum_dx\tsum_dy\tleaves\tmemories\n";
-        report.precision(17);
-        for (size_t g = 0; g < fp_before.size(); ++g) {
-          const auto shift = warp_shifts.empty() ? Warp_centroid_shift{} : warp_shifts[g];
-          report << fp_before[g].name << '\t' << fp_before_warp[g].x << '\t' << fp_before_warp[g].y << '\t' << fp_before[g].x
-                 << '\t' << fp_before[g].y << '\t' << fp_snap->circles[g].x << '\t' << fp_snap->circles[g].y << '\t' << shift.sum.x
-                 << '\t' << shift.sum.y << '\t' << shift.count << '\t' << shift.memories << '\n';
-        }
-        if (!report) {
-          throw std::runtime_error("cannot write FP warp target report");
-        }
       }
       if (control.max_iterations > 0 && options.fp_anchor > 0) {
         for (const auto& p : fp_snap->circles) {
@@ -12256,30 +12160,6 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         return moves;
       };
     }
-    std::optional<Macro_warp> macro_warp;
-    if (options.macro_warp.enabled && movable_macros && !warp_memories(v.design).empty()) {
-      write_warp_nodes();
-      auto macro_policy       = options.macro_warp;
-      macro_policy.dbu_per_um = tech.dbu;
-      macro_warp.emplace(macro_policy, control.max_iterations, options.output_dir + "/macro_warp");
-      const auto prior            = control.macro_step_observer;
-      control.macro_step_observer = [&, prior](int iteration, double sum, bool valid) {
-        macro_warp->observe_motion(iteration, sum, valid);
-        if (prior) {
-          prior(iteration, sum, valid);
-        }
-      };
-      control.macro_pull_interval          = 1;
-      control.macro_pull_after_density     = macro_policy.once_after_density;
-      control.macro_pull_settle_iterations = macro_policy.once_after_density ? 20 : 0;
-      control.macro_pull_update            = [&](const dp::Design& snapshot, int iteration) {
-        auto replacement = macro_warp->refresh(snapshot, warp_memories(snapshot), iteration);
-        if (macro_replay && replacement) {
-          macro_replay->events.push_back({iteration, dp::MagnetEvent::pull});
-        }
-        return replacement;
-      };
-    }
     std::optional<Macro_anchor> macro_anchor;
     // anchor_final_override refers to macro_anchor: clear it whenever this scope ends.
     const auto anchor_override_guard = std::unique_ptr<void, std::function<void(void*)>>(reinterpret_cast<void*>(1), [&](void*) {
@@ -13636,9 +13516,6 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       }
     }
 #endif
-    if (macro_warp) {
-      macro_warp->finish(metrics.iterations);
-    }
     anchor_final_override = nullptr;
     if (macro_anchor) {
       macro_anchor->finish(v.design, metrics.iterations);
@@ -15614,8 +15491,6 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     }
     json.AddMember("macro_gp_timing_for_resynthesis", bool(result.macro_gp_timing), allocator);
     json["virtual_fillers"].SetBool(options.virtual_fillers);
-    json.AddMember("fp_warpspace", options.fp_warp.enabled, allocator);
-    json.AddMember("macro_warpspace", options.macro_warp.enabled, allocator);
     if (options.macro_anchor.enabled) {
       json.AddMember("macro_anchor", true, allocator);
     }
@@ -16244,9 +16119,6 @@ static Result place_requested(hhds::Graph& source, hhds::GraphLibrary& library, 
   if (release_source && source.get_io() && source.get_io()->get_library() == &library) {
     throw std::invalid_argument("releasing placement input requires a separate destination library");
   }
-  if (requested.gp_search.enabled && requested.gp_resize) {
-    throw std::invalid_argument("gp_ab requires fixed topology; disable gp_resize (post-placement resize remains available)");
-  }
   if (!std::isfinite(requested.rc_pessimism) || requested.rc_pessimism < 1) {
     throw std::invalid_argument("rc_pessimism must be finite and at least 1");
   }
@@ -16269,12 +16141,10 @@ static Result place_requested(hhds::Graph& source, hhds::GraphLibrary& library, 
   }
   validate_region_options(requested.region);
   validate_boundary_pin_options(requested.boundarypins);
-  validate_warp_options(requested.fp_warp);
-  validate_warp_options(requested.macro_warp);
   if (requested.macro_anchor.enabled) {
     validate_macro_anchor_options(requested.macro_anchor);
-    if (requested.macro_warp.enabled || requested.macro_magnet.enabled) {
-      throw std::invalid_argument("macro.anchor cannot be combined with macro.warpspace or macro.magnet");
+    if (requested.macro_magnet.enabled) {
+      throw std::invalid_argument("macro.anchor cannot be combined with macro.magnet");
     }
   }
   requested.macro_magnet.validate();
@@ -16433,9 +16303,7 @@ static Result place_requested(hhds::Graph& source, hhds::GraphLibrary& library, 
   }
   cell_options.fp_place               = false;
   cell_options.fp_auto                = false;
-  // FP centroids and macro warp pulls end at the fixed-macro handoff.
-  cell_options.fp_warp.enabled        = false;
-  cell_options.macro_warp.enabled     = false;
+  // FP centroids and macro pulls end at the fixed-macro handoff.
   cell_options.macro_anchor.enabled   = false;
   cell_options.macro_filler_fraction  = 0;
   cell_options.macro_fill_cell_space  = false;

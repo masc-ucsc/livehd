@@ -89,7 +89,7 @@ def synth_one(lhd, top, ref, meta, base, tech):
         nonempty(dest / 'mapped.v')
         nonempty(dest / 'mapped' / 'library.txt')
         diagnostics = (dest / 'diagnostics.jsonl').read_text()
-        if 'pass.abc.memory=true' in meta.get('synth_set', '') and re.search(
+        if 'synth.memory=flops' in meta.get('synth_set', '') and re.search(
                 'memory-unlowered|memory-max-bits', diagnostics):
             raise RuntimeError('memory was not mapped: ' + diagnostics)
         # `lhd lec --lib lg:` materializes the model Verilog a Verilog side

@@ -150,25 +150,13 @@ int list_options(const Options& opts) {
 // Returns -1 when `name` is not in the option vocabulary (caller falls
 // through to the unknown-name error).
 int describe_option(const Options& opts, const std::string& name) {
-  // A deprecated synth.* spelling is not listed; describe its canonical name.
+  // A retired synth.* spelling is not listed: say what replaced it.
   if (name.starts_with("synth.")) {
     for (const auto& r : kSynthSetRenames) {
-      if (r.old_name != std::string_view{name}.substr(6)) {
-        continue;
+      if (r.old_name == std::string_view{name}.substr(6)) {
+        std::print(stderr, "lhd describe: '{}' is retired: {}\n", name, r.hint);
+        return 2;
       }
-      const auto target = std::format("synth.{}", r.new_name);
-      if (r.true_value.empty()) {
-        std::print(stderr, "lhd describe: '{}' is a deprecated alias of '{}'\n", name, target);
-      } else {
-        std::print(stderr,
-                   "lhd describe: '{}' is deprecated: true is {}={}, false is {}={}\n",
-                   name,
-                   target,
-                   r.true_value,
-                   target,
-                   r.false_value);
-      }
-      return describe_option(opts, target);
     }
   }
   const auto all = list_set_options();
@@ -807,7 +795,7 @@ void print_general_help() {
       "               lhd compile x.prp --emit-dir ln:x_lns/      # pre-elaborate for importers\n"
       "               lhd compile ln:x_lns/ --emit verilog:net.v  # synth from IR\n"
       "               lhd compile lg:foo_lgs/ --emit-dir lg:foo_opt_lgs/\n"
-      "  synth      one-shot synthesis: compile -> optional reduce -> color synth -> abc tech-map -> opentimer STA (QoR + timing)\n"
+      "  synth      one-shot synthesis: compile -> optional reduce -> color synth -> tech-map -> STA (QoR + timing)\n"
       "               lhd synth cpu.prp --top Cpu --workdir W          # reports in W/synth/, incremental on re-run\n"
       "               lhd synth lg:cpu_lg --top Cpu --emit-dir lg:net --stats\n"
       "  sim        build + run a C++ simulation of a Pyrope design's `test` blocks (dynamic verify)\n"
@@ -1368,7 +1356,7 @@ int help_pass(const std::string& sub) {
 
 std::string json_general() {
   return std::format(
-      R"json({{"schema_version":1,"name":"lhd","version":"{}","description":"LiveHD stateless CLI kernel: one hermetic invocation per flow (declared inputs + config -> declared outputs + exit code); drives the registered pass/inou (EPRP) methods via argv","commands":[{{"name":"compile","summary":"sources and/or ln:/lg: IR -> ln:/lg:/verilog/pyrope (front-end + elaborate + synth)"}},{{"name":"synth","summary":"one-shot synthesis: compile -> color synth -> abc tech-map -> opentimer STA; QoR + timing report"}},{{"name":"sim","summary":"build + run a C++ simulation of a Pyrope design's test blocks (dynamic verify)"}},{{"name":"lec","summary":"logic equivalence check: prove_equal(ref, impl); --set formal.solver = cvc5|bitwuzla|lgyosys"}},{{"name":"formal","summary":"formal verification family: verify (assert/assume BMC) | lec (= lhd lec)"}},{{"name":"scan","summary":"report each .prp file's import strings"}},{{"name":"tool","summary":"inspect ln:/lg: artifacts: cat | grep | diff | tree | sta"}},{{"name":"pyrope","summary":"Pyrope developer tools: fmt | lsp"}},{{"name":"pass","summary":"run one graph pass over lg: inputs: {}"}},{{"name":"list","summary":"enumerate the CLI vocabulary: steps|emit-kinds|error-classes|options|log-channels"}},{{"name":"describe","summary":"one item's full record as JSON"}},{{"name":"version","summary":"print the tool version"}},{{"name":"help","summary":"per-command help: lhd help <command> (== lhd <command> --help)"}}],"examples":["lhd compile x.prp --emit verilog:net.v","lhd lec --impl impl.prp --ref ref.v","lhd help compile"]}})json",
+      R"json({{"schema_version":1,"name":"lhd","version":"{}","description":"LiveHD stateless CLI kernel: one hermetic invocation per flow (declared inputs + config -> declared outputs + exit code); drives the registered pass/inou (EPRP) methods via argv","commands":[{{"name":"compile","summary":"sources and/or ln:/lg: IR -> ln:/lg:/verilog/pyrope (front-end + elaborate + synth)"}},{{"name":"synth","summary":"one-shot synthesis: compile -> color synth -> tech-map -> STA; QoR + timing report"}},{{"name":"sim","summary":"build + run a C++ simulation of a Pyrope design's test blocks (dynamic verify)"}},{{"name":"lec","summary":"logic equivalence check: prove_equal(ref, impl); --set formal.solver = cvc5|bitwuzla|lgyosys"}},{{"name":"formal","summary":"formal verification family: verify (assert/assume BMC) | lec (= lhd lec)"}},{{"name":"scan","summary":"report each .prp file's import strings"}},{{"name":"tool","summary":"inspect ln:/lg: artifacts: cat | grep | diff | tree | sta"}},{{"name":"pyrope","summary":"Pyrope developer tools: fmt | lsp"}},{{"name":"pass","summary":"run one graph pass over lg: inputs: {}"}},{{"name":"list","summary":"enumerate the CLI vocabulary: steps|emit-kinds|error-classes|options|log-channels"}},{{"name":"describe","summary":"one item's full record as JSON"}},{{"name":"version","summary":"print the tool version"}},{{"name":"help","summary":"per-command help: lhd help <command> (== lhd <command> --help)"}}],"examples":["lhd compile x.prp --emit verilog:net.v","lhd lec --impl impl.prp --ref ref.v","lhd help compile"]}})json",
       kVersion,
       kPassSubcommands);
 }

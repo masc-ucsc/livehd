@@ -37,7 +37,8 @@ endmodule
     foreign = root/'foreign.json'
     foreign.write_text(json.dumps([{'class':'foreign.second','id':'other','value':3}]))
     cmd=[str(lhd),'synth',str(rtl),str(fixture/'macros.v'),'--top','hint_top','--workdir',str(root/'work'),'-q']
-    settings={'synth.liberty':fixture/'fake.lib','synth.lef':fixture/'fake.lef','synth.place':'true',
+    # Module-scoped hints need the shared bank definition to survive mapping.
+    settings={'synth.flat_sweep':'false','synth.liberty':fixture/'fake.lib','synth.lef':fixture/'fake.lef','synth.place':'true',
               'compile.slang.blackbox_attribute':'true','synth.timing':'false','synth.place.resize':'false',
               'synth.place.timing_driven':'false','synth.place.io_resynth':0,'synth.place.fp':'true',
               'synth.place.fp.minimum':0,'synth.place.fp.min_macros':0,'synth.place.fp.snap':'false',

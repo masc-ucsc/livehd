@@ -25,7 +25,7 @@ def synth(name, source, *settings):
     # Fine partitioning unless the caller picks one: a repeated --set is a usage error.
     if not any(v.startswith("synth.partition=") for v in settings):
         settings = ["synth.partition=fine", *settings]
-    return run("synth", source, "-d", "pass.abc", "--top", name, "--workdir", work / name,
+    return run("synth", source, "-d", "pass.abc,synth-target-unreachable", "--top", name, "--workdir", work / name,
                "--emit-dir", "lg:" + str(work / (name + "-net")),
                "--set", "synth.liberty=" + lib, "--set", timer,
                *[a for value in settings for a in ("--set", value)])
@@ -97,7 +97,8 @@ pub comb shared::[timecheck=false](a:U8,b:U8,c:U8)->(x:U8,y:U8) {
  x=lane(a=a,b=b).y
  y=lane(a=b,b=c).y
 }''')
-shared_doc, _ = synth("shared", shared, "compile.upass.inline=false")
+# Both instances must retain one shared implementation for this reuse check.
+shared_doc, _ = synth("shared", shared, "compile.upass.inline=false", "synth.flat_sweep=false")
 assert len([r for r in shared_doc["qor"]["abc"]["regions"] if "__g_carry" in r["module"]]) == 1, shared_doc
 shared_groups = json.loads((work / "shared/synth/synth_groups.json").read_text())
 assert any(d["physical_instances"] == 2 for d in shared_groups["definitions"]), shared_groups
@@ -299,7 +300,7 @@ def memory_regions(pin, fold, *extra):
     src.write_text('pub mod mem_' + pin + '::[timecheck=false](a:U3,d:U8,we:Bool,clk:Clock)->(o:U8@[0]) {\n'
                    '  reg q:[8]U8:[clock_pin=clk' + (',synth.memory="' + pin + '"' if pin != "none" else "") + ']\n'
                    '  if we { q[a] = d }\n  o = q[a]\n}')
-    doc, _ = synth("mem_" + pin, src, "pass.abc.memory=" + fold, *extra)
+    doc, _ = synth("mem_" + pin, src, "synth.memory=" + {"auto": "auto", "true": "flops", "false": "macro"}[fold], *extra)
     table = doc["qor"]["abc"]["memories"]
     assert len(table) == 1 and table[0]["name"] == "q" and table[0]["size"] == 8 and table[0]["bits"] == 8, table
     assert table[0]["realization"] == ("flops" if table[0]["reason"] != "" and any(
@@ -307,8 +308,8 @@ def memory_regions(pin, fold, *extra):
     memory_reasons.append(table[0]["reason"])
     return {r["module"] for r in doc["qor"]["abc"]["regions"]}
 memory_reasons = []
-assert not any(m.endswith("_blasted") for m in memory_regions("none", "auto", "pass.abc.memory_max_bits=8"))
-assert any(m.endswith("_blasted") for m in memory_regions("flops", "auto", "pass.abc.memory_max_bits=8"))
+assert not any(m.endswith("_blasted") for m in memory_regions("none", "auto", "synth.memory.max_bits=8"))
+assert any(m.endswith("_blasted") for m in memory_regions("flops", "auto", "synth.memory.max_bits=8"))
 assert not any(m.endswith("_blasted") for m in memory_regions("macro", "true"))
 assert memory_reasons[0].startswith("auto: 64 bits > memory_max_bits"), memory_reasons
 assert memory_reasons[1] == "pin synth.memory=flops" and memory_reasons[2] == "pin synth.memory=macro", memory_reasons
@@ -337,7 +338,8 @@ def inlined(name, head):
     path = work / (name + ".prp")
     path.write_text(head + "\npub comb " + name + "::[timecheck=false](a:U32,b:U32,n:U5)->(x:U32,z:U32) {\n"
                     " x=sh(a=a,n=n).y\n z=sh(a=b,n=n).y\n}")
-    doc, _ = synth(name, path)
+    # Compare source-policy mapping before the separate flat-sweep refolding.
+    doc, _ = synth(name, path, "synth.flat_sweep=false")
     total = doc["qor"]["abc"]["total"]
     return total["gates"], len(doc["qor"]["abc"]["regions"])
 plain_sh = inlined("inl_plain", "comb sh(a:U32,n:U5)->(y:U32) { y=(a<<n)#[0..=31] }")

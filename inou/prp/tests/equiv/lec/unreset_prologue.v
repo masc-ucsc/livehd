@@ -1,6 +1,6 @@
 /*
 :lec_top: top
-:lec_set: formal.engine=bmc formal.min_timeout=1 formal.simfail=false
+:lec_set: formal.engine=bmc formal.simfail=false
 An unrelated reset input must not turn unreset state into a don't-care. Only
 `v` has a reset; the prologue never writes `cnt`, `r`, `s` or `u` with known
 data. In a single-clock design equal names keep sharing one power-on value on

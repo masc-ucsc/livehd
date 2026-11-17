@@ -142,6 +142,14 @@ TEST(LhdOptions, SynthCommandAndPassKeepSeparateNamespaces) {
   }
   EXPECT_FALSE(lhd::retired_set_hint("pass.abc", "threads").empty());
   EXPECT_FALSE(lhd::retired_set_hint("pass.abc", "qor").empty());
+  EXPECT_FALSE(lhd::retired_set_hint("pass.abc", "memory_max_bits").empty());
+  EXPECT_FALSE(lhd::retired_set_hint("pass.usyn", "memory_max_bits").empty());
+  EXPECT_FALSE(lhd::retired_set_hint("synth", "memory.min_bits").empty());
+  EXPECT_FALSE(lhd::retired_set_hint("pass.abc", "memory").empty());
+  EXPECT_FALSE(lhd::retired_set_hint("pass.usyn", "memory").empty());
+  for (const auto* flag : {"place.resize.gp", "place.resize.gp_margin", "place.resize.gp_trials"}) {
+    EXPECT_FALSE(lhd::retired_set_hint("synth", flag).empty()) << flag;
+  }
 }
 
 // Keep the full retired-option matrix in one process. The CLI integration
@@ -504,12 +512,17 @@ TEST(LhdOptions, SynthPlaceFoldsAutoMemoriesWithoutSram) {
     lhd::merge_mapper_sets(opts, "pass.abc", labels);
     return labels;
   };
-  EXPECT_FALSE(merged({}).contains("memory"));
+  EXPECT_EQ(merged({}).at("memory"), "auto");
   EXPECT_EQ(merged({{"synth.place", "true"}}).at("memory"), "true");
   EXPECT_EQ(merged({{"synth.place", "true"}, {"synth.memory", "auto"}}).at("memory"), "true");
   EXPECT_EQ(merged({{"synth.place", "true"}, {"synth.memory", "macro"}}).at("memory"), "false");
   EXPECT_EQ(merged({{"synth.place", "true"}, {"synth.memory", "sram"}}).at("memory"), "sram");
-  EXPECT_EQ(merged({{"synth.place", "true"}, {"pass.abc.memory", "false"}}).at("memory"), "false");
+  // synth.memory.max_bits: one threshold, auto = 1024 (2048 under sram), an explicit value in both modes.
+  EXPECT_EQ(merged({}).at("memory_max_bits"), "1024");
+  EXPECT_EQ(merged({{"synth.memory", "sram"}}).at("memory_max_bits"), "2048");
+  EXPECT_EQ(merged({{"synth.memory.max_bits", "4096"}}).at("memory_max_bits"), "4096");
+  EXPECT_EQ(merged({{"synth.memory", "sram"}, {"synth.memory.max_bits", "0"}}).at("memory_max_bits"), "0");
+  EXPECT_THROW(merged({{"synth.memory.max_bits", "lots"}}), lhd::Lhd_error);
 }
 
 // The compile schedule's two fold slots both run the e-graph engine under the compile.cprop set name.
@@ -664,9 +677,6 @@ TEST(LhdOptions, RecommendedSharedDefaults) {
            {            "synth.place.macro.anchor.swaps",  "false"},
            {            "synth.place.final.timing_start",    "200"},
            {         "synth.place.final.timing_schedule",  "fixed"},
-           {                     "synth.place.resize.gp",   "true"},
-           {              "synth.place.resize.gp_margin",   "0.01"},
-           {              "synth.place.resize.gp_trials",      "4"},
            {                   "synth.place.route.model",   "rsmt"},
            {                  "synth.place.rc_pessimism",      "1"},
            {  "synth.place.legalize.critical_pair_limit",    "256"},
@@ -674,6 +684,7 @@ TEST(LhdOptions, RecommendedSharedDefaults) {
            { "synth.place.legalize.joint_minimize_total",   "true"},
            {"synth.place.legalize.remainder_wire_weight",      "4"},
            {                         "synth.state_sweep",   "true"},
+           {                          "synth.flat_sweep",   "true"},
            {                     "synth.merge_registers",   "true"},
            {                    "synth.place.io_resynth",      "5"}
   }) {
@@ -683,13 +694,21 @@ TEST(LhdOptions, RecommendedSharedDefaults) {
   }
 }
 
-TEST(LhdOptions, WarpspaceStagesAreIndependentAndOptIn) {
-  const auto options = lhd::list_set_options();
-  for (const auto& stage : {std::string("fp"), std::string("macro")}) {
-    const auto name  = "synth.place." + stage + ".warpspace";
-    const auto found = std::find_if(options.begin(), options.end(), [&](const auto& option) { return option.name == name; });
-    ASSERT_NE(found, options.end());
-    EXPECT_EQ(found->default_value, "false");
+// Q19: an automatic value is spelled auto, never a numeric sentinel.
+TEST(LhdOptions, AutomaticValuesAreSpelledAuto) {
+  const auto listed = lhd::list_set_options();
+  for (const auto* key : {"synth.place.explore.memory_mb", "synth.place.explore.session_memory_mb", "synth.place.explore.timeout.t1",
+                          "synth.place.fp.color_minimum", "synth.place.macro.filler_fraction", "synth.place.local_density_target",
+                          "synth.place.region.boundarypins.pitch_um", "synth.place.preroute.hold_margin", "synth.block_size"}) {
+    const auto option = std::find_if(listed.begin(), listed.end(), [&](const auto& o) { return o.name == key; });
+    ASSERT_NE(option, listed.end()) << key;
+    EXPECT_EQ(option->default_value, "auto") << key;
+  }
+}
+
+TEST(LhdOptions, WarpspaceIsRetired) {
+  for (const auto* flag : {"place.fp.warpspace", "place.macro.warpspace.updates", "place.legalize.warpspace.bins"}) {
+    EXPECT_FALSE(lhd::retired_set_hint("synth", flag).empty()) << flag;
   }
 }
 
@@ -709,7 +728,7 @@ TEST(LhdOptions, LegrouteOptionsAreTheMinimalCoreAndOptIn) {
       {       "synth.place.legroute.plan.route_model", "legacy"},
       {    "synth.place.legroute.plan.route_interval",     "50"},
       {    "synth.place.legroute.plan.route_net_pops",   "2000"},
-      {"synth.place.legroute.plan.max_degradation_ps",     "-1"},
+      {"synth.place.legroute.plan.max_degradation_ps",    "off"},
       {       "synth.place.legroute.plan.local_tiles",      "0"},
       {          "synth.place.legroute.plan.net_pops", "100000"},
       {       "synth.place.legroute.plan.max_inflate",    "1.5"},
@@ -868,93 +887,16 @@ TEST(LhdOptions, MacroAnchorMilestonesRequireCompleteFiniteTokens) {
   }
 }
 
-// 3g-partitions: the old grid/region/bin spellings stay accepted, rewrite to
-// the canonical names before anything reads them, and stay out of the listing.
-TEST(LhdOptions, DeprecatedPartitionSpellingsCanonicalize) {
+// The pre-3g placement partition spellings are retired: each one is refused with a hint naming its new key, and
+// none of them is listed.
+TEST(LhdOptions, RetiredPartitionSpellingsAreRefused) {
   const auto listed = lhd::list_set_options();
-  const auto in     = [&](const std::string& name) {
-    return std::any_of(listed.begin(), listed.end(), [&](const auto& option) { return option.name == name; });
-  };
-  lhd::Options opts;
-  opts.command = "synth";
   for (const auto& r : lhd::kSynthSetRenames) {
     SCOPED_TRACE(std::string(r.old_name));
-    EXPECT_FALSE(in("synth." + std::string(r.old_name)));
-    EXPECT_TRUE(in("synth." + std::string(r.new_name)));
-    const auto spec = std::find_if(std::begin(lhd::kSynthSetOptions), std::end(lhd::kSynthSetOptions), [&](const auto& o) {
-      return o.name == r.old_name;
-    });
-    ASSERT_NE(spec, std::end(lhd::kSynthSetOptions));
-    EXPECT_TRUE(std::string_view{spec->help}.starts_with("DEPRECATED"));
-    const bool boolean = spec->kind == lhd::Synth_set_option::Kind::boolean;
-    opts.sets.emplace_back("synth." + std::string(r.old_name), boolean ? "true" : "7");
+    EXPECT_FALSE(std::any_of(listed.begin(), listed.end(), [&](const auto& o) { return o.name == "synth." + std::string(r.old_name); }));
+    EXPECT_EQ(lhd::retired_set_hint("synth", r.old_name), r.hint);
   }
-  EXPECT_NO_THROW(lhd::check_known_set_passes(opts));
-  lhd::canonicalize_synth_sets(opts);
-  const auto value = [&](std::string_view key) {
-    std::vector<std::string> values;
-    for (const auto& [k, v] : opts.sets) {
-      if (k == key) {
-        values.push_back(v);
-      }
-    }
-    return values;
-  };
-  EXPECT_EQ(value("synth.place.grid.density"), std::vector<std::string>{"7"});
-  EXPECT_EQ(value("synth.place.region.max_cells"), std::vector<std::string>{"7"});
-  EXPECT_EQ(value("synth.place.satlegalize.bin.grid"), std::vector<std::string>{"route"});
-  EXPECT_TRUE(value("synth.place.bins").empty());
-  // Both density booleans true is a combination grid.density_mode cannot
-  // spell: they stay for the placement driver to read.
-  EXPECT_EQ(value("synth.place.dynamic_bins"), std::vector<std::string>{"true"});
-  EXPECT_EQ(value("synth.place.auto_bins"), std::vector<std::string>{"true"});
-  EXPECT_EQ(opts.deprecated_sets.size(), std::size(lhd::kSynthSetRenames));
-  EXPECT_NO_THROW(lhd::check_known_set_passes(opts));
-  // One density boolean merges into the mode, so both spellings share a cache key.
-  for (const auto& [sets, mode] : std::vector<std::pair<std::vector<std::pair<std::string, std::string>>, std::string>>{
-           {                                    {{"synth.place.dynamic_bins", "true"}}, "dynamic"},
-           {{{"synth.place.auto_bins", "true"}, {"synth.place.dynamic_bins", "false"}},   "macro"},
-           {                                   {{"synth.place.dynamic_bins", "false"}},   "fixed"},
-  }) {
-    opts.sets = sets;
-    lhd::canonicalize_synth_sets(opts);
-    EXPECT_EQ(opts.sets,
-              (std::vector<std::pair<std::string, std::string>>{
-                  {"synth.place.grid.density_mode", mode}
-    }));
-  }
-  // An explicit mode competes: the booleans stay so the driver rejects the mix.
-  opts.sets = {
-      {"synth.place.grid.density_mode", "fixed"},
-      {     "synth.place.dynamic_bins",  "true"}
-  };
-  lhd::canonicalize_synth_sets(opts);
-  EXPECT_EQ(value("synth.place.dynamic_bins"), std::vector<std::string>{"true"});
-}
-
-// `synth.place.seed` named the start-position TSV, which invited `=33` as an RNG seed. A number now reaches the
-// shared `lhd.seed`; a path reaches synth.place.start_map. Both warn.
-TEST(LhdOptions, PlaceSeedIsAStartMapFileOrTheSharedSeed) {
-  lhd::Options opts;
-  opts.command = "synth";
-  opts.sets    = {{"synth.place.seed", "33"}};
-  lhd::canonicalize_synth_sets(opts);
-  ASSERT_EQ(opts.sets.size(), 1u);
-  EXPECT_EQ(opts.sets[0].first, "lhd.seed");
-  EXPECT_EQ(opts.sets[0].second, "33");
-  ASSERT_EQ(opts.deprecated_sets.size(), 1u);
-  lhd::apply_lhd_settings(opts);
-  EXPECT_EQ(opts.seed, "33");
-  EXPECT_TRUE(opts.seed_explicit);
-
-  lhd::Options file;
-  file.command = "synth";
-  file.sets    = {{"synth.place.seed", "start.tsv"}};
-  lhd::canonicalize_synth_sets(file);
-  ASSERT_EQ(file.sets.size(), 1u);
-  EXPECT_EQ(file.sets[0].first, "synth.place.start_map");
-  EXPECT_EQ(file.sets[0].second, "start.tsv");
-  EXPECT_EQ(file.deprecated_sets.size(), 1u);
+  EXPECT_FALSE(lhd::retired_set_hint("synth", "place.mesh_variants").empty());
 }
 
 TEST(LhdOptions, PositionalMetadataIsNotSourceAndMergesByClass) {

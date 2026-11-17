@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """synth.memory=sram turns a memory kept native into a generated macro: any port count, a Liberty and a LEF view,
-a body-less instance in the netlist; a memory below synth.memory.min_bits is flops."""
+a body-less instance in the netlist; a memory below synth.memory.max_bits is flops."""
 import json
 import os
 from pathlib import Path
@@ -22,9 +22,9 @@ endmodule
 ''')
 lib = Path('inou/lefdef/tests/data/sky130hd.lib')
 
-def synth(name, *sets):
+def synth(name, *sets, src=source):
     result = root / (name + '.json')
-    cmd = ['lhd/lhd', 'synth', str(source), '--top', 'top', '--workdir', str(root / name), '--result-json', str(result),
+    cmd = ['lhd/lhd', 'synth', str(src), '--top', 'top', '--workdir', str(root / name), '--result-json', str(result),
            '--emit-dir', f'verilog:{root}/{name}_net', '--set', f'synth.liberty={lib}', '--set', 'synth.timing=false']
     for s in sets:
         cmd += ['--set', s]
@@ -54,5 +54,15 @@ assert f'module {name}' not in net, 'the macro has no body'
 # the register file went to flops
 assert len(re.findall(r'^cgen_memory_\w+ ', net, re.M)) == 1 or '_blasted' in net
 
-err = synth('min', 'synth.memory=sram', 'synth.memory.min_bits=100000')
+# The threshold on a small memory (blasting the 64 Kib one to flops would dominate the test time): 2 Kib is a
+# macro by default and flops below synth.memory.max_bits.
+small = root / 'small.v'
+small.write_text('''module top(input clk, input [5:0] ra, wa, input [31:0] wd, input we, output reg [31:0] q);
+  reg [31:0] mem [0:63];
+  always @(posedge clk) begin if (we) mem[wa] <= wd; q <= mem[ra]; end
+endmodule
+''')
+err = synth('small', 'synth.memory=sram', src=small)
+assert '1 memories became macros' in err, err
+err = synth('min', 'synth.memory=sram', 'synth.memory.max_bits=100000', src=small)
 assert 'became macros' not in err, err

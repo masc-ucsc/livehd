@@ -1,6 +1,6 @@
 /*
 :lec_top: mem_x
-:lec_set: formal.engine=bmc formal.min_timeout=1 formal.simfail=false
+:lec_set: formal.engine=bmc formal.simfail=false
 Unknown power-on controls must not manufacture memory-vs-flop counterexamples.
 The reference writes a real 2-entry memory when `push_valid && !valid`, and
 `valid` is unknown until the reset prologue lands. `_1` splits the memory into

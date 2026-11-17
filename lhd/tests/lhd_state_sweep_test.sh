@@ -5,7 +5,7 @@
 # copy, registers read in part keep only what is read (a prefix is narrowed, scattered
 # bits become single-bit registers named after the source bits), across the instance
 # hierarchy; the graph-native LEC proves the mapped netlist against the source. The
-# default (off) maps every register as before. synth.mapper=usyn honors the option too.
+# explicit off case maps every register. synth.mapper=usyn honors the option too.
 # synth.merge_registers merges twin registers.
 set -u
 
@@ -27,12 +27,13 @@ fail() {
 
 count() { grep -h "$2" "$1" | wc -l | tr -d ' '; }
 
+# Disable the separate flat sweep so it cannot remove state before the pass under test.
 synth() { # <tag> <state_sweep> [extra --set ...]
   local d="$W/$1" sweep="$2"
   shift 2
   mkdir -p "$d"
   "$LHD" synth -d pass.abc,pass.usyn --result-json "$d/r.json" --reader slang --top sweep --workdir "$d/W" --emit-dir lg:"$d/net" \
-    --emit-dir verilog:"$d/netv" --set synth.liberty="$LIB" --set synth.state_sweep="$sweep" "$@" \
+    --emit-dir verilog:"$d/netv" --set synth.liberty="$LIB" --set synth.flat_sweep=false --set synth.state_sweep="$sweep" "$@" \
     -- "$SRC" > "$d/synth.log" 2>&1 || fail "$1: synth -> $(cat "$d/r.json" 2>/dev/null)"
   cat "$d/netv/"*.v > "$d/net.v"
 }
@@ -56,7 +57,7 @@ ON=99
 MEM_SRC="$PWD/lhd/tests/state_sweep_mem.v"
 
 if [ "$part" = all ] || [ "$part" = registers ]; then
-# Default: every register of the source is mapped (184 bits: 32+32+8 in the child, 16, 64, 32 here).
+# With both sweeps off, every register of the source is mapped (184 bits: 32+32+8 in the child, 16, 64, 32 here).
 synth off false
 OFF=$(count "$W/off/net.v" '^DFF')
 [ "$OFF" = 184 ] || fail "off: expected the 184 register bits of the source, got $OFF"
@@ -110,7 +111,7 @@ usyn() { # <tag> <state_sweep>
   local d="$W/usyn_$1"
   mkdir -p "$d"
   "$LHD" synth --result-json "$d/r.json" --reader slang --top sweep --workdir "$d/W" --emit verilog:"$d/net.v" \
-    --set synth.mapper=usyn --set pass.usyn.tmap=none --set synth.state_sweep="$2" -- "$SRC" > "$d/synth.log" 2>&1 \
+    --set synth.mapper=usyn --set pass.usyn.tmap=none --set synth.flat_sweep=false --set synth.state_sweep="$2" -- "$SRC" > "$d/synth.log" 2>&1 \
     || fail "usyn $1: synth -> $(cat "$d/r.json" 2>/dev/null)"
 }
 if [ "$part" = all ] || [ "$part" = usyn ]; then

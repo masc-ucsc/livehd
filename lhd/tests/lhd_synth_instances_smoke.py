@@ -70,8 +70,9 @@ def run(label, args):
 
 
 run("models", ["pass", "liberty", "gensim", library, "--emit-dir", "lg:" + str(root / "models")])
+# Shared definitions and occurrence colors must survive into the mapper cache.
 base = ["synth", str(source), "--top", "top", "--set", "compile.upass.inline=false",
-        "--set", "synth.mapper=usyn", "--set", "synth.liberty=" + library, "--set", "synth.timing=false"]
+        "--set", "synth.flat_sweep=false", "--set", "synth.mapper=usyn", "--set", "synth.liberty=" + library, "--set", "synth.timing=false"]
 if per_definition:
     base += ["--set", "pass.color.hier=false"]
 if per_occurrence:

@@ -154,7 +154,7 @@ fi
 MSRC=inou/prp/tests/pyrope/abc_mem.prp
 MTOP=abc_mem.abc_mem
 if [ -f "$MSRC" ]; then
-  # `abc.memory=false`: this section is about the array-vs-array cut, so the
+  # `synth.memory=macro`: this section is about the array-vs-array cut, so the
   # Memory must SURVIVE mapping as a native instance. pass.abc defaults to
   # memory=auto, which folds a memory this small (bit-blast: `mem._mem[i]`
   # storage flops); under a fold the impl has no array at all -- the
@@ -167,7 +167,7 @@ if [ -f "$MSRC" ]; then
       && "$LHD" pass color flat --top "$MTOP" lg:"$WORK/$1.lg" >> "$WORK/$1.build" 2>&1 \
       && "$LHD" pass abc --top "$MTOP" --workdir "$WORK/$1.wd" lg:"$WORK/$1.lg" \
                 --emit-dir lg:"$WORK/$1.net" --set synth.liberty="$LIB" --set abc.register=false \
-                --set "abc.memory=${3:-false}" \
+                --set "synth.memory=$( [ "${3:-false}" = true ] && echo flops || echo macro )" \
                 >> "$WORK/$1.build" 2>&1
   }
   # BAD differs from GOOD ONLY in the memory WRITE ADDRESS cone.

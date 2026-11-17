@@ -104,6 +104,7 @@ lgcheck() {
 # (the positive checks keep the full 8 steps).
 NEG_BMC_STEPS=4
 
+# Keep the child clock-port boundary exercised by the preview-latch case.
 # synth <dir> <lib> <top> <src> <ref.v> <graph-lec: prove|norefute|skip> <lgcheck: prove|norefute>
 # Synthesize, emit the netlist and the gensim models, and check both oracles.
 synth() {
@@ -112,7 +113,7 @@ synth() {
   local in=(--reader slang --top "$top" -- "$src")
   [[ "$src" == *.prp ]] && in=(--top "$top" "$src")
   "$LHD" synth --result-json "$d/r.json" --workdir "$d/W" --emit-dir lg:"$d/net" --emit-dir verilog:"$d/netv" \
-    --set synth.mapper="$MAPPER" --set synth.liberty="$lib" "${in[@]}" > "$d/synth.log" 2>&1 \
+    --set synth.flat_sweep=false --set synth.mapper="$MAPPER" --set synth.liberty="$lib" "${in[@]}" > "$d/synth.log" 2>&1 \
     || fail "$d: synth -> $(cat "$d/r.json" 2>/dev/null)"
   cat "$d/netv/"*.v > "$d/net.v"
   "$LHD" pass liberty gensim "$lib" --emit-dir lg:"$d/models" --emit verilog:"$d/models.v" --workdir "$d/Wm" -q \

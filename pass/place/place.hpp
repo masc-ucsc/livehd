@@ -40,7 +40,6 @@
 #include "rc_cache.hpp"
 #include "satlegalize.hpp"
 #include "terminal_legalize.hpp"
-#include "warpspace.hpp"
 
 namespace livehd::placement {
 namespace timeclosure {
@@ -217,7 +216,6 @@ struct Options {
   std::string                                               liberty, tech_rc_file, tracks_file;
   std::array<std::string, 2>                                tie_masters;  // explicit platform tie-low and tie-high masters
   std::string                                               macro_mode = "none";
-  Warp_options                      fp_warp{.weight = 1}, macro_warp{.weight = .7, .start_stability = .2, .refresh_interval = 25};
   // macro.anchor: moving legalized-target soft anchors inside macro GP (macro_anchor.hpp); off by default.
   Macro_anchor_options                  macro_anchor;
   DreamPlace::native::MagnetOptions macro_magnet;
@@ -307,9 +305,6 @@ struct Options {
   int                                fp_timing_max_updates  = 10;
   bool                               fp_resize              = false;
   // Resolved by the driver: enabled with resize unless explicitly disabled.
-  bool   gp_resize             = false;
-  int    gp_buffer_trials      = 4;    // maximum attempts per insertion/removal phase
-  double gp_buffer_margin      = .01;  // fraction of clock period (path delay without clocks)
 
   // synth.place.resize.engine: "new" = path-based sizing/buffering on the
   // incremental what-if timer (resize_engine.hpp); "legacy" = batch sweeps.
@@ -404,7 +399,6 @@ struct Options {
   bool                                     area_search    = false;
   // place.area=auto: an imported (fixed) core places in the smallest region that still routes (area_fit.hpp)
   Area_fit_options                                           area_fit;
-  unsigned                                 mesh_variants  = 0;  // region meshes tried at the same core before it grows (0..2)
   // the region mesh to place with (1: regions a quarter larger, 2: a fifth smaller); the driver scales
   // region.max_cells by it
   unsigned                                 mesh_variant   = 0;

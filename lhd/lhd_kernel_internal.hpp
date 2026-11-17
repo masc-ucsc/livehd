@@ -72,8 +72,8 @@ struct Set_pass {
 // canonical spelling `formal.lec.<flag>`.
 inline constexpr std::string_view kFormalCommonFlags[] = {
     "abc",           "abc_budget",  "abc_mem",     "assume_check", "bound",
-    "engine",        "profile",     "portfolio",   "effort",       "hard_timeout_mult",
-    "ignore_memory", "mine",        "min_timeout", "partitions",   "pdr",
+    "engine",        "profile",     "portfolio",   "effort",
+    "ignore_memory", "mine",        "partitions",   "pdr",
     "pdr_timeout",   "phase",       "report",      "reset",        "reset_cycles",
     "retry",         "reuse",       "sec_timeout", "solver",       "spec_mining_timeout",
     "simfail",       "simfail_run", "split",       "stats",        "timeout",
@@ -340,6 +340,41 @@ inline std::string_view retired_set_hint(std::string_view method, std::string_vi
   if (method == "pass.opentimer" && flag == "io_load") {
     return "use --set synth.io_load=<fF>|auto: one primary-output load for pass.abc, pass.usyn and pass.opentimer";
   }
+  if ((method == "pass.abc" || method == "pass.usyn") && flag == "memory") {
+    return "use --set synth.memory=auto|flops|macro|sram: one storage knob shared by `lhd synth` and `lhd pass abc|usyn` "
+           "(flops = the old memory=true, macro = memory=false)";
+  }
+  if ((method == "pass.abc" || method == "pass.usyn") && flag == "memory_max_bits") {
+    return "use --set synth.memory.max_bits=<bits>|auto: one memory size threshold for synth.memory=auto and sram, "
+           "shared by `lhd synth` and `lhd pass abc|usyn`";
+  }
+  if (method == "synth" && flag == "memory.min_bits") {
+    return "use --set synth.memory.max_bits=<bits>|auto: one memory size threshold (auto = 2048 under synth.memory=sram)";
+  }
+  if (method == "synth" && (flag == "place.resize.gp" || flag == "place.resize.gp_margin" || flag == "place.resize.gp_trials")) {
+    return "the GP-time buffer repair was removed; buffering and sizing run after placement (synth.place.resize); drop the "
+           "setting";
+  }
+  if ((method == "formal" || method == "pass.lec" || method == "pass.formal")
+      && (flag == "min_timeout" || flag == "hard_timeout_mult")) {
+    return "formal.timeout is the one formal budget; the per-unit floor (1 s) and the recovery wall cap (3x timeout) are "
+           "fixed: drop the setting";
+  }
+  if (method == "synth"
+      && (flag.starts_with("place.fp.warpspace") || flag.starts_with("place.macro.warpspace")
+          || flag.starts_with("place.legalize.warpspace"))) {
+    return "warpspace (density warp of FP centroids, macro pulls and terminal cell targets) was removed; drop the setting";
+  }
+  if (method == "synth" && flag == "place.mesh_variants") {
+    return "this option had no effect (the legroute regional mesh retry was removed); drop the setting";
+  }
+  if (method == "synth") {
+    for (const auto& r : kSynthSetRenames) {  // the pre-3g placement partition spellings
+      if (r.old_name == flag) {
+        return r.hint;
+      }
+    }
+  }
   if (method == "synth" && flag == "memory.sram") {
     return "use --set synth.memory=sram (synth.memory is auto|flops|macro|sram)";
   }
@@ -597,17 +632,13 @@ bool              mapper_maps_cells(const Options& opts, std::string_view method
 // coloring's own (`pass.color.synth.*`) both feed the one pass.color method.
 void              merge_color_sets(const Options& opts, Eprp_var::Eprp_dict& labels);
 void              check_known_set_passes(const Options& opts);
-// Rewrite deprecated synth.* spellings (kSynthSetRenames) to their canonical
-// names right after validation, and queue one `deprecated-option` warning
-// each in opts.deprecated_sets. synth emits them with emit_deprecated_sets
-// once its last sink-clearing setup_diag (the compile front end) is done.
-void              canonicalize_synth_sets(Options& opts);
-void              emit_deprecated_sets(const Options& opts);
 // The `synth.*` command namespace, readable from any command: `synth.liberty`
 // is THE one Liberty spelling (`lhd synth`, `lhd pass abc`, `lhd pass
 // opentimer` all resolve through resolve_liberty), so no two Liberty readers
 // in one flow can end up on different files.
 std::string       synth_set(const Options& opts, std::string_view flag, std::string_view def);
+// synth.memory.max_bits resolved: auto = 1024, or 2048 under synth.memory=sram; 0 = no threshold.
+uint64_t          memory_max_bits(const Options& opts);
 std::string       resolve_liberty(const Options& opts);
 // synth.liberty, else $LHD_TECH_DIR/<default Liberty> when that is set, else empty. No existence check and
 // no error (resolve_liberty adds both); every reader that needs the library's path or units goes through it.

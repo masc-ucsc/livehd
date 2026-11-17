@@ -357,11 +357,11 @@ today, for the record:
 | `synth.delay` `{D}` | **empty — i.e. `&nf` runs UNCONSTRAINED** | `pass_abc.cpp` (`delay`) |
 | `pass.abc.load` `{L}` | empty | `pass_abc.cpp` (`load`) |
 | `synth.adder` | **`auto`** (starts ripple-carry, trials `cla`/`cska`) | `pass_abc.cpp` (`adder`) |
-| `synth.block_size` | `0` (auto) | `pass_abc.cpp` (`block_size`) |
+| `synth.block_size` | `auto` | `pass_abc.cpp` (`block_size`) |
 | `synth.multiplier` | **`auto`** (serial partial-product addition, trials a balanced `tree`) | `pass_abc.cpp` (`multiplier`) |
 | `pass.abc.register` | `true` (flops map to Liberty DFF cells) | `pass_abc.cpp` (`register`) |
-| `pass.abc.memory` | `auto` (fold a memory within `memory_max_bits`, or over 3 ports whatever the size) | `pass_abc.cpp` (`memory`) |
-| `pass.abc.memory_max_bits` | `1024` | `pass_abc.cpp` (`memory_max_bits`) |
+| `synth.memory` | `auto` (fold a memory within `synth.memory.max_bits`, or over 3 ports whatever the size; both mappers) | `lhd_kernel_common.cpp` (`merge_mapper_sets`) |
+| `synth.memory.max_bits` | `auto` (1024; 2048 under `synth.memory=sram`) | `lhd_kernel_common.cpp` (`memory_max_bits`) |
 | `pass.abc.memory_prune_reads` | `false` (clear unobserved read-port bits and feed provably-zero input bits as constants in a lowered memory) | `pass_abc.cpp` (`memory_prune_reads`), `memory_module.cpp`, `bit_facts.cpp` |
 | `pass.abc.ware_zero_bits` | `false` (clear provably-zero data bits of a ware shifter inside its module) | `pass_abc.cpp` (`ware_zero_bits`), `ware_module.cpp`, `bit_facts.cpp` |
 | `pass.color.synth.mode` | **`cones`** (`cones` \| `synth` \| `pipe`) | `pass_color.cpp` (`mode`) |

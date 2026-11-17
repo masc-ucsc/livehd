@@ -1,5 +1,5 @@
 /*
-:synth_set: pass.abc.memory=true
+:synth_set: synth.memory=flops
 */
 module rom(input clock, en, input [3:0] addr, output [7:0] comb, output reg [7:0] q);
   reg [7:0] table_data [0:15];

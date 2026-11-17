@@ -13,7 +13,6 @@
 #include "prects_networks.hpp"
 #include "row_occupancy.hpp"
 #include "satlegalize.hpp"
-#include "warpspace.hpp"
 
 namespace livehd::placement {
 // This attempt could not satisfy the hard density/padding constraints or exhaustively place a cell.
@@ -31,7 +30,6 @@ struct Terminal_legalize_options {
   // Empty leaves existing behavior unchanged; otherwise one domain per component.
   std::vector<Terminal_legalize_domain> domains;
   Prects_library                        prects;
-  Warp_options                          remainder_warp{.weight = 1};
   unsigned                              bins_x = 64, bins_y = 64;
   bool                                  route_drc   = false;  // Full rectangular trace checks for the signal-routing experiment.
   double                                max_density = .8, target_density = .5;
@@ -76,9 +74,6 @@ struct Terminal_legalize_report {
   size_t                              joint_density_cuts = 0, joint_obstruction_cuts = 0, joint_corridor_cuts = 0;
   size_t                              supporting_cells = 0, full_site_scans = 0, relaxed_padding_cells = 0, wire_changed_cells = 0;
   size_t                              ignored_nets = 0;
-  size_t                              warp_samples = 0;
-  double                              warp_seconds = 0, warp_max_displacement_dbu = 0;
-  std::string                         warp_status = "disabled", warp_reason;
   size_t                              timed_nets = 0, critical_nets = 0, critical_cells = 0;
   size_t                              critical_pairs = 0, local_pairs = 0, sat_trials = 0, sat_unknown = 0, sat_unsat = 0;
   size_t                              candidate_checks = 0, moved_cells = 0, crossed_cells = 0, max_bin_distance = 0;

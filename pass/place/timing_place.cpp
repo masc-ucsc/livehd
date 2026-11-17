@@ -261,7 +261,6 @@ Repair_result timing_place(Result initial, const Options& requested, const Evalu
     trial.cell_stage                   = true;
     trial.fp_evaluate                  = {};
     trial.gp_rank                      = {};
-    trial.gp_resize                    = false;
     trial.warm_refinement              = true;
     trial.density_weight_seed          = result.placed.gp_density_weight;
     trial.output_dir                   = directory + "/round_" + std::to_string(round);

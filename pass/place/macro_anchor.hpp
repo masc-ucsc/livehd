@@ -17,7 +17,7 @@ namespace livehd::placement {
 // + optional macro snap + the host after_macro_legalize chain: edge snap, track
 // snap and any later pass such as dead-space collapse) on a COPY of the current
 // GP macro positions. The legal macro centers become the targets of the native
-// virtual macro pulls (the warpspace pull objective), so cells settle around the
+// virtual macro pulls, so cells settle around the
 // macros' final positions and the final hard pass is a small correction.
 struct Macro_anchor_options {
   bool                enabled        = false;

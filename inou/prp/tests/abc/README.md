@@ -24,7 +24,7 @@ Optional `:key: value` source-header fields (JSON profiles use the same keys):
 | `top` | Top entity; defaults to filename stem or the Pyrope `pyrope_top` header |
 | `source` | JSON profiles only: existing input relative to this directory |
 | `compile_set` | Space-separated compile `key=value` options |
-| `synth_set` | Space-separated synthesis options, such as `pass.abc.memory=true` |
+| `synth_set` | Space-separated synthesis options, such as `synth.memory=flops` |
 | `libs` | Local Liberty stems; defaults to `test`, optionally `test test_qn` |
 | `readers` | Compile reader names; defaults to the normal reader |
 | `ref_top` | Handwritten reference top; defaults to `reference` |

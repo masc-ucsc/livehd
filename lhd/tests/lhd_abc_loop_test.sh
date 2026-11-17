@@ -28,6 +28,14 @@ for mode in true false off; do
     if [[ "$mode" != true ]]; then
       grep -q 'u_loop_0__li5' "$W/net.v"
     fi
+    if [[ "$iteration" = 2 ]]; then
+      # Cache readback must reproduce the proven fresh mapping byte for byte
+      # (stronger than a second proof of the same netlist, and much cheaper).
+      cmp -s "$W/net.v" "$W/net_${mode}_1.v" ||
+        { echo "FAIL: mode=$mode: cache readback changed the mapped netlist" >&2; exit 1; }
+      continue
+    fi
+    cp "$W/net.v" "$W/net_${mode}_1.v"
     cat "$W/net.v" "$W/models/"*.v > "$W/impl.v"
     # A proof, not a sampled test: formal.effort=proof, and the verdict must
     # be PROVEN (a TIMEOUT also exits 0, so the exit code alone is no gate).

@@ -232,7 +232,7 @@ EOF
 WDU="$W/wd_report_unknown"
 mkdir -p "$WDU"
 verify hard hard --top hard --set formal.engine=bmc --set formal.bound=2 \
-  --set formal.timeout=1 --set formal.min_timeout=1 --workdir "$WDU"
+  --set formal.timeout=1 --workdir "$WDU"
 [ "$RC" -eq 0 ] || fail "a TIMEOUT-time run exits 0 with a warning (got rc=$RC): $(cat "$OUT")"
 grep -q "^formal verify: 'hard.hard' TIMEOUT-time" "$OUT" || fail "the run must say it was UNDECIDED (TIMEOUT-time): $(cat "$OUT")"
 grep -q '"code":"formal-timeout-time"' "$OUT" || fail "an undecided run must warn (formal-timeout-time): $(cat "$OUT")"
@@ -795,7 +795,7 @@ EOF
 WD6="$W/wd_collfail"
 mkdir -p "$WD6"
 OUT="$W/collfail.out"
-"$LHD" formal verify "$W/combdut.prp" "$W/combcoll.verify.prp" --top combdut \
+"$LHD" formal verify -d simfail-embed-ambiguous "$W/combdut.prp" "$W/combcoll.verify.prp" --top combdut \
    --workdir "$WD6" --set formal.simfail_run=false >"$OUT" 2>&1
 RC=$?
 [ "$RC" -eq 10 ] || fail "the false assert must still refute when it shares a line (rc=$RC): $(cat "$OUT")"

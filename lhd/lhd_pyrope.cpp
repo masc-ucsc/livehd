@@ -157,6 +157,9 @@ int run_style(const lhd::Options& opts) {
         .emit();
     return 1;
   }
+  // The info-severity findings ARE this command's output: select its pass so
+  // they reach stderr without an explicit `-d` (info is otherwise -d only).
+  livehd::diag::add_debug("lhd.pyrope.style");
   const style::Options config{opts.style_min_repeats, opts.style_max_block_statements, opts.style_max_findings};
   int                  status      = 0;
   bool                 suggestions = false;

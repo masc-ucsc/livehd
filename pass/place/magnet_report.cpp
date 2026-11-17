@@ -70,18 +70,6 @@ void write_magnet_report(const DreamPlace::native::MagnetReport& report, const s
   w.Key("reference_peak_dbu");
   w.Double(stability_reference);
   w.EndObject();
-  w.Key("warp_stability");
-  w.StartArray();
-  std::ifstream warp_trace(directory + "/macro_warp_stability.jsonl");
-  for (std::string line; std::getline(warp_trace, line);) {
-    rapidjson::Document sample;
-    sample.Parse<rapidjson::kParseFullPrecisionFlag>(line.c_str());
-    if (sample.HasParseError() || !sample.IsObject()) {
-      throw std::runtime_error("invalid warpspace stability trace");
-    }
-    sample.Accept(w);
-  }
-  w.EndArray();
   w.Key("motion_history");
   w.StartArray();
   for (const auto& sample : report.motion_history) {
@@ -320,8 +308,7 @@ const byIteration=new Map();for(let i=0;i<frames.length;i++){const f=frames[i];i
 const roundFrames=new Map(),roundsAtFrame=new Map(),mergedCounts=new Map();
 for(const r of d.rounds){const ordinal=mergedCounts.get(r.iteration)||0,a=byIteration.get(r.iteration);let j=a?.before[ordinal]??-1;if(j<0&&d.before_snap&&ordinal)j=a?.merged[ordinal-1]??-1;if(j<0)j=a?.gp??-1;roundFrames.set(r,j);if(!roundsAtFrame.has(j))roundsAtFrame.set(j,[]);roundsAtFrame.get(j).push(r);if(r.status==='merged')mergedCounts.set(r.iteration,ordinal+1);}
 const decisionFrame=round=>roundFrames.get(round)??-1;
-const warpStateAt=i=>(d.warp_stability||[]).filter(s=>s.iteration<=i).at(-1);
-const eventName=e=>e.event==='pull'?'Warpspace target update'+(warpStateAt(e.iteration)?' · strength '+warpStateAt(e.iteration).weight.toFixed(2)+' · '+warpStateAt(e.iteration).decision.replaceAll('_',' '):''):e.event==='ready'?(d.before_snap?'Magnet enabled before snap':'Global magnet gate opens'):e.event==='magnet'?'Rigid merge':e.event==='snap'?'Macro snap/LP':e.event;
+const eventName=e=>e.event==='pull'?'Macro pull target update':e.event==='ready'?(d.before_snap?'Magnet enabled before snap':'Global magnet gate opens'):e.event==='magnet'?'Rigid merge':e.event==='snap'?'Macro snap/LP':e.event;
 const eventFrames=[],eventsAtFrame=new Map(),eventCounts=new Map();
 for(let j=0;j<d.events.length;j++){const e=d.events[j],key=e.iteration+':'+e.event,ordinal=eventCounts.get(key)||0,a=byIteration.get(e.iteration);eventCounts.set(key,ordinal+1);let i=e.event==='magnet'?a?.merged[ordinal]??-1:e.event==='snap'?a?.snap[ordinal]??-1:-1;
 if(i<0){let lo=0,hi=frames.length;while(lo<hi){const mid=(lo+hi)>>>1;if(frames[mid].iteration<e.iteration)lo=mid+1;else hi=mid;}i=lo<frames.length?lo:-1;}eventFrames.push(i);if(!eventsAtFrame.has(i))eventsAtFrame.set(i,[]);eventsAtFrame.get(i).push(e);
@@ -345,10 +332,10 @@ if(k.center_shift)info+=` · core translation ${k.center_shift.map(v=>(v/d.dbu_p
 if(atDecision&&k.merged_box){const [a,b,e,g]=k.merged_box;ctx.strokeStyle='#47e4ff';ctx.setLineDash([3,4]);ctx.strokeRect(X(a),Y(g),(e-a)*s,(g-b)*s);ctx.setLineDash([]);}
 $('candidate_status').textContent=info+(atDecision?' · Corridor: green/red; proposed padded union: cyan.':decisionFrame(r)<0?' · Exact decision pose was not recorded; overlay unavailable.':' · Select this decision again to return to its recorded geometry.');}else $('candidate_status').textContent='Group interiors keep both member halos. The channel between member bodies belongs to the rigid group.';
 const events=eventsAtFrame.get(index)||[],rounds=roundsAtFrame.get(index)||[];
-const motion=(d.motion_history||[]).filter(v=>v.iteration<=f.iteration).at(-1),step=(d.motion_history||[]).filter(v=>v.center_step_valid&&v.iteration<=f.iteration).at(-1),reference=stabilityReference,warp=d.events.filter(e=>e.event==='pull'&&e.iteration<=f.iteration).at(-1);
+const motion=(d.motion_history||[]).filter(v=>v.iteration<=f.iteration).at(-1),step=(d.motion_history||[]).filter(v=>v.center_step_valid&&v.iteration<=f.iteration).at(-1),reference=stabilityReference,pull=d.events.filter(e=>e.event==='pull'&&e.iteration<=f.iteration).at(-1);
 const stability=`Macro stability (last GP step): ${step&&reference>0?(100*step.center_step_sum_dbu/reference).toFixed(2)+'%':'not available'} · Total center movement: ${step?(step.center_step_sum_dbu/d.dbu_per_um).toFixed(3)+' µm':'not available'}`;
 const gate=d.enabled===false?'Magnet disabled':d.before_snap?'Magnet before snap; movement gates unused':`Global max ${motion&&motion.window_complete?(100*motion.maximum).toFixed(2)+'%':'window incomplete'} · RMS ${motion&&motion.window_complete?(100*motion.rms).toFixed(2)+'%':'window incomplete'} · ${(100*d.start_displacement).toFixed(1)}% start gate ${d.start_iteration===null?'not reached':f.iteration<d.start_iteration?'waiting (opens @ '+d.start_iteration+')':'open since '+d.start_iteration} · Local limit ${(100*d.settle_displacement).toFixed(1)}%`;
-const warpState=warpStateAt(f.iteration);$('gate_status').textContent=stability+(warpState?` · Warpspace strength ${warpState.weight.toFixed(2)} · ${warpState.decision.replaceAll('_',' ')}${warpState.macro_stability_fraction===null?'':` (window ${(100*warpState.macro_stability_fraction).toFixed(2)}%)`}`:'')+' · '+gate+` · Last warpspace target update: ${warp?warp.iteration:'not applied yet'}`;
+$('gate_status').textContent=stability+' · '+gate+` · Last macro pull target update: ${pull?pull.iteration:'not applied yet'}`;
 $('status').textContent=`Frame ${index+1}/${frames.length} · iteration ${f.iteration} · ${f.event} · ${groups.size} rigid groups\n`+events.map(e=>`${eventName(e)} @ ${e.iteration}`).join(' · ');
 $('decisions').textContent=JSON.stringify({events,rounds},null,2);$('seek').value=index;}
 function stop(){clearInterval(timer);timer=null;$('play').textContent='Play';}function play(){stop();$('play').textContent='Pause';timer=setInterval(()=>{if(index===frames.length-1){stop();return;}index++;draw();},1000/+$('speed').value);}

@@ -542,65 +542,6 @@ struct Model {
     obstacles.push_back(cell);
     grid.each(box(candidate.place), [&](size_t bin, double) { bin_obstacles[bin].push_back(cell); });
   }
-  void warp_remainder(const std::vector<size_t>& remaining) {
-    const auto& policy = options.remainder_warp;
-    if (!policy.enabled || policy.weight == 0 || remaining.empty()) {
-      return;
-    }
-    const auto start = warp::Clock::now();
-    try {
-      DreamPlace::native::Design d;
-      d.layout = {grid.bounds.xl, grid.bounds.yl, grid.bounds.xh, grid.bounds.yh, 1, 1};
-      std::vector<int>    samples;
-      // Remap only unprotected cells into the movable prefix. All locked cells
-      // contribute demand at their accepted coordinates, never sample targets.
-      std::vector<size_t> order = remaining;
-      d.num_movable             = int(order.size());
-      for (size_t i = 0; i < installed.size(); ++i) {
-        if (installed[i] && ph::placement_mask(fp.components[i], tech) != ph::Placement_mask::soft) {
-          order.push_back(i);
-        }
-      }
-      for (size_t k = 0; k < order.size(); ++k) {
-        const auto   i     = order[k];
-        const auto&  p     = fp.components[i].place;
-        const bool   macro = !tech.macros.at(fp.components[i].macro).klass.starts_with("CORE");
-        const double hx    = macro ? options.macro_halo_x_dbu : 0;
-        const double hy    = macro ? options.macro_halo_y_dbu : 0;
-        d.node_x.push_back(p.x - hx);
-        d.node_y.push_back(p.y - hy);
-        d.node_size_x.push_back(p.width + 2 * hx);
-        d.node_size_y.push_back(p.height + 2 * hy);
-        d.node_macro.push_back(macro);
-        if (k < remaining.size()) {
-          samples.push_back(int(k));
-        }
-      }
-      auto controls       = policy;
-      controls.dbu_per_um = fp.dbu;
-      const auto field    = placement_warp(d, samples, controls, true);
-      auto       next     = preferred;
-      double     max_move = 0;
-      for (const auto& [node, delta] : field.delta) {
-        const auto i = order[node];
-        auto&      p = next[i];
-        if (p.width > grid.bounds.xh - grid.bounds.xl || p.height > grid.bounds.yh - grid.bounds.yl) {
-          throw std::invalid_argument("warp cell does not fit core");
-        }
-        p.x      = std::llround(std::clamp(original[i].x + policy.weight * delta.x, grid.bounds.xl, grid.bounds.xh - p.width));
-        p.y      = std::llround(std::clamp(original[i].y + policy.weight * delta.y, grid.bounds.yl, grid.bounds.yh - p.height));
-        max_move = std::max(max_move, distance(p, original[i]));
-      }
-      preferred                        = std::move(next);
-      report.warp_samples              = field.delta.size();
-      report.warp_max_displacement_dbu = max_move;
-      report.warp_status               = "applied";
-    } catch (const std::exception& error) {
-      report.warp_status = "retained";
-      report.warp_reason = error.what();
-    }
-    report.warp_seconds = std::chrono::duration<double>(warp::Clock::now() - start).count();
-  }
   void place_cell(size_t cell, unsigned stage) {
     if (installed[cell]) {
       return;
@@ -1700,7 +1641,6 @@ struct Model {
         remaining.push_back(i);
       }
     }
-    warp_remainder(remaining);
     // Placing the most critical remaining cells first leaves displacement to
     // less critical cells. Direct destinations eliminate push oscillations and
     // allow transfer past full intermediate bins without moving locked cells.
@@ -1845,7 +1785,6 @@ Terminal_legalize_report terminal_legalize(const physical::Technology& tech, phy
       || !std::isfinite(timing.time_unit_ps) || timing.time_unit_ps <= 0) {
     throw std::invalid_argument("invalid terminal legalization controls; target density must be below the hard bin cap");
   }
-  validate_warp_options(options.remainder_warp);
   (void)sat_backend(options.backend);
   const auto start    = std::chrono::steady_clock::now();
   auto       proposal = fp;
@@ -1915,13 +1854,6 @@ void write_terminal_legalize_report(const Terminal_legalize_report& r, const phy
   count("padding_max_extra_rows", o.padding_max_extra_rows);
   count("relaxed_padding_cells", r.relaxed_padding_cells);
   number("remainder_wire_weight", o.remainder_wire_weight);
-  count("warp_samples", r.warp_samples);
-  number("warp_seconds", r.warp_seconds);
-  number("warp_max_displacement_dbu", r.warp_max_displacement_dbu);
-  w.Key("warp_status");
-  w.String(r.warp_status.c_str());
-  w.Key("warp_reason");
-  w.String(r.warp_reason.c_str());
   count("wire_changed_cells", r.wire_changed_cells);
   count("critical_padding_sites", o.critical_padding_sites);
   count("critical_fanin_depth", o.critical_fanin_depth);

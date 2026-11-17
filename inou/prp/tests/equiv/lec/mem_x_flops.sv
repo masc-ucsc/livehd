@@ -1,6 +1,6 @@
 /*
 :lec_top: mem_x
-:lec_set: formal.engine=bmc formal.min_timeout=1 formal.simfail=false
+:lec_set: formal.engine=bmc formal.simfail=false
 mem_x with the sides swapped: the flop pair is now the reference, so each
 flop's write enable reads the power-on-unknown `idle`. The reference flop's
 knowledge plane must merge its write and hold paths under that unknown

@@ -1,6 +1,6 @@
 /*
 :top: whole_array
-:synth_set: pass.abc.memory=true
+:synth_set: synth.memory=flops
 :lec_set: formal.bound=2
 */
 module whole_array(input clock, reset, load, we, input [1:0] index,

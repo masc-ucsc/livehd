@@ -321,7 +321,7 @@ for side in a b; do
 done
 if [ "$fail" -eq 0 ]; then
   OUT=$("$LHD" lec --set formal.effort=proof --ref "lg:$W/unknown_a" --impl "lg:$W/unknown_b" --top unknown_parent \
-        --set formal.timeout=1 --set formal.min_timeout=1 --workdir "$W/wd_unknown_child" 2>&1); RC=$?
+        --set formal.timeout=1 --workdir "$W/wd_unknown_child" 2>&1); RC=$?
   if [ "$RC" -ne 0 ]; then
     echo "FAIL: case 8 an inconclusive child stranded a contextually equivalent parent (rc=$RC)"; fail=1
   elif ! echo "$OUT" | grep -qE "'hard' (TIMEOUT|UNSUPPORTED|UNDISCHARGED|UNCONFIRMED|UNPAIRED|UNCHECKED|VACUOUS|UNEXPLAINED)"; then

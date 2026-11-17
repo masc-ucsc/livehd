@@ -1045,6 +1045,19 @@ std::string resolve_io_load(const Options& opts, const std::string& liberty) {
   return load;
 }
 
+uint64_t memory_max_bits(const Options& opts) {
+  const auto value = synth_set(opts, "memory.max_bits", "auto");
+  if (value == "auto") {
+    return synth_set(opts, "memory", "auto") == "sram" ? 2048 : 1024;
+  }
+  uint64_t bits = 0;
+  const auto [p, ec] = std::from_chars(value.data(), value.data() + value.size(), bits);
+  if (value.empty() || ec != std::errc{} || p != value.data() + value.size()) {
+    throw Lhd_error{"usage", std::format("synth.memory.max_bits expects auto or a non-negative bit count, got '{}'", value), ""};
+  }
+  return bits;
+}
+
 void merge_mapper_sets(const Options& opts, std::string_view method, Eprp_var::Eprp_dict& labels) {
   // Concurrency is lhd.jobs alone (0 = the available CPUs): ABC's worker cap follows it; its RAM admission still
   // gates each worker.
@@ -1060,33 +1073,33 @@ void merge_mapper_sets(const Options& opts, std::string_view method, Eprp_var::E
       have_delay      = true;
     } else if (k == "synth.abc_pre" && method == "pass.abc" && !v.empty()) {
       labels["pre"] = v;
-    } else if (k == "synth.memory" && method == "pass.abc") {
-      labels["memory"] = v == "flops" ? "true" : v == "macro" ? "false" : "auto";  // sram: resolved below
-    } else if (k == "synth.memory" && method == "pass.usyn" && (v == "flops" || v == "macro")) {
-      // USYN keeps memories native unless asked: only an explicit flops/macro reaches its mapping step.
-      labels["memory"] = v == "flops" ? "true" : "false";
     }
   }
-  // synth.memory=sram: memories are generated macros (pass/synth/sram_macro.hpp), so the mapper folds only a memory
-  // below the smallest macro or one no macro can realize.
-  if (method == "pass.abc" && (!labels.contains("memory") || labels["memory"] == "auto")) {
-    const bool  sram     = synth_set(opts, "memory", "auto") == "sram";
-    std::string min_bits = "2048";
-    for (const auto& [k, v] : opts.sets) {
-      if (k == "synth.memory.min_bits") {
-        min_bits = v;
-      }
-    }
-    if (sram) {
-      labels["memory"]          = "sram";
-      labels["memory_max_bits"] = min_bits;
+  // synth.memory.max_bits is the one memory size threshold of both mappers (auto: 1024, or 2048 under sram).
+  if (method == "pass.abc" || method == "pass.usyn") {
+    labels["memory_max_bits"] = std::to_string(memory_max_bits(opts));
+  }
+  // synth.memory is the one storage knob of both mappers (pass.abc.memory / pass.usyn.memory are retired):
+  // flops = fold every memory, macro = keep every memory native, auto = fold within synth.memory.max_bits (or over
+  // 3 ports), sram = generated macros (pass/synth/sram_macro.hpp), folding only a memory below the smallest macro or
+  // one no macro can realize.
+  if (method == "pass.abc" || method == "pass.usyn") {
+    const auto memory = synth_set(opts, "memory", "auto");
+    if (memory == "flops") {
+      labels["memory"] = "true";
+    } else if (memory == "macro") {
+      labels["memory"] = "false";
+    } else if (memory == "sram") {
+      labels["memory"] = "sram";
     } else if (const auto place = synth_set(opts, "place", "false");
                !place.empty() && place != "false" && place != "0" && place != "off") {
       // A placed netlist goes to a physical flow: a memory left native becomes a virtual proxy block that no
       // backend can implement (cnn's FIFOs reached the OpenROAD handoff as `__livehd_memory_*`, ODB-0092). Without
-      // generated SRAM macros, `auto` folds every memory to flops, as the ORFS flows do; synth.memory=macro (or an
-      // explicit pass.abc.memory, merged below) still keeps a memory native on purpose.
+      // generated SRAM macros, `auto` folds every memory to flops, as the ORFS flows do; synth.memory=macro still
+      // keeps a memory native on purpose.
       labels["memory"] = "true";
+    } else {
+      labels["memory"] = "auto";
     }
   }
   // A placed netlist goes on to clock-tree synthesis (OpenROAD CTS after the DEF handoff), which owns every clock
@@ -1155,6 +1168,14 @@ void merge_mapper_sets(const Options& opts, std::string_view method, Eprp_var::E
       if (k == full) {
         labels[std::string(key)] = v;
       }
+    }
+  }
+  // synth.block_size=auto derives the block from the operand width (the mappers' 0); a literal 0 is refused.
+  if (const auto it = labels.find("block_size"); it != labels.end()) {
+    if (it->second == "auto") {
+      labels.erase(it);
+    } else if (it->second == "0") {
+      throw Lhd_error{"usage", "synth.block_size=0 is no longer the automatic value", "use synth.block_size=auto"};
     }
   }
   if (!labels.contains("io_load")) {
@@ -1496,6 +1517,11 @@ void check_known_set_passes(const Options& opts) {
       }
       if (flag == "memory" && value != "auto" && value != "flops" && value != "macro" && value != "sram") {
         throw Lhd_error{"usage", std::format("synth.memory expects auto|flops|macro|sram, got '{}'", value), ""};
+      }
+      if (flag == "memory.max_bits") {
+        Options probe;
+        probe.sets.emplace_back("synth.memory.max_bits", value);
+        (void)memory_max_bits(probe);  // throws the usage error
       }
       if (flag == "io_load" && value != "auto") {
         char*        end = nullptr;
@@ -1924,64 +1950,6 @@ void apply_log_settings(const Options& opts) {
     if (ok) {
       livehd::log::configure(key.substr(0, pos), lvl);
     }
-  }
-}
-
-void canonicalize_synth_sets(Options& opts) {
-  const auto          on = [](std::string_view v) { return !v.empty() && v != "false" && v != "0" && v != "off"; };
-  // grid.density_mode replaces two booleans that could be combined. Merge them
-  // only when they name one mode and no explicit grid.density_mode competes;
-  // otherwise placement_options reads them (and rejects a mix with the mode).
-  std::optional<bool> dynamic, automatic;
-  bool                explicit_mode = false;
-  for (const auto& [key, value] : opts.sets) {
-    dynamic       = key == "synth.place.dynamic_bins" ? std::optional<bool>{on(value)} : dynamic;
-    automatic     = key == "synth.place.auto_bins" ? std::optional<bool>{on(value)} : automatic;
-    explicit_mode = explicit_mode || key == "synth.place.grid.density_mode";
-  }
-  const bool merge_mode = !explicit_mode && !(dynamic.value_or(false) && automatic.value_or(false));
-  bool       mode_set   = false;
-  for (auto& [key, value] : opts.sets) {
-    if (!key.starts_with("synth.")) {
-      continue;
-    }
-    const auto flag = std::string_view{key}.substr(6);
-    // `synth.place.seed` used to name the start-position TSV, which invited `=33` as an RNG seed. A bare
-    // number can only mean the seed, and there is one: the shared `lhd.seed` every pass reads.
-    if (flag == "place.seed" && !value.empty() && std::all_of(value.begin(), value.end(), [](unsigned char c) { return std::isdigit(c); })) {
-      opts.deprecated_sets.emplace_back("synth.place.seed is deprecated; it is not an RNG seed option",
-                                        std::format("use --set lhd.seed={} (the one seed shared by every pass); the start-position file is "
-                                                    "synth.place.start_map",
-                                                    value));
-      key = "lhd.seed";
-      continue;
-    }
-    for (const auto& r : kSynthSetRenames) {
-      if (r.old_name != flag) {
-        continue;
-      }
-      const auto target = std::string{r.true_value.empty() ? std::string_view{value} : on(value) ? r.true_value : r.false_value};
-      opts.deprecated_sets.emplace_back(std::format("synth.{} is deprecated", r.old_name),
-                                        std::format("use --set synth.{}={}", r.new_name, target));
-      if (r.new_name == "place.grid.density_mode") {
-        if (merge_mode) {
-          value    = dynamic.value_or(false) ? "dynamic" : automatic.value_or(false) ? "macro" : "fixed";
-          key      = mode_set ? std::string{} : std::format("synth.{}", r.new_name);  // one entry for both booleans
-          mode_set = true;
-        }
-      } else {
-        value = target;
-        key   = std::format("synth.{}", r.new_name);
-      }
-      break;
-    }
-  }
-  std::erase_if(opts.sets, [](const auto& set) { return set.first.empty(); });
-}
-
-void emit_deprecated_sets(const Options& opts) {
-  for (const auto& [msg, hint] : opts.deprecated_sets) {
-    livehd::diag::warn("lhd", "deprecated-option", "io").msg("{}", msg).hint(hint).emit();
   }
 }
 

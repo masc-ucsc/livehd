@@ -1,6 +1,6 @@
 /*
 :top: partial_write
-:synth_set: pass.abc.memory=true
+:synth_set: synth.memory=flops
 :lec_set: formal.bound=2
 */
 module partial_write(input clock, reset, load, we, input [1:0] index,

@@ -92,11 +92,11 @@ for claim in shift mem select lanes shared; do
       map_design "$W/${claim}_on" "$top" --set pass.abc.ware_zero_bits=true
       ;;
     mem|lanes)
-      map_design "$W/${claim}_off" "$top" --set pass.abc.memory=true
-      map_design "$W/${claim}_on" "$top" --set pass.abc.memory=true --set pass.abc.memory_prune_reads=true
+      map_design "$W/${claim}_off" "$top" --set synth.memory=flops
+      map_design "$W/${claim}_on" "$top" --set synth.memory=flops --set pass.abc.memory_prune_reads=true
       ;;
     shared)
-      map_design "$W/shared_on" "$top" --set pass.abc.memory=true --set pass.abc.memory_prune_reads=true
+      map_design "$W/shared_on" "$top" --set synth.memory=flops --set pass.abc.memory_prune_reads=true
       ;;
   esac
   on=$(cells "$W/${claim}_on/netv")

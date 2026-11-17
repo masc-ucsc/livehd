@@ -5912,12 +5912,12 @@ void lec_command(Options& opts, Result& res) {
   }
   // Proof scheduling retains the per-definition minimum allowance. Sampled
   // runs use timeout as a wall-clock cap without extending it to this floor.
-  o.min_timeout         = std::atoi(label("min_timeout", "1").c_str());
+  o.min_timeout         = 1;  // per-unit floor (s) once the shared formal.timeout total is spent (internal)
   // Hard wall backstop on a forked proof worker, as a multiple of `timeout` (0 = off).
   // `timeout` is cvc5 tlimit-per, which cannot preempt ONE long CaDiCaL solve -- the
   // shape a flat box-free miter takes. See Lec_options::hard_timeout_mult.
   o.confirm_timeout     = std::atoi(label("confirm_timeout", "30").c_str());
-  o.hard_timeout_mult   = std::atoi(label("hard_timeout_mult", "3").c_str());
+  o.hard_timeout_mult   = 3;  // recovery-solve wall cap = 3 x formal.timeout (internal)
   o.spec_mining_timeout = std::atoi(label("spec_mining_timeout", "0").c_str());
   o.phase               = label("phase", "after_reset");
   o.reset_cycles        = std::atoi(label("reset_cycles", "2").c_str());
@@ -8317,11 +8317,11 @@ void formal_verify_command(Options& opts, Result& res) {
   // the verify analogue of the hier-lec scheduler. rlimit>0 (deterministic tier)
   // disables it inside prove_properties. spec_mining_timeout (0=off): an INDEPENDENT
   // diagnosis budget that names the toxic obligation core of a timed-out run.
-  o.min_timeout         = std::atoi(label("min_timeout", "1").c_str());
+  o.min_timeout         = 1;  // per-unit floor (s) once the shared formal.timeout total is spent (internal)
   // Hard wall backstop on a forked proof worker, as a multiple of `timeout` (0 = off).
   // `timeout` is cvc5 tlimit-per, which cannot preempt ONE long CaDiCaL solve -- the
   // shape a flat box-free miter takes. See Lec_options::hard_timeout_mult.
-  o.hard_timeout_mult   = std::atoi(label("hard_timeout_mult", "3").c_str());
+  o.hard_timeout_mult   = 3;  // recovery-solve wall cap = 3 x formal.timeout (internal)
   o.spec_mining_timeout = std::atoi(label("spec_mining_timeout", "0").c_str());
   o.mine                = label("mine", "");  // P3 mining tier ("" = inductive only | speculative)
   // Cross-version reuse: which techniques (hash is the cone-key verdict cache).

@@ -366,7 +366,6 @@ void run_engine_command(Options& opts, Result& res) {
   validate_emits(opts);
   validate_dumps(opts);
   check_known_set_passes(opts);  // --set AND --config table names: a typo'd pass must error, not no-op
-  canonicalize_synth_sets(opts);  // deprecated synth.* spellings -> canonical names (with a warning)
   apply_log_settings(opts);      // --set <channel>.log=<level> -> livehd::log (developer logging)
   apply_lhd_settings(opts);      // --set lhd.seed / lhd.top -> the shared kernel Options fields
 

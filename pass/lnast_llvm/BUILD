@@ -47,5 +47,7 @@ sh_test(
     name = "lnast_llvm_diff_test",
     size = "medium",
     srcs = ["tests/lnast_llvm_diff_test.sh"],
+    # Each design pays a reference-simulator host compile; spread them.
+    shard_count = 6,
     data = glob(["tests/*.sv", "tests/*.prp", "tests/gen_tb.py"]) + ["//lhd", ":lnast_llvm_run"],
 )

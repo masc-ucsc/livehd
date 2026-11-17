@@ -245,7 +245,7 @@ std::string report_json(hhds::GraphLibrary& library, std::string_view top, const
   w.Key("opaque_logic_nodes");
   w.Uint64(bound.opaque_cells);
   w.Key("native_state_nodes");
-  w.Uint64(bound.unmapped_nodes);
+  w.Uint64(bound.unmapped_nodes + bound.memory_nodes);
   w.Key("constraints_complete");
   w.Bool(engine.constraints().unsupported.empty());
   const auto unsupported = ranker.unsupported();
@@ -338,7 +338,7 @@ std::string report_json(hhds::GraphLibrary& library, std::string_view top, const
     w.Key("nets");
     w.Uint64(placed->nets.size());
     w.EndObject();
-    if (bound.unmapped_nodes != 0) {
+    if (bound.memory_nodes != 0) {
       w.Key("memory_timing_model");
       w.String("clock_boundary_zero_internal_delay");
     }

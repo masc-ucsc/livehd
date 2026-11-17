@@ -282,7 +282,7 @@ struct Lec_options {
   // ~0.1s as integers, while mask/extract/memory-heavy cones degrade to Undecided
   // (nonlinear integer arithmetic is undecidable). Hence:
   //   auto (default) — solve BV-first; a solver-give-up Undecided earns ONE
-  //     int-blasted re-solve at the formal.min_timeout budget (int_blast_retry,
+  //     int-blasted re-solve at the the per-unit min_timeout budget (int_blast_retry,
   //     called by the drivers — never by the engines, so the portfolio/tier-2
   //     recursion inside prove_equal retries at most once per driver query);
   //   off — never int-blast;
@@ -820,7 +820,7 @@ inline std::string lec_options_range_error(const Lec_options& o) {
     return "formal.lec.conelimit must be >= 0 (0 = ABC default), got " + std::to_string(o.conelimit);
   }
   if (o.hard_timeout_mult < 0) {
-    return "formal.hard_timeout_mult must be >= 0 (0 = disabled), got " + std::to_string(o.hard_timeout_mult);
+    return "hard_timeout_mult must be >= 0 (0 = disabled), got " + std::to_string(o.hard_timeout_mult);
   }
   if (o.int_blast != "auto" && o.int_blast != "off" && o.int_blast != "iand" && o.int_blast != "sum" && o.int_blast != "bitwise"
       && o.int_blast != "bv") {
@@ -876,21 +876,21 @@ bool unframe_blob(std::string_view b, std::string_view& payload);
 // NonClausalSimp) nor a single eager CaDiCaL solve, so without this a stuck
 // racer made `formal.timeout` advisory (formal.timeout=60 ran 15+ minutes).
 // Each racer runs ONE leg under one formal.timeout allowance, may draw one
-// formal.min_timeout floor once it is spent, and also encodes (which
+// the per-unit min_timeout floor once it is spent, and also encodes (which
 // formal.timeout deliberately excludes), so the deadline is
-//   formal.timeout + formal.min_timeout + grace,
+//   formal.timeout + the per-unit min_timeout + grace,
 //   grace = clamp(formal.timeout / 4, 10 s, 60 s).
 // 0 when formal.timeout == 0 (unbounded / the deterministic rlimit tier) or
-// formal.hard_timeout_mult == 0 (the documented "disable the wall backstops"
+// hard_timeout_mult == 0 (the documented "disable the wall backstops"
 // setting). A killed racer is a witness-free Undecided, never a verdict.
 long long race_deadline_ms(const Lec_options& opts);
 
 // The verify STRATEGY race's wall deadline (engine=auto). Unlike one
 // equivalence leg, a verify strategy may legitimately overshoot formal.timeout
-// by one formal.min_timeout floor PER unsettled obligation
+// by one the per-unit min_timeout floor PER unsettled obligation
 // (Lec_options::min_timeout), so the deadline scales with `n_units` (an upper
 // bound on the obligation count):
-//   (formal.timeout + max(1, n_units) x formal.min_timeout) [x2 for phase=full]
+//   (formal.timeout + max(1, n_units) x the per-unit min_timeout) [x2 for phase=full]
 //   + grace,
 // never under formal.timeout x hard_timeout_mult. 0 exactly when
 // race_deadline_ms is 0.
@@ -905,7 +905,7 @@ Query_result prove_equal_isolated(hhds::Graph* ref, hhds::Graph* impl, const Lec
 // int_blast=auto second leg: when the BV-first solve `first` came back a
 // SOLVER-GIVE-UP Undecided (not unsupported/nothing-compared — those no
 // budget can change), re-solve ONCE with cvc5's int-blasting (iand) at the
-// formal.min_timeout budget and adopt the retry iff it SETTLES; a retry Undecided
+// the per-unit min_timeout budget and adopt the retry iff it SETTLES; a retry Undecided
 // keeps `first` (its detail names the real bottleneck) with a note appended.
 // DRIVER-level only — call it once per driver query, after any flat-confirm,
 // never from inside the engines: prove_equal recurses (tier-2 discipline, the
@@ -1079,7 +1079,7 @@ struct Verify_result {
   std::vector<std::string> vacuous_scopes;
   // Soft-budget accounting (formal.timeout is a TARGET, not a cap). What was
   // actually spent against it, over how many units, and how many of those ran on
-  // the formal.min_timeout floor — the floored ones ARE the overrun, so the two
+  // the the per-unit min_timeout floor — the floored ones ARE the overrun, so the two
   // numbers together say whether to raise the target or lower the floor.
   // budget_target_s == 0 means no budget was in force (unbounded / rlimit tier).
   int                      budget_target_s = 0;

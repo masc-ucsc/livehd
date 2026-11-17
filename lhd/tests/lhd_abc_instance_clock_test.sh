@@ -65,20 +65,21 @@ dff_clk() {
   awk -v name="\\\\$2" '$1 == "DFFx1" && $2 == name { f = 1; next } f && /\.CLK\(/ { sub(/.*\.CLK\(/, ""); sub(/\).*/, ""); print; exit }' "$1"
 }
 
-# Default: the registers stay native on their instance-driven clocks.
+# Keep the clock-generating instances intact so both paths exercise an instance output.
+# With derived_clock=false, the registers stay native on those clocks.
 D0="$W/off"
 mkdir -p "$D0"
 "$LHD" synth --result-json "$D0/r.json" --reader slang --top "$TOP" --workdir "$D0/W" --emit-dir verilog:"$D0/netv" \
-  --set synth.mapper=abc --set synth.liberty="$LIB" --set synth.derived_clock=false -- "$SRC" > "$D0/synth.log" 2>&1 \
-  || fail "default synth -> $(cat "$D0/r.json" 2>/dev/null)"
+  --set synth.flat_sweep=false --set synth.mapper=abc --set synth.liberty="$LIB" --set synth.derived_clock=false -- "$SRC" > "$D0/synth.log" 2>&1 \
+  || fail "derived_clock=false synth -> $(cat "$D0/r.json" 2>/dev/null)"
 cat "$D0/netv/"*.v > "$D0/net.v"
-grep -q '"derived-clock-native"' "$D0/synth.log" || fail "default: the derived-clock-native diagnostic is missing"
-grep -q 'always @' "$D0/net.v" || fail "default: expected native flops on the instance-driven clocks"
+grep -q '"derived-clock-native"' "$D0/synth.log" || fail "derived_clock=false: the derived-clock-native diagnostic is missing"
+grep -q 'always @' "$D0/net.v" || fail "derived_clock=false: expected native flops on the instance-driven clocks"
 
 D="$W/run"
 mkdir -p "$D"
 "$LHD" synth --result-json "$D/r.json" --reader slang --top "$TOP" --workdir "$D/W" --emit-dir verilog:"$D/netv" \
-  --set synth.mapper=abc --set synth.liberty="$LIB" --set synth.derived_clock=true -- "$SRC" > "$D/synth.log" 2>&1 \
+  --set synth.flat_sweep=false --set synth.mapper=abc --set synth.liberty="$LIB" --set synth.derived_clock=true -- "$SRC" > "$D/synth.log" 2>&1 \
   || fail "synth -> $(cat "$D/r.json" 2>/dev/null)"
 cat "$D/netv/"*.v > "$D/net.v"
 

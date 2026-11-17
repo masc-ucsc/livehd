@@ -148,7 +148,7 @@ EOF
   "${LHD}" compile "${TMP}/w.prp" --top w.w --emit-dir "lg:${D}/lg" --workdir "${D}/w1" -q >/dev/null 2>&1 || ok=0
   "${LHD}" pass color synth --top w.w "lg:${D}/lg" --workdir "${D}/w2" -q >/dev/null 2>&1 || ok=0
   "${LHD}" pass abc --top w.w "lg:${D}/lg" --emit-dir "lg:${D}/net" --set synth.liberty="${LIB}" \
-      --set pass.abc.memory=true --workdir "${D}/w3" -q >/dev/null 2>&1 || ok=0
+      --set synth.memory=flops --workdir "${D}/w3" -q >/dev/null 2>&1 || ok=0
   "${LHD}" pass partition --top w.w "lg:${D}/lg" --emit-dir "lg:${D}/re" --workdir "${D}/w4" -q >/dev/null 2>&1 || ok=0
   "${LHD}" pass liberty gensim "${LIB}" --emit-dir "lg:${D}/models" --workdir "${D}/w5" -q >/dev/null 2>&1 || ok=0
   for x in net models re; do

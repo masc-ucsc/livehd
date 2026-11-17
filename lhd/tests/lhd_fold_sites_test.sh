@@ -8,7 +8,7 @@
 #
 #   specialize.refold + cgen.sim.refold   lhd sim (sim.unroll_sites splices a small loop; sim cost)
 #   synth.loop_cleanup                    pass abc over a rolled loop
-#   synth.memory_module                   pass abc --set pass.abc.memory=true over a register tile
+#   synth.memory_module                   pass abc --set synth.memory=flops over a register tile
 #   synth.state_sweep                     lhd synth with synth.state_sweep=true
 #   satopt.cleanup                        pass satopt over a design satopt rewrites
 #   formal.lec.preflight                  lhd lec across two hierarchies
@@ -106,15 +106,16 @@ PRP
   grep -q '"verdict":"proven-' "$W/loop_lec_$tag.json" || fail "loop engine=$engine: mapped netlist not PROVEN: $(head -c 600 "$W/loop_lec_$tag.json")"
 
   # -- synthesis: memory module lowering ----------------------------------------------------------------------------
-  "$LHD" pass abc --top memtile.memtile lg:"$W/tile_src" --set synth.liberty="$LIB" --set pass.abc.memory=true \
+  "$LHD" pass abc --top memtile.memtile lg:"$W/tile_src" --set synth.liberty="$LIB" --set synth.memory=flops \
     --emit-dir lg:"$W/tile_net_$tag" --workdir "$W/tile_map_$tag" -q >"$W/tile_map_$tag.out" 2>"$W/tile_map_$tag.log" || fail "tile abc engine=$engine failed: $(head -c 600 "$W/tile_map_$tag.out")"
   expect "$engine" synth.memory_module "$W/tile_map_$tag.log"
 
+  # Isolate state_sweep: flat_sweep would fold the constant register first.
   # -- synthesis: private-copy state sweep, PROVEN ------------------------------------------------------------------
   "$LHD" synth --reader slang --top sweep --workdir "$W/state_$tag" --emit-dir lg:"$W/state_net_$tag" --set synth.liberty="$STATE_LIB" \
-    --set synth.state_sweep=true --result-json "$W/state_$tag.json" -q -- "$STATE_SRC" >"$W/state_$tag.out" 2>"$W/state_$tag.log" \
+    --set synth.flat_sweep=false --set synth.state_sweep=true --result-json "$W/state_$tag.json" -q -- "$STATE_SRC" >"$W/state_$tag.out" 2>"$W/state_$tag.log" \
     || fail "state sweep engine=$engine failed: $(head -c 600 "$W/state_$tag.json")"
-  "$LHD" synth --reader slang --top cst --workdir "$W/cst_$tag" --set synth.liberty="$STATE_LIB" --set synth.state_sweep=true \
+  "$LHD" synth --reader slang --top cst --workdir "$W/cst_$tag" --set synth.liberty="$STATE_LIB" --set synth.flat_sweep=false --set synth.state_sweep=true \
     --result-json "$W/cst_$tag.json" -q -- "$W/cst.sv" >"$W/cst_$tag.out" 2>"$W/cst_$tag.log" \
     || fail "constant-register sweep engine=$engine failed: $(head -c 600 "$W/cst_$tag.json")"
   expect "$engine" synth.state_sweep "$W/cst_$tag.log"

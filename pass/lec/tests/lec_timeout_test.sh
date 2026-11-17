@@ -22,7 +22,7 @@
 # switch the knob off to keep the old fixture alive (that would stop testing the
 # path a user actually gets).
 #
-# `formal.min_timeout=1` bounds that second leg: the retry's whole budget is the
+# the fixed 1s per-unit min_timeout bounds that second leg: the retry's whole budget is the
 # min_timeout floor, so leaving it on the 20s default would add ~20s to every
 # case here and crowd the 25s watchdog below.
 
@@ -91,7 +91,7 @@ run_lec() {  # $1=name $2=formal.timeout secs $3=outer kill secs
   start=$(date +%s)
   "$LHD" lec --set formal.effort=proof --ref "$WORK/${name}_ref.v" --impl "$WORK/${name}_impl.v" \
          --top foo --set formal.lec.hier=false --set formal.engine=bmc --set formal.lec.decompose=false \
-         --set formal.timeout="$tmo" --set formal.min_timeout=1 --workdir "$WORK/w_$name" > "$of" 2>&1 &
+         --set formal.timeout="$tmo" --workdir "$WORK/w_$name" > "$of" 2>&1 &
   pid=$!
   # POLL in 1s steps and exit as soon as the run is reaped, rather than one
   # `sleep $outer`: killing the watchdog subshell does NOT kill a long sleep it
@@ -135,7 +135,7 @@ EOF2
 (
   s0=$(date +%s)
   LHD_LEC_RACER_STALL_S=60 "$LHD" lec --set formal.effort=proof --ref "$WORK/stall_ref.v" --impl "$WORK/stall_impl.v" --top foo \
-    --set formal.lec.hier=false --set formal.lec.decompose=false --set formal.timeout=1 --set formal.min_timeout=1 \
+    --set formal.lec.hier=false --set formal.lec.decompose=false --set formal.timeout=1 \
     --workdir "$WORK/w_stall_race" > "$WORK/out_stall.txt" 2>&1 &
   spid=$!
   ( for ((i = 0; i < 25; i++)); do
@@ -172,7 +172,7 @@ EOF2
 (
   s0=$(date +%s)
   LHD_LEC_RACER_STALL_ONLY=1 LHD_LEC_RACER_STALL_S=60 "$LHD" lec --set formal.effort=proof --ref "$WORK/ibstall_ref.v" --impl "$WORK/ibstall_impl.v" \
-    --top foo --set formal.lec.hier=false --set formal.lec.decompose=false --set formal.timeout=1 --set formal.min_timeout=1 \
+    --top foo --set formal.lec.hier=false --set formal.lec.decompose=false --set formal.timeout=1 \
     --workdir "$WORK/w_ibstall" > "$WORK/out_ibstall.txt" 2>&1 &
   ipid=$!
   ( for ((i = 0; i < 25; i++)); do

@@ -36,8 +36,8 @@ def run(name, extra, success=True, expect=None, iterations=30, bins=8):
         assert expect in error['message'], (name, expect, error)
     return data
 
-run('invalid_gp_margin', ['--set', 'synth.place=true', '--set', 'synth.place.resize.gp_margin=1.5'],
-    success=False, expect='resize.gp_margin')
+run('retired_gp_margin', ['--set', 'synth.place=true', '--set', 'synth.place.resize.gp_margin=0.5'],
+    success=False, expect='no longer a public option')
 native = run('terminal_default', ['--set', 'synth.place=true', '--set', 'synth.place.macro.timing_interval=5',
                                   '--set', 'synth.place.final.timing_start=5'])
 # GP ranks paths for weights; detailed electrical repair follows legal GP.
@@ -47,10 +47,6 @@ gp_ranking = [json.loads(line) for line in
 assert gp_ranking and all(p['ranking_only'] and p['delay'] is None for p in gp_ranking), gp_ranking
 assert native['qor']['place']['physical_timing']['ranking_evaluations'] > 0, native
 assert native['qor']['place']['physical_timing']['detailed_evaluations'] > 0, native
-run('gp_repair_disabled', ['--set', 'synth.place=true', '--set', 'synth.place.macro.timing_interval=5',
-                           '--set', 'synth.place.final.timing_start=5',
-                           '--set', 'synth.place.resize.gp=false'])
-assert not list((root/'gp_repair_disabled/synth/place').rglob('gp_buffer_repair_*.json'))
 
 run('timing_warmup', ['--set', 'synth.place=true',
                       '--set', 'synth.place.min_iterations=260'], iterations=260)

@@ -208,7 +208,7 @@ assert proven(work, 'hier', root / 'hier.v')
 
 # A register clocked through a definition port stays CMOS: the shared
 # definition would need a new enable port wired per instance.
-_, physical, endpoints, _ = synth('defport')
+_, physical, endpoints, _ = synth('defport', '--set', 'synth.flat_sweep=false')
 assert reasons(endpoints) == {'q': 'definition-clock'}, reasons(endpoints)
 
 # Inversions: the falling edge of a gated clock retains as negative-edge; the

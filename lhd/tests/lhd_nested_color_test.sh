@@ -13,6 +13,7 @@
 #   3. a warm rerun on the same workdir hits the region cache for both regions
 #      and writes byte-identical Verilog (cached bodies are the un-nested ones,
 #      so nesting is applied once per run, never twice).
+# Keep the nested region boundaries this test inspects.
 set -u
 LHD=lhd/lhd
 LIB=inou/prp/tests/abc/test.lib
@@ -33,7 +34,7 @@ EOF
 
 synth() {  # <verilog dir> <result json>
   "$LHD" synth "$W/nested.prp" --top nested --workdir "$W/w" --emit-dir "verilog:$1" \
-    --set synth.liberty="$LIB" --set synth.timing=false --set synth.partition=fine -q --result-json "$2" \
+    --set synth.liberty="$LIB" --set synth.timing=false --set synth.flat_sweep=false --set synth.partition=fine -q --result-json "$2" \
     || fail "synth -> $(cat "$2" 2>/dev/null)"
 }
 
@@ -72,10 +73,10 @@ assert inner['parent'] == 'nested.nested__g_outer' and inner['path'] == ['outer'
 assert all(r['files'] for r in d['regions']) and d['files'], d
 PY
 "$LHD" synth "$W/nested.prp" --top nested --workdir "$W/w" --set synth.liberty="$LIB" --set synth.timing=false \
-  --set synth.partition=fine -d color-index --diag-fmt pretty >"$W/warm.log" 2>&1 || fail "warm synth: $(tail -5 "$W/warm.log")"
+  --set synth.flat_sweep=false --set synth.partition=fine -d color-index --diag-fmt pretty >"$W/warm.log" 2>&1 || fail "warm synth: $(tail -5 "$W/warm.log")"
 grep -q "color index: 2 of 2 colors depend only on unchanged sources" "$W/warm.log" || fail "warm index: $(cat "$W/warm.log")"
 sed -i.bak 's/(a-c)/(a+c)/' "$W/nested.prp"
 "$LHD" synth "$W/nested.prp" --top nested --workdir "$W/w" --set synth.liberty="$LIB" --set synth.timing=false \
-  --set synth.partition=fine -d color-index --diag-fmt pretty >"$W/edit.log" 2>&1 || fail "edited synth: $(tail -5 "$W/edit.log")"
+  --set synth.flat_sweep=false --set synth.partition=fine -d color-index --diag-fmt pretty >"$W/edit.log" 2>&1 || fail "edited synth: $(tail -5 "$W/edit.log")"
 grep -q "color index: 0 of 2 colors depend only on unchanged sources" "$W/edit.log" || fail "edited index: $(cat "$W/edit.log")"
 echo "PASS: the color index records parents and sources and detects the edited colors"

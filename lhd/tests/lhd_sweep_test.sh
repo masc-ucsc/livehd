@@ -52,7 +52,7 @@ synth_case() {
   mkdir -p "$d"
   "$LHD" synth "$SRC" --top "$TOP" --workdir "$d/w" --emit-dir verilog:"$d/net/" \
       --set synth.liberty="$LIB" --set synth.timing=false \
-      --set compile.specialize_modules=false --set synth.state_sweep=false --set synth.merge_registers=false -q --result-json "$d/r.json" "$@" -- -GSTUB="$stub" \
+      --set synth.flat_sweep=false --set compile.specialize_modules=false --set synth.state_sweep=false --set synth.merge_registers=false -q --result-json "$d/r.json" "$@" -- -GSTUB="$stub" \
       || fail "synth STUB=$stub $* -> $(cat "$d/r.json" 2>/dev/null)"
 }
 

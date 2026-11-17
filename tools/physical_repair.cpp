@@ -629,23 +629,6 @@ int main(int argc, char** argv) {
         }
       }
     }
-    boolean_option("remainder_warpspace", options.terminal_legalize_options.remainder_warp.enabled);
-    number_option("remainder_warp_weight", options.terminal_legalize_options.remainder_warp.weight);
-    number_option("remainder_warp_seconds", options.terminal_legalize_options.remainder_warp.seconds);
-    sat_limit("remainder_warp_bins", options.terminal_legalize_options.remainder_warp.bins);
-    boolean_option("fp_warpspace", options.fp_warp.enabled);
-    boolean_option("macro_warpspace", options.macro_warp.enabled);
-    boolean_option("macro_warp_once_after_density", options.macro_warp.once_after_density);
-    sat_limit("fp_warp_bins", options.fp_warp.bins);
-    sat_limit("macro_warp_bins", options.macro_warp.bins);
-    sat_limit("fp_warp_iterations", options.fp_warp.iterations);
-    sat_limit("macro_warp_iterations", options.macro_warp.iterations);
-    sat_limit("macro_warp_updates", options.macro_warp.updates);
-    number_option("fp_warp_weight", options.fp_warp.weight);
-    number_option("macro_warp_weight", options.macro_warp.weight);
-    number_option("fp_warp_seconds", options.fp_warp.seconds);
-    number_option("macro_warp_seconds", options.macro_warp.seconds);
-    number_option("macro_warp_warmup", options.macro_warp.warmup);
     // macro.anchor: legalized-target soft anchors inside macro GP (pass/place/macro_anchor.hpp); opt-in.
     boolean_option("macro_anchor", options.macro_anchor.enabled);
     number_option("macro_anchor_weight", options.macro_anchor.weight);
@@ -1131,16 +1114,19 @@ int main(int argc, char** argv) {
       const bool run_resize        = config.HasMember("resize") && config["resize"].GetBool();
       const auto timing_rounds     = config.HasMember("timing_rounds") ? config["timing_rounds"].GetUint() : 0;
       options.optimization_pending = run_resize || timing_rounds;
-      if (config.HasMember("virtual_timing")) {
-        throw std::invalid_argument("virtual_timing was removed; use resize with gp_resize for real GP buffer repair");
+      for (const char* removed : {"virtual_timing", "gp_resize", "gp_buffer_trials", "gp_buffer_margin"}) {
+        if (config.HasMember(removed)) {
+          throw std::invalid_argument(std::string(removed)
+                                      + " was removed with the GP-time buffer repair; resize runs after placement");
+        }
       }
-      options.gp_resize = run_resize && (!config.HasMember("gp_resize") || config["gp_resize"].GetBool());
-      integer_option("gp_buffer_trials", options.gp_buffer_trials);
-      if (config.HasMember("gp_buffer_margin")) {
-        options.gp_buffer_margin = config["gp_buffer_margin"].GetDouble();
+      for (const auto& member : config.GetObject()) {
+        if (std::string_view(member.name.GetString()).find("warp") != std::string_view::npos) {
+          throw std::invalid_argument(std::string(member.name.GetString()) + ": warpspace was removed");
+        }
       }
-      if (options.gp_resize) {
-        options.fp_evaluate = raw_evaluate;
+      if (run_resize) {
+        options.fp_evaluate = raw_evaluate;  // in-loop timing feeds the post-placement repair
       }
       int trace_interval = 0, stop_iteration = 0;
       integer_option("gp_trace_interval", trace_interval);

@@ -22,7 +22,8 @@ keep = root / 'other.json'
 keep.write_text('[{"class":"unrelated.pass","id":"keep","counter":9007199254740993}]')
 lib = Path('inou/lefdef/tests/data').resolve()
 args = ['lhd/lhd', 'synth', str(rtl), '--top', 'top', '-q']
-for setting in (f'synth.liberty={lib}/sky130hd.lib', f'synth.lef={lib}/sky130hd.tlef,{lib}/sky130hd.lef',
+# Chunk reuse needs two occurrences of the same mapped definition.
+for setting in ('synth.flat_sweep=false', f'synth.liberty={lib}/sky130hd.lib', f'synth.lef={lib}/sky130hd.tlef,{lib}/sky130hd.lef',
                 'compile.specialize_modules=true', 'synth.place=true', 'synth.place.fp=true',
                 'lhd.ram_budget_mb=0.38147', 'synth.place.utilization=0.15', 'synth.place.density=0.5',
                 'synth.place.iterations=12', 'synth.place.grid.density=8', 'synth.place.io_resynth=0',

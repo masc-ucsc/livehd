@@ -215,12 +215,19 @@ uint32_t Physical_ranker::resolve_label(const Pin_label& label) const {
       return netlist.pin(added->second, label.pin().view());
     }
   }
+  uint32_t cell = no_index;
   if (!names_) {
-    const auto cell = frozen_cells_.find(label.instance().str());
-    return cell == frozen_cells_.end() ? no_index : netlist.pin(cell->second, label.pin().view());
+    const auto frozen = frozen_cells_.find(label.instance().str());
+    cell              = frozen == frozen_cells_.end() ? no_index : frozen->second;
+  } else {
+    cell = names_->cell(label.instance().view());
   }
-  const auto cell = names_->cell(label.instance().view());
-  return cell == no_index ? no_index : netlist.pin(cell, label.pin().view());
+  if (cell != no_index) {
+    return netlist.pin(cell, label.pin().view());
+  }
+  // A memory macro pin is a boundary port named by its whole label (bind_graph).
+  const auto it = port_index_.find(label.str());
+  return it == port_index_.end() ? no_index : it->second;
 }
 
 void Physical_ranker::build_engine(const std::set<std::string>& cuts, const physical::Parasitics& rc) {

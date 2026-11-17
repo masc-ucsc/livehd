@@ -433,10 +433,6 @@ filegroup(
         "cell_criticality.hpp",
         "cell_jump.cpp",
         "cell_jump.hpp",
-        "density_warp.cpp",
-        "density_warp.hpp",
-        "warpspace.cpp",
-        "warpspace.hpp",
         "color_centroids.cpp",
         "color_centroids.hpp",
         "h2d.cpp",
@@ -882,7 +878,6 @@ cc_library(
         ":handoff_pins",
         ":preroute_design",
         ":power_grid",
-        ":warpspace",
         ":rc_cache",
         ":prects_networks",
         ":satlegalize",
@@ -1140,7 +1135,7 @@ cc_library(
     hdrs = ["terminal_legalize.hpp"],
     copts = COPTS,
     visibility = ["//visibility:public"],
-    deps = [":capacity_bins", ":cell_criticality", ":row_occupancy", ":warpspace", ":prects_networks", ":satlegalize", ":sat_solver", "//core", "//inou/lefdef:inou_lefdef", "@dreamplace//dreamplace/native:placer", "@rapidjson"],
+    deps = [":capacity_bins", ":cell_criticality", ":row_occupancy", ":prects_networks", ":satlegalize", ":sat_solver", "//core", "//inou/lefdef:inou_lefdef", "@dreamplace//dreamplace/native:placer", "@rapidjson"],
 )
 cc_test(
     name = "terminal_legalize_test",
@@ -1278,30 +1273,6 @@ cc_test(
     srcs = ["routing_tracks_test.cpp"],
     copts = COPTS,
     deps = [":place", "@googletest//:gtest_main"],
-)
-
-cc_library(
-    name = "density_warp",
-    srcs = ["density_warp.cpp"],
-    hdrs = ["density_warp.hpp"],
-    copts = COPTS,
-    visibility = ["//visibility:public"],
-    deps = ["@highs//:highs"],
-)
-
-cc_library(
-    name = "warpspace",
-    srcs = ["warpspace.cpp"],
-    hdrs = ["warpspace.hpp"],
-    copts = COPTS,
-    deps = [":density_warp", "@dreamplace//dreamplace/native:placer", "@rapidjson"],
-)
-
-cc_test(
-    name = "warpspace_test",
-    srcs = ["warpspace_test.cpp"],
-    copts = COPTS,
-    deps = [":warpspace", "@googletest//:gtest_main"],
 )
 
 cc_library(

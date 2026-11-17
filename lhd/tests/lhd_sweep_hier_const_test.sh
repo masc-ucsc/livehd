@@ -2,7 +2,7 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #
 # compile.sweep + pass.specialize: a constant crosses REGISTERS without flattening. Fixture sweep_hier_const.v is a
-# three-stage chain of one module whose first instance is fed only by constants. By default only the first stage folds
+# three-stage chain of one module whose first instance is fed only by constants. With the flat sweep off, only the first stage folds
 # (its next state is a plain constant): the other two keep their 9 registers (18 flops). With compile.sweep the
 # specialization proves each following stage's registers constant in turn
 # (the per-definition state sweep inside the refold), publishes the constant outputs to the parent and finishes with
@@ -30,10 +30,10 @@ synth() { # <tag> [extra --set ...]
 }
 flops() { grep -h '^DFF' "$1" | wc -l | tr -d ' '; }
 
-synth off
+synth off --set synth.flat_sweep=false
 [ "$(flops "$W/off/net.v")" = 18 ] || fail "off: expected 18 flops (first stage folded), got $(flops "$W/off/net.v")"
 
-synth on --set compile.sweep=true
+synth on --set synth.flat_sweep=false --set compile.sweep=true
 [ "$(flops "$W/on/net.v")" = 0 ] || fail "on: expected no flop after the hierarchical constant sweep, got $(flops "$W/on/net.v")"
 
 # The mapper-private flat sweep must be reachable through both mapper APIs.

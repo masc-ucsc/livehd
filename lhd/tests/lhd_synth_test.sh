@@ -496,21 +496,15 @@ group_ram128() {
   p=$!
   run compile "$W/ram128_repro.sv" --top ram128_repro \
       --emit-dir lg:"$W/ram128_source" --workdir "$W/ram128_compile"
-  # No pass.abc.memory override: this must exercise the default lowering policy.
+  # No synth.memory override: this must exercise the default lowering policy (auto: both mappers lower a memory
+  # within synth.memory.max_bits).
   run synth lg:"$W/ram128_source" --top ram128_repro --set synth.liberty="$LIB" --set synth.mapper="$MAPPER" \
       --emit-dir lg:"$W/ram128_mapped" --emit verilog:"$W/ram128_mapped.v" \
       --workdir "$W/ram128_synth"
-  if [ "$MAPPER" = abc ]; then
-    [ "$(grep -c '^module cgen_memory_.*_blasted' "$W/ram128_mapped.v")" = 1 ] \
-        || fail "128-bit fixture must synthesize exactly one lowered memory"
-  else
-    # USYN keeps the memory a native barrier: ONE 1-read/2-write memory instance,
-    # nothing lowered, and the 38 pipeline-register bits as 38 mapped DFF cells
-    [ "$(grep -c '^cgen_memory_1rd_2wr ' "$W/ram128_mapped.v")" = 1 ] \
-        || fail "128-bit fixture must keep exactly one native 1rd/2wr memory: $(grep 'cgen_memory' "$W/ram128_mapped.v")"
-    ! grep -q '^module cgen_memory_.*_blasted' "$W/ram128_mapped.v" || fail "USYN lowered the native memory barrier"
-    [ "$(jeval "$RJ" 'u["totals"]["register_bits"]')" = 38 ] || fail "ram128: USYN must report the 38 pipeline register bits"
-    [ "$(grep -cE '^DFF[A-Za-z0-9]* ' "$W/ram128_mapped.v")" = 38 ] || fail "ram128: expected 38 mapped DFF cells"
+  [ "$(grep -c '^module cgen_memory_.*_blasted' "$W/ram128_mapped.v")" = 1 ] \
+      || fail "128-bit fixture must synthesize exactly one lowered memory ($MAPPER)"
+  ! grep -q '^cgen_memory_1rd_2wr ' "$W/ram128_mapped.v" || fail "ram128: the memory stayed native ($MAPPER)"
+  if [ "$MAPPER" = usyn ]; then
     ! grep -q 'always @' "$W/ram128_mapped.v" || fail "ram128: a register stayed a native flop"
   fi
   wait "$p" || exit 1

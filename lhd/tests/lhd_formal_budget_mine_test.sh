@@ -9,7 +9,7 @@
 #     depth. The whole run stays near ONE budget.
 #   * SOFT-budget reporting: `timeout` is a target, not a cap, so a run that
 #     overshoots must say by how much, over how many units, and how many ran on
-#     the explicitly selected `formal.min_timeout` floor.
+#     the explicitly selected `the per-unit min_timeout` floor.
 #   * spec_mining_timeout timeout-core diagnosis: under an INDEPENDENT spec_mining_timeout budget a
 #     timed-out run NAMES the toxic obligation subset ("spec_mining_timeout core (k/n ...)").
 #   * A budget-limited run is TIMEOUT-time: exit 0 plus a formal-timeout-time
@@ -51,7 +51,7 @@ start=$(date +%s)
 # on the same solver result avoids repeatedly waiting on the deliberately hard
 # multiplier identities.
 "$LHD" formal verify "$W/hard2.prp" --top hard2 --set formal.engine=bmc \
-  --set formal.bound=2 --set formal.timeout=1 --set formal.min_timeout=1 \
+  --set formal.bound=2 --set formal.timeout=1 \
   --set formal.spec_mining_timeout=1 --set formal.split=none \
   --workdir "$W/budget" >"$W/budget.out" 2>&1
 rc=$?

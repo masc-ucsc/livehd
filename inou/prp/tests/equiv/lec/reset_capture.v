@@ -1,5 +1,5 @@
 /*
-:lec_set: formal.engine=bmc formal.min_timeout=1 formal.simfail=false
+:lec_set: formal.engine=bmc formal.simfail=false
 A single-clock reset prologue. `busy` has a synchronous reset; `data` has
 none and loads whenever `busy` is set, INCLUDING the first reset cycle, when
 `busy` still holds its arbitrary power-on value. After reset `data` keeps

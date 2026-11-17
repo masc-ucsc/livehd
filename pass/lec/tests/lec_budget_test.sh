@@ -9,7 +9,7 @@
 # time, without summing their solve times. A fast, genuinely-equivalent hierarchy must still
 # PROVE under the scheduler (no regression).
 #
-# `timeout` is a SOFT target: `formal.min_timeout` is the floor every def gets even
+# `timeout` is a SOFT target: `the per-unit min_timeout` is the floor every def gets even
 # once the total is spent, so raising it BUYS verdicts by overshooting. The
 # `floor` mode pins that tradeoff in both directions; Bazel schedules it as the
 # separate lec_min_timeout_test so neither intentional timeout chain dominates.
@@ -24,7 +24,7 @@
 # `formal.lec.int_blast=auto` re-solves every solver-give-up Unknown as unbounded
 # integers at the min_timeout budget (base + step again), and that leg runs INSIDE
 # the def's timing, so it draws the budget down like any other solve. That is why
-# min_timeout is pinned to 1 here and why the window bound below is what it is.
+# the per-unit floor is a fixed 1 s and why the window bound below is what it is.
 #
 # Timing claims are asserted on the run's OWN accounting (the `Ns actual` in its
 # budget report = the DAG dispatch window), never on the shell's `date` delta: the
@@ -139,7 +139,7 @@ run_lec() {  # $1=tag $2=basename $3=formal.timeout $4=outer_kill_s; $5.. = extr
 #    moved to 20s (2026-07-28): four defs drawing a 20s floor turns a ~10s case
 #    into minutes and blows the `< 12s` window assertion below.
 if [ "$MODE" != floor ]; then
-run_lec wall wide 2 30 --set formal.min_timeout=1
+run_lec wall wide 2 30
 # MATCHED/TRUSTED are verdicts too, not skips — and under the top-down order
 # (default) the top can settle via semdiff with its children BOXED, which is a
 # real (conditional) verdict and exactly the cheap path this scheduler wants.
@@ -195,7 +195,7 @@ fi
 
 # 3) A per-unit floor cannot extend proof mode's shared wall deadline.
 if [ "$MODE" != budget ]; then
-run_lec base hard1 1 30 --set formal.min_timeout=1
+run_lec base hard1 1 30
 BASE_ACTUAL=${ACTUAL:-1}
 case "$VERDICT" in
   PROVEN-*) echo "FAIL: hard leaf under budget -> FALSE PROVEN ($VERDICT)"; fail=1 ;;
@@ -206,28 +206,11 @@ case "$VERDICT" in
              fi ;;
   *) echo "FAIL: floor A/B baseline -> '${VERDICT:-<none>}' rc=$RC (want TIMEOUT-*, rc 0): $(cat "$OUTFILE")"; fail=1 ;;
 esac
-run_lec floor hard1 1 30 --set formal.min_timeout=2
-FLOOR_ACTUAL=${ACTUAL:-1}
-if grep -qE "budget 1s target / [0-9]+s actual over [0-9]+ def\(s\) solved, [0-9]+ on the 2s floor" "$OUTFILE"; then
-  echo "ok: overrun reported ($(grep -oE 'budget 1s target[^\n]*' "$OUTFILE" | head -1))"
+if [ "${BASE_ACTUAL:-99}" -le 2 ] && [ "$ELAPSED" -lt 8 ]; then
+  echo "ok: the fixed 1s per-unit floor does not extend the 1s proof wall allowance"
 else
-  echo "FAIL: a run that overshot its soft budget must report target/actual/units/floored: $(cat "$OUTFILE")"; fail=1
+  echo "FAIL: the per-unit floor extended the proof deadline (${BASE_ACTUAL:-<none>}s proof, ${ELAPSED}s end-to-end)"; fail=1
 fi
-if [ "${FLOOR_ACTUAL:-99}" -le 2 ] && [ "$ELAPSED" -lt 8 ]; then
-  echo "ok: min_timeout=2 does not extend the 1s proof wall allowance"
-else
-  echo "FAIL: min_timeout extended the proof deadline (${FLOOR_ACTUAL:-<none>}s proof, ${ELAPSED}s end-to-end)"; fail=1
-fi
-# A bigger floor must still not turn an unprovable hierarchy into a false PROVEN.
-case "$VERDICT" in
-  PROVEN-*) echo "FAIL: hard hierarchy with a bigger floor -> FALSE PROVEN ($VERDICT)"; fail=1 ;;
-  TIMEOUT-*) if [ "$RC" -eq 0 ]; then
-               echo "ok: bigger floor keeps the sound verdict ($VERDICT)"
-             else
-               echo "FAIL: bigger floor -> $VERDICT but rc=$RC (want 0)"; fail=1
-             fi ;;
-  *) echo "FAIL: bigger floor -> '${VERDICT:-<none>}' rc=$RC (want TIMEOUT-*, rc 0): $(cat "$OUTFILE")"; fail=1 ;;
-esac
 fi
 
 if [ $fail -ne 0 ]; then echo "lec_budget_test: FAILED"; exit 1; fi

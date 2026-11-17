@@ -7,22 +7,6 @@ load("@rules_python//python:defs.bzl", "py_binary")
 
 load("//tools:copt_default.bzl", "COPTS")
 
-cc_binary(
-    name = "warpspace",
-    srcs = ["warpspace.cpp"],
-    copts = COPTS,
-    deps = ["//pass/place:density_warp", "@zlib//:zlib", "@rapidjson"],
-)
-
-py_test(
-    name = "warpspace_smoke",
-    srcs = ["warpspace_smoke.py"],
-    args = ["$(location :warpspace)"],
-    data = [":warpspace"],
-    legacy_create_init = 0,
-    timeout = "short",
-)
-
 # Talks to a running `lhd synth --gui` over its local Unix socket (an assistant's channel into the visualization).
 py_binary(
     name = "lhd_gui",

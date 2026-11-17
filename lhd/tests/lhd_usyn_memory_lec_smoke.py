@@ -62,7 +62,7 @@ subprocess.run([lhd, 'pass', 'liberty', 'gensim', str(root / 'seq.lib'), '--emit
                 str(root / 'gensim'), '-q'], check=True, capture_output=True, timeout=20)
 
 USYN = ['--set', 'synth.mapper=usyn', '--set', 'pass.usyn.clock_phases=1', '--set', 'pass.usyn.tmap=abc', '--set',
-        'pass.usyn.tmap_trials=1']
+        'pass.usyn.tmap_trials=1', '--set', 'synth.memory=macro']  # the native memory block is the subject
 DOMINO = ['--set', 'pass.usyn.physical=domino_provisional', '--set', 'pass.usyn.domino_select=all']
 PLACE = ['--set', 'synth.place=true', '--set', 'synth.place.timing_driven=false', '--set', 'synth.place.iterations=80',
          '--set', 'synth.place.grid.density=8', '--set', 'synth.place.stage_timing=true']
@@ -128,7 +128,8 @@ lec('dmem', work, 'memreg')
 
 # C: the domino profile, placed: enable, synchronous resets on RST, a folded
 # Liberty clock gate; each converted instance is named after its state.
-work, qor, netlist = synth('dregs', 'regs', *DOMINO, *PLACE)
+# Preserve the child definition to exercise placement's hierarchy flattening.
+work, qor, netlist = synth('dregs', 'regs', *DOMINO, *PLACE, '--set', 'synth.flat_sweep=false')
 physical = qor['usyn']['physical']
 converted = {e['name'] for r in physical['regions'] for e in r['endpoints'] if e['decision'] == 'domino'}
 assert {'rd[0]', 'q2[0]', 'q3', 'u0.q[0]'} <= converted, converted

@@ -1,6 +1,6 @@
 /*
 :lec_top: cdc
-:lec_set: formal.engine=bmc formal.min_timeout=1 formal.simfail=false
+:lec_set: formal.engine=bmc formal.simfail=false
 A toggle-pulse clock-domain crossing. `_1` stores src_level complemented under
 the same register name and folds its synchronous reset into the next-state
 logic. The after_reset prologue starts before reset has reached src_level, and

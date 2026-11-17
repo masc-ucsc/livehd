@@ -63,7 +63,7 @@ map_design() {
   local r="$d/r.json"
   run() { "$LHD" "$@" -q --result-json "$r" || fail "$* -> $(cat "$r" 2>/dev/null)"; }
   run pass color synth --top membank.membank lg:"$d/lg" --workdir "$d/w2"
-  run pass abc --top membank.membank lg:"$d/lg" --emit-dir lg:"$d/net" --set synth.liberty="$lib" --set pass.abc.memory=true \
+  run pass abc --top membank.membank lg:"$d/lg" --emit-dir lg:"$d/net" --set synth.liberty="$lib" --set synth.memory=flops \
       --emit diagnostics:"$d/diag.jsonl" --workdir "$d/w3" "$@"
   ! grep -q '"code":"memory-unlowered"' "$d/diag.jsonl" || fail "$d: memory was NOT bit-blasted: $(grep memory-unlowered "$d/diag.jsonl")"
   run pass liberty gensim "$lib" --emit-dir lg:"$d/models" --workdir "$d/w5"
@@ -194,7 +194,7 @@ mrun compile "$MULTI_SRC" --reader slang --top membank_multi \
     --emit-dir lg:"$M/lg" --workdir "$M/w1"
 mrun pass color synth --top membank_multi.membank_multi lg:"$M/lg" --workdir "$M/w2"
 mrun pass abc --top membank_multi.membank_multi lg:"$M/lg" --emit-dir lg:"$M/net" \
-    --set synth.liberty="$LIB" --set pass.abc.memory=true --workdir "$M/w3"
+    --set synth.liberty="$LIB" --set synth.memory=flops --workdir "$M/w3"
 mrun pass liberty gensim "$LIB" --emit-dir lg:"$M/models" --workdir "$M/w4"
 "$LHD" lec --set formal.effort=proof --impl lg:"$M/net" --ref lg:"$M/lg" --lib lg:"$M/models" \
     --top membank_multi.membank_multi --workdir "$M/wlec" \

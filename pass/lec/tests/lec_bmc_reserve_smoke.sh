@@ -27,7 +27,9 @@ with (w/'compile.log').open('w') as log:
 env=dict(os.environ,LHD_LEC_RACER_STALL_S='60',LHD_LEC_RACER_STALL_ONLY='0')
 for tag,impl,verdict in [('equal','ref.v','proven-bounded'),('bug','bad.v','refuted-cex')]:
  cmd=[lhd,'lec','--set','formal.effort=proof','--ref',str(w/'ref.v'),'--impl',str(w/impl),'--top','top','--lib',f'lg:{w}/models','--workdir',str(w/tag),'--result-json',str(w/(tag+'.json'))]
- for setting in ['formal.lec.semdiff=none','lhd.jobs=2','formal.timeout=2','formal.min_timeout=1','formal.lec.int_blast=off','formal.simfail_run=false']:
+ # Test the solver's reserved budget, not counterexample testbench generation:
+ # simfail_run=false still recompiles both inputs to emit the Pyrope replay.
+ for setting in ['formal.lec.semdiff=none','lhd.jobs=2','formal.timeout=2','formal.lec.int_blast=off','formal.simfail=false']:
   cmd+=['--set',setting]
  start=time.monotonic()
  with (w/(tag+'.log')).open('w') as log:

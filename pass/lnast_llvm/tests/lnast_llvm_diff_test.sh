@@ -17,7 +17,7 @@ RUN="$(cd "$(dirname "pass/lnast_llvm/lnast_llvm_run")" && pwd)/lnast_llvm_run"
 SRC="$(cd pass/lnast_llvm/tests && pwd)"
 W="${TEST_TMPDIR:-/tmp/lnast_llvm_diff_$$}"
 CYCLES=96
-JOBS=8
+JOBS=4
 mkdir -p "$W"
 
 # one_design NAME KIND: KIND is `sv` (SystemVerilog source) or `prp` (Pyrope source; these are also
@@ -103,7 +103,14 @@ reap() {  # wait for the oldest running design
   pids=("${pids[@]:1}")
   names=("${names[@]:1}")
 }
+# Bazel shards (shard_count in BUILD): shard i of n takes every n-th design.
+SHARD="${TEST_SHARD_INDEX:-0}"
+SHARDS="${TEST_TOTAL_SHARDS:-1}"
+[ -n "${TEST_SHARD_STATUS_FILE:-}" ] && touch "$TEST_SHARD_STATUS_FILE"
+index=0
 for entry in $(for s in $SV; do echo "$s:sv"; done) $(for p in $PRP; do echo "$p:prp"; done); do
+  index=$((index + 1))
+  [ $(((index - 1) % SHARDS)) -eq "$SHARD" ] || continue
   design=${entry%%:*}
   kind=${entry##*:}
   one_design "$design" "$kind" &

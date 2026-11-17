@@ -66,12 +66,17 @@ public:
       }
     }
     // The cells.
-    std::vector<hhds::Node_class> cells;
+    std::vector<hhds::Node_class> cells, memories;
     for (auto node : flat_.body().nodes(hhds::Node_order::forward)) {
       if (node.get_debug_nid() == hhds::Graph::INPUT_NODE || node.get_debug_nid() == hhds::Graph::OUTPUT_NODE) {
         continue;
       }
       const auto op = gu::type_op_of(node);
+      if (op == Ntype_op::Memory) {
+        memories.push_back(node);
+        ++out_.memory_nodes;
+        continue;
+      }
       if (op != Ntype_op::Sub) {
         if (op != Ntype_op::Get_mask && op != Ntype_op::Set_mask && op != Ntype_op::Concat && op != Ntype_op::And
             && op != Ntype_op::Or && op != Ntype_op::SHL && op != Ntype_op::SRA && op != Ntype_op::Sext) {
@@ -121,6 +126,37 @@ public:
         continue;
       }
       connect(pin.get_driver_pins(), output.bit, netlist.pin(output.cell, 0u), output.name);
+    }
+    // Memory endpoints: every runtime bit a memory samples (address, write data, enable, whole-array update,
+    // its enable and the reset), checked like an output with no delay. A constant bit has nothing to check.
+    for (const auto& node : memories) {
+      for (auto sink : node.inp_sorted_pins()) {
+        const auto off = sink.get_port_id() % Ntype::Memory_port_stride;
+        if (off != 0 && off != 3 && off != 4 && off != 12 && off != 13 && off != 14) {
+          continue;
+        }
+        const auto drivers = sink.get_driver_pins();
+        if (drivers.size() != 1 || drivers.front().is_const()) {
+          continue;
+        }
+        const int bits = std::max(1, gu::bits_of(drivers.front()));
+        for (int b = 0; b < bits; ++b) {
+          Terminal terminal;
+          try {
+            terminal = resolve(drivers.front(), b, 0);
+          } catch (const std::exception&) {
+            ++out_.unresolved_sinks;
+            continue;
+          }
+          if (terminal.kind != Terminal::Kind::driver) {
+            continue;
+          }
+          const auto cell
+              = netlist.add_output_port(std::format("{}:in_{}[{}]", std::string(node.get_name()), sink.get_port_id(), b));
+          out_.cell_node.emplace_back();
+          netlist.connect(terminal.pin, netlist.pin(cell, 0u));
+        }
+      }
     }
     netlist.finalize();
     if (out_.constant_sinks != 0) {
@@ -214,6 +250,8 @@ private:
       if (b >= width) {
         // Past the declared width the value extends; a signed pin repeats its top bit.
         out = gu::is_unsign(pin) ? Terminal{Terminal::Kind::constant, no_index, false} : resolve(pin, width - 1, depth + 1);
+      } else if (op == Ntype_op::Memory) {
+        out = {Terminal::Kind::driver, memory_start(node, pin, b), false};
       } else if (op == Ntype_op::Get_mask || op == Ntype_op::Set_mask) {
         const auto range = gu::bit_range(node);
         if (!range) {
@@ -300,6 +338,19 @@ private:
     busy_.erase(key);
     memo_.emplace(key, out);
     return out;
+  }
+
+  // The start point of one read-data bit of a memory: an input port cell, made on first use.
+  uint32_t memory_start(const hhds::Node_class& node, const hhds::Pin_class& pin, int b) {
+    auto name = std::format("{}:out_{}[{}]", std::string(node.get_name()), pin.get_port_id(), b);
+    if (const auto found = input_bit_.find(name); found != input_bit_.end()) {
+      return found->second;
+    }
+    const auto cell = out_.netlist->add_input_port(name);
+    out_.cell_node.emplace_back();
+    const auto start = out_.netlist->pin(cell, 0u);
+    input_bit_.emplace(std::move(name), start);
+    return start;
   }
 
   const hhds::Graph&                                      flat_;
