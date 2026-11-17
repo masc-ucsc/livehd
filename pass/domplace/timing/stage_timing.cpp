@@ -636,6 +636,7 @@ Stage_timing evaluate_stage_timing(const hhds::Graph& graph, const physical::Par
   text(w, "timer", "native_late_proxy");
   text(w, "netlist", options.netlist);
   text(w, "generation", std::format("{:016x}", options.model_generation));
+  real(w, "output_load_ff", options.output_load_ff);
   w.Key("units");
   w.StartObject();
   text(w, "time", "ps");
@@ -1098,6 +1099,7 @@ Stage_timing Stage_timer::evaluate(const hhds::Graph& graph, const physical::Par
     options.netlist = kWordPortNetlist;
   }
   options.model_generation = generation_;
+  options.output_load_ff   = inputs_.output_load_ff;
   if (inputs_.technology) {
     options.dbu = inputs_.technology->dbu;
   }
