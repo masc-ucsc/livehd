@@ -163,10 +163,24 @@ TEST(MacroEdgeSnap, PinnedFacePushBackRespectsTheFarSide) {
   limits.halo_x = limits.halo_y = 5;
   limits.space_x = limits.space_y = 12;
   limits.pin_edge_x = limits.pin_edge_y = 20;
-  // The pinned macro has a neighbor at its far side: moving 15 would break the 12 channel to it, so it stays.
+  // The pinned macro has a FIXED neighbor at its far side: moving 15 would break the 12 channel to it, so it stays.
   auto pinned      = box(5, 100, 50, 50);
   pinned.pin_faces = 1;
   std::vector<pl::Edge_object> objects{pinned, box(5 + 50 + 12, 100, 50, 50, /*movable=*/false)};
   pl::snap_macros_to_edges(objects, limits);
   EXPECT_EQ(objects[0].xl, 5);
+}
+
+TEST(MacroEdgeSnap, PinnedFacePushBackCascadesThroughMovableMacros) {
+  auto limits   = core(50);
+  limits.halo_x = limits.halo_y = 5;
+  limits.space_x = limits.space_y = 12;
+  limits.pin_edge_x = limits.pin_edge_y = 20;
+  // A row: the pinned macro at the halo, a movable neighbor one channel to its right. Both shift right by 15.
+  auto pinned      = box(5, 100, 50, 50);
+  pinned.pin_faces = 1;
+  std::vector<pl::Edge_object> objects{pinned, box(5 + 50 + 12, 100, 50, 50)};
+  pl::snap_macros_to_edges(objects, limits);
+  EXPECT_EQ(objects[0].xl, 20);
+  EXPECT_EQ(objects[1].xl, 20 + 50 + 12);
 }

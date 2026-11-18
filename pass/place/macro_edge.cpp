@@ -2,6 +2,7 @@
 #include "macro_edge.hpp"
 
 #include <algorithm>
+#include <functional>
 #include <numeric>
 #include <optional>
 #include <stdexcept>
@@ -78,9 +79,40 @@ std::vector<int64_t> snap_axis(std::vector<Edge_object>& objects, bool x_axis, c
     return (o.pin_faces & face) != 0 ? pin_edge : halo;
   };
   // Push-back: a movable macro whose pinned face sits closer to its core edge than pin_edge moves away from the edge
-  // to that clearance when nothing is in the way on the far side (farthest macros first, so a nearer one sees the
-  // ones already moved). Movable standard cells are not obstacles: they are legalized afterwards.
+  // to that clearance. A movable macro in the way on the far side is pushed along by the same amount (a cascade along
+  // the axis, keeping every macro channel); a fixed obstacle or the opposite core edge stops it and the whole cascade
+  // is rolled back. Movable standard cells are not obstacles: they are legalized afterwards.
   if (pin_edge > halo) {
+    std::function<bool(size_t, int64_t, bool, int)> push = [&](size_t i, int64_t new_lo, bool low, int depth) -> bool {
+      const auto s   = span_of(objects[i]);
+      const auto len = s.hi - s.lo;
+      if (depth > 64 || (low ? new_lo + len > core_hi - halo : new_lo < core_lo + halo)) {
+        return false;
+      }
+      for (size_t j = 0; j < n; ++j) {
+        if (j == i) {
+          continue;
+        }
+        const auto o   = span_of(objects[j]);
+        const auto gap = objects[j].macro ? cross : cross_h;
+        if (!(o.a < s.b + gap && s.a < o.b + gap) || (low ? o.lo < s.hi : o.hi > s.lo)) {
+          continue;  // clear across the axis, or not on the far side
+        }
+        const auto need = objects[j].macro ? space : halo;
+        if (low ? o.lo >= new_lo + len + need : o.hi <= new_lo - need) {
+          continue;
+        }
+        if (!objects[j].macro || !objects[j].movable) {
+          return false;
+        }
+        const auto j_lo = admissible(objects[j], axis, low ? new_lo + len + need : new_lo - need - (o.hi - o.lo), low, core_lo, l.grid);
+        if (!j_lo || !push(j, *j_lo, low, depth + 1)) {
+          return false;
+        }
+      }
+      set_lo(objects[i], new_lo);
+      return true;
+    };
     for (int side = 0; side < 2; ++side) {
       const bool          low = side == 0;
       std::vector<size_t> order;
@@ -103,36 +135,27 @@ std::vector<int64_t> snap_axis(std::vector<Edge_object>& objects, bool x_axis, c
         }
         const auto len    = s.hi - s.lo;
         const auto target = admissible(objects[i], axis, low ? core_lo + clear : core_hi - clear - len, low, core_lo, l.grid);
-        if (!target) {
+        if (!target || (low ? *target <= s.lo : *target >= s.lo)) {
           continue;
         }
-        // the far-side obstacle bound
-        bool fits = true;
-        for (size_t j = 0; j < n && fits; ++j) {
-          if (j == i) {
-            continue;
-          }
-          const auto o   = span_of(objects[j]);
-          const auto gap = objects[j].macro ? cross : cross_h;
-          if (!(o.a < s.b + gap && s.a < o.b + gap)) {
-            continue;
-          }
-          const auto need = objects[j].macro ? space : halo;
-          if (low ? o.lo >= s.hi - 0 && o.lo < *target + len + need : o.hi <= s.lo && o.hi > *target - need) {
-            fits = false;
-          }
+        std::vector<int64_t> before(n);
+        for (size_t j = 0; j < n; ++j) {
+          before[j] = span_of(objects[j]).lo;
         }
-        if (!fits || (low ? *target + len > core_hi - halo : *target < core_lo + halo)) {
+        if (!push(i, *target, low, 0)) {
+          for (size_t j = 0; j < n; ++j) {
+            set_lo(objects[j], before[j]);
+          }
           continue;
         }
-        const auto delta = low ? *target - s.lo : s.lo - *target;
-        if (delta <= 0) {
-          continue;
+        for (size_t j = 0; j < n; ++j) {
+          const auto now = span_of(objects[j]).lo;
+          if (now != before[j]) {
+            report.distance += std::abs(now - before[j]);
+            ++report.moves;
+            moved.push_back(static_cast<int64_t>(j));
+          }
         }
-        set_lo(objects[i], *target);
-        report.distance += delta;
-        ++report.moves;
-        moved.push_back(static_cast<int64_t>(i));
       }
     }
   }
