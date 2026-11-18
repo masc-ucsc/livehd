@@ -2114,6 +2114,20 @@ void Bitwidth::bw_pass(hhds::Graph* g) {
   discovered_some_backward_nodes_try_again = true;
   not_finished                             = false;
 
+  // Concat lane drivers whose STAMPED width already honours the lane window on entry (see the lane check below).
+  absl::flat_hash_set<hhds::Class_index> lane_stamp_fits;
+  for (auto node : g->body().nodes()) {
+    if (type_op_of(node) != Ntype_op::Concat) {
+      continue;
+    }
+    for (const auto& lane : livehd::graph_util::concat_lanes(node)) {
+      const auto stamped = lane.value.is_const() ? 0 : livehd::graph_util::bits_of(lane.value);
+      if (stamped > 0 && stamped <= lane.width) {
+        lane_stamp_fits.insert(lane.value.get_class_index());
+      }
+    }
+  }
+
   int  n_iterations = 0;
   auto gio          = g->get_io();
 
@@ -2433,6 +2447,44 @@ void Bitwidth::bw_pass(hhds::Graph* g) {
           bwmap.emplace(pin.get_class_index(), range);
           set_bits_sign(pin, range);
         });
+    // A lane driver whose stamp fit its window on entry but whose INFERRED width now exceeds it. The ranges
+    // here are a monotone over-approximation: a transient wide range (say a shift whose amount only collapsed to
+    // a constant in a later iteration) stays widened in every consumer, even though the folded graph's value
+    // fits the window. The window is the lane's declared field width, so the lane reads its driver through
+    // Get_mask(v, 0, window): a no-op when the value fits, the declared truncation when it does not. Same
+    // contract the e-graph keeps (Egraph lane_masked). A driver that was ALREADY too wide (or unstamped) on
+    // entry is a genuine violation and still reaches the error below.
+    {
+      std::vector<hhds::Node_class> concats;
+      for (auto node : g->body().nodes()) {
+        if (type_op_of(node) == Ntype_op::Concat) {
+          concats.push_back(node);
+        }
+      }
+      for (auto node : concats) {
+        const auto lanes = livehd::graph_util::concat_lanes(node);
+        for (size_t li = 0; li < lanes.size(); ++li) {
+          const auto& lane = lanes[li];
+          if (lane.value.is_const() || livehd::graph_util::concat_lane_fits(lane) || !lane_stamp_fits.contains(lane.value.get_class_index())) {
+            continue;
+          }
+          const auto lane_pid = static_cast<hhds::Port_id>(2 * li);
+          for (const auto& sink : node.inp_sorted_pins()) {
+            if (sink.get_port_id() != lane_pid) {
+              continue;
+            }
+            auto masked = livehd::graph_util::create_get_mask(*g, lane.value, 0, lane.width).create_driver_pin(0);
+            livehd::graph_util::set_ubits(masked, lane.width);
+            Bitwidth_range range;
+            range.set_ubits_range(lane.width);
+            bwmap.insert_or_assign(masked.get_class_index(), range);
+            sink.del_sink(lane.value);
+            masked.connect_sink(sink);
+            break;
+          }
+        }
+      }
+    }
     for (auto node : g->body().nodes()) {
       if (type_op_of(node) != Ntype_op::Concat) {
         continue;

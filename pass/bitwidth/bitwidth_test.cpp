@@ -1295,6 +1295,28 @@ TEST(BitwidthInfer, OversizedConcatLaneReportsError) {
   EXPECT_THROW((void)run_and_read_driver(g, concat), std::runtime_error);
 }
 
+// A lane driver whose STAMP honours its window but whose inferred range is wider (a sum stamped at the lane
+// width: the real value fits, the monotone range does not know) is read through Get_mask(v, 0, window) instead of
+// failing the Concat contract. A driver that was already too wide on entry still reports the error (test above).
+TEST(BitwidthInfer, StampedLaneDriverWiderByInferenceIsMasked) {
+  namespace gu = livehd::graph_util;
+  auto g       = bounded_inputs("bw_concat_stamped_lane", 8, 8);
+  auto sum     = gu::create_typed_node(*g, Ntype_op::Sum);
+  g->get_input_pin("a").connect_sink(gu::setup_sink_pid(sum, 0));
+  g->get_input_pin("b").connect_sink(gu::setup_sink_pid(sum, 0));
+  auto sum_out = sum.create_driver_pin(0);
+  gu::set_ubits(sum_out, 8);  // declared to fit the 8-bit window; inference says 9
+  auto concat = gu::create_typed_node(*g, Ntype_op::Concat);
+  sum_out.connect_sink(gu::setup_sink_pid(concat, 0));
+  gu::create_const(*g, *Dlop::create_integer(8)).connect_sink(gu::setup_sink_pid(concat, 1));
+  concat.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
+  EXPECT_NO_THROW((void)run_and_read_driver(g, concat));
+  const auto lanes = gu::concat_lanes(concat);
+  ASSERT_EQ(lanes.size(), 1u);
+  EXPECT_TRUE(gu::concat_lane_violation(lanes).empty());
+  EXPECT_EQ(gu::type_op_of(lanes.front().value.get_master_node()), Ntype_op::Get_mask) << "the lane reads its driver through a window mask";
+}
+
 TEST(BitwidthMasks, DropsOnlyFiniteLowMaskIdentities) {
   namespace gu = livehd::graph_util;
   int id       = 0;
