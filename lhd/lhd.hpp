@@ -955,9 +955,9 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      "auto",
      Synth_set_option::Kind::file,
      "with a technology profile that cuts placement rows around macros at handoff (asap7: 2 um, OpenROAD tapcell "
-     "MACRO_ROWS_HALO), macro-to-macro spacing across the rows is at least 2x that halo plus this usable strip, so the "
+     "MACRO_ROWS_HALO), macro-to-macro spacing on both axes is at least 2x that halo plus this usable strip, so the "
      "channel rows left downstream can hold CTS and repair buffers (half of it remains between a macro and the core "
-     "edge): auto (twice the placement halo), 0 (off) or X microns; "
+     "edge): auto (twice the placement halo on that axis), 0 (off) or X microns; "
      "degrades to the plain spacing when the macros cannot fit the core"},
     {"place.macro.refine_rounds",
      "0",

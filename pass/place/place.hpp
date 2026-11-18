@@ -454,7 +454,7 @@ struct Options {
   std::optional<std::pair<double, double>> macro_edge_snap;
   bool macro_slivers = true;  // close macro slivers narrower than their clearance (macro_edge.hpp Edge_snap_limits::slivers)
   // macro.row_strip: with a technology profile whose handoff cuts rows around macros (Tech_profile::tap_row_halo),
-  // the macro-to-macro spacing across the rows (x) is at least 2 x that row halo plus this usable strip, so every
+  // the macro-to-macro spacing on both axes is at least 2 x that row halo plus this usable strip, so every
   // channel the downstream row cut leaves can hold the clock and repair buffers inserted after placement (a macro
   // keeps half the channel to the core edge, so half the strip remains there). Negative: auto (2 placement halos);
   // 0: off. Degrades to the plain spacing when the macros cannot fit.

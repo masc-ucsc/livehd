@@ -8280,9 +8280,9 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
                                                       : std::vector{requested_pdn_level(options)};
     v.pdn_ladder.clear();
     // macro.row_strip: a handoff that cuts rows tap_row_halo around each macro leaves channel - 2 x halo of row in a
-    // macro-to-macro channel across the rows; keep that strip at least row_strip wide (strongest levels first), and
+    // macro-to-macro channel; keep that strip at least row_strip wide on both axes (strongest levels first), and
     // fall back to the plain channels when the macros cannot fit with it.
-    int64_t row_floor_x = 0;
+    int64_t row_floor_x = 0, row_floor_y = 0;
     if (options.macro_row_strip != 0) {
       const ph::Tech_profile* profile = nullptr;
       try {
@@ -8291,8 +8291,14 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         profile = nullptr;  // an unregistered technology: no known handoff row cut
       }
       if (profile && profile->tap_row_halo > 0) {
-        const auto strip = options.macro_row_strip < 0 ? 2 * v.halo_x : channel_dbu(options.macro_row_strip, tech);
-        row_floor_x      = 2 * std::llround(profile->tap_row_halo * tech.dbu) + strip;
+        // across the rows (x) the strip must hold a buffer's width; along them (y) enough rows for the buffers the
+        // pins on both macro faces need (ORFS hold/repair buffers pile up in a 5-row channel)
+        const auto halo  = 2 * std::llround(profile->tap_row_halo * tech.dbu);
+        const auto strip = [&](int64_t placement_halo) {
+          return options.macro_row_strip < 0 ? 2 * placement_halo : channel_dbu(options.macro_row_strip, tech);
+        };
+        row_floor_x = halo + strip(v.halo_x);
+        row_floor_y = halo + strip(v.halo_y);
       }
     }
     const auto add_level = [&](Pg_macro_level level, int64_t x, int64_t y) {
@@ -8301,12 +8307,12 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       }
     };
     for (const int pass : {0, 1}) {
-      if (pass == 1 && row_floor_x == 0) {
+      if (pass == 1 && row_floor_x == 0 && row_floor_y == 0) {
         break;
       }
       for (const auto level : levels) {
         const auto [x, y] = macro_channel_at(tech, metal, v.pdn_rules, level);
-        add_level(level, pass == 0 && row_floor_x > 0 ? std::max(x, row_floor_x) : x, y);
+        add_level(level, pass == 0 ? std::max(x, row_floor_x) : x, pass == 0 ? std::max(y, row_floor_y) : y);
       }
     }
     v.pdn_attempts.clear();
