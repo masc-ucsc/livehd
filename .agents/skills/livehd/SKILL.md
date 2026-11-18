@@ -1,20 +1,23 @@
 ---
 name: livehd
-description: Use the LiveHD CLI for synthesis, simulation, equivalence and timing analysis, or to explore and optimize macro floorplans with the placement GUI or agent socket.
+description: Use the LiveHD CLI for synthesis, simulation, equivalence, timing analysis, incremental pre-CTS chunk placement, and interactive floorplan editing through the GUI or agent socket.
 ---
 
 # LiveHD
 
 Use `lhd help <command>` for the current build’s accepted arguments. For incremental builds, proof verdicts and critical-path queries, see the [CLI reference](lhd.md): result contract, sim/formal/lec/synth/STA workflows and triage.
 
-## Explore a floorplan
+## Plan and place by chunk
 
-The agent socket of `lhd synth --gui` (how to start it, the `tools/lhd_gui.py` client, command groups, exporting collaterals): [agent_socket.md](agent_socket.md).
+Use `lhd synth chunk init` with the design's synthesis recipe and worker memory budget to create the initial `fp_plan`. Add `--gui` to pause there. Humans and agents can preview, apply and undo member transfers, splits, joins and shape changes in the same session. Use `chunk_edit` at the live floorplan gate for these edits. [GUI and agent socket](agent_socket.md)
 
+After accepting the plan, use `chunk list` and `show` to select physical chunk IDs, then run `macro` and `final` on the selected chunks. `chunk gui` opens the worker controls. Use `chunk update` after source changes or `chunk update --gui` to reopen the editor. [Chunk workflow and shared IO](lhd.md#pre-cts-chunk-placement)
+
+## Explore macro poses in whole-design placement
 
 1. Start the design’s existing synthesis recipe with `--set synth.place=true --gui --set synth.place.gui.pause=true`. At a stable gate, inspect `hello`, `state` and the macro inventory.
    - Check units, pin access, floorplan exclusions and clock constraints.
-   - Check movability per gate. Macros are movable early (`fp`, `macro`) and fixed once placed (`final`, `legalize`, `edit`). A placed macro moves only through `macro_move`, which restarts the flow.
+   - Check movability per gate. At the chunk floorplan gate, each color or macro is a coarse member of a physical home. In the macro placement phase, inspect each macro’s movability before requesting a pose edit. Macros are fixed during final placement. A placed macro moves only through `macro_move`, which restarts the flow.
    - `allowed_orientations` lists what the solver may choose, and a fixed node reports only `N`. `macro_move orientation=` can still mirror a synthetic memory proxy.
    - Read the connected pins per side from `geometry` (`pin_access_proxy`). Use the router’s actual track grid before saving exact poses; a legal row placement alone does not prove a macro pin is reachable. Keep the executable and physical inputs unchanged across replay. Run an empty patch from the same baseline at the fidelity you plan to compare.
 2. Give each candidate one hypothesis. For example, face two banks’ data pins toward their consumers, then check whether that shortens critical nets or crowds the channel between them. Inspect halo clearance, channel entrances, standard-cell occupancy and congestion alongside wirelength. A small gap between bodies can leave too little room for pin access or routing.
@@ -25,6 +28,6 @@ The agent socket of `lhd synth --gui` (how to start it, the `tools/lhd_gui.py` c
 4. **Spend more on survivors.** Use T2 when neighboring cells need to move. Bound the iterations and active region, include a halo, and keep exterior loads and obstacles in the evaluation. Freeze sizing, buffer edits and resynthesis while testing geometry. Use T3 to test a specific repair separately. Before routing, replay the saved macro poses with the normal whole-design placement budget and density grid. A legal but crowded short trial can fail to route at exactly the same macro coordinates. Use T4 to check applied poses, routed timing and DRC. If pins have no access point, look for the same instances in earlier legalization failures. Measure usable row area between the macro halo and the core edge. Compare it to nearby cell area after CTS and hold repair; even a channel with reachable pins can run out of sites for buffers. Use the IOs the downstream flow will keep. A row cut beneath a fixed macro blocks standard cells; consult its layer obstructions for routing. Preserve the channel’s track and row alignment when shifting neighbors, then recheck legalization after CTS and timing repair insert buffers.
 5. Compare the same gate, seed, scope, policy and estimator, within one session and build. A relaunch or rebuild can change the core outline and the baseline. A restart from the start (`checkpoint:-1`) also drops every `macro_move` pose. Repeat the unchanged reference to measure noise before reading small deltas. Check geometry on both frames. Compare worst and total negative slack (WNS/TNS) and failing endpoints by clock or path family under matching corners and endpoint coverage. A flat worst slack can hide many degraded paths. Label congestion estimates and placement-RC timing with their fidelity. Save the move patch and the measured deltas. For reuse across floorplan sizes, express the winning relationship as a named alignment, gap or pin-facing preference and remeasure it.
 
-Search coarse before fine, one factor per experiment: edge vs centre, grouping and shape, orientation, order along an edge, placed vs left to the placer. Prefer bounded T2 forks to restarts for edits the solver can apply. The full method is under *Efficient floorplan search* in [agent_socket.md](agent_socket.md).
+Search coarse before fine, one factor per experiment: edge vs centre, grouping and shape, orientation, order along an edge, placed vs left to the placer. Prefer bounded T2 forks to restarts for edits the solver can apply. Use the socket to inspect candidates and export the selected frame. [Agent socket reference](agent_socket.md)
 
 Save a chosen frame as design metadata. A clean run reads the same class-tagged record array beside the RTL: `livehd.placement.state` fixes the named macro poses, while `livehd.placement.hints` describes relationships that can adapt to a different core. Keep other passes’ records in the same bundle. Check the exported DEF and downstream database against the requested lower-left coordinates and orientations.

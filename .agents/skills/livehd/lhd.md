@@ -8,7 +8,7 @@ performance-related; `dbg` is several times slower.
 
 ## Contract
 
-- Deterministic. Exit 0 is a pass. The last stdout line is a JSON result
+- For native compile, simulation, proof and synthesis commands, exit 0 is a pass. The last stdout line is a JSON result
   object; on failure `error.class` says why (`usage`, `syntax`, `equiv_fail`,
   `unsupported`, `internal`, `config`, `missing_file`...). `--result-json FILE`
   writes it to a file: scripts should read that, not parse stdout.
@@ -124,6 +124,40 @@ region (`--set synth.mapper=abc|usyn`), then STA over a Liberty
   inside `W/synth` replays it: unchanged inputs mean no work and the stored
   report; any change re-runs incrementally. `--emit-dir lg:DIR` yields a
   netlist for STA, LEC and tool queries.
+
+### Pre-CTS chunk placement
+
+Start from the design's existing RTL, top, Liberty, LEFs, constraints and floorplan settings. `init` saves that recipe and exports one worker packet per physical chunk. The budget sizes chunks and applies to isolated workers. The producer still loads the flat design. Hierarchy order is the default. For a connectivity experiment, add `--set synth.place.chunk.connectivity=true` to `init`. It favors colors or macros sharing two-object nets. Use separate workdirs to compare budgets or packing choices.
+
+```sh
+lhd synth chunk init design.v --top top --workdir W --budget 1GiB \
+  --set synth.liberty=cells.lib --set synth.lef=tech.lef,cells.lef
+lhd synth chunk list --workdir W --json
+```
+
+Use an ID from `list` as `id` below. `show` returns neighboring IDs, ports with their `net_index` and die coordinates in DBU, and stage results.
+
+```sh
+lhd synth chunk show "$id" --workdir W
+lhd synth chunk list "$id" --neighbors --workdir W
+lhd synth chunk macro "$id" --neighbors --workdir W
+lhd synth chunk final "$id" --neighbors --workdir W
+```
+
+One ID runs one chunk. Several IDs run that set. `--neighbors` adds one hop of edge-sharing or overlapping homes. Explicit IDs rerun the selected jobs. Omitting IDs runs outstanding jobs. Final needs a successful, current macro result and fixes its hard macros. This workflow stops before CTS. Read `list --json` for per-stage status, positions, reports and worker peak RSS.
+
+After a source edit, `lhd synth chunk update --workdir W` replays the recipe and accepted plan guidance. Read the delta for added, removed, changed and reusable chunks. Use `--budget 512MiB` on update to resize the plan. To accept a measured shared contact after macro placement, use the chosen port's `net_index` as `net`.
+
+```sh
+lhd synth chunk move-io "$id" "$net" --from-macro --workdir W
+lhd synth chunk list --stage final --status stale --workdir W
+lhd synth chunk macro --workdir W
+lhd synth chunk final --workdir W
+```
+
+A contact change marks completed work stale on all incident chunks, including the source. A macro rerun also invalidates its previous final. Use `chunk gui --workdir W` to run selected workers and inspect placement feedback. To change the plan itself, use the [live floorplan editor](agent_socket.md).
+
+For pre-CTS QoR comparisons, score the same connected full design with the same clocks, libraries and RC. Request `--set synth.place.snapshots=true` at init to obtain `synth/place/chunk-plan.def`. Apply final worker positions by instance name before computing pin HPWL or STA. Local HPWL includes virtual boundary contacts. [Placement reference](../../../pass/place/README.md#color-and-macro-chunk-floorplan)
 
 ### Critical paths
 
