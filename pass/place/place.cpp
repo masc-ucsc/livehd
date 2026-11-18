@@ -589,7 +589,7 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
   if (o.macro_slivers) {
     h = hash_text("macro-slivers:v1", h);
   }
-  h = hash_text(std::format("macro-row-strip:v1:{}", o.macro_row_strip), h);
+  h = hash_text(std::format("macro-row-strip:v2:{}", o.macro_row_strip), h);
   if (o.macro_refine_rounds) {
     h = hash_text(std::format("macro-refine:{}:{}", o.macro_refine_rounds, o.macro_refine_iterations), h);
   }
@@ -1550,6 +1550,8 @@ struct View {
   // macro.edge_snap: resolved sliver limits (DBU, 0 = off) and what the snap did over the stage.
   int64_t                                       edge_snap_x = 0, edge_snap_y = 0;
   bool                                          sliver_snap = false;  // macro.slivers (Edge_snap_limits::slivers)
+  // macro.row_strip: core-edge clearance of a macro face with signal pins (Edge_snap_limits::pin_edge_x/y; 0: halo)
+  int64_t                                       pin_edge_x = 0, pin_edge_y = 0;
   // Native padding of a movable hard macro per side while macros are planned: the halo, or half the macro channel
   // rounded up to sites/rows when that is larger, so the native macro legalizer already keeps the channel.
   int64_t                                       plan_pad_x = 0, plan_pad_y = 0;
@@ -2674,6 +2676,8 @@ void snap_macros_to_core_edges(View& v, const ph::Technology& tech, dp::Design& 
   limits.max_gap_y  = std::max<int64_t>(0, v.edge_snap_y);
   limits.slivers    = v.sliver_snap;
   limits.grid       = channel_grid(tech);
+  limits.pin_edge_x = v.pin_edge_x;
+  limits.pin_edge_y = v.pin_edge_y;
   const auto report = snap_macros_to_edges(objects, limits);
   for (size_t j = 0; j < objects.size(); ++j) {
     physical.node_x[indexes[j]] = objects[j].xl;
@@ -8312,6 +8316,10 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         row_floor_y = halo + strip(v.halo_y);
       }
     }
+    // A pinned macro face against the core edge needs the same usable strip as a channel: half a channel there
+    // left vortex's hold buffers 2.7 um of row (DPL-0036 on 359 of them).
+    v.pin_edge_x = row_floor_x;
+    v.pin_edge_y = row_floor_y;
     const auto add_level = [&](Pg_macro_level level, int64_t x, int64_t y) {
       if (v.pdn_ladder.empty() || v.pdn_ladder.back().channel_x != x || v.pdn_ladder.back().channel_y != y) {
         v.pdn_ladder.push_back({level, x, y});

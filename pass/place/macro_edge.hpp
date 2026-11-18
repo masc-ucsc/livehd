@@ -27,6 +27,11 @@ struct Edge_snap_limits {
   // (a body gap under 2 * space to a macro, under 2 * halo to the core edge), anchored to the edge or not, unless both
   // facing faces carry signal pins. Such a sliver is too narrow for cells and only makes a routing bottleneck.
   bool slivers = false;
+  // Clearance to the core edge for a macro face that carries signal pins (0: the halo, as for any face). A
+  // downstream flow that cuts rows near macros (ORFS tapcell) leaves only clearance - row_halo of row there, and the
+  // hold/repair buffers those pins need pile up in it; a pinned face keeps a full channel instead, and a macro that
+  // sits closer is pushed back when the far side has room.
+  int64_t pin_edge_x = 0, pin_edge_y = 0;
 };
 struct Edge_snap_report {
   int64_t moved    = 0;  // macros displaced on at least one axis

@@ -138,3 +138,35 @@ TEST(MacroEdgeSnap, SliversLandOnTheTrackLattice) {
   EXPECT_EQ(objects[1].xl, 361);
   EXPECT_EQ((objects[1].xl - 1) % 4, 0);
 }
+
+TEST(MacroEdgeSnap, PinnedFaceKeepsAChannelToTheCoreEdge) {
+  auto limits   = core(50);
+  limits.halo_x = limits.halo_y = 5;
+  limits.space_x = limits.space_y = 12;
+  limits.pin_edge_x = limits.pin_edge_y = 20;  // a full channel for a face with signal pins
+  // Both start at the halo off the left edge; only the first has pins on its left face.
+  auto pinned      = box(5, 100, 50, 50);
+  pinned.pin_faces = 1;
+  auto plain       = box(5, 700, 50, 50);
+  // A pinned face 12 off the right edge (a sliver the snap would otherwise close to the halo).
+  auto right       = box(1000 - 12 - 50, 400, 50, 50);
+  right.pin_faces  = 2;
+  std::vector<pl::Edge_object> objects{pinned, plain, right};
+  pl::snap_macros_to_edges(objects, limits);
+  EXPECT_EQ(objects[0].xl, 20);        // pushed back to the pinned-face clearance
+  EXPECT_EQ(objects[1].xl, 5);         // an unpinned face keeps the halo
+  EXPECT_EQ(objects[2].xh, 1000 - 20);  // pushed back from the right edge too, never snapped to the halo
+}
+
+TEST(MacroEdgeSnap, PinnedFacePushBackRespectsTheFarSide) {
+  auto limits   = core(50);
+  limits.halo_x = limits.halo_y = 5;
+  limits.space_x = limits.space_y = 12;
+  limits.pin_edge_x = limits.pin_edge_y = 20;
+  // The pinned macro has a neighbor at its far side: moving 15 would break the 12 channel to it, so it stays.
+  auto pinned      = box(5, 100, 50, 50);
+  pinned.pin_faces = 1;
+  std::vector<pl::Edge_object> objects{pinned, box(5 + 50 + 12, 100, 50, 50, /*movable=*/false)};
+  pl::snap_macros_to_edges(objects, limits);
+  EXPECT_EQ(objects[0].xl, 5);
+}

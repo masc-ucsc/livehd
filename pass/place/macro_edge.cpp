@@ -69,8 +69,73 @@ std::vector<int64_t> snap_axis(std::vector<Edge_object>& objects, bool x_axis, c
   if (max_gap <= 0 && !l.slivers) {
     return moved;
   }
-  const int axis = x_axis ? 0 : 1;
-  const auto mid = core_lo + (core_hi - core_lo) / 2;
+  const int  axis     = x_axis ? 0 : 1;
+  const auto mid      = core_lo + (core_hi - core_lo) / 2;
+  const auto pin_edge = std::max(halo, x_axis ? l.pin_edge_x : l.pin_edge_y);
+  // the core-edge clearance of object i's face toward the low or high core edge
+  const auto edge_clear = [&](const Edge_object& o, bool low) {
+    const unsigned face = x_axis ? (low ? 1u : 2u) : (low ? 4u : 8u);
+    return (o.pin_faces & face) != 0 ? pin_edge : halo;
+  };
+  // Push-back: a movable macro whose pinned face sits closer to its core edge than pin_edge moves away from the edge
+  // to that clearance when nothing is in the way on the far side (farthest macros first, so a nearer one sees the
+  // ones already moved). Movable standard cells are not obstacles: they are legalized afterwards.
+  if (pin_edge > halo) {
+    for (int side = 0; side < 2; ++side) {
+      const bool          low = side == 0;
+      std::vector<size_t> order;
+      for (size_t i = 0; i < n; ++i) {
+        const auto s = span_of(objects[i]);
+        if (objects[i].macro && objects[i].movable && ((s.lo + s.hi) / 2 < mid) == low) {
+          order.push_back(i);
+        }
+      }
+      std::sort(order.begin(), order.end(), [&](size_t i, size_t j) {
+        const auto a = span_of(objects[i]), b = span_of(objects[j]);
+        const auto ka = low ? -a.lo : a.hi, kb = low ? -b.lo : b.hi;
+        return ka != kb ? ka < kb : i < j;
+      });
+      for (const auto i : order) {
+        const auto s     = span_of(objects[i]);
+        const auto clear = edge_clear(objects[i], low);
+        if (clear <= halo || (low ? s.lo >= core_lo + clear : s.hi <= core_hi - clear)) {
+          continue;
+        }
+        const auto len    = s.hi - s.lo;
+        const auto target = admissible(objects[i], axis, low ? core_lo + clear : core_hi - clear - len, low, core_lo, l.grid);
+        if (!target) {
+          continue;
+        }
+        // the far-side obstacle bound
+        bool fits = true;
+        for (size_t j = 0; j < n && fits; ++j) {
+          if (j == i) {
+            continue;
+          }
+          const auto o   = span_of(objects[j]);
+          const auto gap = objects[j].macro ? cross : cross_h;
+          if (!(o.a < s.b + gap && s.a < o.b + gap)) {
+            continue;
+          }
+          const auto need = objects[j].macro ? space : halo;
+          if (low ? o.lo >= s.hi - 0 && o.lo < *target + len + need : o.hi <= s.lo && o.hi > *target - need) {
+            fits = false;
+          }
+        }
+        if (!fits || (low ? *target + len > core_hi - halo : *target < core_lo + halo)) {
+          continue;
+        }
+        const auto delta = low ? *target - s.lo : s.lo - *target;
+        if (delta <= 0) {
+          continue;
+        }
+        set_lo(objects[i], *target);
+        report.distance += delta;
+        ++report.moves;
+        moved.push_back(static_cast<int64_t>(i));
+      }
+    }
+  }
   // Low side: macros whose center is below the core middle slide toward core_lo.
   for (int side = 0; side < 2; ++side) {
     const bool          low = side == 0;
@@ -89,10 +154,11 @@ std::vector<int64_t> snap_axis(std::vector<Edge_object>& objects, bool x_axis, c
     std::vector<char> anchored(n, 0);
     for (const auto i : order) {
       const auto s     = span_of(objects[i]);
-      // The core edge (keeping the halo inside the core) anchors the chain.
-      int64_t    limit = low ? core_lo + halo : core_hi - halo;
+      // The core edge (keeping the halo inside the core, or pin_edge for a pinned face) anchors the chain.
+      const auto edge  = edge_clear(objects[i], low);
+      int64_t    limit = low ? core_lo + edge : core_hi - edge;
       bool       chain = true;
-      int64_t    anchor_clear = halo;  // the clearance the tightest anchor imposes (a sliver is narrower than it)
+      int64_t    anchor_clear = edge;  // the clearance the tightest anchor imposes (a sliver is narrower than it)
       bool       anchor_macro = false;
       unsigned   anchor_faces = 0;
       for (size_t j = 0; j < n; ++j) {
