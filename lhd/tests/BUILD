@@ -2140,6 +2140,18 @@ sh_test(
     ],
 )
 
+# synth.state_sweep + split_by_demand: an instance whose outputs nobody reads gets its own copy
+# of the shared definition, so the state only it carries is swept; proven by the graph-native LEC.
+sh_test(
+    name = "lhd_synth_demand_split_test",
+    size = "small",
+    srcs = ["lhd_synth_demand_split_test.sh"],
+    data = _FLOW_DATA + [
+        "abc_arst_q.lib",
+        "synth_demand_split.v",
+    ],
+)
+
 # synth.state_sweep: unobserved registers and register bits leave the mapper's private
 # copy (across the hierarchy), proven equivalent to the source by the graph-native LEC.
 [

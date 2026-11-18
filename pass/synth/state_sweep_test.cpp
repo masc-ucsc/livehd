@@ -248,6 +248,73 @@ TEST(StateSweep, DropsAChildRegisterTheParentNeverReads) {
   EXPECT_TRUE(nodes_of(*child.graph, Ntype_op::Flop).empty());
 }
 
+// Two instances of one child: one parent output reads the first instance's register, nothing reads the second's.
+// The plain sweep joins the reads (the child register stays for both); split_by_demand gives the unread instance its
+// own copy, whose register the sweep then drops while the read one keeps it.
+TEST(StateSweep, SplitByDemandDropsStateOnlyAnUnreadInstanceCarries) {
+  hhds::GraphLibrary library;
+  auto               child = make_module(library, "child", 16, 16);
+  auto               reg   = make_reg(*child.graph, child.graph->get_input_pin("d"), child.graph->get_input_pin("clk"), 16, "r");
+  reg.create_driver_pin(0).connect_sink(child.graph->get_output_pin("o"));
+
+  auto                          parent = make_module(library, "top", 16, 16);
+  auto&                         top    = *parent.graph;
+  std::vector<hhds::Node_class> insts;
+  for (int i = 0; i < 2; ++i) {
+    auto inst = gu::create_typed_node(top, Ntype_op::Sub);
+    inst.set_subnode(child.io);
+    top.get_input_pin("clk").connect_sink(inst.create_sink_pin(kClk));
+    top.get_input_pin("d").connect_sink(inst.create_sink_pin(kData));
+    gu::set_ubits(inst.create_driver_pin(kOut), 16);
+    insts.push_back(inst);
+  }
+  insts[0].get_driver_pin(kOut).connect_sink(top.get_output_pin("o"));  // insts[1]'s output is never read
+
+  {  // without the split the shared register survives
+    hhds::GraphLibrary lib2;
+    auto               c2 = make_module(lib2, "child", 16, 16);
+    auto               r2 = make_reg(*c2.graph, c2.graph->get_input_pin("d"), c2.graph->get_input_pin("clk"), 16, "r");
+    r2.create_driver_pin(0).connect_sink(c2.graph->get_output_pin("o"));
+    auto  p2 = make_module(lib2, "top", 16, 16);
+    auto& t2 = *p2.graph;
+    for (int i = 0; i < 2; ++i) {
+      auto inst = gu::create_typed_node(t2, Ntype_op::Sub);
+      inst.set_subnode(c2.io);
+      t2.get_input_pin("clk").connect_sink(inst.create_sink_pin(kClk));
+      t2.get_input_pin("d").connect_sink(inst.create_sink_pin(kData));
+      auto out = inst.create_driver_pin(kOut);
+      gu::set_ubits(out, 16);
+      if (i == 0) {
+        out.connect_sink(t2.get_output_pin("o"));
+      }
+    }
+    ASSERT_TRUE(sweep({p2.graph, c2.graph}, "top"));
+    EXPECT_EQ(nodes_of(*c2.graph, Ntype_op::Flop).size(), 1U);
+  }
+
+  std::vector<std::shared_ptr<hhds::Graph>> defs{parent.graph, child.graph};
+  const auto                                made = split_by_demand(defs, "top", nullptr);
+  ASSERT_TRUE(made);
+  EXPECT_EQ(*made, 1);
+  ASSERT_EQ(defs.size(), 3U);
+  // The read instance keeps the original; the unread one points at the content-named copy.
+  EXPECT_EQ(insts[0].get_subnode_graph().get(), child.graph.get());
+  const auto copy = insts[1].get_subnode_graph();
+  ASSERT_TRUE(copy);
+  EXPECT_NE(copy.get(), child.graph.get());
+  EXPECT_TRUE(std::string{copy->get_name()}.starts_with("child__d"));
+  // A second split finds nothing left to separate.
+  const auto again = split_by_demand(defs, "top", nullptr);
+  ASSERT_TRUE(again);
+  EXPECT_EQ(*again, 0);
+
+  const auto stats = sweep(defs, "top");
+  ASSERT_TRUE(stats);
+  EXPECT_EQ(stats->registers_removed, 1U);
+  EXPECT_EQ(nodes_of(*child.graph, Ntype_op::Flop).size(), 1U);
+  EXPECT_TRUE(nodes_of(*copy, Ntype_op::Flop).empty());
+}
+
 TEST(StateSweep, AnInstanceOfABodyLessCellObservesItsInputs) {
   hhds::GraphLibrary library;
   auto               cell = library.create_io("cell");

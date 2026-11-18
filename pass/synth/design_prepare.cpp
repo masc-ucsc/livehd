@@ -294,6 +294,18 @@ std::unique_ptr<Prepared_design> prepare_design(std::span<const std::shared_ptr<
     }
   }
   if (state.state_sweep) {
+    // Instances of one definition that read different outputs get their own copies first, so the sweep below
+    // drops what each copy's readers ignore instead of what all of them ignore (bsg FIFOs whose data one user
+    // reads and another discards).
+    const auto split = split_by_demand(result->definitions, state.top, budget);
+    if (!split) {
+      return {};
+    }
+    if (*split > 0) {
+      livehd::diag::stat(from_pass, "demand-split", "progress")
+          .msg("{}: {} definition copy(ies) for instances that read different outputs", from_pass, *split)
+          .emit();
+    }
     const auto swept = sweep_unobserved_state(result->definitions, state.top, budget);
     if (!swept) {
       return {};

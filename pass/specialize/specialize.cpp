@@ -1070,6 +1070,11 @@ int specialize_shared(std::vector<std::shared_ptr<hhds::Graph>>& graphs, const O
 
 }  // namespace
 
+std::shared_ptr<hhds::Graph> clone_definition(std::vector<std::shared_ptr<hhds::Graph>>& graphs,
+                                              const std::shared_ptr<hhds::Graph>& body, std::string_view name) {
+  return copy_specialized_body(graphs, body, body->get_io(), name);
+}
+
 int specialize_constants(std::vector<std::shared_ptr<hhds::Graph>>& graphs, const Options& options) {
   if (options.max_versions <= 0) {
     return 0;  // no hierarchical traversal: every instance boundary as compiled

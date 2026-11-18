@@ -69,6 +69,11 @@ enum class Refold_cost : uint8_t { compile, synth, sim };
 void refold_private_body(const std::shared_ptr<hhds::Graph>& graph, Refold_cost cost = Refold_cost::compile,
                          std::string_view site = "specialize.refold");
 
+// A content-named copy `name` of definition `body` (same interface, same nodes and colors, its origin recorded as
+// the specialization origin), appended to `graphs` unless already there. A slot of that name is refreshed in place.
+std::shared_ptr<hhds::Graph> clone_definition(std::vector<std::shared_ptr<hhds::Graph>>& graphs,
+                                              const std::shared_ptr<hhds::Graph>& body, std::string_view name);
+
 // In a colored graph (synthesis regions), give every node created since
 // `existed` (node debug ids; nullptr = every node) the color of a colored
 // neighbor -- drivers first, then readers, to a fixpoint -- so a rewrite of a

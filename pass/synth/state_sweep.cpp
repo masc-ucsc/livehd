@@ -7,6 +7,7 @@
 #include <deque>
 #include <format>
 #include <limits>
+#include <map>
 #include <print>
 #include <string>
 #include <vector>
@@ -16,6 +17,7 @@
 #include "attr_carry.hpp"
 #include "bus_name.hpp"
 #include "debug_env.hpp"
+#include "hash_util.hpp"
 #include "node_util.hpp"
 #include "specialize.hpp"
 
@@ -267,6 +269,83 @@ public:
       stats->constant_bits      = folded.constant_bits;
     }
     return stats;
+  }
+
+  // Demand-specialized copies: a definition whose instances read different outputs (or different bits of them) is
+  // swept by the JOIN of those reads, so the cone only some instance reads stays in every instance. Group the
+  // instances by what each one reads and give every group but the widest its own content-named copy
+  // (`<name>__d<hash of the reads>`), so the next sweep sees each group's demand alone. Returns the copies made
+  // (0: no definition has instances that read differently), or no value when the budget refused.
+  std::optional<int> split(std::vector<std::shared_ptr<hhds::Graph>>& definitions, int max_versions) {
+    if (!mark_loop_bodies() || !link()) {
+      return std::nullopt;
+    }
+    seed();
+    if (!solve()) {
+      return std::nullopt;
+    }
+    int made = 0;
+    for (auto& def : defs_) {
+      if (def.skip || def.instances.size() < 2 || root_gids_.contains(def.graph->get_gid()) || !def.io) {
+        continue;
+      }
+      // What one instance reads of each output, as text: equal text, equal demand.
+      const auto reads = [&](const Instance& inst) {
+        std::string key;
+        int64_t     total = 0;
+        for (const auto& decl : def.io->get_output_pin_decls()) {
+          const auto pin   = inst.node.get_driver_pin(decl.port_id);
+          const auto width = std::max<int64_t>(1, decl.bits);
+          Mask       m;
+          if (!pin.is_invalid()) {
+            if (auto it = inst.parent->demand.find(pin.get_class_index()); it != inst.parent->demand.end()) {
+              m = it->second.clipped(width);
+            }
+          }
+          for (int64_t i = 0; i < width; ++i) {
+            total += m.test(i) ? 1 : 0;
+          }
+          key += std::format("|{}{}", decl.port_id, ranges(m, width));
+        }
+        return std::pair{key, total};
+      };
+      std::map<std::string, std::pair<int64_t, std::vector<const Instance*>>> groups;
+      for (const auto& inst : def.instances) {
+        auto [key, total] = reads(inst);
+        auto& group       = groups[key];
+        group.first       = total;
+        group.second.push_back(&inst);
+      }
+      if (livehd::debug::env<"LHD_STATE_SWEEP_DEBUG">() != nullptr && groups.size() > 1) {
+        std::print(stderr,
+                   "state-sweep split {} instances={} read patterns={}\n",
+                   def.graph->get_name(),
+                   def.instances.size(),
+                   groups.size());
+      }
+      if (groups.size() < 2) {
+        continue;
+      }
+      // The widest group (most bits read; ties by key) keeps the definition itself.
+      const auto keep     = std::ranges::max_element(groups, [](const auto& a, const auto& b) {
+        return a.second.first != b.second.first ? a.second.first < b.second.first : a.first > b.first;
+      });
+      int        versions = 0;
+      for (auto& [key, group] : groups) {
+        if (key == keep->first || versions >= max_versions) {
+          continue;
+        }
+        ++versions;
+        const auto name = std::format("{}__d{:016x}", def.graph->get_name(), livehd::hash_util::fnv1a64(key));
+        auto       copy = specialize::clone_definition(definitions, def.graph, name);
+        for (const auto* inst : group.second) {
+          auto node = inst->node;
+          node.set_subnode(copy->get_io());
+        }
+        ++made;
+      }
+    }
+    return made;
   }
 
 private:
@@ -1201,6 +1280,24 @@ std::optional<State_sweep_stats> sweep_unobserved_state(std::span<const std::sha
                                                         std::string_view top, Preparation_budget* budget) {
   Sweeper sweeper(definitions, top, budget);
   return sweeper.run();
+}
+
+std::optional<int> split_by_demand(std::vector<std::shared_ptr<hhds::Graph>>& definitions, std::string_view top,
+                                   Preparation_budget* budget, int max_rounds, int max_versions) {
+  int total = 0;
+  for (int round = 0; round < max_rounds; ++round) {
+    // A copy's own children are read per copy only in the next round's demand.
+    Sweeper    sweeper(definitions, top, budget);
+    const auto made = sweeper.split(definitions, max_versions);
+    if (!made) {
+      return std::nullopt;
+    }
+    if (*made == 0) {
+      break;
+    }
+    total += *made;
+  }
+  return total;
 }
 
 }  // namespace livehd::synth

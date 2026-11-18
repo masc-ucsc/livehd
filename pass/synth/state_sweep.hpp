@@ -6,6 +6,7 @@
 #include <optional>
 #include <span>
 #include <string_view>
+#include <vector>
 
 #include "hhds/graph.hpp"
 #include "preparation_budget.hpp"
@@ -45,5 +46,14 @@ struct State_sweep_stats {
 // compact loop are left alone. Returns no value when the budget refused.
 std::optional<State_sweep_stats> sweep_unobserved_state(std::span<const std::shared_ptr<hhds::Graph>> definitions,
                                                         std::string_view top, Preparation_budget* budget);
+
+// Before sweep_unobserved_state: the sweep keeps a cell when ANY instance of its definition reads it. A definition
+// whose instances read different outputs (a FIFO whose data one user reads and another ignores) gets a content-named
+// copy (`<name>__d<hash>`) per distinct read pattern beyond the widest, appended to `definitions`, so each pattern is
+// swept on its own -- what flattening gives, without flattening. Repeats (a copy's children split in the next round)
+// up to `max_rounds`; at most `max_versions` copies per definition per round. Returns the copies made, or no value
+// when the budget refused.
+std::optional<int> split_by_demand(std::vector<std::shared_ptr<hhds::Graph>>& definitions, std::string_view top,
+                                   Preparation_budget* budget, int max_rounds = 8, int max_versions = 16);
 
 }  // namespace livehd::synth
