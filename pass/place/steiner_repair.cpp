@@ -314,6 +314,12 @@ Buffer_tree plan_buffer_choices(Point root, const std::vector<Point>& loads, con
     }
   }
   Buffer_tree               best;
+  // Every scored alternative: the final pick treats required times within a tolerance as equal (see below).
+  struct Scored {
+    Buffer_tree plan;
+    double      required, area;
+  };
+  std::vector<Scored>       scored;
   double                    best_required = -std::numeric_limits<double>::infinity(), best_area = best_required;
   double                    best_hpwl = std::numeric_limits<double>::infinity(), spatial_hpwl_limit = best_hpwl;
   bool                      found = false;
@@ -407,6 +413,56 @@ Buffer_tree plan_buffer_choices(Point root, const std::vector<Point>& loads, con
     } catch (const std::runtime_error& error) {
       note(candidate, "topology failed:", error.what());
       continue;
+    }
+    // A fanout-bounded cut along one long Steiner path is a daisy chain: on vortex's 685-load enable it was 95
+    // buffers deep (about 14 ps each). The score below is the worst sink's required time, which a chain can improve by
+    // serving that sink first while the far sinks end ~1.5 ns later -- invisible to a min-only score, but the timer then
+    // reports them as the worst path and the TNS explodes. Keep trees near balanced: at most 3 ceil(log4 N) + 2 levels
+    // (a balanced fanout-4 tree is ceil(log4 N) deep) plus one per repeater span to the farthest sink.
+    bool too_deep = false;
+    {
+      size_t                deepest = 0;
+      std::vector<std::pair<unsigned, unsigned>> work;  // (buffer, its level)
+      for (const auto& child : plan.root) {
+        if (child.buffer) {
+          work.push_back({child.index, 1});
+        }
+      }
+      while (!work.empty()) {
+        const auto [index, at] = work.back();
+        work.pop_back();
+        deepest = std::max<size_t>(deepest, at);
+        if (deepest > plan.buffers.size()) {
+          break;  // malformed (cyclic) plan: the timing walk below rejects it
+        }
+        for (const auto& child : plan.buffers[index].loads) {
+          if (child.buffer) {
+            work.push_back({child.index, at + 1});
+          }
+        }
+      }
+      // A long wire legitimately needs repeaters in series: add one level per repeater span to the farthest sink.
+      double far = 0, span = 0;
+      for (const auto& xy : loads) {
+        far = std::max(far, std::abs(xy.first - root.first) + std::abs(xy.second - root.second));
+      }
+      for (const auto& d : drives) {
+        if (std::isfinite(d.max_distance_dbu)) {
+          span = std::max(span, d.max_distance_dbu);
+        }
+      }
+      const size_t repeaters = span > 0 ? static_cast<size_t>(std::ceil(far / span)) : loads.size();
+      const auto   max_depth = std::max<size_t>(
+          4,
+          3 * static_cast<size_t>(std::ceil(std::log(std::max<double>(2.0, double(loads.size()))) / std::log(4.0))) + 2 + repeaters);
+      if (deepest > max_depth) {
+        // Still scored: it keeps calibrating the spatial wire budget, but it is never picked.
+        too_deep = true;
+        if (trace) {
+          std::fprintf(stderr, "[steiner] %zu loads candidate %zu: %zu buffer levels deep (limit %zu): not eligible\n", loads.size(),
+                       candidate, deepest, max_depth);
+        }
+      }
     }
     struct State {
       double cap, required, area, hpwl = 0;
@@ -563,12 +619,40 @@ Buffer_tree plan_buffer_choices(Point root, const std::vector<Point>& loads, con
                    required, plan.buffers.size(), packet.area);
     }
     if (!found || required > best_required + 1e-6 || (std::abs(required - best_required) <= 1e-6 && packet.area < best_area)) {
-      best          = std::move(plan);
       best_required = required;
       best_area     = packet.area;
       best_hpwl     = packet.hpwl;
       found         = true;
     }
+    if (!too_deep) {
+      scored.push_back({std::move(plan), required, packet.area});
+    }
+  }
+  // The score is the required time at the driver, the minimum over the sinks. When one critical sink dominates it,
+  // every alternative scores within a few ps and the deep, cheap-at-the-critical-sink daisy chain (one buffer per
+  // fanout-4 cut along a long Steiner path) won by 0.2 ps at 4x the area of a balanced tree: vortex got a 108-deep
+  // chain whose far sinks then became the worst path (1.5 ns of buffers). Required times within max(1 ps, 0.2%)
+  // are a tie; among them take the smallest area, then the fewest buffers.
+  found = !scored.empty();
+  if (found) {
+    double top = -std::numeric_limits<double>::infinity();
+    for (const auto& candidate : scored) {
+      top = std::max(top, candidate.required);
+    }
+    const double tolerance = std::max(1.0, 2e-3 * std::abs(top));
+    const Scored* pick     = nullptr;
+    for (const auto& candidate : scored) {
+      if (candidate.required < top - tolerance) {
+        continue;
+      }
+      if (pick == nullptr || candidate.area < pick->area - 1e-9
+          || (std::abs(candidate.area - pick->area) <= 1e-9 && candidate.plan.buffers.size() < pick->plan.buffers.size())
+          || (std::abs(candidate.area - pick->area) <= 1e-9 && candidate.plan.buffers.size() == pick->plan.buffers.size()
+              && candidate.required > pick->required)) {
+        pick = &candidate;
+      }
+    }
+    best = pick->plan;
   }
   if (!found || livehd::debug::env<"LHD_STEINER_DUMP_ALL">() != nullptr) {
     dump_plan_inputs(root, loads, capacitances, required_ps, drives, driver, wire_r_ohm_dbu, wire_c_ff_dbu, limits);

@@ -1301,6 +1301,18 @@ cc_test(
 )
 
 cc_test(
+    name = "steiner_choice_test",
+    size = "small",
+    srcs = ["steiner_choice_test.cpp"],
+    copts = COPTS,
+    data = ["tests/steiner_chain_net.txt"],
+    deps = [
+        ":place",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "steiner_topology_test",
     srcs = ["steiner_topology_test.cpp"],
     copts = COPTS,
