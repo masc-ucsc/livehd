@@ -3353,6 +3353,17 @@ sh_test(
 )
 
 sh_test(
+    name = "lhd_user_cell_resynth_smoke",
+    size = "small",
+    timeout = "short",
+    srcs = ["lhd_user_cell_resynth_smoke.py"],
+    data = [
+        "//inou/lefdef:test_data",
+        "//lhd",
+    ],
+)
+
+sh_test(
     name = "lhd_placement_timing_defaults_smoke",
     size = "small",
     timeout = "short",

@@ -81,6 +81,32 @@ TEST_F(FlattenAdmission, BoundaryAdaptersRetainOccurrenceExclusion) {
   EXPECT_FALSE(child->get_input_node().attr(attrs::preroute_exclude).has());
 }
 
+// A constant on a narrower (here: 1-bit) instance input folds to its low bits instead of a Get_mask adapter: the
+// adapter would be an uncolored node, a stray color-0 region of its own in a colored design (pass.partition warns).
+TEST_F(FlattenAdmission, ConstantOnANarrowPortFoldsWithoutAnAdapter) {
+  auto ctop = make_graph(source, "ctop");
+  auto node = gu::create_typed_node(*ctop, Ntype_op::Sub);
+  node.set_subnode(child->get_io());
+  gu::create_const(*ctop, *Dlop::create_integer(3)).connect_sink(node.create_sink_pin(1));  // 2 bits into a 1-bit port
+  auto result = node.create_driver_pin(2);
+  gu::set_ubits(result, 1);
+  result.connect_sink(ctop->get_output_pin("y"));
+  hhds::GraphLibrary destination;
+  auto               flat = flatten_hierarchy(ctop.get(), &destination, "constant_port");
+  ASSERT_TRUE(flat);
+  bool saw_not = false;
+  for (auto n : flat->body().nodes()) {
+    EXPECT_NE(gu::type_op_of(n), Ntype_op::Get_mask);
+    if (gu::type_op_of(n) == Ntype_op::Not) {
+      saw_not       = true;
+      const auto in = n.inp_sorted_pins().front().get_driver_pin();
+      ASSERT_TRUE(in.is_const());
+      EXPECT_EQ(gu::const_of(in).to_just_i64(), 1);  // the port's low bit of 3
+    }
+  }
+  EXPECT_TRUE(saw_not);
+}
+
 TEST_F(FlattenAdmission, ProtectedFeedthroughMarksOnlyItsNet) {
   auto alias = make_graph(source, "alias");
   alias->get_input_pin("a").connect_sink(alias->get_output_pin("y"));

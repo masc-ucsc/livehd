@@ -661,7 +661,10 @@ static bool import_def(Refine& R, Imp_def& d) {
         }
         continue;
       }
-      if (auto* gate = Mio_LibraryReadGateByName(R.mio, const_cast<char*>(tname.c_str()), nullptr); gate != nullptr) {
+      // A Liberty cell the design instantiated (attrs::user_cell) is not the mapper's to redo: SDC and floorplans name
+      // it, so it falls through to the opaque-instance path below and survives a remap with its name and pins.
+      if (auto* gate = Mio_LibraryReadGateByName(R.mio, const_cast<char*>(tname.c_str()), nullptr);
+          gate != nullptr && !node.attr(livehd::attrs::user_cell).has()) {
         Cell c;
         c.node             = node;
         c.gate             = gate;

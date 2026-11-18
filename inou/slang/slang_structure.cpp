@@ -4960,7 +4960,11 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
         constant           = true;
       }
     }
-    if (!constant) {
+    // A combinational driver (an `always @(*)` or continuous assign; LiteX gives every comb-assigned reg an
+    // initializer) rewrites the variable from its inputs, so the initializer is never observable in hardware and
+    // ignoring it is exact, not a loss worth a warning (Yosys drops it silently too).
+    const bool comb_driven = writers_of.contains(vs) && !reg_syms_.contains(vs);
+    if (!constant && !comb_driven) {
       emit_warning(slang::SourceRange(vs->location, vs->location),
                    "var-init-ignored",
                    "unsupported",

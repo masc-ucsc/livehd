@@ -630,6 +630,11 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
     if (native_comb_logic.contains(bb.node)) {
       nn.attr(livehd::attrs::native_comb_boundary).set({});
     }
+    // A body-less instance copied through mapping (a Liberty cell the design names, a macro, external IP) is the
+    // design's, not the mapper's: later remaps of this region must keep it, with its name, as an opaque instance.
+    if (bb.op == Ntype_op::Sub && (!bb.node.get_subnode_graph() || bb.node.attr(livehd::attrs::user_cell).has())) {
+      nn.attr(livehd::attrs::user_cell).set({});
+    }
     br.node = nn;
     br.out_pin.resize(bb.outs.size());
     br.out_bit.resize(bb.outs.size());

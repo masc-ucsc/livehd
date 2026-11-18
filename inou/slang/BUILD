@@ -70,6 +70,12 @@ sh_test(
     data = ["//lhd"],
 )
 
+sh_test(
+    name = "slang_comb_initializer_silent",
+    srcs = ["tests/comb_initializer_silent.sh"],
+    data = ["//lhd"],
+)
+
 # A level-sensitive `always @(*)` of nonblocking assignments is combinational when
 # every path assigns (Migen/LiteX output), a latch only when one path holds.
 sh_test(

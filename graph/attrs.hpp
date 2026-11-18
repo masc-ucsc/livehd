@@ -230,6 +230,19 @@ struct native_comb_boundary_t {
 };
 inline constexpr native_comb_boundary_t native_comb_boundary{};
 
+// Marker on a Liberty cell the DESIGN instantiates by name (an RTL `AND2x2 u0 (...)` or a body-less library cell
+// copied through mapping), as opposed to a cell a mapper chose. SDC constraints and floorplans name these instances
+// and their pins (`create_generated_clock ... [get_pins u/clk_buf/Y]`), so a remapper keeps them as opaque
+// instances with their names: pass.abc's mapped-region import (placement IO resynthesis, boundary refinement)
+// cuts at them instead of absorbing them as ordinary gates.
+struct user_cell_t {
+  struct value_type {
+    uint8_t marker = 1;
+  };
+  using storage = hhds::flat_storage;
+};
+inline constexpr user_cell_t user_cell{};
+
 // Per-node place annotation (ArchFP / physical-design floorplan rectangle).
 // Replaces Lgraph_attributes::node_place_map.
 struct place_t {
@@ -565,6 +578,8 @@ inline constexpr Attr_kind attr_kind<resynth_t> = Attr_kind::node;
 template <>
 inline constexpr Attr_kind attr_kind<native_comb_boundary_t> = Attr_kind::node;
 template <>
+inline constexpr Attr_kind attr_kind<user_cell_t> = Attr_kind::node;
+template <>
 inline constexpr Attr_kind attr_kind<place_t> = Attr_kind::node;
 template <>
 inline constexpr Attr_kind attr_kind<placement_rc_t> = Attr_kind::node;
@@ -679,6 +694,7 @@ inline constexpr bool carry_on_rebuild<placement_block_names_t> = false;
   X(synth_color_group_names)        \
   X(resynth)                        \
   X(native_comb_boundary)           \
+  X(user_cell)                      \
   X(hier_color)                     \
   X(coloring_info)                  \
   X(region_nesting)                 \

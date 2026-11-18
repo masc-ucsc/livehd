@@ -80,6 +80,50 @@ TEST(AbcIo, MappedBoundaryTimingAndProvedRewrite) {
   EXPECT_EQ(f.graph->get_io()->get_output_pin_decls().front().name, "y");
   EXPECT_TRUE(mapper(*f.graph, env, env, 1000, 5, false).checked);
 }
+// A Liberty cell the design instantiated (attrs::user_cell) is a timing anchor that SDC names (`get_pins u/clk_buf/Y`):
+// a whole-color remap cuts at it and keeps it, with its name and cell, instead of absorbing it into its own mapping.
+TEST(AbcIo, RemapKeepsDesignInstantiatedCells) {
+  struct Outcome {
+    size_t gates    = 0;
+    bool   accepted = false;
+    int    kept     = 0;
+  };
+  const auto remap = [](bool mark) {
+    Fixture f(6);
+    for (auto node : f.graph->body().nodes()) {
+      if (mark && node.get_name() == "inv1") {
+        node.attr(attrs::user_cell).set({});
+      }
+    }
+    f.graph->commit();
+    auto                  mapper = synth::make_io_mapper("abc",
+                                                         {
+                                            {"library", "inou/prp/tests/abc/timing.lib"}
+    });
+    synth::Io_environment env;
+    env.inputs["a[0]"]   = 950;
+    env.required["y[0]"] = 1000;
+    Outcome    out;
+    const auto inspection = mapper(*f.graph, env, {}, 1000, 5, false);
+    EXPECT_TRUE(inspection.checked);
+    out.gates         = inspection.gates;
+    const auto result = mapper(*f.graph, env, {}, 1000, 5, true);
+    out.accepted      = result.accepted;
+    for (auto node : f.graph->body().nodes()) {
+      if (node.get_name() == "inv1" && node.get_subnode_io() && node.get_subnode_io()->get_name() == "INVx1") {
+        ++out.kept;
+        EXPECT_EQ(node.attr(attrs::user_cell).has(), mark);
+      }
+    }
+    return out;
+  };
+  const auto mapper_owned = remap(false);
+  ASSERT_TRUE(mapper_owned.accepted);  // the control: an unmarked cell is the remapper's to redo, and it does
+  EXPECT_EQ(mapper_owned.kept, 0);
+  const auto design_owned = remap(true);
+  EXPECT_EQ(design_owned.gates + 1, mapper_owned.gates);  // imported as an opaque cut, not as a remappable gate
+  EXPECT_EQ(design_owned.kept, 1);
+}
 TEST(AbcIo, GrowthAdmissionRejectsBeforePublishingAProvedReplacement) {
   Fixture    f;
   auto       mapper = synth::make_io_mapper("abc",
