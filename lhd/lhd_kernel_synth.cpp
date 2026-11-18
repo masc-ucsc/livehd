@@ -622,7 +622,6 @@ livehd::placement::Options placement_options(const Options& opts) {
   // cell there) unless set: kept from the regional flow so the placement the plan rounds start from is unchanged
   if (truthy(synth_set(opts, "place.legroute", "true")) && synth_set(opts, "place.region.cleancuts", "").empty()) {
     out.boundarypins.clean_cuts = true;
-    out.legroute_clean_cuts     = true;
   }
   // bus order across region edges is the boundary-pin flow with ordered, spaced, fixed virtual pins
   if (truthy(synth_set(opts, "place.region.busorder", "true"))) {
@@ -630,8 +629,6 @@ livehd::placement::Options placement_options(const Options& opts) {
   }
   livehd::placement::validate_boundary_pin_options(out.boundarypins);
   out.legroute                             = truthy(synth_set(opts, "place.legroute", "true"));
-  // on by default: placement may skip the plan (with a warning) where it cannot run; an explicit setting keeps it strict
-  out.legroute_explicit                    = !synth_set(opts, "place.legroute", "").empty();
   out.legroute_options.capacity_share      = number("place.legroute.capacity_share", "1");
   out.legroute_options.global_margin       = integer("place.legroute.global_margin", "8");
   out.legroute_options.global_rounds       = static_cast<unsigned>(integer("place.legroute.global_rounds", "16"));
@@ -1668,7 +1665,7 @@ std::string resolve_liberty(const Options& opts) {
 
 namespace {
 void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd::placement::Placement_session>& placement_session,
-                        bool placement_area_resume);
+                        bool placement_area_resume, unsigned legroute_area_restarts_used = 0);
 }
 
 // legroute can ask for a larger core (its plan rounds leave routing overflow, or the cells do not legalize, on a
@@ -1736,10 +1733,13 @@ static void synth_command_flow(Options& opts, Result& res) {
                  std::lround(base_cells * scale),
                  variant);
   };
+  // routing growths already taken: each restart rebuilds the placement options, so the count of core growths the
+  // plan's leftover overflow asked for (capped by synth.place.legroute.area_restarts) is carried here
+  unsigned legroute_area_restarts_used = 0;
   for (unsigned restarts = 0;; ++restarts) {
     bool ok = false;
     try {
-      synth_command_once(opts, res, placement_session, placement_area_resume);
+      synth_command_once(opts, res, placement_session, placement_area_resume, legroute_area_restarts_used);
       ok = true;
     } catch (const livehd::placement::Placement_area_restart& restart) {
       if (!search) {  // the utilization legroute asks for
@@ -1761,6 +1761,9 @@ static void synth_command_flow(Options& opts, Result& res) {
           }
         }
         placement_area_resume = true;
+        if (restart.routing) {
+          ++legroute_area_restarts_used;
+        }
         set_point(restart.utilization, restart.mesh_variant, "restarting for routability");
         continue;
       }
@@ -1956,7 +1959,7 @@ bool density_failure(const std::exception& e, const livehd::placement::Options& 
          && std::string_view(e.what()).find("legalization failed") != std::string_view::npos;
 }
 void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd::placement::Placement_session>& placement_session,
-                        bool placement_area_resume) {
+                        bool placement_area_resume, unsigned legroute_area_restarts_used) {
   const double gui_invocation_start_s = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
   setup_diag(opts, "synth");
 
@@ -1995,6 +1998,7 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
     place_options.placement_session     = placement_session;
     place_options.placement_area_resume = placement_area_resume;
   }
+  place_options.legroute_area_restarts_used = legroute_area_restarts_used;
   const bool run_resize   = !isolated && truthy(synth_set(opts, "place.resize", run_place && run_sta && place_options.full ? "true" : "false"));
   const bool run_resynth  = !isolated && truthy(synth_set(opts, "place.resynth", "false"));
   // 2i-interact: the interactive session serves the whole run and keeps the process alive afterwards.

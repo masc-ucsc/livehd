@@ -325,19 +325,24 @@ Grid build_grid(const Design& d, const Legroute_power& power) {
     }
   }
   // routing layers: the profile's signal layers above the escape layer, else the LEF stack above the second
-  // routing layer, at most six
+  // routing layer, at most six. A two-layer stack has no layer to spare for pin escape: both layers route (one
+  // horizontal, one vertical; the pins land on them directly), so the grid models what a router has there.
   std::vector<std::string> stack;
+  bool                     above = false;
   if (d.profile) {
     g.escape_layer = d.profile->route.access.escape;
     stack          = d.profile->route.signal_layers;
+  } else if (tech.routing_layers.size() == 2) {
+    g.escape_layer.clear();
+    stack = tech.routing_layers;
+    above = true;
   } else {
-    if (tech.routing_layers.size() < 3) {
-      throw std::invalid_argument("legroute requires at least three routing layers");
+    if (tech.routing_layers.size() < 2) {
+      throw std::invalid_argument("legroute requires at least two routing layers (one horizontal, one vertical)");
     }
     g.escape_layer = tech.routing_layers[1];
     stack.assign(tech.routing_layers.begin() + 1, tech.routing_layers.begin() + std::min<size_t>(7, tech.routing_layers.size()));
   }
-  bool above = false;
   for (const auto& name : stack) {
     if (name == g.escape_layer) {
       above = true;
@@ -373,7 +378,8 @@ Grid build_grid(const Design& d, const Legroute_power& power) {
   }
   if (g.layers.size() < 2 || std::none_of(g.layers.begin(), g.layers.end(), [](const auto& l) { return l.horizontal; })
       || std::all_of(g.layers.begin(), g.layers.end(), [](const auto& l) { return l.horizontal; })) {
-    throw std::invalid_argument("legroute needs horizontal and vertical routing layers above " + g.escape_layer);
+    throw std::invalid_argument(g.escape_layer.empty() ? std::string("legroute needs a horizontal and a vertical routing layer")
+                                                        : "legroute needs horizontal and vertical routing layers above " + g.escape_layer);
   }
   // the first reserved_tracks tracks of every band are kept out of the capacity
   const auto reserved = [&](int64_t ordinal) { return ordinal < int64_t(d.opt.reserved_tracks); };

@@ -531,16 +531,6 @@ static const ph::Tech_profile& placement_tech_profile(const ph::Technology& tech
                                   pg ? std::string_view(options.pg) : std::string_view("auto"),
                                   options.satlegalize_route_vias ? ph::Tech_policy::route : ph::Tech_policy::power_grid);
 }
-// legroute's grid takes the route stack from the technology profile, else from the LEF routing layers above the
-// second one (legroute_grid.cpp): without a profile it needs at least three
-static bool legroute_supported(const ph::Technology& tech, const Options& options) {
-  try {
-    (void)placement_tech_profile(tech, options);
-    return true;
-  } catch (const std::invalid_argument&) {
-    return tech.routing_layers.size() >= 3;
-  }
-}
 std::string environment_key(const Options& o, const ph::Technology& tech) {
   uint64_t h = kPlaceSalt;
   h          = hash_text(std::to_string(o.technology().content_hash), h);
@@ -13186,6 +13176,13 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       auto gp     = control;
       gp.legalize = gp.detailed_place = false;
       const bool resume               = options.placement_area_resume && live_session->live() && !terminal_active;
+      if (options.gui && !resume) {
+        // The interactive session's GP is the native owner's (snapshot, fork and optimizer continuation); the plan
+        // rounds then open the retained session on its converged positions (their first advance starts it there).
+        return gui_native_place(v.design, gp, options, [&] {
+          return standalone_hints && placement_hints && !placement_hints->has_pull_hints();
+        });
+      }
       unsigned   minimum              = 0;
       bool       remap_recovery       = false;
       if (resume) {
@@ -14575,7 +14572,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     return result;
   }
   if (options.gui && options.full && options.completed_stage == Placement_stage::final && !options.timing_seed
-      && !options.retain_placement && !options.fp_place && !defer_macro_cells && (!terminal_active || !options.legroute)) {
+      && !options.retain_placement && !options.fp_place && !defer_macro_cells) {
     gui_edit_mode(v, tech, options, result, region_macros, region_ios);
   }
   // A restored or edited placement keeps the netlist's geometry template; the
@@ -16177,30 +16174,8 @@ static Result place_requested(hhds::Graph& source, hhds::GraphLibrary& library, 
       resolved_options->boundarypins.enabled = true;
     }
   }
-  // legroute on by default (not requested): step aside where the plan cannot run or would fight the user
-  if (requested.legroute && !requested.legroute_explicit) {
-    std::string why;
-    if (requested.gui) {
-      why = "an interactive GUI session drives placement (its edits and native GP continuation use the regular final GP)";
-    } else if (!requested.lefs.empty() && !legroute_supported(requested.technology().lef, requested)) {
-      why = "the technology has no route stack for it (an unregistered technology with fewer than three routing layers)";
-    }
-    if (!why.empty()) {
-      if (!resolved_options) {
-        resolved_options = requested;
-      }
-      resolved_options->legroute = false;
-      if (requested.legroute_clean_cuts) {
-        resolved_options->boundarypins.clean_cuts = false;
-      }
-      livehd::diag::warn("pass.place", "legroute-skipped", "unsupported")
-          .msg("legroute plan (on by default) skipped: {}; set synth.place.legroute=false to silence, true to require it", why)
-          .emit();
-    }
-  }
-  const bool legroute = resolved_options ? resolved_options->legroute : requested.legroute;
   // the staged final-cell pass imports the macro pass's frame: whether the core may grow is decided here
-  if (requested.allow_increase_area && legroute) {
+  if (requested.allow_increase_area && requested.legroute) {
     if (!resolved_options) {
       resolved_options = requested;
     }
@@ -16209,7 +16184,7 @@ static Result place_requested(hhds::Graph& source, hhds::GraphLibrary& library, 
                                        || (requested.floorplan.empty() && requested.die.empty() && requested.core.empty()
                                            && !requested.previous && !requested.timing_seed);
   }
-  if (legroute && !requested.placement_session) {
+  if (requested.legroute && !requested.placement_session) {
     if (!resolved_options) {
       resolved_options = requested;
     }

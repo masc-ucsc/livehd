@@ -1516,9 +1516,8 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      "routability step at the end of placement (todo/livehd/2r-route.html): plan rounds route the converged placement "
      "on a tile grid, widen the cells of congested nets and resume global placement; the best measured round goes to "
      "the regular terminal legalizer. Remaining routing overflow is reported (qor.json, legroute_plan_selection.json); "
-     "on a fixed die/core it never stops the run. On by default with placement: left unset, the plan is skipped with a "
-     "warning (legroute-skipped) on a technology without a route stack for it or under an interactive GUI session; "
-     "set true to make those preconditions errors"},
+     "on a fixed die/core it never stops the run. On by default with placement (a two-layer stack routes on both "
+     "layers); false turns it off"},
     {"place.legroute.plan.rounds",
      "2",
      Synth_set_option::Kind::integer,

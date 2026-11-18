@@ -1284,10 +1284,13 @@ any other map against them. The learned third estimator was removed;
 With placement the legroute plan runs by default: after global placement converges, plan rounds route the
 placement on a tile grid, widen the cells of congested nets and resume GP; the best measured round goes to the
 regular terminal legalizer, and leftover overflow is reported (`legroute_plan_selection.json`, `qor.json`), never
-fatal on a fixed die/core. Left unset, the plan steps aside with one `legroute-skipped` warning where it cannot run
-(a technology with no registered profile and fewer than three routing layers) and under an interactive GUI session,
-whose edit mode and native GP continuation use the regular final GP. `synth.place.legroute=true` makes both of
-those errors; `false` turns the plan off.
+fatal on a fixed die/core. The grid takes its routing layers from the technology profile, else from the LEF stack
+above the second routing layer; a two-layer stack routes on both layers (one horizontal, one vertical, pins landing
+on them). Fewer than two routing layers, or no horizontal/vertical pair, is an error. On a generated core the
+plan's leftover overflow may grow the core at most `synth.place.legroute.area_restarts` times, counted across the
+driver's restarts. Under an interactive GUI session the main GP stays in the native GP owner (snapshot, fork and
+optimizer continuation), the plan rounds start their retained optimizer from its converged positions, and
+edit-mode moves are replayed on the final placement. `synth.place.legroute=false` turns the plan off.
 
 ## Timing-closure observation controller
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""synth.place.legroute is on by default: left unset, a technology the plan cannot route (two routing layers, no
-registered profile) skips the plan with one `legroute-skipped` warning and places normally; an explicit
-synth.place.legroute=true keeps the precondition a hard error."""
+"""synth.place.legroute is on by default with placement, and the plan runs on a two-routing-layer technology (both
+layers route, one horizontal and one vertical): left unset and set true both write legroute_plan_selection.json and
+place; false runs no plan."""
 import json
 import os
 from pathlib import Path
@@ -33,19 +33,16 @@ endmodule
             cmd += ['--set', f'{k}={v}']
         cmd += list(extra)
         p = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
-        return p, (json.loads(result.read_text()) if result.exists() else {})
+        assert p.returncode == 0, (label, p.stdout[-2000:], p.stderr[-3000:])
+        plans = list((root / label).rglob('legroute_plan_selection.json'))
+        return p.stdout + p.stderr, plans
 
-    p, r = run('default')
-    assert p.returncode == 0, (p.stdout[-2000:], p.stderr[-2000:], r.get('error'))
-    log = p.stdout + p.stderr
-    assert log.count('"code":"legroute-skipped"') == 1, log[-3000:]
-    assert 'fewer than three routing layers' in log, log[-3000:]
-
-    p, r = run('explicit', ['--set', 'synth.place.legroute=true'])
-    assert p.returncode != 0, (p.stdout[-2000:], p.stderr[-2000:])
-    assert 'legroute requires at least three routing layers' in json.dumps(r.get('error', {})) + p.stdout + p.stderr, r
-
-    p, r = run('off', ['--set', 'synth.place.legroute=false'])
-    assert p.returncode == 0, (p.stdout[-2000:], p.stderr[-2000:], r.get('error'))
-    assert 'legroute-skipped' not in p.stdout + p.stderr
+    for label, extra in (('default', ()), ('explicit', ('--set', 'synth.place.legroute=true'))):
+        log, plans = run(label, extra)
+        assert plans, (label, log[-3000:])
+        selection = json.loads(plans[0].read_text())
+        assert selection['rounds_run'] >= 1, selection
+        assert 'legroute plan 0' in log, log[-3000:]
+    log, plans = run('off', ('--set', 'synth.place.legroute=false'))
+    assert not plans and 'legroute plan' not in log, log[-3000:]
 print('PASS')

@@ -9,6 +9,35 @@
 namespace livehd::placement {
 using Fixture = Legroute_test_frame;
 
+TEST(LegrouteGrid, TwoLayerStackRoutesOnBothLayers) {
+  // A two-layer technology has no layer to spare for pin escape: both layers route, one per direction.
+  for (size_t keep : {2u, 1u}) {
+    SCOPED_TRACE(keep);
+    Fixture f;
+    f.cell("dff", 0, 0);
+    f.tech.routing_layers.resize(keep);
+    std::erase_if(f.fp.tracks, [&](const auto& t) { return t.layer != "M1" && t.layer != "M2"; });
+    for (const auto* name : {"M3", "M4", "M5", "M6"}) {
+      f.tech.layers.erase(name);
+    }
+    const auto d = lr::build_design(f.tech, f.fp, f.timing, {}, nullptr);
+    if (keep == 1) {
+      EXPECT_THROW((void)lr::build_grid(d, {}), std::invalid_argument);
+      continue;
+    }
+    const auto g = lr::build_grid(d, {});
+    EXPECT_TRUE(g.escape_layer.empty());
+    ASSERT_EQ(g.layers.size(), 2u);
+    EXPECT_EQ(g.layers[0].name, "M1");
+    EXPECT_FALSE(g.layers[0].horizontal);
+    EXPECT_EQ(g.layers[1].name, "M2");
+    EXPECT_TRUE(g.layers[1].horizontal);
+    const auto [h, v] = lr::transit_capacity(g);
+    EXPECT_GT(h[size_t(g.tile(2, 3))], 0);
+    EXPECT_GT(v[size_t(g.tile(2, 3))], 0);
+  }
+}
+
 TEST(LegrouteGrid, TileGridCapacityStripesAndMacros) {
   Fixture f;
   f.cell("dff", 0, 0);
