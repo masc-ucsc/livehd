@@ -793,6 +793,118 @@ TEST(Semdiff, DigestBreaksLoopsThroughInstances) {
   EXPECT_NE(a, an);  // instance identity is part of it
 }
 
+// A combinational loop through TWO instances of one def: neither Sub's operand ever gets a forward
+// signature (the other lane's loop feeds it), so the fast path stalls with cut_unknown and nothing
+// seeds the Subs. The exact traversal must pair the unpaired Subs itself; before, it refused to cross
+// any Sub cut and an unchanged mapped region missed on every warm run. A rewired loop stays refused.
+TEST(Semdiff, TraversalPairsUnseededSubsInLoops) {
+  auto build = [](const std::string& dir, bool swap, Ntype_op op) {
+    auto& lib = livehd::Hhds_graph_library::instance(dir);
+    auto  cio = lib.create_io("cell");
+    cio->add_input("a", 1);
+    cio->add_output("y", 2);
+    auto pio = lib.create_io("top");
+    pio->add_input("d0", 0);
+    pio->add_input("d1", 1);
+    pio->add_output("q", 2);
+    auto             pg = pio->create_graph();
+    hhds::Node_class sub[2], gate[2];
+    for (int i = 0; i < 2; ++i) {
+      sub[i] = create_typed_node(*pg, Ntype_op::Sub);
+      sub[i].set_subnode(cio);
+      sub[i].set_name("__flat___dup");  // same key on both lanes: undecidable by cut key
+      gate[i] = create_typed_node(*pg, i == 0 ? op : Ntype_op::And);
+    }
+    for (int i = 0; i < 2; ++i) {
+      const int j = swap ? 1 - i : i;  // which Sub's output closes lane i
+      pg->get_input_pin(i == 0 ? "d0" : "d1").connect_sink(setup_sink_pid(gate[i], 0));
+      sub[j].create_driver_pin(2).connect_sink(setup_sink_pid(gate[i], 0));
+      gate[i].create_driver_pin(0).connect_sink(setup_sink_pid(sub[i], 1));
+    }
+    auto sum = create_typed_node(*pg, Ntype_op::Sum);
+    gate[0].create_driver_pin(0).connect_sink(livehd::graph_util::setup_sink_by_name(sum, "as"));
+    gate[1].create_driver_pin(0).connect_sink(livehd::graph_util::setup_sink_by_name(sum, "bs"));
+    sum.create_driver_pin(0).connect_sink(pg->get_output_pin("q"));
+    return pg;
+  };
+  livehd::semdiff::Semdiff_options o;
+  o.matching_names = true;
+  o.blackbox_subs  = true;
+
+  auto a  = build("lgdb_semdiff_subloop_a", false, Ntype_op::And);
+  auto a2 = build("lgdb_semdiff_subloop_a2", false, Ntype_op::And);
+  auto op = build("lgdb_semdiff_subloop_op", false, Ntype_op::Or);
+  EXPECT_TRUE(livehd::semdiff::structural_equivalent_traversal(a.get(), a2.get(), o));
+  EXPECT_TRUE(livehd::semdiff::structural_identical(a.get(), a2.get(), o));
+  EXPECT_FALSE(livehd::semdiff::structural_equivalent_traversal(a.get(), op.get(), o));
+}
+
+// Identical tied-off instances (every operand a constant) collide on their cut key and no driver
+// ever reaches them, so the stalled fast path used to leave the region unmatched on every warm run.
+TEST(Semdiff, TraversalPairsConstantOnlySubs) {
+  auto build = [](const std::string& dir, uint32_t k1) {
+    auto& lib = livehd::Hhds_graph_library::instance(dir);
+    auto  cio = lib.create_io("cell");
+    cio->add_input("a", 1);
+    cio->add_output("y", 2);
+    auto pio = lib.create_io("top");
+    pio->add_input("d", 0);
+    pio->add_output("q", 1);
+    auto pg  = pio->create_graph();
+    auto sum = create_typed_node(*pg, Ntype_op::Sum);
+    for (int i = 0; i < 3; ++i) {
+      auto sub = create_typed_node(*pg, Ntype_op::Sub);
+      sub.set_subnode(cio);
+      sub.set_name("__flat___tie");
+      livehd::graph_util::create_const(*pg, *Dlop::create_integer(i == 2 ? k1 : 1)).connect_sink(setup_sink_pid(sub, 1));
+      sub.create_driver_pin(2).connect_sink(livehd::graph_util::setup_sink_by_name(sum, i == 0 ? "as" : "bs"));
+    }
+    pg->get_input_pin("d").connect_sink(livehd::graph_util::setup_sink_by_name(sum, "bs"));
+    sum.create_driver_pin(0).connect_sink(pg->get_output_pin("q"));
+    return pg;
+  };
+  livehd::semdiff::Semdiff_options o;
+  o.matching_names = true;
+  o.blackbox_subs  = true;
+
+  auto a  = build("lgdb_semdiff_tie_a", 1);
+  auto a2 = build("lgdb_semdiff_tie_a2", 1);
+  auto b  = build("lgdb_semdiff_tie_b", 0);
+  EXPECT_TRUE(livehd::semdiff::structural_equivalent_traversal(a.get(), a2.get(), o));
+  EXPECT_TRUE(livehd::semdiff::structural_identical(a.get(), a2.get(), o));
+  EXPECT_FALSE(livehd::semdiff::structural_equivalent_traversal(a.get(), b.get(), o));
+}
+
+// Identical constant-only gates share one forward signature, so the 1:1 signature pairing skips them and
+// no worklist driver reaches them (a constant is not one). The exact traversal pairs them itself.
+TEST(Semdiff, TraversalPairsDuplicateConstantGates) {
+  auto build = [](const std::string& dir, uint32_t k) {
+    auto& lib = livehd::Hhds_graph_library::instance(dir);
+    auto  pio = lib.create_io("top");
+    pio->add_input("d", 0);
+    pio->add_output("q", 1);
+    auto pg  = pio->create_graph();
+    auto sum = create_typed_node(*pg, Ntype_op::Sum);
+    for (int i = 0; i < 3; ++i) {
+      auto gate = create_typed_node(*pg, Ntype_op::And);
+      livehd::graph_util::create_const(*pg, *Dlop::create_integer(i == 2 ? k : 3)).connect_sink(setup_sink_pid(gate, 0));
+      livehd::graph_util::create_const(*pg, *Dlop::create_integer(5)).connect_sink(setup_sink_pid(gate, 0));
+      gate.create_driver_pin(0).connect_sink(livehd::graph_util::setup_sink_by_name(sum, i == 0 ? "as" : "bs"));
+    }
+    pg->get_input_pin("d").connect_sink(livehd::graph_util::setup_sink_by_name(sum, "bs"));
+    sum.create_driver_pin(0).connect_sink(pg->get_output_pin("q"));
+    return pg;
+  };
+  livehd::semdiff::Semdiff_options o;
+  o.matching_names = true;
+
+  auto a  = build("lgdb_semdiff_dupc_a", 3);
+  auto a2 = build("lgdb_semdiff_dupc_a2", 3);
+  auto b  = build("lgdb_semdiff_dupc_b", 7);
+  EXPECT_TRUE(livehd::semdiff::structural_equivalent_traversal(a.get(), a2.get(), o));
+  EXPECT_FALSE(livehd::semdiff::structural_equivalent_traversal(a.get(), b.get(), o));
+}
+
 TEST(Semdiff, AggregateProvenanceLossKeepsPhysicalLeafIdentity) {
   auto make = [](const std::string& dir, bool keep_provenance) {
     auto& lib = livehd::Hhds_graph_library::instance(dir);

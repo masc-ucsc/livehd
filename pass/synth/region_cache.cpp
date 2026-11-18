@@ -219,6 +219,12 @@ Region_cache::Region_cache(std::string dir, uint64_t salt, bool scoped_libraries
   }
   const std::string want = std::format("{:016x}", salt_);
   if (auto s = doc.FindMember("salt"); s == doc.MemberEnd() || !s->value.IsString() || want != s->value.GetString()) {
+    if (incr_debug()) {
+      std::print("[abc-incr] cache {} discarded: salt {} != {}\n",
+                 dir_,
+                 s != doc.MemberEnd() && s->value.IsString() ? s->value.GetString() : "?",
+                 want);
+    }
     return;
   }
   auto r = doc.FindMember("regions");
@@ -413,6 +419,7 @@ Region_cache::Compare_result Region_cache::lookup_compare(const livehd::partitio
     so.matching_names    = true;
     so.matching_io_names = !cross_name;
     so.blackbox_subs     = livehd::debug::env<"LHD_ABC_INCR_NO_BLACKBOX">() == nullptr;
+    so.verbose           = incr_debug() && livehd::debug::env<"LHD_ABC_INCR_VERBOSE">() != nullptr;
     if (annotated || has_preroute_exclusions(*cached_pre)) {
       // The logical fast path deliberately ignores these physical annotations.
       // Verify every marked location under an exact graph bijection instead;

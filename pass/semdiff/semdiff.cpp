@@ -3651,6 +3651,57 @@ bool structural_equivalent_traversal(hhds::Graph* a, hhds::Graph* b, const Semdi
     return fold_operands(h, by_port);
   };
 
+  // Seed 3: an unpaired node whose operands are all constants or graph inputs -- a tied-off instance,
+  // one of several identical hot muxes. Neither a signature (identical siblings collide) nor a paired
+  // driver (constants are not worklist drivers) ever reaches it. Pair such nodes by operand description
+  // and debug nid; state cells keep their own name-based pairing. The exact verify below stays the
+  // only soundness gate.
+  {
+    auto source_only_nodes = [&](hhds::Graph* g, bool a_side) {
+      std::vector<hhds::Node_class> out;
+      for (auto node : g->body().nodes(hhds::Node_order::forward)) {
+        if (is_state(gu::type_op_of(node))
+            || (a_side ? ab.contains(node.get_class_index()) : ba.contains(node.get_class_index()))) {
+          continue;
+        }
+        bool source_only = true;
+        for_each_inp_operand(node, [&](const hhds::Pin_class&, const hhds::Pin_class& driver) {
+          source_only = source_only && (driver.is_const() || gu::is_graph_input_pin(driver));
+          return source_only;
+        });
+        if (source_only) {
+          out.push_back(node);
+        }
+      }
+      std::sort(out.begin(), out.end(), [&](const hhds::Node_class& x, const hhds::Node_class& y) {
+        const auto xc = canon(x, a_side);
+        const auto yc = canon(y, a_side);
+        return xc != yc ? xc < yc : x.get_debug_nid() < y.get_debug_nid();
+      });
+      return out;
+    };
+    auto   nodes_a = source_only_nodes(a, true);
+    auto   nodes_b = source_only_nodes(b, false);
+    size_t i = 0, j = 0;
+    while (i < nodes_a.size() && j < nodes_b.size() && !mismatch) {
+      const auto ka = canon(nodes_a[i], true);
+      const auto kb = canon(nodes_b[j], false);
+      if (ka < kb) {
+        ++i;
+      } else if (ka > kb) {
+        ++j;
+      } else {
+        if (!try_pair(nodes_a[i], nodes_b[j])) {
+          mismatch = true;
+          break;
+        }
+        enqueue_node_outputs(nodes_a[i], nodes_b[j]);
+        ++i;
+        ++j;
+      }
+    }
+  }
+
   while (!work.empty() && !mismatch) {
     auto [da, db] = work.back();
     work.pop_back();
@@ -3662,8 +3713,12 @@ bool structural_equivalent_traversal(hhds::Graph* a, hhds::Graph* b, const Semdi
           continue;
         }
         auto sn = e.sink.get_master_node();
-        if (is_cut(sn, opts.blackbox_subs)) {
-          continue;  // an anchor: paired by fsig-seed, its inputs are obligations
+        // A state cell is an anchor: paired by fsig-seed, its inputs are obligations. An UNPAIRED Sub
+        // is not: when a combinational loop runs through a child instance, its operands never got a
+        // forward signature, so nothing seeded it. Pair it here, from a driver both sides already
+        // agree on; verify below still checks its interface and every input edge.
+        if (is_cut(sn, opts.blackbox_subs) && gu::type_op_of(sn) != Ntype_op::Sub) {
+          continue;
         }
         auto ci = sn.get_class_index();
         if ((a_side ? ab.contains(ci) : ba.contains(ci))) {
@@ -3730,13 +3785,32 @@ bool structural_equivalent_traversal(hhds::Graph* a, hhds::Graph* b, const Semdi
   // all surface here as an inequality, so a `true` is a genuine isomorphism.
   for (auto node : a->body().nodes(hhds::Node_order::forward)) {
     if (!ab.contains(node.get_class_index())) {
-      return fail(std::format("unpaired ref node {}", node.get_debug_nid()));
+      std::string why;
+      if (opts.verbose) {
+        for_each_inp_operand(node, [&](const hhds::Pin_class& sink, const hhds::Pin_class& driver) {
+          (void)sink;
+          if (gu::is_graph_input_pin(driver)) {
+            why += " [in]";
+          } else if (driver.is_const()) {
+            why += " [const]";
+          } else {
+            auto dm  = driver.get_master_node();
+            why     += std::format(" [{}#{}{}]",
+                               Ntype::get_name(gu::type_op_of(dm)),
+                               dm.get_debug_nid(),
+                               ab.contains(dm.get_class_index()) ? " paired" : " UNPAIRED");
+          }
+          return true;
+        });
+      }
+      return fail(
+          std::format("unpaired ref node {} ({}) drivers:{}", node.get_debug_nid(), Ntype::get_name(gu::type_op_of(node)), why));
     }
   }
   size_t b_nodes = 0;
   for (auto node : b->body().nodes(hhds::Node_order::forward)) {
     if (!ba.contains(node.get_class_index())) {
-      return fail(std::format("unpaired impl node {}", node.get_debug_nid()));
+      return fail(std::format("unpaired impl node {} ({})", node.get_debug_nid(), Ntype::get_name(gu::type_op_of(node))));
     }
     ++b_nodes;
   }

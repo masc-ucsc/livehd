@@ -1439,6 +1439,11 @@ void Region_driver::map_region(const livehd::partition::Region_body& rb) {
     q.resynth     = true;
     q.ms          = since();
     qor_.push_back(std::move(q));
+    // The rewritten wiring is a pure function of the region: cache it like a mapped body. Without
+    // this the region re-ran, and counted as a miss, on every otherwise fully warm run.
+    if (incr_ != nullptr && pre_g != nullptr) {
+      incr_->store(rb, *rb.pre_lib, rb.pre_name, qor_.back(), recipe, outlib_);
+    }
     report_completion(qor_.back());
     return;
   }
