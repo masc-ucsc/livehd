@@ -1292,6 +1292,9 @@ livehd::placement::Options placement_options(const Options& opts) {
     // (0 there disables the mapper's buffering tail; the reset tree still needs a cap, so it keeps 16).
     const auto fanout = integer("max_fanout", "16");
     out.reset_fanout  = fanout >= 2 ? static_cast<unsigned>(fanout) : 16U;
+    // The virtual buffer trees keep the mapper's fanout cap as their requirement.
+    out.virtual_buffer_fanout = out.reset_fanout;
+    out.virtual_buffers       = truthy(synth_set(opts, "place.virtual_buffers", "true"));
     out.pcrs          = truthy(synth_set(opts, "place.pcrs", "true"));
     out.pcrs_depth    = std::make_shared<livehd::pcrs::Depth_state>();
     if (!truthy(synth_set(opts, "place.pcrs.reset_pipeline", "true"))) {
@@ -3501,6 +3504,7 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
   std::deque<livehd::placement::Repair_result> repair_loop_keep;  // the graph libraries of every repair-loop iteration, accepted or not
   std::string                         repair_loop_report;           // JSON array, one object per iteration
   livehd::placement::Repair_result    timed_placement;
+  livehd::placement::Repair_result    virtual_expanded;  // the post-GP expansion of the virtual buffer trees
   livehd::placement::Repair_result    region_refined;  // keeps its graph library alive for the placement it returned
   livehd::placement::Repair_result    timing_kick;     // timing-driven placement reacting to the region refinement
   livehd::placement::Repair_result    sat_aligned;     // the SAT-legalization step (after resize/repair)
@@ -4102,12 +4106,19 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
         const auto  cleaned = livehd::placement::remove_synthesis_buffers(**found, *library, place_options);
         fs::create_directories(place_options.output_dir);
         const auto mode = prepared_before ? std::ios::app : std::ios::trunc;
-        std::ofstream(place_options.output_dir + "/buffer_cleanup.jsonl", mode)
-            << std::format("{{\"removed\":{},\"boundary\":{},\"protected\":{},\"unsupported\":{}}}\n",
-                           cleaned.removed,
-                           cleaned.boundary,
-                           cleaned.protected_cells,
-                           cleaned.unsupported);
+        std::ofstream(place_options.output_dir + "/buffer_cleanup.jsonl", mode) << std::format(
+            "{{\"removed\":{},\"boundary\":{},\"protected\":{},\"unsupported\":{},\"inverter_pairs\":{},\"virtual_trees\":{}}}\n",
+            cleaned.removed,
+            cleaned.boundary,
+            cleaned.protected_cells,
+            cleaned.unsupported,
+            cleaned.inverter_pairs,
+            cleaned.virtual_trees.size());
+        if (place_options.virtual_buffers) {
+          place_options.virtual_buffer_trees
+              = std::make_shared<const std::map<std::string, livehd::placement::Options::Virtual_buffer>>(
+                  std::move(cleaned.virtual_trees));
+        }
         prepared_libraries.push_back(std::move(library));
         prepared_before = true;
         return cleaned.graph;
@@ -4356,6 +4367,21 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
       }
       if (io_flow) {
         timed_placement.timing = io_flow->take_final_timing();
+      }
+      if (!macro_plan_only && place_options.virtual_buffers && place_options.virtual_buffer_trees
+          && !place_options.virtual_buffer_trees->empty()) {
+        // Realize the virtual buffer trees now that global placement has converged: each wide net the mapper had
+        // buffered gets a position-aware tree, legalized in place, before timing-driven placement and repair.
+        Phase_timer                          phase(res, "pass.place.virtual_buffers");
+        livehd::placement::Virtual_expansion stats;
+        Stdout_to_log                        redirect(next_log_path(opts, "pass.place.virtual_buffers"));
+        virtual_expanded = livehd::placement::expand_virtual_buffers(std::move(placed), place_options, evaluate, &stats);
+        placed           = std::move(virtual_expanded.placed);
+        if (virtual_expanded.timing) {
+          timed_placement.timing = std::move(virtual_expanded.timing);
+        }
+        res.recipe_steps.emplace_back(
+            std::format("pass.place.virtual_buffers.expanded={}.buffers={}", stats.expanded, stats.buffers));
       }
       // A T3 request can ask for a bounded terminal repair on a no-resize run.
       // It starts after replay and legalization; all changes use the ordinary timing acceptance checks.

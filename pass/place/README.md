@@ -182,6 +182,51 @@ cones remain, including controls crossing region boundaries. Logical mapped
 definitions and their resynthesis identities/history are unchanged. The cleanup
 also runs on the new physical copy after an accepted color restart, but never
 on repair/ECO trials. `buffer_cleanup.jsonl` records removed and retained counts.
+
+### Virtual buffer trees (`synth.place.virtual_buffers`, default on)
+
+A fanout buffer tree built at mapping time groups loads before any position
+exists, so its buffers' loads end up scattered and global placement cannot
+untangle them (HighTide: 1.4-2.5x OpenROAD's HPWL with the trees, 1.06-1.3x
+without). With virtual buffer trees the cleanup above converts every tree into
+one *virtual node* instead of keeping wide trees whole
+(`buffer_cleanup.max_fanout` then does not apply):
+
+- **Representation.** The tree's root driver, its final loads and the mapper's
+  fanout cap (`synth.max_fanout`) plus the root buffer's master, keyed by the root
+  driver's physical pin label (`Options::virtual_buffer_trees`, also counted in
+  `buffer_cleanup.jsonl`). Polarity-neutral inverter pairs -- an inverter whose
+  every load is another inverter, from the mapper or an imported netlist -- are
+  collapsed onto the first inverter's driver and recorded the same way. Cells the
+  design instantiated (`attrs::user_cell`), fixed cells, ports and clock/reset
+  cones are never bypassed. Only the private physical copy changes: logical
+  definitions, mapper cache keys and warm-run reuse are untouched, and a flow
+  without placement keeps the mapper's balanced tree (the fully mapped fallback).
+- **Before expansion.** Global placement and its timing checkpoints see the
+  root driving every load directly. The timer charges that net its full load, so
+  it is pessimistic, not optimistic (minimax: -22.9 ns before expansion).
+- **Expansion.** `expand_virtual_buffers()` runs once global placement has
+  converged, before timing-driven placement and repair. A recorded root whose net
+  still has more loads than the fanout cap *and* is electrically overloaded
+  (placed wire RC plus sink pins against the driver's Liberty max_capacitance and
+  a lumped 10-90% slew estimate against max_transition) gets a tree from repair's
+  timing-aware planner (sink positions, drive ladder, required times). When that
+  planner finds nothing to split although the net is overloaded -- a timer that
+  misses the far sinks' slew -- the mapper's fanout- and capacitance-bounded
+  spatial tree (`plan_buffers`) is built regardless. Nets within limits stay
+  direct; timing-driven repair may still split them. Expansion is mandatory, not a
+  timed trial. New cells are legalized by the single-cell ECO and the result is
+  re-timed; `virtual_buffers/report.json` records roots, expanded nets, buffers,
+  and the displacement figures below.
+- **Space.** No area is reserved during GP. The bypassed trees' area is
+  already in the density budget, and expansion inserts far fewer buffers than it
+  removed (minimax 445 vs 1149, sha3 562 vs 701, litedram 416 vs 1610), only on
+  overloaded nets. Measured on HighTide: new buffers land 0.4-0.7 um (mean,
+  max 3 um) from their planned positions and 5-128 existing cells move, by 0.6 um
+  on average. Macro designs show a few long moves where a planned buffer falls on
+  a macro or in a full channel; the macro row strip keeps channel headroom.
+- **Disable** with `synth.place.virtual_buffers=false` (wide trees stay whole,
+  the `buffer_cleanup.max_fanout` cap) or `synth.place.buffer_cleanup=false`.
 The synthesis host releases that cleanup graph once the zero-wire timing seed
 owns its flattened copy. The seed keeps RC in memory without serializing a second
 copy into graph attributes; completed placements still persist their RC for

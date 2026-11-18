@@ -334,6 +334,18 @@ struct Options {
   std::string                                     control_ports;  // override optional roots; recognized resets stay excluded
   // Synthesis buffer cleanup keeps a buffer tree whole when its root net reaches more final loads than this (0: no cap).
   unsigned                                        buffer_cleanup_max_fanout = 256;
+  // Virtual buffer trees (synth.place.virtual_buffers): buffer cleanup records each synthesis fanout tree it bypasses
+  // as one virtual node -- the root driver, its final loads and the mapper's fanout cap -- instead of capping wide
+  // trees, and expand_virtual_buffers() rebuilds it from sink positions once global placement has converged.
+  // Keyed by the root driver's physical pin label ("cell:pin", or a port name).
+  struct Virtual_buffer {
+    std::string master;       // the buffer cell the mapper used at the tree root (the expansion's seed drive)
+    unsigned    loads   = 0;  // final loads behind the tree
+    unsigned    buffers = 0;  // synthesis buffers the tree had
+  };
+  bool                                                         virtual_buffers       = true;
+  unsigned                                                     virtual_buffer_fanout = 16;  // synth.max_fanout
+  std::shared_ptr<const std::map<std::string, Virtual_buffer>> virtual_buffer_trees;
   Evaluate                                        fp_evaluate;
   // Optional lightweight path ranking for placement weights. Detailed timing
   // remains available through fp_evaluate for resizing and resynthesis.

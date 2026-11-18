@@ -281,3 +281,13 @@ dividend for remainder (the SMT-LIB bvurem/bvsrem convention). LiveHD treats
 division and remainder by zero as X (`pass/lec/encode.cpp`: value 0 with an
 all-ones x-mask), so this is one legal refinement and `lhd lec` does not constrain
 it. Runtime divisors and non-power-of-two constants are supported.
+
+## Fanout buffering and placement
+
+The mapper still builds a balanced fanout tree for every net over
+`synth.max_fanout`: a flow that stops at synthesis gets a fully mapped netlist,
+and the logical definitions, their cache keys and LEC see that tree. When full
+placement follows, placement treats each such tree as a virtual buffer-tree node
+(driver, loads, fanout cap) on its private physical copy and realizes it from
+sink positions after global placement -- see "Virtual buffer trees" in
+`pass/place/README.md`. Synthesis output and incremental reuse do not change.

@@ -211,6 +211,8 @@ TEST_F(Buffer_repair, SynthesisBufferCleanupKeepsTreesWiderThanTheCap) {
   }
   graph->get_output_pin("y").connect_driver(gate("sky130_fd_sc_hd__buf_1", "output_binding", inv));
   // The root net (`logic`) reaches 4 final loads: three under `internal`, one through the output binding.
+  // The cap is the fallback without virtual buffer trees; with them every tree is bypassed and recorded.
+  options.virtual_buffers           = false;
   options.buffer_cleanup_max_fanout = 3;
   auto kept                         = remove_synthesis_buffers(*graph, flat, options);
   EXPECT_EQ(kept.removed, 0U);
@@ -221,6 +223,45 @@ TEST_F(Buffer_repair, SynthesisBufferCleanupKeepsTreesWiderThanTheCap) {
   options.buffer_cleanup_max_fanout = 0;  // no cap
   hhds::GraphLibrary third;
   EXPECT_EQ(remove_synthesis_buffers(*graph, third, options).removed, 1U);
+}
+TEST_F(Buffer_repair, SynthesisBufferCleanupRecordsVirtualTreesWithoutTheCap) {
+  auto inv = gate("sky130_fd_sc_hd__inv_1", "logic", graph->get_input_pin("a"));
+  auto b1  = gate("sky130_fd_sc_hd__buf_1", "internal", inv);
+  for (int i = 0; i < 3; ++i) {
+    gate("sky130_fd_sc_hd__inv_1", "load" + std::to_string(i), b1);
+  }
+  graph->get_output_pin("y").connect_driver(gate("sky130_fd_sc_hd__buf_1", "output_binding", inv));
+  options.virtual_buffers           = true;
+  options.buffer_cleanup_max_fanout = 3;  // ignored: the wide tree becomes a virtual node
+  auto cleaned                      = remove_synthesis_buffers(*graph, flat, options);
+  EXPECT_EQ(cleaned.removed, 1U);
+  ASSERT_EQ(cleaned.virtual_trees.size(), 1U);
+  const auto& [root, tree] = *cleaned.virtual_trees.begin();
+  EXPECT_EQ(root, "logic:Y");
+  EXPECT_EQ(tree.loads, 4U);
+  EXPECT_EQ(tree.buffers, 1U);
+  EXPECT_EQ(tree.master, "sky130_fd_sc_hd__buf_1");
+}
+TEST_F(Buffer_repair, SynthesisBufferCleanupCollapsesInverterPairsIntoAVirtualTree) {
+  auto in = gate("sky130_fd_sc_hd__buf_1", "input_binding", graph->get_input_pin("a"));
+  auto x1 = gate("sky130_fd_sc_hd__inv_1", "x1", in);
+  auto p0 = gate("sky130_fd_sc_hd__inv_1", "p0", x1);
+  auto p1 = gate("sky130_fd_sc_hd__inv_1", "p1", x1);
+  auto l0 = gate("sky130_fd_sc_hd__inv_1", "l0", p0);
+  gate("sky130_fd_sc_hd__inv_1", "l1", p1);
+  graph->get_output_pin("y").connect_driver(gate("sky130_fd_sc_hd__buf_1", "output_binding", l0));
+  options.virtual_buffers = true;
+  auto cleaned            = remove_synthesis_buffers(*graph, flat, options);
+  EXPECT_EQ(cleaned.inverter_pairs, 2U);
+  ASSERT_TRUE(cleaned.virtual_trees.contains("input_binding:X"));
+  EXPECT_EQ(cleaned.virtual_trees.at("input_binding:X").loads, 2U);
+  EXPECT_EQ(cleaned.virtual_trees.at("input_binding:X").buffers, 3U);
+  Result state;
+  state.graph = cleaned.graph;
+  equivalent(state);                // a -> l0 -> y: still one inversion
+  options.virtual_buffers = false;  // without virtual trees the pairs stay
+  hhds::GraphLibrary kept;
+  EXPECT_EQ(remove_synthesis_buffers(*graph, kept, options).inverter_pairs, 0U);
 }
 TEST_F(Buffer_repair, SynthesisBufferCleanupPreservesFixedAndControlCones) {
   auto      inv   = gate("sky130_fd_sc_hd__inv_1", "logic", graph->get_input_pin("a"));

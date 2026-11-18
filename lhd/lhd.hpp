@@ -2045,6 +2045,12 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      Synth_set_option::Kind::integer,
      "with buffer_cleanup: keep a synthesis buffer tree whole when its root net reaches more final loads than this (very wide "
      "decode/enable nets that location-based repair does not rebuild); 0 bypasses every tree"},
+    {"place.virtual_buffers",
+     "true",
+     Synth_set_option::Kind::boolean,
+     "with buffer_cleanup: every bypassed synthesis buffer tree becomes a virtual node (driver, loads, synth.max_fanout) that "
+     "global placement sees as one net, realized after GP as a position-aware tree and legalized before timing-driven "
+     "placement and repair; buffer_cleanup.max_fanout then does not apply. false: wide trees stay whole (the cap)"},
     {"place.resize.engine",
      "legacy",
      Synth_set_option::Kind::file,

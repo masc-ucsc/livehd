@@ -4,11 +4,11 @@
 #include <fnmatch.h>
 
 #include <algorithm>
-#include <cstdlib>
 #include <cctype>
 #include <charconv>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -21,6 +21,7 @@
 #include <unordered_map>
 
 #include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
 #include "attrs.hpp"
 #include "growth_budget.hpp"
 #include "handoff_rows.hpp"
@@ -1156,7 +1157,10 @@ std::optional<Buffer_tree> apply(hhds::Graph& graph, const Inventory& cells, con
   const auto   fanout    = b.max_fanout ? std::min(edit.fanout, static_cast<unsigned>(std::max(0.0, *b.max_fanout))) : edit.fanout;
   Buffer_tree  plan;
   std::vector<const Buffer*> drive_cells{&b};
-  if (timing.has_pins()) {
+  // A virtual buffer tree first takes the timing-aware planner (drive ladder, required times), like repair. When that
+  // finds nothing to split although the net is electrically overloaded (a timer that misses the far sinks' slew),
+  // "virtual_fixed" builds the mapper's fanout- and capacitance-bounded spatial tree regardless of the timer.
+  if (timing.has_pins() && edit.kind != "virtual_fixed") {
     drive_cells.clear();
     std::vector<Buffer_drive> drives;
     const auto                model = [&](const Buffer& cell) {
@@ -1757,7 +1761,9 @@ Buffer_cleanup remove_synthesis_buffers(hhds::Graph& source, hhds::GraphLibrary&
       continue;
     }
     const auto original = origin.src_node;
-    if (fixed(node) || fixed(original) || protected_names.contains(std::string(node.get_name()))) {
+    // A buffer the design instantiated (attrs::user_cell) is a timing anchor SDC can name: never bypassed.
+    if (fixed(node) || fixed(original) || protected_names.contains(std::string(node.get_name()))
+        || node.attr(attrs::user_cell).has() || original.attr(attrs::user_cell).has()) {
       ++result.protected_cells;
       continue;
     }
@@ -1774,7 +1780,9 @@ Buffer_cleanup remove_synthesis_buffers(hhds::Graph& source, hhds::GraphLibrary&
       ++result.boundary;
       continue;
     }
-    if (options.buffer_cleanup_max_fanout > 0) {
+    // With virtual buffer trees every tree is bypassed: the wide ones are exactly the nets the post-placement
+    // expansion must rebuild, so keeping them whole (the cap) is only the fallback without virtual trees.
+    if (!options.virtual_buffers && options.buffer_cleanup_max_fanout > 0) {
       const auto root = root_of(node);
       if (!root.is_const() && loads_of(root) > options.buffer_cleanup_max_fanout) {
         ++result.protected_cells;
@@ -1782,6 +1790,21 @@ Buffer_cleanup remove_synthesis_buffers(hhds::Graph& source, hhds::GraphLibrary&
       }
     }
     remove.push_back(node);
+  }
+  if (options.virtual_buffers) {
+    // One virtual node per tree root, recorded before the bypass rewires the loads onto it.
+    for (auto node : remove) {
+      const auto root = root_of(node);
+      if (root.is_const()) {
+        continue;
+      }
+      auto& tree = result.virtual_trees[physical_label(root)];
+      ++tree.buffers;
+      tree.loads = static_cast<unsigned>(loads_of(root));
+      if (input(node, *buffer(node, cells)) == root || tree.master.empty()) {
+        tree.master = buffer(node, cells)->name;  // the drive the mapper put at the root
+      }
+    }
   }
   std::sort(remove.begin(), remove.end(), [](Node a, Node b) { return a.get_debug_nid() < b.get_debug_nid(); });
   for (auto node : remove) {
@@ -1800,6 +1823,323 @@ Buffer_cleanup remove_synthesis_buffers(hhds::Graph& source, hhds::GraphLibrary&
     node.del_node();
     ++result.removed;
   }
+  if (options.virtual_buffers) {
+    // Inverter pairs are buffering too: an inverter whose every load is another inverter is a polarity-neutral
+    // fanout tree (a mapper's or an imported netlist's). Collapse it onto the first inverter's driver and record it
+    // as part of that driver's virtual tree. A port load, a fixed, protected or design-instantiated cell keeps it.
+    const auto inverter = [&](Node n) -> const Buffer* {
+      const auto* c = combinational(n, cells);
+      return c && c->inputs.size() == 1 && liberty::cell_truth(*c) == uint64_t{0x5555555555555555} ? c : nullptr;
+    };
+    const auto keep
+        = [&](Node n) { return fixed(n) || n.attr(attrs::user_cell).has() || protected_names.contains(std::string(n.get_name())); };
+    std::vector<Node> candidates;
+    for (auto n : result.graph->body().nodes()) {
+      if (inverter(n)) {
+        candidates.push_back(n);
+      }
+    }
+    std::sort(candidates.begin(), candidates.end(), [](Node a, Node b) { return a.get_debug_nid() < b.get_debug_nid(); });
+    absl::flat_hash_set<uint64_t> gone;
+    for (auto first : candidates) {
+      if (gone.contains(first.get_debug_nid()) || keep(first)) {
+        continue;
+      }
+      const auto* a       = inverter(first);
+      const auto  drivers = first.get_sink_pin(a->inputs.front()).get_driver_pins();
+      const auto  out     = output(first, *a);
+      if (drivers.size() != 1 || drivers.front().is_const() || gu::bits_of(drivers.front()) != 1 || gu::bits_of(out) != 1
+          || drivers.front().get_master_node().is_input_node()) {
+        continue;
+      }
+      const auto        loads = sinks(out);
+      std::vector<Node> seconds;
+      bool              ok = !loads.empty();
+      for (auto load : loads) {
+        auto        second = load.get_master_node();
+        const auto* b      = second == first ? nullptr : inverter(second);
+        if (!b || keep(second) || gone.contains(second.get_debug_nid()) || gu::bits_of(output(second, *b)) != 1) {
+          ok = false;
+          break;
+        }
+        const auto targets = sinks(output(second, *b));
+        if (std::any_of(targets.begin(), targets.end(), [](Pin t) { return t.get_master_node().is_output_node(); })) {
+          ok = false;
+          break;
+        }
+        if (std::find(seconds.begin(), seconds.end(), second) == seconds.end()) {
+          seconds.push_back(second);
+        }
+      }
+      if (!ok) {
+        continue;
+      }
+      const auto root    = drivers.front();
+      unsigned   rewired = 0;
+      for (auto second : seconds) {
+        const auto* b  = inverter(second);
+        const auto  ob = output(second, *b);
+        gu::carry_signal_roles(ob, root);
+        gu::carry_preroute_exclusion(ob, root);
+        for (auto sink : sinks(ob)) {
+          gu::drop_drivers(sink);
+          sink.connect_driver(root);
+          ++rewired;
+        }
+        gone.insert(second.get_debug_nid());
+        second.del_node();
+      }
+      gone.insert(first.get_debug_nid());
+      first.del_node();
+      result.inverter_pairs += static_cast<unsigned>(seconds.size());
+      auto& tree             = result.virtual_trees[physical_label(root)];
+      tree.buffers          += static_cast<unsigned>(seconds.size()) + 1;
+      tree.loads            += rewired;
+    }
+  }
+  return result;
+}
+Repair_result expand_virtual_buffers(Result initial, const Options& options, const Evaluate& evaluate, Virtual_expansion* stats) {
+  Repair_result     result;
+  Virtual_expansion local;
+  auto&             st = stats ? *stats : local;
+  result.placed        = std::move(initial);
+  if (!options.virtual_buffers || !options.virtual_buffer_trees || options.virtual_buffer_trees->empty()
+      || options.mutation_policy().no_buffer_edits || !result.placed.graph || !result.placed.parasitics) {
+    return result;
+  }
+  const auto&    tech            = options.technology().lef;
+  const auto     cells           = inventory(options, tech);
+  const bool     protect_reset   = !pcrs_active(options);
+  const auto     protected_names = protected_buffers(*result.placed.graph,
+                                                 cells,
+                                                 scan_special_pins(options.technology().cells, protect_reset),
+                                                 protect_reset,
+                                                 options.control_ports);
+  const unsigned fanout          = std::max(2U, options.virtual_buffer_fanout);
+  // The fallback drive: the smallest identity buffer that may be used.
+  const Buffer*  fallback        = nullptr;
+  for (const auto& [name, cell] : cells) {
+    if (identity(cell) && !matches_dont_use(name, options) && (!fallback || cell.area < fallback->area)) {
+      fallback = &cell;
+    }
+  }
+  // Pin capacitances for the electrical estimate below; the tree itself does not depend on the timer's slack or slew.
+  auto                                                                 score = evaluate(result.placed);
+  std::map<std::pair<std::string, std::string>, liberty::Output_drive> state_drives;
+  for (const auto& drive : options.technology().cells.drives) {
+    if (drive.sequential) {
+      state_drives.emplace(std::pair{drive.name, drive.output}, drive);
+    }
+  }
+  Node_index nodes;
+  for (auto n : result.placed.graph->body().nodes()) {
+    if (!n.get_name().empty()) {
+      nodes.emplace(std::string(n.get_name()), n);
+    }
+  }
+  // Whether the driver can carry the whole net by itself: a first-order, timer-independent electrical estimate
+  // from the placed wire (RC nodes and edges) and the sink pins against the driver's Liberty limits. A net within
+  // them stays direct (timing-driven repair may still split it); one over them -- a several-hundred-load decode
+  // net -- is realized now, whatever the timer reported for it.
+  const auto overloaded = [&](const physical::Rc_net& net) {
+    const auto colon = net.driver.rfind(':');
+    if (colon == std::string::npos) {
+      return false;  // a port: its drive is the environment's
+    }
+    const auto found = nodes.find(net.driver.substr(0, colon));
+    if (found == nodes.end()) {
+      return false;
+    }
+    std::optional<double> max_cap, max_slew;
+    double                resistance = 0;
+    if (const auto* cell = combinational(found->second, cells)) {
+      max_cap    = cell->max_capacitance_ff;
+      max_slew   = cell->max_transition_ps;
+      resistance = cell->resistance_ohm;
+    } else if (const auto io = found->second.get_subnode_io()) {
+      const auto drive = state_drives.find({std::string(io->get_name()), net.driver.substr(colon + 1)});
+      if (drive == state_drives.end()) {
+        return false;
+      }
+      max_cap    = drive->second.max_capacitance_ff;
+      max_slew   = drive->second.max_transition_ps;
+      resistance = drive->second.resistance_ohm;
+    } else {
+      return false;
+    }
+    double load = 0, wire_r = 0;
+    for (const auto& node : net.nodes) {
+      load += node.capacitance_ff;
+      if (!node.pin.empty() && node.pin != net.driver) {
+        if (const auto* pin = score.find_label(node.pin)) {
+          load += pin->capacitance_ff.value_or(0);
+        }
+      }
+    }
+    for (const auto& edge : net.edges) {
+      wire_r += edge.resistance_ohm;
+    }
+    // 10-90% transition of a lumped driver plus half the wire's RC (Elmore of a distributed line), in ps.
+    const double slew = 2.2 * (resistance * load + .5 * wire_r * load) * 1e-3;
+    return (max_cap && *max_cap > 0 && load > *max_cap) || (max_slew && *max_slew > 0 && slew > *max_slew);
+  };
+  std::vector<Edit> selected;
+  for (const auto& net : result.placed.parasitics->nets) {
+    const auto tree = options.virtual_buffer_trees->find(net.driver);
+    if (tree == options.virtual_buffer_trees->end()) {
+      continue;
+    }
+    ++st.roots;
+    const auto loads = std::count_if(net.nodes.begin(), net.nodes.end(), [](const auto& p) { return !p.pin.empty(); }) - 1;
+    if (loads <= static_cast<int64_t>(fanout) || !overloaded(net)) {
+      ++st.skipped;  // within the mapper's fanout (GP-time repair or a narrow tree), or electrically fine direct
+      continue;
+    }
+    const auto colon = net.driver.rfind(':');
+    const auto owner = colon == std::string::npos ? "__port_" + net.driver : net.driver.substr(0, colon);
+    if (protected_names.contains(owner) || protected_names.contains("@port:" + net.driver)) {
+      ++st.skipped;
+      continue;
+    }
+    const auto  seed = cells.find(tree->second.master);
+    const auto* master
+        = seed != cells.end() && identity(seed->second) && !matches_dont_use(seed->first, options) ? &seed->second : fallback;
+    if (!master) {
+      ++st.failed;
+      continue;
+    }
+    selected.push_back({"virtual", owner, master->name, fanout, 0, net.driver, "virtual", 1});
+  }
+  std::sort(selected.begin(), selected.end(), [](const Edit& a, const Edit& b) { return a.driver < b.driver; });
+  if (selected.empty()) {
+    return result;
+  }
+  hhds::GraphLibrary draft;
+  auto               graph = partition::flatten_hierarchy(result.placed.graph.get(),
+                                            &draft,
+                                            result.placed.graph->get_name(),
+                                            nullptr,
+                                            false,
+                                                          {},
+                                                          {},
+                                            true);
+  if (!graph) {
+    throw std::runtime_error("cannot clone the placement for virtual buffer expansion");
+  }
+  Apply_index              index(*graph, result.placed);
+  std::vector<std::string> changed;
+  for (const auto& edit : selected) {
+    // apply plans and validates before mutating, so a refused plan leaves the net's direct wiring for the next try.
+    std::optional<Buffer_tree> tree;
+    for (const auto* kind : {"virtual", "virtual_fixed"}) {
+      auto attempt = edit;
+      attempt.kind = kind;
+      try {
+        tree = apply(*graph, cells, attempt, protected_names, result.placed, score, options, tech, &index);
+      } catch (const std::runtime_error&) {
+        tree.reset();
+      }
+      if (tree && !tree->buffers.empty()) {
+        st.fixed += attempt.kind == "virtual_fixed";
+        break;
+      }
+    }
+    if (tree && !tree->buffers.empty()) {
+      ++st.expanded;
+      st.buffers += static_cast<unsigned>(tree->buffers.size());
+      changed.push_back(edit.node);
+    } else {
+      ++st.failed;
+    }
+  }
+  if (changed.empty()) {
+    result.timing = std::move(score);
+    return result;
+  }
+  auto trial_options = options;
+  trial_options.cache_dir.clear();
+  trial_options.legalize_cells = true;
+  if (options.optimization_multirow_eco) {
+    trial_options.multirow_eco = options.optimization_multirow_eco;
+  }
+  const auto directory = options.output_dir + "/virtual_buffers";
+  fs::create_directories(directory);
+  trial_options.net_weights   = std::move(index.weights);
+  trial_options.previous      = std::make_shared<physical::Floorplan>(result.placed.floorplan);
+  trial_options.changed_cells = std::move(changed);
+  trial_options.output_dir    = directory;
+  trial_options.own_frame     = options.own_frame || options.floorplan.empty();
+  trial_options.floorplan     = directory + "/floorplan.def";
+  auto frame                  = result.placed.floorplan;
+  std::erase_if(frame.components, [](const auto& c) {
+    return c.place.status != Ann_place::Status::FIXED && c.place.status != Ann_place::Status::LOCKED;
+  });
+  for (auto& port : frame.terminals) {
+    port.status = Ann_place::Status::FIXED;
+  }
+  physical::write_def(frame, trial_options.floorplan);
+  // Displacement accounting (the space question): where the planner put each new buffer against where legalization
+  // found room, and how far the existing cells had to move for them.
+  std::map<std::string, std::pair<int64_t, int64_t>> before, seeds;
+  for (const auto& c : result.placed.floorplan.components) {
+    before.emplace(std::string(c.name), std::pair{c.place.x, c.place.y});
+  }
+  for (auto n : graph->body().nodes()) {
+    if (const auto name = std::string(n.get_name()); !name.empty() && !before.contains(name) && n.attr(attrs::place).has()) {
+      const Ann_place seed = n.attr(attrs::place).get();
+      seeds.emplace(name, std::pair{seed.x, seed.y});
+    }
+  }
+  auto owner               = std::make_unique<hhds::GraphLibrary>();
+  auto placed              = place(*graph, *owner, trial_options);
+  placed.gp_density_weight = result.placed.gp_density_weight;
+  {
+    const double dbu   = placed.floorplan.dbu > 0 ? double(placed.floorplan.dbu) : 1.0;
+    double       moved = 0, inserted = 0;
+    for (const auto& c : placed.floorplan.components) {
+      const auto name = std::string(c.name);
+      const auto at   = [&](const auto& m) { return m.find(name); };
+      double     d    = -1;
+      if (const auto b = at(before); b != before.end()) {
+        d = (std::abs(c.place.x - b->second.first) + std::abs(c.place.y - b->second.second)) / dbu;
+        if (d > 0) {
+          ++st.moved_cells;
+          moved           += d;
+          st.moved_max_um  = std::max(st.moved_max_um, d);
+        }
+      } else if (const auto seed = at(seeds); seed != seeds.end()) {
+        d                 = (std::abs(c.place.x - seed->second.first) + std::abs(c.place.y - seed->second.second)) / dbu;
+        inserted         += d;
+        st.buffer_max_um  = std::max(st.buffer_max_um, d);
+        ++st.placed_buffers;
+      }
+    }
+    st.moved_mean_um  = st.moved_cells ? moved / st.moved_cells : 0;
+    st.buffer_mean_um = st.placed_buffers ? inserted / st.placed_buffers : 0;
+  }
+  auto next     = evaluate(placed);
+  result.placed = std::move(placed);
+  result.libraries.push_back(std::move(owner));
+  refresh_repair_weights(result.placed, options, next);
+  std::ofstream(directory + "/report.json") << std::format(
+      "{{\"roots\":{},\"expanded\":{},\"fixed\":{},\"buffers\":{},\"skipped\":{},\"failed\":{},\"buffer_disp_mean_um\":{:.3f},"
+      "\"buffer_disp_max_um\":{:.3f},\"moved_cells\":{},\"moved_mean_um\":{:.3f},\"moved_max_um\":{:.3f},\"wns_before\":{},"
+      "\"wns_after\":{}}}\n",
+      st.roots,
+      st.expanded,
+      st.fixed,
+      st.buffers,
+      st.skipped,
+      st.failed,
+      st.buffer_mean_um,
+      st.buffer_max_um,
+      st.moved_cells,
+      st.moved_mean_um,
+      st.moved_max_um,
+      score.wns.value_or(0),
+      next.wns.value_or(0));
+  result.timing = std::move(next);
   return result;
 }
 bool            timing_improves(const Timing_feedback& before, const Timing_feedback& after) { return retain(before, after); }
