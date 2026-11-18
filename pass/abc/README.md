@@ -299,8 +299,8 @@ cell's enable, and the gate output becomes a PI read back from the cell -- so
 the registers cross as ordinary latches clocked by the cell (a negedge one
 through the shared clock inverter) and any other reader of the gated clock
 keeps working. Anything else (the active-low `clk | ~latch` flavour, a latch
-with a reset or open on the wrong phase, a Liberty without such a cell) stays
-native with the precise reason (`derived-clock-native`, `icg-native`); pass.color
+with a reset or open on the wrong phase, a Liberty without such a cell) keeps
+the gate native (`icg-native` for a recognized gate without a usable cell); pass.color
 keeps a gate's latch in its AND's color so the two meet in one region.
 `synth.derived_clock=true` (the default, shared with pass.usyn) maps those registers to ordinary
 DFF / clear / preset cells instead, clocked by the mapped clock logic: the clock
@@ -310,7 +310,9 @@ clock fanout tree buffers it like an ICG output (`icg_fanout`; `lhd synth` with
 `synth.place=true` turns that tree off unless `pass.abc.icg_fanout` is set, because the
 placed netlist goes to CTS, which owns every clock net). It needs a DFF cell and a flow
 that keeps every latch as crossed, like the ICG and async cells; a negedge
-register (the cells are posedge-only) and a multi-bit clock stay native. Use it
+register takes the inverted mapped clock net, while a multi-bit clock stays native.
+With `synth.derived_clock=false`, unsupported gates keep their registers native
+with the precise `derived-clock-native` reason. Use derived-clock mapping
 when a physical flow follows (placement refuses a native flop) and the Liberty
 has no usable ICG cell, e.g. ASAP7 with `ICG*` dont_use. A register
 clocked by the OUTPUT OF A MODULE INSTANCE in its own region (a clock-gate wrapper

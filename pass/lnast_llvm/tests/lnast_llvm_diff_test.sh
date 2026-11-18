@@ -43,7 +43,7 @@ one_design() {
     python3 -I "$SRC/gen_tb.py" "$d/k/kernel.json" "$top" "$top" "$CYCLES" 1 >"$d/tb.prp" || { fail "$design: testbench generation"; return 1; }
   fi
   "$RUN" "$d/k" "$CYCLES" >"$d/new.trace" || { fail "$design: kernel run failed"; return 1; }
-  (cd "$d" && "$LHD_ABS" sim lg:lg tb.prp --workdir w --set sim.init_zero=true -q >sim.log 2>&1) \
+  (cd "$d" && LHD_SIM_LNAST=0 "$LHD_ABS" sim lg:lg tb.prp --workdir w --set sim.init_zero=true -q >sim.log 2>&1) \
     || { cat "$d/sim.log" >&2; fail "$design: reference sim failed"; return 1; }
   "$d/w/sim/drv.bin" --set sim.init_zero=true 2>&1 | grep -a 'puts:TRACE' | sed 's/.*puts://' >"$d/ref.trace"
   [ "$(wc -l <"$d/ref.trace")" -eq "$CYCLES" ] || { fail "$design: reference trace has $(wc -l <"$d/ref.trace") lines, want $CYCLES"; return 1; }

@@ -27,8 +27,10 @@
 # enable function (cvc5 on graphs), an inverted gate enable, a gate taken off the
 # chain and an always-on gate (lgcheck; cvc5's BMC does not close the last one
 # within its budget). abc_icg_n (the `clk | ~latch` flavour) and a library
-# without an ICG cell keep the gates native with the precise reason (derived-
-# clock-native / icg-native), and still prove.
+# without an ICG cell keep the gates native. With synth.derived_clock=false,
+# abc_icg_n also keeps its registers native with the precise reason
+# (derived-clock-native); the default maps them to DFFs on the inverted derived
+# clock. Both forms must prove.
 #
 # MAPPER=usyn (native USYN, default tmap=abc): a recognized clock gate is a
 # native ICG barrier (clock-control state, never a USYN endpoint), so no ICG
@@ -41,8 +43,8 @@
 # latches native, and the schema-5 report's 12 register bits / 10 endpoints
 # (the negedge `f` bits are not endpoints) for every library. The ABC-only
 # claims (ICG cell picks and pins, pass.abc icg-native / derived-clock-native
-# reason text) run only for MAPPER=abc; abc_icg_n instead asserts that its
-# register stays 4 native negedge flops beside the native latch.
+# reason text) run only for MAPPER=abc; abc_icg_n checks both mapped registers
+# and the explicit native fallback beside the native latch.
 set -u
 
 MAPPER="${MAPPER:-abc}"
@@ -144,9 +146,10 @@ lgcheck() {
 # case owns the original-vs-mapped proof and independent Verilog check.
 prepare() {
   local d="$1" lib="$2" top="$3"
+  shift 3
   mkdir -p "$d"
   "$LHD" synth --result-json "$d/r.json" --reader slang --top "$top" --workdir "$d/W" --emit-dir lg:"$d/net" \
-    --emit-dir verilog:"$d/netv" --set synth.flat_sweep=false --set synth.mapper="$MAPPER" --set synth.liberty="$lib" -- "$SRC" > "$d/synth.log" 2>&1 \
+    --emit-dir verilog:"$d/netv" --set synth.flat_sweep=false --set synth.mapper="$MAPPER" --set synth.liberty="$lib" "$@" -- "$SRC" > "$d/synth.log" 2>&1 \
     || fail "$d: synth -> $(cat "$d/r.json" 2>/dev/null)"
   cat "$d/netv/"*.v > "$d/net.v"
   "$LHD" pass liberty gensim "$lib" --emit-dir lg:"$d/models" --emit verilog:"$d/models.v" --workdir "$d/Wm" -q \
@@ -173,7 +176,7 @@ verify() {
 }
 
 synth() {
-  prepare "$1" "$2" "$3"
+  prepare "$@"
   verify "$1" "$3"
 }
 
@@ -258,7 +261,7 @@ case_qn() {
 }
 
 case_n() {
-  synth "$W/n" "$PWD/lhd/tests/abc_icg_q.lib" abc_icg_n
+  synth "$W/n" "$PWD/lhd/tests/abc_icg_q.lib" abc_icg_n --set synth.derived_clock=false
   if [ "$MAPPER" = abc ]; then
     grep -q 'derived-clock-native.*an OR (`clk | ~latch`' "$W/n/synth.log" \
       || fail "n: the OR-flavour gate must stay native with its reason: $(grep -o '"derived-clock-native[^}]*' "$W/n/synth.log")"
@@ -278,6 +281,26 @@ case_n() {
   fi
 
   echo "PASS: OR-flavour clock gate stays native"
+}
+
+case_n_mapped() {
+  synth "$W/n_mapped" "$PWD/lhd/tests/abc_icg_q.lib" abc_icg_n
+  local N="$W/n_mapped/net.v" r
+  ! grep -q 'always @' "$N" || fail "n_mapped: a register stayed a native flop"
+  [ "$(count "$N" '^DFFx1 ')" = 4 ] || fail "n_mapped: expected 4 mapped flop bits"
+  for r in 'r[0]' 'r[1]' 'r[2]' 'r[3]'; do
+    [ "$(grep -c "^DFFx1 \\\\$(re "$r") (" "$N")" = 1 ] || fail "n_mapped: register bit $r is not one mapped DFF cell"
+  done
+  [ "$(count "$N" '^always_latch')" = 1 ] && [ -n "$(latch_enable "$N" en_latch)" ] \
+    || fail "n_mapped: the gate latch en_latch must stay native"
+  ! grep -q "^S*DLCLK[A-Za-z0-9]* \|^ICG[A-Za-z0-9]* " "$N" || fail "n_mapped: an ICG cell replaced the OR-flavour gate"
+  grep -q '"native_state_nodes":1' "$W/n_mapped/r.json" || fail "n_mapped: the STA must see only the native gate latch"
+  if [ "$MAPPER" = usyn ]; then
+    # Technology mapping supports the derived falling edge, but it is still
+    # not an eligible endpoint for USYN's register-rooted optimization.
+    usyn_state "$W/n_mapped" n_mapped 4 0 ""
+  fi
+  echo "PASS: OR-flavour clock gate clocks mapped falling-edge registers"
 }
 
 case_none() {
@@ -332,6 +355,7 @@ case "${ICG_CASE:-all}" in
   qn_enfn) case_qn_negative enfn ;;
   qn_chain) case_qn_negative chain ;;
   n) case_n ;;
+  n_mapped) case_n_mapped ;;
   none) case_none ;;
   all)
     case_q || exit 1
@@ -339,6 +363,7 @@ case "${ICG_CASE:-all}" in
     case_q_negative || exit 1
     case_qn_negative || exit 1
     case_n || exit 1
+    case_n_mapped || exit 1
     case_none || exit 1
     ;;
   *) fail "invalid ICG_CASE=${ICG_CASE}" ;;

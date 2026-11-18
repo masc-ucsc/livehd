@@ -64,8 +64,9 @@ module abc_icg_mix(input clk, input rst_n, input en0, input en1, input en2, inpu
 endmodule
 
 // The active-low flavour (minion's prim_clk_gate_n: the enable latched while
-// the clock is HIGH, `clk | ~latch`) is not an ICG cell: its register stays a
-// native flop, reported with the precise derived-clock-native reason.
+// the clock is HIGH, `clk | ~latch`) is not an ICG cell: the latch stays native
+// and the register maps on the inverted derived clock. Disabling
+// synth.derived_clock keeps the register native with the precise reason.
 module abc_icg_n(input clk, input en, input [3:0] d, output [3:0] q);
   reg en_latch;
   always_latch if (clk) en_latch = en;

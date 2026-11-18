@@ -2082,12 +2082,14 @@ test_suite(
 # Latch-based clock gates map onto the Liberty's integrated clock-gate cell and
 # their registers onto DFF / clear / preset cells clocked by it (sky130- and
 # ASAP7-shaped hermetic libraries): graph LEC proves, lgcheck does not refute,
-# broken twins refute, and the OR flavour / an ICG-less library stay native.
+# broken twins refute, and the OR flavour / an ICG-less library keep native
+# gates. The OR flavour checks mapped registers and the explicit native fallback.
 _ICG_CASES = [
     ("q", "q", "both"),
     ("qn", "qn", "both"),
     ("none", "none", "both"),
     ("n", "n", "both"),
+    ("n_mapped", "n_mapped", "both"),
     ("q_negative", "q_negative", "both"),
     ("qn_negative", "qn_negative", "both"),
 ]
