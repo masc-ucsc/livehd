@@ -64,7 +64,8 @@ struct Type {
   uint16_t    pin_count  = 0;
   uint16_t    arc_count  = 0;
   bool        sequential = false;
-  // Cells the engine does not time; their pins are reported as unsupported instead of timed.
+  // Cells the engine does not time; their pins are reported as unsupported instead of timed. A synchronous memory
+  // macro (clocked reads, setup checks, no combinational arc) is not `memory` here: it is timed like a flip-flop.
   bool        latch = false, memory = false, clock_gate = false;
 };
 

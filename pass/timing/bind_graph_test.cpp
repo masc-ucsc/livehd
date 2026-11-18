@@ -214,9 +214,9 @@ TEST(BindGraph, HierarchyIsBoundInPlaceLikeAFlattenedCopy) {
     }
     return fast::no_index;
   };
-  const auto driver_name = [](const fast::Bound_graph& b, uint32_t cell, const char* pin) -> std::string {
+  const auto driver_name = [](const fast::Bound_graph& b, uint32_t at, const char* pin) -> std::string {
     const auto& n      = *b.netlist;
-    const auto  net_id = n.net_of(n.pin(cell, pin));
+    const auto  net_id = n.net_of(n.pin(at, pin));
     if (net_id == fast::no_index) {
       return "-";
     }
@@ -258,4 +258,89 @@ TEST(BindGraph, HierarchyIsBoundInPlaceLikeAFlattenedCopy) {
     ASSERT_NE(c, fast::no_index) << name;
     EXPECT_EQ(driver_name(flat_bound, c, "A"), driver_name(hier, cell_named(hier, name), "A")) << name;
   }
+}
+
+// A macro's bus pins (pass/liberty expands a Liberty bus into one pin per bit, `D[0]`, `D[1]`) bind bit by bit: an
+// input bus member is driven by that bit of the instance pin's driver and checked against its setup arc, and an output
+// bus member drives that bit of the instance output.
+TEST(BindGraph, MacroBusPinsBindPerBit) {
+  const std::string text = R"lib(
+library(bus) {
+  time_unit : "1ps";
+  capacitive_load_unit(1,ff);
+  type(bus2) { base_type : array; data_type : bit; bit_width : 2; bit_from : 1; bit_to : 0; downto : true; }
+  cell(RAM) {
+    area : 100;
+    memory() { type : ram; address_width : 1; word_width : 2; }
+    pin(CLK) { direction : input; clock : true; capacitance : 1; }
+    bus(D) { bus_type : bus2; direction : input; capacitance : 1;
+      timing() { related_pin : CLK; timing_type : setup_rising;
+        rise_constraint(scalar) { values("50"); } fall_constraint(scalar) { values("50"); } } }
+    bus(Q) { bus_type : bus2; direction : output;
+      timing() { related_pin : CLK; timing_type : rising_edge; timing_sense : non_unate;
+        cell_rise(scalar) { values("100"); } cell_fall(scalar) { values("100"); }
+        rise_transition(scalar) { values("10"); } fall_transition(scalar) { values("10"); } } }
+  }
+}
+)lib";
+  lt::Library        lib  = lt::parse(text);
+  const lt::Library* ps[] = {&lib};
+  const std::string  ns[] = {"typ"};
+  const auto         types = fast::Cell_types::build(ps, ns);
+
+  hhds::GraphLibrary library;
+  auto               ram = library.create_io("RAM");
+  ram->add_input("CLK", 1);
+  ram->add_input("D", 2);
+  ram->set_bits("D", 2);
+  ram->add_output("Q", 3);
+  ram->set_bits("Q", 2);
+  auto top = library.create_io("top");
+  top->add_input("clk", 1);
+  top->add_input("d", 2);
+  top->set_bits("d", 2);
+  top->add_output("y", 3);
+  top->set_bits("y", 2);
+  auto g = top->create_graph();
+  auto u = gu::create_typed_node(*g, Ntype_op::Sub);
+  u.set_subnode(ram);
+  g->get_input_pin("clk").connect_sink(u.create_sink_pin("CLK"));
+  g->get_input_pin("d").connect_sink(u.create_sink_pin("D"));
+  u.create_driver_pin("Q").connect_sink(g->get_output_pin("y"));
+
+  const auto  bound = fast::bind_graph(*g, types);
+  const auto& net   = *bound.netlist;
+  for (const auto& line : bound.unsupported) {
+    EXPECT_EQ(line.find("missing Liberty pin"), std::string::npos) << line;
+  }
+  uint32_t cell = fast::no_index;
+  for (uint32_t c = 0; c < net.cells(); ++c) {
+    if (!bound.cell_node[c].is_invalid() && bound.cell_node[c] == u) {
+      cell = c;
+    }
+  }
+  ASSERT_NE(cell, fast::no_index);
+  const auto port = [&](const char* name) {
+    for (const auto& p : net.ports()) {
+      if (p.name == name) {
+        return net.pin(p.cell, 0u);
+      }
+    }
+    return fast::no_index;
+  };
+  EXPECT_EQ(net.driver_of(net.net_of(net.pin(cell, "D[0]"))), port("d[0]"));
+  EXPECT_EQ(net.driver_of(net.net_of(net.pin(cell, "D[1]"))), port("d[1]"));
+  EXPECT_EQ(net.driver_of(net.net_of(port("y[0]"))), net.pin(cell, "Q[0]"));
+  EXPECT_EQ(net.driver_of(net.net_of(port("y[1]"))), net.pin(cell, "Q[1]"));
+
+  // The bus members are endpoints: a d input delay of 900 ps against a 1000 ps clock and a 50 ps setup leaves 50 ps.
+  fast::Constraints constraints;
+  constraints.clocks.push_back({"clk", "clk", 1000, 0, 0});
+  constraints.inputs.push_back({"d[0]", "clk", 900, 0});
+  constraints.inputs.push_back({"d[1]", "clk", 900, 0});
+  fast::Engine engine(*bound.netlist, constraints);
+  engine.evaluate();
+  EXPECT_NEAR(engine.slack(net.pin(cell, "D[1]")), 50, 1e-3);
+  // A synchronous memory launches like a flip-flop: the read bus is 100 ps after the clock.
+  EXPECT_NEAR(engine.arrival(port("y[1]"), 0, 0), 100, 1e-3);
 }

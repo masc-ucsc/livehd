@@ -43,6 +43,32 @@ std::string declared_name(const hhds::Pin_class& pin) {
   return {};
 }
 
+// The declared width of the pin of a Sub instance (1 when unknown).
+int declared_bits(const hhds::Pin_class& pin) {
+  const auto node = pin.get_master_node();
+  const auto io   = node.get_subnode_io();
+  if (io) {
+    const auto& declarations = pin.is_sink() ? io->get_input_pin_decls() : io->get_output_pin_decls();
+    for (const auto& declaration : declarations) {
+      if (declaration.port_id == pin.get_port_id()) {
+        return std::max<int>(1, static_cast<int>(declaration.bits));
+      }
+    }
+  }
+  return 1;
+}
+
+// The cell-type pin of bit `bit` of a Sub instance pin: the pin itself when the Liberty cell has it by that name
+// (a one-bit pin), else the Liberty bus member `name[bit]` (pass/liberty expands a bus into one pin per bit).
+uint32_t cell_pin_of_bit(const Cell_types& types, uint32_t type, const std::string& name, int bits, int bit) {
+  if (bits <= 1) {
+    if (const auto local = types.find_pin(type, name); local != no_index) {
+      return bit == 0 ? local : no_index;
+    }
+  }
+  return types.find_pin(type, std::format("{}[{}]", name, bit));
+}
+
 struct Terminal {
   enum class Kind : uint8_t { unknown, constant, driver, undriven };
   Kind     kind  = Kind::unknown;
@@ -102,13 +128,28 @@ public:
     for (const auto& [ctx, node] : cells_) {
       const auto cell = cell_of_node_.at(Handle_key{ctx, static_cast<uint64_t>(node.get_debug_nid()), 0});
       for (const auto sink : node.inp_sorted_pins()) {
-        const auto name  = declared_name(sink);
-        const auto local = types_.find_pin(netlist.type_of(cell), name);
-        if (local == no_index) {
-          out_.unsupported.push_back(std::format("missing Liberty pin: {}:{}", name_of(ctx, node), name));
+        const auto name = declared_name(sink);
+        const auto type = netlist.type_of(cell);
+        if (const auto local = types_.find_pin(type, name); local != no_index) {
+          connect(ctx, sink.get_driver_pins(), 0, netlist.pin(cell, local), [&] { return name_of(ctx, node) + ":" + name; });
           continue;
         }
-        connect(ctx, sink.get_driver_pins(), 0, netlist.pin(cell, local), [&] { return name_of(ctx, node) + ":" + name; });
+        // A multi-bit pin of a macro: one Liberty bus member per bit.
+        const int bits  = declared_bits(sink);
+        bool      bound = false;
+        for (int b = 0; b < bits; ++b) {
+          const auto local = cell_pin_of_bit(types_, type, name, bits, b);
+          if (local == no_index) {
+            continue;
+          }
+          bound = true;
+          connect(ctx, sink.get_driver_pins(), b, netlist.pin(cell, local), [&] {
+            return std::format("{}:{}[{}]", name_of(ctx, node), name, b);
+          });
+        }
+        if (!bound) {
+          out_.unsupported.push_back(std::format("missing Liberty pin: {}:{}", name_of(ctx, node), name));
+        }
       }
     }
     for (const auto& output : outputs) {
@@ -428,11 +469,17 @@ private:
       }
     } else if (const auto cell = cell_of_node_.find(Handle_key{ctx, static_cast<uint64_t>(node.get_debug_nid()), 0});
                cell != cell_of_node_.end()) {
-      const auto local = types_.find_pin(out_.netlist->type_of(cell->second), declared_name(pin));
+      const auto type  = out_.netlist->type_of(cell->second);
+      const auto name  = declared_name(pin);
+      const auto local = types_.find_pin(type, name);
       if (local != no_index && b == 0) {
         out = {Terminal::Kind::driver, out_.netlist->pin(cell->second, local), false};
       } else if (local != no_index) {
         out = {Terminal::Kind::constant, no_index, false};  // a one-bit cell output is zero-extended
+      } else if (const int bits = declared_bits(pin); b >= bits) {
+        out = {Terminal::Kind::constant, no_index, false};  // past a bus output's width
+      } else if (const auto member = cell_pin_of_bit(types_, type, name, bits, b); member != no_index) {
+        out = {Terminal::Kind::driver, out_.netlist->pin(cell->second, member), false};  // a macro bus output bit
       }
     } else {
       const auto op    = gu::type_op_of(node);
@@ -627,16 +674,24 @@ void Bound_names::gather_nets() const {
       continue;
     }
     for (const auto& pin : node.out_pins()) {
-      const auto local = types.find_pin(netlist.type_of(cell), declared_name(pin));
-      if (local == no_index) {
-        continue;
-      }
+      const auto type  = netlist.type_of(cell);
+      const auto pname = declared_name(pin);
       // A flattened copy prefixes the wire names it copies with the instance path (pass/partition/flatten).
       auto name = gu::wire_name(pin);
       if (bound_.hierarchical()) {
         name.insert(0, bound_.prefixes[bound_.cell_prefix[cell]]);
       }
-      nets_.emplace(std::move(name), netlist.pin(cell, local));
+      if (const auto local = types.find_pin(type, pname); local != no_index) {
+        nets_.emplace(std::move(name), netlist.pin(cell, local));
+        continue;
+      }
+      // A macro bus output: one net per bit, `wire[bit]`.
+      const int bits = declared_bits(pin);
+      for (int b = 0; b < bits; ++b) {
+        if (const auto member = cell_pin_of_bit(types, type, pname, bits, b); member != no_index) {
+          nets_.emplace(std::format("{}[{}]", name, b), netlist.pin(cell, member));
+        }
+      }
     }
   }
 }

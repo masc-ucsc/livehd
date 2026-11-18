@@ -266,6 +266,20 @@ Cell_types Cell_types::build(std::span<const lt::Library* const> corners, std::s
       }
     }
     type.arc_count = static_cast<uint16_t>(arcs_of_type);
+    // A synchronous memory macro (an SRAM such as a fakeram: clock-to-output reads and setup checks on its inputs,
+    // no combinational arc) is timed like a flip-flop. A memory with a combinational (asynchronous) read stays
+    // untimed: its read arcs would form loops through the write side that the engine does not model.
+    if (type.memory) {
+      bool clocked = false, combinational = false;
+      for (uint32_t a = type.first_arc; a < type.first_arc + type.arc_count; ++a) {
+        const auto kind = types.arcs_[a].kind;
+        clocked         = clocked || kind == Arc_kind::launch_rise || kind == Arc_kind::setup_rise;
+        combinational   = combinational || kind == Arc_kind::combinational;
+      }
+      if (clocked && !combinational) {
+        type.memory = false;
+      }
+    }
     types.by_name_.emplace(cell_name, static_cast<uint32_t>(types.types_.size()));
     types.types_.push_back(std::move(type));
   }
