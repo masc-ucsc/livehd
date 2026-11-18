@@ -13,6 +13,7 @@ extern char** environ;
 #include <cstdio>
 #include <cstdlib>
 #include <exception>
+#include <new>
 #include <filesystem>
 
 #include "debug_env.hpp"
@@ -251,6 +252,18 @@ int main(int argc, char** argv) {
     lhd::run_engine_command(opts, res);
   } catch (const lhd::Lhd_error& e) {
     mark_failed(res, e);
+  } catch (const std::bad_alloc& e) {
+    // An allocation the RLIMIT_AS backstop denied before any pass-level catch
+    // (e.g. engine setup under a small lhd.ram_max_mb) is out of memory, not a
+    // livehd bug: report it as TIMEOUT-memory like the pass entries do.
+    if (livehd::cost::address_space_limit_bytes() != 0) {
+      mark_failed(res,
+                  lhd::Lhd_error{"unsupported",
+                                 "TIMEOUT-memory: out of memory at the memory backstop (lhd.ram_max_mb / RLIMIT_AS)",
+                                 "run on a host with more memory or a larger --set lhd.ram_max_mb"});
+    } else {
+      mark_failed(res, lhd::classify_engine_failure(e.what()));
+    }
   } catch (const std::exception& e) {
     mark_failed(res, lhd::classify_engine_failure(e.what()));
   } catch (...) {

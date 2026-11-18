@@ -151,15 +151,19 @@ fi
 # 300-bit adder and therefore instantiates __livehd_abc_input_bits_300; at this
 # occurrence its input resolves all the way to CONST_NODE. Constants are real
 # zero-arrival timing leaves, and each splitter SRA must retain its one-bit
-# output arity without inventing an `invalid_*` bus net.
+# output arity without inventing an `invalid_*` bus net. A second instance
+# with a live input keeps `dense` generic (one shared mapped child): with the
+# constant instance alone, partition flatten folds the tied-off port and the
+# whole child constant-folds away, so no splitter would reach timing.
 CSPR="$W/const_splitter.prp"
 cat >"$CSPR" <<'EOF'
 mod dense(a:U300) -> (y:U300@[0]) {
   y = a + 1
 }
 
-pub mod ot_const_splitter() -> (y:U300@[0]) {
+pub mod ot_const_splitter(b:U300) -> (y:U300@[0], z:U300@[0]) {
   y = dense(a=0).y
+  z = dense(a=b).y
 }
 EOF
 CSTOP=const_splitter.ot_const_splitter
