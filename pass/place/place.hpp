@@ -438,6 +438,12 @@ struct Options {
   // notch threshold).
   std::optional<std::pair<double, double>> macro_edge_snap;
   bool macro_slivers = true;  // close macro slivers narrower than their clearance (macro_edge.hpp Edge_snap_limits::slivers)
+  // macro.row_strip: with a technology profile whose handoff cuts rows around macros (Tech_profile::tap_row_halo),
+  // the macro-to-macro spacing across the rows (x) is at least 2 x that row halo plus this usable strip, so every
+  // channel the downstream row cut leaves can hold the clock and repair buffers inserted after placement (a macro
+  // keeps half the channel to the core edge, so half the strip remains there). Negative: auto (2 placement halos);
+  // 0: off. Degrades to the plain spacing when the macros cannot fit.
+  double macro_row_strip = -1;
   // macro.dead_space: unset (off, the default) changes nothing. Set: QoR
   // reports the dead-space metric of the final macro frame (`macro_dead_space`), and with `collapse` the native macro
   // flow runs the collapse pass after the edge snap and before routing-track alignment. See macro_dead_space.hpp and

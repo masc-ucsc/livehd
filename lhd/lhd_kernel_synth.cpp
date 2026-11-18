@@ -1126,6 +1126,14 @@ livehd::placement::Options placement_options(const Options& opts) {
     out.macro_edge_snap = parse_halo(edge_snap_text, "place.macro.edge_snap");
   }
   out.macro_slivers    = truthy(synth_set(opts, "place.macro.slivers", "true"));
+  if (const auto strip = synth_set(opts, "place.macro.row_strip", "auto"); strip == "auto") {
+    out.macro_row_strip = -1;
+  } else {
+    out.macro_row_strip = number("place.macro.row_strip", "auto");
+    if (!std::isfinite(out.macro_row_strip) || out.macro_row_strip < 0) {
+      throw Lhd_error{"usage", "invalid synth.place.macro.row_strip", "expected auto, 0 or a nonnegative number of microns"};
+    }
+  }
   out.macro_dead_space = livehd::placement::parse_dead_space_options(synth_set(opts, "place.macro.dead_space", "off"));
   for (const auto& [key, fallback, target] : {
            std::tuple{    "place.macro.refine_rounds",  "0",     &out.macro_refine_rounds},

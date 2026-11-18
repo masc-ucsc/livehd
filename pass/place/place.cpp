@@ -589,6 +589,7 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
   if (o.macro_slivers) {
     h = hash_text("macro-slivers:v1", h);
   }
+  h = hash_text(std::format("macro-row-strip:v1:{}", o.macro_row_strip), h);
   if (o.macro_refine_rounds) {
     h = hash_text(std::format("macro-refine:{}:{}", o.macro_refine_rounds, o.macro_refine_iterations), h);
   }
@@ -8278,10 +8279,34 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
                         : options.macro_pdn == "auto" ? std::vector{Pg_macro_level::gap, Pg_macro_level::align, Pg_macro_level::off}
                                                       : std::vector{requested_pdn_level(options)};
     v.pdn_ladder.clear();
-    for (const auto level : levels) {
-      const auto [x, y] = macro_channel_at(tech, metal, v.pdn_rules, level);
+    // macro.row_strip: a handoff that cuts rows tap_row_halo around each macro leaves channel - 2 x halo of row in a
+    // macro-to-macro channel across the rows; keep that strip at least row_strip wide (strongest levels first), and
+    // fall back to the plain channels when the macros cannot fit with it.
+    int64_t row_floor_x = 0;
+    if (options.macro_row_strip != 0) {
+      const ph::Tech_profile* profile = nullptr;
+      try {
+        profile = &placement_tech_profile(tech, options);
+      } catch (const std::invalid_argument&) {
+        profile = nullptr;  // an unregistered technology: no known handoff row cut
+      }
+      if (profile && profile->tap_row_halo > 0) {
+        const auto strip = options.macro_row_strip < 0 ? 2 * v.halo_x : channel_dbu(options.macro_row_strip, tech);
+        row_floor_x      = 2 * std::llround(profile->tap_row_halo * tech.dbu) + strip;
+      }
+    }
+    const auto add_level = [&](Pg_macro_level level, int64_t x, int64_t y) {
       if (v.pdn_ladder.empty() || v.pdn_ladder.back().channel_x != x || v.pdn_ladder.back().channel_y != y) {
         v.pdn_ladder.push_back({level, x, y});
+      }
+    };
+    for (const int pass : {0, 1}) {
+      if (pass == 1 && row_floor_x == 0) {
+        break;
+      }
+      for (const auto level : levels) {
+        const auto [x, y] = macro_channel_at(tech, metal, v.pdn_rules, level);
+        add_level(level, pass == 0 && row_floor_x > 0 ? std::max(x, row_floor_x) : x, y);
       }
     }
     v.pdn_attempts.clear();

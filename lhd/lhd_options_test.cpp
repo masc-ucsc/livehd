@@ -670,6 +670,7 @@ TEST(LhdOptions, RecommendedSharedDefaults) {
            {                 "synth.place.fp.pin_adjust",   "true"},
            {              "synth.place.macro.pin_adjust",   "true"},
            {               "synth.place.macro.edge_snap",    "off"},
+           {               "synth.place.macro.row_strip",   "auto"},
            {              "synth.place.macro.dead_space",    "off"},
            {           "synth.place.macro.refine_rounds",      "0"},
            {                  "synth.place.macro.anchor",  "false"},

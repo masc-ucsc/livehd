@@ -951,6 +951,14 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      "after native macro legalization, close any clear sliver narrower than the clearance it faces (macro bodies "
      "under 2x their spacing max(channel, 2*halo) apart, or a body under 2x halo from the core edge) by sliding the "
      "macro toward its core edge onto its track lattice; a channel between two faces that both have signal pins stays"},
+    {"place.macro.row_strip",
+     "auto",
+     Synth_set_option::Kind::file,
+     "with a technology profile that cuts placement rows around macros at handoff (asap7: 2 um, OpenROAD tapcell "
+     "MACRO_ROWS_HALO), macro-to-macro spacing across the rows is at least 2x that halo plus this usable strip, so the "
+     "channel rows left downstream can hold CTS and repair buffers (half of it remains between a macro and the core "
+     "edge): auto (twice the placement halo), 0 (off) or X microns; "
+     "degrades to the plain spacing when the macros cannot fit the core"},
     {"place.macro.refine_rounds",
      "0",
      Synth_set_option::Kind::file,
