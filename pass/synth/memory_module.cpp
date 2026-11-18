@@ -23,6 +23,7 @@
 #include "graph_library_singleton.hpp"
 #include "node_util.hpp"
 #include "pass.hpp"
+#include "source_path.hpp"
 #include "sram_macro.hpp"
 #include "synth_policy.hpp"
 
@@ -34,14 +35,23 @@ namespace {
 struct Scratch {
   fs::path path;
   Scratch() {
-    auto  pattern = std::string{"/tmp/lhd-memory-XXXXXX"};
-    auto* p       = mkdtemp(pattern.data());
+    // The system temporary directory (TMPDIR first), not a hard-coded /tmp: big designs lower many memories and a
+    // tmpfs /tmp fills up.
+    std::error_code ec;
+    auto            root    = fs::temp_directory_path(ec);
+    auto            pattern = ((ec || root.empty()) ? fs::path{"/tmp"} : root) / "lhd-memory-XXXXXX";
+    auto            text    = pattern.string();
+    auto*           p       = mkdtemp(text.data());
     if (!p) {
       diag::err("pass.abc", "memory-scratch", "io").msg("could not create memory RTL scratch directory").fatal();
     }
     path = p;
+    // The directory name is random; the generated RTL's source locations must not be, or every run mints different
+    // SourceIds and the emitted source maps differ run to run.
+    srcloc::register_source_alias(path.string(), "lhd-memory");
   }
   ~Scratch() {
+    srcloc::unregister_source_alias(path.string());
     if (livehd::debug::env<"LHD_MEMORY_KEEP_SCRATCH">() != nullptr) {
       return;  // debugging: keep the generated RTL and yosys script for inspection
     }

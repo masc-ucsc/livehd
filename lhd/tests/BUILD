@@ -2164,6 +2164,19 @@ sh_test(
     ],
 )
 
+# Synthesis determinism: two runs of a flat-state + memory-lowering design, fresh workdirs and temporary
+# directories, emit byte-identical netlists and source maps.
+sh_test(
+    name = "lhd_synth_deterministic_test",
+    size = "small",
+    srcs = ["lhd_synth_deterministic_test.sh"],
+    data = _FLOW_DATA + [
+        "abc_arst_q.lib",
+        "synth_flat_state.v",
+        "synth_rom_srcmap.v",
+    ],
+)
+
 # Signed registers narrowed by the state sweep: a signed tap chain whose low bits nothing observes keeps only the
 # observed bits, proven equivalent to the source by the graph-native LEC.
 sh_test(

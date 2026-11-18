@@ -177,6 +177,7 @@ cc_test(
         "tests/debug_env_smoke.cpp",
         "tests/file_name_test.cpp",
         "tests/interned_name_test.cpp",
+        "tests/source_path_test.cpp",
         "tests/util_smoke.cpp",
         "tests/worker_pool_test.cpp",
     ],
