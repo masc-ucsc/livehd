@@ -6,6 +6,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "hhds/graph.hpp"
@@ -126,8 +127,12 @@ public:
   Host_inliner& operator=(const Host_inliner&) = delete;
 
   // Splice `inst` (a Sub in the host). `new_subs`, when non-null, receives
-  // (appended) the Sub clones the splice created, ascending node id.
-  [[nodiscard]] bool splice(const hhds::Node_class& inst, std::vector<hhds::Node_class>* new_subs = nullptr);
+  // (appended) the Sub clones the splice created, ascending node id. `clones`,
+  // when non-null, receives (appended, unordered) every body node of the callee
+  // paired with its clone in the host: the provenance a caller needs to carry a
+  // fact found on the flat host back to the definition it came from.
+  [[nodiscard]] bool splice(const hhds::Node_class& inst, std::vector<hhds::Node_class>* new_subs = nullptr,
+                            std::vector<std::pair<hhds::Node_class, hhds::Node_class>>* clones = nullptr);
 
   // A splice stopped at the deadline (see above): the host is partial.
   [[nodiscard]] bool timed_out() const;

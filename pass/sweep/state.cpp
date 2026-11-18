@@ -689,6 +689,9 @@ struct State_sweeper {
 
   hhds::Graph&         g;
   State_options        opt;
+  // Name what a rebuild keeps the way synth's hierarchical state sweep does (a kept prefix keeps the register's
+  // name, every other kept bit is a single-bit flop named after its source bit), so LEC pairs it bit by bit.
+  bool                 bit_names = false;
   State_stats          stats;
   std::vector<Flop_info> flops;
   absl::flat_hash_map<hhds::Class_index, int32_t> flop_of;
@@ -927,7 +930,7 @@ struct State_sweeper {
   // Rebuild `info.node` keeping only the bits for which `keep[i]` is true. Bits
   // that are not kept read `replace[i]` (a constant, 0/1) -- or 0 when unobserved.
   // Returns true when the graph changed.
-  bool rebuild(const Flop_info& info, const std::vector<bool>& keep, const std::vector<int8_t>& replace) {
+  bool rebuild(const Flop_info& info, const std::vector<bool>& keep, const std::vector<int8_t>& replace, bool unobserved = false) {
     const int  w = info.width;
     int        kept = 0;
     for (int i = 0; i < w; ++i) {
@@ -942,6 +945,13 @@ struct State_sweeper {
     const auto old_q = info.node.get_driver_pin(0);
     const auto name  = std::string(gu::node_name_of(info.node));
 
+    if (opt.on_fold) {
+      for (int i = 0; i < w; ++i) {
+        if (!keep[static_cast<size_t>(i)]) {
+          opt.on_fold(info.node, i, unobserved ? int8_t{2} : replace[static_cast<size_t>(i)]);
+        }
+      }
+    }
     hhds::Pin_class result;
     if (kept == 0) {
       result = const_bits(g, replace, 0, w, info.is_signed);
@@ -955,7 +965,20 @@ struct State_sweeper {
           while (j < w && keep[static_cast<size_t>(j)]) {
             ++j;
           }
-          lanes.push_back({make_flop_run(info, i, j, name, w), j - i});
+          if (bit_names && i != 0) {
+            // Scattered kept bits: one single-bit flop per bit, named after the source bit.
+            for (int k = i; k < j; ++k) {
+              lanes.push_back({make_flop_run(info, k, k + 1, name, w), 1});
+              if (opt.on_run) {
+                opt.on_run(info.node, k, k + 1, lanes.back().value.get_master_node());
+              }
+            }
+          } else {
+            lanes.push_back({make_flop_run(info, i, j, name, w), j - i});
+            if (opt.on_run) {
+              opt.on_run(info.node, i, j, lanes.back().value.get_master_node());
+            }
+          }
         } else {
           while (j < w && !keep[static_cast<size_t>(j)]) {
             ++j;
@@ -1001,7 +1024,7 @@ struct State_sweeper {
         driver.connect_sink(dst.create_sink_pin(pid));
       }
     }
-    if (!name.empty() && (lo != 0 || hi != w)) {
+    if (!name.empty() && (lo != 0 || hi != w) && !(bit_names && lo == 0)) {  // a narrowed prefix keeps its name
       const auto piece = hi - lo == 1 ? livehd::bus_name::bit(name, lo) : std::format("{}[{}:{}]", name, hi - 1, lo);
       dst.attr(hhds::attrs::name).set(piece);
     }
@@ -1427,7 +1450,7 @@ struct State_sweeper {
         continue;
       }
       std::vector<int8_t> zeros(static_cast<size_t>(w), 0);
-      if (rebuild(info, keep, zeros)) {
+      if (rebuild(info, keep, zeros, /*unobserved=*/true)) {
         stats.dead_bits += dead;
         stats.flops_rebuilt += 1;
         changed = true;
@@ -1447,6 +1470,9 @@ struct State_sweeper {
       }
       if (observed) {
         continue;
+      }
+      if (opt.on_memory_dropped) {
+        opt.on_memory_dropped(mem);
       }
       const auto zero = gu::create_const(g, *Dlop::create_integer(0));
       for (const auto& port : mem.out_pins_snapshot()) {
@@ -1490,6 +1516,57 @@ struct State_sweeper {
     return changed;
   }
 };
+
+bool fold_flop_bits(hhds::Graph& g, const hhds::Node_class& flop, const std::vector<int8_t>& replace) {
+  if (flop.is_invalid() || gu::type_op_of(flop) != Ntype_op::Flop || !single_depth(flop)) {
+    return false;
+  }
+  const auto q = flop.get_driver_pin(0);
+  if (q.is_invalid()) {
+    return false;
+  }
+  const int w = gu::bits_of(q);
+  if (w <= 0 || static_cast<size_t>(w) != replace.size() || gu::get_driver_of_sink_name(flop, "din").is_invalid()) {
+    return false;
+  }
+  const auto initial = gu::get_driver_of_sink_name(flop, "initial");
+  if (!initial.is_invalid() && !initial.is_const()) {
+    return false;
+  }
+  std::vector<bool>   keep(static_cast<size_t>(w), true);
+  std::vector<int8_t> value(static_cast<size_t>(w), 0);
+  for (int i = 0; i < w; ++i) {
+    if (replace[static_cast<size_t>(i)] >= 0) {
+      keep[static_cast<size_t>(i)]  = false;
+      value[static_cast<size_t>(i)] = replace[static_cast<size_t>(i)] != 0 ? 1 : 0;
+    }
+  }
+  State_sweeper s(g, {});
+  s.bit_names = true;
+  Flop_info     info;
+  info.node      = flop;
+  info.width     = w;
+  info.is_signed = !gu::is_unsign(q);
+  return s.rebuild(info, keep, value);
+}
+
+bool drop_memory(hhds::Graph& g, const hhds::Node_class& mem) {
+  if (mem.is_invalid() || gu::type_op_of(mem) != Ntype_op::Memory || gu::memory_image_of(mem)) {
+    return false;
+  }
+  const auto zero = gu::create_const(g, *Dlop::create_integer(0));
+  for (const auto& port : mem.out_pins_snapshot()) {
+    for (const auto& e : readers_of(port)) {
+      if (e.sink.get_master_node() == mem) {
+        continue;
+      }
+      e.sink.del_sink(port);
+      zero.connect_sink(e.sink);
+    }
+  }
+  mem.del_node();
+  return true;
+}
 
 State_stats sweep_state(hhds::Graph& g, const State_options& options) {
   State_sweeper s(g, options);

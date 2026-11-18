@@ -2152,6 +2152,18 @@ sh_test(
     ],
 )
 
+# synth.state_sweep's whole-design state proof (pass/synth flat_state): a ring of instances whose registers are
+# constant only jointly gets a folded content-named copy without flattening; proven by the graph-native LEC.
+sh_test(
+    name = "lhd_synth_flat_state_test",
+    size = "small",
+    srcs = ["lhd_synth_flat_state_test.sh"],
+    data = _FLOW_DATA + [
+        "abc_arst_q.lib",
+        "synth_flat_state.v",
+    ],
+)
+
 # synth.state_sweep: unobserved registers and register bits leave the mapper's private
 # copy (across the hierarchy), proven equivalent to the source by the graph-native LEC.
 [

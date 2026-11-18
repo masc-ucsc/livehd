@@ -20,7 +20,9 @@ fail() {
   exit 1
 }
 
-"$LHD" synth --result-json "$W/r.json" --reader slang --top synth_demand_split --workdir "$W/W" --emit-dir lg:"$W/net" \
+# The whole-design state proof (pass/synth flat_state) would drop `b`'s data registers first, through a `__f`
+# copy; switch it off so this test keeps exercising split_by_demand itself.
+LHD_NO_FLAT_STATE=1 "$LHD" synth --result-json "$W/r.json" --reader slang --top synth_demand_split --workdir "$W/W" --emit-dir lg:"$W/net" \
   --emit-dir verilog:"$W/netv" --set synth.mapper=abc --set synth.liberty="$LIB" -- "$SRC" > "$W/synth.log" 2>&1 \
   || fail "synth -> $(cat "$W/r.json" 2>/dev/null)"
 cat "$W/netv/"*.v > "$W/net.v"

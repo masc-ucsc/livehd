@@ -1,9 +1,13 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 #include <cstddef>
+#include <cstdint>
+#include <functional>
 #include <memory>
+#include <utility>
 #include <vector>
 
+#include "absl/container/flat_hash_map.h"
 #include "hhds/graph.hpp"
 
 // pass/sweep -- whole-design clean-up that a hierarchy of separately compiled
@@ -26,10 +30,27 @@ struct Flatten_stats {
   size_t kept    = 0;  // instances left alone (no body, a rolled loop, refused)
 };
 
+// Where each flop of a flattened root came from: the instance context tree
+// (context 0 is the root itself; context c > 0 is the instance whose Sub node,
+// by debug nid, sits in the definition of context `parent`, and whose callee is
+// `def`) and, per flop of the flat root, its context and the debug nid of the
+// flop in that context's definition. Filled by flatten() for a single root.
+struct Flat_origin {
+  struct Context {
+    int32_t   parent = -1;
+    hhds::Nid sub    = 0;
+    hhds::Gid def    = 0;
+  };
+  std::vector<Context>                                                  contexts;
+  absl::flat_hash_map<hhds::Class_index, std::pair<int32_t, hhds::Nid>> flops;
+  absl::flat_hash_map<hhds::Class_index, std::pair<int32_t, hhds::Nid>> memories;  // the same, per Memory node
+};
+
 // Inline every body-carrying Sub instance, recursively, into each of `roots`
 // (in place). The callee definitions stay in the library untouched; a caller
-// that no longer needs them drops them (see reachable_closure).
-Flatten_stats flatten(const std::vector<std::shared_ptr<hhds::Graph>>& roots);
+// that no longer needs them drops them (see reachable_closure). `origin`
+// (only with one root) records the provenance above.
+Flatten_stats flatten(const std::vector<std::shared_ptr<hhds::Graph>>& roots, Flat_origin* origin = nullptr);
 
 // The roots plus every definition still instantiated below them.
 std::vector<std::shared_ptr<hhds::Graph>> reachable_closure(const std::vector<std::shared_ptr<hhds::Graph>>& roots);
@@ -39,12 +60,19 @@ std::vector<std::shared_ptr<hhds::Graph>> reachable_closure(const std::vector<st
 size_t refine_unknown(hhds::Graph& g);
 
 struct State_options {
-  bool unobserved = true;  // also remove state bits nothing can observe
+  bool                                                      unobserved      = true;  // also remove state bits nothing can observe
   // A property marker instance (fproperty / lgassert / lgundef) observes the signals it
   // reads: dropping their cone would change an assertion that cgen emits or the
   // simulator evaluates. In a synthesis flow the markers have no hardware, so
   // `lhd synth` clears this and the logic only they read is dead.
-  bool observe_markers = true;
+  bool                                                      observe_markers = true;
+  // Provenance hooks, called while a flop is rebuilt: `on_fold(old, bit, value)` for every bit cut out of
+  // `old` (value 0/1: a constant bit that reads it; 2: an unobserved bit, which reads 0), and `on_run(old, lo, hi, run)` for
+  // every narrower flop `run` that keeps bits [lo, hi) of `old` (its bit 0 is old bit lo).
+  std::function<void(const hhds::Node_class&, int, int8_t)> on_fold;
+  std::function<void(const hhds::Node_class&, int, int, const hhds::Node_class&)> on_run;
+  // Called with each memory removed because none of its read data is observed (its readers read 0).
+  std::function<void(const hhds::Node_class&)>                                    on_memory_dropped;
 };
 
 struct State_stats {
@@ -59,5 +87,16 @@ struct State_stats {
 // One round of the state sweep on `g` (see state.cpp). The caller folds the
 // result with cprop + bitwidth and calls again until it reports no change.
 State_stats sweep_state(hhds::Graph& g, const State_options& options = {});
+
+// Cut bits out of one flop of `g` the way the sweep does: bit i reads the constant `replace[i]` (0/1), and a bit
+// with replace[i] < 0 stays state. What stays is named like synth's hierarchical state sweep names it (a kept
+// prefix keeps the register's name, any other kept bit becomes a single-bit flop named after its source bit), so
+// LEC pairs it bit by bit. Returns false when nothing changed (no bit to cut, a partial cut of a signed flop, a
+// flop the sweep does not handle).
+bool fold_flop_bits(hhds::Graph& g, const hhds::Node_class& flop, const std::vector<int8_t>& replace);
+
+// Remove one memory of `g` the way the sweep removes an unobserved one: every reader of its read data reads 0.
+// Returns false when `mem` is not a plain (non-image) memory.
+bool drop_memory(hhds::Graph& g, const hhds::Node_class& mem);
 
 }  // namespace livehd::sweep

@@ -9,6 +9,7 @@
 #include "absl/container/flat_hash_set.h"
 #include "clock_gate.hpp"  // //graph
 #include "diag.hpp"
+#include "flat_state.hpp"
 #include "node_util.hpp"
 #include "pass_partition.hpp"
 #include "reassoc.hpp"
@@ -291,6 +292,21 @@ std::unique_ptr<Prepared_design> prepare_design(std::span<const std::shared_ptr<
           .msg("{}: merged {} duplicate register(s) ({} bit(s)) in {} round(s)", from_pass, merged->registers, merged->bits,
                merged->rounds)
           .emit();
+    }
+  }
+  if (state.state_sweep && !state.flat_sweep) {
+    // The constant and unobserved state only the whole design proves (router rings), found on a flat analysis copy
+    // and folded into per-instance-signature copies, so the hierarchy is kept (synth.flat_sweep does it by flattening).
+    if (const auto flat = fold_flat_state(result->definitions, state.top, budget);
+        flat && flat->folded_bits + flat->memories_dropped > 0) {
+      livehd::diag::stat(from_pass, "flat-state", "progress")
+          .msg("{}: whole-design state proof folded {} state bit(s) and {} memory(ies) in {} definition(s) ({} instance "
+               "copy(ies))",
+               from_pass, flat->folded_bits, flat->memories_dropped, flat->graphs_folded, flat->copies)
+          .emit();
+    }
+    if (budget != nullptr && budget->refused) {
+      return {};
     }
   }
   if (state.state_sweep) {

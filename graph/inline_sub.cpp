@@ -145,6 +145,8 @@ public:
 
   // The Sub clones this splice created, in creation (= ascending node id) order.
   [[nodiscard]] const std::vector<hhds::Node_class>& cloned_subs() const { return cloned_subs_; }
+  // Every body node and its clone in the parent (child node -> parent clone).
+  [[nodiscard]] const absl::flat_hash_map<hhds::Node_class, hhds::Node_class>& node_map() const { return node_map_; }
 
 private:
   hhds::Graph*               parent_;
@@ -891,11 +893,18 @@ Host_inliner::~Host_inliner() {
   }
 }
 
-bool Host_inliner::splice(const hhds::Node_class& inst, std::vector<hhds::Node_class>* new_subs) {
+bool Host_inliner::splice(const hhds::Node_class& inst, std::vector<hhds::Node_class>* new_subs,
+                          std::vector<std::pair<hhds::Node_class, hhds::Node_class>>* clones) {
   Sub_inliner s(host_, inst, from_pass_, nullptr, false, true, false, std::nullopt, state_.get());
   const bool  ok = s.run();
   if (ok && new_subs != nullptr) {
     new_subs->insert(new_subs->end(), s.cloned_subs().begin(), s.cloned_subs().end());
+  }
+  if (ok && clones != nullptr) {
+    clones->reserve(clones->size() + s.node_map().size());
+    for (const auto& [child, clone] : s.node_map()) {
+      clones->emplace_back(child, clone);
+    }
   }
   return ok;
 }

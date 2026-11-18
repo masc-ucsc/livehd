@@ -51,6 +51,7 @@ cc_test(
     deps = [
         ":sweep",
         "//graph",
+        "@abseil-cpp//absl/container:flat_hash_set",
         "@googletest//:gtest_main",
         "@hhds//hhds:graph",
     ],

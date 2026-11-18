@@ -2,9 +2,13 @@
 //
 // pass/sweep: flatten, unknown refinement and the state sweep (constant and
 // unobserved flop bits), each on a graph built by hand.
+#include <algorithm>
 #include <memory>
+#include <string>
+#include <utility>
 #include <vector>
 
+#include "absl/container/flat_hash_set.h"
 #include "graph_library_singleton.hpp"
 #include "gtest/gtest.h"
 #include "node_util.hpp"
@@ -124,6 +128,67 @@ TEST(SweepFlatten, SplicesTheCalleeBodyAndKeepsBlackBoxes) {
   EXPECT_EQ(livehd::sweep::reachable_closure({top}).size(), 1u);
 }
 
+TEST(SweepFlatten, RecordsWhereEveryFlatFlopCameFrom) {
+  auto& lib      = livehd::Hhds_graph_library::instance("lgdb_sweep_flatten_origin");
+  auto  child_io = lib.create_io("leaf");
+  child_io->add_input("clk", 1);
+  child_io->add_input("rst", 2);
+  child_io->add_input("d", 3);
+  child_io->set_bits("d", 2);
+  child_io->add_input("en", 4);
+  child_io->add_output("q", 5);
+  child_io->set_bits("q", 2);
+  auto child = child_io->create_graph();
+  auto flop  = make_flop(*child, 2, 0, child->get_input_pin("d"), child->get_input_pin("en"));
+  flop.get_driver_pin(0).connect_sink(child->get_output_pin("q"));
+
+  auto top_io = lib.create_io("top2");
+  for (const char* in : {"clk", "rst", "d", "en"}) {
+    top_io->add_input(in, top_io->get_input_pin_decls().size() + 1);
+  }
+  top_io->set_bits("d", 2);
+  top_io->add_output("q0", 10);
+  top_io->set_bits("q0", 2);
+  top_io->add_output("q1", 11);
+  top_io->set_bits("q1", 2);
+  auto                   top = top_io->create_graph();
+  std::vector<hhds::Nid> subs;
+  for (const char* out : {"q0", "q1"}) {
+    auto inst = gu::create_typed_node(*top, Ntype_op::Sub);
+    inst.set_subnode(child_io);
+    for (const char* in : {"clk", "rst", "d", "en"}) {
+      top->get_input_pin(in).connect_sink(inst.create_sink_pin(child_io->get_input_port_id(in)));
+    }
+    auto q = inst.create_driver_pin(child_io->get_output_port_id("q"));
+    gu::set_ubits(q, 2);
+    q.connect_sink(top->get_output_pin(out));
+    subs.push_back(inst.get_debug_nid());
+  }
+
+  livehd::sweep::Flat_origin origin;
+  const auto                 stats = livehd::sweep::flatten({top}, &origin);
+  EXPECT_EQ(stats.inlined, 2u);
+  ASSERT_EQ(origin.contexts.size(), 3u);
+  EXPECT_EQ(origin.contexts[0].parent, -1);
+  for (int c = 1; c < 3; ++c) {
+    EXPECT_EQ(origin.contexts[c].parent, 0);
+    EXPECT_EQ(origin.contexts[c].def, child->get_gid());
+  }
+  EXPECT_NE(origin.contexts[1].sub, origin.contexts[2].sub);
+  ASSERT_EQ(origin.flops.size(), 2u);
+  absl::flat_hash_set<int32_t> seen;
+  for (auto node : top->body().nodes()) {
+    if (gu::type_op_of(node) != Ntype_op::Flop) {
+      continue;
+    }
+    auto it = origin.flops.find(node.get_class_index());
+    ASSERT_NE(it, origin.flops.end());
+    EXPECT_EQ(it->second.second, flop.get_debug_nid());
+    seen.insert(it->second.first);
+  }
+  EXPECT_EQ(seen, (absl::flat_hash_set<int32_t>{1, 2}));
+}
+
 TEST(SweepFlatten, KeepsAClockGateLeafAsAnInstance) {
   auto& lib      = livehd::Hhds_graph_library::instance("lgdb_sweep_flatten_cg");
   auto  child_io = lib.create_io("cg");
@@ -212,6 +277,82 @@ TEST(SweepState, PartiallyConstantRegisterKeepsOnlyItsLiveBits) {
     }
   }
   EXPECT_FALSE(graph->get_output_pin("q").get_driver_pin().is_const());
+}
+
+TEST(SweepState, RebuildHooksReportTheCutBitsAndTheKeptRuns) {
+  auto graph = make_graph("lgdb_sweep_hooks", "hooks", 4);
+  auto low   = gu::create_get_mask(*graph, graph->get_input_pin("d"), 0, 2);
+  auto lowp  = low.create_driver_pin(0);
+  gu::set_ubits(lowp, 2);
+  auto cat = gu::create_typed_node(*graph, Ntype_op::Concat);
+  lowp.connect_sink(cat.create_sink_pin(0));
+  constant(*graph, 2).connect_sink(cat.create_sink_pin(1));
+  constant(*graph, 0).connect_sink(cat.create_sink_pin(2));
+  constant(*graph, 2).connect_sink(cat.create_sink_pin(3));
+  auto din = cat.create_driver_pin(0);
+  gu::set_ubits(din, 4);
+  auto flop = make_flop(*graph, 4, 0, din, graph->get_input_pin("en"));
+  flop.get_driver_pin(0).connect_sink(graph->get_output_pin("q"));
+  constant(*graph, 0).connect_sink(graph->get_output_pin("r"));
+
+  std::vector<std::pair<int, int8_t>> folded;
+  std::vector<std::pair<int, int>>    runs;
+  livehd::sweep::State_options        options;
+  options.on_fold = [&](const hhds::Node_class& old, int bit, int8_t value) {
+    EXPECT_EQ(old, flop);
+    folded.emplace_back(bit, value);
+  };
+  options.on_run = [&](const hhds::Node_class& old, int lo, int hi, const hhds::Node_class& run) {
+    EXPECT_EQ(old, flop);
+    EXPECT_EQ(gu::type_op_of(run), Ntype_op::Flop);
+    runs.emplace_back(lo, hi);
+  };
+  (void)livehd::sweep::sweep_state(*graph, options);
+  EXPECT_EQ(folded,
+            (std::vector<std::pair<int, int8_t>>{
+                {0, 0},
+                {1, 0}
+  }));
+  EXPECT_EQ(runs,
+            (std::vector<std::pair<int, int>>{
+                {2, 4}
+  }));
+}
+
+TEST(SweepState, FoldFlopBitsCutsTheGivenBitsOnly) {
+  auto graph = make_graph("lgdb_sweep_fold_bits", "fold_bits", 4);
+  auto flop  = make_flop(*graph, 4, 0, graph->get_input_pin("d"), graph->get_input_pin("en"));
+  flop.get_driver_pin(0).connect_sink(graph->get_output_pin("q"));
+  constant(*graph, 0).connect_sink(graph->get_output_pin("r"));
+  flop.attr(hhds::attrs::name).set("acc");
+  EXPECT_FALSE(livehd::sweep::fold_flop_bits(*graph, flop, {-1, -1, -1, -1}));
+  // bits 1 and 2 stay: not a prefix, so each becomes a single-bit flop named after its source bit
+  EXPECT_TRUE(livehd::sweep::fold_flop_bits(*graph, flop, {1, -1, -1, 0}));
+  std::vector<std::string> names;
+  for (auto node : graph->body().nodes()) {
+    if (gu::type_op_of(node) == Ntype_op::Flop) {
+      EXPECT_EQ(gu::bits_of(node.get_driver_pin(0)), 1);
+      names.emplace_back(gu::node_name_of(node));
+    }
+  }
+  std::ranges::sort(names);
+  EXPECT_EQ(names, (std::vector<std::string>{"acc[1]", "acc[2]"}));
+}
+
+TEST(SweepState, FoldFlopBitsKeepsTheNameOfANarrowedPrefix) {
+  auto graph = make_graph("lgdb_sweep_fold_prefix", "fold_prefix", 4);
+  auto flop  = make_flop(*graph, 4, 0, graph->get_input_pin("d"), graph->get_input_pin("en"));
+  flop.get_driver_pin(0).connect_sink(graph->get_output_pin("q"));
+  constant(*graph, 0).connect_sink(graph->get_output_pin("r"));
+  flop.attr(hhds::attrs::name).set("acc");
+  EXPECT_TRUE(livehd::sweep::fold_flop_bits(*graph, flop, {-1, -1, 0, 0}));
+  ASSERT_EQ(count_op(*graph, Ntype_op::Flop), 1u);
+  for (auto node : graph->body().nodes()) {
+    if (gu::type_op_of(node) == Ntype_op::Flop) {
+      EXPECT_EQ(gu::bits_of(node.get_driver_pin(0)), 2);
+      EXPECT_EQ(gu::node_name_of(node), "acc");
+    }
+  }
 }
 
 TEST(SweepState, TwoRegistersThatOnlyKeepEachOtherAtZeroAreProvenByInduction) {

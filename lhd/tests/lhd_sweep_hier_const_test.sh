@@ -30,8 +30,13 @@ synth() { # <tag> [extra --set ...]
 }
 flops() { grep -h '^DFF' "$1" | wc -l | tr -d ' '; }
 
-synth off --set synth.flat_sweep=false
+# The per-definition flow alone (the whole-design state proof, pass/synth flat_state, switched off).
+LHD_NO_FLAT_STATE=1 synth off --set synth.flat_sweep=false
 [ "$(flops "$W/off/net.v")" = 18 ] || fail "off: expected 18 flops (first stage folded), got $(flops "$W/off/net.v")"
+
+# The default flow: the whole-design state proof folds the chain without flattening (no compile.sweep needed).
+synth proof --set synth.flat_sweep=false
+[ "$(flops "$W/proof/net.v")" = 0 ] || fail "proof: expected the whole-design state proof to fold the chain, got $(flops "$W/proof/net.v")"
 
 synth on --set synth.flat_sweep=false --set compile.sweep=true
 [ "$(flops "$W/on/net.v")" = 0 ] || fail "on: expected no flop after the hierarchical constant sweep, got $(flops "$W/on/net.v")"
