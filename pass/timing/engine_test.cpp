@@ -492,9 +492,22 @@ TEST(FastEngine, WireModelAddsLoadAndDelay) {
   engine.evaluate();
   const S wired = inv({0, 0, 0, 0}, 4 + 6, 1);
   EXPECT_NEAR(engine.arrival(b.pin(i1, "Y"), 0, 0), wired.ar, 1e-3);
-  EXPECT_NEAR(engine.arrival(b.port_pin(out), 0, 0), wired.ar + 3, 1e-3);
-  EXPECT_NEAR(engine.slack(b.port_pin(out)),
-              1000 - std::max(wired.ar, wired.af) - 3, 1e-2);
+  // The sink reads the driver ramp through one pole of the 3 ps Elmore delay (OpenSTA's dmp model): its
+  // middle-threshold delay is at most the Elmore delay and close to it when the ramp is as slow as the wire.
+  const float wire_part = engine.arrival(b.port_pin(out), 0, 0) - wired.ar;
+  EXPECT_GT(wire_part, 0.8f * 3);
+  EXPECT_LE(wire_part, 3.f + 1e-3f);
+  EXPECT_NEAR(engine.slack(b.port_pin(out)), 1000 - std::max(wired.ar, wired.af) - wire_part, 0.2);
+
+  // A long wire (Elmore 2 ns, far beyond the driver slew) carries the single-pole slew: the lower->upper
+  // crossings of 1 - exp(-t/tau) are tau * ln((1 - lower) / (1 - upper)) apart (ln 4 for this library's 20/80%).
+  wire.sink_delay_ps[b.port_pin(out)] = 2000.f;
+  engine.set_wire(wire);
+  engine.evaluate();
+  const auto& m = b.netlist->types().slew_measure(0);
+  const float pole_slew = 2000.f * std::log((1 - m.lower) / (1 - m.upper)) / m.derate;
+  EXPECT_NEAR(engine.slew(b.port_pin(out), 0, 0), pole_slew, 0.05f * pole_slew);
+  EXPECT_NEAR(engine.arrival(b.port_pin(out), 0, 0) - wired.ar, 2000.f * std::log(1 / (1 - m.middle)), 0.05f * 2000.f);
 }
 
 TEST(FastEngine, DepthMarginShrinksWithTheLogicDepth) {

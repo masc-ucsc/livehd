@@ -47,6 +47,7 @@ struct Edit {
   std::string driver{};
   std::string reason{};  // why a tree was proposed: the clauses of edits() that held, for the report
   double      effort = 1;  // how many of the planner's alternatives to try (see plan_buffer_choices)
+  double      stress = 0;  // electrical stress of the net (1 + worst excess ratio at its driver or sinks; 0 within limits)
 };
 const Buffer* combinational(Node n, const Inventory& cells) {
   const auto io = n.get_subnode_io();
@@ -431,6 +432,31 @@ std::vector<Edit> edits(hhds::Graph& graph, const Inventory& cells, const Timing
     bool                      critical;
     std::string               name;
   };
+  Rc_index nets;
+  nets.reserve(placed.parasitics->nets.size());
+  for (const auto& net : placed.parasitics->nets) {
+    nets.emplace(net.driver, &net);
+  }
+  // The worst electrical excess at the SINKS of a driver's net (1 + excess ratio, 0 within limits). A strong
+  // driver of a long, heavily loaded net keeps its own output slew low while the far sinks see a slew many
+  // times the library limit; ranking by the driver pin alone let the budget go to milder nets first and left
+  // the worst ones (588/146-load decode nets) with nothing.
+  const auto sink_stress = [&](const std::string& label) {
+    double     worst = 0;
+    const auto found = nets.find(label);
+    if (found == nets.end()) {
+      return worst;
+    }
+    for (const auto& node : found->second->nodes) {
+      if (node.pin.empty() || node.pin == label) {
+        continue;
+      }
+      if (const auto* p = timing.find_label(node.pin); p != nullptr && p->electrical_excess > 0) {
+        worst = std::max(worst, 1 + p->electrical_excess);
+      }
+    }
+    return worst;
+  };
   std::unordered_map<uint64_t, Node_priority> priorities;
   priorities.reserve(buffers.size());
   // These graph/name/feedback lookups do not mutate the graph. Compute them
@@ -457,11 +483,6 @@ std::vector<Edit> edits(hhds::Graph& graph, const Inventory& cells, const Timing
     }
     return pa.critical != pb.critical ? pa.critical > pb.critical : pa.name < pb.name;
   });
-  Rc_index nets;
-  nets.reserve(placed.parasitics->nets.size());
-  for (const auto& net : placed.parasitics->nets) {
-    nets.emplace(net.driver, &net);
-  }
   std::map<std::string, std::vector<const Buffer*>> ladders;
   std::map<std::string, std::optional<uint64_t>>    truths;  // one truth table per cell, not per pair
   for (const auto& [name, c] : cells) {
@@ -713,9 +734,21 @@ std::vector<Edit> edits(hhds::Graph& graph, const Inventory& cells, const Timing
         needed = true;
         why("stress");
       }
+      double net_stress = 0;
       if (cell && pin != nullptr && drive_stress(*cell, *pin, timing.time_unit_ps) > 1) {
-        needed = true;
+        needed     = true;
+        net_stress = drive_stress(*cell, *pin, timing.time_unit_ps);
         why("stress");
+      }
+      if (state_drive && pin != nullptr) {
+        net_stress = std::max(net_stress, drive_stress(*state_drive, *pin, timing.time_unit_ps));
+      }
+      // A far sink past its max_transition (a long, heavily loaded net whose strong driver keeps its own output
+      // slew low) needs a tree as much as an overloaded driver does.
+      if (const double s = sink_stress(net.driver); s > 1) {
+        needed     = true;
+        net_stress = std::max(net_stress, s);
+        why("sink_slew");
       }
       const auto root = placed.pin_locations.find(net.driver);
       for (const auto& p : net.nodes) {
@@ -740,9 +773,10 @@ std::vector<Edit> edits(hhds::Graph& graph, const Inventory& cells, const Timing
       }
       if (needed) {
         // Nets that break an electrical limit keep every alternative; the others get fewer as they matter less.
-        const bool   electrical = reason.find("stress") != std::string::npos || reason.find("max_fanout") != std::string::npos;
+        const bool   electrical = reason.find("stress") != std::string::npos || reason.find("max_fanout") != std::string::npos
+                                || reason.find("sink_slew") != std::string::npos;
         const double effort     = electrical ? 1.0 : min_effort + (1.0 - min_effort) * crit;
-        result.push_back({"tree", owner, preferred->name, 4, 0, net.driver, reason, effort});
+        result.push_back({"tree", owner, preferred->name, 4, 0, net.driver, reason, effort, net_stress});
       }
     }
   } else {
@@ -1255,10 +1289,12 @@ std::optional<Buffer_tree> apply(hhds::Graph& graph, const Inventory& cells, con
       for (const auto& cell : removed) {
         removed_area += master_area(std::string(cell.get_subnode_io()->get_name()));
       }
-      const auto max_cells = static_cast<uint64_t>(std::floor(budget.baseline.charged_cells() * (1 + budget.fraction) + 1e-9));
+      // Only a net that breaks an electrical limit plans against the electrical allowance.
+      const double extra     = edit.stress > 1 ? budget.extra() : 0.0;
+      const auto   max_cells = static_cast<uint64_t>(std::floor(budget.baseline.charged_cells() * (1 + budget.fraction + extra) + 1e-9));
       limits.cells = max_cells + removed.size() >= now.charged_cells() ? max_cells + removed.size() - now.charged_cells() : 0;
       limits.area  = std::max(0.0,
-                              (budget.baseline.area_um2 - budget.baseline.constant_um2) * (1 + budget.fraction)
+                              (budget.baseline.area_um2 - budget.baseline.constant_um2) * (1 + budget.fraction + extra)
                                   - budget.charged_area(now) + removed_area);
     }
     plan = plan_buffer_choices(root_xy->second,
@@ -2803,6 +2839,26 @@ Repair_result repair_buffers(Result initial, const Options& requested, const Eva
       const auto phase_limit = std::min(sweep_budget, attempt + 12);
       const auto candidates
           = edits(*result.placed.graph, cells, score, protected_names, result.placed, options, tech, nullptr, true);
+      // The electrical allowance (Growth_budget::electrical_fraction) is open only while a tree sweep carries a net
+      // that breaks an electrical limit AND setup is met: it is a cleanup after timing closure. Opened while setup
+      // still fails, it let electrical trees spend the room the timing repair loop needed (minimax: +65 -> -216 ps);
+      // a sweep of timing-only trees (fanout4/chain/long) always stays within place.growth.
+      struct Electrical_scope {
+        Growth_budget* budget;
+        Electrical_scope(Growth_budget* b, bool on) : budget(on ? b : nullptr) {
+          if (budget) {
+            budget->electrical = true;
+          }
+        }
+        ~Electrical_scope() {
+          if (budget) {
+            budget->electrical = false;
+          }
+        }
+      } electrical_scope(options.growth_budget.get(),
+                         trees && score.wns && *score.wns >= 0
+                             && std::any_of(candidates.begin(), candidates.end(), [](const Edit& e) { return e.stress > 1; }));
+
       Node_index index;
       for (auto n : result.placed.graph->body().nodes()) {
         if (!n.get_name().empty()) {
@@ -2872,7 +2928,10 @@ Repair_result repair_buffers(Result initial, const Options& requested, const Eva
           const auto   pin    = score.find_label(driver);
           const double slack  = pin == nullptr ? std::numeric_limits<double>::infinity()
                                                : pin->slack.value_or(std::numeric_limits<double>::infinity());
-          const double excess = score.electrical_pin_feedback && pin != nullptr ? std::max(0.0, pin->electrical_excess) : 0;
+          // The net's own stress counts its far sinks too (Edit::stress, sink_slew): a strong driver of a 512-load
+          // net keeps its output within limits while the sinks see 10x max_transition.
+          const double excess = std::max(score.electrical_pin_feedback && pin != nullptr ? std::max(0.0, pin->electrical_excess) : 0.0,
+                                         edit.stress > 1 ? edit.stress - 1 : 0.0);
           // Setup-violating drivers first, worst slack first; then the rest by electrical excess. The growth
           // allowance is spent in this order, and a critical net can be inside its driver's cap and slew
           // ratings: a 115-load net on a BUFx24 has no "excess", so by excess alone it queued behind every net

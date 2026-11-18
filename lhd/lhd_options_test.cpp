@@ -662,6 +662,7 @@ TEST(LhdOptions, RecommendedSharedDefaults) {
            {                         "synth.place.pcrs",   "true"},
            {                       "synth.place.growth",   "0.05"},
            {         "synth.place.growth.sizing_share",    "0.3"},
+           {           "synth.place.growth.electrical",    "0.3"},
            {         "synth.place.repair.iterations",    "3"},
            {            "synth.place.domino_rail_fanout",     "32"},
            {                        "synth.place.resize",   "true"},

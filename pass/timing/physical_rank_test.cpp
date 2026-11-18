@@ -95,8 +95,9 @@ TEST(PhysicalRank, WireDelayLowersTheSlackOfTheEndpointItFeeds) {
   const auto* b = wire.ranking->find("ub:D");
   ASSERT_TRUE(a && b);
   ASSERT_TRUE(std::isfinite(a->slack));
-  // The wire adds its Elmore delay 2 * (5 + 2) = 14 ps, and the heavier load slows the flop's Q on top of it.
-  EXPECT_GT(a->slack - b->slack, 14.0);
+  // The wire adds about its Elmore delay 2 * (5 + 2) = 14 ps (read through the driver ramp, so a little less: the
+  // dmp single-pole model), and the heavier load slows the flop's Q on top of it.
+  EXPECT_GT(a->slack - b->slack, 12.0);
   EXPECT_LT(a->slack - b->slack, 40.0);
   // The clock pins are marked; the labels are sorted and unique; each net lists its labelled pins.
   ASSERT_TRUE(wire.ranking->find("inv:A"));

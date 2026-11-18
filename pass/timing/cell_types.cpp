@@ -110,6 +110,18 @@ Cell_types Cell_types::build(std::span<const lt::Library* const> corners, std::s
   Cell_types types;
   types.corner_names_.assign(names.begin(), names.end());
   const size_t count = corners.size();
+  for (const auto* library : corners) {
+    const auto&  t = library->default_thresholds;
+    Slew_measure m;
+    m.lower  = static_cast<float>(t.lower[0]);
+    m.upper  = static_cast<float>(t.upper[0]);
+    m.middle = static_cast<float>(t.output[0]);
+    m.derate = t.slew_derate > 0 ? static_cast<float>(t.slew_derate) : 1.f;
+    if (!(m.lower > 0 && m.upper > m.lower && m.upper < 1 && m.middle > 0 && m.middle < 1)) {
+      m = Slew_measure{};
+    }
+    types.slew_measure_.push_back(m);
+  }
 
   // The two port types come first, so that a primary input or output is a cell like any other.
   const auto add_port_type = [&](const char* type_name, const char* pin_name, Direction direction) {

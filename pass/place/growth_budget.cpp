@@ -89,8 +89,9 @@ double Growth_budget::charged_area(const Physical_size& candidate) const {
 }
 bool Growth_budget::allows(const Physical_size& candidate, double share) const {
   const auto area = charged_area(candidate);
-  return candidate.charged_cells() <= std::floor(baseline.charged_cells() * (1 + fraction * share) + 1e-9) && std::isfinite(area)
-         && area <= (baseline.area_um2 - baseline.constant_um2) * (1 + fraction * share) + 1e-9;
+  const double allowance = fraction * share + extra();
+  return candidate.charged_cells() <= std::floor(baseline.charged_cells() * (1 + allowance) + 1e-9) && std::isfinite(area)
+         && area <= (baseline.area_um2 - baseline.constant_um2) * (1 + allowance) + 1e-9;
 }
 void initialize_growth_budget(hhds::Graph& source, Options& options) {
   options.growth_budget            = std::make_shared<Growth_budget>();

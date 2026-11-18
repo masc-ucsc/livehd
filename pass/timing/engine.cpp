@@ -14,6 +14,43 @@
 
 namespace livehd::timing::fast {
 namespace {
+
+// The delay and slew a sink sees through its wire, the way OpenSTA's dmp delay calculator reads them
+// (DmpAlg::loadDelaySlew): the driver output is a saturating ramp whose `slew` is measured between the library's
+// lower and upper thresholds, and the sink is that ramp through one pole whose time constant is the sink's Elmore
+// delay `tau`. Delay is the sink's middle-threshold crossing less the ramp's own, slew the sink's lower->upper span.
+// A long heavily loaded net then reports the multi-ns slew OpenSTA reports at its far sinks; a short wire leaves
+// the driver slew unchanged (delay = tau when tau is under 0.1% of the slew, as OpenSTA does).
+std::pair<float, float> ramp_through_pole(float slew, float tau, const Cell_types::Slew_measure& m) {
+  if (!(tau > 0)) {
+    return {0.f, slew};
+  }
+  if (!(slew > 0) || tau < slew * 1e-3f) {
+    return {tau, slew};
+  }
+  const double T   = double(slew) * m.derate / (m.upper - m.lower);  // the full 0->1 ramp duration
+  const double tc  = tau;
+  const auto   y   = [&](double t) {
+    if (t <= 0) {
+      return 0.0;
+    }
+    if (t <= T) {
+      return (t - tc * -std::expm1(-t / tc)) / T;
+    }
+    return 1 - tc / T * (std::exp(-(t - T) / tc) - std::exp(-t / tc));
+  };
+  const auto cross = [&](double v) {
+    double lo = 0, hi = T + 30 * tc;
+    for (int i = 0; i < 40 && hi - lo > 1e-4; ++i) {
+      const double mid = .5 * (lo + hi);
+      (y(mid) < v ? lo : hi) = mid;
+    }
+    return .5 * (lo + hi);
+  };
+  const double delay = cross(m.middle) - m.middle * T;
+  const double out   = (cross(m.upper) - cross(m.lower)) / m.derate;
+  return {static_cast<float>(std::max(0.0, delay)), static_cast<float>(std::max<double>(slew, out))};
+}
 constexpr float inf = std::numeric_limits<float>::infinity();
 
 struct Combo {
@@ -614,11 +651,11 @@ void Engine::recompute_arrival(uint32_t p) {
     for (size_t s = 0; s < S; ++s) {
       const size_t k  = s % C;
       const float  wd = wire_delay(p, k);
-      const float  ws = wire_.sink_slew_ps.empty() ? 0.f : wire_.sink_slew_ps[static_cast<size_t>(p) * C + k];
       for (unsigned t = 0; t < 2; ++t) {
         const auto from = index(driver, s, t), to = index(p, s, t);
-        store(arrival_, to, arrival_[from] + wd);
-        store(slew_, to, ws == 0.f ? slew_[from] : std::hypot(slew_[from], ws));
+        const auto [d, sl] = ramp_through_pole(slew_[from], wd, types_.slew_measure(k));
+        store(arrival_, to, arrival_[from] + d);
+        store(slew_, to, sl);
         store(depth_, to, depth_[from]);
         if (k == options_.path_corner) {
           store_predecessor(path_index(p, s / C, t), {driver, static_cast<uint8_t>(t)});
@@ -985,11 +1022,11 @@ void Engine::forward_early() {
     if (net != no_index && !netlist_.is_driver(p)) {
       const auto  driver = netlist_.driver_of(net);
       const float wd     = wire_delay(p, h);
-      const float ws     = wire_.sink_slew_ps.empty() ? 0.f : wire_.sink_slew_ps[static_cast<size_t>(p) * corners_ + h];
       for (size_t g = 0; g < G; ++g) {
         for (unsigned t = 0; t < 2; ++t) {
-          early_arrival_[at(p, g, t)] = early_arrival_[at(driver, g, t)] + wd;
-          early_slew_[at(p, g, t)]    = ws == 0.f ? early_slew_[at(driver, g, t)] : std::hypot(early_slew_[at(driver, g, t)], ws);
+          const auto [d, sl]          = ramp_through_pole(early_slew_[at(driver, g, t)], wd, types_.slew_measure(h));
+          early_arrival_[at(p, g, t)] = early_arrival_[at(driver, g, t)] + d;
+          early_slew_[at(p, g, t)]    = sl;
         }
       }
       continue;

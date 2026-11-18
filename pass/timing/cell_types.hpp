@@ -86,6 +86,16 @@ public:
 
   [[nodiscard]] size_t               corners() const { return corner_names_.size(); }
   [[nodiscard]] const std::string&   corner_name(size_t corner) const { return corner_names_[corner]; }
+  // The library's slew measurement in a corner: the lower/upper slew thresholds (fractions of the swing), the output
+  // (delay) threshold and slew_derate_from_library; the wire model uses them to read a sink's delay and slew off the
+  // driver ramp through the RC tree the way OpenSTA's dmp delay calculator does.
+  struct Slew_measure {
+    float lower = .2f, upper = .8f, middle = .5f, derate = 1.f;
+  };
+  [[nodiscard]] const Slew_measure&  slew_measure(size_t corner) const {
+    static const Slew_measure fallback;
+    return corner < slew_measure_.size() ? slew_measure_[corner] : fallback;
+  }
   [[nodiscard]] size_t               types() const { return types_.size(); }
   [[nodiscard]] const Type&          type(uint32_t index) const { return types_[index]; }
   [[nodiscard]] uint32_t             find(std::string_view cell) const;
@@ -138,6 +148,7 @@ private:
   uint32_t                   add_axis(const std::vector<double>& values);
 
   std::vector<std::string>                  corner_names_;
+  std::vector<Slew_measure>                 slew_measure_;
   std::vector<Type>                         types_;
   std::vector<Pin_type>                     pins_;
   std::vector<Arc>                          arcs_;

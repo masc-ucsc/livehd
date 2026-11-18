@@ -36,6 +36,13 @@ struct Growth_budget {
   Physical_size baseline;
   double        fraction        = .03;
   double        sizing_share    = 0.6;  // see sizing_growth_share
+  // Extra allowance (a fraction of the baseline, like `fraction`) that only the electrical tree sweep may use while
+  // `electrical` is set: max_transition/max_capacitance fixes are not timing growth, and on a design whose
+  // timing-driven repair has already spent `fraction` they would otherwise find no room at all (litepci: 476 drivers
+  // with 1-6 ns slews left unbuffered). synth.place.growth.electrical.
+  double        electrical_fraction = 0.3;
+  bool          electrical          = false;
+  [[nodiscard]] double extra() const { return electrical ? electrical_fraction : 0.0; }
   uint64_t      rejected        = 0;
   double        tree_master_um2 = 0;  // the area of the master trees mint (placement sets it; 0: unknown)
   std::set<std::string> constants;    // tie-cell masters: every measurement against this budget names them

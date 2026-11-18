@@ -90,6 +90,33 @@ use only `synth.place.growth.sizing_share` (default 0.3) of it; buffer insertion
 spend the headroom a high-fanout net needs for its buffer tree (measured on eyeriss: 3% with sizing first left
 0.07 um2 for a 271-load net; 5% with a 0.3 share takes WNS from -11.0 to -6.9 ns).
 
+**Electrical repair.** The placement timer reads every sink the way OpenSTA's dmp delay calculator does: the driver
+output is a saturating ramp and the sink is that ramp through one pole of the sink's Elmore delay
+(`pass/timing/engine.cpp`, `ramp_through_pole`), so a long, heavily loaded net reports the multi-ns slew OpenSTA reports
+at its far sinks (the impulse-variance slew used before was ~2x low there, and a wire's delay is the ramp's crossing,
+at most its Elmore delay). Every pin is checked against Liberty `max_transition` (the library `default_max_transition`
+for pins without one) and every driver against `max_capacitance`. Tree repair proposes a net whose far sinks break
+`max_transition` even when its strong driver does not (reason `sink_slew` in `qor.place.repair`) and spends the growth
+allowance on the worst net stress first. Once setup is met, `pass.place.repair_electrical` runs one tree sweep with
+`synth.place.growth.electrical` (default 0.3) of extra cell/area allowance on top of `synth.place.growth`, usable only
+by nets that break an electrical limit; while setup still fails electrical trees stay within `synth.place.growth`, so
+they cannot take the room the timing repair loop needs. Measured on HighTide (virtual buffers on, OpenSTA): litepci WNS
++258 -> +1041 ps, max-slew violations 7.9k -> 5.9k, max-cap 492 -> 158 (cells +12%, HPWL +28%); liteeth +98 -> +152 ps,
+slew violations 534 -> 118; litedram slew violations 339 -> 207; sha3 +220 -> +235 ps; minimax +65 -> +2 ps (LiveHD's
+own slack now within 10 ps of OpenSTA's instead of 24 ps optimistic).
+
+**Buffer-tree planner API** (`steiner_repair.hpp`, reused by any step that must drive a positioned sink set):
+`plan_buffer_choices(root, loads, capacitances, required_ps, drives, driver, wire_r_ohm_dbu, wire_c_ff_dbu, limits,
+effort, min_topologies)` returns a `Buffer_tree` (buffers in postorder, each with a position, its loads and a drive
+index into `drives`; `root` lists what the original driver keeps). Geometry is DBU, capacitance fF, time ps.
+`Buffer_drive` describes a candidate cell (or the original driver): input cap, `max_cap_ff`, `max_fanout`, intrinsic
+delay and drive resistance, and area. The planner generates
+spatial topologies, picks drives bottom-up by required time with the Elmore delay over each branch's Steiner tree,
+splits the root when the original driver would break its own cap/fanout limit, and rejects
+trees beyond `Buffer_limits` (cells/area of the growth allowance left). It only proposes: callers apply the tree and
+accept it with fresh STA. `LHD_STEINER_TRACE=<n>` explains every rejected candidate on nets of at least n loads, and
+`LHD_STEINER_DUMP=<file>` records the inputs of a failed plan for `//pass/place:steiner_replay_test`.
+
 **Repair loop** (`synth.place.repair.iterations`, default 3; 0 = a single pass). After the first sizing and buffering
 pass the placement those edits were computed for is stale, so the flow re-places warm with the timing weights of the
 repaired result (a new buffer is a timed net: its slack rank pulls it to its loads), then sizes and buffers again. An

@@ -1269,6 +1269,10 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.eval_budget     = static_cast<unsigned>(std::max<int64_t>(4, integer("place.eval_budget", "6")));
   out.growth_fraction = number("place.growth", "0.05");
   out.growth_sizing_share = number("place.growth.sizing_share", "0.3");
+  out.growth_electrical   = number("place.growth.electrical", "0.3");
+  if (!std::isfinite(out.growth_electrical) || out.growth_electrical < 0 || out.growth_electrical > 4) {
+    throw Lhd_error{"usage", "synth.place.growth.electrical expects a fraction in [0,4]", ""};
+  }
   {
     const auto iterations = integer("place.repair.iterations", "3");
     if (iterations < 0 || iterations > 8) {
@@ -3671,6 +3675,7 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
         livehd::placement::initialize_growth_budget(**found, place_options);
         place_options.growth_budget->fraction     = place_options.growth_fraction;
         place_options.growth_budget->sizing_share = place_options.growth_sizing_share;
+        place_options.growth_budget->electrical_fraction = place_options.growth_electrical;
       }
       if (physical_cache) {
         const auto hint = physical_cache->placement_hint();
@@ -4548,6 +4553,28 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
             repair_loop_report += "]";
             design_repaired.timing = std::move(best_timing);  // the prior of the final legalization
             res.recipe_steps.emplace_back("pass.place.repair_loop");
+          }
+          // Electrical cleanup: once setup is met, the slew/capacitance violations left (wide nets the timing repair had
+          // no reason or no room to split) get one tree sweep with the electrical allowance (synth.place.growth.electrical)
+          // open. Transactional like every sweep: fresh STA must keep setup met and lower the electrical excess.
+          if (!experimental_repair && run_resize && place_options.resize_engine != "new" && place_options.growth_electrical > 0
+              && design_repaired.timing && !design_repaired.timing->ranking_only && design_repaired.timing->wns
+              && *design_repaired.timing->wns >= 0
+              && (design_repaired.timing->violations > 0 || design_repaired.timing->electrical_excess > 1e-6)
+              && !place_options.mutation_policy().no_buffer_edits) {
+            Phase_timer phase(res, "pass.place.repair_electrical");
+            auto        cleanup = livehd::placement::repair_buffers(std::move(placed),
+                                                                    place_options,
+                                                                    evaluate,
+                                                                    livehd::placement::Repair_scope::forest,
+                                                                    design_repaired.timing,
+                                                                    {});
+            placed              = std::move(cleanup.placed);
+            if (cleanup.timing) {
+              design_repaired.timing = std::move(cleanup.timing);
+            }
+            repair_loop_keep.push_back(std::move(cleanup));
+            res.recipe_steps.emplace_back("pass.place.repair_electrical");
           }
           if (terminal_resynth && !place_options.mutation_policy().no_resynthesis) {
             Phase_timer phase(res, "pass.place.resynth");

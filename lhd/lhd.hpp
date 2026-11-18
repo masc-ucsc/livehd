@@ -1069,6 +1069,11 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      Synth_set_option::Kind::file,
      "part of place.growth that gate sizing may use, in (0,1]; buffer insertion may use all of it, so a smaller share keeps more "
      "headroom for the buffer trees of high-fanout nets"},
+    {"place.growth.electrical",
+     "0.3",
+     Synth_set_option::Kind::file,
+     "extra cell/area allowance (a fraction of the mapped netlist, on top of place.growth) that only buffer trees fixing a "
+     "max_transition/max_capacitance/max_fanout violation may use; timing-driven growth stays within place.growth"},
     {"place.macro.anchor",
      "false",
      Synth_set_option::Kind::boolean,
