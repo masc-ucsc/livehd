@@ -36,6 +36,10 @@ struct Legroute_options {
   // retain Dijkstra. This changes no capacity or connectivity check.
   double   global_astar_weight = 1;
   int64_t  macro_halo_x_dbu = 0, macro_halo_y_dbu = 0;
+  // Route on the pin-escape layer too (a profile's access.escape, e.g. ASAP7 M2), as FastRoute does from
+  // MIN_ROUTING_LAYER: its tracks less the power rails count toward capacity. false keeps it out of the stack
+  // (the place.area=auto oracle's calibration).
+  bool     route_escape     = false;
 };
 void validate_legroute_options(const Legroute_options&);
 
@@ -45,6 +49,9 @@ struct Legroute_power {
   std::vector<physical::Shape> obstacles;
   std::vector<physical::Net>   power_nets;
   std::vector<physical::Via>   power_vias;
+  // the obstacles are the technology profile's planned power grid (its rails and stripes, no vias or pins): a
+  // planning-only budget for a flow that adds the PDN later (ORFS pdngen), not geometry that is exported
+  bool                         planned = false;
 };
 
 // One global route of a placement on the tile grid. Endpoints are the physical pins of the cells where they are
@@ -54,6 +61,7 @@ struct Legroute_plan_report {
   // no POWER/GROUND special-net geometry in the floorplan: the routing capacities carry no power budget, so a
   // passing route is optimistic for a design that will get a power grid
   bool pg_missing = false;
+  bool pg_planned = false;  // the power budget is the profile's planned grid (Legroute_power::planned)
   struct Failure {
     size_t      net_index = 0;  // original floorplan net index, not request order
     std::string net_name;

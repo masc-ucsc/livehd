@@ -346,7 +346,9 @@ Grid build_grid(const Design& d, const Legroute_power& power) {
   for (const auto& name : stack) {
     if (name == g.escape_layer) {
       above = true;
-      continue;
+      if (!d.opt.route_escape) {
+        continue;
+      }
     }
     if (!above) {
       continue;
@@ -363,11 +365,27 @@ Grid build_grid(const Design& d, const Legroute_power& power) {
     const double off   = L.has_offset ? (l.horizontal ? L.offset_y : L.offset_x) : pitch / 2;
     l.pitch            = std::llround(pitch * fp.dbu);
     l.offset           = std::llround(off * fp.dbu);
-    for (const auto& t : fp.tracks) {  // DEF TRACKS win over the LEF pitch: TRACKS Y are horizontal lines
-      if (t.layer == name && t.supported() && (t.axis == "Y") == l.horizontal) {
-        l.pitch  = t.step;
-        l.offset = t.start;
-        break;
+    // DEF TRACKS win over the LEF pitch: TRACKS Y are horizontal lines. A layer given as several interleaved patterns
+    // of one step (ORFS asap7 M2: seven patterns of a row's step) is that many tracks per step: the grid counts it at
+    // the mean pitch from the first start, so it keeps all of them instead of the first pattern's one per step.
+    {
+      int64_t step = 0, start = 0, patterns = 0;
+      for (const auto& t : fp.tracks) {
+        if (t.layer != name || !t.supported() || (t.axis == "Y") != l.horizontal) {
+          continue;
+        }
+        if (!patterns) {
+          step  = t.step;
+          start = t.start;
+        } else if (t.step != step) {
+          continue;  // a pattern of another step: keep the first one's
+        }
+        start = std::min(start, t.start);
+        ++patterns;
+      }
+      if (patterns) {
+        l.pitch  = std::max<int64_t>(1, step / patterns);
+        l.offset = start;
       }
     }
     if (l.pitch <= 0) {

@@ -1567,10 +1567,16 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      Synth_set_option::Kind::file,
      "with legroute: maximum virtual cell-width inflation per feedback round"},
     {"place.legroute.capacity_share",
-     "1",
+     "auto",
      Synth_set_option::Kind::file,
      "with legroute: share in (0,1] of an edge's tracks (after power, macros, blockages and the clock charge) the "
-     "global router may use"},
+     "global router may use; auto: 1 - synth.place.route.layer_adjustment, the derate FastRoute's "
+     "set_global_routing_layer_adjustment applies (ORFS asap7: 0.75)"},
+    {"place.legroute.route_escape",
+     "true",
+     Synth_set_option::Kind::boolean,
+     "with legroute: route on the pin-escape layer as well (ASAP7 M2, FastRoute's MIN_ROUTING_LAYER), its tracks less "
+     "the power rails counting toward capacity; false keeps it out of the plan's routing stack"},
     {"place.legroute.global_margin",
      "8",
      Synth_set_option::Kind::integer,

@@ -629,7 +629,8 @@ livehd::placement::Options placement_options(const Options& opts) {
   }
   livehd::placement::validate_boundary_pin_options(out.boundarypins);
   out.legroute                             = truthy(synth_set(opts, "place.legroute", "true"));
-  out.legroute_options.capacity_share      = number("place.legroute.capacity_share", "1");
+  out.legroute_options.capacity_share      = auto_number("place.legroute.capacity_share");  // -1: the placer derives it
+  out.legroute_options.route_escape        = truthy(synth_set(opts, "place.legroute.route_escape", "true"));
   out.legroute_options.global_margin       = integer("place.legroute.global_margin", "8");
   out.legroute_options.global_rounds       = static_cast<unsigned>(integer("place.legroute.global_rounds", "16"));
   out.legroute_options.global_pattern      = truthy(synth_set(opts, "place.legroute.global_pattern", "true"));
@@ -670,7 +671,11 @@ livehd::placement::Options placement_options(const Options& opts) {
     throw Lhd_error{"usage", "legroute requires positive plan budgets (rounds, iterations, net_pops) and plan.max_inflate > 1", ""};
   }
   try {
-    livehd::placement::validate_legroute_options(out.legroute_options);
+    auto checked = out.legroute_options;
+    if (checked.capacity_share < 0) {
+      checked.capacity_share = 1;  // auto: derived from the route layer adjustment by the placer
+    }
+    livehd::placement::validate_legroute_options(checked);
   } catch (const std::invalid_argument& error) {
     throw Lhd_error{"usage", error.what(), ""};
   }

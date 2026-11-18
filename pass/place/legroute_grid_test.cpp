@@ -38,6 +38,36 @@ TEST(LegrouteGrid, TwoLayerStackRoutesOnBothLayers) {
   }
 }
 
+TEST(LegrouteGrid, RouteEscapeCountsTheEscapeLayerAndEveryInterleavedTrackPattern) {
+  // route_escape adds the escape layer (M2 here) to the routed stack, as FastRoute routes from MIN_ROUTING_LAYER
+  Fixture f;
+  f.cell("dff", 0, 0);
+  Legroute_options opt;
+  opt.route_escape = true;
+  const auto d     = lr::build_design(f.tech, f.fp, f.timing, opt, nullptr);
+  const auto g     = lr::build_grid(d, {});
+  ASSERT_EQ(g.layers.size(), 5u);  // M2..M6
+  EXPECT_EQ(g.layers[0].name, "M2");
+  EXPECT_TRUE(g.layers[0].horizontal);
+  const auto single = g.cap[0];
+  // The same M2 tracks written as five patterns of one row's step (ORFS asap7 writes M2 so): every track counts,
+  // not only the first pattern's one per row
+  Fixture split;
+  split.cell("dff", 0, 0);
+  std::erase_if(split.fp.tracks, [](const auto& t) { return t.layer == "M2"; });
+  for (int64_t start : {25, 75, 125, 175, 225}) {
+    split.fp.tracks.push_back({"Y", "M2", start, 16, 250});
+  }
+  const auto ds = lr::build_design(split.tech, split.fp, split.timing, opt, nullptr);
+  const auto gs = lr::build_grid(ds, {});
+  ASSERT_EQ(gs.layers[0].name, "M2");
+  EXPECT_EQ(gs.layers[0].pitch, 50);
+  EXPECT_EQ(gs.cap[0], single);
+  // without route_escape the escape layer stays out of the stack
+  const auto dn = lr::build_design(f.tech, f.fp, f.timing, {}, nullptr);
+  EXPECT_EQ(lr::build_grid(dn, {}).layers.front().name, "M3");
+}
+
 TEST(LegrouteGrid, TileGridCapacityStripesAndMacros) {
   Fixture f;
   f.cell("dff", 0, 0);

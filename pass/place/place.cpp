@@ -342,6 +342,12 @@ void remove_transparent_latches(hhds::Graph& graph) {
   }
 }
 uint64_t    hash_text(std::string_view text, uint64_t hash = hash_util::kFnv1a64_offset) { return hash_util::fnv1a64(text, hash); }
+// legroute's capacity share: an explicit (0,1] value, or auto (<= 0) the same derate FastRoute applies
+// (1 - route_layer_adjustment), so the plan's overflow is measured against what global routing will admit
+double      legroute_capacity_share(const Options& o) {
+  const double share = o.legroute_options.capacity_share;
+  return share > 0 ? share : std::clamp(1 - o.route_layer_adjustment, 0.05, 1.0);
+}
 std::string file_text(const std::string& path) {
   std::ifstream input(path, std::ios::binary);
   if (!input) {
@@ -904,8 +910,9 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
   }
   if (o.legroute) {
     const auto& l = o.legroute_options;
-    h             = hash_text(std::format("legroute-v15:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}",
-                                          l.capacity_share,
+    h             = hash_text(std::format("legroute-v16:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}",
+                                          legroute_capacity_share(o),
+                                          l.route_escape,
                                           l.reserved_tracks,
                                           l.clock_charge,
                                           l.rib_tiles,
@@ -12425,6 +12432,24 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         }
         power.power_nets = std::move(grid.special_nets);
         power.power_vias = std::move(grid.vias);
+      } else if (profile
+                 && std::ranges::none_of(frame.special_nets, [](const ph::Net& net) {
+                      return (net.use == "POWER" || net.use == "GROUND") && !net.wires.empty();
+                    })) {
+        // No native grid and none in the DEF: the flow adds its PDN later (ORFS pdngen). Budget the profile's planned
+        // rails and stripes as routing obstacles so the plan's capacity matches what global routing will see; the
+        // planned geometry is never exported. A profile without a power-grid strategy keeps the PG-less capacity.
+        try {
+          const auto planned = plan_power_grid(tech, frame, power_grid_profile(*profile));
+          power.obstacles.reserve(power.obstacles.size() + planned.metal.size());
+          for (const auto& metal : planned.metal) {
+            power.obstacles.push_back({metal.layer, metal.rect});
+          }
+          power.planned = !planned.metal.empty();
+        } catch (const std::exception&) {
+          power.obstacles.clear();
+          power.planned = false;
+        }
       }
       return profile;
     };
@@ -12568,6 +12593,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         live_session->synchronize(design, control, session_identities(), "plan_measure");
       }
       auto lopt             = options.legroute_options;
+      lopt.capacity_share   = legroute_capacity_share(options);
       lopt.macro_halo_x_dbu = v.halo_x;
       lopt.macro_halo_y_dbu = v.halo_y;
       const std::string round_dir
@@ -12648,7 +12674,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
             R"({{"backend":"native","global_astar_weight":{},"global_pattern":{},"capacity_share":{},"measure_only":{},"nearby_cells":{},"local_scope":{},)",
             options.legroute_options.global_astar_weight,
             options.legroute_options.global_pattern,
-            options.legroute_options.capacity_share,
+            legroute_capacity_share(options),
             measure_only,
             nearby_cells,
             local_scope)

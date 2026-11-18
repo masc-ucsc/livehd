@@ -49,7 +49,8 @@ Legroute_plan_report legroute_plan(const physical::Technology& tech, physical::F
     return std::ranges::any_of(nets,
                                [](const auto& net) { return (net.use == "POWER" || net.use == "GROUND") && !net.wires.empty(); });
   };
-  out.pg_missing = !has_pg(fp.special_nets) && power.power_nets.empty();  // generated nets are PG by construction
+  out.pg_planned = power.planned && !power.obstacles.empty();
+  out.pg_missing = !has_pg(fp.special_nets) && power.power_nets.empty() && !out.pg_planned;  // generated nets are PG
   if (out.pg_missing) {
     std::fprintf(stderr,
                  "legroute plan: no power grid in the floorplan or the generated grid; routing capacities carry no "
@@ -260,7 +261,7 @@ Legroute_plan_report legroute_plan(const physical::Technology& tech, physical::F
 
 std::string legroute_plan_json(const Legroute_plan_report& r) {
   std::ostringstream out;
-  out << std::boolalpha << "{\"pg_missing\":" << r.pg_missing << ",\"signals\":" << r.signals
+  out << std::boolalpha << "{\"pg_missing\":" << r.pg_missing << ",\"pg_planned\":" << r.pg_planned << ",\"signals\":" << r.signals
       << ",\"timed_signals\":" << r.timed_signals << ",\"unrouted\":" << r.unrouted << ",\"search_limited\":" << r.search_limited
       << ",\"topology_disconnected\":" << r.topology_disconnected << ",\"overflow_edges\":" << r.overflow_edges
       << ",\"overflow_tracks\":" << r.overflow_tracks << ",\"overflow\":{\"basis\":\"2d_router_demand_per_direction\""
