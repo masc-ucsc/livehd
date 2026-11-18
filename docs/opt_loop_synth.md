@@ -362,7 +362,7 @@ today, for the record:
 | `pass.abc.register` | `true` (flops map to Liberty DFF cells) | `pass_abc.cpp` (`register`) |
 | `synth.memory` | `auto` (fold a memory within `synth.memory.max_bits`, or over 3 ports whatever the size; both mappers) | `lhd_kernel_common.cpp` (`merge_mapper_sets`) |
 | `synth.memory.max_bits` | `auto` (1024; 2048 under `synth.memory=sram`) | `lhd_kernel_common.cpp` (`memory_max_bits`) |
-| `pass.abc.memory_prune_reads` | `false` (clear unobserved read-port bits and feed provably-zero input bits as constants in a lowered memory) | `pass_abc.cpp` (`memory_prune_reads`), `memory_module.cpp`, `bit_facts.cpp` |
+| `pass.abc.memory_prune_reads` | `true` (clear unobserved read-port bits and feed provably-zero input bits as constants in a lowered memory) | `pass_abc.cpp` (`memory_prune_reads`), `memory_module.cpp`, `bit_facts.cpp` |
 | `pass.abc.ware_zero_bits` | `false` (clear provably-zero data bits of a ware shifter inside its module) | `pass_abc.cpp` (`ware_zero_bits`), `ware_module.cpp`, `bit_facts.cpp` |
 | `pass.color.synth.mode` | **`cones`** (`cones` \| `synth` \| `pipe`) | `pass_color.cpp` (`mode`) |
 | `pass.color.synth.mapper` | `abc` (`lhd synth` sets it from `synth.mapper`); picks the `stop_*` default profile | `pass_color.cpp` (`mapper`) |

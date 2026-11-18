@@ -2164,6 +2164,18 @@ sh_test(
     ],
 )
 
+# Signed registers narrowed by the state sweep: a signed tap chain whose low bits nothing observes keeps only the
+# observed bits, proven equivalent to the source by the graph-native LEC.
+sh_test(
+    name = "lhd_synth_signed_dead_test",
+    size = "small",
+    srcs = ["lhd_synth_signed_dead_test.sh"],
+    data = _FLOW_DATA + [
+        "abc_arst_q.lib",
+        "synth_signed_dead.v",
+    ],
+)
+
 # Constant-0 bits across instance boundaries (pass/synth propagate_constant_bits): fewer gates than with it off,
 # proven equivalent to the source by the graph-native LEC.
 sh_test(

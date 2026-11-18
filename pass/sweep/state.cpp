@@ -939,9 +939,6 @@ struct State_sweeper {
     if (kept == w) {
       return false;
     }
-    if (info.is_signed && kept != 0) {
-      return false;  // a partial split would change a signed Q's meaning
-    }
     const auto old_q = info.node.get_driver_pin(0);
     const auto name  = std::string(gu::node_name_of(info.node));
 
@@ -988,6 +985,16 @@ struct State_sweeper {
         i = j;
       }
       result = lanes.size() == 1 ? lanes.front().value : make_concat(g, lanes);
+      if (info.is_signed) {
+        // The lanes rebuild the exact w-bit pattern unsigned; a Sext keeping all w bits (b is the kept bit count)
+        // makes it the same signed value, so readers that sign-extend past w still read the top bit. An
+        // unobserved top bit reads 0 here, which no reader can see (reading past w would have demanded it).
+        auto sext = gu::create_typed_node(g, Ntype_op::Sext);
+        result.connect_sink(gu::setup_sink_by_name(sext, "a"));
+        gu::create_const(g, *Dlop::create_integer(w)).connect_sink(gu::setup_sink_by_name(sext, "b"));
+        result = sext.create_driver_pin(0);
+        gu::set_sbits(result, w);
+      }
     }
     // Every reader of the old Q -- including the new flops' own feedback, which
     // was wired to the old Q while they were built -- now reads the new value.
@@ -1290,6 +1297,25 @@ struct State_sweeper {
         }
         return;
       }
+      case Ntype_op::Sext: {
+        // sext(a, b): b is the kept bit COUNT; output bit j reads a[min(j, b-1)]
+        const auto a = gu::get_driver_of_sink_name(n, "a");
+        const auto b = gu::get_driver_of_sink_name(n, "b");
+        if (a.is_invalid() || b.is_invalid() || !b.is_const() || !gu::const_of(b).is_just_i64()
+            || gu::const_of(b).to_just_i64() <= 0) {
+          need_all_inputs(n);
+          return;
+        }
+        const int keep = static_cast<int>(std::min<int64_t>(gu::const_of(b).to_just_i64(), int64_t{1} << 24));
+        for (int j = 0; j < w; ++j) {
+          if (is_demanded(out, j)) {
+            const int src = std::min(j, keep - 1);
+            need(a, src, src + 1);
+          }
+        }
+        return;
+      }
+      case Ntype_op::Mult:  // like a sum: product bits [0, top) read only operand bits [0, top)
       case Ntype_op::Sum: {
         const int top = top_demand(out);
         for (const auto& sink : n.inp_sorted_pins()) {
@@ -1446,9 +1472,6 @@ struct State_sweeper {
       info.node      = node;
       info.width     = w;
       info.is_signed = !gu::is_unsign(q);
-      if (info.is_signed && dead != static_cast<size_t>(w)) {
-        continue;
-      }
       std::vector<int8_t> zeros(static_cast<size_t>(w), 0);
       if (rebuild(info, keep, zeros, /*unobserved=*/true)) {
         stats.dead_bits += dead;

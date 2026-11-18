@@ -41,10 +41,10 @@ for sweep_opt in compile.flatten compile.unknown_zero compile.sweep; do
   echo "$out" | grep -q "\"name\":\"$sweep_opt\",\"method\":\"compile\",\"default\":\"false\"" \
     || fail "$sweep_opt must be listed and default false: $out"
 done
-for abc_opt in memory_prune_reads ware_zero_bits; do
-  echo "$out" | grep -q "\"name\":\"pass.abc.$abc_opt\",\"method\":\"pass.abc\",\"default\":\"false\"" \
-    || fail "pass.abc.$abc_opt must be listed and default false: $out"
-done
+echo "$out" | grep -q '"name":"pass.abc.ware_zero_bits","method":"pass.abc","default":"false"' \
+  || fail "pass.abc.ware_zero_bits must be listed and default false: $out"
+echo "$out" | grep -q '"name":"pass.abc.memory_prune_reads","method":"pass.abc","default":"true"' \
+  || fail "pass.abc.memory_prune_reads must be listed and default true: $out"
 for obsolete in roll roll_arrays roll_cap unroll; do
   "$LHD" compile "$PRP" --set "compile.upass.$obsolete=true" --workdir "$W/removed_$obsolete" -q \
     >"$W/removed_$obsolete.json" 2>&1 && fail "compile.upass.$obsolete must be rejected"

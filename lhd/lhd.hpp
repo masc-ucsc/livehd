@@ -2039,7 +2039,7 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      "",
      Synth_set_option::Kind::file,
      "comma-separated cell-name globs never chosen as a new master or repeater by either resize engine"},
-    {"adder", "auto", Synth_set_option::Kind::file, "shared default: auto|rca|cska|cla|prefix|brent; source pins override it"},
+    {"adder", "auto", Synth_set_option::Kind::file, "shared default: auto|rca|cska|cla|prefix|brent (auto: rca untimed, brent with a delay budget in pass.abc); source pins override it"},
     {"multiplier", "auto", Synth_set_option::Kind::file, "shared default: auto|array|tree|csa|tdm"},
     {"barrel", "auto", Synth_set_option::Kind::file, "shared default: auto|log|reverse"},
     {"block_size", "auto", Synth_set_option::Kind::file, "shared CSKA/CLA block width; auto derives it from the operand width"},

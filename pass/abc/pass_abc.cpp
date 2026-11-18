@@ -262,8 +262,8 @@ void Pass_abc::add_mapping_labels(Eprp_method& m) {
                        "enable of `cond ? K : 0`, a narrow address), and pass a lane-enable vector that is one condition on "
                        "a constant lane pattern as that one bit, so the read and write logic of those bits is dropped. The "
                        "mapped function of every observed bit is unchanged. Memory modules are then built before ware "
-                       "modules (false, the default)",
-                       "false");
+                       "modules (true, the default; false keeps the historical ware-first order and full-width ports)",
+                       "true");
   m.add_label_optional(
       "ware_zero_bits",
       "true|false clear, inside an extracted ware shifter, the data-operand bits its parent provably drives "
@@ -313,7 +313,7 @@ void Pass_abc::add_mapping_labels(Eprp_method& m) {
   m.add_label_optional("stats", "report one mapped QoR row per (definition, color); incremental rows include resynth=1|0", "false");
   m.add_label_optional(
       "adder",
-      "auto|rca|cska|cla|prefix|brent: auto uses the heuristic choice (smallest, or fastest for a timed region); it compares "
+      "auto|rca|cska|cla|prefix|brent: auto starts from rca (untimed) or brent (with a delay budget); it compares "
       "mapped area or critical-path timing, including inlined arithmetic, only under synth.tune.profile=on",
       "auto");
   m.add_label_optional("tune_profile", "INTERNAL: synth.tune.profile", "auto");
@@ -936,7 +936,7 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
   bool       map_register        = truthy(var.get("register", "true"));
   bool       drop_init           = truthy(var.get("drop_init", "false"));
   bool       derived_clock       = truthy(var.get("derived_clock", "true"));
-  const bool memory_prune_reads  = truthy(var.get("memory_prune_reads", "false"));
+  const bool memory_prune_reads  = truthy(var.get("memory_prune_reads", "true"));
   const bool ware_zero_bits      = truthy(var.get("ware_zero_bits", "false"));
   auto       memory_s            = std::string{var.get("memory", "auto")};
   auto       memory_max_bits_s   = std::string{var.get("memory_max_bits", "1024")};
@@ -967,6 +967,7 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
     region_opts = std::move(parsed.value());
   }
 
+  // `auto` starts from rca here; Region_driver picks Brent-Kung per region when that region has a delay budget.
   auto adder = livehd::synth::arith::parse_adder_kind(adder_s == "auto" ? "rca" : adder_s);
   if (!adder.has_value()) {
     livehd::diag::err("pass.abc", "bad-adder", "io")

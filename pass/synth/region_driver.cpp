@@ -566,6 +566,16 @@ bool Region_driver::apply_region_overrides(const livehd::partition::Region_body&
       opts_.auto_barrel      = true;
     }
   }
+  // An `auto` adder starts from ripple carry in an untimed region and from Brent-Kung under a delay budget: a ripple
+  // carry chain is a linear-depth path the technology mapper cannot restructure, and across the lhdsuite cores the
+  // log-depth Brent-Kung tree recovered most of the timing gap to Yosys+ABC for a few percent of area (Kogge-Stone
+  // `prefix` was faster only on the widest adders and larger everywhere). Decided per region, after its own delay.
+  if (opts_.auto_adder) {
+    char*        end = nullptr;
+    const double ps  = opts_.delay.empty() ? 0.0 : std::strtod(opts_.delay.c_str(), &end);
+    const bool timed = !opts_.delay.empty() && end != opts_.delay.c_str() && std::isfinite(ps) && ps > 0.0;
+    opts_.adder      = timed ? arith::Adder_kind::brent : arith::Adder_kind::rca;
+  }
   return flow_overridden;
 }
 

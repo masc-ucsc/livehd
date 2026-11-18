@@ -17,8 +17,8 @@
 #   2. zb_mem: a lowered memory whose two read ports each observe a narrow window of
 #      the word. With memory_prune_reads the bits no reader observes are cleared at
 #      the memory module's output, so the read mux of those bits is not built.
-# Each option is off by default (the cell counts without it are the historical ones),
-# and with it on the mapped netlist is LEC-equivalent to the source through the
+# ware_zero_bits is off by default; memory_prune_reads is on by default (its `off` run sets it false to get the
+# historical cell counts). With each on, the mapped netlist is LEC-equivalent to the source through the
 # graph-native and the Verilog engines.
 set -u
 
@@ -92,8 +92,8 @@ for claim in shift mem select lanes shared; do
       map_design "$W/${claim}_on" "$top" --set pass.abc.ware_zero_bits=true
       ;;
     mem|lanes)
-      map_design "$W/${claim}_off" "$top" --set synth.memory=flops
-      map_design "$W/${claim}_on" "$top" --set synth.memory=flops --set pass.abc.memory_prune_reads=true
+      map_design "$W/${claim}_off" "$top" --set synth.memory=flops --set pass.abc.memory_prune_reads=false
+      map_design "$W/${claim}_on" "$top" --set synth.memory=flops
       ;;
     shared)
       map_design "$W/shared_on" "$top" --set synth.memory=flops --set pass.abc.memory_prune_reads=true
