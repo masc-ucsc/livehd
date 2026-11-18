@@ -632,7 +632,7 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.legroute_options.capacity_share      = number("place.legroute.capacity_share", "1");
   out.legroute_options.global_margin       = integer("place.legroute.global_margin", "8");
   out.legroute_options.global_rounds       = static_cast<unsigned>(integer("place.legroute.global_rounds", "16"));
-  out.legroute_options.global_pattern      = truthy(synth_set(opts, "place.legroute.global_pattern", "false"));
+  out.legroute_options.global_pattern      = truthy(synth_set(opts, "place.legroute.global_pattern", "true"));
   out.legroute_options.global_astar_weight = number("place.legroute.global_astar_weight", "1");
   if (out.legroute) {
     out.placement_session = std::make_shared<livehd::placement::Placement_session>();

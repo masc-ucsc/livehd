@@ -1292,6 +1292,14 @@ driver's restarts. Under an interactive GUI session the main GP stays in the nat
 optimizer continuation), the plan rounds start their retained optimizer from its converged positions, and
 edit-mode moves are replayed on the final placement. `synth.place.legroute=false` turns the plan off.
 
+Each plan round's global route seeds nets with FastRoute-style L/Z patterns on the remaining edge capacity
+(`synth.place.legroute.global_pattern`, on by default) and falls back to the negotiated maze only where a pattern
+does not fit. On HighTide asap7 this routes the long multi-pin nets the bounded maze gave up on (litepci 85 and
+coralnpu 160 unresolved nets -> 0), measures less overflow on the same placement (sha3 1374 -> 330 tracks, minimax
+369 -> 0) and halves the probe time. A round whose residual has no cell to widen (only unresolved nets, or overflow
+on timing-protected cells only) keeps the measured placement instead of spending a GP slice without a routing
+objective.
+
 ## Timing-closure observation controller
 
 `//pass/place:timeclosure` is the independent observation/controller foundation

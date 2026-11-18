@@ -1581,7 +1581,7 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      "with legroute: negotiation rounds of the global router (the nets on an edge over its share reroute under a "
      "congestion cost that doubles each round plus the edge's overuse history); 0 = one pass with full edges closed"},
     {"place.legroute.global_pattern",
-     "false",
+     "true",
      Synth_set_option::Kind::boolean,
      "with legroute: FastRoute-derived L/Z pattern seed using native timing topology and remaining edge capacity; "
      "bounded unsuccessful attempts fall back to the native maze router"},

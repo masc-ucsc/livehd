@@ -735,7 +735,7 @@ TEST(LhdOptions, LegrouteOptionsAreTheMinimalCoreAndOptIn) {
       {         "synth.place.legroute.capacity_share",      "1"},
       {          "synth.place.legroute.global_margin",      "8"},
       {          "synth.place.legroute.global_rounds",     "16"},
-      {         "synth.place.legroute.global_pattern",  "false"},
+      {         "synth.place.legroute.global_pattern",   "true"},
       {    "synth.place.legroute.global_astar_weight",      "1"},
   };
   size_t count = 0;

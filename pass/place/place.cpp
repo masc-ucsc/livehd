@@ -12762,6 +12762,13 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
                    added,
                    control.target_density,
                    density);
+      if (!coarse_feedback && std::ranges::none_of(grow, [](double g) { return g > 0; })) {
+        // Nothing to widen: the residual is unresolved nets (a search budget, no measured overflow) or overflow
+        // whose cells are all timing-protected. A GP slice without inflation has no routing objective, only
+        // reshuffles the converged placement (measured: more residual, never less) and costs a full GP budget.
+        std::fprintf(stderr, "legroute plan %u: no cell to widen, keeping the measured placement\n", round);
+        return true;
+      }
       const double   hpwl_before        = dp::hpwl(design);
       const auto     before_x           = local_scope ? design.node_x : std::vector<double>{};
       const auto     before_y           = local_scope ? design.node_y : std::vector<double>{};
