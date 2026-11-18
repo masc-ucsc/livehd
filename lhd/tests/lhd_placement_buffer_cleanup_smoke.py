@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """synth.place.buffer_cleanup: the pre-placement removal of internal synthesis
-buffers is disabled by default. Explicit auto runs it when resize rebuilds
-buffering; true forces the cleanup, false keeps the synthesis buffers."""
+buffers defaults to auto, which runs it only when resize rebuilds buffering
+(not here: no OpenTimer, so no resize); true forces the cleanup, false keeps
+the synthesis buffers."""
 import json
 import os
 from pathlib import Path

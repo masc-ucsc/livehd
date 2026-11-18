@@ -2036,7 +2036,7 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      Synth_set_option::Kind::boolean,
      "timing-checked gate sizing, buffer removal and Steiner repair with single-cell legalization"},
     {"place.buffer_cleanup",
-     "false",
+     "auto",
      Synth_set_option::Kind::file,
      "auto|true|false: bypass internal non-inverting synthesis buffers on the physical copy before full placement; auto "
      "only when synth.place.resize will rebuild the buffering in the same run (else the synthesis buffers stay)"},

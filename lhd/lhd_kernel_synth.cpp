@@ -4073,10 +4073,12 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
       };
       place_options.optimization_pending = !macro_plan_only && (run_resize || run_timing_place || run_resynth);
       place_options.persist_parasitics   = !place_options.optimization_pending;
-      // Preserve synthesis buffers by default. Explicit auto cleanup delegates
-      // buffering to synth.place.resize; timing placement and resynthesis
-      // alone do not rebuild it.
-      const auto buffer_cleanup          = synth_set(opts, "place.buffer_cleanup", "false");
+      // auto (the default) bypasses the synthesis buffers when synth.place.resize rebuilds the buffering in this run:
+      // a mapping-time fanout tree groups loads before any position exists, so its buffers' loads end up scattered
+      // and global placement cannot untangle them (HighTide minimax/litedram/sha3/liteeth HPWL 2.5/1.9/1.4/1.5x
+      // OpenROAD's with them, 1.06/1.31/1.13/1.24x without). Timing placement and resynthesis alone do not rebuild
+      // buffering, so without resize the synthesis buffers stay.
+      const auto buffer_cleanup          = synth_set(opts, "place.buffer_cleanup", "auto");
       if (buffer_cleanup != "auto" && buffer_cleanup != "true" && buffer_cleanup != "false") {
         throw Lhd_error{"usage", "invalid synth.place.buffer_cleanup: " + buffer_cleanup, "expected auto, true or false"};
       }
