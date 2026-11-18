@@ -5,6 +5,7 @@
 #include <atomic>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -213,6 +214,7 @@ private:
   void        create_combinational(std::shared_ptr<File_output> fout, hhds::Graph* graph);
   void        create_outputs(std::shared_ptr<File_output> fout, hhds::Graph* graph);
   static bool structural_wiring_graph(hhds::Graph* graph);
+  static std::optional<int64_t> structural_shift_amount(const hhds::Node_class& node);
   std::string structural_bit(const hhds::Pin_class& pin, int64_t bit) const;
   std::string structural_range(const hhds::Pin_class& pin, int width, int64_t low = 0, bool sized_hex = false) const;
   void        create_structural_wiring(std::shared_ptr<File_output> fout, hhds::Graph* graph);

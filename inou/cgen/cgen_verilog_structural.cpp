@@ -1,6 +1,7 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include <algorithm>
+#include <optional>
 #include <vector>
 
 #include "absl/strings/str_cat.h"
@@ -9,6 +10,26 @@
 #include "node_util.hpp"
 
 namespace gu = livehd::graph_util;
+
+std::optional<int64_t> Cgen_verilog::structural_shift_amount(const hhds::Node_class& node) {
+  // One driver per operand (a multi-driver `b` is a sum of shifts, not wiring).
+  for (std::string_view name : {"a", "b"}) {
+    const auto sink = gu::find_sink_pin(node, name);
+    if (sink.is_invalid() || sink.get_driver_pins().size() != 1) {
+      return std::nullopt;
+    }
+  }
+  const auto b = gu::get_driver_of_sink_name(node, "b");
+  if (!b.is_const()) {
+    return std::nullopt;
+  }
+  const auto& value = gu::const_of(b);
+  if (!value.is_numeric() || !value.is_just_i64() || value.has_unknowns() || value.to_just_i64() < 0
+      || value.to_just_i64() > (int64_t{1} << 20)) {
+    return std::nullopt;
+  }
+  return value.to_just_i64();
+}
 
 bool Cgen_verilog::structural_wiring_graph(hhds::Graph* graph) {
   for (auto node : graph->body().nodes()) {
@@ -37,6 +58,11 @@ bool Cgen_verilog::structural_wiring_graph(hhds::Graph* graph) {
       }
     } else if (op == Ntype_op::Concat) {
       if (gu::concat_lanes(node).empty()) {
+        return false;
+      }
+    } else if (op == Ntype_op::SHL || op == Ntype_op::SRA) {
+      // A constant shift is wiring (pass.abc's single-shift rewrite emits it as a typed node): one assign per bit.
+      if (!structural_shift_amount(node).has_value()) {
         return false;
       }
     } else {
@@ -135,6 +161,17 @@ void Cgen_verilog::create_structural_wiring(std::shared_ptr<File_output> fout, h
       const auto keep   = gu::const_of(gu::get_driver_of_sink_name(node, "b")).to_just_i64();
       for (int bit = 0; bit < width; ++bit) {
         bits[bit] = structural_bit(source, keep > 0 ? std::min<int64_t>(bit, keep - 1) : bit);
+      }
+    } else if (op == Ntype_op::SHL || op == Ntype_op::SRA) {
+      const auto source = gu::get_driver_of_sink_name(node, "a");
+      const auto amount = *structural_shift_amount(node);
+      for (int bit = 0; bit < width; ++bit) {
+        if (op == Ntype_op::SHL) {
+          bits[bit] = bit < amount ? "1'b0" : structural_bit(source, bit - amount);
+        } else {
+          // structural_bit extends past the declared width: the sign bit of a signed source, 0 of an unsigned one.
+          bits[bit] = structural_bit(source, bit + amount);
+        }
       }
     } else {
       I(op == Ntype_op::Concat);

@@ -5707,6 +5707,25 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
     // driver, so the driver/store-count refinements don't apply.
     for (const auto* wsym : emit_ordered(wire_syms_)) {
       const auto* vs = wsym->as_if<slang::ast::ValueSymbol>();
+      // A RUNTIME-indexed combinational 1-D array is not pre-declared in
+      // lower_module (only aggregate or constant-indexed ones are), so it is
+      // still undeclared here and would be declared lazily at its first use as
+      // a plain flat `mut` — skipping this split. A reader sorted ahead of the
+      // writer (a cross-process combinational cycle keeps source order) then
+      // read the poison initializer and tolg wired it nil: minion's
+      // `uc_load_id_q <= uc_load_id_d` flop latched X forever. Declare it now
+      // (it takes declare_unpacked's flatten branch, at module top) so the
+      // split below applies exactly as for a pre-declared bus.
+      if (vs != nullptr && !wire_split_tmp_.contains(wsym) && !declared_.contains(wsym) && is_module_level(*vs)
+          && !reg_syms_.contains(vs) && !input_syms_.contains(vs) && !output_syms_.contains(vs) && !mem_init_vals_.contains(vs)) {
+        const auto& ct = vs->getType().getCanonicalType();
+        if (ct.kind == slang::ast::SymbolKind::FixedSizeUnpackedArrayType) {
+          const auto& elem = ct.as<slang::ast::FixedSizeUnpackedArrayType>().elementType.getCanonicalType();
+          if (elem.kind != slang::ast::SymbolKind::FixedSizeUnpackedArrayType && elem.isIntegral()) {
+            declare_value_symbol(*vs, /*force_reg=*/false);
+          }
+        }
+      }
       if (vs == nullptr || wire_split_tmp_.contains(wsym) || !declared_.contains(wsym)) {
         continue;
       }

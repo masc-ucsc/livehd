@@ -1656,7 +1656,10 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
     livehd::diag::warn("pass.abc", "dff-init-kept-native", "unsupported")
         .msg(
             "pass.abc region '{}': register(s) carry a power-on init value that the plain DFF cell '{}' has no pin for; "
-            "they were kept as native flops (still correct) while init-less registers mapped to DFF cells",
+            "they were kept as native flops (still correct) while init-less registers mapped to DFF cells. A native flop "
+            "is not a library cell (a cell-only netlist or placement cannot use it): --set synth.drop_init=true maps "
+            "them to plain DFF cells and drops the value, as Yosys does for an ASIC (LEC against the source then sees the "
+            "power-on difference)",
             rb.module_name,
             dff->name)
         .emit();

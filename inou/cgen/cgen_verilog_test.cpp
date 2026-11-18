@@ -69,6 +69,49 @@ TEST(CgenVerilog, StructuralWiringUsesPlainVerilogAndExplicitWidths) {
   EXPECT_NE(verilog.find("assign "), std::string::npos);
 }
 
+// A constant shift (pass.abc's single-shift rewrite leaves one as a typed node in
+// a mapped region) is wiring: the netlist stays structural -- no always_comb/reg,
+// which OpenSTA rejects -- and the bits land where the shift puts them.
+TEST(CgenVerilog, StructuralConstantShiftsAreWiring) {
+  const std::string name = "structural_shift";
+  auto&             lib  = livehd::Hhds_graph_library::instance("lgdb_" + name);
+  auto              io   = lib.create_io(name);
+  io->add_input("u", 1);
+  io->set_bits("u", 4);
+  io->set_unsign("u", true);
+  io->add_input("s", 2);
+  io->set_bits("s", 4);
+  io->add_output("left", 3);
+  io->set_bits("left", 6);
+  io->set_unsign("left", true);
+  io->add_output("right", 4);
+  io->set_bits("right", 4);
+  io->set_unsign("right", true);
+  auto graph = io->create_graph();
+  gu::set_ubits(graph->get_input_pin("u"), 4);
+  gu::set_sbits(graph->get_input_pin("s"), 4);
+  auto shl = gu::create_typed_node(*graph, Ntype_op::SHL);
+  graph->get_input_pin("u").connect_sink(gu::setup_sink_by_name(shl, "a"));
+  gu::create_const(*graph, *Dlop::create_integer(2)).connect_sink(gu::setup_sink_by_name(shl, "b"));
+  gu::set_ubits(shl.create_driver_pin(0), 6);
+  shl.create_driver_pin(0).connect_sink(graph->get_output_pin("left"));
+  auto sra = gu::create_typed_node(*graph, Ntype_op::SRA);
+  graph->get_input_pin("s").connect_sink(gu::setup_sink_by_name(sra, "a"));
+  gu::create_const(*graph, *Dlop::create_integer(1)).connect_sink(gu::setup_sink_by_name(sra, "b"));
+  gu::set_sbits(sra.create_driver_pin(0), 4);
+  sra.create_driver_pin(0).connect_sink(graph->get_output_pin("right"));
+  std::filesystem::create_directories(name);
+  Cgen_verilog{name}.do_from_graph(graph);
+  std::ifstream     input(name + "/" + name + ".v");
+  const std::string verilog{std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
+  for (const char* syntax : {"always", " reg ", "<<", ">>"}) {
+    EXPECT_EQ(verilog.find(syntax), std::string::npos) << syntax << "\n" << verilog;
+  }
+  // u << 2 into 6 bits: {u[3],u[2],u[1],u[0],0,0}; s >>> 1 (signed): {s[3],s[3],s[2],s[1]}.
+  EXPECT_NE(verilog.find("{u[3],u[2],u[1],u[0],1'b0,1'b0}"), std::string::npos) << verilog;
+  EXPECT_NE(verilog.find("{s[3],s[3],s[2],s[1]}"), std::string::npos) << verilog;
+}
+
 // STA does not apply Verilog's implicit extension at Liberty instance ports.
 TEST(CgenVerilog, StructuralInstanceInputsExtendToDeclaredWidth) {
   const std::string name = "structural_port_width";

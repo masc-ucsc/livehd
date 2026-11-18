@@ -781,6 +781,7 @@ bool Partitioner::collect() {
   // input or a constant never union-merge below). The flat def must come out
   // as ONE module, and a same-color multi-module split would defeat it.
   absl::flat_hash_map<int, hhds::Node_class> color_anchor;
+  bool                                       saw_colored = false;
 
   for (auto n : g_->body().nodes(hhds::Node_order::forward)) {
     admit("collect-step");
@@ -790,6 +791,8 @@ bool Partitioner::collect() {
     auto c = node_color_of(n);
     if (c == NO_COLOR) {
       saw_uncolored_ = true;
+    } else {
+      saw_colored = true;
     }
     uf_.find(n);
     // fuse_colors_: the coloring advertises multi-component ids (size-window
@@ -814,7 +817,10 @@ bool Partitioner::collect() {
   }
   // The flow mints `cgen_memory_*` modules itself (pass/synth/memory_module.cpp) and never colors them; a
   // warning there is about the tool's own scaffolding, not the user's design, and repeated per memory.
-  if (saw_uncolored_ && !std::string_view{top_}.starts_with("cgen_memory_")) {
+  // Likewise, when a coloring DID run (some node carries a color), the color-0 leftovers are nodes the flow
+  // added after it -- e.g. `synth.memory=flops` registers inlined into the top -- and "run pass.color first"
+  // is not actionable: every `lhd synth` from Verilog warned. Warn only when the def was never colored.
+  if (saw_uncolored_ && !saw_colored && !std::string_view{top_}.starts_with("cgen_memory_")) {
     // One warning per def (not per node): the dedup sink collapses repeats.
     livehd::diag::warn("pass.partition", "uncolored-node", "io")
         .msg(

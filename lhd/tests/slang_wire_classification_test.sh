@@ -214,4 +214,47 @@ $LHD lec --set formal.effort=proof --impl lg:"$W/cplg" --impl-top const_cond_tmp
 grep -q '"status":"pass"' "$W/cplec.json" || fail "constant-conditional temporary LEC not pass: $(cat "$W/cplec.json")"
 echo "PASS: module variable first assigned in if (0) stays declared, recompiles, and LECs"
 
+# ── (5) runtime-indexed unpacked array inside a cross-process comb cycle ───────
+# Two always_comb blocks feed each other (ent <-> ready), so the dataflow sort
+# keeps source order and the flop `q <= d` reads `d` before the block that
+# writes it. A runtime-indexed 1-D comb array is not pre-declared, and it used to
+# miss the flattened-aggregate wire split: `d` read its poison initializer and
+# tolg wired it nil (minion's uc_load_id_q never loaded). The reference computes
+# the same thing in one block (no cycle).
+cat >"$W/arr_cycle.sv" <<'EOF'
+module arr_cycle(input logic clk, input logic [2:0] idx, input logic [1:0] v, input logic we,
+                 input logic grant, input logic [3:0] pend_q, output logic [1:0] o);
+  logic [1:0] q [8];
+  logic [1:0] d [8];
+  logic [3:0] info_d;
+  logic       ready;
+  logic [1:0] ent;
+  always_ff @(posedge clk) q <= d;
+  always_comb begin
+    ready = pend_q[0];
+    info_d = pend_q;
+    if (grant) info_d[ent] = 1'b0;
+    d = q;
+    if (we) d[idx] = v;
+  end
+  always_comb ent = ready ? 2'd1 : 2'd0;
+  assign o = q[0] ^ info_d[1:0];
+endmodule
+EOF
+sed -e 's/^  always_comb ent = .*$//' \
+    -e 's/^    ready = pend_q\[0\];$/    ready = pend_q[0];\n    ent = ready ? 2'"'"'d1 : 2'"'"'d0;/' \
+    "$W/arr_cycle.sv" >"$W/arr_nocycle.sv"
+grep -q "ent = ready" "$W/arr_nocycle.sv" || fail "arr_nocycle reference was not generated"
+$LHD compile "$W/arr_cycle.sv" --top arr_cycle --emit-dir lg:"$W/aclg" --workdir "$W/acw" >"$W/ac.log" 2>&1 \
+  || { tail -20 "$W/ac.log"; fail "array cross-process cycle did not compile"; }
+if grep -q 'unresolved ref' "$W/ac.log"; then
+  fail "array read before its writer lost its driver: $(grep 'unresolved ref' "$W/ac.log")"
+fi
+$LHD lec --set formal.effort=proof --impl lg:"$W/aclg" --impl-top arr_cycle \
+  --ref verilog:"$W/arr_nocycle.sv" --ref-top arr_cycle \
+  --workdir "$W/aclec" -q --result-json "$W/aclec.json" \
+  || fail "array cross-process cycle changed behavior: $(cat "$W/aclec.json" 2>/dev/null)"
+grep -q '"status":"pass"' "$W/aclec.json" || fail "array cross-process cycle LEC not pass: $(cat "$W/aclec.json")"
+echo "PASS: runtime-indexed comb array read before its writer keeps its driver and LECs"
+
 echo "PASS: all slang wire-classification regressions"

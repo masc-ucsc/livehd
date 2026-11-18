@@ -1242,15 +1242,18 @@ private:
     // silent miscompile, so it is a hard error. A Verilog-origin module may
     // legally read an undriven wire (it defaults to X), so keep the warn + nil.
     const bool strict = !lnast_->is_verilog_origin();
+    // Name the source variable, not the SSA temporary that read it (`%6` for an
+    // undriven `reg_0.ALL`).
+    const auto       alias  = nil_seed_alias_.find(key);
+    std::string_view source = alias != nil_seed_alias_.end() ? std::string_view(alias->second) : std::string_view(name);
     if (strict) {
-      const auto alias = nil_seed_alias_.find(key);
       error_here(
           "upass.tolg: unresolved reference '{}' — it has no driver "
           "(often an unassigned variable or a value that "
           "resolved to nil)",
-          alias != nil_seed_alias_.end() ? std::string_view(alias->second) : name);
+          source);
     } else {
-      warn_at(Lnast_nid{}, {"unresolved-ref", "name"}, "unresolved ref '{}' — wiring nil (0sb?)", name);
+      warn_at(Lnast_nid{}, {"unresolved-ref", "name"}, "unresolved ref '{}' — wiring nil (0sb?)", source);
     }
     auto p        = nil_pin();
     pin_map_[key] = p;
