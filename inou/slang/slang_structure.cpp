@@ -433,6 +433,26 @@ void definite_blocking_writes(const slang::ast::Statement& stmt, absl::flat_hash
       return;
     case StatementKind::ExpressionStatement: {
       const auto& e = stmt.as<slang::ast::ExpressionStatement>().expr;
+      if (e.kind == ExpressionKind::Call && !nonblocking) {
+        // A task/function call copies every output/inout argument out on return: a
+        // blocking write of each actual on this path (e.g. a DPI task's outputs).
+        for (const auto* arg : e.as<slang::ast::CallExpression>().arguments()) {
+          if (arg == nullptr || arg->kind != ExpressionKind::Assignment) {
+            continue;
+          }
+          const slang::ast::Expression* bare = &arg->as<slang::ast::AssignmentExpression>().left();
+          while (bare->kind == ExpressionKind::Conversion) {
+            bare = &bare->as<slang::ast::ConversionExpression>().operand();
+          }
+          if (whole_only && bare->kind != ExpressionKind::NamedValue) {
+            continue;
+          }
+          if (const auto* sym = lhs_base_symbol(*bare)) {
+            out.insert(sym);
+          }
+        }
+        return;
+      }
       if (e.kind != ExpressionKind::Assignment) {
         return;
       }

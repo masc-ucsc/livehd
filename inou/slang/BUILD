@@ -76,6 +76,13 @@ sh_test(
     data = ["//lhd"],
 )
 
+# A DPI-C import call has no hardware body: outputs and return value read X (yosys-slang semantics).
+sh_test(
+    name = "slang_dpi_call_x",
+    srcs = ["tests/dpi_call_x.sh"],
+    data = ["//lhd"],
+)
+
 # A level-sensitive `always @(*)` of nonblocking assignments is combinational when
 # every path assigns (Migen/LiteX output), a latch only when one path holds.
 sh_test(

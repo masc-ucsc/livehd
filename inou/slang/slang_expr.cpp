@@ -2033,6 +2033,47 @@ std::string Slang_context::lower_call(const slang::ast::CallExpression& expr) {
     return inline_call(expr, *sub);
   }
 
+  // A DPI-C import has no hardware body: like yosys-slang, which executes its empty
+  // body, every output/inout argument and the return value read X (the unknown
+  // policy then decides, e.g. compile.unknown_zero / synth's setundef-zero). Vortex's
+  // FPU_DSP branch calls dpi_fsqrt/dpi_fdiv/dpi_fmadd from always_comb this way.
+  if (sub != nullptr && sub->flags.has(slang::ast::MethodFlags::DPIImport)) {
+    emit_warning(expr.sourceRange,
+                 "dpi-call-x",
+                 "unsupported",
+                 std::string("DPI import '") + std::string(expr.getSubroutineName())
+                     + "' has no hardware body: its outputs and return value read X (synthesis semantics)");
+    const auto formals = sub->getArguments();
+    const auto actuals = expr.arguments();
+    for (size_t i = 0; i < formals.size() && i < actuals.size(); ++i) {
+      if (formals[i]->direction == slang::ast::ArgumentDirection::In || actuals[i] == nullptr) {
+        continue;
+      }
+      const slang::ast::Expression* lhs = actuals[i];
+      if (lhs->kind == ExpressionKind::Assignment) {
+        lhs = &lhs->as<slang::ast::AssignmentExpression>().left();
+      }
+      if (lhs->type == nullptr) {
+        continue;
+      }
+      const int bits = tinfo(*lhs->type).bits;
+      if (bits <= 0) {
+        continue;
+      }
+      const bool saved            = current_assign_nonblocking_;
+      current_assign_nonblocking_ = false;
+      assign_to(*lhs, absl::StrCat("0ub", std::string(static_cast<size_t>(bits), '?')));
+      current_assign_nonblocking_ = saved;
+    }
+    if (sub->returnValVar != nullptr && expr.type != nullptr) {
+      const int bits = tinfo(*expr.type).bits;
+      if (bits > 0) {
+        return absl::StrCat("0ub", std::string(static_cast<size_t>(bits), '?'));
+      }
+    }
+    return "0";
+  }
+
   emit_unsupported(expr.sourceRange,
                    "unsupported-function-call",
                    std::string("call to '") + std::string(expr.getSubroutineName())
