@@ -13266,6 +13266,35 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
           return standalone_hints && placement_hints && !placement_hints->has_pull_hints();
         });
       }
+      if (!resume && !live_session->live()) {
+        // The first main GP is an ordinary native solve; the retained session then starts on its converged pose (a
+        // one-step advance publishes the layout, identities and fixed bodies the later stages continue from). A
+        // session-owned first solve loses the solver's post-density record (no retained sample may replace a drifted
+        // iterate under an external continuation): on vortex it ran to the 1500-step cap at 0.285 density overflow,
+        // where the plain solve settles at 0.097 in 460 steps, and the plan then routed (and spread) that unconverged
+        // placement for two hours at -2.7 ns.
+        auto solved = gui_native_place(v.design, gp, options, [&] {
+          return standalone_hints && placement_hints && !placement_hints->has_pull_hints();
+        });
+        // A cold optimizer is created by its first step: one step from the converged pose, no hooks.
+        auto seed                 = gp;
+        seed.max_iterations       = seed.schedule_iterations = 1;
+        seed.min_iterations       = seed.min_slice_iterations = 0;
+        seed.checkpoint           = {};
+        seed.before_legalize      = {};
+        seed.after_macro_legalize = {};
+        seed.observer             = {};
+        if (gp.max_iterations > 0) {  // a zero-step stage leaves the session cold, as the session-owned solve did
+          const auto solved_x = v.design.node_x, solved_y = v.design.node_y;
+          live_session->advance(v.design, seed, session_identities(), "global_placement", 0, session_identities);
+          // The seeding step only creates the optimizer: the placement stays the native solve's, and the retained
+          // session is re-anchored on it.
+          v.design.node_x = solved_x;
+          v.design.node_y = solved_y;
+          live_session->synchronize(v.design, gp, session_identities(), "global_placement_pose");
+        }
+        return solved;
+      }
       unsigned   minimum              = 0;
       bool       remap_recovery       = false;
       if (resume) {
