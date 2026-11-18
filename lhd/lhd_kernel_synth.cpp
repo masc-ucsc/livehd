@@ -1207,6 +1207,8 @@ livehd::placement::Options placement_options(const Options& opts) {
   if (out.chunk_require_fit && (!out.fp_chunks || out.chunk_memory_bytes == 0)) {
     throw Lhd_error{"usage", "chunk.require_fit requires a chunk floorplan and a positive memory budget", ""};
   }
+  out.chunk_pack_scopes = truthy(synth_set(opts, "place.chunk.pack_scopes", "false"));
+  out.chunk_connectivity = truthy(synth_set(opts, "place.chunk.connectivity", "false"));
   out.chunk_only = synth_set(opts, "place.chunk.only", "");
   if (!out.chunk_only.empty() && chunk_run == "flow") {
     throw Lhd_error{"usage", "chunk.only requires chunk.run=feedback or export", ""};

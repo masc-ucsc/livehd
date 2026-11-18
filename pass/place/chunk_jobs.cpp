@@ -12,6 +12,7 @@
 #include <cstring>
 #include <format>
 #include <fstream>
+#include <numeric>
 #include <thread>
 
 #include "chunk_refine.hpp"
@@ -158,6 +159,32 @@ void put_positions(const fs::path& path, const Chunk_job& j) {
   file.close();
   need(bool(file), "cannot write chunk positions");
 }
+// A bounded view for the browser. The full position list stays on disk even for a very large home.
+void write_chunk_preview(const fs::path& path, const Chunk_job& job, int macros) {
+  auto               view = rec("livehd.placement.chunk_preview", job.design, job.id);
+  auto&              a    = view.GetAllocator();
+  const auto&        d    = job.physical;
+  const std::array   count{d.num_movable - macros, macros};
+  std::array<int, 2> seen{};
+  Value              boxes(rapidjson::kArrayType);
+  for (int i = 0; i < d.num_movable; ++i) {
+    const int kind   = d.node_macro[i] != 0;
+    const int stride = 1 + (count[kind] - 1) / 1024;
+    if (seen[kind]++ % stride == 0) {
+      Value box(rapidjson::kArrayType);
+      box.PushBack(d.node_x[i] + job.box[0], a)
+          .PushBack(d.node_y[i] + job.box[1], a)
+          .PushBack(d.node_size_x[i], a)
+          .PushBack(d.node_size_y[i], a)
+          .PushBack(kind, a);
+      boxes.PushBack(box, a);
+    }
+  }
+  view.AddMember("boxes_dbu", boxes, a).AddMember("owned", d.num_movable, a);
+  metadata::Bundle bundle;
+  bundle.replace(view);
+  bundle.write(path.string());
+}
 void boundary_feedback(Doc& f, const Chunk_job& j) {
   auto& a = f.GetAllocator();
   Value ports(rapidjson::kArrayType);
@@ -222,6 +249,10 @@ std::string write_chunk_jobs(const fs::path& manifest, const metadata::Bundle& b
   if (only) {
     d.AddMember("selected", str(selected, d), a);
   }
+  const fs::path packet_dir = manifest.parent_path() / "chunk-packets";
+  if (model.pack_scopes) {
+    fs::create_directories(packet_dir);
+  }
   refine_chunk_seeds(
       physical,
       model,
@@ -232,19 +263,27 @@ std::string write_chunk_jobs(const fs::path& manifest, const metadata::Bundle& b
       threads,
       detailed,
       [&](size_t index, Chunk_job& j) {
-        auto& c              = plan.chunks[index];
-        j.id                 = c.id;
-        j.design             = design;
-        j.plan_key           = plan.input_key;
-        j.budget             = plan.budget;
-        j.dbu                = dbu;
-        j.box                = c.box;
-        j.density            = c.density;
-        j.iterations         = iterations;
-        j.threads            = std::max(1, threads);
-        j.detailed           = detailed;
-        auto          name   = std::to_string(index) + ".bin";
-        auto          digest = write_chunk_job(fs::path(tmp) / name, j);
+        auto& c         = plan.chunks[index];
+        j.id            = c.id;
+        j.design        = design;
+        // The managed scheduler checks the complete packet digest. A plan-wide key in every
+        // packet would force all sibling handoffs to expire after any source edit.
+        j.plan_key      = model.pack_scopes ? 0 : plan.input_key;
+        j.budget        = plan.budget;
+        j.dbu           = dbu;
+        j.box           = c.box;
+        j.density       = c.density;
+        j.iterations    = iterations;
+        j.threads       = std::max(1, threads);
+        j.detailed      = detailed;
+        auto     name   = std::to_string(index) + ".bin";
+        auto     digest = write_chunk_job(fs::path(tmp) / name, j);
+        fs::path input  = fs::path(tmp).filename() / name;
+        if (model.pack_scopes) {
+          const fs::path target = packet_dir / (digest + ".bin");
+          fs::rename(fs::path(tmp) / name, target);
+          input = target.lexically_relative(manifest.parent_path());
+        }
         Memory_counts counts{};
         for (int obj : c.objects) {
           const auto& o            = model.objects[obj];
@@ -266,10 +305,14 @@ std::string write_chunk_jobs(const fs::path& manifest, const metadata::Bundle& b
             .AddMember("implementation", str(c.implementation, d), a)
             .AddMember("estimated_bytes", predictor && predictor->samples ? predictor->peak(counts) : c.bytes, a)
             .AddMember("box_dbu", box, a)
-            .AddMember("input", str((fs::path(tmp).filename() / name).string(), d), a);
+            .AddMember("input", str(input.string(), d), a);
+        row.AddMember("packet_plan_key", j.plan_key, a);
         rows.PushBack(row, a);
       },
       only);
+  if (model.pack_scopes) {
+    fs::remove(tmp);  // now empty: all packets have content-addressed names
+  }
   d.AddMember("jobs", rows, a);
   metadata::Bundle out(base.json());
   out.erase_selected(jobs_class, design);
@@ -278,6 +321,41 @@ std::string write_chunk_jobs(const fs::path& manifest, const metadata::Bundle& b
   out.write(manifest.string());
   return manifest.string();
 }
+// DREAMPlace models fixed objects as the suffix of the node arrays. Keep pin identity
+// while moving hard macros behind the cells for the final solve. Names retain the
+// same permutation so the result includes every owned instance, including fixed macros.
+static void freeze_chunk_macros(Chunk_job& job) {
+  auto&            d = job.physical;
+  std::vector<int> mapped(d.node_x.size());
+  std::iota(mapped.begin(), mapped.end(), 0);
+  int cells = 0;
+  for (int i = 0; i < d.num_movable; ++i) {
+    if (d.node_macro[i]) {
+      continue;
+    }
+    if (cells != i) {
+      for (auto* field : {&d.node_x, &d.node_y, &d.node_size_x, &d.node_size_y, &d.node_halo_x, &d.node_halo_y}) {
+        if (!field->empty()) {
+          std::swap((*field)[i], (*field)[cells]);
+        }
+      }
+      std::swap(d.node_macro[i], d.node_macro[cells]);
+      std::swap(job.names[i], job.names[cells]);
+      // mapped holds new -> old until inverted below.
+      std::swap(mapped[i], mapped[cells]);
+    }
+    ++cells;
+  }
+  std::vector<int> inverse(mapped.size());
+  for (size_t i = 0; i < mapped.size(); ++i) {
+    inverse[mapped[i]] = i;
+  }
+  for (auto& node : d.pin2node) {
+    node = inverse.at(node);
+  }
+  d.num_movable = cells;
+}
+
 int place_chunk_worker(const fs::path& input, const fs::path& output, const std::string& checksum) {
   auto        start    = Clock::now();
   auto        baseline = process_rss(getpid());
@@ -297,11 +375,60 @@ int place_chunk_worker(const fs::path& input, const fs::path& output, const std:
       .AddMember("boundary_contacts", uint64_t(job.boundary_nets.size()), a)
       .AddMember("dbu_per_um", job.dbu, a);
   try {
+    std::string stage;
+    if (fs::exists(output / "request.json")) {
+      auto request = metadata::Bundle::read((output / "request.json").string());
+      auto records = request.select("livehd.placement.chunk_request", job.design);
+      need(records.size() == 1, "missing chunk stage request");
+      const auto& r = *records.front();
+      need(
+          r.HasMember("id") && r["id"].IsString() && job.id == r["id"].GetString() && r.HasMember("stage") && r["stage"].IsString(),
+          "invalid chunk stage request");
+      stage = r["stage"].GetString();
+      need(stage == "macro" || stage == "final", "unknown chunk stage");
+      report.AddMember("stage", str(stage, report), a);
+      if (r.HasMember("contacts")) {
+        need(r["contacts"].IsArray(), "invalid chunk contacts");
+        std::map<uint64_t, std::array<double, 2>> edits;
+        for (const auto& contact : r["contacts"].GetArray()) {
+          need(contact.IsArray() && contact.Size() == 3 && contact[0].IsUint64() && contact[1].IsNumber() && contact[2].IsNumber(),
+               "invalid contact edit");
+          auto x = contact[1].GetDouble(), y = contact[2].GetDouble();
+          need(x >= job.box[0] && x <= job.box[2] && y >= job.box[1] && y <= job.box[3]
+                   && (x == job.box[0] || x == job.box[2] || y == job.box[1] || y == job.box[3]),
+               "contact outside chunk boundary");
+          need(edits.emplace(contact[0].GetUint64(), std::array{x - job.box[0], y - job.box[1]}).second, "duplicate cut net");
+        }
+        for (size_t i = 0; !edits.empty() && i < job.original_nets.size(); ++i) {
+          auto edit = edits.find(job.original_nets[i]);
+          if (edit != edits.end()) {
+            auto end          = d.flat_net2pin_start.at(job.boundary_nets[i] + 1);
+            auto node         = d.pin2node.at(d.flat_net2pin.at(end - 1));
+            d.node_x.at(node) = edit->second[0];
+            d.node_y.at(node) = edit->second[1];
+            edits.erase(edit);
+          }
+        }
+        need(edits.empty(), "edited net has no contact in this packet");
+      }
+    }
+    const int owned = d.num_movable;
+    if (stage == "final" && macros) {
+      freeze_chunk_macros(job);
+    }
+    if (!stage.empty()) {
+      report.AddMember("solver_movable_nodes", d.num_movable, a);
+      report["detailed_place"].SetBool(d.num_movable > 0 && stage == "final" && job.detailed);
+    }
     if (job.multirow) {
       throw std::runtime_error("multi-height standard cells require a row-aware local worker");
     }
     if (!d.num_movable) {
       status = "fixed_only";
+      if (owned) {
+        d.build_maps();
+        report.AddMember("hpwl_dbu", dp::hpwl(d), a);
+      }
     } else {
       d.build_maps();
       d.validate();
@@ -317,7 +444,7 @@ int place_chunk_worker(const fs::path& input, const fs::path& output, const std:
       o.min_iterations = std::min(o.min_iterations, o.max_iterations);
       o.target_density = job.density;
       o.legalize       = true;
-      o.detailed_place = job.detailed;
+      o.detailed_place = stage != "macro" && job.detailed;
       // Fixed cut terminals and projected obstacles stay outside the movable prefix.
       auto result      = dp::place(d, o);
       report.AddMember("iterations", result.iterations, a).AddMember("overflow", result.overflow, a);
@@ -325,12 +452,22 @@ int place_chunk_worker(const fs::path& input, const fs::path& output, const std:
         throw std::runtime_error(reason.empty() ? "local legalization failed" : reason);
       }
       report.AddMember("hpwl_dbu", dp::hpwl(d), a);
+    }
+    d.num_movable = owned;
+    if (owned) {
       boundary_feedback(report, job);
       put_positions(output / "positions.json", job);
       status = "placed";
     }
+    if (!stage.empty()) {
+      write_chunk_preview(output / "preview.json", job, macros);
+    }
+    if (stage == "macro") {
+      report.AddMember("handoff_checksum", str(write_chunk_job(output / "handoff.bin", job), report), a);
+    }
   } catch (const std::exception& e) {
     reason = e.what();
+    status = "failed";
   }
   report.AddMember("status", str(status, report), a);
   if (!reason.empty()) {
@@ -390,7 +527,7 @@ int place_chunk_batch(const std::string& exe, const fs::path& manifest, const fs
       }
       Doc row;
       row.CopyFrom(*prior, row.GetAllocator());
-      for (auto field : {"positions", "report"}) {
+      for (auto field : {"positions", "report", "preview"}) {
         if (row.HasMember(field)) {
           row[field] = str(rebase(string_field(row, field)), row);
         }
@@ -415,6 +552,11 @@ int place_chunk_batch(const std::string& exe, const fs::path& manifest, const fs
     auto folder = output / std::to_string(index);
     fs::create_directory(folder);
     auto        src = (base / string_field(j, "input")).string(), dst = folder.string();
+    if (j.HasMember("request")) {
+      metadata::Bundle request;
+      request.replace(j["request"]);
+      request.write((folder / "request.json").string());
+    }
     int         status = 0;
     uint64_t    rss    = 0;
     std::string why;
@@ -462,7 +604,9 @@ int place_chunk_batch(const std::string& exe, const fs::path& manifest, const fs
       auto        reports = b.select(feedback_class, design);
       const auto* fb      = reports.size() == 1 ? reports.front() : nullptr;
       if (fb && id == string_field(*fb, "id") && fb->HasMember("plan_key") && (*fb)["plan_key"].IsUint64()
-          && (*fb)["plan_key"].GetUint64() == d["plan_key"].GetUint64()) {
+          && (*fb)["plan_key"].GetUint64()
+                 == (j.HasMember("packet_plan_key") && j["packet_plan_key"].IsUint64() ? j["packet_plan_key"] : d["plan_key"])
+                        .GetUint64()) {
         r.CopyFrom(*reports.front(), r.GetAllocator());
         valid = true;
       }
@@ -480,6 +624,13 @@ int place_chunk_batch(const std::string& exe, const fs::path& manifest, const fs
     auto outcome = string_field(r, "status");
     if (outcome != "placed") {
       fs::remove(folder / "positions.json");
+      if (outcome == "failed") {
+        fs::remove(folder / "handoff.bin");
+        fs::remove(folder / "preview.json");
+      }
+    }
+    if (valid && outcome != "failed" && fs::exists(folder / "preview.json")) {
+      r.AddMember("preview", str(std::to_string(index) + "/preview.json", r), a);
     }
     if (outcome == "placed") {
       r.AddMember("positions", str(std::to_string(index) + "/positions.json", r), a);
@@ -489,10 +640,15 @@ int place_chunk_batch(const std::string& exe, const fs::path& manifest, const fs
     }
     metadata::Bundle single;
     single.replace(r);
-    if (r.HasMember("positions")) {
+    if (r.HasMember("positions") || r.HasMember("preview")) {
       auto rr = rec(feedback_class, design, id);
       rr.CopyFrom(r, rr.GetAllocator());
-      rr["positions"].SetString("positions.json");
+      if (rr.HasMember("positions")) {
+        rr["positions"].SetString("positions.json");
+      }
+      if (rr.HasMember("preview")) {
+        rr["preview"].SetString("preview.json");
+      }
       single.replace(rr);
     }
     single.write((folder / "feedback.json").string());

@@ -977,6 +977,8 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      Synth_set_option::Kind::file,
      "optional final-cell clearance around fixed macros: H or X,Y microns; empty inherits place.halo; "
      "each axis must not exceed place.halo; macro placement and macro-to-macro spacing retain place.halo"},
+    {"place.chunk.connectivity", "false", Synth_set_option::Kind::boolean, "grow memory-sized worker homes along nets connecting pairs of colors or macros"},
+    {"place.chunk.pack_scopes", "false", Synth_set_option::Kind::boolean, "pack hierarchy-ordered colors and macros into memory-sized worker homes across scope boundaries"},
     {"place.chunk.only", "", Synth_set_option::Kind::file, "physical home ID to project and place in export or feedback mode; default: all homes"},
     {"place.chunk.run", "flow", Synth_set_option::Kind::file, "flow: full placement; feedback: place isolated homes in sequence; export: write standalone home jobs"},
     {"place.chunk.seed_detail", "true", Synth_set_option::Kind::boolean,

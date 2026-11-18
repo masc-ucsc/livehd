@@ -460,6 +460,55 @@ void Chunk_model::net(std::vector<int>& pins, bool place, std::optional<Point> t
     edges.push_back({pins, terminal, std::string(name), ordinal, terminal_bounds});
   }
 }
+// Grow each capacity cut toward the unassigned object sharing the most two-object nets.
+// Each net adds two incidences regardless of how many physical pins it contains.
+// The existing hierarchy order resolves ties and seeds disconnected components.
+void Chunk_model::order_connected(std::vector<int>& ids, uint64_t capacity, const Chunk_predictor& predictor) const {
+  const auto          order = ids;
+  std::vector<size_t> rank(objects.size());
+  for (size_t i = 0; i < order.size(); ++i) {
+    rank[order[i]] = i;
+  }
+  std::vector<std::map<size_t, size_t>> neighbors(order.size());
+  for (const auto& edge : edges) {
+    if (edge.nodes.size() == 2) {
+      const auto a = rank[edge.nodes[0]], b = rank[edge.nodes[1]];
+      ++neighbors[a][b];
+      ++neighbors[b][a];
+    }
+  }
+  std::vector<bool>                   used(order.size());
+  std::vector<size_t>                 affinity(order.size());
+  std::set<std::pair<size_t, size_t>> frontier;  // strongest affinity first, then lowest rank
+  size_t                              first = 0;
+  uint64_t                            load  = 0;
+  const auto priority = [](size_t weight, size_t i) { return std::pair{std::numeric_limits<size_t>::max() - weight, i}; };
+  for (auto& id : ids) {
+    while (used[first]) {
+      ++first;
+    }
+    const size_t pick = frontier.empty() ? first : frontier.begin()->second;
+    id                = order[pick];
+    used[pick]        = true;
+    const auto cost   = predictor.variable(features(objects[id]));
+    if (load && (load >= capacity || cost > capacity - load)) {
+      for (const auto& entry : frontier) {
+        affinity[entry.second] = 0;
+      }
+      frontier.clear();
+      load = 0;
+    }
+    load = add_bytes(load, cost);
+    frontier.erase(priority(affinity[pick], pick));
+    for (const auto& [i, weight] : neighbors[pick]) {
+      if (!used[i]) {
+        frontier.erase(priority(affinity[i], i));
+        affinity[i] += weight;
+        frontier.insert(priority(affinity[i], i));
+      }
+    }
+  }
+}
 Chunk_plan Chunk_model::plan(Chunk_box core, double site, double row, uint64_t budget, double density,
                              const metadata::Bundle* input, const std::string& design, const Chunk_predictor& predictor) const {
   // Replay an explicit floorplan using the sizing decision captured when it was
@@ -537,6 +586,7 @@ std::optional<Chunk_plan> Chunk_model::plan_with(Chunk_box core, double site, do
     p.macro_islands = macro_islands;
     p.budget        = budget;
     const auto n    = objects.size();
+    const bool pack_hierarchy = pack_scopes && !single && !macro_islands;
     p.seeds.resize(n);
     p.density.resize(n);
     p.density_source.resize(n);
@@ -549,7 +599,7 @@ std::optional<Chunk_plan> Chunk_model::plan_with(Chunk_box core, double site, do
       const auto  scope = packed && !packed->scope[i].empty()              ? packed->scope[i]
                                        : macro_islands && o.macro && o.instance.empty() ? "@physical:" + o.id
                                                                                         : o.instance;
-      scopes[single ? "" : scope].push_back(i);
+      scopes[(single || pack_hierarchy) ? "" : scope].push_back(i);
       const double inherited = o.module.empty() ? density : hints.get("template_color", qualified(o.module, o.local), density);
       p.density[i]        = o.macro ? 1 : hints.get("color", o.id, inherited);
       p.density_source[i] = o.macro                                  ? "footprint"
@@ -697,14 +747,22 @@ std::optional<Chunk_plan> Chunk_model::plan_with(Chunk_box core, double site, do
     }
     for (auto& [scope, ids] : scopes) {
       std::sort(ids.begin(), ids.end(), [&](int i, int j) {
+        if (pack_hierarchy) {
+          return std::tie(objects[i].instance, objects[i].id, objects[i].macro)
+                 < std::tie(objects[j].instance, objects[j].id, objects[j].macro);
+        }
         return std::tie(objects[i].local, objects[i].macro, objects[i].id)
                < std::tie(objects[j].local, objects[j].macro, objects[j].id);
       });
-      if (scope.empty() && budget && std::none_of(ids.begin(), ids.end(), [&](int i) { return objects[i].macro; })) {
+      if (!pack_hierarchy && scope.empty() && budget
+          && std::none_of(ids.begin(), ids.end(), [&](int i) { return objects[i].macro; })) {
         // For unstructured logic, put objects near one another in the quotient placement in the same chunk.
         std::stable_sort(ids.begin(), ids.end(), [&](int i, int j) {
           return std::tie(logical_order[i], objects[i].id) < std::tie(logical_order[j], objects[j].id);
         });
+      }
+      if (pack_hierarchy && connectivity) {
+        order_connected(ids, capacity, predictor);
       }
       Shape shape;
       for (int i : ids) {
@@ -712,8 +770,8 @@ std::optional<Chunk_plan> Chunk_model::plan_with(Chunk_box core, double site, do
         shape.emplace_back(o.macro,
                            o.local,
                            (packed && !packed->scope[i].empty()) || scope.empty() || o.module.empty()
-                                            ? estimate(o)
-                                            : max_cost.at({o.module, o.macro, o.local}));
+                               ? estimate(o)
+                               : max_cost.at({o.module, o.macro, o.local}));
       }
       const auto module = (packed && !packed->scope[ids[0]].empty()) || scope.empty() ? std::string{} : objects[ids[0]].module;
       auto [it, added] = partitions.try_emplace({module, std::move(shape)});
@@ -774,13 +832,21 @@ std::optional<Chunk_plan> Chunk_model::plan_with(Chunk_box core, double site, do
         }
         c.bytes = add_bytes(c.bytes, estimate(o));
         include(d, demands[i]);
+        // The independent solver expands a movable macro by its halo before legalization.
+        // Keep seed rectangles physical, but reserve the complete envelope in the home.
+        if (o.worker_halo[0] || o.worker_halo[1]) {
+          const double w = o.width + 2 * o.worker_halo[0], h = o.height + 2 * o.worker_halo[1];
+          d.minimum[0]  = std::max(d.minimum[0], w);
+          d.minimum[1]  = std::max(d.minimum[1], h);
+          d.occupied   += w * h - o.width * o.height;
+        }
         (o.macro ? macro : logic) += o.area;
         total                     += o.area;
         for (int k = 0; k < 2; ++k) {
           xy[k] += centers[i][k] * o.area;
         }
       }
-      d.occupied = total;
+      d.occupied += total;
       c.reserved = d.area = std::max(d.area, macro + logic / c.density);
       c.allowance         = budget ? std::max(budget, c.bytes) : 0;
       chunk_centers.push_back({xy[0] / total, xy[1] / total});
@@ -868,6 +934,10 @@ std::optional<Chunk_plan> Chunk_model::plan_with(Chunk_box core, double site, do
         mix(o.cells);
         mix(o.pins);
         mix(o.nets);
+        if (o.worker_halo[0] || o.worker_halo[1]) {
+          mix(std::bit_cast<uint64_t>(o.worker_halo[0]));
+          mix(std::bit_cast<uint64_t>(o.worker_halo[1]));
+        }
         for (double v : {o.area, o.width, o.height, p.density[i]}) {
           mix(std::bit_cast<uint64_t>(v));
         }
@@ -1028,11 +1098,13 @@ std::optional<Chunk_plan> Chunk_model::plan_with(Chunk_box core, double site, do
           if (c.id == op.second) {
             child = i;
           }
-          auto b           = op.before.at(c.id == op.second && op.split ? op.first : c.id);
+          auto b           = op.before.at(c.id == op.second && op.kind == Home_edit::split ? op.first : c.id);
           boxes[i]         = b;
           chunk_centers[i] = {(b[0] + b[2]) / 2, (b[1] + b[3]) / 2};
         }
-        if (op.split) {
+        if (op.kind == Home_edit::transfer) {
+          kept_frame = true;
+        } else if (op.kind == Home_edit::split) {
           kept_frame = tile({j, child}, boxes[j], {site, row}, chunk_demand, chunk_centers, boxes);
         } else {
           auto      a = boxes[j], b = op.before.at(op.second);
@@ -1147,7 +1219,8 @@ std::optional<Chunk_plan> Chunk_model::plan_with(Chunk_box core, double site, do
         std::erase_if(e.locks, [&](const auto& id) { return retired.contains(id); });
       }
       std::erase_if(valid_edits, [&](const auto& e) {
-        return retired.contains(e.move) || retired.contains(e.all_but) || (e.all_but.empty() && e.move.empty() && e.locks.empty());
+        return retired.contains(e.move) || retired.contains(e.all_but) || retired.contains(e.reshape)
+               || (e.all_but.empty() && e.move.empty() && e.reshape.empty() && e.locks.empty());
       });
     }
     // Keep a reference frame even if all geometry rules are currently dormant.

@@ -10,6 +10,8 @@ struct Chunk_edit {
   std::vector<std::string> locks;
   bool                     lock = false;
   std::string              all_but;
+  std::string              reshape;
+  double                   aspect = 0;
 };
 using Chunk_edits = std::vector<Chunk_edit>;
 Chunk_edits read_chunk_edits(const metadata::Bundle*, const std::string& design);

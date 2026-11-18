@@ -13,11 +13,12 @@ extern char** environ;
 #include <cstdio>
 #include <cstdlib>
 #include <exception>
-#include <new>
 #include <filesystem>
+#include <new>
 
 #include "debug_env.hpp"
 #include "diag.hpp"
+#include "file_utils.hpp"
 #include "host_mem.hpp"
 #include "iassert.hpp"
 #include "job_manager.hpp"
@@ -27,6 +28,7 @@ extern char** environ;
 #include "pass/place/gui/gui_ipc.hpp"
 #include "perf_tracing.hpp"
 #include "process_group.hpp"
+#include "rules_cc/cc/runfiles/runfiles.h"
 
 namespace {
 
@@ -50,6 +52,30 @@ struct Trace_guard {
 }  // namespace
 
 int main(int argc, char** argv) {
+  if (argc >= 3 && std::string_view(argv[1]) == "synth" && std::string_view(argv[2]) == "chunk"
+      && !(argc > 3 && (std::string_view(argv[3]) == "--help" || std::string_view(argv[3]) == "-h"
+                        || std::string_view(argv[3]).starts_with("--diag-fmt")))) {
+    using rules_cc::cc::runfiles::Runfiles;
+    std::string     error;
+    std::error_code ec;
+    auto            exe = std::filesystem::read_symlink("/proc/self/exe", ec);
+    if (ec) {
+      exe = std::filesystem::path(livehd::file_utils::get_exe_path()) / std::filesystem::path(argv[0]).filename();
+    }
+    std::unique_ptr<Runfiles> files(Runfiles::Create(exe.string(), BAZEL_CURRENT_REPOSITORY, &error));
+    if (!files) {
+      std::fprintf(stderr, "lhd synth chunk: %s\n", error.c_str());
+      return 1;
+    }
+    auto               script = files->Rlocation("_main/lhd/chunk_flow.py");
+    auto               page   = files->Rlocation("_main/lhd/chunk_gui.html");
+    auto               binary = exe.string();
+    std::vector<char*> args{const_cast<char*>("python3"), script.data(), binary.data(), page.data()};
+    args.insert(args.end(), argv + 3, argv + argc + 1);
+    execvp(args[0], args.data());
+    std::perror("lhd synth chunk: python3");
+    return 1;
+  }
   if (argc >= 2 && (std::string_view(argv[1]) == "place-chunks" || std::string_view(argv[1]) == "--place-one-chunk")) {
     try {
       (void)livehd::cost::install_memory_backstop();
@@ -58,10 +84,10 @@ int main(int argc, char** argv) {
       }
       if (std::string_view(argv[1]) == "place-chunks" && (argc == 5 || (argc == 7 && std::string_view(argv[5]) == "--chunk"))
           && std::string_view(argv[3]) == "--out") {
-        // Workers are spawned from this path: prefer the running image over a relative or rewritten argv[0].
         std::error_code ec;
-        const auto      self = std::filesystem::read_symlink("/proc/self/exe", ec);
-        return livehd::placement::place_chunk_batch(ec ? std::string(argv[0]) : self.string(),
+        // Spawn workers from the running image if the build replaces lhd during a long queue.
+        const auto      self = std::filesystem::exists("/proc/self/exe", ec) ? "/proc/self/exe" : argv[0];
+        return livehd::placement::place_chunk_batch(self,
                                                     argv[2],
                                                     argv[4],
                                                     argc == 7 ? std::optional<std::string>(argv[6]) : std::nullopt);

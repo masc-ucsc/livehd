@@ -222,7 +222,7 @@ std::optional<Flat_state_stats> fold_flat_state(std::vector<std::shared_ptr<hhds
         c);
   }
   absl::flat_hash_map<std::vector<int64_t>, int32_t> interned;
-  std::vector<std::vector<int64_t>>                  sig_content;
+  std::vector<uint64_t>                              sig_digest;
   std::vector<bool>                                  sig_has;
   std::vector<int32_t>                               sig(static_cast<size_t>(n), -1);
   for (int32_t c = n - 1; c >= 0; --c) {  // a child's context comes after its parent's
@@ -243,16 +243,27 @@ std::optional<Flat_state_stats> fold_flat_state(std::vector<std::shared_ptr<hhds
       content.push_back(sig[static_cast<size_t>(child)]);
       has = has || sig_has[static_cast<size_t>(sig[static_cast<size_t>(child)])];
     }
-    auto [it, added] = interned.emplace(content, static_cast<int32_t>(sig_content.size()));
+    auto [it, added] = interned.emplace(std::move(content), static_cast<int32_t>(sig_digest.size()));
     if (added) {
-      sig_content.push_back(std::move(content));
+      // Graph IDs and interned signature indices depend on other modules in this invocation.
+      // Placement uses definition names to identify colors across source edits.
+      const auto io     = library->find_io(origin.contexts[static_cast<size_t>(c)].def);
+      auto       digest = hash_util::fnv1a64(io ? io->get_name() : std::string_view{});
+      digest            = hash_util::combine64(digest, mine.size());
+      for (const auto& [nid, bit, value] : mine) {
+        digest = hash_util::combine64(hash_util::combine64(hash_util::combine64(digest, nid), bit), value);
+      }
+      for (const auto& [nid, child] : kids) {
+        digest = hash_util::combine64(hash_util::combine64(digest, nid), sig_digest[sig[static_cast<size_t>(child)]]);
+      }
+      sig_digest.push_back(digest);
       sig_has.push_back(has);
     }
     sig[static_cast<size_t>(c)] = it->second;
   }
 
   // ---- one definition per signature: `top` in place, a fresh copy for any other signature with facts ----
-  std::vector<std::shared_ptr<hhds::Graph>> graph_of(sig_content.size());
+  std::vector<std::shared_ptr<hhds::Graph>> graph_of(sig_digest.size());
   absl::flat_hash_map<const hhds::Graph*, const hhds::Graph*> copied_from;
   graph_of[static_cast<size_t>(sig[0])] = root;
   absl::flat_hash_set<std::string> used;
@@ -269,13 +280,9 @@ std::optional<Flat_state_stats> fold_flat_state(std::vector<std::shared_ptr<hhds
       graph_of[s] = def->second;
       continue;
     }
-    std::string text;
-    for (auto v : sig_content[s]) {
-      text += std::format("{},", v);
-    }
-    auto name = std::format("{}__f{:016x}", def->second->get_name(), livehd::hash_util::fnv1a64(text));
+    auto name = std::format("{}__f{:016x}", def->second->get_name(), sig_digest[s]);
     for (int k = 1; used.contains(name) || library->find_io(name); ++k) {
-      name = std::format("{}__f{:016x}_{}", def->second->get_name(), livehd::hash_util::fnv1a64(text), k);
+      name = std::format("{}__f{:016x}_{}", def->second->get_name(), sig_digest[s], k);
     }
     used.insert(name);
     graph_of[s] = specialize::clone_definition(definitions, def->second, name);
@@ -434,7 +441,7 @@ std::optional<Flat_state_stats> fold_flat_state(std::vector<std::shared_ptr<hhds
         stderr,
         "flat-state contexts={} signatures={} copies={} folded_bits={} memories={} graphs={} lost_bits={} outputs_folded={}\n",
         stats.contexts,
-        sig_content.size(),
+        sig_digest.size(),
         stats.copies,
         stats.folded_bits,
         stats.memories_dropped,

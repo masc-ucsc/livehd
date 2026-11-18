@@ -170,9 +170,11 @@ input[type=number]{width:44px;font:inherit;color:var(--fg);background:transparen
 <fieldset style="min-width:0"><legend>Move a physical chunk</legend>
 <label><input type="checkbox" id="chunkDrag" checked>Drag chunks (Alt-drag to pan)</label>
 <label><input type="checkbox" id="reviewDrop">Preview drop before applying</label>
-<span id="dropActions" hidden><button id="dropApply">Apply this move</button> <button id="dropDiscard">Discard preview</button></span>
+<span id="dropActions" hidden><button id="dropApply">Apply preview</button> <button id="dropDiscard">Discard preview</button></span>
 <label>Allow overlap <input type="number" id="chunkOverlap" min="0" max="25" step="1" value="0"> % per chunk</label>
 <label>Peer <select id="geometryPeer" style="max-width:100%"></select></label><output id="geometryPair" style="display:block" class="mut"></output>
+<label>Width / height <input id="homeAspect" type="number" min="0" step="any" style="width:6em"></label>
+<button id="aspectPreview">Preview shape</button> <button id="aspectApply">Apply shape</button>
 <button id="geometryLock">Lock aspect</button> <button id="geometryOthers">Lock other aspects</button>
 <button id="geometryUnlock">Unlock all</button> <button id="geometryUndo">Undo last geometry edit</button>
 <output id="geometryInfo" aria-live="polite" style="display:block">Drag to estimate wire spans with peers held still. Drop to refine boxes and pins.</output>
@@ -181,10 +183,10 @@ input[type=number]{width:44px;font:inherit;color:var(--fg);background:transparen
 <label><input id="homeLinks" type="checkbox" checked>Show selected interconnects</label>
 <label><input id="homeHeat" type="checkbox">Show estimated routing demand</label>
 <div id="homeMetrics" class="mut"></div><small>Wire and route proxies count crossing nets only. Split or fuse changes that set. Final placement checks row cutouts and fixed-cell obstacles.</small>
-<label>Edit <select id="homeAction"><option value="split">Split this home</option><option value="fuse">Fuse with another home</option></select></label>
-<div id="homeSplit"><label>Move to new home <select id="homeMembers" multiple size="4" style="max-width:100%"></select></label>
-<label>New home ID <input id="homeName" style="min-width:0;width:9em"></label></div>
-<div id="homeFuse" hidden><label>Fuse into selected home <select id="homePeer" style="max-width:100%"></select></label></div>
+<label>Edit <select id="homeAction"><option value="split">Split this home</option><option value="transfer">Move members to another home</option><option value="fuse">Fuse with another home</option></select></label>
+<div id="homeSplit"><label>Members <select id="homeMembers" multiple size="4" style="max-width:100%"></select></label>
+<label id="homeNameField">New home ID <input id="homeName" style="min-width:0;width:9em"></label></div>
+<div id="homeFuse" hidden><label>Other home <select id="homePeer" style="max-width:100%"></select></label></div>
 <button id="homePreview">Preview</button> <button id="homeApply">Apply</button> <button id="homeUndo">Undo home edit</button>
 <output id="homeStatus" aria-live="polite" style="display:block"></output></fieldset>
 <fieldset style="min-width:0"><legend>Copy a boundary interface</legend>
@@ -820,6 +822,7 @@ function homeControls(c){
  const peers=$('homePeer'), members=$('homeMembers'), old=peers.value;
  let list=chunkPlan.chunks.filter(x=>x.id!==c.id);
  const b=c.box_dbu;
+ $('homeAspect').value=(b[2]-b[0])/(b[3]-b[1]);
  function gap(x){const a=x.box_dbu;return Math.max(0,b[0]-a[2],a[0]-b[2])+Math.max(0,b[1]-a[3],a[1]-b[3])}
  list.sort((a,b)=>gap(a)-gap(b));
  peers.replaceChildren(...list.map(x=>new Option((homeLabels.get(x.id)||x.id)+(gap(x)===0?' (touches)':''),x.id)));
@@ -833,15 +836,18 @@ function homeAction(apply,undo=false){
  const c=geometryChunk();if(!c)return;
  let op='undo';
  if(!undo){
-   if($('homeAction').value==='split'){
-     const selected=Array.from($('homeMembers').selectedOptions,o=>JSON.parse(o.value)),name=$('homeName').value.trim();
-     if(!name||!selected.length||selected.length===c.members.length){$('homeStatus').textContent='Name a new home and select some, but not all, of the members.';return}
-     op={split:c.id,new_id:name,members:selected};
-   }else{
-     const other=$('homePeer').value;if(!other){$('homeStatus').textContent='Choose another home to fuse.';return}
-     op={fuse:[c.id,other]};
+   const action=$('homeAction').value,other=$('homePeer').value;
+   if(action!=='split'&&!other){$('homeStatus').textContent='Choose another home.';return}
+   if(action==='fuse')op={fuse:[c.id,other]};
+   else{
+     const selected=Array.from($('homeMembers').selectedOptions,o=>JSON.parse(o.value));
+     if(!selected.length||selected.length===c.members.length){$('homeStatus').textContent='Select some, but not all, of the members.';return}
+     if(action==='transfer')op={transfer:c.id,to:other,members:selected};
+     else{
+       const name=$('homeName').value.trim();if(!name){$('homeStatus').textContent='Enter a new home ID.';return}
+       op={split:c.id,new_id:name,members:selected};
+     }
    }
-   op.before=chunkPlan.chunks.map(c=>({id:c.id,box_dbu:c.reference_box_dbu||c.box_dbu}));
  }
  geometryEdit(op,c.id,null,'topology',apply);
 }
@@ -878,7 +884,7 @@ function drawHomePreview(){
  }
  ctx.restore();
 }
-$('homeAction').onchange=()=>{const split=$('homeAction').value==='split';$('homeSplit').hidden=!split;$('homeFuse').hidden=split;clearHomePreview()};
+$('homeAction').onchange=()=>{const action=$('homeAction').value;$('homeSplit').hidden=action==='fuse';$('homeNameField').hidden=action!=='split';$('homeFuse').hidden=action==='split';clearHomePreview()};
 for(const id of ['homeMembers','homePeer','homeName'])$(id).oninput=clearHomePreview;
 $('homeHeat').onchange=$('homeLinks').onchange=()=>{dirty=true};
 $('homePreview').onclick=()=>homeAction(false);$('homeApply').onclick=()=>homeAction(true);
@@ -888,16 +894,10 @@ async function geometryEdit(op,who,expect,field='geometry',apply=true){
  try{
    discardDrop();
    if(rev!==null||D?.phase!=='fp'||!chunkPlan||S.state!=='gate')throw Error('Edit at the live floorplan gate.');
-   geomBusy=true;const target=exploration||'main',frame=expect?.frame??S.frame,design=chunkPlan.design,before=chunkPlan.communication.pin_hpwl_dbu;
-   const old=await xcommand({cmd:'export',target,what:'intent',encoding:'json_text'});
-   if(expect&&expect.intent!==old.revision)throw Error('Floorplan changed during drag. Try again.');
-   const records=JSON.parse(old.records_json).filter(r=>r.class==='livehd.placement.chunk_guidance'&&(!r.design||r.design===design));
-   let record=records.find(r=>r[field])||records.find(r=>r.id==='gui'&&r.design===design);
-   if(!record){record={class:'livehd.placement.chunk_guidance',id:'gui',design,targets:[]};records.push(record)}
-   const ops=record[field]??=[];
-   if(op==='undo'){if(!ops.length)throw Error('No edit of this kind to undo.');ops.pop()}else ops.push(op);
+   geomBusy=true;const target=exploration||'main',frame=expect?.frame??S.frame,before=chunkPlan.communication.pin_hpwl_dbu;
+   const revision=expect?.intent??S.intent_revision;
    status.textContent='Refining chunk boxes, colors and pins…';
-   const a=await xcommand({cmd:apply?'intent_apply':'intent_preview',target,expect:{frame,intent:old.revision},records_json:JSON.stringify(records)});
+   const a=await xcommand({cmd:'chunk_edit',target,field,op,apply,expect:{frame,intent:revision}});
    for(;;){const r=await xcommand({cmd:'command_status',target,sequence:a.sequence});
      if(r.status!=='queued'){if(r.status!=='applied')throw Error(r.reason||r.status);break}await new Promise(resolve=>setTimeout(resolve,60))}
    const r=await xcommand({cmd:'export',target,what:'intent'});
@@ -914,17 +914,23 @@ async function geometryEdit(op,who,expect,field='geometry',apply=true){
    if(apply){showChunks(plan);if(c)focusGeometry(c)}
    else{
      homePreview={base:chunkPlan,plan};
-     dropPreview={op,who,expect:{frame,intent:old.revision},target,overlay:homePreview};
+     dropPreview={op,who,expect:{frame,intent:revision},target,overlay:homePreview};
      $('dropActions').hidden=false;dirty=true;
    }
    const landed=c?.box_dbu;
    const at=v=>'('+v.slice(0,2).map(num).join(', ')+')';
-   const msg=c&&op.move?(apply?'Placed at ':'Preview only: would land at ')+at(landed)+' DBU'+(landed[0]!==op.to_dbu[0]||landed[1]!==op.to_dbu[1]?'; requested '+at(op.to_dbu)+' DBU':'')+'; longest incident span '+num(c.longest_net_span_dbu)+' DBU. ':'';
+   const msg=c&&op.reshape?'Width / height '+((landed[2]-landed[0])/(landed[3]-landed[1])).toFixed(4)+'. ':c&&op.move?(apply?'Placed at ':'Preview only: would land at ')+at(landed)+' DBU'+(landed[0]!==op.to_dbu[0]||landed[1]!==op.to_dbu[1]?'; requested '+at(op.to_dbu)+' DBU':'')+'; longest incident span '+num(c.longest_net_span_dbu)+' DBU. ':'';
    const delta=plan.communication.pin_hpwl_dbu-before;
    const change=before&&delta?' · '+(Math.abs(delta)/before<.0001?'<0.01':(100*Math.abs(delta)/before).toFixed(2))+'% '+(delta>0?'longer':'shorter'):'';
    status.textContent=msg+'Refined design HPWL '+num(plan.communication.pin_hpwl_dbu)+' DBU ('+signed(delta)+change+'). Shared area '+num(plan.geometry?.shared_dbu2||0)+' DBU²; cycles '+(plan.geometry?.independent_cycles||0)+'.';
  }catch(e){status.textContent=e.message}finally{geomBusy=false;geometryPair(0,0);dirty=true}
 }
+function editAspect(apply){
+ const c=geometryChunk(),aspect=$('homeAspect').valueAsNumber;
+ if(!c||!(aspect>0)){$('geometryInfo').textContent='Select a chunk and enter a positive width / height.';return}
+ geometryEdit({reshape:c.id,aspect_ratio:aspect},c.id,null,'geometry',apply);
+}
+$('aspectPreview').onclick=()=>editAspect(false);$('aspectApply').onclick=()=>editAspect(true);
 function geometryLock(what){
  const c=geometryChunk();if(!c){$('geometryInfo').textContent='Select a physical chunk first.';return}
  if(what==='others'){geometryEdit({lock_others:c.id},c.id);return}

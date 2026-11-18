@@ -5,7 +5,7 @@
 #include "fp_chunks.hpp"
 namespace livehd::placement {
 struct Home_edit {
-  bool                                   split = false;
+  enum Kind { split, fuse, transfer } kind = fuse;
   std::string                            first, second;
   std::map<std::string, Chunk_box>       before;
   std::set<std::pair<bool, std::string>> members;

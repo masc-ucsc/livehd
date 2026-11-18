@@ -2236,6 +2236,88 @@ std::string Session::agent_call(const std::string& json, int timeout_ms) {
         options_json(),
         state_json());
   }
+  if (cmd == "chunk_edit") {
+    auto field = str("field");
+    if ((field != "topology" && field != "geometry") || !d.HasMember("op") || (d.HasMember("apply") && !d["apply"].IsBool())) {
+      return err_json("supply field (topology or geometry), op and an optional boolean apply");
+    }
+    const auto& op   = d["op"];
+    const bool  undo = op.IsString() && std::string_view(op.GetString()) == "undo";
+    if (!undo && !op.IsObject()) {
+      return err_json("op must be an edit object or undo");
+    }
+    std::string design, intent, plan;
+    uint64_t    frame, revision;
+    {
+      std::lock_guard lock(m_);
+      if (!scene_ || !frame_ || scene_->phase != "fp" || scene_->chunk_plan.empty() || state_name_ != "gate") {
+        return err_json("chunk edits require the live floorplan gate");
+      }
+      if (auto why = expected_revision_locked(); !why.empty()) {
+        return err_json(why);
+      }
+      design   = scene_->design;
+      intent   = cfg_.intent;
+      frame    = frame_->id;
+      revision = intent_revision_;
+      if (field == "topology" && !undo) {
+        plan = scene_->chunk_plan;
+      }
+    }
+    metadata::Bundle        prior(intent), edits;
+    rapidjson::Document     record(rapidjson::kObjectType);
+    auto&                   a     = record.GetAllocator();
+    // The planner accepts one ordered array per field; append to its owner.
+    const rapidjson::Value* owner = nullptr;
+    for (auto* r : prior.select("livehd.placement.chunk_guidance", design)) {
+      edits.replace(*r);
+      if (r->HasMember(field.c_str())) {
+        owner = r;
+      } else if (!owner && r->HasMember("id") && (*r)["id"] == "gui" && r->HasMember("design")
+                 && (*r)["design"] == design.c_str()) {
+        owner = r;
+      }
+    }
+    if (owner) {
+      record.CopyFrom(*owner, a);
+    } else {
+      record.AddMember("class", "livehd.placement.chunk_guidance", a)
+          .AddMember("id", "gui", a)
+          .AddMember("design", rapidjson::Value(design.c_str(), a), a);
+    }
+    if (!record.HasMember(field.c_str())) {
+      record.AddMember(rapidjson::Value(field.c_str(), a), rapidjson::Value(rapidjson::kArrayType), a);
+    }
+    auto& ops = record[field.c_str()];
+    if (!ops.IsArray() || (undo && ops.Empty())) {
+      return err_json("no edit of this kind to undo or invalid edit history");
+    }
+    if (undo) {
+      ops.PopBack();
+    } else {
+      rapidjson::Value next(op, a);
+      if (!plan.empty() && !next.HasMember("before")) {
+        rapidjson::Document live;
+        live.Parse<rapidjson::kParseFullPrecisionFlag>(plan.c_str());
+        rapidjson::Value boxes(rapidjson::kArrayType);
+        for (const auto& c : live["chunks"].GetArray()) {
+          rapidjson::Value box(rapidjson::kObjectType);
+          box.AddMember("id", rapidjson::Value(c["id"], a), a)
+              .AddMember("box_dbu", rapidjson::Value(c[c.HasMember("reference_box_dbu") ? "reference_box_dbu" : "box_dbu"], a), a);
+          boxes.PushBack(box, a);
+        }
+        next.AddMember("before", boxes, a);
+      }
+      ops.PushBack(next, a);
+    }
+    edits.replace(record);
+    const bool apply = d.HasMember("apply") && d["apply"].GetBool();
+    return submit_reply(std::format(R"({{"cmd":"{}","expect":{{"frame":{},"intent":{}}},"records":{}}})",
+                                    apply ? "intent_apply" : "intent_preview",
+                                    frame,
+                                    revision,
+                                    edits.json()));
+  }
   if (cmd == "chunk_interface") {
     std::string design, intent;
     uint64_t    frame = 0, revision = 0;
@@ -2333,7 +2415,7 @@ std::string Session::agent_call(const std::string& json, int timeout_ms) {
                          scene_->dbu_per_um,
                          moves);
     }
-    if (what == "chunks" || what == "chunk_pins" || what == "chunk_peers") {
+    if (what == "chunks" || what == "chunk_members" || what == "chunk_pins" || what == "chunk_peers") {
       if (!scene_ || scene_->chunk_plan.empty()) {
         return err_json("no chunk floorplan at this frame");
       }
@@ -2355,6 +2437,27 @@ std::string Session::agent_call(const std::string& json, int timeout_ms) {
       if (start < 0 || limit < 1 || limit > 256 || (d.HasMember("offset") && !d["offset"].IsInt())
           || (d.HasMember("limit") && !d["limit"].IsInt())) {
         return err_json("use a nonnegative offset and a limit between 1 and 256");
+      }
+      if (what == "chunk_members") {
+        for (const auto& c : plan["chunks"].GetArray()) {
+          if (filter != c["id"].GetString()) {
+            continue;
+          }
+          const auto&         members = c["members"];
+          rapidjson::Document reply(rapidjson::kObjectType);
+          auto&               a = reply.GetAllocator();
+          rapidjson::Value    page(rapidjson::kArrayType);
+          for (size_t i = start; i < members.Size() && page.Size() < unsigned(limit); ++i) {
+            page.PushBack(rapidjson::Value(members[rapidjson::SizeType(i)], a), a);
+          }
+          reply.AddMember("ok", true, a)
+              .AddMember("total", members.Size(), a)
+              .AddMember("members", page, a)
+              .AddMember("frame", frame_ ? frame_->id : 0, a)
+              .AddMember("intent_revision", intent_revision_, a);
+          return metadata::canonical(reply);
+        }
+        return err_json("chunk_members requires a known physical chunk");
       }
       if (what == "chunk_peers") {
         auto homes = plan["chunks"].GetArray();
@@ -2707,7 +2810,7 @@ std::string Session::agent_call(const std::string& json, int timeout_ms) {
 "paint":["highlight","highlight_names","select","clear_highlight","highlights"],
 "edit":["move","batch","pin","unpin","relax","legalize","evaluate","command_status","cmd"],
 "explore":["whatif","explore","explore_begin","explore_wait","explorations","compare","similarity","explore_discard","score_config"],
-"collateral":["export","intent_preview","intent_apply"],
+"collateral":["export","chunk_edit","chunk_interface","intent_preview","intent_apply"],
 "loop":"hello -> state (wait for a gate) -> inspect -> whatif/explore candidates -> compare -> apply with move/batch + evaluate -> export what=macros|intent|flags"},
 "commands":{
 "explore":"{tier:T0|T1|T2|T3|T4, target:main, patch, expect?, label?, client?} -> isolated geometry or frozen-netlist evaluation",
@@ -2724,7 +2827,8 @@ std::string Session::agent_call(const std::string& json, int timeout_ms) {
 "score_config":"{estimator,components:[{loss,weight,half}]} -> set an informational score; empty components disables it",
 "summary":"{} -> current timing, routing and configured quality with measurement frame IDs",
 "hello":"{} -> invocation, files, capabilities, options and state",
-"export":"{what:macros|relationships|intent|floorplan|chunks|chunk_pins|chunk_peers|flags|summary|score|scope, format?:metadata|dbu|placereasoner|def, encoding?:json_text} -> placement or session data",
+"export":"{what:macros|relationships|intent|floorplan|chunks|chunk_members|chunk_pins|chunk_peers|flags|summary|score|scope, format?:metadata|dbu|placereasoner|def, encoding?:json_text} -> placement or session data",
+"chunk_edit":"{field:topology|geometry,op,apply?:false,expect?} -> preview/apply one edit or undo; topology ops: {split,new_id,members}, {transfer,to,members}, {fuse:[keep,remove]}; geometry: {reshape,aspect_ratio} (width/height). Members are {id,macro} from export what=chunk_members with chunk and optional offset/limit. Poll command_status, then export what=chunks with view=preview or live.",
 "chunk_interface":"{chunk,source?,orientation:auto|N|FN|FS|S|clear,apply?:false,expect?} -> preview or apply a physical home interface; inspect export what=chunks or what=chunk_pins (chunk required, match=all|copied|local), view=preview or live, offset?, limit?",
 "intent_apply":"{records or records_json,expect?} -> replace the applicable placement hints; preserve other design metadata",
 "intent_preview":"{records or records_json,expect?} -> bind records and measure residuals; export intent returns the preview report",

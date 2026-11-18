@@ -29,17 +29,20 @@ std::vector<Home_edit> read_home_edits(const metadata::Bundle* input, const std:
       check(!seen && ops.IsArray(), "expected one ordered topology array");
       seen = true;
       for (const auto& op : ops.GetArray()) {
-        check(op.IsObject() && op.HasMember("split") != op.HasMember("fuse"), "choose split or fuse");
+        check(op.IsObject() && int(op.HasMember("split")) + op.HasMember("fuse") + op.HasMember("transfer") == 1,
+              "choose split, fuse or transfer");
         Home_edit e;
-        e.split = op.HasMember("split");
-        if (e.split) {
-          check(op.HasMember("new_id") && op.HasMember("members") && op["members"].IsArray() && !op["members"].Empty(),
-                "select members and a new_id");
-          e.first  = name(op["split"]);
-          e.second = name(op["new_id"]);
+        e.kind = op.HasMember("split") ? Home_edit::split : op.HasMember("transfer") ? Home_edit::transfer : Home_edit::fuse;
+        if (e.kind != Home_edit::fuse) {
+          const bool split = e.kind == Home_edit::split;
+          check(
+              op.HasMember(split ? "new_id" : "to") && op.HasMember("members") && op["members"].IsArray() && !op["members"].Empty(),
+              "select members and a destination");
+          e.first  = name(op[split ? "split" : "transfer"]);
+          e.second = name(op[split ? "new_id" : "to"]);
           for (const auto& m : op["members"].GetArray()) {
             check(m.IsObject() && m.HasMember("id") && m.HasMember("macro") && m["macro"].IsBool(), "a member needs id and macro");
-            check(e.members.emplace(m["macro"].GetBool(), name(m["id"])).second, "duplicate split member");
+            check(e.members.emplace(m["macro"].GetBool(), name(m["id"])).second, "duplicate selected member");
           }
         } else {
           auto& pair = op["fuse"];
@@ -149,8 +152,12 @@ Home_history repartition(std::vector<Fp_chunk>& chunks, const std::vector<Home_e
       check(std::abs(area - (core[2] - core[0]) * (core[3] - core[1])) <= 1e-12 * area, "before frame leaves uncovered area");
     }
     history[a->partition].insert(a->id);
-    if (e.split) {
-      check(b == chunks.end(), "new chunk ID already exists: " + e.second);
+    if (e.kind != Home_edit::fuse) {
+      if (e.kind == Home_edit::transfer) {
+        check(b != chunks.end(), "unknown destination " + e.second);
+      } else {
+        check(b == chunks.end(), "new chunk ID already exists: " + e.second);
+      }
       Fp_chunk child;
       child.id = e.second;
       std::vector<int> keep;
@@ -158,12 +165,18 @@ Home_history repartition(std::vector<Fp_chunk>& chunks, const std::vector<Home_e
         const auto& o = objects[i];
         (e.members.contains({o.macro, o.id}) ? child.objects : keep).push_back(i);
       }
-      check(child.objects.size() == e.members.size(), "split member is outside " + e.first);
-      check(!keep.empty(), "split would leave an empty chunk");
+      check(child.objects.size() == e.members.size(), "selected member is outside " + e.first);
+      check(!keep.empty(), "edit would leave an empty chunk; fuse the homes instead");
       a->objects = std::move(keep);
       classify(*a);
-      classify(child);
-      chunks.push_back(std::move(child));
+      if (e.kind == Home_edit::split) {
+        classify(child);
+        chunks.push_back(std::move(child));
+      } else {
+        history[b->partition].insert(b->id);
+        b->objects.insert(b->objects.end(), child.objects.begin(), child.objects.end());
+        classify(*b);
+      }
     } else {
       check(b != chunks.end(), "unknown fusion peer " + e.second);
       history[b->partition].insert(b->id);

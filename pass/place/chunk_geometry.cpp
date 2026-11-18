@@ -89,6 +89,7 @@ struct Mover {
   std::vector<Box>                 boxes;
   std::vector<bool>                hard, macro;
   std::vector<Point>               minimum;
+  std::vector<double>              occupied;
   Capacity                         current;
   Mover(Chunk_plan& p_, const std::vector<Chunk_object>& o, Box b, Point step) : p(p_), objects(o), core(b), pitch(step) {
     for (auto& c : p.chunks) {
@@ -96,14 +97,18 @@ struct Mover {
       c.reference_box = boxes.back();
       Point dims{};
       bool  fixed = false, has_macro = false;
+      double used = 0;
       for (int n : c.objects) {
         const auto& v  = o[n];
         fixed         |= v.fixed.has_value();
         has_macro     |= v.macro;
-        dims[0]        = std::max(dims[0], v.width);
-        dims[1]        = std::max(dims[1], v.height);
+        const double w = v.width + 2 * v.worker_halo[0], h = v.height + 2 * v.worker_halo[1];
+        dims[0]  = std::max(dims[0], w);
+        dims[1]  = std::max(dims[1], h);
+        used    += v.area + (w * h - v.width * v.height);
       }
       minimum.push_back(dims);
+      occupied.push_back(used);
       hard.push_back(fixed);
       macro.push_back(has_macro);
     }
@@ -257,6 +262,62 @@ struct Mover {
     }
     return false;
   }
+  // Slide one complete shared edge. All abutting neighbors give up or receive
+  // exactly that strip, so the edited frame still tiles the same area.
+  void reshape(int id, double ratio) {
+    const auto& old = boxes[id];
+    check(!p.chunks[id].aspect_locked, "aspect is locked for " + p.chunks[id].id);
+    check(!current.overlap[id], "reshape requires a disjoint source chunk");
+    if (same(dim(old, 0) / dim(old, 1), ratio)) {
+      return;
+    }
+    Change best;
+    double error = std::abs(std::log(dim(old, 0) / dim(old, 1)) - std::log(ratio));
+    for (int side = 0; side < 4; ++side) {
+      const int    k = side % 2, h = 1 - k, opposite = side ^ 2;
+      const double span = k == 0 ? dim(old, h) * ratio : dim(old, h) / ratio;
+      const double edge = snap(old[opposite] + (side < 2 ? -span : span), k);
+      if (!(edge > core[k] && edge < core[k + 2]) || edge == old[side]) {
+        continue;
+      }
+      auto dest  = old;
+      dest[side] = edge;
+      Change change{
+          {id, dest}
+      };
+      double covered = 0;
+      for (size_t j = 0; j < boxes.size(); ++j) {
+        const auto& b = boxes[j];
+        if (b[opposite] != old[side] || b[h] < old[h] || b[h + 2] > old[h + 2]) {
+          continue;
+        }
+        auto neighbor      = b;
+        neighbor[opposite] = edge;
+        change.emplace_back(j, neighbor);
+        covered += dim(b, h);
+      }
+      if (!same(covered, dim(old, h))) {
+        continue;
+      }
+      const bool   feasible = std::all_of(change.begin(), change.end(), [&](const auto& item) {
+        auto& [j, b] = item;
+        return positive(b) && !p.chunks[j].aspect_locked && !current.overlap[j] && dim(b, 0) >= minimum[j][0]
+               && dim(b, 1) >= minimum[j][1] && area(b) >= occupied[j] && area(b) >= std::min(area(boxes[j]), p.chunks[j].reserved)
+               && (!hard[j] || std::all_of(p.chunks[j].objects.begin(), p.chunks[j].objects.end(), [&](int i) {
+                    return !objects[i].fixed || inside(*objects[i].fixed, b);
+                  }));
+      });
+      const double diff     = std::abs(std::log(dim(dest, 0) / dim(dest, 1)) - std::log(ratio));
+      if (feasible && (diff < error || (!best.empty() && same(diff, error) && change.size() < best.size()))) {
+        best  = std::move(change);
+        error = diff;
+      }
+    }
+    check(!best.empty(), "no feasible shared edge for the requested aspect ratio on " + p.chunks[id].id);
+    for (const auto& [j, b] : best) {
+      boxes[j] = b;
+    }
+  }
   void move(int id, Point wish, double cap) {
     auto old = boxes[id];
     check(!hard[id], "chunk contains a fixed macro: " + p.chunks[id].id);
@@ -348,7 +409,15 @@ Chunk_edits read_chunk_edits(const metadata::Bundle* input, const std::string& d
       for (const auto& v : list.GetArray()) {
         check(v.IsObject(), "invalid operation");
         Chunk_edit e;
-        if (v.HasMember("lock_others")) {
+        if (v.HasMember("reshape")) {
+          check(v["reshape"].IsString() && v["reshape"].GetStringLength() && v.HasMember("aspect_ratio")
+                    && v["aspect_ratio"].IsNumber() && std::isfinite(v["aspect_ratio"].GetDouble())
+                    && v["aspect_ratio"].GetDouble() > 0 && !v.HasMember("move") && !v.HasMember("lock_aspect")
+                    && !v.HasMember("lock_others"),
+                "reshape needs a physical chunk and a positive aspect_ratio");
+          e.reshape = v["reshape"].GetString();
+          e.aspect  = v["aspect_ratio"].GetDouble();
+        } else if (v.HasMember("lock_others")) {
           check(!v.HasMember("move") && !v.HasMember("lock_aspect") && v["lock_others"].IsString()
                     && v["lock_others"].GetStringLength(),
                 "invalid lock_others selector");
@@ -399,7 +468,9 @@ void edit_chunk_boxes(Chunk_plan& p, const Chunk_edits& edits, const std::vector
     return it->second;
   };
   for (const auto& e : edits) {
-    if (!e.all_but.empty()) {
+    if (!e.reshape.empty()) {
+      m.reshape(id(e.reshape), e.aspect);
+    } else if (!e.all_but.empty()) {
       int free = id(e.all_but);
       for (size_t i = 0; i < p.chunks.size(); ++i) {
         p.chunks[i].aspect_locked = int(i) != free;

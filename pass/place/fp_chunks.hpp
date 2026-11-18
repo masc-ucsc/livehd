@@ -21,6 +21,7 @@ struct Chunk_object {
   size_t                   cells = 0, pins = 0, nets = 0;
   double                   area = 0, width = 0, height = 0;
   std::optional<Chunk_box> fixed{};
+  std::array<double, 2>    worker_halo{};  // per-side clearance for an independently placed macro
 };
 struct Chunk_port {
   std::string           net;
@@ -88,11 +89,14 @@ class Chunk_model {
   };
   std::vector<Edge>         edges;
   size_t                    net_count = 0;
+  void order_connected(std::vector<int>& ids, uint64_t capacity, const Chunk_predictor& predictor) const;
   std::optional<Chunk_plan> plan_with(Chunk_box core, double site, double row, uint64_t budget, double density,
                                       const metadata::Bundle* input, const std::string& design, const Chunk_predictor& predictor,
                                       bool only_saved) const;
 
 public:
+  bool pack_scopes = false;  // group whole colors and macros across instance boundaries up to the worker budget
+  bool connectivity = false;
   std::vector<Chunk_object>                                                       objects;
   // Only mapped floorplans can identify the full set of physical pins on a cut.
   // Materialize keys on demand, never while planning a color-only design.

@@ -4680,6 +4680,8 @@ bool legalize_edits(View& v, const ph::Technology& tech, const ph::Floorplan& re
 bool plan_color_chunks(View& v, const Options& options, const std::vector<Hint_scope>& scopes, const std::string& design,
                        double dbu, bool restored) {
   Chunk_model                                  model;
+  model.pack_scopes = options.chunk_pack_scopes;
+  model.connectivity = options.chunk_connectivity;
   auto&                                        d = v.design;
   std::map<std::string, std::set<std::string>> modules;
   for (const auto& s : scopes) {
@@ -4763,6 +4765,10 @@ bool plan_color_chunks(View& v, const Options& options, const std::vector<Hint_s
       }
     }
     owner[i] = model.cell(std::move(id), std::move(scope), std::move(module), macro, w, h, fixed);
+    if (macro && !fixed && !options.chunk_manifest.empty()) {
+      model.objects[owner[i]].worker_halo = {d.node_halo_x.empty() ? 0 : d.node_halo_x[i],
+                                             d.node_halo_y.empty() ? 0 : d.node_halo_y[i]};
+    }
     if (!macro) {
       color_nodes.emplace(group, owner[i]);
     }
@@ -5066,6 +5072,11 @@ bool plan_color_chunks(View& v, const Options& options, const std::vector<Hint_s
                                  options.chunk_require_fit,
                                  options.chunk_only,
                                  options.chunk_predictor.get());
+    if (options.snapshots) {
+      ph::Floorplan frame;
+      snapshot_frame(frame, v);
+      ph::write_def(frame, options.output_dir + "/chunk-plan.def");
+    }
     throw Chunk_jobs_ready{path};
   }
   if (plan.chunks.size() > 1) {

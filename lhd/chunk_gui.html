@@ -1,0 +1,211 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LiveHD · Chunk placement</title>
+<style>
+*{box-sizing:border-box}body{font:15px/1.5 Inter,system-ui,sans-serif;color:#203438;background:#f6f8f6;margin:0}
+main{max-width:1200px;margin:auto;padding:2rem}h1,h2{margin:0 0 .8rem}section{background:white;padding:1.1rem;border:1px solid #cdd8d3;border-radius:6px;margin-bottom:1rem}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:1rem}canvas{display:block;width:100%;height:280px;background:#f0f4f1}
+button,input,select{font:inherit}button{background:#16524c;color:white;border:0;border-radius:4px;padding:.45rem .8rem;cursor:pointer}button:disabled{opacity:.55}
+table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:.4rem;border-bottom:1px solid #dbe2dc}pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:14rem;overflow:auto}
+.tools{display:flex;gap:.6rem;align-items:center;flex-wrap:wrap;margin:.8rem 0}input[type=number]{width:8rem}#message{min-height:1.5rem}#tablebox{max-height:22rem;overflow:auto}
+@media(max-width:780px){main{padding:.8rem}.grid{display:block}}
+</style><main>
+<h1>Chunk placement</h1>
+<div class="grid"><section><h2>Floorplan</h2><canvas aria-label="Select a floorplan chunk"></canvas></section>
+<section><h2>Placement queue</h2><div id="tablebox"><table><thead><tr><th>Chunk</th><th>Macro</th><th>Final</th><th>Est. MiB</th></tr></thead><tbody></tbody></table></div>
+<div class="tools"><button id="macro">Run macro</button><button id="final">Run final</button><label><input type="checkbox" id="neighbors"> Include neighbors</label></div>
+<div id="message" role="status"></div></section></div>
+<section><h2>Chunk feedback</h2><div class="tools"><select id="inspect" aria-label="Inspect chunk"></select><select id="view" aria-label="Placement stage"><option>final</option><option>macro</option></select><button id="refresh">Refresh</button></div><canvas id="placement" aria-label="Selected chunk placement"></canvas><p id="caption"></p><pre id="feedback"></pre>
+<h2>Boundary contacts</h2><div class="tools"><select id="ports" aria-label="Contact net"></select>
+<label>X (DBU) <input type="number" id="x"></label><label>Y (DBU) <input type="number" id="y"></label>
+<button id="move">Move IO</button><button id="accept">Use macro feedback</button></div></section></main>
+<script>
+const $ = id => document.getElementById(id);
+const canvas = document.querySelector('canvas');
+const selected = new Set();
+const token = location.hash.slice(1);
+let generation;
+let rows = [], boxes = [], detail = null, preview = null, busy = false, inspection = 0;
+
+async function api(cmd, fields = {}) {
+  const response = await fetch('/chunk', {
+    method: 'POST',
+    headers: {Authorization: 'Bearer ' + token, 'Content-Type': 'application/json'},
+    body: JSON.stringify({cmd, generation, ...fields})
+  });
+  const result = await response.json();
+  if (!response.ok) throw Error(result.error || response.statusText);
+  if (cmd === 'list') {
+    const next = response.headers.get('X-Chunk-Generation');
+    if (generation !== next) selected.clear();
+    generation = next;
+  }
+  return result;
+}
+function draw() {
+  const width = canvas.clientWidth, height = canvas.clientHeight, ratio = devicePixelRatio || 1;
+  canvas.width = width * ratio;
+  canvas.height = height * ratio;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(ratio, ratio);
+  boxes = [];
+  if (!rows.length) return;
+  const frame = [Infinity, Infinity, -Infinity, -Infinity];
+  for (const {box_dbu: [xl, yl, xh, yh]} of rows) {
+    frame[0] = Math.min(frame[0], xl);
+    frame[1] = Math.min(frame[1], yl);
+    frame[2] = Math.max(frame[2], xh);
+    frame[3] = Math.max(frame[3], yh);
+  }
+  const unit = Math.min((width - 16) / (frame[2] - frame[0]), (height - 16) / (frame[3] - frame[1]));
+  for (const row of rows) {
+    const [xl, yl, xh, yh] = row.box_dbu;
+    const x = 8 + (xl - frame[0]) * unit, y = 8 + (frame[3] - yh) * unit;
+    const w = (xh - xl) * unit, h = (yh - yl) * unit;
+    ctx.fillStyle = selected.has(row.id) ? '#98cdbb' : '#e1e9e3';
+    ctx.fillRect(x, y, w, h);
+    ctx.strokeStyle = '#47685f';
+    ctx.strokeRect(x, y, w, h);
+    ctx.fillStyle = '#173c34';
+    if (h > 18 && ctx.measureText(row.id).width < w - 8) ctx.fillText(row.id, x + 4, y + 15);
+    boxes.push({id: row.id, x, y, w, h, exported: row.exported});
+  }
+}
+function table() {
+  $('macro').disabled = $('final').disabled = busy || !selected.size;
+  const body = document.querySelector('tbody');
+  body.replaceChildren();
+  for (const row of rows) {
+    const tr = body.insertRow();
+    const label = document.createElement('label'), check = document.createElement('input');
+    check.type = 'checkbox';
+    check.checked = selected.has(row.id);
+    check.disabled = !row.exported;
+    check.onchange = () => toggle(row.id);
+    label.append(check, document.createTextNode(row.id));
+    tr.insertCell().append(label);
+    const estimate = row.exported ? (row.estimated_bytes / 1048576).toFixed(2) : 'Unavailable';
+    for (const value of [row.macro.status, row.final.status, estimate]) tr.insertCell().textContent = value;
+  }
+  draw();
+}
+function drawPlacement() {
+  const panel = $('placement');
+  const width = panel.clientWidth;
+  const height = panel.clientHeight;
+  const ratio = devicePixelRatio || 1;
+  panel.width = width * ratio;
+  panel.height = height * ratio;
+  if (!detail) return;
+  const ctx = panel.getContext('2d');
+  ctx.scale(ratio, ratio);
+  const [xl, yl, xh, yh] = detail.box_dbu;
+  const unit = Math.min((width - 20) / (xh - xl), (height - 20) / (yh - yl));
+  const left = (width - (xh - xl) * unit) / 2;
+  const top = (height - (yh - yl) * unit) / 2;
+  const px = x => left + (x - xl) * unit;
+  const py = y => top + (yh - y) * unit;
+  ctx.strokeStyle = '#47685f';
+  ctx.strokeRect(left, top, (xh - xl) * unit, (yh - yl) * unit);
+  for (const [x, y, w, h, macro] of preview?.boxes_dbu || []) {
+    ctx.fillStyle = macro ? '#233f55' : '#54917e';
+    ctx.fillRect(px(x), py(y + h), Math.max(1, w * unit), Math.max(1, h * unit));
+  }
+  const port = detail.ports[$('ports').selectedIndex];
+  if (port) {
+    ctx.fillStyle = '#c4512a';
+    ctx.beginPath();
+    ctx.arc(px(port.xy_dbu[0]), py(port.xy_dbu[1]), 4, 0, 2 * Math.PI);
+    ctx.fill();
+  }
+}
+async function inspect() {
+  const request = ++inspection;
+  const id = $('inspect').value;
+  if (!id) return;
+  const d = await api('show', {id});
+  if (inspection !== request) return;
+  const stage = $('view').value;
+  const current = d[stage];
+  const image = current.status === 'done' && current.preview ? await api('preview', {id, stage}) : null;
+  if (inspection !== request) return;
+  detail = d;
+  preview = image;
+  const metrics = result => [
+    result.status,
+    result.reason,
+    result.hpwl_dbu === undefined ? '' : 'HPWL ' + result.hpwl_dbu.toLocaleString() + ' DBU',
+    result.peak_rss_bytes === undefined ? '' : 'Peak ' + (result.peak_rss_bytes / 1048576).toFixed(1) + ' MiB'
+  ].filter(Boolean).join(' · ');
+  $('feedback').textContent = 'Macro: ' + metrics(d.macro) + '\nFinal: ' + metrics(d.final);
+  $('caption').textContent = image ? image.boxes_dbu.length + ' of ' + image.owned + ' instances shown. Dark blocks are macros.' : 'Stage: ' + current.status;
+  const oldNet = $('ports').value;
+  const options = document.createDocumentFragment();
+  for (const port of d.ports) options.append(new Option(port.net + ' · ' + port.net_index, port.net_index));
+  $('ports').replaceChildren(options);
+  if (d.ports.some(port => String(port.net_index) === oldNet)) $('ports').value = oldNet;
+  contact();
+}
+function contact() {
+  const port = detail?.ports[$('ports').selectedIndex];
+  $('x').value = port?.xy_dbu[0] ?? '';
+  $('y').value = port?.xy_dbu[1] ?? '';
+  drawPlacement();
+}
+function toggle(id) {
+  if (selected.has(id)) selected.delete(id);
+  else selected.add(id);
+  $('inspect').value = id;
+  table();
+  inspect().catch(error);
+}
+canvas.onclick = event => {
+  const box = boxes.find(b => event.offsetX >= b.x && event.offsetX <= b.x + b.w &&
+                              event.offsetY >= b.y && event.offsetY <= b.y + b.h);
+  if (box?.exported) toggle(box.id);
+};
+async function refresh() {
+  rows = await api('list');
+  const current = $('inspect').value;
+  const options = document.createDocumentFragment();
+  for (const row of rows) options.append(new Option(row.id, row.id));
+  $('inspect').replaceChildren(options);
+  if (rows.some(r => r.id === current)) $('inspect').value = current;
+  table();
+  await inspect();
+}
+function error(e) { $('message').textContent = e.message; }
+async function action(cmd, fields) {
+  if (busy) return;
+  busy = true;
+  $('message').textContent = 'Running ' + cmd + '…';
+  try {
+    const result = await api(cmd, fields);
+    if (cmd === 'macro' || cmd === 'final') $('view').value = cmd;
+    $('message').textContent = result.changed
+      ? 'Affected chunks: ' + (result.changed.join(', ') || 'none')
+      : cmd + ' complete: ' + result.map(c => c.id).join(', ');
+  } catch (e) {
+    error(e);
+  } finally {
+    busy = false;
+    await refresh();
+  }
+}
+for (const cmd of ['macro', 'final']) {
+  $(cmd).onclick = () => action(cmd, {ids: [...selected], neighbors: $('neighbors').checked}).catch(error);
+}
+for (const id of ['move', 'accept']) {
+  $(id).onclick = () => {
+    if ($('ports').selectedIndex < 0) return;
+    action('move-io', {
+      id: $('inspect').value, net: Number($('ports').value),
+      xy: [$('x').valueAsNumber, $('y').valueAsNumber], measured: id === 'accept'
+    }).catch(error);
+  };
+}
+$('ports').onchange = contact;
+$('inspect').onchange = $('view').onchange = () => inspect().catch(error);
+$('refresh').onclick = () => refresh().catch(error);
+window.onresize = () => { draw(); drawPlacement(); };
+refresh().catch(error);
+</script></html>

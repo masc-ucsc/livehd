@@ -20,7 +20,7 @@ constexpr std::string_view kJsonPassUsyn
     = R"json({"schema_version":1,"name":"pass usyn","description":"Native register-rooted XAG synthesis with bounded endpoint selection and residual rewriting/resubstitution. target=cmos preserves original state. tmap=none emits logical CMOS without Liberty; tmap=abc (default) requests only technology mapping from an optional provider. USYN invokes no ABC synthesis or SATOPT and has no ABC fallback. Logical and optional mapped-region reuse follow lhd.incremental with a named workdir; changing Liberty or mapping policy preserves native logical reuse.","inputs":["lg"],"outputs":["lg","verilog"],"examples":["lhd pass usyn lg:design --top top --set pass.usyn.tmap=none --emit-dir lg:net --workdir W","lhd synth design.v --top top --set synth.mapper=usyn --set synth.liberty=cells.lib --workdir W"]})json";
 
 constexpr std::string_view kSteps
-    = R"json(["compile verilog","compile pyrope","synth","sim","lec","formal verify","formal lec","scan","tool","pass","pyrope fmt","pyrope lsp","pyrope style"])json";
+    = R"json(["compile verilog","compile pyrope","synth","synth chunk","sim","lec","formal verify","formal lec","scan","tool","pass","pyrope fmt","pyrope lsp","pyrope style"])json";
 constexpr std::string_view kEmitKinds
     = R"json(["ln","lg","verilog","pyrope","lnast-dump","isabelle","lean","sim","graphviz","metadata","results","report","def","diagnostics"])json";
 constexpr std::string_view kErrorClasses
@@ -635,6 +635,10 @@ int describe_command(const Options& opts) {
         R"json({"schema_version":1,"name":"verilog","description":"Verilog source; as --emit a deterministic name-sorted concatenation of per-module cgen output","direction":"in/out"})json");
     return 0;
   }
+  if (name == "synth chunk") {
+    print_json_line(R"json({"schema_version":1,"name":"synth chunk","description":"Export a memory-sized floorplan, select physical homes and run their macro and final placement. Use lhd synth chunk <subcommand> --help for arguments.","subcommands":["init","update","plan","list","show","macro","final","move-io","gui"],"examples":["lhd synth chunk init top.v --top top --budget 1GiB --workdir W --set synth.liberty=cells.lib --set synth.lef=tech.lef,cells.lef","lhd synth chunk update --workdir W","lhd synth chunk list --workdir W --stage final --status stale"]})json");
+    return 0;
+  }
   if (name == "synth") {
     print_json_line(kJsonSynthCommand);
     return 0;
@@ -798,6 +802,7 @@ void print_general_help() {
       "  synth      one-shot synthesis: compile -> optional reduce -> color synth -> tech-map -> STA (QoR + timing)\n"
       "               lhd synth cpu.prp --top Cpu --workdir W          # reports in W/synth/, incremental on re-run\n"
       "               lhd synth lg:cpu_lg --top Cpu --emit-dir lg:net --stats\n"
+      "  synth chunk init | update | plan | list | show | macro | final | move-io | gui   (lhd synth chunk --help)\n"
       "  sim        build + run a C++ simulation of a Pyrope design's `test` blocks (dynamic verify)\n"
       "               lhd sim foo.prp                  # build + run every test block\n"
       "               lhd sim foo.prp my_test +n=4\n"
@@ -1427,6 +1432,9 @@ int help_json_dispatch(const std::string& topic, const std::string& sub, const O
     print_json_line(kJsonSimCommand);
     return 0;
   }
+  if (topic == "synth" && sub == "chunk") {
+    return describe_as("synth chunk");
+  }
   if (topic == "synth") {
     print_json_line(kJsonSynthCommand);
     return 0;
@@ -1907,6 +1915,20 @@ int help_command(const Options& opts) {
                "  ./build/sim/drv.bin --list-tests               # list tests from the built binary\n"
                "  lhd sim foo.prp --run-only --workdir build/    # rebuild/run a prior --setup-only\n");
     return print_options_section({"sim."});
+  }
+  if (topic == "synth" && sub == "chunk") {
+    std::print("lhd synth chunk — pre-CTS placement by physical home\n"
+               "  init      create a floorplan and a source-backed workspace (--budget 1GiB, --workdir DIR)\n"
+               "  update    re-export from saved sources, retain current work, optionally resize with --budget\n"
+               "  plan      export a floorplan with the usual synthesis inputs and --workdir\n"
+               "  list      list physical IDs, stage status, estimates and budgets\n"
+               "  show      inspect a home and its boundary contacts\n"
+               "  macro     place outstanding or selected chunks and save their macro frames\n"
+               "  final     place outstanding or selected chunks with their accepted macros fixed\n"
+               "  move-io   move a contact and invalidate its incident homes\n"
+               "  gui       open the placement controls on an exported plan\n"
+               "Use lhd synth chunk SUBCOMMAND --help for its arguments.\n");
+    return 0;
   }
   if (topic == "synth") {
     std::print("{}",

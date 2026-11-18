@@ -67,6 +67,241 @@ def run(name,extra=(),success=True,unset=()):
  assert (completed.returncode==0)==success,(name,value,completed.stderr)
  if not success:assert value['error']['class']=='usage',value
  return value
+# Exercise the accepted-plan worker handoff with actual SRAMs. The small budget
+# deliberately forces multiple homes below the worker baseline; strict admission
+# is tested separately in lhd_placement_chunks_smoke.
+def check_chunk_stages():
+    import urllib.request
+    exe = str(Path('lhd/lhd').resolve())
+    work = root / 'chunk_stages'
+    tech = f'synth.lef={data}/sky130hd.tlef,{data}/sky130hd.lef,{lef}'
+    options = ['--top', 'top',
+               '--set', f'synth.liberty={library}', '--set', tech, '--set', 'synth.flat_sweep=false',
+               '--set', 'compile.specialize_modules=true', '--set', 'synth.timing=false',
+               '--set', 'synth.place.timing_driven=false', '--set', 'synth.place.utilization=0.1',
+               '--set', 'synth.place.density=0.5', '--set', 'synth.place.halo=0.5',
+               '--set', 'synth.place.iterations=10',
+               '--set', 'synth.place.chunk.require_fit=false', '-q']
+    subprocess.run([exe, 'synth', 'chunk', 'plan', str(source), '--workdir', str(work),
+                    '--set', 'lhd.ram_budget_mb=0.08', '--set', 'synth.place.snapshots=true', *options], check=True, timeout=25)
+    directory = work / 'synth/place'
+    frame = (directory / 'chunk-plan.def').read_text()
+    assert len(re.findall(r'^- \S+ test_sram ', frame, re.M)) == 4
+    assert re.search(r'^NETS [1-9]\d* ;', frame, re.M) and '( PIN clk )' in frame
+
+    def cmd(*args, ok=True):
+        flags = ['--json'] if args[0] == 'list' else []
+        proc = subprocess.run([exe, 'synth', 'chunk', *args, *flags], cwd=directory, capture_output=True, text=True, timeout=25)
+        assert (proc.returncode == 0) == ok, (args, proc.stdout, proc.stderr)
+        return json.loads(proc.stdout) if ok else proc.stderr
+
+    rows = cmd('list')
+    ids = [r['id'] for r in rows]
+    assert len(ids) >= 3, rows
+    assert 'requires current macro' in cmd('final', ids[0], ok=False)
+    assert 'unknown chunk' in cmd('macro', ids[0], 'absent', ok=False)
+    assert len(cmd('list', '--status', 'pending')) == len(ids)
+    info = {i: cmd('show', i) for i in ids}
+    initial = cmd('macro', ids[0], '--neighbors')
+    assert {r['id'] for r in initial} == {ids[0], *info[ids[0]]['neighbors']}
+    for i in ids:
+        if not any(r['id'] == i for r in initial):
+            cmd('macro', i)
+    final = cmd('final', *ids)
+    macros = 0
+    for row in final:
+        before = json.loads(Path(row['macro']['positions']).read_text())[0]
+        after = {n: [x, y] for n, x, y in json.loads(Path(row['final']['positions']).read_text())[0]['nodes']}
+        assert set(after) == {n for n, _, _ in before['nodes']}
+        for idx, _, _ in before['macro_sizes_dbu']:
+            name, *xy = before['nodes'][idx]
+            assert after[name] == xy, (name, xy, after[name])
+            macros += 1
+    assert macros == 4
+
+    # Change one shared contact through the GUI, read the dependency updates
+    # from a separate CLI process, then recompute only the affected homes.
+    owners = {}
+    for i, detail in info.items():
+        for port in detail['ports']:
+            owners.setdefault(port['net_index'], []).append(i)
+    net, homes = next((n, h) for n, h in owners.items() if 1 < len(h) < len(ids))
+    src = homes[0]
+    box = info[src]['box_dbu']
+    prior = next(p['xy_dbu'] for p in info[src]['ports'] if p['net_index'] == net)
+    xy = [box[2] if prior[0] == box[0] else box[0], (box[1] + box[3]) / 2]
+    proc = subprocess.Popen([exe, 'synth', 'chunk', 'gui', '--no-open'], cwd=directory, stdout=subprocess.PIPE, text=True)
+    try:
+        url, token = proc.stdout.readline().strip().split('#')
+        with urllib.request.urlopen(url, timeout=5) as page:
+            assert b'Run macro' in page.read()
+        def action(**request):
+            req = urllib.request.Request(url+'chunk', data=json.dumps(request).encode(),
+                                         headers={'Authorization': 'Bearer '+token, 'Content-Type':'application/json'})
+            with urllib.request.urlopen(req, timeout=15) as reply:
+                return json.load(reply)
+        preview = action(cmd='preview', id=src, stage='final')
+        assert 0 < len(preview['boxes_dbu']) <= preview['owned']
+        assert set(action(cmd='move-io', id=src, net=net, xy=xy)['changed']) == set(homes)
+        assert {r['id'] for r in cmd('list','--stage','final','--status','stale')} == set(homes)
+        assert set(ids) - set(homes) == {r['id'] for r in cmd('list','--status','done')}
+        assert 'requires current macro' in cmd('final', src, ok=False)
+        action(cmd='macro', ids=homes)
+        for row in action(cmd='final', ids=homes):
+            report = json.loads(Path(row['final']['report']).read_text())[0]
+            measured = next(p for p in report['boundary'] if p['net_index'] == net)
+            port = next(p for p in cmd('show', row['id'])['ports'] if p['net_index'] == net)
+            assert measured['contact_dbu'] == port['xy_dbu']
+        assert cmd('move-io', src, str(net), '--xy', *map(str, xy)) == {'changed': []}
+        assert len(cmd('list','--stage','final','--status','done')) == len(ids)
+    finally:
+        proc.terminate()
+        proc.wait(timeout=5)
+
+    # Exercise the source-backed CLI in a separate workspace. A failed source
+    # build must leave the previous selection and completed placement usable.
+    work = root / 'chunk_project'
+    local_source = root / 'eco.v'
+    design = ('module top(input clk,we, input [2:0] a, input [39:0] data, output [39:0] result);\n'
+              + ''.join(f'test_sram ram{i}(.CLK(clk),.WE(we),.A(a),.D(data[{5*i} +: 5]),.Q(result[{5*i} +: 5]));\n'
+                        for i in range(8)) + 'endmodule\n')
+    local_source.write_text(design)
+    subprocess.run([exe, 'synth', 'chunk', 'init', str(local_source), '--budget', '0.08MiB',
+                    '--workdir', str(work), *options, '--', '-DCHUNK_TEST'], check=True, timeout=25)
+    directory = work  # commands discover synth/place from the workspace root
+    cmd('macro')
+    completed = cmd('final')
+    assert len(completed) > 1
+    prior = {r['id']: r['final']['positions'] for r in completed}
+    noop = cmd('update')
+    assert set(noop['unchanged']) == set(prior) and not noop['changed'], noop
+    assert not cmd('macro') and not cmd('final')
+    packets = work / 'synth/place/chunk-packets'
+    assert len(list(packets.glob('*.bin'))) == len(prior)
+    assert {r['id']: r['final']['positions'] for r in cmd('list')} == prior
+    local_source.write_text('module broken(')
+    assert 'floorplan export failed' in cmd('update', ok=False)
+    assert {r['id']: r['final']['positions'] for r in cmd('list', '--stage', 'final', '--status', 'done')} == prior
+    local_source.write_text(design.replace('data[0 +: 5]', '{data[4:2],data[0],data[1]}'))
+    delta = cmd('update')
+    dirty = set(delta['changed'] + delta['added'])
+    assert len(dirty) == 1 and delta['unchanged'] and not delta['membership_changed'], delta
+    carried = {r['id']: r['final']['positions'] for r in cmd('list', '--stage', 'final', '--status', 'done')}
+    assert carried == {k: prior[k] for k in delta['unchanged']}, delta
+    assert {r['id'] for r in cmd('macro')} == dirty
+    assert {r['id'] for r in cmd('final')} == dirty
+    resized = cmd('update', '--budget', '1GiB')
+    assert resized['chunks'] == 1 and resized['removed'], resized
+    assert cmd('list')[0]['budget_bytes'] == 1 << 30
+    assert cmd('update')['changed'] == []
+
+    # Reopen the managed plan and author through the real Unix-domain agent socket.
+    import http.client
+    import socket
+    import time
+    place = work / 'synth/place'
+    proc = subprocess.Popen([exe, 'synth', 'chunk', 'update', '--workdir', str(work), '--gui', '--gui-no-open'],
+                            stdout=subprocess.PIPE, text=True)
+    try:
+        def wait_for(fn):
+            end = time.monotonic() + 15
+            while time.monotonic() < end:
+                assert proc.poll() is None, proc.returncode
+                value = fn()
+                if value:
+                    return value
+                time.sleep(.03)
+            raise AssertionError('floorplan socket operation timed out')
+
+        pointer = place / 'gui_agent.json'
+        sock = wait_for(lambda: pointer.exists() and json.loads(pointer.read_text())['socket'])
+
+        def request(route, body=None):
+            with socket.socket(socket.AF_UNIX) as channel:
+                channel.settimeout(5)
+                channel.connect(sock)
+                conn = http.client.HTTPConnection('localhost')
+                conn.sock = channel
+                conn.request('POST' if body else 'GET', route, body=json.dumps(body) if body else None,
+                             headers={'Content-Type': 'application/json'})
+                return json.load(conn.getresponse())
+
+        def agent(**body):
+            response = request('/agent', body)
+            assert response['ok'], response
+            return response
+
+        def edit(field, op, apply=True, accepted=True):
+            before = request('/state')
+            seq = agent(cmd='chunk_edit', field=field, op=op, apply=apply)['sequence']
+            def receipt():
+                r = agent(cmd='command_status', sequence=seq)
+                return r if r['status'] != 'queued' else None
+            r = wait_for(receipt)
+            assert r['status'] == ('applied' if accepted else 'rejected'), r
+            # Follow the same versioned state and design endpoints as a second,
+            # already-open browser. Only a committed edit publishes a new scene.
+            after = request('/state?since=' + str(before['v']))
+            assert after['epoch'] == before['epoch'] and after['phase'] == 'fp' and after['state'] == 'gate'
+            assert json.loads(pointer.read_text()) == session
+            committed = apply and accepted
+            assert after['intent_revision'] == before['intent_revision'] + int(committed)
+            assert (after['scene'] > before['scene']) if committed else (after['scene'] == before['scene'])
+            if committed:
+                live = agent(cmd='export', what='chunks')['chunks']
+                published = request('/design')['chunk_plan']['chunks']
+                assert [(c['id'], c['box_dbu'], len(c['members'])) for c in published] == [
+                    (c['id'], c['box_dbu'], c['members']) for c in live]
+            if accepted:
+                return agent(cmd='export', what='chunks', view='live' if apply else 'preview')['chunks']
+
+        wait_for(lambda: request('/state')['state'] == 'gate')
+        session = json.loads(pointer.read_text())
+        home, = agent(cmd='export', what='chunks')['chunks']
+        a, b = home['id'], 'second-home'
+        contents = agent(cmd='export', what='chunk_members', chunk=a, offset=1, limit=4)
+        assert contents['total'] == home['members'] and len(contents['members']) == 4
+        selected = [dict(id=m['id'], macro=m['macro']) for m in contents['members'] if m['macro']][:3]
+        assert len(selected) >= 2
+        split = dict(split=a, new_id=b, members=selected)
+        assert len(edit('topology', split, False)) == 2
+        assert len(agent(cmd='export', what='chunks')['chunks']) == 1
+        edit('topology', split)
+        transfer = dict(transfer=b, to=a, members=selected[:1])
+        edit('topology', dict(transfer=b, to=a, members=selected), accepted=False)
+        two = edit('topology', transfer)
+        members = agent(cmd='export', what='chunk_members', chunk=b)['members']
+        assert {m['id'] for m in members} == {m['id'] for m in selected[1:]}
+        assert len(edit('topology', dict(fuse=[a,b]))) == 1
+        two = edit('topology', 'undo')
+        left, right = [r['box_dbu'] for r in two]
+        horizontal = left[1] == right[1] and left[3] == right[3]
+        w, h = left[2]-left[0], left[3]-left[1]
+        desired = w/h * (1.025 if horizontal else .975)
+        reshape = dict(reshape=two[0]['id'], aspect_ratio=desired)
+        edit('geometry', dict(reshape=a, aspect_ratio=1e12), accepted=False)
+        preview = edit('geometry', reshape, False)
+        assert agent(cmd='export', what='chunks')['chunks'] == two
+        changed = edit('geometry', reshape)
+        assert changed == preview and all(x['box_dbu'] != y['box_dbu'] for x,y in zip(changed,two))
+        box = changed[0]['box_dbu']
+        assert abs((box[2]-box[0])/(box[3]-box[1])-desired) < abs(w/h-desired)
+        request('/cmd', {'cmd':'finish'})
+        wait_for(lambda: json.loads((place/'chunk-project.json').read_text()).get('guidance'))
+    finally:
+        proc.terminate()
+        proc.wait(timeout=5)
+
+    manifest = json.loads((place/'chunk-project.json').read_text())['manifest']
+    plan = next(r for r in json.loads((place/manifest).read_text()) if r['class'].endswith('chunk_plan'))
+    assert [(r['id'],r['box_dbu']) for r in plan['chunks']] == [(r['id'],r['box_dbu']) for r in changed]
+    assert {m['id'] for c in plan['chunks'] if c['id'] == b for m in c['members']} == {m['id'] for m in selected[1:]}
+    assert cmd('update')['changed'] == []
+    cmd('macro')
+    cmd('final')
+    assert {r['id'] for r in cmd('list','--stage','final','--status','done')} == {a,b}
+
+check_chunk_stages()
 first=run('cold',['--emit-dir',f'def:{root}/def','--emit-dir',f'verilog:{root}/net','--set','synth.place.snapshots=true'])
 assert first['qor']['place']['legal'] and first['qor']['place']['macro']['mode']=='h2d',first
 report=root/'W/synth/place/macro_topology.json'

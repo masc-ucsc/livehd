@@ -7,6 +7,110 @@ plans chunks before native full placement. A small design can use one chunk. To 
 single chunk at the floorplan GUI gate, set `synth.place.fp=chunks`. Set it to `false` to
 bypass floorplanning, or `centroid` to use the older centroid experiment.
 
+## Color and macro chunk floorplan
+
+Use the staged worker flow to keep placement work and feedback for a selected set of physical homes.
+Supply the usual synthesis inputs, Liberty and LEFs once. The project records the invocation and its working directory so relative sources and reader options can be replayed.
+
+```sh
+lhd synth chunk init design.v --top top --workdir W --budget 1GiB \
+  --set synth.liberty=cells.lib --set synth.lef=tech.lef,cells.lef
+cd W
+lhd synth chunk list
+lhd synth chunk show "$id"
+lhd synth chunk macro "$id" --neighbors
+lhd synth chunk final "$id" --neighbors
+lhd synth chunk list --stage final --status done
+lhd synth chunk gui
+```
+
+Set `id` to an ID from `list`. Run commands from the workspace or pass `--workdir W` to each.
+After editing HDL, replay the saved recipe and run outstanding placements.
+
+```sh
+lhd synth chunk update
+lhd synth chunk list --stage final --status stale
+lhd synth chunk macro
+lhd synth chunk final
+```
+
+`init` packs whole colors and macros across instance scopes up to the estimated worker budget.
+By default it visits them in hierarchy order. To group objects that share nets, pass
+`--set synth.place.chunk.connectivity=true` to `init`. This favors nets joining two
+objects and uses hierarchy order to break ties. It changes chunk membership and can
+affect both wirelength and timing. Home dimensions account for the placement
+worker's clearance on each side of movable hard macros.
+Use `update --budget 768MiB` to resize an existing plan, or separate workdirs to compare placements side by side. A no-change `update` retains completed work.
+For an edit, the summary reports added and removed IDs, changes in physical membership and changes to placement inputs.
+Existing macro/final results carry forward when membership, packet, worker, admission policy and shared IO still match.
+A source edit that changes a reset tree or shared contacts can affect several chunks even when their membership stays fixed.
+A failed update leaves the last successful floorplan active.
+
+For machine-readable status and artifact paths, use `list --json`.
+Macro and final process outstanding jobs by default. Supplying one or more IDs explicitly reruns those jobs. `--neighbors` adds one hop of
+homes sharing an edge or overlapping the selected boxes. Workers run sequentially and read only their own
+packets. The macro worker runs native mixed-size placement and legalization. Final seeds the cells from
+that solution, fixes all owned hard macros and applies the packet's detailed-placement setting.
+These stages use the isolated DREAMPlace recipe. Whole-design H2D, timing repair, multi-height cell
+legalization, DEF stitching and CTS are outside this worker flow.
+
+`show` reports each planned port's net index and die coordinates. Use
+`lhd synth chunk move-io "$id" "$net" --from-macro` to accept the measured local pin centroid
+projected onto the chunk perimeter, or supply `--xy X Y`. Each incident home projects that point to its
+own perimeter. A change marks completed work on every home sharing that net stale, including the source.
+Re-run macro and final for the affected IDs. Final requires a current successful macro result.
+Macro reruns invalidate the previous final. Results and failure logs are in attempt directories
+under `.chunk-work` beside the manifest. The commands report their paths. State persists across processes
+and the project switches to the new plan after a successful update. The lower-level `plan` command and `--manifest PATH` are available for standalone exports.
+
+`init --gui` pauses at the floorplan editor. Use `lhd synth chunk update --workdir W --gui`
+to reopen the plan with its accepted edits. On finishing the plan, the project publishes the new
+worker packets and opens the chunk placement controls. `lhd synth chunk gui` opens those controls
+directly. Add `--gui-no-open` alongside `--gui` to work over the agent socket without launching a browser.
+
+In **Floorplan chunks**, select a physical chunk. Under **Physical homes**, select one or more
+colors or macros to move to another home or split into a named new home. **Fuse** keeps the
+selected chunk ID and takes all members of the other home. Membership edits must fit the worker budget. Under **Move a physical chunk**,
+enter the desired width / height and use **Preview shape** or **Apply shape**. Reshaping slides
+a complete shared edge on the placement grid and adjusts every chunk along that edge. Locked
+aspects, fixed macro locations, macro clearances and available area can rule out a shape.
+A single chunk filling the outline has no shared edge. A rejected preview reports the reason.
+Preview, Apply and Undo run the planner in the open session. Applying an edit publishes
+a new floorplan scene to connected browsers and agents while the GUI stays at the same
+editing gate. Finish the plan to export the accepted assignment for macro and final placement.
+
+Agents use the same edits through the local socket. From the repository root, inspect the current plan and preview a transfer with the following commands.
+
+```sh
+gui() { python3 tools/lhd_gui.py --workdir W "$@"; }
+gui wait state=gate phase=fp
+gui export what=chunks
+gui export what=chunk_members chunk=A offset=0 limit=32
+gui chunk_edit field=topology 'op={"transfer":"A","to":"B","members":[{"id":"ram0","macro":true}]}'
+gui command_status sequence=N
+gui export what=chunks view=preview
+```
+
+Substitute the returned chunk IDs, member ID and sequence number. After inspecting a preview,
+repeat the edit with `apply=true` and wait for its receipt. Pass
+`expect={"frame":F,"intent":I}` as one shell argument using the returned frame and
+intent revision when multiple clients share the gate. Other operations include
+`{"split":"A","new_id":"C","members":[...]}`, `{"fuse":["A","B"]}`, and, with
+`field=geometry`, `{"reshape":"A","aspect_ratio":1.5}`. Send `op=undo apply=true`
+with the same field to undo its last edit. Finish with `gui cmd 'command={"cmd":"finish"}'`.
+Future source-backed updates replay the accepted editing guidance and reconcile worker results.
+
+The budget is in MiB and applies to worker admission and measured worker peak RSS. The producer still
+materializes the flat physical design. To exercise partition creation below the worker's process baseline,
+set `synth.place.chunk.require_fit=false` explicitly and inspect measured peaks in the stage results.
+
+For whole-design QoR measurement, pass `--set synth.place.snapshots=true` to
+`init` to save `synth/place/chunk-plan.def` with the mapped cells, connected nets
+and physical terminals. This DEF contains the initial plan. Apply each completed
+final worker's positions by instance name before measuring full-design HPWL or
+running placement-based STA. Summing local HPWL includes virtual boundary pins
+and can misstate the length of nets that cross chunk boundaries.
+
 GP timing feedback is approximate critical-path ranking. It uses characterized
 gate delay at total load and a closed-form Elmore wire estimate, updates the
 existing timing graph for changed RC and gate strengths, and exports only pin

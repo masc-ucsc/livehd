@@ -104,6 +104,35 @@ TEST(FpChunks, MoveAndRetileRespectAreaAndLockedAspect) {
   Chunk_edit lock{.locks = {"2"}, .lock = true};
   EXPECT_THROW(edit_chunk_boxes(original, {lock, move}, objects, {0, 0, 100, 100}, {1, 1}), std::invalid_argument);
 }
+TEST(FpChunks, PhysicalAspectSlidesTheEntireSharedEdgeOnGrid) {
+  const auto                base = tiled({
+      { 0,  0,  40, 100},
+      {40,  0, 100,  30},
+      {40, 30, 100, 100}
+  });
+  std::vector<Chunk_object> objects(3);
+  auto                      resize = [&](double ratio, bool lock_neighbor) {
+    auto plan                    = base;
+    plan.chunks[1].aspect_locked = lock_neighbor;
+    edit_chunk_boxes(plan,
+                                          {
+                         {.reshape = "0", .aspect = ratio}
+    },
+                     objects,
+                                          {0, 0, 100, 100},
+                                          {2, 1});
+    return plan;
+  };
+  auto result = resize(.515, false);
+  EXPECT_EQ(result.chunks[0].box, (Chunk_box{0, 0, 52, 100}));
+  EXPECT_EQ(result.chunks[1].box, (Chunk_box{52, 0, 100, 30}));
+  EXPECT_EQ(result.chunks[2].box, (Chunk_box{52, 30, 100, 100}));
+  EXPECT_THROW(resize(.52, true), std::invalid_argument);
+  objects[1].macro       = true;
+  objects[1].width       = 42;
+  objects[1].worker_halo = {4, 0};
+  EXPECT_THROW(resize(.52, false), std::invalid_argument);
+}
 TEST(FpChunks, OverlapRingUsesOnlyPhysicalAreaAndRejectsExcessDemand) {
   auto                      base = tiled({
       { 0,  0,  50,  50},
@@ -442,6 +471,45 @@ TEST(FpChunks, SmallPeripheralWrappersShareAHomeWithoutLosingTheirColor) {
   ASSERT_EQ(plan.chunks.size(), 1);
   EXPECT_EQ(plan.chunks.front().objects.size(), 3);
   EXPECT_EQ(plan.home, (std::vector<int>{0, 0, 0}));
+}
+
+TEST(FpChunks, ConnectedPackingKeepsPairedColorsWithinTheWorkerBudget) {
+  Chunk_model model;
+  model.pack_scopes = true;
+  for (int i = 0; i < 6; ++i) {
+    model.add_summary({.id = "c" + std::to_string(i), .cells = 1, .area = 1, .width = 1, .height = 1});
+  }
+  for (int i = 0; i < 3; ++i) {
+    std::vector<int> pins{i, i + 3};
+    model.net(pins, true);
+  }
+  Chunk_predictor predictor;
+  predictor.rate = {1, 1, 0, 0};
+  const auto plan = [&] { return model.plan({0, 0, 60, 60}, 1, 1, 2, .5, nullptr, "top", predictor); };
+  EXPECT_EQ(plan().crossing_nets, 3);
+  model.connectivity = true;
+  auto packed = plan();
+  ASSERT_EQ(packed.chunks.size(), 3);
+  EXPECT_EQ(packed.crossing_nets, 0);
+  for (const auto& home : packed.chunks) {
+    EXPECT_EQ(home.bytes, 2);
+  }
+}
+
+TEST(FpChunks, WorkerHomeIncludesMovableMacroClearance) {
+  Chunk_model model;
+  model.pack_scopes = true;
+  int ram = model.cell("ram", "", "", true, 20, 5);
+  model.cell("logic", "", "", false, 1, 1);
+  model.objects[ram].worker_halo = {15, 10};
+  Chunk_predictor predictor;
+  predictor.rate = {1, 1, 0, 0};
+  auto plan = model.plan({0, 0, 100, 40}, 1, 1, 1, .5, nullptr, "top", predictor);
+  ASSERT_EQ(plan.chunks.size(), 2);
+  const auto& box = plan.chunks[plan.home[ram]].box;
+  EXPECT_GE(box[2] - box[0], 50);
+  EXPECT_GE(box[3] - box[1], 25);
+  EXPECT_THROW(model.plan({0, 0, 100, 24}, 1, 1, 1, .5, nullptr, "top", predictor), std::runtime_error);
 }
 
 TEST(FpChunks, LogicHasUsableAreaBetweenFixedMacrosAndReplaysItsIslands) {

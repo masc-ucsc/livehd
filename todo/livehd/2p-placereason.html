@@ -28,11 +28,11 @@ about 30 minutes and 51 GB (9 minutes when the abc cache is warm).</p>
   <li><strong>The agent works the plan.</strong> It may trigger <strong>macro_plan for one chunk</strong>, not the whole design. That
   synthesizes only that chunk's regions (incremental: the abc cache, so unchanged regions are not mapped again) and skips costly steps:
   no timing feedback and no resynthesis, unless it reuses a previous run that already had resynthesis incorporated.
-  <em>Today:</em> isolated per-chunk placement exists only from the CLI (<code>chunk.run=feedback</code>, <code>chunk.only=ID</code>,
-  <code>place-chunks --chunk</code>); the agent socket has no per-chunk macro_plan command.</li>
+  <em>Today:</em> <code>lhd synth chunk init --budget 1GiB</code> saves the source recipe and runs fp_plan. <code>update</code> replays synthesis and tracks changed packets, membership and shared IO. After accepting fp_plan, <code>lhd synth chunk macro</code> and <code>final</code> run selected exported homes from the CLI or chunk GUI.
+  The live FP agent socket still lacks an in-gate worker for previews.</li>
   <li><strong>Chunks and most macros decided.</strong> Macros that float between chunks are left for the final stage.
   <em>Today:</em> not seen as an option.</li>
-  <li><strong>Chunk IOs decided</strong> (one fixed contact per crossing net). <em>Today:</em> done at fp_plan.</li>
+  <li><strong>Chunk IOs decided</strong> (one fixed contact per crossing net). <em>Today:</em> fp_plan supplies initial contacts. The chunk GUI and <code>move-io</code> can accept a macro measurement and invalidate incident homes.</li>
   <li><strong>Final placement per chunk.</strong> Cells do not leave their chunk. <em>Today:</em> matches (no cross-chunk migration).
   <strong>Wanted:</strong> a <code>porous</code> flag that lets cells cross chunk edges, with the chunk IOs moving and adjusting as cells move.</li>
 </ol>

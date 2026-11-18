@@ -226,6 +226,8 @@ struct Options {
   bool                              explicit_chunk_gate = false;  // Even on a trivial one-chunk floorplan.
   std::shared_ptr<const Chunk_predictor> chunk_predictor;
   bool chunk_require_fit=false;
+  bool chunk_pack_scopes = false;
+  bool                              chunk_connectivity = false;
   std::string                       chunk_manifest, chunk_only;  // nonempty manifest: export the accepted home jobs before whole-chip placement
   bool                              chunk_seed_detail = true;
   // synth.place.chunk.seed_cache: off, exact or translate (see Chunk_seed_store); the directory is set by the driver.

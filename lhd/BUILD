@@ -345,6 +345,8 @@ config_setting(
     ],
     copts = COPTS,
     data = [
+        "chunk_flow.py",
+        "chunk_gui.html",
         "@dreamplace//thirdparty/flute:flute",
         "//ware:cgen_memory_rtl",
         ":sim_runtime_hdrs",
@@ -374,6 +376,7 @@ config_setting(
     deps = [
         ":lhd_lib",
         "//pass/place:gui",
+        "@rules_cc//cc/runfiles",
         "//inou/prp:pyrope_style",
         "//lsp",
         "//pass/cost:host_mem",
