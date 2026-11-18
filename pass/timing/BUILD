@@ -89,6 +89,7 @@ cc_test(
         ":bind_graph",
         ":fast_timing",
         "//graph",
+        "//pass/partition:flatten",
         "@googletest//:gtest_main",
         "@hhds//hhds:graph",
     ],
@@ -126,7 +127,8 @@ cc_binary(
     deps = [":fast_timing"],
 )
 
-# lhd synth's timing.json from the fast engine (the Physical_ranker placement uses), synth.timing.engine=fast.
+# lhd synth's timing.json from the fast engine, synth.timing.engine=fast: the mapped hierarchy bound in place
+# (bind_hier, no flattened copy) and evaluated once; a placed design goes through the Physical_ranker (pin labels).
 cc_library(
     name = "timing_report",
     srcs = ["report.cpp"],
@@ -139,6 +141,7 @@ cc_library(
         "//core",
         "//graph",
         "//inou/lefdef:inou_lefdef",
+        "@abseil-cpp//absl/container:flat_hash_map",
         "//pass/partition:flatten",
         "@hhds//hhds:graph",
         "@rapidjson",

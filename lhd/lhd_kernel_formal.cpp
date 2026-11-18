@@ -3267,8 +3267,8 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
         }
         return;
       }
-      auto            m  = livehd::semdiff::structural_match(ref_by_name[name], impl_by_name[name], so);
-      const long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
+      auto      m  = livehd::semdiff::structural_match(ref_by_name[name], impl_by_name[name], so);
+      long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
       if (want_pairing) {
         state_unpaired_ref  = m.a_state_unpaired;
         state_unpaired_impl = m.b_state_unpaired;
@@ -3333,19 +3333,40 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
         return same(a->get_io()->get_input_pin_decls(), b->get_io()->get_input_pin_decls())
                && same(a->get_io()->get_output_pin_decls(), b->get_io()->get_output_pin_decls());
       }();
-      if (o.semdiff != "none" && kids_proven && !o.design_assumes && same_interface && livehd::semdiff::is_structural_identity(m)) {
+      const bool can_skip           = o.semdiff != "none" && kids_proven && !o.design_assumes && same_interface;
+      const bool signature_identity = livehd::semdiff::is_structural_identity(m);
+      // The rich matcher leaves feedback compare points inconclusive. Its
+      // result predicate alone is therefore weaker than structural_identical,
+      // which also checks an exact node/edge bijection for cut_unknown. Use
+      // that same proof gate before paying for a solver; keep the hierarchy,
+      // assumption and interface guards above in force for either proof.
+      const bool exact_identity     = [&] {
+        if (!can_skip || signature_identity || m.cut_unknown == 0 || m.cut_violated != 0) {
+          return false;
+        }
+        auto exact_options           = so;
+        // Repeated state names can leave the traversal without an anchor too.
+        // Stable node ids propose candidates only: the exact verifier still
+        // checks the complete node/edge bijection, including every state input.
+        exact_options.exact_fallback = true;
+        return livehd::semdiff::structural_identical(ref_by_name[name], impl_by_name[name], exact_options);
+      }();
+      if (can_skip && (signature_identity || exact_identity)) {
+        ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
         livehd::lec::Query_result sr;
-        sr.verdict         = Verdict::Proven;
-        sr.engine          = "semdiff";
-        sr.elapsed_ms      = ms;
-        sr.detail          = std::format("structurally identical (structural: {} matched node(s), no solver call)", m.a_matched);
-        proven[def_ix]     = 1;
+        sr.verdict     = Verdict::Proven;
+        sr.engine      = "semdiff";
+        sr.elapsed_ms  = ms;
+        sr.detail      = exact_identity
+                             ? "structurally identical (exact traversal, no solver call)"
+                             : std::format("structurally identical (structural: {} matched node(s), no solver call)", m.a_matched);
+        proven[def_ix] = 1;
         by_semdiff[def_ix] = 1;
         ++semdiff_count;
         {
           std::lock_guard report_lock(report_mutex);
           emit_lec_block_progress(name, sr, o, ms);
-          std::print("lec[hier]: '{}' MATCHED (semdiff structural, no solver)\n", name);
+          std::print("lec[hier]: '{}' MATCHED (semdiff {}, no solver)\n", name, exact_identity ? "exact traversal" : "structural");
         }
         if (vcache != nullptr && !ckey.empty()) {
           vcache->insert(ckey, {sr.engine, sr.detail, ms, sr.bounded});  // a structural match is a definitive Proven

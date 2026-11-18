@@ -1,13 +1,16 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "bind_graph.hpp"
 
+#include <format>
 #include <string>
 
 #include "cell.hpp"
 #include "engine.hpp"
 #include "gtest/gtest.h"
+#include "hhds/attrs/name.hpp"
 #include "hhds/graph.hpp"
 #include "node_util.hpp"
+#include "pass/partition/flatten.hpp"
 #include "test_library.hpp"
 
 namespace fast = livehd::timing::fast;
@@ -126,4 +129,133 @@ TEST(BindGraph, WiringIsResolvedToTheDriverPinsAndPortBits) {
   EXPECT_EQ(engine.report().endpoints, 2u);
   EXPECT_NEAR(engine.arrival(output("y0"), 0, 0), 10 + 2 * 5, 1e-3);  // a rising output of an inverter driving 5 fF, input slew 0
   EXPECT_NEAR(engine.arrival(output("y0"), 0, 1), 15 + 2 * 5, 1e-3);
+}
+
+// The hierarchy is bound in place: the same cells, names and drivers as binding a flattened copy, with the connections
+// resolved across the instance boundaries, and a declared port acting as a cast.
+TEST(BindGraph, HierarchyIsBoundInPlaceLikeAFlattenedCopy) {
+  Library_fixture    cells;
+  hhds::GraphLibrary library;
+  auto               inv = library.create_io("INV");
+  inv->add_input("A", 1);
+  inv->add_output("Y", 2);
+  const auto cell = [&](hhds::Graph& g, const char* name) {
+    auto node = gu::create_typed_node(g, Ntype_op::Sub);
+    node.set_subnode(inv);
+    node.attr(hhds::attrs::name).set(name);
+    return node;
+  };
+  const auto instance = [&](hhds::Graph& g, const std::shared_ptr<hhds::GraphIO>& io, const char* name) {
+    auto node = gu::create_typed_node(g, Ntype_op::Sub);
+    node.set_subnode(io);
+    node.attr(hhds::attrs::name).set(name);
+    return node;
+  };
+
+  // stage: y = !a[1]
+  auto stage = library.create_io("stage");
+  stage->add_input("a", 1);
+  stage->set_bits("a", 2);
+  stage->add_output("y", 2);
+  auto sg = stage->create_graph();
+  {
+    const auto u = cell(*sg, "u");
+    gu::create_get_mask(*sg, sg->get_input_pin("a"), 1).create_driver_pin(0).connect_sink(u.create_sink_pin("A"));
+    u.create_driver_pin("Y").connect_sink(sg->get_output_pin("y"));
+  }
+  // narrow: its port n is one unsigned bit, so bit 1 of n reads 0 whatever drives it; signed (snarrow), bit 1 repeats
+  // bit 0.
+  const auto narrow_module = [&](const char* module, bool unsign) {
+    auto io = library.create_io(module);
+    io->add_input("n", 1);
+    io->set_bits("n", 1);
+    io->set_unsign("n", unsign);
+    io->add_output("z", 2);
+    auto g = io->create_graph();
+    const auto w = cell(*g, "w");
+    gu::create_get_mask(*g, g->get_input_pin("n"), 1).create_driver_pin(0).connect_sink(w.create_sink_pin("A"));
+    w.create_driver_pin("Y").connect_sink(g->get_output_pin("z"));
+    return io;
+  };
+  auto narrow = narrow_module("narrow", true), snarrow = narrow_module("snarrow", false);
+  // top: two stages fed by d, an inverter after the first, the narrow module fed by d too.
+  auto top = library.create_io("top");
+  top->add_input("d", 1);
+  top->set_bits("d", 2);
+  top->add_output("o0", 2);
+  top->add_output("o1", 3);
+  top->add_output("o2", 4);
+  top->add_output("o3", 5);
+  auto tg = top->create_graph();
+  const auto s0 = instance(*tg, stage, "s0"), s1 = instance(*tg, stage, "s1"), nw = instance(*tg, narrow, "nw"),
+             sn = instance(*tg, snarrow, "sn");
+  for (const auto& s : {s0, s1}) {
+    tg->get_input_pin("d").connect_sink(s.create_sink_pin(1));
+  }
+  tg->get_input_pin("d").connect_sink(nw.create_sink_pin(1));
+  tg->get_input_pin("d").connect_sink(sn.create_sink_pin(1));
+  const auto t = cell(*tg, "t");
+  s0.create_driver_pin(2).connect_sink(t.create_sink_pin("A"));
+  t.create_driver_pin("Y").connect_sink(tg->get_output_pin("o0"));
+  s1.create_driver_pin(2).connect_sink(tg->get_output_pin("o1"));
+  nw.create_driver_pin(2).connect_sink(tg->get_output_pin("o2"));
+  sn.create_driver_pin(2).connect_sink(tg->get_output_pin("o3"));
+
+  const auto  hier = fast::bind_hier(*tg, cells.types);
+  const auto& net  = *hier.netlist;
+  EXPECT_TRUE(hier.hierarchical());
+  EXPECT_EQ(hier.mapped_cells, 5u);
+  EXPECT_EQ(hier.constant_sinks, 1u);  // w.A: bit 1 of a one-bit port
+  const auto cell_named = [](const fast::Bound_graph& b, std::string_view name) {
+    for (uint32_t c = 0; c < b.netlist->cells(); ++c) {
+      if (!b.cell_node[c].is_invalid() && b.name(c) == name) {
+        return c;
+      }
+    }
+    return fast::no_index;
+  };
+  const auto driver_name = [](const fast::Bound_graph& b, uint32_t cell, const char* pin) -> std::string {
+    const auto& n      = *b.netlist;
+    const auto  net_id = n.net_of(n.pin(cell, pin));
+    if (net_id == fast::no_index) {
+      return "-";
+    }
+    const auto driver = n.driver_of(net_id);
+    const auto owner  = n.cell_of(driver);
+    if (b.cell_node[owner].is_invalid()) {
+      for (const auto& port : n.ports()) {
+        if (port.cell == owner) {
+          return port.name;
+        }
+      }
+    }
+    return std::format("{}:{}", b.name(owner), n.pin_type(driver).name);
+  };
+  for (const char* name : {"s0.u", "s1.u", "t", "nw.w", "sn.w"}) {
+    EXPECT_NE(cell_named(hier, name), fast::no_index) << name;
+  }
+  EXPECT_EQ(driver_name(hier, cell_named(hier, "s0.u"), "A"), "d[1]");
+  EXPECT_EQ(driver_name(hier, cell_named(hier, "s1.u"), "A"), "d[1]");
+  EXPECT_EQ(driver_name(hier, cell_named(hier, "t"), "A"), "s0.u:Y");  // down into s0
+  EXPECT_EQ(driver_name(hier, cell_named(hier, "nw.w"), "A"), "-");     // unsigned: a zero
+  EXPECT_EQ(driver_name(hier, cell_named(hier, "sn.w"), "A"), "d[0]");  // signed: the sign bit
+  for (const auto& port : net.ports()) {
+    if (port.name == "o1") {
+      const auto driver = net.driver_of(net.net_of(net.pin(port.cell, 0u)));
+      EXPECT_EQ(hier.name(net.cell_of(driver)), "s1.u");
+    }
+  }
+
+  // A flattened copy binds to the same design.
+  auto flat = livehd::partition::flatten_hierarchy(tg.get(), &library, "top__flat");
+  ASSERT_NE(flat, nullptr);
+  const auto flat_bound = fast::bind_graph(*flat, cells.types);
+  EXPECT_EQ(flat_bound.mapped_cells, hier.mapped_cells);
+  EXPECT_EQ(flat_bound.constant_sinks, hier.constant_sinks);
+  EXPECT_EQ(flat_bound.netlist->ports().size(), net.ports().size());
+  for (const char* name : {"s0.u", "s1.u", "t", "nw.w", "sn.w"}) {
+    const auto c = cell_named(flat_bound, name);
+    ASSERT_NE(c, fast::no_index) << name;
+    EXPECT_EQ(driver_name(flat_bound, c, "A"), driver_name(hier, cell_named(hier, name), "A")) << name;
+  }
 }

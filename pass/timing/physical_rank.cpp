@@ -71,31 +71,13 @@ void field(A& a, Wire_model& v) {
   binary_message::fields(a, v.net_cap_ff, v.sink_delay_ps, v.sink_slew_ps);
 }
 
-std::vector<std::string> Physical_ranker::unsupported() const {
-  std::vector<std::string> out = constraints_.unsupported;
-  if (bound_) {
-    out.insert(out.end(), bound_->unsupported.begin(), bound_->unsupported.end());
-  }
-  return out;
-}
-
-void Physical_ranker::bind(const std::shared_ptr<hhds::Graph>& graph) {
-  const auto start = Steady::now();
-  engine_.reset();
-  mapping_bound_ = false;
-  bound_         = std::make_unique<Bound_graph>(bind_graph(*graph, types_));
-  bound_graph_   = graph.get();
-  bound_epoch_   = graph->body_epoch();
-  names_.reset();
-  port_index_.clear();
-  const auto& netlist = *bound_->netlist;
-  names_ = std::make_unique<Bound_names>(*bound_);
+void complete_constraints(Constraints& constraints, const Netlist& netlist, bool sdc_empty, bool default_constraints,
+                          float default_period_ps, float output_load_ff) {
+  absl::flat_hash_map<std::string, uint32_t> port_pin;
   for (const auto& port : netlist.ports()) {
-    port_index_.emplace(port.name, netlist.pin(port.cell, 0u));
+    port_pin.emplace(port.name, netlist.pin(port.cell, 0u));
   }
-  // The constraint file is run against this netlist: its object queries and its own checks see these names.
-  constraints_ = read_constraints(options_.sdc_text, sdc_units_, netlist, names_.get());
-  if (options_.sdc_text.empty() && options_.default_constraints) {
+  if (sdc_empty && default_constraints) {
     // Ideal clocks on the input ports that reach a clock pin: walk back from every clock pin through one-input
     // cells (buffers, inverters) to the port.
     absl::flat_hash_map<uint32_t, std::string> port_of_cell;
@@ -144,62 +126,90 @@ void Physical_ranker::bind(const std::shared_ptr<hhds::Graph>& graph) {
       Clock clock;
       clock.name      = port;
       clock.port      = port;
-      clock.period_ps = options_.default_period_ps;
-      clock.source_pins.push_back(port_index_.at(port));
-      constraints_.clocks.push_back(std::move(clock));
+      clock.period_ps = default_period_ps;
+      clock.source_pins.push_back(port_pin.at(port));
+      constraints.clocks.push_back(std::move(clock));
     }
-    if (constraints_.clocks.empty()) {
+    if (constraints.clocks.empty()) {
       // A purely combinational design: its outputs are checked against one virtual clock, so the report still
       // carries the worst input-to-output arrival.
       Clock clock;
       clock.name      = "virtual_clock";
-      clock.period_ps = options_.default_period_ps;
-      constraints_.clocks.push_back(std::move(clock));
+      clock.period_ps = default_period_ps;
+      constraints.clocks.push_back(std::move(clock));
     }
   }
-  if (options_.default_constraints && !constraints_.clocks.empty()) {
+  if (default_constraints && !constraints.clocks.empty()) {
     // An output the constraints leave unchecked is checked against the first clock with a zero output delay
     // (an unconstrained input already arrives at 0): a constraint file that only creates the clock still times
     // its input-to-output paths, as the OpenTimer flow did.
     std::set<std::string> constrained;
-    for (const auto& out : constraints_.outputs) {
+    for (const auto& out : constraints.outputs) {
       if (out.check) {
         constrained.insert(out.port);
       }
     }
-    for (auto& out : constraints_.outputs) {
+    for (auto& out : constraints.outputs) {
       if (!out.check && !constrained.contains(out.port)) {  // a set_load alone: keep its load, add the check
         out.check   = true;
         out.clocked = true;
-        out.clock   = constraints_.clocks.front().name;
+        out.clock   = constraints.clocks.front().name;
         constrained.insert(out.port);
       }
     }
     for (const auto& port : netlist.ports()) {
       if (!port.input && !constrained.contains(port.name)) {
-        constraints_.outputs.push_back({port.name, constraints_.clocks.front().name, 0.f, options_.output_load_ff});
+        constraints.outputs.push_back({port.name, constraints.clocks.front().name, 0.f, output_load_ff});
       }
     }
   }
-  if (options_.output_load_ff > 0) {
+  if (output_load_ff > 0) {
     // An output the constraints give no load (or none at all) sees synth.io_load.
     std::set<std::string> seen;
-    for (auto& out : constraints_.outputs) {
+    for (auto& out : constraints.outputs) {
       seen.insert(out.port);
       if (out.load_ff == 0) {
-        out.load_ff = options_.output_load_ff;
+        out.load_ff = output_load_ff;
       }
     }
     for (const auto& port : netlist.ports()) {
       if (!port.input && !seen.contains(port.name)) {
         Output_delay load_only;
         load_only.port    = port.name;
-        load_only.load_ff = options_.output_load_ff;
+        load_only.load_ff = output_load_ff;
         load_only.check   = false;
-        constraints_.outputs.push_back(std::move(load_only));
+        constraints.outputs.push_back(std::move(load_only));
       }
     }
   }
+}
+
+std::vector<std::string> Physical_ranker::unsupported() const {
+  std::vector<std::string> out = constraints_.unsupported;
+  if (bound_) {
+    out.insert(out.end(), bound_->unsupported.begin(), bound_->unsupported.end());
+  }
+  return out;
+}
+
+void Physical_ranker::bind(const std::shared_ptr<hhds::Graph>& graph) {
+  const auto start = Steady::now();
+  engine_.reset();
+  mapping_bound_ = false;
+  bound_         = std::make_unique<Bound_graph>(bind_graph(*graph, types_));
+  bound_graph_   = graph.get();
+  bound_epoch_   = graph->body_epoch();
+  names_.reset();
+  port_index_.clear();
+  const auto& netlist = *bound_->netlist;
+  names_ = std::make_unique<Bound_names>(*bound_);
+  for (const auto& port : netlist.ports()) {
+    port_index_.emplace(port.name, netlist.pin(port.cell, 0u));
+  }
+  // The constraint file is run against this netlist: its object queries and its own checks see these names.
+  constraints_ = read_constraints(options_.sdc_text, sdc_units_, netlist, names_.get());
+  complete_constraints(constraints_, netlist, options_.sdc_text.empty(), options_.default_constraints, options_.default_period_ps,
+                       options_.output_load_ff);
   ++stats_.binds;
   stats_.bind_seconds += since(start);
 }

@@ -35,7 +35,7 @@ Remaining native synthesis work is tracked in [2u-usyn](../../todo/livehd/2u-usy
    ([`pass/satopt`](../satopt/README.md)) already ran in the compile step when
    explicitly enabled (`pass.satopt` defaults off for every command); the mapper maps what
    compile produced.
-   **Flat constant-state sweep** (`synth.flat_sweep`, default true under `lhd synth`, off in `State_options` and the pass-level labels). ABC and native
+   **Flat constant-state sweep** (`synth.flat_sweep`, default false everywhere: the flattened private top loses its region colors, so the whole inlined hierarchy maps as one region and incremental reuse collapses). ABC and native
    USYN can flatten the mapper's private top, refine undriven bits to zero, and
    alternate constant folding with constant-register proofs for up to 16 rounds.
    This lets constants cross instance boundaries while the compiled graphs and

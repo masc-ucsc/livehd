@@ -32,13 +32,34 @@ namespace livehd::timing::fast {
 
 struct Bound_graph {
   std::unique_ptr<Netlist>      netlist;
-  std::vector<hhds::Node_class> cell_node;  // per netlist cell; an invalid node for a port cell
+  // Per netlist cell; an invalid node for a port cell. After bind_hier it is the DEFINITION node the occurrence is an
+  // instance of (its graph is the module the cell belongs to; class attributes such as srcid read from it).
+  std::vector<hhds::Node_class> cell_node;
+  // bind_hier only (empty after bind_graph): per cell, the dotted instance path of the occurrence (`a.b.`, empty at the
+  // top), the full hierarchical name (prefix + node name, the name a flattened copy would give the cell), and the color of
+  // the occurrence (its hier_color, else the definition color).
+  std::vector<uint32_t>         cell_prefix;
+  std::vector<std::string>      prefixes;
+  std::vector<std::string>      cell_name;
+  std::vector<int32_t>          cell_color;
   std::vector<std::string>      unsupported;
   size_t                        mapped_cells = 0, opaque_cells = 0, unmapped_nodes = 0, memory_nodes = 0;
   size_t                        constant_sinks = 0, undriven_sinks = 0, multiple_driver_sinks = 0, unresolved_sinks = 0;
+
+  [[nodiscard]] bool             hierarchical() const { return !cell_name.empty(); }
+  // The name of a cell: its hierarchical name after bind_hier, the graph node name after bind_graph.
+  [[nodiscard]] std::string_view name(uint32_t cell) const {
+    return hierarchical() ? std::string_view{cell_name[cell]} : cell_node[cell].get_name();
+  }
 };
 
 Bound_graph bind_graph(const hhds::Graph& flat, const Cell_types& types);
+
+// The same binding over the instance hierarchy of `top`, without flattening it: the cells are the occurrences of the
+// body-less Liberty instances found by the hierarchical traversal (graph->occurrences()), and a sink is resolved to its
+// driver across instance boundaries by the occurrence connectivity. Names are the dotted instance paths a flattened copy
+// would carry, so constraints and reports see the same design.
+Bound_graph bind_hier(hhds::Graph& top, const Cell_types& types);
 
 // The names of a bound graph for the constraint reader: instances by their name in the graph, nets by the name
 // of the pin that drives them (the name the Verilog writer gives the wire: the pin's own name, or the name of
@@ -54,6 +75,7 @@ public:
 
 private:
   void                                                    gather_nets() const;
+  [[nodiscard]] std::string_view                          cell_name(uint32_t cell) const { return bound_.name(cell); }
   const Bound_graph&                                      bound_;
   absl::flat_hash_map<std::string_view, uint32_t>         cells_;
   mutable bool                                            nets_ready_ = false;

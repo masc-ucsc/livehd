@@ -684,7 +684,7 @@ TEST(LhdOptions, RecommendedSharedDefaults) {
            { "synth.place.legalize.joint_minimize_total",   "true"},
            {"synth.place.legalize.remainder_wire_weight",      "4"},
            {                         "synth.state_sweep",   "true"},
-           {                          "synth.flat_sweep",   "true"},
+           {                          "synth.flat_sweep",  "false"},
            {                     "synth.merge_registers",   "true"},
            {                    "synth.place.io_resynth",      "5"}
   }) {

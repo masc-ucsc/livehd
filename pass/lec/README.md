@@ -835,6 +835,11 @@ ladder(D):                                  # ORDERING ONLY, never a verdict
     yield abc, ind, bmc, int_blast          # minus the one already yielded
 ```
 
+The structural gate includes semdiff's exact node/edge traversal when feedback
+leaves signature compare points unresolved. Combinational arrays (Memory type 2)
+propagate their operands through the signatures; only persistent state is a
+state cut. Both paths retain the hierarchy, assumption and interface guards.
+
 Two properties carry the weight:
 
 - **A miss costs at most the old behaviour.** An undecided cone falls through the

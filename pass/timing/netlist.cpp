@@ -216,8 +216,11 @@ void Netlist::finalize() {
     diagnostics_.push_back(std::format("{} cells (latches, memories, clock gates) are not timed", untimed_cells_));
   }
 
-  // Levelization (Kahn): the edges are net edges (driver -> sink) and the delay arcs inside a cell.
-  const auto timed_arc = [](const Arc& arc) { return arc.kind == Arc_kind::combinational || arc.kind == Arc_kind::launch_rise; };
+  // Levelization (Kahn): the edges are net edges (driver -> sink) and the delay arcs inside a cell. The arcs of a cell
+  // the engine does not time (above) are no edges: the engine never propagates through it (its pins keep their seed),
+  // so a latch-based register file is no combinational loop, and no cut through it can move with the cell order.
+  const auto timed_arc  = [](const Arc& arc) { return arc.kind == Arc_kind::combinational || arc.kind == Arc_kind::launch_rise; };
+  const auto timed_cell = [&](uint32_t cell) { return first_pin_[cell] == first_pin_[cell + 1] || untimed_[first_pin_[cell]] == 0; };
   std::vector<uint32_t> waiting(pin_count, 0);
   for (uint32_t p = 0; p < pin_count; ++p) {
     if (pin_net_[p] != no_index && net_driver_[pin_net_[p]] != p) {
@@ -225,6 +228,9 @@ void Netlist::finalize() {
     }
   }
   for (uint32_t cell = 0; cell < cells(); ++cell) {
+    if (!timed_cell(cell)) {
+      continue;
+    }
     for (const auto& arc : types_->arcs(cell_type_[cell])) {
       if (timed_arc(arc)) {
         ++waiting[first_pin_[cell] + arc.to];
@@ -279,6 +285,9 @@ void Netlist::finalize() {
     }
     const uint32_t cell  = pin_cell_[p];
     const uint32_t local = p - first_pin_[cell];
+    if (!timed_cell(cell)) {
+      continue;
+    }
     for (const auto& arc : types_->arcs(cell_type_[cell])) {
       if (timed_arc(arc) && arc.from == local) {
         const uint32_t out = first_pin_[cell] + arc.to;

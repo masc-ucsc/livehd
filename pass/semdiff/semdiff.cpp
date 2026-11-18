@@ -132,7 +132,7 @@ bool is_cut(const hhds::Node_class& node, bool blackbox_subs = false) {
   // is caught) but its outputs are seeded sources, so a comb loop through a
   // submodule breaks and the compare keys on the Sub's IO wiring, not its
   // (separately-cached) body. An anonymous Sub is not (is_anonymous_sub).
-  return is_state(op) || (op == Ntype_op::Sub && ((blackbox_subs && !is_anonymous_sub(node)) || node.is_loop_break()));
+  return is_persistent_state(node) || (op == Ntype_op::Sub && ((blackbox_subs && !is_anonymous_sub(node)) || node.is_loop_break()));
 }
 
 // Name-normalization mirror of pass/lec/encode.cpp's flop_state_key (kept local
@@ -2033,7 +2033,10 @@ Side analyze(hhds::Graph* g, const Semdiff_options& opts,
   s.matching_io_names = opts.matching_io_names;
   s.blackbox_subs     = opts.blackbox_subs;
 
-  // Seed state cells (cut points). With matching_names they get a cross-side
+  // Seed persistent state cells (cut points). Type-2 Memory is a combinational
+  // array read/update: state pairing does not seed it, so it must propagate
+  // operand signatures like any other combinational cell, not become a frontier.
+  // With matching_names state cells get a cross-side
   // identity by hierarchical name so structure flows through them in BOTH
   // directions; without it they stay frontiers (a renamed flop => a gap).
   // structural_match may pass explicit seeds instead (state_pairing: tier-2
@@ -2045,7 +2048,7 @@ Side analyze(hhds::Graph* g, const Semdiff_options& opts,
     }
   } else if (opts.matching_names) {
     for (auto node : g->body().nodes(hhds::Node_order::forward)) {
-      if (is_state(gu::type_op_of(node))) {
+      if (is_persistent_state(node)) {
         uint64_t seed                  = hcombine(hstr("\x01state"), hstr(state_key(g, node)));
         s.fsig[node.get_class_index()] = seed;
         s.bsig[node.get_class_index()] = seed;
@@ -2062,13 +2065,12 @@ Side analyze(hhds::Graph* g, const Semdiff_options& opts,
     }
     s.order.push_back(node);
     auto ci = node.get_class_index();
-    auto op = gu::type_op_of(node);
 
     if (s.fsig.contains(ci)) {  // pre-seeded state cell
       s.fvals.insert(s.fsig[ci]);
       continue;
     }
-    if (is_state(op)) {
+    if (is_persistent_state(node)) {
       continue;  // unseeded state cell => forward frontier
     }
 
@@ -2112,8 +2114,7 @@ Side analyze(hhds::Graph* g, const Semdiff_options& opts,
       if (s.fsig.contains(ci)) {
         continue;
       }
-      auto op = gu::type_op_of(node);
-      if (is_state(op)) {
+      if (is_persistent_state(node)) {
         continue;  // const already signed; unseeded state is a real frontier
       }
       absl::flat_hash_map<int, std::vector<uint64_t>> by_port;
@@ -2142,13 +2143,12 @@ Side analyze(hhds::Graph* g, const Semdiff_options& opts,
   for (auto it = s.order.rbegin(); it != s.order.rend(); ++it) {
     auto node = *it;
     auto ci   = node.get_class_index();
-    auto op   = gu::type_op_of(node);
 
     if (s.bsig.contains(ci)) {  // pre-seeded state cell
       s.bvals.insert(s.bsig[ci]);
       continue;
     }
-    if (is_state(op)) {
+    if (is_persistent_state(node)) {
       continue;  // unseeded state cell => backward frontier
     }
 
@@ -3873,7 +3873,7 @@ Canonical_digest digest_one(hhds::Graph* g, const Digest_resolver& resolve, absl
   // falls back to the per-run debug nid, which is neither stable across
   // processes nor safely replaceable by a constant.
   for (auto node : g->body().nodes(hhds::Node_order::forward)) {
-    if (is_state(gu::type_op_of(node)) && state_key(g, node).starts_with("f:")) {
+    if (is_persistent_state(node) && state_key(g, node).starts_with("f:")) {
       return d;  // valid=false — not digestable, callers skip the cache
     }
   }
@@ -3913,7 +3913,7 @@ Canonical_digest digest_one(hhds::Graph* g, const Digest_resolver& resolve, absl
   }
   for (auto node : g->body().nodes(hhds::Node_order::forward)) {
     const auto op = gu::type_op_of(node);
-    if (is_state(op)) {
+    if (is_persistent_state(node)) {
       seeds.emplace(node.get_class_index(), hcombine(hstr("\x01state"), hstr(state_key(g, node))));
     } else if (op == Ntype_op::Sub) {
       uint64_t seed = 0;
@@ -3955,7 +3955,7 @@ Canonical_digest digest_one(hhds::Graph* g, const Digest_resolver& resolve, absl
     // value share one digest -- and the lec verdict cache replayed a PROVEN
     // onto the refuted one. An operand without a forward signature leaves the
     // def undigestable (never cached) rather than silently under-keyed.
-    if (is_state(gu::type_op_of(node))) {
+    if (is_persistent_state(node)) {
       uint64_t cs = 0;
       if (!cut_signature(s, node, cs)) {
         return {};

@@ -4,14 +4,18 @@
 #include <algorithm>
 #include <cmath>
 #include <format>
+#include <functional>
+#include <optional>
 #include <limits>
 #include <map>
 #include <stdexcept>
 
+#include "absl/container/flat_hash_map.h"
 #include "attrs.hpp"
 #include "hhds/attrs/srcid.hpp"
 #include "node_util.hpp"
 #include "pass/partition/flatten.hpp"
+#include "pass/liberty/timing_model.hpp"
 #include "physical_rank.hpp"
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
@@ -28,13 +32,134 @@ struct Region_row {
 };
 }  // namespace
 
+namespace {
+// The report of one timed design: everything below reads only the engine, the binding and these.
+struct Timed {
+  const Engine*                   engine = nullptr;
+  const Bound_graph*              bound  = nullptr;
+  std::optional<float>            wns, tns;
+  std::vector<std::string>        unsupported;    // the constraint reader's and the binding's
+  const livehd::timing::Feedback* feedback = nullptr;  // the placed evaluation (physical_pins), else null
+  // The module a cell belongs to (its region), with the color: false for a port cell.
+  std::function<bool(uint32_t, const hhds::GraphIO*&, int&)> region;
+};
+
+std::string write_report(hhds::GraphLibrary& library, std::string_view top, const Report_inputs& inputs,
+                         const std::shared_ptr<const physical::Parasitics>& placed, const Timed& timed);
+std::string report_json_placed(hhds::GraphLibrary& library, std::string_view top, const Report_inputs& inputs,
+                               const std::shared_ptr<const physical::Parasitics>& placed);
+
+// The synthesis wire estimate (synth.wire_rc): every net a star of the predicted length for its fanout, driver -> one
+// junction (the wire resistance and capacitance) -> every sink. Its Elmore solution has a closed form: every sink sees
+// delay R * C_total (the wire plus the sink pins), and the impulse 2*beta - delta^2 equals delta^2, so the slew it adds
+// in quadrature is the delay itself.
+Wire_model star_wire(const Netlist& netlist, const Report_inputs& inputs) {
+  const auto&  types = netlist.types();
+  const size_t C     = types.corners();
+  Wire_model   wire;
+  wire.net_cap_ff.assign(netlist.nets() * C, 0.f);
+  wire.sink_delay_ps.assign(netlist.pins() * C, 0.f);
+  wire.sink_slew_ps.assign(netlist.pins() * C, 0.f);
+  const auto length = [&](unsigned fanout) {
+    const auto& table = inputs.wire_length_um;
+    if (const auto it = table.find(fanout); it != table.end()) {
+      return it->second;
+    }
+    const auto above = table.lower_bound(fanout);
+    if (above == table.end()) {
+      const auto last = std::prev(table.end());
+      return last->second + inputs.wire_slope_um * (fanout - last->first);
+    }
+    if (above == table.begin()) {
+      return above->second * fanout / above->first;
+    }
+    const auto below = std::prev(above);
+    return below->second + (above->second - below->second) * (fanout - below->first) / (above->first - below->first);
+  };
+  constexpr float to_kohm = 1e-3f;  // Ω * fF -> ps (wire.cpp)
+  for (uint32_t net = 0; net < netlist.nets(); ++net) {
+    const auto sinks = netlist.sinks_of(net);
+    if (sinks.empty() || netlist.driver_of(net) == no_index) {
+      continue;
+    }
+    const double um       = std::max(0.0, length(static_cast<unsigned>(sinks.size())));
+    const float  wire_cap = static_cast<float>(um * inputs.wire_cap_ff_um);
+    const float  res      = static_cast<float>(um * inputs.wire_res_ohm_um);
+    for (size_t k = 0; k < C; ++k) {
+      float total = wire_cap;
+      for (const auto sink : sinks) {
+        const auto type  = netlist.type_of(netlist.cell_of(sink));
+        const auto local = netlist.local_of(sink);
+        total += std::max(types.pin_cap(type, local, k, 0), types.pin_cap(type, local, k, 1));
+      }
+      const float delay              = res * to_kohm * total;
+      wire.net_cap_ff[net * C + k] = wire_cap;
+      for (const auto sink : sinks) {
+        wire.sink_delay_ps[static_cast<size_t>(sink) * C + k] = delay;
+        wire.sink_slew_ps[static_cast<size_t>(sink) * C + k]  = delay;
+      }
+    }
+  }
+  return wire;
+}
+}  // namespace
+
 std::string report_json(hhds::GraphLibrary& library, std::string_view top, const Report_inputs& inputs,
                         const std::shared_ptr<const physical::Parasitics>& placed) {
   const auto io = library.find_io(top);
   if (!io || !io->get_graph()) {
     throw std::runtime_error(std::format("timing report: no module {}", top));
   }
-  std::shared_ptr<hhds::Graph> graph = io->get_graph();
+  if (placed) {
+    return report_json_placed(library, top, inputs, placed);
+  }
+  // Synthesis: the mapped hierarchy is timed in place. The hierarchical traversal binds every cell occurrence to the
+  // numeric netlist (no flattened copy), the wire estimate goes straight into the engine's per-net arrays, and the
+  // design is evaluated once.
+  auto                  graph   = io->get_graph();
+  const auto            liberty = liberty::timing::parse(inputs.liberty_text);
+  const auto*           corner  = &liberty;
+  const std::string     name    = inputs.corner_name.empty() ? std::string{"corner0"} : inputs.corner_name;
+  const auto            types   = Cell_types::build(std::span<const liberty::timing::Library* const>(&corner, 1),
+                                                    std::span<const std::string>(&name, 1));
+  const Sdc_units       units{liberty.time_unit_ps, liberty.capacitance_unit_ff};
+  const auto            bound   = bind_hier(*graph, types);
+  const Bound_names     names(bound);
+  auto                  constraints = read_constraints(inputs.sdc_text, units, *bound.netlist, &names);
+  complete_constraints(constraints, *bound.netlist, inputs.sdc_text.empty(), true, Physical_ranker::Options{}.default_period_ps,
+                       inputs.io_load_ff);
+  Timed timed;
+  timed.unsupported = constraints.unsupported;
+  timed.unsupported.insert(timed.unsupported.end(), bound.unsupported.begin(), bound.unsupported.end());
+  Engine engine(*bound.netlist, std::move(constraints));
+  if (!inputs.wire_length_um.empty() && (inputs.wire_cap_ff_um > 0 || inputs.wire_res_ohm_um > 0)) {
+    engine.set_wire(star_wire(*bound.netlist, inputs));
+  }
+  engine.evaluate();
+  const auto& report = engine.report();
+  if (report.endpoints != 0 && std::isfinite(report.wns_ps)) {
+    timed.wns = report.wns_ps;
+    timed.tns = report.tns_ps;
+  }
+  timed.engine = &engine;
+  timed.bound  = &bound;
+  timed.region = [&](uint32_t cell, const hhds::GraphIO*& def, int& color) {
+    const auto& node = bound.cell_node[cell];
+    if (node.is_invalid()) {
+      return false;
+    }
+    def   = node.get_graph()->get_io().get();
+    color = bound.cell_color[cell];
+    return def != nullptr;
+  };
+  return write_report(library, top, inputs, nullptr, timed);
+}
+
+namespace {
+// The placed design: the placer's RC is named by pin labels, which the Physical_ranker maps to the bound netlist.
+std::string report_json_placed(hhds::GraphLibrary& library, std::string_view top, const Report_inputs& inputs,
+                               const std::shared_ptr<const physical::Parasitics>& placed) {
+  std::shared_ptr<hhds::Graph> graph        = library.find_io(top)->get_graph();
   bool                         hierarchical = false;
   for (auto node : graph->body().nodes()) {
     if (livehd::graph_util::is_type_sub(node) && node.get_subnode_graph() != nullptr) {
@@ -68,76 +193,35 @@ std::string report_json(hhds::GraphLibrary& library, std::string_view top, const
   options.output_load_ff      = inputs.io_load_ff;
   Physical_ranker ranker(std::move(options));
   // The placement's timing cuts (pins the placed flow does not time through) apply to its report too.
-  const std::set<std::string> cuts = placed ? placed->timing_cuts : std::set<std::string>{};
-  auto feedback = ranker.evaluate(graph, placed ? placed : std::make_shared<const physical::Parasitics>(), cuts);
-  if (!placed && !inputs.wire_length_um.empty() && (inputs.wire_cap_ff_um > 0 || inputs.wire_res_ohm_um > 0)) {
-    // The synthesis wire estimate: every net of the bound netlist gets its predicted wire as a star, and the design
-    // is timed again with it.
-    const auto& nl     = *ranker.bound()->netlist;
-    const auto& bnd    = *ranker.bound();
-    const auto  length = [&](unsigned fanout) {
-      const auto& table = inputs.wire_length_um;
-      if (const auto it = table.find(fanout); it != table.end()) {
-        return it->second;
-      }
-      const auto above = table.lower_bound(fanout);
-      if (above == table.end()) {
-        const auto last = std::prev(table.end());
-        return last->second + inputs.wire_slope_um * (fanout - last->first);
-      }
-      if (above == table.begin()) {
-        return above->second * fanout / above->first;
-      }
-      const auto below = std::prev(above);
-      return below->second + (above->second - below->second) * (fanout - below->first) / (above->first - below->first);
-    };
-    const auto pin_label = [&](uint32_t pin) -> std::string {
-      const auto cell = nl.cell_of(pin);
-      if (bnd.cell_node[cell].is_invalid()) {
-        for (const auto& port : nl.ports()) {
-          if (port.cell == cell) {
-            return port.name;
-          }
-        }
-        return {};
-      }
-      return std::format("{}:{}", bnd.cell_node[cell].get_name(), nl.pin_type(pin).name);
-    };
-    auto wire = std::make_shared<physical::Parasitics>();
-    for (uint32_t net = 0; net < nl.nets(); ++net) {
-      const auto sinks = nl.sinks_of(net);
-      const auto drv   = nl.driver_of(net);
-      if (sinks.empty() || drv == no_index) {
-        continue;
-      }
-      const auto driver = pin_label(drv);
-      if (driver.empty()) {
-        continue;
-      }
-      const double     um = std::max(0.0, length(static_cast<unsigned>(sinks.size())));
-      physical::Rc_net rc_net;
-      rc_net.driver         = livehd::Pin_label(driver);
-      rc_net.wire_length_um = um;
-      rc_net.nodes.push_back({livehd::Pin_label(driver), 0});
-      rc_net.nodes.push_back({livehd::Pin_label(), um * inputs.wire_cap_ff_um});  // the junction
-      rc_net.edges.push_back({0, 1, um * inputs.wire_res_ohm_um});
-      for (const auto sink : sinks) {
-        const auto label = pin_label(sink);
-        if (label.empty()) {
-          continue;
-        }
-        rc_net.nodes.push_back({livehd::Pin_label(label), 0});
-        rc_net.edges.push_back({1, static_cast<unsigned>(rc_net.nodes.size() - 1), 0});
-      }
-      wire->nets.push_back(std::move(rc_net));
+  const auto feedback = ranker.evaluate(graph, placed, placed->timing_cuts);
+  Timed      timed;
+  timed.engine      = ranker.engine();
+  timed.bound       = ranker.bound();
+  timed.wns         = feedback.wns ? std::optional<float>(static_cast<float>(*feedback.wns)) : std::nullopt;
+  timed.tns         = feedback.tns ? std::optional<float>(static_cast<float>(*feedback.tns)) : std::nullopt;
+  timed.unsupported = ranker.unsupported();
+  timed.feedback    = &feedback;
+  const auto* bound = ranker.bound();
+  timed.region      = [&](uint32_t cell, const hhds::GraphIO*& def, int& color) {
+    const auto& node = bound->cell_node[cell];
+    if (node.is_invalid()) {
+      return false;
     }
-    feedback = ranker.evaluate(graph, wire, {});
-  }
-  const auto&     engine   = *ranker.engine();
-  const auto&     bound    = *ranker.bound();
+    const auto it = origin.find(node);
+    def           = it == origin.end() ? graph->get_io().get() : library.find_io(it->second.def_gid).get();
+    color         = it == origin.end() ? 0 : it->second.color();
+    return def != nullptr;
+  };
+  return write_report(library, top, inputs, placed, timed);
+}
+
+std::string write_report(hhds::GraphLibrary& library, std::string_view top, const Report_inputs& inputs,
+                         const std::shared_ptr<const physical::Parasitics>& placed, const Timed& timed) {
+  (void)library;
+  const auto&     engine   = *timed.engine;
+  const auto&     bound    = *timed.bound;
   const auto&     netlist  = *bound.netlist;
   const auto&     types    = netlist.types();
-
   // Units: the report speaks the Liberty's time unit, as pass.opentimer does (ns or ps; anything else in ps).
   const double unit_div  = inputs.time_unit_ps == 1000 ? 1000.0 : 1.0;
   const auto   unit_name = inputs.time_unit_ps == 1000 ? "ns" : "ps";
@@ -152,7 +236,7 @@ std::string report_json(hhds::GraphLibrary& library, std::string_view top, const
       }
       return "?";
     }
-    return std::format("{}:{}", bound.cell_node[cell].get_name(), netlist.pin_type(pin).name);
+    return std::format("{}:{}", bound.name(cell), netlist.pin_type(pin).name);
   };
   const auto src_of = [&](uint32_t pin) -> std::string {
     const auto cell = netlist.cell_of(pin);
@@ -163,7 +247,8 @@ std::string report_json(hhds::GraphLibrary& library, std::string_view top, const
     if (!a.has() || a.get() == 0) {
       return {};
     }
-    const auto span = graph->source_locator().resolve_spans(static_cast<hhds::SourceId>(a.get())).primary;
+    const auto span
+        = bound.cell_node[cell].get_graph()->source_locator().resolve_spans(static_cast<hhds::SourceId>(a.get())).primary;
     return span.is_null() ? std::string{} : std::format("{}:{}", span.file, span.start_line.value_or(0));
   };
   const auto worst_arrival = [&](uint32_t pin) {
@@ -185,23 +270,25 @@ std::string report_json(hhds::GraphLibrary& library, std::string_view top, const
   }
   std::sort(ends.begin(), ends.end(), [](const auto& a, const auto& b) { return a.first != b.first ? a.first > b.first : a.second < b.second; });
 
-  // Region rows: the module each flat cell was cloned from.
-  std::map<std::string, Region_row> rows;
-  const auto                        region_of = [&](uint32_t cell) -> Region_row* {
-    if (bound.cell_node[cell].is_invalid()) {
+  // Region rows: the module each cell belongs to.
+  std::map<std::string, Region_row>                             rows;
+  absl::flat_hash_map<const hhds::GraphIO*, Region_row*>        row_of_def;
+  const auto                                                    region_of = [&](uint32_t cell) -> Region_row* {
+    const hhds::GraphIO* def   = nullptr;
+    int                  color = 0;
+    if (!timed.region(cell, def, color)) {
       return nullptr;
     }
-    const auto it = origin.find(bound.cell_node[cell]);
-    const auto def = it == origin.end() ? graph->get_io() : library.find_io(it->second.def_gid);
-    if (!def) {
-      return nullptr;
+    if (const auto it = row_of_def.find(def); it != row_of_def.end()) {
+      return it->second;
     }
     auto& row = rows[std::string(def->get_name())];
     if (row.module.empty()) {
       row.module  = def->get_name();
-      row.color   = it == origin.end() ? 0 : it->second.color();
+      row.color   = color;
       row.resynth = def->get_graph() && def->get_graph()->get_input_node().attr(livehd::attrs::resynth).has();
     }
+    row_of_def.emplace(def, &row);
     return &row;
   };
   double area = 0;
@@ -248,19 +335,19 @@ std::string report_json(hhds::GraphLibrary& library, std::string_view top, const
   w.Uint64(bound.unmapped_nodes + bound.memory_nodes);
   w.Key("constraints_complete");
   w.Bool(engine.constraints().unsupported.empty());
-  const auto unsupported = ranker.unsupported();
+  const auto& unsupported = timed.unsupported;
   w.Key("timing_cells_complete");
   w.Bool(unsupported.empty() && engine.report().unsupported.empty());
   const auto delay_of = [&](float ps) { return static_cast<double>(ps) / unit_div; };
   w.Key("max_delay");
   w.Double(ends.empty() ? 0.0 : delay_of(ends.front().first));
-  if (feedback.wns) {
+  if (timed.wns) {
     w.Key("wns");
-    w.Double(delay_of(*feedback.wns));
+    w.Double(delay_of(*timed.wns));
   }
-  if (feedback.tns) {
+  if (timed.tns) {
     w.Key("tns");
-    w.Double(delay_of(*feedback.tns));
+    w.Double(delay_of(*timed.tns));
   }
   if (!ends.empty()) {
     w.Key("critical_pin");
@@ -325,7 +412,8 @@ std::string report_json(hhds::GraphLibrary& library, std::string_view top, const
     w.EndObject();
   }
   w.EndArray();
-  if (placed) {
+  if (placed && timed.feedback) {
+    const auto& feedback = *timed.feedback;
     // The placed design: the RC it was timed with and every physical pin's timing, in time_unit_ps units.
     w.Key("parasitics");
     w.StartObject();
@@ -387,5 +475,6 @@ std::string report_json(hhds::GraphLibrary& library, std::string_view top, const
   w.EndObject();
   return buffer.GetString();
 }
+}  // namespace
 
 }  // namespace livehd::timing::fast

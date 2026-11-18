@@ -374,6 +374,30 @@ TEST(FastEngine, ACombinationalLoopIsCutAndListed) {
   EXPECT_TRUE(said);
 }
 
+// A latch is not timed (its pins keep their seeds), so a feedback through it is no combinational loop: nothing is cut,
+// and no cut can move with the order of the cells.
+TEST(FastEngine, ALatchFeedbackIsNoCombinationalLoop) {
+  auto text = library_text(1.0);
+  text.insert(text.rfind('}'),
+              "cell(LAT) { area : 10; latch(IQ, IQN) { enable : \"G\"; data_in : \"D\"; } "
+              "pin(G) { direction : input; clock : true; capacitance : 1; } pin(D) { direction : input; capacitance : 1; } "
+              "pin(Q) { direction : output; function : \"IQ\"; "
+                  + fast::test::comb("D", "positive_unate", 20, 22, 1.0) + " } }\n");
+  const auto         library = lt::parse(text);
+  const lt::Library* pointers[] = {&library};
+  const std::string  names[]    = {"c0"};
+  const auto         types      = fast::Cell_types::build(pointers, names);
+  ASSERT_NE(types.find("LAT"), fast::no_index);
+  ASSERT_TRUE(types.type(types.find("LAT")).latch);
+  fast::Netlist netlist(types);
+  const auto    lat = netlist.add_cell(types.find("LAT")), inv = netlist.add_cell(types.find("INV"));
+  netlist.connect(netlist.pin(lat, "Q"), netlist.pin(inv, "A"));
+  netlist.connect(netlist.pin(inv, "Y"), netlist.pin(lat, "D"));
+  netlist.finalize();
+  EXPECT_TRUE(netlist.loop_pins().empty());
+  EXPECT_EQ(netlist.order().size(), netlist.pins());
+}
+
 TEST(FastEngine, ElectricalLimitsAreCounted) {
   Bench b;
   const auto clk = b.netlist->add_input_port("clk");

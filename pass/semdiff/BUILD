@@ -66,6 +66,16 @@ sh_test(
     tags = ["no-sandbox"],  # invokes the in-process cvc5 engines
 )
 
+sh_test(
+    name = "lec_exact_smoke",
+    srcs = ["tests/lec_exact_smoke.sh"],
+    data = [
+        "//inou/prp:tests/equiv/loop_lru_bit_update.prp",
+        "//lhd",
+    ],
+    tags = ["no-sandbox"],  # negative controls fork the in-process prover
+)
+
 # Hashed into the formal verdict-cache salt (see //pass/lec:formal_srcs): the
 # canonical digest is computed here, so digest-affecting changes must
 # invalidate cached verdicts too.

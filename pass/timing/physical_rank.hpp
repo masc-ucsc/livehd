@@ -52,6 +52,14 @@ struct Wire_trees {
   }
 };
 
+// The constraints a design is timed with when the constraint file leaves things out (or there is none). Without an SDC
+// (`sdc_empty`) and with `default_constraints`: every input port whose net reaches a Liberty clock pin through cells with
+// one input is an ideal clock of `default_period_ps` (a virtual clock for a combinational design). With
+// `default_constraints`, an output no constraint checks is checked against the first clock with a zero output delay. An
+// output with no load sees `output_load_ff`.
+void complete_constraints(Constraints& constraints, const Netlist& netlist, bool sdc_empty, bool default_constraints,
+                          float default_period_ps, float output_load_ff);
+
 class Physical_ranker {
 public:
   struct Options {

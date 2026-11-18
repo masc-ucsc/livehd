@@ -12,6 +12,7 @@ _EQUIV_HDL = hdl_sources()
 exports_files(["tests/yvr_test.py"], visibility = ["//inou/yosys:__pkg__"])
 
 exports_files([
+    "tests/equiv/loop_lru_bit_update.prp",
     "tests/equiv/ready_signal_chain.v",
     "tests/equiv/ready_signal_chain_1.v",
     "tests/equiv/ready_signal_slices.v",
