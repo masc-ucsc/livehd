@@ -17,6 +17,7 @@
 #include "attr_carry.hpp"
 #include "bus_name.hpp"
 #include "debug_env.hpp"
+#include "flat_state.hpp"
 #include "hash_util.hpp"
 #include "node_util.hpp"
 #include "specialize.hpp"
@@ -276,7 +277,8 @@ public:
   // instances by what each one reads and give every group but the widest its own content-named copy
   // (`<name>__d<hash of the reads>`), so the next sweep sees each group's demand alone. Returns the copies made
   // (0: no definition has instances that read differently), or no value when the budget refused.
-  std::optional<int> split(std::vector<std::shared_ptr<hhds::Graph>>& definitions, int max_versions) {
+  std::optional<int> split(std::vector<std::shared_ptr<hhds::Graph>>& definitions, int max_versions,
+                           absl::flat_hash_map<const hhds::Graph*, const hhds::Graph*>& copied_from) {
     if (!mark_loop_bodies() || !link()) {
       return std::nullopt;
     }
@@ -338,6 +340,7 @@ public:
         ++versions;
         const auto name = std::format("{}__d{:016x}", def.graph->get_name(), livehd::hash_util::fnv1a64(key));
         auto       copy = specialize::clone_definition(definitions, def.graph, name);
+        copied_from.emplace(copy.get(), def.graph.get());
         for (const auto* inst : group.second) {
           auto node = inst->node;
           node.set_subnode(copy->get_io());
@@ -1287,13 +1290,21 @@ std::optional<int> split_by_demand(std::vector<std::shared_ptr<hhds::Graph>>& de
   int total = 0;
   for (int round = 0; round < max_rounds; ++round) {
     // A copy's own children are read per copy only in the next round's demand.
-    Sweeper    sweeper(definitions, top, budget);
-    const auto made = sweeper.split(definitions, max_versions);
+    Sweeper                                                     sweeper(definitions, top, budget);
+    absl::flat_hash_map<const hhds::Graph*, const hhds::Graph*> copied_from;
+    const auto                                                  made = sweeper.split(definitions, max_versions, copied_from);
     if (!made) {
       return std::nullopt;
     }
     if (*made == 0) {
       break;
+    }
+    // pass.color already ran: the copies take the per-path colors of the instances re-pointed at them.
+    for (const auto& graph : definitions) {
+      if (graph && graph->get_name() == top) {
+        rehome_hier_colors(definitions, graph, copied_from);
+        break;
+      }
     }
     total += *made;
   }

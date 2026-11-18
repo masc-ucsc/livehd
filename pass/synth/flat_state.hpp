@@ -7,6 +7,7 @@
 #include <string_view>
 #include <vector>
 
+#include "absl/container/flat_hash_map.h"
 #include "hhds/graph.hpp"
 #include "preparation_budget.hpp"
 
@@ -55,5 +56,14 @@ struct Const_bits_stats {
 // Returns no value when the budget refused.
 std::optional<Const_bits_stats> propagate_constant_bits(std::vector<std::shared_ptr<hhds::Graph>>& definitions,
                                                         std::string_view top, Preparation_budget* budget);
+
+// Carry the per-instance-path synthesis colors (attrs::hier_color, written by pass.color over the virtual flat design)
+// onto definition copies made AFTER coloring. A copy keeps its original's node ids and a re-pointed instance keeps its
+// Sub node id, but every hier_color entry is keyed by the instance path's (definition gid, Sub id) steps and stored in
+// the original definition: without this, every node under a re-pointed instance reads uncolored and the partitioner
+// merges the whole subtree into one color-0 region. `original_of` maps each copy to the definition it was cloned from
+// (a copy of a copy maps to the first original); graphs not in it are their own original.
+void rehome_hier_colors(const std::vector<std::shared_ptr<hhds::Graph>>& definitions, const std::shared_ptr<hhds::Graph>& root,
+                        const absl::flat_hash_map<const hhds::Graph*, const hhds::Graph*>& original_of);
 
 }  // namespace livehd::synth

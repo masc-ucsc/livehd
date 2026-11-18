@@ -253,6 +253,7 @@ std::optional<Flat_state_stats> fold_flat_state(std::vector<std::shared_ptr<hhds
 
   // ---- one definition per signature: `top` in place, a fresh copy for any other signature with facts ----
   std::vector<std::shared_ptr<hhds::Graph>> graph_of(sig_content.size());
+  absl::flat_hash_map<const hhds::Graph*, const hhds::Graph*> copied_from;
   graph_of[static_cast<size_t>(sig[0])] = root;
   absl::flat_hash_set<std::string> used;
   for (int32_t c = 1; c < n; ++c) {
@@ -278,6 +279,7 @@ std::optional<Flat_state_stats> fold_flat_state(std::vector<std::shared_ptr<hhds
     }
     used.insert(name);
     graph_of[s] = specialize::clone_definition(definitions, def->second, name);
+    copied_from.emplace(graph_of[s].get(), def->second.get());
     ++stats.copies;
   }
 
@@ -299,6 +301,8 @@ std::optional<Flat_state_stats> fold_flat_state(std::vector<std::shared_ptr<hhds
       node.set_subnode(graph_of[s]->get_io());
     }
   }
+  // pass.color already ran: give the copies the per-path colors of the instances now pointing at them.
+  rehome_hier_colors(definitions, root, copied_from);
 
   // Fold each signature's own facts into its definition, once.
   absl::flat_hash_set<const hhds::Graph*> done;
@@ -484,6 +488,80 @@ uint64_t new_zero_bits(const std::vector<bool>& zero, std::vector<bool>& applied
 }
 
 }  // namespace
+
+void rehome_hier_colors(const std::vector<std::shared_ptr<hhds::Graph>>& definitions, const std::shared_ptr<hhds::Graph>& root,
+                        const absl::flat_hash_map<const hhds::Graph*, const hhds::Graph*>& original_of) {
+  if (!root || original_of.empty()) {
+    return;
+  }
+  absl::flat_hash_set<const hhds::Graph*> ours;
+  for (const auto& g : definitions) {
+    if (g) {
+      ours.insert(g.get());
+    }
+  }
+  const auto original = [&](const hhds::Graph* g) {
+    const auto it = original_of.find(g);
+    return it == original_of.end() ? g : it->second;
+  };
+  // Each original's entries grouped by path (root + steps), so a reached (copy, path) pair copies its group at once.
+  using Path_key = hhds::Hier_attr_key;
+  absl::flat_hash_map<const hhds::Graph*,
+                      absl::flat_hash_map<Path_key, std::vector<std::pair<hhds::Attr_key, int32_t>>, hhds::Hier_attr_key_hash>>
+             grouped;
+  const auto groups_of = [&](const hhds::Graph* orig) -> const auto& {
+    auto [it, added] = grouped.try_emplace(orig);
+    if (added) {
+      if (const auto* store = orig->find_attr_store(livehd::attrs::hier_color)) {
+        for (const auto& [key, color] : *store) {
+          Path_key path{key.root_gid, key.steps, 0};
+          it->second[path].emplace_back(key.flat_key, color);
+        }
+      }
+    }
+    return it->second;
+  };
+  const auto root_gid = root->get_gid();
+  struct Frame {
+    hhds::Graph*                      graph;
+    std::vector<hhds::Hier_attr_step> new_steps;
+    std::vector<hhds::Hier_attr_step> old_steps;
+  };
+  std::vector<Frame> work;
+  work.push_back({root.get(), {}, {}});
+  uint64_t guard = 0;
+  while (!work.empty()) {
+    auto frame = std::move(work.back());
+    work.pop_back();
+    if (++guard > 50'000'000) {
+      break;  // a malformed (cyclic) hierarchy: leave the rest as is
+    }
+    auto*      g    = frame.graph;
+    const auto orig = original(g);
+    if (orig != g || frame.new_steps != frame.old_steps) {
+      const auto& groups = groups_of(orig);
+      if (const auto it = groups.find(Path_key{root_gid, frame.old_steps, 0}); it != groups.end()) {
+        for (const auto& [flat_key, color] : it->second) {
+          hhds::AttrRef<livehd::attrs::hier_color_t>{g, flat_key, root_gid, frame.new_steps}.set(color);
+        }
+      }
+    }
+    for (auto node : g->body().nodes()) {
+      if (gu::type_op_of(node) != Ntype_op::Sub || node.subnode_loop()) {
+        continue;
+      }
+      auto callee = node.get_subnode_graph();
+      if (!callee || !ours.contains(callee.get())) {
+        continue;
+      }
+      const auto site = node.get_definition_index();
+      Frame      next{callee.get(), frame.new_steps, frame.old_steps};
+      next.new_steps.push_back({site.gid, site.value, std::nullopt});
+      next.old_steps.push_back({orig->get_gid(), site.value, std::nullopt});
+      work.push_back(std::move(next));
+    }
+  }
+}
 
 std::optional<Const_bits_stats> propagate_constant_bits(std::vector<std::shared_ptr<hhds::Graph>>& definitions,
                                                         std::string_view top, Preparation_budget* budget) {

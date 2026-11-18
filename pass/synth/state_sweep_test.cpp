@@ -6,9 +6,11 @@
 #include <string>
 #include <vector>
 
+#include "flat_state.hpp"
 #include "gtest/gtest.h"
 #include "hhds/graph.hpp"
 #include "node_util.hpp"
+#include "specialize.hpp"
 
 namespace livehd::synth {
 namespace {
@@ -313,6 +315,86 @@ TEST(StateSweep, SplitByDemandDropsStateOnlyAnUnreadInstanceCarries) {
   EXPECT_EQ(stats->registers_removed, 1U);
   EXPECT_EQ(nodes_of(*child.graph, Ntype_op::Flop).size(), 1U);
   EXPECT_TRUE(nodes_of(*copy, Ntype_op::Flop).empty());
+}
+
+// pass.color stores a shared definition's colors per instance path (hier_color, keyed by the (definition gid, Sub id)
+// steps from the top). A copy made after coloring under a copied parent changes those steps: rehome_hier_colors must
+// give the copy the colors of the path now pointing at it, or the whole subtree reads uncolored (one color-0 region).
+TEST(StateSweep, RehomedCopiesKeepTheirInstancePathColors) {
+  hhds::GraphLibrary library;
+  auto               leaf = make_module(library, "leaf", 4, 4);
+  auto               reg  = make_reg(*leaf.graph, leaf.graph->get_input_pin("d"), leaf.graph->get_input_pin("clk"), 4, "r");
+  reg.create_driver_pin(0).connect_sink(leaf.graph->get_output_pin("o"));
+
+  const auto instance = [](hhds::Graph& g, const std::shared_ptr<hhds::GraphIO>& callee) {
+    auto inst = gu::create_typed_node(g, Ntype_op::Sub);
+    inst.set_subnode(callee);
+    g.get_input_pin("clk").connect_sink(inst.create_sink_pin(kClk));
+    g.get_input_pin("d").connect_sink(inst.create_sink_pin(kData));
+    gu::set_ubits(inst.create_driver_pin(kOut), 4);
+    return inst;
+  };
+  auto mid      = make_module(library, "mid", 4, 4);
+  auto mid_leaf = instance(*mid.graph, leaf.io);
+  mid_leaf.get_driver_pin(kOut).connect_sink(mid.graph->get_output_pin("o"));
+  auto top = make_module(library, "top", 4, 4);
+  auto a   = instance(*top.graph, mid.io);
+  auto b   = instance(*top.graph, mid.io);
+  a.get_driver_pin(kOut).connect_sink(top.graph->get_output_pin("o"));
+
+  const auto top_gid = top.graph->get_gid();
+  const auto key     = [](const hhds::Node_class& n) {
+    return hhds::make_node_attr_key(static_cast<uint64_t>(n.get_debug_nid() & ~static_cast<hhds::Nid>(3)));
+  };
+  const auto step = [](const hhds::Node_class& sub) {
+    const auto site = sub.get_definition_index();
+    return hhds::Hier_attr_step{site.gid, site.value, std::nullopt};
+  };
+  const auto color = [&](hhds::Graph* g, const hhds::Node_class& n, std::vector<hhds::Hier_attr_step> steps) {
+    hhds::AttrRef<livehd::attrs::hier_color_t> ref{g, key(n), top_gid, std::move(steps)};
+    return ref.has() ? std::optional<int32_t>{ref.get()} : std::nullopt;
+  };
+  hhds::AttrRef<livehd::attrs::hier_color_t>{
+      leaf.graph.get(),
+      key(reg),
+      top_gid,
+      {step(a), step(mid_leaf)}
+  }
+      .set(3);
+  hhds::AttrRef<livehd::attrs::hier_color_t>{
+      leaf.graph.get(),
+      key(reg),
+      top_gid,
+      {step(b), step(mid_leaf)}
+  }
+      .set(4);
+
+  // Instance b gets its own copies of mid and leaf, as fold_flat_state / split_by_demand make them after coloring.
+  std::vector<std::shared_ptr<hhds::Graph>> defs{top.graph, mid.graph, leaf.graph};
+  auto                                      mid_copy  = specialize::clone_definition(defs, mid.graph, "mid__copy");
+  auto                                      leaf_copy = specialize::clone_definition(defs, leaf.graph, "leaf__copy");
+  b.set_subnode(mid_copy->get_io());
+  hhds::Node_class copy_leaf_inst;
+  for (auto n : mid_copy->body().nodes()) {
+    if (gu::type_op_of(n) == Ntype_op::Sub) {
+      n.set_subnode(leaf_copy->get_io());
+      copy_leaf_inst = n;
+    }
+  }
+  ASSERT_FALSE(copy_leaf_inst.is_invalid());
+  const auto copy_reg = nodes_of(*leaf_copy, Ntype_op::Flop);
+  ASSERT_EQ(copy_reg.size(), 1U);
+  const std::vector<hhds::Hier_attr_step> b_path{step(b), step(copy_leaf_inst)};
+  EXPECT_FALSE(color(leaf_copy.get(), copy_reg[0], b_path));  // the copy under the copied parent reads uncolored
+
+  rehome_hier_colors(defs,
+                     top.graph,
+                     {
+                         { mid_copy.get(),  mid.graph.get()},
+                         {leaf_copy.get(), leaf.graph.get()}
+  });
+  EXPECT_EQ(color(leaf_copy.get(), copy_reg[0], b_path), std::optional<int32_t>{4});
+  EXPECT_EQ(color(leaf.graph.get(), reg, {step(a), step(mid_leaf)}), std::optional<int32_t>{3});  // a's path untouched
 }
 
 TEST(StateSweep, AnInstanceOfABodyLessCellObservesItsInputs) {
