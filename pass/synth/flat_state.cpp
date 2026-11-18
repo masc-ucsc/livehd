@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cstring>
 #include <format>
+#include <functional>
 #include <map>
 #include <print>
 #include <string>
@@ -11,6 +12,7 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
+#include "bit_facts.hpp"
 #include "debug_env.hpp"
 #include "hash_util.hpp"
 #include "inline_sub.hpp"
@@ -435,6 +437,248 @@ std::optional<Flat_state_stats> fold_flat_state(std::vector<std::shared_ptr<hhds
         stats.graphs_folded,
         stats.lost_bits,
         stats.outputs_folded);
+  }
+  return stats;
+}
+
+namespace {
+
+// Rewire every reader of `pin` in `g` to read it with `zero` bits cleared: a constant 0 when every bit is cleared,
+// else `pin & ~zero`. Returns false when `pin` has no reader.
+bool read_as_zero(hhds::Graph& g, const hhds::Pin_class& pin, const std::vector<bool>& zero, int bits, bool is_signed) {
+  if (pin.is_invalid() || pin.out_edges().empty()) {
+    return false;
+  }
+  const gu::Edge_vec readers(pin.out_edges().begin(), pin.out_edges().end());
+  hhds::Pin_class    value;
+  if (std::ranges::all_of(zero, [](bool z) { return z; })) {
+    value = gu::fit_to_port(g, gu::create_const(g, *Dlop::create_integer(0)), std::max(1, bits), is_signed);
+  } else {
+    std::vector<bool> keep(zero.size());
+    for (size_t i = 0; i < zero.size(); ++i) {
+      keep[i] = !zero[i];
+    }
+    value = bit_facts::mask_pin(g, pin, keep);
+  }
+  const auto mask_node = value.is_const() ? hhds::Node_class{} : value.get_master_node();
+  for (const auto& e : readers) {
+    if (!mask_node.is_invalid() && e.sink.get_master_node() == mask_node) {
+      continue;
+    }
+    e.sink.del_sink(pin);
+    value.connect_sink(e.sink);
+  }
+  return true;
+}
+
+// Bits of `zero` not yet in `applied` (both `bits` wide); merges them into `applied`.
+uint64_t new_zero_bits(const std::vector<bool>& zero, std::vector<bool>& applied) {
+  uint64_t n = 0;
+  for (size_t i = 0; i < zero.size() && i < applied.size(); ++i) {
+    if (zero[i] && !applied[i]) {
+      applied[i] = true;
+      ++n;
+    }
+  }
+  return n;
+}
+
+}  // namespace
+
+std::optional<Const_bits_stats> propagate_constant_bits(std::vector<std::shared_ptr<hhds::Graph>>& definitions,
+                                                        std::string_view top, Preparation_budget* budget) {
+  Const_bits_stats stats;
+  if (livehd::debug::env<"LHD_NO_CONST_BITS">() != nullptr) {
+    return stats;
+  }
+  const bool                                                   debug = livehd::debug::env<"LHD_FLAT_STATE_DEBUG">() != nullptr;
+  absl::flat_hash_map<const hhds::Graph*, std::shared_ptr<hhds::Graph>> ours;
+  for (const auto& g : definitions) {
+    if (g && g->get_io()) {
+      ours.emplace(g.get(), g);
+    }
+  }
+  const auto callee_of = [&](const hhds::Node_class& node) -> std::shared_ptr<hhds::Graph> {
+    if (gu::type_op_of(node) != Ntype_op::Sub) {
+      return nullptr;
+    }
+    auto callee = node.get_subnode_graph();
+    if (!callee || !ours.contains(callee.get())) {
+      return nullptr;
+    }
+    return ours.at(callee.get());
+  };
+  // Children before parents.
+  std::vector<std::shared_ptr<hhds::Graph>> post;
+  absl::flat_hash_set<const hhds::Graph*>   seen;
+  std::function<void(const std::shared_ptr<hhds::Graph>&)> visit = [&](const std::shared_ptr<hhds::Graph>& g) {
+    if (!seen.insert(g.get()).second) {
+      return;
+    }
+    for (auto node : g->body().nodes()) {
+      if (auto callee = callee_of(node)) {
+        visit(callee);
+      }
+    }
+    post.push_back(g);
+  };
+  for (const auto& g : definitions) {
+    if (g && g->get_io()) {
+      visit(g);
+    }
+  }
+
+  const auto refold = [&](const std::shared_ptr<hhds::Graph>& g, const absl::flat_hash_set<uint64_t>& existed) {
+    specialize::refold_private_body(g, specialize::Refold_cost::synth, "synth.const_bits");
+    specialize::inherit_colors(*g, &existed);
+    ++stats.graphs_folded;
+  };
+  const auto nids_of = [](const hhds::Graph& g) {
+    absl::flat_hash_set<uint64_t> existed;
+    for (auto node : const_cast<hhds::Graph&>(g).body().nodes()) {
+      existed.insert(node.get_debug_nid());
+    }
+    return existed;
+  };
+
+  // (parent, instance nid, output port) -> zeros a parent already reads; (definition, input port) -> zeros applied inside
+  absl::flat_hash_map<std::tuple<const hhds::Graph*, hhds::Nid, hhds::Port_id>, std::vector<bool>> out_applied;
+  absl::flat_hash_map<std::pair<const hhds::Graph*, hhds::Port_id>, std::vector<bool>>             in_applied;
+
+  for (int round = 0; round < 16; ++round) {
+    if (budget != nullptr && !budget->check("const-bits")) {
+      return std::nullopt;
+    }
+    bool any = false;
+    // ---- outputs: a parent reads its instances' zero output bits as 0 (children first, so a pass-through parent's own
+    // output zeros are visible to its parent in the same round)
+    for (const auto& g : post) {
+      std::vector<hhds::Node_class> subs;
+      for (auto node : g->body().nodes()) {
+        if (callee_of(node) && !node.subnode_loop()) {
+          subs.push_back(node);
+        }
+      }
+      if (subs.empty()) {
+        continue;
+      }
+      auto existed = nids_of(*g);
+      bool changed = false;
+      for (const auto& node : subs) {
+        const auto callee = callee_of(node);
+        for (const auto& decl : callee->get_io()->get_output_pin_decls()) {
+          const int bits = static_cast<int>(decl.bits);
+          if (bits <= 0) {
+            continue;
+          }
+          const auto out = node.get_driver_pin(decl.port_id);
+          if (out.is_invalid() || out.out_edges().empty()) {
+            continue;
+          }
+          const auto drv = callee->get_output_pin(decl.name).get_driver_pin();
+          if (drv.is_invalid()) {
+            continue;
+          }
+          const auto zero    = bit_facts::known_zero_bits(drv, bits);
+          auto&      applied = out_applied[{g.get(), node.get_debug_nid(), decl.port_id}];
+          if (applied.empty()) {
+            applied.assign(static_cast<size_t>(bits), false);
+          }
+          const auto fresh = new_zero_bits(zero, applied);
+          if (fresh == 0) {
+            continue;
+          }
+          if (read_as_zero(*g, out, applied, bits, !decl.unsign)) {
+            stats.output_bits += fresh;
+            changed = true;
+          }
+        }
+      }
+      if (changed) {
+        refold(g, existed);
+        any = true;
+      }
+    }
+    // ---- inputs: a definition reads as 0 the input bits EVERY instance drives with 0
+    struct In_facts {
+      bool                                                        unknown = false;  // an instance the analysis cannot see
+      uint64_t                                                    count   = 0;
+      absl::flat_hash_map<hhds::Port_id, std::vector<bool>>       zero;
+    };
+    absl::flat_hash_map<const hhds::Graph*, In_facts> facts;
+    for (const auto& g : post) {
+      for (auto node : g->body().nodes()) {
+        const auto callee = callee_of(node);
+        if (!callee) {
+          continue;
+        }
+        auto& f = facts[callee.get()];
+        if (node.subnode_loop()) {
+          f.unknown = true;
+          continue;
+        }
+        absl::flat_hash_map<hhds::Port_id, hhds::Pin_class> driver_of;
+        for (const auto& sink : node.inp_sorted_pins()) {
+          driver_of.emplace(sink.get_port_id(), sink.get_driver_pin());
+        }
+        ++f.count;
+        for (const auto& decl : callee->get_io()->get_input_pin_decls()) {
+          const int bits = static_cast<int>(decl.bits);
+          if (bits <= 0) {
+            continue;
+          }
+          auto       it   = driver_of.find(decl.port_id);
+          const auto zero = it == driver_of.end() || it->second.is_invalid() ? std::vector<bool>(static_cast<size_t>(bits), false)
+                                                                             : bit_facts::known_zero_bits(it->second, bits);
+          auto [z, added] = f.zero.try_emplace(decl.port_id, zero);
+          if (!added) {
+            for (size_t i = 0; i < z->second.size(); ++i) {
+              z->second[i] = z->second[i] && i < zero.size() && zero[i];
+            }
+          }
+        }
+      }
+    }
+    for (auto it = post.rbegin(); it != post.rend(); ++it) {  // parents first
+      const auto& g  = *it;
+      auto        fi = facts.find(g.get());
+      if (g->get_name() == top || fi == facts.end() || fi->second.unknown || fi->second.count == 0) {
+        continue;
+      }
+      auto existed = nids_of(*g);
+      bool changed = false;
+      for (const auto& decl : g->get_io()->get_input_pin_decls()) {
+        auto z = fi->second.zero.find(decl.port_id);
+        if (z == fi->second.zero.end()) {
+          continue;
+        }
+        const int bits    = static_cast<int>(decl.bits);
+        auto&     applied = in_applied[{g.get(), decl.port_id}];
+        if (applied.empty()) {
+          applied.assign(static_cast<size_t>(bits), false);
+        }
+        const auto fresh = new_zero_bits(z->second, applied);
+        if (fresh == 0) {
+          continue;
+        }
+        if (read_as_zero(*g, g->get_input_pin(decl.name), applied, bits, !decl.unsign)) {
+          stats.input_bits += fresh;
+          changed = true;
+        }
+      }
+      if (changed) {
+        refold(g, existed);
+        any = true;
+      }
+    }
+    if (!any) {
+      break;
+    }
+    ++stats.rounds;
+  }
+  if (debug) {
+    std::print(stderr, "const-bits rounds={} output_bits={} input_bits={} refolds={}\n", stats.rounds, stats.output_bits,
+               stats.input_bits, stats.graphs_folded);
   }
   return stats;
 }

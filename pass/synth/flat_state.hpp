@@ -38,4 +38,22 @@ struct Flat_state_stats {
 std::optional<Flat_state_stats> fold_flat_state(std::vector<std::shared_ptr<hhds::Graph>>& definitions, std::string_view top,
                                                 Preparation_budget* budget);
 
+struct Const_bits_stats {
+  uint64_t rounds        = 0;  // fixpoint rounds that changed something
+  uint64_t output_bits   = 0;  // instance output bits a parent now reads as 0 (summed over instances)
+  uint64_t input_bits    = 0;  // definition input bits now read as 0 inside the body (every instance drives 0)
+  uint64_t graphs_folded = 0;  // refolds of a definition that gained masks
+};
+
+// Constant-0 bits across instance boundaries, without flattening. A definition whose output bits are provably 0 (a
+// spill register whose payload flops the whole-design proof cut: 577 of 579 payload bits read 0) makes every parent
+// read those bits as 0; a definition whose input bits every instance drives with 0 reads them as 0 inside its body.
+// Both are plain masks (`x & keep`) that the refold folds through the logic, so a pass-through chain (FIFO -> route
+// select -> output arbiter -> wormhole arbiter) learns its zeros round by round until nothing changes. Only a whole
+// port's bits that hold at EVERY instance in the private copy are applied to a definition, so no copy is made here.
+//
+// Returns no value when the budget refused.
+std::optional<Const_bits_stats> propagate_constant_bits(std::vector<std::shared_ptr<hhds::Graph>>& definitions,
+                                                        std::string_view top, Preparation_budget* budget);
+
 }  // namespace livehd::synth

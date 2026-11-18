@@ -2164,6 +2164,18 @@ sh_test(
     ],
 )
 
+# Constant-0 bits across instance boundaries (pass/synth propagate_constant_bits): fewer gates than with it off,
+# proven equivalent to the source by the graph-native LEC.
+sh_test(
+    name = "lhd_synth_const_bits_test",
+    size = "small",
+    srcs = ["lhd_synth_const_bits_test.sh"],
+    data = _FLOW_DATA + [
+        "abc_arst_q.lib",
+        "synth_const_bits.v",
+    ],
+)
+
 # synth.state_sweep: unobserved registers and register bits leave the mapper's private
 # copy (across the hierarchy), proven equivalent to the source by the graph-native LEC.
 [

@@ -308,6 +308,19 @@ std::unique_ptr<Prepared_design> prepare_design(std::span<const std::shared_ptr<
     if (budget != nullptr && budget->refused) {
       return {};
     }
+    // What that proof cut often makes PART of a port constant (a spill register's payload bits read 0); pass those
+    // zeros across the instance boundaries the way flattening would, so a pass-through chain stops carrying them.
+    const auto zeros = propagate_constant_bits(result->definitions, state.top, budget);
+    if (!zeros) {
+      return {};
+    }
+    if (zeros->output_bits + zeros->input_bits > 0) {
+      livehd::diag::stat(from_pass, "const-bits", "progress")
+          .msg("{}: {} instance output bit(s) and {} definition input bit(s) read as constant 0 across instance "
+               "boundaries ({} round(s))",
+               from_pass, zeros->output_bits, zeros->input_bits, zeros->rounds)
+          .emit();
+    }
   }
   if (state.state_sweep) {
     // Instances of one definition that read different outputs get their own copies first, so the sweep below
