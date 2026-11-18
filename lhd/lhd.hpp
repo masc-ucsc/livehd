@@ -2040,6 +2040,11 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      Synth_set_option::Kind::file,
      "auto|true|false: bypass internal non-inverting synthesis buffers on the physical copy before full placement; auto "
      "only when synth.place.resize will rebuild the buffering in the same run (else the synthesis buffers stay)"},
+    {"place.buffer_cleanup.max_fanout",
+     "256",
+     Synth_set_option::Kind::integer,
+     "with buffer_cleanup: keep a synthesis buffer tree whole when its root net reaches more final loads than this (very wide "
+     "decode/enable nets that location-based repair does not rebuild); 0 bypasses every tree"},
     {"place.resize.engine",
      "legacy",
      Synth_set_option::Kind::file,

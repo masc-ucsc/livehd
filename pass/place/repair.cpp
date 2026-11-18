@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <functional>
 #include <limits>
 #include <map>
 #include <numeric>
@@ -19,6 +20,7 @@
 #include <stdexcept>
 #include <unordered_map>
 
+#include "absl/container/flat_hash_map.h"
 #include "attrs.hpp"
 #include "growth_budget.hpp"
 #include "handoff_rows.hpp"
@@ -1714,6 +1716,38 @@ Buffer_cleanup remove_synthesis_buffers(hhds::Graph& source, hhds::GraphLibrary&
   }
   Buffer_cleanup result;
   result.graph = flat;
+  // A tree whose root net reaches more final loads than the cap stays whole: location-based repair rebuilds a moderate
+  // fanout, not a several-hundred-load decode or enable net (litepci's 588-load write enable lost its tree and
+  // finished with a 3.8 ns slew).
+  const auto is_buffer_cell = [&](Node n) {
+    const auto* b = buffer(n, cells);
+    return b != nullptr && n.get_sink_pin(b->inputs.front()).get_driver_pins().size() == 1;
+  };
+  absl::flat_hash_map<Pin, size_t> tree_loads;
+  std::function<size_t(Pin)>       loads_of = [&](Pin driver) -> size_t {
+    if (auto it = tree_loads.find(driver); it != tree_loads.end()) {
+      return it->second;
+    }
+    tree_loads[driver] = 0;  // cycle guard
+    size_t total       = 0;
+    for (auto sink : sinks(driver)) {
+      const auto n  = sink.get_master_node();
+      total        += is_buffer_cell(n) && !fixed(n) ? loads_of(output(n, *buffer(n, cells))) : 1;
+    }
+    tree_loads[driver] = total;
+    return total;
+  };
+  const auto root_of = [&](Node n) {
+    Pin driver = input(n, *buffer(n, cells));
+    for (int guard = 0; guard < 64; ++guard) {
+      const auto m = driver.get_master_node();
+      if (driver.is_const() || m.is_input_node() || !is_buffer_cell(m) || fixed(m)) {
+        break;
+      }
+      driver = input(m, *buffer(m, cells));
+    }
+    return driver;
+  };
   // Select before editing: deleting a chain must not turn its later buffers
   // into apparent input boundaries, making the result depend on node order.
   std::vector<Node> remove;
@@ -1739,6 +1773,13 @@ Buffer_cleanup remove_synthesis_buffers(hhds::Graph& source, hhds::GraphLibrary&
         || std::any_of(targets.begin(), targets.end(), [](Pin sink) { return sink.get_master_node().is_output_node(); })) {
       ++result.boundary;
       continue;
+    }
+    if (options.buffer_cleanup_max_fanout > 0) {
+      const auto root = root_of(node);
+      if (!root.is_const() && loads_of(root) > options.buffer_cleanup_max_fanout) {
+        ++result.protected_cells;
+        continue;
+      }
     }
     remove.push_back(node);
   }

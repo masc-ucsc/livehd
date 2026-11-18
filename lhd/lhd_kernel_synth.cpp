@@ -1306,6 +1306,13 @@ livehd::placement::Options placement_options(const Options& opts) {
     out.domino_rail_fanout = static_cast<unsigned>(rails);
   }
   out.control_ports = synth_set(opts, "place.control_ports", "");
+  {
+    const auto cap = integer("place.buffer_cleanup.max_fanout", "256");
+    if (cap < 0) {
+      throw Lhd_error{"usage", "invalid synth.place.buffer_cleanup.max_fanout", "expected 0 (no cap) or a positive load count"};
+    }
+    out.buffer_cleanup_max_fanout = static_cast<unsigned>(cap);
+  }
   out.fp_iterations   = integer("place.fp.iterations", "1500");
   out.fp_minimum      = number("place.fp.minimum", "3000");
   out.fp_min_copies   = integer("place.fp.min_copies", "4");

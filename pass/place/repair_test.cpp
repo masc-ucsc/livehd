@@ -203,6 +203,25 @@ TEST_F(Buffer_repair, SynthesisBufferCleanupPreservesBoundaryBindingsAndSource) 
   hhds::GraphLibrary repeated;
   EXPECT_EQ(remove_synthesis_buffers(*state.graph, repeated, options).removed, 0U);
 }
+TEST_F(Buffer_repair, SynthesisBufferCleanupKeepsTreesWiderThanTheCap) {
+  auto inv = gate("sky130_fd_sc_hd__inv_1", "logic", graph->get_input_pin("a"));
+  auto b1  = gate("sky130_fd_sc_hd__buf_1", "internal", inv);
+  for (int i = 0; i < 3; ++i) {
+    gate("sky130_fd_sc_hd__inv_1", "load" + std::to_string(i), b1);
+  }
+  graph->get_output_pin("y").connect_driver(gate("sky130_fd_sc_hd__buf_1", "output_binding", inv));
+  // The root net (`logic`) reaches 4 final loads: three under `internal`, one through the output binding.
+  options.buffer_cleanup_max_fanout = 3;
+  auto kept                         = remove_synthesis_buffers(*graph, flat, options);
+  EXPECT_EQ(kept.removed, 0U);
+  EXPECT_EQ(kept.protected_cells, 1U);
+  options.buffer_cleanup_max_fanout = 4;
+  hhds::GraphLibrary second;
+  EXPECT_EQ(remove_synthesis_buffers(*graph, second, options).removed, 1U);
+  options.buffer_cleanup_max_fanout = 0;  // no cap
+  hhds::GraphLibrary third;
+  EXPECT_EQ(remove_synthesis_buffers(*graph, third, options).removed, 1U);
+}
 TEST_F(Buffer_repair, SynthesisBufferCleanupPreservesFixedAndControlCones) {
   auto      inv   = gate("sky130_fd_sc_hd__inv_1", "logic", graph->get_input_pin("a"));
   auto      fixed = gate("sky130_fd_sc_hd__buf_1", "fixed", inv);

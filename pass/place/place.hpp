@@ -332,6 +332,8 @@ struct Options {
   unsigned                                        domino_rail_fanout = 0;
   std::map<std::string, std::vector<std::string>> domino_rail_pins;
   std::string                                     control_ports;  // override optional roots; recognized resets stay excluded
+  // Synthesis buffer cleanup keeps a buffer tree whole when its root net reaches more final loads than this (0: no cap).
+  unsigned                                        buffer_cleanup_max_fanout = 256;
   Evaluate                                        fp_evaluate;
   // Optional lightweight path ranking for placement weights. Detailed timing
   // remains available through fp_evaluate for resizing and resynthesis.

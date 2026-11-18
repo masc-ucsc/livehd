@@ -666,6 +666,7 @@ TEST(LhdOptions, RecommendedSharedDefaults) {
            {            "synth.place.domino_rail_fanout",     "32"},
            {                        "synth.place.resize",   "true"},
            {                "synth.place.buffer_cleanup",   "auto"},
+           {     "synth.place.buffer_cleanup.max_fanout",    "256"},
            {                          "synth.place.halo",   "auto"},
            {                 "synth.place.fp.pin_adjust",   "true"},
            {              "synth.place.macro.pin_adjust",   "true"},
