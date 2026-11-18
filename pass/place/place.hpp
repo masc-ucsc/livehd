@@ -287,6 +287,12 @@ struct Options {
   // nets and resume global placement; the best measured round is kept and the regular terminal legalizer
   // legalizes it. What the router could not fit is reported (legroute_plan_selection.json, qor.json), not fatal.
   bool                                  legroute = false;
+  // false: the default turned legroute on (synth.place.legroute not set). The plan is then skipped with one warning
+  // where it cannot run (no route stack: an unregistered technology with fewer than three routing layers) or where
+  // an interactive GUI session drives placement; an explicit request keeps every precondition a hard error.
+  bool                                  legroute_explicit = true;
+  // region clean cuts were turned on only because legroute is on: a skipped plan turns them back off
+  bool                                  legroute_clean_cuts = false;
   Legroute_options                      legroute_options;
   struct Legroute_plan {
     std::string route_model    = "legacy";  // coarse: actual local H/V pressure replaces whole-tree inflation in recovery

@@ -1279,6 +1279,16 @@ utilization, DRC and detour labels from a routed DEF and scores RUDY, RSMT or
 any other map against them. The learned third estimator was removed;
 [2r-route](../../todo/livehd/2r-route.html) records why.
 
+### Legroute plan (`synth.place.legroute`, on by default)
+
+With placement the legroute plan runs by default: after global placement converges, plan rounds route the
+placement on a tile grid, widen the cells of congested nets and resume GP; the best measured round goes to the
+regular terminal legalizer, and leftover overflow is reported (`legroute_plan_selection.json`, `qor.json`), never
+fatal on a fixed die/core. Left unset, the plan steps aside with one `legroute-skipped` warning where it cannot run
+(a technology with no registered profile and fewer than three routing layers) and under an interactive GUI session,
+whose edit mode and native GP continuation use the regular final GP. `synth.place.legroute=true` makes both of
+those errors; `false` turns the plan off.
+
 ## Timing-closure observation controller
 
 `//pass/place:timeclosure` is the independent observation/controller foundation

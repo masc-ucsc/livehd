@@ -719,7 +719,7 @@ TEST(LhdOptions, LegrouteOptionsAreTheMinimalCoreAndOptIn) {
   lhd::Options opts;
   opts.command = "synth";
   const std::vector<std::pair<std::string, std::string>> expected{
-      {                        "synth.place.legroute",  "false"},
+      {                        "synth.place.legroute",   "true"},
       {            "synth.place.legroute.plan.rounds",      "2"},
       {          "synth.place.legroute.area_restarts",      "1"},
       {        "synth.place.legroute.plan.iterations",    "100"},

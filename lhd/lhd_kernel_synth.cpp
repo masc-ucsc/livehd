@@ -620,15 +620,18 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.boundarypins.clean_cuts          = truthy(synth_set(opts, "place.region.cleancuts", "false"));
   // with legroute the region refinement makes clean cuts (no net dipping into a region through one side with 0 or 1
   // cell there) unless set: kept from the regional flow so the placement the plan rounds start from is unchanged
-  if (truthy(synth_set(opts, "place.legroute", "false")) && synth_set(opts, "place.region.cleancuts", "").empty()) {
+  if (truthy(synth_set(opts, "place.legroute", "true")) && synth_set(opts, "place.region.cleancuts", "").empty()) {
     out.boundarypins.clean_cuts = true;
+    out.legroute_clean_cuts     = true;
   }
   // bus order across region edges is the boundary-pin flow with ordered, spaced, fixed virtual pins
   if (truthy(synth_set(opts, "place.region.busorder", "true"))) {
     out.boundarypins.enabled = out.boundarypins.split = out.boundarypins.order = true;
   }
   livehd::placement::validate_boundary_pin_options(out.boundarypins);
-  out.legroute                             = truthy(synth_set(opts, "place.legroute", "false"));
+  out.legroute                             = truthy(synth_set(opts, "place.legroute", "true"));
+  // on by default: placement may skip the plan (with a warning) where it cannot run; an explicit setting keeps it strict
+  out.legroute_explicit                    = !synth_set(opts, "place.legroute", "").empty();
   out.legroute_options.capacity_share      = number("place.legroute.capacity_share", "1");
   out.legroute_options.global_margin       = integer("place.legroute.global_margin", "8");
   out.legroute_options.global_rounds       = static_cast<unsigned>(integer("place.legroute.global_rounds", "16"));
@@ -1683,7 +1686,7 @@ static void synth_command_flow(Options& opts, Result& res) {
   const bool     search                = std::stod(synth_set(opts, "place.utilization", "0.30")) <= 0;
   // Monotonic area/mesh retries continue the same physical optimizer. The
   // bisection search may shrink the core and intentionally keeps independent solves.
-  const auto     placement_session     = !search && truthy(synth_set(opts, "place.legroute", "false"))
+  const auto     placement_session     = !search && truthy(synth_set(opts, "place.legroute", "true"))
                                              ? std::make_shared<livehd::placement::Placement_session>()
                                              : nullptr;
   bool           placement_area_resume = false;

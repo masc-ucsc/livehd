@@ -1337,6 +1337,18 @@ cc_test(
 )
 
 py_test(
+    name = "legroute_default_smoke",
+    srcs = ["tests/legroute_default_smoke.py"],
+    main = "tests/legroute_default_smoke.py",
+    legacy_create_init = 0,
+    size = "small",
+    data = [
+        "//lhd:lhd",
+        "//pass/place/tests/regularity:hint_fixtures",
+    ],
+)
+
+py_test(
     name = "placement_hints_smoke",
     srcs = ["tests/placement_hints_smoke.py"],
     main = "tests/placement_hints_smoke.py",

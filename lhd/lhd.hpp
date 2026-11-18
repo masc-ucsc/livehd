@@ -1511,12 +1511,14 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      "bus order across region edges: fixed virtual IO pins on the region boundaries, each bus ordered by where its "
      "cells pull and spaced (the boundary-pin flow with boundarypins.order; its settle/pitch/iteration options apply)"},
     {"place.legroute",
-     "false",
+     "true",
      Synth_set_option::Kind::boolean,
      "routability step at the end of placement (todo/livehd/2r-route.html): plan rounds route the converged placement "
      "on a tile grid, widen the cells of congested nets and resume global placement; the best measured round goes to "
      "the regular terminal legalizer. Remaining routing overflow is reported (qor.json, legroute_plan_selection.json); "
-     "on a fixed die/core it never stops the run"},
+     "on a fixed die/core it never stops the run. On by default with placement: left unset, the plan is skipped with a "
+     "warning (legroute-skipped) on a technology without a route stack for it or under an interactive GUI session; "
+     "set true to make those preconditions errors"},
     {"place.legroute.plan.rounds",
      "2",
      Synth_set_option::Kind::integer,
