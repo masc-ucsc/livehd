@@ -131,6 +131,13 @@ Special_pins scan_special_pins(const liberty::Cell_library& library, bool protec
 std::set<std::string> protected_buffers(hhds::Graph& graph, const Inventory& cells, const Special_pins& special, bool protect_reset,
                                         const std::string& control_ports) {
   std::set<std::string> protected_names;
+  // Protection is keyed by instance name, but control trees pass through unnamed wiring nodes. Every unnamed node
+  // keyed as "" made one shared entry: once any control tree crossed an unnamed node, every buffer driven by ANY
+  // unnamed node was protected, and repair could never touch it (litepci: a BUFx2 driving a 2 mm, 8-SRAM data net).
+  const auto            key = [](const Node& n) {
+    const auto name = n.get_name();
+    return name.empty() ? std::format("#unnamed:{}", n.get_debug_nid()) : std::string(name);
+  };
   const auto            roots = prects_library("", control_ports);
   for (const auto& port : roots.ports) {
     protected_names.insert("@port:" + port);
@@ -149,7 +156,7 @@ std::set<std::string> protected_buffers(hhds::Graph& graph, const Inventory& cel
     if (!visited.insert(n.get_debug_nid()).second) {
       return;
     }
-    protected_names.emplace(n.get_name());
+    protected_names.emplace(key(n));
     const auto op     = gu::type_op_of(n);
     const bool wiring = !n.get_subnode_io() && op != Ntype_op::Flop && op != Ntype_op::Latch && op != Ntype_op::Memory;
     if (b || wiring) {
@@ -215,8 +222,7 @@ std::set<std::string> protected_buffers(hhds::Graph& graph, const Inventory& cel
     }
     for (auto driver : n.get_sink_pin(cell->inputs.front()).get_driver_pins()) {
       const auto from = driver.get_master_node();
-      const auto key  = from.is_input_node() ? "@port:" + std::string(driver.get_pin_name()) : std::string(from.get_name());
-      branches[key].emplace_back(n.get_name());
+      branches[from.is_input_node() ? "@port:" + std::string(driver.get_pin_name()) : key(from)].emplace_back(key(n));
     }
   }
   std::vector<std::string> pending(protected_names.begin(), protected_names.end());

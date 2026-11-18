@@ -363,6 +363,29 @@ TEST_F(Buffer_repair, SynthesisBufferCleanupProtectsControlsAcrossHierarchy) {
   EXPECT_EQ(protected_copy.removed, 0U);
   EXPECT_EQ(protected_copy.protected_cells, 2U);
 }
+TEST_F(Buffer_repair, UnnamedControlWiringDoesNotProtectUnrelatedBuffers) {
+  // A reset tree that crosses an unnamed wiring node must protect only its own ancestry. Protection used to key
+  // every unnamed node as "", so a data buffer driven by a DIFFERENT unnamed node inherited the reset tree's
+  // protection and repair could never rebuild it (litepci: a BUFx2 driving a 2 mm, 8-SRAM data net).
+  const auto wire = [&](hhds::Pin_class from) {
+    auto n = gu::create_typed_node(*graph, Ntype_op::Or);  // unnamed single-input wiring
+    n.create_sink_pin(0).connect_driver(from);
+    auto out = n.create_driver_pin(0);
+    gu::set_bits(out, 1);
+    return out;
+  };
+  auto flop = gu::create_typed_node(*graph, Ntype_op::Flop);
+  flop.set_name("state");
+  flop.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Flop, "reset_pin")).connect_driver(wire(graph->get_input_pin("a")));
+  flop.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Flop, "din")).connect_driver(graph->get_input_pin("a"));
+  gu::set_bits(flop.create_driver_pin(0), 1);
+  auto data = gate("sky130_fd_sc_hd__buf_1", "data_buffer", wire(graph->get_input_pin("a")));
+  auto inv  = gate("sky130_fd_sc_hd__inv_1", "logic", data);
+  graph->get_output_pin("y").connect_driver(gate("sky130_fd_sc_hd__buf_1", "output_binding", inv));
+  const auto cleaned = remove_synthesis_buffers(*graph, flat, options);
+  EXPECT_EQ(cleaned.protected_cells, 0U);
+  EXPECT_EQ(cleaned.removed, 1U);
+}
 TEST_F(Buffer_repair, FinalLegalizationReusesTimingOnlyForIdenticalPhysicalState) {
   options.density     = .5;
   options.tile_spread = false;  // the spread re-runs on the final pass; this test needs an identical physical state
