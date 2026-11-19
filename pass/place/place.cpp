@@ -13749,11 +13749,33 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       if (multirow_cells) {
         multirow_report = anchor_multirow_cells(tech, frame, anchor_controls(options, terminal_options, core_origins));
       }
+      // A fixed core the optimized netlist fills close to its rows cannot hold every cell with its padding sites
+      // (a 4-site gate then needs 6), while it can without them. The legalizer itself never relaxes its padding
+      // (a refusal is atomic), so retry once without it and say so; a generated core grows instead (below).
+      const auto legalize_fixed_frame = [&] {
+        try {
+          return terminal_legalize(tech, frame, final_gp_timing, terminal_options);
+        } catch (const Terminal_legalize_unfit& e) {
+          if ((options.allow_increase_area && options.generated_core) || terminal_options.padding_sites == 0) {
+            throw;
+          }
+          livehd::diag::warn("pass.place", "terminal-padding-dropped", "routability")
+              .msg("terminal legalization cannot fit the cells with {} padding site(s) per side ({}); legalizing without "
+                   "padding",
+                   terminal_options.padding_sites,
+                   e.what())
+              .hint("the netlist fills the fixed core close to its row capacity; expect harder pin access")
+              .emit();
+          auto relaxed          = terminal_options;
+          relaxed.padding_sites = 0;
+          return terminal_legalize(tech, frame, final_gp_timing, relaxed);
+        }
+      };
       if (options.legroute) {
         // After the plan rounds the regular terminal legalizer legalizes. A generated core that may grow restarts
         // at a lower utilization when the cells do not fit; a fixed core reports the failure.
         try {
-          terminal_report = terminal_legalize(tech, frame, final_gp_timing, terminal_options);
+          terminal_report = legalize_fixed_frame();
         } catch (const Terminal_legalize_unfit& e) {
           if (!options.allow_increase_area || !options.generated_core) {
             throw;
@@ -13763,7 +13785,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
           throw Placement_area_restart(utilization, std::min(options.density, utilization + .05));
         }
       } else {
-        terminal_report = terminal_legalize(tech, frame, final_gp_timing, terminal_options);
+        terminal_report = legalize_fixed_frame();
       }
       if (multirow_report) {
         release_multirow_anchors(frame, *multirow_report);

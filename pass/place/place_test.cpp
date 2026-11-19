@@ -889,6 +889,48 @@ TEST(Placement, TerminalLegalizerIsLastAndPreservesItsExactOutput) {
   }
 }
 
+TEST(Placement, AFixedCoreTooDenseForThePaddingLegalizesWithoutIt) {
+  // A core the cells fill to 90%: with four padding sites per side a 3-site inverter needs 11 sites and the
+  // terminal legalizer refuses; a core that may not grow then legalizes without padding (and warns).
+  hhds::GraphLibrary source, flat;
+  auto               io = source.create_io("dense_rows");
+  io->add_input("a", 0);
+  io->set_bits("a", 1);
+  io->add_output("y", 0);
+  io->set_bits("y", 1);
+  auto graph = io->create_graph();
+  auto inv   = source.create_io("sky130_fd_sc_hd__inv_1");
+  inv->add_input("A", 0);
+  inv->add_output("Y", 0);
+  auto signal = graph->get_input_pin("a");
+  gu::set_bits(signal, 1);
+  for (unsigned i = 0; i < 60; ++i) {
+    auto node = gu::create_typed_node(*graph, Ntype_op::Sub);
+    node.set_subnode(inv);
+    node.set_name("inv" + std::to_string(i));
+    node.create_sink_pin("A").connect_driver(signal);
+    signal = node.create_driver_pin("Y");
+    gu::set_bits(signal, 1);
+  }
+  graph->get_output_pin("y").connect_driver(signal);
+  auto options                                        = plain_options();
+  options.lefs                                        = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
+  options.output_dir                                  = std::string(std::getenv("TEST_TMPDIR")) + "/dense_rows";
+  options.iterations                                  = 0;
+  options.bins                                        = 2;
+  options.utilization                                 = .9;
+  options.density                                     = .95;
+  options.allow_increase_area                         = false;
+  options.optimization_pending                        = false;
+  options.legroute                                    = false;
+  options.terminal_legalize_options.critical_fraction = 0;
+  options.terminal_legalize_options.padding_sites     = 4;
+  options.terminal_legalize_options.max_density       = .99;
+  Result result;
+  ASSERT_NO_THROW(result = place(*graph, flat, options));
+  EXPECT_NO_THROW(check_legality(physical::read_lef(options.lefs), result.floorplan));
+}
+
 // A chain of sky130 cells (12 by default) in which c1, c5, c9... are a
 // two-row copy of inv_1 named `master` in rail template t0, given in its own
 // LEF with its t1 rail twin `master`_t1, for full placement through the
