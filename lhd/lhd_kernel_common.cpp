@@ -1045,10 +1045,30 @@ std::string resolve_io_load(const Options& opts, const std::string& liberty) {
   return load;
 }
 
+std::string effective_memory_mode(const Options& opts) {
+  auto mode = synth_set(opts, "memory", "auto");
+  if (mode == "auto") {
+    // A placed netlist goes to a physical flow, where a memory left native is a virtual proxy block that no backend
+    // can implement (cnn's FIFOs reached the OpenROAD handoff as `__livehd_memory_*`, ODB-0092). So `auto` decides
+    // per memory the way a physical flow does (sram_fit): a memory in a shape a fakeram flow would generate --
+    // more than 4096 bits (ORFS's SYNTH_MEMORY_MAX_BITS default), at least 32 entries, at most 2 ports -- becomes
+    // a generated SRAM macro (Liberty + LEF, bsg_fakeram style; pass/synth/sram_macro.hpp); any other memory
+    // (small, shallow, a many-ported register file, or one no macro can realize) folds to flops. It used to fold
+    // EVERY memory, so a large array became millions of flops. Explicit macro instances (fakeram cells with a
+    // Liberty view) are cells and stay macros either way.
+    if (const auto place = synth_set(opts, "place", "false");
+        !place.empty() && place != "false" && place != "0" && place != "off") {
+      mode = "sram_fit";
+    }
+  }
+  return mode;
+}
+
 uint64_t memory_max_bits(const Options& opts) {
   const auto value = synth_set(opts, "memory.max_bits", "auto");
   if (value == "auto") {
-    return synth_set(opts, "memory", "auto") == "sram" ? 2048 : 1024;
+    const auto mode = effective_memory_mode(opts);
+    return mode == "sram" ? 2048 : mode == "sram_fit" ? 4097 : 1024;
   }
   uint64_t bits = 0;
   const auto [p, ec] = std::from_chars(value.data(), value.data() + value.size(), bits);
@@ -1084,20 +1104,15 @@ void merge_mapper_sets(const Options& opts, std::string_view method, Eprp_var::E
   // 3 ports), sram = generated macros (pass/synth/sram_macro.hpp), folding only a memory below the smallest macro or
   // one no macro can realize.
   if (method == "pass.abc" || method == "pass.usyn") {
-    const auto memory = synth_set(opts, "memory", "auto");
+    // effective_memory_mode: with placement, `auto` is `sram_fit` (generated macros for fakeram-shaped memories,
+    // flops for the rest); synth.memory=macro still keeps a memory native on purpose.
+    const auto memory = effective_memory_mode(opts);
     if (memory == "flops") {
       labels["memory"] = "true";
     } else if (memory == "macro") {
       labels["memory"] = "false";
-    } else if (memory == "sram") {
-      labels["memory"] = "sram";
-    } else if (const auto place = synth_set(opts, "place", "false");
-               !place.empty() && place != "false" && place != "0" && place != "off") {
-      // A placed netlist goes to a physical flow: a memory left native becomes a virtual proxy block that no
-      // backend can implement (cnn's FIFOs reached the OpenROAD handoff as `__livehd_memory_*`, ODB-0092). Without
-      // generated SRAM macros, `auto` folds every memory to flops, as the ORFS flows do; synth.memory=macro still
-      // keeps a memory native on purpose.
-      labels["memory"] = "true";
+    } else if (memory == "sram" || memory == "sram_fit") {
+      labels["memory"] = memory;
     } else {
       labels["memory"] = "auto";
     }
@@ -1515,8 +1530,8 @@ void check_known_set_passes(const Options& opts) {
                         std::format("synth.abc_pre '{}' is not a ';'-separated list of allow-listed ABC optimization steps", value),
                         "e.g. `dc2`, `fraig; dc2`, `resyn2`, `&dch -f`, `&synch2 -K 6 -C 500`"};
       }
-      if (flag == "memory" && value != "auto" && value != "flops" && value != "macro" && value != "sram") {
-        throw Lhd_error{"usage", std::format("synth.memory expects auto|flops|macro|sram, got '{}'", value), ""};
+      if (flag == "memory" && value != "auto" && value != "flops" && value != "macro" && value != "sram" && value != "sram_fit") {
+        throw Lhd_error{"usage", std::format("synth.memory expects auto|flops|macro|sram|sram_fit, got '{}'", value), ""};
       }
       if (flag == "memory.max_bits") {
         Options probe;

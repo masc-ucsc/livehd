@@ -3417,7 +3417,7 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
   if (net.graphs.empty()) {
     throw Lhd_error{"internal", mapper_method + " produced an empty netlist library", ""};
   }
-  if (mapped_output && synth_set(opts, "memory", "auto") == "sram") {
+  if (const auto memory_mode = effective_memory_mode(opts); mapped_output && (memory_mode == "sram" || memory_mode == "sram_fit")) {
     livehd::synth::Sram_tech tech;
     // Area, timing, pin loads and voltage scale with the mapped Liberty's smallest NOT
     // (liberty::tech_proxy); an explicit number overrides one quantity.
@@ -3494,6 +3494,53 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
       }
       std::fprintf(stderr, "lhd synth: synth.memory=sram: %zu memories became macros (%.0f Kib, %.0f um2): %s/*.lib, %s\n", sram.macros.size(),
                    static_cast<double>(bits) / 1024.0, area, lib_dir.c_str(), lef_path.c_str());
+    } else if (const auto lef_path = root + "/sram.lef"; std::filesystem::is_regular_file(lef_path) && std::filesystem::is_regular_file(root + "/sram.txt")) {
+      // A warm run restores the mapped netlist from the cache: its memories already ARE the generated macros, so
+      // there is nothing left to convert, but the timers and the placer still need the views the cold run wrote
+      // (without the LEF, placement's growth inventory meets an unknown master). Reuse them when the restored
+      // netlist instantiates any macro listed in sram.txt.
+      std::set<std::string> listed;
+      {
+        std::ifstream table(root + "/sram.txt");
+        std::string   line;
+        std::getline(table, line);  // header
+        while (std::getline(table, line)) {
+          listed.insert(line.substr(0, line.find('\t')));
+        }
+      }
+      bool used = false;
+      for (const auto& g : net.graphs) {
+        for (auto node : g->body().nodes()) {
+          if (const auto io = node.get_subnode_io(); io && listed.contains(std::string(io->get_name()))) {
+            used = true;
+            break;
+          }
+        }
+        if (used) {
+          break;
+        }
+      }
+      if (used) {
+        std::string lib_path;
+        for (const auto& macro : listed) {
+          if (const auto file = root + "/sram/" + macro + ".lib"; std::filesystem::is_regular_file(file)) {
+            lib_path += (lib_path.empty() ? "" : ",") + file;
+          }
+        }
+        sram_liberty_path = lib_path;
+        if (run_place) {
+          place_options.lefs.push_back(lef_path);
+        }
+        if (physical_cache) {
+          for (const auto& macro : listed) {
+            if (const auto file = root + "/sram/" + macro + ".lib"; std::filesystem::is_regular_file(file)) {
+              physical_cache->add_dependency(file);
+            }
+          }
+          physical_cache->add_dependency(lef_path);
+        }
+        std::fprintf(stderr, "lhd synth: synth.memory=sram: reusing %zu generated macro view(s) from %s\n", listed.size(), root.c_str());
+      }
     }
   }
 

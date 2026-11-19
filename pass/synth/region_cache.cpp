@@ -1051,8 +1051,10 @@ uint64_t Region_cache::make_salt(uint64_t engine_salt, std::string_view library_
   h = combine64(h, static_cast<uint64_t>(map_register) << 1U | static_cast<uint64_t>(memory_fold == Memory_fold::Always));
   if (memory_fold == Memory_fold::Sram) {
     h = combine64(h, 0x5372616dULL);  // 'Sram': a different realization of the same memories
+  } else if (memory_fold == Memory_fold::SramFit) {
+    h = combine64(h, 0x53726146ULL);  // 'SraF': sram with the fakeram-shape fold rule
   }
-  if (memory_fold == Memory_fold::Auto || memory_fold == Memory_fold::Sram) {
+  if (memory_fold == Memory_fold::Auto || generates_sram(memory_fold)) {
     // Only `auto` reads the threshold, and only `auto` adds an item: the
     // explicit true/false salts stay exactly what they were before the mode
     // existed, so a cache written under them survives.

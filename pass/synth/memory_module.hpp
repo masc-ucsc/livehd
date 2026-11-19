@@ -20,7 +20,16 @@ namespace livehd::synth {
 //   Sram   (`sram`)  the synth.memory=sram flow: fold only a memory under memory_max_bits (the smallest
 //                    macro) or one no generated macro can realize (sram_macro.hpp); every other
 //                    memory stays native whatever its port count, for macro_memories to convert.
-enum class Memory_fold : uint8_t { Never = 0, Always = 1, Auto = 2, Sram = 3 };
+//   SramFit (`sram_fit`) `auto` with placement (lhd effective_memory_mode): like Sram, but a memory becomes a
+//                    macro only in a shape a fakeram flow would generate -- at least memory_max_bits bits (lhd:
+//                    more than 4096, ORFS's SYNTH_MEMORY_MAX_BITS default), at least kSramFitMinDepth entries
+//                    and at most kSramFitMaxPorts ports (1rw / 1r1w); every other memory folds to flops.
+enum class Memory_fold : uint8_t { Never = 0, Always = 1, Auto = 2, Sram = 3, SramFit = 4 };
+
+inline constexpr uint64_t kSramFitMinDepth = 32;
+inline constexpr uint64_t kSramFitMaxPorts = 2;
+
+[[nodiscard]] constexpr bool generates_sram(Memory_fold mode) { return mode == Memory_fold::Sram || mode == Memory_fold::SramFit; }
 
 // `auto` folds a memory with MORE than this many ports whatever its storage
 // size: no SRAM compiler or standard-cell library offers such a macro, so
@@ -36,6 +45,7 @@ inline constexpr uint64_t kAutoFoldPortsAbove = 3;
     case Memory_fold::Always: return "true";
     case Memory_fold::Auto: return "auto";
     case Memory_fold::Sram: return "sram";
+    case Memory_fold::SramFit: return "sram_fit";
   }
   return "auto";
 }
@@ -46,6 +56,9 @@ inline constexpr uint64_t kAutoFoldPortsAbove = 3;
   }
   if (v == "sram") {
     return Memory_fold::Sram;
+  }
+  if (v == "sram_fit") {
+    return Memory_fold::SramFit;
   }
   if (v == "false" || v == "0" || v == "off" || v == "no") {
     return Memory_fold::Never;

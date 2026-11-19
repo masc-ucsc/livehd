@@ -639,6 +639,8 @@ void              check_known_set_passes(const Options& opts);
 std::string       synth_set(const Options& opts, std::string_view flag, std::string_view def);
 // synth.memory.max_bits resolved: auto = 1024, or 2048 under synth.memory=sram; 0 = no threshold.
 uint64_t          memory_max_bits(const Options& opts);
+// synth.memory as the mappers apply it: `auto` with placement becomes `sram_fit` (see lhd_kernel_common.cpp).
+std::string       effective_memory_mode(const Options& opts);
 std::string       resolve_liberty(const Options& opts);
 // synth.liberty, else $LHD_TECH_DIR/<default Liberty> when that is set, else empty. No existence check and
 // no error (resolve_liberty adds both); every reader that needs the library's path or units goes through it.

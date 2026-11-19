@@ -502,7 +502,7 @@ TEST(LhdOptions, SynthPlaceTurnsOffTheMapperClockTree) {
 
 // A placed netlist cannot carry a native memory into a physical flow: `auto` folds memories to flops there, unless
 // generated SRAM macros are on or the user asks for native memories.
-TEST(LhdOptions, SynthPlaceFoldsAutoMemoriesWithoutSram) {
+TEST(LhdOptions, SynthPlaceMakesAutoMemoriesSramMacros) {
   const auto merged = [](std::vector<std::pair<std::string, std::string>> sets) {
     lhd::Options opts;
     for (auto& [k, v] : sets) {
@@ -513,8 +513,12 @@ TEST(LhdOptions, SynthPlaceFoldsAutoMemoriesWithoutSram) {
     return labels;
   };
   EXPECT_EQ(merged({}).at("memory"), "auto");
-  EXPECT_EQ(merged({{"synth.place", "true"}}).at("memory"), "true");
-  EXPECT_EQ(merged({{"synth.place", "true"}, {"synth.memory", "auto"}}).at("memory"), "true");
+  // With placement, auto is sram_fit: a fakeram-shaped memory (> 4096 bits, >= 32 entries, <= 2 ports) becomes a
+  // generated macro, every other memory flops.
+  EXPECT_EQ(merged({{"synth.place", "true"}}).at("memory"), "sram_fit");
+  EXPECT_EQ(merged({{"synth.place", "true"}, {"synth.memory", "auto"}}).at("memory"), "sram_fit");
+  EXPECT_EQ(merged({{"synth.place", "true"}}).at("memory_max_bits"), "4097");
+  EXPECT_EQ(merged({{"synth.place", "true"}, {"synth.memory", "flops"}}).at("memory"), "true");
   EXPECT_EQ(merged({{"synth.place", "true"}, {"synth.memory", "macro"}}).at("memory"), "false");
   EXPECT_EQ(merged({{"synth.place", "true"}, {"synth.memory", "sram"}}).at("memory"), "sram");
   // synth.memory.max_bits: one threshold, auto = 1024 (2048 under sram), an explicit value in both modes.

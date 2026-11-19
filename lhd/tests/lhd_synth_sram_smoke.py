@@ -66,3 +66,35 @@ err = synth('small', 'synth.memory=sram', src=small)
 assert '1 memories became macros' in err, err
 err = synth('min', 'synth.memory=sram', 'synth.memory.max_bits=100000', src=small)
 assert 'became macros' not in err, err
+
+# sram_fit (what synth.memory=auto does with synth.place): a macro only for a fakeram shape -- more than 4096 bits,
+# at least 32 entries, at most 2 ports. The 2 Kib memory, a shallow wide one and a 3-port one fold to flops.
+err = synth('fit_small', 'synth.memory=sram_fit', src=small)
+assert 'became macros' not in err, err
+deep = root / 'deep.v'
+deep.write_text('''module top(input clk, input [7:0] ra, wa, input [31:0] wd, input we, output reg [31:0] q);
+  reg [31:0] mem [0:255];             // 8 Kib, 256 entries, 1r1w: a fakeram shape
+  always @(posedge clk) begin if (we) mem[wa] <= wd; q <= mem[ra]; end
+endmodule
+''')
+err = synth('fit_deep', 'synth.memory=sram_fit', src=deep)
+assert '1 memories became macros' in err, err
+shallow = root / 'shallow.v'
+shallow.write_text('''module top(input clk, input [3:0] ra, wa, input [511:0] wd, input we, output reg [511:0] q);
+  reg [511:0] mem [0:15];             // 8 Kib but only 16 entries: flops (no fakeram shape)
+  always @(posedge clk) begin if (we) mem[wa] <= wd; q <= mem[ra]; end
+endmodule
+''')
+err = synth('fit_shallow', 'synth.memory=sram_fit', src=shallow)
+assert 'became macros' not in err, err
+err = synth('sram_shallow', 'synth.memory=sram', src=shallow)
+assert '1 memories became macros' in err, err   # plain sram keeps any shape
+ported = root / 'ported.v'
+ported.write_text('''module top(input clk, input [7:0] ra, rb, wa, input [31:0] wd, input we, output reg [31:0] qa, qb);
+  reg [31:0] mem [0:255];             // 8 Kib, 256 entries, but 2 reads + 1 write: flops
+  always @(posedge clk) begin if (we) mem[wa] <= wd; qa <= mem[ra]; qb <= mem[rb]; end
+endmodule
+''')
+err = synth('fit_ported', 'synth.memory=sram_fit', src=ported)
+assert 'became macros' not in err, err
+print('PASS')

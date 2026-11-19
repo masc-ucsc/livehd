@@ -2155,11 +2155,14 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
     {"memory",
      "auto",
      Synth_set_option::Kind::file,
-     "auto|flops|macro|sram: bit-blast memories to flops + decode (flops), keep the native memory instance (macro), "
-     "let the size threshold and the port count decide (auto), or generate an SRAM macro -- any port count, a Liberty "
+     "auto|flops|macro|sram|sram_fit: bit-blast memories to flops + decode (flops), keep the native memory instance (macro), "
+     "let the size threshold and the port count decide (auto; with synth.place auto generates a macro only for a "
+     "fakeram-shaped memory -- over 4096 bits, at least 32 entries, at most 2 ports -- and folds the rest to flops), "
+     "or generate an SRAM macro -- any port count, a Liberty "
      "and LEF view written under --workdir/synth and handed to the timers and the placer -- for every memory of at "
      "least synth.memory.max_bits (smaller ones become flops; forwarding between ports, power-on contents, whole-array "
-     "update/reset and several write clocks keep the native instance) (sram); "
+     "update/reset and several write clocks keep the native instance) (sram); sram_fit = sram limited to "
+     "fakeram shapes (what auto does with synth.place); "
      "source pins override it per memory"},
     {"delay",
      "",
@@ -2262,7 +2265,8 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      Synth_set_option::Kind::file,
      "the memory size threshold in bits (bits x entries): with synth.memory=auto a memory within it folds to flops and a "
      "larger one stays native; with synth.memory=sram a memory below it folds to flops (the smallest macro). auto = "
-     "1024 (auto) or 2048 (sram); 0 = no threshold (auto folds every memory, sram makes every memory a macro)"},
+     "1024 (auto), 4097 (auto with synth.place) or 2048 (sram); 0 = no threshold (auto folds every memory, sram "
+     "makes every memory a macro)"},
     {"liberty",
      "",
      Synth_set_option::Kind::file,
