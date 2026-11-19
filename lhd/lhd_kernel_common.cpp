@@ -2165,7 +2165,10 @@ void write_unit_meta(std::ofstream& ofs, const Lnast& ln) {
   if (!bw.empty()) {
     ofs << ",\"bw_meta\":[";
     bool first = true;
-    for (const auto& [name, e] : bw.ranges) {
+    // Ordered copy: absl hash iteration is per-process randomized, which made the manifest (and its content_hash)
+    // differ between identical compiles (the compile cache's tree.bin writer sorts the same way).
+    const std::map<std::string, BitwidthEntry> ordered(bw.ranges.begin(), bw.ranges.end());
+    for (const auto& [name, e] : ordered) {
       if (!first) {
         ofs << ',';
       }

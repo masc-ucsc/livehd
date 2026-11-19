@@ -3661,6 +3661,13 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
         res.outputs.push_back(net_dir);
       }
     }
+    if (!restored && physical_cache && place_options.chunk_manifest.empty()
+        && physical_cache->reason() != "no completed generation") {
+      // A warm run that places again should say why: a full re-place of a large design costs as much as the cold run.
+      livehd::diag::warn("synth", "physical-cache-miss", "io")
+          .msg("completed placement not restored: {}", physical_cache->reason())
+          .emit();
+    }
     if (!restored) {
       const auto found
           = std::find_if(net.graphs.begin(), net.graphs.end(), [&](const auto& g) { return g && g->get_name() == top; });

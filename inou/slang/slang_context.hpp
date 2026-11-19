@@ -465,6 +465,9 @@ struct Slang_module_state {
   int                                                         local_cnt_ = 0;
 };
 
+// Stable cross-file ordering for sym_emit_less (slang_structure.cpp).
+void set_emit_source_manager(const slang::SourceManager* sm);
+
 class Slang_context : private Slang_module_state {
 public:
   struct Options {
@@ -562,7 +565,10 @@ public:
 
   Slang_context() = default;
 
-  void           set_source_manager(const slang::SourceManager* sm) { sm_ = sm; }
+  void           set_source_manager(const slang::SourceManager* sm) {
+    sm_ = sm;
+    set_emit_source_manager(sm);  // sym_emit_less orders symbols by file, not by load-order buffer id
+  }
   void           set_options(const Options& o) { options_ = o; }
   const Options& get_options() const { return options_; }
 

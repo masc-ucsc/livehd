@@ -109,5 +109,68 @@ if ! diff <(grep -a 'head_o' "$WORK/a/genrep.prp") <(grep -a 'head_o' "$WORK/b/g
   fail=1
 fi
 
+# Cross-FILE ties. A slang SourceLocation orders by buffer id, and buffer ids
+# follow the order files are loaded (slang loads in parallel, so on vortex the
+# order changed from run to run). Two interface definitions in two files, read
+# in both command-line orders, must lower identically: the signals' declare
+# order is by file name and offset, never by load order. Before the fix the two
+# orders swapped the `__if` declarations, renumbered LNAST temporaries and
+# changed the compiled graphs' bytes, so a warm `lhd synth` missed its completed
+# placement (physical cache keyed on the compiled library).
+cat > "$WORK/zeta_if.sv" <<'EOF'
+interface zeta_if;
+  logic       valid;
+  logic [7:0] data;
+  modport src(output valid, output data);
+endinterface
+EOF
+cat > "$WORK/alpha_if.sv" <<'EOF'
+interface alpha_if;
+  logic       ready;
+  logic [3:0] tag;
+  modport src(output ready, output tag);
+endinterface
+EOF
+cat > "$WORK/xfile.sv" <<'EOF'
+module xfile_leaf(input logic clk, input logic [7:0] d, zeta_if.src z, alpha_if.src a);
+  always_ff @(posedge clk) begin
+    z.valid <= d[0];
+    z.data  <= d;
+    a.ready <= d[1];
+    a.tag   <= d[5:2];
+  end
+endmodule
+module xfile(input logic clk, input logic [7:0] d, output logic [7:0] o, output logic r);
+  zeta_if  z0();
+  alpha_if a0();
+  zeta_if  z1();
+  alpha_if a1();
+  xfile_leaf u0(.clk(clk), .d(d),  .z(z0), .a(a0));
+  xfile_leaf u1(.clk(clk), .d(~d), .z(z1), .a(a1));
+  assign o = z0.data ^ z1.data ^ {a0.tag, a1.tag};
+  assign r = z0.valid & z1.valid & a0.ready & a1.ready;
+endmodule
+EOF
+xemit() {  # $1 = output tag, rest = sources in command-line order
+  local tag=$1; shift
+  rm -rf "$WORK/x_$tag" "$WORK/xl_$tag" "$WORK/xw_$tag"
+  $LHD compile "$@" --top xfile --emit-dir "pyrope:$WORK/x_$tag" --emit-dir "lg:$WORK/xl_$tag" \
+       --workdir "$WORK/xw_$tag" >"$WORK/x_$tag.log" 2>&1 || { cat "$WORK/x_$tag.log"; echo "FAIL: compile ($tag)"; exit 1; }
+}
+xemit fwd "$WORK/zeta_if.sv" "$WORK/alpha_if.sv" "$WORK/xfile.sv"
+xemit rev "$WORK/xfile.sv" "$WORK/alpha_if.sv" "$WORK/zeta_if.sv"
+if diff -r "$WORK/x_fwd" "$WORK/x_rev" >/dev/null; then
+  echo "ok: interface files read in either order emit byte-identical Pyrope"
+else
+  echo "FAIL: Pyrope emission depends on the source-file order"
+  diff -r "$WORK/x_fwd" "$WORK/x_rev" | head -30
+  fail=1
+fi
+xdiff=0
+for f in $(cd "$WORK/xl_fwd" && find . -type f -name '*.bin' | sort); do
+  cmp -s "$WORK/xl_fwd/$f" "$WORK/xl_rev/$f" || { echo "FAIL: compiled graph $f differs with the source-file order"; xdiff=1; }
+done
+[ $xdiff -eq 0 ] && echo "ok: compiled graphs are byte-identical in either source-file order" || fail=1
+
 if [ $fail -ne 0 ]; then echo "slang_emit_determinism: FAILED"; exit 1; fi
 echo "slang_emit_determinism: PASS"

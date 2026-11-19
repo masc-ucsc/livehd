@@ -59,12 +59,36 @@ namespace {
 // The hierarchical path (`…gen_msg_ptrs_port[1].oob_rd_ptr`) is unique per
 // ELABORATED symbol and identical across runs, so it separates exactly the
 // symbols that tie. It is built only on a tie, so the common case pays nothing.
+namespace {
+// The SourceManager of the compile being lowered (Slang_context::set_source_manager). A SourceLocation orders by
+// slang's BUFFER id, and buffer ids follow the order files finished loading -- slang loads in parallel, so it varies
+// from run to run: symbols from two files (vortex's interface definitions) sorted differently, the LNAST statement
+// order and temporary numbering moved, and the compiled graphs' bytes changed between identical runs (a warm
+// `lhd synth` then missed its completed placement). Compare by original file name and offset instead.
+thread_local const slang::SourceManager* tls_emit_sm = nullptr;
+}  // namespace
+
 bool sym_emit_less(const slang::ast::Symbol* a, const slang::ast::Symbol* b) {
   if (a == b) {
     return false;
   }
   if (a->location != b->location) {
-    return a->location < b->location;
+    if (tls_emit_sm != nullptr && a->location.buffer() != b->location.buffer()) {
+      const auto la = tls_emit_sm->getFullyOriginalLoc(a->location);
+      const auto lb = tls_emit_sm->getFullyOriginalLoc(b->location);
+      if (la.valid() && lb.valid()) {
+        const auto fa = tls_emit_sm->getFileName(la), fb = tls_emit_sm->getFileName(lb);
+        if (fa != fb) {
+          return fa < fb;
+        }
+        if (la.offset() != lb.offset()) {
+          return la.offset() < lb.offset();
+        }
+      }
+    }
+    if (a->location.buffer() == b->location.buffer()) {
+      return a->location < b->location;
+    }
   }
   if (a->name != b->name) {
     return a->name < b->name;
@@ -9146,3 +9170,5 @@ void Slang_context::lower_unknown_instance(const slang::ast::UninstantiatedDefSy
 
   builder_.lnast->add_external_module(callee);
 }
+
+void set_emit_source_manager(const slang::SourceManager* sm) { tls_emit_sm = sm; }
