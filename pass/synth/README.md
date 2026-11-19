@@ -78,13 +78,16 @@ Remaining native synthesis work is tracked in [2u-usyn](../../todo/livehd/2u-usy
    after the first sweep), and `pass.usyn` takes it too. Run together, the second finds only
    what the first could not (`//lhd/tests:lhd_state_sweep_test` runs both and proves the
    result against the source).
-   **Constant bits across instances** (`propagate_constant_bits`, `flat_state.cpp`; with the state sweep). The bits of a
-   definition output that are constant are read as constants by every instance's readers, and the bits of a definition input
-   that every instance drives with one value are read as constants inside the definition: zeros and ones, per bit
-   (`bit_facts::known_bits`: constants, And/Or, Mux and Hotmux arms, Concat lanes, constant windows and shifts, an indexed
-   word select `v[idx]` whose lanes all agree, and through an instance into its definition and back out at what that
-   instance drives). It runs after the whole-design state proof and again after the demand split, when instances that read
-   a definition differently have their own copies. HighTide floonoc: comb area -1.7%.
+   **Constant bits across instances** are the shared global pass, not synthesis code: `pass.specialize` (the per-bit
+   join every flow runs on its private copy once its partition is chosen; `bit_facts::known_bits`, zeros and ones,
+   constants, And/Or, Mux and Hotmux arms, Concat lanes, constant windows and shifts, an indexed word select `v[idx]`
+   whose lanes all agree, and through an instance into its definition and back out at what that instance drives). The
+   bits of a definition input that every instance drives with one value are read as constants inside it, and the known
+   bits of an instance's output by the parent's readers; each body touched is folded again, to a fixpoint. prepare_design
+   runs it three times: after pass.color, after the whole-design state proof, and after the demand split (instances that
+   read a definition differently have their own copies by then). Here a definition that holds state is refined in place
+   (`stateful_in_place`: the mapper's copy is private and every instance is in it), so it keeps its name and registers.
+   `LHD_NO_CONST_BITS` skips the two later runs. HighTide floonoc: comb area -1.7%.
    **Color boundaries** (`synth.boundary_bits`, default true; `color_boundary.cpp`). On each graph right before it is cut
    (`Pass_partition`'s `prepare_src` seam, both mappers), nothing constant and nothing unread crosses a color: a cell of
    another color reads the known bits of a value as constants through cells of its own color, and a value of which only

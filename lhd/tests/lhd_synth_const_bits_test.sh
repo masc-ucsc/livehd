@@ -1,8 +1,8 @@
 #!/bin/bash
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #
-# synth.state_sweep with synth.flat_sweep off (the default): constant-0 bits cross instance boundaries
-# (pass/synth propagate_constant_bits). `stage` instances register a flit whose upper 30 bits are 0, `thru` passes it
+# synth.state_sweep with synth.flat_sweep off (the default): constant bits cross instance boundaries
+# (pass.specialize's per-bit join, run again on the mapper's copy after the state proof). `stage` instances register a flit whose upper 30 bits are 0, `thru` passes it
 # on, `wmux` selects between two. With the propagation the design maps to fewer gates than with it disabled
 # (LHD_NO_CONST_BITS), and the graph-native LEC proves the netlist against the compiled source without a bound.
 set -u

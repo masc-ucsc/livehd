@@ -21,8 +21,14 @@ filegroup(
 
 cc_library(
     name = "specialize",
-    srcs = ["specialize.cpp"],
-    hdrs = ["specialize.hpp"],
+    srcs = [
+        "bit_facts.cpp",
+        "specialize.cpp",
+    ],
+    hdrs = [
+        "bit_facts.hpp",
+        "specialize.hpp",
+    ],
     copts = COPTS,
     includes = ["."],
     visibility = ["//visibility:public"],
@@ -34,6 +40,7 @@ cc_library(
         "//pass/bitwidth:pass_bitwidth",
         "//pass/cprop:pass_cprop",
         "//pass/sweep",
+        "//pass/synth:affine_amount",  # header only: the index*scale+bias of a word select (bit_facts)
         "@hhds//hhds:graph",
         "@hlop//hlop",
     ],

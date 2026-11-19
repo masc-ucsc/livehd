@@ -175,6 +175,138 @@ TEST(InheritColors, BackwardChainIsLinear) {
   EXPECT_LT(ms, 10000) << "inherit_colors took " << ms << " ms on a " << kLinks << "-link chain";
 }
 
+// Per-bit facts cross an instance boundary in the shared mode: two instances drive input `a` with bit 0 set (one of
+// them with bit 1 set as well), so the copy they share reads bit 0 as 1; its output `a & 1` is then the constant 1,
+// which each instance's readers in the parent read. A partly constant input makes no copy in the per-binding mode.
+struct Bits_design {
+  hhds::GraphLibrary                        library;
+  std::shared_ptr<hhds::Graph>              child, parent;
+  hhds::Node_class                          first, second, reader;
+  std::vector<std::shared_ptr<hhds::Graph>> graphs;
+  explicit Bits_design(bool stateful) {
+    auto child_io = library.create_io("child");
+    child_io->add_input("a", 1);
+    child_io->add_input("clock", 2);
+    child_io->add_output("y", 3);
+    for (const auto name : {"a", "y"}) {
+      child_io->set_bits(name, 8);
+      child_io->set_unsign(name, true);
+    }
+    child_io->set_bits("clock", 1);
+    child_io->set_unsign("clock", true);
+    child      = child_io->create_graph();
+    gu::set_ubits(child->get_input_pin("a"), 8);
+    auto low   = gu::create_typed_node(*child, Ntype_op::And);
+    child->get_input_pin("a").connect_sink(gu::setup_sink_by_name(low, "as"));
+    gu::create_const(*child, *Dlop::create_integer(1)).connect_sink(gu::setup_sink_by_name(low, "as"));
+    auto value = low.create_driver_pin(0);
+    gu::set_ubits(value, 8);
+    if (stateful) {
+      auto flop = gu::create_typed_node(*child, Ntype_op::Flop);
+      value.connect_sink(gu::setup_sink_by_name(flop, "din"));
+      child->get_input_pin("clock").connect_sink(gu::setup_sink_by_name(flop, "clock_pin"));
+      auto q = flop.create_driver_pin(0);
+      gu::set_ubits(q, 8);
+      auto mix = gu::create_typed_node(*child, Ntype_op::Xor);  // y = q ^ (a & 1): the comb part is what folds
+      q.connect_sink(gu::setup_sink_by_name(mix, "as"));
+      value.connect_sink(gu::setup_sink_by_name(mix, "as"));
+      value = mix.create_driver_pin(0);
+      gu::set_ubits(value, 8);
+    }
+    value.connect_sink(child->get_output_pin("y"));
+
+    auto parent_io = library.create_io("parent");
+    parent_io->add_input("x", 1);
+    parent_io->add_input("clock", 2);
+    parent_io->add_output("o", 3);
+    for (const auto name : {"x", "o"}) {
+      parent_io->set_bits(name, 8);
+      parent_io->set_unsign(name, true);
+    }
+    parent_io->set_bits("clock", 1);
+    parent_io->set_unsign("clock", true);
+    parent = parent_io->create_graph();
+    gu::set_ubits(parent->get_input_pin("x"), 8);
+    const auto instance = [&](int tied) {
+      auto drive = gu::create_typed_node(*parent, Ntype_op::Or);
+      parent->get_input_pin("x").connect_sink(gu::setup_sink_by_name(drive, "as"));
+      gu::create_const(*parent, *Dlop::create_integer(tied)).connect_sink(gu::setup_sink_by_name(drive, "as"));
+      gu::set_ubits(drive.create_driver_pin(0), 8);
+      auto call = gu::create_typed_node(*parent, Ntype_op::Sub);
+      call.set_subnode(child_io);
+      drive.create_driver_pin(0).connect_sink(call.create_sink_pin(1));
+      parent->get_input_pin("clock").connect_sink(call.create_sink_pin(2));
+      gu::set_ubits(call.create_driver_pin(3), 8);
+      return call;
+    };
+    first  = instance(1);
+    second = instance(3);
+    reader = gu::create_typed_node(*parent, Ntype_op::Sum);
+    first.create_driver_pin(3).connect_sink(gu::setup_sink_by_name(reader, "as"));
+    second.create_driver_pin(3).connect_sink(gu::setup_sink_by_name(reader, "as"));
+    gu::set_ubits(reader.create_driver_pin(0), 8);
+    reader.create_driver_pin(0).connect_sink(parent->get_output_pin("o"));
+    graphs = {child, parent};
+  }
+  [[nodiscard]] static size_t count(hhds::Graph& g, Ntype_op op) {
+    size_t n = 0;
+    for (auto node : g.body().nodes()) {
+      n += gu::type_op_of(node) == op ? 1 : 0;
+    }
+    return n;
+  }
+};
+
+TEST(SpecializeBits, SharedModeCarriesTheBitsEveryInstanceAgreesOn) {
+  Bits_design d(/*stateful=*/false);
+  EXPECT_EQ(livehd::specialize::specialize_constants(d.graphs, {.max_versions = 1}), 1);
+  auto copy = d.first.get_subnode_graph();
+  ASSERT_TRUE(copy);
+  EXPECT_NE(copy.get(), d.child.get());
+  EXPECT_EQ(copy.get(), d.second.get_subnode_graph().get());
+  // inside the copy `a & 1` folded to the constant 1 ...
+  const auto y = copy->get_output_pin("y").get_driver_pin();
+  ASSERT_TRUE(y.is_const());
+  EXPECT_TRUE(gu::const_of(y).is_known_eq(*Dlop::create_integer(1)));
+  // ... and the parent folded 1 + 1
+  const auto o = d.parent->get_output_pin("o").get_driver_pin();
+  ASSERT_TRUE(o.is_const());
+  EXPECT_TRUE(gu::const_of(o).is_known_eq(*Dlop::create_integer(2)));
+  // the original definition is untouched
+  EXPECT_EQ(Bits_design::count(*d.child, Ntype_op::And), 1u);
+}
+
+TEST(SpecializeBits, PerBindingModeKeepsTheDefinitionOfAPartlyConstantInput) {
+  Bits_design d(/*stateful=*/false);
+  EXPECT_EQ(livehd::specialize::specialize_constants(d.graphs, {.max_versions = 64}), 0);
+  EXPECT_EQ(d.first.get_subnode_graph().get(), d.child.get());
+  EXPECT_EQ(d.graphs.size(), 2u);
+}
+
+TEST(SpecializeBits, AStatefulDefinitionIsSkippedOrRefinedInPlace) {
+  {
+    Bits_design d(/*stateful=*/true);
+    EXPECT_EQ(livehd::specialize::specialize_constants(d.graphs, {.state_free_only = true}), 0);
+    EXPECT_EQ(d.first.get_subnode_graph().get(), d.child.get());
+    EXPECT_EQ(Bits_design::count(*d.child, Ntype_op::Xor), 1u);
+  }
+  Bits_design d(/*stateful=*/true);
+  EXPECT_EQ(livehd::specialize::specialize_constants(d.graphs, {.state_free_only = true, .stateful_in_place = true}), 0);
+  EXPECT_EQ(d.first.get_subnode_graph().get(), d.child.get());  // same definition, same name
+  EXPECT_EQ(d.graphs.size(), 2u);
+  // y = q ^ 1 now: the `a & 1` under the Xor is the constant 1, and the register reads a constant
+  EXPECT_EQ(Bits_design::count(*d.child, Ntype_op::Flop), 1u);
+  bool reads_one = false;
+  for (auto node : d.child->body().nodes()) {
+    if (gu::type_op_of(node) != Ntype_op::Flop) {
+      continue;
+    }
+    const auto din = gu::get_driver_of_sink_name(node, "din");
+    reads_one      = din.is_const() && gu::const_of(din).is_known_eq(*Dlop::create_integer(1));
+  }
+  EXPECT_TRUE(reads_one);
+}
+
 }  // namespace
 
 // refold_private_body is the fold site cgen_sim (post-splice, sim cost), the synthesis state sweep (synth cost)

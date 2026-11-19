@@ -2189,7 +2189,7 @@ sh_test(
     ],
 )
 
-# Constant-0 bits across instance boundaries (pass/synth propagate_constant_bits): fewer gates than with it off,
+# Constant bits across instance boundaries (pass.specialize's per-bit join on the mapper's copy): fewer gates than with it off,
 # proven equivalent to the source by the graph-native LEC.
 sh_test(
     name = "lhd_synth_const_bits_test",

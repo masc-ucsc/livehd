@@ -8,6 +8,7 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "clock_gate.hpp"  // //graph
+#include "debug_env.hpp"
 #include "diag.hpp"
 #include "flat_state.hpp"
 #include "node_util.hpp"
@@ -294,6 +295,26 @@ std::unique_ptr<Prepared_design> prepare_design(std::span<const std::shared_ptr<
           .emit();
     }
   }
+  // The shared global pass again (pass.specialize, the per-bit join every flow runs on its private copy), now that a
+  // synthesis-only step exposed new constants. Stateful definitions are refined in place: this is the mapper's own
+  // copy and every instance is in it. LHD_NO_CONST_BITS skips it (the A/B of lhd_synth_const_bits_test).
+  const auto cross_instance_bits = [&](std::string_view when) {
+    if (livehd::debug::env<"LHD_NO_CONST_BITS">() != nullptr) {
+      return true;
+    }
+    if (budget != nullptr && !budget->check("const-bits")) {
+      return false;
+    }
+    const int refined
+        = specialize::specialize_constants(result->definitions,
+                                           {.inherit_colors = true, .state_free_only = true, .stateful_in_place = true});
+    if (refined > 0) {
+      livehd::diag::stat(from_pass, "const-bits", "progress")
+          .msg("{}: {}: {} more definition copy(ies) from constants across instance boundaries", from_pass, when, refined)
+          .emit();
+    }
+    return budget == nullptr || !budget->refused;
+  };
   if (state.state_sweep && !state.flat_sweep) {
     // The constant and unobserved state only the whole design proves (router rings), found on a flat analysis copy
     // and folded into per-instance-signature copies, so the hierarchy is kept (synth.flat_sweep does it by flattening).
@@ -309,17 +330,9 @@ std::unique_ptr<Prepared_design> prepare_design(std::span<const std::shared_ptr<
       return {};
     }
     // What that proof cut often makes PART of a port constant (a spill register's payload bits read 0); pass those
-    // zeros across the instance boundaries the way flattening would, so a pass-through chain stops carrying them.
-    const auto zeros = propagate_constant_bits(result->definitions, state.top, budget);
-    if (!zeros) {
+    // bits across the instance boundaries the way flattening would, so a pass-through chain stops carrying them.
+    if (!cross_instance_bits("after the whole-design state proof")) {
       return {};
-    }
-    if (zeros->output_bits + zeros->input_bits > 0) {
-      livehd::diag::stat(from_pass, "const-bits", "progress")
-          .msg("{}: {} instance output bit(s) and {} definition input bit(s) read as constants across instance "
-               "boundaries ({} round(s))",
-               from_pass, zeros->output_bits, zeros->input_bits, zeros->rounds)
-          .emit();
     }
   }
   if (state.state_sweep) {
@@ -359,18 +372,8 @@ std::unique_ptr<Prepared_design> prepare_design(std::span<const std::shared_ptr<
     // differently their own copies, so a bit that only SOME instances of the shared definition drove with a constant
     // is now driven so by every instance of a copy (floonoc's `lzc`: 128 instances behind two read patterns), and the
     // sweep left constants behind the registers it folded.
-    if (!state.flat_sweep) {
-      const auto again = propagate_constant_bits(result->definitions, state.top, budget);
-      if (!again) {
-        return {};
-      }
-      if (again->output_bits + again->input_bits > 0) {
-        livehd::diag::stat(from_pass, "const-bits", "progress")
-            .msg("{}: after the demand split, {} more instance output bit(s) and {} definition input bit(s) read as "
-                 "constants ({} round(s))",
-                 from_pass, again->output_bits, again->input_bits, again->rounds)
-            .emit();
-      }
+    if (!state.flat_sweep && !cross_instance_bits("after the demand split")) {
+      return {};
     }
   }
   // The cells each definition holds before its carried loops are expanded:

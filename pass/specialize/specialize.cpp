@@ -15,6 +15,7 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
+#include "bit_facts.hpp"
 #include "bitwidth.hpp"
 #include "fold_body.hpp"
 #include "hash_util.hpp"
@@ -611,12 +612,63 @@ struct Site {
 // What crosses into one definition from ALL its instances, joined: the one
 // specialization every instance can share (max_versions == 1).
 struct Context {
-  std::vector<std::pair<hhds::Port_id, Dlop>>                 constants;  // input tied to the same constant everywhere
-  std::vector<std::tuple<hhds::Port_id, uint32_t, bool>>      widths;     // input narrower than declared: (pid, bits, unsign)
-  bool                                                        zero_index_fold = false;
-  std::string                                                 key;  // content of the context (names the copy)
-  [[nodiscard]] bool empty() const { return constants.empty() && widths.empty() && !zero_index_fold; }
+  std::vector<std::pair<hhds::Port_id, Dlop>>                    constants;  // input tied to the same constant everywhere
+  std::vector<std::tuple<hhds::Port_id, uint32_t, bool>>         widths;     // input narrower than declared: (pid, bits, unsign)
+  // Bits of an unsigned input that every instance drives with the same value, when the input is not one constant: a
+  // lane of a packed bus that is always 0, a tied valid (bit_facts::known_bits of each instance's driver, joined).
+  std::vector<std::pair<hhds::Port_id, synth::bit_facts::Known>> bits;
+  bool                                                           zero_index_fold = false;
+  std::string                                                    key;  // content of the context (names the copy)
+  [[nodiscard]] bool empty() const { return constants.empty() && widths.empty() && bits.empty() && !zero_index_fold; }
 };
+
+// Bits of `fresh` that `applied` does not hold yet, merged into `applied`. `fresh` keeps only those.
+uint64_t new_known_bits(synth::bit_facts::Known& fresh, synth::bit_facts::Known& applied) {
+  if (applied.zero.empty()) {
+    applied.zero.assign(fresh.zero.size(), false);
+    applied.one.assign(fresh.one.size(), false);
+  }
+  uint64_t n = 0;
+  for (size_t i = 0; i < fresh.zero.size() && i < applied.zero.size(); ++i) {
+    fresh.zero[i] = fresh.zero[i] && !applied.zero[i] && !applied.one[i];
+    fresh.one[i]  = fresh.one[i] && !applied.zero[i] && !applied.one[i];
+    if (fresh.zero[i] || fresh.one[i]) {
+      applied.zero[i] = applied.zero[i] || fresh.zero[i];
+      applied.one[i]  = applied.one[i] || fresh.one[i];
+      ++n;
+    }
+  }
+  return n;
+}
+
+std::string known_text(const synth::bit_facts::Known& k) {  // LSB first: 0 / 1 known, '.' not; runs compressed by the hash
+  std::string out(k.zero.size(), '.');
+  for (size_t i = 0; i < k.zero.size(); ++i) {
+    out[i] = k.zero[i] ? '0' : k.one[i] ? '1' : '.';
+  }
+  return out;
+}
+
+// Every reader of `pin` reads it with `known` spelled out: `(pin & keep) | ones`, or the constant when every bit is
+// known. Returns false when nothing reads it.
+bool read_known(hhds::Graph& g, const hhds::Pin_class& pin, const synth::bit_facts::Known& known,
+                const hhds::Node_class& skip = {}) {
+  const auto readers = gu::Edge_vec(pin.out_edges().begin(), pin.out_edges().end());
+  if (readers.empty()) {
+    return false;
+  }
+  const auto value   = synth::bit_facts::known_pin(g, pin, known);  // its own cells read `pin`: not in `readers`
+  bool       changed = false;
+  for (const auto& edge : readers) {
+    if (!skip.is_invalid() && edge.sink.get_master_node() == skip) {
+      continue;
+    }
+    edge.sink.del_sink(pin);
+    value.connect_sink(edge.sink);
+    changed = true;
+  }
+  return changed;
+}
 
 std::vector<hhds::Pin_class> site_drivers(const Site& s, hhds::Port_id pid) {
   std::vector<hhds::Pin_class> out;
@@ -632,8 +684,12 @@ std::vector<hhds::Pin_class> site_drivers(const Site& s, hhds::Port_id pid) {
   return out;
 }
 
-Context join_context(const hhds::Graph& body, const hhds::GraphIO& io, const std::vector<Site>& sites) {
-  Context ctx;
+constexpr uint32_t kMaxKnownWidth = 1U << 20;  // wider ports keep their bits
+
+// `with_bits`: also the per-bit facts (false when no parent of an instance changed since they were last joined: the
+// walk behind each fact is the costly part of a round).
+Context join_context(const hhds::Graph& body, const hhds::GraphIO& io, const std::vector<Site>& sites, bool with_bits) {
+  Context                            ctx;
   // Inputs a rolled loop drives per ordinal (index, activation, carries) never
   // take one value for the whole body.
   absl::flat_hash_set<hhds::Port_id> per_ordinal;
@@ -707,6 +763,35 @@ Context join_context(const hhds::Graph& body, const hhds::GraphIO& io, const std
       ctx.key += std::format(":c{}={}", port.port_id, *value);
       continue;
     }
+    // per bit: what every instance's driver is known to carry (an unsigned port, so a zero above a narrow driver and
+    // a known one read the same inside)
+    if (with_bits && port.unsign && port.bits > 0 && port.bits <= kMaxKnownWidth) {
+      std::optional<synth::bit_facts::Known> joined;
+      for (const auto& s : sites) {
+        const auto drivers = site_drivers(s, port.port_id);
+        if (drivers.size() != 1) {
+          joined.reset();
+          break;
+        }
+        const auto known = synth::bit_facts::known_bits(drivers.front(), static_cast<int>(port.bits));
+        if (!joined) {
+          joined = known;
+        } else {
+          for (size_t i = 0; i < joined->zero.size(); ++i) {
+            joined->zero[i] = joined->zero[i] && known.zero[i];
+            joined->one[i]  = joined->one[i] && known.one[i];
+          }
+        }
+        if (std::ranges::none_of(joined->zero, std::identity{}) && std::ranges::none_of(joined->one, std::identity{})) {
+          joined.reset();
+          break;
+        }
+      }
+      if (joined) {
+        ctx.key += std::format(":b{}={}", port.port_id, known_text(*joined));
+        ctx.bits.emplace_back(port.port_id, std::move(*joined));
+      }
+    }
     // narrower than declared, same sign, or an unsigned value into a signed port
     if (widths_ok && unsign && port.bits > 0 && max_bits < port.bits && (*unsign || !port.unsign)) {
       ctx.widths.emplace_back(port.port_id, max_bits, *unsign);
@@ -740,6 +825,13 @@ void apply_context(hhds::Graph& g, const Context& ctx) {
       for (const auto& edge : readers) {
         edge.sink.del_sink(input);
         fitted.connect_sink(edge.sink);
+      }
+    }
+  }
+  for (const auto& [pid, known] : ctx.bits) {
+    for (const auto& port : io->get_input_pin_decls()) {
+      if (port.port_id == pid) {
+        (void)read_known(g, g.get_input_pin(port.name), known);
       }
     }
   }
@@ -878,6 +970,39 @@ bool publish_outputs(const Site& s) {
   return changed;
 }
 
+// The per-bit half of publish_outputs: the bits of an instance output that are known (read through THIS instance:
+// into its definition and, at one of its inputs, on to what this instance drives it with) are read as such by the
+// parent's readers. `applied` keeps what each (instance, port) already spells. Returns true when the parent changed.
+using Applied_outputs = absl::flat_hash_map<std::tuple<const hhds::Graph*, uint64_t, uint64_t>, synth::bit_facts::Known>;
+bool publish_known_bits(const Site& s, Applied_outputs& applied) {
+  auto node = s.node;
+  auto body = node.get_subnode_graph();
+  if (!body || !body->get_io() || node.subnode_loop()) {
+    return false;
+  }
+  bool changed = false;
+  for (const auto& port : body->get_io()->get_output_pin_decls()) {
+    if (!port.unsign || port.bits == 0 || port.bits > kMaxKnownWidth) {
+      continue;
+    }
+    const auto driver = node.get_driver_pin(port.port_id);
+    if (driver.is_invalid() || !gu::is_unsign(driver) || driver.out_edges().begin() == driver.out_edges().end()) {
+      continue;
+    }
+    const int width = gu::bits_of(driver) > 0 ? std::min<int>(gu::bits_of(driver), static_cast<int>(port.bits)) : 0;
+    if (width <= 0) {
+      continue;
+    }
+    auto  known = synth::bit_facts::known_bits(driver, gu::bits_of(driver));
+    auto& have  = applied[{s.parent, static_cast<uint64_t>(node.get_debug_nid()), static_cast<uint64_t>(port.port_id)}];
+    if (new_known_bits(known, have) == 0) {
+      continue;
+    }
+    changed |= read_known(*s.parent, driver, have, node);
+  }
+  return changed;
+}
+
 // max_versions == 1: per definition, the context ALL its instances share. A
 // definition that receives one gets ONE copy `<name>__k<hash>` (the original
 // stays untouched -- a later run, or another flow, may still want it) and
@@ -890,9 +1015,11 @@ int specialize_shared(std::vector<std::shared_ptr<hhds::Graph>>& graphs, const O
   absl::flat_hash_set<const hhds::Graph*> created;   // copies this pass owns
   std::set<const hhds::Graph*>            pending;   // bodies to refold
   absl::flat_hash_map<const hhds::Graph*, absl::flat_hash_set<uint64_t>> existed;
-  absl::flat_hash_map<const hhds::Graph*, const hhds::Graph*>             cloned_from;
-  absl::flat_hash_set<std::pair<const hhds::Graph*, hhds::Port_id>>       fitted_inputs;  // (copy, input) already fitted
-  absl::flat_hash_set<std::pair<uint64_t, uint64_t>>                      fitted_outputs;
+  absl::flat_hash_map<const hhds::Graph*, const hhds::Graph*>            cloned_from;
+  absl::flat_hash_set<std::pair<const hhds::Graph*, hhds::Port_id>>      fitted_inputs;  // (copy, input) already fitted
+  absl::flat_hash_set<std::pair<uint64_t, uint64_t>>                     fitted_outputs;
+  absl::flat_hash_map<std::pair<const hhds::Graph*, hhds::Port_id>, synth::bit_facts::Known> known_inputs;  // (copy, input)
+  Applied_outputs                                                                            known_outputs;
   if (options.inherit_colors) {
     for (const auto& graph : graphs) {
       auto& set = existed[graph.get()];
@@ -923,11 +1050,17 @@ int specialize_shared(std::vector<std::shared_ptr<hhds::Graph>>& graphs, const O
       roots.push_back(g);
     }
   }
-  int copies = 0;
+  int                                     copies    = 0;
+  // The bodies changed since the per-bit facts were last read (every one in the first round): a fact is a walk over
+  // its drivers, so only the instances whose parent or definition changed are asked again.
+  bool                                    all_dirty = true;
+  absl::flat_hash_set<const hhds::Graph*> dirty;
   for (int round = 0; round < 8; ++round) {
+    absl::flat_hash_set<const hhds::Graph*> next_dirty;
     for (const auto& g : graphs) {
       if (pending.erase(g.get()) != 0) {
         refold_with_options(options, g);
+        dirty.insert(g.get());
         if (options.modified) {
           options.modified->insert(g.get());
         }
@@ -966,11 +1099,25 @@ int specialize_shared(std::vector<std::shared_ptr<hhds::Graph>>& graphs, const O
         continue;
       }
       if (options.state_free_only && !created.contains(body.get()) && !is_state_free(*body, state_free_memo)) {
-        continue;
+        if (!options.stateful_in_place) {
+          continue;
+        }
+        created.insert(body.get());  // refined in place from here on, like a copy this pass owns
       }
-      auto ctx = join_context(*body, *body->get_io(), it->second);
+      const bool parents_changed
+          = all_dirty || std::ranges::any_of(it->second, [&](const Site& site) { return dirty.contains(site.parent); });
+      auto ctx = join_context(*body, *body->get_io(), it->second, parents_changed);
       if (created.contains(body.get())) {
         std::erase_if(ctx.widths, [&](const auto& w) { return fitted_inputs.contains({body.get(), std::get<0>(w)}); });
+        // a copy is refined in place: only the bits it does not spell yet (the merged set is what its readers read)
+        std::erase_if(ctx.bits, [&](auto& b) {
+          auto& have = known_inputs[{body.get(), b.first}];
+          if (new_known_bits(b.second, have) == 0) {
+            return true;
+          }
+          b.second = have;
+          return false;
+        });
       }
       if (ctx.empty()) {
         continue;
@@ -1001,6 +1148,11 @@ int specialize_shared(std::vector<std::shared_ptr<hhds::Graph>>& graphs, const O
       for (const auto& w : ctx.widths) {
         fitted_inputs.insert({target.get(), std::get<0>(w)});
       }
+      if (target != body) {
+        for (const auto& b : ctx.bits) {
+          known_inputs[{target.get(), b.first}] = b.second;  // what the new copy spells from the start
+        }
+      }
       if (ctx.zero_index_fold) {
         for (const auto& s : it->second) {
           const auto loop = s.node.subnode_loop();
@@ -1017,6 +1169,10 @@ int specialize_shared(std::vector<std::shared_ptr<hhds::Graph>>& graphs, const O
         }
       }
       refold_with_options(options, target);
+      if (options.modified) {
+        options.modified->insert(target.get());
+      }
+      next_dirty.insert(target.get());
       changed = true;
     }
     // bottom-up: constant outputs into parents; narrower outputs of copies
@@ -1034,11 +1190,18 @@ int specialize_shared(std::vector<std::shared_ptr<hhds::Graph>>& graphs, const O
           pending.insert(s.parent);
           changed = true;
         }
+        if ((all_dirty || dirty.contains(body.get()) || dirty.contains(s.parent) || next_dirty.contains(body.get()))
+            && publish_known_bits(s, known_outputs)) {
+          pending.insert(s.parent);
+          changed = true;
+        }
       }
     }
     if (!changed && pending.empty()) {
       break;
     }
+    dirty     = std::move(next_dirty);
+    all_dirty = false;
   }
   for (const auto& g : graphs) {
     if (pending.erase(g.get()) != 0) {
@@ -1082,6 +1245,12 @@ int specialize_constants(std::vector<std::shared_ptr<hhds::Graph>>& graphs, cons
   if (options.max_versions == 1) {
     return specialize_shared(graphs, options);
   }
+  // One clone per distinct constant binding: the compile pipeline's mode, on the design every flow starts from. It
+  // carries whole constants only. The per-bit facts belong to the shared mode above, which each flow runs on its own
+  // private copy once its partition is chosen (the simulator before its color plan, synthesis after pass.color): a
+  // partly constant argument (`{16'b0, x}`) is common, and a renamed copy of every definition that takes one would
+  // change the names of the compiled design itself (state matching, LEC pairing and the simulator's per-definition
+  // files key on them).
   return specialize_per_binding(graphs, options);
 }
 }  // namespace livehd::specialize

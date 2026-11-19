@@ -61,8 +61,8 @@ set by lhd when `pass.satopt=true` and the stage is selected) runs it on its pri
 1. **Instances** (`prove_instance_bits`, once, on the whole private hierarchy before it is cut). The constant bits
    of every definition output are read as constants by each instance's readers, and the bits of a definition
    input that *every* instance drives with one constant are read as constants inside the definition, to a
-   fixpoint of at most six rounds. Zeros and ones alike: the structural pass before it
-   (`propagate_constant_bits`, `pass/synth/flat_state.cpp`) knows only word-level zeros.
+   fixpoint of at most six rounds. The shared structural pass before it (`pass.specialize`, the per-bit join)
+   already carries what `bit_facts::known_bits` can read off the graph; this adds what only a proof finds.
 2. **Colors** (`prove_boundary_bits`, on each graph right before the partitioner cuts it, its final colors on it).
    A combinational value read by a cell of another color is proven bit by bit; each reading color gets its own
    `Or(And(value, keep), constant)` cells, so its region sees the constants instead of free inputs.

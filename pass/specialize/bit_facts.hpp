@@ -5,10 +5,12 @@
 
 #include "hhds/graph.hpp"
 
-// Bit-level facts about word-level values, used where a module boundary would
-// otherwise hide them from the mapper (a lowered memory, an extracted ware
-// shifter): the parent knows that part of an input is provably 0, the module
-// body does not.
+// Bit-level facts about word-level values, used where a boundary would
+// otherwise hide them: pass.specialize carries them across instance boundaries
+// for every flow (compile, sim, synth), and synthesis across its colors, a
+// lowered memory and an extracted ware shifter. The parent knows that part of
+// an input is provably constant, the body on the other side does not.
+// (Namespace kept from its first home in pass/synth.)
 namespace livehd::synth::bit_facts {
 
 // Which bits of the value `pin` drives are provably constant 0 (true = known

@@ -16,6 +16,14 @@
 // identity stay intact. Runs after the partitioning is decided: the simulator
 // on its private library before Color_plan, synthesis on the mapper's private
 // copy after pass.color (docs/passes.html).
+//
+// The same holds per BIT (bit_facts.hpp): the bits of an input that every
+// instance drives with one value and the known bits of an instance's output
+// cross the boundary too, and every body that reads one is folded again, to a
+// fixpoint. This is the global pass that leaves no constant at a boundary;
+// synthesis runs it again whenever one of its own steps exposes new constants
+// (pass/synth/design_prepare.cpp) and adds the color boundaries, which only
+// exist once a definition is cut (pass/synth/color_boundary.hpp).
 namespace livehd::specialize {
 
 struct Options {
@@ -27,6 +35,11 @@ struct Options {
   // picks, clock-gate mapping and LEC pairing on a stateful definition's
   // identity, so those keep their own module.
   bool state_free_only = false;
+  // With state_free_only: a definition that holds state is not skipped but refined IN PLACE (no copy, so it keeps
+  // its name, registers and instance identity) with the context all its instances share. Only for a private copy
+  // of the design whose every instance is in `graphs`: the body then holds only inside this design. Synthesis sets
+  // it; this is how a constant bit reaches a FIFO or an arbiter without flattening.
+  bool stateful_in_place = false;
   // Refold (cprop + bitwidth) EVERY definition once, not only the ones this
   // pass rewrites. The simulator wants it; synthesis does not -- after
   // pass.color a refold would reshape regions nothing here touched.
@@ -51,8 +64,15 @@ struct Options {
 // Specialize `graphs` (appending the copies; an original stays, even when no
 // instance uses it any more -- a testbench may drive any module directly). Information crosses an instance
 // boundary both ways: a context into the child (constant inputs, narrower
-// input widths) and a constant output, or a copy's narrower output, into the
-// parent. Returns the number of specialized definitions created or refreshed.
+// input widths, and the BITS of an unsigned input that every instance drives
+// with the same value: bit_facts::known_bits, zeros and ones) and a constant
+// output, a copy's narrower output or the known bits of an instance's output
+// into the parent. No constant bit is left at a boundary without the bodies
+// that read it being folded again. The per-bit facts cross in the shared mode
+// (max_versions == 1), the one each flow runs on its private copy once its
+// partition is chosen; the per-binding mode of the compile pipeline carries
+// whole constants only, so the compiled design keeps its definition names.
+// Returns the number of specialized definitions created or refreshed.
 int specialize_constants(std::vector<std::shared_ptr<hhds::Graph>>& graphs, const Options& options = {});
 
 // One constant-folding and width round over a private body a structural
