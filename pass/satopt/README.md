@@ -45,6 +45,7 @@ default; an explicit `pass.satopt.stages` list replaces that.
 | `memory` | memory ports: synthesis merges/removes/narrows; shared only ties a write enable proven never active | on |
 | `resub` | experimental: a one-bit output whose private cone has 2+ cells re-expressed as And/Or/Xor/And-not of two nearby one-bit values | on |
 | `simp_ctrl` | derive and prove a Boolean function over up to three existing one-bit signals for mux selects and Flop/memory enables; commit only when it removes more cells than it adds | on |
+| `boundary` | bits of a value that crosses a synthesis color, or an instance boundary, proven constant (0 or 1, any position); the colors or definitions that read it read `Or(And(value, keep), constant)` | on (needs colors: inapplicable in the compile step; `lhd synth`'s mapper runs it) |
 
 Targets of the value stages are operation cells only (Sum, Mult, Div, And, Or,
 Xor, Not, Ror, Rxor, Popcount, EQ, LT, GT, SHL, SRA, two-arm Mux, Hotmux);
@@ -52,6 +53,30 @@ wiring, constants, inputs and state or instance outputs may be the value a
 target is replaced with, never a target. Other constant-bit runs are left
 alone on purpose: rebuilding a value from lanes hid an affine shift amount
 from the word-select ware and grew a 4:1 word select 4x.
+
+`boundary` (`satopt_boundary.cpp`) is the one stage that reads the synthesis colors, so it cannot run in the
+compile step (it reports `inapplicable` there). Under `lhd synth` the mapper (`pass.abc`, label `satopt_boundary`,
+set by lhd when `pass.satopt=true` and the stage is selected) runs it on its private copy, in two parts:
+
+1. **Instances** (`prove_instance_bits`, once, on the whole private hierarchy before it is cut). The constant bits
+   of every definition output are read as constants by each instance's readers, and the bits of a definition
+   input that *every* instance drives with one constant are read as constants inside the definition, to a
+   fixpoint of at most six rounds. Zeros and ones alike: the structural pass before it
+   (`propagate_constant_bits`, `pass/synth/flat_state.cpp`) knows only word-level zeros.
+2. **Colors** (`prove_boundary_bits`, on each graph right before the partitioner cuts it, its final colors on it).
+   A combinational value read by a cell of another color is proven bit by bit; each reading color gets its own
+   `Or(And(value, keep), constant)` cells, so its region sees the constants instead of free inputs.
+
+Both prove through instances (`descend_subs`) and treat an instance output they cannot enter as a free word
+(`Prove_options::subs_as_symbols`). Nothing is replaced: the producer and the readers of its own color keep the
+value, so every rewrite keeps every function and they are applied together. Partial facts are taken for unsigned
+values only (a signed value must be one whole constant). There is no proof cache yet: the search reruns.
+Measured 2026-11-19 (asap7, `lhd synth`, `pass.satopt.stages=boundary`): HighTide floonoc comb area 3085.1 ->
+2966.9 um2 (-3.8%) for 52 s of proofs, all of it from the instance part.
+
+```
+lhd synth design.v --top top --set pass.satopt=true --set pass.satopt.stages=boundary
+```
 
 `simp_ctrl` runs after `resub` and is independent of it. For example:
 

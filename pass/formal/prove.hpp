@@ -72,6 +72,11 @@ struct Prove_options {
   bool reject_unknown_constants = false;
   // Encode through Sub instances (virtual flat) instead of stopping at them.
   bool descend_subs             = false;
+  // An instance output the encoding cannot enter (descend_subs off, a body-less
+  // or loop callee, or something unsupported inside it) is an independent free
+  // word, like a memory output under memory_as_symbols, instead of making the
+  // whole cone Unknown. Sound for any fact proven for every value of that word.
+  bool subs_as_symbols          = false;
   // A driver pin with no stamped width (bits 0) makes its cone Unknown instead
   // of being read as one bit: a rewrite proven about a guessed width would be
   // proven about a different circuit (satopt).

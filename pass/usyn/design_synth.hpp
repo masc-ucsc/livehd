@@ -61,6 +61,11 @@ struct Design_options {
   // (synth::fold_gated_clocks) on the flat design top right before it is
   // partitioned. Only the domino profile sets it.
   std::optional<synth::Gated_fold_options> gated_fold{};
+  // synth.boundary_bits: no constant and no unread bit crosses a color (synth::trim_color_boundaries), on each graph
+  // right before it is cut.
+  bool                                     boundary_bits = true;
+  // synth.share_cells: duplicate cells share one (synth::share_duplicate_cells), in the same step.
+  bool                                     share_cells = true;
 };
 
 struct Design_region {

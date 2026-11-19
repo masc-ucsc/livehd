@@ -78,6 +78,26 @@ Remaining native synthesis work is tracked in [2u-usyn](../../todo/livehd/2u-usy
    after the first sweep), and `pass.usyn` takes it too. Run together, the second finds only
    what the first could not (`//lhd/tests:lhd_state_sweep_test` runs both and proves the
    result against the source).
+   **Constant bits across instances** (`propagate_constant_bits`, `flat_state.cpp`; with the state sweep). The bits of a
+   definition output that are constant are read as constants by every instance's readers, and the bits of a definition input
+   that every instance drives with one value are read as constants inside the definition: zeros and ones, per bit
+   (`bit_facts::known_bits`: constants, And/Or, Mux and Hotmux arms, Concat lanes, constant windows and shifts, an indexed
+   word select `v[idx]` whose lanes all agree, and through an instance into its definition and back out at what that
+   instance drives). It runs after the whole-design state proof and again after the demand split, when instances that read
+   a definition differently have their own copies. HighTide floonoc: comb area -1.7%.
+   **Color boundaries** (`synth.boundary_bits`, default true; `color_boundary.cpp`). On each graph right before it is cut
+   (`Pass_partition`'s `prepare_src` seam, both mappers), nothing constant and nothing unread crosses a color: a cell of
+   another color reads the known bits of a value as constants through cells of its own color, and a value of which only
+   some bits are read (the per-bit demand of the state sweep, `mask_unread_color_outputs`) crosses as `value & read`, the
+   And in the producer's color, so the producing region exports constant 0 for the unread bits and the mapper drops their
+   logic. Only known bits that some reader asks for get a cell; both rewrites are idempotent. No proof search: satopt's
+   `boundary` stage is the SAT-backed version for what the structural facts cannot see.
+   **Duplicate cells** (`synth.share_cells`, default true; `share_cells.cpp`), in the same step and before it: one forward
+   pass hashes every combinational cell from its operation, width and operands (a constant by value, a driver by the cell
+   already standing for it; And/Or/Xor/Sum/Mult/EQ operands as a multiset) and removes a cell identical to an earlier one.
+   The e-graph fold already shares inside a definition; this sees the same logic in two modules once a color inlines them
+   into one graph. The kept cell stays in its color; a share that would make two colors depend on each other in a loop is
+   refused.
    **Register merge** (`synth.merge_registers`, default true under `lhd synth`, off in `State_options`; `register_merge.cpp`), just
    before the sweep: a Flop with the same clock, enable, reset, polarities, reset value,
    width, sign and D driver as another in its definition holds the same value every cycle,

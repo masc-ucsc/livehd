@@ -10,9 +10,6 @@
 
 namespace livehd::satopt::detail {
 namespace {
-// Values held at once, over every column (16 bytes each, inline up to 64 bits).
-constexpr uint64_t kMaxStored = 4'000'000;
-
 uint64_t splitmix(uint64_t x) {
   x += 0x9e3779b97f4a7c15ULL;
   x  = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ULL;

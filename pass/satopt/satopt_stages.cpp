@@ -14,6 +14,7 @@
 #include "satopt_ctrl.hpp"
 #include "satopt_memory.hpp"
 #include "satopt_mux.hpp"
+#include "satopt_boundary.hpp"
 #include "satopt_muxtree.hpp"
 #include "satopt_share.hpp"
 #include "satopt_sweep.hpp"
@@ -72,6 +73,7 @@ std::string_view stage_name(Stage s) {
     case Stage::memory: return "memory";
     case Stage::resub: return "resub";
     case Stage::simp_ctrl: return "simp_ctrl";
+    case Stage::boundary: return "boundary";
   }
   return "?";
 }
@@ -294,7 +296,8 @@ std::optional<Stage_set> parse_stages(std::string_view text, Profile profile, st
                                        Stage::hotmux,
                                        Stage::memory,
                                        Stage::resub,
-                                       Stage::simp_ctrl}
+                                       Stage::simp_ctrl,
+                                       Stage::boundary}
                                  .text());
       }
       return std::nullopt;
@@ -425,6 +428,8 @@ Report run(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, const Option
     return report;
   }
   const auto  applicable = scan(graphs);
+  // Only a colored design (after pass.color) has color boundaries; the scan is skipped unless the stage is asked for.
+  const bool  colored    = opts.stages.has(Stage::boundary) && has_colors(graphs);
   const auto* prover     = opts.mux_prover ? opts.mux_prover : registered_mux_prover();
   const auto  runs       = [&](Stage s) {
     if (!opts.stages.has(s)) {
@@ -441,6 +446,7 @@ Report run(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, const Option
       case Stage::hotmux    : return applicable.muxes;
       case Stage::memory: return applicable.memory;
       case Stage::simp_ctrl: return applicable.selects || applicable.memory;
+      case Stage::boundary: return colored;
     }
     return false;
   };
@@ -480,6 +486,7 @@ Report run(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, const Option
       case Stage::odc: sweep_values(graphs, Sweep::odc, opts.profile, opts.cache_dir, r, meter); break;
       case Stage::resub: sweep_values(graphs, Sweep::resub, opts.profile, opts.cache_dir, r, meter); break;
       case Stage::simp_ctrl: simplify_controls(graphs, r, meter); break;
+      case Stage::boundary: prove_boundary_bits(graphs, opts.profile, r, meter); break;
       case Stage::muxtree   : simplify_mux_contexts(graphs, r, meter); break;
       case Stage::share     : share_operators(graphs, r, meter); break;
       case Stage::hotmux:

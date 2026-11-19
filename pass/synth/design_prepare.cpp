@@ -316,7 +316,7 @@ std::unique_ptr<Prepared_design> prepare_design(std::span<const std::shared_ptr<
     }
     if (zeros->output_bits + zeros->input_bits > 0) {
       livehd::diag::stat(from_pass, "const-bits", "progress")
-          .msg("{}: {} instance output bit(s) and {} definition input bit(s) read as constant 0 across instance "
+          .msg("{}: {} instance output bit(s) and {} definition input bit(s) read as constants across instance "
                "boundaries ({} round(s))",
                from_pass, zeros->output_bits, zeros->input_bits, zeros->rounds)
           .emit();
@@ -354,6 +354,23 @@ std::unique_ptr<Prepared_design> prepare_design(std::span<const std::shared_ptr<
                swept->registers_split,
                swept->trimmed_bits)
           .emit();
+    }
+    // Once more across the instance boundaries: the demand split above gave the instances that read a definition
+    // differently their own copies, so a bit that only SOME instances of the shared definition drove with a constant
+    // is now driven so by every instance of a copy (floonoc's `lzc`: 128 instances behind two read patterns), and the
+    // sweep left constants behind the registers it folded.
+    if (!state.flat_sweep) {
+      const auto again = propagate_constant_bits(result->definitions, state.top, budget);
+      if (!again) {
+        return {};
+      }
+      if (again->output_bits + again->input_bits > 0) {
+        livehd::diag::stat(from_pass, "const-bits", "progress")
+            .msg("{}: after the demand split, {} more instance output bit(s) and {} definition input bit(s) read as "
+                 "constants ({} round(s))",
+                 from_pass, again->output_bits, again->input_bits, again->rounds)
+            .emit();
+      }
     }
   }
   // The cells each definition holds before its carried loops are expanded:

@@ -1,6 +1,8 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "state_sweep.hpp"
 
+#include "bit_facts.hpp"
+
 #include <algorithm>
 #include <bit>
 #include <cstdlib>
@@ -349,6 +351,125 @@ public:
       }
     }
     return made;
+  }
+
+  // Which of the low bits of each of `pins` (driver pins of the one definition) something reads.
+  std::optional<std::vector<std::vector<bool>>> read_bits(std::span<const hhds::Pin_class> pins) {
+    if (!mark_loop_bodies() || !link()) {
+      return std::nullopt;
+    }
+    seed();
+    if (!solve()) {
+      return std::nullopt;
+    }
+    std::vector<std::vector<bool>> out;
+    out.reserve(pins.size());
+    auto& def = defs_.front();
+    for (const auto& pin : pins) {
+      const auto width = static_cast<size_t>(std::max(1, gu::bits_of(pin)));
+      const auto it    = def.demand.find(pin.get_class_index());
+      auto&      read  = out.emplace_back(width, false);
+      if (it == def.demand.end()) {
+        continue;
+      }
+      for (size_t i = 0; i < width; ++i) {
+        read[i] = it->second.test(static_cast<int64_t>(i));
+      }
+    }
+    return out;
+  }
+
+  // Color boundaries: an unsigned combinational value that a cell of another color reads, and of which only some
+  // bits are read by anything, is handed to those readers as `value & read`, the And in the producer's color. The
+  // producer's region then exports constant 0 for the unread bits and the mapper drops the logic behind them; the
+  // readers see the same value on every bit they read.
+  std::optional<Unread_stats> mask_unread() {
+    if (!mark_loop_bodies() || !link()) {
+      return std::nullopt;
+    }
+    seed();
+    if (!solve()) {
+      return std::nullopt;
+    }
+    Unread_stats stats;
+    for (auto& def : defs_) {
+      if (def.skip) {
+        continue;
+      }
+      struct Cut {
+        hhds::Pin_class              pin;
+        std::vector<hhds::Pin_class> sinks;
+        std::vector<bool>            keep;
+        int                          color = -1;
+      };
+      std::vector<Cut> cuts;
+      for (auto node : def.graph->body().nodes()) {
+        if (!admit("state-sweep-scan")) {
+          return std::nullopt;
+        }
+        const auto op = gu::type_op_of(node);
+        if (gu::is_builtin_node(node) || keeps_unobserved(op) || is_register(op) || !Ntype::is_comb(op) || op == Ntype_op::Clock_cell
+            || !single_output(node)) {
+          continue;
+        }
+        for (auto pin : node.out_sorted_pins()) {
+          const int64_t width = gu::bits_of(pin);
+          if (width <= 1 || width > kMaxMaskOperand || !gu::is_unsign(pin)) {
+            continue;
+          }
+          const auto it = def.demand.find(pin.get_class_index());
+          if (it == def.demand.end() || it->second.unbounded()) {
+            continue;  // nothing reads it (the dead-cell sweep's), or everything does
+          }
+          Cut  cut;
+          bool partial = false;
+          cut.keep.resize(static_cast<size_t>(width));
+          for (int64_t i = 0; i < width; ++i) {
+            cut.keep[static_cast<size_t>(i)] = it->second.test(i);
+            partial                         |= !cut.keep[static_cast<size_t>(i)];
+          }
+          if (!partial) {
+            continue;
+          }
+          // Nothing to gain when every unread bit is already a known zero (a mask this very step put there on an
+          // earlier run, a zero lane): the step is idempotent.
+          const auto zero   = bit_facts::known_zero_bits(pin, static_cast<int>(width));
+          bool       gains  = false;
+          for (int64_t i = 0; i < width && !gains; ++i) {
+            gains = !cut.keep[static_cast<size_t>(i)] && !zero[static_cast<size_t>(i)];
+          }
+          if (!gains) {
+            continue;
+          }
+          const int mine = gu::has_color(node) ? gu::color_of(node) : 0;
+          for (auto edge : pin.out_edges()) {
+            if (gu::is_graph_output_pin(edge.sink)) {
+              continue;
+            }
+            const auto reader = edge.sink.get_master_node();
+            if ((gu::has_color(reader) ? gu::color_of(reader) : 0) != mine) {
+              cut.sinks.push_back(edge.sink);
+            }
+          }
+          if (cut.sinks.empty()) {
+            continue;
+          }
+          cut.pin   = pin;
+          cut.color = gu::has_color(node) ? mine : -1;
+          cuts.push_back(std::move(cut));
+        }
+      }
+      for (const auto& cut : cuts) {
+        const auto masked = bit_facts::mask_pin(*def.graph, cut.pin, cut.keep, cut.color);
+        for (const auto& sink : cut.sinks) {
+          sink.del_sink(cut.pin);
+          masked.connect_sink(sink);
+        }
+        ++stats.values;
+        stats.bits += static_cast<uint64_t>(std::ranges::count(cut.keep, false));
+      }
+    }
+    return stats;
   }
 
 private:
@@ -721,7 +842,36 @@ private:
     }
     const int64_t top = m.highest();
     switch (op) {
-      case Ntype_op::And:
+      case Ntype_op::And: {
+        // A bit a non-negative constant operand clears is 0 whatever the other operands carry there.
+        Mask kept = m;
+        if (!m.unbounded()) {
+          for (auto sink : node.inp_sorted_pins()) {
+            for (auto drv : sink.get_driver_pins()) {
+              if (!drv.is_const()) {
+                continue;
+              }
+              const auto& c = gu::const_of(drv);
+              if (c.has_unknowns() || !c.is_integer() || c.is_negative()) {
+                continue;
+              }
+              Mask narrowed;
+              for (int64_t i = 0; i <= top; ++i) {
+                if (kept.test(i) && c.bit_test(static_cast<int>(i))) {
+                  narrowed.set(i);
+                }
+              }
+              kept = narrowed;
+            }
+          }
+        }
+        for (auto sink : node.inp_sorted_pins()) {
+          for (auto drv : sink.get_driver_pins()) {
+            add_demand(def, drv, kept);
+          }
+        }
+        return;
+      }
       case Ntype_op::Or:
       case Ntype_op::Xor:
       case Ntype_op::Not:
@@ -1283,6 +1433,28 @@ std::optional<State_sweep_stats> sweep_unobserved_state(std::span<const std::sha
                                                         std::string_view top, Preparation_budget* budget) {
   Sweeper sweeper(definitions, top, budget);
   return sweeper.run();
+}
+
+std::optional<std::vector<std::vector<bool>>> read_bits(hhds::Graph* graph, std::span<const hhds::Pin_class> pins) {
+  if (graph == nullptr) {
+    return std::nullopt;
+  }
+  const std::shared_ptr<hhds::Graph> alias(std::shared_ptr<void>{}, graph);
+  const std::shared_ptr<hhds::Graph> one[] = {alias};
+  Sweeper                            sweeper(one, graph->get_name(), nullptr);
+  return sweeper.read_bits(pins);
+}
+
+std::optional<Unread_stats> mask_unread_color_outputs(hhds::Graph* graph) {
+  if (graph == nullptr) {
+    return Unread_stats{};
+  }
+  // A non-owning handle: the caller owns the graph. It is the only definition and its own root, so its outputs and
+  // every instance input are read in full.
+  const std::shared_ptr<hhds::Graph> alias(std::shared_ptr<void>{}, graph);
+  const std::shared_ptr<hhds::Graph> one[] = {alias};
+  Sweeper                            sweeper(one, graph->get_name(), nullptr);
+  return sweeper.mask_unread();
 }
 
 std::optional<int> split_by_demand(std::vector<std::shared_ptr<hhds::Graph>>& definitions, std::string_view top,
