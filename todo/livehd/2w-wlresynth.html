@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TODO 2w-wlresynth — wirelength-aware cone resynthesis around virtual buffers and long nets</title>
+<link rel="stylesheet" href="../todo.css">
+</head>
+<body>
+<nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
+<main>
+<h1><strong class="item-id">2w-wlresynth</strong> Wirelength-aware cone resynthesis around virtual buffers and long nets</h1>
+<p><span class="status">Plan written 2026-11-19 from a question-and-answer session. Step 0 (slack-based
+placement weights) is being implemented; steps 1 to 6 are plan only. Names of options and files are
+proposals.</span></p>
+
+<p>After a few timing-driven global-placement iterations, some nets show that the logic's fanout
+structure conflicts with the placement: one driver and many loads spread over the die (a virtual
+buffer root), or a long net with few pins (a repeater candidate). Today the answer is always
+buffers. This task extracts the cone of logic around such a net and lets USYN restructure it using
+the placed positions, so that copies of the driver logic sit near their load clusters. A buffer
+tree or a repeater stays as one option among the others, chosen where it wins.</p>
+
+<h2>Why</h2>
+<ul>
+<li><strong>Routed wirelength is the remaining gap to OpenROAD.</strong> On HighTide asap7, LiveHD
+routes to 0 DRC with 1.12 to 1.34 times OpenROAD's routed wirelength on macro-free designs
+(2026-11-18, after virtual buffer trees). More wire means more detailed-route iterations and route
+time.</li>
+<li><strong>Existing resynthesis is timing only.</strong> <code>synth.place.io_resynth</code> remaps a
+whole color only when its placed slack is within 5% of the period and its boundary got tighter than
+synthesis assumed. It has no wirelength objective and skips stages that already meet timing.</li>
+<li><strong>Remapping for area does not help.</strong> Area-oriented mapping cut HPWL only 2 to 6% and
+cost timing (sha3 +209 to −86 ps). Cell and pin counts are already within about 7% of ORFS.</li>
+<li><strong>The excess wire sits in buffered nets.</strong> On NVDLA/partition_a the netlist-side excess
+is in 5 to 8 pin nets and nets over 64 pins driven by timing-repair buffers (BUFx16f and BUFx24
+cells driving 65 to 138 spread loads). 3-pin nets driven by flops are 3 times longer than with
+OpenROAD's placer on the same netlist.</li>
+</ul>
+
+<h2>Decisions (2026-11-19)</h2>
+<table>
+<tr><th>#</th><th>Topic</th><th>Decision</th></tr>
+<tr><td>W1</td><td>Unit of work</td><td>The cone of logic around one target net, not the whole
+color.</td></tr>
+<tr><td>W2</td><td>Targets</td><td>Virtual buffer roots (high fanout) and long low-fanout nets
+(repeater candidates).</td></tr>
+<tr><td>W3</td><td>Engine</td><td>USYN's native XAG, not ABC logic optimization. ABC stays only as the
+technology-mapping provider for the rewritten cone, as it is for USYN today.</td></tr>
+<tr><td>W4</td><td>Cone extent</td><td>The forward and backward cone of the target net up to the flops,
+flops included, restricted to the part where there is a chance to optimize. Beyond that cone, look
+only a few extra combinational gate levels. No fixed gate-count bound.</td></tr>
+<tr><td>W5</td><td>Colors</td><td>A cone may cross colors.</td></tr>
+<tr><td>W6</td><td>Flops</td><td>Flops may be duplicated. All copies share a common name derived from
+the original register so <code>semdiff</code> collapses them. LEC either collapses the copies or
+structurally undoes the duplication before proving.</td></tr>
+<tr><td>W7</td><td>Area</td><td>The per-cone growth limit is soft. The real constraint is the overall
+area of the die, so candidates from all cones compete for the free area, ranked by gain per
+area.</td></tr>
+<tr><td>W8</td><td>Growth budget</td><td>The fixed 5% growth budget is a soft guide against search
+explosion. It may be replaced by a better method to decide buffer insertion, such as the ranking of
+W7.</td></tr>
+<tr><td>W9</td><td>Phase 1 gate</td><td>No stop gate. The measured upper bound only orders the search
+(which cones to try first).</td></tr>
+<tr><td>W10</td><td>Order</td><td>Fix the rank-based timing-driven placement weights first (step 0),
+so cones are scored on a placement that has not stretched nets for no reason.</td></tr>
+</table>
+
+<h2>Steps</h2>
+<h3>Step 0: slack-based placement weights (in progress)</h3>
+<p>Today about half of all nets get a placement weight from 1 to 2 by slack percentile, even on a
+design that meets timing (NVDLA/partition_a: about 29k of 58.6k nets, design finishes at +354 ps).
+With timing-driven placement off, liteeth HPWL drops 11% with better WNS and NVDLA/partition_a
+drops 7% at equal WNS, but minimax, sha3 and litepci lose timing. Weight a net by its slack relative
+to the clock period instead: weight 1 for comfortable slack, rising smoothly as slack approaches
+zero, saturating for negative slack. Code: <code>data_timing_weights</code> in
+<code>pass/place/timing_place.cpp</code> and the post-synthesis seed in
+<code>lhd/lhd_kernel_synth.cpp</code>.</p>
+
+<h3>Step 1: measure</h3>
+<ul>
+<li>For each target net on litepci, NVDLA/partition_a, sha3 and minimax: fan-in cone size, load
+count, load spread, loads per geometric cluster.</li>
+<li>Estimate the upper bound: HPWL if each load cluster had its own copy of the driver, against
+the buffer tree or repeaters built today.</li>
+<li>Use the bound to order the search (W9).</li>
+</ul>
+
+<h3>Step 2: cone extraction and placement feedback</h3>
+<ul>
+<li>Build the cone as a small graph with placed positions on its boundary pins: inputs with arrival
+times, loads with required times and coordinates.</li>
+<li>Cluster the loads by position, reusing the spatial clustering of the buffer-tree planner
+(<code>plan_buffer_choices</code> in <code>pass/place/repair.cpp</code>).</li>
+</ul>
+
+<h3>Step 3: restructuring options, scored per cone</h3>
+<ul>
+<li><strong>Duplicate the driver.</strong> One copy of the root gate, flop or small fan-in cone per
+load cluster, each fed by the original inputs. One long high-fanout net becomes several short
+ones, at the cost of more load on the cone's inputs.</li>
+<li><strong>Re-decompose.</strong> When the root is a wide AND, OR, XOR or mux, split it so partial
+terms are computed near the inputs they depend on and only the final stage sits near each load
+cluster.</li>
+<li><strong>Push through.</strong> When all loads apply the same next-stage function with different
+side inputs, move that function before the fanout point.</li>
+<li><strong>Move the driver.</strong> For a long low-fanout net, move or duplicate the driver gate
+toward its loads.</li>
+<li><strong>Buffer tree or repeaters.</strong> Today's expansion, kept as the baseline option.</li>
+</ul>
+
+<h3>Step 4: cost model and accept rule</h3>
+<ul>
+<li>Score each option on values measured on the placed design: HPWL of the affected nets, worst
+slack through the cone, slew and capacitance limits, and area.</li>
+<li>Rank all candidates of all cones by gain per area and fill the die's free area in that order
+(W7, W8). No setup slack may be lost. Ties go to fewer cells.</li>
+</ul>
+
+<h3>Step 5: integration</h3>
+<ul>
+<li>Run after the first timing-driven global-placement iterations and before
+<code>expand_virtual_buffers</code>. Targets the pass resolves never reach buffer expansion.</li>
+<li>Place new cells at their cluster centroids, then ECO-legalize, as buffer expansion does.</li>
+<li>Prove each rewritten cone equivalent to the original and reject it on failure.</li>
+<li>Only the private physical copy changes: logical definitions and mapper cache keys stay as they
+are. The pass is deterministic and part of the placement cache key, so warm runs stay
+byte-identical.</li>
+<li>Clock and reset cones and design-instantiated cells (<code>attrs::user_cell</code>) are never
+touched.</li>
+</ul>
+
+<h3>Step 6: verification</h3>
+<ul>
+<li>Unit tests per option on hand-built cones, and an unbounded LEC of a whole design before and
+after, including duplicated flops (W6).</li>
+<li>HighTide pre-CTS and post-route on minimax, sha3, litedram, liteeth, litepci and
+NVDLA/partition_a, as same-binary on/off pairs. Targets: routed wirelength down without setup loss,
+0 DRC kept, fewer inserted buffers.</li>
+</ul>
+
+<h2>Risks</h2>
+<ul>
+<li><strong>Input loading.</strong> Duplicating a driver adds load on its inputs, which can move the
+high-fanout problem one level back. The cost model must include the fan-in nets.</li>
+<li><strong>Small upper bound.</strong> Cell and pin counts are already close to ORFS, so step 1 has to
+show where restructuring can beat good buffering.</li>
+<li><strong>Runtime.</strong> Thousands of cones per design. W4 bounds each cone by structure, and the
+ranking of W7 bounds how many are applied, but the number tried also needs a limit.</li>
+<li><strong>Hold.</strong> Duplicated flops and shorter paths change hold margins after CTS; check the
+ORFS hold-buffer counts in the post-route runs.</li>
+</ul>
+
+<h2>Related</h2>
+<ul>
+<li><a href="2is-incsynth.html">2is-incsynth</a>: placement-stage timing feedback and whole-color
+remap (<code>io_resynth</code>).</li>
+<li><a href="synth-unate.html">synth-unate</a>: the USYN pass this task builds on.</li>
+<li><a href="2r-route.html">2r-route</a>: legroute, which measures the routability these changes
+should improve.</li>
+<li><code>pass/place/README.md</code>, "Virtual buffer trees": the virtual node and its expansion.</li>
+</ul>
+</main>
+<footer>LiveHD TODO</footer>
+</body>
+</html>
