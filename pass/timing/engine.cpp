@@ -516,9 +516,178 @@ void Engine::mark_clock_network() {
 void Engine::compute_loads() {
   load_.assign(netlist_.nets() * corners_, 0.f);
   early_load_.assign(netlist_.nets(), 0.f);
+  virt_levels_.clear();
   for (uint32_t net = 0; net < netlist_.nets(); ++net) {
     compute_net_load(net);
   }
+  plan_virtual_trees();
+  if (!virt_levels_.empty()) {
+    for (uint32_t net = 0; net < netlist_.nets(); ++net) {
+      if (virtual_net(net)) {
+        compute_net_load(net);
+      }
+    }
+  }
+}
+
+// Virtual buffer trees: decide, from the direct loads just computed, which virtual roots the placement's expansion
+// will rebuild -- over the fanout and over the driver's Liberty limits (capacitance, or the output slew at that
+// load, degraded through the longest sink wire, against the max transition) -- and plan the balanced tree each one
+// is timed as until then. Branching b = ceil(N^(1/L)) <= fanout over L = ceil(log_fanout N) buffer levels; the
+// net's wire capacitance is split evenly over the L + 1 driving stages and then over the drivers of each stage, so
+// the root sees b buffer inputs plus its share of the wire, an inner buffer b buffer inputs plus a smaller share,
+// a leaf buffer b sink pins plus its share. The estimate never assumes a wire shorter than the direct net's.
+void Engine::plan_virtual_trees() {
+  if (wire_.net_virtual.empty()) {
+    return;
+  }
+  const size_t C = corners_, stride = max_virtual_levels + 1;
+  const auto   nets = std::min<size_t>(netlist_.nets(), wire_.net_virtual.size());
+  virt_levels_.assign(netlist_.nets(), 0);
+  virt_buffer_.assign(netlist_.nets(), no_index);
+  virt_stage_load_.assign(netlist_.nets() * C * stride, 0.f);
+  direct_load_.assign(netlist_.nets() * C, 0.f);
+  for (uint32_t net = 0; net < nets; ++net) {
+    const auto& vt = wire_.net_virtual[net];
+    if (vt.buffer_type == no_index || vt.buffer_type >= types_.types()) {
+      continue;
+    }
+    const auto driver = netlist_.driver_of(net);
+    if (driver == no_index || clock_pin_[driver] != 0) {
+      continue;
+    }
+    const auto dcell = netlist_.cell_of(driver);
+    const auto dtype = netlist_.type_of(dcell);
+    if (dtype == Cell_types::input_port_type || dtype == Cell_types::output_port_type) {
+      continue;  // a port's drive is the environment's (the expansion leaves it alone too)
+    }
+    const auto dlocal = netlist_.local_of(driver);
+    // The buffer's input pin and its one delay arc.
+    const auto  btype = vt.buffer_type;
+    const Arc*  barc  = nullptr;
+    for (const auto& arc : types_.arcs(btype)) {
+      if (arc.kind == Arc_kind::combinational) {
+        barc = &arc;
+        break;
+      }
+    }
+    if (!barc) {
+      continue;
+    }
+    size_t sinks = 0;
+    float  sink_cap[32]{};
+    float  far_wire = 0;
+    for (const auto sink : netlist_.sinks_of(net)) {
+      if (netlist_.untimed(sink)) {
+        continue;
+      }
+      ++sinks;
+      const auto type = netlist_.type_of(netlist_.cell_of(sink));
+      for (size_t k = 0; k < C; ++k) {
+        sink_cap[k] += type == Cell_types::output_port_type
+                           ? port_load_[netlist_.cell_of(sink)]
+                           : std::max(types_.pin_cap(type, netlist_.local_of(sink), k, 0),
+                                      types_.pin_cap(type, netlist_.local_of(sink), k, 1));
+      }
+      far_wire = std::max(far_wire, wire_delay(sink, 0));
+    }
+    const auto fanout = std::max<uint32_t>(2, vt.fanout);
+    if (sinks <= fanout) {
+      continue;
+    }
+    // Over the driver's limits as a direct net?
+    bool over = false;
+    for (size_t k = 0; k < C && !over; ++k) {
+      const float load     = load_[net * C + k];
+      const float cap_lim  = types_.max_capacitance(dtype, dlocal, k);
+      const float tran_lim = types_.max_transition(dtype, dlocal, k);
+      if (cap_lim != inf && cap_lim > 0 && load > cap_lim) {
+        over = true;
+        break;
+      }
+      if (tran_lim == inf || tran_lim <= 0) {
+        continue;
+      }
+      for (const auto& arc : types_.arcs_into(dtype, dlocal)) {
+        if (!timed_arc(arc)) {
+          continue;
+        }
+        for (unsigned t = 0; t < 2 && !over; ++t) {
+          const auto slew_table = types_.table(arc, k, 1, t);
+          if (slew_table == no_index) {
+            continue;
+          }
+          const float out  = std::max(0.f, types_.lookup(slew_table, Query{10.f, load, 0.f, 0.f}));
+          const float far  = ramp_through_pole(out, far_wire, types_.slew_measure(k)).second;
+          over             = out > tran_lim || far > tran_lim;
+        }
+        break;  // the first timed arc stands for the drive
+      }
+    }
+    if (!over) {
+      continue;
+    }
+    // The balanced tree.
+    const double n      = static_cast<double>(sinks);
+    auto         levels = static_cast<size_t>(std::ceil(std::log(n) / std::log(static_cast<double>(fanout)) - 1e-9));
+    levels              = std::clamp<size_t>(levels, 1, max_virtual_levels);
+    const double branch = std::min<double>(fanout, std::ceil(std::pow(n, 1.0 / static_cast<double>(levels)) - 1e-9));
+    const auto   bin    = barc->from;
+    virt_levels_[net]   = static_cast<uint8_t>(levels);
+    virt_buffer_[net]   = btype;
+    for (size_t k = 0; k < C; ++k) {
+      direct_load_[net * C + k] = load_[net * C + k];
+    }
+    for (size_t k = 0; k < C; ++k) {
+      const float  cin      = std::max(types_.pin_cap(btype, bin, k, 0), types_.pin_cap(btype, bin, k, 1));
+      const float  wire_cap = wire_.net_cap_ff.empty() ? 0.f : wire_.net_cap_ff[net * C + k];
+      const double per_stage_wire = wire_cap / static_cast<double>(levels + 1);
+      const double leaves         = std::ceil(n / branch);
+      for (size_t j = 0; j <= levels; ++j) {
+        const double drivers = std::min(std::pow(branch, static_cast<double>(j)), leaves);
+        const double pins    = j < levels ? branch * cin : branch * (sink_cap[k] / n);
+        virt_stage_load_[(net * C + k) * stride + j] = static_cast<float>(pins + per_stage_wire / std::max(1.0, drivers));
+      }
+    }
+  }
+}
+
+std::pair<float, float> Engine::virtual_sink(uint32_t net, uint32_t sink, size_t k, unsigned t, float slew) const {
+  const size_t C = corners_, stride = max_virtual_levels + 1;
+  const auto   levels = virt_levels_[net];
+  const auto   btype  = virt_buffer_[net];
+  const Arc*   barc   = nullptr;
+  for (const auto& arc : types_.arcs(btype)) {
+    if (arc.kind == Arc_kind::combinational) {
+      barc = &arc;
+      break;
+    }
+  }
+  // Each stage's wire. The direct net's Elmore delay to this sink is about R_path * W / 2 (W its whole wire and
+  // pin load), which gives the path resistance; a stage covers 1/(levels + 1) of that path and drives only its
+  // own load, so its Elmore delay is that share of R_path times the stage load (the whole stage load, not half:
+  // kept pessimistic), and never more than its share of the direct delay.
+  const float direct    = wire_delay(sink, k);
+  const float net_total = load_[static_cast<size_t>(net) * C + k] > 0 ? direct_load_[static_cast<size_t>(net) * C + k] : 0.f;
+  const float r_share   = net_total > 0 ? 2.f * direct / net_total / static_cast<float>(levels + 1) : 0.f;
+  const auto  stage_tau = [&](size_t j) {
+    const float load = virt_stage_load_[(static_cast<size_t>(net) * C + k) * stride + j];
+    return std::min(direct / static_cast<float>(levels + 1), r_share * load);
+  };
+  const auto& m     = types_.slew_measure(k);
+  float       delay = 0;
+  for (size_t j = 1; j <= levels; ++j) {
+    const auto [dw, sw] = ramp_through_pole(slew, stage_tau(j - 1), m);
+    delay += dw;
+    slew                 = sw;
+    const Query q{slew, virt_stage_load_[(static_cast<size_t>(net) * C + k) * stride + j], 0.f, 0.f};
+    const auto  dt = barc ? types_.table(*barc, k, 0, t) : no_index;
+    const auto  st = barc ? types_.table(*barc, k, 1, t) : no_index;
+    delay += dt == no_index ? 0.f : types_.lookup(dt, q);
+    slew = st == no_index ? slew : std::max(0.f, types_.lookup(st, q));
+  }
+  const auto [dw, sw] = ramp_through_pole(slew, stage_tau(levels), m);
+  return {delay + dw, sw};
 }
 
 // The total load of one net in every corner: the pin capacitances of its sinks (the larger of rise and fall),
@@ -548,6 +717,13 @@ bool Engine::compute_net_load(uint32_t net) {
       sum[k] += wire_.net_cap_ff[net * C + k];
     }
     early += wire_.net_cap_ff[net * C + hold_corner_];
+  }
+  if (virtual_net(net)) {  // the root drives the first stage of its planned tree
+    const size_t stride = max_virtual_levels + 1;
+    for (size_t k = 0; k < C; ++k) {
+      sum[k] = virt_stage_load_[(static_cast<size_t>(net) * C + k) * stride];
+    }
+    early = virt_stage_load_[(static_cast<size_t>(net) * C + hold_corner_) * stride];
   }
   bool changed = false;
   for (size_t k = 0; k < C; ++k) {
@@ -647,13 +823,14 @@ void Engine::recompute_arrival(uint32_t p) {
     return;
   }
   if (net != no_index && !netlist_.is_driver(p)) {
-    const auto driver = netlist_.driver_of(net);
+    const auto driver  = netlist_.driver_of(net);
+    const bool virt    = virtual_net(net);
     for (size_t s = 0; s < S; ++s) {
       const size_t k  = s % C;
       const float  wd = wire_delay(p, k);
       for (unsigned t = 0; t < 2; ++t) {
         const auto from = index(driver, s, t), to = index(p, s, t);
-        const auto [d, sl] = ramp_through_pole(slew_[from], wd, types_.slew_measure(k));
+        const auto [d, sl] = virt ? virtual_sink(net, p, k, t, slew_[from]) : ramp_through_pole(slew_[from], wd, types_.slew_measure(k));
         store(arrival_, to, arrival_[from] + d);
         store(slew_, to, sl);
         store(depth_, to, depth_[from]);
@@ -826,7 +1003,8 @@ void Engine::recompute_required(uint32_t p) {
           if (netlist_.untimed(sink) || clock_pin_[sink] != 0) {
             continue;
           }
-          requirement = std::min(requirement, required_[index(sink, s, t)] - wire_delay(sink, k));
+          const float through = virtual_net(net) ? virtual_sink(net, sink, k, t, slew_[index(p, s, t)]).first : wire_delay(sink, k);
+          requirement         = std::min(requirement, required_[index(sink, s, t)] - through);
         }
       }
       for (size_t j = 0; j < arcs.size(); ++j) {
@@ -1024,7 +1202,8 @@ void Engine::forward_early() {
       const float wd     = wire_delay(p, h);
       for (size_t g = 0; g < G; ++g) {
         for (unsigned t = 0; t < 2; ++t) {
-          const auto [d, sl]          = ramp_through_pole(early_slew_[at(driver, g, t)], wd, types_.slew_measure(h));
+          const auto [d, sl]          = virtual_net(net) ? virtual_sink(net, p, h, t, early_slew_[at(driver, g, t)])
+                                                             : ramp_through_pole(early_slew_[at(driver, g, t)], wd, types_.slew_measure(h));
           early_arrival_[at(p, g, t)] = early_arrival_[at(driver, g, t)] + d;
           early_slew_[at(p, g, t)]    = sl;
         }

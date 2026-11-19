@@ -4183,6 +4183,17 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
           place_options.virtual_buffer_trees
               = std::make_shared<const std::map<std::string, livehd::placement::Options::Virtual_buffer>>(
                   std::move(cleaned.virtual_trees));
+          // Until the expansion realizes them, the fast timer times each overloaded virtual root as the balanced
+          // tree it will become instead of a direct drive of every load (which made post-synthesis timing and the
+          // placement weights seeded from it far too pessimistic).
+          if (fast_ranker && !place_options.virtual_buffer_trees->empty()
+              && livehd::debug::env<"LHD_NO_VIRTUAL_TREE_TIMING">() == nullptr) {
+            auto roots = std::make_shared<std::map<std::string, livehd::timing::fast::Physical_ranker::Virtual_root>>();
+            for (const auto& [label, tree] : *place_options.virtual_buffer_trees) {
+              roots->emplace(label, livehd::timing::fast::Physical_ranker::Virtual_root{tree.master, place_options.virtual_buffer_fanout});
+            }
+            fast_ranker->set_virtual_roots(std::move(roots));
+          }
         }
         prepared_libraries.push_back(std::move(library));
         prepared_before = true;
@@ -4433,6 +4444,51 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
       if (io_flow) {
         timed_placement.timing = io_flow->take_final_timing();
       }
+      // LHD_VIRTUAL_TREE_DEBUG: per virtual root, the worst root-to-sink delay the balanced-tree model estimated
+      // (timed now, before the expansion) against what the realized netlist gives (timed after it), in
+      // <output_dir>/virtual_tree_correlation.jsonl.
+      std::map<std::string, std::pair<double, std::vector<std::string>>> virtual_estimate;
+      const bool virtual_debug = livehd::debug::env<"LHD_VIRTUAL_TREE_DEBUG">() != nullptr && fast_ranker
+                                 && place_options.virtual_buffer_trees && !place_options.virtual_buffer_trees->empty()
+                                 && placed.parasitics;
+      const auto root_delays = [&](const livehd::timing::Feedback& fb, const std::string& driver,
+                                   const std::vector<std::string>& sinks) -> double {
+        const auto* d = fb.find_label(driver);
+        if (!d || !d->arrival) {
+          return -1;
+        }
+        double worst = -1;
+        for (const auto& sink : sinks) {
+          if (const auto* p = fb.find_label(sink); p && p->arrival) {
+            worst = std::max(worst, (*p->arrival - *d->arrival) * fb.time_unit_ps);
+          }
+        }
+        return worst;
+      };
+      if (virtual_debug) {
+        const auto est = evaluate(placed);
+        {
+          for (const auto& rc_net : placed.parasitics->nets) {
+            if (!place_options.virtual_buffer_trees->contains(std::string(rc_net.driver))) {
+              continue;
+            }
+            std::vector<std::string> sinks;
+            for (const auto& node : rc_net.nodes) {
+              if (!node.pin.empty() && node.pin != rc_net.driver) {
+                sinks.emplace_back(node.pin);
+              }
+            }
+            if (sinks.size() > place_options.virtual_buffer_fanout) {
+              const auto driver = std::string(rc_net.driver);
+              virtual_estimate.emplace(driver, std::pair{root_delays(est, driver, sinks), std::move(sinks)});
+            }
+          }
+        }
+      }
+      // From here the netlist holds whatever the expansion builds (or the direct nets it leaves): time it as it is.
+      if (fast_ranker) {
+        fast_ranker->set_virtual_roots(nullptr);
+      }
       if (!macro_plan_only && place_options.virtual_buffers && place_options.virtual_buffer_trees
           && !place_options.virtual_buffer_trees->empty()) {
         // Realize the virtual buffer trees now that global placement has converged: each wide net the mapper had
@@ -4447,6 +4503,25 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
         }
         res.recipe_steps.emplace_back(
             std::format("pass.place.virtual_buffers.expanded={}.buffers={}", stats.expanded, stats.buffers));
+        if (virtual_debug && !virtual_estimate.empty()) {
+          const auto real = evaluate(placed);
+          {
+            std::map<std::string, size_t> direct_sinks;  // after the expansion: sinks still on each root's net
+            if (placed.parasitics) {
+              for (const auto& rc_net : placed.parasitics->nets) {
+                direct_sinks[std::string(rc_net.driver)]
+                    = std::count_if(rc_net.nodes.begin(), rc_net.nodes.end(), [](const auto& n) { return !n.pin.empty(); }) - 1;
+              }
+            }
+            std::ofstream out(place_options.output_dir + "/virtual_tree_correlation.jsonl");
+            for (const auto& [driver, entry] : virtual_estimate) {
+              const auto still = direct_sinks.contains(driver) ? direct_sinks.at(driver) : 0;
+              out << std::format(
+                  "{{\"driver\":\"{}\",\"loads\":{},\"expanded\":{},\"estimated_ps\":{:.1f},\"realized_ps\":{:.1f}}}\n",
+                  driver, entry.second.size(), still < entry.second.size(), entry.first, root_delays(real, driver, entry.second));
+            }
+          }
+        }
       }
       // A T3 request can ask for a bounded terminal repair on a no-resize run.
       // It starts after replay and legalization; all changes use the ordinary timing acceptance checks.

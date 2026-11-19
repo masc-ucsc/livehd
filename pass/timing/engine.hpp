@@ -100,6 +100,16 @@ struct Wire_model {
   std::vector<float> net_cap_ff;     // [net * corners + corner]
   std::vector<float> sink_delay_ps;  // [pin * corners + corner], on the sink pins of a net
   std::vector<float> sink_slew_ps;   // same; added to the driver slew in quadrature
+  // Virtual buffer trees (placement, synth.place.virtual_buffers): a net whose driver stands for a synthesis
+  // fanout tree that placement has not rebuilt yet. When the direct net would break the driver's Liberty limits
+  // (the same test the expansion applies), it is timed as the balanced tree the expansion will build: the root
+  // drives the first level of `buffer_type`, ceil(log_fanout(sinks)) levels deep, each sink seeing the buffer
+  // stages and its share of the wire. Within the limits the net stays direct, as the expansion leaves it.
+  struct Virtual_tree {
+    uint32_t buffer_type = no_index;  // a Cell_types index; no_index: an ordinary net
+    uint32_t fanout      = 16;
+  };
+  std::vector<Virtual_tree> net_virtual;  // [net]; empty: no virtual nets
 };
 
 struct Options {
@@ -342,6 +352,11 @@ private:
   void                mark_start_points();
   [[nodiscard]] float wire_delay(uint32_t pin, size_t corner) const;
   [[nodiscard]] float net_load(uint32_t net, size_t corner, bool early) const;
+  // Virtual buffer trees (see Wire_model::Virtual_tree).
+  void                plan_virtual_trees();
+  [[nodiscard]] bool  virtual_net(uint32_t net) const { return net < virt_levels_.size() && virt_levels_[net] != 0; }
+  // Delay and slew from the root's output to a sink through the planned stages; `slew` is the root's output slew.
+  [[nodiscard]] std::pair<float, float> virtual_sink(uint32_t net, uint32_t sink, size_t corner, unsigned t, float slew) const;
 
   Netlist&          netlist_;
   const Cell_types& types_;
@@ -358,6 +373,13 @@ private:
   std::vector<uint8_t>     pin_clock_;  // the clock id of a clock-network pin
   // Per net, per corner.
   std::vector<float>       load_, early_load_;
+  // Virtual buffer trees, planned once per wire model: per net the buffer levels (0: timed direct) and per net,
+  // corner and stage 0..levels the load each driver of that stage sees (stage 0 is the root).
+  static constexpr size_t  max_virtual_levels = 6;
+  std::vector<uint8_t>     virt_levels_;
+  std::vector<uint32_t>    virt_buffer_;      // [net] the buffer type
+  std::vector<float>       virt_stage_load_;  // [(net * corners + corner) * (max_virtual_levels + 1) + stage]
+  std::vector<float>       direct_load_;      // [net * corners + corner] the direct net's load (pins and wire)
   std::vector<Electrical_pin> electrical_pins_;
   std::vector<uint32_t>    port_input_;  // per cell: the index of its input constraint, no_index without one
   // Delay of every timed arc of every cell: [cell block][arc][slot][combo].

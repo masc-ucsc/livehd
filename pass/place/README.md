@@ -344,8 +344,31 @@ one *virtual node* instead of keeping wide trees whole
   definitions, mapper cache keys and warm-run reuse are untouched, and a flow
   without placement keeps the mapper's balanced tree (the fully mapped fallback).
 - **Before expansion.** Global placement and its timing checkpoints see the
-  root driving every load directly. The timer charges that net its full load, so
-  it is pessimistic, not optimistic (minimax: -22.9 ns before expansion).
+  root driving every load directly. The fast timer does not time that direct
+  drive: a recorded root whose direct net is over the fanout cap *and* over the
+  driver's Liberty limits (the expansion's own test: load against
+  max_capacitance, or the output slew at that load, degraded through the
+  longest sink wire, against max_transition) is timed as the balanced tree the
+  expansion will build (`Wire_model::Virtual_tree`, set by
+  `Physical_ranker::set_virtual_roots`). L = ceil(log_fanout N) levels of the
+  recorded root buffer master with branching b = ceil(N^(1/L)); the root drives b
+  buffer inputs plus its share of the net's wire capacitance (split evenly over
+  the L + 1 stages, then over each stage's drivers); every sink sees the L buffer
+  stages (Liberty delay and slew at each stage's load) and each stage's wire,
+  whose Elmore delay is the stage's share of the direct path resistance times the
+  whole stage load, capped at its share of the direct wire delay. A root within
+  its limits stays direct, as the expansion usually leaves it. Correlation on six
+  HighTide designs (estimated against realized worst root-to-sink delay of the
+  expanded nets): median ratio about 1.0; about 40% of the expanded nets come out
+  optimistic, mostly small ones the expansion's stricter lumped test expanded
+  while this model timed them direct. Taking the slower of direct and tree for
+  those was tried and rejected: it moved litepci from +872 to -645 ps. The model is cleared before
+  the expansion: from there the netlist is timed as it is. The direct drive had
+  made post-synthesis timing, and the placement weights seeded from it, far too
+  pessimistic (NVDLA/partition_a: 6,968 ps worst delay against +354 ps final).
+  `LHD_NO_VIRTUAL_TREE_TIMING` restores the direct timing;
+  `LHD_VIRTUAL_TREE_DEBUG` writes `virtual_tree_correlation.jsonl` (per root:
+  loads, expanded, the estimated and the realized worst root-to-sink delay).
 - **Expansion.** `expand_virtual_buffers()` runs once global placement has
   converged, before timing-driven placement and repair. A recorded root whose net
   still has more loads than the fanout cap *and* is electrically overloaded

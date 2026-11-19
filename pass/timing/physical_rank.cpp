@@ -429,6 +429,30 @@ void Physical_ranker::install_net(Wire_model& wire, const physical::Rc_net& net,
   }
 }
 
+void Physical_ranker::fill_virtual(Wire_model& wire) const {
+  if (!virtual_roots_ || virtual_roots_->empty()) {
+    return;
+  }
+  const auto& netlist = *bound_->netlist;
+  wire.net_virtual.assign(netlist.nets(), {});
+  std::map<std::string, uint32_t, std::less<>> types;
+  for (const auto& [label, root] : *virtual_roots_) {
+    const auto pin = resolve_label(Pin_label(label));
+    if (pin == no_index) {
+      continue;
+    }
+    const auto net = netlist.net_of(pin);
+    if (net == no_index || !netlist.is_driver(pin)) {
+      continue;
+    }
+    auto it = types.find(root.master);
+    if (it == types.end()) {
+      it = types.emplace(root.master, netlist.types().find(root.master)).first;
+    }
+    wire.net_virtual[net] = {it->second, root.fanout};
+  }
+}
+
 Wire_model Physical_ranker::wire_model(const physical::Parasitics& rc) {
   const auto  start   = Steady::now();
   const auto& netlist = *bound_->netlist;
@@ -448,6 +472,7 @@ Wire_model Physical_ranker::wire_model(const physical::Parasitics& rc) {
     const auto first = m.net_start[n];
     install_net(wire, net, std::span<const uint32_t>(m.pin.data() + first, net.nodes.size()), m.net_root[n], driver, solved);
   }
+  fill_virtual(wire);
   stats_.wire_seconds += since(start);
   return wire;
 }
@@ -522,6 +547,7 @@ Wire_model Physical_ranker::wire_model_trees(const Wire_trees& trees) {
       }
     }
   }
+  fill_virtual(wire);
   stats_.wire_seconds += since(start);
   return wire;
 }

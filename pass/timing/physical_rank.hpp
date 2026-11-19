@@ -2,6 +2,7 @@
 #pragma once
 
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <set>
 #include <span>
@@ -108,6 +109,15 @@ public:
   // slew and capacitance limits and the fanout limit of the SDC (set_max_fanout on the design).
   [[nodiscard]] livehd::timing::Whatif& whatif();
 
+  // Virtual buffer trees (placement): drivers, by physical pin label, that stand for a synthesis fanout tree the
+  // placement has not rebuilt yet, with the buffer master it will use and the fanout cap. Until cleared, such a net
+  // over its driver's limits is timed as the balanced tree (Wire_model::Virtual_tree). nullptr clears them.
+  struct Virtual_root {
+    std::string master;
+    unsigned    fanout = 16;
+  };
+  void set_virtual_roots(std::shared_ptr<const std::map<std::string, Virtual_root>> roots) { virtual_roots_ = std::move(roots); }
+
   [[nodiscard]] const Statistics&  statistics() const { return stats_; }
   [[nodiscard]] const Engine*      engine() const { return engine_.get(); }
   [[nodiscard]] const Bound_graph* bound() const { return bound_.get(); }
@@ -177,6 +187,8 @@ private:
   std::vector<Wire_edge>     edges_;
   std::vector<float>         node_cap_, node_wire_cap_;
   std::shared_ptr<const Tree_topology> mapping_topology_;  // keeps the topology of a tree mapping alive
+  std::shared_ptr<const std::map<std::string, Virtual_root>> virtual_roots_;
+  void fill_virtual(Wire_model& wire) const;
 };
 
 }  // namespace livehd::timing::fast
