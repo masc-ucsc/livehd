@@ -337,6 +337,10 @@ struct Options {
   std::string                                     control_ports;  // override optional roots; recognized resets stay excluded
   // Synthesis buffer cleanup keeps a buffer tree whole when its root net reaches more final loads than this (0: no cap).
   unsigned                                        buffer_cleanup_max_fanout = 256;
+  // With buffer cleanup: a clock-gating AND whose input is another clock-gating AND's output takes that gate's inputs
+  // instead (AND(AND(clk, q0), q1) -> AND3(clk, q0, q1)), so every gated domain is one gate below its root clock and
+  // a downstream CTS balances the cascaded domains (synth.place.clock_gate_flatten).
+  bool                                            flatten_clock_gates = true;
   // Virtual buffer trees (synth.place.virtual_buffers): buffer cleanup records each synthesis fanout tree it bypasses
   // as one virtual node -- the root driver, its final loads and the mapper's fanout cap -- instead of capping wide
   // trees, and expand_virtual_buffers() rebuilds it from sink positions once global placement has converged.

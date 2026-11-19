@@ -19,6 +19,7 @@ using Trial_admission = std::function<bool()>;
 struct Buffer_cleanup {
   std::shared_ptr<hhds::Graph> graph;
   unsigned                     removed = 0, boundary = 0, protected_cells = 0, unsupported = 0, inverter_pairs = 0;
+  unsigned                     clock_gates = 0;  // cascaded clock-gating ANDs merged (Options::flatten_clock_gates)
   // With options.virtual_buffers: every bypassed tree as one virtual node, by root driver label (see Options).
   std::map<std::string, Options::Virtual_buffer> virtual_trees;
 };

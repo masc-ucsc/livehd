@@ -2052,6 +2052,12 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      Synth_set_option::Kind::integer,
      "with buffer_cleanup: keep a synthesis buffer tree whole when its root net reaches more final loads than this (very wide "
      "decode/enable nets that location-based repair does not rebuild); 0 bypasses every tree"},
+    {"place.clock_gate_flatten",
+     "true",
+     Synth_set_option::Kind::boolean,
+     "with buffer_cleanup: a clock-gating AND fed by another clock-gating AND takes that gate's inputs "
+     "(AND(AND(clk, q0), q1) -> AND3(clk, q0, q1)), so every gated domain sits one gate below its root clock and CTS "
+     "balances it against its sibling domains (fewer post-CTS hold fixes); false keeps the cascade"},
     {"place.virtual_buffers",
      "true",
      Synth_set_option::Kind::boolean,

@@ -1737,6 +1737,198 @@ std::optional<Repeater_graph> Repeater_proposer::propose(const Result& state, co
 }
 }  // namespace detail
 using namespace detail;
+// The input count n of a cell that computes the AND of all its inputs, else 0.
+static unsigned and_arity(const Buffer& cell) {
+  const auto truth = liberty::cell_truth(cell);
+  const auto n     = cell.inputs.size();
+  if (!truth || n < 2 || n > 6) {
+    return 0;
+  }
+  const uint64_t all = (uint64_t{1} << n) - 1;
+  uint64_t       expect = 0;
+  for (uint64_t i = 0; i < 64; ++i) {
+    if ((i & all) == all) {
+      expect |= uint64_t{1} << i;
+    }
+  }
+  return *truth == expect ? static_cast<unsigned>(n) : 0;
+}
+// Cascaded clock gates: AND(AND(clk, q0), q1) -> AND3(clk, q0, q1). A gated domain two gates below its root clock
+// gets a clock tree that starts after the first gate's tree, so after CTS it arrives late against the first domain
+// and its paths need hold buffers (HighTide coralnpu: 7,651 flops two AND2 levels below io_aclk, 16.6k ORFS hold
+// buffers vs OpenROAD's ~200, whose Yosys netlist ANDs the enables in one AND3). The function is identical and the
+// enable latches keep their clocks, so the merged gate is glitch-free exactly when the cascade was. Only an AND cell
+// whose output reaches clock pins is rewritten; the inner gate stays for its other loads and is deleted when unused.
+static unsigned flatten_clock_gate_chains(hhds::Graph& graph, const Inventory& cells, const Special_pins& clock_pins, const Options& options) {
+  const auto and_cell = [&](Node n) -> const Buffer* {
+    const auto* c = combinational(n, cells);
+    return c && and_arity(*c) ? c : nullptr;
+  };
+  const auto keep = [&](Node n) { return fixed(n) || n.attr(attrs::user_cell).has(); };
+  const auto is_clock_sink = [&](Pin sink) {
+    const auto n  = sink.get_master_node();
+    const auto op = gu::type_op_of(n);
+    if (op == Ntype_op::Flop || op == Ntype_op::Latch) {
+      return Ntype::get_sink_name(op, sink.get_port_id()) == "clock_pin";
+    }
+    const auto io = n.get_subnode_io();
+    if (!io) {
+      return false;
+    }
+    const auto it = clock_pins.find(std::string(io->get_name()));
+    if (it == clock_pins.end()) {
+      return false;
+    }
+    for (const auto& decl : io->get_input_pin_decls()) {
+      if (decl.port_id == sink.get_port_id()) {
+        return it->second.contains(decl.name);
+      }
+    }
+    return false;
+  };
+  const auto clocks = [&](Pin driver) {
+    for (auto sink : sinks(driver)) {
+      if (is_clock_sink(sink)) {
+        return true;
+      }
+    }
+    return false;
+  };
+  unsigned max_arity = 0;
+  for (const auto& [name, cell] : cells) {
+    if (!matches_dont_use(name, options)) {
+      max_arity = std::max(max_arity, and_arity(cell));
+    }
+  }
+  const auto drive_of = [](const std::string& name) {
+    const auto x = name.find('x', name.find("AND") == std::string::npos ? 0 : name.find("AND"));
+    return x == std::string::npos ? std::string{} : name.substr(x, name.find('_', x) - x);
+  };
+  const auto pick = [&](unsigned arity, const std::string& like) -> const Buffer* {
+    const Buffer* best = nullptr;
+    for (const auto& [name, cell] : cells) {  // map order: deterministic
+      if (and_arity(cell) != arity || matches_dont_use(name, options)) {
+        continue;
+      }
+      if (!best || (drive_of(name) == drive_of(like) && drive_of(best->name) != drive_of(like))) {
+        best = &cell;
+      }
+    }
+    return best;
+  };
+  std::vector<Node> gates;
+  for (auto n : graph.body().nodes()) {
+    if (const auto* c = and_cell(n); c && !keep(n) && gu::bits_of(output(n, *c)) == 1 && clocks(output(n, *c))) {
+      gates.push_back(n);
+    }
+  }
+  std::sort(gates.begin(), gates.end(), [](Node a, Node b) { return a.get_debug_nid() < b.get_debug_nid(); });
+  unsigned                      merged = 0;
+  absl::flat_hash_set<uint64_t> deleted;
+  for (auto outer : gates) {
+    if (deleted.contains(outer.get_debug_nid())) {
+      continue;
+    }
+    const auto* oc = and_cell(outer);
+    if (!oc) {
+      continue;  // already rewritten into a wider gate this pass
+    }
+    // Inputs of the merged gate: an input driven by a clock-gating AND (one that also clocks state, or feeds only
+    // this gate) is replaced by that gate's inputs, transitively, while the result fits the widest AND cell.
+    std::vector<Pin> leaves;
+    std::vector<Node> inner;
+    bool              ok = true;
+    for (const auto& name : oc->inputs) {
+      const auto d = outer.get_sink_pin(name).get_driver_pins();
+      if (d.size() != 1 || gu::bits_of(d.front()) != 1) {
+        ok = false;
+        break;
+      }
+      leaves.push_back(d.front());
+    }
+    if (!ok) {
+      continue;
+    }
+    for (bool grew = true; grew;) {
+      grew = false;
+      for (size_t i = 0; i < leaves.size(); ++i) {
+        const auto drv = leaves[i];
+        if (drv.is_const() || drv.get_master_node().is_input_node()) {
+          continue;
+        }
+        const auto  g  = drv.get_master_node();
+        const auto* gc = and_cell(g);
+        if (!gc || keep(g) || g == outer || drv != output(g, *gc)) {
+          continue;
+        }
+        const auto loads = sinks(drv);
+        if (!clocks(drv) && loads.size() != 1) {
+          continue;  // a data AND that happens to feed this gate: not a clock gate
+        }
+        std::vector<Pin> sub;
+        for (const auto& name : gc->inputs) {
+          const auto d = g.get_sink_pin(name).get_driver_pins();
+          if (d.size() != 1 || gu::bits_of(d.front()) != 1) {
+            sub.clear();
+            break;
+          }
+          sub.push_back(d.front());
+        }
+        if (sub.empty() || leaves.size() - 1 + sub.size() > max_arity) {
+          continue;
+        }
+        leaves.erase(leaves.begin() + static_cast<std::ptrdiff_t>(i));
+        leaves.insert(leaves.begin() + static_cast<std::ptrdiff_t>(i), sub.begin(), sub.end());
+        inner.push_back(g);
+        grew = true;
+        break;
+      }
+    }
+    if (inner.empty()) {
+      continue;
+    }
+    std::vector<Pin> unique;  // first occurrence order: deterministic, the root clock first when it came first
+    for (auto p : leaves) {
+      if (std::find(unique.begin(), unique.end(), p) == unique.end()) {
+        unique.push_back(p);
+      }
+    }
+    leaves = std::move(unique);
+    const auto* to = leaves.size() >= 2 ? pick(static_cast<unsigned>(leaves.size()), oc->name) : nullptr;
+    if (!to) {
+      continue;
+    }
+    // Rewire the outer gate in place (its name, attributes and loads stay).
+    const auto targets   = sinks(output(outer, *oc));
+    const auto old_out   = output(outer, *oc);
+    const auto old_roles = gu::signal_roles_of(old_out);
+    for (auto p : outer.inp_pins_snapshot()) {
+      gu::drop_drivers(p);
+    }
+    for (auto p : targets) {
+      p.del_sink(old_out);
+    }
+    outer.set_subnode(buffer_io(graph, *to));
+    for (size_t k = 0; k < to->inputs.size(); ++k) {
+      outer.create_sink_pin(to->inputs[k]).connect_driver(leaves[k]);
+    }
+    auto out = outer.create_driver_pin(to->output);
+    gu::set_bits(out, 1);
+    gu::add_signal_roles(out, old_roles);
+    for (auto p : targets) {
+      p.connect_driver(out);
+    }
+    for (auto g : inner) {
+      const auto* gc = and_cell(g);
+      if (gc && !deleted.contains(g.get_debug_nid()) && sinks(output(g, *gc)).empty()) {
+        deleted.insert(g.get_debug_nid());
+        g.del_node();
+      }
+    }
+    ++merged;
+  }
+  return merged;
+}
 Buffer_cleanup remove_synthesis_buffers(hhds::Graph& source, hhds::GraphLibrary& library, const Options& options) {
   const auto&                   tech    = options.technology();
   const auto                    cells   = inventory(options, tech.lef);
@@ -1938,6 +2130,9 @@ Buffer_cleanup remove_synthesis_buffers(hhds::Graph& source, hhds::GraphLibrary&
       tree.buffers          += static_cast<unsigned>(seconds.size()) + 1;
       tree.loads            += rewired;
     }
+  }
+  if (options.flatten_clock_gates) {
+    result.clock_gates = flatten_clock_gate_chains(*result.graph, cells, scan_special_pins(tech.cells, false), options);
   }
   return result;
 }

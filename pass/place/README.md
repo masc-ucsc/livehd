@@ -314,6 +314,16 @@ definitions and their resynthesis identities/history are unchanged. The cleanup
 also runs on the new physical copy after an accepted color restart, but never
 on repair/ECO trials. `buffer_cleanup.jsonl` records removed and retained counts.
 
+### Cascaded clock gates (`synth.place.clock_gate_flatten`, default on)
+
+With buffer cleanup, a clock-gating AND cell (an AND whose output reaches clock pins) whose input is another
+clock-gating AND's output takes that gate's inputs instead: `AND(AND(clk, q0), q1) -> AND3(clk, q0, q1)`, up to the
+widest AND cell of the library. Every gated domain then sits one gate below its root clock, so a downstream CTS
+balances it against its sibling domains instead of starting its tree after the first gate's (HighTide coralnpu: 7,651
+flops two AND2 levels below `io_aclk`). The function is identical and the enable latches keep their clocks; the inner
+gate stays for its other loads and is deleted when unused. Data ANDs, fixed and design-instantiated cells are untouched;
+`buffer_cleanup.jsonl` reports `clock_gates`.
+
 ### Virtual buffer trees (`synth.place.virtual_buffers`, default on)
 
 A fanout buffer tree built at mapping time groups loads before any position

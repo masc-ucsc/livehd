@@ -2274,6 +2274,106 @@ TEST_F(Buffer_repair, PreservesCriticalAndNameTieOrderForRepairCandidates) {
   }
   EXPECT_EQ(report["accepted"].GetUint(), 0);
 }
+TEST_F(Buffer_repair, SynthesisBufferCleanupFlattensCascadedClockGates) {
+  // The checked-in library has no AND cells: add 2- and 3-input ANDs (Liberty function + a legal LEF shape).
+  std::filesystem::create_directories(options.output_dir);
+  {
+    std::ifstream lib_input(options.liberty);
+    std::string   lib{std::istreambuf_iterator<char>(lib_input), {}};
+    lib.insert(lib.rfind('}'),
+               R"lib(cell(sky130_fd_sc_hd__and2_1) { area: 2;
+                    pin(A) {direction: input; capacitance: 0.1;} pin(B) {direction: input; capacitance: 0.1;}
+                    pin(X) {direction: output; function: "(A&B)"; max_capacitance: 1000;}}
+                  cell(sky130_fd_sc_hd__and3_1) { area: 3;
+                    pin(A) {direction: input; capacitance: 0.1;} pin(B) {direction: input; capacitance: 0.1;}
+                    pin(C) {direction: input; capacitance: 0.1;}
+                    pin(X) {direction: output; function: "(A&B&C)"; max_capacitance: 1000;}})lib");
+    options.liberty = options.output_dir + "/and.lib";
+    std::ofstream(options.liberty) << lib;
+    std::string lef = "VERSION 5.8 ;\n";
+    for (const auto& [name, pins] : {std::pair{std::string("sky130_fd_sc_hd__and2_1"), std::string("ABX")},
+                                     std::pair{std::string("sky130_fd_sc_hd__and3_1"), std::string("ABCX")}}) {
+      lef += "MACRO " + name + "\n  CLASS CORE ;\n  ORIGIN 0 0 ;\n  SIZE 1.840 BY 2.720 ;\n  SYMMETRY X Y R90 ;\n  SITE unithd ;\n";
+      double x = 0.1;
+      for (char pin : pins) {
+        lef += std::format("  PIN {}\n    DIRECTION {} ;\n    USE SIGNAL ;\n    PORT\n      LAYER li1 ;\n        RECT {:.3f} 1.0 {:.3f} 1.3 ;\n"
+                           "    END\n  END {}\n",
+                           pin, pin == 'X' ? "OUTPUT" : "INPUT", x, x + 0.2, pin);
+        x += 0.4;
+      }
+      lef += "END " + name + "\n";
+    }
+    options.lefs.push_back(options.output_dir + "/and.lef");
+    std::ofstream(options.lefs.back()) << lef << "END LIBRARY\n";
+  }
+  const auto cell = [&](const std::string& master, const std::string& name, std::vector<std::pair<std::string, hhds::Pin_class>> ins,
+                        const std::string& out) {
+    auto io = source.find_io(master);
+    if (!io) {
+      io      = source.create_io(master);
+      int pid = 0;
+      for (const auto& [pin, _] : ins) {
+        io->add_input(pin, pid++);
+        io->set_bits(pin, 1);
+      }
+      io->add_output(out, pid);
+      io->set_bits(out, 1);
+    }
+    auto n = gu::create_typed_node(*graph, Ntype_op::Sub);
+    n.set_subnode(io);
+    n.set_name(name);
+    for (const auto& [pin, driver] : ins) {
+      n.create_sink_pin(pin).connect_driver(driver);
+    }
+    auto q = n.create_driver_pin(out);
+    gu::set_bits(q, 1);
+    return q;
+  };
+  const auto a   = graph->get_input_pin("a");
+  const auto flop = [&](const std::string& name, hhds::Pin_class clk) {
+    return cell("sky130_fd_sc_hd__dfxtp_1", name, {{"D", a}, {"CLK", clk}}, "Q");
+  };
+  const auto e0 = flop("enable0", a), e1 = flop("enable1", a);
+  // io clock -> g1 = AND(clk, e0) clocks `first`; g2 = AND(g1, e1) clocks `second`: a cascade.
+  const auto g1 = cell("sky130_fd_sc_hd__and2_1", "gate1", {{"A", a}, {"B", e0}}, "X");
+  const auto g2 = cell("sky130_fd_sc_hd__and2_1", "gate2", {{"A", g1}, {"B", e1}}, "X");
+  flop("first", g1);
+  graph->get_output_pin("y").connect_driver(flop("second", g2));
+  // A data AND (no clock load) fed by a gate is left alone.
+  const auto d = cell("sky130_fd_sc_hd__and2_1", "data_and", {{"A", g1}, {"B", e1}}, "X");
+  flop("sink", a).get_master_node().get_sink_pin("D").connect_driver(d);
+
+  options.virtual_buffers = true;
+  auto cleaned            = remove_synthesis_buffers(*graph, flat, options);
+  EXPECT_EQ(cleaned.clock_gates, 1U);
+  bool saw_gate1 = false, saw_gate2 = false;
+  for (auto n : cleaned.graph->body().nodes()) {
+    const auto io = n.get_subnode_io();
+    if (n.get_name() == "gate2") {
+      saw_gate2 = true;
+      ASSERT_TRUE(io);
+      EXPECT_EQ(io->get_name(), "sky130_fd_sc_hd__and3_1");
+      std::set<std::string> drivers;
+      for (const auto& pin : {"A", "B", "C"}) {
+        const auto drv = n.get_sink_pin(pin).get_driver_pins();
+        ASSERT_EQ(drv.size(), 1);
+        drivers.insert(drv.front().get_master_node().is_input_node() ? std::string("@a")
+                                                                      : std::string(drv.front().get_master_node().get_name()));
+      }
+      EXPECT_EQ(drivers, (std::set<std::string>{"@a", "enable0", "enable1"}));
+    } else if (n.get_name() == "gate1") {
+      saw_gate1 = true;  // still clocks `first` and feeds the data AND
+      EXPECT_EQ(io->get_name(), "sky130_fd_sc_hd__and2_1");
+    } else if (n.get_name() == "data_and") {
+      EXPECT_EQ(io->get_name(), "sky130_fd_sc_hd__and2_1");
+    }
+  }
+  EXPECT_TRUE(saw_gate1);
+  EXPECT_TRUE(saw_gate2);
+  options.flatten_clock_gates = false;
+  hhds::GraphLibrary kept;
+  EXPECT_EQ(remove_synthesis_buffers(*graph, kept, options).clock_gates, 0U);
+}
 TEST_F(Buffer_repair, ProtectsClockLogicThroughAliasesAndBuffers) {
   auto p  = gate("sky130_fd_sc_hd__buf_1", "clock_buffer", graph->get_input_pin("a"));
   p       = gate("sky130_fd_sc_hd__inv_1", "clock_inverter", p);

@@ -892,6 +892,9 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
                               dp::Options{}.post_density_patience),
                   h);
   }
+  if (!o.flatten_clock_gates) {
+    h = hash_text("no-clock-gate-flatten", h);
+  }
   if (o.boundarypins.enabled) {
     h = hash_text(std::format("boundarypins:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}",
                               o.boundarypins.split,

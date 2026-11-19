@@ -1323,6 +1323,7 @@ livehd::placement::Options placement_options(const Options& opts) {
     }
     out.buffer_cleanup_max_fanout = static_cast<unsigned>(cap);
   }
+  out.flatten_clock_gates = truthy(synth_set(opts, "place.clock_gate_flatten", "true"));
   out.fp_iterations   = integer("place.fp.iterations", "1500");
   out.fp_minimum      = number("place.fp.minimum", "3000");
   out.fp_min_copies   = integer("place.fp.min_copies", "4");
@@ -4169,13 +4170,15 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
         fs::create_directories(place_options.output_dir);
         const auto mode = prepared_before ? std::ios::app : std::ios::trunc;
         std::ofstream(place_options.output_dir + "/buffer_cleanup.jsonl", mode) << std::format(
-            "{{\"removed\":{},\"boundary\":{},\"protected\":{},\"unsupported\":{},\"inverter_pairs\":{},\"virtual_trees\":{}}}\n",
+            "{{\"removed\":{},\"boundary\":{},\"protected\":{},\"unsupported\":{},\"inverter_pairs\":{},\"virtual_trees\":{},"
+            "\"clock_gates\":{}}}\n",
             cleaned.removed,
             cleaned.boundary,
             cleaned.protected_cells,
             cleaned.unsupported,
             cleaned.inverter_pairs,
-            cleaned.virtual_trees.size());
+            cleaned.virtual_trees.size(),
+            cleaned.clock_gates);
         if (place_options.virtual_buffers) {
           place_options.virtual_buffer_trees
               = std::make_shared<const std::map<std::string, livehd::placement::Options::Virtual_buffer>>(
