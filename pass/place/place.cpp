@@ -13266,10 +13266,10 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
           return standalone_hints && placement_hints && !placement_hints->has_pull_hints();
         });
       }
-      if (!resume && !live_session->live()) {
-        // The first main GP is an ordinary native solve; the retained session then starts on its converged pose (a
-        // one-step advance publishes the layout, identities and fixed bodies the later stages continue from). A
-        // session-owned first solve loses the solver's post-density record (no retained sample may replace a drifted
+      if (!resume) {
+        // A main GP is an ordinary native solve; the retained session then restarts on its converged pose (a one-step
+        // advance creates the optimizer and the session is re-anchored on the solved pose, publishing the layout,
+        // identities and fixed bodies the later stages continue from). A session-owned solve loses the solver's post-density record (no retained sample may replace a drifted
         // iterate under an external continuation): on vortex it ran to the 1500-step cap at 0.285 density overflow,
         // where the plain solve settles at 0.097 in 460 steps, and the plan then routed (and spread) that unconverged
         // placement for two hours at -2.7 ns.
@@ -13284,7 +13284,11 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         seed.before_legalize      = {};
         seed.after_macro_legalize = {};
         seed.observer             = {};
-        if (gp.max_iterations > 0) {  // a zero-step stage leaves the session cold, as the session-owned solve did
+        if (gp.max_iterations > 0) {  // a zero-step stage leaves the session as it was, as the session-owned solve did
+          // A session retained from an earlier stage restarts on the new solve: its fixed bodies may have moved since.
+          if (live_session->live()) {
+            live_session->restore({});
+          }
           const auto solved_x = v.design.node_x, solved_y = v.design.node_y;
           live_session->advance(v.design, seed, session_identities(), "global_placement", 0, session_identities);
           // The seeding step only creates the optimizer: the placement stays the native solve's, and the retained
