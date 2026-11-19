@@ -28,19 +28,9 @@ Track_lattice                          imported_tracks(const physical::Floorplan
 Track_pattern                          lef_track_pattern(const physical::Technology&, const physical::Layer&, bool x);
 // Automatic perimeter anchors use actual tracks when available, retaining the
 // site-pitch spread only on axes without imported track data.
-// IO pin spacing on the die edge (OpenROAD place_pins defaults: two routing tracks between pins, and no pin
-// within 15 tracks -- at most 1 um -- of a die corner). spread_dbu widens the pitch beyond the tracks so a bus
-// spans its edge instead of packing every track (0: the track spacing alone).
-struct Io_slot_spacing {
-  double min_tracks   = 1;  // pins at least this many slot-layer tracks apart
-  double corner_tracks = 0;  // no slot within this many tracks of a die corner ...
-  double corner_cap   = 0;  // ... capped at this many DBU (0: no cap)
-  double spread_dbu   = 0;  // a pitch floor in DBU on every edge
-};
 std::vector<std::pair<double, double>> io_perimeter_slots(const physical::Technology&, const physical::Floorplan&,
                                                           std::string_view layer, double pitch,
-                                                          std::string_view vertical_layer = {},
-                                                          const Io_slot_spacing& spacing = {});
+                                                          std::string_view vertical_layer = {});
 // Extend movable edge-pin shapes inward to reach the normal-axis track. Fixed
 // imported pin shapes and coordinates are immutable.
 void                                   shape_io_perimeter_pins(physical::Floorplan&);

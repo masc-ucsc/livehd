@@ -3449,23 +3449,6 @@ std::shared_ptr<const Input_row_frame> prepare_rows(const ph::Technology& tech, 
   validate_rows(tech, fp);
   return original;
 }
-// Pitch floor for automatic edge pins: about a quarter of each movable pin's share of the die perimeter, capped
-// at 0.5 um, for designs with at least 64 movable pins. A wide bus then spans its edge instead of packing every
-// track, so the logic and the hold/repair buffers it pulls in are not piled into a few microns at the die edge.
-// Shared by the initial assignment and the floorplan pin adjustment.
-double io_spread_dbu(const ph::Floorplan& fp, double dbu) {
-  size_t movable = 0;
-  for (const auto& t : fp.terminals) {
-    movable += t.status != Status::FIXED;
-  }
-  // A handful of pins never crowds an edge; spreading them only pushes pins onto other edges (a tiny design's GP
-  // then pulls its few cells three ways). Spread wide pin sets only.
-  if (movable < 64 || fp.die.empty()) {
-    return 0;
-  }
-  const double perimeter = 2 * ((fp.die.xh - fp.die.xl) + (fp.die.yh - fp.die.yl));
-  return std::min(0.5 * dbu, perimeter / (4.0 * double(movable)));
-}
 // Rectangular Hungarian assignment; cost is Manhattan distance to each net's
 // current cell-pin centroid. Already fixed terminals reserve their slots. Slots
 // lie on the DIEAREA boundary, which an imported floorplan may set outside the core.
@@ -3500,28 +3483,7 @@ void assign_io(View& v, const ph::Technology& tech, const Options& options) {
   } catch (const std::invalid_argument&) {
     // an unregistered technology keeps the LEF's lowest routing layers
   }
-  // Spacing like OpenROAD's place_pins defaults: two tracks between pins and no pin within 15 tracks (at most
-  // 1 um) of a corner. A wide bus must also SPAN its edge rather than pack every second track: with a few hundred
-  // pins next to each other the logic and the hold/repair buffers they pull in pile up in a strip a few microns
-  // long at the die edge (vortex: 115 pins in 12 um, thousands of ORFS hold buffers that did not legalize); see
-  // io_spread_dbu. The spacing relaxes step by step when the edges cannot hold every pin.
-  size_t movable_count = 0;
-  for (const auto& t : v.fp.terminals) {
-    movable_count += t.status != Status::FIXED;
-  }
-  const double spread = io_spread_dbu(v.fp, tech.dbu);
-  const std::array<Io_slot_spacing, 4> ladder = {
-      Io_slot_spacing{.min_tracks = 2, .corner_tracks = 15, .corner_cap = 1.0 * tech.dbu, .spread_dbu = spread},
-      Io_slot_spacing{.min_tracks = 2, .corner_tracks = 15, .corner_cap = 1.0 * tech.dbu, .spread_dbu = 0},
-      Io_slot_spacing{.min_tracks = 2, .corner_tracks = 0, .corner_cap = 0, .spread_dbu = 0},
-      Io_slot_spacing{}};
-  std::vector<std::pair<double, double>> slots;
-  for (const auto& spacing : ladder) {
-    slots = io_perimeter_slots(tech, v.fp, layer, pitch, vertical_layer, spacing);
-    if (slots.size() >= 2 * movable_count) {  // the fixed-pin and supply filters below may take some away
-      break;
-    }
-  }
+  auto              slots          = io_perimeter_slots(tech, v.fp, layer, pitch, vertical_layer);
   // A left/right pin's stub runs inward on its own track: skip the tracks whose first stretch (about a placement
   // tile) runs into supply metal on the pin layer (the power grid's via landings sit on every rail row there).
   if (!layer.empty() && !v.fp.special_nets.empty()) {
@@ -10199,8 +10161,6 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         io_pitch            = std::max(io_pitch, std::ceil(extent + std::max(layer.pitch_x, layer.pitch_y) * tech.dbu));
       }
     }
-    // The adjustment re-places the pins on its own uniform slots: keep the initial assignment's spread.
-    io_pitch = std::max(io_pitch, std::ceil(io_spread_dbu(v.fp, tech.dbu)));
   }
   const auto adjust_pins = [&](dp::Design& d, int iteration, bool initialize, bool macro) {
     const auto stats   = adjust_fp_pins(d,
