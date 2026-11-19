@@ -472,23 +472,23 @@ public:
     // and collision semantics are deliberately not synthesized or invented.
     absl::flat_hash_set<std::string> liberty_memories;
     std::string                      liberty_declarations;
-    // Opt-in (compile.slang.liberty_macro_precedence): a synth.liberty RAM macro
+    // compile.slang.liberty_macro_precedence (default true): a synth.liberty RAM macro
     // WINS over a same-named module in the design sources, as in the Yosys/ORFS
     // flow where `read_liberty -overwrite` replaces the Verilog definition with
-    // the macro blackbox. Default off: such a collision is refused
-    // (`liberty-memory-name-collision`) rather than silently picking one side.
-    bool                             liberty_macro_precedence  = false;
+    // the macro blackbox; a `liberty-macro-shadows-module` note names each shadowed
+    // module. false refuses such a collision (`liberty-memory-name-collision`).
+    bool                             liberty_macro_precedence  = true;
     // Opt-in (compile.slang.liberty_allow_truncation): connecting a wider actual
     // to a narrower synth.liberty RAM input keeps the low bits, as Verilog and
     // Yosys do, with a `liberty-memory-port-truncation` WARNING instead of the
     // default error (which refuses to discard address/data bits).
     bool                             liberty_allow_truncation  = false;
-    // Opt-in (compile.slang.liberty_cells): a module instantiated by name that no
+    // compile.slang.liberty_cells (default true): a module instantiated by name that no
     // source defines but the selected Liberty does (a standard cell such as
     // `BUFx2_ASAP7_75t_R`, as in Xilinx-primitive stubs for ASIC flows) is bound
     // as a typed, opaque cell with the pins and directions the Liberty states,
     // exactly like a RAM macro. `liberty_files` is the selected library list.
-    bool                             liberty_cells = false;
+    bool                             liberty_cells = true;
     std::string                      liberty_files;
     // Opt-in (compile.slang.blackbox_attribute): a module carrying the Yosys attribute `(* blackbox *)` is
     // an interface only (a hard-macro or vendor-primitive stub whose body is the LEF/Liberty macro).
@@ -1331,4 +1331,8 @@ private:
                   std::string_view hint = {});
   void emit_warning(slang::SourceRange range, std::string_view code, std::string_view category, std::string message,
                     std::string_view hint = {});
+  void emit_note(slang::SourceRange range, std::string_view code, std::string_view category, std::string message,
+                 std::string_view hint = {});
+  // Design-source modules a synth.liberty macro shadowed (liberty_macro_precedence): one note per name.
+  absl::flat_hash_set<std::string> liberty_shadow_noted_;
 };

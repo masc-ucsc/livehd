@@ -401,20 +401,20 @@ The discovered integration cases reserve four Bazel CPUs each so concurrent
 frontend/solver jobs do not exhaust the fixed LEC watchdog through resource
 contention. Synthesis integration cases in `//inou/prp:integration` run exclusively.
 
-For source bundles containing unfinished modules outside an explicit top hierarchy,
-pass `-- --ignore-uninstantiated-modules` or `--set compile.slang.ignore_uninstantiated_modules=true`
-(the form a flow that cannot append raw slang arguments uses). This opts into Slang's existing
-`IgnoreUninstantiatedModules` policy; syntax errors and semantic errors within the
-selected hierarchy remain errors. Vendor RTL that hides simulation-only code between
+With a top (`--top`), modules outside its hierarchy are not elaborated by default
+(Slang's `IgnoreUninstantiatedModules` policy), so unfinished or simulation-only modules in a
+source bundle cannot fail the read; syntax errors everywhere and semantic errors within the
+selected hierarchy remain errors. `--set compile.slang.ignore_uninstantiated_modules=false`
+elaborates every module. Vendor RTL that hides simulation-only code between
 `// synopsys translate_off` and `// synopsys translate_on` (the `synthesis` and `pragma` spellings too,
 with or without a space after `//`) is excluded by default, matching synthesis semantics.
 `--set compile.slang.translate_off=false` keeps that text for parsing and lowering instead.
 The default enables slang's `--translate-off-format` for all three spellings; an unclosed
 region is still an error. Explicit raw `--translate-off-format` arguments replace this list. Both are covered by `//inou/slang:slang_vendor_bundle_options`. The separate upstream argument
-`--allow-use-before-declare` supports legacy declaration ordering. Ignoring uninstantiated modules and allowing use before declaration remain opt-in.
+`--allow-use-before-declare` supports legacy declaration ordering, and remains opt-in.
 Unfinished reference RTL that must not even be parsed belongs inside a Verilog
 `` `ifndef SYNTHESIS `` guard. Define it explicitly with `-- -DSYNTHESIS=1`.
-The HighTide run uses both that define and `--ignore-uninstantiated-modules`.
+The HighTide run uses that define.
 
 `--set compile.specialize_modules=true` opts into the existing cross-instance
 specializer before legalization. It folds constants per instance binding (up to 64 contexts per definition,
@@ -425,25 +425,27 @@ cleanup, so a constant-configured router
 does not require this optimization flag. Dynamic feedback still fails cycle
 checking. The default remains false.
 
-A `synth.liberty` RAM cell is bound as an opaque macro only when the instance
-resolves to the injected Liberty declaration. A module of the same name in the
-design sources (for example a behavioral SRAM model shipped next to the `.lib`)
-fails the read: slang reports `DuplicateDefinition`, and with that diagnostic
-silenced the reader still refuses it as `liberty-memory-name-collision` rather
-than silently picking the macro pins or the RTL body. Remove the model from the
-synthesis sources.
+A `synth.liberty` RAM cell is bound as an opaque macro when the instance resolves
+to the injected Liberty declaration. By default a module of the same name in the
+design sources (a behavioral SRAM model shipped next to the `.lib`, a fakeram stub)
+is shadowed by the macro, like Yosys `read_liberty -overwrite`, and a
+`liberty-macro-shadows-module` note names it. With
+`--set compile.slang.liberty_macro_precedence=false` the collision fails the read
+instead: slang reports `DuplicateDefinition`, and with that diagnostic silenced the
+reader still refuses it as `liberty-memory-name-collision`.
 
-### Hard macros, vendor stubs and Yosys-style netlists (opt-ins)
+### Hard macros, vendor stubs and Yosys-style netlists
 
 These serve flows whose reference is Yosys/ORFS, where the Liberty/LEF view of a macro
-replaces whatever the sources say about it. Each is `--set compile.slang.<flag>=true`
-(or the value shown) and every one is off by default.
+replaces whatever the sources say about it. `liberty_macro_precedence` and `liberty_cells`
+are on by default (`--set compile.slang.<flag>=false` turns them off); the others are
+opt-ins (`--set compile.slang.<flag>=true` or the value shown).
 
 | flag | effect |
 | --- | --- |
-| `liberty_macro_precedence` | a `synth.liberty` RAM macro WINS over a same-named design module, like `read_liberty -overwrite`: the declarations go into a slang library of the highest priority, every instantiation of that name binds to the macro pins, and the shadowed source module (a vendor behavioral model, a wrapper that re-instantiates the macro under its own name) is never elaborated |
+| `liberty_macro_precedence` (default true) | a `synth.liberty` RAM macro WINS over a same-named design module, like `read_liberty -overwrite`: the declarations go into a slang library of the highest priority, every instantiation of that name binds to the macro pins, and the shadowed source module (a vendor behavioral model, a wrapper that re-instantiates the macro under its own name) is never elaborated |
 | `liberty_allow_truncation` | a wider actual on a narrower macro input keeps the low bits, as Verilog does, and `liberty-memory-port-truncation` becomes a warning instead of an error. The upper address/data bits are really discarded: use it only when the reference design does the same |
-| `liberty_cells` | a module that no source defines but the selected Liberty does (a standard cell such as `BUFx2_ASAP7_75t_R` instantiated by a vendor-primitive stub) is bound as a typed, opaque cell instance with the Liberty's pins and directions, like a RAM macro. A source definition of the name always wins |
+| `liberty_cells` (default true) | a module that no source defines but the selected Liberty does (a standard cell such as `BUFx2_ASAP7_75t_R` instantiated by a vendor-primitive stub) is bound as a typed, opaque cell instance with the Liberty's pins and directions, like a RAM macro. A source definition of the name always wins |
 | `blackbox_attribute` | a module marked `(* blackbox *)` is its interface only: ports are declared, no body is built, and every instance stays an opaque `Sub` (the LEF/Liberty macro) instead of an empty module whose outputs read as unknown |
 | `unconnected_input=zero\|one` | an instance input left open reads that constant instead of `x`. Yosys folds a vendor primitive whose controls are open (BUFG_GT's CE/CLR) into its enabled state; an unknown select keeps the whole enable cone as logic on a clock net |
 | `flatten_state_arrays` | a one-dimensional unpacked state array without power-on contents is one packed register vector (constant selectors are element offsets, a runtime selector a shift/mask) instead of a Memory with one port per access site. NyuziProcessor's `pending_stores` has 375 read and 360 write ports, which otherwise take hours to bit-blast |

@@ -2789,12 +2789,12 @@ void compile_sources(Options& opts, Result& res, const Ir_inputs& ir) {
       if (!liberty.empty()) {
         auto& glib = livehd::Hhds_graph_library::instance(lib_path);
         livehd::liberty::declare_memory_cells(glib, livehd::liberty::scan_memory_cells(liberty));
-        // compile.slang.liberty_cells: the reader bound modules only the Liberty defines (standard
-        // cells instantiated by name) as external instances; declare exactly those, typed.
-        bool liberty_cells = false;
+        // compile.slang.liberty_cells (default true): the reader bound modules only the Liberty defines
+        // (standard cells instantiated by name) as external instances; declare exactly those, typed.
+        bool liberty_cells = true;
         for (const auto& [key, value] : opts.sets) {
           if (key == "compile.slang.liberty_cells") {
-            liberty_cells = value == "true";
+            liberty_cells = value != "false" && value != "0";
           }
         }
         if (liberty_cells) {

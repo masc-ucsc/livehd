@@ -8448,6 +8448,16 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
     const auto* other = from_liberty && !options_.liberty_macro_precedence
                             ? other_root_declaration(body_->getCompilation(), definition, definition.name)
                             : nullptr;
+    if (from_liberty && options_.liberty_macro_precedence && liberty_shadow_noted_.insert(std::string(definition.name)).second) {
+      if (const auto* shadowed = other_root_declaration(body_->getCompilation(), definition, definition.name)) {
+        emit_note(shadowed->header->name.range(),
+                  "liberty-macro-shadows-module",
+                  "name",
+                  "module '" + std::string(definition.name)
+                      + "' in the design sources is replaced by the synth.liberty macro of the same name",
+                  "set compile.slang.liberty_macro_precedence=false to refuse the collision instead");
+      }
+    }
     if (!from_liberty || other != nullptr) {
       const auto where = other != nullptr ? other->header->name.range() : slang::SourceRange(definition.location, definition.location);
       emit_error(where,

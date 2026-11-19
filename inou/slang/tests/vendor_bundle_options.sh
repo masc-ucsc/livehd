@@ -10,7 +10,7 @@
 #       simulation-only code there (plusargs, $timeformat, assertion monitors
 #       instantiating modules that only exist for simulation) never reaches the
 #       design. An unclosed region is still an error.
-#   compile.slang.ignore_uninstantiated_modules=true
+#   compile.slang.ignore_uninstantiated_modules (default true with --top)
 #       skips semantic elaboration of modules outside the --top hierarchy (a
 #       module whose generated body is empty and references undeclared signals
 #       is dead in this configuration). Errors inside the hierarchy remain
@@ -77,11 +77,12 @@ module dead_unfinished(output y);
 assign y = missing_wire0;
 endmodule
 V
-if "$LHD" compile "$W/bundle.v" --top live_top --workdir "$W/dead_strict" -q > /dev/null 2>&1; then
-  fail "an undeclared identifier in a dead module was accepted without the opt-in"
+if "$LHD" compile "$W/bundle.v" --top live_top --workdir "$W/dead_strict" -q \
+    --set compile.slang.ignore_uninstantiated_modules=false > /dev/null 2>&1; then
+  fail "an undeclared identifier in a dead module was accepted with ignore_uninstantiated_modules=false"
 fi
 "$LHD" compile "$W/bundle.v" --top live_top --workdir "$W/dead_ok" --emit-dir verilog:"$W/dead_net" -q \
-  --set compile.slang.ignore_uninstantiated_modules=true || fail "ignore_uninstantiated_modules=true did not skip the dead module"
+  || fail "the default (a top given) did not skip the dead module"
 [ -f "$W/dead_net/live_top.v" ] && [ ! -f "$W/dead_net/dead_unfinished.v" ] || fail "dead module was emitted"
 # The raw flag and the label together must not trip slang's repeated-flag error.
 "$LHD" compile "$W/bundle.v" --top live_top --workdir "$W/dead_both" -q \

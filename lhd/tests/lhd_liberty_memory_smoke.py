@@ -64,8 +64,8 @@ assert 'BUSY' in changed.read_text()
 invoke('compile_changed', ['compile', str(source), '--top', 'top', '--set', f'synth.liberty={changed}',
                            '--workdir', str(root/'compileW'), '--emit-dir', f'lg:{root}/compiled'])
 
-# A behavioral model of the macro in the sources is a hard error, not a silent
-# pick of one side: slang's DuplicateDefinition by default, and LiveHD's own
+# With liberty_macro_precedence=false a behavioral model of the macro in the sources is a
+# hard error, not a silent pick of one side: slang's DuplicateDefinition, and LiveHD's own
 # check when that slang diagnostic is silenced (-Wno-duplicate-definition).
 collide = root/'collide.v'
 collide.write_text(source.read_text() + '''module test_sram(input CLK,WE,input [5:0] A,input [4:0] D,output reg [4:0] Q,output FLAG);
@@ -77,15 +77,18 @@ for name, extra, code in [('collide', [], 'DuplicateDefinition'),
                           ('collide_quiet', ['--', '-Wno-duplicate-definition'], 'liberty-memory-name-collision')]:
     diag = root/(name+'.diagnostics.jsonl')
     invoke(name, ['compile', str(collide), '--top', 'top', '--set', f'synth.liberty={library}',
+                  '--set', 'compile.slang.liberty_macro_precedence=false',
                   '--workdir', str(root/(name+'W')), '--emit', f'diagnostics:{diag}', *extra], success=False)
     assert f'"code":"{code}"' in diag.read_text(), diag.read_text()
 
-# Opt-in (compile.slang.liberty_macro_precedence): the macro wins over the same-named
+# Default (compile.slang.liberty_macro_precedence=true): the macro wins over the same-named
 # behavioral model, as in the Yosys/ORFS flow where the Liberty cell replaces the Verilog
-# definition. The model is never elaborated, so its wider address port is irrelevant.
+# definition, with one note. The model is never elaborated, so its wider address port is irrelevant.
+diag = root/'precedence.diagnostics.jsonl'
 invoke('precedence', ['synth', str(collide), '--top', 'top', '--set', f'synth.liberty={library}',
-                      '--set', 'compile.slang.liberty_macro_precedence=true', '--set', 'synth.timing=false',
+                      '--set', 'synth.timing=false', '--emit', f'diagnostics:{diag}',
                       '--workdir', str(root/'precedenceW'), '--emit-dir', f'verilog:{root}/precedence-net'])
+assert diag.read_text().count('"code":"liberty-macro-shadows-module"') == 1, diag.read_text()
 text = '\n'.join(p.read_text() for p in (root/'precedence-net').glob('*.v'))
 assert text.count('test_sram ') == 2 and 'module test_sram' not in text and 'always' not in text, text
 # The wrapper that re-instantiates the macro under its own name (liteeth's macros.v) is not recursive.
@@ -118,16 +121,17 @@ assert '"severity":"warning","code":"liberty-memory-port-truncation"' in diag.re
 text = '\n'.join(p.read_text() for p in (root/'truncate-net').glob('*.v'))
 assert text.count('test_sram ') == 2, text
 
-# Opt-in (compile.slang.ignore_uninstantiated_modules): an unused module outside the top's
-# hierarchy is not elaborated, so its error cannot fail a read that also binds Liberty macros.
+# Default with --top (compile.slang.ignore_uninstantiated_modules): an unused module outside the
+# top's hierarchy is not elaborated, so its error cannot fail a read that also binds Liberty macros;
+# =false elaborates it and reports the error.
 junk = root/'junk.v'
 junk.write_text(source.read_text() + 'module unused_junk(output y);\n assign y = not_declared_anywhere;\nendmodule\n')
 diag = root/'junk.diagnostics.jsonl'
 invoke('junk', ['compile', str(junk), '--top', 'top', '--set', f'synth.liberty={library}',
+                '--set', 'compile.slang.ignore_uninstantiated_modules=false',
                 '--workdir', str(root/'junkW'), '--emit', f'diagnostics:{diag}'], success=False)
 assert 'not_declared_anywhere' in diag.read_text(), diag.read_text()
 invoke('junk_ok', ['compile', str(junk), '--top', 'top', '--set', f'synth.liberty={library}',
-                   '--set', 'compile.slang.ignore_uninstantiated_modules=true',
                    '--workdir', str(root/'junkOkW'), '--emit-dir', f'lg:{root}/junk-ok'])
 
 unknown = root/'unknown.v'

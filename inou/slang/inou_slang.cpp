@@ -115,19 +115,21 @@ void Inou_slang::setup() {
   m1.add_label_optional("slang_flags",
                         "raw slang driver args ('\\x1f'-separated, e.g. -F filelist.f); supplied by `lhd --reader slang -- ...`");
   m1.add_label_optional("ignore_uninstantiated_modules",
-                        "true to skip semantic elaboration of modules outside the --top hierarchy (same as the slang flag "
-                        "--ignore-uninstantiated-modules; syntax errors are still reported everywhere)");
+                        "skip semantic elaboration of modules outside the --top hierarchy (same as the slang flag "
+                        "--ignore-uninstantiated-modules; syntax errors are still reported everywhere); default true when "
+                        "a top is given, false to elaborate every module");
   m1.add_label_optional("translate_off",
                         "true (default) to drop the source text between `// synopsys translate_off` and `// synopsys translate_on` (and the "
                         "`synthesis` and `pragma` spellings), as DC, Yosys and Vivado do (same as slang --translate-off-format)");
   m1.add_label_optional("liberty_macro_precedence",
-                        "true to let a synth.liberty RAM macro win over a same-named design-source module (default: refuse the collision)");
+                        "a synth.liberty RAM macro wins over a same-named design-source module, with a note (default true, like "
+                        "Yosys read_liberty -overwrite); false to refuse the collision");
   m1.add_label_optional("liberty_allow_truncation",
                         "true to keep the low bits when a wider actual drives a narrower synth.liberty RAM input, with a warning "
                         "(default: refuse; Verilog/Yosys truncate silently)");
   m1.add_label_optional("liberty_cells",
-                        "true to bind a module that only the selected synth.liberty defines (a standard cell instantiated by "
-                        "name) as a typed, opaque cell instance");
+                        "bind a module that only the selected synth.liberty defines (a standard cell instantiated by name) as a "
+                        "typed, opaque cell instance (default true; false to report it as an unknown module)");
   m1.add_label_optional("unconnected_input",
                         "zero|one to read an unconnected instance input as that constant instead of the unknown 'x (default: x)");
   m1.add_label_optional("blackbox_attribute",
@@ -161,19 +163,21 @@ void Inou_slang::setup() {
   m2.add_label_optional("slang_flags",
                         "raw slang driver args ('\\x1f'-separated, e.g. -F filelist.f); supplied by `lhd --reader slang -- ...`");
   m2.add_label_optional("ignore_uninstantiated_modules",
-                        "true to skip semantic elaboration of modules outside the --top hierarchy (same as the slang flag "
-                        "--ignore-uninstantiated-modules; syntax errors are still reported everywhere)");
+                        "skip semantic elaboration of modules outside the --top hierarchy (same as the slang flag "
+                        "--ignore-uninstantiated-modules; syntax errors are still reported everywhere); default true when "
+                        "a top is given, false to elaborate every module");
   m2.add_label_optional("translate_off",
                         "true (default) to drop the source text between `// synopsys translate_off` and `// synopsys translate_on` (and the "
                         "`synthesis` and `pragma` spellings), as DC, Yosys and Vivado do (same as slang --translate-off-format)");
   m2.add_label_optional("liberty_macro_precedence",
-                        "true to let a synth.liberty RAM macro win over a same-named design-source module (default: refuse the collision)");
+                        "a synth.liberty RAM macro wins over a same-named design-source module, with a note (default true, like "
+                        "Yosys read_liberty -overwrite); false to refuse the collision");
   m2.add_label_optional("liberty_allow_truncation",
                         "true to keep the low bits when a wider actual drives a narrower synth.liberty RAM input, with a warning "
                         "(default: refuse; Verilog/Yosys truncate silently)");
   m2.add_label_optional("liberty_cells",
-                        "true to bind a module that only the selected synth.liberty defines (a standard cell instantiated by "
-                        "name) as a typed, opaque cell instance");
+                        "bind a module that only the selected synth.liberty defines (a standard cell instantiated by name) as a "
+                        "typed, opaque cell instance (default true; false to report it as an unknown module)");
   m2.add_label_optional("unconnected_input",
                         "zero|one to read an unconnected instance input as that constant instead of the unknown 'x (default: x)");
   m2.add_label_optional("blackbox_attribute",
@@ -240,7 +244,12 @@ void Inou_slang::work(Eprp_var& var) {
   const auto user_has_prefix = [&](std::string_view prefix) {
     return std::any_of(user_flags.begin(), user_flags.end(), [&](const std::string& f) { return f.starts_with(prefix); });
   };
-  if (label_true("ignore_uninstantiated_modules") && !user_has("--ignore-uninstantiated-modules")) {
+  // Default on whenever a top is given: modules outside its hierarchy are not the design (vendor bundles carry
+  // unfinished or simulation-only modules); compile.slang.ignore_uninstantiated_modules=false elaborates them all.
+  const bool ignore_uninstantiated = var.has_label("ignore_uninstantiated_modules")
+                                         ? label_true("ignore_uninstantiated_modules")
+                                         : (var.has_label("top") && !var.get("top").empty()) || user_has("--top");
+  if (ignore_uninstantiated && !user_has("--ignore-uninstantiated-modules")) {
     argv.push_back(strdup("--ignore-uninstantiated-modules"));
   }
   if ((!var.has_label("translate_off") || label_true("translate_off")) && !user_has_prefix("--translate-off-format")) {
@@ -329,9 +338,13 @@ void Inou_slang::work(Eprp_var& var) {
     }
   }
   const auto flag_true = [&](std::string_view name) { return var.has_label(name) && var.get(name) == "true"; };
-  opts.liberty_macro_precedence      = flag_true("liberty_macro_precedence");
+  // Default-on flags: only an explicit false/0 turns them off.
+  const auto flag_default_true = [&](std::string_view name) {
+    return !var.has_label(name) || (var.get(name) != "false" && var.get(name) != "0");
+  };
+  opts.liberty_macro_precedence      = flag_default_true("liberty_macro_precedence");
   opts.liberty_allow_truncation      = flag_true("liberty_allow_truncation");
-  opts.liberty_cells                 = flag_true("liberty_cells");
+  opts.liberty_cells                 = flag_default_true("liberty_cells");
   opts.blackbox_attribute            = flag_true("blackbox_attribute");
   opts.flatten_state_arrays          = flag_true("flatten_state_arrays");
   if (var.has_label("unconnected_input")) {

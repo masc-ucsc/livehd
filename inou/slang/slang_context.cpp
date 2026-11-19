@@ -569,6 +569,21 @@ void Slang_context::emit_error(slang::SourceRange range, std::string_view code, 
                                                      .hint     = std::string(hint)});
 }
 
+void Slang_context::emit_note(slang::SourceRange range, std::string_view code, std::string_view category, std::string message,
+                              std::string_view hint) {
+  livehd::diag::Span span;
+  if (sm_ != nullptr) {
+    span = livehd::slang_loc::span_of(*sm_, range);
+  }
+  livehd::diag::sink().emit(livehd::diag::Diagnostic{.severity = livehd::diag::Severity::note,
+                                                     .code     = std::string(code),
+                                                     .category = std::string(category),
+                                                     .pass     = "inou.slang",
+                                                     .message  = std::move(message),
+                                                     .span     = std::move(span),
+                                                     .hint     = std::string(hint)});
+}
+
 void Slang_context::emit_warning(slang::SourceRange range, std::string_view code, std::string_view category, std::string message,
                                  std::string_view hint) {
   livehd::diag::Span span;

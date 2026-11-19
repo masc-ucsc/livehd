@@ -53,10 +53,10 @@ cell.write_text('''module cellmod(input a, output y);
 endmodule
 ''')
 synth = ['synth', str(cell), '--top', 'cellmod', '--set', f'synth.liberty={lib}', '--set', 'synth.timing=false']
-diag = lhd('cell_default', [*synth, '--workdir', str(root / 'cellW0')], success=False)
+diag = lhd('cell_off', [*synth, '--set', 'compile.slang.liberty_cells=false', '--workdir', str(root / 'cellW0')],
+           success=False)
 assert 'unknown-module' in diag, diag
-lhd('cell_opt_in', [*synth, '--set', 'compile.slang.liberty_cells=true', '--workdir', str(root / 'cellW1'),
-                    '--emit-dir', f'verilog:{root}/cell-net'])
+lhd('cell_default', [*synth, '--workdir', str(root / 'cellW1'), '--emit-dir', f'verilog:{root}/cell-net'])
 net = verilog('cell-net')
 assert 'sky130_fd_sc_hd__buf_1 b(' in net and '.A(a)' in net and 'module sky130_fd_sc_hd__buf_1' not in net, net
 
