@@ -621,7 +621,8 @@ livehd::placement::Options placement_options(const Options& opts) {
   // with legroute the region refinement makes clean cuts (no net dipping into a region through one side with 0 or 1
   // cell there) unless set: kept from the regional flow so the placement the plan rounds start from is unchanged
   if (truthy(synth_set(opts, "place.legroute", "true")) && synth_set(opts, "place.region.cleancuts", "").empty()) {
-    out.boundarypins.clean_cuts = true;
+    out.boundarypins.clean_cuts      = true;
+    out.boundarypins.clean_cuts_auto = true;  // kept only when the legroute probe measures overflow
   }
   // bus order across region edges is the boundary-pin flow with ordered, spaced, fixed virtual pins
   if (truthy(synth_set(opts, "place.region.busorder", "true"))) {

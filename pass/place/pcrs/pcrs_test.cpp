@@ -829,6 +829,42 @@ TEST_F(Pcrs, CellsAreSizedForThePinsAndTheWireTheyDrive) {
   expect_uniform(0, 0);
 }
 
+TEST_F(Pcrs, AWeakLeafFlopSplitsItsGroupBehindBuffersToMeetSlew) {
+  add_flops(20, clock);  // 40 reset pins: five leaf groups of eight
+  auto lib = cells();
+  // Without drive data nothing changes: each leaf flop drives its eight pins directly.
+  auto stats = build_reset(*graph, tech, lib, {.fanout = 8}, depth(1));
+  EXPECT_EQ(minted("BUFx1"), 0u);
+  // A flop whose Q cannot reach max_transition on eight pins (2.2 R C over 0.6 of the limit): every leaf group is
+  // split, each part behind a buffer, with the same reset latency on every sink.
+  bool found = false;
+  for (auto& drive : lib.drives) {
+    if (drive.name == "DFFx1" && drive.output == "Q") {
+      drive.resistance_ohm    = 10000;
+      drive.max_transition_ps = 10;
+      found                   = true;
+    }
+  }
+  if (!found) {
+    liberty::Output_drive drive;
+    drive.sequential        = true;
+    drive.name              = "DFFx1";
+    drive.output            = "Q";
+    drive.resistance_ohm    = 10000;
+    drive.max_transition_ps = 10;
+    lib.drives.push_back(drive);
+  }
+  stats = build_reset(*graph, tech, lib, {.fanout = 8, .regroup = true}, depth(1));
+  EXPECT_EQ(stats.flops, 5u);
+  EXPECT_GE(minted("BUFx1"), 10u);  // at least two parts per leaf group
+  expect_uniform(1, 0);
+  for (auto node : graph->body().nodes()) {
+    if (is_pcrs_cell(std::string(node.get_name())) && node.get_subnode_io()->get_name() == "DFFx1") {
+      EXPECT_LE(fanout(node.get_driver_pin("Q")), 4u);
+    }
+  }
+}
+
 TEST_F(Pcrs, DeadLibraryDoesNothing) {
   add_flops(20, clock);
   lib_text = R"(library(empty) { time_unit : "1ns"; })";

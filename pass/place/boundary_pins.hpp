@@ -20,6 +20,9 @@ struct Boundary_pin_options {
   // most max_displacement_um), and an RSMT piece with no pin that enters and leaves a rectangle through one boundary
   // line is dropped, its crossings joined on the other side.
   bool     clean_cuts          = false;
+  // clean_cuts came from legroute's default (place.region.cleancuts unset): keep them only when a legroute probe of
+  // the converged placement measures real routing overflow; an uncongested placement keeps its cut-free refinement.
+  bool     clean_cuts_auto     = false;
   // With align: also align a net's input and output pins on opposite edges of a rectangle with cells in between when
   // they are within this many pin pitches (0: only across zero or one cell).
   double   align_near          = 0;

@@ -43,6 +43,8 @@ struct Lib {
   // rest are what a heavier load gets. One entry when the Liberty states no limit.
   std::vector<const liberty::Comb_cell*>                    buffer_sizes, inverter_sizes;
   std::vector<std::pair<const liberty::Dff_cell*, double>> flop_sizes;  // with the Q pin's limit in fF (0: unstated)
+  // The Q pin's drive estimate of every flop size: resistance (ohm) and max_transition (ps, 0: unstated).
+  std::map<std::string, std::pair<double, double>, std::less<>> flop_drive;
 
   bool placeable(const std::string& name, std::initializer_list<const std::string*> pins) const {
     const auto macro = tech.macros.find(name);
@@ -143,6 +145,14 @@ struct Lib {
       for (const auto& entry : stronger) {
         if (entry.second > flop_sizes.back().second) {
           flop_sizes.push_back(entry);
+        }
+      }
+      for (const auto& [cell, cap] : flop_sizes) {
+        for (const auto& drive : cells.drives) {
+          if (drive.name == cell->name && drive.output == cell->q_pin) {
+            flop_drive[cell->name] = {drive.resistance_ohm, drive.max_transition_ps.value_or(0)};
+            break;
+          }
         }
       }
     }
@@ -637,9 +647,28 @@ private:
   static double comfort(const std::optional<double>& limit) {
     return limit && *limit > 0 ? *limit / 2 : std::numeric_limits<double>::infinity();
   }
+  // The driver's output slew on a lumped load (10-90% of an RC step, 2.2 R C) stays within a share of the Liberty
+  // max_transition, so the sinks it reaches through the wire still meet the limit. Unstated data: no limit.
+  static bool slew_ok(double resistance_ohm, double max_transition_ps, double load_ff) {
+    constexpr double kShare = 0.6;
+    if (!(resistance_ohm > 0) || !(max_transition_ps > 0)) {
+      return true;
+    }
+    return 2.2 * resistance_ohm * load_ff * 1e-3 <= kShare * max_transition_ps;
+  }
+  static bool fits(const liberty::Comb_cell& cell, double load) {
+    return load <= comfort(cell.max_capacitance_ff) && slew_ok(cell.resistance_ohm, cell.max_transition_ps.value_or(0), load);
+  }
+  bool flop_fits(const liberty::Dff_cell& cell, double limit, double load) const {
+    if (load > comfort(limit > 0 ? std::optional{limit} : std::nullopt)) {
+      return false;
+    }
+    const auto drive = lib_.flop_drive.find(cell.name);
+    return drive == lib_.flop_drive.end() || slew_ok(drive->second.first, drive->second.second, load);
+  }
   const liberty::Comb_cell& sized(const std::vector<const liberty::Comb_cell*>& sizes, double load) const {
     for (const auto* cell : sizes) {
-      if (load <= comfort(cell->max_capacitance_ff)) {
+      if (fits(*cell, load)) {
         return *cell;
       }
     }
@@ -647,11 +676,40 @@ private:
   }
   const liberty::Dff_cell& sized_flop(double load) const {
     for (const auto& [cell, limit] : lib_.flop_sizes) {
-      if (load <= comfort(limit > 0 ? std::optional{limit} : std::nullopt)) {
+      if (flop_fits(*cell, limit, load)) {
         return *cell;
       }
     }
     return *lib_.flop_sizes.back().first;
+  }
+  // A leaf group the strongest driver cannot carry (capacitance or slew): split it by position until every part
+  // fits the strongest buffer, which then drives that part. One part: the driver serves the group directly.
+  std::vector<std::vector<Pin>> drive_split(std::vector<Pin> sinks, bool strongest_fits, unsigned guard = 0) const {
+    if (strongest_fits || sinks.size() <= 1 || guard > 8 || lib_.buffer_sizes.empty()) {
+      return {std::move(sinks)};
+    }
+    Box        box;
+    const auto load = load_of(sinks, box);
+    if (guard > 0 && fits(*lib_.buffer_sizes.back(), load)) {
+      return {std::move(sinks)};
+    }
+    // Bisect along the longer side of the sinks' box (unplaced sinks keep their order).
+    const bool by_x = box.any() && (box.xh - box.xl) >= (box.yh - box.yl);
+    std::vector<std::pair<double, size_t>> order;
+    for (size_t i = 0; i < sinks.size(); ++i) {
+      const auto at = where(sinks[i].get_master_node());
+      order.emplace_back(at ? (by_x ? at->first : at->second) : double(i), i);
+    }
+    std::ranges::stable_sort(order, {}, [](const auto& e) { return e.first; });
+    std::vector<Pin> lo, hi;
+    for (size_t i = 0; i < order.size(); ++i) {
+      (i < order.size() / 2 ? lo : hi).push_back(sinks[order[i].second]);
+    }
+    auto parts = drive_split(std::move(lo), false, guard + 1);
+    for (auto& part : drive_split(std::move(hi), false, guard + 1)) {
+      parts.push_back(std::move(part));
+    }
+    return parts;
   }
   void sit(const Node& cell, const Box& box) {
     if (box.any()) {
@@ -763,6 +821,7 @@ private:
     std::vector<std::vector<Box>>    boxes(depth);
     std::vector<std::vector<double>> loads(depth);
     std::vector<const liberty::Comb_cell*> leaf_inverter(G, nullptr);
+    std::vector<std::vector<std::vector<Pin>>> leaf_parts(G);  // the buffered parts of a group (one: driven directly)
     std::vector<std::vector<uint64_t>>     ids(depth);  // the sinks beneath every flop
     boxes[depth - 1].resize(G);
     loads[depth - 1].resize(G);
@@ -773,7 +832,24 @@ private:
         sinks.push_back(leaf.sink);
       }
       ids[depth - 1][g]       = identity_of(sinks);
-      const double group_load = load_of(sinks, boxes[depth - 1][g]);
+      double group_load       = load_of(sinks, boxes[depth - 1][g]);
+      {
+        const bool strongest = invert ? fits(*lib_.inverter_sizes.back(), group_load)
+                                      : flop_fits(*lib_.flop_sizes.back().first, lib_.flop_sizes.back().second, group_load);
+        leaf_parts[g]        = drive_split(sinks, strongest);
+        if (leaf_parts[g].size() > 1) {
+          // The driver now carries one buffer per part, each in the middle of its sinks.
+          Box centers;
+          for (const auto& part : leaf_parts[g]) {
+            Box part_box;
+            (void)load_of(part, part_box);
+            if (part_box.any()) {
+              centers.add(part_box.center());
+            }
+          }
+          group_load = double(leaf_parts[g].size()) * pin_ff_ + wire_ff(centers, leaf_parts[g].size());
+        }
+      }
       if (invert) {
         leaf_inverter[g] = &sized(lib_.inverter_sizes, group_load);
         const auto& in   = leaf_inverter[g]->input_capacitance_ff;
@@ -837,6 +913,12 @@ private:
         gu::set_bits(out, 1);
         inv.create_sink_pin(master.inputs.front()).connect_driver(driver);
         driver = out;
+      }
+      if (leaf_parts[g].size() > 1) {
+        for (const auto& part : leaf_parts[g]) {
+          buffer_for(part, group_owner[g], "e", depth, domain).connect_driver(driver);
+        }
+        continue;
       }
       for (const auto& leaf : groups[g]) {
         leaf.sink.connect_driver(driver);

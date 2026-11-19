@@ -907,7 +907,9 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
                   h);
   }
   if (o.boundarypins.enabled && (o.boundarypins.clean_cuts || o.boundarypins.align_near > 0)) {
-    h = hash_text(std::format("boundarypins-cuts:{}:{}", o.boundarypins.clean_cuts, o.boundarypins.align_near), h);
+    h = hash_text(std::format("boundarypins-cuts:{}:{}:{}", o.boundarypins.clean_cuts, o.boundarypins.align_near,
+                              o.boundarypins.clean_cuts_auto),
+                  h);
   }
   if (o.legroute) {
     const auto& l = o.legroute_options;
@@ -10000,6 +10002,9 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     }
     return ios;
   };
+  // Set once the legroute routing frame is available (below): true when the converged placement has routing
+  // overflow, so default (legroute-implied) clean region cuts are worth their wirelength.
+  std::function<bool(const dp::Design&)> clean_cuts_probe;
   const auto refine_final_boundaries = [&](dp::Design& physical) {
     auto refine_control = control;
     if (live_session && session_checkpoint) {
@@ -10095,6 +10100,10 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
           }
         }
         pin_options.pitch_um = 2 * flop;
+      }
+      if (pin_options.clean_cuts && pin_options.clean_cuts_auto) {
+        // Legroute's default clean cuts cost wirelength on placements that route anyway: measure first.
+        pin_options.clean_cuts = clean_cuts_probe ? clean_cuts_probe(physical) : true;
       }
       std::vector<std::string> drivers;
       for (const auto& [driver, sinks] : v.nets) {
@@ -12503,6 +12512,35 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       }
       return profile;
     };
+    if (options.legroute) {
+      clean_cuts_probe = [&](const dp::Design& physical) {
+        try {
+          auto frame = sat_frame(physical, false);
+          if (options.handoff_taps) {
+            add_handoff_taps(frame);
+          }
+          Legroute_power power;
+          const auto*    profile = legroute_power(frame, power);
+          auto           lopt    = options.legroute_options;
+          lopt.capacity_share    = legroute_capacity_share(options);
+          lopt.macro_halo_x_dbu  = v.halo_x;
+          lopt.macro_halo_y_dbu  = v.halo_y;
+          const auto plan        = legroute_plan(tech, frame, timing::Feedback{}, lopt, power, profile, options.legroute_plan.net_pops);
+          const bool congested   = plan.residual() > 0;
+          std::fprintf(stderr,
+                       "legroute clean-cut probe: residual %zu (overflow tracks %zu, edges %zu, unrouted %zu): clean cuts %s\n",
+                       plan.residual(),
+                       plan.overflow_tracks,
+                       plan.overflow_edges,
+                       plan.unrouted,
+                       congested ? "kept" : "skipped");
+          return congested;
+        } catch (const std::exception& e) {
+          std::fprintf(stderr, "legroute clean-cut probe failed (%s): clean cuts kept\n", e.what());
+          return true;
+        }
+      };
+    }
     const auto terminal_controls = [&](const ph::Floorplan& frame) {
       auto terminal_config             = options.terminal_legalize_options;
       terminal_config.prects           = v.prects;
