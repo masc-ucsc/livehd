@@ -124,6 +124,42 @@ TEST(AbcIo, RemapKeepsDesignInstantiatedCells) {
   EXPECT_EQ(design_owned.gates + 1, mapper_owned.gates);  // imported as an opaque cut, not as a remappable gate
   EXPECT_EQ(design_owned.kept, 1);
 }
+// The cells feeding a clock pin are CTS's to buffer, not the remapper's: a remap that restructures a clock gate
+// (AND -> NAND+INV, buffers on the clock port) leaves an inverter in front of a downstream gate that CTS then does not
+// treat as a clock root. A chain that reaches a macro's clock-named pin is kept cell for cell; the same chain into a
+// data pin is remapped (the control).
+TEST(AbcIo, RemapKeepsClockConeCells) {
+  const auto remap = [](std::string_view pin) {
+    Fixture f(6);
+    auto    macro = f.library.create_io("MACRO");
+    macro->add_input(std::string(pin), 1);
+    macro->set_bits(std::string(pin), 1);
+    auto drv = f.graph->get_output_pin("y").get_driver_pin();
+    auto m   = graph_util::create_typed_node(*f.graph, Ntype_op::Sub);
+    m.set_subnode(macro);
+    m.set_name("mem0");
+    drv.connect_sink(m.create_sink_pin(std::string(pin)));
+    f.graph->commit();
+    auto                  mapper = synth::make_io_mapper("abc",
+                                                         {
+                                            {"library", "inou/prp/tests/abc/timing.lib"}
+    });
+    synth::Io_environment env;
+    env.inputs["a[0]"]   = 950;
+    env.required["y[0]"] = 1000;
+    (void)mapper(*f.graph, env, {}, 1000, 5, true);
+    int kept = 0;
+    for (auto node : f.graph->body().nodes()) {
+      const auto name = node.get_name();
+      if (name.starts_with("inv") && node.get_subnode_io() && node.get_subnode_io()->get_name() == "INVx1") {
+        ++kept;
+      }
+    }
+    return kept;
+  };
+  EXPECT_EQ(remap("d"), 0);    // a data pin: the chain is the remapper's to redo
+  EXPECT_EQ(remap("clk"), 6);  // a clock pin: every cell of the chain survives with its name
+}
 TEST(AbcIo, GrowthAdmissionRejectsBeforePublishingAProvedReplacement) {
   Fixture    f;
   auto       mapper = synth::make_io_mapper("abc",

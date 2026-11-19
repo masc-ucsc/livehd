@@ -16,6 +16,7 @@
 #include "abc_boundary.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <format>
@@ -416,6 +417,7 @@ struct Refine {
   std::vector<std::unique_ptr<Imp_def>>                       defs;
   absl::flat_hash_map<std::string, int>                       def_idx;
   absl::flat_hash_set<std::string>                            dff_names;
+  absl::flat_hash_set<std::string>                            latch_names;  // the latch cells among dff_names
   absl::flat_hash_map<std::string, SC_Cell*>                  cell_by_name;
   float                                                       typical_cap = 0.0f;
   float                                                       io_load     = 0.0f;
@@ -610,6 +612,82 @@ static bool import_def(Refine& R, Imp_def& d) {
     return pins;
   };
 
+  // 0. The clock cone: combinational cells whose output reaches a register, latch or macro clock pin. A remap
+  // may restructure them (a gate AND became NAND+INV with buffers on the clock port), which leaves CTS with an
+  // inverter in front of a downstream gate that it then does not treat as a clock root: thousands of registers
+  // got no clock tree (coralnpu, 8.4k flops behind a second clock gate) and post-CTS hold repair exploded. Clock
+  // cells keep their exact cell, the way design-instantiated cells do; CTS owns the clock network.
+  absl::flat_hash_set<hhds::Node_class> clock_cone;
+  {
+    std::vector<hhds::Pin_class>          work;
+    absl::flat_hash_set<hhds::Node_class> visited;
+    const auto                            seed_clock = [&](const hhds::Pin_class& p) {
+      if (!p.is_invalid() && !p.is_const()) {
+        work.push_back(p);
+      }
+    };
+    const auto clock_named = [](std::string_view name) {
+      std::string l(name);
+      std::transform(l.begin(), l.end(), l.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+      return l.find("clk") != std::string::npos || l == "ck";
+    };
+    for (auto node : g->body().nodes(hhds::Node_order::forward)) {
+      const auto op = gu::type_op_of(node);
+      if (op == Ntype_op::Sub) {
+        auto io = node.get_subnode_io();
+        if (!io) {
+          continue;
+        }
+        const std::string tname{io->get_name()};
+        if (R.dff_names.contains(tname)) {
+          // d=1, clk=2, q=3 (liberty::create_dff_io). A latch cell's enable is not a seed: it is often plain
+          // decode logic (a LiteX FSM latch), and a clock gate's latch is reached through the gate it feeds.
+          if (!R.latch_names.contains(tname)) {
+            seed_clock(driver_of_pid(node, 2));
+          }
+          continue;
+        }
+        if (Mio_LibraryReadGateByName(R.mio, const_cast<char*>(tname.c_str()), nullptr) != nullptr) {
+          continue;
+        }
+        for (const auto& id : io->get_input_pin_decls()) {  // a macro / other instance: its clock-named inputs
+          if (clock_named(id.name)) {
+            seed_clock(driver_of_pid(node, id.port_id));
+          }
+        }
+      } else if (op == Ntype_op::Flop || op == Ntype_op::Fflop) {
+        seed_clock(gu::get_driver_of_sink_name(node, "clock_pin"));
+      }
+    }
+    while (!work.empty()) {
+      const auto p = work.back();
+      work.pop_back();
+      const auto node = p.get_master_node();
+      if (!visited.insert(node).second) {
+        continue;
+      }
+      const auto op = gu::type_op_of(node);
+      if (op == Ntype_op::Sub) {
+        auto io = node.get_subnode_io();
+        if (!io) {
+          continue;
+        }
+        const std::string tname{io->get_name()};
+        if (R.dff_names.contains(tname)
+            || Mio_LibraryReadGateByName(R.mio, const_cast<char*>(tname.c_str()), nullptr) == nullptr) {
+          continue;  // state or an opaque instance: the cone stops there
+        }
+        clock_cone.insert(node);
+      } else if (op == Ntype_op::Flop || op == Ntype_op::Fflop || op == Ntype_op::Latch || op == Ntype_op::Memory
+                 || !Ntype::is_pin_trackable(op)) {
+        continue;
+      }
+      for (const auto& in_pin : node.inp_sorted_pins()) {  // a gate or wiring glue: keep walking toward the source
+        seed_clock(in_pin.get_driver_pin());
+      }
+    }
+  }
+
   // 1. classify nodes; trackable glue is replayed in a deferral loop.
   std::vector<hhds::Node_class> pending;
   for (auto node : g->body().nodes(hhds::Node_order::forward)) {
@@ -664,7 +742,7 @@ static bool import_def(Refine& R, Imp_def& d) {
       // A Liberty cell the design instantiated (attrs::user_cell) is not the mapper's to redo: SDC and floorplans name
       // it, so it falls through to the opaque-instance path below and survives a remap with its name and pins.
       if (auto* gate = Mio_LibraryReadGateByName(R.mio, const_cast<char*>(tname.c_str()), nullptr);
-          gate != nullptr && !node.attr(livehd::attrs::user_cell).has()) {
+          gate != nullptr && !node.attr(livehd::attrs::user_cell).has() && !clock_cone.contains(node)) {
         Cell c;
         c.node             = node;
         c.gate             = gate;
@@ -1294,6 +1372,7 @@ uint64_t Abc_backend::refine(hhds::GraphLibrary& outlib, std::string_view top, c
   }
   for (const auto& n : design.latch_cell_names) {
     R.dff_names.insert(n);  // a latch cell: a register-like boundary (d=1, q=3), never a gate
+    R.latch_names.insert(n);
   }
 
   // 1. the defs reachable from top, children after parents does not matter:
@@ -1827,6 +1906,7 @@ synth::Ware_score Abc_backend::score(hhds::GraphLibrary& outlib, std::string_vie
   }
   for (const auto& n : design.latch_cell_names) {
     R.dff_names.insert(n);  // a latch cell: a register-like boundary (d=1, q=3), never a gate
+    R.latch_names.insert(n);
   }
 
   // 1. the defs reachable from top, children after parents does not matter:
