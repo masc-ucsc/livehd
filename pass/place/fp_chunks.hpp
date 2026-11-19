@@ -22,6 +22,7 @@ struct Chunk_object {
   double                   area = 0, width = 0, height = 0;
   std::optional<Chunk_box> fixed{};
   std::array<double, 2>    worker_halo{};  // per-side clearance for an independently placed macro
+  bool                     worker_memory = false;  // Release the parent memory pose inside its assigned home.
 };
 struct Chunk_port {
   std::string           net;
@@ -95,6 +96,7 @@ class Chunk_model {
                                       bool only_saved) const;
 
 public:
+  std::map<std::vector<int>, unsigned> shared_nets() const;
   bool pack_scopes = false;  // group whole colors and macros across instance boundaries up to the worker budget
   bool connectivity = false;
   std::vector<Chunk_object>                                                       objects;

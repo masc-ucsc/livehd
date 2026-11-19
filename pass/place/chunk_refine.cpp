@@ -179,7 +179,10 @@ Chunk_refine_stats refine_chunk_seeds(dp::Design& d, const Chunk_model& model, c
   std::vector<std::vector<int>>       nodes(plan.chunks.size());
   std::vector<std::vector<Local_net>> nets(plan.chunks.size());
   std::vector<int>                    idx(owners.size(), -1), home(owners.size(), -1);
-  auto movable = [&](int i) { return i < d.num_movable && (export_job || !model.objects[owners[i]].macro); };
+  auto                                movable = [&](int i) {
+    const auto& object = model.objects[owners[i]];
+    return (export_job && object.worker_memory) || (i < d.num_movable && (export_job || !object.macro));
+  };
   for (size_t i = 0; i < owners.size(); ++i) {
     if (owners[i] >= 0) {
       home[i] = plan.home[owners[i]];
@@ -379,6 +382,7 @@ Chunk_refine_stats refine_chunk_seeds(dp::Design& d, const Chunk_model& model, c
         pin(i, dx, dy);
         edge += number(number(mix(2166136261U, i), d.pin_offset_x[pp]), d.pin_offset_y[pp]);
       }
+      if (export_job) job.parent_nets.push_back(part.net);
       if (part.port) {
         if (export_job) {
           job.boundary_nets.push_back(local.net_weights.size());

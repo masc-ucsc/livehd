@@ -1372,6 +1372,11 @@ void Session::set_intent_provider(Intent_provider provider) {
   std::lock_guard lock(m_);
   intent_provider_ = std::move(provider);
 }
+std::vector<std::string> Session::selected_names() const {
+  if (controller_) return wire::read<std::vector<std::string>>(controller_->call("selected_names"));
+  std::lock_guard lock(m_);
+  return selection_;
+}
 std::string Session::intent() const {
   if (controller_) {
     return controller_->call("get_intent");

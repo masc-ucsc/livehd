@@ -266,6 +266,32 @@ TEST(FpChunks, RepeatedCoresAndScopedGuidanceReplay) {
   auto single = m.plan({10, 20, 510, 320}, 1, 2, 0, .6, nullptr, "top");
   EXPECT_EQ(single.chunks.size(), 1);
 }
+TEST(FpChunks, ExportReleasesOwnedMemoryAndKeepsFixedObstacle) {
+  Chunk_model m;
+  int         ram                 = m.cell("ram", "", "", true, 8, 8, Chunk_box{10, 10, 18, 18});
+  int         block               = m.cell("fixed", "", "", true, 8, 8, Chunk_box{30, 10, 38, 18});
+  m.objects[ram].worker_memory    = true;
+  auto                       plan = m.plan({0, 0, 80, 80}, 1, 1, 0, .8, nullptr, "top");
+  DreamPlace::native::Design d;
+  d.layout      = {0, 0, 80, 80, 1, 1};
+  d.num_movable = 0;
+  d.node_x      = {30, 10};
+  d.node_y      = {10, 10};
+  d.node_size_x = d.node_size_y = {8, 8};
+  d.node_halo_x = d.node_halo_y = {0, 1};
+  d.flat_net2pin_start          = {0};
+  const std::vector<int>         owners{block, ram};
+  const std::vector<std::string> names{"fixed", "ram"};
+  unsigned                       packets = 0;
+  refine_chunk_seeds(d, m, plan, owners, names, 1, 1, false, [&](size_t, Chunk_job& job) {
+    ++packets;
+    EXPECT_EQ(job.names, (std::vector<std::string>{"ram"}));
+    EXPECT_EQ(job.physical.num_movable, 1);
+    EXPECT_EQ(job.physical.node_x, (std::vector<double>{10, 30}));
+    EXPECT_EQ(job.physical.node_halo_x.front(), 1);
+  });
+  EXPECT_EQ(packets, 1);
+}
 TEST(FpChunks, ReusesDetailedCoreAndMeasuresCrossingCellArea) {
   Chunk_model m;
   for (std::string core : {"a", "b"}) {

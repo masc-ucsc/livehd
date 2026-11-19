@@ -11,16 +11,21 @@ struct Chunk_jobs_ready {
   std::string manifest;
 };
 struct Chunk_job {
-  std::string                design, id;
-  uint64_t                   plan_key = 0, budget = 0;
-  int                        dbu = 0, iterations = 0, threads = 1;
-  bool                       detailed = true, multirow = false;
-  double                     density = .5;
-  Chunk_box                  box{};
-  std::vector<std::string>   names;          // full physical names in native movable order
-  std::vector<int>           boundary_nets;  // local net indexes; contact is its final, fixed pin
-  std::vector<uint64_t>      original_nets;
-  DreamPlace::native::Design physical;
+  std::string                                  design, id;
+  uint64_t                                     plan_key = 0, budget = 0;
+  int                                          dbu = 0, iterations = 0, threads = 1;
+  bool                                         detailed = true, multirow = false;
+  double                                       density = .5;
+  Chunk_box                                    box{};
+  std::vector<std::string>                     names;          // full physical names in native movable order
+  std::vector<int>                             boundary_nets;  // local net indexes; contact is its final, fixed pin
+  std::vector<uint64_t>                        original_nets;
+  // Local nets in parent order, used only while assembling the packet.
+  std::vector<size_t>                          parent_nets;
+  // Constrained nets carry the STA slack and wire delay at the exported seed.
+  std::vector<std::tuple<int, double, double>> timed_nets;
+  std::array<double, 4>                        wire_rc{};
+  DreamPlace::native::Design                   physical;
 };
 int place_chunk_worker(const std::filesystem::path& input, const std::filesystem::path& output, const std::string& checksum);
 int place_chunk_batch(const std::string& executable, const std::filesystem::path& manifest, const std::filesystem::path& output,
@@ -29,6 +34,7 @@ int place_chunk_batch(const std::string& executable, const std::filesystem::path
 std::string write_chunk_jobs(const std::filesystem::path& manifest, const metadata::Bundle& base, const Chunk_model&,
                              const Chunk_plan&, DreamPlace::native::Design&, std::span<const int> owners,
                              std::span<const std::string> names, const std::string& design, int dbu, int iterations, int threads,
-                             bool detailed, bool strict, const std::string& selected = {},
-                             const Chunk_predictor* current = nullptr);
+                             bool detailed, bool strict, bool adjust_contacts, const std::string& selected = {},
+                             const Chunk_predictor* current = nullptr, std::span<const double> slack_ps = {},
+                             std::array<double, 4> wire_rc = {}, std::span<const std::array<double, 2>> windows = {});
 }  // namespace livehd::placement

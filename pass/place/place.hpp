@@ -362,6 +362,7 @@ struct Options {
   Evaluate                                        fp_evaluate;
   // Optional lightweight path ranking for placement weights. Detailed timing
   // remains available through fp_evaluate for resizing and resynthesis.
+  Rank                                            chunk_timing;  // Detailed boundary timing at packet export.
   Rank                                            gp_rank;
   Rank_trees                                      gp_rank_trees;  // when set, GP timing checkpoints rank from numeric trees
   std::shared_ptr<timing::Whatif*>                gui_journal;    // owned by the private detailed evaluator

@@ -10,6 +10,33 @@ gui wait state=gate phase=fp
 gui export what=chunks
 ```
 
+For a live edit, use the workdir client directly. A click or Shift-click supplies the current members.
+Use `gui connected kind=color limit=2 add_to_selection=true` to add the two most connected colors.
+`gui split home=A new_id=B`, `gui transfer home=A to=B`, `gui fuse home=A other=B` and
+`gui reshape home=B aspect=1.5` apply and wait for the planner. Add `apply=false` for a preview.
+Finish the plan to switch the same browser tab to placement. Run `gui macro 'ids=["B"]'` for one home.
+
+At the worker stage, `gui selection` returns clicked objects and contacts. `gui find home=B kind=macro match=csr`
+lists named memories and their coordinates. `gui edit align=row side=right gap=3000` edits the selected
+objects immediately. Add `fix=x|y|xy` for held axes. Use `gui undo` to restore the full previous main state.
+
+```sh
+gui trial iterations=100 metric=hpwl keep_if=checkpoint \
+  'left={"align":"row","side":"left","gap":3000}' \
+  'right={"align":"row","side":"right","gap":3000}'
+```
+
+The result includes completed iterations and deltas against the starting checkpoint and an equally advanced
+control. Use `keep_if=control` for a comparison against that control. For manual inspection, omit
+`keep_if`, then `gui view trial=ID branch=right`, `gui compare trial=ID wait=true` and
+`gui keep trial=ID branch=right`. Use `metric=wns` for a packet with constrained nets at export.
+Its estimate applies local wire-delay changes to STA seed slacks. Moves preserve the full legal handoff
+when accepted, and a stale fork cannot replace an intervening main edit.
+
+Use `gui overview` for the accepted, selected and best comparable assembled pin HPWL and estimated WNS. Run `gui next objective=hpwl|wns|density` to inspect each chunk's priority and reason. Supply `hypothesis="..."` with the trial. A density candidate such as `'sparse={"density":0.72}'` changes that worker's target. An IO candidate such as `'slide={"io":{"net":17,"xy":[1200,2400]}}'` advances every incident chunk and its matched control. Add `stage=final` to fork a finalized handoff. `gui history query=CSR`, `gui finding trial=ID branch=NAME text="..."` and `gui replay trial=ID branch=NAME` use the persistent experiment log.
+
+Use `gui place-design` to finish outstanding chunks locally, validate ownership and assemble their exact positions. The equivalent headless commands are `lhd synth chunk final --workdir W` and `lhd synth chunk assemble --workdir W`. Use `--workers 1` on `chunk init --gui` or `chunk gui` when only one placement worker fits. [Scoring and experiment semantics](../../../pass/place/README.md#live-search-on-isolated-workers)
+
 The client reads the Unix socket path from `W/synth/place/gui_agent.json`. The chunk listing gives physical IDs, boxes in DBU, estimated worker bytes, frame and intent revision. Read members, peers or pins for a selected ID. Each list supports `offset` and `limit`.
 
 ```sh

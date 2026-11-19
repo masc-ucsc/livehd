@@ -79,12 +79,12 @@ input[type=number]{width:44px;font:inherit;color:var(--fg);background:transparen
 </fieldset><output id="scoreStatus" aria-live="polite"></output></details>
 <div class="row"><span>timing from iter</span><span id="s_titer">-</span></div>
 <div class="row"><span></span><span><button id="tim" style="padding:0 8px;font-size:12px">Refresh timing</button> <button id="evaluate">Full timing</button> <button id="legalize">Legalize</button></span></div>
-<h4>Implementation changes</h4>
+<details><summary>Implementation controls</summary>
 <label><input type="checkbox" id="no_resynthesis">No resynthesis</label>
 <label><input type="checkbox" id="no_sizing">No sizing</label>
 <label><input type="checkbox" id="no_buffer_edits">No buffer edits</label>
 <button id="freeze">Freeze implementation</button>
-<div id="slowwork" class="mut"></div>
+<div id="slowwork" class="mut"></div></details>
 <h4>Stop before stage</h4><div id="stages" class="mut">-</div>
 <h4>Explorations</h4>
 <div id="explist" aria-live="polite"></div>
@@ -138,19 +138,19 @@ input[type=number]{width:44px;font:inherit;color:var(--fg);background:transparen
 <label><input type="checkbox" id="l_disp">displacement</label>
 <h4>Highlights</h4><div id="hls" class="mut" style="font-size:12px">none (an assistant can paint cells here)</div>
 <h4>Selection (<span id="s_sel">0</span>)</h4>
-<div id="al">
+<details><summary>Align selected objects</summary><div id="al">
 <button data-a="left">Left</button><button data-a="hcenter">H center</button><button data-a="right">Right</button>
 <button data-a="top">Top</button><button data-a="vcenter">V center</button><button data-a="bottom">Bottom</button>
 <button data-a="disth">Distribute H</button><button data-a="distv">Distribute V</button><button data-a="unpin">Unpin</button>
 </div>
 <div class="row" style="margin-top:6px;align-items:center"><span>matrix</span><span><input type="number" id="m_r" value="2" min="1"> x <input type="number" id="m_c" value="2" min="1"> <button data-a="matrix">Go</button></span></div>
-<label><input type="checkbox" id="ipreserve">Preserve as relationship</label>
-<h4>Placement intent</h4>
+<label><input type="checkbox" id="ipreserve">Preserve as relationship</label></details>
+<details><summary>Placement intent records</summary>
 <button id="iread">Inspect</button> <button id="ipreview">Preview</button> <button id="iapply">Apply records</button>
 <textarea id="irecords" aria-label="Authored placement records" rows="4" style="width:100%"></textarea>
 <label id="ioverlayControl" hidden><input type="checkbox" id="ioverlay" checked> Show intent targets</label>
 <output id="ilegend" class="mut" aria-live="polite"></output>
-<pre id="ibind" style="white-space:pre-wrap;max-height:12em;overflow:auto"></pre>
+<pre id="ibind" style="white-space:pre-wrap;max-height:12em;overflow:auto"></pre></details>
 <details id="chunks" hidden><summary>Floorplan chunks</summary>
 <label><input type="checkbox" id="chunkLines" checked> Show boundaries</label>
 <label>Target <select id="chunkSelect" style="max-width:100%"></select></label>
@@ -167,7 +167,7 @@ input[type=number]{width:44px;font:inherit;color:var(--fg);background:transparen
 <div id="chunkInfo" class="mut"></div>
 <label>Density <input id="chunkDensity" type="number" min="0.001" max="1" step="any"></label>
 <button id="chunkApply">Apply</button> <button id="chunkClear">Inherit</button>
-<fieldset style="min-width:0"><legend>Move a physical chunk</legend>
+<details><summary>Move a physical chunk</summary>
 <label><input type="checkbox" id="chunkDrag" checked>Drag chunks (Alt-drag to pan)</label>
 <label><input type="checkbox" id="reviewDrop">Preview drop before applying</label>
 <span id="dropActions" hidden><button id="dropApply">Apply preview</button> <button id="dropDiscard">Discard preview</button></span>
@@ -178,8 +178,8 @@ input[type=number]{width:44px;font:inherit;color:var(--fg);background:transparen
 <button id="geometryLock">Lock aspect</button> <button id="geometryOthers">Lock other aspects</button>
 <button id="geometryUnlock">Unlock all</button> <button id="geometryUndo">Undo last geometry edit</button>
 <output id="geometryInfo" aria-live="polite" style="display:block">Drag to estimate wire spans with peers held still. Drop to refine boxes and pins.</output>
-</fieldset>
-<fieldset style="min-width:0"><legend>Physical homes</legend>
+</details>
+<details><summary>Physical homes</summary>
 <label><input id="homeLinks" type="checkbox" checked>Show selected interconnects</label>
 <label><input id="homeHeat" type="checkbox">Show estimated routing demand</label>
 <div id="homeMetrics" class="mut"></div><small>Wire and route proxies count crossing nets only. Split or fuse changes that set. Final placement checks row cutouts and fixed-cell obstacles.</small>
@@ -188,8 +188,8 @@ input[type=number]{width:44px;font:inherit;color:var(--fg);background:transparen
 <label id="homeNameField">New home ID <input id="homeName" style="min-width:0;width:9em"></label></div>
 <div id="homeFuse" hidden><label>Other home <select id="homePeer" style="max-width:100%"></select></label></div>
 <button id="homePreview">Preview</button> <button id="homeApply">Apply</button> <button id="homeUndo">Undo home edit</button>
-<output id="homeStatus" aria-live="polite" style="display:block"></output></fieldset>
-<fieldset style="min-width:0"><legend>Copy a boundary interface</legend>
+<output id="homeStatus" aria-live="polite" style="display:block"></output></details>
+<details><summary>Copy a boundary interface</summary>
 <div id="copyTarget" class="mut"></div>
 <label>Source home <select id="copySource" style="max-width:100%"></select></label>
 <label>Orientation <select id="copyOrientation"><option value="auto">Lowest crossing HPWL</option><option value="N">Unchanged (N)</option><option value="FN">Mirror left/right (FN)</option><option value="FS">Mirror top/bottom (FS)</option><option value="S">Rotate 180° (S)</option></select></label>
@@ -199,8 +199,8 @@ input[type=number]{width:44px;font:inherit;color:var(--fg);background:transparen
 <details id="copyContacts"><summary>Inspect boundary contacts</summary>
 <label>Show <select id="copyFilter"><option value="local">Kept local</option><option value="copied">Copied from source</option></select></label>
 <button id="copyPrev">Previous</button> <button id="copyNext">Next</button>
-<div id="copyRange" aria-live="polite"></div><ol id="copyPins" style="padding-left:2em;overflow-wrap:anywhere"></ol></details></fieldset>
-<fieldset style="min-width:0"><legend>Chunk implementations</legend>
+<div id="copyRange" aria-live="polite"></div><ol id="copyPins" style="padding-left:2em;overflow-wrap:anywhere"></ol></details></details>
+<details><summary>Chunk implementations</summary>
 <label>Logical partition <select id="implFamily" style="max-width:100%"></select></label>
 <div id="implSummary" class="mut"></div>
 <label>Instances <select id="implCopies" aria-label="Instances of this logical partition" multiple size="5" style="width:100%"></select></label>
@@ -217,7 +217,7 @@ input[type=number]{width:44px;font:inherit;color:var(--fg);background:transparen
  Offset <input id="implOffset" type="number" min="0" max="1" step="any" value=".5" style="width:5em"></label>
 </div>
 <button id="implPreview">Preview change</button> <button id="implApply">Apply change</button>
-</fieldset>
+</details>
 <button id="chunkSave">Save design metadata</button><output id="chunkStatus" aria-live="polite"></output>
 </details>
 <h4>Options <span id="f_n" class="mut"></span></h4>

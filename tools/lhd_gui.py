@@ -18,7 +18,7 @@ paints (highlights, selection) shows up in the page at once.
   tools/lhd_gui.py --retry 120 --workdir W state             # any command, riding out a restart: the socket is down for a moment
 
 `help` returns an overview (command groups, the usual loop) and the full command reference. Guide:
-.claude/skills/livehd/agent_socket.md
+.agents/skills/livehd/agent_socket.md
 
 Values are JSON when they parse (numbers, true/false, lists), else strings. The reply is printed as JSON; the exit
 status is 1 when it says "ok": false."""
@@ -51,16 +51,21 @@ def find_socket(args):
     if os.environ.get('LHD_GUI_SOCKET'):
         return os.environ['LHD_GUI_SOCKET']
     if args.workdir:
-        pointer = os.path.join(args.workdir, 'synth/place/gui_agent.json')
-        with open(pointer) as f:
-            info = json.load(f)
-        try:
-            os.kill(info['pid'], 0)
-        except ProcessLookupError:
-            raise SystemExit(f'the lhd session (pid {info["pid"]}) is not running; {pointer} is stale')
-        except PermissionError:
-            pass
-        return info['socket']
+        directory = os.path.join(args.workdir, 'synth/place')
+        paths = [os.path.join(directory,n) for n in ('chunk_agent.json', 'gui_agent.json')]
+        for pointer in sorted((p for p in paths if os.path.isfile(p)), key=os.path.getmtime, reverse=True):
+            if os.path.isfile(pointer):
+                with open(pointer) as f:
+                    info = json.load(f)
+                if os.path.exists(info['socket']):
+                    try:
+                        os.kill(info['pid'], 0)
+                    except ProcessLookupError:
+                        continue
+                    except PermissionError:
+                        pass
+                    return info['socket']
+        raise FileNotFoundError('no live floorplanning socket in ' + directory)
     raise SystemExit('give --socket PATH, --workdir W or set LHD_GUI_SOCKET')
 
 
@@ -89,14 +94,16 @@ def fetch(path, route, timeout=30):
     return response.status, body
 
 
-def with_retry(args, action):
+def with_retry(args, action, repeat_read=False):
     """Run action(socket path); with --retry N, ride out the moments the socket is down (a restart or area change
     re-executes lhd, and the pointer file names the new socket)."""
     deadline = time.time() + args.retry
     while True:
         try:
             return action(find_socket(args))
-        except (ConnectionRefusedError, FileNotFoundError, ConnectionResetError, http.client.RemoteDisconnected, json.JSONDecodeError):
+        except (ConnectionRefusedError, FileNotFoundError, ConnectionResetError, http.client.RemoteDisconnected, json.JSONDecodeError) as error:
+            if not repeat_read and not isinstance(error, (ConnectionRefusedError, FileNotFoundError)):
+                raise
             if time.time() >= deadline:
                 raise
             time.sleep(0.5)
@@ -109,6 +116,57 @@ def local_command(args):
         key, _, value = pair.partition('=')
         pairs[key] = parse_value(value)
     call = lambda payload: with_retry(args, lambda sock: request(sock, payload, args.timeout))
+    if args.command == 'finish-plan':
+        path = find_socket(args)
+        state = request(path, {'cmd':'state'}, args.timeout)
+        if state.get('phase') != 'fp' or state.get('state') != 'gate':
+            return dict(ok=False, error='finish-plan requires the floorplan gate')
+        return request(path, {'cmd':'cmd','command':{'cmd':'finish'}}, args.timeout)
+    if args.command == 'edit' and 'edit' not in pairs:
+        options = {k:pairs.pop(k) for k in ('home','stage','names','iterations','hypothesis','scope') if k in pairs}
+        return call(dict(cmd='edit', edit=pairs, **options))
+    if args.command == 'trial' and 'candidates' not in pairs:
+        options = {k:pairs.pop(k) for k in ('home','stage','names','iterations','metric','scope','hypothesis','keep_if','wait') if k in pairs}
+        return call(dict(cmd='trial', candidates=pairs, **options))
+    if args.command == 'help':
+        reply = call({'cmd':'help'})
+        if reply.get('ok',True):
+            reply['client_examples'] = (['edit align=row side=right fix=x', 'trial iterations=100 left=... right=... keep_if=control', 'overview', 'next objective=density', 'history query=CSR', 'place-design']
+                if 'usage' in reply else ['connected kind=color limit=3 add_to_selection=true', 'split home=A new_id=B', 'transfer home=B to=A', 'reshape home=B aspect=1.5'])
+        return reply
+    if args.command == 'connected':
+        return call(dict(cmd='export', what='connected', **pairs))
+    if args.command in ('chunks', 'members', 'peers', 'pins'):
+        what = 'chunks' if args.command == 'chunks' else 'chunk_' + args.command
+        return call(dict(cmd='export', what=what, **pairs))
+    if args.command in ('split', 'transfer', 'fuse', 'reshape', 'undo-plan'):
+        cmd = args.command
+        if cmd == 'undo-plan':
+            field, op = pairs.pop('field'), 'undo'
+        else:
+            field = 'geometry' if cmd == 'reshape' else 'topology'
+            op = {cmd: pairs.pop('home')}
+            if cmd in ('split', 'transfer'):
+                op['members'] = pairs.pop('members', 'selected')
+                key = 'new_id' if cmd == 'split' else 'to'
+                op[key] = pairs.pop(key)
+            elif cmd == 'fuse':
+                op[cmd] = [op[cmd], pairs.pop('other')]
+            elif cmd == 'reshape':
+                op['aspect_ratio'] = pairs.pop('aspect')
+        apply = pairs.pop('apply', True)
+        if pairs:
+            return dict(ok=False, error='unknown arguments: ' + ', '.join(pairs))
+        # Submit once. A lost reply after submission is ambiguous.
+        path = find_socket(args)
+        reply = request(path, dict(cmd='chunk_edit', field=field, op=op, apply=apply), args.timeout)
+        deadline = time.monotonic() + args.timeout
+        while reply.get('status') == 'queued' and time.monotonic() < deadline:
+            time.sleep(.025)
+            reply = request(path, dict(cmd='command_status', sequence=reply['sequence']), args.timeout)
+        if reply.get('status') != 'applied':
+            return dict(reply, ok=False)
+        return request(path, dict(cmd='export', what='chunks', view='live' if apply else 'preview'), args.timeout)
     if args.command == 'screenshot':
         out = pairs.pop('out', 'lhd_screenshot.png')
         query = '&'.join(f'{k}={v}' for k, v in pairs.items())
@@ -134,6 +192,8 @@ def local_command(args):
             if time.time() >= deadline:
                 return {'ok': False, 'error': f'timed out after {timeout:g}s waiting for {pairs or {"state": "gate"}}', 'state': state.get('state'), 'phase': state.get('phase')}
             time.sleep(1)
+    if args.command == 'macros' and call({'cmd':'hello'}).get('mode') == 'chunk':
+        return call(dict(cmd='find', kind='macro', **pairs))
     if args.command == 'macros':
         listing = call({'cmd': 'export', 'what': 'macros'})
         if not listing.get('ok'):
@@ -157,7 +217,10 @@ def main(argv=None):
     ap.add_argument('command', help='a command (help, find, highlight, critical, selection, ...) or a JSON object')
     ap.add_argument('pairs', nargs='*', metavar='key=value')
     args = ap.parse_args(argv)
-    local = local_command(args)
+    try:
+        local = local_command(args)
+    except KeyError as missing:
+        ap.error(f'{args.command} requires {missing.args[0]}=VALUE')
     if local is not None:
         print(json.dumps(local, indent=2))
         return 0 if local.get('ok', True) else 1

@@ -80,6 +80,7 @@ struct Scene {
   std::map<std::string, std::vector<Macro_tracks>> track_lattices;
   std::string                                  design;
   std::string                                  chunk_plan, chunk_results;  // fp_plan record, DBU boundaries and scoped targets
+  std::map<std::vector<int>, unsigned>          floorplan_nets;
   std::string                                  phase;  // "fp", "macro", "final", ...
   Box                                          die;    // the placement area (the core: the rows' hull), DBU
   Box                                          frame_die;  // the floorplan's die (the core plus its margin), DBU; zero: not known
@@ -383,6 +384,7 @@ public:
   void               set_orientation_provider(Orientation_provider);
   void               set_intent_provider(Intent_provider);
   std::string        intent() const;
+  std::vector<std::string> selected_names() const;
   void               set_fork_builder(Fork_builder);
 
   // ---- flow thread -----------------------------------------------------------------------

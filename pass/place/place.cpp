@@ -4692,7 +4692,7 @@ bool legalize_edits(View& v, const ph::Technology& tech, const ph::Floorplan& re
 // Pins and the action trace use node *names*; the scene maps them to this phase's solver indices.
 // Project the physical netlist once, then GUI previews and density edits operate only on the quotient hypergraph.
 bool plan_color_chunks(View& v, const Options& options, const std::vector<Hint_scope>& scopes, const std::string& design,
-                       double dbu, bool restored) {
+                       double dbu, bool restored, const Result& source) {
   Chunk_model                                  model;
   model.pack_scopes = options.chunk_pack_scopes;
   model.connectivity = options.chunk_connectivity;
@@ -4779,7 +4779,8 @@ bool plan_color_chunks(View& v, const Options& options, const std::vector<Hint_s
       }
     }
     owner[i] = model.cell(std::move(id), std::move(scope), std::move(module), macro, w, h, fixed);
-    if (macro && !fixed && !options.chunk_manifest.empty()) {
+    model.objects[owner[i]].worker_memory = macro && gu::type_op_of(c.node) == Ntype_op::Memory;
+    if (macro && (!fixed || model.objects[owner[i]].worker_memory) && !options.chunk_manifest.empty()) {
       model.objects[owner[i]].worker_halo = {d.node_halo_x.empty() ? 0 : d.node_halo_x[i],
                                              d.node_halo_y.empty() ? 0 : d.node_halo_y[i]};
     }
@@ -4974,6 +4975,7 @@ bool plan_color_chunks(View& v, const Options& options, const std::vector<Hint_s
       scene->dead_narrow_x = (l.xh - l.xl) / 10;
       scene->dead_narrow_y = (l.yh - l.yl) / 10;
     }
+    scene->floorplan_nets = model.shared_nets();
     scene->chunk_plan = display(record);
     std::vector<double> x, y;
     for (size_t i = 0; i < model.objects.size(); ++i) {
@@ -5071,6 +5073,43 @@ bool plan_color_chunks(View& v, const Options& options, const std::vector<Hint_s
       joined.replace_selected(chunk_guidance_class, design, metadata::Bundle(options.gui->intent()));
     }
     joined.replace(record);
+    std::vector<double>                slack_ps;
+    std::vector<std::array<double, 2>> windows;
+    std::array<double, 4>              wire_rc{};
+    if (options.gp_rank && source.graph) {
+      const auto& tech       = options.technology().lef;
+      const auto  rc         = technology_wire_rc(tech,
+                                                  options.liberty,
+                                                  options.tech_rc_file,
+                                                  options.resistance_ohm_um,
+                                                  options.capacitance_ff_um,
+                                                  options.rc_pessimism,
+                                                  options.technology().cells.contents);
+      wire_rc                = {rc.horizontal_r, rc.horizontal_c, rc.vertical_r, rc.vertical_c};
+      const auto  parasitics = estimate_rc(Geometry_view{v, d}, tech, options, nullptr, nullptr, nullptr, false);
+      const auto& timer      = options.chunk_timing ? options.chunk_timing : options.gp_rank;
+      const auto  fb         = prects_data_timing(timer({source.graph, parasitics, v.ignored}), v.ignored);
+      if (!fb.ranking) {
+        windows.resize(d.flat_net2pin_start.size() - 1, {INFINITY, INFINITY});
+      }
+      slack_ps.assign(d.flat_net2pin_start.size() - 1, INFINITY);
+      for (size_t n = 0; n < slack_ps.size(); ++n) {
+        for (int k = d.flat_net2pin_start[n]; k < d.flat_net2pin_start[n + 1]; ++k) {
+          const auto& pin   = v.pins.at(d.flat_net2pin[k]);
+          const auto  label = pin.label();
+          if (fb.ranking) {
+            if (auto p = fb.ranking->find(label); p && !p->clock && std::isfinite(p->slack)) {
+              slack_ps[n] = std::min(slack_ps[n], p->slack * fb.time_unit_ps);
+            }
+          } else if (auto p = fb.find_label(label); p && !p->clock && p->slack && std::isfinite(*p->slack)) {
+            if (*p->slack * fb.time_unit_ps < slack_ps[n]) {
+              slack_ps[n] = *p->slack * fb.time_unit_ps;
+              windows[n]  = {p->arrival.value_or(INFINITY) * fb.time_unit_ps, p->required.value_or(INFINITY) * fb.time_unit_ps};
+            }
+          }
+        }
+      }
+    }
     auto path = write_chunk_jobs(options.chunk_manifest,
                                  joined,
                                  model,
@@ -5084,8 +5123,50 @@ bool plan_color_chunks(View& v, const Options& options, const std::vector<Hint_s
                                  options.threads,
                                  options.chunk_seed_detail,
                                  options.chunk_require_fit,
+                                 options.macro_pin_adjust,
                                  options.chunk_only,
-                                 options.chunk_predictor.get());
+                                 options.chunk_predictor.get(),
+                                 slack_ps,
+                                 wire_rc,
+                                 windows);
+    if (options.gui) {
+      // UI state belongs to this plan revision and never changes packet identity.
+      const auto                  selected = options.gui->selected_names();
+      const std::set<std::string> wanted(selected.begin(), selected.end());
+      rapidjson::Document         focus(rapidjson::kObjectType);
+      auto&                       alloc = focus.GetAllocator();
+      rapidjson::Value                members(rapidjson::kArrayType);
+      std::map<int, std::string_view> physical_names;
+      for (size_t j = 0; j < owner.size() && !wanted.empty(); ++j) {
+        const int o = owner[j];
+        if (o >= 0 && model.objects[o].macro && !names[j].empty()
+            && (j < size_t(d.num_movable) || model.objects[o].worker_memory)) {
+          physical_names.emplace(o, names[j]);
+        }
+      }
+      for (size_t i = 0; i < model.objects.size() && !wanted.empty(); ++i) {
+        const auto& obj  = model.objects[i];
+        const auto  name = (obj.macro ? "macro:" : "color:") + obj.id;
+        if (wanted.contains(name)) {
+          rapidjson::Value row(rapidjson::kObjectType);
+          row.AddMember("name", rapidjson::Value(obj.id.c_str(), alloc), alloc)
+              .AddMember("macro", obj.macro, alloc)
+              .AddMember("home", rapidjson::Value(plan.chunks.at(plan.home[i]).id.c_str(), alloc), alloc);
+          if (const auto it = physical_names.find(i); it != physical_names.end()) {
+            row.AddMember("physical_name", rapidjson::Value(it->second.data(), it->second.size(), alloc), alloc);
+          }
+          members.PushBack(row, alloc);
+        }
+      }
+      const auto revision = std::format("{:016x}", hash_util::fnv1a64(metadata::canonical(record)));
+      focus.AddMember("revision", rapidjson::Value(revision.c_str(), alloc), alloc).AddMember("members", members, alloc);
+      const auto    file = fs::path(path).parent_path() / "chunk-selection.json";
+      std::ofstream out(file.string() + ".tmp");
+      out.exceptions(std::ios::failbit | std::ios::badbit);
+      out << metadata::canonical(focus);
+      out.close();
+      fs::rename(file.string() + ".tmp", file);
+    }
     if (options.snapshots) {
       ph::Floorplan frame;
       snapshot_frame(frame, v);
@@ -9568,7 +9649,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     }
   }
   make_arrays(v, tech);
-  const bool chunk_seeded = chunk_stage && plan_color_chunks(v, options, hint_scopes, hint_design, tech.dbu, cache.reused != 0);
+  const bool chunk_seeded = chunk_stage && plan_color_chunks(v, options, hint_scopes, hint_design, tech.dbu, cache.reused != 0, result);
   const auto hint_objects = [&] {
     std::vector<Hint_object> objects;
     objects.reserve(v.cells.size());

@@ -144,7 +144,7 @@ lhd synth chunk macro "$id" --neighbors --workdir W
 lhd synth chunk final "$id" --neighbors --workdir W
 ```
 
-One ID runs one chunk. Several IDs run that set. `--neighbors` adds one hop of edge-sharing or overlapping homes. Explicit IDs rerun the selected jobs. Omitting IDs runs outstanding jobs. Final needs a successful, current macro result and fixes its hard macros. This workflow stops before CTS. Read `list --json` for per-stage status, positions, reports and worker peak RSS.
+One ID runs one chunk. Several IDs run that set. `--neighbors` adds one hop of edge-sharing or overlapping homes. Explicit IDs rerun the selected jobs. Omitting IDs runs outstanding jobs. Final fixes the macro positions from a current macro result. Without that handoff it places the memories and cells together. Macro placement can slide a shared contact along the common chunk edge and publishes its coordinates for all incident chunks. This workflow stops before CTS. Read `list --json` for per-stage status, positions, reports and worker peak RSS.
 
 After a source edit, `lhd synth chunk update --workdir W` replays the recipe and accepted plan guidance. Read the delta for added, removed, changed and reusable chunks. Use `--budget 512MiB` on update to resize the plan. To accept a measured shared contact after macro placement, use the chosen port's `net_index` as `net`.
 
@@ -157,7 +157,7 @@ lhd synth chunk final --workdir W
 
 A contact change marks completed work stale on all incident chunks, including the source. A macro rerun also invalidates its previous final. Use `chunk gui --workdir W` to run selected workers and inspect placement feedback. To change the plan itself, use the [live floorplan editor](agent_socket.md).
 
-For pre-CTS QoR comparisons, score the same connected full design with the same clocks, libraries and RC. Request `--set synth.place.snapshots=true` at init to obtain `synth/place/chunk-plan.def`. Apply final worker positions by instance name before computing pin HPWL or STA. Local HPWL includes virtual boundary contacts. [Placement reference](../../../pass/place/README.md#color-and-macro-chunk-floorplan)
+For pre-CTS QoR comparisons, score the same connected full design with the same clocks, libraries and RC. Request `--set synth.place.snapshots=true` at init to obtain `synth/place/chunk-plan.def`. Use `lhd synth chunk score --workdir W` for assembled physical-pin HPWL and estimated setup WNS. It reads compact worker summaries, including frozen neighbors and die pins. Local worker HPWL includes virtual boundary contacts. Use `lhd synth chunk assemble --workdir W` for the verified final position manifest. [Placement reference](../../../pass/place/README.md#color-and-macro-chunk-floorplan)
 
 ### Critical paths
 

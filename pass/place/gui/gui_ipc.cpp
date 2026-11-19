@@ -136,6 +136,8 @@ struct Controller {
       std::vector<std::string> changed;
       unpack(data, trials, changed);
       s.set_repair_trials(trials, changed);
+    } else if (op == "selected_names") {
+      return pack(s.selected_names());
     } else if (op == "get_intent") {
       return s.intent();
     } else if (op == "options") {

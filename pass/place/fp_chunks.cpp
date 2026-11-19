@@ -460,6 +460,13 @@ void Chunk_model::net(std::vector<int>& pins, bool place, std::optional<Point> t
     edges.push_back({pins, terminal, std::string(name), ordinal, terminal_bounds});
   }
 }
+std::map<std::vector<int>, unsigned> Chunk_model::shared_nets() const {
+  std::map<std::vector<int>, unsigned> result;
+  for (const auto& edge : edges) {
+    if (edge.nodes.size() > 1) ++result[edge.nodes];
+  }
+  return result;
+}
 // Grow each capacity cut toward the unassigned object sharing the most two-object nets.
 // Each net adds two incidences regardless of how many physical pins it contains.
 // The existing hierarchy order resolves ties and seeds disconnected components.

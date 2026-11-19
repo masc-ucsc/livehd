@@ -8,16 +8,20 @@ button,input,select{font:inherit}button{background:#16524c;color:white;border:0;
 table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:.4rem;border-bottom:1px solid #dbe2dc}pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:14rem;overflow:auto}
 .tools{display:flex;gap:.6rem;align-items:center;flex-wrap:wrap;margin:.8rem 0}input[type=number]{width:8rem}#message{min-height:1.5rem}#tablebox{max-height:22rem;overflow:auto}
 @media(max-width:780px){main{padding:.8rem}.grid{display:block}}
-</style><main>
+#placement{height:50vh;min-height:300px}</style><main>
 <h1>Chunk placement</h1>
+<section aria-label="Overall placement metrics"><table><thead><tr><th>Assembled design</th><th>Pin HPWL (µm)</th><th>Estimated WNS (ps)</th><th>Chunk stages</th></tr></thead><tbody id="scores"></tbody></table></section>
 <div class="grid"><section><h2>Floorplan</h2><canvas aria-label="Select a floorplan chunk"></canvas></section>
-<section><h2>Placement queue</h2><div id="tablebox"><table><thead><tr><th>Chunk</th><th>Macro</th><th>Final</th><th>Est. MiB</th></tr></thead><tbody></tbody></table></div>
-<div class="tools"><button id="macro">Run macro</button><button id="final">Run final</button><label><input type="checkbox" id="neighbors"> Include neighbors</label></div>
+<section><h2>Placement stages</h2><div id="tablebox"><table><thead><tr><th>Chunk</th><th>Macro</th><th>Final</th><th>Est. MiB</th></tr></thead><tbody></tbody></table></div>
+<div class="tools"><button id="macro">Run macro</button><button id="final">Run final</button><button id="placeDesign">Place design by chunk</button><label><input type="checkbox" id="neighbors"> Include neighbors</label></div>
 <div id="message" role="status"></div></section></div>
-<section><h2>Chunk feedback</h2><div class="tools"><select id="inspect" aria-label="Inspect chunk"></select><select id="view" aria-label="Placement stage"><option>final</option><option>macro</option></select><button id="refresh">Refresh</button></div><canvas id="placement" aria-label="Selected chunk placement"></canvas><p id="caption"></p><pre id="feedback"></pre>
-<h2>Boundary contacts</h2><div class="tools"><select id="ports" aria-label="Contact net"></select>
+<section><h2>Placement</h2><div class="tools"><select id="inspect" aria-label="Inspect chunk"></select><select id="view" aria-label="Placement stage"><option>macro</option><option>final</option></select><select id="branch" aria-label="Trial branch"><option value="">Main</option></select><button id="keep" disabled>Keep branch</button><button id="undo">Undo</button><label><input type="checkbox" id="density"> Cell density</label>
+<label><input type="checkbox" id="overlay"> GP displacement</label><label><input type="checkbox" id="follow" checked> Follow new trials</label><button id="fit">Fit</button></div><canvas id="placement" aria-label="Selected chunk placement"></canvas><p id="caption"></p><pre id="feedback"></pre>
+<details><summary>Boundary contacts</summary><div class="tools"><select id="ports" aria-label="Contact net"></select>
 <label>X (DBU) <input type="number" id="x"></label><label>Y (DBU) <input type="number" id="y"></label>
-<button id="move">Move IO</button><button id="accept">Use macro feedback</button></div></section></main>
+<button id="move">Move IO</button><button id="accept">Use macro feedback</button></div></details></section>
+<section><h2>Experiments</h2><div class="tools"><input type="search" id="query" aria-label="Search experiments" placeholder="Search findings or objects"><button id="more">Older</button><button id="latest">Latest</button></div><div id="records"></div></section>
+<section><h2>Next chunk</h2><select id="priority" aria-label="Search objective"><option value="hpwl">HPWL</option><option value="wns">WNS</option><option value="density">Density overflow</option></select><div id="next"></div></section></main>
 <script>
 const $ = id => document.getElementById(id);
 const canvas = document.querySelector('canvas');
@@ -26,6 +30,8 @@ const token = location.hash.slice(1);
 let generation;
 let rows = [], boxes = [], detail = null, preview = null, busy = false, inspection = 0;
 
+let tiles={}, historyPage=0, latestTrial=null, mapRevision='', zoom=1, center=null, cameraHome='';
+let liveScene = null, hitBoxes = [], observed = '', watchBusy = false;
 async function api(cmd, fields = {}) {
   const response = await fetch('/chunk', {
     method: 'POST',
@@ -33,7 +39,7 @@ async function api(cmd, fields = {}) {
     body: JSON.stringify({cmd, generation, ...fields})
   });
   const result = await response.json();
-  if (!response.ok) throw Error(result.error || response.statusText);
+  if (!response.ok || result?.ok === false) throw Error(result.error || response.statusText);
   if (cmd === 'list') {
     const next = response.headers.get('X-Chunk-Generation');
     if (generation !== next) selected.clear();
@@ -63,6 +69,20 @@ function draw() {
     const w = (xh - xl) * unit, h = (yh - yl) * unit;
     ctx.fillStyle = selected.has(row.id) ? '#98cdbb' : '#e1e9e3';
     ctx.fillRect(x, y, w, h);
+    const tile=tiles[row.id];
+    if(tile){
+      for(const [nx,ny,nw,nh,macro] of tile.boxes){
+        ctx.fillStyle=macro?'#40576a':'#7b9e8b';
+        ctx.fillRect(x+(nx-xl)*unit,y+(yh-ny-nh)*unit,Math.max(1,nw*unit),Math.max(1,nh*unit));
+      }
+    }
+    if (row.id === liveScene?.home) {
+      ctx.fillStyle='#e1e9e3';ctx.fillRect(x,y,w,h);
+      for (const [nx, ny, nw, nh, macro] of Object.values(liveScene.nodes)) {
+        ctx.fillStyle = macro ? '#233f55' : '#75a58b';
+        ctx.fillRect(x+(nx-xl)*unit, y+(yh-ny-nh)*unit, Math.max(1,nw*unit), Math.max(1,nh*unit));
+      }
+    }
     ctx.strokeStyle = '#47685f';
     ctx.strokeRect(x, y, w, h);
     ctx.fillStyle = '#173c34';
@@ -72,7 +92,7 @@ function draw() {
 }
 function table() {
   $('macro').disabled = $('final').disabled = busy || !selected.size;
-  const body = document.querySelector('tbody');
+  const body = document.querySelector('#tablebox tbody');
   body.replaceChildren();
   for (const row of rows) {
     const tr = body.insertRow();
@@ -80,7 +100,7 @@ function table() {
     check.type = 'checkbox';
     check.checked = selected.has(row.id);
     check.disabled = !row.exported;
-    check.onchange = () => toggle(row.id);
+    check.onchange = () => toggle(row.id).catch(error);
     label.append(check, document.createTextNode(row.id));
     tr.insertCell().append(label);
     const estimate = row.exported ? (row.estimated_bytes / 1048576).toFixed(2) : 'Unavailable';
@@ -99,16 +119,39 @@ function drawPlacement() {
   const ctx = panel.getContext('2d');
   ctx.scale(ratio, ratio);
   const [xl, yl, xh, yh] = detail.box_dbu;
-  const unit = Math.min((width - 20) / (xh - xl), (height - 20) / (yh - yl));
-  const left = (width - (xh - xl) * unit) / 2;
-  const top = (height - (yh - yl) * unit) / 2;
+  if(cameraHome!==detail.id){zoom=1;center=null;cameraHome=detail.id;}
+  const unit = zoom*Math.min((width - 20) / (xh - xl), (height - 20) / (yh - yl));
+  const left = width/2-((center?.[0]??(xl+xh)/2)-xl)*unit;
+  const top = height/2-(yh-(center?.[1]??(yl+yh)/2))*unit;
+  panel.camera={unit,left,top,xl,yh};
   const px = x => left + (x - xl) * unit;
   const py = y => top + (yh - y) * unit;
   ctx.strokeStyle = '#47685f';
   ctx.strokeRect(left, top, (xh - xl) * unit, (yh - yl) * unit);
-  for (const [x, y, w, h, macro] of preview?.boxes_dbu || []) {
-    ctx.fillStyle = macro ? '#233f55' : '#54917e';
-    ctx.fillRect(px(x), py(y + h), Math.max(1, w * unit), Math.max(1, h * unit));
+  const scene = liveScene?.home === detail.id ? liveScene : null;
+  const heat = scene || preview;
+  if ($('density').checked && heat?.cell_density) {
+    const n=heat.bins, w=(xh-xl)/n, h=(yh-yl)/n;
+    heat.cell_density.forEach((v,i)=>{
+      if(v===null)return;
+      ctx.fillStyle=v>=1?'#a74020':'rgba(211,90,38,'+v*0.8+')';
+      ctx.fillRect(px(xl+(i%n)*w),py(yl+(1+Math.floor(i/n))*h),w*unit,h*unit);
+    });
+  }
+  const nodes = scene ? Object.entries(scene.nodes) : (preview?.boxes_dbu || []).map(b => [null, b]);
+  const marked = new Set(scene?.selected || []);
+  hitBoxes = [];
+  for (const [name, [x, y, w, h, macro]] of nodes) {
+    ctx.fillStyle = macro ? '#233f55' : $('density').checked ? '#54917e44' : '#54917e';
+    const rect = [px(x), py(y+h), Math.max(1,w*unit), Math.max(1,h*unit)];
+    ctx.fillRect(...rect);
+    const previous=scene?.gp_nodes?.[name];
+    if($('overlay').checked && previous && (previous[0]!==x || previous[1]!==y)){
+      ctx.strokeStyle='#ce6d25';ctx.lineWidth=1;
+      ctx.beginPath();ctx.moveTo(px(previous[0]+w/2),py(previous[1]+h/2));ctx.lineTo(px(x+w/2),py(y+h/2));ctx.stroke();
+    }
+    if (marked.has(name)) { ctx.strokeStyle='#ed870f'; ctx.lineWidth=2; ctx.strokeRect(...rect); }
+    if (name) hitBoxes.push({name, rect});
   }
   const port = detail.ports[$('ports').selectedIndex];
   if (port) {
@@ -126,7 +169,7 @@ async function inspect() {
   if (inspection !== request) return;
   const stage = $('view').value;
   const current = d[stage];
-  const image = current.status === 'done' && current.preview ? await api('preview', {id, stage}) : null;
+  const image = (current.status === 'done' && current.preview || current.status === 'running') ? await api('preview', {id, stage}) : null;
   if (inspection !== request) return;
   detail = d;
   preview = image;
@@ -136,14 +179,29 @@ async function inspect() {
     result.hpwl_dbu === undefined ? '' : 'HPWL ' + result.hpwl_dbu.toLocaleString() + ' DBU',
     result.peak_rss_bytes === undefined ? '' : 'Peak ' + (result.peak_rss_bytes / 1048576).toFixed(1) + ' MiB'
   ].filter(Boolean).join(' · ');
-  $('feedback').textContent = 'Macro: ' + metrics(d.macro) + '\nFinal: ' + metrics(d.final);
-  $('caption').textContent = image ? image.boxes_dbu.length + ' of ' + image.owned + ' instances shown. Dark blocks are macros.' : 'Stage: ' + current.status;
+
+  if (image || $('branch').value) {
+    const snapshot = await api('scene', {home:id,stage,overlay:$('overlay').checked});
+    if (inspection !== request) return;
+    liveScene = snapshot;
+    if (snapshot.home === id) detail.ports = snapshot.ports;
+  } else liveScene = null;
+  $('feedback').textContent = liveScene?.view ? '' : 'Macro: ' + metrics(d.macro) + '\nFinal: ' + metrics(d.final);
+  const timing = liveScene?.estimated_wns_ps == null ? 'WNS unavailable' : 'Estimated WNS ' + liveScene.estimated_wns_ps.toFixed(2) + ' ps · ' + liveScene.timed_nets+' timed nets';
+  const occupancy = liveScene?.cell_density;
+  const pct=v=>(100*v).toFixed(1)+'%';
+  const density = occupancy ? ' · target '+pct(liveScene.target_density)+' · peak '+pct(liveScene.peak_density)+' · overflow '+pct(liveScene.overflow_fraction) : '';
+  const displacement=$('overlay').checked ? (liveScene?.gp_moved!=null ? ' · GP to legal: '+liveScene.gp_moved+' moved, max '+(liveScene.gp_max_displacement_dbu/liveScene.dbu_per_um).toFixed(2)+' µm' : ' · No GP checkpoint for this frame'):'';
+  $('caption').textContent = liveScene?.home === id
+    ? (liveScene.view ? liveScene.view[1] : 'Main') + ' · Local HPWL ' + (liveScene.hpwl_dbu/liveScene.dbu_per_um).toLocaleString() + ' µm · ' + timing + density + displacement + ' · ' + liveScene.selected.length + ' selected'
+    : image ? image.boxes_dbu.length + ' of ' + image.owned + ' instances shown. Dark blocks are macros.' : 'Stage: ' + current.status;
   const oldNet = $('ports').value;
   const options = document.createDocumentFragment();
   for (const port of d.ports) options.append(new Option(port.net + ' · ' + port.net_index, port.net_index));
   $('ports').replaceChildren(options);
   if (d.ports.some(port => String(port.net_index) === oldNet)) $('ports').value = oldNet;
   contact();
+  draw();
 }
 function contact() {
   const port = detail?.ports[$('ports').selectedIndex];
@@ -151,21 +209,22 @@ function contact() {
   $('y').value = port?.xy_dbu[1] ?? '';
   drawPlacement();
 }
-function toggle(id) {
+async function toggle(id) {
   if (selected.has(id)) selected.delete(id);
   else selected.add(id);
   $('inspect').value = id;
   table();
-  inspect().catch(error);
+  await api('focus',{home:id,homes:[...selected]});
+  await inspect();
 }
 canvas.onclick = event => {
   const box = boxes.find(b => event.offsetX >= b.x && event.offsetX <= b.x + b.w &&
                               event.offsetY >= b.y && event.offsetY <= b.y + b.h);
-  if (box?.exported) toggle(box.id);
+  if (box?.exported) toggle(box.id).catch(error);
 };
 async function refresh() {
   rows = await api('list');
-  const current = $('inspect').value;
+  const current = $('inspect').value || rows.find(r => r.macro.status === 'done')?.id;
   const options = document.createDocumentFragment();
   for (const row of rows) options.append(new Option(row.id, row.id));
   $('inspect').replaceChildren(options);
@@ -180,8 +239,9 @@ async function action(cmd, fields) {
   $('message').textContent = 'Running ' + cmd + '…';
   try {
     const result = await api(cmd, fields);
+    if (cmd === 'place-design') $('view').value='final';
     if (cmd === 'macro' || cmd === 'final') $('view').value = cmd;
-    $('message').textContent = result.changed
+    $('message').textContent = cmd==='place-design' ? 'Assembled '+result.chunks.length+' locally finalized chunks' : result.changed
       ? 'Affected chunks: ' + (result.changed.join(', ') || 'none')
       : cmd + ' complete: ' + result.map(c => c.id).join(', ');
   } catch (e) {
@@ -203,9 +263,133 @@ for (const id of ['move', 'accept']) {
     }).catch(error);
   };
 }
-$('ports').onchange = contact;
-$('inspect').onchange = $('view').onchange = () => inspect().catch(error);
-$('refresh').onclick = () => refresh().catch(error);
+$('ports').onchange = () => {contact();api('focus',{home:detail.id,net:Number($('ports').value)}).catch(error);};
+$('inspect').onchange = async () => {try {await api('focus',{home:$('inspect').value});await inspect();} catch(e){error(e);}};
+$('view').onchange = async () => {try {await api('focus',{home:$('inspect').value,stage:$('view').value});await inspect();} catch(e){error(e);}};
+$('density').onchange = drawPlacement;
+$('overlay').onchange = ()=>inspect().catch(error);
+$('placeDesign').onclick=()=>action('place-design',{});
+$('fit').onclick=()=>{zoom=1;center=null;drawPlacement();};
+$('placement').onwheel=e=>{
+  const c=$('placement').camera;if(!c)return;e.preventDefault();
+  const x=c.xl+(e.offsetX-c.left)/c.unit, y=c.yh-(e.offsetY-c.top)/c.unit;
+  const next=Math.max(1,Math.min(32,zoom*Math.exp(-.002*e.deltaY)));
+  const unit=c.unit*next/zoom;zoom=next;
+  center=zoom===1?null:[x-(e.offsetX-$('placement').clientWidth/2)/unit,y+(e.offsetY-$('placement').clientHeight/2)/unit];
+  drawPlacement();
+};
+$('placement').onclick = async ev => {
+  const hit = hitBoxes.findLast(({rect:[x,y,w,h]}) => ev.offsetX>=x && ev.offsetX<=x+w && ev.offsetY>=y && ev.offsetY<=y+h);
+  if (!hit || !liveScene || liveScene.view) return;
+  const names = new Set(ev.shiftKey ? liveScene.selected : []);
+  if (names.has(hit.name)) names.delete(hit.name); else names.add(hit.name);
+  try { await api('select',{home:detail.id,stage:$('view').value,names:[...names]}); await inspect(); } catch(e) { error(e); }
+};
+function branchChoice(){return JSON.parse($('branch').value || 'null');}
+$('branch').onchange=async()=>{
+  try {
+    $('follow').checked=false;
+    const choice=branchChoice();
+    await api('view',choice || {branch:'main'});
+    $('keep').disabled=!choice;
+    await inspect();
+  } catch(e){error(e);}
+};
+$('keep').onclick=async()=>{try {await api('keep',branchChoice());await refresh();} catch(e){error(e);}};
+$('undo').onclick=async()=>{try {await api('undo');await refresh();} catch(e){error(e);}};
+const fmt=(v,d=2)=>v==null?'—':v.toLocaleString(undefined,{maximumFractionDigits:d});
+function showScores(overview) {
+  const body=$('scores');body.replaceChildren();
+  for(const [label,item] of [['Accepted',overview.accepted],['Selected trial',overview.selected],['Best comparable '+overview.objective.toUpperCase(),overview.best]]){
+    const tr=body.insertRow(), stages=item?.stages || (item? (overview.selected||overview.accepted).stages:null);
+    for(const v of [label+(label==='Selected trial'&&overview.selected_frame?' · '+overview.selected_frame:'')+(item?.trial?' · '+item.trial+'/'+item.branch:''),fmt(item?.hpwl_um)+(label==='Selected trial'&&overview.delta_control?.hpwl_um!=null?' (Δ '+fmt(overview.delta_control.hpwl_um)+')':''),fmt(item?.estimated_wns_ps,3),
+      stages?Object.entries(stages).filter(([,n])=>n).map(([k,n])=>n+' '+k).join(', '):'—'])tr.insertCell().textContent=v;
+  }
+}
+async function logbook(){
+  const {experiments}=await api('history',{query:$('query').value,offset:historyPage,limit:12});
+  const list=$('records'),open=new Set(Array.from(list.querySelectorAll('details[open]'),e=>e.dataset.id));list.replaceChildren();
+  for(const t of experiments){
+    const line=document.createElement('details'), title=document.createElement('summary');
+    line.dataset.id=t.id;line.open=open.has(t.id);
+    title.textContent=t.home+' · '+(t.hypothesis || t.id)+' · '+t.requested_iterations+' iterations';
+    line.append(title);
+    for(const [label,r] of Object.entries(t.candidates)){
+      const btn=document.createElement('button');btn.textContent=label+' · '+(r.assembled?.hpwl_um==null?r.status:fmt(r.assembled.hpwl_um)+' µm');
+      btn.disabled=!r.preview;btn.onclick=async()=>{try{$('follow').checked=false;await api('replay',{trial:t.id,branch:label});await watch();}catch(e){error(e);}};line.append(btn,' ');
+    }
+    for(const d of t.decisions){const p=document.createElement('p');p.textContent=[d.action,d.branch,d.finding].filter(Boolean).join(' · ');line.append(p);}
+    list.append(line);
+  }
+  $('more').disabled=experiments.length<12;$('latest').disabled=historyPage===0;
+}
+$('query').oninput=()=>{historyPage=0;logbook().catch(error);};
+$('more').onclick=()=>{historyPage+=12;logbook().catch(error);};
+$('latest').onclick=()=>{historyPage=0;logbook().catch(error);};
+async function recommendations(){
+  const {chunks}=await api('next',{objective:$('priority').value});
+  $('next').replaceChildren();
+  for(const r of chunks.slice(0,3)){
+    const p=document.createElement('p');
+    p.textContent=r.home+' · '+r.reason+(r.critical_boundary && r.objective==='wns'?' · boundary net '+r.critical_boundary.net:'')+(r.oscillating_nets.length?' · Repeated IO positions on nets '+r.oscillating_nets.join(', '):'');
+    $('next').append(p);
+  }
+}
+$('priority').onchange=()=>recommendations().catch(error);
+async function watch(){
+  if (watchBusy || document.hidden) return;
+  watchBusy=true;
+  try {
+    const w=await api('watch'), signature=JSON.stringify(w);
+    if(signature!==observed){
+
+      if(w.trials.length){
+        const t=w.trials[w.trials.length-1];
+        if(latestTrial!==null && t.id!==latestTrial){
+          latestTrial=t.id;
+          const label=Object.keys(t.candidates).find(k=>k!=='control' && t.candidates[k].status!=='failed');
+          if($('follow').checked && label){await api('view',{trial:t.id,branch:label});return;}
+        }
+      }
+      latestTrial=w.trials.at(-1)?.id||'';
+      const watched=w.view && w.trials.find(t=>t.id===w.view[0])?.candidates[w.view[1]];
+      const mapKey=JSON.stringify([w.revision,w.view,watched?.status]);
+      if(mapRevision!==mapKey){
+        const map=await api('floorplan');tiles=map.tiles;mapRevision=mapKey;
+        await recommendations();
+      }
+      showScores(await api('overview'));
+      await logbook();
+      $('branch').replaceChildren(new Option('Main',''));
+      for(const t of w.trials) for(const [name,r] of Object.entries(t.candidates)){
+        const delta=r.delta_assembled;
+        const parts=[t.home,name,r.status];
+        if(r.running_home)parts.push(r.running_home);
+        if(r.iterations!=null)parts.push(r.iterations+' iterations');
+        if(delta?.hpwl_um!=null)parts.push('Δ assembled HPWL '+fmt(delta.hpwl_um)+' µm');
+        if(delta?.estimated_wns_ps!=null)parts.push('Δ WNS '+fmt(delta.estimated_wns_ps,3)+' ps');
+        const option=new Option(parts.join(' · '), JSON.stringify({trial:t.id,branch:name}));
+        option.disabled=r.status==='failed'; $('branch').append(option);
+      }
+      if(w.view){
+        const value=JSON.stringify({trial:w.view[0],branch:w.view[1]});
+        if(!Array.from($('branch').options).some(o=>o.value===value)) $('branch').append(new Option('Archived · '+w.view.join(' / '),value));
+        $('branch').value=value;
+      }
+      const viewed=w.view && w.trials.find(t=>t.id===w.view[0]);
+      $('keep').disabled=!w.can_keep || (viewed && viewed.candidates[w.view[1]]?.status!=='done');
+      selected.clear();
+      for(const home of w.homes) selected.add(home);
+      $('view').value=w.stage;
+      const active=Object.entries(w.running)[0];
+      if(active && !w.view){$('inspect').value=active[0];$('view').value=active[1].stage;}
+      else if(w.home) $('inspect').value=watched?.running_home || w.home;
+      observed=signature;
+      await refresh();
+    }
+  }catch(e){error(e);} finally{watchBusy=false;}
+}
+setInterval(watch,700);
 window.onresize = () => { draw(); drawPlacement(); };
 refresh().catch(error);
 </script></html>

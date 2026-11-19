@@ -636,7 +636,7 @@ int describe_command(const Options& opts) {
     return 0;
   }
   if (name == "synth chunk") {
-    print_json_line(R"json({"schema_version":1,"name":"synth chunk","description":"Export a memory-sized floorplan, select physical homes and run their macro and final placement. Use lhd synth chunk <subcommand> --help for arguments.","subcommands":["init","update","plan","list","show","macro","final","move-io","gui"],"examples":["lhd synth chunk init top.v --top top --budget 1GiB --workdir W --set synth.liberty=cells.lib --set synth.lef=tech.lef,cells.lef","lhd synth chunk update --workdir W","lhd synth chunk list --workdir W --stage final --status stale"]})json");
+    print_json_line(R"json({"schema_version":1,"name":"synth chunk","description":"Export a memory-sized floorplan, select physical homes and run their macro and final placement. Use lhd synth chunk <subcommand> --help for arguments.","subcommands":["init","update","plan","list","show","macro","final","move-io","score","next","assemble","gui"],"examples":["lhd synth chunk init top.v --top top --budget 1GiB --workdir W --set synth.liberty=cells.lib --set synth.lef=tech.lef,cells.lef","lhd synth chunk update --workdir W","lhd synth chunk list --workdir W --stage final --status stale"]})json");
     return 0;
   }
   if (name == "synth") {

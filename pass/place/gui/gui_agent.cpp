@@ -2261,6 +2261,24 @@ std::string Session::agent_call(const std::string& json, int timeout_ms) {
       frame    = frame_->id;
       revision = intent_revision_;
       if (field == "topology" && !undo) {
+        auto& operation = d["op"];
+        if (operation.HasMember("members") && operation["members"].IsString()
+            && std::string_view(operation["members"].GetString()) == "selected") {
+          if (selection_.empty() || selection_count_ != selection_.size()) {
+            return err_json("select one or more floorplan objects; the entire selection must fit");
+          }
+          auto& members = operation["members"].SetArray();
+          for (const auto& name : selection_) {
+            const bool macro = name.starts_with("macro:");
+            if (!macro && !name.starts_with("color:")) {
+              return err_json("selection contains an object outside the floorplan");
+            }
+            rapidjson::Value member(rapidjson::kObjectType);
+            member.AddMember("macro", macro, d.GetAllocator())
+                .AddMember("id", rapidjson::Value(name.c_str() + 6, d.GetAllocator()), d.GetAllocator());
+            members.PushBack(member, d.GetAllocator());
+          }
+        }
         plan = scene_->chunk_plan;
       }
     }
@@ -2414,6 +2432,63 @@ std::string Session::agent_call(const std::string& json, int timeout_ms) {
                          frame_->id,
                          scene_->dbu_per_um,
                          moves);
+    }
+    if (what == "connected") {
+      if (!scene_ || scene_->phase != "fp" || selection_.empty() || selection_count_ != selection_.size()) {
+        return err_json("select floorplan members first");
+      }
+      std::string bad;
+      const auto  limit = bounded("limit", 16, 1, 256, bad);
+      if (!bad.empty()) {
+        return err_json(bad);
+      }
+      const auto kind = str("kind");
+      if (!kind.empty() && kind != "color" && kind != "macro") {
+        return err_json("use kind=color or macro");
+      }
+      std::set<int> seeds;
+      for (const auto& name : selection_) {
+        seeds.insert(scene_->node_index(name));
+      }
+      std::vector<unsigned> counts(scene_->nodes.size());
+      for (const auto& [net, count] : scene_->floorplan_nets) {
+        if (std::ranges::any_of(net, [&](int i) { return seeds.contains(i); })) {
+          for (int i : net) {
+            if (!seeds.contains(i)) {
+              counts.at(i) += count;
+            }
+          }
+        }
+      }
+      std::vector<std::pair<unsigned, std::string>> ranked;
+      for (size_t i = 0; i < counts.size(); ++i) {
+        const auto& name = scene_->nodes[i].name;
+        if (counts[i] && (kind.empty() || name.starts_with(kind + ":"))) {
+          ranked.emplace_back(counts[i], name);
+        }
+      }
+      std::sort(ranked.begin(), ranked.end(), [](const auto& l, const auto& r) {
+        return l.first == r.first ? l.second < r.second : l.first > r.first;
+      });
+      std::string rows;
+      auto        selection = selection_;
+      for (size_t i = 0; i < std::min(size_t(limit), ranked.size()); ++i) {
+        const auto& [count, name]  = ranked[i];
+        rows                      += std::format(R"({}{{"name":"{}","shared_nets":{}}})", i ? "," : "", esc(name), count);
+        selection.push_back(name);
+      }
+      if (d.HasMember("add_to_selection")) {
+        if (!d["add_to_selection"].IsBool()) {
+          return err_json("add_to_selection must be boolean");
+        }
+        if (d["add_to_selection"].GetBool()) {
+          if (selection.size() > 5000) {
+            return err_json("selection exceeds 5000 objects");
+          }
+          set_selection_locked(std::move(selection));
+        }
+      }
+      return std::format(R"({{"ok":true,"count":{},"nodes":[{}]}})", ranked.size(), rows);
     }
     if (what == "chunks" || what == "chunk_members" || what == "chunk_pins" || what == "chunk_peers") {
       if (!scene_ || scene_->chunk_plan.empty()) {
@@ -2828,7 +2903,7 @@ std::string Session::agent_call(const std::string& json, int timeout_ms) {
 "summary":"{} -> current timing, routing and configured quality with measurement frame IDs",
 "hello":"{} -> invocation, files, capabilities, options and state",
 "export":"{what:macros|relationships|intent|floorplan|chunks|chunk_members|chunk_pins|chunk_peers|flags|summary|score|scope, format?:metadata|dbu|placereasoner|def, encoding?:json_text} -> placement or session data",
-"chunk_edit":"{field:topology|geometry,op,apply?:false,expect?} -> preview/apply one edit or undo; topology ops: {split,new_id,members}, {transfer,to,members}, {fuse:[keep,remove]}; geometry: {reshape,aspect_ratio} (width/height). Members are {id,macro} from export what=chunk_members with chunk and optional offset/limit. Poll command_status, then export what=chunks with view=preview or live.",
+"chunk_edit":"{field:topology|geometry,op,apply?:false,expect?} -> preview/apply one edit or undo; topology ops: {split,new_id,members}, {transfer,to,members}, {fuse:[keep,remove]}; geometry: {reshape,aspect_ratio} (width/height). Members may be the string selected, or {id,macro} from export what=chunk_members with chunk and optional offset/limit. Poll command_status, then export what=chunks with view=preview or live.",
 "chunk_interface":"{chunk,source?,orientation:auto|N|FN|FS|S|clear,apply?:false,expect?} -> preview or apply a physical home interface; inspect export what=chunks or what=chunk_pins (chunk required, match=all|copied|local), view=preview or live, offset?, limit?",
 "intent_apply":"{records or records_json,expect?} -> replace the applicable placement hints; preserve other design metadata",
 "intent_preview":"{records or records_json,expect?} -> bind records and measure residuals; export intent returns the preview report",
@@ -2930,8 +3005,15 @@ std::string Session::agent_call(const std::string& json, int timeout_ms) {
   }
   if (cmd == "selection") {
     std::lock_guard lk(m_);
-    std::string     out = std::format(R"({{"ok":true,"count":{},"nodes":[)", selection_count_);
-    size_t          shown = 0;
+    std::string     names;
+    for (const auto& name : selection_) {
+      names += std::format(R"({}"{}")", names.empty() ? "" : ",", esc(name));
+    }
+    std::string out   = std::format(R"({{"ok":true,"count":{},"names":[{}],"truncated":{},"nodes":[)",
+                                    selection_count_,
+                                    names,
+                                    selection_count_ != selection_.size());
+    size_t      shown = 0;
     if (scene_) {
       for (const auto& name : selection_) {
         const auto it = scene_->index.find(name);

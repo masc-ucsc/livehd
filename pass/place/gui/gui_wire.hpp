@@ -85,7 +85,7 @@ void physical_scene_fields(A& a, Scene& v) {
 template <class A>
 void field(A& a, Scene& v) {
   physical_scene_fields(a, v);
-  fields(a, v.chunk_plan, v.chunk_results, v.track_lattices);
+  fields(a, v.chunk_plan, v.chunk_results, v.track_lattices, v.floorplan_nets);
   if constexpr (std::is_same_v<A, Decoder>) {
     v.build_index();
   }

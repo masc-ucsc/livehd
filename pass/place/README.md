@@ -50,23 +50,53 @@ For machine-readable status and artifact paths, use `list --json`.
 Macro and final process outstanding jobs by default. Supplying one or more IDs explicitly reruns those jobs. `--neighbors` adds one hop of
 homes sharing an edge or overlapping the selected boxes. Workers run sequentially and read only their own
 packets. The macro worker runs native mixed-size placement and legalization. Final seeds the cells from
-that solution, fixes all owned hard macros and applies the packet's detailed-placement setting.
+that solution, fixes its hard macros and applies the packet's detailed-placement setting. When there is no current macro handoff, final starts from the original packet and places both cells and macros. A native memory's parent-floorplan pose seeds the independent worker, which can move that memory anywhere legal inside its home.
 These stages use the isolated DREAMPlace recipe. Whole-design H2D, timing repair, multi-height cell
 legalization, DEF stitching and CTS are outside this worker flow.
 
-`show` reports each planned port's net index and die coordinates. Use
+Macro placement (and final run directly from the packet) slides eligible shared contacts along their common boundary to reduce local HPWL. Set `synth.place.macro.pin_adjust=false` to keep planned contacts. The coordinator publishes the accepted coordinates to all incident homes before another worker starts. Die-anchored nets, contacts at disjoint interfaces, manual edits and current neighbor results retain their agreed positions.
+
+`show` reports each port's net index and current die coordinates. Use
 `lhd synth chunk move-io "$id" "$net" --from-macro` to accept the measured local pin centroid
 projected onto the chunk perimeter, or supply `--xy X Y`. Each incident home projects that point to its
 own perimeter. A change marks completed work on every home sharing that net stale, including the source.
-Re-run macro and final for the affected IDs. Final requires a current successful macro result.
+Re-run affected stages to refresh their results.
 Macro reruns invalidate the previous final. Results and failure logs are in attempt directories
 under `.chunk-work` beside the manifest. The commands report their paths. State persists across processes
 and the project switches to the new plan after a successful update. The lower-level `plan` command and `--manifest PATH` are available for standalone exports.
 
 `init --gui` pauses at the floorplan editor. Use `lhd synth chunk update --workdir W --gui`
 to reopen the plan with its accepted edits. On finishing the plan, the project publishes the new
-worker packets and opens the chunk placement controls. `lhd synth chunk gui` opens those controls
+worker packets and switches the same browser tab to the chunk placement controls. `lhd synth chunk gui` opens those controls
 directly. Add `--gui-no-open` alongside `--gui` to work over the agent socket without launching a browser.
+
+### Live search on isolated workers
+
+Start with `lhd synth chunk init --gui --workers 1 --workdir W` and the design's synthesis arguments. The browser follows the accepted floorplan into its chunk workers. To reopen the search, run `lhd synth chunk gui --workdir W`. The worker limit also applies to concurrent trial branches. Packet export currently loads the connected design once.
+
+From the same socket used by the GUI, try:
+
+```sh
+python3 tools/lhd_gui.py --workdir W macro 'ids=["Rocket.middle"]'
+python3 tools/lhd_gui.py --workdir W select home=Rocket.middle kind=macro match=csr.__array_view
+python3 tools/lhd_gui.py --workdir W trial home=Rocket.middle iterations=100 \
+  'hypothesis=Move the CSR memories right or reduce density' \
+  'candidates={"right":{"dx":1000},"less_dense":{"density":0.72}}' keep_if=control
+python3 tools/lhd_gui.py --workdir W overview
+python3 tools/lhd_gui.py --workdir W next objective=wns
+python3 tools/lhd_gui.py --workdir W history query=CSR
+python3 tools/lhd_gui.py --workdir W place-design
+```
+
+A candidate can move a shared terminal with `{"io":{"net":17,"xy":[1200,2400]}}`. The control and each alternative advance the same incident homes sequentially. An unrelated worker stays frozen.
+
+Moves use die DBU. Add `"fix":"x"` to hold the requested axis. A trial reuses the selected macro or final handoff. It runs each candidate and an unchanged control for the same iteration budget. `scope=assembled` scores physical pins across the exported design. `scope=local` includes virtual cut terminals. Older exports without scoring summaries support local scoring. Re-export to obtain assembled scores. A preexisting final result without a forkable handoff needs one local final rerun before a final-stage trial. `keep` promotes the measured files at their parent revision. `undo` restores that revision. Search results, annotations and frame references persist under the manifest's `.chunk-work` directory. `discard` closes a trial and retains its measured frames for `replay`.
+
+`lhd synth chunk score --workdir W` combines the active net pin bounds with summaries of other chunks and fixed die pins. Each included physical net contributes its unweighted HPWL once. Stage counts identify the homes still represented by export seeds or stale measurements. Estimated setup WNS uses the exported timing snapshot and distributed-wire RC correction for changed pin spans. Missing timing is reported as null. `next --objective hpwl|wns|density` ranks chunks and reports the reason, cost and boundary feedback behind each choice.
+
+The GUI shows accepted, selected, and best metrics for comparable stages. Use the branch selector or open a recorded finding to inspect its measured frame. Density is standard-cell area divided by available bin area after subtracting macro and obstacle coverage. Overflow is excess area above the selected density target divided by total standard-cell area. The GP displacement overlay connects sampled positions before legalization to the returned legal frame. Its movement count and maximum use all owned instances.
+
+**Place design by chunk** runs outstanding local final workers sequentially, validates unique instance ownership and containment, and returns the assembled position manifest. Use `lhd synth chunk assemble --workdir W` to reproduce that manifest from current final results.
 
 In **Floorplan chunks**, select a physical chunk. Under **Physical homes**, select one or more
 colors or macros to move to another home or split into a named new home. **Fuse** keeps the
@@ -79,26 +109,59 @@ Preview, Apply and Undo run the planner in the open session. Applying an edit pu
 a new floorplan scene to connected browsers and agents while the GUI stays at the same
 editing gate. Finish the plan to export the accepted assignment for macro and final placement.
 
-Agents use the same edits through the local socket. From the repository root, inspect the current plan and preview a transfer with the following commands.
+### Live floorplanning from the socket
+
+Start with `lhd synth chunk init design.v --top top --workdir W --gui` and the usual synthesis,
+technology and floorplan options. The browser and `tools/lhd_gui.py --workdir W` share a selection.
+At the floorplan gate, click members or select by name. Rank connected colors by the number of planner
+nets they share with the selected members. For example, to group the selected memories with two colors:
 
 ```sh
-gui() { python3 tools/lhd_gui.py --workdir W "$@"; }
-gui wait state=gate phase=fp
-gui export what=chunks
-gui export what=chunk_members chunk=A offset=0 limit=32
-gui chunk_edit field=topology 'op={"transfer":"A","to":"B","members":[{"id":"ram0","macro":true}]}'
-gui command_status sequence=N
-gui export what=chunks view=preview
+gui() { tools/lhd_gui.py --workdir W "$@"; }
+gui chunks
+gui connected kind=color limit=2 add_to_selection=true
+gui split home=A new_id=CSR
+gui reshape home=CSR aspect=1.5
+gui finish-plan
+gui macro 'ids=["CSR"]'
 ```
 
-Substitute the returned chunk IDs, member ID and sequence number. After inspecting a preview,
-repeat the edit with `apply=true` and wait for its receipt. Pass
-`expect={"frame":F,"intent":I}` as one shell argument using the returned frame and
-intent revision when multiple clients share the gate. Other operations include
-`{"split":"A","new_id":"C","members":[...]}`, `{"fuse":["A","B"]}`, and, with
-`field=geometry`, `{"reshape":"A","aspect_ratio":1.5}`. Send `op=undo apply=true`
-with the same field to undo its last edit. Finish with `gui cmd 'command={"cmd":"finish"}'`.
-Future source-backed updates replay the accepted editing guidance and reconcile worker results.
+Use the actual source home returned by `chunks`. The split and reshape commands wait for the planner's
+receipt. `apply=false` previews a change. `undo-plan field=geometry` and `undo-plan field=topology`
+undo the most recent edit in the named field. Reopening a source-backed project replays its accepted guidance.
+
+After macro placement, click a memory and Shift-click to add or remove others. Both browser and agent can
+inspect the selection. A direct edit recomputes the legal placement and publishes it to the canvas.
+Coordinates and gaps are in die DBU. A move gives the placer a starting position. Add `fix=x`,
+`fix=y` or `fix=xy` to hold the corresponding coordinates. `release=x|y|xy` releases a hold.
+Symbolic edge placements with holds use legal grid coordinates. Infeasible holds return a placement failure.
+
+```sh
+gui selection
+gui edit align=row side=right gap=3000
+gui undo
+gui trial iterations=100 metric=hpwl keep_if=checkpoint \
+    'left={"align":"row","side":"left","gap":3000}' \
+    'right={"align":"row","side":"right","gap":3000}'
+```
+
+Each candidate and the unedited control start a fresh local solve from the same immutable physical
+handoff, including the accepted cells, memories, contacts and coordinate holds. The reply includes
+actual completed GP iterations, HPWL and estimated WNS deltas against both references.
+`keep_if=checkpoint` accepts a strict improvement over the starting value. `keep_if=control`
+accepts a strict improvement over the equally advanced control. With neither condition, the candidates
+stay available for inspection. Use `view trial=ID branch=right` to follow a running or finished candidate,
+`compare trial=ID wait=true` to wait, `keep trial=ID branch=right` to accept and `discard trial=ID`
+to release the alternatives. Undo restores the accepted checkpoint, including coordinated contacts.
+Intervening main edits invalidate acceptance of older trials.
+
+With an SDC and synthesis timing enabled, export ranks the seed placement once with the configured
+timer. Each timed home carries the constrained nets' seed slacks. Worker frames estimate the change
+in each net's distributed-wire Elmore delay from its horizontal and vertical spans and report the
+worst negative corrected slack in ps. This compares local geometry with cell and exterior delays
+held at their seed values. It does not propagate slew or accumulate delay changes along entire paths.
+The GUI reports the number of timed nets and shows unavailable timing for untimed packets.
+The density overlay measures physical cell and macro body area in each of 16 × 16 bins.
 
 The budget is in MiB and applies to worker admission and measured worker peak RSS. The producer still
 materializes the flat physical design. To exercise partition creation below the worker's process baseline,

@@ -346,6 +346,9 @@ config_setting(
     copts = COPTS,
     data = [
         "chunk_flow.py",
+        "chunk_live.py",
+        "chunk_score.py",
+        "chunk_journal.py",
         "chunk_gui.html",
         "@dreamplace//thirdparty/flute:flute",
         "//ware:cgen_memory_rtl",

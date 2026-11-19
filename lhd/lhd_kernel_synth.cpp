@@ -4252,6 +4252,17 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
         // GP consumes criticality only. Physical resizing runs after legal GP.
         place_options.fp_resize   = false;
       }
+      if (isolated && !sdc.empty() && truthy(synth_set(opts, "timing", "true")) && !place_options.unresolved_def_nets) {
+        place_options.gp_rank      = rank;
+        place_options.chunk_timing = [&](const livehd::placement::Ranking_view& state) {
+          if (timing_engine == "fast") {
+            ensure_fast_ranker();
+            Stdout_to_log redirect(timing_log);
+            return fast_ranker->evaluate(state.graph, state.parasitics, state.controls.timing_cuts);
+          }
+          return estimate(state, livehd::opentimer::Physical_session::Purpose::detailed);
+        };
+      }
       if (gui_session && !place_options.unresolved_def_nets) {
         // Each GUI timer owns its incremental state and its evaluation counters.
         // A drag or a full timing request must never perturb a flow checkpoint.

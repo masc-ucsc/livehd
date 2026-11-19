@@ -324,3 +324,17 @@ try:
 finally:
     if proc.poll() is None:proc.terminate()
     proc.wait(timeout=5)
+
+
+# A constrained seed carries STA-ranked nets into the independent worker. Tighten
+# the cycle so that a zero substituted for missing timing cannot satisfy this check.
+sdc = root / 'tight.sdc'
+sdc.write_text('create_clock -name clk -period 0.01 [get_ports clk]\n')
+timed = root / 'timed-home'
+timed_args = [s.replace('synth.timing=false','synth.timing=true') for s in args]
+subprocess.run(timed_args + ['--workdir', str(timed), '--set', f'synth.sdc={sdc}', '--set', 'synth.place.chunk.run=export',
+                             '--set', 'synth.place.chunk.require_fit=false'], check=True, capture_output=True, timeout=20)
+run = subprocess.run(['lhd/lhd','synth','chunk','macro','--workdir',str(timed),'--json'],
+                     capture_output=True,text=True,check=True,timeout=20)
+homes = [r['macro'] for r in json.loads(run.stdout)]
+assert any(h.get('timed_nets',0)>0 and h['estimated_wns_ps']<0 for h in homes), homes

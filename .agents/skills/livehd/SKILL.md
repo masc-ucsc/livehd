@@ -13,6 +13,15 @@ Use `lhd synth chunk init` with the design's synthesis recipe and worker memory 
 
 After accepting the plan, use `chunk list` and `show` to select physical chunk IDs, then run `macro` and `final` on the selected chunks. `chunk gui` opens the worker controls. Use `chunk update` after source changes or `chunk update --gui` to reopen the editor. [Chunk workflow and shared IO](lhd.md#pre-cts-chunk-placement)
 
+### Run a live placement experiment
+
+- Start from the accepted placement in the shared GUI. Resolve a selection to its objects and owning chunks. Use connectivity and the density map to pick one change, name the metric it should improve, and say what would justify keeping it.
+- Distinguish a starting position from a constraint. Seed a macro when the placer may refine its position. Fix a coordinate when it must survive placement. Inspect the resulting pose after the placer runs.
+- Fork each candidate and an unchanged control from the same checkpoint. Give them the same stage, settings, seed and iteration budget. Compare the candidate with the control to isolate the edit’s effect. Compare it with the accepted result at the same stage to decide whether to keep it. Repeat the control when the gain is close to run-to-run variation.
+- Place the affected chunk with the exterior frozen. If a shared IO moves, coordinate its position with the neighboring chunks and remeasure the affected chunks. Check assembled wirelength and timing estimates so the comparison includes nets crossing the boundary.
+- Show the active trial, the accepted placement and the best comparable metrics in the GUI. Inspect density hotspots alongside wirelength and estimated timing. Check promising candidates after legalization, particularly where cells moved far from their global-placement positions.
+- Keep the measured placement or restore the accepted checkpoint. Log the hypothesis, affected chunks, measured deltas and decision so the next experiment can build on the result.
+
 ## Explore macro poses in whole-design placement
 
 1. Start the design’s existing synthesis recipe with `--set synth.place=true --gui --set synth.place.gui.pause=true`. At a stable gate, inspect `hello`, `state` and the macro inventory.

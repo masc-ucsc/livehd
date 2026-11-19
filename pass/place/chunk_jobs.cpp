@@ -13,6 +13,7 @@
 #include <format>
 #include <fstream>
 #include <numeric>
+#include <set>
 #include <thread>
 
 #include "chunk_refine.hpp"
@@ -100,6 +101,9 @@ Chunk_job read_job(const fs::path& path, const std::string& expected) {
   binary_message::Decoder decoder{std::string_view(bytes).substr(magic.size())};
   Chunk_job               j;
   packet(decoder, j);
+  if (!decoder.bytes.empty()) {
+    binary_message::fields(decoder, j.timed_nets, j.wire_rc);
+  }
   need(decoder.bytes.empty() && j.physical.num_movable >= 0 && j.names.size() == size_t(j.physical.num_movable)
            && j.physical.node_macro.size() >= j.names.size() && j.boundary_nets.size() == j.original_nets.size() && j.dbu > 0
            && j.iterations >= 0 && j.threads > 0,
@@ -142,6 +146,15 @@ void put_positions(const fs::path& path, const Chunk_job& j) {
     w.EndArray();
   }
   w.EndArray();
+  w.Key("sizes_dbu");
+  w.StartArray();
+  for (int i = 0; i < j.physical.num_movable; ++i) {
+    w.StartArray();
+    w.Double(j.physical.node_size_x[i]);
+    w.Double(j.physical.node_size_y[i]);
+    w.EndArray();
+  }
+  w.EndArray();
   w.Key("macro_sizes_dbu");
   w.StartArray();
   for (int i = 0; i < j.physical.num_movable; ++i) {
@@ -159,28 +172,228 @@ void put_positions(const fs::path& path, const Chunk_job& j) {
   file.close();
   need(bool(file), "cannot write chunk positions");
 }
+// Distributed-wire Elmore estimate (ohm * fF -> 0.001 ps). Calibration carries
+// the STA cell, load and exterior delays at export; only local wire spans vary.
+std::array<double, 2> pin_span(const Chunk_job& j, int net, const double* xs, const double* ys) {
+  const auto& d  = j.physical;
+  double      xl = INFINITY, yl = INFINITY, xh = -INFINITY, yh = -INFINITY;
+  for (int k = d.flat_net2pin_start.at(net); k < d.flat_net2pin_start.at(net + 1); ++k) {
+    const auto p = d.flat_net2pin.at(k), i = d.pin2node.at(p);
+    double     x = xs[i] + d.pin_offset_x.at(p), y = ys[i] + d.pin_offset_y.at(p);
+    xl = std::min(xl, x);
+    xh = std::max(xh, x);
+    yl = std::min(yl, y);
+    yh = std::max(yh, y);
+  }
+  return {xh - xl, yh - yl};
+}
+double wire_delay_ps(const Chunk_job& j, int net, const double* xs, const double* ys) {
+  const auto   span = pin_span(j, net, xs, ys);
+  const double h = span[0] / j.dbu, v = span[1] / j.dbu;
+  const auto [rh, ch, rv, cv] = j.wire_rc;
+  return .0005 * (rh * h + rv * v) * (ch * h + cv * v);
+}
+void report_timing(Doc& report, const Chunk_job& job, const double* xs, const double* ys) {
+  auto& a = report.GetAllocator();
+  if (!job.timed_nets.empty()) {
+    double worst = INFINITY;
+    for (const auto& [net, slack, seed_delay] : job.timed_nets) {
+      worst = std::min(worst, slack + seed_delay - wire_delay_ps(job, net, xs, ys));
+    }
+    report.AddMember("estimated_wns_ps", std::min(0., worst), a)
+        .AddMember("estimated_worst_slack_ps", worst, a)
+        .AddMember("timed_nets", uint64_t(job.timed_nets.size()), a);
+  }
+}
+// Each physical net is either internal to one worker, shared, or entirely fixed.
+// The worker never scores the artificial terminal added to its local solve.
+struct Pin_bounds {
+  double xl = INFINITY, yl = INFINITY, xh = -INFINITY, yh = -INFINITY;
+  void   add(double x, double y) {
+    xl = std::min(xl, x);
+    yl = std::min(yl, y);
+    xh = std::max(xh, x);
+    yh = std::max(yh, y);
+  }
+  double span() const { return xl <= xh ? xh - xl + yh - yl : 0; }
+  Value  json(Doc& doc) const {
+    Value box(rapidjson::kArrayType);
+    if (xl <= xh) {
+      for (double v : {xl, yl, xh, yh}) {
+        box.PushBack(v, doc.GetAllocator());
+      }
+    }
+    return box;
+  }
+};
+
+Value chunk_score(const Chunk_job& job, const std::map<int, uint64_t>& shared, Doc& doc, const double* xs = nullptr,
+                  const double* ys = nullptr) {
+  const auto& d = job.physical;
+  auto&       a = doc.GetAllocator();
+  Value       score(rapidjson::kObjectType), bounds(rapidjson::kArrayType);
+  double      internal = 0, worst = INFINITY;
+  if (!xs) {
+    xs = d.node_x.data();
+  }
+  if (!ys) {
+    ys = d.node_y.data();
+  }
+  for (size_t n = 0; n < d.net_weights.size(); ++n) {
+    Pin_bounds box;
+    for (int k = d.flat_net2pin_start[n]; k < d.flat_net2pin_start[n + 1]; ++k) {
+      int p = d.flat_net2pin[k], i = d.pin2node[p];
+      if (size_t(i) < job.names.size()) {
+        box.add(job.box[0] + xs[i] + d.pin_offset_x[p], job.box[1] + ys[i] + d.pin_offset_y[p]);
+      }
+    }
+    auto it = shared.find(n);
+    if (it == shared.end()) {
+      internal += box.span();
+    } else if (box.xl <= box.xh) {
+      Value entry(rapidjson::kArrayType);
+      entry.PushBack(it->second, a).PushBack(box.json(doc), a);
+      bounds.PushBack(entry, a);
+    }
+  }
+  for (const auto& [n, slack, seed] : job.timed_nets) {
+    if (!shared.contains(n)) {
+      worst = std::min(worst, slack + seed - wire_delay_ps(job, n, xs, ys));
+    }
+  }
+  score.AddMember("internal_dbu", internal, a).AddMember("bounds", bounds, a);
+  if (std::isfinite(worst)) {
+    score.AddMember("internal_slack_ps", worst, a);
+  }
+  return score;
+}
+
 // A bounded view for the browser. The full position list stays on disk even for a very large home.
-void write_chunk_preview(const fs::path& path, const Chunk_job& job, int macros) {
-  auto               view = rec("livehd.placement.chunk_preview", job.design, job.id);
-  auto&              a    = view.GetAllocator();
-  const auto&        d    = job.physical;
-  const std::array   count{d.num_movable - macros, macros};
+void write_chunk_preview(const fs::path& path, const Chunk_job& job, int macros, const dp::InteractView* frame = nullptr,
+                         const std::map<int, uint64_t>* shared = nullptr) {
+  auto        view  = rec("livehd.placement.chunk_preview", job.design, job.id);
+  auto&       a     = view.GetAllocator();
+  const auto& d     = job.physical;
+  const int   owned = job.names.size();
+  const auto* xs    = frame ? frame->x : d.node_x.data();
+  const auto* ys    = frame ? frame->y : d.node_y.data();
+  if (frame) {
+    double wl = 0;
+    for (size_t n = 0; n < d.net_weights.size(); ++n) {
+      if (!d.net_mask.empty() && !d.net_mask[n]) {
+        continue;
+      }
+      const auto [dx, dy]  = pin_span(job, n, xs, ys);
+      wl                  += d.net_weights[n] * (dx + dy);
+    }
+    view.AddMember("iterations", frame->iteration, a).AddMember("hpwl_dbu", wl, a);
+    report_timing(view, job, xs, ys);
+    if (shared) {
+      view.AddMember("score", chunk_score(job, *shared, view, xs, ys), a);
+    }
+  }
+  const std::array   count{owned - macros, macros};
   std::array<int, 2> seen{};
-  Value              boxes(rapidjson::kArrayType);
-  for (int i = 0; i < d.num_movable; ++i) {
+  Value              boxes(rapidjson::kArrayType), names(rapidjson::kArrayType);
+  for (int i = 0; i < owned; ++i) {
     const int kind   = d.node_macro[i] != 0;
     const int stride = 1 + (count[kind] - 1) / 1024;
     if (seen[kind]++ % stride == 0) {
       Value box(rapidjson::kArrayType);
-      box.PushBack(d.node_x[i] + job.box[0], a)
-          .PushBack(d.node_y[i] + job.box[1], a)
+      box.PushBack(xs[i] + job.box[0], a)
+          .PushBack(ys[i] + job.box[1], a)
           .PushBack(d.node_size_x[i], a)
           .PushBack(d.node_size_y[i], a)
           .PushBack(kind, a);
       boxes.PushBack(box, a);
+      names.PushBack(str(job.names.at(i), view), a);
     }
   }
-  view.AddMember("boxes_dbu", boxes, a).AddMember("owned", d.num_movable, a);
+  constexpr int                                   bins = 16;
+  const double                                    bw = (job.box[2] - job.box[0]) / bins, bh = (job.box[3] - job.box[1]) / bins;
+  std::array<double, bins * bins>                 occupied{}, cell_area{};
+  std::array<std::vector<Chunk_box>, bins * bins> obstacles;
+  for (size_t i = 0; i < d.node_size_x.size(); ++i) {
+    if (d.node_size_x[i] <= 0 || d.node_size_y[i] <= 0) {
+      continue;
+    }
+    double xl = xs[i], yl = ys[i], xh = xl + d.node_size_x[i], yh = yl + d.node_size_y[i];
+    for (int y = std::max(0, int(yl / bh)); y < bins && y * bh < yh; ++y) {
+      for (int x = std::max(0, int(xl / bw)); x < bins && x * bw < xh; ++x) {
+        Chunk_box    r{std::max(xl, x * bw), std::max(yl, y * bh), std::min(xh, (x + 1) * bw), std::min(yh, (y + 1) * bh)};
+        const int    index = y * bins + x;
+        const double area  = (r[2] - r[0]) * (r[3] - r[1]);
+        if (i < size_t(owned)) {
+          occupied[index] += area / (bw * bh);
+        }
+        if (i >= size_t(owned) || d.node_macro[i]) {
+          obstacles[index].push_back(r);
+        } else {
+          cell_area[index] += area;
+        }
+      }
+    }
+  }
+  Value  utilization(rapidjson::kArrayType);
+  double peak = 0, overflow = 0, total = 0;
+  for (size_t i = 0; i < cell_area.size(); ++i) {
+    // Union overlapping blockages (including projected exterior rectangles).
+    std::vector<double> cuts;
+    for (const auto& r : obstacles[i]) {
+      cuts.push_back(r[0]);
+      cuts.push_back(r[2]);
+    }
+    std::sort(cuts.begin(), cuts.end());
+    double blocked = 0;
+    for (size_t j = 1; j < cuts.size(); ++j) {
+      if (cuts[j] == cuts[j - 1]) {
+        continue;
+      }
+      std::vector<std::pair<double, double>> intervals;
+      for (const auto& r : obstacles[i]) {
+        if (r[0] < cuts[j] && r[2] > cuts[j - 1]) {
+          intervals.emplace_back(r[1], r[3]);
+        }
+      }
+      std::sort(intervals.begin(), intervals.end());
+      double end = -INFINITY, length = 0;
+      for (auto [lo, hi] : intervals) {
+        length += std::max(0., hi - std::max(lo, end));
+        end     = std::max(end, hi);
+      }
+      blocked += (cuts[j] - cuts[j - 1]) * length;
+    }
+    double available = std::max(0., bw * bh - blocked);
+    if (available > 1.e-9 * bw * bh) {
+      const double ratio = cell_area[i] / available;
+      utilization.PushBack(ratio, a);
+      peak = std::max(peak, ratio);
+    } else {
+      utilization.PushBack(Value(), a);
+    }
+    overflow += std::max(0., cell_area[i] - job.density * available);
+    total    += cell_area[i];
+  }
+  view.AddMember("cell_density", utilization, a)
+      .AddMember("peak_density", peak, a)
+      .AddMember("target_density", job.density, a)
+      .AddMember("overflow_fraction", total ? overflow / total : 0., a);
+  Value grid(rapidjson::kArrayType), halos(rapidjson::kObjectType);
+  grid.PushBack(d.layout.site_width, a).PushBack(d.layout.row_height, a);
+  for (int i = 0; i < owned; ++i) {
+    if (d.node_macro[i]) {
+      Value halo(rapidjson::kArrayType);
+      halo.PushBack(d.node_halo_x.empty() ? 0 : d.node_halo_x[i], a).PushBack(d.node_halo_y.empty() ? 0 : d.node_halo_y[i], a);
+      halos.AddMember(str(job.names.at(i), view), halo, a);
+    }
+  }
+  view.AddMember("grid_dbu", grid, a).AddMember("macro_halos_dbu", halos, a);
+  Value density(rapidjson::kArrayType);
+  for (double share : occupied) {
+    density.PushBack(share, a);
+  }
+  view.AddMember("occupancy", density, a).AddMember("bins", bins, a);
+  view.AddMember("names", names, a).AddMember("boxes_dbu", boxes, a).AddMember("owned", owned, a);
   metadata::Bundle bundle;
   bundle.replace(view);
   bundle.write(path.string());
@@ -217,6 +430,9 @@ static std::string write_chunk_job(const fs::path& path, Chunk_job& j) {
   binary_message::Encoder en;
   en.bytes = magic;
   packet(en, j);
+  if (!j.timed_nets.empty()) {
+    binary_message::fields(en, j.timed_nets, j.wire_rc);
+  }
   std::ofstream f(path, std::ios::binary);
   f.write(en.bytes.data(), en.bytes.size());
   f.close();
@@ -226,7 +442,9 @@ static std::string write_chunk_job(const fs::path& path, Chunk_job& j) {
 std::string write_chunk_jobs(const fs::path& manifest, const metadata::Bundle& base, const Chunk_model& model,
                              const Chunk_plan& plan, dp::Design& physical, std::span<const int> owners,
                              std::span<const std::string> names, const std::string& design, int dbu, int iterations, int threads,
-                             bool detailed, bool strict, const std::string& selected, const Chunk_predictor* predictor) {
+                             bool detailed, bool strict, bool adjust_contacts, const std::string& selected,
+                             const Chunk_predictor* predictor, std::span<const double> slack_ps, std::array<double, 4> wire_rc,
+                             std::span<const std::array<double, 2>> windows) {
   std::optional<size_t> only;
   if (!selected.empty()) {
     auto it = std::find_if(plan.chunks.begin(), plan.chunks.end(), [&](const auto& c) { return c.id == selected; });
@@ -245,6 +463,7 @@ std::string write_chunk_jobs(const fs::path& manifest, const metadata::Bundle& b
       .AddMember("plan_key", plan.input_key, a)
       .AddMember("budget_bytes", plan.budget, a)
       .AddMember("require_fit", strict, a)
+      .AddMember("adjust_contacts", adjust_contacts, a)
       .AddMember("dbu_per_um", dbu, a);
   if (only) {
     d.AddMember("selected", str(selected, d), a);
@@ -253,6 +472,61 @@ std::string write_chunk_jobs(const fs::path& manifest, const metadata::Bundle& b
   if (model.pack_scopes) {
     fs::create_directories(packet_dir);
   }
+  std::set<size_t> shared_nets;
+  Value  assembly(rapidjson::kObjectType), fixed(rapidjson::kArrayType), timing(rapidjson::kArrayType), rc(rapidjson::kArrayType);
+  double fixed_hpwl = 0, fixed_slack = INFINITY, seed_hpwl = 0;
+  for (size_t n = 0; n + 1 < physical.flat_net2pin_start.size(); ++n) {
+    if (!physical.net_mask.empty() && !physical.net_mask[n]) {
+      continue;
+    }
+    int        first_home = -1;
+    bool       crossing   = false;
+    Pin_bounds anchors, all;
+    for (int k = physical.flat_net2pin_start[n]; k < physical.flat_net2pin_start[n + 1]; ++k) {
+      int    p = physical.flat_net2pin[k], i = physical.pin2node[p];
+      double x = physical.node_x[i] + physical.pin_offset_x[p], y = physical.node_y[i] + physical.pin_offset_y[p];
+      all.add(x, y);
+      if (size_t(i) >= owners.size() || owners[i] < 0 || (i >= physical.num_movable && !model.objects[owners[i]].worker_memory)) {
+        anchors.add(x, y);
+      } else {
+        int h       = plan.home[owners[i]];
+        crossing   |= first_home >= 0 && first_home != h;
+        first_home  = h;
+      }
+    }
+    seed_hpwl          += all.span();
+    const double slack  = n < slack_ps.size() ? slack_ps[n] : INFINITY;
+    if (first_home < 0) {
+      fixed_hpwl  += anchors.span();
+      fixed_slack  = std::min(slack, fixed_slack);
+    } else if (crossing || anchors.xl <= anchors.xh) {
+      shared_nets.insert(n);
+      Value item(rapidjson::kArrayType);
+      if (anchors.xl <= anchors.xh) {
+        fixed.PushBack(item.PushBack(uint64_t(n), a).PushBack(anchors.json(d), a), a);
+      }
+      if (std::isfinite(slack)) {
+        Value sample(rapidjson::kArrayType);
+        sample.PushBack(uint64_t(n), a).PushBack(slack, a).PushBack(all.json(d), a);
+        if (n < windows.size() && std::isfinite(windows[n][0]) && std::isfinite(windows[n][1])) {
+          sample.PushBack(windows[n][0], a).PushBack(windows[n][1], a);
+        }
+        timing.PushBack(sample, a);
+      }
+    }
+  }
+  for (double v : wire_rc) {
+    rc.PushBack(v, a);
+  }
+  assembly.AddMember("fixed_dbu", fixed_hpwl, a)
+      .AddMember("anchors", fixed, a)
+      .AddMember("timing", timing, a)
+      .AddMember("wire_rc", rc, a);
+  if (std::isfinite(fixed_slack)) {
+    assembly.AddMember("fixed_slack_ps", fixed_slack, a);
+  }
+  assembly.AddMember("seed_hpwl_dbu", seed_hpwl, a);
+  d.AddMember("assembly", assembly, a);
   refine_chunk_seeds(
       physical,
       model,
@@ -263,19 +537,26 @@ std::string write_chunk_jobs(const fs::path& manifest, const metadata::Bundle& b
       threads,
       detailed,
       [&](size_t index, Chunk_job& j) {
-        auto& c         = plan.chunks[index];
-        j.id            = c.id;
-        j.design        = design;
+        auto& c      = plan.chunks[index];
+        j.id         = c.id;
+        j.design     = design;
         // The managed scheduler checks the complete packet digest. A plan-wide key in every
         // packet would force all sibling handoffs to expire after any source edit.
-        j.plan_key      = model.pack_scopes ? 0 : plan.input_key;
-        j.budget        = plan.budget;
-        j.dbu           = dbu;
-        j.box           = c.box;
-        j.density       = c.density;
-        j.iterations    = iterations;
-        j.threads       = std::max(1, threads);
-        j.detailed      = detailed;
+        j.plan_key   = model.pack_scopes ? 0 : plan.input_key;
+        j.budget     = plan.budget;
+        j.dbu        = dbu;
+        j.box        = c.box;
+        j.density    = c.density;
+        j.iterations = iterations;
+        j.threads    = std::max(1, threads);
+        j.detailed   = detailed;
+        j.wire_rc    = wire_rc;
+        for (size_t i = 0; i < j.parent_nets.size() && !slack_ps.empty(); ++i) {
+          const auto n = j.parent_nets[i];
+          if (n < slack_ps.size() && std::isfinite(slack_ps[n])) {
+            j.timed_nets.emplace_back(i, slack_ps[n], wire_delay_ps(j, i, j.physical.node_x.data(), j.physical.node_y.data()));
+          }
+        }
         auto     name   = std::to_string(index) + ".bin";
         auto     digest = write_chunk_job(fs::path(tmp) / name, j);
         fs::path input  = fs::path(tmp).filename() / name;
@@ -298,6 +579,16 @@ std::string write_chunk_jobs(const fs::path& manifest, const metadata::Bundle& b
         for (double v : c.box) {
           box.PushBack(v, a);
         }
+        std::map<int, uint64_t> shared;
+        Value                   score_nets(rapidjson::kArrayType);
+        for (size_t n = 0; n < j.parent_nets.size(); ++n) {
+          if (shared_nets.contains(j.parent_nets[n])) {
+            shared.emplace(n, j.parent_nets[n]);
+            Value pair(rapidjson::kArrayType);
+            score_nets.PushBack(pair.PushBack(int(n), a).PushBack(uint64_t(j.parent_nets[n]), a), a);
+          }
+        }
+        row.AddMember("score_nets", score_nets, a).AddMember("seed_score", chunk_score(j, shared, d), a);
         row.AddMember("counts", features, a)
             .AddMember("checksum", str(digest, d), a)
             .AddMember("id", str(c.id, d), a)
@@ -375,7 +666,17 @@ int place_chunk_worker(const fs::path& input, const fs::path& output, const std:
       .AddMember("boundary_contacts", uint64_t(job.boundary_nets.size()), a)
       .AddMember("dbu_per_um", job.dbu, a);
   try {
-    std::string stage;
+    std::optional<std::map<int, uint64_t>>              score_nets;
+    std::string                                         stage;
+    bool                                                live_frames = false;
+    int                                                 trial_steps = -1;
+    std::map<int, std::array<std::optional<double>, 2>> holds;
+    bool                                                freeze_macros = true;  // Old final requests always carry a macro handoff.
+    struct Slide {
+      int    axis;
+      double lo, hi;
+    };
+    std::map<uint64_t, Slide> slides;
     if (fs::exists(output / "request.json")) {
       auto request = metadata::Bundle::read((output / "request.json").string());
       auto records = request.select("livehd.placement.chunk_request", job.design);
@@ -387,6 +688,68 @@ int place_chunk_worker(const fs::path& input, const fs::path& output, const std:
       stage = r["stage"].GetString();
       need(stage == "macro" || stage == "final", "unknown chunk stage");
       report.AddMember("stage", str(stage, report), a);
+      if (r.HasMember("score_nets")) {
+        need(r["score_nets"].IsArray(), "invalid score net mapping");
+        score_nets.emplace();
+        for (const auto& pair : r["score_nets"].GetArray()) {
+          need(pair.IsArray() && pair.Size() == 2 && pair[0].IsUint() && pair[0].GetUint() < d.net_weights.size()
+                   && pair[1].IsUint64(),
+               "invalid score net");
+          score_nets->emplace(pair[0].GetInt(), pair[1].GetUint64());
+        }
+      }
+      if (r.HasMember("density")) {
+        need(r["density"].IsNumber() && r["density"].GetDouble() > 0 && r["density"].GetDouble() <= 1, "density must be in (0, 1]");
+        job.density = r["density"].GetDouble();
+        report["target_density"].SetDouble(job.density);
+      }
+      if (r.HasMember("freeze_macros")) {
+        need(r["freeze_macros"].IsBool(), "invalid macro handoff flag");
+        freeze_macros = r["freeze_macros"].GetBool();
+      }
+      live_frames = r.HasMember("live_frames") && r["live_frames"].IsBool() && r["live_frames"].GetBool();
+      if (r.HasMember("iterations")) {
+        need(r["iterations"].IsInt() && r["iterations"].GetInt() >= 0, "trial iterations must be a nonnegative integer");
+        trial_steps = r["iterations"].GetInt();
+      }
+      if (r.HasMember("poses")) {
+        need(r["poses"].IsArray(), "poses must be an array");
+        std::map<std::string, int> ids;
+        for (int i = 0; i < d.num_movable; ++i) {
+          ids.emplace(job.names[i], i);
+        }
+        for (const auto& pose : r["poses"].GetArray()) {
+          need(pose.IsArray() && pose.Size() == 5 && pose[0].IsString(), "invalid physical pose");
+          auto entry = ids.find(pose[0].GetString());
+          need(entry != ids.end(), "pose requires an owned movable object");
+          int i = entry->second;
+          for (int k = 0; k < 2; ++k) {
+            if (pose[k + 1].IsNull()) {
+              continue;
+            }
+            need(pose[k + 1].IsNumber() && pose[k + 3].IsBool(), "invalid axis coordinate or hold");
+            double x      = pose[k + 1].GetDouble() - job.box[k];
+            double extent = k ? d.node_size_y[i] : d.node_size_x[i];
+            need(x >= 0 && x + extent <= job.box[k + 2] - job.box[k], "requested pose exceeds home");
+            (k ? d.node_y : d.node_x)[i] = x;
+            if (pose[k + 3].GetBool()) {
+              holds[i][k] = x;
+            }
+          }
+        }
+      }
+      if (r.HasMember("shared_edges")) {
+        need(r["shared_edges"].IsArray(), "invalid shared edges");
+        for (const auto& edge : r["shared_edges"].GetArray()) {
+          need(edge.IsArray() && edge.Size() == 4 && edge[0].IsUint64() && edge[1].IsUint() && edge[1].GetUint() < 2
+                   && edge[2].IsNumber() && edge[3].IsNumber(),
+               "invalid shared edge");
+          int    axis = edge[1].GetInt();
+          double lo = edge[2].GetDouble(), hi = edge[3].GetDouble();
+          need(job.box[axis] <= lo && lo <= hi && hi <= job.box[axis + 2], "shared edge exceeds chunk");
+          slides.emplace(edge[0].GetUint64(), Slide{axis, lo - job.box[axis], hi - job.box[axis]});
+        }
+      }
       if (r.HasMember("contacts")) {
         need(r["contacts"].IsArray(), "invalid chunk contacts");
         std::map<uint64_t, std::array<double, 2>> edits;
@@ -413,8 +776,21 @@ int place_chunk_worker(const fs::path& input, const fs::path& output, const std:
       }
     }
     const int owned = d.num_movable;
-    if (stage == "final" && macros) {
+    if (stage == "final" && freeze_macros && macros) {
+      std::map<std::string, std::array<std::optional<double>, 2>> cell_holds;
+      for (const auto& [i, axes] : holds) {
+        if (!d.node_macro[i]) {
+          cell_holds.emplace(job.names[i], axes);
+        }
+      }
       freeze_chunk_macros(job);
+      holds.clear();
+      for (int i = 0; !cell_holds.empty() && i < d.num_movable; ++i) {
+        if (auto it = cell_holds.find(job.names[i]); it != cell_holds.end()) {
+          holds.emplace(i, it->second);
+          cell_holds.erase(it);
+        }
+      }
     }
     if (!stage.empty()) {
       report.AddMember("solver_movable_nodes", d.num_movable, a);
@@ -425,6 +801,7 @@ int place_chunk_worker(const fs::path& input, const fs::path& output, const std:
     }
     if (!d.num_movable) {
       status = "fixed_only";
+      report.AddMember("iterations", 0, a);
       if (owned) {
         d.build_maps();
         report.AddMember("hpwl_dbu", dp::hpwl(d), a);
@@ -442,6 +819,62 @@ int place_chunk_worker(const fs::path& input, const fs::path& output, const std:
       o.num_threads    = job.threads;
       o.max_iterations = job.iterations;
       o.min_iterations = std::min(o.min_iterations, o.max_iterations);
+      if (trial_steps >= 0) {
+        o.min_iterations = o.max_iterations = trial_steps;
+      }
+      if (!holds.empty()) {
+        o.before_legalize = [&](dp::Design& physical) {
+          physical.node_legalize_fixed.resize(physical.node_x.size());
+          for (const auto& [i, axes] : holds) {
+            auto snap = [](double x, double step, double low, double high) {
+              need(step > 0 && std::ceil(low / step) <= std::floor(high / step), "no legal site inside held object's home");
+              return std::clamp(std::round(x / step), std::ceil(low / step), std::floor(high / step)) * step;
+            };
+            const auto& l      = physical.layout;
+            double      hx     = physical.node_halo_x.empty() ? 0 : physical.node_halo_x[i];
+            double      hy     = physical.node_halo_y.empty() ? 0 : physical.node_halo_y[i];
+            physical.node_x[i] = axes[0].value_or(snap(physical.node_x[i], l.site_width, hx, l.xh - physical.node_size_x[i] - hx));
+            physical.node_y[i] = axes[1].value_or(snap(physical.node_y[i], l.row_height, hy, l.yh - physical.node_size_y[i] - hy));
+            physical.node_legalize_fixed[i] = 1;
+          }
+        };
+        d.node_boxes.assign(d.node_x.size(), {0, 0, d.layout.xh, d.layout.yh});
+        for (const auto& [i, axes] : holds) {
+          if (axes[0]) {
+            d.node_boxes[i].xl = d.node_boxes[i].xh = *axes[0];
+          }
+          if (axes[1]) {
+            d.node_boxes[i].yl = d.node_boxes[i].yh = *axes[1];
+          }
+        }
+      }
+      if (trial_steps > 0 || live_frames) {
+        o.interact_interval = 10;
+        o.interact          = [&, last = Clock::time_point{}](const dp::InteractView& view) mutable {
+          const auto now = Clock::now();
+          if (view.count >= int(job.physical.node_x.size()) && (view.finishing || now - last >= std::chrono::milliseconds(250))) {
+            write_chunk_preview(output / "progress.tmp", job, macros, &view, score_nets ? &*score_nets : nullptr);
+            fs::rename(output / "progress.tmp", output / "progress.json");
+            last = now;
+          }
+          return dp::InteractUpdate{};
+        };
+      }
+      std::vector<double> gp_x, gp_y;
+      if (live_frames || trial_steps >= 0) {
+        auto apply_holds  = o.before_legalize;
+        o.before_legalize = [&, apply_holds](dp::Design& physical) {
+          gp_x.assign(physical.node_x.begin(), physical.node_x.begin() + owned);
+          gp_y.assign(physical.node_y.begin(), physical.node_y.begin() + owned);
+          dp::InteractView gp{};
+          gp.x = physical.node_x.data();
+          gp.y = physical.node_y.data();
+          write_chunk_preview(output / "gp.json", job, macros, &gp);
+          if (apply_holds) {
+            apply_holds(physical);
+          }
+        };
+      }
       o.target_density = job.density;
       o.legalize       = true;
       o.detailed_place = stage != "macro" && job.detailed;
@@ -451,9 +884,61 @@ int place_chunk_worker(const fs::path& input, const fs::path& output, const std:
       if (!dp::is_legal(d, &reason) || !result.legal) {
         throw std::runtime_error(reason.empty() ? "local legalization failed" : reason);
       }
+      if (!gp_x.empty()) {
+        double   maximum = 0, sum = 0;
+        unsigned moved = 0;
+        for (int i = 0; i < owned; ++i) {
+          double delta  = std::abs(gp_x[i] - d.node_x[i]) + std::abs(gp_y[i] - d.node_y[i]);
+          sum          += delta;
+          maximum       = std::max(maximum, delta);
+          moved        += delta > .01;
+        }
+        report.AddMember("gp_moved", moved, a)
+            .AddMember("gp_max_displacement_dbu", maximum, a)
+            .AddMember("gp_mean_displacement_dbu", sum / owned, a);
+      }
+      if (!holds.empty()) {
+        for (const auto& [i, axes] : holds) {
+          need((!axes[0] || std::abs(d.node_x[i] - *axes[0]) < .01) && (!axes[1] || std::abs(d.node_y[i] - *axes[1]) < .01),
+               "legalization could not retain fixed coordinate");
+        }
+      }
+      // On the common edge, any coordinate inside the local pins' bounding interval
+      // minimizes this net's local HPWL. Move the contact only as far as necessary.
+      unsigned moved = 0;
+      for (size_t k = 0; k < job.original_nets.size(); ++k) {
+        auto it = slides.find(job.original_nets[k]);
+        if (it == slides.end()) {
+          continue;
+        }
+        auto [axis, lo, hi] = it->second;
+        auto&       coord   = axis ? d.node_y : d.node_x;
+        const auto& offset  = axis ? d.pin_offset_y : d.pin_offset_x;
+        auto        net     = job.boundary_nets[k];
+        int         first = d.flat_net2pin_start[net], last = d.flat_net2pin_start[net + 1] - 1;
+        if (first >= last) {
+          continue;
+        }
+        double low = hi, high = lo;
+        for (int j = first; j < last; ++j) {
+          auto   pin = d.flat_net2pin[j];
+          double x   = std::clamp(coord[d.pin2node[pin]] + offset[pin], lo, hi);
+          low        = std::min(low, x);
+          high       = std::max(high, x);
+        }
+        auto& xy    = coord[d.pin2node[d.flat_net2pin[last]]];
+        auto  next  = std::clamp(xy, low, high);
+        moved      += next != xy;
+        xy          = next;
+      }
+      report.AddMember("adjusted_contacts", moved, a);
       report.AddMember("hpwl_dbu", dp::hpwl(d), a);
     }
+    report_timing(report, job, d.node_x.data(), d.node_y.data());
     d.num_movable = owned;
+    if (score_nets) {
+      report.AddMember("score", chunk_score(job, *score_nets, report), a);
+    }
     if (owned) {
       boundary_feedback(report, job);
       put_positions(output / "positions.json", job);
@@ -462,7 +947,7 @@ int place_chunk_worker(const fs::path& input, const fs::path& output, const std:
     if (!stage.empty()) {
       write_chunk_preview(output / "preview.json", job, macros);
     }
-    if (stage == "macro") {
+    if (!stage.empty()) {
       report.AddMember("handoff_checksum", str(write_chunk_job(output / "handoff.bin", job), report), a);
     }
   } catch (const std::exception& e) {
@@ -551,7 +1036,7 @@ int place_chunk_batch(const std::string& exe, const fs::path& manifest, const fs
     }
     auto folder = output / std::to_string(index);
     fs::create_directory(folder);
-    auto        src = (base / string_field(j, "input")).string(), dst = folder.string();
+    auto src = (base / string_field(j, "input")).string(), dst = folder.string();
     if (j.HasMember("request")) {
       metadata::Bundle request;
       request.replace(j["request"]);
@@ -653,6 +1138,7 @@ int place_chunk_batch(const std::string& exe, const fs::path& manifest, const fs
     }
     single.write((folder / "feedback.json").string());
     r.RemoveMember("boundary");
+    r.RemoveMember("score");
     r.AddMember("report", str(std::to_string(index) + "/feedback.json", r), a);
     if (outcome == "placed" && r.HasMember("start_bytes") && r["start_bytes"].IsUint64() && rss >= r["start_bytes"].GetUint64()) {
       Chunk_predictor evidence;

@@ -98,7 +98,18 @@ def check_chunk_stages():
     rows = cmd('list')
     ids = [r['id'] for r in rows]
     assert len(ids) >= 3, rows
-    assert 'requires current macro' in cmd('final', ids[0], ok=False)
+    plan = next(r for r in json.loads((directory/'chunks.json').read_text()) if r['class'].endswith('.chunk_plan'))
+    jobs = next(r for r in json.loads((directory/'chunks.json').read_text()) if r['class'].endswith('.chunk_jobs'))
+    initial_score = cmd('score')
+    assert initial_score['stages']['seed'] == len(ids)
+    assert abs(initial_score['hpwl_um']*jobs['dbu_per_um'] - jobs['assembly']['seed_hpwl_dbu']) < .01
+    assert initial_score['estimated_wns_ps'] is None
+    ram_home = next(c['id'] for c in plan['chunks'] if any(m['macro'] for m in c['members']))
+    direct, = cmd('final', ram_home)
+    direct_report = json.loads(Path(direct['final']['report']).read_text())[0]
+    assert direct['macro']['status'] == 'pending' and direct['final']['status'] == 'done'
+    assert direct_report['movable_macros'] > 0
+    assert direct_report['solver_movable_nodes'] == direct_report['movable_nodes']
     assert 'unknown chunk' in cmd('macro', ids[0], 'absent', ok=False)
     assert len(cmd('list', '--status', 'pending')) == len(ids)
     info = {i: cmd('show', i) for i in ids}
@@ -140,12 +151,65 @@ def check_chunk_stages():
                                          headers={'Authorization': 'Bearer '+token, 'Content-Type':'application/json'})
             with urllib.request.urlopen(req, timeout=15) as reply:
                 return json.load(reply)
+        initial_scene = action(cmd='scene', home=ram_home)
+        memory = next(n for n, b in initial_scene['nodes'].items() if b[4])
+        assert action(cmd='select', home=ram_home, names=[memory])['count'] == 1
+        ref = action(cmd='scene', home=ram_home)
+        candidates = dict(held={'fix':'xy'}, free={})
+        before = {row['id']:row['final']['positions'] for row in cmd('list')}
+        assert len(action(cmd='assemble')['chunks'])==len(ids)
+        candidates['sparse']={'density':.42}
+        trial = action(cmd='trial', candidates=candidates, hypothesis='Open space around a selected RAM', iterations=100, wait=True)
+        assert all(r['status']=='done' and r['iterations']==100 for r in trial['candidates'].values()), trial
+        assert trial['candidates']['free']['delta_control_dbu'] == 0
+        assert trial['score_scope']=='assembled'
+        assert trial['candidates']['free']['delta_assembled']['hpwl_um']==0
+        assert trial['candidates']['sparse']['target_density']==.42
+        assert trial['candidates']['sparse']['overflow_fraction']>=0
+        assert action(cmd='overview')['accepted']['hpwl_um']==cmd('score')['hpwl_um']
+        action(cmd='finding',trial=trial['id'],text='Compare RAM displacement')
+        assert action(cmd='history',query='RAM displacement')['experiments'][0]['id']==trial['id']
+        choice = dict(trial=trial['id'], branch='held')
+        action(cmd='view', **choice)
+        branch = action(cmd='scene')
+        assert branch['nodes'][memory] == ref['nodes'][memory] and branch['view'][1]=='held'
+        action(cmd='keep', **choice)
+        assert cmd('score')['hpwl_um']==trial['candidates']['held']['assembled']['hpwl_um']
+        assert all(row['final']['positions']==before[row['id']] for row in cmd('list') if row['id']!=ram_home)
+        accepted = action(cmd='scene',overlay=True)
+        assert accepted['gp_nodes'] and len(accepted['cell_density'])==accepted['bins']**2
+        assert accepted['view'] is None and accepted['nodes']==branch['nodes'] and accepted['ports']==branch['ports']
+        action(cmd='undo')
+        restored = action(cmd='scene')
+        assert restored['revision']==ref['revision'] and restored['nodes']==ref['nodes'] and restored['ports']==ref['ports']
+        try:
+            action(cmd='keep', **choice)
+            raise AssertionError('accepted obsolete trial')
+        except urllib.error.HTTPError as e:
+            assert 'since the fork' in json.load(e)['error']
+        action(cmd='discard',trial=trial['id'])
+        action(cmd='replay',**choice)
+        assert action(cmd='scene')['nodes']==branch['nodes']
+        action(cmd='view',branch='main')
         preview = action(cmd='preview', id=src, stage='final')
         assert 0 < len(preview['boxes_dbu']) <= preview['owned']
+        coordinated=action(cmd='trial',home=src,names=[],stage='macro',iterations=100,
+                           hypothesis='Shift a shared terminal',candidates={'shift':{'io':{'net':net,'xy':xy}}},wait=True)
+        assert set(coordinated['affected_homes'])==set(homes)
+        for variant in coordinated['candidates'].values():
+            assert set(variant['per_home_iterations'])==set(homes)
+            assert variant['assembled']['hpwl_um'] is not None
+        action(cmd='keep',trial=coordinated['id'],branch='shift')
+        assert cmd('score')['hpwl_um']==coordinated['candidates']['shift']['assembled']['hpwl_um']
+        assert next(p for p in cmd('show',src)['ports'] if p['net_index']==net)['xy_dbu']==xy
+        assert all(row['final']['positions']==before[row['id']] for row in cmd('list') if row['id'] not in homes)
+        action(cmd='undo')
         assert set(action(cmd='move-io', id=src, net=net, xy=xy)['changed']) == set(homes)
         assert {r['id'] for r in cmd('list','--stage','final','--status','stale')} == set(homes)
+        suggested=action(cmd='next',objective='wns')['chunks'][0]
+        assert suggested['home'] in homes and str(net) in suggested['reason']
         assert set(ids) - set(homes) == {r['id'] for r in cmd('list','--status','done')}
-        assert 'requires current macro' in cmd('final', src, ok=False)
+        assert cmd('final', src)[0]['final']['status'] == 'done'
         action(cmd='macro', ids=homes)
         for row in action(cmd='final', ids=homes):
             report = json.loads(Path(row['final']['report']).read_text())[0]
@@ -154,6 +218,34 @@ def check_chunk_stages():
             assert measured['contact_dbu'] == port['xy_dbu']
         assert cmd('move-io', src, str(net), '--xy', *map(str, xy)) == {'changed': []}
         assert len(cmd('list','--stage','final','--status','done')) == len(ids)
+    finally:
+        proc.terminate()
+        proc.wait(timeout=5)
+
+    # Reopen the saved experiment and compare two final-stage forks with a single worker.
+    proc = subprocess.Popen([exe,'synth','chunk','gui','--no-open','--workers','1'],cwd=directory,
+                            stdout=subprocess.PIPE,text=True)
+    try:
+        url,token=proc.stdout.readline().strip().split('#')
+        action(cmd='replay',**choice)
+        assert action(cmd='scene')['nodes']==branch['nodes']
+        assert action(cmd='history',query='RAM displacement')['experiments'][0]['decisions']
+        action(cmd='view',branch='main')
+        current=cmd('list')
+        home=next(r['id'] for r in current if r['final']['solver_movable_nodes']>0)
+        trial_final=action(cmd='trial',home=home,stage='final',names=[],iterations=100,
+                           candidates={'density':{'density':.45}},wait=True)
+        assert trial_final['stage']=='final' and trial_final['score_scope']=='assembled'
+        measured=trial_final['candidates']['density']['assembled']
+        assert measured['stages']['final']==len(ids)
+        action(cmd='discard',trial=trial_final['id'])
+        action(cmd='replay',trial=trial_final['id'],branch='density')
+        assert action(cmd='watch')['can_keep']
+        action(cmd='keep',trial=trial_final['id'],branch='density')
+        assembly=action(cmd='place-design')
+        assert assembly['metrics']['hpwl_um']==measured['hpwl_um']
+        assert all(r['owned']>=0 for r in assembly['chunks'])
+        assert action(cmd='undo')['revision']==trial_final['checkpoint']
     finally:
         proc.terminate()
         proc.wait(timeout=5)
@@ -200,8 +292,9 @@ def check_chunk_stages():
     import socket
     import time
     place = work / 'synth/place'
+    window_log = (root/'window.log').open('w')
     proc = subprocess.Popen([exe, 'synth', 'chunk', 'update', '--workdir', str(work), '--gui', '--gui-no-open'],
-                            stdout=subprocess.PIPE, text=True)
+                            stdout=subprocess.PIPE, stderr=window_log, text=True)
     try:
         def wait_for(fn):
             end = time.monotonic() + 15
@@ -256,6 +349,13 @@ def check_chunk_stages():
                 return agent(cmd='export', what='chunks', view='live' if apply else 'preview')['chunks']
 
         wait_for(lambda: request('/state')['state'] == 'gate')
+        window = re.search(r'Live floorplan: (http://[^ ]+?)\n',(root/'window.log').read_text()).group(1)
+        address, key = window.split('#')
+        def window_target():
+            req = urllib.request.Request(address+'target',headers={'Authorization':'Bearer '+key})
+            with urllib.request.urlopen(req,timeout=3) as response:
+                return response.read().decode()
+        wait_for(lambda: '/?t=' in window_target())
         session = json.loads(pointer.read_text())
         home, = agent(cmd='export', what='chunks')['chunks']
         a, b = home['id'], 'second-home'
@@ -263,7 +363,11 @@ def check_chunk_stages():
         assert contents['total'] == home['members'] and len(contents['members']) == 4
         selected = [dict(id=m['id'], macro=m['macro']) for m in contents['members'] if m['macro']][:3]
         assert len(selected) >= 2
-        split = dict(split=a, new_id=b, members=selected)
+        agent(cmd='select', names=['macro:'+m['id'] for m in selected])
+        assert len(agent(cmd='selection')['names'])==len(selected)
+        connected = agent(cmd='export', what='connected', kind='color', limit=3)
+        assert all(r['name'].startswith('color:') and r['shared_nets']>0 for r in connected['nodes'])
+        split = dict(split=a, new_id=b, members='selected')
         assert len(edit('topology', split, False)) == 2
         assert len(agent(cmd='export', what='chunks')['chunks']) == 1
         edit('topology', split)
@@ -286,12 +390,19 @@ def check_chunk_stages():
         assert changed == preview and all(x['box_dbu'] != y['box_dbu'] for x,y in zip(changed,two))
         box = changed[0]['box_dbu']
         assert abs((box[2]-box[0])/(box[3]-box[1])-desired) < abs(w/h-desired)
+        agent(cmd='select',names=['macro:'+selected[0]['id']])
         request('/cmd', {'cmd':'finish'})
         wait_for(lambda: json.loads((place/'chunk-project.json').read_text()).get('guidance'))
+        wait_for(lambda: '/#' in window_target())
+        sock = json.loads((place/'chunk_agent.json').read_text())['socket']
+        carried = agent(cmd='selection')
+        member, = carried['floorplan_members']
+        assert member['name'] == selected[0]['id'] and carried['names'] == [member['physical_name']]
     finally:
         proc.terminate()
         proc.wait(timeout=5)
 
+    window_log.close()
     manifest = json.loads((place/'chunk-project.json').read_text())['manifest']
     plan = next(r for r in json.loads((place/manifest).read_text()) if r['class'].endswith('chunk_plan'))
     assert [(r['id'],r['box_dbu']) for r in plan['chunks']] == [(r['id'],r['box_dbu']) for r in changed]
