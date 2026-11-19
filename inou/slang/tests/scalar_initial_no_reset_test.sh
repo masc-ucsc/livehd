@@ -106,6 +106,11 @@ SV
   || { sed -n '1,40p' "$W/agree.log" >&2; fail "a declaration initializer equal to the reset value was refused"; }
 grep -q 'reset-init-mismatch' "$W/agree.log" \
   && fail "matching power-on and reset values were reported as a contradiction"
+# ... but an initializer next to a reset still says two things about power-on: warn once per register.
+grep -q '"severity":"warning".*"code":"reg-init-and-reset".*register .r.' "$W/agree.log" \
+  || { sed -n '1,40p' "$W/agree.log" >&2; fail "an initializer together with a reset did not warn (reg-init-and-reset)"; }
+[ "$(grep -c '"code":"reg-init-and-reset"' "$W/agree.log")" = 1 ] \
+  || fail "reg-init-and-reset was not reported exactly once for the register"
 
 # ── synchronous reset recognition ────────────────────────────────────────────
 # `always_ff @(posedge clk) if (rst) q <= C; else q <= d;` is a RESET, not

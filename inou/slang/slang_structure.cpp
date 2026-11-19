@@ -7455,6 +7455,17 @@ void Slang_context::emit_reg_reset_attrs(const slang::ast::ValueSymbol& sym, std
       reset_attr_syms_.insert(&sym);
       return;
     }
+    // Both an initializer and a reset, with the same value: representable (one `initial` pin), but the
+    // design says two things about power-on -- a value that holds before any reset and a reset that sets it.
+    // Hardware only honors the reset, so flag it once per register.
+    if (init_reset_warned_.insert(&sym).second) {
+      emit_warning(slang::SourceRange(sym.location, sym.location),
+                   "reg-init-and-reset",
+                   "unsupported",
+                   std::string("register '") + std::string(sym.name) + "' has both a declaration initializer ("
+                       + it->second + ") and a reset to the same value; LiveHD keeps one power-on value (the reset value)",
+                   "drop the declaration initializer and rely on the reset");
+    }
   }
   auto name = reg_net_of(sym);
   struct Reset_target {

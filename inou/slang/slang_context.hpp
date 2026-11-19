@@ -323,6 +323,8 @@ struct Slang_module_state {
   absl::flat_hash_map<const slang::ast::ValueSymbol*, std::string>         undriven_init_;
   absl::flat_hash_set<const slang::ast::ValueSymbol*>                      reg_init_applied_;
   absl::flat_hash_set<const slang::ast::ValueSymbol*>                      reset_attr_syms_;
+  // Registers already warned for carrying both a declaration initializer and a reset (reg-init-and-reset).
+  absl::flat_hash_set<const slang::ast::ValueSymbol*>                      init_reset_warned_;
   // Unpacked-array PORTS are not memories: an `output T arr[N-1:0]` port lowers
   // to a FLAT packed [N*elem_bits-1:0] IO bus (Verilator/yosys flatten unpacked
   // ports the same way, so LEC lines up), and element access `arr[i]` becomes a
