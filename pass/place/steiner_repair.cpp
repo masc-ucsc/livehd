@@ -159,6 +159,14 @@ Buffer_tree plan_buffers(Point root, const std::vector<Point>& loads, const std:
   return result;
 }
 
+void partition_spatial_loads(const std::vector<Point>& loads, bool x_axis, std::vector<unsigned>& group) {
+  const auto middle = group.begin() + group.size() / 2;
+      std::nth_element(group.begin(), middle, group.end(), [&](unsigned a, unsigned b) {
+        const double lhs = x_axis ? loads[a].first : loads[a].second;
+        const double rhs = x_axis ? loads[b].first : loads[b].second;
+        return lhs != rhs ? lhs < rhs : a < b;
+      });
+}
 namespace {
 // Partition the sinks before building the distribution backbone. Cutting only
 // a sink-level Steiner tree can leave overlapping, long leaf nets at forks.
@@ -205,11 +213,7 @@ Buffer_tree clustered_buffers(Point root, const std::vector<Point>& loads, const
       }
       const bool x_axis = high.first - low.first >= high.second - low.second;
       const auto middle = group.begin() + group.size() / 2;
-      std::nth_element(group.begin(), middle, group.end(), [&](unsigned a, unsigned b) {
-        const double lhs = x_axis ? loads[a].first : loads[a].second;
-        const double rhs = x_axis ? loads[b].first : loads[b].second;
-        return lhs != rhs ? lhs < rhs : a < b;
-      });
+      partition_spatial_loads(loads, x_axis, group);
       groups.emplace_back(group.begin(), middle);
       groups.emplace_back(middle, group.end());
       continue;

@@ -47,6 +47,7 @@
 #include "node_util.hpp"
 #include "observe.hpp"
 #include "occurrence_materialize.hpp"
+#include "register_replica.hpp"
 #include "split_selfref.hpp"
 #include "state_match.hpp"
 #include "str_tools.hpp"
@@ -12721,6 +12722,85 @@ std::vector<std::string> summarize_loop_pairs(hhds::Graph* ref, hhds::Graph* imp
 
 static Query_result prove_equal_unchecked(hhds::Graph* ref, hhds::Graph* impl, const Lec_options& opts,
                                           const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib) {
+  if (ref && impl && opts.phase == "after_reset" && opts.reset.empty() && opts.reset_cycles > 0) {
+    // Normalize only verified physical flop replicas on private graph copies.
+    // With a free initial state, or a caller-selected reset, the normal
+    // engines must check the original pair under that contract.
+    // A reset with mixed polarities across the two designs cannot establish
+    // equality of all replicas. Restrict this shortcut to flat designs and
+    // an unambiguous primary reset present on both sides.
+    const auto reset_ports = [&](hhds::Graph* side, std::map<std::string, std::set<bool>>& polarities) {
+      for (auto n : side->body().nodes()) {
+        if (n.get_subnode_graph()) {
+          return false;
+        }
+        if (gu::type_op_of(n) != Ntype_op::Flop) {
+          continue;
+        }
+        auto rst = gu::get_driver_of_sink_name(n, "reset_pin");
+        if (rst.is_invalid() || rst.is_const() || !gu::is_graph_input_pin(rst)) {
+          continue;
+        }
+        auto polarity = gu::get_driver_of_sink_name(n, "negreset");
+        if (!polarity.is_invalid() && !polarity.is_const()) {
+          return false;
+        }
+        const auto name = std::string(gu::pin_name_of(rst));
+        if (name.empty()) {
+          return false;
+        }
+        polarities[name].insert(polarity.is_const() && !gu::const_of(polarity).is_known_false());
+      }
+      return true;
+    };
+    std::map<std::string, std::set<bool>> polarities;
+    const auto                            fold = [&](hhds::Graph*                               side,
+                          hhds::GraphLibrary&                        library,
+                          std::shared_ptr<hhds::Graph>&              top,
+                          std::vector<std::shared_ptr<hhds::Graph>>& definitions) {
+      const auto candidates = gu::reset_replica_sources(*side);
+      if (candidates.empty()) {
+        return false;
+      }
+      if (!reset_ports(ref, polarities) || !reset_ports(impl, polarities)) {
+        return false;
+      }
+      for (const auto& [copy, source] : candidates) {
+        const auto rst  = gu::get_driver_of_sink_name(source, "reset_pin");
+        const auto name = std::string(gu::pin_name_of(rst));
+        if (polarities[name].size() != 1 || ref->get_input_pin(name).is_invalid() || impl->get_input_pin(name).is_invalid()) {
+          return false;
+        }
+      }
+      if (!copy_loop_scratch(side, sub_lib, library, top, definitions)) {
+        return false;
+      }
+      const auto                    aliases = gu::reset_replica_sources(*top);
+      std::vector<hhds::Node_class> copies;
+      for (auto n : top->body().nodes()) {
+        if (aliases.contains(n.get_debug_nid())) {
+          copies.push_back(n);
+        }
+      }
+      for (auto n : copies) {
+        auto out = n.get_driver_pin(0), same = aliases.at(n.get_debug_nid()).get_driver_pin(0);
+        auto edges = gu::Edge_vec(out.out_edges().begin(), out.out_edges().end());
+        for (auto e : edges) {
+          e.sink.del_sink(out);
+          e.sink.connect_driver(same);
+        }
+        n.del_node();
+      }
+      return !copies.empty();
+    };
+    hhds::GraphLibrary                        left, right;
+    std::shared_ptr<hhds::Graph>              a, b;
+    std::vector<std::shared_ptr<hhds::Graph>> left_defs, right_defs;
+    const bool                                folded_a = fold(ref, left, a, left_defs), folded_b = fold(impl, right, b, right_defs);
+    if (folded_a || folded_b) {
+      return prove_equal_unchecked(folded_a ? a.get() : ref, folded_b ? b.get() : impl, opts, sub_lib);
+    }
+  }
   const auto& selected_profile = solver_profile(opts.profile);
   if (selected_profile.needs_models_off && opts.witness) {
     auto nonmodel    = opts;

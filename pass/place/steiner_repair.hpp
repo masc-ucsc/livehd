@@ -4,6 +4,7 @@
 
 #include "place.hpp"
 namespace livehd::placement {
+void partition_spatial_loads(const std::vector<Point>& loads, bool x_axis, std::vector<unsigned>& group);
 struct Buffer_tree {
   struct Load {
     bool     buffer = false;

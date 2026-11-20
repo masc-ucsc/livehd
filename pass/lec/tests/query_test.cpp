@@ -559,6 +559,58 @@ TEST(LecState, PartialUnknownInitialPreservesKnownBits) {
   EXPECT_TRUE(concrete->x_mask.isNull());
 }
 
+TEST(LecState, ResettablePlacedReplicaIsInductiveAndIncorrectReplicaIsRefuted) {
+  hhds::GraphLibrary lib;
+  const auto         build = [&](const std::string& name, bool duplicate, bool wrong) {
+    auto     io = lib.create_io(name);
+    unsigned id = 0;
+    for (auto port : {"clock", "reset", "enable", "data", "other"}) {
+      io->add_input(port, id++);
+      io->set_bits(port, 1);
+      io->set_unsign(port, true);
+    }
+    for (auto port : {"a", "b"}) {
+      io->add_output(port, id++);
+      io->set_bits(port, 1);
+      io->set_unsign(port, true);
+    }
+    auto       g     = io->create_graph();
+    const auto state = [&](const std::string& label, bool mismatch) {
+      auto f = graph_util::create_typed_node(*g, Ntype_op::Flop);
+      f.set_name(label);
+      auto q = f.create_driver_pin(0);
+      graph_util::set_ubits(q, 1);
+      graph_util::set_pin_name(q, label);
+      for (const auto& [pin, port] : std::map<std::string, std::string>{
+               {"clock_pin",                     "clock"},
+               {"reset_pin",                     "reset"},
+               {   "enable",                    "enable"},
+               {      "din", mismatch ? "other" : "data"}
+      }) {
+        g->get_input_pin(port).connect_sink(graph_util::setup_sink_by_name(f, pin));
+      }
+      graph_util::create_const(*g, *Dlop::from_binary("0", true)).connect_sink(graph_util::setup_sink_by_name(f, "initial"));
+      return q;
+    };
+    auto q = state("original", false);
+    q.connect_sink(g->get_output_pin("a"));
+    (duplicate ? state("__wl_copy_original", wrong) : q).connect_sink(g->get_output_pin("b"));
+    return g;
+  };
+  auto             gold = build("gold", false, false), same = build("same", true, false), bad = build("wrong", true, true);
+  lec::Lec_options options;
+  options.phase  = "after_reset";
+  options.engine = "ind";
+  auto good      = lec::prove_equal(gold.get(), same.get(), options);
+  EXPECT_EQ(good.verdict, Verdict::Proven) << good.detail;
+  EXPECT_FALSE(good.bounded) << good.detail;
+  // An incorrect copy has no inductive correspondence. Check a reachable
+  // counterexample from reset with the bounded engine.
+  options.engine = "bmc";
+  auto different = lec::prove_equal(gold.get(), bad.get(), options);
+  EXPECT_EQ(different.verdict, Verdict::Refuted) << different.detail;
+}
+
 TEST(LecState, UnknownWriteEnableMergesWriteAndHoldKnowledge) {
   hhds::GraphLibrary lib;
   auto               io = lib.create_io("enabled");

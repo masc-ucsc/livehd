@@ -689,6 +689,11 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
   if (o.timing_max_weight != 2 || o.timing_min_weight != .5 || o.timing_smoothing != .5) {
     h = hash_text(std::format("timing-rank-weights:{}:{}:{}", o.timing_min_weight, o.timing_max_weight, o.timing_smoothing), h);
   }
+  // Always part of the identity: the slack-relative weights replaced the rank weights as the default.
+  if (o.wl_resynth) {
+    h = hash_text("wl-resynth-v1", h);
+  }
+  h = hash_text(std::format("timing-slack-weights:{}:{}", o.timing_margin, o.timing_exponent), h);
   if (o.satlegalize_options.route_grid) {
     h = hash_text(std::format("sat-route-grid-v1:{}", o.satlegalize_options.route_guidance), h);
   }
@@ -7725,7 +7730,9 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
   if (!std::isfinite(options.timing_max_weight) || options.timing_max_weight < 1 || options.timing_max_weight > max_net_weight
       || !std::isfinite(options.timing_smoothing) || options.timing_smoothing < 0 || options.timing_smoothing > 1
       || options.fp_timing_max_updates < 2 || !std::isfinite(options.timing_min_weight) || options.timing_min_weight <= 0
-      || options.timing_min_weight > 1
+      || options.timing_min_weight > 1 || !std::isfinite(options.timing_margin) || options.timing_margin < 0
+      || options.timing_margin > 1 || !std::isfinite(options.timing_exponent) || options.timing_exponent <= 0
+      || options.timing_exponent > 8
       || !std::isfinite(options.timing_spread_weight) || options.timing_spread_weight < 0 || options.timing_spread_weight > 1
       || options.macro_timing_interval < 0) {
     throw std::invalid_argument("invalid timing weight/smoothing/update budget");
@@ -10686,7 +10693,8 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
           }
           const auto target = timing_weights(*checkpoint.parasitics,
                                              after,
-                                             options.timing_min_weight, options.timing_max_weight);
+                                             options.timing_min_weight, options.timing_max_weight,
+                                             options.timing_margin, options.timing_exponent);
           if (target.empty()) {
             throw std::runtime_error("FP timing has no constrained data nets for weighting");
           }
@@ -10991,7 +10999,8 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         }
         const auto membership = timing_weights(*checkpoint.parasitics,
                                                timing,
-                                               options.timing_min_weight, options.timing_max_weight);
+                                               options.timing_min_weight, options.timing_max_weight,
+                                               options.timing_margin, options.timing_exponent);
         if (save_macro_gp_timing) {
           result.macro_gp_timing = Macro_gp_timing{timing, std::move(checkpoint.parasitics), std::move(checkpoint.pin_locations)};
         }
@@ -14311,6 +14320,10 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     json.Double(options.timing_spread_weight);
     json.Key("timing_max_weight");
     json.Double(options.timing_max_weight);
+    json.Key("timing_margin");
+    json.Double(options.timing_margin);
+    json.Key("timing_exponent");
+    json.Double(options.timing_exponent);
     json.Key("timing_smoothing");
     json.Double(options.timing_smoothing);
     json.Key("timing_max_updates");

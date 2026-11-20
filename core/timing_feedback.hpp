@@ -27,6 +27,9 @@ struct Feedback {
     struct Pin {
       double slack = std::numeric_limits<double>::infinity();
       bool   clock = false;
+      // The clock period the slack is measured against, in the slack's unit (the period of the launch group the
+      // worst arrival belongs to); 0: unknown, use Feedback::clock_period.
+      float  period = 0;
     };
     struct Layout {
       std::vector<std::string> labels;  // sorted, unique physical pin identities
@@ -64,6 +67,7 @@ struct Feedback {
     double                electrical_excess = 0;
     bool                  clock             = false;
     std::optional<double> hold_slack{};  // MIN-corner slack, in time_unit_ps units
+    float                 period = 0;    // the clock period `slack` is measured against (slack units); 0: unknown
   };
   struct Pin_index {
     std::vector<std::string> labels;  // sorted, unique physical identities
@@ -97,6 +101,8 @@ struct Feedback {
     }
   };
   double                     time_unit_ps = 1000;
+  // The smallest clock period of the design in the slack's unit; 0: unknown. A pin's own `period` wins.
+  double                     clock_period = 0;
   // Sparse inputs remain useful for external reports and small what-if views.
   // Production detailed evaluations share one immutable label index and own
   // only dense values, avoiding per-evaluation map nodes and label copies.

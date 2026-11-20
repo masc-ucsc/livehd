@@ -47,6 +47,7 @@ cc_library(
         "loop_split.hpp",
         "width_validation.hpp",
         "node_util.hpp",
+        "register_replica.hpp",
         "port_reach.hpp",
         "reduce_lower.hpp",
         "predict_abc_size.hpp",

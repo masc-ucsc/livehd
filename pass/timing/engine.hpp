@@ -246,6 +246,8 @@ public:
   }
   // Setup slack over the setup corners and both transitions; +inf when no path passes the pin.
   [[nodiscard]] float         slack(uint32_t pin) const;
+  // The same slack, and the launch group whose arrival gives it (0 when no path passes the pin).
+  [[nodiscard]] float         slack(uint32_t pin, uint32_t& group) const;
   [[nodiscard]] float         criticality(uint32_t pin) const { return criticality_[pin]; }
   // True for a pin of the ideal clock network (clock source to flip-flop clock pins).
   [[nodiscard]] bool          clock_network(uint32_t pin) const { return clock_pin_[pin] != 0; }

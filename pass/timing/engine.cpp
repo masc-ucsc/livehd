@@ -1404,6 +1404,24 @@ float Engine::slack(uint32_t pin) const {
   return worst;
 }
 
+float Engine::slack(uint32_t pin, uint32_t& group) const {
+  float worst = inf;
+  group       = 0;
+  for (size_t s = 0; s < slots_; ++s) {
+    if (!(options_.setup_corners >> (s % corners_) & 1u)) {
+      continue;
+    }
+    for (unsigned t = 0; t < 2; ++t) {
+      const auto at = index(pin, s, t);
+      if (arrival_[at] != -inf && required_[at] != inf && required_[at] - arrival_[at] < worst) {
+        worst = required_[at] - arrival_[at];
+        group = static_cast<uint32_t>(s / corners_);
+      }
+    }
+  }
+  return worst;
+}
+
 std::vector<uint32_t> Engine::endpoint_pins() const {
   std::vector<uint32_t> pins;
   pins.reserve(endpoints_.size());

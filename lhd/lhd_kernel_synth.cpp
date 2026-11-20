@@ -712,6 +712,8 @@ livehd::placement::Options placement_options(const Options& opts) {
   }
   out.timing_max_weight      = number("place.timing_max_weight", "2");
   out.timing_min_weight      = number("place.timing_min_weight", "0.5");
+  out.timing_margin          = number("place.timing_margin", "0.2");
+  out.timing_exponent        = number("place.timing_exponent", "1");
   out.timing_spread_weight   = number("place.timing_spread_weight", "0");
   out.macro_timing_interval  = static_cast<int>(integer("place.macro.timing_interval", "50"));
   out.timing_smoothing       = number("place.timing_smoothing", "0.5");
@@ -720,8 +722,9 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.initial_density_weight = number("place.initial_density_weight", "0.01");
   if (out.timing_max_weight < 1 || out.timing_max_weight > livehd::placement::max_net_weight || out.timing_smoothing < 0
       || out.timing_smoothing > 1 || out.fp_timing_max_updates < 2 || out.stop_overflow < 0 || out.stop_overflow > 1
-      || out.initial_density_weight <= 0 || out.timing_min_weight <= 0 || out.timing_min_weight > 1 || out.macro_timing_interval < 0 || out.timing_spread_weight < 0
-      || out.timing_spread_weight > 1) {
+      || out.initial_density_weight <= 0 || out.timing_min_weight <= 0 || out.timing_min_weight > 1 || out.macro_timing_interval < 0
+      || out.timing_spread_weight < 0 || out.timing_spread_weight > 1 || out.timing_margin < 0 || out.timing_margin > 1
+      || out.timing_exponent <= 0 || out.timing_exponent > 8) {
     throw Lhd_error{"usage", "invalid synth.place timing/density tuning controls", "check lhd describe synth for allowed values"};
   }
   out.snapshots = truthy(synth_set(opts, "place.snapshots", "false"));
@@ -1301,6 +1304,7 @@ livehd::placement::Options placement_options(const Options& opts) {
     out.reset_fanout  = fanout >= 2 ? static_cast<unsigned>(fanout) : 16U;
     // The virtual buffer trees keep the mapper's fanout cap as their requirement.
     out.virtual_buffer_fanout = out.reset_fanout;
+    out.wl_resynth            = truthy(synth_set(opts, "place.wl_resynth", "false"));
     out.virtual_buffers       = truthy(synth_set(opts, "place.virtual_buffers", "true"));
     out.pcrs          = truthy(synth_set(opts, "place.pcrs", "true"));
     out.pcrs_depth    = std::make_shared<livehd::pcrs::Depth_state>();
@@ -4323,7 +4327,10 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
         const auto data_timing    = livehd::placement::prects_data_timing(std::move(timing), controls);
         place_options.net_weights = livehd::placement::timing_weights(*seed.parasitics,
                                                                       data_timing,
-                                                                      place_options.timing_min_weight, place_options.timing_max_weight);
+                                                                      place_options.timing_min_weight,
+                                                                      place_options.timing_max_weight,
+                                                                      place_options.timing_margin,
+                                                                      place_options.timing_exponent);
         if (place_options.net_weights.empty()) {
           throw Lhd_error{"unsupported",
                           "post-synthesis timing has no constrained data nets for placement weighting",
@@ -4489,14 +4496,46 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
       if (fast_ranker) {
         fast_ranker->set_virtual_roots(nullptr);
       }
-      if (!macro_plan_only && place_options.virtual_buffers && place_options.virtual_buffer_trees
-          && !place_options.virtual_buffer_trees->empty()) {
+      if (!macro_plan_only
+          && (place_options.wl_resynth
+              || (place_options.virtual_buffers && place_options.virtual_buffer_trees
+                  && !place_options.virtual_buffer_trees->empty()))) {
         // Realize the virtual buffer trees now that global placement has converged: each wide net the mapper had
         // buffered gets a position-aware tree, legalized in place, before timing-driven placement and repair.
         Phase_timer                          phase(res, "pass.place.virtual_buffers");
         livehd::placement::Virtual_expansion stats;
         Stdout_to_log                        redirect(next_log_path(opts, "pass.place.virtual_buffers"));
-        virtual_expanded = livehd::placement::expand_virtual_buffers(std::move(placed), place_options, evaluate, &stats);
+        if (place_options.wl_resynth) {
+          // Speculation must not consume later repair's timing budget or
+          // leave its incremental solver bound to a rejected netlist.
+          std::unique_ptr<livehd::timing::fast::Physical_ranker> trial_fast;
+          std::unique_ptr<livehd::opentimer::Physical_session>   trial_timer;
+          const auto                                             trial_evaluate = [&](const livehd::placement::Result& state) {
+            const auto controls = livehd::placement::prects_networks(timing_tech, state.floorplan, state.prects);
+            if (timing_engine == "fast") {
+              if (!trial_fast) {
+                trial_fast = make_fast_ranker();
+              }
+              return livehd::placement::prects_data_timing(
+                  trial_fast->evaluate(state.graph, state.parasitics, controls.timing_cuts),
+                  controls);
+            }
+            if (!trial_timer) {
+              trial_timer = std::make_unique<livehd::opentimer::Physical_session>(timing_options, place_options.threads);
+            }
+            return livehd::placement::prects_data_timing(
+                trial_timer->evaluate(state.graph,
+                                      state.parasitics,
+                                      controls.timing_cuts,
+                                      livehd::opentimer::Physical_session::Purpose::detailed),
+                controls);
+          };
+          virtual_expanded
+              = livehd::placement::wirelength_resynthesize(std::move(placed), place_options, evaluate, trial_evaluate, stats);
+          res.recipe_steps.emplace_back("pass.place.wl_resynth." + virtual_expanded.report);
+        } else {
+          virtual_expanded = livehd::placement::expand_virtual_buffers(std::move(placed), place_options, evaluate, &stats);
+        }
         placed           = std::move(virtual_expanded.placed);
         if (virtual_expanded.timing) {
           timed_placement.timing = std::move(virtual_expanded.timing);

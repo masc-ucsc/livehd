@@ -11,6 +11,27 @@
 
 namespace livehd::timing::fast {
 namespace {
+// The clock period a launch group's slack is measured against: the shortest period of the clocks that launch in
+// the group; a group without a clock (ports with no input delay) takes the shortest period of the design.
+// `.back()` is that design period (0 without clocks).
+std::vector<float> group_periods(const Constraints& constraints, size_t groups) {
+  std::vector<float> out(groups + 1, 0.f);
+  float              shortest = 0;
+  for (const auto& clock : constraints.clocks) {
+    if (!(clock.period_ps > 0) || !std::isfinite(clock.period_ps)) {
+      continue;
+    }
+    shortest = shortest == 0 ? clock.period_ps : std::min(shortest, clock.period_ps);
+    if (clock.group < groups) {
+      auto& slot = out[clock.group];
+      slot       = slot == 0 ? clock.period_ps : std::min(slot, clock.period_ps);
+    }
+  }
+  for (auto& slot : out) {
+    slot = slot == 0 ? shortest : slot;
+  }
+  return out;
+}
 using Steady = std::chrono::steady_clock;
 double since(Steady::time_point start) { return std::chrono::duration<double>(Steady::now() - start).count(); }
 }  // namespace
@@ -629,13 +650,17 @@ livehd::timing::Feedback Physical_ranker::ranking_feedback(const std::shared_ptr
   ranking.parasitics  = rc;
   ranking.pins.resize(mapping_.layout_pin.size());
   const auto& netlist = *bound_->netlist;
+  const auto  periods = group_periods(engine_->constraints(), engine_->groups());
+  result.clock_period = periods.back();
   for (size_t i = 0; i < ranking.pins.size(); ++i) {
     const auto pin = mapping_.layout_pin[i];
     if (pin == no_index) {
       continue;
     }
-    const float slack = engine_->slack(pin);
-    ranking.pins[i].slack = std::isfinite(slack) ? slack : std::numeric_limits<double>::infinity();
+    uint32_t    group = 0;
+    const float slack = engine_->slack(pin, group);
+    ranking.pins[i].slack  = std::isfinite(slack) ? slack : std::numeric_limits<double>::infinity();
+    ranking.pins[i].period = periods[group];
     ranking.pins[i].clock = engine_->clock_network(pin) || netlist.pin_type(pin).clock;
   }
   ++stats_.ranks;
@@ -666,6 +691,8 @@ livehd::timing::Feedback Physical_ranker::detailed_feedback() {
   const auto&  report       = engine_->report();
   livehd::timing::Feedback result;
   result.time_unit_ps = 1;
+  const auto periods  = group_periods(engine_->constraints(), engine_->groups());
+  result.clock_period = periods.back();
   const auto finite = [](float v) { return std::isfinite(v); };
   if (report.endpoints != 0 && finite(report.wns_ps)) {
     result.wns = report.wns_ps;
@@ -735,8 +762,10 @@ livehd::timing::Feedback Physical_ranker::detailed_feedback() {
     if (finite(required)) {
       value.required = required;
     }
-    if (const auto slack = engine_->slack(pin); finite(slack)) {
-      value.slack = slack;
+    uint32_t group = 0;
+    if (const auto slack = engine_->slack(pin, group); finite(slack)) {
+      value.slack  = slack;
+      value.period = periods[group];
     }
     if (const auto hold = engine_->hold_slack(pin); finite(hold)) {
       value.hold_slack = hold;

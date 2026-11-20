@@ -1929,11 +1929,25 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
     {"place.timing_max_weight",
      "2",
      Synth_set_option::Kind::file,
-     "weight of the worst-slack net, finite, 1..100; every timed non-clock net is weighted by its slack rank: worst = this, median = 1, best = place.timing_min_weight (linear in rank, so 2/0.5 is the default progressive criticality and 1/1 turns weighting off)"},
+     "weight of the worst failing net, finite, 1..100. Every timed non-clock net is weighted by its slack relative to the "
+     "clock period of its own domain (x = slack / period): 1 when x >= place.timing_margin, rising to the midpoint "
+     "between 1 and this at zero slack, and failing nets share the other half by how far they are toward the worst one; "
+     "1 turns weighting off"},
     {"place.timing_min_weight",
      "0.5",
      Synth_set_option::Kind::file,
-     "weight of the best-slack net, in (0,1]; see place.timing_max_weight"},
+     "legacy slack-rank weights only (place.timing_margin=0): weight of the best-slack net, in (0,1]"},
+    {"place.timing_margin",
+     "0.2",
+     Synth_set_option::Kind::file,
+     "slack, as a fraction of the clock period (0..1), below which a net's placement weight starts to rise; a net with "
+     "more slack weighs exactly 1. 0: the legacy slack-rank weights (worst = place.timing_max_weight, median = 1, best = "
+     "place.timing_min_weight, linear in rank), also used when the timing source reports no clock period"},
+    {"place.timing_exponent",
+     "1",
+     Synth_set_option::Kind::file,
+     "shape of the rise below place.timing_margin, in (0,8]: the criticality (0 at the margin, 0.5 at zero slack, 1 on "
+     "the worst failing net) is raised to this power; above 1 concentrates the weight on the most critical nets"},
     {"place.timing_spread_weight",
      "0",
      Synth_set_option::Kind::file,
@@ -2058,6 +2072,8 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      "with buffer_cleanup: a clock-gating AND fed by another clock-gating AND takes that gate's inputs "
      "(AND(AND(clk, q0), q1) -> AND3(clk, q0, q1)), so every gated domain sits one gate below its root clock and CTS "
      "balances it against its sibling domains (fewer post-CTS hold fixes); false keeps the cascade"},
+    {"place.wl_resynth", "false", Synth_set_option::Kind::boolean,
+     "try wirelength-driven local logic changes after global placement and keep a legalized timing-safe improvement"},
     {"place.virtual_buffers",
      "true",
      Synth_set_option::Kind::boolean,

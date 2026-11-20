@@ -356,6 +356,16 @@ void Flattener::carry_node_attrs(Ictx* ctx, const hhds::Node_class& orig, const 
     neo.attr(livehd::attrs::pcrs_stage).set(a.get());
   }
   if (physical_names_) {
+    // Keep the physical edit barrier and state correspondence across ECO copies.
+    if (orig.attr(livehd::attrs::user_cell).has()) {
+      neo.attr(livehd::attrs::user_cell).set({});
+    }
+    if (auto origin = orig.attr(livehd::attrs::aggregate_origin); origin.has()) {
+      neo.attr(livehd::attrs::aggregate_origin).set(ctx->prefix + origin.get());
+    }
+    if (auto init = orig.attr(livehd::attrs::simulation_init); init.has()) {
+      neo.attr(livehd::attrs::simulation_init).set(init.get());
+    }
     if (auto a = orig.attr(livehd::attrs::place); a.has()) neo.attr(livehd::attrs::place).set(a.get());
     if (const auto source = gu::Placement_block::id_of(orig); source != 0) {
       if (ctx->block_ids.size() < source) {

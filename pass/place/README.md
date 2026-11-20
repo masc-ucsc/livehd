@@ -324,6 +324,39 @@ flops two AND2 levels below `io_aclk`). The function is identical and the enable
 gate stays for its other loads and is deleted when unused. Data ANDs, fixed and design-instantiated cells are untouched;
 `buffer_cleanup.jsonl` reports `clock_gates`.
 
+### Wirelength-aware cone resynthesis
+
+Enable the pass on a placed synthesis run with `--set synth.place.wl_resynth=true`.
+The default is off. After global placement, LiveHD identifies virtual-buffer
+roots and long data nets using the technology's repeater length. It measures
+where the loads cluster and what ordinary buffer expansion costs. Candidates
+can move a driver, copy logic or a resettable register near a load cluster,
+factor a gate with USYN, or move a common inversion ahead of the fanout.
+For example, one complemented driver can replace a bank of sink inverters.
+For multi-input sinks, their distinct side inputs retain their original connections.
+Each rewritten term binds directly to an available Liberty cell. An XAG
+truth-table check verifies the chosen input order and output polarity.
+Register copies require a characterized, single-output flop with one
+externally driven asynchronous reset. After reset, the original and copy
+have the same initial value and transition function. The cost estimate
+includes the extra load on the inputs of copied gates.
+
+Candidates compete for available row area. LiveHD legalizes each trial on a
+private copy and times the result, including any remaining buffer trees. An
+accepted trial must improve total pin HPWL, or tie with fewer cells, while
+preserving the placement timer's setup and electrical checks. Independent
+OpenSTA and extracted post-route setup can differ from the placement estimate.
+A rejected trial returns the ordinary buffer-expanded placement.
+
+The placement work directory contains `wl_resynth/report.json`. Its `targets`
+array gives each eligible root's measured load spread, cone and timing boundary.
+The `trials` array records rejected and accepted batches. The `edits` array
+identifies the last batch and its proposed transformations. The recipe records
+the number accepted and the number of trials. When routability triggers an area
+restart, `wl_resynth/history.jsonl` retains the decisions for earlier attempts.
+Ordinary buffer counts are in
+`virtual_buffers/report.json`.
+
 ### Virtual buffer trees (`synth.place.virtual_buffers`, default on)
 
 A fanout buffer tree built at mapping time groups loads before any position

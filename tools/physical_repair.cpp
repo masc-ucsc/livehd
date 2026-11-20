@@ -571,6 +571,12 @@ int main(int argc, char** argv) {
     if (config.HasMember("timing_min_weight")) {
       options.timing_min_weight = config["timing_min_weight"].GetDouble();
     }
+    if (config.HasMember("timing_margin")) {
+      options.timing_margin = config["timing_margin"].GetDouble();
+    }
+    if (config.HasMember("timing_exponent")) {
+      options.timing_exponent = config["timing_exponent"].GetDouble();
+    }
     if (config.HasMember("timing_spread_weight")) {
       options.timing_spread_weight = config["timing_spread_weight"].GetDouble();
     }
@@ -1104,7 +1110,8 @@ int main(int argc, char** argv) {
       if (!config.HasMember("net_weights") && timing_driven) {
         options.net_weights = pl::timing_weights(*seed.parasitics,
                                                  seed_timing,
-                                                 options.timing_min_weight, options.timing_max_weight);
+                                                 options.timing_min_weight, options.timing_max_weight,
+                                                 options.timing_margin, options.timing_exponent);
       }
       if (timing_driven) {
         options.fp_evaluate = raw_evaluate;
@@ -1257,7 +1264,8 @@ int main(int argc, char** argv) {
       }
       const auto                                 membership = pl::timing_weights(*result.parasitics,
                                                                                  final_feedback,
-                                                                                 options.timing_min_weight, options.timing_max_weight);
+                                                                                 options.timing_min_weight, options.timing_max_weight,
+                                                 options.timing_margin, options.timing_exponent);
       rapidjson::StringBuffer                    final_weights_json;
       rapidjson::Writer<rapidjson::StringBuffer> final_weights(final_weights_json);
       final_weights.StartObject();

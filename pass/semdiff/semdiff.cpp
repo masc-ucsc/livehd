@@ -26,6 +26,7 @@
 #include "hhds/hash_mix.hpp"
 #include "hhds/node_hash.hpp"
 #include "node_util.hpp"
+#include "register_replica.hpp"
 
 namespace livehd::semdiff {
 
@@ -2487,8 +2488,11 @@ Match_result structural_match(hhds::Graph* a, hhds::Graph* b, const Semdiff_opti
   absl::flat_hash_map<Classkey, uint32_t> class2id;
   uint32_t                                next_id = 1;
   auto                                    assign  = [&](Side& side, uint32_t& matched, uint32_t& unmatched) {
+    const auto replicas = gu::placed_replica_sources(*side.g);
     for (const auto& node : side.order) {
-      auto     ck = class_of(side, node.get_class_index(), fcommon, bcommon);
+      const auto source = replicas.find(node.get_debug_nid());
+      const auto ck
+          = class_of(side, source == replicas.end() ? node.get_class_index() : source->second.get_class_index(), fcommon, bcommon);
       uint32_t id = 0;
       if (ck) {
         auto [it, inserted] = class2id.try_emplace(*ck, next_id);

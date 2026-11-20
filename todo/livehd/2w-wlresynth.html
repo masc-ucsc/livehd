@@ -10,9 +10,18 @@
 <nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
 <main>
 <h1><strong class="item-id">2w-wlresynth</strong> Wirelength-aware cone resynthesis around virtual buffers and long nets</h1>
-<p><span class="status">Plan written 2026-11-19 from a question-and-answer session. Step 0 (slack-based
-placement weights) is being implemented; steps 1 to 6 are plan only. Names of options and files are
-proposals.</span></p>
+<p><span class="status">The experimental pass is available in <code>lhd synth</code> with
+<code>--set synth.place.wl_resynth=true</code>. The default is off. The placement work directory's
+<code>wl_resynth/report.json</code> contains the cone measurements, timed trials and selected edits.
+<code>wl_resynth/history.jsonl</code> records each decision across routability restarts.</span></p>
+
+<p>On HighTide ASAP7, comparing the enabled and disabled flow with one binary,
+<code>litedram</code> used 132 &micro;m less detailed-route wire and gained 0.90 ps of
+extracted setup slack. <code>liteeth</code> used 499 &micro;m less and gained 9.17 ps.
+Both pairs routed with zero DRC errors. Their independent pre-CTS setup checks
+fell by 0.11 ps and 7.33 ps respectively. On <code>NVDLA/partition_a</code> the
+pass rejected all candidates, reproduced the baseline DEF, and increased cold
+synthesis time from about three minutes to more than six.</p>
 
 <p>After a few timing-driven global-placement iterations, some nets show that the logic's fanout
 structure conflicts with the placement: one driver and many loads spread over the die (a virtual
@@ -67,7 +76,7 @@ so cones are scored on a placement that has not stretched nets for no reason.</t
 </table>
 
 <h2>Steps</h2>
-<h3>Step 0: slack-based placement weights (in progress)</h3>
+<h3>Step 0: slack-based placement weights</h3>
 <p>Today about half of all nets get a placement weight from 1 to 2 by slack percentile, even on a
 design that meets timing (NVDLA/partition_a: about 29k of 58.6k nets, design finishes at +354 ps).
 With timing-driven placement off, liteeth HPWL drops 11% with better WNS and NVDLA/partition_a

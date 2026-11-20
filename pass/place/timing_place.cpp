@@ -1,13 +1,17 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <limits>
 #include <optional>
 #include <stdexcept>
 #include <string_view>
+#include <tuple>
 
+#include "debug_env.hpp"
 #include "placement_technology.hpp"
 #include "rapidjson/document.h"
 #include "rapidjson/stringbuffer.h"
@@ -16,15 +20,25 @@
 namespace livehd::placement {
 namespace {
 std::map<std::string, double> data_timing_weights(const physical::Parasitics& nets, const Timing_feedback& timing, double min_weight,
-                                                  double max_weight, const Prects_networks* controls) {
+                                                  double max_weight, double margin, double exponent, const Prects_networks* controls) {
   if (!std::isfinite(max_weight) || max_weight < 1 || max_weight > max_net_weight) {
     throw std::invalid_argument("maximum timing weight must be finite and in [1, 100]");
   }
   if (!std::isfinite(min_weight) || min_weight <= 0 || min_weight > 1) {
     throw std::invalid_argument("minimum timing weight must be finite and in (0, 1]");
   }
-  std::vector<std::pair<double, Pin_label>> ranked;
-  ranked.reserve(nets.nets.size());
+  if (!std::isfinite(margin) || margin < 0 || margin > 1) {
+    throw std::invalid_argument("timing margin must be finite and in [0, 1]");
+  }
+  if (!std::isfinite(exponent) || exponent <= 0 || exponent > 8) {
+    throw std::invalid_argument("timing exponent must be finite and in (0, 8]");
+  }
+  struct Timed_net {
+    double    slack, period;
+    Pin_label driver;
+  };
+  std::vector<Timed_net> timed;
+  timed.reserve(nets.nets.size());
   const auto*       indexed = timing.ranking && timing.ranking->parasitics.get() == &nets ? &*timing.ranking : nullptr;
   // Borrow feedback: filtering controls must not duplicate all detailed pin
   // records or ranking values. Indexed rankings need only one exclusion bit
@@ -39,10 +53,18 @@ std::map<std::string, double> data_timing_weights(const physical::Parasitics& ne
       }
     }
   }
+  bool any_period = false;
   for (size_t net_index = 0; net_index < nets.nets.size(); ++net_index) {
-    const auto& net   = nets.nets[net_index];
-    double      slack = std::numeric_limits<double>::infinity();
-    bool        clock = false;
+    const auto& net    = nets.nets[net_index];
+    double      slack  = std::numeric_limits<double>::infinity();
+    double      period = 0;  // of the pin that gives the net its slack
+    bool        clock  = false;
+    const auto  take   = [&](double pin_slack, double pin_period) {
+      if (pin_slack < slack) {
+        slack  = pin_slack;
+        period = pin_period;
+      }
+    };
     if (indexed) {
       const auto& layout = *indexed->layout;
       for (size_t i = layout.net_offsets.at(net_index); i < layout.net_offsets.at(net_index + 1); ++i) {
@@ -52,7 +74,7 @@ std::map<std::string, double> data_timing_weights(const physical::Parasitics& ne
         }
         const auto& pin  = indexed->pins.at(index);
         clock           |= pin.clock;
-        slack            = std::min(slack, pin.slack);
+        take(pin.slack, pin.period);
       }
     } else {
       for (const auto& node : net.nodes) {
@@ -62,39 +84,113 @@ std::map<std::string, double> data_timing_weights(const physical::Parasitics& ne
         if (timing.ranking) {
           if (const auto* pin = timing.ranking->find(node.pin)) {
             clock |= pin->clock;
-            slack  = std::min(slack, pin->slack);
+            take(pin->slack, pin->period);
           }
         } else if (const auto it = timing.find_label(node.pin); it != nullptr) {
           clock |= it->clock;
           if (it->slack) {
-            slack = std::min(slack, *it->slack);
+            take(*it->slack, it->period);
           }
         }
       }
     }
     if (!clock && std::isfinite(slack)) {
-      ranked.emplace_back(slack, net.driver);
+      period      = period > 0 ? period : timing.clock_period;
+      any_period |= period > 0;
+      timed.push_back({slack, period, net.driver});
     }
   }
-  if (ranked.empty()) {
+  if (timed.empty()) {
     return {};
   }
-  // Every timed non-clock net gets a weight from its slack RANK, never from the sign or scale of the slack: designs
-  // where all nets fail (or all pass) still order their nets. Piecewise linear in the rank percentile p (0 = worst
-  // slack, 1 = best): the worst net weighs max_weight, the median exactly 1, the best min_weight. Nets with equal slack
-  // share their mean rank, so ties never split.
-  std::sort(ranked.begin(), ranked.end());
-  const size_t                  n = ranked.size();
   std::map<std::string, double> target;
+  if (margin > 0 && any_period) {
+    // Criticality from the slack RELATIVE TO THE CLOCK PERIOD of the net's own domain, x = slack / period. A net
+    // with x >= margin is comfortable and weighs exactly 1, however it ranks: a design that meets timing with room
+    // pulls no net. Below the margin the weight rises linearly to the midpoint at zero slack, and failing nets
+    // share the other half by how far they are toward the worst one, so a design where every net fails still
+    // orders its nets and the worst always weighs max_weight. A net whose period is unknown weighs 1.
+    static const double zero_slack_share = [] {
+      const char* text = std::getenv("LHD_TW_C0");
+      return text ? std::atof(text) : .5;
+    }();
+    static const double relax_at = [] {  // EXPERIMENT: x at which a comfortable net reaches min_weight; 0: never
+      const char* text = std::getenv("LHD_TW_RELAX");
+      return text ? std::atof(text) : 0.;
+    }();
+    double worst = 0;
+    for (const auto& net : timed) {
+      if (net.period > 0) {
+        worst = std::min(worst, net.slack / net.period);
+      }
+    }
+    if (livehd::debug::env<"LHD_TIMING_WEIGHT_DEBUG">() != nullptr) {  // slack/period histogram of the timed nets
+      size_t bins[8] = {};
+      for (const auto& net : timed) {
+        const double x = net.period > 0 ? net.slack / net.period : 9;
+        ++bins[x < -.2 ? 0 : x < 0 ? 1 : x < .05 ? 2 : x < .1 ? 3 : x < .2 ? 4 : x < .4 ? 5 : x < 9 ? 6 : 7];
+      }
+      std::fprintf(stderr,
+                   "timing weights: %zu nets worst x=%.3f | x<-0.2:%zu <0:%zu <0.05:%zu <0.1:%zu <0.2:%zu <0.4:%zu >=0.4:%zu "
+                   "no-period:%zu\n",
+                   timed.size(), worst, bins[0], bins[1], bins[2], bins[3], bins[4], bins[5], bins[6], bins[7]);
+      // TEMP: the worst nets and the largest ones
+      std::vector<std::tuple<double, size_t, std::string>> rows;
+      for (size_t n = 0; n < nets.nets.size(); ++n) {
+        double slack = std::numeric_limits<double>::infinity();
+        if (indexed) {
+          const auto& layout = *indexed->layout;
+          for (size_t i = layout.net_offsets.at(n); i < layout.net_offsets.at(n + 1); ++i) {
+            slack = std::min(slack, indexed->pins.at(layout.net_pins[i]).slack);
+          }
+        }
+        rows.emplace_back(slack, nets.nets[n].nodes.size(), nets.nets[n].driver.str());
+      }
+      std::sort(rows.begin(), rows.end());
+      for (size_t i = 0; i < std::min<size_t>(8, rows.size()); ++i) {
+        std::fprintf(stderr, "  worst %zu: slack %.1f nodes %zu %s\n", i, std::get<0>(rows[i]), std::get<1>(rows[i]), std::get<2>(rows[i]).c_str());
+      }
+      std::sort(rows.begin(), rows.end(), [](const auto& a, const auto& b) { return std::get<1>(a) > std::get<1>(b); });
+      for (size_t i = 0; i < std::min<size_t>(8, rows.size()); ++i) {
+        std::fprintf(stderr, "  big %zu: slack %.1f nodes %zu %s\n", i, std::get<0>(rows[i]), std::get<1>(rows[i]), std::get<2>(rows[i]).c_str());
+      }
+    }
+    for (const auto& net : timed) {
+      double w = 1;
+      if (net.period > 0) {
+        const double x = net.slack / net.period;
+        double       c = 0;
+        if (x < 0) {
+          c = zero_slack_share + (1 - zero_slack_share) * (x / worst);
+        } else if (x < margin) {
+          c = zero_slack_share * (margin - x) / margin;
+        }
+        w = 1 + (max_weight - 1) * std::pow(std::clamp(c, 0., 1.), exponent);
+        if (relax_at > margin && x > margin) {
+          w = 1 - (1 - min_weight) * std::clamp((x - margin) / (relax_at - margin), 0., 1.);
+        }
+      }
+      target[std::string(net.driver)] = w;
+    }
+    return target;
+  }
+  // Legacy (margin 0, or a timing source that reports no clock period): every timed non-clock net gets a weight
+  // from its slack RANK, never from the sign or scale of the slack. Piecewise linear in the rank percentile p (0 =
+  // worst slack, 1 = best): the worst net weighs max_weight, the median exactly 1, the best min_weight. Nets with
+  // equal slack share their mean rank, so ties never split.
+  std::sort(timed.begin(), timed.end(), [](const Timed_net& a, const Timed_net& b) {
+    return a.slack != b.slack ? a.slack < b.slack : a.driver < b.driver;
+  });
+  const size_t n = timed.size();
   for (size_t begin = 0; begin < n;) {
     size_t end = begin + 1;
-    while (end < n && ranked[end].first == ranked[begin].first) {
+    while (end < n && timed[end].slack == timed[begin].slack) {
       ++end;
     }
     const double p = n > 1 ? .5 * double(begin + end - 1) / double(n - 1) : .5;  // mean rank / (n-1)
     const double w = p <= .5 ? max_weight - (max_weight - 1) * (p / .5) : 1 - (1 - min_weight) * ((p - .5) / .5);
     for (size_t i = begin; i < end; ++i) {
-      target[std::string(ranked[i].second)] = w;
+      target[std::string(timed[i].driver)] = w;
     }
     begin = end;
   }
@@ -102,8 +198,8 @@ std::map<std::string, double> data_timing_weights(const physical::Parasitics& ne
 }
 }  // namespace
 std::map<std::string, double> timing_weights(const physical::Parasitics& nets, const Timing_feedback& timing, double min_weight,
-                                             double max_weight) {
-  return data_timing_weights(nets, timing, min_weight, max_weight, nullptr);
+                                             double max_weight, double margin, double exponent) {
+  return data_timing_weights(nets, timing, min_weight, max_weight, margin, exponent, nullptr);
 }
 void refresh_timing_weights(Result& state, const Options& options, const Timing_feedback& timing) {
   auto roles = state.floorplan.nets.empty() ? Prects_library{} : prects_library(options.technology().cells, options.control_ports);
@@ -126,6 +222,8 @@ void refresh_timing_weights(Result& state, const Options& options, const Timing_
                                                              timing,
                                                              options.timing_min_weight,
                                                              options.timing_max_weight,
+                                                             options.timing_margin,
+                                                             options.timing_exponent,
                                                              controls ? &*controls : nullptr);
   std::map<std::string, double> current;
   for (const auto& net : state.parasitics->nets) {
@@ -189,6 +287,10 @@ Repair_result timing_place(Result initial, const Options& requested, const Evalu
   w.Double(options.timing_min_weight);
   w.Key("timing_max_weight");
   w.Double(options.timing_max_weight);
+  w.Key("timing_margin");
+  w.Double(options.timing_margin);
+  w.Key("timing_exponent");
+  w.Double(options.timing_exponent);
   w.Key("timing_smoothing");
   w.Double(options.timing_smoothing);
   w.Key("initial_weights");
@@ -220,7 +322,8 @@ Repair_result timing_place(Result initial, const Options& requested, const Evalu
     if (admit_trial && !admit_trial()) {
       break;
     }
-    auto target = timing_weights(*result.placed.parasitics, best, options.timing_min_weight, options.timing_max_weight);
+    auto target = timing_weights(*result.placed.parasitics, best, options.timing_min_weight, options.timing_max_weight,
+                                 options.timing_margin, options.timing_exponent);
     if (target.empty()) {
       break;
     }

@@ -56,6 +56,8 @@ namespace buffering {
 struct Checkpoint_settings;
 }
 inline constexpr double max_net_weight = 100;  // physical net weight ceiling shared by option checks and the placement database
+// Timing net weights: slack below this fraction of the clock period starts to raise a net's weight.
+inline constexpr double default_timing_margin = 0.2;
 struct Technology;
 struct Chunk_predictor;
 struct Growth_budget;
@@ -258,6 +260,9 @@ struct Options {
   bool                              fp_timing_after_density = false;
   // Rank-based criticality weights over every timed non-clock net: worst slack max_weight, median 1, best min_weight.
   double                            timing_max_weight = 2, timing_min_weight = .5, timing_smoothing = .5;
+  // Net weights from slack / clock period: a net with at least this fraction of its period as slack weighs 1
+  // (0: the legacy slack-rank weights); the rise below the margin is raised to timing_exponent.
+  double                            timing_margin = default_timing_margin, timing_exponent = 1;
   double                            timing_spread_weight        = 0;  // [0,1] protection from extra routing/local spreading
   int                               macro_timing_interval       = 50;
   int                               final_timing_start          = 200;      // GP warm-up before placement STA
@@ -350,6 +355,7 @@ struct Options {
     unsigned    loads   = 0;  // final loads behind the tree
     unsigned    buffers = 0;  // synthesis buffers the tree had
   };
+  bool wl_resynth = false;
   bool                                                         virtual_buffers       = true;
   unsigned                                                     virtual_buffer_fanout = 16;  // synth.max_fanout
   std::shared_ptr<const std::map<std::string, Virtual_buffer>> virtual_buffer_trees;

@@ -22,9 +22,67 @@
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
 #include "steiner_repair.hpp"
+#include "wirelength_factor.hpp"
+#include "wirelength_register.hpp"
 namespace livehd::placement {
 namespace {
 namespace gu = graph_util;
+TEST(WirelengthFactor, RefactorsAndOrXorAndRejectsWrongPinOrder) {
+  const auto make = [](std::string name, std::vector<std::string> inputs, std::string function) {
+    liberty::Comb_cell cell;
+    cell.name     = std::move(name);
+    cell.inputs   = std::move(inputs);
+    cell.function = std::move(function);
+    cell.output   = "Y";
+    cell.area     = 1;
+    return cell;
+  };
+  std::map<std::string, liberty::Comb_cell> library;
+  for (const auto& [name, fn] : std::map<std::string, std::string>{
+           {"AND", "A & B"},
+           { "OR", "A | B"},
+           {"XOR", "A ^ B"}
+  }) {
+    library.emplace(name, make(name, {"A", "B"}, fn));
+  }
+  for (const auto& fn : {"(A & B) | C", "(A | B) & C", "A ^ B ^ C", "(!A & B) | (A & C)"}) {
+    const auto source  = make("wide", {"A", "B", "C"}, fn);
+    const auto factors = wire_factors(source, library);
+    ASSERT_FALSE(factors.empty()) << fn;
+    for (const auto& factor : factors) {
+      EXPECT_TRUE(equivalent_factor(source, factor, library));
+    }
+    auto bad     = factors.front();
+    bad.bound[0] = bad.bound[1];
+    EXPECT_FALSE(equivalent_factor(source, bad, library));
+  }
+}
+TEST(WirelengthFactor, PushesInputPhaseAcrossIndependentSideInputs) {
+  std::map<std::string, liberty::Comb_cell> lib;
+  const auto                                add = [&](std::string name, std::vector<std::string> inputs, std::string fn) {
+    liberty::Comb_cell c;
+    c.name     = name;
+    c.inputs   = std::move(inputs);
+    c.function = std::move(fn);
+    c.output   = "Y";
+    c.area     = 1;
+    lib.emplace(name, c);
+  };
+  add("NAND", {"A", "B"}, "!(A & B)");
+  add("AND", {"A", "B"}, "A & B");
+  add("NOT", {"A"}, "!A");
+  add("ANDNOT", {"A", "B"}, "!A & B");
+  const auto absorbed = wire_push(lib.at("AND"), lib.at("NOT"), 0, lib);
+  ASSERT_TRUE(absorbed);
+  EXPECT_TRUE(absorbed->bypass);
+  EXPECT_EQ(absorbed->root, "NAND");
+  const auto pushed = wire_push(lib.at("AND"), lib.at("AND"), 0, lib);
+  ASSERT_TRUE(pushed);
+  EXPECT_FALSE(pushed->bypass);
+  EXPECT_EQ(pushed->load, "ANDNOT");
+  lib.erase("ANDNOT");
+  EXPECT_FALSE(wire_push(lib.at("AND"), lib.at("AND"), 0, lib));
+}
 class Buffer_repair : public ::testing::Test {
 protected:
   hhds::GraphLibrary                                   source, flat;
@@ -223,6 +281,171 @@ TEST_F(Buffer_repair, SynthesisBufferCleanupKeepsTreesWiderThanTheCap) {
   options.buffer_cleanup_max_fanout = 0;  // no cap
   hhds::GraphLibrary third;
   EXPECT_EQ(remove_synthesis_buffers(*graph, third, options).removed, 1U);
+}
+TEST_F(Buffer_repair, WirelengthMovesOrCopiesOneRootOnAPrivatePlacement) {
+  // Only the root is a virtual target. An unrelated sink keeps the input
+  // net's bounding box wide, so an extra local driver does not lengthen it.
+  const auto root = gate("sky130_fd_sc_hd__inv_1", "root", graph->get_input_pin("a"));
+  const auto side = gate("sky130_fd_sc_hd__buf_1", "side", graph->get_input_pin("a"));
+  for (unsigned i = 0; i < 5; ++i) {
+    const auto name = std::format("out{}", i);
+    graph->get_io()->add_output(name, i + 1);
+    graph->get_io()->set_bits(name, 1);
+    const auto pin = i == 4 ? side : gate("sky130_fd_sc_hd__buf_1", std::format("load{}", i), root);
+    graph->get_output_pin(name).connect_driver(pin);
+  }
+  graph->get_output_pin("y").connect_driver(side);
+  auto trees                   = std::make_shared<std::map<std::string, Options::Virtual_buffer>>();
+  (*trees)["root:Y"]           = {"sky130_fd_sc_hd__buf_1", 4, 1};
+  options.virtual_buffer_trees = trees;
+  const auto evaluate          = [](const Result& r) {
+    Timing_feedback t;
+    t.wns = 100;
+    t.tns = 0;
+    for (const auto& [pin, xy] : r.pin_locations) {
+      t.pins[std::string(pin)].slack = 100;
+    }
+    return t;
+  };
+  for (bool split : {false, true}) {
+    hhds::GraphLibrary owner;
+    auto               initial = place(*graph, owner, options);
+    for (auto& [pin, xy] : initial.pin_locations) {
+      const std::string name = pin;
+      const bool        far  = name.starts_with("side:") || name.starts_with("out") || name.starts_with("load2:")
+                       || name.starts_with("load3:") || (!split && name.starts_with("load"));
+      xy = {far ? 100000. : 0., 0.};
+    }
+    Virtual_expansion stats;
+    const auto        r = wirelength_resynthesize(initial, options, evaluate, evaluate, stats);
+    EXPECT_NE(r.report.find("accepted=1"), std::string::npos) << r.report;
+    EXPECT_EQ(count(r.placed, "__wl_copy_root"), split ? 1U : 0U);
+    EXPECT_EQ(count(initial, "__wl_copy_"), 0U);
+    for (const auto& decl : r.placed.graph->get_io()->get_output_pin_decls()) {
+      auto     at         = r.placed.graph->get_output_pin(decl.name).get_driver_pin();
+      unsigned inversions = 0, visited = 0;
+      while (!at.get_master_node().is_input_node()) {
+        ASSERT_LT(++visited, 20U);
+        auto n = at.get_master_node();
+        ASSERT_TRUE(n.get_subnode_io());
+        inversions += n.get_subnode_io()->get_name() == "sky130_fd_sc_hd__inv_1";
+        at          = n.get_sink_pin("A").get_driver_pin();
+      }
+      EXPECT_EQ(inversions, (decl.name == "y" || decl.name == "out4") ? 0U : 1U);
+    }
+  }
+}
+TEST_F(Buffer_repair, WireRegisterProofFoldsOnlyTheSameStateAfterReset) {
+  auto lib_text = [](const std::string& path) {
+    std::ifstream f(path);
+    return std::string(std::istreambuf_iterator<char>(f), {});
+  };
+  auto lib = lib_text(options.liberty);
+  lib.insert(lib.rfind('}'), lib_text("inou/lefdef/tests/data/sky130hd_seq.lib.fragment"));
+  std::filesystem::create_directories(options.output_dir);
+  options.liberty = options.output_dir + "/seq.lib";
+  std::ofstream(options.liberty) << lib;
+  liberty::Cell_library technology(options.liberty);
+  auto                  master = source.create_io("sky130_fd_sc_hd__dfrtp_1");
+  for (const auto& [name, id] : std::map<std::string, unsigned>{
+           {      "D", 0},
+           {    "CLK", 1},
+           {"RESET_B", 2}
+  }) {
+    master->add_input(name, id);
+    master->set_bits(name, 1);
+  }
+  master->add_output("Q", 0);
+  master->set_bits("Q", 1);
+  graph->get_io()->add_input("clk", 1);
+  graph->get_io()->add_input("rst_n", 2);
+  graph->get_io()->set_bits("clk", 1);
+  graph->get_io()->set_bits("rst_n", 1);
+  auto make = [&](const std::string& name) {
+    auto n = gu::create_typed_node(*graph, Ntype_op::Sub);
+    n.set_name(name);
+    n.set_subnode(master);
+    n.attr(attrs::aggregate_origin).set("q");
+    for (const auto& [pin, port] : std::map<std::string, std::string>{
+             {    "CLK",   "clk"},
+             {      "D",     "a"},
+             {"RESET_B", "rst_n"}
+    }) {
+      n.create_sink_pin(pin).connect_driver(graph->get_input_pin(port));
+    }
+    auto q = n.create_driver_pin("Q");
+    gu::set_bits(q, 1);
+    return n;
+  };
+  auto orig = make("q");
+  gu::Color_group::set(orig, "core:registers");
+  // Exercise real candidate creation before checking corruption and reset
+  // phase handling on the hand-built pair below. Existing sinks hold all
+  // three input-net boxes open at the far cluster.
+  auto lef = lib_text(options.lefs.back());
+  lef.insert(lef.rfind("END LIBRARY"), lib_text("inou/lefdef/tests/data/sky130hd_seq.lef.fragment"));
+  options.lefs.back() = options.output_dir + "/seq.lef";
+  std::ofstream(options.lefs.back()) << lef;
+  unsigned   out_id  = 1;
+  const auto observe = [&](hhds::Pin_class p, std::string name) {
+    graph->get_io()->add_output(name, out_id++);
+    graph->get_io()->set_bits(name, 1);
+    graph->get_output_pin(name).connect_driver(p);
+  };
+  for (auto port : {"clk", "rst_n", "a"}) {
+    observe(gate("sky130_fd_sc_hd__buf_1", "far_" + std::string(port), graph->get_input_pin(port)), "out_" + std::string(port));
+  }
+  for (unsigned i = 0; i < 4; ++i) {
+    observe(gate("sky130_fd_sc_hd__buf_1", std::format("load{}", i), orig.get_driver_pin("Q")), std::format("out{}", i));
+  }
+  graph->get_output_pin("y").connect_driver(orig.get_driver_pin("Q"));
+  auto trees                   = std::make_shared<std::map<std::string, Options::Virtual_buffer>>();
+  (*trees)["q:Q"]              = {"sky130_fd_sc_hd__buf_1", 5, 1};
+  options.virtual_buffer_trees = trees;
+  hhds::GraphLibrary place_owner;
+  auto               initial = place(*graph, place_owner, options);
+  for (auto& [label, xy] : initial.pin_locations) {
+    std::string name = label;
+    const bool  far  = name == "y" || name.starts_with("far_") || name.starts_with("out") || name.starts_with("load2:")
+                     || name.starts_with("load3:");
+    xy = {far ? 100000. : 0., 0.};
+  }
+  const auto timer = [](const Result& r) {
+    Timing_feedback t;
+    t.wns = 100;
+    t.tns = 0;
+    for (const auto& [pin, xy] : r.pin_locations) {
+      t.pins[std::string(pin)].slack = 100;
+    }
+    return t;
+  };
+  Virtual_expansion stats;
+  auto              trial = wirelength_resynthesize(initial, options, timer, timer, stats);
+  EXPECT_EQ(count(trial.placed, "__wl_copy_q"), 1U) << trial.report;
+  for (auto n : trial.placed.graph->body().nodes()) {
+    if (n.get_name() == "__wl_copy_q") {
+      EXPECT_EQ(gu::Color_group::text(n), "core:registers");
+    }
+  }
+  hhds::GraphLibrary trial_owner;
+  auto               normalized = wire_register_proof_view(*trial.placed.graph, trial_owner, technology, true);
+  ASSERT_TRUE(normalized);
+  EXPECT_FALSE(has_wire_register_replicas(*normalized));
+  graph->get_output_pin("y").del_sink(orig.get_driver_pin("Q"));
+  auto copy = make("__wl_copy_q");
+  graph->get_output_pin("y").connect_driver(copy.get_driver_pin("Q"));
+  hhds::GraphLibrary independent, after_reset;
+  EXPECT_FALSE(wire_register_proof_view(*graph, independent, technology, false));
+  auto folded = wire_register_proof_view(*graph, after_reset, technology, true);
+  ASSERT_TRUE(folded);
+  EXPECT_EQ(folded->get_output_pin("y").get_driver_pin().get_master_node().get_name(), "q");
+  EXPECT_TRUE(has_wire_register_replicas(*graph));
+  EXPECT_FALSE(has_wire_register_replicas(*folded));
+  auto d = copy.get_sink_pin("D");
+  d.del_sink(graph->get_input_pin("a"));
+  d.connect_driver(orig.get_driver_pin("Q"));
+  hhds::GraphLibrary bad;
+  EXPECT_FALSE(wire_register_proof_view(*graph, bad, technology, true));
 }
 TEST_F(Buffer_repair, SynthesisBufferCleanupRecordsVirtualTreesWithoutTheCap) {
   auto inv = gate("sky130_fd_sc_hd__inv_1", "logic", graph->get_input_pin("a"));

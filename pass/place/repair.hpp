@@ -25,10 +25,14 @@ struct Buffer_cleanup {
 };
 Buffer_cleanup                remove_synthesis_buffers(hhds::Graph& source, hhds::GraphLibrary& library, const Options& options);
 Timing_feedback               timing_feedback(std::string_view json);
+// A weight per timed non-clock net from its slack relative to the clock period of its own domain (x = slack /
+// period): 1 for x >= margin, rising to the midpoint between 1 and max_weight at zero slack and to max_weight on
+// the worst failing net (`exponent` shapes the rise). margin 0, or timing that reports no clock period: the
+// legacy slack-RANK weights (worst max_weight, median 1, best min_weight).
 std::map<std::string, double> timing_weights(const physical::Parasitics& nets, const Timing_feedback& timing, double min_weight = .5,
-                                             double max_weight = 2);
-// Every timed non-clock net is weighted by its slack rank (worst max_weight, median 1, best min_weight); nets without
-// timing return to the baseline weight 1, and the weights are smoothed against the previous ones.
+                                             double max_weight = 2, double margin = default_timing_margin, double exponent = 1);
+// The weights above for every timed non-clock net; nets without timing return to the baseline weight 1, and the
+// weights are smoothed against the previous ones.
 void                          refresh_timing_weights(Result& state, const Options& options, const Timing_feedback& timing);
 // Reuse the unmodified Liberty/control-port roles parsed for this placement
 // invocation. Graph-specific control seeds still come from state.prects.
@@ -61,6 +65,7 @@ struct Virtual_expansion {
 };
 Repair_result expand_virtual_buffers(Result initial, const Options& options, const Evaluate& evaluate,
                                      Virtual_expansion* stats = nullptr);
+Repair_result wirelength_resynthesize(Result initial, const Options& options, const Evaluate& evaluate, const Evaluate& trial_evaluate, Virtual_expansion& stats);
 struct Floorplan_resize {
   Timing_feedback timing;
   unsigned        proposed = 0, accepted = 0, repair_proposed = 0, repair_accepted = 0;
