@@ -13768,7 +13768,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
           if ((options.allow_increase_area && options.generated_core) || terminal_options.padding_sites == 0) {
             throw;
           }
-          livehd::diag::warn("pass.place", "terminal-padding-dropped", "routability")
+          livehd::diag::warn("pass.place", "terminal-padding-dropped", "unsupported")
               .msg("terminal legalization cannot fit the cells with {} padding site(s) per side ({}); legalizing without "
                    "padding",
                    terminal_options.padding_sites,
