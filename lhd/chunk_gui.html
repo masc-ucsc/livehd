@@ -1,33 +1,63 @@
 <!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>LiveHD · Chunk placement</title>
 <style>
+[hidden]{display:none!important}
 *{box-sizing:border-box}body{font:15px/1.5 Inter,system-ui,sans-serif;color:#203438;background:#f6f8f6;margin:0}
-main{max-width:1200px;margin:auto;padding:2rem}h1,h2{margin:0 0 .8rem}section{background:white;padding:1.1rem;border:1px solid #cdd8d3;border-radius:6px;margin-bottom:1rem}
-.grid{display:grid;grid-template-columns:1fr 1fr;gap:1rem}canvas{display:block;width:100%;height:280px;background:#f0f4f1}
+main{max-width:1500px;margin:auto;padding:1.25rem}h1,h2{margin:0 0 .8rem}section{background:white;padding:1.1rem;border:1px solid #cdd8d3;border-radius:6px;margin-bottom:1rem}
+.grid{display:grid;grid-template-columns:minmax(285px,1fr) minmax(0,2fr);grid-template-areas:"floor local" "stages local";gap:1rem;margin-bottom:1rem;align-items:start}.grid>section{margin:0;min-width:0}.floor{grid-area:floor}.stages{grid-area:stages}.local{grid-area:local}.tools select{max-width:100%}canvas{display:block;width:100%;height:280px;background:#f0f4f1}
 button,input,select{font:inherit}button{background:#16524c;color:white;border:0;border-radius:4px;padding:.45rem .8rem;cursor:pointer}button:disabled{opacity:.55}
 table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:.4rem;border-bottom:1px solid #dbe2dc}pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:14rem;overflow:auto}
 .tools{display:flex;gap:.6rem;align-items:center;flex-wrap:wrap;margin:.8rem 0}input[type=number]{width:8rem}#message{min-height:1.5rem}#tablebox{max-height:22rem;overflow:auto}
-@media(max-width:780px){main{padding:.8rem}.grid{display:block}}
+@media(max-width:780px){main{padding:.8rem}.grid{grid-template-columns:minmax(0,1fr);grid-template-areas:"floor" "local" "stages"}}
 #placement{height:50vh;min-height:300px}</style><main>
 <h1>Chunk placement</h1>
-<section aria-label="Overall placement metrics"><table><thead><tr><th>Assembled design</th><th>Pin HPWL (µm)</th><th>Estimated WNS (ps)</th><th>Chunk stages</th></tr></thead><tbody id="scores"></tbody></table></section>
-<div class="grid"><section><h2>Floorplan</h2><canvas aria-label="Select a floorplan chunk"></canvas></section>
-<section><h2>Placement stages</h2><div id="tablebox"><table><thead><tr><th>Chunk</th><th>Macro</th><th>Final</th><th>Est. MiB</th></tr></thead><tbody></tbody></table></div>
+<div class="tools" id="projectChoice" hidden><label>Project <select id="project"></select></label><label><input type="checkbox" id="followProjects" checked> Follow active design</label><output id="activity" aria-live="polite"></output></div>
+<section aria-label="Overall placement metrics"><table><thead><tr><th>Assembled design</th><th>Pin HPWL (µm)</th><th>Estimated WNS (ps)</th><th>Chunk stages</th></tr></thead><tbody id="scores"></tbody></table><div id="validation"></div></section>
+<div class="grid"><section class="floor"><h2>Floorplan</h2><div class="tools"><select id="mapMode" aria-label="Floorplan overlay"><option value="">Placement</option><option value="measured:0">Global-route metal length</option><optgroup label="Floorplan estimate"><option value="fp:0">Crossing demand</option><option value="fp:2">Internal demand</option><option value="fp:4">Available capacity</option><option value="fp:6">Predicted excess</option></optgroup><optgroup label="Floorplan with boundary IO"><option value="io:0">Crossing demand via IOs</option><option value="io:6">Predicted excess via IOs</option></optgroup><optgroup label="Placed chunks"><option value="local:0">Crossing demand</option><option value="local:2">Internal demand</option><option value="local:4">Available capacity</option><option value="local:6">Predicted excess</option></optgroup></select><select id="direction" aria-label="Routing direction"><option value="both">Both directions</option><option value="0">Horizontal</option><option value="1">Vertical</option></select></div><canvas aria-label="Select a floorplan chunk"></canvas><small id="scale"></small></section>
+<section class="stages"><h2>Placement stages</h2><div id="tablebox"><table><thead><tr><th>Chunk</th><th>Macro</th><th>Final</th><th>Est. MiB</th></tr></thead><tbody></tbody></table></div>
 <div class="tools"><button id="macro">Run macro</button><button id="final">Run final</button><button id="placeDesign">Place design by chunk</button><label><input type="checkbox" id="neighbors"> Include neighbors</label></div>
-<div id="message" role="status"></div></section></div>
-<section><h2>Placement</h2><div class="tools"><select id="inspect" aria-label="Inspect chunk"></select><select id="view" aria-label="Placement stage"><option>macro</option><option>final</option></select><select id="branch" aria-label="Trial branch"><option value="">Main</option></select><button id="keep" disabled>Keep branch</button><button id="undo">Undo</button><label><input type="checkbox" id="density"> Cell density</label>
-<label><input type="checkbox" id="overlay"> GP displacement</label><label><input type="checkbox" id="follow" checked> Follow new trials</label><button id="fit">Fit</button></div><canvas id="placement" aria-label="Selected chunk placement"></canvas><p id="caption"></p><pre id="feedback"></pre>
+<div id="message" role="status"></div></section>
+<section class="local"><h2>Selected chunk</h2><div class="tools"><select id="inspect" aria-label="Inspect chunk"></select><select id="view" aria-label="Placement stage"><option>macro</option><option>final</option></select><select id="branch" aria-label="Trial branch"><option value="">Main</option></select><button id="keep" disabled>Keep branch</button><button id="undo">Undo</button><label><input type="checkbox" id="density"> Cell density</label>
+<label><input type="checkbox" id="overlay"> GP displacement</label><label><input type="checkbox" id="follow" checked> Follow active chunk and trial</label><button id="fit">Fit</button></div><canvas id="placement" aria-label="Selected chunk placement"></canvas><p id="caption"></p><pre id="feedback"></pre>
 <details><summary>Boundary contacts</summary><div class="tools"><select id="ports" aria-label="Contact net"></select>
 <label>X (DBU) <input type="number" id="x"></label><label>Y (DBU) <input type="number" id="y"></label>
-<button id="move">Move IO</button><button id="accept">Use macro feedback</button></div></details></section>
+<button id="move">Move IO</button><button id="accept">Use macro feedback</button></div>
+<div class="tools"><label><input type="checkbox" id="ioOrder"> Order bus bits</label>
+<select id="ioSpread" aria-label="IO spacing"><option value="">Project IO spacing</option><option value="yes">Spread tracks</option><option value="no">Nominal tracks</option></select>
+<button id="ioScreen">Check boundary slots</button><button id="ioTrial">Test with local placement</button></div><output id="ioResult"></output></details></section></div>
 <section><h2>Experiments</h2><div class="tools"><input type="search" id="query" aria-label="Search experiments" placeholder="Search findings or objects"><button id="more">Older</button><button id="latest">Latest</button></div><div id="records"></div></section>
 <section><h2>Next chunk</h2><select id="priority" aria-label="Search objective"><option value="hpwl">HPWL</option><option value="wns">WNS</option><option value="density">Density overflow</option></select><div id="next"></div></section></main>
 <script>
 const $ = id => document.getElementById(id);
 const canvas = document.querySelector('canvas');
 const selected = new Set();
-const token = location.hash.slice(1);
+const [token, project='0'] = location.hash.slice(1).split('~');
 let generation;
+const followKey='follow-projects:'+token;
+$('followProjects').checked=sessionStorage.getItem(followKey)!=='off';
+$('followProjects').onchange=()=>sessionStorage.setItem(followKey,$('followProjects').checked?'on':'off');
+let latestActivity=null,activityBusy=false;
+function switchProject(id){
+ if(id===project)return;
+ location.replace('#'+token+'~'+id);
+ location.reload();
+}
+async function followProjects(){
+ if(activityBusy||document.hidden)return;
+ activityBusy=true;
+ try{
+   const {events}=await api('activity');
+   const e=events.find(x=>x.project===project&&x.running)||events[0];
+   if(!e)return;
+   const seconds=Math.max(0,Math.floor(Date.now()/1000-e.time));
+   const age=seconds<60?'under a minute':Math.floor(seconds/60)+' min';
+   const progress=e.stage.startsWith('OpenROAD')&&!e.stage.endsWith('complete')?'last log update '+age+' ago':'';
+   const text=[e.name,e.stage,e.home,e.branch,progress].filter(Boolean).join(' · ');
+   if($('activity').textContent!==text)$('activity').textContent=text;
+   latestActivity=e;
+   if($('followProjects').checked&&e.project!==project)switchProject(e.project);
+ }catch(e){error(e);}finally{activityBusy=false;}
+}
 let rows = [], boxes = [], detail = null, preview = null, busy = false, inspection = 0;
 
 let tiles={}, historyPage=0, latestTrial=null, mapRevision='', zoom=1, center=null, cameraHome='';
@@ -36,7 +66,7 @@ async function api(cmd, fields = {}) {
   const response = await fetch('/chunk', {
     method: 'POST',
     headers: {Authorization: 'Bearer ' + token, 'Content-Type': 'application/json'},
-    body: JSON.stringify({cmd, generation, ...fields})
+    body: JSON.stringify({cmd, project, generation, ...fields})
   });
   const result = await response.json();
   if (!response.ok || result?.ok === false) throw Error(result.error || response.statusText);
@@ -46,6 +76,48 @@ async function api(cmd, fields = {}) {
     generation = next;
   }
   return result;
+}
+let routeMaps = null, measuredGrid = null, dbuPerUm=1;
+async function fetchMaps() {
+  if ($('mapMode').value) routeMaps = await api('routing');
+  draw();
+}
+$('mapMode').onchange=()=>fetchMaps().catch(error);
+$('direction').onchange=()=>draw();
+function heat(ctx, frame, unit) {
+  const [scope,field]=$('mapMode').value.split(':');
+  $('scale').textContent='';
+  if(!scope||(!routeMaps&&scope!=='measured'))return;
+  const grids=(scope==='measured'?[measuredGrid]:scope==='fp'?[routeMaps.floorplan]:scope==='io'?[routeMaps.boundaries]:Object.values(routeMaps.chunks).map(r=>r.grid)).filter(Boolean);
+  if(!grids.length){$('scale').textContent=scope==='measured'?'Validate this placement with global-route segments to show its metal length.':'No routing estimate for this stage';return;}
+  const dir=$('direction').value, index=Number(field);
+  const val=t=>dir==='both'?t[index]+t[index+1]:t[index+Number(dir)];
+  const peak=Math.max(...grids.map(g=>Math.max(0,...g.tiles.map(val))));
+  for(const g of grids){
+    const [l,b,r,t]=g.frame_dbu,dx=(r-l)/g.columns,dy=(t-b)/g.rows;
+    g.tiles.forEach((tile,i)=>{
+      const v=val(tile);
+      ctx.fillStyle=peak&&v?'rgba(186,65,22,'+Math.sqrt(v/peak)+')':'#e9efed';
+      const ix=i%g.columns,iy=Math.floor(i/g.columns);
+      const xl=g.x_edges?.[ix]??l+ix*dx,xh=g.x_edges?.[ix+1]??xl+dx,yl=g.y_edges?.[iy]??b+iy*dy,yh=g.y_edges?.[iy+1]??yl+dy;
+      ctx.fillRect(8+(xl-frame[0])*unit,8+(frame[3]-yh)*unit,(xh-xl)*unit+.25,(yh-yl)*unit+.25);
+    });
+  }
+  for(const row of rows){ctx.strokeStyle='#29483d';drawEdge(ctx,row,v=>8+(v-frame[0])*unit,v=>8+(frame[3]-v)*unit);}
+  if(scope==='measured'){
+    $('scale').textContent='OpenROAD global-route metal length per tile · peak '+fmt(peak/dbuPerUm)+' µm';
+    return;
+  }
+  $('scale').textContent=(routeMaps.view?'Selected trial ':'Accepted ')+(scope==='local'?'local placements':'floorplan')+' · '+grids[0].track_pitches+' track pitches per solver tile · displayed tile range 0 to '+fmt(peak)+' tracks';
+}
+function drawEdge(ctx, home, px, py) {
+  const [l,b,r,t]=home.box_dbu;
+  const edges=home.perimeter_dbu||[[0,b,l,r],[0,t,l,r],[1,l,b,t],[1,r,b,t]];
+  ctx.beginPath();
+  for (const [k,line,lo,hi] of edges) {
+    ctx.moveTo(px(k?line:lo),py(k?lo:line));ctx.lineTo(px(k?line:hi),py(k?hi:line));
+  }
+  ctx.stroke();
 }
 function draw() {
   const width = canvas.clientWidth, height = canvas.clientHeight, ratio = devicePixelRatio || 1;
@@ -68,7 +140,13 @@ function draw() {
     const x = 8 + (xl - frame[0]) * unit, y = 8 + (frame[3] - yh) * unit;
     const w = (xh - xl) * unit, h = (yh - yl) * unit;
     ctx.fillStyle = selected.has(row.id) ? '#98cdbb' : '#e1e9e3';
-    ctx.fillRect(x, y, w, h);
+    ctx.save();ctx.beginPath();
+    const slabs=row.region_dbu||[row.box_dbu];
+    for(const [l,b,r,t] of slabs){
+      const rect={id:row.id,x:x+(l-xl)*unit,y:y+(yh-t)*unit,w:(r-l)*unit,h:(t-b)*unit,exported:row.exported};
+      boxes.push(rect);ctx.rect(rect.x,rect.y,rect.w,rect.h);
+    }
+    ctx.clip();ctx.fillRect(x,y,w,h);
     const tile=tiles[row.id];
     if(tile){
       for(const [nx,ny,nw,nh,macro] of tile.boxes){
@@ -83,12 +161,13 @@ function draw() {
         ctx.fillRect(x+(nx-xl)*unit, y+(yh-ny-nh)*unit, Math.max(1,nw*unit), Math.max(1,nh*unit));
       }
     }
-    ctx.strokeStyle = '#47685f';
-    ctx.strokeRect(x, y, w, h);
+    ctx.restore();ctx.strokeStyle = '#47685f';
+    drawEdge(ctx,row,v=>x+(v-xl)*unit,v=>y+(yh-v)*unit);
     ctx.fillStyle = '#173c34';
     if (h > 18 && ctx.measureText(row.id).width < w - 8) ctx.fillText(row.id, x + 4, y + 15);
-    boxes.push({id: row.id, x, y, w, h, exported: row.exported});
+
   }
+  heat(ctx,frame,unit);
 }
 function table() {
   $('macro').disabled = $('final').disabled = busy || !selected.size;
@@ -127,7 +206,7 @@ function drawPlacement() {
   const px = x => left + (x - xl) * unit;
   const py = y => top + (yh - y) * unit;
   ctx.strokeStyle = '#47685f';
-  ctx.strokeRect(left, top, (xh - xl) * unit, (yh - yl) * unit);
+  drawEdge(ctx,detail,px,py);
   const scene = liveScene?.home === detail.id ? liveScene : null;
   const heat = scene || preview;
   if ($('density').checked && heat?.cell_density) {
@@ -263,6 +342,19 @@ for (const id of ['move', 'accept']) {
     }).catch(error);
   };
 }
+function ioOptions(){
+ const choice=$('ioSpread').value;
+ return {bus_order:$('ioOrder').checked,...(choice?{spread:choice==='yes'}:{})};
+}
+$('ioScreen').onclick=async()=>{try{
+ const p=await api('interfaces',{...ioOptions(),summary:true});
+ const b=p.bus_order;
+ $('ioResult').textContent=p.unassigned+' unassigned contacts'+(b?' · '+b.ordered_after+' ordered bus groups out of '+b.groups:'');
+}catch(e){error(e)}};
+$('ioTrial').onclick=async()=>{try{
+ const p=await api('explore',{...ioOptions(),kind:'interfaces',iterations:100,keep:false});
+ $('ioResult').textContent='Placement trial '+p.trial;
+}catch(e){error(e)}};
 $('ports').onchange = () => {contact();api('focus',{home:detail.id,net:Number($('ports').value)}).catch(error);};
 $('inspect').onchange = async () => {try {await api('focus',{home:$('inspect').value});await inspect();} catch(e){error(e);}};
 $('view').onchange = async () => {try {await api('focus',{home:$('inspect').value,stage:$('view').value});await inspect();} catch(e){error(e);}};
@@ -299,7 +391,24 @@ $('keep').onclick=async()=>{try {await api('keep',branchChoice());await refresh(
 $('undo').onclick=async()=>{try {await api('undo');await refresh();} catch(e){error(e);}};
 const fmt=(v,d=2)=>v==null?'—':v.toLocaleString(undefined,{maximumFractionDigits:d});
 function showScores(overview) {
+  const v=overview.selected_frame?overview.selected_validation:overview.validation;
+  measuredGrid=(v?.spatial_calibration||v?.previous_global_route?.spatial_calibration)?.metal_length_dbu;
+  if($('mapMode').value==='measured:0')draw();
   const body=$('scores');body.replaceChildren();
+  const verification=$('validation');verification.replaceChildren();
+  for(const [label,v] of [['Accepted',overview.validation],['Selected trial',overview.selected_validation]]){
+    if(!v)continue;
+    const line=document.createElement('div');
+    line.textContent=[label+' · Independent OpenROAD check',...Object.entries(v.timing).map(([stage,t])=>stage+' WNS '+fmt(t.wns_ps)+' ps'),
+      ...(v.routed_um!=null?['Routed '+fmt(v.routed_um)+' µm','Overflow '+fmt(v.global_overflow)]:[])].join(' · ');
+    verification.append(line);
+    if(v.previous_global_route){
+      const route=v.previous_global_route, reference=document.createElement('div');
+      reference.textContent=label+' · Previous global route on this placement · WNS '+fmt(route.timing.global_routing?.wns_ps)+
+        ' ps · Routed '+fmt(route.routed_um)+' µm · Overflow '+fmt(route.global_overflow);
+      verification.append(reference);
+    }
+  }
   for(const [label,item] of [['Accepted',overview.accepted],['Selected trial',overview.selected],['Best comparable '+overview.objective.toUpperCase(),overview.best]]){
     const tr=body.insertRow(), stages=item?.stages || (item? (overview.selected||overview.accepted).stages:null);
     for(const v of [label+(label==='Selected trial'&&overview.selected_frame?' · '+overview.selected_frame:'')+(item?.trial?' · '+item.trial+'/'+item.branch:''),fmt(item?.hpwl_um)+(label==='Selected trial'&&overview.delta_control?.hpwl_um!=null?' (Δ '+fmt(overview.delta_control.hpwl_um)+')':''),fmt(item?.estimated_wns_ps,3),
@@ -340,7 +449,15 @@ async function watch(){
   if (watchBusy || document.hidden) return;
   watchBusy=true;
   try {
-    const w=await api('watch'), signature=JSON.stringify(w);
+    const w=await api('watch'), a=latestActivity?.project===project&&$('followProjects').checked?latestActivity:null;
+    dbuPerUm=w.dbu_per_um;
+    const signature=JSON.stringify([w,a?.stage,a?.trial,a?.branch,a?.home]);
+    if(a&&$('follow').checked){
+      if(a.trial&&a.branch&&(w.view?.[0]!==a.trial||w.view?.[1]!==a.branch)){
+        await api('view',{trial:a.trial,branch:a.branch});return;
+      }
+      if(w.view&&!a.trial&&(a.running||a.stage.startsWith('OpenROAD'))){await api('view',{branch:'main'});return;}
+    }
     if(signature!==observed){
 
       if(w.trials.length){
@@ -355,7 +472,7 @@ async function watch(){
       const watched=w.view && w.trials.find(t=>t.id===w.view[0])?.candidates[w.view[1]];
       const mapKey=JSON.stringify([w.revision,w.view,watched?.status]);
       if(mapRevision!==mapKey){
-        const map=await api('floorplan');tiles=map.tiles;mapRevision=mapKey;
+        const map=await api('floorplan');tiles=map.tiles;mapRevision=mapKey;if($('mapMode').value)await fetchMaps();
         await recommendations();
       }
       showScores(await api('overview'));
@@ -364,7 +481,7 @@ async function watch(){
       for(const t of w.trials) for(const [name,r] of Object.entries(t.candidates)){
         const delta=r.delta_assembled;
         const parts=[t.home,name,r.status];
-        if(r.running_home)parts.push(r.running_home);
+        if(r.workers && Object.keys(r.workers).length)parts.push(Object.keys(r.workers).join(', '));else if(r.running_home)parts.push(r.running_home);
         if(r.iterations!=null)parts.push(r.iterations+' iterations');
         if(delta?.hpwl_um!=null)parts.push('Δ assembled HPWL '+fmt(delta.hpwl_um)+' µm');
         if(delta?.estimated_wns_ps!=null)parts.push('Δ WNS '+fmt(delta.estimated_wns_ps,3)+' ps');
@@ -380,16 +497,32 @@ async function watch(){
       $('keep').disabled=!w.can_keep || (viewed && viewed.candidates[w.view[1]]?.status!=='done');
       selected.clear();
       for(const home of w.homes) selected.add(home);
-      $('view').value=w.stage;
-      const active=Object.entries(w.running)[0];
-      if(active && !w.view){$('inspect').value=active[0];$('view').value=active[1].stage;}
-      else if(w.home) $('inspect').value=watched?.running_home || w.home;
+      if($('follow').checked){
+        const finalFrame=a&&(a.stage.startsWith('OpenROAD')||a.stage==='final placement complete'||
+          (a.stage==='Placement complete'&&rows.some(r=>r.final.status==='done')));
+        $('view').value=finalFrame?'final':w.stage;
+      }
+      const active=Object.entries(w.running).find(([h])=>h===latestActivity?.home)||Object.entries(w.running)[0];
+      if($('follow').checked && active && !w.view){$('inspect').value=active[0];$('view').value=active[1].stage;}
+      else if(w.home&&($('follow').checked||!$('inspect').value)) $('inspect').value=watched?.running_home || w.home;
       observed=signature;
       await refresh();
     }
   }catch(e){error(e);} finally{watchBusy=false;}
 }
 setInterval(watch,700);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden){if(!$('projectChoice').hidden)followProjects();watch();}});
 window.onresize = () => { draw(); drawPlacement(); };
+api('projects').then(({projects})=>{
+  if(projects.length<2)return;
+  $('projectChoice').hidden=false;
+  for(const p of projects){
+    const option=new Option(p.name+(p.ready?'':' · awaiting floorplan'),p.id);
+    $('project').add(option);
+  }
+  $('project').value=project;
+  $('project').onchange=()=>{$('followProjects').checked=false;$('followProjects').onchange();switchProject($('project').value);};
+  followProjects();setInterval(followProjects,1500);
+}).catch(()=>{});
 refresh().catch(error);
 </script></html>

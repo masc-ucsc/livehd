@@ -115,7 +115,8 @@ def local_command(args):
     for pair in args.pairs:
         key, _, value = pair.partition('=')
         pairs[key] = parse_value(value)
-    call = lambda payload: with_retry(args, lambda sock: request(sock, payload, args.timeout))
+    project = {'project': pairs.pop('project')} if 'project' in pairs else {}
+    call = lambda payload: with_retry(args, lambda sock: request(sock, {**project, **payload}, args.timeout))
     if args.command == 'finish-plan':
         path = find_socket(args)
         state = request(path, {'cmd':'state'}, args.timeout)
@@ -131,7 +132,7 @@ def local_command(args):
     if args.command == 'help':
         reply = call({'cmd':'help'})
         if reply.get('ok',True):
-            reply['client_examples'] = (['edit align=row side=right fix=x', 'trial iterations=100 left=... right=... keep_if=control', 'overview', 'next objective=density', 'history query=CSR', 'place-design']
+            reply['client_examples'] = (['edit align=row side=right fix=x', 'trial iterations=100 left=... right=... keep_if=control', 'overview', 'next objective=density', 'explore kind=density density=0.45 iterations=300 keep=true', 'interfaces apply=false', 'routing', 'resources', 'history', 'place-design']
                 if 'usage' in reply else ['connected kind=color limit=3 add_to_selection=true', 'split home=A new_id=B', 'transfer home=B to=A', 'reshape home=B aspect=1.5'])
         return reply
     if args.command == 'connected':

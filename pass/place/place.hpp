@@ -229,6 +229,11 @@ struct Options {
   std::shared_ptr<const Chunk_predictor> chunk_predictor;
   bool chunk_require_fit=false;
   bool chunk_pack_scopes = false;
+  std::string                                               chunk_route_layers;
+  bool                                                      io_spread = false;
+  unsigned                                                  chunk_shape_rank = 0;
+  double                                                    chunk_area_weight = 0;
+  int                                                       chunk_target       = 0;
   bool                              chunk_connectivity = false;
   std::string                       chunk_manifest, chunk_only;  // nonempty manifest: export the accepted home jobs before whole-chip placement
   bool                              chunk_seed_detail = true;

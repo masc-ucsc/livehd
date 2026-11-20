@@ -174,7 +174,7 @@ studied for ideas, without using their code, are under <a href="#tools-inspirati
 <ul class="tools">
 <li><a href="https://github.com/steveicarus/iverilog">Icarus Verilog</a> and <a href="https://github.com/verilator/verilator">Verilator</a> — reference simulators for checks, fuzzing and speed baselines.</li>
 <li><a href="https://github.com/YosysHQ/yosys">yosys-smtbmc</a> with <a href="https://github.com/Z3Prover/z3">Z3</a> — bounded equivalence of generated Verilog.</li>
-<li><a href="https://github.com/The-OpenROAD-Project/OpenROAD">OpenROAD</a> and <a href="https://github.com/The-OpenROAD-Project/OpenROAD-flow-scripts">OpenROAD-flow-scripts</a> — DRC on routed DEF, the routing handoff, power-grid checks and the reference flow.</li>
+<li><a href="https://github.com/The-OpenROAD-Project/OpenROAD">OpenROAD</a> and <a href="https://github.com/The-OpenROAD-Project/OpenROAD-flow-scripts">OpenROAD-flow-scripts</a> — DRC on routed DEF, the routing handoff, assembled chunk legality and global-route timing checks, power-grid checks and the reference flow.</li>
 <li>The interactive macro-placement experiments draw on <a href="https://github.com/fenggev56/PlaceReasoner-Beta">PlaceReasoner-Beta</a> and use external tasks from <a href="https://huggingface.co/datasets/fenggev566/PlaceReasoner-Bench">PlaceReasoner-Bench</a>.</li>
 <li><a href="https://github.com/The-OpenROAD-Project/OpenSTA">OpenSTA</a> — reference timing in the synthesis harness.</li>
 <li><a href="https://lean-lang.org">Lean 4</a> with <a href="https://github.com/leanprover-community/mathlib4">Mathlib</a> and <a href="https://isabelle.in.tum.de">Isabelle/HOL</a> — formal semantics and translation validation.</li>
@@ -507,6 +507,10 @@ Hover a marker for the details; <code>grep -n "todo-check\|fixme" docs/acknowled
 <li>P. Spindler, F.M. Johannes. <em>Fast and Accurate Routing Demand Estimation for Efficient Routability-driven Placement.</em> DATE 2007.<span class="use">RUDY maps (<code>tools/rudy_metrics.cpp</code>).</span></li>
 <li>Z. Xie et al. <em>RouteNet: Routability Prediction for Mixed-size Designs Using Convolutional Neural Network.</em> ICCAD 2018. <a href="https://doi.org/10.1145/3240765.3240843">doi</a></li>
 <li>Z. Wang, A.C. Bovik, H.R. Sheikh, E.P. Simoncelli. <em>Image Quality Assessment: From Error Visibility to Structural Similarity.</em> IEEE TIP 13(4), 2004.<span class="use">SSIM score in <code>tools/routetruth/score.py</code>.</span></li>
+<li>Z. Xiong, R. S. Rajarathnam, Z. Jiang, H. Zhu and D. Z. Pan.
+<a href="https://arxiv.org/abs/2311.08582"><em>DREAMPlaceFPGA-MP</em></a> (2023).
+<span class="use">Its preservation of FPGA cascade and region constraints through legalization informed the stepped ASIC chunk experiment.
+LiveHD exchanges site-aligned strips and gives both workers complementary row exclusions.</span></li>
 <li>M. Pan, C. Chu. <em>FastRoute: A Step to Integrate Global Routing into Placement.</em> ICCAD 2006; Y. Xu, Y. Zhang, C. Chu. <em>FastRoute 4.0.</em> ASP-DAC 2009.<span class="use">L/Z pattern routing adapted in <code>pass/place/fast_route_pattern.cpp</code>.</span></li>
 <li>L. McMurchie, C. Ebeling. <em>PathFinder: A Negotiation-Based Performance-Driven Router for FPGAs.</em> FPGA 1995.<span class="use">Negotiated congestion in legroute and buffering.</span></li>
 <li>C.Y. Lee. <em>An Algorithm for Path Connections and Its Applications.</em> IRE Trans. EC-10(3), 1961.<span class="use">Maze routing (<code>signal_maze.cpp</code>).</span></li>

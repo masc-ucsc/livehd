@@ -12,10 +12,18 @@ import os
 import re
 from pathlib import Path
 import secrets
+import shutil
 import subprocess
 import threading
+import time
 from socketserver import ThreadingUnixStreamServer
-from chunk_live import LivePlacement
+from chunk_resources import monitor
+import chunk_dispatch
+import chunk_interfaces
+import chunk_explore
+import chunk_validate
+from chunk_live import LivePlacement, revision
+from chunk_journal import Journal
 from chunk_score import Exterior, contribution, priorities, refresh_neighbors
 import sys
 import tempfile
@@ -92,15 +100,17 @@ class Workspace:
         self.index = one(records, 'chunk_jobs')
         self.design = self.index['design']
         self.guidance = [r for r in records if r['class'] == PREFIX + 'chunk_guidance' and r.get('design') == self.design]
-        plan = one(records, 'chunk_plan', self.design)
-        self.chunks = {c['id']: {'box_dbu': c['box_dbu'], 'ports': c['ports']} for c in plan['chunks']}
+        plan = self.plan = one(records, 'chunk_plan', self.design)
+        self.chunks = {c['id']: {'box_dbu': c.get('worker_box_dbu', c['box_dbu']), 'ports': c['ports'],
+                                 **{k:c[k] for k in ('perimeter_dbu','region_dbu') if k in c}} for c in plan['chunks']}
         self.anchored = {p['net_index'] for p in plan.get('communication', {}).get('fixed_contacts', [])}
         self.incident = interfaces(self)
         self.timed_interfaces = {r[0] for r in self.index.get("assembly", {}).get("timing", [])}
         self.members = {c['id']: frozenset((m['macro'], m['id']) for m in c['members']) for c in plan['chunks']}
         self.jobs = {j['id']: j for j in self.index['jobs']}
         # Bind state to the exact export, including worker options and admission policy.
-        self.root = self.manifest.parent / '.chunk-work' / hashlib.sha256(raw).hexdigest()
+        self.manifest_digest = hashlib.sha256(raw).hexdigest()
+        self.root = self.manifest.parent / '.chunk-work' / self.manifest_digest
         self.root.mkdir(parents=True, exist_ok=True)
         self.path = self.root / 'state.json'
 
@@ -144,8 +154,10 @@ class Workspace:
         selected = set(ids or self.chunks)
         if neighbors:
             for ident in ids:
-                box = self.chunks[ident]['box_dbu']
-                selected.update(k for k, c in self.chunks.items() if adjacent(box, c['box_dbu']))
+                home = self.chunks[ident]
+                selected.update(k for k, c in self.chunks.items()
+                                if (chunk_interfaces.common_segments(home,c) if "region_dbu" in home or "region_dbu" in c
+                                    else adjacent(home["box_dbu"],c["box_dbu"])))
         return [k for k in self.chunks if k in selected]
 
     def rows(self, state, ids):
@@ -159,16 +171,109 @@ class Workspace:
                     if field in saved:
                         result[stage][field] = os.path.normpath(self.root / saved[field])
             rows.append(dict(id=k, box_dbu=self.chunks[k]['box_dbu'], exported=bool(job),
+                             **{field:self.chunks[k][field] for field in ('region_dbu','perimeter_dbu') if field in self.chunks[k]},
                              estimated_bytes=job.get('estimated_bytes'), budget_bytes=self.index['budget_bytes'],
                              macro=result.get('macro', {'status': 'pending'}), final=result.get('final', {'status': 'pending'})))
+        return rows
+
+    def display_rows(self, rows):
+        pending = chunk_dispatch.active_jobs(self.root)
+        for row in rows:
+            job=pending.get(row['id'])
+            if job:
+                stage=job['stage']
+                row[stage]=dict(row[stage],status='running',directory=job['directory'])
         return rows
 
     def show(self, state, ident):
         row, = self.rows(state, self.select([ident]))
         edits = state['contacts'].get(ident, {})
         row['ports'] = [dict(p, xy_dbu=edits.get(str(p['net_index']), p['xy_dbu'])) for p in self.chunks[ident]['ports']]
+        for port in row['ports']:
+            layer=state.get('contact_layers',{}).get(ident,{}).get(str(port['net_index']))
+            if layer:port['layer']=layer
         row['neighbors'] = [k for k in self.select([ident], True) if k != ident]
         return row
+
+    def analysis(self, cmd, req, state=None):
+        state = state if state is not None else self.state()
+        if cmd == 'shapes':
+            if req.get('screen'):
+                return chunk_interfaces.screen_shapes(self, state, req.get('pitch'))
+            return {
+                'rank': self.plan.get('shape_rank'),
+                'home_order': list(self.chunks),
+                'candidates': self.plan.get('shape_candidates', []),
+            }
+        if cmd == 'resources':
+            project = self.manifest.parent / PROJECT
+            settings = json.loads(project.read_text()) if project.exists() else {}
+            waves = sorted((self.root / 'waves').glob('*.json'), key=lambda path: path.stat().st_mtime, reverse=True)
+            return {
+                'budget_bytes': self.index['budget_bytes'],
+                'producer': settings.get('producer'),
+                'latest_wave': json.loads(waves[0].read_text()) if waves else None,
+            }
+        if cmd == 'interfaces':
+            proposal = chunk_interfaces.proposal(self, state, req.get('pitch'), req.get('nets'),spread=req.get('spread'),bus_order=req.get('bus_order',False))
+            if req.get('apply') and proposal['updates']:
+                with self.writer() as (current, _):
+                    if revision(current) != revision(state):
+                        raise ValueError('placement changed during slot allocation')
+                    chunk_interfaces.install(current, proposal)
+                    journal = Journal(self.root)
+                    journal.checkpoint(revision(current), state)
+                    journal.epoch(advance=True)
+                    self.save(current)
+            elif req.get('apply') and not proposal['feasible']:
+                raise ValueError('insufficient interface slots at this pitch')
+            if req.get('summary'):
+                return {key: proposal[key] for key in ('pitch_dbu', 'feasible', 'edges','spread','bus_order')} | {
+                    'unassigned': len(proposal['conflicts']),
+                    'affected_homes': {h: len(nets) for h, nets in proposal['updates'].items()},
+                }
+            return proposal
+        maps = {}
+        for h in self.jobs:
+            rows = state['results'].get(h, {})
+            for stage in ('final', 'macro'):
+                row = rows.get(stage, {})
+                if row.get('status') == 'done':
+                    measured = json.loads((self.root / row['report']).read_text())[0]
+                    if 'coarse_routing' in measured:
+                        maps[h] = {'stage': stage, 'grid': measured['coarse_routing']}
+                    break
+        floorplan = self.plan.get('coarse_routing')
+        boundary_grid = self.plan.get('boundary_routing')
+        fields = [
+            'crossing_h',
+            'crossing_v',
+            'internal_h',
+            'internal_v',
+            'capacity_h',
+            'capacity_v',
+            'excess_h',
+            'excess_v',
+        ]
+        if req.get('summary'):
+
+            def summary(grid):
+                if not grid:
+                    return None
+                totals = list(map(sum, zip(*grid['tiles'])))
+                return {
+                    'track_pitches': grid['track_pitches'],
+                    'pitch_dbu': grid['pitch_dbu'],
+                    'track_totals': dict(zip(fields, totals)),
+                    'tiles_with_excess': sum(t[6] + t[7] > 0 for t in grid['tiles']),
+                    'displayed_tiles': len(grid['tiles']),
+                }
+
+            floorplan = summary(floorplan)
+            boundary_grid = summary(boundary_grid)
+            for result in maps.values():
+                result['grid'] = summary(result['grid'])
+        return {'tile_fields': fields, 'floorplan': floorplan, 'boundaries':boundary_grid, 'chunks': maps}
 
     def move_io(self, ident, net, xy, measured=False, undo=None):
         with self.writer() as (state, _):
@@ -185,8 +290,8 @@ class Workspace:
                 if sample is None:
                     raise ValueError('macro stage has no measurement for this net')
                 xy = [a + b for a, b in zip(sample['contact_dbu'], sample['mean_pin_offset_dbu'])]
-                xy = boundary(row['box_dbu'], xy)
-            if len(xy) != 2 or not all(math.isfinite(v) for v in xy) or boundary(row['box_dbu'], xy) != list(xy):
+                xy = chunk_interfaces.project(row, xy)
+            if len(xy) != 2 or not all(math.isfinite(v) for v in xy) or chunk_interfaces.project(row, xy) != list(xy):
                 raise ValueError('use a point on the selected chunk perimeter in die DBU')
             if list(xy) == port['xy_dbu']:
                 return {'changed': []}
@@ -197,7 +302,10 @@ class Workspace:
             for k, c in self.chunks.items():
                 if any(p['net_index'] == net for p in c['ports']):
                     affected.append(k)
-                    state['contacts'].setdefault(k, {})[str(net)] = boundary(c['box_dbu'], xy)
+                    revisions = state.setdefault("interface_revision", {})
+                    revisions[k] = revisions.get(k, 0) + 1
+                    state.get('contact_layers',{}).get(k,{}).pop(str(net),None)
+                    state['contacts'].setdefault(k, {})[str(net)] = chunk_interfaces.project(c, xy)
                     for result in state['results'].get(k, {}).values():
                         result.update(status='stale', reason=f'{ident} moved net {net}')
             self.save(state)
@@ -221,14 +329,115 @@ class Workspace:
             xy = port['xy_dbu']
             if any(contact != xy for _, contact, _ in homes.values()):
                 continue
-            boxes = [box for _, _, box in homes.values()]
-            for axis in (0, 1):
-                fixed = 1 - axis
-                lo, hi = max(b[axis] for b in boxes), min(b[axis + 2] for b in boxes)
-                if lo < hi and all(xy[fixed] in (b[fixed], b[fixed + 2]) for b in boxes):
-                    edges.append([net, axis, lo, hi])
-                    break
+            candidates = chunk_interfaces.perimeter(self.chunks[ident])
+            for axis,line,start,end in candidates:
+                if xy[1-axis]!=line or not start<=xy[axis]<=end: continue
+                lo,hi=start,end
+                for peer in homes:
+                    match=next((e for e in chunk_interfaces.perimeter(self.chunks[peer])
+                                if e[0]==axis and e[1]==line and e[2]<=xy[axis]<=e[3]),None)
+                    if not match: break
+                    lo,hi=max(lo,match[2]),min(hi,match[3])
+                else:
+                    if lo<hi:
+                        edges.append([net,axis,lo,hi])
+                        break
         return edges
+
+    def prepare_job(
+        self,
+        state,
+        k,
+        stage,
+        run,
+        *,
+        seed=None,
+        poses=(),
+        iterations=None,
+        live_frames=False,
+        density=None,
+        freeze_macros=None,
+        negotiate=False,
+    ):
+        result = state["results"].get(k, {})
+        job = self.jobs[k].copy()
+        job["input"] = str(self.manifest.parent / job["input"])
+        handoff = stage == "final" and result.get("macro", {}).get("status") == "done"
+        if seed:
+            job.update(input=seed["path"], checksum=seed["checksum"])
+        elif handoff:
+            job.update(
+                input=str(self.root / result["macro"]["handoff"]),
+                checksum=result["macro"]["handoff_checksum"],
+            )
+        elif stage == "macro" and result.get("macro", {}).get("status") == "done":
+            current = result["macro"]
+            job.update(
+                input=str(self.root / current["handoff"]),
+                checksum=current["handoff_checksum"],
+            )
+        contacts = sorted(
+            [int(net), *xy] for net, xy in state["contacts"].get(k, {}).items()
+        )
+        if freeze_macros is not None:
+            handoff = freeze_macros
+        edges = (
+            self.shared_edges(k, state)
+            if negotiate and not handoff and self.index.get("adjust_contacts", False)
+            else []
+        )
+        job["request"] = {
+            "class": PREFIX + "chunk_request",
+            "stage": stage,
+            "id": k,
+            "design": self.design,
+            "contacts": contacts,
+            "freeze_macros": handoff,
+            "shared_edges": edges,
+        }
+        if layers := state.get("contact_layers", {}).get(k):
+            job["request"]["contact_layers"] = layers
+        if grid := self.plan.get("coarse_routing"):
+            members = next(c["members"] for c in self.plan["chunks"] if c["id"] == k)
+            job["request"]["routing"] = dict(
+                pitch=grid["track_pitch_dbu"],
+                rates=grid["tracks_per_dbu"],
+                blockage={
+                    m["id"]: m["blocked_fraction"]
+                    for m in members
+                    if "blocked_fraction" in m
+                },
+            )
+        if "score_nets" in job:
+            job["request"]["score_nets"] = job.pop("score_nets")
+        job.pop("seed_score", None)
+        if density is not None:
+            job["request"]["density"] = density
+        if live_frames:
+            job["request"]["live_frames"] = True
+        if poses:
+            job["request"]["poses"] = poses
+        if iterations is not None:
+            job["request"]["iterations"] = iterations
+        if not poses:
+            job["request"]["poses"] = [
+                [n, x, y, x is not None, y is not None]
+                for n, (x, y) in state.get("holds", {}).get(k, {}).items()
+            ]
+        # An edited frame must never appear current when the base fp_plan is reopened.
+        base = self.index["plan_revision"]
+        inputs = json.dumps([base, stage, job["checksum"], job["request"]]).encode()
+        revision = "chunk-" + hashlib.sha256(inputs).hexdigest()
+        job["input"] = os.path.relpath(job["input"], run)
+        manifest = run / "job.json"
+        packet_index = {
+            field: value
+            for field, value in self.index.items()
+            if field not in ("jobs", "assembly")
+        }
+        packet_index.update(jobs=[job], base_plan_revision=base, plan_revision=revision)
+        manifest.write_text(json.dumps([packet_index]))
+        return manifest, edges
 
     def run(self, stage, ids, neighbors=False, *, seed=None, poses=(), iterations=None, undo=None, live_frames=False, density=None, freeze_macros=None, negotiate=True):
         selected = self.select(ids, neighbors)
@@ -248,49 +457,22 @@ class Workspace:
             for k in selected:
                 _, previous_score = contribution(self,state,k)
                 result = state['results'].setdefault(k, {})
-                job = self.jobs[k].copy()
-                job['input'] = str(self.manifest.parent / job['input'])
-                handoff = stage == 'final' and result.get('macro', {}).get('status') == 'done'
-                if seed:
-                    job.update(input=seed['path'], checksum=seed['checksum'])
-                elif handoff:
-                    job.update(input=str(self.root / result['macro']['handoff']), checksum=result['macro']['handoff_checksum'])
-                elif stage == 'macro' and result.get('macro',{}).get('status') == 'done':
-                    current = result['macro']
-                    job.update(input=str(self.root / current['handoff']), checksum=current['handoff_checksum'])
+                run = Path(tempfile.mkdtemp(prefix=stage + "-", dir=self.root))
+                manifest, edges = self.prepare_job(
+                    state,
+                    k,
+                    stage,
+                    run,
+                    seed=seed,
+                    poses=poses,
+                    iterations=iterations,
+                    live_frames=live_frames,
+                    density=density,
+                    freeze_macros=freeze_macros,
+                    negotiate=negotiate,
+                )
                 if stage == 'macro' and 'final' in result:
                     result['final'].update(status='stale', reason='macro placement rerun')
-                contacts = sorted([int(net), *xy] for net, xy in state['contacts'].get(k, {}).items())
-                if freeze_macros is not None:
-                    handoff = freeze_macros
-                edges = self.shared_edges(k, state) if negotiate and not handoff and self.index.get('adjust_contacts', False) else []
-                job['request'] = {'class': PREFIX + 'chunk_request', 'stage': stage, 'id': k,
-                                  'design': self.design, 'contacts': contacts, 'freeze_macros': handoff,
-                                  'shared_edges': edges}
-                if 'score_nets' in job:
-                    job['request']['score_nets'] = job.pop('score_nets')
-                job.pop('seed_score', None)
-                if density is not None:
-                    job['request']['density'] = density
-                if live_frames:
-                    job['request']['live_frames'] = True
-                if poses:
-                    job['request']['poses'] = poses
-                if iterations is not None:
-                    job['request']['iterations'] = iterations
-                if not poses:
-                    job['request']['poses'] = [[n, x, y, x is not None, y is not None]
-                                               for n, (x, y) in state.get('holds', {}).get(k, {}).items()]
-                # An edited frame must never appear current when the base fp_plan is reopened.
-                base = self.index['plan_revision']
-                inputs = json.dumps([base, stage, job['checksum'], job['request']]).encode()
-                revision = 'chunk-' + hashlib.sha256(inputs).hexdigest()
-                run = Path(tempfile.mkdtemp(prefix=stage + '-', dir=self.root))
-                job['input'] = os.path.relpath(job['input'], run)
-                manifest = run / 'job.json'
-                packet_index = {field: value for field, value in self.index.items() if field not in ('jobs', 'assembly')}
-                packet_index.update(jobs=[job], base_plan_revision=base, plan_revision=revision)
-                manifest.write_text(json.dumps([packet_index]))
                 prior_result = result.get(stage,{})
                 # Keep the previous immutable measurement visible until the new one is published.
                 previous_report = prior_result.get('report') or prior_result.get('previous_report')
@@ -348,11 +530,43 @@ class Workspace:
         return self.rows(state, selected)
 
 
-def serve(work, page, no_open, viewer=None, workers=None):
+def serve(work, page, no_open, viewer=None, workers=None, compare_dirs=()):
     token = secrets.token_urlsafe(32)
-    managed = (work.manifest.parent / PROJECT).exists()
+    primary = LivePlacement(work, workers)
+    directories = list(dict.fromkeys([work.manifest.parent, *(place_dir(p) for p in compare_dirs)]))
+    projects = {str(i): path for i, path in enumerate(directories)}
+    sessions = {'0': (primary, {})}
+    session_lock = threading.Lock()
 
-    live = LivePlacement(work,workers)
+    # Several tabs can watch the same study. Cache only small activity records,
+    # and avoid loading every project's cell database on each poll.
+    activity_lock = threading.Lock()
+    activity_cache = {}
+    legacy_roots = {}
+    def activity():
+        from chunk_live import project_activity
+
+        with activity_lock:
+            now = time.monotonic()
+            if now < activity_cache.get('until', 0):
+                return activity_cache['rows']
+            rows = []
+            for key, directory in projects.items():
+                manifest = current_manifest(directory)
+                if not manifest.is_file():
+                    continue
+                digest = manifest.stem.removeprefix('chunks-')
+                if len(digest) != 64:
+                    version = (manifest, manifest.stat().st_mtime_ns)
+                    if version not in legacy_roots:
+                        legacy_roots[version] = hashlib.sha256(manifest.read_bytes()).hexdigest()
+                    digest = legacy_roots[version]
+                event = project_activity(directory / '.chunk-work' / digest)
+                if event:
+                    rows.append(dict(project=key, name=directory.parent.parent.name, **event))
+            rows.sort(key=lambda e: (e.get('running', False), e['time']), reverse=True)
+            activity_cache.update(until=now+1, rows=rows)
+            return rows
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, fmt, *args):
@@ -374,7 +588,6 @@ def serve(work, page, no_open, viewer=None, workers=None):
                 self.send_error(404)
 
         def do_POST(self):
-            nonlocal work
             local = isinstance(self.server, ThreadingUnixStreamServer)
             if (local and self.path != '/agent') or (not local and (self.path != '/chunk' or self.headers.get('Authorization') != 'Bearer ' + token)):
                 self.send_error(403)
@@ -386,13 +599,28 @@ def serve(work, page, no_open, viewer=None, workers=None):
                 req = json.loads(self.rfile.read(size))
                 if not isinstance(req, dict) or not isinstance(req.get('cmd'), str):
                     raise ValueError('send an object with a command name')
+                project = str(req.get('project', '0'))
+                if project not in projects:
+                    raise ValueError('unknown project')
+                if req['cmd'] == 'activity':
+                    self.reply(json.dumps({'events': activity()}).encode(), 'application/json')
+                    return
+                if req['cmd'] == 'projects':
+                    options = [{'id': key, 'name': path.parent.parent.name,
+                                'ready': current_manifest(path).is_file()} for key, path in projects.items()]
+                    self.reply(json.dumps({'projects': options, 'selected': project}).encode(), 'application/json')
+                    return
+                with session_lock:
+                    if project not in sessions:
+                        peer = Workspace(current_manifest(projects[project]), work.exe)
+                        sessions[project] = LivePlacement(peer, primary.slots, admission=primary.admission), {}
+                    live, searches = sessions[project]
                 with live.lock:
-                    active = work
-                    if managed:
+                    active = live.work
+                    if (active.manifest.parent / PROJECT).is_file():
                         path = current_manifest(active.manifest.parent)
                         if path != active.manifest:
                             active = Workspace(path, active.exe)
-                            work = active
                             live.bind(active)
                 self.generation = active.root.name
                 cmd = req['cmd']
@@ -400,11 +628,11 @@ def serve(work, page, no_open, viewer=None, workers=None):
                     raise ValueError('floorplan changed; refresh the selection')
                 undo = []
                 if cmd == 'list':
-                    answer = active.rows(active.state(), active.chunks)
+                    answer = active.display_rows(active.rows(active.state(), active.chunks))
                 elif cmd == 'show':
-                    answer = active.show(active.state(), req['id'])
+                    answer = active.display_rows([active.show(active.state(), req['id'])])[0]
                 elif cmd == 'preview':
-                    row, = active.rows(active.state(), active.select([req['id']]))
+                    row, = active.display_rows(active.rows(active.state(), active.select([req['id']])))
                     result = row[req['stage']]
                     if result['status'] == 'running':
                         frame = live.worker_progress(active, active.state(), req['id'], req['stage'])
@@ -413,6 +641,100 @@ def serve(work, page, no_open, viewer=None, workers=None):
                         answer = one(json.loads(Path(result['preview']).read_text()), 'chunk_preview', active.design)
                     else:
                         raise ValueError('no current placement preview')
+                elif cmd == 'restore-best':
+                    answer = chunk_explore.restore_best(active, req.get('objective', 'hpwl'))
+                elif local and cmd == 'verify-wns':
+                    answer = chunk_validate.verify_wns(active, req['trial'], req['branch'], req.get('openroad', 'openroad'),
+                                                       req.get('timing_setup'), req.get('keep', False))
+                elif local and cmd == 'validate':
+                    answer = chunk_validate.validate(
+                        active,
+                        req.get('openroad', 'openroad'),
+                        req.get('route'),
+                        req.get('capacity', 0.75),
+                        req.get('timing_setup'),
+                        req.get('segments', False),
+                        req.get('trial'),
+                        req.get('branch'),
+                    )
+                elif local and cmd == 'assemble' and req.get('def'):
+                    state = chunk_validate.placement_state(active, req.get('trial'), req.get('branch'))
+                    answer = chunk_validate.stitch(active, state, req['def'])
+                elif local and cmd == 'dispatch':
+                    answer = {
+                        'request': chunk_dispatch.issue(
+                            active,
+                            req['home'],
+                            req['stage'],
+                            req['bundle'],
+                            iterations=req.get('iterations'),
+                        )
+                    }
+                elif local and cmd == 'collect':
+                    answer = chunk_dispatch.collect(active, req['bundle'])
+                elif cmd == 'explore':
+                    kind = req['kind']
+                    if kind not in ('macro', 'density', 'interfaces'):
+                        raise ValueError('explore accepts macro, density or interfaces')
+                    ident = secrets.token_hex(6)
+                    journal = Journal(active.root)
+                    start = active.state()
+                    homes = active.select(req.get('ids') or [])
+                    pending = dict(
+                        id=ident,
+                        kind=kind,
+                        home=homes[0],
+                        stage='final',
+                        selection=[],
+                        checkpoint=revision(start),
+                        epoch=journal.epoch(),
+                        started=time.time(),
+                        hypothesis=req.get('hypothesis') or f'Compare {kind} placement',
+                        requested_iterations=req.get('iterations', 120),
+                        candidates={kind: {'status': 'queued'}},
+                    )
+                    journal.save(pending)
+
+                    def search():
+                        try:
+                            return chunk_explore.explore(
+                                active,
+                                kind,
+                                live.slots,
+                                req.get('iterations', 120),
+                                req.get('final_iterations', 300),
+                                homes,
+                                req.get('pitch'),
+                                req.get('nets'),
+                                req.get('density', 0.4),
+                                req.get('keep', False),
+                                req.get('objective', 'hpwl'),
+                                admit=live.admit,
+                                ident=ident,
+                                base_state=start, spread=req.get('spread'),bus_order=req.get('bus_order',False),hypothesis=req.get('hypothesis'),
+                            )
+                        except Exception as exc:
+                            record = journal.get(ident)
+                            for row in record['candidates'].values():
+                                if row['status'] in ('queued', 'running'):
+                                    row.update(status='failed', error=str(exc))
+                            record['error'] = str(exc)
+                            journal.save(record)
+                            raise
+                        finally:
+                            with live.lock:
+                                searches.pop(ident, None)
+
+                    with live.lock:
+                        task = live.pool.submit(search)
+                        searches[ident] = task
+                    answer = task.result() if req.get('wait') else {'ok': True, 'trial': ident, 'status': 'queued'}
+                elif cmd == 'compare' and req.get('wait') and req.get('trial') in searches:
+                    with live.lock:
+                        task = searches.get(req['trial'])
+                    answer = task.result() if task else Journal(active.root).get(req['trial'])
+                elif cmd in ('interfaces', 'shapes', 'resources'):
+                    answer=active.analysis(cmd,req)
                 elif cmd == 'move-io':
                     with live.lock:
                         home, net = req.get('id', live.home), req.get('net', live.port)
@@ -430,9 +752,15 @@ def serve(work, page, no_open, viewer=None, workers=None):
                             live.home, live.stage, live.view = ids[0], cmd, None
                             live.update()
                     selected = active.select(ids, req.get('neighbors', False))
-                    estimate = max((active.jobs[k]['estimated_bytes'] for k in selected if k in active.jobs), default=0)
-                    with live.admit(estimate):
-                        answer = active.run(cmd, ids, req.get('neighbors', False), undo=undo, live_frames=True)
+                    answer = chunk_dispatch.wave(
+                        active,
+                        cmd,
+                        [h for h in selected if h in active.jobs] if ids else None,
+                        live.slots,
+                        iterations=req.get('iterations'),
+                        live_frames=True,
+                        admit=live.admit,
+                    )
                     if len(answer) == 1:
                         with live.lock:
                             if live.home != answer[0]['id']:
@@ -492,17 +820,39 @@ def reconcile(old, new, same_engine):
     before, after = old.incident, new.incident
     changed_io = set()
     stable_nets = set()
-    for net in before.keys() | after.keys():
-        if before.get(net) != after.get(net):
-            changed_io.update(before.get(net, {}))
-            changed_io.update(after.get(net, {}))
-        else:
-            stable_nets.add(net)
+    old_grid = old.plan.get('coarse_routing', {})
+    new_grid = new.plan.get('coarse_routing', {})
+    same_tracks = all(old_grid.get(key) == new_grid.get(key) for key in ('track_patterns', 'track_pitch_dbu', 'io_spacing'))
+    # Compare the actual interface, including every previously negotiated tap.
+    # A bounding frame can expand while the shared contacts on another edge stay put.
+    overrides = {}
     for ident, edits in prior['contacts'].items():
         for key, xy in edits.items():
-            net = int(key)
-            if net in stable_nets and ident in after[net]:
-                state['contacts'].setdefault(ident, {})[key] = xy
+            overrides.setdefault(int(key), {})[ident] = xy
+    for net in before.keys() | after.keys():
+        previous, current = before.get(net, {}), after.get(net, {})
+        taps = overrides.get(net, {})
+        matching = previous.keys() == current.keys() and all(previous[h][:2] == current[h][:2] for h in current)
+        if taps:
+            matching = (matching and same_tracks and (net in old.anchored) == (net in new.anchored)
+                        and all(h in current and chunk_interfaces.project(new.chunks[h], xy) == xy for h, xy in taps.items()))
+        if matching:
+            stable_nets.add(net)
+        else:
+            changed_io.update(previous)
+            changed_io.update(current)
+    for net, taps in overrides.items():
+        if net not in stable_nets:
+            continue
+        key = str(net)
+        for ident, xy in taps.items():
+            state['contacts'].setdefault(ident, {})[key] = xy
+            layer = prior.get('contact_layers', {}).get(ident, {}).get(key)
+            if layer:
+                state.setdefault('contact_layers', {}).setdefault(ident, {})[key] = layer
+    for ident, counter in prior.get('interface_revision', {}).items():
+        if ident in new.chunks:
+            state.setdefault('interface_revision', {})[ident] = counter + int(ident in changed_io)
     changed, reused, repartitioned = [], [], []
     for ident in new.jobs.keys() & old.jobs.keys():
         reasons = []
@@ -536,6 +886,19 @@ def reconcile(old, new, same_engine):
     new.save(state)
     return dict(unchanged=sorted(reused), changed=sorted(changed), membership_changed=sorted(repartitioned),
                 added=sorted(new.jobs.keys() - old.jobs.keys()), removed=sorted(old.jobs.keys() - new.jobs.keys()))
+
+
+def without_settings(argv, keys):
+    """Remove inherited --set pairs for explicitly overridden native options."""
+    result = []
+    i = 0
+    while i < len(argv):
+        if argv[i] == '--set' and i + 1 < len(argv) and argv[i + 1].partition('=')[0] in keys:
+            i += 2
+        else:
+            result.append(argv[i])
+            i += 1
+    return result
 
 
 def export_args(argv, managed):
@@ -592,24 +955,27 @@ finally{setTimeout(follow,500);}}follow();</script></html>"""
         if not no_open:
             webbrowser.open(url)
 
-    def run(self, command, **kwargs):
+    def run(self, command, budget, **kwargs):
         # Relay native diagnostics and discover its authenticated browser URL.
         command = list(command)
         if '--gui-no-open' not in command:
             command.insert(command.index('--gui')+1, '--gui-no-open')
-        with subprocess.Popen(command, stderr=subprocess.PIPE, **kwargs) as proc:
+        with subprocess.Popen(command, stderr=subprocess.PIPE, **kwargs) as proc, monitor(proc,budget) as usage:
             for line in proc.stderr:
                 sys.stderr.buffer.write(line)
                 sys.stderr.buffer.flush()
                 if line.startswith(b'lhd synth --gui: http://127.0.0.1:'):
                     self.target = line.decode().partition('--gui: ')[2].strip()
-            return proc.wait()
+            return proc.wait(),usage
 
 def setup_project(exe, page, argv, updating):
     index = argv.index('--') if '--' in argv else len(argv)
     parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
     parser.add_argument('--workdir', type=Path)
     parser.add_argument('--budget', metavar='SIZE')
+    parser.add_argument('--producer-budget', metavar='SIZE')
+    if not updating:
+        parser.add_argument('--from-workdir', type=Path, help='reuse this synthesis recipe and mapping caches in a new project')
     parser.add_argument('--workers', type=int)
     opts, args = parser.parse_known_args(argv[:index])
     if opts.workers is not None and opts.workers < 1:
@@ -634,15 +1000,48 @@ def setup_project(exe, page, argv, updating):
         else:
             if path.exists():
                 raise ValueError('workspace already initialized; use update')
-            args += argv[index:]
-            project = dict(cwd=str(Path.cwd()), args=export_args(args, True))
+            if opts.from_workdir:
+                source = place_dir(opts.from_workdir)
+                with project_lock(source, False):
+                    saved = json.loads((source / PROJECT).read_text())
+                    previous = saved['args']
+                    sep = previous.index('--') if '--' in previous else len(previous)
+                    native = [a for a in previous[:sep] if a not in ('--gui', '--gui-no-open')]
+                    overrides = {args[i + 1].partition('=')[0] for i, arg in enumerate(args[:-1]) if arg == '--set'}
+                    native = without_settings(native, overrides)
+                    reader = previous[sep + 1:] + argv[index + 1:]
+                    project = {k: saved[k] for k in ('cwd', 'workers', 'budget_mib', 'producer_budget_mib') if k in saved}
+                    project['args'] = native + args + (['--'] + reader if reader else [])
+                    project['source_project'] = str(source / saved['manifest'])
+                    # Only mapping caches cross the boundary. The new owner gets private
+                    # inodes and can remap or update its index independently.
+                    for name in ('abc_cache', 'abc_cache_pre', 'usyn_cache'):
+                        origin, destination = source.parent.parent / name, directory.parent.parent / name
+                        if origin.is_dir() and not destination.exists():
+                            with tempfile.TemporaryDirectory(dir=destination.parent) as temporary:
+                                copied = Path(temporary) / name
+                                shutil.copytree(origin, copied)
+                                copied.rename(destination)
+            else:
+                args += argv[index:]
+                project = dict(cwd=str(Path.cwd()), args=export_args(args, True))
         if opts.workers is not None:
             project['workers'] = opts.workers
-        if opts.budget:
-            match = re.fullmatch(r'(\d+(?:\.\d+)?|\.\d+)(MiB|GiB)?', opts.budget, re.I)
+        for size, key in (
+            (opts.budget, "budget_mib"),
+            (opts.producer_budget, "producer_budget_mib"),
+        ):
+            if size is None:
+                continue
+            match = re.fullmatch(r"(\d+(?:\.\d+)?|\.\d+)(MiB|GiB|MB|GB)?", size, re.I)
             if not match or not 0 < float(match[1]) < math.inf:
-                raise ValueError('--budget expects a positive size such as 1024MiB or 1GiB')
-            project['budget_mib'] = float(match[1]) * (1024 if (match[2] or '').lower() == 'gib' else 1)
+                raise ValueError(
+                    "use a positive memory size, for example 2GB or 1907MiB"
+                )
+            scale = {"mib": 2**20, "gib": 2**30, "mb": 10**6, "gb": 10**9}[
+                (match[2] or "MiB").lower()
+            ]
+            project[key]=float(match[1])*scale/2**20
         digest = hashlib.sha256()
         with open(exe, 'rb') as binary:
             for block in iter(lambda: binary.read(1 << 20), b''):
@@ -657,6 +1056,7 @@ def setup_project(exe, page, argv, updating):
         else:
             native += ['--workdir', str(directory.parent.parent)]
         if 'budget_mib' in project:
+            native = without_settings(native, {'lhd.ram_budget_mb'})
             native += ['--set', f"lhd.ram_budget_mb={project['budget_mib']}"]
         if updating:
             native = [a for a in native if a not in ('--gui', '--gui-no-open')]
@@ -673,11 +1073,25 @@ def setup_project(exe, page, argv, updating):
         with log.open('w') as out:
             command = [exe, 'synth', *args]
             invocation = dict(cwd=project['cwd'], stdout=out, pass_fds=(lock_fd,))
-            rc = viewer.run(command, **invocation) if viewer else subprocess.run(command, **invocation).returncode
+            budget = round(project.get("producer_budget_mib", 0) * 2**20)
+            invocation["start_new_session"] = True
+            if viewer:
+                rc, usage = viewer.run(command, budget, **invocation)
+            else:
+                with (
+                    subprocess.Popen(command, **invocation) as proc,
+                    monitor(proc, budget) as usage,
+                ):
+                    rc = proc.wait()
+            project['producer']=usage
         if rc:
             raise ValueError(f'floorplan export failed (exit {rc}); see {log}')
         work = Workspace(directory / 'chunks.json', exe)
         snapshot = directory / ('chunks-' + work.root.name + '.json')
+        seed_def = directory / "chunk-plan.def"
+        if seed_def.is_file() and not (work.root / "seed.def").exists():
+
+            shutil.copyfile(seed_def,work.root/'seed.def')
         if not snapshot.exists():
             os.link(work.manifest, snapshot)
         if '--gui' in native and work.guidance:
@@ -705,7 +1119,7 @@ def main(exe, page, argv):
         if '--gui' not in argv:
             os.execv(exe, command)
         viewer = FloorplanWindow('--gui-no-open' in argv)
-        rc = viewer.run(command)
+        rc, _ = viewer.run(command, 0, start_new_session=True)
         if rc:
             raise SystemExit(rc)
         # Continue from the accepted interactive plan after synthesis releases its flat view.
@@ -718,10 +1132,12 @@ def main(exe, page, argv):
     init = cmds.add_parser('init', usage='%(prog)s SOURCES [--workdir DIR] [--budget SIZE] [synth options]',
                            help='create a floorplan and remember the source recipe for update',
                            description='Pass the same HDL, top, Liberty, LEF and reader options as lhd synth.')
+    init.add_argument('--from-workdir', type=Path, help='reuse a managed project recipe and mapping caches')
     init.add_argument('--budget', metavar='SIZE', help='per-worker memory budget, for example 1024MiB or 1GiB')
     init.add_argument('--workdir', metavar='DIR', help='new project directory (default: current directory)')
     update = cmds.add_parser('update', help='rebuild from the saved source recipe and reconcile chunks')
     for sub in (init, update):
+        sub.add_argument('--producer-budget',metavar='SIZE',help='separate process-tree limit for source mapping and export')
         sub.add_argument('--workers',type=int,help='concurrent GUI placement workers for this project')
         sub.add_argument('--gui', action='store_true', help='pause in the interactive floorplan editor')
         sub.add_argument('--gui-no-open', action='store_true', help='print GUI access details without opening a browser')
@@ -733,7 +1149,7 @@ def main(exe, page, argv):
                                 'Use --gui to edit the initial plan and continue into chunk placement.')
     for cmd, help_text in [('list', 'list chunks and their stage status'), ('show', 'inspect a chunk and its IO contacts'),
                            ('macro', 'place macros and save the fixed frame'), ('final', 'place cells in the accepted macro frame'),
-                           ('move-io', 'move a contact and invalidate all homes on its net'), ('assemble','verify final placements and emit the assembled position manifest'), ('next','rank the next chunk to optimize'), ('score','score the assembled coordinates'), ('gui', 'open chunk placement controls')]:
+                           ('shapes','list screened frames in coarse wirelength order'), ('resources','report producer and worker memory and concurrent solves'), ('validate','stitch and check a final DEF using OpenROAD'), ('restore-best','restore the best complete comparable archived placement'), ('verify-wns','compare independent WNS on an archived trial, control and checkpoint'), ('explore','test a placement hypothesis against a matched control'), ('interfaces','preview or apply a shared IO slot contract'), ('routing','get directional floorplan and worker routing estimates'), ('move-io', 'move a contact and invalidate all homes on its net'), ('assemble','verify final placements and emit the assembled position manifest'), ('next','rank the next chunk to optimize'), ('score','score the assembled coordinates'), ('gui', 'open chunk placement controls')]:
         sub = cmds.add_parser(cmd, help=help_text)
         target = sub.add_mutually_exclusive_group()
         target.add_argument('--manifest', type=Path, help='exported chunk manifest')
@@ -743,11 +1159,75 @@ def main(exe, page, argv):
             sub.add_argument('--neighbors', action='store_true', help='include homes touching or overlapping the selected boxes')
         if cmd in ('list', 'macro', 'final'):
             sub.add_argument('--json', action='store_true', help='include machine-readable feedback and artifact paths')
+        if cmd in ("macro", "final"):
+            sub.add_argument(
+                "--workers",
+                type=int,
+                help="concurrent workers using frozen shared contacts",
+            )
+            sub.add_argument("--iterations", type=int)
+            sub.add_argument('--cgroup-root',type=Path,help='delegated Linux cgroup v2 directory for hard worker limits')
+        if cmd=='shapes':
+            sub.add_argument('--screen',action='store_true',help='rank candidate frames by slot feasibility and projected physical pin span')
+            sub.add_argument('--pitch',type=float)
+        if cmd in ('interfaces','routing'):
+            sub.add_argument('--summary',action='store_true',help='summarize demand or infeasible contacts without all coordinates')
         if cmd == 'list':
             sub.add_argument('--stage', choices=['macro', 'final'], default='macro', help='stage used by --status')
             sub.add_argument('--status', choices=['pending', 'running', 'done', 'stale', 'failed', 'interrupted'])
         if cmd in ('show', 'move-io'):
             sub.add_argument('id')
+        if cmd == "restore-best":
+            sub.add_argument("--objective", choices=["hpwl","wns"], default="hpwl")
+        if cmd == "verify-wns":
+            sub.add_argument("--trial", required=True)
+            sub.add_argument("--branch", required=True)
+            sub.add_argument("--openroad", default="openroad")
+            sub.add_argument("--timing-setup", type=Path)
+            sub.add_argument("--keep", action="store_true")
+        if cmd in ("assemble", "validate"):
+            sub.add_argument("--trial", help="use an archived experiment")
+            sub.add_argument("--branch", help="use this completed candidate from the experiment")
+        if cmd == "assemble":
+            sub.add_argument(
+                "--def",
+                dest="def_out",
+                type=Path,
+                help="write stitched final coordinates into a DEF",
+            )
+        if cmd == "validate":
+            sub.add_argument(
+                "--segments",
+                action="store_true",
+                help="retain global route segments for spatial calibration",
+            )
+            sub.add_argument("--openroad", default="openroad")
+            sub.add_argument("--route", nargs=2, metavar=("FIRST_LAYER", "LAST_LAYER"))
+            sub.add_argument("--capacity", type=float, default=0.75)
+            sub.add_argument(
+                "--timing-setup",
+                type=Path,
+                help="Tcl constraints setup to source before the design SDC",
+            )
+        if cmd in ("explore","interfaces"):
+            sub.add_argument("--spread",action=argparse.BooleanOptionalAction,default=None,help="try top-level track spacing with a capacity fallback")
+            sub.add_argument("--bus-order",action="store_true",help="order logical bits along shared boundaries")
+        if cmd == "explore":
+            sub.add_argument("kind", choices=["macro", "density", "interfaces"])
+            sub.add_argument("--ids", nargs="+")
+            sub.add_argument("--workers", type=int, default=1)
+            sub.add_argument("--iterations", type=int, default=120)
+            sub.add_argument("--final-iterations", type=int, default=300)
+            sub.add_argument("--hypothesis",help="record what this fork is testing in the GUI experiment log")
+            sub.add_argument("--pitch", type=float)
+            sub.add_argument("--nets", type=int, nargs="+")
+            sub.add_argument("--density", type=float, default=0.4)
+            sub.add_argument("--keep", action="store_true")
+            sub.add_argument("--objective", choices=["hpwl", "wns"], default="hpwl")
+        if cmd == "interfaces":
+            sub.add_argument("--pitch", type=float, help="logical slot spacing in DBU")
+            sub.add_argument("--nets", type=int, nargs="+")
+            sub.add_argument('--apply',action='store_true')
         if cmd == 'move-io':
             sub.add_argument('net', type=int, help='net_index from show')
             source = sub.add_mutually_exclusive_group(required=True)
@@ -757,13 +1237,106 @@ def main(exe, page, argv):
             sub.add_argument('--objective',choices=['hpwl','wns','density'],default='hpwl')
         if cmd == 'gui':
             sub.add_argument('--workers',type=int,help='maximum concurrent placement workers including trials')
+            sub.add_argument('--compare-workdir', action='append', type=Path, default=[], help='add a design or floorplan alternative to this viewer (repeatable)')
             sub.add_argument('--no-open', action='store_true')
+    for cmd in ("dispatch", "collect", "worker"):
+        sub = cmds.add_parser(
+            cmd,
+            help={
+                "dispatch": "issue a frozen portable placement request",
+                "worker": "execute a request with the matching native build",
+                "collect": "import a completed request if its inputs are current",
+            }[cmd],
+        )
+        sub.add_argument("bundle", type=Path)
+        if cmd == "worker":
+            sub.add_argument("--cgroup-root", type=Path)
+        if cmd != "worker":
+            target = sub.add_mutually_exclusive_group()
+            target.add_argument("--workdir", type=Path)
+            target.add_argument("--manifest", type=Path)
+        if cmd == "dispatch":
+            sub.add_argument("stage", choices=["macro", "final"])
+            sub.add_argument("home")
+            sub.add_argument('--iterations',type=int)
     args = parser.parse_args(argv or ['--help'])
+    if args.cmd == 'worker':
+        print(
+            json.dumps(
+                chunk_dispatch.execute(exe, args.bundle, cgroup_root=args.cgroup_root),
+                indent=2,
+            )
+        )
+        return
     if args.manifest and args.manifest.name != 'chunks.json':
         work = Workspace(args.manifest, exe)
     else:
         directory = args.manifest.resolve().parent if args.manifest else place_dir(args.workdir)
         work = Workspace(current_manifest(directory), exe)
+    if args.cmd == 'restore-best':
+        print(json.dumps(chunk_explore.restore_best(work, args.objective), indent=2))
+        return
+    if args.cmd == 'verify-wns':
+        print(json.dumps(chunk_validate.verify_wns(work, args.trial, args.branch, args.openroad, args.timing_setup, args.keep), indent=2))
+        return
+    if args.cmd == 'validate':
+        print(
+            json.dumps(
+                chunk_validate.validate(
+                    work,
+                    args.openroad,
+                    args.route,
+                    args.capacity,
+                    args.timing_setup,
+                    args.segments,
+                    args.trial,
+                    args.branch,
+                ),
+                indent=2,
+            )
+        )
+        return
+    if args.cmd == 'explore':
+        print(
+            json.dumps(
+                chunk_explore.explore(
+                    work,
+                    args.kind,
+                    args.workers,
+                    args.iterations,
+                    args.final_iterations,
+                    args.ids,
+                    args.pitch,
+                    args.nets,
+                    args.density,
+                    args.keep,
+                    args.objective,spread=args.spread,bus_order=args.bus_order,hypothesis=args.hypothesis,
+                ),
+                indent=2,
+            )
+        )
+        return
+    if args.cmd in ('routing', 'interfaces', 'shapes', 'resources'):
+        print(json.dumps(work.analysis(args.cmd, vars(args)), indent=2))
+        return
+    if args.cmd == 'dispatch':
+        print(
+            json.dumps(
+                {
+                    'request': chunk_dispatch.issue(
+                        work,
+                        args.home,
+                        args.stage,
+                        args.bundle,
+                        iterations=args.iterations,
+                    )
+                }
+            )
+        )
+        return
+    if args.cmd == "collect":
+        print(json.dumps(chunk_dispatch.collect(work, args.bundle), indent=2))
+        return
     if args.cmd == 'gui':
         if args.workers is not None and args.workers<1:
             raise ValueError('--workers must be positive')
@@ -771,11 +1344,16 @@ def main(exe, page, argv):
         project = work.manifest.parent / PROJECT
         if workers is None and project.is_file():
             workers = json.loads(project.read_text()).get('workers')
-        return serve(work, Path(page), args.no_open, workers=workers)
-    if args.cmd in ('assemble','score','next'):
+        return serve(work, Path(page), args.no_open, workers=workers, compare_dirs=args.compare_workdir)
+    if args.cmd in ('assemble', 'score', 'next'):
         state = work.state()
         if args.cmd == 'assemble':
-            value = LivePlacement.assemble(work, state)
+            state = chunk_validate.placement_state(work, args.trial, args.branch)
+            value = (
+                chunk_validate.stitch(work, state, args.def_out)
+                if args.def_out
+                else LivePlacement.assemble(work, state)
+            )
         elif args.cmd == 'score':
             value = Exterior(work, state).measure()
         else:
@@ -783,7 +1361,7 @@ def main(exe, page, argv):
         print(json.dumps(value, indent=2))
         return
     if args.cmd == 'list':
-        value = work.rows(work.state(), work.select(args.ids, args.neighbors))
+        value = work.display_rows(work.rows(work.state(), work.select(args.ids, args.neighbors)))
         if args.status:
             value = [r for r in value if r[args.stage]['status'] == args.status]
         if not args.json:
@@ -799,7 +1377,29 @@ def main(exe, page, argv):
     elif args.cmd == 'move-io':
         value = work.move_io(args.id, args.net, args.xy or [], args.from_macro)
     else:
-        value = work.run(args.cmd, args.ids, args.neighbors)
+        project = work.manifest.parent / PROJECT
+        workers = (
+            args.workers
+            if args.workers is not None
+            else (
+                json.loads(project.read_text()).get("workers")
+                if project.exists()
+                else None
+            )
+        )
+        if args.cgroup_root and workers is None:
+            workers = 1
+        if workers is None:
+            value = work.run(
+                args.cmd, args.ids, args.neighbors, iterations=args.iterations
+            )
+        else:
+            ids = (
+                work.select(args.ids, args.neighbors)
+                if args.ids or args.neighbors
+                else None
+            )
+            value=chunk_dispatch.wave(work,args.cmd,ids,workers,iterations=args.iterations,cgroup_root=args.cgroup_root)
         if sys.stdout.isatty() and not args.json:
             if not value:
                 print(f'All exported chunks have current {args.cmd} placement.')

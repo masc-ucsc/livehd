@@ -11,8 +11,10 @@
 #include <stdexcept>
 #include <tuple>
 
+#include "chunk_demand.hpp"
 #include "chunk_templates.hpp"
 #include "chunk_topology.hpp"
+#include "io_spacing.hpp"
 
 namespace livehd::placement {
 namespace {
@@ -567,7 +569,17 @@ std::optional<Chunk_plan> Chunk_model::plan_with(Chunk_box core, double site, do
   if (!(density > 0 && density <= 1 && site > 0 && row > 0 && core[2] > core[0] && core[3] > core[1]) || objects.empty()) {
     throw std::invalid_argument("invalid fp_plan frame, density or empty design");
   }
-  const auto    edits      = read_chunk_edits(input, design);
+  const auto all_edits = read_chunk_edits(input, design);
+  // The latest depth replaces the previous one for the same physical seam. Keeping
+  // the original intent history lets undo restore the prior profile.
+  std::map<std::pair<std::string, std::string>, const Chunk_edit*> steps;
+  for (const auto& edit : all_edits) {
+    if (!edit.step.empty()) {
+      steps[std::minmax(edit.step, edit.peer)] = &edit;
+    }
+  }
+  auto edits = all_edits;
+  std::erase_if(edits, [](const auto& op) { return !op.step.empty(); });
   const auto    home_edits = read_home_edits(input, design);
   const auto    copies     = read_interface_copies(input, design);
   Memory_counts counts{};
@@ -581,11 +593,11 @@ std::optional<Chunk_plan> Chunk_model::plan_with(Chunk_box core, double site, do
     whole = add_bytes(whole, estimate(o));
   }
   const uint64_t capacity = budget > predictor.baseline ? budget - predictor.baseline : 0;
-  const bool     single   = !budget || whole <= budget || !capacity;
+  const bool     single   = target_homes <= 1 && (!budget || whole <= budget || !capacity);
   auto           solve    = [&](bool          macro_islands,
-                   const Packed* packed     = nullptr,
-                   bool          scaffold   = false,
-                   bool          exact_only = false) -> std::optional<Chunk_plan> {
+                                const Packed* packed     = nullptr,
+                                bool          scaffold   = false,
+                                bool          exact_only = false) -> std::optional<Chunk_plan> {
     auto       hints = read_guidance(input, design);
     Chunk_plan p;
     p.predictor     = predictor;
@@ -593,7 +605,7 @@ std::optional<Chunk_plan> Chunk_model::plan_with(Chunk_box core, double site, do
     p.macro_islands = macro_islands;
     p.budget        = budget;
     const auto n    = objects.size();
-    const bool pack_hierarchy = pack_scopes && !single && !macro_islands;
+    const bool pack_hierarchy = (pack_scopes || target_homes > 0) && !single && !macro_islands;
     p.seeds.resize(n);
     p.density.resize(n);
     p.density_source.resize(n);
@@ -782,7 +794,56 @@ std::optional<Chunk_plan> Chunk_model::plan_with(Chunk_box core, double site, do
       }
       const auto module = (packed && !packed->scope[ids[0]].empty()) || scope.empty() ? std::string{} : objects[ids[0]].module;
       auto [it, added] = partitions.try_emplace({module, std::move(shape)});
-      if (added) {
+      if (added && target_homes && pack_hierarchy) {
+        // Keep contiguous hierarchy together. Near the desired load, prefer ending at a shallower instance boundary.
+        std::vector<uint64_t> prefix(ids.size() + 1);
+        std::vector<double> area_prefix(ids.size() + 1);
+        for (size_t j = 0; j < ids.size(); ++j) {
+          prefix[j + 1]      = add_bytes(prefix[j], estimate(objects[ids[j]]));
+          area_prefix[j + 1] = area_prefix[j] + demands[ids[j]].area;
+        }
+        const uint64_t limit = budget ? capacity : std::numeric_limits<uint64_t>::max();
+        for (size_t begin = 0; begin < ids.size();) {
+          const size_t bins
+              = std::min(ids.size() - begin,
+                         std::max<size_t>(1, target_homes > int(it->second.size()) ? target_homes - it->second.size() : 1));
+          double goal = std::min<double>(limit, double(prefix.back() - prefix[begin]) / bins);
+          const double area_goal = (area_prefix.back() - area_prefix[begin]) / bins;
+          double best = INFINITY;
+          size_t cut  = begin + 1;
+          for (size_t end = begin + 1; end <= ids.size() - (bins - 1); ++end) {
+            const double cost = prefix[end] - prefix[begin];
+            if (cost > limit && end > begin + 1) {
+              break;
+            }
+            unsigned depth = 0;
+            if (end < ids.size()) {
+              const auto& l = objects[ids[end - 1]].id;
+              const auto& r = objects[ids[end]].id;
+              for (size_t pos = 0; pos < std::min(l.size(), r.size()) && l[pos] == r[pos]; ++pos) {
+                depth += l[pos] == '.';
+              }
+            }
+            double load = cost / std::max(1., goal);
+            if (area_goal > 0) {
+              load = std::lerp(load, (area_prefix[end] - area_prefix[begin]) / area_goal, area_weight);
+            }
+            double loss = std::abs(load - 1.) + .12 * depth;
+            if (bins == 1 && end == ids.size()) {
+              loss = -1;
+            }
+            if (loss < best) {
+              best = loss;
+              cut  = end;
+            }
+            if (load > 1.5) {
+              break;
+            }
+          }
+          it->second.push_back(cut);
+          begin = cut;
+        }
+      } else if (added) {
         uint64_t load = 0;
         for (size_t j = 0; j < ids.size(); ++j) {
           uint64_t cost = std::get<2>(it->first.second[j]);
@@ -919,7 +980,7 @@ std::optional<Chunk_plan> Chunk_model::plan_with(Chunk_box core, double site, do
         if (rec->HasMember("interface_copies") && !(*rec)["interface_copies"].Empty()) {
           text(metadata::canonical((*rec)["interface_copies"]));
         }
-        if (rec->HasMember("geometry") && !edits.empty()) {
+        if (rec->HasMember("geometry") && !all_edits.empty()) {
           text(metadata::canonical((*rec)["geometry"]));
         }
         if (rec->HasMember("implementations") && (*rec)["implementations"].IsArray() && !(*rec)["implementations"].Empty()) {
@@ -1146,6 +1207,60 @@ std::optional<Chunk_plan> Chunk_model::plan_with(Chunk_box core, double site, do
       } else {
         return {};
       }
+      if (target_homes && !kept_frame && !have_boxes && ids.size() > 1 && home_edits.empty()) {
+        auto wire_cost = [&](const std::vector<Chunk_box>& frame) {
+          double cost = 0;
+          for (const auto& e : edges) {
+            if (e.nodes.empty()) {
+              continue;
+            }
+            Chunk_box b   = {INFINITY, INFINITY, -INFINITY, -INFINITY};
+            auto      add = [&](Point xy) {
+              for (int k = 0; k < 2; ++k) {
+                b[k]     = std::min(b[k], xy[k]);
+                b[k + 2] = std::max(b[k + 2], xy[k]);
+              }
+            };
+            for (int obj : e.nodes) {
+              const auto& f = frame[p.home[obj]];
+              add({(f[0] + f[2]) / 2, (f[1] + f[3]) / 2});
+            }
+            if (e.terminal) {
+              add(*e.terminal);
+            }
+            cost += b[2] - b[0] + b[3] - b[1];
+          }
+          return cost;
+        };
+        p.shape_candidates.emplace_back(wire_cost(boxes), boxes);
+        // Screen mirrored home assignments and alternative area splits on the same physical lattice.
+        for (int mask = 0; mask < 4; ++mask) {
+          for (double bias : {.9, 1., 1.1}) {
+            auto centers_try = chunk_centers;
+            auto demand_try  = chunk_demand;
+            for (size_t j = 0; j < ids.size(); ++j) {
+              for (int k = 0; k < 2; ++k) {
+                if (mask & (1 << k)) {
+                  centers_try[j][k] = -centers_try[j][k];
+                }
+              }
+              demand_try[j].area *= j % 2 ? bias : 1 / bias;
+            }
+            auto trial = boxes;
+            if (tile(ids, core, {site, row}, demand_try, centers_try, trial)) {
+              double cost = wire_cost(trial);
+              p.shape_candidates.emplace_back(cost, std::move(trial));
+            }
+          }
+        }
+        std::sort(p.shape_candidates.begin(), p.shape_candidates.end());
+        auto distinct = std::unique(p.shape_candidates.begin(), p.shape_candidates.end());
+        p.shape_candidates.erase(distinct, p.shape_candidates.end());
+        if (shape_rank >= p.shape_candidates.size()) {
+          throw std::invalid_argument("requested chunk shape rank exceeds distinct feasible frames");
+        }
+        boxes = p.shape_candidates[shape_rank].second;
+      }
       for (size_t j = 0; j < boxes.size(); ++j) {
         p.chunks[j].box = boxes[j];
       }
@@ -1319,6 +1434,18 @@ std::optional<Chunk_plan> Chunk_model::plan_with(Chunk_box core, double site, do
       }
     }
     validate_targets();
+    for (const auto& [pair, edit] : steps) {
+      apply_chunk_step(p, *edit, objects, {site, row});
+    }
+    if (all_edits.size() != edits.size()) {
+      std::vector<size_t> tap_index(p.chunks.size());
+      for (auto& w : wires) {
+        for (auto& tap : w.contacts) {
+          tap.xy = p.chunks[tap.home].ports[tap_index[tap.home]++].xy;
+        }
+      }
+      measure_chunk_ports(p, wires, core);
+    }
     return p;
   };
   // A low memory target can separate logic from a group of fixed SRAMs spanning the core.
@@ -1432,6 +1559,18 @@ rapidjson::Document Chunk_model::record(const Chunk_plan& p, const std::string& 
         .AddMember("baseline_exhausts_budget", p.budget && p.predictor.baseline >= p.budget, a);
     d.AddMember("memory_prediction", mem, a);
   }
+  if (!p.shape_candidates.empty()) {
+    rapidjson::Value alternatives(rapidjson::kArrayType);
+    for (auto& [cost, frames] : p.shape_candidates) {
+      rapidjson::Value row(rapidjson::kObjectType), rects(rapidjson::kArrayType);
+      for (auto& frame : frames) {
+        rects.PushBack(box(frame), a);
+      }
+      row.AddMember("center_hpwl_dbu", cost, a).AddMember("boxes_dbu", rects, a);
+      alternatives.PushBack(row, a);
+    }
+    d.AddMember("shape_candidates", alternatives, a).AddMember("shape_rank", shape_rank, a);
+  }
   rapidjson::Value communication(rapidjson::kObjectType);
   communication.AddMember("crossing_nets", uint64_t(p.crossing_nets), a)
       .AddMember("center_hpwl_dbu", p.center_hpwl, a)
@@ -1457,6 +1596,117 @@ rapidjson::Document Chunk_model::record(const Chunk_plan& p, const std::string& 
       .AddMember("peak_vertical", p.route.peak_v, a)
       .AddMember("loads", loads, a);
   d.AddMember("route_demand", route, a);
+  if (track_pitch > 0 && !p.home.empty()) {
+    Chunk_demand map(p.route.frame, 128 * track_pitch, tracks_per_dbu);
+    for (size_t i = 0; i < objects.size(); ++i) {
+      const auto& b = p.seeds[i];
+      if (objects[i].macro) {
+        map.reserve(b, objects[i].route_blockage);
+      } else {
+        double utilization = objects[i].area / std::max(1., (b[2] - b[0]) * (b[3] - b[1]));
+        double reserve     = std::clamp(utilization, 0., .8);
+        map.reserve(b, {reserve, reserve}, true);
+      }
+    }
+    Chunk_demand                                      boundary_map(p.route.frame, 128 * track_pitch, tracks_per_dbu);
+    std::map<size_t, std::vector<Chunk_demand::Pair>> taps;
+    for (const auto& c : p.chunks) {
+      for (const auto& port : c.ports) {
+        taps[port.net_index].push_back(port.xy);
+      }
+      for (int i : c.objects) {
+        const auto& seed = p.seeds[i];
+        if (objects[i].macro) {
+          boundary_map.reserve(objects[i].macro_footprint(seed), objects[i].route_blockage);
+          continue;
+        }
+        std::vector<Chunk_box> parts;
+        double                 area = 0;
+        const auto             add  = [&](const Chunk_box& r) {
+          Chunk_box b{std::max(r[0], seed[0]), std::max(r[1], seed[1]), std::min(r[2], seed[2]), std::min(r[3], seed[3])};
+          if (b[2] > b[0] && b[3] > b[1]) {
+            parts.push_back(b);
+            area += (b[2] - b[0]) * (b[3] - b[1]);
+          }
+        };
+        if (c.region.empty()) {
+          add(c.box);
+        } else {
+          for (const auto& r : c.region) {
+            add(r);
+          }
+        }
+        if (parts.empty()) {
+          // A seed wholly inside a donated tab deposits demand in the nearest owned slab.
+          const double x = (seed[0] + seed[2]) * .5, y = (seed[1] + seed[3]) * .5;
+          const auto   dist = [&](const Chunk_box& b) {
+            return std::abs(x - std::clamp(x, b[0], b[2])) + std::abs(y - std::clamp(y, b[1], b[3]));
+          };
+          const auto r = c.region.empty() ? c.box : *std::min_element(c.region.begin(), c.region.end(), [&](auto& a, auto& b) {
+            return dist(a) < dist(b);
+          });
+          parts.push_back(r);
+          area = (r[2] - r[0]) * (r[3] - r[1]);
+        }
+        double reserve = std::clamp(objects[i].area / std::max(1., area), 0., .8);
+        for (const auto& b : parts) {
+          boundary_map.reserve(b, {reserve, reserve}, true);
+        }
+      }
+    }
+    for (const auto& edge : edges) {
+      if (edge.nodes.empty()) {
+        continue;
+      }
+      const int home = p.home[edge.nodes.front()];
+      if (!edge.terminal && std::ranges::all_of(edge.nodes, [&](int i) { return p.home[i] == home; })) {
+        continue;
+      }
+      std::vector<Chunk_demand::Pair> points;
+      for (int i : edge.nodes) {
+        const auto& b = p.seeds[i];
+        points.push_back({(b[0] + b[2]) / 2, (b[1] + b[3]) / 2});
+      }
+      if (edge.terminal) {
+        points.push_back(*edge.terminal);
+      }
+      map.route(points);
+      if (auto it = taps.find(edge.net_index); it != taps.end()) {
+        points.insert(points.end(), it->second.begin(), it->second.end());
+      }
+      boundary_map.route(std::move(points));
+    }
+    d.AddMember("boundary_routing", boundary_map.record(d, 128), a);
+    auto             grid = map.record(d, 128);
+    rapidjson::Value rates(rapidjson::kArrayType);
+    for (auto rate : tracks_per_dbu) {
+      rates.PushBack(rate, a);
+    }
+    rapidjson::Value patterns(rapidjson::kArrayType);
+    for (auto& t : routing_patterns) {
+      rapidjson::Value pattern(rapidjson::kObjectType);
+      pattern.AddMember("layer", str(t.layer), a)
+          .AddMember("direction", t.axis, a)
+          .AddMember("start", t.start, a)
+          .AddMember("step", t.step, a)
+          .AddMember("count", t.count, a);
+      patterns.PushBack(pattern, a);
+    }
+    if (dbu_per_um > 0) {
+      rapidjson::Value policy(rapidjson::kObjectType);
+      policy.AddMember("enabled", spread, a)
+          .AddMember("wide_count", Io_spread_policy::wide_count, a)
+          .AddMember("tracks", Io_spread_policy::tracks, a)
+          .AddMember("corner_tracks", Io_spread_policy::corner_tracks, a)
+          .AddMember("corner_cap_dbu", Io_spread_policy::max_corner_um * dbu_per_um, a)
+          .AddMember("share", Io_spread_policy::share, a)
+          .AddMember("max_pitch_dbu", Io_spread_policy::max_pitch_um * dbu_per_um, a);
+      grid.AddMember("io_spacing", policy, a);
+    }
+    grid.AddMember("track_patterns", patterns, a);
+    grid.AddMember("track_pitch_dbu", track_pitch, a).AddMember("tracks_per_dbu", rates, a);
+    d.AddMember("coarse_routing", grid, a);
+  }
   if (!p.chunks.empty() && p.chunks.front().reference_box) {
     rapidjson::Value overlaps(rapidjson::kArrayType), geom(rapidjson::kObjectType);
     double           shared = 0;
@@ -1497,6 +1747,16 @@ rapidjson::Document Chunk_model::record(const Chunk_plan& p, const std::string& 
           .AddMember("density", p.density[i], a)
           .AddMember("density_source", str(p.density_source[i]), a)
           .AddMember("reserved_dbu2", o.area / p.density[i], a);
+      if (o.macro && track_pitch > 0) {
+        rapidjson::Value obs(rapidjson::kArrayType);
+        for (auto rate : o.route_blockage) {
+          obs.PushBack(rate, a);
+        }
+        m.AddMember("blocked_fraction", obs, a);
+      }
+      if (!o.instance.empty()) {
+        m.AddMember("instance", str(o.instance), a);
+      }
       if (!o.module.empty() && !o.macro) {
         m.AddMember("template_color", str(qualified(o.module, o.local)), a);
       }
@@ -1516,6 +1776,9 @@ rapidjson::Document Chunk_model::record(const Chunk_plan& p, const std::string& 
       }
       if (!port.role.empty()) {
         contact.AddMember("role", str(port.role), a);
+      }
+      if (auto bit = bus_bits.find(port.net_index); bit != bus_bits.end()) {
+        contact.AddMember("bus", str(bit->second.first), a).AddMember("bit", bit->second.second, a);
       }
       ports.PushBack(contact, a);
     }
@@ -1542,6 +1805,15 @@ rapidjson::Document Chunk_model::record(const Chunk_plan& p, const std::string& 
       v.AddMember("interface_copy", result, a);
     }
     v.AddMember("incident_pin_hpwl_dbu", c.incident_hpwl, a).AddMember("longest_net_span_dbu", c.longest_span, a);
+    if (!c.region.empty()) {
+      auto rects = [&](const auto& boxes) {
+        rapidjson::Value out(rapidjson::kArrayType);
+        for (const auto& b : boxes) out.PushBack(box(b), a);
+        return out;
+      };
+      v.AddMember("region_dbu", rects(c.region), a).AddMember("perimeter_dbu", rects(c.perimeter), a)
+          .AddMember("worker_box_dbu", box(c.worker_box()), a);
+    }
     v.AddMember("instances", instances, a).AddMember("ports", ports, a);
     v.AddMember("id", str(c.id), a)
         .AddMember("partition", str(c.partition), a)

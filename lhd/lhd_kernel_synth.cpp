@@ -1213,6 +1213,21 @@ livehd::placement::Options placement_options(const Options& opts) {
     throw Lhd_error{"usage", "chunk.require_fit requires a chunk floorplan and a positive memory budget", ""};
   }
   out.chunk_pack_scopes = truthy(synth_set(opts, "place.chunk.pack_scopes", "false"));
+  out.chunk_route_layers = synth_set(opts, "place.chunk.route_layers", "");
+  int rank               = std::stoi(synth_set(opts, "place.chunk.shape_rank", "0"));
+  if (rank < 0) {
+    throw Lhd_error{"usage", "place.chunk.shape_rank must be nonnegative", ""};
+  }
+  out.io_spread = truthy(synth_set(opts, "place.io.spread", "false"));
+  out.chunk_area_weight = std::stod(synth_set(opts, "place.chunk.area_weight", "0"));
+  if (!(out.chunk_area_weight >= 0 && out.chunk_area_weight <= 1)) {
+    throw Lhd_error{"usage", "place.chunk.area_weight must be between 0 and 1", ""};
+  }
+  out.chunk_shape_rank = rank;
+  out.chunk_target     = std::stoi(synth_set(opts, "place.chunk.target", "0"));
+  if (out.chunk_target < 0) {
+    throw Lhd_error{"usage", "place.chunk.target must be nonnegative", ""};
+  }
   out.chunk_connectivity = truthy(synth_set(opts, "place.chunk.connectivity", "false"));
   out.chunk_only = synth_set(opts, "place.chunk.only", "");
   if (!out.chunk_only.empty() && chunk_run == "flow") {

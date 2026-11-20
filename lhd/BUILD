@@ -346,6 +346,12 @@ config_setting(
     copts = COPTS,
     data = [
         "chunk_flow.py",
+        "chunk_dispatch.py",
+        "chunk_resources.py",
+        "chunk_interfaces.py",
+        "chunk_explore.py",
+        "chunk_validate.py",
+        "chunk_calibrate.py",
         "chunk_live.py",
         "chunk_score.py",
         "chunk_journal.py",

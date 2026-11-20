@@ -2490,7 +2490,7 @@ std::string Session::agent_call(const std::string& json, int timeout_ms) {
       }
       return std::format(R"({{"ok":true,"count":{},"nodes":[{}]}})", ranked.size(), rows);
     }
-    if (what == "chunks" || what == "chunk_members" || what == "chunk_pins" || what == "chunk_peers") {
+    if (what == "chunks" || what == "chunk_members" || what == "chunk_pins" || what == "chunk_peers" || what == "chunk_transfers") {
       if (!scene_ || scene_->chunk_plan.empty()) {
         return err_json("no chunk floorplan at this frame");
       }
@@ -2512,6 +2512,70 @@ std::string Session::agent_call(const std::string& json, int timeout_ms) {
       if (start < 0 || limit < 1 || limit > 256 || (d.HasMember("offset") && !d["offset"].IsInt())
           || (d.HasMember("limit") && !d["limit"].IsInt())) {
         return err_json("use a nonnegative offset and a limit between 1 and 256");
+      }
+      if (what == "chunk_transfers") {
+        const auto peer = str("peer");
+        if (scene_->phase != "fp" || filter == peer) {
+          return err_json("choose a source and a different peer at fp_plan");
+        }
+        std::vector<int> owner(scene_->nodes.size(), -1);
+        int              source = -1, dest = -1, n = 0;
+        for (const auto& c : plan["chunks"].GetArray()) {
+          if (filter == c["id"].GetString()) {
+            source = n;
+          }
+          if (peer == c["id"].GetString()) {
+            dest = n;
+          }
+          for (const auto& m : c["members"].GetArray()) {
+            int i = scene_->node_index(std::string(m["macro"].GetBool() ? "macro:" : "color:") + m["id"].GetString());
+            if (i >= 0 && size_t(i) < owner.size()) {
+              owner[i] = n;
+            }
+          }
+          ++n;
+        }
+        if (source < 0 || dest < 0) {
+          return err_json("unknown source or destination home");
+        }
+        std::vector<std::array<int64_t, 2>> gains(owner.size());
+        for (const auto& [net, count] : scene_->floorplan_nets) {
+          int  ns = 0, nd = 0;
+          bool other = false;
+          for (int i : net) {
+            ns    += owner.at(i) == source;
+            nd    += owner[i] == dest;
+            other |= owner[i] != source && owner[i] != dest;
+          }
+          if (ns == 0) {
+            continue;
+          }
+          const int seam_delta = int(ns > 1) - int(nd > 0);
+          const int cut_delta  = other ? 0 : seam_delta;
+          for (int i : net) {
+            if (owner[i] == source) {
+              gains[i][0] += int64_t(count) * seam_delta;
+              gains[i][1] += int64_t(count) * cut_delta;
+            }
+          }
+        }
+        std::vector<std::tuple<int64_t, int64_t, std::string>> ranked;
+        for (size_t i = 0; i < owner.size(); ++i) {
+          const auto& name = scene_->nodes[i].name;
+          if (owner[i] == source && name.starts_with("color:")) {
+            ranked.emplace_back(gains[i][0], gains[i][1], name.substr(6));
+          }
+        }
+        std::sort(ranked.begin(), ranked.end());
+        std::string result;
+        for (size_t i = start; i < ranked.size() && i < size_t(start) + size_t(limit); ++i) {
+          const auto& [seam, cut, name] = ranked[i];
+          if (!result.empty()) {
+            result += ',';
+          }
+          result += std::format(R"({{"id":"{}","macro":false,"pair_net_delta":{},"cut_net_delta":{}}})", esc(name), seam, cut);
+        }
+        return std::format(R"({{"ok":true,"scope":"inter-member hypernets","total":{},"transfers":[{}]}})", ranked.size(), result);
       }
       if (what == "chunk_members") {
         for (const auto& c : plan["chunks"].GetArray()) {
@@ -2667,6 +2731,9 @@ std::string Session::agent_call(const std::string& json, int timeout_ms) {
                               "partition",
                               "implementation",
                               "box_dbu",
+                              "region_dbu",
+                              "perimeter_dbu",
+                              "worker_box_dbu",
                               "density",
                               "estimated_bytes",
                               "incident_pin_hpwl_dbu",
@@ -2902,8 +2969,8 @@ std::string Session::agent_call(const std::string& json, int timeout_ms) {
 "score_config":"{estimator,components:[{loss,weight,half}]} -> set an informational score; empty components disables it",
 "summary":"{} -> current timing, routing and configured quality with measurement frame IDs",
 "hello":"{} -> invocation, files, capabilities, options and state",
-"export":"{what:macros|relationships|intent|floorplan|chunks|chunk_members|chunk_pins|chunk_peers|flags|summary|score|scope, format?:metadata|dbu|placereasoner|def, encoding?:json_text} -> placement or session data",
-"chunk_edit":"{field:topology|geometry,op,apply?:false,expect?} -> preview/apply one edit or undo; topology ops: {split,new_id,members}, {transfer,to,members}, {fuse:[keep,remove]}; geometry: {reshape,aspect_ratio} (width/height). Members may be the string selected, or {id,macro} from export what=chunk_members with chunk and optional offset/limit. Poll command_status, then export what=chunks with view=preview or live.",
+"export":"{what:macros|relationships|intent|floorplan|chunks|chunk_members|chunk_pins|chunk_peers|chunk_transfers (chunk,peer)|flags|summary|score|scope, format?:metadata|dbu|placereasoner|def, encoding?:json_text} -> placement or session data",
+"chunk_edit":"{field:topology|geometry,op,apply?:false,expect?} -> preview/apply one edit or undo; topology ops: {split,new_id,members}, {transfer,to,members}, {fuse:[keep,remove]}; geometry: {step:HOME,peer:HOME,depth_dbu:SIGNED_DEPTH,band_dbu?:WIDTH,offset_dbu?:START} or {reshape,aspect_ratio} (width/height). Members may be the string selected, or {id,macro} from export what=chunk_members with chunk and optional offset/limit. Poll command_status, then export what=chunks with view=preview or live.",
 "chunk_interface":"{chunk,source?,orientation:auto|N|FN|FS|S|clear,apply?:false,expect?} -> preview or apply a physical home interface; inspect export what=chunks or what=chunk_pins (chunk required, match=all|copied|local), view=preview or live, offset?, limit?",
 "intent_apply":"{records or records_json,expect?} -> replace the applicable placement hints; preserve other design metadata",
 "intent_preview":"{records or records_json,expect?} -> bind records and measure residuals; export intent returns the preview report",

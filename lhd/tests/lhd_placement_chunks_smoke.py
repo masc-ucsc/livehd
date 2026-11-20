@@ -4,12 +4,133 @@ import json
 import os
 import re
 import subprocess
+import sys
+from types import SimpleNamespace
 import time
 import urllib.request
 from pathlib import Path
 
-root = Path(os.environ['TEST_TMPDIR'])
-rtl = root / 'cores.v'
+# A folded seam travels in both axes. The same net/slot assignment goes to both
+# workers, even at a corner with tracks on multiple layers.
+sys.path.insert(0, str(Path("lhd").resolve()))
+from chunk_interfaces import proposal
+
+
+def check_folded_bus():
+    seam = [
+        (1, 10, 0, 10),
+        (0, 10, 10, 14),
+        (1, 14, 10, 20),
+        (0, 20, 10, 14),
+        (1, 10, 20, 30),
+    ]
+    homes = {
+        "a": {"box_dbu": [0, 0, 14, 30], "perimeter_dbu": seam + [(1, 0, 0, 30)]},
+        "b": {"box_dbu": [10, 0, 25, 30], "perimeter_dbu": seam + [(1, 25, 0, 30)]},
+    }
+    points = [(10, 5), (10, 26), (14, 14), (10, 7)]
+    ports = [dict(net_index=i, bus="data", bit=i) for i in range(4)]
+    grid = dict(
+        track_pitch_dbu=1,
+        track_patterns=[
+            dict(direction=k, start=0, step=1, count=40, layer=str(k)) for k in (0, 1)
+        ],
+        io_spacing=dict(
+            enabled=False,
+            wide_count=64,
+            tracks=2,
+            corner_tracks=15,
+            corner_cap_dbu=15,
+            share=0.25,
+            max_pitch_dbu=5,
+        ),
+    )
+    work = SimpleNamespace(
+        chunks=homes,
+        incident={
+            i: {h: ("data", list(q), home["box_dbu"]) for h, home in homes.items()}
+            for i, q in enumerate(points)
+        },
+        anchored=set(),
+        index={},
+        plan={"chunks": [{"ports": ports}], "coarse_routing": grid},
+    )
+    state = {"contacts": {}}
+    intervals = {h: {i: [*q, *q] for i, q in enumerate(points)} for h in homes}
+    result = proposal(work, state, intervals=intervals, bus_order=True, spread=True)
+    assert result["feasible"] and result["bus_order"]["ordered_after"] == 1, result
+    assert result["edges"][0]["spacing_level"] >= 2
+    assert (
+        result["updates"]["a"] == result["updates"]["b"]
+        and result["layers"]["a"] == result["layers"]["b"]
+    )
+    assert (
+        len(
+            {
+                (*xy, result["layers"]["a"][n])
+                for n, xy in result["updates"]["a"].items()
+            }
+        )
+        == 4
+    )
+    work.anchored = {2}
+    partial = proposal(work, state, intervals=intervals, bus_order=True)
+    assert partial["bus_order"]["fixed_or_ambiguous"] == 1 and all(
+        "2" not in changes for changes in partial["updates"].values()
+    )
+
+
+check_folded_bus()
+
+
+def check_reconciled_bus():
+    from chunk_flow import reconcile
+
+    homes = {"a": {"box_dbu": [0, 0, 10, 10]}, "b": {"box_dbu": [10, 0, 20, 10]}}
+
+    def workspace(path, homes):
+        return SimpleNamespace(
+            root=Path(path),
+            chunks=homes,
+            plan={},
+            anchored=set(),
+            incident={
+                7: {h: ("data", [10, 0], v["box_dbu"]) for h, v in homes.items()}
+            },
+            jobs={h: {"checksum": h} for h in homes},
+            members={h: [h] for h in homes},
+            index={"require_fit": True},
+        )
+
+    old = workspace("old", homes)
+    old.state = lambda: dict(
+        contacts={h: {"7": [10, 5]} for h in homes},
+        results={},
+        contact_layers={h: {"7": "M3"} for h in homes},
+        interface_revision={h: 4 for h in homes},
+    )
+    new = workspace("new", dict(homes, a={"box_dbu": [-5, 0, 10, 10]}))
+    saved = {}
+    new.save = saved.update
+    assert reconcile(old, new, True)["unchanged"] == ["a", "b"]
+    assert (
+        saved["contacts"] == old.state()["contacts"]
+        and saved["contact_layers"] == old.state()["contact_layers"]
+    )
+    assert saved["interface_revision"] == old.state()["interface_revision"]
+    # The prior coordinate lies off one owner's new perimeter. Both copies of
+    # the contract must be invalidated even though the original tap is intact.
+    new.chunks["a"]["perimeter_dbu"] = [(0, 0, 0, 10), (1, 9, 0, 10)]
+    saved.clear()
+    assert reconcile(old, new, True)["changed"] == ["a", "b"]
+    assert saved["contacts"] == {} and "contact_layers" not in saved
+    assert saved["interface_revision"] == {"a": 5, "b": 5}
+
+
+check_reconciled_bus()
+
+root = Path(os.environ["TEST_TMPDIR"])
+rtl = root / "cores.v"
 rtl.write_text("""
 module core(input clk, input [3:0] d, output reg [3:0] q);
   always @(posedge clk) q <= (q ^ d) + {q[2:0],q[3]};
@@ -68,6 +189,9 @@ try:
     pages=api('/agent',{'cmd':'export','what':'chunks','limit':1})
     assert pages['total']==2 and len(pages['chunks'])==1 and isinstance(pages['chunks'][0]['ports'],int)
     source,dst=chunks[0]['id'],chunks[1]['id']
+    ranked = api('/agent',dict(cmd='export',what='chunk_transfers',chunk=source,peer=dst))
+    assert ranked['ok'] and ranked['transfers'] and ranked['total'] <= len(chunks[0]['members'])
+    assert all(not row['macro'] for row in ranked['transfers'])
     def copy_interface(orientation, apply=False):
         cmd=api('/agent',{'cmd':'chunk_interface','chunk':dst,'source':source,'orientation':orientation,'apply':apply,
                           'expect':{'frame':api('/state')['frame']}})
@@ -338,3 +462,64 @@ run = subprocess.run(['lhd/lhd','synth','chunk','macro','--workdir',str(timed),'
                      capture_output=True,text=True,check=True,timeout=20)
 homes = [r['macro'] for r in json.loads(run.stdout)]
 assert any(h.get('timed_nets',0)>0 and h['estimated_wns_ps']<0 for h in homes), homes
+
+# Portable packets carry their complete seed. Two independent results may be
+# delivered in reverse order. A second proposal from the same base expires.
+def chunk(*flags, ok=True):
+    result = subprocess.run(['lhd/lhd','synth','chunk',*map(str,flags)], capture_output=True, text=True, timeout=20)
+    if ok:
+        assert result.returncode == 0, result.stderr
+        return json.loads(result.stdout)
+    assert result.returncode != 0
+    return result.stderr
+
+source = ['--workdir',timed]
+home_a, home_b = [r['id'] for r in chunk('list',*source,'--json')][:2]
+bundles = []
+for label, owner, effort in [('a',home_a,8),('b',home_b,8),('older',home_a,9)]:
+    issued = root / ('send-'+label)
+    chunk('dispatch', issued, 'macro', owner, *source, '--iterations',effort)
+    remote = root / ('return-'+label)
+    issued.rename(remote)
+    chunk('worker',remote)
+    bundles.append(remote)
+chunk('collect',bundles[1],*source)
+first = chunk('collect',bundles[0],*source)
+assert chunk('collect',bundles[0],*source) == first
+assert 'changed since dispatch' in chunk('collect',bundles[2],*source,ok=False)
+
+# The live socket/HTTP API returns a durable trial immediately. Its finished
+# candidate remains selectable and exposes the corresponding physical routing map.
+with subprocess.Popen(['lhd/lhd','synth','chunk','gui',*map(str,source),'--workers','2','--no-open',
+                       '--compare-workdir',str(root/'measure-gui')],
+                      stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True) as server:
+    try:
+        address, auth = server.stdout.readline().strip().split('/#')
+        def live_request(cmd, **fields):
+            request = urllib.request.Request(address+'/chunk',
+                data=json.dumps(dict(cmd=cmd,**fields)).encode(),
+                headers={'Authorization':'Bearer '+auth,'Content-Type':'application/json'})
+            with urllib.request.urlopen(request,timeout=15) as http:
+                return json.load(http)
+        projects = live_request('projects')['projects']
+        assert [p['name'] for p in projects] == ['timed-home','measure-gui']
+        assert live_request('list',project='1')
+        assert live_request('projects')['selected'] == '0'
+        queued = live_request('explore', kind='density', iterations=8)
+        assert queued['status']=='queued'
+        record = live_request('compare',trial=queued['trial'],wait=True)
+        assert record['candidates']['density']['status']=='done', record
+        events = live_request('activity')['events']
+        assert events and events[0]['project'] == '0', events
+        assert events[0]['name'] == 'timed-home' and events[0]['time'] > 0
+        assert live_request('projects', project='1')['selected'] == '1'
+        live_request('view',trial=queued['trial'],branch='density')
+        assert live_request('routing')['view']==[queued['trial'],'density']
+        archived = chunk('assemble', *source, '--trial', queued['trial'], '--branch', 'density')
+        assert archived['metrics']['hpwl_um'] == record['candidates']['density']['assembled']['hpwl_um']
+        assert 'choose both' in chunk('assemble', *source, '--trial', queued['trial'], ok=False)
+        assert live_request('overview')['selected']['hpwl_um'] is not None
+        assert live_request('scene',home=home_a)['view']==[queued['trial'],'density']
+    finally:
+        server.terminate()
+        server.wait(timeout=5)

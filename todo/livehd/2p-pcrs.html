@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TODO 2p-pcrs — PCRS clock: a placement-aware clock network owned by LiveHD</title>
+<link rel="stylesheet" href="../todo.css">
+</head>
+<body>
+<nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
+<main>
+<h1><strong class="item-id">2p-pcrs</strong> PCRS clock: a placement-aware clock network owned by LiveHD</h1>
+<p><span class="status">Plan written 2026-11-19 from a question-and-answer session. Nothing below is started;
+only the reset part of <code>pass/place/pcrs</code> exists. This is a high-level plan, not an execution plan.
+Names of options, steps and files are proposals.</span></p>
+
+<p>LiveHD places and times a design on <strong>ideal clocks</strong>, and OpenROAD builds the clock tree
+afterwards on a placement that never looked at the clock. This page plans the clock part of PCRS (power,
+clock, reset, scan): LiveHD pulls the sinks of a clock together while it places them, forms small and
+uniform leaf groups, decides where the clock is gated, schedules the arrival of every group, builds the
+network above the groups, and times setup and hold on that network. OpenROAD no longer synthesizes a clock
+tree. It routes the one LiveHD built. What the clock steps cannot fix at a reasonable cost is reported
+against the RTL, because changing the RTL is an accepted answer.</p>
+
+<h2>Why</h2>
+<ul>
+<li><strong>The backend stops in the clock stage.</strong> In the HighTide asap7 cohort, two of the three
+LiveHD failures that reached the backend stopped in OpenROAD's CTS and hold repair, before any signal was
+routed (<a href="2r-route.html">2r-route</a>).</li>
+<li><strong>Hold is paid after the fact.</strong> OpenROAD's hold repair added 82,892 buffers on gemmini
+(utilization 49.1% → 53.2%) and reached its buffer limit on NVDLA/partition_a with hold WNS −136 ps left.
+LiveHD only reserves room for those buffers today (2r decision C1). It does not know where they go or why.</li>
+<li><strong>The clock does not pull anything.</strong> Clock nets are excluded from placement
+(<code>prects_networks</code>), so flops are placed by their data nets only, and a clock gate is held by
+its enable net alone. A gate can sit far from the flops it drives.</li>
+<li><strong>Setup is optimized on a clock that will not exist.</strong> Sizing, repair and resynthesis see
+zero skew. The real tree then moves every endpoint by its own latency, and the critical paths after CTS
+are not the ones LiveHD worked on.</li>
+<li><strong>Most clock power is at the leaves.</strong> About 80% of clock capacitance is at the leaf level
+(Cheon et al., cited by Deng et al.); on the ISPD 2010 clock benchmarks 58% of it is buffer capacitance.
+The leaf level is decided by where the flops are, which is a placement decision.</li>
+</ul>
+
+<h3>The feedback this page answers</h3>
+<table>
+<tr><th>Feedback item</th><th>Where it is handled</th></tr>
+<tr><td>Own the clock tree: CTS or clock-skew-aware placement with useful skew inside LiveHD</td>
+<td>This page, all of it.</td></tr>
+<tr><td>Detailed-route-driven legalization (pin access, local density, calibrated on DRC counts)</td>
+<td><a href="2r-route.html">2r-route</a>. This page adds one constraint to it: a flop group must not exceed
+the pin density the router can serve (see Risks).</td></tr>
+<tr><td>Post-route timing closure loop on extracted RC</td>
+<td>Only its hold part is here (step I, the post-route pass). The setup loop needs its own page.</td></tr>
+<tr><td>Incremental CTS and routing</td>
+<td>Incremental CTS is step J. Incremental routing waits for native routing.</td></tr>
+</table>
+
+<h2>Decisions (2026-11-19)</h2>
+<table>
+<tr><th>#</th><th>Topic</th><th>Decision</th></tr>
+<tr><td>K1</td><td>Leaf groups</td><td>Sinks of the same clock are placed close to each other and grouped
+into leaf groups of <strong>6 to 30 flops</strong> behind one driver (a buffer or a clock gate). The goal
+is a homogeneous, predictable tree. Getting the clock gates right matters more than the last picosecond of
+skew.</td></tr>
+<tr><td>K2</td><td>Boundary with OpenROAD</td><td>LiveHD builds the full network: flop groups, clock gates,
+every clock buffer, all of them placed, and it times setup and hold on its own propagated clock. OpenROAD
+skips its CTS step and only routes the clock nets. LiveHD does not draw clock wires in this plan (the mesh
+grid of K6 is the one exception, see Open points).</td></tr>
+<tr><td>K3</td><td>Clock gates</td><td>PCRS <strong>re-decides the gating level</strong>. A gate is a
+function (clock, enable), not a cell. PCRS clones it so each copy drives one nearby group, merges copies
+with the same enable, moves the gating decision up or down the tree, and drops a gate whose group is too
+small to pay for it. Placement and activity drive the choice.</td></tr>
+<tr><td>K4</td><td>When to cluster</td><td>Soft during global placement, hard at the end. A soft-membership
+attraction acts while cells can still move far at low cost. Groups become hard only on the converged
+placement, before the final legalization.</td></tr>
+<tr><td>K5</td><td>Skew</td><td><strong>Useful skew from the start.</strong> Each leaf group gets a
+scheduled arrival from the setup and hold slack of its flops, and the network is built to those targets.
+A balanced tree is the special case where every target is equal.</td></tr>
+<tr><td>K6</td><td>Top network</td><td><strong>Tree and mesh together.</strong> The network above the leaf
+groups is either a buffered tree or a mesh with a tree in front of it. Both are in the first milestone and
+both sit behind the same leaf interface.</td></tr>
+<tr><td>K7</td><td>Hold</td><td>LiveHD tries to fix hold before hand-off, at bounded cost. A complete
+pre-route fix can be very expensive and is not a goal. A final post-route pass changes cells and adds
+buffers for what is left.</td></tr>
+<tr><td>K8</td><td>Variation</td><td>An early/late derate on clock cells and clock wires, with the
+pessimism removed on the part of the clock path that launch and capture share. Mesh sinks get a smaller
+derate, fitted offline.</td></tr>
+<tr><td>K9</td><td>RTL feedback</td><td>PCRS points at the clock structures that are hard or expensive to
+fix in placement, CTS or routing: where they are in the source, what they cost, and what change would
+remove them. Asking for an RTL change is acceptable for those. PCRS still builds the best network it can
+for the RTL it was given.</td></tr>
+</table>
+
+<h2>What exists today</h2>
+<table>
+<tr><th>Piece</th><th>State</th><th>Use in this plan</th></tr>
+<tr><td><code>pass/place/pcrs</code></td><td>Reset only. Rebuilds a pipelined tree per (reset root, clock
+domain) at every placement call, clusters sinks by position, names cells from what they drive so a later
+stage finds them again, keeps a depth state across timing rounds, and has a LEC bypass.</td>
+<td>The clock part follows the same pattern: rebuild from the sinks, content-derived names, changes of
+structure between timing rounds.</td></tr>
+<tr><td>Clock exclusion</td><td><code>prects_networks</code> removes clock nets from placement and from
+optimization timing. Native HPWL omits them.</td><td>Stays for the wire model. The clock pulls cells
+through the new force (step E), not through HPWL.</td></tr>
+<tr><td>Timing engine (<a href="2q-fasttimer.html">2q-fasttimer</a>)</td><td>Ideal clocks. The ideal clock
+already passes inverters, integrated clock gates and recognized gates, and every gate enable has a
+clock-gating check. <code>set_clock_latency</code> is not supported. Hold is best effort (2q step J).</td>
+<td>Needs propagated clock arrivals, the derate and the common-path credit (step B).</td></tr>
+<tr><td>Clock-gate inference</td><td><code>synth.clock_gate</code> in synthesis (minimum bits per gate, chained
+gates up to a depth). <code>synth.place.clock_gate_flatten</code> turns cascaded gating ANDs into one cell
+before placement.</td><td>Synthesis keeps proposing gates without positions. PCRS takes its result as
+the starting set of gating functions (K3).</td></tr>
+<tr><td>Routing estimate (<a href="2r-route.html">2r-route</a>)</td><td>The clock charge models a spine tree.
+A share of the sites is held back for CTS and hold buffers (C1).</td><td>The charge becomes the demand of the
+real network. The reserve shrinks to the post-route hold residual.</td></tr>
+<tr><td>Global placement</td><td><code>../DREAMPlace</code> is an owned fork. Timing forces and pin weights
+exist as experiments (<a href="2t-timing_closure_plan.html">2t-timing_closure_plan</a>).</td>
+<td>The soft-clustering force is added in the fork (step E).</td></tr>
+<tr><td>Hand-off</td><td>LiveHD hands a placed DEF to ORFS, which runs CTS, repair, global and detailed
+routing.</td><td>The recipe changes to "no CTS, propagated clocks, route" (step C).</td></tr>
+</table>
+
+<h2>What the literature gives</h2>
+<p>The first three rows are the PDFs in the repository root, read in full or (the thesis) in the chapters
+that matter here. The other rows are the suggested recent papers, checked on 2026-11-19: all six exist, and
+the row says whether the full text or only the abstract was read. Two descriptions were corrected (the
+meaning of IB-KSR, and the iCTS buffer model).</p>
+<table>
+<tr><th>Source</th><th>What it shows</th><th>What this plan takes</th></tr>
+<tr><td>Mangiras et al., <em>Soft-Clustering Driven Flip-flop Placement Targeting Clock-induced OCV</em>,
+ISPD 2020 (<code>soft_clustering.pdf</code>)</td>
+<td>Before CTS, flops and gates move toward the weighted mean of nearby cluster centres. Membership is soft
+(k-harmonic means) and mixes distance with the position of <em>timing neighbours</em>: cells on the same
+clock net that launch and capture the same path, weighted by slack (a = 0.35 distance, 0.65 neighbours).
+It works bottom-up over the gating hierarchy, moves only cells with positive slack inside their
+timing-feasible region, and avoids dense or congested areas. Six industrial designs (82k to 1.5M cells,
+14–28 nm): setup TNS −42%, WNS −28%, hold WNS −45%, hold TNS −73% on average, for 0.4–8% of flow time.
+Plain distance-only flop clumping made timing worse on several designs.</td>
+<td>The membership function becomes the force of step E. Its limit: it only guides someone else's CTS
+through placement. Here the groups become the real leaves.</td></tr>
+<tr><td>Deng, Cai, Zhou, <em>Register Clustering Methodology for Low Power Clock Tree Synthesis</em>,
+JCST 2015 (<code>clustering.pdf</code>)</td>
+<td>Hard clustering of registers on a fixed placement, one local buffer per cluster, and the buffers become
+the sinks of any CTS. Three algorithms; the greedy one (GSR) adds a register to the nearest cluster within a
+maximum radius, load and fanout, else opens a new cluster. The buffer of a cluster is the smallest one that
+meets slew at the farthest register. ISPD 2009/2010 benchmarks: clock power −31%, skew −4%, latency −5%, CTS
+run time about 10× lower, because the tree above has far fewer sinks.</td>
+<td>The hard grouping of step D (radius, load and fanout limits; smallest driver that meets slew), and
+the rule that the tree above only sees leaf drivers.</td></tr>
+<tr><td>Khan, <em>Clock Mesh Analysis and Optimization using Surrogate Models with Graph Neural
+Networks</em>, PhD thesis, UCSC 2026 (<code>phd_thesis.pdf</code>)</td>
+<td>A mesh is robust to variation but STA cannot time it (loops, several drivers), and the first-moment
+method is 74 ps off in delay and 27.5 ps in skew under variation. A GNN surrogate on asap7 predicts delay,
+slew and skew within 3.3–4.3 ps of SPICE and power within 3.4%, 18× to 1706× faster than the first-moment
+method. Used in a genetic search over mesh buffer sizes it improves 99th-percentile skew by 49.1%, power
+by 25.7% and buffer area by 37.3% over MeshWorks, with 6.8% more slew. The top-level tree enters the model
+only as an input delay and slew per mesh buffer. Its future work names local clock buffers with small local
+trees below the mesh, where "the inputs of these buffers take the place of the flip-flop pins".</td>
+<td>The mesh top of step H, timed by the surrogate. The leaf interface of this plan is the thesis's
+local-buffer extension. Its metric list (global and local skew, slew, power, robustness, routing
+resources) is the report of step A.</td></tr>
+<tr><td>Li et al., <em>iCTS: Iterative and Hierarchical Clock Tree Synthesis With Skew-Latency-Load
+Tree</em>, TCAD 2025 (abstract), and its DAC 2024 version (full text). Open source in iEDA.</td>
+<td>Level by level, bottom-up: cluster, build topology, buffer. Clusters are balanced (k-means with a
+min-cost flow, then annealing) on a cost that is the <em>variance</em> of net capacitance and net delay. The
+topology is a bounded-skew tree, shortened by a shallow-light step, then made skew-legal again. Buffer
+delay is a first-order fit in input slew and load; a node gets a lower bound of its insertion delay before
+its buffer exists, so later merges disturb less. On 28 nm, 1.2k–27k flops, OpenROAD's tree has 1.4–1.5× the
+latency, 1.7–2.2× the skew and 1.2–1.3× the buffers of iCTS, and breaks the 80 ps skew bound on two
+designs. It does not beat the commercial tool on every design.</td>
+<td>The model for the tree top of step G. The variance cost is the homogeneity of K1 written as an
+objective. The cheap buffer model and the insertion-delay bound keep the timing engine out of the inner
+loop.</td></tr>
+<tr><td>Li et al., <em>A Method for Synthesizing Ultra-Large-Scale Clock Trees</em> (IB-KSR), Algorithms
+2025 (full text)</td>
+<td>IB-KSR is "incomplete balanced KSR", where KSR is the K-splitting clustering of Deng et al. above. It
+replaces the complete graph by the k nearest neighbours of each register, runs Kruskal on those edges, cuts
+long edges, and splits any tree above the fanout limit at the edge that halves it. Time goes from quadratic
+to O(k·n·log²n). 114k–185k registers. The evidence is weak: no delay model is described, the baseline is the
+authors' own GSR, and it uses 21% more buffers and 87× the run time of that GSR.</td>
+<td>Only the scaling rule for steps D and G: neighbours from a sparse graph, and a balanced split to
+enforce a hard fanout limit.</td></tr>
+<tr><td>Ji et al., <em>DiffCCD: Differentiable Concurrent Clock and Data Optimization</em>, ICCAD 2025
+(full text)</td>
+<td>After CTS, cell positions (within a small radius) and clock buffer sizes are optimized together by
+gradient on a differentiable timer, on a GPU. Against OpenROAD's <code>repair_timing</code> after its CTS:
+WNS 22% and TNS 45% better, 9.4× faster, on 20k–798k cells. Setup only: no hold, no gate sizing, no
+post-route numbers.</td>
+<td>Step F: clock arrival and data path are decided on the same slack, in the placement timing loop. The
+gap it leaves is hold, which K7 puts in the schedule.</td></tr>
+<tr><td>Choi et al., <em>Multisource Clock Tree Synthesis Through Sink Clustering and Fast Clock Latency
+Prediction</em>, ISCAS 2023 (abstract only)</td>
+<td>Local trees under tap drivers fed by an H-tree. Sinks are clustered by weight-balanced k-means so the
+tap loads are equal, and the number of trees is searched with a learned latency predictor instead of
+running CTS. Latency −11.8%, synthesis time −64% on a few circuits.</td>
+<td>The same structure as the mesh or spine top of step H: balanced tap loads, and a fast predictor to
+choose the number of taps.</td></tr>
+<tr><td>Cheng et al., <em>Cross-Mesh Clock Network Synthesis</em>, Electronics 2023 (full text)</td>
+<td>One horizontal and one vertical mesh line through the core centre. Each register starts with its own
+clock gate; neighbouring clusters merge while the load stays under 60–90% of the gate's limit (26–38
+registers per gate at 90%). Dummy loads balance the branches. Against a uniform mesh: capacitance −29%, skew
+−80%. Benchmarks are tiny (at most 1,728 registers, 90 nm) and there is no tree baseline.</td>
+<td>A gate per leaf group, merged up to a load limit, lands in the same 6–30 range as K1. The cross is the
+cheapest non-tree top and a candidate for the routable spine of the open point on mesh wires.</td></tr>
+<tr><td>Kwon and Park, <em>Shallow Clock Tree Pre-Estimation for Designing Clock Tree Synthesizable Verilog
+RTLs</em>, Electronics 2023 (full text)</td>
+<td>A netlist-only estimate: no placement, no wires, delay is the sum of cell delays on each clock path,
+and paths are padded with buffers to the longest one. Not a CTS method.</td>
+<td>Nothing for the network. Only the idea behind the synthesis level of the clock report (K9): clock
+structure that will hurt is visible before placement, while changing the RTL is still cheap.</td></tr>
+<tr><td>Kahng, Kundu, Thumathy, <em>Scalable Flip-Flop Clustering Using Divide and Conquer for Capacitated
+K-Means</em>, GLSVLSI 2024 (found by the literature check)</td>
+<td>Capacitated k-means for flop trays, split into small min-cost-flow problems: 100× faster than the
+earlier flow for 1.1% power. asap7, up to 64k flops. It is the basis of OpenROAD's
+<code>cluster_flops</code>.</td>
+<td>The reference for the size-capped hard assignment of step D, and for multi-bit banking if it is ever
+planned.</td></tr>
+</table>
+
+<h3>OpenROAD is moving too</h3>
+<p>The literature check (2026-11-19, OpenROAD master) found that the baseline is no longer the plain H-tree
+of the cohort runs. The items marked "reported" come from the check and are not yet reproduced here (F9).</p>
+<ul>
+<li><strong>Leaf clusters.</strong> <code>-sink_clustering_enable</code> builds one leaf level below the H-tree.
+Without explicit limits a cluster grows to a capacitance limit, with at most 30 sinks (reported). That is the
+upper end of K1.</li>
+<li><strong>Useful skew.</strong> <code>clock_tree_synthesis -useful_skew</code>, merged 2026-10-29 and off by
+default, inserts delay buffers to reach per-register targets from a skew budget.</li>
+<li><strong>Clock estimate in placement.</strong> <code>global_placement -virtual_cts</code> gives each sink a
+latency proportional to its path in a spanning tree (reported, merged 2026-06).</li>
+<li><strong>Gate cloning.</strong> A gate whose flops do not fit one cluster is cloned per part (reported, a
+commit of 2026-11-13). An open pull request makes power-driven placement pull leaf clusters together.</li>
+<li><strong>Still missing there.</strong> No incremental CTS, no skew groups, no mesh, and the known weak
+points remain: deep buffer chains, latency, and skew with many macros.</li>
+</ul>
+<p>So single features are not the advantage. What LiveHD can have and a staged flow cannot: one timer and
+one set of decisions for placement, gating level and arrival schedule; groups that are uniform because
+placement made them so; the gating level decided with the enable function in hand; a report against the
+RTL; and a local rebuild after a small change.</p>
+
+<h2>Design</h2>
+
+<h3>The clock as PCRS sees it</h3>
+<ul>
+<li><strong>Clock domain:</strong> one SDC clock root and everything it reaches through buffers,
+inverters and gates. Domains are found as the timing engine finds them today.</li>
+<li><strong>Sink:</strong> a flop clock pin, a memory or macro clock pin (with its Liberty insertion delay),
+a latch, or a clock leaving through a port.</li>
+<li><strong>Gating function:</strong> (domain, enable expression). Every sink has zero or more of them,
+taken from what synthesis inferred. The cells that implement a function are PCRS's to choose (K3).</li>
+<li><strong>Timing neighbours:</strong> two sinks of the same domain joined by a data path, with the slack
+of that path (the soft-clustering paper's definition).</li>
+<li><strong>Leaf group:</strong> 6–30 sinks with the same gating function, one driver, one scheduled
+arrival.</li>
+<li><strong>Leaf interface:</strong> what a top network sees of a group: driver position, input
+capacitance, wanted arrival and tolerance. Trees and meshes are built against this interface only (K6).</li>
+</ul>
+
+<h3>Where it runs in the flow</h3>
+<table>
+<tr><th>Stage</th><th>Clock work</th></tr>
+<tr><td>Synthesis</td><td>Gate inference as today. PCRS records the gating functions per flop and reports
+the expected leaf structure (flops per function, functions below 6 or above 30 flops).</td></tr>
+<tr><td>Floorplan and macro placement</td><td>Area for clock cells is reserved from the sink count. A gate
+is tied to the centroid of its flops instead of floating on its enable net.</td></tr>
+<tr><td>Final global placement</td><td>The soft-clustering force is on. At each timing round the wanted
+arrivals are recomputed, and the gating-level and depth decisions may change, as the reset depth does
+today.</td></tr>
+<tr><td>Converged placement, before the routing estimate and final legalization</td><td>Hard leaf groups,
+gates cloned and placed, drivers sized, top network built and placed, timing on the propagated clock,
+bounded hold fixes.</td></tr>
+<tr><td>Routing estimate (2r)</td><td>Charges the real clock network. Keeps a reserve only for the
+post-route hold pass.</td></tr>
+<tr><td>Final legalization</td><td>Clock cells are legalized first. A flop stays within its group
+radius.</td></tr>
+<tr><td>Hand-off and OpenROAD</td><td>Netlist and DEF with the clock cells placed and protected, SDC with
+propagated clocks. No CTS. Clock nets are routed with the platform's clock rules, then signals.</td></tr>
+<tr><td>Post-route</td><td>The hold pass of K7 on extracted RC.</td></tr>
+</table>
+
+<h3>Soft clustering in global placement (K4)</h3>
+<ul>
+<li>Each sink is attracted to the nearby cluster centres of its own gating function. The weight mixes
+distance with where its timing neighbours are, as in the paper. Cluster centres are a by-product of the
+previous iteration, so the force costs little.</li>
+<li>The force grows with density overflow going down, like the other late forces, so it shapes the
+placement without fighting spreading.</li>
+<li>A cell on a critical path is pulled less. A bin that is already dense in cells or pins takes no more
+flops.</li>
+<li>Useful skew changes the paper's rule. Two flops on a critical path that need <em>different</em>
+arrivals must not share a group. They go to sibling groups under a common parent, which still gives them
+a long shared clock path. Wanted arrival is therefore one more coordinate of membership.</li>
+</ul>
+
+<h3>Hard leaf groups (K1)</h3>
+<ul>
+<li>Formed once on the converged placement, in the style of GSR: a group takes the nearest sink while it
+stays inside a maximum radius, load and fanout, and its sinks agree on gating function and wanted
+arrival.</li>
+<li><strong>Homogeneous means:</strong> few driver sizes, a narrow band of load and wire radius per group, so
+the delay of a leaf stage is nearly the same everywhere. The top network then sees uniform sinks, and
+an arrival offset is a deliberate, discrete step. A refinement pass moves border sinks between groups to
+lower the variance of group capacitance and delay (the iCTS clustering cost).</li>
+<li>30 is the fanout and slew limit of one driver. 6 is where a dedicated driver or gate stops paying for
+itself. Sinks left in a group below 6 join a neighbour or lose their gate (next section).</li>
+<li>Memories and macros are groups of one with their own insertion delay.</li>
+</ul>
+
+<h3>Gating level (K3)</h3>
+<ul>
+<li><strong>Clone:</strong> one gate cell per leaf group. The gate is the leaf driver, so a gated group
+costs no extra buffer.</li>
+<li><strong>Merge:</strong> groups with the same function that end up adjacent share one gate.</li>
+<li><strong>Raise:</strong> when every group below a tree node shares a function, or a common factor of
+their enables (the chained form synthesis already produces), the gate moves to that node. More of the tree
+stops toggling, but the enable must arrive earlier by the latency below the gate.</li>
+<li><strong>Lower or drop:</strong> a function left with too few flops goes back to an enable on the data
+path, and its flops join an ungated neighbour group.</li>
+<li>The choice is a cost: switched clock capacitance (with the enable's activity), cell area, and the slack of
+the enable's clock-gating check at that level. Structural changes happen between timing rounds.</li>
+<li>Each flop keeps its (clock, enable) behaviour, so <code>lhd lec</code> compares the same function.
+Clock buffers and inverter pairs are identities.</li>
+</ul>
+
+<h3>Arrival schedule (K5)</h3>
+<ul>
+<li>One wanted arrival per leaf group, not per flop. It comes from the setup slack before and after the
+group's flops and from their hold slack, on the engine's criticality window.</li>
+<li>The offset is bounded: by hold at the derated margin, by a maximum range (a fraction of the period), and
+by what the network can realize in a few uniform steps.</li>
+<li>Realized in two places: the leaf driver (size, or one of a few delay steps) and, for a tree, the
+branches above. A mesh delivers one arrival, so below a mesh the leaf is the only place.</li>
+<li>The schedule is recomputed at every timing round together with sizing and repair, so data-path
+optimization and clock arrival are decided on the same slack (the DiffCCD direction).</li>
+</ul>
+
+<h3>Top network (K6)</h3>
+<ul>
+<li><strong>Tree.</strong> Built bottom-up and hierarchically over the leaf interfaces to the wanted
+arrivals: nearby nodes merge under limits on skew, latency and load; a buffer is chosen with a cheap
+load-based delay model; the timing engine checks each level. Registers that talk to each other merge early,
+so their shared path is long (K8). Neighbour search uses a sparse graph, never all pairs.</li>
+<li><strong>Mesh.</strong> A grid over the region of a domain, mesh buffers on it, a short stub from the
+grid to every leaf driver, and a tree from the root to the mesh buffers. Buffer sizes come from the thesis's
+search, with its surrogate predicting arrival, slew and power at the leaf drivers. Those arrivals enter
+the timing engine as the clock arrival of each leaf driver.</li>
+<li><strong>Which one.</strong> Per domain, or per region of a domain. A mesh is chosen where the tree
+cannot meet the skew target under the derate of K8 and the domain is dense enough to pay for the wire.
+Both report the same metrics.</li>
+</ul>
+
+<h3>Timing on the built clock (K8)</h3>
+<ul>
+<li>The engine propagates the clock through the PCRS network and gives every sink an early and a late
+arrival. Setup and hold use them instead of zero.</li>
+<li>Derate on clock cells and wires; the shared part of the launch and capture paths is not derated twice.
+A longer shared path is then worth picoseconds in LiveHD's own slack, which is what makes the clustering
+decisions measurable.</li>
+<li>Before the network exists (early placement stages) the engine uses an estimate: ideal clock plus the
+scheduled arrival of the group a sink would join.</li>
+</ul>
+
+<h3>Hold (K7)</h3>
+<ul>
+<li>The schedule never creates a hold violation at the model's margin.</li>
+<li>Cheap fixes before hand-off, in order: shift the schedule, change a cell (flop or driver) on the short
+path, add a delay cell where setup slack covers it. A budget on added area stops the pass.</li>
+<li>What is left goes to the post-route pass on extracted RC. It runs in OpenROAD first, and natively when
+a post-route timing loop exists.</li>
+<li>Every hold fix is placed by LiveHD, so its sites are known before the routing estimate.</li>
+</ul>
+
+<h3>Clock report: what to ask the RTL for (K9)</h3>
+<p>Every clock step knows when it gave up or paid too much. The report collects those cases instead of
+hiding them in a worse tree. An item names the source location (through the source map), the cost in the
+unit that hurts (slack, added cells, switched clock capacitance, hold buffers) and the change that would
+remove it. Items are ranked by cost, and an item appears only when PCRS could not fix it or the fix cost
+more than a threshold. The report is machine-readable, so an agent can act on it.</p>
+<table>
+<tr><th>Found by</th><th>Issue</th><th>What to ask for</th></tr>
+<tr><td>Synthesis (no positions)</td><td>A gating function with fewer than 6 flops, or many functions that
+differ by one term on registers of the same block.</td><td>Share one enable, or drop the condition.</td></tr>
+<tr><td>Synthesis</td><td>Logic on the clock that is not a recognized gate: clock muxes, dividers, both
+edges in one domain, latches, a domain with a handful of sinks.</td><td>Use an enable instead of a derived
+clock, one edge, one mux at the root.</td></tr>
+<tr><td>Leaf groups</td><td>Flops of one function spread over the die, so every group is under 6, or a
+sink that its data nets hold far from every group of its clock.</td><td>Gate per block, not across blocks;
+register the far signal locally.</td></tr>
+<tr><td>Gating level</td><td>An enable that fails its clock-gating check at every level, so the gate
+cannot be raised or must be dropped.</td><td>Compute the enable a cycle earlier, or from fewer
+levels of logic.</td></tr>
+<tr><td>Arrival schedule</td><td>A path that needs more offset than the bound allows, or whose offset is
+blocked by hold on the next path.</td><td>Retime or add a stage; the report names both registers.</td></tr>
+<tr><td>Hold</td><td>Register-to-register connections with no logic between groups of different arrival
+(shift chains, synchronizers, wide pipelines) that take most of the hold budget.</td>
+<td>Keep the chain in one block so it shares a group, or accept the delay cells knowingly.</td></tr>
+<tr><td>Top network</td><td>A macro or memory clock pin whose insertion delay or position sets the latency of
+the whole domain.</td><td>Move the macro, or give it its own clock entry.</td></tr>
+</table>
+<p>The synthesis level needs no placement and runs in seconds, so it is useful long before a clock network
+exists. Later levels repeat the check with real positions and real arrivals, and drop the items that
+placement solved.</p>
+
+<h3>Incremental</h3>
+<ul>
+<li>A group whose sinks, positions and schedule did not change keeps its driver, name and place. A change
+rebuilds the groups it touches and the path from them to the root.</li>
+<li>With chunks (<a href="2f-scalability.html">2f-scalability</a>): leaf groups never cross a chunk, each
+chunk has a clock entry with an arrival as a boundary time, and the top network connects chunk
+entries.</li>
+</ul>
+
+<h2>Facts to confirm first</h2>
+<ul class="subtasks">
+<li><strong>F1 — no-CTS recipe.</strong> What OpenROAD needs to accept a clock network it did not build:
+clock net type and routing rules, propagated clocks in the SDC, protection of clock cells from its own
+repair, and whether its timing repair still edits clock nets.</li>
+<li><strong>F2 — clock cells.</strong> Per platform (asap7, sky130, nangate45): buffer, inverter, gate and
+delay cell families the LEF can place, and the insertion delay of memory clock pins.</li>
+<li><strong>F3 — sign-off variation.</strong> Which derate and pessimism removal the ORFS sign-off uses on the
+cohort. If none, K8 needs a declared derate applied to both arms.</li>
+<li><strong>F4 — activity.</strong> Whether enable activity is available (from <code>lhd sim</code>) for the
+gating cost, or a default probability is used.</li>
+<li><strong>F5 — cohort clock structure.</strong> Per design: sinks per domain, flops per gating function, gate
+depth, and the share of flops whose function has fewer than 6 or more than 30 flops.</li>
+<li><strong>F6 — thesis artifacts.</strong> Code, weights, technology coverage and run-time dependencies of
+the surrogate and of the mesh generator, and their licences.</li>
+<li><strong>F7 — mesh hand-off.</strong> How a mesh is written so OpenROAD keeps it and connects the stubs, and
+how the sign-off timer receives mesh arrivals.</li>
+<li><strong>F8 — reading OpenROAD's tree.</strong> The DEF reader rejects the non-default routing rules that
+OpenROAD CTS writes (2r). Step B needs to load those results.</li>
+<li><strong>F9 — the OpenROAD of the control arm.</strong> Which OpenROAD version the cohort recipes use, and
+whether it has sink clustering, <code>-useful_skew</code>, <code>-virtual_cts</code> and gate cloning. Reproduce
+each reported feature before it is used as a baseline.</li>
+</ul>
+
+<h2>Steps</h2>
+<p>K5 and K6 put useful skew, tree and mesh in the first milestone. The order below is the order of
+dependency.</p>
+<ul class="subtasks">
+<li><strong>A — Controls.</strong> On the cohort, measure OpenROAD's CTS on today's LiveHD placements: clock
+buffers, clock capacitance, latency, global and local skew, sinks and radius per leaf buffer, hold buffers and
+where they land, and the stage each run reaches. Two controls: the recipe as it is today, and the best
+OpenROAD can do with its own clock features on (F9). These are the control arms of every later
+comparison.</li>
+<li><strong>B — Clock in the timing engine.</strong> Propagated arrivals, derate, common-path credit, gating
+checks and hold with real latency. Checked by loading an OpenROAD post-CTS result and comparing per-sink
+latency and endpoint slack with OpenSTA.</li>
+<li><strong>C — Hand-off without OpenROAD CTS.</strong> The simplest network (hard groups on a finished
+placement, a plain balanced tree) taken through routing with CTS skipped. It proves the recipe of F1 and the
+reports. No QoR claim.</li>
+<li><strong>D — Leaf groups and gates.</strong> Hard grouping with the homogeneity rules; gates as
+functions; clone and merge first, then raise, lower and drop with the cost model.</li>
+<li><strong>E — Soft clustering in global placement.</strong> The force, the area reservation, and the density
+and pin-density guards.</li>
+<li><strong>F — Arrival schedule.</strong> Wanted arrival per group, its bounds, its role in group membership,
+and its place in the timing rounds.</li>
+<li><strong>G — Tree top.</strong> The hierarchical builder to the scheduled arrivals, buffer placement,
+scaling to the largest domain of the cohort.</li>
+<li><strong>H — Mesh top.</strong> Mesh generation, the surrogate, buffer sizing, the selection rule, and the
+hand-off of F7.</li>
+<li><strong>I — Hold.</strong> Schedule bounds, the bounded pre-route fixes, and the post-route pass.</li>
+<li><strong>J — Incremental and chunks.</strong> Local rebuild after a small change, and the chunk clock
+entry.</li>
+<li><strong>L — Clock report</strong> (no step K, to keep it apart from the decisions). The synthesis level
+comes with step A, from the structure census of F5. Steps D, F, G, H and I each add their items when they
+land. Checked by applying a suggested change to one cohort design and measuring that the reported cost
+goes away.</li>
+</ul>
+
+<h2>Acceptance</h2>
+<p>Routed outcome in OpenROAD with the same die, density and constraints in both arms, as in 2r decision R6.
+Control: LiveHD placement, OpenROAD CTS, in the two variants of step A. New: LiveHD clock network, OpenROAD
+routing only. A win counts only against the stronger control.</p>
+<ul>
+<li>No design stops at an earlier stage than its control, and the CTS and hold-repair failures of the
+cohort are gone.</li>
+<li>Post-route setup and hold WNS and TNS with propagated clocks on extracted RC, under the variation setup
+of F3.</li>
+<li>Hold buffers added after hand-off, as a count and as area. This is the number the cohort complained
+about.</li>
+<li>Clock network: cells, capacitance (power), wirelength, maximum latency, global skew, local skew on the
+near-critical register pairs, and the spread of leaf-stage delay (the homogeneity of K1).</li>
+<li>Routability and signal wirelength not worse; final DRC.</li>
+<li>Wall time of the clock steps, and of an incremental rebuild after a one-module change.</li>
+<li>LiveHD's own post-placement slack against the routed slack, per endpoint: the reason to own the clock is
+that the two agree.</li>
+<li>The clock report of each design: its top items explain the clock cost that is left, and at least one
+suggested RTL change is shown to remove the cost it reported.</li>
+</ul>
+
+<h2>Risks</h2>
+<ul>
+<li><strong>Pin density in flop groups.</strong> On litepci the detailed-route hotspots were a flop-array
+cluster with more than 9 pins/µm² (2026-11-16). Pulling flops together makes this worse unless the group
+radius respects the router's pin capacity.</li>
+<li><strong>Data timing and wirelength.</strong> Every move toward a clock group lengthens some data net. The
+force must lose against a critical data path.</li>
+<li><strong>Useful skew and hold.</strong> Scheduled offsets create short-path risk that the pre-route model
+sees only approximately. A schedule that is too aggressive moves the 82,892-buffer problem instead of
+removing it.</li>
+<li><strong>Model against routed clock.</strong> LiveHD times its tree on estimated wires; OpenROAD routes
+them. If the two disagree, the schedule is built on the wrong arrivals. Step C measures this gap before any
+optimization depends on it.</li>
+<li><strong>Mesh outside the comfort zone.</strong> A mesh needs wires LiveHD does not draw, a timer STA does
+not have, and a learned model in the flow. The last learned model in LiveHD (URoute) was deleted.</li>
+<li><strong>Two owners of clock gating.</strong> Synthesis infers gates and PCRS re-decides them. The split
+must be explicit, or the same gate is created and dropped at every round.</li>
+<li><strong>Too much in one milestone.</strong> Useful skew, tree and mesh together make a result hard to
+attribute. Each must be switchable so a comparison can turn one off.</li>
+</ul>
+
+<h2>Open points</h2>
+<ul>
+<li>Mesh wires: K2 says OpenROAD routes the clock, but a detailed router does not build a mesh. Either
+LiveHD writes the grid as fixed wires, or a spine that OpenROAD can route is the first non-tree network.</li>
+<li>Where the surrogate runs: as a separate process, or as native inference inside <code>lhd</code>.</li>
+<li>Multi-bit flops: a leaf group is a natural bank. Not planned until a platform with such cells is in the
+cohort.</li>
+<li>Divided and generated clocks, clock muxes, and several clocks reaching one sink.</li>
+<li>The reset tree of PCRS under useful skew: its flops are clock sinks like any other.</li>
+<li>The power and scan parts of PCRS are not in this page.</li>
+</ul>
+
+<h2>Related</h2>
+<ul>
+<li><code>pass/place/pcrs/README.md</code>: the reset network and the conventions this plan reuses.</li>
+<li><a href="2q-fasttimer.html">2q-fasttimer</a>: the timing engine that step B extends; its hold step J
+becomes step I here.</li>
+<li><a href="2r-route.html">2r-route</a>: the clock charge and the repair reserve that this plan replaces
+with real cells; names PCRS as the next goal.</li>
+<li><a href="2t-timing_closure_plan.html">2t-timing_closure_plan</a>: the GP timing forces next to which the
+clustering force runs. It left useful skew and hold ECO to OpenROAD; this page takes them back.</li>
+<li><a href="2f-scalability.html">2f-scalability</a>: chunks and boundary times for step J.</li>
+<li><code>soft_clustering.pdf</code>, <code>clustering.pdf</code>, <code>phd_thesis.pdf</code> in the
+repository root.</li>
+</ul>
+</main>
+<footer>LiveHD TODO · 2p-pcrs</footer>
+</body>
+</html>

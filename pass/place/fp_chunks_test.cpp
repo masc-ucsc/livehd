@@ -5,10 +5,12 @@
 
 #include <cmath>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <iterator>
 #include <limits>
 
+#include "chunk_demand.hpp"
 #include "chunk_geometry.hpp"
 #include "chunk_measure.hpp"
 #include "chunk_refine.hpp"
@@ -632,6 +634,153 @@ TEST(FpChunks, MemoryHistorySeparatesContextsAndMergesWithCollateral) {
   EXPECT_EQ(load_chunk_predictor("unseen", history, nullptr).samples, 0U);
   EXPECT_EQ(metadata::Bundle::read(history).select("other.pass", "").size(), 1U);
   EXPECT_EQ(exported.select("other.pass", "").size(), 1U);
+}
+TEST(FpChunks, DirectionalDemandDeduplicatesSharedWiresAndReservesObstructedTracks) {
+  Chunk_demand grid({0, 0, 40, 40}, 10, {1, 2});
+  grid.reserve({0, 0, 10, 10}, {1., 0.});
+  grid.internal({0, 0, 30, 0});
+  grid.route({
+      { 0, 0},
+      {30, 0},
+      {30, 0}
+  });
+  rapidjson::Document doc;
+  const auto          report = grid.record(doc, 32);
+  const auto&         tile   = report["tiles"][0];
+  EXPECT_DOUBLE_EQ(tile[0].GetDouble(), 1.);
+  EXPECT_DOUBLE_EQ(tile[1].GetDouble(), 0.);
+  EXPECT_GT(tile[2].GetDouble(), 0.);
+  EXPECT_DOUBLE_EQ(tile[4].GetDouble(), 0.);
+  EXPECT_DOUBLE_EQ(tile[5].GetDouble(), 20.);
+  EXPECT_GT(tile[6].GetDouble(), 1.);
+}
+TEST(FpChunks, BoundaryTileHasOnlyItsPhysicalTracks) {
+  Chunk_demand grid({0, 0, 12, 13}, 10, {1, 2});
+  grid.reserve({10, 10, 20, 20}, {.5, 1.});
+  rapidjson::Document doc;
+  const auto record = grid.record(doc, 128);
+  const auto& last = record["tiles"][3];
+  EXPECT_DOUBLE_EQ(last[4].GetDouble(), 1.5);
+  EXPECT_DOUBLE_EQ(last[5].GetDouble(), 0.);
+}
+TEST(FpChunks, DistinctScreenedFramesKeepBudgetAndMembership) {
+  Chunk_model model;
+  model.target_homes = 3;
+  for (int i = 0; i < 12; ++i) {
+    model.cell("group." + std::to_string(i), "", "", false, 2, 2);
+  }
+  auto plan = model.plan({0, 0, 150, 100}, 1, 1, 100000000, .6, nullptr, "top");
+  ASSERT_EQ(plan.chunks.size(), 3u);
+  ASSERT_GT(plan.shape_candidates.size(), 1u);
+  model.shape_rank = 1;
+  auto other       = model.plan({0, 0, 150, 100}, 1, 1, 100000000, .6, nullptr, "top");
+  EXPECT_EQ(other.home, plan.home);
+  for (size_t h = 0; h < other.chunks.size(); ++h) {
+    EXPECT_EQ(other.chunks[h].box, plan.shape_candidates[1].second[h]);
+    EXPECT_LE(other.chunks[h].bytes, 100000000u);
+  }
+}
+TEST(FpChunks, AreaWeightedTargetDistributesLargeMacros) {
+  Chunk_model model;
+  model.target_homes = 4;
+  for (int i = 0; i < 24; ++i) {
+    model.cell("logic" + std::to_string(i), "", "", false, 1, 1);
+  }
+  for (int i = 0; i < 4; ++i) {
+    model.cell("sram" + std::to_string(i), "", "", true, 20, 20);
+  }
+  model.area_weight = 1;
+  auto plan = model.plan({0, 0, 100, 100}, 1, 1, 100000000, .6, nullptr, "top");
+  ASSERT_EQ(plan.chunks.size(), 4u);
+  for (const auto& chunk : plan.chunks) {
+    EXPECT_EQ(std::count_if(chunk.objects.begin(), chunk.objects.end(), [&](int i) { return model.objects[i].macro; }), 1);
+    EXPECT_LE(chunk.bytes, 100000000u);
+  }
+}
+TEST(FpChunks, SteppedEdgePartitionsSitesAndProjectsCoincidentTaps) {
+  auto                      p = tiled({
+      { 0, 0, 20, 40},
+      {20, 0, 40, 40}
+  });
+  std::vector<Chunk_object> objects(2);
+  for (auto& c : p.chunks) {
+    c.ports.push_back({
+        "net",
+        {20, 10},
+        7
+    });
+  }
+  Chunk_edit e;
+  e.step  = "0";
+  e.peer  = "1";
+  e.depth = 3;
+  apply_chunk_step(p, e, objects, {1, 2});
+  EXPECT_EQ(p.chunks[0].ports.front().xy, p.chunks[1].ports.front().xy);
+  EXPECT_EQ(p.chunks[0].ports.front().xy, (Chunk_point{23, 10}));
+  std::array<int, 2> area{};
+  for (int x = 0; x < 40; ++x) {
+    for (int y = 0; y < 40; ++y) {
+      int owners = 0;
+      for (size_t i = 0; i < p.chunks.size(); ++i) {
+        const auto& c        = p.chunks[i];
+        auto        contains = [&](const auto& b) { return x >= b[0] && x < b[2] && y >= b[1] && y < b[3]; };
+        int         count    = std::count_if(c.region.begin(), c.region.end(), contains);
+        EXPECT_EQ(int(contains(c.worker_box())), count + std::count_if(c.exclusions.begin(), c.exclusions.end(), contains));
+        area[i] += count;
+        owners  += count;
+      }
+      ASSERT_EQ(owners, 1);
+    }
+  }
+  EXPECT_EQ(area[0], area[1]);
+  auto protected_home    = tiled({
+      { 0, 0, 20, 40},
+      {20, 0, 40, 40}
+  });
+  objects[1].macro       = true;
+  objects[1].width       = 4;
+  objects[1].height      = 3;
+  objects[1].worker_halo = {2, 0};
+  protected_home.seeds   = {
+      { 0, 0,  5,  5},
+      {24, 9, 28, 12}
+  };
+  EXPECT_THROW(apply_chunk_step(protected_home, e, objects, {1, 2}), std::invalid_argument);
+  auto wide_slot  = tiled({
+      { 0, 0, 20, 40},
+      {20, 0, 40, 40}
+  });
+  wide_slot.seeds = {
+      { 0, 0, 20, 40},
+      {20, 0, 40, 40}
+  };
+  EXPECT_NO_THROW(apply_chunk_step(wide_slot, e, objects, {1, 2}));
+}
+TEST(FpChunks, RepeatedStepReplacesTheSameSeamAndZeroRestoresTheControl) {
+  Chunk_model model;
+  model.target_homes = 2;
+  for (int i = 0; i < 8; ++i) {
+    model.cell("group." + std::to_string(i), "", "", false, 2, 2);
+  }
+  auto solve = [&](const metadata::Bundle* intent) { return model.plan({0, 0, 140, 100}, 1, 1, 100000000, .6, intent, "top"); };
+  const auto base = solve(nullptr);
+  ASSERT_EQ(base.chunks.size(), 2u);
+  const auto& a  = base.chunks[0].id;
+  const auto& b  = base.chunks[1].id;
+  auto        op = [&](int depth) {
+    return std::format(R"({{"step":"{}","peer":"{}","depth_dbu":{},"band_dbu":4,"offset_dbu":7}})", a, b, depth);
+  };
+  auto with = [&](const std::string& edits) {
+    metadata::Bundle intent(std::format(R"([{{"class":"livehd.placement.chunk_guidance","id":"gui","geometry":[{}]}}])", edits));
+    return solve(&intent);
+  };
+  auto latest = with(op(5));
+  EXPECT_EQ(with(op(-3) + "," + op(5)).chunks[0].perimeter, latest.chunks[0].perimeter);
+  EXPECT_FALSE(latest.chunks[0].region.empty());
+  auto cleared = with(op(5) + "," + op(0));
+  EXPECT_TRUE(cleared.chunks[0].region.empty());
+  EXPECT_EQ(cleared.home, base.home);
+  EXPECT_EQ(cleared.chunks[1].box, base.chunks[1].box);
 }
 TEST(FpChunks, OutdatedSelectorsAreDiagnosed) {
   Chunk_model m;

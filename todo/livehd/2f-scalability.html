@@ -15,6 +15,203 @@ and a whole-design timing or routing run have different memory footprints. See t
 <a href="../../pass/place/README.md#color-and-macro-chunk-floorplan">working flow and replay commands</a>
 and the <a href="../../lhd/tests/lhd_placement_chunks_smoke.py">clean-run checks</a>.</p>
 
+<h2 id="eyeriss-workers">Eyeriss worker experiments</h2>
+<p>HighTide ASAP7 Eyeriss, top <code>TOP</code>, has 275,073 standard cells and 1,040 SRAM banks in this
+mapping. The first export with a strict 1,907 MiB budget made two homes. We compared four homes following
+the repeated cluster groups, automatic hierarchy and connectivity cuts, alternative rectangles, a central
+controller home, and tighter worker budgets, covering three through seven homes. All placement after
+export ran on individual homes. Three- and seven-home exports peaked at 2.53 and 2.49 GB for the
+producer process tree. The 2 GB worker budget therefore needs a separate producer budget today.
+A deliberately understated estimate at a 128 MiB test limit reached 184 MB before the supervisor
+stopped the worker. A retry at the normal budget reproduced its original handoff. Use a host-enforced
+limit or measured admission headroom for a hard RAM ceiling.</p>
+<ol>
+<li><strong>Partition whole repeated groups first, then refine.</strong> At 120 macro and 300 final
+iterations, keeping the four groups together cut 1,890 signal nets including die IO, versus 2,249 for
+hierarchy packing and 4,365 for greedy connectivity packing. Assembled HPWL was 5.874, 5.912 and
+11.006 million µm respectively. Score boundary capacity, physical pin spans, and shape along with memory.
+Screen candidate macro moves independently and score their exact assembled coordinates before promotion.
+After per-home macro, density and iteration trials, the two finalists reached 4.759 and 4.778 million µm
+HPWL. Both passed placement legality and routed all nets with zero global overflow. The second used
+3,671 µm less routed wire and improved global-route-RC WNS by 1.68 ns.</li>
+<li><strong>Dispatch versioned packets to available workers.</strong> Four final jobs copied into separate
+directories reproduced the serial handoff checksums using three worker slots. The two serial runs took
+35.7 and 36.5 seconds, the parallel runs 18.4 seconds each. The three worker process trees together
+peaked at 0.70 GB in a separate simultaneous sample. Six smaller chunks finished the same 300-step
+placement wave in 13.3 seconds with three workers but increased assembled HPWL by 17% relative to
+the four intact groups. Include both wall time and assembled quality when choosing a partition.
+Extend the project coordinator with a short
+dispatch transaction and a short result transaction. Run the solver outside the project write lock.
+Identify a result by design revision, packet and engine digests, placement seed, and incident interface
+revisions. Accept disjoint results independently, reject obsolete results, and retry a failed job from
+the same packet. Track transfer bytes, per-process peak RSS, queue time, and the slowest job.</li>
+<li><strong>Let the coordinator own boundary slots.</strong> In one four-group frame, 586 two-home
+signal nets shared the same proposed point on a 43.146 µm edge. One 0.24 µm lane per signal would
+need 140.64 µm. Even when both workers favored sliding a contact, re-placement could increase whole-design
+HPWL. Ordering 1,744 contacts into shared slots and re-solving for 1,500 iterations improved HPWL
+by 48,056 µm and placement-RC WNS by 1.26 ns relative to an equally advanced frozen-contact run.
+Have workers return preferred intervals, demand by layer and timing sensitivity. Assign compatible
+slots once per interface epoch, send exactly those slots to every incident home, and compare the round
+with an equally advanced frozen-contact control. Include multi-home trunks and fixed die ports.</li>
+<li><strong>Route the color and macro terminals before legal placement.</strong> An offline directional
+pattern-route experiment used 128 lower-layer track pitches per floorplan tile and 32 per macro tile.
+It included SRAM layer obstructions and reserved capacity using local cell density. Across three
+four-home partitions, correlation with independent FastRoute crossing-net wirelength maps was
+0.64–0.73 at the floorplan and 0.82–0.93 after macro placement. The existing contact-span map gave
+0.15–0.54. Expose directional demand, available tracks, internal reservation, and overflow separately.
+In the all-net reference, floorplan density alone correlated only 0.10 with internal wire demand.
+Under a tighter track budget, the resulting floorplan overflow flags covered less than 1% of the
+reported third-iteration marker weight. Adding per-net internal demand from 96 and 120 local macro
+iterations brought those figures to 46% and 51% in the highest-ranked tenth of the map. The
+four-home placement waves took about 2.6 seconds each. Workers can return sparse directional tile
+demand and incident terminals. The coordinator can then update affected tiles and crossing routes
+without reading full worker placements. Test false negatives on a held-out design before using the
+map to reject a floorplan.</li>
+</ol>
+<p>Keep independent timing measurements for finalists. The live WNS estimate favored automatic hierarchy
+packing over four intact groups (−32.85 versus −40.80 ns). OpenSTA with placement RC and the same
+2.5 ns clock favored the intact groups (−19.03 versus −21.86 ns for hierarchy packing). Exchange arrival
+and load at cut pins, track the critical path family, and test candidate <em>deltas</em> against this
+reference. On a second four-group geometry, coordinating just five address signals across all four
+homes improved placement-RC WNS by 4.45 ns against a matched 850-iteration control. The live WNS
+estimate returned the same value for both. Coarse and full-grid routing are validation stages with
+their own memory budgets.</p>
+
+<h2>Production worker and routing measurements</h2>
+<p>Four hierarchy-based homes were placed independently for HighTide Eyeriss, CNN,
+CoralNPU CoreMiniAxi and NVDLA partition C. Each worker had a decimal 2 GB budget.
+Three processes ran concurrently on one Apple Silicon host. The coordinator stitched
+276,113, 206,192, 146,204 and 259,440 owned instances respectively.
+OpenROAD checked placement legality and measured placement-RC slack for each
+assembly and its matched control.</p>
+<table><thead><tr><th>Four-home placement</th><th>Kept hypothesis</th><th>Initial HPWL
+(million µm)</th><th>Kept HPWL (million µm)</th><th>OpenROAD ΔWNS
+against matched control (ns)</th></tr></thead><tbody>
+<tr><td>Eyeriss</td><td>Per-home density</td><td>5.860</td><td>5.779</td><td>+0.588</td></tr>
+<tr><td>CNN</td><td>Connectivity-guided macro moves</td><td>14.816</td><td>14.113</td><td>+0.859</td></tr>
+<tr><td>CoralNPU</td><td>Per-home density</td><td>6.352</td><td>5.957</td><td>+0.022</td></tr>
+<tr><td>NVDLA C</td><td>Shared IO slots</td><td>17.693</td><td>12.900</td><td>+3.875</td></tr>
+</tbody></table>
+<p>Transferred packets now carry pin identities, oriented macro poses and frozen
+interface dependencies. Four identical CoralNPU final jobs took 12.21 seconds
+serially and 6.85 seconds using three processes. Every handoff and coordinate file
+matched byte for byte. The slot allocator can reserve aligned contacts on multiple
+preferred routing layers, atomically update affected homes, reject an overfull seam
+and check stale replies before publication. Partial negotiation can target particular
+crossing signals.</p>
+<p>The floorplan proxy uses 128 track pitches per tile and the placed homes use 32.
+Both expose horizontal and vertical crossing demand, internal demand and available
+tracks. Against routed metal length on a common 32 × 32 grid, Eyeriss correlation
+went from 0.33/0.34 at the floorplan to 0.95/0.96 after local placement. The
+independent M2–M7 reference routed 287,544 nets with zero global overflow.
+CoralNPU provides a second calibration with nonzero overflow. Timing and capacity
+remain separate decisions; Eyeriss geometry rank 1 had higher pin HPWL but better
+placement-RC WNS than the HPWL winner on the original four-home partition.</p>
+<p>Use <code>lhd synth chunk shapes --screen</code> to compare pin span and boundary
+slot capacity, <code>explore</code> to compare matched forks, and <code>validate</code>
+to check the exact stitched pose. <code>resources</code> reports producer and worker
+measurements separately. The live GUI shows accepted, viewed and best comparable
+scores along with density, demand and placement frames.</p>
+
+<h3>Partition and acceptance controls</h3>
+<p>The complete sweep covered 21 physical projects and 31 logged search experiments.
+For CNN at equal placement effort, hierarchy order gave 14.778 and 18.431 million µm
+for four and five area-weighted homes. Connectivity order gave 6.632 and 6.443 at
+the same counts. The best five-home control reached 6.235. On Eyeriss, three,
+four and seven hierarchy homes produced 6.583, 5.860 and 7.293 million µm at
+equal effort. Increasing the count reduced peak worker memory but could lengthen
+the crossing connections.</p>
+<table><thead><tr><th>Lowest verified pin HPWL</th><th>Homes</th><th>HPWL
+(million µm)</th><th>Independent placement WNS (ns)</th></tr></thead><tbody>
+<tr><td>Eyeriss</td><td>4</td><td>5.779</td><td>−28.405</td></tr>
+<tr><td>CNN</td><td>5</td><td>6.235</td><td>−38.405</td></tr>
+<tr><td>CoralNPU</td><td>5</td><td>4.430</td><td>−1.952</td></tr>
+<tr><td>NVDLA partition C</td><td>4</td><td>7.382</td><td>−8.543</td></tr>
+</tbody></table>
+<p>Independent validation found two ranking reversals. The CoralNPU rank-6 geometry
+reduced projected floorplan excess by 5.5% but increased global-router overflow from
+3,518,895 to 3,588,284. On a separate CoralNPU density trial, the estimated WNS gain
+was 20 ps and measured placement-RC WNS fell 416 ps versus the equally advanced control.
+<code>verify-wns --keep</code> retained the original revision. On NVDLA the independent
+check confirmed a 3.875 ns gain against the control. A projected hotspot map and
+a candidate ranking should each be tested against independent routed data.</p>
+
+<h3>Global routing on the selected placements</h3>
+<p>OpenROAD read each accepted, independently placed chunk assembly at its recorded revision.
+All four passed placement legality. The global router used M2–M7, 75% retained capacity
+and up to three congestion iterations. WNS uses the resulting route RC.</p>
+<table>
+<thead><tr><th>Design</th><th>Routed wire (million µm)</th><th>Final overflow</th><th>Routed WNS (ns)</th></tr></thead>
+<tbody>
+<tr><td>Eyeriss</td><td>7.186</td><td>0</td><td>−19.585</td></tr>
+<tr><td>CNN</td><td>7.918</td><td>374,221</td><td>−37.834</td></tr>
+<tr><td>CoralNPU</td><td>6.338</td><td>2,670,161</td><td>−3.672</td></tr>
+<tr><td>NVDLA partition C</td><td>10.220</td><td>1,617,380</td><td>−7.364</td></tr>
+</tbody></table>
+<p>Every selected floorplan had enough shared boundary slots. Only Eyeriss met global routing
+capacity everywhere. The selected five-chunk CNN used 44.0% less routed wire and had 91.3%
+less overflow than the four-chunk area-weighted comparison. Across the four selected designs,
+directional correlation with routed wire density ranged from 0.23 to 0.67 at floorplan time
+and from 0.83 to 0.96 after local placement. Predicting the severity of overflow on individual
+boundaries remains a separate calibration target.</p>
+
+<h3 id="fp-boundary-feedback">Testing color transfers and stepped boundaries at fp_plan</h3>
+<p>Use the floorplan seeds to measure crossing nets, unassigned contacts on each shared
+edge, directional excess tracks and local density. Repeat the measurements after the local
+workers place their cells. On the four-chunk CoralNPU floorplan, changing frame rank from
+0 to 6 without changing ownership reduced seed-stage unassigned contacts from 677 to 33.
+The independent global route measured 1.97% more overflow on the latter placement.
+On four-chunk, area-weighted CNN, growing homes by connectivity lowered crossing nets
+from 8,306 to 6,558 and seed-stage excess from 588,414 to 182,809 track units. These
+counts compare complete ownership partitions and the frames generated for them.</p>
+<p>A geometric screen held the initial color assignments and chunk areas constant.
+It exchanged two equal rectangles across a single shared edge, snapped their edges to rows
+and sites, and excluded exchanges intersecting a seeded macro. Counts below are distinct
+M2–M7 coordinate/layer slots on the modified edge, before pin access and competing traffic.
+The last column reserves 25% of those slots as a sensitivity test.</p>
+<table><thead><tr><th>Seed floorplan</th><th>Signals on edge</th><th>Straight slots</th><th>Step depth and slots</th><th>Depth with reserve</th></tr></thead>
+<tbody><tr><td>CoralNPU, four chunks</td><td>2,085</td><td>1,408</td><td>2.700 µm, 2,088</td><td>5.670 µm</td></tr>
+<tr><td>CoralNPU, five chunks</td><td>7,809</td><td>6,942</td><td>3.402 µm, 7,821</td><td>No fit within 7.852 µm search bound</td></tr>
+<tr><td>CNN, four chunks</td><td>2,669</td><td>2,528</td><td>0.540 µm, 2,675</td><td>3.996 µm</td></tr></tbody></table>
+<h3>Placed and routed boundary trials</h3>
+<p>The floorplan editor now exchanges two equal, site- and row-snapped tabs across a shared
+edge. Both workers receive complementary row intervals and the same boundary segments.
+The editor checks seeded macro footprints, halo, fixed instances and terminals before
+accepting an edit. Local legalization and stitch validation check the complete cell footprint.
+On HighTide CoralNPU, Eyeriss, CNN and NVDLA partition_c, we exercised four chunks per design,
+a 2,000,000,000-byte allowance per worker and up to three concurrent local workers. Each
+straight/stepped comparison kept both exterior chunks at byte-identical final coordinates.</p>
+<p>For CoralNPU, the 5.670 µm step increased a 2,121-signal edge from 1,408 to 2,828
+distinct coordinate/layer slots. Across all interfaces, the number of signals without a slot
+dropped from 713 to 160. Independent OpenROAD global routing on M2–M7 with 75% capacity
+gave the following results. WNS is pre-CTS and uses the design constraints.</p>
+<table><thead><tr><th>CoralNPU edit</th><th>Crossing nets</th><th>Routed wire (µm)</th>
+<th>Global overflow</th><th>Routed WNS (ps)</th></tr></thead><tbody>
+<tr><td>Straight control</td><td>21,802</td><td>9,432,519</td><td>4,262,415</td><td>−6,979</td></tr>
+<tr><td>Boundary step</td><td>21,802</td><td>9,415,399</td><td>4,227,748</td><td>−5,843</td></tr>
+<tr><td>Move one color</td><td>21,801</td><td>9,834,324</td><td>4,716,196</td><td>−6,627</td></tr>
+<tr><td>Move color and step</td><td>21,801</td><td>9,888,562</td><td>4,734,836</td><td>−5,054</td></tr>
+</tbody></table>
+<p>A second experiment placed CoralNPU’s 128-bit DTCM read bus in bit order along its
+shared boundary. Both branches advanced just the two incident chunks for 120 iterations.
+Relative to the matched control, assembled HPWL fell 2,848 µm and estimated WNS improved
+0.175 ps. Global routing saved 9,404 µm and 3,367 units of overflow, but WNS worsened
+1,334 ps. The main placement was retained. Bus ordering and extra track spacing can be
+tested independently. The GUI exposes each trial, both timing estimates, and the measured
+metal-length grid alongside the early routing and density maps.</p>
+<p>The other stepped boundaries were evaluated with the same worker budget and routing settings. Positive WNS deltas improve slack. All eight stitched placements passed the independent placement legality check.</p>
+<table><thead><tr><th>Design</th><th>Stepped minus straight routed wire (µm)</th><th>Overflow delta</th><th>Routed WNS delta (ps)</th></tr></thead><tbody>
+<tr><td>CoralNPU</td><td>−17,120</td><td>−34,667</td><td>+1,136</td></tr>
+<tr><td>Eyeriss</td><td>+102,115</td><td>0</td><td>+3,604</td></tr>
+<tr><td>CNN</td><td>−107,636</td><td>−158,351</td><td>−5,063</td></tr>
+<tr><td>NVDLA partition_c</td><td>+691,095</td><td>+533,490</td><td>+216</td></tr>
+</tbody></table>
+<p>On the CNN dedicated SRAM chunk, connectivity-directed reseeding of eight memories saved 70,929 µm of assembled HPWL against the equally advanced control. Moving 32 added 245,484 µm. The checkpoint, matched control and top-eight trial had placement-RC WNS of −40,186 ps. The three logic chunks remained frozen. Global routing of the eight-memory edit saved 69,953 µm of wire, added 2,137 units of overflow and worsened WNS by 1,741 ps against the matched control. The trial was archived. On NVDLA, lowering one chunk’s density target to 45% increased measured local density overflow from 39.6% to 44.7%. Both outcomes are available in the live experiment journal.</p>
+<p>Xiong et al. group ordered FPGA cascades during placement and enforce allowed regions
+during legalization. The ASIC experiment here carries an area-preserving union of rectangles
+from the floorplan through local placement and stitching.
+<a href="https://arxiv.org/pdf/2311.08582">DREAMPlaceFPGA-MP</a>.</p>
+
 <h2>Remaining work</h2>
 <ol>
 <li><strong>Export without a flat physical design.</strong> Read cells, pins, obstructions and boundary
@@ -25,20 +222,22 @@ and name copies before choosing the next memory optimization.</li>
 <li><strong>Reuse and stitch physical implementations.</strong> An interface match helps choose
 how pins face; it does not prove interchangeable netlists, rows, rails or SRAM pin access.
 Carry logical instance and pin identity through inlining and extract arbitrary colored chunks without
-requiring separately supplied RTL. Store oriented cell and macro poses and stitch one owner per
-movable instance. Reject incompatible masters, fixed obstacles, row phase or unmatched required pins.
+requiring separately supplied RTL. The worker frame now stores macro orientation and stitches each owned physical instance once.
+Check substitutability of independently produced implementations across equivalent logical instances,
+including masters, fixed obstacles, row phase and required pins.
 Acceptance: reproduce a representative in another instance from saved collateral; check the stitched
 DEF in OpenROAD, then compare crossing-net wirelength and routed DRC against independent placements.</li>
 <li><strong>Bound timing and negotiate edges.</strong> Exchange arrival/required time, exterior load
 and RC at cut pins. Compare local deltas with a flat reference, including multi-clock and reconvergent
-paths. Then try moving a contact or cell between neighbors. Charge overlap capacity once, preserve
-unique cell ownership and stop or roll back a round that oscillates. Test a pair and a ring before
-running workers in parallel under one aggregate memory budget.</li>
+paths. Shared-slot contact moves and stale-result checks now work for incident homes. Next, test moving cells
+between neighbors and permitting crossing routes to use an intermediate home. Charge overlap capacity once, preserve
+unique cell ownership and stop or roll back a round that oscillates. Measure convergence on a pair and a ring under simultaneous IO proposals. A host-level physical
+memory controller remains to be tested across multiple Linux machines.</li>
 <li><strong>Calibrate on unfamiliar designs.</strong> Challenge the worker RSS envelope at 1, 2, 4, 8
 and 16 GB across technologies, sparse and macro-heavy homes, and detailed placement. Separate a
 completed peak from a killed worker’s lower bound. Check simultaneous producer and worker memory
 on a constrained machine; polling an individual RSS is not a hard machine limit.</li>
-<li><strong>Incremental replacement and precision.</strong> After stitching works, remap one edited
+<li><strong>Incremental replacement and precision.</strong> Using the verified stitching path, remap one edited
 color and show which home and neighbor results really need invalidation. Compare with a clean run.
 For the proposed FP32 solver, benchmark local normalized coordinates first; retain exact integer
 legal poses and verify timing, wirelength and memory before changing default precision.</li>

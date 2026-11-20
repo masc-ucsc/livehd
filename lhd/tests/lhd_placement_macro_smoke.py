@@ -246,6 +246,12 @@ def check_chunk_stages():
         assert assembly['metrics']['hpwl_um']==measured['hpwl_um']
         assert all(r['owned']>=0 for r in assembly['chunks'])
         assert action(cmd='undo')['revision']==trial_final['checkpoint']
+        prior = action(cmd='overview')['accepted']
+        recalled = cmd('restore-best', '--objective', 'hpwl')
+        assert recalled['metrics']['hpwl_um'] <= prior['hpwl_um']
+        assert not cmd('restore-best', '--objective', 'hpwl')['restored']
+        if recalled['restored']:
+            assert action(cmd='undo')['revision'] == prior['revision']
     finally:
         proc.terminate()
         proc.wait(timeout=5)
@@ -260,6 +266,17 @@ def check_chunk_stages():
     local_source.write_text(design)
     subprocess.run([exe, 'synth', 'chunk', 'init', str(local_source), '--budget', '0.08MiB',
                     '--workdir', str(work), *options, '--', '-DCHUNK_TEST'], check=True, timeout=25)
+    alternative = root / 'alternative'
+    subprocess.run([exe, 'synth', 'chunk', 'init', '--from-workdir', str(work),
+                    '--workdir', str(alternative), '--set', 'synth.place.chunk.target=3',
+                    '--set', 'synth.place.density=0.62'],
+                   check=True, timeout=25)
+    fork = json.loads((alternative/'synth/place/chunk-project.json').read_text())
+    parent = json.loads((work/'synth/place/chunk-project.json').read_text())
+    assert fork['budget_mib'] == parent['budget_mib'] and fork['cwd'] == parent['cwd']
+    assert fork['args'][-2:] == ['--', '-DCHUNK_TEST']
+    assert [x for x in fork['args'] if x.startswith('synth.place.density=')] == ['synth.place.density=0.62']
+    assert 'synth.place.chunk.target=3' in fork['args'] and 'synth.place.chunk.target=3' not in parent['args']
     directory = work  # commands discover synth/place from the workspace root
     cmd('macro')
     completed = cmd('final')

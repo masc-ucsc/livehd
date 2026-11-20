@@ -1052,6 +1052,9 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
       }
     }
   }
+  if (o.io_spread) {
+    h = hash_text("io:spread-on-routing-tracks", h);
+  }
   if (o.fp_place && o.fp_pin_adjust) {
     h = hash_text(std::format("fp-pins:{}:{}:{}", o.fp_pin_interval, o.fp_pin_step, o.fp_pin_improvement), h);
   }
@@ -3454,25 +3457,42 @@ std::shared_ptr<const Input_row_frame> prepare_rows(const ph::Technology& tech, 
   validate_rows(tech, fp);
   return original;
 }
+// Pitch floor for automatic edge pins: about a quarter of each movable pin's share of the die perimeter, capped
+// at 0.5 um, for designs with at least 64 movable pins. A wide bus then spans its edge instead of packing every
+// track, so the logic and the hold/repair buffers it pulls in are not piled into a few microns at the die edge.
+// Shared by the initial assignment and the floorplan pin adjustment.
+double io_spread_dbu(const ph::Floorplan& fp, double dbu) {
+  size_t movable = 0;
+  for (const auto& t : fp.terminals) {
+    movable += t.status != Status::FIXED;
+  }
+  // A handful of pins never crowds an edge; spreading them only pushes pins onto other edges (a tiny design's GP
+  // then pulls its few cells three ways). Spread wide pin sets only.
+  if (movable < Io_spread_policy::wide_count || fp.die.empty()) {
+    return 0;
+  }
+  const double perimeter = 2 * ((fp.die.xh - fp.die.xl) + (fp.die.yh - fp.die.yl));
+  return std::min(Io_spread_policy::max_pitch_um * dbu, Io_spread_policy::share * perimeter / double(movable));
+}
 // Rectangular Hungarian assignment; cost is Manhattan distance to each net's
 // current cell-pin centroid. Already fixed terminals reserve their slots. Slots
 // lie on the DIEAREA boundary, which an imported floorplan may set outside the core.
-void assign_io(View& v, const ph::Technology& tech, const Options& options) {
-  const auto&       l              = v.design.layout;
-  const double      pitch          = std::min(l.site_width, l.row_height);
+void assign_io(View& v, const ph::Technology& tech, const Options& options, bool preserve_seed_order = false) {
+  const auto&  l              = v.design.layout;
+  const double pitch          = std::min(l.site_width, l.row_height);
   // Imported positions are frozen by the caller. Automatic left/right pins
   // use the first horizontal layer; top/bottom pins use its next vertical
   // routing layer so an inward access stem follows the preferred direction.
-  auto              horizontal     = std::find_if(tech.routing_layers.begin(), tech.routing_layers.end(), [&](const auto& name) {
+  auto         horizontal     = std::find_if(tech.routing_layers.begin(), tech.routing_layers.end(), [&](const auto& name) {
     return tech.layers.at(name).direction == "HORIZONTAL";
   });
-  std::string       layer          = horizontal == tech.routing_layers.end() ? "" : *horizontal;
-  auto              vertical       = horizontal == tech.routing_layers.end()
-                                         ? tech.routing_layers.end()
-                                         : std::find_if(std::next(horizontal), tech.routing_layers.end(), [&](const auto& name) {
+  std::string  layer          = horizontal == tech.routing_layers.end() ? "" : *horizontal;
+  auto         vertical       = horizontal == tech.routing_layers.end()
+                                    ? tech.routing_layers.end()
+                                    : std::find_if(std::next(horizontal), tech.routing_layers.end(), [&](const auto& name) {
                           return tech.layers.at(name).direction == "VERTICAL";
-                                           });
-  std::string       vertical_layer = vertical == tech.routing_layers.end() ? layer : *vertical;
+                                      });
+  std::string  vertical_layer = vertical == tech.routing_layers.end() ? layer : *vertical;
   // A registered technology names its IO pin layers (OpenROAD's IO_PLACER_H / IO_PLACER_V): the lowest layers are the
   // cell rows' (asap7 M2 tracks follow the rows), so pins there are off the routing grid the router reaches them on.
   try {
@@ -3488,51 +3508,85 @@ void assign_io(View& v, const ph::Technology& tech, const Options& options) {
   } catch (const std::invalid_argument&) {
     // an unregistered technology keeps the LEF's lowest routing layers
   }
-  auto              slots          = io_perimeter_slots(tech, v.fp, layer, pitch, vertical_layer);
-  // A left/right pin's stub runs inward on its own track: skip the tracks whose first stretch (about a placement
-  // tile) runs into supply metal on the pin layer (the power grid's via landings sit on every rail row there).
-  if (!layer.empty() && !v.fp.special_nets.empty()) {
-    const auto&  L        = tech.layers.at(layer);
-    const double half     = std::round(L.width * tech.dbu / 2);
-    const double lpitch   = L.direction == "HORIZONTAL" ? L.pitch_y : L.pitch_x;
-    const double spacing  = std::max(0.0, std::round((lpitch - L.width) * tech.dbu));
-    const double corridor = 5 * l.row_height;
-    std::vector<ph::Rect> supply;
-    for (const auto& net : v.fp.special_nets) {
-      try {
-        for (const auto& shape : ph::route_geometry(tech, v.fp, net, true)) {
-          if (shape.layer == layer
-              && (shape.rect.xl < v.fp.die.xl + corridor || shape.rect.xh > v.fp.die.xh - corridor)) {
-            supply.push_back(shape.rect);
+  // Spacing like OpenROAD's place_pins defaults: two tracks between pins and no pin within 15 tracks (at most
+  // 1 um) of a corner. A wide bus must also SPAN its edge rather than pack every second track: with a few hundred
+  // pins next to each other the logic and the hold/repair buffers they pull in pile up in a strip a few microns
+  // long at the die edge (vortex: 115 pins in 12 um, thousands of ORFS hold buffers that did not legalize); see
+  // io_spread_dbu. The spacing relaxes step by step when the edges cannot hold every pin.
+  size_t movable_count = 0;
+  for (const auto& t : v.fp.terminals) {
+    movable_count += t.status != Status::FIXED;
+  }
+  const double                         spread = options.io_spread ? io_spread_dbu(v.fp, tech.dbu) : 0;
+  const std::array<Io_slot_spacing, 4> ladder = {
+      Io_slot_spacing{.min_tracks    = Io_spread_policy::tracks,
+                      .corner_tracks = Io_spread_policy::corner_tracks,
+                      .corner_cap    = Io_spread_policy::max_corner_um * tech.dbu,
+                      .spread_dbu    = spread},
+      Io_slot_spacing{.min_tracks    = Io_spread_policy::tracks,
+                      .corner_tracks = Io_spread_policy::corner_tracks,
+                      .corner_cap    = Io_spread_policy::max_corner_um * tech.dbu,
+                      .spread_dbu    = 0},
+      Io_slot_spacing{.min_tracks = Io_spread_policy::tracks, .corner_tracks = 0, .corner_cap = 0, .spread_dbu = 0},
+      Io_slot_spacing{}
+  };
+  const auto available_slots = [&](const Io_slot_spacing& policy) {
+    auto slots = io_perimeter_slots(tech, v.fp, layer, pitch, vertical_layer, policy);
+    // A left/right pin's stub runs inward on its own track: skip the tracks whose first stretch (about a placement
+    // tile) runs into supply metal on the pin layer (the power grid's via landings sit on every rail row there).
+    if (!layer.empty() && !v.fp.special_nets.empty()) {
+      const auto&           L        = tech.layers.at(layer);
+      const double          half     = std::round(L.width * tech.dbu / 2);
+      const double          lpitch   = L.direction == "HORIZONTAL" ? L.pitch_y : L.pitch_x;
+      const double          spacing  = std::max(0.0, std::round((lpitch - L.width) * tech.dbu));
+      const double          corridor = 5 * l.row_height;
+      std::vector<ph::Rect> supply;
+      for (const auto& net : v.fp.special_nets) {
+        try {
+          for (const auto& shape : ph::route_geometry(tech, v.fp, net, true)) {
+            if (shape.layer == layer && (shape.rect.xl < v.fp.die.xl + corridor || shape.rect.xh > v.fp.die.xh - corridor)) {
+              supply.push_back(shape.rect);
+            }
           }
+        } catch (const std::exception&) {
+          // unreadable supply geometry: keep every slot (the router still checks the stub)
         }
-      } catch (const std::exception&) {
-        // unreadable supply geometry: keep every slot (the router still checks the stub)
+      }
+      const auto all_slots = slots;
+      std::erase_if(slots, [&](const auto& slot) {
+        const bool left = slot.first == v.fp.die.xl, right = slot.first == v.fp.die.xh;
+        if (!left && !right) {
+          return false;
+        }
+        return std::ranges::any_of(supply, [&](const ph::Rect& r) {
+          const bool near = left ? r.xl < v.fp.die.xl + corridor : r.xh > v.fp.die.xh - corridor;
+          return near && r.yl < slot.second + half + spacing && r.yh > slot.second - half - spacing;
+        });
+      });
+      if (slots.size() < v.fp.terminals.size()) {
+        slots = all_slots;  // the supply filter is a preference: never leave fewer slots than pins
       }
     }
-    const auto all_slots = slots;
-    std::erase_if(slots, [&](const auto& slot) {
-      const bool left = slot.first == v.fp.die.xl, right = slot.first == v.fp.die.xh;
-      if (!left && !right) {
-        return false;
+    std::erase_if(slots, [&](const auto& s) {
+      for (const auto& t : v.fp.terminals) {
+        if (t.status == Status::FIXED && std::abs(t.x - s.first) + std::abs(t.y - s.second) < pitch / 2) {
+          return true;
+        }
       }
-      return std::ranges::any_of(supply, [&](const ph::Rect& r) {
-        const bool near = left ? r.xl < v.fp.die.xl + corridor : r.xh > v.fp.die.xh - corridor;
-        return near && r.yl < slot.second + half + spacing && r.yh > slot.second - half - spacing;
-      });
+      return false;
     });
-    if (slots.size() < v.fp.terminals.size()) {
-      slots = all_slots;  // the supply filter is a preference: never leave fewer slots than pins
+    return slots;
+  };
+  std::vector<std::pair<double, double>> slots;
+  for (const auto& spacing : ladder) {
+    if (!options.io_spread && spacing.min_tracks > 1) {
+      continue;
+    }
+    slots = available_slots(spacing);
+    if (slots.size() >= movable_count) {
+      break;
     }
   }
-  std::erase_if(slots, [&](const auto& s) {
-    for (const auto& t : v.fp.terminals) {
-      if (t.status == Status::FIXED && std::abs(t.x - s.first) + std::abs(t.y - s.second) < pitch / 2) {
-        return true;
-      }
-    }
-    return false;
-  });
   std::vector<size_t> movable;
   for (size_t i = 0; i < v.fp.terminals.size(); ++i) {
     if (v.fp.terminals[i].status != Status::FIXED) {
@@ -3544,6 +3598,56 @@ void assign_io(View& v, const ph::Technology& tech, const Options& options) {
   }
   if (slots.size() < movable.size()) {
     throw std::runtime_error("not enough die-edge slots for IO pins; enlarge the floorplan");
+  }
+  const auto install_slot = [&](ph::Terminal& t, const std::pair<double, double>& slot) {
+    t.x                        = std::llround(slot.first);
+    t.y                        = std::llround(slot.second);
+    const auto& selected_layer = t.y == v.fp.die.yl || t.y == v.fp.die.yh ? vertical_layer : layer;
+    if (!selected_layer.empty()) {
+      const double half = std::max(1.0, std::round(tech.layers.at(selected_layer).width * tech.dbu / 2));
+      t.shapes          = {
+          {selected_layer, {-half, -half, half, half}}
+      };
+    }
+    t.status = Status::PLACED;
+  };
+  if (preserve_seed_order) {
+    // The chunk producer has perimeter seeds, but no placed cell centroids yet.
+    // Keep their cyclic bus order while snapping each signal to an available track.
+    const auto&  die = v.fp.die;
+    const double w = die.xh - die.xl, h = die.yh - die.yl;
+    const auto   along = [&](double x, double y) {
+      if (x == die.xl) {
+        return double(y - die.yl);
+      }
+      if (y == die.yh) {
+        return h + x - die.xl;
+      }
+      if (x == die.xh) {
+        return h + w + die.yh - y;
+      }
+      return 2 * h + w + die.xh - x;
+    };
+    auto pin_position = [&](size_t pin) {
+      const auto& t = v.fp.terminals[pin];
+      return along(t.x, t.y);
+    };
+    auto position = [&](const auto& slot) { return along(slot.first, slot.second); };
+    std::stable_sort(movable.begin(), movable.end(), [&](auto i, auto j) { return pin_position(i) < pin_position(j); });
+    std::ranges::sort(slots, {}, position);
+    auto first = slots.begin();
+    for (size_t i = 0; i < movable.size(); ++i) {
+      // Leave one slot available for each following bit.
+      const auto last   = slots.end() - (movable.size() - i - 1);
+      const auto target = pin_position(movable[i]);
+      auto       best   = std::lower_bound(first, last, target, [&](const auto& slot, double at) { return position(slot) < at; });
+      if (best == last || (best != first && target - position(best[-1]) <= position(*best) - target)) {
+        --best;
+      }
+      install_slot(v.fp.terminals[movable[i]], *best);
+      first = best + 1;
+    }
+    return;
   }
   std::vector<std::pair<double, double>>       centers(v.fp.terminals.size(), {(l.xl + l.xh) / 2, (l.yl + l.yh) / 2});
   // One pass over the nets: accumulate every touching net's cell pins per terminal.
@@ -3622,17 +3726,7 @@ void assign_io(View& v, const ph::Technology& tech, const Options& options) {
   }
   for (size_t j = 1; j <= m; ++j) {
     if (p[j]) {
-      auto& t                    = v.fp.terminals[movable[p[j] - 1]];
-      t.x                        = std::llround(slots[j - 1].first);
-      t.y                        = std::llround(slots[j - 1].second);
-      const auto& selected_layer = t.y == v.fp.die.yl || t.y == v.fp.die.yh ? vertical_layer : layer;
-      if (!selected_layer.empty()) {
-        const double half = std::max(1.0, std::round(tech.layers.at(selected_layer).width * tech.dbu / 2));
-        t.shapes          = {
-            {selected_layer, {-half, -half, half, half}}
-        };
-      }
-      t.status = Status::PLACED;
+      install_slot(v.fp.terminals[movable[p[j] - 1]], slots[j - 1]);
     }
   }
 }
@@ -4690,12 +4784,93 @@ bool legalize_edits(View& v, const ph::Technology& tech, const ph::Floorplan& re
 }
 // ---- 2i-interact: the adapter between the solver and gui::Session ---------------------------------------------------
 // Pins and the action trace use node *names*; the scene maps them to this phase's solver indices.
+// Keep chunk IO and detail-final region lanes tied to the same logical bit identity.
+Bus_bit physical_bus_bit(const View& v, const ph::Technology& tech, const Endpoint& driver, const std::vector<Endpoint>& sinks) {
+  Bus_bit    identity;
+  const auto named = [&](const Endpoint& endpoint) {
+    const auto it = v.bus_names.find(endpoint);
+    if (it == v.bus_names.end()) {
+      return false;
+    }
+    identity = it->second;
+    return true;
+  };
+  if (!named(driver)) {
+    for (const auto& sink : sinks) {
+      if (named(sink)) {
+        break;
+      }
+    }
+  }
+  const auto fallback = [&](const Endpoint& endpoint) {
+    if (identity.bit >= 0) {
+      return;
+    }
+    if (endpoint.instance != "PIN") {
+      const auto cell = v.cell.find(endpoint.instance);
+      if (cell == v.cell.end() || tech.macros.at(v.cells[cell->second].macro).klass.starts_with("CORE")) {
+        return;
+      }
+    }
+    if (auto bit = indexed_bus_bit(endpoint.pin)) {
+      if (endpoint.instance != "PIN") {
+        bit->bus = endpoint.instance + "/" + bit->bus;
+      }
+      identity = *bit;
+    }
+  };
+  fallback(driver);
+  for (const auto& sink : sinks) {
+    fallback(sink);
+  }
+  return identity;
+}
 // Project the physical netlist once, then GUI previews and density edits operate only on the quotient hypergraph.
 bool plan_color_chunks(View& v, const Options& options, const std::vector<Hint_scope>& scopes, const std::string& design,
-                       double dbu, bool restored, const Result& source) {
-  Chunk_model                                  model;
-  model.pack_scopes = options.chunk_pack_scopes;
+                       const ph::Technology& tech, bool restored, const Result& source) {
+  const double dbu = tech.dbu;
+  Chunk_model  model;
+  model.pack_scopes  = options.chunk_pack_scopes;
+  model.target_homes = options.chunk_target;
+  model.spread       = options.io_spread;
+  model.dbu_per_um   = dbu;
+  model.shape_rank   = options.chunk_shape_rank;
+  model.area_weight  = options.chunk_area_weight;
   model.connectivity = options.chunk_connectivity;
+  std::map<std::string, std::pair<int, double>> layers;
+  std::set<std::string>                         allowed_layers;
+  if (!options.chunk_route_layers.empty()) {
+    const auto& range = options.chunk_route_layers;
+    auto        split = range.find(':');
+    auto        lo    = std::ranges::find(tech.routing_layers, range.substr(0, split));
+    auto        hi    = std::ranges::find(tech.routing_layers, range.substr(split == std::string::npos ? 0 : split + 1));
+    if (lo == tech.routing_layers.end() || hi == tech.routing_layers.end() || hi < lo) {
+      throw std::invalid_argument("chunk.route_layers must name an ordered range of LEF routing layers");
+    }
+    allowed_layers.insert(lo, std::next(hi));
+  }
+  for (const auto& track : v.fp.tracks) {
+    if (!allowed_layers.empty() && !allowed_layers.contains(track.layer)) {
+      continue;
+    }
+    auto it = tech.layers.find(track.layer);
+    if (it == tech.layers.end() || !track.supported()) {
+      continue;
+    }
+    int axis = it->second.direction == "VERTICAL";
+    if (track.axis != (axis ? "X" : "Y")) {
+      continue;
+    }
+    model.routing_patterns.push_back({track.layer, axis, double(track.start), double(track.step), track.count});
+    auto& entry   = layers[track.layer];
+    entry.first   = axis;
+    entry.second += static_cast<double>(track.count) / std::max(1., axis ? v.fp.die.xh - v.fp.die.xl : v.fp.die.yh - v.fp.die.yl);
+  }
+  for (const auto& [name, layer] : layers) {
+    model.tracks_per_dbu[layer.first] += layer.second;
+    double pitch                       = 1. / layer.second;
+    model.track_pitch                  = model.track_pitch ? std::min(model.track_pitch, pitch) : pitch;
+  }
   auto&                                        d = v.design;
   std::map<std::string, std::set<std::string>> modules;
   for (const auto& s : scopes) {
@@ -4784,9 +4959,30 @@ bool plan_color_chunks(View& v, const Options& options, const std::vector<Hint_s
       model.objects[owner[i]].worker_halo = {d.node_halo_x.empty() ? 0 : d.node_halo_x[i],
                                              d.node_halo_y.empty() ? 0 : d.node_halo_y[i]};
     }
+    if (macro) {
+      auto master = tech.macros.find(c.macro);
+      if (master != tech.macros.end()) {
+        auto& clipped = model.objects[owner[i]].route_blockage;
+        for (const auto& [name, layer] : layers) {
+          double area = 0;
+          for (const auto& shape : master->second.obstructions) {
+            if (shape.layer == name) {
+              area += (shape.rect.xh - shape.rect.xl) * (shape.rect.yh - shape.rect.yl);
+            }
+          }
+          const auto& m = master->second;
+          double      fraction
+              = m.conservative_obstructions.contains(name) ? 1. : std::clamp(area / std::max(1e-12, m.width * m.height), 0., 1.);
+          clipped[layer.first] += fraction * layer.second / model.tracks_per_dbu[layer.first];
+        }
+      }
+    }
     if (!macro) {
       color_nodes.emplace(group, owner[i]);
     }
+  }
+  for (auto& rate : model.tracks_per_dbu) {
+    rate *= 1 - options.route_layer_adjustment;
   }
   if (model.objects.empty()) {
     return false;
@@ -4820,8 +5016,20 @@ bool plan_color_chunks(View& v, const Options& options, const std::vector<Hint_s
       anchor[0] /= count;
       anchor[1] /= count;
     }
-    model.net(pins, d.net_mask.empty() || d.net_mask[n], count ? std::optional{anchor} : std::nullopt, v.drivers[n].label(),
+    model.net(pins,
+              d.net_mask.empty() || d.net_mask[n],
+              count ? std::optional{anchor} : std::nullopt,
+              v.drivers[n].label(),
               count > 1 ? std::optional{terminal_bounds} : std::nullopt);
+    if ((pins.size() > 1 || count) && (d.net_mask.empty() || d.net_mask[n])) {
+      const auto it = v.nets.find(v.drivers[n]);
+      if (it != v.nets.end()) {
+        auto bit = physical_bus_bit(v, tech, it->first, it->second);
+        if (bit.bit >= 0) {
+          model.bus_bits.emplace(n, std::pair{std::move(bit.bus), bit.bit});
+        }
+      }
+    }
   }
   // The floorplanner normally needs only color incidences. Resolve pin identities
   // only for an explicit interface comparison, and cache them across geometry previews.
@@ -5077,7 +5285,6 @@ bool plan_color_chunks(View& v, const Options& options, const std::vector<Hint_s
     std::vector<std::array<double, 2>> windows;
     std::array<double, 4>              wire_rc{};
     if (options.gp_rank && source.graph) {
-      const auto& tech       = options.technology().lef;
       const auto  rc         = technology_wire_rc(tech,
                                                   options.liberty,
                                                   options.tech_rc_file,
@@ -5110,25 +5317,28 @@ bool plan_color_chunks(View& v, const Options& options, const std::vector<Hint_s
         }
       }
     }
-    auto path = write_chunk_jobs(options.chunk_manifest,
-                                 joined,
-                                 model,
-                                 plan,
-                                 d,
-                                 owner,
-                                 names,
-                                 design,
-                                 dbu,
-                                 options.iterations,
-                                 options.threads,
-                                 options.chunk_seed_detail,
-                                 options.chunk_require_fit,
-                                 options.macro_pin_adjust,
-                                 options.chunk_only,
-                                 options.chunk_predictor.get(),
-                                 slack_ps,
-                                 wire_rc,
-                                 windows);
+    auto path = write_chunk_jobs(
+        options.chunk_manifest,
+        joined,
+        model,
+        plan,
+        d,
+        owner,
+        names,
+        design,
+        dbu,
+        options.iterations,
+        options.threads,
+        options.chunk_seed_detail,
+        options.chunk_require_fit,
+        options.macro_pin_adjust,
+        options.chunk_only,
+        options.chunk_predictor.get(),
+        slack_ps,
+        wire_rc,
+        windows,
+        [&](int i) { return ph::orientation_name(v.cells[i].place.orientation); },
+        [&](int i) { return v.pins[i].pin.view(); });
     if (options.gui) {
       // UI state belongs to this plan revision and never changes packet identity.
       const auto                  selected = options.gui->selected_names();
@@ -9649,7 +9859,21 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     }
   }
   make_arrays(v, tech);
-  const bool chunk_seeded = chunk_stage && plan_color_chunks(v, options, hint_scopes, hint_design, tech.dbu, cache.reused != 0, result);
+  if (chunk_stage && options.io_spread && !options.previous && !options.restart_seed && !cache.reused) {
+    std::vector<Status> original;
+    for (auto& terminal : v.fp.terminals) {
+      original.push_back(terminal.status);
+      if (imported_pos.contains(terminal.name) || terminal.status == Status::LOCKED) {
+        terminal.status = Status::FIXED;
+      }
+    }
+    assign_io(v, tech, options, true);
+    for (size_t i = 0; i < original.size(); ++i) {
+      v.fp.terminals[i].status = original[i];
+    }
+    make_arrays(v, tech);
+  }
+  const bool chunk_seeded = chunk_stage && plan_color_chunks(v, options, hint_scopes, hint_design, tech, cache.reused != 0, result);
   const auto hint_objects = [&] {
     std::vector<Hint_object> objects;
     objects.reserve(v.cells.size());
@@ -10108,44 +10332,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     const auto           ios        = region_ios();
     std::vector<Bus_bit> identities;
     for (const auto& [driver, sinks] : v.nets) {
-      Bus_bit    identity;
-      const auto named = [&](const Endpoint& endpoint) {
-        const auto it = v.bus_names.find(endpoint);
-        if (it == v.bus_names.end()) {
-          return false;
-        }
-        identity = it->second;
-        return true;
-      };
-      if (!named(driver)) {
-        for (const auto& sink : sinks) {
-          if (named(sink)) {
-            break;
-          }
-        }
-      }
-      const auto fallback = [&](const Endpoint& endpoint) {
-        if (identity.bit >= 0) {
-          return;
-        }
-        if (endpoint.instance != "PIN") {
-          const auto cell = v.cell.find(endpoint.instance);
-          if (cell == v.cell.end() || tech.macros.at(v.cells[cell->second].macro).klass.starts_with("CORE")) {
-            return;
-          }
-        }
-        if (auto bit = indexed_bus_bit(endpoint.pin)) {
-          if (endpoint.instance != "PIN") {
-            bit->bus = endpoint.instance + "/" + bit->bus;
-          }
-          identity = *bit;
-        }
-      };
-      fallback(driver);
-      for (const auto& sink : sinks) {
-        fallback(sink);
-      }
-      identities.push_back(std::move(identity));
+      identities.push_back(physical_bus_bit(v,tech,driver,sinks));
     }
     const auto router = [](const std::vector<Busorder_point>& points) {
       const auto    tree = steiner_tree(points);
@@ -10248,6 +10435,10 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         const double extent = std::max(shape.rect.xh - shape.rect.xl, shape.rect.yh - shape.rect.yl);
         io_pitch            = std::max(io_pitch, std::ceil(extent + std::max(layer.pitch_x, layer.pitch_y) * tech.dbu));
       }
+    }
+    // The adjustment re-places the pins on its own uniform slots: keep the initial assignment's spread.
+    if (options.io_spread) {
+      io_pitch = std::max(io_pitch, std::ceil(io_spread_dbu(v.fp, tech.dbu)));
     }
   }
   const auto adjust_pins = [&](dp::Design& d, int iteration, bool initialize, bool macro) {

@@ -17,9 +17,13 @@ struct Chunk_job {
   bool                                         detailed = true, multirow = false;
   double                                       density = .5;
   Chunk_box                                    box{};
+  std::vector<Chunk_box>                       perimeter, exclusions;
   std::vector<std::string>                     names;          // full physical names in native movable order
   std::vector<int>                             boundary_nets;  // local net indexes; contact is its final, fixed pin
   std::vector<uint64_t>                        original_nets;
+  std::vector<std::string> orientations, pin_dictionary;
+  std::vector<int> pin_labels;  // master-pin dictionary index by local physical pin, -1 for synthetic contacts
+  std::vector<int> source_nodes,source_pins; // producer scratch for one home
   // Local nets in parent order, used only while assembling the packet.
   std::vector<size_t>                          parent_nets;
   // Constrained nets carry the STA slack and wire delay at the exported seed.
@@ -36,5 +40,7 @@ std::string write_chunk_jobs(const std::filesystem::path& manifest, const metada
                              std::span<const std::string> names, const std::string& design, int dbu, int iterations, int threads,
                              bool detailed, bool strict, bool adjust_contacts, const std::string& selected = {},
                              const Chunk_predictor* current = nullptr, std::span<const double> slack_ps = {},
-                             std::array<double, 4> wire_rc = {}, std::span<const std::array<double, 2>> windows = {});
+                             std::array<double, 4> wire_rc = {}, std::span<const std::array<double, 2>> windows = {},
+                             const std::function<std::string(int)>& orientation = {},
+                             const std::function<std::string_view(int)>& pin_name = {});
 }  // namespace livehd::placement

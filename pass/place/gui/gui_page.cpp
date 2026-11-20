@@ -175,19 +175,21 @@ input[type=number]{width:44px;font:inherit;color:var(--fg);background:transparen
 <label>Peer <select id="geometryPeer" style="max-width:100%"></select></label><output id="geometryPair" style="display:block" class="mut"></output>
 <label>Width / height <input id="homeAspect" type="number" min="0" step="any" style="width:6em"></label>
 <button id="aspectPreview">Preview shape</button> <button id="aspectApply">Apply shape</button>
+<label>Step depth (µm) <input id="boundaryDepth" type="number" step="any" style="width:6em"></label>
+<button id="stepPreview">Preview stepped edge</button> <button id="stepApply">Apply stepped edge</button>
 <button id="geometryLock">Lock aspect</button> <button id="geometryOthers">Lock other aspects</button>
 <button id="geometryUnlock">Unlock all</button> <button id="geometryUndo">Undo last geometry edit</button>
 <output id="geometryInfo" aria-live="polite" style="display:block">Drag to estimate wire spans with peers held still. Drop to refine boxes and pins.</output>
 </details>
 <details><summary>Physical homes</summary>
 <label><input id="homeLinks" type="checkbox" checked>Show selected interconnects</label>
-<label><input id="homeHeat" type="checkbox">Show estimated routing demand</label>
+<label><input id="homeHeat" type="checkbox">Routing estimate</label><select id="homeMap" aria-label="Routing endpoints"><option value="boundary">Boundary contacts</option><option value="coarse">Color centers</option></select><select id="homeRouting" aria-label="Floorplan routing overlay"><option value="0">Crossing demand</option><option value="2">Internal demand</option><option value="4">Available capacity</option><option value="6">Estimated overflow</option></select><select id="homeDirection" aria-label="Routing direction"><option value="0">Horizontal</option><option value="1">Vertical</option></select>
 <div id="homeMetrics" class="mut"></div><small>Wire and route proxies count crossing nets only. Split or fuse changes that set. Final placement checks row cutouts and fixed-cell obstacles.</small>
 <label>Edit <select id="homeAction"><option value="split">Split this home</option><option value="transfer">Move members to another home</option><option value="fuse">Fuse with another home</option></select></label>
 <div id="homeSplit"><label>Members <select id="homeMembers" multiple size="4" style="max-width:100%"></select></label>
 <label id="homeNameField">New home ID <input id="homeName" style="min-width:0;width:9em"></label></div>
 <div id="homeFuse" hidden><label>Other home <select id="homePeer" style="max-width:100%"></select></label></div>
-<button id="homePreview">Preview</button> <button id="homeApply">Apply</button> <button id="homeUndo">Undo home edit</button>
+<button id="suggestTransfer" hidden>Suggest a color</button> <button id="homePreview">Preview</button> <button id="homeApply">Apply</button> <button id="homeUndo">Undo home edit</button>
 <output id="homeStatus" aria-live="polite" style="display:block"></output></details>
 <details><summary>Copy a boundary interface</summary>
 <div id="copyTarget" class="mut"></div>
@@ -678,11 +680,14 @@ function drawChunks(){
    const x=sx(b[0]),y=sy(b[3]),w=(b[2]-b[0])*view.s,h=(b[3]-b[1])*view.s;
    const r=overlay&&relations.rows.get(c.id),active=c.id===focus;
    if(r?.nets){ctx.fillStyle='rgba(83,99,117,.29)';ctx.fillRect(x,y,w,h)}
-   if(boundaries)outline(x,y,w,h,1,css('--acc'),1.5,[6,3]);
+   if(c.perimeter_dbu&&(boundaries||active)){
+     ctx.setLineDash([]);ctx.strokeStyle=active?'#d27713':css('--acc');ctx.lineWidth=active?3:1.5;
+     for(const [k,line,lo,hi] of c.perimeter_dbu){ctx.beginPath();ctx.moveTo(sx(k?line:lo),sy(k?lo:line));ctx.lineTo(sx(k?line:hi),sy(k?hi:line));ctx.stroke()}
+   }else if(boundaries)outline(x,y,w,h,1,css('--acc'),1.5,[6,3]);
    if(r?.logical)outline(x,y,w,h,3,'#078b74',3,[7,4]);
    if(r?.physical)outline(x,y,w,h,7,'#9854cc',3,[]);
    if(r?.pins)outline(x,y,w,h,10,'#c94f83',3,[2,3]);
-   if(active)outline(x,y,w,h,2,'#d27713',4,[]);
+   if(active&&!c.perimeter_dbu)outline(x,y,w,h,2,'#d27713',4,[]);
    if((boundaries||active||r)&&w>23&&h>18){
      const id=(homeLabels.get(c.id)||('H'+(i+1))).split(' · ')[0],roles=(!r?'':[r.logical?'L':'',r.physical?'P':'',r.pins?'I':''].join(''));
      ctx.font='bold 12px sans-serif';let label=id+(r?.nets?' ↔'+r.nets:'')+(roles?' · '+roles:'');
@@ -856,7 +861,15 @@ function drawHomePreview(){
  const trial=homePreview?.base===chunkPlan?homePreview.plan:null,plan=trial||chunkPlan;
  const grid=plan.route_demand;
  ctx.save();
- if(grid&&$('homeHeat').checked){
+ const coarse=($('homeMap').value==='boundary'&&plan.boundary_routing)||plan.coarse_routing;
+ if(coarse&&$('homeHeat').checked){
+   const [l,b,r,t]=coarse.frame_dbu,n=coarse.columns,w=(r-l)/n,h=(t-b)/coarse.rows;
+   const k=Number($('homeRouting').value)+Number($('homeDirection').value),peak=Math.max(...coarse.tiles.map(v=>v[k]));
+   if(peak>0)coarse.tiles.forEach((v,i)=>{if(!v[k])return;ctx.fillStyle='rgba(216,85,25,'+(.7*Math.sqrt(v[k]/peak))+')';
+     const x=i%n,y=Math.floor(i/n),xl=coarse.x_edges?.[x]??l+x*w,xh=coarse.x_edges?.[x+1]??xl+w;
+     const yl=coarse.y_edges?.[y]??b+y*h,yh=coarse.y_edges?.[y+1]??yl+h;
+     ctx.fillRect(sx(xl),sy(yh),(xh-xl)*view.s,(yh-yl)*view.s)});
+ }else if(grid&&$('homeHeat').checked){
    const [l,b,r,t]=grid.frame_dbu,n=grid.bins,w=(r-l)/n,h=(t-b)/n,peak=Math.max(grid.peak_horizontal,grid.peak_vertical,chunkPlan.route_demand?.peak_horizontal||0,chunkPlan.route_demand?.peak_vertical||0);
    if(peak>0)grid.loads.forEach(([a,v],i)=>{const q=Math.max(a,v)/peak;if(!q)return;
      ctx.fillStyle='rgba(216,85,25,'+(.45*q)+')';ctx.fillRect(sx(l+i%n*w),sy(b+(Math.floor(i/n)+1)*h),w*view.s,h*view.s)});
@@ -884,9 +897,22 @@ function drawHomePreview(){
  }
  ctx.restore();
 }
-$('homeAction').onchange=()=>{const action=$('homeAction').value;$('homeSplit').hidden=action==='fuse';$('homeNameField').hidden=action!=='split';$('homeFuse').hidden=action==='split';clearHomePreview()};
+$('homeAction').onchange=()=>{const action=$('homeAction').value;$('suggestTransfer').hidden=action!=='transfer';$('homeSplit').hidden=action==='fuse';$('homeNameField').hidden=action!=='split';$('homeFuse').hidden=action==='split';clearHomePreview()};
+$('suggestTransfer').onclick=async()=>{
+ const source=geometryChunk()?.id,peer=$('homePeer').value,status=$('homeStatus');
+ if(!source||!peer)return;
+ try{
+   const result=await xcommand({cmd:'export',target:exploration||'main',what:'chunk_transfers',chunk:source,peer,limit:1});
+   if(source!==geometryChunk()?.id||peer!==$('homePeer').value)return;
+   const move=result.transfers?.[0];
+   if(!move){status.textContent='No movable colors in this home.';return}
+   clearHomePreview();
+   $('homeMembers').value=JSON.stringify({id:move.id,macro:false});
+   status.textContent=move.id+' · shared net change '+signed(move.pair_net_delta)+' · inter-color cut change '+signed(move.cut_net_delta);
+ }catch(e){status.textContent=e.message}
+};
 for(const id of ['homeMembers','homePeer','homeName'])$(id).oninput=clearHomePreview;
-$('homeHeat').onchange=$('homeLinks').onchange=()=>{dirty=true};
+$('homeMap').onchange=$('homeDirection').onchange=$('homeRouting').onchange=$('homeHeat').onchange=$('homeLinks').onchange=()=>{dirty=true};
 $('homePreview').onclick=()=>homeAction(false);$('homeApply').onclick=()=>homeAction(true);
 $('homeUndo').onclick=()=>homeAction(true,true);
 async function geometryEdit(op,who,expect,field='geometry',apply=true){
@@ -931,6 +957,12 @@ function editAspect(apply){
  geometryEdit({reshape:c.id,aspect_ratio:aspect},c.id,null,'geometry',apply);
 }
 $('aspectPreview').onclick=()=>editAspect(false);$('aspectApply').onclick=()=>editAspect(true);
+function editStep(apply){
+ const c=geometryChunk(),peer=$('geometryPeer').value,depth=$('boundaryDepth').valueAsNumber;
+ if(!c||!peer||!Number.isFinite(depth)){$('geometryInfo').textContent='Select adjacent chunks and enter a signed depth.';return}
+ geometryEdit({step:c.id,peer,depth_dbu:depth*D.dbu},c.id,null,'geometry',apply);
+}
+$('stepPreview').onclick=()=>editStep(false);$('stepApply').onclick=()=>editStep(true);
 function geometryLock(what){
  const c=geometryChunk();if(!c){$('geometryInfo').textContent='Select a physical chunk first.';return}
  if(what==='others'){geometryEdit({lock_others:c.id},c.id);return}
@@ -1375,7 +1407,7 @@ cv.addEventListener('mousedown',e=>{if(!D||e.button!==0)return;if(beginGeometry(
  else{if(sel.size){sel.clear();selUi()}drag={pan:true,px:e.offsetX,py:e.offsetY,ox:view.ox,oy:view.oy}}dirty=true});
 cv.addEventListener('dblclick',e=>{
  if(rev!==null||D?.phase!=='fp'||!chunkPlan)return;
- const x=wx(e.offsetX),y=wy(e.offsetY),c=chunkPlan.chunks.find(c=>{const b=c.box_dbu;return x>=b[0]&&x<=b[2]&&y>=b[1]&&y<=b[3]});
+ const x=wx(e.offsetX),y=wy(e.offsetY),c=chunkPlan.chunks.find(c=>{return (c.region_dbu||[c.box_dbu]).some(b=>x>=b[0]&&x<=b[2]&&y>=b[1]&&y<=b[3])});
  if(!c)return;
  $('chunks').open=true;$('chunkSelect').value=JSON.stringify(['chunk',c.id]);$('chunkSelect').onchange();
  $('implFamily').scrollIntoView({block:'nearest'});

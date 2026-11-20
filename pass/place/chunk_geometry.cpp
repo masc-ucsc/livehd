@@ -409,7 +409,26 @@ Chunk_edits read_chunk_edits(const metadata::Bundle* input, const std::string& d
       for (const auto& v : list.GetArray()) {
         check(v.IsObject(), "invalid operation");
         Chunk_edit e;
-        if (v.HasMember("reshape")) {
+        if (v.HasMember("step")) {
+          check(v.MemberCount() == 3u + v.HasMember("band_dbu") + v.HasMember("offset_dbu") && v["step"].IsString()
+                    && v.HasMember("peer") && v["peer"].IsString() && v.HasMember("depth_dbu") && v["depth_dbu"].IsNumber()
+                    && std::isfinite(v["depth_dbu"].GetDouble()),
+                "step needs two adjacent homes and a signed depth_dbu");
+          if (v.HasMember("band_dbu")) {
+            check(v["band_dbu"].IsNumber() && std::isfinite(v["band_dbu"].GetDouble()) && v["band_dbu"].GetDouble() > 0,
+                  "band_dbu must be positive");
+            e.band = v["band_dbu"].GetDouble();
+          }
+          if (v.HasMember("offset_dbu")) {
+            check(v["offset_dbu"].IsNumber() && std::isfinite(v["offset_dbu"].GetDouble()) && v["offset_dbu"].GetDouble() >= 0,
+                  "offset_dbu must be nonnegative");
+            e.offset = v["offset_dbu"].GetDouble();
+          }
+          e.step  = v["step"].GetString();
+          e.peer  = v["peer"].GetString();
+          e.depth = v["depth_dbu"].GetDouble();
+          check(!e.step.empty() && !e.peer.empty() && e.step != e.peer, "step needs distinct home IDs");
+        } else if (v.HasMember("reshape")) {
           check(v["reshape"].IsString() && v["reshape"].GetStringLength() && v.HasMember("aspect_ratio")
                     && v["aspect_ratio"].IsNumber() && std::isfinite(v["aspect_ratio"].GetDouble())
                     && v["aspect_ratio"].GetDouble() > 0 && !v.HasMember("move") && !v.HasMember("lock_aspect")
@@ -452,6 +471,117 @@ Chunk_edits read_chunk_edits(const metadata::Bundle* input, const std::string& d
     }
   }
   return ops;
+}
+std::array<double, 2> Fp_chunk::project_port(Point point) const {
+  if (perimeter.empty()) {
+    return point;
+  }
+  Point  best{};
+  double distance = INFINITY;
+  for (const auto& s : perimeter) {
+    int  k           = int(s[0]);
+    auto candidate   = point;
+    candidate[k]     = std::clamp(point[k], s[2], s[3]);
+    candidate[1 - k] = s[1];
+    double dist      = std::abs(candidate[0] - point[0]) + std::abs(candidate[1] - point[1]);
+    if (dist < distance) {
+      best     = candidate;
+      distance = dist;
+    }
+  }
+  return best;
+}
+// Exchange equal-width bands. Both owners derive the very same polyline, including its corners.
+void apply_chunk_step(Chunk_plan& plan, const Chunk_edit& edit, const std::vector<Chunk_object>& objects, Point pitch) {
+  auto home = [&](const std::string& id) -> Fp_chunk& {
+    auto it = std::find_if(plan.chunks.begin(), plan.chunks.end(), [&](const auto& c) { return c.id == id; });
+    check(it != plan.chunks.end(), "unknown step home " + id);
+    return *it;
+  };
+  auto& first  = home(edit.step);
+  auto& peer   = home(edit.peer);
+  auto  common = intersect(first.box, peer.box);
+  int   axis = dim(common, 0) > 0 ? 0 : 1, normal = 1 - axis;
+  check(dim(common, axis) > 0 && dim(common, normal) == 0, "step requires an edge between adjacent rectangles");
+  check(first.shared_dbu2 == 0 && peer.shared_dbu2 == 0, "step requires exclusive ownership of both home regions");
+  if (edit.depth == 0) {
+    return;
+  }
+  const double line = common[normal], lo = common[axis] + pitch[axis] * std::round(edit.offset / pitch[axis]);
+  const double band  = pitch[axis] * std::floor((edit.band > 0 ? edit.band : dim(common, axis) / 5) / pitch[axis]);
+  const double depth = pitch[normal] * std::round(edit.depth / pitch[normal]);
+  check(band > 0 && lo + 4 * band < common[axis + 2] && depth != 0
+            && std::abs(depth) < std::min(dim(first.box, normal), dim(peer.box, normal)),
+        "step collapses a band or home after site snapping");
+  for (auto* c : {&first, &peer}) {
+    check(c->region.empty(), "a home already has a stepped edge");
+    bool                  low  = c->box[normal + 2] == line;
+    const int             side = normal + (low ? 2 : 0);
+    std::array<double, 6> cuts{c->box[axis], lo + band, lo + 2 * band, lo + 3 * band, lo + 4 * band, c->box[axis + 2]};
+    std::array<double, 5> offsets{0, depth, 0, -depth, 0};
+    for (size_t i = 0; i < offsets.size(); ++i) {
+      auto slab       = c->box;
+      slab[axis]      = cuts[i];
+      slab[axis + 2]  = cuts[i + 1];
+      slab[side]     += offsets[i];
+      c->region.push_back(slab);
+      c->perimeter.push_back({double(axis), slab[side], cuts[i], cuts[i + 1]});
+      if (i) {
+        const double prev = line + offsets[i - 1];
+        c->perimeter.push_back({double(normal), cuts[i], std::min(prev, slab[side]), std::max(prev, slab[side])});
+      }
+    }
+    c->perimeter.push_back({double(axis), c->box[normal + (low ? 0 : 2)], cuts.front(), cuts.back()});
+    for (double end : {cuts.front(), cuts.back()}) {
+      c->perimeter.push_back({double(normal), end, c->box[normal], c->box[normal + 2]});
+    }
+    const auto bounds = c->worker_box();
+    for (auto slab : c->region) {
+      if (slab[side] == bounds[side]) {
+        continue;
+      }
+      double seam      = slab[side];
+      slab[normal]     = std::min(seam, bounds[side]);
+      slab[normal + 2] = std::max(seam, bounds[side]);
+      c->exclusions.push_back(slab);
+      // Only land donated by the original owner is new obstruction. A movable
+      // macro already close to an unchanged exterior edge still legalizes locally.
+      auto donated = intersect(slab, c->box);
+      if (!positive(donated)) {
+        continue;
+      }
+      for (int obj : c->objects) {
+        if (!objects[obj].macro) {
+          if (objects[obj].fixed) {
+            check(!positive(intersect(*objects[obj].fixed, donated)), "step would cut fixed cells in " + c->id);
+          }
+          continue;
+        }
+        auto protected_box = objects[obj].macro_footprint(plan.seeds[obj]);
+        for (int k = 0; k < 2; ++k) {
+          protected_box[k]     -= objects[obj].worker_halo[k];
+          protected_box[k + 2] += objects[obj].worker_halo[k];
+        }
+        check(!positive(intersect(protected_box, donated)), "step would cut a seeded macro or halo in " + c->id);
+      }
+    }
+    for (auto& port : c->ports) {
+      if (port.xy[normal] != line) {
+        continue;
+      }
+      for (size_t i : {1U, 3U}) {
+        if (cuts[i] < port.xy[axis] && port.xy[axis] < cuts[i + 1]) {
+          auto anchor = plan.fixed_contacts.find(port.net_index);
+          if (anchor != plan.fixed_contacts.end()) {
+            const auto& b = anchor->second;
+            check(!(b[0] == b[2] && b[1] == b[3] && b[0] == port.xy[0] && b[1] == port.xy[1]),
+                  "step would displace a fixed terminal");
+          }
+          port.xy[normal] = line + offsets[i];
+        }
+      }
+    }
+  }
 }
 void edit_chunk_boxes(Chunk_plan& p, const Chunk_edits& edits, const std::vector<Chunk_object>& objects, Box core, Point pitch) {
   if (edits.empty()) {

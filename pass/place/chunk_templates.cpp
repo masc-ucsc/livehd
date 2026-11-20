@@ -698,6 +698,12 @@ void refine_templates(Chunk_plan& p, std::vector<Interface_net>& wires, const st
     }
   }
   copy_interfaces(p, wires, copies_requested, resolver, rules);
+  measure_chunk_ports(p,wires,core);
+}
+void measure_chunk_ports(Chunk_plan& p,const std::vector<Interface_net>& wires,Chunk_box core) {
+  p.center_hpwl=p.port_hpwl=0;
+  p.route={};
+  for(auto& c:p.chunks) c.incident_hpwl=c.longest_span=0;
   // Spread each net's horizontal and vertical spans over its pin bounding
   // box. A zero-width line belongs to one bin in that axis. The sums recover
   // HPWL; dividing each direction by the tile span gives track equivalents.

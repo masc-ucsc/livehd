@@ -1,6 +1,8 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -22,7 +24,13 @@ struct Chunk_object {
   double                   area = 0, width = 0, height = 0;
   std::optional<Chunk_box> fixed{};
   std::array<double, 2>    worker_halo{};  // per-side clearance for an independently placed macro
+  std::array<double, 2>    route_blockage{};       // fraction of preferred tracks blocked by this master
   bool                     worker_memory = false;  // Release the parent memory pose inside its assigned home.
+  Chunk_box macro_footprint(const Chunk_box& slot) const {
+    const double x = std::round(slot[0] + .5 * std::max(0., slot[2] - slot[0] - width));
+    const double y = std::round(slot[1] + .5 * std::max(0., slot[3] - slot[1] - height));
+    return fixed.value_or(Chunk_box{x, y, x + width, y + height});
+  }
 };
 struct Chunk_port {
   std::string           net;
@@ -44,6 +52,20 @@ struct Fp_chunk {
   std::vector<int>              objects;
   std::vector<Chunk_port>       ports;
   Chunk_box                     box{};
+  // Disjoint site-aligned slabs cover the stepped home. The original box remains its replay scaffold.
+  std::vector<Chunk_box>        region, exclusions;
+  std::vector<Chunk_box>        perimeter;  // axis, constant coordinate, low, high
+  std::array<double, 2>         project_port(std::array<double, 2> point) const;
+  Chunk_box                     worker_box() const {
+    auto b = box;
+    for (const auto& r : region) {
+      for (int k = 0; k < 2; ++k) {
+        b[k]     = std::min(b[k], r[k]);
+        b[k + 2] = std::max(b[k + 2], r[k + 2]);
+      }
+    }
+    return b;
+  }
   uint64_t                      bytes = 0, allowance = 0;
   double                        density = 0, reserved = 0;
   std::optional<Chunk_box>      reference_box;  // Disjoint pre-edit layout for replay.
@@ -61,6 +83,7 @@ struct Chunk_route_grid {
   double                                         peak_h = 0, peak_v = 0;
 };
 struct Chunk_plan {
+  std::vector<std::pair<double,std::vector<Chunk_box>>> shape_candidates;
   Chunk_route_grid            route;
   std::vector<Chunk_overlap>  overlaps;
   unsigned                    overlap_cycles = 0;
@@ -97,7 +120,17 @@ class Chunk_model {
 
 public:
   std::map<std::vector<int>, unsigned> shared_nets() const;
-  bool pack_scopes = false;  // group whole colors and macros across instance boundaries up to the worker budget
+  int                                  target_homes = 0;
+  unsigned                             shape_rank = 0;
+  double                               area_weight = 0;
+  struct Routing_pattern { std::string layer; int axis; double start,step; int64_t count; };
+  std::vector<Routing_pattern>                  routing_patterns;
+  bool                                          spread     = false;
+  double                                        dbu_per_um = 0;
+  std::map<size_t, std::pair<std::string, int>> bus_bits;
+  double                                        track_pitch = 0;
+  std::array<double, 2>                         tracks_per_dbu{};
+  bool pack_scopes  = false;  // group whole colors and macros across instance boundaries up to the worker budget
   bool connectivity = false;
   std::vector<Chunk_object>                                                       objects;
   // Only mapped floorplans can identify the full set of physical pins on a cut.

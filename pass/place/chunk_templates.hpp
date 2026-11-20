@@ -35,6 +35,7 @@ struct Interface_copy_rule {
 std::vector<Interface_copy_rule> read_interface_copies(const metadata::Bundle*, const std::string& design);
 using Contact_keys = decltype(Chunk_model::contact_keys);
 Template_rules read_template_rules(const metadata::Bundle*, const std::string& design);
+void measure_chunk_ports(Chunk_plan&, const std::vector<Interface_net>&, Chunk_box);
 void           refine_templates(Chunk_plan&, std::vector<Interface_net>&, const std::vector<Chunk_object>&, const Template_rules&,
                                 Chunk_box core, Chunk_point pitch, bool move_boxes, const Chunk_edits& edits,
                                 const std::vector<Interface_copy_rule>& copies = {}, const Contact_keys& keys = {});

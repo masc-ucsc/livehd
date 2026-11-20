@@ -49,9 +49,14 @@ Io_tracks io_tracks(const physical::Floorplan& fp, std::string_view layer, std::
 }  // namespace
 
 std::vector<std::pair<double, double>> io_perimeter_slots(const physical::Technology& tech, const physical::Floorplan& fp,
-                                                          std::string_view layer, double pitch, std::string_view vertical_layer) {
+                                                          std::string_view layer, double pitch, std::string_view vertical_layer,
+                                                          const Io_slot_spacing& spacing) {
   if (!std::isfinite(pitch) || pitch <= 0) {
     throw std::invalid_argument("IO slot pitch must be positive and finite");
+  }
+  if (!(spacing.min_tracks >= 1) || !(spacing.corner_tracks >= 0) || !(spacing.corner_cap >= 0) || !(spacing.spread_dbu >= 0)
+      || !std::isfinite(spacing.min_tracks + spacing.corner_tracks + spacing.corner_cap + spacing.spread_dbu)) {
+    throw std::invalid_argument("IO slot spacing must be finite, with at least one track between pins");
   }
   std::vector<std::pair<double, double>> slots;
   for (const auto* axis : {"X", "Y"}) {
@@ -66,9 +71,29 @@ std::vector<std::pair<double, double>> io_perimeter_slots(const physical::Techno
         grid.positions.push_back(v);
       }
     }
+    // The track step of this edge's layer: the smallest gap between distinct tracks (else the site pitch).
+    double step = pitch;
+    if (grid.known && grid.positions.size() > 1) {
+      double smallest = std::numeric_limits<double>::infinity();
+      for (size_t i = 1; i < grid.positions.size(); ++i) {
+        if (const double gap = grid.positions[i] - grid.positions[i - 1]; gap > 0) {
+          smallest = std::min(smallest, gap);
+        }
+      }
+      if (std::isfinite(smallest)) {
+        step = smallest;
+      }
+    }
+    const double min_gap = spacing.min_tracks == 1 && spacing.spread_dbu == 0
+                               ? pitch
+                               : std::max({pitch, spacing.min_tracks * step, spacing.spread_dbu}) - 1e-9;
+    double       corner  = spacing.corner_tracks * step;
+    if (spacing.corner_cap > 0) {
+      corner = std::min(corner, spacing.corner_cap);
+    }
     double previous = -std::numeric_limits<double>::infinity();
     for (double v : grid.positions) {
-      if (v - previous < pitch) {
+      if (v - previous < min_gap || v < lo + corner || v > hi - corner) {
         continue;
       }
       previous = v;

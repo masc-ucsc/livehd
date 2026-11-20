@@ -366,6 +366,15 @@ std::string render_png(const Scene& scene, const Frame& frame, const std::set<in
         if (!part.IsObject() || !part.HasMember("box_dbu")) {
           continue;
         }
+        if (part.HasMember("perimeter_dbu")) {
+          for (const auto& segment : part["perimeter_dbu"].GetArray()) {
+            const bool vertical=segment[0].GetDouble()!=0;
+            const double fixed=segment[1].GetDouble(),lo=segment[2].GetDouble(),hi=segment[3].GetDouble();
+            if(vertical) c.fill(sx(fixed),sy(hi),sx(fixed)+1,sy(lo)+1,edge);
+            else c.fill(sx(lo),sy(fixed),sx(hi)+1,sy(fixed)+1,edge);
+          }
+          continue;
+        }
         const auto& b = part["box_dbu"];
         if (!b.IsArray() || b.Size() != 4 || !std::all_of(b.Begin(), b.End(), [](const auto& v) { return v.IsNumber(); })) {
           continue;

@@ -10,7 +10,7 @@ bypass floorplanning, or `centroid` to use the older centroid experiment.
 ## Color and macro chunk floorplan
 
 Use the staged worker flow to keep placement work and feedback for a selected set of physical homes.
-Supply the usual synthesis inputs, Liberty and LEFs once. The project records the invocation and its working directory so relative sources and reader options can be replayed.
+Supply the usual synthesis inputs, Liberty and LEFs once. The project records the invocation and its working directory so relative sources and reader options can be replayed. For multiple workers, geometry screening, IO negotiation and independent timing checks, see [Comparing physical chunk placements](#comparing-physical-chunk-placements).
 
 ```sh
 lhd synth chunk init design.v --top top --workdir W --budget 1GiB \
@@ -2777,3 +2777,46 @@ For a non-emitting physical routing diagnostic, `//tools:signal_route` accepts
 frame, retaining pin ownership and the input DEF unchanged. This reproduces
 pre-PG access checks; it is not a flow handoff or a way to bypass legality.
 The result prints the route rejection reason and search/deadline counters.
+
+### Comparing physical chunk placements
+
+Use `lhd synth chunk init --budget 2GB --producer-budget 12GiB --workers 3 --set synth.place.chunk.target=4` with the design's normal sources, physical libraries, clock constraints and synthesis options. The worker budget applies independently to each home. The producer currently builds the mapped physical view for the whole design, then exports indexed incidence data by home. It records process-group peak resident bytes and enforces its separately supplied limit during mapping and export. Set `synth.place.snapshots=true` to retain the physical reference DEF for independent validation.
+
+The planner preserves hierarchy near memory-balanced cuts and ranks feasible rectangle assignments by crossing-net span. The exported `chunk_plan.shape_candidates` lists distinct assignments in rank order. Run `shapes --screen` after placement to project measured pin spans and test boundary slots for each frame. Its Pareto ranks identify tradeoffs between missing slots and projected wirelength. With a positive target, `synth.place.chunk.area_weight` from 0 to 1 trades the predicted worker load against occupied area at each hierarchy cut. The worker byte limit applies at every weight. Create a new project from the saved recipe with `lhd synth chunk init --from-workdir W --workdir W_alt --set synth.place.chunk.shape_rank=1`. This copies mapping caches, inherits the budgets, preserves reader arguments and starts an independent placement journal. An area-weight or target override can compare a new ownership partition through the same command.
+
+From an initialized project, these commands run the independent homes and compare local hypotheses. The accepted placement and each trial are visible in `chunk gui`. Add one `--compare-workdir W` per alternative floorplan or design to switch between them in the same viewer. Each tab keeps its selected project and all projects share the worker admission limit. The socket lists the project IDs with `projects` and accepts a `project` field on requests. Running `tools/lhd_gui.py --workdir W explore kind=density iterations=300` returns a trial ID immediately. Use `history`, `compare`, `view` and `watch` on the same socket to inspect the branches and their progress.
+
+```sh
+lhd synth chunk macro --workers 3 --iterations 120
+lhd synth chunk final --workers 3 --iterations 300
+lhd synth chunk explore macro --workers 3 --iterations 120 --final-iterations 300 --keep
+lhd synth chunk explore density --workers 3 --density 0.45 --iterations 300 --keep
+lhd synth chunk interfaces
+lhd synth chunk explore interfaces --workers 3 --iterations 300 --keep
+lhd synth chunk shapes --screen
+lhd synth chunk routing --summary
+lhd synth chunk resources
+lhd synth chunk assemble --def accepted.def
+lhd synth chunk validate --openroad /path/to/openroad --route M2 M7 --capacity 0.75
+```
+
+Each search uses the same starting handoff and frozen exterior for its control and edited branches. Acceptance compares the selected objective (assembled physical pin HPWL by default, estimated worst slack with `--objective wns`) against both the equally advanced control and the current placement with matching stage coverage. Macro and density trials can combine results from different homes while keeping the same interface. A matched control can be the lowest-HPWL placement observed. Use `restore-best --objective hpwl` to explicitly recall the complete best comparable placement in the current immutable plan, including its contacts and poses. The prior accepted state remains available to `undo`. The IO coordinator reserves anchored contacts, allocates shared slots and versions every participant in a changed interface. A newer export with track patterns can report preferred-layer assignments. Set `synth.place.chunk.route_layers=M2:M7` or the relevant technology range to match the downstream routing stack. Pin access and detailed DRC require downstream validation.
+
+At the live FP gate, select adjacent homes and use **Preview stepped edge**. The socket takes the same operation in DBU. A positive depth extends the first band toward increasing X on a vertical edge, or increasing Y on a horizontal edge. A second band gives the same area back. Optional `band_dbu` and `offset_dbu` select the strip width and starting offset along the shared edge. Geometry snaps to the site's X pitch and the row's Y pitch. Reapplying the pair replaces its depth. A zero depth restores the straight edge. Different pairs can be edited together when they have disjoint owners. A physical macro footprint plus its halo or a fixed terminal can rule out an exchange. The worker receives the bounding frame and excluded strips. Local placement, legalization and final stitching check the actual footprint.
+
+```sh
+tools/lhd_gui.py --workdir W chunk_edit field=geometry 'op={"step":"HOME","peer":"PEER","depth_dbu":1000}' apply=false
+tools/lhd_gui.py --workdir W export what=chunk_transfers chunk=HOME peer=PEER limit=5
+lhd synth chunk interfaces --workdir W --spread --bus-order
+lhd synth chunk explore interfaces --workdir W --nets NET0 NET1 --spread --bus-order --iterations 120 --workers 3
+```
+
+The transfer query ranks whole colors by their change in shared nets, then by their change in cuts across all homes on the inter-color graph. Preview a transfer to measure the full physical floorplan. Compare the color-center routing overlay with the boundary-contact overlay, which includes the actual taps and the local logic density. Both are wiring estimates. Independent routing results appear alongside estimated HPWL and WNS after validation.
+
+Set `synth.place.io.spread=true` to reserve extra track spacing and corner clearance for automatic package pins and chunk IOs. The chunk producer snaps its exterior seeds to legal slots in perimeter order, preserving the order of each bus. Imported and fixed package pins retain their locations. A boundary trial can enable or disable the same spacing policy independently. At a stepped interface, both owners receive the same coordinate and preferred layer. The allocator relaxes spacing as slots fill. `--bus-order` orders named logical bits along the connected segments, choosing the direction with the smaller pin-span cost. The result reports ordered groups, groups with anchored or ambiguous bits, and signals that could not obtain a slot. Test complete named buses as a unit when comparing a subset.
+
+**Follow active design** in a multi-project GUI tracks current workers, fork branches and independent validation across the registered workdirs. Choosing a project pauses following for that browser tab. The `activity` socket command returns the same cross-project feed. The accepted placement and each completed experiment remain available for inspection.
+
+For separate machines, issue `lhd synth chunk dispatch BUNDLE macro HOME`, transfer that directory, run `lhd synth chunk worker BUNDLE` with the identical executable, and return the directory for `lhd synth chunk collect BUNDLE`. The coordinator validates the bundle and its home dependencies. Independent replies may arrive in any order. Repeating a delivery is idempotent. On a Linux worker with a delegated cgroup v2 subtree, `worker --cgroup-root DIR` applies a kernel memory limit to the native worker process group.
+
+Routing estimates report crossing, internal, capacity and predicted excess tracks in horizontal and vertical directions. The floorplan uses a tile spanning 128 technology track pitches and reserves capacity for logic density. Each local placement estimates internal demand from actual pins using a 32-pitch tile. Reports aggregate the native tiles for display. The optional OpenROAD validation stitches local placements, checks site legality and measures placement-RC timing. With a layer range it also reports all-net global-route wirelength, overflow and route-RC timing. Use `--segments` to retain the independent route geometry for spatial checks. Add `--trial ID --branch control` or the candidate name to `validate` or `assemble` to measure an archived placement without changing the accepted design. When the timing delta matters, run `verify-wns --trial ID --branch NAME --openroad /path/to/openroad --keep` on a fully final-placed experiment. It checks placement-RC WNS at the frozen checkpoint, control and candidate, records the finding, and publishes the candidate only when both comparisons improve and the checkpoint is still current.

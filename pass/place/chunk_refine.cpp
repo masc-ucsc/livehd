@@ -221,61 +221,68 @@ Chunk_refine_stats refine_chunk_seeds(dp::Design& d, const Chunk_model& model, c
       obstacles.push_back(i);
     }
   }
-  // Split once, not a flat-netlist scan per chunk. Outside pins enter the local solve at the boundary.
-  std::vector<int> incident;
-  const bool       indexed = only && d.flat_node2pin_start.size() == d.node_x.size() + 1 && d.pin2net.size() == d.pin2node.size();
-  if (indexed) {
-    for (int node : nodes.at(*only)) {
-      for (int j = d.flat_node2pin_start[node]; j < d.flat_node2pin_start[node + 1]; ++j) {
-        incident.push_back(d.pin2net[d.flat_node2pin[j]]);
-      }
-    }
-    std::sort(incident.begin(), incident.end());
-    incident.erase(std::unique(incident.begin(), incident.end()), incident.end());
-  }
-  const auto net_count = indexed ? incident.size() : d.flat_net2pin_start.size() - 1;
-  for (size_t k_net = 0; k_net < net_count; ++k_net) {
-    const size_t n = indexed ? size_t(incident[k_net]) : k_net;
-    if (!d.net_mask.empty() && !d.net_mask[n]) {
-      continue;
-    }
-    std::map<int, std::vector<int>> split;
-    Point                           sum{};
-    size_t                          count = 0;
-    for (int j = d.flat_net2pin_start[n]; j < d.flat_net2pin_start[n + 1]; ++j) {
-      int pin = d.flat_net2pin[j], i = d.pin2node[pin];
-      if (i < int(home.size()) && home[i] >= 0 && (!only || size_t(home[i]) == *only)) {
-        split[home[i]].push_back(pin);
-      }
-      sum[0] += d.node_x[i] + d.pin_offset_x[pin];
-      sum[1] += d.node_y[i] + d.pin_offset_y[pin];
-      ++count;
-    }
-    for (auto& [cid, pins] : split) {
-      std::optional<Point> port;
-      if (auto it = planned_ports[cid].find(n); it != planned_ports[cid].end()) {
-        port = it->second;
-      } else if (pins.size() != count) {
-        auto ext = sum;
-        for (int pin : pins) {
-          int i   = d.pin2node[pin];
-          ext[0] -= d.node_x[i] + d.pin_offset_x[pin];
-          ext[1] -= d.node_y[i] + d.pin_offset_y[pin];
+  // With reverse pin incidence, build and release one owner's net fragments at a time.
+  // Older physical views without the reverse index retain the single linear traversal.
+  const bool indexed        = d.flat_node2pin_start.size() == d.node_x.size() + 1 && d.pin2net.size() == d.pin2node.size();
+  auto       partition_nets = [&](std::optional<size_t> owner) {
+    std::vector<int> incident;
+
+    if (owner && indexed) {
+      for (int node : nodes.at(*owner)) {
+        for (int j = d.flat_node2pin_start[node]; j < d.flat_node2pin_start[node + 1]; ++j) {
+          incident.push_back(d.pin2net[d.flat_node2pin[j]]);
         }
-        const auto& b = plan.chunks[cid].box;
-        Point       xy{};
-        for (int k = 0; k < 2; ++k) {
-          xy[k] = std::clamp(ext[k] / (count - pins.size()), b[k], b[k + 2]);
-        }
-        std::array<double, 4> gap{xy[0] - b[0], xy[1] - b[1], b[2] - xy[0], b[3] - xy[1]};
-        auto                  side = std::min_element(gap.begin(), gap.end()) - gap.begin();
-        xy[side % 2]               = b[side];
-        port                       = xy;
       }
-      if (pins.size() > 1 || port) {
-        nets[cid].push_back({int(n), std::move(pins), port});
+      std::sort(incident.begin(), incident.end());
+      incident.erase(std::unique(incident.begin(), incident.end()), incident.end());
+    }
+    const auto net_count = owner && indexed ? incident.size() : d.flat_net2pin_start.size() - 1;
+    for (size_t k_net = 0; k_net < net_count; ++k_net) {
+      const size_t n = owner && indexed ? size_t(incident[k_net]) : k_net;
+      if (!d.net_mask.empty() && !d.net_mask[n]) {
+        continue;
+      }
+      std::map<int, std::vector<int>> split;
+      Point                           sum{};
+      size_t                          count = 0;
+      for (int j = d.flat_net2pin_start[n]; j < d.flat_net2pin_start[n + 1]; ++j) {
+        int pin = d.flat_net2pin[j], i = d.pin2node[pin];
+        if (i < int(home.size()) && home[i] >= 0 && (!owner || size_t(home[i]) == *owner)) {
+          split[home[i]].push_back(pin);
+        }
+        sum[0] += d.node_x[i] + d.pin_offset_x[pin];
+        sum[1] += d.node_y[i] + d.pin_offset_y[pin];
+        ++count;
+      }
+      for (auto& [cid, pins] : split) {
+        std::optional<Point> port;
+        if (auto it = planned_ports[cid].find(n); it != planned_ports[cid].end()) {
+          port = it->second;
+        } else if (pins.size() != count) {
+          auto ext = sum;
+          for (int pin : pins) {
+            int i   = d.pin2node[pin];
+            ext[0] -= d.node_x[i] + d.pin_offset_x[pin];
+            ext[1] -= d.node_y[i] + d.pin_offset_y[pin];
+          }
+          const auto& b = plan.chunks[cid].box;
+          Point       xy{};
+          for (int k = 0; k < 2; ++k) {
+            xy[k] = std::clamp(ext[k] / (count - pins.size()), b[k], b[k + 2]);
+          }
+          std::array<double, 4> gap{xy[0] - b[0], xy[1] - b[1], b[2] - xy[0], b[3] - xy[1]};
+          auto                  side = std::min_element(gap.begin(), gap.end()) - gap.begin();
+          xy[side % 2]               = b[side];
+          port                       = plan.chunks[cid].project_port(xy);
+        }
+        if (pins.size() > 1 || port) {
+          nets[cid].push_back({int(n), std::move(pins), port});
+        }
       }
     }
+  };
+  if (!indexed) {
+    partition_nets(only);
   }
   struct Seed {
     uint64_t           context;
@@ -286,8 +293,9 @@ Chunk_refine_stats refine_chunk_seeds(dp::Design& d, const Chunk_model& model, c
     if (only && j != *only) {
       continue;
     }
-    const auto&  c = plan.chunks[j];
-    const auto&  b = c.box;
+    const auto& c = plan.chunks[j];
+    const auto  b = c.worker_box();
+    excluded[j].insert(excluded[j].end(), c.exclusions.begin(), c.exclusions.end());
     const double w = b[2] - b[0], h = b[3] - b[1];
     auto&        ids = nodes[j];
     std::sort(ids.begin(), ids.end(), [&](int i, int k) {
@@ -320,6 +328,7 @@ Chunk_refine_stats refine_chunk_seeds(dp::Design& d, const Chunk_model& model, c
         add(d.node_x[i] - b[0], d.node_y[i] - b[1], sx, sy, model.objects[owners[i]].macro);
         if (export_job) {
           job.names.push_back(names[i]);
+          job.source_nodes.push_back(i);
         }
       } else {
         // Keep the true intersection; a remote fixed cell is just a boundary contact.
@@ -363,6 +372,9 @@ Chunk_refine_stats refine_chunk_seeds(dp::Design& d, const Chunk_model& model, c
         }
       }
     }
+    if (indexed) {
+      partition_nets(j);
+    }
     for (const auto& part : nets[j]) {
       uint64_t edge = 0;
       auto     pin  = [&](int i, double x, double y) {
@@ -380,6 +392,9 @@ Chunk_refine_stats refine_chunk_seeds(dp::Design& d, const Chunk_model& model, c
           context = number(number(context, dx), dy);
         }
         pin(i, dx, dy);
+        if (export_job) {
+          job.source_pins.push_back(pp);
+        }
         edge += number(number(mix(2166136261U, i), d.pin_offset_x[pp]), d.pin_offset_y[pp]);
       }
       if (export_job) job.parent_nets.push_back(part.net);
@@ -392,6 +407,9 @@ Chunk_refine_stats refine_chunk_seeds(dp::Design& d, const Chunk_model& model, c
         double px = (*part.port)[0] - b[0], py = (*part.port)[1] - b[1];
         add(px, py, 0, 0, false);
         pin(i, 0, 0);
+        if (export_job) {
+          job.source_pins.push_back(-1);
+        }
         context += edge;  // that this net reaches the boundary is structure; where its contact sits is not
         port_context += number(number(edge, px), py);
       }
@@ -399,6 +417,7 @@ Chunk_refine_stats refine_chunk_seeds(dp::Design& d, const Chunk_model& model, c
       local.net_weights.push_back(export_job && !d.net_weights.empty() ? d.net_weights[part.net] : 1);
       local.flat_net2pin_start.push_back(local.pin2node.size());
     }
+    std::vector<Local_net>().swap(nets[j]);
     if (export_job) {
       job.multirow = multirow;
       // In the seed path macros are fixed. Independent jobs place their own movable
