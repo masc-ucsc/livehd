@@ -254,6 +254,12 @@ echo "ok: $(tail -1 "$OUT/fp_symbolic.log")"
   > "$OUT/mem_addr_check.log" 2>&1 && grep -q '^PASS mem_addr_check' "$OUT/mem_addr_check.log" \
   || { tail -5 "$OUT/mem_addr_check.log"; echo "FAIL: mem_addr_check"; exit 1; }
 echo "ok: $(tail -1 "$OUT/mem_addr_check.log")"
+# FastBV's GetMask fast form against GetMask's definition, wide masks included
+# (tests/getmask_fast_check.lean)
+(cd "$ROOT/formal/lean" && LEAN_PATH="$PWD/.olean-dev" lean --run "$ROOT/pass/lean/tools/tests/getmask_fast_check.lean") \
+  > "$OUT/getmask_fast_check.log" 2>&1 && grep -q '^PASS getmask_fast' "$OUT/getmask_fast_check.log" \
+  || { tail -5 "$OUT/getmask_fast_check.log"; echo "FAIL: getmask_fast_check"; exit 1; }
+echo "ok: $(tail -1 "$OUT/getmask_fast_check.log")"
 # certificates no Verilog front end emits (symbolic masks, whole-memory load)
 (cd "$ROOT/formal/lean" && LEAN_PATH="$PWD/.olean-dev" lean --run "$ROOT/pass/lean/tools/tests/gen_gap_certs.lean" "$OUT/gap") \
   > "$OUT/gen_gap_certs.log" 2>&1 || { tail -5 "$OUT/gen_gap_certs.log"; echo "FAIL: gen_gap_certs"; exit 1; }

@@ -15,7 +15,9 @@ substitution changes no result; nothing here is `@[implemented_by]`. The definit
 
 The fast forms work on the unsigned value as a `Nat` (`uintNat`), take masks from a table
 built once (`maskTab`), and use word operations (`&&&`, `|||`, `^^^`, shifts) that Lean
-inlines for values below `2 ^ 63`. Widths of 63 and more fall back to the definition.
+inlines for values below `2 ^ 63`. Widths of 63 and more fall back to the definition,
+except GetMask on a run-of-ones mask, which is one shift and one mask on `Nat` at any width
+(`bvGetMaskFast`).
 
 A `@[csimp]` lemma reaches only call sites compiled after it, so the modules whose code runs
 per simulated cycle import this one: `Compiler/ResidualSemantics` (TV's step and the
@@ -394,26 +396,30 @@ theorem pack_low_bv_range' (x : BV) (s L : Nat) :
       simp only [h0, Nat.mul_zero, Nat.add_zero]
       simp
 
-/-- Trailing zero bits of `n`, by a plain loop (64 when `n = 0`). Its answer is checked
-before it is used, so this needs no proof. -/
-def ctz (n : Nat) : Nat := go n 0 64
-where
-  go (n acc : Nat) : Nat → Nat
-    | 0 => acc
-    | f + 1 => if n % 2 == 1 then acc else go (n >>> 1) (acc + 1) f
+/-- Position of the lowest set bit of `n`: `n ^^^ (n - 1)` is the run of ones up to and
+including it. `Nat.log2` is native (`lean_nat_log2`), so this costs no bit loop at any
+width. Its answer is checked before it is used, so it needs no proof. -/
+@[inline] def lowBitPos (n : Nat) : Nat := Nat.log2 (n ^^^ (n - 1))
 
 /-- `bv_get_mask` on a run-of-ones mask `(2 ^ L - 1) * 2 ^ s`: one shift and one mask.
-`s` and `L` come from `ctz` and are checked against the mask before they are used. Every
-mask LiveHD emits for PicoRV32 has this shape; any other mask takes the definition. -/
+`s` and `L` are computed from the mask and CHECKED against it before they are used; any
+mask that is not one run of ones (or a run that does not fit the mask's width) takes the
+definition, so every mask and width keeps exactly the meaning of `bv_get_mask`
+(`bv_get_mask_eq_fast` below). Below 63 bits the masks come from tables; a run at or past
+bit 63 (one bit of a wide vector) is the same shift and mask on `Nat`, instead of the
+definition's loop over every bit. -/
 def bvGetMaskFast (w : Nat) (x m : BV) : BV :=
   let M := uintNat m
-  let s := ctz M
-  let L := ctz ((M >>> s) + 1)
+  let s := lowBitPos M
+  let L := Nat.log2 ((M >>> s) + 1)
   if h : s < pow2Tab.size ∧ L < maskTab.size then
     if s + L ≤ m.width ∧ M = maskTab[L] * pow2Tab[s] then
       ofNatLt w (truncNat w ((uintNat x >>> s) &&& maskTab[L]))
     else bv_get_mask w x m
-  else bv_get_mask w x m
+  else
+    if s + L ≤ m.width ∧ M = ((1 <<< L) - 1) <<< s then
+      ofNatLt w (truncNat w ((uintNat x >>> s) &&& ((1 <<< L) - 1)))
+    else bv_get_mask w x m
 
 @[csimp] theorem bv_get_mask_eq_fast : @bv_get_mask = @bvGetMaskFast := by
   funext w x m
@@ -430,7 +436,16 @@ def bvGetMaskFast (w : Nat) (x m : BV) : BV :=
       rw [mask_indices_bv_contig m _ _ heq hle, pack_low_bv_range', and_maskTab _ _ hL, truncNat_eq]
       exact mk_bv_natCast_mod w _
     · rfl
-  · rfl
+  · split
+    · rename_i h2
+      obtain ⟨hle, heq⟩ := h2
+      have hm := heq
+      rw [Nat.shiftLeft_eq, Nat.one_shiftLeft] at hm
+      unfold bv_get_mask
+      rw [mask_indices_bv_contig m _ _ hm hle, pack_low_bv_range', Nat.one_shiftLeft,
+        Nat.and_two_pow_sub_one_eq_mod, truncNat_eq]
+      exact mk_bv_natCast_mod w _
+    · rfl
 
 /-! ## `Op_Sext` -/
 
