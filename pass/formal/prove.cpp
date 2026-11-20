@@ -235,10 +235,16 @@ void Prover::cone_walk(uint32_t scope, const hhds::Pin_class& pin, absl::flat_ha
     return;
   }
   if (op == Ntype_op::Sub) {
+    bool inside = false;  // unsupported inside the callee
     if (auto down = cross(scope, pin)) {
-      cone_walk(down->first, down->second, seen, n, stateful, unsupported);
+      cone_walk(down->first, down->second, seen, n, stateful, inside);
     } else {
-      unsupported = true;
+      inside = true;
+    }
+    if (inside && opts_.subs_as_symbols) {
+      stateful = true;  // cut: a free word (val_of decides the same way)
+    } else {
+      unsupported |= inside;
     }
     return;
   }
@@ -312,16 +318,38 @@ std::optional<Val> Prover::val_of(uint32_t scope, const hhds::Pin_class& dpin) {
   // drives it on the other side of the instance boundary.
   if ((scope != 0 && gu::is_graph_input_pin(dpin))
       || (!gu::is_graph_input_pin(dpin) && gu::type_op_of(dpin.get_master_node()) == Ntype_op::Sub)) {
+    // subs_as_symbols: an instance output that cannot be entered is a free word.
+    const bool sub_output = !gu::is_graph_input_pin(dpin);
+    const auto free_word  = [&]() -> std::optional<Val> {
+      const int w    = std::max(1, gu::real_width(dpin));
+      auto      term = tm_.mkConst(tm_.mkBitVectorSort(static_cast<uint32_t>(w)),
+                                   std::format("{}sub_{}_{}",
+                                               scopes_[scope].prefix,
+                                               static_cast<uint64_t>(dpin.get_master_node().get_debug_nid()),
+                                               static_cast<uint64_t>(dpin.get_port_id())));
+      Val       value{term, w, !gu::is_unsign(dpin)};
+      memo_[ci]     = value;
+      enc_stateful_ = true;
+      leaf(term, scope, dpin);
+      return value;
+    };
     const auto other = cross(scope, dpin);
     if (!other || on_stack_.contains(ci)) {
+      if (sub_output && opts_.subs_as_symbols) {
+        return free_word();
+      }
       enc_unsupported_ = true;
       return std::nullopt;
     }
+    const bool was_unsupported = enc_unsupported_;
     on_stack_.insert(ci);
     auto v = val_of(other->first, other->second);
     on_stack_.erase(ci);
     if (v) {
       memo_[ci] = *v;
+    } else if (sub_output && opts_.subs_as_symbols) {
+      enc_unsupported_ = was_unsupported;
+      return free_word();
     }
     return v;
   }

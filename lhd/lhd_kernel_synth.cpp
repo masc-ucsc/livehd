@@ -81,6 +81,7 @@
 #include "inou/lefdef/mapped_graph.hpp"
 #include "inou/lefdef/route_store.hpp"
 #include "lhd_kernel_internal.hpp"
+#include "satopt_stages.hpp"
 #include "liberty_dff.hpp"
 #include "node_util.hpp"
 #include "job_manager.hpp"
@@ -3074,6 +3075,29 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
     labels["state_sweep"]     = synth_set(opts, "state_sweep", "true");
     labels["merge_registers"] = synth_set(opts, "merge_registers", "true");
     labels["flat_sweep"]      = synth_set(opts, "flat_sweep", "false");
+    labels["boundary_bits"]   = synth_set(opts, "boundary_bits", "true");
+    labels["share_cells"]     = synth_set(opts, "share_cells", "true");
+    // satopt's `boundary` stage reads the final colors, so the mapper runs it on each graph right before it is cut (every
+    // other stage ran in the compile step). On with pass.satopt=true when the stage is selected (the default set has it).
+    if (satopt_setting(opts).value_or(false)) {
+      std::string stages, budget;
+      for (const auto& [key, value] : opts.sets) {
+        if (key == "pass.satopt.stages") {
+          stages = value;
+        } else if (key.starts_with("pass.satopt.")) {
+          const auto knob = std::string_view{key}.substr(std::string_view{"pass.satopt."}.size());
+          if (std::find(livehd::satopt::kBudgetKeys.begin(), livehd::satopt::kBudgetKeys.end(), knob)
+              != livehd::satopt::kBudgetKeys.end()) {
+            budget += std::format("{}{}={}", budget.empty() ? "" : ",", knob, value);
+          }
+        }
+      }
+      if (const auto set = livehd::satopt::parse_stages(stages, livehd::satopt::Profile::shared);
+          set && set->has(livehd::satopt::Stage::boundary)) {
+        labels["satopt_boundary"] = "true";
+        labels["satopt_budget"]   = budget;
+      }
+    }
     // Clock gating needs the Liberty's integrated clock-gate cell: without one the gated registers' clock would be computed
     // logic and the registers would stay native flops (no mapped DFF, no timing). The library decides, the user can still say
     // false.

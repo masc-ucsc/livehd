@@ -9,6 +9,7 @@
 #include <print>
 #include <unordered_map>
 
+#include "color_boundary.hpp"
 #include "arith_choice.hpp"
 #include "design_prepare.hpp"
 #include "diag.hpp"
@@ -306,8 +307,14 @@ Design_result synthesize_cmos_design(const std::shared_ptr<hhds::Graph>& top, co
   // U21: the folded registers of the flat design top, by flat source node.
   absl::flat_hash_map<hhds::Node_class, synth::Gated_fold_hint> fold_hints;
   std::function<void(hhds::Graph*)>                             prepare_src;
-  if (options.gated_fold) {
+  if (options.gated_fold || options.boundary_bits || options.share_cells) {
     prepare_src = [&](hhds::Graph* source) {
+      if (options.boundary_bits || options.share_cells) {
+        (void)synth::trim_color_boundaries(source, {.bits = options.boundary_bits, .share = options.share_cells});
+      }
+      if (!options.gated_fold) {
+        return;
+      }
       const auto name = source->get_name();
       if (name != top->get_name() && name != partition::flatten_scratch_name(top->get_name())) {
         return;  // a preserved definition: its clock ports are not design inputs

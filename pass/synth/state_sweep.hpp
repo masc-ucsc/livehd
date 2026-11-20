@@ -47,6 +47,25 @@ struct State_sweep_stats {
 std::optional<State_sweep_stats> sweep_unobserved_state(std::span<const std::shared_ptr<hhds::Graph>> definitions,
                                                         std::string_view top, Preparation_budget* budget);
 
+// For each of `pins` (driver pins of `graph`), which of its declared bits something reads, with the per-bit demand of
+// the sweep above computed on this graph alone (its outputs and instance inputs read in full). No value when the
+// demand could not be computed.
+std::optional<std::vector<std::vector<bool>>> read_bits(hhds::Graph* graph, std::span<const hhds::Pin_class> pins);
+
+// What mask_unread_color_outputs trimmed.
+struct Unread_stats {
+  uint64_t values = 0;  // crossing values handed to their readers through a mask
+  uint64_t bits   = 0;  // the bits those masks clear
+};
+
+// Dead code at color boundaries, on one colored graph right before it is cut into regions. A reading region asks only
+// for the bits it uses, but the producing region computes every bit of the value it exports. With the same per-bit
+// demand as the sweep above (this graph alone, its outputs and instance inputs read in full), an unsigned
+// combinational value that a cell of another color reads and whose bits are not all read by something is handed to
+// those readers as `value & read`, the And in the producer's color: the unread bits leave the producer as constant 0
+// and the mapper drops the logic behind them. Returns no value when the demand could not be computed.
+std::optional<Unread_stats> mask_unread_color_outputs(hhds::Graph* graph);
+
 // Before sweep_unobserved_state: the sweep keeps a cell when ANY instance of its definition reads it. A definition
 // whose instances read different outputs (a FIFO whose data one user reads and another ignores) gets a content-named
 // copy (`<name>__d<hash>`) per distinct read pattern beyond the widest, appended to `definitions`, so each pattern is

@@ -32,8 +32,9 @@ enum class Stage : uint8_t {
   simp_ctrl,   // small-support Boolean resynthesis of one-bit controls
   muxtree,     // private mux selects constant under bounded ancestor contexts
   share,       // arithmetic under proven exclusive complete activations
+  boundary,    // bits of a value that crosses a color proven constant for the colors that read it
 };
-inline constexpr size_t                         kStageCount = 10;
+inline constexpr size_t                         kStageCount = 11;
 inline constexpr std::array<Stage, kStageCount> kStageOrder{Stage::constants,
                                                             Stage::equiv,
                                                             Stage::complement,
@@ -43,7 +44,8 @@ inline constexpr std::array<Stage, kStageCount> kStageOrder{Stage::constants,
                                                             Stage::hotmux,
                                                             Stage::memory,
                                                             Stage::resub,
-                                                            Stage::simp_ctrl};
+                                                            Stage::simp_ctrl,
+                                                            Stage::boundary};
 [[nodiscard]] std::string_view stage_name(Stage s);
 
 class Stage_set {

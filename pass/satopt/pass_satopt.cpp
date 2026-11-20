@@ -128,7 +128,7 @@ public:
     method.add_label_optional(
         "stages",
         "none, default, all, or a comma-separated list of: constants, equiv, complement, odc, muxtree, share, hotmux, memory, "
-        "resub, simp_ctrl (always run in that order)",
+        "resub, simp_ctrl, boundary (always run in that order; boundary needs a colored design)",
         "");
     method.add_label_optional("cleanup", "true: constant propagation and bitwidth on every changed graph afterwards", "true");
     method.add_label_optional("work",

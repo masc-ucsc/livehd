@@ -41,17 +41,22 @@ std::optional<Flat_state_stats> fold_flat_state(std::vector<std::shared_ptr<hhds
 
 struct Const_bits_stats {
   uint64_t rounds        = 0;  // fixpoint rounds that changed something
-  uint64_t output_bits   = 0;  // instance output bits a parent now reads as 0 (summed over instances)
-  uint64_t input_bits    = 0;  // definition input bits now read as 0 inside the body (every instance drives 0)
+  uint64_t output_bits   = 0;  // instance output bits a parent now reads as constants (summed over instances)
+  uint64_t input_bits    = 0;  // definition input bits now read as constants inside the body (every instance agrees)
   uint64_t graphs_folded = 0;  // refolds of a definition that gained masks
 };
 
-// Constant-0 bits across instance boundaries, without flattening. A definition whose output bits are provably 0 (a
-// spill register whose payload flops the whole-design proof cut: 577 of 579 payload bits read 0) makes every parent
-// read those bits as 0; a definition whose input bits every instance drives with 0 reads them as 0 inside its body.
-// Both are plain masks (`x & keep`) that the refold folds through the logic, so a pass-through chain (FIFO -> route
-// select -> output arbiter -> wormhole arbiter) learns its zeros round by round until nothing changes. Only a whole
-// port's bits that hold at EVERY instance in the private copy are applied to a definition, so no copy is made here.
+// Constant bits across instance boundaries, without flattening. A definition whose output bits are provably constant
+// (a spill register whose payload flops the whole-design proof cut: 577 of 579 payload bits read 0) makes every
+// parent read those bits as constants; a definition whose input bits every instance drives with the same value reads
+// them as constants inside its body. The facts are bit_facts::known_bits: zeros through any port, ones (a tied
+// `valid_i`, `req_i`) through an unsigned one, read through the instance (a constant only this instance passes in
+// still comes back out). Both rewrites are `(x & keep) | ones`, which the refold folds through the logic, so a
+// pass-through chain (FIFO -> route select -> output arbiter -> wormhole arbiter) learns its bits round by round until
+// nothing changes. Only bits that hold at EVERY instance in the private copy are applied inside a definition, so no
+// copy is made here. prepare_design runs it twice: after the whole-design state proof, and again after the demand
+// split gave differently-read instances their own copies (a bit only some instances of the shared definition drove
+// with a constant is then driven so by every instance of a copy).
 //
 // Returns no value when the budget refused.
 std::optional<Const_bits_stats> propagate_constant_bits(std::vector<std::shared_ptr<hhds::Graph>>& definitions,

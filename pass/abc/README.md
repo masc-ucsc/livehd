@@ -89,6 +89,10 @@ and `lhd lec`. An lg: input (`lhd synth lg:...`, `lhd pass abc|usyn`) is mapped
 as compiled. `abc_satopt.cpp` registers the ABC `&fraig` mux-fact prover that
 compile-time satopt uses when ABC is linked. pass.abc still drops dead logic
 from its private copy before partitioning.
+The one exception is satopt's `boundary` stage, which reads the synthesis colors and therefore cannot run in
+the compile step: with `pass.satopt=true` and the stage selected, lhd sets the `satopt_boundary` label and
+pass.abc runs it on its private copy -- across the instance boundaries before partitioning, then on each
+graph right before it is cut (`Pass_partition`'s `prepare_src` seam). See the satopt README.
 
 ## Parallel synthesis
 

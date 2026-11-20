@@ -482,6 +482,25 @@ bool read_as_zero(hhds::Graph& g, const hhds::Pin_class& pin, const std::vector<
   return true;
 }
 
+// Rewire every reader of `pin` in `g` to read it with its known bits spelled out (`(pin & keep) | ones`, a constant when
+// every bit is known). Ones only for an unsigned port. Returns false when `pin` has no reader.
+bool read_as_known(hhds::Graph& g, const hhds::Pin_class& pin, const bit_facts::Known& known, int bits, bool is_signed) {
+  if (std::ranges::none_of(known.one, [](bool o) { return o; })) {
+    return read_as_zero(g, pin, known.zero, bits, is_signed);
+  }
+  if (pin.is_invalid() || pin.out_edges().empty() || is_signed) {
+    return false;
+  }
+  const gu::Edge_vec readers(pin.out_edges().begin(), pin.out_edges().end());
+  // The nodes the rebuild adds read `pin` themselves: they are not in `readers`, taken before it.
+  const auto value = bit_facts::known_pin(g, pin, known);
+  for (const auto& e : readers) {
+    e.sink.del_sink(pin);
+    (value.is_const() ? gu::fit_to_port(g, value, std::max(1, bits), is_signed) : value).connect_sink(e.sink);
+  }
+  return true;
+}
+
 // Bits of `zero` not yet in `applied` (both `bits` wide); merges them into `applied`.
 uint64_t new_zero_bits(const std::vector<bool>& zero, std::vector<bool>& applied) {
   uint64_t n = 0;
@@ -627,8 +646,22 @@ std::optional<Const_bits_stats> propagate_constant_bits(std::vector<std::shared_
   };
 
   // (parent, instance nid, output port) -> zeros a parent already reads; (definition, input port) -> zeros applied inside
-  absl::flat_hash_map<std::tuple<const hhds::Graph*, hhds::Nid, hhds::Port_id>, std::vector<bool>> out_applied;
-  absl::flat_hash_map<std::pair<const hhds::Graph*, hhds::Port_id>, std::vector<bool>>             in_applied;
+  absl::flat_hash_map<std::tuple<const hhds::Graph*, hhds::Nid, hhds::Port_id>, bit_facts::Known> out_applied;
+  absl::flat_hash_map<std::pair<const hhds::Graph*, hhds::Port_id>, bit_facts::Known>             in_applied;
+  // The known bits of a `bits`-wide port read from `drv`: zeros always, ones only into an unsigned port.
+  const auto known_of = [](const hhds::Pin_class& drv, int bits, bool unsign) {
+    auto known = bit_facts::known_bits(drv, bits);
+    if (!unsign) {
+      std::fill(known.one.begin(), known.one.end(), false);
+    }
+    return known;
+  };
+  const auto sized = [](bit_facts::Known& applied, int bits) {
+    if (applied.zero.empty()) {
+      applied.zero.assign(static_cast<size_t>(bits), false);
+      applied.one.assign(static_cast<size_t>(bits), false);
+    }
+  };
 
   for (int round = 0; round < 16; ++round) {
     if (budget != nullptr && !budget->check("const-bits")) {
@@ -664,16 +697,17 @@ std::optional<Const_bits_stats> propagate_constant_bits(std::vector<std::shared_
           if (drv.is_invalid()) {
             continue;
           }
-          const auto zero    = bit_facts::known_zero_bits(drv, bits);
+          // Read through THIS instance (an unsigned port): the walk enters the definition and, at one of its inputs,
+          // continues at what this instance drives it with, so a constant only this instance passes in still comes
+          // back out. A signed port keeps the definition-only facts.
+          const auto known   = decl.unsign ? known_of(out, bits, true) : known_of(drv, bits, false);
           auto&      applied = out_applied[{g.get(), node.get_debug_nid(), decl.port_id}];
-          if (applied.empty()) {
-            applied.assign(static_cast<size_t>(bits), false);
-          }
-          const auto fresh = new_zero_bits(zero, applied);
+          sized(applied, bits);
+          const auto fresh = new_zero_bits(known.zero, applied.zero) + new_zero_bits(known.one, applied.one);
           if (fresh == 0) {
             continue;
           }
-          if (read_as_zero(*g, out, applied, bits, !decl.unsign)) {
+          if (read_as_known(*g, out, applied, bits, !decl.unsign)) {
             stats.output_bits += fresh;
             changed = true;
           }
@@ -688,7 +722,7 @@ std::optional<Const_bits_stats> propagate_constant_bits(std::vector<std::shared_
     struct In_facts {
       bool                                                        unknown = false;  // an instance the analysis cannot see
       uint64_t                                                    count   = 0;
-      absl::flat_hash_map<hhds::Port_id, std::vector<bool>>       zero;
+      absl::flat_hash_map<hhds::Port_id, bit_facts::Known>        zero;  // the bits every instance drives with one value
     };
     absl::flat_hash_map<const hhds::Graph*, In_facts> facts;
     for (const auto& g : post) {
@@ -712,13 +746,19 @@ std::optional<Const_bits_stats> propagate_constant_bits(std::vector<std::shared_
           if (bits <= 0) {
             continue;
           }
-          auto       it   = driver_of.find(decl.port_id);
-          const auto zero = it == driver_of.end() || it->second.is_invalid() ? std::vector<bool>(static_cast<size_t>(bits), false)
-                                                                             : bit_facts::known_zero_bits(it->second, bits);
-          auto [z, added] = f.zero.try_emplace(decl.port_id, zero);
+          auto             it = driver_of.find(decl.port_id);
+          bit_facts::Known known;
+          if (it == driver_of.end() || it->second.is_invalid()) {
+            known.zero.assign(static_cast<size_t>(bits), false);
+            known.one.assign(static_cast<size_t>(bits), false);
+          } else {
+            known = known_of(it->second, bits, decl.unsign);
+          }
+          auto [z, added] = f.zero.try_emplace(decl.port_id, known);
           if (!added) {
-            for (size_t i = 0; i < z->second.size(); ++i) {
-              z->second[i] = z->second[i] && i < zero.size() && zero[i];
+            for (size_t i = 0; i < z->second.zero.size(); ++i) {
+              z->second.zero[i] = z->second.zero[i] && i < known.zero.size() && known.zero[i];
+              z->second.one[i]  = z->second.one[i] && i < known.one.size() && known.one[i];
             }
           }
         }
@@ -739,14 +779,12 @@ std::optional<Const_bits_stats> propagate_constant_bits(std::vector<std::shared_
         }
         const int bits    = static_cast<int>(decl.bits);
         auto&     applied = in_applied[{g.get(), decl.port_id}];
-        if (applied.empty()) {
-          applied.assign(static_cast<size_t>(bits), false);
-        }
-        const auto fresh = new_zero_bits(z->second, applied);
+        sized(applied, bits);
+        const auto fresh = new_zero_bits(z->second.zero, applied.zero) + new_zero_bits(z->second.one, applied.one);
         if (fresh == 0) {
           continue;
         }
-        if (read_as_zero(*g, g->get_input_pin(decl.name), applied, bits, !decl.unsign)) {
+        if (read_as_known(*g, g->get_input_pin(decl.name), applied, bits, !decl.unsign)) {
           stats.input_bits += fresh;
           changed = true;
         }

@@ -48,6 +48,11 @@ public:
   [[nodiscard]] uint32_t   columns() const { return columns_; }
   // Column values computed so far (the work a budgeted caller charges).
   [[nodiscard]] uint64_t   work() const { return work_; }
+  // Column values held now (16 bytes each, inline up to 64 bits): past
+  // kMaxStored a new value is unavailable, and a caller sweeping a graph
+  // larger than that starts a fresh simulator.
+  [[nodiscard]] uint64_t   stored() const { return stored_; }
+  static constexpr uint64_t kMaxStored = 4'000'000;
   // Every definition a value so far descended into (descend), once each: a
   // cached result filtered by these values depends on their bodies.
   [[nodiscard]] std::vector<hhds::Graph*> descended() const;

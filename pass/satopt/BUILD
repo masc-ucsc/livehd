@@ -70,6 +70,7 @@ cc_library(
         "//pass/common:pass",
         "//pass/cprop:pass_cprop",
         "//pass/formal:formal",
+        "//pass/specialize",
         "//pass/synth",
         "@abseil-cpp//absl/container:flat_hash_map",
         "@abseil-cpp//absl/container:flat_hash_set",
@@ -82,6 +83,7 @@ cc_library(
 cc_test(
     name = "satopt_test",
     srcs = [
+        "satopt_boundary_test.cpp",
         "satopt_ctrl_test.cpp",
         "satopt_memory_test.cpp",
         "satopt_muxtree_test.cpp",
