@@ -12,7 +12,8 @@
 <h1><strong class="item-id">2p-pcrs</strong> PCRS clock: a placement-aware clock network owned by LiveHD</h1>
 <p><span class="status">Plan written 2026-11-19 from a question-and-answer session. Nothing below is started;
 only the reset part of <code>pass/place/pcrs</code> exists. This is a high-level plan, not an execution plan.
-Names of options, steps and files are proposals.</span></p>
+Names of options, steps and files are proposals. The section <a href="#postroute">Hints from the post-route
+runs</a> was added the same day from the HighTide post-route session of 2026-11-18 and 19.</span></p>
 
 <p>LiveHD places and times a design on <strong>ideal clocks</strong>, and OpenROAD builds the clock tree
 afterwards on a placement that never looked at the clock. This page plans the clock part of PCRS (power,
@@ -108,7 +109,7 @@ clock-gating check. <code>set_clock_latency</code> is not supported. Hold is bes
 <td>Needs propagated clock arrivals, the derate and the common-path credit (step B).</td></tr>
 <tr><td>Clock-gate inference</td><td><code>synth.clock_gate</code> in synthesis (minimum bits per gate, chained
 gates up to a depth). <code>synth.place.clock_gate_flatten</code> turns cascaded gating ANDs into one cell
-before placement.</td><td>Synthesis keeps proposing gates without positions. PCRS takes its result as
+before placement. Placement IO resynthesis keeps clock-cone cells exact (2026-11-18).</td><td>Synthesis keeps proposing gates without positions. PCRS takes its result as
 the starting set of gating functions (K3).</td></tr>
 <tr><td>Routing estimate (<a href="2r-route.html">2r-route</a>)</td><td>The clock charge models a spine tree.
 A share of the sites is held back for CTS and hold buffers (C1).</td><td>The charge becomes the demand of the
@@ -410,11 +411,90 @@ chunk has a clock entry with an arrival as a boundary time, and the top network 
 entries.</li>
 </ul>
 
+<h2 id="postroute">Hints from the post-route runs (2026-11-18 and 19)</h2>
+<p>The Why section quotes the cohort of <a href="2r-route.html">2r-route</a>. These are newer runs of the
+same designs: LiveHD placements taken through OpenROAD's CTS, repair, global and detailed routing with
+<code>tools/vslivehd/postroute.py</code> in HighTide, next to OpenROAD's own placement in the same die.
+The LiveHD commits are named so a number can be traced. Counts are from the OpenROAD stage logs.</p>
+<table>
+<tr><th>Design</th><th>LiveHD placement</th><th>OpenROAD placement</th><th>What it says</th></tr>
+<tr><td>coralnpu</td><td>Before <code>c3c0930c8</code>: 6,458 hold endpoints and 4,118 buffers at CTS, 4 h 55 m.
+After it and the gate flatten (<code>806ff3981</code>): 1,350 endpoints, 7,037 buffers, 27 min; hold WNS
+&minus;214 ps before repair.</td><td>About 490 endpoints and 200 buffers, 37 min.</td>
+<td>Clock structure, not data placement. See H1 and H2.</td></tr>
+<tr><td>NVDLA/partition_c</td><td>6,445 hold endpoints when post-route repair starts, worst about
+&minus;1.3 ns.</td><td>1,949 endpoints, worst about &minus;1.2 ns.</td>
+<td>Cascaded gates again (67 merged by the flatten). Both arms carry a large hold problem.</td></tr>
+<tr><td>litepci</td><td>3,440 hold endpoints, worst &minus;555 ps at fakeram address pins.</td>
+<td>The same worst hold (&minus;550 to &minus;610 ps at the same pins) and a 6.5 h repair.</td>
+<td>Intrinsic to the macro. See H3.</td></tr>
+<tr><td>vortex</td><td>11.9k to 17.5k hold buffers; 359 to 982 of them fail legalization.</td>
+<td>About 10k hold buffers, all legalized.</td><td>Where the buffers land decides the outcome. See H4.</td></tr>
+<tr><td>gemmini</td><td>About 14.9k hold buffers (82,892 in the older cohort run).</td><td>About 25.0k.</td>
+<td>No longer a LiveHD-specific failure.</td></tr>
+<tr><td>NVDLA/partition_a</td><td>Routes to 0 DRC, no buffer-limit stop (<code>9e70615d1</code>).</td>
+<td>Routes to 0 DRC.</td><td>The cohort failure quoted in Why does not reproduce on current LiveHD.</td></tr>
+</table>
+<ul>
+<li><strong>H1 &mdash; one owner of the clock cone.</strong> Three placement passes edited clock cells before
+they were stopped one by one. IO resynthesis remapped a clock gate into a buffer, a NAND and an inverter;
+OpenROAD's CTS does not treat the AND function behind that inverter as a clock root, so 8,357 flops of
+coralnpu got no tree (fixed by <code>c3c0930c8</code>). Repair protected clock and reset buffers by instance
+name, and unnamed wiring nodes all shared the empty name, so unrelated data buffers were protected too
+(fixed by <code>230eead8f</code>). Buffer cleanup now rewrites gate chains. PCRS should publish one
+clock-cone classification that every pass asks, instead of each pass walking back from clock pins on its
+own. This widens the "two owners" risk below to every pass that edits cells.</li>
+<li><strong>H2 &mdash; gate depth is skew between groups.</strong> With cascaded gates the gated flops sit two
+cells below the root while an ungated domain (the reset synchronizer) sits at the root. Merging the cascade
+into one AND3 halved coralnpu's hold TNS before repair (&minus;295k to &minus;145k ps) but left most of the
+endpoints: the remaining violators are still registers of the gated domain. This is a direct case for K3 and
+K5 together: the arrival of a gated group has to be scheduled against the ungated groups it talks to. It
+is also a ready-made test for step D.</li>
+<li><strong>H3 &mdash; macro clock pins are the first useful-skew target.</strong> litepci's worst hold is at
+fakeram address pins in both arms, from the macro's hold requirement plus the clock latency to the macro,
+and both arms pay hours of buffer insertion for it. A macro is a leaf group of one (K1), so its arrival can be
+scheduled directly (K5). Moving that one arrival is cheaper than delaying hundreds of address and data
+paths. Step F should take litepci as its first case.</li>
+<li><strong>H4 &mdash; hold fixes need room where the short paths are.</strong> On vortex the hold buffers that
+failed to legalize sat in the strip between a pin-dense macro face and the core edge, and along the IO edge
+where LiveHD had about 12k cells within 15 &micro;m against about 1.4k in OpenROAD's placement. LiveHD now
+keeps OpenROAD's macro halo and a floor on macro channels, which fixed litepci and cnn. For K7 this means the
+bounded pre-route fix must place its cells with the same rules, and the reserve of 2r has to sit near macro
+pin faces and IO registers, not be spread evenly.</li>
+<li><strong>H5 &mdash; ideal-clock slack cannot rank clock changes.</strong> NVDLA/partition_c's pre-CTS setup WNS
+moved from &minus;130 to &minus;1,799 ps on a change that touched no data path, and the gate flatten looked
+worse before CTS (&minus;130 to &minus;615 ps) but better after global routing (&minus;520 against
+&minus;555 ps). Until step B exists, a clock step can only be judged on the routed result, on same-binary
+pairs, and a pair should be run twice.</li>
+<li><strong>H6 &mdash; the control arm is already scripted.</strong> <code>postroute.py</code> runs the reference
+and a LiveHD placement through the same deployed OpenROAD stages and keeps every stage log. It records setup
+slack per stage, routed wirelength and DRC. Hold endpoints and hold buffers per stage were read from the logs
+by hand in these runs; adding them to its metrics gives step A its report. Its LiveHD arm imports a DEF onto
+OpenROAD's floorplan, which is also where a "no CTS" variant (step C) would start.</li>
+<li><strong>H7 &mdash; leaf limits need slew, not only fanout.</strong> The reset part of PCRS limited a level by
+fanout 16 and left pipeline flops driving reset pins at 5 to 6.5 ns of slew on litepci until its cells were
+sized against the Liberty transition limit (<code>acac8ac6c</code>). The timing engine now propagates slew to
+each sink through one pole per wire (<code>e9e759f9d</code>), so the "smallest driver that meets slew at the
+farthest sink" rule of K1 can use it directly.</li>
+<li><strong>H8 &mdash; order with <a href="2w-wlresynth.html">2w-wlresynth</a>.</strong> That task may duplicate
+flops per load cluster. Each copy is a new clock sink at a new place, so hard leaf groups must be formed
+after it, and the soft force should treat the copies as separate sinks.</li>
+<li><strong>H9 &mdash; warm runs.</strong> A warm rerun restores the placement only when the compiled design and
+every placement decision are byte-identical. One unordered container in the frontend was enough to
+re-place vortex for 25 minutes (<code>e02d898f4</code>). Group formation, gate cloning and the schedule need
+stable orders (position ties broken by name) and a cache key that includes their options.</li>
+</ul>
+
 <h2>Facts to confirm first</h2>
 <ul class="subtasks">
 <li><strong>F1 — no-CTS recipe.</strong> What OpenROAD needs to accept a clock network it did not build:
 clock net type and routing rules, propagated clocks in the SDC, protection of clock cells from its own
-repair, and whether its timing repair still edits clock nets.</li>
+repair, and whether its timing repair still edits clock nets. HighTide's workaround table
+(<code>CLAUDE.md</code>) already documents three behaviours that matter here: CTS skips a buffer whose source
+type is <code>TIMING</code> as an existing clock buffer (CTS-0105), CTS runs its own detailed placement that
+ignores the flow's placement arguments (DPL-0036), and <code>SKIP_CTS_REPAIR_TIMING</code> and
+<code>SKIP_INCREMENTAL_REPAIR</code> switch off the repair passes that would otherwise edit a network
+LiveHD built.</li>
 <li><strong>F2 — clock cells.</strong> Per platform (asap7, sky130, nangate45): buffer, inverter, gate and
 delay cell families the LEF can place, and the insertion delay of memory clock pins.</li>
 <li><strong>F3 — sign-off variation.</strong> Which derate and pessimism removal the ORFS sign-off uses on the
@@ -431,7 +511,10 @@ how the sign-off timer receives mesh arrivals.</li>
 OpenROAD CTS writes (2r). Step B needs to load those results.</li>
 <li><strong>F9 — the OpenROAD of the control arm.</strong> Which OpenROAD version the cohort recipes use, and
 whether it has sink clustering, <code>-useful_skew</code>, <code>-virtual_cts</code> and gate cloning. Reproduce
-each reported feature before it is used as a baseline.</li>
+each reported feature before it is used as a baseline. HighTide pins OpenROAD <code>b65c274c</code> with
+OpenSTA <code>8572175a</code> (its 2026-07 validation), which is older than the <code>-useful_skew</code> merge
+and the gate-cloning commit quoted above, so the stronger control of step A needs a newer OpenROAD built
+next to the pinned one.</li>
 </ul>
 
 <h2>Steps</h2>
@@ -506,6 +589,11 @@ optimization depends on it.</li>
 not have, and a learned model in the flow. The last learned model in LiveHD (URoute) was deleted.</li>
 <li><strong>Two owners of clock gating.</strong> Synthesis infers gates and PCRS re-decides them. The split
 must be explicit, or the same gate is created and dropped at every round.</li>
+<li><strong>Passes that edit the clock cone.</strong> Resynthesis, buffer cleanup and repair each changed
+clock cells in the 2026-11 runs (H1). Any pass added later can do it again unless the cone is a shared,
+enforced classification.</li>
+<li><strong>Hold buffers without room.</strong> A correct schedule still leaves buffers to place, and they
+concentrate at macro pin faces and IO registers (H4), where rows are cut and pins are dense.</li>
 <li><strong>Too much in one milestone.</strong> Useful skew, tree and mesh together make a result hard to
 attribute. Each must be switchable so a comparison can turn one off.</li>
 </ul>
@@ -532,6 +620,9 @@ with real cells; names PCRS as the next goal.</li>
 <li><a href="2t-timing_closure_plan.html">2t-timing_closure_plan</a>: the GP timing forces next to which the
 clustering force runs. It left useful skew and hold ECO to OpenROAD; this page takes them back.</li>
 <li><a href="2f-scalability.html">2f-scalability</a>: chunks and boundary times for step J.</li>
+<li><a href="2w-wlresynth.html">2w-wlresynth</a>: may duplicate flops before leaf groups are formed (H8).</li>
+<li>HighTide <code>tools/vslivehd/postroute.py</code>: the routed comparison used for the hints above and
+for step A (H6).</li>
 <li><code>soft_clustering.pdf</code>, <code>clustering.pdf</code>, <code>phd_thesis.pdf</code> in the
 repository root.</li>
 </ul>
