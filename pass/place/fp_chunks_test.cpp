@@ -514,14 +514,14 @@ TEST(FpChunks, ConnectedPackingKeepsPairedColorsWithinTheWorkerBudget) {
   Chunk_predictor predictor;
   predictor.rate = {1, 1, 0, 0};
   const auto plan = [&] { return model.plan({0, 0, 60, 60}, 1, 1, 2, .5, nullptr, "top", predictor); };
-  EXPECT_EQ(plan().crossing_nets, 3);
-  model.connectivity = true;
   auto packed = plan();
   ASSERT_EQ(packed.chunks.size(), 3);
   EXPECT_EQ(packed.crossing_nets, 0);
   for (const auto& home : packed.chunks) {
     EXPECT_EQ(home.bytes, 2);
   }
+  model.connectivity = false;
+  EXPECT_EQ(plan().crossing_nets, 3);
 }
 
 TEST(FpChunks, WorkerHomeIncludesMovableMacroClearance) {

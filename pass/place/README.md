@@ -35,10 +35,9 @@ lhd synth chunk final
 ```
 
 `init` packs whole colors and macros across instance scopes up to the estimated worker budget.
-By default it visits them in hierarchy order. To group objects that share nets, pass
-`--set synth.place.chunk.connectivity=true` to `init`. This favors nets joining two
-objects and uses hierarchy order to break ties. It changes chunk membership and can
-affect both wirelength and timing. Home dimensions account for the placement
+By default it groups objects that share two-object nets and uses hierarchy order to
+break ties. Pass `--set synth.place.chunk.connectivity=false` to `init` to pack in
+hierarchy order. The packing order can affect both wirelength and timing. Home dimensions account for the placement
 worker's clearance on each side of movable hard macros.
 Use `update --budget 768MiB` to resize an existing plan, or separate workdirs to compare placements side by side. A no-change `update` retains completed work.
 For an edit, the summary reports added and removed IDs, changes in physical membership and changes to placement inputs.

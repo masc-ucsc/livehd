@@ -234,7 +234,7 @@ struct Options {
   unsigned                                                  chunk_shape_rank = 0;
   double                                                    chunk_area_weight = 0;
   int                                                       chunk_target       = 0;
-  bool                              chunk_connectivity = false;
+  bool                              chunk_connectivity = true;
   std::string                       chunk_manifest, chunk_only;  // nonempty manifest: export the accepted home jobs before whole-chip placement
   bool                              chunk_seed_detail = true;
   // synth.place.chunk.seed_cache: off, exact or translate (see Chunk_seed_store); the directory is set by the driver.

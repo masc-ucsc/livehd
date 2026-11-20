@@ -127,7 +127,7 @@ region (`--set synth.mapper=abc|usyn`), then STA over a Liberty
 
 ### Pre-CTS chunk placement
 
-Start from the design's existing RTL, top, Liberty, LEFs, constraints and floorplan settings. `init` saves that recipe and exports one worker packet per physical chunk. The budget sizes chunks and applies to isolated workers. The producer still loads the flat design. Hierarchy order is the default. For a connectivity experiment, add `--set synth.place.chunk.connectivity=true` to `init`. It favors colors or macros sharing two-object nets. Use separate workdirs to compare budgets or packing choices.
+Start from the design's existing RTL, top, Liberty, LEFs, constraints and floorplan settings. `init` saves that recipe and exports one worker packet per physical chunk. The budget sizes chunks and applies to isolated workers. The producer still loads the flat design. By default, the planner favors colors or macros sharing two-object nets and breaks ties in hierarchy order. To pack in hierarchy order, add `--set synth.place.chunk.connectivity=false` to `init`. Use separate workdirs to compare budgets or packing choices.
 
 ```sh
 lhd synth chunk init design.v --top top --workdir W --budget 1GiB \

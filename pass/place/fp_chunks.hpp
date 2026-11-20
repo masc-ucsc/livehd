@@ -131,7 +131,7 @@ public:
   double                                        track_pitch = 0;
   std::array<double, 2>                         tracks_per_dbu{};
   bool pack_scopes  = false;  // group whole colors and macros across instance boundaries up to the worker budget
-  bool connectivity = false;
+  bool connectivity = true;
   std::vector<Chunk_object>                                                       objects;
   // Only mapped floorplans can identify the full set of physical pins on a cut.
   // Materialize keys on demand, never while planning a color-only design.

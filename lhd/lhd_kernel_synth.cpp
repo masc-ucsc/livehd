@@ -1228,7 +1228,7 @@ livehd::placement::Options placement_options(const Options& opts) {
   if (out.chunk_target < 0) {
     throw Lhd_error{"usage", "place.chunk.target must be nonnegative", ""};
   }
-  out.chunk_connectivity = truthy(synth_set(opts, "place.chunk.connectivity", "false"));
+  out.chunk_connectivity = truthy(synth_set(opts, "place.chunk.connectivity", "true"));
   out.chunk_only = synth_set(opts, "place.chunk.only", "");
   if (!out.chunk_only.empty() && chunk_run == "flow") {
     throw Lhd_error{"usage", "chunk.only requires chunk.run=feedback or export", ""};
