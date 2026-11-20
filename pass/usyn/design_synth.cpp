@@ -307,10 +307,10 @@ Design_result synthesize_cmos_design(const std::shared_ptr<hhds::Graph>& top, co
   // U21: the folded registers of the flat design top, by flat source node.
   absl::flat_hash_map<hhds::Node_class, synth::Gated_fold_hint> fold_hints;
   std::function<void(hhds::Graph*)>                             prepare_src;
-  if (options.gated_fold || options.boundary_bits || options.share_cells) {
+  if (options.gated_fold || options.boundary_bits) {
     prepare_src = [&](hhds::Graph* source) {
-      if (options.boundary_bits || options.share_cells) {
-        (void)synth::trim_color_boundaries(source, {.bits = options.boundary_bits, .share = options.share_cells});
+      if (options.boundary_bits) {
+        (void)synth::trim_color_boundaries(source);
       }
       if (!options.gated_fold) {
         return;

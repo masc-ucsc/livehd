@@ -83,11 +83,6 @@ void Pass_abc::add_mapping_labels(Eprp_method& m) {
                        "read the known constant bits of a value as constants, and a value only partly read crosses as "
                        "`value & read` so the producer drops the unread logic (default true; the synth.boundary_bits spelling)",
                        "true");
-  m.add_label_optional("share_cells",
-                       "true|false: on every graph right before it is cut into regions, a combinational cell identical to an "
-                       "earlier one (same operation, width and operands) is removed and its readers read the earlier one: one "
-                       "linear structural-hash pass (default true; the synth.share_cells spelling)",
-                       "true");
   m.add_label_optional("satopt_boundary",
                        "true|false: run pass.satopt's `boundary` stage on every colored graph right before it is cut into "
                        "regions: the bits of a value crossing a color that are proven constant are read as constants by the "
@@ -1484,13 +1479,9 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
   std::optional<livehd::satopt::Meter> boundary_meter;
   // synth.boundary_bits: the structural part, always on. No constant and no unread bit crosses a color.
   livehd::synth::Color_boundary_stats  color_boundary;
-  const livehd::synth::Color_boundary_options boundary_options{.bits  = var.get("boundary_bits", "true") != "false",
-                                                               .share = var.get("share_cells", "true") != "false"};
-  const bool                                  boundary_bits = boundary_options.bits || boundary_options.share;
+  const bool                           boundary_bits = var.get("boundary_bits", "true") != "false";
   if (boundary_bits) {
-    boundary_stage = [&color_boundary, boundary_options](hhds::Graph* graph) {
-      color_boundary.add(livehd::synth::trim_color_boundaries(graph, boundary_options));
-    };
+    boundary_stage = [&color_boundary](hhds::Graph* graph) { color_boundary.add(livehd::synth::trim_color_boundaries(graph)); };
   }
   if (var.get("satopt_boundary", "false") == "true") {
     std::string error;
@@ -1508,10 +1499,10 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
                                           boundary_report.at(livehd::satopt::Stage::boundary), *boundary_meter);
       boundary_instances_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
     }
-    boundary_stage = [&boundary_report, &boundary_ms, &boundary_meter, &color_boundary, boundary_bits, boundary_options,
+    boundary_stage = [&boundary_report, &boundary_ms, &boundary_meter, &color_boundary, boundary_bits,
                       budget = *budget](hhds::Graph* graph) {
       if (boundary_bits) {
-        color_boundary.add(livehd::synth::trim_color_boundaries(graph, boundary_options));
+        color_boundary.add(livehd::synth::trim_color_boundaries(graph));
       }
       const auto              start = std::chrono::steady_clock::now();
       livehd::satopt::Options sat;
@@ -1537,19 +1528,16 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
       2 * livehd::synth::synthesis_thread_limit(threads, std::thread::hardware_concurrency()),
       loops.preserved_defs,
       boundary_stage);
-  if (boundary_bits && color_boundary.constant_values + color_boundary.unread_values + color_boundary.shared_cells > 0) {
+  if (boundary_bits && color_boundary.constant_values + color_boundary.unread_values > 0) {
     livehd::diag::stat("pass.abc", "boundary-bits", "progress")
         .msg("pass.abc: color boundaries: {} constant bit(s) of {} value(s) read as constants by other colors, {} unread "
-             "bit(s) of {} value(s) cleared; {} duplicate cell(s) shared ({} across colors, {} kept to avoid a loop)",
+             "bit(s) of {} value(s) cleared",
              color_boundary.constant_bits, color_boundary.constant_values, color_boundary.unread_bits,
-             color_boundary.unread_values, color_boundary.shared_cells, color_boundary.shared_across,
-             color_boundary.share_refused)
+             color_boundary.unread_values)
         .emit();
-    std::print("pass.abc boundary bits: {} constant bit(s) of {} value(s), {} unread bit(s) of {} value(s); shared cells: {} "
-               "({} across colors, {} kept to avoid a loop)\n",
+    std::print("pass.abc boundary bits: {} constant bit(s) of {} value(s), {} unread bit(s) of {} value(s)\n",
                color_boundary.constant_bits, color_boundary.constant_values, color_boundary.unread_bits,
-               color_boundary.unread_values, color_boundary.shared_cells, color_boundary.shared_across,
-               color_boundary.share_refused);
+               color_boundary.unread_values);
   }
   if (var.get("satopt_boundary", "false") == "true") {
     const auto& r = boundary_report.at(livehd::satopt::Stage::boundary);

@@ -8,7 +8,6 @@
 #include "bit_facts.hpp"
 #include "cell.hpp"
 #include "node_util.hpp"
-#include "share_cells.hpp"
 #include "state_sweep.hpp"
 
 namespace livehd::synth {
@@ -157,18 +156,9 @@ void known_constants(hhds::Graph& g, Color_boundary_stats& stats) {
 }
 }  // namespace
 
-Color_boundary_stats trim_color_boundaries(hhds::Graph* graph, const Color_boundary_options& options) {
+Color_boundary_stats trim_color_boundaries(hhds::Graph* graph) {
   Color_boundary_stats stats;
   if (graph == nullptr) {
-    return stats;
-  }
-  if (options.share) {
-    const auto shared   = share_duplicate_cells(graph);
-    stats.shared_cells  = shared.cells;
-    stats.shared_across = shared.cross_color;
-    stats.share_refused = shared.refused;
-  }
-  if (!options.bits) {
     return stats;
   }
   bool colored = false;

@@ -2331,14 +2331,6 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      "of another color read the structurally known bits of a value as constants, and a value only partly read crosses as "
      "`value & read`, so the producing region drops the logic of the unread bits. Per bit, zeros and ones, no proof search. "
      "Across instances the same known bits (ones included) cross with the state sweep. Enabled by default"},
-    {"share_cells",
-     "true",
-     Synth_set_option::Kind::boolean,
-     "share duplicate logic: right before a graph is cut into regions, a combinational cell identical to an earlier one "
-     "(same operation, width and operands; And/Or/Xor/Sum/Mult/EQ operands in any order) is removed and its readers read "
-     "the earlier one. One linear structural-hash pass; it sees the same logic in two modules once they are inlined into "
-     "one graph, which the per-definition fold cannot. Sharing across two colors is refused when it would make them depend "
-     "on each other in a loop. Enabled by default"},
     {"flat_sweep",
      "false",
      Synth_set_option::Kind::boolean,

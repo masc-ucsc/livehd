@@ -95,12 +95,9 @@ Remaining native synthesis work is tracked in [2u-usyn](../../todo/livehd/2u-usy
    And in the producer's color, so the producing region exports constant 0 for the unread bits and the mapper drops their
    logic. Only known bits that some reader asks for get a cell; both rewrites are idempotent. No proof search: satopt's
    `boundary` stage is the SAT-backed version for what the structural facts cannot see.
-   **Duplicate cells** (`synth.share_cells`, default true; `share_cells.cpp`), in the same step and before it: one forward
-   pass hashes every combinational cell from its operation, width and operands (a constant by value, a driver by the cell
-   already standing for it; And/Or/Xor/Sum/Mult/EQ operands as a multiset) and removes a cell identical to an earlier one.
-   The e-graph fold already shares inside a definition; this sees the same logic in two modules once a color inlines them
-   into one graph. The kept cell stays in its color; a share that would make two colors depend on each other in a loop is
-   refused.
+   Duplicate cells need no step here: the e-graph fold shares them (hash-consing, its `cse` count: 661,958 cells in
+   XiangShan Mini16's first compile fold). A mapper-side structural-hash pass for the twins that only appear once a color
+   inlines several modules was tried and removed: 1,562 cells on Mini16, none on floonoc, no area change.
    **Register merge** (`synth.merge_registers`, default true under `lhd synth`, off in `State_options`; `register_merge.cpp`), just
    before the sweep: a Flop with the same clock, enable, reset, polarities, reset value,
    width, sign and D driver as another in its definition holds the same value every cycle,

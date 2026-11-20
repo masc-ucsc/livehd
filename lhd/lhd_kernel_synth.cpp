@@ -3076,7 +3076,6 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
     labels["merge_registers"] = synth_set(opts, "merge_registers", "true");
     labels["flat_sweep"]      = synth_set(opts, "flat_sweep", "false");
     labels["boundary_bits"]   = synth_set(opts, "boundary_bits", "true");
-    labels["share_cells"]     = synth_set(opts, "share_cells", "true");
     // satopt's `boundary` stage reads the final colors, so the mapper runs it on each graph right before it is cut (every
     // other stage ran in the compile step). On with pass.satopt=true when the stage is selected (the default set has it).
     if (satopt_setting(opts).value_or(false)) {
