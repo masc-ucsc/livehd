@@ -15,13 +15,21 @@
 <code>wl_resynth/report.json</code> contains the cone measurements, timed trials and selected edits.
 <code>wl_resynth/history.jsonl</code> records each decision across routability restarts.</span></p>
 
-<p>On HighTide ASAP7, comparing the enabled and disabled flow with one binary,
+<p>On HighTide ASAP7 at <code>8296f7ffa</code>, comparing the enabled and disabled flow with one binary,
 <code>litedram</code> used 132 &micro;m less detailed-route wire and gained 0.90 ps of
 extracted setup slack. <code>liteeth</code> used 499 &micro;m less and gained 9.17 ps.
 Both pairs routed with zero DRC errors. Their independent pre-CTS setup checks
 fell by 0.11 ps and 7.33 ps respectively. On <code>NVDLA/partition_a</code> the
 pass rejected all candidates, reproduced the baseline DEF, and increased cold
 synthesis time from about three minutes to more than six.</p>
+
+<p>Repeating <code>litedram</code> on the integrated master <code>405a55af4</code>
+reversed the small gain. Routed wire increased from 98,680 to 98,814 &micro;m
+and extracted setup slack fell from +69.98 to +64.00 ps. Both routes had zero
+DRC errors and the two placements passed equivalence over all 4,422 registers.
+In a single-thread Sky130HD <code>sha3</code> run, two driver moves saved
+1,854 &micro;m of final pre-CTS HPWL but cost 249 ps of independently measured
+setup margin. These measurements are why the pass remains opt-in.</p>
 
 <p>After a few timing-driven global-placement iterations, some nets show that the logic's fanout
 structure conflicts with the placement: one driver and many loads spread over the die (a virtual
