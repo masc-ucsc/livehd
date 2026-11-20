@@ -31,7 +31,7 @@ std::shared_ptr<hhds::Graph> make_graph(const char* lib_name) {
 hhds::Pin_class cell(hhds::Graph& g, Ntype_op op, int bits, std::initializer_list<hhds::Pin_class> inputs, int color = 0) {
   auto node = gu::create_typed_node(g, op);
   for (const auto& in : inputs) {
-    gu::setup_sink_by_name(node, "as").connect_driver(in);
+    gu::setup_sink_pid(node, 0).connect_driver(in);
   }
   if (color != 0) {
     gu::set_color(node, color);

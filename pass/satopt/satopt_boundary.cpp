@@ -205,9 +205,7 @@ Pin rebuild(hhds::Graph& g, const Pin& t, const Fact& f, int color, const Node& 
     if (color != 0) {
       gu::set_color(n, color);
     }
-    if (gu::has_hier_color(like)) {
-      gu::set_hier_color(n, gu::hier_color_of(like));
-    }
+    // This rewrites the shared definition. Hierarchical colors belong to individual occurrences.
     gu::carry_srcid(like, n);
     return n;
   };
