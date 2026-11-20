@@ -389,8 +389,9 @@ gate stays for its other loads and is deleted when unused. Data ANDs, fixed and 
 
 ### Wirelength-aware cone resynthesis
 
-Enable the pass on a placed synthesis run with `--set synth.place.wl_resynth=true`.
-The default is off. After global placement, LiveHD identifies virtual-buffer
+Full placement with timing enables both wirelength-aware and proved critical-cone
+resynthesis by default. Disable either independently with `--set synth.place.wl_resynth=false`
+or `--set synth.place.resynth=false`, respectively. After global placement, LiveHD identifies virtual-buffer
 roots and long data nets using the technology's repeater length. It measures
 where the loads cluster and what ordinary buffer expansion costs. Candidates
 can move a driver, copy logic or a resettable register near a load cluster,

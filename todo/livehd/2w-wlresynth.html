@@ -10,8 +10,8 @@
 <nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
 <main>
 <h1><strong class="item-id">2w-wlresynth</strong> Wirelength-aware cone resynthesis around virtual buffers and long nets</h1>
-<p><span class="status">The experimental pass is available in <code>lhd synth</code> with
-<code>--set synth.place.wl_resynth=true</code>. The default is off. The placement work directory's
+<p><span class="status">Full timed placement in <code>lhd synth</code> enables the pass by default.
+Use <code>--set synth.place.wl_resynth=false</code> to disable it. The placement work directory's
 <code>wl_resynth/report.json</code> contains the cone measurements, timed trials and selected edits.
 <code>wl_resynth/history.jsonl</code> records each decision across routability restarts.</span></p>
 
@@ -29,7 +29,7 @@ and extracted setup slack fell from +69.98 to +64.00 ps. Both routes had zero
 DRC errors and the two placements passed equivalence over all 4,422 registers.
 In a single-thread Sky130HD <code>sha3</code> run, two driver moves saved
 1,854 &micro;m of final pre-CTS HPWL but cost 249 ps of independently measured
-setup margin. These measurements are why the pass remains opt-in.</p>
+setup margin.</p>
 
 <p>After a few timing-driven global-placement iterations, some nets show that the logic's fanout
 structure conflicts with the placement: one driver and many loads spread over the die (a virtual

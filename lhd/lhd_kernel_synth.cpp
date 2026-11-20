@@ -1320,7 +1320,6 @@ livehd::placement::Options placement_options(const Options& opts) {
     out.reset_fanout  = fanout >= 2 ? static_cast<unsigned>(fanout) : 16U;
     // The virtual buffer trees keep the mapper's fanout cap as their requirement.
     out.virtual_buffer_fanout = out.reset_fanout;
-    out.wl_resynth            = truthy(synth_set(opts, "place.wl_resynth", "false"));
     out.virtual_buffers       = truthy(synth_set(opts, "place.virtual_buffers", "true"));
     out.pcrs          = truthy(synth_set(opts, "place.pcrs", "true"));
     out.pcrs_depth    = std::make_shared<livehd::pcrs::Depth_state>();
@@ -2050,8 +2049,10 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
     place_options.placement_area_resume = placement_area_resume;
   }
   place_options.legroute_area_restarts_used = legroute_area_restarts_used;
-  const bool run_resize   = !isolated && truthy(synth_set(opts, "place.resize", run_place && run_sta && place_options.full ? "true" : "false"));
-  const bool run_resynth  = !isolated && truthy(synth_set(opts, "place.resynth", "false"));
+  const auto* optimization_default = run_place && run_sta && place_options.full ? "true" : "false";
+  const bool  run_resize           = !isolated && truthy(synth_set(opts, "place.resize", optimization_default));
+  bool        run_resynth          = !isolated && truthy(synth_set(opts, "place.resynth", optimization_default));
+  place_options.wl_resynth         = truthy(synth_set(opts, "place.wl_resynth", optimization_default));
   // 2i-interact: the interactive session serves the whole run and keeps the process alive afterwards.
   std::shared_ptr<livehd::placement::gui::Session> gui_session;
   std::string                                      gui_video_out;
@@ -3051,11 +3052,12 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
         auto unresolved = std::make_shared<std::vector<livehd::physical::Net>>();
         livehd::physical::mapped_graph(output, frame, place_options.technology().lef, unresolved.get());
         if (!unresolved->empty()) {
-          if (run_resize || run_resynth || run_stage_timing) {
+          if (run_resize || run_stage_timing || truthy(synth_set(opts, "place.resynth", "false"))
+              || truthy(synth_set(opts, "place.wl_resynth", "false"))) {
             throw std::invalid_argument("directed repair or stage timing requires a unique driver on every connected net");
           }
           place_options.unresolved_def_nets = std::move(unresolved);
-          run_sta = run_timing_place = false;
+          run_sta = run_timing_place = run_resynth = place_options.wl_resynth = false;
           const auto message
               = std::format("{} undriven or multiply driven DEF nets retained for placement; directed timing unavailable",
                             place_options.unresolved_def_nets->size());

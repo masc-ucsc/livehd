@@ -2052,9 +2052,9 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      Synth_set_option::Kind::file,
      "new target share in timing weight updates [0,1]; 0 holds prior weights, 1 applies targets directly"},
     {"place.resynth",
-     "false",
+     "true",
      Synth_set_option::Kind::boolean,
-     "opt in to proved critical-cone resynthesis with local placement and timing acceptance"},
+     "try proved critical-cone resynthesis with local placement and timing acceptance in full timed placement"},
     {"place.io_resynth",
      "5",
      Synth_set_option::Kind::file,
@@ -2080,8 +2080,8 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      "with buffer_cleanup: a clock-gating AND fed by another clock-gating AND takes that gate's inputs "
      "(AND(AND(clk, q0), q1) -> AND3(clk, q0, q1)), so every gated domain sits one gate below its root clock and CTS "
      "balances it against its sibling domains (fewer post-CTS hold fixes); false keeps the cascade"},
-    {"place.wl_resynth", "false", Synth_set_option::Kind::boolean,
-     "try wirelength-driven local logic changes after global placement and keep a legalized timing-safe improvement"},
+    {"place.wl_resynth", "true", Synth_set_option::Kind::boolean,
+     "try wirelength-driven local logic changes after global placement in full timed placement and keep a legalized timing-safe improvement"},
     {"place.virtual_buffers",
      "true",
      Synth_set_option::Kind::boolean,

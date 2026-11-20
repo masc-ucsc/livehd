@@ -37,6 +37,8 @@ cold = run('cold', ['--set', 'synth.place=true', '--emit-dir', f'def:{root}/def'
                     '--emit', f'verilog:{root}/placed.v'])
 place = cold['qor']['place']
 assert place['legal'] and place['mode'] == 'full', place
+assert 'pass.place.resynth' in cold['recipe'], cold['recipe']
+assert (root/'W/synth/place/wl_resynth/report.json').is_file()
 assert (root/'def/out.def').is_file()
 exported_lefs = json.loads((root/'def/lefs.json').read_text())
 assert len(exported_lefs) == 2, exported_lefs
@@ -227,9 +229,13 @@ new_phases = [p['name'] for p in resized_new['phases']]
 assert 'pass.place.resize' in new_phases and 'pass.place.repair' not in new_phases, new_phases
 run('bad_engine', ['--set', 'synth.place=true', '--set', 'synth.place.resize=true',
                    '--set', 'synth.place.resize.engine=fast'], False)
-resynth = run('resynth', ['--set', 'synth.place=true', '--set', 'synth.place.resynth=true'])
+resynth = run('resynth', ['--set', 'synth.place=true', '--set', 'synth.place.wl_resynth=false'])
 assert resynth['qor']['place']['legal']
 assert 0 < resynth['qor']['place']['resynth']['attempts'] <= 4
+assert not any(s.startswith('pass.place.wl_resynth.') for s in resynth['recipe'])
+wirelength = run('wirelength', ['--set', 'synth.place=true', '--set', 'synth.place.resynth=false'])
+assert 'pass.place.resynth' not in wirelength['recipe']
+assert any(s.startswith('pass.place.wl_resynth.') for s in wirelength['recipe'])
 run('bad_resynth', ['--set', 'synth.place.resynth=true'], False)
 run('bad_resize', ['--set', 'synth.place.resize=true'], False)
 gp = run('gp', ['--set', 'synth.place=true', '--set', 'synth.place.mode=gp'])

@@ -6,6 +6,7 @@
 #include <numeric>
 
 #include "attrs.hpp"
+#include "memory_proxy.hpp"
 #include "node_util.hpp"
 #include "pass/partition/flatten.hpp"
 #include "placement_technology.hpp"
@@ -803,7 +804,8 @@ void measure(const Result& initial, const Options& options, const Timing_feedbac
   }
 }
 double free_area(const Result& state, const Options& options) {
-  const auto& tech = options.technology().lef;
+  auto tech = options.technology().lef;
+  memory_proxies(*state.graph, tech, options.liberty);
   const auto  occupied
       = row_occupancy(tech, state.floorplan, occupancy_controls(options.terminal_legalize_options), "wirelength resynthesis", true);
   double       area = 0;
@@ -1121,7 +1123,7 @@ Repair_result wirelength_resynthesize(Result initial, const Options& options, co
     return a.driver < b.driver;
   });
   const auto&            tech = options.technology().lef;
-  auto                   room = free_area(initial, options);
+  auto                   room = choices.empty() ? 0. : free_area(initial, options);
   std::set<std::string>  touched;
   std::vector<Candidate> batch;
   for (auto& c : choices) {

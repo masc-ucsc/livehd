@@ -360,7 +360,7 @@ struct Options {
     unsigned    loads   = 0;  // final loads behind the tree
     unsigned    buffers = 0;  // synthesis buffers the tree had
   };
-  bool wl_resynth = false;
+  bool wl_resynth = true;
   bool                                                         virtual_buffers       = true;
   unsigned                                                     virtual_buffer_fanout = 16;  // synth.max_fanout
   std::shared_ptr<const std::map<std::string, Virtual_buffer>> virtual_buffer_trees;

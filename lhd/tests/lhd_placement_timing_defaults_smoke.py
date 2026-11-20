@@ -10,20 +10,19 @@ root = Path(os.environ['TEST_TMPDIR']) / 'timing_defaults'
 root.mkdir()
 source = root / 'dut.v'
 source.write_text('module dut(input [1:0] a,b, output [1:0] y); assign y=a^b; endmodule\n')
-sdc = root / 'timing.sdc'
-sdc.write_text('create_clock -name virtual -period 10\n'
-               'set_input_delay -clock virtual 0 [all_inputs]\n'
-               'set_output_delay -clock virtual 0 [all_outputs]\n')
 lib = Path('inou/lefdef/tests/data')
 base = ['lhd/lhd', 'synth', str(source), '--top', 'dut',
         '--set', f'synth.liberty={lib}/sky130hd.lib',
         '--set', f'synth.lef={lib}/sky130hd.tlef,{lib}/sky130hd.lef',
-        '--set', f'synth.sdc={sdc}',
         '--set', 'synth.place.grid.density=8', '--set', 'synth.place.timing_rounds=1', '-q']
 
-def run(name, extra, success=True, expect=None, iterations=30, bins=8):
+def run(name, extra, success=True, expect=None, iterations=30, bins=8, period=10):
     report = root / (name + '.json')
-    invocation = list(base)
+    sdc = root / (name + '.sdc')
+    sdc.write_text(f'create_clock -name virtual -period {period}\n'
+                   'set_input_delay -clock virtual 0 [all_inputs]\n'
+                   'set_output_delay -clock virtual 0 [all_outputs]\n')
+    invocation = base + ['--set', f'synth.sdc={sdc}']
     invocation[invocation.index('synth.place.grid.density=8')] = f'synth.place.grid.density={bins}'
     p = subprocess.run(invocation + ['--set', f'synth.place.iterations={iterations}'] + extra + ['--workdir', str(root/name), '--result-json', str(report)],
                        capture_output=True, text=True, timeout=10)
@@ -100,10 +99,17 @@ assert alignment['global_same_master'] and alignment['weight'] == 25, alignment
 assert alignment['gp_alignment_seconds'] == 0, alignment
 td = q['timing_driven']
 assert td['initial_timing_source'] == 'post_synthesis_zero_wire', td
-assert max(td['initial_weights'].values()) > 1, td
+assert set(td['initial_weights'].values()) == {1}, td
 assert td['timing_min_weight'] == .5 and td['timing_max_weight'] == 2 and td['timing_smoothing'] == .5, td
 assert td['skipped_setup_met'] and td['rounds'] == [], td
 assert 'pass.place.post_synth_timing' in [p['name'] for p in timed['phases']]
+
+# The same XOR paths get extra weight when their clock period leaves no setup slack.
+tight = run('tight', ['--set', 'synth.place=true'], period=0.4)
+tight_td = tight['qor']['place']['timing_driven']
+assert tight_td['initial_timing_source'] == 'post_synthesis_zero_wire', tight_td
+assert max(tight_td['initial_weights'].values()) > 1, tight_td
+assert not tight_td['skipped_setup_met'] and tight_td['rounds'], tight_td
 
 debug = run('debug', ['--set', 'synth.place=true', '--set', 'synth.place.timing_driven=false',
                       '--set', 'synth.place.macro.align_weight=0', '--set', 'synth.place.preserve_imported_ties=true'])
