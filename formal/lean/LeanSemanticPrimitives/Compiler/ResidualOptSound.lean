@@ -341,6 +341,51 @@ theorem copyOf_sound {env : SlotEnv} {kn : Nat → Bool} {cv : Nat → CertVal}
         exact congrArg CertVal.bv (rxorV_one hr)
       · exact absurd h (by simp)
     · exact absurd h (by simp)
+  case rmux w sel f t =>
+    -- the mux's value: `bv_resize` of the arm the select takes
+    have hval : ∀ (a : Nat) (x : BV), denoteRef env a = .bv x → RedW w x →
+        (bv_nonzero (refBV env sel) = true → a = t) → (bv_nonzero (refBV env sel) = false → a = f) →
+        denoteExpr env (.rmux w sel f t) = denoteRef env a := by
+      intro a x hx hr ht hf
+      simp only [denoteExpr, rmuxV]
+      cases hs : bv_nonzero (refBV env sel)
+      · rw [ite_eq_right (by simp)]
+        rw [← hf hs] at *
+        simp only [refBV, hx, CertVal.asBV, resize_redW hr]
+      · rw [ite_eq_left rfl]
+        rw [← ht hs] at *
+        simp only [refBV, hx, CertVal.asBV, resize_redW hr]
+    split at h
+    · -- equal arms
+      rename_i hc
+      simp only [Bool.and_eq_true, beq_iff_eq] at hc
+      obtain ⟨hft, hwf⟩ := hc
+      have hq : f = q := by simpa using h
+      subst hq
+      obtain ⟨x, hx, hr⟩ := hw f w hwf
+      exact hval f x hx hr (fun _ => hft) (fun _ => rfl)
+    · split at h
+      · rename_i hks
+        split at h
+        · rename_i sv hsv
+          have hsel : refBV env sel = sv := by simp only [refBV, hk sel hks, hsv, CertVal.asBV]
+          cases hnz : bv_nonzero sv
+          · -- the select is zero: the mux takes `f`
+            have h' : wq f = some w ∧ f = q := by simpa [hnz] using h
+            obtain ⟨hwf, hq⟩ := h'
+            subst hq
+            obtain ⟨x, hx, hr⟩ := hw f w hwf
+            exact hval f x hx hr (fun hs => by rw [hsel, hnz] at hs; exact absurd hs (by simp))
+              (fun _ => rfl)
+          · -- the select is nonzero: the mux takes `t`
+            have h' : wq t = some w ∧ t = q := by simpa [hnz] using h
+            obtain ⟨hwt, hq⟩ := h'
+            subst hq
+            obtain ⟨x, hx, hr⟩ := hw t w hwt
+            exact hval t x hx hr (fun _ => rfl)
+              (fun hs => by rw [hsel, hnz] at hs; exact absurd hs (by simp))
+        · exact absurd h (by simp)
+      · exact absurd h (by simp)
   case rgetMask w a m =>
     split at h
     · rename_i mv hmv

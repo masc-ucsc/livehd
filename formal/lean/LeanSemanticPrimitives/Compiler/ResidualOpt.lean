@@ -24,8 +24,9 @@ binding, an output, a flop or a memory reads:
   slot holds its value for a reason the checker verified (`Just`):
   - `cse`: the new program computes, at that slot, the binding's own expression renamed;
   - `copy q`: the binding's value is old slot `q`'s (`copyOf`: a one-operand OR, XOR, AND,
-    sum or product of the same width, or GetMask with a constant mask that keeps every bit
-    of a same-width operand), and the binding's new slot is `q`'s;
+    sum or product of the same width, GetMask with a constant mask that keeps every bit
+    of a same-width operand, or a mux whose arms are one slot or whose select the checker
+    knows, choosing a same-width arm), and the binding's new slot is `q`'s;
 and that the kept bindings land, in order, right after the new sources.
 
 The checker computes every folded binding's constant itself, in one pass: a folded
@@ -48,7 +49,9 @@ which a copy needs, and the renamed expression of each kept binding, which a `cs
 - copy propagation: a binding whose value is one of its operands' (`copyOf`) reads that
   operand's new slot instead;
 - common subexpressions: a binding whose expression, renamed, is an earlier kept
-  binding's reads that binding's new slot instead.
+  binding's reads that binding's new slot instead;
+- branch folding: a mux with a known select, or with one slot on both arms, is a copy of
+  the arm it takes.
 
 Mathlib-free; the proofs are in `ResidualOptSound`.
 -/
@@ -170,6 +173,16 @@ def copyOf (kn : Nat → Bool) (cv : Nat → CertVal) (wq : Nat → Option Nat) 
            | .bv mv => lowMaskCovers w mv
            | .mem _ => false)
       then some a else none
+  | .rmux w s f t =>
+      -- branch folding: equal arms, or a select the checker knows
+      if f == t && wq f == some w then some f
+      else if kn s then
+        match cv s with
+        | .bv sv =>
+          let a := if bv_nonzero sv then t else f
+          if wq a == some w then some a else none
+        | .mem _ => none
+      else none
   | _ => none
 
 /-! ## The certificate, the rebuild and the checker -/

@@ -6,7 +6,7 @@ Tests for vc's optimizer and its checker (`Compiler.ResidualOpt`).
 `ResidualOptSound.optimize_correct` already PROVES that `optimize` never changes a result;
 these cases check that the optimizer does what it should (drops what is dead, shares equal
 constants, folds constant bindings and propagates them, replaces copies and repeated
-expressions by what they copy or repeat), that the checker refuses wrong certificates, and
+expressions by what they copy or repeat, folds muxes with a known select or equal arms), that the checker refuses wrong certificates, and
 that the optimized program runs step for step like the original, a memory included.
 
 Prints `PASS residual_opt: <n> cases` or one `FAIL` line per case that went wrong.
@@ -54,6 +54,18 @@ def copyProg : ResidualProgram :=
                   ⟨.bv 8, .rorBits 8 #[4]⟩, ⟨.bv 8, .rgetMask 8 0 2⟩, ⟨.bv 8, .rgetMask 8 0 3⟩,
                   ⟨.bv 8, .rxor 8 #[5, 6, 7, 8]⟩, ⟨.bv 8, .rorBits 8 #[1]⟩]
     outputs := #[{ slot := 9, width := 8 }, { slot := 6, width := 8 }, { slot := 10, width := 8 }]
+    flopUpdates := #[]
+    memoryUpdates := #[] }
+
+/-- Branch folding. Sources: 0 input a, 1 input b (8 bits), 2 const 1 1, 3 const 1 0,
+4 input s (1 bit). Bindings (slots 5..9): 5 = mux(1, a, b) (takes b), 6 = mux(0, a, b)
+(takes a), 7 = mux(s, a, a) (equal arms: a), 8 = mux(s, a, b) (kept), 9 = 5 ^ 6 ^ 7 ^ 8.
+Outputs: 9 and 5. Expected: 8 and 9 kept. -/
+def muxProg : ResidualProgram :=
+  { sources := #[.input 0 8, .input 1 8, .const 1 1, .const 1 0, .input 2 1]
+    bindings := #[⟨.bv 8, .rmux 8 2 0 1⟩, ⟨.bv 8, .rmux 8 3 0 1⟩, ⟨.bv 8, .rmux 8 4 0 0⟩,
+                  ⟨.bv 8, .rmux 8 4 0 1⟩, ⟨.bv 8, .rxor 8 #[5, 6, 7, 8]⟩]
+    outputs := #[{ slot := 9, width := 8 }, { slot := 5, width := 8 }]
     flopUpdates := #[]
     memoryUpdates := #[] }
 
@@ -171,7 +183,32 @@ def main : IO UInt32 := do
   for (name, w) in wrongC do
     n := n + 1
     fails := check s!"refused: {name}" (!validate copyProg w) fails
-  -- 6. a compiled program with a memory, 40 steps, optimized against unoptimized
+  -- 6. branch folding
+  let (Mx, accM) := optimizeWith muxProg
+  n := n + 3
+  fails := check "the checker accepted the branch-folding certificate" accM fails
+  fails := check s!"muxes: bindings 5 -> 2 (got {Mx.bindings.size})" (Mx.bindings.size == 2) fails
+  let cm := optimizeRaw muxProg
+  fails := check s!"muxes: the reasons (got {repr cm.just})"
+    (cm.just == #[.copy 1, .copy 0, .copy 0, .none, .none]) fails
+  for a in [0, 1, 0x5A, 255] do
+    for b in [0, 7, 200] do
+      for sel in [0, 1] do
+        n := n + 1
+        let i : RuntimeInput := #[mk_bv 8 a, mk_bv 8 b, mk_bv 1 sel]
+        let s : RuntimeState := { flops := #[], mems := #[] }
+        fails := check s!"muxes: same step at a={a} b={b} s={sel}"
+          (same (denoteResidual Mx #[true] i s) (denoteResidual muxProg #[true] i s)) fails
+  let wrongM : List (String × OptCert) := [
+    ("a known-select mux marked a copy of the arm it does not take",
+      { cm with just := cm.just.set! 0 (.copy 0), pos := cm.pos.set! 5 cm.pos[0]! }),
+    ("a mux with a select the checker does not know marked a copy",
+      { cm with just := cm.just.set! 3 (.copy 0), keep := cm.keep.set! 3 false,
+                pos := cm.pos.set! 8 cm.pos[0]! })]
+  for (name, w) in wrongM do
+    n := n + 1
+    fails := check s!"refused: {name}" (!validate muxProg w) fails
+  -- 7. a compiled program with a memory, 40 steps, optimized against unoptimized
   match compileDesign ramCert with
   | .error e => fails := fails.push s!"compileDesign refused the RAM: {repr e}"
   | .ok R =>
