@@ -90,6 +90,17 @@ DesignIoMeta build_io_meta(const DesignScan& design, const CertificateIR& cert) 
     }
     meta.flops.push_back({name, k, f.width});
   }
+
+  // Memories in the CERTIFICATE's order; `origin` is the scan id of the array.
+  for (uint32_t k = 0; k < cert.memories.size(); ++k) {
+    const auto& m    = cert.memories[k];
+    const auto  it   = design.memories.find(m.origin);
+    const auto  name = it == design.memories.end() || it->second.raw_name.empty() ? "mem_" + std::to_string(m.origin)
+                                                                                  : it->second.raw_name;
+    const uint64_t depth = m.depth != 0 ? m.depth : (m.addr_w < 64 ? (uint64_t{1} << m.addr_w) : 0);
+    const auto inst = it == design.memories.end() ? std::string{} : it->second.inst_name;
+    meta.memories.push_back({name, inst, k, m.addr_w, m.data_w, depth});
+  }
   return meta;
 }
 
@@ -159,6 +170,14 @@ std::string io_meta_json(const DesignIoMeta& meta) {
       << ", \"ordinal\": " << meta.flops[i].ordinal << ", \"width\": " << meta.flops[i].width << "}";
   }
   o << (meta.flops.empty() ? "]" : "\n  ]");
+  o << ",\n  \"memories\": [";
+  for (size_t i = 0; i < meta.memories.size(); ++i) {
+    const auto& m = meta.memories[i];
+    o << (i ? ",\n    " : "\n    ") << "{\"name\": " << json_str(m.name) << ", \"inst\": " << json_str(m.inst)
+      << ", \"ordinal\": " << m.ordinal
+      << ", \"aw\": " << m.aw << ", \"dw\": " << m.dw << ", \"depth\": " << m.depth << "}";
+  }
+  o << (meta.memories.empty() ? "]" : "\n  ]");
   o << "\n}\n";
   return o.str();
 }

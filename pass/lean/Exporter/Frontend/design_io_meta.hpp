@@ -51,6 +51,22 @@ struct FlopMeta {
   uint32_t    width   = 0;
 };
 
+// A certificate memory by its RUNTIME ordinal (the index into `DesignCert.memories`),
+// with the RTL name of the array and its shape: address and data width, and the
+// depth (DCERT4 `MemoryDesc.depth`; the whole `2 ^ aw` table when the cell gives
+// none). `name` follows the flops' naming (a wire's name; read registers are
+// `<name>.rd<port>`), `inst` is the cell's instance name, which cgen uses. A tool
+// that reads another simulator's memory dump by name (lhd_ckpt import-lhd)
+// matches it through these.
+struct MemoryMeta {
+  std::string name;
+  std::string inst;  // the cell's instance name, cgen's name for the array
+  uint32_t    ordinal = 0;
+  uint32_t    aw      = 0;
+  uint32_t    dw      = 0;
+  uint64_t    depth   = 0;
+};
+
 struct DesignIoMeta {
   std::string             top;
   // `Direct.inputArity`: one past the highest ordinal any source references,
@@ -63,6 +79,7 @@ struct DesignIoMeta {
   std::vector<IoPortMeta> outputs;  // emission order
   std::vector<ClockMeta>  clocks;
   std::vector<FlopMeta>   flops;    // certificate (runtime) order
+  std::vector<MemoryMeta> memories; // certificate (runtime) order
 };
 
 DesignIoMeta build_io_meta(const DesignScan& design, const CertificateIR& cert);

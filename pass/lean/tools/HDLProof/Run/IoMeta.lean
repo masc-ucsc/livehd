@@ -16,10 +16,22 @@ structure Port where
   width   : Nat
 deriving Inhabited, Repr, BEq
 
+/-- A memory of the certificate, by its RTL array name (the sidecar's `memories`). -/
+structure MemPort where
+  name    : String
+  /-- the cell's instance name (cgen's name for the array); empty in an older sidecar -/
+  inst    : String := ""
+  ordinal : Nat
+  aw      : Nat
+  dw      : Nat
+  depth   : Nat
+deriving Inhabited, Repr, BEq
+
 structure IoMeta where
-  inputs  : Array Port := #[]
-  outputs : Array Port := #[]
-  flops   : Array Port := #[]
+  inputs   : Array Port := #[]
+  outputs  : Array Port := #[]
+  flops    : Array Port := #[]
+  memories : Array MemPort := #[]
 deriving Inhabited, Repr
 
 /-- The sidecar's path for a certificate `<dir>/<stem>.dcert`. -/
@@ -39,9 +51,25 @@ private def portsOf (j : Lean.Json) (kind : String) : Array Port := Id.run do
       | _, _, _ => pure ()
     return out.qsort (·.ordinal < ·.ordinal)
 
+private def memsOf (j : Lean.Json) : Array MemPort := Id.run do
+  match (j.getObjValD "memories").getArr? with
+  | .error _ => return #[]
+  | .ok arr =>
+    let mut out : Array MemPort := #[]
+    for o in arr do
+      match (o.getObjValD "name").getStr?, (o.getObjValD "ordinal").getNat?,
+            (o.getObjValD "aw").getNat?, (o.getObjValD "dw").getNat?, (o.getObjValD "depth").getNat? with
+      | .ok n, .ok k, .ok aw, .ok dw, .ok d =>
+        out := out.push { name := n, inst := ((o.getObjValD "inst").getStr?.toOption.getD ""),
+                          ordinal := k, aw, dw, depth := d }
+      | _, _, _, _, _ => pure ()
+    return out.qsort (·.ordinal < ·.ordinal)
+
+/-- The sidecar. `memories` is absent in a sidecar written before it was added: then empty. -/
 def IoMeta.parse (txt : String) : Except String IoMeta := do
   let j ← Lean.Json.parse txt
-  return { inputs := portsOf j "inputs", outputs := portsOf j "outputs", flops := portsOf j "flops" }
+  return { inputs := portsOf j "inputs", outputs := portsOf j "outputs", flops := portsOf j "flops",
+           memories := memsOf j }
 
 /-- The sidecar beside `cert`, or an empty table when there is none. -/
 def IoMeta.load (cert : String) : IO IoMeta := do

@@ -3169,6 +3169,17 @@ TEST(DesignScanClocks, PerReadRowForwardingValueOracle) {
   ASSERT_EQ(images, 1u) << "both ports read ONE image";
   ASSERT_TRUE(cert.flops.empty()) << "asynchronous reads are values, not registers";
 
+  // The sidecar names the array, at its certificate ordinal, with its shape.
+  const auto meta = build_io_meta(design, cert);
+  ASSERT_EQ(meta.memories.size(), 1u) << "the sidecar lists every certificate memory";
+  EXPECT_EQ(meta.memories[0].ordinal, 0u);
+  EXPECT_EQ(meta.memories[0].aw, cert.memories[0].addr_w);
+  EXPECT_EQ(meta.memories[0].dw, cert.memories[0].data_w);
+  EXPECT_GT(meta.memories[0].depth, 0u);
+  EXPECT_FALSE(meta.memories[0].name.empty());
+  EXPECT_FALSE(meta.memories[0].inst.empty());
+  EXPECT_NE(io_meta_json(meta).find("\"memories\": ["), std::string::npos);
+
   const char* path = std::getenv("LHD_LEAN_ROW_FIXTURE");
   if (path == nullptr) {
     GTEST_SKIP() << "set LHD_LEAN_ROW_FIXTURE to emit the Lean oracle";

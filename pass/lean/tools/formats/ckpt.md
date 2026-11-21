@@ -119,6 +119,7 @@ lhd_ckpt seal      <in.ckpt> <out.ckpt>            recompute the digest of a han
 lhd_ckpt normalize <in.ckpt> <out.ckpt>            sort words, drop words equal to the default, reseal
 lhd_ckpt init      <cert> <out.ckpt> [reset|zero]  the power-on state (default reset) at cycle 0
 lhd_ckpt to-state  <cert> <ckpt> <out>             the same state as an lgraph-sim `--state` file
+lhd_ckpt import-lhd <cert> <ckp dir> <out.ckpt> ...  an `lhd sim` checkpoint, imported (below)
 ```
 
 - `<cert>` is a DCERT4, DCERT3 or DCERT1 file.
@@ -130,6 +131,37 @@ lhd_ckpt to-state  <cert> <ckpt> <out>             the same state as an lgraph-s
 
 To edit a checkpoint by hand: change the lines, run `lhd_ckpt seal`, then `lhd_ckpt check`.
 Run `lhd_ckpt normalize` first when you added words out of order or words equal to the default.
+
+## Importing an `lhd sim` checkpoint
+
+`lhd sim` (the C++ simulator) writes a checkpoint directory every `sim.checkpoint_every`
+cycles: `<workdir>/ckpt/<test>/ckp<N>/` with `regs.json` (registers by name), one
+`<inst>.<memory>.hex` per memory (`$readmemh` words), and `meta.json` (the cycle). The C++
+simulator can fast-forward a long run and a Lean route continue from it:
+
+```
+lhd_ckpt import-lhd <cert> <ckp dir> <out.ckpt> [inst:<prefix>] [map:<file>] [fill] [emit-map]
+```
+
+- Names come from the `_io.json` beside the certificate. Flop `n` is the key `<inst>.<n>`.
+  Memory `k` is the file `<inst>.<i>.hex`, `i` being the sidecar's `inst` for it (the cell's
+  instance name, which cgen uses), else its `name`.
+- `<inst>` is the testbench's instance name. It is found from the `<inst>.__in.*` keys unless
+  `inst:` gives it.
+- `map:<file>` overrides names, one line each: `flop <ordinal> <key>` or
+  `mem <ordinal> <file>`. `emit-map` prints the mapping used, in that format.
+- A flop or memory with no match is refused, by name. With `fill` it takes its power-on value,
+  and a note says so. Keys that no flop claims (inputs `__in.*` and clock history
+  `__clkprev*` aside) are listed in a note.
+- Values are hex (`0x...`) or decimal; a negative one is taken modulo `2 ^ width`. A dump word
+  at or past the memory's depth must be 0.
+- The result is validated like any other checkpoint before it is written.
+
+`lhd sim`'s design hash is not the certificate's, so the match is by names and shapes. This
+version handles a flat design: registers of sub-instances need `map:` lines.
+`tests/lhd_ckpt_import_test.sh` runs a design under both `lhd sim` flows (cgen and LNAST),
+imports every checkpoint, and checks that a Lean run from power-on reaches the first one and
+that a Lean run of 10 cycles from each reaches the next.
 
 ## Running from a checkpoint
 

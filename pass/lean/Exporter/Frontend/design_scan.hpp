@@ -187,6 +187,10 @@ struct Memory {
   std::vector<MemoryPort>  ports;
   std::vector<size_t>      read_ports, write_ports;
   std::string              raw_name;
+  // The cell's instance name (`graph_util::default_instance_name`): what cgen calls
+  // the array, so `lhd sim` checkpoints name its dump `<inst>.<inst_name>.hex`.
+  // `raw_name` (a wire's name) stays the name every other output uses.
+  std::string              inst_name;
 };
 // No graph handles or formatting state survive scanning. Safe to use after the
 // graph is closed, and reusable by consumers that do not link HHDS or EPRP.

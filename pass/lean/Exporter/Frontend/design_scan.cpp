@@ -831,6 +831,7 @@ DesignScan scan_design(hhds::Graph& graph, const ScanOptions& options) {
     Memory     m;
     m.id           = info.nid;
     m.raw_name     = state_name(node, "mem_");
+    m.inst_name    = livehd::graph_util::default_instance_name(node);
     m.bits         = info.bits;
     m.addr_width   = info.addr_width;
     m.size         = info.size;
