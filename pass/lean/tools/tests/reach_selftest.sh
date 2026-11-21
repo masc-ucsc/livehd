@@ -21,6 +21,9 @@ set -euo pipefail
 #          odd" is PROVED from power-on, and its emitted theorem file (init:reset) compiles, as
 #          does the one from the c = 4 checkpoint; c = 4 at cycle 2 is REACHABLE from all-zero
 #          and NOT MATCHED by the same witness from power-on
+#   unreach the invariant excludes a checkpoint (sym_verify unreach:, not_reachable_of_verdict): c = 3
+#          is UNREACHABLE from all-zero ("c is even"), c = 4 from power-on ("c is odd"), both
+#          theorem files prove `unreachable`; c = 4 from all-zero is not concluded
 #
 # CK_NAT=<dir with native ckpt_reach, lhd_ckpt, cert_trace and sym_verify (with cadical beside
 # it)> uses them; otherwise the drivers run interpreted against formal/lean/.olean-dev (build it
@@ -163,6 +166,20 @@ expect 2 "" sv "$EP" odd_o k:1 init:ckpt:"$OUT/ram7.ckpt" work:"$OUT/w7"
 handmade "$OUT/ep0.ckpt" "$OUT/ep4c2.ckpt" '/^cycle /{print "cycle 2"; next} /^flops /{f=NR} NR==f+1 && f{$2="4"} 1'
 expect 0 "RESULT: REACHABLE (cycle 2, 2 steps" reach check "$EP" "$OUT/ep4c2.ckpt" "$OUT/en1.stim" init:zero
 expect 1 "RESULT: NOT MATCHED: flop 0 is 0x5" reach check "$EP" "$OUT/ep4c2.ckpt" "$OUT/en1.stim" init:reset
+# unreach: the proved invariant excludes a checkpoint (not_reachable_of_verdict)
+expect 0 "UNREACHABLE: $OUT/ep3.ckpt -- not_reachable_of_verdict: no run from the all-zero state" \
+  sv "$EP" '!odd_o' k:1 unreach:"$OUT/ep3.ckpt" emit:"$OUT/UnreachC3.lean" work:"$OUT/w8"
+expect 0 "UNREACHABLE: $OUT/ep4.ckpt -- not_reachable_of_verdict: no run from the power-on" \
+  sv "$EP" odd_o k:1 init:reset unreach:"$OUT/ep4.ckpt" emit:"$OUT/UnreachC4.lean" work:"$OUT/w9"
+expect 0 "UNREACHABLE NOT CONCLUDED ($OUT/ep4.ckpt): the checkpoint's own state satisfies the property" \
+  sv "$EP" '!odd_o' k:1 unreach:"$OUT/ep4.ckpt" work:"$OUT/w10"
+grep -q '^  UNREACHABLE:' "$LOG" && { cat "$LOG"; echo "FAIL: a reachable checkpoint was called unreachable"; exit 1; }
+for f in UnreachC3 UnreachC4; do
+  (cd "$ROOT/formal/lean" && LEAN_PATH="$PWD/.olean-dev" lean "$OUT/$f.lean") > "$OUT/$f.log" 2>&1 \
+    || { cat "$OUT/$f.log"; echo "FAIL: $f.lean does not compile"; exit 1; }
+  grep -q "'SymF2.$f.unreachable' depends on axioms" "$OUT/$f.log" && ! grep -q sorryAx "$OUT/$f.log" \
+    || { cat "$OUT/$f.log"; echo "FAIL: $f.lean does not prove unreachable"; exit 1; }
+done
 for f in EvenC4 OddReset; do
   (cd "$ROOT/formal/lean" && LEAN_PATH="$PWD/.olean-dev" lean "$OUT/$f.lean") > "$OUT/$f.log" 2>&1 \
     || { cat "$OUT/$f.log"; echo "FAIL: $f.lean does not compile"; exit 1; }

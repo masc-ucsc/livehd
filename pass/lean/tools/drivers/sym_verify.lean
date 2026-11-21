@@ -4,7 +4,7 @@ residual (M3).
 
     sym_verify <cert> [!]<output>[,[!]<output>...] [asm:[!]<output>] [in:<input>=<value>]...
                [k:<n>[,<n>...]] [base] [closed|rebuild] [sim:fp|ir|vc (default vc)] [route:fused|var|plain] [emit:<file>] [sf:<n>] [wf:<n>]
-               [solver:<cadical>] [work:<dir>] [init:zero|reset|ckpt:<file>]
+               [solver:<cadical>] [work:<dir>] [init:zero|reset|ckpt:<file>] [unreach:<ckpt>]
 
 The specializer is `MemFused.projectMemFDesignAt`: the memory interpreter
 with `env0` inlined and the node fold fused into its readers, whose residual
@@ -32,6 +32,14 @@ words, defaults) unless `init:` names another: `init:reset` is the power-on stat
 `cert_trace` and the runners use), `init:ckpt:<file>` an `lhdcert-ckpt v1` checkpoint
 (validated, then `CkptStateM.toStateM`). `emit:` writes the same start into the theorem file.
 `init:` applies to invariants; `conj:` specs start all-zero.
+
+`unreach:<ckpt>`: after an invariant is PROVED, conclude that no run from the start state
+reaches a state matching the checkpoint (`HDLProof.Reach.not_reachable_of_verdict`, which takes
+the verdict theorem's own statement): the property must have no output assumption, the
+certificate and checkpoint must pass the checks `unreachSideB` names, and the checkpoint's own
+state must violate the property on a probe input (every input 0, assumed inputs at their
+values). The line `UNREACHABLE: <ckpt>` (or `UNREACHABLE NOT CONCLUDED` and why) precedes the
+RESULT line; with `emit:` the theorem file also proves `unreachable`.
 
 Steps: load and admit the certificate; specialize the memory interpreter to
 it ONCE; then, per candidate property and k (k-major,
@@ -75,6 +83,8 @@ import HDLProof.Kit.SymRoute
 import HDLProof.Sym.Closed
 -- init:ckpt: a checkpoint as the start state
 import LeanSemanticPrimitives.Projection.CkptStateM
+-- unreach:<ckpt>: the verdict excludes a checkpoint
+import HDLProof.Reach.Refute
 
 open Compiler Projection HDLProof HDLProof.Sym HDLProof.Driver Projection.MemProjection Projection.HwMem
 open HDLProof.Kit (SymRoute mkSymRoute defaultSim simWhy)
@@ -151,8 +161,8 @@ def zeroS0Def : String := "def s0 : StateM :=
 with `route:var`, `runInvK_sound` with `route:plain`; `runInvKOn_sound` on ir and vc) applied
 to a `native_decide` of the closed check on THIS certificate's text. -/
 def emitF2 (path : System.FilePath) (name : String) (certText : String) (sf wf : Nat) (sp : InvSpec)
-    (pfB pfS : ByteArray) (route sim : String) (s0Def : String := zeroS0Def) (extraImport : String := "") :
-    IO Unit := do
+    (pfB pfS : ByteArray) (route sim : String) (s0Def : String := zeroS0Def) (extraImport : String := "")
+    (extraDefs : String := "") : IO Unit := do
   let fpChk := if route == "plain" then "runInvK" else if route == "var" then "runInvKV" else "runInvKF"
   let chk := if sim == "fp" then s!"{fpChk} {sf} {wf}" else s!"runInvKOn .{sim}"
   let snd := if sim == "fp" then s!"{fpChk}_sound" else "runInvKOn_sound"
@@ -186,7 +196,7 @@ theorem invariant (ins : Nat → RuntimeInput) (hins : ∀ n, (ins n).toList.map
   {snd} verdict ins hins
 
 #print axioms invariant
-
+{extraDefs}
 end SymF2.{name}
 "
   IO.FS.writeFile path src
@@ -197,7 +207,8 @@ def attempt (cert : String) (solver : String) (work : System.FilePath) (sf wf : 
     (D : DesignCert) (rt : SymRoute) (s0 : StateM) (tag : String) (prop : PropSpec)
     (asmOut : Option PropSpec) (asmIn : List (Nat × Int)) (kd : Nat) (closed rebuild : Bool) (route sim : String)
     (emit : Option String) (baseOnly : Bool := false)
-    (start : String := "all-zero") (s0Def : String := zeroS0Def) (s0Import : String := "") :
+    (start : String := "all-zero") (s0Def : String := zeroS0Def) (s0Import : String := "")
+    (unreach : Option (String × Compiler.Ckpt.Ckpt × String) := none) :
     IO (UInt32 × String) := do
   let pre := if tag.isEmpty then "" else s!"[{tag} k={kd}] "
   let fin (code : UInt32) (v : String) : IO (UInt32 × String) := do
@@ -299,9 +310,53 @@ cycle {a} and the property held at every cycle before it (the symbolic step and 
   let t5 ← IO.monoMsNow
   say s!"  {pre}verified check ({mode}LRAT-check both) in {t5 - t4} ms"
   if ok then
+    -- unreach:<ckpt>: the invariant excludes the checkpoint (HDLProof.Reach.not_reachable_of_verdict)
+    let mut extraDefs := ""
+    let mut extraImport := s0Import
+    if let some (up, c, ctext) := unreach then
+      let probe : RuntimeInput := sp.inW.toArray.mapIdx fun k w => mk_bv w ((sp.asmIn.lookup k).getD 0)
+      let r0 := StateM.denote s0
+      let why : Option String :=
+        if sp.asmOut.isSome then some "the property has an output assumption (asm:); unreach: needs none"
+        else if !HDLProof.Reach.designOKB D then some "the direct simulator refuses the certificate"
+        else if Compiler.MemAddr.addrError D != none then some "the memory-address check fails"
+        else if Compiler.Ckpt.imgRootError D != none || Compiler.Ckpt.wordError D != none then
+          some "a certificate rule of checkpoints fails (imgRootError or wordError)"
+        else if Compiler.Ckpt.validate D (Compiler.Ckpt.designHash D) c != none then some "the checkpoint does not validate"
+        else if !HDLProof.Reach.unreachSideB D c r0 then some "the start state's memories do not fit the certificate"
+        else if !HDLProof.Reach.probeB D c sp.inW sp.asmIn sp.prop probe then
+          some "the checkpoint's own state satisfies the property on the probe input (inputs 0, assumed inputs at their values)"
+        else none
+      match why with
+      | some w => say s!"  {pre}UNREACHABLE NOT CONCLUDED ({up}): {w}"
+      | none =>
+        say s!"  {pre}UNREACHABLE: {up} -- not_reachable_of_verdict: no run from the {start} state (every clock \
+firing, inputs at their declared widths meeting the input assumptions) reaches a state matching the checkpoint"
+        extraImport := extraImport ++ "\nimport HDLProof.Reach.Refute"
+        let probeLit := "#[" ++ ", ".intercalate (probe.toList.map fun b => s!"mk_bv {b.width} {b.value}") ++ "]"
+        extraDefs := s!"
+def targetText : String := {leanStr ctext}
+
+def target : Compiler.Ckpt.Ckpt := match Compiler.Ckpt.parse targetText.toUTF8 with
+  | .ok c => c
+  | .error _ => default
+
+def probe : RuntimeInput := {probeLit}
+
+theorem side : HDLProof.Reach.unreachSideB D target (StateM.denote s0) = true := by native_decide
+
+theorem probeOK : HDLProof.Reach.probeB D target spec.inW spec.asmIn spec.prop probe = true := by native_decide
+
+/-- No run from the start state reaches a state matching the checkpoint. -/
+theorem unreachable : ¬ HDLProof.Reach.Reachable D (StateM.denote s0)
+    (HDLProof.Reach.symAdm D spec.inW spec.asmIn) (HDLProof.Reach.Matches D target) :=
+  HDLProof.Reach.not_reachable_of_verdict side rfl (fun ins hins => invariant ins hins) probeOK
+
+#print axioms unreachable
+"
     if let some ef := emit then
       let name := ((System.FilePath.mk ef).fileStem.getD "F2").map fun c => if c.isAlphanum then c else '_'
-      emitF2 ef name (← IO.FS.readFile cert) sf wf sp pfB pfS route sim s0Def s0Import
+      emitF2 ef name (← IO.FS.readFile cert) sf wf sp pfB pfS route sim s0Def extraImport extraDefs
       say s!"  {pre}theorem form written to {ef} ({sndName} via native_decide)"
     fin 0 s!"INVARIANT PROVED (k={kd}) -- runInvKOf_sound_ref: on every run from the {start} state, the property holds at every cycle whose assumptions held"
   else
@@ -652,6 +707,14 @@ def main (args : List String) : IO UInt32 := do
                   s!"def ckptText : String := {leanStr txt}\n\ndef s0 : StateM := match Compiler.Ckpt.parse ckptText.toUTF8 with\n  | .ok c => Projection.CkptStateM.toStateM c\n  | .error _ => default",
                   "\nimport LeanSemanticPrimitives.Projection.CkptStateM")
         else do IO.eprintln s!"init:{x} is not one of zero | reset | ckpt:<file>"; return 2
+    -- unreach:<ckpt>: after a proof, conclude that the checkpoint is unreachable
+    let unreach ← match opt "unreach" with
+      | none => pure none
+      | some p => do
+        let txt ← IO.FS.readFile p
+        match Compiler.Ckpt.parse txt.toUTF8 with
+        | .error e => IO.eprintln s!"{p}: {e}"; return 2
+        | .ok c => pure (some (p, c, txt))
     say s!"{cert}"
     say s!"  shape: sources {D.sources.size} nodes {D.nodes.size} outputs {D.outputs.size} \
 flops {D.flops.size} memories {D.memories.size} clocks {D.clocks.size}"
@@ -681,7 +744,7 @@ flops {D.flops.size} memories {D.memories.size} clocks {D.clocks.size}"
       for (tok, prop) in cands do
         let (code, v) ← attempt cert solver work sf wf D rt s0 (if single then "" else tok) prop
           asmOut asmIn kd (rest.contains "closed") (rest.contains "rebuild") route sim (opt "emit")
-          (rest.contains "base") start s0Def s0Import
+          (rest.contains "base") start s0Def s0Import unreach
         verdicts := verdicts ++ [s!"{tok} k={kd}: {(v.splitOn " --").head!}"]
         last := code
         if code == 0 then
@@ -698,5 +761,5 @@ flops {D.flops.size} memories {D.memories.size} clocks {D.clocks.size}"
     unless single do say s!"  SUMMARY: none proved: {verdicts}"
     return last
   | _ =>
-    IO.eprintln "usage: sym_verify <cert> [!]<out>[,[!]<out>...] [asm:<output>] [in:<input>=<value>]... [k:<n>[,<n>...]] [base] [closed|rebuild] [sim:fp|ir|vc (default vc)] [route:fused|var|plain] [emit:<file>] [sf:<n>] [wf:<n>] [solver:<cadical>] [work:<dir>] [init:zero|reset|ckpt:<file>]"
+    IO.eprintln "usage: sym_verify <cert> [!]<out>[,[!]<out>...] [asm:<output>] [in:<input>=<value>]... [k:<n>[,<n>...]] [base] [closed|rebuild] [sim:fp|ir|vc (default vc)] [route:fused|var|plain] [emit:<file>] [sf:<n>] [wf:<n>] [solver:<cadical>] [work:<dir>] [init:zero|reset|ckpt:<file>] [unreach:<ckpt>]"
     return 2

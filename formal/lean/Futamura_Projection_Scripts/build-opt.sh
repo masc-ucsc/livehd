@@ -91,6 +91,8 @@ MODULES=(
   # checkpoints (lhdcert-ckpt v1: drivers/lhd_ckpt, and the ckpt options of cert_trace and
   # dcert2_memroute): the start states, the format, its proofs, the FP state conversion
   Compiler/DirectTrace Compiler/Ckpt Compiler/CkptSound Projection/CkptStateM
+  # ... resuming is exact (T4), used by sym_verify's unreach: (Reach/Refute)
+  Projection/MemAddrSound Projection/CkptResume
 )
 # The proof tools (pass/lean/tools, HDLProof): a second source root.
 TOOLS="$(cd ../../pass/lean/tools && pwd)"
@@ -111,7 +113,7 @@ TOOL_MODULES=(
   # the drivers' shared IO helpers
   HDLProof/Kit/Driver
   # stimulus files as ticks, and reachability (ckpt_reach)
-  HDLProof/Run/Stim HDLProof/Reach/Defs
+  HDLProof/Run/Stim HDLProof/Reach/Defs HDLProof/Reach/Refute
   # running a program on a design (cert_run)
   HDLProof/Run/IoMeta HDLProof/Run/Image HDLProof/Run/Backend HDLProof/Run/Host
   HDLProof/Run/Loop HDLProof/Run/Sound HDLProof/Run/Vcd
