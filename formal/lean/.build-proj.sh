@@ -49,6 +49,9 @@ MODULES=(
   # vc's step compiled after its operators' fast forms (`@[csimp]`, equal by proof).
   Compiler/FastResidual
   Compiler/ResidualFast
+  # Proved compiler passes on vc's program: optimizer, checker, soundness.
+  Compiler/ResidualOpt
+  Compiler/ResidualOptSound
   Compiler/CompileOpDefs
   Compiler/CompileGraphDefs
   Compiler/CompileDesignDefs

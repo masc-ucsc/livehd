@@ -7,6 +7,7 @@ traces are compared line by line.
 
     lean --run Futamura_Projection_Scripts/cert_trace.lean <cert> <cycles> <stim>
          [edges:all|edges:third|edges:file:<path>] [init:reset|init:zero] [route:ir|route:vc]
+         [opt:off] [opt:stats]
 
 `stim v1` is the dcert2_memroute format, restricted to what an RTL testbench
 can replay: `in <ordinal> <width> <value>` (every cycle) and
@@ -30,6 +31,13 @@ once, then its straight-line program (`denoteResidual`) every step -- the
 program `compileDesign_correct` proves equal to `interpretDesign`. Same stimulus,
 same output format, so the two routes' traces compare line for line. A
 certificate `compileDesign` refuses is reported and exits 1.
+
+On `route:vc` the compiled program is OPTIMIZED once before the first step
+(`ResidualOpt.optimize`: unreachable bindings and unread sources dropped, identical
+constants shared), and `compileOpt_correct` proves the optimized program equal to
+`interpretDesign` too, so the trace is the same. `opt:off` runs the unoptimized program;
+`opt:stats` prints, on stderr, the program's size before and after and whether the
+optimizer's certificate was accepted (a refused one runs the unoptimized program).
 -/
 import LeanSemanticPrimitives.Projection.CertLoadAny
 import LeanSemanticPrimitives.Compiler.DesignSemantics
@@ -37,6 +45,8 @@ import LeanSemanticPrimitives.Compiler.DirectSemantics
 import LeanSemanticPrimitives.Compiler.CompileDesignDefs
 -- route:vc runs `denoteResidual`'s fast spelling (`@[csimp]`, equal by proof)
 import LeanSemanticPrimitives.Compiler.ResidualFast
+-- route:vc runs the optimized program (`compileOpt_correct`)
+import LeanSemanticPrimitives.Compiler.ResidualOpt
 
 open Compiler
 
@@ -132,6 +142,8 @@ def main (args : List String) : IO UInt32 := do
     let mut third := false
     let mut zeroInit := false
     let mut vc := false
+    let mut optOn := true
+    let mut optStats := false
     let mut schedPath : Option String := none
     for opt in rest do
       if opt.startsWith "edges:file:" then
@@ -145,6 +157,8 @@ def main (args : List String) : IO UInt32 := do
         | "route:ir" => vc := false
         | "route:vc" => vc := true
         | "route:tv" => vc := true   -- the old name of route:vc
+        | "opt:off" => optOn := false
+        | "opt:stats" => optStats := true
         | _ => do IO.eprintln s!"unknown option {opt}"; return 2
     let (_, D) ← Projection.CertLoadAny.loadAny cert
     let st ← match parseStim (← IO.FS.readFile stimPath) with
@@ -159,7 +173,12 @@ def main (args : List String) : IO UInt32 := do
     if vc then
       match compileDesign D with
       | .error e => do IO.eprintln s!"compileDesign refused: {repr e}"; return 1
-      | .ok R =>
+      | .ok R0 =>
+        let (R, accepted) := if optOn then ResidualOpt.optimizeWith R0 else (R0, false)
+        if optStats then
+          let verdict := if !optOn then "off" else if accepted then "accepted" else "REFUSED (unoptimized)"
+          IO.eprintln s!"vc optimize: {verdict}; sources {R0.sources.size} -> {R.sources.size}, \
+            bindings {R0.bindings.size} -> {R.bindings.size}"
         for k in List.range cycles do
           let r := denoteResidual R (edgesAt D third sched k) (inputAt D st k) s
           IO.println s!"STEP {k} {" ".intercalate (r.outputs.toList.map (fun o => toString (bv_uint o)))}"
@@ -179,5 +198,5 @@ def main (args : List String) : IO UInt32 := do
       s := r.nextState
     return 0
   | _ =>
-    IO.eprintln "usage: cert_trace <cert> <cycles> <stim> [edges:all|edges:third] [init:reset|init:zero] [route:ir|route:vc]"
+    IO.eprintln "usage: cert_trace <cert> <cycles> <stim> [edges:all|edges:third] [init:reset|init:zero] [route:ir|route:vc] [opt:off] [opt:stats]"
     return 2

@@ -84,6 +84,8 @@ MODULES=(
   Compiler/DirectSemantics Compiler/ResidualIR Compiler/ResidualSemantics
   # vc's step after its operators' fast forms (ResidualFast: @[csimp], equal by proof).
   Compiler/FastResidual Compiler/ResidualFast
+  # vc's optimizer and its checker (ResidualOpt; sound by ResidualOptSound)
+  Compiler/ResidualOpt
   Compiler/CompileOpDefs Compiler/CompileGraphDefs Compiler/CompileDesignDefs
 )
 # The proof tools (pass/lean/tools, HDLProof): a second source root.
