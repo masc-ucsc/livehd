@@ -9,6 +9,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <deque>
 #include <cctype>
 #include <cerrno>
 #include <charconv>
@@ -10794,77 +10795,109 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         return h;
       }
     };
-    std::unordered_map<Slice_key, cvc5::Term, Slice_hash>     slice_memo;
-    std::function<cvc5::Term(cvc5::Term, uint32_t, uint32_t)> slice_term;
-    slice_term = [&](cvc5::Term base, uint32_t hi, uint32_t lo) -> cvc5::Term {
-      const Slice_key key{base, hi, lo};
-      if (auto it = slice_memo.find(key); it != slice_memo.end()) {
-        return it->second;
-      }
-      const uint32_t width = base.getSort().getBitVectorSize();
-      if (lo > hi || hi >= width) {
-        return {};
-      }
-      auto remember = [&](cvc5::Term value) {
-        slice_memo.emplace(key, value);
-        return value;
-      };
+    std::unordered_map<Slice_key, cvc5::Term, Slice_hash> slice_memo;
+    // Normalize slices bottom-up. Deep gate cones must not consume the worker's
+    // native stack, including when the portfolio forks on a scheduler thread.
+    struct Slice_work {
+      Slice_key              key;
+      std::vector<Slice_key> children;
+      cvc5::Kind             op = cvc5::Kind::NULL_TERM;
+    };
+    auto plan_slice = [&](Slice_work& work) -> cvc5::Term {
+      const auto& [base, hi, lo] = work.key;
+      const auto width           = base.getSort().getBitVectorSize();
       if (lo == 0 && hi + 1 == width) {
-        return remember(base);
+        return base;
       }
-      if (base.getKind() == cvc5::Kind::BITVECTOR_CONCAT) {
+      const auto kind = base.getKind();
+      if (kind == cvc5::Kind::BITVECTOR_CONCAT) {
         uint32_t lsb = 0;
         for (size_t n = base.getNumChildren(); n-- > 0;) {
-          const uint32_t child_width = base[n].getSort().getBitVectorSize();
+          const auto child_width = base[n].getSort().getBitVectorSize();
           if (lo >= lsb && hi < lsb + child_width) {
-            return remember(slice_term(base[n], hi - lsb, lo - lsb));
+            work.children.push_back({base[n], hi - lsb, lo - lsb});
+            return {};
           }
           lsb += child_width;
         }
-      }
-      if (base.getKind() == cvc5::Kind::BITVECTOR_ZERO_EXTEND && base.getNumChildren() == 1) {
-        const uint32_t child_width = base[0].getSort().getBitVectorSize();
+      } else if (kind == cvc5::Kind::BITVECTOR_ZERO_EXTEND) {
+        const auto child_width = base[0].getSort().getBitVectorSize();
         if (hi < child_width) {
-          return remember(slice_term(base[0], hi, lo));
+          work.children.push_back({base[0], hi, lo});
+          return {};
         }
         if (lo >= child_width) {
-          return remember(tm.mkBitVector(hi - lo + 1, 0));
+          return tm.mkBitVector(hi - lo + 1, 0);
         }
-      }
-      if (base.getKind() == cvc5::Kind::BITVECTOR_LSHR && base.getNumChildren() == 2) {
+      } else if (kind == cvc5::Kind::BITVECTOR_LSHR) {
         if (const auto shift = bitvector_constant(base[1])) {
           if (*shift < width && hi < width - *shift) {
-            return remember(slice_term(base[0], hi + static_cast<uint32_t>(*shift), lo + static_cast<uint32_t>(*shift)));
+            const auto off = static_cast<uint32_t>(*shift);
+            work.children.push_back({base[0], hi + off, lo + off});
+            return {};
           }
           if (*shift >= width || lo >= width - *shift) {
-            return remember(tm.mkBitVector(hi - lo + 1, 0));
+            return tm.mkBitVector(hi - lo + 1, 0);
           }
         }
-      }
-      if ((base.getKind() == cvc5::Kind::BITVECTOR_AND || base.getKind() == cvc5::Kind::BITVECTOR_OR
-           || base.getKind() == cvc5::Kind::BITVECTOR_XOR)
-          && base.getNumChildren() >= 2) {
-        std::vector<cvc5::Term> sliced;
-        sliced.reserve(base.getNumChildren());
-        for (size_t i = 0; i < base.getNumChildren(); ++i) {
-          sliced.push_back(slice_term(base[i], hi, lo));
+      } else if (kind == cvc5::Kind::BITVECTOR_EXTRACT) {
+        const auto offset = static_cast<uint32_t>(std::stoul(base.getOp()[1].toString()));
+        work.children.push_back({base[0], hi + offset, lo + offset});
+        return {};
+      } else if (kind == cvc5::Kind::BITVECTOR_AND || kind == cvc5::Kind::BITVECTOR_OR || kind == cvc5::Kind::BITVECTOR_XOR
+                 || kind == cvc5::Kind::BITVECTOR_NOT || kind == cvc5::Kind::ITE) {
+        work.op = kind;
+        for (size_t i = kind == cvc5::Kind::ITE ? 1 : 0; i < base.getNumChildren(); ++i) {
+          work.children.push_back({base[i], hi, lo});
         }
-        return remember(tm.mkTerm(base.getKind(), sliced));
+        return {};
       }
-      if (base.getKind() == cvc5::Kind::BITVECTOR_NOT && base.getNumChildren() == 1) {
-        return remember(tm.mkTerm(cvc5::Kind::BITVECTOR_NOT, {slice_term(base[0], hi, lo)}));
+      return tm.mkTerm(tm.mkOp(cvc5::Kind::BITVECTOR_EXTRACT, {hi, lo}), {base});
+    };
+    auto slice_term = [&](cvc5::Term base, uint32_t hi, uint32_t lo) -> cvc5::Term {
+      if (lo > hi || hi >= base.getSort().getBitVectorSize()) {
+        return {};
       }
-      if (base.getKind() == cvc5::Kind::ITE && base.getNumChildren() == 3 && base[1].getSort().isBitVector()) {
-        return remember(tm.mkTerm(cvc5::Kind::ITE, {base[0], slice_term(base[1], hi, lo), slice_term(base[2], hi, lo)}));
-      }
-      if (base.getKind() == cvc5::Kind::BITVECTOR_EXTRACT && base.getNumChildren() == 1) {
-        const auto op = base.getOp();
-        if (op.getNumIndices() == 2) {
-          const uint32_t inner_lo = static_cast<uint32_t>(std::stoul(cvc5::Op(op)[1].toString()));
-          return remember(slice_term(base[0], inner_lo + hi, inner_lo + lo));
+      const Slice_key        root{base, hi, lo};
+      std::deque<Slice_work> pending{
+          {root, {}}
+      };
+      while (!pending.empty()) {
+        auto& work = pending.back();
+        if (slice_memo.contains(work.key)) {
+          pending.pop_back();
+          continue;
         }
+        if (work.children.empty()) {
+          if (auto value = plan_slice(work); !value.isNull()) {
+            slice_memo.emplace(work.key, value);
+            pending.pop_back();
+          } else {
+            for (const auto& child : work.children) {
+              if (!slice_memo.contains(child)) {
+                pending.push_back({child, {}});
+              }
+            }
+          }
+          continue;
+        }
+        cvc5::Term result;
+        if (work.op == cvc5::Kind::NULL_TERM) {
+          result = slice_memo.at(work.children.front());
+        } else {
+          std::vector<cvc5::Term> args;
+          if (work.op == cvc5::Kind::ITE) {
+            args.push_back(work.key.term[0]);
+          }
+          for (const auto& child : work.children) {
+            args.push_back(slice_memo.at(child));
+          }
+          result = tm.mkTerm(work.op, args);
+        }
+        slice_memo.emplace(work.key, result);
+        pending.pop_back();
       }
-      return remember(tm.mkTerm(tm.mkOp(cvc5::Kind::BITVECTOR_EXTRACT, {hi, lo}), {base}));
+      return slice_memo.at(root);
     };
     auto rewrite_exact_reads = [&](const cvc5::Term& root) {
       std::vector<std::pair<cvc5::Term, bool>> work;

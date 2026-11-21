@@ -54,7 +54,7 @@ std::shared_ptr<hhds::Graph> build_and_or(const std::string& dir, const std::str
   return g;
 }
 
-std::shared_ptr<hhds::Graph> build_feedback(const std::string& dir, bool swap_op = false) {
+std::shared_ptr<hhds::Graph> build_feedback(const std::string& dir, bool swap_op = false, bool swap_data = false) {
   auto& lib = livehd::Hhds_graph_library::instance(dir);
   auto  gio = lib.create_io("feedback");
   gio->add_input("sel", 0);
@@ -64,9 +64,9 @@ std::shared_ptr<hhds::Graph> build_feedback(const std::string& dir, bool swap_op
 
   auto mux = create_typed_node(*g, swap_op ? Ntype_op::Or : Ntype_op::Mux);
   g->get_input_pin("sel").connect_sink(setup_sink_pid(mux, 0));
-  g->get_input_pin("d").connect_sink(setup_sink_pid(mux, 2));
+  g->get_input_pin("d").connect_sink(setup_sink_pid(mux, swap_data ? 1 : 2));
   auto out = mux.create_driver_pin(0);
-  out.connect_sink(setup_sink_pid(mux, 1));
+  out.connect_sink(setup_sink_pid(mux, swap_data ? 2 : 1));
   out.connect_sink(g->get_output_pin("y"));
   return g;
 }
@@ -293,6 +293,23 @@ TEST(Semdiff, StructuralIdenticalResolvesCombinationalFeedback) {
 
   EXPECT_TRUE(livehd::semdiff::structural_identical(a.get(), b.get()));
   EXPECT_FALSE(livehd::semdiff::structural_identical(a.get(), c.get()));
+}
+
+TEST(Semdiff, SnapshotDigestChecksFeedbackWiringAcrossReload) {
+  const std::string dir   = "lgdb_semdiff_snapshot";
+  auto              graph = build_feedback(dir);
+  EXPECT_FALSE(livehd::semdiff::canonical_digest(graph.get()).valid);
+  const auto digest = livehd::semdiff::snapshot_digest(graph.get());
+  ASSERT_TRUE(digest.valid);
+  livehd::Hhds_graph_library::save(dir);
+  hhds::GraphLibrary saved;
+  saved.load(dir);
+  EXPECT_EQ(digest, livehd::semdiff::snapshot_digest(saved.get_graph(graph->get_gid()).get()));
+
+  auto       rewired = build_feedback(dir + "_rewired", false, true);
+  const auto changed = livehd::semdiff::snapshot_digest(rewired.get());
+  ASSERT_TRUE(changed.valid);
+  EXPECT_NE(digest, changed);
 }
 
 TEST(Semdiff, ExactArtifactFallbackResolvesAmbiguousStateCuts) {

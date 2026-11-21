@@ -1,329 +1,48 @@
 #!/usr/bin/env python3
-
+"""Run the instance-output and combinational feedback regressions on native simulators."""
 import argparse
-import hashlib
 import os
-import re
-import shutil
 import subprocess
-from concurrent.futures import ThreadPoolExecutor
-import sys
 import tempfile
 from pathlib import Path
 
-
-ROOT = Path(os.getcwd())
-
-
-def find_lhd():
-    for path in (ROOT / "bazel-bin/lhd/lhd", ROOT / "lhd/lhd"):
-        if path.exists():
-            return path
-    print("failed to find lhd binary")
-    sys.exit(3)
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("--prp", required=True, type=Path)
+parser.add_argument("--mode", required=True, choices=("lg-emit", "v2prp-sim"))
+args = parser.parse_args()
+rtl = args.prp.with_suffix(".v").resolve()
+top = rtl.stem + "_top"
+lhd = Path(os.environ.get("LHD", "lhd/lhd")).resolve()
 
 
-def sim_include_dirs(tmp_dir):
-    roots = []
-    for env in ("TEST_SRCDIR", "RUNFILES_DIR"):
-        val = os.environ.get(env)
-        if val and os.path.isdir(val):
-            roots.append(val)
-    roots.append(str(tmp_dir))
-    wanted = ("slop.hpp", "iassert.hpp")
-    found = {}
-    for root in roots:
-        for dirpath, _dirs, files in os.walk(root):
-            for name in wanted:
-                if name in files and name not in found:
-                    found[name] = dirpath
-        if len(found) == len(wanted):
-            break
-    if len(found) != len(wanted):
-        return []
-    return [found[name] for name in wanted]
+def run(*argv):
+    subprocess.run([lhd, *argv], check=True)
 
 
-LHD = find_lhd()
-
-
-def run(cmd, timeout=60):
-    proc = subprocess.run(cmd, cwd=ROOT, text=True, capture_output=True, timeout=timeout)
-    return proc.returncode, proc.stdout + proc.stderr
-
-
-def header_value(prp, key):
-    pat = re.compile(rf"^:{re.escape(key)}:\s*(.+)")
-    for line in Path(prp).read_text().splitlines():
-        m = pat.match(line)
-        if m:
-            return m.group(1).strip()
-    return ""
-
-
-def fields(simdir, top, struct):
-    h = (simdir / f"{top}.hpp").read_text()
-    m = re.search(rf"  struct {struct} \{{(.*?)  \}};", h, re.S)
-    if not m:
-        return []
-    return [(name, int(width)) for width, name in re.findall(r"Slop<(\d+)>\s+(\w+)\{\}", m.group(1))]
-
-
-def cpp_class_name(simdir, top):
-    h = (simdir / f"{top}.hpp").read_text()
-    # Skip the generated runtime helpers (`struct __lhd_tune_support {` precedes
-    # the module struct in every header).
-    # The module struct may carry base classes (its native frame helpers).
-    m = re.search(r"(?:class|struct)\s+((?!__lhd_)[A-Za-z_]\w*)\s*(?::[^{;]*)?\{", h)
-    if not m:
-        raise RuntimeError(f"could not find generated C++ class in {top}.hpp")
-    return m.group(1)
-
-
-def salt(name):
-    return int.from_bytes(hashlib.sha256(name.encode()).digest()[:8], "little")
-
-
-def gen_driver(simdir, top):
-    cls = cpp_class_name(simdir, top)
-    ins = fields(simdir, top, "In")
-    outs = fields(simdir, top, "Out")
-    lines = [
-        f'#include "{top}.hpp"',
-        "#include <filesystem>",
-        "#include <fstream>",
-        "#include <map>",
-        "#include <string>",
-        "",
-        "static unsigned long long splitmix64(unsigned long long x) {",
-        "  x += 0x9e3779b97f4a7c15ULL;",
-        "  x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ULL;",
-        "  x = (x ^ (x >> 27)) * 0x94d049bb133111ebULL;",
-        "  return x ^ (x >> 31);",
-        "}",
-        "template<int W> Slop<W> stim(long cycle, unsigned long long salt) {",
-        "  std::string bits; bits.resize(W);",
-        "  for (int pos = W - 1; pos >= 0; --pos) {",
-        "    auto r = splitmix64(salt ^ (unsigned long long)cycle * 0xd1342543de82ef95ULL ^ (unsigned long long)(pos / 64) * 0x9ddfea08eb382d69ULL);",
-        "    bits[W - 1 - pos] = ((r >> (pos & 63)) & 1) ? '1' : '0';",
-        "  }",
-        "  return Slop<W>::from_binary(bits, true);",
-        "}",
-        "int main(int argc, char **argv) {",
-        "  const long cycles = argc > 1 ? std::stol(argv[1]) : 8;",
-        "  const std::string outdir = argc > 2 ? argv[2] : \"run\";",
-        "  std::filesystem::create_directories(outdir);",
-        f"  {cls} dut;",
-        "  dut.reset_cycle();",
-        "  std::ofstream out(outdir + \"/outputs.txt\");",
-        "  for (long cycle = 0; cycle < cycles; ++cycle) {",
-        f"    auto& in = dut.__in;  // ports are members",
-    ]
-    for name, width in ins:
-        if name == "reset":
-            lines.append(f"    in.{name} = Slop<{width}>::create_integer(cycle < 2 ? 1 : 0);")
-        elif name == "clock":
-            lines.append(f"    in.{name} = Slop<{width}>::create_integer(cycle & 1);")
-        elif name == "valid":
-            lines.append(f"    in.{name} = Slop<{width}>::create_integer(0);")
-        else:
-            lines.append(f"    in.{name} = stim<{width}>(cycle, {salt(name)}ULL);")
-    lines += [
-        "    ++dut.__gen; auto o = dut.cycle();",
-        "    if (cycle == cycles - 1) { out << cycle;",
-    ]
-    for name, _ in outs:
-        lines.append(f"      out << \" {name}=\" << o.{name}.to_pyrope();")
-    lines += [
-        "      out << \"\\n\"; }",
-        "  }",
-        "  std::map<std::string, std::string> regs;",
-        "  dut.dump_state(\"\", regs, outdir);",
-        "  std::ofstream st(outdir + \"/state.txt\");",
-        "  for (const auto &[k,v] : regs) st << k << \"=\" << v << \"\\n\";",
-        "  return 0;",
-        "}",
-    ]
-    (simdir / "drv_compare.cpp").write_text("\n".join(lines) + "\n")
-
-
-def compile_driver(simdir):
-    top = next(p.stem for p in simdir.glob("*.hpp"))
-    cpp = [str(p) for p in simdir.glob("*.cpp") if p.name != "drv_compare.cpp"]
-    cpp += [str(p) for p in sorted(simdir.glob("*.llvm.o"))]  # the LLVM backend's native color objects
-    incs = ["-I" + str(simdir)] + ["-I" + d for d in sim_include_dirs(simdir)]
-    cmd = [
-        "clang++",
-        "-std=c++23",
-        "-O2",
-        "-DNDEBUG",
-        *incs,
-        *cpp,
-        str(simdir / "drv_compare.cpp"),
-        "-o",
-        str(simdir / "drv_compare"),
-    ]
-    return top, run(cmd)
-
-
-def hash_file(path):
-    p = Path(path)
-    return hashlib.sha256(p.read_bytes()).hexdigest() if p.exists() else None
-
-
-def compare_dirs(a, b):
-    diffs = []
-    for name in ("outputs.txt", "state.txt"):
-        if hash_file(Path(a) / name) != hash_file(Path(b) / name):
-            diffs.append(name)
-    return diffs
-
-
-def compile_sim(src, top, out, reader=None):
-    srcs = [str(s) for s in src] if isinstance(src, (list, tuple)) else [str(src)]
-    # This check compares name-keyed internal state as well as outputs, so
-    # preserve matching module boundaries on both sides of the round trip.
-    cmd = [str(LHD), "compile", *srcs, "--set", "compile.upass.inline=false"]
-    if reader:
-        cmd += ["--reader", reader]
-    cmd += ["--top", top, "--emit-dir", f"sim:{out}", "--workdir", str(out.parent / ("w_" + out.name))]
-    return run(cmd)
-
-
-def _resolve_top(simdir, top):
-    # cgen_sim names each module's .hpp by its HIERARCHICAL graph name
-    # (`file.entity`), while the caller's `top` is the flat entity (Verilog-style)
-    # or a golden module name. Map it to the actually-emitted top .hpp stem.
-    skip = {"slop.hpp", "iassert.hpp", "vcd_writer.hpp"}
-    cands = [p.stem for p in simdir.glob("*.hpp") if p.name not in skip]
-    if top in cands:
-        return top
-    dotted = [c for c in cands if c.rsplit(".", 1)[-1] == top]
-    return dotted[0] if len(dotted) == 1 else top
-
-
-def drive(simdir, top, rundir):
-    """gen_driver + compile + run one side; returns (rc, output)."""
-    top = _resolve_top(simdir, top)
-    gen_driver(simdir, top)
-    _, (rc, out) = compile_driver(simdir)
-    if rc:
-        return rc, out
-    return run([str(simdir / "drv_compare"), "8", str(rundir)])
-
-
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--mode", choices=["lg-emit", "prp-emit", "exact-diff", "v2prp-sim"], required=True)
-    ap.add_argument("--prp", required=True)
-    ap.add_argument("--reader", default="slang")
-    args = ap.parse_args()
-
-    prp = Path(args.prp)
-    verilog = prp.with_suffix(".v")
-    pyrope_top = header_value(prp, "pyrope_top")
-    verilog_top = header_value(prp, "verilog_top")
-    if not pyrope_top or not verilog_top:
-        print("missing :pyrope_top: or :verilog_top:")
-        return 2
-
-    work = Path(tempfile.mkdtemp(prefix="lhd_equiv_sim_"))
-    try:
-        if args.mode == "lg-emit":
-            rc, out = compile_sim(verilog, verilog_top, work / "lg_sim", "slang")
-            print(out)
-            return rc
-        if args.mode == "prp-emit":
-            rc, out = compile_sim(prp, pyrope_top, work / "prp_sim")
-            print(out)
-            return rc
-        if args.mode == "v2prp-sim":
-            # The XiangShan fp-convert-family SIM fail class (instance-output
-            # struct dual identity, the ExeUnitImp_4 category): the .v lowers
-            # CORRECTLY in memory (side A: slang -> sim), but the EMITTED
-            # Pyrope TEXT carries a flat instance-output store + 0-init
-            # per-field leaves, so the RECOMPILED Pyrope (side B) computes
-            # from never-written leaves and its sim diverges. Both sides get
-            # the same deterministic stimulus; they must match once the
-            # emitter fix (lower_instance per-field output split) lands.
-            # The two sides share nothing until the comparison: side A is
-            # .v -> sim, side B is .v -> .prp -> sim, and each then builds and
-            # runs its own comparison driver. That is four host clang builds in
-            # a row (~20s) when walked in order, so run the two chains at once.
-            lg_sim = work / "lg_sim"
-            v2_sim = work / "v2_sim"
-
-            def side_a():
-                rc, out = compile_sim(verilog, verilog_top, lg_sim, "slang")
-                if rc:
-                    return rc, out
-                return drive(lg_sim, verilog_top, work / "lg_run")
-
-            def side_b():
-                prp_dir = work / "prp_emit"
-                rc, out = run([str(LHD), "compile", "--reader", "slang", str(verilog),
-                               "--emit-dir", f"pyrope:{prp_dir}/",
-                               "--workdir", str(work / "w_emit")])
-                if rc:
-                    return rc, out
-                emitted = sorted(prp_dir.glob("*.prp"))
-                if not emitted:
-                    return 1, "no .prp emitted from {}".format(verilog)
-                rc, out = compile_sim(emitted, verilog_top, v2_sim)
-                if rc:
-                    return rc, out
-                return drive(v2_sim, verilog_top, work / "v2_run")
-
-            with ThreadPoolExecutor(max_workers=2) as pool:
-                results = [f.result() for f in [pool.submit(side_a), pool.submit(side_b)]]
-            for rc, out in results:
-                if rc:
-                    print(out)
-                    return rc
-            diffs = compare_dirs(work / "lg_run", work / "v2_run")
-            if diffs:
-                print("SIM v2prp diff:", ",".join(diffs))
-                return 1
-            print("SIM v2prp match")
-            return 0
-
-        lg_sim = work / "lg_sim"
-        prp_sim = work / "prp_sim"
-        rc, out = compile_sim(verilog, verilog_top, lg_sim, args.reader)
-        if rc:
-            print(out)
-            return rc
-        rc, out = compile_sim(prp, pyrope_top, prp_sim)
-        if rc:
-            print(out)
-            return rc
-        gen_driver(lg_sim, next(p.stem for p in lg_sim.glob("*.hpp")))
-        gen_driver(prp_sim, next(p.stem for p in prp_sim.glob("*.hpp")))
-        _, (rc, out) = compile_driver(lg_sim)
-        if rc:
-            print(out)
-            return rc
-        _, (rc, out) = compile_driver(prp_sim)
-        if rc:
-            print(out)
-            return rc
-        rc, out = run([str(lg_sim / "drv_compare"), "8", str(work / "lg_run")])
-        if rc:
-            print(out)
-            return rc
-        rc, out = run([str(prp_sim / "drv_compare"), "8", str(work / "prp_run")])
-        if rc:
-            print(out)
-            return rc
-        diffs = compare_dirs(work / "lg_run", work / "prp_run")
-        if diffs:
-            print("SIM exact diff:", ",".join(diffs))
-            return 1
-        print("SIM exact match")
-        return 0
-    finally:
-        shutil.rmtree(work, ignore_errors=True)
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+with tempfile.TemporaryDirectory(dir=os.environ.get("TEST_TMPDIR")) as tmp:
+    work = Path(tmp)
+    lg = work / "lg"
+    pyrope = work / "pyrope"
+    emit = ["--emit-dir", f"pyrope:{pyrope}"] if args.mode == "v2prp-sim" else []
+    run("compile", rtl, "--reader", "slang", "--top", top, "--workdir", work / "compile",
+        "--emit-dir", f"lg:{lg}", *emit)
+    if args.mode == "lg-emit":
+        run("pass", "lnast-llvm", f"lg:{lg}", "--top", top, "--emit-dir", f"sim:{work}/kernels")
+    else:
+        # Check every byte on both paths against the RTL specification. Each side
+        # must independently preserve the packed isZero field and complemented count.
+        for mode, entry, inputs in [("rtl", f"lg:{top}", [f"lg:{lg}"]),
+                                    ("emitted", f"pyrope/{top}.{top}", [])]:
+            tb = work / f"{mode}_tb.prp"
+            tb.write_text(f'''const design = import("{entry}")
+test check {{
+  mut dut = design
+  tick 256 {{
+    dut.a = clock
+    step
+    const want = if clock == 0 {{ 8 }} elif clock >= 128 {{ 7 }} elif clock >= 64 {{ 6 }} elif clock >= 32 {{ 5 }} else {{ 0 }}
+    assert(dut.r == want, "packed instance output")
+  }}
+}}
+''')
+            run("sim", *inputs, tb, "--workdir", work / mode)

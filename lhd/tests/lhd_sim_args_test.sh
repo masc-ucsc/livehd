@@ -40,20 +40,15 @@ test nn.t(cycles:U20 = 20) {
 EOF
 "$LHD" sim "$W/good.prp" --setup-only --workdir "$W/good" -q >/dev/null 2>&1 \
   || fail "valid parameterized test failed to set up"
-# One driver per design (drv.cpp) holds every `test` block; each `test`-parameter
-# is bound from the central `+<name>=VALUE` arg map inside its run function.
-DRV="$W/good/sim/drv.cpp"
-[ -f "$DRV" ] || fail "expected driver not generated: $DRV"
-grep -q '_args.find("cycles")' "$DRV" || fail "driver does not bind the cycles parameter"
-grep -q -- '"--seed"'  "$DRV" || fail "driver missing the --seed flag"
-grep -q -- '"--list-tests"' "$DRV" || fail "driver missing the --list-tests flag"
-grep -q -- '"--test"'  "$DRV" || fail "driver missing the --test selector flag"
-grep -q    '_to_i64'   "$DRV" || fail "driver missing the validating integer parser"
-grep -q    '_to_u64'   "$DRV" || fail "driver missing the validating seed parser"
-grep -q    'hlop_set_random_seed' "$DRV" || fail "driver does not seed the hlop PRNG"
-grep -q    '_tests_json' "$DRV" || fail "driver missing the embedded --list-tests JSON"
+# The setup lowers every `test` block into ONE object and writes the table of tests and their parameters the runtime
+# binds `+<name>=VALUE` from (no generated C++).
+MAN="$W/good/sim/drv.tb.json"
+[ -f "$MAN" ] && [ -f "$W/good/sim/drv.tb.o" ] || fail "expected testbench object and manifest not generated in $W/good/sim"
+grep -q '"name":"cycles"' "$MAN" || fail "manifest does not list the cycles parameter"
+grep -q '"default":"20"' "$MAN" || fail "manifest does not record the cycles default"
+[ -z "$(ls "$W"/good/sim/*.cpp "$W"/good/sim/*.hpp 2>/dev/null)" ] || fail "C++ was generated: $(ls "$W/good/sim")"
 
-# ---- reserved / unsafe parameter names are rejected at setup -----------------
+# ---- a reserved Pyrope word cannot be a parameter name; every other name is usable -----------------
 # $1 = parameter declaration text, $2 = a label for messages,
 # $3 = (optional) the expected message pattern, when the name is refused BEFORE
 #      the simulation-parameter check ever sees it.
@@ -87,11 +82,26 @@ EOF
   echo "$out" | grep -qE "$want" \
     || fail "rejection of $label lacked the explanatory message: $out"
 }
-reject_param 'default:U8 = 2' 'C++ keyword'
-reject_param 'argc:U8 = 2'    'main argument argc'
-reject_param '_seed:U8 = 2'   'leading-underscore driver-local collision'
 reject_param 'test:U8 = 2'    'Pyrope reserved test keyword' 'is reserved, so it cannot be a parameter name'
-reject_param '`my param`:U8 = 2' 'backtick-escaped identifier'
+
+# A parameter is an ordinary name now: nothing becomes a C++ identifier, so what used to be refused (a C++ keyword, a
+# driver-internal name, a leading underscore, a backtick-escaped name) simulates like any other.
+for name in default argc _seed '`my param`'; do
+  cat > "$W/ok.prp" <<EOF
+/*
+:name: ok
+:type: simulation
+*/
+mod nn(a:U8) -> (s:U8@[0]) { s = a }
+test nn.t($name:U8 = 2) {
+  mut acc = nn
+  mut v = 0
+  tick 2 { acc.a = 1; step; v = acc.s }
+  assert(v == 1, "x")
+}
+EOF
+  "$LHD" sim "$W/ok.prp" --workdir "$W/ok" -q >"$W/ok.out" 2>&1 || fail "a parameter named $name should be usable: $(cat "$W/ok.out")"
+done
 
 # ---- `--list-tests` emits the dotted name + params as JSON (no build) ---------
 LT="$("$LHD" sim "$W/good.prp" --list-tests --diag-fmt jsonl 2>/dev/null | head -1)" \

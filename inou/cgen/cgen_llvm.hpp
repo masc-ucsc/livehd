@@ -68,8 +68,8 @@ public:
   // Scalar ABI: inputs are word arguments; outputs are concatenated into one
   // uint64_t return, first-added output in the low bits (at most 64 bits total).
   explicit Cgen_llvm(std::string_view function_name, const std::vector<std::pair<uint32_t, bool>>& inputs, bool scalar_abi = false);
-  // Native simulator ABI: void(uint64_t* state, void** resources). Every
-  // field occupies whole little-endian words in one caller-owned allocation.
+  // Native simulator ABI: void(uint64_t* state, void** resources). The caller
+  // owns one word array. Private spills can occupy aligned subwords.
   // Inputs and outputs may alias: outputs observe the state before any output
   // is written. No per-invocation packing buffers or C++ adapters are needed.
   struct State_input {
@@ -81,6 +81,7 @@ public:
   struct State_layout {
     size_t                   words = 0;
     std::vector<State_input> inputs;
+    bool                     combine_lane_loads = false;  // combine reads of one word in kernels that run on every edge
   };
   struct Dirty_mask {
     size_t   word = 0;
@@ -280,7 +281,10 @@ public:
   [[nodiscard]] bool is_storage_input(size_t index) const;
   // Compare against `previous_word` (the current-state bank for a pending
   // register), store into `word`, and OR dirty masks when the value changes.
-  bool add_state_output(size_t word, size_t previous_word, Value value, const std::vector<Dirty_mask>& dirty, std::string& error);
+  // For a private little-endian spill, byte selects its aligned offset in both
+  // words. A narrow spill owns the full 8, 16 or 32 bits of its storage lane.
+  bool add_state_output(size_t word, size_t previous_word, Value value, const std::vector<Dirty_mask>& dirty, std::string& error,
+                        int byte = -1);
   // The same store, performed only while `guard` is non-zero (`when_zero`: only while it is zero): a
   // register that keeps its value when its enable is off is not rewritten, and what only its new
   // value needs can sink under the test. Outputs of one guard share one branch, taken after every
@@ -289,6 +293,12 @@ public:
   bool add_state_output_if(Value guard, bool when_zero, size_t word, Value value, std::string& error,
                            const std::vector<Dirty_mask>& dirty = {});
   // Phase-barrier copy. Source and destination spans must not overlap.
+  // Commit a dense shadow bank to disjoint ranges of the instance frames.
+  struct State_span {
+    size_t word;
+    size_t words;
+  };
+  bool commit_state(size_t source, const std::vector<State_span>& spans, std::string& error);
   bool copy_state(size_t destination, size_t source, size_t words, std::string& error);
   // `state[destination + i] |= state[source + i]; state[source + i] = 0`, right here (not at the kernel's
   // end): dirty marks recorded for the next phase become current. The spans must not overlap.
@@ -390,9 +400,20 @@ public:
   // parameter, so the ABI and the adapter's call do not change shape.
   // An optional sidecar allows a verified IR/object pair to skip optimization
   // and machine-code generation. Empty disables reuse. No graph-global key
-  // or mutable binding offsets are added to the kernel identity.
+  // or mutable binding offsets are added to the kernel identity. dump_bitcode
+  // also writes the pre-optimization .bc next to the object on cache hits.
   bool write_object(std::string_view path, std::string& error, bool track_changed = true, std::string_view cache_path = {},
-                    bool* reused = nullptr);
+                    bool* reused = nullptr, bool dump_bitcode = false);
+
+  // Canonical state byte offsets, in order of first use. Equal bitcode is
+  // executable with any of its original bindings, including indexed memories.
+  struct Kernel_binding {
+    std::string           name;
+    std::vector<uint64_t> byte_offsets, masks;
+  };
+  bool        encode_kernel(std::string& bitcode, Kernel_binding& binding, std::string& error);
+  static bool write_kernel_group(std::string_view bitcode, const std::vector<Kernel_binding>& instances, std::string_view path,
+                                 std::string_view cache_path, bool dump_bitcode, size_t& instructions, std::string& error);
 
   // Package a state-ABI kernel with its allocation/initialization descriptor.
   // Only `descriptor` is exported; code, offsets, and defaults stay local to
@@ -410,8 +431,9 @@ public:
                                   std::string_view object_path, std::string& error);
 
 private:
-  bool seal(std::string& error, bool track_changed);
-  bool write_module(std::string_view path, std::string& error, bool track_changed, bool native);
   class Impl;
+  explicit Cgen_llvm(std::unique_ptr<Impl> impl);
+  bool seal(std::string& error, bool track_changed);
+  bool write_module(std::string_view path, std::string& error, bool track_changed, bool native, bool dump_bitcode = false);
   std::unique_ptr<Impl> impl_;
 };

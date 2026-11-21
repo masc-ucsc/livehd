@@ -251,7 +251,7 @@ echo "$simj" | grep -q 'test` blocks' || fail "help sim (jsonl) is not the sim c
 for f in probe-from probe-to vcd-from vcd-to; do
   echo "$simj" | grep -qF "\"name\":\"$f\"" || fail "sim record (jsonl) missing the --$f flag"
 done
-lhdc describe sim 2>&1 | grep -q 'Executable C++ simulation' \
+lhdc describe sim 2>&1 | grep -q 'The simulator directory' \
   || fail "describe sim should still be the sim emit-kind record"
 # Same collision for `pyrope` (command family vs emit-kind).
 lhdc help pyrope --diag-fmt jsonl 2>&1 | grep -q 'developer tools' \

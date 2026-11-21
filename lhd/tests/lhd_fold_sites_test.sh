@@ -6,7 +6,6 @@
 # `fold_body engine=aegraph site=<site>` on stderr; this test drives one command per site family and
 # asserts the line appears:
 #
-#   specialize.refold + cgen.sim.refold   lhd sim (sim.unroll_sites splices a small loop; sim cost)
 #   synth.loop_cleanup                    pass abc over a rolled loop
 #   synth.memory_module                   pass abc --set synth.memory=flops over a register tile
 #   synth.state_sweep                     lhd synth with synth.state_sweep=true
@@ -16,11 +15,6 @@
 # The results stay sound (mapped netlists and the LEC are PROVEN), compile.sweep runs the engine too, and the
 # synthesis region cache never replays one cost profile's regions for another.
 set -u
-# Pinned to inou.cgen.sim: this test is about that flow's generated sources, color plan, tune/profile
-# machinery or its default undefined-access warnings, none of which the LNAST sim flow (the `lhd sim`
-# default) produces. See AGENTS.md, "Sim flow".
-export LHD_SIM_LNAST=0
-
 LHD="${LHD:-lhd/lhd}"
 LIB=inou/prp/tests/abc/test.lib
 W="${TEST_TMPDIR:-/tmp/lhd_fold_sites_$$}"
@@ -90,11 +84,9 @@ PRP
   engine=aegraph
   tag=aegraph
 
-  # -- sim: specialize refolds and the post-splice fold (cost=sim) -----------------------------------------------
-  "$LHD" sim "$SMALL_LOOP" --setup-only --set sim.unroll_sites=100000 --workdir "$W/sim_$tag" -q >"$W/sim_$tag.out" 2>"$W/sim_$tag.log" \
+  # -- sim: the simulator setup still compiles under the e-graph engine (cost=sim) ----------------------------------
+  "$LHD" sim "$SMALL_LOOP" --setup-only --workdir "$W/sim_$tag" -q >"$W/sim_$tag.out" 2>"$W/sim_$tag.log" \
     || fail "sim engine=$engine failed: $(head -c 600 "$W/sim_$tag.out")"
-  expect "$engine" cgen.sim.refold "$W/sim_$tag.log"
-  expect "$engine" specialize.refold "$W/sim_$tag.log"
 
   # -- synthesis: loop cleanup, mapped netlist PROVEN against the compiled source ----------------------------------
   "$LHD" pass abc lg:"$W/loop_src" --top "$LOOP_TOP" --set synth.liberty="$LIB" --emit verilog:"$W/loop_net_$tag.v" \

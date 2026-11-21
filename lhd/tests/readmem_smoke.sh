@@ -49,17 +49,19 @@ python3 - "$W/result.json" <<'PY'
 import json,sys
 r=json.load(open(sys.argv[1])); assert r['status']=='pass',r
 PY
-# A content-only change must be seen by the SAME generated executable.
+# A content-only change must be seen by the SAME simulator (`--run-only` runs the setup that already exists): the
+# runtime reads the image at power-on.
 printf '56 34 @2 ab\n' > "$W/image.hex"
-"$W/run/sim/drv.bin" --init-zero +expected=86 > "$W/changed.log"
+"$LHD" sim "$W/load.prp" --workdir "$W/run" --run-only --set sim.init_zero=true --set compile.unknown_zero=true \
+  +expected=86 --diag-fmt pretty > "$W/changed.log" 2>&1 || { cat "$W/changed.log"; exit 1; }
 grep -q 'PASS preload' "$W/changed.log"
 # Missing and malformed files are clean failures, including the filename.
 for image in missing malformed; do
   if [ "$image" = missing ]; then rm "$W/image.hex"; else printf '12 xyz!\n' > "$W/image.hex"; fi
-  if "$W/run/sim/drv.bin" --init-zero > "$W/error.log" 2>&1; then
+  if "$LHD" sim "$W/load.prp" --workdir "$W/run" --run-only --set sim.init_zero=true --diag-fmt pretty > "$W/error.log" 2>&1; then
     echo "loader accepted $image image" >&2; exit 1
   fi
-  grep -q 'readmem:.*image.hex:' "$W/error.log"
+  grep -q 'readmem:.*image.hex:' "$W/error.log" || { cat "$W/error.log"; exit 1; }
 done
 printf '12 34 @2 ab\n' > "$W/image.hex"
 fi

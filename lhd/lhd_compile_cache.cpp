@@ -85,7 +85,6 @@ struct Prior_cache {
   bool                                          compatible{false};
   std::map<std::string, Prior_unit>             units;
   std::map<std::string, std::shared_ptr<Lnast>> lnasts;
-  std::vector<std::string>                      order;
 };
 
 struct Graph_row {
@@ -94,6 +93,7 @@ struct Graph_row {
   std::string              unit_key;
   uint64_t                 interface_hash{0};
   bool                     has_body{false};
+  bool                     snapshot_local{false};
   uint64_t                 h0{0};
   uint64_t                 h1{0};
   std::vector<std::string> inlined;
@@ -347,6 +347,7 @@ struct Stored_unit {
 
 struct Graph_inventory {
   std::string                        closure_key;
+  bool                               whole_design_only{false};
   std::map<std::string, Stored_unit> units;
   std::vector<std::string>           lnast_order;
   std::vector<Stored_mint>           mints;
@@ -368,7 +369,8 @@ void replay_pipeline_diags(const Graph_inventory& inventory, const std::set<std:
 }
 
 std::string            lnast_unit_dir(std::string_view snapshot_file);
-std::shared_ptr<Lnast> load_compact_lnast(const std::string& dir, std::string_view expected_name);
+std::shared_ptr<Lnast> load_compact_lnast(const std::string& dir, std::string_view expected_name,
+                                          std::optional<uint64_t> expected_hash = {});
 
 uint64_t hash_bytes(std::string_view text) { return lh::woothash64(text.data(), text.size(), 1021); }
 
@@ -450,8 +452,12 @@ File_compare compare_file_bytes(const std::string& path, std::string_view bytes)
 
 std::string normalized_user_path(std::string_view p) { return fs::path(p).lexically_normal().string(); }
 
+using Dependents = std::map<std::string, std::set<std::string>>;
+
 std::vector<Source_unit> capture_closure(const std::vector<std::string>& seeds, const Eprp_var& var, const Prior_cache* prior,
-                                         const std::string& scope) {
+                                         const std::string& scope, Dependents& importers) {
+  Dependents                                                    importers_by_path;
+  std::vector<std::pair<std::string, std::vector<std::string>>> external_imports;
   std::map<std::string, std::string> pending;  // logical unit -> path
   std::set<std::string>              loaded;
   std::set<std::string>              parsed_paths;
@@ -524,6 +530,7 @@ std::vector<Source_unit> capture_closure(const std::vector<std::string>& seeds, 
       // cache-off discover_imports path errors deterministically. Resolution is
       // cheap (per-directory listings are cached in the resolver).
       const bool satisfied = std::any_of(names.begin(), names.end(), [&](const auto& n) { return loaded.contains(n); });
+      bool       local     = false;
       for (const auto& candidate : names) {
         const auto resolved = resolver.find(importer_dir, candidate);
         if (resolved.empty()) {
@@ -536,13 +543,35 @@ std::vector<Source_unit> capture_closure(const std::vector<std::string>& seeds, 
                           "rename the file or import explicitly"};
         }
         logical_paths[candidate] = resolved_abs;
+        importers_by_path[resolved_abs].insert(unit.name);
+        local = true;
         if (!satisfied && !parsed_paths.contains(resolved_abs)) {
           pending.try_emplace(candidate, normalized_user_path(resolved));
         }
         break;
       }
+      if (!local || satisfied) {
+        // An already loaded unit or an explicit seed in another directory can
+        // satisfy a qualified spelling even when the scanner found a local candidate.
+        external_imports.emplace_back(unit.name, names);
+      }
     }
     out.push_back(std::move(unit));
+  }
+
+  for (const auto& [importer, candidates] : external_imports) {
+    for (const auto& candidate : candidates) {
+      if (const auto it = logical_paths.find(candidate); it != logical_paths.end()) {
+        importers_by_path[it->second].insert(importer);
+      }
+    }
+  }
+  // Two import spellings can resolve to the same file. Both callers depend
+  // on the single LNAST captured for that path.
+  for (const auto& unit : out) {
+    if (auto it = importers_by_path.find(unit.abs_path); it != importers_by_path.end()) {
+      importers.emplace(unit.name, std::move(it->second));
+    }
   }
 
   std::sort(out.begin(), out.end(), [](const Source_unit& a, const Source_unit& b) { return a.name < b.name; });
@@ -721,65 +750,40 @@ struct Unit_match {
   bool interface{false};
 };
 
-// The units still clean against a reference closure of `reference_units`
-// units.
+// An interface edit crosses the scanner's reverse import edges. A body-only
+// edit crosses the edges legalize actually inlined.
 std::vector<std::string> clean_units(const std::vector<Source_unit>& units, const std::map<std::string, Unit_match>& match,
-                                     size_t                                              reference_units,
-                                     const std::map<std::string, std::set<std::string>>& inlined_dependents) {
-  std::map<std::string, const Source_unit*> by_name;
-  std::set<std::string>                     dirty;
-  std::set<std::string>                     interface_changed;
-  for (const auto& unit : units) {
-    by_name.emplace(unit.name, &unit);
-    const auto m = match.find(unit.name);
-    if (m == match.end() || !m->second.body) {
-      dirty.emplace(unit.name);
-    }
-    if (m == match.end() || !m->second.interface) {
-      interface_changed.emplace(unit.name);
-    }
-  }
-  if (reference_units != units.size()) {
-    // A vanished exporter must invalidate every importer that named it. The
-    // exact old reverse edges are not retained in memory here, so conservatively
-    // rebuild the current closure; ghost pruning still removes the vanished def.
+                                     size_t reference_units, const Dependents& imports, const Dependents& inlined) {
+  if (reference_units != units.size() || match.size() != units.size()) {
+    // The current edges cannot describe an exporter that left the closure.
     return {};
   }
-  // Body dirtiness is local. It crosses a boundary only when legalize recorded
-  // that the caller contains an inlined copy of the callee, or when the
-  // callee's source interface changed. Interface dirtiness remains transitive:
-  // an implicit clock/reset ABI can change an importer's own GraphIO.
-  bool changed = true;
-  while (changed) {
-    changed = false;
-    for (const auto& [callee, callers] : inlined_dependents) {
-      if (!dirty.contains(callee)) {
-        continue;
-      }
-      for (const auto& caller : callers) {
-        if (by_name.contains(caller) && dirty.emplace(caller).second) {
-          changed = true;
-        }
-      }
-    }
-    for (const auto& unit : units) {
-      for (const auto& raw : unit.imports) {
-        bool dep_interface_changed = false;
-        for (const auto& candidate : import_detail::candidates(raw)) {
-          if (by_name.contains(candidate)) {
-            dep_interface_changed = interface_changed.contains(candidate);
-            break;
+  auto propagate = [](std::set<std::string>& affected, const Dependents& callers) {
+    std::vector<std::string> queue(affected.begin(), affected.end());
+    for (size_t i = 0; i < queue.size(); ++i) {
+      const auto it = callers.find(queue[i]);
+      if (it != callers.end()) {
+        for (const auto& caller : it->second) {
+          if (affected.insert(caller).second) {
+            queue.push_back(caller);
           }
         }
-        if (dep_interface_changed) {
-          const bool new_dirty      = dirty.emplace(unit.name).second;
-          const bool new_interface  = interface_changed.emplace(unit.name).second;
-          changed                  |= new_dirty || new_interface;
-          break;
-        }
       }
     }
+  };
+  std::set<std::string> dirty;
+  for (const auto& [name, m] : match) {
+    if (!m.interface) {
+      dirty.insert(name);
+    }
   }
+  propagate(dirty, imports);
+  for (const auto& [name, m] : match) {
+    if (!m.body) {
+      dirty.insert(name);
+    }
+  }
+  propagate(dirty, inlined);
   std::vector<std::string> clean;
   for (const auto& unit : units) {
     if (!dirty.contains(unit.name)) {
@@ -1048,7 +1052,7 @@ void write_lg_owners(const std::string& lib_path, const Lg_owners& owners) {
   }
 }
 
-Prior_cache load_prior(const std::string& scope, const std::string& context, bool materialize_lnasts = false) {
+Prior_cache load_prior(const std::string& scope, const std::string& context) {
   Prior_cache prior;
   auto        text = try_slurp(scope + "/inventory.json");
   if (!text) {
@@ -1082,21 +1086,6 @@ Prior_cache load_prior(const std::string& scope, const std::string& context, boo
     }
     const std::string name = u["name"].GetString();
     if (!prior.units.emplace(name, std::move(unit)).second) {
-      return {};
-    }
-    prior.order.push_back(name);
-  }
-  if (materialize_lnasts) {
-    try {
-      for (const auto& name : prior.order) {
-        const auto& unit = prior.units.at(name);
-        auto        ln   = load_compact_lnast(scope + "/ln/" + lnast_unit_dir(unit.snapshot_file), name);
-        if (semantic_hash(*ln) != unit.semantic_hash) {
-          return {};
-        }
-        prior.lnasts.emplace(name, std::move(ln));
-      }
-    } catch (...) {
       return {};
     }
   }
@@ -1299,6 +1288,13 @@ std::vector<Graph_row> graph_rows(hhds::GraphLibrary& lib, const Result& res, bo
       // Merkle digest once while retaining the identical digest contract.
       auto digest = livehd::semdiff::canonical_digest(graph.get(), resolver, digest_memo);
       if (!digest.valid) {
+        // graph_rows checks every definition in the saved library, including
+        // each child. A feedback loop need not have a canonical Merkle digest
+        // to verify the very same serialized definition on reload.
+        row.snapshot_local = true;
+        digest             = livehd::semdiff::snapshot_digest(graph.get());
+      }
+      if (!digest.valid) {
         digestable = false;
         return {};
       }
@@ -1379,12 +1375,14 @@ bool artifact_matches(const fs::path& root, const std::vector<Artifact_file>& ex
 
 void write_graph_inventory(const std::string& path, const Result& res, const std::vector<Graph_row>& rows,
                            const std::vector<std::shared_ptr<Lnast>>& lnasts, const std::vector<Artifact_file>& files,
-                           const std::vector<Stored_diag>& pipeline_diags) {
+                           const std::vector<Stored_diag>& pipeline_diags, bool whole_design_only) {
   rapidjson::StringBuffer                    sb;
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
   w.StartObject();
   w.Key("schema_version");
-  w.Int(6);
+  w.Int(7);
+  w.Key("whole_design_only");
+  w.Bool(whole_design_only);
   w.Key("code_salt");
   w.Uint64(livehd::kCompileSrcSalt);
   w.Key("context");
@@ -1516,15 +1514,16 @@ std::optional<Graph_inventory> read_graph_inventory(const Result& res) {
   rapidjson::Document doc;
   doc.Parse(text->data(), text->size());
   if (doc.HasParseError() || !doc.IsObject() || !doc.HasMember("schema_version") || !doc["schema_version"].IsInt()
-      || doc["schema_version"].GetInt() != 6 || !doc.HasMember("code_salt") || !doc["code_salt"].IsUint64()
-      || doc["code_salt"].GetUint64() != livehd::kCompileSrcSalt || !doc.HasMember("context") || !doc["context"].IsString()
-      || res.compile_cache_context != doc["context"].GetString() || !doc.HasMember("closure_key") || !doc["closure_key"].IsString()
-      || !doc.HasMember("lnast_order") || !doc["lnast_order"].IsArray() || !doc.HasMember("graphs") || !doc["graphs"].IsArray()
-      || !doc.HasMember("pipeline_diags") || !doc["pipeline_diags"].IsArray() || !doc.HasMember("artifact_files")
-      || !doc["artifact_files"].IsArray()) {
+      || doc["schema_version"].GetInt() != 7 || !doc.HasMember("whole_design_only") || !doc["whole_design_only"].IsBool()
+      || !doc.HasMember("code_salt") || !doc["code_salt"].IsUint64() || doc["code_salt"].GetUint64() != livehd::kCompileSrcSalt
+      || !doc.HasMember("context") || !doc["context"].IsString() || res.compile_cache_context != doc["context"].GetString()
+      || !doc.HasMember("closure_key") || !doc["closure_key"].IsString() || !doc.HasMember("lnast_order")
+      || !doc["lnast_order"].IsArray() || !doc.HasMember("graphs") || !doc["graphs"].IsArray() || !doc.HasMember("pipeline_diags")
+      || !doc["pipeline_diags"].IsArray() || !doc.HasMember("artifact_files") || !doc["artifact_files"].IsArray()) {
     return std::nullopt;
   }
   Graph_inventory inventory;
+  inventory.whole_design_only = doc["whole_design_only"].GetBool();
   inventory.closure_key = doc["closure_key"].GetString();
   if (!doc.HasMember("units") || !doc["units"].IsArray()) {
     return std::nullopt;
@@ -1985,7 +1984,8 @@ void save_compact_lnast(const std::shared_ptr<Lnast>& ln, const fs::path& dir, b
   }
 }
 
-std::shared_ptr<Lnast> load_compact_lnast(const std::string& dir, std::string_view expected_name) {
+std::shared_ptr<Lnast> load_compact_lnast(const std::string& dir, std::string_view expected_name,
+                                          std::optional<uint64_t> expected_hash) {
   std::ifstream is(fs::path(dir) / "tree.bin", std::ios::binary);
   if (!is.is_open()) {
     throw Lhd_error{"config", std::format("missing compact compile-cache LNAST in {}", dir), "the unit will be rebuilt cold"};
@@ -1996,7 +1996,12 @@ std::shared_ptr<Lnast> load_compact_lnast(const std::string& dir, std::string_vi
     throw Lhd_error{"config", std::format("invalid compact compile-cache LNAST in {}", dir), "the unit will be rebuilt cold"};
   }
   const auto header_hash = read_pod<uint64_t>(is);
-  const auto name        = read_string(is);
+  if (expected_hash && header_hash != *expected_hash) {
+    throw Lhd_error{"config",
+                    std::format("compact LNAST no longer matches the captured source {}", expected_name),
+                    "rerun with a separate --workdir"};
+  }
+  const auto name = read_string(is);
   if (name != expected_name) {
     throw Lhd_error{"config",
                     std::format("compile-cache LNAST '{}' does not match expected '{}'", name, expected_name),
@@ -2489,7 +2494,7 @@ std::string compile_cache_scope_name(const Options& opts, const std::vector<std:
 }
 
 size_t compile_cache_parse_sources(Options& opts, Result& res, Eprp_var& var, const std::vector<std::string>& seed_files,
-                                   bool defer_clean_lnasts) {
+                                   std::vector<Compile_source>* deferred) {
   if (seed_files.empty()) {
     return 0;
   }
@@ -2520,9 +2525,10 @@ size_t compile_cache_parse_sources(Options& opts, Result& res, Eprp_var& var, co
     res.compile_cache_prior_units.push_back(name);
   }
   std::vector<Source_unit> units;
+  Dependents               imports;
   {
     Phase_timer phase(res, "compile.cache.sync");
-    units = capture_closure(seed_files, var, prior.compatible ? &prior : nullptr, scope);
+    units = capture_closure(seed_files, var, prior.compatible ? &prior : nullptr, scope, imports);
   }
 
   auto load_prior_unit = [&](const std::string& name, const Prior_unit& row) -> std::shared_ptr<Lnast> {
@@ -2530,10 +2536,7 @@ size_t compile_cache_parse_sources(Options& opts, Result& res, Eprp_var& var, co
       return found->second;
     }
     try {
-      auto ln = load_compact_lnast(scope + "/ln/" + lnast_unit_dir(row.snapshot_file), name);
-      if (semantic_hash(*ln) != row.semantic_hash) {
-        return {};
-      }
+      auto ln = load_compact_lnast(scope + "/ln/" + lnast_unit_dir(row.snapshot_file), name, row.semantic_hash);
       prior.lnasts.emplace(name, ln);
       return ln;
     } catch (...) {
@@ -2559,7 +2562,7 @@ size_t compile_cache_parse_sources(Options& opts, Result& res, Eprp_var& var, co
           // a stale tree; the full artifact is decoded only when needed.
           if (compact_lnast_header_valid(fs::path(scope) / "ln" / lnast_unit_dir(row->second.snapshot_file),
                                          row->second.semantic_hash)
-              && (defer_clean_lnasts || (unit.lnast = load_prior_unit(unit.name, row->second)))) {
+              && (deferred || (unit.lnast = load_prior_unit(unit.name, row->second)))) {
             unit.semantic_hash         = row->second.semantic_hash;
             unit.interface_hash        = row->second.interface_hash;
             unit.exact_prior_match     = true;
@@ -2630,9 +2633,11 @@ size_t compile_cache_parse_sources(Options& opts, Result& res, Eprp_var& var, co
   if (prior.compatible) {
     std::map<std::string, Unit_match> manifest_match;
     for (const auto& unit : units) {
-      manifest_match.emplace(unit.name, Unit_match{.body = unit.exact_prior_match, .interface = unit.exact_interface_match});
+      if (prior.units.contains(unit.name)) {
+        manifest_match.emplace(unit.name, Unit_match{.body = unit.exact_prior_match, .interface = unit.exact_interface_match});
+      }
     }
-    res.compile_cache_clean_units = clean_units(units, manifest_match, prior.units.size(), inlined_dependents);
+    res.compile_cache_clean_units = clean_units(units, manifest_match, prior.units.size(), imports, inlined_dependents);
   } else {
     res.compile_cache_clean_units.clear();
   }
@@ -2653,12 +2658,12 @@ size_t compile_cache_parse_sources(Options& opts, Result& res, Eprp_var& var, co
                                             .interface = it->second.interface_hash == unit.interface_hash});
       }
     }
-    const auto generation_clean = clean_units(units, generation_match, inventory->units.size(), inlined_dependents);
+    const auto generation_clean = clean_units(units, generation_match, inventory->units.size(), imports, inlined_dependents);
     const std::set<std::string> keep(generation_clean.begin(), generation_clean.end());
     std::erase_if(res.compile_cache_clean_units, [&keep](const std::string& unit) { return !keep.contains(unit); });
   }
 
-  if (!defer_clean_lnasts) {
+  if (!deferred) {
     for (auto& unit : units) {
       var.add(unit.lnast);
     }
@@ -2670,6 +2675,9 @@ size_t compile_cache_parse_sources(Options& opts, Result& res, Eprp_var& var, co
     const std::set<std::string> clean(res.compile_cache_clean_units.begin(), res.compile_cache_clean_units.end());
     for (auto& unit : units) {
       if (clean.contains(unit.name)) {
+        if (unit.lnast) {
+          var.add(unit.lnast);  // retain a freshly parsed, semantically unchanged edit
+        }
         continue;
       }
       if (!unit.lnast) {
@@ -2704,71 +2712,60 @@ size_t compile_cache_parse_sources(Options& opts, Result& res, Eprp_var& var, co
     ++res.compile_cache.store_failed;
     throw;
   }
+  if (deferred) {
+    deferred->reserve(units.size());
+    for (auto& unit : units) {
+      deferred->push_back(
+          {unit.name, unit.path, scope + "/ln/" + lnast_unit_dir(unit.snapshot_file), std::move(unit.bytes), unit.semantic_hash});
+    }
+  }
   return units.size();
 }
 
-void compile_cache_materialize_sources(Result& res, Eprp_var& var) {
-  auto current = load_prior(res.compile_cache_scope, res.compile_cache_context, true);
-  if (!current.compatible || current.lnasts.size() != current.units.size()) {
-    ++res.compile_cache.refused;
-    throw Lhd_error{"config",
-                    "could not materialize the current hermetic compile-cache source generation",
-                    "remove the damaged compile scope or rerun with --set lhd.incremental=false"};
-  }
-  // The disk generation must be THIS run's: a concurrent compile sharing the
-  // scope may have published a different generation between our store and this
-  // re-read, and silently lowering someone else's sources would be a
-  // miscompile. Recompute the closure key from the loaded rows and compare.
-  std::vector<Source_unit> rows;
-  rows.reserve(current.units.size());
-  for (const auto& name : current.order) {
-    const auto& unit = current.units.at(name);
-    Source_unit row;
-    row.name          = name;
-    row.semantic_hash = unit.semantic_hash;
-    row.imports       = unit.imports;
-    rows.push_back(std::move(row));
-  }
-  if (closure_key(rows) != res.compile_cache_closure_key) {
-    ++res.compile_cache.refused;
-    throw Lhd_error{"config",
-                    "compile-cache scope changed while this compile was running",
-                    "another lhd process shares this --workdir scope; rerun, or use separate workdirs"};
-  }
-  // The inventory array preserves capture_closure's deterministic source
-  // order. Prior_cache::units/lnasts are maps for lookup only; iterating the
-  // map here alphabetized 500+ restored roots before a graph-cache refusal.
-  // That changed registry and CSE representative order relative to a cold
-  // parse (XS ExeUnitImp split shared Get_mask nodes), so a full fallback was
-  // semantically equal but not H5-identical. Rebuild the forest in the exact
-  // captured order.
-  // Dirty source units are already present in `var` as the freshly parsed
-  // objects. Keep those exact objects: besides avoiding a pointless decode,
-  // prp2lnast may attach transient directly-streamed lambda siblings that are
-  // deliberately not part of the compact source-wrapper serialization. Clean
-  // units still come from the just-published hermetic generation below.
+// Reconstruct the cold source order. A partial graph restore supplies its
+// own post-upass trees for replaced roots, including streamed lambdas.
+static void materialize_sources(Result& res, Eprp_var& var, const std::vector<Compile_source>& sources,
+                                const std::set<std::string>& replaced) {
   absl::flat_hash_map<std::string, std::shared_ptr<Lnast>> fresh;
-  for (auto& ln : var.lnasts) {
-    if (ln) {
-      fresh[std::string(ln->get_top_module_name())] = std::move(ln);
-    }
+  for (const auto& ln : var.lnasts) {
+    fresh.emplace(ln->get_top_module_name(), ln);
   }
-  var.lnasts.clear();
-  for (const auto& name : current.order) {
-    if (auto fit = fresh.find(name); fit != fresh.end()) {
-      var.add(std::move(fit->second));
-      fresh.erase(fit);
+  std::vector<std::shared_ptr<Lnast>> ordered;
+  std::optional<Phase_timer>          decode;
+  for (const auto& source : sources) {
+    if (replaced.contains(source.name)) {
       continue;
     }
-    auto it = current.lnasts.find(name);
-    if (it == current.lnasts.end()) {
-      ++res.compile_cache.refused;
-      throw Lhd_error{"config",
-                      "compile-cache source order references a missing LNAST",
-                      "remove the damaged compile scope or rerun with --set lhd.incremental=false"};
+    if (const auto it = fresh.find(source.name); it != fresh.end()) {
+      ordered.push_back(it->second);
+      continue;
     }
-    var.add(std::move(it->second));
+    if (!decode) {
+      decode.emplace(res, "compile.cache.load_source_trees");
+    }
+    try {
+      ordered.push_back(load_compact_lnast(source.tree_dir, source.name, source.semantic_hash));
+    } catch (const Lhd_error&) {
+      // The captured bytes remain authoritative even if another writer
+      // replaced the compact tree after the scan or its payload is damaged.
+      ++res.compile_cache.refused;
+      Prp2lnast converter(source.path, source.name, source.bytes);
+      auto      ln = converter.get_lnast();
+      if (semantic_hash(*ln) != source.semantic_hash) {
+        throw Lhd_error{"config",
+                        std::format("source cache inventory disagrees with the captured bytes of {}", source.path),
+                        "rerun with a separate --workdir or --set lhd.incremental=false"};
+      }
+      --res.compile_cache.hits;
+      ++res.compile_cache.misses;
+      ordered.push_back(std::move(ln));
+    }
   }
+  var.lnasts = std::move(ordered);
+}
+
+void compile_cache_materialize_sources(Result& res, Eprp_var& var, const std::vector<Compile_source>& sources) {
+  materialize_sources(res, var, sources, {});
 }
 
 bool compile_cache_restore_lg_artifact(Options& opts, Result& res, const std::string& lib_path) {
@@ -2851,47 +2848,52 @@ bool compile_cache_restore_lg_artifact(Options& opts, Result& res, const std::st
   return true;
 }
 
-bool compile_cache_restore_graphs(Options& opts, Result& res, Eprp_var& var, const std::string& lib_path) {
-  (void)opts;
+Graph_restore compile_cache_restore_graphs(Result& res, Eprp_var& var, const std::string& lib_path,
+                                           const std::vector<Compile_source>* deferred) {
   if (res.compile_cache_scope.empty() || res.compile_cache_closure_key.empty()) {
-    return false;
+    return Graph_restore::miss;
   }
   Phase_timer phase(res, "compile.cache.lg_lookup");
   auto        expected = read_graph_inventory(res);
   if (!expected) {
-    return false;
+    return Graph_restore::miss;
   }
   const std::set<std::string> clean(res.compile_cache_clean_units.begin(), res.compile_cache_clean_units.end());
   const bool                  full_clean
       = expected->closure_key == res.compile_cache_closure_key && clean.size() == res.compile_cache_unit_keys.size();
   res.compile_cache_overlay_graphs.clear();
+  if (!full_clean && expected->whole_design_only) {
+    return Graph_restore::miss;
+  }
+  auto refuse = [&](std::string_view reason, std::string_view unit = {}) {
+    ++res.compile_cache.refused;
+    livehd::diag::info("compile.cache", "graph-restore-refused", "cache").msg("{}{}", reason, unit).emit();
+    return Graph_restore::miss;
+  };
   try {
     check_ir_body_magic(res.compile_cache_scope + "/lg", "graph_", kHhdsGraphBodyMagic, "compile cache lg:");
     auto& cache      = livehd::Hhds_graph_library::instance(res.compile_cache_scope + "/lg");
     bool  digestable = true;
     auto  actual     = graph_rows(cache, res, digestable);
     if (!digestable || actual.size() != expected->rows.size()) {
-      ++res.compile_cache.refused;
-      return false;
+      return refuse("graph inventory size or digest changed");
     }
     for (size_t i = 0; i < actual.size(); ++i) {
       const auto& a = actual[i];
       const auto& e = expected->rows[i];
-      if (a.name != e.name || a.interface_hash != e.interface_hash || a.has_body != e.has_body || a.h0 != e.h0 || a.h1 != e.h1
-          || a.inlined != e.inlined) {
-        ++res.compile_cache.refused;
-        return false;
+      if ((!full_clean && a.snapshot_local) || a.name != e.name || a.interface_hash != e.interface_hash || a.has_body != e.has_body
+          || a.h0 != e.h0 || a.h1 != e.h1 || a.inlined != e.inlined) {
+        return refuse("graph differs from its inventory: ", a.name);
       }
       // Ownership is derived, never trusted from the manifest: changing it can
       // otherwise make a dirty graph masquerade as belonging to a clean unit.
       if (a.owner != e.owner) {
-        ++res.compile_cache.refused;
-        return false;
+        return refuse("graph owner changed: ", a.name);
       }
     }
 
     if (!full_clean && clean.empty()) {
-      return false;  // nothing restorable — leave the destination library untouched
+      return Graph_restore::miss;  // nothing restorable — leave the destination library untouched
     }
     if (!full_clean) {
       // A stored record with no derivable owner cannot be split between the
@@ -2914,8 +2916,7 @@ bool compile_cache_restore_graphs(Options& opts, Result& res, Eprp_var& var, con
             res.compile_cache_overlay_graphs.push_back(row.name);
           }
         }
-        ++res.compile_cache.refused;
-        return false;
+        return refuse("stored diagnostic has no source owner");
       }
     }
     // Units that run live instead of being restored. A default-top
@@ -3013,9 +3014,9 @@ bool compile_cache_restore_graphs(Options& opts, Result& res, Eprp_var& var, con
         }
       }
       // Specialization can retire a concrete unit's original GraphIO when
-      // every old caller used a constant-bound copy. Its cached mod/pipe tree
-      // is metadata-only, so restoring that owner would leave a dirty caller
-      // neither the original interface nor a body to lower. Rebuild just such
+      // every old caller used a constant-bound copy. Marking its source tree
+      // graph-restored would skip register_io for the original definition,
+      // including comb callees instantiated by a newly live caller. Rebuild just such
       // owners from their source trees; unrelated final graphs remain reusable.
       bool missing_concrete_body = false;
       for (const auto& ln : cached) {
@@ -3023,8 +3024,7 @@ bool compile_cache_restore_graphs(Options& opts, Result& res, Eprp_var& var, con
           continue;
         }
         const auto kind = ln->get_lambda_kind();
-        if ((kind == "mod" || kind == "pipe")
-            && !cache.find_io(std::string(ln->get_graph_name()))) {
+        if ((kind == "mod" || kind == "pipe" || kind == "comb") && !cache.find_io(std::string(ln->get_graph_name()))) {
           const auto owner = owner_of(ln->get_top_module_name(), res);
           if (!owner.empty() && run_live.insert(owner).second) {
             missing_concrete_body = true;
@@ -3118,42 +3118,17 @@ bool compile_cache_restore_graphs(Options& opts, Result& res, Eprp_var& var, con
       }
     }
 
-    // A source owner may run live only to recreate its missing original
-    // interface. Its unchanged specialized bodies are still authoritative for
-    // restored callers: close the graph restore over those dependencies before
-    // discarding other cached bodies. Never retain a body from changed source.
-    std::map<std::string, const Graph_row*> rows_by_name;
-    for (const auto& row : actual) {
-      rows_by_name.emplace(row.name, &row);
-    }
-    std::vector<std::string> dependencies(eligible_names.begin(), eligible_names.end());
-    for (size_t i = 0; i < dependencies.size(); ++i) {
-      const auto io = cache.find_io(dependencies[i]);
-      if (!io || !io->has_graph()) {
-        continue;
-      }
-      for (auto node : io->get_graph()->body().nodes()) {
+    // Never mix a final caller with a retired specialization of a live
+    // owner. Its callee can acquire different port ids during live lowering.
+    for (const auto& name : eligible_names) {
+      for (const auto node : cache.find_io(name)->get_graph()->body().nodes()) {
         if (livehd::graph_util::type_op_of(node) != Ntype_op::Sub) {
           continue;
         }
         const auto child = node.get_subnode_io();
-        if (!child) {
-          continue;
+        if (child && child->has_graph() && !eligible_names.contains(std::string(child->get_name()))) {
+          return refuse("restored graph depends on a live definition: ", child->get_name());
         }
-        const std::string name(child->get_name());
-        const auto found = rows_by_name.find(name);
-        if (eligible_names.contains(name) || found == rows_by_name.end() || !found->second->has_body) {
-          continue;
-        }
-        const auto& row = *found->second;
-        if (!row.design || row.owner.empty() || !clean.contains(row.owner) || row.unit_key.empty()
-            || row.unit_key != key_of(row.owner, res)) {
-          ++res.compile_cache.refused;
-          return false;  // no destination mutation: the normal full lowering is safe
-        }
-        eligible_names.insert(name);
-        restored_names.push_back(name);
-        dependencies.push_back(name);
       }
     }
 
@@ -3180,8 +3155,7 @@ bool compile_cache_restore_graphs(Options& opts, Result& res, Eprp_var& var, con
       const auto dio = held.contains(name) ? dst.find_io(name) : nullptr;
       const auto cio = cache.find_io(name);
       if (dio && cio && !same_declarations(*dio, *cio)) {
-        ++res.compile_cache.refused;
-        return false;
+        return refuse("destination declarations differ: ", name);
       }
     }
     for (const auto& name : eligible_names) {
@@ -3218,8 +3192,7 @@ bool compile_cache_restore_graphs(Options& opts, Result& res, Eprp_var& var, con
     for (const auto& name : eligible_names) {
       auto io = dst.find_io(name);
       if (!io || !io->has_graph()) {
-        ++res.compile_cache.refused;
-        return false;  // `var` is still untouched: the caller's full re-lower is safe
+        return refuse("restored body is missing: ", name);  // `var` is still untouched: the caller's full re-lower is safe
       }
       restored_graphs.push_back(io->get_graph());
     }
@@ -3233,6 +3206,15 @@ bool compile_cache_restore_graphs(Options& opts, Result& res, Eprp_var& var, con
       // coexist (non-imported collisions are tolerated upstream), and a plain
       // map would silently DROP every tree after the first per name while also
       // flipping cold's last-wins registry to first-wins.
+      if (deferred) {
+        std::set<std::string> replaced;
+        for (const auto& name : expected->lnast_order) {
+          if (owner_graph_restored(name)) {
+            replaced.insert(name);
+          }
+        }
+        materialize_sources(res, var, *deferred, replaced);
+      }
       std::map<std::string, std::deque<std::shared_ptr<Lnast>>> current;
       for (auto& ln : var.lnasts) {
         current[std::string(ln->get_top_module_name())].push_back(ln);
@@ -3293,18 +3275,24 @@ bool compile_cache_restore_graphs(Options& opts, Result& res, Eprp_var& var, con
       // set reproduces the cold diagnostics exactly. A partial restore was
       // already refused above when the generation carries any.
       replay_pipeline_diags(*expected);
-    } else if (restored_bodies != 0) {
+      return Graph_restore::complete;
+    }
+    if (restored_bodies != 0) {
       // A warning is not a reuse barrier. The stored owner is derived from its
       // source span (or an exact structured graph attribute), so replay only
       // records belonging to restored units; the live pipeline emits the other
       // half (a clean unit that is not restored runs live too). Unattributed
       // records deliberately stay live-only.
       replay_pipeline_diags(*expected, &restored_owners);
+      return Graph_restore::partial;
     }
-    return total;
+    return Graph_restore::miss;
+  } catch (const Lhd_error& error) {
+    return refuse(error.msg);
+  } catch (const std::exception& error) {
+    return refuse(error.what());
   } catch (...) {
-    ++res.compile_cache.refused;
-    return false;
+    return refuse("could not read the graph generation");
   }
 }
 
@@ -3328,7 +3316,7 @@ Overlay_status compile_cache_overlay_clean_graphs(Result& res, Eprp_var& var, co
   };
   try {
     auto expected = read_graph_inventory(res);
-    if (!expected) {
+    if (!expected || expected->whole_design_only) {
       return decline();
     }
     check_ir_body_magic(res.compile_cache_scope + "/lg", "graph_", kHhdsGraphBodyMagic, "compile cache lg:");
@@ -3603,7 +3591,7 @@ void compile_cache_store_graphs(Options& opts, Result& res, const Eprp_var& var,
     const size_t               end     = std::min(res.compile_cache_diag_end, records.size());
     for (size_t i = begin; i < end; ++i) {
       const auto& record = records[i];
-      if (record.severity != livehd::diag::Severity::error) {
+      if (record.severity != livehd::diag::Severity::error && record.pass != "compile.cache") {
         if (!current) {
           current = load_prior(res.compile_cache_scope, res.compile_cache_context);
         }
@@ -3646,7 +3634,8 @@ void compile_cache_store_graphs(Options& opts, Result& res, const Eprp_var& var,
     // cold Backend time; a byte copy is exact, independently owned, and keeps
     // a later overwrite of the user's lg: output from mutating the cache.
     copy_tree_files(lib_path, temp);
-    if (!var.lnasts.empty()) {
+    const bool whole_design_only = std::any_of(rows.begin(), rows.end(), [](const Graph_row& row) { return row.snapshot_local; });
+    if (!whole_design_only && !var.lnasts.empty()) {
       const auto lowered_dir = fs::path(temp) / "lowered_ln";
       fs::create_directories(lowered_dir);
       for (size_t i = 0; i < var.lnasts.size(); ++i) {
@@ -3663,7 +3652,7 @@ void compile_cache_store_graphs(Options& opts, Result& res, const Eprp_var& var,
         save_compact_lnast(var.lnasts[i], lowered_dir / lowered_lnast_dir(i), meta_only);
       }
     }
-    write_graph_inventory(temp + "/graph_inventory.json", res, rows, var.lnasts, files, pipeline_diags);
+    write_graph_inventory(temp + "/graph_inventory.json", res, rows, var.lnasts, files, pipeline_diags, whole_design_only);
     replace_dir(temp, res.compile_cache_scope + "/lg");
   } catch (...) {
     std::error_code cleanup_ec;

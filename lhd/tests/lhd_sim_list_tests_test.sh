@@ -77,52 +77,45 @@ LT1="$("$LHD" sim "$W/two.prp" cnt.gated --list-tests --diag-fmt jsonl 2>/dev/nu
 echo "$LT1" | grep -q '"name":"cnt.gated"'  || fail "selected --list-tests missing cnt.gated: $LT1"
 echo "$LT1" | grep -q '"name":"cnt.held"'   && fail "selected --list-tests must not include cnt.held: $LT1"
 
-# ---- `--setup-only` generates the single driver with the registry + flags -----
+# ---- `--setup-only` lowers every test into ONE object and writes the registry ---
 "$LHD" sim "$W/two.prp" --setup-only --workdir "$W/s" -q >/dev/null 2>&1 || fail "setup-only failed"
-DRV="$W/s/sim/drv.cpp"
-[ -f "$DRV" ] || fail "single driver drv.cpp not generated"
-[ -f "$W/s/sim/drv_cnt_held.cpp" ] && fail "a per-test driver was generated (expected one drv.cpp)"
-grep -q '_tests_json'        "$DRV" || fail "driver missing the embedded --list-tests JSON"
-grep -q '"--list-tests"'     "$DRV" || fail "driver missing --list-tests handling"
-grep -q '"--test"'           "$DRV" || fail "driver missing the --test selector"
-grep -q '_run_cnt_held'      "$DRV" || fail "driver missing the cnt.held run function"
-grep -q '_run_cnt_gated'     "$DRV" || fail "driver missing the cnt.gated run function"
-grep -q '"cnt.held"'         "$DRV" || fail "driver registry missing cnt.held"
-grep -q '"cnt.gated"'        "$DRV" || fail "driver registry missing cnt.gated"
-# no VCD machinery unless asked
-grep -q 'vcd::global_timestamp' "$DRV" && fail "non-VCD driver must not touch the VCD timeline"
+MAN="$W/s/sim/drv.tb.json"
+[ -f "$W/s/sim/drv.tb.o" ] && [ -f "$MAN" ] || fail "single testbench object/manifest not generated"
+[ -z "$(ls "$W"/s/sim/*.cpp "$W"/s/sim/*.hpp 2>/dev/null)" ] || fail "C++ was generated: $(ls "$W/s/sim")"
+grep -q '"name":"cnt.held"'  "$MAN" || fail "manifest missing the cnt.held test"
+grep -q '"name":"cnt.gated"' "$MAN" || fail "manifest missing the cnt.gated test"
+# no trace code unless asked: the simulation object has none, and the trace object exists only for a VCD run
+[ -f "$W/s/sim/drv.tb.trace.o" ] && fail "a non-VCD setup must not write the trace object"
 
-# ---- with sim.vcd, the driver resets the VCD timeline between tests -----------
+# ---- with sim.vcd, the setup also writes the trace object the replay runs ----------
 "$LHD" sim "$W/two.prp" --setup-only --set sim.vcd=true --workdir "$W/v" -q >/dev/null 2>&1 \
   || fail "setup-only (vcd) failed"
-VDRV="$W/v/sim/drv.cpp"
-grep -q '#include "vcd_writer.hpp"' "$VDRV" || fail "VCD driver does not include the VCD writer header"
-grep -q 'vcd::global_timestamp = 0' "$VDRV" || fail "VCD driver does not reset the per-test VCD timeline"
+[ -f "$W/v/sim/drv.tb.trace.o" ] || fail "a VCD setup must write the trace object (drv.tb.trace.o)"
 
-# lhd locates its declared simulator runtime files; a failed build must fail.
+SIMRT="${LHD_SIMRT:-$(dirname "$LHD")/lhd_simrt}"
+[ -x "$SIMRT" ] || fail "lhd_simrt not found next to lhd ($SIMRT)"
 
-# the built binary's --list-tests must match `lhd sim --list-tests` byte-for-byte
+# a VCD run: both tests pass and each gets its own waveform, replayed from the start
 "$LHD" sim "$W/two.prp" --set sim.vcd=true --workdir "$W/run" --diag-fmt pretty > "$W/run.out" 2>&1 \
-  || fail "fast run path failed: $(cat "$W/run.out")"
+  || fail "run failed: $(cat "$W/run.out")"
 grep -q 'PASS cnt.held'  "$W/run.out" || fail "cnt.held did not pass: $(cat "$W/run.out")"
-grep -q 'PASS cnt.gated' "$W/run.out" || fail "cnt.gated did not pass (VCD multi-test crash?): $(cat "$W/run.out")"
+grep -q 'PASS cnt.gated' "$W/run.out" || fail "cnt.gated did not pass: $(cat "$W/run.out")"
 
-BIN="$W/run/sim/drv.bin"
-[ -x "$BIN" ] || fail "the host-compiled binary $BIN was not produced"
-BIN_JSON="$("$BIN" --list-tests)"
+# the runtime's --list-tests must match `lhd sim --list-tests` byte-for-byte
+RT_JSON="$("$SIMRT" "$W/run/sim" --list-tests)"
 LHD_JSON="$("$LHD" sim "$W/two.prp" --list-tests --diag-fmt jsonl 2>/dev/null | head -1)"
-[ "$BIN_JSON" = "$LHD_JSON" ] || fail "binary --list-tests != lhd sim --list-tests:
-  bin: $BIN_JSON
+[ "$RT_JSON" = "$LHD_JSON" ] || fail "runtime --list-tests != lhd sim --list-tests:
+  rt:  $RT_JSON
   lhd: $LHD_JSON"
 
 # --test selects exactly one test
-SEL_OUT="$("$BIN" --test cnt.gated)"
+SEL_OUT="$("$SIMRT" "$W/run/sim" --test cnt.gated --no-checkpoint)"
 echo "$SEL_OUT" | grep -q 'PASS cnt.gated' || fail "--test cnt.gated did not run it: $SEL_OUT"
 echo "$SEL_OUT" | grep -q 'cnt.held'       && fail "--test cnt.gated must not run cnt.held: $SEL_OUT"
 
-# both VCDs were produced (no registration crash from the shared timeline)
+# both VCDs were produced
 [ -s "$W/run/cnt.held.vcd" ]  || fail "cnt.held.vcd not produced"
 [ -s "$W/run/cnt.gated.vcd" ] || fail "cnt.gated.vcd not produced"
 grep -q '^#0' "$W/run/cnt.gated.vcd" || fail "cnt.gated.vcd does not start at time 0"
 
-echo "PASS: lhd sim --list-tests + single fast run path (host-compile, VCD multi-test)"
+echo "PASS: lhd sim --list-tests + the single-object run path (VCD multi-test)"

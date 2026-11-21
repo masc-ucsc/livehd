@@ -1465,6 +1465,70 @@ TEST(CgenLlvm, NativeWideStateCommitHasNoExternalMemcpy) {
   std::filesystem::remove(path);
 }
 
+TEST(CgenLlvm, NarrowSpillsUseDisjointBytesAndTrackChanges) {
+  if constexpr (std::endian::native != std::endian::little) {
+    return;
+  }
+  Cgen_llvm   kernel("spill_bytes",
+                     Cgen_llvm::State_layout{
+                         2,
+                         {{0, 7, true, 0}, {0, 7, true, 8}}
+  });
+  std::string error;
+  ASSERT_TRUE(kernel.add_state_output(0,
+                                      0,
+                                      kernel.input(0),
+                                      {
+                                          {1, 1}
+  },
+                                      error,
+                                      1))
+      << error;
+  ASSERT_TRUE(kernel.add_state_output(0,
+                                      0,
+                                      kernel.input(1),
+                                      {
+                                          {1, 2}
+  },
+                                      error,
+                                      0))
+      << error;
+  ASSERT_TRUE(kernel.add_state_output(0,
+                                      0,
+                                      kernel.constant(13, 0x1337),
+                                      {
+                                          {1, 4}
+  },
+                                      error,
+                                      2))
+      << error;
+  ASSERT_TRUE(kernel.add_state_output(0,
+                                      0,
+                                      kernel.constant(23, 0x456789),
+                                      {
+                                          {1, 8}
+  },
+                                      error,
+                                      4))
+      << error;
+  EXPECT_FALSE(kernel.add_state_output(0, 0, kernel.constant(13, 0), {}, error, 1));
+  auto path = std::filesystem::temp_directory_path() / "livehd-spill-bytes.o";
+  ASSERT_TRUE(kernel.write_object(path.string(), error)) << error;
+  livehd::sim::Native_objects objects;
+  ASSERT_TRUE(objects.load(path.string(), error)) << error;
+  auto fn = objects.lookup("spill_bytes", error);
+  ASSERT_NE(fn, nullptr) << error;
+  uint64_t state[] = {0x5a34, 0};
+  fn(state, nullptr);
+  EXPECT_EQ(state[0], 0x4567891337345aULL);
+  EXPECT_EQ(state[1], 15u);
+  state[1] = 0;
+  fn(state, nullptr);
+  EXPECT_EQ(state[0], 0x45678913375a34ULL);
+  EXPECT_EQ(state[1], 3u);
+  std::filesystem::remove(path);
+}
+
 TEST(CgenLlvm, NativeStateRejectsInvalidSpans) {
   std::string error;
   Cgen_llvm   kernel("bad_state", Cgen_llvm::State_layout{4, {{0, 64, true}}});
@@ -1584,6 +1648,167 @@ TEST(CgenLlvm, OrderedMemoryWritesNeedNoPendingStorage) {
   fn(state, resources);
   EXPECT_EQ(state[3], 0u);
   EXPECT_EQ(state[4], 0u);
+  std::filesystem::remove(path);
+}
+
+// Exercise a single shifted base, several register arguments, and the
+// descriptor-backed ABI with enough independently moving regions to spill.
+TEST(CgenLlvm, SharedKernelUsesEachInstancesStateAndCacheBindings) {
+  const auto path     = std::filesystem::temp_directory_path() / "livehd-shared-kernel.o";
+  const auto cache    = path.string() + ".k";
+  size_t     revision = 0;
+  for (size_t stride : {1, 2, 3, 3}) {
+    ++revision;
+    const size_t                           slots = stride == 2 ? 3 : 10;
+    std::vector<Cgen_llvm::Kernel_binding> instances(2);
+    std::string                            shape, error;
+    for (size_t n = 0; n < instances.size(); ++n) {
+      std::vector<Cgen_llvm::State_input> inputs;
+      for (size_t i = 0; i < slots; ++i) {
+        inputs.push_back({n == 0 ? i : 32 + stride * i, 64, true});
+      }
+      Cgen_llvm kernel("instance" + std::to_string(n), Cgen_llvm::State_layout{128, inputs});
+      for (size_t i = 0; i < slots; ++i) {
+        const size_t out = inputs[i].word + 64;
+        ASSERT_TRUE(kernel.add_state_output(out,
+                                            out,
+                                            kernel.input(i),
+                                            {
+                                                {127, uint64_t{1} << (revision + n)}
+        },
+                                            error))
+            << error;
+      }
+      std::string code;
+      ASSERT_TRUE(kernel.encode_kernel(code, instances[n], error)) << error;
+      if (n == 0) {
+        shape = std::move(code);
+      } else {
+        ASSERT_EQ(code, shape);
+      }
+    }
+    size_t count = 0;
+    for (int build = 0; build < 2; ++build) {
+      ASSERT_TRUE(Cgen_llvm::write_kernel_group(shape, instances, path.string(), cache, false, count, error)) << error;
+      EXPECT_GT(count, 0u);
+    }
+    livehd::sim::Native_objects objects;
+    ASSERT_TRUE(objects.load(path.string(), error)) << error;
+    std::vector<uint64_t> state(128), expected(128);
+    for (size_t i = 0; i < 64; ++i) {
+      state[i] = expected[i] = 17 + i;
+    }
+    for (size_t n = 0; n < instances.size(); ++n) {
+      const auto fn = objects.lookup(instances[n].name, error);
+      ASSERT_NE(fn, nullptr) << error;
+      fn(state.data(), nullptr);
+      for (size_t i = 0; i < slots; ++i) {
+        const size_t offset   = n == 0 ? i : 32 + stride * i;
+        expected[offset + 64] = expected[offset];
+      }
+      expected[127] |= uint64_t{1} << (revision + n);
+      EXPECT_EQ(state, expected);
+      // An unchanged value must leave the dirty scheduler word clear.
+      state[127] = expected[127] = 0;
+      fn(state.data(), nullptr);
+      EXPECT_EQ(state, expected);
+    }
+  }
+  std::filesystem::remove(path);
+  std::filesystem::remove(cache);
+}
+
+TEST(CgenLlvm, SharedKernelBindsPackedSpillsAtDifferentBytes) {
+  if constexpr (std::endian::native != std::endian::little) {
+    GTEST_SKIP() << "Private simulator spills are byte-packed on little-endian hosts";
+  }
+  const auto                             path = std::filesystem::temp_directory_path() / "livehd-shared-byte-lanes.o";
+  const std::array<uint32_t, 2>          input_bits{56, 16};
+  const std::array<int, 2>               output_bytes{2, 7};
+  std::vector<Cgen_llvm::Kernel_binding> instances(2);
+  std::string                            shape, error;
+  for (unsigned n = 0; n < 2; ++n) {
+    Cgen_llvm kernel("copy_lane" + std::to_string(n), Cgen_llvm::State_layout{4, {{n, 7, false, input_bits[n]}}});
+    const std::vector<Cgen_llvm::Dirty_mask> dirty{{3, uint64_t{1} << n}};
+    ASSERT_TRUE(kernel.add_state_output(2, 2, kernel.input(0), dirty, error, output_bytes[n])) << error;
+    std::string code;
+    ASSERT_TRUE(kernel.encode_kernel(code, instances[n], error)) << error;
+    if (n == 0) {
+      shape = code;
+    } else {
+      ASSERT_EQ(code, shape);
+    }
+  }
+  size_t count = 0;
+  ASSERT_TRUE(Cgen_llvm::write_kernel_group(shape, instances, path.string(), {}, false, count, error)) << error;
+  livehd::sim::Native_objects objects;
+  ASSERT_TRUE(objects.load(path.string(), error)) << error;
+  std::array<uint64_t, 4> state{0xca00000000000000ull, 0xf70000, ~0ull, 0};
+  auto                    expected = state;
+  for (unsigned n = 0; n < 2; ++n) {
+    const auto fn = objects.lookup(instances[n].name, error);
+    ASSERT_NE(fn, nullptr) << error;
+    fn(state.data(), nullptr);
+    const unsigned dst = output_bytes[n] * 8;
+    expected[2]        = (expected[2] & ~(uint64_t{255} << dst)) | (((expected[n] >> input_bits[n]) & 127) << dst);
+    expected[3]        = 1ull << n;
+    EXPECT_EQ(state, expected);
+    state[3] = expected[3] = 0;
+    fn(state.data(), nullptr);
+    EXPECT_EQ(state, expected);
+  }
+  std::filesystem::remove(path);
+}
+
+TEST(CgenLlvm, ReadingTwoPackedLanesBeforeOverwritingTheirWord) {
+  const auto  path = std::filesystem::temp_directory_path() / "livehd-coalesced-lanes.o";
+  Cgen_llvm   kernel("read_two_lanes",
+                     Cgen_llvm::State_layout{
+                         2,
+                         {{0, 7, true, 1}, {0, 17, true, 40}},
+                         true
+  });
+  std::string error;
+  ASSERT_TRUE(kernel.add_state_output(0, 0, kernel.input(0), {}, error)) << error;
+  ASSERT_TRUE(kernel.add_state_output(1, 1, kernel.input(1), {}, error)) << error;
+  ASSERT_TRUE(kernel.write_object(path.string(), error)) << error;
+  livehd::sim::Native_objects objects;
+  ASSERT_TRUE(objects.load(path.string(), error)) << error;
+  auto fn = objects.lookup("read_two_lanes", error);
+  ASSERT_NE(fn, nullptr) << error;
+  const uint64_t          input = 0x01ac3400000000feull;
+  std::array<uint64_t, 2> state{input, 0};
+  fn(state.data(), nullptr);
+  EXPECT_EQ(state[0], (input >> 1) & 127);
+  EXPECT_EQ(state[1], (input >> 40) & 0x1ffff);
+  std::filesystem::remove(path);
+}
+
+TEST(CgenLlvm, CommitCopiesOnlyPendingWordsInInstanceFrames) {
+  Cgen_llvm                          kernel("scatter_commit", Cgen_llvm::State_layout{128, {}});
+  std::vector<Cgen_llvm::State_span> spans;
+  std::vector<uint64_t>              state(128);
+  for (size_t i = 0; i < state.size(); ++i) {
+    state[i] = 1 + i;
+  }
+  auto   expected = state;
+  size_t source   = 64;
+  for (size_t i = 0; i < 12; ++i) {
+    spans.push_back({i * 4, i % 3 + 1});
+    for (size_t j = 0; j < spans.back().words; ++j) {
+      expected[i * 4 + j] = state[source++];
+    }
+  }
+  std::string error;
+  ASSERT_TRUE(kernel.commit_state(64, spans, error)) << error;
+  auto path = std::filesystem::temp_directory_path() / "livehd-scatter-commit.o";
+  ASSERT_TRUE(kernel.write_object(path.string(), error)) << error;
+  livehd::sim::Native_objects objects;
+  ASSERT_TRUE(objects.load(path.string(), error)) << error;
+  auto fn = objects.lookup("scatter_commit", error);
+  ASSERT_NE(fn, nullptr) << error;
+  fn(state.data(), nullptr);
+  EXPECT_EQ(state, expected);
   std::filesystem::remove(path);
 }
 

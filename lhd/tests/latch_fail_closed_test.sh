@@ -300,7 +300,7 @@ expect_fail_with "sim on a NON-ICG derived clock" "a Clock is not data" \
   "$LHD" sim "$W/derived.prp" --setup-only --workdir "$W/dwd"
 
 # The front ends refuse a derived clock (Pyrope by type, the slang reader by
-# ruling 81), but a netlist the yosys reader builds still reaches inou.cgen.sim
+# ruling 81), but a netlist the yosys reader builds still reaches `lhd sim`
 # with one: its own refusal must stay fail-closed, never simulate the gate as
 # dead code.
 cat > "$W/dxor.v" <<'EOF'
@@ -322,7 +322,7 @@ test dxor.smoke {
 EOF
 "$LHD" compile "$W/dxor.v" --reader yosys --top dxor --emit-dir lg:"$W/dxlg/" --workdir "$W/dxw" >"$W/dx.log" 2>&1 \
   || { tail -3 "$W/dx.log"; fail "the yosys reader no longer compiles a derived-clock netlist (the sim refusal below is untested)"; }
-expect_fail_with "sim on a yosys-read derived clock" "gated-clock-unsupported" \
+expect_fail_with "sim on a yosys-read derived clock" "neither the clock nor a clock gate" \
   "$LHD" sim lg:"$W/dxlg" "$W/dxor_tb.prp" --setup-only --workdir "$W/dxs"
 
 # ---- 5: LIFTED BY M6 — a second clock domain now simulates -------------------

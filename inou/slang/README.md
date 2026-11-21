@@ -388,11 +388,7 @@ accept an unsupported LEC verdict. Ordinary roundtrips still use LEC.
    `sim.unknown_zero=true`. Native simulation is cycle-based: each `step` is
    one reference-clock cycle, so edge polarity, a reset asserted between edges,
    and sub-cycle toggles are not observable there. Pin those with step 1.
-3. A design native simulation refuses declares `// :sim_unsupported: TEXT`
-   instead of a `_tb.prp`; the refusal (exit 7, class `unsupported`, `TEXT` in
-   the message) is required, so a newly supported schedule fails until it gets
-   a testbench.
-4. An optional `<stem>_tb.v` event-level bench (it must `$fatal` on mismatch)
+3. An optional `<stem>_tb.v` event-level bench (it must `$fatal` on mismatch)
    runs under Icarus only with `LHD_EXTERNAL_SIM=1`, for example
    `bazel test --test_env=LHD_EXTERNAL_SIM=1 //inou/slang:slang_writer_divclk`
    with iverilog/vvp on `PATH`. The default suite needs no external simulator.

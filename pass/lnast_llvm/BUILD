@@ -12,7 +12,6 @@ cc_library(
     hdrs = [
         "lnast_llvm.hpp",
         "lnast_sim.hpp",
-        "lnast_sim_rt.hpp",
     ],
     copts = COPTS,
     includes = ["."],
@@ -22,12 +21,12 @@ cc_library(
         "//core:file_name",
         "//graph",
         "//inou/cgen:inou_cgen",
-        "//inou/cgen:sim_tune_hdrs",
         "//lnast",
         "//pass/lg2lnast:pass_lg2lnast",
         "//upass/aeg:upass_aeg",
         "@abseil-cpp//absl/container:flat_hash_map",
         "@abseil-cpp//absl/container:flat_hash_set",
+        "@hlop//hlop",
     ],
 )
 
@@ -47,7 +46,7 @@ sh_test(
     name = "lnast_llvm_diff_test",
     size = "medium",
     srcs = ["tests/lnast_llvm_diff_test.sh"],
-    # Each design pays a reference-simulator host compile; spread them.
+    # Shard the independent designs and kernel variants.
     shard_count = 6,
     data = glob(["tests/*.sv", "tests/*.prp", "tests/gen_tb.py"]) + ["//lhd", ":lnast_llvm_run"],
 )

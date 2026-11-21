@@ -93,9 +93,9 @@ if [ "$part" = all ] || [ "$part" = routing ] || [ "$part" = ln ]; then
 fi
 
 if [ "$part" = all ] || [ "$part" = routing ]; then
-# ---- 1. the positional forms set up a driver AND the DUT body ---------------
-# (the DUT body is what proves the lg: library joined the design; a name-only
-# absorb would have left `sim` with nothing synthesizable to emit)
+# ---- 1. the positional forms set up the testbench object AND the DUT kernels --
+# (the DUT kernels prove the lg: library joined the design; a name-only absorb
+# would have left `sim` with nothing synthesizable to emit)
 for kind in lg ln; do
   case $kind in
     lg) IN="lg:$W/L/"  ; TB="$W/tb_lg.prp" ;;
@@ -103,9 +103,9 @@ for kind in lg ln; do
   esac
   "$LHD" sim "$IN" "$TB" --setup-only --workdir "$W/s_$kind" -q --result-json "$W/rs_$kind.json" \
     || fail "sim over $kind: failed: $(cat "$W/rs_$kind.json" 2>/dev/null)"
-  [ -f "$W/s_$kind/sim/drv.cpp" ] || fail "sim over $kind: generated no driver"
-  [ -s "$W/s_$kind/sim/dut.cnt.cpp" ] || fail "sim over $kind: generated no DUT body (dut.cnt.cpp): $(ls "$W/s_$kind/sim")"
-  grep -q '_run_dutmod_held' "$W/s_$kind/sim/drv.cpp" || fail "sim over $kind: driver misses the dutmod.held test"
+  [ -f "$W/s_$kind/sim/drv.tb.o" ] || fail "sim over $kind: generated no testbench object"
+  ls "$W/s_$kind/sim"/*cnt*.dut.json >/dev/null 2>&1 || fail "sim over $kind: generated no DUT kernels (cnt.dut.json): $(ls "$W/s_$kind/sim")"
+  grep -q '"name":"dutmod.held"' "$W/s_$kind/sim/drv.tb.json" || fail "sim over $kind: manifest misses the dutmod.held test"
 done
 
 # ---- 2. --in KIND:DIR is the same input as the positional -------------------
@@ -116,7 +116,7 @@ for kind in lg ln; do
   esac
   "$LHD" sim --in "$IN" "$TB" --setup-only --workdir "$W/i_$kind" -q --result-json "$W/ri_$kind.json" \
     || fail "sim --in $kind: failed: $(cat "$W/ri_$kind.json" 2>/dev/null)"
-  [ -s "$W/i_$kind/sim/dut.cnt.cpp" ] || fail "sim --in $kind: generated no DUT body"
+  ls "$W/i_$kind/sim"/*cnt*.dut.json >/dev/null 2>&1 || fail "sim --in $kind: generated no DUT kernels"
 done
 fi
 
@@ -147,12 +147,10 @@ grep -q 'simulated modules: cnt'        <<<"$out" || fail "the error must list t
 { echo '// const cnt = import("stale.leftover")'; cat "$W/tb_lg.prp"; } > "$W/tb_cmt.prp"
 "$LHD" sim lg:"$W/L/" "$W/tb_cmt.prp" --setup-only --workdir "$W/s_cmt" -q --result-json "$W/r_cmt.json" \
   || fail "a commented-out import broke the live one: $(cat "$W/r_cmt.json" 2>/dev/null)"
-grep -q 'std::make_unique<dut_cnt>()' "$W/s_cmt/sim/drv.cpp" \
-  || fail "driver bound the wrong DUT: $(grep -n '_dut_storage_acc' "$W/s_cmt/sim/drv.cpp")"
-grep -q 'auto& acc = \*_dut_storage_acc' "$W/s_cmt/sim/drv.cpp" \
-  || fail "driver did not preserve the DUT reference surface: $(grep -n '_dut_storage_acc' "$W/s_cmt/sim/drv.cpp")"
-! grep -q 'dut_cnt acc;' "$W/s_cmt/sim/drv.cpp" \
-  || fail "driver put the DUT back on the thread stack"
+# the live import binds the DUT (the commented one above it must not): the test runs and passes
+"$LHD" sim lg:"$W/L/" "$W/tb_cmt.prp" --workdir "$W/run_cmt" --diag-fmt pretty > "$W/run_cmt.out" 2>&1 \
+  || fail "a commented-out import broke the live one: $(cat "$W/run_cmt.out")"
+grep -q 'PASS dutmod.held' "$W/run_cmt.out" || fail "the live import did not bind the DUT: $(cat "$W/run_cmt.out")"
 fi
 
 if [ "$part" = all ] || [ "$part" = hierarchy ]; then

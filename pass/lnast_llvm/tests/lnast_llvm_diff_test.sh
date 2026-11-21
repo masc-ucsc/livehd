@@ -1,15 +1,8 @@
 #!/bin/bash
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #
-# M3 differential: the native kernels generated straight from the typed LNAST
-# (`lhd pass lnast-llvm`, no lgraph cgen) must reproduce, cycle for cycle, what
-# the existing `lhd sim` flow (lg -> cgen_sim, llvm backend) shows a Pyrope
-# testbench after every `step`. Both sides are driven by the same closed-form
-# stimulus (tests/gen_tb.py documents it), so the two TRACE streams are
-# compared byte for byte.
-#
-# Each design is independent (its own directory), and most of a design's time is
-# the reference simulator's host compile, so the designs run a few at a time.
+# Compare native kernel schedules and the Pyrope testbench driver cycle by cycle.
+# LHD_EXTERNAL_SIM adds original RTL simulation for selected designs.
 set -uo pipefail
 LHD="${LHD:-lhd/lhd}"
 LHD_ABS="$(cd "$(dirname "$LHD")" && pwd)/$(basename "$LHD")"
@@ -43,11 +36,21 @@ one_design() {
     python3 -I "$SRC/gen_tb.py" "$d/k/kernel.json" "$top" "$top" "$CYCLES" 1 >"$d/tb.prp" || { fail "$design: testbench generation"; return 1; }
   fi
   "$RUN" "$d/k" "$CYCLES" >"$d/new.trace" || { fail "$design: kernel run failed"; return 1; }
-  (cd "$d" && LHD_SIM_LNAST=0 "$LHD_ABS" sim lg:lg tb.prp --workdir w --set sim.init_zero=true -q >sim.log 2>&1) \
+  # the reference: the same design driven by the generated Pyrope testbench through `lhd sim` (a different driver than
+  # the standalone kernel runner above)
+  (cd "$d" && "$LHD_ABS" sim lg:lg tb.prp --workdir w --set sim.init_zero=true --diag-fmt pretty >sim.log 2>&1) \
     || { cat "$d/sim.log" >&2; fail "$design: reference sim failed"; return 1; }
-  "$d/w/sim/drv.bin" --set sim.init_zero=true 2>&1 | grep -a 'puts:TRACE' | sed 's/.*puts://' >"$d/ref.trace"
+  grep -a 'puts:TRACE' "$d/sim.log" | sed 's/.*puts://' >"$d/ref.trace"
   [ "$(wc -l <"$d/ref.trace")" -eq "$CYCLES" ] || { fail "$design: reference trace has $(wc -l <"$d/ref.trace") lines, want $CYCLES"; return 1; }
   cmp -s "$d/new.trace" "$d/ref.trace" || { diff "$d/new.trace" "$d/ref.trace" | head -10 >&2; fail "$design: traces differ"; return 1; }
+  case "${LHD_EXTERNAL_SIM:-}:$design" in
+    ?*:comb_reg|?*:reduce_shift|?*:setmask|?*:repeated_state)
+      python3 -I "$SRC/gen_tb.py" "$d/k/kernel.json" "$top" "$top" "$CYCLES" --iverilog >"$d/oracle.sv" &&
+        iverilog -g2012 -s oracle -o "$d/oracle" "$SRC/$design.sv" "$d/oracle.sv" &&
+        vvp "$d/oracle" >"$d/rtl.trace" &&
+        diff -u "$d/rtl.trace" "$d/ref.trace" || { fail "$design: Icarus RTL trace differs"; return 1; }
+      ;;
+  esac
   # The same design cut into many small kernels: values crossing kernels through state words,
   # registers that can no longer be written in place (pending words and the commit copy). A small
   # design is otherwise always ONE kernel, so only the large benchmarks would ever run these paths.
@@ -69,6 +72,20 @@ one_design() {
     cmp -s "$d/gated$chunk.trace" "$d/ref.trace" \
       || { diff "$d/gated$chunk.trace" "$d/ref.trace" | head -10 >&2; fail "$design: gated traces differ (chunk $chunk)"; return 1; }
   done
+  if [ "$design" = repeated_state ]; then
+    python3 -I - "$d/kg1/kernel.json" <<'CHECK_LAYOUT' || { fail "$design: expected shared code and distinct instance frames"; return 1; }
+import json
+import sys
+
+with open(sys.argv[1]) as f:
+    dut = json.load(f)
+assert len(dut["objects"]) < len(dut["edge"]) + len(dut["settle"])
+words = {reg["name"]: reg["word"] for reg in dut["regs"]}
+frames = [(words[f"lanes_{i}_lane.acc"], words[f"lanes_{i}_lane.prev"]) for i in range(4)]
+assert len({word for frame in frames for word in frame}) == 8, frames
+assert len({previous - accumulator for accumulator, previous in frames}) == 1, frames
+CHECK_LAYOUT
+  fi
   if [ "$kind" = prp ]; then
     # Loops stay rolled, except an innermost loop of fewer than five trips. The same trace must come
     # out with every loop rolled, with every loop unrolled, and with lane access at an index-dependent
@@ -89,7 +106,7 @@ one_design() {
 # clock-phase cases (a negedge register against a posedge one; a hi/lo latch pair that is a ring).
 # inst_ring: instances that depend on each other in a ring, and one that reads its own output.
 SV="comb_reg reset_enable reduce_shift struct_port hier async_reset m3_memory m3_memory_array mem_reset mem_reload mem_update
-    mem_collide nary_ops mem_bytes setmask negedge_reg latch_pair inst_ring"
+    mem_collide nary_ops mem_bytes setmask negedge_reg latch_pair inst_ring repeated_state"
 # Pyrope designs. Compact loops: a `for` with its body inline -- carries, finals, nested loops, a
 # memory read in place (also while this cycle's write to it is visible), strided domains, calls in the
 # body. loop_lanes: lanes of a wide value read and written at index-dependent positions. clock_gate: a register on `Clock(clock_pin=, enable=)` next to one on the free clock.

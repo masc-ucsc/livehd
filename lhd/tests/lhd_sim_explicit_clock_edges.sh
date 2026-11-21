@@ -15,11 +15,7 @@ if [ "${NEGSOLE:-prp}" = verilog ]; then
     }
   SIM_ARGS=(lg:"$W/lg" lhd/tests/sim_negsole_standin_tb.prp)
 fi
-for backend in slop llvm; do
-  "$LHD" sim "${SIM_ARGS[@]}" \
-    --workdir "$W/$backend" --set sim.tune.profile=off \
-    --set "sim.tune.backend=$backend" >"$W/$backend.log" 2>&1 || {
-      cat "$W/$backend.log"
-      exit 1
-    }
-done
+"$LHD" sim "${SIM_ARGS[@]}" --workdir "$W/sim" >"$W/sim.log" 2>&1 || {
+  cat "$W/sim.log"
+  exit 1
+}

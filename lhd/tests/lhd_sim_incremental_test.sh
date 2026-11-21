@@ -1,43 +1,9 @@
 #!/bin/bash
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #
-# Incremental regeneration of the sim tree. `lhd sim --setup-only` re-emits the
-# C++ for every module whose structural digest moved, and File_output skips the
-# write when the bytes are unchanged — so a generated file's MTIME is the signal
-# the host build keys on. This
-# test pins the properties that make the host build incremental, and the ones
-# that make the reuse SOUND:
-#
-#   1. re-running setup with nothing changed rewrites NO generated file;
-#   2. a COMMENT-only Pyrope edit rewrites NO generated file (the digest is
-#      structural, so the change never reaches the emitter);
-#   3. a BODY-only edit to a leaf rewrites the occurrence-root color source and
-#      NOT the leaf storage interface. Ordinary children no longer own evaluator
-#      methods; the root color TU is where their logic lives.
-#   4. the occurrence ROOT — the expensive module, and the one that used to be
-#      excluded from reuse entirely — has a generation record listing its
-#      COMPLETE artifact set, and its key is HIERARCHICAL (a leaf body edit
-#      moves it, because the root's code is derived from a plan over the whole
-#      cone while its own body hash is unchanged);
-#   5. deleting one recorded artifact is a cold miss, not a partial hit.
-#
-# Plus, using the built-in builder, the end-to-end consequence: a second build
-# with nothing changed compiles nothing at all (6), and an interface change
-# rebuilds the parent through its depfile (7).
-#
-#   8. a default generic specialization (named after its template) survives a
-#      partial graph restore, and the regenerated sim executes the edited
-#      sibling (checked against an lhd.incremental=false oracle).
-#
-# Usage: lhd_sim_incremental_test.sh [rebuild|identity]. `rebuild` (the
-# default) runs steps 1-7 and `identity` runs step 8; they are two bazel
-# targets only to keep each under the per-test runtime budget.
-#
-# Steps 1-5 drive only --setup-only, so they need no host compiler.
-#
-# Rewrites are detected with `find -newer <marker>`, not by reading timestamps:
-# a whole-second stamp cannot see two setups that land in the same second, and
-# that made an earlier version of this test pass steps 1-2 vacuously.
+# Incremental compile + `lhd sim`: a default generic specialization (named after its template) survives a partial graph
+# restore, and the regenerated simulator executes the edited sibling (checked against an lhd.incremental=false oracle).
+# (The generated-C++ rewrite checks this test used to carry went with the C++ driver: `lhd sim` writes no sources now.)
 
 set -u
 
@@ -49,207 +15,6 @@ fail() {
   echo "FAIL: $*" >&2
   exit 1
 }
-
-part="${1:-rebuild}"
-case "$part" in
-rebuild | identity) ;;
-*) fail "unknown part '$part' (expected rebuild or identity)" ;;
-esac
-
-# ======================== part `rebuild`: steps 1-7 ========================
-if [ "$part" = rebuild ]; then
-
-# A leaf whose body can change without its ports changing, and a parent that
-# instantiates it — so the parent's object depends on the leaf's header.
-cat > "$W/leaf.prp" <<'EOF'
-pub comb leaf(a:U8, b:U8) -> (s:U8) {
-  s = (a | b)#[0..=7]
-}
-EOF
-
-cat > "$W/top.prp" <<'EOF'
-const leaf = import("leaf.leaf")
-pub comb top(x:U8, y:U8) -> (o:U8) {
-  mut inst = leaf::[name=inst](a = x, b = y)
-  o = inst.s
-}
-EOF
-
-cat > "$W/tb.prp" <<'EOF'
-const top = import("top.top")
-test top.hello(cycles:U20 = 4) {
-  mut acc = top
-  mut got = 0
-  tick cycles {
-    acc.x = 0xF0
-    acc.y = 0x0F
-    step
-    got = acc.o
-  }
-  puts("hello world: got={got}")
-}
-EOF
-
-# Steps 1-7 pin the reference C++ (Slop) backend: they assert which generated
-# C++ sources a body edit rewrites and how the host build reuses their objects.
-# Under the default LLVM backend a circuit edit lands in a native color object
-# instead, so these source-level checks are about the Slop emitter.
-BE=(--set sim.tune.backend=slop)
-
-setup() {
-  "$LHD" sim "$W/tb.prp" "${BE[@]}" --set compile.upass.inline=false --setup-only --workdir "$W/wd" >"$W/setup.log" 2>&1 \
-    || { cat "$W/setup.log" >&2; fail "lhd sim --setup-only failed"; }
-}
-
-# rewritten -> basenames of the generated C++ files touched since $W/marker.
-rewritten() {
-  find "$W/wd/sim" \( -name '*.hpp' -o -name '*.cpp' \) -newer "$W/marker" \
-    -exec basename {} \; 2>/dev/null | sort | tr '\n' ' '
-}
-
-setup
-n_files=$(find "$W/wd/sim" \( -name '*.hpp' -o -name '*.cpp' \) | wc -l | tr -d ' ')
-[ "$n_files" -ge 4 ] || fail "expected at least 4 generated C++ files, got $n_files"
-
-# ---- 1. nothing changed: no file may be rewritten -----------------------------
-touch "$W/marker"
-setup
-got=$(rewritten)
-[ -z "$got" ] || fail "a no-op re-setup rewrote: $got (File_output is not write-if-different)"
-
-# ---- 2. comment-only edit: still no file may be rewritten ---------------------
-printf '\n// a comment carries no structure\n' >> "$W/leaf.prp"
-touch "$W/marker"
-setup
-got=$(rewritten)
-[ -z "$got" ] || fail "a comment-only Pyrope edit rewrote: $got"
-
-# ---- 3. body-only edit: root color source, NOT the leaf storage interface -----
-# `|` -> `&` keeps every port width identical, so the interface is untouched.
-cp "$W/wd/sim/leaf.leaf.cpp" "$W/leaf.cpp.before"
-cp "$W/wd/sim/leaf.leaf.hpp" "$W/leaf.hpp.before"
-cp "$W/wd/sim/top.top.cpp" "$W/top.cpp.before"
-sed -e 's/(a | b)/(a \& b)/' "$W/leaf.prp" > "$W/leaf.new" && mv "$W/leaf.new" "$W/leaf.prp"
-grep -q '(a & b)' "$W/leaf.prp" || fail "the body edit did not apply (test bug)"
-touch "$W/marker"
-setup
-
-# Content first, so a mechanism failure cannot be read as an emitter failure.
-if cmp -s "$W/top.cpp.before" "$W/wd/sim/top.top.cpp"; then
-  fail "the body edit produced identical root color C++ — occurrence lowering never saw it"
-fi
-cmp -s "$W/leaf.cpp.before" "$W/wd/sim/leaf.leaf.cpp" \
-  || fail "a body-only edit rewrote the leaf storage implementation; module-local evaluation returned"
-cmp -s "$W/leaf.hpp.before" "$W/wd/sim/leaf.leaf.hpp" \
-  || fail "a body-only edit changed the leaf's storage interface"
-
-got=$(rewritten)
-[ -n "$got" ] || fail "the leaf's .cpp content changed but no file registered as rewritten (mtime granularity?)"
-case "$got" in
-*.hpp*) fail "a body-only edit rewrote a HEADER, so every parent needlessly rebuilds; rewritten: $got" ;;
-esac
-case "$got" in
-*top.top.cpp*) ;;
-*) fail "a body-only leaf edit did not rewrite the occurrence-root source: $got" ;;
-esac
-echo "  body-only edit rewrote root color sources: $got"
-
-# ---- 4. the OCCURRENCE-ROOT is cached too, with its complete artifact set ----
-# The root owns the evaluator/commit shards, the color runtime and kernel
-# headers, and (LLVM backend) one object per color — i.e. everything expensive.
-# It used to be excluded from reuse outright, so a no-change rebuild still paid
-# the whole generation. Two properties make the reuse sound, and both are
-# checked here because both fail silently:
-#
-#   a) the root has a record AND the record lists more than the {hpp,cpp,json}
-#      triple, so a hit restores everything it emitted rather than a subset;
-#   b) a leaf BODY edit moves the ROOT's key — the root's code is derived from
-#      an occurrence plan spanning the whole cone, while its own body hash never
-#      moves for a leaf edit, so a non-hierarchical key would reuse stale
-#      root C++ against a changed child. That is a miscompile, not a slow build.
-setup
-DIG="$W/wd/sim/gen_digests.json"
-[ -f "$DIG" ] || fail "no gen_digests.json was written"
-
-root_record() {
-  python3 - "$DIG" <<'PY'
-import json, sys
-mods = json.load(open(sys.argv[1]))["modules"]
-r = mods.get("top.top")
-print("MISSING" if r is None else "%s %d" % (r["d"], len(r["f"])))
-PY
-}
-
-read -r root_key root_files <<EOF
-$(root_record)
-EOF
-[ "$root_key" != MISSING ] \
-  || fail "the occurrence-root 'top.top' has no generation record — the color root is excluded from reuse again"
-[ "${root_files:-0}" -gt 3 ] \
-  || fail "the root recorded only $root_files artifact(s); it emits color runtime/kernel headers too, and a record that omits them lets a hit restore an incomplete tree"
-
-sed -e 's/(a & b)/(a ^ b)/' "$W/leaf.prp" > "$W/leaf.new" && mv "$W/leaf.new" "$W/leaf.prp"
-grep -q '(a ^ b)' "$W/leaf.prp" || fail "the second body edit did not apply (test bug)"
-setup
-read -r root_key2 _ <<EOF
-$(root_record)
-EOF
-[ "$root_key2" != "$root_key" ] \
-  || fail "a LEAF body edit left the root's generation key unchanged ($root_key) — the key is not hierarchical, so stale root C++ would be reused against a changed child"
-
-# ---- 5. a missing recorded artifact is a COLD MISS, never a partial hit ------
-# Delete one file the record names and re-run: the emitter must notice and
-# rewrite it. A cache that only checks its digest would skip and leave the host
-# build referencing a file that is not there.
-victim=$(python3 - "$DIG" <<'PY'
-import json, sys
-print(json.load(open(sys.argv[1]))["modules"]["top.top"]["f"][0])
-PY
-)
-rm -f "$W/wd/sim/$victim"
-setup
-[ -f "$W/wd/sim/$victim" ] \
-  || fail "deleting the recorded artifact '$victim' did not force a re-emission — an incomplete tree reads as a hit"
-
-# ---- 6. compile-only stops at drv.bin; a second build compiles nothing -------
-if ! "$LHD" sim "$W/tb.prp" --run-only "${BE[@]}" --set sim.compile_only=true --set sim.tune.profile=off \
-  --diag-fmt pretty --workdir "$W/wd" >"$W/build1.log" 2>&1; then
-  cat "$W/build1.log" >&2
-  fail "generated simulator host build failed"
-fi
-[ -x "$W/wd/sim/drv.bin" ] || fail "compile-only did not produce drv.bin"
-grep -qa "hello world" "$W/build1.log" && fail "compile-only executed the testbench"
-[ ! -e "$W/wd/sim/build.ninja" ] && [ ! -e "$W/wd/sim/BUILD" ] || fail "a bazel/ninja build file was written next to the generated sources"
-
-# A second build must neither compile nor link.
-touch "$W/build-marker"
-"$LHD" sim "$W/tb.prp" --run-only "${BE[@]}" --set sim.compile_only=true \
-  --set sim.tune.profile=off --workdir "$W/wd" >"$W/build2.log" 2>&1 \
-  || { cat "$W/build2.log" >&2; fail "warm build failed"; }
-[ -z "$(find "$W/wd/sim" \( -name '*.o' -o -name drv.bin \) -newer "$W/build-marker")" ] \
-  || fail "a warm build rewrote objects or relinked the simulator"
-
-# ---- 7. an INTERFACE change must reach the parent, via the depfile ------------
-# The parent's object depends on the leaf's header only through the compiler's
-# `-MD` depfile, which the builder reads. If that
-# dependency is lost, header edits stop rebuilding the parent. So assert the
-# parent actually rebuilds.
-sed -e 's/b:U8/b:U7/' "$W/leaf.prp" > "$W/leaf.new" && mv "$W/leaf.new" "$W/leaf.prp"
-grep -q 'b:U7' "$W/leaf.prp" || fail "the interface edit did not apply (test bug)"
-sed -e 's/b = y/b = y#[0..=6]/' "$W/top.prp" > "$W/top.new" && mv "$W/top.new" "$W/top.prp"
-setup
-touch "$W/build-marker"
-"$LHD" sim "$W/tb.prp" --run-only "${BE[@]}" --set sim.compile_only=true \
-  --set sim.tune.profile=off --workdir "$W/wd" >"$W/build3.log" 2>&1 \
-  || { cat "$W/build3.log" >&2; fail "interface rebuild failed"; }
-for obj in leaf.leaf.o top.top.o; do
-  [ -n "$(find "$W/wd/sim" -name "$obj" -newer "$W/build-marker")" ] \
-    || fail "an interface change did not rebuild $obj"
-done
-
-echo "PASS (steps 1-7): warm rebuild is a no-op; interface changes rebuild dependents"
-exit 0
-fi
 
 # ======================== part `identity`: step 8 ==========================
 # ---- 8. default generic specialization: partial graph restore + sim regen ----
@@ -286,7 +51,7 @@ identity_run() {
   local tag=$1 wd=$2 expected=$3
   shift 3
   "$LHD" sim "$IW/tb.prp" --workdir "$wd" "+expected=$expected" \
-    --set lhd.jobs=4 --set sim.tune.profile=off --result-json "$IW/$tag.json" "$@" >"$IW/$tag.log" 2>&1 \
+    --set lhd.jobs=4 --result-json "$IW/$tag.json" "$@" >"$IW/$tag.log" 2>&1 \
     || { cat "$IW/$tag.log" >&2; fail "default-specialization simulation failed ($tag)"; }
 }
 identity_run cold "$IW/w" 3
@@ -300,3 +65,31 @@ PY
 identity_run oracle "$IW/oracle" 2 --set lhd.incremental=false
 
 echo "PASS (step 8): default specialization uses the edited sibling after partial graph reuse"
+
+# The testbench object's verified content key survives an unchanged setup. A
+# damaged object or a testbench-only source change must each force regeneration.
+object="$IW/w/sim/drv.tb.o"
+touch -t 200001010101 "$object"
+identity_run warm "$IW/w" 2 --set sim.dump_bitcode=true --set sim.vcd=true
+python3 - "$IW/w/sim" <<'PYBC' || fail "missing or invalid LLVM bitcode"
+import pathlib, sys
+objects = list(pathlib.Path(sys.argv[1]).glob("*.o"))
+assert any(p.name.endswith(".llvm.o") for p in objects)
+assert {"drv.tb.o", "drv.tb.trace.o"}.issubset(p.name for p in objects)
+for path in objects:
+    assert path.with_suffix(".bc").read_bytes()[:4] in (b"BC\xc0\xde", b"\xde\xc0\x17\x0b"), path
+PYBC
+[ "$object" -ot "$IW/warm.json" ] || fail "unchanged object was republished"
+python3 - "$object" <<'PY' || fail "testbench object cache missed"
+import os, sys
+assert os.stat(sys.argv[1]).st_mtime < 1000000000
+PY
+cp "$object" "$IW/clean.o"
+echo damaged > "$object"
+identity_run repair "$IW/w" 2
+compgen -G "$IW/w/sim/*.bc" >/dev/null && fail "obsolete bitcode survived setup"
+cmp "$object" "$IW/clean.o" || fail "did not restore the correct native object"
+sed 's/dut.y == expected/dut.y + 1 == expected/' "$IW/tb.prp" > "$IW/tb.new" && mv "$IW/tb.new" "$IW/tb.prp"
+identity_run tbedit "$IW/w" 3
+cmp -s "$object" "$IW/clean.o" && fail "testbench-only edit reused stale code"
+exit 0

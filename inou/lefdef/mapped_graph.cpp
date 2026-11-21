@@ -2,6 +2,7 @@
 #include "mapped_graph.hpp"
 
 #include <map>
+#include <set>
 #include <stdexcept>
 #include <vector>
 
@@ -44,6 +45,7 @@ std::shared_ptr<hhds::Graph> mapped_graph(hhds::GraphLibrary& library, const Flo
     node.set_subnode(master);
     nodes.emplace(cell.name, node);
   }
+  std::set<std::pair<std::string, std::string>> connected_inputs;
   for (const auto& net : fp.nets) {
     std::vector<hhds::Pin_class> drivers;
     std::vector<hhds::Pin_class> sinks;
@@ -67,6 +69,9 @@ std::shared_ptr<hhds::Graph> mapped_graph(hhds::GraphLibrary& library, const Flo
         if (!output && declaration.direction != "INPUT") {
           throw std::runtime_error("unsupported DEF signal direction: " + pin.instance + ":" + pin.pin);
         }
+        if (!output) {
+          connected_inputs.emplace(pin.instance, pin.pin);
+        }
         physical = output ? node.create_driver_pin(pin.pin) : node.create_sink_pin(pin.pin);
       }
       if (output) {
@@ -83,6 +88,7 @@ std::shared_ptr<hhds::Graph> mapped_graph(hhds::GraphLibrary& library, const Flo
             + net.name);
       }
       unresolved->push_back(net);
+      continue;  // retain every endpoint in the physical net; there is no directed LGraph edge
     }
     for (auto sink : sinks) {
       for (auto source : drivers) {
@@ -97,8 +103,7 @@ std::shared_ptr<hhds::Graph> mapped_graph(hhds::GraphLibrary& library, const Flo
   for (const auto& [name, node] : nodes) {
     std::vector<std::string> open;
     for (const auto& declaration : node.get_subnode_io()->get_input_pin_decls()) {
-      const auto pin = node.try_get_sink_pin(declaration.port_id);
-      if (pin.is_invalid() || pin.get_driver_pins().empty()) {
+      if (!connected_inputs.contains({name, declaration.name})) {
         open.push_back(declaration.name);
       }
     }

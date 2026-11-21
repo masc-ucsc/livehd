@@ -655,7 +655,7 @@ int describe_command(const Options& opts) {
   }
   if (name == "sim") {
     print_json_line(
-        R"json({"schema_version":1,"name":"sim","description":"Executable C++ simulation (inou.cgen.sim): a standalone Bazel module of per-module Slop<N> structs (functional Out cycle(In)) over the ../hlop library. Each module is a small <name>.hpp interface plus a <name>.cpp body, so a body edit recompiles only that .o. --emit-dir only; `cd DIR && bazel build //:sim`","direction":"out"})json");
+        R"json({"schema_version":1,"name":"sim","description":"The simulator directory `lhd sim` writes (native LLVM state kernels plus the testbench object). `lhd pass lnast-llvm --emit-dir sim:DIR` writes the kernels alone; `lhd compile --emit-dir sim:` no longer generates a C++ simulator","direction":"out"})json");
     return 0;
   }
   if (name == "pyrope fmt") {
@@ -803,7 +803,7 @@ void print_general_help() {
       "               lhd synth cpu.prp --top Cpu --workdir W          # reports in W/synth/, incremental on re-run\n"
       "               lhd synth lg:cpu_lg --top Cpu --emit-dir lg:net --stats\n"
       "  synth chunk init | update | plan | list | show | macro | final | move-io | gui   (lhd synth chunk --help)\n"
-      "  sim        build + run a C++ simulation of a Pyrope design's `test` blocks (dynamic verify)\n"
+      "  sim        build + run a native simulation of a Pyrope design's `test` blocks (dynamic verify)\n"
       "               lhd sim foo.prp                  # build + run every test block\n"
       "               lhd sim foo.prp my_test +n=4\n"
       "  lec        logic equivalence (LEC): verilog:/pyrope:/ln:/lg: sides, --set formal.solver picks the\n"
@@ -839,7 +839,7 @@ void print_general_help() {
       "\n"
       "typed I/O (KIND:PATH):  ln: = Forest dir (LNAST units)   lg: = GraphLibrary dir (LGraphs)\n"
       "  ln:/lg:/lnast-dump:/isabelle:/lean:/sim: are directory containers (--emit-dir only;\n"
-      "    sim: is an executable C++ simulation, inou.cgen.sim);\n"
+      "    sim: the simulator directory `lhd sim` writes);\n"
       "  verilog: / pyrope: are --emit (one file; pyrope needs a one-unit design) or --emit-dir\n"
       "  (one file per module). --emit also infers the kind from a bare .v/.sv/.prp path\n"
       "\n"
@@ -982,7 +982,7 @@ int help_pass(const std::string& sub) {
         "           merge tune small-region merging)\n"
         "  cgen     one color per cone-sink signature — each primary output, plus one\n"
         "           shared flop/mem next-state bucket; logic feeding several sinks gets its\n"
-        "           own id (the granularity inou.cgen.sim uses to break false comb loops)\n"
+        "           own id\n"
         "  synth    three boundary modes behind --set pass.color.synth.mode. The DEFAULT,\n"
         "           cones, walks BACKWARD: one cone per register din and per register\n"
         "           enable, cones record how much logic they share, and the most-sharing\n"
@@ -1402,7 +1402,7 @@ constexpr std::string_view kJsonPassAnalyze
 
 constexpr std::
     string_view
-        kJsonSimCommand = R"json({"schema_version":1,"name":"sim","description":"Build and run a C++ simulation of a Pyrope design's `test` blocks (dynamic verify): the DUT lowers to a Slop<N> struct (inou.cgen.sim, over ../hlop) whose circuit colors compile to native LLVM objects by default (sim.tune.backend=llvm; slop = reference C++ kernels) and ONE C++ driver holding every test block is host-compiled and run — each test's asserts are checked by running, not formally. Positionals are the .prp source(s) — the LAST holds the `test` blocks — plus, as in `lhd compile`, any ln:DIR (pre-elaborated units) or lg:DIR (pre-compiled libraries) the testbench imports, so a design compiled once simulates without re-reading its sources. A lone non-path positional selects a single test; each `test name(params)` parameter becomes a +<name>=VALUE flag on the generated binary","args":{"required":[{"name":"file","type":"path (.prp)","positional":true}],"optional":[{"name":"ir-inputs","type":"ln:DIR|lg:DIR","positional":true,"repeatable":true},{"name":"test","type":"string","positional":true},{"name":"+name[=value]","type":"simulation argument","repeatable":true},{"name":"arg","type":"key=value (legacy alias)","repeatable":true},{"name":"seed","type":"int"},{"name":"list-tests","type":"flag"},{"name":"setup-only","type":"flag"},{"name":"run-only","type":"flag"},{"name":"workdir","type":"path"},{"name":"result-json","type":"path"},{"name":"restart-cycle","type":"int"},{"name":"vcd-from","type":"int"},{"name":"vcd-to","type":"int"},{"name":"vcd-on-fail","type":"flag"},{"name":"vcd-fail-window","type":"int"},{"name":"list-signals","type":"flag"},{"name":"probe","type":"SIG,..."},{"name":"probe-from","type":"int"},{"name":"probe-to","type":"int"},{"name":"break-when","type":"SIG OP VALUE"},{"name":"query","type":"path|-|json"},{"name":"set","type":"sim.flag=value","repeatable":true}]},"inputs":["pyrope","ln","lg"],"outputs":["sim"],"examples":["lhd sim foo.prp","lhd sim foo.prp --list-tests","lhd sim foo.prp my_test +n=4","lhd sim dut.prp tb.prp","lhd sim ln:dut_lns/ tb.prp","lhd sim lg:dut_lgs/ tb.prp","lhd sim foo.prp --set sim.vcd=true","lhd sim foo.prp --workdir W --set sim.tune.profile=on","lhd sim foo.prp my_test --query q.json --result-json r.json"]})json";
+        kJsonSimCommand = R"json({"schema_version":1,"name":"sim","description":"Build and run a native simulation of a Pyrope design's `test` blocks (dynamic verify): the DUT lowers to typed LNAST and native LLVM state kernels, the `test` blocks lower to ONE LLVM testbench object, and the prebuilt runtime `lhd_simrt` runs it (no C++ is generated, nothing is host-compiled) — each test's asserts are checked by running, not formally. Positionals are the .prp source(s) — the LAST holds the `test` blocks — plus, as in `lhd compile`, any ln:DIR (pre-elaborated units) or lg:DIR (pre-compiled libraries) the testbench imports, so a design compiled once simulates without re-reading its sources. A lone non-path positional selects a single test; each `test name(params)` parameter becomes a +<name>=VALUE flag on the runtime","args":{"required":[{"name":"file","type":"path (.prp)","positional":true}],"optional":[{"name":"ir-inputs","type":"ln:DIR|lg:DIR","positional":true,"repeatable":true},{"name":"test","type":"string","positional":true},{"name":"+name[=value]","type":"simulation argument","repeatable":true},{"name":"arg","type":"key=value (legacy alias)","repeatable":true},{"name":"seed","type":"int"},{"name":"list-tests","type":"flag"},{"name":"setup-only","type":"flag"},{"name":"run-only","type":"flag"},{"name":"workdir","type":"path"},{"name":"result-json","type":"path"},{"name":"restart-cycle","type":"int"},{"name":"vcd-from","type":"int"},{"name":"vcd-to","type":"int"},{"name":"vcd-on-fail","type":"flag"},{"name":"vcd-fail-window","type":"int"},{"name":"list-signals","type":"flag"},{"name":"probe","type":"SIG,..."},{"name":"probe-from","type":"int"},{"name":"probe-to","type":"int"},{"name":"break-when","type":"SIG OP VALUE"},{"name":"query","type":"path|-|json"},{"name":"set","type":"sim.flag=value","repeatable":true}]},"inputs":["pyrope","ln","lg"],"outputs":["sim"],"examples":["lhd sim foo.prp","lhd sim foo.prp --list-tests","lhd sim foo.prp my_test +n=4","lhd sim dut.prp tb.prp","lhd sim ln:dut_lns/ tb.prp","lhd sim lg:dut_lgs/ tb.prp","lhd sim foo.prp --set sim.vcd=true","lhd sim foo.prp my_test --query q.json --result-json r.json"]})json";
 
 constexpr std::string_view kJsonList
     = R"json({"schema_version":1,"name":"list","description":"Enumerate the CLI vocabulary as one JSON line (options also honors --diag-fmt pretty). Patterns: steps | emit-kinds | error-classes | options [REGEX] | log-channels","args":{"required":[{"name":"pattern","type":"enum","values":["steps","emit-kinds","error-classes","options","log-channels"],"positional":true}],"optional":[{"name":"regex","type":"string (options name filter)","positional":true}]},"examples":["lhd list options 'cgen\\..*'","lhd list log-channels"]})json";
@@ -1586,7 +1586,7 @@ int help_command(const Options& opts) {
         "  --top T              --reader R   slang | yosys | yosys-slang | yosys-verilog (default slang)\n"
         "  --emit verilog:PATH | pyrope:PATH   (or a bare .v/.sv/.prp — kind inferred)\n"
         "  --emit-dir K:DIR/    lg: | ln: | verilog: | pyrope: | lnast-dump: | isabelle: | lean: | sim:\n"
-        "                       (sim: = executable C++ simulation; `cd DIR && bazel build //:sim`)\n"
+        "                       (sim: = the simulator directory written by `lhd sim`)\n"
         "  --set pass.flag=value   --config lhd.toml   --depfile PATH   --workdir DIR\n"
         "  --unused-inputs PATH  declared source files whose contents did not reach the\n"
         "                        compiled closure (e.g. modules outside the --top hierarchy);\n"
@@ -1604,7 +1604,7 @@ int help_command(const Options& opts) {
         "  lhd compile x.prp --emit-dir ln:x_lns/        # pre-elaborate for importers\n"
         "  lhd compile ln:x_lns/ --emit verilog:net.v    # synth from IR\n"
         "  lhd compile lg:foo_lgs/ --emit-dir lg:foo_opt_lgs/\n"
-        "  lhd compile x.prp --emit-dir sim:x_sim/        # C++ sim (cd x_sim && bazel build //:sim)\n");
+        "  lhd sim x.prp                                  # simulate the `test` blocks of x.prp\n");
     return print_options_section({"compile."});
   }
   if (topic == "lec") {
@@ -1852,22 +1852,18 @@ int help_command(const Options& opts) {
   }
   if (topic == "sim") {
     std::print("{}",
-               "lhd sim — build and run a C++ simulation of a Pyrope design's `test` blocks\n"
+               "lhd sim — build and run a native simulation of a Pyrope design's `test` blocks\n"
                "\n"
                "usage: lhd sim <file.prp> [test.name] [flags]\n"
-               "  Lowers the design's DUT to a Slop<N> struct (inou.cgen.sim, over ../hlop) and\n"
-               "  generates ONE C++ driver (drv.cpp) holding every `test` block. The circuit\n"
-               "  colors compile to native LLVM objects (sim.tune.backend=llvm, the default;\n"
-               "  sim.tune.backend=slop emits them as reference Slop C++ kernels). The driver is\n"
-               "  built with the host C++ compiler (header-only Slop runtime, no bazel) and run —\n"
-               "  each `test`'s asserts are checked dynamically (by running), not formally. An\n"
+               "  Lowers the design's DUT to typed LNAST and native LLVM state kernels, and lowers ALL the `test`\n"
+               "  blocks to ONE LLVM testbench object (no C++ is generated). The prebuilt runtime `lhd_simrt` loads\n"
+               "  both and runs them — each `test`'s asserts are checked dynamically (by running), not formally. An\n"
                "  optional second positional selects a single test by name.\n"
                "\n"
-               "  Each `test name(params)` parameter becomes a `+<name>=VALUE` flag on the generated\n"
-               "  binary (defaulting to its signature default; a parameter with no default is\n"
-               "  required). The binary also accepts `--list-tests`, `--test NAME`, `--seed N`\n"
-               "  (hlop PRNG seed), and `--help`. `+key=value` / `--seed N` here are forwarded\n"
-               "  to it, and the built binary can be re-run directly with those flags.\n"
+               "  Each `test name(params)` parameter becomes a `+<name>=VALUE` flag (defaulting to its signature\n"
+               "  default; a parameter with no default is required). `+key=value` / `--seed N` are forwarded to the\n"
+               "  runtime. Periodic native checkpoints make a long run restartable. VCD and queries replay recorded\n"
+               "  checkpoint intervals. `--set lhd.jobs=N` bounds parallel replay.\n"
                "\n"
                "flags:\n"
                "  --list-tests         list the design's tests + parameters, then exit (no build; JSON or\n"
@@ -1880,21 +1876,14 @@ int help_command(const Options& opts) {
                "  --restart-cycle N    resume from the nearest checkpoint <= cycle N (debug a long run)\n"
                "  --vcd-from Y [--vcd-to Z]  trace a VCD over just cycles [Y, Z] (restarts near Y; implies VCD)\n"
                "  --vcd-on-fail [--vcd-fail-window N]  on an assert fire, auto-dump a VCD of the last N cycles\n"
-               "  --list-signals       list the observable scalar signals (hierarchical names) as JSON, then exit\n"
-               "  --probe SIG,... [--probe-from A --probe-to B]  per-cycle JSON trajectory of SIG (no re-instrumenting)\n"
-               "  --break-when 'SIG OP V'  report the first cycle a `SIG >|<|>=|<=|==|!= VALUE|SIG` condition holds\n"
-               "  --query FILE|-|{...} batched JSON questions about the run, answered from ONE replay; the\n"
-               "                       answers become the result envelope's `query` member. The request is\n"
-               "                       {\"schema_version\":1,\"kind\":\"sim_query\",\"queries\":[{\"id\":..,\"op\":..}]}\n"
-               "                       with ops signals|value|values|changes|next_change|find|snapshot|diff;\n"
-               "                       a query names a signal (or a {scope|glob|regex|kind} selector) and a\n"
-               "                       time {\"cycle\":N}. Unknown ops/fields/phases and bad ranges are usage\n"
-               "                       errors; a bad SIGNAL is an in-band per-query error, so one typo never\n"
-               "                       erases the other answers. Not combinable with --restart-cycle/--vcd-*\n"
-               "  --setup-only         generate the C++ sim driver, do not build/run\n"
-               "  --run-only           host-compile + run an existing sim (needs --workdir from --setup-only)\n"
-               "  --workdir DIR        reuse DIR as the build dir (else a fresh temp dir)\n"
-               "  --set sim.flag=value VCD, checkpoint and sim.tune.* knobs (the options block below; `lhd describe sim.flag`)\n"
+               "  --list-signals      list a single test's observable DUT signals\n"
+               "  --probe SIG,... [--probe-from Y] [--probe-to Z]  report values over an inclusive cycle window\n"
+               "  --break-when 'SIG OP VALUE|SIG'  report the first matching cycle and its signal values\n"
+               "  --query FILE|-|JSON  batch signal, value, change, find, snapshot and diff queries\n"
+               "  --setup-only         lower the design and the tests, do not run\n"
+               "  --run-only           run an existing setup (needs --workdir from --setup-only)\n"
+               "  --workdir DIR        reuse DIR as the simulator dir (else a fresh temp dir)\n"
+               "  --set sim.flag=value VCD and checkpoint knobs (the options block below; `lhd describe sim.flag`)\n"
                "\n"
                "examples:\n"
                "  lhd sim foo.prp                                # build + run every test in foo.prp\n"
@@ -1904,17 +1893,13 @@ int help_command(const Options& opts) {
                "  lhd sim foo.prp my_test --seed 42             # reproducible randomized run\n"
                "  lhd sim foo.prp --result-json r.json           # envelope + per-test located-failure array\n"
                "  lhd sim foo.prp --set sim.vcd=true             # also dump a VCD per test\n"
-               "  lhd sim foo.prp --workdir W                    # auto-tune sim.tune.* across runs in W\n"
-               "  lhd sim foo.prp --workdir W --set sim.tune.export=f.json  # replay elsewhere: lhd sim foo.prp f.json\n"
                "  lhd sim foo.prp my_test --result-json r.json \\\n"
                "      --query '{\"schema_version\":1,\"kind\":\"sim_query\",\"queries\":[\n"
                "        {\"id\":\"pc\",\"op\":\"value\",\"signal\":\"cpu.fetch.pc\",\"at\":{\"cycle\":42}},\n"
                "        {\"id\":\"regs\",\"op\":\"signals\",\"scope\":\"cpu.rf\"}]}'\n"
-               "                                                # one replay answers both; `regs` needs none\n"
-               "  lhd sim foo.prp --setup-only --workdir build/  # generate, then build it yourself\n"
-               "  ./build/sim/drv.bin --test my_test --seed 7    # run the built driver directly\n"
-               "  ./build/sim/drv.bin --list-tests               # list tests from the built binary\n"
-               "  lhd sim foo.prp --run-only --workdir build/    # rebuild/run a prior --setup-only\n");
+               "                                                # catalog requests need no replay\n"
+               "  lhd sim foo.prp --setup-only --workdir build/  # generate the native objects\n"
+               "  lhd sim foo.prp --run-only --workdir build/    # run a prior setup\n");
     return print_options_section({"sim."});
   }
   if (topic == "synth" && sub == "chunk") {

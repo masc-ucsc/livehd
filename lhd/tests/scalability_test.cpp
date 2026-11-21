@@ -256,9 +256,10 @@ std::shared_ptr<Lnast> synth_lnast(int n) {
 
 Times run_lnast_pipeline(int n) {
   setup_passes();
-  Times      t;
-  const auto lib = fresh_dir("lnast");
-  Eprp_var   var;
+  Times                                       t;
+  const auto                                  lib = fresh_dir("lnast");
+  livehd::Hhds_graph_library::Scoped_instance instance(lib);
+  Eprp_var                                    var;
   var.add(synth_lnast(n));
   {
     Clock c(t, "pass.upass");
@@ -318,9 +319,8 @@ Times run_lnast_pipeline(int n) {
 
 // Wide selections (binary Mux decoder chains and Hotmux trees), long n-ary and
 // chained arithmetic, and a flop chain, all over sized inputs.
-std::shared_ptr<hhds::Graph> synth_lgraph(int n) {
+std::shared_ptr<hhds::Graph> synth_lgraph(hhds::GraphLibrary& lib, int n) {
   static int serial = 0;
-  auto&      lib    = livehd::Hhds_graph_library::instance(fresh_dir("lg_lib"));
   auto       io     = lib.create_io(std::format("scale_lg_{}", serial++));
   io->add_input("s", 0);
   io->add_input("a", 1);
@@ -380,9 +380,10 @@ std::shared_ptr<hhds::Graph> synth_lgraph(int n) {
 
 Times run_lgraph_pipeline(int n) {
   setup_passes();
-  Times    t;
-  Eprp_var var;
-  var.add(synth_lgraph(n));
+  Times              t;
+  hhds::GraphLibrary lib;
+  Eprp_var           var;
+  var.add(synth_lgraph(lib, n));
   {
     Clock c(t, "pass.aegraph");
     Pass::eprp.run_method_now("pass.aegraph", var, {});

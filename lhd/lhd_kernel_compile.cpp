@@ -556,7 +556,7 @@ void discover_imports(Eprp_var& var, Result& res, size_t n_imports, const std::v
 // parse+validate the source files. Returns the number of imported units (the
 // source units are var.lnasts[n_imports..]).
 size_t pyrope_parse(Options& opts, Result& res, Eprp_var& var, const std::vector<std::string>& ln_import_dirs,
-                    bool defer_cache_lnasts = false) {
+                    std::vector<Compile_source>* deferred) {
   check_inputs_exist(opts.files);
   res.inputs = opts.files;
 
@@ -583,7 +583,7 @@ size_t pyrope_parse(Options& opts, Result& res, Eprp_var& var, const std::vector
   }
 
   if (res.compile_cache.enabled) {
-    compile_cache_parse_sources(opts, res, var, opts.files, defer_cache_lnasts);
+    compile_cache_parse_sources(opts, res, var, opts.files, deferred);
   } else {
     run_step("inou.prp",
              var,
@@ -597,7 +597,7 @@ size_t pyrope_parse(Options& opts, Result& res, Eprp_var& var, const std::vector
     // dependency list (and the LSP resolves the same way).
     discover_imports(var, res, n_imports, opts.files);
   }
-  if (!defer_cache_lnasts && lnastfmt_enabled(opts)) {
+  if (!deferred && lnastfmt_enabled(opts)) {
     run_step("pass.lnastfmt", var, {}, opts, res);
   }
   if (wants_dump(opts, "parse")) {  // this invocation's source units only (imports are pre-elaborated)
@@ -2679,7 +2679,8 @@ void compile_link_ir(Options& opts, Result& res, const Ir_inputs& ir) {
 // dir (pub wrappers) when one is requested; the slang path emits the plain
 // post-upass forest.
 void compile_sources(Options& opts, Result& res, const Ir_inputs& ir) {
-  Eprp_var var;
+  Eprp_var                 var;
+  std::vector<std::string> captured_paths;
   if (opts.language == "pyrope") {
     // workdir() lazily creates ephemeral scratch, so capture the user's intent
     // before the first timed pass asks for a log path. Incremental persistence
@@ -2688,22 +2689,18 @@ void compile_sources(Options& opts, Result& res, const Ir_inputs& ir) {
     res.compile_cache.present = user_workdir;
     res.compile_cache.enabled = user_workdir && compile_cache_enabled(opts);
     setup_diag(opts, "compile.pyrope");
-    const auto* lg_out               = find_slot(opts.emit_dirs, "lg");
-    const auto* ln_out               = find_slot(opts.emit_dirs, "ln");
-    std::string lib_path             = lg_out ? lg_out->path : workdir(opts) + "/lgdb";
-    const bool  need_graphs          = emits_need_graphs(opts) || force_diag_graphs(opts) || !ir.lg_dirs.empty();
-    const bool  defer_cache_lnasts   = res.compile_cache.enabled && need_graphs && !emits_need_lnast(opts) && ir.ln_dirs.empty()
-                                       && ir.lg_dirs.empty() && !wants_dump(opts, "parse");
-    auto        n_imports            = pyrope_parse(opts, res, var, ir.ln_dirs, defer_cache_lnasts);
-    auto        materialize_deferred = [&] {
-      if (!defer_cache_lnasts) {
-        return;
-      }
-      compile_cache_materialize_sources(res, var);
-      if (lnastfmt_enabled(opts)) {
-        run_step("pass.lnastfmt", var, {}, opts, res);
-      }
-    };
+    const auto* lg_out             = find_slot(opts.emit_dirs, "lg");
+    const auto* ln_out             = find_slot(opts.emit_dirs, "ln");
+    std::string lib_path           = lg_out ? lg_out->path : workdir(opts) + "/lgdb";
+    const bool  need_graphs        = emits_need_graphs(opts) || force_diag_graphs(opts) || !ir.lg_dirs.empty();
+    const bool  defer_cache_lnasts = res.compile_cache.enabled && need_graphs && !emits_need_lnast(opts) && ir.ln_dirs.empty()
+                                     && ir.lg_dirs.empty() && !wants_dump(opts, "parse");
+    std::vector<Compile_source> sources;
+    auto*                       deferred  = defer_cache_lnasts ? &sources : nullptr;
+    auto                        n_imports = pyrope_parse(opts, res, var, ir.ln_dirs, deferred);
+    for (const auto& source : sources) {
+      captured_paths.push_back(source.path);
+    }
     // What this design and others already saved into the library (prior units
     // for the prune and tolg's leftover deferral; roots the prune never
     // deletes). Read after the parse, which publishes the manifest's.
@@ -2722,22 +2719,29 @@ void compile_sources(Options& opts, Result& res, const Ir_inputs& ir) {
     const bool lg_artifact_only = lg_out != nullptr && opts.emit_dirs.size() == 1 && opts.emits.empty() && opts.dumps.empty();
     if (all_sources_clean && lg_artifact_only && compile_cache_restore_lg_artifact(opts, res, lib_path)) {
       res.outputs.push_back(lg_out->path);
+      const auto closure = harvest_source_files(res, var.lnasts, std::move(captured_paths));
+      write_depfile(opts, res);
+      write_unused_inputs(opts, res, closure);
       return;
     }
-    // A mixed dirty rebuild still needs the complete hermetic Tier-A forest.
-    // Source-level type/pub/elaboration dependencies are broader than graph
-    // ownership alone; selecting only Merkle-dirty roots produced a structurally
-    // different Minion top. The all-clean lg-only path above remains fully lazy.
-    materialize_deferred();
-    // Opens the diagnostic window the graph pipeline owns. It starts HERE, not
-    // after the parse: the front end and materialize_deferred (lnastfmt) both
-    // run on a warm restore too, so their records must not be carried. The
-    // window is closed by graph_pipeline_and_emits, before the emits.
+    if (deferred && lnastfmt_enabled(opts)) {
+      compile_cache_materialize_sources(res, var, sources);
+      run_step("pass.lnastfmt", var, {}, opts, res);
+      deferred = nullptr;
+    }
+    // Frontend diagnostics run live; only graph pipeline diagnostics are replayed.
     res.compile_cache_diag_mark = livehd::diag::sink().records().size();
-    const bool graph_cache_hit  = res.compile_cache.enabled && need_graphs && !emits_need_lnast(opts) && ir.ln_dirs.empty()
-                                  && ir.lg_dirs.empty() && compile_cache_restore_graphs(opts, res, var, lib_path);
+    auto restore                = Graph_restore::miss;
+    if (res.compile_cache.enabled && need_graphs && !emits_need_lnast(opts) && ir.ln_dirs.empty() && ir.lg_dirs.empty()) {
+      restore = compile_cache_restore_graphs(res, var, lib_path, deferred);
+    }
+    const bool graph_cache_hit = restore == Graph_restore::complete;
     // Bare `lhd compile FILE.prp` (no emit) still lowers to LGraphs for max
     // diagnostics; the graphs are built and discarded (force_diag_graphs).
+    if (deferred && restore == Graph_restore::miss) {
+      compile_cache_materialize_sources(res, var, sources);
+    }
+    sources.clear();  // release captured source bytes before lowering and code generation
     if (!graph_cache_hit) {
       lower_lnasts(opts, res, var, lib_path, need_graphs, &absorbed);
     }
@@ -2837,7 +2841,7 @@ void compile_sources(Options& opts, Result& res, const Ir_inputs& ir) {
       graph_pipeline_and_emits(opts, res, var, lib_path);
     }
   }
-  const auto closure = harvest_source_files(res, var.lnasts);
+  const auto closure = harvest_source_files(res, var.lnasts, std::move(captured_paths));
   write_depfile(opts, res);
   write_unused_inputs(opts, res, closure);
 }

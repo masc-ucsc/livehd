@@ -28,11 +28,7 @@
 #             and no `// :verilog_not_re: <ERE>` may. Then the sibling
 #             `<stem>_tb.prp` runs under `lhd sim lg:` (native, cycle-based
 #             directed vectors: it cannot see edge polarity or reset timing
-#             between edges, which the regex headers pin structurally). A design
-#             native sim refuses declares `// :sim_unsupported: <substr>`
-#             instead; the refusal (exit 7, class unsupported, <substr> in the
-#             message) is then required, so a newly supported schedule fails
-#             until it gets a _tb.prp. An optional `<stem>_tb.v` event-level
+#             between edges, which the regex headers pin structurally). An optional `<stem>_tb.v` event-level
 #             bench runs under iverilog/vvp only when LHD_EXTERNAL_SIM is set.
 #   sim     - the roundtrip_sim checks on the Verilog LiveHD emits for the
 #             fixture itself, with no Pyrope round trip: for a design whose
@@ -105,7 +101,7 @@ header_values() { # <file> <key>: every `// :<key>: <value>` value, one per line
 
 # The roundtrip_sim checks on the re-emitted "$wd"/all.v (see the tier list).
 run_roundtrip_sim() { # <file> <base> <scratch>
-  local f=$1 base=$2 wd=$3 re unsupported tb tool rc
+  local f=$1 base=$2 wd=$3 re tb tool
   while IFS= read -r re; do
     grep -Eq -- "$re" "$wd"/all.v || {
       echo "FAIL(${base}): emitted Verilog does not match :verilog_re: $re"
@@ -120,54 +116,32 @@ run_roundtrip_sim() { # <file> <base> <scratch>
     fi
   done < <(header_values "$f" verilog_not_re)
 
-  unsupported=$(header_values "$f" sim_unsupported | head -1)
-  if [ -n "$unsupported" ]; then
-    # A tripwire, not a behavior check: native sim must keep refusing loudly
-    # (never simulate a clock it cannot schedule as if it ticked every step).
-    rc=0
-    ${LHD} compile "$wd"/all.v --top "$base" --set compile.formal.mode=none \
-      --emit-dir sim:"$wd"/sim --workdir "$wd"/simw --result-json "$wd"/sim.json \
-      -q >"$wd"/sim.log 2>&1 || rc=$?
-    python3 - "$wd"/sim.json "$rc" "$unsupported" <<'CHECK' || { cat "$wd"/sim.log; return 1; }
-import json, sys
-path, rc, want = sys.argv[1], int(sys.argv[2]), sys.argv[3]
-if rc == 0:
-    raise SystemExit('FAIL: native simulation now supports this design: replace '
-                     ':sim_unsupported: with a <stem>_tb.prp testbench')
-with open(path) as stream:
-    error = json.load(stream).get('error', {})
-if rc != 7 or error.get('class') != 'unsupported' or want not in error.get('message', ''):
-    raise SystemExit('FAIL: expected a native-sim refusal (exit 7, class unsupported) '
-                     'mentioning {!r}; got exit {}: {}'.format(want, rc, error))
-CHECK
-  else
-    tb=${f%.*}_tb.prp
-    [ -s "$tb" ] || {
-      echo "FAIL(${base}): roundtrip_sim needs a Pyrope testbench $tb (or a :sim_unsupported: header)"
-      return 1
-    }
-    ${LHD} compile "$wd"/all.v --top "$base" --set compile.formal.mode=none \
-      --emit-dir lg:"$wd"/lg --workdir "$wd"/lgw -q >"$wd"/lg.log 2>&1 || {
-      echo "FAIL(${base}): re-emitted Verilog did not compile to lg:"
-      cat "$wd"/lg.log
-      return 1
-    }
-    ${LHD} sim lg:"$wd"/lg "$tb" --set sim.tune.profile=off \
-      --set compile.upass.inline=false --set compile.unknown_zero=true \
-      --workdir "$wd"/simrun --result-json "$wd"/simrun.json -q >"$wd"/simrun.log 2>&1 || {
-      echo "FAIL(${base}): native simulation of $tb failed"
-      cat "$wd"/simrun.log "$wd"/simrun.json 2>/dev/null
-      return 1
-    }
-    # A bench whose test block never ran must not pass vacuously.
-    python3 - "$wd"/simrun.json <<'CHECK' || return 1
+  tb=${f%.*}_tb.prp
+  [ -s "$tb" ] || {
+    echo "FAIL(${base}): roundtrip_sim needs a Pyrope testbench $tb "
+    return 1
+  }
+  ${LHD} compile "$wd"/all.v --top "$base" --set compile.formal.mode=none \
+    --emit-dir lg:"$wd"/lg --workdir "$wd"/lgw -q >"$wd"/lg.log 2>&1 || {
+    echo "FAIL(${base}): re-emitted Verilog did not compile to lg:"
+    cat "$wd"/lg.log
+    return 1
+  }
+  ${LHD} sim lg:"$wd"/lg "$tb" --set sim.tune.profile=off \
+    --set compile.upass.inline=false --set compile.unknown_zero=true \
+    --workdir "$wd"/simrun --result-json "$wd"/simrun.json -q >"$wd"/simrun.log 2>&1 || {
+    echo "FAIL(${base}): native simulation of $tb failed"
+    cat "$wd"/simrun.log "$wd"/simrun.json 2>/dev/null
+    return 1
+  }
+  # A bench whose test block never ran must not pass vacuously.
+  python3 - "$wd"/simrun.json <<'CHECK' || return 1
 import json, sys
 with open(sys.argv[1]) as stream:
-    tests = json.load(stream).get('tests', [])
+  tests = json.load(stream).get('tests', [])
 if not tests or any(t.get('status') != 'pass' for t in tests):
-    raise SystemExit('FAIL: expected at least one passing native test, got {}'.format(tests))
+  raise SystemExit('FAIL: expected at least one passing native test, got {}'.format(tests))
 CHECK
-  fi
 
   # Event-level oracle (edges between reference cycles), external tools only.
   tb=${f%.*}_tb.v

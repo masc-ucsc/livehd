@@ -6,6 +6,7 @@
 #include <bit>
 #include <chrono>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <functional>
 #include <limits>
@@ -1396,6 +1397,7 @@ public:
   struct State_output {
     size_t                  word;
     size_t                  previous_word;
+    int                     byte;
     Value                   value;
     std::vector<Dirty_mask> dirty;
   };
@@ -1417,6 +1419,7 @@ public:
   std::map<std::tuple<llvm::BasicBlock*, llvm::Value*, uint32_t>, llvm::Value*>                   mux_rotations;
   std::vector<size_t>                                                                             input_word_offsets;
   std::vector<uint32_t>                                                                           input_bits;
+  std::vector<bool>                                                                               load_whole_state_word;
   // The packed ABI layout of the inputs (Cgen_llvm::packed_layout); empty for the state ABI.
   std::vector<Packed_field>                                                                       input_fields;
   size_t                                                                                          input_words = 0;
@@ -1483,6 +1486,7 @@ public:
   std::vector<std::pair<uint32_t, bool>>  input_types;
   std::vector<Output>                     output_values;
   std::string                             error;
+  std::string                             binding_digest;  // cache key available before rebuilding a bound module
   std::string                             cache_path;
   bool*                                   cache_reused = nullptr;
   std::optional<bool>                     sealed_changed;
@@ -1512,15 +1516,22 @@ public:
   struct Changes {
     std::map<std::vector<std::pair<size_t, uint64_t>>, llvm::Value*> groups;
   };
+  llvm::Value* spill_ptr(size_t word, int byte) {
+    return builder.CreateConstInBoundsGEP1_64(builder.getInt8Ty(), inputs, word * sizeof(uint64_t) + static_cast<unsigned>(byte));
+  }
   // Records whether storing `value` will change the `width` bits of state at `word` (the bits past
   // them in the last word are not the value's: whoever wrote them may have sign-extended). Call for
   // every store of the set BEFORE any of them is made.
-  void note_change(Changes& changes, size_t word, llvm::Value* value, uint32_t width, const std::vector<Dirty_mask>& dirty) {
+  void note_change(Changes& changes, size_t word, llvm::Value* value, uint32_t width, const std::vector<Dirty_mask>& dirty,
+                   int byte = -1) {
     std::map<size_t, uint64_t> by_word;
     for (const auto& d : dirty) {
       by_word[d.word] |= d.mask;
     }
-    auto*        old  = load_packed(inputs, word, width, "state.old");
+    auto* old = byte < 0 ? load_packed(inputs, word, width, "state.old")
+                         : builder.CreateTruncOrBitCast(
+                               builder.CreateLoad(builder.getIntNTy(std::bit_ceil(std::max(8u, width))), spill_ptr(word, byte)),
+                               builder.getIntNTy(width));
     llvm::Value* diff = width <= 64 ? builder.CreateXor(old, value) : builder.CreateICmpNE(old, value);
     diff              = builder.CreateZExt(diff, builder.getInt64Ty());
     auto [it, inserted]
@@ -1568,6 +1579,8 @@ public:
   std::vector<Guarded_output>             guarded_outputs;
   std::unordered_map<std::string, Memory> memories;
 
+  Impl() : builder(context), state_abi(true) {}
+
   Impl(std::string_view function_name, const std::vector<std::pair<uint32_t, bool>>& input_desc, bool use_scalar_abi,
        const State_layout* layout = nullptr)
       : module(std::make_unique<llvm::Module>("livehd.sim.color", context))
@@ -1610,6 +1623,18 @@ public:
     auto* entry = llvm::BasicBlock::Create(context, "entry", function);
     builder.SetInsertPoint(entry);
 
+    if (layout && layout->combine_lane_loads) {
+      // Several lanes of the same state word can share one load. Leave the shifts and masks in IR
+      // so LLVM can combine their reads wherever no intervening write changes the underlying word.
+      load_whole_state_word.resize(input_types.size());
+      std::unordered_map<size_t, size_t> first;
+      for (size_t i = 0; i < layout->inputs.size(); ++i) {
+        auto [it, added] = first.try_emplace(layout->inputs[i].word, i);
+        if (!added) {
+          load_whole_state_word[i] = load_whole_state_word[it->second] = true;
+        }
+      }
+    }
     values.reserve(input_types.size());
     deferred_casts.resize(input_types.size());
     input_storage.resize(input_types.size());
@@ -2180,11 +2205,21 @@ public:
     }
     if (value.id < input_types.size() && value.id < values.size() && values[value.id] == nullptr && value.width != 0) {
       ensure_input_layout();
-      const auto width  = input_types[value.id].first;
-      const auto bit    = input_bits[value.id];
-      auto*      loaded = load_packed(inputs, input_word_offsets[value.id], width + bit, "in");
-      if (bit != 0) {
-        loaded = builder.CreateLShr(loaded, bit);
+      const auto   width = input_types[value.id].first;
+      const auto   bit   = input_bits[value.id];
+      const auto   word  = input_word_offsets[value.id];
+      llvm::Value* loaded;
+      if (state_abi && (load_whole_state_word.empty() || !load_whole_state_word[value.id])
+          && std::endian::native == std::endian::little && width <= 32 && bit % 8 == 0 && bit + width <= 64) {
+        // Address the byte lane directly so the same kernel can read it at a different offset in each instance.
+        // An arbitrary state slice can be unaligned or end at the last byte of the word.
+        auto* type = builder.getIntNTy(8 * ((width + 7) / 8));
+        loaded     = builder.CreateAlignedLoad(type, spill_ptr(word, bit / 8), llvm::Align(1), "in.lane");
+      } else {
+        loaded = load_packed(inputs, word, width + bit, "in");
+        if (bit != 0) {
+          loaded = builder.CreateLShr(loaded, bit);
+        }
       }
       values[value.id]        = cast_integer(builder, loaded, width, true);
       input_handles[value.id] = values[value.id];
@@ -3698,7 +3733,14 @@ bool Cgen_llvm::speculate_input(Value value, uint64_t inactive) {
 }
 
 bool Cgen_llvm::add_state_output(size_t word, size_t previous_word, Value value, const std::vector<Dirty_mask>& dirty,
-                                 std::string& error) {
+                                 std::string& error, int byte) {
+  if (byte < -1
+      || (byte >= 0
+          && (value.width == 0 || value.width > 32 || byte > 7
+              || (static_cast<unsigned>(byte) % (std::bit_ceil(std::max(8u, value.width)) / 8)) != 0))) {
+    error = "invalid LLVM state spill offset";
+    return false;
+  }
   const auto fits
       = [&](size_t offset) { return offset <= impl_->state_words && word_count(value.width) <= impl_->state_words - offset; };
   if (!impl_->state_abi || value.width == 0 || !fits(word) || !fits(previous_word) || impl_->get(value) == nullptr) {
@@ -3711,7 +3753,7 @@ bool Cgen_llvm::add_state_output(size_t word, size_t previous_word, Value value,
       return false;
     }
   }
-  impl_->state_outputs.push_back({word, previous_word, value, dirty});
+  impl_->state_outputs.push_back({word, previous_word, byte, value, dirty});
   return true;
 }
 
@@ -3745,6 +3787,70 @@ bool Cgen_llvm::merge_state_words(size_t destination, size_t source, size_t word
     impl_->or_state_word(destination + i, b.CreateLoad(b.getInt64Ty(), from));
     b.CreateStore(b.getInt64(0), from);
   }
+  return true;
+}
+
+bool Cgen_llvm::commit_state(size_t source, const std::vector<State_span>& spans, std::string& error) {
+  if (spans.size() <= 8) {
+    for (const auto& span : spans) {
+      if (!copy_state(span.word, source, span.words, error)) {
+        return false;
+      }
+      source += span.words;
+    }
+    return true;
+  }
+
+  // The source is contiguous. Keep the emitted commit code bounded even
+  // for a many-core design with thousands of scattered destinations.
+  std::vector<uint64_t> rows;
+  size_t                total = 0;
+  for (const auto& span : spans) {
+    if (span.word >= source || span.words == 0 || span.words > source - span.word || source > impl_->state_words
+        || span.words > impl_->state_words - source - total) {
+      error = "LLVM commit range is outside its state banks";
+      return false;
+    }
+    rows.push_back(span.word);
+    total += span.words;
+    rows.push_back(total);
+  }
+  auto& b    = impl_->builder;
+  auto* data = llvm::ConstantDataArray::get(impl_->context, llvm::ArrayRef<uint64_t>(rows));
+  auto* table
+      = new llvm::GlobalVariable(*impl_->module, data->getType(), true, llvm::GlobalValue::PrivateLinkage, data, "commit.spans");
+  auto* pre     = b.GetInsertBlock();
+  auto* fn      = pre->getParent();
+  auto* range   = llvm::BasicBlock::Create(impl_->context, "commit.range", fn);
+  auto* copy    = llvm::BasicBlock::Create(impl_->context, "commit.word", fn);
+  auto* advance = llvm::BasicBlock::Create(impl_->context, "commit.next", fn);
+  auto* done    = llvm::BasicBlock::Create(impl_->context, "commit.done", fn);
+  auto* i64     = b.getInt64Ty();
+  auto* src     = impl_->word_ptr(impl_->inputs, source);
+  b.CreateBr(range);
+  b.SetInsertPoint(range);
+  auto* row   = b.CreatePHI(i64, 2);
+  auto* start = b.CreatePHI(i64, 2);
+  row->addIncoming(b.getInt64(0), pre);
+  start->addIncoming(b.getInt64(0), pre);
+  auto* addr = b.CreateInBoundsGEP(i64, table, row);
+  auto* dest = b.CreateInBoundsGEP(i64, impl_->outputs, b.CreateLoad(i64, addr));
+  auto* end  = b.CreateLoad(i64, b.CreateConstInBoundsGEP1_64(i64, addr, 1));
+  b.CreateBr(copy);
+  b.SetInsertPoint(copy);
+  auto* i = b.CreatePHI(i64, 2);
+  i->addIncoming(start, range);
+  auto* value = b.CreateAlignedLoad(i64, b.CreateInBoundsGEP(i64, src, i), llvm::Align(8));
+  b.CreateAlignedStore(value, b.CreateInBoundsGEP(i64, dest, b.CreateSub(i, start)), llvm::Align(8));
+  auto* next = b.CreateAdd(i, b.getInt64(1));
+  i->addIncoming(next, copy);
+  b.CreateCondBr(b.CreateICmpEQ(next, end), advance, copy);
+  b.SetInsertPoint(advance);
+  auto* next_row = b.CreateAdd(row, b.getInt64(2));
+  row->addIncoming(next_row, advance);
+  start->addIncoming(end, advance);
+  b.CreateCondBr(b.CreateICmpEQ(next_row, b.getInt64(rows.size())), done, range);
+  b.SetInsertPoint(done);
   return true;
 }
 
@@ -3810,13 +3916,303 @@ size_t Cgen_llvm::instruction_count() const {
 }
 
 bool Cgen_llvm::write_object(std::string_view path, std::string& error, bool track_changed, std::string_view cache_path,
-                             bool* reused) {
+                             bool* reused, bool dump_bitcode) {
   impl_->cache_path   = cache_path;
   impl_->cache_reused = reused;
   if (reused != nullptr) {
     *reused = false;
   }
-  return write_module(path, error, track_changed, true);
+  return write_module(path, error, track_changed, true, dump_bitcode);
+}
+
+Cgen_llvm::Cgen_llvm(std::unique_ptr<Impl> impl) : impl_(std::move(impl)) {}
+
+namespace {
+std::string object_digest(llvm::StringRef bytes) {
+  llvm::SHA256 hash;
+  hash.update(bytes);
+  const auto result = hash.final();
+  return {reinterpret_cast<const char*>(result.data()), result.size()};
+}
+
+std::string kernel_digest(llvm::SHA256& hash) {
+  hash.update(std::to_string(livehd::kCgenSrcSalt));
+  hash.update(std::to_string(branch_min_cost()));
+  hash.update(shrink_enabled() ? "shrink" : "keep");
+  hash.update(llvm_debug_args());
+  hash.update(std::to_string(remat_distance()));
+  const auto result = hash.final();
+  return {reinterpret_cast<const char*>(result.data()), result.size()};
+}
+
+// Both the recipe and the actual object must match before reporting a hit.
+bool cached_kernel(std::string_view path, std::string_view cache, llvm::StringRef key, size_t* count) {
+  auto meta = llvm::MemoryBuffer::getFile(cache);
+  if (!meta || (*meta)->getBufferSize() != 64 + (count ? sizeof(*count) : 0) || (*meta)->getBuffer().take_front(32) != key) {
+    return false;
+  }
+  auto object = llvm::MemoryBuffer::getFile(path);
+  if (!object || (*meta)->getBuffer().substr(32, 32) != object_digest((*object)->getBuffer())) {
+    return false;
+  }
+  if (count) {
+    std::memcpy(count, (*meta)->getBufferStart() + 64, sizeof(*count));
+  }
+  return true;
+}
+
+llvm::GetElementPtrInst* kernel_address(llvm::Instruction& inst, llvm::Function& fn) {
+  auto* gep = llvm::dyn_cast<llvm::GetElementPtrInst>(&inst);
+  if (gep && gep->getPointerOperand() == fn.getArg(0)
+      && (gep->getSourceElementType()->isIntegerTy(64) || gep->getSourceElementType()->isIntegerTy(8)) && gep->getNumIndices() == 1
+      && llvm::isa<llvm::ConstantInt>(gep->getOperand(1)) && gep->getOperand(1)->getType()->isIntegerTy(64)) {
+    return gep;
+  }
+  return nullptr;
+}
+// Activity marks have the shape "changed ? reader_mask : 0". Preserve the
+// mask for each occurrence, including when the pattern comes from DUT logic.
+llvm::SelectInst* kernel_mask(llvm::Instruction& inst) {
+  auto* sel = llvm::dyn_cast<llvm::SelectInst>(&inst);
+  if (sel && sel->getType()->isIntegerTy(64) && llvm::isa<llvm::ConstantInt>(sel->getTrueValue())
+      && llvm::isa<llvm::ConstantInt>(sel->getFalseValue()) && llvm::cast<llvm::ConstantInt>(sel->getFalseValue())->isZero()) {
+    return sel;
+  }
+  return nullptr;
+}
+
+struct Binding_columns {
+  std::vector<size_t> anchors, column;
+};
+
+// Addresses that shift together use one pointer. Masks with the same value
+// in each row use one scalar. Invariant columns stay constants in the body.
+Binding_columns binding_columns(const std::vector<Cgen_llvm::Kernel_binding>& rows, bool addresses) {
+  auto            member = addresses ? &Cgen_llvm::Kernel_binding::byte_offsets : &Cgen_llvm::Kernel_binding::masks;
+  const auto&     first  = rows.front().*member;
+  Binding_columns plan;
+  plan.column.assign(first.size(), first.size());
+  std::map<std::vector<uint64_t>, size_t> groups;
+  for (size_t i = 0; i < first.size() && rows.size() > 1; ++i) {
+    std::vector<uint64_t> values;
+    values.reserve(rows.size());
+    for (const auto& row : rows) {
+      const auto value = (row.*member)[i];
+      values.push_back(addresses ? value - first[i] : value);
+    }
+    if (std::ranges::all_of(values, [&](uint64_t v) { return v == values.front(); })) {
+      continue;
+    }
+    auto [it, added] = groups.try_emplace(std::move(values), plan.anchors.size());
+    if (added) {
+      plan.anchors.push_back(i);
+    }
+    plan.column[i] = it->second;
+  }
+  return plan;
+}
+}  // namespace
+
+bool Cgen_llvm::encode_kernel(std::string& bitcode, Kernel_binding& binding, std::string& error) {
+  if (!seal(error, true)) {
+    return false;
+  }
+  auto& fn = *impl_->function;
+  bitcode.clear();
+  binding.byte_offsets.clear();
+  binding.masks.clear();
+  binding.name = fn.getName().str();
+  fn.setName("__kernel");
+  std::vector<std::pair<llvm::Use*, llvm::Value*>> originals;
+  const auto                                       replace = [&](llvm::Use& use, uint64_t value) {
+    originals.emplace_back(&use, use.get());
+    use.set(impl_->builder.getInt64(value));
+  };
+  std::unordered_map<uint64_t, size_t> slots;
+  for (auto& block : fn) {
+    for (auto& inst : block) {
+      if (auto* gep = kernel_address(inst, fn)) {
+        const auto offset = llvm::cast<llvm::ConstantInt>(gep->getOperand(1))->getZExtValue()
+                            * (gep->getSourceElementType()->getIntegerBitWidth() / 8);
+        auto [it, added]  = slots.try_emplace(offset, slots.size());
+        if (added) {
+          binding.byte_offsets.push_back(offset);
+        }
+        replace(gep->getOperandUse(1), it->second);
+      } else if (auto* mask = kernel_mask(inst)) {
+        binding.masks.push_back(llvm::cast<llvm::ConstantInt>(mask->getTrueValue())->getZExtValue());
+        replace(mask->getOperandUse(1), 1);
+      }
+    }
+  }
+  llvm::raw_string_ostream stream(bitcode);
+  llvm::WriteBitcodeToFile(*impl_->module, stream);
+  for (auto [use, value] : originals) {
+    use->set(value);
+  }
+  fn.setName(binding.name);
+  return true;
+}
+
+bool Cgen_llvm::write_kernel_group(std::string_view bitcode, const std::vector<Kernel_binding>& instances, std::string_view path,
+                                   std::string_view cache_path, bool dump_bitcode, size_t& instructions, std::string& error) {
+  if (instances.empty()) {
+    error = "a native kernel group needs an entry point";
+    return false;
+  }
+  std::string key;
+  if (!cache_path.empty()) {
+    llvm::SHA256 hash;
+    const auto   field = [&](llvm::StringRef bytes) {
+      const uint64_t length = bytes.size();
+      hash.update(llvm::ArrayRef<uint8_t>(reinterpret_cast<const uint8_t*>(&length), sizeof(length)));
+      hash.update(bytes);
+    };
+    field("native kernel group byte offsets");
+    field(llvm::sys::getDefaultTargetTriple());
+    field(bitcode);
+    for (const auto& instance : instances) {
+      field(instance.name);
+      field({reinterpret_cast<const char*>(instance.byte_offsets.data()), instance.byte_offsets.size() * sizeof(uint64_t)});
+      field({reinterpret_cast<const char*>(instance.masks.data()), instance.masks.size() * sizeof(uint64_t)});
+    }
+    key = kernel_digest(hash);
+    if (!dump_bitcode && cached_kernel(path, cache_path, key, &instructions)) {
+      return true;
+    }
+  }
+  Cgen_llvm k(std::make_unique<Impl>());
+  auto&     impl      = *k.impl_;
+  impl.binding_digest = std::move(key);
+  auto parsed         = llvm::parseBitcodeFile(llvm::MemoryBufferRef(bitcode, "state.kernel"), impl.context);
+  if (!parsed) {
+    error = llvm::toString(parsed.takeError());
+    return false;
+  }
+  impl.module = std::move(*parsed);
+  auto* fn    = impl.module->getFunction("__kernel");
+  if (fn == nullptr || fn->arg_size() != 2) {
+    error = "invalid native kernel shape";
+    return false;
+  }
+  auto&       b     = impl.builder;
+  const auto& first = instances.front();
+  for (const auto& instance : instances) {
+    if (instance.byte_offsets.size() != first.byte_offsets.size() || instance.masks.size() != first.masks.size()) {
+      error = "inconsistent native kernel binding";
+      return false;
+    }
+  }
+  auto* word = b.getInt64Ty();
+
+  const auto                addresses  = binding_columns(instances, true);
+  const auto                masks      = binding_columns(instances, false);
+  auto*                     entry_type = fn->getFunctionType();
+  const bool                table      = addresses.anchors.size() + masks.anchors.size() > 6;
+  std::vector<llvm::Value*> bases, mask_args;
+  if (instances.size() > 1) {
+    std::vector<llvm::Type*> params(2 + (table ? 1 : addresses.anchors.size()), b.getPtrTy());
+    if (!table) {
+      params.insert(params.end(), masks.anchors.size(), word);
+    }
+    auto* body = llvm::Function::Create(llvm::FunctionType::get(b.getVoidTy(), params, false),
+                                        llvm::GlobalValue::ExternalLinkage,
+                                        first.name + ".shared",
+                                        *impl.module);
+    body->setVisibility(llvm::GlobalValue::HiddenVisibility);
+    body->addFnAttr(llvm::Attribute::NoInline);
+    fn->getArg(0)->replaceAllUsesWith(body->getArg(0));
+    fn->getArg(1)->replaceAllUsesWith(body->getArg(1));
+    body->splice(body->end(), fn);
+    fn->eraseFromParent();
+    fn = body;
+    b.SetInsertPoint(&*fn->getEntryBlock().getFirstInsertionPt());
+    auto argument = [&](size_t index) -> llvm::Value* {
+      if (table) {
+        return b.CreateLoad(word, b.CreateConstInBoundsGEP1_64(word, fn->getArg(2), index));
+      }
+      return fn->getArg(2 + index);
+    };
+    for (size_t r = 0; r < addresses.anchors.size(); ++r) {
+      auto* value = argument(r);
+      bases.push_back(table ? b.CreateInBoundsGEP(b.getInt8Ty(), fn->getArg(0), value) : value);
+    }
+    for (size_t m = 0; m < masks.anchors.size(); ++m) {
+      mask_args.push_back(argument(addresses.anchors.size() + m));
+    }
+  } else {
+    fn->setName(first.name);
+  }
+
+  size_t next_mask = 0;
+  for (auto& block : *fn) {
+    for (auto& inst : block) {
+      if (auto* gep = kernel_address(inst, *fn)) {
+        const size_t i = llvm::cast<llvm::ConstantInt>(gep->getOperand(1))->getZExtValue();
+        if (i >= first.byte_offsets.size()) {
+          error = "native kernel state slot has no binding";
+          return false;
+        }
+        uint64_t offset = first.byte_offsets[i];
+        if (addresses.column[i] < bases.size()) {
+          gep->setOperand(0, bases[addresses.column[i]]);
+          offset -= first.byte_offsets[addresses.anchors[addresses.column[i]]];
+        }
+        gep->setSourceElementType(b.getInt8Ty());
+        gep->setResultElementType(b.getInt8Ty());
+        gep->setOperand(1, b.getInt64(offset));
+      } else if (auto* select = kernel_mask(inst)) {
+        if (next_mask >= first.masks.size()) {
+          error = "native kernel mask has no binding";
+          return false;
+        }
+        const size_t col = masks.column[next_mask];
+        select->setTrueValue(col < mask_args.size() ? mask_args[col] : b.getInt64(first.masks[next_mask]));
+        ++next_mask;
+      }
+    }
+  }
+  if (instances.size() > 1) {
+    for (const auto& instance : instances) {
+      auto* wrapper = llvm::Function::Create(entry_type, llvm::GlobalValue::ExternalLinkage, instance.name, *impl.module);
+      b.SetInsertPoint(llvm::BasicBlock::Create(impl.context, "entry", wrapper));
+      std::vector<llvm::Value*> args{wrapper->getArg(0), wrapper->getArg(1)};
+      if (table) {
+        std::vector<uint64_t> offsets;
+        for (const auto i : addresses.anchors) {
+          offsets.push_back(instance.byte_offsets[i]);
+        }
+        for (const auto i : masks.anchors) {
+          offsets.push_back(instance.masks[i]);
+        }
+        auto* row = llvm::ConstantDataArray::get(impl.context, llvm::ArrayRef<uint64_t>(offsets));
+        auto* global
+            = new llvm::GlobalVariable(*impl.module, row->getType(), true, llvm::GlobalValue::PrivateLinkage, row, "layout");
+        global->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
+        args.push_back(global);
+      } else {
+        for (const auto i : addresses.anchors) {
+          args.push_back(b.CreateConstInBoundsGEP1_64(b.getInt8Ty(), wrapper->getArg(0), instance.byte_offsets[i]));
+        }
+        for (const auto i : masks.anchors) {
+          args.push_back(b.getInt64(instance.masks[i]));
+        }
+      }
+      b.CreateCall(fn, args)->setTailCallKind(llvm::CallInst::TCK_Tail);
+      b.CreateRetVoid();
+    }
+  }
+  impl.function       = fn;
+  impl.sealed_changed = true;
+  if (llvm::verifyModule(*impl.module, &llvm::errs())) {
+    error = "LLVM rejected the bound simulator kernel";
+    return false;
+  }
+  if (!k.write_object(path, error, true, cache_path, nullptr, dump_bitcode)) {
+    return false;
+  }
+  instructions = k.instruction_count();
+  return true;
 }
 
 bool Cgen_llvm::write_state_object(std::string_view path, std::string_view descriptor, size_t public_words,
@@ -3909,11 +4305,17 @@ bool Cgen_llvm::seal(std::string& error, bool track_changed) {
     Impl::Changes changed;
     for (const auto& output : impl_->state_outputs) {
       if (!output.dirty.empty()) {
-        impl_->note_change(changed, output.previous_word, impl_->get(output.value), output.value.width, output.dirty);
+        impl_->note_change(changed, output.previous_word, impl_->get(output.value), output.value.width, output.dirty, output.byte);
       }
     }
     for (const auto& output : impl_->state_outputs) {
-      impl_->store_packed(impl_->get(output.value), impl_->outputs, output.word, output.value.width);
+      if (output.byte >= 0) {
+        auto* type = impl_->builder.getIntNTy(std::bit_ceil(std::max(8u, output.value.width)));
+        impl_->builder.CreateStore(impl_->builder.CreateZExtOrBitCast(impl_->get(output.value), type),
+                                   impl_->spill_ptr(output.word, output.byte));
+      } else {
+        impl_->store_packed(impl_->get(output.value), impl_->outputs, output.word, output.value.width);
+      }
     }
     impl_->mark_changes(changed);
     // Guarded outputs: one branch per distinct guard, in first-use order. Every value was
@@ -4911,7 +5313,7 @@ std::string Cgen_llvm::inline_bitcode(std::string& error, bool track_changed) {
   return {bytes.data(), bytes.size()};
 }
 
-bool Cgen_llvm::write_module(std::string_view path, std::string& error, bool track_changed, bool native) {
+bool Cgen_llvm::write_module(std::string_view path, std::string& error, bool track_changed, bool native, bool dump_bitcode) {
   (void)llvm_debug_args();
   Llvm_pass_profile profile("kernel", path);
   if (!seal(error, track_changed)) {
@@ -4948,35 +5350,39 @@ bool Cgen_llvm::write_module(std::string_view path, std::string& error, bool tra
   for (auto* body : impl_->split_speculation()) {
     body_names.push_back(body->getName().str());
   }
-  const auto digest = [](llvm::StringRef bytes) {
-    llvm::SHA256 hash;
-    hash.update(bytes);
-    const auto result = hash.final();
-    return std::string(reinterpret_cast<const char*>(result.data()), result.size());
-  };
-  std::string input_digest;
-  if (native && !impl_->cache_path.empty()) {
-    llvm::SmallVector<char, 0> bitcode;
-    llvm::raw_svector_ostream  stream(bitcode);
+  std::string                input_digest = impl_->binding_digest;
+  llvm::SmallVector<char, 0> bitcode;
+  if (native && ((!impl_->cache_path.empty() && input_digest.empty()) || dump_bitcode)) {
+    llvm::raw_svector_ostream stream(bitcode);
     llvm::WriteBitcodeToFile(*impl_->module, stream);
-    llvm::SHA256 hash;
-    hash.update(llvm::StringRef(bitcode.data(), bitcode.size()));
-    hash.update(std::to_string(livehd::kCgenSrcSalt));
-    hash.update(std::to_string(branch_min_cost()));  // debug knobs that change the object
-    hash.update(shrink_enabled() ? "shrink" : "keep");
-    hash.update(llvm_debug_args());
-    hash.update(std::to_string(remat_distance()));
-    const auto key = hash.final();
-    input_digest.assign(reinterpret_cast<const char*>(key.data()), key.size());
-    const auto cached = llvm::MemoryBuffer::getFile(impl_->cache_path);
-    if (cached && (*cached)->getBufferSize() == 64 && (*cached)->getBuffer().take_front(32) == input_digest) {
-      const auto object = llvm::MemoryBuffer::getFile(path);
-      if (object && (*cached)->getBuffer().drop_front(32) == digest((*object)->getBuffer())) {
-        if (impl_->cache_reused != nullptr) {
-          *impl_->cache_reused = true;
-        }
-        return true;
+    if (dump_bitcode) {
+      const auto           filename = std::filesystem::path(path).replace_extension(".bc").string();
+      std::error_code      ec;
+      llvm::raw_fd_ostream dump(filename, ec);
+      if (!ec) {
+        dump.write(bitcode.data(), bitcode.size());
+        dump.close();
+        ec = dump.error();
+        dump.clear_error();
       }
+      if (ec) {
+        error = filename + ": " + ec.message();
+        return false;
+      }
+    }
+  }
+  if (native && !impl_->cache_path.empty()) {
+    if (input_digest.empty()) {
+      llvm::SHA256 hash;
+      hash.update(llvm::StringRef(bitcode.data(), bitcode.size()));
+      input_digest = kernel_digest(hash);
+    }
+    size_t count;
+    if (cached_kernel(path, impl_->cache_path, input_digest, impl_->binding_digest.empty() ? nullptr : &count)) {
+      if (impl_->cache_reused != nullptr) {
+        *impl_->cache_reused = true;
+      }
+      return true;
     }
   }
 
@@ -5239,7 +5645,11 @@ bool Cgen_llvm::write_module(std::string_view path, std::string& error, bool tra
     // or mismatched pair is a miss, including interruption between the writes.
     File_output cached{impl_->cache_path};
     cached.append(input_digest);
-    cached.append(digest(llvm::StringRef(object_buffer.data(), object_buffer.size())));
+    cached.append(object_digest(llvm::StringRef(object_buffer.data(), object_buffer.size())));
+    if (!impl_->binding_digest.empty()) {
+      const size_t count = instruction_count();
+      cached.append({reinterpret_cast<const char*>(&count), sizeof(count)});
+    }
   }
   profile.mark("bitcode-serialize-and-write");
   return true;

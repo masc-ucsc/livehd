@@ -68,7 +68,6 @@ cc_library(
         ["*.cpp"],
         exclude = [
             "*_test.cpp",
-            "llvm_sim_link.cpp",
             "sim_compile_workers_smoke.cpp",
             "sim_native_rt.cpp",
         ],
@@ -138,6 +137,7 @@ cc_library(
     srcs = ["sim_native_rt.cpp"],
     hdrs = ["sim_native_rt.hpp", "sim_llvm_target.hpp"],
     copts = COPTS,
+    includes = ["."],
     visibility = ["//visibility:public"],
     deps = [
         ":sim_native_abi",
@@ -157,14 +157,6 @@ cc_library(
     deps = ["//core"],  # worker_pool.hpp: big-stack worker threads
 )
 
-cc_binary(
-    name = "llvm_sim_link",
-    srcs = ["llvm_sim_link.cpp"],
-    copts = COPTS,
-    visibility = ["//visibility:public"],
-    deps = [":inou_cgen"],
-)
-
 cc_test(
     name = "cgen_llvm_test",
     srcs = ["cgen_llvm_test.cpp"],
@@ -181,30 +173,6 @@ cc_test(
     srcs = ["sim_compile_workers_smoke.cpp"],
     copts = COPTS,
     deps = [":sim_compile_workers", "@googletest//:gtest_main"],
-)
-
-cc_test(
-    name = "sim_color_plan_test",
-    srcs = ["sim_color_plan_test.cpp"],
-    copts = COPTS,
-    deps = [
-        ":inou_cgen",
-        "//graph",
-        "@googletest//:gtest_main",
-        "@hhds//hhds:graph",
-    ],
-)
-
-cc_test(
-    name = "sim_loop_fusion_test",
-    srcs = ["sim_loop_fusion_test.cpp"],
-    copts = COPTS,
-    deps = [
-        ":inou_cgen",
-        "//graph",
-        "@googletest//:gtest_main",
-        "@hhds//hhds:graph",
-    ],
 )
 
 # A cgen Memory becomes `<wrapper instance>.data` when its Verilog is read
@@ -226,20 +194,6 @@ filegroup(
     name = "memory_generator_srcs",
     srcs = ["cgen_verilog.cpp", "cgen_verilog.hpp", "cgen_verilog_structural.cpp", "inou_cgen.cpp"],
     visibility = ["//visibility:public"],
-)
-
-cc_test(
-    name = "cgen_sim_test",
-    srcs = ["cgen_sim_test.cpp"],
-    copts = COPTS,
-    deps = [
-        ":inou_cgen",
-        ":sim_native_rt",
-        "//graph",
-        "//pass/specialize",
-        "@googletest//:gtest_main",
-        "@hhds//hhds:graph",
-    ],
 )
 
 cc_test(

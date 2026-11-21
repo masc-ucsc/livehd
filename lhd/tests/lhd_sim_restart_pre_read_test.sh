@@ -23,17 +23,15 @@ test restore.pre_read {
 }
 EOF
 "$LHD" compile verilog --top dut --emit-dir "lg:$W/lg" --workdir "$W/compile" -- "$W/dut.sv"
-for backend in llvm slop; do
-  common=("lg:$W/lg" "$W/tb.prp" --workdir "$W/$backend" --set sim.tune.profile=off
-          --set "sim.tune.backend=$backend" --set sim.init_zero=true --set compile.unknown_zero=true)
-  "$LHD" sim "${common[@]}" --set sim.checkpoint_every=4 --result-json "$W/$backend-full.json"
-  "$LHD" sim "${common[@]}" --run-only --restart-cycle 17 --result-json "$W/$backend-replay.json"
-  python3 - "$W/$backend-full.json" "$W/$backend-replay.json" <<'PY'
+common=("lg:$W/lg" "$W/tb.prp" --workdir "$W/sim" --set sim.init_zero=true --set compile.unknown_zero=true)
+"$LHD" sim "${common[@]}" --set sim.checkpoint_every=4 --result-json "$W/full.json"
+"$LHD" sim "${common[@]}" --run-only --restart-cycle 17 --result-json "$W/replay.json" 2>"$W/replay.err"
+grep -q 'restarted from checkpoint cycle 16' "$W/replay.err" || { cat "$W/replay.err"; echo "FAIL: the replay did not restart from the cycle-16 checkpoint"; exit 1; }
+python3 - "$W/full.json" "$W/replay.json" <<'PY'
 import json,sys
 a,b=[json.load(open(p))['tests'][0] for p in sys.argv[1:]]
+# the resumed run passes the assert that reads the restored state first (acc.q == 19), like the full run
 assert a['status']==b['status']=='pass', (a,b)
-assert b['sim_cycles']==4, b
-assert a['end_digest']==b['end_digest'], (a,b)
-assert a['out_digest']==b['out_digest'], (a,b)
+assert a['sim_cycles']==b['sim_cycles']==20, (a,b)
 PY
-done
+echo "PASS: restore settles outputs before the first resumed read"

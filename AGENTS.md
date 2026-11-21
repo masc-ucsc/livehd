@@ -37,36 +37,27 @@
 - **Independent tests**: LiveHD scripts and BUILD rules must not access sibling
   benchmark repositories. Test inputs must be provided by this repository or
   declared build dependencies.
-- **Simulator backend**: `lhd sim` defaults to `sim.tune.backend=llvm` (native
-  color objects). A test that is about the Slop backend itself (its C++ output,
-  slop-only knobs) pins `--set sim.tune.backend=slop`; a general sim test that
-  fails under llvm is an LLVM-backend bug to fix in `inou/cgen`, not a reason
-  to switch it to slop.
-- **Sim flow (LNAST vs inou.cgen.sim)**: `lhd sim` builds the DUT through the
-  LNAST flow by default (`pass.lg2lnast` -> `pass/lnast_llvm` native kernels, no
-  color plan or cgen_sim; `pass/lg2lnast/README.md` milestone 3). What it does not
-  cover (VCD/probe/query runs, `sim.tune.backend=slop`, a design `lg2lnast` or
-  `lnast_llvm` declines, a testbench that reads a register/memory/sub-instance of
-  the DUT) falls back to `inou.cgen.sim` with a `lnast-fallback` progress note.
-  `LHD_SIM_LNAST=0` forces inou.cgen.sim, `=1` requires the LNAST flow (a decline
-  is an error: the way to find out why a design is not covered). A test about
-  inou.cgen.sim itself (the sim.tune driver, its generated C++) pins
-  `LHD_SIM_LNAST=0`. Known semantic difference: with `compile.unknown_zero` off each
-  `?` literal is drawn ONCE per run from the seed in both flows, but a `?` the
-  LNAST flow meets outside an operand literal is 0. `sim.vcd` is supported (ports
-  and registers, one scope per instance path, edge-aligned: no `sim.vcd_fake_delay`
-  X windows, memories not traced); probe / break-when / query / list-signals /
-  restart runs still fall back. `sim.warn_undefined` reports in both flows (the
-  LNAST flow: division/remainder by zero, registered-memory accesses outside the
-  array, and the Verilog reader's `lgundef` markers; not inside a rolled loop). When a flow disagrees with the
-  other, do not assume the old one is right: compare against the language rules.
-- **Sim build**: `lhd sim` generates `<workdir>/sim` and builds `drv.bin` itself
-  (built-in parallel, incremental host compile); there is no bazel/ninja project
-  and no `sim.ninja` option. The sim dir records its command, so `lhd sim` /
-  `lhd sim --setup-only` / `lhd sim --run-only` run inside it re-read the
-  original sources and reuse everything unchanged (`--setup-only` regenerates
-  only; plain `lhd sim` regenerates, builds and runs; `--run-only` builds and
-  runs the existing tree, `sim.compile_only=true` stops after the build).
+- **Simulator**: `lhd sim` has ONE flow and no fallback. The design is native LLVM kernels
+  (`pass.lg2lnast` -> `pass/lnast_llvm`, one `<stem>.dut.json` + kernel objects per DUT), the testbench's `test`
+  blocks are lowered to ONE object beside them (`inou/prp/tb_llvm.cpp`, `drv.tb.o`), and the tests are run by the
+  standalone `lhd_simrt` (`lhd/lhd_sim_llvm_rt.cpp`, a separate small binary built beside `lhd`: it loads the
+  objects through OrcJIT, so there is no host compiler, no link step and no generated C++ anywhere). A design or run
+  the flow cannot do is an error that names the construct, never a reroute. `sim.tune.backend=slop` is unsupported. A
+  testbench that pokes the DUT's clock port (`acc.rclk = (clock & 1) == 0`) drives it as an explicit waveform: each
+  `step` is then one clock event (rise kernels on a 0->1 change, fall kernels on 1->0). `acc.clk = clock` is the
+  ordinary binding and changes nothing. File-preloaded memories (`std.readmemh/b`) and simulation-only `initial`
+  programs (`$display`, `$value$plusargs`, `$fatal`) are read/interpreted by the runtime at power-on.
+  Testbench values are exact-width LLVM integers (carried in 32/64-bit multiples, kept sign-extended; any width is
+  allowed): see `todo/livehd/2sl-llvm-only-sim.md` for the width rules and the measurements behind them.
+  `inou.cgen.sim` (the generated C++ class API) and `lhd compile --emit-dir sim:` were deleted: that emit kind is now
+  an `unsupported` error pointing at `lhd sim` / `lhd pass lnast-llvm --emit-dir sim:DIR` (native kernels only).
+- **Sim checkpoints and observation**. The runtime writes native checkpoints under `<workdir>/ckpt/` with
+  `state.bin`, `frame.bin`, and `meta.json` written by a forked child. `--restart-cycle N` resumes from the
+  nearest compatible checkpoint at or before N. Cycle numbers are absolute across successive ticks.
+  VCD, `--probe`, `--break-when`, and state queries use `drv.tb.trace.o` in a separate replay over checkpoint
+  intervals. `lhd.jobs` bounds concurrent intervals and results are combined chronologically. `--list-signals`
+  reads the DUT catalog. Include trace options during `--setup-only` if a later `--run-only` needs them.
+  `sim.compile_only=true` stops after setup.
 - **Synth rebuild**: `lhd synth ... --workdir W` records its command and result in
   `W/synth/manifest.json` (the same single manifest.json the unit index lives in:
   entries such as `invocation` and `synth` are kept across rewrites). A bare

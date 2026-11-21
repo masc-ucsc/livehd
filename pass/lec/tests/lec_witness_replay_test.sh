@@ -12,12 +12,10 @@
 # sim fails to build — and `lhd lec` still exits REFUTED with the right verdict,
 # so nothing downstream notices that the reproduction stopped being produced.
 #
-# The replayed VALUES are asserted with `lhd sim --query` (docs/pyrope 09b) rather
-# than by diffing the waveform: the query answers are structured, exact and
-# full-width, while a VCD golden would pin the writer's `$dumpvars` hash order and
-# its wall-clock `$date` — neither of which is content. The VCD is still required
-# to EXIST and to carry both DUTs, since it is the artifact this test exists to
-# protect.
+# The replayed VALUES are asserted from the replay waveform (vcd_check.py below), parsed for signal changes rather than
+# diffed against a golden, which would pin the writer's `$dumpvars` order and its wall-clock `$date` -- neither of
+# which is content. The VCD is also required to EXIST and to carry both DUTs, since it is the artifact this test
+# exists to protect.
 #
 # The design pair is chosen so the counterexample is UNIQUE and forced, which is
 # what makes a pinned trace legitimate rather than flaky:
@@ -41,6 +39,57 @@ WORK="${TEST_TMPDIR:-/tmp/lecvcd}"
 mkdir -p "$WORK"
 fail=0
 ck() { if eval "$2"; then echo "ok: $1"; else echo "FAIL: $1"; fail=1; fi; }
+
+# Shared VCD checker: values come from the replay waveform. A cycle's period is 10 time units; the value change an edge
+# produces appears at that edge's timestamp, which is the NEXT cycle's "during period" sample, hence `cycle = t/10 + 1`.
+cat > "$WORK/vcd_check.py" <<'PY'
+import json, sys
+
+def parse(path):
+    names, scope, changes, order = {}, [], {}, []
+    t = 0
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if line.startswith("$scope"):
+                scope.append(line.split()[2])
+            elif line.startswith("$upscope"):
+                scope.pop()
+            elif line.startswith("$var"):
+                p = line.split()
+                names[p[3]] = ".".join(scope + [p[4].split("[")[0]])
+            elif line.startswith("#"):
+                t = int(line[1:])
+                order.append(t)
+            elif line.startswith("b"):
+                v, i = line[1:].split()
+                changes.setdefault(i, []).append((t, int(v, 2)))
+            elif line and line[0] in "01xz" and len(line) > 1:
+                changes.setdefault(line[1:], []).append((t, int(line[0]) if line[0] in "01" else -1))
+    return names, changes, sorted(set(order))
+
+def timeline(changes, ident, times):
+    cur, out, j = None, {}, 0
+    ch = changes.get(ident, [])
+    for t in times:
+        while j < len(ch) and ch[j][0] <= t:
+            cur = ch[j][1]
+            j += 1
+        out[t] = cur
+    return out
+
+def divergence(vcd, witness):
+    names, changes, times = parse(vcd)
+    by = {n: i for i, n in names.items()}
+    impl = timeline(changes, by["_lec_dut.impl_o"], times)
+    ref = timeline(changes, by["_lec_dut.ref_o"], times)
+    differ = [t for t in times if impl[t] != ref[t]]
+    assert differ, "the two sides never part in the waveform"
+    t = differ[0]
+    assert all(impl[u] == ref[u] for u in times if u < t), "the sides must agree before they part"
+    assert t // 10 + 1 == witness["diverge_cycle"], (t, witness["diverge_cycle"])
+    return names, changes, times, impl, ref, t
+PY
 
 # ref: +1 per cycle.  impl: +2 per cycle.  Async reset on both sides, no data in.
 cat > "$WORK/mini.v" <<'EOF'
@@ -90,17 +139,6 @@ ST="$WORK/rerun_t"
 rm -rf "$ST"
 (
   $LHD lec --set formal.effort=proof --ref "$WORK/sref.prp" --impl "$WORK/simpl.prp" --workdir "$WT" >"$WORK/out2.log" 2>&1
-# The query follows the witness JSON's diverge_cycle rather than a fixed number.
-python3 - "$WT/simfail_dut.json" > "$WORK/qt.json" <<'PYQ'
-import json, sys
-n = json.load(open(sys.argv[1]))["diverge_cycle"]
-print(json.dumps({"schema_version": 1, "kind": "sim_query",
-                  "queries": [{"id": f"o{c}", "op": "values", "kind": "output",
-                               "at": {"cycle": c}} for c in range(n + 1)]}))
-PYQ
-ST="$WORK/rerun_t"
-rm -rf "$ST"
-$LHD sim "$WORK/simpl.prp" "$WORK/sref.prp" "$WT/simfail_dut.prp" --workdir "$ST"      --result-json "$WORK/qt.out.json" --query "$WORK/qt.json" >/dev/null 2>&1
 ) &
 struct_pid=$!
 
@@ -128,74 +166,43 @@ ck "VCD declares both DUT outputs" \
 ck "VCD carries both sub-instances" \
    '[ "$(grep -c "^\$scope module u_" "$W/simfail_mini.vcd")" = 2 ]'
 
-# ---- the replayed VALUES, via `lhd sim --query` --------------------------------
-# Re-running the emitted testbench BY ITSELF is the whole point of the artifact
-# (edit, re-run, watch the divergence move), so the query runs against the .prp
-# in a fresh workdir with nothing else passed.
-cat > "$WORK/q.json" <<'EOF'
-{"schema_version": 1, "kind": "sim_query", "queries": [
-  {"id": "impl_changes", "op": "changes", "signal": "_lec_dut.impl_o", "from": {"cycle": 0}, "to": {"cycle": 3}},
-  {"id": "ref_changes",  "op": "changes", "signal": "_lec_dut.ref_o",  "from": {"cycle": 0}, "to": {"cycle": 3}},
-  {"id": "outs",         "op": "values",  "kind": "output", "at": {"cycle": 3}},
-  {"id": "state",        "op": "values",  "kind": "flop",   "at": {"cycle": 2}}
-]}
-EOF
+# ---- the replayed VALUES, from the waveform -------------------------------------
+# Re-running the emitted testbench BY ITSELF is the whole point of the artifact (edit, re-run, watch the divergence
+# move), so it runs in a fresh workdir with nothing else passed, with the VCD on, and THAT waveform is what is checked.
 S="$WORK/rerun"
 rm -rf "$S"
-$LHD sim "$W/simfail_mini.prp" --workdir "$S" --result-json "$WORK/q.out.json" \
-     --query "$WORK/q.json" >/dev/null 2>&1
-ck "standalone re-run answered the query" '[ -s "$WORK/q.out.json" ]'
+$LHD sim "$W/simfail_mini.prp" --workdir "$S" --set sim.vcd=true >/dev/null 2>&1
+RV=$(ls "$S"/*.vcd 2>/dev/null | head -1)
+ck "standalone re-run wrote a waveform" '[ -n "$RV" ] && [ -s "$RV" ]'
 
 cat > "$WORK/chk.py" <<'PY'
 import json, sys
-q = json.load(open(sys.argv[1]))["query"]
-r = {x["id"]: x for x in q["results"]}
-for k, v in r.items():
-    assert v.get("ok"), f"query {k} failed: {v}"
-
-# Each output moves EXACTLY once, off a value both sides shared. That pins the
-# whole trace of both outputs AND proves the failure point is unique: equal
-# before the change, and diverging only at it.
-exp = {"impl_changes": ("_lec_dut.impl_o", "2"), "ref_changes": ("_lec_dut.ref_o", "1")}
-cyc = set()
-for qid, (sig, new) in exp.items():
-    ch = r[qid]["changes"]
-    assert r[qid]["signal"] == sig, r[qid]
-    assert len(ch) == 1, f"{qid}: expected ONE transition, got {ch}"
-    assert ch[0]["old"]["dec"] == "0", f"{qid}: must start settled at 0, got {ch[0]['old']}"
-    assert ch[0]["new"]["dec"] == new, f"{qid}: expected {new}, got {ch[0]['new']}"
-    cyc.add(ch[0]["cycle"])
-assert len(cyc) == 1, f"the two sides must part on ONE cycle, got {sorted(cyc)}"
-
-# Same values read directly at the diverging cycle, full width.
-outs = {v["signal"]: v["value"] for v in r["outs"]["values"]}
-assert outs["_lec_dut.impl_o"]["dec"] == "2", outs
-assert outs["_lec_dut.ref_o"]["dec"] == "1", outs
-assert outs["_lec_dut.impl_o"]["hex"] == "02", outs   # ceil(8/4) digits, no truncation
-assert outs["_lec_dut.ref_o"]["hex"] == "01", outs
-
-# The ROOT CUT the verdict named is the `cnt` flop inside each DUT, and the replay
-# must land the same two values there. A flop is sampled SETTLED end-of-period
-# while an output reports what it drove DURING the period, so the state that the
-# cycle-3 outputs inherit is the flop at cycle 2 — one edge earlier, by design
-# (see the sampling note in the simquery docs; reading both at cycle 3 gives 4/2,
-# the NEXT state, which looks like a bug and is not).
-st = {s.rsplit(".", 1)[0]: v["dec"] for s, v in
-      ((x["signal"], x["value"]) for x in r["state"]["values"]) if s.endswith(".cnt")}
-assert sorted(st.values()) == ["1", "2"], f"root-cut flops must hold ref=1 impl=2, got {st}"
-assert all(v["value"]["sampled"] == "settled" for v in r["state"]["values"]), r["state"]
-assert all(v["value"]["sampled"] == "during_period" for v in r["outs"]["values"]), r["outs"]
-
-# The sibling witness JSON must tell the same story as the simulation.
+sys.path.insert(0, sys.argv[3])
+from vcd_check import divergence
 w = json.load(open(sys.argv[2]))
+names, changes, times, impl, ref, t = divergence(sys.argv[1], w)
+# Each output moves EXACTLY once off a value both sides shared (settled at 0), and the two sides part on ONE cycle with
+# the values the witness names.
+assert impl[t] == 2 and ref[t] == 1, (impl[t], ref[t])
+for sig, new in (("_lec_dut.impl_o", 2), ("_lec_dut.ref_o", 1)):
+    ident = next(i for i, n in names.items() if n == sig)
+    first = [(u, v) for u, v in changes[ident] if v != 0]
+    assert first and first[0] == (t, new), (sig, first[:2])
+    assert all(v == 0 for u, v in changes[ident] if u < t), f"{sig}: must start settled at 0"
+# The ROOT CUT the verdict named is the `cnt` flop inside each DUT: the replay lands the same two values there.
+st = {n: changes[i] for i, n in names.items() if n.endswith(".cnt")}
+vals = sorted(next(v for u, v in ch if u == t) for ch in st.values())
+assert vals == [1, 2], f"root-cut flops must hold ref=1 impl=2, got {vals}"
+# The sibling witness JSON tells the same story as the simulation.
 assert w["kind"] == "simfail", w
 assert w["root_cut"]["ref"] == "1" and w["root_cut"]["impl"] == "2", w["root_cut"]
-assert w["diverge_cycle"] == cyc.pop(), (w["diverge_cycle"], cyc)
 assert w["root_cut"]["file"].endswith("mini_bug.prp") and w["root_cut"]["line"] > 0, w["root_cut"]
 print("ok")
 PY
-ck "replay reproduces the counterexample (query + witness JSON agree)" \
-   'python3 "$WORK/chk.py" "$WORK/q.out.json" "$W/simfail_mini.json" | grep -q ok'
+ck "replay reproduces the counterexample (waveform + witness JSON agree)" \
+   'python3 "$WORK/chk.py" "$RV" "$W/simfail_mini.json" "$WORK" | grep -q ok'
+ck "lec-written waveform tells the same story" \
+   'python3 "$WORK/chk.py" "$W/simfail_mini.vcd" "$W/simfail_mini.json" "$WORK" | grep -q ok'
 
 # ---- the verdict text names the same divergence -------------------------------
 ck "verdict names the divergence" 'echo "$OUT" | grep -q "o(ref=1 impl=2)"'
@@ -218,23 +225,15 @@ ck "struct: no writer round trip" '[ ! -d "$WT/lecfail_impl_prp" ] && [ ! -d "$W
 
 cat > "$WORK/chkt.py" <<'PY'
 import json, sys
-w  = json.load(open(sys.argv[2]))
-n  = w["diverge_cycle"]
+sys.path.insert(0, sys.argv[3])
+from vcd_check import divergence
+w = json.load(open(sys.argv[2]))
 rc = w["root_cut"]
-r  = {x["id"]: x for x in json.load(open(sys.argv[1]))["query"]["results"]}
-for c in range(n + 1):
-    q = r[f"o{c}"]
-    assert q.get("ok"), q
-    v = {x["signal"]: x["value"]["dec"] for x in q["values"]}
-    impl, ref = v["_lec_dut.impl_o"], v["_lec_dut.ref_o"]
-    if c < n:
-        assert impl == ref, f"cycle {c}: the sides must still agree, got impl={impl} ref={ref}"
-    else:
-        assert impl != ref, f"cycle {n}: the sides must part, both read {impl}"
-        assert (ref, impl) == (rc["ref"], rc["impl"]),             f"cycle {n}: replay gave ref={ref} impl={impl}, witness says {rc}"
+names, changes, times, impl, ref, t = divergence(sys.argv[1], w)
+assert (str(ref[t]), str(impl[t])) == (rc["ref"], rc["impl"]), f"replay gave ref={ref[t]} impl={impl[t]}, witness says {rc}"
 print("ok")
 PY
-ck "struct: replay reproduces the counterexample"    'python3 "$WORK/chkt.py" "$WORK/qt.out.json" "$WT/simfail_dut.json" | grep -q ok'
+ck "struct: replay reproduces the counterexample"    'python3 "$WORK/chkt.py" "$WT/simfail_dut.vcd" "$WT/simfail_dut.json" "$WORK" | grep -q ok'
 
 if [ $fail -ne 0 ]; then echo "lec_witness_replay_test: FAILED"; exit 1; fi
 echo "lec_witness_replay_test: PASSED"

@@ -3867,7 +3867,8 @@ namespace {
 // `visiting` are shared across the whole canonical_digest() call so shared
 // children in the instance DAG are digested once and a cycle is caught.
 Canonical_digest digest_one(hhds::Graph* g, const Digest_resolver& resolve, absl::flat_hash_map<hhds::Gid, Canonical_digest>& memo,
-                            absl::flat_hash_set<hhds::Gid>& visiting, Sub_fold sub_fold, bool matching_io_names) {
+                            absl::flat_hash_set<hhds::Gid>& visiting, Sub_fold sub_fold, bool matching_io_names,
+                            bool snapshot = false) {
   Canonical_digest d;
   if (g == nullptr) {
     return d;
@@ -3877,7 +3878,7 @@ Canonical_digest digest_one(hhds::Graph* g, const Digest_resolver& resolve, absl
   // falls back to the per-run debug nid, which is neither stable across
   // processes nor safely replaceable by a constant.
   for (auto node : g->body().nodes(hhds::Node_order::forward)) {
-    if (is_persistent_state(node) && state_key(g, node).starts_with("f:")) {
+    if (!snapshot && is_persistent_state(node) && state_key(g, node).starts_with("f:")) {
       return d;  // valid=false — not digestable, callers skip the cache
     }
   }
@@ -3933,6 +3934,23 @@ Canonical_digest digest_one(hhds::Graph* g, const Digest_resolver& resolve, absl
     }
   }
   Side s = analyze(g, opts, &seeds);
+  // A persisted copy has the same node indices as the source graph. Where a
+  // feedback cone has no canonical forward identity, use that local index and
+  // fold *all* incoming edges below. This identity is private to the compile
+  // snapshot. Proof caches still require allocation-independent signatures.
+  if (snapshot) {
+    const auto seeded = seeds.size();
+    for (const auto& node : s.order) {
+      const auto ci = node.get_class_index();
+      if (!s.fsig.contains(ci)) {
+        seeds.emplace(ci, hcombine(hstr("\x01snapshot"), static_cast<uint64_t>(node.get_debug_nid())));
+        named_cuts.insert(ci);
+      }
+    }
+    if (seeds.size() != seeded) {
+      s = analyze(g, opts, &seeds);
+    }
+  }
 
   // Order-independent fold: one token per node (fsig = input-cone identity,
   // bsig = output-cone identity, kind = local shape), sorted so allocation /
@@ -3971,8 +3989,8 @@ Canonical_digest digest_one(hhds::Graph* g, const Digest_resolver& resolve, absl
       // same information an unseeded stalled instance contributed before.
       if (uint64_t cs = 0; cut_signature(s, node, cs)) {
         tok = hcombine(hcombine(tok, hstr("\x01instcut")), cs);
-      } else if (node.is_loop_subnode()) {
-        return {};  // a loop cut newly made digestable must key on its operands, never under-key
+      } else if (snapshot || node.is_loop_subnode()) {
+        return {};  // every snapshot or loop cut must account for all its operands
       }
     }
     // interface mode: a Sub folds ONLY its def identity (the gid in node_kind_key)
@@ -4083,6 +4101,12 @@ Canonical_digest canonical_digest(hhds::Graph* g, const Digest_resolver& resolve
     memo.emplace(g->get_gid(), d);
   }
   return d;
+}
+
+Canonical_digest snapshot_digest(hhds::Graph* g) {
+  absl::flat_hash_map<hhds::Gid, Canonical_digest> memo;
+  absl::flat_hash_set<hhds::Gid>                   visiting;
+  return digest_one(g, {}, memo, visiting, Sub_fold::interface, true, /*snapshot=*/true);
 }
 
 }  // namespace livehd::semdiff

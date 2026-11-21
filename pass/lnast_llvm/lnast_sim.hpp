@@ -8,11 +8,10 @@
 
 #include "hhds/graph.hpp"
 
-// `lhd sim` through the LNAST flow: lgraph -> typed LNAST (pass.lg2lnast) -> native LLVM state
-// kernels (lnast_llvm), with a thin C++ class around the state so the testbench driver that
-// inou/prp/prp_sim generates drives it exactly like a class inou.cgen.sim wrote: `__in`/`__out`
-// Slop fields, step(), reset_cycle(), checkpoint and observation hooks, and the `<stem>.iface.json`
-// manifest. No per-module C++ is generated: the design is the kernels plus one small class.
+// `lhd sim`: lgraph -> typed LNAST (pass.lg2lnast) -> native LLVM state kernels (lnast_llvm). Per DUT it writes the
+// kernel objects and `<stem>.dut.json` (the state layout, the kernel schedule and the activity-gating marks); the
+// testbench object inou/prp/tb_llvm lowers calls the kernels directly and reads and writes the port words in place.
+// No C++ is generated.
 namespace livehd::lnast_llvm {
 
 struct Sim_request {
@@ -24,14 +23,15 @@ struct Sim_request {
   std::vector<std::string>                  duts;
   std::string                               odir;    // the simulator directory (`<workdir>/sim`)
   std::string                               passes;  // LNAST stream passes (pass.lg2lnast.passes)
+  bool                                      dump_bitcode = false;
+  bool                                      incremental  = true;
   bool                                      unknown_zero = false;  // sim.unknown_zero: `?` bits are 0, else drawn once per run
-  bool                                      vcd          = false;  // sim.vcd: the class writes a VCD of its ports and registers
 };
 
 struct Sim_emitted {
   bool                     ok = false;
   std::string              why;    // ok == false: what the flow does not cover (first reason)
-  std::vector<std::string> stems;  // file stems written (`<stem>.hpp`, `.cpp`, `.iface.json`)
+  std::vector<std::string> stems;  // native DUT descriptors written (`<stem>.dut.json`)
   size_t                   words        = 0;
   size_t                   instructions = 0;
 };

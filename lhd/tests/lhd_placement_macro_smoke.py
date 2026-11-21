@@ -429,7 +429,16 @@ def check_chunk_stages():
     cmd('final')
     assert {r['id'] for r in cmd('list','--stage','final','--status','done')} == {a,b}
 
-check_chunk_stages()
+# Chunk work and the batch floorplan checks use independent workdirs.
+shards = int(os.environ.get('TEST_TOTAL_SHARDS', 1))
+assert shards in (1, 2)
+if shards == 2:
+    Path(os.environ['TEST_SHARD_STATUS_FILE']).touch()
+if int(os.environ.get('TEST_SHARD_INDEX', 0)) == 0:
+    check_chunk_stages()
+    if shards == 2:
+        raise SystemExit(0)
+
 first=run('cold',['--emit-dir',f'def:{root}/def','--emit-dir',f'verilog:{root}/net','--set','synth.place.snapshots=true'])
 assert first['qor']['place']['legal'] and first['qor']['place']['macro']['mode']=='h2d',first
 report=root/'W/synth/place/macro_topology.json'

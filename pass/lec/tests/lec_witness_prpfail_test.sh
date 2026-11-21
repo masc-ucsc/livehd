@@ -82,14 +82,11 @@ PY
 ck "json root_cut + input sequence match the .prp" 'python3 "$WORK/chk.py" "$W1/simfail_dut.prp" "$W1/simfail_dut.json" | grep -q ok'
 
 # ---- the generated testbench must be SIM-VALID: `lhd sim --setup-only` runs the
-# whole front-end (inou.prp -> upass -> tolg -> cgen_sim) without host-compiling,
+# whole front-end (inou.prp -> upass -> tolg -> native kernels + the testbench object) without running anything,
 # so it catches any codegen regression in the generated wrapper/test hermetically.
 S1="$WORK/s1"
 $LHD sim "$W1/simfail_dut.prp" --setup-only --set sim.vcd=true --workdir "$S1" >/dev/null 2>&1
-ck "generated testbench sim-valid" '[ -f "$S1/sim/drv.cpp" ]'
-# The hierarchical peek must snapshot sub-instances by value, so the DUT struct
-# stays copyable under VCD: __vcd is a shared_ptr, not unique_ptr (the cgen_sim fix).
-ck "VCD __vcd is copyable (shared_ptr)" '! grep -rq "unique_ptr<vcd::VCDWriter>" "$S1/sim"/ && grep -rq "shared_ptr<vcd::VCDWriter>" "$S1/sim"/'
+ck "generated testbench sim-valid" '[ -f "$S1/sim/drv.tb.o" ]'
 
 # ---- formal.witness=false disables the whole feature ------------------------------
 W2="$WORK/w2"
@@ -152,7 +149,7 @@ ck "hier: prp generated"        '[ -f "$WH/simfail_topm.prp" ]'
 ck "hier: sub-module input typed" 'grep -Eq "mod adder[^(]*\(en:(Bool|U[0-9]+)" "$WH/simfail_topm.prp"'
 SH="$WORK/sh"
 $LHD sim "$WH/simfail_topm.prp" --setup-only --set sim.vcd=true --workdir "$SH" >/dev/null 2>&1
-ck "hier: testbench sim-valid"  '[ -f "$SH/sim/drv.cpp" ]'
+ck "hier: testbench sim-valid"  '[ -f "$SH/sim/drv.tb.o" ]'
 
 # ---- IMPORT form: when BOTH sides are `pub` .prp with DISTINCT stems, the
 # testbench IMPORTS the originals (`import("<stem>.<top>")`) instead of inlining
@@ -182,7 +179,7 @@ ck "import: no inlined copy"     '! grep -q "^pub mod dut" "$WP/simfail_dut.prp"
 # sim-valid ONLY with the sources passed positionally (the imports need them).
 SP="$WORK/sp"
 $LHD sim "$WORK/pimpl.prp" "$WORK/pref.prp" "$WP/simfail_dut.prp" --setup-only --set sim.vcd=true --workdir "$SP" >/dev/null 2>&1
-ck "import: testbench sim-valid" '[ -f "$SP/sim/drv.cpp" ]'
+ck "import: testbench sim-valid" '[ -f "$SP/sim/drv.tb.o" ]'
 # Bool ports are strict: the wrapper declares `en:Bool` (not the trace's u1),
 # drives it with a comparison, and casts at the binding of a side that declares
 # the same port as an integer.
@@ -194,7 +191,7 @@ $LHD lec --set formal.effort=proof --impl "$WORK/pimpl.prp" --ref "$WORK/pkref.p
 ck "kinds: u1 side gets a cast"    'grep -q "refmod(en = U1(en))" "$WK/simfail_dut.prp"'
 SK="$WORK/sk"
 $LHD sim "$WORK/pimpl.prp" "$WORK/pkref.prp" "$WK/simfail_dut.prp" --setup-only --set sim.vcd=true --workdir "$SK" >/dev/null 2>&1
-ck "kinds: testbench sim-valid"    '[ -f "$SK/sim/drv.cpp" ]'
+ck "kinds: testbench sim-valid"    '[ -f "$SK/sim/drv.tb.o" ]'
 # The other direction: the wrapper port takes the u1 impl's kind, so it is
 # driven as an integer and the bool side gets `Bool(...)`.
 WKR="$WORK/wkr"
@@ -204,7 +201,7 @@ ck "kinds: bool side gets a cast"  'grep -q "refmod(en = Bool(en))" "$WKR/simfai
 ck "kinds: u1 port driven as int"  'grep -Eq "_lec_dut.en = _drv_en\[\`clock\`\]$" "$WKR/simfail_dut.prp"'
 SKR="$WORK/skr"
 $LHD sim "$WORK/pkref.prp" "$WORK/pimpl.prp" "$WKR/simfail_dut.prp" --setup-only --set sim.vcd=true --workdir "$SKR" >/dev/null 2>&1
-ck "kinds: reverse testbench sim-valid" '[ -f "$SKR/sim/drv.cpp" ]'
+ck "kinds: reverse testbench sim-valid" '[ -f "$SKR/sim/drv.tb.o" ]'
 
 # ---- a COMBINATIONAL side. prp_writer picks the lambda keyword from the body
 # (`pub mod` with state, `pub comb` without), so a stateless side re-emits with
@@ -232,7 +229,7 @@ ck "comb: mod side keeps cycle" 'grep -q "impl_r:U8@\[1\]" "$WQ/simfail_dut.prp"
 ck "comb: comb side gets @[]"   'grep -q "ref_r:U8@\[\]" "$WQ/simfail_dut.prp"'
 SQ="$WORK/sq"
 $LHD sim "$WORK/qimpl.prp" "$WORK/qref.prp" "$WQ/simfail_dut.prp" --setup-only --set sim.vcd=true --workdir "$SQ" >/dev/null 2>&1
-ck "comb: testbench sim-valid"  '[ -f "$SQ/sim/drv.cpp" ]'
+ck "comb: testbench sim-valid"  '[ -f "$SQ/sim/drv.tb.o" ]'
 
 # ---- STRUCT ports. A nested port (`io:(valid:U1, bits:(x:U4))`) is ONE decl but
 # several scalar leaves, and an instantiation binds it per LEAF (`io.bits.x = e`),
@@ -268,7 +265,7 @@ ck "struct: impl-only leaf NOT on ref" '! grep -q "refmod(.*only_impl" "$WS/simf
 ck "struct: drives each leaf"      'grep -q "_lec_dut.io__bits__y = _drv_io__bits__y\[\`clock\`\]" "$WS/simfail_dut.prp"'
 SS="$WORK/ss"
 $LHD sim "$WORK/simpl.prp" "$WORK/sref.prp" "$WS/simfail_dut.prp" --setup-only --set sim.vcd=true --workdir "$SS" >/dev/null 2>&1
-ck "struct: testbench sim-valid"   '[ -f "$SS/sim/drv.cpp" ]'
+ck "struct: testbench sim-valid"   '[ -f "$SS/sim/drv.tb.o" ]'
 
 # ---- import the original popcount design directly. The writer now supports
 # popcount, but replay must still avoid re-emitting either Pyrope side. The
@@ -285,7 +282,7 @@ ck "popcount: prp still generated" '[ -f "$WC/simfail_dut.prp" ]'
 ck "popcount: no writer round trip" '[ ! -d "$WC/lecfail_impl_prp" ] && [ ! -d "$WC/lecfail_ref_prp" ]'
 SC="$WORK/sc"
 $LHD sim "$WORK/pcimpl.prp" "$WORK/pcref.prp" "$WC/simfail_dut.prp" --setup-only --set sim.vcd=true --workdir "$SC" >/dev/null 2>&1
-ck "popcount: testbench sim-valid" '[ -f "$SC/sim/drv.cpp" ]'
+ck "popcount: testbench sim-valid" '[ -f "$SC/sim/drv.tb.o" ]'
 
 if [ $fail -ne 0 ]; then echo "lec_witness_prpfail_test: FAILED"; exit 1; fi
 echo "lec_witness_prpfail_test: PASSED"

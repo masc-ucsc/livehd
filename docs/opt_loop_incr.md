@@ -78,11 +78,21 @@ none of them.
 | tier | grain | reuses | skips when it hits |
 |---|---|---|---|
 | **A** | one source file | its LNAST | the parser |
-| **B** | the whole design | the graph library | upass, tolg, cprop, formal, legalize, save |
+| **B** | eligible definitions or the whole design | finalized LGraphs and their elaboration metadata | elaboration and graph passes for restored definitions |
 
-Tier A is what makes an edit cheap to *detect*. Tier B is what makes it cheap to
-*skip*. Tier A hitting on 179 of 180 files is worth almost nothing on its own —
-parsing is a small fraction of a compile. Tier B is where the time is.
+The source scan reads each Pyrope file once. It compares the bytes with the saved
+snapshot and reuses the import list on an exact match. Changed bytes go through
+the fast import scanner and parser. The resolved paths supply reverse dependency
+edges, including multiple import spellings for one file. An interface change
+invalidates transitive importers. A body change also invalidates callers that
+contain an inlined copy.
+
+A graph consumer loads source trees only for definitions that need live
+elaboration or source-format validation. A complete graph hit still writes the
+full source dependency file. Where a feedback cone needs stored node identities
+to validate its graph, the cache marks the generation for whole-design reuse.
+A semantic edit to that generation reuses unchanged source LNASTs and lowers
+the graphs together so specialized callers agree with their callees' ports.
 
 ### The algorithm
 
@@ -99,7 +109,7 @@ compile(seeds, workdir, options):
         u.bytes ← read u
         if prior has u  and  u.bytes == snapshot(u):
             u.state   ← HIT             # skip the parser entirely
-            u.lnast   ← the cached tree
+            u.lnast   ← reference to the cached tree, decoded on demand
             u.imports ← the cached import list
         else:
             u.imports ← scan_imports(u.bytes)        # lexical, cheap
@@ -116,8 +126,11 @@ compile(seeds, workdir, options):
         materialize the stored library by file inventory;  return    # the fast path
 
     inventory ← read scope/lg/graph_inventory.json
-    validate every stored graph against it (§3)
-    restore the bodies owned by clean units
+    if dirty and inventory.whole_design_only:
+        lower the source forest, loading unchanged units from Tier A
+        store the new generation and return
+    validate the stored graphs against the inventory (§3)
+    restore eligible bodies owned by clean units
     replay their stored diagnostics
     run the pipeline over the dirty ones only
 

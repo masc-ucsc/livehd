@@ -11,5 +11,6 @@ namespace livehd::graph_util {
 // absence of pin_signed, so no separate "sign present" attribute is required.
 // Includes the reachable definition closure, including instance output pins.
 // Emits an internal error and throws before the consumer can use a bad graph.
+void require_sized_definition(hhds::Graph& definition, std::string_view consumer);
 void require_sized_design(hhds::Graph& graph, std::string_view consumer);
 }  // namespace livehd::graph_util

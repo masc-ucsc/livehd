@@ -92,9 +92,7 @@ SV
     # Cycle-level data check of the falling-edge memory (both write ports,
     # explicit expected contents). native_sim advances one whole reference
     # `clk` cycle per vector, so it cannot see edge polarity: a posedge memory
-    # passes it too. Polarity is pinned only by the .clk(~(clk)) grep above
-    # (formal refuses FALLING-edge memories), and event-level by the
-    # LHD_EXTERNAL_SIM leg below.
+    # passes it too. The explicit waveform below checks polarity.
     python3 - "$W/vectors.json" <<'PYV'
 import json, sys
 vectors = []
@@ -112,6 +110,33 @@ for k in range(16):
 open(sys.argv[1], 'w').write(json.dumps(vectors))
 PYV
     LHD="$LHD" python3 tools/native_sim.py "$W/$kind-out.v" memory_clock "$W/vectors.json" "$W/native"
+    # Two instances of the same falling-edge module have opposite physical
+    # edges. Each must retain its own data while the other instance updates.
+    cat "$W/$kind-out.v" > "$W/edges.v"
+    cat >> "$W/edges.v" <<'SV'
+module edge_pair(input clk, input [7:0] value, output [7:0] qfall, qrise);
+  memory_clock f(.clk(clk), .clk_b(1'b0), .we_a(1'b1), .we_b(1'b0), .a(2'b0), .b(2'b0),
+                 .d_a(value), .d_b(8'b0), .q(qfall));
+  memory_clock r(.clk(~clk), .clk_b(1'b0), .we_a(1'b1), .we_b(1'b0), .a(2'b0), .b(2'b0),
+                 .d_a(value), .d_b(8'b0), .q(qrise));
+endmodule
+SV
+    "$LHD" compile "$W/edges.v" --top edge_pair --emit-dir "lg:$W/pair-lg" --workdir "$W/pair" -q
+    cat > "$W/edge.prp" <<'PRP'
+const pair = import("lg:edge_pair")
+test memory.edges {
+  mut d = pair
+  tick 4 {
+    d.value = clock + 10
+    d.clk = (clock & 1) == 0
+    step
+    if clock == 1 { assert(d.qfall == 11 and d.qrise == 10, "first falling edge") }
+    if clock == 2 { assert(d.qfall == 11 and d.qrise == 12, "second rising edge") }
+    if clock == 3 { assert(d.qfall == 13 and d.qrise == 12, "second falling edge") }
+  }
+}
+PRP
+    "$LHD" sim "lg:$W/pair-lg" "$W/edge.prp" --set compile.unknown_zero=true --workdir "$W/edges" -q
     # Event-level oracle (external simulator only): compare against the source
     # RTL before the falling edge, after it, and after the rising edge.
     if [ -n "${LHD_EXTERNAL_SIM:-}" ]; then

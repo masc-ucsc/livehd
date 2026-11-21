@@ -26,24 +26,27 @@ test echo.defaults(cycles:U8=9) {
   if not std.testplusarg("cycles") { assert(cycles == 9) }
 }
 PRP
-"$LHD" sim "$W/args.prp" --workdir "$W/run" --set sim.tune.profile=off --result-json "$W/default.json"
-DRV="$W/run/sim/drv.bin"
-"$LHD" sim "$W/args.prp" --run-only --workdir "$W/run" +cycles=4 +verbose '+file=a=b.hex' --seed 42 +seed=7 --set sim.tune.profile=off --result-json "$W/cli.json"
-"$DRV" +cycles=4 +cycles=8 +verbose '+file=a=b.hex' --seed 42 +seed=7 --result-json "$W/direct.json" > "$W/direct.log"
+"$LHD" sim "$W/args.prp" --workdir "$W/run" --result-json "$W/default.json"
+SIMRT="${LHD_SIMRT:-$(dirname "$LHD")/lhd_simrt}"
+[ -x "$SIMRT" ] || { echo "lhd_simrt not found next to lhd ($SIMRT)" >&2; exit 1; }
+# the simulator runtime, run directly on the setup `lhd sim` wrote
+drv() { "$SIMRT" "$W/run/sim" "$@"; }
+"$LHD" sim "$W/args.prp" --run-only --workdir "$W/run" +cycles=4 +verbose '+file=a=b.hex' --seed 42 +seed=7 --result-json "$W/cli.json"
+drv +cycles=4 +cycles=8 +verbose '+file=a=b.hex' --seed 42 +seed=7 --result-json "$W/direct.json" > "$W/direct.log"
 grep -q 'cycles=4 verbose=1 file=a=b.hex' "$W/direct.log"
 # Compatibility aliases are intentional coverage, not the preferred spelling.
-"$LHD" sim "$W/args.prp" --run-only --workdir "$W/run" --arg cycles=4 --set sim.tune.profile=off --result-json "$W/alias.json"
-"$DRV" --cycles=4 --result-json "$W/old.json" > /dev/null
-"$DRV" +derived=2 +fallback_derived=typo > /dev/null
-"$DRV" +file= --result-json "$W/empty.json" > /dev/null
+"$LHD" sim "$W/args.prp" --run-only --workdir "$W/run" --arg cycles=4 --result-json "$W/alias.json"
+drv --cycles=4 --result-json "$W/old.json" > /dev/null
+drv +derived=2 +fallback_derived=typo > /dev/null
+drv +file= --result-json "$W/empty.json" > /dev/null
 for bad in '+cycles' '+cycles=256' '+cycles=-1' '+cycles=typo' '+required' '+verbose=typo' '+request_missing'; do
-  if "$DRV" "$bad" > "$W/bad.log" 2>&1; then echo "accepted invalid argument $bad" >&2; exit 1; fi
+  if drv "$bad" > "$W/bad.log" 2>&1; then echo "accepted invalid argument $bad" >&2; exit 1; fi
   grep -Eq 'requires a value|outside U8 range|expects an integer|expects true|missing simulation argument' "$W/bad.log"
 done
 # Replay may reuse only checkpoints from the same supplied/resolved arguments.
-"$DRV" --test echo.run +cycles=4 --ckpt-dir "$W/checkpoints" --checkpoint-every 1 > /dev/null
-"$DRV" --test echo.run +cycles=4 --ckpt-dir "$W/checkpoints" --restart-cycle 2 > /dev/null
-if "$DRV" --test echo.run +cycles=5 --ckpt-dir "$W/checkpoints" --restart-cycle 2 > "$W/replay.log" 2>&1; then
+drv --test echo.run +cycles=4 --ckpt-dir "$W/checkpoints" --checkpoint-every 1 > /dev/null
+drv --test echo.run +cycles=4 --ckpt-dir "$W/checkpoints" --restart-cycle 2 > /dev/null
+if drv --test echo.run +cycles=5 --ckpt-dir "$W/checkpoints" --restart-cycle 2 > "$W/replay.log" 2>&1; then
   echo 'accepted checkpoint with different arguments' >&2; exit 1
 fi
 grep -q 'checkpoint simulation arguments differ' "$W/replay.log"

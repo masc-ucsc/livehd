@@ -17,11 +17,10 @@ CASES = (
 )
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--case", choices=CASES, help="Run one independent regression")
-parser.add_argument("--backend", choices=("slop", "llvm"), help="Run one simulator backend")
 parser.add_argument("--part", choices=("all", "verilog", "pyrope", "oracles"), default="all",
                     help="Run one input language or the independent equivalence/oracle checks")
 ARGS = parser.parse_args()
-ORACLES = ARGS.backend != "llvm" and ARGS.part in ("all", "oracles")
+ORACLES = ARGS.part in ("all", "oracles")
 
 LHD = str(Path(os.environ.get("LHD", "lhd/lhd")).resolve())
 WORK = Path(os.environ.get("TEST_TMPDIR") or tempfile.mkdtemp(prefix="lhd-rtl-roundtrip-")).resolve()
@@ -50,8 +49,8 @@ def check(name, rtl, stimulus, checks, cpp):
     source.write_text(rtl)
     run([LHD, "compile", source, "--top", "top", "--emit-dir", f"lg:{work}/lg",
          "--emit-dir", f"pyrope:{work}/prp", "--workdir", work / "compile", "--set", "compile.upass.inline=false"], work / "compile.log")
-    # LEC is independent of the simulator backend; check it once in the Slop
-    # leg (or the unsplit manual run), alongside the optional Verilator twin.
+    # LEC is independent of the simulator; check it in the `oracles` part (or the unsplit manual run), alongside the
+    # optional Verilator twin.
     if ORACLES:
         lec = run([LHD, "lec", "--ref", source, "--impl", work / "prp/top.prp", "--top", "top",
                    "--workdir", work / "lec", "--set", "compile.upass.inline=false",
@@ -75,12 +74,8 @@ test top.compare {{
 }}
 ''')
         inputs = [f"lg:{work}/lg", tb] if language == "verilog" else [tb]
-        # Both C++/Slop and LLVM must implement the same phase dependencies.
-        for backend in ((ARGS.backend,) if ARGS.backend else ("slop", "llvm")):
-            run([LHD, "sim", *inputs, "--workdir", work / f"{language}-{backend}",
-                 "--set", "sim.tune.profile=off", "--set", f"sim.tune.backend={backend}",
-                 "--set", "compile.upass.inline=false"],
-                work / f"{language}-{backend}.log")
+        run([LHD, "sim", *inputs, "--workdir", work / language, "--set", "compile.upass.inline=false"],
+            work / f"{language}.log")
     if VERILATOR and ORACLES:
         twin = work / "main.cpp"
         twin.write_text('''#include "Vtop.h"
@@ -96,7 +91,7 @@ int main(int argc, char **argv) {
         run([work / "vobj/Vtop"], work / "verilator-run.log")
     elif ORACLES:
         print("note: external-simulator leg skipped (set LHD_EXTERNAL_SIM=1)")
-    print(f"PASS: {name}: {ARGS.part}, {ARGS.backend or 'Slop and LLVM'}")
+    print(f"PASS: {name}: {ARGS.part}")
 
 
 

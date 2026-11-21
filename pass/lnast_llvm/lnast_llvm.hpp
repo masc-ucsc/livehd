@@ -29,6 +29,9 @@ struct Field {
   // zero under sim.init_zero, 2 unknown.
   uint8_t               fill     = 0;
   std::vector<uint64_t> init_words;
+  // A memory preloaded from a file (`std.readmemh/b`): the runtime reads it at power-on (radix 16 or 2).
+  std::string           image_path;
+  int                   image_radix = 0;
   uint64_t              entries    = 0;
   uint32_t              entry_bits = 0;
   // Inputs only, with activity gating: the kernels (their dirty bits) that read this input.
@@ -88,9 +91,11 @@ struct Sim_objects {
   std::string json;
   // true: every `?` bit of a literal is 0 (sim.unknown_zero). false (the `lhd sim` default): each `?`
   // literal is drawn ONCE per run from the seeded PRNG, so an unspecified bit cannot be relied on.
-  bool        unknown_zero = true;
+  bool        incremental    = true;
+  bool        unknown_zero   = true;
   // true: instrument the undefined accesses sim.warn_undefined reports (Result::undefined).
   bool        warn_undefined = false;
+  bool        dump_bitcode   = false;
 };
 Result generate_sim(const Lnast& ln, const std::vector<std::shared_ptr<Lnast>>& lib, const Sim_objects& out);
 

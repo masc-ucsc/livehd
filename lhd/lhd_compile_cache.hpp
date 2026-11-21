@@ -2,6 +2,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -17,22 +18,33 @@ struct Result;
 // `<workdir>/incr/scopes/<kind>/<name>`. `seed_files` must be non-empty.
 std::string compile_cache_scope_name(const Options& opts, const std::vector<std::string>& seed_files);
 
+// Pinned by the source scan before graph lookup. Keep capture order and verify
+// each deferred tree against this invocation even if another writer republishes.
+struct Compile_source {
+  std::string name;
+  std::string path;
+  std::string tree_dir;
+  std::string bytes;  // the scanner's captured source, for recovery from a damaged tree
+  uint64_t    semantic_hash;
+};
+
 // Parse the complete Pyrope source closure through the persistent Tier-A cache.
 // `var` already contains any explicit ln: imports; source units are appended in
-// deterministic logical-name order. Returns the number of appended source file
+// the same seed/import order as a cold parse. Returns the number of appended source file
 // units (derived lambdas do not exist until upass).
 size_t compile_cache_parse_sources(Options& opts, Result& res, Eprp_var& var, const std::vector<std::string>& seed_files,
-                                   bool defer_clean_lnasts = false);
+                                   std::vector<Compile_source>* deferred);
 
 // Materialize the current hermetic Tier-A generation only when a lower tier
 // actually needs LNAST bodies.  An all-clean Tier-B hit must not deserialize
 // and re-hash the complete source forest merely to return a cached LGraph.
-void compile_cache_materialize_sources(Result& res, Eprp_var& var);
+void compile_cache_materialize_sources(Result& res, Eprp_var& var, const std::vector<Compile_source>& sources);
 
-// Tier B all-clean fast path. Restore validates the graph inventory against
-// Tier A's current Merkle closure key, checks every cached graph/interface,
-// and copies the exact final post-formal library into `lib_path`.
-bool compile_cache_restore_graphs(Options& opts, Result& res, Eprp_var& var, const std::string& lib_path);
+enum class Graph_restore { miss, partial, complete };
+
+// A partial restore supplies the complete mixed forest for live lowering.
+Graph_restore compile_cache_restore_graphs(Result& res, Eprp_var& var, const std::string& lib_path,
+                                           const std::vector<Compile_source>* deferred);
 // After a warning-carrying partial restore runs the full pipeline live, replace
 // clean definitions with their validated cached final bodies. This retains the
 // live diagnostic stream while keeping unchanged graph presentation H5-exact.

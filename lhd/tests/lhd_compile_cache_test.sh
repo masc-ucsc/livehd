@@ -109,6 +109,37 @@ has_phase "$W/warm.json" pass.upass && fail "warm compile reran upass"
 has_phase "$W/warm.json" lnast.tolg && fail "warm compile reran tolg"
 [ "$("$LHD" tool diff "lg:$W/cold_lg" "lg:$W/lg" --structural -q)" = identical ] || fail "warm lg is not structurally identical to cold"
 
+# A graph consumer can restore a byte-identical design without opening source
+# trees. The dependency file must still list the transitive inputs in full.
+for stage in cold warm; do
+  "$LHD" compile "$W/src/top.prp" --top top --emit-dir "verilog:$W/lazy_v" \
+    --workdir "$W/lazy_w" --set compile.lnast_fmt=false --depfile "$W/lazy_$stage.d" \
+    --result-json "$W/lazy_$stage.json" -q || fail "deferred source compile ($stage)"
+  has_phase "$W/lazy_$stage.json" compile.cache.load_source_trees && fail "$stage compile decoded redundant source trees"
+done
+has_phase "$W/lazy_warm.json" pass.upass && fail "warm graph consumer re-elaborated"
+[ "$(field "$W/lazy_warm.json" incremental.compile.misses)" = 0 ] || fail "warm graph consumer reparsed"
+cmp "$W/lazy_cold.d" "$W/lazy_warm.d" || fail "warm graph restore changed the dependency closure"
+for unit in top leaf side; do
+  grep -Fq "/$unit.prp" "$W/lazy_warm.d" || fail "warm graph restore lost the $unit dependency"
+done
+
+# Header-only validation defers the payload read. If a graph miss later
+# needs a damaged payload, recover just that file from the scanner's bytes.
+python3 - "$W/lazy_w/incr/scopes/compile/top" <<'PYDAMAGE'
+import json, sys
+from pathlib import Path
+scope = Path(sys.argv[1])
+(scope / "lg" / "graph_inventory.json").rename(scope / "previous-graphs.json")
+side = next(u for u in json.loads((scope / "inventory.json").read_text())["units"] if u["name"] == "side")
+tree = scope / "ln" / Path(side["snapshot"]).stem / "tree.bin"
+tree.write_bytes(tree.read_bytes()[:-1])
+PYDAMAGE
+"$LHD" compile "$W/src/top.prp" --top top --emit-dir "verilog:$W/lazy_v" \
+  --workdir "$W/lazy_w" --set compile.lnast_fmt=false --result-json "$W/lazy_repair.json" -q || fail "deferred source recovery failed"
+[ "$(field "$W/lazy_repair.json" incremental.compile.misses)" = 1 ] || fail "damaged source did not reparse exactly once"
+has_phase "$W/lazy_repair.json" pass.upass || fail "missing graph generation skipped live lowering"
+
 # A clean lg-only consumer reuses the immutable graph artifact as a filesystem
 # generation. It must not deserialize either IR merely to materialize a second
 # output directory, and the materialized result remains structurally exact.

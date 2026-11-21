@@ -18,7 +18,6 @@
 #include "file_name.hpp"
 #include "lnast.hpp"
 #include "lnast_llvm.hpp"
-#include "lnast_sim_rt.hpp"
 #include "node_util.hpp"
 #include "occurrence_materialize.hpp"
 #include "pass_lg2lnast.hpp"
@@ -33,91 +32,26 @@ namespace {
 namespace fs = std::filesystem;
 
 // Generated files are build inputs keyed on mtime: leave an unchanged one alone.
-void write_if_different(const std::string& path, std::string_view text) {
+bool write_if_different(const std::string& path, std::string_view text) {
   {
     std::ifstream in(path, std::ios::binary);
     if (in) {
       std::stringstream old;
       old << in.rdbuf();
       if (old.str() == text) {
-        return;
+        return true;
       }
     }
   }
   std::ofstream out(path, std::ios::binary | std::ios::trunc);
   out << text;
-}
-
-std::string slop_type(const Field& f) { return std::format("{}<{}>", f.sign ? "Slop" : "Slop_u", f.bits); }
-
-// A port or top-level register name the driver can spell as one C++ member.
-bool plain_name(std::string_view name) {
-  return !name.empty() && name.find('.') == std::string_view::npos && livehd::cpp_ident(name) == name;
-}
-
-// The C++ spelling of a port path: livehd::cpp_port_path, the one inou.cgen.sim uses (existing
-// testbenches and the driver generator are written against it).
-using livehd::cpp_port_path;
-
-// A port name the class can declare: an identifier or a reserved word (escaped), optionally a bundle
-// leaf `bundle.inner.leaf`.
-bool port_name(std::string_view name) {
-  if (name.empty() || name.front() == '.' || name.back() == '.') {
-    return false;
-  }
-  return name.find("..") == std::string_view::npos;
-}
-
-// The members of a port struct: plain ports as fields, one nested struct per bundle (members in
-// first-appearance order).
-struct Port_tree {
-  std::string                                    type;  // a leaf's Slop type
-  std::vector<std::pair<std::string, Port_tree>> members;
-  Port_tree&                                     member(const std::string& name) {
-    for (auto& [n, m] : members) {
-      if (n == name) {
-        return m;
-      }
-    }
-    members.emplace_back(name, Port_tree{});
-    return members.back().second;
-  }
-  std::string text(int depth) const {
-    std::string out;
-    const auto  pad = std::string(static_cast<size_t>(depth) * 2, ' ');
-    for (const auto& [name, m] : members) {
-      if (m.members.empty()) {
-        out += std::format("{}{} {}{{}};\n", pad, m.type, name);
-      } else {
-        out += std::format("{}struct {{\n{}{}}} {}{{}};\n", pad, m.text(depth + 1), pad, name);
-      }
-    }
-    return out;
-  }
-};
-std::string port_members(const std::vector<Field>& ports) {
-  Port_tree root;
-  for (const auto& f : ports) {
-    Port_tree*        at = &root;
-    const std::string spelled = cpp_port_path(f.name);
-    std::string_view  name    = spelled;
-    for (auto dot = name.find('.'); dot != std::string_view::npos; dot = name.find('.')) {
-      at = &at->member(std::string(name.substr(0, dot)));
-      name.remove_prefix(dot + 1);
-    }
-    at->member(std::string(name)).type = slop_type(f);
-  }
-  return root.text(2);
+  out.close();
+  return out.good();
 }
 
 }  // namespace
 
 Sim_emitted emit_sim(const Sim_request& request) {
-  for (const auto& graph : request.graphs) {
-    if (graph) {
-      livehd::graph_util::require_sized_design(*graph, "pass.lnast_sim");
-    }
-  }
   Sim_emitted result;
   // LHD_SIM_LNAST_TIME (debug): where the time before and after the kernels goes.
   const bool  timed = livehd::debug::env<"LHD_SIM_LNAST_TIME">() != nullptr;
@@ -139,6 +73,8 @@ Sim_emitted emit_sim(const Sim_request& request) {
   // works on a private copy of the library (the caller's graphs go on to the compile cache).
   hhds::GraphLibrary                        library;
   std::vector<std::shared_ptr<hhds::Graph>> graphs;
+  absl::flat_hash_set<const hhds::Graph*>   visited;
+  std::vector<std::shared_ptr<hhds::Graph>> definitions;
   for (const auto& source : request.graphs) {
     if (!source) {
       continue;
@@ -149,6 +85,11 @@ Sim_emitted emit_sim(const Sim_request& request) {
       return fail(std::format("graph '{}' has no library", std::string(source->get_name())));
     }
     for (const auto& graph : source->definitions().graphs()) {
+      if (!visited.insert(graph.get()).second) {
+        continue;
+      }
+      livehd::graph_util::require_sized_definition(*graph, "pass.lnast_sim");
+      definitions.push_back(graph);
       if (library.find_io(graph->get_name())) {
         continue;
       }
@@ -159,15 +100,9 @@ Sim_emitted emit_sim(const Sim_request& request) {
   }
   // A body-less cell (an fproperty/lgassert/lgundef marker) is only a declaration, which copy_from
   // does not bring along: declare it here so its instances still resolve by name.
-  for (const auto& source : request.graphs) {
-    if (!source) {
-      continue;
-    }
-    for (const auto& graph : source->definitions().graphs()) {
-      for (const auto node : graph->body().nodes()) {
-        if (livehd::graph_util::type_op_of(node) != Ntype_op::Sub) {
-          continue;
-        }
+  for (const auto& graph : definitions) {
+    for (const auto node : graph->body().nodes()) {
+      if (livehd::graph_util::type_op_of(node) == Ntype_op::Sub) {
         if (auto io = node.get_subnode_io(); io && !library.find_io(io->get_name())) {
           (void)library.create_io(io->get_name());
         }
@@ -283,6 +218,7 @@ Sim_emitted emit_sim(const Sim_request& request) {
   // well, the same logic was lowered three times.
   std::vector<std::shared_ptr<Lnast>>              lnasts;
   std::vector<std::pair<std::string, std::string>> skipped;
+  absl::flat_hash_map<std::string, std::string>    init_programs;  // graph name -> its simulation-only initialization program
   {
     absl::flat_hash_set<std::string>          lowered;
     std::vector<std::shared_ptr<hhds::Graph>> work;
@@ -297,11 +233,11 @@ Sim_emitted emit_sim(const Sim_request& request) {
       if (!lowered.insert(std::string(g->get_name())).second) {
         continue;
       }
-      // Simulation-only initialization (`initial` blocks with $display / $value$plusargs / $fatal): a program
-      // the graph carries beside the circuit and inou.cgen.sim runs at power-on. This flow has no such
-      // program, and dropping it would silently lose its prints, plusargs and failures.
+      // Simulation-only initialization (`initial` blocks with $display / $value$plusargs / $fatal): a program the graph
+      // carries beside the circuit (core/sim_program.hpp). It is not circuit state: it travels in `<stem>.dut.json` and
+      // the runtime interprets it at each instance's power-on.
       if (auto init = g->get_input_node().attr(livehd::attrs::simulation_init); init.has() && !init.get().empty()) {
-        return fail(std::format("{}: has a simulation-only initial block ($display / plusargs / $fatal)", std::string(g->get_name())));
+        init_programs[std::string(g->get_name())] = init.get();
       }
       if (!Pass_lg2lnast::lower({g}, request.passes, lnasts, &skipped, false, true)) {
         return fail("unknown LNAST stream pass in pass.lg2lnast.passes");
@@ -424,7 +360,7 @@ Sim_emitted emit_sim(const Sim_request& request) {
     }
     lap("tree aegraph (upass/aeg)");
   }
-  absl::flat_hash_set<std::string> mine{"lnast_sim_rt.hpp"};
+  absl::flat_hash_set<std::string> mine;
   std::error_code                  ec;
   fs::create_directories(request.odir, ec);
   for (const auto& root : roots) {
@@ -449,13 +385,15 @@ Sim_emitted emit_sim(const Sim_request& request) {
     const std::string base = request.odir + "/" + stem;
 
     Sim_objects objects;
-    objects.symbol = "__lnast_" + cls;
-    objects.object = base + ".lnast.llvm.o";
-    objects.unknown_zero = request.unknown_zero;
+    objects.symbol         = "__lnast_" + cls;
+    objects.object         = base + ".lnast.llvm.o";
+    objects.incremental    = request.incremental;
+    objects.dump_bitcode   = request.dump_bitcode;
+    objects.unknown_zero   = request.unknown_zero;
     // sim.warn_undefined is a run-time switch (drv.bin --set sim.warn_undefined=false), so the sites
     // are always instrumented, as inou.cgen.sim does.
     objects.warn_undefined = true;
-    const auto gen = generate_sim(*top, lnasts, objects);
+    const auto gen         = generate_sim(*top, lnasts, objects);
     lap("kernels (lnast_llvm)");
     if (!gen.ok) {
       for (const auto& [name, why] : skipped) {  // usually the real reason: a callee that was not lowered
@@ -463,361 +401,118 @@ Sim_emitted emit_sim(const Sim_request& request) {
       }
       return fail(gen.why);
     }
-    for (const auto& f : gen.inputs) {
-      if (!port_name(f.name)) {
-        return fail(std::format("port '{}' is not an identifier or a tuple leaf", f.name));
-      }
-    }
-    for (const auto& f : gen.outputs) {
-      if (!port_name(f.name)) {
-        return fail(std::format("port '{}' is not an identifier or a tuple leaf", f.name));
-      }
-    }
-    for (const auto& c : gen.clocks) {
-      if (!plain_name(c)) {
-        return fail(std::format("clock port '{}' is not a plain identifier", c));
-      }
-    }
-
-    // ---- <stem>.hpp: the class the driver instantiates ----
-    std::string h;
-    h += "// Generated by lhd sim (LNAST flow). Do not edit.\n#pragma once\n";
-    if (request.vcd) {
-      h += "#define LHD_LNAST_VCD 1\n";
-    }
-    h += "#include \"lnast_sim_rt.hpp\"\n";
-    h += std::format("struct {} : __lnast_dut {{\n", cls);
-    h += "  struct In {\n";
-    for (const auto& c : gen.clocks) {
-      h += std::format("    Slop_u<1> {}{{}};\n    bool {}__tick = true;\n", c, c);
-    }
-    h += port_members(gen.inputs);
-    h += "  };\n  struct Out {\n";
-    h += port_members(gen.outputs);
-    h += "  };\n  In __in{};\n  Out __out{};\n";
-    h += std::format("  {}();\n", cls);
-    // The header holds the ports and nothing of the layout: an edit that moves state words changes
-    // `<stem>.cpp` and the kernels, and the testbench driver -- the slow file of the host build --
-    // is not compiled again.
-    h += "  void step();              // one clock and the outputs after it\n";
-    h += "  void __settle();          // the outputs on the current state and inputs\n";
-    h += "  void __push();\n  void __pull();\n";
-    std::string body;  // of __push, then of __pull (defined in the .cpp)
-    for (const auto& f : gen.inputs) {
-      if (f.marks.empty()) {  // no kernel waits on this input
-        body += std::format("    __in.{}.copy_packed_words(&st_[{}]);\n", cpp_port_path(f.name), f.word);
-        continue;
-      }
-      // Activity gating: an input that changed wakes the kernels that read it.
-      std::map<size_t, uint64_t> masks;
-      for (const auto bit : f.marks) {
-        masks[gen.gate_word + bit / 64] |= uint64_t{1} << (bit % 64);
-      }
-      const size_t n  = (f.bits + 63) / 64;
-      body            += std::format("    {{\n      std::uint64_t w[{}];\n      __in.{}.copy_packed_words(w);\n", n, cpp_port_path(f.name));
-      if (n == 1) {
-        body += std::format("      if (w[0] != st_[{0}]) {{\n        st_[{0}] = w[0];\n", f.word);
-      } else {
-        body
-            += std::format("      if (std::memcmp(w, &st_[{0}], sizeof w) != 0) {{\n        std::memcpy(&st_[{0}], w, sizeof w);\n",
-                           f.word);
-      }
-      for (const auto& [word, mask] : masks) {
-        body += std::format("        st_[{}] |= 0x{:x}ULL;\n", word, mask);
-      }
-      body += "      }\n    }\n";
-    }
-    const std::string push_body = std::move(body);
-    body.clear();
-    for (const auto& f : gen.outputs) {
-      body += std::format("    __out.{} = {}::from_packed_words(&st_[{}]);\n", cpp_port_path(f.name), slop_type(f), f.word);
-    }
-    const std::string pull_body  = std::move(body);
-    h += "  void __edge();            // one clock: rise (next state, memory writes, commit), then fall\n";
-    h += "  void __settle_kernels();  // outputs on the current state\n";
-    h += "  void reset_cycle(bool zero_uninitialized = false, bool unknown_zero = false);\n";
-    h += "  void after_load() override;\n";
-    h                += "  void __all_dirty();       // activity gating: every kernel runs once more\n";
-    if (!gen.undefined.empty()) {
-      h += "  void __undefined_report();  // sim.warn_undefined: report the sites the last clock hit\n";
-    }
-    // LHD_SIM_LNAST_STATS (debug): count how often each gated kernel really ran; printed at exit.
-    const bool stats  = gen.gate_bits != 0 && livehd::debug::env<"LHD_SIM_LNAST_STATS">() != nullptr;
-    if (stats) {
-      h += std::format("  std::uint64_t __runs[{}]{{}};\n  ~{}();\n", gen.gate_bits + 1, cls);
-    }
-    h += "};\n";
-    write_if_different(base + ".hpp", h);
-
-    // ---- <stem>.cpp: the field table and the cold entry points ----
-    std::string c;
-    c += std::format("// Generated by lhd sim (LNAST flow). Do not edit.\n#include \"{}.hpp\"\n", stem);
-    if (!gen.undefined.empty()) {
-      // At namespace scope: its inline switch and cycle are the driver's (one definition program-wide).
-      c += livehd::sim::kUndefinedWarnHelper;
-    }
-    c += "namespace {\n";
-    std::string table;
-    size_t      fields = 0;
-    for (size_t i = 0; i < gen.regs.size(); ++i) {
-      const auto& r = gen.regs[i];
-      if ((r.entries == 0 && r.has_init) || (r.entries != 0 && !r.init_words.empty())) {
-        c              += std::format("const std::uint64_t init_{}[] = {{", i);
-        const size_t n  = r.entries != 0 ? r.init_words.size() : (r.bits + 63) / 64;
-        for (size_t w = 0; w < n; ++w) {
-          uint64_t v = w < r.init_words.size() ? r.init_words[w] : 0;
-          if (r.entries == 0 && r.sign && w + 1 == n && r.bits % 64 != 0 && ((v >> ((r.bits - 1) % 64)) & 1) != 0) {
-            v |= ~((uint64_t{1} << (r.bits % 64)) - 1);  // the state keeps a signed value sign-extended over its last word
+    // No C++ at all (todo/livehd/2sl-llvm-only-sim.md): `<stem>.dut.json` describes the kernels and the state layout,
+    // and the testbench object (inou/prp/tb_llvm) calls the kernels directly and reads/writes the port words in place.
+    {
+      const auto esc = [](std::string_view s) {
+        std::string out;
+        for (const char ch : s) {
+          if (ch == '"' || ch == '\\') {
+            out += '\\';
           }
-          c += std::format("{}0x{:x}ULL", w ? ", " : "", v);
+          out += (static_cast<unsigned char>(ch) < 0x20) ? ' ' : ch;
         }
-        c += "};\n";
+        return out;
+      };
+      const auto str_list = [&](const std::vector<std::string>& v) {
+        std::string out = "[";
+        for (size_t i = 0; i < v.size(); ++i) {
+          out += std::format("{}\"{}\"", i ? "," : "", esc(v[i]));
+        }
+        return out + "]";
+      };
+      std::string d = std::format("{{\"schema_version\":1,\"kind\":\"sim_dut\",\"stem\":\"{}\",\"module\":\"{}\",\"words\":{}", stem, esc(root), gen.words);
+      d += std::format(",\"gate_word\":{},\"gate_bits\":{}", gen.gate_word, gen.gate_bits);
+      d += ",\"edge\":" + str_list(gen.edge_functions) + ",\"fall\":" + str_list(gen.fall_functions)
+           + ",\"settle\":" + str_list(gen.settle_functions);
+      d += std::format(",\"commit\":\"{}\",\"fall_commit\":\"{}\"", esc(gen.commit_function), esc(gen.fall_commit_function));
+      d += ",\"clocks\":" + str_list(gen.clocks);
+      if (const auto it = init_programs.find(root); it != init_programs.end()) {
+        std::string quoted = "\"";
+        for (const unsigned char ch : it->second) {  // a full JSON string: the program's frames carry any byte
+          if (ch == '"' || ch == '\\') {
+            quoted += '\\';
+            quoted += static_cast<char>(ch);
+          } else if (ch < 0x20) {
+            quoted += std::format("\\u{:04x}", static_cast<unsigned>(ch));
+          } else {
+            quoted += static_cast<char>(ch);
+          }
+        }
+        d += ",\"sim_init\":" + quoted + "\"";
       }
-    }
-    const auto row = [&](const Field& f, int kind, std::string_view init, int fill) {
-      table += std::format("  {{\"{}\", {}, {}, {}, {}, {}ULL, {}, {}}},\n",
-                           f.name,
-                           kind == 3 ? f.entry_bits : f.bits,
-                           f.word,
-                           kind,
-                           f.sign ? "true" : "false",
-                           f.entries,
-                           init,
-                           fill);
-      ++fields;
-    };
-    for (const auto& f : gen.inputs) {
-      row(f, 0, "nullptr", 0);
-    }
-    for (const auto& f : gen.outputs) {
-      row(f, 1, "nullptr", 0);
-    }
-    for (size_t i = 0; i < gen.regs.size(); ++i) {
-      const auto& r = gen.regs[i];
-      const bool has_table = (r.entries == 0 && r.has_init) || (r.entries != 0 && !r.init_words.empty());
-      row(r, r.entries != 0 ? 3 : 2, has_table ? std::format("init_{}", i) : "nullptr", r.fill);
-    }
-    c += std::format("const __lnast_field fields[] = {{\n{}}};\n", table);
-    // sim.warn_undefined: the edge kernels set a site's word (Result::undefined, consecutive words);
-    // step() tests them all at once and reports through the driver's reporter (kUndefinedWarnHelper,
-    // the text inou.cgen.sim and the driver use, so the run-time switch and the cycle are shared). A
-    // statement in a module instantiated several times is one site per instance here: those report
-    // through ONE __lhd_undef_site, so a site is reported once, as in inou.cgen.sim.
-    std::vector<size_t> undefined_of;
-    if (!gen.undefined.empty()) {
-      std::map<std::pair<std::string, std::string>, size_t> distinct;
-      std::string                                           sites;
+      std::vector<std::string> object_names;
+      for (const auto& object : gen.objects) {
+        object_names.push_back(fs::path(object).filename().string());
+      }
+      d += ",\"objects\":" + str_list(object_names);
+      d += ",\"fields\":[";
+      bool first_field = true;
+      const auto field_row = [&](const Field& f, int kind) {
+        std::string init = "null";
+        const bool  has_table = (f.entries == 0 && f.has_init) || (f.entries != 0 && !f.init_words.empty());
+        if (has_table) {
+          init                = "[";
+          const size_t n      = f.entries != 0 ? f.init_words.size() : (f.bits + 63) / 64;
+          for (size_t w = 0; w < n; ++w) {
+            uint64_t v = w < f.init_words.size() ? f.init_words[w] : 0;
+            if (f.entries == 0 && f.sign && w + 1 == n && f.bits % 64 != 0 && ((v >> ((f.bits - 1) % 64)) & 1) != 0) {
+              v |= ~((uint64_t{1} << (f.bits % 64)) - 1);
+            }
+            init += std::format("{}\"0x{:x}\"", w ? "," : "", v);
+          }
+          init += "]";
+        }
+        std::string image = "null";
+        if (!f.image_path.empty()) {
+          image = std::format("{{\"path\":\"{}\",\"radix\":{}}}", esc(f.image_path), f.image_radix);
+        }
+        std::string marks = "[";
+        for (size_t m = 0; m < f.marks.size(); ++m) {
+          marks += std::format("{}{}", m ? "," : "", f.marks[m]);
+        }
+        marks += "]";
+        d += std::format("{}{{\"name\":\"{}\",\"bits\":{},\"word\":{},\"kind\":{},\"sign\":{},\"entries\":{},\"fill\":{},\"init\":{},\"image\":{},\"marks\":{}}}",
+                         first_field ? "" : ",",
+                         esc(f.name),
+                         kind == 3 ? f.entry_bits : f.bits,
+                         f.word,
+                         kind,
+                         f.sign ? "true" : "false",
+                         f.entries,
+                         f.fill,
+                         init,
+                         image,
+                         marks);
+        first_field = false;
+      };
+      for (const auto& f : gen.inputs) {
+        field_row(f, 0);
+      }
+      for (const auto& f : gen.outputs) {
+        field_row(f, 1);
+      }
+      for (const auto& r : gen.regs) {
+        field_row(r, r.entries != 0 ? 3 : 2);
+      }
+      d += "],\"undefined\":[";
       for (size_t i = 0; i < gen.undefined.size(); ++i) {
-        const auto& u = gen.undefined[i];
-        if (u.word != gen.undefined.front().word + i) {
-          return fail("internal: the undefined-access words are not consecutive");
+        d += std::format("{}{{\"what\":\"{}\",\"where\":\"{}\",\"word\":{}}}", i ? "," : "", esc(gen.undefined[i].what),
+                         esc(gen.undefined[i].where), gen.undefined[i].word);
+      }
+      d += "]}\n";
+      if (!write_if_different(base + ".dut.json", d)) {
+        return fail("could not write " + base + ".dut.json");
+      }
+      mine.insert(stem + ".dut.json");
+      for (const auto& object : gen.objects) {
+        const auto name = fs::path(object).filename().string();
+        mine.insert(name);
+        if (request.dump_bitcode) {
+          mine.insert(fs::path(name).replace_extension(".bc").string());
         }
-        auto [it, fresh] = distinct.try_emplace({u.what, u.where}, distinct.size());
-        if (fresh) {
-          sites += std::format("  {{{}, {}, 0, false}},\n", livehd::cpp_string_literal(u.what), livehd::cpp_string_literal(u.where));
-        }
-        undefined_of.push_back(it->second);
+        mine.insert(name.substr(0, name.size() - 1) + "k");  // its reuse sidecar
       }
-      c += std::format("__lhd_undef_site undefined_sites[] = {{\n{}}};\nconst std::uint32_t undefined_site_of[] = {{", sites);
-      for (size_t i = 0; i < undefined_of.size(); ++i) {
-        c += std::format("{}{}", i ? ", " : "", undefined_of[i]);
-      }
-      c += "};\n";
-    }
-    c += "}  // namespace\n";
-    c += "extern \"C\" {\n";
-    for (const auto* list : {&gen.edge_functions, &gen.fall_functions, &gen.settle_functions}) {
-      for (const auto& fn : *list) {
-        c += std::format("void {}(std::uint64_t* state, void** resources);\n", fn);
-      }
-    }
-    for (const auto* commit : {&gen.commit_function, &gen.fall_commit_function}) {
-      if (!commit->empty()) {
-        c += std::format("void {}(std::uint64_t* state, void** resources);\n", *commit);
-      }
-    }
-    c += "}\n";
-    // Activity gating (lnast_llvm.hpp): a kernel runs when its dirty bit is set, cleared before the
-    // call: one test and a direct call per kernel, under a test per eight kernels and one per dirty
-    // word (most kernels of a large design rest most clocks, and resting kernels cluster). Every test
-    // reads the word again: a kernel wakes later ones. Scanning the dirty words for set bits and
-    // calling through a table instead is slower as soon as much of the design is active (boom, two
-    // thirds of its kernels each clock: 28.9k cycles/s against 35.5k) -- one indirect call site
-    // that the processor cannot predict.
-    const auto run  = [&](size_t first, size_t count) {
-      std::string out;
-      const auto  mask_of = [&](size_t lo, size_t hi) {  // bits [lo, hi) of one word, clipped to [first, first + count)
-        uint64_t m = 0;
-        for (size_t b = std::max(lo, first); b < std::min(hi, first + count); ++b) {
-          m |= uint64_t{1} << (b % 64);
-        }
-        return m;
-      };
-      const auto& name_of = [&](size_t bit) -> const std::string& {
-        if (bit < gen.edge_functions.size()) {
-          return gen.edge_functions[bit];
-        }
-        bit -= gen.edge_functions.size();
-        return bit < gen.fall_functions.size() ? gen.fall_functions[bit] : gen.settle_functions[bit - gen.fall_functions.size()];
-      };
-      for (size_t w = first / 64; w * 64 < first + count; ++w) {
-        const auto word  = gen.gate_word + w;
-        out             += std::format("  if ((s[{}] & 0x{:x}ULL) != 0) {{\n", word, mask_of(w * 64, w * 64 + 64));
-        for (size_t g = w * 64; g < w * 64 + 64; g += 8) {
-          const auto group = mask_of(g, g + 8);
-          if (group == 0) {
-            continue;
-          }
-          out += std::format("    if ((s[{}] & 0x{:x}ULL) != 0) {{\n", word, group);
-          for (size_t b = std::max(g, first); b < std::min(g + 8, first + count); ++b) {
-            const auto bit  = uint64_t{1} << (b % 64);
-            out            += std::format("      if ((s[{0}] & 0x{1:x}ULL) != 0) {{ s[{0}] &= ~0x{1:x}ULL; {2}(s, nullptr); }}\n",
-                               word,
-                               bit,
-                               name_of(b));
-          }
-          out += "    }\n";
-        }
-        out += "  }\n";
-      }
-      return out;
-    };
-    const bool scan     = gen.gate_bits != 0 && !stats;
-    size_t     gate_bit = 0;
-    const auto call     = [&](const std::string& fn) {
-      if (gen.gate_bits == 0) {
-        return std::format("  {}(s, nullptr);\n", fn);
-      }
-      const auto word = gen.gate_word + gate_bit / 64;
-      const auto mask = uint64_t{1} << (gate_bit % 64);
-      ++gate_bit;
-      return std::format("  if ((s[{0}] & 0x{1:x}ULL) != 0) {{\n    s[{0}] &= ~0x{1:x}ULL;\n{3}    {2}(s, nullptr);\n  }}\n",
-                         word,
-                         mask,
-                         fn,
-                         stats ? std::format("    ++__runs[{}];\n", gate_bit - 1) : std::string());
-    };
-    c += std::format("void {}::__edge() {{\n  auto* s = st_.get();\n{}",
-                     cls,
-                     stats ? std::format("  ++__runs[{}];\n", gen.gate_bits) : "");
-    for (const auto* list : {&gen.edge_functions, &gen.fall_functions}) {
-      if (scan) {
-        c += run(list == &gen.edge_functions ? 0 : gen.edge_functions.size(), list->size());
-      } else {
-        for (const auto& fn : *list) {
-          c += call(fn);
-        }
-      }
-      const auto& commit = list == &gen.edge_functions ? gen.commit_function : gen.fall_commit_function;
-      if (!commit.empty()) {
-        c += std::format("  {}(s, nullptr);\n", commit);
-      }
-    }
-    c += std::format("}}\nvoid {}::__settle_kernels() {{\n  auto* s = st_.get();\n", cls);
-    if (scan) {
-      c += run(gen.edge_functions.size() + gen.fall_functions.size(), gen.settle_functions.size());
-    } else {
-      for (const auto& fn : gen.settle_functions) {
-        c += call(fn);
-      }
-    }
-    c += "}\n";
-    if (stats) {
-      c += std::format(
-          "{0}::~{0}() {{\n  std::uint64_t total = 0;\n  for (std::size_t i = 0; i < {1}; ++i) {{\n    total += __runs[i];\n"
-          "    std::fprintf(stderr, \"lnast activity: kernel %zu ran %llu of %llu clocks\\n\", i, "
-          "static_cast<unsigned long long>(__runs[i]), static_cast<unsigned long long>(__runs[{1}]));\n  }}\n"
-          "  std::fprintf(stderr, \"lnast activity: %llu kernel runs of %llu ({1} kernels, %llu clocks)\\n\", "
-          "static_cast<unsigned long long>(total), static_cast<unsigned long long>(__runs[{1}] * {1}), "
-          "static_cast<unsigned long long>(__runs[{1}]));\n}}\n",
-          cls,
-          gen.gate_bits);
-    }
-    c += std::format("void {}::__all_dirty() {{\n", cls);
-    for (size_t w = 0; w < (gen.gate_bits + 63) / 64; ++w) {
-      const bool part  = w + 1 == (gen.gate_bits + 63) / 64 && gen.gate_bits % 64 != 0;
-      c               += std::format("  st_[{}] = 0x{:x}ULL;\n",
-                       gen.gate_word + w,
-                       part ? (uint64_t{1} << (gen.gate_bits % 64)) - 1 : ~uint64_t{0});
-    }
-    c += "}\n";
-    c += std::format("inline void {}::__push() {{\n{}}}\ninline void {}::__pull() {{\n{}}}\n", cls, push_body, cls, pull_body);
-    c += std::format("void {}::step() {{\n  ++__gen;\n  __push();\n  __edge();\n  __settle_kernels();\n  __pull();\n", cls);
-    if (!gen.undefined.empty()) {
-      c += std::format(
-          "  {{\n    std::uint64_t hit = 0;\n    for (std::size_t i = 0; i < {1}; ++i) {{\n      hit |= st_[{0} + i];\n    }}\n"
-          "    if (hit != 0) [[unlikely]] {{\n      __undefined_report();\n    }}\n  }}\n",
-          gen.undefined.front().word,
-          gen.undefined.size());
-    }
-    if (request.vcd) {
-      std::string clock_list;
-      for (const auto& ck : gen.clocks) {
-        clock_list += (clock_list.empty() ? "" : ",") + ck;
-      }
-      c += std::format("  if (!__vcd_path.empty() || __vcd) {{\n    __vcd_sample(\"{}\", \"{}\");\n  }}\n", cls, clock_list);
-    }
-    c += "}\n";
-    c += std::format("void {}::__settle() {{\n  __push();\n  __settle_kernels();\n  __pull();\n}}\n", cls);
-    if (!gen.undefined.empty()) {
-      c += std::format(
-          "void {0}::__undefined_report() {{\n  for (std::size_t i = 0; i < {2}; ++i) {{\n    if (st_[{1} + i] != 0) {{\n"
-          "      st_[{1} + i] = 0;\n      __lhd_sim_undefined(&undefined_sites[undefined_site_of[i]]);\n    }}\n  }}\n}}\n",
-          cls,
-          gen.undefined.front().word,
-          gen.undefined.size());
-    }
-    c += std::format("{0}::{0}() : __lnast_dut(fields, {1}, {2}) {{ __all_dirty(); }}\n", cls, fields, gen.words);
-    c += std::format(
-        "void {}::reset_cycle(bool zero_uninitialized, bool unknown_zero) {{\n  power_on(zero_uninitialized, unknown_zero);\n  "
-        "__all_dirty();\n  __settle();\n}}\n",
-        cls);
-    c += std::format("void {}::after_load() {{\n  __all_dirty();\n", cls);
-    for (const auto& f : gen.inputs) {
-      c += std::format("  __in.{} = {}::from_packed_words(&st_[{}]);\n", cpp_port_path(f.name), slop_type(f), f.word);
-    }
-    c += "  __settle();\n}\n";
-    write_if_different(base + ".cpp", c);
-    write_if_different(request.odir + "/lnast_sim_rt.hpp", kSimRuntimeHeader);
-
-    // ---- <stem>.iface.json: what the driver generator reads (schema: inou/prp/prp_sim.cpp) ----
-    std::string j = std::format(
-        "{{\"schema_version\":1,\"kind\":\"sim_iface\",\"gen\":\"lnast-1\",\"module\":\"{}\",\"executable\":true,\"io\":[",
-        cls);
-    bool       first = true;
-    const auto io    = [&](std::string_view name, std::string_view dir, uint32_t bits, bool sign, bool clock) {
-      j     += std::format("{}{{\"name\":\"{}\",\"dir\":\"{}\",\"bits\":{},\"declared_bits\":{},\"signed\":{}{}}}",
-                       first ? "" : ",",
-                       name,
-                       dir,
-                       bits,
-                       bits,
-                       sign ? "true" : "false",
-                       clock ? ",\"clock\":true" : "");
-      first  = false;
-    };
-    for (const auto& ck : gen.clocks) {
-      io(ck, "input", 1, false, true);
-    }
-    for (const auto& f : gen.inputs) {
-      io(cpp_port_path(f.name), "input", f.bits, f.sign, false);
-    }
-    for (const auto& f : gen.outputs) {
-      io(cpp_port_path(f.name), "output", f.bits, f.sign, false);
-    }
-    // No `regs`, `mems` or `subs`: the class publishes ports only. A testbench that reads or drives a
-    // register (`dut.c`, `regref(...)`) or a memory word, or walks into a sub-instance, would need members
-    // this class does not have; leaving them out makes the driver generator say so, and `lhd sim` then
-    // builds the design on inou.cgen.sim (see lnast_sim_may_fall_back in lhd_kernel_sim.cpp).
-    j += "],\"regs\":[],\"mems\":[],\"subs\":[]}\n";
-    write_if_different(base + ".iface.json", j);
-    for (std::string_view ext : {".hpp", ".cpp", ".iface.json"}) {
-      mine.insert(stem + std::string(ext));
-    }
-    for (const auto& object : gen.objects) {
-      const auto name = fs::path(object).filename().string();
-      mine.insert(name);
-      mine.insert(name.substr(0, name.size() - 1) + "k");  // its reuse sidecar
     }
     result.stems.push_back(stem);
     result.words        += gen.words;
@@ -838,7 +533,7 @@ Sim_emitted emit_sim(const Sim_request& request) {
       fs::remove(entry.path(), ec);
       continue;
     }
-    for (std::string_view ext : {".hpp", ".cpp", ".iface.json", ".llvm.o", ".llvm.k", ".inc", ".txt"}) {
+    for (std::string_view ext : {".hpp", ".cpp", ".iface.json", ".dut.json", ".llvm.o", ".llvm.k", ".llvm.bc", ".inc", ".txt"}) {
       if (name.ends_with(ext)) {
         fs::remove(entry.path(), ec);
         break;

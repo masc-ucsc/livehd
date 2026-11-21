@@ -2,6 +2,7 @@
 // Simulation and source-level checking commands.
 
 #include <sys/wait.h>
+#include <unistd.h>
 
 #include <algorithm>
 #include <atomic>
@@ -28,14 +29,16 @@
 #include "file_name.hpp"  // livehd::unit_file_stem — the shared long-name policy
 #include "file_utils.hpp"
 #include "graph_library_singleton.hpp"
+#include "job_manager.hpp"
 #include "lhd_kernel_internal.hpp"
-#include "lhd_sim_tune_session.hpp"
+#include "compile_salt.hpp"
 #include "pass.hpp"
 #include "prp_sim.hpp"
 #include "rapidjson/document.h"
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
 #include "sim_compile_jobs.hpp"
+#include "tb_llvm.hpp"
 #include "worker_pool.hpp"  // livehd::run_workers (big-stack workers)
 
 namespace lhd {
@@ -79,1492 +82,313 @@ std::string signal_description(int signal) {
 }
 }  // namespace
 
-// ---- `sim --query`: the batched JSON query API (todo/livehd/2f-sim.html) ------
-//
-// The kernel/driver seam is deliberately asymmetric. The KERNEL owns JSON: it
-// parses and validates the request, resolves every selector against the STATIC
-// catalog the generator wrote (sim_catalog.json — names, kinds and widths are
-// all known at codegen time), answers whatever needs no simulation at all,
-// unions what is left into ONE time interval, and hands the driver a
-// selector-free line plan. The generated driver has no JSON parser and must not
-// grow one: it reads the plan, evaluates it inside its single tick loop, and
-// writes sim_query.json back, which the kernel merges and embeds verbatim as the
-// envelope's "query" member (exactly like the "debug" sidecar).
-//
-// The split is what makes a batch answerable in ONE replay, and it is also why
-// the kernel is the only side that ever reports a "usage" verdict: by the time
-// the driver runs, the request is already known to be well-formed.
+// The standalone runtime of the LLVM testbench flow: `lhd_simrt`, built beside `lhd` (a data dependency of it).
+// A separate small executable on purpose: starting the compiler binary costs over a second on its own.
+std::string simrt_path() {
+  if (const char* env = std::getenv("LHD_SIMRT"); env != nullptr && ::access(env, X_OK) == 0) {
+    return fs::absolute(env).string();
+  }
+  const std::string exe_dir = livehd::file_utils::get_exe_path();  // the directory holding lhd, symlinks resolved
+  for (const auto& cand : {exe_dir + "/lhd_simrt", exe_dir + "/lhd.runfiles/_main/lhd/lhd_simrt", exe_dir + "/../lhd_simrt"}) {
+    if (::access(cand.c_str(), X_OK) == 0) {
+      return fs::absolute(cand).string();
+    }
+  }
+  throw Lhd_error{"dependency", "lhd_simrt (the LLVM testbench runtime) not found next to lhd", "build //lhd:lhd_simrt or set LHD_SIMRT=/path/to/lhd_simrt"};
+}
+
+// `lhd sim` through the LLVM testbench flow: nothing is host-compiled. The DUT kernels and the testbench
+// object (already written by the setup) are loaded and run by `lhd_simrt SIMDIR` (lhd_sim_llvm_rt.cpp),
+// which prints what the old driver printed and exits with its verdict codes.
+struct Llvm_tb_cfg {
+  std::string ckpt_dir, ckpt_min_secs, ckpt_max, ckpt_max_overhead, ckpt_every;
+  bool        vcd_on = false;
+  std::string vcd_dir;
+  bool        unknown_zero = false;  // an explicit compile.unknown_zero=true: every `?` bit is 0 (DUT and testbench)
+};
+
 namespace {
 
-namespace rj = rapidjson;
-
-// A malformed REQUEST is a process-level usage error (exit 2): the invocation
-// was wrong, so there is nothing to answer. Contrast Q_fail below.
-[[noreturn]] void query_usage(const std::string& msg, const std::string& hint = "") {
-  throw Lhd_error{"usage", std::format("--query: {}", msg), hint};
-}
-
-// A per-QUERY failure. One bad signal name must never erase the batch's other
-// answers, so these become in-band `ok:false` results with the enumerated class
-// vocabulary (unknown_signal|ambiguous_selector|invalid_range|unsupported|
-// timeout|limit) instead of failing the process.
-struct Q_fail {
-  std::string              cls;
-  std::string              msg;
-  std::string              hint;
-  std::vector<std::string> suggestions;
-};
-
-// One sim_catalog.json record. Widths are BOTH reported on purpose: `bits` is
-// the literal internal carrier width and `declared_bits` is what the source
-// asked for. They agree for ordinary typed values, but both remain useful for
-// imported or conservatively widened internal nets.
-struct Cat_sig {
-  std::string name;
-  std::string alias;  // the legacy spelling (`acc.__in.din`), empty when none
-  std::string kind;   // flop|pipe|memrd|input|output|memory
-  long        bits          = 0;
-  long        declared_bits = 0;
-  long        size          = -1;  // memory words; -1 = not a memory
-  bool        is_signed     = false;
-};
-
-struct Sim_catalog {
-  std::string          test;
-  std::string          clock;
-  std::vector<Cat_sig> sigs;  // CATALOG ORDER — the deterministic expansion order of every selector
-};
-
-// What plan_sim_query hands back to the run: the kernel-answered results (by
-// REQUEST position; empty string = the driver owns it) plus the ids, so the
-// sidecar can be spliced back into request order afterwards.
-struct Query_plan {
-  bool                     active     = false;  // --query was given
-  bool                     wrote_plan = false;  // some query needs the replay
-  std::string              test;
-  std::string              clock;
-  std::vector<std::string> ids;
-  std::vector<std::string> kernel_results;  // parallel to ids
-};
-
-// `*` (any run, dots included) and `?` (one char). Deliberately NOT a full
-// fnmatch: character classes would collide with the `[index]` memory spelling.
-bool glob_match(std::string_view pat, std::string_view s) {
-  size_t pi = 0, si = 0, ss = 0;
-  size_t star = std::string_view::npos;
-  while (si < s.size()) {
-    if (pi < pat.size() && (pat[pi] == '?' || pat[pi] == s[si])) {
-      ++pi;
-      ++si;
-    } else if (pi < pat.size() && pat[pi] == '*') {
-      star = pi++;
-      ss   = si;
-    } else if (star != std::string_view::npos) {
-      pi = star + 1;
-      si = ++ss;
-    } else {
-      return false;
-    }
-  }
-  while (pi < pat.size() && pat[pi] == '*') {
-    ++pi;
-  }
-  return pi == pat.size();
-}
-
-size_t edit_distance(std::string_view a, std::string_view b) {
-  std::vector<size_t> prev(b.size() + 1), cur(b.size() + 1);
-  for (size_t j = 0; j <= b.size(); ++j) {
-    prev[j] = j;
-  }
-  for (size_t i = 1; i <= a.size(); ++i) {
-    cur[0] = i;
-    for (size_t j = 1; j <= b.size(); ++j) {
-      cur[j] = std::min({prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] == b[j - 1] ? 0 : 1)});
-    }
-    prev = cur;
-  }
-  return prev[b.size()];
-}
-
-// Up to 5 nearest catalog names. An unknown name that merely disappears leaves
-// an agent guessing; a name plus its neighbours is actionable.
-std::vector<std::string> nearest_names(const Sim_catalog& cat, std::string_view want) {
-  std::vector<std::pair<size_t, std::string>> scored;
-  scored.reserve(cat.sigs.size());
-  for (const auto& s : cat.sigs) {
-    scored.emplace_back(edit_distance(want, s.name), s.name);
-  }
-  std::sort(scored.begin(), scored.end());
-  std::vector<std::string> out;
-  for (const auto& [d, n] : scored) {
-    if (out.size() >= 5 || d > 8) {
-      break;
-    }
-    out.push_back(n);
-  }
-  return out;
-}
-
-// A comparison literal -> exactly ceil(bits/4) lowercase hex digits of the
-// two's-complement value at `bits`. ARBITRARY PRECISION on purpose: the plan is
-// the wire format for `find`, and --break-when's 64-bit strtoull hole must not
-// be recreated one layer down. Accepts decimal (optionally signed) or 0x-hex.
-std::string literal_to_hex(std::string_view lit, long bits, std::string& err) {
-  while (!lit.empty() && (lit.front() == ' ' || lit.front() == '\t')) {
-    lit.remove_prefix(1);
-  }
-  while (!lit.empty() && (lit.back() == ' ' || lit.back() == '\t')) {
-    lit.remove_suffix(1);
-  }
-  bool neg = false;
-  if (!lit.empty() && (lit.front() == '+' || lit.front() == '-')) {
-    neg = lit.front() == '-';
-    lit.remove_prefix(1);
-  }
-  std::vector<uint8_t> mag;  // little-endian magnitude
-  if (lit.size() > 2 && lit[0] == '0' && (lit[1] == 'x' || lit[1] == 'X')) {
-    auto hx = lit.substr(2);
-    for (size_t k = 0; k < hx.size(); ++k) {
-      const char c = hx[hx.size() - 1 - k];
-      int        d = 0;
-      if (c >= '0' && c <= '9') {
-        d = c - '0';
-      } else if (c >= 'a' && c <= 'f') {
-        d = c - 'a' + 10;
-      } else if (c >= 'A' && c <= 'F') {
-        d = c - 'A' + 10;
-      } else {
-        err = std::format("'{}' is not a hex literal", lit);
-        return {};
-      }
-      if (k / 2 >= mag.size()) {
-        mag.push_back(0);
-      }
-      mag[k / 2] |= static_cast<uint8_t>(d << (4 * (k % 2)));
-    }
-  } else if (!lit.empty()) {
-    for (char c : lit) {
-      if (c < '0' || c > '9') {
-        err = std::format("'{}' is not a decimal or 0x-hex literal", lit);
-        return {};
-      }
-      unsigned carry = static_cast<unsigned>(c - '0');
-      for (auto& b : mag) {
-        const unsigned t = static_cast<unsigned>(b) * 10U + carry;
-        b                = static_cast<uint8_t>(t & 0xffU);
-        carry            = t >> 8;
-      }
-      while (carry != 0) {
-        mag.push_back(static_cast<uint8_t>(carry & 0xffU));
-        carry >>= 8;
-      }
-    }
+std::string read_sim_sidecar(const std::string& path) {
+  std::ifstream in(path);
+  std::string   json{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+  if (const auto last = json.find_last_not_of(" \t\r\n"); last != std::string::npos) {
+    json.resize(last + 1);
   } else {
-    err = "empty comparison literal";
-    return {};
+    json.clear();
   }
-  // Reject a literal the signal cannot hold rather than truncating it: a silent
-  // truncation turns a typo into a comparison that never (or always) fires.
-  size_t bitlen = 0;
-  for (size_t i = mag.size(); i-- > 0;) {
-    if (mag[i] != 0) {
-      unsigned v = mag[i];
-      bitlen     = i * 8;
-      while (v != 0) {
-        ++bitlen;
-        v >>= 1;
-      }
-      break;
-    }
-  }
-  if (static_cast<long>(bitlen) > bits) {
-    err = std::format("literal needs {} bits but the signal is {} bits wide", bitlen, bits);
-    return {};
-  }
-  const size_t nbytes = static_cast<size_t>((bits + 7) / 8);
-  mag.resize(nbytes, 0);
-  if (neg) {
-    unsigned carry = 1;
-    for (auto& b : mag) {
-      const unsigned t = static_cast<unsigned>(static_cast<uint8_t>(~b)) + carry;
-      b                = static_cast<uint8_t>(t & 0xffU);
-      carry            = t >> 8;
-    }
-  }
-  if (const long rem = bits % 8; rem != 0 && nbytes != 0) {
-    mag[nbytes - 1] &= static_cast<uint8_t>((1U << rem) - 1U);
-  }
-  const size_t ndig = static_cast<size_t>((bits + 3) / 4);
-  std::string  out;
-  out.reserve(ndig);
-  for (size_t k = ndig; k-- > 0;) {
-    const unsigned nib  = (mag[k / 2] >> (4 * (k % 2))) & 0xfU;
-    out                += "0123456789abcdef"[nib];
-  }
-  return out;
+  return json;
 }
 
-// The generator writes sim_catalog.json beside the driver. Its ABSENCE is not a
-// user mistake — every generated sim dir has one — so it reads as an internal
-// error naming the stale dir rather than as bad input.
-Sim_catalog load_sim_catalog(const std::string& simdir, const std::string& test_sel) {
-  const std::string path = std::format("{}/sim_catalog.json", simdir);
-  std::ifstream     ifs(path);
-  if (!ifs.is_open()) {
-    throw Lhd_error{"internal",
-                    std::format("--query needs the signal catalog, but {} does not exist", path),
-                    "the sim dir predates the query API — re-run without --run-only (or delete --workdir) to regenerate it"};
-  }
-  std::stringstream ss;
-  ss << ifs.rdbuf();
-  rj::Document doc;
-  doc.Parse(ss.str().c_str());
-  if (doc.HasParseError() || !doc.IsObject() || !doc.HasMember("kind") || !doc["kind"].IsString()
-      || std::string_view{doc["kind"].GetString()} != "sim_catalog" || !doc.HasMember("tests") || !doc["tests"].IsObject()) {
-    throw Lhd_error{"internal", std::format("malformed signal catalog {}", path), "regenerate the sim dir (drop --run-only)"};
-  }
+bool wants_observation(const Options& opts) {
+  return opts.sim_list_signals || !opts.sim_probe.empty() || !opts.sim_break_when.empty() || !opts.sim_query.empty();
+}
 
-  // Exactly ONE selected test, matching every other observability mode: a batch
-  // plans one replay, and "which run is cycle 42 in?" has no answer otherwise.
-  const auto&              tmap  = doc["tests"];
-  const rj::Value*         entry = nullptr;
-  std::string              name;
-  std::vector<std::string> keys;
-  for (auto it = tmap.MemberBegin(); it != tmap.MemberEnd(); ++it) {
-    keys.emplace_back(it->name.GetString());
+std::string prepare_query_file(const std::string& spec, const std::string& simdir) {
+  if (spec.empty()) {
+    return {};
   }
-  if (!test_sel.empty()) {
-    for (auto it = tmap.MemberBegin(); it != tmap.MemberEnd(); ++it) {
-      const std::string k    = it->name.GetString();
-      // The selector may be the dotted name or just its tail (`run` for `cnt.run`),
-      // the same two spellings the driver's --test accepts.
-      const auto        dot  = k.rfind('.');
-      const std::string tail = dot == std::string::npos ? k : k.substr(dot + 1);
-      if (k == test_sel || tail == test_sel) {
-        entry = &it->value;
-        name  = k;
-        break;
-      }
+  const auto first     = spec.find_first_not_of(" \t\r\n");
+  const bool is_inline = first != std::string::npos && spec[first] == '{';
+  if (!is_inline && spec != "-") {
+    if (!fs::is_regular_file(spec)) {
+      throw Lhd_error{"missing_file", std::format("--query file '{}' does not exist", spec), ""};
     }
-    if (entry == nullptr) {
-      query_usage(std::format("no test matched '{}'", test_sel), std::format("this sim holds: {}", absl::StrJoin(keys, ", ")));
-    }
-  } else if (keys.size() == 1) {
-    entry = &tmap.MemberBegin()->value;
-    name  = keys.front();
+    return fs::absolute(spec).string();
+  }
+  const auto    path = simdir + "/sim_query_request.json";
+  std::ofstream out(path);
+  if (is_inline) {
+    out << spec;
   } else {
-    query_usage("a query batch needs exactly one selected test",
-                std::format("name one as the second positional: {}", absl::StrJoin(keys, ", ")));
+    out << std::cin.rdbuf();
   }
-
-  Sim_catalog cat;
-  cat.test = name;
-  if (entry->HasMember("clock") && (*entry)["clock"].IsString()) {
-    cat.clock = (*entry)["clock"].GetString();
+  out.close();
+  if (!out) {
+    throw Lhd_error{"usage", "could not read the query request or write " + path, ""};
   }
-  if (!entry->HasMember("signals") || !(*entry)["signals"].IsArray()) {
-    throw Lhd_error{"internal", std::format("catalog entry '{}' has no signals array ({})", name, path), ""};
-  }
-  for (const auto& s : (*entry)["signals"].GetArray()) {
-    if (!s.IsObject() || !s.HasMember("name") || !s["name"].IsString()) {
-      continue;
-    }
-    Cat_sig c;
-    c.name = s["name"].GetString();
-    if (s.HasMember("alias") && s["alias"].IsString()) {
-      c.alias = s["alias"].GetString();
-    }
-    c.kind          = (s.HasMember("kind") && s["kind"].IsString()) ? s["kind"].GetString() : "flop";
-    c.bits          = (s.HasMember("bits") && s["bits"].IsNumber()) ? s["bits"].GetInt64() : 0;
-    c.declared_bits = (s.HasMember("declared_bits") && s["declared_bits"].IsNumber()) ? s["declared_bits"].GetInt64() : c.bits;
-    c.size          = (s.HasMember("size") && s["size"].IsNumber()) ? s["size"].GetInt64() : -1;
-    c.is_signed     = s.HasMember("signed") && s["signed"].IsBool() && s["signed"].GetBool();
-    cat.sigs.push_back(std::move(c));
-  }
-  return cat;
+  return path;
 }
 
-// --query FILE | - (stdin) | {inline JSON}. The inline form is what makes the
-// agent loop one invocation with no scratch file.
-std::string read_query_request(const std::string& spec) {
-  if (spec.front() == '{') {
-    return spec;
-  }
-  if (spec == "-") {
-    std::ostringstream oss;
-    oss << std::cin.rdbuf();
-    return oss.str();
-  }
-  std::ifstream ifs(spec);
-  if (!ifs.is_open()) {
-    throw Lhd_error{"missing_file",
-                    std::format("--query file '{}' does not exist", spec),
-                    "pass `-` to read the request from stdin"};
-  }
-  std::ostringstream oss;
-  oss << ifs.rdbuf();
-  return oss.str();
-}
-
-// A request timestamp. {"cycle":N} is absolute; {"event":"fail","offset":K} is
-// resolved DURING the run — the kernel cannot know the failing cycle at plan
-// time, so it travels as the token `F<offset>` and the driver resolves it once
-// the assert has (or has not) fired.
-struct Q_time {
-  long cycle    = -1;  // -1 = unbounded on this side
-  bool is_event = false;
-  long offset   = 0;
-};
-
-void reject_unknown_members(const rj::Value& obj, std::initializer_list<std::string_view> known, std::string_view where) {
-  for (auto it = obj.MemberBegin(); it != obj.MemberEnd(); ++it) {
-    const std::string_view k = it->name.GetString();
-    if (std::find(known.begin(), known.end(), k) == known.end()) {
-      query_usage(std::format("unknown field '{}' in {}", k, where),
-                  "v1 rejects unknown request fields rather than ignoring them (a typo must not silently change the answer)");
-    }
-  }
-}
-
-Q_time parse_time(const rj::Value& v, std::string_view where) {
-  if (!v.IsObject()) {
-    query_usage(std::format("{} must be an object, e.g. {{\"cycle\": 10}}", where));
-  }
-  reject_unknown_members(v, {"cycle", "event", "offset", "phase"}, where);
-  if (v.HasMember("phase")) {
-    if (!v["phase"].IsString() || std::string_view{v["phase"].GetString()} != "post") {
-      query_usage(std::format("{}.phase: only \"post\" exists in v1", where),
-                  "post is the only observation point the generated code exposes; a `pre` phase is the first planned extension");
-    }
-  }
-  Q_time t;
-  if (v.HasMember("event")) {
-    if (!v["event"].IsString() || std::string_view{v["event"].GetString()} != "fail") {
-      query_usage(std::format("{}.event: only \"fail\" exists in v1", where));
-    }
-    t.is_event = true;
-    if (v.HasMember("offset")) {
-      if (!v["offset"].IsInt64()) {
-        query_usage(std::format("{}.offset must be an integer", where));
-      }
-      t.offset = v["offset"].GetInt64();
-    }
-    if (v.HasMember("cycle")) {
-      query_usage(std::format("{}: give either a cycle or an event, not both", where));
-    }
-    return t;
-  }
-  if (!v.HasMember("cycle")) {
-    query_usage(std::format("{} needs a \"cycle\" (or an \"event\")", where));
-  }
-  if (!v["cycle"].IsInt64() || v["cycle"].GetInt64() < 0) {
-    query_usage(std::format("{}.cycle must be a non-negative integer", where));
-  }
-  t.cycle = v["cycle"].GetInt64();
-  return t;
-}
-
-// A selector: an exact name, or any AND-combination of scope/glob/regex/kind.
-struct Q_sel {
-  bool        has     = false;
-  bool        by_name = false;
-  std::string signal;  // exact name (or alias), possibly `mem[3]`
-  std::string scope;
-  std::string glob;
-  std::string regex;
-  std::string kind;
-};
-
-Q_sel parse_selector(const rj::Value& q, std::string_view where) {
-  Q_sel s;
-  auto  str = [&](const char* k) -> std::string {
-    if (!q[k].IsString()) {
-      query_usage(std::format("{}.{} must be a string", where, k));
-    }
-    s.has = true;
-    return q[k].GetString();
-  };
-  if (q.HasMember("signal")) {
-    s.signal  = str("signal");
-    s.by_name = true;
-  }
-  if (q.HasMember("scope")) {
-    s.scope = str("scope");
-  }
-  if (q.HasMember("glob")) {
-    s.glob = str("glob");
-  }
-  if (q.HasMember("regex")) {
-    s.regex = str("regex");
-  }
-  if (q.HasMember("kind")) {
-    s.kind                                     = str("kind");
-    static constexpr std::string_view kKinds[] = {"flop", "pipe", "memrd", "input", "output", "memory"};
-    if (std::find(std::begin(kKinds), std::end(kKinds), std::string_view{s.kind}) == std::end(kKinds)) {
-      query_usage(std::format("{}.kind '{}' is not a v1 signal kind", where, s.kind),
-                  "flop | pipe | memrd | input | output | memory");
-    }
-  }
-  return s;
-}
-
-// Selector -> catalog indices, in CATALOG ORDER (never match order): the
-// expansion order has to be reproducible for the response to be diffable.
-std::vector<size_t> resolve_sel(const Q_sel& sel, const Sim_catalog& cat, std::string_view where) {
-  std::optional<std::regex> re;
-  if (!sel.regex.empty()) {
-    try {
-      re.emplace(sel.regex, std::regex::ECMAScript);
-    } catch (const std::regex_error& e) {
-      query_usage(std::format("{}.regex '{}' does not compile: {}", where, sel.regex, e.what()));
-    }
-  }
-  std::vector<size_t> out;
-  for (size_t i = 0; i < cat.sigs.size(); ++i) {
-    const auto& c = cat.sigs[i];
-    if (sel.by_name && c.name != sel.signal && c.alias != sel.signal) {
-      continue;
-    }
-    if (!sel.scope.empty() && c.name != sel.scope && !std::string_view{c.name}.starts_with(sel.scope + ".")) {
-      continue;
-    }
-    if (!sel.glob.empty() && !glob_match(sel.glob, c.name)) {
-      continue;
-    }
-    if (re.has_value() && !std::regex_match(c.name, *re)) {
-      continue;
-    }
-    if (!sel.kind.empty() && c.kind != sel.kind) {
-      continue;
-    }
-    out.push_back(i);
-  }
-  return out;
-}
-
-// Exactly-one resolution (`value`, `changes`, a find leaf, a sample entry).
-// Zero and many are DIFFERENT failures with different fixes, so they carry
-// different classes.
-size_t resolve_one(const Q_sel& sel, const Sim_catalog& cat, std::string_view where) {
-  auto hits = resolve_sel(sel, cat, where);
-  if (hits.empty()) {
-    const std::string want = sel.by_name ? sel.signal : std::string{where};
-    throw Q_fail{"unknown_signal", std::format("no signal matches {}", want), "", nearest_names(cat, want)};
-  }
-  if (hits.size() > 1) {
-    std::vector<std::string> some;
-    for (size_t k = 0; k < hits.size() && k < 5; ++k) {
-      some.push_back(cat.sigs[hits[k]].name);
-    }
-    throw Q_fail{"ambiguous_selector",
-                 std::format("{} matches {} signals; this operation needs exactly one", where, hits.size()),
-                 "narrow the selector, or use `values`/`snapshot` for a set",
-                 some};
-  }
-  return hits.front();
-}
-
-// A bare hierarchical name (find leaves and `sample` entries take strings, not
-// selector objects).
-size_t resolve_name(const std::string& name, const Sim_catalog& cat) {
-  for (size_t i = 0; i < cat.sigs.size(); ++i) {
-    if (cat.sigs[i].name == name || cat.sigs[i].alias == name) {
-      return i;
-    }
-  }
-  throw Q_fail{"unknown_signal", std::format("no signal named '{}'", name), "", nearest_names(cat, name)};
-}
-
-std::string q_error_result(const std::string& id, const Q_fail& f) {
-  rj::StringBuffer             sb;
-  rj::Writer<rj::StringBuffer> w(sb);
-  w.StartObject();
-  w.Key("id");
-  w.String(id.c_str());
-  w.Key("ok");
-  w.Bool(false);
-  w.Key("error");
-  w.StartObject();
-  w.Key("class");
-  w.String(f.cls.c_str());
-  w.Key("message");
-  w.String(f.msg.c_str());
-  if (!f.hint.empty()) {
-    w.Key("hint");
-    w.String(f.hint.c_str());
-  }
-  w.Key("suggestions");
-  w.StartArray();
-  for (const auto& s : f.suggestions) {
-    w.String(s.c_str());
-  }
-  w.EndArray();
-  w.EndObject();
-  w.EndObject();
-  return sb.GetString();
-}
-
-// `signals` is answered ENTIRELY HERE: the catalog is static, so enumeration
-// never needs a simulation. (The query still keeps its request position.)
-std::string q_signals_result(const std::string& id, const std::vector<size_t>& hits, const Sim_catalog& cat, long max_results) {
-  const bool                   truncated = static_cast<long>(hits.size()) > max_results;
-  rj::StringBuffer             sb;
-  rj::Writer<rj::StringBuffer> w(sb);
-  w.StartObject();
-  w.Key("id");
-  w.String(id.c_str());
-  w.Key("ok");
-  w.Bool(true);
-  w.Key("count");
-  w.Int64(static_cast<int64_t>(hits.size()));
-  w.Key("complete");
-  w.Bool(!truncated);
-  w.Key("truncated");
-  w.Bool(truncated);
-  w.Key("signals");
-  w.StartArray();
-  for (size_t k = 0; k < hits.size() && static_cast<long>(k) < max_results; ++k) {
-    const auto& c = cat.sigs[hits[k]];
-    w.StartObject();
-    w.Key("name");
-    w.String(c.name.c_str());
-    w.Key("kind");
-    w.String(c.kind.c_str());
-    w.Key("bits");
-    w.Int64(c.bits);
-    w.Key("declared_bits");
-    w.Int64(c.declared_bits);
-    w.Key("signed");
-    w.Bool(c.is_signed);
-    w.Key("direction");
-    if (c.kind == "input") {
-      w.String("in");
-    } else if (c.kind == "output") {
-      w.String("out");
-    } else {
-      w.Null();
-    }
-    w.Key("size");
-    if (c.size >= 0) {
-      w.Int64(c.size);
-    } else {
-      w.Null();
-    }
-    w.Key("alias");
-    if (c.alias.empty()) {
-      w.Null();
-    } else {
-      w.String(c.alias.c_str());
-    }
-    // Absent-until-plumbed, spelled explicitly so an agent never has to guess
-    // whether the engine forgot the field or the design has no such fact.
-    w.Key("source");
-    w.Null();
-    w.Key("clock_domain");
-    w.Null();
-    w.Key("ops");
-    w.StartArray();
-    if (c.kind == "memory") {
-      w.String("value");  // indexed WORD reads only — no whole-memory dump/diff in v1
-    } else {
-      for (const char* op : {"value", "values", "changes", "next_change", "find", "snapshot", "diff"}) {
-        w.String(op);
-      }
-    }
-    w.EndArray();
-    w.EndObject();
-  }
-  w.EndArray();
-  w.EndObject();
-  return sb.GetString();
-}
-
-// `mem[7]` -> ("mem", 7). Memory words are addressed by explicit index only.
-std::pair<std::string, long> split_index(const std::string& name) {
-  if (name.empty() || name.back() != ']') {
-    return {name, -1};
-  }
-  const auto ob = name.rfind('[');
-  if (ob == std::string::npos || ob == 0) {
-    return {name, -1};
-  }
-  const auto digits = name.substr(ob + 1, name.size() - ob - 2);
-  if (digits.empty() || digits.find_first_not_of("0123456789") != std::string::npos) {
-    return {name, -1};
-  }
-  return {name.substr(0, ob), std::stol(digits)};
-}
-
-// One `find` expression node -> POST-ORDER X lines (a tiny stack machine the
-// driver evaluates without a parser). Returns the node count it emitted.
-size_t emit_expr(const rj::Value& n, const Sim_catalog& cat, std::string& out) {
-  if (!n.IsObject()) {
-    query_usage("find.expr nodes must be objects");
-  }
-  if (n.HasMember("all") || n.HasMember("any")) {
-    const bool  is_all = n.HasMember("all");
-    const char* key    = is_all ? "all" : "any";
-    reject_unknown_members(n, {"all", "any"}, "find.expr");
-    if (!n[key].IsArray() || n[key].Empty()) {
-      query_usage(std::format("find.expr.{} needs a non-empty array of sub-expressions", key));
-    }
-    size_t total = 0;
-    for (const auto& sub : n[key].GetArray()) {
-      total += emit_expr(sub, cat, out);
-    }
-    out += std::format("X {} {}\n", key, n[key].Size());
-    return total + 1;
-  }
-  if (n.HasMember("not")) {
-    reject_unknown_members(n, {"not"}, "find.expr");
-    const size_t sub  = emit_expr(n["not"], cat, out);
-    out              += "X not\n";
-    return sub + 1;
-  }
-  reject_unknown_members(n, {"sig", "cmp", "value", "sig2", "slice"}, "find.expr leaf");
-  if (!n.HasMember("sig") || !n["sig"].IsString() || !n.HasMember("cmp") || !n["cmp"].IsString()) {
-    query_usage("a find.expr leaf needs a \"sig\" and a \"cmp\"");
-  }
-  if (n.HasMember("slice")) {
-    throw Q_fail{"unsupported",
-                 "find.expr leaf `slice` is not in the v1 plan protocol",
-                 "compare the whole signal, or slice with a separate expression once the protocol carries it",
-                 {}};
-  }
-  const std::string cmp = n["cmp"].GetString();
-  const auto&       c   = cat.sigs[resolve_name(n["sig"].GetString(), cat)];
-  if (cmp == "changed" || cmp == "rising" || cmp == "falling") {
-    if (cmp != "changed" && c.bits != 1) {
-      throw Q_fail{"unsupported",
-                   std::format("`{}` is only defined on a 1-bit signal ({} is {} bits)", cmp, c.name, c.bits),
-                   "",
-                   {}};
-    }
-    if (n.HasMember("value") || n.HasMember("sig2")) {
-      query_usage(std::format("find.expr `{}` takes no value/sig2", cmp));
-    }
-    out += std::format("X edge {} {}\n", c.name, cmp);
-    return 1;
-  }
-  static constexpr std::string_view kCmps[] = {"==", "!=", "<", "<=", ">", ">="};
-  if (std::find(std::begin(kCmps), std::end(kCmps), std::string_view{cmp}) == std::end(kCmps)) {
-    query_usage(std::format("find.expr cmp '{}' is not a v1 comparator", cmp), "== != < <= > >= changed rising falling");
-  }
-  const bool ordered = cmp != "==" && cmp != "!=";
-  // The driver compares UNSIGNED magnitudes at arbitrary width (it has no
-  // catalog, so it cannot know an operand is signed). Refusing the query is the
-  // only honest option: emitting the compare anyway is exactly the --break-when
-  // strtoull hole one layer down — a confidently wrong cycle number.
-  if (ordered && c.is_signed) {
-    throw Q_fail{"unsupported",
-                 std::format("ordered compare on the signed signal '{}' is not in the v1 plan protocol", c.name),
-                 "the plan's comparator is an unsigned magnitude compare; use == / != , or compare an unsigned signal",
-                 {}};
-  }
-  if (n.HasMember("sig2")) {
-    if (n.HasMember("value")) {
-      query_usage("find.expr leaf takes either a value or a sig2, not both");
-    }
-    if (!n["sig2"].IsString()) {
-      query_usage("find.expr leaf sig2 must be a string");
-    }
-    const auto& c2 = cat.sigs[resolve_name(n["sig2"].GetString(), cat)];
-    if (ordered && c2.is_signed) {
-      throw Q_fail{"unsupported",
-                   std::format("ordered compare on the signed signal '{}' is not in the v1 plan protocol", c2.name),
-                   "the plan's comparator is an unsigned magnitude compare",
-                   {}};
-    }
-    out += std::format("X cmp2 {} {} {}\n", c.name, cmp, c2.name);
-    return 1;
-  }
-  if (!n.HasMember("value")) {
-    query_usage("find.expr leaf needs a \"value\" or a \"sig2\"");
-  }
-  // Numbers are accepted for ergonomics, but a wide literal MUST be written as a
-  // string: JSON numbers are doubles in every consumer we do not control.
-  std::string lit;
-  if (n["value"].IsString()) {
-    lit = n["value"].GetString();
-  } else if (n["value"].IsInt64()) {
-    lit = std::to_string(n["value"].GetInt64());
-  } else {
-    query_usage("find.expr leaf value must be a decimal/0x-hex string or an integer");
-  }
-  if (!lit.empty() && lit.front() == '-' && !c.is_signed) {
-    query_usage(std::format("find.expr leaf on '{}': a negative literal against an unsigned {}-bit signal", c.name, c.bits));
-  }
-  std::string err;
-  const auto  hex = literal_to_hex(lit, c.bits, err);  // bare lowercase hex: no 0x, no sign — that is the wire form
-  if (!err.empty()) {
-    query_usage(std::format("find.expr leaf on '{}': {}", c.name, err));
-  }
-  out += std::format("X cmp {} {} {}\n", c.name, cmp, hex);
-  return 1;
-}
-
-// Validate + plan the whole batch. Throws Lhd_error{usage} for a malformed
-// REQUEST; per-query problems land in plan.kernel_results as ok:false objects.
-Query_plan plan_sim_query(const std::string& request, const Sim_catalog& cat, const std::string& plan_path) {
-  rj::Document doc;
-  doc.Parse(request.c_str());
-  if (doc.HasParseError()) {
-    query_usage(std::format("the request is not valid JSON (offset {})", doc.GetErrorOffset()));
-  }
-  if (!doc.IsObject()) {
-    query_usage("the request must be a JSON object");
-  }
-  reject_unknown_members(doc, {"schema_version", "kind", "queries", "max_results", "allow_rng_divergence"}, "the request");
-  if (!doc.HasMember("schema_version") || !doc["schema_version"].IsInt() || doc["schema_version"].GetInt() != 1) {
-    query_usage("the request needs \"schema_version\": 1", "an unknown schema version is rejected, never best-effort parsed");
-  }
-  if (!doc.HasMember("kind") || !doc["kind"].IsString() || std::string_view{doc["kind"].GetString()} != "sim_query") {
-    query_usage("the request needs \"kind\": \"sim_query\"");
-  }
-  if (!doc.HasMember("queries") || !doc["queries"].IsArray()) {
-    query_usage("the request needs a \"queries\" array");
-  }
-  long max_results = 1000;
-  if (doc.HasMember("max_results")) {
-    if (!doc["max_results"].IsInt64() || doc["max_results"].GetInt64() <= 0) {
-      query_usage("max_results must be a positive integer");
-    }
-    max_results = doc["max_results"].GetInt64();
-  }
-  if (doc.HasMember("allow_rng_divergence") && doc["allow_rng_divergence"].GetBool()) {
-    // Recognized, and deliberately NOT silently ignored: honoring it means
-    // replaying from a checkpoint whose PRNG stream position was never saved,
-    // which every result would have to be marked `reproducible:false` for.
-    throw Lhd_error{"unsupported",
-                    "--query: allow_rng_divergence is not implemented yet",
-                    "drop the field; a randomized run replays from cycle 0, which is the reproducible answer"};
-  }
-
-  Query_plan plan;
-  plan.active = true;
-  plan.test   = cat.test;
-  plan.clock  = cat.clock;
-
-  std::string body;  // the Q/G/S/X lines, in request order
-  // The union of every replayed query's interval. -1 on either side means
-  // "unbounded there", which is how the driver reads FROM/TO.
-  bool        lo_unbounded = false, hi_unbounded = false;
-  long        lo_min = std::numeric_limits<long>::max(), hi_max = -1;
-  auto        note_lo = [&](long c) {
-    if (c < 0) {
-      lo_unbounded = true;
-    } else {
-      lo_min = std::min(lo_min, c);
-    }
-  };
-  auto note_hi = [&](long c) {
-    if (c < 0) {
-      hi_unbounded = true;
-    } else {
-      hi_max = std::max(hi_max, c);
-    }
-  };
-
-  // A failure-anchored bound has no value until the run happens, so the batch
-  // cannot bound its sampling window: it must observe the whole run.
-  bool       any_event = false;
-  const auto tok       = [&](const Q_time& t) {
-    if (t.is_event) {
-      any_event = true;
-      return std::format("F{}{}", t.offset < 0 ? "" : "+", t.offset);
-    }
-    return std::to_string(t.cycle);
-  };
-  std::map<std::string, size_t> seen_ids;
-  for (const auto& q : doc["queries"].GetArray()) {
-    if (!q.IsObject()) {
-      query_usage("every entry of \"queries\" must be an object");
-    }
-    if (!q.HasMember("id") || !q["id"].IsString()) {
-      query_usage("every query needs a string \"id\" (the response echoes it)");
-    }
-    const std::string id = q["id"].GetString();
-    // The id is a FIELD of the space-separated plan line, and it is the join key
-    // of the response — so no whitespace, and no duplicates.
-    if (id.empty() || id.find_first_of(" \t\n\r") != std::string::npos) {
-      query_usage(std::format("query id '{}' must be non-empty and contain no whitespace", id));
-    }
-    if (!seen_ids.emplace(id, plan.ids.size()).second) {
-      query_usage(std::format("duplicate query id '{}'", id));
-    }
-    if (!q.HasMember("op") || !q["op"].IsString()) {
-      query_usage(std::format("query '{}' needs a string \"op\"", id));
-    }
-    const std::string op    = q["op"].GetString();
-    const std::string where = std::format("query '{}'", id);
-    plan.ids.push_back(id);
-    plan.kernel_results.emplace_back();
-    std::string& kres = plan.kernel_results.back();
-
-    // Everything below may raise Q_fail (a per-query answer) — a bad name in one
-    // query must not cost the batch its other answers.
-    try {
-      if (op == "signals") {
-        reject_unknown_members(q, {"id", "op", "signal", "scope", "glob", "regex", "kind"}, where);
-        const auto sel  = parse_selector(q, where);
-        auto       hits = resolve_sel(sel, cat, where);
-        if (hits.empty() && sel.by_name) {
-          throw Q_fail{"unknown_signal", std::format("no signal named '{}'", sel.signal), "", nearest_names(cat, sel.signal)};
-        }
-        kres = q_signals_result(id, hits, cat, max_results);
-        continue;
-      }
-
-      // Everything else needs the replay. Resolve first, THEN emit lines, so a
-      // failing query contributes neither a plan line nor a time bound.
-      std::string line;
-      if (op == "value") {
-        reject_unknown_members(q, {"id", "op", "signal", "scope", "glob", "regex", "kind", "at", "index"}, where);
-        if (!q.HasMember("at")) {
-          query_usage(std::format("{}: `value` needs an \"at\"", where));
-        }
-        auto sel = parse_selector(q, where);
-        long idx = -1;
-        if (sel.by_name) {
-          auto [base, parsed] = split_index(sel.signal);
-          if (parsed >= 0) {
-            sel.signal = base;
-            idx        = parsed;
-          }
-        }
-        if (q.HasMember("index")) {
-          if (!q["index"].IsInt64() || q["index"].GetInt64() < 0) {
-            query_usage(std::format("{}.index must be a non-negative integer", where));
-          }
-          idx = q["index"].GetInt64();
-        }
-        const auto& c = cat.sigs[resolve_one(sel, cat, where)];
-        const auto  t = parse_time(q["at"], std::format("{}.at", where));
-        if (c.kind == "memory" && idx < 0) {
-          throw Q_fail{"unsupported",
-                       std::format("'{}' is a memory: read a WORD ({}[K]) — whole-memory reads are not in v1", c.name, c.name),
-                       "",
-                       {}};
-        }
-        if (c.kind != "memory" && idx >= 0) {
-          throw Q_fail{"unsupported", std::format("'{}' is a {}, not a memory — it takes no index", c.name, c.kind), "", {}};
-        }
-        if (idx >= 0 && c.size >= 0 && idx >= c.size) {
-          throw Q_fail{"invalid_range", std::format("index {} is outside '{}' ({} words)", idx, c.name, c.size), "", {}};
-        }
-        line = idx >= 0 ? std::format("Q {} memvalue {} {} {}\n", id, c.name, idx, tok(t))
-                        : std::format("Q {} value {} {}\n", id, c.name, tok(t));
-        note_lo(t.cycle);
-        note_hi(t.cycle);
-      } else if (op == "values" || op == "snapshot") {
-        reject_unknown_members(q, {"id", "op", "signal", "scope", "glob", "regex", "kind", "at"}, where);
-        const auto sel = parse_selector(q, where);
-        if (!sel.has) {
-          query_usage(std::format("{}: `{}` needs a selector", where, op),
-                      "signal | scope | glob | regex | kind — omitting it is an error, not an implicit select-all");
-        }
-        if (!q.HasMember("at")) {
-          query_usage(std::format("{}: `{}` needs an \"at\"", where, op));
-        }
-        const auto t    = parse_time(q["at"], std::format("{}.at", where));
-        auto       hits = resolve_sel(sel, cat, where);
-        std::erase_if(hits, [&](size_t i) { return cat.sigs[i].kind == "memory"; });  // selectors never enumerate memory words
-        if (hits.empty()) {
-          throw Q_fail{"unknown_signal",
-                       std::format("{} selects no signal", where),
-                       "",
-                       sel.by_name ? nearest_names(cat, sel.signal) : std::vector<std::string>{}};
-        }
-        line = std::format("Q {} {} {} {}\n", id, op, tok(t), hits.size());
-        for (size_t i : hits) {
-          line += std::format("G {}\n", cat.sigs[i].name);
-        }
-        note_lo(t.cycle);
-        note_hi(t.cycle);
-      } else if (op == "diff") {
-        reject_unknown_members(q, {"id", "op", "signal", "scope", "glob", "regex", "kind", "from", "to"}, where);
-        const auto sel = parse_selector(q, where);
-        if (!sel.has) {
-          query_usage(std::format("{}: `diff` needs a selector", where));
-        }
-        if (!q.HasMember("from") || !q.HasMember("to")) {
-          query_usage(std::format("{}: `diff` needs a \"from\" and a \"to\"", where));
-        }
-        const auto f = parse_time(q["from"], std::format("{}.from", where));
-        const auto t = parse_time(q["to"], std::format("{}.to", where));
-        if (f.cycle > t.cycle) {
-          query_usage(std::format("{}: from {} is after to {}", where, f.cycle, t.cycle));
-        }
-        auto hits = resolve_sel(sel, cat, where);
-        std::erase_if(hits, [&](size_t i) { return cat.sigs[i].kind == "memory"; });
-        if (hits.empty()) {
-          throw Q_fail{"unknown_signal", std::format("{} selects no signal", where), "", {}};
-        }
-        line = std::format("Q {} diff {} {} {}\n", id, tok(f), tok(t), hits.size());
-        for (size_t i : hits) {
-          line += std::format("G {}\n", cat.sigs[i].name);
-        }
-        note_lo(f.cycle);
-        note_hi(t.cycle);
-      } else if (op == "changes") {
-        reject_unknown_members(q, {"id", "op", "signal", "scope", "glob", "regex", "kind", "from", "to", "count_only"}, where);
-        const auto sel = parse_selector(q, where);
-        Q_time     f, t;
-        if (q.HasMember("from")) {
-          f = parse_time(q["from"], std::format("{}.from", where));
-        }
-        if (q.HasMember("to")) {
-          t = parse_time(q["to"], std::format("{}.to", where));
-        }
-        if (f.cycle >= 0 && t.cycle >= 0 && f.cycle > t.cycle) {
-          query_usage(std::format("{}: from {} is after to {}", where, f.cycle, t.cycle));
-        }
-        bool count_only = false;
-        if (q.HasMember("count_only")) {
-          if (!q["count_only"].IsBool()) {
-            query_usage(std::format("{}.count_only must be a boolean", where));
-          }
-          count_only = q["count_only"].GetBool();
-        }
-        // The plan carries ONE signal per `changes`, so a scope expansion has no
-        // wire form yet. Say so per-query rather than silently answering about
-        // whichever signal happened to sort first.
-        const auto& c = cat.sigs[resolve_one(sel, cat, where)];
-        line          = std::format("Q {} changes {} {} {} {}\n", id, c.name, tok(f), tok(t), count_only ? 1 : 0);
-        note_lo(f.cycle);
-        note_hi(t.cycle);
-      } else if (op == "next_change") {
-        reject_unknown_members(q, {"id", "op", "signal", "scope", "glob", "regex", "kind", "after", "to"}, where);
-        const auto sel = parse_selector(q, where);
-        Q_time     a, t;
-        if (q.HasMember("after")) {
-          a = parse_time(q["after"], std::format("{}.after", where));
-        }
-        if (q.HasMember("to")) {
-          t = parse_time(q["to"], std::format("{}.to", where));
-        }
-        if (a.cycle >= 0 && t.cycle >= 0 && a.cycle > t.cycle) {
-          query_usage(std::format("{}: after {} is past to {}", where, a.cycle, t.cycle));
-        }
-        const auto& c = cat.sigs[resolve_one(sel, cat, where)];
-        line          = std::format("Q {} next_change {} {} {}\n", id, c.name, tok(a), tok(t));
-        note_lo(a.cycle);
-        note_hi(t.cycle);
-      } else if (op == "find") {
-        reject_unknown_members(q, {"id", "op", "dir", "from", "to", "expr", "sample"}, where);
-        std::string dir = "fwd";
-        if (q.HasMember("dir")) {
-          if (!q["dir"].IsString()) {
-            query_usage(std::format("{}.dir must be a string", where));
-          }
-          const std::string d = q["dir"].GetString();
-          if (d == "forward" || d == "fwd") {
-            dir = "fwd";
-          } else if (d == "backward" || d == "bwd") {
-            dir = "bwd";
-          } else {
-            query_usage(std::format("{}.dir '{}' is not forward|backward", where, d));
-          }
-        }
-        Q_time f, t;
-        if (q.HasMember("from")) {
-          f = parse_time(q["from"], std::format("{}.from", where));
-        }
-        if (q.HasMember("to")) {
-          t = parse_time(q["to"], std::format("{}.to", where));
-        }
-        if (f.cycle >= 0 && t.cycle >= 0 && f.cycle > t.cycle) {
-          query_usage(std::format("{}: from {} is after to {}", where, f.cycle, t.cycle));
-        }
-        if (!q.HasMember("expr")) {
-          query_usage(std::format("{}: `find` needs an \"expr\" tree", where));
-        }
-        std::string  xs;
-        const size_t nx = emit_expr(q["expr"], cat, xs);
-        std::string  ss;
-        size_t       nsample = 0;
-        if (q.HasMember("sample")) {
-          if (!q["sample"].IsArray()) {
-            query_usage(std::format("{}.sample must be an array of signal names", where));
-          }
-          for (const auto& s : q["sample"].GetArray()) {
-            if (!s.IsString()) {
-              query_usage(std::format("{}.sample entries must be strings", where));
-            }
-            ss += std::format("S {}\n", cat.sigs[resolve_name(s.GetString(), cat)].name);
-            ++nsample;
-          }
-        }
-        line = std::format("Q {} find {} {} {} {} {}\n", id, dir, tok(f), tok(t), nx, nsample) + xs + ss;
-        note_lo(f.cycle);
-        note_hi(t.cycle);
-      } else {
-        query_usage(std::format("{}: unknown op '{}'", where, op),
-                    "signals | value | values | changes | next_change | find | snapshot | diff");
-      }
-      body += line;
-    } catch (const Q_fail& f) {
-      kres = q_error_result(id, f);
-    }
-  }
-
-  if (body.empty()) {
-    return plan;  // every question was answered from the catalog — no plan, no replay work
-  }
-  std::ofstream pf(plan_path);
-  if (!pf.is_open()) {
-    throw Lhd_error{"config", std::format("could not write the query plan {}", plan_path), ""};
-  }
-  pf << "V 1\n";
-  pf << std::format("FROM {}\n", any_event || lo_unbounded || lo_min == std::numeric_limits<long>::max() ? -1 : lo_min);
-  pf << std::format("TO {}\n", any_event || hi_unbounded ? -1 : hi_max);
-  pf << std::format("MAXRES {}\n", max_results);
-  pf << body;
-  plan.wrote_plan = true;
-  return plan;
-}
-
-// ---- value enrichment --------------------------------------------------------
-//
-// The driver has NO catalog — it knows bit patterns, not widths or signedness —
-// so every value it writes is the minimal {"hex":"<full-width canonical hex>"}.
-// Width, signedness, the decimal rendering and known_mask are catalog facts, and
-// the kernel is the side that holds the catalog. Adding them here keeps exactly
-// ONE copy of the metadata in the system; teaching the generated C++ a second
-// one is how the two drift.
-using Json_writer = rj::Writer<rj::StringBuffer>;
-
-const Cat_sig* find_sig(const Sim_catalog& cat, std::string_view name) {
-  for (const auto& c : cat.sigs) {
-    if (c.name == name || c.alias == name) {
-      return &c;
-    }
-  }
-  return nullptr;
-}
-
-// Canonical hex -> little-endian magnitude bytes.
-std::vector<uint8_t> hex_to_bytes(std::string_view hx) {
-  std::vector<uint8_t> v;
-  for (size_t k = 0; k < hx.size(); ++k) {
-    const char c = hx[hx.size() - 1 - k];
-    int        d = 0;
-    if (c >= '0' && c <= '9') {
-      d = c - '0';
-    } else if (c >= 'a' && c <= 'f') {
-      d = c - 'a' + 10;
-    } else if (c >= 'A' && c <= 'F') {
-      d = c - 'A' + 10;
-    } else {
-      return {};
-    }
-    if (k / 2 >= v.size()) {
-      v.push_back(0);
-    }
-    v[k / 2] |= static_cast<uint8_t>(d << (4 * (k % 2)));
-  }
-  return v;
-}
-
-std::string bytes_to_dec(std::vector<uint8_t> v) {
-  auto nonzero = [&] { return std::any_of(v.begin(), v.end(), [](uint8_t b) { return b != 0; }); };
-  if (!nonzero()) {
-    return "0";
-  }
-  std::string s;
-  while (nonzero()) {
-    unsigned rem = 0;
-    for (size_t i = v.size(); i-- > 0;) {
-      const unsigned cur = (rem << 8) | v[i];
-      v[i]               = static_cast<uint8_t>(cur / 10);
-      rem                = cur % 10;
-    }
-    s += static_cast<char>('0' + rem);
-  }
-  std::reverse(s.begin(), s.end());
-  return s;
-}
-
-// The signed decimal rendering of a hex value. The interpretation WIDTH is the
-// source-declared one (an `s12` holding -3 is "-3", not 4093) — but only when
-// the value actually fits there. An imported or conservatively widened
-// internal net can exceed its declaration, and truncating a value that uses
-// those bits would silently report a different number than `hex` says.
-std::string hex_to_dec(std::string_view hx, long bits, long declared_bits, bool is_signed) {
-  auto v = hex_to_bytes(hx);
-  if (v.empty()) {
-    return {};
-  }
-  long width = (declared_bits > 0 && declared_bits <= bits) ? declared_bits : bits;
-  auto bit   = [&](long i) {
-    const size_t byte = static_cast<size_t>(i) / 8;
-    return byte < v.size() && ((v[byte] >> (i % 8)) & 1U) != 0;
-  };
-  for (long i = width; i < bits; ++i) {
-    if (bit(i)) {
-      width = bits;  // the value overflows its declared width — report it whole
-      break;
-    }
-  }
-  const size_t nbytes = static_cast<size_t>((width + 7) / 8);
-  v.resize(nbytes, 0);
-  if (const long rem = width % 8; rem != 0 && nbytes != 0) {
-    v[nbytes - 1] &= static_cast<uint8_t>((1U << rem) - 1U);
-  }
-  const bool neg = is_signed && width > 0 && bit(width - 1);
-  if (neg) {
-    unsigned carry = 1;
-    for (auto& b : v) {
-      const unsigned t = static_cast<unsigned>(static_cast<uint8_t>(~b)) + carry;
-      b                = static_cast<uint8_t>(t & 0xffU);
-      carry            = t >> 8;
-    }
-    if (const long rem = width % 8; rem != 0 && nbytes != 0) {
-      v[nbytes - 1] &= static_cast<uint8_t>((1U << rem) - 1U);
-    }
-  }
-  return (neg ? "-" : "") + bytes_to_dec(std::move(v));
-}
-
-void write_value_enriched(Json_writer& w, const rj::Value& v, const Cat_sig* c) {
-  if (c == nullptr || !v.IsObject() || !v.HasMember("hex") || !v["hex"].IsString()) {
-    v.Accept(w);  // nothing to enrich it WITH — never guess a width
-    return;
-  }
-  const std::string hex = v["hex"].GetString();
-  std::string       err;
-  // All-ones at the internal width. v1 is strictly 2-state (Slop resolves x/?
-  // to seeded-PRNG bits at parse time), so an engine reporting an unknown bit
-  // here would be inventing one; the honest disclosure is run.seed/rng_draws.
-  const auto        known_mask = literal_to_hex("-1", c->bits, err);
-  w.StartObject();
-  w.Key("bits");
-  w.Int64(c->bits);
-  w.Key("declared_bits");
-  w.Int64(c->declared_bits);
-  w.Key("signed");
-  w.Bool(c->is_signed);
-  w.Key("hex");
-  w.String(hex.c_str());
-  w.Key("dec");
-  w.String(hex_to_dec(hex, c->bits, c->declared_bits, c->is_signed).c_str());
-  w.Key("known_mask");
-  w.String(known_mask.c_str());
-  // WHEN in the cycle this value was observed. State settles at the end of the
-  // period (where --probe has always sampled); a combinational OUTPUT is the
-  // value it drove DURING the period, computed from the state entering it —
-  // which is what the VCD shows at that period's timestamps. So a register and
-  // an output reading it are one commit apart. That is correct and cheap (the
-  // alternative is re-evaluating the design once per sampled cycle), but it is
-  // surprising, so every value says which one it is instead of relying on the
-  // reader having found the documentation.
-  w.Key("sampled");
-  w.String(c->kind == "output" ? "during_period" : "settled");
-  for (auto it = v.MemberBegin(); it != v.MemberEnd(); ++it) {
-    const std::string_view k = it->name.GetString();
-    if (k == "hex" || k == "bits" || k == "declared_bits" || k == "signed" || k == "dec" || k == "known_mask" || k == "sampled") {
-      continue;  // ours; a driver that starts emitting them must not double-write
-    }
-    w.Key(it->name.GetString());
-    it->value.Accept(w);
-  }
-  w.EndObject();
-}
-
-// Every member spelling that holds a value object, across the five operations:
-// `value` (value/values), `from_value`/`to_value` (diff), `old`/`new` (changes).
-bool is_value_key(std::string_view k) { return k == "value" || k == "from_value" || k == "to_value" || k == "old" || k == "new"; }
-
-// One row of a values/diff/changes/sample array. A row names its own signal;
-// a single-signal `changes` may leave that to the result level instead.
-void write_row_enriched(Json_writer& w, const rj::Value& row, const Sim_catalog& cat, const Cat_sig* outer) {
-  if (!row.IsObject()) {
-    row.Accept(w);
-    return;
-  }
-  const Cat_sig* c = outer;
-  if (row.HasMember("signal") && row["signal"].IsString()) {
-    if (const auto* f = find_sig(cat, row["signal"].GetString()); f != nullptr) {
-      c = f;
-    }
-  }
-  w.StartObject();
-  for (auto it = row.MemberBegin(); it != row.MemberEnd(); ++it) {
-    w.Key(it->name.GetString());
-    if (is_value_key(it->name.GetString())) {
-      write_value_enriched(w, it->value, c);
-    } else {
-      it->value.Accept(w);
-    }
-  }
-  w.EndObject();
-}
-
-void write_result_enriched(Json_writer& w, const rj::Value& r, const Sim_catalog& cat) {
-  if (!r.IsObject()) {
-    r.Accept(w);
-    return;
-  }
-  const Cat_sig* c = nullptr;
-  if (r.HasMember("signal") && r["signal"].IsString()) {
-    c = find_sig(cat, r["signal"].GetString());
-  }
-  w.StartObject();
-  for (auto it = r.MemberBegin(); it != r.MemberEnd(); ++it) {
-    w.Key(it->name.GetString());
-    if (is_value_key(it->name.GetString())) {
-      write_value_enriched(w, it->value, c);
-    } else if (it->value.IsArray()) {
-      w.StartArray();
-      for (const auto& row : it->value.GetArray()) {
-        write_row_enriched(w, row, cat, c);
-      }
-      w.EndArray();
-    } else {
-      it->value.Accept(w);
-    }
-  }
-  w.EndObject();
-}
-
-// The response the envelope carries: the driver's sidecar with every value
-// enriched from the catalog and the kernel-answered queries SPLICED BACK into
-// their request positions. Request order is part of the contract, and `signals`
-// results never reach the driver at all.
-std::string finalize_sim_query(const Query_plan& plan, const Sim_catalog& cat, const std::string& sidecar_path) {
-  std::string raw;
-  if (plan.wrote_plan) {
-    std::ifstream ifs(sidecar_path);
-    if (ifs.is_open()) {
-      std::stringstream ss;
-      ss << ifs.rdbuf();
-      raw = ss.str();
-      while (!raw.empty() && (raw.back() == '\n' || raw.back() == '\r' || raw.back() == ' ' || raw.back() == '\t')) {
-        raw.pop_back();
-      }
-    }
-  }
-  rj::Document doc;
-  bool         have_driver = false;
-  if (raw.size() >= 2 && raw.front() == '{') {
-    doc.Parse(raw.c_str());
-    have_driver = !doc.HasParseError() && doc.IsObject() && doc.HasMember("results") && doc["results"].IsArray();
-  }
-  // Index the driver's answers BY ID, not by position: the plan and the response
-  // agree on ids, and a positional join would mis-attribute every later answer
-  // if the driver ever dropped one.
-  std::map<std::string, const rj::Value*> by_id;
-  if (have_driver) {
-    for (const auto& r : doc["results"].GetArray()) {
-      if (r.IsObject() && r.HasMember("id") && r["id"].IsString()) {
-        by_id.emplace(r["id"].GetString(), &r);
-      }
-    }
-  }
-
-  rj::StringBuffer             sb;
-  rj::Writer<rj::StringBuffer> w(sb);
-  w.StartObject();
-  if (have_driver) {
-    for (auto it = doc.MemberBegin(); it != doc.MemberEnd(); ++it) {
-      const std::string_view key = it->name.GetString();
-      if (key == "results") {
-        continue;  // rebuilt below, in request order
-      }
-      w.Key(it->name.GetString());
-      if (key != "run" || !it->value.IsObject()) {
-        it->value.Accept(w);
-        continue;
-      }
-      // The driver reports what it MEASURED (samples, replay bounds, seed,
-      // fail_cycle); which test and which clock those belong to are selection
-      // facts only this side knows, so they are added rather than duplicated
-      // into the generated code.
-      w.StartObject();
-      for (auto rit = it->value.MemberBegin(); rit != it->value.MemberEnd(); ++rit) {
-        w.Key(rit->name.GetString());
-        rit->value.Accept(w);
-      }
-      if (!it->value.HasMember("test")) {
-        w.Key("test");
-        w.String(plan.test.c_str());
-      }
-      if (!it->value.HasMember("clock")) {
-        w.Key("clock");
-        if (plan.clock.empty()) {
-          w.Null();
-        } else {
-          w.String(plan.clock.c_str());
-        }
-      }
-      w.EndObject();
-    }
-  } else {
-    // No replay was needed (or the driver produced nothing): the kernel is the
-    // whole engine for this batch, and says only what it actually knows.
-    w.Key("schema_version");
-    w.Int(1);
-    w.Key("kind");
-    w.String("sim_query_result");
-    w.Key("run");
-    w.StartObject();
-    w.Key("test");
-    w.String(plan.test.c_str());
-    w.Key("clock");
-    if (plan.clock.empty()) {
-      w.Null();
-    } else {
-      w.String(plan.clock.c_str());
-    }
-    w.Key("phase");
-    w.String("post");
-    w.EndObject();
-  }
-  w.Key("results");
-  w.StartArray();
-  for (size_t i = 0; i < plan.ids.size(); ++i) {
-    if (!plan.kernel_results[i].empty()) {
-      w.RawValue(plan.kernel_results[i].data(), plan.kernel_results[i].size(), rj::kObjectType);
-      continue;
-    }
-    if (auto it = by_id.find(plan.ids[i]); it != by_id.end()) {
-      write_result_enriched(w, *it->second, cat);
-      continue;
-    }
-    // The query was planned but came back unanswered (an older driver, or one
-    // that died mid-batch). An absent id would read as "not asked"; say why.
-    const auto miss = q_error_result(plan.ids[i],
-                                     Q_fail{"unsupported",
-                                            "the generated sim driver returned no answer for this query",
-                                            "regenerate the sim dir (drop --run-only) so the driver carries the query evaluator",
-                                            {}});
-    w.RawValue(miss.data(), miss.size(), rj::kObjectType);
-  }
-  w.EndArray();
-  w.EndObject();
-  return sb.GetString();
-}
-
-// The compile library retains definitions that simulator preparation inlined
-// away. Their generated code is useful for standalone export, but the driver
-// must not compile/link those orphan modules. Follow literal generated includes
-// and the per-module artifact manifest; names/prefixes alone are ambiguous.
-// Missing/old/malformed manifests conservatively keep the previous full build.
-std::set<std::string> sim_unused_artifacts(const std::string& directory, const std::string& driver) {
-  std::ifstream     index(directory + "/gen_digests.json");
-  const std::string text{std::istreambuf_iterator<char>(index), std::istreambuf_iterator<char>()};
-  rj::Document      doc;
-  doc.Parse(text.data(), text.size());
-  if (doc.HasParseError() || !doc.IsObject() || !doc.HasMember("modules") || !doc["modules"].IsObject()) {
-    return {};
-  }
-  std::map<std::string, std::vector<std::string>> modules;
-  std::map<std::string, std::string>              owners;
-  for (const auto& record : doc["modules"].GetObject()) {
-    if (!record.value.IsObject() || !record.value.HasMember("f") || !record.value["f"].IsArray()) {
-      return {};
-    }
-    auto& files = modules[record.name.GetString()];
-    for (const auto& entry : record.value["f"].GetArray()) {
-      if (!entry.IsString()) {
-        return {};
-      }
-      const std::string name = entry.GetString();
-      if (std::filesystem::path(name).filename() != name || !owners.emplace(name, record.name.GetString()).second) {
-        return {};
-      }
-      files.push_back(name);
-    }
-  }
-  std::vector<std::string> pending{std::filesystem::path(driver).filename().string()};
-  // Hand-written support translation units remain build inputs too. Their
-  // includes can reach a generated module independently of the test driver.
-  std::error_code          scan_error;
-  for (const auto& entry : std::filesystem::directory_iterator(directory, scan_error)) {
-    const auto name = entry.path().filename().string();
-    if (name.ends_with(".cpp") && !owners.contains(name)) {
-      pending.push_back(name);
-    }
-  }
-  if (scan_error) {
-    return {};
-  }
-  std::set<std::string> visited;
-  std::set<std::string> reached;
-  while (!pending.empty()) {
-    auto name = std::move(pending.back());
-    pending.pop_back();
-    if (!visited.insert(name).second) {
-      continue;
-    }
-    if (const auto owner = owners.find(name); owner != owners.end() && reached.insert(owner->second).second) {
-      for (const auto& file : modules.at(owner->second)) {
-        if (file.ends_with(".cpp") || file.ends_with(".hpp")) {
-          pending.push_back(file);
-        }
-      }
-    }
-    std::ifstream source(directory + "/" + name);
-    if (!source) {
-      return {};
-    }
-    std::string line;
-    while (std::getline(source, line)) {
-      auto first = line.find_first_not_of(" \t");
-      if (first == std::string::npos || line[first] != '#') {
-        continue;
-      }
-      // `#  include "x"`: blanks are allowed between '#' and the directive
-      const auto directive = line.find_first_not_of(" \t", first + 1);
-      if (directive == std::string::npos || !std::string_view(line).substr(directive).starts_with("include")) {
-        continue;
-      }
-      first            = directive;
-      const auto begin = line.find('"', first + 7);
-      if (begin == std::string::npos) {
-        continue;
-      }
-      const auto end = line.find('"', begin + 1);
-      if (end == std::string::npos) {
-        continue;
-      }
-      const auto      included = line.substr(begin + 1, end - begin - 1);
-      std::error_code ec;
-      if (std::filesystem::is_regular_file(std::filesystem::path(directory) / included, ec)) {
-        pending.push_back(included);
-      }
-    }
-  }
-  std::set<std::string> unused;
-  for (const auto& [module, files] : modules) {
-    if (!reached.contains(module)) {
-      unused.insert(files.begin(), files.end());
-    }
-  }
-  return unused;
+std::pair<int, std::string> run_sim_replay(const std::string& command) {
+  std::string out;
+  FILE*       stream = ::popen((command + " 2>&1").c_str(), "r");
+  if (stream == nullptr) {
+    return {-1, "could not launch the replay runtime"};
+  }
+  char buf[4096];
+  while (const auto count = std::fread(buf, 1, sizeof buf, stream)) {
+    out.append(buf, count);
+  }
+  const int status = ::pclose(stream);
+  if (const auto last = out.find_last_not_of("\r\n"); last != std::string::npos) {
+    out.resize(last + 1);
+  }
+  return {WIFEXITED(status) ? WEXITSTATUS(status) : -1, std::move(out)};
 }
 
 }  // namespace
 
-// `lhd sim <file.prp> [test.name] [--arg k=v ...]` — lower the design's DUT
-// modules to Slop<N> structs (inou.cgen.sim) and, for each `test` block,
-// generate a C++ driver that runs the `tick` loop and turns `assert`s into
-// runtime checks, then host-compile + run it and report pass/fail.
-//
-// The host build is lhd's own: it shells out to the host compiler directly (the
-// "fast run path" below), with no bazel project, no ninja and no network. That
-// is what lets `lhd sim` work inside SOMEONE ELSE'S bazel test sandbox (that is
-// how lhdsuite drives it). Parallelism comes from the built-in fan-out
-// (`lhd.jobs`); incrementality from compiler depfiles plus a per-output stamp of
-// the exact command line. `lhd sim` / `lhd sim --setup-only` run with no
-// arguments inside a generated sim directory replays the recorded invocation
-// (see replay_recorded_invocation), so that is the one way to rebuild.
+void run_llvm_testbench(Options& opts, Result& res, const std::string& file, const std::string& simdir, const std::string& simroot,
+                        const std::string& test_sel, bool init_zero, const std::string& warn_undefined, bool pretty,
+                        const Llvm_tb_cfg& cfg) {
+  if (!fs::exists(std::format("{}/{}", simdir, prp_tb::kManifest))) {
+    res.status        = "fail";
+    res.error_class   = "usage";
+    res.error_message = std::format("no generated sim testbench in {} (run --setup-only --workdir {} first)", simdir, simroot);
+    res.exit_code     = exit_code_for(res.error_class);
+    return;
+  }
+  const std::string runtime = shell_quote(simrt_path()) + " " + shell_quote(simdir);
+  std::string       run_config;
+  if (opts.seed_explicit) {
+    run_config += " --seed " + shell_quote(opts.seed);
+  }
+  if (init_zero) {
+    run_config += " --init-zero";
+  }
+  if (cfg.unknown_zero) {
+    run_config += " --set sim.unknown_zero=true";
+  }
+  if (!warn_undefined.empty()) {
+    run_config += " --set sim.warn_undefined=" + warn_undefined;
+  }
+  if (!cfg.ckpt_dir.empty()) {
+    run_config += " --ckpt-dir " + shell_quote(cfg.ckpt_dir);
+  } else {
+    run_config += " --no-checkpoint";
+  }
+  for (const auto& arg : opts.sim_plusargs) {
+    run_config += " " + shell_quote(arg);
+  }
+  const auto  selection      = test_sel.empty() ? std::string{} : " --test " + shell_quote(test_sel);
+  const auto  sim_tests_path = simdir + "/sim_tests.json";
+  const auto  sim_debug_path = simdir + "/sim_debug.json";
+  const auto  sim_query_path = simdir + "/sim_query.json";
+  const bool  observe        = wants_observation(opts);
+  std::string observation_args;
+  if (observe) {
+    std::error_code ec;
+    fs::remove(sim_debug_path, ec);
+    fs::remove(sim_query_path, ec);
+    if (opts.sim_list_signals) {
+      observation_args += " --list-signals";
+    }
+    if (!opts.sim_probe.empty()) {
+      observation_args += " --probe " + shell_quote(opts.sim_probe) + " --probe-from " + std::to_string(opts.sim_probe_from)
+                          + " --probe-to " + std::to_string(opts.sim_probe_to);
+    }
+    if (!opts.sim_break_when.empty()) {
+      observation_args += " --break-when " + shell_quote(opts.sim_break_when);
+    }
+    if (!opts.sim_query.empty()) {
+      observation_args += " --query-file " + shell_quote(prepare_query_file(opts.sim_query, simdir));
+    }
+    const auto listed_only
+        = opts.sim_list_signals && !cfg.vcd_on && opts.sim_probe.empty() && opts.sim_break_when.empty() && opts.sim_query.empty();
+    const std::string mode   = listed_only ? " --debug-json " + shell_quote(sim_debug_path) : " --check-observation";
+    const auto [status, msg] = run_sim_replay(runtime + selection + observation_args + mode);
+    if (status != 0) {
+      throw Lhd_error{"usage", msg.empty() ? "the simulator could not prepare observation" : msg, ""};
+    }
+    if (listed_only) {
+      res.sim_debug_json = read_sim_sidecar(sim_debug_path);
+      res.outputs.push_back(simdir);
+      return;
+    }
+    observation_args += " --debug-json " + shell_quote(sim_debug_path) + " --query-json " + shell_quote(sim_query_path);
+  }
+
+  {
+    std::error_code ec;
+    fs::remove(sim_tests_path, ec);
+  }
+  std::string run_args = runtime + selection + run_config + " --result-json " + shell_quote(sim_tests_path);
+  if (!cfg.ckpt_dir.empty()) {
+    if (!cfg.ckpt_min_secs.empty()) {
+      run_args += " --checkpoint-min-secs " + shell_quote(cfg.ckpt_min_secs);
+    }
+    if (!cfg.ckpt_max.empty()) {
+      run_args += " --checkpoint-max " + shell_quote(cfg.ckpt_max);
+    }
+    if (!cfg.ckpt_max_overhead.empty()) {
+      run_args += " --checkpoint-max-overhead " + shell_quote(cfg.ckpt_max_overhead);
+    }
+    if (!cfg.ckpt_every.empty()) {
+      run_args += " --checkpoint-every " + shell_quote(cfg.ckpt_every);
+    }
+  }
+  if (opts.sim_restart_cycle >= 0) {
+    run_args += " --restart-cycle " + std::to_string(opts.sim_restart_cycle);
+  }
+  int         rc        = 0;
+  int         killed_by = 0;
+  std::string out;
+  {
+    Phase_timer run_phase(res, "sim.run");
+    FILE*       p = ::popen(run_args.c_str(), "r");
+    if (p == nullptr) {
+      rc = -1;
+    } else {
+      char   buf[4096];
+      size_t n = 0;
+      while ((n = std::fread(buf, 1, sizeof buf, p)) > 0) {
+        out.append(buf, n);
+      }
+      const int st = ::pclose(p);
+      rc           = WIFEXITED(st) ? WEXITSTATUS(st) : -1;
+      killed_by    = terminating_signal(st);
+    }
+  }
+  res.sim_tests_json = read_sim_sidecar(sim_tests_path);
+  if ((observe || cfg.vcd_on) && (rc == 0 || rc == 1)) {
+    Phase_timer replay_phase(res, "sim.replay");
+    const auto  jobs          = livehd::Job_manager::global().ceiling();
+    const auto  replay_config = run_config + " --jobs " + std::to_string(jobs) + " --replay-results " + shell_quote(sim_tests_path);
+    rapidjson::Document recorded;
+    recorded.Parse(res.sim_tests_json.c_str());
+    if (!recorded.IsArray()) {
+      throw Lhd_error{"internal", "the simulation did not write results for replay", ""};
+    }
+    for (const auto& test : recorded.GetArray()) {
+      const std::string      name   = test["test"].GetString();
+      const std::string_view status = test["status"].GetString();
+      if (status == "error") {
+        continue;
+      }
+      std::string cmd         = runtime + " --test " + shell_quote(name) + replay_config + observation_args;
+      const bool  failure_vcd = cfg.vcd_on && opts.sim_vcd_on_fail && test.HasMember("cycle") && test["cycle"].GetInt64() >= 0;
+      const bool  vcd         = cfg.vcd_on && (!opts.sim_vcd_on_fail || failure_vcd);
+      long        from = std::max(0L, opts.sim_vcd_from), to = opts.sim_vcd_to;
+      if (failure_vcd) {
+        to   = test["cycle"].GetInt64();
+        from = std::max(0L, to - opts.sim_vcd_fail_window);
+      }
+      if (vcd) {
+        cmd += " --vcd-out " + shell_quote(cfg.vcd_dir + "/" + name + ".vcd") + " --vcd-from " + std::to_string(from) + " --vcd-to "
+               + std::to_string(to);
+      } else if (!observe) {
+        continue;
+      }
+      const auto [replay_status, message] = run_sim_replay(cmd);
+      if (replay_status != 0) {
+        const auto error = std::format("replay of {} failed{}", name, message.empty() ? "" : ": " + message);
+        if (rc == 0) {
+          throw Lhd_error{replay_status == 2 ? "usage" : "internal", error, ""};
+        }
+        std::fprintf(stderr, "lhd sim: %s\n", error.c_str());
+        continue;
+      }
+      if (pretty && !message.empty()) {
+        out += message + "\n";
+      }
+      if (failure_vcd) {
+        std::fprintf(stderr,
+                     "lhd sim: %s failed at clock %ld -> wrote failure VCD (cycles %ld..%ld)\n",
+                     name.c_str(),
+                     to,
+                     from,
+                     to);
+      }
+    }
+    if (observe) {
+      res.sim_debug_json = read_sim_sidecar(sim_debug_path);
+      res.sim_query_json = read_sim_sidecar(sim_query_path);
+    }
+  }
+  int    n_fail = 0;
+  size_t n_run  = 0;
+  {
+    std::istringstream iss(out);
+    std::string        ln;
+    while (std::getline(iss, ln)) {
+      const bool pass = ln.rfind("PASS ", 0) == 0;
+      const bool fail = ln.rfind("FAIL ", 0) == 0;
+      if (!pass && !fail) {
+        continue;
+      }
+      ++n_run;
+      std::string name = ln.substr(5);
+      if (auto sp = name.find(" ("); sp != std::string::npos) {
+        name = name.substr(0, sp);
+      }
+      res.recipe_steps.push_back(std::format("sim {} ({})", name, pass ? "pass" : "fail"));
+      if (fail) {
+        ++n_fail;
+      }
+    }
+  }
+  if (pretty) {
+    std::istringstream iss(out);
+    std::string        ln;
+    while (std::getline(iss, ln)) {
+      std::print("    {}\n", ln);
+    }
+    std::fflush(stdout);
+  }
+  res.outputs.push_back(simdir);
+  if (rc == 0) {
+    return;
+  }
+  res.status = "fail";
+  if (rc == 2) {
+    res.error_class   = "usage";
+    res.error_message = (!test_sel.empty() && n_run == 0) ? std::format("no test matched '{}' in {}", test_sel, file)
+                                                          : std::format("the sim runtime rejected an argument in {}", file);
+  } else if (killed_by != 0) {
+    res.error_class   = "assert";
+    res.error_message = std::format("the sim runtime was killed by signal {} ({}) after {} test verdict(s)", signal_name(killed_by),
+                                    signal_description(killed_by), n_run);
+  } else {
+    res.error_class   = "assert";
+    res.error_message = (n_fail > 0 && n_run > 0) ? std::format("{} of {} test(s) failed", n_fail, n_run)
+                                                  : std::format("the sim runtime exited with code {}", rc);
+  }
+  res.exit_code = exit_code_for(res.error_class);
+}
+
 void sim_command(Options& opts, Result& res) {
   res.command             = "sim pyrope";
-  // Captured FIRST: compile_sources later mints a scratch workdir when the user
-  // named none, and the sim tuner must never keep its store in one.
-  const bool user_workdir = !opts.workdir.empty() && !opts.workdir_scratch;
   if (opts.files.empty()) {
     throw Lhd_error{"usage", "sim requires a .prp file", "e.g. `lhd sim foo.prp` or `lhd sim foo.prp test.name`"};
   }
@@ -1709,137 +533,83 @@ void sim_command(Options& opts, Result& res) {
                     "run `lhd sim <tb.prp> --setup-only --workdir <dir>` first, or check --workdir points at that dir"};
   }
 
-  // --set sim.vcd=true: dump one VCD per test, `<workdir>/<test.name>.vcd`. The
-  // path is absolute (the driver binary is run from the caller's cwd), and when
-  // on, the fast build also links hlop's VCD writer (vcd_writer.cpp).
-  bool compile_only      = false;
-  bool vcd_on            = false;
-  bool vcd_fakedelay     = true;  // sim.vcdfakedelay: X + settle delay after each edge (default); false = edge-aligned
-  bool vcd_fakedelay_set = false;
+  // --set sim.vcd=true / --vcd-from / --vcd-on-fail: the VCD is not the simulator's business. The setup also writes a
+  // trace object (`drv.tb.trace.o`) and, after the run, lhd replays it from the nearest checkpoint (`lhd_simrt
+  // --vcd-out`), one `<workdir>/<test>.vcd` per test.
+  bool compile_only = false;
+  bool vcd_on       = false;
   for (const auto& [k, v] : opts.sets) {
     if (k == "sim.compile_only") {
       compile_only = (v == "true" || v == "1" || v == "on");
+    } else if (k == "sim.dump_bitcode") {
+      opts.sim_dump_bitcode = v == "true" || v == "1" || v == "on";
     } else if (k == "sim.vcd") {
-      // bool-or-FILE: any non-false value turns tracing on (an explicit FILE
-      // only matters for compiled/baked binaries; `lhd sim` derives per-test paths)
       vcd_on = !(v == "false" || v == "0" || v == "off" || v.empty());
-    } else if (k == "sim.vcd_fake_delay") {
-      vcd_fakedelay     = (v == "true" || v == "1" || v == "on");
-      vcd_fakedelay_set = true;
     }
   }
-  // A `--vcd-from` window or `--vcd-on-fail` implies VCD: the driver needs the
-  // trace machinery emitted (the first run still produces none until a window opens).
+  if (run_only && opts.sim_dump_bitcode) {
+    throw Lhd_error{"usage", "sim.dump_bitcode requires simulator setup", "use --setup-only to write LLVM bitcode"};
+  }
   if (opts.sim_vcd_from >= 0 || opts.sim_vcd_on_fail) {
     vcd_on = true;
   }
-  // Hierarchical combinational port mirrors are compile-time instrumentation.
-  // Keep them out of the ordinary fast binary; emit them only for a run that
-  // actually requests waveform or value observation.
-  // --list-signals is deliberately NOT here: describe_signals() walks the
-  // declared state/IO members, so it needs the runtime-support state walk
-  // below, never the hierarchical mirrors.
   opts.sim_observe          = vcd_on || !opts.sim_probe.empty() || !opts.sim_break_when.empty() || !opts.sim_query.empty();
   const std::string vcd_dir = vcd_on ? fs::absolute(simroot).string() : std::string{};
 
-  // --set sim.checkpoint* : periodic editable checkpoints of DUT + testbench state
-  // under <simroot>/ckpt/<test>/ckp<cycle>/ (regs.json + *.hex + tb.json +
-  // meta.json). Default ON; a short run (< the min-secs floor) writes none. The
-  // settings are forwarded to the driver, which owns the fork cadence + prune.
-  bool        ckpt_on       = true;
-  bool        ckpt_explicit = false;  // the user configured checkpoints (sim.tune: auto does not profile then)
-  bool        init_zero     = false;
-  std::string warn_undefined;  // empty: the driver's default (on)
-  bool        unknown_zero     = false;
-  bool        unknown_zero_set = false;  // an explicit sim.unknown_zero is always followed (sim.tune ruling 3)
+  // --set sim.checkpoint* : periodic native checkpoints of the DUT state and the testbench frame under
+  // <simroot>/ckpt/<test>/c<cycle>/ (state.bin, frame.bin, meta.json). Default ON; a short run (< the min-secs floor)
+  // writes none. The runtime owns the fork cadence and the prune.
+  bool        ckpt_on   = true;
+  bool        init_zero = false;
+  std::string warn_undefined;
+  bool        unknown_zero = false;
   std::string ckpt_min_secs, ckpt_max, ckpt_max_overhead, ckpt_every;
   for (const auto& [k, v] : opts.sets) {
     if (k == "sim.checkpoint") {
-      ckpt_on       = (v == "true" || v == "1" || v == "on");
-      ckpt_explicit = true;
+      ckpt_on = (v == "true" || v == "1" || v == "on");
     } else if (k == "sim.checkpoint_min_secs") {
       ckpt_min_secs = v;
-      ckpt_explicit = true;
     } else if (k == "sim.checkpoint_max") {
-      ckpt_max      = v;
-      ckpt_explicit = true;
+      ckpt_max = v;
     } else if (k == "sim.checkpoint_max_overhead") {
       ckpt_max_overhead = v;
-      ckpt_explicit     = true;
     } else if (k == "sim.checkpoint_every") {
-      ckpt_every    = v;
-      ckpt_explicit = true;
+      ckpt_every = v;
     } else if (k == "sim.init_zero") {
       init_zero = (v == "true" || v == "1" || v == "on");
     } else if (k == "sim.warn_undefined") {
       warn_undefined = (v == "true" || v == "1" || v == "on") ? "true" : "false";
     } else if (k == "compile.unknown_zero") {
-      // Read here for the TESTBENCH literals (prp_sim); the DUT side gets the
-      // same flag as an inou.cgen.sim label (lhd_kernel_common's sim.* mapping).
-      unknown_zero     = (v == "true" || v == "1" || v == "on");
-      unknown_zero_set = true;
+      unknown_zero = (v == "true" || v == "1" || v == "on");  // the testbench's `?` literals too (the DUT side gets the same flag)
     }
   }
   const std::string ckpt_dir = ckpt_on ? (fs::absolute(simroot).string() + "/ckpt") : std::string{};
-  // The default checkpoint-capable build retains the editable state-walk
-  // surface. An explicit checkpoint-off performance build may omit it, unless
-  // VCD/probe/query/--list-signals needs the same generated control plane.
   opts.sim_runtime_support   = ckpt_on || opts.sim_observe || opts.sim_list_signals;
 
-  // Debug-flag sanity (sim_checkpoint_debug_plan): catch contradictory combinations
-  // up front instead of silently producing a degenerate run.
+  // Debug-flag sanity: catch contradictory combinations up front instead of silently producing a degenerate run.
   if (opts.sim_vcd_to >= 0 && opts.sim_vcd_from < 0) {
     throw Lhd_error{"usage", "--vcd-to needs --vcd-from (the window start)", "e.g. --vcd-from 100 --vcd-to 140"};
   }
   if (opts.sim_vcd_from >= 0 && opts.sim_vcd_to >= 0 && opts.sim_vcd_from > opts.sim_vcd_to) {
     throw Lhd_error{"usage", std::format("--vcd-from {} is after --vcd-to {}", opts.sim_vcd_from, opts.sim_vcd_to), ""};
   }
+  if ((opts.sim_probe_from >= 0 || opts.sim_probe_to >= 0) && opts.sim_probe.empty()) {
+    throw Lhd_error{"usage", "--probe-from and --probe-to require --probe", ""};
+  }
+  if (opts.sim_probe_to >= 0 && opts.sim_probe_from > opts.sim_probe_to) {
+    throw Lhd_error{"usage", "--probe-from is after --probe-to", ""};
+  }
   if (ckpt_dir.empty() && opts.sim_restart_cycle >= 0) {
     throw Lhd_error{"usage",
                     "--restart-cycle needs checkpoints — do not combine it with --set sim.checkpoint=false",
                     "run once with checkpointing on to create them, then --restart-cycle"};
   }
-  // --query owns the replay: it plans ONE traversal over the union of the
-  // batch's time ranges and picks its own checkpoint. --restart-cycle and the VCD
-  // window flags plan the same replay differently (--vcd-from silently doubles
-  // as a restart target), so the two planners would fight over one run. v1 says
-  // so instead of picking a winner; composition can come later.
-  if (!opts.sim_query.empty()
-      && (opts.sim_restart_cycle >= 0 || opts.sim_vcd_from >= 0 || opts.sim_vcd_to >= 0 || opts.sim_vcd_on_fail)) {
-    throw Lhd_error{"usage",
-                    "--query cannot be combined with --restart-cycle / --vcd-from / --vcd-to / --vcd-on-fail",
-                    "run the query batch on its own; a VCD or a restart is a separate invocation"};
-  }
-
-  // ---- sim.tune: resolve the tune vector (explicit --set > positional simulation tuning > the
-  // workdir's tuned decision > default) into opts.sim_tune BEFORE the compile,
-  // ingest pending profiles, judge or apply a trial (lhd_sim_tune_session.cpp).
-  // Its destructor finishes on every return path below.
-  Sim_tune_session tune(opts,
-                        res,
-                        Sim_tune_shape{.user_workdir        = user_workdir,
-                                       .setup_only          = setup_only,
-                                       .run_only            = run_only,
-                                       .compile_only        = compile_only,
-                                       .observation         = vcd_on || opts.sim_observe || opts.sim_list_signals
-                                                              || opts.sim_restart_cycle >= 0 || opts.sim_vcd_from >= 0,
-                                       .unknown_zero_set    = unknown_zero_set,
-                                       .unknown_zero        = unknown_zero,
-                                       .checkpoint_explicit = ckpt_on && ckpt_explicit,
-                                       .simroot             = simroot,
-                                       .simdir              = simdir,
-                                       .sources             = sources});
-  if (tune.refused()) {
-    return;  // a --run-only of a closed trial tree: res carries the usage error
-  }
 
   std::vector<prp_sim::Test_info> tests;
 
-  // A failed setup must not leave a runnable driver behind: in a reused
-  // --workdir, --run-only would otherwise build and run the PREVIOUS setup's
-  // drv.cpp and report PASS for sources that no longer compile. A failing
-  // setup deletes the old driver and records its error in kSetupFailed, so
-  // --run-only can report the real setup error instead of "no driver".
+  // A failed setup must not leave a runnable simulator behind: in a reused --workdir, --run-only would otherwise run
+  // the PREVIOUS setup's testbench object and report PASS for sources that no longer compile. A failing setup deletes
+  // the old object and records its error in kSetupFailed, so --run-only can report the real setup error.
   static constexpr std::string_view kSetupFailed = "setup_failed.txt";
   const std::string                 setup_failed = std::format("{}/{}", simdir, kSetupFailed);
   struct Setup_outcome {
@@ -1854,11 +624,10 @@ void sim_command(Options& opts, Result& res) {
         fs::remove(marker, ec);
         return;
       }
-      // Only a FAILED setup drops the old driver: a passing one rewrites
-      // drv.cpp write-if-different, and its unchanged drv.bin is reused.
       const auto dir = fs::path(marker).parent_path();
-      fs::remove(dir / std::format("{}.cpp", prp_sim::kDriverBasename), ec);
-      fs::remove(dir / std::format("{}.bin", prp_sim::kDriverBasename), ec);
+      fs::remove(dir / prp_tb::kObject, ec);
+      fs::remove(dir / prp_tb::kTraceObject, ec);
+      fs::remove(dir / prp_tb::kManifest, ec);
       std::ofstream out(marker, std::ios::trunc);
       const bool    from_res = res.status != "pass";
       const auto    cls      = from_res ? res.error_class : thrown_cls;
@@ -1868,24 +637,17 @@ void sim_command(Options& opts, Result& res) {
     }
   };
 
-  // ---- setup: lower DUT -> Slop, generate the single driver (drv.cpp)
+  // ---- setup: the DUT as native kernels (pass.lnast_sim), the testbench as one object (prp_tb)
   std::optional<Setup_outcome> setup_outcome;
   if (!run_only) {
     ensure_dir(simdir);
     setup_outcome.emplace(setup_failed, res);
     opts.language = "pyrope";
     opts.files    = sources;  // compile ALL positional sources (imports resolve across them)
-    if (vcd_on) {
-      opts.sets.emplace_back("sim.vcd", "1");  // make cgen_sim emit the VCD machinery
-      if (!vcd_fakedelay) {
-        opts.sets.emplace_back("sim.vcd_fake_delay", "false");  // edge-aligned trace (cgen default is true)
-      }
-    }
-    // `sim` is DYNAMIC verification: each `test` block's asserts are checked by
-    // running the generated driver, not formally. Skip pass.formal — a `test`
-    // lowers to a never-instantiated comb whose runtime parameters become free
-    // inputs, so a concrete-valued assert (`assert(acc == 22)`) would otherwise
-    // be "refuted" over those free inputs even though the bound run satisfies it.
+    // `sim` is DYNAMIC verification: each `test` block's asserts are checked by running it, not formally. Skip
+    // pass.formal — a `test` lowers to a never-instantiated comb whose runtime parameters become free inputs, so a
+    // concrete-valued assert (`assert(acc == 22)`) would otherwise be "refuted" over those free inputs even though the
+    // bound run satisfies it.
     opts.sets.emplace_back("compile.formal.mode", "none");
     opts.emit_dirs.push_back(Typed_path{"sim", simdir});
     try {
@@ -1904,60 +666,18 @@ void sim_command(Options& opts, Result& res) {
     if (res.status != "pass") {
       return;
     }
-    tune.after_compile();
     std::string err;
     int         gen_rc = 0;
-    const auto  generate_driver = [&]() {
-      Phase_timer drvgen(res, "sim.drvgen");  // the testbench driver generation (drv.cpp)
-      return prp_sim::generate(file,
-                               simdir,
-                               test_sel,
-                               vcd_dir,
-                               opts.sim_observe,
-                               opts.sim_runtime_support,
-                               unknown_zero,
-                               tests,
-                               err);
-    };
-    gen_rc = generate_driver();
-    const bool built_on_lnast = std::ranges::any_of(res.recipe_steps, [](const std::string& s) { return s.starts_with("pass.lnast_sim"); });
-    if (gen_rc != 0 && built_on_lnast && lnast_sim_may_fall_back()) {
-      // The testbench asks for something the LNAST flow's interface does not publish (a register inside a
-      // sub-instance, ...): build the design again on inou.cgen.sim, which does.
-      livehd::diag::outcome("lhd.sim", "lnast-fallback", "progress")
-          .msg("LNAST sim flow cannot serve this testbench ({}); using inou.cgen.sim", err)
-          .emit();
-      std::error_code rm_ec;
-      for (const auto& entry : fs::directory_iterator(simdir, rm_ec)) {
-        const auto name = entry.path().filename().string();
-        if (name.find(".lnast") != std::string::npos || name == "lnast_sim_rt.hpp") {
-          fs::remove(entry.path(), rm_ec);
-        }
-      }
-      std::erase_if(res.recipe_steps, [](const std::string& s) { return s.starts_with("pass.lnast_sim"); });
-      g_lnast_sim_off = true;
-      try {
-        auto ir = gather_ir_inputs(opts, "sim");
-        compile_sources(opts, res, ir);
-      } catch (const Lhd_error& e) {
-        g_lnast_sim_off           = false;
-        setup_outcome->thrown_cls = e.cls;
-        setup_outcome->thrown_msg = e.msg;
-        throw;
-      } catch (const std::exception& e) {
-        g_lnast_sim_off           = false;
-        const auto classified     = classify_engine_failure(e.what());  // as the first compile above
-        setup_outcome->thrown_cls = classified.cls;
-        setup_outcome->thrown_msg = classified.msg;
-        throw;
-      }
-      g_lnast_sim_off = false;
-      if (res.status != "pass") {
-        return;
-      }
-      err.clear();
-      tests.clear();
-      gen_rc = generate_driver();
+    {
+      Phase_timer tbgen(res, "sim.tbgen");  // the testbench object (inou/prp/tb_llvm)
+      gen_rc = prp_tb::generate(file,
+                                simdir,
+                                test_sel,
+                                tests,
+                                err,
+                                opts.sim_observe,
+                                opts.sim_dump_bitcode,
+                                opts.incremental ? std::optional{livehd::kCompileSrcSalt} : std::nullopt);
     }
     if (gen_rc != 0) {
       res.status        = "fail";
@@ -1966,7 +686,6 @@ void sim_command(Options& opts, Result& res) {
       res.exit_code     = exit_code_for(res.error_class);
       return;
     }
-    tune.after_generate();
     record_invocation(opts, "sim", simroot, simdir);
     res.recipe_steps.push_back(std::format("sim setup: {} test(s) in {}", tests.size(), simdir));
     setup_outcome.reset();  // the setup passed: clear the marker now, before any test outcome
@@ -1981,34 +700,6 @@ void sim_command(Options& opts, Result& res) {
     }
     return;  // status stays pass
   }
-
-  // `killed_by` (optional) receives the signal that ended the command, or 0.
-  auto capture = [](const std::string& c, int& rc, int* killed_by = nullptr) {
-    std::string out;
-    char        buf[4096];
-    FILE*       p = ::popen(c.c_str(), "r");
-    if (p == nullptr) {
-      rc = -1;
-      return out;
-    }
-    size_t n = 0;
-    while ((n = std::fread(buf, 1, sizeof buf, p)) > 0) {
-      out.append(buf, n);
-    }
-    int st = ::pclose(p);
-    rc     = (WIFEXITED(st) ? WEXITSTATUS(st) : -1);
-    if (killed_by != nullptr) {
-      *killed_by = terminating_signal(st);
-    }
-    return out;
-  };
-
-  // ---- the single fast run path: host-compile drv.cpp + the DUT bodies (+ the
-  // VCD writer when sim.vcd) with the host C++ compiler, then run the one binary.
-  // The Slop runtime is header-only and, with -DNDEBUG, has no link deps — so
-  // there is no nested bazel, no abseil, no network. (For --run-only the driver +
-  // bodies are reused from a prior --setup-only; only the compile + run happen.)
-  const std::string drv_cpp = std::format("{}/{}.cpp", simdir, prp_sim::kDriverBasename);
   if (run_only && fs::exists(setup_failed)) {
     std::ifstream fin(setup_failed);
     std::string   klass;
@@ -2020,1030 +711,24 @@ void sim_command(Options& opts, Result& res) {
     res.status        = "fail";
     res.error_class   = klass.empty() ? "internal" : klass;
     res.error_message = std::format("the last --setup-only in {} failed: {}", simroot, msg);
-    res.error_hint    = "fix that error and rerun --setup-only; --run-only never runs a driver older than the sources";
+    res.error_hint    = "fix that error and rerun --setup-only; --run-only never runs a simulator older than the sources";
     res.exit_code     = exit_code_for(res.error_class);
     return;
   }
-  if (::access(drv_cpp.c_str(), R_OK) != 0) {
-    res.status        = "fail";
-    res.error_class   = "usage";
-    res.error_message = std::format("no generated sim driver in {} (run --setup-only --workdir {} first)", simdir, simroot);
-    res.exit_code     = exit_code_for(res.error_class);
-    return;
-  }
-  // A VCD request against a prior --setup-only that was generated WITHOUT VCD (the
-  // driver lacks the trace machinery) would silently produce no waveform — reject
-  // it so the user regenerates instead. The `vcd::global_timestamp` line is emitted
-  // iff VCD codegen was on (prp_sim).
-  bool observation_baked = false;  // a --run-only driver built with VCD/observation code is never profiled
-  if (run_only) {
-    std::ifstream     dfs(drv_cpp);
-    std::stringstream dss;
-    dss << dfs.rdbuf();
-    const auto driver_source = dss.str();
-    if (!opts.sim_plusargs.empty() && driver_source.find("driver-plusarg-parser: 1") == std::string::npos) {
-      throw Lhd_error{"usage", "this simulator predates +argument support", "run again without --run-only to regenerate it"};
-    }
-    const bool baked_vcd             = driver_source.find("vcd::global_timestamp") != std::string::npos;
-    const bool baked_observation     = driver_source.find("hierarchical-observation: true") != std::string::npos;
-    const bool baked_runtime_support = driver_source.find("runtime-control-support: true") != std::string::npos
-                                       || driver_source.find(".dump_state(") != std::string::npos;
-    const bool observation_requested = !opts.sim_probe.empty() || !opts.sim_break_when.empty() || !opts.sim_query.empty();
-    observation_baked                = baked_vcd || baked_observation;
-    if (!warn_undefined.empty() && driver_source.find("sim.warn_undefined") == std::string::npos) {
-      // An older drv.bin has no such run-time key (its --set parser dies on
-      // it): drop the setting, it only ever controls warnings.
-      warn_undefined.clear();
-    }
-    if (init_zero && driver_source.find("--init-zero") == std::string::npos) {
-      res.status        = "fail";
-      res.error_class   = "usage";
-      res.error_message = "this --run-only sim predates sim.init_zero; re-run --setup-only with the current lhd";
-      res.exit_code     = exit_code_for(res.error_class);
-      return;
-    }
-    if (vcd_on && !baked_vcd) {
-      res.status      = "fail";
-      res.error_class = "usage";
-      res.error_message
-          = "this --run-only sim was generated without VCD; re-run without --run-only (or "
-            "--setup-only --set sim.vcd=true) so the driver gets the trace machinery";
-      res.exit_code = exit_code_for(res.error_class);
-      return;
-    }
-    if (observation_requested && !baked_observation) {
-      res.status      = "fail";
-      res.error_class = "usage";
-      res.error_message
-          = "this --run-only sim was generated without hierarchical observation; re-run without --run-only so "
-            "--probe/--break-when/--query instrumentation is generated";
-      res.exit_code = exit_code_for(res.error_class);
-      return;
-    }
-    if (opts.sim_runtime_support && !baked_runtime_support) {
-      res.status      = "fail";
-      res.error_class = "usage";
-      res.error_message
-          = "this --run-only sim was generated without checkpoint/observation support (no checkpointing, "
-            "--list-signals, --probe, --break-when or --query); repeat --set sim.checkpoint=false or re-run "
-            "--setup-only with runtime support enabled";
-      res.exit_code = exit_code_for(res.error_class);
-      return;
-    }
-    // PERSIST the setup-time decision. sim.vcd is a DRIVER-AFFECTING setting:
-    // setup bakes the trace machinery in, and the run phase has to link hlop's
-    // vcd_writer.cpp to satisfy it. Requiring the flag again on the run
-    // invocation made the honest two-phase sequence die at link time with an
-    // undefined `__vcd_init()`, so every caller had to repeat the flag. The
-    // driver source already records what was baked — use it.
-    if (baked_vcd && !vcd_on) {
-      vcd_on = true;
-    }
-  }
-  // Same staleness trap for the VCD style: sim.vcdfakedelay is BAKED at setup
-  // (the X/settle phases are codegen), so an explicit request that disagrees
-  // with the prior --setup-only would be silently ignored — reject instead.
-  // The `__vcd_dump_x` method is emitted iff fake-delay codegen was on.
-  if (run_only && vcd_on && vcd_fakedelay_set) {
-    bool baked_fakedelay = false;
-    for (const auto& de : fs::directory_iterator(simdir)) {
-      if (de.path().extension() != ".hpp") {
-        continue;
-      }
-      std::ifstream     hfs(de.path());
-      std::stringstream hss;
-      hss << hfs.rdbuf();
-      if (hss.str().find("__vcd_dump_x") != std::string::npos) {
-        baked_fakedelay = true;
-        break;
-      }
-    }
-    if (baked_fakedelay != vcd_fakedelay) {
-      res.status        = "fail";
-      res.error_class   = "usage";
-      res.error_message = std::format(
-          "this --run-only sim was generated with sim.vcd_fake_delay={}; the style is baked "
-          "at codegen — re-run --setup-only with the desired --set sim.vcd_fake_delay",
-          baked_fakedelay ? "true" : "false");
-      res.exit_code = exit_code_for(res.error_class);
-      return;
-    }
-  }
-  tune.inspect_driver(observation_baked);
-  const std::string hlop_inc    = sim_hlop_include_dir(opts);
-  const std::string iassert_inc = sim_iassert_include_dir(opts);
-  if (hlop_inc.empty() || iassert_inc.empty()) {
-    res.status        = "fail";
-    res.error_class   = "dependency";
-    res.error_message = std::format("could not locate the sim runtime headers (slop.hpp: {}, iassert.hpp: {})",
-                                    hlop_inc.empty() ? "<not found>" : hlop_inc,
-                                    iassert_inc.empty() ? "<not found>" : iassert_inc);
-    res.exit_code     = exit_code_for(res.error_class);
-    if (pretty) {
-      std::print(
-          "  hint: run `lhd` from bazel (its runfiles carry slop.hpp/iassert.hpp), or export "
-          "RUNFILES_DIR=<...>/lhd.runfiles to run it by hand; a source checkout resolves them from the sibling "
-          "../hlop and ../iassert, and --set sim.hlop_dir=DIR / "
-          "--set sim.iassert_dir=DIR point at an explicit checkout\n");
-      std::fflush(stdout);
-    }
-    return;
-  }
-  const std::string cxx = sim_host_cxx();
-
-  // Compile only the modules reached from the actual test driver. Retained
-  // standalone exports from inlined-away definitions are not link inputs.
-  const auto               unused_artifacts = sim_unused_artifacts(simdir, drv_cpp);
-  std::vector<std::string> bodies;
-  std::vector<std::string> direct_objects;
-  {
-    std::error_code ec;
-    for (auto& de : fs::directory_iterator(simdir, ec)) {
-      if (!de.is_regular_file()) {
-        continue;
-      }
-      auto fn = de.path().filename().string();
-      if (unused_artifacts.contains(fn)) {
-        continue;
-      }
-      if (fn.ends_with(".llvm.o")) {
-        direct_objects.push_back(de.path().string());
-        continue;
-      }
-      if (fn.size() < 5 || fn.substr(fn.size() - 4) != ".cpp") {
-        continue;
-      }
-      if (fn == std::string(prp_sim::kDriverBasename) + ".cpp") {
-        continue;  // the driver itself (exact name — a prefix skip would also drop a `drv*.prp` design's DUT bodies)
-      }
-      bodies.push_back(de.path().string());
-    }
-    std::sort(bodies.begin(), bodies.end());
-    std::sort(direct_objects.begin(), direct_objects.end());
-  }
-
-  const std::string exe = std::format("{}/{}.bin", simdir, prp_sim::kDriverBasename);
-
-  // The translation units, in a FIXED order — the sorted DUT bodies, then the
-  // driver, then hlop's VCD writer when tracing was baked in. The order is what
-  // makes the object names and build.log reproducible; the link does not care.
-  std::vector<std::string> tus = bodies;
-  tus.push_back(drv_cpp);
-  if (vcd_on) {
-    tus.push_back(hlop_inc + "/vcd_writer.cpp");
-  }
-
-  // Size optimization is the simulator default for both Slop and LLVM's
-  // generated C++ support. Keep compilation parallel and cache its full command.
-  // ABSOLUTE -I: `--workdir` is routinely relative, and a relative `-Iw/sim`
-  // would resolve to nothing for anything that runs from another directory.
-  const std::string simdir_abs  = fs::absolute(simdir).string();
-  std::string       cflags      = std::format("-std=c++23 -DNDEBUG -Os -pthread -I{} -I{} -I{}",
-                                              shell_quote(simdir_abs),
-                                              shell_quote(hlop_inc),
-                                              shell_quote(iassert_inc));
-  // --set lhd.jobs=N bounds the fan-out (0/unset = one per hardware thread).
-  // Pin it to make a build-time measurement reproducible, or to leave the
-  // machine usable while a big design builds.
-  // Under `bazel test` (TEST_SRCDIR set) the default is 2: bazel already runs
-  // tests in parallel, and a per-test fan-out of every hardware thread
-  // oversubscribes the machine several times over.
-  int               jobs        = static_cast<int>(opts.jobs);
-  // The load-independent job count: what the PCH decision below compares
-  // against. `jobs` follows the machine's CURRENT load, and the PCH choice lands
-  // in every TU's stamped command line, so deciding on the load would rebuild
-  // every object whenever the host was busier than the last run.
-  int               stable_jobs = jobs > 0 ? jobs : static_cast<int>(livehd::sim::available_cpus());
-  if (jobs <= 0) {
-    jobs = static_cast<int>(livehd::sim::available_compile_jobs());
-  }
-  jobs        = std::clamp(jobs, 1, static_cast<int>(tus.size()));
-  stable_jobs = std::clamp(stable_jobs, 1, static_cast<int>(tus.size()));
-
-  // One object per TU. The objects are NOT wiped between runs and their names
-  // are STABLE (derived from the source basename, never from a position in the
-  // list) — a positional name would rename every object the moment a module is
-  // added, turning an incremental build into a full one and orphaning the old
-  // files. Design bodies all live in simdir, so their basenames are unique by
-  // construction; only hlop's vcd_writer.cpp comes from outside, and it gets a
-  // reserved name so a design module called `vcd_writer` cannot collide with it.
-  const std::string objdir = simdir + "/obj";
-  ensure_dir(objdir);
-  std::vector<std::string> objs(tus.size());
-  for (size_t i = 0; i < tus.size(); ++i) {
-    const bool external = (fs::path(tus[i]).parent_path() != fs::path(simdir));
-    objs[i]             = std::format("{}/{}{}.o", objdir, external ? "_rt_" : "", fs::path(tus[i]).stem().string());
-  }
-  {
-    // Two TUs mapping to one object would silently make the build link whichever
-    // compile finished last — a wrong binary from a green run. Catch it here
-    // and report a nameable problem.
-    auto sorted = objs;
-    std::sort(sorted.begin(), sorted.end());
-    auto dup = std::adjacent_find(sorted.begin(), sorted.end());
-    if (dup != sorted.end()) {
-      res.status        = "fail";
-      res.error_class   = "unsupported";
-      res.error_message = std::format("two sim translation units map to the same object file ({}) — rename one module", *dup);
-      res.exit_code     = exit_code_for(res.error_class);
-      return;
-    }
-  }
-
-  // LLVM colors are native objects with a data-only ABI. Every C++ support
-  // translation unit uses the ordinary host compiler, independently of LLVM.
-
-  // Unity batching of the SMALL generated translation units. A module body that
-  // holds only cold members (dump/load/probe/describe ...), a 70-statement
-  // commit shard, or a tune table is a few KB of source, yet each cost ~0.8 s of
-  // host compile on its own: parsing slop.hpp/<format>/<map> and instantiating
-  // the same Slop/std::format templates again, not its own code. MEASURED on
-  // minion (Verilog, 6P+12E-core arm64, same sources): a prototype on AC power
-  // went 547 CPU-s / 31.7 s wall -> ~210 CPU-s / 13.9 s; this bucketing on
-  // battery (low-power mode) went 281 TUs / 68 s -> 42 TUs / 32 s. The large
-  // evaluator shards stay one TU each: they are most of what is left, and
-  // batching them would only lengthen the critical path.
-  //
-  // A batch is an `#include` wrapper under <simdir>/unity/ (the body scan above
-  // is not recursive, so the next run does not mistake it for a module). Its
-  // depfile names every member, so the build rebuilds it
-  // when any member changes. Membership is a stable hash of the file NAME into a
-  // bucket count that depends only on the design, never on the host's core
-  // count: an edit to one module rebuilds just its own batch, and two machines
-  // compile the same TUs. A design with at most kUnityMinTus small TUs is left
-  // alone -- there the per-TU parallelism is free. This needs
-  // every generated TU to be unity-safe: no two may define the same file-scope
-  // name (cgen_sim_tune.cpp's per-module table namespace exists for this).
-  {
-    constexpr std::uintmax_t kUnityMaxBytes    = 256 * 1024;
-    constexpr std::uintmax_t kUnityTargetBytes = 1024 * 1024;
-    constexpr size_t         kUnityMaxFiles    = 12;
-    // Start once the small files need at least two buckets. After unreachable
-    // exports are removed, Dino has 13 candidates: leaving those separate
-    // costs 9.2 s versus 6.2 s with the same two generated-source batches.
-    constexpr size_t         kUnityMinTus      = kUnityMaxFiles;
-    std::vector<size_t>      candidates;
-    std::uintmax_t           candidate_bytes = 0;
-    for (size_t i = 0; i < bodies.size(); ++i) {  // tus[0, bodies.size()) are the simdir bodies
-      if (fs::path(tus[i]).filename().string().find(".color-eval-") != std::string::npos) {
-        continue;  // evaluator shards already bound compiler work; do not batch them back together
-      }
-      std::error_code ec;
-      const auto      bytes = fs::file_size(tus[i], ec);
-      if (ec || bytes >= kUnityMaxBytes) {
-        continue;
-      }
-      std::ifstream source(tus[i]);
-      std::string   first_line;
-      if (!std::getline(source, first_line) || !first_line.starts_with("// Generated")) {
-        continue;  // hand-written support may have translation-unit-local names
-      }
-      candidates.push_back(i);
-      candidate_bytes += bytes;
-    }
-    const std::string     unity_dir = simdir + "/unity";
-    std::set<std::string> unity_files;
-    if (candidates.size() > kUnityMinTus) {
-      const size_t buckets = std::max<size_t>({1,
-                                               static_cast<size_t>((candidate_bytes + kUnityTargetBytes - 1) / kUnityTargetBytes),
-                                               (candidates.size() + kUnityMaxFiles - 1) / kUnityMaxFiles});
-      std::vector<std::vector<size_t>> members(buckets);
-      for (const auto i : candidates) {
-        // FNV-1a: stable across runs, hosts and standard libraries (std::hash is none of those).
-        uint64_t h = 1469598103934665603ULL;
-        for (const char c : fs::path(tus[i]).filename().string()) {
-          h = (h ^ static_cast<unsigned char>(c)) * 1099511628211ULL;
-        }
-        members[h % buckets].push_back(i);
-      }
-      std::vector<bool>        batched(tus.size(), false);
-      std::vector<std::string> unity_tus;
-      std::vector<std::string> unity_objs;
-      for (size_t b = 0; b < buckets; ++b) {
-        if (members[b].size() < 2) {
-          continue;  // a lone member keeps its own TU, and so its object name
-        }
-        std::string text = "// Generated by `lhd sim`: a unity batch of small generated translation units.\n";
-        for (const auto i : members[b]) {
-          text       += std::format("#include \"../{}\"\n", fs::path(tus[i]).filename().string());
-          batched[i]  = true;
-        }
-        const std::string name = std::format("unity-{}.cpp", b);
-        const std::string path = unity_dir + "/" + name;
-        unity_files.insert(name);
-        // Write-if-different, like every other generated source: staleness keys
-        // on mtimes, and an unconditional rewrite would rebuild every batch.
-        std::string     old;
-        std::error_code ec;
-        if (fs::exists(path, ec)) {
-          std::ifstream in(path);
-          old.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
-        }
-        if (old != text) {
-          ensure_dir(unity_dir);
-          std::ofstream out(path, std::ios::trunc);
-          out << text;
-          if (!out) {
-            res.status        = "fail";
-            res.error_class   = "internal";
-            res.error_message = std::format("could not write the sim unity batch {}", path);
-            res.exit_code     = exit_code_for(res.error_class);
-            return;
-          }
-        }
-        unity_tus.push_back(path);
-        unity_objs.push_back(std::format("{}/unity-{}.o", objdir, b));
-      }
-      if (!unity_tus.empty()) {
-        std::vector<std::string> kept_tus;
-        std::vector<std::string> kept_objs;
-        for (size_t i = 0; i < tus.size(); ++i) {
-          if (!batched[i]) {
-            kept_tus.push_back(std::move(tus[i]));
-            kept_objs.push_back(std::move(objs[i]));
-          }
-        }
-        for (size_t b = 0; b < unity_tus.size(); ++b) {
-          kept_tus.push_back(std::move(unity_tus[b]));
-          kept_objs.push_back(std::move(unity_objs[b]));
-        }
-        tus  = std::move(kept_tus);
-        objs = std::move(kept_objs);
-      }
-    }
-    // Batches a previous run wrote and this one does not reference (the design
-    // shrank, or no longer batches at all) would only confuse the next build.
-    std::error_code ec;
-    for (const auto& de : fs::directory_iterator(unity_dir, ec)) {
-      if (de.path().extension() == ".cpp" && !unity_files.contains(de.path().filename().string())) {
-        std::error_code rm_ec;
-        fs::remove(de.path(), rm_ec);
-      }
-    }
-  }
-  // Output staleness, shared by the precompiled-header stage below and the
-  // built-in TU build: an output is fresh when its stamp (the exact command
-  // that produced it) matches and it is not older than any prerequisite its
-  // depfile lists, see the TU build below for the caveats.
-  auto mtime_of = [](const std::string& path) -> std::optional<fs::file_time_type> {
-    std::error_code ec;
-    const auto      t = fs::last_write_time(path, ec);
-    if (ec) {
-      return std::nullopt;
-    }
-    return t;
-  };
-  auto not_older_than_all = [&](const std::string& out, const std::vector<std::string>& ins) {
-    const auto ot = mtime_of(out);
-    if (!ot) {
-      return false;
-    }
-    for (const auto& in : ins) {
-      const auto it = mtime_of(in);
-      if (!it || *it > *ot) {
-        return false;  // a missing input is a rebuild too: it may reappear
-      }
-    }
-    return true;
-  };
-  auto stamp_path    = [](const std::string& out) { return out + ".cmd"; };
-  auto stamp_matches = [&](const std::string& out, const std::string& cmd) {
-    std::ifstream f(stamp_path(out));
-    if (!f.is_open()) {
-      return false;
-    }
-    const std::string prev((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
-    return prev == cmd;
-  };
-  auto drop_stamp = [&](const std::string& out) {
-    std::error_code ec;
-    fs::remove(stamp_path(out), ec);
-  };
-  auto write_stamp = [&](const std::string& out, const std::string& cmd) {
-    std::ofstream f(stamp_path(out));
-    if (f.is_open()) {
-      f << cmd;
-    }
-  };
-  // A `-MD` depfile is one make rule: `out: prereq prereq \<newline> prereq`.
-  // Backslash-newline continues a line and `\ ` is a literal space in a path;
-  // nothing else in the format needs unescaping.
-  auto read_depfile = [](const std::string& dep) {
-    std::vector<std::string> prereqs;
-    std::ifstream            f(dep);
-    if (!f.is_open()) {
-      return prereqs;
-    }
-    const std::string all((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
-    const auto        colon = all.find(':');
-    if (colon == std::string::npos) {
-      return prereqs;
-    }
-    std::string cur;
-    for (size_t i = colon + 1; i < all.size(); ++i) {
-      const char c = all[i];
-      if (c == '\\' && i + 1 < all.size()) {
-        const char n = all[i + 1];
-        if (n == '\n' || n == '\r') {
-          ++i;
-          continue;
-        }
-        if (n == ' ') {
-          cur += ' ';
-          ++i;
-          continue;
-        }
-      }
-      if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
-        if (!cur.empty()) {
-          prereqs.push_back(cur);
-          cur.clear();
-        }
-        continue;
-      }
-      cur += c;
-    }
-    if (!cur.empty()) {
-      prereqs.push_back(cur);
-    }
-    return prereqs;
-  };
-
-  // Precompiled headers (clang only; `--set sim.pch=false` disables them).
-  // Measured on minion (462 TUs, 128 jobs): 4216 -> 2352 CPU-s and 40 -> 28 s
-  // of host build, with the same drv.bin behavior and cycle rate. Two layers:
-  //  * a PRELUDE of the std/hlop headers every generated module header opens
-  //    with (slop.hpp pulls in <format>/<print>/<random>), shared by every TU;
-  //  * one chained PCH per generated header that is the FIRST include of two
-  //    or more TUs -- a sharded module's evaluator/commit/bind shards all open
-  //    with `<mod>.color-runtime.hpp`, which transitively parses every child
-  //    module's class (most of a shard's front end).
-  // Codegen is unchanged: -include-pch only replays the parse, and every
-  // generated header is `#pragma once` with nothing #defined ahead of its first
-  // include, so the TU's own #include of the same header is a no-op. lhd builds
-  // the PCHs itself (stage 0 of either build path, same stamp+depfile staleness
-  // as the TUs), so a header that does not precompile cleanly only drops its
-  // TUs back to the prelude (or to no PCH) instead of failing the simulation.
-  // Native LLVM colors do not participate in the host PCH build.
-  std::vector<std::string> tu_pch(tus.size());  // the -include-pch file per TU ("" = none)
-  {
-    std::string pch_set;
-    for (const auto& [k, v] : opts.sets) {
-      if (k == "sim.pch") {
-        pch_set = v;
-      }
-    }
-    // Default (unset/auto): only a CPU-bound build, at least two TUs per job.
-    // With every TU already running in parallel, the serial PCH stage only
-    // delays the critical path (drv.cpp): measured on dino/picorv32 at 128
-    // jobs, 6.4 -> 7.0 s. `true` forces it, `false` disables it.
-    const bool pch_forced = pch_set == "true" || pch_set == "1" || pch_set == "on";
-    bool       pch_on     = pch_set != "false" && pch_set != "0" && pch_set != "off"
-                            && (pch_forced || tus.size() >= 2 * static_cast<size_t>(std::max(stable_jobs, 1)));
-    if (pch_on) {
-      int        vrc     = 0;
-      const auto version = capture(std::format("{} --version 2>&1", shell_quote(cxx)), vrc);
-      pch_on             = vrc == 0 && version.find("clang") != std::string::npos;
-    }
-    // ABSOLUTE, like the -I paths.
-    const std::string pch_dir = simdir_abs + "/pch";
-    if (pch_on) {
-      ensure_dir(pch_dir);
-      // Write-if-different: its mtime keys every PCH and so every TU.
-      const std::string prelude_hdr = pch_dir + "/prelude.hpp";
-      const std::string prelude_text
-          = "// Generated by `lhd sim`: precompiled prelude of every generated TU.\n#pragma once\n"
-            "#include <array>\n#include <cstdint>\n#include <map>\n#include <string>\n"
-            "#include <vector>\n#include \"slop.hpp\"\n#include \"memory.hpp\"\n";
-      std::string old;
-      if (std::ifstream in(prelude_hdr); in) {
-        old.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
-      }
-      if (old != prelude_text) {
-        std::ofstream out(prelude_hdr, std::ios::trunc);
-        out << prelude_text;
-      }
-      // The first `#include "..."` of a TU, followed through a unity batch to
-      // its first member; only a header generated in the sim dir qualifies.
-      const auto first_header = [&](const std::string& tu) -> std::string {
-        std::string path = tu;
-        for (int hop = 0; hop < 2; ++hop) {
-          std::ifstream in(path);
-          std::string   line;
-          while (std::getline(in, line)) {
-            if (!line.starts_with("#include \"")) {
-              continue;
-            }
-            const auto close = line.find('"', 10);
-            if (close == std::string::npos) {
-              return {};
-            }
-            const fs::path inc = fs::path(path).parent_path() / line.substr(10, close - 10);
-            if (inc.extension() == ".cpp") {
-              path = inc.lexically_normal().string();
-              break;  // a unity batch: follow its first member
-            }
-            const fs::path  hdr = fs::path(simdir) / inc.filename();
-            std::error_code ec;
-            return fs::exists(hdr, ec) && inc.lexically_normal().parent_path() == fs::path(simdir).lexically_normal()
-                       ? hdr.string()
-                       : std::string{};
-          }
-        }
-        return {};
-      };
-      std::vector<std::string>      first(tus.size());
-      std::map<std::string, size_t> users;  // std::map: a stable PCH order
-      for (size_t i = 0; i < tus.size(); ++i) {
-        if (!tus[i].ends_with("/vcd_writer.cpp")) {
-          first[i] = first_header(tus[i]);
-          if (!first[i].empty()) {
-            ++users[first[i]];
-          }
-        }
-      }
-      struct Pch_unit {
-        std::string header;
-        std::string pch;
-        std::string base;  // chained-on PCH ("" for the prelude)
-        bool        ok = false;
-      };
-      std::vector<Pch_unit> units{
-          {prelude_hdr, pch_dir + "/prelude.pch", "", false}
-      };
-      std::map<std::string, size_t> unit_of;
-      for (const auto& [hdr, n] : users) {
-        if (n >= 2) {
-          unit_of[hdr] = units.size();
-          units.push_back({hdr, pch_dir + "/" + fs::path(hdr).filename().string() + ".pch", units[0].pch, false});
-        }
-      }
-      const auto build_unit = [&](Pch_unit& u, const std::string& base_ok) {
-        const std::string dep = u.pch + ".d";
-        const std::string cmd = std::format("{} {}{} -x c++-header -MD -MF {} {} -o {} 2>&1",
-                                            shell_quote(cxx),
-                                            cflags,
-                                            base_ok.empty() ? std::string{} : " -include-pch " + shell_quote(base_ok),
-                                            shell_quote(dep),
-                                            shell_quote(u.header),
-                                            shell_quote(u.pch));
-        if (stamp_matches(u.pch, cmd)) {
-          auto prereqs = read_depfile(dep);
-          if (!base_ok.empty()) {
-            prereqs.push_back(base_ok);
-          }
-          if (!prereqs.empty() && not_older_than_all(u.pch, prereqs)) {
-            u.ok = true;
-            return;
-          }
-        }
-        drop_stamp(u.pch);
-        int rc = 0;
-        (void)capture(cmd, rc);
-        u.ok = rc == 0;
-        if (u.ok) {
-          write_stamp(u.pch, cmd);
-        }
-      };
-      build_unit(units[0], "");
-      if (units[0].ok) {
-        std::atomic<size_t> cursor{1};
-        livehd::run_workers(static_cast<size_t>(std::clamp<size_t>(jobs, 1, std::max<size_t>(1, units.size() - 1))), [&](size_t) {
-          for (size_t u = cursor.fetch_add(1); u < units.size(); u = cursor.fetch_add(1)) {
-            build_unit(units[u], units[0].pch);
-          }
-        });
-        for (size_t i = 0; i < tus.size(); ++i) {
-          if (tus[i].ends_with("/vcd_writer.cpp")) {
-            continue;
-          }
-          const auto found = first[i].empty() ? unit_of.end() : unit_of.find(first[i]);
-          tu_pch[i]        = found != unit_of.end() && units[found->second].ok ? units[found->second].pch : units[0].pch;
-        }
-      }
-    }
-    // PCHs a previous run built and this one does not use only cost disk.
-    std::error_code ec;
-    for (const auto& de : fs::directory_iterator(pch_dir, ec)) {
-      const auto name = de.path().filename().string();
-      bool       used = name == "prelude.hpp";
-      for (const auto& p : tu_pch) {
-        used = used
-               || (!p.empty()
-                   && (name == fs::path(p).filename().string() || name == fs::path(p).filename().string() + ".d"
-                       || name == fs::path(p).filename().string() + ".cmd"));
-      }
-      if (!used) {
-        std::error_code rm_ec;
-        fs::remove(de.path(), rm_ec);
-      }
-    }
-  }
-  const auto pch_flag = [&](size_t i) { return tu_pch[i].empty() ? std::string{} : "-include-pch " + shell_quote(tu_pch[i]); };
-
-  // fail_build LOG_BODY SHOWN — the one compile-failure exit, shared by both
-  // build paths. Persists the full compiler output (in JSONL mode it was
-  // previously swallowed entirely — "see the compiler output" pointed nowhere)
-  // and surfaces the first error line in the machine-readable message.
-  auto fail_build = [&](const std::string& log_body, const std::string& shown) {
-    const std::string build_log = simdir + "/build.log";
-    {
-      std::ofstream bl(build_log);
-      if (bl.is_open()) {
-        bl << log_body;
-      }
-    }
-    std::string        first_err;
-    std::string        ln;
-    std::istringstream iss(shown);
-    while (std::getline(iss, ln)) {
-      if (ln.find("error") != std::string::npos) {
-        first_err = ln;
-        break;
-      }
-    }
-    res.status        = "fail";
-    res.error_class   = "compile";
-    res.error_message = std::format("the sim driver failed to compile ({}): {}",
-                                    build_log,
-                                    first_err.empty() ? std::string{"see the log"} : first_err);
-    res.exit_code     = exit_code_for(res.error_class);
-    if (pretty) {
-      std::istringstream sis(shown);
-      while (std::getline(sis, ln)) {
-        std::print("    {}\n", ln);
-      }
-      std::fflush(stdout);
-    }
-  };
-
-  // "sim.hostbuild": compiling + linking the generated driver into drv.bin,
-  // Recorded on a failed build too (the
-  // destructor fires on the early return) — a build that burned two minutes and
-  // then failed is exactly the number an incremental study wants.
-  Phase_timer build_phase(res, "sim.hostbuild");
-  // Compile every TU, `jobs` at a time, then link, SKIPPING whatever is already
-  // up to date. Staleness is sound because emission upstream is
-  // write-if-different (see the note above): the compiler emits a
-  // depfile (`-MD -MF`), so the headers a TU actually read are KNOWN rather
-  // than guessed, and a stamp beside each output records the command line
-  // that produced it, so a changed flag rebuilds even when no input is newer.
-  //
-  // Freshness rule, with its one gap: an
-  // output is fresh when it is NOT OLDER than its inputs, so a source
-  // rewritten inside the same filesystem timestamp tick as its object is
-  // missed (sub-second stamps make that window vanishing on APFS/ext4/btrfs).
-
-  std::vector<std::string> cmds(tus.size()), outs(tus.size());
-  std::vector<int>         rcs(tus.size(), 0);
-  {
-    std::atomic<size_t> cursor{0};
-    auto                worker = [&] {
-      for (size_t i = cursor.fetch_add(1); i < tus.size(); i = cursor.fetch_add(1)) {
-        const std::string dep = objs[i] + ".d";
-        cmds[i]               = std::format("{} {}{} -MD -MF {} -c {} -o {} 2>&1",
-                                            shell_quote(cxx),
-                                            cflags,
-                                            tu_pch[i].empty() ? std::string{} : " " + pch_flag(i),
-                                            shell_quote(dep),
-                                            shell_quote(tus[i]),
-                                            shell_quote(objs[i]));
-        if (stamp_matches(objs[i], cmds[i])) {
-          auto prereqs = read_depfile(dep);
-          if (!prereqs.empty() && !tu_pch[i].empty()) {
-            prereqs.push_back(tu_pch[i]);
-          }
-          // An empty prereq list means no usable depfile, which is a
-          // rebuild, not a free pass.
-          if (!prereqs.empty() && not_older_than_all(objs[i], prereqs)) {
-            outs[i] = "(up to date)\n";
-            continue;
-          }
-        }
-        drop_stamp(objs[i]);
-        outs[i] = capture(cmds[i], rcs[i]);
-        if (rcs[i] == 0) {
-          write_stamp(objs[i], cmds[i]);
-        }
-      }
-    };
-    livehd::run_workers(static_cast<size_t>(jobs), [&](size_t) { worker(); });
-  }
-
-  // Every TU's command + output reaches build.log in TU order, so the log is
-  // the same whatever order the workers finished in. What is PRINTED is only
-  // the FIRST failing TU: one bad generated header fails all 18 identically,
-  // and eighteen copies of the one diagnostic bury it.
-  std::string log_body, shown;
-  size_t      n_failed = 0;
-  for (size_t i = 0; i < tus.size(); ++i) {
-    log_body += cmds[i] + "\n\n" + outs[i] + "\n";
-    if (rcs[i] != 0 && n_failed++ == 0) {
-      shown = outs[i];
-    }
-  }
-  if (n_failed != 0) {
-    if (n_failed > 1) {
-      shown += std::format("({} more translation unit(s) also failed; see build.log)\n", n_failed - 1);
-    }
-    fail_build(log_body, shown);
-    return;
-  }
-
-  auto link_inputs = objs;
-  link_inputs.insert(link_inputs.end(), direct_objects.begin(), direct_objects.end());
-  // Thousands of independent colors exceed the shell's single-argument
-  // limit. Both host builders pass objects through a compiler response file.
-  std::string response;
-  for (const auto& object : link_inputs) {
-    response += '"';
-    for (const char c : object) {
-      if (c == '\\' || c == '"') {
-        response += '\\';
-      }
-      response += c;
-    }
-    response += "\"\n";
-  }
-  const auto response_path = exe + ".rsp";
-  {
-    std::ofstream out(response_path);
-    out << response;
-    if (!out) {
-      fail_build("cannot write simulator link response file " + response_path, "");
-      return;
-    }
-  }
-  const auto link = shell_quote(cxx) + " " + shell_quote("@" + response_path) + " -pthread -o " + shell_quote(exe) + " 2>&1";
-  const auto link_stamp = link + "\n" + response;
-  if (!stamp_matches(exe, link_stamp) || !not_older_than_all(exe, link_inputs)) {
-    drop_stamp(exe);
-    int  link_rc  = 0;
-    auto link_out = capture(link, link_rc);
-    if (link_rc != 0) {
-      fail_build(link + "\n\n" + link_out, link_out);
-      return;
-    }
-    write_stamp(exe, link_stamp);
-  }
-  build_phase.stop();
-  tune.after_build();
-
-  // The incremental build benchmark wants the real generated host-build path
-  // (including the depfile-based reuse) but deliberately no simulation.
-  // Returning here leaves drv.bin as the successful endpoint and guarantees
-  // that no testbench side effects or design-dependent cycle time enter it.
   if (compile_only) {
-    return;
+    return;  // nothing is built any more: the setup is the whole compile
   }
 
-  // Run the one binary. A test selector (`lhd sim foo.prp my.test`) becomes
-  // `--test`; an explicit `--seed` and every `lhd sim --arg key=value` are
-  // forwarded (the binary itself filters per-test params + warns on a `--arg`
-  // that no run test consumes).
-  std::string run_args;
-  if (!test_sel.empty()) {
-    run_args += " --test " + shell_quote(test_sel);
-  }
-  if (opts.seed_explicit) {
-    run_args += " --seed " + shell_quote(opts.seed);
-  }
-  if (init_zero) {
-    run_args += " --init-zero";
-  }
-  if (!warn_undefined.empty()) {
-    run_args += " --set sim.warn_undefined=" + warn_undefined;
-  }
-  // Always ask the driver for its per-test result array (a sidecar JSON file);
-  // it is read back below and embedded verbatim as the envelope's "tests" member
-  // (so `lhd sim --result-json r.json` carries {test,status,cycle,failing_assert,
-  // prp_file,line,msg} per test). Remove any stale sidecar from a reused workdir.
-  const std::string sim_tests_path = std::format("{}/sim_tests.json", simdir);
-  {
-    std::error_code ec_rm;
-    fs::remove(sim_tests_path, ec_rm);
-  }
-  run_args += " --result-json " + shell_quote(sim_tests_path);
-  // Checkpoint creation (sim.checkpoint*): enabled by default; the driver owns the
-  // fork cadence / prune and only writes once the min-secs floor elapses. A
-  // sim.tune profiling run takes none (driver_args() says --no-checkpoint).
-  if (tune.profiling()) {
-    // no checkpoint arguments: see driver_args()
-  } else if (!ckpt_dir.empty()) {
-    run_args += " --ckpt-dir " + shell_quote(ckpt_dir);
-    if (!ckpt_min_secs.empty()) {
-      run_args += " --checkpoint-min-secs " + shell_quote(ckpt_min_secs);
-    }
-    if (!ckpt_max.empty()) {
-      run_args += " --checkpoint-max " + shell_quote(ckpt_max);
-    }
-    if (!ckpt_max_overhead.empty()) {
-      run_args += " --checkpoint-max-overhead " + shell_quote(ckpt_max_overhead);
-    }
-    if (!ckpt_every.empty()) {
-      run_args += " --checkpoint-every " + shell_quote(ckpt_every);
-    }
-  } else {
-    run_args += " --no-checkpoint";
-  }
-  // sim.tune: `--set sim.tune.profile=on` + its raw-file dir + the zero fill of a
-  // profiling run, and on --run-only the pinned codegen knobs drv.bin checks
-  // against what it baked. Only for a driver carrying the --set parser.
-  run_args += tune.driver_args();
-  // Debug replay: jump to the failure region (loads the nearest checkpoint <= N).
-  if (opts.sim_restart_cycle >= 0) {
-    run_args += " --restart-cycle " + shell_quote(std::to_string(opts.sim_restart_cycle));
-  }
-  // Windowed VCD: restart near Y, run silent to Y, trace [Y, Z].
-  if (opts.sim_vcd_from >= 0) {
-    run_args += " --vcd-from " + shell_quote(std::to_string(opts.sim_vcd_from));
-    if (opts.sim_vcd_to >= 0) {
-      run_args += " --vcd-to " + shell_quote(std::to_string(opts.sim_vcd_to));
-    }
-  }
-  // On an assert fire, auto-dump a VCD of the failure region (re-run from the
-  // nearest checkpoint with a window around the failing cycle).
-  if (opts.sim_vcd_on_fail) {
-    run_args += " --vcd-on-fail --vcd-fail-window " + shell_quote(std::to_string(opts.sim_vcd_fail_window));
-  }
-  // Observability: --list-signals / --probe / --break-when. Results go to the
-  // debug sidecar, read back below and embedded as the envelope's "debug" member.
-  const std::string sim_debug_path = std::format("{}/sim_debug.json", simdir);
-  {
-    std::error_code ec_rm2;
-    fs::remove(sim_debug_path, ec_rm2);
-  }
-  const bool debug_requested = opts.sim_list_signals || !opts.sim_probe.empty() || !opts.sim_break_when.empty();
-  if (debug_requested) {
-    run_args += " --debug-json " + shell_quote(sim_debug_path);
-    if (opts.sim_list_signals) {
-      run_args += " --list-signals";
-    }
-    if (!opts.sim_probe.empty()) {
-      run_args += " --probe " + shell_quote(opts.sim_probe);
-      if (opts.sim_probe_from >= 0) {
-        run_args += " --probe-from " + shell_quote(std::to_string(opts.sim_probe_from));
-      }
-      if (opts.sim_probe_to >= 0) {
-        run_args += " --probe-to " + shell_quote(std::to_string(opts.sim_probe_to));
-      }
-    }
-    if (!opts.sim_break_when.empty()) {
-      run_args += " --break-when " + shell_quote(opts.sim_break_when);
-    }
-  }
-  // --query: the kernel half of the batched query API. Everything JSON happens
-  // HERE — validate the request, resolve every selector against the static
-  // catalog, answer whatever needs no simulation, union the surviving time
-  // ranges, and leave the driver a selector-free line plan. A batch of nothing
-  // but `signals` needs no plan at all: the run still happens (a query run is
-  // still a test run) but it carries no query work.
-  const std::string sim_query_path  = std::format("{}/sim_query.json", simdir);
-  const std::string query_plan_path = std::format("{}/sim_query_plan.txt", simdir);
-  Sim_catalog       query_cat;
-  Query_plan        query_plan;
-  if (!opts.sim_query.empty()) {
-    // Stale artifacts from a reused --workdir would read as THIS run's answers.
-    std::error_code ec_rm3;
-    fs::remove(sim_query_path, ec_rm3);
-    fs::remove(query_plan_path, ec_rm3);
-    query_cat  = load_sim_catalog(simdir, test_sel);
-    query_plan = plan_sim_query(read_query_request(opts.sim_query), query_cat, query_plan_path);
-    if (query_plan.wrote_plan) {
-      run_args += " --query-plan " + shell_quote(query_plan_path) + " --query-json " + shell_quote(sim_query_path);
-    }
-  }
-  // Application arguments occupy their own namespace, independent of driver
-  // controls. Preserve text and order for SV compatibility and runtime reads.
-  for (const auto& arg : opts.sim_plusargs) {
-    run_args += " " + shell_quote(arg);
-  }
-  // Capture the binary's STDOUT (its `puts` output + the per-test PASS/FAIL
-  // verdict lines) for parsing + the pretty relay, but let its STDERR pass
-  // through to the user's stderr UNCHANGED — that is where the driver prints its
-  // warnings (e.g. a `--arg` that matches no test parameter) and usage errors, so
-  // they stay visible in JSON mode too (not only in the pretty relay below).
-  int         rc        = 0;
-  int         killed_by = 0;
-  std::string out;
-  tune.before_run();
-  {
-    Phase_timer run_phase(res, "sim.run");  // the driver binary itself, argv assembly excluded
-    out = capture(std::format("{}{}", shell_quote(exe), run_args), rc, &killed_by);
-  }
-
-  // Read back the per-test result array (present whenever the driver ran, even on
-  // assert failure); embedded as the envelope's "tests" member. Absent if the
-  // driver crashed before writing it.
-  if (std::error_code ec_st; fs::exists(sim_tests_path, ec_st)) {
-    std::ifstream     ifs(sim_tests_path);
-    std::stringstream ss;
-    ss << ifs.rdbuf();
-    std::string tj = ss.str();
-    while (!tj.empty() && (tj.back() == '\n' || tj.back() == '\r' || tj.back() == ' ' || tj.back() == '\t')) {
-      tj.pop_back();
-    }
-    if (tj.size() >= 2 && tj.front() == '[') {  // a well-formed array, never a partial write
-      res.sim_tests_json = tj;
-    }
-  }
-
-  // Read back the observability sidecar ({signals?, probe?, break?}); embedded as
-  // the envelope's "debug" member.
-  if (std::error_code ec_dbg; debug_requested && fs::exists(sim_debug_path, ec_dbg)) {
-    std::ifstream     ifs(sim_debug_path);
-    std::stringstream ss;
-    ss << ifs.rdbuf();
-    std::string dj = ss.str();
-    while (!dj.empty() && (dj.back() == '\n' || dj.back() == '\r' || dj.back() == ' ' || dj.back() == '\t')) {
-      dj.pop_back();
-    }
-    if (dj.size() >= 2 && dj.front() == '{') {
-      res.sim_debug_json = dj;
-    }
-  }
-
-  // The --query answers, embedded as the envelope's "query" member. ABOVE the
-  // rc mapping on purpose: an assert-firing replay is still exit 11, and its
-  // query answers are exactly what the agent asked the failing run for.
-  if (query_plan.active) {
-    res.sim_query_json = finalize_sim_query(query_plan, query_cat, sim_query_path);
-  }
-
-  // sim.tune: ingest this run's profile, judge a trial (reverting a loser with a
-  // pointer swap), propose the next step.
-  tune.after_run(rc);
-
-  // The binary's EXIT CODE is the authoritative verdict (0 = all selected tests
-  // passed, 1 = a test failed, 2 = a usage error, <0 = the driver crashed). The
-  // per-test `PASS <name>` / `FAIL <name> (...)` lines are parsed only for the
-  // structured recipe detail (best-effort: a test that itself `puts` a line
-  // starting with "PASS "/"FAIL " adds a cosmetic recipe entry but never changes
-  // the verdict, which is rc-driven).
-  int    n_fail = 0;
-  size_t n_run  = 0;
-  {
-    std::istringstream iss(out);
-    std::string        ln;
-    while (std::getline(iss, ln)) {
-      const bool pass = ln.rfind("PASS ", 0) == 0;
-      const bool fail = ln.rfind("FAIL ", 0) == 0;
-      if (!pass && !fail) {
-        continue;
-      }
-      ++n_run;
-      std::string name = ln.substr(5);
-      if (auto sp = name.find(" ("); sp != std::string::npos) {
-        name = name.substr(0, sp);
-      }
-      res.recipe_steps.push_back(std::format("sim {} ({})", name, pass ? "pass" : "fail"));
-      if (fail) {
-        ++n_fail;
-      }
-    }
-  }
-  if (pretty) {
-    std::istringstream iss(out);
-    std::string        ln;
-    while (std::getline(iss, ln)) {
-      std::print("    {}\n", ln);
-    }
-    std::fflush(stdout);
-  }
-  res.outputs.push_back(simdir);
-  if (rc == 0) {
-    // every selected test passed — status stays pass.
-  } else if (rc == 2) {
-    // a usage error inside the binary (unknown flag / unknown `--test` name /
-    // missing value / bad `--arg` value); the binary printed the specific reason
-    // (relayed above in pretty mode).
-    res.status        = "fail";
-    res.error_class   = "usage";
-    res.error_message = (!test_sel.empty() && n_run == 0) ? std::format("no test matched '{}' in {}", test_sel, file)
-                                                          : std::format("the sim driver rejected an argument in {}", file);
-    res.exit_code     = exit_code_for(res.error_class);
-  } else if (killed_by != 0) {
-    // The driver CRASHED (no test verdict): name the signal, never a bare exit
-    // code (-1, or the shell's 128+N). A crash of generated code is a LiveHD
-    // bug, so the other backend is the first thing to compare against.
-    res.status        = "fail";
-    res.error_class   = "assert";
-    res.error_message = std::format("the sim driver was killed by signal {} ({}) after {} test verdict(s){}",
-                                    signal_name(killed_by),
-                                    signal_description(killed_by),
-                                    n_run,
-                                    killed_by == SIGILL ? "; an illegal instruction in generated code is a simulator bug, compare "
-                                                          "with --set sim.tune.backend=slop"
-                                                        : "");
-    res.exit_code     = exit_code_for(res.error_class);
-  } else {
-    // rc == 1 (a test's assert fired) or rc < 0 (the driver could not run).
-    res.status        = "fail";
-    res.error_class   = "assert";
-    res.error_message = (n_fail > 0 && n_run > 0) ? std::format("{} of {} test(s) failed", n_fail, n_run)
-                                                  : std::format("the sim driver exited with code {}", rc);
-    res.exit_code     = exit_code_for(res.error_class);
-  }
+  Llvm_tb_cfg cfg;
+  cfg.ckpt_dir          = ckpt_dir;
+  cfg.ckpt_min_secs     = ckpt_min_secs;
+  cfg.ckpt_max          = ckpt_max;
+  cfg.ckpt_max_overhead = ckpt_max_overhead;
+  cfg.ckpt_every        = ckpt_every;
+  cfg.vcd_on            = vcd_on;
+  cfg.vcd_dir           = vcd_dir;
+  cfg.unknown_zero      = unknown_zero;
+  run_llvm_testbench(opts, res, file, simdir, simroot, test_sel, init_zero, warn_undefined, pretty, cfg);
 }
 
 // ---- check ------------------------------------------------------------------

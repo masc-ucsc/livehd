@@ -230,8 +230,8 @@ cc_library(
         "lhd_meta.cpp",
         "lhd_options.cpp",
         "lhd_result.cpp",
-        "lhd_sim_tune_session.cpp",
-        "lhd_sim_tune_session.hpp",
+        "lhd_sim_options.cpp",
+        "lhd_sim_options.hpp",
     ],
     hdrs = ["lhd.hpp"],
     copts = COPTS,
@@ -307,22 +307,6 @@ cc_library(
     }),
 )
 
-# The Slop/iassert sim runtime as SOURCE files: `lhd sim` host-compiles its
-# generated driver at run time and resolves slop.hpp / iassert.hpp /
-# vcd_writer.cpp via its runfiles probe (lhd_kernel_common.cpp). Riding as
-# `data` on :lhd means every consumer that depends on the binary — including
-# other bazel modules (e.g. the lhdsuite bench repo) — gets a sim-capable lhd
-# with no extra wiring; the dev-layout ../hlop sibling fallback still works
-# outside bazel-run contexts.
-filegroup(
-    name = "sim_runtime_hdrs",
-    srcs = [
-        "@hlop//hlop:sim_runtime_hdrs",
-        "@iassert//:sim_runtime_hdrs",
-    ],
-    visibility = ["//visibility:public"],
-)
-
 config_setting(
     name = "dreamplace_openmp",
     define_values = {"dreamplace_openmp": "true"},
@@ -332,6 +316,35 @@ config_setting(
     name = "dbg_macos",
     constraint_values = ["@platforms//os:macos"],
     values = {"compilation_mode": "dbg"},
+)
+
+# The run-time half of the LLVM testbench flow (todo/livehd/2sl-llvm-only-sim.md): loads the DUT kernel objects
+# and the testbench object through OrcJIT and runs the tests. A small executable of its own on purpose --
+# starting the compiler binary costs over a second -- that links none of the compiler (the ABI is header-only).
+cc_binary(
+    name = "lhd_simrt",
+    srcs = [
+        "lhd_sim_llvm_rt.cpp",
+        "lhd_sim_observe.cpp",
+        "lhd_sim_observe.hpp",
+    ],
+    copts = COPTS,
+    additional_linker_inputs = select({
+        "@platforms//os:macos": ["lhd_simrt_exports.txt"],
+        "//conditions:default": [],
+    }),
+    linkopts = select({
+        "@platforms//os:macos": ["-Wl,-exported_symbols_list,$(location lhd_simrt_exports.txt)"],
+        "//conditions:default": [],
+    }),
+    visibility = ["//visibility:public"],
+    deps = [
+        "//core:sim_program",
+        "//inou/cgen:sim_native_rt",
+        "//inou/prp:tb_abi",
+        "@hlop//hlop",
+        "@rapidjson",
+    ],
 )
 
 [cc_binary(
@@ -348,6 +361,7 @@ config_setting(
         "chunk_flow.py",
         "chunk_dispatch.py",
         "chunk_resources.py",
+        ":lhd_simrt",
         "chunk_interfaces.py",
         "chunk_explore.py",
         "chunk_validate.py",
@@ -358,8 +372,6 @@ config_setting(
         "chunk_gui.html",
         "@dreamplace//thirdparty/flute:flute",
         "//ware:cgen_memory_rtl",
-        ":sim_runtime_hdrs",
-        "//inou/cgen:llvm_sim_link",
     ] + select({
         "//:without_abc": [],
         "//conditions:default": ["//inou/yosys:scripts"],

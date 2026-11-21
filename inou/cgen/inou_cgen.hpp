@@ -10,7 +10,6 @@ private:
 
 protected:
   static void to_cgen_verilog(Eprp_var& var);
-  static void to_cgen_sim(Eprp_var& var);  // inou.cgen.sim: executable Slop C++
 
 public:
   Inou_cgen(const Eprp_var& var);

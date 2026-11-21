@@ -56,12 +56,6 @@ run lec --set formal.effort=proof --impl lg:"$W/lg" --ref lg:"$W/lg" --top adder
 cp -r "$W/lg" "$W/lg2"
 run pass semdiff --ref lg:"$W/lg" --impl lg:"$W/lg2" --top adder
 
-# sim emit: the resolved FULL name reaches inou.cgen.sim, so both the bare
-# entity and the full spelling bake the VCD path into exactly the top module.
-rm -rf "$W/simd"
-run compile "$PRP" --emit-dir sim:"$W/simd" --top adder.adder --set sim.vcd=out.vcd --workdir "$W/w3"
-grep -ql '__vcd_path = "out.vcd"' "$W/simd/adder.adder.hpp" || fail "sim emit: full --top did not bake the VCD path"
-
 # A top that resolves nowhere still errors; tool diff must fail rather than
 # report the empty-vs-empty selection as "identical", and diff --match must
 # fail rather than print the misleading "run semdiff" hint.

@@ -3,7 +3,6 @@
 load("//tools:regression.bzl", "cc_test", "sh_test")
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
 
-load("//tools:cc_headers.bzl", "cc_direct_headers")
 load("//tools:copt_default.bzl", "COPTS")
 load("//inou/prp:tests/equiv/fixtures.bzl", "hdl_sources")
 
@@ -125,6 +124,15 @@ cc_library(
     ],
 )
 
+# The run-time ABI of the LLVM testbench flow, header-only: shared by tb_llvm.cpp (generator) and the standalone
+# `lhd_simrt` runtime, which must not link the compiler.
+cc_library(
+    name = "tb_abi",
+    hdrs = ["tb_abi.hpp"],
+    includes = ["."],
+    visibility = ["//visibility:public"],
+)
+
 cc_library(
     name = "inou_prp",
     srcs = glob(
@@ -147,9 +155,6 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//core",
-        # The generated-C++ helper text (`?` literals, tune hashing) prp_sim emits
-        # into drv.cpp VERBATIM, shared with inou.cgen.sim. Header-only.
-        "//inou/cgen:sim_tune_hdrs",
         "//lnast",
         "//pass/common:pass",
         # THE attribute-name vocabulary (battr.hpp). Header-only, so this does
@@ -164,7 +169,29 @@ cc_library(
         # 2f-sim B0: prp_sim reads cgen_sim's per-module <stem>.iface.json
         # manifest instead of text-scraping the generated headers.
         "@rapidjson",
-    ],
+        # tb_llvm: the testbench is lowered straight to an LLVM object (no generated C++).
+        "@llvm-project//llvm:BitWriter",
+        "@llvm-project//llvm:CodeGen",
+        "@llvm-project//llvm:Core",
+        "@llvm-project//llvm:MC",
+        "@llvm-project//llvm:Passes",
+        "@llvm-project//llvm:Support",
+        "@llvm-project//llvm:Target",
+        "@llvm-project//llvm:TargetParser",
+    ] + select({
+        "@platforms//cpu:aarch64": [
+            "@llvm-project//llvm:AArch64AsmParser",
+            "@llvm-project//llvm:AArch64CodeGen",
+        ],
+        "@platforms//cpu:x86_64": [
+            "@llvm-project//llvm:X86AsmParser",
+            "@llvm-project//llvm:X86CodeGen",
+        ],
+        "//conditions:default": [
+            "@llvm-project//llvm:AllTargetsAsmParsers",
+            "@llvm-project//llvm:AllTargetsCodeGens",
+        ],
+    }),
     alwayslink = True,
 )
 
@@ -290,38 +317,6 @@ _ERR_MERGED = {
     for group, names in _ERR_MERGED.items()
 ]
 
-# sim.tune DRIVER contract (prp_sim_rt.hpp, sim_profile.md §6): run-time
-# `--set sim.unknown_zero=true` == a generated sim.unknown_zero=true build, the
-# per-test metrics + digests of every --result-json row, profiling changes no
-# simulated value and reproduces its counts under a fixed stride, the `--set`
-# key classes, and independence of `+set` from `--set`. Hermetic like the
-# prp-sim targets (runfiles hlop/iassert headers + the host C++ compiler).
-[
-sh_test(
-    name = "prp-sim-tune-driver-" + part,
-    srcs = ["tests/sim_tune_driver_test.py"],
-    args = [
-        "--part",
-        part,
-        "-i",
-        "$(location //inou/prp:tests/sim/unknown_tb_literal_once.prp)",
-    ],
-    data = [
-        "//inou/prp:sim_runtime_hdrs",
-        "//inou/prp:tests/prpsim.py",
-        "//inou/prp:tests/sim/unknown_tb_literal_once.prp",
-        "//inou/prp:tests/sim_tune_driver_test.py",
-        "//lhd",
-    ],
-)
-
-    for part in ["fill", "profile"]
-]
-
-test_suite(
-    name = "prp-sim-tune-driver",
-    tests = [":prp-sim-tune-driver-" + part for part in ["fill", "profile"]],
-)
 # Pyrope rejects a statically out-of-range array index in uPass. A dynamic
 # index cannot be decided until execution, so the emitted Verilog keeps a bounds
 # assertion on the index; native simulation checks the in-range values. The
@@ -517,23 +512,7 @@ sh_test(
     data = ["//lhd"],
 )
 
-# Simulation tests (tests/sim/*.prp, `:type: simulation`): a synthesizable DUT
-# driven from `test` blocks that end-of-sim `assert` the result. The harness
-# (`lhd sim --setup-only`) lowers each DUT to header-only Slop<N> C++ and emits
-# a driver per test; prplib then compiles each driver with the HOST C++ compiler
-# and runs it (a non-zero exit == an assert fired). The Slop/Blop runtime is
-# header-only and, with -DNDEBUG, has no link deps — so this needs NO nested
-# bazel, just hlop's + iassert's headers staged into runfiles (the
-# `sim_runtime_hdrs` data dep below), discovered by name at runtime.
-cc_direct_headers(
-    name = "sim_runtime_hdrs",
-    visibility = ["//visibility:private"],
-    deps = [
-        "@hlop//hlop",
-        "@iassert",
-    ],
-)
-
+# Native simulation fixtures run the testbench and DUT objects with lhd_simrt.
 # KNOWN-FAILING sim fixtures (tagged `fixme`, which .bazelrc's
 # `--test_tag_filters -fixme` excludes from `bazel test`).
 #
@@ -579,31 +558,12 @@ _SIM_FIXME = [
             "//inou/prp:tests/prpsim.py",
             "//inou/prp:tests/pyrope_test.py",
             "//inou/prp:%s" % prp_file,
-            "//inou/prp:sim_runtime_hdrs",
             "//lhd",
         ],
         tags = ["fixme"] if prp_file.split("/")[-1].split(".")[0] in _SIM_FIXME else [],
     )
     for prp_file in glob(["tests/sim/*.prp"])
 ]
-
-# The same local gated-clock latch windows must hold under the Slop backend.
-# The ordinary fixture target above continues to exercise the default LLVM backend.
-sh_test(
-    name = "prp-sim-latch_gated_feedback_slop",
-    srcs = ["tests/pyrope_test.py"],
-    args = ["-i", "$(location tests/sim/latch_gated_feedback.prp)"],
-    data = [
-        "tests/lec.py",
-        "tests/prplib.py",
-        "tests/prpsim.py",
-        "tests/pyrope_test.py",
-        "tests/sim/latch_gated_feedback.prp",
-        ":sim_runtime_hdrs",
-        "//lhd",
-    ],
-    env = {"LHD_PRP_COMPILE_SETS": "sim.tune.backend=slop"},
-)
 
 # VERILATOR DIFFERENTIALS. A `tests/sim/` fixture that also carries
 # `:verilator: <name>_vtb.cpp` gets a second target that emits its Verilog
@@ -646,8 +606,7 @@ sh_test(
 # formal_report.json verdict counts, the simfail_<test>.prp counterexample
 # testbench on an expected REFUTE, and the replay outcome (:verify_replay:
 # fired = the driven trace re-fires the assert; no-refire = the loud
-# free-initial-state warning). The replay compiles a sim driver, hence the
-# sim_runtime_hdrs data dep. Distinct `prp-verify-` prefix.
+# free-initial-state warning). Distinct `prp-verify-` prefix.
 # latch_negedge_enable was PROMOTED out of this list (2026-10-04): the latch is
 # `enable=clk, enable_high=false` on a `Clock` port.
 _VERIFY_FIXME = []
@@ -665,7 +624,6 @@ _VERIFY_FIXME = []
             "//inou/prp:tests/prplib.py",
             "//inou/prp:tests/pyrope_test.py",
             "//inou/prp:%s" % prp_file,
-            "//inou/prp:sim_runtime_hdrs",
             "//lhd",
         ],
         tags = ["fixme"] if prp_file.split("/")[-1].split(".")[0] in _VERIFY_FIXME else [],
@@ -993,7 +951,6 @@ _EQUIV_SPLIT_BITFUZZ = [
             "//inou/prp:tests/prpsim.py",
             "//inou/prp:tests/pyrope_test.py",
             "//inou/prp:tests/equiv/%s.prp" % stem,
-            "//inou/prp:sim_runtime_hdrs",
             "//lhd",
         ],
     )
@@ -1728,24 +1685,8 @@ _V2PRP2V_DUP = [
             "//inou/prp:tests/equiv_sim_fail_test.py",
             "//inou/prp:tests/equiv/%s.prp" % name,
             "//inou/prp:tests/equiv/%s.v" % name,
-            "//inou/prp:sim_runtime_hdrs",
             "//lhd",
         ],
-        # sim_lg_atomic_feedback now compiles: cgen_sim flattens the false-loop
-        # pure-comb sub-instance (flatten_false_loop_subs). The packed-word and
-        # sub-feedback comb-loop pairs that used to be tracked here (prp-emit
-        # mode, compile-only) are covered by their prp-simeq-<name> twins, which
-        # compile the same tests/equiv/<name>.prp and also check values.
-        # cpu:4 -- the v2prp-sim mode builds its two simulator sides (and their
-        # comparison drivers) concurrently; the others build one side at a time.
-        tags = (["cpu:4"] if mode == "v2prp-sim" else []) if name in (
-            "sim_lg_atomic_feedback",
-            # 2026-07-03: instance-output dual identity fixed — assign_to
-            # splits the bound value onto the struct's bundle leaves, so the
-            # emitted .prp recompiles to the same sim (v2prp-sim mode green).
-            "instance_out_struct_ident",
-        ) else ["fixme"],
-        deps = ["//inou/yosys:scripts"],
     )
     for name, mode in {
         "sim_lg_atomic_feedback": "lg-emit",
@@ -2064,7 +2005,6 @@ _SIMEQ_FIXME = []
             "//inou/prp:tests/pyrope_test.py",
             "//inou/prp:tests/equiv/%s_tb.prp" % base,
             "//inou/prp:tests/equiv/%s.prp" % base,
-            "//inou/prp:sim_runtime_hdrs",
             "//lhd",
         ],
         tags = [] if base in _SIMEQ else ["fixme"],

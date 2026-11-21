@@ -34,7 +34,7 @@ TEST(LhdOptions, ConsumersRejectUnresolvedDriverWidths) {
   var.add(graph);
   auto& sink = livehd::diag::sink();
   sink.set_human_stderr(false);
-  for (const auto method : {"pass.abc", "pass.usyn", "pass.lec", "pass.formal", "inou.cgen.verilog", "inou.cgen.sim"}) {
+  for (const auto method : {"pass.abc", "pass.usyn", "pass.lec", "pass.formal", "inou.cgen.verilog"}) {
     sink.clear();
     lhd::Options opts;
     opts.workdir = "width_guard_logs";

@@ -226,12 +226,10 @@ struct Options {
   long                     sim_probe_from = -1;          // --probe-from A
   long                     sim_probe_to   = -1;          // --probe-to B
   std::string              sim_break_when;               // --break-when 'SIG OP VALUE|SIG': first cycle the condition holds
-  // `sim --query FILE|-|{inline}` (2f-sim): a BATCHED JSON request
-  // ({schema_version:1, kind:"sim_query", queries:[...]}). Batching is what lets
-  // the planner union every question's time range and answer them all from ONE
-  // replay; the legacy flags above stay the low-ceremony spelling of the same
-  // engine. Answers land in the envelope's "query" member.
+  // A version 1 JSON batch. The runtime schedules its ranges over retained
+  // checkpoint intervals and reports answers in the "query" member.
   std::string              sim_query;
+  bool                     sim_dump_bitcode = false;
   bool                     sim_observe = false;  // setup-time hierarchical instrumentation needed by VCD/probe/query
   bool sim_runtime_support = true;  // generated checkpoint/probe/query methods; false only for a lean checkpoint-off setup
   // The RESOLVED `sim.tune.*` vector (explicit --set > positional simulation tuning > the
@@ -476,8 +474,7 @@ struct Result {
 
   // `lhd sim --query` payload (2f-sim): the {schema_version, kind:"sim_query_result",
   // run, results} object embedded verbatim as the result's "query" member. Built
-  // from the driver's <simdir>/sim_query.json sidecar merged with the queries the
-  // kernel answered from the static catalog alone (`signals`), in REQUEST order.
+  // from the runtime's <simdir>/sim_query.json sidecar, in request order.
   std::string sim_query_json;
 
   // `lhd sim` profile-guided tuning (sim.tune.*): the envelope's "sim_tune"
@@ -587,17 +584,13 @@ struct Sim_set_option {
 inline constexpr Sim_set_option kSimSetOptions[] = {
     {"compile_only",
      "false", Sim_set_option::Kind::boolean,
-     "compile and link the generated simulator, then stop before executing any testbench. With --run-only, this "
-     "builds an existing <workdir>/sim incrementally without regenerating its sources"},
+     "prepare native DUT and testbench objects and stop before running the tests"},
     {"vcd",
      "false", Sim_set_option::Kind::bool_or_file,
-     "false|true|FILE — VCD tracing, the ONE vcd knob for every flow. `lhd sim`: any non-false value dumps one VCD "
-     "per test to <workdir>/<test.name>.vcd. Compiled sim binaries (--emit-dir sim:): true bakes <top>.vcd, "
-     "FILE bakes that explicit path, false bakes none", Sim_set_option::Stage::codegen},
+     "false|true|FILE — replay an edge-aligned VCD for each selected test under the workdir", Sim_set_option::Stage::codegen},
     {"vcd_fake_delay",
      "true", Sim_set_option::Kind::boolean,
-     "VCD data settles a few ticks after each clock edge, with X during the settle window (edge->data causality); "
-     "false = plain edge-aligned updates (no X, no delay; smaller/faster trace)", Sim_set_option::Stage::codegen},
+     "legacy generated-driver setting; native VCD replay always writes edge-aligned values", Sim_set_option::Stage::codegen},
     {"hlop_dir",
      "", Sim_set_option::Kind::bool_or_file,
      "DIR — hlop checkout to build the sim driver against (resolves slop.hpp/blop.hpp/vcd_writer.hpp). Empty = "
@@ -624,6 +617,8 @@ inline constexpr Sim_set_option kSimSetOptions[] = {
      "form's O(1)-in-trip-count code footprint is what the large benchmarks depend on, so it is preserved by "
      "ruling. Set it to measure what a rolled loop costs (lhdtrack br_mux_onehot ran 2.5x, br_arb_lru 5.6x faster "
      "flat). Speed only: the simulated values never change", Sim_set_option::Stage::codegen},
+    {"dump_bitcode", "false", Sim_set_option::Kind::boolean,
+     "write the pre-optimization LLVM module for each native kernel and testbench beside its object as .bc", Sim_set_option::Stage::codegen},
     {"init_zero",
      "false", Sim_set_option::Kind::boolean,
      "use zero as the power-on value only for flops and memories that have neither an initializer nor a reset. "
@@ -642,7 +637,7 @@ inline constexpr Sim_set_option kSimSetOptions[] = {
      "wall-clock floor in seconds between checkpoints (a short run writes none)", Sim_set_option::Stage::run},
     {"checkpoint_max",
      "10", Sim_set_option::Kind::non_neg_num,
-     "max checkpoints kept per test, evenly spaced (older ones are pruned)", Sim_set_option::Stage::run},
+     "max checkpoints kept per test (oldest pruned first, 0 keeps all)", Sim_set_option::Stage::run},
     {"checkpoint_max_overhead",
      "0.10", Sim_set_option::Kind::non_neg_num,
      "target checkpoint cost as a fraction of run time (caps how often they are taken)", Sim_set_option::Stage::run},
@@ -654,58 +649,36 @@ inline constexpr Sim_set_option kSimSetOptions[] = {
     // below enforces it), plus the tuner's own controls.
     {"tune.profile",
      "auto", Sim_set_option::Kind::tune_mode,
-     "auto|on|off — profile-guided tuning of the sim.tune.* speed knobs; needs a user --workdir and lhd.incremental. "
-     "auto: while the workdir holds no CONVERGED tune data, runs profile (drv.bin samples state activity; `?` "
-     "literals zero-fill unless compile.unknown_zero is set; checkpoints are skipped) and the next setup may trial ONE "
-     "better vector, kept only if >= 7% cheaper per simulated cycle with byte-identical results; converged data is "
-     "reused with no sampling. on: profile and learn even when converged. off: ignore the workdir's tune data. An "
-     "explicit sim.tune.X or positional simulation tuning always wins. The envelope's `sim_tune` member reports what was applied", Sim_set_option::Stage::both},
+     "legacy profile selection (auto|on|off); the native runtime does not collect generated-driver profiles", Sim_set_option::Stage::both},
     {"tune.dirty",
      "auto", Sim_set_option::Kind::tri,
-     "auto|on|off (was sim.color_dirty) — the cross-cycle color activation cache, for workloads with long "
-     "stable-input periods. off executes every color once per cycle in static phase order with direct boundary "
-     "assignments; on change-compares boundary writes, runs a color only when an input changed and ends a fully "
-     "quiescent period early. auto = the workdir's tuned decision, else on", Sim_set_option::Stage::codegen,
+     "legacy generated-driver color activation option (auto|on|off); native kernels schedule activity from the design", Sim_set_option::Stage::codegen,
      Sim_set_option::Tune::perf_g,
      "d"},
     {"tune.fence",
      "auto", Sim_set_option::Kind::fence,
-     "auto|none|N (was sim.fence_ratio) — fence a module used ONCE into its own simulator colors only when it has "
-     "at least N sites per interface word. A fence lets dirty gating skip a mostly idle module (xs_alu's "
-     "AluDataModule: 2.4x), but every value crossing it is a stored, change-tested slot, which only costs when the "
-     "module toggles every cycle (an LFSR-driven DUT: up to 10x). 0 fences every such module, none fences nothing; "
-     "reused modules always keep their fence. auto = the tuned decision, else none with dirty off and 16 with it on", Sim_set_option::Stage::codegen,
+     "legacy generated-driver module fence (auto|none|N); accepted for configuration compatibility", Sim_set_option::Stage::codegen,
      Sim_set_option::Tune::perf_g,
      "f"},
     {"tune.live_words",
      "auto", Sim_set_option::Kind::num_or_auto,
-     "auto|N (was sim.live_words) — machine words (64 bits) of live values one simulator color may keep across its "
-     "members. A color boundary costs a stored slot, a compare and a dirty mark per value, so a larger budget means "
-     "fewer, bigger colors (minion 20->256 words: 1.75x cycles/s); a smaller one keeps idle logic finer-grained. "
-     "auto = the tuned decision, else 256", Sim_set_option::Stage::codegen,
+     "legacy generated-driver live-word budget (auto|N); accepted for configuration compatibility", Sim_set_option::Stage::codegen,
      Sim_set_option::Tune::perf_g,
      "lw"},
     {"tune.backend",
      "llvm", Sim_set_option::Kind::backend,
-     "llvm|slop|auto (was sim.backend) — simulator color-kernel backend. llvm (the default) emits native object "
-     "files directly; a color its lowering rejects is a setup error, never a silent fallback. slop emits the "
-     "reference C++ kernels. auto = the tuned decision, else slop (the tuner never trials the backend, so auto is "
-     "slop unless positional simulation tuning pins one)", Sim_set_option::Stage::codegen,
+     "llvm|auto selects the native simulator; the removed slop backend reports unsupported", Sim_set_option::Stage::codegen,
      Sim_set_option::Tune::perf_g,
      "be"},
     {"tune.export",
      "", Sim_set_option::Kind::path,
-     "FILE — write the current tune decision (explicit > positional simulation tuning > tuned > default) as a positional "
-     "simulation tuning, with "
-     "its provenance (design structure, converged, activity stats)"},
+     "legacy generated-driver tuning export path; the native runtime does not produce tuning decisions"},
     {"tune.profile_dir",
      "", Sim_set_option::Kind::path,
-     "DIR — where a profiling drv.bin writes its raw run file (default <drv.bin dir>/tune_runs, which the next "
-     "`lhd sim --workdir` ingests). `lhd sim` points its own runs at <workdir>/sim_tune/inbox", Sim_set_option::Stage::run},
+     "legacy profile output directory; the native runtime does not write profiler files", Sim_set_option::Stage::run},
     {"tune.profile_stride",
      "0", Sim_set_option::Kind::count,
-     "N in [0, 1048576] — TEST ONLY: a fixed profiling sample stride in cycles with no jitter (0 = the "
-     "self-calibrated <= 1% overhead stride)", Sim_set_option::Stage::run},
+     "legacy profiling stride; accepted for configuration compatibility", Sim_set_option::Stage::run},
 };
 
 // Only speed knobs live under sim.tune.*: every entry there is either a tunable

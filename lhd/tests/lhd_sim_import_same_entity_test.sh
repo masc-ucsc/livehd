@@ -87,9 +87,9 @@ assert tests["imp.same"]["status"] == "fail", tests["imp.same"]
 assert tests["imp.same"]["failing_assert"] == "ur.o == ut.o", tests["imp.same"]
 PY
 
-drv="$W/sw/sim/drv.cpp"
-for cls in imp_p1_top imp_p2_top imp_tb_top; do
-  grep -q "make_unique<$cls>" "$drv" || fail "drv.cpp never instantiates $cls"
+# the testbench binds three distinct instances, one per unit (the manifest the setup wrote)
+for stem in imp_p1.top imp_p2.top imp_tb.top; do
+  grep -q "\"stem\":\"$stem\"" "$W/sw/sim/drv.tb.json" || fail "drv.tb.json never instantiates $stem: $(cat "$W/sw/sim/drv.tb.json" | head -c 600)"
 done
 
 echo "PASS: each import of a shared entity name binds its own unit"

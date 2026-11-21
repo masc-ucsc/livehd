@@ -86,37 +86,53 @@ updates combined with entry writes require one shared clock and edge.
 Native formal also rejects uniform falling-edge memory schedules, although
 their Verilog emission is supported and covered by RTL simulation.
 
-## Simulator tuning (`sim.tune.*`)
+## Inspecting simulator code
 
-Knobs that change only simulator speed, never a simulated value, live under
-`sim.tune.*`: `dirty`, `fence`, `live_words` and `backend`; the first three
-are `auto` by default and `backend` defaults to `llvm` (`slop` selects the
-reference C++ kernels; an explicit `auto` is the tuned decision, else slop).
-`sim.tune.profile=auto|on|off` (default `auto`) decides whether
-`lhd sim` learns them per workdir. With a user `--workdir` and
-`lhd.incremental=true`, an `auto` run profiles until the workdir's decision
-converges, trying at most one better vector per setup and keeping it only when
-it is at least 7% faster with byte-identical results. A trial that cannot be
-judged (no comparable run, a failed build, a crash) is reverted at the end of
-that run, and after two such attempts on one design structure `auto` stops
-trying it. An observation run (`--list-signals`, `--restart-cycle`, VCD) does
-not learn but builds the tuned vector, so it replays the same binary. A profiling run
-zero-fills `?` literals unless `sim.unknown_zero` is set, and takes no
-checkpoints. Per knob, an explicit `--set` beats `sim.tune.file`, which beats
-the workdir's decision (`<workdir>/incr/scopes/sim/<scope>/tune.jsonl`), which
-beats the built-in default, `d=on f=16 lw=512 be=llvm` (dirty gating on; a design profiled
-busy is trialed back to `d=off`, and small always-toggling benches can pin
-`--set sim.tune.dirty=off`). `off` ignores the workdir's data.
-`sim.tune.export=FILE` writes the applied vector for `sim.tune.file` to pin
-elsewhere. The envelope's `sim_tune.reproduce` is the `--set` list that
-rebuilds the applied vector.
+Run `lhd sim <inputs> --setup-only --workdir W --set sim.dump_bitcode=true`
+to save the pre-optimization LLVM bitcode beside each object in `W/sim/`.
+For example, `llvm-dis W/sim/drv.tb.bc -o -` prints the testbench IR.
+The DUT manifest lists the emitted objects. Each has a matching `.llvm.bc`.
+When several scheduled kernels use the same computation, the object contains
+one shared function and an entry point for each occurrence. Each entry binds
+the addresses for that occurrence's state. Registers and memories of repeated
+module definitions have consistent offsets within their instance and keep
+independent values. A trace-enabled setup also writes `drv.tb.trace.bc`.
+Use the LLVM major version pinned in `MODULE.bazel`.
 
-The old spellings are rename errors: `sim.color_dirty` -> `sim.tune.dirty`
-(`true`/`false` -> `on`/`off`), `sim.fence_ratio` -> `sim.tune.fence`,
-`sim.live_words` -> `sim.tune.live_words` (`0` -> `auto`), and `sim.backend`
--> `sim.tune.backend`. A test or benchmark that needs checkpoints, random `?`
-fill, or a fixed generated tree across runs in one workdir pins
-`--set sim.tune.profile=off`. The full guide is `docs/simopt.md` §13.
+## Simulator checkpoints and observation
+
+The LLVM testbench runner saves the DUT state and testbench locals during
+top-level `tick` loops. Set `sim.checkpoint_every=N` for a fixed cadence, or
+use the default time-based policy. `sim.checkpoint_max=0` retains every
+snapshot. `--restart-cycle N` loads the nearest compatible snapshot at or
+before N. The testbench's `clock` variable still starts at zero in each
+`tick`, while replay uses an absolute cycle number across the test.
+
+`--list-signals` enumerates the DUT fields of a selected test. Use
+`--probe SIG,...` for a per-cycle window, `--break-when 'SIG OP VALUE'` for the
+first matching cycle, and `--query FILE|-|JSON` for a version 1 query batch.
+Queries support `signals`, `value`, `values`, `snapshot`, `diff`, `changes`,
+`next_change`, and `find`. A query can address a memory word by index or use
+the first failing assertion as a cycle anchor. Query outputs describe
+combinational outputs during the period and state after the step.
+
+VCD and value observations replay only the required checkpoint intervals.
+`--set lhd.jobs=N` bounds concurrent interval replay. If a requested range
+precedes the first usable checkpoint, replay begins from power-on.
+`--vcd-from` and `--vcd-to` select an inclusive cycle window. VCD timestamps
+follow the absolute step timeline, with 10 time units per step.
+
+`--setup-only` emits `drv.tb.trace.o` when given a VCD, probe, breakpoint or
+query option. Keep that artifact for later observation with `--run-only`.
+The ordinary simulation object runs the test and determines its verdict.
+A tick drives unbound root clock ports together. Setup names those ports when a
+DUT has several clocks. An explicit waveform on one of several root clocks
+requires independent clock scheduling and produces an unsupported diagnostic.
+
+Incremental setup verifies native objects against their inputs and on-disk
+contents before reuse. The generated-driver profiler, fake VCD delay and
+`end_digest` / `out_digest` result fields were retired with the C++ driver.
+The CLI still recognizes the legacy tuning vocabulary for existing configurations.
 
 ## Pyrope formatter
 

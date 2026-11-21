@@ -46,6 +46,15 @@ cc_library(
     visibility = ["//visibility:public"],
 )
 
+# The simulation-only initialization IR (`initial` blocks with $display / $value$plusargs / $fatal), header-only: the
+# simulator runtime interprets it without linking the rest of core.
+cc_library(
+    name = "sim_program",
+    hdrs = ["sim_program.hpp"],
+    includes = ["."],
+    visibility = ["//visibility:public"],
+)
+
 cc_library(
     name = "core",
     srcs = glob(

@@ -36,7 +36,7 @@ test cnt.runs() {
 EOF
 sed 's/wrap r = r + 1/wrap r = r + undefined_name/' "$W/good.prp" > "$W/bad.prp"
 
-drv="sim/drv.cpp"
+drv="sim/drv.tb.o"
 marker="sim/setup_failed.txt"
 
 # 1) good setup, then a failing setup in the SAME workdir.
@@ -46,7 +46,7 @@ marker="sim/setup_failed.txt"
 if "$LHD" sim "$W/bad.prp" --setup-only --workdir "$W/reuse" > "$W/s2.out" 2>&1; then
   fail "setup of an undefined read passed"
 fi
-[ ! -f "$W/reuse/$drv" ] || fail "failed setup kept the previous $drv (a stale driver --run-only would run)"
+[ ! -f "$W/reuse/$drv" ] || fail "failed setup kept the previous $drv (a stale simulator --run-only would run)"
 [ -f "$W/reuse/$marker" ] || fail "failed setup recorded no $marker"
 
 # 2) --run-only reports THAT error, never the old driver's result.

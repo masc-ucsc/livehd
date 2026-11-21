@@ -118,7 +118,9 @@ TEST(MappedGraph, PhysicalOwnerRetainsAmbiguousNets) {
   };
   hhds::GraphLibrary library;
   std::vector<Net>   unresolved;
-  ASSERT_TRUE(mapped_graph(library, fp, {}, &unresolved));
+  auto graph = mapped_graph(library, fp, {}, &unresolved);
+  ASSERT_TRUE(graph);
+  EXPECT_TRUE(graph->get_output_pin("z").get_driver_pins().empty());
   EXPECT_EQ(unresolved, fp.nets);
 }
 }  // namespace livehd::physical

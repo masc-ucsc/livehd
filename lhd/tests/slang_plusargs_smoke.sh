@@ -2,6 +2,8 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 set -euo pipefail
 LHD="${LHD:-lhd/lhd}"
+SIMRT="${LHD_SIMRT:-$(dirname "$LHD")/lhd_simrt}"
+[ -x "$SIMRT" ] || { echo "lhd_simrt not found next to lhd ($SIMRT)" >&2; exit 1; }
 W="${TEST_TMPDIR:-/tmp/livehd_slang_plusargs_$$}"
 mkdir -p "$W"
 cat > "$W/args.sv" <<'SV'
@@ -58,18 +60,18 @@ test run(cycles:U8=3) {
   tick cycles { d.a = 42; step; assert(d.b == 42) }
 }
 PRP
-  "$LHD" sim "$W/bench.prp" "$kind:$W/$kind" --workdir "$W/$kind-run" --set sim.tune.profile=off > "$W/$kind.log" 2>&1
-  "$W/$kind-run/sim/drv.bin" > "$W/$kind.log" 2>&1
+  "$LHD" sim "$W/bench.prp" "$kind:$W/$kind" --workdir "$W/$kind-run" > "$W/$kind.log" 2>&1
+  "$SIMRT" "$W/$kind-run/sim" > "$W/$kind.log" 2>&1
   grep -q 'SV number=19 file=default.hex h=0 b=0 o=0 p=0 n=0 bar=0' "$W/$kind.log"
 done
-DRV="$W/lg-run/sim/drv.bin"
+drv() { "$SIMRT" "$W/lg-run/sim" "$@"; }
 ARGS=(+number=-7 +number=99 '+file=a=b path.hex' +hex=ff +binary=101 +octal=17 +packed=AB +narrow=255 +barrel)
-"$DRV" "${ARGS[@]}" --result-json "$W/plus.json" > "$W/plus.log" 2>&1
+drv "${ARGS[@]}" --result-json "$W/plus.json" > "$W/plus.log" 2>&1
 grep -q 'SV number=-7 file=a=b path.hex h=255 b=5 o=15 p=4142 n=-1 bar=1' "$W/plus.log"
 [ "$(grep -c '^CHILD bar' "$W/plus.log")" = 2 ]
-"$DRV" +number +number=9 +file= > "$W/empty.log"
+drv +number +number=9 +file= > "$W/empty.log"
 grep -q 'SV number=9 file= h=0 b=0 o=0 p=0 n=0 bar=0' "$W/empty.log"
-if "$DRV" +fail > "$W/fail.log" 2>&1; then echo 'accepted fatal' >&2; exit 1; fi
+if drv +fail > "$W/fail.log" 2>&1; then echo 'accepted fatal' >&2; exit 1; fi
 grep -q 'requested SV failure' "$W/fail.log"
 # A simulation-only edit must invalidate generated code in the same workdir.
 sed 's/int number = 19/int number = 20/; s/number == 19/number == 20/' "$W/args.sv" > "$W/edit.sv"
@@ -78,8 +80,8 @@ cp "$W/edit.sv" "$W/args.sv"
 grep -q "32'sd20" "$W/changed.sv"
 sed 's/ln:args/lg:args/' "$W/bench.prp" > "$W/bench-next.prp"
 cp "$W/bench-next.prp" "$W/bench.prp"
-"$LHD" sim "$W/bench.prp" "lg:$W/lg" --workdir "$W/lg-run" --set sim.tune.profile=off > "$W/edited-sim.log" 2>&1
-"$DRV" > "$W/edited.log"
+"$LHD" sim "$W/bench.prp" "lg:$W/lg" --workdir "$W/lg-run" > "$W/edited-sim.log" 2>&1
+drv > "$W/edited.log"
 grep -q 'SV number=20 file=default.hex' "$W/edited.log"
 # Argument-controlled data, control, and output aliases are hardware influence.
 for statement in 'assign b = x;' 'assign b = x ? a : 0;' 'always_comb if (x) b = a; else b = 0;'; do

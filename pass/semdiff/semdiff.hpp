@@ -382,4 +382,9 @@ Canonical_digest canonical_digest(hhds::Graph* g, const Digest_resolver& resolve
                                   absl::flat_hash_map<hhds::Gid, Canonical_digest>& memo, Sub_fold sub_fold = Sub_fold::merkle,
                                   bool matching_io_names = true);
 
+// Integrity of one serialized definition. Can key feedback by its persisted
+// node indices. The caller must validate every other definition in the same
+// library independently. Never use this digest to transfer a formal verdict.
+Canonical_digest snapshot_digest(hhds::Graph* g);
+
 }  // namespace livehd::semdiff

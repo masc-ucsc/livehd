@@ -298,8 +298,8 @@ _SV_LGYOSYS = [
 # A new ordinary SV regression is one source file: no per-case BUILD or script.
 # Optional // :test: roundtrip|roundtrip_sim|error|lec_no_x headers select shared
 # checks (see tests/slang_compile.sh). A roundtrip_sim fixture carries its
-# :verilog_re:/:verilog_not_re: structure checks and either a sibling
-# <stem>_tb.prp native testbench or a :sim_unsupported: refusal tripwire; an
+# :verilog_re:/:verilog_not_re: structure checks and a sibling
+# <stem>_tb.prp native testbench; an
 # optional <stem>_tb.v event-level bench runs only with LHD_EXTERNAL_SIM=1.
 [sh_test(
     name = "slang_%s" % src.split("/")[-1].rsplit(".", 1)[0],

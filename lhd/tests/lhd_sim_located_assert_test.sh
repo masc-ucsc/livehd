@@ -57,30 +57,16 @@ test cnt.good {
 }
 EOF
 
-# ---- structural: the generated driver carries the located-assert machinery ----
+# ---- structural: the setup lowers the testbench to an object (no generated C++) ----
 "$LHD" sim "$W/la.prp" --setup-only --workdir "$W/s" -q >/dev/null 2>&1 || fail "setup-only failed"
-DRV="$W/s/sim/drv.cpp"
-[ -f "$DRV" ] || fail "driver not generated"
-
-grep -q 'struct _Fail'                  "$DRV" || fail "no _Fail (first-failing-assert) record"
-grep -q '\[\[maybe_unused\]\] long _clk' "$DRV" || fail "no _clk cycle tracker"
-grep -q '_clk = clock;'                 "$DRV" || fail "tick loop does not update _clk"
-grep -q ':assert fail:'                  "$DRV" || fail "no located ':assert fail:' message"
-grep -q 'clock=%ld'                     "$DRV" || fail "located message does not print the cycle"
-grep -q '_ff.has = true'                "$DRV" || fail "first-failing-assert is not captured"
-grep -q '_ff.assertion ='               "$DRV" || fail "failing_assert source is not captured"
-grep -q '_ff.line ='                    "$DRV" || fail "assert line is not captured"
-# the result-json array is a BARE array (the kernel embeds it as the envelope's tests member)
-grep -q 'std::string _rj = "\[";'       "$DRV" || fail "result array is not a bare JSON array"
-grep -q '"--result-json"'               "$DRV" || fail "driver does not accept --result-json"
-grep -q 'failing_assert'                "$DRV" || fail "driver does not emit failing_assert"
-# Operand VALUES go through the Slop decimal formatter (`%s` + to_decimal()), not
-# `%ld` — a wide value must print in full rather than as its low 64 bits.
-# A literal RHS prints only its source (one %s, for the LHS): `v=%s == 30`
-grep -q 'v=%s == 30'                    "$DRV" || fail "literal operand should not print '=value' ($(grep 'la.prp:.*:assert fail:.*== 30' "$DRV"))"
-grep -q '(v).to_decimal().c_str()'      "$DRV" || fail "operand value is not formatted through Slop to_decimal()"
-# two named operands each print their value: `v=%s == expect=%s`
-grep -q 'v=%s == expect=%s'             "$DRV" || fail "both named operands should print their value"
+[ -f "$W/s/sim/drv.tb.o" ] && [ -f "$W/s/sim/drv.tb.json" ] || fail "testbench object/manifest not generated"
+# the manifest carries the located-assert table: the source text of both operands of the compared assert, and its line
+grep -q '"cond":"v == 30"' "$W/s/sim/drv.tb.json" || fail "the located assert's source condition is not recorded: $(head -c 800 "$W/s/sim/drv.tb.json")"
+grep -q '"lhs":"v"' "$W/s/sim/drv.tb.json" && grep -q '"rhs":"30"' "$W/s/sim/drv.tb.json" || fail "the compared operands are not recorded"
+grep -q '"rhs_lit":true' "$W/s/sim/drv.tb.json" || fail "a literal right-hand side should print only its source"
+# two named operands each print their value: `v=10 == expect=99`
+grep -q '"cond":"v == expect"' "$W/s/sim/drv.tb.json" || fail "the two-operand assert is not recorded"
+grep -q '"lhs_lit":false,"rhs_lit":false' "$W/s/sim/drv.tb.json" || fail "both named operands should print their value"
 
 # ---- a `tick` nested in another `tick` is rejected at setup (no shared _clk) ---
 cat > "$W/nest.prp" <<'EOF'
@@ -97,8 +83,6 @@ test cnt.t {
 EOF
 NOUT="$("$LHD" sim "$W/nest.prp" --setup-only --workdir "$W/nest" -q 2>&1)" && fail "nested tick was NOT rejected"
 echo "$NOUT" | grep -q 'cannot be nested' || fail "nested-tick rejection message missing: $NOUT"
-
-# lhd locates its declared simulator runtime files; a failed build must fail.
 
 # the run exits non-zero (asserts fired) but still produces the located stdout + the
 # enriched result envelope.

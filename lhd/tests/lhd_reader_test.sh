@@ -5,10 +5,6 @@
 # frontend, with yosys-slang retained as a compatibility alias.
 
 set -u
-# Pinned to inou.cgen.sim: this test is about that flow's generated sources, color plan, tune/profile
-# machinery or its default undefined-access warnings, none of which the LNAST sim flow (the `lhd sim`
-# default) produces. See AGENTS.md, "Sim flow".
-export LHD_SIM_LNAST=0
 
 LHD=lhd/lhd
 SV=lhd/tests/trivial.v
@@ -73,19 +69,11 @@ EOF
 # file_name.hpp) shared by every per-unit emitter, so EVERY --emit-dir kind
 # that names a file after a unit has to survive the same design. `ln:`/`lg:`
 # name their files by index, so they are not part of this set.
-for kind in verilog pyrope lnast-dump sim; do
+for kind in verilog pyrope lnast-dump; do
   for run in first second; do
     "$LHD" compile "$W/long.sv" --top top --emit-dir "$kind:$W/long-$kind-$run" \
       --workdir "$W/long-$kind-$run-work" -q || fail "long module names broke --emit-dir $kind"
   done
-done
-# Long names must also work at the simulation ROOT, which additionally emits
-# a color-plan report. An incremental configuration change can leave a cached
-# generic specialization as an independent root even when it was formerly a
-# child. The report must use the same shortened stem as its C++ artifacts.
-for run in first second; do
-  "$LHD" compile "$W/long.sv" --top "${long_name}a" --emit-dir "sim:$W/long-sim-root" \
-    --workdir "$W/long-sim-root-work" -q || fail "long root name broke simulator plan emission"
 done
 python3 - "$W" "$long_name" <<'PYCODE' || fail "long filename hashing is incorrect"
 import hashlib, pathlib, sys
@@ -112,13 +100,6 @@ for kind, ext in (('verilog', '.v'), ('pyrope', '.prp'), ('lnast-dump', '.lnast'
         assert '"file":"' + stem + ext + '"' in manifest, (kind, stem)
 # The `.v` sidecar rides the SAME stem, so it stays beside its module.
 assert (root / 'long-verilog-first' / (next(iter(stems.values())) + '.v.map')).is_file()
-# `sim:` names three files per module off the same stem, and lhd re-derives
-# those names to build the BUILD srcs list -- the emit fails outright if the
-# two mappings ever drift apart.
-for stem in stems.values():
-    for ext in ('.hpp', '.cpp', '.iface.json'):
-        assert (root / 'long-sim-first' / (stem + ext)).is_file(), stem + ext
-assert (root / 'long-sim-root' / (stems['a'] + '.color-plan.txt')).is_file()
 PYCODE
 grep -q "module ${long_name}a" "$W/long.v" || fail "first long module identity lost"
 grep -q "module ${long_name}b" "$W/long.v" || fail "second long module identity lost"

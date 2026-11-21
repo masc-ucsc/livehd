@@ -76,3 +76,31 @@ test mwe.memory_write_survives_a_negedge_flop {
     assert((clock >= 2) implies (acc.rd == 99), "the memory write is not dropped by the two-phase tick")
   }
 }
+
+// The rising write takes the previous data. A falling memory also commits,
+// so a falling flop must read the rising memory's committed entry here.
+pub mod mixed(a:U2, d:U8) -> (sample:U8@[1], rd:U8@[0], fallword:U8@[0]) {
+  reg data:U8 = 0
+  reg rising:[4]U8:[ordering="fwd"] = 0
+  reg falling:[4]U8:[posclk=false, ordering="old"] = 0
+  reg captured:U8:[posclk=false] = 0
+  rising[a] = data
+  captured = rising[a]
+  falling[a] = d
+  data = d
+  rd = rising[a]
+  sample = captured
+  fallword = falling[a]
+}
+test mixed.edges {
+  mut m = mixed
+  tick 8 {
+    m.a = clock & 3
+    m.d = clock + 40
+    step
+    const previous = if clock == 0 { 0 } else { clock + 39 }
+    assert(m.rd == previous)
+    assert(m.sample == previous)
+    assert(m.fallword == clock + 40)
+  }
+}

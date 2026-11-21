@@ -81,14 +81,6 @@ if "$LHD" compile "$W/identical.prp" --workdir "$W/identical" \
 fi
 grep -q 'onehot-violated' "$W/identical.jsonl"
 
-# Exercise the same value/default selection in both generated simulators.
+# Exercise the value/default selection in simulation.
 sed 's/hotmux_unique.dec/pairs.dec/' inou/prp/tests/equiv/hotmux_unique_tb.prp > "$W/pairs_tb.prp"
-# Each backend is a ~7s host build in its own workdir and they share nothing, so
-# build them side by side and collect the two exit codes afterwards.
-for backend in slop llvm; do
-  "$LHD" sim "$W/pairs_tb.prp" --set "sim.tune.backend=$backend" --workdir "$W/sim-$backend" &
-  eval "sim_${backend}_pid=$!"
-done
-for backend in slop llvm; do
-  eval "wait \"\${sim_${backend}_pid}\"" || { echo "FAIL: $backend simulation failed" >&2; exit 1; }
-done
+"$LHD" sim "$W/pairs_tb.prp" --workdir "$W/sim" || { echo "FAIL: simulation failed" >&2; exit 1; }

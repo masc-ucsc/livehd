@@ -1,0 +1,28 @@
+/*
+:name: mask_ranges
+:type: simulation
+*/
+pub comb slices(a:U64, shift:U6, b:U4) -> (field:U8, shifted:U64, lo:U1, hi:U1) {
+  field = U8((a >> 12) & 255)
+  shifted = a >> shift
+  mut r:U4 = 0
+  r#[0] = b#[1]
+  r#[1] = b#[3]
+  r#[2] = b#[0]
+  r#[3] = b#[2]
+  lo = r#[0]
+  hi = r#[2]
+}
+test slices.values {
+  mut d = slices
+  tick 64 {
+    d.a = 0x8123456789abcdef
+    d.shift = clock
+    d.b = clock & 15
+    step
+    assert(d.field == 0xbc)
+    assert(d.shifted == (0x8123456789abcdef >> clock))
+    assert(d.lo == ((clock >> 1) & 1))
+    assert(d.hi == (clock & 1))
+  }
+}

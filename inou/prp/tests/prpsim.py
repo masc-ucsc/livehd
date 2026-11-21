@@ -72,6 +72,9 @@ def run_simulation(runner, tmp_dir, test):
         if not sep or not key or not values or any(not v for v in values.split(',')):
             print('{} - simulation - FAILED: invalid :sim_sweep: {}'.format(name, spec))
             return 1
+        if key.startswith('sim.tune.'):
+            # the backend/tuner knobs went with the C++ driver: `lhd sim` has one flow (LLVM) and nothing to tune
+            continue
         choices.append([key + '=' + v for v in values.split(',')])
     vectors = list(itertools.product(*choices)) if choices else [()]
     base = runner._scratch(test, 'simulation')

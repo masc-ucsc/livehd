@@ -1,0 +1,25 @@
+// This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+//
+// Native-sim bench of blocking_array_named_clock.sv: the negedge array clears both slots and then writes
+// slot[idx] = d when `en`; the posedge register `r` takes d at the rise.
+const dut = import("lg:blocking_array_named_clock")
+
+test blocking_array_named_clock.edges {
+  mut acc = dut
+  acc.en  = true
+  acc.idx = 0
+  acc.d   = 5
+  step
+  assert(acc.q == 0x05, "slot[0] = d, slot[1] cleared")
+  assert(acc.r == 5, "r takes d at the rise")
+  acc.idx = 1
+  acc.d   = 3
+  step
+  assert(acc.q == 0x30, "slot[1] = d, slot[0] cleared again")
+  assert(acc.r == 3, "r follows d")
+  acc.en = false
+  acc.d  = 9
+  step
+  assert(acc.q == 0x00, "no enable: both slots cleared")
+  assert(acc.r == 9, "r still follows d")
+}

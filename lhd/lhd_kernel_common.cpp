@@ -46,7 +46,7 @@
 #include "liberty_dff.hpp"
 #include "job_manager.hpp"
 #include "lhd_kernel_internal.hpp"
-#include "lhd_sim_tune_session.hpp"
+#include "lhd_sim_options.hpp"
 #include "lnast.hpp"
 #include "lnast_sim.hpp"
 #include "log.hpp"
@@ -762,7 +762,7 @@ void run_step(std::string_view method, Eprp_var& var, const Eprp_var::Eprp_dict&
       // Reject unresolved compiled IR before codegen, mapping or proof. This
       // also covers lg: inputs and cache restores which skip bitwidth.
       if (mapper_of_method(method) || method == "pass.formal" || method == "pass.lec"
-          || method == "inou.cgen.verilog" || method == "inou.cgen.sim") {
+          || method == "inou.cgen.verilog") {
         for (const auto& graph : var.graphs) {
           if (graph) {
             livehd::graph_util::require_sized_design(*graph, method);
@@ -1612,7 +1612,7 @@ void check_known_set_passes(const Options& opts) {
                         near.empty() ? std::format("the sim.* namespace takes: {}", known)
                                      : std::format("{}\nthe sim.* namespace takes: {}", near, known)};
       }
-      // The value grammar of every Sim_set_option::Kind (lhd_sim_tune_session.cpp).
+      // The value grammar of every Sim_set_option::Kind (lhd_sim_options.cpp).
       if (auto [msg, hint] = sim_set_value_error(*opt, value); !msg.empty()) {
         throw Lhd_error{"usage", std::move(msg), std::move(hint)};
       }
@@ -2975,16 +2975,11 @@ void emit_verilog_outputs(Options& opts, Result& res, Eprp_var& var) {
   }
 }
 
-// Run inou.cgen.sim: a <module>.hpp interface + <module>.cpp body per
-// graph into `odir`. Mirrors cgen_into — seed odir, run the step, then assert
-// each pair exists.
+// The DUT side of `lhd sim`: lgraph -> typed LNAST -> native state kernels into `odir` (the stems it wrote).
 std::vector<std::string> sim_into(Options& opts, Result& res, Eprp_var& var, const std::string& odir) {
   ensure_dir(odir);
 
-  // Resolve --top once against the loaded graphs. inou.cgen.sim accepts the
-  // FULL internal name (file.entity) — the only
-  // spelling that disambiguates two same-entity modules. An unresolvable name
-  // passes through unchanged (with a warning: the VCD would not self-root).
+  // Resolve the full graph name once to disambiguate modules with the same entity name.
   std::string top_full;
   if (!opts.top.empty() && opts.top != "-auto-top") {
     std::vector<std::string> names;
@@ -3050,33 +3045,20 @@ std::vector<std::string> sim_into(Options& opts, Result& res, Eprp_var& var, con
   if (!top_full.empty()) {
     labels["top"] = top_full;  // only the top module emits the VCD
   }
-  // The LNAST flow (pass/lnast_llvm/lnast_sim.hpp): lgraph -> typed LNAST -> native state kernels
-  // behind one thin class. It is the DEFAULT `lhd sim` backend; a design (or observation run) it
-  // does not cover yet falls back to inou.cgen.sim with a `lnast-fallback` progress note. The
-  // developer switch LHD_SIM_LNAST selects: unset/`auto` = LNAST flow with fallback, `1` = LNAST
-  // flow required (a design it does not cover is an error), `0` = inou.cgen.sim only.
-  const char* lnast_mode = livehd::debug::env<"LHD_SIM_LNAST">();
-  if (lnast_mode == nullptr || *lnast_mode == 0) {
-    lnast_mode = "auto";
-  }
-  // Only the `lhd sim` command takes the LNAST flow by default: `lhd compile --emit-dir sim:` hands the
-  // generated class to other tools (the equivalence-sim harness drives `dut.cycle()`), and that class API is
-  // inou.cgen.sim's. LHD_SIM_LNAST=1 asks for it anywhere.
-  const bool sim_command = opts.command == "sim";
-  if (std::string_view(lnast_mode) != "0" && !g_lnast_sim_off && (sim_command || std::string_view(lnast_mode) != "auto")) {
-    const bool  required = std::string_view(lnast_mode) != "auto";
+  // `lhd sim` has ONE flow (todo/livehd/2sl-llvm-only-sim.md): lgraph -> typed LNAST (pass.lg2lnast) -> native state
+  // kernels (pass/lnast_llvm), with the testbench lowered to an object beside them (inou/prp/tb_llvm). A design or run
+  // it cannot do is an error. The standalone kernel exporter is lhd pass lnast-llvm.
+  if (opts.command == "sim") {
     std::string declined;
-    if (!opts.sim_probe.empty() || !opts.sim_break_when.empty() || !opts.sim_query.empty() || opts.sim_list_signals
-        || opts.sim_restart_cycle >= 0) {
-      declined = "probe, break-when, query, list-signals and restart runs are not covered yet";
-    } else if (labels["backend"] == "slop") {
-      declined = "sim.tune.backend=slop selects the reference C++ backend";
+    if (labels["backend"] == "slop") {
+      declined = "sim.tune.backend=slop: the generated-C++ Slop simulator was removed (the LLVM kernels are the only simulator)";
     } else {
       livehd::lnast_llvm::Sim_request request;
-      request.graphs = var.graphs;
-      request.top    = top_full;
-      request.odir   = odir;
-      request.vcd = labels.contains("vcd") && !labels["vcd"].empty();
+      request.graphs       = var.graphs;
+      request.top          = top_full;
+      request.odir         = odir;
+      request.incremental  = opts.incremental;
+      request.dump_bitcode = opts.sim_dump_bitcode;
       if (auto uz = labels.find("unknown_zero"); uz != labels.end()) {
         request.unknown_zero = uz->second == "true" || uz->second == "1" || uz->second == "on";
       }
@@ -3085,8 +3067,8 @@ std::vector<std::string> sim_into(Options& opts, Result& res, Eprp_var& var, con
           request.passes = v;
         }
       }
-      // `lhd sim`: the last source holds the test blocks; the modules it imports are the DUTs.
-      if (opts.command == "sim" && !opts.files.empty()) {
+      // the last source holds the test blocks; the modules it imports are the DUTs
+      if (!opts.files.empty()) {
         std::ifstream     tb(opts.files.back());
         std::stringstream text;
         text << tb.rdbuf();
@@ -3104,70 +3086,12 @@ std::vector<std::string> sim_into(Options& opts, Result& res, Eprp_var& var, con
       }
       declined = emitted.why;
     }
-    if (required) {
-      throw Lhd_error{"unsupported",
-                      std::format("the LNAST sim flow does not cover this run: {}", declined),
-                      "unset LHD_SIM_LNAST (or set it to auto) to simulate with inou.cgen.sim"};
-    }
-    livehd::diag::outcome("lhd.sim", "lnast-fallback", "progress")
-        .msg("LNAST sim flow declined ({}); using inou.cgen.sim", declined)
-        .emit();
+    throw Lhd_error{"unsupported", std::format("`lhd sim` does not cover this run: {}", declined), ""};
   }
-  run_step("inou.cgen.sim", var, labels, opts, res);
-
-  std::vector<std::string> names;
-  names.reserve(var.graphs.size());
-  for (const auto& g : var.graphs) {
-    std::string gn     = std::string{g->get_name()};
-    auto        entity = gn.substr(gn.rfind('.') + 1);
-    // Skip compiler-minted (`%`-named) graphs: a `test` block lowers to one, and
-    // inou.cgen.sim does not emit it (it is a testbench, not hardware), so it
-    // must not appear in the build's source list or the manifest either.
-    if (!entity.empty() && entity.front() == '%') {
-      continue;
-    }
-    // Mirror inou.cgen.sim's file-name mapping — the ONE long-name policy: a
-    // '/' from a path-qualified import (`../pp.Foo`) is a directory separator
-    // that collapses to '_', and a generated name past NAME_MAX is shortened.
-    // The existence check and the BUILD srcs list must reference the SAME
-    // basename cgen actually wrote.
-    names.emplace_back(livehd::unit_file_stem(gn));
-  }
-  // Simulator-private loop fusion/specialization can emit definitions absent
-  // from var.graphs: `<graph>__k<key>` bodies of a graph compiled in THIS run.
-  // Their iface sidecars identify module bodies, unlike an arbitrary user .cpp
-  // or the separately collected evaluator shards. Only a specialization of a
-  // current graph counts: a sidecar a previous run left for a module that no
-  // longer exists must not enter the build.
-  const absl::flat_hash_set<std::string> current(names.begin(), names.end());
-  for (const auto& entry : fs::directory_iterator(odir)) {
-    const auto filename = entry.path().filename().string();
-    if (!entry.is_regular_file() || !filename.ends_with(".iface.json")) {
-      continue;
-    }
-    const auto stem = filename.substr(0, filename.size() - std::string_view{".iface.json"}.size());
-    for (auto k = stem.find("__k"); k != std::string::npos; k = stem.find("__k", k + 1)) {
-      if (current.contains(stem.substr(0, k))) {
-        names.push_back(stem);
-        break;
-      }
-    }
-  }
-  std::sort(names.begin(), names.end());
-  names.erase(std::unique(names.begin(), names.end()), names.end());
-  for (const auto& n : names) {
-    // `iface.json` is the per-module manifest prp_sim reads to learn the DUT
-    // interface (2f-sim B0). Checking it here turns a missing/failed manifest
-    // into a precise "cgen.sim did not produce X" instead of the downstream
-    // "no DUT modules found in <simdir>" that the driver generator would raise.
-    for (const char* ext : {"hpp", "cpp", "iface.json"}) {
-      auto f = std::format("{}/{}.{}", odir, n, ext);
-      if (::access(f.c_str(), R_OK) != 0) {
-        throw Lhd_error{"internal", std::format("inou.cgen.sim did not produce {}", f), "check the step log in --workdir"};
-      }
-    }
-  }
-  return names;
+  // The generated C++ simulator (inou.cgen.sim) is gone: `--emit-dir sim:` is only the directory `lhd sim` writes.
+  throw Lhd_error{"unsupported",
+                  "`--emit-dir sim:` no longer generates a C++ simulator (inou.cgen.sim was removed)",
+                  "run `lhd sim` to simulate, or `lhd pass lnast-llvm --emit-dir sim:DIR` for the native kernels"};
 }
 
 // Locate a header staged in the bazel RUNFILES of the running binary (e.g. the
@@ -3274,140 +3198,8 @@ std::string find_header_in_runfiles(std::string_view header) {
   return result;
 }
 
-// hlop checkout for the sim host build:
-// `--set sim.hlop_dir=DIR` wins (point the sim build at a WORKING hlop
-// checkout — the reason to keep this knob is testing new slop/vcd_writer
-// code without reinstalling), else the sibling ../hlop of the CWD (the dev
-// layout), else the bazel runfiles in sim_hlop_include_dir().
-//
-// Historical note: this began as `compile.cgen.sim_hlop`, which was never
-// registered in the options registry, so passing the flag lhd's own hint
-// printed was rejected as unknown. It is now `sim.hlop_dir` in kSimSetOptions
-// (validated, listed, and in the hint) — this reader and the lec/verify
-// forwarders must match THAT spelling, or the knob validates and then
-// silently does nothing.
-std::string sim_hlop_path(const Options& opts) {
-  for (const auto& [k, v] : opts.sets) {
-    if (k == "sim.hlop_dir" && !v.empty()) {
-      return v;
-    }
-  }
-  std::error_code ec;
-  auto            p = std::filesystem::weakly_canonical(std::filesystem::current_path(ec) / ".." / "hlop", ec);
-  return p.empty() ? std::string{"../hlop"} : p.string();
-}
-
-// The `-I` directory that resolves `#include "slop.hpp"` (and blop.hpp /
-// vcd_writer.hpp): the `hlop/` subdir of the hlop module root, falling back to
-// the module root itself in case the root already points at the header dir.
-//
-// PRECEDENCE: an explicit `--set sim.hlop_dir=DIR` is the ONLY authority when
-// it is given -- it must not silently resolve against bazel runfiles instead,
-// or a deliberate override would be ignored, so an explicit root that has no
-// slop.hpp returns empty and the caller reports it. Without an override the
-// runfiles copy wins over the `../hlop` guess: inside a bazel test the sibling
-// checkout may not exist at all, and if it does it is not the tree the test
-// was built against.
-std::string sim_hlop_include_dir(const Options& opts) {
-  bool explicit_root = false;
-  for (const auto& [key, value] : opts.sets) {
-    if (key == "sim.hlop_dir" && !value.empty()) {
-      explicit_root = true;
-      break;
-    }
-  }
-  if (!explicit_root) {
-    if (const auto runfiles = find_header_in_runfiles("slop.hpp"); !runfiles.empty()) {
-      return runfiles;
-    }
-  }
-  const auto root = sim_hlop_path(opts);
-  for (const auto& cand : {root + "/hlop", root}) {
-    if (::access((cand + "/slop.hpp").c_str(), R_OK) == 0) {
-      return cand;
-    }
-  }
-  return {};  // the runfiles probe above already ran for the non-explicit case
-}
-
-// The `-I` directory that resolves `#include "iassert.hpp"` (slop.hpp pulls it
-// in): `--set sim.iassert_dir=DIR` wins, else the sibling
-// `../iassert` of the hlop root / CWD, where the header lives under `src/`,
-// else the bazel runfiles. Empty -> not found.
-std::string sim_iassert_include_dir(const Options& opts) {
-  std::vector<std::string> cands;
-  for (const auto& [k, v] : opts.sets) {
-    if (k == "sim.iassert_dir" && !v.empty()) {
-      cands.push_back(v);
-    }
-  }
-  std::error_code ec;
-  const auto      hlop_root = std::filesystem::path(sim_hlop_path(opts));
-  for (const auto& base : {hlop_root.parent_path(), std::filesystem::current_path(ec) / ".."}) {
-    cands.push_back((base / "iassert" / "src").string());
-    cands.push_back((base / "iassert").string());
-  }
-  for (const auto& cand : cands) {
-    if (::access((cand + "/iassert.hpp").c_str(), R_OK) == 0) {
-      return cand;
-    }
-  }
-  return find_header_in_runfiles("iassert.hpp");  // bazel runfiles fallback
-}
-
-// Host C++ compiler for the fast (header-only + optional VCD) sim build. The Slop
-// runtime needs C++23; the repo already requires a C++23 toolchain to build lhd,
-// so the host compiler has it. $CXX wins (CI override), then the usual names.
-std::string sim_host_cxx() {
-  std::vector<std::string> cands;
-  if (const char* cxx = std::getenv("CXX"); cxx != nullptr && cxx[0] != '\0') {
-    cands.emplace_back(cxx);
-  }
-  cands.insert(cands.end(), {"clang++", "c++", "g++"});
-  const char* path = std::getenv("PATH");
-  for (const auto& c : cands) {
-    if (c.find('/') != std::string::npos) {  // an explicit path ($CXX)
-      if (::access(c.c_str(), X_OK) == 0) {
-        return c;
-      }
-      continue;
-    }
-    for (std::string_view dirs = (path != nullptr ? path : ""); !dirs.empty();) {
-      auto             sep = dirs.find(':');
-      std::string_view d   = dirs.substr(0, sep);
-      if (!d.empty() && ::access((std::string(d) + "/" + c).c_str(), X_OK) == 0) {
-        return c;  // on PATH
-      }
-      dirs = (sep == std::string_view::npos) ? std::string_view{} : dirs.substr(sep + 1);
-    }
-  }
-  return "c++";  // last resort (POSIX): let exec resolve it
-}
-
-// The LLVM simulator emits bitcode with the LLVM linked into lhd. A host
-// compiler may use a different LLVM version, so its linker cannot safely read
-// those files. This companion binary uses lhd's exact LLVM to inline the color
-// kernels into a host-compiler bitcode TU and emits one ordinary native object.
-std::string sim_llvm_link_tool() {
-  const auto dir = find_header_in_runfiles("llvm_sim_link");
-  if (!dir.empty()) {
-    const auto path = dir + "/llvm_sim_link";
-    if (::access(path.c_str(), X_OK) == 0) {
-      return path;
-    }
-  }
-  return {};
-}
-
-// `--emit-dir sim:DIR/` — inou.cgen.sim. Writes the per-module Slop<N> structs:
-// the pass writes a <name>.hpp interface + a <name>.cpp body per module, here we
-// add the manifest (content hashes of every generated source and kernel
-// object). There is no bazel/ninja project: `lhd sim` rebuilds the directory.
-bool lnast_sim_may_fall_back() {
-  const char* mode = livehd::debug::env<"LHD_SIM_LNAST">();
-  return mode == nullptr || *mode == 0 || std::string_view(mode) == "auto";
-}
-
+// `--emit-dir sim:DIR/` — the simulator directory `lhd sim` writes: the kernel objects of pass.lnast_sim plus a
+// manifest of their content hashes.
 void emit_sim_outputs(Options& opts, Result& res, Eprp_var& var) {
   const auto* sim_out = find_slot(opts.emit_dirs, "sim");
   if (sim_out == nullptr) {
@@ -3418,54 +3210,26 @@ void emit_sim_outputs(Options& opts, Result& res, Eprp_var& var) {
                     "no synthesizable modules to emit as sim:",
                     "the design produced no LGraphs (a pure-comptime program has no module IO)"};
   }
-  const auto&              dir   = sim_out->path;
-  auto                     names = sim_into(opts, res, var, dir);  // writes <name>.hpp + <name>.cpp + checks
-  std::vector<std::string> color_aux_sources;
-  std::vector<std::string> color_objects;
-  {
-    std::error_code ec;
-    for (const auto& entry : fs::directory_iterator(dir, ec)) {
-      const auto filename = entry.path().filename().string();
-      if (!entry.is_regular_file()) {
-        continue;
-      }
-      // `.color-commit-` belongs here with the other two: a design large enough
-      // to shard its state commit (>512 members) emits those TUs exactly like
-      // the evaluator shards, and omitting them left the generated BUILD and
-      // manifest.json describing a tree that cannot link. `lhd sim`'s own build
-      // globs the directory, so only the hand-buildable bazel/manifest path was
-      // affected — which is precisely the path nothing in CI exercises.
-      // The root-only sim.tune TUs (`.tune-id.cpp`: the baked vector/structure
-      // identity; `.tune.cpp`: the profiler's support tables) and the
-      // `.color-bind-` shards link into the same library.
-      if ((filename.find(".color-kernel-") != std::string::npos || filename.find(".color-eval-") != std::string::npos
-           || filename.find(".color-commit-") != std::string::npos || filename.find(".color-bind-") != std::string::npos
-           || filename.ends_with(".tune-id.cpp") || filename.ends_with(".tune.cpp"))
-          && filename.ends_with(".cpp")) {
-        color_aux_sources.push_back(filename);
-      } else if (filename.ends_with(".llvm.o")) {  // color kernels AND <stem>.native-loop.llvm.o, as `lhd sim` globs
-        color_objects.push_back(filename);
-      }
-    }
-    std::ranges::sort(color_aux_sources);
-    std::ranges::sort(color_objects);
-  }
-
-  // A missing file hashes as empty bytes.
+  const auto&                                   dir   = sim_out->path;
+  const auto                                    stems = sim_into(opts, res, var, dir);
   std::vector<std::pair<std::string, uint64_t>> manifest;
-  for (const auto& n : names) {
-    std::string bytes;
-    for (const char* ext : {"hpp", "cpp"}) {
-      bytes += livehd::file_utils::read_file(std::format("{}/{}.{}", dir, n, ext)).value_or("");
+  const auto                                    record = [&](const std::string& unit, const fs::path& path) {
+    const auto bytes = livehd::file_utils::read_file(path.string());
+    if (!bytes) {
+      throw Lhd_error{"config", "could not read simulator output " + path.string(), ""};
     }
-    manifest.emplace_back(n, hash_bytes(bytes));
+    manifest.emplace_back(unit, hash_bytes(*bytes));
+  };
+  for (const auto& stem : stems) {
+    record(stem, fs::path(dir) / (stem + ".dut.json"));
   }
-  for (const auto& source : color_aux_sources) {
-    manifest.emplace_back(source, hash_bytes(livehd::file_utils::read_file(std::format("{}/{}", dir, source)).value_or("")));
+  for (const auto& entry : fs::directory_iterator(dir)) {
+    const auto filename = entry.path().filename().string();
+    if (filename.ends_with(".llvm.o")) {
+      record(filename, entry.path());
+    }
   }
-  for (const auto& object : color_objects) {
-    manifest.emplace_back(object, hash_bytes(livehd::file_utils::read_file(std::format("{}/{}", dir, object)).value_or("")));
-  }
+  std::ranges::sort(manifest);
   write_manifest(dir, "sim", manifest);
   res.outputs.push_back(dir);
 }
@@ -3620,15 +3384,19 @@ void emit_pyrope_single_file(Options& opts, Result& res, Eprp_var& var) {
 // anything imports pulled in) — fold them into the depfile prerequisites.
 // Returns the harvested closure by itself (res.inputs also holds the declared
 // inputs) so write_unused_inputs can subtract it from the declared files.
-std::vector<std::string> harvest_source_files(Result& res, const std::vector<std::shared_ptr<Lnast>>& units) {
-  std::vector<std::string> closure;
-  for (const auto& ln : units) {
-    if (!ln) {
-      continue;
-    }
-    const auto& sl = ln->source_locator();
-    for (uint32_t fid = 0; fid < sl.file_count(); ++fid) {
-      closure.emplace_back(sl.file_path(fid));
+std::vector<std::string> harvest_source_files(Result& res, const std::vector<std::shared_ptr<Lnast>>& units,
+                                              std::vector<std::string> closure) {
+  // A deferred Pyrope forest may contain only edited roots, or no roots on a
+  // total graph hit. Its source scan already resolved every file actually read.
+  if (closure.empty()) {
+    for (const auto& ln : units) {
+      if (!ln) {
+        continue;
+      }
+      const auto& sl = ln->source_locator();
+      for (uint32_t fid = 0; fid < sl.file_count(); ++fid) {
+        closure.emplace_back(sl.file_path(fid));
+      }
     }
   }
   std::sort(closure.begin(), closure.end());
