@@ -33,8 +33,8 @@ same output format, so the two routes' traces compare line for line. A
 certificate `compileDesign` refuses is reported and exits 1.
 
 On `route:vc` the compiled program is OPTIMIZED once before the first step
-(`ResidualOpt.optimize`: unreachable bindings and unread sources dropped, identical
-constants shared), and `compileOpt_correct` proves the optimized program equal to
+(`ResidualOpt.optimize`: bindings whose operands are all constants folded into
+constants, unreachable bindings and unread sources dropped, identical constants shared), and `compileOpt_correct` proves the optimized program equal to
 `interpretDesign` too, so the trace is the same. `opt:off` runs the unoptimized program;
 `opt:stats` prints, on stderr, the program's size before and after and whether the
 optimizer's certificate was accepted (a refused one runs the unoptimized program).
