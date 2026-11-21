@@ -5,8 +5,9 @@ Tests for vc's optimizer and its checker (`Compiler.ResidualOpt`).
 
 `ResidualOptSound.optimize_correct` already PROVES that `optimize` never changes a result;
 these cases check that the optimizer does what it should (drops what is dead, shares equal
-constants), that the checker refuses wrong certificates, and that the optimized program
-runs step for step like the original, a memory included.
+constants, folds constant bindings and propagates them), that the checker refuses wrong
+certificates, and that the optimized program runs step for step like the original, a
+memory included.
 
 Prints `PASS residual_opt: <n> cases` or one `FAIL` line per case that went wrong.
 -/
@@ -25,6 +26,19 @@ def prog : ResidualProgram :=
     outputs := #[{ slot := 6, width := 8 }, { slot := 10, width := 8 }]
     flopUpdates := #[{ width := 8, din := 7, enable := none, resetPin := none, resetValue := 0,
                        resetActiveLow := false, clock := 0, asyncReset := false }]
+    memoryUpdates := #[] }
+
+/-- Folding. Sources: 0 input a, 1 const 3, 2 const 4. Bindings (slots 3..7):
+3 = 3 + 4 (a constant: 7), 4 = 3 * a (reads the folded 3), 5 = 1 xor 3 (a constant through
+the folded 3: 3 ^ 7 = 4, the value of source 2), 6 = 1 + 1 (a constant read only by a folded
+binding), 7 = 6 xor 2 (6 ^ 4 = 2). Outputs: slots 4, 5 and 7. Expected: one binding (4) is
+left; the sources are a, the constant 7 and the constant 4 (5's value) and 2 (7's). -/
+def foldProg : ResidualProgram :=
+  { sources := #[.input 0 8, .const 8 3, .const 8 4]
+    bindings := #[⟨.bv 8, .rsum 8 2 #[1, 2]⟩, ⟨.bv 8, .rmult 8 #[3, 0]⟩, ⟨.bv 8, .rxor 8 #[1, 3]⟩,
+                  ⟨.bv 8, .rsum 8 2 #[1, 1]⟩, ⟨.bv 8, .rxor 8 #[6, 2]⟩]
+    outputs := #[{ slot := 4, width := 8 }, { slot := 5, width := 8 }, { slot := 7, width := 8 }]
+    flopUpdates := #[]
     memoryUpdates := #[] }
 
 /-- A 12-word memory, written and read through the clamp `x < 12 ? x : 0`, with the clamp
@@ -81,7 +95,35 @@ def main : IO UInt32 := do
   for (name, w) in wrong do
     n := n + 1
     fails := check s!"refused: {name}" (!validate prog w) fails
-  -- 4. a compiled program with a memory, 40 steps, optimized against unoptimized
+  -- 4. folding and propagation
+  let (F, accF) := optimizeWith foldProg
+  n := n + 4
+  fails := check "the checker accepted the folding certificate" accF fails
+  fails := check s!"folded: bindings 5 -> 1 (got {F.bindings.size})" (F.bindings.size == 1) fails
+  fails := check s!"folded: sources a, 7, 4, 2 (got {repr F.sources})"
+    (F.sources == #[.input 0 8, .const 8 7, .const 8 4, .const 8 2]) fails
+  fails := check "folded: the kept product reads the folded 7"
+    (F.bindings.map (·.rhs) == #[.rmult 8 #[1, 0]]) fails
+  for a in [0, 1, 5, 200, 255] do
+    n := n + 1
+    let i : RuntimeInput := #[mk_bv 8 a]
+    let s : RuntimeState := { flops := #[], mems := #[] }
+    fails := check s!"folded: same step at a={a}"
+      (same (denoteResidual F #[true] i s) (denoteResidual foldProg #[true] i s)) fails
+  let cf := optimizeRaw foldProg
+  let wrongF : List (String × OptCert) := [
+    ("a binding that reads an input marked a constant",
+      { cf with fold := cf.fold.set! 1 true, keep := cf.keep.set! 1 false }),
+    ("a folded binding at a source with another constant",
+      { cf with newSources := cf.newSources.set! 1 (.const 8 6) }),
+    ("a folded binding at a source of another width",
+      { cf with newSources := cf.newSources.set! 1 (.const 9 7) }),
+    ("a folded binding at an input source", { cf with pos := cf.pos.set! 3 0 }),
+    ("a read binding neither kept nor folded", { cf with fold := cf.fold.set! 0 false })]
+  for (name, w) in wrongF do
+    n := n + 1
+    fails := check s!"refused: {name}" (!validate foldProg w) fails
+  -- 5. a compiled program with a memory, 40 steps, optimized against unoptimized
   match compileDesign ramCert with
   | .error e => fails := fails.push s!"compileDesign refused the RAM: {repr e}"
   | .ok R =>

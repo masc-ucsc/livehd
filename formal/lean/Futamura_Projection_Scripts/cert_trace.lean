@@ -1,6 +1,6 @@
 /-
 `cert_trace` -- the per-step OUTPUTS of `interpretDesign` on a certificate
-(computed by `directStep`, proved equal to it),
+(computed by `directStep`, proved equal to it; the certificate check runs once),
 under a supplied stimulus. The oracle side of an RTL differential: the same
 `stim v1` file drives an event simulator on the original RTL, and the two
 traces are compared line by line.
@@ -33,8 +33,8 @@ same output format, so the two routes' traces compare line for line. A
 certificate `compileDesign` refuses is reported and exits 1.
 
 On `route:vc` the compiled program is OPTIMIZED once before the first step
-(`ResidualOpt.optimize`: unreachable bindings and unread sources dropped, identical
-constants shared), and `compileOpt_correct` proves the optimized program equal to
+(`ResidualOpt.optimize`: bindings whose operands are all constants folded into
+constants, unreachable bindings and unread sources dropped, identical constants shared), and `compileOpt_correct` proves the optimized program equal to
 `interpretDesign` too, so the trace is the same. `opt:off` runs the unoptimized program;
 `opt:stats` prints, on stderr, the program's size before and after and whether the
 optimizer's certificate was accepted (a refused one runs the unoptimized program).
@@ -240,21 +240,34 @@ def main (args : List String) : IO UInt32 := do
           s := r.nextState
         saveAt (start + cycles) s
         return 0
-    for k in List.range' start cycles do
-      saveAt k s
-      -- `directStep` is proved equal to `interpretDesign` on every input it
-      -- accepts (`directStep_correct`; it refuses a certificate or runtime shape
-      -- outside the checked fragment instead of stepping it). Executing
-      -- `interpretDesign` itself is exponential in the number of steps on a
-      -- design with a memory: measured on a 16x4 register file, 7 s for 10
-      -- steps and about 2.3x per extra step, against 0.6 s for 200 steps here.
-      let r ← match Compiler.Direct.directStep D (edgesAt D third sched k) (inputAt D st k) s with
-        | .ok r => pure r
-        | .error e => do IO.eprintln s!"step {k}: refused: {e.render}"; return 1
-      IO.println s!"STEP {k} {" ".intercalate (r.outputs.toList.map (fun o => toString (bv_uint o)))}"
-      s := r.nextState
-    saveAt (start + cycles) s
-    return 0
+    -- `directStep` is proved equal to `interpretDesign` on every input it
+    -- accepts (`directStep_correct`; it refuses a certificate or runtime shape
+    -- outside the checked fragment instead of stepping it). Executing
+    -- `interpretDesign` itself is exponential in the number of steps on a
+    -- design with a memory: measured on a 16x4 register file, 7 s for 10
+    -- steps and about 2.3x per extra step, against 0.6 s for 200 steps here.
+    -- `directStep` checks the certificate (`checkDesign`) and then the step's
+    -- shapes; the certificate check reads only the certificate, so it runs once
+    -- here, and each step runs `directStepChecked`, which is `directStep` on
+    -- every step once the check has passed (`directStepChecked_eq`). A refused
+    -- certificate is reported at the first step, as `directStep` reports it.
+    match Compiler.Direct.checkDesign D with
+    | .error e =>
+      if cycles > 0 then
+        IO.eprintln s!"step {start}: refused: {e.render}"
+        return 1
+      saveAt start s
+      return 0
+    | .ok _ =>
+      for k in List.range' start cycles do
+        saveAt k s
+        let r ← match Compiler.Direct.directStepChecked D (edgesAt D third sched k) (inputAt D st k) s with
+          | .ok r => pure r
+          | .error e => do IO.eprintln s!"step {k}: refused: {e.render}"; return 1
+        IO.println s!"STEP {k} {" ".intercalate (r.outputs.toList.map (fun o => toString (bv_uint o)))}"
+        s := r.nextState
+      saveAt (start + cycles) s
+      return 0
   | _ =>
     IO.eprintln "usage: cert_trace <cert> <cycles> <stim> [edges:all|edges:third] [init:reset|init:zero] [route:ir|route:vc] [opt:off] [opt:stats] [ckpt-in:<file>] [ckpt-at:<cycle>:<file>] [ckpt-out:<file>]"
     return 2
