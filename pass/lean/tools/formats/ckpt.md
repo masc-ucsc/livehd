@@ -110,6 +110,22 @@ trailing bytes after the digest line, and a digest mismatch.
 - `restore_save_flop`, `restore_save_mem` (T3): the restored state reads like the saved one,
   each flop at its declared width and each memory word below `depth` at the memory's width.
 
+`Projection/CkptResume.lean` proves that this is all a step can see:
+- `step_agree` (T4): two states that agree where a step can see them (each flop at its declared
+  width, each memory word below `depth` by its unsigned value) give equal outputs and next
+  states that agree again, on every input and clock vector. `trace_agree` extends it to every
+  tick sequence.
+- `resume_exact_reached`: for every state a run from power-on reaches, a run from its saved and
+  restored checkpoint prints exactly the outputs the run itself prints, on every tick
+  sequence. `resume_exact_from_ckpt` says the same for a run that started from a valid
+  checkpoint, so a chain of resumes is exact too.
+
+The hypotheses are the checks the loader and `validate` already run: the direct simulator
+accepts the certificate (`checkDesign`), its memory addresses pass the load-time check
+(`MemAddr.addrError`), and the two certificate rules of `validate` hold (`imgRootError`,
+`wordError`). The second certificate rule is what makes a saved word all of the stored word:
+every state a run reaches keeps each word at most `dw` bits wide (`wordsFit_trace`).
+
 ## `lhd_ckpt`
 
 ```

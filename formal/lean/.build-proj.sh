@@ -150,6 +150,8 @@ MODULES=(
   Compiler/CkptSound
   # ... and on the FP route: a checkpoint as its StateM (toStateM_denote, T6)
   Projection/CkptStateM
+  # ... and resuming is exact: states equal where a step can see them step alike (T4)
+  Projection/CkptResume
   # The central audit: `#audit_axioms` FAILS this build on any axiom outside
   # propext/Classical.choice/Quot.sound. The memory-route modules above audit
   # their own theorems in place with the same command.
@@ -216,6 +218,7 @@ TOOL_MODULES=(
   # definitions and the witness checker (ckpt_reach)
   HDLProof/Run/Stim
   HDLProof/Reach/Defs
+  HDLProof/Reach/Refute
   # running a program on a design (cert_run; formats/run.md, formats/bind.md): ports by name,
   # program images, the steppers, the host, one cycle, its soundness, VCD
   HDLProof/Run/IoMeta HDLProof/Run/Image HDLProof/Run/Backend HDLProof/Run/Host
