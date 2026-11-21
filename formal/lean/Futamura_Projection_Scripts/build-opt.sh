@@ -112,6 +112,9 @@ TOOL_MODULES=(
   HDLProof/Kit/Driver
   # stimulus files as ticks, and reachability (ckpt_reach)
   HDLProof/Run/Stim HDLProof/Reach/Defs
+  # running a program on a design (cert_run)
+  HDLProof/Run/IoMeta HDLProof/Run/Image HDLProof/Run/Backend HDLProof/Run/Host
+  HDLProof/Run/Loop HDLProof/Run/Sound HDLProof/Run/Vcd
 )
 [ $# -ge 1 ] || { echo "usage: OPT=.. ROOT=.. build-opt.sh probe.lean [probe.lean ...]" >&2; exit 2; }
 JOBS=${JOBS:-4}

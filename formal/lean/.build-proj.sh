@@ -216,6 +216,10 @@ TOOL_MODULES=(
   # definitions and the witness checker (ckpt_reach)
   HDLProof/Run/Stim
   HDLProof/Reach/Defs
+  # running a program on a design (cert_run; formats/run.md, formats/bind.md): ports by name,
+  # program images, the steppers, the host, one cycle, its soundness, VCD
+  HDLProof/Run/IoMeta HDLProof/Run/Image HDLProof/Run/Backend HDLProof/Run/Host
+  HDLProof/Run/Loop HDLProof/Run/Sound HDLProof/Run/Vcd
   # the tools' audit: fails the build on a non-standard axiom
   HDLProof/Check/Audit
 )
