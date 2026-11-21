@@ -759,8 +759,130 @@ def evalOpCertFast : LGraphOp → Nat → List CertVal → CertVal
   | LGraphOp.Op_MemToBus _, w, _ => .bv (mk_bv w 0)
   | op, w, vs => .bv (eval_op op w (vs.map CertVal.asBV))
 
-@[csimp] theorem eval_op_cert_eq_fast : @eval_op_cert = @evalOpCertFast := by
+theorem eval_op_cert_eq_fast : @eval_op_cert = @evalOpCertFast := by
   funext op w args
   rfl
+
+/-! ## Memory images that do not grow when nothing is written
+
+Lean compiles a definition whose result is a function (`Int → BV`) with the function's
+argument added to its parameters; a call with fewer arguments is then a closure over all of
+them. So `.mem (cert_mem_write m.asMem a d en)` is a closure over `m.asMem` (itself a closure
+over `m`), `a`, `d` and `en`, built on every step whether `en` is set or not, and each read
+re-tests `en` and recomputes `bv_uint a` on every layer back to the start of the run. A
+byte-enable write recomputes its merged word on every read of that address.
+
+The forms below return the `CertVal` itself: a disabled write returns the image it was given,
+and an enabled one adds one layer (`writeAt`) over the old image with the address and the new
+word computed once. `evalOpCertMem` uses them, and `@[csimp] eval_op_cert_eq_mem` makes every
+caller of `eval_op_cert` compiled after this module run it. Each form is proved equal to the
+original; no definition changes. -/
+
+/-- Image `f` with word `ua` replaced by `d`. -/
+def writeAt (f : Int → BV) (ua : Int) (d : BV) : Int → BV := fun x => if x = ua then d else f x
+
+/-- `cert_mem_read` on a `CertVal` image, without building `asMem`'s closure. -/
+def certMemReadVal (w : Nat) (m : CertVal) (a en : BV) : BV :=
+  match m with
+  | .mem f => cert_mem_read w f a en
+  | .bv _ => cert_mem_read w m.asMem a en
+
+theorem certMemReadVal_eq (w : Nat) (m : CertVal) (a en : BV) :
+    certMemReadVal w m a en = cert_mem_read w m.asMem a en := by
+  cases m <;> rfl
+
+/-- `cert_mem_write` as a value: the given image when `en` is 0. -/
+def certMemWriteVal (m : CertVal) (a d en : BV) : CertVal :=
+  match m with
+  | .mem f => if bv_nonzero en then .mem (writeAt f (bv_uint a) d) else .mem f
+  | .bv _ => .mem (cert_mem_write m.asMem a d en)
+
+theorem certMemWriteVal_eq (m : CertVal) (a d en : BV) :
+    certMemWriteVal m a d en = .mem (cert_mem_write m.asMem a d en) := by
+  cases m with
+  | bv _ => rfl
+  | mem f =>
+    simp only [certMemWriteVal, CertVal.asMem, cert_mem_write]
+    split <;> rfl
+
+/-- `cert_mem_write_be` as a value; the merged word is computed once, when written. -/
+def certMemWriteBeVal (w : Nat) (m : CertVal) (a d bev : BV) (byte_w : Nat) : CertVal :=
+  match m with
+  | .mem f =>
+    if bv_nonzero bev then
+      .mem (writeAt f (bv_uint a) (cert_masked_update w (f (bv_uint a)) d bev byte_w))
+    else .mem f
+  | .bv _ => .mem (cert_mem_write_be w m.asMem a d bev byte_w)
+
+theorem certMemWriteBeVal_eq (w : Nat) (m : CertVal) (a d bev : BV) (byte_w : Nat) :
+    certMemWriteBeVal w m a d bev byte_w = .mem (cert_mem_write_be w m.asMem a d bev byte_w) := by
+  cases m with
+  | bv _ => rfl
+  | mem f =>
+    simp only [certMemWriteBeVal, CertVal.asMem, cert_mem_write_be]
+    split <;> rfl
+
+/-- `cert_mem_load` as a value: the given image when `en` is 0. -/
+def certMemLoadVal (w n : Nat) (m : CertVal) (bus en : BV) : CertVal :=
+  match m with
+  | .mem f => if bv_nonzero en then .mem (cert_mem_load w n f bus en) else .mem f
+  | .bv _ => .mem (cert_mem_load w n m.asMem bus en)
+
+theorem certMemLoadVal_eq (w n : Nat) (m : CertVal) (bus en : BV) :
+    certMemLoadVal w n m bus en = .mem (cert_mem_load w n m.asMem bus en) := by
+  cases m with
+  | bv _ => rfl
+  | mem f =>
+    simp only [certMemLoadVal, CertVal.asMem]
+    by_cases h : bv_nonzero en = true
+    · simp only [h, ↓reduceIte]
+    · simp only [h, cert_mem_load, Bool.false_eq_true, ↓reduceIte]
+
+/-- `eval_op_cert` with the memory operators above; every other operator is `evalOpCertFast`. -/
+def evalOpCertMem (op : LGraphOp) (w : Nat) (args : List CertVal) : CertVal :=
+  match op, args with
+  | .Op_MemRead, [m, a, en] => .bv (certMemReadVal w m a.asBV en.asBV)
+  | .Op_MemWrite, [m, a, d, en] => certMemWriteVal m a.asBV d.asBV en.asBV
+  | .Op_MemWriteBE byte_w, [m, a, d, be] => certMemWriteBeVal w m a.asBV d.asBV be.asBV byte_w
+  | .Op_MemLoad n, [m, bus, en] => certMemLoadVal w n m bus.asBV en.asBV
+  | op, args => evalOpCertFast op w args
+
+@[csimp] theorem eval_op_cert_eq_mem : @eval_op_cert = @evalOpCertMem := by
+  funext op w args
+  unfold evalOpCertMem
+  split
+  · rw [certMemReadVal_eq]; rfl
+  · rw [certMemWriteVal_eq]; rfl
+  · rw [certMemWriteBeVal_eq]; rfl
+  · rw [certMemLoadVal_eq]; rfl
+  · exact congrFun (congrFun (congrFun eval_op_cert_eq_fast _) _) _
+
+/-- Push image `v`'s function itself (a `.mem f` pushes `f`, with no closure around it). -/
+def pushImg (acc : Array (Int → BV)) (v : CertVal) : Array (Int → BV) :=
+  match v with
+  | .mem f => acc.push f
+  | .bv _ => acc.push (fun _ => mk_bv 0 0)
+
+theorem pushImg_eq (acc : Array (Int → BV)) (v : CertVal) : pushImg acc v = acc.push v.asMem := by
+  cases v <;> rfl
+
+/-- The images of `vs`, as a next state stores them. -/
+def memsOfVals (vs : Array CertVal) : Array (Int → BV) := vs.foldl pushImg #[]
+
+theorem memsOfVals_eq (vs : Array CertVal) : memsOfVals vs = vs.map CertVal.asMem := by
+  rw [Array.map_eq_foldl]
+  unfold memsOfVals
+  congr 1
+  funext acc v
+  exact pushImg_eq acc v
+
+theorem map_mapIdx {α β γ : Type} (as : Array α) (g : Nat → α → β) (h : β → γ) :
+    (as.mapIdx g).map h = as.mapIdx (fun i a => h (g i a)) := by
+  apply Array.ext <;> simp
+
+/-- A next state's memories from the selected images: no closure over the step's slots. -/
+theorem memsOfVals_mapIdx {α : Type} (as : Array α) (g : Nat → α → CertVal) :
+    memsOfVals (as.mapIdx g) = as.mapIdx (fun i a => (g i a).asMem) := by
+  rw [memsOfVals_eq, map_mapIdx]
 
 end FastBV

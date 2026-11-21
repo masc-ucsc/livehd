@@ -34,6 +34,7 @@ the dense array holds `eval_op_cert` applied to the node's own operator, so the
 recurrence is an equality between two spellings of the same call.
 -/
 import LeanSemanticPrimitives.Compiler.DirectCheck
+import LeanSemanticPrimitives.Compiler.MemStepFast
 import LeanSemanticPrimitives.Translation.FastBV
 
 namespace Compiler
@@ -312,6 +313,23 @@ def directStepRaw (D : DesignCert) (e : ClockEdges) (i : RuntimeInput) (s : Runt
     nextState :=
       { flops := D.flops.mapIdx fun idx f => directFlopNext env e s idx f
         mems  := D.memories.mapIdx fun idx m => srcMemNext (denoteRef env) e s idx m } }
+
+/-- `directStepRaw`, with the next memories stored by `FastBV.memsOfVals`: each is the function
+its slot holds, not a closure over this step's slots and the previous state
+(`Compiler/MemStepFast`). `@[csimp] directStepRaw_eq_fast` makes `directStep`,
+`directStepChecked` and every later caller run it. -/
+def directStepRawFast (D : DesignCert) (e : ClockEdges) (i : RuntimeInput) (s : RuntimeState) :
+    RuntimeResult :=
+  let env := evalDense D.nodes (sourceEnvArr D.sources i s)
+  { outputs   := D.outputs.map fun o => bv_resize o.width (denoteRef env o.slot).asBV
+    nextState :=
+      { flops := D.flops.mapIdx fun idx f => directFlopNext env e s idx f
+        mems  := FastBV.memsOfVals
+          (D.memories.mapIdx fun idx m => srcMemNextVal (denoteRef env) e s idx m) } }
+
+@[csimp] theorem directStepRaw_eq_fast : @directStepRaw = @directStepRawFast := by
+  funext D e i s
+  simp only [directStepRaw, directStepRawFast, srcMems_eq]
 
 /-- **The public one-step API.**  Fail-closed: a certificate outside the
 accepted fragment, or an edge vector / input / state of the wrong shape, is

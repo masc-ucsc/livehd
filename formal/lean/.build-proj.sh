@@ -31,6 +31,8 @@ MODULES=(
   Compiler/MemDomains
   Compiler/DesignCertWF
   Compiler/DesignSemantics
+  # the memory step as values: next images stored without a closure over the step
+  Compiler/MemStepFast
   # Load-time check: every memory address stays inside the memory's depth (DCERT4).
   Compiler/MemAddr
   # Compiler/CertIO itself is NOT built here: its verified entry point
