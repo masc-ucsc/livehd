@@ -325,6 +325,23 @@ def directStep (D : DesignCert) (e : ClockEdges) (i : RuntimeInput) (s : Runtime
     | .error err => .error err
     | .ok _ => .ok (directStepRaw D e i s)
 
+/-- `directStep` once `checkDesign D` has accepted the certificate. `checkDesign` reads only
+the certificate, not the step's edges, inputs or state, so a run of many steps checks the
+certificate once, before its first step, and then steps with this: the per-step runtime
+shape check (`checkRuntime`), then the evaluation. `directStepChecked_eq` proves it is
+`directStep` on every step, refusals included. -/
+def directStepChecked (D : DesignCert) (e : ClockEdges) (i : RuntimeInput) (s : RuntimeState) :
+    Except SimError RuntimeResult :=
+  match checkRuntime D e i s with
+  | .error err => .error err
+  | .ok _ => .ok (directStepRaw D e i s)
+
+theorem directStepChecked_eq (D : DesignCert) {u : Unit} (hc : checkDesign D = .ok u)
+    (e : ClockEdges) (i : RuntimeInput) (s : RuntimeState) :
+    directStepChecked D e i s = directStep D e i s := by
+  unfold directStep directStepChecked
+  rw [hc]
+
 --------------------------------------------------------------------------------
 -- Correctness
 --------------------------------------------------------------------------------
