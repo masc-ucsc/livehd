@@ -260,6 +260,13 @@ echo "ok: $(tail -1 "$OUT/mem_addr_check.log")"
   > "$OUT/getmask_fast_check.log" 2>&1 && grep -q '^PASS getmask_fast' "$OUT/getmask_fast_check.log" \
   || { tail -5 "$OUT/getmask_fast_check.log"; echo "FAIL: getmask_fast_check"; exit 1; }
 echo "ok: $(tail -1 "$OUT/getmask_fast_check.log")"
+# FastBV's wide-value fast forms (SHL, SRA, Sext, the signed value, bitwise operators, the
+# reduction) against the definitions, 0 to 4096 bits, ir's and vc's operators
+# (tests/wide_fast_check.lean)
+(cd "$ROOT/formal/lean" && LEAN_PATH="$PWD/.olean-dev" lean --run "$ROOT/pass/lean/tools/tests/wide_fast_check.lean") \
+  > "$OUT/wide_fast_check.log" 2>&1 && grep -q '^PASS wide_fast' "$OUT/wide_fast_check.log" \
+  || { tail -5 "$OUT/wide_fast_check.log"; echo "FAIL: wide_fast_check"; exit 1; }
+echo "ok: $(tail -1 "$OUT/wide_fast_check.log")"
 # vc's optimizer and its checker: what it drops and shares, refused certificates, a RAM run
 # optimized against unoptimized (tests/residual_opt_check.lean)
 (cd "$ROOT/formal/lean" && LEAN_PATH="$PWD/.olean-dev" lean --run "$ROOT/pass/lean/tools/tests/residual_opt_check.lean") \

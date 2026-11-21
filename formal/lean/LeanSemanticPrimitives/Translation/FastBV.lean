@@ -15,9 +15,10 @@ substitution changes no result; nothing here is `@[implemented_by]`. The definit
 
 The fast forms work on the unsigned value as a `Nat` (`uintNat`), take masks from a table
 built once (`maskTab`), and use word operations (`&&&`, `|||`, `^^^`, shifts) that Lean
-inlines for values below `2 ^ 63`. Widths of 63 and more fall back to the definition,
-except GetMask on a run-of-ones mask, which is one shift and one mask on `Nat` at any width
-(`bvGetMaskFast`).
+inlines for values below `2 ^ 63`. At 63 bits and more the values are GMP numbers; the
+fast forms then avoid computing `2 ^ w`: a reduction checks the value against `2 ^ w` with
+`Nat.log2` (`ltPow2`), and SHL, SRA, Sext, the signed value, the bitwise operators and
+GetMask on a run-of-ones mask are shifts and word operations on `Nat` at any width.
 
 A `@[csimp]` lemma reaches only call sites compiled after it, so the modules whose code runs
 per simulated cycle import this one: `Compiler/ResidualSemantics` (TV's step and the
@@ -65,12 +66,24 @@ theorem pow2Of_eq (w : Nat) : pow2Of w = 2 ^ w := by
   · rename_i h; exact pow2Big_get w h
   · rfl
 
+/-- `u < 2 ^ k`, decided by `Nat.log2` (native, `lean_nat_log2`: no power and no allocation,
+at any size). -/
+@[inline] def ltPow2 (u k : Nat) : Bool := u == 0 || u.log2 < k
+
+theorem ltPow2_iff (u k : Nat) : ltPow2 u k = true ↔ u < 2 ^ k := by
+  unfold ltPow2
+  by_cases h : u = 0
+  · simp [h, Nat.two_pow_pos]
+  · simp [h, Nat.log2_lt h]
+
 /-- `x % 2 ^ w` without computing `2 ^ w`: a table mask below 63 bits; up to 128 bits, a
-comparison with the tabled power (a scalar `x` is always below `2 ^ 63`), and the
-remainder only when `x` really is wider. -/
+comparison with the tabled power (a scalar `x` is always below `2 ^ 63`); above 128 bits,
+`ltPow2` (a value already below `2 ^ w`, which every reduced value is). The remainder is
+computed only when `x` really is wider. -/
 @[inline] def modPow2 (w x : Nat) : Nat :=
   if h : w < maskTab.size then x &&& maskTab[w]
   else if h2 : w < pow2Big.size then (if x < pow2Big[w] then x else x % pow2Big[w])
+  else if ltPow2 x w then x
   else x % 2 ^ w
 
 theorem modPow2_eq (w x : Nat) : modPow2 w x = x % 2 ^ w := by
@@ -83,7 +96,9 @@ theorem modPow2_eq (w x : Nat) : modPow2 w x = x % 2 ^ w := by
       split
       · rename_i hx; exact (Nat.mod_eq_of_lt hx).symm
       · rfl
-    · rfl
+    · split
+      · rename_i hx; exact (Nat.mod_eq_of_lt ((ltPow2_iff x w).mp hx)).symm
+      · rfl
 
 /-- `2 ^ w - 1`, from a table when it has `w`. -/
 @[inline] def maskOf (w : Nat) : Nat := if h : w < maskTab.size then maskTab[w] else pow2Of w - 1
@@ -256,18 +271,55 @@ theorem bitwiseNatTab_eq (w : Nat) (f : Bool → Bool → Bool) (A B : Nat) :
   unfold bitwiseNatTab bitwiseNat
   rw [maskOf_eq]
 
+/-- A bitwise operator with `f false false = false` on whole numbers: one word operation
+and no mask, since such an operator sets no bit that neither operand has. The eight such
+operators by their truth table (`f true true`, `f true false`, `f false true`). -/
+@[inline] def bitwiseDirect (f : Bool → Bool → Bool) (A B : Nat) : Nat :=
+  if f true true then
+    if f true false then (if f false true then A ||| B else A)
+    else (if f false true then B else A &&& B)
+  else
+    if f true false then (if f false true then A ^^^ B else A ^^^ (A &&& B))
+    else (if f false true then B ^^^ (A &&& B) else 0)
+
+theorem testBit_bitwiseDirect (f : Bool → Bool → Bool) (hf : f false false = false) (A B i : Nat) :
+    (bitwiseDirect f A B).testBit i = f (A.testBit i) (B.testBit i) := by
+  unfold bitwiseDirect
+  cases ha : A.testBit i <;> cases hb : B.testBit i <;>
+    cases h1 : f true true <;> cases h2 : f true false <;> cases h3 : f false true <;>
+    simp_all [Nat.testBit_and, Nat.testBit_or, Nat.testBit_xor]
+
+theorem modPow2_bitwiseDirect (w : Nat) (f : Bool → Bool → Bool) (hf : f false false = false)
+    (A B : Nat) : modPow2 w (bitwiseDirect f A B) = bitwiseNat w f A B := by
+  rw [modPow2_eq]
+  apply Nat.eq_of_testBit_eq
+  intro i
+  rw [Nat.testBit_mod_two_pow, testBit_bitwiseDirect f hf, testBit_bitwiseNat]
+
 /-- Inlined, so at a call site with a literal operator (`fun x y => x && y`) the compiler
 evaluates the truth table itself and keeps one word operation, instead of calling the
-operator's closure four times per use. -/
+operator's closure four times per use. An operator with `f false false = false` (AND, OR,
+XOR, ...) needs no mask: `bitwiseDirect`, then `modPow2`, which at 129 bits and more is
+one `Nat.log2` when the operands already fit (and they do when they are `w` bits wide).
+The others (NOT, NOR, ...) complement within `w` bits, so they keep the mask. -/
 @[inline] def bvBitwiseFast (w : Nat) (f : Bool → Bool → Bool) (a b : BV) : BV :=
-  ofNatLt w (bitwiseNatTab w f (uintNat a) (uintNat b))
+  if f false false then ofNatLt w (bitwiseNatTab w f (uintNat a) (uintNat b))
+  else ofNatLt w (modPow2 w (bitwiseDirect f (uintNat a) (uintNat b)))
 
-@[csimp] theorem bv_bitwise_eq_fast : @bv_bitwise = @bvBitwiseFast := by
-  funext w f a b
-  simp only [bv_bitwise, bvBitwiseFast, bitwiseNatTab_eq]
+theorem bv_bitwise_eq_nat (w : Nat) (f : Bool → Bool → Bool) (a b : BV) :
+    bv_bitwise w f a b = ofNatLt w (bitwiseNat w f (uintNat a) (uintNat b)) := by
+  simp only [bv_bitwise]
   rw [bits_to_int_eq w _ (bitwiseNat w f (uintNat a) (uintNat b)) (bitwiseNat_lt _ _ _ _)
       (fun i hi => by rw [testBit_bitwiseNat]; simp [hi, bv_bit_eq]),
     mk_bv_natCast w _ (bitwiseNat_lt _ _ _ _)]
+
+@[csimp] theorem bv_bitwise_eq_fast : @bv_bitwise = @bvBitwiseFast := by
+  funext w f a b
+  rw [bv_bitwise_eq_nat]
+  unfold bvBitwiseFast
+  cases hff : f false false
+  · rw [ite_eq_right (by simp), modPow2_bitwiseDirect w f hff]
+  · rw [ite_eq_left rfl, bitwiseNatTab_eq]
 
 @[inline] def bvNotFast (w : Nat) (a : BV) : BV :=
   ofNatLt w (bitwiseNatTab w (fun x _ => !x) (uintNat a) 0)
@@ -282,14 +334,32 @@ operator's closure four times per use. -/
 /-! ## Signed value -/
 
 /-- `bv_sint` on scalars. A negative result is built as `Int.negSucc` of a small `Nat`, so
-it never passes through the unsigned value as a (possibly big) `Int`. -/
+it never passes through the unsigned value as a (possibly big) `Int`. At 63 bits and more,
+the same with the sign test by `ltPow2` (no power) and the complement from `maskOf`. -/
 def bvSintFast (x : BV) : Int :=
   if h : x.width < maskTab.size then
     let u := uintNat x
     if x.width = 0 then 0
     else if u ≤ maskTab[x.width - 1] then (u : Int)
     else Int.negSucc (maskTab[x.width] - u)
-  else bv_sint x
+  else
+    let u := uintNat x
+    if ltPow2 u (x.width - 1) then (u : Int)
+    else Int.negSucc (maskOf x.width - u)
+
+/-- `bv_sint` of a nonzero width, by the sign test `u < 2 ^ (w - 1)` on `Nat`. -/
+theorem bv_sint_nat (x : BV) (h0 : x.width ≠ 0) :
+    bv_sint x = if uintNat x < 2 ^ (x.width - 1) then ((uintNat x : Nat) : Int)
+                else Int.negSucc (2 ^ x.width - 1 - uintNat x) := by
+  simp only [bv_sint, bv_uint_eq_uintNat, h0, ite_false, two_pow_int]
+  have hu := uintNat_lt x
+  by_cases hlt : uintNat x < 2 ^ (x.width - 1)
+  · have : ((uintNat x : Nat) : Int) < ((2 ^ (x.width - 1) : Nat) : Int) := Int.ofNat_lt.mpr hlt
+    rw [ite_eq_left this, ite_eq_left hlt]
+  · have : ¬ ((uintNat x : Nat) : Int) < ((2 ^ (x.width - 1) : Nat) : Int) :=
+      fun h => hlt (Int.ofNat_lt.mp h)
+    rw [ite_eq_right this, ite_eq_right hlt, Int.negSucc_eq]
+    omega
 
 @[csimp] theorem bv_sint_eq_fast : @bv_sint = @bvSintFast := by
   funext x
@@ -311,19 +381,69 @@ def bvSintFast (x : BV) : Int :=
       · have : ¬ ((uintNat x : Nat) : Int) < ((2 ^ (x.width - 1) : Nat) : Int) := by omega
         rw [if_neg this, if_neg hlt, Int.negSucc_eq]
         omega
-  · rfl
+  · rename_i h
+    have h0 : x.width ≠ 0 := by rw [maskTab_size] at h; omega
+    rw [bv_sint_nat x h0]
+    simp only [maskOf_eq]
+    by_cases hl : ltPow2 (uintNat x) (x.width - 1) = true
+    · rw [ite_eq_left hl, ite_eq_left ((ltPow2_iff _ _).mp hl)]
+    · have hl' : ¬ uintNat x < 2 ^ (x.width - 1) := fun h' => hl ((ltPow2_iff _ _).mpr h')
+      rw [ite_eq_right hl, ite_eq_right hl']
+
+/-! ## `Op_SRA` -/
+
+/-- `bv_sra` on `Nat`: the sign test by `ltPow2`, a nonnegative value shifted right, a
+negative one as `Int.negSucc` of the shifted complement (floor division by `2 ^ k` is a
+right shift of the complement). No `2 ^ k`, no division, at any width. -/
+def bvSraFast (w : Nat) (x shamt : BV) : BV :=
+  let k := uintNat shamt
+  let u := uintNat x
+  if k ≥ x.width then
+    mk_bv w (if x.width = 0 then 0 else if ltPow2 u (x.width - 1) then 0 else -1)
+  else if ltPow2 u (x.width - 1) then ofNatLt w (modPow2 w (u >>> k))
+  else mk_bv w (Int.negSucc ((maskOf x.width - u) >>> k))
+
+@[csimp] theorem bv_sra_eq_fast : @bv_sra = @bvSraFast := by
+  funext w x shamt
+  unfold bv_sra bvSraFast
+  simp only [bv_uint_eq_uintNat, Int.toNat_natCast]
+  by_cases hk : uintNat shamt ≥ x.width
+  · rw [ite_eq_left hk, ite_eq_left hk]
+    by_cases h0 : x.width = 0
+    · simp only [h0, ite_true]
+    · simp only [h0, ite_false]
+      rw [bv_sint_nat x h0]
+      by_cases hl : ltPow2 (uintNat x) (x.width - 1) = true
+      · have hl' := (ltPow2_iff _ _).mp hl
+        rw [ite_eq_left hl', ite_eq_left hl, ite_eq_left (Int.natCast_nonneg _)]
+      · have hl' : ¬ uintNat x < 2 ^ (x.width - 1) := fun h' => hl ((ltPow2_iff _ _).mpr h')
+        rw [ite_eq_right hl', ite_eq_right hl, ite_eq_right (by simp only [Int.negSucc_eq]; omega)]
+  · rw [ite_eq_right hk, ite_eq_right hk]
+    have h0 : x.width ≠ 0 := by omega
+    rw [bv_sint_nat x h0, maskOf_eq]
+    have hp := Nat.two_pow_pos (uintNat shamt)
+    have h2k : ((2 : Int) ^ uintNat shamt) = (((2 ^ uintNat shamt - 1) + 1 : Nat) : Int) := by
+      rw [two_pow_int]; congr 1; omega
+    by_cases hl : ltPow2 (uintNat x) (x.width - 1) = true
+    · rw [ite_eq_left ((ltPow2_iff _ _).mp hl), ite_eq_left hl, two_pow_int, Int.ofNat_ediv_ofNat,
+        mk_bv_natCast_mod, modPow2_eq, Nat.shiftRight_eq_div_pow]
+    · have hl' : ¬ uintNat x < 2 ^ (x.width - 1) := fun h' => hl ((ltPow2_iff _ _).mpr h')
+      rw [ite_eq_right hl', ite_eq_right hl, h2k, Int.negSucc_ediv_ofNat_succ, Nat.shiftRight_eq_div_pow]
+      congr 3
+      omega
 
 /-! ## One `Op_SHL` term -/
 
 /-- `bv_shl_step` without `2 ^ k`: keep the low `w - k` bits of `a` and multiply by `2 ^ k`
-from the table; the product is below `2 ^ w`. -/
+from the table; the product is below `2 ^ w`. At 63 bits and more, the same by a shift:
+the low `w - k` bits (`modPow2`), shifted left by `k`, so no power and no remainder. -/
 def bvShlStepFast (w : Nat) (a b : BV) : BV :=
   let k := uintNat b
   if hk : k ≥ w then ofNatLt w 0
   else if h : w < maskTab.size then
     ofNatLt w ((uintNat a &&& maskTab[w - k]'(by omega)) *
       pow2Tab[k]'(by rw [pow2Tab_size]; rw [maskTab_size] at h; omega))
-  else ofNatLt w (modPow2 w (uintNat a * pow2Of k))
+  else ofNatLt w (modPow2 (w - k) (uintNat a) <<< k)
 
 theorem mul_two_pow_mod (x s w : Nat) (hs : s ≤ w) :
     x * 2 ^ s % 2 ^ w = x % 2 ^ (w - s) * 2 ^ s := by
@@ -342,7 +462,8 @@ theorem mul_two_pow_mod (x s w : Nat) (hs : s ≤ w) :
     · rename_i h
       rw [and_maskTab _ _ (by omega), pow2Tab_get, two_pow_int, ← Int.natCast_mul, mk_bv_natCast_mod,
         mul_two_pow_mod _ _ _ (by omega)]
-    · rw [two_pow_int, ← Int.natCast_mul, mk_bv_natCast_mod, modPow2_eq, pow2Of_eq]
+    · rw [two_pow_int, ← Int.natCast_mul, mk_bv_natCast_mod, modPow2_eq, Nat.shiftLeft_eq,
+        mul_two_pow_mod _ _ _ (by omega)]
 
 /-! ## `bv_get_mask` on a contiguous mask -/
 
@@ -489,7 +610,11 @@ def sextOpFast (w : Nat) (a amount : BV) : BV :=
     let u := uintNat a &&& maskTab[n]
     if u ≤ maskTab[n - 1]'(by omega) then ofNatLt w (u &&& maskTab[w])
     else ofNatLt w ((u + (maskTab[w] - maskTab[n])) &&& maskTab[w])
-  else sextOp w a amount
+  else
+    -- 63 bits and more: the same steps with `modPow2`, `ltPow2` and `maskOf` (no power)
+    let u := modPow2 n (uintNat a)
+    if ltPow2 u (n - 1) then ofNatLt w (modPow2 w u)
+    else ofNatLt w (modPow2 w (u + (maskOf w - maskOf n)))
 
 @[csimp] theorem sextOp_eq_fast : @sextOp = @sextOpFast := by
   funext w a amount
@@ -528,6 +653,20 @@ def sextOpFast (w : Nat) (a amount : BV) : BV :=
           simp only [mk_bv, ofNatLt, two_pow_int]
           rw [sext_mod]
       · rw [dif_neg h]
+        unfold sextOp
+        simp only [bv_uint_eq_uintNat, Int.toNat_natCast, ite_eq_right h0, ite_eq_right hg]
+        simp only [modPow2_eq, maskOf_eq, two_pow_int]
+        rw [← Int.natCast_emod]
+        by_cases hl : ltPow2 (uintNat a % 2 ^ uintNat amount) (uintNat amount - 1) = true
+        · have hlt : ((uintNat a % 2 ^ uintNat amount : Nat) : Int)
+              < ((2 ^ (uintNat amount - 1) : Nat) : Int) := Int.ofNat_lt.mpr ((ltPow2_iff _ _).mp hl)
+          rw [ite_eq_left hlt, ite_eq_left hl, mk_bv_natCast_mod]
+        · have hlt : ¬ ((uintNat a % 2 ^ uintNat amount : Nat) : Int)
+              < ((2 ^ (uintNat amount - 1) : Nat) : Int) :=
+            fun h' => hl ((ltPow2_iff _ _).mpr (Int.ofNat_lt.mp h'))
+          rw [ite_eq_right hlt, ite_eq_right hl]
+          simp only [mk_bv, ofNatLt, two_pow_int]
+          rw [sext_mod]
 
 /-! ## `eval_op` and `eval_op_cert`, recompiled
 
