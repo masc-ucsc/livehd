@@ -24,6 +24,7 @@ ROOT=${ROOT:?set ROOT to an absolute, project-local build directory}
 OUT="$ROOT/olean"; NAT="$ROOT/nat"
 mkdir -p "$OUT/LeanSemanticPrimitives/Projection/Proto" \
          "$OUT/HDLProof/Sym" "$OUT/HDLProof/Theory" "$OUT/HDLProof/Kit" "$OUT/HDLProof/Check" \
+         "$OUT/HDLProof/Run" "$OUT/HDLProof/Reach" \
          "$OUT/LeanSemanticPrimitives/Compiler" \
          "$OUT/LeanSemanticPrimitives/Translation" "$NAT"
 export LEAN_PATH="$OUT"
@@ -109,6 +110,8 @@ TOOL_MODULES=(
   HDLProof/Kit/Judge
   # the drivers' shared IO helpers
   HDLProof/Kit/Driver
+  # stimulus files as ticks, and reachability (ckpt_reach)
+  HDLProof/Run/Stim HDLProof/Reach/Defs
 )
 [ $# -ge 1 ] || { echo "usage: OPT=.. ROOT=.. build-opt.sh probe.lean [probe.lean ...]" >&2; exit 2; }
 JOBS=${JOBS:-4}

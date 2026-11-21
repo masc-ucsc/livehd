@@ -20,10 +20,12 @@ memory route) stays in `formal/lean`; everything here builds on it.
 | `HDLProof/Check/RefMap*.lean` | the refinement-map checker: a design refines a spec certificate with stuttering, the spec's state at every cycle being the map's value (`RefMap`, `RefMapSound`: `runRefMapOf`, `runRefMapOf_sound`) |
 | `HDLProof/Check/SpecFacts.lean` | the spec's facts, checked once per spec: Moore, and confluence of every pair of channels (`runSpecFactsOf_sound`) |
 | `HDLProof/Check/RefMapCompose.lean`, `RefMapRef.lean` | two checked maps of one spec show the same streams (`refmap_compose`); progress (`refmap_progress`); both restated over `interpretDesign` for verdicts of any route (`refmap_compose_any`, `start_any`, `refmap_progress_any`, over `RefMapPasses` / `SpecFactsPass`), which every verdict form gives (`RefMapChecked` / `SpecFactsChecked` on fp, `RefMapCheckedOn` / `SpecFactsCheckedOn` on any route, `.passes`); `refmap_compose_ref`, `start_ref`, `refmap_progress_ref` take the fp forms |
+| `HDLProof/Reach/` | reachable states: `Reachable`, `ReachableIn`, `Matches` (a state against a checkpoint, where a step can see it), the witness checker `checkReach` with `checkReach_sound`, and `not_reachable_of_inv` (`Defs`) |
+| `HDLProof/Run/` | `Stim`: `cert_trace`'s `stim v1` and `edges v1` files as the `Tick` list `refTrace` takes |
 | `HDLProof/Check/Audit.lean` | the axiom gate: `#audit_axioms` for every checker theorem; the build fails on anything but `propext`, `Classical.choice`, `Quot.sound` |
-| `drivers/` | `sym_verify.lean` (invariants, k-induction, `conj:` specs), `sym_refmap.lean` (refinement with stuttering by refinement maps, spec facts, the judge; `.refmap` files; theorem files); both take `sim:fp\|ir\|vc`, default `vc`; `sym_probe.lean` (one symbolic step without SAT on each route: OK or the refusal's class, with operator and primitive counts); `lhd_ckpt.lean` (checkpoints: check, diff, seal, normalize, the power-on state, the lgraph-sim `--state` text) |
+| `drivers/` | `sym_verify.lean` (invariants, k-induction, `conj:` specs), `sym_refmap.lean` (refinement with stuttering by refinement maps, spec facts, the judge; `.refmap` files; theorem files); both take `sim:fp\|ir\|vc`, default `vc`; `sym_probe.lean` (one symbolic step without SAT on each route: OK or the refusal's class, with operator and primitive counts); `lhd_ckpt.lean` (checkpoints: check, diff, seal, normalize, the power-on state, the lgraph-sim `--state` text); `ckpt_reach.lean` (is a checkpoint reachable: replays a witness, REACHABLE or NOT MATCHED, `emit:` writes the theorem) |
 | `formats/` | `refmap.md`: the `.refmap` format, what each target means, results, theorem files; `ckpt.md`: the `lhdcert-ckpt v1` checkpoint format, its load-time checks and `lhd_ckpt` |
-| `tests/` | `sym_selftest.sh` and `refmap_selftest.sh`: small fixtures through the real flow, passing and failing; `ckpt_selftest.sh` and `ckpt_check.lean`: checkpoints on exported and hand-built certificates, one test per refusal; `native_symbolic.lean` and `fp_symbolic.lean`: each route's symbolic operators and primitives against the concrete semantics on many assignments; `gen_gap_certs.lean`: certificates no front end emits (symbolic masks, a whole-memory load) |
+| `tests/` | `sym_selftest.sh` and `refmap_selftest.sh`: small fixtures through the real flow, passing and failing; `ckpt_selftest.sh` and `ckpt_check.lean`: checkpoints on exported and hand-built certificates, one test per refusal; `reach_selftest.sh`: witnesses that reach and that miss, the emitted theorem; `native_symbolic.lean` and `fp_symbolic.lean`: each route's symbolic operators and primitives against the concrete semantics on many assignments; `gen_gap_certs.lean`: certificates no front end emits (symbolic masks, a whole-memory load) |
 | `scripts/` | `sym_observe.py`: adds observer outputs (witnesses, internal state) to a copy of the RTL; `sym_survey.py`: runs `sym_probe` on a list of certificates under a memory cap and tabulates the refusals |
 
 ## Build
@@ -48,6 +50,7 @@ Self-test, natively or interpreted against `.olean-dev`:
 SYM_NAT=<root>/nat LHD=<lhd> bash pass/lean/tools/tests/sym_selftest.sh
 SYM_NAT=<root>/nat LHD=<lhd> bash pass/lean/tools/tests/refmap_selftest.sh
 CK_NAT=<root>/nat  LHD=<lhd> bash pass/lean/tools/tests/ckpt_selftest.sh
+CK_NAT=<root>/nat  LHD=<lhd> bash pass/lean/tools/tests/reach_selftest.sh
 ```
 
 A native driver looks for `cadical` beside itself unless `solver:` is given.

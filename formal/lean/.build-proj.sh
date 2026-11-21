@@ -212,6 +212,10 @@ TOOL_MODULES=(
   HDLProof/Kit/Judge
   # the drivers' shared IO helpers (untrusted: no theorems)
   HDLProof/Kit/Driver
+  # stimulus and edge files as ticks (cert_trace's formats), and reachability: the
+  # definitions and the witness checker (ckpt_reach)
+  HDLProof/Run/Stim
+  HDLProof/Reach/Defs
   # the tools' audit: fails the build on a non-standard axiom
   HDLProof/Check/Audit
 )
