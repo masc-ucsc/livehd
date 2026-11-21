@@ -124,9 +124,19 @@ MODULES=(
   Projection/HardwareMemWriteAdmit
   # The memory entry with `env0` inlined (the scalar route's TOTAL-variant
   # rewrite, applied to mainM): memVar_iff(W), projectMemVarDesignAt(W)_correct.
+  # The specializer's fast, summary and shift forms, and the variant runner
+  # (VariantAdequacy, VariantExec, RunnerSupport) that dcert2_memroute imports:
+  # built here too, so the drivers run interpreted against .olean-dev, in the
+  # order build-opt.sh builds them.
+  Projection/Proto/PartialEvaluatorFast
+  Projection/Proto/PartialEvaluatorSummary
+  Projection/Proto/PartialEvaluatorShift
   Projection/Proto/InterpreterVariant
   Projection/Proto/VariantTransport
   Projection/Proto/RewriteTotal
+  Projection/Proto/VariantAdequacy
+  Projection/Proto/VariantExec
+  Projection/Proto/RunnerSupport
   Projection/MemVariant
   Projection/MemVariantSim
   # ... and the node fold fused into its readers (MemFused): the default route
