@@ -1,0 +1,3 @@
+# ld64 -exported_symbols_list for the macOS `lhd_simrt`: export NOTHING. The runtime is an executable no one
+# links against; exporting every weak C++ definition (LLVM's) makes dyld spend most of a second coalescing
+# them on every process start.
