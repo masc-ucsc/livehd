@@ -71,12 +71,25 @@ driver does not invent them.  A `memConst` ROM is a different thing entirely --
 it is a SOURCE, its actual contents and `contents.size` bound come from the
 certificate, and they pass through untouched.
 
+CHECKPOINTS (`lhdcert-ckpt v1`, `Compiler/Ckpt.lean`, `pass/lean/tools/formats/ckpt.md`).
+The start `ckpt:<file>` reads a checkpoint, validates it against the certificate (design
+hash, shapes, values; a refusal is a configuration refusal, exit 2) and builds the FP state
+from it (`CkptStateM.toStateM`, which denotes `restore c` by `toStateM_denote`). The run then
+starts at the checkpoint's cycle `c`: cycle numbers are absolute, for the stimulus's `at`
+lines, the edge schedule and the `outputs` lines alike. `ckpt-at:<k>:<file>` writes the state
+reached after `k` steps (`c <= k <= c + cycles`, repeatable) and `ckpt-out:<file>` the final
+state, both through `CkptStateM.saveM`, so the bytes equal those `cert_trace` writes for the
+same state on the IR and VC routes. A checkpoint due after a cycle that did not step or was
+refused by the runtime policy is not written (the run fails anyway).
+
 Exit: 0 ok / 1 execution failure / 2 configuration refused / 3 specialization
 out of fuel at this budget / 4 specialization failed / 5 residual check
 rejected / 6 memory route refuses admission / 7 runtime policy refuses the
 state, input or edge vector / 8 parse/load failure.
 -/
 import LeanSemanticPrimitives.Projection.MemProjection
+-- checkpoints: lhdcert-ckpt v1 as the FP state (toStateM_denote)
+import LeanSemanticPrimitives.Projection.CkptStateM
 import LeanSemanticPrimitives.Projection.HardwareMemWriteAdmit
 import LeanSemanticPrimitives.Projection.MemVariantSim
 import LeanSemanticPrimitives.Projection.MemFused
@@ -352,12 +365,16 @@ inductive InitMode where
   /-- The real thing: initial flops and memory images READ FROM A FILE, carried
   through the production codec unchanged. -/
   | suppliedFile (path : String)
+  /-- An `lhdcert-ckpt v1` checkpoint, validated against the certificate; the run
+  starts at its cycle. -/
+  | ckptFile (path : String)
 
 def parseInit (s : String) : Option InitMode :=
   if s == "zero" then some .zeroWitness
   else if s == "ramp" then some .rampSynthetic
   else if s == "narrow" then some .narrowControl
   else if s.startsWith "file:" then some (.suppliedFile (s.drop 5).toString)
+  else if s.startsWith "ckpt:" then some (.ckptFile (s.drop 5).toString)
   else none
 
 def InitMode.label : InitMode → String
@@ -367,6 +384,7 @@ a legal-state witness, NOT an RTL startup contract)"
 NOT caller-supplied contents)"
   | .narrowControl  => "narrow (SYNTHETIC negative control: under-width flops)"
   | .suppliedFile p => s!"file:{p} (SUPPLIED initial state, read from the file)"
+  | .ckptFile p     => s!"ckpt:{p} (an lhdcert-ckpt v1 checkpoint, validated against the certificate)"
 
 /-! ### The supplied-state format
 
@@ -589,6 +607,12 @@ structure Cfg where
   autoStep : Bool := false
   /-- `auto` in place of the work budget: `autoWorkFuel`. -/
   autoWork : Bool := false
+  /-- the absolute cycle of the first step: the checkpoint's under `ckpt:`, else 0 -/
+  start : Nat := 0
+  /-- `ckpt-at:<k>:<file>`: write the state reached after `k` steps -/
+  ckptAt : List (Nat × String) := []
+  /-- `ckpt-out:<file>`: write the final state -/
+  ckptOut : Option String := none
 
 /-- The step budget bounds how deep the specializer recurses, and the depth grows
 with the design: the smallest budget that worked on the four largest rows was
@@ -750,6 +774,24 @@ effEn {ws.effEn} origEn {ws.origEn} mask {ws.mask} pred {ws.pred} phaseSrc {ws.p
       say s!"  stimulus: {cfg.stimProv}"
       say s!"  edges: {cfg.edgeMode.describe D}"
       say s!"  executing {cfg.cycles} cycle(s) of the residual at the checked bound"
+      -- checkpoints: every one names a cycle of this run, and is written from the
+      -- state the residual reached (`saveM`: the bytes the IR and VC routes write)
+      for (k, p) in cfg.ckptAt do
+        unless cfg.start ≤ k && k ≤ cfg.start + cfg.cycles do
+          IO.eprintln s!"  ckpt-at:{k}:{p}: cycle {k} is outside this run \
+({cfg.start} .. {cfg.start + cfg.cycles})"
+          return 2
+      let ckptHash := if cfg.ckptAt.isEmpty && cfg.ckptOut.isNone then 0 else Ckpt.designHash D
+      let saveAt (k : Nat) (st : StateM) (ok : Bool) : IO Unit := do
+        let due := (cfg.ckptAt.filter (·.1 == k)).map (·.2) ++
+          (if k == cfg.start + cfg.cycles then cfg.ckptOut.toList else [])
+        for p in due do
+          if ok then
+            IO.FS.writeBinFile p (Ckpt.render (CkptStateM.saveM D ckptHash k #[] st))
+            say s!"  checkpoint at cycle {k} written: {p}"
+          else
+            IO.eprintln s!"  checkpoint at cycle {k} NOT written ({p}): an earlier cycle \
+did not step or was refused"
       (← IO.getStdout).flush
       let t5 ← IO.monoMsNow
       let mut st := st0
@@ -760,7 +802,8 @@ effEn {ws.effEn} origEn {ws.origEn} mask {ws.mask} pred {ws.pred} phaseSrc {ws.p
       let mut bad := false
       let mut policyBad := false
       let mut cmp : CmpStatus := if cfg.compare then .complete else .disabled
-      for k in List.range cfg.cycles do
+      for k in List.range' cfg.start cfg.cycles do
+        saveAt k st (!bad && !policyBad)
         let e := scheduleEdges cfg.edgeMode D k
         if let some rc := (← RunAdmission.refuseEdges? D k e) then return rc
         let i := match cfg.stim with
@@ -812,6 +855,7 @@ addr {(bv ws.addr).value} datum {(bv ws.datum).value}"
                 say s!"  TRACE step {k} policy {runtimeFullOKB D i r.nextState e}"
               -- the DECODED next state is what the following cycle runs on
               st := r.nextState
+      saveAt (cfg.start + cfg.cycles) st (!bad && !policyBad)
       let t6 ← IO.monoMsNow
       let rss ← peakRSS
       let cpu ← cpuTicks
@@ -899,6 +943,21 @@ states: every value is `mk_bv`-normalised, and unnamed addresses hold the
 declared default rather than anything the file wrote. -/
 def buildState (D : DesignCert) (im : InitMode) : IO (Except String (StateM × String)) := do
   match im with
+  | .ckptFile path => do
+      let bytes? ← try (do let b ← IO.FS.readBinFile path; pure (some b))
+                    catch e => do IO.eprintln s!"checkpoint unreadable: {e}"; pure none
+      match bytes? with
+      | none => pure (.error s!"cannot read checkpoint {path}")
+      | some bytes =>
+        match Ckpt.parse bytes with
+        | .error e => pure (.error s!"{path}: {e}")
+        | .ok c =>
+          match Ckpt.validate D (Ckpt.designHash D) c with
+          | some e => pure (.error s!"{path}: {e}")
+          | none =>
+            let note := if c.exts.isEmpty then "" else s!", {c.exts.size} ext section(s) not read"
+            pure (.ok (CkptStateM.toStateM c,
+              s!"checkpoint {path}, {bytes.size} bytes, cycle {c.cycle}{note}"))
   | .zeroWitness   => pure (.ok (initStateOf D, "generated: initStateOf (synthetic)"))
   | .rampSynthetic => pure (.ok (rampStateOf D, "generated: ramp pattern (synthetic)"))
   | .narrowControl => pure (.ok (narrowStateOf D, "generated: narrow control (synthetic)"))
@@ -920,12 +979,22 @@ def buildState (D : DesignCert) (im : InitMode) : IO (Except String (StateM × S
             pure (.ok (⟨fl, ss.mems⟩,
               s!"supplied file {path}, {bytes.size} bytes, fnv1a {fnv1a bytes}{note}"))
 
+/-- The absolute cycle a run starts at: a checkpoint's own, else 0. -/
+def startOf (im : InitMode) : IO Nat := do
+  match im with
+  | .ckptFile path =>
+      match Ckpt.parse (← IO.FS.readBinFile path) with
+      | .ok c    => pure c.cycle
+      | .error _ => pure 0   -- buildState has already refused it
+  | _ => pure 0
+
 def usage : String :=
   "usage: dcert2_memroute (<cert.dcert>|--fixture <name>|--selftest) <stepFuel|auto> \
 <workFuel|auto> [cycles] [init] [nocompare] [trace] [outputs] [no-plain-write] [route:fused|var|plain]\n  \
 auto: step = max 20000 (4 x (nodes + sources)), work = 2000, one retry at 10x after an out-of-fuel\n  \
 fixtures: full mixed twomem lane\n\
-  fixtures (negative): romwrite\n  init: zero | ramp | narrow | file:<path>"
+  fixtures (negative): romwrite\n  init: zero | ramp | narrow | file:<path> | ckpt:<path>\n  \
+checkpoints: ckpt-at:<cycle>:<file> (repeatable) ckpt-out:<file>"
 
 def parseCfg (rest : List String) : Except String Cfg := do
   match rest with
@@ -966,7 +1035,20 @@ contents or use init=zero, which is a legal-state witness only."
     let route := (tl.findSome? (fun t => (t.dropPrefix? "route:").map (·.toString))).getD "fused"
     unless ["fused", "var", "plain"].contains route do
       .error s!"route:{route} is not one of fused | var | plain"
-    .ok ⟨sf, wf, cyc, im, cmp, none, [], [], prov, sup, tr, pw, em, route, op, autoStep, autoWork⟩
+    -- checkpoints to write
+    let ckptOut := tl.findSome? (fun t => (t.dropPrefix? "ckpt-out:").map (·.toString))
+    let mut ckptAt : List (Nat × String) := []
+    for t in tl do
+      if let some r := t.dropPrefix? "ckpt-at:" then
+        match r.toString.splitOn ":" with
+        | k :: q@(_ :: _) =>
+          match k.toNat? with
+          | some k => ckptAt := ckptAt ++ [(k, ":".intercalate q)]
+          | none => .error s!"ckpt-at: {repr k} is not a number"
+        | _ => .error s!"ckpt-at expects <cycle>:<file>, got {repr t}"
+    let cfg : Cfg := ⟨sf, wf, cyc, im, cmp, none, [], [], prov, sup, tr, pw, em, route, op, autoStep, autoWork,
+      0, [], none⟩
+    .ok { cfg with ckptAt, ckptOut }
   | _ => .error usage
 
 /-! ## Comparison self-test
@@ -1053,7 +1135,9 @@ def main (args : List String) : IO UInt32 := do
           | .ok cfg =>
             match ← buildState D cfg.init with
             | .error e => do IO.eprintln s!"REFUSING: {e}"; return 2
-            | .ok (st0, prov) => runRoute s!"fixture:{name}" "n/a(in-repo fixture)" D cfg st0 prov
+            | .ok (st0, prov) =>
+                let cfg := { cfg with start := ← startOf cfg.init }
+                runRoute s!"fixture:{name}" "n/a(in-repo fixture)" D cfg st0 prov
   | path :: rest =>
       match parseCfg rest with
       | .error e => do IO.eprintln s!"REFUSING: {e}"; return 2
@@ -1075,5 +1159,7 @@ def main (args : List String) : IO UInt32 := do
 that format's own policy)"
               match ← buildState D cfg.init with
               | .error e => do IO.eprintln s!"REFUSING: {e}"; return 2
-              | .ok (st0, prov) => runRoute path (toString (fnv1a bytes)) D cfg st0 prov
+              | .ok (st0, prov) =>
+                  let cfg := { cfg with start := ← startOf cfg.init }
+                  runRoute path (toString (fnv1a bytes)) D cfg st0 prov
   | _ => do IO.eprintln usage; return 2

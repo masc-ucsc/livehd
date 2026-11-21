@@ -7,7 +7,7 @@ traces are compared line by line.
 
     lean --run Futamura_Projection_Scripts/cert_trace.lean <cert> <cycles> <stim>
          [edges:all|edges:third|edges:file:<path>] [init:reset|init:zero] [route:ir|route:vc]
-         [opt:off] [opt:stats]
+         [opt:off] [opt:stats] [ckpt-in:<file>] [ckpt-at:<cycle>:<file>] [ckpt-out:<file>]
 
 `stim v1` is the dcert2_memroute format, restricted to what an RTL testbench
 can replay: `in <ordinal> <width> <value>` (every cycle) and
@@ -38,6 +38,21 @@ constants shared), and `compileOpt_correct` proves the optimized program equal t
 `interpretDesign` too, so the trace is the same. `opt:off` runs the unoptimized program;
 `opt:stats` prints, on stderr, the program's size before and after and whether the
 optimizer's certificate was accepted (a refused one runs the unoptimized program).
+
+Checkpoints (`lhdcert-ckpt v1`, `Compiler/Ckpt.lean`, `pass/lean/tools/formats/ckpt.md`):
+
+    ckpt-in:<file>       start from this checkpoint instead of the power-on state. It is
+                         validated against the certificate (exit 1 when refused). The run
+                         starts at the checkpoint's cycle c and prints STEP c .. c+cycles-1:
+                         cycle numbers are absolute, for the stimulus, the edges and the
+                         output alike, so the lines equal the same lines of a run from 0.
+                         The checkpoint's ext sections are not read (a note on stderr).
+    ckpt-at:<k>:<file>   write the state reached after k steps (before step k), at absolute
+                         cycle k, c <= k <= c+cycles; repeatable
+    ckpt-out:<file>      write the final state, at cycle c+cycles
+
+Both routes write the same bytes for the same state, and each resumes from the other's file:
+`ckpt-at:k` of one run, then `ckpt-in` of a second run, prints exactly the lines from k on.
 -/
 import LeanSemanticPrimitives.Projection.CertLoadAny
 import LeanSemanticPrimitives.Compiler.DesignSemantics
@@ -47,6 +62,8 @@ import LeanSemanticPrimitives.Compiler.CompileDesignDefs
 import LeanSemanticPrimitives.Compiler.ResidualFast
 -- route:vc runs the optimized program (`compileOpt_correct`)
 import LeanSemanticPrimitives.Compiler.ResidualOpt
+-- checkpoints: lhdcert-ckpt v1
+import LeanSemanticPrimitives.Compiler.Ckpt
 
 open Compiler
 
@@ -145,9 +162,23 @@ def main (args : List String) : IO UInt32 := do
     let mut optOn := true
     let mut optStats := false
     let mut schedPath : Option String := none
+    let mut ckptIn : Option String := none
+    let mut ckptAt : Array (Nat × String) := #[]
+    let mut ckptOut : Option String := none
     for opt in rest do
       if opt.startsWith "edges:file:" then
         schedPath := some (opt.replace "edges:file:" "")
+      else if opt.startsWith "ckpt-in:" then
+        ckptIn := some (opt.replace "ckpt-in:" "")
+      else if opt.startsWith "ckpt-out:" then
+        ckptOut := some (opt.replace "ckpt-out:" "")
+      else if opt.startsWith "ckpt-at:" then
+        match (opt.replace "ckpt-at:" "").splitOn ":" with
+        | k :: p@(_ :: _) =>
+          match k.toNat? with
+          | some k => ckptAt := ckptAt.push (k, ":".intercalate p)
+          | none => do IO.eprintln s!"ckpt-at: {repr k} is not a number"; return 2
+        | _ => do IO.eprintln s!"ckpt-at expects <cycle>:<file>, got {repr opt}"; return 2
       else
         match opt with
         | "edges:all" => third := false
@@ -170,6 +201,29 @@ def main (args : List String) : IO UInt32 := do
         | .ok rows => pure (some rows)
         | .error e => do IO.eprintln s!"edges: {e}"; return 2
     let mut s := if zeroInit then zeroState D else resetState D
+    -- checkpoints: the design hash is computed only when one is read or written
+    let hash := if ckptIn.isSome || ckptOut.isSome || !ckptAt.isEmpty then Ckpt.designHash D else 0
+    let mut start := 0
+    if let some p := ckptIn then
+      match Ckpt.parse (← IO.FS.readBinFile p) with
+      | .error e => do IO.eprintln s!"{p}: {e}"; return 2
+      | .ok c =>
+        if let some e := Ckpt.validate D hash c then
+          IO.eprintln s!"{p}: {e}"; return 1
+        unless c.exts.isEmpty do
+          IO.eprintln s!"note: {p}: {c.exts.size} ext sections not read"
+        s := Ckpt.restore c
+        start := c.cycle
+    for (k, p) in ckptAt do
+      unless start ≤ k && k ≤ start + cycles do
+        IO.eprintln s!"ckpt-at:{k}:{p}: cycle {k} is outside this run ({start} .. {start + cycles})"
+        return 2
+    -- write every checkpoint due at cycle `k`, state `st`
+    let saveAt (k : Nat) (st : RuntimeState) : IO Unit := do
+      for (j, p) in ckptAt do
+        if j == k then IO.FS.writeBinFile p (Ckpt.render (Ckpt.save D hash k #[] st))
+      if k == start + cycles then
+        if let some p := ckptOut then IO.FS.writeBinFile p (Ckpt.render (Ckpt.save D hash k #[] st))
     if vc then
       match compileDesign D with
       | .error e => do IO.eprintln s!"compileDesign refused: {repr e}"; return 1
@@ -179,12 +233,15 @@ def main (args : List String) : IO UInt32 := do
           let verdict := if !optOn then "off" else if accepted then "accepted" else "REFUSED (unoptimized)"
           IO.eprintln s!"vc optimize: {verdict}; sources {R0.sources.size} -> {R.sources.size}, \
             bindings {R0.bindings.size} -> {R.bindings.size}"
-        for k in List.range cycles do
+        for k in List.range' start cycles do
+          saveAt k s
           let r := denoteResidual R (edgesAt D third sched k) (inputAt D st k) s
           IO.println s!"STEP {k} {" ".intercalate (r.outputs.toList.map (fun o => toString (bv_uint o)))}"
           s := r.nextState
+        saveAt (start + cycles) s
         return 0
-    for k in List.range cycles do
+    for k in List.range' start cycles do
+      saveAt k s
       -- `directStep` is proved equal to `interpretDesign` on every input it
       -- accepts (`directStep_correct`; it refuses a certificate or runtime shape
       -- outside the checked fragment instead of stepping it). Executing
@@ -196,7 +253,8 @@ def main (args : List String) : IO UInt32 := do
         | .error e => do IO.eprintln s!"step {k}: refused: {e.render}"; return 1
       IO.println s!"STEP {k} {" ".intercalate (r.outputs.toList.map (fun o => toString (bv_uint o)))}"
       s := r.nextState
+    saveAt (start + cycles) s
     return 0
   | _ =>
-    IO.eprintln "usage: cert_trace <cert> <cycles> <stim> [edges:all|edges:third] [init:reset|init:zero] [route:ir|route:vc] [opt:off] [opt:stats]"
+    IO.eprintln "usage: cert_trace <cert> <cycles> <stim> [edges:all|edges:third] [init:reset|init:zero] [route:ir|route:vc] [opt:off] [opt:stats] [ckpt-in:<file>] [ckpt-at:<cycle>:<file>] [ckpt-out:<file>]"
     return 2

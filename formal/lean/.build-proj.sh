@@ -139,6 +139,17 @@ MODULES=(
   # Residual serialization: a proved codec (decodeProgram_encodeProgram).
   Projection/ResidualIO
   Projection/Scaling
+  # Checkpoints (`lhdcert-ckpt v1`, drivers/lhd_ckpt): the direct simulator's
+  # start states (DirectTrace), lgraph-sim's `--state` reader (DirectSim; the
+  # checkpoint's to-state text is tested against it), the format with its
+  # load-time checks (Ckpt), and save/restore proved inverse (CkptSound).
+  Compiler/DirectSemantics
+  Compiler/DirectTrace
+  Compiler/DirectSim
+  Compiler/Ckpt
+  Compiler/CkptSound
+  # ... and on the FP route: a checkpoint as its StateM (toStateM_denote, T6)
+  Projection/CkptStateM
   # The central audit: `#audit_axioms` FAILS this build on any axiom outside
   # propext/Classical.choice/Quot.sound. The memory-route modules above audit
   # their own theorems in place with the same command.

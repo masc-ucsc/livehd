@@ -87,6 +87,9 @@ MODULES=(
   # vc's optimizer and its checker (ResidualOpt; sound by ResidualOptSound)
   Compiler/ResidualOpt
   Compiler/CompileOpDefs Compiler/CompileGraphDefs Compiler/CompileDesignDefs
+  # checkpoints (lhdcert-ckpt v1: drivers/lhd_ckpt, and the ckpt options of cert_trace and
+  # dcert2_memroute): the start states, the format, its proofs, the FP state conversion
+  Compiler/DirectTrace Compiler/Ckpt Compiler/CkptSound Projection/CkptStateM
 )
 # The proof tools (pass/lean/tools, HDLProof): a second source root.
 TOOLS="$(cd ../../pass/lean/tools && pwd)"
