@@ -12,7 +12,7 @@ cert_run <cert> [bind:<file>] [stim:<file>] [edges:all|edges:third|edges:file:<p
          [load:<image>[@<addr>][:mem<k>]] [vaddr] [word:<bytes>]
          [max:<cycles>] [stop:<output>=<value>]
          [trace:<dir>] [vcd:<file>] [lockstep:<route>]
-         [ckpt-at:<cycle>:<file>] [ckpt-out:<file>]
+         [ckpt-at:<cycle>:<file>] [ckpt-out:<file>] [compact:<cycles>]
 ```
 
 ## Options
@@ -43,6 +43,12 @@ cert_run <cert> [bind:<file>] [stim:<file>] [edges:all|edges:third|edges:file:<p
   first cycle whose outputs differ.
 - `ckpt-at:` and `ckpt-out:` write `lhdcert-ckpt v1` checkpoints (`ckpt.md`). A bind run adds
   its host section.
+- `compact:<K>` replaces the simulator state by its restored checkpoint every `K` cycles, in
+  memory. The `ir`, `vc` and `ref` routes hold a memory as a function: each cycle's image calls
+  the previous cycle's, and keeps that cycle's evaluated slots alive. Without compaction, a
+  run's memory use grows every cycle and a memory read walks back to the run's start, even
+  when nothing is written. A restored state holds each memory as one table, so the growth and
+  the read cost are bounded by `K` cycles. The outputs do not change (below). Default: off.
 
 ## Output
 
@@ -77,6 +83,9 @@ the design steps. `HDLProof/Run/Sound.lean` proves:
   and final state are those of `refTrace`, iterated `interpretDesign`, on the recorded ticks.
 - `mkStepper_ir_sound` (and `refStep_sound`): the `ir` (and `ref`) steppers agree with
   `interpretDesign`. For `vc` this is `compileDesign_correct` and `compileOpt_correct`.
+- `compacted_outputs`: a run cut into segments, with its state replaced by the restored
+  checkpoint of itself after each one (`compact:`), prints the outputs of the run that is not
+  cut. It chains `resume_exact` (`Projection/CkptResume.lean`) over the segments.
 
 The driver iterates the same `cycleStep`. So the recorded `inputs.stim` replays the run open
 loop: `cert_trace <cert> <cycles> inputs.stim` prints the run's `steps.trace` on every route.

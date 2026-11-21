@@ -355,6 +355,37 @@ def restore (c : Ckpt) : RuntimeState :=
   { flops := c.flops.map fun (w, v) => mk_bv w (v : Int)
     mems  := c.mems.map memImage }
 
+/-! ### Building each table once
+
+Lean compiles a definition whose result is a function, such as `memImage`, with the function's
+argument added to its parameters, and the `let` before the `fun` moves into the body. A
+partial application `memImage m` then rebuilds `memTable m` on every read. `restoreTabled`
+first builds every table as data (`Tabled`), then makes each image from its built table, so
+a read is one array lookup. The `@[csimp]` lemma makes every caller of `restore` run it; the
+two are equal, so no result changes. -/
+
+/-- `memImage` over a table that is already built. -/
+def tableImage (dw dflt : Nat) (t : Array Nat) : Int → BV :=
+  fun x => mk_bv dw (((if 0 ≤ x then t[x.toNat]? else none).getD dflt : Nat) : Int)
+
+theorem memImage_eq_tableImage (m : MemCk) : memImage m = tableImage m.dw m.dflt (memTable m) := rfl
+
+/-- A checkpoint memory with its dense table. -/
+structure Tabled where
+  m : MemCk
+  t : Array Nat
+
+/-- `restore`, with each memory's table built once. -/
+def restoreTabled (c : Ckpt) : RuntimeState :=
+  { flops := c.flops.map fun (w, v) => mk_bv w (v : Int)
+    mems  := (c.mems.map fun m => ({ m, t := memTable m } : Tabled)).map
+      fun p => tableImage p.m.dw p.m.dflt p.t }
+
+@[csimp] theorem restore_eq_tabled : @restore = @restoreTabled := by
+  funext c
+  simp only [restore, restoreTabled, Array.map_map]
+  rfl
+
 /-- Word `a` of image `f`, unsigned at `dw` bits. -/
 def wordAt (dw : Nat) (f : Int → BV) (a : Int) : Nat := (bv_uint (f a)).toNat % 2 ^ dw
 

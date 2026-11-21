@@ -13,11 +13,15 @@ closed-loop run is not known in advance. What is fixed is how each cycle uses th
 * `runCycles_sound`: for every host (every bind file, image, latency and stimulus) the run's
   outputs and final state are those of `refTrace` (iterated `interpretDesign`) on the recorded
   ticks. So the inputs a run writes (`inputs.stim`) replay it open-loop on any route.
+* `compacted_outputs`: a run cut into segments, its state replaced by the restored checkpoint
+  of itself after each segment (`cert_run compact:<K>`), prints the outputs of the run that is
+  not cut, from power-on, from a restored checkpoint, or from any state whose words fit.
 
 Mathlib-free; the axioms are audited at the end.
 -/
 import HDLProof.Run.Loop
 import LeanSemanticPrimitives.Compiler.DirectTrace
+import LeanSemanticPrimitives.Projection.CkptResume
 import LeanSemanticPrimitives.Projection.AxiomGate
 
 namespace HDLProof
@@ -195,6 +199,59 @@ theorem runCycles_sound {ctx : Ctx} (hs : StepSound ctx.D ctx.step) :
         cases h
         exact ⟨hheld.symm, rfl⟩
 
+/-! ## Compaction (`compact:<K>`) -/
+
+section
+open Projection.CkptResume (WordsFit resume_exact wordsFit_trace mems_size_trace wordsFit_restore)
+variable {D : DesignCert}
+
+/-- The outputs of a run on `a ++ b` are those on `a`, then those on `b` from where `a` ends. -/
+theorem refTrace_append_outputs (D : DesignCert) :
+    ∀ (s : RuntimeState) (a b : List Tick),
+      (refTrace D s (a ++ b)).steps.map (·.outputs) =
+        (refTrace D s a).steps.map (·.outputs) ++
+          (refTrace D (refTrace D s a).finalState b).steps.map (·.outputs)
+  | _, [], _ => rfl
+  | s, t :: a, b => by
+    simp only [List.cons_append, refTrace, List.map_cons]
+    rw [refTrace_append_outputs D _ a b]
+
+/-- `restore` reads neither the cycle nor the ext sections of a checkpoint. -/
+theorem restore_save_cycle (hash k : Nat) (exts : Array Ckpt.Ext) (s : RuntimeState) :
+    Ckpt.restore (Ckpt.save D hash k exts s) = Ckpt.restore (Ckpt.save D hash 0 #[] s) := rfl
+
+/-- The outputs of a run in segments `segs` from `s`, its state replaced by its restored
+checkpoint after each segment, as `cert_run compact:<K>` does every `K` cycles. -/
+def compactedOutputs (D : DesignCert) (hash : Nat) : RuntimeState → List (List Tick) → List (Array BV)
+  | _, [] => []
+  | s, seg :: segs =>
+    (refTrace D s seg).steps.map (·.outputs) ++
+      compactedOutputs D hash (Ckpt.restore (Ckpt.save D hash 0 #[] (refTrace D s seg).finalState)) segs
+
+/-- **Compaction is exact.** Cutting a run into segments and replacing its state by the
+restored checkpoint of itself after each one changes none of its outputs. The start is any
+state of the right shape whose memory words fit (`resetState`, `zeroState` and every restored
+valid checkpoint are: `wordsFit_reset`, `wordsFit_zero`, `wordsFit_restore`). -/
+theorem compacted_outputs (hsem : Direct.DesignSemWF D) (haddr : MemAddr.addrError D = none)
+    (hroot : Ckpt.imgRootError D = none) (hword : Ckpt.wordError D = none) (hash : Nat) :
+    ∀ (segs : List (List Tick)) (s : RuntimeState), s.mems.size = D.memories.size →
+      WordsFit D s →
+      compactedOutputs D hash s segs = (refTrace D s segs.flatten).steps.map (·.outputs)
+  | [], s, _, _ => by simp [compactedOutputs, refTrace]
+  | seg :: segs, s, hsz, hfit => by
+    have hszf : (refTrace D s seg).finalState.mems.size = D.memories.size := mems_size_trace hsz seg
+    have hfitf : WordsFit D (refTrace D s seg).finalState := wordsFit_trace hsem hroot hword seg s hfit
+    have hv := Ckpt.validate_save D hash 0 #[] (refTrace D s seg).finalState hroot hword
+    have hsz' : (Ckpt.restore (Ckpt.save D hash 0 #[] (refTrace D s seg).finalState)).mems.size =
+        D.memories.size := by
+      simp [Ckpt.restore, Ckpt.save]
+    have ih := compacted_outputs hsem haddr hroot hword hash segs _ hsz' (wordsFit_restore hv)
+    simp only [compactedOutputs, List.flatten_cons]
+    rw [ih, resume_exact hsem haddr hroot hash 0 #[] hszf hfitf, refTrace_append_outputs]
+
+end
+
+#audit_axioms HDLProof.Run.compacted_outputs
 #audit_axioms HDLProof.Run.runCycles_sound
 #audit_axioms HDLProof.Run.cycleStep_applied
 #audit_axioms HDLProof.Run.mkStepper_ir_sound

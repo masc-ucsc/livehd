@@ -7,7 +7,7 @@ cert_run <cert> [bind:<file>] [stim:<file>] [edges:all|edges:third|edges:file:<p
          [load:<image>[@<addr>][:mem<k>]] [vaddr] [word:<bytes>]
          [max:<cycles>] [stop:<output>=<value>]
          [trace:<dir>] [vcd:<file>] [lockstep:<route>]
-         [ckpt-at:<cycle>:<file>] [ckpt-out:<file>]
+         [ckpt-at:<cycle>:<file>] [ckpt-out:<file>] [compact:<cycles>]
 ```
 
 A run steps the design cycle by cycle on a proved simulator (`route:ir`, the default; `vc`;
@@ -33,6 +33,13 @@ documents every option; in short:
   `runCycles_sound` proves that a run is the reference trace of the ticks it applied.
 * Checkpoints are `lhdcert-ckpt v1` (`formats/ckpt.md`); a bind run keeps its host in the ext
   section `cert_run host v1`, so `ckpt-in:` resumes the whole machine.
+* `compact:<K>` replaces the simulator state by its restored checkpoint every `K` cycles, in
+  memory (no file). The `ir`, `vc` and `ref` routes keep each memory as a function built from
+  every earlier cycle, so a run's memory use and the cost of a memory read grow with its length;
+  a restored state holds each memory as one table. The outputs do not change:
+  `Projection/CkptResume.lean`'s `resume_exact` proves that a run from the restored checkpoint
+  of a state prints what a run from the state prints, and `HDLProof/Run/Sound.lean`'s
+  `compacted_outputs` chains it over the segments of a run. Default: off.
 
 The summary ends with `RESULT: <status>`. Exit code: 0 for `exit` with code 0, `stop-output`,
 `limit`, `breakpoint` and `watchpoint`; 1 for `exit` with another code and the failure
@@ -51,7 +58,8 @@ def usage : String :=
   "usage: cert_run <cert> [bind:<file>] [stim:<file>] [edges:all|edges:third|edges:file:<path>]\n" ++
   "       [route:ir|vc|ref] [opt:off] [init:reset|init:zero] [ckpt-in:<file>]\n" ++
   "       [load:<image>[@<addr>][:mem<k>]] [vaddr] [word:<bytes>] [max:<cycles>] [stop:<output>=<value>]\n" ++
-  "       [trace:<dir>] [vcd:<file>] [lockstep:<route>] [ckpt-at:<cycle>:<file>] [ckpt-out:<file>]"
+  "       [trace:<dir>] [vcd:<file>] [lockstep:<route>] [ckpt-at:<cycle>:<file>] [ckpt-out:<file>]\n" ++
+  "       [compact:<cycles>]"
 
 structure Opts where
   bind     : Option String := none
@@ -71,6 +79,7 @@ structure Opts where
   lockstep : Option Route := none
   ckptAt   : Array (Nat × String) := #[]
   ckptOut  : Option String := none
+  compact  : Nat := 0
 
 def parseOpts (args : List String) : Except String Opts := do
   let mut o : Opts := {}
@@ -111,6 +120,10 @@ def parseOpts (args : List String) : Except String Opts := do
         | none => throw s!"bad {a}"
       | _ => throw s!"ckpt-at expects <cycle>:<file>, got {a}"
     else if a.startsWith "ckpt-out:" then o := { o with ckptOut := some (drop "ckpt-out:") }
+    else if a.startsWith "compact:" then
+      match (drop "compact:").toNat? with
+      | some n => o := { o with compact := n }
+      | none => throw s!"bad {a}"
     else throw s!"unknown option {a}"
   return o
 
@@ -142,7 +155,9 @@ def loadWords (D : DesignCert) (s : RuntimeState) (k : Nat) (ws : Array (Nat × 
   for (a, _) in ws do
     if a ≥ md.depth then throw s!"word {a} is past memory {k}'s depth {md.depth}"
   let m := Ckpt.normalizeMem { m0 with words := m0.words ++ ws.map fun (a, v) => (a, v % 2 ^ md.dw) }
-  return { s with mems := s.mems.set! k (Ckpt.memImage m) }
+  -- the table is built here, once (`Ckpt.tableImage`), not on every read
+  let t := Ckpt.memTable m
+  return { s with mems := s.mems.set! k (Ckpt.tableImage m.dw m.dflt t) }
 
 def escapeBytes (b : ByteArray) : String :=
   b.foldl (fun s c =>
@@ -276,11 +291,16 @@ def main (args : List String) : IO UInt32 := do
     let mut s2 := s0
     let mut status := "limit"
     let mut applied := 0
+    let mut compactions := 0
     repeat
       let k := st.cycle
       for (j, p) in o.ckptAt do
         if j == k then saveTo p st
       if k ≥ c0 + o.max then status := "limit"; break
+      if o.compact > 0 && k > c0 && (k - c0) % o.compact == 0 then
+        st := { st with s := Ckpt.restore (Ckpt.save D hash k #[] st.s) }
+        if ls.isSome then s2 := Ckpt.restore (Ckpt.save D hash k #[] s2)
+        compactions := compactions + 1
       match cycleStep ctx st with
       | .error e =>
         IO.eprintln s!"cycle {k}: {e}"
@@ -328,6 +348,7 @@ def main (args : List String) : IO UInt32 := do
         say s!"word {nm} {match st.host.words.find? (·.1 == a) with | some (_, v) => hexS v | none => "-"}"
     unless bind.buses.isEmpty do
       say s!"bus reads {st.host.stats.reads} writes {st.host.stats.writes} fetches {st.host.stats.fetches} wait_cycles {st.host.stats.waits}"
+    if o.compact > 0 then say s!"compactions {compactions} (every {o.compact} cycles)"
     say s!"wall_ms {ns / 1000000} cycles_per_s {if ns == 0 then 0 else applied * 1000000000 / ns}"
     say s!"RESULT: {status}"
     let ok := ["stop-output", "limit", "breakpoint", "watchpoint"].contains status ||

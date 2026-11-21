@@ -229,6 +229,37 @@ summary | cmp -s - "$OUT/full.summary" || { cat "$LOG"; echo "FAIL: the resumed 
 cmp -s <(sed -n '31,$p' "$OUT/t_full/steps.trace") "$OUT/t_res/steps.trace" || { echo "FAIL: resumed steps.trace"; exit 1; }
 cmp -s "$OUT/cend.ckpt" "$OUT/cres.ckpt" || { echo "FAIL: the resumed run's final checkpoint differs"; exit 1; }
 
+# compaction (compact:<K>) changes no output: the same steps.trace, summary and final checkpoint
+for k in 1 7; do
+  expect 0 exit "$B" bind:"$OUT/lat2.bind" load:"$OUT/prog.elf" trace:"$OUT/t_c$k" ckpt-out:"$OUT/cc$k.ckpt" max:5000 compact:$k
+  grep -q "^compactions [1-9][0-9]* (every $k cycles)$" "$LOG" || { cat "$LOG"; echo "FAIL: compact:$k made no compaction"; exit 1; }
+  summary | cmp -s - "$OUT/full.summary" || { cat "$LOG"; echo "FAIL: compact:$k ends elsewhere"; exit 1; }
+  cmp -s "$OUT/t_full/steps.trace" "$OUT/t_c$k/steps.trace" || { echo "FAIL: compact:$k steps.trace"; exit 1; }
+  cmp -s "$OUT/cend.ckpt" "$OUT/cc$k.ckpt" || { echo "FAIL: compact:$k final checkpoint"; exit 1; }
+done
+# writes to the design's own memory every few cycles (seqm), on ir and vc, with and without compaction
+python3 -I - "$OUT/seqm_lean/seqm_io.json" "$OUT/seqw.stim" <<'PY'
+import json, random, sys
+ins = {i['name']: i for i in json.load(open(sys.argv[1]))['inputs']}
+r = random.Random(7)
+lines = ['stim v1']
+for k in range(80):
+    we = 1 if r.random() < 0.4 else 0
+    for n, v in (('we', we), ('wa', r.randrange(12)), ('wd', r.randrange(256))):
+        lines.append(f"at {k} in {ins[n]['ordinal']} {ins[n]['width']} {v}")
+open(sys.argv[2], 'w').write('\n'.join(lines) + '\n')
+PY
+for rt in ir vc; do
+  run "$OUT/seqm_lean/seqm.dcert" stim:"$OUT/seqw.stim" route:$rt trace:"$OUT/t_sw_$rt" ckpt-out:"$OUT/sw_$rt.ckpt" max:80
+  [[ $RC == 0 ]] || { cat "$LOG"; echo "FAIL: seqm writes, $rt"; exit 1; }
+  run "$OUT/seqm_lean/seqm.dcert" stim:"$OUT/seqw.stim" route:$rt trace:"$OUT/t_swc_$rt" ckpt-out:"$OUT/swc_$rt.ckpt" max:80 compact:3
+  [[ $RC == 0 ]] && has "compactions 26 (every 3 cycles)" || { cat "$LOG"; echo "FAIL: seqm writes, $rt, compact:3"; exit 1; }
+  cmp -s "$OUT/t_sw_$rt/steps.trace" "$OUT/t_swc_$rt/steps.trace" || { echo "FAIL: seqm compact:3 steps.trace ($rt)"; exit 1; }
+  cmp -s "$OUT/sw_$rt.ckpt" "$OUT/swc_$rt.ckpt" || { echo "FAIL: seqm compact:3 final checkpoint ($rt)"; exit 1; }
+done
+cmp -s "$OUT/t_sw_ir/steps.trace" "$OUT/t_sw_vc/steps.trace" || { echo "FAIL: seqm writes, ir and vc differ"; exit 1; }
+[[ $(cut -d' ' -f3 "$OUT/t_sw_ir/steps.trace" | sort -u | wc -l) -gt 3 ]] || { echo "FAIL: seqm writes reach no output"; exit 1; }
+
 # stops
 expect 0 limit "$B" bind:"$OUT/busm.bind" load:"$OUT/prog.elf" max:20
 has "cycles 20"
