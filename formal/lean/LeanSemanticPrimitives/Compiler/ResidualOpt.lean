@@ -13,19 +13,27 @@ original program when the checker refuses, so it is ALWAYS correct
 ## The certificate
 
 `pos` maps every OLD slot to its NEW slot; `keep` says which bindings stay; `fold` says
-which bindings are constants; `newSources` are the new sources. The rebuild renames every
-reference by `pos` and drops the bindings not kept. The checker requires, for every
-reference a kept binding, an output, a flop or a memory reads:
+which bindings are constants; `just` says why a binding that is neither still has a value
+in the new program; `newSources` are the new sources. The rebuild renames every reference
+by `pos` and drops the bindings not kept. The checker requires, for every reference a kept
+binding, an output, a flop or a memory reads:
 - a source: the new sources hold the same descriptor at its new slot (so identical
   constants may share one new source);
 - a binding: it is earlier (for a binding's operands) and either kept, or folded with the
-  new source at its new slot the constant the CHECKER computed for it;
+  new source at its new slot the constant the CHECKER computed for it, or aliased: its new
+  slot holds its value for a reason the checker verified (`Just`):
+  - `cse`: the new program computes, at that slot, the binding's own expression renamed;
+  - `copy q`: the binding's value is old slot `q`'s (`copyOf`: a one-operand OR, XOR, AND,
+    sum or product of the same width, or GetMask with a constant mask that keeps every bit
+    of a same-width operand), and the binding's new slot is `q`'s;
 and that the kept bindings land, in order, right after the new sources.
 
 The checker computes every folded binding's constant itself, in one pass: a folded
 binding may read only constant sources and earlier folded bindings, whose values the
 checker already knows, and `denoteExpr` on those values is the binding's value on every
-step (it reads nothing else).
+step (it reads nothing else). In the same pass it records each slot's static width
+(`srcWidth`, `exprWidth`: the value is a reduced bit vector of that width on every step),
+which a copy needs, and the renamed expression of each kept binding, which a `cse` needs.
 
 ## The passes so far
 
@@ -36,7 +44,11 @@ step (it reads nothing else).
   reads is dropped, and so is every source nothing reads (a folded binding reads
   nothing: its operands may die with it);
 - constant sharing: constant sources with the same width and value become one, folded
-  constants included.
+  constants included;
+- copy propagation: a binding whose value is one of its operands' (`copyOf`) reads that
+  operand's new slot instead;
+- common subexpressions: a binding whose expression, renamed, is an earlier kept
+  binding's reads that binding's new slot instead.
 
 Mathlib-free; the proofs are in `ResidualOptSound`.
 -/
@@ -112,7 +124,65 @@ def flopRefs (f : ResidualFlopUpdate) : List Nat :=
 def memRefs (m : ResidualMemoryUpdate) : List Nat :=
   m.nextImg :: (m.commits.toList.map (·.nextImg) ++ m.asyncImg.toList)
 
+/-! ## Static widths -/
+
+/-- The width of a source's value, when it is a bit vector (`none`: a memory image). -/
+def srcWidth : SourceDesc → Option Nat
+  | .input _ w => some w
+  | .const w _ => some w
+  | .flopQ _ w => some w
+  | .flopQAsync _ w _ _ _ => some w
+  | _ => none
+
+/-- The width of an expression's value, when it is a bit vector (`none`: a memory). -/
+def exprWidth : ResidualExpr → Option Nat
+  | .rsum w _ _ | .rmult w _ | .rand w _ | .rorBits w _ | .rxor w _ | .rredOr w _ | .req w _
+  | .rshl w _ | .rmuxN w _ | .rnot w _ | .rult w _ _ | .rugt w _ _ | .rslt w _ _ | .rsgt w _ _
+  | .rsra w _ _ | .rsext w _ _ | .rgetMask w _ _ | .rudiv w _ _ | .rsdiv w _ _
+  | .rsetMask w _ _ _ | .rmux w _ _ _ | .rmemRead w _ _ _ | .rmemToBus w _ _ => some w
+  | .rmemWrite .. | .rmemWriteBE .. | .rmemLoad .. => none
+
+/-! ## Copies -/
+
+/-- A constant mask that keeps bits `0 .. L-1` of its operand, with `w ≤ L` and the run
+inside the mask's own width. -/
+def lowMaskCovers (w : Nat) (m : BV) : Bool :=
+  let M := FastBV.uintNat m
+  let L := Nat.log2 (M + 1)
+  M == 2 ^ L - 1 && decide (w ≤ L) && decide (L ≤ m.width)
+
+/-- The operand whose value an expression is, when the expression is a copy of it: given
+which slots hold known constants (`kn`), their values (`cv`) and each slot's static width
+(`wq`). Shared by the optimizer and the checker. -/
+def copyOf (kn : Nat → Bool) (cv : Nat → CertVal) (wq : Nat → Option Nat) :
+    ResidualExpr → Option Nat
+  | .rorBits w args | .rxor w args | .rand w args | .rmult w args =>
+      match args.toList with
+      | [q] => if wq q == some w then some q else none
+      | _ => none
+  | .rsum w n args =>
+      match args.toList with
+      | [q] => if decide (1 ≤ n) && wq q == some w then some q else none
+      | _ => none
+  | .rgetMask w a m =>
+      if wq a == some w && kn m &&
+          (match cv m with
+           | .bv mv => lowMaskCovers w mv
+           | .mem _ => false)
+      then some a else none
+  | _ => none
+
 /-! ## The certificate, the rebuild and the checker -/
+
+/-- Why a binding that is neither kept nor folded still has a value in the new program. -/
+inductive Just where
+  /-- none: the binding is dropped, and nothing may read it -/
+  | none
+  /-- the new program computes the binding's own expression, renamed, at its new slot -/
+  | cse
+  /-- the binding's value is old slot `q`'s (`copyOf`) -/
+  | copy (q : Nat)
+deriving Inhabited, DecidableEq, Repr
 
 structure OptCert where
   newSources : Array SourceDesc
@@ -122,6 +192,8 @@ structure OptCert where
   keep       : Array Bool
   /-- old binding ↦ a constant? (only for a binding not kept) -/
   fold       : Array Bool := #[]
+  /-- old binding ↦ why it has a value though neither kept nor folded -/
+  just       : Array Just := #[]
 deriving Inhabited
 
 /-- The renaming: old slot ↦ new slot. -/
@@ -151,6 +223,12 @@ def constOK (c : OptCert) (r : Nat) : CertVal → Bool
 @[inline] def isFold (c : OptCert) (k : Nat) : Bool :=
   !(c.keep.getD k false) && c.fold.getD k false
 
+@[inline] def justOf (c : OptCert) (k : Nat) : Just := c.just.getD k .none
+
+/-- Old binding `k` is aliased: neither kept nor folded, and justified. -/
+@[inline] def isAlias (c : OptCert) (k : Nat) : Bool :=
+  !(c.keep.getD k false) && !(c.fold.getD k false) && (justOf c k != .none)
+
 /-- Old slot `r` holds a value the checker knows without running the program: a constant
 source, or a folded binding. -/
 def known (R : ResidualProgram) (c : OptCert) (r : Nat) : Bool :=
@@ -171,25 +249,46 @@ sources hold at `σ r`, or an earlier binding that is kept, or folded with its c
 def refOK (R : ResidualProgram) (c : OptCert) (cenv : SlotEnv) (bound r : Nat) : Bool :=
   if r < R.sources.size then c.newSources[c.σ r]? == R.sources[r]?
   else r < bound && (c.keep.getD (r - R.sources.size) false ||
-    (isFold c (r - R.sources.size) && constOK c r (denoteRef cenv r)))
+    (isFold c (r - R.sources.size) && constOK c r (denoteRef cenv r)) ||
+    isAlias c (r - R.sources.size))
 
 /-- The checker's next environment entry for old binding `k`: its constant when folded. -/
 @[inline] def cval (c : OptCert) (cenv : SlotEnv) (k : Nat) (b : ResidualBinding) : CertVal :=
   if isFold c k then denoteExpr cenv b.rhs else badVal
 
-/-- Walk the bindings (`k` old index, `t` new index, `cenv` the checker's constants): a kept
-binding reads only references `refOK` below it, and lands at new slot
-`newSources.size + t`; a folded binding reads only references the checker knows. -/
+/-- An aliased binding's reason holds: `cse`, its renamed expression is what the new program
+computes at its new slot (`nr`: the renamed expressions of the kept bindings, in order);
+`copy q`, its value is `q`'s and its new slot is `q`'s. -/
+def aliasOK (R : ResidualProgram) (c : OptCert) (cenv : SlotEnv) (wenv : Array (Option Nat))
+    (nr : Array ResidualExpr) (k : Nat) (rhs : ResidualExpr) : Bool :=
+  let slot := R.sources.size + k
+  match justOf c k with
+  | .none => false
+  | .cse =>
+      (exprRefs rhs).all (refOK R c cenv slot) && decide (c.newSources.size ≤ c.σ slot) &&
+      nr[c.σ slot - c.newSources.size]? == some (renameExpr c.σ rhs)
+  | .copy q =>
+      refOK R c cenv slot q && c.σ slot == c.σ q &&
+      copyOf (known R c) (denoteRef cenv) (fun r => wenv.getD r none) rhs == some q
+
+/-- Walk the bindings (`k` old index, `t` new index; the checker's constants `cenv`, static
+widths `wenv` and the kept bindings' renamed expressions `nr`): a kept binding reads only
+references `refOK` below it, and lands at new slot `newSources.size + t`; a folded binding
+reads only references the checker knows; an aliased binding's reason holds. -/
 def scanOK (R : ResidualProgram) (c : OptCert) :
-    List (ResidualBinding × Bool) → Nat → Nat → SlotEnv → Bool
-  | [], _, _, _ => true
-  | (b, true) :: rest, k, t, cenv =>
+    List (ResidualBinding × Bool) → Nat → Nat → SlotEnv → Array (Option Nat) →
+    Array ResidualExpr → Bool
+  | [], _, _, _, _, _ => true
+  | (b, true) :: rest, k, t, cenv, wenv, nr =>
       (exprRefs b.rhs).all (refOK R c cenv (R.sources.size + k)) &&
       c.σ (R.sources.size + k) == c.newSources.size + t &&
-      scanOK R c rest (k + 1) (t + 1) (cenv.push (cval c cenv k b))
-  | (b, false) :: rest, k, t, cenv =>
-      (!isFold c k || (exprRefs b.rhs).all (known R c)) &&
-      scanOK R c rest (k + 1) t (cenv.push (cval c cenv k b))
+      scanOK R c rest (k + 1) (t + 1) (cenv.push (cval c cenv k b)) (wenv.push (exprWidth b.rhs))
+        (nr.push (renameExpr c.σ b.rhs))
+  | (b, false) :: rest, k, t, cenv, wenv, nr =>
+      (if isFold c k then (exprRefs b.rhs).all (known R c)
+       else if isAlias c k then aliasOK R c cenv wenv nr k b.rhs
+       else true) &&
+      scanOK R c rest (k + 1) t (cenv.push (cval c cenv k b)) (wenv.push (exprWidth b.rhs)) nr
 
 /-- The checker's constants after the bindings (the environment `scanOK` ends with). -/
 def cenvRun (c : OptCert) : List ResidualBinding → Nat → SlotEnv → SlotEnv
@@ -201,26 +300,50 @@ def validate (R : ResidualProgram) (c : OptCert) : Bool :=
   let b := R.sources.size + R.bindings.size
   let cenv := cenvRun c R.bindings.toList 0 (constEnv R)
   c.keep.size == R.bindings.size &&
-  scanOK R c (R.bindings.toList.zip c.keep.toList) 0 0 (constEnv R) &&
+  scanOK R c (R.bindings.toList.zip c.keep.toList) 0 0 (constEnv R) (R.sources.map srcWidth) #[] &&
   R.outputs.all (fun o => refOK R c cenv b o.slot) &&
   R.flopUpdates.all (fun f => (flopRefs f).all (refOK R c cenv b)) &&
   R.memoryUpdates.all (fun m => (memRefs m).all (refOK R c cenv b))
 
 /-! ## The optimizer (unproved: its every output is checked) -/
 
-/-- Constant folding and propagation, the checker's way (one pass, the same environment),
-then liveness from the outputs, flops and memories, then constant sharing, then the
-renaming. -/
+deriving instance Hashable for ResidualExpr
+
+/-- One forward pass, the checker's way, then liveness, then the new slots.
+
+The forward pass folds a binding all of whose operands are known (its value must be a
+reduced `BV`, `constOK`), records static widths, and otherwise marks a copy (`copyOf`) or
+a repeated expression. Every slot gets a class, and slots of one class get one new slot:
+a constant's class is its width and value (folded constants included), a copy's is its
+operand's, a repeated expression's is its first binding's, and every other slot is its own.
+An expression's key for repetition is the expression with its operands renamed to their
+classes.
+
+Liveness then runs from the outputs, flops and memories back: a folded binding reads
+nothing, a copy reads its operand, a repeated expression its first binding and its own
+operands (the checker reads them), any other binding its operands. A binding that is not
+read gets no reason (`Just.none`) and is dropped. -/
 def optimizeRaw (R : ResidualProgram) : OptCert := Id.run do
   let S := R.sources.size
   let B := R.bindings.size
-  -- folding: a binding all of whose operands are known; its value must be a reduced `BV`
-  -- (`constOK`), else it stays a binding
   let mut cenv : SlotEnv := constEnv R
   let mut kn : Array Bool := R.sources.map fun sd => match sd with
     | .const _ _ => true
     | _ => false
+  let mut wenv : Array (Option Nat) := R.sources.map srcWidth
   let mut fold : Array Bool := Array.replicate B false
+  let mut just : Array Just := Array.replicate B .none
+  let mut first : Array Nat := Array.replicate B 0
+  let mut constCls : Std.HashMap (Nat × Int) Nat := {}
+  let mut cls : Array Nat := Array.range S
+  for j in [0:S] do
+    match R.sources[j]! with
+    | .const w v =>
+      match constCls.get? (w, v) with
+      | some id => cls := cls.set! j id
+      | none => constCls := constCls.insert (w, v) j
+    | _ => pure ()
+  let mut seen : Std.HashMap ResidualExpr Nat := {}
   for k in [0:B] do
     let rhs := R.bindings[k]!.rhs
     let canFold : Bool := (exprRefs rhs).all fun r => kn.getD r false
@@ -228,9 +351,35 @@ def optimizeRaw (R : ResidualProgram) : OptCert := Id.run do
     let ok : Bool := canFold && (match v with
       | .bv x => mk_bv x.width x.value == x
       | .mem _ => false)
-    fold := fold.set! k ok
+    if ok then
+      fold := fold.set! k true
+      match v with
+      | .bv x =>
+        match constCls.get? (x.width, x.value) with
+        | some id => cls := cls.push id
+        | none =>
+          constCls := constCls.insert (x.width, x.value) (S + k)
+          cls := cls.push (S + k)
+      | .mem _ => cls := cls.push (S + k)
+    else
+      match copyOf (fun r => kn.getD r false) (fun r => cenv.getD r badVal)
+          (fun r => wenv.getD r none) rhs with
+      | some q =>
+        just := just.set! k (.copy q)
+        cls := cls.push (cls.getD q q)
+      | none =>
+        let key := renameExpr (fun r => cls.getD r r) rhs
+        match seen.get? key with
+        | some j =>
+          just := just.set! k .cse
+          first := first.set! k j
+          cls := cls.push (S + j)
+        | none =>
+          seen := seen.insert key k
+          cls := cls.push (S + k)
     kn := kn.push ok
     cenv := cenv.push (if ok then v else badVal)
+    wenv := wenv.push (exprWidth rhs)
   let mark (live : Array Bool) (r : Nat) : Array Bool :=
     if r < live.size then live.set! r true else live
   let mut live : Array Bool := Array.replicate (S + B) false
@@ -239,12 +388,17 @@ def optimizeRaw (R : ResidualProgram) : OptCert := Id.run do
     for r in flopRefs f do live := mark live r
   for m in R.memoryUpdates do
     for r in memRefs m do live := mark live r
-  -- bindings read only earlier slots, so one pass from the last binding back is enough;
-  -- a folded binding becomes a constant and reads nothing
+  -- bindings read only earlier slots, so one pass from the last binding back is enough
   for kk in [0:B] do
     let k := B - 1 - kk
     if live[S + k]! && !fold[k]! then
-      for r in exprRefs R.bindings[k]!.rhs do live := mark live r
+      match just[k]! with
+      | .copy q => live := mark live q
+      | .cse =>
+        live := mark live (S + first[k]!)
+        for r in exprRefs R.bindings[k]!.rhs do live := mark live r
+      | .none =>
+        for r in exprRefs R.bindings[k]!.rhs do live := mark live r
   let mut newSources : Array SourceDesc := #[]
   let mut pos : Array Nat := Array.replicate (S + B) 0
   let mut constAt : Std.HashMap (Nat × Int) Nat := {}
@@ -278,11 +432,20 @@ def optimizeRaw (R : ResidualProgram) : OptCert := Id.run do
   let mut keep : Array Bool := Array.replicate B false
   let mut t := 0
   for k in [0:B] do
-    if live[S + k]! && !fold[k]! then
+    if live[S + k]! && !fold[k]! && just[k]! == .none then
       keep := keep.set! k true
       pos := pos.set! (S + k) (S' + t)
       t := t + 1
-  return { newSources, pos, keep, fold }
+  -- an alias takes its target's new slot (targets are earlier); an unread binding no reason
+  for k in [0:B] do
+    if live[S + k]! && !fold[k]! then
+      match just[k]! with
+      | .copy q => pos := pos.set! (S + k) pos[q]!
+      | .cse => pos := pos.set! (S + k) pos[S + first[k]!]!
+      | .none => pure ()
+    else
+      just := just.set! k .none
+  return { newSources, pos, keep, fold, just }
 
 /-- The optimized program, and whether the checker accepted the optimizer's certificate. -/
 def optimizeWith (R : ResidualProgram) : ResidualProgram × Bool :=

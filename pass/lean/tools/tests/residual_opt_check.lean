@@ -5,9 +5,9 @@ Tests for vc's optimizer and its checker (`Compiler.ResidualOpt`).
 
 `ResidualOptSound.optimize_correct` already PROVES that `optimize` never changes a result;
 these cases check that the optimizer does what it should (drops what is dead, shares equal
-constants, folds constant bindings and propagates them), that the checker refuses wrong
-certificates, and that the optimized program runs step for step like the original, a
-memory included.
+constants, folds constant bindings and propagates them, replaces copies and repeated
+expressions by what they copy or repeat), that the checker refuses wrong certificates, and
+that the optimized program runs step for step like the original, a memory included.
 
 Prints `PASS residual_opt: <n> cases` or one `FAIL` line per case that went wrong.
 -/
@@ -17,8 +17,9 @@ import LeanSemanticPrimitives.Compiler.CompileDesignDefs
 open Compiler Compiler.ResidualOpt
 
 /-- Sources: 0 input a, 1 const 5, 2 const 5 (a duplicate), 3 const 7, 4 input b (unread),
-5 flop q. Bindings (slots 6..10): 6 = a + 5, 7 = a + 5 (through the duplicate), 8 = a * 7
-(nothing reads it), 9 = 6 xor 7, 10 = 9 | q. Outputs: slots 6 and 10; the flop takes 7. -/
+5 flop q. Bindings (slots 6..10): 6 = a + 5, 7 = a + 5 (through the duplicate: the same
+expression once the constants are shared), 8 = a * 7 (nothing reads it), 9 = 6 xor 7,
+10 = 9 | q. Outputs: slots 6 and 10; the flop takes 7. -/
 def prog : ResidualProgram :=
   { sources := #[.input 0 8, .const 8 5, .const 8 5, .const 8 7, .input 1 8, .flopQ 0 8]
     bindings := #[⟨.bv 8, .rsum 8 2 #[0, 1]⟩, ⟨.bv 8, .rsum 8 2 #[0, 2]⟩, ⟨.bv 8, .rmult 8 #[0, 3]⟩,
@@ -38,6 +39,21 @@ def foldProg : ResidualProgram :=
     bindings := #[⟨.bv 8, .rsum 8 2 #[1, 2]⟩, ⟨.bv 8, .rmult 8 #[3, 0]⟩, ⟨.bv 8, .rxor 8 #[1, 3]⟩,
                   ⟨.bv 8, .rsum 8 2 #[1, 1]⟩, ⟨.bv 8, .rxor 8 #[6, 2]⟩]
     outputs := #[{ slot := 4, width := 8 }, { slot := 5, width := 8 }, { slot := 7, width := 8 }]
+    flopUpdates := #[]
+    memoryUpdates := #[] }
+
+/-- Copies and repeated expressions. Sources: 0 input a (8 bits), 1 input b (4 bits),
+2 const 8 0xFF, 3 const 8 0x0F. Bindings (slots 4..9): 4 = a + b, 5 = a + b (repeated),
+6 = | 4 (a one-operand OR of the same width: a copy of 4), 7 = GetMask a 0xFF (keeps every bit
+of a: a copy of a), 8 = GetMask a 0x0F (keeps 4 of 8 bits: not a copy), 9 = 5 ^ 6 ^ 7 ^ 8,
+10 = | b at 8 bits (a widening, not a copy). Outputs: 9, 6 and 10. Expected: 4, 8, 9 and
+10 kept. -/
+def copyProg : ResidualProgram :=
+  { sources := #[.input 0 8, .input 1 4, .const 8 0xFF, .const 8 0x0F]
+    bindings := #[⟨.bv 8, .rsum 8 2 #[0, 1]⟩, ⟨.bv 8, .rsum 8 2 #[0, 1]⟩,
+                  ⟨.bv 8, .rorBits 8 #[4]⟩, ⟨.bv 8, .rgetMask 8 0 2⟩, ⟨.bv 8, .rgetMask 8 0 3⟩,
+                  ⟨.bv 8, .rxor 8 #[5, 6, 7, 8]⟩, ⟨.bv 8, .rorBits 8 #[1]⟩]
+    outputs := #[{ slot := 9, width := 8 }, { slot := 6, width := 8 }, { slot := 10, width := 8 }]
     flopUpdates := #[]
     memoryUpdates := #[] }
 
@@ -74,7 +90,7 @@ def main : IO UInt32 := do
   n := n + 3
   fails := check "the checker accepted the optimizer's certificate" acc fails
   fails := check s!"sources 6 -> 3 (got {P.sources.size})" (P.sources.size == 3) fails
-  fails := check s!"bindings 5 -> 4 (got {P.bindings.size})" (P.bindings.size == 4) fails
+  fails := check s!"bindings 5 -> 3 (got {P.bindings.size})" (P.bindings.size == 3) fails
   -- 2. same results, every input and state tried
   for a in [0, 1, 5, 200, 255] do
     for q in [0, 9, 255] do
@@ -88,7 +104,7 @@ def main : IO UInt32 := do
   let wrong : List (String × OptCert) := [
     ("a source mapped to a different constant",
       { c with newSources := c.newSources.set! 1 (.const 8 7) }),
-    ("a needed binding dropped", { c with keep := c.keep.set! 1 false }),
+    ("a needed binding dropped", { c with keep := c.keep.set! 3 false }),
     ("an output's binding dropped", { c with keep := c.keep.set! 0 false }),
     ("a kept binding put at the wrong slot", { c with pos := c.pos.set! 7 (c.pos[7]! + 1) }),
     ("keep of the wrong length", { c with keep := c.keep.pop })]
@@ -123,7 +139,39 @@ def main : IO UInt32 := do
   for (name, w) in wrongF do
     n := n + 1
     fails := check s!"refused: {name}" (!validate foldProg w) fails
-  -- 5. a compiled program with a memory, 40 steps, optimized against unoptimized
+  -- 5. copies and repeated expressions
+  let (Cp, accC) := optimizeWith copyProg
+  n := n + 3
+  fails := check "the checker accepted the copy/repeat certificate" accC fails
+  fails := check s!"copies: bindings 7 -> 4 (got {Cp.bindings.size})" (Cp.bindings.size == 4) fails
+  let cc := optimizeRaw copyProg
+  fails := check s!"copies: the reasons (got {repr cc.just})"
+    (cc.just == #[.none, .cse, .copy 4, .copy 0, .none, .none, .none]) fails
+  for a in [0, 1, 0x5A, 200, 255] do
+    for b in [0, 3, 15] do
+      n := n + 1
+      let i : RuntimeInput := #[mk_bv 8 a, mk_bv 4 b]
+      let s : RuntimeState := { flops := #[], mems := #[] }
+      fails := check s!"copies: same step at a={a} b={b}"
+        (same (denoteResidual Cp #[true] i s) (denoteResidual copyProg #[true] i s)) fails
+  let wrongC : List (String × OptCert) := [
+    ("a repeated expression at another binding's slot",
+      { cc with pos := cc.pos.set! 5 cc.pos[8]! }),
+    ("a copy of an operand it does not copy", { cc with just := cc.just.set! 2 (.copy 0) }),
+    ("a copy whose new slot is not its operand's",
+      { cc with pos := cc.pos.set! 6 cc.pos[9]! }),
+    ("a GetMask that drops bits marked a copy",
+      { cc with just := cc.just.set! 4 (.copy 0), keep := cc.keep.set! 4 false,
+                pos := cc.pos.set! 8 cc.pos[0]! }),
+    ("a widening marked a copy",
+      { cc with just := cc.just.set! 6 (.copy 1), keep := cc.keep.set! 6 false,
+                pos := cc.pos.set! 10 cc.pos[1]! }),
+    ("a repeat marked for a binding with no earlier twin",
+      { cc with just := cc.just.set! 4 .cse, keep := cc.keep.set! 4 false })]
+  for (name, w) in wrongC do
+    n := n + 1
+    fails := check s!"refused: {name}" (!validate copyProg w) fails
+  -- 6. a compiled program with a memory, 40 steps, optimized against unoptimized
   match compileDesign ramCert with
   | .error e => fails := fails.push s!"compileDesign refused the RAM: {repr e}"
   | .ok R =>
