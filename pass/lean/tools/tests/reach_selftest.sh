@@ -15,9 +15,16 @@ set -euo pipefail
 #          end checkpoint is REACHABLE
 #   errors another design's checkpoint (exit 4), a start after the target (exit 2), a
 #          stimulus that does not parse (exit 2)
+#   init   sym_verify's start state (evenpow: a counter that adds 2, power-on value 1): "c is
+#          even" is PROVED from the all-zero start and from a checkpoint with c = 4, and has a
+#          base COUNTEREXAMPLE from the power-on state and from a checkpoint with c = 3; "c is
+#          odd" is PROVED from power-on, and its emitted theorem file (init:reset) compiles, as
+#          does the one from the c = 4 checkpoint; c = 4 at cycle 2 is REACHABLE from all-zero
+#          and NOT MATCHED by the same witness from power-on
 #
-# CK_NAT=<dir with native ckpt_reach, lhd_ckpt and cert_trace> uses them; otherwise the drivers
-# run interpreted against formal/lean/.olean-dev (build it with formal/lean/.build-proj.sh).
+# CK_NAT=<dir with native ckpt_reach, lhd_ckpt, cert_trace and sym_verify (with cadical beside
+# it)> uses them; otherwise the drivers run interpreted against formal/lean/.olean-dev (build it
+# with formal/lean/.build-proj.sh).
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
@@ -48,7 +55,16 @@ module ram(input clk, input we, input [3:0] wa, input [7:0] wd, input [3:0] ra,
   assign rd_o = m[ra];
 endmodule
 EOF
-for d in even ram; do
+cat > "$OUT/evenpow.v" <<'EOF'
+module evenpow(input clk, input en, output [3:0] c_o, output odd_o, output is5_o);
+  reg [3:0] c = 4'd1;
+  always @(posedge clk) if (en) c <= c + 4'd2;
+  assign c_o = c;
+  assign odd_o = c[0];
+  assign is5_o = (c == 4'd5);
+endmodule
+EOF
+for d in even ram evenpow; do
   (cd "$OUT" && "$LHD" compile "$d.v" --reader slang --top "$d" --emit-dir "lg:${d}_lg" --workdir "${d}_cw" \
      > "$d.compile.log" 2>&1) || { tail -5 "$OUT/$d.compile.log"; echo "FAIL: compile $d"; exit 1; }
   (cd "$OUT" && "$LHD" compile "lg:${d}_lg" --top "$d" --workdir "${d}_lw" --emit-dir "lean:${d}_lean" \
@@ -71,6 +87,7 @@ drv() { # <native name> <source> args... -> RC, LOG
 reach() { drv ckpt_reach "$ROOT/pass/lean/tools/drivers/ckpt_reach.lean" "$@"; }
 ck() { drv lhd_ckpt "$ROOT/pass/lean/tools/drivers/lhd_ckpt.lean" "$@"; }
 ct() { drv cert_trace "$ROOT/formal/lean/Futamura_Projection_Scripts/cert_trace.lean" "$@"; }
+sv() { drv sym_verify "$ROOT/pass/lean/tools/drivers/sym_verify.lean" "$@"; }
 expect() { # <exit code> <text> <driver fn> args...
   local want=$1 text=$2 fn=$3; shift 3
   "$fn" "$@"
@@ -127,5 +144,30 @@ expect 4 "RESULT: CHECKPOINT REFUSED" reach check "$RAM" "$OUT/even6at3.ckpt" "$
 expect 2 "after the target's cycle" reach check "$RAM" "$OUT/ram7.ckpt" "$OUT/ram.stim" init:ckpt:"$OUT/ram14.ckpt"
 printf 'stim v2\n' > "$OUT/bad.stim"
 expect 2 'expected "stim v1"' reach check "$EVEN" "$OUT/even6at3.ckpt" "$OUT/bad.stim"
+
+# sym_verify's start state
+EP="$OUT/evenpow_lean/evenpow.dcert"
+expect 0 "" ck init "$EP" "$OUT/ep0.ckpt"
+handmade "$OUT/ep0.ckpt" "$OUT/ep4.ckpt" '/^flops /{f=NR} NR==f+1 && f{$2="4"} 1'
+handmade "$OUT/ep0.ckpt" "$OUT/ep3.ckpt" '/^flops /{f=NR} NR==f+1 && f{$2="3"} 1'
+expect 0 "RESULT: INVARIANT PROVED (k=1) -- runInvKOf_sound_ref: on every run from the all-zero state" \
+  sv "$EP" '!odd_o' k:1 work:"$OUT/w1"
+expect 0 "on every run from the all-zero state" sv "$EP" '!odd_o' k:1 init:zero work:"$OUT/w2"
+expect 1 "RESULT: COUNTEREXAMPLE (base, replayed)" sv "$EP" '!odd_o' k:1 init:reset work:"$OUT/w3"
+expect 0 "RESULT: INVARIANT PROVED (k=1)" sv "$EP" '!odd_o' k:1 init:ckpt:"$OUT/ep4.ckpt" emit:"$OUT/EvenC4.lean" work:"$OUT/w4"
+expect 1 "RESULT: COUNTEREXAMPLE (base, replayed)" sv "$EP" '!odd_o' k:1 init:ckpt:"$OUT/ep3.ckpt" work:"$OUT/w5"
+expect 0 "on every run from the power-on" sv "$EP" odd_o k:1 init:reset emit:"$OUT/OddReset.lean" work:"$OUT/w6"
+expect 2 "" sv "$EP" odd_o k:1 init:ckpt:"$OUT/ram7.ckpt" work:"$OUT/w7"
+# the start is part of the question: c = 4 at cycle 2 is reachable from all-zero, and the same
+# witness misses it from power-on (where c stays odd, PROVED above)
+handmade "$OUT/ep0.ckpt" "$OUT/ep4c2.ckpt" '/^cycle /{print "cycle 2"; next} /^flops /{f=NR} NR==f+1 && f{$2="4"} 1'
+expect 0 "RESULT: REACHABLE (cycle 2, 2 steps" reach check "$EP" "$OUT/ep4c2.ckpt" "$OUT/en1.stim" init:zero
+expect 1 "RESULT: NOT MATCHED: flop 0 is 0x5" reach check "$EP" "$OUT/ep4c2.ckpt" "$OUT/en1.stim" init:reset
+for f in EvenC4 OddReset; do
+  (cd "$ROOT/formal/lean" && LEAN_PATH="$PWD/.olean-dev" lean "$OUT/$f.lean") > "$OUT/$f.log" 2>&1 \
+    || { cat "$OUT/$f.log"; echo "FAIL: $f.lean does not compile"; exit 1; }
+  grep -q "'SymF2.$f.invariant' depends on axioms" "$OUT/$f.log" && ! grep -q sorryAx "$OUT/$f.log" \
+    || { cat "$OUT/$f.log"; echo "FAIL: $f.lean axioms"; exit 1; }
+done
 
 echo "PASS reach_selftest: $N driver runs"

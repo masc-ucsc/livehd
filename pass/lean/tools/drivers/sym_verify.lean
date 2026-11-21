@@ -4,7 +4,7 @@ residual (M3).
 
     sym_verify <cert> [!]<output>[,[!]<output>...] [asm:[!]<output>] [in:<input>=<value>]...
                [k:<n>[,<n>...]] [base] [closed|rebuild] [sim:fp|ir|vc (default vc)] [route:fused|var|plain] [emit:<file>] [sf:<n>] [wf:<n>]
-               [solver:<cadical>] [work:<dir>]
+               [solver:<cadical>] [work:<dir>] [init:zero|reset|ckpt:<file>]
 
 The specializer is `MemFused.projectMemFDesignAt`: the memory interpreter
 with `env0` inlined and the node fold fused into its readers, whose residual
@@ -27,7 +27,11 @@ Outputs and inputs are named by ordinal or by name (names come from the
 the output is NONZERO (or ZERO, with `!`). Assumptions restrict which cycles
 count: an output (`asm:`), and inputs held at fixed values (`in:`, e.g.
 `in:rst_ni=0` for "reset held"). The initial state is all-zero (flops, memory
-words, defaults).
+words, defaults) unless `init:` names another: `init:reset` is the power-on state
+(`initStateOf`: every flop at its reset value, every memory at its power-on image, the start
+`cert_trace` and the runners use), `init:ckpt:<file>` an `lhdcert-ckpt v1` checkpoint
+(validated, then `CkptStateM.toStateM`). `emit:` writes the same start into the theorem file.
+`init:` applies to invariants; `conj:` specs start all-zero.
 
 Steps: load and admit the certificate; specialize the memory interpreter to
 it ONCE; then, per candidate property and k (k-major,
@@ -69,6 +73,8 @@ import Lean.Data.Json
 import HDLProof.Kit.Driver
 import HDLProof.Kit.SymRoute
 import HDLProof.Sym.Closed
+-- init:ckpt: a checkpoint as the start state
+import LeanSemanticPrimitives.Projection.CkptStateM
 
 open Compiler Projection HDLProof HDLProof.Sym HDLProof.Driver Projection.MemProjection Projection.HwMem
 open HDLProof.Kit (SymRoute mkSymRoute defaultSim simWhy)
@@ -135,11 +141,18 @@ def leanSpec (sp : InvSpec) : String :=
   s!"\{ prop := {leanProp sp.prop}, asmOut := {asmOut}, asmIn := {asmIn}, k := {sp.k}, fuel := {sp.fuel}, \
 inW := {sp.inW}, L := \{ fws := {sp.L.fws}, mds := {mds} } }"
 
+/-- The emitted start state of the all-zero default (`init:zero`), as it has always been written. -/
+def zeroS0Def : String := "def s0 : StateM :=
+  { flops := D.flops.map (fun f => mk_bv f.width 0)
+  , mems  := D.memories.map (fun md =>
+      { words := List.replicate (2 ^ md.aw) (mk_bv md.dw 0), dflt := mk_bv md.dw 0 }) }"
+
 /-- A self-contained Lean file whose `invariant` is `runInvKF_sound` (`runInvKV_sound`
 with `route:var`, `runInvK_sound` with `route:plain`; `runInvKOn_sound` on ir and vc) applied
 to a `native_decide` of the closed check on THIS certificate's text. -/
 def emitF2 (path : System.FilePath) (name : String) (certText : String) (sf wf : Nat) (sp : InvSpec)
-    (pfB pfS : ByteArray) (route sim : String) : IO Unit := do
+    (pfB pfS : ByteArray) (route sim : String) (s0Def : String := zeroS0Def) (extraImport : String := "") :
+    IO Unit := do
   let fpChk := if route == "plain" then "runInvK" else if route == "var" then "runInvKV" else "runInvKF"
   let chk := if sim == "fp" then s!"{fpChk} {sf} {wf}" else s!"runInvKOn .{sim}"
   let snd := if sim == "fp" then s!"{fpChk}_sound" else "runInvKOn_sound"
@@ -147,7 +160,7 @@ def emitF2 (path : System.FilePath) (name : String) (certText : String) (sf wf :
 the LRAT proofs came from an untrusted solver and are checked by `{chk.splitOn " " |>.head!}`, which
 `native_decide` evaluates (trusted-native: one `_native` axiom). -/
 import HDLProof.Sym.Closed
-import LeanSemanticPrimitives.Compiler.CertIOCodec
+import LeanSemanticPrimitives.Compiler.CertIOCodec{extraImport}
 open Compiler Projection HDLProof HDLProof.Sym
 
 namespace SymF2.{name}
@@ -158,10 +171,7 @@ def D : DesignCert := match CertIO.readCertChecked certText.toUTF8 with
   | .ok d => d
   | .error _ => default
 
-def s0 : StateM :=
-  \{ flops := D.flops.map (fun f => mk_bv f.width 0)
-  , mems  := D.memories.map (fun md =>
-      \{ words := List.replicate (2 ^ md.aw) (mk_bv md.dw 0), dflt := mk_bv md.dw 0 }) }
+{s0Def}
 
 def spec : InvSpec := {leanSpec sp}
 
@@ -186,7 +196,9 @@ once for all attempts. Returns the exit code and the verdict. -/
 def attempt (cert : String) (solver : String) (work : System.FilePath) (sf wf : Nat)
     (D : DesignCert) (rt : SymRoute) (s0 : StateM) (tag : String) (prop : PropSpec)
     (asmOut : Option PropSpec) (asmIn : List (Nat × Int)) (kd : Nat) (closed rebuild : Bool) (route sim : String)
-    (emit : Option String) (baseOnly : Bool := false) : IO (UInt32 × String) := do
+    (emit : Option String) (baseOnly : Bool := false)
+    (start : String := "all-zero") (s0Def : String := zeroS0Def) (s0Import : String := "") :
+    IO (UInt32 × String) := do
   let pre := if tag.isEmpty then "" else s!"[{tag} k={kd}] "
   let fin (code : UInt32) (v : String) : IO (UInt32 × String) := do
     say s!"  {pre}RESULT: {v}"; return (code, v)
@@ -289,9 +301,9 @@ cycle {a} and the property held at every cycle before it (the symbolic step and 
   if ok then
     if let some ef := emit then
       let name := ((System.FilePath.mk ef).fileStem.getD "F2").map fun c => if c.isAlphanum then c else '_'
-      emitF2 ef name (← IO.FS.readFile cert) sf wf sp pfB pfS route sim
+      emitF2 ef name (← IO.FS.readFile cert) sf wf sp pfB pfS route sim s0Def s0Import
       say s!"  {pre}theorem form written to {ef} ({sndName} via native_decide)"
-    fin 0 s!"INVARIANT PROVED (k={kd}) -- runInvKOf_sound_ref: on every run from the all-zero state, the property holds at every cycle whose assumptions held"
+    fin 0 s!"INVARIANT PROVED (k={kd}) -- runInvKOf_sound_ref: on every run from the {start} state, the property holds at every cycle whose assumptions held"
   else
     fin 6 "CHECK REJECTED (the verified checker did not accept the proofs)"
 
@@ -621,6 +633,25 @@ def main (args : List String) : IO UInt32 := do
           let some v := vs.toInt? | IO.eprintln s!"bad value {repr vs}"; return 2
           asmIn := asmIn ++ [(k, v)]
       | _ => IO.eprintln s!"in:<input>=<value>, got {repr tok}"; return 2
+    -- the start state: all-zero (the default), the power-on state, or a checkpoint
+    let (s0, start, s0Def, s0Import) ← match opt "init" with
+      | none | some "zero" => pure (zeroState D, "all-zero", zeroS0Def, "")
+      | some "reset" =>
+        pure (initStateOf D, "power-on (flops at their reset values, memories at their power-on images)",
+              "def s0 : StateM := Projection.HwMem.initStateOf D", "")
+      | some x =>
+        if x.startsWith "ckpt:" then
+          let p := (x.drop 5).toString
+          let txt ← IO.FS.readFile p
+          match Compiler.Ckpt.parse txt.toUTF8 with
+          | .error e => IO.eprintln s!"{p}: {e}"; return 2
+          | .ok c =>
+            if let some e := Compiler.Ckpt.validate D (Compiler.Ckpt.designHash D) c then
+              IO.eprintln s!"{p}: {e}"; return 2
+            pure (CkptStateM.toStateM c, s!"checkpoint (cycle {c.cycle} of {p})",
+                  s!"def ckptText : String := {leanStr txt}\n\ndef s0 : StateM := match Compiler.Ckpt.parse ckptText.toUTF8 with\n  | .ok c => Projection.CkptStateM.toStateM c\n  | .error _ => default",
+                  "\nimport LeanSemanticPrimitives.Projection.CkptStateM")
+        else do IO.eprintln s!"init:{x} is not one of zero | reset | ckpt:<file>"; return 2
     say s!"{cert}"
     say s!"  shape: sources {D.sources.size} nodes {D.nodes.size} outputs {D.outputs.size} \
 flops {D.flops.size} memories {D.memories.size} clocks {D.clocks.size}"
@@ -628,7 +659,7 @@ flops {D.flops.size} memories {D.memories.size} clocks {D.clocks.size}"
     say s!"  propert{if cands.length == 1 then "y" else "ies (first proved wins)"}: \
 {", ".intercalate (cands.map fun (t, p) => s!"{t} = {pstr p}")}\
 {match asmOut with | some a => s!", assuming {pstr a}" | none => ""}\
-{if asmIn.isEmpty then "" else s!", assuming inputs {asmIn}"}; k in {ks}; initial state all-zero"
+{if asmIn.isEmpty then "" else s!", assuming inputs {asmIn}"}; k in {ks}; initial state {start}"
     unless HwMem.admitsWB D do
       say "  RESULT: REFUSED (the memory route does not admit this certificate)"; return 4
     let t0 ← IO.monoMsNow
@@ -643,7 +674,6 @@ flops {D.flops.size} memories {D.memories.size} clocks {D.clocks.size}"
     let t1 ← IO.monoMsNow
     say s!"  route sim:{sim}{simWhy (opt "sim") fpOnly}: {rt.name}, set up in {t1 - t0} ms"
     say s!"  [time] setup {t1 - t0}"
-    let s0 := zeroState D
     let single := cands.length == 1 && ks.length == 1
     let mut last : UInt32 := 2
     let mut verdicts : List String := []
@@ -651,7 +681,7 @@ flops {D.flops.size} memories {D.memories.size} clocks {D.clocks.size}"
       for (tok, prop) in cands do
         let (code, v) ← attempt cert solver work sf wf D rt s0 (if single then "" else tok) prop
           asmOut asmIn kd (rest.contains "closed") (rest.contains "rebuild") route sim (opt "emit")
-          (rest.contains "base")
+          (rest.contains "base") start s0Def s0Import
         verdicts := verdicts ++ [s!"{tok} k={kd}: {(v.splitOn " --").head!}"]
         last := code
         if code == 0 then
@@ -668,5 +698,5 @@ flops {D.flops.size} memories {D.memories.size} clocks {D.clocks.size}"
     unless single do say s!"  SUMMARY: none proved: {verdicts}"
     return last
   | _ =>
-    IO.eprintln "usage: sym_verify <cert> [!]<out>[,[!]<out>...] [asm:<output>] [in:<input>=<value>]... [k:<n>[,<n>...]] [base] [closed|rebuild] [sim:fp|ir|vc (default vc)] [route:fused|var|plain] [emit:<file>] [sf:<n>] [wf:<n>] [solver:<cadical>] [work:<dir>]"
+    IO.eprintln "usage: sym_verify <cert> [!]<out>[,[!]<out>...] [asm:<output>] [in:<input>=<value>]... [k:<n>[,<n>...]] [base] [closed|rebuild] [sim:fp|ir|vc (default vc)] [route:fused|var|plain] [emit:<file>] [sf:<n>] [wf:<n>] [solver:<cadical>] [work:<dir>] [init:zero|reset|ckpt:<file>]"
     return 2
