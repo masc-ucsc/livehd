@@ -35,6 +35,8 @@ import LeanSemanticPrimitives.Projection.CertLoadAny
 import LeanSemanticPrimitives.Compiler.DesignSemantics
 import LeanSemanticPrimitives.Compiler.DirectSemantics
 import LeanSemanticPrimitives.Compiler.CompileDesignDefs
+-- route:vc runs `denoteResidual`'s fast spelling (`@[csimp]`, equal by proof)
+import LeanSemanticPrimitives.Compiler.ResidualFast
 
 open Compiler
 

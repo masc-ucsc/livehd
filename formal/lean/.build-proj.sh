@@ -46,6 +46,9 @@ MODULES=(
   Compiler/RunAdmission
   Compiler/ResidualIR
   Compiler/ResidualSemantics
+  # vc's step compiled after its operators' fast forms (`@[csimp]`, equal by proof).
+  Compiler/FastResidual
+  Compiler/ResidualFast
   Compiler/CompileOpDefs
   Compiler/CompileGraphDefs
   Compiler/CompileDesignDefs

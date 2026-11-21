@@ -82,6 +82,8 @@ MODULES=(
   # The IR/VC trace driver (cert_trace, and its route:vc): the direct simulator
   # and the verified compiler's executable half, all Mathlib-free.
   Compiler/DirectSemantics Compiler/ResidualIR Compiler/ResidualSemantics
+  # vc's step after its operators' fast forms (ResidualFast: @[csimp], equal by proof).
+  Compiler/FastResidual Compiler/ResidualFast
   Compiler/CompileOpDefs Compiler/CompileGraphDefs Compiler/CompileDesignDefs
 )
 # The proof tools (pass/lean/tools, HDLProof): a second source root.

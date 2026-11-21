@@ -124,6 +124,8 @@ import HDLProof.Kit.Judge
 import HDLProof.Kit.SymRoute
 import LeanSemanticPrimitives.Compiler.DirectSemantics
 import LeanSemanticPrimitives.Compiler.CompileDesignDefs
+-- the vc judge runs `denoteResidual`'s fast spelling (`@[csimp]`, equal by proof)
+import LeanSemanticPrimitives.Compiler.ResidualFast
 
 open Compiler Projection HDLProof HDLProof.Sym HDLProof.Kit HDLProof.Check HDLProof.Driver
 open Projection.MemProjection Projection.HwMem Std.Tactic.BVDecide
