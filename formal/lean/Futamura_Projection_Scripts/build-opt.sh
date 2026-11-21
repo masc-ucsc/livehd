@@ -87,6 +87,8 @@ MODULES=(
   Compiler/FastResidual Compiler/ResidualFast
   # vc's optimizer and its checker (ResidualOpt; sound by ResidualOptSound)
   Compiler/ResidualOpt
+  # vc's incremental step (ResidualInc imports the optimizer's proof module for its lemmas)
+  Compiler/ResidualOptSound Compiler/ResidualInc
   Compiler/CompileOpDefs Compiler/CompileGraphDefs Compiler/CompileDesignDefs
   # checkpoints (lhdcert-ckpt v1: drivers/lhd_ckpt, and the ckpt options of cert_trace and
   # dcert2_memroute): the start states, the format, its proofs, the FP state conversion

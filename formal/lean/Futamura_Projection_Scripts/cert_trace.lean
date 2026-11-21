@@ -7,7 +7,7 @@ traces are compared line by line.
 
     lean --run Futamura_Projection_Scripts/cert_trace.lean <cert> <cycles> <stim>
          [edges:all|edges:third|edges:file:<path>] [init:reset|init:zero] [route:ir|route:vc]
-         [opt:off] [opt:stats] [ckpt-in:<file>] [ckpt-at:<cycle>:<file>] [ckpt-out:<file>]
+         [opt:off] [opt:stats] [inc:off] [ckpt-in:<file>] [ckpt-at:<cycle>:<file>] [ckpt-out:<file>]
 
 `stim v1` is the dcert2_memroute format, restricted to what an RTL testbench
 can replay: `in <ordinal> <width> <value>` (every cycle) and
@@ -39,6 +39,13 @@ constants, unreachable bindings and unread sources dropped, identical constants 
 `opt:stats` prints, on stderr, the program's size before and after and whether the
 optimizer's certificate was accepted (a refused one runs the unoptimized program).
 
+On `route:vc` every step after the first is INCREMENTAL (`ResidualInc.incStep`): it starts
+from the previous step's environment and recomputes only the bindings an operand of which
+changed value, keeping the others' previous values. `runIncOpt_correct` proves such a run is
+`interpretDesign`'s run, step for step, for a program in which every binding reads only
+earlier slots (`ResidualInc.wellOrdered`, checked once here; a program that fails it runs the
+full step every time). `inc:off` runs the full step every time.
+
 Checkpoints (`lhdcert-ckpt v1`, `Compiler/Ckpt.lean`, `pass/lean/tools/formats/ckpt.md`):
 
     ckpt-in:<file>       start from this checkpoint instead of the power-on state. It is
@@ -64,6 +71,8 @@ import LeanSemanticPrimitives.Compiler.ResidualFast
 import LeanSemanticPrimitives.Compiler.ResidualOpt
 -- checkpoints: lhdcert-ckpt v1
 import LeanSemanticPrimitives.Compiler.Ckpt
+-- route:vc steps incrementally (`runIncOpt_correct`)
+import LeanSemanticPrimitives.Compiler.ResidualInc
 
 open Compiler
 
@@ -161,6 +170,7 @@ def main (args : List String) : IO UInt32 := do
     let mut vc := false
     let mut optOn := true
     let mut optStats := false
+    let mut incOn := true
     let mut schedPath : Option String := none
     let mut ckptIn : Option String := none
     let mut ckptAt : Array (Nat × String) := #[]
@@ -190,6 +200,7 @@ def main (args : List String) : IO UInt32 := do
         | "route:tv" => vc := true   -- the old name of route:vc
         | "opt:off" => optOn := false
         | "opt:stats" => optStats := true
+        | "inc:off" => incOn := false
         | _ => do IO.eprintln s!"unknown option {opt}"; return 2
     let (_, D) ← Projection.CertLoadAny.loadAny cert
     let st ← match parseStim (← IO.FS.readFile stimPath) with
@@ -233,9 +244,25 @@ def main (args : List String) : IO UInt32 := do
           let verdict := if !optOn then "off" else if accepted then "accepted" else "REFUSED (unoptimized)"
           IO.eprintln s!"vc optimize: {verdict}; sources {R0.sources.size} -> {R.sources.size}, \
             bindings {R0.bindings.size} -> {R.bindings.size}"
+        let inc := incOn && ResidualInc.wellOrdered R
+        if optStats then
+          IO.eprintln s!"vc incremental: {if inc then "on" else if incOn then "off (not well-ordered)" else "off"}"
+        -- the steps of `ResidualInc.runInc`: the first (also the first after a checkpoint)
+        -- full, the others from the last step's environment (`env`, updated in place)
+        let mut env : SlotEnv := #[]
         for k in List.range' start cycles do
           saveAt k s
-          let r := denoteResidual R (edgesAt D third sched k) (inputAt D st k) s
+          let e := edgesAt D third sched k
+          let i := inputAt D st k
+          let r ← if !inc then pure (denoteResidual R e i s)
+            else if k == start then do
+              let env0 := ResidualInc.fullEnv R i s
+              env := env0
+              pure (ResidualInc.stepOfEnv R env0 e s)
+            else do
+              let p := ResidualInc.incStep R env e i s
+              env := p.2
+              pure p.1
           IO.println s!"STEP {k} {" ".intercalate (r.outputs.toList.map (fun o => toString (bv_uint o)))}"
           s := r.nextState
         saveAt (start + cycles) s
@@ -269,5 +296,5 @@ def main (args : List String) : IO UInt32 := do
       saveAt (start + cycles) s
       return 0
   | _ =>
-    IO.eprintln "usage: cert_trace <cert> <cycles> <stim> [edges:all|edges:third] [init:reset|init:zero] [route:ir|route:vc] [opt:off] [opt:stats] [ckpt-in:<file>] [ckpt-at:<cycle>:<file>] [ckpt-out:<file>]"
+    IO.eprintln "usage: cert_trace <cert> <cycles> <stim> [edges:all|edges:third] [init:reset|init:zero] [route:ir|route:vc] [opt:off] [opt:stats] [inc:off] [ckpt-in:<file>] [ckpt-at:<cycle>:<file>] [ckpt-out:<file>]"
     return 2

@@ -52,6 +52,8 @@ MODULES=(
   # Proved compiler passes on vc's program: optimizer, checker, soundness.
   Compiler/ResidualOpt
   Compiler/ResidualOptSound
+  # vc's incremental step (reuse last step's unchanged values) and its proof.
+  Compiler/ResidualInc
   Compiler/CompileOpDefs
   Compiler/CompileGraphDefs
   Compiler/CompileDesignDefs
