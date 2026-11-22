@@ -690,6 +690,70 @@ def elabReifyDesignShared : CommandElab := fun stx => do
       {R.bindings.size} bindings"
   | _ => throwUnsupportedSyntax
 
+/-- The straight-line body `reify_design` emits for the residual program `R`: the sources
+read from `srcs` (a term for an `Array SourceDesc` equal to `R.sources`), then the binding
+chain, then the outputs, flops and memories. Shared by `reify_design` (`srcs` = the
+certificate's sources) and `ReifyOpt.reify_design_opt` (the optimized program's). -/
+def reifiedModel (R : ResidualProgram) (srcs : Term) : TermElabM Term := do
+  let nsrc := R.sources.size
+  -- sources first: each is one `sourceValue` read, O(1) and outside the chain
+  let mut lets : Array (TSyntax `Lean.Parser.Term.doSeqItem) := #[]
+  let mut stmts : Array Term := #[]
+  -- build innermost result, then wrap in lets from the inside out
+  let outs : Array Term ← R.outputs.mapM fun o =>
+    `(bv_resize $(quote o.width) $(slotIdent nsrc o.slot))
+  -- A MEMORY HOLDS ON A QUIET DOMAIN (see `denoteResidual`).
+  let mems : Array Term ← R.memoryUpdates.mapIdxM fun k m => do
+    -- the held image: the async reset's (decision #2), else the stored one
+    let held ← match m.asyncImg with
+      | some a => pure (slotIdent nsrc a)
+      | none   => `($(mkIdent ``Compiler.memAt) st $(quote k))
+    if m.commits.isEmpty then
+      `(if Compiler.fires e $(quote m.clock) then $(slotIdent nsrc m.nextImg) else $held)
+    else
+      memPickSyntax (← `(e)) m (slotIdent nsrc m.nextImg) held
+        (fun r => pure (slotIdent nsrc r))
+  -- THE HAND-ROLLED FLOP UPDATE WAS CLOCKLESS, and could not be repaired
+  -- in place: it applied the reset whenever the pin was asserted and
+  -- otherwise took `din` or held on the ENABLE alone, with no notion of an
+  -- edge. `flopNext`'s rule is three-way -- a quiet domain holds, except
+  -- for an ASYNCHRONOUS reset, which does not wait for an edge -- so this
+  -- path now emits the same `flopNextV` application as the other three.
+  -- One rule in one place, and `flopNext_eq` already bridges it.
+  let flops : Array Term ← R.flopUpdates.mapIdxM fun idx fu => do
+    let din := slotIdent nsrc fu.din
+    let en ← match fu.enable with
+      | none   => `(none)
+      | some e => `(some $(slotIdent nsrc e))
+    let rp ← match fu.resetPin with
+      | none   => `(none)
+      | some r => `(some $(slotIdent nsrc r))
+    let rvq ← quoteInt fu.resetValue
+    let ral := if fu.resetActiveLow then mkIdent ``true else mkIdent ``false
+    let aRl := if fu.asyncReset then mkIdent ``true else mkIdent ``false
+    `(Compiler.flopNextV $(quote fu.width) (bv_resize $(quote fu.width) $din)
+        $en $rp $rvq $ral ($(mkIdent ``Compiler.flopAt) st $(quote idx))
+        (Compiler.fires e $(quote fu.clock)) $aRl)
+  let mut res ← `({ outputs := #[$outs,*],
+                    nextState := { flops := #[$flops,*], mems := #[$mems,*] } })
+  -- wrap the binding chain, innermost last
+  for k in [0 : R.bindings.size] do
+    let k' := R.bindings.size - 1 - k
+    let b := R.bindings[k']!
+    let nm := mkIdent (Name.mkSimple s!"v{k'}")
+    let rhs ← rhsSyntax nsrc b.rhs
+    res ← `(let $nm := $rhs; $res)
+  for j in [0 : nsrc] do
+    let j' := nsrc - 1 - j
+    let nm := mkIdent (Name.mkSimple s!"s{j'}")
+    let acc ← match R.sources[j']! with
+      | .memImg _ _ _ | .memConst _ _ _ =>
+          `(let $nm := (sourceValue i st $srcs[$(quote j')]!).asMem; $res)
+      | _ => `(let $nm := (sourceValue i st $srcs[$(quote j')]!).asBV; $res)
+    res := acc
+  let _ := lets; let _ := stmts
+  pure res
+
 /-- `reify_design <designCert> as <name>` -/
 syntax (name := reifyDesign) "reify_design " ident " as " ident : command
 
@@ -704,64 +768,7 @@ def elabReifyDesign : CommandElab := fun stx => do
       | .error _ => throwError "reify_design: compileDesign refused {d}"
       | .ok R    => pure R
     let nsrc := R.sources.size
-    let body ← liftTermElabM do
-      -- sources first: each is one `sourceValue` read, O(1) and outside the chain
-      let mut lets : Array (TSyntax `Lean.Parser.Term.doSeqItem) := #[]
-      let mut stmts : Array Term := #[]
-      -- build innermost result, then wrap in lets from the inside out
-      let outs : Array Term ← R.outputs.mapM fun o =>
-        `(bv_resize $(quote o.width) $(slotIdent nsrc o.slot))
-      -- A MEMORY HOLDS ON A QUIET DOMAIN (see `denoteResidual`).
-      let mems : Array Term ← R.memoryUpdates.mapIdxM fun k m => do
-        -- the held image: the async reset's (decision #2), else the stored one
-        let held ← match m.asyncImg with
-          | some a => pure (slotIdent nsrc a)
-          | none   => `($(mkIdent ``Compiler.memAt) st $(quote k))
-        if m.commits.isEmpty then
-          `(if Compiler.fires e $(quote m.clock) then $(slotIdent nsrc m.nextImg) else $held)
-        else
-          memPickSyntax (← `(e)) m (slotIdent nsrc m.nextImg) held
-            (fun r => pure (slotIdent nsrc r))
-      -- THE HAND-ROLLED FLOP UPDATE WAS CLOCKLESS, and could not be repaired
-      -- in place: it applied the reset whenever the pin was asserted and
-      -- otherwise took `din` or held on the ENABLE alone, with no notion of an
-      -- edge. `flopNext`'s rule is three-way -- a quiet domain holds, except
-      -- for an ASYNCHRONOUS reset, which does not wait for an edge -- so this
-      -- path now emits the same `flopNextV` application as the other three.
-      -- One rule in one place, and `flopNext_eq` already bridges it.
-      let flops : Array Term ← R.flopUpdates.mapIdxM fun idx fu => do
-        let din := slotIdent nsrc fu.din
-        let en ← match fu.enable with
-          | none   => `(none)
-          | some e => `(some $(slotIdent nsrc e))
-        let rp ← match fu.resetPin with
-          | none   => `(none)
-          | some r => `(some $(slotIdent nsrc r))
-        let rvq ← quoteInt fu.resetValue
-        let ral := if fu.resetActiveLow then mkIdent ``true else mkIdent ``false
-        let aRl := if fu.asyncReset then mkIdent ``true else mkIdent ``false
-        `(Compiler.flopNextV $(quote fu.width) (bv_resize $(quote fu.width) $din)
-            $en $rp $rvq $ral ($(mkIdent ``Compiler.flopAt) st $(quote idx))
-            (Compiler.fires e $(quote fu.clock)) $aRl)
-      let mut res ← `({ outputs := #[$outs,*],
-                        nextState := { flops := #[$flops,*], mems := #[$mems,*] } })
-      -- wrap the binding chain, innermost last
-      for k in [0 : R.bindings.size] do
-        let k' := R.bindings.size - 1 - k
-        let b := R.bindings[k']!
-        let nm := mkIdent (Name.mkSimple s!"v{k'}")
-        let rhs ← rhsSyntax nsrc b.rhs
-        res ← `(let $nm := $rhs; $res)
-      for j in [0 : nsrc] do
-        let j' := nsrc - 1 - j
-        let nm := mkIdent (Name.mkSimple s!"s{j'}")
-        let acc ← match R.sources[j']! with
-          | .memImg _ _ _ | .memConst _ _ _ =>
-              `(let $nm := (sourceValue i st ($d).sources[$(quote j')]!).asMem; $res)
-          | _ => `(let $nm := (sourceValue i st ($d).sources[$(quote j')]!).asBV; $res)
-        res := acc
-      let _ := lets; let _ := stmts
-      pure res
+    let body ← liftTermElabM (reifiedModel R (← `(($d).sources)))
     elabCommand (← `(command|
       def $f (e : Compiler.ClockEdges) (i : RuntimeInput) (st : RuntimeState) :
           RuntimeResult := $body))
