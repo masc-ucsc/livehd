@@ -93,6 +93,7 @@ import LeanSemanticPrimitives.Projection.CkptStateM
 import LeanSemanticPrimitives.Projection.HardwareMemWriteAdmit
 import LeanSemanticPrimitives.Projection.MemVariantSim
 import LeanSemanticPrimitives.Projection.MemFused
+import LeanSemanticPrimitives.Projection.MemRunFast
 import LeanSemanticPrimitives.Projection.Proto.RunnerSupport
 import LeanSemanticPrimitives.Compiler.CertIORoute   -- DCERT2 + DCERT1, routed by magic (Mathlib-free)
 import LeanSemanticPrimitives.Compiler.RunAdmission   -- C3 edges / C4 reset polarity
@@ -613,6 +614,9 @@ structure Cfg where
   ckptAt : List (Nat × String) := []
   /-- `ckpt-out:<file>`: write the final state -/
   ckptOut : Option String := none
+  /-- `loop:full`: run every cycle through `runMemSim` with the full state check, as before
+  the fast loop (`Projection/MemRunFast`); `compare` and `trace` always do. -/
+  fullLoop : Bool := false
 
 /-- The step budget bounds how deep the specializer recurses, and the depth grows
 with the design: the smallest budget that worked on the four largest rows was
@@ -802,59 +806,130 @@ did not step or was refused"
       let mut bad := false
       let mut policyBad := false
       let mut cmp : CmpStatus := if cfg.compare then .complete else .disabled
-      for k in List.range' cfg.start cfg.cycles do
-        saveAt k st (!bad && !policyBad)
-        let e := scheduleEdges cfg.edgeMode D k
-        if let some rc := (← RunAdmission.refuseEdges? D k e) then return rc
-        let i := match cfg.stim with
-                 | some spec => stimInput D spec cfg.react cfg.ats prevOuts k
-                 | none      => mkInputFor D k
-        if runtimeFullOKB D i st e != true then
-          tags := "policy-refused" :: tags
-          policyBad := true
-        else
-          match runMemSim sim e i st with
-          | none   => tags := "no-step" :: tags; bad := true
-          | some r =>
-              tags := "ok" :: tags
-              if cfg.outputs then
-                IO.println s!"STEP {k} {" ".intercalate (r.outputs.toList.map (fun o => toString (bv_uint o)))}"
-              outs := r.outputs :: outs
-              prevOuts := r.outputs
-              flops := r.nextState.flops :: flops
-              if cfg.compare then
-                -- `interpretDesign`, computed as `directStepRaw` (`refStep_eq_interpretDesign`)
-                let ref := Direct.directStepRaw D e i (StateM.denote st)
-                cmp := cmp.meet (cycleCheck D r ref)
-              if cfg.trace then
-                -- the memory's own commit condition for this step, read from
-                -- the SAME `fires`/enable semantics the gate uses, plus the
-                -- decoded next image.  `fires e md.clock` is the quiet/active
-                -- classification; it is derived from the edge vector and the
-                -- declared clock, never from the final image.
-                -- THE PRE-STEP VALUES, from the actual pre-state and input
-                -- through the SAME semantics the reference uses
-                -- (DesignSemantics: evalGraphG over srcEnv).  No overrides.
-                match writeSlots D with
-                | none => say s!"  TRACE step {k} slots UNRESOLVED"
-                | some ws =>
-                  let G   := D.toGraphCert
-                  let rho := evalGraphG G.topo G (Compiler.srcEnv D i (StateM.denote st))
-                  let bv  := fun sl => (rho sl).asBV
-                  say s!"  TRACE step {k} pre phase {(bv ws.phaseSrc).value} pred {(bv ws.pred).value} \
-origEn {(bv ws.origEn).value} effEn {(bv ws.effEn).value} \
-addr {(bv ws.addr).value} datum {(bv ws.datum).value}"
-                let edges := String.intercalate "," (e.toList.map (fun b => if b then "1" else "0"))
-                let ivals := String.intercalate "," (i.toList.map (fun v => s!"{v.value}"))
-                for (md, idx) in D.memories.toList.zipIdx do
-                  let act := if fires e md.clock then "active" else "quiet"
-                  say s!"  TRACE step {k} mem {idx} {act} edges [{edges}] inputs [{ivals}]"
-                  match r.nextState.mems[idx]? with
-                  | some m => say s!"  TRACE step {k} mem {idx} next {fullImage m}"
-                  | none   => say s!"  TRACE step {k} mem {idx} next MISSING"
-                say s!"  TRACE step {k} policy {runtimeFullOKB D i r.nextState e}"
-              -- the DECODED next state is what the following cycle runs on
-              st := r.nextState
+      if !cfg.compare && !cfg.trace && !cfg.fullLoop then
+        -- The same steps and the same lines, without the redundant work (`Projection/MemRunFast`):
+        -- * the state stays encoded: the state part of a step's result value is the encoding of
+        --   the next state (`next_from_parts`, from the codec's canonicity), so the next step runs
+        --   on it (`runMemSimEnc`, `runMemSim_eq_enc`); only the outputs and the flops (which
+        --   this run reports) are decoded each cycle, the whole state when a checkpoint is due
+        --   and at the end;
+        -- * the state check runs once: every route's `runMemSim…_correct` gives `stateFullOKB` of
+        --   the state it returns, so the check is its input, flop-bound and edge half
+        --   (`runtimeFullOKB_after`), which depends only on sizes and is computed once per sizes.
+        let mut sv := StateM.encStateM st
+        let mut stKnown := true
+        let mut stateOK := false
+        let mut fl : Array BV := st.flops
+        let mut chk : Option ((Nat × Nat × Nat) × Bool) := none
+        for k in List.range' cfg.start cfg.cycles do
+          let due := cfg.ckptAt.any (·.1 == k) || (k == cfg.start + cfg.cycles && cfg.ckptOut.isSome)
+          if due && !stKnown then
+            st := (StateM.decStateM sv).getD st
+            stKnown := true
+          saveAt k st (!bad && !policyBad)
+          let e := scheduleEdges cfg.edgeMode D k
+          if let some rc := (← RunAdmission.refuseEdges? D k e) then return rc
+          let i := match cfg.stim with
+                   | some spec => stimInput D spec cfg.react cfg.ats prevOuts k
+                   | none      => mkInputFor D k
+          let mut pass := false
+          if stateOK then
+            let key := (i.size, fl.size, e.size)
+            match chk with
+            | some (k0, b) =>
+              if k0 == key then pass := b
+              else
+                let b := inputOKB D i.size && flopBoundOKB D fl.size && edgesOKB D e
+                chk := some (key, b)
+                pass := b
+            | none =>
+              let b := inputOKB D i.size && flopBoundOKB D fl.size && edgesOKB D e
+              chk := some (key, b)
+              pass := b
+          else
+            if !stKnown then
+              st := (StateM.decStateM sv).getD st
+              stKnown := true
+            pass := runtimeFullOKB D i st e
+          if !pass then
+            tags := "policy-refused" :: tags
+            policyBad := true
+          else
+            match MemRunFast.runMemSimEnc sim e i sv with
+            | none => tags := "no-step" :: tags; bad := true
+            | some v =>
+              match MemRunFast.resultParts v with
+              | none => tags := "no-step" :: tags; bad := true
+              | some (sp, op) =>
+                match decBVs op, (field2 StateM.tagStateM sp).bind (fun p => decBVs p.1) with
+                | some os, some fls =>
+                  tags := "ok" :: tags
+                  if cfg.outputs then
+                    IO.println s!"STEP {k} {" ".intercalate (os.toList.map (fun o => toString (bv_uint o)))}"
+                  outs := os :: outs
+                  prevOuts := os
+                  flops := fls :: flops
+                  sv := sp
+                  stKnown := false
+                  stateOK := true
+                  fl := fls
+                | _, _ => tags := "no-step" :: tags; bad := true
+        if !stKnown then
+          st := (StateM.decStateM sv).getD st
+      else
+        for k in List.range' cfg.start cfg.cycles do
+          saveAt k st (!bad && !policyBad)
+          let e := scheduleEdges cfg.edgeMode D k
+          if let some rc := (← RunAdmission.refuseEdges? D k e) then return rc
+          let i := match cfg.stim with
+                   | some spec => stimInput D spec cfg.react cfg.ats prevOuts k
+                   | none      => mkInputFor D k
+          if runtimeFullOKB D i st e != true then
+            tags := "policy-refused" :: tags
+            policyBad := true
+          else
+            match runMemSim sim e i st with
+            | none   => tags := "no-step" :: tags; bad := true
+            | some r =>
+                tags := "ok" :: tags
+                if cfg.outputs then
+                  IO.println s!"STEP {k} {" ".intercalate (r.outputs.toList.map (fun o => toString (bv_uint o)))}"
+                outs := r.outputs :: outs
+                prevOuts := r.outputs
+                flops := r.nextState.flops :: flops
+                if cfg.compare then
+                  -- `interpretDesign`, computed as `directStepRaw` (`refStep_eq_interpretDesign`)
+                  let ref := Direct.directStepRaw D e i (StateM.denote st)
+                  cmp := cmp.meet (cycleCheck D r ref)
+                if cfg.trace then
+                  -- the memory's own commit condition for this step, read from
+                  -- the SAME `fires`/enable semantics the gate uses, plus the
+                  -- decoded next image.  `fires e md.clock` is the quiet/active
+                  -- classification; it is derived from the edge vector and the
+                  -- declared clock, never from the final image.
+                  -- THE PRE-STEP VALUES, from the actual pre-state and input
+                  -- through the SAME semantics the reference uses
+                  -- (DesignSemantics: evalGraphG over srcEnv).  No overrides.
+                  match writeSlots D with
+                  | none => say s!"  TRACE step {k} slots UNRESOLVED"
+                  | some ws =>
+                    let G   := D.toGraphCert
+                    let rho := evalGraphG G.topo G (Compiler.srcEnv D i (StateM.denote st))
+                    let bv  := fun sl => (rho sl).asBV
+                    say s!"  TRACE step {k} pre phase {(bv ws.phaseSrc).value} pred {(bv ws.pred).value} \
+  origEn {(bv ws.origEn).value} effEn {(bv ws.effEn).value} \
+  addr {(bv ws.addr).value} datum {(bv ws.datum).value}"
+                  let edges := String.intercalate "," (e.toList.map (fun b => if b then "1" else "0"))
+                  let ivals := String.intercalate "," (i.toList.map (fun v => s!"{v.value}"))
+                  for (md, idx) in D.memories.toList.zipIdx do
+                    let act := if fires e md.clock then "active" else "quiet"
+                    say s!"  TRACE step {k} mem {idx} {act} edges [{edges}] inputs [{ivals}]"
+                    match r.nextState.mems[idx]? with
+                    | some m => say s!"  TRACE step {k} mem {idx} next {fullImage m}"
+                    | none   => say s!"  TRACE step {k} mem {idx} next MISSING"
+                  say s!"  TRACE step {k} policy {runtimeFullOKB D i r.nextState e}"
+                -- the DECODED next state is what the following cycle runs on
+                st := r.nextState
       saveAt (cfg.start + cfg.cycles) st (!bad && !policyBad)
       let t6 ← IO.monoMsNow
       let rss ← peakRSS
@@ -994,7 +1069,9 @@ def usage : String :=
 auto: step = max 20000 (4 x (nodes + sources)), work = 2000, one retry at 10x after an out-of-fuel\n  \
 fixtures: full mixed twomem lane\n\
   fixtures (negative): romwrite\n  init: zero | ramp | narrow | file:<path> | ckpt:<path>\n  \
-checkpoints: ckpt-at:<cycle>:<file> (repeatable) ckpt-out:<file>"
+checkpoints: ckpt-at:<cycle>:<file> (repeatable) ckpt-out:<file>\n  \
+loop:full: every cycle through runMemSim with the full state check (the default loop keeps the state \
+encoded and checks the state once; compare and trace use the full loop)"
 
 def parseCfg (rest : List String) : Except String Cfg := do
   match rest with
@@ -1047,7 +1124,7 @@ contents or use init=zero, which is a legal-state witness only."
           | none => .error s!"ckpt-at: {repr k} is not a number"
         | _ => .error s!"ckpt-at expects <cycle>:<file>, got {repr t}"
     let cfg : Cfg := ⟨sf, wf, cyc, im, cmp, none, [], [], prov, sup, tr, pw, em, route, op, autoStep, autoWork,
-      0, [], none⟩
+      0, [], none, tl.contains "loop:full"⟩
     .ok { cfg with ckptAt, ckptOut }
   | _ => .error usage
 

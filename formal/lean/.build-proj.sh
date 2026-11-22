@@ -123,6 +123,8 @@ MODULES=(
   Projection/MemSupport
   Projection/EvalFuelArr
   Projection/MemProjection
+  # the FP step loop without the repeated state check and codec (dcert2_memroute)
+  Projection/MemRunFast
   Projection/HardwareMemWriteAdmit
   # The memory entry with `env0` inlined (the scalar route's TOTAL-variant
   # rewrite, applied to mainM): memVar_iff(W), projectMemVarDesignAt(W)_correct.
