@@ -56,6 +56,21 @@ def stepOfEnv (R : ResidualProgram) (env : SlotEnv) (e : ClockEdges) (s : Runtim
       { flops := R.flopUpdates.mapIdx fun idx f => flopNext env e s idx f
         mems  := R.memoryUpdates.mapIdx fun idx m => memNext env e s idx m } }
 
+/-- `stepOfEnv`, with the next memories stored by `FastBV.memsOfVals` (`ResidualFast`): each is
+the function its slot holds, not a closure over `env`. So the result keeps no reference to the
+environment, and the next incremental step can update it in place instead of copying it.
+`@[csimp] stepOfEnv_eq_fast` makes `incStep` and every later caller run it. -/
+def stepOfEnvFast (R : ResidualProgram) (env : SlotEnv) (e : ClockEdges) (s : RuntimeState) :
+    RuntimeResult :=
+  { outputs   := R.outputs.map fun o => bv_resize o.width (refBV env o.slot)
+    nextState :=
+      { flops := R.flopUpdates.mapIdx fun idx f => flopNext env e s idx f
+        mems  := FastBV.memsOfVals (R.memoryUpdates.mapIdx fun idx m => memNextVal env e s idx m) } }
+
+@[csimp] theorem stepOfEnv_eq_fast : @stepOfEnv = @stepOfEnvFast := by
+  funext R env e s
+  simp only [stepOfEnv, stepOfEnvFast, residualMems_eq]
+
 /-- Equal values, decided cheaply; a memory image is never equal to anything. -/
 @[inline] def sameVal : CertVal → CertVal → Bool
   | .bv x, .bv y => x.width == y.width && x.value == y.value
