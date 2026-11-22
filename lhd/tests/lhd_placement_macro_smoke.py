@@ -309,22 +309,30 @@ def check_chunk_stages():
     import socket
     import time
     place = work / 'synth/place'
-    window_log = (root/'window.log').open('w')
+    window_log_path = root / 'window.log'
+    window_log = window_log_path.open('w')
     proc = subprocess.Popen([exe, 'synth', 'chunk', 'update', '--workdir', str(work), '--gui', '--gui-no-open'],
-                            stdout=subprocess.PIPE, stderr=window_log, text=True)
+                            stdout=window_log, stderr=window_log)
     try:
         def wait_for(fn):
-            end = time.monotonic() + 15
-            while time.monotonic() < end:
-                assert proc.poll() is None, proc.returncode
+            # Bazel bounds the test. GUI startup includes a new synth process
+            # and can take longer on a cold or busy runner.
+            while proc.poll() is None:
                 value = fn()
                 if value:
                     return value
                 time.sleep(.03)
-            raise AssertionError('floorplan socket operation timed out')
+            raise AssertionError(f'floorplan window exited with status {proc.returncode}')
 
         pointer = place / 'gui_agent.json'
-        sock = wait_for(lambda: pointer.exists() and json.loads(pointer.read_text())['socket'])
+
+        def native_socket():
+            try:
+                return json.loads(pointer.read_text())['socket']
+            except (FileNotFoundError, json.JSONDecodeError):
+                return None
+
+        sock = wait_for(native_socket)
 
         def request(route, body=None):
             with socket.socket(socket.AF_UNIX) as channel:
@@ -415,11 +423,14 @@ def check_chunk_stages():
         carried = agent(cmd='selection')
         member, = carried['floorplan_members']
         assert member['name'] == selected[0]['id'] and carried['names'] == [member['physical_name']]
+    except Exception:
+        print(window_log_path.read_text(), flush=True)
+        raise
     finally:
+        window_log.close()
         proc.terminate()
         proc.wait(timeout=5)
 
-    window_log.close()
     manifest = json.loads((place/'chunk-project.json').read_text())['manifest']
     plan = next(r for r in json.loads((place/manifest).read_text()) if r['class'].endswith('chunk_plan'))
     assert [(r['id'],r['box_dbu']) for r in plan['chunks']] == [(r['id'],r['box_dbu']) for r in changed]
