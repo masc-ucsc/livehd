@@ -56,7 +56,6 @@ which a copy needs, and the renamed expression of each kept binding, which a `cs
 Mathlib-free; the proofs are in `ResidualOptSound`.
 -/
 import LeanSemanticPrimitives.Compiler.ResidualSemantics
-import Std.Data.HashMap
 
 namespace Compiler
 namespace ResidualOpt
@@ -157,7 +156,7 @@ def lowMaskCovers (w : Nat) (m : BV) : Bool :=
 /-- The operand whose value an expression is, when the expression is a copy of it: given
 which slots hold known constants (`kn`), their values (`cv`) and each slot's static width
 (`wq`). Shared by the optimizer and the checker. -/
-def copyOf (kn : Nat → Bool) (cv : Nat → CertVal) (wq : Nat → Option Nat) :
+@[specialize] def copyOf (kn : Nat → Bool) (cv : Nat → CertVal) (wq : Nat → Option Nat) :
     ResidualExpr → Option Nat
   | .rorBits w args | .rxor w args | .rand w args | .rmult w args =>
       match args.toList with
@@ -320,7 +319,100 @@ def validate (R : ResidualProgram) (c : OptCert) : Bool :=
 
 /-! ## The optimizer (unproved: its every output is checked) -/
 
-deriving instance Hashable for ResidualExpr
+/-- Fold `f` over the references `exprRefs e` lists, without building the list. -/
+@[inline] def foldRefs {α : Type} (f : α → Nat → α) (init : α) : ResidualExpr → α
+  | .rsum _ _ args | .rmult _ args | .rand _ args | .rorBits _ args | .rxor _ args
+  | .rredOr _ args | .req _ args | .rshl _ args | .rmuxN _ args => args.foldl f init
+  | .rnot _ a => f init a
+  | .rult _ a b | .rugt _ a b | .rslt _ a b | .rsgt _ a b | .rsra _ a b | .rsext _ a b
+  | .rgetMask _ a b | .rudiv _ a b | .rsdiv _ a b => f (f init a) b
+  | .rsetMask _ a m v => f (f (f init a) m) v
+  | .rmux _ s t e => f (f (f init s) t) e
+  | .rmemRead _ m a en => f (f (f init m) a) en
+  | .rmemWrite m a d en => f (f (f (f init m) a) d) en
+  | .rmemWriteBE _ _ m a d be => f (f (f (f init m) a) d) be
+  | .rmemLoad _ _ m bus en => f (f (f init m) bus) en
+  | .rmemToBus _ _ m => f init m
+
+/-- A hash of `renameExpr f e`, computed without building it: the constructor, its other
+fields and its operands' new names. Equal renamed expressions hash equal. -/
+@[specialize] def hashUnder (f : Nat → Nat) (e : ResidualExpr) : UInt64 :=
+  let mx := fun (h : UInt64) (n : Nat) => mixHash h (hash n)
+  let ha := fun (h : UInt64) (args : Array Nat) => args.foldl (fun h r => mx h (f r)) (mx h args.size)
+  match e with
+  | .rsum w n args             => ha (mx (mx 0 w) n) args
+  | .rmult w args              => ha (mx 1 w) args
+  | .rand w args               => ha (mx 2 w) args
+  | .rorBits w args            => ha (mx 3 w) args
+  | .rxor w args               => ha (mx 4 w) args
+  | .rredOr w args             => ha (mx 5 w) args
+  | .req w args                => ha (mx 6 w) args
+  | .rshl w args               => ha (mx 7 w) args
+  | .rmuxN w args              => ha (mx 8 w) args
+  | .rnot w a                  => mx (mx 9 w) (f a)
+  | .rult w a b                => mx (mx (mx 10 w) (f a)) (f b)
+  | .rugt w a b                => mx (mx (mx 11 w) (f a)) (f b)
+  | .rslt w a b                => mx (mx (mx 12 w) (f a)) (f b)
+  | .rsgt w a b                => mx (mx (mx 13 w) (f a)) (f b)
+  | .rsra w a b                => mx (mx (mx 14 w) (f a)) (f b)
+  | .rsext w a b               => mx (mx (mx 15 w) (f a)) (f b)
+  | .rgetMask w a b            => mx (mx (mx 16 w) (f a)) (f b)
+  | .rudiv w a b               => mx (mx (mx 17 w) (f a)) (f b)
+  | .rsdiv w a b               => mx (mx (mx 18 w) (f a)) (f b)
+  | .rsetMask w a m v          => mx (mx (mx (mx 19 w) (f a)) (f m)) (f v)
+  | .rmux w s t u              => mx (mx (mx (mx 20 w) (f s)) (f t)) (f u)
+  | .rmemRead w m a en         => mx (mx (mx (mx 21 w) (f m)) (f a)) (f en)
+  | .rmemWrite m a d en        => mx (mx (mx (mx 22 (f m)) (f a)) (f d)) (f en)
+  | .rmemWriteBE w bw m a d be => mx (mx (mx (mx (mx (mx 23 w) bw) (f m)) (f a)) (f d)) (f be)
+  | .rmemLoad w n m bus en     => mx (mx (mx (mx (mx 24 w) n) (f m)) (f bus)) (f en)
+  | .rmemToBus w n m           => mx (mx (mx 25 w) n) (f m)
+
+/-- A hash of every bit of `v`, without allocating: its low 64 bits and its residue modulo
+the prime 2^31 - 1. The low 64 bits alone (all `hash (v : Int)` reads) collide on wide
+constants: SoomRV's SoC has 442 constants of one width that share them. -/
+@[inline] def intHash (v : Int) : UInt64 :=
+  mixHash (Int64.ofInt v).toUInt64 (Int64.ofInt (v % 2147483647)).toUInt64
+
+/-- A constant's hash (its width and value), as a small `Nat`. -/
+@[inline] def constHash (w : Nat) (v : Int) : Nat :=
+  (mixHash (hash w) (intHash v) >>> 2).toNat
+
+/-- A flat open-addressing table in one array: `slots[2i]` is an entry's payload + 1 (0:
+empty) and `slots[2i+1]` its hash; the capacity is `slots.size / 2`, a power of two, and at
+most half of it is used. The index where probing from `i` stops: an empty slot, or the
+entry with hash `h` whose payload `same` accepts. -/
+@[specialize] def flatFind (slots : Array Nat) (mask h : Nat) (same : Nat → Bool) :
+    Nat → Nat → Nat
+  | 0, i => i
+  | fuel + 1, i =>
+    let p := slots[2 * i]!
+    if p == 0 || (slots[2 * i + 1]! == h && same (p - 1)) then i
+    else flatFind slots mask h same fuel ((i + 1) &&& mask)
+
+/-- The table with twice the capacity and the same entries. -/
+def flatGrow (slots : Array Nat) : Array Nat := Id.run do
+  let ncap := slots.size
+  let mask := ncap - 1
+  let mut ns : Array Nat := Array.replicate (2 * ncap) 0
+  for i in [0:slots.size / 2] do
+    let p := slots[2 * i]!
+    if p != 0 then
+      let h := slots[2 * i + 1]!
+      let j := flatFind ns mask h (fun _ => false) ncap (h &&& mask)
+      ns := (ns.set! (2 * j) p).set! (2 * j + 1) h
+  return ns
+
+/-- Look `h` up in a flat table (`same` decides a hash match): the slot index where an equal
+entry is, or where a new one goes. -/
+@[inline] def flatLookup (slots : Array Nat) (h : Nat) (same : Nat → Bool) : Nat :=
+  let cap := slots.size / 2
+  flatFind slots (cap - 1) h same cap (h &&& (cap - 1))
+
+/-- Put payload `p` with hash `h` at index `i` (from `flatLookup`), growing the table when it
+is half full; `n` counts the entries. -/
+@[inline] def flatPut (slots : Array Nat) (n i h p : Nat) : Array Nat × Nat :=
+  let slots := (slots.set! (2 * i) (p + 1)).set! (2 * i + 1) h
+  if 4 * (n + 1) ≥ slots.size then (flatGrow slots, n + 1) else (slots, n + 1)
 
 /-- One forward pass, the checker's way, then liveness, then the new slots.
 
@@ -330,12 +422,17 @@ a repeated expression. Every slot gets a class, and slots of one class get one n
 a constant's class is its width and value (folded constants included), a copy's is its
 operand's, a repeated expression's is its first binding's, and every other slot is its own.
 An expression's key for repetition is the expression with its operands renamed to their
-classes.
+classes (an earlier entry's with the classes it saw: the slots before it).
 
 Liveness then runs from the outputs, flops and memories back: a folded binding reads
 nothing, a copy reads its operand, a repeated expression its first binding and its own
 operands (the checker reads them), any other binding its operands. A binding that is not
-read gets no reason (`Just.none`) and is dropped. -/
+read gets no reason (`Just.none`) and is dropped.
+
+Speed (the certificate does not depend on it): constant classes and repeated expressions
+are found in flat open-addressing tables (`flatFind`) that hold slot numbers and hashes
+(`constHash`, `hashUnder`), not keys; a constant's new slot is its class's, so the new
+slots need no second table; references are folded over (`foldRefs`), not listed. -/
 def optimizeRaw (R : ResidualProgram) : OptCert := Id.run do
   let S := R.sources.size
   let B := R.bindings.size
@@ -343,23 +440,33 @@ def optimizeRaw (R : ResidualProgram) : OptCert := Id.run do
   let mut kn : Array Bool := R.sources.map fun sd => match sd with
     | .const _ _ => true
     | _ => false
-  let mut wenv : Array (Option Nat) := R.sources.map srcWidth
+  -- static widths: a source's from its descriptor, a binding's as `w + 1` (0: none)
+  let mut bw : Array Nat := Array.mkEmpty B
   let mut fold : Array Bool := Array.replicate B false
   let mut just : Array Just := Array.replicate B .none
   let mut first : Array Nat := Array.replicate B 0
-  let mut constCls : Std.HashMap (Nat × Int) Nat := {}
+  -- constant classes: a table of class representatives (the first constant source, or the
+  -- first folded binding's slot, with the class's width and value)
+  let mut ct : Array Nat := Array.replicate 2048 0
+  let mut ctN : Nat := 0
   let mut cls : Array Nat := Array.range S
   for j in [0:S] do
     match R.sources[j]! with
     | .const w v =>
-      match constCls.get? (w, v) with
-      | some id => cls := cls.set! j id
-      | none => constCls := constCls.insert (w, v) j
+      let h := constHash w v
+      let i := flatLookup ct h fun p => match R.sources[p]! with
+        | .const w' v' => w' == w && v' == v
+        | _ => false
+      let p := ct[2 * i]!
+      if p != 0 then cls := cls.set! j (p - 1)
+      else (ct, ctN) := flatPut ct ctN i h j
     | _ => pure ()
-  let mut seen : Std.HashMap ResidualExpr Nat := {}
+  -- repeated expressions: a table of first bindings
+  let mut st : Array Nat := Array.replicate (2 * 2 ^ (Nat.log2 (2 * B + 1024) + 1)) 0
+  let mut stN : Nat := 0
   for k in [0:B] do
     let rhs := R.bindings[k]!.rhs
-    let canFold : Bool := (exprRefs rhs).all fun r => kn.getD r false
+    let canFold : Bool := foldRefs (fun acc r => acc && kn.getD r false) true rhs
     let v : CertVal := if canFold then denoteExpr cenv rhs else badVal
     let ok : Bool := canFold && (match v with
       | .bv x => mk_bv x.width x.value == x
@@ -368,31 +475,44 @@ def optimizeRaw (R : ResidualProgram) : OptCert := Id.run do
       fold := fold.set! k true
       match v with
       | .bv x =>
-        match constCls.get? (x.width, x.value) with
-        | some id => cls := cls.push id
-        | none =>
-          constCls := constCls.insert (x.width, x.value) (S + k)
+        let h := constHash x.width x.value
+        let i := flatLookup ct h fun p =>
+          if p < S then (match R.sources[p]! with
+            | .const w' v' => w' == x.width && v' == x.value
+            | _ => false)
+          else (match cenv.getD p badVal with
+            | .bv y => y.width == x.width && y.value == x.value
+            | .mem _ => false)
+        let p := ct[2 * i]!
+        if p != 0 then cls := cls.push (p - 1)
+        else
+          (ct, ctN) := flatPut ct ctN i h (S + k)
           cls := cls.push (S + k)
       | .mem _ => cls := cls.push (S + k)
     else
-      match copyOf (fun r => kn.getD r false) (fun r => cenv.getD r badVal)
-          (fun r => wenv.getD r none) rhs with
+      let wq := fun (r : Nat) => if r < S then srcWidth R.sources[r]! else
+        (let b := bw.getD (r - S) 0; if b == 0 then none else some (b - 1))
+      match copyOf (fun r => kn.getD r false) (fun r => cenv.getD r badVal) wq rhs with
       | some q =>
         just := just.set! k (.copy q)
         cls := cls.push (cls.getD q q)
       | none =>
-        let key := renameExpr (fun r => cls.getD r r) rhs
-        match seen.get? key with
-        | some j =>
+        let f := fun r => cls.getD r r
+        let h := (hashUnder f rhs >>> 2).toNat
+        let i := flatLookup st h fun p =>
+          renameExpr (fun r => if r < S + p then cls.getD r r else r) R.bindings[p]!.rhs ==
+            renameExpr f rhs
+        let hit := st[2 * i]!
+        if hit != 0 then
           just := just.set! k .cse
-          first := first.set! k j
-          cls := cls.push (S + j)
-        | none =>
-          seen := seen.insert key k
+          first := first.set! k (hit - 1)
+          cls := cls.push (S + (hit - 1))
+        else
+          (st, stN) := flatPut st stN i h k
           cls := cls.push (S + k)
     kn := kn.push ok
     cenv := cenv.push (if ok then v else badVal)
-    wenv := wenv.push (exprWidth rhs)
+    bw := bw.push (match exprWidth rhs with | some w => w + 1 | none => 0)
   let mark (live : Array Bool) (r : Nat) : Array Bool :=
     if r < live.size then live.set! r true else live
   let mut live : Array Bool := Array.replicate (S + B) false
@@ -409,21 +529,24 @@ def optimizeRaw (R : ResidualProgram) : OptCert := Id.run do
       | .copy q => live := mark live q
       | .cse =>
         live := mark live (S + first[k]!)
-        for r in exprRefs R.bindings[k]!.rhs do live := mark live r
+        live := foldRefs mark live R.bindings[k]!.rhs
       | .none =>
-        for r in exprRefs R.bindings[k]!.rhs do live := mark live r
+        live := foldRefs mark live R.bindings[k]!.rhs
+  -- a constant takes its class's new slot, the first time one of the class is read:
+  -- `clsPos` holds it (S + B: not placed yet)
   let mut newSources : Array SourceDesc := #[]
   let mut pos : Array Nat := Array.replicate (S + B) 0
-  let mut constAt : Std.HashMap (Nat × Int) Nat := {}
+  let mut clsPos : Array Nat := Array.replicate (S + B) (S + B)
   for j in [0:S] do
     if live[j]! then
       let sd := R.sources[j]!
       match sd with
-      | .const w v =>
-        match constAt.get? (w, v) with
-        | some t => pos := pos.set! j t
-        | none =>
-          constAt := constAt.insert (w, v) newSources.size
+      | .const _ _ =>
+        let c := cls[j]!
+        let p := clsPos[c]!
+        if p < S + B then pos := pos.set! j p
+        else
+          clsPos := clsPos.set! c newSources.size
           pos := pos.set! j newSources.size
           newSources := newSources.push sd
       | _ =>
@@ -434,10 +557,11 @@ def optimizeRaw (R : ResidualProgram) : OptCert := Id.run do
     if live[S + k]! && fold[k]! then
       match cenv[S + k]! with
       | .bv x =>
-        match constAt.get? (x.width, x.value) with
-        | some t => pos := pos.set! (S + k) t
-        | none =>
-          constAt := constAt.insert (x.width, x.value) newSources.size
+        let c := cls[S + k]!
+        let p := clsPos[c]!
+        if p < S + B then pos := pos.set! (S + k) p
+        else
+          clsPos := clsPos.set! c newSources.size
           pos := pos.set! (S + k) newSources.size
           newSources := newSources.push (.const x.width x.value)
       | .mem _ => pure ()

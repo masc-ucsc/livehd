@@ -6,7 +6,7 @@ Tests for vc's optimizer and its checker (`Compiler.ResidualOpt`).
 `ResidualOptSound.optimize_correct` already PROVES that `optimize` never changes a result;
 these cases check that the optimizer does what it should (drops what is dead, shares equal
 constants, folds constant bindings and propagates them, replaces copies and repeated
-expressions by what they copy or repeat, folds muxes with a known select or equal arms), that the checker refuses wrong certificates, and
+expressions by what they copy or repeat, folds muxes with a known select or equal arms, tells apart wide constants that one hash cannot), that the checker refuses wrong certificates, and
 that the optimized program runs step for step like the original, a memory included.
 
 Prints `PASS residual_opt: <n> cases` or one `FAIL` line per case that went wrong.
@@ -66,6 +66,22 @@ def muxProg : ResidualProgram :=
     bindings := #[⟨.bv 8, .rmux 8 2 0 1⟩, ⟨.bv 8, .rmux 8 3 0 1⟩, ⟨.bv 8, .rmux 8 4 0 0⟩,
                   ⟨.bv 8, .rmux 8 4 0 1⟩, ⟨.bv 8, .rxor 8 #[5, 6, 7, 8]⟩]
     outputs := #[{ slot := 9, width := 8 }, { slot := 5, width := 8 }]
+    flopUpdates := #[]
+    memoryUpdates := #[] }
+
+/-- Wide constants with one hash: 2^64 and 2^95 agree in their low 64 bits and modulo
+2^31 - 1, so the optimizer's tables see one hash for both and must compare the values.
+Sources: 0 input a (128 bits), 1 const 2^64, 2 const 2^95, 3 const 2^64 (a duplicate of 1),
+4 const 2^64 + 2^95. Bindings (slots 5..10): 5 = a + 1, 6 = a + 2, 7 = a + 3 (5 again once
+the constants are shared), 8 = 1 + 2 (folded: source 4's value), 9 = a ^ 4,
+10 = 5 ^ 6 ^ 7 ^ 8 ^ 9. Outputs: 10 and 8. Expected: four sources, 5, 6, 9 and 10 kept. -/
+def wideProg : ResidualProgram :=
+  { sources := #[.input 0 128, .const 128 (2 ^ 64), .const 128 (2 ^ 95), .const 128 (2 ^ 64),
+                 .const 128 (2 ^ 64 + 2 ^ 95)]
+    bindings := #[⟨.bv 128, .rsum 128 2 #[0, 1]⟩, ⟨.bv 128, .rsum 128 2 #[0, 2]⟩,
+                  ⟨.bv 128, .rsum 128 2 #[0, 3]⟩, ⟨.bv 128, .rsum 128 2 #[1, 2]⟩,
+                  ⟨.bv 128, .rxor 128 #[0, 4]⟩, ⟨.bv 128, .rxor 128 #[5, 6, 7, 8, 9]⟩]
+    outputs := #[{ slot := 10, width := 128 }, { slot := 8, width := 128 }]
     flopUpdates := #[]
     memoryUpdates := #[] }
 
@@ -208,6 +224,28 @@ def main : IO UInt32 := do
   for (name, w) in wrongM do
     n := n + 1
     fails := check s!"refused: {name}" (!validate muxProg w) fails
+  -- 6b. wide constants with one hash
+  let (Wd, accW) := optimizeWith wideProg
+  let cw := optimizeRaw wideProg
+  n := n + 5
+  fails := check "the checker accepted the wide-constant certificate" accW fails
+  fails := check s!"wide: sources a, 2^64, 2^95, 2^64 + 2^95 (got {repr Wd.sources})"
+    (Wd.sources == #[.input 0 128, .const 128 (2 ^ 64), .const 128 (2 ^ 95),
+                     .const 128 (2 ^ 64 + 2 ^ 95)]) fails
+  fails := check s!"wide: bindings 6 -> 4 (got {Wd.bindings.size})" (Wd.bindings.size == 4) fails
+  fails := check s!"wide: the reasons (got {repr cw.just})"
+    (cw.just == #[.none, .none, .cse, .none, .none, .none]) fails
+  fails := check s!"wide: the folded sum (got {repr cw.fold})"
+    (cw.fold == #[false, false, false, true, false, false]) fails
+  for a in [0, 1, 2 ^ 64, 2 ^ 95, 2 ^ 128 - 1] do
+    n := n + 1
+    let i : RuntimeInput := #[mk_bv 128 a]
+    let s : RuntimeState := { flops := #[], mems := #[] }
+    fails := check s!"wide: same step at a={a}"
+      (same (denoteResidual Wd #[true] i s) (denoteResidual wideProg #[true] i s)) fails
+  n := n + 1
+  fails := check "refused: 2^95 read at 2^64's new slot"
+    (!validate wideProg { cw with pos := cw.pos.set! 2 cw.pos[1]! }) fails
   -- 7. a compiled program with a memory, 40 steps, optimized against unoptimized
   match compileDesign ramCert with
   | .error e => fails := fails.push s!"compileDesign refused the RAM: {repr e}"
