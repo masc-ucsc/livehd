@@ -549,7 +549,7 @@ sh_test(
     name = "lec_bmc_reserve_smoke",
     srcs = ["tests/lec_bmc_reserve_smoke.sh"],
     data = ["//lhd"],
-    tags = ["no-sandbox"],
+    tags = ["cpu:2", "no-sandbox"],  # account for the test's two formal workers
 )
 
 # Trusted-module assume-equal (`lhd lec --trust <def>` / formal.lec.trust): a def

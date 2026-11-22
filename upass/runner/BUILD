@@ -43,9 +43,20 @@ cc_test(
 # names, never once per name or per loop (tests/loop_roll_linear_test.sh:
 # pass.upass grows linearly from K to 4K invariants, untyped invariants,
 # final-only outputs, and loops in a row).
-sh_test(
+_LOOP_ROLL_SHAPES = ["inv", "fin", "unt", "mlp"]
+
+[
+    sh_test(
+        name = "loop_roll_linear_" + shape,
+        size = "medium",
+        srcs = ["tests/loop_roll_linear_test.sh"],
+        args = [shape],
+        data = ["//lhd"],
+    )
+    for shape in _LOOP_ROLL_SHAPES
+]
+
+test_suite(
     name = "loop_roll_linear_test",
-    size = "medium",
-    srcs = ["tests/loop_roll_linear_test.sh"],
-    data = ["//lhd"],
+    tests = [":loop_roll_linear_" + shape for shape in _LOOP_ROLL_SHAPES],
 )

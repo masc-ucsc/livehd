@@ -21,7 +21,9 @@ assign y = q ^ a;
 endmodule
 '''
 (w/'ref.v').write_text(src)
-(w/'bad.v').write_text(src.replace('q ^ a','q ^ ~a'))
+# Also break the child. The top's concrete flat counterexample should stand
+# even if the separately checked child fails to discharge.
+(w/'bad.v').write_text(src.replace('q ^ a','q ^ ~a').replace('q <= d','q <= ~d'))
 with (w/'compile.log').open('w') as log:
  subprocess.run([lhd,'compile',str(w/'cell.v'),'--top','budget_cell','--emit-dir',f'lg:{w}/models','--workdir',str(w/'cell-work')],stdout=log,stderr=subprocess.STDOUT,check=True,timeout=10)
 env=dict(os.environ,LHD_LEC_RACER_STALL_S='60',LHD_LEC_RACER_STALL_ONLY='0')

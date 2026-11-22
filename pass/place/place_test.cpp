@@ -5711,6 +5711,56 @@ TEST(Placement, MemoryProxyPinsReachImportedTracksWithoutWidening) {
   EXPECT_THROW(align_memory_proxy_pins(tech, fp), std::runtime_error);
 }
 
+TEST(Placement, WideMemorySharesDataPinsAcrossOppositeEdges) {
+  hhds::GraphLibrary source;
+  auto               io = source.create_io("wide_memory");
+  io->add_input("data", 0);
+  io->set_bits("data", 256);
+  auto graph = io->create_graph();
+  auto data  = graph->get_input_pin("data");
+  gu::set_bits(data, 256);
+  auto mem = gu::create_typed_node(*graph, Ntype_op::Memory);
+  const auto constant = [&](hhds::Port_id port, int value) {
+    mem.create_sink_pin(port).connect_driver(gu::create_const(*graph, *Dlop::create_integer(value)));
+  };
+  constant(1, 256);
+  constant(9, 2);
+  for (unsigned port = 0; port < 3; ++port) {
+    const auto base = port * Ntype::Memory_port_stride;
+    constant(base, 0);
+    mem.create_sink_pin(base + 3).connect_driver(data);
+  }
+  const std::string liberty = "inou/lefdef/tests/data/sky130hd.lib";
+  const auto        flop    = liberty::smallest_flop_area(liberty);
+  ASSERT_TRUE(flop);
+  physical::Technology tech;
+  const double side = std::ceil(std::sqrt(512 * *flop * std::pow(1.1, 3)) * tech.dbu) / tech.dbu;
+  const double pitch = std::round(side * tech.dbu / 600) / tech.dbu;
+  tech.routing_layers = {"V", "H"};
+  tech.layers["V"] = {.width = pitch / 2, .direction = "VERTICAL", .pitch_x = pitch};
+  tech.layers["H"] = {.width = pitch / 2, .direction = "HORIZONTAL", .pitch_y = pitch};
+  const auto masters = memory_proxies(*graph, tech, liberty);
+  ASSERT_EQ(masters.size(), 1U);
+  physical::Floorplan fp;
+  fp.dbu = tech.dbu;
+  ASSERT_NO_THROW(align_memory_proxy_pins(tech, fp));
+  const auto& macro = tech.macros.at(masters.begin()->second);
+  EXPECT_DOUBLE_EQ(macro.width, side);
+  EXPECT_DOUBLE_EQ(macro.height, side);
+  std::set<double> bottom, top;
+  for (const auto& [name, pin] : macro.pins) {
+    const auto& shape = pin.shapes.front();
+    if (shape.layer == "V") {
+      EXPECT_TRUE(shape.rect.yl == 0 || shape.rect.yh == macro.height) << name;
+      const double track = (shape.rect.xl + shape.rect.xh) / (2 * pitch);
+      EXPECT_NEAR(track, std::round(track), 1e-7) << name;
+      (shape.rect.yl == 0 ? bottom : top).insert(std::round(track));
+    }
+  }
+  EXPECT_EQ(bottom.size(), 384U);
+  EXPECT_EQ(top.size(), 384U);
+}
+
 TEST(Placement, ThreePortMemorySquareGeometryAndClockBoundaryTiming) {
   hhds::GraphLibrary source;
   auto               io        = source.create_io("memory_top");

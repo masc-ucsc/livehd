@@ -395,11 +395,14 @@ public:
   llvm::Module&      mod() { return mod_; }
   llvm::IntegerType* ity(unsigned w) { return llvm::IntegerType::get(ctx_, w); }
 
-  // `void sim_step_<sym>(ptr s)`, `sim_settle_<sym>`, `sim_dirty_<sym>`: the per-DUT cycle, built once.
-  void emit_dut(const Dut& d) {
-    if (!duts_done_.insert(d.stem).second) {
+  // Emit only the clock dispatchers used by this DUT's tests. A later test may use the other clock mode.
+  void emit_dut(const Dut& d, bool explicit_clock) {
+    const unsigned mode = explicit_clock ? 2 : 1;
+    auto [it, first]    = dut_clock_modes_.try_emplace(d.stem, mode);
+    if (!first && (it->second & mode) != 0) {
       return;
     }
+    it->second |= mode;
     const auto fty = llvm::FunctionType::get(void_, {ptr_}, false);
     const auto mk  = [&](const std::string& name) {
       const bool exported = name.starts_with("sim_settle_") || name.starts_with("sim_dirty_");
@@ -482,16 +485,22 @@ public:
       phase(fn, d.settle, settle_bit);
       b_.CreateRetVoid();
     };
-    Function* step = mk("sim_step_" + d.sym);
-    edge(step, false);
-    edge(step, true);
-    finish(step);
-    Function* rise = mk("sim_rise_" + d.sym);
-    edge(rise, false);
-    finish(rise);
-    Function* fall = mk("sim_fall_" + d.sym);
-    edge(fall, true);
-    finish(fall);
+    if (explicit_clock) {
+      Function* rise = mk("sim_rise_" + d.sym);
+      edge(rise, false);
+      finish(rise);
+      Function* fall = mk("sim_fall_" + d.sym);
+      edge(fall, true);
+      finish(fall);
+    } else {
+      Function* step = mk("sim_step_" + d.sym);
+      edge(step, false);
+      edge(step, true);
+      finish(step);
+    }
+    if (!first) {
+      return;
+    }
     finish(mk("sim_settle_" + d.sym));
     Function* dirty = mk("sim_dirty_" + d.sym);
     for (size_t w = 0; w < (d.gate_bits + 63) / 64; ++w) {
@@ -514,7 +523,7 @@ private:
   llvm::LLVMContext   ctx_;
   llvm::Module        mod_;
   llvm::IRBuilder<>   b_;
-  std::set<std::string> duts_done_;
+  std::map<std::string, unsigned> dut_clock_modes_;
 };
 
 // ---- one test -------------------------------------------------------------------------------------------
@@ -568,7 +577,7 @@ public:
     for (auto& inst : insts_) {
       inst.base = base;
       base      += inst.dut->words + 1;
-      m_.emit_dut(*inst.dut);
+      m_.emit_dut(*inst.dut, inst.explicit_clk);
     }
     r.instances   = insts_;
     r.state_words = base;

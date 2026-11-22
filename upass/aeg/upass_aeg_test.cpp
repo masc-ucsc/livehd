@@ -1406,8 +1406,13 @@ TEST(TreeAegScale, WidePlusMinusChainIsLinear) {
   upass::Staging_rewrite_stats s1;
   upass::Staging_rewrite_stats s4;
   time_plus_minus(2000, s1);  // warm the pools
-  const double t1 = time_plus_minus(10000, s1);
-  const double t4 = time_plus_minus(40000, s4);
+  // Match LinearInTheTree's sampling: preemption during a full regression
+  // must not turn a single wall-clock sample into an apparent growth penalty.
+  double t1 = time_plus_minus(10000, s1), t4 = time_plus_minus(40000, s4);
+  for (int rep = 0; rep < 2; ++rep) {
+    t1 = std::min(t1, time_plus_minus(10000, s1));
+    t4 = std::min(t4, time_plus_minus(40000, s4));
+  }
   EXPECT_EQ(applied(s4, "flatten"), 1U);
   EXPECT_EQ(s4.budget_hit, 0U);
   EXPECT_LT(t4, 8.0 * std::max(t1, 1e-3)) << "10k " << t1 << "s, 40k " << t4 << "s";

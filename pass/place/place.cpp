@@ -9713,17 +9713,18 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     bool        found = false;
     const auto& first = v.fp.rows.front();
     for (int64_t y = first.y + v.halo_y; !found && y + macro->place.height + v.halo_y <= v.fp.rows.back().y + rh; y += rh) {
-      for (int64_t x = first.x + v.halo_x; !found && x + macro->place.width + v.halo_x <= first.x + first.count * sw; x += sw) {
-        bool overlap = false;
+      for (int64_t x = first.x + v.halo_x; !found && x + macro->place.width + v.halo_x <= first.x + first.count * sw;) {
+        auto next = x;
         for (const auto& o : pack_obstacles) {
           const auto& c = *o.cell;
-          if (&c != macro && x < c.place.x + c.place.width + o.sx && x + macro->place.width + o.sx > c.place.x
-              && y < c.place.y + c.place.height + o.sy && y + macro->place.height + o.sy > c.place.y) {
-            overlap = true;
+          const auto  right = c.place.x + c.place.width + o.sx;
+          if (&c != macro && x < right && x + macro->place.width + o.sx > c.place.x && y < c.place.y + c.place.height + o.sy
+              && y + macro->place.height + o.sy > c.place.y) {
+            next = right;
             break;
           }
         }
-        if (!overlap) {
+        if (next == x) {
           macro->place.x           = x;
           macro->place.y           = y;
           macro->place.orientation = Orientation::N;
@@ -9731,11 +9732,16 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
           packed_memories.insert(macro);
           add_pack_obstacle(*macro);  // later proxies keep their distance from this one
           found = true;
+        } else {
+          // Every intervening site overlaps this same obstacle.
+          x += (1 + (next - x - 1) / sw) * sw;
         }
       }
     }
     if (!found) {
-      throw std::runtime_error("no space for square memory proxy: " + macro->name);
+      // A site-grid seed can miss a gap that fits on the routing lattice.
+      // Let the track legalizer place this proxy along with the seeded ones.
+      packed_memories.insert(macro);
     }
   }
   // ... and, like every packed proxy, legalized to the routing tracks below (an arbitrary drop position misses them).
@@ -9774,6 +9780,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       if (packed_memories.contains(owners[i])) {
         owners[i]->place.x = frame[i].place.x;
         owners[i]->place.y = frame[i].place.y;
+        owners[i]->place.status = Status::FIXED;
       }
     }
   }

@@ -83,7 +83,14 @@ upass_ms() {  # upass_ms <shape> <K>: best pass.upass ms of three compiles (and 
 div=1
 [[ "${TEST_SRCDIR:-$PWD}" =~ /bazel-out/[^/]*-(dbg|fastbuild)/ ]] && div=4
 
-for shape in inv fin unt mlp; do
+if [ "$#" = 0 ]; then
+  set -- inv fin unt mlp
+fi
+for shape in "$@"; do
+  case "$shape" in
+    inv | fin | unt | mlp) ;;
+    *) echo "FAIL: unknown loop shape $shape" >&2; exit 1 ;;
+  esac
   small=1000
   large=4000
   [ "$shape" != inv ] && small=500 && large=2000
@@ -97,4 +104,4 @@ for shape in inv fin unt mlp; do
   python3 -c "import sys; a, b = float(sys.argv[1]), float(sys.argv[2]); sys.exit(0 if b <= 10 * max(a, 1.0) else 1)" "$a" "$b" \
     || { echo "FAIL: $shape pass.upass grew ${a} -> ${b} ms for 4x the names (super-linear)" >&2; exit 1; }
 done
-echo "PASS: the loop roll planner stays linear in invariants (typed or not), written names and loops"
+echo "PASS: the loop roll planner stays linear for $*"

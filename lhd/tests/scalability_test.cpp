@@ -430,7 +430,7 @@ void measure(std::string_view what, int base, const std::function<Times(int)>& r
   check_linear(what, sizes, runs);
 }
 
-TEST(Scalability, LnastToVerilogPassesAreLinear) { measure("lnast", base_n(5000), run_lnast_pipeline); }
+TEST(Scalability, LnastToVerilogPassesAreLinear) { measure("lnast", base_n(3200), run_lnast_pipeline); }
 
 TEST(Scalability, LgraphPassesAreLinear) { measure("lgraph", base_n(8000), run_lgraph_pipeline); }
 

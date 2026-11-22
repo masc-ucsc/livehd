@@ -99,6 +99,7 @@
 #include "pass/place/growth_budget.hpp"
 #include "pass/place/gui/gui_session.hpp"
 #include "pass/place/io_timing.hpp"
+#include "pass/place/macro_tracks.hpp"
 #include "pass/place/place.hpp"
 #include "pass/place/placement_hints.hpp"
 #include "pass/place/placement_technology.hpp"
@@ -2006,7 +2007,8 @@ namespace {
 // die/core/floorplan never grows.
 bool density_failure(const std::exception& e, const livehd::placement::Options& po) {
   return po.allow_increase_area && po.generated_core
-         && std::string_view(e.what()).find("legalization failed") != std::string_view::npos;
+         && (dynamic_cast<const livehd::placement::Macro_placement_no_space*>(&e)
+             || std::string_view(e.what()).find("legalization failed") != std::string_view::npos);
 }
 void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd::placement::Placement_session>& placement_session,
                         bool placement_area_resume, unsigned legroute_area_restarts_used) {

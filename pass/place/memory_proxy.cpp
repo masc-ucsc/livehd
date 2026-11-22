@@ -6,6 +6,7 @@
 #include <format>
 #include <limits>
 #include <set>
+#include <span>
 #include <stdexcept>
 
 #include "hash_util.hpp"
@@ -14,6 +15,12 @@
 #include "routing_tracks.hpp"
 
 namespace livehd::placement {
+namespace {
+enum class Proxy_edge { Left, Bottom, Right, Top };
+
+bool vertical_access(Proxy_edge edge) { return edge == Proxy_edge::Bottom || edge == Proxy_edge::Top; }
+}  // namespace
+
 bool memory_runtime_pin(hhds::Port_id pid) {
   const auto off = pid % Ntype::Memory_port_stride;
   return off == 0 || off == 2 || off == 3 || off == 4 || off == 12 || off == 13 || off == 14;
@@ -92,10 +99,10 @@ std::map<uint64_t, std::string> memory_proxies(hhds::Graph& graph, physical::Tec
     if (tech.routing_layers.empty()) {
       throw std::runtime_error("memory proxy needs a routing layer");
     }
-    const auto pins = [&](const std::vector<std::string>& names, int edge) {
+    const auto layers = [&](bool vertical_edge) {
       // Route away from the edge on the layer's preferred direction. Putting
       // every edge on the first layer can leave only off-grid planar access.
-      const auto preferred = edge == 1 ? "VERTICAL" : "HORIZONTAL";
+      const auto preferred = vertical_edge ? "VERTICAL" : "HORIZONTAL";
       std::vector<std::string> stack;
       for (const auto& layer_name : tech.routing_layers) {
         if (tech.layers.at(layer_name).direction == preferred) {
@@ -105,6 +112,16 @@ std::map<uint64_t, std::string> memory_proxies(hhds::Graph& graph, physical::Tec
       if (stack.empty()) {
         stack.push_back(tech.routing_layers.front());
       }
+      return stack;
+    };
+    const auto horizontal_layers = layers(false);
+    const auto vertical_layers   = layers(true);
+    const auto capacity = [&](const physical::Layer& layer, bool vertical_edge, size_t count) {
+      const double pitch = vertical_edge ? layer.pitch_x : layer.pitch_y;
+      return pitch > 0 ? std::max<size_t>(1, static_cast<size_t>(0.8 * macro.width / pitch)) : count;
+    };
+    const auto pins = [&](std::span<const std::string> names, Proxy_edge edge) {
+      const auto& stack = vertical_access(edge) ? vertical_layers : horizontal_layers;
       // The proxy is sized from bit area, so a wide memory can have more pins than one layer has tracks along
       // its edge (a 30x8 memory with 241 control pins on a 73 um edge). Fill each layer of the preferred
       // direction up to 80% of its tracks, then the next layer; the last layer takes whatever is left (the
@@ -112,23 +129,35 @@ std::map<uint64_t, std::string> memory_proxies(hhds::Graph& graph, physical::Tec
       size_t at = 0;
       for (size_t l = 0; l < stack.size() && at < names.size(); ++l) {
         const auto&  layer = tech.layers.at(stack[l]);
-        const double pitch = edge == 1 ? layer.pitch_x : layer.pitch_y;
-        const size_t cap   = pitch > 0 ? std::max<size_t>(1, static_cast<size_t>(0.8 * macro.width / pitch)) : names.size();
+        const size_t cap   = capacity(layer, vertical_access(edge), names.size());
         const size_t take  = l + 1 == stack.size() ? names.size() - at : std::min(cap, names.size() - at);
         const double half  = std::min(macro.width / 100, std::max(1.0 / tech.dbu, layer.width / 2));
         for (size_t i = 0; i < take; ++i) {
           const double   pos  = macro.width * (i + 1) / (take + 1);
-          physical::Rect rect = edge == 0   ? physical::Rect{0, pos - half, 2 * half, pos + half}
-                                : edge == 1 ? physical::Rect{pos - half, 0, pos + half, 2 * half}
-                                            : physical::Rect{macro.width - 2 * half, pos - half, macro.width, pos + half};
+          physical::Rect rect;
+          switch (edge) {
+            case Proxy_edge::Left: rect = {0, pos - half, 2 * half, pos + half}; break;
+            case Proxy_edge::Bottom: rect = {pos - half, 0, pos + half, 2 * half}; break;
+            case Proxy_edge::Right: rect = {macro.width - 2 * half, pos - half, macro.width, pos + half}; break;
+            case Proxy_edge::Top: rect = {pos - half, macro.height - 2 * half, pos + half, macro.height}; break;
+          }
           macro.pins.at(names[at + i]).shapes.push_back({stack[l], rect});
         }
         at += take;
       }
     };
-    pins(address, 0);
-    pins(data, 1);
-    pins(control, 2);
+    // A shallow multiport array can have more data pins than the bottom
+    // edge has tracks. Use the opposite edge before changing its footprint.
+    size_t bottom_capacity = 0;
+    for (const auto& layer_name : vertical_layers) {
+      bottom_capacity += capacity(tech.layers.at(layer_name), true, data.size());
+    }
+    const auto   data_pins    = std::span(data);
+    const size_t bottom_count = data.size() <= bottom_capacity ? data.size() : (data.size() + 1) / 2;
+    pins(address, Proxy_edge::Left);
+    pins(data_pins.first(bottom_count), Proxy_edge::Bottom);
+    pins(data_pins.subspan(bottom_count), Proxy_edge::Top);
+    pins(control, Proxy_edge::Right);
     // The name keys on the proxy's shape and pins, NOT on the instance: the floorplan stage finds repeated hierarchy
     // copies by matching macro masters, and a per-instance hash made every copy of a memory look different.
     std::string signature = std::format("{}x{}:{:.6f}", bits, depth, macro.width);
@@ -149,19 +178,22 @@ void align_memory_proxy_pins(physical::Technology& tech, const physical::Floorpl
     }
     // Each edge uses a preferred escape layer; varying pin coordinates must
     // share one phase so a rigid origin correction can serve every pin.
-    std::map<std::pair<std::string, int>, std::vector<physical::Rect*>> edges;
+    std::map<std::pair<std::string, Proxy_edge>, std::vector<physical::Rect*>> edges;
     for (auto& [label, pin] : macro.pins) {
       (void)label;
       for (auto& shape : pin.shapes) {
         const auto& layer = tech.layers.at(shape.layer);
-        const int   edge  = shape.rect.yl == 0 ? 1 : shape.rect.xl == 0 ? 0 : 2;
-        if ((edge == 1 && layer.direction == "VERTICAL") || (edge != 1 && layer.direction == "HORIZONTAL")) {
+        if (layer.direction == "VERTICAL" && (shape.rect.yl == 0 || shape.rect.yh == macro.height)) {
+          const auto edge = shape.rect.yl == 0 ? Proxy_edge::Bottom : Proxy_edge::Top;
+          edges[{shape.layer, edge}].push_back(&shape.rect);
+        } else if (layer.direction == "HORIZONTAL" && (shape.rect.xl == 0 || shape.rect.xh == macro.width)) {
+          const auto edge = shape.rect.xl == 0 ? Proxy_edge::Left : Proxy_edge::Right;
           edges[{shape.layer, edge}].push_back(&shape.rect);
         }
       }
     }
     for (auto& [key, rectangles] : edges) {
-      const bool                               x     = key.second == 1;
+      const bool                               x     = vertical_access(key.second);
       const auto&                              layer = tech.layers.at(key.first);
       auto                                     patterns = imported_tracks(floorplan, key.first, x).patterns;
       // Unlike macro-track legalization, a LEF pitch without OFFSET still
@@ -177,7 +209,8 @@ void align_memory_proxy_pins(physical::Technology& tech, const physical::Floorpl
       });
       const auto&       first = *rectangles.front();
       const double      half  = (x ? first.xh - first.xl : first.yh - first.yl) * tech.dbu / 2;
-      const int64_t     low = std::ceil(half - 1e-7), high = std::floor(macro.width * tech.dbu - half + 1e-7);
+      const double      length = (x ? macro.width : macro.height) * tech.dbu;
+      const int64_t     low = std::ceil(half - 1e-7), high = std::floor(length - half + 1e-7);
       std::set<int64_t> candidates;
       const auto        add = [&](int64_t point) {
         if (point >= low && point <= high) {
@@ -210,7 +243,7 @@ void align_memory_proxy_pins(physical::Technology& tech, const physical::Floorpl
           point += pitch;
         }
         for (size_t i = 0; i < rectangles.size(); ++i) {
-          const auto wanted = std::llround(macro.width * tech.dbu * (i + 1) / (rectangles.size() + 1));
+          const auto wanted = std::llround(length * (i + 1) / (rectangles.size() + 1));
           if (wanted < phase) {
             add(phase);
             continue;
@@ -229,14 +262,14 @@ void align_memory_proxy_pins(physical::Technology& tech, const physical::Floorpl
                                              rectangles.size(),
                                              candidates.size(),
                                              key.first,
-                                             key.second,
+                                             static_cast<int>(key.second),
                                              macro.width));
       }
       const std::vector<int64_t> positions(candidates.begin(), candidates.end());
       size_t                     next = 0;
       for (size_t i = 0; i < rectangles.size(); ++i) {
         auto&        rect   = *rectangles[i];
-        const double wanted = macro.width * tech.dbu * (i + 1) / (rectangles.size() + 1);
+        const double wanted = length * (i + 1) / (rectangles.size() + 1);
         const auto   last   = positions.size() - (rectangles.size() - i);
         auto         chosen = static_cast<size_t>(std::lower_bound(positions.begin(), positions.end(), wanted) - positions.begin());
         chosen              = std::clamp(chosen, next, last);

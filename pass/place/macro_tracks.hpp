@@ -3,6 +3,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -10,6 +11,12 @@
 #include "inou/lefdef/physical.hpp"
 #include "power_grid_rules.hpp"
 namespace livehd::placement {
+// A movable macro frame could not fit at the requested clearance. The driver
+// may retry on a larger generated core.
+struct Macro_placement_no_space : std::runtime_error {
+  using std::runtime_error::runtime_error;
+};
+
 // The origins at which a macro's signal pins land on routing tracks, as `legalize_macro_tracks` demands of a FIXED
 // macro: per axis the lower-left origin must be phases[axis][i] + k * period[axis] for some i and integer k (pins that
 // need either axis are not separated, so a macro with such pins is judged by its single-axis pins). Plain data: it

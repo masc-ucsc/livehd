@@ -80,8 +80,8 @@ endmodule
 err = synth('fit_deep', 'synth.memory=sram_fit', src=deep)
 assert '1 memories became macros' in err, err
 shallow = root / 'shallow.v'
-shallow.write_text('''module top(input clk, input [3:0] ra, wa, input [511:0] wd, input we, output reg [511:0] q);
-  reg [511:0] mem [0:15];             // 8 Kib but only 16 entries: flops (no fakeram shape)
+shallow.write_text('''module top(input clk, input [3:0] ra, wa, input [271:0] wd, input we, output reg [271:0] q);
+  reg [271:0] mem [0:15];             // 4352 bits but only 16 entries: flops (no fakeram shape)
   always @(posedge clk) begin if (we) mem[wa] <= wd; q <= mem[ra]; end
 endmodule
 ''')
@@ -90,8 +90,8 @@ assert 'became macros' not in err, err
 err = synth('sram_shallow', 'synth.memory=sram', src=shallow)
 assert '1 memories became macros' in err, err   # plain sram keeps any shape
 ported = root / 'ported.v'
-ported.write_text('''module top(input clk, input [7:0] ra, rb, wa, input [31:0] wd, input we, output reg [31:0] qa, qb);
-  reg [31:0] mem [0:255];             // 8 Kib, 256 entries, but 2 reads + 1 write: flops
+ported.write_text('''module top(input clk, input [5:0] ra, rb, wa, input [71:0] wd, input we, output reg [71:0] qa, qb);
+  reg [71:0] mem [0:63];              // 4608 bits and 64 entries, but 2 reads + 1 write: flops
   always @(posedge clk) begin if (we) mem[wa] <= wd; qa <= mem[ra]; qb <= mem[rb]; end
 endmodule
 ''')

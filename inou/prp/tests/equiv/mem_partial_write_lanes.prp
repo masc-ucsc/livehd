@@ -19,35 +19,35 @@
 //   N  "none":    a colliding read is undefined, so qn only reads when idle
 //   R  default ("program"), whole-entry + runtime-position writes: `#[k]` and
 //      `#[j..+4]` have no constant lane, so R takes single-bit lanes
-// The lanes of P/O/F/N are 4 bits wide: the byte writes and the [4..<12]
-// write share 4-bit boundaries (wensize 4).
-pub mod mem_partial_write_lanes(we0:Bool, we1:Bool, we2:Bool, we3:Bool, a:U2, b:U2, c:U2, x:U8, y:U8, z:U8, w:U16, k:U4, j:U3, bv:U1, nib:U4, ra:U2)
-  -> (qp0:U16@[0], qp1:U16@[0], qo:U16@[0], qf:U16@[0], qn:U16@[0], qr:U16@[0]) {
-  reg P:[4]U16:[ordering="program"] = nil
-  reg O:[4]U16:[ordering="old"] = nil
-  reg F:[4]U16:[ordering="fwd"] = nil
-  reg N:[4]U16:[ordering="none"] = nil
-  reg R:[4]U16 = nil
+// The lanes of P/O/F/N are 2 bits wide: the half-word writes and the [2..<6]
+// write share 2-bit boundaries (wensize 2).
+pub mod mem_partial_write_lanes(we0:Bool, we1:Bool, we2:Bool, we3:Bool, a:U2, b:U2, c:U2, x:U4, y:U4, z:U4, w:U8, k:U3, j:U2, bv:U1, nib:U4, ra:U2)
+  -> (qp0:U8@[0], qp1:U8@[0], qo:U8@[0], qf:U8@[0], qn:U8@[0], qr:U8@[0]) {
+  reg P:[4]U8:[ordering="program"] = nil
+  reg O:[4]U8:[ordering="old"] = nil
+  reg F:[4]U8:[ordering="fwd"] = nil
+  reg N:[4]U8:[ordering="none"] = nil
+  reg R:[4]U8 = nil
 
   qp0 = P[ra]
   qf  = F[ra]
   if we0 {
-    P[a]#[0..<8] = x
-    O[a]#[0..<8] = x
-    F[a]#[0..<8] = x
-    N[a]#[0..<8] = x
+    P[a]#[0..<4] = x
+    O[a]#[0..<4] = x
+    F[a]#[0..<4] = x
+    N[a]#[0..<4] = x
   }
   if we1 {
-    P[b]#[8..<16] = y
-    O[b]#[8..<16] = y
-    F[b]#[8..<16] = y
-    N[b]#[8..<16] = y
+    P[b]#[4..<8] = y
+    O[b]#[4..<8] = y
+    F[b]#[4..<8] = y
+    N[b]#[4..<8] = y
   }
   if we2 {
-    P[c]#[4..<12] = z
-    O[c]#[4..<12] = z
-    F[c]#[4..<12] = z
-    N[c]#[4..<12] = z
+    P[c]#[2..<6] = z
+    O[c]#[2..<6] = z
+    F[c]#[2..<6] = z
+    N[c]#[2..<6] = z
   }
   qp1 = P[ra]
   qo  = O[ra]
@@ -60,18 +60,18 @@ pub mod mem_partial_write_lanes(we0:Bool, we1:Bool, we2:Bool, we3:Bool, a:U2, b:
   qr = R[ra]
 }
 
-// Four cycles fill entries 0..3 with two byte writes each; cycle 4 writes all
-// three lanes of entry 1 (0xAA low byte, 0xBB high byte, then 0xCC over bits
-// 4..11): the entry must end 0xBCCA in every ordering. The sampled outputs
+// Four cycles fill entries 0..3 with two half-word writes each; cycle 4 writes all
+// three lanes of entry 1 (0xA low half, 0xB high half, then 0xC over bits
+// 2..5): the entry must end 0xB2 in every ordering. The sampled outputs
 // read the state after each clock edge.
 test mem_partial_write_lanes.merge {
   mut d = mem_partial_write_lanes
   const we  = [1, 1, 1, 1, 1, 0]
   const we2 = [0, 0, 0, 0, 1, 0]
   const ad  = [0, 1, 2, 3, 1, 1]
-  const xs  = [0x10, 0x11, 0x12, 0x13, 0xAA, 0]
-  const ys  = [0x20, 0x21, 0x22, 0x23, 0xBB, 0]
-  const e   = [0x2010, 0x2111, 0x2212, 0x2313, 0xBCCA, 0xBCCA]
+  const xs  = [0, 1, 2, 3, 0xA, 0]
+  const ys  = [4, 5, 6, 7, 0xB, 0]
+  const e   = [0x40, 0x51, 0x62, 0x73, 0xB2, 0xB2]
   tick 6 {
     d.we0 = we[clock] == 1
     d.we1 = we[clock] == 1
@@ -83,9 +83,9 @@ test mem_partial_write_lanes.merge {
     d.ra  = ad[clock]
     d.x   = xs[clock]
     d.y   = ys[clock]
-    d.z   = 0xCC
-    d.w   = 0x5555
-    d.k   = 15
+    d.z   = 0xC
+    d.w   = 0x55
+    d.k   = 7
     d.j   = 2
     d.bv  = 1
     d.nib = 0xF
@@ -97,9 +97,9 @@ test mem_partial_write_lanes.merge {
     if we[clock] == 0 {
       assert(d.qn == e[clock])
     }
-    // R: entry 0 is 0x5555, then bit 15 set, then bits 2..5 set: 0xD57D.
+    // R: entry 0 is 0x55, then bit 7 set, then bits 2..5 set: 0xFD.
     if clock == 0 {
-      assert(d.qr == 0xD57D)
+      assert(d.qr == 0xFD)
     }
   }
 }

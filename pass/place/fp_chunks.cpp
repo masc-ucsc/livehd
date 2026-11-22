@@ -1642,9 +1642,11 @@ rapidjson::Document Chunk_model::record(const Chunk_plan& p, const std::string& 
           const auto   dist = [&](const Chunk_box& b) {
             return std::abs(x - std::clamp(x, b[0], b[2])) + std::abs(y - std::clamp(y, b[1], b[3]));
           };
-          const auto r = c.region.empty() ? c.box : *std::min_element(c.region.begin(), c.region.end(), [&](auto& a, auto& b) {
-            return dist(a) < dist(b);
-          });
+          const auto r = c.region.empty()
+                             ? c.box
+                             : *std::min_element(c.region.begin(), c.region.end(), [&](const auto& lhs, const auto& rhs) {
+                                 return dist(lhs) < dist(rhs);
+                               });
           parts.push_back(r);
           area = (r[2] - r[0]) * (r[3] - r[1]);
         }

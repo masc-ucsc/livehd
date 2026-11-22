@@ -166,7 +166,7 @@ fi
 if [ "$part" = all ] || [ "$part" = memory ]; then
 
 # A lowered memory is registers behind a read mux: with the sweep, the columns no reader looks at go too
-# (4 entries x 16 bits -> the 8 bits of the byte read). The removed columns have no counterpart left to pair, so
+# (2 entries x 16 bits -> the 8 bits of the byte read). The removed columns have no counterpart left to pair, so
 # the LEC proof is a bounded one.
 for mode in false true; do
   d="$W/mem_$mode"
@@ -176,8 +176,8 @@ for mode in false true; do
     -- "$MEM_SRC" > "$d/synth.log" 2>&1 || fail "mem $mode: synth -> $(cat "$d/r.json" 2>/dev/null)"
   cat "$d/netv/"*.v > "$d/net.v"
 done
-[ "$(count "$W/mem_false/net.v" '^DFF')" = 64 ] || fail "mem off: expected 64 register bits, got $(count "$W/mem_false/net.v" '^DFF')"
-[ "$(count "$W/mem_true/net.v" '^DFF')" = 32 ] || fail "mem on: expected 32 register bits, got $(count "$W/mem_true/net.v" '^DFF')"
+[ "$(count "$W/mem_false/net.v" '^DFF')" = 32 ] || fail "mem off: expected 32 register bits, got $(count "$W/mem_false/net.v" '^DFF')"
+[ "$(count "$W/mem_true/net.v" '^DFF')" = 16 ] || fail "mem on: expected 16 register bits, got $(count "$W/mem_true/net.v" '^DFF')"
 grep -q '"state-swept-memory"' "$W/mem_true/synth.log" || fail "mem on: the sweep of the lowered memory did not report"
 "$LHD" lec --set formal.effort=proof --impl lg:"$W/mem_true/net" --ref lg:"$W/mem_true/W/synth/lg" --lib lg:"$W/models" \
   --top sweep_mem --workdir "$W/mem_true/lec" -q --result-json "$W/mem_true/lec.json" > "$W/mem_true/lec.log" 2>&1 \
@@ -201,7 +201,7 @@ mkdir -p "$d"
   --set compile.sweep=true --set synth.state_sweep=true -- "$MEM_SRC" > "$d/synth.log" 2>&1 \
   || fail "mem both: synth -> $(cat "$d/r.json" 2>/dev/null)"
 cat "$d/netv/"*.v > "$d/net.v"
-[ "$(count "$d/net.v" '^DFF')" = 32 ] || fail "mem both: expected 32 register bits, got $(count "$d/net.v" '^DFF')"
+[ "$(count "$d/net.v" '^DFF')" = 16 ] || fail "mem both: expected 16 register bits, got $(count "$d/net.v" '^DFF')"
 
 fi
 

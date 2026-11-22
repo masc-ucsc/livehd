@@ -423,6 +423,64 @@ TEST(Placement, VirtualMemoryTrackAlignmentPreservesExplicitFixedOrigins) {
   cells.front().place.status = Ann_place::Status::FIXED;
   EXPECT_NO_THROW(legalize_macro_tracks(tech, fp, cells, 0, 0, false));
 }
+
+TEST(Placement, VirtualMemoryFindsDistantTrackAlignedSpaceWithClearance) {
+  auto [tech, fp]                     = track_fixture();
+  tech.macros.at("ram").virtual_proxy = true;
+  fp.die                             = {0, 0, 1200, 1200};
+  fp.rows.clear();
+  for (int y = 0; y < 1200; y += 10) {
+    fp.rows.push_back({"r" + std::to_string(y), "grid", 0, y, 200, 6, physical::Orientation::N});
+  }
+  fp.tracks[0].count = 280;  // Finite tracks end before the far edge of the die.
+  fp.tracks[1].count = 190;
+  auto& blocked      = fp.blockages.emplace_back().rectangles;
+  blocked            = {
+      {  0, 0,  990, 1200},
+      {990, 0, 1200,  990}
+  };
+  // Many closer edges hide the distant opening from the bounded search.
+  for (int i = 70; i < 690; i += 6) {
+    blocked.push_back({double(i), double(i), double(i + 1), double(i + 1)});
+  }
+  auto fixed         = track_macro();
+  fixed.name         = "fixed";
+  fixed.place.x      = 1001;
+  fixed.place.y      = 995;
+  fixed.place.status = Ann_place::Status::FIXED;
+  auto second        = track_macro();
+  second.name        = "ram1";
+  std::vector<physical::Component> cells{track_macro(), fixed, second};
+  ASSERT_NO_THROW(legalize_macro_tracks(tech, fp, cells, 2, 2, true, 12, 12));
+  EXPECT_EQ(cells[1], fixed);
+  for (const auto i : {0, 2}) {
+    const auto& p = cells[i].place;
+    EXPECT_GE(p.x, 990);
+    EXPECT_GE(p.y, 990);
+    EXPECT_LE(p.x + 6, 3 + 279 * 4);
+    EXPECT_LE(p.y + 3, 2 + 189 * 6);
+    EXPECT_EQ((p.x + 2 - 3) % 4, 0);
+    EXPECT_EQ((p.y + 3 - 2) % 6, 0);
+    for (int j = 0; j < 3; ++j) {
+      if (i != j) {
+        const auto& q     = cells[j].place;
+        const auto  gap_x = std::max(p.x - q.x - q.width, q.x - p.x - p.width);
+        const auto  gap_y = std::max(p.y - q.y - q.height, q.y - p.y - p.height);
+        EXPECT_GE(std::max(gap_x, gap_y), 12);
+      }
+    }
+  }
+  auto fixed_frame = cells;
+  for (auto& c : fixed_frame) {
+    c.place.status = Ann_place::Status::FIXED;
+  }
+  EXPECT_NO_THROW(legalize_macro_tracks(tech, fp, fixed_frame, 2, 2, false, 12, 12));
+  blocked.push_back({990, 990, 1200, 1200});
+  const auto saved = cells;
+  EXPECT_THROW(legalize_macro_tracks(tech, fp, cells, 2, 2, true, 12, 12), Macro_placement_no_space);
+  EXPECT_EQ(cells, saved);
+}
+
 TEST(Placement, RigidMacroTrackAlignmentUsesOneTranslationAcrossMastersAndOrientations) {
   auto [tech, fp]             = track_fixture();
   tech.macros.at("ram").width = 12;

@@ -171,6 +171,20 @@ std::optional<std::string> inaccessible(const Profile& p, int64_t x, int64_t y) 
 struct Box {
   int64_t xl, yl, xh, yh;
 };
+Box row_core(const ph::Technology& tech, const ph::Floorplan& layout) {
+  Box core{std::numeric_limits<int64_t>::max(),
+           std::numeric_limits<int64_t>::max(),
+           std::numeric_limits<int64_t>::min(),
+           std::numeric_limits<int64_t>::min()};
+  for (const auto& row : layout.rows) {
+    const auto height = std::llround(tech.sites.at(row.site).height * tech.dbu);
+    core.xl           = std::min(core.xl, row.x);
+    core.yl           = std::min(core.yl, row.y);
+    core.xh           = std::max(core.xh, row.x + row.count * row.step);
+    core.yh           = std::max<int64_t>(core.yh, row.y + height);
+  }
+  return core;
+}
 bool excluded(const ph::Floorplan& layout, const Box& b) {
   const ph::Rect rect{double(b.xl), double(b.yl), double(b.xh), double(b.yh)};
   return std::ranges::any_of(layout.blockages, [&](const auto& block) {
@@ -320,16 +334,7 @@ bool coherent_macro_tracks(const ph::Technology& tech, const ph::Floorplan& layo
     const auto& m = tech.macros.at(c.macro);
     return c.place.status == ph::Status::FIXED || c.place.status == ph::Status::LOCKED || m.klass.starts_with("CORE");
   };
-  Box core{std::numeric_limits<int64_t>::max(),
-           std::numeric_limits<int64_t>::max(),
-           std::numeric_limits<int64_t>::min(),
-           std::numeric_limits<int64_t>::min()};
-  for (const auto& row : layout.rows) {
-    core.xl = std::min(core.xl, row.x);
-    core.yl = std::min(core.yl, row.y);
-    core.xh = std::max(core.xh, row.x + row.count * row.step);
-    core.yh = std::max<int64_t>(core.yh, row.y + std::llround(tech.sites.at(row.site).height * tech.dbu));
-  }
+  const auto                                                 core = row_core(tech, layout);
   const Pdn_check                                            pdn{alignment, core, members};
   std::map<std::pair<std::string, ph::Orientation>, Profile> cache;
   std::vector<const Profile*>                                profiles(cells.size(), nullptr);
@@ -596,17 +601,7 @@ void legalize_macro_tracks_impl(const ph::Technology& tech, const ph::Floorplan&
   if (layout.rows.empty()) {
     return;
   }
-  Box core{std::numeric_limits<int64_t>::max(),
-           std::numeric_limits<int64_t>::max(),
-           std::numeric_limits<int64_t>::min(),
-           std::numeric_limits<int64_t>::min()};
-  for (const auto& row : layout.rows) {
-    const auto height = std::llround(tech.sites.at(row.site).height * tech.dbu);
-    core.xl           = std::min(core.xl, row.x);
-    core.yl           = std::min(core.yl, row.y);
-    core.xh           = std::max(core.xh, row.x + row.count * row.step);
-    core.yh           = std::max<int64_t>(core.yh, row.y + height);
-  }
+  const auto          core = row_core(tech, layout);
   const Pdn_check     pdn{alignment, core, members};
   const auto fixed = [](const auto& c) { return c.place.status == ph::Status::FIXED || c.place.status == ph::Status::LOCKED; };
   std::vector<size_t> blockers;
@@ -771,11 +766,205 @@ void legalize_macro_tracks_impl(const ph::Technology& tech, const ph::Floorplan&
     }
     if (!placed) {
       c.place = original;
-      throw std::runtime_error("no legal macro routing-track alignment near " + c.name);
+      throw Macro_placement_no_space("no legal macro routing-track alignment near " + c.name);
     }
   }
 }
 namespace {
+using Interval = std::pair<int64_t, int64_t>;
+struct Origin_domain {
+  int64_t               period = 1;
+  std::vector<Interval> spans;  // first/last congruent origin in each span
+
+  std::optional<int64_t> at_or_after(int64_t low) const {
+    std::optional<int64_t> best;
+    for (const auto& [first, last] : spans) {
+      if (low > last) {
+        continue;
+      }
+      const auto delta = std::max<int64_t>(0, low - first);
+      const auto value = first + (delta / period + (delta % period != 0)) * period;
+      if (value <= last && (!best || value < *best)) {
+        best = value;
+      }
+    }
+    return best;
+  }
+};
+
+// A proxy pin uses tracks on one axis. A periodic phase determines which
+// patterns can serve it. Their finite extents then bound the valid origins.
+Origin_domain proxy_origins(const Profile& p, int axis, int64_t low, int64_t high) {
+  const auto    period = p.period[axis];
+  Origin_domain domain{period, {}};
+  for (const auto& phase : p.phases[axis]) {
+    const auto align_up   = [&](int64_t v) { return v + ((phase.value - v) % period + period) % period; };
+    const auto align_down = [&](int64_t v) { return v - ((v - phase.value) % period + period) % period; };
+    const auto start = align_up(low), end = align_down(high);
+    if (start > end) {
+      continue;
+    }
+    std::vector<Interval> spans{
+        {start, end}
+    };
+    for (const auto& pin : p.pins) {
+      if (pin.access.front().x != (axis == 0)) {
+        continue;
+      }
+      std::vector<Interval> reachable;
+      for (const auto& access : pin.access) {
+        if (!accessible(access, phase.value, false).first) {
+          continue;
+        }
+        const long double last         = access.start + static_cast<long double>(access.count - 1) * access.pitch;
+        const auto        first_origin = std::max<long double>(start, std::floor(access.start - access.high + 1e-7) + 1);
+        const auto        last_origin  = std::min<long double>(end, std::ceil(last - access.low - 1e-7L) - 1);
+        if (first_origin <= last_origin) {
+          reachable.emplace_back(int64_t(first_origin), int64_t(last_origin));
+        }
+      }
+      const auto            allowed = ph::merge_intervals(std::move(reachable));
+      std::vector<Interval> next;
+      for (const auto& [a, b] : spans) {
+        for (const auto& [c, d] : allowed) {
+          const auto first = align_up(std::max(a, c)), last = align_down(std::min(b, d));
+          if (first <= last) {
+            next.emplace_back(first, last);
+          }
+        }
+      }
+      spans = std::move(next);
+      if (spans.empty()) {
+        break;
+      }
+    }
+    domain.spans.insert(domain.spans.end(), spans.begin(), spans.end());
+  }
+  return domain;
+}
+
+bool place_proxy_on_tracks(const ph::Technology& tech, const ph::Floorplan& layout, const Box& core, const Clearance& k,
+                           const Profile& p, const std::vector<ph::Component>& placed, ph::Component& proxy) {
+  // Generated memory ports have one escape direction each, so X and Y
+  // accessibility can be solved independently.
+  if (std::ranges::any_of(p.pins, &Pin::mixed)) {
+    return false;
+  }
+  const auto width = proxy.place.width, height = proxy.place.height;
+  const auto xmin = core.xl + k.hx, ymin = core.yl + k.hy;
+  const auto xs = proxy_origins(p, 0, xmin, core.xh - k.hx - width);
+  const auto ys = proxy_origins(p, 1, ymin, core.yh - k.hy - height);
+  if (xs.spans.empty() || ys.spans.empty()) {
+    return false;
+  }
+  // Forbidden origin rectangles are half-open. A strip can only gain space
+  // at a blocker's upper edge. Within each strip, skip entire blocked spans.
+  std::vector<Box> blocked;
+  for (const auto& other : placed) {
+    if (other.place.status != ph::Status::FIXED && other.place.status != ph::Status::LOCKED && !is_macro(tech, other)) {
+      continue;
+    }
+    const auto [sx, sy] = spacing(tech, proxy, other, k);
+    const auto& q       = other.place;
+    blocked.push_back({q.x - sx - width + 1, q.y - sy - height + 1, q.x + q.width + sx, q.y + q.height + sy});
+  }
+  for (const auto& b : layout.blockages) {
+    if (!b.soft) {
+      for (const auto& r : b.rectangles) {
+        blocked.push_back({int64_t(std::floor(r.xl)) - width + 1,
+                           int64_t(std::floor(r.yl)) - height + 1,
+                           int64_t(std::ceil(r.xh)),
+                           int64_t(std::ceil(r.yh))});
+      }
+    }
+  }
+  std::vector<int64_t> edges{ymin};
+  for (const auto& b : blocked) {
+    if (b.yh > ymin) {
+      edges.push_back(b.yh);
+    }
+  }
+  std::ranges::sort(edges);
+  std::ranges::sort(blocked, {}, &Box::xl);
+  std::optional<int64_t> last_y;
+  for (const auto edge : edges) {
+    const auto y = ys.at_or_after(edge);
+    if (!y) {
+      break;
+    }
+    if (y == last_y) {
+      continue;
+    }
+    last_y = y;
+    auto x = xs.at_or_after(xmin);
+    for (const auto& b : blocked) {
+      if (!x || b.xl > *x) {
+        break;
+      }
+      if (*y >= b.yl && *y < b.yh && *x < b.xh) {
+        x = xs.at_or_after(b.xh);
+      }
+    }
+    if (x && !inaccessible(p, *x, *y)) {
+      proxy.place.x = *x;
+      proxy.place.y = *y;
+      return true;
+    }
+  }
+  return false;
+}
+
+bool repack_memory_proxies(const ph::Technology& tech, const ph::Floorplan& layout, std::vector<ph::Component>& cells,
+                           const Clearance& k) {
+  std::vector<ph::Component> placed;
+  std::vector<size_t>        movable, retained;
+  for (size_t i = 0; i < cells.size(); ++i) {
+    const auto& c = cells[i];
+    if (tech.macros.at(c.macro).virtual_proxy && c.place.status != ph::Status::FIXED && c.place.status != ph::Status::LOCKED) {
+      movable.push_back(i);
+    } else {
+      retained.push_back(i);
+      placed.push_back(c);
+    }
+  }
+  if (movable.empty()) {
+    return false;
+  }
+  try {
+    legalize_macro_tracks_impl(tech, layout, placed, k, true, true, nullptr);
+  } catch (const Macro_placement_no_space&) {
+    return false;
+  }
+  std::ranges::sort(movable, [&](size_t a, size_t b) {
+    const auto& p      = cells[a];
+    const auto& q      = cells[b];
+    const auto  area_p = int64_t(p.place.width) * p.place.height;
+    const auto  area_q = int64_t(q.place.width) * q.place.height;
+    if (area_p != area_q) {
+      return area_p > area_q;
+    }
+    return p.name < q.name;
+  });
+  const auto                                                 core = row_core(tech, layout);
+  std::map<std::pair<std::string, ph::Orientation>, Profile> profiles;
+  for (const auto i : movable) {
+    auto       c   = cells[i];
+    const auto key = std::pair{c.macro, c.place.orientation};
+    if (!profiles.contains(key)) {
+      profiles.emplace(key, profile(tech, layout, c));
+    }
+    if (!place_proxy_on_tracks(tech, layout, core, k, profiles.at(key), placed, c)) {
+      return false;
+    }
+    placed.push_back(std::move(c));
+  }
+  retained.insert(retained.end(), movable.begin(), movable.end());
+  for (size_t i = 0; i < placed.size(); ++i) {
+    cells[retained[i]].place = placed[i].place;
+  }
+  return true;
+}
+
 void legalize_macro_tracks_with(const ph::Technology& tech, const ph::Floorplan& layout, std::vector<ph::Component>& cells,
                                 const Clearance& k, bool move_macros, const Pg_macro_alignment* pdn,
                                 const Member_spans* members = nullptr) {
@@ -796,9 +985,9 @@ void legalize_macro_tracks_with(const ph::Technology& tech, const ph::Floorplan&
         cells = std::move(trial);
       }
     }
-  } catch (const std::runtime_error& failure) {
+  } catch (const Macro_placement_no_space&) {
     cells = original;
-    if (!move_macros || !std::string(failure.what()).starts_with("no legal macro routing-track alignment near ")) {
+    if (!move_macros) {
       throw;
     }
     if (coherent_macro_tracks(tech, layout, cells, k, pdn, members)) {
@@ -810,10 +999,19 @@ void legalize_macro_tracks_with(const ph::Technology& tech, const ph::Floorplan&
     // geometry and completed macros; preserve the original frame on failure.
     try {
       legalize_macro_tracks_impl(tech, layout, cells, k, move_macros, true, pdn, members);
+    } catch (const Macro_placement_no_space&) {
+      cells = original;
+      if (!pdn && repack_memory_proxies(tech, layout, cells, k)) {
+        return;
+      }
+      throw;
     } catch (...) {
       cells = original;
       throw;
     }
+  } catch (...) {
+    cells = original;
+    throw;
   }
 }
 // Open one macro face without breaking a neighbor's halo. Displacement travels only inward, on
@@ -1182,10 +1380,7 @@ void legalize_macro_tracks_lattice(const ph::Technology& tech, const ph::Floorpl
     if (complete_macro_frame) {
       open_io_channels(tech, layout, cells, k, pdn, members);
     }
-  } catch (const std::runtime_error& failure) {
-    if (!std::string(failure.what()).starts_with("no legal macro routing-track alignment near ")) {
-      throw;
-    }
+  } catch (const Macro_placement_no_space&) {
     // The strap lattice is a placement preference on top of legality: without a lattice-aligned frame keep the
     // routing-track alignment alone.
     cells = original;

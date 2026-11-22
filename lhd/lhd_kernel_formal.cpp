@@ -3041,7 +3041,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
       }
     }
 
-    auto record_flat_proof = [&] {
+    auto record_flat_result = [&] {
       assumed[def_ix].clear();
       if (auto it = children.find(name); it != children.end()) {
         descended[def_ix].insert(it->second.begin(), it->second.end());
@@ -3072,7 +3072,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
       auto       hit      = vcache->lookup(flat_key);
       if (hit.has_value()) {
         ckey = flat_key;
-        record_flat_proof();
+        record_flat_result();
       } else if (flat_key != ckey) {
         hit = vcache->lookup(ckey);
       }
@@ -3771,13 +3771,12 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
           r.cvc5               += rf.cvc5;  // here `rf` is the discarded side; the effort was still spent
         }
       }
-      if (r.verdict == Verdict::Proven) {
-        // Every successful branch above adopted the flat query. Its only
-        // remaining boxes are explicitly trusted, so the speculative child
-        // premises no longer belong to this proof. Otherwise escalation can
-        // discard a settled flat proof and time out repeating the same miter.
-        record_flat_proof();
-        if (!ckey.empty()) {
+      if (r.verdict == Verdict::Proven || r.verdict == Verdict::Refuted) {
+        // A settled flat query has already checked the speculative children
+        // in context. Escalating their separate verdicts would repeat the
+        // miter and could discard an established proof or counterexample.
+        record_flat_result();
+        if (r.verdict == Verdict::Proven && !ckey.empty()) {
           // A warm hit must recover the same absence of speculative premises.
           ckey = lec_pair_cache_key(ref_digest[def_ix], impl_digest[def_ix], oflat);
         }

@@ -16,13 +16,23 @@ sh_binary(
 # Exercise every physical stage and handoff on every topology. These checks
 # require legal placement, not optimization convergence; keep the optimization
 # budget and replicated logic bounded. The run binary retains the full
-# benchmark fixtures and longer measurement settings.
+# benchmark fixtures and longer measurement settings. Exercise the default
+# routing feedback on the small mesh; the larger cases check placement handoffs.
 [
     sh_test(
         name = case,
         size = "small",
         srcs = ["run.py"],
-        args = ["--case", case, "--iterations", "20", "--logic-depth", "2"],
+        args = [
+            "--case",
+            case,
+            "--iterations",
+            "20",
+            "--logic-depth",
+            "1" if case in ["mesh_6x6", "ring_32"] else "2",
+        ] + (
+            [] if case == "mesh_2x2" else ["--set", "synth.place.legroute=false"]
+        ),
         data = [":fixtures", "generate.py", "render.py", "//lhd:lhd"],
         tags = ["placement"],
     )

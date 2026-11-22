@@ -200,4 +200,42 @@ grep -q 'shared-tick-clock' shared.log || fail "missing clock diagnostic: $(cat 
 "$LHD" sim lg:domain-lg waveform.prp independent --workdir clocks >domain.log 2>&1 && fail "independent clocks were merged"
 grep -q 'independent clock waveforms.*dut\.rclk' domain.log && grep -q 'dut\.wclk' domain.log || fail "$(cat domain.log)"
 
+# One image can need both clock dispatchers for the same DUT.
+cat > clock_modes.v <<'VERILOG'
+module sample(input clk, input [7:0] d, output reg [7:0] q);
+  initial q = 0;
+  always @(posedge clk) q <= d;
+endmodule
+VERILOG
+cat > clock_modes.prp <<'PRP'
+const sample = import("lg:sample")
+test sample.periods {
+  mut a = sample
+  tick 6 {
+    a.clk = clock
+    a.d = 5 + clock
+    step
+    assert(a.q == 5 + clock)
+  }
+}
+test sample.edges {
+  mut a = sample
+  tick 6 {
+    a.clk = (clock & 1) == 0
+    a.d = 5 + clock
+    step
+    if (clock & 1) == 0 {
+      assert(a.q == 5 + clock)
+    } else {
+      assert(a.q == 4 + clock)
+    }
+  }
+}
+PRP
+"$LHD" compile clock_modes.v --top sample --emit-dir lg:clock-lg --workdir clock-import >clock-import.log 2>&1 \
+  || fail "$(cat clock-import.log)"
+"$LHD" sim lg:clock-lg clock_modes.prp --workdir clock-modes --set sim.vcd=true >clock-modes.log 2>&1 \
+  || fail "$(cat clock-modes.log)"
+[ -s clock-modes/sample.periods.vcd ] && [ -s clock-modes/sample.edges.vcd ] || fail "missing clock mode replay"
+
 echo "PASS lhd_sim_llvm_tb_test"
