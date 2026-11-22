@@ -6,7 +6,8 @@ closed-loop run is not known in advance. What is fixed is how each cycle uses th
 `cycleStep` applies exactly one step, on the tick it records (`co.tick`), and keeps its result.
 
 * `StepSound D step`: the stepper agrees with `interpretDesign` on every step it accepts.
-  `irStep_sound` proves it for the direct simulator (route `ir`); `refStep_sound` for `ref`.
+  `irStep_sound` proves it for the direct simulator (route `ir`), `irStepStaged_sound` for its
+  staged form (the one `mkStepper` builds); `refStep_sound` for `ref`.
   For route `vc` it is `compileDesign_correct` / `compileOpt_correct` (on the lake side).
 * `cycleStep_applied`: an applied cycle's outputs and next state are `interpretDesign`'s on the
   recorded tick; `cycleStep_held`: a cycle that stops before its edge leaves the state as it was.
@@ -22,6 +23,7 @@ Mathlib-free; the axioms are audited at the end.
 import HDLProof.Run.Loop
 import LeanSemanticPrimitives.Compiler.DirectTrace
 import LeanSemanticPrimitives.Projection.CkptResume
+import LeanSemanticPrimitives.Compiler.DirectStagedSound
 import LeanSemanticPrimitives.Projection.AxiomGate
 
 namespace HDLProof
@@ -43,6 +45,18 @@ theorem irStep_sound (D : DesignCert) (hd : Direct.checkDesign D = .ok ()) :
   · cases h
     exact directStepRaw_correct D (checkDesign_sound hd).depsBounded e i s
 
+/-- The staged `ir` stepper is sound: `Staged.step_eq` and `directStepRaw_correct`. -/
+theorem irStepStaged_sound (D : DesignCert) (hd : Direct.checkDesign D = .ok ()) :
+    StepSound D (irStepStaged (Staged.prepare D)) := by
+  intro e i s r h
+  unfold irStepStaged at h
+  split at h
+  · cases h
+  · cases h
+    have hdb := (checkDesign_sound hd).depsBounded
+    rw [Staged.step_eq D hdb]
+    exact directStepRaw_correct D hdb e i s
+
 theorem refStep_sound (D : DesignCert) :
     StepSound D (fun e i s => .ok (interpretDesign D e i s)) := by
   intro e i s r h
@@ -57,7 +71,7 @@ theorem mkStepper_ir_sound {D : DesignCert} {st : Stepper} {opt : Bool}
   | ok u =>
     rw [hc] at h
     cases h
-    exact irStep_sound D (by cases u; exact hc)
+    exact irStepStaged_sound D (by cases u; exact hc)
 
 theorem mkStepper_ref_sound {D : DesignCert} {st : Stepper} {opt : Bool}
     (h : mkStepper D .ref opt = .ok st) : StepSound D st.step := by

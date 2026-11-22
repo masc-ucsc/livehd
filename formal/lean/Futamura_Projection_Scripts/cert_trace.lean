@@ -1,6 +1,7 @@
 /-
 `cert_trace` -- the per-step OUTPUTS of `interpretDesign` on a certificate
-(computed by `directStep`, proved equal to it; the certificate check runs once),
+(computed by `directStep`, proved equal to it; the certificate check runs once; route:ir runs
+its staged form, `Compiler/DirectStaged`, proved equal by `Staged.stepChecked_eq`),
 under a supplied stimulus. The oracle side of an RTL differential: the same
 `stim v1` file drives an event simulator on the original RTL, and the two
 traces are compared line by line.
@@ -75,6 +76,7 @@ Both routes write the same bytes for the same state, and each resumes from the o
 import LeanSemanticPrimitives.Projection.CertLoadAny
 import LeanSemanticPrimitives.Compiler.DesignSemantics
 import LeanSemanticPrimitives.Compiler.DirectSemantics
+import LeanSemanticPrimitives.Compiler.DirectStaged
 import LeanSemanticPrimitives.Compiler.CompileDesignDefs
 -- route:vc runs `denoteResidual`'s fast spelling (`@[csimp]`, equal by proof)
 import LeanSemanticPrimitives.Compiler.ResidualFast
@@ -299,6 +301,9 @@ def main (args : List String) : IO UInt32 := do
     -- here, and each step runs `directStepChecked`, which is `directStep` on
     -- every step once the check has passed (`directStepChecked_eq`). A refused
     -- certificate is reported at the first step, as `directStep` reports it.
+    -- Each step runs the STAGED form (`Compiler/DirectStaged`): the design is prepared once
+    -- (every node specialized, constants folded), and `Staged.stepChecked_eq` proves the staged
+    -- step equal to `directStepChecked` for a certificate `checkDesign` accepts.
     match Compiler.Direct.checkDesign D with
     | .error e =>
       if cycles > 0 then
@@ -307,13 +312,14 @@ def main (args : List String) : IO UInt32 := do
       saveAt start s
       return 0
     | .ok _ =>
+      let P := Compiler.Staged.prepare D
       let mut compactions := 0
       for k in List.range' start cycles do
         saveAt k s
         if compactK > 0 && k > start && (k - start) % compactK == 0 then
           s := Ckpt.restore (Ckpt.save D hash k #[] s)
           compactions := compactions + 1
-        let r ← match Compiler.Direct.directStepChecked D (edgesAt D third sched k) (inputAt D st k) s with
+        let r ← match Compiler.Staged.stepChecked P (edgesAt D third sched k) (inputAt D st k) s with
           | .ok r => pure r
           | .error e => do IO.eprintln s!"step {k}: refused: {e.render}"; return 1
         IO.println s!"STEP {k} {" ".intercalate (r.outputs.toList.map (fun o => toString (bv_uint o)))}"

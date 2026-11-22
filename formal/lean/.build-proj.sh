@@ -158,6 +158,9 @@ MODULES=(
   # checkpoint's to-state text is tested against it), the format with its
   # load-time checks (Ckpt), and save/restore proved inverse (CkptSound).
   Compiler/DirectSemantics
+  # the direct simulator, staged: every node specialized once per design
+  Compiler/DirectStaged
+  Compiler/DirectStagedSound
   Compiler/DirectTrace
   Compiler/DirectSim
   Compiler/Ckpt

@@ -82,7 +82,7 @@ MODULES=(
   Projection/MemVariant Projection/MemVariantSim Projection/MemFused
   # The IR/VC trace driver (cert_trace, and its route:vc): the direct simulator
   # and the verified compiler's executable half, all Mathlib-free.
-  Compiler/DirectSemantics Compiler/ResidualIR Compiler/ResidualSemantics
+  Compiler/DirectSemantics Compiler/DirectStaged Compiler/DirectStagedSound Compiler/ResidualIR Compiler/ResidualSemantics
   # vc's step after its operators' fast forms (ResidualFast: @[csimp], equal by proof).
   Compiler/FastResidual Compiler/ResidualFast
   # vc's optimizer and its checker (ResidualOpt; sound by ResidualOptSound)

@@ -18,7 +18,10 @@ cert_run <cert> [bind:<file>] [stim:<file>] [edges:all|edges:third|edges:file:<p
 ## Options
 
 - `route:` picks the simulator. `ir` (the default) is the direct simulator, `vc` the verified
-  compiler, `ref` `interpretDesign` itself. `ref` is exact by definition and slow on designs
+  compiler, `ref` `interpretDesign` itself. `ir` runs the staged direct step
+  (`Compiler/DirectStaged`): the design is prepared once, each node specialized to its operator
+  with its constant operands folded in, and every slot kept as its reduced value;
+  `Staged.step_eq` (`Compiler/DirectStagedSound`) proves the step equal to `directStepRaw`. `ref` is exact by definition and slow on designs
   with memories. `opt:off` runs `vc` without its optimizer.
 - `bind:` adds a host: reset, constants, buses, memory, console, exit, registers, stop
   conditions.

@@ -15,6 +15,7 @@ outputs BEFORE the edge and the state AFTER it, exactly `interpretDesign`'s shap
   memory function, so reads walk the chain).
 -/
 import LeanSemanticPrimitives.Compiler.DirectSemantics
+import LeanSemanticPrimitives.Compiler.DirectStaged
 import LeanSemanticPrimitives.Compiler.CompileDesignDefs
 import LeanSemanticPrimitives.Compiler.ResidualFast
 import LeanSemanticPrimitives.Compiler.ResidualOpt
@@ -50,13 +51,23 @@ def irStep (D : DesignCert) (e : ClockEdges) (i : RuntimeInput) (s : RuntimeStat
   | .error err => .error err.render
   | .ok _ => .ok (Direct.directStepRaw D e i s)
 
+/-- The `ir` stepper on the staged direct step (`Compiler/DirectStaged`): the design is prepared
+once, each step is `Staged.step`, which `Staged.step_eq` proves equal to `directStepRaw`. -/
+def irStepStaged (P : Staged.Prep) (e : ClockEdges) (i : RuntimeInput) (s : RuntimeState) :
+    Except String RuntimeResult :=
+  match Direct.checkRuntime P.D e i s with
+  | .error err => .error err.render
+  | .ok _ => .ok (Staged.step P e i s)
+
 /-- The stepper of route `r` for design `D`, or why it cannot be built. -/
 def mkStepper (D : DesignCert) (r : Route) (opt : Bool := true) : Except String Stepper :=
   match r with
   | .ir =>
     match Direct.checkDesign D with
     | .error e => .error s!"ir: the direct simulator refuses the certificate: {e.render}"
-    | .ok _ => .ok { name := "ir", step := irStep D }
+    | .ok _ =>
+      let P := Staged.prepare D
+      .ok { name := "ir", step := irStepStaged P }
   | .vc =>
     match compileDesign D with
     | .error e => .error s!"vc: compileDesign refused: {repr e}"
