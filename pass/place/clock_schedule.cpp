@@ -504,6 +504,16 @@ Clock_schedule_result choose_clock_schedule(const Clock_schedule& initial, unsig
     out.unbalanced_score = current.score;
     if (!current.constraints_supported()) {
       out.balance_decision = "unsupported_constraints";
+      if (initial.balance_unverified) {
+        try {
+          (void)build(initial);
+          out.schedule         = initial;
+          out.balance_decision = "accepted_unverified";
+        } catch (const pcrs::Clock_infeasible&) {
+          (void)build(nominal);
+          out.balance_decision = "infeasible_clock_tree";
+        }
+      }
     } else {
       const auto try_balance = [&](const Clock_schedule&                 schedule,
                                    std::optional<Clock_score>&           score,

@@ -715,8 +715,9 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
     if (o.clock_max_slew_ps > 0) {  // absent at the default, so existing identities stay valid
       h = hash_text(std::format("clock-max-slew:{}", o.clock_max_slew_ps), h);
     }
+    h = hash_text("clock-layers:" + o.clock_layers + ":trunk:" + std::to_string(o.clock_trunk_drive_steps), h);
     if (o.clock_balance) {
-      h = hash_text("clock-arrival-bands-v3", h);
+      h = hash_text(o.clock_balance_unverified ? "clock-balance-unverified" : "clock-balance-verified", h);
     }
     if (o.clock_source_fork) {
       h = hash_text("sized-clock-source-root-v1", h);
@@ -4164,7 +4165,8 @@ std::shared_ptr<ph::Parasitics> estimate_rc(const Geometry_view& geometry, const
                                            options.resistance_ohm_um,
                                            options.capacitance_ff_um,
                                            options.rc_pessimism,
-                                           options.technology().cells.contents);
+                                           options.technology().cells.contents,
+                                           options.clock_rc_layers());
   const double horizontal_r = wire.signal.horizontal_r, horizontal_c = wire.signal.horizontal_c;
   const double vertical_r = wire.signal.vertical_r, vertical_c = wire.signal.vertical_c;
   if (provenance) {
@@ -4275,7 +4277,8 @@ timing::fast::Wire_trees estimate_wire_trees(const Geometry_view& geometry, cons
                                            options.resistance_ohm_um,
                                            options.capacitance_ff_um,
                                            options.rc_pessimism,
-                                           options.technology().cells.contents);
+                                           options.technology().cells.contents,
+                                           options.clock_rc_layers());
   timing::fast::Wire_trees trees;
   trees.topology = cache.topology;
   trees.node_start.reserve(cache.tree_net.size() + 1);
@@ -6100,7 +6103,8 @@ void gui_trial_timing(gui::Timing_query& query, timing::Whatif& journal, const V
                                            options.resistance_ohm_um,
                                            options.capacitance_ff_um,
                                            options.rc_pessimism,
-                                           options.technology().cells.contents);
+                                           options.technology().cells.contents,
+                                           options.clock_rc_layers());
   const auto original     = journal.failing_endpoints(0);
   query.baseline_failing  = original.size();
   const auto baseline_wns = journal.wns(), baseline_tns = journal.tns();
@@ -6294,7 +6298,8 @@ bool gui_timing(const View& v, const ph::Technology& tech, const Options& option
                                                options.resistance_ohm_um,
                                                options.capacitance_ff_um,
                                                options.rc_pessimism,
-                                               options.technology().cells.contents);
+                                               options.technology().cells.contents,
+                                               options.clock_rc_layers());
       std::vector<std::tuple<std::string, double, double>> ios;
       for (const auto& io : env->region_ios) {
         ios.emplace_back(io.name, io.x, io.y);

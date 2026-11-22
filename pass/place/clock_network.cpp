@@ -695,7 +695,8 @@ Clock_planning_model clock_planning_model(const Options& options, const liberty:
                                             options.resistance_ohm_um,
                                             options.capacitance_ff_um,
                                             options.rc_pessimism,
-                                            tech.cells.contents);
+                                            tech.cells.contents,
+                                            options.clock_rc_layers());
   const auto& rc     = wires.clock;
   const auto  scaled = [&](const std::array<double, 2>& factors) {
     return Wire_rc{rc.horizontal_r * factors[0],
@@ -711,6 +712,7 @@ Clock_planning_model clock_planning_model(const Options& options, const liberty:
                             options.clock_leaf_radius_um};
   limits.balance        = options.clock_balance;
   limits.target_slew_ps = options.clock_max_slew_ps;
+  limits.trunk_drive_steps = options.clock_trunk_drive_steps;
   limits.split_scheduled_leaves
       = (options.clock_balance || options.clock_split_scheduled_leaves) && !options.clock_leaf_schedule.empty();
   limits.leaf_rc                = per_um(leaf_rc);
@@ -813,6 +815,16 @@ static Clock_handoff build_clock_handoff_impl(Result& placed, const Options& opt
     Clock_sdc_design design(fp, tech.lef, instances);
     sdc                  = timing::fast::read_sdc(sdc_text, units, design);
     internal_constraints = design.queried_internals;
+  }
+  {
+    // Half of the skew the period tolerates is the gap between sibling subtrees that balancing leaves alone.
+    double period = std::numeric_limits<double>::infinity();
+    for (const auto& clock : sdc.clocks) {
+      if (clock.period_ps > 0) {
+        period = std::min(period, clock.period_ps);
+      }
+    }
+    limits.skew_bound_ps = std::isfinite(period) ? options.clock_skew_period_fraction * period / 2 : 0.;
   }
   std::map<std::string, double> port_slews;
   for (const auto& t : sdc.transitions) {
@@ -994,7 +1006,8 @@ static Clock_handoff build_clock_handoff_impl(Result& placed, const Options& opt
     }
   }
   Clock_schedule schedule;
-  schedule.balance = options.clock_balance;
+  schedule.balance            = options.clock_balance;
+  schedule.balance_unverified = options.clock_balance_unverified;
   for (const auto& [name, steps] : options.clock_leaf_schedule) {
     const auto pin = pin_ids.find(name);
     if (pin == pin_ids.end()) {
@@ -1046,7 +1059,8 @@ static Clock_handoff build_clock_handoff_impl(Result& placed, const Options& opt
       }
     }
     std::vector<unsigned> visited(plans.size());
-    std::vector<double>   latency(plans.size());
+    std::vector<double>   latency(plans.size(), -std::numeric_limits<double>::infinity());
+    std::vector<double>   latency_min(plans.size(), std::numeric_limits<double>::infinity());
     const auto            fit_domain = [&](auto&& self, size_t index) -> void {
       auto& d = plans[index];
       if (d.merged_into || visited[index] == 2) {
@@ -1058,10 +1072,16 @@ static Clock_handoff build_clock_handoff_impl(Result& placed, const Options& opt
       visited[index] = 1;
       const auto propagate = [&](pcrs::Clock_sink& pin) {
         pin.downstream_ps = 0;
+        pin.downstream_min_ps.reset();
         const auto [begin, end] = downstream_domains.equal_range(pin.name);
+        double earliest         = std::numeric_limits<double>::infinity();
         for (auto it = begin; it != end; ++it) {
           self(self, it->second);
-          pin.downstream_ps = std::max(pin.downstream_ps, latency[it->second]);
+          pin.downstream_ps = it == begin ? latency[it->second] : std::max(pin.downstream_ps, latency[it->second]);
+          earliest          = std::min(earliest, latency_min[it->second]);
+        }
+        if (std::isfinite(earliest) && earliest < pin.downstream_ps) {
+          pin.downstream_min_ps = earliest;
         }
       };
       std::ranges::for_each(d.loads, propagate);
@@ -1111,8 +1131,8 @@ static Clock_handoff build_clock_handoff_impl(Result& placed, const Options& opt
       const auto record_latency = [&](const auto& pins, const auto& arrivals) {
         for (size_t i = 0; i < pins.size(); ++i) {
           const auto& pin = pins[i];
-          latency[index] = std::max(latency[index], d.tree.source_cell_delay_ps + arrivals.at(i)
-                                                        + pin.downstream_ps + pin.insertion_ps - pin.wanted_ps);
+          latency[index]     = std::max(latency[index], d.tree.source_cell_delay_ps + arrivals.at(i) + pin.tail_hi_ps());
+          latency_min[index] = std::min(latency_min[index], d.tree.source_cell_delay_ps + arrivals.at(i) + pin.tail_lo_ps());
         }
       };
       record_latency(d.loads, d.gate_leaf ? d.tree.retained_arrival_ps : d.tree.arrival_ps);

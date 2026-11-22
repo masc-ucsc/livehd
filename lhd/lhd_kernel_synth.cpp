@@ -1376,7 +1376,12 @@ livehd::placement::Options placement_options(const Options& opts) {
       throw Lhd_error{"usage", "invalid PCRS skew bounds", "period fraction must be in [0,1] and hold margin must be nonnegative"};
     }
     out.clock_incremental_trials = truthy(synth_set(opts, "place.pcrs.incremental_trials", "true"));
-    out.clock_balance            = truthy(synth_set(opts, "place.pcrs.balance", "false"));
+    {
+      // true: balance, accepted by timing where it can be checked and kept where it cannot; verified: only by timing.
+      const auto balance           = synth_set(opts, "place.pcrs.balance", "true");
+      out.clock_balance            = balance == "verified" || truthy(balance);
+      out.clock_balance_unverified = balance != "verified" && truthy(balance);
+    }
     if (const auto path = synth_set(opts, "place.pcrs.gate_activity", ""); !path.empty()) {
       const auto          contents = livehd::file_utils::read_file(path);
       rapidjson::Document doc;
@@ -1423,6 +1428,22 @@ livehd::placement::Options placement_options(const Options& opts) {
     out.clock_leaf_radius_um = number("place.pcrs.leaf_radius_um", "0");
     if (out.clock_leaf_fanout < 2 || out.clock_leaf_fanout > 30 || out.clock_leaf_radius_um < 0) {
       throw Lhd_error{"usage", "invalid PCRS leaf grouping limits", "fanout must be 2 to 30 and radius nonnegative"};
+    }
+    out.clock_layers = synth_set(opts, "place.pcrs.clock_layers", "auto");
+    {
+      const auto steps = synth_set(opts, "place.pcrs.trunk_drive_steps", "all");
+      if (steps == "all") {
+        out.clock_trunk_drive_steps = std::numeric_limits<unsigned>::max();
+      } else {
+        unsigned value = 0;
+        const auto [end, ec] = std::from_chars(steps.data(), steps.data() + steps.size(), value);
+        if (ec != std::errc{} || end != steps.data() + steps.size() || value > 64) {
+          throw Lhd_error{"usage",
+                          "invalid synth.place.pcrs.trunk_drive_steps: " + steps,
+                          "expected all or an integer from 0 to 64"};
+        }
+        out.clock_trunk_drive_steps = value;
+      }
     }
     out.clock_max_slew_ps = number("place.pcrs.max_slew_ps", "0");
     if (out.clock_max_slew_ps < 0) {

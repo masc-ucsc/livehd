@@ -72,6 +72,13 @@ cc_binary(
 )
 
 cc_binary(
+    name = "clock_probe",
+    srcs = ["clock_probe.cpp"],
+    copts = COPTS,
+    deps = ["//core", "//inou/lefdef:inou_lefdef", "//pass/place:place", "//pass/timing:physical_rank"],
+)
+
+cc_binary(
     name = "timing_probe",
     srcs = ["timing_probe.cpp"],
     deps = ["//pass/opentimer:pass_opentimer", "@rapidjson"],

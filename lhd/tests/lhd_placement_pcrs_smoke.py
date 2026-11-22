@@ -34,13 +34,16 @@ base = ['lhd/lhd', 'synth', str(source), '--top', 'dut', '--set', f'synth.libert
         '--set', f'synth.mapper={os.environ.get("MAPPER", "abc")}', '-q']
 
 
-def run(name, extra, success=True, *, timing_driven=False, constraints=sdc, design=source):
+def run(name, extra, success=True, *, timing_driven=False, constraints=sdc, design=source, default_balance=False):
     result = root / f'{name}.json'
     args = list(base)
     args[args.index(str(source))] = str(design)
     args[args.index(f'synth.sdc={sdc}')] = f'synth.sdc={constraints}'
     if timing_driven:
         args[args.index('synth.place.timing_driven=false')] = 'synth.place.timing_driven=true'
+    # Balancing is on by default; these runs check the unbalanced tree and the searches around it unless they ask for it.
+    if not default_balance and not any('synth.place.pcrs.balance' in word for word in extra):
+        extra = extra + ['--set', 'synth.place.pcrs.balance=false']
     completed = subprocess.run(args + extra + ['--workdir', str(root / name), '--emit-dir', f'def:{root}/{name}_def',
                                                '--result-json', str(result)], capture_output=True, text=True, timeout=60)
     assert result.is_file(), (name, completed.returncode, completed.stdout, completed.stderr)
@@ -147,6 +150,10 @@ with sdc.open('a') as constraints:
 clock_opts = ['--set', 'synth.pcrs.clock_report=true', '--set', 'synth.place.pcrs.clock=true', '--set', 'synth.place.pcrs.skew_rounds=1']
 clock = run('clock', clock_opts)
 run('clock_repeat', clock_opts)
+# The balanced tree is the default of the product: it must build, and say how it was decided.
+run('clock_balanced', ['--set', 'synth.place.pcrs.clock=true'], default_balance=True)
+decision = json.loads((root / 'clock_balanced/synth/place/pcrs_clock.json').read_text())['useful_skew']['balance_decision']
+assert decision in ('accepted', 'accepted_unverified', 'clock_offset', 'timing_regression', 'lower_ranked', 'no_timing_gain'), decision
 assert (root / 'clock/synth/place/pcrs_clock.json').read_bytes() == (root / 'clock_repeat/synth/place/pcrs_clock.json').read_bytes()
 structure = json.loads((root / 'clock/synth/pcrs_clock_structure.json').read_text())
 assert [(d['root'], d['flop_clock_pins']) for d in structure['domains']] == [('clk', 48)], structure

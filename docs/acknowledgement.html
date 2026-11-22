@@ -166,7 +166,7 @@ studied for ideas, without using their code, are under <a href="#tools-inspirati
 <li><a href="https://github.com/wangyi-fudan/wyhash">wyhash</a> and <a href="https://github.com/tommyettinger/waterhash">waterhash/woothash</a> — hashing in <code>core/</code>.</li>
 <li><a href="https://www.1024cores.net/home/lock-free-algorithms/queues/bounded-mpmc-queue">Dmitry Vyukov's bounded queue</a> — basis of <code>core/spsc.hpp</code>.</li>
 <li><a href="https://github.com/louiskenzo/dye">dye</a> — colors for Graphviz output; <a href="https://github.com/WojciechMula/toys">Wojciech Muła's linux-perf-events</a> — perf counters; sfc64 from PractRand — <code>core/lrand.hpp</code>.</li>
-<li><a href="https://github.com/google/skywater-pdk">SkyWater SKY130</a> cells, <a href="https://github.com/The-OpenROAD-Project/OpenROAD-flow-scripts">OpenROAD-flow-scripts</a> platform files and the TAU 2015 timing-contest fixtures — hermetic test data.</li>
+<li><a href="https://github.com/google/skywater-pdk">SkyWater SKY130</a> cells, <a href="https://github.com/The-OpenROAD-Project/OpenROAD-flow-scripts">OpenROAD-flow-scripts</a> platform files and the TAU 2015 timing-contest fixtures — hermetic test data. The native SKY130HD power-grid profile follows the ORFS SKY130HD PDN, tapcell and track scripts.</li>
 <li><a href="https://www.contributor-covenant.org">Contributor Covenant</a> — the code of conduct.</li>
 </ul>
 
@@ -207,6 +207,8 @@ studied for ideas, without using their code, are under <a href="#tools-inspirati
 <ul class="tools">
 <li><a href="https://github.com/The-OpenROAD-Project/OpenSTA">OpenSTA</a> — Elmore plus ramp-driver timing conventions for the native timer.</li>
 <li><a href="https://github.com/The-OpenROAD-Project/OpenROAD">OpenROAD</a> gpl/rsz/mpl/pdngen — density grids, slack weighting, repair order and macro thresholds in the native placer.</li>
+<li><a href="https://github.com/The-OpenROAD-Project/OpenROAD">OpenROAD</a> cts — the control arm of every native clock tree comparison: sink clustering, delay-buffer useful skew and clock-gate cloning.</li>
+<li><a href="https://github.com/OSCC-Project/iEDA">iEDA</a> iCTS — bounded-skew merging, min/max delay per subtree and latency optimization by resizing, studied for the native clock tree.</li>
 <li><a href="https://github.com/The-OpenROAD-Project/RePlAce">RePlAce</a> and MLBuf-RePlAce — soft macros and virtual buffering.</li>
 <li><a href="https://github.com/cuhk-eda/Xplace">Xplace</a> — timing-driven placement weighting.</li>
 <li><a href="https://github.com/The-OpenROAD-Project/TritonRoute">TritonRoute</a> and <a href="https://github.com/cuhk-eda/cu-gr">CUGR</a> — routing handoff conventions.</li>
@@ -553,6 +555,14 @@ LiveHD exchanges site-aligned strips and gives both workers complementary row ex
 <li>S. Umeyama. <em>Least-Squares Estimation of Transformation Parameters Between Two Point Patterns.</em> IEEE TPAMI 13(4), 1991.<span class="use">Close idea: the pattern fit in <code>docs/placement_regularity.html</code>.</span></li>
 </ul>
 
+<h4>Clock network</h4>
+<ul class="refs">
+<li>D. Mangiras et al. <em>Soft-Clustering Driven Flip-flop Placement Targeting Clock-induced OCV.</em> ISPD 2020. <span class="todo-check" title="full author list and DOI not checked">todo-check</span><span class="use">Flops of one clock group pull each other during global placement, weighted by slack: the anchors of <code>synth.place.pcrs.cluster_strength</code> (<code>pass/place/forces/clock_cluster.cpp</code>).</span></li>
+<li>C. Deng, Y. Cai, Q. Zhou. <em>Register Clustering Methodology for Low Power Clock Tree Synthesis.</em> J. Computer Science and Technology 30(2), 2015. <span class="todo-check" title="volume, issue and DOI not checked">todo-check</span><span class="use">Leaf groups under radius, load and fanout limits behind the smallest driver that meets slew; the tree above sees only leaf drivers (<code>pass/place/pcrs/clock_tree.cpp</code>).</span></li>
+<li>W. Li et al. <em>iCTS: Iterative and Hierarchical Clock Tree Synthesis With Skew-Latency-Load Tree.</em> DAC 2024; IEEE TCAD 2025. <span class="todo-check" title="author list and DOIs not checked">todo-check</span> <a href="https://github.com/OSCC-Project/iEDA">code (iEDA)</a><span class="use">Close idea: level-by-level clustering on the variance of net load and delay, a cheap buffer model in slew and load, and a delay range per subtree. Studied for the tree builder of <code>todo/livehd/2p-pcrs.html</code>; no iEDA code is in LiveHD.</span></li>
+<li>A.B. Kahng, S. Kundu, S. Thumathy. <em>Scalable Flip-Flop Clustering Using Divide and Conquer for Capacitated K-Means.</em> GLSVLSI 2024. <span class="todo-check" title="DOI not checked">todo-check</span><span class="use">Close idea: size-capped hard assignment of flops to groups.</span></li>
+</ul>
+
 <h4>Cited by open plans (not implemented yet)</h4>
 <p class="note">Referenced from <code>todo/</code> plans such as <code>timing_closure_plan.md</code>, <code>2q-fasttimer</code> and <code>2t-timing_closure_plan</code>.</p>
 <ul class="refs compact">
@@ -580,6 +590,11 @@ LiveHD exchanges site-aligned strips and gives both workers complementary row ex
 <li>A. Sharma, C. Chu. <em>Rapid Gate Sizing with Fewer Iterations of Lagrangian Relaxation.</em> ICCAD 2017.</li>
 <li>P.-C. Wu, M.D.F. Wong, I. Nedelchev, S. Bhardwaj, V. Parkhe. <em>On Timing Closure: Buffer Insertion for Hold-Violation Removal.</em> DAC 2014.</li>
 <li>Y. Ji, Y. Lu, Z. Zhang, Z. Guo, Y. Lin, B. Yu. <em>DiffCCD: Differentiable Concurrent Clock and Data Optimization.</em> ICCAD 2025.</li>
+<li>N. Khan. <em>Clock Mesh Analysis and Optimization using Surrogate Models with Graph Neural Networks.</em> PhD thesis, UC Santa Cruz, 2026. <span class="todo-check" title="first name and thesis record not checked">todo-check</span><span class="use">The deferred mesh top of <code>todo/livehd/2p-pcrs.html</code>.</span></li>
+<li>W. Li et al. <em>A Method for Synthesizing Ultra-Large-Scale Clock Trees.</em> Algorithms, 2025. <span class="todo-check" title="author list, volume and DOI not checked">todo-check</span><span class="use">Neighbours from a sparse graph and a balanced split for a hard fanout limit.</span></li>
+<li>Choi et al. <em>Multisource Clock Tree Synthesis Through Sink Clustering and Fast Clock Latency Prediction.</em> ISCAS 2023. <span class="todo-check" title="abstract only; authors not checked">todo-check</span></li>
+<li>Cheng et al. <em>Cross-Mesh Clock Network Synthesis.</em> Electronics, 2023. <span class="todo-check" title="authors, volume and DOI not checked">todo-check</span></li>
+<li>Kwon, Park. <em>Shallow Clock Tree Pre-Estimation for Designing Clock Tree Synthesizable Verilog RTLs.</em> Electronics, 2023. <span class="todo-check" title="authors, volume and DOI not checked">todo-check</span><span class="use">Close idea: clock structure that will hurt is visible before placement (<code>synth.pcrs.clock_report</code>).</span></li>
 <li>A.B. Kahng et al. <em>Post-Placement Buffering and Sizing Contest.</em> ISPD 2026. <span class="todo-check" title="not checked">todo-check</span></li>
 <li>Y.-C. Lu et al. <em>2025 ICCAD CAD Contest Problem C: Simultaneous Gate Sizing, Buffering, and Cell Relocation.</em> <span class="todo-check" title="not checked">todo-check</span></li>
 <li>J. Liu et al. <em>CUGR: Detailed-Routability-Driven 3D Global Routing with Probabilistic Resource Model.</em> DAC 2020. <span class="todo-check" title="title and authors not checked">todo-check</span></li>

@@ -163,6 +163,57 @@ TEST_F(Technology_rc, DistanceUnitsNormalizePerLengthValues) {
   EXPECT_DOUBLE_EQ(rc.horizontal_r, 30000);
   EXPECT_DOUBLE_EQ(rc.horizontal_c, 200);
 }
+TEST_F(Technology_rc, ClockLayersReplaceThePlatformClockWireWithTheDirectionAveragedLayers) {
+  tech.routing_layers = {"M2", "M3", "M4", "M5", "M6"};
+  for (const char* name : {"M2", "M3", "M4", "M5", "M6"}) {
+    tech.layers[name].direction = (name[1] - '0') % 2 == 0 ? "HORIZONTAL" : "VERTICAL";
+  }
+  const auto file     = write("rc.tcl",
+                          "set_cmd_units -resistance ohm -capacitance ff\n"
+                              "set_layer_rc -layer M2 -resistance 30 -capacitance 180\n"
+                              "set_layer_rc -layer M3 -resistance 31 -capacitance 150\n"
+                              "set_layer_rc -layer M4 -resistance 18 -capacitance 190\n"
+                              "set_layer_rc -layer M5 -resistance 19 -capacitance 170\n"
+                              "set_layer_rc -layer M6 -resistance 12 -capacitance 176\n"
+                              "set_wire_rc -signal -resistance 32 -capacitance 173\n"
+                              "set_wire_rc -clock -resistance 51 -capacitance 144\n");
+  const auto platform = technology_net_wire_rc(tech, "", file);
+  EXPECT_DOUBLE_EQ(platform.clock.horizontal_r, 51);
+  // The empty specification keeps the platform value; the signal wire is never touched.
+  const auto same = technology_net_wire_rc(tech, "", file, -1, -1, 1, std::nullopt, "");
+  EXPECT_DOUBLE_EQ(same.clock.horizontal_c, 144);
+  const auto range = technology_net_wire_rc(tech, "", file, -1, -1, 1, std::nullopt, "M5-M6");
+  EXPECT_DOUBLE_EQ(range.clock.horizontal_r, 12);  // M6 is the only horizontal layer of the range
+  EXPECT_DOUBLE_EQ(range.clock.horizontal_c, 176 * .9);
+  EXPECT_DOUBLE_EQ(range.clock.vertical_r, 19);
+  EXPECT_DOUBLE_EQ(range.clock.vertical_c, 170 * .9);
+  EXPECT_DOUBLE_EQ(range.signal.horizontal_r, 32);
+  EXPECT_NE(range.clock.source.find("M5,M6"), std::string::npos);
+  const auto list = technology_net_wire_rc(tech, "", file, -1, -1, 1, std::nullopt, "M2,M4");
+  EXPECT_DOUBLE_EQ(list.clock.horizontal_r, (30 + 18) / 2.);
+  EXPECT_DOUBLE_EQ(list.clock.vertical_r, (30 + 18) / 2.);  // no vertical layer listed: the horizontal average
+  // auto: the two highest characterized layers.
+  const auto automatic = technology_net_wire_rc(tech, "", file, -1, -1, 1, std::nullopt, "auto");
+  EXPECT_DOUBLE_EQ(automatic.clock.horizontal_r, 12);
+  EXPECT_DOUBLE_EQ(automatic.clock.vertical_r, 19);
+  // Pessimism applies to the layered clock wire like to the platform one.
+  const auto pessimistic = technology_net_wire_rc(tech, "", file, -1, -1, 4, std::nullopt, "M5-M6");
+  EXPECT_DOUBLE_EQ(pessimistic.clock.horizontal_r, 24);
+  EXPECT_DOUBLE_EQ(pessimistic.clock.horizontal_c, 352 * .9);
+  // Errors name the layer.
+  EXPECT_THROW(technology_net_wire_rc(tech, "", file, -1, -1, 1, std::nullopt, "M9"), std::runtime_error);
+  EXPECT_THROW(technology_net_wire_rc(tech, "", file, -1, -1, 1, std::nullopt, "M2-M3-M4"), std::runtime_error);
+  for (const auto spec : {"M5,", "M5-", "M5,,M6"}) {
+    EXPECT_THROW(technology_net_wire_rc(tech, "", file, -1, -1, 1, std::nullopt, spec), std::runtime_error);
+  }
+  // An explicit wire RC wins over everything.
+  EXPECT_DOUBLE_EQ(technology_net_wire_rc(tech, "", file, 3, 4, 1, std::nullopt, "M5-M6").clock.horizontal_r, 3);
+  // Without set_layer_rc lines, auto leaves the platform clock RC alone.
+  const auto bare = write("bare.tcl",
+                          "set_cmd_units -resistance ohm -capacitance ff\nset_wire_rc -clock -resistance 51 -capacitance "
+                          "144\nset_wire_rc -signal -resistance 32 -capacitance 173\n");
+  EXPECT_DOUBLE_EQ(technology_net_wire_rc(tech, "", bare, -1, -1, 1, std::nullopt, "auto").clock.horizontal_r, 51);
+}
 TEST(Steiner_rc, NetsBeyondFluteDegreeAreTreesNotStars) {
   // 1500 sinks on a 1 um pitch line, driver at one end: a Steiner tree has
   // about 1500 um of wire; a star from the driver would have about 1.1 m.

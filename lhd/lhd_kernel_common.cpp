@@ -1566,9 +1566,9 @@ void check_known_set_passes(const Options& opts) {
                           ""};
         }
       }
-      if (opt->kind == Synth_set_option::Kind::boolean && value != "true" && value != "false" && value != "1" && value != "0"
+      if ((opt->kind == Synth_set_option::Kind::boolean || (flag == "place.pcrs.balance" && value != "verified")) && value != "true" && value != "false" && value != "1" && value != "0"
           && value != "on" && value != "off") {
-        throw Lhd_error{"usage", std::format("--set/--config synth.{} expects true|false, got '{}'", flag, value), ""};
+        throw Lhd_error{"usage", std::format("--set/--config synth.{} expects {}, got '{}'", flag, flag == "place.pcrs.balance" ? "true|false|verified" : "true|false", value), ""};
       }
       continue;
     }

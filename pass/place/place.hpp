@@ -2,6 +2,7 @@
 #pragma once
 #include <cstddef>
 #include <functional>
+#include <limits>
 #include <map>
 #include <memory>
 #include <optional>
@@ -32,8 +33,8 @@
 #include "macro_state.hpp"
 #include "multirow.hpp"
 #include "multirow_eco.hpp"
-#include "pass/place/pcrs/pcrs.hpp"
 #include "pass/place/gui/gui_policy.hpp"
+#include "pass/place/pcrs/pcrs.hpp"
 #include "placement_session.hpp"
 #include "power_grid.hpp"
 #include "prects_networks.hpp"
@@ -371,12 +372,22 @@ struct Options {
            clock_gate_clone_trials = 0, clock_gate_raise_trials = 0;
   bool                                             clock_source_fork        = false;
   bool                                             clock_balance            = false;
+  bool clock_balance_unverified = false;  // keep the balanced tree when no check can score it
   bool                                             clock_split_scheduled_leaves = false;  // Initial tree for a balanced manual schedule.
   bool                                             clock_incremental_trials = true;
   std::map<std::string, std::pair<std::optional<double>, double>> clock_arrival_targets{};  // insertion override and wanted arrival, ps
   unsigned                                         clock_leaf_fanout    = 24;
   double                                           clock_leaf_radius_um = 0;
   double                                           clock_max_slew_ps    = 0;  // transition target of planned clock stages; 0: library limit
+  // Routing layers whose RC (averaged by direction) replaces the platform's clock wire RC: "auto", "M6-M7", "M4,M6" or
+  // empty for the platform value. Read only with the native clock tree on; see technology_net_wire_rc.
+  std::string                    clock_layers            = "auto";
+  // Faster drivers for the stages above the leaves, as many as help (the stage is few cells and every sink below it
+  // shares its delay). 0 keeps the smallest legal driver there.
+  unsigned                       clock_trunk_drive_steps = std::numeric_limits<unsigned>::max();
+  [[nodiscard]] std::string_view clock_rc_layers() const {
+    return clock_tree ? std::string_view(clock_layers) : std::string_view{};
+  }
   std::array<double, 2>                    clock_leaf_rc_scale{1, 1}, clock_trunk_rc_scale{1, 1};  // resistance, capacitance
   double                                   clock_skew_period_fraction = 0.05;
   std::optional<double>                    clock_skew_hold_margin_ps;

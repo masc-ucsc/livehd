@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TODO 2p-pcrs-review — PCRS clock tree: review, limits and plan (2026-11-22)</title>
+<link rel="stylesheet" href="../todo.css">
+</head>
+<body>
+<nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
+<main>
+<h1><strong class="item-id">2p-pcrs-review</strong> PCRS clock tree: review, limits and plan</h1>
+<p><span class="status">Review of 2026-11-22 of the native clock tree and power grid
+(<a href="2p-pcrs.html">2p-pcrs</a>). Five fixes and one option were applied in the work tree and tested; the
+rest is pending work, listed in <a href="2p-pcrs.html#next">2p-pcrs</a>. The <a href="#a-track">Track A measurements</a> cover subsequent builder changes.</span></p>
+
+<p>The short version: the plumbing works end to end and the tree is small and cheap, but it is not a balanced
+tree and it is under-driven, and the way results are measured cannot yet tell a good tree from a lucky run.
+The pending work fixes the measurement first, then the wire model, then balance and drive.</p>
+
+<h2 id="done">What changed in this pass</h2>
+<ul>
+<li><strong>Abort on retained pins.</strong> The leaf fanout option was also applied to pins the existing clock
+source keeps (discrete gate forks). A source with more of them than <code>leaf_fanout</code> made the build
+fail with "no legal clock driver". The option now bounds planned stages only
+(<code>pass/place/pcrs/clock_tree.cpp</code>, test <code>RetainedSourcePinsDoNotCountAgainstTheLeafFanout</code>).</li>
+<li><strong>Abort on a third build in one workdir.</strong> A fresh buffer name is a hash of its members and a
+retained name stays with the branch that kept most of its old members, so after a regrouping the two can be
+equal. The build stopped with "clock instance name already in use". It now takes the next free name
+(<code>pass/place/clock_network.cpp</code>, <code>assign_clock_names</code>). No test yet: it needs three
+generations.</li>
+<li><strong>Stale placement after a new RC fit.</strong> The content of <code>synth.place.pcrs.clock_rc_fit</code>
+was not an input of the physical cache, only its path (<code>lhd/lhd_kernel_synth.cpp</code>, both lists).</li>
+<li><strong>Small ones.</strong> The help text of <code>skew_hold_margin_ps</code> said 4 ps where the code uses
+29 ps. <code>tools/clock_rc_fit</code> ended on a bare <code>map::at</code> for a tree without trunk stages.</li>
+<li><strong>New option <code>synth.place.pcrs.max_slew_ps</code></strong> (default 0, no change): a bound on the
+transition a planned stage delivers. It exists to measure limit L3 below, and it is a strict no-op when it does
+not bind (minimax at 80 ps is identical to the default run).</li>
+<li><strong>Clock view in the GUI and on the agent socket.</strong> See <a href="#gui">the last section</a>.</li>
+</ul>
+<p>Tests: <code>bazel test --config=backend //pass/place/... //tools/... //pass/timing/...
+//lhd:lhd_options_test //lhd/tests:lhd_placement_pcrs_smoke</code>. The first pass of this review saw four timeouts in
+<code>//pass/place/tests/regularity</code> (<code>mesh_4x4</code>, <code>mesh_6x6</code>, <code>ring_32</code>,
+<code>hierarchy_4x4</code>) at a machine load of 60 to 80. Run again with the machine quiet they pass in 60 to 250 s of the
+300 s limit (<code>ring_32</code> 251 s), so the timeouts were load, and that test is close to the limit.</p>
+
+<h2 id="results">What the existing results say</h2>
+<p>From <code>/lscratch/renau/review_runs/pcrs-clock-20261119</code>, read on 2026-11-22. Same frozen
+placement for both trees, pinned OpenROAD, CTS repair on, slack after final extraction, in ps. All rows are
+DRC clean.</p>
+<table>
+<tr><th>Design (clock pins)</th><th>Tree</th><th>Clock buffers (µm²)</th><th>Setup WNS</th><th>Hold WNS</th><th>Skew setup / hold</th><th>Hold buffers</th></tr>
+<tr><td rowspan="2">minimax (2,263)</td><td>OpenROAD</td><td>221 (65.3)</td><td>−34.7</td><td>+35.7</td><td>27.4 / 32.7</td><td>0</td></tr>
+<tr><td>PCRS</td><td>137 (10.0)</td><td>−31.0</td><td>+37.3</td><td>14.7 / 20.0</td><td>0</td></tr>
+<tr><td rowspan="2">sha3 (1,697)</td><td>OpenROAD</td><td>176 (50.0)</td><td>+243.2</td><td>+10.9</td><td>18.6 / 22.9</td><td>277</td></tr>
+<tr><td>PCRS</td><td>137</td><td>+268.4</td><td>−9.1 (13 fail)</td><td>33.6 / 36.4</td><td>544</td></tr>
+<tr><td rowspan="2">litedram (4,474)</td><td>OpenROAD</td><td>446 (129.9)</td><td>+204.3</td><td>+27.1</td><td>21.6 / 25.9</td><td>0</td></tr>
+<tr><td>PCRS</td><td>276</td><td>+167.9</td><td>+24.2</td><td>16.2 / 20.1</td><td>0</td></tr>
+<tr><td rowspan="2">liteeth (3,399)</td><td>OpenROAD</td><td>785 (269.6)</td><td>+173.9</td><td>+16.4</td><td>122.7 / 127.8</td><td>6,716</td></tr>
+<tr><td>PCRS</td><td>304</td><td>+45.1</td><td>+7.6</td><td>130.8 / 154.2</td><td>5,527</td></tr>
+<tr><td rowspan="2">coralnpu (10,108), repair off</td><td>OpenROAD</td><td>1,459 (423.0)</td><td>−568.4</td><td>−196.1</td><td>255.5 / 238.1</td><td>0</td></tr>
+<tr><td>PCRS</td><td>702 (51.5)</td><td>−890.4</td><td>−372.5</td><td>574.6 / 594.2</td><td>0</td></tr>
+</table>
+<ul>
+<li><strong>Where PCRS is ahead:</strong> clock cell area (6 to 8 times less), clock wire and capacitance (3% less
+on minimax, about 25% less on liteeth), and routability of the hold-buffer chains on coralnpu.</li>
+<li><strong>Where it is behind:</strong> coralnpu by 320 to 480 ps of setup in every setting, liteeth by 129 ps,
+sha3 in hold. On coralnpu the cause is measured: the two gated domains are 467 ps apart (32 ps with OpenROAD),
+and the path from the first gate to the second takes 369 ps through five buffers (80 ps through three, because
+OpenROAD clones the gate). A cross experiment put the PCRS tree on OpenROAD's placement and the loss followed
+the tree.</li>
+<li><strong>What the table cannot say.</strong> NVDLA/partition_c and litepci have no OpenROAD arm (their rows
+compare PCRS with and without anchors). The two trials of each row are bit-identical, so there is no spread.
+The "useful skew" control annotated zero registers. The sky130 lfsr control changed between runs (other DEF
+and utilization): against the earlier control the lead is 14 ps, not 192 ps. The sha3 setup lead is paid with
+the hold failure: with hold cells both close and OpenROAD leads by 9 ps.</li>
+</ul>
+
+<h2 id="swap">The coralnpu tree swap</h2>
+<p>Run by the implementation session on 2026-11-22 to separate the tree from the placement. 3,000 ps clock,
+worst slack in ps, same router and SDC in both arms, incremental timing repair off. Directories are under
+<code>/lscratch/renau/review_runs/pcrs-clock-20261119/s1-fair</code>.</p>
+<table>
+<tr><th>What is held fixed</th><th>Stage</th><th>OpenROAD tree</th><th>PCRS tree</th></tr>
+<tr><td>OpenROAD's fresh post-CTS placement, all 197,928 other cells frozen
+(<code>coral-openroad-only-placement-declone-cross</code>)</td><td>Global route</td>
+<td>−435.3 / +8.6, hold skew 187.9</td><td>−511.1 / −247.1, hold skew 376.3, 697 failing hold endpoints</td></tr>
+<tr><td>OpenROAD's repaired checkpoint with its 31,451 hold buffers and every data net
+(<code>coral-postcts-placement-cross</code>)</td><td>Global route</td><td>−307 / −86</td><td>−803 / −662</td></tr>
+<tr><td>The same, with the extracted data parasitics of 197,771 nets frozen and only the clock parasitics
+swapped</td><td>Global-route clock</td><td>−320 / −83</td><td>−811 / −660</td></tr>
+<tr><td>OpenROAD's final layout with all wires stripped
+(<code>coral-openroad-routed-placement-declone-cross</code>)</td><td>Detailed route and extraction, no DRC
+violations</td><td>−318.8 / +20.5</td><td>−364.7 / −189.4</td></tr>
+</table>
+<ul>
+<li><strong>The loss follows the tree.</strong> With the data side frozen, the tree alone costs about 490 ps of
+setup and 580 ps of hold at global route. After detailed routing on OpenROAD's own layout it is 46 ps of setup
+and 210 ps of hold. The worst hold check there is in the asynchronous group; the worst synchronous hold is
++7.0 ps.</li>
+<li><strong>One path shows why.</strong> From <code>dm.data0[2]</code> to
+<code>core.score.fRegfile.fregfile_31_mantissa[2]</code>, hold went from +329 to −660 ps. The native launch
+clock arrives at 339 ps and the capture clock at 1,174 ps; OpenROAD's arrive at 877 and 724 ps. OpenROAD's
+launch branch passes through 29 delay buffers worth 490 ps. The native tree has no delay on that branch.</li>
+<li><strong>A build failure.</strong> PCRS could not build with OpenROAD's clock-gate clone in place: the clone
+is 498 µm from the original gate and PCRS reported no legal common leaf for the gate fork. The runs above
+removed the clone (same clock and enable nets, verified) and PCRS then built 693 buffers.</li>
+</ul>
+
+<h2 id="limits">Limits of the current PCRS</h2>
+<p>Ordered by how much they limit the result. "Measured here" means a short run of this pass, with the frozen
+binary and scripts in <code>/lscratch/renau/domplace_runs/pcrs_gui</code>.</p>
+
+<h3 id="L1">L1 — The result of a run is mostly noise</h3>
+<p>Measured here on minimax. Eight full <code>lhd synth</code> runs that differ only in the transition target,
+which resizes 0 to 9 of the 137 clock buffers:</p>
+<table>
+<tr><th>Target (ps)</th><th>Buffers changed</th><th>Clock arrival on the same placement (ps)</th><th>Skew there</th><th>Final setup WNS / TNS in <code>lhd</code></th></tr>
+<tr><td>none, 80</td><td>0</td><td>136.7 to 147.1</td><td>10.4</td><td>−43.9 / −2,960</td></tr>
+<tr><td>70, 65</td><td>1</td><td>123.3 to 136.6</td><td>13.2</td><td>−30.0 / −1,091</td></tr>
+<tr><td>60</td><td>2</td><td>116.7 to 135.5</td><td>18.8</td><td>−142.5 / −70,077</td></tr>
+<tr><td>55</td><td>9</td><td>113.2 to 125.7</td><td>12.6</td><td>−93.2 / −20,076</td></tr>
+<tr><td>50</td><td>9</td><td>113.3 to 125.6</td><td>12.3</td><td>−120.3 / −66,768</td></tr>
+<tr><td>45</td><td>9</td><td>107.2 to 120.1</td><td>13.0</td><td>−43.9 / −2,031</td></tr>
+</table>
+<p>The tree changes smoothly. The flow result moves by 110 ps with no trend. On the identical placement
+(the DEF right after the tree is built, timed with <code>tools/clock_timing_report</code>) the worst slack of
+the six trees differs by about 11 ps. So the swing comes from what runs after the tree: the repair loop
+starts from −387 to −819 ps and ends anywhere between −28 and −135 ps. The timing-driven placement round after
+the tree runs 100 steps, stops unconverged and is rejected in every run. A lead of 3.7 ps on minimax is far
+inside this spread, and the routed repeats carry no spread at all because they repeat the same inputs.</p>
+
+<h3 id="L2">L2 — The tree is not balanced</h3>
+<p>With the default options nothing compares arrivals. Measured here on liteeth (<code>sys_clock</code>, 2,976
+pins): every leaf is five stages deep, but one stage costs between 19 and 209 ps, and the estimated arrivals run
+from 451 to 796 ps. Chunk homes and gated domains are collapsed on their own and meet at different depths; a
+macro pin is a leaf of one. <code>balance=true</code> pads early arms, but it is off by default, it does not
+run at a source fork, it is skipped for a design with an inverted clock at a register (NVDLA), and on coralnpu
+its guards rejected every candidate. There is no gate cloning, which is what the coralnpu loss needs.</p>
+
+<h3 id="L3">L3 — Stages are under-driven and the wire model is not the router's</h3>
+<p>The planner takes the smallest buffer that is legal, and the only transition bound is the library limit
+(320 ps here). From the existing hand-offs, estimated transition of trunk stages, median / 90th percentile /
+largest:</p>
+<table>
+<tr><th>Design</th><th>Trunk transition (ps)</th><th>Smallest buffer share</th><th>Estimated insertion of the largest net (ps)</th></tr>
+<tr><td>minimax</td><td>59 / 64 / 72</td><td>137 of 137</td><td>121 to 132</td></tr>
+<tr><td>coralnpu</td><td>92 / 184 / 320</td><td>691 of 693</td><td>332 to 491</td></tr>
+<tr><td>litepci</td><td>89 / 291 / 320</td><td>1,177 of 1,188</td><td>734 to 1,238</td></tr>
+<tr><td>liteeth (default run of this pass)</td><td>193 / 271 / 318</td><td>218 of 221</td><td>451 to 796</td></tr>
+<tr><td>NVDLA/partition_c</td><td>249 / 307 / 320</td><td>5,364 of about 5,800</td><td>2,118 to 2,810</td></tr>
+</table>
+<p>A trunk stage at the limit costs 150 to 230 ps where a healthy one costs 30 to 60 ps. The low clock area in
+the results table is the other side of this. Measured here on liteeth with <code>max_slew_ps=80</code>: trunk
+transition drops to 65 / 75 / 79 ps and estimated skew from 345 to 280 ps, but the planner meets the target
+with chains of the smallest buffer, 9 to 13 stages deep, and the insertion stays at 467 to 747 ps. The reason
+is the wire: the planner uses one platform clock RC, and at that resistance a long arm is slow whatever drives
+it. The router puts the trunk on upper layers with a wider rule, so the estimate is far off: 219 ps mean error
+on coralnpu, and 3,493 ps estimated against 1,418 ps extracted on 25 single-load stages of NVDLA. A fit made on
+one design made another worse. Even on minimax, at the same placement, the planner's arrivals are 10 to 16 ps
+early against the timer, which is more than the 11 ps of skew it reports.</p>
+
+<h3 id="L4">L4 — Topology: bisection by count, long paths, half-full leaves</h3>
+<ul>
+<li>Groups are halved by count until one fits, so leaves end near half the limit when the count falls just
+above a power of two. Leaves built against leaves needed at 24 per leaf: minimax 128 / 95, liteeth 178 / 142,
+coralnpu 643 / 419, litepci 1,068 / 544, NVDLA/partition_c 3,708 / 2,231 (455 of them under 6 pins).</li>
+<li>Each driver sits at the middle of the box of its loads, without looking at blockages or macros. On the
+latest liteeth path the four trunk arms add up to 646 µm.</li>
+<li>On NVDLA/partition_c 1,579 of 2,138 trunk buffers have one child: repeater chains.</li>
+<li>An electrical failure of a full group is cut at the widest gap in one direction, which gives uneven leaves;
+and one discrete gate fork anywhere on the net switches the outlier rule off for the whole net.</li>
+</ul>
+
+<h3 id="L5">L5 — Hold</h3>
+<p>The native tree starts with worse hold on sha3 and needs twice the hold buffers. NVDLA/partition_c ends with
+65,073 hold buffers and litepci with 28,289. Inside <code>lhd</code> the liteeth run above ends at −644 ps of
+hold, left to the downstream repair. The native hold repair has three acceptance problems found by reading
+(not measured): an edit is rejected when an untouched endpoint inside the 29 ps reserve moves by a fraction of a
+picosecond (<code>clock_schedule.cpp:1101</code>, <code>clock_bounds.cpp:224</code>); a net is given up when
+one of its failing loads has no setup room (<code>clock_hold.cpp:177</code>); and the rejected list is cleared
+after every accepted buffer, so the same candidates are timed again (<code>clock_schedule.cpp:1178</code>).</p>
+
+<h3 id="L6">L6 — One bad domain or input stops the whole run</h3>
+<ul>
+<li>An infeasible domain throws out of the planner with no catch, also for a net where PCRS would insert
+nothing (<code>clock_network.cpp:1099</code>, <code>clock_tree.cpp:367</code>). NVDLA/partition_c has 556 clock
+nets.</li>
+<li>The final tree build runs outside the try block and log redirect of the first one
+(<code>lhd_kernel_synth.cpp:5167</code>).</li>
+<li>With the tree on, the power grid turns on by itself; a floorplan DEF that already has a grid fails in final
+legalization with "the optimized netlist is too dense for the fixed core"
+(<code>lhd_kernel_synth.cpp:2948</code>, <code>:5193</code>).</li>
+<li>Clock pins on a net that was demoted to data are in no report (<code>prects_networks.cpp:340</code>).</li>
+<li>An unsupported SDC command switches every gate search off and the report shows empty lists without a reason
+(<code>clock_network.cpp:1163</code>, <code>:1218</code>, <code>:1410</code>).</li>
+</ul>
+
+<h3 id="L7">L7 — Timing engine</h3>
+<ul>
+<li>A register behind a clock inverter is checked against the full period: optimistic by half a period. It is
+reported as unsupported, not fixed (<code>pass/timing/engine.cpp:910</code>). The fixture that expects 510 ps
+(<code>pass/timing/tests/clock_phase</code>) is in no BUILD file.</li>
+<li>After a clock edit in a trial, the enable check of an integrated gate keeps the old clock arrival
+(<code>engine.cpp:864</code>). This affects exactly the skew and gate trials.</li>
+<li>A divider behind a divider without <code>-master_clock</code> throws under a propagated clock
+(<code>engine.cpp:791</code>, <code>sdc.cpp:650</code>).</li>
+<li>Hold ignores <code>set_clock_uncertainty</code> (<code>engine.cpp:1962</code>). No cohort SDC uses it.</li>
+<li>Median error against OpenSTA on the same wires: 45 ps on coralnpu, 33 ps on NVDLA, 26 ps on litepci.</li>
+</ul>
+
+<h3 id="L8">L8 — Cost</h3>
+<p>31 pins take 3.2 s in <code>pass.pcrs.clock</code>. NVDLA plans in 95 s and one balance attempt takes 677 s.
+The litepci schedule search ran 77 trials in 2,165 s. A skew round has no trial budget
+(<code>clock_schedule.cpp:733</code>), every trial copies the floorplan and rebuilds name-keyed maps of every
+pin, and a journal trial pays two full hold evaluations (<code>engine.cpp:2488</code>). The grouping cache is
+dropped when fields that do not affect grouping change (<code>clock_tree.cpp:141</code>).</p>
+
+<h3 id="L9">L9 — Placement around the tree</h3>
+<p>The largest move in the downstream legalization is 60 µm on liteeth and 91 µm on coralnpu with the native
+tree, against about 2 µm with OpenROAD's; the hand-off keeps the estimates of the planned positions and does
+not record how far a buffer moved. Tree buffers ignore <code>synth.place.resize.dont_use</code>
+(<code>clock_network.cpp:422</code>). The placement anchors stay off by default: they made NVDLA and coralnpu
+worse.</p>
+
+<h3 id="L10">L10 — Power grid</h3>
+<p>By reading, not run. A via at a crossing where the strap or the rail ends inside the other's width is sized
+for a full crossing and can overhang (<code>power_grid_export.cpp:277</code>); it can happen at the core edge,
+at a macro halo and with a small JSON offset. JSON overrides are checked only for sign and pitch, not against
+the manufacturing grid or the layer's width and spacing, and the remaining errors appear in final legalization
+(<code>power_grid_profiles.cpp:94</code>). The routing-capacity model takes nothing off for via landings that
+run across a layer (<code>legroute_grid.cpp:432</code>). The grid is rebuilt and copied on every routing-plan
+call (<code>place.cpp:13036</code>; 312,336 vias on liteeth). The first clock legalization budgets the
+reference grid, not the tuned one (<code>place.cpp:13074</code>).</p>
+
+<h3 id="L11">L11 — Clock gates</h3>
+<p>By reading: a gate trial lists the gate's test pin as a control that must have a timing check, and a pin
+tied to a constant has none, so merge, leaf, raise and clone would all be rejected as "missing_gate_checks" on
+a gate cell with a tied scan enable (<code>clock_schedule.cpp:281</code>, <code>:970</code>). This matters now
+that the asap7 integrated gates are allowed. It needs a fixture before a fix. An enable flop with an
+asynchronous reset is not recognized as part of a gate (<code>clock_gate.cpp:42</code>). No test runs
+<code>lhd lec</code> on a merged or cloned gate.</p>
+
+<h2 id="a1">A1 — the fixed-topology experiment (2026-11-22)</h2>
+<p>Same coralnpu tree, same OpenROAD post-CTS placement, same 31,451 hold buffers and data nets as the swap above. Only the
+clock cells change, then the flow's own global route runs and the design is timed with its estimate. The base
+reproduces the swap's global-route number to four digits (−802.79 / −661.62). OpenROAD's own tree on the same
+placement is −307 / −86. Latencies are the median late arrival of each clock domain: the root flops, the debug
+module behind the first gate (dm, 77 flops), the domain under the cloned gate (C, 2,371) and the domain under the
+second gate (G, 7,651).</p>
+<table>
+<tr><th>Change to the tree</th><th>Setup WNS / TNS</th><th>Hold WNS / TNS (failing)</th><th>Async hold WNS (failing)</th><th>Latency root / dm / C / G (ps)</th></tr>
+<tr><td>none (base)</td><td>−802.8 / −261,896</td><td>−661.6 / −803,325 (4,237)</td><td>−25.7 (6)</td><td>219 / 349 / 644 / 1,197</td></tr>
+<tr><td>56 trunk buffers, +3 drive steps</td><td>−484.9 / −145,485</td><td>−392.6 / −195,092 (1,486)</td><td>−43.8 (9)</td><td>203 / 309 / 523 / 882</td></tr>
+<tr><td>48-stage delay chains on dm and C only</td><td>−816.5 / −268,077</td><td>−643.5 / −261,927 (1,376)</td><td>−445.0 (30)</td><td>220 / 1,165 / 1,176 / 1,210</td></tr>
+<tr><td>trunk +3 and delay chains to level the domains</td><td>−493.0 / −148,156</td><td>−353.7 / −71,232 (719)</td><td>−264.3 (29)</td><td>203 / 875 / 872 / 888</td></tr>
+<tr><td>trunk +5, chains 26 and 15</td><td>−434.0 / −128,823</td><td>−242.3 / −33,784 (575)</td><td>−178.0 (26)</td><td>202 / 761 / 759 / 828</td></tr>
+<tr><td>trunk +5, chains 30 and 19</td><td>−430.0 / −127,551</td><td>−313.3 / −52,374 (647)</td><td>−245.6 (19)</td><td>202 / 832 / 829 / 828</td></tr>
+</table>
+<ul>
+<li><strong>Sizing alone is most of the setup gain.</strong> Fifty-six cells recover 315 ps of latency in G, 318 ps of setup
+WNS and 269 ps of hold WNS. In the placement-RC sweeps upsizing only the leaves did nothing, and upsizing every trunk buffer
+by nine steps was worse than by five: a larger buffer loads its driver.</li>
+<li><strong>Delay alone fixes hold between domains and nothing else.</strong> It cannot help the setup of G to the ports,
+which is set by G's absolute latency, and it moves the hold problem to the asynchronous recovery and removal checks
+(−26 ps to −445 ps). Delay placed before the gate instead of after it broke the gating hold by −1,000 ps in the
+placement-RC runs, so chains go after the gate.</li>
+<li><strong>Both together</strong> take hold TNS from −803k to −34k (−96%), failing hold endpoints from 4,237 to 575 and
+setup WNS from −803 to −434 ps. The remaining failures are the 327 dm-to-port setup paths (the domains now arrive at
+0.8 ns against zero-latency ports) and the asynchronous checks, which a delay on a flop domain makes worse. The three
+domains line up to 4 ps in the last row.</li>
+<li><strong>Measurement caution.</strong> Incremental global routing after an edit (<code>global_route -start_incremental</code>) is
+not usable here: swapping 645 buffers to another master and back, which changes nothing, moved the latest arrival
+from 1,197 to 386 ps. Each row above is a full <code>do-5_1_grt</code> of the edited <code>4_cts.odb</code>.</li>
+<li><strong>Placement RC overstates all of it.</strong> The same sweeps with the platform's clock wire RC give a G latency
+of 1,617 ps and a sizing gain of only 190 ps (<a href="#L3">L3</a>), which is why the planner's wire model was changed first.</li>
+</ul>
+<p>What this decided: trunk drive by default (A6), a clock wire RC from the routed layers (A2), and balancing by
+arrival band with a skew bound (A4). The numbers of the code that followed are in the next section.</p>
+
+<h2 id="a-track">What the A-track code changed, measured</h2>
+<p>Measured with <code>tools/clock_probe</code> (builds the tree on a placed DEF in
+4 s on coralnpu) and <code>tools/clock_timing_report</code> with the layer RC, which reproduces the routed domain latencies
+to within 5%, and with full <code>lhd synth</code> runs of minimax and liteeth against the earlier default-option runs.</p>
+<table>
+<tr><th>Step</th><th>coralnpu (LiveHD placement): clock buffers</th><th>latest domain G (ps)</th><th>C (ps)</th></tr>
+<tr><td>before, platform RC</td><td>702</td><td>1,802</td><td>1,056</td></tr>
+<tr><td>before, timed with layer RC</td><td>702</td><td>1,167</td><td>609</td></tr>
+<tr><td>A2: planner uses the layer RC</td><td>691</td><td>1,264</td><td>663</td></tr>
+<tr><td>A6 trunk drivers (as many steps as help) and A7 leaf fill</td><td>450</td><td>942</td><td>541</td></tr>
+<tr><td>A4: merge by arrival band, balance (default), and the 10% lower capacitance of A2</td><td>512</td><td>694</td><td>637, 57 ps from G</td></tr>
+</table>
+<ul>
+<li><strong>minimax</strong> (default options, whole flow): clock buffers 137 → 100 and insertion 121–132 → 77–82 ps (skew 11 → 6 ps). The
+flow's own setup WNS is not a result of the tree: the same tree settings gave +18.7 ps in one build and −62.6 ps in the next, against
+−43.9 ps at the start, because the repair after the tree starts from hundreds of picoseconds apart (L1).</li>
+<li><strong>liteeth</strong>: clock buffers 221 → 186, the main net's insertion 451–796 → 199–481 ps (skew 345 → 281 ps), hold WNS −643 → −168 ps; setup WNS −260 →
++63 ps in the last build and +150 ps in the one before (same caveat). Balancing is rejected there by the clock-offset bound and the nominal
+tree is kept.</li>
+<li><strong>coralnpu with the timer in the loop</strong>: balancing is accepted as <code>accepted_unverified</code>. Before this
+change the scheduler skipped it on every gated design because the engine cannot score a gate without a gating check or a
+register behind a clock inverter.</li>
+<li><strong>NVDLA/partition_c</strong> (53,529 clock pins, 623 clock nets), tree only, timed with the layer RC: planning takes 7 s
+(20 s with timing), against 95 s. Old settings: 5,095 clock buffers, latency 1,216–3,395 ps, global skew 2,198 ps, 30,981 hold-failing
+endpoints. New settings without balancing: 3,966 buffers, skew 1,990 ps, 25,301 failing. With balancing: 7,506 buffers, latency 2,166–2,460 ps,
+skew 425 ps, 4,740 failing. The worst output-port setup is 220 ps worse than without balancing, because every flop now arrives with the
+late domain: the balance target is the latest effective arrival.</li>
+<li><strong>Wire model.</strong> Against the global-route estimate of the 10,105 sinks of the OpenROAD-placed coralnpu tree, the mean error of
+the latest arrival is 428 ps with the platform clock RC, 135 ps with the M4–M7 average, 62 ps with M6–M7, 9 ps with M6–M7 and 10% less capacitance.
+The planner against the timer on the same model: 2.3 ps mean shape error (it was 20 ps with the old model under the layer-RC timer).</li>
+<li><strong>The 498 µm gate fork</strong> of the OpenROAD-only placement (<code>no legal common clock leaf for discrete gate fork _3723_:B</code>) builds
+with the layer RC (442 buffers) and stays infeasible with the platform RC even with the new site search.</li>
+<li><strong>Re-timing stages at the propagated transition</strong> (tried, removed): leaf stages 8 ps slower and trunk stages 0 to 25 ps slower than at
+the reference transition, but using them in the arrivals moved the planner away from the timer (shape error 2.3 → 4.6 ps).</li>
+<li><strong>Not yet measured:</strong> a routed result of the new coralnpu tree. The probe tree is on LiveHD's placement, the
+global-route sweeps above are on OpenROAD's.</li>
+</ul>
+
+<h2 id="plan">Plan</h2>
+<p>The work that answers these limits is in <a href="2p-pcrs.html#next">2p-pcrs</a>, rewritten on 2026-11-22
+into three tracks: the tree builder (A1 to A8: one wire model, a delay interval per subtree, a merge at the
+balance point, propagated transition and sizing, leaf fill), per-chunk subtrees joined at the top (H1 to H5),
+and a common centroid helper that replaces the anchors (G1 to G5). The measurement step P0 comes first, and the
+robustness, timing-engine and gate fixes (P4, P5, P7) do not wait.</p>
+
+<h2 id="runs">The comparison runs</h2>
+<p>On 2026-11-22 at 08:21, 24 OpenROAD processes of the comparison were running. Several detailed routes had
+not converged after more than a day: the unmodified coralnpu control (iteration 29, about 31,000 violations),
+the two <code>gate-</code> routes of <code>s6/coral-grt-overflow</code> (1.3 and 1.7 million violations after
+6 hours), and two NVDLA global routes still in timing repair after 30 hours. This pass did not stop any of
+them. By 09:27 none was running: they ended at about 09:00, when the session that owned them restarted. The
+rows of <a href="2p-pcrs.html">2p-pcrs</a> that waited for them (the unmodified coralnpu control, the
+newer-build control, the matched S2 arm) are therefore still open and need a new launch, preferably after P0.</p>
+<p>The disk reached 100% at about 08:30. Results older than three days were pruned to their small files
+(1.37 TB freed); the frozen placement campaign the comparison reads was not touched.</p>
+
+<h2 id="gui">Looking at the tree</h2>
+<p>Under <code>lhd synth --gui</code> with <code>synth.place.pcrs.clock=true</code>, every scene after the
+tree build carries the tree by node (<code>Scene::clock_nets</code>, filled in <code>gui_scene</code>, with the
+hand-off's estimates). The code is <code>pass/place/gui/gui_clock.{hpp,cpp}</code> with
+<code>gui_clock_test.cpp</code>.</p>
+<ul>
+<li><strong>Page:</strong> a <em>clock tree</em> layer with four views: stage depth, sink arrival, leaf slew and
+a grid of local skew.</li>
+<li><strong>Agent:</strong> <code>clock</code> (<code>summary</code>, <code>nets</code>, <code>sinks</code>,
+<code>pair</code>, <code>map</code>) and <code>screenshot layers=...,clock</code>.</li>
+<li><strong>Decisions:</strong> <code>clock_edit</code> stages leaf drive steps, wanted arrivals and the scalar
+options, and <code>op=apply</code> restarts the flow with them. Checked on lfsr: staging
+<code>leaf_fanout=8</code> and step 2 on one leaf gave four leaves of eight and a larger buffer on that leaf
+after the restart.</li>
+</ul>
+<p>Not done: there is no browser on the test machine, so the page layer was checked by a syntax pass and by
+running its drawing code against the live replies with a stub canvas, not by eye. The numbers shown are the
+planner's estimates, which L3 says are 10 to 16 ps off on minimax and far more on larger designs; the next
+step is to send the timer's per-pin arrivals with the scene. A decision costs a full restart; a gate right
+after the tree build would let an agent try one without re-placing. Routed clock wires are not drawn.</p>
+
+<h2>Related</h2>
+<ul>
+<li><a href="2p-pcrs.html">2p-pcrs</a> — the plan, the implementation review of 2026-11-20 and the subtask status</li>
+<li><a href="2q-fasttimer.html">2q-fasttimer</a> — the timing engine</li>
+<li><code>pass/place/pcrs/README.md</code>, <code>.agents/skills/livehd/agent_socket.md</code></li>
+</ul>
+</main>
+</body>
+</html>

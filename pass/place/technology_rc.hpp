@@ -1,10 +1,10 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
-#include <span>
-#include <optional>
 #include <array>
 #include <map>
 #include <optional>
+#include <set>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -30,6 +30,7 @@ struct Layer_rc {
 };
 struct Route_technology_rc {
   std::map<std::string, Layer_rc> layers;
+  std::set<std::string>           characterized;  // layers the RC file itself names with set_layer_rc
   std::map<std::string, double>   cut_resistance_ohm;
   std::map<std::string, double>   via_resistance_ohm;
   std::string                     source;
@@ -49,9 +50,15 @@ struct Net_wire_rc {
   Wire_rc signal, clock;
 };
 // A clock-specific set_wire_rc overrides the common estimate on clock nets.
+// clock_layers replaces the clock RC by the layer RC of the layers the clock is routed on, averaged by direction:
+// "M6-M7" (a range in routing order), "M4,M6" (a list), or "auto" (the two highest routing layers the RC file
+// characterizes with set_layer_rc; nothing changes when it has none). Empty keeps the clock wire RC of the file.
+// The platform's set_wire_rc -clock is a pessimistic average: on ASAP7 it is about 3.5 times the resistance of the
+// layers that carry the long clock arms (M6 and M7), which overestimates a 600 um arm by about 100 ps. The layered
+// capacitance is 10% below the layer tables: the double-spaced rule the hand-off routes the trunks with.
 Net_wire_rc technology_net_wire_rc(const physical::Technology& tech, const std::string& liberty, const std::string& rc_file,
                                    double resistance = -1, double capacitance = -1, double rc_pessimism = 1,
-                                   std::optional<std::string_view> liberty_text = std::nullopt);
+                                   std::optional<std::string_view> liberty_text = std::nullopt, std::string_view clock_layers = {});
 // Driver-aware clock/signal RC for a mapped physical timing checkpoint.
 physical::Parasitics estimate_floorplan_rc(const physical::Floorplan&, const physical::Technology&, const Net_wire_rc&);
 // Optional per-driver calibration for the native leaf and trunk wires in a placement trial.

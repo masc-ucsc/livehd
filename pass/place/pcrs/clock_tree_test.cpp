@@ -3,9 +3,11 @@
 
 #include <algorithm>
 #include <cmath>
+#include <format>
 #include <map>
 #include <set>
 #include <stdexcept>
+#include <thread>
 
 #include "gtest/gtest.h"
 
@@ -900,6 +902,185 @@ TEST(PcrsClock, RetainedSourcePinsDoNotCountAgainstTheLeafFanout) {
   EXPECT_THROW(plan_clock_tree(sinks, drivers, limits, source), Clock_infeasible);
   source.driver.max_fanout = 6;
   EXPECT_NO_THROW(plan_clock_tree(sinks, drivers, limits, source));
+}
+
+TEST(PcrsClock, LeavesFillToTheFanoutLimitInsteadOfHalvingByCount) {
+  // 51 pins at fanout 24: halving by count gives 25 and 26, then four leaves of about 12 and 13. Cutting whole
+  // groups' worth gives three leaves of 17, and a design of 51,677 pins about half the buffers.
+  std::vector<Clock_sink> sinks;
+  for (int i = 0; i < 51; ++i) {
+    sinks.push_back({std::format("s{:02d}", i), double(i % 10), double(i / 10), 1});
+  }
+  const std::vector<Clock_driver> buffers{
+      {"buf", "A", "Y", 1, 100, 1, 0, 0, 0, 20}
+  };
+  const Clock_limits limits{24, 0, 0, 0};
+  const auto         tree   = plan_clock_tree(sinks, buffers, limits);
+  size_t             leaves = 0, largest = 0, smallest = 100;
+  for (const auto& b : tree.branches) {
+    if (b.leaf) {
+      ++leaves;
+      largest  = std::max(largest, b.children.size());
+      smallest = std::min(smallest, b.children.size());
+    }
+  }
+  EXPECT_EQ(leaves, 3u);
+  EXPECT_LE(largest, 24u);
+  EXPECT_GE(smallest, 17u);
+  // An exact multiple needs no repair: 48 pins are two full leaves.
+  sinks.resize(48);
+  size_t full = 0;
+  for (const auto& b : plan_clock_tree(sinks, buffers, limits).branches) {
+    full += b.leaf && b.children.size() == 24;
+  }
+  EXPECT_EQ(full, 2u);
+}
+
+TEST(PcrsClock, TrunkStagesTakeTheFasterDriverWhenAsked) {
+  // Two clusters far apart under fanout 4: two leaves and one trunk stage above them.
+  std::vector<Clock_sink> sinks;
+  for (int i = 0; i < 4; ++i) {
+    sinks.push_back({std::format("l{}", i), double(i), 0, 1});
+    sinks.push_back({std::format("r{}", i), 200. + i, 0, 1});
+  }
+  const std::vector<Clock_driver> buffers{
+      {  "base", "A", "Y", 1, 100, 1, 0, 0, 0, 100},
+      {"faster", "A", "Y", 1, 100, 3, 0, 0, 0,  50}
+  };
+  Clock_limits limits{4, 0, 0, 0};
+  const auto   trunk_driver = [&](const Clock_tree& tree) {
+    std::string master;
+    for (const auto& b : tree.branches) {
+      if (!b.leaf) {
+        master = buffers[b.driver].master;
+      }
+    }
+    return master;
+  };
+  const auto small = plan_clock_tree(sinks, buffers, limits);
+  EXPECT_EQ(trunk_driver(small), "base");
+  limits.trunk_drive_steps = 1;
+  const auto fast          = plan_clock_tree(sinks, buffers, limits);
+  EXPECT_EQ(trunk_driver(fast), "faster");
+  for (const auto& b : fast.branches) {
+    EXPECT_EQ(buffers[b.driver].master, b.leaf ? "base" : "faster");  // leaves keep their own policy
+  }
+  EXPECT_LT(fast.arrival_ps[0], small.arrival_ps[0]);
+}
+
+TEST(PcrsClock, BalancingPadsTheEarlyBandOnceAtTheTopInsteadOfEveryArm) {
+  // Twelve flops and a gate whose own subtree takes 300 ps. Mixing the gate into a spatial fork pads every flop
+  // arm of that fork. Merging by arrival keeps the flops one root, and that root gets one chain of stages.
+  std::vector<Clock_sink> sinks;
+  for (int i = 0; i < 12; ++i) {
+    sinks.push_back({std::format("f{:02d}", i), double(i % 4), double(i / 4), 1});
+  }
+  sinks.push_back({"gate", 10, 0, 1});
+  sinks.back().downstream_ps = 300;
+  const std::vector<Clock_driver> buffers{
+      {"buf", "A", "Y", 1, 100, 1, 0, 0, 0, 30}
+  };
+  Clock_limits limits{3, 0, 0, 0};
+  limits.balance      = true;
+  const auto balanced = plan_clock_tree(sinks, buffers, limits);
+  EXPECT_GE(balanced.balance_buffers, 8u);
+  EXPECT_LE(balanced.balance_buffers, 12u);
+  EXPECT_LE(balanced.target_skew_ps, 30);
+  // A gap the clock period tolerates is left alone.
+  limits.skew_bound_ps = 1000;
+  const auto relaxed   = plan_clock_tree(sinks, buffers, limits);
+  EXPECT_EQ(relaxed.balance_buffers, 0u);
+}
+
+TEST(PcrsClock, AGateSubtreeReportsItsEarliestAndLatestArrivalNotOneNumber) {
+  // Below this pin a gate and its flops arrive between 100 and 300 ps after it. The domain above sees the spread.
+  std::vector<Clock_sink> sinks{
+      {"gate", 0, 0, 1}
+  };
+  sinks[0].downstream_ps = 300;
+  const std::vector<Clock_driver> buffers{
+      {"buf", "A", "Y", 1, 100, 1, 0, 0, 0, 20}
+  };
+  const Clock_limits limits{4, 0, 0, 0};
+  EXPECT_DOUBLE_EQ(plan_clock_tree(sinks, buffers, limits).target_skew_ps, 0);
+  sinks[0].downstream_min_ps = 100;
+  EXPECT_DOUBLE_EQ(plan_clock_tree(sinks, buffers, limits).target_skew_ps, 200);
+  sinks[0].downstream_ps = -100;
+  sinks[0].downstream_min_ps = -300;
+  EXPECT_DOUBLE_EQ(plan_clock_tree(sinks, buffers, limits).target_skew_ps, 200);
+  sinks[0].downstream_min_ps = 400;  // later than the latest: not an interval
+  EXPECT_THROW(plan_clock_tree(sinks, buffers, limits), std::invalid_argument);
+}
+
+TEST(PcrsClock, ADiscreteGateForkTriesOtherSitesBeforeItIsInfeasible) {
+  // Three pins of one gate fork in an L: the middle of their box is off the shortest tree, so a driver there pays a
+  // stub of wire the corner pin does not, and exceeds the load limit that a driver at a pin meets.
+  std::vector<Clock_sink> sinks{
+      {"a",   0,   0, 1},
+      {"b", 100,   0, 1},
+      {"c",   0, 100, 1}
+  };
+  for (auto& sink : sinks) {
+    sink.coupled_group = "fork";
+  }
+  const std::vector<Clock_driver> buffers{
+      {"buf", "A", "Y", 1, 95, 1, 0, 0, 0, 20}
+  };
+  Clock_limits limits{8, 0.4, 0.001, 0};
+  const auto   tree = plan_clock_tree(sinks, buffers, limits);
+  ASSERT_EQ(tree.branches.size(), 1u);
+  EXPECT_EQ(tree.branches[0].children.size(), 3u);
+  EXPECT_LE(tree.branches[0].load_ff, 95);
+  EXPECT_FALSE(tree.branches[0].x_um == 50 && tree.branches[0].y_um == 50) << "the box middle is not legal here";
+  // Where no site works the group stays infeasible, and says which fork.
+  limits.wire_ff_um = 2.0;
+  try {
+    plan_clock_tree(sinks, buffers, limits);
+    FAIL() << "expected Clock_infeasible";
+  } catch (const Clock_infeasible& error) {
+    EXPECT_NE(std::string(error.what()).find("fork"), std::string::npos);
+  }
+}
+
+TEST(PcrsClock, PlannersRunAtTheSameTimeAndGiveTheirSequentialResults) {
+  // One planner per chunk runs in its own worker. They share nothing: the same inputs give the same tree whichever
+  // thread plans it, and with how many others.
+  const std::vector<Clock_driver> buffers{
+      {  "base", "A", "Y", 1, 100, 1, 0, 0, 0, 100},
+      {"faster", "A", "Y", 1, 100, 3, 0, 0, 0,  50}
+  };
+  const auto sinks = [](int seed) {
+    std::vector<Clock_sink> out;
+    for (int i = 0; i < 400; ++i) {
+      out.push_back({std::format("s{}_{:03d}", seed, i), double((i * 37 + seed * 11) % 211), double((i * 53 + seed * 7) % 197), 1});
+    }
+    return out;
+  };
+  Clock_limits limits{12, 0.1, 0.5, 0};
+  limits.balance                = true;
+  limits.trunk_drive_steps      = 4;
+  constexpr int           count = 8;
+  std::vector<Clock_tree> expected;
+  for (int seed = 0; seed < count; ++seed) {
+    expected.push_back(plan_clock_tree(sinks(seed), buffers, limits));
+  }
+  std::vector<Clock_tree>  parallel(count);
+  std::vector<std::thread> workers;
+  for (int seed = 0; seed < count; ++seed) {
+    workers.emplace_back([&, seed] { parallel[seed] = plan_clock_tree(sinks(seed), buffers, limits); });
+  }
+  for (auto& worker : workers) {
+    worker.join();
+  }
+  for (int seed = 0; seed < count; ++seed) {
+    ASSERT_EQ(parallel[seed].branches.size(), expected[seed].branches.size()) << seed;
+    EXPECT_EQ(parallel[seed].arrival_ps, expected[seed].arrival_ps) << seed;
+    EXPECT_EQ(parallel[seed].balance_buffers, expected[seed].balance_buffers) << seed;
+    for (size_t i = 0; i < parallel[seed].branches.size(); ++i) {
+      EXPECT_EQ(parallel[seed].branches[i].children, expected[seed].branches[i].children) << seed << ":" << i;
+      EXPECT_EQ(parallel[seed].branches[i].driver, expected[seed].branches[i].driver) << seed << ":" << i;
+    }
+  }
 }
 }  // namespace
 }  // namespace livehd::pcrs

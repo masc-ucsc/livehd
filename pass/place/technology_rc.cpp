@@ -233,6 +233,7 @@ Parsed_rc parse_rc(const physical::Technology& tech, const std::string& liberty,
         }
       } else if (args.contains("-layer") && tech.layers.contains(args.at("-layer"))) {
         layers[args.at("-layer")] = rc;
+        parsed.table.characterized.insert(args.at("-layer"));
       } else {
         throw std::runtime_error("technology RC refers to an unknown routing layer");
       }
@@ -244,9 +245,105 @@ Parsed_rc parse_rc(const physical::Technology& tech, const std::string& liberty,
 Route_technology_rc technology_route_rc(const physical::Technology& tech, const std::string& liberty, const std::string& rc_file) {
   return parse_rc(tech, liberty, rc_file, true).table;
 }
+namespace {
+constexpr double kDoubleSpacedCapacitance = 0.90;
+// The layers named by a clock_layers specification, in routing order.
+std::vector<std::string> clock_layer_names(const physical::Technology& tech, const Route_technology_rc& table,
+                                           std::string_view spec) {
+  const auto& order = tech.routing_layers;
+  const auto  index = [&](const std::string& name) {
+    const auto it = std::ranges::find(order, name);
+    if (it == order.end()) {
+      throw std::runtime_error("clock_layers names a layer that is not a routing layer: " + name);
+    }
+    return size_t(it - order.begin());
+  };
+  std::vector<std::string> names;
+  if (spec == "auto") {
+    for (auto it = order.rbegin(); it != order.rend() && names.size() < 2; ++it) {
+      if (table.characterized.contains(*it)) {
+        names.push_back(*it);
+      }
+    }
+    std::ranges::reverse(names);
+    return names;
+  }
+  const auto split = [](std::string_view text, char separator) {
+    std::vector<std::string> parts;
+    for (;;) {
+      const auto cut = text.find(separator);
+      parts.emplace_back(text.substr(0, cut));
+      if (cut == std::string_view::npos) {
+        break;
+      }
+      text.remove_prefix(cut + 1);
+    }
+    return parts;
+  };
+  for (const auto& item : split(spec, ',')) {
+    const auto range = split(item, '-');
+    if (range.size() == 1) {
+      index(range.front());
+      names.push_back(range.front());
+    } else if (range.size() == 2) {
+      auto lo = index(range[0]), hi = index(range[1]);
+      if (lo > hi) {
+        std::swap(lo, hi);
+      }
+      names.insert(names.end(), order.begin() + lo, order.begin() + hi + 1);
+    } else {
+      throw std::runtime_error("clock_layers needs layer names, ranges like M4-M7 or auto, got " + std::string(spec));
+    }
+  }
+  return names;
+}
+// Direction-averaged RC of the layers; a direction without a layer takes the other one's average.
+std::optional<Wire_rc> clock_layer_rc(const physical::Technology& tech, const Parsed_rc& parsed, std::string_view spec,
+                                      const std::string& source) {
+  if (spec.empty()) {
+    return std::nullopt;
+  }
+  const auto names = clock_layer_names(tech, parsed.table, spec);
+  if (names.empty()) {
+    return std::nullopt;
+  }
+  std::array<std::pair<double, double>, 2> sum{};
+  std::array<unsigned, 2>                  count{};
+  for (const auto& name : names) {
+    const auto rc = parsed.table.layers.find(name);
+    if (rc == parsed.table.layers.end() || !(rc->second.r >= 0) || !(rc->second.c >= 0)) {
+      throw std::runtime_error("clock_layers names a layer with no characterized RC: " + name);
+    }
+    const size_t side  = tech.layers.at(name).direction == "VERTICAL" ? 1 : 0;
+    sum[side].first   += rc->second.r;
+    sum[side].second  += rc->second.c;
+    ++count[side];
+  }
+  const auto mean = [&](size_t side) {
+    return count[side] > 0 ? std::pair{sum[side].first / count[side], sum[side].second / count[side]} : std::pair{-1., -1.};
+  };
+  auto h = mean(0), v = mean(1);
+  if (h.first < 0) {
+    h = v;
+  }
+  if (v.first < 0) {
+    v = h;
+  }
+  std::string used;
+  for (const auto& name : names) {
+    used += (used.empty() ? "" : ",") + name;
+  }
+  // The hand-off routes the trunks with twice the track spacing, and the layer tables are for the default spacing:
+  // less coupling to the neighbours, less capacitance. Against the global-route estimate of 10,105 coralnpu sinks on
+  // ASAP7, the M6 and M7 average gives a mean error of 62 ps (all pessimistic) and the same resistance with 10% less
+  // capacitance 9 ps (median +0.8 ps); 5% less gives 33 ps and 15% less 30 ps. The factor is that measurement.
+  return Wire_rc{h.first, h.second * kDoubleSpacedCapacitance, v.first, v.second * kDoubleSpacedCapacitance,
+                 "clock layers " + used + " of " + source};
+}
+}  // namespace
 Net_wire_rc technology_net_wire_rc(const physical::Technology& tech, const std::string& liberty, const std::string& rc_file,
                                    double resistance, double capacitance, double rc_pessimism,
-                                   std::optional<std::string_view> liberty_text) {
+                                   std::optional<std::string_view> liberty_text, std::string_view clock_layers) {
   if (!std::isfinite(rc_pessimism) || rc_pessimism < 1) {
     throw std::invalid_argument("rc_pessimism must be finite and at least 1");
   }
@@ -270,6 +367,9 @@ Net_wire_rc technology_net_wire_rc(const physical::Technology& tech, const std::
   const auto  parsed     = parse_rc(tech, liberty, rc_file, false, liberty_text);
   const auto& layers     = parsed.table.layers;
   const auto  with_clock = [&](const Wire_rc& signal_wire) -> Net_wire_rc {
+    if (auto layered = clock_layer_rc(tech, parsed, clock_layers, rc_file.empty() ? "LEF" : rc_file)) {
+      return {signal_wire, pessimize(*layered)};
+    }
     if (parsed.clock) {
       const auto& clock = *parsed.clock;
       return {signal_wire, pessimize({clock.r, clock.c, clock.r, clock.c, rc_file})};

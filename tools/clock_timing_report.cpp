@@ -22,7 +22,7 @@ std::string read(const std::string& path) {
 
 int main(int argc, char** argv) {
   try {
-    std::string                         def, sdc, rc, spef, wire_rc, main_liberty;
+    std::string                         def, sdc, rc, spef, wire_rc, main_liberty, clock_layers;
     std::vector<std::string>            lefs;
     bool                                use_def_clock_nets = false;
     livehd::timing::fast::Report_inputs inputs;
@@ -53,6 +53,8 @@ int main(int argc, char** argv) {
         sdc = argv[i];
       } else if (option == "--wire-rc") {
         wire_rc = argv[i];
+      } else if (option == "--clock-layers") {
+        clock_layers = argv[i];
       } else if (option == "--spef") {
         spef = argv[i];
       } else if (option == "--parasitics") {
@@ -64,7 +66,11 @@ int main(int argc, char** argv) {
     if (def.empty() || lefs.empty() || inputs.liberty_text.empty() || sdc.empty()) {
       throw std::invalid_argument(
           "usage: clock_timing_report --def FILE --lef FILE... --liberty FILE... --sdc FILE "
-          "[--corner NAME] [--use-def-clock-nets] [--parasitics LIVEHD_RC | --spef FILE | --wire-rc PLATFORM_RC]");
+          "[--corner NAME] [--use-def-clock-nets] [--parasitics LIVEHD_RC | --spef FILE | --wire-rc PLATFORM_RC [--clock-layers "
+          "auto|M6-M7]]");
+    }
+    if (!clock_layers.empty() && wire_rc.empty()) {
+      throw std::invalid_argument("--clock-layers requires --wire-rc");
     }
     inputs.sdc_text = read(sdc);
     auto       fp   = livehd::physical::read_def_snapshot(def);
@@ -83,7 +89,8 @@ int main(int argc, char** argv) {
       throw std::invalid_argument("select one parasitic input");
     }
     if (!wire_rc.empty()) {
-      const auto wire = livehd::placement::technology_net_wire_rc(tech, main_liberty, wire_rc, -1, -1, 1, inputs.liberty_text);
+      const auto wire
+          = livehd::placement::technology_net_wire_rc(tech, main_liberty, wire_rc, -1, -1, 1, inputs.liberty_text, clock_layers);
       inputs.parasitic_model = "placement_steiner";
       parasitics = std::make_shared<livehd::physical::Parasitics>(livehd::placement::estimate_floorplan_rc(fp, tech, wire));
     } else if (!spef.empty()) {

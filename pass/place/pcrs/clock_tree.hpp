@@ -34,11 +34,20 @@ struct Clock_sink {
   Pin_label                                coupled_group{};      // Pins at a discrete clock-gate fork must share a leaf.
   std::optional<std::pair<double, double>> previous_position{};  // Before relocating a private phase cell, in micrometres.
   Name                                     chunk{};              // Accepted floorplan home.
-  double                                   downstream_ps = 0;    // Arrival through a clock gate and its own sink subtree.
+  double                                   downstream_ps = 0;    // Latest effective arrival below a gate, relative to requested arrival.
   double   insertion_ps = 0, wanted_ps = 0;          // Internal clock-pin latency and desired relative effective arrival.
   double   leaf_delay_ps                       = 0;  // Requested physical delay ahead of this leaf.
   bool     separate_leaf                       = false;
   uint64_t graph_pin                           = 0;  // HHDS pin class index in the accepted physical graph.
+  // Earliest arrival through the gate and its own sink subtree, when it differs from downstream_ps (the latest).
+  // The subtree below a gate has its own spread: the tree above sees the interval, not one number.
+  std::optional<double> downstream_min_ps{};
+  [[nodiscard]] bool valid_downstream() const {
+    return std::isfinite(downstream_ps)
+           && (!downstream_min_ps || (std::isfinite(*downstream_min_ps) && *downstream_min_ps <= downstream_ps));
+  }
+  [[nodiscard]] double  tail_lo_ps() const { return downstream_min_ps.value_or(downstream_ps) + insertion_ps - wanted_ps; }
+  [[nodiscard]] double  tail_hi_ps() const { return downstream_ps + insertion_ps - wanted_ps; }
   bool     operator==(const Clock_sink&) const = default;
 };
 
@@ -51,7 +60,7 @@ struct Clock_driver {
   // Rise and fall NLDM slices at an input slew representative of a fanout-of-four stage.
   // Only arcs of the actual buffer input/output pair enter this model.
   struct Arc {
-    liberty::timing::Table delay, slew;
+    liberty::timing::Table delay, slew;  // at the reference input transition, over the output load
     double                 wire_slew_factor = 0;
   };
   std::vector<Arc> arcs{};
@@ -88,6 +97,13 @@ struct Clock_limits {
   // max_transition as the only bound, which lets every stage run at the limit of the smallest buffer.
   // Declared last: callers and tests initialize the fields above by position.
   double target_slew_ps = 0;
+  // Faster legal drivers for each planned trunk stage (the stages above the leaves), as leaf_drive_steps does for
+  // leaves. A trunk stage is few cells and its delay is shared by every sink below it. UINT_MAX: until no faster
+  // driver exists at its load.
+  unsigned trunk_drive_steps      = 0;
+  // Arrival differences below this between sibling subtrees are left alone when balancing: padding a gap the
+  // clock period tolerates costs buffers for no timing gain. Zero pads to the resolution of the smallest stage.
+  double   skew_bound_ps          = 0;
 };
 
 struct Clock_branch {

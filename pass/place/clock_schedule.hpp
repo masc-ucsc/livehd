@@ -21,6 +21,9 @@ struct Clock_schedule {
   std::map<uint64_t, double>   delay_ps;
   std::set<uint64_t>           separate;
   bool                         balance                                  = false;
+  // Keep the balanced tree when no timing check can score it (a gate without a gating check, a register behind a
+  // clock inverter). The planner already leaves gaps the period tolerates alone and pads only the early band.
+  bool                         balance_unverified                       = false;
   unsigned                     port_source_stages                       = 0;
   auto                         operator<=>(const Clock_schedule&) const = default;
 };

@@ -107,8 +107,8 @@ public:
     for (size_t i = 0; i < sinks.size(); ++i) {
       const auto& s = sinks[i];
       if (s.name.empty() || !names.insert(s.name).second || !std::isfinite(s.x_um) || !std::isfinite(s.y_um)
-          || !nonnegative(s.cap_ff) || !nonnegative(s.max_slew_ps) || !nonnegative(s.downstream_ps) || !nonnegative(s.insertion_ps)
-          || !std::isfinite(s.wanted_ps) || !nonnegative(s.leaf_delay_ps)) {
+          || !nonnegative(s.cap_ff) || !nonnegative(s.max_slew_ps) || !s.valid_downstream()
+          || !nonnegative(s.insertion_ps) || !std::isfinite(s.wanted_ps) || !nonnegative(s.leaf_delay_ps)) {
         throw std::invalid_argument("invalid or duplicate clock sink " + s.name);
       }
       if (s.previous_position
@@ -352,7 +352,7 @@ public:
     if (source && (!top.empty() || !source->direct.empty())) {
       for (const auto& s : source->direct) {
         if (s.name.empty() || !names.insert(s.name).second || !std::isfinite(s.x_um) || !std::isfinite(s.y_um)
-            || !nonnegative(s.cap_ff) || !nonnegative(s.max_slew_ps) || !nonnegative(s.downstream_ps)
+            || !nonnegative(s.cap_ff) || !nonnegative(s.max_slew_ps) || !s.valid_downstream()
             || !nonnegative(s.insertion_ps) || !std::isfinite(s.wanted_ps)) {
           throw std::invalid_argument("invalid direct clock sink " + s.name);
         }
@@ -397,9 +397,8 @@ public:
     const auto include = [&](const auto& pins, const auto& arrivals) {
       for (size_t i = 0; i < pins.size(); ++i) {
         const auto& pin = pins[i];
-        const double arrival = arrivals.at(i) + pin.downstream_ps + pin.insertion_ps - pin.wanted_ps;
-        effective.lo = std::min(effective.lo, arrival);
-        effective.hi = std::max(effective.hi, arrival);
+        effective.lo    = std::min(effective.lo, arrivals.at(i) + pin.tail_lo_ps());
+        effective.hi    = std::max(effective.hi, arrivals.at(i) + pin.tail_hi_ps());
       }
     };
     include(sinks, tree.arrival_ps);
@@ -428,10 +427,71 @@ private:
   };
   mutable timing::fast::Elmore wire_solver;
   std::vector<Interval> intervals;
+  std::optional<double>        quantum_ps;
   std::vector<Load>     direct_loads;
   double                direct_slew = std::numeric_limits<double>::infinity();
 
+  // The delay of the smallest stage the library can build into one input. Subtrees closer than half of it in
+  // effective arrival are one band: padding below a stage's resolution costs a buffer for no gain.
+  double stage_quantum() {
+    if (quantum_ps) {
+      return *quantum_ps;
+    }
+    double smallest = std::numeric_limits<double>::infinity();
+    for (size_t i = 0; i < drivers.size(); ++i) {
+      const Load input{0, 0, 0, 0, drivers[i].input_ff, drivers[i].input_max_slew_ps};
+      const auto stage = fit_at(std::span(&input, 1), 0, 0, false, i);
+      if (stage && stage->delay_ps > 0) {
+        smallest = std::min(smallest, stage->delay_ps);
+      }
+    }
+    quantum_ps = std::isfinite(smallest) ? smallest : 0.;
+    return *quantum_ps;
+  }
+
+  // Merge by arrival, then by place. Subtrees whose sinks arrive at different times (a clock gate with its own
+  // subtree below it, a macro with an insertion delay) are kept apart until each band is one root, and the band roots
+  // are joined last, where the early ones are padded once. Mixing them in a spatial fork pads every early arm of the
+  // fork separately.
   void combine(std::vector<Load>& top) {
+    if (limits.balance && top.size() > 1 && intervals.size() >= tree.branches.size()) {
+      const double        quantum = std::max(stage_quantum() / 2, limits.skew_bound_ps);
+      std::vector<size_t> order(top.size());
+      std::iota(order.begin(), order.end(), 0);
+      std::ranges::sort(order, [&](size_t a, size_t b) {
+        return std::tuple{intervals[top[a].id].hi, top[a].id} < std::tuple{intervals[top[b].id].hi, top[b].id};
+      });
+      std::vector<std::vector<Load>> bands;
+      double                         start = 0;
+      for (const auto i : order) {
+        const double hi = intervals[top[i].id].hi;
+        if (bands.empty() || hi - start > quantum) {
+          bands.emplace_back();
+          start = hi;
+        }
+        bands.back().push_back(top[i]);
+      }
+      if (bands.size() > 1 && bands.size() < top.size() && quantum > 0) {
+        std::vector<Load> roots;
+        for (auto& band : bands) {
+          while (band.size() > 1) {
+            combine_by_place(band);
+          }
+          roots.push_back(band.front());
+        }
+        top = std::move(roots);
+        if (top.size() <= limits.fanout) {
+          std::vector<Load> next;
+          partition(top, 0, top.size(), false, next);
+          top = std::move(next);
+        }
+        return;
+      }
+    }
+    combine_by_place(top);
+  }
+
+  void combine_by_place(std::vector<Load>& top) {
     std::vector<Load> next;
     partition(top, 0, top.size(), false, next);
     if (next.size() >= top.size()) {
@@ -671,7 +731,8 @@ private:
       const double delay = branch.cell_delay_ps + wire.delays[i];
       Interval     tail;
       if (branch.leaf) {
-        tail.lo = tail.hi = sinks[id].downstream_ps + sinks[id].insertion_ps - sinks[id].wanted_ps;
+        tail.lo = sinks[id].tail_lo_ps();
+        tail.hi = sinks[id].tail_hi_ps();
       } else {
         tail = substitute && substitute->first == i ? substitute->second : intervals.at(id);
       }
@@ -688,7 +749,7 @@ private:
       return;
     }
     auto before = arrival_interval(parent, loads);
-    if (before.spread() <= 1e-6) {
+    if (before.spread() <= std::max(1e-6, limits.skew_bound_ps)) {
       return;
     }
     const double target = before.hi;
@@ -705,7 +766,8 @@ private:
     // A long downstream gate path can take several stages to match. Each accepted
     // stage reduces the error and consumes a site from the common placement budget.
     std::vector<bool> used(loads.size());
-    while (tree.wire_repeaters + tree.balance_buffers + tree.schedule_buffers < limits.repeater_sites) {
+    while (tree.wire_repeaters + tree.balance_buffers + tree.schedule_buffers < limits.repeater_sites
+           && before.spread() > std::max(1e-6, limits.skew_bound_ps)) {
       struct Choice {
         Clock_branch stub, parent;
         Interval     range;
@@ -801,8 +863,46 @@ private:
     return b;
   }
 
+  // The middle of the bounding box first. When a stage cannot be legal there (a lopsided cluster puts the box middle
+  // far from most pins, which is wire and load), try the coordinate medians, the load-weighted centre and, for a
+  // small group, each pin's own site, and take the legal one with the least delay. A group that cannot be split,
+  // a discrete gate fork, is infeasible only when no site works.
   std::optional<Clock_branch> fit(std::span<const Load> loads, Bounds b, bool leaf) const {
-    return fit_at(loads, std::midpoint(b.xl, b.xh), std::midpoint(b.yl, b.yh), leaf);
+    if (loads.size() > limits.fanout) {
+      return {};
+    }
+    if (auto middle = fit_at(loads, std::midpoint(b.xl, b.xh), std::midpoint(b.yl, b.yh), leaf)) {
+      return middle;
+    }
+    std::vector<std::pair<double, double>> sites;
+    std::vector<double>                    xs, ys;
+    double                                 weight = 0, cx = 0, cy = 0;
+    for (const auto& p : loads) {
+      xs.push_back(p.x);
+      ys.push_back(p.y);
+      const double w  = p.cap > 0 ? p.cap : 1;
+      weight         += w;
+      cx             += w * p.x;
+      cy             += w * p.y;
+    }
+    const auto median = [](std::vector<double>& v) {
+      std::ranges::sort(v);
+      return v.size() % 2 ? v[v.size() / 2] : std::midpoint(v[v.size() / 2 - 1], v[v.size() / 2]);
+    };
+    sites.emplace_back(median(xs), median(ys));
+    sites.emplace_back(cx / weight, cy / weight);
+    if (loads.size() <= 6) {
+      for (const auto& p : loads) {
+        sites.emplace_back(p.x, p.y);
+      }
+    }
+    std::optional<Clock_branch> best;
+    for (const auto& [x, y] : sites) {
+      if (auto stage = fit_at(loads, x, y, leaf); stage && (!best || stage->delay_ps < best->delay_ps)) {
+        best = std::move(stage);
+      }
+    }
+    return best;
   }
 
   std::optional<Clock_branch> fit_at(std::span<const Load> loads, double x, double y, bool leaf,
@@ -814,7 +914,7 @@ private:
     std::vector<double> key{x,
                             y,
                             only_driver ? double(*only_driver) : -1.,
-                            double(requested_steps.value_or(limits.leaf_drive_steps))};
+                            double(requested_steps.value_or(limits.trunk_drive_steps))};
     key.reserve(4 + 4 * loads.size());
     for (const auto& p : loads) {
       key.insert(key.end(), {p.x, p.y, p.cap, p.max_slew});
@@ -832,7 +932,7 @@ private:
   std::optional<Clock_branch> fit_uncached(std::span<const Load> loads, double x, double y, bool leaf,
                                            std::optional<size_t> only_driver, const Clock_driver* existing,
                                            std::optional<unsigned> requested_steps) const {
-    const unsigned steps  = requested_steps.value_or(limits.leaf_drive_steps);
+    const unsigned steps  = requested_steps.value_or(leaf ? limits.leaf_drive_steps : existing ? 0 : limits.trunk_drive_steps);
     const auto     fanout = loads.size() + (existing ? direct_loads.size() : 0);
     // The grouping limit bounds what a planned stage fans out to. Pins the existing source keeps (a discrete gate's
     // fork, a retained phase pin) were on it before the tree: they count against its own Liberty limit below, and a
@@ -881,7 +981,7 @@ private:
         continue;
       }
       // Without a requested drive step, only a smaller legal cell can replace the best fit.
-      if (best && !(leaf && steps)
+      if (best && !steps
           && std::tie(d.area_um2, d.master) >= std::tie(drivers[best->driver].area_um2, drivers[best->driver].master)) {
         continue;
       }
@@ -902,7 +1002,7 @@ private:
       }
       Clock_branch candidate{i, x, y, cap, radius, leaf, {}, delay + wire.max_delay, slew, wire.length};
       candidate.cell_delay_ps = delay;
-      if (leaf && steps) {
+      if (steps) {
         candidates.push_back(candidate);
       }
       if (!best || std::tie(d.area_um2, d.master) < std::tie(drivers[best->driver].area_um2, drivers[best->driver].master)) {
@@ -1404,6 +1504,12 @@ private:
     }
     const bool horizontal = b.xh - b.xl >= b.yh - b.yl;
     size_t     mid        = lo + n / 2;
+    if (n > limits.fanout) {
+      // More than a group's worth: cut whole groups' worth off, so the pieces fill to the limit. Halving by count
+      // alone leaves 25 pins as 12 and 13, and 51,677 as 4,096 leaves of about 12 instead of 2,154 of 24.
+      const size_t g = (n + limits.fanout - 1) / limits.fanout;
+      mid            = lo + n * (g / 2) / g;
+    }
     if (leaf && !groups.empty()) {
       const auto key = [&](const Load& p) {
         const auto& sink = sinks[p.id];
@@ -1460,7 +1566,7 @@ private:
 Clock_tree plan(const std::vector<Clock_sink>& sinks, const std::vector<Clock_driver>& drivers, const Clock_limits& limits,
                 const std::optional<Clock_source>& source, Clock_plan_cache* cache, Plan_depth depth) {
   if (limits.fanout < 2 || limits.fanout > 30 || !Planner::nonnegative(limits.wire_ff_um)
-      || !Planner::nonnegative(limits.wire_ohm_um) || !Planner::nonnegative(limits.radius_um) || !std::isfinite(limits.dbu_per_um)
+      || !Planner::nonnegative(limits.wire_ohm_um) || !Planner::nonnegative(limits.skew_bound_ps) || !Planner::nonnegative(limits.radius_um) || !std::isfinite(limits.dbu_per_um)
       || limits.dbu_per_um <= 0 || (limits.directional_rc && !std::ranges::all_of(*limits.directional_rc, Planner::nonnegative))
       || (limits.leaf_rc && !std::ranges::all_of(*limits.leaf_rc, Planner::nonnegative))
       || (limits.trunk_rc && !std::ranges::all_of(*limits.trunk_rc, Planner::nonnegative))
