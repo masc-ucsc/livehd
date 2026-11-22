@@ -8,6 +8,7 @@ traces are compared line by line.
     lean --run Futamura_Projection_Scripts/cert_trace.lean <cert> <cycles> <stim>
          [edges:all|edges:third|edges:file:<path>] [init:reset|init:zero] [route:ir|route:vc]
          [opt:off] [opt:stats] [inc:off] [ckpt-in:<file>] [ckpt-at:<cycle>:<file>] [ckpt-out:<file>]
+         [compact:<cycles>]
 
 `stim v1` is the dcert2_memroute format, restricted to what an RTL testbench
 can replay: `in <ordinal> <width> <value>` (every cycle) and
@@ -60,6 +61,16 @@ Checkpoints (`lhdcert-ckpt v1`, `Compiler/Ckpt.lean`, `pass/lean/tools/formats/c
 
 Both routes write the same bytes for the same state, and each resumes from the other's file:
 `ckpt-at:k` of one run, then `ckpt-in` of a second run, prints exactly the lines from k on.
+
+    compact:<K>          every K cycles, replace the state by its restored checkpoint, in
+                         memory (no file); the number made is printed on stderr. A memory is
+                         a function that adds one layer per write, so a read walks back
+                         through every write since the start (or since the last
+                         compaction); a restored state holds each memory as one table.
+                         The lines do not change: `HDLProof/Run/Sound.lean`'s
+                         `compacted_outputs` (from `resume_exact`) for the reference trace,
+                         and on route:vc `ResidualInc.incStep_correct` holds for any state,
+                         so the incremental step continues from its environment. Default off.
 -/
 import LeanSemanticPrimitives.Projection.CertLoadAny
 import LeanSemanticPrimitives.Compiler.DesignSemantics
@@ -175,6 +186,7 @@ def main (args : List String) : IO UInt32 := do
     let mut ckptIn : Option String := none
     let mut ckptAt : Array (Nat × String) := #[]
     let mut ckptOut : Option String := none
+    let mut compactK : Nat := 0
     for opt in rest do
       if opt.startsWith "edges:file:" then
         schedPath := some (opt.replace "edges:file:" "")
@@ -182,6 +194,10 @@ def main (args : List String) : IO UInt32 := do
         ckptIn := some (opt.replace "ckpt-in:" "")
       else if opt.startsWith "ckpt-out:" then
         ckptOut := some (opt.replace "ckpt-out:" "")
+      else if opt.startsWith "compact:" then
+        match (opt.replace "compact:" "").toNat? with
+        | some k => compactK := k
+        | none => do IO.eprintln s!"compact: {repr opt} is not a number of cycles"; return 2
       else if opt.startsWith "ckpt-at:" then
         match (opt.replace "ckpt-at:" "").splitOn ":" with
         | k :: p@(_ :: _) =>
@@ -250,8 +266,12 @@ def main (args : List String) : IO UInt32 := do
         -- the steps of `ResidualInc.runInc`: the first (also the first after a checkpoint)
         -- full, the others from the last step's environment (`env`, updated in place)
         let mut env : SlotEnv := #[]
+        let mut compactions := 0
         for k in List.range' start cycles do
           saveAt k s
+          if compactK > 0 && k > start && (k - start) % compactK == 0 then
+            s := Ckpt.restore (Ckpt.save D hash k #[] s)
+            compactions := compactions + 1
           let e := edgesAt D third sched k
           let i := inputAt D st k
           let r ← if !inc then pure (denoteResidual R e i s)
@@ -266,6 +286,7 @@ def main (args : List String) : IO UInt32 := do
           IO.println s!"STEP {k} {" ".intercalate (r.outputs.toList.map (fun o => toString (bv_uint o)))}"
           s := r.nextState
         saveAt (start + cycles) s
+        if compactK > 0 then IO.eprintln s!"compactions {compactions} (every {compactK} cycles)"
         return 0
     -- `directStep` is proved equal to `interpretDesign` on every input it
     -- accepts (`directStep_correct`; it refuses a certificate or runtime shape
@@ -286,15 +307,20 @@ def main (args : List String) : IO UInt32 := do
       saveAt start s
       return 0
     | .ok _ =>
+      let mut compactions := 0
       for k in List.range' start cycles do
         saveAt k s
+        if compactK > 0 && k > start && (k - start) % compactK == 0 then
+          s := Ckpt.restore (Ckpt.save D hash k #[] s)
+          compactions := compactions + 1
         let r ← match Compiler.Direct.directStepChecked D (edgesAt D third sched k) (inputAt D st k) s with
           | .ok r => pure r
           | .error e => do IO.eprintln s!"step {k}: refused: {e.render}"; return 1
         IO.println s!"STEP {k} {" ".intercalate (r.outputs.toList.map (fun o => toString (bv_uint o)))}"
         s := r.nextState
       saveAt (start + cycles) s
+      if compactK > 0 then IO.eprintln s!"compactions {compactions} (every {compactK} cycles)"
       return 0
   | _ =>
-    IO.eprintln "usage: cert_trace <cert> <cycles> <stim> [edges:all|edges:third] [init:reset|init:zero] [route:ir|route:vc] [opt:off] [opt:stats] [inc:off] [ckpt-in:<file>] [ckpt-at:<cycle>:<file>] [ckpt-out:<file>]"
+    IO.eprintln "usage: cert_trace <cert> <cycles> <stim> [edges:all|edges:third] [init:reset|init:zero] [route:ir|route:vc] [opt:off] [opt:stats] [inc:off] [ckpt-in:<file>] [ckpt-at:<cycle>:<file>] [ckpt-out:<file>] [compact:<cycles>]"
     return 2

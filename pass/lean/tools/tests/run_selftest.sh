@@ -259,6 +259,15 @@ for rt in ir vc; do
 done
 cmp -s "$OUT/t_sw_ir/steps.trace" "$OUT/t_sw_vc/steps.trace" || { echo "FAIL: seqm writes, ir and vc differ"; exit 1; }
 [[ $(cut -d' ' -f3 "$OUT/t_sw_ir/steps.trace" | sort -u | wc -l) -gt 3 ]] || { echo "FAIL: seqm writes reach no output"; exit 1; }
+# cert_trace compact:<K> (ir, vc incremental, vc inc:off): the same lines as without, and as cert_run's
+for mode in "route:ir" "route:vc" "route:vc inc:off"; do
+  ct "$OUT/seqm_lean/seqm.dcert" 80 "$OUT/seqw.stim" $mode
+  grep '^STEP' "$LOG" > "$OUT/ct_plain.txt"
+  ct "$OUT/seqm_lean/seqm.dcert" 80 "$OUT/seqw.stim" $mode compact:3
+  [[ $RC == 0 ]] && has "compactions 26 (every 3 cycles)" || { cat "$LOG"; echo "FAIL: cert_trace $mode compact:3"; exit 1; }
+  cmp -s "$OUT/ct_plain.txt" <(grep '^STEP' "$LOG") || { echo "FAIL: cert_trace $mode compact:3 changed the trace"; exit 1; }
+  cmp -s "$OUT/ct_plain.txt" "$OUT/t_sw_ir/steps.trace" || { echo "FAIL: cert_trace $mode differs from cert_run"; exit 1; }
+done
 
 # stops
 expect 0 limit "$B" bind:"$OUT/busm.bind" load:"$OUT/prog.elf" max:20
