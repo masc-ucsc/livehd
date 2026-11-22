@@ -73,7 +73,7 @@ constexpr Combo any[4] = {
     {1, 0},
     {1, 1}
 };
-constexpr Combo launch[2] = {
+constexpr Combo rising_launch_combos[2] = {
     {0, 0},
     {0, 1}
 };  // the rising clock edge launches both output transitions
@@ -81,7 +81,7 @@ constexpr Combo launch[2] = {
 // The (input, output) transition pairs an arc can carry, in the order its delays are stored.
 std::span<const Combo> combos_of(const Arc& arc) {
   if (arc.kind == Arc_kind::launch_rise) {
-    return launch;
+    return rising_launch_combos;
   }
   if (arc.kind != Arc_kind::combinational) {
     return {};
