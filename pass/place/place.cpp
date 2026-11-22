@@ -103,7 +103,6 @@
 #include "steiner_net.hpp"
 #include "steiner_topology.hpp"
 #include "technology_rc.hpp"
-#include "thirdparty/flute/flute.hpp"
 #include "tile_spread.hpp"
 #include "track_capacity.hpp"
 
@@ -8026,7 +8025,6 @@ Steiner_tree steiner_tree(const std::vector<Point>& points) {
   if (points.empty() || points.size() > std::numeric_limits<unsigned>::max() / 4) {
     throw std::invalid_argument("invalid Steiner terminal count");
   }
-  initialize_flute_tables();
   Steiner_tree                            result;
   std::map<std::pair<int, int>, unsigned> indices;
   const auto                              vertex = [&](Point p) {
@@ -8089,22 +8087,19 @@ Steiner_tree steiner_tree(const std::vector<Point>& points) {
     std::erase_if(result.edges, [&](const auto& edge) { return !sets.merge(edge.second, edge.first); });
     return result;
   }
-  std::vector<int> xs, ys;
+  std::vector<Steiner_location> locations;
+  locations.reserve(indices.size());
   for (const auto& [xy, index] : indices) {
-    (void)index;
-    xs.push_back(xy.first);
-    ys.push_back(xy.second);
+    locations.emplace_back(xy.first, xy.second);
   }
-  auto                                    tree = flute::flute(xs.size(), xs.data(), ys.data(), 3);
-  std::set<std::pair<unsigned, unsigned>> edges;
-  for (int i = 0; i < 2 * tree.deg - 2; ++i) {
-    const auto a = vertex({tree.branch[i].x, tree.branch[i].y});
-    const auto b = vertex({tree.branch[tree.branch[i].n].x, tree.branch[tree.branch[i].n].y});
-    if (a != b && edges.emplace(std::min(a, b), std::max(a, b)).second) {
-      result.edges.emplace_back(a, b);
-    }
+  const auto tree = steiner_topology(locations);
+  for (const auto& [ai, bi] : tree.edges) {
+    const auto& [ax, ay] = tree.locations[ai];
+    const auto& [bx, by] = tree.locations[bi];
+    const auto a         = vertex({double(ax), double(ay)});
+    const auto b         = vertex({double(bx), double(by)});
+    result.edges.emplace_back(a, b);
   }
-  std::free(tree.branch);
   return result;
 }
 // Area-weighted RMS movement, in density bins, of the movable cells since the

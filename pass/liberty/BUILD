@@ -13,10 +13,21 @@ cc_library(
 )
 
 cc_library(
+    name = "units",
+    hdrs = ["units.hpp"],
+)
+
+cc_library(
+    name = "scanner",
+    hdrs = ["scanner.hpp"],
+)
+
+cc_library(
     name = "timing_model",
     srcs = ["timing_model.cpp"],
-    hdrs = ["timing_model.hpp"],
+    hdrs = ["nldm.hpp", "timing_model.hpp"],
     copts = COPTS,
+    deps = [":scanner", ":units"],
     visibility = ["//visibility:public"],
 )
 
@@ -40,6 +51,8 @@ filegroup(
         "clock_topology.hpp",
         "liberty_dff.cpp",
         "liberty_dff.hpp",
+        "scanner.hpp",
+        "units.hpp",
     ],
     visibility = ["//pass/synth:__pkg__", "//pass/opentimer:__pkg__"],
 )
@@ -55,6 +68,8 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":clock_function",
+        ":scanner",
+        ":units",
         "//graph",
     ],
 )

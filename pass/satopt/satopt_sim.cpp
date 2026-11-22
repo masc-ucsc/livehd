@@ -300,8 +300,16 @@ std::optional<Dlop> Word_sim::column(const Key& k, uint32_t j) {
         // LGraph specifies a width; Dlop sign-extends from a bit index.
         v = *a->sext_op(b->sub_op(Dlop::create_integer(1)));
         break;
-      case Ntype_op::SHL: v = *a->shl_op(*b); break;
-      default           : v = *a->sra_op(*b); break;
+      default: {
+        const auto amount_pin = gu::get_driver_of_sink_name(n, "b");
+        const auto amount_width
+            = std::max(1, amount_pin.is_const() ? gu::const_of(amount_pin).get_signed_bits() : gu::bits_of(amount_pin));
+        const auto amount = b->and_op(*Dlop::get_mask_value(amount_width));
+        const auto limit  = op == Ntype_op::SHL ? width(p) : std::max(1, a->get_signed_bits());
+        const auto count  = Dlop::create_integer(amount->is_just_i64() ? std::min<int64_t>(amount->to_just_i64(), limit) : limit);
+        v                 = op == Ntype_op::SHL ? *a->shl_op(*count) : *a->sra_op(*count);
+        break;
+      }
     }
   } else if (op == Ntype_op::Sum || op == Ntype_op::And || op == Ntype_op::Or || op == Ntype_op::Xor || op == Ntype_op::Mult
              || op == Ntype_op::EQ || op == Ntype_op::Ror) {

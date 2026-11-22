@@ -10,10 +10,12 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/container/inlined_vector.h"
+#include "attr_carry.hpp"
 #include "cell.hpp"
 #include "diag.hpp"
 #include "hhds/attrs/name.hpp"
 #include "hhds/attrs/srcid.hpp"
+#include "io_decls.hpp"
 #include "node_util.hpp"
 #include "shared_text.hpp"
 #include "synth_policy.hpp"
@@ -190,25 +192,17 @@ private:
 // still does on a recompile into the same lg: dir) -- mapped both names to one
 // id, and the flat netlist silently differed from a fresh compile's. Refuse it.
 void check_io_port_ids(const hhds::GraphIO& gio, std::string_view instance) {
-  auto scan = [&](const auto& decls) {
-    absl::flat_hash_map<hhds::Port_id, std::string_view> owner;
-    for (const auto& d : decls) {
-      const auto [it, fresh] = owner.try_emplace(d.port_id, d.name);
-      if (!fresh) {
-        livehd::diag::err("pass.partition", "io-port-clash", "io")
-            .msg("flatten: '{}'{} declares ports '{}' and '{}' on the same port id {}: its GraphIO is out of sync with its body",
-                 std::string{gio.get_name()},
-                 instance.empty() ? std::string{} : std::format(" (instance '{}')", instance),
-                 it->second,
-                 d.name,
-                 d.port_id)
-            .hint("re-create the lg: library from source into a fresh --emit-dir lg: directory")
-            .fatal();
-      }
-    }
-  };
-  scan(gio.get_input_pin_decls());
-  scan(gio.get_output_pin_decls());
+  if (const auto clash = gu::find_io_port_clash(gio)) {
+    livehd::diag::err("pass.partition", "io-port-clash", "io")
+        .msg("flatten: '{}'{} declares ports '{}' and '{}' on the same port id {}: its GraphIO is out of sync with its body",
+             gio.get_name(),
+             instance.empty() ? std::string{} : std::format(" (instance '{}')", instance),
+             clash->first,
+             clash->second,
+             clash->id)
+        .hint("re-create the lg: library from source into a fresh --emit-dir lg: directory")
+        .fatal();
+  }
 }
 
 Ictx* Flattener::make_ctx(hhds::Graph* src, Ictx* parent, const hhds::Node_class& inst, std::string prefix) {
@@ -312,9 +306,15 @@ hhds::Pin_class Flattener::apply_port_shape(const hhds::Pin_class& source, const
 
 void Flattener::carry_node_attrs(Ictx* ctx, const hhds::Node_class& orig, const hhds::Node_class& neo) {
   admit("flatten-carry_node_attrs");
-  if (auto a = orig.attr(livehd::attrs::pcrs_clock_buffer); a.has()) {
-    neo.attr(livehd::attrs::pcrs_clock_buffer).set(a.get());
-  }
+  gu::carry_node_attrs(orig,
+                       neo,
+                       {.names            = false,
+                        .colors           = false,
+                        .placement        = false,
+                        .analysis         = false,
+                        .synth_policy     = false,
+                        .aggregate_origin = false,
+                        .matches          = false});
   if (ctx->preroute_excluded || orig.attr(livehd::attrs::preroute_exclude).has()) {
     neo.attr(livehd::attrs::preroute_exclude).set();
   }
@@ -346,30 +346,9 @@ void Flattener::carry_node_attrs(Ictx* ctx, const hhds::Node_class& orig, const 
     // payload is parsed, never used as an identifier: copy it verbatim.
     neo.attr(hhds::attrs::name).set(nm.find('\x1f') == std::string::npos ? ctx->prefix + nm : nm);
   }
-  // Explicitly open imported terminals are part of the cell's connectivity
-  // contract. Keep them when placement flattens the physical graph.
-  if (auto a = orig.attr(livehd::attrs::physical_open_inputs); a.has()) {
-    neo.attr(livehd::attrs::physical_open_inputs).set(a.get());
-  }
-  if (auto a = orig.attr(livehd::attrs::lut); a.has()) {
-    neo.attr(livehd::attrs::lut).set(std::string{a.get()});
-  }
-  // A reset pipeline flop of pass.pcrs stays a wire for formal wherever the netlist is flattened again.
-  if (auto a = orig.attr(livehd::attrs::pcrs_stage); a.has()) {
-    neo.attr(livehd::attrs::pcrs_stage).set(a.get());
-  }
   if (physical_names_) {
     // Keep the physical edit barrier and state correspondence across ECO copies.
-    if (orig.attr(livehd::attrs::user_cell).has()) {
-      neo.attr(livehd::attrs::user_cell).set({});
-    }
-    if (auto origin = orig.attr(livehd::attrs::aggregate_origin); origin.has()) {
-      neo.attr(livehd::attrs::aggregate_origin).set(ctx->prefix + origin.get());
-    }
-    if (auto init = orig.attr(livehd::attrs::simulation_init); init.has()) {
-      neo.attr(livehd::attrs::simulation_init).set(init.get());
-    }
-    if (auto a = orig.attr(livehd::attrs::place); a.has()) neo.attr(livehd::attrs::place).set(a.get());
+    gu::carry_attr<livehd::attrs::place_t>(orig, neo);
     if (const auto source = gu::Placement_block::id_of(orig); source != 0) {
       if (ctx->block_ids.size() < source) {
         ctx->block_ids.resize(source, 0);
@@ -381,6 +360,9 @@ void Flattener::carry_node_attrs(Ictx* ctx, const hhds::Node_class& orig, const 
       blocks_->set(neo, id);
     }
     if (auto a = orig.attr(livehd::attrs::synth_region_id); a.has()) neo.attr(livehd::attrs::synth_region_id).set(a.get());
+  }
+  if (auto origin = orig.attr(livehd::attrs::aggregate_origin); origin.has()) {
+    neo.attr(livehd::attrs::aggregate_origin).set(ctx->prefix + origin.get());
   }
   if (auto a = orig.attr(hhds::attrs::srcid); a.has() && a.get() != 0) {
     // Into the owning library's shared srcmap, not the flat body's own locator:
@@ -398,22 +380,11 @@ void Flattener::carry_node_attrs(Ictx* ctx, const hhds::Node_class& orig, const 
   if (ctx->synth_region_id != 0) {
     neo.attr(livehd::attrs::synth_region_id).set(ctx->synth_region_id);
   }
-  if (auto a = orig.attr(livehd::attrs::native_comb_boundary); a.has()) {
-    neo.attr(livehd::attrs::native_comb_boundary).set(a.get());
-  }
   // Virtual coloring writes occurrence overrides on shared definitions. The
   // physical flat view must recover that exact membership for partitioning.
   const livehd::partition::Flat_origin source{.def_gid = ctx->src->get_gid(), .src_node = orig, .instance = ctx->instance};
   if (auto c = source.color(); c != 0) {
     neo.attr(livehd::attrs::color).set(c);
-  }
-  // Formal markers ride the node (pass.abc reads `proven` off fproperty Subs to
-  // exploit discharged assumes; cgen keeps runtime checks alive through them).
-  if (auto a = orig.attr(livehd::attrs::proven); a.has()) {
-    neo.attr(livehd::attrs::proven).set(a.get());
-  }
-  if (auto a = orig.attr(livehd::attrs::runtime_check); a.has()) {
-    neo.attr(livehd::attrs::runtime_check).set(a.get());
   }
   // Driver pin 0 rides with the NODE: a single-output cell with zero fanout
   // never reaches resolve_driver (the only carry_driver_attrs site), so its
@@ -430,19 +401,11 @@ void Flattener::carry_node_attrs(Ictx* ctx, const hhds::Node_class& orig, const 
 
 void Flattener::carry_driver_attrs(Ictx* ctx, const hhds::Pin_class& orig, const hhds::Pin_class& neo) {
   admit("flatten-carry_driver_attrs");
-  if (auto b = gu::bits_of(orig); b != 0) {
-    gu::set_bits(neo, b);
-  }
-  if (!gu::is_unsign(orig)) {
-    gu::set_sign(neo);
-  }
+  gu::carry_pin_attrs(orig, neo, {.names = false, .placement = physical_names_, .matches = false});
   // Wire names are per-def; two instances of one def would collide in the flat
   // module, so prefix like node names.
   if (auto a = orig.attr(livehd::attrs::pin_name); a.has()) {
     gu::set_pin_name(neo, ctx->prefix + std::string{a.get()});
-  }
-  if (auto o = orig.attr(livehd::attrs::pin_offset); o.has()) {
-    neo.attr(livehd::attrs::pin_offset).set(o.get());
   }
 }
 
@@ -778,22 +741,7 @@ std::shared_ptr<hhds::Graph> Flattener::run(std::string_view flat_name) {
   }
 
   auto gio = lib_->create_io(std::string{flat_name});
-  for (const auto& d : src_gio->get_input_pin_decls()) {
-    admit("flatten-run-step");
-    gio->add_input(d.name, d.port_id, d.loop_break);
-    if (d.bits != 0) {
-      gio->set_bits(d.name, d.bits);
-    }
-    gio->set_unsign(d.name, d.unsign);
-  }
-  for (const auto& d : src_gio->get_output_pin_decls()) {
-    admit("flatten-run-step");
-    gio->add_output(d.name, d.port_id, d.loop_break);
-    if (d.bits != 0) {
-      gio->set_bits(d.name, d.bits);
-    }
-    gio->set_unsign(d.name, d.unsign);
-  }
+  gu::copy_io_decls(*src_gio, *gio, [&] { admit("flatten-run-step"); });
   auto flat = gio->create_graph();
   flat_     = flat.get();
   groups_.emplace(flat_);
@@ -906,20 +854,7 @@ std::shared_ptr<hhds::GraphIO> resolve_or_clone_subdef(hhds::GraphLibrary* outli
   }
   // Body-less black-box def: clone the IO decl so the instance stays opaque.
   auto io = outlib->create_io(std::string{child->get_name()});
-  for (const auto& d : child->get_input_pin_decls()) {
-    io->add_input(d.name, d.port_id, d.loop_break);
-    if (d.bits != 0) {
-      io->set_bits(d.name, d.bits);
-    }
-    io->set_unsign(d.name, d.unsign);
-  }
-  for (const auto& d : child->get_output_pin_decls()) {
-    io->add_output(d.name, d.port_id, d.loop_break);
-    if (d.bits != 0) {
-      io->set_bits(d.name, d.bits);
-    }
-    io->set_unsign(d.name, d.unsign);
-  }
+  gu::copy_io_decls(*child, *io);
   return io;
 }
 

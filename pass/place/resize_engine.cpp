@@ -2217,11 +2217,31 @@ void detail::publish_engine_qor(Result& placed, const std::string& prior_qor, st
   prior.Parse(prior_qor.c_str());
   if (qor.IsObject()) {
     if (prior.IsObject()) {
-      for (const auto* name : carried) {
-        if (prior.HasMember(name) && !qor.HasMember(name)) {
+      const auto carry = [&](const rapidjson::Value& name, const rapidjson::Value& value, bool replace) {
+        if (auto found = qor.FindMember(name); found != qor.MemberEnd()) {
+          if (replace) {
+            found->value.CopyFrom(value, qor.GetAllocator());
+          }
+        } else {
           qor.AddMember(rapidjson::Value(name, qor.GetAllocator()),
-                        rapidjson::Value(prior[name], qor.GetAllocator()),
+                        rapidjson::Value(value, qor.GetAllocator()),
                         qor.GetAllocator());
+        }
+      };
+      for (const auto& entry : prior.GetObject()) {
+        const std::string_view name(entry.name.GetString(), entry.name.GetStringLength());
+        if (name.starts_with("gp_") || name == "initial_hpwl_um") {
+          carry(entry.name, entry.value, true);
+        }
+      }
+      for (const auto* name : {"timing_driven", "resize", "repair", "resynth", "wirelength_resynth", "domino_sizing"}) {
+        if (const auto entry = prior.FindMember(name); entry != prior.MemberEnd()) {
+          carry(entry->name, entry->value, false);
+        }
+      }
+      for (const auto* name : carried) {
+        if (const auto entry = prior.FindMember(name); entry != prior.MemberEnd()) {
+          carry(entry->name, entry->value, false);
         }
       }
     }
@@ -2263,14 +2283,7 @@ Resize_trial run_resize_trial(const Result& state, const Options& options, const
   trial_options.output_dir     = output_dir;
   trial_options.own_frame      = options.own_frame || options.floorplan.empty();
   trial_options.floorplan      = floorplan;
-  auto frame                   = state.floorplan;
-  std::erase_if(frame.components, [](const auto& c) {
-    return c.place.status != Ann_place::Status::FIXED && c.place.status != Ann_place::Status::LOCKED;
-  });
-  for (auto& port : frame.terminals) {
-    port.status = Ann_place::Status::FIXED;
-  }
-  physical::write_def(frame, trial_options.floorplan);
+  detail::write_eco_floorplan(state.floorplan, trial_options.floorplan);
   Resize_trial trial;
   if (!growth_admissible(*graph, trial_options)) {
     trial.rejected = "physical cell/area growth budget exceeded";

@@ -8295,6 +8295,7 @@ void formal_verify_command(Options& opts, Result& res) {
   // per-obligation firsts. bmc / ind still select a single strategy directly.
   o.engine       = label("engine", "auto");
   o.solver       = label("solver", "cvc5");
+  o.portfolio    = label("portfolio", "auto");
   o.assume_check = label("assume_check", "true") != "false" && label("assume_check", "true") != "0";
   // Same escape hatch as lec: both drivers instantiate the same Encoder, so a
   // memory it refuses to model (per-port clock edges) has to be excludable here
@@ -8347,8 +8348,7 @@ void formal_verify_command(Options& opts, Result& res) {
   // Cross-version reuse: which techniques (hash is the cone-key verdict cache).
   bool reuse_hash = false;
   {
-    std::string_view rs = std::string_view{label("reuse", "hash")};
-    const std::string all = std::string{rs};
+    const std::string all = label("reuse", "hash");
     for (size_t at = 0; at <= all.size();) {
       const size_t      nx = std::min(all.find(',', at), all.size());
       const std::string t  = all.substr(at, nx - at);

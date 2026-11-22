@@ -79,6 +79,9 @@ Domino_footprint footprint(const ph::Technology& tech, const std::string& invert
       continue;
     }
     for (const auto& shape : pin.shapes) {
+      if (std::ranges::find(tech.routing_layers, shape.layer) == tech.routing_layers.end()) {
+        continue;
+      }
       const auto local = shape.rect.translated(m.origin_x, m.origin_y);
       const auto what  = inverter + "/" + name;
       const auto xl = to_dbu(local.xl, tech.dbu, what), xh = to_dbu(local.xh, tech.dbu, what);

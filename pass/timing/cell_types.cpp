@@ -9,6 +9,7 @@
 #include <stdexcept>
 
 #include "pass/liberty/clock_function.hpp"
+#include "pass/liberty/nldm.hpp"
 
 namespace livehd::timing::fast {
 namespace lt = liberty::timing;
@@ -410,32 +411,21 @@ float Cell_types::coordinate(Variable variable, const Query& query) {
 
 float Cell_types::lookup(uint32_t id, const Query& query) const {
   const auto& table = tables_[id];
-  // The two nearest points of the axis around the value; beyond either end the line through the two points at
-  // that end continues, as in liberty::timing::Table::lookup. A negative value (a rounding artifact) is zero.
-  struct Place {
-    uint32_t lo = 0, hi = 0;
-    float    fraction = 0;
-  };
-  const auto place = [&](uint32_t axis_id, float value) {
-    Place at;
-    if (axis_id == no_index || axes_[axis_id].size < 2) {
-      return at;
+  const auto  axis  = [&](uint32_t index) -> std::span<const float> {
+    if (index == no_index) {
+      return {};
     }
-    value                = std::max(value, 0.f);
-    const float*   axis  = axis_values_.data() + axes_[axis_id].offset;
-    const uint32_t size  = axes_[axis_id].size;
-    const auto     upper = static_cast<uint32_t>(std::upper_bound(axis, axis + size, value) - axis);
-    at.hi                = std::clamp<uint32_t>(upper, 1, size - 1);
-    at.lo                = at.hi - 1;
-    at.fraction          = (value - axis[at.lo]) / (axis[at.hi] - axis[at.lo]);
-    return at;
+    const auto& entry = axes_[index];
+    return {axis_values_.data() + entry.offset, entry.size};
   };
-  const auto   a = place(table.x_axis, coordinate(table.x_var, query)), b = place(table.y_axis, coordinate(table.y_var, query));
-  const float* v    = values_.data() + table.values;
-  const auto   ny   = table.ny;
-  const float  low  = std::lerp(v[a.lo * ny + b.lo], v[a.lo * ny + b.hi], b.fraction);
-  const float  high = std::lerp(v[a.hi * ny + b.lo], v[a.hi * ny + b.hi], b.fraction);
-  return std::lerp(low, high, a.fraction);
+  const auto x     = axis(table.x_axis);
+  const auto y     = axis(table.y_axis);
+  const auto count = std::max<size_t>(1, x.size()) * std::max<size_t>(1, y.size());
+  return liberty::timing::nldm_interpolate<float>(x,
+                                                  y,
+                                                  {values_.data() + table.values, count},
+                                                  coordinate(table.x_var, query),
+                                                  coordinate(table.y_var, query));
 }
 
 size_t Cell_types::bytes() const {

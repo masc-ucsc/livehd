@@ -8,6 +8,7 @@
 
 #include "diag.hpp"
 #include "hash_util.hpp"
+#include "io_decls.hpp"
 #include "node_util.hpp"
 #include "predict_abc_size.hpp"
 #include "synth_policy.hpp"
@@ -92,16 +93,7 @@ void specialize_calls(std::vector<std::shared_ptr<hhds::Graph>>& graphs) {
       if (found == copies.end()) {
         const auto name = std::string(io->get_name()) + "__s_" + std::format("{:016x}", livehd::hash_util::fnv1a64(key));
         auto       neo  = lib->create_io(name);
-        for (const auto& p : io->get_input_pin_decls()) {
-          neo->add_input(p.name, p.port_id, p.loop_break);
-          neo->set_bits(p.name, p.bits);
-          neo->set_unsign(p.name, p.unsign);
-        }
-        for (const auto& p : io->get_output_pin_decls()) {
-          neo->add_output(p.name, p.port_id);
-          neo->set_bits(p.name, p.bits);
-          neo->set_unsign(p.name, p.unsign);
-        }
+        graph_util::copy_io_decls(*io, *neo);
         auto body = neo->create_graph();
         if (!lib->replace_body_from(name, *child)) {
           throw std::runtime_error("cannot copy synthesis specialization");

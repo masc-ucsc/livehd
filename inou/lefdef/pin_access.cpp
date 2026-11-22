@@ -13,39 +13,6 @@
 namespace livehd::physical {
 namespace {
 bool valid(const Rect& r) { return integral_dbu(r) && !r.empty(); }
-bool covered(const Rect& r, const std::vector<Rect>& pin) {
-  std::vector<double> xs{r.xl, r.xh};
-  for (const auto& s : pin) {
-    if (s.xl > r.xl && s.xl < r.xh) {
-      xs.push_back(s.xl);
-    }
-    if (s.xh > r.xl && s.xh < r.xh) {
-      xs.push_back(s.xh);
-    }
-  }
-  std::sort(xs.begin(), xs.end());
-  xs.erase(std::unique(xs.begin(), xs.end()), xs.end());
-  for (size_t i = 1; i < xs.size(); ++i) {
-    std::vector<std::pair<double, double>> ys;
-    for (const auto& s : pin) {
-      if (s.xl <= xs[i - 1] && s.xh >= xs[i]) {
-        ys.emplace_back(s.yl, s.yh);
-      }
-    }
-    std::sort(ys.begin(), ys.end());
-    auto high = r.yl;
-    for (const auto& [lo, hi] : ys) {
-      if (lo > high) {
-        break;
-      }
-      high = std::max(high, hi);
-    }
-    if (high < r.yh) {
-      return false;
-    }
-  }
-  return true;
-}
 }  // namespace
 static Pin_access_result enumerate_pin_access_impl(const Technology& tech, const Floorplan& fp, const Component& cell,
                                                    const std::string& pin_name, std::span<const Shape> obstacles,
@@ -249,7 +216,7 @@ static Pin_access_result enumerate_pin_access_impl(const Technology& tech, const
           return out;
         }
         ++out.examined;
-        if (!covered(lower->rect.translated(x, y), pin)) {
+        if (!rect_union_covers(lower->rect.translated(x, y), pin)) {
           ++out.rejected["lower landing outside pin union"];
           continue;
         }

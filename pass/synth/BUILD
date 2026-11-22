@@ -118,7 +118,7 @@ cc_library(
     ),
     hdrs = glob(
         ["*.hpp"],
-        exclude = ["synth_salt.hpp"],
+        exclude = ["synth_salt.hpp", "tune_validation.hpp"],
     ) + [":synth_salt"],
     copts = COPTS,
     includes = ["."],
@@ -147,6 +147,14 @@ cc_library(
         "@abseil-cpp//absl/container:node_hash_map",
         "@rapidjson",
     ],
+)
+
+cc_library(
+    name = "tune_validation",
+    hdrs = ["tune_validation.hpp"],
+    includes = ["."],
+    visibility = ["//visibility:public"],
+    deps = [":synth", "//core", "//pass/lec:lec_query"],
 )
 
 exports_files(["arith.hpp"])

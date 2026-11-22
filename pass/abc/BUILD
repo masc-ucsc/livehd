@@ -81,6 +81,7 @@ cc_library(
         "//pass/enableopt:pass_enableopt",
         "//pass/formal",
         "//pass/lec:lec_query",
+        "//pass/synth:tune_validation",
         "//pass/liberty:liberty_dff",
         "//pass/liberty:pass_liberty",
         "//pass/partition:pass_partition",

@@ -448,6 +448,14 @@ absl::flat_hash_set<std::string> design_clock_inputs(hhds::Graph* g, const absl:
 
 // Extend (sign/zero per v.is_signed) or truncate `v` to exactly `width` bits.
 cvc5::Term fit_to(cvc5::TermManager& tm, const Val& v, int width);
+cvc5::Term vals_equal(cvc5::TermManager& tm, const Val& a, const Val& b);
+cvc5::Term encode_shift(cvc5::TermManager& tm, const Val& data, const Val& amount, int width, bool left);
+struct Div_result {
+  cvc5::Term value;
+  cvc5::Term by_zero;
+};
+Div_result encode_div(cvc5::TermManager& tm, const Val& a, const Val& b, int width, bool remainder = false,
+                      const cvc5::Term& undefined = {});
 
 class Encoder {
 public:

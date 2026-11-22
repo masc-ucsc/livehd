@@ -344,18 +344,6 @@ std::string tool_pin_label(const hhds::Pin_class& pin) {
 
 // Width of a constant driver, as `tool cat` states it.
 //
-// Mirrors pass.lean's `pin_width` / `intrinsic_const_width`: a declared width
-// wins; an unsized constant takes its width from its value, and a negative
-// literal counts its sign bit.
-//
-// The canonical pair is `intrinsic_const_width` / `minimal_unsigned_const_width`
-// in `pass/lean/Exporter/Frontend/graph_access.hpp`. They are NOT called here: that header comes
-// from `//pass/lean:lean_graph_scan`, which `//lhd:lhd_lib` reaches only
-// transitively through `:pass_lean`, so including it would depend on lax header
-// visibility. This is therefore a deliberate second copy, kept line-for-line
-// equivalent to those two functions -- `lhd/tests/lhd_tool_test.sh` pins the
-// agreement on the cases that distinguish them.
-//
 // "?" means the dump cannot state the width exactly: unknown bits, or a
 // declared width too narrow for its own value (which pass.lean calls "a lie"
 // and refuses rather than guess). A consumer MUST fail closed on "?".
@@ -365,42 +353,18 @@ std::string tool_const_width_str(const hhds::Pin_class& pin) {
   if (v.has_unknowns()) {
     return "?";
   }
-  auto minimal_unsigned = [](int64_t iv) -> uint32_t {
-    if (iv <= 0) {
-      return 1;
-    }
-    auto     uv   = static_cast<uint64_t>(iv);
-    uint32_t bits = 0;
-    while (uv != 0) {
-      ++bits;
-      uv >>= 1;
-    }
-    return std::max<uint32_t>(1, bits);
-  };
-  // `intrinsic_const_width` for EVERY value shape, not only the i64 one: a
-  // value too wide for int64 takes `get_signed_bits()`, and so does a negative
-  // literal (whose sign bit get_signed_bits() already counts).
-  auto intrinsic = [&]() -> uint32_t {
-    if (!v.is_just_i64()) {
-      return std::max<uint32_t>(1, static_cast<uint32_t>(v.get_signed_bits()));
-    }
-    const int64_t iv = v.to_just_i64();
-    if (iv < 0) {
-      return std::max<uint32_t>(1, static_cast<uint32_t>(v.get_signed_bits()));
-    }
-    return minimal_unsigned(iv);
-  };
+  const auto    intrinsic = gu::intrinsic_const_width(v);
   const int32_t declared = gu::bits_of(pin);
   if (declared > 0) {
     // The "declared width is a lie" check, with pin_width's own guard, which
     // is NOT restricted to i64 -- so a 200-bit positive value on a width-1 pin
     // is "?" and not 1.
-    if (!v.is_negative() && intrinsic() > static_cast<uint32_t>(declared)) {
+    if (!v.is_negative() && intrinsic > static_cast<uint32_t>(declared)) {
       return "?";
     }
     return std::to_string(declared);
   }
-  return std::to_string(intrinsic());
+  return std::to_string(intrinsic);
 }
 
 // Every CONSTANT feeding a node's sink pins: `consts` as `<pin>=<value>` and

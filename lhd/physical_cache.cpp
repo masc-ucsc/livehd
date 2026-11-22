@@ -1,11 +1,16 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "physical_cache.hpp"
 
+#include <unistd.h>
+
 #include <array>
+#include <cerrno>
+#include <cstdlib>
 #include <fstream>
 #include <map>
 #include <stdexcept>
 
+#include "file_utils.hpp"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/SHA256.h"
 #include "rapidjson/document.h"
@@ -212,8 +217,21 @@ fs::path Physical_cache::placement_hint(fs::path* clock_report) const {
 }
 
 void Physical_cache::publish(const fs::path& net, const fs::path& place) {
-  const auto pending = fs::path(directory_.string() + ".pending");
-  fs::remove_all(pending);
+  if (directory_.has_parent_path()) {
+    fs::create_directories(directory_.parent_path());
+  }
+  auto temp = directory_.string() + ".pending.XXXXXX";
+  if (::mkdtemp(temp.data()) == nullptr) {
+    throw std::system_error(errno, std::generic_category(), "creating staging directory for physical cache");
+  }
+  struct Staging {
+    fs::path path;
+    ~Staging() {
+      std::error_code cleanup;
+      fs::remove_all(path, cleanup);
+    }
+  } staging{temp};
+  const auto& pending = staging.path;
   fs::create_directories(pending / "artifacts/place");
   copy_tree(net, pending / "artifacts/net");
   for (const auto* name : kPlaceArtifacts) {
@@ -240,19 +258,11 @@ void Physical_cache::publish(const fs::path& net, const fs::path& place) {
   writer.Key("artifacts");
   write_inventory(writer, artifacts);
   writer.EndObject();
-  std::ofstream output(pending / "manifest.json");
-  output << buffer.GetString() << '\n';
-  output.close();
-  if (!output) {
-    throw std::runtime_error("cannot publish physical cache manifest");
+  const auto manifest = std::string(buffer.GetString(), buffer.GetSize()) + '\n';
+  if (const auto error = livehd::file_utils::write_file_atomic((pending / "manifest.json").string(), manifest); error) {
+    throw std::system_error(error, "publishing physical cache manifest");
   }
-  const auto previous = fs::path(directory_.string() + ".previous");
-  fs::remove_all(previous);
-  if (fs::exists(directory_)) {
-    fs::rename(directory_, previous);
-  }
-  fs::rename(pending, directory_);
-  fs::remove_all(previous);
+  livehd::file_utils::replace_dir_atomic(pending, directory_);
 }
 
 }  // namespace lhd

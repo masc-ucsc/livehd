@@ -237,6 +237,15 @@ private:
 };
 
 void Sub_inliner::carry_node_attrs(const hhds::Node_class& orig, const hhds::Node_class& neo) {
+  graph_util::carry_node_attrs(orig,
+                               neo,
+                               {.names            = false,
+                                .colors           = false,
+                                .placement        = false,
+                                .analysis         = false,
+                                .synth_policy     = false,
+                                .aggregate_origin = false,
+                                .matches          = false});
   if (orig.attr(livehd::attrs::preroute_exclude).has() || inst_.attr(livehd::attrs::preroute_exclude).has()
       || child_->get_input_node().attr(livehd::attrs::preroute_exclude).has()) {
     neo.attr(livehd::attrs::preroute_exclude).set();
@@ -282,9 +291,6 @@ void Sub_inliner::carry_node_attrs(const hhds::Node_class& orig, const hhds::Nod
     std::replace(def.begin(), def.end(), '.', '_');  // one dot-free component (as cgen's flat module name)
     neo.attr(hhds::attrs::name).set(prefix_ + std::string{transparent_instance_prefix} + def);
   }
-  if (auto a = orig.attr(livehd::attrs::lut); a.has()) {
-    neo.attr(livehd::attrs::lut).set(std::string{a.get()});
-  }
   if (auto a = orig.attr(hhds::attrs::srcid); a.has() && a.get() != 0) {
     auto newid = parent_->source_locator().import_from(child_->source_locator(), a.get());
     neo.attr(hhds::attrs::srcid).set(newid);
@@ -296,15 +302,6 @@ void Sub_inliner::carry_node_attrs(const hhds::Node_class& orig, const hhds::Nod
   // are per-def), and pass.color recolors the parent right after. Dropping it is
   // the honest move: carrying it would silently claim the child's region ids mean
   // something here.
-  if (auto a = orig.attr(livehd::attrs::proven); a.has()) {
-    neo.attr(livehd::attrs::proven).set(a.get());
-  }
-  if (auto a = orig.attr(livehd::attrs::runtime_check); a.has()) {
-    neo.attr(livehd::attrs::runtime_check).set(a.get());
-  }
-  if (auto a = orig.attr(livehd::attrs::memory_async_reset); a.has()) {
-    neo.attr(livehd::attrs::memory_async_reset).set(a.get());
-  }
   // Scalar-replacement provenance, or the spliced bits of a blasted register
   // stop being recognizable as ONE register. pass.semdiff reassembles a mapped
   // `q_0..q_15` into the ref's single wide `q` from exactly these five, and the
@@ -319,30 +316,12 @@ void Sub_inliner::carry_node_attrs(const hhds::Node_class& orig, const hhds::Nod
   if (auto a = orig.attr(livehd::attrs::aggregate_origin); a.has() && !a.get().empty()) {
     neo.attr(livehd::attrs::aggregate_origin).set(prefix_ + std::string{a.get()});
   }
-  // The ordinals carry no policy, so they go through the ONE table-driven copy
-  // (graph/attr_carry.hpp) rather than yet another hand-kept if-chain -- that
-  // header exists because these chains drift.
-  carry_attr<livehd::attrs::aggregate_source_index_t>(orig, neo);
-  carry_attr<livehd::attrs::aggregate_lane_ordinal_t>(orig, neo);
-  carry_attr<livehd::attrs::aggregate_bit_offset_t>(orig, neo);
-  carry_attr<livehd::attrs::aggregate_bit_width_t>(orig, neo);
-  carry_attr<livehd::attrs::aggregate_extent_t>(orig, neo);
 }
 
 void Sub_inliner::carry_driver_attrs(const hhds::Pin_class& orig, const hhds::Pin_class& neo) {
-  carry_signal_roles(orig, neo);
-  carry_preroute_exclusion(orig, neo);
-  if (auto b = bits_of(orig); b != 0) {
-    set_bits(neo, b);
-  }
-  if (!is_unsign(orig)) {
-    set_sign(neo);
-  }
+  carry_pin_attrs(orig, neo, {.names = false, .placement = false, .matches = false});
   if (auto a = orig.attr(livehd::attrs::pin_name); a.has()) {
     set_pin_name(neo, prefix_ + std::string{a.get()});  // wire names are per-def: prefix like node names
-  }
-  if (auto o = orig.attr(livehd::attrs::pin_offset); o.has()) {
-    neo.attr(livehd::attrs::pin_offset).set(o.get());
   }
 }
 
@@ -998,6 +977,20 @@ hhds::Pin_class fit_to_port(hhds::Graph& graph, const hhds::Pin_class& driver, i
   auto fitted = create_get_mask(graph, driver, 0, bits).create_driver_pin(0);
   set_ubits(fitted, bits);
   return fitted;
+}
+
+bool is_pure_comb_body(hhds::Graph* body, bool single_product) {
+  if (body == nullptr) {
+    return false;
+  }
+  for (auto node : body->body().nodes()) {
+    const auto op = type_op_of(node);
+    if (is_type_register(node) || op == Ntype_op::Memory || op == Ntype_op::Sub || op == Ntype_op::Clock_cell
+        || (single_product && op == Ntype_op::Or)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 std::string sub_def_port_mismatch(const hhds::Node_class& inst, hhds::Graph* def) {

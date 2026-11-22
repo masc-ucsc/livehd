@@ -77,9 +77,10 @@ genrule(
         "lhd_kernel_common.cpp",
         "lhd_kernel_compile.cpp",
         "lhd_kernel_internal.hpp",
-        "lhd_prp_import.hpp",
         "//core",
         "//core:file_name",
+        "//core:pyrope_ident",
+        "//core:sim_values",
         "//pass/specialize:specialize_srcs",
         "//pass/sweep:sweep_srcs",
         "//pass/satopt:satopt_srcs",
@@ -135,6 +136,8 @@ cc_library(
     includes = ["."],
     visibility = ["//visibility:public"],
     deps = [
+        "//core:file_utils",
+        "//core:serialization_hdrs",
         "//inou/cgen:sim_tune_hdrs",
         "@rapidjson",
     ],
@@ -182,7 +185,7 @@ cc_library(
     srcs = ["physical_cache.cpp"],
     hdrs = ["physical_cache.hpp"],
     copts = COPTS,
-    deps = ["@llvm-project//llvm:Support", "@rapidjson"],
+    deps = ["//core:file_utils", "@llvm-project//llvm:Support", "@rapidjson"],
 )
 
 cc_library(
@@ -216,7 +219,6 @@ cc_library(
         "physical_salt.hpp",
         "lhd_compile_cache.cpp",
         "lhd_compile_cache.hpp",
-        "lhd_prp_import.hpp",
         "lhd_kernel.cpp",
         "lhd_kernel_common.cpp",
         "lhd_kernel_compile.cpp",
@@ -340,7 +342,10 @@ cc_binary(
     }),
     visibility = ["//visibility:public"],
     deps = [
+        "//core:file_utils",
+        "//core:serialization_hdrs",
         "//core:sim_program",
+        "//core:sim_values",
         "//inou/cgen:sim_native_rt",
         "//inou/prp:tb_abi",
         "@hlop//hlop",

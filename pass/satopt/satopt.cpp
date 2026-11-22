@@ -12,6 +12,7 @@
 #include <print>
 #include <sstream>
 
+#include "file_utils.hpp"
 #include "json_util.hpp"
 #include "rapidjson/document.h"
 #include "satopt_detail.hpp"
@@ -104,21 +105,7 @@ void write_atomic(const std::string& path, const std::string& text) {
   if (ec) {
     return;
   }
-  // Separate temporary files prevent concurrent invocations from interleaving
-  // a definition descriptor from one proof run with another run's facts.
-  auto      temporary = path + ".tmp.XXXXXX";
-  const int fd        = mkstemp(temporary.data());
-  if (fd < 0) {
-    return;
-  }
-  close(fd);
-  std::ofstream out(temporary);
-  out << text;
-  out.close();
-  if (out) {
-    std::filesystem::rename(temporary, path, ec);
-  }
-  std::filesystem::remove(temporary, ec);
+  (void)file_utils::write_file_atomic(path, text);
 }
 }  // namespace detail
 

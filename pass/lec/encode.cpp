@@ -192,7 +192,7 @@ static Pin peel_clock_bits(Pin p, int& bit, bool keep_bit0) {
       }
       nbit = range->first + bit;
     } else if (bit != 0) {
-      // Sext(a, pos): bits [0, pos] pass, everything above copies bit pos.
+      // Sext(a, pos): bits [0, pos) pass, everything above copies bit pos - 1.
       // Bit 0 always passes; a higher bit needs the constant pos.
       Pin pos;
       for (const auto& sink : p.get_master_node().inp_sorted_pins()) {
@@ -203,10 +203,10 @@ static Pin peel_clock_bits(Pin p, int& bit, bool keep_bit0) {
           }
         }
       }
-      if (!pos.is_const() || !gu::const_of(pos).is_just_i64() || gu::const_of(pos).to_just_i64() < 0) {
+      if (!pos.is_const() || !gu::const_of(pos).is_just_i64() || gu::const_of(pos).to_just_i64() <= 0) {
         break;
       }
-      nbit = static_cast<int>(std::min<int64_t>(bit, gu::const_of(pos).to_just_i64()));
+      nbit = static_cast<int>(std::min<int64_t>(bit, gu::const_of(pos).to_just_i64() - 1));
     }
     if (keep_bit0 && nbit != 0) {
       break;
@@ -871,6 +871,35 @@ Term fit_to(cvc5::TermManager& tm, const Val& v, int width) {
   uint32_t d  = static_cast<uint32_t>(width - v.width);
   auto     op = tm.mkOp(v.is_signed ? Kind::BITVECTOR_SIGN_EXTEND : Kind::BITVECTOR_ZERO_EXTEND, {d});
   return tm.mkTerm(op, {v.term});
+}
+
+Term vals_equal(cvc5::TermManager& tm, const Val& a, const Val& b) {
+  // Compare integer values. Mixed signs require room for the unsigned operand's leading zero.
+  const int width = std::max(a.width + (!a.is_signed && b.is_signed), b.width + (!b.is_signed && a.is_signed));
+  return tm.mkTerm(Kind::EQUAL, {fit_to(tm, a, width), fit_to(tm, b, width)});
+}
+
+Term encode_shift(cvc5::TermManager& tm, const Val& data, const Val& amount, int width, bool left) {
+  // The amount is unsigned and self-determined. Preserve its high bits even
+  // when the destination is narrow, so an overshift cannot wrap to a small count.
+  const int  wide    = std::max({data.width, amount.width, width, 1});
+  const auto kind    = left ? Kind::BITVECTOR_SHL : (data.is_signed ? Kind::BITVECTOR_ASHR : Kind::BITVECTOR_LSHR);
+  auto       shifted = tm.mkTerm(kind, {fit_to(tm, data, wide), fit_to(tm, Val{amount.term, amount.width, false}, wide)});
+  return fit_to(tm, Val{shifted, wide, data.is_signed}, width);
+}
+
+Div_result encode_div(cvc5::TermManager& tm, const Val& a, const Val& b, int width, bool remainder, const Term& undefined) {
+  // Divide at operand width even when the inferred result is narrow. The sign
+  // of the operands selects the operation. SREM has the dividend's sign.
+  const bool signed_math = a.is_signed || b.is_signed;
+  const int  wide        = std::max({width, a.width + (signed_math && !a.is_signed), b.width + (signed_math && !b.is_signed)});
+  const auto av          = fit_to(tm, a, wide);
+  const auto bv          = fit_to(tm, b, wide);
+  const auto kind        = remainder ? (signed_math ? Kind::BITVECTOR_SREM : Kind::BITVECTOR_UREM)
+                                     : (signed_math ? Kind::BITVECTOR_SDIV : Kind::BITVECTOR_UDIV);
+  const auto by_zero     = tm.mkTerm(Kind::EQUAL, {bv, bv_const(tm, wide, 0)});
+  const auto value       = fit_to(tm, Val{tm.mkTerm(kind, {av, bv}), wide, signed_math}, width);
+  return {tm.mkTerm(Kind::ITE, {by_zero, undefined.isNull() ? bv_const(tm, width, 0) : undefined, value}), by_zero};
 }
 
 Sort Encoder::bv(int width) { return tm_.mkBitVectorSort(width < 1 ? 1 : width); }
@@ -3414,56 +3443,14 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           result = add_acc;
           break;
         }
-        case Ntype_op::Div: {
-          if (pid(0).size() != 1 || pid(1).size() != 1) {
-            return fail("Div expects single a/b drivers");
-          }
-          // Division is NOT modular like add/mult: fitting the operands to the
-          // (often tiny) output width W corrupts it. Bitwidth analysis stamps the
-          // QUOTIENT width on the Div pin — e.g. `c/100` with c:u3 has a quotient
-          // that is always 0, so W is ~1 bit; `fit(100, 1)` would truncate the
-          // divisor to 0 => UDIV-by-zero => all-ones garbage. Compute the quotient
-          // at a width that holds both operands, then narrow to the output width.
-          const auto& av          = pid(0)[0];
-          const auto& bv          = pid(1)[0];
-          const bool  signed_math = av.is_signed || bv.is_signed;
-          // Signed arithmetic needs a zero guard on each unsigned operand.
-          // The quotient's inferred sign does not select the operation: two
-          // negative operands can produce a proven non-negative quotient.
-          int         dw = std::max({W, av.width + (signed_math && !av.is_signed), bv.width + (signed_math && !bv.is_signed)});
-          Term        a  = fit(av, dw);
-          Term        b  = fit(bv, dw);
-          Term        q  = tm_.mkTerm(signed_math ? Kind::BITVECTOR_SDIV : Kind::BITVECTOR_UDIV, {a, b});
-          div_by_zero    = tm_.mkTerm(Kind::EQUAL, {b, bv_const(tm_, dw, 0)});
-          q              = tm_.mkTerm(Kind::ITE, {div_by_zero, bv_const(tm_, dw, 0), q});
-          result         = fit(Val{q, dw, signed_math}, W);
-          break;
-        }
+        case Ntype_op::Div:
         case Ntype_op::Rem: {
           if (pid(0).size() != 1 || pid(1).size() != 1) {
-            return fail("Rem expects single a/b drivers");
+            return fail(op == Ntype_op::Div ? "Div expects single a/b drivers" : "Rem expects single a/b drivers");
           }
-          // Same width discipline as Div, and it matters MORE here: the result
-          // width is legitimately tiny (`a % 4` is 2 bits), so fitting the DIVISOR
-          // to W would truncate 4 to 0 and hand cvc5 a remainder-by-zero, which is
-          // all-ones rather than an error. Compute at a width holding both
-          // operands, then narrow.
-          //
-          // SREM, never SMOD: the op is TRUNCATED remainder (sign follows the
-          // dividend), matching Verilog `%`, Dlop::rem_op and the tolg lowering.
-          // SMOD is floored and would flip the sign for a negative dividend --
-          // and because BOTH sides of the miter would use the same wrong kind,
-          // lec would still report "equivalent". One kind, no sign switch: every
-          // value here is signed and unsigned is just the non-negative subset.
-          const auto& av = pid(0)[0];
-          const auto& bv = pid(1)[0];
-          int         dw = std::max({W, av.width + !av.is_signed, bv.width + !bv.is_signed});
-          Term        a  = fit(av, dw);
-          Term        b  = fit(bv, dw);
-          Term        r  = tm_.mkTerm(Kind::BITVECTOR_SREM, {a, b});
-          div_by_zero    = tm_.mkTerm(Kind::EQUAL, {b, bv_const(tm_, dw, 0)});
-          r              = tm_.mkTerm(Kind::ITE, {div_by_zero, bv_const(tm_, dw, 0), r});
-          result         = fit(Val{r, dw, true}, W);
+          auto div    = encode_div(tm_, pid(0)[0], pid(1)[0], W, op == Ntype_op::Rem);
+          result      = div.value;
+          div_by_zero = div.by_zero;
           break;
         }
         case Ntype_op::Not: {
@@ -3516,23 +3503,9 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
             result = pred_to_bv(tm_.mkBoolean(true));
             break;
           }
-          // LGraph compares integer values, independently of Verilog's
-          // expression coercions. Extend each operand with its own sign and
-          // retain an unsigned operand's leading zero when signs are mixed.
-          // Otherwise s4(-1) incorrectly equals u4(15).
-          int  cw           = 0;
-          bool any_signed   = false;
-          bool any_unsigned = false;
-          for (const auto& v : all) {
-            cw           = std::max(cw, v.width);
-            any_signed   = any_signed || v.is_signed;
-            any_unsigned = any_unsigned || !v.is_signed;
-          }
-          cw       += any_signed && any_unsigned;
-          auto ext  = [&](const Val& v) { return fit_to(tm_, v, cw); };
           Term acc;
           for (size_t i = 1; i < all.size(); ++i) {
-            Term eq = tm_.mkTerm(Kind::EQUAL, {ext(all[0]), ext(all[i])});
+            Term eq = vals_equal(tm_, all[0], all[i]);
             acc     = acc.isNull() ? eq : tm_.mkTerm(Kind::AND, {acc, eq});
           }
           result = pred_to_bv(acc);
@@ -3585,19 +3558,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           // defensive: it also gives the zero-driver identity (no amount => `a`)
           // that pass/abc/abc_blast.hpp shares.
           for (const auto& b : pid(1)) {
-            // A shift count is UNSIGNED (a bit position), so zero-extend it. Reading
-            // it as signed would sign-extend a wrapped 3-bit amount like 7 (== -1)
-            // to a huge value, overshifting `1 << amt` to 0 (e.g. RISC-V vlmax).
-            // It is also SELF-DETERMINED: never truncate it to the (possibly
-            // narrower) result width. A one-bit value shifted by the unsized
-            // constant 2 must become zero, not `a << (2 truncated to 1 bit)` = a.
-            // cvc5 requires equal operand widths, so shift at a width that holds
-            // the value, result, AND full count, then narrow the result.
-            const int cw    = std::max({a.width, b.width, W, 1});
-            Term      af    = fit(a, cw);
-            Term      shamt = fit_to(tm_, Val{b.term, b.width, false}, cw);
-            Term      wide  = tm_.mkTerm(Kind::BITVECTOR_SHL, {af, shamt});
-            Term      sh    = fit_to(tm_, Val{wide, cw, a.is_signed}, W);
+            Term sh         = encode_shift(tm_, a, b, W, /*left=*/true);
             acc             = acc.isNull() ? sh : tm_.mkTerm(Kind::BITVECTOR_OR, {acc, sh});
           }
           result      = acc.isNull() ? fit(a, W) : acc;
@@ -3617,19 +3578,8 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           if (pid(0).empty() || pid(1).empty()) {
             return fail("SRA missing a/b");
           }
-          // A right shift pulls bits DOWN from higher positions, so the operand
-          // must be at its full width BEFORE shifting — fitting it to the (possibly
-          // narrower) output width W first would drop the very bits the shift moves
-          // into range (e.g. (w[63:0] >> 1)[0] = w[1], but ((w[0]) >> 1) = 0). Shift
-          // at max(operand,output) width, then fit the result to W. Arithmetic
-          // (sign-replicating) only for a signed operand; logical otherwise — this
-          // mirrors Verilog `>>>` (arithmetic iff the operand is signed).
           const Val& a    = pid(0)[0];
-          int        cw   = std::max({a.width, pid(1)[0].width, W, 1});
-          Term       af   = fit(a, cw);
-          Term       shf  = fit_to(tm_, Val{pid(1)[0].term, pid(1)[0].width, false}, cw);  // shift amount: unsigned
-          Kind       k    = a.is_signed ? Kind::BITVECTOR_ASHR : Kind::BITVECTOR_LSHR;
-          result          = fit_to(tm_, Val{tm_.mkTerm(k, {af, shf}), cw, a.is_signed}, W);
+          result           = encode_shift(tm_, a, pid(1)[0], W, /*left=*/false);
           // An arithmetic shift PRESERVES the operand's sign, so the result is
           // signed whenever `a` is -- and the pin's own hint cannot say so, since
           // tolg's bind_result drops it on every op output. cgen already carries

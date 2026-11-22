@@ -1,7 +1,6 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include "pass_partition.hpp"
-#include "nest_regions.hpp"
 
 #include <rapidjson/document.h>
 #include <rapidjson/stringbuffer.h>
@@ -27,6 +26,7 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/container/inlined_vector.h"
+#include "attr_carry.hpp"
 #include "cell.hpp"
 #include "color_common.hpp"
 #include "diag.hpp"
@@ -37,6 +37,8 @@
 #include "hhds/graph.hpp"
 #include "hhds/hash_mix.hpp"
 #include "hhds/node_hash.hpp"
+#include "io_decls.hpp"
+#include "nest_regions.hpp"
 #include "node_util.hpp"
 #include "occurrence_materialize.hpp"
 #include "str_tools.hpp"
@@ -91,24 +93,16 @@ using livehd::color::Union_find;  // region = connected component of same color
 // assert in dbg, an empty name that crashed pass.abc (SIGSEGV) in opt. Refuse
 // such a def with a diagnostic before any pin is named.
 void check_io_decls(const hhds::GraphIO& gio, std::string_view top) {
-  absl::flat_hash_map<hhds::Port_id, std::string_view> owner;
-  auto                                                 scan = [&](const auto& decls) {
-    for (const auto& d : decls) {
-      const auto [it, fresh] = owner.try_emplace(d.port_id, d.name);
-      if (!fresh) {
-        livehd::diag::err("pass.partition", "io-port-clash", "io")
-            .msg("'{}' declares ports '{}' and '{}' on the same port id {}: its GraphIO is out of sync with its body",
-                 top,
-                 it->second,
-                 d.name,
-                 d.port_id)
-            .hint("re-create the lg: library from source into a fresh --emit-dir lg: directory")
-            .fatal();
-      }
-    }
-  };
-  scan(gio.get_input_pin_decls());
-  scan(gio.get_output_pin_decls());
+  if (const auto clash = gu::find_io_port_clash(gio)) {
+    livehd::diag::err("pass.partition", "io-port-clash", "io")
+        .msg("'{}' declares ports '{}' and '{}' on the same port id {}: its GraphIO is out of sync with its body",
+             top,
+             clash->first,
+             clash->second,
+             clash->id)
+        .hint("re-create the lg: library from source into a fresh --emit-dir lg: directory")
+        .fatal();
+  }
 }
 
 // pin_name_of for a graph-IO pin whose name the caller must have: a missing
@@ -704,22 +698,8 @@ private:
 
 void Partitioner::carry_node_attrs(const hhds::Node_class& orig, const hhds::Node_class& neo, hhds::GraphLibrary* dst_lib) {
   admit("carry_node_attrs");
-  if (orig.attr(livehd::attrs::preroute_exclude).has()) {
-    neo.attr(livehd::attrs::preroute_exclude).set();
-  }
+  gu::carry_node_attrs(orig, neo, {.colors = false, .placement = false, .analysis = false});
   gu::Color_group::copy(orig, neo);
-  if (auto a = orig.attr(livehd::attrs::pcrs_clock_buffer); a.has()) {
-    neo.attr(livehd::attrs::pcrs_clock_buffer).set(a.get());
-  }
-  if (auto a = orig.attr(livehd::attrs::synth_policy); a.has()) {
-    neo.attr(livehd::attrs::synth_policy).set(std::string(a.get()));
-  }
-  if (gu::has_name(orig)) {
-    neo.attr(hhds::attrs::name).set(std::string{gu::node_name_of(orig)});
-  }
-  if (auto a = orig.attr(livehd::attrs::lut); a.has()) {
-    neo.attr(livehd::attrs::lut).set(std::string{a.get()});
-  }
   if (auto a = orig.attr(hhds::attrs::srcid); a.has() && a.get() != 0) {
     // Import into the output LIBRARY's shared srcmap, never the body's own
     // locator: every body chains to the library base (hhds bind_library), so the
@@ -748,20 +728,10 @@ void Partitioner::carry_node_attrs(const hhds::Node_class& orig, const hhds::Nod
 
 void Partitioner::carry_driver_attrs(const hhds::Pin_class& orig, const hhds::Pin_class& neo) {
   admit("carry_driver_attrs");
-  gu::carry_signal_roles(orig, neo);
-  gu::carry_preroute_exclusion(orig, neo);
-  if (auto b = gu::bits_of(orig); b != 0) {
-    gu::set_bits(neo, b);
-  }
-  if (!gu::is_unsign(orig)) {
-    gu::set_sign(neo);
-  }
+  gu::carry_pin_attrs(orig, neo, {.names = false, .placement = false});
   auto pn = gu::pin_name_of(orig);
   if (!pn.empty()) {
     gu::set_pin_name(neo, pn);
-  }
-  if (auto o = orig.attr(livehd::attrs::pin_offset); o.has()) {
-    neo.attr(livehd::attrs::pin_offset).set(o.get());
   }
 }
 
@@ -1998,22 +1968,7 @@ void Partitioner::build_module(uint32_t r) {
 // comparison body. Preserve both declaration metadata and input-pin attrs.
 std::shared_ptr<hhds::Graph> Partitioner::create_top_body(const std::shared_ptr<hhds::GraphIO>& gio, std::string_view stage) {
   auto src_gio = g_->get_io();
-  for (const auto& decl : src_gio->get_input_pin_decls()) {
-    admit(stage);
-    gio->add_input(decl.name, decl.port_id, decl.loop_break);
-    if (decl.bits != 0) {
-      gio->set_bits(decl.name, decl.bits);
-    }
-    gio->set_unsign(decl.name, decl.unsign);
-  }
-  for (const auto& decl : src_gio->get_output_pin_decls()) {
-    admit(stage);
-    gio->add_output(decl.name, decl.port_id, decl.loop_break);
-    if (decl.bits != 0) {
-      gio->set_bits(decl.name, decl.bits);
-    }
-    gio->set_unsign(decl.name, decl.unsign);
-  }
+  gu::copy_io_decls(*src_gio, *gio, [&] { admit(stage); });
   auto body = gio->create_graph();
 
   // GraphIO declarations do not propagate bits/sign to materialized pins.

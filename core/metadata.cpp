@@ -1,16 +1,14 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "metadata.hpp"
 
-#include <unistd.h>
-
 #include <algorithm>
-#include <atomic>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <map>
 #include <stdexcept>
 
+#include "file_utils.hpp"
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
 namespace livehd::metadata {
@@ -183,25 +181,12 @@ void Bundle::replace(const rapidjson::Value& record) {
   entries_.PushBack(rapidjson::Value(record, a), a);
 }
 void Bundle::write(const std::string& path) const {
-  namespace fs                        = std::filesystem;
-  static std::atomic<unsigned> serial = 0;
-  const fs::path               destination(path);
-  if (!destination.parent_path().empty()) {
-    fs::create_directories(destination.parent_path());
+  const auto parent = std::filesystem::path(path).parent_path();
+  if (!parent.empty()) {
+    std::filesystem::create_directories(parent);
   }
-  const auto tmp = path + ".tmp." + std::to_string(getpid()) + "." + std::to_string(serial++);
-  try {
-    std::ofstream f(tmp);
-    f << json() << '\n';
-    f.close();
-    if (!f) {
-      throw std::runtime_error("cannot write metadata: " + path);
-    }
-    fs::rename(tmp, path);
-  } catch (...) {
-    std::error_code ec;
-    fs::remove(tmp, ec);
-    throw;
+  if (const auto error = file_utils::write_file_atomic(path, json() + '\n'); error) {
+    throw std::system_error(error, "writing metadata: " + path);
   }
 }
 }  // namespace livehd::metadata

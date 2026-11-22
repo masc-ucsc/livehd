@@ -2051,22 +2051,6 @@ std::shared_ptr<Lnast> Prp2lnast::pop_streamed_destination() {
 }
 
 namespace {
-// Copy one LNAST node (preserving ref/const text) under dst_parent.
-Lnast_nid prp_copy_one_node(const Lnast& src, const Lnast_nid& src_nid, Lnast& dst, const Lnast_nid& dst_parent) {
-  const auto t  = src.get_type(src_nid);
-  Lnast_nid  nn = dst.add_child(dst_parent, t);
-  if (Lnast_ntype::is_ref(t) || Lnast_ntype::is_const(t)) {
-    dst.set_name_id(nn, src.get_name_id(src_nid));
-  }
-  // Carry the SourceId across the decl-merge rebuild — one integer attr,
-  // copied unconditionally for every def-bearing kind (the dst tree
-  // becomes this same Lnast's body via replace_body, so the id stays
-  // resolvable in the Lnast's own locator).
-  if (Lnast::srcid_carries(t)) {
-    dst.set_srcid(nn, src.get_srcid(src_nid));
-  }
-  return nn;
-}
 
 // Comment/whitespace-insensitive fingerprint of a source span. The streamed
 // lambda marker rides this in the wrapper tree, where it participates in the
@@ -2148,12 +2132,6 @@ prpparse::Ast* clone_prp_subtree(prpparse::Ast_arena& dst, const prpparse::Ast* 
 }
 
 // Faithful recursive subtree copy (no merging) — used for the TYPE subtree.
-void prp_copy_subtree(const Lnast& src, const Lnast_nid& src_nid, Lnast& dst, const Lnast_nid& dst_parent) {
-  auto nn = prp_copy_one_node(src, src_nid, dst, dst_parent);
-  for (auto c : src.children(src_nid)) {
-    prp_copy_subtree(src, c, dst, nn);
-  }
-}
 
 // Name of the Nth child of `nid` (0-based), or "" if absent.
 std::string_view prp_child_name(const Lnast& src, const Lnast_nid& nid, int n) {
@@ -2189,7 +2167,7 @@ void Prp2lnast::rewrite_decls_to_declare() {
   // is copied verbatim (recursing so nested stmts merge too).
   std::function<Lnast_nid(const Lnast_nid&, const Lnast_nid&)> copy_merge
       = [&](const Lnast_nid& src_nid, const Lnast_nid& dst_parent) -> Lnast_nid {
-    auto nn   = prp_copy_one_node(*lnast, src_nid, *staging, dst_parent);
+    auto nn   = lnast->copy_node(src_nid, *staging, dst_parent);
     auto type = lnast->get_type(src_nid);
     if (!Lnast_ntype::is_stmts(type)) {
       for (auto c : lnast->children(src_nid)) {
@@ -2253,7 +2231,7 @@ void Prp2lnast::rewrite_decls_to_declare() {
       staging->add_child(d, Lnast_node::create_ref(target));
       Lnast_nid tnid = type_node.is_invalid() ? Lnast_nid{} : prp_child_nid(*lnast, type_node, 1);
       if (!tnid.is_invalid()) {
-        prp_copy_subtree(*lnast, tnid, *staging, d);
+        lnast->copy_subtree(tnid, *staging, d);
       } else {
         staging->add_child(d, Lnast_ntype::create_prim_type_none());
       }
@@ -2276,7 +2254,7 @@ void Prp2lnast::rewrite_decls_to_declare() {
         // The (min,max) rides the cluster head as its trailing child.
         auto st = prp_child_nid(*lnast, k, 3);
         if (!st.is_invalid() && Lnast_ntype::is_stages(lnast->get_type(st))) {
-          prp_copy_subtree(*lnast, st, *staging, d);
+          lnast->copy_subtree(st, *staging, d);
         }
       } else if (kind == "reg") {
         // The reg initializer rides the cluster head (child 3);
@@ -2285,7 +2263,7 @@ void Prp2lnast::rewrite_decls_to_declare() {
         // value (reg reads are runtime q reads).
         auto iv = prp_child_nid(*lnast, k, 3);
         if (!iv.is_invalid()) {
-          prp_copy_subtree(*lnast, iv, *staging, d);
+          lnast->copy_subtree(iv, *staging, d);
         }
       }
       i = j;
@@ -3724,7 +3702,7 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
       lnast->add_child(aidx, ref);
       lnast->add_child(aidx, store_value);
       // Span → bitwidth's "does not fit" overflow diagnostic can point at the
-      // write site (the declare/store loc-carry chain: here, prp_copy_one_node,
+      // write site (the declare/store loc-carry chain: here, Lnast::copy_node,
       // and the runner's emit_push).
       attach_loc(aidx, id);
     }
@@ -6651,8 +6629,9 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
         }
         if (!ts_node_is_null(id)) {
           Lnast_nid gref;
-          check_signature_shadow(canonical_escaped_ident(trim(get_text(id))), id, "generic");
-          note_binding(canonical_escaped_ident(trim(get_text(id))), Bind_kind::generic);
+          const auto generic_name = canonical_escaped_ident(trim(get_text(id)));
+          check_signature_shadow(generic_name, id, "generic");
+          note_binding(generic_name, Bind_kind::generic);
           // A default is read by name at each call (the runner re-reads it),
           // so a name it reads must be declared here: this generic and the
           // later ones are not yet visible to it.
@@ -6662,12 +6641,12 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
             }
             record_name_reads(def, Generic_read::default_value);
           }
-          inflight_name_scopes_.back().emplace_back(get_text(id));
+          inflight_name_scopes_.back().emplace_back(generic_name);
           if (stream_lambda) {
-            streamed_generics.emplace_back(get_text(id));
-            streamed_scope_names_.insert(std::string(get_text(id)));
+            streamed_generics.emplace_back(generic_name);
+            streamed_scope_names_.emplace(generic_name);
           } else {
-            gref = lnast->add_child(gen_idx, Lnast_node::create_ref(get_text(id)));
+            gref = lnast->add_child(gen_idx, Lnast_node::create_ref(generic_name));
           }
           // A DECLARATION default (`<T, N=1>`, todo 3g B) rides as the default's
           // source text in a `const` child of the generic ref: func_extract
@@ -6759,15 +6738,16 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
       } else if (ct == "typed_identifier") {
         add_one(ci);
       } else if (ct == "identifier") {
-        check_signature_shadow(canonical_escaped_ident(trim(get_text(ci))), ci, "generic");
-        note_binding(canonical_escaped_ident(trim(get_text(ci))), Bind_kind::generic);
-        inflight_name_scopes_.back().emplace_back(get_text(ci));
+        const auto generic_name = canonical_escaped_ident(trim(get_text(ci)));
+        check_signature_shadow(generic_name, ci, "generic");
+        note_binding(generic_name, Bind_kind::generic);
+        inflight_name_scopes_.back().emplace_back(generic_name);
         if (stream_lambda) {
-          streamed_generics.emplace_back(get_text(ci));
+          streamed_generics.emplace_back(generic_name);
           streamed_generic_defaults.emplace_back();
-          streamed_scope_names_.insert(std::string(get_text(ci)));
+          streamed_scope_names_.emplace(generic_name);
         } else {
-          lnast->add_child(gen_idx, Lnast_node::create_ref(get_text(ci)));
+          lnast->add_child(gen_idx, Lnast_node::create_ref(generic_name));
         }
       }
     }

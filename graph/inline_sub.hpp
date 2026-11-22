@@ -13,6 +13,10 @@
 
 namespace livehd::graph_util {
 
+// A leaf body with no state, memory or explicit clock operators. The phase
+// scheduler can also limit an exposed gate model to a single product term.
+[[nodiscard]] bool is_pure_comb_body(hhds::Graph* body, bool single_product = false);
+
 // Structurally inline ONE Sub instance into the body that holds it, in place.
 //
 // The child's nodes are cloned into `parent` (node/wire names prefixed with the

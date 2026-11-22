@@ -28,9 +28,13 @@
 #include "perf_tracing.hpp"
 
 using livehd::cprop_value::make_node;
+using livehd::graph_util::consumer_sinks;
 using livehd::graph_util::create_const;
 using livehd::graph_util::debug_name;
+using livehd::graph_util::drv_at;
 using livehd::graph_util::find_sink_pin;
+using livehd::graph_util::has_single_consumer;
+using livehd::graph_util::is_computed_comb_op;
 using livehd::graph_util::is_graph_input_pin;
 using livehd::graph_util::is_graph_output_pin;
 using livehd::graph_util::type_op_of;
@@ -110,39 +114,10 @@ void clear_all_sinks(const hhds::Node_class& node) {
   }
 }
 
-// Every consumer SINK of `node`, materialized: the node's DRIVER PINS, then
-// each pin's own fan-out. Same sinks, same order as the old node-level
-// out_edges() walk, but safe to rewire through -- a driver's fan-out is a lazy
-// view over live edge storage, and every caller below reconnects or deletes
-// while walking it. A driver's fan-out is genuinely a SET (clock and reset
-// reach 100K+ sinks), so there is no single-sink reader to use instead.
-std::vector<hhds::Pin_class> consumer_sinks(const hhds::Node_class& node) {
-  std::vector<hhds::Pin_class> sinks;
-  for (const auto& out_pin : node.out_sorted_pins()) {
-    for (const auto& e : out_pin.out_edges()) {
-      sinks.push_back(e.sink);
-    }
-  }
-  return sinks;
-}
-
 // Only explicit operations and literal values can prove a mask redundant.
 bool fits_unsigned_window(const hhds::Pin_class& pin, int width) {
   const int bound = livehd::cprop_value::unsigned_width(pin);
   return width > 0 && bound >= 0 && bound <= width;
-}
-
-// "Does `p` (a driver pin) or `n` (a node) have EXACTLY one consumer edge?"
-// Stops at the second edge instead of walking the whole fan-out.
-template <typename T>
-[[nodiscard]] bool has_single_consumer(const T& p) {
-  size_t consumers = 0;
-  for ([[maybe_unused]] const auto& e : p.out_edges()) {
-    if (++consumers > 1) {
-      return false;
-    }
-  }
-  return consumers == 1;
 }
 
 [[nodiscard]] std::string sink_pin_name(const hhds::Pin_class& spin) {
@@ -154,7 +129,6 @@ template <typename T>
   return Ntype::get_sink_name(op, spin.get_port_id());
 }
 
-[[nodiscard]] hhds::Pin_class drv_at(const hhds::Node_class& n, uint32_t pid);
 
 using livehd::muxctx::Bool_condition;
 
@@ -216,17 +190,6 @@ using livehd::muxctx::Bool_condition;
 // any cycle). See graph/split_selfref.cpp for the cycle-gated, node-CREATING
 // rules (Mux/EQ/distribute) this deliberately does NOT duplicate.
 
-[[nodiscard]] hhds::Pin_class drv_at(const hhds::Node_class& n, uint32_t pid) {
-  // Cprop only asks for required single-driver ports of a well-formed builtin.
-  // Go directly through that sink's fan-in instead of materializing and
-  // filtering every input edge of the node for each port lookup.
-  auto sink    = n.get_sink_pin(static_cast<hhds::Port_id>(pid));
-  auto drivers = sink.get_driver_pins();
-  if (drivers.size() == 1) {
-    return drivers.front();
-  }
-  return {};
-}
 
 constexpr std::pair<int, int> kFpBail{-1, -1};
 // Canonicalizing one flat, disjoint Or/SHL pack scans immediate operands. Chisel-generated state bundles can
@@ -261,17 +224,6 @@ constexpr int                 kConcatPackFanInLimit = 4096;
 [[nodiscard]] int low_mask_width(const Dlop& mask) {
   auto window = livehd::graph_util::mask_window_of(mask);
   return (window && window->first == 0) ? window->second : -1;
-}
-
-// "Is `op` a COMPUTED combinational cell (as opposed to an IO/state/Sub/const/
-// attr boundary)?"
-//
-// Ntype::is_comb minus Clock_cell, a clock-network operator that is never
-// folded or CSE'd as data. Div and Rem are pure (Q2: x/0 and x%0 are the
-// all-unknown value, never a trap), so they are hash-consed and CSE'd like any
-// other op; cprop_opshare.cpp's shape_of lists both for the same reason.
-[[nodiscard]] constexpr bool is_computed_comb_op(Ntype_op op) {
-  return Ntype::is_comb(op) && op != Ntype_op::Clock_cell;
 }
 
 using livehd::cprop_value::is_bool01;

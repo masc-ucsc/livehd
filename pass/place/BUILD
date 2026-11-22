@@ -944,7 +944,6 @@ cc_library(
         "@dreamplace//:macro_place",
         "@dreamplace//:macro_render",
         "@dreamplace//:macro_report",
-        "@dreamplace//thirdparty/flute",
         "@rapidjson",
     ],
 )

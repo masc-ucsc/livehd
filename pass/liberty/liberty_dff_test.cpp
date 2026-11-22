@@ -855,6 +855,27 @@ TEST(LibertyClockGateForm, WideDeMorganAndMixedPolarity) {
   EXPECT_FALSE(livehd::liberty::clock_gate_form(cell));
 }
 
+TEST(LibertyFunction, ScansQuotedPayloadsAndSemicolonlessAttributes) {
+  const auto cells = livehd::liberty::scan_comb_cells_text(R"(
+    library (sample) {
+      time_unit : "1ps"
+      capacitive_load_unit (1, "ff");
+      cell (BUF) {
+        comment : "brace } and escaped quote \" with // inside";
+        area : 7.25
+        dont_use : false
+        pin(A) { direction : input; capacitance : 3; }
+        pin(Y) { direction : output
+                 function : "A"; }
+      }
+    }
+  )");
+  ASSERT_EQ(cells.size(), 1U);
+  EXPECT_EQ(cells.front().name, "BUF");
+  EXPECT_DOUBLE_EQ(cells.front().area, 7.25);
+  EXPECT_EQ(cells.front().function, "A");
+}
+
 TEST(LibertyFunction, RepairElectricalUnitsAndNldmEstimate) {
   const auto cells = livehd::liberty::scan_comb_cells_text(R"(
     library (picofarads) { time_unit : "1ns"; capacitive_load_unit (1, "pf"); default_max_transition : 2;

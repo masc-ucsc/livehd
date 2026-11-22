@@ -50,6 +50,20 @@
 
 namespace livehd::graph_util {
 
+// Width carried by an unsized literal. Wide and unknown Dlop values already
+// carry a signed width. Small positive literals need only their magnitude.
+[[nodiscard]] inline uint32_t minimal_unsigned_const_width(const Dlop& value) {
+  if (value.has_unknowns() || !value.is_just_i64()) {
+    return std::max<uint32_t>(1, value.get_signed_bits());
+  }
+  const auto number = value.to_just_i64();
+  return number <= 0 ? 1 : std::max<uint32_t>(1, std::bit_width(static_cast<uint64_t>(number)));
+}
+
+[[nodiscard]] inline uint32_t intrinsic_const_width(const Dlop& value) {
+  return value.is_negative() ? std::max<uint32_t>(1, value.get_signed_bits()) : minimal_unsigned_const_width(value);
+}
+
 // A snapshot of a DRIVER's fan-out edges. Matches the element type and inline
 // capacity hhds's out_edges() view yields, so `Edge_vec v(r.begin(), r.end())`
 // never reallocates for the common low-degree driver.
@@ -640,6 +654,40 @@ inline constexpr std::string_view transparent_instance_prefix = "__flat___";
 }
 
 [[nodiscard]] inline std::string wire_name(const hhds::Occurrence_pin& pin) { return wire_name(pin.base_pin()); }
+
+// Inspect a single-driver port without creating a missing sink.
+[[nodiscard]] inline hhds::Pin_class drv_at(const hhds::Node_class& node, hhds::Port_id port) {
+  if (node.is_invalid()) {
+    return {};
+  }
+  const auto sink = node.try_get_sink_pin(port);
+  if (sink.is_invalid()) {
+    return {};
+  }
+  const auto drivers = sink.get_driver_pins();
+  return drivers.size() == 1 ? drivers.front() : hhds::Pin_class{};
+}
+
+// Snapshot consumer sinks before a rewrite changes the underlying edge list.
+[[nodiscard]] inline std::vector<hhds::Pin_class> consumer_sinks(const hhds::Node_class& node) {
+  std::vector<hhds::Pin_class> sinks;
+  for (const auto& pin : node.out_sorted_pins()) {
+    for (const auto& edge : pin.out_edges()) {
+      sinks.push_back(edge.sink);
+    }
+  }
+  return sinks;
+}
+
+template <class Source>
+[[nodiscard]] bool has_single_consumer(const Source& source) {
+  auto edges = source.out_edges();
+  auto iter  = edges.begin();
+  return iter != edges.end() && ++iter == edges.end();
+}
+
+// Clock cells are network primitives and must never be folded as data.
+[[nodiscard]] constexpr bool is_computed_comb_op(Ntype_op op) { return Ntype::is_comb(op) && op != Ntype_op::Clock_cell; }
 
 [[nodiscard]] inline hhds::Pin_class get_driver_of_sink_name(const hhds::Node_class& node, std::string_view name);
 [[nodiscard]] inline int32_t         concat_total_width(const hhds::Node_class& node);
@@ -1600,8 +1648,8 @@ inline void set_pin_offset(const hhds::Pin_class& pin, int32_t off) {
 // clock domains on multi-clock arrays. Tests the raw pid directly instead of
 // get_sink_name: that helper builds a std::string per edge (absl::StrCat above
 // the stride) on what is a hot per-node path.
-template <typename Fn>
-inline void for_each_memory_clock_driver(const hhds::Node_class& node, Fn&& fn) {
+template <typename Node, typename Fn>
+inline void for_each_memory_clock_driver(const Node& node, Fn&& fn) {
   I(type_op_of(node) == Ntype_op::Memory, "for_each_memory_clock_driver decodes Memory port blocks; got a non-Memory node");
   const auto clock_off = Ntype::get_sink_pid(Ntype_op::Memory, "clock_pin");
   for (auto sink : node.inp_sorted_pins()) {

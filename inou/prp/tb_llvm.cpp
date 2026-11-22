@@ -10,8 +10,8 @@
 #include <format>
 #include <fstream>
 #include <functional>
+#include <limits>
 #include <map>
-#include <mutex>
 #include <optional>
 #include <regex>
 #include <set>
@@ -37,7 +37,6 @@
 #include "llvm/Support/Error.h"
 #include "llvm/Support/ModRef.h"
 #include "llvm/Support/SHA256.h"
-#include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetOptions.h"
@@ -47,7 +46,9 @@
 #include "prpparse/lexer.hpp"
 #include "prpparse/parser.hpp"
 #include "prpparse/source_buffer.hpp"
+#include "pyrope_literal.hpp"
 #include "rapidjson/document.h"
+#include "sim_llvm_target.hpp"
 #include "str_tools.hpp"
 
 namespace prp_tb {
@@ -1425,44 +1426,35 @@ private:
   // An integer literal of any size: exactly the bits its value needs plus a sign bit. A `?` bit makes it a literal
   // the runtime draws once per run.
   Val literal(const std::string& raw) {
-    std::string lit = raw;
-    lit.erase(std::remove(lit.begin(), lit.end(), '_'), lit.end());
-    bool neg = false;
-    if (!lit.empty() && lit[0] == '-') {
-      neg = true;
-      lit.erase(0, 1);
+    const auto parsed = livehd::parse_pyrope_integer_spelling(raw);
+    if (!parsed) {
+      fail("invalid integer literal '" + raw + "'");
     }
-    unsigned radix  = 10;
-    size_t   digits = 0;
-    bool     sign_prefix = false;
-    if (lit.size() > 2 && lit[0] == '0' && (lit[1] == 'x' || lit[1] == 'X')) {
-      radix  = 16;
-      digits = 2;
-    } else if (lit.size() > 2 && lit[0] == '0' && (lit[1] == 'b' || lit[1] == 'B')) {
-      radix  = 2;
-      digits = 2;
-    } else if (lit.size() > 3 && lit[0] == '0' && (lit[1] == 'u' || lit[1] == 's') && (lit[2] == 'b' || lit[2] == 'B' || lit[2] == 'x' || lit[2] == 'X')) {
-      radix       = (lit[2] == 'b' || lit[2] == 'B') ? 2 : 16;
-      digits      = 3;
-      sign_prefix = lit[1] == 's';
+    const auto& lit = *parsed;
+    const auto  bpd = lit.bits_per_digit();
+    if (lit.digits.size() > (std::numeric_limits<unsigned>::max() - 1) / bpd) {
+      fail("integer literal is too large: " + raw);
     }
-    if (digits >= lit.size()) {
-      fail("integer literal '" + raw + "' has no digits");
+    const unsigned bits = static_cast<unsigned>(lit.digits.size()) * bpd;
+    if (lit.unknown()) {
+      const unsigned width = bits + !lit.signed_pattern;
+      if (width > kMaxTbWidth) {
+        fail("integer literal is wider than " + std::to_string(kMaxTbWidth) + " bits");
+      }
+      return unknown_literal(raw, lit.digits, lit.radix, lit.signed_pattern, lit.negate);
     }
-    const std::string body = lit.substr(digits);
-    if (body.find('?') != std::string::npos) {
-      return unknown_literal(raw, body, radix, sign_prefix, neg);
+    llvm::APInt v(bits + 1, llvm::StringRef(lit.digits), static_cast<uint8_t>(lit.radix));
+    if (lit.negative_pattern()) {
+      v = v.trunc(bits).sext(bits + 1);
     }
-    const unsigned bits_per_digit = radix == 2 ? 1 : radix == 16 ? 4 : 4;  // decimal: 4 bits per digit is an over-estimate
-    llvm::APInt    v(static_cast<unsigned>(body.size()) * bits_per_digit + 1, llvm::StringRef(body), static_cast<uint8_t>(radix));
-    if (neg) {
+    if (lit.negate) {
       v = -v;
     }
-    const unsigned w = neg ? v.getSignificantBits() : std::max(2u, v.getActiveBits() + 1);
-    if (neg && w > kMaxTbWidth) {
+    const unsigned width = v.isNegative() ? v.getSignificantBits() : std::max(2u, v.getActiveBits() + 1);
+    if (width > kMaxTbWidth) {
       fail("integer literal is wider than " + std::to_string(kMaxTbWidth) + " bits");
     }
-    return data(ConstantInt::get(m_.ctx(), v.sextOrTrunc(phys(w))), w);
+    return data(ConstantInt::get(m_.ctx(), v.sextOrTrunc(phys(width))), width);
   }
 
   // `0ub????????`, `0sb?`, `0x??`: known bits are fixed, each `?` bit is drawn ONCE per run (zero under
@@ -3014,12 +3006,7 @@ private:
 // ---- object emission --------------------------------------------------------------------------------------
 bool emit_object(llvm::Module& mod, const std::string& path, std::string& err, bool dump_bitcode,
                  std::optional<uint64_t> cache_salt) {
-  static std::once_flag once;
-  std::call_once(once, [] {
-    llvm::InitializeNativeTarget();
-    llvm::InitializeNativeTargetAsmPrinter();
-    llvm::InitializeNativeTargetAsmParser();
-  });
+  livehd::sim::initialize_llvm_target();
   llvm::Triple triple(llvm::sys::getDefaultTargetTriple());
   mod.setTargetTriple(triple);
   std::string         lookup;

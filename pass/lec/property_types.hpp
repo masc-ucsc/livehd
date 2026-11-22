@@ -42,8 +42,10 @@ struct Undecided_cause {
   }
   // Any resource limit is a timeout -- even when another engine also cannot check it.
   // Out of memory is a resource limit too (TIMEOUT-memory at the top level).
+  const bool engine_crash = has("engine crash") || has("ENGINE CRASH");
   if (has("formal.timeout") || has("wall deadline") || has("wall-clock limit") || has("timed out") || has("a resource limit")
-      || has("MEMOUT") || has("out of memory") || has("memory backstop") || has("RLIMIT_AS") || has("bad_alloc")) {
+      || has("MEMOUT") || has("out of memory") || has("bad_alloc")
+      || (!engine_crash && (has("memory backstop") || has("RLIMIT_AS")))) {
     return {"TIMEOUT", "timeout"};
   }
   if (has("NO reason")) {

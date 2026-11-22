@@ -62,7 +62,21 @@ public:
   static constexpr bool is_if_like(Lnast_ntype_int v) { return v == Lnast_ntype_if || v == Lnast_ntype_unique_if; }
 
   // Super types
-  static constexpr bool is_primitive_op(Lnast_ntype_int v) { return v >= Lnast_ntype_dp_assign && v <= Lnast_ntype_attr_get; }
+  static constexpr bool is_primitive_op(Lnast_ntype_int v) {
+    return (v >= Lnast_ntype_dp_assign && v <= Lnast_ntype_ge) || is_range(v)
+           || (v >= Lnast_ntype_tuple_concat && v <= Lnast_ntype_attr_get);
+  }
+
+  // Direct result operations and bindings name their destination in child 0.
+  static constexpr bool defines_first_child(Lnast_ntype_int v) {
+    return is_primitive_op(v) || is_func_call(v) || (v >= Lnast_ntype_func_does && v <= Lnast_ntype_func_case);
+  }
+
+  // A time-shifted read can carry state/lowering metadata. Classify its
+  // destination as a write, while keeping it outside local dead-code removal.
+  static constexpr bool is_dce_def_producing(Lnast_ntype_int v) {
+    return defines_first_child(v) && !is_declare(v) && !is_delay_assign(v);
+  }
   static constexpr bool is_logical_op(Lnast_ntype_int v) {
     return v == Lnast_ntype_log_and || v == Lnast_ntype_log_or || v == Lnast_ntype_log_not;
   }

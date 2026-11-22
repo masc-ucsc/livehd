@@ -8,6 +8,7 @@
 #include <tuple>
 
 #include "cut_rules.hpp"
+#include "routing_geometry.hpp"
 
 namespace livehd::physical {
 namespace {
@@ -187,7 +188,7 @@ std::array<Rect_edge, 4> edges(const Rect& r) {
 // Keep source identity at the caller. Here we prove only exact geometric
 // coverage and derive exterior edges without widening or bridging any gap.
 bool union_covers(const Shape& query, std::span<const Shape> shapes) {
-  std::vector<double> xs{query.rect.xl, query.rect.xh};
+  std::vector<Rect> context;
   for (const auto& shape : shapes) {
     if (shape.layer != query.layer) {
       continue;
@@ -196,33 +197,10 @@ bool union_covers(const Shape& query, std::span<const Shape> shapes) {
       return false;
     }
     if (shape.rect.overlaps(query.rect)) {
-      xs.push_back(std::max(query.rect.xl, shape.rect.xl));
-      xs.push_back(std::min(query.rect.xh, shape.rect.xh));
+      context.push_back(shape.rect);
     }
   }
-  std::ranges::sort(xs);
-  xs.erase(std::unique(xs.begin(), xs.end()), xs.end());
-  for (size_t i = 1; i < xs.size(); ++i) {
-    std::vector<std::pair<double, double>> ys;
-    for (const auto& shape : shapes) {
-      if (shape.layer == query.layer && shape.rect.xl <= xs[i - 1] && shape.rect.xh >= xs[i] && shape.rect.yh > query.rect.yl
-          && shape.rect.yl < query.rect.yh) {
-        ys.emplace_back(std::max(query.rect.yl, shape.rect.yl), std::min(query.rect.yh, shape.rect.yh));
-      }
-    }
-    std::ranges::sort(ys);
-    double reached = query.rect.yl;
-    for (const auto& [lo, hi] : ys) {
-      if (lo > reached) {
-        return false;
-      }
-      reached = std::max(reached, hi);
-    }
-    if (reached < query.rect.yh) {
-      return false;
-    }
-  }
-  return true;
+  return rect_union_covers(query.rect, context);
 }
 std::vector<Rect_edge> exposed_edges(const Shape& query, std::span<const Shape> shapes) {
   const auto query_edges = edges(query.rect);

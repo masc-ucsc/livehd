@@ -10,6 +10,7 @@
 #include <string>
 
 #include "diag.hpp"
+#include "file_utils.hpp"
 #include "hash_util.hpp"
 #include "json_util.hpp"
 #include "rapidjson/document.h"
@@ -91,7 +92,9 @@ Sta_cache::Sta_cache(std::string dir, uint64_t salt) : dir_(std::move(dir)), sal
   if (d.HasParseError() || !d.IsObject()) {
     return;  // corrupt file: start over, a cache is never an oracle of record
   }
-  if (jstr(d, "salt") != std::format("{:016x}", salt_)) {
+  const auto schema = d.FindMember("schema");
+  if (schema == d.MemberEnd() || !schema->value.IsInt() || schema->value.GetInt() != 1
+      || jstr(d, "salt") != std::format("{:016x}", salt_)) {
     return;  // a different timing engine / environment schema: re-time
   }
   auto regs = d.FindMember("analyses");
@@ -207,23 +210,11 @@ void Sta_cache::save() {
   out += "}}\n";
 
   const auto path = (fs::path(dir_) / "sta_cache.json").string();
-  const auto tmp  = path + ".tmp";
-  {
-    std::ofstream ofs(tmp, std::ios::binary | std::ios::trunc);
-    if (!ofs) {
-      livehd::diag::warn("pass.opentimer", "sta-cache-write", "io")
-          .msg("pass.opentimer: cannot write the STA reuse cache '{}' (this run is unaffected)", path)
-          .emit();
-      return;
-    }
-    ofs << out;
-  }
-  fs::rename(tmp, path, ec);
-  if (ec) {
-    fs::remove(tmp, ec);
+  if (const auto error = file_utils::write_file_atomic(path, out); error) {
     livehd::diag::warn("pass.opentimer", "sta-cache-write", "io")
-        .msg("pass.opentimer: cannot publish the STA reuse cache '{}' (this run is unaffected)", path)
+        .msg("pass.opentimer: cannot publish the STA reuse cache '{}': {} (this run is unaffected)", path, error.message())
         .emit();
+    return;
   }
   dirty_ = false;
 }

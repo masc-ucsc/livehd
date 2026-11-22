@@ -96,58 +96,6 @@ private:
 // Statement classes
 // ---------------------------------------------------------------------------
 
-// The runner DCE's definition-producing ops (child 0 is the defined name).
-[[nodiscard]] bool dce_def_producing(Ltype t) {
-  switch (t) {
-    case N::Lnast_ntype_store:
-    case N::Lnast_ntype_dp_assign:
-    case N::Lnast_ntype_range:
-    case N::Lnast_ntype_tuple_add:
-    case N::Lnast_ntype_tuple_concat:
-    case N::Lnast_ntype_tuple_get:
-    case N::Lnast_ntype_plus:
-    case N::Lnast_ntype_minus:
-    case N::Lnast_ntype_mult:
-    case N::Lnast_ntype_div:
-    case N::Lnast_ntype_mod:
-    case N::Lnast_ntype_shl:
-    case N::Lnast_ntype_sra:
-    case N::Lnast_ntype_sext:
-    case N::Lnast_ntype_set_mask:
-    case N::Lnast_ntype_get_mask:
-    case N::Lnast_ntype_concat:
-    case N::Lnast_ntype_bit_and:
-    case N::Lnast_ntype_bit_or:
-    case N::Lnast_ntype_bit_xor:
-    case N::Lnast_ntype_bit_not:
-    case N::Lnast_ntype_red_and:
-    case N::Lnast_ntype_red_or:
-    case N::Lnast_ntype_red_xor:
-    case N::Lnast_ntype_popcount:
-    case N::Lnast_ntype_log_and:
-    case N::Lnast_ntype_log_or:
-    case N::Lnast_ntype_log_not:
-    case N::Lnast_ntype_eq:
-    case N::Lnast_ntype_ne:
-    case N::Lnast_ntype_lt:
-    case N::Lnast_ntype_le:
-    case N::Lnast_ntype_gt:
-    case N::Lnast_ntype_ge:
-    case N::Lnast_ntype_func_call:
-    case N::Lnast_ntype_func_does:
-    case N::Lnast_ntype_func_equals:
-    case N::Lnast_ntype_func_in:
-    case N::Lnast_ntype_func_has:
-    case N::Lnast_ntype_func_case:
-    case N::Lnast_ntype_attr_set:
-    case N::Lnast_ntype_attr_get: return true;
-    default                      : return false;
-  }
-}
-
-// A ref that is child 0 of these names its target; it is not a read (the DCE's rule).
-[[nodiscard]] bool names_target(Ltype t) { return dce_def_producing(t) || N::is_declare(t) || N::is_type_spec(t); }
-
 // Statements the walk never looks into: their payload has scoping or execution
 // rules of its own (exclusive arms, a lifted loop body, a runtime cycle loop).
 [[nodiscard]] bool is_barrier_compound(Ltype t) {
@@ -175,6 +123,10 @@ private:
 }
 
 [[nodiscard]] Kind const_kind(std::string_view text) {
+  // A single unknown bit can fill a destination of any scalar kind.
+  if (text == "0sb?" || text == "0ub?") {
+    return Kind::unknown;
+  }
   if (text == "true" || text == "false") {
     return Kind::boolean;
   }
@@ -718,7 +670,7 @@ private:
       edges_ += children;
     }
     const auto dst = nid.first_child();
-    if (dst.is_invalid() || !N::is_ref(ln_.get_type(dst)) || !(dce_def_producing(t) || N::is_declare(t) || N::is_delay_assign(t))) {
+    if (dst.is_invalid() || !N::is_ref(ln_.get_type(dst)) || !N::defines_first_child(t)) {
       return;
     }
     const auto n        = local(ln_.get_name_id(dst));
@@ -794,7 +746,7 @@ private:
       mention(n, s);
       // Inside an opaque compound every mention counts (a loop carry input is
       // child 0 of a store, yet the loop reads it).
-      if (opaque || !(first && names_target(parent))) {
+      if (opaque || !(first && (N::defines_first_child(parent) || N::is_type_spec(parent)))) {
         read(n);
       }
       if (agg_ != kNone) {

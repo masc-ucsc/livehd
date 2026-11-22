@@ -25,9 +25,9 @@
 #include "graph_library_singleton.hpp"
 #include "hhds/graph.hpp"
 #include "lhd.hpp"
-#include "lhd_prp_import.hpp"
 #include "node_util.hpp"
 #include "prp2lnast.hpp"
+#include "prp_import.hpp"
 #include "rapidjson/document.h"
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
@@ -172,7 +172,7 @@ bool append_lg_slice_content(std::string& buf, const std::string& dir, const std
 // The on-disk Pyrope import closure of the `.prp` files in `seeds` (path, the
 // bytes already read): each file's import strings come from the lexer (what
 // `lhd scan` reports) and resolve with the compile driver's own
-// importer-relative resolver (lhd_prp_import.hpp), to a fixpoint. A file the
+// importer-relative resolver (prp_import.hpp), to a fixpoint. A file the
 // command line already names is not repeated, and every file is read once.
 // Rows are (logical import name, path, bytes), sorted by name then path; only
 // the name and the bytes are hashed, never the path. A file that does not lex
@@ -183,12 +183,12 @@ struct Prp_import_row {
   std::string bytes;
 };
 std::vector<Prp_import_row> prp_import_closure(const std::vector<std::pair<std::string, std::string>>& seeds) {
-  import_detail::Resolver                                 resolver;
+  livehd::prp_import::Resolver                            resolver;
   std::set<std::string>                                   visited;  // absolute paths
   std::vector<std::pair<std::string, const std::string*>> pending;  // path, its bytes
   std::deque<Prp_import_row>                              found;    // stable: `pending` points into it
   for (const auto& [path, bytes] : seeds) {
-    if (visited.insert(import_detail::abspath_of(path)).second) {
+    if (visited.insert(livehd::prp_import::abspath_of(path)).second) {
       pending.emplace_back(path, &bytes);
     }
   }
@@ -201,17 +201,17 @@ std::vector<Prp_import_row> prp_import_closure(const std::vector<std::pair<std::
     } catch (...) {
       continue;
     }
-    const auto dir = import_detail::dir_of(importer);
+    const auto dir = livehd::prp_import::dir_of(importer);
     for (const auto& raw : imports) {
       if (raw.starts_with("lg:") || raw.starts_with("ln:")) {
         continue;  // artifact imports are not source files
       }
-      for (const auto& name : import_detail::candidates(raw)) {
+      for (const auto& name : livehd::prp_import::candidates(raw)) {
         auto path = resolver.find(dir, name);
         if (path.empty()) {
           continue;
         }
-        if (visited.insert(import_detail::abspath_of(path)).second) {
+        if (visited.insert(livehd::prp_import::abspath_of(path)).second) {
           auto  content = livehd::file_utils::read_file(path);
           auto& row     = found.emplace_back(Prp_import_row{name, path, content ? std::move(*content) : std::string{}});
           pending.emplace_back(row.path, &row.bytes);

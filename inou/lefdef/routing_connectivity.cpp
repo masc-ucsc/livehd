@@ -71,7 +71,7 @@ Route_connectivity check_connectivity(const Technology& tech, const Floorplan& f
           }
           Net piece;
           piece.name = net.name;
-          piece.wires.push_back({wire.type, {{layer, path.width, path.shape, {*previous, step}, path.taper_rule, path.taper}}});
+          piece.wires.push_back({wire.type, {path.with_steps(layer, {*previous, step})}});
           const auto          shapes = route_geometry(tech, fp, piece, false, trial_rules);
           std::vector<size_t> piece_nodes;
           for (const auto& s : shapes) {

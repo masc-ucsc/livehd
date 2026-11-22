@@ -158,6 +158,7 @@ TEST(IsabelleEmission, BridgeScaffoldingRefusesMemoryCertificateStubs) {
   policy("rdport", 1);
   policy("addr", 0);
   policy("enable", 1);
+  memory.attr(livehd::attrs::mem_address_proven).set(uint32_t{1});
   memory.create_driver_pin(0).connect_sink(graph->get_output_pin("y"));
   Eprp_var var;
   var.add("path", root.string());

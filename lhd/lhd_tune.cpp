@@ -3,7 +3,6 @@
 #include "lhd_tune.hpp"
 
 #include <fcntl.h>
-#include <sys/file.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -25,19 +24,12 @@
 #include <sys/syscall.h>
 #endif
 
+#include "file_utils.hpp"
 #include "rapidjson/document.h"
 
 namespace lhd::tune {
 
 namespace fs = std::filesystem;
-
-uint64_t fnv1a64(std::string_view bytes, uint64_t h) {
-  for (const unsigned char c : bytes) {
-    h ^= c;
-    h *= 0x100000001b3ULL;
-  }
-  return h;
-}
 
 std::string hex16(uint64_t v) { return std::format("{:016x}", v); }
 
@@ -54,16 +46,6 @@ std::string iso8601_utc(int64_t unix_seconds) {
   return buf;
 }
 
-std::optional<std::string> read_file(const std::string& path) {
-  std::ifstream ifs(path, std::ios::binary);
-  if (!ifs.is_open()) {
-    return std::nullopt;
-  }
-  std::ostringstream oss;
-  oss << ifs.rdbuf();
-  return std::move(oss).str();
-}
-
 bool write_file_atomic(const std::string& path, std::string_view bytes, std::string& why) {
   std::error_code ec;
   const fs::path  p(path);
@@ -74,24 +56,8 @@ bool write_file_atomic(const std::string& path, std::string_view bytes, std::str
       return false;
     }
   }
-  const std::string tmp = std::format("{}.tmp.{}", path, ::getpid());
-  {
-    std::ofstream ofs(tmp, std::ios::binary | std::ios::trunc);
-    if (!ofs.is_open()) {
-      why = std::format("cannot write {}", tmp);
-      return false;
-    }
-    ofs.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
-    ofs.flush();
-    if (!ofs) {
-      why = std::format("short write to {}", tmp);
-      fs::remove(tmp, ec);
-      return false;
-    }
-  }
-  if (std::rename(tmp.c_str(), path.c_str()) != 0) {
-    why = std::format("cannot rename {} -> {}: {}", tmp, path, std::strerror(errno));
-    fs::remove(tmp, ec);
+  if (const auto error = livehd::file_utils::write_file_atomic(path, bytes); error) {
+    why = std::format("cannot publish {}: {}", path, error.message());
     return false;
   }
   return true;
@@ -176,27 +142,10 @@ bool append_jsonl(const std::string& path, const std::vector<std::string>& lines
     blob += l;
     blob += '\n';
   }
-  // ONE write(2) with O_APPEND: a crash leaves at most a partial final line,
-  // which the loader drops.
-  const int fd = ::open(path.c_str(), O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0644);
-  if (fd < 0) {
-    why = std::format("cannot open {}: {}", path, std::strerror(errno));
+  if (const auto error = livehd::file_utils::append_file(path, blob, /*repair_partial_line=*/true); error) {
+    why = std::format("cannot append to {}: {}", path, error.message());
     return false;
   }
-  size_t off = 0;
-  while (off < blob.size()) {
-    const auto w = ::write(fd, blob.data() + off, blob.size() - off);
-    if (w < 0) {
-      if (errno == EINTR) {
-        continue;
-      }
-      why = std::format("cannot append to {}: {}", path, std::strerror(errno));
-      ::close(fd);
-      return false;
-    }
-    off += static_cast<size_t>(w);
-  }
-  ::close(fd);
   return true;
 }
 
@@ -207,62 +156,6 @@ bool rewrite_jsonl(const std::string& path, const std::vector<std::string>& line
     blob += '\n';
   }
   return write_file_atomic(path, blob, why);
-}
-
-// ---- the workdir lock -------------------------------------------------------
-
-File_lock::~File_lock() { release(); }
-
-bool File_lock::open(const std::string& path, std::string& why) {
-  release();
-  std::error_code ec;
-  const fs::path  p(path);
-  if (p.has_parent_path()) {
-    fs::create_directories(p.parent_path(), ec);
-  }
-  fd_ = ::open(path.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0644);
-  if (fd_ < 0) {
-    why = std::format("cannot open lock {}: {}", path, std::strerror(errno));
-    return false;
-  }
-  return true;
-}
-
-bool File_lock::lock(int op, std::string_view waiting) {
-  if (fd_ < 0) {
-    return false;
-  }
-  while (::flock(fd_, op | LOCK_NB) != 0) {
-    if (errno == EINTR) {
-      continue;
-    }
-    if (errno != EWOULDBLOCK) {
-      return false;
-    }
-    if (!waiting.empty()) {
-      std::fprintf(stderr, "%.*s\n", static_cast<int>(waiting.size()), waiting.data());
-      std::fflush(stderr);
-    }
-    while (::flock(fd_, op) != 0) {
-      if (errno != EINTR) {
-        return false;
-      }
-    }
-    return true;
-  }
-  return true;
-}
-
-bool File_lock::exclusive(std::string_view waiting) { return lock(LOCK_EX, waiting); }
-
-bool File_lock::shared() { return lock(LOCK_SH, {}); }
-
-void File_lock::release() noexcept {
-  if (fd_ >= 0) {
-    (void)::flock(fd_, LOCK_UN);
-    ::close(fd_);
-    fd_ = -1;
-  }
 }
 
 // ---- copy-on-write retention --------------------------------------------------

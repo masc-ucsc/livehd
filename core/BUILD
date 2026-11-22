@@ -56,17 +56,59 @@ cc_library(
 )
 
 cc_library(
+    name = "sim_values",
+    hdrs = ["pyrope_literal.hpp", "wide_decimal.hpp"],
+    includes = ["."],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "pyrope_ident",
+    hdrs = ["pyrope_ident.hpp"],
+    includes = ["."],
+    visibility = ["//visibility:public"],
+    deps = [":core", "@abseil-cpp//absl/container:flat_hash_set", "@prpparse//:prp_keywords"],
+)
+
+cc_library(
+    name = "serialization_hdrs",
+    hdrs = ["fnv1a.hpp", "json_util.hpp"],
+    includes = ["."],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "file_utils",
+    srcs = ["file_utils.cpp"],
+    hdrs = ["file_utils.hpp"],
+    copts = COPTS,
+    includes = ["."],
+    visibility = ["//visibility:public"],
+    deps = ["@iassert"],
+)
+
+cc_library(
     name = "core",
     srcs = glob(
         ["*.cpp"],
         exclude = [
             "*test*.cpp",
             "file_name.cpp",
+            "file_utils.cpp",
         ],
     ),
     hdrs = glob(
         ["*.hpp"],
-        exclude = ["file_name.hpp", "debug_env.hpp"],
+        exclude = [
+            "debug_env.hpp",
+            "file_name.hpp",
+            "file_utils.hpp",
+            "fnv1a.hpp",
+            "json_util.hpp",
+            "pyrope_ident.hpp",
+            "pyrope_literal.hpp",
+            "wide_decimal.hpp",
+        ],
     ),
     copts = ["-std=c++23"] + COPTS,
     defines = select({
@@ -83,6 +125,8 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":debug_env",
+        ":file_utils",
+        ":serialization_hdrs",
         "@hhds//hhds:core",  # diag Span/excerpts ride the hhds source locator
         "@hlop//hlop:hlop",
         "@abseil-cpp//absl/container:btree",

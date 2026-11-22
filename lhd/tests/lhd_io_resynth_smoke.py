@@ -55,9 +55,12 @@ assert off['qor']['place']['legal'] and 'io_resynth' not in off['qor']['place'],
 assert not (root/'off/abc_cache/io_timing.json').exists()
 quiet = root/'quiet.sdc'
 quiet.write_text(sdc.read_text().replace('virtual 9.9', 'virtual 0'))
-quiet_on = run('quiet_on', ['--emit', 'verilog:'+str(root/'quiet_on.v')], timing=quiet)
-quiet_off = run('quiet_off', ['--set','synth.place.io_resynth=0',
-                             '--emit','verilog:'+str(root/'quiet_off.v')], timing=quiet)
+# The late cone pass shares the timing-call budget. Isolate the IO callback
+# so its setup check cannot change how many unrelated late trials run.
+quiet_options = ['--set', 'synth.place.resynth=false', '--set', 'synth.place.wl_resynth=false']
+quiet_on = run('quiet_on', quiet_options + ['--emit', 'verilog:'+str(root/'quiet_on.v')], timing=quiet)
+quiet_off = run('quiet_off', quiet_options + ['--set','synth.place.io_resynth=0',
+                                             '--emit','verilog:'+str(root/'quiet_off.v')], timing=quiet)
 assert quiet_on['qor']['place']['io_resynth']['fired'] == 0, quiet_on
 assert (root/'quiet_on.v').read_bytes() == (root/'quiet_off.v').read_bytes()
 transient = run('transient', ['--set', 'lhd.incremental=false'])

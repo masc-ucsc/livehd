@@ -2301,6 +2301,9 @@ void Engine::refresh_endpoint(size_t e) {
 }
 
 void Engine::settle() {
+  if (!dirty_clocks_.empty() || !fwd_heap_.empty() || !bwd_heap_.empty()) {
+    report_.hold_computed = false;
+  }
   if (!dirty_clocks_.empty()) {
     propagate_clocks(dirty_clocks_);
     dirty_clocks_.clear();
@@ -2425,6 +2428,19 @@ void Engine::settle() {
   touched_endpoints_.clear();
 }
 
+float Engine::settled_hold_slack(uint32_t pin) {
+  if (endpoint_of(pin) == no_endpoint) {
+    return inf;
+  }
+  settle();
+  if (!report_.hold_computed) {
+    forward_early();
+    check_hold();
+    report_.hold_computed = true;
+  }
+  return hold_slack(pin);
+}
+
 size_t Engine::mark() {
   begin_edits();
   settle();
@@ -2453,6 +2469,9 @@ void Engine::rollback(size_t to) {
     return v;
   };
   bool clocks_restored = false;
+  if (journal_.size() > to) {
+    report_.hold_computed = false;
+  }
   dirty_clocks_.clear();
   while (journal_.size() > to) {
     const auto u = journal_.back();

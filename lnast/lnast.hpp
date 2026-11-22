@@ -645,6 +645,10 @@ public:
   // The old per-node `lnast.loc` struct + `lnast.fname` string attributes are
   // gone; one uint64 SourceId (hhds::attrs::srcid) resolved through the
   // locator below replaces both.
+  // Copy a node or subtree from this LNAST, rehoming source spans in the destination.
+  Lnast_nid copy_node(const Lnast_nid& src, Lnast& dst, const Lnast_nid& parent) const;
+  void      copy_subtree(const Lnast_nid& src, Lnast& dst, const Lnast_nid& parent) const;
+
   hhds::Source_locator&       source_locator() noexcept { return srcloc_; }
   const hhds::Source_locator& source_locator() const noexcept { return srcloc_; }
 

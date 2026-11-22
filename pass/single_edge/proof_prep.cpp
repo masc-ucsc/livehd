@@ -450,14 +450,7 @@ std::string inline_clock_lib_cells(const absl::flat_hash_map<hhds::Gid, hhds::Gr
     }
     auto [it, fresh] = pure_memo.try_emplace(body, true);
     if (fresh) {
-      for (auto node : body->body().nodes()) {
-        const auto op = livehd::graph_util::type_op_of(node);
-        if (livehd::graph_util::is_type_register(node) || op == Ntype_op::Memory || op == Ntype_op::Sub
-            || op == Ntype_op::Clock_cell) {
-          it->second = false;
-          break;
-        }
-      }
+      it->second = livehd::graph_util::is_pure_comb_body(body);
     }
     return it->second;
   };
@@ -597,21 +590,16 @@ std::string inline_hier_clock_lib_cells(const absl::flat_hash_map<hhds::Gid, hhd
     }
     auto [it, fresh] = pure_memo.try_emplace(body, true);
     if (fresh) {
-      for (auto node : body->body().nodes()) {
-        const auto op = livehd::graph_util::type_op_of(node);
-        if (livehd::graph_util::is_type_register(node) || op == Ntype_op::Memory || op == Ntype_op::Sub
-            || op == Ntype_op::Clock_cell) {
-          it->second = false;
-          break;
-        }
-      }
+      it->second = livehd::graph_util::is_pure_comb_body(body);
     }
     return it->second;
   };
   std::vector<hhds::Occurrence_pin> pending;
   for (auto node : top->grouped_hierarchy().nodes()) {
     const auto op = livehd::graph_util::type_op_of(node);
-    if (op == Ntype_op::Flop || op == Ntype_op::Fflop) {
+    if (op == Ntype_op::Memory) {
+      livehd::graph_util::for_each_memory_clock_driver(node, [&](auto pin) { pending.push_back(pin); });
+    } else if (op == Ntype_op::Flop || op == Ntype_op::Fflop) {
       pending.push_back(livehd::latch_contract::sink_driver_hier(node, "clock_pin"));
     }
   }

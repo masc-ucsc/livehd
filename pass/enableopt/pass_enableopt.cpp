@@ -24,38 +24,10 @@ void Pass_enableopt::optimize(Eprp_var& var) {
   Pass_enableopt pcp(var);
 
   // Each worker owns a graph body and all analysis is invocation-local.
-  std::atomic<size_t> next{0};
-  const size_t        hw = std::max<size_t>(1, std::thread::hardware_concurrency());
-  const size_t        nw = std::min({var.graphs.size(), hw, size_t{16}});
-  if (nw <= 1) {
-    Enableopt cp;
-    for (const auto& g : var.graphs) {
-      cp.do_trans(g);
-    }
-    return;
-  }
-
-  std::vector<std::exception_ptr> errors(var.graphs.size());
-  // Stop claiming graphs after the first failure and rethrow after joining.
-  std::atomic<bool>               failed{false};
-  livehd::run_workers(nw, [&](size_t) {
-    Enableopt cp;
-    while (!failed.load(std::memory_order_relaxed)) {
-      const size_t i = next.fetch_add(1, std::memory_order_relaxed);
-      if (i >= var.graphs.size()) {
-        break;
-      }
-      try {
-        cp.do_trans(var.graphs[i]);
-      } catch (...) {
-        errors[i] = std::current_exception();
-        failed.store(true, std::memory_order_relaxed);
-      }
-    }
+  const auto hw      = std::max<size_t>(1, std::thread::hardware_concurrency());
+  const auto count   = var.graphs.size();
+  const auto workers = std::min({count, hw, size_t{16}});
+  livehd::parallel_for_each(count, workers, [&] {
+    return [&, cp = Enableopt{}](size_t i) mutable { cp.do_trans(var.graphs[i]); };
   });
-  for (const auto& error : errors) {
-    if (error) {
-      std::rethrow_exception(error);
-    }
-  }
 }

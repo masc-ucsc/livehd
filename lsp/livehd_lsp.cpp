@@ -21,11 +21,13 @@
 #include "absl/container/flat_hash_set.h"
 #include "diag.hpp"
 #include "eprp_var.hpp"
+#include "file_utils.hpp"
 #include "lnast.hpp"
 #include "lnast_ntype.hpp"
 #include "lsp_index.hpp"
 #include "pass_upass.hpp"
 #include "prp2lnast.hpp"
+#include "prp_import.hpp"
 #include "rapidjson/document.h"
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
@@ -56,24 +58,15 @@ std::unordered_map<std::string, std::string> g_docs;
 
 //============================ framed stdio ============================
 
-void write_all(int fd, const char* p, size_t n) {
-  while (n != 0) {
-    ssize_t w = ::write(fd, p, n);
-    if (w <= 0) {
-      if (w < 0 && errno == EINTR) {
-        continue;
-      }
-      return;  // broken pipe / closed: give up on this write
-    }
-    p += w;
-    n -= static_cast<size_t>(w);
-  }
-}
-
 void send_message(const std::string& body) {
   std::string header = "Content-Length: " + std::to_string(body.size()) + "\r\n\r\n";
-  write_all(g_out_fd, header.data(), header.size());
-  write_all(g_out_fd, body.data(), body.size());
+  auto        error  = file_utils::write_all(g_out_fd, header);
+  if (!error) {
+    error = file_utils::write_all(g_out_fd, body);
+  }
+  if (error) {
+    throw std::system_error(error, "writing LSP response");
+  }
 }
 
 bool read_byte(char& out) {
@@ -240,13 +233,8 @@ std::string uri_to_path(std::string_view uri) {
 }
 
 std::string module_name_of(std::string_view path) {
-  auto             slash = path.find_last_of('/');
-  std::string_view base  = (slash == std::string_view::npos) ? path : path.substr(slash + 1);
-  auto             dot   = base.find('.');
-  if (dot != std::string_view::npos) {
-    base = base.substr(0, dot);
-  }
-  return base.empty() ? std::string("top") : std::string(base);
+  auto name = prp_import::unit_name_of(path);
+  return name.empty() ? std::string("top") : name;
 }
 
 // Percent-encode an absolute filesystem path into a file:// URI.
@@ -389,6 +377,9 @@ std::vector<std::string> import_strings(const std::shared_ptr<Lnast>& ln) {
       continue;
     }
     auto target = ln->get_first_child(nid);
+    if (target.is_invalid()) {
+      continue;
+    }
     auto fname  = ln->get_sibling_next(target);
     if (fname.is_invalid() || ln->get_name(fname) != "import") {
       continue;
@@ -416,48 +407,14 @@ std::vector<std::string> import_strings(const std::shared_ptr<Lnast>& ln) {
 // fails to parse is skipped (the import simply stays unresolved for this file).
 void discover_sibling_imports(Eprp_var& var, std::string_view importer_path,
                               absl::flat_hash_map<std::string, std::string>& rel2abs) {
-  auto dir_of = [](std::string_view p) -> std::string {
-    auto s = p.rfind('/');
-    return s == std::string_view::npos ? std::string(".") : std::string(p.substr(0, s));
-  };
-  auto abspath_of = [](std::string_view p) -> std::string {
-    std::error_code ec;
-    auto            a = std::filesystem::absolute(std::filesystem::path(p), ec);
-    return ec ? std::string(p) : a.lexically_normal().string();
-  };
-  // Resolve `<stem>.prp` in `dir` case-sensitively (mirrors the compile-time
-  // discover_imports): scan the directory and return the REAL on-disk filename
-  // (original case preserved) so two import spellings of one file collapse to a
-  // path. Empty when absent.
-  auto find_prp = [](const std::string& dir, const std::string& stem) -> std::string {
-    // A stem may be path-qualified (`subdir/mod`): the directory portion rides
-    // verbatim onto `dir` and only the final component is matched exactly.
-    std::string scan_dir = dir;
-    std::string leaf     = stem;
-    if (const auto s = stem.rfind('/'); s != std::string::npos) {
-      scan_dir = dir + "/" + stem.substr(0, s);
-      leaf     = stem.substr(s + 1);
-    }
-    std::error_code it_ec;
-    for (std::filesystem::directory_iterator it(scan_dir, it_ec), end; !it_ec && it != end; it.increment(it_ec)) {
-      if (!it->is_regular_file()) {
-        continue;
-      }
-      const auto fn = it->path().filename().string();
-      if (fn.size() == leaf.size() + 4 && str_tools::ends_with(fn, ".prp")
-          && (std::string_view(fn).substr(0, leaf.size()) == leaf)) {
-        return it->path().string();
-      }
-    }
-    return {};
-  };
+  prp_import::Resolver resolver;
 
   absl::flat_hash_map<std::string, std::string> unit_dir;      // unit -> source dir (case-sensitive)
   std::unordered_set<std::string>               parsed_paths;  // abs paths already loaded (exact filesystem paths)
   for (const auto& ln : var.lnasts) {
-    unit_dir[std::string(ln->get_top_module_name())] = dir_of(importer_path);
+    unit_dir[std::string(ln->get_top_module_name())] = prp_import::dir_of(importer_path);
   }
-  parsed_paths.insert(abspath_of(importer_path));
+  parsed_paths.insert(prp_import::abspath_of(importer_path));
 
   while (true) {
     absl::flat_hash_set<std::string> loaded;
@@ -475,15 +432,7 @@ void discover_sibling_imports(Eprp_var& var, std::string_view importer_path,
         if (raw.starts_with("lg:") || raw.starts_with("ln:")) {
           continue;  // artifact imports resolve elsewhere, not on-disk source
         }
-        // A trailing `.entry` after the last '/' selects a pub member, so the
-        // file is the stem; otherwise the whole string is the file path.
-        std::vector<std::string> names;
-        auto                     slash = raw.rfind('/');
-        auto                     dot   = raw.rfind('.');
-        if (dot != std::string::npos && (slash == std::string::npos || dot > slash)) {
-          names.push_back(raw.substr(0, dot));
-        }
-        names.push_back(raw);
+        const auto names   = prp_import::candidates(raw);
         bool already = false;
         for (const auto& c : names) {
           if (loaded.count(c)) {
@@ -495,9 +444,9 @@ void discover_sibling_imports(Eprp_var& var, std::string_view importer_path,
           continue;
         }
         for (const auto& c : names) {
-          std::string path = find_prp(dir, c);
+          std::string path = resolver.find(dir, c);
           if (!path.empty()) {
-            if (parsed_paths.insert(abspath_of(path)).second) {
+            if (parsed_paths.insert(prp_import::abspath_of(path)).second) {
               to_parse.emplace_back(c, path);
             }
             break;
@@ -512,11 +461,11 @@ void discover_sibling_imports(Eprp_var& var, std::string_view importer_path,
       try {
         Prp2lnast converter(path, name);
         var.add(converter.get_lnast());
-        unit_dir[name]                                    = dir_of(path);
+        unit_dir[name]                                    = prp_import::dir_of(path);
         // Span.file of everything minted from this sibling is
         // workspace_relative(path) — remember how to get back to the disk file
         // so definition Locations can carry a real file:// URI.
-        rel2abs[livehd::srcloc::workspace_relative(path)] = abspath_of(path);
+        rel2abs[livehd::srcloc::workspace_relative(path)] = prp_import::abspath_of(path);
       } catch (...) {
         // sibling did not parse — skip it (import stays unresolved for this file)
       }

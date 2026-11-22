@@ -29,19 +29,6 @@ bool is_two_arm_mux(const hhds::Node_class& node) {
   }
   return expected == 3;
 }
-hhds::Pin_class drv_at(const hhds::Node_class& n, uint32_t pid) {
-  auto sink = n.get_sink_pin(static_cast<hhds::Port_id>(pid));
-  return sink.is_invalid() ? hhds::Pin_class{} : sink.get_driver_pin();
-}
-template <typename T>
-bool has_single_consumer(const T& p) {
-  auto edges = p.out_edges();
-  auto it    = edges.begin();
-  if (it == edges.end()) {
-    return false;
-  }
-  return ++it == edges.end();
-}
 using livehd::muxctx::Bool_condition;
 
 [[nodiscard]] bool same_pin(const hhds::Pin_class& a, const hhds::Pin_class& b) {

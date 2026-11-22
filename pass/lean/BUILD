@@ -74,7 +74,7 @@ cc_library(
     hdrs = ["Exporter/Frontend/lean_options.hpp"],
     includes = ["Exporter/Frontend"],
     copts = COPTS,
-    deps = ["//pass/common:pass"],
+    deps = ["//core", "//pass/common:pass"],
     visibility = ["//visibility:public"],
 )
 

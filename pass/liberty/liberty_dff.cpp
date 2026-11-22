@@ -3,8 +3,8 @@
 #include "liberty_dff.hpp"
 
 #include <algorithm>
-#include <bit>
 #include <array>
+#include <bit>
 #include <cctype>
 #include <charconv>
 #include <cmath>
@@ -24,6 +24,8 @@
 #include "cell.hpp"
 #include "dlop.hpp"
 #include "node_util.hpp"
+#include "scanner.hpp"
+#include "units.hpp"
 
 namespace gu = livehd::graph_util;
 
@@ -51,12 +53,19 @@ std::string read_files(const std::string& lib_files, size_t* reads = nullptr) {
   return all;
 }
 
-// Drop /* */ and // comments (quotes are not comment-bearing in Liberty).
+// Drop comments while preserving quoted payloads.
 std::string strip_comments(const std::string& s) {
   std::string out;
   out.reserve(s.size());
   size_t start = 0;
-  for (size_t slash = s.find('/'); slash != std::string::npos; slash = s.find('/', slash + 1)) {
+  for (size_t slash = s.find_first_of("\"/"); slash != s.npos; slash = s.find_first_of("\"/", slash + 1)) {
+    if (s[slash] == '"') {
+      slash = quoted_end(s, slash);
+      if (slash == s.npos) {
+        break;
+      }
+      continue;
+    }
     if (slash + 1 == s.size() || (s[slash + 1] != '*' && s[slash + 1] != '/')) {
       continue;
     }
@@ -79,9 +88,7 @@ size_t match_brace(const std::string& s, size_t open) {
   for (size_t i = open; i < s.size(); ++i) {
     const char c = s[i];
     if (c == '"') {
-      // Timing tables dominate library size. Jump over their quoted payload
-      // while preserving the scanner's existing quote-delimiter semantics.
-      i = s.find('"', i + 1);
+      i = quoted_end(s, i);
       if (i == std::string::npos) {
         return i;
       }
@@ -128,6 +135,21 @@ size_t find_group(const std::string& s, std::string_view keyword, size_t from, s
   return std::string::npos;
 }
 
+// A line break also terminates an unquoted scalar in some ASAP7 libraries.
+std::string_view scalar_value(std::string_view body, size_t start) {
+  while (start < body.size() && std::isspace(static_cast<unsigned char>(body[start]))) {
+    ++start;
+  }
+  if (start == body.size()) {
+    return {};
+  }
+  const auto end = body[start] == '"' ? quoted_end(body, start) : body.find_first_of(";\r\n", start);
+  if (body[start] == '"' && end != body.npos) {
+    return body.substr(start, end - start + 1);
+  }
+  return body.substr(start, end == body.npos ? body.npos : end - start);
+}
+
 // Value of a `key : value ;` attribute inside `body` (unquoted, trimmed). Empty
 // when absent. Only scans `body` as given (pass a shallow group body).
 std::string scalar_attr(const std::string& body, std::string_view key) {
@@ -151,11 +173,7 @@ std::string scalar_attr(const std::string& body, std::string_view key) {
       continue;
     }
     ++c;
-    size_t end = body.find(';', c);
-    if (end == std::string::npos) {
-      end = body.size();
-    }
-    std::string v = body.substr(c, end - c);
+    std::string v{scalar_value(body, c)};
     // trim whitespace and surrounding quotes
     size_t      b = 0;
     size_t      e = v.size();
@@ -247,7 +265,7 @@ std::string top_level_only(const std::string& body) {
   for (size_t i = 0; i < body.size(); ++i) {
     const char c = body[i];
     if (c == '"') {
-      const auto end = body.find('"', i + 1);
+      const auto end = quoted_end(body, i);
       if (depth <= 0) {
         out.append(body, i, end == std::string::npos ? body.size() - i : end - i + 1);
       }
@@ -288,40 +306,8 @@ double parse_area(const std::string& body) {
   return a;
 }
 
-// Picoseconds per Liberty time unit, from a `time_unit : "1ns"` value
-// (`<number><fs|ps|ns|us>`, spaces tolerated). The Liberty default is 1ns.
-// ASAP7 says "1ps", sky130 "1ns" -- and ABC normalizes every SCL library to ps
-// on read, so the flop overhead has to be in the same unit as the `delay`
-// target the sizing commands take.
-double time_unit_ps(std::string_view value) {
-  std::string v;
-  for (char c : value) {
-    if (!std::isspace(static_cast<unsigned char>(c)) && c != '"') {
-      v.push_back(c);
-    }
-  }
-  double n           = 1;
-  auto [p, ec]       = std::from_chars(v.data(), v.data() + v.size(), n);
-  std::string_view u = v;
-  if (ec == std::errc{}) {
-    u = std::string_view{p, static_cast<size_t>(v.data() + v.size() - p)};
-  } else {
-    n = 1;
-  }
-  if (u == "fs") {
-    return n * 0.001;
-  }
-  if (u == "ps") {
-    return n;
-  }
-  if (u == "ns") {
-    return n * 1000.0;
-  }
-  if (u == "us") {
-    return n * 1e6;
-  }
-  return 1000.0;  // absent/unknown: the Liberty default
-}
+// The lightweight scan uses the Liberty defaults for an absent or unreadable unit.
+double time_unit_ps_default(std::string_view value) { return liberty::time_unit_ps(unquote_trim(value)).value_or(1000.0); }
 
 // The `values(...)` matrix of a Liberty table group: rows are the quoted
 // strings (`\\` line continuations sit between them and are skipped with
@@ -345,7 +331,7 @@ std::vector<std::vector<double>> table_values(const std::string& table_body) {
     return rows;
   }
   for (size_t q0 = table_body.find('"', open); q0 != std::string::npos && q0 < close; q0 = table_body.find('"', q0 + 1)) {
-    const size_t q1 = table_body.find('"', q0 + 1);
+    const size_t q1 = quoted_end(table_body, q0);
     if (q1 == std::string::npos || q1 > close) {
       break;
     }
@@ -981,8 +967,7 @@ Cell_scan scan_cells_text(const std::string& contents) {
     if (c >= text.size() || text[c] != ':') {
       continue;
     }
-    const size_t end = text.find(';', c);
-    units.emplace_back(u, time_unit_ps(text.substr(c + 1, (end == std::string::npos ? text.size() : end) - (c + 1))));
+    units.emplace_back(u, time_unit_ps_default(scalar_value(text, c + 1)));
   }
   const auto unit_at = [&](size_t pos) {
     double ps = 1000.0;
@@ -1046,7 +1031,7 @@ std::map<size_t, Electrical_units> electrical_units(const std::string& text) {
     }
     const auto       header = top_level_only(text.substr(open + 1, close - open - 1));
     Electrical_units u;
-    u.time   = time_unit_ps(scalar_attr(header, "time_unit"));
+    u.time   = time_unit_ps_default(scalar_attr(header, "time_unit"));
     auto cap = header.find("capacitive_load_unit");
     if (cap != std::string::npos) {
       cap              = header.find('(', cap);
@@ -1054,8 +1039,8 @@ std::map<size_t, Electrical_units> electrical_units(const std::string& text) {
       if (cap != std::string::npos && comma != std::string::npos && end != std::string::npos) {
         const auto value = positive_number(unquote_trim(header.substr(cap + 1, comma - cap - 1)));
         const auto unit  = unquote_trim(header.substr(comma + 1, end - comma - 1));
-        if (value && (unit == "pf" || unit == "ff")) {
-          u.cap = *value * (unit == "pf" ? 1000 : 1);
+        if (value) {
+          u.cap = capacitance_unit_ff(*value, unit).value_or(u.cap);
         }
       }
     }

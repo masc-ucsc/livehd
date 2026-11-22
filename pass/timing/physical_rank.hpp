@@ -111,8 +111,8 @@ public:
                                                   const std::set<std::string>&                       cuts);
 
   // Transient edits on top of the last evaluate(), answered incrementally by the engine (see Engine's edit
-  // sessions). Valid after an evaluate(); the next rank() or evaluate() discards what is pending. The hold slack
-  // of a pin is not kept up to date by edits (Pin_timing::hold_slack is empty). The electrical checks are the Liberty
+  // sessions). Valid after an evaluate(); the next rank() or evaluate() discards what is pending. Endpoint hold
+  // checks are refreshed on demand. The electrical checks are the Liberty
   // slew and capacitance limits and the fanout limit of the SDC (set_max_fanout on the design).
   [[nodiscard]] livehd::timing::Whatif& whatif();
 

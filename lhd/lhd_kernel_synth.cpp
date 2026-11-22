@@ -5567,9 +5567,9 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
       if (!cache_file.empty()) {
         std::error_code ec;
         fs::create_directories(fs::path(cache_file).parent_path(), ec);
-        const auto tmp = cache_file + ".tmp";
-        std::ofstream(tmp) << sta_qor;
-        fs::rename(tmp, cache_file, ec);
+        if (!ec) {
+          (void)livehd::file_utils::write_file_atomic(cache_file, sta_qor);
+        }
       }
     }
     // The tier's counters, where pass.opentimer put them (harvest_sta_incremental reads them).

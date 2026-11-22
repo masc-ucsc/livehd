@@ -64,9 +64,11 @@ private:
   Lnast_nid              stmts_;
 };
 
-// Deep copy of one subtree (names and types; source ids are not carried across trees).
-void copy_subtree(const std::shared_ptr<Lnast>& src, const Lnast_nid& src_nid, const std::shared_ptr<Lnast>& dst,
-                  const Lnast_nid& dst_parent);
+// Deep copy of one subtree, including source spans.
+inline void copy_subtree(const std::shared_ptr<Lnast>& src, const Lnast_nid& src_nid, const std::shared_ptr<Lnast>& dst,
+                         const Lnast_nid& dst_parent) {
+  src->copy_subtree(src_nid, *dst, dst_parent);
+}
 
 // An ordered list of passes wired head -> ... -> final sink.
 class Chain {

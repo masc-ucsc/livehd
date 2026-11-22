@@ -9,7 +9,6 @@
 #include <unistd.h>
 
 #include <algorithm>
-#include <deque>
 #include <cctype>
 #include <cerrno>
 #include <charconv>
@@ -17,6 +16,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -40,6 +40,7 @@
 #include "cprop.hpp"
 #include "debug_env.hpp"
 #include "encode.hpp"
+#include "file_utils.hpp"
 #include "fork_race.hpp"
 #include "fresh_solver.hpp"
 #include "hash_util.hpp"
@@ -1382,20 +1383,6 @@ bool deserialize_verify(std::string_view b, Verify_result& v) {
   // tail leaves Cvc5_stats{} == "no cvc5 query ran".
   (void)get_cvc5_stats(b, v.cvc5);
   return true;
-}
-
-void write_all(int fd, const char* p, size_t n) {
-  while (n > 0) {
-    ssize_t w = ::write(fd, p, n);
-    if (w <= 0) {
-      if (w < 0 && errno == EINTR) {
-        continue;
-      }
-      break;
-    }
-    p += w;
-    n -= static_cast<size_t>(w);
-  }
 }
 
 // Length-framing for a worker's serialized result.
@@ -4759,27 +4746,13 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   // classic per-side free-constant counterexample (`q(ref=254 impl=255)`), a
   // false REFUTE on an equivalent pair. Measured exactly that before this.
   if (!opts.ignore_memory.empty()) {
-    auto ign_named = [&](const hhds::Occurrence_node& n) {
-      const std::string hier{n.get_hier_name()};
-      const std::string canon = canon_flop_name(hier);
-      const auto        leaf  = [](std::string_view v) {
-        auto d = v.rfind('.');
-        return std::string(d == std::string_view::npos ? v : v.substr(d + 1));
-      };
-      const std::string hleaf = leaf(hier);
-      for (const auto& want : opts.ignore_memory) {
-        if (want == hier || want == canon || want == hleaf || canon_flop_name(want) == canon || leaf(want) == hleaf) {
-          return true;
-        }
-      }
-      return false;
-    };
     // Walk BOTH designs: the key is the cross-design memory key, so the two
     // agree by construction, and a memory ignored on one side must be ignored
     // on the other or the shared symbol is one-sided.
     for (auto* g : {ref, impl}) {
       for (auto node : g->occurrences(collapse_gids_ptr).nodes(hhds::Node_order::forward)) {
-        if (graph_util::type_op_of(node) != Ntype_op::Memory || !node.has_out_edges() || !ign_named(node)) {
+        if (graph_util::type_op_of(node) != Ntype_op::Memory || !node.has_out_edges()
+            || !memory_is_ignored(node, opts.ignore_memory)) {
           continue;
         }
         auto        sig = read_mem_sig(node);
@@ -13082,7 +13055,9 @@ Query_result spawn_isolated_worker(hhds::Graph* ref, hhds::Graph* impl, const Le
       worker.partitions       = 1;
       Query_result r          = safe_prove_equal(ref, impl, worker, sub_lib);
       std::string  blob       = frame_blob(serialize_result(r));
-      write_all(p[1], blob.data(), blob.size());
+      if (file_utils::write_all(p[1], blob)) {
+        ::_exit(kChildExitException);
+      }
     } catch (const std::bad_alloc&) {
       ::_exit(kChildExitBadAlloc);
     } catch (...) {

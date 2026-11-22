@@ -42,7 +42,8 @@ Inventory             inventory(const Options& options, const physical::Technolo
 Special_pins          scan_special_pins(const std::string& libs, bool protect_reset);
 Special_pins                   scan_special_pins(const liberty::Cell_library& library, bool protect_reset);
 std::set<std::string> protected_buffers(hhds::Graph& graph, const Inventory& cells, const Special_pins& special, bool protect_reset,
-                                        const std::string& control_ports = {});
+                                        const std::string& control_ports = {}, const Timing_feedback* timing = nullptr);
+void                  write_eco_floorplan(const physical::Floorplan& floorplan, const std::string& path);
 std::string           physical_label(Pin p);
 std::shared_ptr<hhds::GraphIO> buffer_io(hhds::Graph& graph, const Buffer& b);
 void                           change_master(Node n, const Buffer& from, const Buffer& to);

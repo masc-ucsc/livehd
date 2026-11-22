@@ -1151,10 +1151,9 @@ struct Physical_session::Impl : Pass_opentimer {
     ranking.parasitics  = physical_rc_;
     ranking.pins.resize(ranking_pins.size());
     for (size_t index = 0; index < ranking_pins.size(); ++index) {
-      const auto& pin     = *ranking_pins[index];
-      auto&       value   = ranking.pins[index];
-      const auto* cellpin = pin.cellpin(ot::MAX);
-      value.clock         = pin.is_ideal_clock() || (cellpin && cellpin->is_clock.value_or(false));
+      const auto& pin   = *ranking_pins[index];
+      auto&       value = ranking.pins[index];
+      value.clock       = physical_pin_is_clock(pin);
       for (const auto transition : {ot::RISE, ot::FALL}) {
         if (const auto slack = pin.slack(ot::MAX, transition); slack && std::isfinite(*slack)) {
           value.slack = std::min(value.slack, double(*slack));

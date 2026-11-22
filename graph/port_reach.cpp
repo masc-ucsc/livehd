@@ -12,6 +12,7 @@
 #include "attrs.hpp"
 #include "cell.hpp"
 #include "node_util.hpp"
+#include "port_reach_step.hpp"
 
 namespace livehd::port_reach {
 
@@ -386,26 +387,16 @@ const Def_reach& Cache::of(const std::shared_ptr<hhds::Graph>& g) {
       const auto op  = gu::type_op_of(n);
       uint32_t   pid = 0, k = 0;
       if (op == Ntype_op::Get_mask) {
-        hhds::Pin_class val, msk;
-        for (auto e_sink : n.inp_sorted_pins()) {
-          auto e_drv = e_sink.get_driver_pin();
-          if (e_sink.get_port_id() == 0) {
-            val = e_drv;
-          } else {
-            msk = e_drv;
+        bool       found = false;
+        const auto push  = [&](const auto& pin, int lo, int hi) {
+          const auto input = peel_ident(pin);
+          if (!input.is_invalid() && gu::is_graph_input_pin(input)) {
+            add_atom(atoms, static_cast<uint32_t>(input.get_port_id()), static_cast<uint32_t>(lo), static_cast<uint32_t>(hi - lo));
+            found = true;
           }
-        }
-        val = peel_ident(val);
-        if (!val.is_invalid() && gu::is_graph_input_pin(val) && msk.is_const()) {
-          if (auto window = gu::bit_range(n); window) {
-            add_atom(atoms,
-                     static_cast<uint32_t>(val.get_port_id()),
-                     static_cast<uint32_t>(window->first),
-                     static_cast<uint32_t>(window->second - window->first));
-            return true;
-          }
-        }
-        return false;
+        };
+        step_bit_range(n, 0, std::numeric_limits<int>::max(), push, [](const auto&) {});
+        return found;
       }
       if (op == Ntype_op::SRA && sra_of(d, &pid, &k)) {
         const uint32_t w = in_bits.contains(pid) ? in_bits[pid] : 0;
@@ -506,39 +497,6 @@ const Def_reach& Cache::of(const std::shared_ptr<hhds::Graph>& g) {
         const auto op = gu::type_op_of(m);
         if (op == Ntype_op::Flop || op == Ntype_op::Fflop || op == Ntype_op::Latch) {
           continue;  // true state boundary: q is last period's value
-        }
-        if (op == Ntype_op::Get_mask) {
-          // The packed-field read idiom: Get_mask(x, contiguous const) is
-          // "(x >> mb) truncated" — when x is DIRECTLY a graph input, record
-          // the bit range instead of the whole port. Any other shape falls
-          // through to plain traversal.
-          hhds::Pin_class val, msk;
-          for (auto e_sink : m.inp_sorted_pins()) {
-            auto e_drv = e_sink.get_driver_pin();
-            if (e_sink.get_port_id() == 0) {
-              val = e_drv;
-            } else {
-              msk = e_drv;
-            }
-          }
-          if (!val.is_invalid() && gu::is_graph_input_pin(val) && msk.is_const()) {
-            if (auto window = gu::bit_range(m); window) {
-              add_atom(atoms,
-                       static_cast<uint32_t>(val.get_port_id()),
-                       static_cast<uint32_t>(window->first),
-                       static_cast<uint32_t>(window->second - window->first));
-              continue;
-            }
-          }
-          if (expanded.insert(m).second) {
-            // Arbitrary/Sub node: a compact loop carry-in sink holds two drivers.
-            for (auto e_sink : m.inp_sorted_pins()) {
-              for (auto e_drv : e_sink.get_driver_pins()) {
-                enqueue(e_drv);
-              }
-            }
-          }
-          continue;
         }
         if (op == Ntype_op::Sub) {
           auto cg = m.get_subnode_graph();

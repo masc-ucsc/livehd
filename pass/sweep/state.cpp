@@ -1202,32 +1202,16 @@ struct State_sweeper {
         }
         return;
       case Ntype_op::Mux:
-        for (const auto& sink : n.inp_sorted_pins()) {
-          for (const auto& d : sink.get_driver_pins()) {
-            if (sink.get_port_id() == 0) {
-              need_all(d);
-            } else {
-              need_same(d, out);
-            }
-          }
-        }
-        return;
       case Ntype_op::Hotmux: {
-        // interleaved (control, value) pairs and an optional trailing default value
-        std::vector<std::vector<hhds::Pin_class>> sinks;
+        const auto end = op == Ntype_op::Hotmux ? gu::hotmux_control_end(n) : size_t{1};
         for (const auto& sink : n.inp_sorted_pins()) {
-          auto& drivers = sinks.emplace_back();
+          const auto pid     = sink.get_port_id();
+          const bool control = op == Ntype_op::Hotmux ? gu::is_hotmux_control(pid, end) : pid == 0;
           for (const auto& d : sink.get_driver_pins()) {
-            drivers.push_back(d);
-          }
-        }
-        for (size_t idx = 0; idx < sinks.size(); ++idx) {
-          const bool is_value = (idx % 2 == 1) || (sinks.size() % 2 == 1 && idx + 1 == sinks.size());
-          for (const auto& d : sinks[idx]) {
-            if (is_value) {
-              need_same(d, out);
-            } else {
+            if (control) {
               need_all(d);
+            } else {
+              need_same(d, out);
             }
           }
         }
@@ -1351,9 +1335,10 @@ struct State_sweeper {
         }
         return;
       }
-      case Ntype_op::Flop: {
+      case Ntype_op::Flop :
+      case Ntype_op::Latch: {
         for (const auto& sink : n.inp_sorted_pins()) {
-          const auto sname = Ntype::get_sink_name(Ntype_op::Flop, sink.get_port_id());
+          const auto sname = Ntype::get_sink_name(op, sink.get_port_id());
           for (const auto& d : sink.get_driver_pins()) {
             if (sname == "din") {
               need_same(d, out);

@@ -3,19 +3,10 @@
 
 // TABLE-DRIVEN attribute carrying for graph->graph reconstruction.
 //
-// Every transform that builds a new node from an old one has to move that
-// node's attributes across. Doing it by hand means an if-chain per attribute,
-// and there are four such chains today (pass/partition/flatten.cpp,
-// pass/partition/pass_partition.cpp, graph/inline_sub.cpp,
-// graph/occurrence_materialize.cpp). They have already drifted from each other
-// -- flatten drops `memory_async_reset`, inline_sub keeps it -- and a new
-// attribute is silently dropped by whichever chain nobody remembered to update:
-// the failure is a zero-width pin or a lost async reset a long way downstream,
-// not a compile error. Those chains also carry POLICY (name prefixing, a
-// deliberate color drop) the plain copy below does not, which is why they have
-// not been folded onto it yet.
+// Graph reconstruction carries operation annotations from the registry.
+// Callers select whether identity and analysis metadata survive a rewrite.
 //
-// So this header carries from the ONE tag list, LIVEHD_FOR_EACH_ATTR_TAG in
+// This header carries from the ONE tag list, LIVEHD_FOR_EACH_ATTR_TAG in
 // graph/attrs.hpp -- the same list graph/cell.cpp registers from. A tag added
 // there is registered and considered for carry; physical route tags explicitly
 // invalidate on rebuild through carry_on_rebuild. There is no
@@ -92,19 +83,65 @@ inline constexpr std::size_t pin_tag_count  = 0 LIVEHD_FOR_EACH_ATTR_TAG(LIVEHD_
 inline constexpr std::size_t kNodeAttrTagCount = attr_carry_detail::node_tag_count + 4;
 inline constexpr std::size_t kPinAttrTagCount  = attr_carry_detail::pin_tag_count;
 
+struct Carry_policy {
+  bool names            = true;
+  bool colors           = true;
+  bool placement        = true;
+  bool analysis         = true;
+  bool synth_policy     = true;
+  bool aggregate_origin = true;
+  bool matches          = true;
+
+  template <class Tag>
+  [[nodiscard]] bool allows() const {
+    using namespace livehd::attrs;
+    if constexpr (std::is_same_v<Tag, pin_name_t>) {
+      return names;
+    } else if constexpr (std::is_same_v<Tag, color_t>) {
+      return colors;
+    } else if constexpr (std::is_same_v<Tag, place_t> || std::is_same_v<Tag, placement_rc_t> || std::is_same_v<Tag, pin_place_t>
+                         || std::is_same_v<Tag, place_weight_t>) {
+      return placement;
+    } else if constexpr (std::is_same_v<Tag, critical_t> || std::is_same_v<Tag, sta_t> || std::is_same_v<Tag, ctrl_members_t>
+                         || std::is_same_v<Tag, ctrl_stats_t> || std::is_same_v<Tag, coloring_info_t>
+                         || std::is_same_v<Tag, region_nesting_t> || std::is_same_v<Tag, comb_reach_t>
+                         || std::is_same_v<Tag, synth_region_t> || std::is_same_v<Tag, synth_region_id_t>) {
+      return analysis;
+    } else if constexpr (std::is_same_v<Tag, synth_policy_t>) {
+      return synth_policy;
+    } else if constexpr (std::is_same_v<Tag, aggregate_origin_t>) {
+      return aggregate_origin;
+    } else if constexpr (std::is_same_v<Tag, match_t>) {
+      return matches;
+    } else {
+      return true;
+    }
+  }
+};
+
 // Every node-kind attribute (hier_color excepted, see above), plus the name,
 // plus `match`: a DUAL-ROLE tag whose attr_kind entry classifies its pin
 // overload, while semdiff stamps it on nodes too (set_match(node)) and
 // `lhd tool` reads it per node -- so it is carried on both roles.
 template <class Src, class Dst>
-inline void carry_node_attrs(const Src& from, const Dst& to) {
-  carry_attr<hhds::attrs::name_t>(from, to);
-  carry_attr<livehd::attrs::match_t>(from, to);
-  Color_group::copy(from, to);
-  Placement_block::copy(from, to);
+inline void carry_node_attrs(const Src& from, const Dst& to, const Carry_policy& policy = {}) {
+  if (policy.names) {
+    carry_attr<hhds::attrs::name_t>(from, to);
+  }
+  if (policy.matches) {
+    carry_attr<livehd::attrs::match_t>(from, to);
+  }
+  if (policy.colors) {
+    Color_group::copy(from, to);
+  }
+  if (policy.placement) {
+    Placement_block::copy(from, to);
+  }
 #define LIVEHD_ATTR_CARRY_NODE(tag)                                           \
   if constexpr (attr_carry_detail::is_node_carried<livehd::attrs::tag##_t>) { \
-    carry_attr<livehd::attrs::tag##_t>(from, to);                             \
+    if (policy.allows<livehd::attrs::tag##_t>()) {                            \
+      carry_attr<livehd::attrs::tag##_t>(from, to);                           \
+    }                                                                         \
   }
   LIVEHD_FOR_EACH_ATTR_TAG(LIVEHD_ATTR_CARRY_NODE)
 #undef LIVEHD_ATTR_CARRY_NODE
@@ -113,10 +150,12 @@ inline void carry_node_attrs(const Src& from, const Dst& to) {
 // Every pin attribute eligible for carry. Call with matching ROLES (driver->driver, sink->sink):
 // the per-pin key folds the driver/sink bit, so a crossed call aliases slots.
 template <class Src, class Dst>
-inline void carry_pin_attrs(const Src& from, const Dst& to) {
+inline void carry_pin_attrs(const Src& from, const Dst& to, const Carry_policy& policy = {}) {
 #define LIVEHD_ATTR_CARRY_PIN(tag)                                           \
   if constexpr (attr_carry_detail::is_pin_carried<livehd::attrs::tag##_t>) { \
-    carry_attr<livehd::attrs::tag##_t>(from, to);                            \
+    if (policy.allows<livehd::attrs::tag##_t>()) {                           \
+      carry_attr<livehd::attrs::tag##_t>(from, to);                          \
+    }                                                                        \
   }
   LIVEHD_FOR_EACH_ATTR_TAG(LIVEHD_ATTR_CARRY_PIN)
 #undef LIVEHD_ATTR_CARRY_PIN

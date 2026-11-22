@@ -33,6 +33,7 @@
 static constexpr int32_t Bits_unknown = std::numeric_limits<int32_t>::max();
 
 using livehd::graph_util::bits_of;
+using livehd::graph_util::consumer_sinks;
 using livehd::graph_util::create_const;
 using livehd::graph_util::create_typed_node;
 using livehd::graph_util::debug_name;
@@ -100,34 +101,6 @@ constexpr bool infer_internal_range(Ntype_op op) {
     case Ntype_op::AttrSet : return true;
     default                : return false;
   }
-}
-
-// Every consumer SINK of `node`, materialized.
-//
-// Two reasons this exists rather than being inlined at each call site:
-//
-//  1. SAFETY. The callers below reconnect the fan-out and then delete the node,
-//     i.e. they mutate the very edge storage they are walking. A node's driver
-//     fan-out is a LAZY view over that storage, so reading it while rewiring it
-//     is a use-after-free waiting to happen -- the loops used to do exactly
-//     that, under a comment claiming the live walk was deliberate. Taking the
-//     snapshot first is what makes "live-reconnect" honest.
-//
-//  2. It is the pin-centric spelling: the node's DRIVER PINS, then each pin's
-//     own fan-out. That yields the sinks in the same order the old node-level
-//     out_edges() walk did (driver pins ascending, each pin's edges in storage
-//     order), because both walk the same two loops.
-//
-// A driver's fan-out is genuinely a SET -- clock and reset reach 100K+ sinks --
-// so there is no single-sink reader to use here, and materializing is the point.
-std::vector<hhds::Pin_class> consumer_sinks(const hhds::Node_class& node) {
-  std::vector<hhds::Pin_class> sinks;
-  for (const auto& out_pin : node.out_sorted_pins()) {
-    for (const auto& e : out_pin.out_edges()) {
-      sinks.push_back(e.sink);
-    }
-  }
-  return sinks;
 }
 
 }  // namespace

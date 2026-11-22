@@ -129,7 +129,7 @@ Special_pins scan_special_pins(const liberty::Cell_library& library, bool protec
   return special;
 }
 std::set<std::string> protected_buffers(hhds::Graph& graph, const Inventory& cells, const Special_pins& special, bool protect_reset,
-                                        const std::string& control_ports) {
+                                        const std::string& control_ports, const Timing_feedback* timing) {
   std::set<std::string> protected_names;
   // Protection is keyed by instance name, but control trees pass through unnamed wiring nodes. Every unnamed node
   // keyed as "" made one shared entry: once any control tree crossed an unnamed node, every buffer driven by ANY
@@ -203,12 +203,15 @@ std::set<std::string> protected_buffers(hhds::Graph& graph, const Inventory& cel
       }
       const auto op  = gu::type_op_of(n);
       const auto off = sink.get_port_id() % Ntype::Memory_port_stride;
-      if (!roots.override_controls
-          && ((op == Ntype_op::Memory && (off == 2 || off == 14))
-              || ((op == Ntype_op::Flop || op == Ntype_op::Latch)
-                  && (Ntype::get_sink_name(op, sink.get_port_id()) == "clock_pin"
-                      || (protect_reset && Ntype::get_sink_name(op, sink.get_port_id()) == "reset_pin")))
-              || (io && special.contains(std::string(io->get_name())) && special.at(std::string(io->get_name())).contains(name)))) {
+      const auto* timed = timing == nullptr ? nullptr : timing->find_label(std::string(n.get_name()) + ":" + name);
+      if ((timed != nullptr && timed->clock)
+          || (!roots.override_controls
+              && ((op == Ntype_op::Memory && (off == 2 || off == 14))
+                  || ((op == Ntype_op::Flop || op == Ntype_op::Latch)
+                      && (Ntype::get_sink_name(op, sink.get_port_id()) == "clock_pin"
+                          || (protect_reset && Ntype::get_sink_name(op, sink.get_port_id()) == "reset_pin")))
+                  || (io && special.contains(std::string(io->get_name()))
+                      && special.at(std::string(io->get_name())).contains(name))))) {
         for (auto driver : sink.get_driver_pins()) {
           protect(protect, driver);
         }
@@ -249,6 +252,17 @@ std::set<std::string> protected_buffers(hhds::Graph& graph, const Inventory& cel
   auto special = scan_special_pins(libs, protect_reset);
   return protected_buffers(graph, cells, special, protect_reset, control_ports);
 }
+void write_eco_floorplan(const physical::Floorplan& floorplan, const std::string& path) {
+  auto frame = floorplan;
+  std::erase_if(frame.components, [](const auto& c) {
+    return c.place.status != Ann_place::Status::FIXED && c.place.status != Ann_place::Status::LOCKED;
+  });
+  for (auto& port : frame.terminals) {
+    port.status = Ann_place::Status::FIXED;
+  }
+  physical::write_def(frame, path);
+}
+
 std::pair<double, double> wire_rc(const Options& options, const physical::Technology& tech) {
   const auto rc = technology_wire_rc(tech,
                                      options.liberty,

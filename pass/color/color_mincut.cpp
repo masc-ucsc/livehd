@@ -190,7 +190,7 @@ void Color_mincut::label(hhds::Graph* g) {
 
   int n_colors = apply_coloring(g, node2color, opts, opts.sizes);
   if (opts.verbose) {
-    std::print("[color.mincut] {} -> {} cut regions\n", g->get_name(), n_colors);
+    std::print(stderr, "[color.mincut] {} -> {} cut regions\n", g->get_name(), n_colors);
   }
 }
 

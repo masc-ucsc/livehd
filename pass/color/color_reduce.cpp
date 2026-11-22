@@ -13,6 +13,7 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
+#include "attr_carry.hpp"
 #include "cell.hpp"
 #include "color_common.hpp"
 #include "diag.hpp"
@@ -990,20 +991,7 @@ Port_plan plan_ports(const Cone& rep) {
   return plan;
 }
 
-void carry_driver_attrs(const Pin& orig, const Pin& neo) {
-  if (auto b = gu::bits_of(orig); b != 0) {
-    gu::set_bits(neo, b);
-  }
-  if (!gu::is_unsign(orig)) {
-    gu::set_sign(neo);
-  }
-  if (auto pn = gu::pin_name_of(orig); !pn.empty()) {
-    gu::set_pin_name(neo, pn);
-  }
-  if (auto o = orig.attr(livehd::attrs::pin_offset); o.has()) {
-    neo.attr(livehd::attrs::pin_offset).set(o.get());
-  }
-}
+void carry_driver_attrs(const Pin& orig, const Pin& neo) { gu::carry_pin_attrs(orig, neo, {.placement = false, .matches = false}); }
 
 // Build the shared pattern def from the representative cone. Returns the
 // GraphIO, or nullptr after a fatal diag.
@@ -1071,12 +1059,14 @@ std::shared_ptr<hhds::GraphIO> build_pattern_def(hhds::GraphLibrary* lib, const 
   node_map.reserve(rep.members.size());
   for (const auto& n : rep.members) {
     auto neo = gu::create_typed_node(*body, gu::type_op_of(n));
-    if (gu::has_name(n)) {
-      neo.attr(hhds::attrs::name).set(std::string{gu::node_name_of(n)});
-    }
-    if (auto a = n.attr(livehd::attrs::lut); a.has()) {
-      neo.attr(livehd::attrs::lut).set(std::string{a.get()});
-    }
+    gu::carry_node_attrs(n,
+                         neo,
+                         {.colors           = false,
+                          .placement        = false,
+                          .analysis         = false,
+                          .synth_policy     = false,
+                          .aggregate_origin = false,
+                          .matches          = false});
     if (auto a = n.attr(hhds::attrs::srcid); a.has() && a.get() != 0) {
       neo.attr(hhds::attrs::srcid).set(body->source_locator().import_from(rep.g->source_locator(), a.get()));
     }

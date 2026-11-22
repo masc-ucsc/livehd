@@ -100,7 +100,7 @@ ph::Rc_net routed_rc(const ph::Technology& tech, const ph::Floorplan& fp, const 
         if (p) {
           ph::Net piece;
           piece.name = net.name;
-          piece.wires.push_back({wire.type, {{layer, path.width, path.shape, {*previous, *p}, path.taper_rule, path.taper}}});
+          piece.wires.push_back({wire.type, {path.with_steps(layer, {*previous, *p})}});
           const auto  shapes = ph::route_geometry(tech, fp, piece);
           const auto& r      = shapes.at(0).rect;
           const bool  h      = previous->y == p->y;

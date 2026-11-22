@@ -16,8 +16,8 @@
 
 #include <algorithm>
 #include <cctype>
-#include <charconv>
 #include <cerrno>
+#include <charconv>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -36,48 +36,29 @@
 #include <thread>
 #include <vector>
 
+#include "file_utils.hpp"
+#include "fnv1a.hpp"
 #include "hlop/readmem.hpp"
+#include "json_util.hpp"
 #include "lhd_sim_observe.hpp"
+#include "pyrope_literal.hpp"
 #include "rapidjson/document.h"
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
 #include "sim_native_rt.hpp"
 #include "sim_program.hpp"
 #include "tb_abi.hpp"
+#include "wide_decimal.hpp"
 
 namespace {
 
 namespace obs = lhd::sim_observe;
 namespace fs = std::filesystem;
 
-std::string slurp(const std::string& path) {
-  std::ifstream      ifs(path, std::ios::binary);
-  std::ostringstream ss;
-  ss << ifs.rdbuf();
-  return ss.str();
-}
+std::string slurp(const std::string& path) { return livehd::file_utils::read_file(path).value_or(std::string{}); }
 
-std::string json_esc(const std::string& s) {
-  std::string o;
-  for (const char c : s) {
-    switch (c) {
-      case '\\': o += "\\\\"; break;
-      case '"' : o += "\\\""; break;
-      case '\n': o += "\\n"; break;
-      case '\r': o += "\\r"; break;
-      case '\t': o += "\\t"; break;
-      default  : o += static_cast<unsigned char>(c) < 0x20 ? ' ' : c;
-    }
-  }
-  return o;
-}
-
-uint64_t fnv1a(uint64_t h, std::string_view s) {
-  for (const unsigned char c : s) {
-    h = (h ^ c) * 0x100000001b3ULL;
-  }
-  return h;
-}
+using livehd::hash_util::fnv1a64;
+using livehd::json_util::escape;
 
 struct Image_ref {
   std::string path;
@@ -585,7 +566,7 @@ void power_on(uint64_t* st, const Dut& d, bool zero_uninitialized, bool unknown_
     if (unknown_zero && f.kind == 2 && f.name.starts_with("__unknown")) {
       continue;
     }
-    const uint64_t named = fnv1a(seed ^ 0x6c6e6173745f7369ULL, f.name);
+    const uint64_t named = fnv1a64(f.name, seed ^ 0x6c6e6173745f7369ULL);
     for (uint64_t e = 0; e < (f.kind == 3 ? f.entries : 1); ++e) {
       std::vector<uint64_t> words((f.bits + 63) / 64 + 1, 0);
       uint64_t              s = named ^ (e * 0xD6E8FEB86659FD93ULL);
@@ -605,35 +586,35 @@ void power_on(uint64_t* st, const Dut& d, bool zero_uninitialized, bool unknown_
 }
 
 // ---- parameters --------------------------------------------------------------------------------------
-bool parse_int(std::string text, int64_t& out, bool is_unsigned) {
-  text.erase(std::remove(text.begin(), text.end(), '_'), text.end());
-  if (text.empty()) {
+bool parse_int(std::string_view text, int64_t& out, bool is_unsigned) {
+  const auto parsed = livehd::parse_pyrope_integer_spelling(text);
+  if (!parsed || parsed->unknown()) {
     return false;
   }
-  bool neg = false;
-  if (text[0] == '-' || text[0] == '+') {
-    neg = text[0] == '-';
-    text.erase(0, 1);
-  }
-  int base = 10;
-  if (text.size() > 2 && text[0] == '0' && (text[1] == 'x' || text[1] == 'X')) {
-    base = 16;
-    text.erase(0, 2);
-  } else if (text.size() > 2 && text[0] == '0' && (text[1] == 'b' || text[1] == 'B')) {
-    base = 2;
-    text.erase(0, 2);
-  } else if (text.size() > 3 && text[0] == '0' && (text[1] == 'u' || text[1] == 's') && (text[2] == 'b' || text[2] == 'B')) {
-    base = 2;
-    text.erase(0, 3);
-  }
-  uint64_t       magnitude = 0;
-  const auto     end       = text.data() + text.size();
-  const auto     parsed    = std::from_chars(text.data(), end, magnitude, base);
-  constexpr auto max       = static_cast<uint64_t>(std::numeric_limits<int64_t>::max());
-  if (parsed.ec != std::errc{} || parsed.ptr != end || (is_unsigned ? neg : magnitude > max + neg)) {
+  const auto& lit       = *parsed;
+  uint64_t    magnitude = 0;
+  const auto  end       = lit.digits.data() + lit.digits.size();
+  const auto  value     = std::from_chars(lit.digits.data(), end, magnitude, static_cast<int>(lit.radix));
+  if (value.ec != std::errc{} || value.ptr != end) {
     return false;
   }
-  out = static_cast<int64_t>(neg ? uint64_t{0} - magnitude : magnitude);
+  const bool signed_negative = lit.negative_pattern();
+  if (signed_negative) {
+    const auto bits = lit.digits.size() * lit.bits_per_digit();
+    if (bits > 64) {
+      return false;
+    }
+    magnitude = uint64_t{0} - magnitude;
+    if (bits < 64) {
+      magnitude &= (uint64_t{1} << bits) - 1;
+    }
+  }
+  const bool     negative = lit.negate != signed_negative;
+  constexpr auto max      = static_cast<uint64_t>(std::numeric_limits<int64_t>::max());
+  if (is_unsigned ? negative : magnitude > max + negative) {
+    return false;
+  }
+  out = static_cast<int64_t>(negative ? uint64_t{0} - magnitude : magnitude);
   return true;
 }
 
@@ -1227,50 +1208,7 @@ void trace_cb(prp_tb::Rt* base, uint64_t* state, uint32_t before) {
 // ---- arbitrary-width integers from 64-bit words (two's complement, `bits` wide) ----------------------
 bool word_bit(const uint64_t* w, unsigned bit) { return ((w[bit / 64] >> (bit % 64)) & 1) != 0; }
 
-// decimal text of the signed `bits`-wide value in `w`
-std::string wide_decimal(const uint64_t* w, unsigned bits) {
-  const size_t          n = (bits + 63) / 64;
-  std::vector<uint64_t> v(w, w + n);
-  const bool            neg = word_bit(w, bits - 1);
-  if (bits % 64 != 0) {  // the words are sign-extended over the last word: drop the extension
-    v[n - 1] &= (uint64_t{1} << (bits % 64)) - 1;
-  }
-  if (neg) {  // magnitude: ~v + 1 within `bits`
-    for (auto& x : v) {
-      x = ~x;
-    }
-    if (bits % 64 != 0) {
-      v[n - 1] &= (uint64_t{1} << (bits % 64)) - 1;
-    }
-    for (auto& x : v) {
-      if (++x != 0) {
-        break;
-      }
-    }
-    if (bits % 64 != 0) {
-      v[n - 1] &= (uint64_t{1} << (bits % 64)) - 1;
-    }
-  }
-  std::string out;
-  for (;;) {
-    unsigned __int128 rem = 0;
-    bool              any = false;
-    for (size_t i = n; i-- > 0;) {
-      const unsigned __int128 cur = (rem << 64) | v[i];
-      v[i]                        = static_cast<uint64_t>(cur / 10);
-      rem                         = cur % 10;
-      any                         = any || v[i] != 0;
-    }
-    out.push_back(static_cast<char>('0' + static_cast<int>(rem)));
-    if (!any) {
-      break;
-    }
-  }
-  if (neg) {
-    out.push_back('-');
-  }
-  return std::string(out.rbegin(), out.rend());
-}
+using livehd::wide_decimal;
 
 // A hole's text: `[width]` is the minimum digit count (zero padded), `s` groups digits with `_`.
 std::string render_hole(const Print_seg& g, const uint64_t* w) {
@@ -1989,16 +1927,17 @@ int main(int argc, char** argv) {
     return 2;
   }
   if (list_tests) {
-    std::string j = "{\"file\":\"" + json_esc(man["file"].GetString()) + "\",\"tests\":[";
+    std::string j     = "{\"file\":\"" + escape(man["file"].GetString()) + "\",\"tests\":[";
     bool        first = true;
     for (const auto& t : man["tests"].GetArray()) {
-      j += std::string(first ? "" : ",") + "{\"name\":\"" + json_esc(t["name"].GetString()) + "\",\"params\":[";
+      j       += std::string(first ? "" : ",") + "{\"name\":\"" + escape(t["name"].GetString()) + "\",\"params\":[";
       first = false;
       bool pf = true;
       for (const auto& p : t["params"].GetArray()) {
-        j += std::string(pf ? "" : ",") + "{\"name\":\"" + json_esc(p["name"].GetString()) + "\",\"required\":" + (p["required"].GetBool() ? "true" : "false");
+        j += std::string(pf ? "" : ",") + "{\"name\":\"" + escape(p["name"].GetString())
+             + "\",\"required\":" + (p["required"].GetBool() ? "true" : "false");
         if (!p["required"].GetBool()) {
-          j += ",\"default\":\"" + json_esc(p["default"].GetString()) + "\"";
+          j += ",\"default\":\"" + escape(p["default"].GetString()) + "\"";
         }
         j += "}";
         pf = false;
@@ -2010,7 +1949,7 @@ int main(int argc, char** argv) {
   }
 
   const bool legacy      = !man.HasMember("schema_version") || man["schema_version"].GetInt() < 2;
-  uint64_t   design_hash = fnv1a(0xcbf29ce484222325ULL, manifest_text);
+  uint64_t   design_hash = fnv1a64(manifest_text);
 
   // DUT descriptors and the one JIT dylib.
   std::map<std::string, Dut> duts;
@@ -2058,15 +1997,15 @@ int main(int argc, char** argv) {
   std::string                 error;
   const bool                  hash_design = !legacy && !ckpt.dir.empty();
   if (hash_design) {
-    design_hash = fnv1a(design_hash, slurp(simdir + "/" + prp_tb::kObject));
+    design_hash = fnv1a64(slurp(simdir + "/" + prp_tb::kObject), design_hash);
   }
   for (const auto& [stem, d] : duts) {
     if (hash_design) {
-      design_hash = fnv1a(design_hash, slurp(simdir + "/" + stem + ".dut.json"));
+      design_hash = fnv1a64(slurp(simdir + "/" + stem + ".dut.json"), design_hash);
     }
     for (const auto& o : d.objects) {
       if (hash_design) {
-        design_hash = fnv1a(design_hash, slurp(simdir + "/" + o));
+        design_hash = fnv1a64(slurp(simdir + "/" + o), design_hash);
       }
       if (!objects.load(simdir + "/" + o, error)) {
         std::fprintf(stderr, "lhd sim: %s\n", error.c_str());
@@ -2177,7 +2116,7 @@ int main(int argc, char** argv) {
       args.push_back(v);
       args.push_back(supplied);
       args_id     += std::to_string(pname.size()) + ":" + pname + std::to_string(shown.size()) + ":" + shown;
-      params_json += std::string(pfirst ? "" : ",") + "\"" + json_esc(pname) + "\":\"" + json_esc(shown) + "\"";
+      params_json  += std::string(pfirst ? "" : ",") + "\"" + escape(pname) + "\":\"" + escape(shown) + "\"";
       pfirst       = false;
     }
     params_json += "}";
@@ -2339,9 +2278,9 @@ int main(int argc, char** argv) {
           rt.interval       = ckpt.min_secs;
           uint64_t run_hash = design_hash;
           if (hash_design) {
-            run_hash = fnv1a(run_hash, name);
-            run_hash = fnv1a(run_hash, {reinterpret_cast<const char*>(state.data()), state.size() * sizeof(uint64_t)});
-            run_hash = fnv1a(run_hash, std::to_string(seed) + (init_zero ? ":init0" : ":init") + (unknown_zero ? ":x0" : ":x"));
+            run_hash = fnv1a64(name, run_hash);
+            run_hash = fnv1a64({reinterpret_cast<const char*>(state.data()), state.size() * sizeof(uint64_t)}, run_hash);
+            run_hash = fnv1a64(std::to_string(seed) + (init_zero ? ":init0" : ":init") + (unknown_zero ? ":x0" : ":x"), run_hash);
           }
           rt.design_id = std::to_string(run_hash);
           rt.ckpt_left = rt.ckpt.enabled ? poll_period(ckpt) : (int64_t{1} << 60);
@@ -2391,7 +2330,7 @@ int main(int argc, char** argv) {
     }
     std::string args_json = "[";
     for (size_t k = 0; k < arg_tokens.size(); ++k) {
-      args_json += std::string(k ? "," : "") + "\"" + json_esc(arg_tokens[k]) + "\"";
+      args_json += std::string(k ? "," : "") + "\"" + escape(arg_tokens[k]) + "\"";
     }
     args_json += "]";
     const auto sim_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t0).count();
@@ -2412,14 +2351,15 @@ int main(int argc, char** argv) {
     if (!result_json.empty()) {
       rj += rj_first ? "" : ",";
       rj_first = false;
-      rj += "{\"test\":\"" + json_esc(name) + "\",\"status\":\"" + status + "\",\"arguments\":" + args_json + ",\"parameters\":" + params_json;
+      rj       += "{\"test\":\"" + escape(name) + "\",\"status\":\"" + status + "\",\"arguments\":" + args_json
+                  + ",\"parameters\":" + params_json;
       if (fails < 0) {
-        rj += ",\"error\":\"" + json_esc(err) + "\"";
+        rj += ",\"error\":\"" + escape(err) + "\"";
       } else if (fails > 0 && first.has) {
-        rj += ",\"cycle\":" + std::to_string(first.cycle) + ",\"failing_assert\":\"" + json_esc(first.cond) + "\",\"prp_file\":\"" + json_esc(first.file)
-              + "\",\"line\":" + std::to_string(first.line);
+        rj += ",\"cycle\":" + std::to_string(first.cycle) + ",\"failing_assert\":\"" + escape(first.cond) + "\",\"prp_file\":\""
+              + escape(first.file) + "\",\"line\":" + std::to_string(first.line);
         if (!first.msg.empty()) {
-          rj += ",\"msg\":\"" + json_esc(first.msg) + "\"";
+          rj += ",\"msg\":\"" + escape(first.msg) + "\"";
         }
       }
       rj += ",\"sim_cycles\":" + std::to_string(sim_cycles) + ",\"sim_ns\":" + std::to_string(sim_ns) + "}";

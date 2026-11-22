@@ -391,12 +391,16 @@ void semdiff_command(Options& opts, Result& res) {
         if (gu::type_op_of(node) != Ntype_op::Sub) {
           continue;
         }
-        auto        sio = node.get_subnode_io();
-        std::string cn  = canon_ref(sio->get_name());
+        auto sio = node.get_subnode_io();
+        if (!sio) {
+          continue;
+        }
+        std::string cn = canon_ref(sio->get_name());
         if (ref_by_name.contains(cn) && seen.insert(cn).second) {
           children[name].push_back(cn);
         }
       }
+      std::ranges::sort(children[name]);
     }
     std::string want_top = !opts.ref_top.empty() ? opts.ref_top : opts.top;
     if (want_top.empty() && !opts.impl_top.empty()) {

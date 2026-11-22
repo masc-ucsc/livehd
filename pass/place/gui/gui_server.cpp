@@ -16,8 +16,8 @@
 #include <cerrno>
 #include <charconv>
 #include <chrono>
-#include <cstdlib>
 #include <csignal>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <format>
@@ -28,6 +28,7 @@
 #include "gui_ipc.hpp"
 #include "gui_page.hpp"
 #include "gui_session.hpp"
+#include "json_util.hpp"
 
 namespace livehd::placement::gui {
 
@@ -207,21 +208,6 @@ Request read_request(int fd, std::atomic<bool>& stop) {
   req.path = target;
   req.ok   = true;
   return req;
-}
-
-std::string json_text(std::string_view text) {
-  std::string out;
-  for (const unsigned char c : text) {
-    if (c == '"' || c == '\\') {
-      out += '\\';
-      out += char(c);
-    } else if (c < 0x20) {
-      out += ' ';
-    } else {
-      out += char(c);
-    }
-  }
-  return out;
 }
 
 void send_all(int fd, std::string_view data) {
@@ -495,7 +481,10 @@ bool Session::start(std::string* error) {
           } catch (const std::exception& e) {
             // Whatever a command throws (an allocation that cannot be satisfied, a bad index) answers this request
             // and nothing more: an exception leaving a detached thread ends the whole process, the flow with it.
-            respond(client, 500, "application/json", std::format(R"({{"ok":false,"error":"internal error: {}"}})", json_text(e.what())));
+            respond(client,
+                    500,
+                    "application/json",
+                    std::format(R"({{"ok":false,"error":"internal error: {}"}})", json_util::escape(e.what())));
           } catch (...) {
             respond(client, 500, "application/json", R"({"ok":false,"error":"internal error"})");
           }

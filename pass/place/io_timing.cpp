@@ -19,6 +19,7 @@
 #include "placement_technology.hpp"
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
+#include "repair_internal.hpp"
 #include "technology_rc.hpp"
 
 namespace livehd::placement {
@@ -71,31 +72,7 @@ std::map<std::string, synth::Io_environment> Io_timing_flow::harvest(const Resul
                                                                             options_.capacitance_ff_um,
                                                                             options_.rc_pessimism,
                                                                             options_.technology().cells.contents);
-  std::map<std::string, std::set<std::string>> controls;
-  auto                                         flops = options_.technology().cells.dffs;
-  for (const auto& c : options_.technology().cells.async_dffs) {
-    flops.push_back(c);
-  }
-  for (const auto& c : options_.technology().cells.latches) {
-    flops.push_back(c);
-  }
-  for (const auto& c : flops) {
-    for (const auto& name : {c.clk_pin, c.reset0_pin, c.reset1_pin}) {
-      if (!name.empty()) {
-        controls[c.name].insert(name);
-      }
-    }
-  }
-  for (const auto& c : options_.technology().cells.icgs) {
-    controls[c.name].insert(c.clk_pin);
-  }
-  for (const auto& c : options_.technology().cells.memories) {
-    for (const auto& pin : c.pins) {
-      if (pin.clock_input) {
-        controls[c.name].insert(pin.name);
-      }
-    }
-  }
+  const auto                    controls = detail::scan_special_pins(options_.technology().cells, /*protect_reset=*/true);
   hhds::GraphLibrary            flat_library;
   partition::Flat_origin_map    origins;
   std::unordered_set<hhds::Gid> preserved;
@@ -149,7 +126,8 @@ std::map<std::string, synth::Io_environment> Io_timing_flow::harvest(const Resul
       }
       if (colon != std::string::npos) {
         const auto master = masters.find(node.pin.substr(0, colon));
-        if (master != masters.end() && controls[master->second].contains(node.pin.substr(colon + 1))) {
+        const auto control = master == masters.end() ? controls.end() : controls.find(master->second);
+        if (control != controls.end() && control->second.contains(node.pin.substr(colon + 1))) {
           protected_net = true;
         }
       }

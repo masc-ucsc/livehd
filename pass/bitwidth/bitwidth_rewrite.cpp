@@ -8,17 +8,10 @@ namespace {
 using namespace livehd::graph_util;
 using livehd::cprop_value::make_node;
 Cprop::Inp_pins ordered_inp_edges(const hhds::Node_class& node) { return node.inp_pins_snapshot(); }
-hhds::Pin_class drv_at(const hhds::Node_class& node, uint32_t port) { return node.get_sink_pin(port).get_driver_pin(); }
-bool            has_single_consumer(const hhds::Pin_class& pin) {
-  auto edges = pin.out_edges();
-  auto it    = edges.begin();
-  return it != edges.end() && ++it == edges.end();
-}
 bool fits_unsigned_window(const hhds::Pin_class& pin, int width) {
   const int bound = livehd::cprop_value::unsigned_width(pin);
   return width > 0 && bound >= 0 && bound <= width;
 }
-bool is_computed_comb_op(Ntype_op op) { return Ntype::is_comb(op) && op != Ntype_op::Rem && op != Ntype_op::Clock_cell; }
 }  // namespace
 using namespace livehd::graph_util;
 using livehd::cprop_value::make_node;

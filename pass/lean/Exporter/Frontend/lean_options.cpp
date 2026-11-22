@@ -1,11 +1,11 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "lean_options.hpp"
 
-#include <cctype>
 #include <limits>
 #include <string_view>
 
 #include "eprp_var.hpp"
+#include "str_tools.hpp"
 namespace {
 LeanCertWFMode parse_cert_wf_mode(std::string_view mode) {
   if (mode == "eval") {
@@ -27,26 +27,6 @@ LeanCertWFFallback parse_cert_wf_fallback(std::string_view mode) {
     return LeanCertWFFallback::Eval;
   }
   return LeanCertWFFallback::Fail;
-}
-// Default: NO CAP -- see core/str_tools.hpp::parse_max_width, whose contract this
-// mirrors. Keep the two in step.
-size_t parse_max_width(std::string_view s, size_t dflt = std::numeric_limits<size_t>::max()) {
-  if (s.empty()) {
-    return dflt;
-  }
-  std::string l(s);
-  for (auto& c : l) {
-    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-  }
-  if (l == "unlimited" || l == "inf" || l == "none" || l == "0") {
-    return std::numeric_limits<size_t>::max();
-  }
-  try {
-    size_t v = std::stoul(l);
-    return v == 0 ? std::numeric_limits<size_t>::max() : v;
-  } catch (...) {
-    return dflt;
-  }
 }
 }  // namespace
 LeanOptions::LeanOptions(const Eprp_var& var) {
@@ -97,7 +77,7 @@ LeanOptions::LeanOptions(const Eprp_var& var) {
     cert_chunk_limit = 0;
   }
 
-  max_width = parse_max_width(var.get("max_width"));
+  max_width = str_tools::parse_max_width(var.get("max_width"));
   // DEFAULT unlimited -- see ScanOptions::max_nodes.
-  max_nodes = parse_max_width(var.get("max_nodes"), 0);
+  max_nodes = str_tools::parse_max_width(var.get("max_nodes"), 0);
 }

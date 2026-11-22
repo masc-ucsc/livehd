@@ -18,6 +18,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//core",
+        "//core:sim_values",
         "//core:file_name",
         "//graph",
         "//inou/cgen:inou_cgen",
@@ -37,7 +38,7 @@ cc_binary(
     srcs = ["lnast_llvm_run.cpp"],
     copts = COPTS,
     visibility = ["//visibility:public"],
-    deps = ["//inou/cgen:sim_native_rt"],
+    deps = ["//core:sim_values", "//inou/cgen:sim_native_rt"],
 )
 
 load("//tools:regression.bzl", "sh_test")

@@ -145,7 +145,13 @@ bool reaches_clock(const hhds::Occurrence_pin& p, const lc::Design_clocks& clock
 
 Clock_chain resolve_chain(hhds::Occurrence_pin clk, const lc::Design_clocks& clocks, int depth) {
   Clock_chain ch;
-  auto        cur = clk;
+  constexpr int max_hops = 16;
+  if (depth >= max_hops) {
+    ch.refused = true;
+    ch.why     = "is clocked through a nested clock chain beyond the phase scheduler's hop limit";
+    return ch;
+  }
+  auto cur              = clk;
   // WHEN a gate's enable is sampled: in the half-period just before the gate's
   // OWN active edge. An And gate (`c & en`) passes the rise of its clock operand
   // c, so its enable is sampled while c is low; the Or flavour (`c | ~en`) passes
@@ -156,8 +162,13 @@ Clock_chain resolve_chain(hhds::Occurrence_pin clk, const lc::Design_clocks& clo
   // early (a spurious BMC counterexample against the Or spelling of the same
   // netlist). Every gate of a chain must agree: an endpoint has one sample point.
   auto set_sample_point = [&](bool or_flavour, const hhds::Occurrence_pin& clock_operand) {
-    const bool operand_inverted = resolve_chain(clock_operand, clocks, depth + 1).inverted;
-    const bool before_fall      = or_flavour != operand_inverted;
+    const auto operand = resolve_chain(clock_operand, clocks, depth + 1);
+    if (operand.refused) {
+      ch.refused = true;
+      ch.why     = operand.why;
+      return false;
+    }
+    const bool before_fall = or_flavour != operand.inverted;
     if (ch.gated && ch.guard_before_fall != before_fall) {
       ch.refused = true;
       ch.why     = "is clocked through chained clock gates whose enables are sampled in different half-periods; the phase "
@@ -167,7 +178,7 @@ Clock_chain resolve_chain(hhds::Occurrence_pin clk, const lc::Design_clocks& clo
     ch.guard_before_fall = before_fall;
     return true;
   };
-  for (int hops = 0; hops < 16 && !cur.is_invalid(); ++hops) {
+  for (int hops = 0; hops < max_hops && !cur.is_invalid(); ++hops) {
     const auto cr = lc::control_root(cur, /*stop_at_clock_cell=*/true);
     ch.inverted   = ch.inverted != cr.inverted;
     if (cr.net.is_invalid()) {
@@ -192,23 +203,26 @@ Clock_chain resolve_chain(hhds::Occurrence_pin clk, const lc::Design_clocks& clo
     auto       n  = cr.net.get_master_node();
     const auto op = gu::type_op_of(n);
     if (op == Ntype_op::Clock_cell) {
-      if (auto d = lc::sink_driver_hier(n, "div"); d.is_const()) {
-        const auto& dv = gu::const_of(d);
-        const int  iv = dv.is_just_i64() ? static_cast<int>(dv.to_just_i64()) : 0;
-        if (iv != 1) {
-          // A divider's INITIAL PHASE is part of its identity; recording only
-          // `div=2` makes two 180-degrees-apart dividers compare equal, which is
-          // the clock-blindness false-PROVEN class. Named refusal, never an
-          // approximation.
+      if (const auto d = lc::sink_driver_hier(n, "div"); !d.is_invalid()) {
+        if (!d.is_const() || !gu::const_of(d).is_just_i64()) {
           ch.refused = true;
-          ch.why = "is clocked by a Clock_cell with div=" + std::to_string(iv) + ", which is not implemented (v1 is div=1 only)";
+          ch.why     = "is clocked by a Clock_cell without a known constant divisor";
+          return ch;
+        }
+        const auto div = gu::const_of(d).to_just_i64();
+        if (div != 1) {
+          ch.refused = true;
+          ch.why = "is clocked by a Clock_cell with div=" + std::to_string(div) + ", which is not implemented (v1 is div=1 only)";
           return ch;
         }
       }
-      bool invert = false;
-      if (auto inv = lc::sink_driver_hier(n, "invert"); inv.is_const() && !inv.is_known_false()) {
-        invert = true;  // the active-low flavour: `clk_ref | ~en`
+      const auto inv = lc::sink_driver_hier(n, "invert");
+      if (!inv.is_invalid() && (!inv.is_const() || gu::const_of(inv).has_unknowns())) {
+        ch.refused = true;
+        ch.why     = "is clocked by a Clock_cell without a known constant invert pin";
+        return ch;
       }
+      const bool invert  = !inv.is_invalid() && !inv.is_known_false();
       const auto clk_ref = lc::sink_driver_hier(n, "clk_ref");
       if (auto en = lc::sink_driver_hier(n, "en"); !en.is_invalid() && !en.is_const()) {
         if (!set_sample_point(invert, clk_ref)) {
@@ -340,6 +354,10 @@ Clock_chain resolve_chain(hhds::Occurrence_pin clk, const lc::Design_clocks& clo
     }
     ch.root = cr.net;  // some other derived clock: the caller decides what to do
     return ch;
+  }
+  if (!cur.is_invalid()) {
+    ch.refused = true;
+    ch.why     = "is clocked through a clock chain beyond the phase scheduler's hop limit";
   }
   return ch;
 }

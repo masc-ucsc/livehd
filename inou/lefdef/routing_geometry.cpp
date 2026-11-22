@@ -282,4 +282,41 @@ Route_path via_path(const std::string& lower_layer, int64_t x, int64_t y, const 
       {Route_point{x, y, {}}, Route_via{via}}
   };
 }
+bool rect_union_covers(const Rect& r, std::span<const Rect> rects) {
+  if (r.empty()) {
+    return false;
+  }
+  std::vector<double> xs{r.xl, r.xh};
+  for (const auto& s : rects) {
+    if (s.xl > r.xl && s.xl < r.xh) {
+      xs.push_back(s.xl);
+    }
+    if (s.xh > r.xl && s.xh < r.xh) {
+      xs.push_back(s.xh);
+    }
+  }
+  std::sort(xs.begin(), xs.end());
+  xs.erase(std::unique(xs.begin(), xs.end()), xs.end());
+  for (size_t i = 1; i < xs.size(); ++i) {
+    std::vector<std::pair<double, double>> ys;
+    for (const auto& s : rects) {
+      if (!s.empty() && s.xl <= xs[i - 1] && s.xh >= xs[i]) {
+        ys.emplace_back(s.yl, s.yh);
+      }
+    }
+    std::sort(ys.begin(), ys.end());
+    auto high = r.yl;
+    for (const auto& [lo, hi] : ys) {
+      if (lo > high) {
+        break;
+      }
+      high = std::max(high, hi);
+    }
+    if (high < r.yh) {
+      return false;
+    }
+  }
+  return true;
+}
+
 }  // namespace livehd::physical

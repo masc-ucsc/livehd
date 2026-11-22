@@ -16,18 +16,17 @@
 #include <string_view>
 #include <vector>
 
+#include "file_utils.hpp"
+#include "fnv1a.hpp"
+
 namespace lhd::tune {
 
-// FNV-1a 64: the tune store's content hash (retained-tree names, testbench
-// digests, raw-file dedup). Not cryptographic; collisions only cost a trial.
-[[nodiscard]] uint64_t    fnv1a64(std::string_view bytes, uint64_t h = 0xcbf29ce484222325ULL);
+using livehd::file_utils::read_file;
+using livehd::hash_util::fnv1a64;
 [[nodiscard]] std::string hex16(uint64_t v);
 
 [[nodiscard]] int64_t     unix_seconds_now();
 [[nodiscard]] std::string iso8601_utc(int64_t unix_seconds);
-
-// Whole-file read; nullopt when the file cannot be opened.
-[[nodiscard]] std::optional<std::string> read_file(const std::string& path);
 
 // tmp + rename in the same directory: a reader sees the old bytes or the new
 // ones, never a torn file. Creates the parent directory.
@@ -59,31 +58,7 @@ bool append_jsonl(const std::string& path, const std::vector<std::string>& lines
 // Replace the file with exactly `lines` (compaction), tmp + rename.
 bool rewrite_jsonl(const std::string& path, const std::vector<std::string>& lines, std::string& why);
 
-// ---- the workdir lock -------------------------------------------------------
-//
-// flock(2) on a lock file OUTSIDE the tree it protects (the tree gets swapped).
-// The descriptor is O_CLOEXEC: the host compiler and drv.bin (and its
-// forked checkpoint children) must never inherit it, or the lock would outlive
-// lhd. Shared <-> exclusive conversion is not atomic (flock semantics), so a
-// caller that re-acquires EXCLUSIVE must re-validate what it saw before.
-class File_lock {
-public:
-  File_lock()                            = default;
-  File_lock(const File_lock&)            = delete;
-  File_lock& operator=(const File_lock&) = delete;
-  ~File_lock();
-
-  bool               open(const std::string& path, std::string& why);
-  // Blocks. When another holder has it, prints `waiting` to stderr once first.
-  bool               exclusive(std::string_view waiting);
-  bool               shared();
-  void               release() noexcept;
-  [[nodiscard]] bool is_open() const { return fd_ >= 0; }
-
-private:
-  bool lock(int op, std::string_view waiting);
-  int  fd_ = -1;
-};
+using livehd::file_utils::File_lock;
 
 // ---- copy-on-write retention --------------------------------------------------
 //

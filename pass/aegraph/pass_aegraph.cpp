@@ -243,43 +243,11 @@ void Pass_aegraph::optimize(Eprp_var& var) {
         total.consts_created);
   };
 
-  std::atomic<size_t> next{0};
-  const size_t        hw = std::max<size_t>(1, std::thread::hardware_concurrency());
+  const auto hw      = std::max<size_t>(1, std::thread::hardware_concurrency());
+  const auto count   = var.graphs.size();
   // max_rewrites bisects in forward-walk order: one worker keeps the graph order.
-  const size_t        nw = options.max_rewrites != 0 ? 1 : std::min({var.graphs.size(), hw, size_t{16}});
-  if (nw <= 1) {
-    Cprop cp{low_lanes};
-    for (size_t i = 0; i < var.graphs.size(); ++i) {
-      one(cp, i);
-    }
-    summary();
-    report();
-    hoist_after();
-    return;
-  }
-
-  std::vector<std::exception_ptr> errors(var.graphs.size());
-  std::atomic<bool>               failed{false};
-  livehd::run_workers(nw, [&](size_t) {
-    Cprop cp{low_lanes};
-    while (!failed.load(std::memory_order_relaxed)) {
-      const size_t i = next.fetch_add(1, std::memory_order_relaxed);
-      if (i >= var.graphs.size()) {
-        break;
-      }
-      try {
-        one(cp, i);
-      } catch (...) {
-        errors[i] = std::current_exception();
-        failed.store(true, std::memory_order_relaxed);
-      }
-    }
-  });
-  for (const auto& error : errors) {
-    if (error) {
-      std::rethrow_exception(error);
-    }
-  }
+  const auto workers = options.max_rewrites != 0 ? size_t{1} : std::min({count, hw, size_t{16}});
+  livehd::parallel_for_each(count, workers, [&] { return [&, cp = Cprop{low_lanes}](size_t i) mutable { one(cp, i); }; });
   summary();
   report();
   hoist_after();

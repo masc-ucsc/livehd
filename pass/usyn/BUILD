@@ -451,6 +451,7 @@ cc_library(
         "//graph",
         "//pass/aegraph:fold_engine",  # the engine is part of the cache salt
         "//pass/lec:lec_query",
+        "//pass/synth:tune_validation",
         "//pass/common:pass",
         "//pass/cost:host_mem",
         "//pass/cprop:pass_cprop",

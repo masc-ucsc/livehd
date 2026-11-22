@@ -10,6 +10,7 @@
 #include <mutex>
 #include <stdexcept>
 
+#include "file_utils.hpp"
 #include "rapidjson/document.h"
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
@@ -131,14 +132,10 @@ rapidjson::Document read_json(const std::string& path) {
   return d;
 }
 void publish(const std::string& path, const rapidjson::StringBuffer& buffer) {
-  const auto temporary = path + ".tmp";
-  {
-    std::ofstream out(temporary);
-    if (!(out << buffer.GetString() << '\n')) {
-      throw std::runtime_error("cannot save placement synthesis state");
-    }
+  const auto json = std::string(buffer.GetString(), buffer.GetSize()) + '\n';
+  if (const auto error = file_utils::write_file_atomic(path, json); error) {
+    throw std::runtime_error("cannot save placement synthesis state: " + error.message());
   }
-  std::filesystem::rename(temporary, path);
 }
 }  // namespace
 bool register_io_mapper(std::string name, Io_mapper_factory factory) {

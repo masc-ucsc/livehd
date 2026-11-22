@@ -21,6 +21,7 @@
 #include "cell.hpp"  // Ntype_op
 #include "debug_env.hpp"
 #include "diag.hpp"
+#include "file_utils.hpp"
 #include "graph_library_singleton.hpp"
 #include "hash_util.hpp"
 #include "hhds/attrs/name.hpp"
@@ -975,23 +976,11 @@ void Region_cache::save_to(const std::string& directory, bool strict) {
   out += "}}";
 
   const std::string path = directory + "/abc_cache.json";
-  const std::string tmp  = path + ".tmp";
-  {
-    std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
-    if (!f) {
-      if (strict) {
-        throw std::runtime_error("cannot create staged synthesis cache metadata");
-      }
-      return;
+  if (const auto error = file_utils::write_file_atomic(path, out); error) {
+    if (strict) {
+      throw std::runtime_error("cannot publish staged synthesis cache metadata: " + error.message());
     }
-    f << out;
-    f.close();
-    if (strict && !f) {
-      throw std::runtime_error("cannot serialize staged synthesis cache metadata");
-    }
-  }
-  if (std::rename(tmp.c_str(), path.c_str()) != 0 && strict) {
-    throw std::runtime_error("cannot install staged synthesis cache metadata");
+    return;
   }
 
   if (scoped_libraries_ || strict) {

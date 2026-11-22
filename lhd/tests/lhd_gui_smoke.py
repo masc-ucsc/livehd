@@ -139,7 +139,10 @@ try:
     assert abs(moved['x'] - target2[0]) < 4000 and abs(moved['y'] - target2[1]) < 4000, (moved, target2)
     assert post({'cmd': 'continue'})['ok']
     s = wait(lambda s: s['finished'])
-    assert cells[0] in s['pins'], s
+    # ECO edits can rebuild the scene and renumber cells. The physical names
+    # are the pin identities across scenes.
+    assert get(f'/query?name={name}')['pinned'], s
+    assert get(f'/query?name={other_name}')['pinned'], s
     assert s['hpwl'] > 0, s
     png = urllib.request.urlopen(f'{host}/screenshot.png?w=400&h=300&layers=cells,macros,io,pins&t={token}', timeout=20).read()
     assert png[:8] == b'\x89PNG\r\n\x1a\n', png[:8]
@@ -148,7 +151,8 @@ try:
     assert len(zlib.decompress(idat)) == 300 * (400 * 3 + 1)
     assert post({'cmd': 'screenshot', 'file': 'shot.png', 'w': 200, 'h': 150})['ok']
     n = struct.unpack('<I', get('/frame', raw=True)[4:8])[0]
-    assert n == design['n'], (n, design['n'])
+    final_design = get('/design')
+    assert n == final_design['n'], (n, final_design['n'])
     assert post({'cmd': 'finish'})['ok']
     assert proc.wait(timeout=60) == 0
 finally:

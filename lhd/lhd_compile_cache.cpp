@@ -38,12 +38,13 @@
 #include "compile_salt.hpp"
 #include "diag.hpp"
 #include "eprp.hpp"
+#include "file_utils.hpp"
 #include "graph_library_singleton.hpp"
 #include "lhd_kernel_internal.hpp"
-#include "lhd_prp_import.hpp"
 #include "lnast.hpp"
 #include "node_util.hpp"
 #include "prp2lnast.hpp"
+#include "prp_import.hpp"
 #include "rapidjson/document.h"
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
@@ -462,15 +463,15 @@ std::vector<Source_unit> capture_closure(const std::vector<std::string>& seeds, 
   std::set<std::string>              loaded;
   std::set<std::string>              parsed_paths;
   std::map<std::string, std::string> logical_paths;
-  import_detail::Resolver            resolver;
+  livehd::prp_import::Resolver                                  resolver;
 
   for (const auto& ln : var.lnasts) {
     loaded.emplace(ln->get_top_module_name());
   }
   const auto preloaded = loaded;
   for (const auto& path : seeds) {
-    const auto unit = import_detail::unit_name_of(path);
-    const auto abs  = import_detail::abspath_of(path);
+    const auto unit = livehd::prp_import::unit_name_of(path);
+    const auto abs  = livehd::prp_import::abspath_of(path);
     if (const auto it = logical_paths.find(unit); it != logical_paths.end() && it->second != abs) {
       throw Lhd_error{"config",
                       std::format("Pyrope source unit '{}' names both {} and {}", unit, it->second, abs),
@@ -485,7 +486,7 @@ std::vector<Source_unit> capture_closure(const std::vector<std::string>& seeds, 
     auto node = pending.extract(pending.begin());
     auto name = std::move(node.key());
     auto path = std::move(node.mapped());
-    auto abs  = import_detail::abspath_of(path);
+    auto abs  = livehd::prp_import::abspath_of(path);
     if (!parsed_paths.insert(abs).second) {
       loaded.insert(name);
       continue;
@@ -519,12 +520,12 @@ std::vector<Source_unit> capture_closure(const std::vector<std::string>& seeds, 
     }
     loaded.insert(name);
 
-    const std::string importer_dir = import_detail::dir_of(unit.path);
+    const std::string importer_dir = livehd::prp_import::dir_of(unit.path);
     for (const auto& raw : unit.imports) {
       if (raw.starts_with("lg:") || raw.starts_with("ln:")) {
         continue;
       }
-      const auto names     = import_detail::candidates(raw);
+      const auto names     = livehd::prp_import::candidates(raw);
       // An already-satisfied import must still run conflict DETECTION: skipping
       // it made "ambiguous stem" depend on unit-name traversal order, while the
       // cache-off discover_imports path errors deterministically. Resolution is
@@ -536,7 +537,7 @@ std::vector<Source_unit> capture_closure(const std::vector<std::string>& seeds, 
         if (resolved.empty()) {
           continue;
         }
-        const auto resolved_abs = import_detail::abspath_of(resolved);
+        const auto resolved_abs = livehd::prp_import::abspath_of(resolved);
         if (const auto it = logical_paths.find(candidate); it != logical_paths.end() && it->second != resolved_abs) {
           throw Lhd_error{"config",
                           std::format("ambiguous import '{}': resolves to both {} and {}", candidate, it->second, resolved_abs),
@@ -612,7 +613,7 @@ std::vector<Source_unit> capture_closure(const std::vector<std::string>& seeds, 
     order.push_back(index);
   };
   for (const auto& path : seeds) {
-    const auto name = import_detail::unit_name_of(path);
+    const auto name = livehd::prp_import::unit_name_of(path);
     if (const auto it = by_name.find(name); it != by_name.end()) {
       place(name, it->second);
     }
@@ -626,7 +627,7 @@ std::vector<Source_unit> capture_closure(const std::vector<std::string>& seeds, 
         if (raw.starts_with("lg:") || raw.starts_with("ln:")) {
           continue;
         }
-        const auto names = import_detail::candidates(raw);
+        const auto names = livehd::prp_import::candidates(raw);
         if (std::any_of(names.begin(), names.end(), [&](const auto& name) { return satisfied.contains(name); })) {
           continue;
         }
@@ -863,7 +864,7 @@ std::string diagnostic_owner(const livehd::diag::Diagnostic& diagnostic, const P
 }
 
 std::string scope_name(const Options& opts, const std::vector<std::string>& seeds) {
-  std::string raw = opts.top.empty() ? import_detail::unit_name_of(seeds.front()) : opts.top;
+  std::string raw = opts.top.empty() ? livehd::prp_import::unit_name_of(seeds.front()) : opts.top;
   std::string out;
   out.reserve(raw.size());
   for (const unsigned char c : raw) {
@@ -943,12 +944,13 @@ using Lg_owners = std::map<std::string, Lg_record>;  // design -> record
 // moved together with its library keeps its record, and hashed, so no path
 // leaks into the library.
 std::string lg_design_id(const Options& opts, const std::string& lib_path) {
-  auto lib = fs::path(import_detail::abspath_of(lib_path));
+  auto lib = fs::path(livehd::prp_import::abspath_of(lib_path));
   if (!lib.has_filename()) {
     lib = lib.parent_path();  // `lg:L/`
   }
-  const auto rel
-      = [&lib](const std::string& p) { return fs::path(import_detail::abspath_of(p)).lexically_relative(lib).generic_string(); };
+  const auto rel = [&lib](const std::string& p) {
+    return fs::path(livehd::prp_import::abspath_of(p)).lexically_relative(lib).generic_string();
+  };
   std::vector<std::string> parts;
   for (const auto& f : opts.files) {
     parts.push_back(std::format("src:{}", rel(f)));
@@ -1036,19 +1038,9 @@ void write_lg_owners(const std::string& lib_path, const Lg_owners& owners) {
   std::error_code ec;
   fs::create_directories(lib_path, ec);
   const auto path = fs::path(lib_path) / kLgOwnersFile;
-  const auto temp = fs::path(lib_path) / std::format("{}.new.{}", kLgOwnersFile, static_cast<long>(::getpid()));
-  {
-    std::ofstream ofs(temp, std::ios::binary | std::ios::trunc);
-    ofs.write(sb.GetString(), static_cast<std::streamsize>(sb.GetSize()));
-    ofs.put('\n');
-    if (!ofs) {
-      throw Lhd_error{"config", std::format("could not write the lg: ownership record {}", path.string()), ""};
-    }
-  }
-  fs::rename(temp, path, ec);
-  if (ec) {
-    fs::remove(temp, ec);
-    throw Lhd_error{"config", std::format("could not publish the lg: ownership record {}", path.string()), ""};
+  const auto data = std::string(sb.GetString(), sb.GetSize()) + '\n';
+  if (const auto error = livehd::file_utils::write_file_atomic(path.string(), data); error) {
+    throw Lhd_error{"config", std::format("could not publish the lg: ownership record {}: {}", path.string(), error.message()), ""};
   }
 }
 
@@ -1171,27 +1163,11 @@ void collect_stale_temps(const fs::path& dir) {
 }
 
 void replace_dir(const fs::path& fresh, const fs::path& live) {
-  std::error_code ec;
-  const auto      backup = fs::path(live.string() + std::format(".old.{}", static_cast<long>(::getpid())));
-  fs::remove_all(backup, ec);
-  ec.clear();
-  if (fs::exists(live, ec)) {
-    ec.clear();
-    fs::rename(live, backup, ec);
-    if (ec) {
-      throw Lhd_error{"config", std::format("could not retire compile cache directory {}: {}", live.string(), ec.message()), ""};
-    }
+  try {
+    livehd::file_utils::replace_dir_atomic(fresh, live);
+  } catch (const std::exception& error) {
+    throw Lhd_error{"config", std::format("could not publish compile cache directory {}: {}", live.string(), error.what()), ""};
   }
-  ec.clear();
-  fs::rename(fresh, live, ec);
-  if (ec) {
-    std::error_code restore_ec;
-    if (fs::exists(backup, restore_ec)) {
-      fs::rename(backup, live, restore_ec);
-    }
-    throw Lhd_error{"config", std::format("could not publish compile cache directory {}: {}", live.string(), ec.message()), ""};
-  }
-  fs::remove_all(backup, ec);
 }
 
 uint64_t graph_interface_hash(const hhds::GraphIO& io) {

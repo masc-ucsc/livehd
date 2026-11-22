@@ -7,8 +7,8 @@
 #include <cstdlib>
 #include <filesystem>
 #include <format>
-#include <functional>
 #include <fstream>
+#include <functional>
 #include <limits>
 #include <map>
 #include <memory>
@@ -24,6 +24,7 @@
 #include "abc_map.hpp"
 #include "abc_salt.hpp"
 #include "abc_satopt.hpp"
+#include "color_boundary.hpp"
 #include "design_prepare.hpp"
 #include "diag.hpp"
 #include "fold_engine.hpp"
@@ -33,7 +34,6 @@
 #include "liberty_dff.hpp"
 #include "memory_module.hpp"
 #include "node_util.hpp"
-#include "width_validation.hpp"
 #include "occurrence_materialize.hpp"
 #include "pass_liberty.hpp"
 #include "pass_partition.hpp"
@@ -41,13 +41,14 @@
 #include "property_types.hpp"
 #include "query.hpp"
 #include "region_cache.hpp"
-#include "color_boundary.hpp"
 #include "satopt.hpp"
 #include "satopt_boundary.hpp"
 #include "satopt_stages.hpp"
 #include "stage_mem.hpp"
 #include "synth_policy.hpp"
+#include "tune_validation.hpp"
 #include "ware_module.hpp"
+#include "width_validation.hpp"
 
 static Pass_plugin sample("pass_abc", Pass_abc::setup);
 
@@ -1644,38 +1645,13 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
       }
     }
     const auto proof = [&](hhds::Graph* ref, hhds::Graph* impl, std::string_view name) {
-      livehd::lec::Lec_options policy;
-      policy.engine            = "ind";
-      policy.timeout           = 20;
-      policy.min_timeout       = 1;
-      policy.hard_timeout_mult = 2;
-      auto       result        = livehd::lec::prove_equal_isolated(ref, impl, policy, &definitions);
-      // Only an unbounded proof authorizes the tuned mapping; every other
-      // outcome (bounded, vacuous, a timeout, the pinned ind engine giving up)
-      // keeps the untuned policy.
-      const auto outcome       = livehd::lec::pinned_engine_outcome(result.verdict,
-                                                                    result.bounded,
-                                                                    result.nothing_compared,
-                                                                    result.unsupported,
-                                                                    result.detail);
-      std::print("[synth.tune] validation={} region={} result={} detail={}\n",
-                 opts.tune_validate,
-                 name,
-                 livehd::lec::outcome_word(outcome, result.checked_steps > 0 ? result.checked_steps : policy.bound),
-                 result.detail);
-      if (result.verdict == livehd::lec::Verdict::Refuted) {
-        opts.tune_store->authorize_all(false);
-        opts.tune_store->save();
-        // The `-refuted-cex` code makes the kernel exit 10 (equiv_fail): a real
-        // counterexample, exactly like `lhd lec`'s REFUTED-cex.
-        livehd::diag::err("pass.abc", "synth-tune-refuted-cex", "unsupported")
-            .msg("{}: synthesis tuning changed the function of {} (counterexample: {})",
-                 livehd::lec::outcome_word(outcome),
-                 name,
-                 result.witness.empty() ? std::string{"none recorded"} : result.witness)
-            .fatal();
-      }
-      return outcome == livehd::lec::Outcome::Proven_full;
+      return livehd::synth::validate_tune_equivalence(ref,
+                                                      impl,
+                                                      definitions,
+                                                      *opts.tune_store,
+                                                      "pass.abc",
+                                                      opts.tune_validate,
+                                                      name);
     };
     if (opts.tune_validate == "region") {
       mapper.validate_tuning(proof);

@@ -10,6 +10,10 @@
 #include <stdexcept>
 #include <utility>
 
+#include "nldm.hpp"
+#include "scanner.hpp"
+#include "units.hpp"
+
 namespace livehd::liberty::timing {
 namespace {
 struct Unsupported : std::invalid_argument {
@@ -50,22 +54,25 @@ public:
     const auto begin = position++;
     const char c     = text[begin];
     if (c == '"') {
+      const auto end = quoted_end(text, begin);
+      if (end == text.npos) {
+        throw std::invalid_argument("unterminated Liberty string");
+      }
+      const auto payload = text.substr(position, end - position);
+      position           = end + 1;
+      if (payload.find('\\') == payload.npos) {
+        return {std::string(payload), true};
+      }
       std::string value;
-      while (position < text.size()) {
-        const char ch = text[position++];
-        if (ch == '"') {
-          return {std::move(value), true};
-        }
-        if (ch == '\\' && position < text.size()) {
-          const char escaped = text[position++];
-          if (escaped != '\n') {
-            value.push_back(escaped);
-          }
-        } else {
+      for (size_t i = 0; i < payload.size(); ++i) {
+        const bool escape  = payload[i] == '\\';
+        const char ch      = payload[i + escape];
+        i                 += escape;
+        if (!escape || ch != '\n') {
           value.push_back(ch);
         }
       }
-      throw std::invalid_argument("unterminated Liberty string");
+      return {std::move(value), true};
     }
     if (std::string_view("{}():;,").find(c) != std::string_view::npos) {
       return {std::string(1, c)};
@@ -239,46 +246,24 @@ std::string group_name(const Group& group) {
   return group.arguments.front();
 }
 double time_scale(const Group& group) {
-  const auto unit         = attr(group, "time_unit", "1ns");
-  double     value        = 0;
-  const auto [end, error] = std::from_chars(unit.data(), unit.data() + unit.size(), value);
-  std::string suffix(end, unit.data() + unit.size());
-  std::erase_if(suffix, [](unsigned char c) { return std::isspace(c); });
-  const std::map<std::string, double> scales{
-      {"fs", .001},
-      {"ps",    1},
-      {"ns", 1000},
-      {"us",  1e6},
-      {"ms",  1e9},
-      { "s", 1e12}
-  };
-  if (error != std::errc{} || !std::isfinite(value) || value <= 0 || !scales.contains(suffix)) {
-    throw std::invalid_argument("invalid Liberty time_unit: " + unit);
+  const auto unit = attr(group, "time_unit", "1ns");
+  if (const auto scale = time_unit_ps(unit)) {
+    return *scale;
   }
-  return value * scales.at(suffix);
+  throw std::invalid_argument("invalid Liberty time_unit: " + unit);
 }
 double cap_scale(const Group& group) {
   const auto entry = group.attributes.find("capacitive_load_unit");
   if (entry == group.attributes.end()) {
     return 1000;
   }
-  if (entry->second.size() != 2) {
-    throw std::invalid_argument("invalid capacitive_load_unit");
+  const auto& args = entry->second;
+  if (args.size() == 2) {
+    if (const auto scale = capacitance_unit_ff(numeric(args[0]), args[1])) {
+      return *scale;
+    }
   }
-  const auto&                         args = entry->second;
-  const std::map<std::string, double> scales{
-      {"af", .001},
-      {"ff",    1},
-      {"pf", 1000},
-      {"nf",  1e6},
-      {"uf",  1e9},
-      { "f", 1e15}
-  };
-  const auto value = numeric(args[0]);
-  if (value <= 0 || !scales.contains(args[1])) {
-    throw std::invalid_argument("invalid capacitive_load_unit");
-  }
-  return value * scales.at(args[1]);
+  throw std::invalid_argument("invalid capacitive_load_unit");
 }
 Variable variable(const std::string& name) {
   if (name.empty()) {
@@ -471,21 +456,6 @@ double coordinate(Variable kind, const Query& query) {
   }
   throw std::invalid_argument("invalid NLDM variable");
 }
-struct Interval {
-  size_t lo = 0, hi = 0;
-  double fraction = 0;
-};
-Interval interval(const std::vector<double>& axis, double value) {
-  if (!std::isfinite(value) || value < 0) {
-    throw std::invalid_argument("NLDM query must be finite and nonnegative");
-  }
-  if (axis.size() < 2) {
-    return {};
-  }
-  const auto   upper = std::upper_bound(axis.begin(), axis.end(), value);
-  const size_t hi = std::clamp<size_t>(static_cast<size_t>(upper - axis.begin()), 1, axis.size() - 1), lo = hi - 1;
-  return {lo, hi, (value - axis[lo]) / (axis[hi] - axis[lo])};
-}
 }  // namespace
 
 void Table::validate() const {
@@ -521,10 +491,12 @@ double Table::lookup(const Query& query) const {
   if (values.size() != nx * ny) {
     throw std::invalid_argument("invalid NLDM table dimensions");
   }
-  const auto a = interval(x, coordinate(x_variable, query)), b = interval(y, coordinate(y_variable, query));
-  const auto low  = std::lerp(values[a.lo * ny + b.lo], values[a.lo * ny + b.hi], b.fraction);
-  const auto high = std::lerp(values[a.hi * ny + b.lo], values[a.hi * ny + b.hi], b.fraction);
-  return std::lerp(low, high, a.fraction);
+  const auto xv = coordinate(x_variable, query);
+  const auto yv = coordinate(y_variable, query);
+  if (!std::isfinite(xv) || !std::isfinite(yv) || xv < 0 || yv < 0) {
+    throw std::invalid_argument("NLDM query must be finite and nonnegative");
+  }
+  return nldm_interpolate<double>(x, y, values, xv, yv);
 }
 Table Table::output_load_slice(const Query& fixed) const {
   Table result;
@@ -626,10 +598,11 @@ Library parse_library(std::string_view text, Clock_structures* clocks) {
       cell.thresholds = levels;
       cell.area       = number(group, "area").value_or(0);
       cell.clock_gate = !attr(group, "clock_gating_integrated_cell").empty();
+      auto clock_desc   = clock_structure(group);
+      cell.state_clocks = clock_desc.state_clocks;
       if (clocks) {
-        auto desc                 = clock_structure(group);
-        const auto [it, inserted] = clocks->try_emplace(cell.name, std::move(desc));
-        if (!inserted && it->second != desc) {
+        const auto [it, inserted] = clocks->try_emplace(cell.name, std::move(clock_desc));
+        if (!inserted && it->second != clock_desc) {
           throw std::invalid_argument("conflicting clock structures for Liberty cell " + cell.name);
         }
       }
@@ -646,11 +619,6 @@ Library parse_library(std::string_view text, Clock_structures* clocks) {
             cell.storage_clock     = attr(child, "clocked_on");
             cell.storage_state     = child.arguments.front();
             cell.storage_state_inv = child.arguments.back();
-          }
-          for (const auto key : {"clocked_on", "clocked_on_also"}) {
-            if (auto ck = attr(child, key); !ck.empty()) {
-              cell.state_clocks.push_back(std::move(ck));
-            }
           }
         }
         if (child.kind == "latch" || child.kind == "latch_bank") {

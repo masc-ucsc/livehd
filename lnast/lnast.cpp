@@ -234,6 +234,25 @@ Lnast_nid Lnast::set_root(Lnast_ntype::Lnast_ntype_int type) {
   return root;
 }
 
+Lnast_nid Lnast::copy_node(const Lnast_nid& src, Lnast& dst, const Lnast_nid& parent) const {
+  const auto type = get_type(src);
+  const auto copy = dst.add_child(parent, type);
+  if (Lnast_ntype::is_ref(type) || Lnast_ntype::is_const(type)) {
+    dst.set_name_id(copy, name_pool_ == dst.name_pool_ ? get_name_id(src) : dst.intern_name(get_name(src)));
+  }
+  if (srcid_carries(type)) {
+    dst.set_srcid(copy, dst.source_locator().import_from(source_locator(), get_srcid(src)));
+  }
+  return copy;
+}
+
+void Lnast::copy_subtree(const Lnast_nid& src, Lnast& dst, const Lnast_nid& parent) const {
+  const auto copy = copy_node(src, dst, parent);
+  for (auto child : children(src)) {
+    copy_subtree(child, dst, copy);
+  }
+}
+
 Lnast_nid Lnast::add_child(const Lnast_nid& parent, Lnast_ntype::Lnast_ntype_int type) {
   auto child = parent.add_child();
   set_data(child, type);

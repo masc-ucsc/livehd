@@ -1,6 +1,5 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include <algorithm>
-#include <cctype>
 #include <cmath>
 #include <filesystem>
 #include <format>
@@ -19,6 +18,7 @@
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
 #include "repair.hpp"
+#include "repair_internal.hpp"
 
 namespace livehd::placement {
 namespace {
@@ -42,56 +42,6 @@ bool fixed(Node n) {
   const auto p = n.attr(attrs::place);
   return p.has() && (p.get().status == Ann_place::Status::FIXED || p.get().status == Ann_place::Status::LOCKED);
 }
-std::set<std::string> protected_cones(hhds::Graph& graph, const Timing_feedback& timing, const Cells& cells) {
-  std::set<std::string> result;
-  std::set<uint64_t>    visited;
-  const auto            protect = [&](auto&& self, Pin driver) -> void {
-    if (driver.is_invalid() || driver.is_const()) {
-      return;
-    }
-    auto n = driver.get_master_node();
-    if (!visited.insert(n.get_debug_nid()).second) {
-      return;
-    }
-    result.emplace(n.get_name());
-    const auto op     = gu::type_op_of(n);
-    const bool wiring = !n.get_subnode_io() && op != Ntype_op::Flop && op != Ntype_op::Latch && op != Ntype_op::Memory;
-    if (!cell(n, cells) && !wiring) {
-      return;
-    }
-    for (auto p : n.inp_sorted_pins()) {
-      for (auto d : p.get_driver_pins()) {
-        self(self, d);
-      }
-    }
-  };
-  for (auto n : graph.body().nodes()) {
-    const auto io = n.get_subnode_io();
-    for (auto p : n.inp_sorted_pins()) {
-      std::string name(p.get_pin_name());
-      if (io) {
-        for (const auto& decl : io->get_input_pin_decls()) {
-          if (decl.port_id == p.get_port_id()) {
-            name = decl.name;
-          }
-        }
-      }
-      auto lower = name;
-      std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return std::tolower(c); });
-      const auto it  = timing.find_label(label(n, name));
-      const auto op  = gu::type_op_of(n);
-      const auto off = p.get_port_id() % Ntype::Memory_port_stride;
-      if ((it != nullptr && it->clock) || lower.find("clk") != std::string::npos || lower.find("clock") != std::string::npos
-          || lower.find("reset") != std::string::npos || lower.find("rst") != std::string::npos
-          || (op == Ntype_op::Memory && (off == 2 || off == 14))) {
-        for (auto d : p.get_driver_pins()) {
-          protect(protect, d);
-        }
-      }
-    }
-  }
-  return result;
-}
 struct Cut_limit : std::runtime_error {
   using std::runtime_error::runtime_error;
 };
@@ -102,8 +52,8 @@ struct Cone {
   std::vector<Node>    nodes;
   std::vector<Pin>     inputs, outputs;
 };
-Cone extract(hhds::Graph& graph, const std::string& root, const Cells& cells, const Timing_feedback& timing, unsigned max_cells) {
-  const auto                  protected_names = protected_cones(graph, timing, cells);
+Cone extract(hhds::Graph& graph, const std::string& root, const Cells& cells, const Timing_feedback& timing,
+             const std::set<std::string>& protected_names, unsigned max_cells) {
   std::map<std::string, Node> selected;
   const auto                  visit = [&](auto&& self, Node n, unsigned depth) -> void {
     const auto* c    = cell(n, cells);
@@ -421,13 +371,9 @@ Repair_result resynthesize_cones(Result initial, const Options& requested, const
   const auto    prior_qor = initial.qor;
   Repair_result result;
   result.placed    = std::move(initial);
-  const auto& tech = options.technology().lef;
-  Cells       cells;
-  for (auto c : options.technology().cells.combinational) {
-    if (!c.physical_barrier && liberty::cell_truth(c) && tech.macros.contains(c.name)) {
-      cells.emplace(c.name, std::move(c));
-    }
-  }
+  const auto&             technology = options.technology();
+  const auto              cells      = detail::inventory(options, technology.lef);
+  const auto              controls   = detail::scan_special_pins(technology.cells, /*protect_reset=*/true);
   auto                    score = prior_timing && !prior_timing->ranking_only ? std::move(*prior_timing) : evaluate(result.placed);
   rapidjson::StringBuffer trace;
   rapidjson::Writer<rapidjson::StringBuffer> w(trace);
@@ -486,10 +432,14 @@ Repair_result resynthesize_cones(Result initial, const Options& requested, const
       if (!graph) {
         throw std::runtime_error("cannot clone cone trial");
       }
+      auto protected_names = detail::protected_buffers(*graph, cells, controls, /*protect_reset=*/true, {}, &score);
+      if (!options.control_ports.empty()) {
+        protected_names.merge(detail::protected_buffers(*graph, cells, controls, true, options.control_ports));
+      }
       Cone cone;
       for (const unsigned limit : {32, 16, 8, 4, 2, 1}) {
         try {
-          cone = extract(*graph, root, cells, score, limit);
+          cone = extract(*graph, root, cells, score, protected_names, limit);
           break;
         } catch (const Cut_limit&) {
           if (limit == 1) {
@@ -542,11 +492,11 @@ Repair_result resynthesize_cones(Result initial, const Options& requested, const
       splice(*graph, cone, *mapping, attempts);
       auto trial = options;
       trial.cache_dir.clear();
+      trial.legalize_cells = true;
       trial.net_weights = result.placed.net_weights;
       trial.previous    = std::make_shared<physical::Floorplan>(result.placed.floorplan);
       if (options.optimization_multirow_eco) {
         trial.multirow_eco   = options.optimization_multirow_eco;
-        trial.legalize_cells = true;  // the two-row ECO is the nearest-whitespace legalization
       }
       trial.changed_cells.clear();
       for (const auto& c : result.placed.floorplan.components) {
@@ -555,9 +505,14 @@ Repair_result resynthesize_cones(Result initial, const Options& requested, const
         }
       }
       trial.output_dir = options.output_dir + "/resynth/trial_" + std::to_string(attempts);
-      auto owner       = std::make_unique<hhds::GraphLibrary>();
+      std::filesystem::create_directories(trial.output_dir);
+      trial.own_frame = options.own_frame || options.floorplan.empty();
+      trial.floorplan = trial.output_dir + "/floorplan.def";
+      detail::write_eco_floorplan(result.placed.floorplan, trial.floorplan);
+      auto owner = std::make_unique<hhds::GraphLibrary>();
       require_growth_budget(*graph, trial);
       auto       placed = place(*graph, *owner, trial);
+      placed.gp_density_weight = result.placed.gp_density_weight;
       const auto next   = evaluate(placed);
       w.Key("delay");
       w.Double(next.delay);
@@ -590,23 +545,7 @@ Repair_result resynthesize_cones(Result initial, const Options& requested, const
   w.EndObject();
   result.report = trace.GetString();
   physical::write_def(result.placed.floorplan, options.output_dir + "/out.def");
-  rapidjson::Document qor, prior, report;
-  qor.Parse(result.placed.qor.c_str());
-  prior.Parse(prior_qor.c_str());
-  report.Parse(result.report.c_str());
-  for (const auto* key : {"timing_driven", "resize", "repair"}) {
-    if (prior.HasMember(key) && !qor.HasMember(key)) {
-      qor.AddMember(rapidjson::Value(key, qor.GetAllocator()),
-                    rapidjson::Value(prior[key], qor.GetAllocator()),
-                    qor.GetAllocator());
-    }
-  }
-  qor.AddMember("resynth", rapidjson::Value(report, qor.GetAllocator()), qor.GetAllocator());
-  rapidjson::StringBuffer                    out;
-  rapidjson::Writer<rapidjson::StringBuffer> qw(out);
-  qor.Accept(qw);
-  result.placed.qor = out.GetString();
-  std::ofstream(options.output_dir + "/qor.json") << result.placed.qor << '\n';
+  detail::publish_engine_qor(result.placed, prior_qor, {}, {}, "resynth", result.report, options.output_dir);
   std::ofstream(options.output_dir + "/resynth.json") << result.report << '\n';
   result.timing = std::move(score);
   return result;

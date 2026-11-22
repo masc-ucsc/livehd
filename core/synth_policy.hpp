@@ -3,6 +3,7 @@
 
 #include <charconv>
 #include <map>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -79,21 +80,7 @@ inline std::string literal(std::string_view s) {
   }
   return json(d);
 }
-// `synth.abc_pre` / `pass.abc.pre`: `;`-separated ABC optimization steps run on
-// the region before its mapper. Only a fixed vocabulary of AIG (`dc2`, `fraig`,
-// `resyn2`, ...) and GIA (`&dch`, `&synch2`, ...) commands is accepted, so a
-// source attribute can never smuggle an arbitrary ABC command (file I/O, `source`,
-// system calls) into a flow. Options after the command name are free text
-// without `;`. AIG steps run on the strashed region (so logic-network-only
-// commands such as sweep/mfs/lutpack are not offered) and GIA steps right after
-// `&get -n`; all AIG steps run before all GIA steps, whatever the spelled order.
-inline bool valid_abc_pre(std::string_view steps) {
-  static constexpr std::string_view allowed[] = {
-      "balance", "b",     "rewrite", "rw",   "rwz",  "refactor", "rf",    "rfz",     "resub",     "rs",         "rsz",
-      "dc2",     "drw",   "drf",     "fraig","ifraig","resyn", "resyn2",  "resyn2a",   "resyn3",     "compress",
-      "compress2","compress2rs","resyn2rs","choice","choice2", "src_rw", "src_rs",  "src_rws", "dch",       "&dch",
-      "&synch2", "&syn2", "&syn3",   "&syn4","&fraig","&sweep", "&b",    "&dc2",    "&dc3",      "&dc4",       "&jf",
-      "&fx",     "&if",   "&mfs",    "&st", "sopb",  "&sopb",   "strash"};
+inline bool valid_abc_commands(std::string_view steps, std::span<const std::string_view> allowed) {
   size_t i = 0;
   bool   any = false;
   while (i <= steps.size()) {
@@ -119,6 +106,23 @@ inline bool valid_abc_pre(std::string_view steps) {
     i = cut + 1;
   }
   return any || steps.empty();
+}
+// `synth.abc_pre` / `pass.abc.pre`: `;`-separated ABC optimization steps run on
+// the region before its mapper. Only a fixed vocabulary of AIG (`dc2`, `fraig`,
+// `resyn2`, ...) and GIA (`&dch`, `&synch2`, ...) commands is accepted, so a
+// source attribute can never smuggle an arbitrary ABC command (file I/O, `source`,
+// system calls) into a flow. Options after the command name are free text
+// without `;`. AIG steps run on the strashed region (so logic-network-only
+// commands such as sweep/mfs/lutpack are not offered) and GIA steps right after
+// `&get -n`; all AIG steps run before all GIA steps, whatever the spelled order.
+inline bool valid_abc_pre(std::string_view steps) {
+  static constexpr std::string_view allowed[]
+      = {"balance",  "b",         "rewrite",     "rw",       "rwz",    "refactor", "rf",     "rfz",    "resub",   "rs",
+         "rsz",      "dc2",       "drw",         "drf",      "fraig",  "ifraig",   "resyn",  "resyn2", "resyn2a", "resyn3",
+         "compress", "compress2", "compress2rs", "resyn2rs", "choice", "choice2",  "src_rw", "src_rs", "src_rws", "dch",
+         "&dch",     "&synch2",   "&syn2",       "&syn3",    "&syn4",  "&fraig",   "&sweep", "&b",     "&dc2",    "&dc3",
+         "&dc4",     "&jf",       "&fx",         "&if",      "&mfs",   "&st",      "sopb",   "&sopb",  "strash"};
+  return valid_abc_commands(steps, allowed);
 }
 inline void validate(std::string_view key, std::string_view value) {
   rapidjson::Document d;

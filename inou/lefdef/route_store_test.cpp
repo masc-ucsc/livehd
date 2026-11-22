@@ -26,7 +26,7 @@ TEST(RouteStore, GraphSaveLoadPreservesGeometryAndRejectsStaleContext) {
         "",
         {Route_point{10, 20, 0}, Route_via{"VIA12", Orientation::FN}, Route_point{40, 20, {}}, Route_rect{-2, -3, 4, 5}},
         "wide"},
-        {"M2", {}, "", {Route_point{40, 20, 7}, Route_point{80, 20, {}}}, "wide"}}
+        {"M2", {}, "", {Route_point{40, 20, 7}, Route_point{80, 20, {}}}, "", true}}
   });
   const Route_width_rules rules{
       {"wide", {{"M1", 20}, {"M2", 40}}}

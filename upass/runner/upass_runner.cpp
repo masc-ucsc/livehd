@@ -17693,60 +17693,6 @@ void uPass_runner::run() {
 
 namespace {
 
-// True iff `t` is a definition-producing op whose first child is a ref
-// to the value being defined. These are the ops eligible for DCE when
-// their dst is unused. attr_set is included because it "defines" the
-// attribute side-channel on its first-child target; an attr_set on a
-// dead name is itself dead.
-bool dce_is_def_producing(Lnast_ntype::Lnast_ntype_int t) {
-  using N = Lnast_ntype;
-  switch (t) {
-    case N::Lnast_ntype_store:  // store defines its first-child target (the unified write node)
-    case N::Lnast_ntype_dp_assign:
-    case N::Lnast_ntype_range:  // a comptime range whose for-loop unrolled away is dead scaffolding
-    case N::Lnast_ntype_tuple_add:
-    case N::Lnast_ntype_tuple_concat:
-    case N::Lnast_ntype_tuple_get:
-    case N::Lnast_ntype_plus:
-    case N::Lnast_ntype_minus:
-    case N::Lnast_ntype_mult:
-    case N::Lnast_ntype_div:
-    case N::Lnast_ntype_mod:
-    case N::Lnast_ntype_shl:
-    case N::Lnast_ntype_sra:
-    case N::Lnast_ntype_sext:
-    case N::Lnast_ntype_set_mask:
-    case N::Lnast_ntype_get_mask:
-    case N::Lnast_ntype_concat:
-    case N::Lnast_ntype_bit_and:
-    case N::Lnast_ntype_bit_or:
-    case N::Lnast_ntype_bit_xor:
-    case N::Lnast_ntype_bit_not:
-    case N::Lnast_ntype_red_and:
-    case N::Lnast_ntype_red_or:
-    case N::Lnast_ntype_red_xor:
-    case N::Lnast_ntype_popcount:
-    case N::Lnast_ntype_log_and:
-    case N::Lnast_ntype_log_or:
-    case N::Lnast_ntype_log_not:
-    case N::Lnast_ntype_eq:
-    case N::Lnast_ntype_ne:
-    case N::Lnast_ntype_lt:
-    case N::Lnast_ntype_le:
-    case N::Lnast_ntype_gt:
-    case N::Lnast_ntype_ge:
-    case N::Lnast_ntype_func_call:
-    case N::Lnast_ntype_func_does:
-    case N::Lnast_ntype_func_equals:
-    case N::Lnast_ntype_func_in:
-    case N::Lnast_ntype_func_has:
-    case N::Lnast_ntype_func_case:
-    case N::Lnast_ntype_attr_set:
-    case N::Lnast_ntype_attr_get    : return true;
-    default                         : return false;
-  }
-}
-
 // `attr_set TARGET 'type' 'mut'|'reg'` records a user-visible storage
 // class declaration; even when the name has no surviving readers, we
 // keep the declaration so downstream consumers (lnastfmt, bitwidth)
@@ -17918,15 +17864,14 @@ void uPass_runner::dead_code_eliminate_staging() {
         const auto ct = staging->get_type(c);
         if (ct == N::Lnast_ntype_ref) {
           // A declaration names its target; it does not consume the value.
-          const bool is_lhs
-              = (dce_is_def_producing(nt) || nt == N::Lnast_ntype_declare || nt == N::Lnast_ntype_type_spec) && c.is_first_child();
+          const bool is_lhs = (N::defines_first_child(nt) || N::is_type_spec(nt)) && c.is_first_child();
           if (!is_lhs) {
             const auto nm = staging->get_name(c);
             ++use_count[nm];
             if (active != 0) {
               stmt_reads[active].push_back(nm);
             }
-          } else if (dce_is_def_producing(nt)) {
+          } else if (N::defines_first_child(nt) && !N::is_declare(nt)) {
             ++write_count[staging->get_name(c)];
           }
           continue;
@@ -17949,7 +17894,7 @@ void uPass_runner::dead_code_eliminate_staging() {
                 }
               }
             }
-          } else if (on_spine && dce_is_def_producing(ct) && !dce_is_keepalive_attr_set(*staging, c)) {
+          } else if (on_spine && N::is_dce_def_producing(ct) && !dce_is_keepalive_attr_set(*staging, c)) {
             if (auto fc = staging->get_first_child(c); fc.is_valid() && staging->get_type(fc) == N::Lnast_ntype_ref) {
               const auto id = c.get_class_index().value;
               defs_of[staging->get_name(fc)].push_back(id);

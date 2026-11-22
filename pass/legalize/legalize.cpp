@@ -15,6 +15,7 @@
 #include "cell.hpp"
 #include "diag.hpp"
 #include "hlop/dlop.hpp"
+#include "io_decls.hpp"
 #include "loop_split.hpp"
 #include "node_util.hpp"
 #include "semdiff.hpp"
@@ -80,22 +81,17 @@ void freeze_into(hhds::Graph* g, bool owned, std::weak_ptr<hhds::Graph> owner) {
 // order, and a Sub instance's sink/driver pids index straight into these, so
 // neither is renumbered. `keep_out == nullptr` keeps every output.
 void copy_io_decls(const hhds::GraphIO& src, hhds::GraphIO& dst, const absl::flat_hash_set<hhds::Port_id>* keep_out) {
-  for (const auto& in : src.get_input_pin_decls()) {
-    dst.add_input(in.name, in.port_id, in.loop_break);
-    if (in.bits != 0) {
-      dst.set_bits(in.name, in.bits);
-    }
-    dst.set_unsign(in.name, in.unsign);
+  if (keep_out == nullptr) {
+    gu::copy_io_decls(src, dst);
+    return;
   }
-  for (const auto& out : src.get_output_pin_decls()) {
-    if (keep_out != nullptr && !keep_out->contains(out.port_id)) {
-      continue;
+  for (const auto& input : src.get_input_pin_decls()) {
+    gu::copy_io_decl(dst, input, true);
+  }
+  for (const auto& output : src.get_output_pin_decls()) {
+    if (keep_out->contains(output.port_id)) {
+      gu::copy_io_decl(dst, output, false);
     }
-    dst.add_output(out.name, out.port_id, out.loop_break);
-    if (out.bits != 0) {
-      dst.set_bits(out.name, out.bits);
-    }
-    dst.set_unsign(out.name, out.unsign);
   }
 }
 

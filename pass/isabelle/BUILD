@@ -19,6 +19,7 @@ cc_library(
         "//core",
         "//graph",
         "//pass/common:pass",
+        "//pass/lean:lean_graph_scan",
         "@abseil-cpp//absl/container:flat_hash_map",
         "@abseil-cpp//absl/container:flat_hash_set",
         "@hhds//hhds:graph",

@@ -12,115 +12,6 @@ namespace livehd::usyn {
 namespace {
 // Evaluate the entire independent pin basis at once. Reject unknown tokens,
 // absent pins and unfinished expressions; never use a sampled signature.
-class Expression {
-public:
-  Expression(std::string_view expression, const std::vector<std::string>& pins) : text(expression) {
-    for (uint32_t i = 0; i < pins.size(); ++i) {
-      uint64_t bits = 0;
-      for (uint32_t p = 0; p < (1U << pins.size()); ++p) {
-        bits |= uint64_t{(p >> i) & 1} << p;
-      }
-      variables.emplace(pins[i], bits);
-    }
-  }
-  std::optional<uint64_t> parse() {
-    auto value = disjunction();
-    space();
-    if (!valid || position != text.size()) {
-      return {};
-    }
-    return value;
-  }
-
-private:
-  std::string_view                text;
-  size_t                          position = 0;
-  bool                            valid    = true;
-  std::map<std::string, uint64_t> variables;
-  void                            space() {
-    while (position < text.size() && std::isspace(static_cast<unsigned char>(text[position]))) {
-      ++position;
-    }
-  }
-  bool take(char token) {
-    space();
-    if (position < text.size() && text[position] == token) {
-      ++position;
-      return true;
-    }
-    return false;
-  }
-  // Liberty precedence, loosest to tightest: OR (`+` `|`), AND (`*` `&` and
-  // juxtaposition), XOR (`^`), then inversion (`!` prefix, `'` postfix) --
-  // OpenSTA's LibExprParse.yy declares `%left '+' '|'`, `%left '*' '&'`,
-  // `%left '^'`, `%left '!' '\''` in that order. So `A^B*C` is `(A^B)*C`.
-  uint64_t disjunction() {
-    auto value = conjunction();
-    while (take('+') || take('|')) {
-      value |= conjunction();
-    }
-    return value;
-  }
-  uint64_t conjunction() {
-    auto value = exclusive();
-    while (valid) {
-      if (take('*') || take('&')) {
-        value &= exclusive();
-        continue;
-      }
-      space();
-      if (position < text.size()
-          && (text[position] == '(' || text[position] == '!' || text[position] == '~'
-              || std::isalnum(static_cast<unsigned char>(text[position])) || text[position] == '_')) {
-        value &= exclusive();
-        continue;
-      }
-      break;
-    }
-    return value;
-  }
-  uint64_t exclusive() {
-    auto value = literal();
-    while (take('^')) {
-      value ^= literal();
-    }
-    return value;
-  }
-  uint64_t literal() {
-    const bool inverse = take('!') || take('~');
-    if (inverse) {
-      return ~literal();
-    }
-    uint64_t value = 0;
-    if (take('(')) {
-      value = disjunction();
-      if (!take(')')) {
-        valid = false;
-      }
-    } else {
-      space();
-      const auto begin = position;
-      while (position < text.size() && (std::isalnum(static_cast<unsigned char>(text[position])) || text[position] == '_')) {
-        ++position;
-      }
-      const auto name  = std::string(text.substr(begin, position - begin));
-      const auto found = variables.find(name);
-      if (name == "0") {
-        value = 0;
-      } else if (name == "1") {
-        value = ~uint64_t{0};
-      } else if (found != variables.end()) {
-        value = found->second;
-      } else {
-        valid = false;
-      }
-    }
-    while (take('\'')) {
-      value = ~value;
-    }
-    return value;
-  }
-};
 struct Cover {
   bool                             valid = false;
   double                           area = 0, intrinsic_area = 0;
@@ -158,7 +49,7 @@ static std::optional<Native_cost_model> build_native_cost_model(const std::vecto
       ++model.skipped_cells;
       continue;
     }
-    const auto function = Expression(cell.function, cell.inputs).parse();
+    const auto function = liberty::cell_truth(cell);
     if (!function) {
       ++model.skipped_cells;
       continue;

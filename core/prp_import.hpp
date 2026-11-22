@@ -12,9 +12,7 @@
 #include <system_error>
 #include <vector>
 
-namespace lhd {
-
-namespace import_detail {
+namespace livehd::prp_import {
 
 inline std::string dir_of(std::string_view path) {
   const auto slash = path.rfind('/');
@@ -75,6 +73,4 @@ private:
   std::map<std::string, std::map<std::string, std::string>> listings_;
 };
 
-}  // namespace import_detail
-
-}  // namespace lhd
+}  // namespace livehd::prp_import

@@ -8,7 +8,7 @@
 //                   SHL, SRA, Mux, Sext, Get_mask, Set_mask, IO
 //    Stateful:      Flop plus a conservative first Memory slice in the
 //                   executable model. Memory emission supports preserved
-//                   async/array memories with at most one read and one write
+//                   async memories with at most one read and one write
 //                   port, represented as function-valued Isabelle state.
 //                   Sync-read and multi-port memories remain fail-fast until
 //                   their stateful read-data/collision policy is connected.
@@ -37,6 +37,7 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "cell.hpp"
+#include "graph_access.hpp"
 #include "hhds/graph.hpp"
 #include "hlop/dlop.hpp"
 #include "node_util.hpp"
@@ -108,19 +109,6 @@ CertWFFallback parse_cert_wf_fallback(std::string_view mode) {
     return CertWFFallback::Eval;
   }
   return CertWFFallback::Fail;
-}
-
-uint32_t ceil_log2_u64(uint64_t v) {
-  if (v <= 1) {
-    return 1;
-  }
-  --v;
-  uint32_t w = 0;
-  while (v != 0) {
-    ++w;
-    v >>= 1;
-  }
-  return w == 0 ? 1 : w;
 }
 
 }  // namespace
@@ -219,7 +207,7 @@ std::string sanitize(std::string_view name) {
       out.push_back(static_cast<char>(c));
     } else {
       char buf[16];
-      std::snprintf(buf, sizeof(buf), "_chr%x_", c);
+      std::snprintf(buf, sizeof(buf), "_chr%02x_", c);
       out += buf;
     }
   }
@@ -248,35 +236,9 @@ std::string make_field_name(std::string_view role, std::string_view rtl_name, ab
   return name;
 }
 
-struct Memory_port_info {
-  size_t   port_id = 0;
-  bool     rdport  = false;
-  Node_pin addr;
-  Node_pin din;
-  Node_pin enable;
-  Node_pin clock;
-  uint32_t driver_pid = 0;  // read-output driver pin id, valid only for rdport
-};
-
-struct Memory_info {
-  Node                          node;
-  uint32_t                      nid = 0;
-  std::string                   field;
-  std::string                   raw_name;
-  uint32_t                      bits       = 0;
-  uint32_t                      addr_width = 1;
-  uint64_t                      size       = 0;
-  uint32_t                      wensize    = 0;
-  int64_t                       type       = 0;
-  int64_t                       fwd        = 0;
-  int64_t                       posclk     = 1;
-  // ordering="none" (graph/cell.cpp pid 15): is ANY (read,write) collision
-  // window undefined? Kept as a bool, not the matrix — the emitter refuses the
-  // whole memory on the first set bit, and a wide matrix does not fit an i64.
-  bool                          undef      = false;
-  std::vector<Memory_port_info> ports;
-  std::vector<size_t>           read_ports;
-  std::vector<size_t>           write_ports;
+struct Memory_info : lean_pass::Memory_info {
+  std::string field;
+  std::string raw_name;
 };
 
 // Render a width as a literal numeric Isabelle word annotation: ":: <w> word".
@@ -502,189 +464,54 @@ void check_width(const Ctx& ctx, const Node& node, uint32_t w, std::string_view 
   }
 }
 
-int64_t const_pin_int(const Ctx& ctx, const Node_pin& pin, const Node& owner, std::string_view field) {
-  if (!pin_is_const(pin)) {
-    fatal(ctx, "Memory node n_" + std::to_string(node_id(owner)) + " has non-constant " + std::string(field) + " policy pin.");
-  }
-  auto v = pin_const_value(pin);
-  if (!v.is_just_i64()) {
-    fatal(ctx, "Memory node n_" + std::to_string(node_id(owner)) + " has non-integer " + std::string(field) + " policy pin.");
-  }
-  return v.to_just_i64();
-}
-
-std::string memory_policy_summary(const Memory_info& mi) {
-  std::ostringstream oss;
-  oss << "memory node n_" << mi.nid << " bits=" << mi.bits << " size=" << mi.size << " addr_width=" << mi.addr_width
-      << " type=" << mi.type << " fwd=" << mi.fwd << " undef=" << (mi.undef ? 1 : 0) << " posclk=" << mi.posclk
-      << " wensize=" << mi.wensize << " rdports=" << mi.read_ports.size() << " wrports=" << mi.write_ports.size();
-  for (const auto& p : mi.ports) {
-    oss << " port" << p.port_id << "{" << (p.rdport ? "rd" : "wr") << ",addr=" << (p.addr.is_invalid() ? "missing" : "ok")
-        << ",enable=" << (p.enable.is_invalid() ? "missing" : "ok") << ",din=" << (p.din.is_invalid() ? "missing" : "ok")
-        << ",clock=" << (p.clock.is_invalid() ? "missing" : "ok") << "}";
-  }
-  return oss.str();
-}
-
 Memory_info parse_memory_info(Ctx& ctx, const Node& node) {
+  // The Isabelle emitter implements a committed asynchronous RAM. Refuse
+  // unsupported initialization and bulk ports before the shared scanner can
+  // load an image or spend time elaborating a model this backend cannot emit.
+  const auto driver = [&](std::string_view port) { return livehd::graph_util::get_driver_of_sink_name(node, port); };
+  for (const auto port : {"initial", "update", "update_enable", "reset"}) {
+    if (!driver(port).is_invalid()) {
+      fatal(ctx, "pass.isabelle memory v1 cannot model the '" + std::string(port) + "' port.");
+    }
+  }
+  if (const auto posclk = driver("posclk");
+      !posclk.is_invalid() && (!posclk.is_const() || !pin_const_value(posclk).is_just_i64())) {
+    fatal(ctx, "pass.isabelle memory v1 requires a known clock-edge policy.");
+  }
+
+  lean_pass::LeanCtx scan;
+  scan.g         = ctx.g;
+  scan.strict    = ctx.strict;
+  scan.max_width = ctx.max_width;
   Memory_info mi;
-  mi.node = node;
-  mi.nid  = node_id(node);
-
-  for (const auto& e : inp_sinks_ordered(node)) {
-    const auto       raw_pid    = static_cast<size_t>(e.get_port_id());
-    // Memory sink pids are laid out in blocks of Ntype::Memory_port_stride
-    // (graph/cell.hpp). This used to hardcode 11, which both truncated the
-    // cell-global pins (`init`/`update`/`reset`/`undef` all live at pid >= 11)
-    // and fabricated phantom ports for them (e.g. `undef` at pid 15 decoded as
-    // port 1's `enable`).
-    constexpr size_t mem_stride = static_cast<size_t>(Ntype::Memory_port_stride);
-    const auto       pname      = std::string(Ntype::get_sink_name(Ntype_op::Memory, raw_pid % mem_stride));
-    const auto       port_id    = raw_pid / mem_stride;
-    if (mi.ports.size() <= port_id) {
-      mi.ports.resize(port_id + 1);
-    }
-    mi.ports[port_id].port_id = port_id;
-
-    if (pname == "bits") {
-      const auto v = const_pin_int(ctx, e.get_driver_pin(), node, pname);
-      if (v <= 0) {
-        fatal(ctx, "Memory node n_" + std::to_string(mi.nid) + " has non-positive bits.");
-      }
-      mi.bits = static_cast<uint32_t>(v);
-    } else if (pname == "size") {
-      const auto v = const_pin_int(ctx, e.get_driver_pin(), node, pname);
-      if (v <= 0) {
-        fatal(ctx, "Memory node n_" + std::to_string(mi.nid) + " has non-positive size.");
-      }
-      mi.size = static_cast<uint64_t>(v);
-    } else if (pname == "wensize") {
-      const auto v = const_pin_int(ctx, e.get_driver_pin(), node, pname);
-      if (v < 0) {
-        fatal(ctx, "Memory node n_" + std::to_string(mi.nid) + " has negative wensize.");
-      }
-      mi.wensize = static_cast<uint32_t>(v);
-    } else if (pname == "type") {
-      mi.type = const_pin_int(ctx, e.get_driver_pin(), node, pname);
-    } else if (pname == "fwd") {
-      // The per-(read,write) matrix (graph/cell.cpp) can exceed the 62-bit
-      // is_just_i64 window on a many-port memory, and const_pin_int would
-      // FATAL on it. This value is only echoed in the debug summary here, so
-      // degrade to 0 rather than aborting the pass with a misleading message.
-      mi.fwd = 0;
-      if (pin_is_const(e.get_driver_pin())) {
-        auto fv = pin_const_value(e.get_driver_pin());
-        if (fv.is_just_i64()) {
-          mi.fwd = fv.to_just_i64();
-        }
-      }
-    } else if (pname == "undef") {
-      // ordering="none": the read-during-write window is UNDEFINED. This
-      // emitter's memory model is a plain committed `mem_read`, which pins ONE
-      // concrete value there — so a certificate about such a memory asserts
-      // behavior the emitted RTL (x on collision) does not have. Refuse it
-      // below rather than export a proof of a different design.
-      //
-      // Tested with is_known_false() rather than to_just_i64() so a matrix
-      // wider than the 62-bit i64 window still registers as set, and a
-      // non-const driver on this comptime pin refuses instead of guessing.
-      mi.undef = true;
-      if (pin_is_const(e.get_driver_pin())) {
-        mi.undef = !pin_const_value(e.get_driver_pin()).is_known_false();
-      }
-    } else if (pname == "posclk") {
-      mi.posclk = const_pin_int(ctx, e.get_driver_pin(), node, pname);
-    } else if (pname == "rdport") {
-      const bool rd            = const_pin_int(ctx, e.get_driver_pin(), node, pname) != 0;
-      mi.ports[port_id].rdport = rd;
-    } else if (pname == "addr") {
-      mi.ports[port_id].addr = e.get_driver_pin();
-    } else if (pname == "din") {
-      mi.ports[port_id].din = e.get_driver_pin();
-    } else if (pname == "enable") {
-      mi.ports[port_id].enable = e.get_driver_pin();
-    } else if (pname == "clock_pin") {
-      mi.ports[port_id].clock = e.get_driver_pin();
-    }
+  try {
+    static_cast<lean_pass::Memory_info&>(mi) = lean_pass::parse_memory_info(scan, node);
+  } catch (const lean_pass::Emit_error& error) {
+    fatal(ctx, error.what());
   }
-
-  if (mi.bits == 0 || mi.size == 0) {
-    fatal(ctx, "Memory node n_" + std::to_string(mi.nid) + " is missing constant bits/size policy.");
-  }
-  check_width(ctx, node, mi.bits, "memory data");
-  mi.addr_width = ceil_log2_u64(mi.size);
-  if (mi.addr_width == 0 || mi.addr_width > ctx.max_width) {
-    fatal(ctx, "Memory node n_" + std::to_string(mi.nid) + " has unsupported address width " + std::to_string(mi.addr_width));
-  }
-  if (mi.wensize == 0) {
-    mi.wensize = 1;
-  }
-  if (mi.bits % mi.wensize != 0) {
-    fatal(ctx,
-          "Memory node n_" + std::to_string(mi.nid) + " has bits not divisible by wensize: bits=" + std::to_string(mi.bits)
-              + " wensize=" + std::to_string(mi.wensize));
-  }
-
-  for (size_t idx = 0; idx < mi.ports.size(); ++idx) {
-    auto& p   = mi.ports[idx];
-    p.port_id = idx;
-    if (p.rdport) {
-      p.driver_pid = static_cast<uint32_t>(mi.write_ports.size() + mi.read_ports.size());
-      mi.read_ports.push_back(idx);
-      if (p.addr.is_invalid()) {
-        fatal(ctx, "Memory node n_" + std::to_string(mi.nid) + " read port missing addr.");
-      }
-      if (p.enable.is_invalid()) {
-        fatal(ctx, "Memory node n_" + std::to_string(mi.nid) + " read port missing enable.");
-      }
-    } else {
-      mi.write_ports.push_back(idx);
-      if (p.addr.is_invalid()) {
-        fatal(ctx, "Memory node n_" + std::to_string(mi.nid) + " write port missing addr.");
-      }
-      if (p.enable.is_invalid()) {
-        fatal(ctx, "Memory node n_" + std::to_string(mi.nid) + " write port missing enable.");
-      }
-      if (p.din.is_invalid()) {
-        fatal(ctx, "Memory node n_" + std::to_string(mi.nid) + " write port missing din.");
-      }
-    }
-  }
-
+  const auto reject
+      = [&](std::string_view reason) { fatal(ctx, lean_pass::memory_policy_summary(mi) + ". " + std::string(reason)); };
   if (mi.read_ports.size() > 1 || mi.write_ports.size() > 1) {
-    fatal(ctx, memory_policy_summary(mi) + ". pass.isabelle memory v1 supports at most one read and one write port.");
+    reject("pass.isabelle memory v1 supports at most one read and one write port.");
   }
-  if (!(mi.type == 0 || mi.type == 2)) {
-    fatal(ctx,
-          memory_policy_summary(mi)
-              + ". pass.isabelle memory v1 supports async/array memories only; sync-read memories need explicit read-data state.");
+  if (mi.sync || std::ranges::any_of(mi.ports, [](const auto& port) { return port.rd_sync; })) {
+    reject("pass.isabelle memory v1 does not model sync-read data state.");
   }
-  if (mi.undef) {
-    fatal(ctx,
-          memory_policy_summary(mi)
-              + ". pass.isabelle memory v1 cannot model ordering=\"none\" (the `undef` matrix): its `mem_read` returns the "
-                "committed entry, so the certificate would assert a defined value in a window the emitted RTL leaves x. "
-                "Use ordering=\"old\"/\"fwd\"/\"program\" to export this design.");
+  if (mi.undef || lean_pass::memory_fwd_bit(mi, 0, 0)) {
+    reject("pass.isabelle memory v1 does not model undefined or forwarded read/write collisions.");
   }
-
   return mi;
 }
 
 uint32_t pin_width(const Ctx& ctx, const Node_pin& pin, const Node& owner) {
-  auto w = raw_pin_width(pin);
-  if (w == 0 || static_cast<size_t>(w) > ctx.max_width) {
-    // Yosys/LiveHD can represent untyped constants such as 0 as zero-width
-    // constants. Their real width is determined by the consumer, so return a
-    // minimal width here and let driver_expr_at/ucast_pin_at specialize them.
-    if (pin_is_const(pin)) {
-      return 1;
-    }
-    if (ctx.strict) {
-      check_width(ctx, owner, w, "pin");
-    }
-    return 1;
+  lean_pass::LeanCtx scan;
+  scan.strict    = ctx.strict;
+  scan.max_width = ctx.max_width;
+  try {
+    return lean_pass::pin_width(scan, pin, owner);
+  } catch (const lean_pass::Emit_error& error) {
+    fatal(ctx, error.what());
   }
-  return static_cast<uint32_t>(w);
 }
 
 uint32_t node_width(const Ctx& ctx, const Node& node) {
@@ -721,7 +548,7 @@ std::string lit_const_at(const Ctx& ctx, const Node& node, const Dlop& v, uint32
   }
   auto [mask_lo, mask_hi] = v.get_mask_range();
   if (mask_lo == 0 && static_cast<uint32_t>(mask_hi) <= w) {
-    return "((2 ^ " + std::to_string(w) + " - 1) :: " + std::to_string(w) + " word)";
+    return "((2 ^ " + std::to_string(mask_hi) + " - 1) :: " + std::to_string(w) + " word)";
   }
   return lit_const_decimal(v, w);
 }
@@ -749,12 +576,7 @@ std::string driver_expr(const Ctx& ctx, const Node_pin& dpin) {
     return fit->second + " s";
   }
   if (pin_is_const(dpin)) {
-    auto v = pin_const_value(dpin);
-    auto w = raw_pin_width(dpin);
-    if (w == 0) {
-      w = std::max<uint32_t>(1, static_cast<uint32_t>(v.get_signed_bits()));
-    }
-    return lit_const_at(ctx, driver_node, v, w);
+    return lit_const_at(ctx, driver_node, pin_const_value(dpin), pin_width(ctx, dpin, driver_node));
   }
   if (ctx.fv_naming) {
     return "(" + ctx.top_name + "_fv" + std::to_string(node_id(driver_node)) + ctx.fv_args + ")";
@@ -770,29 +592,13 @@ std::string driver_expr_at(const Ctx& ctx, const Node_pin& dpin, uint32_t expect
   return driver_expr(ctx, dpin);
 }
 
-uint32_t minimal_unsigned_const_width(const Dlop& v) {
-  if (!v.is_just_i64()) {
-    return std::max<uint32_t>(1, static_cast<uint32_t>(v.get_signed_bits()));
-  }
-  const int64_t iv = v.to_just_i64();
-  if (iv <= 0) {
-    return 1;
-  }
-
-  auto     uv   = static_cast<uint64_t>(iv);
-  uint32_t bits = 0;
-  while (uv != 0) {
-    ++bits;
-    uv >>= 1;
-  }
-  return std::max<uint32_t>(1, bits);
-}
+using livehd::graph_util::minimal_unsigned_const_width;
 
 std::string shift_amount_expr_at(const Ctx& ctx, const Node_pin& dpin, uint32_t expected_w) {
   auto driver_node = pin_node(dpin);
   if (pin_is_const(dpin)) {
     const auto v = pin_const_value(dpin);
-    const auto w = std::max<uint32_t>(expected_w, minimal_unsigned_const_width(v));
+    const auto w = std::max<uint32_t>(expected_w, livehd::graph_util::minimal_unsigned_const_width(v));
     return lit_const_at(ctx, driver_node, v, w);
   }
   return driver_expr_at(ctx, dpin, expected_w);
@@ -905,7 +711,7 @@ std::string int_of_const(const Ctx& ctx, const Node& node, const Dlop& v, uint32
   }
   auto [mask_lo, mask_hi] = v.get_mask_range();
   if (mask_lo == 0 && static_cast<uint32_t>(mask_hi) <= w) {
-    return "((2::int) ^ " + std::to_string(w) + " - 1)";
+    return "((2::int) ^ " + std::to_string(mask_hi) + " - 1)";
   }
   return isabelle_int_literal(v.to_decimal_string());
 }

@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "inou/cgen/sim_native_rt.hpp"
+#include "wide_decimal.hpp"
 
 namespace {
 
@@ -68,49 +69,6 @@ std::vector<Field> parse_list(const std::string& js, const std::string& key) {
     pos = end + 1;
   }
   return out;
-}
-
-// Decimal text of a `bits`-wide value held in little-endian words (two's complement when `sign`).
-std::string wide_decimal(const uint64_t* w, uint32_t bits, bool sign) {
-  const size_t          n = (bits + 63) / 64;
-  std::vector<uint64_t> v(w, w + n);
-  if (bits % 64 != 0) {
-    v[n - 1] &= (uint64_t{1} << (bits % 64)) - 1;
-  }
-  bool neg = false;
-  if (sign && ((v[(bits - 1) / 64] >> ((bits - 1) % 64)) & 1)) {
-    neg = true;
-    for (auto& x : v) {
-      x = ~x;
-    }
-    if (bits % 64 != 0) {
-      v[n - 1] &= (uint64_t{1} << (bits % 64)) - 1;
-    }
-    for (auto& x : v) {  // + 1
-      if (++x != 0) {
-        break;
-      }
-    }
-  }
-  std::string out;
-  for (;;) {
-    unsigned __int128 rem = 0;
-    bool              any = false;
-    for (size_t i = n; i-- > 0;) {
-      const unsigned __int128 cur = (rem << 64) | v[i];
-      v[i]                        = static_cast<uint64_t>(cur / 10);
-      rem                         = cur % 10;
-      any                         = any || v[i] != 0;
-    }
-    out.push_back(static_cast<char>('0' + static_cast<int>(rem)));
-    if (!any) {
-      break;
-    }
-  }
-  if (neg) {
-    out.push_back('-');
-  }
-  return std::string(out.rbegin(), out.rend());
 }
 
 uint64_t mask_of(uint32_t bits) { return bits >= 64 ? ~uint64_t{0} : ((uint64_t{1} << bits) - 1); }
@@ -238,11 +196,11 @@ int main(int argc, char** argv) {
     std::printf("TRACE %llu", static_cast<unsigned long long>(c));
     for (const auto& o : outs) {
       if (o.bits > 64) {
-        std::printf(" %s=%s", o.name.c_str(), wide_decimal(&state[o.word], o.bits, o.sign).c_str());
+        std::printf(" %s=%s", o.name.c_str(), livehd::wide_decimal(&state[o.word], o.bits, o.sign).c_str());
         continue;
       }
       uint64_t v = state[o.word] & mask_of(o.bits);
-      if (o.sign && o.bits < 64 && ((v >> (o.bits - 1)) & 1)) {
+      if (o.sign && o.bits != 0 && ((v >> (o.bits - 1)) & 1)) {
         std::printf(" %s=%lld", o.name.c_str(), static_cast<long long>(v | ~mask_of(o.bits)));
       } else {
         std::printf(" %s=%llu", o.name.c_str(), static_cast<unsigned long long>(v));

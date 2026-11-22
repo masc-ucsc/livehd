@@ -331,6 +331,8 @@ public:
     settle();
     return slack(pin);
   }
+  // Hold checks are rebuilt lazily after a journaled timing change.
+  [[nodiscard]] float                                   settled_hold_slack(uint32_t pin);
   // Setup slack of the endpoints below a limit, ascending.
   [[nodiscard]] std::vector<std::pair<uint32_t, float>> failing_endpoints(float below_ps);
   // The electrical limits of one pin as evaluate() counts them: {limits exceeded, excess ratio}.

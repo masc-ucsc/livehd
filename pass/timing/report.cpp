@@ -228,9 +228,10 @@ std::string write_report(hhds::GraphLibrary& library, std::string_view top, cons
   const auto&     bound    = *timed.bound;
   const auto&     netlist  = *bound.netlist;
   const auto&     types    = netlist.types();
-  // Units: the report speaks the Liberty's time unit, as pass.opentimer does (ns or ps; anything else in ps).
-  const double unit_div  = inputs.time_unit_ps == 1000 ? 1000.0 : 1.0;
-  const auto   unit_name = inputs.time_unit_ps == 1000 ? "ns" : "ps";
+  // All time fields in the report use the same unit. Unlabeled Liberty scales
+  // are normalized to ps so readers can interpret them without the library.
+  const double    unit_div  = inputs.time_unit_ps == 1e6 || inputs.time_unit_ps == 1e3 ? inputs.time_unit_ps : 1.0;
+  const auto      unit_name = unit_div == 1e6 ? "us" : unit_div == 1e3 ? "ns" : "ps";
 
   const auto label = [&](uint32_t pin) -> std::string {
     const auto cell = netlist.cell_of(pin);
@@ -507,19 +508,43 @@ std::string write_report(hhds::GraphLibrary& library, std::string_view top, cons
       w.String("clock_boundary_zero_internal_delay");
     }
     w.Key("time_unit_ps");
-    w.Double(inputs.time_unit_ps);
-    const double scale = feedback.time_unit_ps / inputs.time_unit_ps;
+    w.Double(unit_div);
+    const double scale    = feedback.time_unit_ps / unit_div;
     const auto   pin_json = [&](std::string_view name, const livehd::timing::Feedback::Pin& pin) {
       w.StartObject();
       w.Key("pin");
       w.String(name.data(), static_cast<rapidjson::SizeType>(name.size()));
-      for (const auto& [key, value] : {std::pair{"arrival", pin.arrival}, std::pair{"required", pin.required},
-                                       std::pair{"slack", pin.slack}, std::pair{"hold_slack", pin.hold_slack}}) {
+      for (const auto& [key, value] : {
+               std::pair{   "arrival",    pin.arrival},
+               std::pair{  "required",   pin.required},
+               std::pair{     "slack",      pin.slack},
+               std::pair{"hold_slack", pin.hold_slack},
+               std::pair{      "slew",       pin.slew}
+      }) {
         if (value && std::isfinite(*value)) {
           w.Key(key);
           w.Double(*value * scale);
         }
       }
+      for (const auto& [key, value] : {
+               std::pair{       "load_ff",        pin.load_ff},
+               std::pair{"capacitance_ff", pin.capacitance_ff}
+      }) {
+        if (value && std::isfinite(*value)) {
+          w.Key(key);
+          w.Double(*value);
+        }
+      }
+      if (pin.violations) {
+        w.Key("violations");
+        w.Uint(pin.violations);
+        if (std::isfinite(pin.electrical_excess)) {
+          w.Key("electrical_excess");
+          w.Double(pin.electrical_excess);
+        }
+      }
+      w.Key("clock");
+      w.Bool(pin.clock);
       w.EndObject();
     };
     w.Key("physical_pins");

@@ -354,7 +354,7 @@ void Color_acyclic::label(hhds::Graph* g) {
   int n_colors = apply_coloring(g, node2id, opts, opts.sizes);
 
   if (opts.verbose) {
-    std::print("[color.acyclic] {} -> {} partitions\n", g->get_name(), n_colors);
+    std::print(stderr, "[color.acyclic] {} -> {} partitions\n", g->get_name(), n_colors);
   }
 }
 

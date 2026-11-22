@@ -23,40 +23,6 @@ bool   contact(const ph::Rect& a, const ph::Rect& b) {
   const auto dy = std::min(a.yh, b.yh) - std::max(a.yl, b.yl);
   return dx >= 0 && dy >= 0 && (dx > 0 || dy > 0);
 }
-bool covered(const ph::Rect& r, const std::vector<ph::Rect>& metal) {
-  std::vector<double> xs{r.xl, r.xh};
-  for (const auto& s : metal) {
-    if (s.xl > r.xl && s.xl < r.xh) {
-      xs.push_back(s.xl);
-    }
-    if (s.xh > r.xl && s.xh < r.xh) {
-      xs.push_back(s.xh);
-    }
-  }
-  std::sort(xs.begin(), xs.end());
-  xs.erase(std::unique(xs.begin(), xs.end()), xs.end());
-  for (size_t i = 1; i < xs.size(); ++i) {
-    const double                           x = (xs[i - 1] + xs[i]) / 2;
-    std::vector<std::pair<double, double>> intervals;
-    for (const auto& s : metal) {
-      if (s.xl <= x && s.xh >= x) {
-        intervals.emplace_back(s.yl, s.yh);
-      }
-    }
-    std::sort(intervals.begin(), intervals.end());
-    double end = r.yl;
-    for (const auto& [lo, hi] : intervals) {
-      if (lo > end) {
-        break;
-      }
-      end = std::max(end, hi);
-    }
-    if (end < r.yh) {
-      return false;
-    }
-  }
-  return true;
-}
 size_t rank(const ph::Technology& t, const std::string& l) {
   return std::find(t.routing_layers.begin(), t.routing_layers.end(), l) - t.routing_layers.begin();
 }
@@ -131,7 +97,7 @@ Decoded decode(const ph::Technology& t, const ph::Floorplan& f, const ph::Net& n
     const auto                     wire = [&](auto steps) {
       // Copy only the path header. Copying p before replacing steps makes
       // decoding a multi-step path quadratic in its number of steps.
-      ph::Route_path one{layer, p.width, p.shape, std::move(steps), p.taper_rule};
+      auto           one = p.with_steps(layer, std::move(steps));
       ph::Net        n;
       n.name = net.name;
       n.wires.push_back({"ROUTED", {}});
@@ -336,7 +302,7 @@ std::string validate_signal_route_domain(const ph::Technology& t, const ph::Floo
       bool incoming = false;
       for (const auto& c : d.carriers) {
         if (carrier_shape(d, t, c, s)) {
-          if (!covered(c.seed.rect.hull(s.rect), carrier_cover(c))) {
+          if (!ph::rect_union_covers(c.seed.rect.hull(s.rect), carrier_cover(c))) {
             return "incoming extension detached from frozen seed";
           }
           incoming = true;
@@ -415,7 +381,7 @@ std::string validate_signal_route_domain(const ph::Technology& t, const ph::Floo
     for (const auto& via : added.vias) {
       for (const auto& p : via.plates) {
         if (p.layer == d.pin_layer) {
-          if (!std::ranges::any_of(pin_unions, [&](const auto& pin) { return covered(p.rect, pin); })) {
+          if (!std::ranges::any_of(pin_unions, [&](const auto& pin) { return ph::rect_union_covers(p.rect, pin); })) {
             return "native access plate outside actual endpoint pin union";
           }
           continue;
@@ -425,7 +391,7 @@ std::string validate_signal_route_domain(const ph::Technology& t, const ph::Floo
         }
         bool incoming = false;
         for (const auto& c : d.carriers) {
-          if (carrier_shape(d, t, c, p) && covered(p.rect, carrier_cover(c))) {
+          if (carrier_shape(d, t, c, p) && ph::rect_union_covers(p.rect, carrier_cover(c))) {
             incoming = true;
             break;
           }
@@ -439,7 +405,7 @@ std::string validate_signal_route_domain(const ph::Technology& t, const ph::Floo
             landing.push_back(s.rect);
           }
         }
-        if (!covered(p.rect, landing)) {
+        if (!ph::rect_union_covers(p.rect, landing)) {
           return "native via plate lacks reserved, seeded carrier, or stack ownership";
         }
       }

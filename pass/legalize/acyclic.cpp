@@ -3,22 +3,24 @@
 #include "acyclic.hpp"
 
 #include <algorithm>
+#include <bit>
+#include <climits>
 #include <format>
 #include <functional>
-#include <bit>
-#include <optional>
-#include <climits>
 #include <map>
+#include <optional>
 #include <set>
 #include <tuple>
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/container/node_hash_map.h"
+#include "attr_carry.hpp"
 #include "diag.hpp"
 #include "inline_sub.hpp"
 #include "node_util.hpp"
 #include "port_reach.hpp"
+#include "port_reach_step.hpp"
 #include "split_selfref.hpp"
 
 namespace livehd::legalize {
@@ -295,119 +297,22 @@ private:
       }
       const auto m  = p.get_master_node();
       const auto op = gu::type_op_of(m);
-      const auto const_amount = [&](const char* sink) -> std::optional<int> {
-        const auto amt = gu::get_driver_of_sink_name(m, sink);
-        if (amt.is_invalid() || !amt.is_const()) {
-          return std::nullopt;
-        }
-        const auto v = gu::const_of(amt);
-        if (!v.is_just_i64() || v.to_just_i64() < 0 || v.to_just_i64() > (1 << 24)) {
-          return std::nullopt;
-        }
-        return static_cast<int>(v.to_just_i64());
-      };
-      bool mapped = true;
-      switch (op) {
-        case Ntype_op::Get_mask:
-          if (const auto w = gu::bit_range(m)) {
-            const int len = w->second - w->first;
-            if (lo < len) {  // above the window: zero fill
-              push(gu::get_driver_of_sink_name(m, "a"), w->first + lo, w->first + std::min(hi, len));
-            }
-          } else {
-            mapped = false;
-          }
-          break;
-        case Ntype_op::Set_mask:
-          if (const auto w = gu::bit_range(m)) {
-            const int ilo = std::max(lo, w->first), ihi = std::min(hi, w->second);
-            if (ilo < ihi) {
-              push(gu::get_driver_of_sink_name(m, "value"), ilo - w->first, ihi - w->first);
-            }
-            const auto a = gu::get_driver_of_sink_name(m, "a");
-            if (lo < w->first) {
-              push(a, lo, std::min(hi, w->first));
-            }
-            if (hi > w->second) {
-              push(a, std::max(lo, w->second), hi);
-            }
-          } else {
-            mapped = false;
-          }
-          break;
-        case Ntype_op::Concat: {
-          const auto lanes = gu::concat_lanes(m);
-          if (lanes.empty()) {
-            mapped = false;
-            break;
-          }
-          for (const auto& l : lanes) {
-            const int llo = std::max(lo, l.offset), lhi = std::min(hi, l.offset + l.width);
-            if (llo < lhi) {
-              push(l.value, llo - l.offset, lhi - l.offset);
-            }
-          }
-          break;
-        }
-        case Ntype_op::SHL:
-          if (const auto k = const_amount("b")) {
-            if (hi > *k) {
-              push(gu::get_driver_of_sink_name(m, "a"), std::max(lo - *k, 0), hi - *k);
-            }
-          } else {
-            mapped = false;
-          }
-          break;
-        case Ntype_op::SRA:
-          if (const auto k = const_amount("b")) {
-            push(gu::get_driver_of_sink_name(m, "a"), lo + *k, hi + *k);
-          } else {
-            mapped = false;
-          }
-          break;
-        case Ntype_op::And:
-        case Ntype_op::Or:
-        case Ntype_op::Xor:
-        case Ntype_op::Not:
-          for (const auto& sink : m.inp_sorted_pins()) {
-            for (const auto& drv : sink.get_driver_pins()) {
-              push(drv, lo, hi);
-            }
-          }
-          break;
-        case Ntype_op::Mux: {
-          const auto sel = Ntype::get_sink_pid(Ntype_op::Mux, "s");
-          for (const auto& sink : m.inp_sorted_pins()) {
-            for (const auto& drv : sink.get_driver_pins()) {
-              if (sink.get_port_id() == sel) {
-                emit(drv);  // the select is read whole
-              } else {
-                push(drv, lo, hi);
-              }
-            }
-          }
-          break;
-        }
-        case Ntype_op::Sub: {
-          const auto* atoms = instance_atoms(m, p, lo, hi);
-          if (atoms == nullptr) {
-            mapped = false;
-            break;
-          }
-          for (const auto& [drv, alo, ahi] : *atoms) {
-            if (ahi == 0) {
-              emit(drv);
+      if (port_reach::step_bit_range(m, lo, hi, push, emit)) {
+        continue;
+      }
+      if (op == Ntype_op::Sub) {
+        if (const auto* atoms = instance_atoms(m, p, lo, hi)) {
+          for (const auto& [driver, first, end] : *atoms) {
+            if (end == 0) {
+              emit(driver);
             } else {
-              push(drv, alo, ahi);
+              push(driver, first, end);
             }
           }
-          break;
+          continue;
         }
-        default: mapped = false; break;
       }
-      if (!mapped) {
-        emit(p);
-      }
+      emit(p);
     }
   }
 
@@ -659,101 +564,17 @@ private:
         for (const auto& atom : *sub) {
           if (auto sit = sink_of.find(atom.pid); sit != sink_of.end()) {
             for (const auto& drv : sit->second.get_driver_pins()) {
-              push(drv, static_cast<int>(atom.lo), static_cast<int>(atom.lo + atom.len));
+              if (atom.len == 0) {
+                whole(drv);
+              } else {
+                push(drv, static_cast<int>(atom.lo), static_cast<int>(atom.lo + atom.len));
+              }
             }
           }
         }
         continue;
       }
-      // Bit-preserving wiring maps the range; anything else reads its operands whole.
-      bool mapped = true;
-      switch (op) {
-        case Ntype_op::Get_mask:
-          if (const auto w = gu::bit_range(m)) {
-            const int len = w->second - w->first;
-            if (plo < len) {
-              push(gu::get_driver_of_sink_name(m, "a"), w->first + plo, w->first + std::min(phi, len));
-            }
-          } else {
-            mapped = false;
-          }
-          break;
-        case Ntype_op::Set_mask:
-          if (const auto w = gu::bit_range(m)) {
-            const int ilo = std::max(plo, w->first), ihi = std::min(phi, w->second);
-            if (ilo < ihi) {
-              push(gu::get_driver_of_sink_name(m, "value"), ilo - w->first, ihi - w->first);
-            }
-            const auto a = gu::get_driver_of_sink_name(m, "a");
-            if (plo < w->first) {
-              push(a, plo, std::min(phi, w->first));
-            }
-            if (phi > w->second) {
-              push(a, std::max(plo, w->second), phi);
-            }
-          } else {
-            mapped = false;
-          }
-          break;
-        case Ntype_op::Concat: {
-          const auto lanes = gu::concat_lanes(m);
-          if (lanes.empty()) {
-            mapped = false;
-            break;
-          }
-          for (const auto& l : lanes) {
-            const int llo = std::max(plo, l.offset), lhi = std::min(phi, l.offset + l.width);
-            if (llo < lhi) {
-              push(l.value, llo - l.offset, lhi - l.offset);
-            }
-          }
-          break;
-        }
-        case Ntype_op::And:
-        case Ntype_op::Or:
-        case Ntype_op::Xor:
-        case Ntype_op::Not:
-          for (const auto& sink : m.inp_sorted_pins()) {
-            for (const auto& drv : sink.get_driver_pins()) {
-              push(drv, plo, phi);
-            }
-          }
-          break;
-        case Ntype_op::Mux: {
-          const auto sel = Ntype::get_sink_pid(Ntype_op::Mux, "s");
-          for (const auto& sink : m.inp_sorted_pins()) {
-            for (const auto& drv : sink.get_driver_pins()) {
-              if (sink.get_port_id() == sel) {
-                whole(drv);
-              } else {
-                push(drv, plo, phi);
-              }
-            }
-          }
-          break;
-        }
-        case Ntype_op::SHL:
-        case Ntype_op::SRA: {
-          const auto amt = gu::get_driver_of_sink_name(m, "b");
-          if (amt.is_invalid() || !amt.is_const() || !gu::const_of(amt).is_just_i64() || gu::const_of(amt).to_just_i64() < 0
-              || gu::const_of(amt).to_just_i64() > (1 << 24)) {
-            mapped = false;
-            break;
-          }
-          const int k = static_cast<int>(gu::const_of(amt).to_just_i64());
-          const auto a = gu::get_driver_of_sink_name(m, "a");
-          if (op == Ntype_op::SHL) {
-            if (phi > k) {
-              push(a, std::max(plo - k, 0), phi - k);
-            }
-          } else {
-            push(a, plo + k, phi + k);
-          }
-          break;
-        }
-        default: mapped = false; break;
-      }
-      if (!mapped) {
+      if (!port_reach::step_bit_range(m, plo, phi, push, whole)) {
         for (const auto& sink : m.inp_sorted_pins()) {
           for (const auto& drv : sink.get_driver_pins()) {
             whole(drv);
@@ -1453,12 +1274,12 @@ bool break_false_cycle(hhds::Graph* g, const std::vector<hhds::Pin_class>& membe
         }
       }
       auto out = neo.create_driver_pin(h.drv.get_port_id());
-      gu::set_bits(out, gu::bits_of(h.drv));
-      if (gu::is_unsign(h.drv)) {
-        gu::set_unsign(out);
-      } else {
-        gu::set_sign(out);
-      }
+      gu::carry_node_attrs(
+          n,
+          neo,
+          {.names = false, .colors = false, .placement = false, .analysis = false, .aggregate_origin = false, .matches = false});
+      gu::carry_srcid(n, neo);
+      gu::carry_pin_attrs(h.drv, out, {.names = false, .placement = false, .matches = false});
       prev = out;
     }
     const auto arm_pid = static_cast<int>(arm_hop.sink.get_port_id());
@@ -1494,9 +1315,45 @@ void report_cycles(const std::string& name, const std::vector<std::vector<hhds::
   }
 }
 
-// A literal setting every bit of an explicit OR slice makes that slice
-// constant, even when another operand feeds back through it. The explicit
-// range matters: wider feedback still has a dependency on its other bits.
+// An OR that sets every bit of a window, or an AND that clears every bit,
+// makes that slice independent of the other operands, including feedback.
+bool fold_window(hhds::Graph& graph, const hhds::Pin_class& output, bool allow_and) {
+  if (output.is_invalid()) {
+    return false;
+  }
+  const auto node = output.get_master_node();
+  if (node.is_invalid() || gu::type_op_of(node) != Ntype_op::Get_mask) {
+    return false;
+  }
+  const auto range = gu::bit_range(node);
+  const auto input = gu::get_driver_of_sink_name(node, "a");
+  if (!range || range->first < 0 || range->second <= range->first || range->second > 62 || input.is_invalid() || input.is_const()
+      || gu::is_graph_input_pin(input)) {
+    return false;
+  }
+  const auto logic = input.get_master_node();
+  const auto op    = gu::type_op_of(logic);
+  if (op != Ntype_op::Or && !(allow_and && op == Ntype_op::And)) {
+    return false;
+  }
+  const auto mask           = (uint64_t{1} << (range->second - range->first)) - 1;
+  const auto deciding_value = op == Ntype_op::Or ? mask : 0;
+  for (const auto& operand : gu::inp_sink_drivers(logic)) {
+    const auto value = small_const(operand.driver);
+    if (!value || ((static_cast<uint64_t>(*value) >> range->first) & mask) != deciding_value) {
+      continue;
+    }
+    const gu::Edge_vec readers(output.out_edges().begin(), output.out_edges().end());
+    const auto         constant = gu::create_const(graph, *Dlop::create_integer(static_cast<int64_t>(deciding_value)));
+    for (const auto& edge : readers) {
+      edge.sink.del_sink(output);
+      constant.connect_sink(edge.sink);
+    }
+    return true;
+  }
+  return false;
+}
+
 bool fold_constant_windows(hhds::Graph* graph) {
   std::vector<hhds::Node_class> windows;
   for (auto node : graph->body().nodes()) {
@@ -1506,85 +1363,19 @@ bool fold_constant_windows(hhds::Graph* graph) {
   }
   bool changed = false;
   for (const auto& node : windows) {
-    const auto range = gu::bit_range(node);
-    const auto input = gu::get_driver_of_sink_name(node, "a");
-    if (!range || range->first < 0 || range->second <= range->first || range->second > 62 || input.is_invalid() || input.is_const()
-        || gu::is_graph_input_pin(input) || gu::type_op_of(input.get_master_node()) != Ntype_op::Or) {
-      continue;
-    }
-    const uint64_t mask = (uint64_t{1} << (range->second - range->first)) - 1;
-    for (const auto& operand : gu::inp_sink_drivers(input.get_master_node())) {
-      const auto value = small_const(operand.driver);
-      if (!value || ((static_cast<uint64_t>(*value) >> range->first) & mask) != mask) {
-        continue;
-      }
-      const auto         output = node.get_driver_pin(0);
-      const gu::Edge_vec consumers(output.out_edges().begin(), output.out_edges().end());
-      const auto         constant = gu::create_const(*graph, *Dlop::create_integer(static_cast<int64_t>(mask)));
-      for (const auto& edge : consumers) {
-        edge.sink.del_sink(output);
-        constant.connect_sink(edge.sink);
-      }
+    if (fold_window(*graph, node.get_driver_pin(0), /*allow_and=*/false)) {
       node.del_node();
       changed = true;
-      break;
     }
   }
   return changed;
 }
 
-}  // namespace
-
-// A cycle member `Get_mask(Or(.., c), lo, hi)` whose constant `c` sets every window bit (or
-// `Get_mask(And(.., c), ..)` whose `c` clears them) is a constant whatever the other operands
-// are, including the member that closes the loop: `r = (r | 1) & 1` is 1. Replace the window by
-// that constant; returns true when one was folded.
-bool fold_decided_window(hhds::Graph* g, const std::vector<hhds::Pin_class>& members) {
-  for (const auto& p : members) {
-    const auto m = p.get_master_node();
-    if (m.is_invalid() || gu::type_op_of(m) != Ntype_op::Get_mask) {
-      continue;
-    }
-    const auto rng = gu::bit_range(m);
-    const auto a   = gu::get_driver_of_sink_name(m, "a");
-    if (!rng || a.is_invalid() || a.is_const() || gu::is_graph_input_pin(a) || rng->first < 0 || rng->second > 62
-        || rng->second <= rng->first) {
-      continue;
-    }
-    const auto an = a.get_master_node();
-    const auto op = gu::type_op_of(an);
-    if (op != Ntype_op::Or && op != Ntype_op::And) {
-      continue;
-    }
-    const uint64_t win = (uint64_t{1} << rng->second) - (uint64_t{1} << rng->first);
-    bool           decided = false;
-    for (auto sink : an.inp_sorted_pins()) {
-      for (const auto& drv : sink.get_driver_pins()) {
-        if (!drv.is_const()) {
-          continue;
-        }
-        const auto& c = gu::const_of(drv);
-        if (c.has_unknowns() || !c.is_just_i64()) {
-          continue;
-        }
-        const uint64_t bits = static_cast<uint64_t>(c.to_just_i64()) & win;
-        decided |= op == Ntype_op::Or ? bits == win : bits == 0;
-      }
-    }
-    if (!decided) {
-      continue;
-    }
-    const int64_t value = op == Ntype_op::Or ? static_cast<int64_t>(win >> rng->first) : 0;
-    const auto    konst = gu::create_const(*g, *Dlop::create_integer(value));
-    const gu::Edge_vec readers(p.out_edges().begin(), p.out_edges().end());
-    for (const auto& edge : readers) {
-      edge.sink.del_sink(p);
-      konst.connect_sink(edge.sink);
-    }
-    return true;
-  }
-  return false;
+bool fold_decided_window(hhds::Graph* graph, const std::vector<hhds::Pin_class>& members) {
+  return std::ranges::any_of(members, [&](const auto& pin) { return fold_window(*graph, pin, /*allow_and=*/true); });
 }
+
+}  // namespace
 
 Acyclic_result make_acyclic(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, Split_state& state, bool defer_inlined_loops,
                             const std::vector<std::shared_ptr<hhds::Graph>>& roots) {

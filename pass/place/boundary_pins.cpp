@@ -57,6 +57,9 @@ int append_anchor(dp::Design& d, Point p) {
   append(d.node_pad_x, 0.);
   append(d.node_pad_y, 0.);
   append(d.node_orientation, dp::Orientation::N);
+  append(d.node_orientation_fixed, 0);
+  append(d.node_legalize_fixed, 0);
+  append(d.node_group_id, 0);
   append(d.node_inflatable, 0);
   if (!d.node_boxes.empty()) {
     d.node_boxes.push_back({p.first, p.second, p.first, p.second});

@@ -32,19 +32,7 @@ namespace {
 // but its Or-form gate (`clk | ~en`) only for an inverted HELD-latch operand;
 // exposing an arbitrary Or would feed it shapes whose guard polarity it does
 // not model. An opaque cell keeps the old, conservative data-latch reading.
-bool is_exposable_gate_model(hhds::Graph* model) {
-  if (model == nullptr) {
-    return false;
-  }
-  for (auto node : model->body().nodes()) {
-    const auto op = gu::type_op_of(node);
-    if (gu::is_type_register(node) || op == Ntype_op::Memory || op == Ntype_op::Sub || op == Ntype_op::Clock_cell
-        || op == Ntype_op::Or) {
-      return false;
-    }
-  }
-  return true;
-}
+bool is_exposable_gate_model(hhds::Graph* model) { return gu::is_pure_comb_body(model, /*single_product=*/true); }
 
 // Splice every listed Sub of `g`'s body from its --lib model. Collected by class
 // index and resolved against ONE snapshot of the body: a splice creates and

@@ -277,7 +277,7 @@ void topo_chunk(const std::vector<hhds::Node_class>& nodes, uint64_t max_ge, int
 
 // Split every region over `max_ge`. Returns the new per-node ids (fresh space).
 void split_large(hhds::Graph* g, Region_graph& rg, uint64_t max_ge, absl::flat_hash_map<hhds::Node_class, int>& out, int& next_id,
-                 Size_window_stats& st) {
+                 Size_window_stats& st, int name_weight) {
   if (max_ge == 0) {
     return;
   }
@@ -342,7 +342,7 @@ void split_large(hhds::Graph* g, Region_graph& rg, uint64_t max_ge, absl::flat_h
     //    agglomerate_to_cap is "merge anything below the cap into its
     //    best-connected neighbour, so long as the union still fits" -- one
     //    actor pass; leftovers under min are folded by the outer merge_small.
-    Region_graph      rg_sub(g, sub);
+    Region_graph      rg_sub(g, sub, name_weight);
     Size_window_stats sub_st;
     agglomerate_to_cap(rg_sub, max_ge, sub_st);
 
@@ -377,7 +377,7 @@ Node2Id apply_size_window(hhds::Graph* g, const Node2Id& node2id, uint64_t min_g
   // then re-split.
   absl::flat_hash_map<hhds::Node_class, int> split_id;
   int                                        next_split = 0;
-  split_large(g, rg, max_ge, split_id, next_split, s);
+  split_large(g, rg, max_ge, split_id, next_split, s, name_weight);
 
   // When nothing was over max -- the common case, and every def on a design with
   // no monster -- the graph already in hand IS the post-split one. Rebuilding it
@@ -405,7 +405,7 @@ Node2Id apply_size_window(hhds::Graph* g, const Node2Id& node2id, uint64_t min_g
         }
       }
     }
-    rebuilt.emplace(g, after_split);
+    rebuilt.emplace(g, after_split, name_weight);
   }
   Region_graph& rg2 = rebuilt.has_value() ? *rebuilt : rg;
 

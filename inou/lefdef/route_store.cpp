@@ -10,6 +10,8 @@ namespace {
 using Records = attrs::route_records_v1_t::value_type;
 using Strings = attrs::route_strings_v1_t::value_type;
 enum Kind : int64_t { header, connection, wire, path, point, via, rect, rule };
+constexpr int64_t kHasWidth = 1;
+constexpr int64_t kTaper    = 2;
 void require(bool condition) {
   if (!condition) {
     throw std::invalid_argument("invalid persistent signal route");
@@ -55,8 +57,12 @@ void store_route(const hhds::Pin_class& driver, int64_t dbu, const Net& net, con
   for (const auto& w : net.wires) {
     data.records.push_back({wire, data.intern(w.type)});
     for (const auto& p : w.paths) {
+      const int64_t flags = (p.width ? kHasWidth : 0) | (p.taper ? kTaper : 0);
+      if (p.taper) {
+        data.records.front()[5] = 2;  // v2 adds the taper flag, with the same record layout
+      }
       data.records.push_back(
-          {path, data.intern(p.layer), p.width.has_value(), p.width.value_or(0), data.intern(p.shape), data.intern(p.taper_rule)});
+          {path, data.intern(p.layer), flags, p.width.value_or(0), data.intern(p.shape), data.intern(p.taper_rule)});
       for (const auto& step : p.steps) {
         if (const auto* v = std::get_if<Route_point>(&step)) {
           require(!v->extension || *v->extension >= 0);
@@ -98,8 +104,10 @@ std::optional<Stored_route> load_route(const hhds::Pin_class& driver, int64_t db
     require(id >= 0 && static_cast<uint64_t>(id) < strings.size());
     return strings[id];
   };
-  require(!records.empty() && records[0][0] == header && records[0][5] == 1);
+  require(!records.empty() && records[0][0] == header);
   const auto& h = records[0];
+  require(h[5] == 1 || h[5] == 2);
+  const auto path_flags = h[5] == 2 ? kHasWidth | kTaper : kHasWidth;
   if (h[1] != dbu || text(h[2]) != context) {
     return {};
   }
@@ -115,9 +123,13 @@ std::optional<Stored_route> load_route(const hhds::Pin_class& driver, int64_t db
         break;
       case wire: result.net.wires.push_back({text(r[1]), {}}); break;
       case path:
-        require(!result.net.wires.empty() && (r[2] == 0 || r[2] == 1));
-        result.net.wires.back().paths.push_back(
-            {text(r[1]), r[2] ? std::optional<int64_t>(r[3]) : std::nullopt, text(r[4]), {}, text(r[5])});
+        require(!result.net.wires.empty() && (r[2] & ~path_flags) == 0);
+        result.net.wires.back().paths.push_back({text(r[1]),
+                                                 (r[2] & kHasWidth) ? std::optional<int64_t>(r[3]) : std::nullopt,
+                                                 text(r[4]),
+                                                 {},
+                                                 text(r[5]),
+                                                 (r[2] & kTaper) != 0});
         break;
       case rule:
         require(r[3] > 0 && !text(r[1]).empty() && !text(r[2]).empty());

@@ -6,6 +6,9 @@
 #include "physical.hpp"
 
 namespace livehd::physical {
+// True when the union of the positive-area input rectangles covers the query.
+bool rect_union_covers(const Rect& query, std::span<const Rect> rectangles);
+
 // Exact rectangular geometry in floorplan DBU. This is geometric decoding,
 // not a DRC/legal-access verdict. Unsupported or unrepresentable geometry throws.
 // Via coordinates are local to the via origin, including DEF ORIGIN/OFFSET and

@@ -363,6 +363,9 @@ TEST(PhysicalRank, CrossingNetJournalMatchesFullTimingWithReconvergenceAndAClock
     EXPECT_DOUBLE_EQ(trial.tns(), reference.tns());
     EXPECT_EQ(trial.load("launch:Q"), reference.load("launch:Q"));
     EXPECT_EQ(trial.pin("outside:A").slew, reference.pin("outside:A").slew);
+    const auto reference_hold = reference.pin("capture:D").hold_slack;
+    ASSERT_TRUE(reference_hold);
+    EXPECT_EQ(trial.pin("capture:D").hold_slack, reference_hold);
     trial.rollback(mark);
     EXPECT_EQ(endpoints(trial), start);
   }

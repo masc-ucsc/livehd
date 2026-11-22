@@ -503,22 +503,15 @@ std::optional<Val> Prover::encode_comb(uint32_t scope, const hhds::Node_class& n
       result = add_acc;
       break;
     }
-    case Ntype_op::Div: {
+    case Ntype_op::Div:
+    case Ntype_op::Rem: {
       if (pid(0).size() != 1 || pid(1).size() != 1) {
         enc_unsupported_ = true;
         return std::nullopt;
       }
-      // Division is NOT modular like add/mult: fitting the operands to the
-      // (often tiny) output width W corrupts it. Bitwidth analysis stamps the
-      // QUOTIENT width on the Div pin — e.g. `c/100` with c:u3 always yields 0,
-      // so W is ~1 bit and `fit(100, 1)` truncates the divisor to 0 =>
-      // UDIV-by-zero => all-ones garbage. Compute at a width holding both
-      // operands, then narrow to W (matches pass/lec/encode.cpp).
-      int  dw = std::max({pid(0)[0].width, pid(1)[0].width, W});
-      Term a  = lec::fit_to(tm_, pid(0)[0], dw);
-      Term b  = lec::fit_to(tm_, pid(1)[0], dw);
-      Term q  = tm_.mkTerm(out_signed ? Kind::BITVECTOR_SDIV : Kind::BITVECTOR_UDIV, {a, b});
-      result  = lec::fit_to(tm_, Val{q, dw, out_signed}, W);
+      // A rewrite proof must hold for every value of an undefined result.
+      const auto undefined = tm_.mkConst(tm_.mkBitVectorSort(static_cast<uint32_t>(W)));
+      result               = lec::encode_div(tm_, pid(0)[0], pid(1)[0], W, op == Ntype_op::Rem, undefined).value;
       break;
     }
     case Ntype_op::Not: {
@@ -563,17 +556,9 @@ std::optional<Val> Prover::encode_comb(uint32_t scope, const hhds::Node_class& n
         enc_unsupported_ = true;
         return std::nullopt;
       }
-      // Integer equality extends each operand by its OWN sign. An unsigned
-      // peer must not turn a negative operand into its positive bit pattern.
-      const bool any_signed = std::any_of(all.begin(), all.end(), [](const auto& v) { return v.is_signed; });
-      int        cw         = 0;
-      for (const auto& v : all) {
-        cw = std::max(cw, v.width + (any_signed && !v.is_signed ? 1 : 0));
-      }
-      auto ext = [&](const Val& v) { return lec::fit_to(tm_, v, cw); };
       Term acc;
       for (size_t i = 1; i < all.size(); ++i) {
-        Term eq = tm_.mkTerm(Kind::EQUAL, {ext(all[0]), ext(all[i])});
+        Term eq = lec::vals_equal(tm_, all[0], all[i]);
         acc     = acc.isNull() ? eq : tm_.mkTerm(Kind::AND, {acc, eq});
       }
       result = pred_to_bv(acc);
@@ -623,8 +608,7 @@ std::optional<Val> Prover::encode_comb(uint32_t scope, const hhds::Node_class& n
       // loop only keeps the zero-driver identity (no amount => `a`), as in
       // pass/lec/encode.cpp and pass/abc/abc_blast.hpp.
       for (const auto& b : pid(1)) {
-        Term shamt = lec::fit_to(tm_, Val{b.term, b.width, false}, W);
-        Term sh    = tm_.mkTerm(Kind::BITVECTOR_SHL, {a, shamt});
+        Term sh    = lec::encode_shift(tm_, pid(0)[0], b, W, /*left=*/true);
         acc        = acc.isNull() ? sh : tm_.mkTerm(Kind::BITVECTOR_OR, {acc, sh});
       }
       result = acc.isNull() ? a : acc;
@@ -635,12 +619,7 @@ std::optional<Val> Prover::encode_comb(uint32_t scope, const hhds::Node_class& n
         enc_unsupported_ = true;
         return std::nullopt;
       }
-      const Val& a   = pid(0)[0];
-      int        cw  = std::max(a.width, std::max(W, 1));
-      Term       af  = lec::fit_to(tm_, a, cw);
-      Term       shf = lec::fit_to(tm_, Val{pid(1)[0].term, pid(1)[0].width, false}, cw);
-      Kind       k   = a.is_signed ? Kind::BITVECTOR_ASHR : Kind::BITVECTOR_LSHR;
-      result         = lec::fit_to(tm_, Val{tm_.mkTerm(k, {af, shf}), cw, a.is_signed}, W);
+      result = lec::encode_shift(tm_, pid(0)[0], pid(1)[0], W, /*left=*/false);
       break;
     }
     case Ntype_op::Sext: {
@@ -988,12 +967,7 @@ Query_out Prover::equal(const hhds::Pin_class& a, const hhds::Pin_class& b) {
   if (!va || !vb || enc_unsupported_) {
     return {Verdict::Undecided, st || enc_stateful_, "", {}};
   }
-  int  wa     = static_cast<int>(va->term.getSort().getBitVectorSize());
-  int  wb     = static_cast<int>(vb->term.getSort().getBitVectorSize());
-  int  w      = std::max(wa, wb);
-  Term ta     = lec::fit_to(tm_, lec::Val{va->term, wa, va->is_signed}, w);
-  Term tb     = lec::fit_to(tm_, lec::Val{vb->term, wb, vb->is_signed}, w);
-  Term refute = tm_.mkTerm(Kind::DISTINCT, {ta, tb});  // a != b falsifies "always equal"
+  Term refute = tm_.mkTerm(Kind::NOT, {lec::vals_equal(tm_, *va, *vb)});
   return solve(refute, n, st || enc_stateful_);
 }
 

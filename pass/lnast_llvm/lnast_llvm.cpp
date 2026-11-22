@@ -1,8 +1,5 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
-#include "hlop/memory_init.hpp"
 #include "lnast_llvm.hpp"
-
-#include "diag.hpp"
 
 #include <algorithm>
 #include <bit>
@@ -23,7 +20,10 @@
 #include "absl/container/flat_hash_set.h"
 #include "cgen_llvm.hpp"
 #include "debug_env.hpp"
+#include "diag.hpp"
+#include "hlop/memory_init.hpp"
 #include "lnast.hpp"
+#include "pyrope_literal.hpp"
 #include "sim_compile_workers.hpp"
 
 namespace livehd::lnast_llvm {
@@ -82,126 +82,61 @@ bool is_pow2(const std::vector<uint64_t>& m) {
   return ones == 1;
 }
 
-std::optional<Literal> parse_literal(std::string_view t) {
-  Literal l;
-  if (t.empty()) {
+std::optional<Literal> parse_literal(std::string_view text) {
+  const auto parsed = livehd::parse_pyrope_integer_spelling(text);
+  if (!parsed) {
     return std::nullopt;
   }
-  if (t[0] == '-') {
-    l.negative = true;
-    t.remove_prefix(1);
-  } else if (t[0] == '+') {
-    t.remove_prefix(1);
-  }
-  if (t.empty()) {
-    return std::nullopt;
-  }
-  if (t.size() > 3 && t[0] == '0' && (t[1] == 'u' || t[1] == 's') && t[2] == 'b') {
-    // 0ub / 0sb bit patterns; unknown bits (? x z) read as 0, like sim.unknown_zero.
-    const bool is_signed = t[1] == 's';
-    t.remove_prefix(3);
-    std::string bits;
-    for (char c : t) {
-      if (c == '_') {
-        continue;
+  const auto& spelling = *parsed;
+  Literal     l;
+  l.negative = spelling.negate;
+  if (spelling.radix == 10) {
+    // Decimal: multiply-add on little-endian words.
+    l.mag.assign(1, 0);
+    for (char digit : spelling.digits) {
+      unsigned __int128 carry = static_cast<unsigned>(digit - '0');
+      for (auto& word : l.mag) {
+        const unsigned __int128 product = static_cast<unsigned __int128>(word) * 10 + carry;
+        word                            = static_cast<uint64_t>(product);
+        carry                           = product >> 64;
       }
-      if (c == '0' || c == '1') {
-        bits.push_back(c);
-      } else if (c == '?' || c == 'x' || c == 'X' || c == 'z' || c == 'Z') {
-        bits.push_back('0');
-      } else {
-        return std::nullopt;
-      }
-    }
-    if (bits.empty()) {
-      return std::nullopt;
-    }
-    const size_t n = bits.size();
-    l.mag.assign((n + 63) / 64, 0);
-    for (size_t i = 0; i < n; ++i) {
-      if (bits[n - 1 - i] == '1') {
-        l.mag[i / 64] |= uint64_t{1} << (i % 64);
-      }
-    }
-    {
-      // which bits were `?` / x / z: the loop above already turned them into '0'
-      std::vector<uint64_t> unk((n + 63) / 64, 0);
-      bool                  any = false;
-      size_t                at  = 0;
-      for (char c : std::string_view(t)) {  // `t` is the text after the prefix; walk it MSB first
-        if (c == '_') {
-          continue;
-        }
-        if (c == '?' || c == 'x' || c == 'X' || c == 'z' || c == 'Z') {
-          const size_t bit = n - 1 - at;
-          unk[bit / 64]   |= uint64_t{1} << (bit % 64);
-          any              = true;
-        }
-        ++at;
-      }
-      if (any) {
-        l.unk        = std::move(unk);
-        l.raw        = l.mag;
-        l.raw_bits   = static_cast<uint32_t>(n);
-        l.raw_signed = is_signed;
-      }
-    }
-    if (is_signed && bits[0] == '1') {  // value - 2^n: negate the two's complement magnitude
-      l.negative = !l.negative;
-      uint64_t carry = 1;
-      for (size_t i = 0; i < l.mag.size(); ++i) {
-        const uint64_t inv = ~l.mag[i];
-        l.mag[i]           = inv + carry;
-        carry              = (carry != 0 && l.mag[i] == 0) ? 1 : 0;
-      }
-      if (n % 64 != 0) {
-        l.mag.back() &= (uint64_t{1} << (n % 64)) - 1;
+      if (carry != 0) {
+        l.mag.push_back(static_cast<uint64_t>(carry));
       }
     }
     return l;
   }
-  if (t.size() > 2 && t[0] == '0' && (t[1] == 'x' || t[1] == 'X')) {
-    t.remove_prefix(2);
-    size_t nibbles = 0;
-    for (char c : t) {
-      if (c == '_') {
-        continue;
-      }
-      if (!std::isxdigit(static_cast<unsigned char>(c))) {
-        return std::nullopt;
-      }
-      ++nibbles;
-    }
-    l.mag.assign((nibbles + 15) / 16, 0);
-    size_t pos = 0;
-    for (size_t i = t.size(); i-- > 0;) {
-      const char c = t[i];
-      if (c == '_') {
-        continue;
-      }
-      const uint64_t d = static_cast<uint64_t>(std::isdigit(static_cast<unsigned char>(c)) ? c - '0' : (std::tolower(c) - 'a' + 10));
-      l.mag[pos / 16] |= d << ((pos % 16) * 4);
-      ++pos;
-    }
-    return l;
+
+  const auto bpd  = spelling.bits_per_digit();
+  const auto bits = spelling.digits.size() * bpd;
+  l.mag.assign((bits + 63) / 64, 0);
+  if (spelling.unknown()) {
+    l.unk.assign(l.mag.size(), 0);
   }
-  // decimal: multiply-add on words
-  l.mag.assign(1, 0);
-  for (char c : t) {
-    if (c == '_') {
-      continue;
+  for (size_t i = 0; i < spelling.digits.size(); ++i) {
+    const char   c   = spelling.digits[spelling.digits.size() - 1 - i];
+    const size_t bit = i * bpd;
+    if (c == '?') {
+      l.unk[bit / 64] |= ((uint64_t{1} << bpd) - 1) << (bit % 64);
+    } else {
+      const auto digit  = static_cast<uint64_t>(c <= '9' ? c - '0' : c - 'a' + 10);
+      l.mag[bit / 64]  |= digit << (bit % 64);
     }
-    if (!std::isdigit(static_cast<unsigned char>(c))) {
-      return std::nullopt;
+  }
+  if (!l.unk.empty()) {
+    l.raw        = l.mag;
+    l.raw_bits   = static_cast<uint32_t>(bits);
+    l.raw_signed = spelling.signed_pattern;
+  }
+  if (spelling.negative_pattern()) {
+    l.negative     = !l.negative;
+    uint64_t carry = 1;
+    for (auto& word : l.mag) {
+      word  = ~word + carry;
+      carry = carry && word == 0;
     }
-    unsigned __int128 carry = static_cast<unsigned>(c - '0');
-    for (auto& w : l.mag) {
-      const unsigned __int128 cur = static_cast<unsigned __int128>(w) * 10 + carry;
-      w                           = static_cast<uint64_t>(cur);
-      carry                       = cur >> 64;
-    }
-    if (carry != 0) {
-      l.mag.push_back(static_cast<uint64_t>(carry));
+    if (bits % 64 != 0) {
+      l.mag.back() &= (uint64_t{1} << (bits % 64)) - 1;
     }
   }
   return l;

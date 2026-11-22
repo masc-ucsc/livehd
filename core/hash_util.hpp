@@ -14,18 +14,13 @@
 // F* = GF(2^61-1)* with gamma excluding 0 and 1, which is the combiner the
 // owner spec of 2026-09-16 defines. The sum/xor/count one it replaced is gone
 // from every LiveHD call site.
+#include "fnv1a.hpp"
 #include "hhds/hash_mix.hpp"
 
 namespace livehd::hash_util {
 
 using hhds::field_combine;
 using hhds::Field_combiner;
-
-// Canonical 64-bit FNV-1a parameters. Every digest built on these is an
-// internal cache key or uniquifier, so a parameter change only costs a
-// one-time cache refill — nothing persists across versions by hash value.
-inline constexpr uint64_t kFnv1a64_offset = 0xcbf29ce484222325ULL;  // 14695981039346656037
-inline constexpr uint64_t kFnv1a64_prime  = 0x100000001b3ULL;       // 1099511628211
 
 // MurmurHash3's 64-bit finalizer. This is a deterministic mixer for internal
 // digests; it is not a cryptographic hash.
@@ -40,17 +35,6 @@ inline constexpr uint64_t kFnv1a64_prime  = 0x100000001b3ULL;       // 109951162
 
 [[nodiscard]] constexpr uint64_t combine64(uint64_t hash, uint64_t value) {
   return mix64(hash ^ (value + 0x9e3779b97f4a7c15ULL + (hash << 6U) + (hash >> 2U)));
-}
-
-// FNV-1a over `text`. Pass a previous return as `seed` to chain fragments:
-// fnv1a64("bc", fnv1a64("a")) == fnv1a64("abc").
-[[nodiscard]] constexpr uint64_t fnv1a64(std::string_view text, uint64_t seed = kFnv1a64_offset) {
-  uint64_t hash = seed;
-  for (char ch : text) {
-    hash ^= static_cast<unsigned char>(ch);
-    hash *= kFnv1a64_prime;
-  }
-  return hash;
 }
 
 // FNV-1a over the 8 little-endian bytes of `value`, so a word-fed digest

@@ -116,34 +116,6 @@ inline std::string memory_bank_name(std::string_view name, char separator = '.')
   return std::string(name);
 }
 
-template <class Index, class Matched>
-std::optional<Memory_bank> memory_bank(const std::string& name, int entries, int width, const Index& candidates,
-                                       const Matched& matched, char separator = '.') {
-  if (name.empty() || entries <= 0 || width <= 0) {
-    return std::nullopt;
-  }
-  Memory_bank out{std::vector<std::string>(entries), std::vector<std::vector<std::string>>(entries)};
-  for (int i = 0; i < entries; ++i) {
-    const auto entry = bus_name::entry(name + separator + "_mem", i);
-    if (auto it = candidates.find(entry); it != candidates.end()) {
-      if (it->second.second != width || matched.contains(entry)) {
-        return std::nullopt;
-      }
-      out.entry_keys[i] = it->second.first;
-      continue;
-    }
-    for (int b = 0; b < width; ++b) {
-      const auto key = bus_name::bit(entry, b);
-      const auto it  = candidates.find(key);
-      if (it == candidates.end() || it->second.second != 1 || matched.contains(key)) {
-        return std::nullopt;
-      }
-      out.bit_keys[i].push_back(it->second.first);
-    }
-  }
-  return out;
-}
-
 // The name relation of a memory lowered to registers when the other side no longer has every storage bit: synthesis
 // removes the bit columns (or entries) nothing reads, and the rest keep their `<mem>._mem[i][b]` names. Each surviving
 // key must still be exactly one storage bit (or one whole entry of `width` bits) and unclaimed by a register; a key of
@@ -189,6 +161,14 @@ std::optional<Memory_bank> memory_bank_coverage(const std::string& name, int ent
     return std::nullopt;
   }
   return out;
+}
+
+template <class Index, class Matched>
+std::optional<Memory_bank> memory_bank(const std::string& name, int entries, int width, const Index& candidates,
+                                       const Matched& matched, char separator = '.') {
+  int  removed = 0;
+  auto bank    = memory_bank_coverage(name, entries, width, candidates, matched, removed, separator);
+  return removed == 0 ? std::move(bank) : std::nullopt;
 }
 
 }  // namespace livehd::state_match

@@ -1204,14 +1204,7 @@ Repair_result wirelength_resynthesize(Result initial, const Options& options, co
     }
     trial_options.own_frame = options.own_frame || options.floorplan.empty();
     trial_options.floorplan = (directory / "floorplan.def").string();
-    auto frame              = initial.floorplan;
-    std::erase_if(frame.components, [](const auto& c) {
-      return c.place.status != Ann_place::Status::FIXED && c.place.status != Ann_place::Status::LOCKED;
-    });
-    for (auto& port : frame.terminals) {
-      port.status = Ann_place::Status::FIXED;
-    }
-    physical::write_def(frame, trial_options.floorplan);
+    detail::write_eco_floorplan(initial.floorplan, trial_options.floorplan);
     if (!batch.empty()) {
       auto owner              = std::make_unique<hhds::GraphLibrary>();
       auto trial              = place(*graph, *owner, trial_options);

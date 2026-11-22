@@ -54,7 +54,6 @@ cc_library(
     name = "sim_tune_hdrs",
     hdrs = [
         "sim_tune_rt.hpp",
-        "sim_plusargs_rt.hpp",
         "sim_tune_vector.hpp",
     ],
     copts = COPTS,
@@ -77,8 +76,8 @@ cc_library(
         exclude = [
             "cgen_salt.hpp",
             "sim_tune_rt.hpp",
-            "sim_plusargs_rt.hpp",
             "sim_tune_vector.hpp",
+            "sim_llvm_target.hpp",
             "sim_native_rt.hpp",
             "sim_native_abi.hpp",
         ],
@@ -87,6 +86,7 @@ cc_library(
     includes = ["."],
     visibility = ["//visibility:public"],
     deps = [
+        ":sim_llvm_target",
         ":sim_tune_hdrs",
         ":sim_native_abi",
         "//core",
@@ -133,14 +133,23 @@ cc_library(
 )
 
 cc_library(
+    name = "sim_llvm_target",
+    hdrs = ["sim_llvm_target.hpp"],
+    includes = ["."],
+    visibility = ["//inou/prp:__pkg__"],
+    deps = ["@llvm-project//llvm:Support"],
+)
+
+cc_library(
     name = "sim_native_rt",
     srcs = ["sim_native_rt.cpp"],
-    hdrs = ["sim_native_rt.hpp", "sim_llvm_target.hpp"],
+    hdrs = ["sim_native_rt.hpp"],
     copts = COPTS,
     includes = ["."],
     visibility = ["//visibility:public"],
     deps = [
         ":sim_native_abi",
+        ":sim_llvm_target",
         "@llvm-project//llvm:OrcJIT",
         "@llvm-project//llvm:Support",
     ] + select({

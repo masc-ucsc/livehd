@@ -3,7 +3,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstdlib>
 #include <limits>
 #include <map>
 #include <numeric>
@@ -11,7 +10,6 @@
 #include <stdexcept>
 
 #include "steiner_topology.hpp"
-#include "thirdparty/flute/flute.hpp"
 
 namespace livehd::placement {
 
@@ -20,7 +18,6 @@ namespace livehd::placement {
 // FLUTE groups are joined by representative trees and any cycles are removed.
 Steiner_net steiner_net(const std::vector<std::pair<double, double>>& pins, size_t driver_index, const std::array<double, 4>& per_um,
                         double dbu, bool* approximate) {
-  initialize_flute_tables();
   if (driver_index >= pins.size()) {
     throw std::invalid_argument("Steiner RC requires a driver pin");
   }
@@ -32,7 +29,8 @@ Steiner_net steiner_net(const std::vector<std::pair<double, double>>& pins, size
   std::map<std::pair<int, int>, unsigned> junction;
   std::vector<std::pair<int, int>>        positions;
   for (const auto& xy : pins) {
-    if (std::abs(xy.first) > std::numeric_limits<int>::max() / 4.0 || std::abs(xy.second) > std::numeric_limits<int>::max() / 4.0) {
+    if (!std::isfinite(xy.first) || !std::isfinite(xy.second) || std::abs(xy.first) > std::numeric_limits<int>::max() / 4.0
+        || std::abs(xy.second) > std::numeric_limits<int>::max() / 4.0) {
       throw std::runtime_error("coordinates exceed FLUTE integer range");
     }
     positions.emplace_back(std::llround(xy.first), std::llround(xy.second));
@@ -131,21 +129,17 @@ Steiner_net steiner_net(const std::vector<std::pair<double, double>>& pins, size
       if (group.size() < 2) {
         return;
       }
-      std::vector<int> gx, gy;
-      for (const auto& p : group) {
-        gx.push_back(p.first);
-        gy.push_back(p.second);
-      }
-      auto t = flute::flute(gx.size(), gx.data(), gy.data(), 3);
-      for (int i = 0; i < 2 * t.deg - 2; ++i) {
-        const auto a  = std::pair{t.branch[i].x, t.branch[i].y};
-        const auto b  = std::pair{t.branch[t.branch[i].n].x, t.branch[t.branch[i].n].y};
-        const auto ai = vertex(a), bi = vertex(b);
+      const std::vector<Steiner_location> locations(group.begin(), group.end());
+      const auto                          topology = steiner_topology(locations);
+      for (const auto& [a_id, b_id] : topology.edges) {
+        const auto& [ax, ay] = topology.locations[a_id];
+        const auto& [bx, by] = topology.locations[b_id];
+        const auto ai        = vertex({int(ax), int(ay)});
+        const auto bi        = vertex({int(bx), int(by)});
         if (edges.emplace(std::min(ai, bi), std::max(ai, bi)).second) {
-          add_edge(ai, bi, std::abs(double(a.first) - b.first), std::abs(double(a.second) - b.second));
+          add_edge(ai, bi, std::abs(double(ax) - bx), std::abs(double(ay) - by));
         }
       }
-      std::free(t.branch);
     };
     const auto root  = positions[driver_index];
     const auto close = [&](const std::pair<int, int>& p) {

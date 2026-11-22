@@ -2236,11 +2236,10 @@ void manifest_write(const std::string& dir, const rapidjson::Document& doc) {
   rapidjson::StringBuffer                    sb;
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
   doc.Accept(w);
-  std::ofstream ofs(dir + "/manifest.json");
-  if (!ofs.is_open()) {
-    throw Lhd_error{"config", std::format("could not write {}/manifest.json", dir), ""};
+  const auto json = std::string(sb.GetString(), sb.GetSize()) + '\n';
+  if (const auto error = livehd::file_utils::write_file_atomic(dir + "/manifest.json", json); error) {
+    throw Lhd_error{"config", std::format("could not write {}/manifest.json: {}", dir, error.message()), ""};
   }
-  ofs << std::string_view{sb.GetString(), sb.GetSize()} << "\n";
 }
 }  // namespace
 

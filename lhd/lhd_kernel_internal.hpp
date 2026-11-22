@@ -1,12 +1,9 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <chrono>
-#if defined(__GLIBC__)
-#include <malloc.h>
-#endif
-#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -18,11 +15,12 @@
 #include <utility>
 #include <vector>
 
-#include "nest_regions.hpp"
 #include "absl/container/flat_hash_map.h"
 #include "debug_env.hpp"
 #include "eprp.hpp"
 #include "lhd.hpp"
+#include "nest_regions.hpp"
+#include "stage_mem.hpp"
 
 void setup_inou_yosys();
 class Lnast;
@@ -472,43 +470,13 @@ private:
 // peak_mb=..`. The kernel's high-water mark is reset when a phase starts (Linux: clear_refs 5), so
 // a phase's peak is its own, not the run's so far; a phase that encloses others keeps the highest
 // mark seen while it was open.
-namespace phase_mem {
-inline bool     on() { return livehd::debug::env<"LHD_PHASE_MEM">() != nullptr; }
-inline uint64_t status_kb(const char* key) {
-  uint64_t value = 0;
-  if (std::FILE* f = std::fopen("/proc/self/status", "r")) {
-    char         line[256];
-    const size_t n = std::strlen(key);
-    while (std::fgets(line, sizeof line, f) != nullptr) {
-      if (std::strncmp(line, key, n) == 0) {
-        value = std::strtoull(line + n, nullptr, 10);
-        break;
-      }
-    }
-    std::fclose(f);
-  }
-  return value;
-}
-inline void reset_high_water() {
-  if (std::FILE* f = std::fopen("/proc/self/clear_refs", "w")) {
-    std::fputs("5", f);
-    std::fclose(f);
-  }
-}
-inline std::vector<uint64_t*>& open_peaks() {
-  static std::vector<uint64_t*> list;
-  return list;
-}
-}  // namespace phase_mem
+namespace phase_mem = livehd::debug::phase_mem;
 
 class Phase_timer {
 public:
   Phase_timer(Result& res, std::string_view name) : res_(res), name_(name), t0_(std::chrono::steady_clock::now()) {
     if (phase_mem::on()) {
-      const uint64_t high = phase_mem::status_kb("VmHWM:");
-      for (auto* open : phase_mem::open_peaks()) {  // the phases this one runs inside
-        *open = std::max(*open, high);
-      }
+      phase_mem::sample_peak();
       phase_mem::reset_high_water();
       start_kb_ = phase_mem::status_kb("VmRSS:");
       peak_kb_  = start_kb_;
@@ -540,34 +508,14 @@ public:
     }
     done_                                              = true;
     const std::chrono::duration<double, std::milli> dt = std::chrono::steady_clock::now() - t0_;
-#if defined(__GLIBC__)
-    // Hand freed pages back to the system when a phase of a second or more ends. glibc keeps what a
-    // phase freed (minion: 0.9 GB after technology mapping, 2.4 GB after timing), and the next phase
-    // starts on top of it. A trim costs milliseconds; LHD_PHASE_TRIM=0 turns it off.
+    // A long phase can free gigabytes the allocator would otherwise retain.
     if (dt.count() >= 1000.0) {
-      const char* trim = livehd::debug::env<"LHD_PHASE_TRIM">();
-      if (trim == nullptr || trim[0] != '0') {
-        malloc_trim(0);
-      }
+      phase_mem::trim(/*default_on=*/true);
     }
-#endif
     if (start_kb_ != 0) {
-      const uint64_t high = phase_mem::status_kb("VmHWM:");
-      auto&          open = phase_mem::open_peaks();
-      for (auto* other : open) {
-        *other = std::max(*other, high);
-      }
-      std::erase(open, &peak_kb_);
-      // live_mb: bytes the allocator has handed out and not got back; free_mb: bytes it holds and
-      // could reuse (freed by the program, not returned to the system).
-      unsigned long long live_mb = 0, free_mb = 0;
-#if defined(__GLIBC__)
-      {
-        const auto info = mallinfo2();
-        live_mb         = (info.uordblks + info.hblkhd) >> 20;
-        free_mb         = info.fordblks >> 20;
-      }
-#endif
+      phase_mem::sample_peak();
+      std::erase(phase_mem::open_peaks(), &peak_kb_);
+      const auto mem = phase_mem::allocator_mb();
       std::fprintf(stderr,
                    "lhd-phase-mem %s ms=%.0f start_mb=%llu end_mb=%llu peak_mb=%llu live_mb=%llu free_mb=%llu\n",
                    name_.c_str(),
@@ -575,8 +523,8 @@ public:
                    static_cast<unsigned long long>(start_kb_ / 1024),
                    static_cast<unsigned long long>(phase_mem::status_kb("VmRSS:") / 1024),
                    static_cast<unsigned long long>(peak_kb_ / 1024),
-                   live_mb,
-                   free_mb);
+                   mem.live,
+                   mem.free);
     }
     try {
       res_.phase_ms.emplace_back(std::move(name_), dt.count());

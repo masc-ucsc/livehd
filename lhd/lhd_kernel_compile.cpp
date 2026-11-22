@@ -25,7 +25,6 @@
 #include "legalize.hpp"
 #include "lhd_compile_cache.hpp"
 #include "lhd_kernel_internal.hpp"
-#include "lhd_prp_import.hpp"
 #include "liberty_dff.hpp"
 #include "lnast.hpp"
 #include "lnast_ntype.hpp"
@@ -33,6 +32,7 @@
 #include "pass.hpp"
 #include "perf_tracing.hpp"
 #include "prp2lnast.hpp"
+#include "prp_import.hpp"
 #include "specialize.hpp"
 #include "sweep.hpp"
 #include "upass_tolg.hpp"
@@ -389,17 +389,17 @@ void discover_imports(Eprp_var& var, Result& res, size_t n_imports, const std::v
   // Disjoint from it — that run_step's timer closed before this call — so the
   // two never double-count; sum them for the whole parse.
   Phase_timer             phase(res, "inou.prp.imports");
-  // Resolution itself lives in lhd_prp_import.hpp and is also used by the
+  // Resolution itself lives in prp_import.hpp and is also used by the
   // incremental closure scanner. Keeping one implementation is a soundness
   // requirement: the cache must never preserve a different closure from the
   // compiler that consumes it.
-  import_detail::Resolver resolver;
+  livehd::prp_import::Resolver resolver;
 
   absl::flat_hash_map<std::string, std::string> unit_dir;      // unit -> source dir (case-sensitive)
   absl::flat_hash_set<std::string>              parsed_paths;  // abs paths already parsed
   for (const auto& f : seed_files) {
-    unit_dir[import_detail::unit_name_of(f)] = import_detail::dir_of(f);
-    parsed_paths.insert(import_detail::abspath_of(f));
+    unit_dir[livehd::prp_import::unit_name_of(f)] = livehd::prp_import::dir_of(f);
+    parsed_paths.insert(livehd::prp_import::abspath_of(f));
   }
 
   // Each unit's imports are examined exactly ONCE, in the round after the unit
@@ -438,7 +438,7 @@ void discover_imports(Eprp_var& var, Result& res, size_t n_imports, const std::v
         }
         // A trailing `.entry` after the last '/' selects a pub member, so the
         // file is the stem; otherwise the whole string is the file path.
-        const auto names   = import_detail::candidates(raw);
+        const auto names   = livehd::prp_import::candidates(raw);
         bool       already = false;
         for (const auto& c : names) {
           if (loaded.contains(c)) {
@@ -452,7 +452,7 @@ void discover_imports(Eprp_var& var, Result& res, size_t n_imports, const std::v
         for (const auto& c : names) {
           std::string path = resolver.find(dir, c);
           if (!path.empty()) {
-            seen_paths[c].insert(import_detail::abspath_of(path));
+            seen_paths[c].insert(livehd::prp_import::abspath_of(path));
             found.try_emplace(c, path);
             break;
           }
@@ -495,7 +495,7 @@ void discover_imports(Eprp_var& var, Result& res, size_t n_imports, const std::v
     std::vector<Parse_job> jobs;
     jobs.reserve(found.size());
     for (const auto& [name, path] : found) {
-      if (!parsed_paths.insert(import_detail::abspath_of(path)).second) {
+      if (!parsed_paths.insert(livehd::prp_import::abspath_of(path)).second) {
         continue;  // already parsed under some name — don't double-load the file
       }
       jobs.push_back(Parse_job{.name = name, .path = path, .lnast = {}, .imports = {}, .error = {}});
@@ -539,7 +539,7 @@ void discover_imports(Eprp_var& var, Result& res, size_t n_imports, const std::v
         job.lnast->rehome_name_pool(Lnast::active_name_pool());
         var.add(std::move(job.lnast));
         loaded.insert(job.name);
-        unit_dir[job.name] = import_detail::dir_of(job.path);
+        unit_dir[job.name] = livehd::prp_import::dir_of(job.path);
         import_cache.emplace(job.name, std::move(job.imports));
       }
     }

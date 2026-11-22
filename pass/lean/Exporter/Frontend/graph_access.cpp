@@ -102,18 +102,6 @@ void check_width(const LeanCtx& ctx, const Node& node, uint32_t w, std::string_v
   }
 }
 
-uint32_t intrinsic_const_width(const Dlop& v) {
-  if (!v.is_just_i64()) {
-    return std::max<uint32_t>(1, static_cast<uint32_t>(v.get_signed_bits()));
-  }
-  const int64_t iv = v.to_just_i64();
-  if (iv < 0) {
-    // A negative literal needs its sign bit; get_signed_bits() already counts it.
-    return std::max<uint32_t>(1, static_cast<uint32_t>(v.get_signed_bits()));
-  }
-  return minimal_unsigned_const_width(v);
-}
-
 uint32_t pin_width(const LeanCtx& ctx, const Node_pin& pin, const Node& owner) {
   auto w = raw_pin_width(pin);
 
@@ -746,23 +734,6 @@ const Memory_info& memory_info_for(const LeanCtx& ctx, const Node& node) {
     throw Emit_error("internal: memory node n_" + std::to_string(node_id(node)) + " has no Memory_info.");
   }
   return it->second;
-}
-
-uint32_t minimal_unsigned_const_width(const Dlop& v) {
-  if (!v.is_just_i64()) {
-    return std::max<uint32_t>(1, static_cast<uint32_t>(v.get_signed_bits()));
-  }
-  const int64_t iv = v.to_just_i64();
-  if (iv <= 0) {
-    return 1;
-  }
-  auto     uv   = static_cast<uint64_t>(iv);
-  uint32_t bits = 0;
-  while (uv != 0) {
-    ++bits;
-    uv >>= 1;
-  }
-  return std::max<uint32_t>(1, bits);
 }
 
 size_t memory_read_ordinal(const Memory_info& mi, size_t port_idx) {

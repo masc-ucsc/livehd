@@ -337,15 +337,8 @@ void Verdict_cache::save() const {
   out += "  ]\n}\n";
 
   const std::string path = workdir_ + "/formal_cache.json";
-  const std::string tmp  = path + ".tmp";
-  {
-    std::ofstream of(tmp, std::ios::binary | std::ios::trunc);
-    if (!of) {
-      return;  // unwritable workdir: the cache is only ever a speedup
-    }
-    of << out;
-  }
-  std::rename(tmp.c_str(), path.c_str());
+  // Unwritable workdirs disable cache reuse without affecting the proof.
+  (void)file_utils::write_file_atomic(path, out);
 }
 
 }  // namespace livehd::formal

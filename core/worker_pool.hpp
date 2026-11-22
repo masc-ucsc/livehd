@@ -5,6 +5,7 @@
 #include <pthread.h>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <exception>
@@ -165,6 +166,42 @@ void run_workers(size_t worker_count, Work&& work) {
   if (rc != 0) {
     throw std::system_error(rc, std::generic_category(), "pthread worker pool");
   }
+  for (const auto& error : errors) {
+    if (error) {
+      std::rethrow_exception(error);
+    }
+  }
+}
+
+// Claim indices dynamically. Keep one scratch context per worker, stop
+// claiming work after a failure, and report errors in original index order.
+template <class Make_worker>
+void parallel_for_each(size_t count, size_t worker_count, Make_worker make_worker) {
+  if (worker_count <= 1) {
+    auto work = make_worker();
+    for (size_t i = 0; i < count; ++i) {
+      work(i);
+    }
+    return;
+  }
+  std::atomic<size_t>             next{0};
+  std::atomic<bool>               failed{false};
+  std::vector<std::exception_ptr> errors(count);
+  run_workers(worker_count, [&](size_t) {
+    auto work = make_worker();
+    while (!failed.load(std::memory_order_relaxed)) {
+      const auto i = next.fetch_add(1, std::memory_order_relaxed);
+      if (i >= count) {
+        break;
+      }
+      try {
+        work(i);
+      } catch (...) {
+        errors[i] = std::current_exception();
+        failed.store(true, std::memory_order_relaxed);
+      }
+    }
+  });
   for (const auto& error : errors) {
     if (error) {
       std::rethrow_exception(error);

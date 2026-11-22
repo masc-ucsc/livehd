@@ -1,6 +1,5 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "pass_usyn.hpp"
-#include "width_validation.hpp"
 
 #include <algorithm>
 #include <charconv>
@@ -24,9 +23,9 @@
 #include "host_mem.hpp"
 #include "job_manager.hpp"
 #include "liberty_dff.hpp"
-#include "memory_module.hpp"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/SHA256.h"
+#include "memory_module.hpp"
 #include "native_report.hpp"
 #include "physical_report.hpp"
 #include "physical_select.hpp"
@@ -34,8 +33,11 @@
 #include "provenance.hpp"
 #include "query.hpp"
 #include "resource_budget.hpp"
+#include "synth_policy.hpp"
 #include "tmap.hpp"
+#include "tune_validation.hpp"
 #include "usyn_salt.hpp"
+#include "width_validation.hpp"
 
 static Pass_plugin plugin("pass_usyn", Pass_usyn::setup);
 
@@ -218,21 +220,10 @@ bool read_options(const Eprp_var& var, Options& options) {
     return invalid_option("max_fanout", "an integer in [0, 4294967295]; 0 disables the `buffer -N` tail");
   }
   mapping.pre = std::string(var.get_stage("tmap_pre", "&dch -f -C 500"));
-  {
-    // Allow-listed GIA commands only: the mapper never runs an arbitrary string.
-    static constexpr std::string_view allowed[] = {"&dch", "&synch2", "&syn2", "&syn3", "&syn4", "&fraig", "&sweep", "&b", "&st"};
-    for (std::string_view rest = mapping.pre; !rest.empty();) {
-      const auto cut = rest.find(';');
-      auto       cmd = rest.substr(0, cut);
-      while (!cmd.empty() && cmd.front() == ' ') {
-        cmd.remove_prefix(1);
-      }
-      const auto name = cmd.substr(0, cmd.find(' '));
-      if (!cmd.empty() && std::find(std::begin(allowed), std::end(allowed), name) == std::end(allowed)) {
-        return invalid_option("tmap_pre", "`;`-separated &dch, &synch2, &syn2, &syn3, &syn4, &fraig, &sweep, &b or &st commands");
-      }
-      rest = cut == std::string_view::npos ? std::string_view{} : rest.substr(cut + 1);
-    }
+  // Mapping prep runs in GIA, so keep its narrower command set.
+  static constexpr std::string_view gia_steps[] = {"&dch", "&synch2", "&syn2", "&syn3", "&syn4", "&fraig", "&sweep", "&b", "&st"};
+  if (!livehd::synth_attr::valid_abc_commands(mapping.pre, gia_steps)) {
+    return invalid_option("tmap_pre", "`;`-separated &dch, &synch2, &syn2, &syn3, &syn4, &fraig, &sweep, &b or &st commands");
   }
   if (!read("area_relax", "100", mapping.area_relax_pct)) {
     return invalid_option("area_relax", "an integer in [0, 4294967295]; 0 always maps for minimum delay");
@@ -1188,36 +1179,27 @@ void Pass_usyn::synthesize(Eprp_var& var) {
     return;
   }
   if (options.design.tune_profile == "on" && options.design.tune_validate != "structural") {
-    livehd::lec::Lec_options policy;
-    policy.engine            = "ind";
-    policy.timeout           = 20;
-    policy.min_timeout       = 1;
-    policy.hard_timeout_mult = 2;
-    const auto prove         = [&](hhds::Graph* ref, hhds::Graph* impl, std::string_view name) {
-      const auto result  = livehd::lec::prove_equal_isolated(ref, impl, policy);
-      // Only an unbounded proof authorizes the tuned choice; every other
-      // outcome (bounded, vacuous, a timeout, the pinned ind engine giving up)
-      // keeps the untuned one.
-      const auto outcome = livehd::lec::pinned_engine_outcome(result.verdict,
-                                                              result.bounded,
-                                                              result.nothing_compared,
-                                                              result.unsupported,
-                                                              result.detail);
-      std::print("[synth.tune] mapper=usyn validation={} region={} result={}\n",
-                 options.design.tune_validate,
-                 name,
-                 livehd::lec::outcome_word(outcome, result.checked_steps > 0 ? result.checked_steps : policy.bound));
-      if (result.verdict == livehd::lec::Verdict::Refuted) {
-        // The `-refuted-cex` code makes the kernel exit 10 (equiv_fail): a real
-        // counterexample, exactly like `lhd lec`'s REFUTED-cex.
-        livehd::diag::err("pass.usyn", "synth-tune-refuted-cex", "unsupported")
-            .msg("{}: synthesis tuning changed the function of {} (counterexample: {})",
-                 livehd::lec::outcome_word(outcome),
-                 name,
-                 result.witness.empty() ? std::string{"none recorded"} : result.witness)
-            .fatal();
+    absl::flat_hash_map<hhds::Gid, hhds::Graph*> definitions;
+    for (const auto& graph : var.graphs) {
+      if (graph) {
+        definitions[graph->get_gid()] = graph.get();
       }
-      return outcome == livehd::lec::Outcome::Proven_full;
+    }
+    for (auto* library : {&selected.design->library, &selected.design->proof_library}) {
+      for (auto gid : library->all_gids()) {
+        if (auto graph = library->get_graph(gid)) {
+          definitions[gid] = graph.get();
+        }
+      }
+    }
+    const auto prove = [&](hhds::Graph* ref, hhds::Graph* impl, std::string_view name) {
+      return livehd::synth::validate_tune_equivalence(ref,
+                                                      impl,
+                                                      definitions,
+                                                      *options.design.tune_store,
+                                                      "pass.usyn",
+                                                      options.design.tune_validate,
+                                                      name);
     };
     if (options.design.tune_validate == "design") {
       options.design.tune_store->authorize_all(prove(top.get(), selected.design->top.get(), requested_top));

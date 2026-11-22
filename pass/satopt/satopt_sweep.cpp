@@ -2,6 +2,7 @@
 #include "satopt_sweep.hpp"
 
 #include <algorithm>
+#include <charconv>
 #include <format>
 #include <fstream>
 #include <map>
@@ -12,10 +13,10 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "attr_carry.hpp"
+#include "cprop.hpp"
 #include "json_util.hpp"
 #include "node_util.hpp"
 #include "rapidjson/document.h"
-#include "cprop.hpp"
 #include "satopt_detail.hpp"
 #include "satopt_salt.hpp"
 
@@ -95,7 +96,20 @@ struct Row {
 std::map<std::string, Row> saved;
 std::mutex                 saved_mutex;
 
-Row read_row(const std::string& path) {
+bool valid_constant_key(std::string_view key) {
+  // Dlop's serialized payload has a one-byte tag and two-byte word count,
+  // followed by two planes of eight-byte words.
+  if (key.size() < 6 || key.size() % 2 || key.find_first_not_of("0123456789abcdefABCDEF") != std::string_view::npos) {
+    return false;
+  }
+  unsigned type  = 0;
+  unsigned words = 0;
+  std::from_chars(key.data(), key.data() + 2, type, 16);
+  std::from_chars(key.data() + 2, key.data() + 6, words, 16);
+  return (type == 0 || type == 1) && words > 0 && words <= 32767 && key.size() == 6 + words * 32;
+}
+
+Row read_row(const std::string& path, Sweep kind) {
   Row row;
   if (path.empty()) {
     return row;
@@ -113,6 +127,11 @@ Row read_row(const std::string& path) {
   for (const auto& f : doc["facts"].GetArray()) {
     if (!f.IsArray() || f.Size() != 8 || !f[0].IsUint64() || !f[1].IsUint64() || !f[2].IsInt() || !f[3].IsString()
         || !f[4].IsString() || !f[5].IsUint64() || !f[6].IsInt() || !f[7].IsInt()) {
+      return {};
+    }
+    const std::string_view value(f[3].GetString(), f[3].GetStringLength()), mask(f[4].GetString(), f[4].GetStringLength());
+    if (((kind == Sweep::constants || kind == Sweep::odc || !value.empty()) && !valid_constant_key(value))
+        || ((kind == Sweep::odc || !mask.empty()) && !valid_constant_key(mask))) {
       return {};
     }
     row.facts.push_back({f[0].GetUint64(),
@@ -1307,7 +1326,7 @@ void sweep_values(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, Sweep
     auto&      row    = saved[std::string(graph->get_name()) + suffix];
     const auto usable = [&] { return row.complete && row.source == source && row.options == options; };
     if (!usable()) {
-      row = read_row(path);
+      row = read_row(path, kind);
     }
     std::vector<Fact> facts;
     bool              searched_odc = false;  // applied during the search

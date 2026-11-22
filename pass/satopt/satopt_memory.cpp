@@ -10,6 +10,7 @@
 #include <format>
 #include <fstream>
 #include <limits>
+#include <mutex>
 #include <print>
 
 #include "attr_carry.hpp"
@@ -26,30 +27,14 @@ namespace gu         = livehd::graph_util;
 using Pin            = hhds::Pin_class;
 using Node           = hhds::Node_class;
 using Verdict        = livehd::formal::Verdict;
-constexpr int stride = 16;
-constexpr int addr = 0, bits = 1, clock = 2, din = 3, enable = 4, fwd = 5, posclk = 6, type = 7, wensize = 8, size = 9, rdport = 10,
-              init = 11, update = 12, reset = 14, undef = 15;
+constexpr int stride = Ntype::Memory_port_stride;
 struct Port {
   Pin              a, d, en, clk;
   std::vector<int> original;
   int              block = -1;  // the memory's pin block (shared profile: edits in place)
 };
-struct Build {
-  hhds::Graph& g;
-  Node         original;
-  Pin          konst(int64_t v) { return gu::create_const(g, *Dlop::create_integer(v)); }
-  Node         node(Ntype_op op) {
-    auto n = gu::create_typed_node(g, op);
-    if (gu::has_color(original)) {
-      gu::set_color(n, gu::color_of(original));
-    }
-    return n;
-  }
-  Pin output(Node n, int width) {
-    auto p = n.create_driver_pin(0);
-    gu::set_ubits(p, width);
-    return p;
-  }
+struct Build : detail::Arm_builder {
+  Pin konst(int64_t v) { return gu::create_const(g, *Dlop::create_integer(v)); }
   Pin binary(Ntype_op op, Pin a, Pin b, int width) {
     auto n = node(op);
     a.connect_sink(livehd::graph_util::setup_sink_pid(n, 0));
@@ -93,11 +78,7 @@ struct Build {
     const int target = std::max(pin_width(a), pin_width(b));
     return mux(s, zero_extend(a, target), zero_extend(b, target), target);
   }
-  Pin slice(Pin a, int lo, int width) {
-    auto n = node(Ntype_op::Get_mask);
-    gu::connect_mask_operands(n, a, lo, lo + width);
-    return output(n, width);
-  }
+  Pin slice(Pin a, int lo, int width) { return Arm_builder::slice(a, lo, lo + width); }
   // Compress an address after deleting an invariant dimension. Selecting all
   // bits except `bit` is two windows, not a legal sparse Get_mask operand.
   Pin remove_address_bit(Pin address, int bit) {
@@ -200,16 +181,7 @@ struct Memory_queries {
   }
 };
 std::map<std::string, Memory_queries> query_cache;
-std::string                           queries_path(std::string_view dir, std::string_view name, bool shared) {
-  if (dir.empty()) {
-    return {};
-  }
-  uint64_t hash = 14695981039346656037ULL;
-  for (unsigned char c : name) {
-    hash = (hash ^ c) * 1099511628211ULL;
-  }
-  return std::format("{}/{:016x}-memory{}.json", dir, hash, shared ? "-shared" : "");
-}
+std::mutex                            query_cache_mutex;
 void read_queries(const std::string& path, Memory_queries& queries, const std::string& source, const std::string& options) {
   queries = {source, options, {}};
   std::ifstream       input(path);
@@ -230,38 +202,16 @@ void read_queries(const std::string& path, Memory_queries& queries, const std::s
   }
 }
 void write_queries(const std::string& path, const Memory_queries& queries) {
-  if (path.empty()) {
-    return;
-  }
-  std::error_code error;
-  std::filesystem::create_directories(std::filesystem::path(path).parent_path(), error);
-  if (error) {
-    return;
-  }
-  // Separate temporary files prevent concurrent invocations from interleaving
-  // a definition descriptor from one proof run with another run's facts.
-  auto      temporary = path + ".tmp.XXXXXX";
-  const int fd        = mkstemp(temporary.data());
-  if (fd < 0) {
-    return;
-  }
-  close(fd);
-  std::ofstream out(temporary);
-  out << std::format("{{\"version\":{},\"source\":\"{}\",\"options\":\"{}\",\"answers\":{{",
-                     kMemoryCacheVersion,
-                     json_util::escape(queries.source),
-                     json_util::escape(queries.options));
-  bool comma = false;
+  auto        text      = std::format("{{\"version\":{},\"source\":\"{}\",\"options\":\"{}\",\"answers\":{{",
+                                      kMemoryCacheVersion,
+                                      json_util::escape(queries.source),
+                                      json_util::escape(queries.options));
+  const char* separator = "";
   for (const auto& [key, answer] : queries.answers) {
-    out << std::format("{}\"{}\":[{},{}]", comma ? "," : "", json_util::escape(key), answer.value ? "true" : "false", answer.work);
-    comma = true;
+    text      += std::format("{}\"{}\":[{},{}]", separator, json_util::escape(key), answer.value ? "true" : "false", answer.work);
+    separator  = ",";
   }
-  out << "}}\n";
-  out.close();
-  if (out) {
-    std::filesystem::rename(temporary, path, error);
-  }
-  std::filesystem::remove(temporary, error);
+  detail::write_atomic(path, text + "}}\n");
 }
 
 // Prefilter only: an unavailable seed never rules a candidate in or proves it.
@@ -370,6 +320,13 @@ void optimize(hhds::Graph& g, Node mem, Memory_satopt& stats, Memory_queries& qu
   if (gu::memory_image_of(mem)) {
     return;
   }
+  const auto memory_pid = [](std::string_view name) { return static_cast<int>(Ntype::get_sink_pid(Ntype_op::Memory, name)); };
+  const int  addr = memory_pid("addr"), bits = memory_pid("bits"), clock = memory_pid("clock_pin"), din = memory_pid("din"),
+             enable = memory_pid("enable");
+  const int  fwd = memory_pid("fwd"), posclk = memory_pid("posclk"), type = memory_pid("type"), wensize = memory_pid("wensize"),
+             size  = memory_pid("size");
+  const int rdport = memory_pid("rdport"), init = memory_pid("initial"), update = memory_pid("update"), reset = memory_pid("reset"),
+            undef = memory_pid("undef");
   std::map<int, Pin>                globals;
   std::map<int, std::map<int, Pin>> blocks;
   for (const auto& in_pin : mem.inp_sorted_pins()) {
@@ -383,8 +340,8 @@ void optimize(hhds::Graph& g, Node mem, Memory_satopt& stats, Memory_queries& qu
   }
   const int word = literal(globals[bits], 0), depth = literal(globals[size], 0), lanes = literal(globals[wensize], 1);
   const int kind = literal(globals[type], 0);
-  if (word <= 0 || word > 65536 || depth <= 0 || lanes <= 0 || word % lanes || kind == 2 || !globals[update].is_invalid()
-      || !globals[reset].is_invalid() || literal(globals[posclk], 1) != 1) {
+  if (word <= 0 || word > 65536 || depth <= 0 || lanes <= 0 || word % lanes || kind == Ntype::Memory_type_array
+      || !globals[update].is_invalid() || !globals[reset].is_invalid() || literal(globals[posclk], 1) != 1) {
     return;
   }
   if (auto attr = mem.attr(livehd::attrs::memory_async_reset); attr.has() && attr.get() != 0) {
@@ -395,7 +352,9 @@ void optimize(hhds::Graph& g, Node mem, Memory_satopt& stats, Memory_queries& qu
       return;
     }
   }
-  Build B{g, mem};
+  Build B{
+      {g, mem}
+  };
   Pin   shared_clock;
   for (const auto& [block, fields] : blocks) {
     (void)block;
@@ -778,8 +737,16 @@ Memory_satopt optimize_memories(const std::vector<std::shared_ptr<hhds::Graph>>&
     }
     const auto source  = satopt_source_key(graph.get());
     const bool shared  = profile == Profile::shared;
-    const auto path    = queries_path(cache_dir, graph->get_name(), shared);
-    auto&      queries = query_cache[std::string(graph->get_name()) + (shared ? "\x01shared" : "")];
+    const auto     path    = detail::cache_path(cache_dir, graph->get_name(), shared ? "-memory-shared" : "-memory");
+    const auto     key     = std::string(graph->get_name()) + (shared ? "\x01shared" : "");
+    Memory_queries queries;
+    {
+      std::lock_guard lock(query_cache_mutex);
+      if (auto it = query_cache.find(key);
+          it != query_cache.end() && it->second.source == source && it->second.options == options) {
+        queries = it->second;
+      }
+    }
     if (queries.source != source || queries.options != options) {
       read_queries(path, queries, source, options);
     }
@@ -796,7 +763,15 @@ Memory_satopt optimize_memories(const std::vector<std::shared_ptr<hhds::Graph>>&
     result.proven       += queries.proven;
     result.reused       += queries.reused;
     result.budget_skips += queries.budget_skips;
-    write_queries(path, queries);
+    {
+      std::lock_guard lock(query_cache_mutex);
+      auto&           entry = query_cache[key];
+      if (entry.source == source && entry.options == options) {
+        queries.answers.merge(entry.answers);
+      }
+      write_queries(path, queries);
+      entry = std::move(queries);
+    }
   }
   std::print("[pass.satopt] memory: {} write merges, {} read merges, {} dead ports, {} unreachable collision bits\n",
              result.merged_writes,

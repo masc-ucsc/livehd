@@ -20,6 +20,7 @@
 #include "default_prologue.hpp"
 #include "file_name.hpp"  // livehd::unit_file_stem -- the file an import names
 #include "io_port_rules.hpp"
+#include "pyrope_ident.hpp"
 #include "range_bits.hpp"
 #include "str_tools.hpp"
 
@@ -470,35 +471,7 @@ std::string Lnast_prp_writer::decl_prefix(std::string_view lhs) {
 // file lhd could not re-parse.  `stage` was the expensive one: a Verilog shift
 // register named `stage` (bedrock's br_delay_valid) emits `stage[0] = a`, which
 // re-parses as a `stage[N]` pipelining declaration ("expected an expression").
-static bool is_pyrope_reserved_ident(std::string_view s) {
-  // Pyrope reserves `_` and `_` followed only by digits for placeholders.
-  // They remain valid Verilog signal and packed-struct field names.
-  if (!s.empty() && s.front() == '_' && s.find_first_not_of("0123456789", 1) == std::string_view::npos) {
-    return true;
-  }
-  // clang-format off: the `#include` inside the braced list makes clang-format
-  // break the hand-added words one per line, which buries them.
-  static const absl::flat_hash_set<std::string_view> kw = {
-      // Reserved by the docs or held for future syntax, so absent from the
-      // parser's table; over-quoting a non-keyword is harmless.
-      "nil", "where", "priority", "defer", "async", "await", "cpp",
-#define PRP_KEYWORD(name) #name,
-#include "prpparse/prp_keywords.def"
-  };
-  // clang-format on
-  // The built-in type words (`U4`, `S1`, `Clock`, `Reset`, ...) are reserved
-  // (a bare one is always the type), and the old lowercase type spellings
-  // (`u8`, `s1`, `i0`, `bool`, `string`, ...) are banned words (docs 02-basics
-  // "Identifiers"): a Verilog signal spelled like either must be backticked.
-  std::string lower(s);
-  for (char& c : lower) {
-    if (c >= 'A' && c <= 'Z') {
-      c += 'a' - 'A';
-    }
-  }
-  return kw.contains(lower) || lower == "clock" || lower == "reset" || str_tools::is_pyrope_type_word(s)
-         || !str_tools::renamed_type_spelling(lower).empty();
-}
+using livehd::should_quote_pyrope_ident;
 
 // A reconstructed bundle path (`in.bits`) is emitted as the BARE dotted path so
 // it re-parses as tuple-field access (not a quoted opaque leaf).  But a base or
@@ -546,7 +519,7 @@ static bool is_pyrope_ident_spelling(std::string_view s) {
   return true;
 }
 
-static bool is_plain_pyrope_ident(std::string_view s) { return is_pyrope_ident_spelling(s) && !is_pyrope_reserved_ident(s); }
+static bool is_plain_pyrope_ident(std::string_view s) { return is_pyrope_ident_spelling(s) && !should_quote_pyrope_ident(s); }
 
 // Index of the next `.` at or after `from` that is NOT inside a backtick-quoted
 // span, or npos.  A Pyrope-origin escaped identifier arrives ALREADY wrapped
@@ -613,7 +586,7 @@ static std::string quote_kw_path(std::string_view path) {
   for (;;) {
     auto             dot  = path.find('.', start);
     std::string_view comp = path.substr(start, dot == std::string_view::npos ? std::string_view::npos : dot - start);
-    if (is_pyrope_reserved_ident(comp)) {
+    if (should_quote_pyrope_ident(comp)) {
       out.push_back('`');
       out.append(str_tools::escape_backtick_inner(comp));
       out.push_back('`');
@@ -784,7 +757,7 @@ std::string Lnast_prp_writer::strip_prefix(std::string_view name) const {
     if (is_bundle_field(s) || is_imported_pkg_path(s)) {
       return quote_kw_path(s);
     }
-    return (s.find('.') == std::string::npos && !is_pyrope_reserved_ident(s)) ? s : "`" + str_tools::escape_backtick_inner(s) + "`";
+    return (s.find('.') == std::string::npos && !should_quote_pyrope_ident(s)) ? s : "`" + str_tools::escape_backtick_inner(s) + "`";
   };
   // A `%`-prefixed compiler temp is not a legal Pyrope identifier — map it to an
   // emittable `t<id>` (collision-checked). A trailing `.field` (e.g. a detuple
@@ -6890,44 +6863,7 @@ bool Lnast_prp_writer::same_operand(Lnast_nid a, Lnast_nid b, int budget) const 
 
 // ── Single-use temp folding ─────────────────────────────────────────────────
 
-bool Lnast_prp_writer::defines_child0(Lnast_ntype::Lnast_ntype_int t) {
-  using N = Lnast_ntype;
-  if (!infix_symbol(t).empty()) {
-    return true;
-  }
-  switch (t) {
-    case N::Lnast_ntype_log_not     :
-    case N::Lnast_ntype_bit_not     :
-    case N::Lnast_ntype_red_or      :
-    case N::Lnast_ntype_red_and     :
-    case N::Lnast_ntype_red_xor     :
-    case N::Lnast_ntype_popcount    :
-    case N::Lnast_ntype_sext        :
-    case N::Lnast_ntype_set_mask    :
-    case N::Lnast_ntype_get_mask    :
-    case N::Lnast_ntype_store       :
-    case N::Lnast_ntype_declare     :
-    case N::Lnast_ntype_dp_assign   :
-    case N::Lnast_ntype_delay_assign:
-    case N::Lnast_ntype_range       :
-    case N::Lnast_ntype_tuple_add   :
-    case N::Lnast_ntype_tuple_concat:
-    case N::Lnast_ntype_tuple_get   :
-    case N::Lnast_ntype_attr_set    :
-    case N::Lnast_ntype_attr_get:
-    // concat( dst, lane_msb, …, lane_lsb ): child0 IS the def. Leaving it out
-    // would count the destination as a READ, so every temp feeding a concat
-    // looks multiply-used and stops folding (and the concat's own statement
-    // would never be recognised as the def of its temp).
-    case N::Lnast_ntype_concat   :
-    case N::Lnast_ntype_func_call: return true;
-    // if/unique_if/cassert/for/while and the pseudo-func_* nodes read child0 (a
-    // condition / value), so leave it classified as a USE — the safe default
-    // (over-counting a use only blocks a fold; mis-marking a use as a def could
-    // wrongly inline a multiply-read temp).
-    default                      : return false;
-  }
-}
+bool Lnast_prp_writer::defines_child0(Lnast_ntype::Lnast_ntype_int t) { return Lnast_ntype::defines_first_child(t); }
 
 bool Lnast_prp_writer::is_pure_copy(Lnast_nid store_node) const {
   auto c0 = lnast->get_child(store_node);

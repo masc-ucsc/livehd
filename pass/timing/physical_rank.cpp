@@ -937,13 +937,6 @@ public:
   }
   void set_net(const physical::Rc_net& net) override {
     auto&        e       = engine();
-    {
-      const auto at = e.mark();
-      const auto driver_pin = o_.resolve_label(net.driver);
-      auto       it         = edited_rc_.find(driver_pin);
-      rc_log_.push_back({at, driver_pin, it != edited_rc_.end(), it != edited_rc_.end() ? it->second : physical::Rc_net{}});
-      edited_rc_[driver_pin] = net;
-    }
     const auto&  netlist = *o_.bound_->netlist;
     const size_t C       = netlist.types().corners();
     const auto   driver  = o_.resolve_label(net.driver);
@@ -978,7 +971,11 @@ public:
       delay.insert(delay.end(), solved.delay.begin() + i * C, solved.delay.begin() + (i + 1) * C);
       slew.insert(slew.end(), solved.slew.begin() + i * C, solved.slew.begin() + (i + 1) * C);
     }
+    const auto at = e.mark();
     e.set_net(driver, sinks, solved.cap, delay, slew);
+    const auto it = edited_rc_.find(driver);
+    rc_log_.push_back({at, driver, it != edited_rc_.end(), it != edited_rc_.end() ? it->second : physical::Rc_net{}});
+    edited_rc_[driver] = net;
   }
 
   double wns() override { return finite_or(engine().wns(), 0.0); }
@@ -993,6 +990,9 @@ public:
     const size_t C = o_.bound_->netlist->types().corners();
     if (const auto slack = e.settled_slack(p); std::isfinite(slack)) {
       out.slack = slack;
+    }
+    if (const auto hold = e.settled_hold_slack(p); std::isfinite(hold)) {
+      out.hold_slack = hold;
     }
     float arrival = -std::numeric_limits<float>::infinity(), slew = arrival, required = std::numeric_limits<float>::infinity();
     for (size_t k = 0; k < C; ++k) {
@@ -1156,7 +1156,7 @@ private:
     if (const auto it = o_.added_cells_.find(instance); it != o_.added_cells_.end()) {
       return it->second;
     }
-    const auto cell = o_.names_->cell(instance);
+    const auto cell = o_.names_ ? o_.names_->cell(instance) : no_index;
     if (cell == no_index) {
       throw std::invalid_argument("what-if instance is not in the timing netlist: " + instance);
     }

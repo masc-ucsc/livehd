@@ -383,6 +383,20 @@ void Pass_lec::lec(Eprp_var& var) {
   auto impl = var.graphs[1];
   auto mod  = std::string{impl->get_name()};
 
+  if (!o.trust.empty()) {
+    const auto ref_entity  = str_tools::canonical_entity_name(ref->get_name());
+    const auto impl_entity = str_tools::canonical_entity_name(impl->get_name());
+    for (const auto& name : o.trust) {
+      if (name == ref->get_name() || name == impl->get_name() || name == ref_entity || name == impl_entity) {
+        livehd::diag::err("pass.lec", "trust-top", "io")
+            .msg("formal.lec.trust names the top module '{}'", name)
+            .hint("trust only internal definitions")
+            .fatal();
+        return;
+      }
+    }
+  }
+
   if (auto error = lec::match_names_error(ref.get(), impl.get(), o.match); !error.empty()) {
     livehd::diag::err("pass.lec", "unresolved-match", "io").msg("{}", error).fatal();
     return;

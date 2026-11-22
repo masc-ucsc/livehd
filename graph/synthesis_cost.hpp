@@ -87,42 +87,7 @@ namespace shift_detail {
   const auto     a_pin   = get_driver_of_sink_name(node, "a");
   const uint64_t shift_w = std::max<uint64_t>(full, a_pin.is_invalid() ? 0 : static_cast<uint64_t>(std::max(0, real_width(a_pin))));
 
-  uint64_t demand = full;
-  if (op == Ntype_op::SRA) {
-    int  selected_hi = 0;
-    bool saw_use     = false;
-    for (const auto& e : node.out_edges()) {
-      const auto consumer = e.sink.get_master_node();
-      if (type_op_of(consumer) != Ntype_op::Get_mask) {
-        saw_use = false;
-        break;
-      }
-      const auto mask_pin = livehd::graph_util::bit_range(consumer);
-      if (!mask_pin.has_value()) {
-        saw_use = false;
-        break;
-      }
-      const auto& mask = livehd::graph_util::mask_window_const(mask_pin->first, mask_pin->second);
-      if (mask.is_negative()) {
-        saw_use = false;
-        break;
-      }
-      const int wanted = std::max(0, real_width(consumer.create_driver_pin(0)));
-      int       found  = 0;
-      int       hi     = 0;
-      for (int bit = 0; bit < static_cast<int>(mask.get_signed_bits()) && found < wanted; ++bit) {
-        if (mask.bit_test(bit)) {
-          hi = bit + 1;
-          ++found;
-        }
-      }
-      selected_hi = std::max(selected_hi, hi);
-      saw_use     = true;
-    }
-    if (saw_use && selected_hi > 0) {
-      demand = std::min(shift_w, static_cast<uint64_t>(selected_hi));
-    }
-  }
+  const uint64_t demand = std::min(shift_w, masked_output_width(node));
 
   // abc_arith builds one 2:1 mux level per amount bit.
   //

@@ -112,20 +112,22 @@ def run(case, args, output):
             if any(cells[name][k] != anchor[k] for k in ('master', 'status', 'x', 'y', 'orientation')):
                 raise ValueError(f'explicit macro anchor moved: {name}')
     # Every view uses actual stage coordinates and the retained physical IDs.
-    stages = [('fp_plan', place/'macro/fp_gp.json'), ('macro_plan', place/'macro/out.def'),
-              ('before_legalization', place/'gp.json'), ('after_legalization', place/'after_legalization.def'),
-              ('final', place/'out.def')]
+    stages = [
+        ('fp_plan', place/'macro/fp_gp.json', place/'macro/out.def'),
+        ('macro_plan', None, place/'macro/out.def'),
+        ('before_legalization', place/'gp.json', place/'after_legalization.def'),
+        ('after_legalization', None, place/'after_legalization.def'),
+        ('final', None, place/'out.def'),
+    ]
     views = {}
-    for name, source in stages:
-        if source.suffix == '.json':
-            snapshot = json.loads(source.read_text())
+    for name, snapshot_path, stage_def in stages:
+        stage_units, stage_die, stage_cells = render.read_def(stage_def)
+        positions = None
+        if snapshot_path is not None:
+            snapshot = json.loads(snapshot_path.read_text())
             positions = {row[0]: (row[1], row[2]) for row in snapshot['nodes']}
-            render.actual(case, units, die, cells, directory/(name+'.png'), positions)
-            views[name] = render.scores(case, points, edges, cells, positions)
-        else:
-            stage_units, stage_die, stage_cells = render.read_def(source)
-            render.actual(case, stage_units, stage_die, stage_cells, directory/(name+'.png'))
-            views[name] = render.scores(case, points, edges, stage_cells)
+        render.actual(case, stage_units, stage_die, stage_cells, directory/(name+'.png'), positions)
+        views[name] = render.scores(case, points, edges, stage_cells, positions)
     inputs = [Path(args.lhd), source_path, ROOT/'macros.v', ROOT/'fake.lib', ROOT/'fake.lef', ROOT/'timing.sdc', ROOT/'run.py', ROOT/'render.py']
     if case.get('fixed_macros'):
         inputs.append(ROOT/(case['name']+'.def'))

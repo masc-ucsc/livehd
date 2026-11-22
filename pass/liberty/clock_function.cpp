@@ -180,7 +180,7 @@ private:
 }  // namespace
 
 std::optional<uint64_t> function_truth(std::string_view function, const std::vector<std::string>& inputs) {
-  if (inputs.empty() || inputs.size() > 6) {
+  if (inputs.size() > 6) {
     return {};
   }
   return Expression<uint64_t>(function,

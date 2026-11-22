@@ -5,13 +5,14 @@
 #include <algorithm>
 #include <cctype>
 #include <exception>
-#include <optional>
 #include <format>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
+#include "attr_carry.hpp"
 #include "cell.hpp"
 #include "diag.hpp"
 #include "dlop.hpp"
@@ -188,27 +189,8 @@ bool expand_one(hhds::Graph* g, const hhds::Node_class& inst, const hhds::Subnod
       occurrence_name = std::format("{}__li{}", occ_base, r);
     }
     rep.set_name(occurrence_name);
-    if (inst.attr(livehd::attrs::preroute_exclude).has()) {
-      rep.attr(livehd::attrs::preroute_exclude).set();
-    }
-    // Carry the compact node's own annotations (srcid, color) so provenance and
-    // partitioning survive expansion; the descriptor itself must NOT ride along
-    // (each occurrence is an ordinary instance now).
-    if (auto s = inst.attr(hhds::attrs::srcid); s.has()) {
-      rep.attr(hhds::attrs::srcid).set(s.get());
-    }
-    // pass.partition/pass.abc materialize into their own scratch copy AFTER
-    // pass.color ran, and then key regions off this attr (like flatten's
-    // carry_node_attrs does when it clones). An uncolored replica would join
-    // the color-0 region instead of the one the compact node belonged to.
-    // Flat `color` only: the per-instance `hier_color` is hier_storage, which a
-    // class-context handle cannot reach at all (its AttrRef asserts without a
-    // hierarchy context, the same reason clear_coloring clears that store
-    // wholesale), and its keys name occurrence paths this expansion is in the
-    // middle of dissolving.
-    if (has_color(inst)) {
-      set_color(rep, color_of(inst));
-    }
+    carry_node_attrs(inst, rep, {.names = false, .placement = false, .analysis = false, .aggregate_origin = false});
+    carry_srcid(inst, rep);
     reps.emplace_back(rep);
   }
 
@@ -232,7 +214,9 @@ bool expand_one(hhds::Graph* g, const hhds::Node_class& inst, const hhds::Subnod
       return hhds::Pin_class{};
     }
     auto dp = rep.create_driver_pin(pid);
-    carry_signal_roles(inst.try_get_driver_pin(pid), dp);
+    if (const auto original_pin = inst.try_get_driver_pin(pid); !original_pin.is_invalid()) {
+      carry_pin_attrs(original_pin, dp, {.names = false, .placement = false, .matches = false});
+    }
     set_bits(dp, decl->bits);
     if (decl->unsign) {
       set_unsign(dp);

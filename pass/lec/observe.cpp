@@ -163,14 +163,17 @@ std::optional<Bits> eval_node(const cvc5::Term& t, const std::vector<const std::
       return r;
     }
     case cvc5::Kind::IMPLIES : return Bits{static_cast<uint8_t>((a[0] == 0 || (*get(1))[0] != 0) ? 1 : 0)};
-    case cvc5::Kind::EQUAL   :
-    case cvc5::Kind::DISTINCT: {
-      bool eq = true;
-      for (size_t k = 1; k < ch.size(); ++k) {
-        eq = eq && *get(k) == a;
+    case cvc5::Kind::EQUAL:
+      return Bits{static_cast<uint8_t>(std::all_of(ch.begin() + 1, ch.end(), [&](const auto& b) { return **b == a; }))};
+    case cvc5::Kind::DISTINCT:
+      for (size_t i = 1; i < ch.size(); ++i) {
+        for (size_t j = 0; j < i; ++j) {
+          if (*get(i) == *get(j)) {
+            return Bits{0};
+          }
+        }
       }
-      return Bits{static_cast<uint8_t>((kind == cvc5::Kind::EQUAL) == eq ? 1 : 0)};
-    }
+      return Bits{1};
     case cvc5::Kind::BITVECTOR_ULT:
     case cvc5::Kind::BITVECTOR_ULE:
     case cvc5::Kind::BITVECTOR_UGT:

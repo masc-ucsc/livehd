@@ -257,18 +257,7 @@ bool uPass_ssa::is_user_var(std::string_view name) {
 // ── copy_subtree ─────────────────────────────────────────────────────────────
 void uPass_ssa::copy_subtree(const std::shared_ptr<Lnast>& src, const Lnast_nid& src_nid, const std::shared_ptr<Lnast>& dst,
                              const Lnast_nid& dst_parent) {
-  auto type    = src->get_type(src_nid);
-  auto new_nid = dst->add_child(dst_parent, type);
-  if (Lnast_ntype::is_ref(type) || Lnast_ntype::is_const(type)) {
-    dst->set_name_id(new_nid, src->get_name_id(src_nid));
-  }
-  // Carry (same-locator: the staging body replaces src's own body).
-  if (Lnast::srcid_carries(type)) {
-    dst->set_srcid(new_nid, src->get_srcid(src_nid));
-  }
-  for (auto child : src->children(src_nid)) {
-    copy_subtree(src, child, dst, new_nid);
-  }
+  src->copy_subtree(src_nid, *dst, dst_parent);
 }
 
 // ── copy_with_rename ─────────────────────────────────────────────────────────

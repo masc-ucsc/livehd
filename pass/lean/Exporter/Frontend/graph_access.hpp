@@ -164,7 +164,7 @@ uint32_t           raw_pin_width(const Node_pin& pin);
 uint32_t           raw_node_width(const Node& node);
 bool               node_output_is_signed(const Node& node);
 void               check_width(const LeanCtx& ctx, const Node& node, uint32_t w, std::string_view what);
-uint32_t           intrinsic_const_width(const Dlop& v);
+using livehd::graph_util::intrinsic_const_width;
 uint32_t           pin_width(const LeanCtx& ctx, const Node_pin& pin, const Node& owner);
 uint32_t           data_dep_width(const LeanCtx& ctx, const Node_pin& pin, const Node& owner, uint32_t op_w);
 uint32_t           node_width(const LeanCtx& ctx, const Node& node);
@@ -174,7 +174,7 @@ int64_t            const_pin_int_or(const Node_pin& pin, int64_t dflt);
 std::string        memory_policy_summary(const Memory_info& mi);
 Memory_info        parse_memory_info(LeanCtx& ctx, const Node& node);
 const Memory_info& memory_info_for(const LeanCtx& ctx, const Node& node);
-uint32_t           minimal_unsigned_const_width(const Dlop& v);
+using livehd::graph_util::minimal_unsigned_const_width;
 size_t             memory_read_ordinal(const Memory_info& mi, size_t port_idx);
 bool               memory_fwd_bit(const Memory_info& mi, size_t r_ord, size_t w_ord);
 

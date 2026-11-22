@@ -155,6 +155,8 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//core",
+        "//core:sim_values",
+        "//inou/cgen:sim_llvm_target",
         "//lnast",
         "//pass/common:pass",
         # THE attribute-name vocabulary (battr.hpp). Header-only, so this does

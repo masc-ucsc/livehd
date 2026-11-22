@@ -280,9 +280,13 @@ struct Route_path {
   std::string            layer;
   std::optional<int64_t> width;  // mandatory for special wiring, implicit for ordinary signal wiring
   std::string            shape;
-  std::vector<std::variant<Route_point, Route_via, Route_rect>> steps;
+  using Steps = std::vector<std::variant<Route_point, Route_via, Route_rect>>;
+  Steps                                                         steps;
   std::string                                                   taper_rule;  // width-only DEF NONDEFAULTRULE applied to this path
   bool taper = false;  // TAPER selects the ordinary layer width on a nondefault net.
+  [[nodiscard]] Route_path with_steps(std::string on_layer, Steps replacement) const {
+    return {std::move(on_layer), width, shape, std::move(replacement), taper_rule, taper};
+  }
   friend bool operator==(const Route_path&, const Route_path&) = default;
 };
 struct Wire {

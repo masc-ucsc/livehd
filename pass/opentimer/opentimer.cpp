@@ -2206,6 +2206,20 @@ void Pass_opentimer::update_timing_profiled() {
   ++timing_update_calls_;
 }
 
+bool Pass_opentimer::physical_pin_is_clock(const ot::Pin& pin) const {
+  const auto* cellpin = pin.cellpin(ot::MAX);
+  const auto& name    = pin.name();
+  if (pin.is_ideal_clock() || (cellpin && cellpin->is_clock.value_or(false)) || physical_clock_endpoints_.contains(name)) {
+    return true;
+  }
+  for (const auto& [clock_name, target] : timing_targets_) {
+    if (std::ranges::find(target.ports, name) != target.ports.end()) {
+      return true;
+    }
+  }
+  return false;
+}
+
 void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
   TRACE_EVENT("pass", "OPENTIMER_compute_timing");
 
@@ -2728,16 +2742,7 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
       if (cp && cp->capacitance && std::isfinite(*cp->capacitance)) {
         value.capacitance_ff = *cp->capacitance * cap_scale;
       }
-      bool clock = pin.is_ideal_clock() || (cp && cp->is_clock.value_or(false));
-      for (const auto& [clock_name, target] : timing_targets_) {
-        (void)clock_name;
-        clock |= std::find(target.ports.begin(), target.ports.end(), name) != target.ports.end();
-      }
-      if (const auto colon = physical.rfind(":in_"); colon != std::string::npos && physical_native_pins_.contains(physical)) {
-        const auto pid  = std::stoul(physical.substr(colon + 4));
-        clock          |= pid % Ntype::Memory_port_stride == 2;
-      }
-      value.clock = clock;
+      value.clock = physical_pin_is_clock(pin);
       if (feedback_) {
         feedback_->dense->values[index] = value;
       }
@@ -2762,7 +2767,7 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
         field("slew", value.slew);
         field("load_ff", value.load_ff);
         field("capacitance_ff", value.capacitance_ff);
-        j += std::format(",\"clock\":{}}}", clock);
+        j += std::format(",\"clock\":{}}}", value.clock);
       }
     }
     if (render) {

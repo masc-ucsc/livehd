@@ -1,6 +1,7 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include <cmath>
 #include <cstdint>
 #include <optional>
 #include <string_view>
@@ -24,7 +25,7 @@ inline void number(Writer& w, const char* key, uint64_t value) {
 // Missing data is written as null, never as zero.
 inline void real(Writer& w, const char* key, std::optional<double> value) {
   w.Key(key);
-  if (value) {
+  if (value && std::isfinite(*value)) {
     w.Double(*value);
   } else {
     w.Null();
