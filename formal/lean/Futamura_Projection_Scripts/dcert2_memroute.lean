@@ -27,6 +27,10 @@ WHAT IT DOES, in the order the phases are reported.
   5. EXECUTE.  Gated by `HwMem.runtimeFullOKB`; the residual is evaluated at the
      returned bound, the result is decoded by the real `StateM.decResultM`, and
      the DECODED next state is what the following cycle runs on.
+     The step runs the residual with its list tails shared (`Projection/ShareTails`, at
+     the bound the same checker gives it; `share:off` turns this off), and the residual
+     as specialized when that one gives no value: that step is `runMemSim` itself on
+     every input (`ShareTails.runMemSimS_eq`).
 
 FAILURE KINDS ARE DISTINCT, and each has its own exit code, because they are
 different answers: a parse failure is not an admission refusal, an admission
@@ -94,6 +98,7 @@ import LeanSemanticPrimitives.Projection.HardwareMemWriteAdmit
 import LeanSemanticPrimitives.Projection.MemVariantSim
 import LeanSemanticPrimitives.Projection.MemFused
 import LeanSemanticPrimitives.Projection.MemRunFast
+import LeanSemanticPrimitives.Projection.ShareTails
 import LeanSemanticPrimitives.Projection.Proto.RunnerSupport
 import LeanSemanticPrimitives.Compiler.CertIORoute   -- DCERT2 + DCERT1, routed by magic (Mathlib-free)
 import LeanSemanticPrimitives.Compiler.RunAdmission   -- C3 edges / C4 reset polarity
@@ -617,6 +622,10 @@ structure Cfg where
   /-- `loop:full`: run every cycle through `runMemSim` with the full state check, as before
   the fast loop (`Projection/MemRunFast`); `compare` and `trace` always do. -/
   fullLoop : Bool := false
+  /-- `share:off`: run the residual as specialized. By default every cycle runs the residual with
+  its list tails shared (`Projection/ShareTails`), and the one as specialized when that one gives
+  no value: the step is `runMemSim` itself (`ShareTails.runMemSimS_eq`, `stepEnc_eq`). -/
+  share : Bool := true
 
 /-- The step budget bounds how deep the specializer recurses, and the depth grows
 with the design: the smallest budget that worked on the four largest rows was
@@ -750,6 +759,23 @@ no execution at a fallback bound"
       let sz := (R.funs.map (fun fd => CertLoad.tsize fd.body)).foldl (·+·) 0
       say s!"  residual {sz} terms, {R.funs.length} function(s), \
 arity {R.funs.map FunDef.arity}, checker bound {sim.bound}"
+      -- the residual with its list tails shared, and the bound the same checker gives it. Each
+      -- cycle runs it, and the residual above when it gives no value: that step is `runMemSim`
+      -- itself on every input (`ShareTails.stepEnc_eq`, `runMemSimS_eq`), so every route's
+      -- `runMemSim…_correct` holds for it unchanged.
+      let ts0 ← IO.monoMsNow
+      let sh ← IO.lazyPure (fun _ => if cfg.share then ShareTails.shareSim sim else none)
+      match sh with
+      | some (R2, b2) =>
+        let ts1 ← IO.monoMsNow
+        let sz2 := (R2.funs.map (fun fd => CertLoad.tsize fd.body)).foldl (·+·) 0
+        say s!"  tails shared (Projection/ShareTails): residual {sz2} terms, checker bound {b2}, \
+{ts1 - ts0} ms; a cycle it gives no value for runs the residual above"
+      | none =>
+        if cfg.share then
+          say "  tails shared: the rewritten residual fails checkResidual; every cycle runs the residual above"
+        else
+          say "  tails shared: off (share:off)"
       -- the supplied or synthetic state, and the policy gate on it
       say s!"  init: {cfg.init.label}"
       say s!"  state provenance: {stateProv}"
@@ -855,7 +881,7 @@ did not step or was refused"
             tags := "policy-refused" :: tags
             policyBad := true
           else
-            match MemRunFast.runMemSimEnc sim e i sv with
+            match ShareTails.stepEnc sim sh e i sv with
             | none => tags := "no-step" :: tags; bad := true
             | some v =>
               match MemRunFast.resultParts v with
@@ -888,7 +914,7 @@ did not step or was refused"
             tags := "policy-refused" :: tags
             policyBad := true
           else
-            match runMemSim sim e i st with
+            match ShareTails.runMemSimS sim sh e i st with
             | none   => tags := "no-step" :: tags; bad := true
             | some r =>
                 tags := "ok" :: tags
@@ -1071,7 +1097,8 @@ fixtures: full mixed twomem lane\n\
   fixtures (negative): romwrite\n  init: zero | ramp | narrow | file:<path> | ckpt:<path>\n  \
 checkpoints: ckpt-at:<cycle>:<file> (repeatable) ckpt-out:<file>\n  \
 loop:full: every cycle through runMemSim with the full state check (the default loop keeps the state \
-encoded and checks the state once; compare and trace use the full loop)"
+encoded and checks the state once; compare and trace use the full loop)\n  \
+share:off: run the residual as specialized (by default its list tails are shared, Projection/ShareTails)"
 
 def parseCfg (rest : List String) : Except String Cfg := do
   match rest with
@@ -1124,7 +1151,7 @@ contents or use init=zero, which is a legal-state witness only."
           | none => .error s!"ckpt-at: {repr k} is not a number"
         | _ => .error s!"ckpt-at expects <cycle>:<file>, got {repr t}"
     let cfg : Cfg := ⟨sf, wf, cyc, im, cmp, none, [], [], prov, sup, tr, pw, em, route, op, autoStep, autoWork,
-      0, [], none, tl.contains "loop:full"⟩
+      0, [], none, tl.contains "loop:full", !(tl.contains "share:off")⟩
     .ok { cfg with ckptAt, ckptOut }
   | _ => .error usage
 

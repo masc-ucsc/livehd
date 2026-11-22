@@ -69,7 +69,7 @@ MODULES=(
   Projection/HardwareMemOutFlop Projection/HardwareMemMain Projection/HardwareMemWidth
   Projection/HardwareMemAdmit Projection/HardwareMemSlotTy Projection/HardwareMemRuntime
   Projection/HardwareMemFixture Projection/HardwareMemWrite Projection/MemSupport
-  Projection/EvalFuelArr Projection/MemProjection Projection/MemRunFast Projection/HardwareMemWriteAdmit
+  Projection/EvalFuelArr Projection/MemProjection Projection/MemRunFast Projection/ShareTails Projection/HardwareMemWriteAdmit
   # residual serialization (gen_probe_v2 save:, gen_readiness_v2 load:)
   Projection/ResidualIO
   Projection/Proto/PartialEvaluatorFast Projection/Proto/PartialEvaluatorSummary
