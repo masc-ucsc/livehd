@@ -575,10 +575,19 @@ private:
     cell.set_subnode(io);
     const auto  load_name = std::string(owner.get_name());
     const auto  dot       = load_name.rfind('.');
+    // Physical flattening drops anonymous region wrappers on unique cells.
+    // Mint the published name in its lasting scope. The load hash still
+    // distinguishes otherwise identical sink names from different regions.
+    std::string scope;
+    if (dot != std::string::npos) {
+      scope = gu::logical_hier_name(std::string_view(load_name).substr(0, dot), true);
+      if (!scope.empty()) {
+        scope += '.';
+      }
+    }
     std::string name;
     do {
-      name = std::format("{}{}{}{}_{:x}", dot == std::string::npos ? std::string{} : load_name.substr(0, dot + 1), kPrefix, tag, level,
-                         identity++ & 0xffffffffffffULL);
+      name = std::format("{}{}{}{}_{:x}", scope, kPrefix, tag, level, identity++ & 0xffffffffffffULL);
     } while (!names_.insert(name).second);
     cell.set_name(name);
     minted_names_.emplace_back(name);

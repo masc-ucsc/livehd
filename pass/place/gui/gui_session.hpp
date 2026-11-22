@@ -73,8 +73,34 @@ struct Macro_tracks {
   std::vector<std::int64_t> phases_x, phases_y;
   std::uint32_t        pins = 0;
 };
+// One physical clock net of the native clock tree (pass.pcrs), by scene node: its driver and its loads. The estimates
+// come from the clock handoff (pcrs_clock.json) and describe the positions the tree was planned at; a field the
+// handoff does not give stays unknown (NaN / negative). Data, not callbacks: the scene crosses a process boundary.
+struct Clock_net {
+  std::string              name;         // the net's driver label ("instance:pin", or the clock port)
+  int                      driver = -1;  // scene node of the driver (an IO terminal for a clock port); -1: not in the scene
+  std::vector<int>         sinks;        // scene nodes of the loads, in net order
+  std::vector<std::string> sink_pins;    // "instance:pin" of each load as the handoff names it (empty: not in the handoff)
+  std::vector<double>      arrival_ps;   // estimated arrival of each load from the clock source pin; NaN: unknown
+  double                   stage_delay_ps = -1, far_slew_ps = -1, load_ff = -1;  // of the driver stage; negative: unknown
+  int                      drive_steps = 0;  // drive steps above the default the leaf driver got (synth.place.pcrs.leaf_schedule)
+  bool                     leaf        = false;  // the handoff calls this a leaf: its loads are clock sinks, not buffers
+};
+// Clock decisions an agent or the page stages before a restart (the agent's `clock_edit`). They are the existing
+// synth.place.pcrs.* inputs: nothing here edits a built tree in place.
+struct Clock_edits {
+  std::map<std::string, int>         drive;      // sink pin -> absolute leaf drive step (leaf_schedule)
+  std::map<std::string, double>      wanted_ps;  // sink pin -> wanted arrival relative to its group (arrival_targets)
+  std::map<std::string, std::string> options;    // synth.place.pcrs.<name> -> value
+  bool                               empty() const { return drive.empty() && wanted_ps.empty() && options.empty(); }
+};
 // Everything that is fixed for the duration of one placement phase.
 struct Scene {
+  // The native clock tree, when the flow has built one; empty before clock synthesis. clock_schedule is the leaf
+  // schedule the tree was built with (sink pin -> absolute drive step): the base an agent's clock edits extend.
+  std::vector<Clock_net>     clock_nets;
+  std::map<std::string, int> clock_schedule;
+  std::string                clock_report;  // path of the handoff the estimates were read from; empty: topology only
   // Macro master -> its track lattice per orientation. A master that is absent has no track constraint. Serialized
   // with the scene (the flow and the session may be different processes), so it is data, not a callback.
   std::map<std::string, std::vector<Macro_tracks>> track_lattices;
@@ -781,6 +807,7 @@ private:
   std::vector<std::string>       relationships_;  // applied relative commands authored on this target, in order
   std::uint64_t                  seq_ = 0;
   std::ofstream                  trace_, private_trace_, foreground_segment_;
+  Clock_edits                    clock_edits_;  // staged clock decisions (m_)
   std::string                    private_trace_path_;
   int                            video_frames_ = 0;
   std::atomic<bool>              exit_{false};

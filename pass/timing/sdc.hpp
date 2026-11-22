@@ -67,6 +67,7 @@ struct Sdc {
     std::optional<float>    uncertainty_ps, slew_ps;
     bool                    generated = false;
     std::string             master;  // of a generated clock, once found
+    bool                    propagated = false;
   };
   struct Delay {
     Sdc_object  port;
@@ -103,6 +104,12 @@ struct Sdc {
   struct Clock_group {
     std::vector<std::vector<std::string>> groups;
   };
+  struct Sink_latency {
+    Sdc_object pin;
+    float delay_ps;
+    std::array<bool,4> selected;  // early rise/fall, late rise/fall
+  };
+  std::vector<Sink_latency> sink_latencies;
   std::vector<Clock>       clocks;
   std::vector<Delay>       delays;
   std::vector<Load>        loads;
@@ -112,6 +119,7 @@ struct Sdc {
   std::vector<Path_delay>  max_delays;
   std::vector<Clock_group> clock_groups;
   std::vector<Sdc_object>  disabled;  // set_disable_timing: no path through these pins or ports
+  Clock_derates            clock_derates;
   std::optional<float>     max_fanout;           // set_max_fanout on the design
   std::vector<std::string> unsupported;
   // The script as the flat list of the SDC commands it ran, in order, for a consumer with its own command

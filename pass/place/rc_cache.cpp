@@ -5,14 +5,22 @@
 #include <stdexcept>
 
 namespace livehd::placement {
-Rc_cache::Snapshot Rc_cache::update(std::shared_ptr<const Rc_layout> layout, std::vector<Rc_geometry> nets, const Rc_policy& policy,
-                                    const Builder& build) {
-  if (!layout || !build || !std::isfinite(policy.dbu) || policy.dbu <= 0) {
+Rc_cache::Snapshot Rc_cache::update(std::shared_ptr<const Rc_layout> layout, std::vector<Rc_geometry> nets,
+                                    const Rc_policy& signal_policy, const Builder& build, const Rc_policy* clock_policy) {
+  if (!layout || !build) {
     throw std::invalid_argument("invalid RC cache builder or DBU");
   }
-  for (double value : policy.per_um) {
-    if (!std::isfinite(value) || value < 0) {
-      throw std::invalid_argument("invalid RC cache wire policy");
+  for (const auto* selected : {&signal_policy, clock_policy}) {
+    if (!selected) {
+      continue;
+    }
+    if (!std::isfinite(selected->dbu) || selected->dbu <= 0) {
+      throw std::invalid_argument("invalid RC cache DBU");
+    }
+    for (double value : selected->per_um) {
+      if (!std::isfinite(value) || value < 0) {
+        throw std::invalid_argument("invalid RC cache wire policy");
+      }
     }
   }
   // Validate the complete frame before invoking an expensive tree builder.
@@ -38,15 +46,17 @@ Rc_cache::Snapshot Rc_cache::update(std::shared_ptr<const Rc_layout> layout, std
   Snapshot                                                    result;
   std::unordered_map<Rc_pin_id, std::shared_ptr<const Entry>> next;
   for (auto& net : nets) {
+    const auto& policy = net.clock && clock_policy ? *clock_policy : signal_policy;
     ++result.stats.nets_inspected;
     result.stats.pins_inspected += net.pins.size();
     const auto old               = entries.find(net.driver);
     const bool same_geometry     = old != entries.end() && old->second->layout == layout && old->second->geometry.pins == net.pins
-                                   && old->second->policy.per_um == policy.per_um && old->second->policy.dbu == policy.dbu
-                                   && old->second->policy.identity == policy.identity
-                                   && old->second->policy.geometry_generation == policy.geometry_generation;
-    const bool same_load         = old != entries.end() && old->second->geometry.load_identity == net.load_identity
-                                   && old->second->policy.timing_generation == policy.timing_generation;
+                               && old->second->policy.per_um == policy.per_um && old->second->policy.dbu == policy.dbu
+                               && old->second->policy.identity == policy.identity
+                               && old->second->policy.geometry_generation == policy.geometry_generation;
+    const bool same_load = old != entries.end() && old->second->geometry.clock == net.clock
+                           && old->second->geometry.load_identity == net.load_identity
+                           && old->second->policy.timing_generation == policy.timing_generation;
     std::shared_ptr<const Entry> entry;
     if (same_geometry && same_load) {
       entry = old->second;

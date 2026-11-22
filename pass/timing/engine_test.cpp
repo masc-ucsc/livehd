@@ -8,8 +8,9 @@
 #include <string>
 #include <vector>
 
-#include "test_library.hpp"
 #include "gtest/gtest.h"
+#include "sdc.hpp"
+#include "test_library.hpp"
 
 namespace fast = livehd::timing::fast;
 namespace lt = livehd::liberty::timing;
@@ -41,11 +42,13 @@ struct Bench {
   std::vector<double> scales;
   fast::Cell_types types;
   std::unique_ptr<fast::Netlist> netlist;
-  explicit Bench(std::vector<double> k = {1.0, 2.0}) : scales(std::move(k)) {
+  explicit Bench(std::vector<double> k = {1.0, 2.0}, std::string extra_cells = {}) : scales(std::move(k)) {
     std::vector<const lt::Library *> pointers;
     std::vector<std::string> names;
     for (const auto scale : scales) {
-      libraries.push_back(lt::parse(library_text(scale)));
+      auto text = library_text(scale);
+      text.insert(text.rfind('}'), extra_cells);
+      libraries.push_back(lt::parse(text));
     }
     for (size_t i = 0; i < scales.size(); ++i) {
       pointers.push_back(&libraries[i]);
@@ -536,6 +539,24 @@ TEST(FastEngine, DepthMarginShrinksWithTheLogicDepth) {
   EXPECT_LT(margined.report().wns_ps, plain.report().wns_ps);
 }
 
+TEST(FastEngine, PublishedClockDriversExcludeSiblingDataLogic) {
+  Bench      b({1.0});
+  const auto clk       = b.netlist->add_input_port("clk");
+  const auto clock_buf = b.cell("BUF"), data_buf = b.cell("BUF"), reg = b.cell("FF");
+  b.netlist->connect(b.port_pin(clk), b.pin(clock_buf, "A"));
+  b.netlist->connect(b.port_pin(clk), b.pin(data_buf, "A"));
+  b.link(clock_buf, "Y", reg, "CLK");
+  b.link(data_buf, "Y", reg, "D");
+  b.netlist->publish_clock_driver(b.port_pin(clk));
+  b.netlist->publish_clock_driver(b.pin(clock_buf, "Y"));
+  b.netlist->finalize();
+  fast::Engine engine(*b.netlist, single_clock(100));
+  engine.evaluate();
+  EXPECT_TRUE(engine.clock_network(b.pin(clock_buf, "A")));
+  EXPECT_TRUE(engine.clock_network(b.pin(reg, "CLK")));
+  EXPECT_FALSE(engine.clock_network(b.pin(data_buf, "A")));
+  EXPECT_FALSE(engine.clock_network(b.pin(data_buf, "Y")));
+}
 TEST(FastEngine, ClockGatesAndClocksThroughBuffersAreIdeal) {
   Bench b({1.0});
   const auto clk = b.netlist->add_input_port("clk");
@@ -1088,4 +1109,548 @@ TEST(FastEngineEdits, AnEditThatBreaksTheOrderIsRefused) {
                std::domain_error);
   (void)early;
   EXPECT_NEAR(engine.wns(), engine.report().wns_ps, 1e-4);
+}
+
+TEST(FastEngine, PropagatedClockUsesPortDriveAndIgnoresIdealTransitionAndDataDelay) {
+  Bench      b({1});
+  const auto port    = b.netlist->add_input_port("clk");
+  const auto ff      = b.cell("FF");
+  const auto capture = b.pin(ff, "CLK");
+  b.netlist->connect(b.port_pin(port), capture);
+  b.netlist->finalize();
+  const std::string clocks
+      = "create_clock -period 100 [get_ports clk]\n"
+        "set_input_delay -clock clk 17 [get_ports clk]\n"
+        "set_clock_transition 12 [get_clocks clk]\n"
+        "set_propagated_clock [get_clocks clk]\n";
+  const auto check = [&](std::string_view drive, float delay, float rise, float fall) {
+    const auto constraints = fast::read_constraints(clocks + std::string(drive), {}, *b.netlist);
+    EXPECT_TRUE(constraints.unsupported.empty());
+    fast::Engine engine(*b.netlist, constraints);
+    engine.evaluate();
+    for (bool early : {false, true}) {
+      for (unsigned t = 0; t < 2; ++t) {
+        const auto edge = engine.clock_edge(capture, 0, t, early);
+        EXPECT_NEAR(edge.arrival, delay, 1e-4);
+        EXPECT_NEAR(edge.slew, t == 0 ? rise : fall, 1e-4);
+      }
+    }
+  };
+  check("", 0, 0, 0);
+  check("set_input_transition 3 [get_ports clk]", 0, 3, 3);
+  check("set_driving_cell -lib_cell INV -pin Y -input_transition_rise 3 -input_transition_fall 3 [get_ports clk]", 2, 5.5, 6.5);
+}
+
+TEST(FastEngine, ExternalOutputHoldUsesItsOwnClockAndSignedMinimumDelay) {
+  Bench      b({1});
+  const auto clk  = b.netlist->add_input_port("clk");
+  const auto ff   = b.cell("FF");
+  const auto port = b.netlist->add_output_port("out");
+  const auto out  = b.port_pin(port);
+  b.netlist->connect(b.port_pin(clk), b.pin(ff, "CLK"));
+  b.netlist->connect(b.pin(ff, "Q"), out);
+  b.netlist->finalize();
+  const std::string clocks
+      = "create_clock -name launch -period 100 [get_ports clk]\n"
+        "create_clock -name external -period 100 -waveform {10 60}\n"
+        "set_propagated_clock [get_clocks launch]\n";
+  const auto check = [&](std::string_view constraints, float expected_setup, float expected_hold) {
+    auto c = fast::read_constraints(clocks + std::string(constraints), {}, *b.netlist);
+    ASSERT_TRUE(c.unsupported.empty());
+    fast::Engine engine(*b.netlist, c);
+    engine.evaluate();
+    EXPECT_EQ(engine.endpoint_setup_slack(out), expected_setup);
+    EXPECT_EQ(engine.hold_slack(out), expected_hold);
+  };
+  check("set_output_delay -clock launch -max 8 [get_ports out]", 52, inf);
+  check("set_output_delay -clock external -min -35 [get_ports out]", inf, 85);
+  check(
+      "set_output_delay -clock launch -max 8 [get_ports out]\n"
+      "set_output_delay -clock external -min -35 [get_ports out]",
+      52,
+      85);
+  check("set_output_delay -clock launch -3 [get_ports out]", 63, 27);
+}
+
+TEST(FastEngine, TimesResetRecoveryAndRemovalWithoutLaunchingDataThroughClear) {
+  Bench      b({1}, R"lib(cell(FFR) {
+    ff(IQ,IQN) {clocked_on:"CLK";next_state:"D";clear:"!RST";}
+    pin(CLK){direction:input;clock:true;}
+    pin(D){direction:input;}
+    pin(RST){direction:input;
+      timing(){related_pin:"CLK";timing_type:recovery_rising;
+        rise_constraint(scalar){values("5");} fall_constraint(scalar){values("5");}}
+      timing(){related_pin:"CLK";timing_type:removal_rising;
+        rise_constraint(scalar){values("2");} fall_constraint(scalar){values("2");}}}
+    pin(Q){direction:output;function:"IQ";
+      timing(){related_pin:"CLK";timing_type:rising_edge;
+        cell_rise(scalar){values("10");} cell_fall(scalar){values("10");}}
+      timing(){related_pin:"RST";timing_type:clear;
+        cell_rise(scalar){values("250");} cell_fall(scalar){values("250");}}}
+  })lib");
+  const auto clk = b.netlist->add_input_port("clk"), rst = b.netlist->add_input_port("rst");
+  const auto ff = b.cell("FFR"), out = b.netlist->add_output_port("out");
+  b.netlist->connect(b.port_pin(clk), b.pin(ff, "CLK"));
+  b.netlist->connect(b.port_pin(rst), b.pin(ff, "RST"));
+  b.netlist->connect(b.pin(ff, "Q"), b.port_pin(out));
+  b.netlist->finalize();
+  auto c = single_clock(100);
+  c.inputs.push_back({"rst", "clk", 20, 0});
+  c.outputs.push_back({"out", "clk", 0, 0});
+  fast::Engine timer(*b.netlist, c);
+  timer.evaluate();
+  EXPECT_FLOAT_EQ(timer.endpoint_setup_slack(b.port_pin(out)), 90);
+  EXPECT_FLOAT_EQ(timer.endpoint_setup_slack(b.pin(ff, "RST")), 75);
+  EXPECT_FLOAT_EQ(timer.hold_slack(b.pin(ff, "RST")), 18);
+}
+
+TEST(FastEngine, PropagatedDividerInheritsMasterWireAndClockToQAcrossDomains) {
+  Bench      b({1});
+  const auto clk    = b.netlist->add_input_port("clk");
+  const auto second = b.cell("FF"), first = b.cell("FF"), buf = b.cell("BUF"), sink = b.cell("FF");
+  b.netlist->connect(b.port_pin(clk), b.pin(buf, "A"));
+  b.link(buf, "Y", first, "CLK");
+  b.link(first, "Q", second, "CLK");
+  b.link(second, "Q", sink, "CLK");
+  b.netlist->finalize();
+  fast::Constraints c;
+  c.clocks = {
+      {"quarter", "", 400, 0, 0, {b.pin(second, "Q")}, 0, true, 1},
+      {"half", "", 200, 0, 0, {b.pin(first, "Q")}, 0, true, 2},
+      {"master", "clk", 100, 0, 0, {}, 0, true}
+  };
+  fast::Engine timer(*b.netlist, c);
+  timer.evaluate();
+  for (bool early : {false, true}) {
+    const auto master = timer.clock_edge(b.pin(first, "CLK"), 0, 0, early).arrival;
+    EXPECT_GT(master, 0);
+    EXPECT_NEAR(timer.clock_edge(b.pin(second, "CLK"), 0, 0, early).arrival, master + 30, 1e-4);
+    EXPECT_NEAR(timer.clock_edge(b.pin(sink, "CLK"), 0, 0, early).arrival, master + 60, 1e-4);
+    EXPECT_NEAR(timer.clock_edge(b.pin(sink, "CLK"), 0, 1, early).arrival, master + 70, 1e-4);
+  }
+  EXPECT_FALSE(timer.report().unsupported_clock_phase);
+}
+
+TEST(FastEngine, GeneratedClockDeclaredAfterDividerLogicRetainsDataArrival) {
+  Bench b({1});
+  const auto clk = b.netlist->add_input_port("clk");
+  const auto divider = b.cell("FF"), stage = b.cell("BUF"), source = b.cell("BUF"), capture = b.cell("FF");
+  b.netlist->connect(b.port_pin(clk), b.pin(divider, "CLK"));
+  b.link(divider, "Q", stage, "A");
+  b.link(stage, "Y", source, "A");
+  b.link(source, "Y", capture, "CLK");
+  b.link(stage, "Y", capture, "D");
+  b.netlist->publish_clock_driver(b.port_pin(clk));
+  b.netlist->publish_clock_driver(b.pin(source, "Y"));
+  b.netlist->finalize();
+  fast::Constraints c;
+  c.clocks = {{"master", "clk", 100, 0, 0, {}, 0, true}, {"half", "", 200, 0, 0, {b.pin(source, "Y")}, 0, true, 0}};
+  auto reference_clocks = c;
+  reference_clocks.clocks.pop_back();
+  fast::Engine reference(*b.netlist, reference_clocks);
+  reference.evaluate();
+  fast::Engine timer(*b.netlist, c);
+  timer.evaluate();
+  EXPECT_FALSE(timer.clock_network(b.pin(stage, "Y")));
+  EXPECT_NEAR(timer.arrival(b.pin(capture, "D"), 0, 0), reference.arrival(b.pin(capture, "D"), 0, 0), .001);
+  for (bool early : {false, true}) {
+    for (unsigned edge : {0u, 1u}) {
+      const float expected = reference.arrival(b.pin(source, "Y"), 0, edge);
+      EXPECT_GT(expected, 70);
+      EXPECT_NEAR(timer.clock_edge(b.pin(capture, "CLK"), 0, edge, early).arrival, expected, .001);
+    }
+  }
+}
+
+TEST(FastEngine, InversionBeforeGeneratedClockOriginDoesNotInvertItsSinks) {
+  for (bool source_on_input : {false, true}) {
+    for (bool invert_after_source : {false, true}) {
+      Bench      b({1});
+      const auto clk     = b.netlist->add_input_port("clk");
+      const auto divider = b.cell("FF"), decode = b.cell("INV"), source = b.cell("BUF");
+      const auto sink = b.cell("FF");
+      b.netlist->connect(b.port_pin(clk), b.pin(divider, "CLK"));
+      b.link(divider, "Q", decode, "A");
+      b.link(decode, "Y", source, "A");
+      if (invert_after_source) {
+        const auto inv = b.cell("INV");
+        b.link(source, "Y", inv, "A");
+        b.link(inv, "Y", sink, "CLK");
+        b.netlist->publish_clock_driver(b.pin(inv, "Y"));
+      } else {
+        b.link(source, "Y", sink, "CLK");
+      }
+      b.netlist->publish_clock_driver(b.port_pin(clk));
+      b.netlist->publish_clock_driver(b.pin(source, "Y"));
+      b.netlist->finalize();
+      const auto        origin = b.pin(source, source_on_input ? "A" : "Y");
+      fast::Constraints c;
+      c.clocks = {
+          {"master", "clk", 100, 0, 0, {}, 0, true},
+          {"divided", "", 200, 0, 0, {origin}, 0, true, 0}
+      };
+      fast::Engine timer(*b.netlist, c);
+      timer.evaluate();
+      EXPECT_EQ(timer.report().unsupported_clock_phase, invert_after_source);
+      for (bool early : {false, true}) {
+        for (unsigned edge : {0u, 1u}) {
+          const auto generated = timer.clock_edge(origin, 0, edge, early);
+          EXPECT_GT(generated.arrival, 0);
+          EXPECT_FALSE(generated.inverted);
+          const auto captured = timer.clock_edge(b.pin(sink, "CLK"), 0, edge, early);
+          EXPECT_GE(captured.arrival, generated.arrival);
+          EXPECT_EQ(captured.inverted, invert_after_source);
+        }
+      }
+    }
+  }
+}
+
+TEST(FastEngine, ReportsOddInversionAtSequentialPin) {
+  Bench      b({1});
+  const auto clk = b.netlist->add_input_port("clk"), inv = b.cell("INV"), ff = b.cell("FF");
+  b.netlist->connect(b.port_pin(clk), b.pin(inv, "A"));
+  b.link(inv, "Y", ff, "CLK");
+  b.netlist->finalize();
+  auto c                      = single_clock(100);
+  c.clocks.front().propagated = true;
+  fast::Engine timer(*b.netlist, c);
+  timer.evaluate();
+  EXPECT_TRUE(timer.report().unsupported_clock_phase);
+  EXPECT_TRUE(std::ranges::any_of(timer.report().unsupported,
+                                  [](const auto &issue) { return issue.find("half-cycle") != std::string::npos; }));
+}
+
+TEST(FastEngine, PropagatedCaptureClockMovesSetupAndHoldInOppositeDirections) {
+  Bench      b({1});
+  const auto clk    = b.netlist->add_input_port("clk");
+  const auto launch = b.cell("FF"), capture = b.cell("FF"), i1 = b.cell("INV"), i2 = b.cell("INV");
+  b.netlist->connect(b.port_pin(clk), b.pin(launch, "CLK"));
+  b.netlist->connect(b.port_pin(clk), b.pin(i1, "A"));
+  b.link(i1, "Y", i2, "A");
+  b.link(i2, "Y", capture, "CLK");
+  b.link(launch, "Q", capture, "D");
+  b.netlist->finalize();
+  auto         constraints = single_clock(200);
+  fast::Engine ideal(*b.netlist, constraints);
+  ideal.evaluate();
+  constraints.clocks[0].propagated = true;
+  fast::Engine actual(*b.netlist, constraints);
+  actual.evaluate();
+  const auto data = b.pin(capture, "D"), clock = b.pin(capture, "CLK");
+  const auto latency = actual.arrival(clock, 0, 0);
+  EXPECT_GT(latency, 20);
+  EXPECT_NEAR(actual.early_arrival(clock, 0), latency, .001);
+  EXPECT_NEAR(actual.required(data, 0, 0) - ideal.required(data, 0, 0), latency, .001);
+  EXPECT_NEAR(actual.hold_slack(data) - ideal.hold_slack(data), -latency, .001);
+  EXPECT_NEAR(actual.arrival(b.pin(launch, "CLK"), 0, 0), 0, .001);
+  const auto path = actual.worst_hold_path(data);
+  EXPECT_FLOAT_EQ(path.slack_ps, actual.hold_slack(data));
+  EXPECT_EQ(path.launch, b.pin(launch, "CLK"));
+  EXPECT_EQ(path.capture, clock);
+}
+
+TEST(FastEngineEdits, ClockWireEditRetimesOnlyItsBranchAndRollsBackTheWaveform) {
+  Bench      b({1});
+  const auto clk    = b.netlist->add_input_port("clk");
+  const auto launch = b.cell("FF"), capture = b.cell("FF"), leaf = b.cell("BUF");
+  b.netlist->connect(b.port_pin(clk), b.pin(launch, "CLK"));
+  b.netlist->connect(b.port_pin(clk), b.pin(leaf, "A"));
+  b.link(leaf, "Y", capture, "CLK");
+  b.link(launch, "Q", capture, "D");
+  b.netlist->finalize();
+  auto c                 = single_clock(200);
+  c.clocks[0].propagated = true;
+  c.clock_derates.cell   = {.9f, 1.1f};
+  const auto   ck = b.pin(capture, "CLK"), data = b.pin(capture, "D"), n = b.netlist->net_of(ck);
+  fast::Engine live(*b.netlist, c);
+  live.evaluate();
+  const auto before = live.clock_edge(ck, 0, 0, false);
+  const auto wns    = live.wns();
+  const auto mark   = live.mark();
+  live.set_net_wire(n, std::array{1.f}, std::array{ck}, std::array{31.f}, std::array{0.f});
+  live.settle();
+  EXPECT_EQ(live.last_clock_edit_pins(), 2u);
+  fast::Wire_model wire;
+  wire.net_cap_ff.assign(b.netlist->nets(), 0);
+  wire.sink_delay_ps.assign(b.netlist->pins(), 0);
+  wire.sink_slew_ps.assign(b.netlist->pins(), 0);
+  wire.net_cap_ff[n]     = 1;
+  wire.sink_delay_ps[ck] = 31;
+  fast::Engine fresh(*b.netlist, c);
+  fresh.set_wire(std::move(wire));
+  fresh.evaluate();
+  for (bool early : {true, false}) {
+    for (unsigned t : {0u, 1u}) {
+      EXPECT_FLOAT_EQ(live.clock_edge(ck, 0, t, early).arrival, fresh.clock_edge(ck, 0, t, early).arrival);
+      EXPECT_FLOAT_EQ(live.clock_edge(ck, 0, t, early).slew, fresh.clock_edge(ck, 0, t, early).slew);
+    }
+  }
+  EXPECT_GT(live.clock_edge(ck, 0, 0, false).arrival, before.arrival + 20);
+  EXPECT_FLOAT_EQ(live.settled_slack(data), fresh.settled_slack(data));
+  EXPECT_FLOAT_EQ(live.wns(), fresh.wns());
+  live.evaluate_edits();
+  EXPECT_FLOAT_EQ(live.hold_slack(data), fresh.hold_slack(data));
+  live.rollback(mark);
+  EXPECT_FLOAT_EQ(live.wns(), wns);
+  EXPECT_FLOAT_EQ(live.clock_edge(ck, 0, 0, false).arrival, before.arrival);
+}
+
+TEST(FastEngine, PropagatedClockChargesTheReceivingPinForEachTransition) {
+  Bench b(
+      {1},
+      R"lib(cell(LOAD) { pin(A) { direction : input; rise_capacitance : 4; fall_capacitance : 1; rise_capacitance_range(2, 4); } })lib");
+  const auto clk = b.netlist->add_input_port("clk");
+  const auto buf = b.cell("BUF"), flop = b.cell("FF"), extra = b.cell("LOAD");
+  b.netlist->connect(b.port_pin(clk), b.pin(buf, "A"));
+  b.link(buf, "Y", flop, "CLK");
+  b.link(buf, "Y", extra, "A");
+  b.netlist->finalize();
+  auto constraints                 = single_clock(200);
+  constraints.clocks[0].propagated = true;
+  fast::Engine engine(*b.netlist, constraints);
+  engine.evaluate();
+  const auto ck = b.pin(flop, "CLK");
+  // Load is 1 fF on FF.CLK plus the transition-specific load on LOAD.A.
+  for (bool early : {false, true}) {
+    EXPECT_NEAR(engine.clock_edge(ck, 0, 0, early).arrival, 20 + 2 * (1 + (early ? 2 : 4)), 1e-5);
+    EXPECT_NEAR(engine.clock_edge(ck, 0, 1, early).arrival, 22 + 2 * (1 + 1), 1e-5);
+  }
+}
+
+TEST(FastEngine, ElectricalChecksIncludeThePropagatedClockDriverAndReceivingPins) {
+  Bench      b({1},
+          R"lib(cell(LOAD) { pin(A) { direction : input; max_transition : 1; rise_capacitance : 6; fall_capacitance : 1; } })lib");
+  const auto clk = b.netlist->add_input_port("clk");
+  const auto inv = b.cell("INV"), flop = b.cell("FF"), extra = b.cell("LOAD");
+  b.netlist->connect(b.port_pin(clk), b.pin(inv, "A"));
+  b.link(inv, "Y", flop, "CLK");
+  b.link(inv, "Y", extra, "A");
+  b.netlist->finalize();
+  auto constraints       = single_clock(200);
+  constraints.max_fanout = 1;
+  for (bool propagated : {false, true}) {
+    constraints.clocks[0].propagated = propagated;
+    fast::Engine engine(*b.netlist, constraints);
+    engine.evaluate();
+    EXPECT_EQ(engine.pin_electrical(b.pin(inv, "Y")).count, propagated ? 2 : 0);    // Capacitance and fanout.
+    EXPECT_EQ(engine.pin_electrical(b.pin(extra, "A")).count, propagated ? 1 : 0);  // Clock slew at the load.
+  }
+}
+
+TEST(FastEngine, SetupCreditCanSelectAnExternalLaunchBehindALaterRegisterPath) {
+  Bench      b({1});
+  const auto clk = b.netlist->add_input_port("clk"), data = b.netlist->add_input_port("data");
+  const auto buf = b.cell("BUF"), ff = b.cell("FF"), gate = b.cell("XOR2");
+  b.netlist->connect(b.port_pin(clk), b.pin(buf, "A"));
+  b.link(buf, "Y", ff, "CLK");
+  b.link(ff, "Q", gate, "A");
+  b.netlist->connect(b.port_pin(data), b.pin(gate, "B"));
+  b.link(gate, "Y", ff, "D");
+  b.netlist->finalize();
+  auto c                 = single_clock(200);
+  c.clocks[0].propagated = true;
+  c.clock_derates.cell   = {.75f, 1.25f};
+  c.clock_derates.net    = {.8f, 1.2f};
+  const auto       ck = b.pin(ff, "CLK"), d = b.pin(ff, "D"), q = b.pin(ff, "Q");
+  fast::Wire_model wire;
+  wire.sink_delay_ps.resize(b.netlist->pins());
+  wire.sink_delay_ps[ck] = 10;
+  auto nominal           = c;
+  nominal.clock_derates  = {};
+  fast::Engine ref(*b.netlist, nominal);
+  ref.set_wire(wire);
+  ref.evaluate();
+  bool saw_external = false, saw_register = false, saw_switch = false;
+  for (float io : {0.f, 60.f, 65.f, 70.f, 75.f, 80.f, 100.f}) {
+    c.inputs = {
+        {"data", "clk", io, 50}
+    };
+    fast::Engine timer(*b.netlist, c);
+    timer.set_wire(wire);
+    timer.evaluate();
+    const float cell_delay = ref.clock_edge(b.pin(buf, "Y"), 0, 0, false).arrival;
+    const float wire_delay = ref.clock_edge(ck, 0, 0, false).arrival - cell_delay;
+    const float early      = timer.clock_edge(ck, 0, 0, true).arrival;
+    const float late       = timer.clock_edge(ck, 0, 0, false).arrival;
+    EXPECT_NEAR(early, cell_delay * .75f + wire_delay * .8f, 1e-4);
+    EXPECT_NEAR(late, cell_delay * 1.25f + wire_delay * 1.2f, 1e-4);
+    auto external = c, reg = c;
+    external.cut_pins = {q};
+    reg.cut_pins      = {b.port_pin(data)};
+    fast::Engine ext_only(*b.netlist, external), reg_only(*b.netlist, reg);
+    ext_only.set_wire(wire);
+    reg_only.set_wire(wire);
+    ext_only.evaluate();
+    reg_only.evaluate();
+    const auto worst = [](const fast::Engine &e, uint32_t pin, float capture) {
+      return std::min(200 + capture - 10 - e.arrival(pin, 0, 0), 200 + capture - 12 - e.arrival(pin, 0, 1));
+    };
+    const float ext_slack = worst(ext_only, d, early), reg_slack = worst(reg_only, d, late);
+    EXPECT_NEAR(timer.endpoint_setup_slack(d), std::min(ext_slack, reg_slack), 1e-4) << io;
+    const auto path = timer.worst_path(d);
+    ASSERT_FALSE(path.empty());
+    const bool from_port = path.front().pin == b.port_pin(data);
+    EXPECT_EQ(from_port, ext_slack < reg_slack) << io;
+    saw_external |= from_port;
+    saw_register |= !from_port;
+    saw_switch   |= from_port && worst(reg_only, d, early) < ext_slack;
+  }
+  EXPECT_TRUE(saw_external && saw_register && saw_switch);
+}
+
+TEST(FastEngine, HoldCommonPathCreditRespectsACompetingExternalLaunch) {
+  Bench      b({1}, R"lib(cell(LOAD) { pin(A) { direction : input; rise_capacitance : 4; rise_capacitance_range(2, 4); } })lib");
+  const auto clk = b.netlist->add_input_port("clk"), data = b.netlist->add_input_port("data");
+  const auto buf = b.cell("BUF"), flop = b.cell("FF"), extra = b.cell("LOAD"), gate = b.cell("XOR2");
+  b.netlist->connect(b.port_pin(clk), b.pin(buf, "A"));
+  b.link(buf, "Y", flop, "CLK");
+  b.link(buf, "Y", extra, "A");
+  b.link(flop, "Q", gate, "A");
+  b.netlist->connect(b.port_pin(data), b.pin(gate, "B"));
+  b.link(gate, "Y", flop, "D");
+  b.netlist->finalize();
+  const auto d = b.pin(flop, "D"), ck = b.pin(flop, "CLK");
+  // The feedback path and external input meet at a nonunate gate. Its inputs
+  // have the same rise slew, and the flop launches at 26 + 30 = 56 ps.
+  for (const auto &[io_launch, allowed] : {
+           std::pair{75.f, 4.f},
+           {57.f, 1.f},
+           {55.f, 0.f}
+  }) {
+    auto constraints                 = single_clock(200);
+    constraints.clocks[0].propagated = true;
+    constraints.inputs.push_back({"data", "clk", io_launch, 50});
+    fast::Engine engine(*b.netlist, constraints);
+    engine.evaluate();
+    ASSERT_NEAR(engine.clock_edge(ck, 0, 0, false).arrival - engine.clock_edge(ck, 0, 0, true).arrival, 4, 1e-5);
+    const auto raw
+        = std::min(engine.early_arrival(d, 0) - 4, engine.early_arrival(d, 1) - 6) - engine.clock_edge(ck, 0, 0, false).arrival;
+    EXPECT_NEAR(engine.hold_slack(d) - raw, allowed, 1e-4) << io_launch;
+    const auto path = engine.worst_hold_path(d);
+    EXPECT_FLOAT_EQ(path.slack_ps, engine.hold_slack(d));
+    EXPECT_EQ(path.capture, ck);
+    EXPECT_EQ(path.launch, io_launch == 75.f ? ck : fast::no_index);
+  }
+}
+
+TEST(FastEngine, HoldCreditsTheCommonClockOfTwoCompetingRegisters) {
+  Bench      b({1}, R"lib(cell(LOAD) { pin(A) { direction : input; rise_capacitance : 4; rise_capacitance_range(2, 4); } })lib");
+  const auto clk = b.netlist->add_input_port("clk");
+  const auto buf = b.cell("BUF"), first = b.cell("FF"), second = b.cell("FF"), extra = b.cell("LOAD"), gate = b.cell("XOR2");
+  b.netlist->connect(b.port_pin(clk), b.pin(buf, "A"));
+  b.link(buf, "Y", first, "CLK");
+  b.link(buf, "Y", second, "CLK");
+  b.link(buf, "Y", extra, "A");
+  b.link(first, "Q", gate, "A");
+  b.link(second, "Q", gate, "B");
+  b.link(gate, "Y", first, "D");
+  b.netlist->finalize();
+  auto constraints                 = single_clock(200);
+  constraints.clocks[0].propagated = true;
+  fast::Engine engine(*b.netlist, constraints);
+  engine.evaluate();
+  const auto d = b.pin(first, "D"), ck = b.pin(first, "CLK");
+  const auto raw
+      = std::min(engine.early_arrival(d, 0) - 4, engine.early_arrival(d, 1) - 6) - engine.clock_edge(ck, 0, 0, false).arrival;
+  EXPECT_NEAR(engine.hold_slack(d) - raw, 4, 1e-4);
+}
+
+TEST(FastEngine, DiscreteGateChecksLatchDataOnlyWhenClockPathsMatch) {
+  const std::string gates = R"lib(cell(LAT) {
+    latch(IQ, IQN) { enable : "!G"; data_in : "D"; }
+    pin(G) { direction : input; }
+    pin(D) { direction : input;
+      timing() { related_pin : G; timing_type : setup_rising;
+        rise_constraint(scalar) { values("10"); } fall_constraint(scalar) { values("10"); } }
+      timing() { related_pin : G; timing_type : hold_rising;
+        rise_constraint(scalar) { values("4"); } fall_constraint(scalar) { values("4"); } }
+    }
+    pin(Q) { direction : output; function : "IQ"; }
+  }
+  cell(AND_GATE) {
+    pin(C) { direction : input; } pin(E) { direction : input; } pin(F) { direction : input; }
+    pin(Y) { direction : output; function : "C & E & F";
+      timing() { related_pin : C; timing_sense : positive_unate; timing_type : combinational;
+        cell_rise(scalar) { values("12"); } cell_fall(scalar) { values("15"); }
+        rise_transition(scalar) { values("5"); } fall_transition(scalar) { values("6"); } }
+    }
+  })lib";
+  for (bool supported_hold : {true, false}) {
+    auto library = gates;
+    if (!supported_hold) {
+      library.replace(library.find("hold_rising"), 11, "hold_falling");
+    }
+    Bench      b({1}, library);
+    const auto clk = b.netlist->add_input_port("clk"), enable = b.netlist->add_input_port("enable");
+    const auto buffer = b.cell("BUF"), capture = b.cell("FF"), latch = b.cell("LAT"), gate = b.cell("AND_GATE");
+    const auto ordinary = b.cell("LAT"), second = b.cell("LAT");
+    b.netlist->connect(b.port_pin(clk), b.pin(buffer, "A"));
+    b.link(buffer, "Y", latch, "G");
+    b.link(buffer, "Y", gate, "C");
+    b.netlist->connect(b.port_pin(enable), b.pin(latch, "D"));
+    b.netlist->connect(b.port_pin(enable), b.pin(ordinary, "G"));
+    b.link(latch, "Q", gate, "E");
+    b.link(buffer, "Y", second, "G");
+    b.netlist->connect(b.port_pin(enable), b.pin(second, "D"));
+    b.link(second, "Q", gate, "F");
+    b.link(gate, "Y", capture, "CLK");
+    b.netlist->finalize();
+    ASSERT_EQ(b.netlist->discrete_clock_gates().size(), 1u);
+    EXPECT_EQ(b.netlist->has_unchecked_clock_gate(), !supported_hold);
+    EXPECT_TRUE(b.netlist->untimed(b.pin(ordinary, "D")));
+    EXPECT_TRUE(b.netlist->untimed(b.pin(latch, "Q")));
+    auto constraints                      = single_clock(200);
+    constraints.clocks.front().propagated = true;
+    fast::Engine timer(*b.netlist, constraints);
+    timer.evaluate();
+    EXPECT_FALSE(timer.clock_network(b.pin(latch, "D")));
+    EXPECT_NEAR(timer.clock_edge(b.pin(capture, "CLK"), 0, 0, true).arrival, 32, .001);
+    EXPECT_NEAR(timer.required(b.pin(latch, "D"), 0, 0), 210, .001);
+    if (supported_hold) {
+      EXPECT_NEAR(timer.hold_slack(b.pin(latch, "D")), -24, .001);
+      EXPECT_NEAR(timer.hold_slack(b.pin(second, "D")), -24, .001);
+    } else {
+      EXPECT_TRUE(std::ranges::any_of(timer.report().unsupported,
+                                      [](const auto &why) { return why.find("closing-edge") != std::string::npos; }));
+    }
+  }
+}
+
+TEST(FastEngine, PropagatedClockChecksGateEnableAndTraversesGate) {
+  Bench      b({1}, R"lib(cell(ICG) {
+    clock_gating_integrated_cell : latch_posedge;
+    latch(IQ, IQN) { enable : "!CK"; data_in : "EN"; }
+    pin(CK) { direction : input; clock_gate_clock_pin : true; }
+    pin(EN) { direction : input; clock_gate_enable_pin : true;
+      timing() { related_pin : CK; timing_type : setup_rising;
+        rise_constraint(scalar) { values("10"); } fall_constraint(scalar) { values("10"); } }
+      timing() { related_pin : CK; timing_type : hold_rising;
+        rise_constraint(scalar) { values("4"); } fall_constraint(scalar) { values("4"); } }
+    }
+    pin(GCK) { direction : output; clock_gate_out_pin : true; function : "CK & IQ";
+      timing() { related_pin : CK; timing_sense : positive_unate; timing_type : combinational;
+        cell_rise(scalar) { values("12"); } cell_fall(scalar) { values("15"); }
+        rise_transition(scalar) { values("5"); } fall_transition(scalar) { values("6"); } }
+    }
+  })lib");
+  const auto clk = b.netlist->add_input_port("clk"), enable = b.netlist->add_input_port("enable");
+  const auto gate = b.cell("ICG"), buffer = b.cell("BUF"), capture = b.cell("FF");
+  b.netlist->connect(b.port_pin(clk), b.pin(buffer, "A"));
+  b.link(buffer, "Y", gate, "CK");
+  b.netlist->connect(b.port_pin(enable), b.pin(gate, "EN"));
+  b.link(gate, "GCK", capture, "CLK");
+  b.netlist->finalize();
+  auto constraints                      = single_clock(200);
+  constraints.clocks.front().propagated = true;
+  fast::Engine timer(*b.netlist, constraints);
+  timer.evaluate();
+  const auto ck = b.pin(gate, "CK"), en = b.pin(gate, "EN"), sink = b.pin(capture, "CLK");
+  EXPECT_TRUE(timer.propagated_clock_sink(ck));
+  EXPECT_FALSE(timer.clock_network(en));
+  const auto insertion = timer.clock_edge(ck, 0, 0, true).arrival;
+  EXPECT_NEAR(insertion, 20, .001);
+  EXPECT_NEAR(timer.clock_edge(sink, 0, 0, true).arrival, insertion + 12, .001);
+  EXPECT_NEAR(timer.required(en, 0, 0), 200 + insertion - 10, .001);
+  EXPECT_NEAR(timer.hold_slack(en), -insertion - 4, .001);
 }

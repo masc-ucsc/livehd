@@ -6205,12 +6205,12 @@ private:
     info.node        = mem;
     info.decl_nid    = lnast_->get_root();
     info.size        = view.size;
-    info.dims        = {view.size};  // the flat row-major view
     info.elem_mw     = view.elem_mw;
     info.elem_signed = view.elem_signed;
     info.is_array    = true;
     info.has_update  = true;
     info.update_val  = packed;
+    info.dims.push_back(view.size);  // the flat row-major view
     info.bulk_sites.push_back({.val = packed, .en = {}, .wr_before = 0});
     auto key = absl::StrCat("__array_view_", snapshot_count_++, "_", what);
     snapshot_mems_[packed].push_back(key);

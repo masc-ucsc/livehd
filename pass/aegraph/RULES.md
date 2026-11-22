@@ -28,6 +28,9 @@ again) can fire them where the first slot could not; `generic` = no width fact.
 | `sum_cancel` | simplify | 60 | Sum | generic | native-unverified | arith.cpp:181 | Sum(x, y) - x = y: an operand in both banks cancels against itself. An e-node keeps its operands sorted by (bank, class), so the added run and the subtracted run pair up in one merge: linear in the arity, which a flattened +/- chain makes as wide as the chain (a scan of the subtracted bank per added operand was quadratic there). |
 | `xor_pair_cancel` | simplify | 60 | Xor | generic | native-unverified | arith.cpp:158 | Xor(x, x, y) = y: pairs cancel, the parity of each operand survives. |
 | `flatten` | simplify | 50 | Sum, Mult, And, Or, Xor | generic | native-unverified | arith.cpp:227 | And(And(a, b), c) = And(a, b, c) when the inner cell has no other reader (absorbing a shared cell would only copy its operands). A SUBTRACTED inner Sum flips the banks of what it brings in. An aegraph never frees an e-node, so flattening a k-long chain one link at a time would leave O(k^2) dead operands behind (a 900-wide Or cost 400k pool entries). Instead a link whose only reader is a cell of the same op (Ctx::chain_inner) leaves the work to that reader, and the top of the chain absorbs every single-use link below it in ONE firing: linear, and a wide chain ends as one banked cell, as in classic cprop. |
+| `and_cover_complement` | simplify | 43 | And | generic | bv-swept | arith.rules:164 | x & ((x == 0) \| y \| ...) can drop the comparison: when x is zero the outer AND already returns zero. |
+| `and_combine_complements` | simplify | 42 | And | +bits | bv-swept | arith.rules:190 | Two Boolean terms with the same operand and opposite control polarities reduce to the common operand. |
+| `or_combine_complements` | simplify | 42 | Or | +bits | bv-swept | arith.rules:170 | Two Boolean terms with the same operand and opposite control polarities reduce to the common operand. |
 | `and_absorb` | simplify | 40 | And | generic | native-unverified | arith.cpp:298 |  |
 | `and_not_self` | simplify | 40 | And | generic | bv-swept | arith.rules:39 | x & ~x = 0: the complement clears every bit x sets, so the whole And is 0. |
 | `bool_complement` | simplify | 40 | And, Or | +bits | native-unverified | arith.cpp:302 | And(c, EQ(c, 0), ..) = 0 for any c (one of the pair is 0); Or(c, EQ(c, 0), ..) = 1 when every operand is a 0/1 value. |
@@ -36,7 +39,15 @@ again) can fire them where the first slot could not; `generic` = no width fact.
 | `sum_double` | alt | 40 | Sum | generic | bv-swept | arith.rules:66 | x + x = x << 1: one adder fewer in hardware (the shift by a constant is wiring). |
 | `sum_not_self` | simplify | 40 | Sum | generic | bv-swept | arith.rules:57 | x + ~x = -1: the pair collapses to the constant -1. |
 | `xor_not_self` | simplify | 40 | Xor | generic | bv-swept | arith.rules:51 | x ^ ~x = -1, which stays in the bank as the constant -1 (a complement of the rest). |
+| `and_bool_parity` | alt | 34 | And | +bits | bv-swept | arith.rules:236 | Exactly one of two Boolean operands is true. |
+| `and_parity` | alt | 34 | And | generic | bv-swept | arith.rules:223 | A union with its intersection cleared is bitwise XOR. |
+| `and_parity_window` | alt | 34 | And | generic | bv-swept | arith.rules:229 | Keep the low window of an unsigned complement when recovering parity. |
+| `or_bool_equal` | alt | 34 | Or | +bits | bv-swept | arith.rules:250 | Both Boolean inputs have the same polarity. |
+| `or_bool_parity` | alt | 34 | Or | +bits | bv-swept | arith.rules:243 | Complementary Boolean product terms select exactly one operand. |
+| `and_consensus` | alt | 32 | And | +bits | bv-swept | arith.rules:203 | The consensus term of two opposite Boolean gates is redundant. |
+| `or_consensus` | alt | 32 | Or | +bits | bv-swept | arith.rules:183 | The consensus term of two opposite Boolean gates is redundant. |
 | `cmp_same` | simplify | 30 | EQ, LT, GT | generic | native-unverified | arith.cpp:360 | P8: one driver is one value ('?' literals included), so EQ(x, x, .., x) = 1 and LT(x, x) = GT(x, x) = 0 on exactly the banks {x} vs {x}. |
+| `diff_factor_products` | alt | 30 | Sum | generic | bv-swept | arith.rules:217 | Factor a shared multiplier operand across a difference of full products. |
 | `eq_bool_chain` | simplify | 30 | EQ | +bits | native-unverified | arith.cpp:377 | EQ(b, 1) = b and EQ(EQ(y, 0), 0) = y for 0/1 values: the boolean EQ chains a lowered `!x` and to-bool leave behind. |
 | `eq_diff_zero` | simplify | 30 | EQ | generic | bv-swept | arith.rules:151 | x - y == 0 is x == y: a subtractor and a zero detect become an equality compare. |
 | `eq_masked_diff_zero` | alt | 30 | EQ | generic | bv-swept | arith.rules:157 | (x - y) mod 2^n == 0 is x mod 2^n == y mod 2^n. |
@@ -54,7 +65,10 @@ again) can fire them where the first slot could not; `generic` = no width fact.
 | `lt_sum_const_sub` | alt | 30 | LT | generic | bv-swept | arith.rules:94 | (x - c) < d is x < d + c. |
 | `mult_pow2_shl` | simplify | 30 | Mult | generic | bv-swept | arith.rules:22 | Strength reduction: Mult(x, 2^k) = SHL(x, k), exact for any sign of x. |
 | `not_not` | simplify | 30 | Not | generic | bv-swept | arith.rules:7 | Not(Not x) = x: the double complement of an unlimited integer. |
+| `sum_factor_products` | alt | 30 | Sum | generic | bv-swept | arith.rules:210 | Factor a shared multiplier operand across two full products. Explicit truncations and sign extensions delimit the match. Extraction on the example: synth keeps the right side; sim keeps the right side. |
 | `xor_bool_one` | simplify | 30 | Xor | +bits | bv-swept | arith.rules:29 | x ^ 1 = EQ(x, 0) for a 0/1 value x. |
+| `and_factor_common` | alt | 25 | And | generic | bv-swept | arith.rules:197 | Factor the common bitwise operand. Extraction accounts for other readers of either original term. |
+| `or_factor_common` | alt | 25 | Or | generic | bv-swept | arith.rules:177 | Factor the common bitwise operand. Extraction accounts for other readers of either original term. |
 | `and_mask_get_mask` | simplify | 20 | And | generic | native-unverified | arith.cpp:333 | And(x, 2^n - 1) = Get_mask(x, 0, n) for any sign of x: both keep the low n bits as a non-negative value. Every low-mask truncation gets the ONE canonical Get_mask shape that the slice and width folds key on (classic's canonicalize_and_mask). Only a binary And with exactly one constant operand. |
 | `not_xor_alt` | alt | 5 | Not | generic | bv-swept | arith.rules:15 | Not(x) and Xor(x, -1) share a class; extraction keeps the original on a tie. Extraction on the example: synth keeps the left side; sim keeps the left side. |
 
@@ -62,18 +76,21 @@ again) can fire them where the first slot could not; `generic` = no width fact.
 
 | rule | tag | prio | root | width | proof | source | what it does |
 | --- | --- | ---: | --- | --- | --- | --- | --- |
+| `div_cancel_product` | simplify | 40 | Div | +bits | bv-swept | div.rules:33 | An exact product divided by its nonzero factor returns the other operand. An intervening truncation prevents the match. |
+| `div_rem_reconstruct` | simplify | 40 | Sum | +bits | bv-swept | div.rules:47 | The full quotient times its nonzero divisor plus the matching truncated remainder recovers the dividend of either sign. |
+| `rem_idempotent` | simplify | 40 | Rem | +bits | bv-swept | div.rules:40 | A truncated remainder already lies strictly between minus and plus the divisor magnitude. |
 | `div_one` | simplify | 30 | Div | generic | bv-swept | div.rules:9 | x / 1 = x for every x. |
-| `div_pow2` | simplify | 30 | Div | +bits | bv-swept | div.rules:33 | x / 2^k = x >> k for x >= 0 (truncation and floor agree on non-negative values). |
+| `div_pow2` | simplify | 30 | Div | +bits | bv-swept | div.rules:54 | x / 2^k = x >> k for x >= 0 (truncation and floor agree on non-negative values). |
 | `div_self` | simplify | 30 | Div | generic | bv-swept | div.rules:21 | b / b = 1. For b = 0 the quotient is the all-unknown value, and 1 is one of its refinements. |
-| `div_shl_pow2` | simplify | 30 | Div | +bits | bv-swept | div.rules:47 | x / (1 << y) = x >> y for x >= 0 and y >= 0. |
+| `div_shl_pow2` | simplify | 30 | Div | +bits | bv-swept | div.rules:68 | x / (1 << y) = x >> y for x >= 0 and y >= 0. |
 | `rem_one` | simplify | 30 | Rem | generic | bv-swept | div.rules:15 | x % 1 = 0 for every x. |
-| `rem_pow2` | simplify | 30 | Rem | +bits | bv-swept | div.rules:40 | x % 2^k = the low k bits of x for x >= 0. |
+| `rem_pow2` | simplify | 30 | Rem | +bits | bv-swept | div.rules:61 | x % 2^k = the low k bits of x for x >= 0. |
 | `rem_self` | simplify | 30 | Rem | generic | bv-swept | div.rules:27 | b % b = 0. For b = 0 the remainder is the all-unknown value, and 0 is one of its refinements. |
-| `div_mulshift16` | alt | 20 | Div | +bits | bv-swept | div.rules:71 | The same for 0 <= x < 2^16. Extraction on the example: synth keeps the left side; sim keeps the right side. |
-| `div_mulshift31` | alt | 20 | Div | +bits | bv-swept | div.rules:80 | The same for 0 <= x < 2^31. Extraction on the example: synth keeps the left side; sim keeps the right side. |
-| `div_mulshift8` | alt | 20 | Div | +bits | bv-swept | div.rules:62 | x / c for 0 <= x < 2^8 and a constant c that is no power of two: floor(x * m / 2^s) with s = 8 + ceil(log2 c) and m = ceil(2^s / c) is exact (Granlund-Montgomery). The bound is the range guard. An alt: `sim` prices the multiply by an immediate plus a shift below the divide, `synth` keeps the Div (the divider array specializes on a constant divisor and measured smaller than the multiplier of the magic constant: aeg_div_rem, area 4182 against 4637). Extraction on the example: synth keeps the left side; sim keeps the right side. |
-| `div_pow2_trunc` | alt | 20 | Div | generic | bv-swept | div.rules:54 | Truncating division by 2^k for any sign of x: (x + (x < 0 ? 2^k - 1 : 0)) >> k. An alt: both profiles keep the Div (a constant power-of-two divide is cheap in each: a shift in hardware, a shift pair in the simulator). Extraction on the example: synth keeps the left side; sim keeps the left side. |
-| `rem_via_div` | alt | 20 | Rem | +bits | bv-swept | div.rules:89 | x % c = x - (x / c) * c; with the Div alts this is the multiply-shift remainder of a dividend bounded below 2^31. The bound is required: the difference carries no width stamp of its own, so it is wrapped in a mask of clog2(c) bits (x % c < c), which gives bitwidth the bound the Rem had; and a dividend without a provable bound (bitfuzz clears the pins) is refused. An alt. Extraction on the example: synth keeps the left side; sim keeps the left side. |
+| `div_mulshift16` | alt | 20 | Div | +bits | bv-swept | div.rules:92 | The same for 0 <= x < 2^16. Extraction on the example: synth keeps the left side; sim keeps the right side. |
+| `div_mulshift31` | alt | 20 | Div | +bits | bv-swept | div.rules:101 | The same for 0 <= x < 2^31. Extraction on the example: synth keeps the left side; sim keeps the right side. |
+| `div_mulshift8` | alt | 20 | Div | +bits | bv-swept | div.rules:83 | x / c for 0 <= x < 2^8 and a constant c that is no power of two: floor(x * m / 2^s) with s = 8 + ceil(log2 c) and m = ceil(2^s / c) is exact (Granlund-Montgomery). The bound is the range guard. An alt: `sim` prices the multiply by an immediate plus a shift below the divide, `synth` keeps the Div (the divider array specializes on a constant divisor and measured smaller than the multiplier of the magic constant: aeg_div_rem, area 4182 against 4637). Extraction on the example: synth keeps the left side; sim keeps the right side. |
+| `div_pow2_trunc` | alt | 20 | Div | generic | bv-swept | div.rules:75 | Truncating division by 2^k for any sign of x: (x + (x < 0 ? 2^k - 1 : 0)) >> k. An alt: both profiles keep the Div (a constant power-of-two divide is cheap in each: a shift in hardware, a shift pair in the simulator). Extraction on the example: synth keeps the left side; sim keeps the left side. |
+| `rem_via_div` | alt | 20 | Rem | +bits | bv-swept | div.rules:110 | x % c = x - (x / c) * c; with the Div alts this is the multiply-shift remainder of a dividend bounded below 2^31. The bound is required: the difference carries no width stamp of its own, so it is wrapped in a mask of clog2(c) bits (x % c < c), which gives bitwidth the bound the Rem had; and a dividend without a provable bound (bitfuzz clears the pins) is refused. An alt. Extraction on the example: synth keeps the left side; sim keeps the left side. |
 
 ## Group `mask`
 
@@ -129,6 +146,13 @@ again) can fire them where the first slot could not; `generic` = no width fact.
 | `mux_sel_arm` | simplify | 30 | Mux | generic | bv-swept | mux.rules:4 | Mux(s, 0, s) = s: s ? s : 0. |
 | `mux_sel_not` | simplify | 30 | Mux | +bits | bv-swept | mux.rules:10 | Mux(EQ(c, 0), f, t) = Mux(c, t, f) for a 0/1 value c: the selector reads the condition itself and the arms swap. |
 | `mux_guard_accumulation` | simplify | 25 | Mux | generic | native-unverified | mux.cpp:178 | Guarded accumulation (classic scalar_mux guard_accumulation), a ROLLED-LOOP rule: `if s { acc OP= x }` is Mux(s, a, a OP x) = a OP Mux(s, id, x)      (id = 0 for Or/Xor, -1 for And; and the swapped arms) bit for bit the same logic, but the Mux no longer sits on the accumulator, so an unrolled run of guarded updates becomes one chain of ONE associative operator that flattens into a single n-ary cell instead of a serial mux chain. It runs only in a lifted loop body (Ctx::guard_scope), where bitwidth follows and sizes the new Mux; the update cell must be private to this Mux and plain (no color, no policy); a held STATE output stays a Mux (the latch contract exempts Q only as a direct Mux arm, and enableopt turns a Q hold into an enable). A Sum is not guarded: a + Mux(s, 0, x) puts the select ahead of the carry chain. |
+| `and_bool_mux` | alt | 22 | And | +bits | bv-swept | mux.rules:35 | Recover a binary mux from opposite Boolean enables. |
+| `or_bool_mux` | alt | 22 | Or | +bits | bv-swept | mux.rules:28 | Recover a binary mux from opposite Boolean enables. |
+| `or_mask_mux` | alt | 22 | Or | +bits | bv-swept | mux.rules:71 | Opposite copies of one replicated selector choose between two whole words. |
+| `mux_gate_word` | alt | 21 | Mux | +bits | bv-swept | mux.rules:42 | Sign-extending the Boolean selector from one bit supplies a word-wide zero or all-ones mask. Extraction on the example: synth keeps the right side; sim keeps the left side. |
+| `mux_gate_word_false` | alt | 21 | Mux | +bits | bv-swept | mux.rules:64 | Gate the false arm with the sign-replicated zero test of the selector. |
+| `product_move_mask_gate` | alt | 21 | Mult | +bits | bv-swept | mux.rules:57 | Move a multiplier gate already expressed as a sign-replicated Boolean mask. |
+| `product_move_zero_gate` | alt | 21 | Mult | +bits | bv-swept | mux.rules:50 | A zero gate on either multiplier input zeroes the full product. Offer the other operand so its width and sharing can decide. |
 | `mux_lane_vector` | alt | 20 | Mux | generic | bv-swept | mux.rules:19 | One lane of a bit-sliced mux. Mux(s, x[a], y[b]) is bit (a mod 64) of the 64-bit-aligned word mux Mux(s, x[a0 +: 64], y[b0 +: 64]), with the same alignment offset on both arms. Every lane of a run that shares s, x, y and the offset b - a builds the SAME word mux, so hash-consing shares it among the lanes (classic vectorize_bit_muxes does this on the extracted graph; this is the alternative the extraction can pick once a cost profile prices the sharing). An alt: a lane alone is cheaper as the scalar mux. Extraction on the example: synth keeps the left side; sim keeps the left side. |
 | `mux_oob_sel` | alt | 20 | Mux | generic | native-unverified | mux.cpp:152 | Q1: an out-of-range or disconnected selection of an n-ary Mux is a '?' owned by that Mux, so any value is a legal resolution of it: a constant selector that names no connected arm may be read as 0 (classic folds exactly this to 0). Written as an alt, not a simplify: the engine never picks a refinement on its own, the extraction does, and a '?' that is one value to the Mux class stays one value at every reader (the literal is the Mux's own). |
 
@@ -144,7 +168,7 @@ again) can fire them where the first slot could not; `generic` = no width fact.
 | `shl_shl` | simplify | 30 | SHL | generic | bv-swept | shift.rules:19 | SHL(SHL(x, a), b) = SHL(x, a + b): shifts never drop bits, so chained left shifts add (up to the 2^28 amount cap). |
 | `sra_sra` | simplify | 30 | SRA | generic | bv-swept | shift.rules:26 | SRA(SRA(x, a), b) = SRA(x, a + b): floor division by 2^a then 2^b is floor division by 2^(a+b). |
 
-Total: 103 rules.
+Total: 127 rules.
 
 ## Analyses
 

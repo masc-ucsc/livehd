@@ -234,6 +234,29 @@ TEST(PhysicalRank, WhatifEditsAgreeWithAFullEvaluationOfTheEditedDesign) {
   EXPECT_THROW(w.resize("nothing", "INV2"), std::invalid_argument);
 }
 
+TEST(PhysicalRank, MinimumOutputDelaySurvivesFrozenCheckpoint) {
+  Design design;
+  auto config = options();
+  const double unit = lt::parse(config.liberty_texts.front()).time_unit_ps;
+  config.sdc_text += std::format("set_propagated_clock [all_clocks]\nset_output_delay -min {} -clock clk [get_ports q]\n", -36.0 / unit);
+  config.sdc_text += "set_timing_derate -clock -net_delay -early .88\nset_timing_derate -clock -cell_delay -late 1.12\n";
+  fast::Physical_ranker ranker(config);
+  const auto measured = ranker.evaluate(design.graph, rc(5, 2000), {});
+  ASSERT_TRUE(measured.hold_wns);
+  const auto frozen = fast::Physical_ranker::from_frozen_checkpoint(ranker.whatif().frozen_checkpoint());
+  for (const fast::Physical_ranker* timer : {&ranker, frozen.get()}) {
+    const auto& derates = timer->engine()->constraints().clock_derates;
+    EXPECT_EQ(derates.cell, (std::array<float, 2>{1, 1.12f}));
+    EXPECT_EQ(derates.net, (std::array<float, 2>{.88f, 1}));
+    const auto& n = *timer->bound()->netlist;
+    const auto port = std::ranges::find(n.ports(), std::string{"q"}, &fast::Port::name);
+    ASSERT_NE(port, n.ports().end());
+    const auto q = n.pin(port->cell, 0u);
+    EXPECT_LT(timer->engine()->hold_slack(q), 0);
+    EXPECT_FALSE(std::isfinite(timer->engine()->endpoint_setup_slack(q)));
+  }
+}
+
 TEST(PhysicalRank, FixedSetupDelayCannotPredictClockFrequencyEvenWhenItEqualsThePeriod) {
   Design design;
   auto config = options();

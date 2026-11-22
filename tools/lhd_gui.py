@@ -16,6 +16,9 @@ paints (highlights, selection) shows up in the page at once.
   tools/lhd_gui.py --workdir W macros                        # every macro: pose, size, orientation, pinned
   tools/lhd_gui.py --workdir W macro_scan node=ram0 grid='{"nx":12,"ny":12}' top=5   # ranked positions by pin wirelength
   tools/lhd_gui.py --retry 120 --workdir W state             # any command, riding out a restart: the socket is down for a moment
+  tools/lhd_gui.py --workdir W clock                         # the native clock tree: roots, buffers, depth, wire, insertion, skew
+  tools/lhd_gui.py --workdir W clock what=map metric=skew    # local clock skew over the die (also nets, sinks, pair)
+  tools/lhd_gui.py --workdir W clock_edit op=drive leaf=NAME step=2   # stage a clock decision; op=apply rebuilds the tree
 
 `help` returns an overview (command groups, the usual loop) and the full command reference. Guide:
 .agents/skills/livehd/agent_socket.md

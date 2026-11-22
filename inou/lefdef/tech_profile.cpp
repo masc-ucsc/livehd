@@ -98,8 +98,31 @@ Tech_profile nangate45() {
   };
   return p;
 }
+Tech_profile sky130hd() {
+  Tech_profile p;
+  p.name          = "sky130hd";
+  p.detect_macros = {"sky130_fd_sc_hd__tapvpwrvgnd_1"};
+  p.io_pin_layers = {"met3", "met2"};
+  p.tap_master    = "sky130_fd_sc_hd__tapvpwrvgnd_1";
+  p.tap_distance  = 14;
+  p.hold_buffer   = "sky130_fd_sc_hd__buf_1";
+  p.routing_grids = {{"li1", .23, .46, .17, .34}, {"met1", .17, .34, .17, .34}, {"met2", .23, .46, .23, .46},
+                     {"met3", .34, .68, .34, .68}, {"met4", .46, .92, .46, .92}, {"met5", 1.7, 3.4, 1.7, 3.4}};
+  auto& pg              = p.pg;
+  pg.name               = "pg_sky130hd";
+  pg.reference_revision = "fb65d5b487d2afd443fc1892330f622c776a57ac";
+  pg.reference_file     = "flow/platforms/sky130hd/pdn.tcl";
+  pg.followpin_layers   = {"met1"};
+  pg.stripes            = {{"met4", 1.60, 11.97, 27.14, 13.57}, {"met5", 1.60, 12, 27.2, 13.6}};
+  pg.connect            = {{{"met1", "met4"}}, {{"met4", "met5"}}};
+  pg.pin_layer          = "met5";
+  pg.macro_grids        = {{{}, 2, {}, {{{"met4", "met5"}}}, true}};
+  pg.nets               = {"VDD", "VSS"};
+  pg.pin_names          = {{{"VDD", "VDDPE", "VDDCE", "VPWR", "VPB"}, {"VSS", "VSSE", "VGND", "VNB"}}};
+  return p;
+}
 const std::vector<Tech_profile>& registry() {
-  static const std::vector<Tech_profile> profiles{asap7(), nangate45()};
+  static const std::vector<Tech_profile> profiles{asap7(), nangate45(), sky130hd()};
   return profiles;
 }
 std::string known_profiles() {

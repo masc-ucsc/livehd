@@ -48,8 +48,15 @@ constexpr double kLimit = 8.0;    // per 4x step: twice linear, half quadratic
 constexpr double kMinMs = 150.0;  // a phase below this at 16x is noise, not scaling
 
 int base_n(int dflt) {
-  const char* v = std::getenv("LHD_SCALE_N");
-  return v != nullptr ? std::atoi(v) : dflt;
+  if (const char* v = std::getenv("LHD_SCALE_N")) {
+    return std::atoi(v);
+  }
+#ifndef NDEBUG
+  // Keep every stage and the 1x/4x/16x sweep within the debug regression timeout.
+  return dflt / 8;
+#else
+  return dflt;
+#endif
 }
 
 std::string fresh_dir(std::string_view tag) {

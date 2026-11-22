@@ -5,6 +5,7 @@
 #include <stdexcept>
 
 #include "power_grid.hpp"
+#include "rapidjson/document.h"
 
 namespace livehd::placement {
 std::vector<Pg_channel> parse_pg_channels(std::string_view text) {
@@ -74,5 +75,42 @@ Pg_profile power_grid_profile(const physical::Tech_profile& profile) {
 }
 Pg_profile power_grid_profile(std::string_view name, const physical::Technology& tech) {
   return power_grid_profile(physical::resolve_tech_profile(tech, name, physical::Tech_policy::power_grid));
+}
+Pg_profile tuned_power_grid(const physical::Tech_profile& tech, const rapidjson::Value& record) {
+  auto result = power_grid_profile(tech);
+  if (!record.IsObject() || !record.HasMember("schema_version") || !record["schema_version"].IsUint()
+      || record["schema_version"].GetUint() != 1 || !record.HasMember("stripes") || !record["stripes"].IsObject()
+      || record["stripes"].ObjectEmpty()) {
+    throw std::invalid_argument("power-grid metadata requires schema_version 1 and a nonempty stripes object");
+  }
+  for (const auto& [name, dimensions] : record["stripes"].GetObject()) {
+    const std::string layer(name.GetString(), name.GetStringLength());
+    auto stripe = std::ranges::find(result.stripes, layer, &Pg_stripe::layer);
+    if (stripe == result.stripes.end() || !dimensions.IsObject() || dimensions.ObjectEmpty()) {
+      throw std::invalid_argument("expected dimensions for a core strap layer in " + tech.name + ": " + layer);
+    }
+    for (const auto& [key, number] : dimensions.GetObject()) {
+      const std::string_view field(key.GetString(), key.GetStringLength());
+      if (!number.IsNumber() || !std::isfinite(number.GetDouble()) || number.GetDouble() < 0) {
+        throw std::invalid_argument("power-grid " + layer + " dimensions must be finite nonnegative microns");
+      }
+      const auto value = number.GetDouble();
+      if (field == "width") {
+        stripe->width = value;
+      } else if (field == "pitch") {
+        stripe->pitch = value;
+      } else if (field == "spacing") {
+        stripe->spacing = value;
+      } else if (field == "offset") {
+        stripe->offset = value;
+      } else {
+        throw std::invalid_argument("unknown power-grid strap field: " + std::string(field));
+      }
+    }
+    if (stripe->width <= 0 || stripe->spacing <= 0 || stripe->pitch <= 2 * stripe->width + stripe->spacing || stripe->offset >= stripe->pitch) {
+      throw std::invalid_argument("invalid power-grid strap width, spacing, pitch or offset on " + layer);
+    }
+  }
+  return result;
 }
 }  // namespace livehd::placement

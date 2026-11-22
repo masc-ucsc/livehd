@@ -34,26 +34,30 @@
 #include "attrs.hpp"
 #include "buffering/checkpoint.hpp"
 #include "cell_criticality.hpp"
+#include "chunk_measure.hpp"
+#include "chunk_refine.hpp"
+#include "clock_model.hpp"
 #include "color_centroids.hpp"
 #include "core/diag.hpp"
+#include "core/job_manager.hpp"
 #include "core/process_group.hpp"
 #include "def_binding.hpp"
 #include "dreamplace/native/placement.hpp"
 #include "dreamplace/native/rudy.hpp"
 #include "filler_budget.hpp"
+#include "forces/clock_cluster.hpp"
 #include "forces/gp_rejection.hpp"
 #include "forces/gp_timing.hpp"
 #include "forces/legalization.hpp"
 #include "fp_chunks.hpp"
-#include "core/job_manager.hpp"
-#include "chunk_refine.hpp"
-#include "chunk_measure.hpp"
 #include "fp_repetition_graph.hpp"
 #include "growth_budget.hpp"
+#include "core/file_utils.hpp"
+#include "gui/gui_clock.hpp"
 #include "gui/gui_geometry.hpp"
+#include "gui/gui_gp_owner.hpp"
 #include "gui/gui_ipc.hpp"
 #include "gui/gui_native_wire.hpp"
-#include "gui/gui_gp_owner.hpp"
 #include "gui/gui_wire.hpp"
 #ifdef __APPLE__
 #include <mach/mach.h>
@@ -75,6 +79,7 @@
 #include "node_util.hpp"
 #include "pass/liberty/liberty_dff.hpp"
 #include "pass/partition/flatten.hpp"
+#include "pass/place/pcrs/clock_gate.hpp"
 #include "pass/place/pcrs/pcrs.hpp"
 #include "pass/place/place_salt.hpp"
 #include "pass/timing/physical_rank.hpp"
@@ -392,7 +397,7 @@ const ph::Pg_strategy* macro_pdn_strategy(const ph::Technology& tech, const Opti
   if (options.macro_pdn == "off") {
     return nullptr;
   }
-  return pg_macro_strategy(tech, options.pg);
+  return options.tuned_pg ? options.tuned_pg.get() : pg_macro_strategy(tech, options.pg);
 }
 // The level macro.pdn requests: auto starts at gap (and may degrade, see View::pdn_ladder); gap/align are strict.
 Pg_macro_level requested_pdn_level(const Options& options) {
@@ -690,6 +695,61 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
     h = hash_text(std::format("timing-rank-weights:{}:{}:{}", o.timing_min_weight, o.timing_max_weight, o.timing_smoothing), h);
   }
   // Always part of the identity: the slack-relative weights replaced the rank weights as the default.
+  if (o.clock_tree) {
+    h = hash_text(std::format("pcrs-clock-tree-v12:{}:{}:{}:{}:{}",
+                              o.clock_leaf_drive_steps,
+                              o.clock_skew_rounds,
+                              o.clock_skew_period_fraction,
+                              o.clock_skew_hold_margin_ps.value_or(-1.),
+                              o.clock_hold_area_um2),
+                  h);
+    h = hash_text(std::format("clock-domains:{}:{}:{}:{}:{}:{}:{}",
+                              o.clock_source_fork,
+                              o.clock_balance,
+                              o.clock_gate_merge_trials,
+                              o.clock_gate_leaf_trials,
+                              o.clock_gate_clone_trials,
+                              o.clock_leaf_fanout,
+                              o.clock_leaf_radius_um),
+                  h);
+    if (o.clock_max_slew_ps > 0) {  // absent at the default, so existing identities stay valid
+      h = hash_text(std::format("clock-max-slew:{}", o.clock_max_slew_ps), h);
+    }
+    if (o.clock_balance) {
+      h = hash_text("clock-arrival-bands-v3", h);
+    }
+    if (o.clock_source_fork) {
+      h = hash_text("sized-clock-source-root-v1", h);
+    }
+    for (const auto& [pin, target] : o.clock_arrival_targets) {
+      const auto insertion = target.first ? std::format("{}", *target.first) : "liberty";
+      h = hash_text(std::format("clock-target:{}:{}:{}:{}", pin.size(), pin, insertion, target.second), h);
+    }
+    for (const auto& [net, activity] : o.clock_activity) {
+      h = hash_text(std::format("clock-activity:{}:{}:{}", net.size(), net, activity), h);
+    }
+    h = hash_text(std::format("clock-rc:{}:{}:{}:{}",
+                              o.clock_leaf_rc_scale[0],
+                              o.clock_leaf_rc_scale[1],
+                              o.clock_trunk_rc_scale[0],
+                              o.clock_trunk_rc_scale[1]),
+                  h);
+    if (o.clock_gate_raise_trials) {
+      h = hash_text(std::format("clock-gate-raise:{}", o.clock_gate_raise_trials), h);
+    }
+    if (!o.clock_incremental_trials) {
+      h = hash_text("full-clock-trials", h);
+    }
+    for (const auto& [pin, delay] : o.clock_leaf_delays_ps) {
+      h = hash_text(std::format("clock-delay:{}:{}:{}", pin.size(), pin, delay), h);
+    }
+    if (o.clock_cluster_strength > 0) {
+      h = hash_text(std::format("clock-leaf-anchors-v6:{}", o.clock_cluster_strength), h);
+    }
+    for (const auto& [pin, steps] : o.clock_leaf_schedule) {
+      h = hash_text(std::format("{}:{}:{}", pin.size(), pin, steps), h);
+    }
+  }
   if (o.wl_resynth) {
     h = hash_text("wl-resynth-v1", h);
   }
@@ -858,6 +918,11 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
   }
   if (o.pg != "none") {
     h = hash_text("native-pg-v1:" + o.pg, h);
+  }
+  if (o.tuned_pg) {
+    for (const auto& stripe : o.tuned_pg->stripes) {
+      h = hash_text(std::format("strap:{}:{}:{}:{}:{}", stripe.layer, stripe.width, stripe.spacing, stripe.pitch, stripe.offset), h);
+    }
   }
   for (const auto& channel : o.pg_channels) {
     h = hash_text(std::format("pg-channel:{}:{}:{},{},{},{}",
@@ -1466,6 +1531,7 @@ void collect_control_roles(hhds::Graph& graph, Resolver& resolve, Prects_library
   }
   roles.clock_ports.clear();
   roles.clock_pins.clear();
+  roles.published_clock_drivers.clear();
   roles.reset_ports.clear();
   roles.reset_pins.clear();
   const auto collect = [&](const hhds::Node_class& node) {
@@ -1484,6 +1550,9 @@ void collect_control_roles(hhds::Graph& graph, Resolver& resolve, Prects_library
         }
         const bool port  = endpoint.instance == "PIN";
         const auto label = endpoint.label();
+        if (gu::is_published_clock_driver(pin)) {
+          roles.published_clock_drivers.emplace(endpoint.instance, endpoint.pin);
+        }
         if (!roles.override_controls) {
           (port ? roles.ports : roles.pins).insert(label);
         }
@@ -1514,6 +1583,8 @@ struct View {
   std::map<std::string, std::string, std::less<>> external_macro_names;
   Prects_library                                prects;
   Prects_networks                               ignored;
+  std::shared_ptr<const Technology>             anchor_technology;
+  std::set<size_t>                              discrete_gate_nets;
   dp::Design                                    design;
   bool                                          hierarchy_snap         = false;
   bool                                          native_orientations    = false;
@@ -1846,19 +1917,6 @@ ph::Floorplan blockage_frame(const View& v, bool routing = false) {
   }
   return result;
 }
-std::pair<double, double> offset(const ph::Macro& macro, const std::string& name, Orientation o, int64_t dbu) {
-  auto it = macro.pins.find(name);
-  if ((it == macro.pins.end() || it->second.shapes.empty()) && ph::soft_block(macro)) {
-    // A soft block pin without LEF geometry connects at the block center.
-    const auto [x, y] = ph::oriented_center(macro, {0, 0, macro.width, macro.height}, o);
-    return {x * dbu, y * dbu};
-  }
-  if (it == macro.pins.end() || it->second.shapes.empty()) {
-    throw std::runtime_error("missing LEF pin geometry: " + name);
-  }
-  const auto [x, y] = ph::oriented_center(macro, it->second.shapes.front().rect, o);
-  return {x * dbu, y * dbu};
-}
 color::Floorplan_coloring analyze_floorplan_colors(const View& v, const ph::Technology& tech, const std::vector<int>& scopes) {
   using Kind = color::Floorplan_kind;
   std::vector<color::Floorplan_node> nodes(v.design.node_x.size());
@@ -2031,6 +2089,175 @@ void snapshot_frame(ph::Floorplan& frame, const Geometry_view& geometry) {
     const auto& c = v.cells[i];
     frame.components.push_back({c.name, c.macro, geometry.pose(i)});
   }
+}
+struct Clock_anchor_plan {
+  std::vector<dp::PairAnchor> pairs;
+  size_t                      leaves = 0, infeasible = 0, gate_anchors = 0, retained_anchors = 0;
+  double                      star_um = 0;
+};
+Clock_anchor_plan plan_clock_anchors(const View& v, const dp::Design& d, const Options& options, const Clock_planning_model& model,
+                                     const liberty::timing::Library& timing, const Clock_chunk_homes& homes,
+                                     const std::map<Name, Name>& clock_inputs, const std::set<Name>& gates, bool installed_leaves) {
+  Clock_anchor_plan               plan;
+  std::vector<Clock_anchor_group> groups;
+  std::vector<double>             criticality(d.num_movable, 1);
+  for (size_t pin = 0; pin < d.pin2node.size(); ++pin) {
+    const int node = d.pin2node[pin], net = d.pin2net[pin];
+    if (node >= d.num_movable || !d.net_mask[net]) {
+      continue;
+    }
+    const double extra = d.pin_timing && !d.pin_timing->weight.empty() ? d.pin_timing->weight[pin] : 0;
+    criticality[node]  = std::max(criticality[node], d.net_weights[net] + extra);
+  }
+  // Recover the original gating domains through the installed distribution. A
+  // timing round may regroup flops on different old leaves of the same gate.
+  std::unordered_map<int, size_t>    buffer_input;
+  std::map<std::pair<size_t, size_t>, std::vector<int>> domain_pins;
+  const auto                         source = [&](size_t net) { return d.pin2node[d.flat_net2pin[d.flat_net2pin_start[net]]]; };
+  if (options.has_physical_clock_tree()) {
+    for (size_t net = 0; net < v.ignored.clock_nets.size(); ++net) {
+      if (!v.ignored.clock_nets[net]) {
+        continue;
+      }
+      for (int k = d.flat_net2pin_start[net] + 1; k < d.flat_net2pin_start[net + 1]; ++k) {
+        const int node = d.pin2node[d.flat_net2pin[k]];
+        if (node < static_cast<int>(v.cells.size()) && v.cells[node].node.attr(attrs::pcrs_clock_buffer).has()) {
+          buffer_input.emplace(node, net);
+        }
+      }
+    }
+  }
+  for (size_t net = 0; net < v.ignored.clock_nets.size(); ++net) {
+    if (!v.ignored.clock_nets[net]) {
+      continue;
+    }
+    size_t root     = net;
+    auto   upstream = buffer_input.find(source(root));
+    for (size_t depth = 0; upstream != buffer_input.end(); ++depth) {
+      if (depth >= buffer_input.size()) {
+        throw std::runtime_error("cycle in published PCRS distribution");
+      }
+      root     = upstream->second;
+      upstream = buffer_input.find(source(root));
+    }
+    // Terminal legalization can run congestion-feedback GP after the last tree
+    // rebuild. At that point the actual leaf net determines membership.
+    auto& pins = domain_pins[{root, installed_leaves ? net : root}];
+    pins.insert(pins.end(),
+                d.flat_net2pin.begin() + d.flat_net2pin_start[net] + 1,
+                d.flat_net2pin.begin() + d.flat_net2pin_start[net + 1]);
+  }
+  const double dbu = model.limits.dbu_per_um;
+  for (const auto& [group, pins] : domain_pins) {
+    const auto root        = group.first;
+    const int source_node = source(root);
+    const bool gate_source
+        = v.discrete_gate_nets.contains(root) || (source_node < d.num_movable && gates.contains(v.cells.at(source_node).macro));
+    const int gate = gate_source && source_node < d.num_movable && !d.legalization_fixed(source_node) ? source_node : -1;
+    struct Domain {
+      std::vector<int>              nodes;
+      std::vector<pcrs::Clock_sink> sinks;
+    };
+    std::map<std::pair<unsigned, double>, Domain> domains;
+    for (const int pin : pins) {
+      const int node = d.pin2node[pin];
+      if (d.legalization_fixed(node) || d.node_macro[node]) {
+        continue;
+      }
+      const auto& cell  = v.cells.at(node);
+      const auto  clock = clock_inputs.find(cell.macro);
+      if (clock == clock_inputs.end() || clock->second != v.pins.at(pin).pin) {
+        continue;
+      }
+      const auto   label = v.pins[pin].label();
+      const auto&  ck    = timing.cells.at(cell.macro.str()).pins.at(clock->second.str());
+      const double x = d.node_x[node], y = d.node_y[node];
+      double       cap = 0;
+      for (unsigned t = 0; t < 2; ++t) {
+        cap = std::max(cap, ck.capacitance_range_ff[t] ? (*ck.capacitance_range_ff[t])[1] : ck.capacitance_ff[t].value_or(0));
+      }
+      pcrs::Clock_sink sink{label,
+                            (x + d.pin_offset_x[pin]) / dbu,
+                            (y + d.pin_offset_y[pin]) / dbu,
+                            cap,
+                            false,
+                            ck.max_transition_ps.value_or(0)};
+      std::string      key;
+      if (!homes.regions.empty()) {
+        if (gu::Color_group::has(cell.node)) {
+          key = gu::Color_group::text(cell.node);
+        } else if (gu::Placement_block::has(cell.node)) {
+          key = gu::Placement_block::text(cell.node);
+        }
+        sink.chunk = homes.locate(false, key, {x + .5 * d.node_size_x[node], y + .5 * d.node_size_y[node]});
+      }
+      if (const auto target = options.clock_arrival_targets.find(label); target != options.clock_arrival_targets.end()) {
+        sink.insertion_ps = target->second.first.value_or(sink.insertion_ps);
+        sink.wanted_ps    = target->second.second;
+      }
+      std::pair<unsigned, double> target{};
+      if (!installed_leaves) {
+        const auto step = options.clock_leaf_schedule.find(label);
+        target.first    = options.clock_leaf_drive_steps;
+        if (model.limits.balance) {
+          if (step != options.clock_leaf_schedule.end()) {
+            sink.drive_steps = step->second;
+          }
+        } else {
+          target.second = sink.wanted_ps;
+          if (step != options.clock_leaf_schedule.end()) {
+            target.first = step->second;
+          }
+        }
+        const auto delay   = options.clock_leaf_delays_ps.find(label);
+        sink.separate_leaf = delay != options.clock_leaf_delays_ps.end() && delay->second > 0;
+      }
+      auto& domain = domains[target];
+      domain.nodes.push_back(node);
+      domain.sinks.push_back(std::move(sink));
+    }
+    for (auto& [target, domain] : domains) {
+      if (domain.nodes.size() < 2 && gate < 0) {
+        continue;
+      }
+      if (installed_leaves) {
+        const auto [left, right] = std::ranges::minmax_element(domain.sinks, {}, &pcrs::Clock_sink::x_um);
+        const auto [bottom, top] = std::ranges::minmax_element(domain.sinks, {}, &pcrs::Clock_sink::y_um);
+        const auto x = std::midpoint(left->x_um, right->x_um), y = std::midpoint(bottom->y_um, top->y_um);
+        for (const auto& sink : domain.sinks) {
+          plan.star_um += std::abs(sink.x_um - x) + std::abs(sink.y_um - y);
+        }
+        groups.push_back({gate, std::move(domain.nodes)});
+        continue;
+      }
+      auto limits             = model.limits;
+      limits.leaf_drive_steps = target.first;
+      try {
+        for (const auto& branch : pcrs::plan_clock_leaves(domain.sinks, model.drivers, limits)) {
+          std::vector<int> members;
+          for (auto child : branch.children) {
+            members.push_back(domain.nodes[child]);
+            const auto& sink  = domain.sinks[child];
+            plan.star_um     += std::abs(sink.x_um - branch.x_um) + std::abs(sink.y_um - branch.y_um);
+          }
+          groups.push_back({gate, std::move(members)});
+        }
+      } catch (const pcrs::Clock_infeasible&) {
+        ++plan.infeasible;
+      } catch (const pcrs::Clock_drive_unavailable&) {
+        ++plan.infeasible;
+      }
+    }
+  }
+  plan.leaves = groups.size();
+  for (const auto& group : groups) {
+    if (group.gate >= 0) {
+      plan.gate_anchors += group.members.size();
+    }
+  }
+  plan.retained_anchors = retained_clock_anchors(groups, d.pair_anchors, d.node_x.size());
+  plan.pairs = clock_leaf_anchors(groups, options.clock_cluster_strength, criticality);
+  return plan;
 }
 void make_arrays(View& v, const ph::Technology& tech) {
   v.design             = {};
@@ -2234,6 +2461,12 @@ void make_arrays(View& v, const ph::Technology& tech) {
     connectivity.nets.push_back(std::move(net));
   }
   v.ignored = prects_networks(tech, connectivity, v.prects);
+  v.discrete_gate_nets.clear();
+  if (v.anchor_technology) {
+    for (const auto& gate : pcrs::discrete_gate_paths(connectivity, v.anchor_technology->cells, v.ignored.clock_nets).gates) {
+      v.discrete_gate_nets.insert(gate.output_net);
+    }
+  }
   v.pins.clear();
   v.drivers.clear();
   uint64_t rc_layout_hash = hash_text("physical-pin-layout-v1");
@@ -2258,7 +2491,7 @@ void make_arrays(View& v, const ph::Technology& tech) {
         const auto  index     = v.cell.at(e.instance);
         const auto& c         = v.cells[index];
         v.rc_pin_types.back() = hash_text(e.pin.view(), hash_text(c.macro));
-        const auto [x, y]     = offset(tech.macros.at(c.macro), e.pin, c.place.orientation, tech.dbu);
+        const auto [x, y]     = placement_pin_offset(tech.macros.at(c.macro), e.pin, c.place.orientation, tech.dbu);
         d.pin2node.push_back(index);
         d.pin_offset_x.push_back(x);
         d.pin_offset_y.push_back(y);
@@ -3076,7 +3309,7 @@ std::pair<double, double> Geometry_view::pin_offset(size_t pin) const {
   if (view.pins[pin].instance == "PIN") {
     return {0, 0};
   }
-  return offset(legal_technology->macros.at(view.cells[node].macro),
+  return placement_pin_offset(legal_technology->macros.at(view.cells[node].macro),
                 view.pins[pin].pin,
                 pose(node).orientation,
                 legal_technology->dbu);
@@ -3217,7 +3450,7 @@ void localize_tie_sites(View& v, const ph::Technology& tech, const liberty::Cell
         y                    += terminal.y;
       } else {
         const auto& user     = v.cells[v.cell.at(sink.instance)];
-        const auto [dx, dy]  = offset(tech.macros.at(user.macro), sink.pin, user.place.orientation, tech.dbu);
+        const auto [dx, dy]  = placement_pin_offset(tech.macros.at(user.macro), sink.pin, user.place.orientation, tech.dbu);
         x                   += user.place.x + dx;
         y                   += user.place.y + dy;
       }
@@ -3258,7 +3491,7 @@ void localize_tie_sites(View& v, const ph::Technology& tech, const liberty::Cell
       }
       double dx = 0, dy = 0;
       for (const auto& pin : outputs.at(index)) {
-        const auto [px, py]  = offset(tech.macros.at(cell.macro), pin, r.orientation, tech.dbu);
+        const auto [px, py]  = placement_pin_offset(tech.macros.at(cell.macro), pin, r.orientation, tech.dbu);
         dx                  += px;
         dy                  += py;
       }
@@ -3327,11 +3560,11 @@ void localize_tie_sites(View& v, const ph::Technology& tech, const liberty::Cell
             y                    = terminal.y;
           } else {
             const auto& user    = v.cells[v.cell.at(sink.instance)];
-            const auto [dx, dy] = offset(tech.macros.at(user.macro), sink.pin, user.place.orientation, tech.dbu);
+            const auto [dx, dy] = placement_pin_offset(tech.macros.at(user.macro), sink.pin, user.place.orientation, tech.dbu);
             x                   = user.place.x + dx;
             y                   = user.place.y + dy;
           }
-          const auto [dx, dy]  = offset(tech.macros.at(tie.macro), outputs.at(index)[i], place.orientation, tech.dbu);
+          const auto [dx, dy]  = placement_pin_offset(tech.macros.at(tie.macro), outputs.at(index)[i], place.orientation, tech.dbu);
           cost                += std::abs(place.x + dx - x) + std::abs(place.y + dy - y);
         }
         return cost;
@@ -3740,6 +3973,11 @@ dp::RoutePolicy route_policy(const Options& options, const Stage_route& stage) {
   return policy;
 }
 }  // namespace
+std::pair<int64_t,int64_t> placement_cell_halo(const Options& options,const physical::Site& site,int64_t dbu) {
+  const auto resolved=resolve_macro_halo(options,site.height);
+  auto [hx,hy]=resolved.cell_halo.value_or(std::pair{resolved.halo_x,resolved.halo_y});
+  return {macro_halo(hx,dbu,std::llround(site.width*dbu)),macro_halo(hy,dbu,std::llround(site.height*dbu))};
+}
 void detail::install_handoff_io(dp::Design& design, std::vector<ph::Terminal>& signal_pins, size_t terminal_begin,
                                 const std::vector<ph::Terminal>& measured_pins) {
   if (measured_pins.size() < signal_pins.size() || terminal_begin > design.node_x.size()
@@ -3772,35 +4010,6 @@ DreamPlace::native::RoutePolicy resolve_route_policy(const Options& options, con
   return route_policy(options, stage);
 }
 void       initialize_route_tables() { initialize_flute_tables(); }
-// Placement RC uses driver-aware Steiner trees, with half each wire's
-// capacitance on each end. Coincident pins attach to a shared junction through
-// 1e-9 ohm edges. If driver-aware construction exceeds its work bound, spatial
-// FLUTE groups are joined by representative trees and any cycles are removed.
-ph::Rc_net steiner_rc(std::string driver, const std::vector<std::pair<std::string, std::pair<double, double>>>& pins,
-                      const Wire_rc& wire, double dbu, bool* approximate) {
-  const auto driver_pin = std::find_if(pins.begin(), pins.end(), [&](const auto& pin) { return pin.first == driver; });
-  if (driver_pin == pins.end()) {
-    throw std::invalid_argument("Steiner RC requires a driver pin");
-  }
-  std::vector<std::pair<double, double>> xy;
-  xy.reserve(pins.size());
-  for (const auto& pin : pins) {
-    xy.push_back(pin.second);
-  }
-  const auto net = steiner_net(xy, static_cast<size_t>(driver_pin - pins.begin()), per_um(wire), dbu, approximate);
-  ph::Rc_net rc;
-  rc.driver         = std::move(driver);
-  rc.wire_length_um = net.wire_length_um;
-  rc.nodes.reserve(net.node_cap_ff.size());
-  for (size_t i = 0; i < net.node_cap_ff.size(); ++i) {
-    rc.nodes.push_back({i < pins.size() ? Pin_label(pins[i].first) : Pin_label(), net.node_cap_ff[i]});
-  }
-  rc.edges.reserve(net.edges.size());
-  for (const auto& edge : net.edges) {
-    rc.edges.push_back({edge.from, edge.to, edge.resistance_ohm});
-  }
-  return rc;
-}
 namespace {
 // The numerical RC step consumes only an immutable pin-ID layout and arrays.
 // Named timing adapters below bind the already-existing endpoint labels later.
@@ -3824,7 +4033,8 @@ struct Numeric_rc_snapshot {
   }
 };
 uint64_t            rc_double_bits(double value) { return std::bit_cast<uint64_t>(value == 0 ? 0.0 : value); }
-Numeric_rc_snapshot estimate_numeric_rc(const Geometry_view& geometry, const Rc_policy& policy, bool full, Rc_cache* cache) {
+Numeric_rc_snapshot estimate_numeric_rc(const Geometry_view& geometry, const Rc_policy& policy, const Rc_policy& clock_policy,
+                                        bool use_clock_rc, bool full, Rc_cache* cache) {
   const auto&              v      = geometry.view;
   const auto&              design = geometry.design;
   std::vector<Rc_geometry> nets;
@@ -3835,6 +4045,7 @@ Numeric_rc_snapshot estimate_numeric_rc(const Geometry_view& geometry, const Rc_
       continue;
     }
     Rc_geometry g;
+    g.clock  = use_clock_rc && v.ignored.clock_nets.at(net);
     g.driver = static_cast<Rc_pin_id>(begin);  // make_arrays puts the driver first
     g.pins.reserve(end - begin);
     for (int p = begin; p < end; ++p) {
@@ -3872,11 +4083,11 @@ Numeric_rc_snapshot estimate_numeric_rc(const Geometry_view& geometry, const Rc_
   initialize_flute_tables();
   Numeric_rc_snapshot result;
   if (cache) {
-    result.cache = cache->update(v.rc_layout, std::move(nets), policy, build);
+    result.cache = cache->update(v.rc_layout, std::move(nets), policy, build, &clock_policy);
   } else {
     result.fresh.reserve(nets.size());
     for (auto& net : nets) {
-      auto tree = build(net, policy);
+      auto tree = build(net, net.clock ? clock_policy : policy);
       result.fresh.push_back({std::move(net), std::move(tree)});
     }
   }
@@ -3947,15 +4158,15 @@ std::shared_ptr<ph::Parasitics> estimate_rc(const Geometry_view& geometry, const
                                             ph::Pin_locations* pin_locations, Rc_cache* cache = nullptr,
                                             Rc_reuse_stats* reuse = nullptr, bool provenance = true) {
   const auto&  v            = geometry.view;
-  const auto   wire         = technology_wire_rc(tech,
-                                                 options.liberty,
-                                                 options.tech_rc_file,
-                                                 options.resistance_ohm_um,
-                                                 options.capacitance_ff_um,
-                                                 options.rc_pessimism,
-                                                 options.technology().cells.contents);
-  const double horizontal_r = wire.horizontal_r, horizontal_c = wire.horizontal_c;
-  const double vertical_r = wire.vertical_r, vertical_c = wire.vertical_c;
+  const auto   wire         = technology_net_wire_rc(tech,
+                                           options.liberty,
+                                           options.tech_rc_file,
+                                           options.resistance_ohm_um,
+                                           options.capacitance_ff_um,
+                                           options.rc_pessimism,
+                                           options.technology().cells.contents);
+  const double horizontal_r = wire.signal.horizontal_r, horizontal_c = wire.signal.horizontal_c;
+  const double vertical_r = wire.signal.vertical_r, vertical_c = wire.signal.vertical_c;
   if (provenance) {
     rapidjson::StringBuffer                    buffer;
     rapidjson::Writer<rapidjson::StringBuffer> json(buffer);
@@ -3967,7 +4178,7 @@ std::shared_ptr<ph::Parasitics> estimate_rc(const Geometry_view& geometry, const
     json.Key("wire_r_c_scale");
     json.Double(std::sqrt(options.rc_pessimism));
     json.Key("source");
-    json.String(wire.source.c_str());
+    json.String(wire.signal.source.c_str());
     json.Key("resistance_units");
     json.String("ohm_per_um");
     json.Key("capacitance_units");
@@ -3981,14 +4192,25 @@ std::shared_ptr<ph::Parasitics> estimate_rc(const Geometry_view& geometry, const
       json.Key(key);
       json.Double(value);
     }
+    if (options.clock_tree) {
+      json.Key("clock_horizontal_r");
+      json.Double(wire.clock.horizontal_r);
+      json.Key("clock_horizontal_c");
+      json.Double(wire.clock.horizontal_c);
+      json.Key("clock_vertical_r");
+      json.Double(wire.clock.vertical_r);
+      json.Key("clock_vertical_c");
+      json.Double(wire.clock.vertical_c);
+    }
     json.EndObject();
     std::ofstream out(options.output_dir + "/wire_rc.json");
     if (!(out << buffer.GetString() << '\n')) {
       throw std::runtime_error("cannot write technology RC provenance");
     }
   }
-  const Rc_policy policy{per_um(wire), double(tech.dbu), wire.source};
-  const auto      numeric = estimate_numeric_rc(geometry, policy, options.full, cache);
+  const Rc_policy policy{per_um(wire.signal), double(tech.dbu), wire.signal.source};
+  const Rc_policy clock_policy{per_um(wire.clock), double(tech.dbu), wire.clock.source};
+  const auto      numeric = estimate_numeric_rc(geometry, policy, clock_policy, options.clock_tree, options.full, cache);
   if (reuse) {
     *reuse = numeric.cache.stats;
   }
@@ -4045,16 +4267,15 @@ std::shared_ptr<Tree_cache> make_tree_cache(const Geometry_view& geometry) {
 }
 timing::fast::Wire_trees estimate_wire_trees(const Geometry_view& geometry, const ph::Technology& tech, const Options& options,
                                              const Tree_cache& cache) {
-  const auto& v      = geometry.view;
-  const auto& design = geometry.design;
-  const auto  wire   = technology_wire_rc(tech,
-                                         options.liberty,
-                                         options.tech_rc_file,
-                                         options.resistance_ohm_um,
-                                         options.capacitance_ff_um,
-                                         options.rc_pessimism,
-                                         options.technology().cells.contents);
-  (void)v;
+  const auto&              v      = geometry.view;
+  const auto&              design = geometry.design;
+  const auto               wire   = technology_net_wire_rc(tech,
+                                           options.liberty,
+                                           options.tech_rc_file,
+                                           options.resistance_ohm_um,
+                                           options.capacitance_ff_um,
+                                           options.rc_pessimism,
+                                           options.technology().cells.contents);
   timing::fast::Wire_trees trees;
   trees.topology = cache.topology;
   trees.node_start.reserve(cache.tree_net.size() + 1);
@@ -4072,7 +4293,10 @@ timing::fast::Wire_trees estimate_wire_trees(const Geometry_view& geometry, cons
     for (int p = begin; p < end; ++p) {
       xy.push_back(geometry.pin_position(p, geometry.pin_offset(p)));
     }
-    const auto tree = steiner_net(xy, cache.topology->driver_index[k], per_um(wire), tech.dbu);
+    const auto tree = steiner_net(xy,
+                                  cache.topology->driver_index[k],
+                                  per_um(options.clock_tree && v.ignored.clock_nets.at(net) ? wire.clock : wire.signal),
+                                  tech.dbu);
     for (const auto cap : tree.node_cap_ff) {
       trees.node_cap_ff.push_back(static_cast<float>(cap));
     }
@@ -4325,7 +4549,7 @@ public:
               net,
               x,
               y,
-              {offset(macro, v.pins[p].pin, Orientation::N, tech.dbu), offset(macro, v.pins[p].pin, Orientation::FS, tech.dbu)}
+              {placement_pin_offset(macro, v.pins[p].pin, Orientation::N, tech.dbu), placement_pin_offset(macro, v.pins[p].pin, Orientation::FS, tech.dbu)}
           });
         }
       }
@@ -5566,7 +5790,7 @@ std::shared_ptr<const gui::Scene> gui_scene(const View& v, const ph::Technology&
           if (pin.shapes.empty() || pin.use == "POWER" || pin.use == "GROUND") {
             continue;
           }
-          const auto [x, y] = offset(master, name, v.cells[i].place.orientation, tech.dbu);
+          const auto [x, y] = placement_pin_offset(master, name, v.cells[i].place.orientation, tech.dbu);
           n.signal_pins.push_back({name, x, y, std::move(connected[name])});
         }
       }
@@ -5594,6 +5818,37 @@ std::shared_ptr<const gui::Scene> gui_scene(const View& v, const ph::Technology&
     }
   }
   scene->build_index();
+  if (options.has_physical_clock_tree()) {
+    // The native clock tree, by solver node: each physical clock net's driver (its first pin) and loads. The session
+    // may be another process, so this is data in the scene; the handoff adds its estimates when it is on disk.
+    for (size_t net = 0; net < v.ignored.clock_nets.size() && net + 1 < d.flat_net2pin_start.size(); ++net) {
+      const int begin = d.flat_net2pin_start[net], end = d.flat_net2pin_start[net + 1];
+      if (!v.ignored.clock_nets[net] || end - begin < 2) {
+        continue;
+      }
+      const auto node_of = [&](int k) {
+        const int node = d.pin2node[d.flat_net2pin[k]];
+        return node >= 0 && size_t(node) < scene->nodes.size() ? node : -1;
+      };
+      gui::Clock_net clock;
+      clock.driver = node_of(begin);
+      // The driver names the net: net names change through legalization, the driver pin does not.
+      clock.name   = clock.driver >= 0 ? scene->nodes[size_t(clock.driver)].name : std::format("net#{}", net);
+      for (int k = begin + 1; k < end; ++k) {
+        clock.sinks.push_back(node_of(k));
+      }
+      scene->clock_nets.push_back(std::move(clock));
+    }
+    // A stage that writes next to the handoff (clock_initial, final, regions, ...) reads its parent's.
+    auto directory = std::filesystem::path(options.output_dir);
+    for (int up = 0; up < 3 && !directory.empty(); ++up, directory = directory.parent_path()) {
+      const auto path = directory / "pcrs_clock.json";
+      if (const auto handoff = file_utils::read_file(path.string())) {
+        gui::annotate_clock(*scene, *handoff, path.string());
+        break;
+      }
+    }
+  }
   {
     // What the flow demands of a FIXED macro, as data (the flow and the session may be different processes): a pose the
     // agent or the page pins is held exactly through legalization, so one that misses the tracks ends the run later
@@ -5839,13 +6094,13 @@ struct Scoped_poses {
 // propagate timing over the complete constrained design.
 void gui_trial_timing(gui::Timing_query& query, timing::Whatif& journal, const View& view, dp::Design& design,
                       const ph::Technology& tech, const Options& options) {
-  const auto wire         = technology_wire_rc(tech,
-                                       options.liberty,
-                                       options.tech_rc_file,
-                                       options.resistance_ohm_um,
-                                       options.capacitance_ff_um,
-                                       options.rc_pessimism,
-                                       options.technology().cells.contents);
+  const auto wire         = technology_net_wire_rc(tech,
+                                           options.liberty,
+                                           options.tech_rc_file,
+                                           options.resistance_ohm_um,
+                                           options.capacitance_ff_um,
+                                           options.rc_pessimism,
+                                           options.technology().cells.contents);
   const auto original     = journal.failing_endpoints(0);
   query.baseline_failing  = original.size();
   const auto baseline_wns = journal.wns(), baseline_tns = journal.tns();
@@ -5884,7 +6139,11 @@ void gui_trial_timing(gui::Timing_query& query, timing::Whatif& journal, const V
           pins.emplace_back(view.pins[pin].label(), geometry.pin_position(pin, geometry.pin_offset(pin)));
         }
         bool approximate = false;
-        journal.set_net(steiner_rc(pins.front().first, pins, wire, tech.dbu, &approximate));
+        journal.set_net(steiner_rc(pins.front().first,
+                                   pins,
+                                   options.clock_tree && view.ignored.clock_nets.at(net) ? wire.clock : wire.signal,
+                                   tech.dbu,
+                                   &approximate));
       }
       trial.wns_ps  = journal.wns();
       trial.tns_ps  = journal.tns();
@@ -6029,21 +6288,30 @@ bool gui_timing(const View& v, const ph::Technology& tech, const Options& option
       for (const auto& p : v.pins) {
         labels.push_back(p.label());
       }
-      const auto                                           wire = technology_wire_rc(tech,
-                                           options.liberty,
-                                           options.tech_rc_file,
-                                           options.resistance_ohm_um,
-                                           options.capacitance_ff_um,
-                                           options.rc_pessimism,
-                                           options.technology().cells.contents);
+      const auto                                           wire = technology_net_wire_rc(tech,
+                                               options.liberty,
+                                               options.tech_rc_file,
+                                               options.resistance_ohm_um,
+                                               options.capacitance_ff_um,
+                                               options.rc_pessimism,
+                                               options.technology().cells.contents);
       std::vector<std::tuple<std::string, double, double>> ios;
       for (const auto& io : env->region_ios) {
         ios.emplace_back(io.name, io.x, io.y);
       }
       gui::wire::Encoder a;
-      binary_message::put(a, timer, labels, excluded, per_um(wire), double(tech.dbu), *fb.wns, *fb.tns, options.density);
+      binary_message::put(a, timer, labels, excluded, per_um(wire.signal), double(tech.dbu), *fb.wns, *fb.tns, options.density);
       auto settings = *env;
       frozen_map_fields(a, d, settings, ios);
+      if (options.clock_tree) {
+        std::vector<uint32_t> clocks;
+        for (size_t net = 0; net < v.ignored.clock_nets.size(); ++net) {
+          if (v.ignored.clock_nets[net]) {
+            clocks.push_back(net);
+          }
+        }
+        binary_message::put(a, per_um(wire.clock), clocks);
+      }
       q.checkpoint = std::move(a.bytes);
       if (!q.native_endpoint.empty() && !gui::retain_native_gp(q.native_endpoint, q.frame->stats.optimizer_identity)) {
         q.native_endpoint.clear();
@@ -6586,7 +6854,7 @@ void gui_scoped_repair(const gui::Edits& edits, const View& baseline, const dp::
       for (int k = d.flat_node2pin_start[i]; k < d.flat_node2pin_start[i+1]; ++k) {
         const int id = d.flat_node2pin[k];
         const auto& pin = v.pins[id].pin;
-        std::tie(d.pin_offset_x[id], d.pin_offset_y[id]) = offset(tech.macros.at(cell.macro), pin, cell.place.orientation, tech.dbu);
+        std::tie(d.pin_offset_x[id], d.pin_offset_y[id]) = placement_pin_offset(tech.macros.at(cell.macro), pin, cell.place.orientation, tech.dbu);
         v.rc_pin_types[id] = hash_text(pin.view(), hash_text(cell.macro));
       }
     }
@@ -8185,7 +8453,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     if (!options.handoff_taps) {
       throw std::invalid_argument("synth.place.pg requires synth.place.handoff.taps=true");
     }
-    pg_profile                             = power_grid_profile(*tech_profile);
+    pg_profile                             = options.tuned_pg ? *options.tuned_pg : power_grid_profile(*tech_profile);
     pg_profile->channels                   = options.pg_channels;
     pg_profile->channel_max_ir_drop_v      = options.pg_channel_max_ir_drop_v;
     pg_profile->tolerate_macro_pin_overlap = options.pg_tolerate_macro_pin_overlap;
@@ -8238,6 +8506,9 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
   View       v;
   v.chunk_plan=options.accepted_chunk_plan;
   auto weight_roles       = prects_library(options.technology().cells, options.control_ports);
+  if (options.clock_cluster_strength > 0 && !options.fp_place) {
+    v.anchor_technology = options.technology_cache;
+  }
   weight_roles.reset_is_data = pcrs_active(options);
   v.prects                = weight_roles;
   v.native_orientations   = macro_active;
@@ -9894,7 +10165,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         if (pin.shapes.empty() || pin.use == "POWER" || pin.use == "GROUND") {
           continue;
         }
-        objects.back().signal_pin_centers.emplace(name, offset(m, name, Orientation::N, tech.dbu));
+        objects.back().signal_pin_centers.emplace(name, placement_pin_offset(m, name, Orientation::N, tech.dbu));
       }
     }
     return objects;
@@ -12516,6 +12787,59 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         }
         return moves;
       };
+    }
+    const bool installed_leaves = control.max_iterations == 0 && options.has_physical_clock_tree() && options.legroute
+                                  && options.legroute_plan.rounds > 0;
+    if (final_timing && options.clock_cluster_strength > 0 && (control.max_iterations > 0 || installed_leaves)) {
+      const auto&          cells = options.technology().cells;
+      std::map<Name, Name> clocks;
+      std::set<Name>       gates;
+      for (const auto* family : {&cells.dffs, &cells.async_dffs}) {
+        for (const auto& flop : *family) {
+          clocks.emplace(flop.name, flop.clk_pin);
+        }
+      }
+      for (const auto& gate : cells.icgs) {
+        gates.emplace(gate.name);
+      }
+      auto       clock_library = options.technology().clock_library();
+      auto       model         = std::make_shared<Clock_planning_model>(clock_planning_model(options, *clock_library, tech.dbu));
+      auto homes = std::make_shared<Clock_chunk_homes>(options.accepted_chunk_plan);
+      auto make_pairs = [&, clock_library, model, homes, clocks = std::move(clocks), gates = std::move(gates),
+                         installed_leaves, first = true](const dp::Design& current, int iteration) mutable {
+        auto plan = plan_clock_anchors(v, current, options, *model, *clock_library, *homes, clocks, gates, installed_leaves);
+        fs::create_directories(options.output_dir);
+        std::ofstream report(options.output_dir + "/pcrs_clock_clusters.jsonl", first ? std::ios::trunc : std::ios::app);
+        report << std::format(
+            R"({{"iteration":{},"groups":{},"anchors":{},"gate_anchors":{},"previous_anchors":{},"retained_anchors":{},"installed_leaves":{},"infeasible_domains":{},"star_um":{}}})",
+            iteration, plan.leaves, plan.pairs.size(), plan.gate_anchors, current.pair_anchors.size(), plan.retained_anchors,
+            installed_leaves, plan.infeasible, plan.star_um) << '\n';
+        if (!report) {
+          throw std::runtime_error("cannot write PCRS clock anchor report");
+        }
+        first = false;
+        return std::move(plan.pairs);
+      };
+      if (installed_leaves) {
+        v.design.pair_anchors = make_pairs(v.design, 0);
+      }
+      const auto prior = control.checkpoint;
+      if (!installed_leaves || prior) {
+        if (!prior || control.checkpoint_interval <= 0) {
+          control.checkpoint_interval = std::max(12, control.max_iterations / 8);
+        }
+        control.checkpoint = [prior, make_pairs = std::move(make_pairs)](const dp::Design& snapshot, int iteration) mutable {
+          auto update = prior ? prior(snapshot, iteration) : dp::GpUpdate{};
+          if (iteration > 0 && update.action != dp::GpCheckpointAction::restore) {
+            if (update.replacement) {
+              update.replacement->pair_anchors = make_pairs(*update.replacement, iteration);
+            } else {
+              update.pair_anchors = make_pairs(snapshot, iteration);
+            }
+          }
+          return update;
+        };
+      }
     }
     std::optional<Macro_anchor> macro_anchor;
     // anchor_final_override refers to macro_anchor: clear it whenever this scope ends.
@@ -15231,6 +15555,8 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
   }
   if (result.parasitics) {
     record_poses(*result.parasitics, v);
+  }
+  if (result.parasitics && !options.has_physical_clock_tree()) {
     // Classification is only needed to attach the cuts. Release its pin sets
     // before allocating the persisted RC text.
     const auto persisted_controls = prects_networks(tech, v.fp, v.prects);
@@ -15881,6 +16207,28 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     out.write(options.output_dir + "/metadata.json");
   }
   if (options.full && !options.timing_seed && !options.retain_placement) {
+    if (options.has_physical_clock_tree()) {
+      Clock_driver_pins seen;
+      for (auto& net : v.fp.nets) {
+        for (const auto& pin : net.connections) {
+          const auto driver = options.clock_net_drivers->find({pin.instance, pin.pin});
+          if (driver == options.clock_net_drivers->end()) {
+            continue;
+          }
+          if (!seen.insert(*driver).second) {
+            throw std::runtime_error("duplicate physical clock driver " + ph::connection_label(pin));
+          }
+          net.use = "CLOCK";
+        }
+      }
+      if (seen.size() != options.clock_net_drivers->size()) {
+        for (const auto& [inst, pin] : *options.clock_net_drivers) {
+          if (!seen.contains({inst, pin})) {
+            throw std::runtime_error("final DEF lost physical clock driver " + ph::connection_label({inst, pin}));
+          }
+        }
+      }
+    }
     ph::write_def(v.fp, def);
     ph::verify_def_roundtrip(v.fp, ph::read_def(def));
   } else {
@@ -16552,6 +16900,23 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     }
     result.preroute_design = std::move(snapshot);
   }
+  if (options.clock_tree && options.clock_hold_area_um2 > 0 && !v.design.pin2node.empty() && control.route_capacity_h > 0
+      && control.route_capacity_v > 0) {
+    dp::RudyOptions access;
+    access.bins_x              = std::max(1, route_grid_bins(control.auxiliary_bins, control.bins_x));
+    access.bins_y              = std::max(1, route_grid_bins(control.auxiliary_bins, control.bins_y));
+    access.horizontal_capacity = control.route_capacity_h;
+    access.vertical_capacity   = control.route_capacity_v;
+    access.cell_pin_capacity   = control.route_cell_pin_capacity;
+    access.pin_access          = true;
+    auto        grid           = std::make_shared<Satlegalize_route_grid>();
+    const auto& bounds         = v.design.layout;
+    grid->bounds               = {bounds.xl, bounds.yl, bounds.xh, bounds.yh};
+    grid->bins_x               = access.bins_x;
+    grid->bins_y               = access.bins_y;
+    grid->pin_utilization      = dp::rudy(v.design, access).pin_utilization;
+    result.hold_pin_access     = std::move(grid);
+  }
   result.floorplan        = std::move(v.fp);
   result.fp_resized_cells = fp_resized;
   result.fp_repair_edits  = fp_repairs;
@@ -17051,6 +17416,18 @@ int gui::serve_frozen_owner(int fd, int parent, uint64_t native_identity) {
     wire::Decoder                                        a{checkpoint};
     wire::fields(a, timer_data, frozen->labels, exclusions, rc, dbu, wns, tns, density);
     frozen_map_fields(a, frozen->design, env, ios);
+    auto clock_rc = rc;
+    if (frozen->design.flat_net2pin_start.empty()) {
+      throw std::runtime_error("placement checkpoint is missing its net pin offsets");
+    }
+    frozen->ignored.clock_nets.resize(frozen->design.flat_net2pin_start.size() - 1);
+    if (!a.bytes.empty()) {
+      std::vector<uint32_t> clocks;
+      wire::fields(a, clock_rc, clocks);
+      for (const auto n : clocks) {
+        frozen->ignored.clock_nets.at(n) = true;
+      }
+    }
     if (!a.bytes.empty() || frozen->labels.size() != frozen->design.pin2node.size()) {
       throw std::runtime_error("inconsistent placement checkpoint");
     }
@@ -17065,6 +17442,7 @@ int gui::serve_frozen_owner(int fd, int parent, uint64_t native_identity) {
     if (timer->engine()->report().wns_ps != wns || timer->engine()->report().tns_ps != tns) {
       throw std::runtime_error("restored timing totals differ from the live checkpoint");
     }
+    const Wire_rc            clock_wire{clock_rc[0], clock_rc[1], clock_rc[2], clock_rc[3], {}};
     const Wire_rc            wire_rc{rc[0], rc[1], rc[2], rc[3], {}};
     std::shared_ptr<Session> doc = Session::read_result_snapshot(document);
     std::string{}.swap(document);
@@ -17100,7 +17478,7 @@ int gui::serve_frozen_owner(int fd, int parent, uint64_t native_identity) {
             const Map_provider maps = [frozen](const std::string& k, const Frame& f) {
               return gui_map(k, frozen->design, f.x.data(), f.y.data(), f.x.size(), frozen->env);
             };
-            const Timing_provider evaluate = [frozen, timer, scene, wire_rc, dbu](Timing_query& q) {
+            const Timing_provider evaluate = [frozen, timer, scene, wire_rc, clock_wire, dbu](Timing_query& q) {
               const auto&   design   = frozen->design;
               const auto&   labels   = frozen->labels;
               const auto&   ignored  = frozen->ignored;
@@ -17124,7 +17502,7 @@ int gui::serve_frozen_owner(int fd, int parent, uint64_t native_identity) {
                                     std::pair(f.x.at(node) + design.pin_offset_x[p], f.y.at(node) + design.pin_offset_y[p]));
                 }
                 if (pins.size() >= 2) {
-                  changes.push_back(steiner_rc(pins.front().first, pins, wire_rc, dbu));
+                  changes.push_back(steiner_rc(pins.front().first, pins, ignored.clock_nets.at(n) ? clock_wire : wire_rc, dbu));
                 }
               }
               const auto sta_start = std::chrono::steady_clock::now();

@@ -1,5 +1,7 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
+#include <span>
+#include <optional>
 #include <array>
 #include <map>
 #include <optional>
@@ -12,9 +14,11 @@
 #include "inou/lefdef/physical.hpp"
 
 namespace livehd::placement {
+std::pair<double, double> placement_pin_offset(const physical::Macro&, const std::string& pin, physical::Orientation, int64_t dbu);
 struct Wire_rc {
   double      horizontal_r = 0, horizontal_c = 0, vertical_r = 0, vertical_c = 0;
   std::string source;
+  bool operator==(const Wire_rc&) const = default;
 };
 // Horizontal R, horizontal C, vertical R, vertical C per micron: the layout of
 // Rc_policy::per_um and the buffering producer's directional_rc.
@@ -41,6 +45,18 @@ Route_technology_rc technology_route_rc(const physical::Technology&, const std::
 Wire_rc             technology_wire_rc(const physical::Technology& tech, const std::string& liberty, const std::string& rc_file,
                                        double resistance = -1, double capacitance = -1, double rc_pessimism = 1,
                                        std::optional<std::string_view> liberty_text = std::nullopt);
+struct Net_wire_rc {
+  Wire_rc signal, clock;
+};
+// A clock-specific set_wire_rc overrides the common estimate on clock nets.
+Net_wire_rc technology_net_wire_rc(const physical::Technology& tech, const std::string& liberty, const std::string& rc_file,
+                                   double resistance = -1, double capacitance = -1, double rc_pessimism = 1,
+                                   std::optional<std::string_view> liberty_text = std::nullopt);
+// Driver-aware clock/signal RC for a mapped physical timing checkpoint.
+physical::Parasitics estimate_floorplan_rc(const physical::Floorplan&, const physical::Technology&, const Net_wire_rc&);
+// Optional per-driver calibration for the native leaf and trunk wires in a placement trial.
+physical::Parasitics estimate_floorplan_rc(const physical::Floorplan&, const physical::Technology&, const Net_wire_rc&,
+                                           const std::map<std::string, Wire_rc>& driver_rc, std::optional<std::span<const size_t>> subset = {});
 // One net's driver-aware Steiner RC from pin labels and positions in DBU.
 // The driver label must occur in pins, in any position. Pathological large
 // nets exceeding the driver-aware work bound use spatial FLUTE groups and an

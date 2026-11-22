@@ -6,6 +6,7 @@
 #include "pass/synth/cone_map.hpp"
 #include "place.hpp"
 
+namespace livehd::timing::fast { class Physical_ranker; }
 namespace livehd::placement {
 // Shared admission for optional optimization trials. Check before cloning,
 // legalization or STA; baseline and final validation remain mandatory. Callers
@@ -66,6 +67,17 @@ struct Virtual_expansion {
 Repair_result expand_virtual_buffers(Result initial, const Options& options, const Evaluate& evaluate,
                                      Virtual_expansion* stats = nullptr);
 Repair_result wirelength_resynthesize(Result initial, const Options& options, const Evaluate& evaluate, const Evaluate& trial_evaluate, Virtual_expansion& stats);
+// Build the native clock network on the private graph and seed its cells for terminal legalization.
+struct Clock_handoff {
+  std::set<std::string> buffers;
+  Clock_driver_pins drivers;
+};
+Clock_handoff build_clock_handoff(Result&, const Options&, const std::vector<std::string>&, std::string_view,
+                                  std::unique_ptr<timing::fast::Physical_ranker>, const std::string& previous_clock_report = {});
+void record_final_clock_leaf_geometry(const Result&, const std::string& output_dir);
+std::set<std::string> build_clock_tree(Result& placed, const Options& options, const std::vector<std::string>& macro_libraries, std::string_view sdc_text);
+std::set<std::string> build_clock_tree(Result&, const Options&, const std::vector<std::string>&, std::string_view,
+                                       std::unique_ptr<timing::fast::Physical_ranker>);
 struct Floorplan_resize {
   Timing_feedback timing;
   unsigned        proposed = 0, accepted = 0, repair_proposed = 0, repair_accepted = 0;

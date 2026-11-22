@@ -1,0 +1,99 @@
+diff --git a/re2/dfa.cc b/re2/dfa.cc
+--- a/re2/dfa.cc
++++ b/re2/dfa.cc
+@@ -1015,7 +1015,7 @@
+ DFA::State* DFA::RunStateOnByteUnlocked(State* state, int c) {
+   // Keep only one RunStateOnByte going
+   // even if the DFA is being run by multiple threads.
+-  absl::MutexLock l(&mutex_);
++  absl::MutexLock l(mutex_);
+   return RunStateOnByte(state, c);
+ }
+ 
+@@ -1152,24 +1152,24 @@
+ };
+ 
+ DFA::RWLocker::RWLocker(CacheMutex* mu) : mu_(mu), writing_(false) {
+-  mu_->ReaderLock();
++  mu_->lock_shared();
+ }
+ 
+ // This function is marked as ABSL_NO_THREAD_SAFETY_ANALYSIS because
+ // the annotations don't support lock upgrade.
+ void DFA::RWLocker::LockForWriting() ABSL_NO_THREAD_SAFETY_ANALYSIS {
+   if (!writing_) {
+-    mu_->ReaderUnlock();
+-    mu_->WriterLock();
++    mu_->unlock_shared();
++    mu_->lock();
+     writing_ = true;
+   }
+ }
+ 
+ DFA::RWLocker::~RWLocker() {
+   if (!writing_)
+-    mu_->ReaderUnlock();
++    mu_->unlock_shared();
+   else
+-    mu_->WriterUnlock();
++    mu_->unlock();
+ }
+ 
+ 
+@@ -1267,7 +1267,7 @@
+ DFA::State* DFA::StateSaver::Restore() {
+   if (is_special_)
+     return special_;
+-  absl::MutexLock l(&dfa_->mutex_);
++  absl::MutexLock l(dfa_->mutex_);
+   State* s = dfa_->CachedState(inst_, ninst_, flag_);
+   if (s == NULL)
+     ABSL_LOG(DFATAL) << "StateSaver failed to restore state.";
+@@ -1730,7 +1730,7 @@
+   if (start != NULL)
+     return true;
+ 
+-  absl::MutexLock l(&mutex_);
++  absl::MutexLock l(mutex_);
+   start = info->start.load(std::memory_order_relaxed);
+   if (start != NULL)
+     return true;
+@@ -2050,7 +2050,7 @@
+   // Build minimum prefix.
+   State* s = params.start;
+   min->clear();
+-  absl::MutexLock lock(&mutex_);
++  absl::MutexLock lock(mutex_);
+   for (int i = 0; i < maxlen; i++) {
+     if (previously_visited_states[s] > kMaxEltRepetitions)
+       break;
+diff --git a/re2/regexp.cc b/re2/regexp.cc
+--- a/re2/regexp.cc
++++ b/re2/regexp.cc
+@@ -95,7 +95,7 @@
+   if (ref_ < kMaxRef)
+     return ref_;
+ 
+-  absl::MutexLock l(ref_mutex());
++  absl::MutexLock l(*ref_mutex());
+   return (*ref_map())[this];
+ }
+ 
+@@ -108,7 +108,7 @@
+     });
+ 
+     // Store ref count in overflow map.
+-    absl::MutexLock l(ref_mutex());
++    absl::MutexLock l(*ref_mutex());
+     if (ref_ == kMaxRef) {
+       // already overflowed
+       (*ref_map())[this]++;
+@@ -128,7 +128,7 @@
+ void Regexp::Decref() {
+   if (ref_ == kMaxRef) {
+     // Ref count is stored in overflow map.
+-    absl::MutexLock l(ref_mutex());
++    absl::MutexLock l(*ref_mutex());
+     int r = (*ref_map())[this] - 1;
+     if (r < kMaxRef) {
+       ref_ = static_cast<uint16_t>(r);

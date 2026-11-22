@@ -74,6 +74,32 @@ hhds::Node_class add_flop(hhds::Graph& g, const std::string& name, const hhds::P
 
 }  // namespace
 
+TEST(LatchContract, ClockIdentifiedByItsGateLatchWindowWithoutPortNames) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_lcontract_unnamed_gate");
+  auto  gio = lib.create_io("top");
+  gio->add_input("p0", 0);
+  gio->add_input("p1", 1);
+  gio->set_bits("p0", 1);
+  gio->set_bits("p1", 1);
+  auto       g      = gio->create_graph();
+  auto       clock  = g->get_input_pin("p0");
+  const auto enable = g->get_input_pin("p1");
+  auto latch = add_latch(*g, "held", clock, true);
+  auto gate  = gu::create_typed_node(*g, Ntype_op::And);
+  auto held  = latch.get_driver_pin(0);
+  gu::set_bits(held, 1);
+  held.connect_sink(gate.create_sink_pin(0));
+  clock.connect_sink(gate.create_sink_pin(1));
+  auto gated = gate.create_driver_pin(0);
+  gu::set_bits(gated, 1);
+  add_flop(*g, "consumer", gated, false);
+  for (bool hierarchical : {false, true}) {
+    const Design_clocks clocks(g.get(), hierarchical);
+    EXPECT_TRUE(clocks.is_clock(clock));
+    EXPECT_FALSE(clocks.is_clock(enable));
+  }
+}
+
 // `latch_verify_hold`'s shape: the gate is COMPUTED (`en = (c==0) or (c==4)`),
 // so its root is an Or node — not a clock. It must classify as DATA even though
 // the design also has a real clock net for its flops.

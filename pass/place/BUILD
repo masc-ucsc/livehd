@@ -385,6 +385,7 @@ cc_test(
 filegroup(
     name = "place_srcs",
     srcs = [
+        "//pass/place/pcrs:clock_placement_srcs",
         "//core:metadata_srcs",
         "fp_repetition.cpp",
         "fp_repetition.hpp",
@@ -526,6 +527,16 @@ filegroup(
         "legroute_congestion.cpp",
         "resynthesize.cpp",
         "wirelength_resynth.cpp",
+        "clock_hold.cpp",
+        "clock_hold.hpp",
+        "clock_network.cpp",
+        "clock_bounds.cpp",
+        "clock_bounds.hpp",
+        "clock_clone.cpp",
+        "clock_clone.hpp",
+        "clock_schedule.cpp",
+        "clock_schedule.hpp",
+        "clock_model.hpp",
         "wirelength_factor.cpp",
         "wirelength_register.cpp",
         "steiner_repair.cpp",
@@ -735,8 +746,8 @@ cc_library(
 # 2i-interact: the interactive placement session, its HTTP server and the embedded page.
 cc_library(
     name = "gui",
-    srcs = ["gui/gui_worker.cpp","gui/gui_geometry.cpp","gui/gui_session.cpp", "gui/gui_server.cpp", "gui/gui_page.cpp", "gui/gui_render.cpp", "gui/gui_agent.cpp", "gui/gui_ipc.cpp", "gui/gui_scan.cpp"],
-    hdrs = ["gui/gui_scan.hpp", "gui/gui_tracks.hpp", "gui/gui_chunks.hpp", "macro_state.hpp", "gui/gui_policy.hpp","gui/gui_worker.hpp","gui/gui_geometry.hpp","gui/gui_session.hpp", "gui/gui_page.hpp", "gui/gui_render.hpp", "gui/gui_ipc.hpp", "gui/gui_wire.hpp"],
+    srcs = ["gui/gui_worker.cpp","gui/gui_geometry.cpp","gui/gui_session.cpp", "gui/gui_server.cpp", "gui/gui_page.cpp", "gui/gui_render.cpp", "gui/gui_agent.cpp", "gui/gui_ipc.cpp", "gui/gui_scan.cpp", "gui/gui_clock.cpp"],
+    hdrs = ["gui/gui_clock.hpp", "gui/gui_scan.hpp", "gui/gui_tracks.hpp", "gui/gui_chunks.hpp", "macro_state.hpp", "gui/gui_policy.hpp","gui/gui_worker.hpp","gui/gui_geometry.hpp","gui/gui_session.hpp", "gui/gui_page.hpp", "gui/gui_render.hpp", "gui/gui_ipc.hpp", "gui/gui_wire.hpp"],
     copts = COPTS,
     visibility = ["//visibility:public"],
     deps = [":macro_dead_space", "//core", "@rapidjson", "@re2//:re2"],
@@ -745,6 +756,13 @@ cc_library(
 cc_test(
     name = "gui_session_test",
     srcs = ["gui/gui_session_test.cpp"],
+    copts = COPTS,
+    deps = [":gui", "@googletest//:gtest_main"],
+)
+
+cc_test(
+    name = "gui_clock_test",
+    srcs = ["gui/gui_clock_test.cpp"],
     copts = COPTS,
     deps = [":gui", "@googletest//:gtest_main"],
 )
@@ -776,6 +794,7 @@ cc_binary(
 
 py_test(
     name = "fp_plan_summary_smoke",
+    legacy_create_init = 0,
     size = "small",
     srcs = ["tests/fp_plan_summary_smoke.py"],
     main = "tests/fp_plan_summary_smoke.py",
@@ -822,11 +841,16 @@ cc_library(
         "resize_engine.cpp",
         "resynthesize.cpp",
         "wirelength_resynth.cpp",
+        "clock_network.cpp",
+        "clock_clone.cpp",
+        "clock_clone.hpp",
+        "clock_schedule.cpp",
+        "clock_schedule.hpp",
+        "clock_model.hpp",
         "wirelength_factor.cpp",
         "wirelength_register.cpp",
         "steiner_repair.cpp",
         "routing_tracks.cpp",
-        "technology_rc.cpp",
         "timing_place.cpp",
     ],
     hdrs = [
@@ -867,7 +891,6 @@ cc_library(
         "resize_engine.hpp",
         "steiner_repair.hpp",
         "routing_tracks.hpp",
-        "technology_rc.hpp",
         ":place_salt",
     ],
     copts = COPTS,
@@ -887,7 +910,11 @@ cc_library(
         ":signal_router",
         ":handoff_rows",
         ":steiner_topology",
+        ":clock_hold",
+        ":clock_bounds",
+        ":technology_rc",
         "//pass/timing:physical_rank",
+        "//pass/timing:fast_timing",
         ":handoff_pins",
         ":preroute_design",
         ":power_grid",
@@ -899,12 +926,14 @@ cc_library(
         ":fp_repetition",
         ":fp_chunks",
         "//pass/place/pcrs",
+        "//pass/liberty:timing_model",
         "//core",
         "//graph",
         "//inou/lefdef:index_union_find",
         "//inou/lefdef:inou_lefdef",
         "//pass/color:floorplan_color",
         "//pass/place/forces:gp_timing",
+        "//pass/place/forces:clock_cluster",
         "//pass/place/forces:gp_rejection",
         "//pass/place/forces:legalization",
         "//pass/liberty:liberty_dff",
@@ -1286,6 +1315,56 @@ cc_test(
     srcs = ["routing_tracks_test.cpp"],
     copts = COPTS,
     deps = [":place", "@googletest//:gtest_main"],
+)
+
+cc_library(
+    name = "clock_bounds",
+    srcs = ["clock_bounds.cpp"],
+    hdrs = ["clock_bounds.hpp"],
+    copts = COPTS,
+    deps = ["//core"],
+)
+
+cc_library(
+    name = "clock_hold",
+    srcs = ["clock_hold.cpp"],
+    hdrs = ["clock_hold.hpp"],
+    copts = COPTS,
+    deps = [":clock_bounds", ":row_occupancy", ":satlegalize", ":technology_rc", "//core", "//inou/lefdef:inou_lefdef", "//pass/place/pcrs"],
+)
+
+cc_test(
+    name = "clock_hold_test",
+    size = "small",
+    srcs = ["clock_hold_test.cpp"],
+    copts = COPTS,
+    deps = [":clock_hold", "@googletest//:gtest_main"],
+)
+
+cc_test(
+    name = "clock_gate_merge_test",
+    size = "small",
+    srcs = ["clock_gate_merge_test.cpp"],
+    data = ["//inou/lefdef:test_data", "tests/clock_gate_pair.def"],
+    copts = COPTS,
+    deps = [":place", "@googletest//:gtest_main", "@rapidjson"],
+)
+
+cc_test(
+    name = "clock_bounds_test",
+    size = "small",
+    srcs = ["clock_bounds_test.cpp"],
+    copts = COPTS,
+    deps = [":clock_bounds", "@googletest//:gtest_main"],
+)
+
+cc_library(
+    name = "technology_rc",
+    srcs = ["technology_rc.cpp"],
+    hdrs = ["technology_rc.hpp"],
+    copts = COPTS,
+    visibility = ["//visibility:public"],
+    deps = [":steiner_topology", "//core", "//inou/lefdef:inou_lefdef"],
 )
 
 cc_library(

@@ -133,6 +133,9 @@ TEST(AbcIo, RemapKeepsClockConeCells) {
     Fixture f(6);
     auto    macro = f.library.create_io("MACRO");
     macro->add_input(std::string(pin), 1);
+    // An unused declared SRAM output has no instance pin in HHDS.
+    macro->add_output("unused_q", 2);
+    macro->set_bits("unused_q", 1);
     macro->set_bits(std::string(pin), 1);
     auto drv = f.graph->get_output_pin("y").get_driver_pin();
     auto m   = graph_util::create_typed_node(*f.graph, Ntype_op::Sub);

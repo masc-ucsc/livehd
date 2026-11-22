@@ -2,11 +2,15 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <map>
+#include <optional>
 #include <span>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -15,7 +19,7 @@
 // The propagation of the fast timing engine (todo 2q-fasttimer, step C): arrival and slew forward, required
 // time backward, for every Liberty corner in one walk of the levelized pins, in single precision.
 //
-// What it times: delay arcs of combinational cells; rising-edge flip-flops with ideal clocks (clock to
+// What it times: delay arcs of combinational cells; rising-edge flip-flops with ideal or propagated clocks (clock to
 // output, setup and hold checks); primary inputs with an input delay and a transition; primary outputs
 // with an output delay and a load. Cell delay and output slew come from the NLDM tables at the input
 // slew and the total load of the net (pin capacitances plus wire capacitance, no effective capacitance);
@@ -39,6 +43,8 @@ struct Clock {
   // another clock. Empty with an empty `port`: a virtual clock, which only references IO delays.
   std::vector<uint32_t> source_pins;
   uint32_t              group = 0;  // the launch group of the flip-flops this clock clocks
+  bool                  propagated = false;
+  uint32_t              master     = no_index;  // Generated clock whose physical insertion starts on this master.
 };
 struct Input_delay {
   std::string port, clock;  // an empty clock is the first one
@@ -59,6 +65,8 @@ struct Output_delay {
   // false: the port has no output delay against a clock; it is an endpoint only for the groups an endpoint
   // relation (set_max_delay) names, with nothing but that delay as its requirement.
   bool        clocked  = true;
+  std::optional<float> min_delay_ps{};  // external minimum delay, subtracted from its capture edge
+  std::string          min_clock{};
 };
 // The setup relation of one endpoint for the arrivals of one launch group (no_index: of every group), in place of
 // the relation between the group and the capture clock. +inf: not checked, for hold neither (a false path from
@@ -68,6 +76,11 @@ struct Output_delay {
 struct Endpoint_relation {
   uint32_t pin = 0, group = no_index;
   float    setup_ps = std::numeric_limits<float>::infinity();
+};
+struct Clock_derates {
+  // Global, dimensionless delay multipliers, indexed by early (0) or late (1).
+  std::array<float, 2> cell{1, 1}, net{1, 1};
+  bool                 operator==(const Clock_derates&) const = default;
 };
 struct Constraints {
   std::vector<Clock>        clocks;
@@ -93,6 +106,8 @@ struct Constraints {
   float                     max_fanout = 0;
   // Items the constraint reader could not honor; copied into the report so that nothing is dropped silently.
   std::vector<std::string>  unsupported;
+  Clock_derates                            clock_derates;
+  std::map<uint32_t, std::array<float, 4>> sink_latencies;              // NaN for an unspecified edge/analysis.
   bool                      has_absolute_setup = false;  // A set_max_delay stays fixed when a clock period changes.
 };
 // Interconnect, from the wire trees of step D. Empty vectors are zero.
@@ -144,6 +159,7 @@ struct Report {
   size_t                     endpoints = 0, unclocked_endpoints = 0, unclocked_flops = 0;
   size_t                     slew_violations = 0, capacitance_violations = 0, fanout_violations = 0;
   size_t                     groups = 1;
+  bool                       unsupported_clock_phase = false;
   double                     electrical_excess = 0;
   bool                       hold_computed     = false;
   std::vector<std::string>   unsupported;
@@ -174,6 +190,8 @@ public:
   void rank();
   // Everything: rank, then true required times, the hold walk and check, the electrical checks.
   void evaluate();
+  // Refresh endpoint, hold and electrical reports after a journaled edit.
+  void                             evaluate_edits();
 
   [[nodiscard]] const Report& report() const { return report_; }
   [[nodiscard]] size_t        corners() const { return corners_; }
@@ -249,12 +267,35 @@ public:
   // The same slack, and the launch group whose arrival gives it (0 when no path passes the pin).
   [[nodiscard]] float         slack(uint32_t pin, uint32_t& group) const;
   [[nodiscard]] float         criticality(uint32_t pin) const { return criticality_[pin]; }
-  // True for a pin of the ideal clock network (clock source to flip-flop clock pins).
+  // True for a pin on a clock network (clock source to flip-flop clock pins).
   [[nodiscard]] bool          clock_network(uint32_t pin) const { return clock_pin_[pin] != 0; }
+  struct Clock_edge {
+    float    arrival  = 0;
+    float    slew     = 0;
+    uint32_t parent   = no_index;  // clock pin index and transition on this selected path
+    bool     inverted = false;     // Relative to the active edge of this domain.
+  };
+  [[nodiscard]] bool propagated_clock_sink(uint32_t pin) const {
+    return clock_pin_[pin] && netlist_.pin_type(pin).clock && constraints_.clocks[pin_clock_[pin]].propagated;
+  }
+  [[nodiscard]] const Clock& clock_at(uint32_t pin) const { return constraints_.clocks.at(pin_clock_.at(pin)); }
+  [[nodiscard]] Clock_edge   clock_edge(uint32_t pin, size_t corner, unsigned transition, bool early) const;
+  // Slack of the setup check at an endpoint, excluding requirements propagated back from downstream endpoints.
+  [[nodiscard]] float        endpoint_setup_slack(uint32_t pin) const {
+    const auto id = endpoint_of(pin);
+    return id == no_endpoint ? std::numeric_limits<float>::infinity() : endpoint_slack_[id];
+  }
   // Hold slack of a data pin (after evaluate); +inf without a check.
   [[nodiscard]] float         hold_slack(uint32_t pin) const {
     return hold_slack_.empty() ? std::numeric_limits<float>::infinity() : hold_slack_[pin];
   }
+  struct Hold_path {
+    float    slack_ps = std::numeric_limits<float>::infinity();
+    uint32_t launch = no_index, capture = no_index;
+  };
+  // Pins responsible for the evaluated minimum check, after common-path credit.
+  // An external capture or a conservative untracked launch has no physical pin.
+  [[nodiscard]] Hold_path worst_hold_path(uint32_t endpoint);
   // ---- Edit sessions (todo 2q-fasttimer, step G): transient edits on top of an evaluate(), settled
   // incrementally and undone exactly. The late setup state (arrival, slew, depth, required, endpoint
   // slack, loads) is kept up to date; the hold walk and the criticality are not (they are stale until the
@@ -280,6 +321,8 @@ public:
   // Returns the net.
   uint32_t             set_net(uint32_t driver, std::span<const uint32_t> sinks, std::span<const float> cap_ff,
                                std::span<const float> delay_ps, std::span<const float> slew_ps);
+  // Number of clock pins reevaluated by the most recent clock-subtree edit.
+  [[nodiscard]] size_t    last_clock_edit_pins() const { return clock_edit_pins_; }
   // Propagate the pending edits; every query below does it first.
   void                 settle();
   [[nodiscard]] float  wns();  // worst endpoint slack over the setup corners, +inf without endpoints
@@ -316,7 +359,9 @@ private:
     uint32_t pin   = 0;
     uint32_t clock = 0;
     bool     port  = false;  // a primary output (otherwise the data pin of a flip-flop)
-    bool     unclocked = false;  // a primary output without an output delay: checked only by an endpoint relation
+    bool     unclocked     = false;  // a primary output without a max delay: setup only by endpoint relation
+    uint32_t hold_clock    = no_index;  // output min delay may refer to a different clock
+    float    output_min_ps = 0;
   };
   // The state of a pin is kept per slot: a Liberty corner in a launch group (slot = group * corners + corner).
   [[nodiscard]] size_t index(uint32_t pin, size_t slot, unsigned t) const {
@@ -330,30 +375,51 @@ private:
   struct Seed {
     float arrival = 0, slew = 0;
   };
-  [[nodiscard]] Seed  input_seed(uint32_t port_cell, size_t corner, unsigned t, bool early) const;
+  [[nodiscard]] Seed     input_seed(uint32_t port_cell, size_t corner, unsigned t, bool early, bool clock_source = false) const;
   [[nodiscard]] uint32_t input_group(uint32_t port_cell) const;
   [[nodiscard]] double   fanout_excess(uint32_t pin) const;
 
   void                prepare();
   void                mark_clock_network();
+  void trace_generated_clock_logic();
+  [[nodiscard]] uint32_t waveform_domain(uint32_t pin) const;
+  void                               propagate_clocks(std::span<const uint32_t> dirty = {});
+  void                               refresh_clock_metadata();
+  void                               dirty_clock(uint32_t pin);
+  [[nodiscard]] std::optional<float> scheduled_latency(uint32_t pin, unsigned transition, bool early) const;
+  float                              common_clock_credit(uint32_t early_pin, uint32_t late_pin, size_t corner) const;
+  float setup_clock_credit(uint32_t pin, size_t slot, unsigned transition, uint32_t capture, std::vector<Path_point>* path) const;
+  bool  clock_spread_ = false;
+  std::vector<uint8_t>                                     clock_has_children_;
+  mutable std::vector<std::unordered_map<uint64_t, float>> clock_credit_cache_;
+  std::vector<uint32_t>                  clock_index_, clock_sources_, clock_order_, clock_position_, dirty_clocks_;
+  std::unordered_map<uint32_t, uint32_t> generated_masters_, generation_logic_;
+  std::vector<std::vector<uint32_t>>     clock_children_;
+  std::vector<Clock_edge>                clock_undo_;
+  size_t                                 clock_edit_pins_ = 0;
+  std::vector<Clock_edge>                clock_early_, clock_late_;
   void                compute_loads();
   bool                compute_net_load(uint32_t net);
   void                seed_late();
   void                forward_late();
-  void                seed_endpoints(bool rebased);
+  void                                   seed_endpoints(bool rebased, bool refresh = false);
+  [[nodiscard]] float                    endpoint_seed(size_t endpoint, size_t slot, unsigned transition) const;
   void                recompute_arrival(uint32_t pin);
   void                recompute_required(uint32_t pin);
-  [[nodiscard]] float endpoint_requirement(size_t endpoint, size_t corner, unsigned transition, bool rebased) const;
+  [[nodiscard]] float                    endpoint_requirement(size_t endpoint, size_t corner, unsigned transition,
+                                                              std::vector<Path_point>* path = nullptr) const;
   void                backward();
   void                measure_endpoints();
   void                criticality_pass();
-  void                forward_early();
+  void                                   forward_early(bool trace_origins = false);
+  Hold_path                              hold_path(size_t endpoint) const;
   void                check_hold();
   void                check_electrical();
   void                electrical_excess(uint32_t pin, double& slew_excess, double& cap_excess) const;
   void                mark_start_points();
   [[nodiscard]] float wire_delay(uint32_t pin, size_t corner) const;
   [[nodiscard]] float net_load(uint32_t net, size_t corner, bool early) const;
+  [[nodiscard]] std::array<float, 2>     transition_loads(uint32_t net, size_t corner, bool early) const;
   // Virtual buffer trees (see Wire_model::Virtual_tree).
   void                plan_virtual_trees();
   [[nodiscard]] bool  virtual_net(uint32_t net) const { return net < virt_levels_.size() && virt_levels_[net] != 0; }
@@ -369,6 +435,13 @@ private:
 
   // Per pin.
   std::vector<float>       arrival_, slew_, required_, early_arrival_, early_slew_, hold_slack_, criticality_;
+  struct Hold_launch {
+    uint32_t pin        = no_index;  // the launch clock of the earliest path, or an external input
+    uint32_t second_pin = no_index;
+    float    second = std::numeric_limits<float>::infinity(), others = std::numeric_limits<float>::infinity();
+    void     consider(float& first, uint32_t origin, float arrival);
+  };
+  std::vector<Hold_launch>    hold_launch_;
   std::vector<uint16_t>    depth_;
   std::vector<Predecessor> predecessor_;
   std::vector<uint8_t>     clock_pin_;  // 0 data, 1 inside the clock network, 2 a flop's clock pin
@@ -403,8 +476,24 @@ private:
   std::vector<float>       endpoint_required_;  // [endpoint][slot][transition], as seeded
   // The journal of an edit session (see mark/rollback): every stored value keeps its old one.
   enum class Undo_kind : uint8_t {
-    arrival, slew, required, depth, predecessor, arc_delay, load, wire_cap, wire_delay, wire_slew, endpoint_required,
-    endpoint_slack, cell_type, netlist_edit, grow_cells, grow_nets
+    arrival,
+    slew,
+    required,
+    depth,
+    predecessor,
+    arc_delay,
+    load,
+    early_load,
+    clock_edge,
+    wire_cap,
+    wire_delay,
+    wire_slew,
+    endpoint_required,
+    endpoint_slack,
+    cell_type,
+    netlist_edit,
+    grow_cells,
+    grow_nets
   };
   struct Undo {
     Undo_kind kind;
@@ -412,7 +501,7 @@ private:
     uint32_t  old_bits;
     size_t    index;
   };
-  bool                     journal_on_ = false;
+  bool                      journal_on_ = false, detailed_edits_ = false;
   std::vector<Undo>        journal_;
   // Edit sessions: dirty pins by position in the order (a forward and a backward heap), flags per pin.
   // The key of a pin orders the walk of an edit session: the position in the levelized order times 2^24 for an

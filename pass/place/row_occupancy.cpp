@@ -13,6 +13,77 @@ namespace ph = physical;
 bool fixed(const Ann_place& p) { return p.status == ph::Status::FIXED || p.status == ph::Status::LOCKED; }
 }  // namespace
 
+std::vector<Row_gaps> unoccupied_rows(const physical::Technology& tech, const physical::Floorplan& fp, unsigned padding_sites, int64_t halo_x, int64_t halo_y) {
+  if (fp.rows.empty()) {
+    return {};
+  }
+  auto rows = row_gaps(tech, fp, "PCRS clock placement");
+  for (const auto& c : fp.components) {
+    if (c.place.status == physical::Status::UNPLACED) {
+      return {};
+    }
+    const auto& m = tech.macros.at(c.macro);
+    auto rect = physical::placed_rect(m,c.place,fp.dbu,{-m.origin_x,-m.origin_y,m.width-m.origin_x,m.height-m.origin_y});
+    if (m.klass.starts_with("CORE")) {
+      if (padding_sites && !fixed_physical_cell(c,m)) {
+        const auto pad=std::llround(tech.sites.at(m.site).width*fp.dbu)*padding_sites;
+        rect.xl-=pad;
+        rect.xh+=pad;
+      }
+    } else if (physical::placement_mask(c,tech)==physical::Placement_mask::none) {
+      rect.xl-=halo_x; rect.xh+=halo_x; rect.yl-=halo_y; rect.yh+=halo_y;
+    }
+    reserve_gaps(rows,rect);
+  }
+  // DEF placement blockages are already in die coordinates. Reserving their
+  // union directly also permits a clock handoff carrying snapshot routing NDRs.
+  for (const auto& blockage : fp.blockages) {
+    if (!blockage.soft) {
+      for (const auto& rect : blockage.rectangles) {
+        reserve_gaps(rows, rect);
+      }
+    }
+  }
+  return rows;
+}
+
+std::optional<Ann_place> closest_free_site(const physical::Floorplan& fp, const std::vector<Row_gaps>& rows,
+                                           const physical::Macro& master, double cx, double cy, unsigned padding_sites) {
+  const auto width = std::llround(master.width * fp.dbu), height = std::llround(master.height * fp.dbu);
+  if (width <= 0 || height <= 0) {
+    return {};
+  }
+  Ann_place pose;
+  double    best = std::numeric_limits<double>::infinity();
+  for (const auto& row : rows) {
+    const auto& source = fp.rows[row.source];
+    if (source.site != master.site || !physical::orientation_allowed(master, source.orientation) || row.height != height
+        || std::abs(row.y - cy) > best) {
+      continue;
+    }
+    const auto sites = (width + row.step - 1) / row.step;
+    for (const auto& [start,end] : row.free) {
+      const int64_t lo=start+padding_sites,hi=end-padding_sites;
+      if (hi - lo < sites) {
+        continue;
+      }
+      const auto site     = std::clamp<int64_t>(std::llround((cx - row.x) / row.step), lo, hi - sites);
+      const auto x        = row.x + site * row.step;
+      const auto distance = std::abs(x - cx) + std::abs(row.y - cy);
+      if (distance < best) {
+        best             = distance;
+        pose             = Ann_place(x, row.y, width, height);
+        pose.orientation = source.orientation;
+        pose.status      = physical::Status::PLACED;
+      }
+    }
+  }
+  if (!std::isfinite(best)) {
+    return {};
+  }
+  return pose;
+}
+
 void subtract_gaps(std::map<int64_t, int64_t>& gaps, int64_t lo, int64_t hi) {
   auto it = gaps.upper_bound(lo);
   if (it != gaps.begin()) {

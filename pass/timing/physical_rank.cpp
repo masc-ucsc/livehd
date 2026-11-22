@@ -166,7 +166,7 @@ void complete_constraints(Constraints& constraints, const Netlist& netlist, bool
     // its input-to-output paths, as the OpenTimer flow did.
     std::set<std::string> constrained;
     for (const auto& out : constraints.outputs) {
-      if (out.check) {
+      if (out.check || out.min_delay_ps) {
         constrained.insert(out.port);
       }
     }
@@ -231,6 +231,11 @@ void Physical_ranker::bind(const std::shared_ptr<hhds::Graph>& graph) {
   constraints_ = read_constraints(options_.sdc_text, sdc_units_, netlist, names_.get());
   complete_constraints(constraints_, netlist, options_.sdc_text.empty(), options_.default_constraints, options_.default_period_ps,
                        options_.output_load_ff);
+  if (options_.propagate_clocks) {
+    for (auto& clock : constraints_.clocks) {
+      clock.propagated = true;
+    }
+  }
   ++stats_.binds;
   stats_.bind_seconds += since(start);
 }
@@ -866,6 +871,45 @@ public:
                         engine().wire(),
                         o_.mapping_.layout->labels,
                         o_.mapping_.layout_pin);
+    // Existing checkpoints end at layout_pin and contain ideal clocks only.
+    std::vector<uint32_t> propagated;
+    const auto&           clocks = engine().constraints().clocks;
+    for (uint32_t i = 0; i < clocks.size(); ++i) {
+      if (clocks[i].propagated) {
+        propagated.push_back(i);
+      }
+    }
+    std::vector<std::pair<uint32_t, std::pair<std::string, float>>> output_holds;
+    const auto&                                                     outputs = engine().constraints().outputs;
+    for (uint32_t i = 0; i < outputs.size(); ++i) {
+      if (outputs[i].min_delay_ps) {
+        output_holds.emplace_back(i, std::pair{outputs[i].min_clock, *outputs[i].min_delay_ps});
+      }
+    }
+    std::vector<std::pair<uint32_t, uint32_t>> masters;
+    for (uint32_t i = 0; i < clocks.size(); ++i) {
+      if (clocks[i].master != no_index) {
+        masters.emplace_back(i, clocks[i].master);
+      }
+    }
+    const auto& derates     = engine().constraints().clock_derates;
+    const bool  has_derates = derates != Clock_derates{};
+    const auto& latencies   = engine().constraints().sink_latencies;
+    if (!propagated.empty() || !output_holds.empty() || has_derates || !masters.empty() || !latencies.empty()) {
+      binary_message::put(a, propagated);
+    }
+    if (!output_holds.empty() || has_derates || !masters.empty() || !latencies.empty()) {
+      binary_message::put(a, output_holds);
+    }
+    if (has_derates || !masters.empty() || !latencies.empty()) {
+      binary_message::put(a, derates.cell, derates.net);
+    }
+    if (!masters.empty() || !latencies.empty()) {
+      binary_message::put(a, masters);
+    }
+    if (!latencies.empty()) {
+      binary_message::put(a, latencies);
+    }
     return std::move(a.bytes);
   }
   void resize(const std::string& instance, const std::string& master) override {
@@ -1256,6 +1300,36 @@ std::unique_ptr<Physical_ranker> Physical_ranker::from_frozen_checkpoint(std::st
                          wire,
                          layout->labels,
                          owner->mapping_.layout_pin);
+  if (!reader.bytes.empty()) {
+    std::vector<uint32_t> propagated;
+    binary_message::fields(reader, propagated);
+    for (const auto clock : propagated) {
+      owner->constraints_.clocks.at(clock).propagated = true;
+    }
+  }
+  if (!reader.bytes.empty()) {
+    std::vector<std::pair<uint32_t, std::pair<std::string, float>>> output_holds;
+    binary_message::fields(reader, output_holds);
+    for (auto& [index, constraint] : output_holds) {
+      auto& out        = owner->constraints_.outputs.at(index);
+      out.min_clock    = std::move(constraint.first);
+      out.min_delay_ps = constraint.second;
+    }
+  }
+  if (!reader.bytes.empty()) {
+    auto& derates = owner->constraints_.clock_derates;
+    binary_message::fields(reader, derates.cell, derates.net);
+  }
+  if (!reader.bytes.empty()) {
+    std::vector<std::pair<uint32_t, uint32_t>> masters;
+    binary_message::fields(reader, masters);
+    for (const auto& [child, master] : masters) {
+      owner->constraints_.clocks.at(child).master = master;
+    }
+  }
+  if (!reader.bytes.empty()) {
+    binary_message::fields(reader, owner->constraints_.sink_latencies);
+  }
   auto labels            = std::make_shared<Feedback::Pin_index>();
   labels->labels         = layout->labels;
   owner->mapping_.index  = std::move(labels);

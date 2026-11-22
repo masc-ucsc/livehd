@@ -272,6 +272,7 @@ cc_library(
         "//pass/opentimer:pass_opentimer",
         "//pass/timing:physical_rank",
         "//pass/timing:timing_report",
+        "//pass/place/pcrs:clock_census",
         "//inou/lefdef:inou_lefdef",
         "//pass/place",
         "//pass/place:preroute_host",

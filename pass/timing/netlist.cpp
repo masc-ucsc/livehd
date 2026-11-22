@@ -40,7 +40,7 @@ void Netlist::retype(uint32_t cell, uint32_t type) {
   const auto& from = types_->type(cell_type_[cell]);
   const auto& to   = types_->type(type);
   bool        same = from.pin_count == to.pin_count && from.sequential == to.sequential && from.latch == to.latch
-              && from.memory == to.memory && from.clock_gate == to.clock_gate;
+              && from.memory == to.memory && from.clock_gate == to.clock_gate && from.clock_shape == to.clock_shape;
   for (uint32_t local = 0; same && local < from.pin_count; ++local) {
     const auto& a = types_->pin(cell_type_[cell], local);
     const auto& b = types_->pin(type, local);
@@ -61,7 +61,7 @@ void Netlist::retype(uint32_t cell, uint32_t type) {
 uint32_t Netlist::append_cell(uint32_t type) {
   const auto cell = add_cell(type);
   const auto& t   = types_->type(type);
-  untimed_.insert(untimed_.end(), t.pin_count, (t.latch || t.memory || t.clock_gate) ? 1 : 0);
+  untimed_.insert(untimed_.end(), t.pin_count, t.untimed());
   pin_net_.insert(pin_net_.end(), t.pin_count, no_index);
   Edit e{Edit::Kind::append_cell, cell, 0, false, {}};
   edit_log_.push_back(std::move(e));
@@ -168,6 +168,70 @@ void Netlist::connect(uint32_t driver_pin, uint32_t sink_pin) {
   connections_.emplace_back(driver_pin, sink_pin);
 }
 
+void Netlist::find_discrete_clock_gates() {
+  using Kind = liberty::Clock_cell_kind;
+  discrete_gates_.clear();
+  gate_enable_storage_.clear();
+  const auto shape   = [&](uint32_t cell) -> const Clock_shape& { return types_->type(type_of(cell)).clock_shape; };
+  bool       storage = false, combinational_gate = false;
+  for (auto id : cell_type_) {
+    const auto kind     = types_->type(id).clock_shape.kind;
+    storage            |= kind == Kind::latch || kind == Kind::flip_flop;
+    combinational_gate |= kind == Kind::gate;
+    if (storage && combinational_gate) {
+      break;
+    }
+  }
+  if (!storage || !combinational_gate) {
+    return;
+  }
+  std::vector<bool> clocks(nets());
+  for (uint32_t c = 0; c < cells(); ++c) {
+    const auto& type = types_->type(type_of(c));
+    if (!type.sequential && !type.clock_gate) {
+      continue;
+    }
+    for (uint32_t i = 0; i < type.pin_count; ++i) {
+      const auto p = pin(c, i);
+      if (pin_type(p).clock && net_of(p) != no_index) {
+        clocks[net_of(p)] = true;
+      }
+    }
+    for (const auto& arc : types_->arcs(type_of(c))) {
+      if (arc.kind != Arc_kind::launch_rise && arc.kind != Arc_kind::setup_rise && arc.kind != Arc_kind::hold_rise) {
+        continue;
+      }
+      const auto n = net_of(pin(c, arc.from));
+      if (n != no_index) {
+        clocks[n] = true;
+      }
+    }
+  }
+  liberty::visit_discrete_clock_gates(
+      clocks,
+      [&](uint32_t n) {
+        const auto p = driver_of(n), c = cell_of(p);
+        return shape(c).output == local_of(p) ? c : no_index;
+      },
+      [&](uint32_t c) { return shape(c).kind; },
+      [&](uint32_t c) { return shape(c).inputs.size(); },
+      [&](uint32_t c, uint32_t i) { return net_of(pin(c, shape(c).inputs[i])); },
+      [&](uint32_t c) { return shape(c).polarity; },
+      [&](uint32_t c, uint32_t i) { return bool(shape(c).levels[i]); },
+      [&](uint32_t n, uint32_t c, uint32_t ck, uint32_t ctl, const auto& en, const auto&, const auto&) {
+        const auto& gate  = shape(c);
+        const auto& latch = shape(en.driver);
+        discrete_gates_.try_emplace(driver_of(n),
+                                    pin(c, gate.inputs[ck]),
+                                    pin(c, gate.inputs[ctl]),
+                                    pin(en.driver, latch.inputs[0]),
+                                    pin(en.driver, latch.inputs[1]),
+                                    gate.polarity != gate.levels[ck],
+                                    gate.levels[ctl] != (en.steps.back().inverted != latch.inverted_data));
+        gate_enable_storage_.insert(en.driver);
+      });
+}
+
 void Netlist::finalize() {
   const size_t pin_count = pins();
   pin_net_.assign(pin_count, no_index);
@@ -200,17 +264,42 @@ void Netlist::finalize() {
   connections_.clear();
   connections_.shrink_to_fit();
 
+  find_discrete_clock_gates();
+
   // Cells the engine does not time.
   untimed_.assign(pin_count, 0);
   untimed_cells_ = 0;
   for (uint32_t cell = 0; cell < cells(); ++cell) {
     const auto& type = types_->type(cell_type_[cell]);
-    if (type.latch || type.memory || type.clock_gate) {
-      ++untimed_cells_;
+    if (type.untimed()) {
+      if (!gating_latch(cell)) {
+        ++untimed_cells_;
+      }
       for (uint32_t p = first_pin_[cell]; p < first_pin_[cell + 1]; ++p) {
         untimed_[p] = 1;
       }
     }
+  }
+  // Only the two inputs acquire timing. Transparent data propagation through latch Q remains cut.
+  unchecked_clock_gate_ = false;
+  // One gate can have multiple independently sampled enables. Check each storage
+  // element even when the output-to-clock association is already known.
+  for (const auto cell : gate_enable_storage_) {
+    const auto& inputs = types_->type(type_of(cell)).clock_shape.inputs;
+    const auto  clock = inputs[0], data = inputs[1];
+    bool        setup = false, hold = false;
+    for (const auto& arc : types_->arcs_into(type_of(cell), data)) {
+      if (arc.from != clock) {
+        continue;
+      }
+      setup |= arc.kind == Arc_kind::setup_rise;
+      hold  |= arc.kind == Arc_kind::hold_rise;
+    }
+    unchecked_clock_gate_     |= !setup || !hold;
+    untimed_[pin(cell, data)] = untimed_[pin(cell, clock)] = 0;
+  }
+  if (unchecked_clock_gate_) {
+    diagnostics_.emplace_back("a discrete clock gate lacks a supported closing-edge setup or hold check");
   }
   if (untimed_cells_ != 0) {
     diagnostics_.push_back(std::format("{} cells (latches, memories, clock gates) are not timed", untimed_cells_));
@@ -220,7 +309,7 @@ void Netlist::finalize() {
   // the engine does not time (above) are no edges: the engine never propagates through it (its pins keep their seed),
   // so a latch-based register file is no combinational loop, and no cut through it can move with the cell order.
   const auto timed_arc  = [](const Arc& arc) { return arc.kind == Arc_kind::combinational || arc.kind == Arc_kind::launch_rise; };
-  const auto timed_cell = [&](uint32_t cell) { return first_pin_[cell] == first_pin_[cell + 1] || untimed_[first_pin_[cell]] == 0; };
+  const auto            timed_cell = [&](uint32_t cell) { return !types_->type(type_of(cell)).untimed(); };
   std::vector<uint32_t> waiting(pin_count, 0);
   for (uint32_t p = 0; p < pin_count; ++p) {
     if (pin_net_[p] != no_index && net_driver_[pin_net_[p]] != p) {

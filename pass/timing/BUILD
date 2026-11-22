@@ -28,7 +28,7 @@ cc_library(
     copts = COPTS,
     includes = ["."],
     visibility = ["//visibility:public"],
-    deps = ["//pass/liberty:timing_model"],
+    deps = ["//pass/liberty:timing_model", "//pass/liberty:clock_function"],
 )
 
 # The constraint reader also feeds pass.opentimer, whose reuse cache is salted by these sources.

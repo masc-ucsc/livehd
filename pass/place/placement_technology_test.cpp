@@ -6,6 +6,7 @@
 #include <fstream>
 
 #include "gtest/gtest.h"
+#include "pass/liberty/timing_model.hpp"
 #include "place.hpp"
 #include "prects_networks.hpp"
 #include "repair_internal.hpp"
@@ -22,6 +23,11 @@ TEST(PlacementTechnology, SharedSnapshotNeedsNoFilesDuringCheckpoints) {
   options.lefs           = {(root / "sky130hd.tlef").string(), (root / "sky130hd.lef").string()};
   options.liberty        = (root / "sky130hd.lib").string();
   const auto& technology = options.technology();
+  const auto  standard   = technology.clock_library();
+  const std::string macro = R"(library(macros) { cell(ram) { pin(CLK) { direction : input; clock : true; } } })";
+  const auto  with_macro  = technology.clock_library(macro);
+  EXPECT_FALSE(standard->cells.contains("ram"));
+  EXPECT_TRUE(with_macro->cells.contains("ram"));
   const auto  roles      = prects_library(technology.cells);
   const auto  special    = detail::scan_special_pins(technology.cells, true);
   const auto  cells      = detail::inventory(options, technology.lef);
@@ -32,6 +38,8 @@ TEST(PlacementTechnology, SharedSnapshotNeedsNoFilesDuringCheckpoints) {
   }
   std::filesystem::remove(options.liberty);
   EXPECT_EQ(&checkpoint.technology(), &technology);
+  EXPECT_EQ(checkpoint.technology().clock_library(), standard);
+  EXPECT_EQ(checkpoint.technology().clock_library(macro), with_macro);
   EXPECT_EQ(prects_library(checkpoint.technology().cells).controls, roles.controls);
   EXPECT_EQ(detail::scan_special_pins(checkpoint.technology().cells, true), special);
   EXPECT_EQ(detail::inventory(checkpoint, checkpoint.technology().lef).size(), cells.size());

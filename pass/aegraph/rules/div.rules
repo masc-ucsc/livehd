@@ -30,6 +30,27 @@
   :example (Rem $x $x)
   :doc "b % b = 0. For b = 0 the remainder is the all-unknown value, and 0 is one of its refinements.")
 
+(simplify div_cancel_product 40
+  (Div (Mult x d) d)
+  :when (nonzero d)
+  => x
+  :example (Div (Mult $x 3) 3)
+  :doc "An exact product divided by its nonzero factor returns the other operand. An intervening truncation prevents the match.")
+
+(simplify rem_idempotent 40
+  (Rem (Rem x d) d)
+  :when (nonzero d)
+  => (Rem x d)
+  :example (Rem (Rem $x 3) 3)
+  :doc "A truncated remainder already lies strictly between minus and plus the divisor magnitude.")
+
+(simplify div_rem_reconstruct 40
+  (Sum (Mult (Div x d) d) (Rem x d))
+  :when (nonzero d)
+  => x
+  :example (Sum (Mult (Div $x 3) 3) (Rem $x 3))
+  :doc "The full quotient times its nonzero divisor plus the matching truncated remainder recovers the dividend of either sign.")
+
 (simplify div_pow2 30
   (Div x (k c))
   :when (pow2? c) (> c 1) (nonneg x)

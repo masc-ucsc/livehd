@@ -160,3 +160,96 @@
   => (EQ (Get_mask x 0 (k n)) (Get_mask y 0 (k n)))
   :example (EQ (Get_mask (Sum (as $x) (bs $y)) 0 8) 0)
   :doc "(x - y) mod 2^n == 0 is x mod 2^n == y mod 2^n.")
+
+(simplify and_cover_complement 43
+  (And (as (Or (as (EQ x 0) y ..tail)) x ..r))
+  => (And (as x (Or (as y ..tail)) ..r))
+  :example (And $x (Or (EQ $x 0) $y))
+  :doc "x & ((x == 0) | y | ...) can drop the comparison: when x is zero the outer AND already returns zero.")
+
+(simplify or_combine_complements 42
+  (Or (as (And x s) (And x (EQ s 0)) ..r))
+  :when (bool01 x) (bool01 s)
+  => (Or (as x ..r))
+  :example (Or (And (LT $x 0) (LT $s 0)) (And (LT $x 0) (EQ (LT $s 0) 0)))
+  :doc "Two Boolean terms with the same operand and opposite control polarities reduce to the common operand.")
+
+(alt or_factor_common 25
+  (Or (And x a) (And x b))
+  => (And x (Or a b))
+  :example (Or (And $x $a) (And $x $b))
+  :doc "Factor the common bitwise operand. Extraction accounts for other readers of either original term.")
+
+(alt or_consensus 32
+  (Or (as (And x a) (And (EQ x 0) b) (And a b)))
+  :when (bool01 x) (bool01 a) (bool01 b)
+  => (Or (And x a) (And (EQ x 0) b))
+  :example (Or (And (LT $x 0) (LT $a 0)) (And (EQ (LT $x 0) 0) (LT $b 0)) (And (LT $a 0) (LT $b 0)))
+  :doc "The consensus term of two opposite Boolean gates is redundant.")
+
+(simplify and_combine_complements 42
+  (And (as (Or x s) (Or x (EQ s 0)) ..r))
+  :when (bool01 x) (bool01 s)
+  => (And (as x ..r))
+  :example (And (Or (LT $x 0) (LT $s 0)) (Or (LT $x 0) (EQ (LT $s 0) 0)))
+  :doc "Two Boolean terms with the same operand and opposite control polarities reduce to the common operand.")
+
+(alt and_factor_common 25
+  (And (Or x a) (Or x b))
+  => (Or x (And a b))
+  :example (And (Or $x $a) (Or $x $b))
+  :doc "Factor the common bitwise operand. Extraction accounts for other readers of either original term.")
+
+(alt and_consensus 32
+  (And (as (Or x a) (Or (EQ x 0) b) (Or a b)))
+  :when (bool01 x) (bool01 a) (bool01 b)
+  => (And (Or x a) (Or (EQ x 0) b))
+  :example (And (Or (LT $x 0) (LT $a 0)) (Or (EQ (LT $x 0) 0) (LT $b 0)) (Or (LT $a 0) (LT $b 0)))
+  :doc "The consensus term of two opposite Boolean gates is redundant.")
+
+(alt sum_factor_products 30
+  (Sum (Mult x a) (Mult x b))
+  => (Mult x (Sum a b))
+  :expect (synth rhs) (sim rhs)
+  :example (Sum (Mult $x $a) (Mult $x $b))
+  :doc "Factor a shared multiplier operand across two full products. Explicit truncations and sign extensions delimit the match.")
+
+(alt diff_factor_products 30
+  (Sum (as (Mult x a)) (bs (Mult x b)))
+  => (Mult x (Sum (as a) (bs b)))
+  :example (Sum (as (Mult $x $a)) (bs (Mult $x $b)))
+  :doc "Factor a shared multiplier operand across a difference of full products.")
+
+(alt and_parity 34
+  (And (Or x y) (Not (And x y)))
+  => (Xor x y)
+  :example (And (Or $x $y) (Not (And $x $y)))
+  :doc "A union with its intersection cleared is bitwise XOR.")
+
+(alt and_parity_window 34
+  (And (Or x y) (Get_mask (Not (And x y)) 0 (k n)))
+  :when (> n 0)
+  => (Get_mask (Xor x y) 0 (k n))
+  :example (And (Or $x $y) (Get_mask (Not (And $x $y)) 0 8))
+  :doc "Keep the low window of an unsigned complement when recovering parity.")
+
+(alt and_bool_parity 34
+  (And (Or x y) (EQ (And x y) 0))
+  :when (bool01 x) (bool01 y)
+  => (Xor x y)
+  :example (And (Or (LT $x 0) (LT $y 0)) (EQ (And (LT $x 0) (LT $y 0)) 0))
+  :doc "Exactly one of two Boolean operands is true.")
+
+(alt or_bool_parity 34
+  (Or (And x (EQ y 0)) (And (EQ x 0) y))
+  :when (bool01 x) (bool01 y)
+  => (Xor x y)
+  :example (Or (And (LT $x 0) (EQ (LT $y 0) 0)) (And (EQ (LT $x 0) 0) (LT $y 0)))
+  :doc "Complementary Boolean product terms select exactly one operand.")
+
+(alt or_bool_equal 34
+  (Or (And x y) (And (EQ x 0) (EQ y 0)))
+  :when (bool01 x) (bool01 y)
+  => (EQ x y)
+  :example (Or (And (LT $x 0) (LT $y 0)) (And (EQ (LT $x 0) 0) (EQ (LT $y 0) 0)))
+  :doc "Both Boolean inputs have the same polarity.")

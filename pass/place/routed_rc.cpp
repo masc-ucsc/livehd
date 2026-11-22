@@ -78,7 +78,7 @@ ph::Rc_net routed_rc(const ph::Technology& tech, const ph::Floorplan& fp, const 
     throw std::invalid_argument("routed RC driver is not an endpoint");
   }
   std::vector<Segment> segments;
-  bool                 variable_width = false;
+  bool                 variable_width = fp.snapshot_ndr.net_rules.contains(net.name.str());
   struct Via {
     Point                  a, b;
     double                 resistance;
@@ -99,7 +99,8 @@ ph::Rc_net routed_rc(const ph::Technology& tech, const ph::Floorplan& fp, const 
         }
         if (p) {
           ph::Net piece;
-          piece.wires.push_back({wire.type, {{layer, path.width, path.shape, {*previous, *p}, path.taper_rule}}});
+          piece.name = net.name;
+          piece.wires.push_back({wire.type, {{layer, path.width, path.shape, {*previous, *p}, path.taper_rule, path.taper}}});
           const auto  shapes = ph::route_geometry(tech, fp, piece);
           const auto& r      = shapes.at(0).rect;
           const bool  h      = previous->y == p->y;
@@ -113,6 +114,7 @@ ph::Rc_net routed_rc(const ph::Technology& tech, const ph::Floorplan& fp, const 
         } else if (std::holds_alternative<ph::Route_rect>(step)) {
           variable_width = true;
           ph::Net piece;
+          piece.name = net.name;
           piece.wires.push_back({wire.type, {{layer, {}, {}, {*previous, step}}}});
           const auto  shapes    = ph::route_geometry(tech, fp, piece);
           const auto& r         = shapes.at(0).rect;

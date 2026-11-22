@@ -24,3 +24,53 @@
   :expect (synth lhs) (sim lhs)
   :example (Mux $s (Get_mask $x 5 6) (Get_mask $y 13 14))
   :doc "One lane of a bit-sliced mux. Mux(s, x[a], y[b]) is bit (a mod 64) of the 64-bit-aligned word mux Mux(s, x[a0 +: 64], y[b0 +: 64]), with the same alignment offset on both arms. Every lane of a run that shares s, x, y and the offset b - a builds the SAME word mux, so hash-consing shares it among the lanes (classic vectorize_bit_muxes does this on the extracted graph; this is the alternative the extraction can pick once a cost profile prices the sharing). An alt: a lane alone is cheaper as the scalar mux.")
+
+(alt or_bool_mux 22
+  (Or (And s t) (And (EQ s 0) f))
+  :when (bool01 s) (bool01 f) (bool01 t)
+  => (Mux s f t)
+  :example (Or (And (LT $s 0) (LT $t 0)) (And (EQ (LT $s 0) 0) (LT $f 0)))
+  :doc "Recover a binary mux from opposite Boolean enables.")
+
+(alt and_bool_mux 22
+  (And (Or s f) (Or (EQ s 0) t))
+  :when (bool01 s) (bool01 f) (bool01 t)
+  => (Mux s f t)
+  :example (And (Or (LT $s 0) (LT $f 0)) (Or (EQ (LT $s 0) 0) (LT $t 0)))
+  :doc "Recover a binary mux from opposite Boolean enables.")
+
+(alt mux_gate_word 21
+  (Mux s 0 x)
+  :when (bool01 s)
+  => (And x (Sext s 1))
+  :expect (synth rhs) (sim lhs)
+  :example (Mux (LT $s 0) 0 (Get_mask $x 0 8))
+  :doc "Sign-extending the Boolean selector from one bit supplies a word-wide zero or all-ones mask.")
+
+(alt product_move_zero_gate 21
+  (Mult (Mux s 0 x) y)
+  :when (bool01 s)
+  => (Mult x (Mux s 0 y))
+  :example (Mult (Mux (LT $s 0) 0 (Get_mask $x 0 12)) (Get_mask $y 0 3))
+  :doc "A zero gate on either multiplier input zeroes the full product. Offer the other operand so its width and sharing can decide.")
+
+(alt product_move_mask_gate 21
+  (Mult (And (Sext s 1) x) y)
+  :when (bool01 s)
+  => (Mult x (Mux s 0 y))
+  :example (Mult (And (Sext (LT $s 0) 1) (Get_mask $x 0 12)) (Get_mask $y 0 3))
+  :doc "Move a multiplier gate already expressed as a sign-replicated Boolean mask.")
+
+(alt mux_gate_word_false 21
+  (Mux s x 0)
+  :when (bool01 s)
+  => (And x (Sext (EQ s 0) 1))
+  :example (Mux (LT $s 0) (Get_mask $x 0 8) 0)
+  :doc "Gate the false arm with the sign-replicated zero test of the selector.")
+
+(alt or_mask_mux 22
+  (Or (And (Sext s 1) t) (And (Not (Sext s 1)) f))
+  :when (bool01 s)
+  => (Mux s f t)
+  :example (Or (And (Sext (LT $s 0) 1) $t) (And (Not (Sext (LT $s 0) 1)) $f))
+  :doc "Opposite copies of one replicated selector choose between two whole words.")

@@ -68,6 +68,26 @@ library(test) {
 })lib";
 }  // namespace
 
+TEST(LibertyClockPath, ReadsInternalMacroLatencyByEdgeAndAnalysis) {
+  const auto lib = livehd::liberty::timing::parse(R"lib(library(x) { time_unit : "1ns";
+    cell(ram) { pin(CK) { direction : input; clock : true;
+      timing() { timing_type : min_clock_tree_path; timing_sense : positive_unate;
+        cell_rise(scalar) { values("0.02"); } }
+      timing() { timing_type : max_clock_tree_path; timing_sense : positive_unate;
+        cell_rise(scalar) { values("0.08"); } cell_fall(scalar) { values("0.11"); } }
+    } }
+  })lib");
+  using namespace livehd::liberty::timing;
+  const auto& ck=lib.cells.at("ram").pins.at("CK");
+  ASSERT_NE(clock_tree_path(ck, Transition::rise, true), nullptr);
+  EXPECT_DOUBLE_EQ(clock_tree_path(ck, Transition::rise, true)->lookup({}), 20);
+  EXPECT_EQ(clock_tree_path(ck, Transition::fall, true), nullptr);
+  ASSERT_NE(clock_tree_path(ck, Transition::rise, false), nullptr);
+  EXPECT_DOUBLE_EQ(clock_tree_path(ck, Transition::rise, false)->lookup({}), 80);
+  ASSERT_NE(clock_tree_path(ck, Transition::fall, false), nullptr);
+  EXPECT_DOUBLE_EQ(clock_tree_path(ck, Transition::fall, false)->lookup({}), 110);
+}
+
 TEST(TimingModel, UnitsAxisOrderAndInterpolation) {
   const auto  library = nldm::parse(model);
   const auto& cell    = library.cells.at("INV");

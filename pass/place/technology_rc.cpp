@@ -1,5 +1,6 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "technology_rc.hpp"
+#include "steiner_net.hpp"
 
 #include <algorithm>
 #include <array>
@@ -12,6 +13,7 @@
 #include <regex>
 #include <sstream>
 #include <stdexcept>
+#include <unordered_map>
 #include <vector>
 
 namespace livehd::placement {
@@ -99,7 +101,7 @@ Units liberty_units(const std::string& path, std::optional<std::string_view> con
 bool valid(const Rc& rc) { return rc.r >= 0 && rc.c >= 0 && std::isfinite(rc.r) && std::isfinite(rc.c); }
 struct Parsed_rc {
   Route_technology_rc table;
-  std::optional<Rc>   signal;
+  std::optional<Rc>   signal, clock;
 };
 Parsed_rc parse_rc(const physical::Technology& tech, const std::string& liberty, const std::string& rc_file, bool detailed,
                    std::optional<std::string_view> contents = std::nullopt) {
@@ -121,7 +123,6 @@ Parsed_rc parse_rc(const physical::Technology& tech, const std::string& liberty,
     auto               data  = std::regex_replace(text(rc_file), std::regex("\\\\\r?\n"), " ");
     std::istringstream lines(data);
     std::string        line;
-    std::optional<Rc>  signal;
     unsigned           line_number = 0;
     while (std::getline(lines, line)) {
       ++line_number;
@@ -200,9 +201,6 @@ Parsed_rc parse_rc(const physical::Technology& tech, const std::string& liberty,
         }
         continue;
       }
-      if (command == "set_wire_rc" && args.contains("-clock") && !args.contains("-signal")) {
-        continue;
-      }
       Rc rc;
       if (args.contains("-layer") && command == "set_wire_rc") {
         const auto it = layers.find(args.at("-layer"));
@@ -227,14 +225,18 @@ Parsed_rc parse_rc(const physical::Technology& tech, const std::string& liberty,
         throw std::runtime_error(rc_file + ":" + std::to_string(line_number) + ": incomplete technology wire RC");
       }
       if (command == "set_wire_rc") {
-        signal = rc;
+        if (args.contains("-signal") || !args.contains("-clock")) {
+          parsed.signal = rc;
+        }
+        if (args.contains("-clock") || !args.contains("-signal")) {
+          parsed.clock = rc;
+        }
       } else if (args.contains("-layer") && tech.layers.contains(args.at("-layer"))) {
         layers[args.at("-layer")] = rc;
       } else {
         throw std::runtime_error("technology RC refers to an unknown routing layer");
       }
     }
-    parsed.signal = signal;
   }
   return parsed;
 }
@@ -242,9 +244,9 @@ Parsed_rc parse_rc(const physical::Technology& tech, const std::string& liberty,
 Route_technology_rc technology_route_rc(const physical::Technology& tech, const std::string& liberty, const std::string& rc_file) {
   return parse_rc(tech, liberty, rc_file, true).table;
 }
-Wire_rc technology_wire_rc(const physical::Technology& tech, const std::string& liberty, const std::string& rc_file,
-                           double resistance, double capacitance, double rc_pessimism,
-                           std::optional<std::string_view> liberty_text) {
+Net_wire_rc technology_net_wire_rc(const physical::Technology& tech, const std::string& liberty, const std::string& rc_file,
+                                   double resistance, double capacitance, double rc_pessimism,
+                                   std::optional<std::string_view> liberty_text) {
   if (!std::isfinite(rc_pessimism) || rc_pessimism < 1) {
     throw std::invalid_argument("rc_pessimism must be finite and at least 1");
   }
@@ -262,13 +264,21 @@ Wire_rc technology_wire_rc(const physical::Technology& tech, const std::string& 
     if (!valid({resistance, capacitance})) {
       throw std::runtime_error("invalid explicit wire RC");
     }
-    return pessimize({resistance, capacitance, resistance, capacitance, "explicit wire_rc"});
+    const auto wire = pessimize({resistance, capacitance, resistance, capacitance, "explicit wire_rc"});
+    return {wire, wire};
   }
-  const auto  parsed = parse_rc(tech, liberty, rc_file, false, liberty_text);
-  const auto& layers = parsed.table.layers;
+  const auto  parsed     = parse_rc(tech, liberty, rc_file, false, liberty_text);
+  const auto& layers     = parsed.table.layers;
+  const auto  with_clock = [&](const Wire_rc& signal_wire) -> Net_wire_rc {
+    if (parsed.clock) {
+      const auto& clock = *parsed.clock;
+      return {signal_wire, pessimize({clock.r, clock.c, clock.r, clock.c, rc_file})};
+    }
+    return {signal_wire, signal_wire};
+  };
   if (parsed.signal) {
     const auto& signal = *parsed.signal;
-    return pessimize({signal.r, signal.c, signal.r, signal.c, rc_file});
+    return with_clock(pessimize({signal.r, signal.c, signal.r, signal.c, rc_file}));
   }
   std::optional<Rc> horizontal;
   for (const auto& name : tech.routing_layers) {
@@ -280,10 +290,122 @@ Wire_rc technology_wire_rc(const physical::Technology& tech, const std::string& 
     if (!horizontal && l.direction == "HORIZONTAL") {
       horizontal = it->second;
     } else if (horizontal && l.direction == "VERTICAL") {
-      return pessimize({horizontal->r, horizontal->c, it->second.r, it->second.c, rc_file.empty() ? "LEF" : rc_file});
+      return with_clock(pessimize({horizontal->r, horizontal->c, it->second.r, it->second.c, rc_file.empty() ? "LEF" : rc_file}));
     }
   }
-  throw std::runtime_error(
-      "technology has no characterized signal or horizontal/vertical wire RC; supply synth.wire_rc");
+  throw std::runtime_error("technology has no characterized signal or horizontal/vertical wire RC; supply synth.wire_rc");
+}
+Wire_rc technology_wire_rc(const physical::Technology& tech, const std::string& liberty, const std::string& rc_file,
+                           double resistance, double capacitance, double rc_pessimism,
+                           std::optional<std::string_view> liberty_text) {
+  return technology_net_wire_rc(tech, liberty, rc_file, resistance, capacitance, rc_pessimism, liberty_text).signal;
+}
+std::pair<double, double> placement_pin_offset(const physical::Macro& macro, const std::string& name, physical::Orientation o, int64_t dbu) {
+  auto it = macro.pins.find(name);
+  if ((it == macro.pins.end() || it->second.shapes.empty()) && physical::soft_block(macro)) {
+    // A soft block pin without LEF geometry connects at the block center.
+    const auto [x, y] = physical::oriented_center(macro, {0, 0, macro.width, macro.height}, o);
+    return {x * dbu, y * dbu};
+  }
+  if (it == macro.pins.end() || it->second.shapes.empty()) {
+    throw std::runtime_error("missing LEF pin geometry: " + name);
+  }
+  const auto [x, y] = physical::oriented_center(macro, it->second.shapes.front().rect, o);
+  return {x * dbu, y * dbu};
+}
+
+// Placement RC uses driver-aware Steiner trees, with half each wire's
+// capacitance on each end. Coincident pins attach to a shared junction through
+// 1e-9 ohm edges. If driver-aware construction exceeds its work bound, spatial
+// FLUTE groups are joined by representative trees and any cycles are removed.
+physical::Rc_net steiner_rc(std::string driver, const std::vector<std::pair<std::string, std::pair<double, double>>>& pins,
+                      const Wire_rc& wire, double dbu, bool* approximate) {
+  const auto driver_pin = std::find_if(pins.begin(), pins.end(), [&](const auto& pin) { return pin.first == driver; });
+  if (driver_pin == pins.end()) {
+    throw std::invalid_argument("Steiner RC requires a driver pin");
+  }
+  std::vector<std::pair<double, double>> xy;
+  xy.reserve(pins.size());
+  for (const auto& pin : pins) {
+    xy.push_back(pin.second);
+  }
+  const auto net = steiner_net(xy, static_cast<size_t>(driver_pin - pins.begin()), per_um(wire), dbu, approximate);
+  physical::Rc_net rc;
+  rc.driver         = std::move(driver);
+  rc.wire_length_um = net.wire_length_um;
+  rc.nodes.reserve(net.node_cap_ff.size());
+  for (size_t i = 0; i < net.node_cap_ff.size(); ++i) {
+    rc.nodes.push_back({i < pins.size() ? Pin_label(pins[i].first) : Pin_label(), net.node_cap_ff[i]});
+  }
+  rc.edges.reserve(net.edges.size());
+  for (const auto& edge : net.edges) {
+    rc.edges.push_back({edge.from, edge.to, edge.resistance_ohm});
+  }
+  return rc;
+}
+physical::Parasitics estimate_floorplan_rc(const physical::Floorplan& fp, const physical::Technology& tech,
+                                          const Net_wire_rc& wire) {
+  return estimate_floorplan_rc(fp, tech, wire, {});
+}
+
+physical::Parasitics estimate_floorplan_rc(const physical::Floorplan& fp, const physical::Technology& tech,
+                                          const Net_wire_rc& wire, const std::map<std::string, Wire_rc>& driver_rc, std::optional<std::span<const size_t>> subset) {
+  std::unordered_map<std::string_view, const physical::Component*> instances;
+  for (const auto& c : fp.components) {
+    instances.emplace(c.name.view(), &c);
+  }
+  std::unordered_map<std::string_view, const physical::Terminal*> ports;
+  for (const auto& t : fp.terminals) {
+    ports.emplace(t.name, &t);
+  }
+  physical::Parasitics result;
+  result.identity = wire.signal.source;
+  const size_t count=subset?subset->size():fp.nets.size();
+  for (size_t i=0;i<count;++i) {
+    const auto& net=fp.nets.at(subset?(*subset)[i]:i);
+    if (net.connections.size() < 2 || net.use == "POWER" || net.use == "GROUND") {
+      continue;
+    }
+    std::vector<std::pair<std::string, std::pair<double, double>>> pins;
+    std::string                                                    driver;
+    for (const auto& conn : net.connections) {
+      double x, y;
+      bool   output;
+      if (conn.instance == "PIN") {
+        const auto& t = *ports.at(conn.pin.view());
+        if (t.status == physical::Status::UNPLACED) {
+          throw std::invalid_argument("missing placement for port " + t.name);
+        }
+        x      = t.x;
+        y      = t.y;
+        output = t.direction == "INPUT";
+      } else {
+        const auto& c      = *instances.at(conn.instance.view());
+        const auto& master = tech.macros.at(c.macro);
+        if (c.place.status == physical::Status::UNPLACED) {
+          throw std::invalid_argument("missing placement for cell " + c.name);
+        }
+        const auto offset = placement::placement_pin_offset(master, conn.pin, c.place.orientation, fp.dbu);
+        x                 = c.place.x + offset.first;
+        y                 = c.place.y + offset.second;
+        output            = master.pins.at(conn.pin).direction == "OUTPUT";
+      }
+      const auto label = physical::connection_label(conn);
+      pins.emplace_back(label, std::pair{x, y});
+      if (output) {
+        if (!driver.empty()) {
+          throw std::invalid_argument("multiple physical drivers on " + net.name);
+        }
+        driver = label;
+      }
+    }
+    if (driver.empty()) {
+      throw std::invalid_argument("no physical driver on " + net.name);
+    }
+    const auto override = driver_rc.find(driver);
+    const auto& rc = override != driver_rc.end() ? override->second : (net.use == "CLOCK" ? wire.clock : wire.signal);
+    result.nets.push_back(placement::steiner_rc(driver, pins, rc, fp.dbu));
+  }
+  return result;
 }
 }  // namespace livehd::placement

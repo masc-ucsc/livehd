@@ -303,6 +303,7 @@ public:
   // pass responsible for that report. A successful handoff consumes the session.
   bool                     write_report(const Eprp_var& report);
   const Statistics&        statistics() const;
+  void                     set_timing_files(const std::string& files);
   std::string              statistics_json() const;
   // Transient what-if edits on the last evaluated state (core/timing_whatif.hpp).
   // evaluate() first discards every pending what-if edit.

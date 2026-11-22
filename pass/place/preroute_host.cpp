@@ -172,7 +172,7 @@ void preroute_placed(Result& placed, const Options& options, const Evaluate& eva
   std::tie(route.demand.horizontal_capacity, route.demand.vertical_capacity) = lef_track_capacity(tech, capacity_layers);
   std::optional<Result> signal_first;
   if (options.satlegalize_pg_after) {
-    route.deferred_pg           = power_grid_profile(tech_profile);
+    route.deferred_pg           = options.tuned_pg ? *options.tuned_pg : power_grid_profile(tech_profile);
     route.deferred_pg->channels = options.pg_channels;
     signal_first                = placed;
     auto&                 base  = signal_first->floorplan;
@@ -219,7 +219,7 @@ void preroute_placed(Result& placed, const Options& options, const Evaluate& eva
   // Export the optimization view explicitly for matched timing audits. These
   // are transient physical identities, not persistent graph attributes or
   // implicit changes to the downstream signoff constraints.
-  const auto       timing_controls = prects_networks(tech, routed.frame, candidate.prects);
+  const auto timing_controls = options.has_physical_clock_tree() ? Prects_networks{} : prects_networks(tech, routed.frame, candidate.prects);
   rapidjson::Value timing_cut_pins(rapidjson::kArrayType);
   for (const auto& pin : timing_controls.timing_cuts) {
     timing_cut_pins.PushBack(rapidjson::Value(pin.c_str(), alloc), alloc);
@@ -460,10 +460,9 @@ void preroute_placed(Result& placed, const Options& options, const Evaluate& eva
   physical::write_def(routed.frame, def);
   physical::verify_def_roundtrip(routed.frame, physical::read_def(def));
   auto       parasitics = std::make_shared<physical::Parasitics>(std::move(routed.parasitics));
-  const auto controls   = prects_networks(options.technology().lef, routed.frame, candidate.prects);
   parasitics->timing_cuts.clear();
   for (const auto& net : parasitics->nets) {
-    if (controls.timing_cuts.contains(net.driver)) {
+    if (timing_controls.timing_cuts.contains(net.driver)) {
       parasitics->timing_cuts.insert(net.driver);
     }
   }

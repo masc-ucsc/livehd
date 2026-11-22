@@ -21,6 +21,8 @@ protected:
     write("net/graph/body.bin", "repaired masters, connectivity, positions and RC");
     write("place/out.def", "final DEF");
     write("place/qor.json", "{}");
+    write("place/pcrs_clock.json", "{\"mode\":\"tree\"}");
+    write("place/pcrs_clock.sdc", "set_propagated_clock [all_clocks]\n");
     write("place/preroute.json", "{\"accepted_nets\":1,\"vias\":2}");
     write("place/power_grid.json", "{\"profile\":\"pg_asap7\",\"channels\":[]}");
     write("place/route_options.json", "{\"global_model\":\"auto\"}");
@@ -64,6 +66,8 @@ TEST_F(PhysicalCache, RestoresTheCompleteRepairedGenerationAcrossFreshInstances)
     EXPECT_EQ((std::string{std::istreambuf_iterator<char>(timing), {}}), "{\"boundary_ps\":213.3134765625}");
     for (const auto* name : {"preroute.json",
                              "power_grid.json",
+                             "pcrs_clock.json",
+                             "pcrs_clock.sdc",
                              "magnet.json",
                              "macro_animation.html",
                              "macro/fixed.def",
@@ -121,7 +125,12 @@ TEST_F(PhysicalCache, EditedColorsCanReuseCoordinatesWithoutReplayingTheOldNetli
   write("compiled/graph/body.bin", "one edited color; remaining colors unchanged");
   auto next = cache();
   EXPECT_FALSE(next.restore(root / "restored/net", root / "restored/place"));
-  EXPECT_EQ(next.placement_hint(), root / "cache/artifacts/place/out.def");
+  fs::path clock_report;
+  EXPECT_EQ(next.placement_hint(&clock_report), root / "cache/artifacts/place/out.def");
+  EXPECT_EQ(clock_report, root / "cache/artifacts/place/pcrs_clock.json");
+  write("cache/artifacts/place/pcrs_clock.json", "damaged clock history");
+  EXPECT_EQ(next.placement_hint(&clock_report), root / "cache/artifacts/place/out.def");
+  EXPECT_TRUE(clock_report.empty());
   EXPECT_FALSE(fs::exists(root / "restored/net"));
   EXPECT_FALSE(fs::exists(root / "restored/place"));
   EXPECT_TRUE(cache("different physical options").placement_hint().empty());

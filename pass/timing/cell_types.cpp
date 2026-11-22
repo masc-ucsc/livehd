@@ -8,6 +8,8 @@
 #include <map>
 #include <stdexcept>
 
+#include "pass/liberty/clock_function.hpp"
+
 namespace livehd::timing::fast {
 namespace lt = liberty::timing;
 namespace {
@@ -43,8 +45,14 @@ struct Classified {
 };
 Classified classify(const std::string& type) {
   if (type == "combinational" || type == "combinational_rise" || type == "combinational_fall" || type == "three_state_enable"
-      || type == "three_state_disable" || type == "clear" || type == "preset") {
+      || type == "three_state_disable") {
     return {Arc_kind::combinational, nullptr};
+  }
+  // An asynchronous assertion is not a synchronous data launch. ORFS uses
+  // OpenSTA's default disabled preset/clear propagation; recovery and removal
+  // at those same pins remain endpoint checks.
+  if (type == "clear" || type == "preset") {
+    return {Arc_kind::ignored, nullptr};
   }
   if (type == "rising_edge") {
     return {Arc_kind::launch_rise, nullptr};
@@ -133,7 +141,7 @@ Cell_types Cell_types::build(std::span<const lt::Library* const> corners, std::s
     types.pin_first_arc_.push_back(0);
     types.pin_arc_count_.push_back(0);
     types.types_.push_back(std::move(type));
-    types.caps_.insert(types.caps_.end(), count * 2, 0.f);
+    types.caps_.insert(types.caps_.end(), count * 2, Pin_cap{});
     types.max_cap_.insert(types.max_cap_.end(), count, infinity);
     types.max_tran_.insert(types.max_tran_.end(), count, infinity);
   };
@@ -169,7 +177,11 @@ Cell_types Cell_types::build(std::span<const lt::Library* const> corners, std::s
     std::map<std::string, uint16_t> local;
     for (const auto& [pin_name, pin] : reference.pins) {
       local.emplace(pin_name, static_cast<uint16_t>(local.size()));
-      types.pins_.push_back({pin_name, direction_of(pin.direction), pin.clock});
+      const bool state_clock = pin.direction == "input" && std::ranges::any_of(reference.state_clocks, [&](const auto& expr) {
+                                 const auto truth = liberty::function_truth(expr, {pin_name});
+                                 return truth == 0xaaaaaaaaaaaaaaaaULL || truth == 0x5555555555555555ULL;
+                               });
+      types.pins_.push_back({pin_name, direction_of(pin.direction), pin.clock || state_clock});
       types.pin_first_arc_.push_back(0);  // set with the arcs below
       types.pin_arc_count_.push_back(0);
       for (size_t k = 0; k < count; ++k) {
@@ -180,13 +192,75 @@ Cell_types Cell_types::build(std::span<const lt::Library* const> corners, std::s
           }
         }
         for (unsigned t = 0; t < 2; ++t) {
-          types.caps_.push_back(static_cast<float>(in_corner->capacitance_ff[t].value_or(0)));
+          const auto nominal = in_corner->capacitance_ff[t].value_or(0);
+          const auto range   = in_corner->capacitance_range_ff[t].value_or(std::array{nominal, nominal});
+          types.caps_.push_back({static_cast<float>(nominal), static_cast<float>(range[0]), static_cast<float>(range[1])});
         }
         types.max_cap_.push_back(in_corner->max_capacitance_ff ? static_cast<float>(*in_corner->max_capacitance_ff) : infinity);
         types.max_tran_.push_back(in_corner->max_transition_ps ? static_cast<float>(*in_corner->max_transition_ps) : infinity);
       }
     }
     type.pin_count = static_cast<uint16_t>(local.size());
+
+    std::vector<std::string> inputs, outputs;
+    for (const auto& [pin, desc] : reference.pins) {
+      if (desc.direction == "input") {
+        inputs.push_back(pin);
+      }
+      if (desc.direction == "output" && !desc.three_state) {
+        outputs.push_back(pin);
+      }
+    }
+    constexpr uint64_t positive = 0xaaaaaaaaaaaaaaaaULL, negative = ~positive;
+    if (type.sequential && !type.clock_gate && !reference.storage_state.empty()) {
+      for (const auto& ck : inputs) {
+        const auto sampling = liberty::function_truth(reference.storage_clock, {ck});
+        if (sampling != positive && sampling != negative) {
+          continue;
+        }
+        for (const auto& data : inputs) {
+          const auto next = liberty::function_truth(reference.storage_data, {data});
+          if (ck == data || (next != positive && next != negative)) {
+            continue;
+          }
+          for (const auto& q : outputs) {
+            const auto& function   = reference.pins.at(q).function;
+            const auto  primary    = liberty::function_truth(function, {reference.storage_state});
+            const auto  complement = liberty::function_truth(function, {reference.storage_state_inv});
+            if (primary != positive && primary != negative && complement != positive && complement != negative) {
+              continue;
+            }
+            const bool inverted = (next == negative) ^ (primary == negative || complement == positive);
+            if (type.clock_shape.output != no_index && inverted) {
+              continue;
+            }
+            type.clock_shape = {
+                type.latch ? liberty::Clock_cell_kind::latch : liberty::Clock_cell_kind::flip_flop,
+                local.at(q),
+                {local.at(ck), local.at(data)},
+                sampling == negative,
+                {},
+                inverted
+            };
+          }
+        }
+      }
+    } else if (!type.sequential && !type.clock_gate && outputs.size() == 1) {
+      const auto& q        = outputs.front();
+      const auto& function = reference.pins.at(q).function;
+      if (inputs.size() == 1) {
+        const auto truth = liberty::function_truth(function, inputs);
+        if (truth == positive || truth == negative) {
+          type.clock_shape = {liberty::Clock_cell_kind::wire, local.at(q), {local.at(inputs.front())}, truth == negative, {}};
+        }
+      } else if (auto form = liberty::clock_gate_form(function, inputs)) {
+        auto& shape = type.clock_shape;
+        shape       = {liberty::Clock_cell_kind::gate, local.at(q), {}, form->active_output, std::move(form->levels)};
+        for (const auto& input : inputs) {
+          shape.inputs.push_back(local.at(input));
+        }
+      }
+    }
 
     // The caps above were pushed pin by pin, corner by corner: [pin][corner][transition], as pin_cap reads them.
     // Arcs: the arcs of a pin are the timing groups on it; a check sits on its constrained pin.
@@ -278,6 +352,16 @@ Cell_types Cell_types::build(std::span<const lt::Library* const> corners, std::s
       }
     }
     type.arc_count = static_cast<uint16_t>(arcs_of_type);
+    if (type.clock_gate) {
+      for (uint32_t a = type.first_arc; a < type.first_arc + type.arc_count; ++a) {
+        const auto& arc = types.arcs_[a];
+        if (arc.kind == Arc_kind::combinational && types.pins_[type.first_pin + arc.from].clock
+            && types.pins_[type.first_pin + arc.to].direction == Direction::output) {
+          type.characterized_gate = true;
+          break;
+        }
+      }
+    }
     // A synchronous memory macro (an SRAM such as a fakeram: clock-to-output reads and setup checks on its inputs,
     // no combinational arc) is timed like a flip-flop. A memory with a combinational (asynchronous) read stays
     // untimed: its read arcs would form loops through the write side that the engine does not model.

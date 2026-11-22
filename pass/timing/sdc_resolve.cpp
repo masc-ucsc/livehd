@@ -63,6 +63,7 @@ class Resolver {
 public:
   Resolver(const Sdc& sdc, const Netlist& netlist, const Design_names* names) : sdc_(sdc), netlist_(netlist), types_(netlist.types()), names_(names) {
     out_.unsupported = sdc.unsupported;
+    out_.clock_derates = sdc.clock_derates;
     out_.has_absolute_setup = !sdc.max_delays.empty();
     noted_.insert(sdc.unsupported.begin(), sdc.unsupported.end());
     for (const auto& port : netlist_.ports()) {
@@ -72,6 +73,16 @@ public:
 
   Constraints run() {
     clocks();
+    for (const auto& spec : sdc_.sink_latencies) {
+      const auto pin=pin_of(spec.pin);
+      if (pin==no_index || !launches(pin)) {
+        note("set_clock_latency requires a sequential clock sink pin: " + spec.pin.name);
+        continue;
+      }
+      auto [entry, fresh]=out_.sink_latencies.try_emplace(pin);
+      if (fresh) entry->second.fill(std::numeric_limits<float>::quiet_NaN());
+      for (size_t i=0;i<4;++i) if (spec.selected[i]) entry->second[i]=spec.delay_ps;
+    }
     relations();
     outputs();
     exceptions();
@@ -162,6 +173,13 @@ private:
   void clocks() {
     for (const auto& clock : sdc_.clocks) {
       Clock c{clock.name, "", static_cast<float>(clock.period_ps), clock.uncertainty_ps.value_or(0.f), clock.slew_ps.value_or(0.f), {}, 0};
+      c.propagated = clock.propagated;
+      if (clock.generated) {
+        c.master = clock_of(clock.master);
+        if (c.master == no_index) {
+          note(std::format("generated clock {} has no resolved master", clock.name));
+        }
+      }
       for (const auto& source : clock.sources) {
         if (const auto pin = pin_of(source); pin != no_index) {
           c.source_pins.push_back(pin);
@@ -701,8 +719,9 @@ private:
     }
     for (const auto& [name, in] : inputs) {
       const auto pin = netlist_.pin(ports_.at(name)->cell, 0u);
-      if (clock_sources_.contains(pin)) {
-        continue;  // the clock itself
+      const bool clock_source = clock_sources_.contains(pin);
+      if (clock_source && !in.slew && !in.drive) {
+        continue;
       }
       if (in.two_clocks) {
         note(std::format("set_input_delay: port '{}' has delays against more than one clock (the last one is used)", name));
@@ -738,6 +757,14 @@ private:
           entry.drive_pin  = local;
           entry.slew_ps    = in.drive->input_slew_ps;
         }
+      }
+      if (clock_source) {
+        // The clock edge uses this port's electrical drive. It has no input
+        // data delay or data launch group, even for set_input_delay [all_inputs].
+        entry.delay_ps = entry.early_delay_ps = 0;
+        entry.early = entry.late = false;
+        out_.inputs.push_back(std::move(entry));
+        continue;
       }
       // The launch group: the port's clock, less what its own exceptions remove.
       const auto clock = in.clock.empty() ? ((in.late || in.early) && n != 0 ? 0u : no_index) : clock_of(in.clock);
@@ -813,7 +840,6 @@ private:
   }
 
   void outputs() {
-    bool min_only = false;
     for (const auto& d : sdc_.delays) {
       if (d.input) {
         continue;
@@ -826,16 +852,15 @@ private:
       if (port->second->input) {
         continue;
       }
-      if (!d.max) {
-        min_only = true;
-        continue;
-      }
       auto& o = outs_[d.port.name];
-      o.delay = d.delay_ps;
-      o.clock = d.clock;
-    }
-    if (min_only) {
-      note("set_output_delay -min (hold is not checked at output ports)");
+      if (d.max) {
+        o.delay = d.delay_ps;
+        o.clock = d.clock;
+      }
+      if (d.min) {
+        o.min_delay = d.delay_ps;
+        o.min_clock = d.clock;
+      }
     }
     for (const auto& l : sdc_.loads) {
       const auto port = ports_.find(l.port.name);
@@ -858,7 +883,9 @@ private:
       outs_[netlist_.ports()[port_index(pin)].name].path_delay = true;
     }
     for (const auto& [name, o] : outs_) {
-      Output_delay entry{name, o.clock, o.delay.value_or(0.f), o.load.value_or(0.f), o.delay.has_value() || o.path_delay, o.delay.has_value()};
+      Output_delay entry{name, o.delay ? o.clock : o.min_clock, o.delay.value_or(0.f), o.load.value_or(0.f), o.delay.has_value() || o.path_delay, o.delay.has_value()};
+      entry.min_delay_ps = o.min_delay;
+      entry.min_clock = o.min_clock;
       out_.outputs.push_back(std::move(entry));
     }
   }
@@ -882,8 +909,8 @@ private:
   std::map<uint32_t, Relations>                            start_clocks_;  // input port: capture clock: relation
   Relations                                                start_all_;     // input port: its delay to every endpoint
   struct Output {
-    std::optional<float> delay, load;
-    std::string          clock;
+    std::optional<float> delay, min_delay, load;
+    std::string          clock, min_clock;
     bool                 path_delay = false;
   };
   std::map<std::string, Output>                            outs_;

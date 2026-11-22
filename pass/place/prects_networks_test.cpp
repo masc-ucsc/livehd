@@ -155,6 +155,7 @@ TEST(PrectsNetworks, DataThatAlsoClocksOneStateCellStaysData) {
   auto excluded = prects_networks(tech, fp, roles);
   EXPECT_EQ(excluded.ignored, (std::vector<bool>{false, false, false, true, true, false, false}));
   EXPECT_FALSE(excluded.pins.contains("b0:o"));
+  EXPECT_EQ(excluded.clock_nets, (std::vector<bool>{false, false, false, true, true, false, false}));
   EXPECT_FALSE(excluded.pins.contains("lat:c"));
   EXPECT_TRUE(excluded.pins.contains("f0:c"));
   // STA flags every state cell's clock pin: that is the same structural evidence, and changes nothing.
@@ -166,6 +167,7 @@ TEST(PrectsNetworks, DataThatAlsoClocksOneStateCellStaysData) {
   roles.clock_pins.insert("b0:o");
   excluded = prects_networks(tech, fp, roles);
   EXPECT_EQ(excluded.ignored, (std::vector<bool>{true, true, true, true, true, false, false}));
+  EXPECT_EQ(excluded.clock_nets, excluded.ignored);
 }
 
 TEST(PrectsNetworks, MissingDistributionEndpointsDoNotJoinDataToResetOrClock) {

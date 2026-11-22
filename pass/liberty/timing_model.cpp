@@ -398,11 +398,19 @@ Pin pin(const Group& group, const Group& library, const Units& units) {
   result.name         = group_name(group);
   result.direction    = attr(group, "direction");
   result.function     = attr(group, "function");
-  result.clock        = attr(group, "clock") == "true";
+  result.clock        = attr(group, "clock") == "true" || attr(group, "clock_gate_clock_pin") == "true";
   result.three_state  = group.attributes.contains("three_state");
   const auto common   = number(group, "capacitance", units.cap);
   const auto fallback = number(library, "default_" + result.direction + "_pin_cap", units.cap);
   for (size_t i = 0; i < 2; ++i) {
+    const auto range_key = i == 0 ? "rise_capacitance_range" : "fall_capacitance_range";
+    if (const auto range = group.attributes.find(range_key); range != group.attributes.end()) {
+      const auto values = numbers(range->second);
+      if (values.size() != 2 || values[0] < 0 || values[1] < values[0] || !std::isfinite(values[1] * units.cap)) {
+        throw std::invalid_argument("invalid Liberty pin capacitance range: " + result.name);
+      }
+      result.capacitance_range_ff[i] = {values[0] * units.cap, values[1] * units.cap};
+    }
     result.capacitance_ff[i] = number(group, i == 0 ? "rise_capacitance" : "fall_capacitance", units.cap);
     if (!result.capacitance_ff[i]) {
       result.capacitance_ff[i] = common ? common : fallback;
@@ -551,7 +559,36 @@ void Thresholds::validate() const {
     }
   }
 }
-Library parse(std::string_view text) {
+namespace {
+Clock_structure clock_structure(const Group& cell) {
+  Clock_structure result;
+  result.gate_style = attr(cell, "clock_gating_integrated_cell");
+  result.dont_use = attr(cell, "dont_use") == "true";
+  for (const auto& group : cell.groups) {
+    if (group.kind == "ff" || group.kind == "ff_bank" || group.kind == "latch" || group.kind == "latch_bank") {
+      for (const auto key : {"clocked_on", "clocked_on_also", "enable", "enable_also"}) {
+        if (auto expr = attr(group, key); !expr.empty()) {
+          result.state_clocks.push_back(std::move(expr));
+        }
+      }
+    }
+    if (group.kind != "pin" || result.gate_style.empty()) {
+      continue;
+    }
+    const auto name = group_name(group);
+    if (attr(group, "clock_gate_enable_pin") == "true") {
+      result.gate_enables.push_back(name);
+    }
+    if (attr(group, "clock_gate_test_pin") == "true") {
+      result.gate_tests.push_back(name);
+    }
+    if (attr(group, "clock_gate_out_pin") == "true") {
+      result.gate_outputs.push_back(name);
+    }
+  }
+  return result;
+}
+Library parse_library(std::string_view text, Clock_structures* clocks) {
   const auto syntax = Parser(text).parse();
   Library    result;
   bool       first = true;
@@ -589,6 +626,13 @@ Library parse(std::string_view text) {
       cell.thresholds = levels;
       cell.area       = number(group, "area").value_or(0);
       cell.clock_gate = !attr(group, "clock_gating_integrated_cell").empty();
+      if (clocks) {
+        auto desc                 = clock_structure(group);
+        const auto [it, inserted] = clocks->try_emplace(cell.name, std::move(desc));
+        if (!inserted && it->second != desc) {
+          throw std::invalid_argument("conflicting clock structures for Liberty cell " + cell.name);
+        }
+      }
       if (attr(library, "delay_model", "table_lookup") != "table_lookup") {
         cell.unsupported.push_back("library delay_model is not table_lookup");
       }
@@ -596,9 +640,28 @@ Library parse(std::string_view text) {
       for (const auto& child : group.groups) {
         if (child.kind == "ff" || child.kind == "ff_bank") {
           cell.sequential = true;
+          if (child.kind == "ff" && child.arguments.size() == 2 && attr(child, "clear").empty() && attr(child, "preset").empty()
+              && attr(child, "clocked_on_also").empty()) {
+            cell.storage_data      = attr(child, "next_state");
+            cell.storage_clock     = attr(child, "clocked_on");
+            cell.storage_state     = child.arguments.front();
+            cell.storage_state_inv = child.arguments.back();
+          }
+          for (const auto key : {"clocked_on", "clocked_on_also"}) {
+            if (auto ck = attr(child, key); !ck.empty()) {
+              cell.state_clocks.push_back(std::move(ck));
+            }
+          }
         }
         if (child.kind == "latch" || child.kind == "latch_bank") {
           cell.sequential = cell.latch = true;
+          if (child.kind == "latch" && child.arguments.size() == 2 && attr(child, "clear").empty() && attr(child, "preset").empty()
+              && attr(child, "enable_also").empty()) {
+            cell.storage_data      = attr(child, "data_in");
+            cell.storage_clock     = attr(child, "enable");
+            cell.storage_state     = child.arguments.front();
+            cell.storage_state_inv = child.arguments.back();
+          }
         }
         if (child.kind == "memory") {
           cell.sequential = cell.memory = true;
@@ -689,5 +752,21 @@ Library parse(std::string_view text) {
     throw std::invalid_argument("no Liberty library group");
   }
   return result;
+}
+}  // namespace
+Library parse(std::string_view text) { return parse_library(text, nullptr); }
+Library parse(std::string_view text, Clock_structures& clocks) {
+  Clock_structures result;
+  auto             library = parse_library(text, &result);
+  clocks                   = std::move(result);
+  return library;
+}
+const Table* clock_tree_path(const Pin& pin, Transition edge, bool early) {
+  const auto type = early ? "min_clock_tree_path" : "max_clock_tree_path";
+  for (const auto& arc : pin.arcs) {
+    const auto& delay = arc.delay[static_cast<unsigned>(edge)];
+    if (arc.type == type && arc.sense != Sense::negative && arc.when.empty() && delay) return &*delay;
+  }
+  return nullptr;
 }
 }  // namespace livehd::liberty::timing

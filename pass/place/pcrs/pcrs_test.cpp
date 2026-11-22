@@ -14,6 +14,7 @@
 #include "gtest/gtest.h"
 #include "node_util.hpp"
 #include "pass/liberty/liberty_dff.hpp"
+#include "pass/partition/flatten.hpp"
 
 namespace livehd::pcrs {
 namespace {
@@ -300,6 +301,35 @@ TEST_F(Pcrs, TwoLevelsAreBalancedAndKeepEveryLoad) {
   EXPECT_EQ(stats.flops, 13u);  // 10 leaf flops + 3 above them: the branching is 10^(1/2) -> 4 per level, not the cap
   expect_uniform(2, 0);
   EXPECT_LE(fanout(reset), 8u);
+}
+
+TEST_F(Pcrs, PublishedResetFlopClockPinsSurvivePhysicalFlattening) {
+  for (const auto* scope : {"core.__flat___left.", "core.__flat___right."}) {
+    for (int i = 0; i < 8; ++i) {
+      flop(scope + std::string("r") + std::to_string(i), reset, clock);
+    }
+  }
+  const auto stats = build_reset(*graph, tech, cells(), {.fanout = 4}, depth(1));
+  ASSERT_EQ(stats.domains.size(), 1u);
+  ASSERT_GT(stats.flops, 1u);
+  hhds::GraphLibrary copy;
+  const auto flat = partition::flatten_hierarchy(graph.get(), &copy, "placed", nullptr, false, {}, {}, true);
+  ASSERT_TRUE(flat);
+  std::set<std::string> clocked;
+  for (const auto& edge : flat->get_input_pin("clk").out_edges()) {
+    if (edge.sink.get_pin_name() == "CLK") {
+      clocked.emplace(edge.sink.get_master_node().get_name());
+    }
+  }
+  size_t published = 0;
+  for (const auto& name : stats.domains.front().cells) {
+    if (instance_leaf(name).starts_with("__pcrs_rstf")) {
+      EXPECT_TRUE(name.starts_with("core.__pcrs_rstf")) << name;
+      EXPECT_TRUE(clocked.contains(name)) << name;
+      ++published;
+    }
+  }
+  EXPECT_EQ(published, stats.flops);
 }
 
 TEST_F(Pcrs, DepthZeroIsAPlainBufferTree) {

@@ -90,6 +90,29 @@ set_wire_rc -clock -resistance .05 -capacitance .14
   EXPECT_DOUBLE_EQ(rc.vertical_r, 32.3151);
   EXPECT_DOUBLE_EQ(rc.horizontal_c, .173323);
   EXPECT_EQ(rc.source, file);
+  const auto wires = technology_net_wire_rc(tech, lib, file);
+  EXPECT_EQ(per_um(wires.signal), per_um(rc));
+  EXPECT_DOUBLE_EQ(wires.clock.horizontal_r, 50);
+  EXPECT_DOUBLE_EQ(wires.clock.vertical_c, .14);
+}
+TEST_F(Technology_rc, CommonAndLayerSpecificCommandsApplyInOrder) {
+  const std::string layers
+      = "set_cmd_units -resistance ohm -capacitance ff\n"
+        "set_layer_rc -layer M2 -resistance 10 -capacitance .2\n"
+        "set_layer_rc -layer M3 -resistance 30 -capacitance .4\n";
+  const auto split
+      = technology_net_wire_rc(tech,
+                               "",
+                               write("split.tcl", layers + "set_wire_rc -clock -layer M3\nset_wire_rc -signal -layer M2\n"));
+  EXPECT_EQ(split.signal.horizontal_r, 10);
+  EXPECT_EQ(split.clock.horizontal_r, 30);
+  EXPECT_DOUBLE_EQ(split.clock.vertical_c, .4);
+  const auto common
+      = technology_net_wire_rc(tech, "", write("common.tcl", layers + "set_wire_rc -clock -layer M3\nset_wire_rc -layer M2\n"));
+  EXPECT_EQ(per_um(common.signal), per_um(common.clock));
+  EXPECT_EQ(common.clock.horizontal_r, 10);
+  const auto fallback = technology_net_wire_rc(tech, "", write("signal.tcl", layers + "set_wire_rc -signal -layer M3\n"));
+  EXPECT_EQ(per_um(fallback.signal), per_um(fallback.clock));
 }
 TEST_F(Technology_rc, ExplicitFileUnitsAndLayerSelectionAreTechIndependent) {
   const auto file = write("rc.tcl", R"(set_cmd_units -time ns -resistance ohm -capacitance pf

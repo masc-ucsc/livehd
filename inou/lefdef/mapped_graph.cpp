@@ -10,7 +10,7 @@
 
 namespace livehd::physical {
 std::shared_ptr<hhds::Graph> mapped_graph(hhds::GraphLibrary& library, const Floorplan& fp, const Technology& tech,
-                                          std::vector<Net>* unresolved) {
+                                          std::vector<Net>* unresolved, bool publish_clock_nets) {
   // One-bit signal pins; other LEF/DEF directions are not imported.
   const auto declare = [](const auto& io, const std::string& name, const std::string& direction) {
     if (direction == "INPUT") {
@@ -80,6 +80,10 @@ std::shared_ptr<hhds::Graph> mapped_graph(hhds::GraphLibrary& library, const Flo
       } else {
         sinks.push_back(physical);
       }
+    }
+    if (publish_clock_nets && net.use == "CLOCK" && drivers.size() == 1) {
+      drivers.front().attr(livehd::attrs::pcrs_clock_driver).set(1);
+      livehd::graph_util::add_signal_roles(drivers.front(), livehd::attrs::signal_clock);
     }
     if (drivers.size() > 1 || (drivers.empty() && !sinks.empty())) {
       if (!unresolved) {

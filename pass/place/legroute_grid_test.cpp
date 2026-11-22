@@ -9,6 +9,20 @@
 namespace livehd::placement {
 using Fixture = Legroute_test_frame;
 
+TEST(LegrouteGrid, PowerOnlyProfileUsesTheLefSignalStack) {
+  Fixture f;
+  f.cell("dff", 0, 0);
+  auto d = lr::build_design(f.tech, f.fp, f.timing, {}, nullptr);
+  const auto reference = lr::build_grid(d, {});
+  d.profile = &physical::tech_profile("sky130hd");
+  const auto actual = lr::build_grid(d, {});
+  EXPECT_EQ(actual.escape_layer, reference.escape_layer);
+  ASSERT_EQ(actual.layers.size(), reference.layers.size());
+  for (size_t i = 0; i < actual.layers.size(); ++i) {
+    EXPECT_EQ(actual.layers[i].name, reference.layers[i].name);
+  }
+}
+
 TEST(LegrouteGrid, TwoLayerStackRoutesOnBothLayers) {
   // A two-layer technology has no layer to spare for pin escape: both layers route, one per direction.
   for (size_t keep : {2u, 1u}) {

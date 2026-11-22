@@ -30,6 +30,7 @@ struct Rc_geometry {
   std::vector<std::pair<Rc_pin_id, std::pair<double, double>>> pins;
   // Electrical changes can dirty timing while retaining unchanged wire geometry.
   uint64_t                                                     load_identity = 0;
+  bool clock = false;
 };
 struct Rc_policy {
   // Horizontal R,C and vertical R,C, in ohm/um and fF/um.
@@ -70,7 +71,7 @@ public:
   // A complete snapshot replaces membership. Failed validation/construction
   // leaves the previous generation intact, including nets removed in the trial.
   Snapshot update(std::shared_ptr<const Rc_layout> layout, std::vector<Rc_geometry> nets, const Rc_policy& policy,
-                  const Builder& build);
+                  const Builder& build, const Rc_policy* clock_policy = nullptr);
   size_t   size() const { return entries.size(); }
 
 private:

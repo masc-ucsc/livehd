@@ -72,6 +72,7 @@ public:
     // Without an SDC (`sdc_text` empty): every input port whose net reaches a Liberty clock pin, through cells with
     // one input, is an ideal clock of `default_period_ps`; inputs launch at 0 and every output port is an endpoint.
     bool                     default_constraints = false;
+    bool                     propagate_clocks    = false;  // after physical clock construction, including inferred clocks
     float                    default_period_ps   = 1e6f;
     // The load of an output port the constraints give none (synth.io_load, shared with the mappers), in fF.
     float                    output_load_ff      = 0;
@@ -82,6 +83,12 @@ public:
   };
 
   explicit Physical_ranker(Options options);
+  void propagate_clocks() {
+    if (!options_.propagate_clocks) {
+      options_.propagate_clocks = true;
+      bound_graph_ = nullptr;  // resolve the new policy at the next evaluation, preserving the what-if session identity
+    }
+  }
   static std::unique_ptr<Physical_ranker> from_frozen_checkpoint(std::string_view);
   livehd::timing::Feedback                evaluate_frozen(const std::vector<physical::Rc_net>& changed);
   ~Physical_ranker();
@@ -119,6 +126,8 @@ public:
   void set_virtual_roots(std::shared_ptr<const std::map<std::string, Virtual_root>> roots) { virtual_roots_ = std::move(roots); }
 
   [[nodiscard]] const Statistics&  statistics() const { return stats_; }
+  [[nodiscard]] Engine::Hold_path worst_hold_path(uint32_t endpoint) { return engine_->worst_hold_path(endpoint); }
+  void evaluate_edits() { engine_->evaluate_edits(); }
   [[nodiscard]] const Engine*      engine() const { return engine_.get(); }
   [[nodiscard]] const Bound_graph* bound() const { return bound_.get(); }
   // What the constraint reader and the binding could not honor, for the log.

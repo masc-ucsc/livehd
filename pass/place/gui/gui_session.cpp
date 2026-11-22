@@ -34,7 +34,8 @@ namespace livehd::placement::gui {
 namespace {
 constexpr std::array<std::string_view, 2> hint_class{"livehd.placement.hints","livehd.placement.chunk_guidance"};
 // These inputs may change the graph, the legal sites, or the initial macro poses.
-constexpr std::array<std::string_view, 5> synthesis_placement_classes{
+constexpr std::array<std::string_view, 6> synthesis_placement_classes{
+    "livehd.physical.power_grid",
     "livehd.synth.tuning", "livehd.physical.row_access", "livehd.placement.hints", "livehd.placement.state","livehd.placement.chunk_guidance"};
 
 // Workers may have a different thread allowance and RSS model. Those observations
@@ -3575,7 +3576,13 @@ std::string Session::state_json() const {
                        suspended_pins_.contains(name));
     first  = false;
   }
-  out += std::format(R"(],"pending":{},"completed_command":{}}})", dirty_pins_.size() + released_.size(), completed_sequence_);
+  // The native clock tree of this phase (the agent's `clock`) and the decisions staged for its rebuild (`clock_edit`).
+  out += std::format(R"(],"clock":{{"nets":{},"estimates":{},"staged":{}}},"pending":{},"completed_command":{}}})",
+                     scene_ ? scene_->clock_nets.size() : size_t(0),
+                     scene_ && !scene_->clock_report.empty(),
+                     clock_edits_.drive.size() + clock_edits_.wanted_ps.size() + clock_edits_.options.size(),
+                     dirty_pins_.size() + released_.size(),
+                     completed_sequence_);
   return out;
 }
 

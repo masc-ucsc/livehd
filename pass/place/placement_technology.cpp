@@ -6,6 +6,7 @@
 #include <stdexcept>
 
 #include "hash_util.hpp"
+#include "pass/liberty/timing_model.hpp"
 #include "place.hpp"
 
 namespace livehd::placement {
@@ -30,6 +31,17 @@ Technology::Technology(const std::vector<std::string>& paths, const std::string&
     }
   }
 }
+std::shared_ptr<const liberty::timing::Library> Technology::clock_library(std::string extra_liberty) const {
+  std::lock_guard lock(clock_library_mutex_);
+  if (auto it = clock_libraries_.find(extra_liberty); it != clock_libraries_.end()) {
+    return it->second;
+  }
+  auto parsed = std::make_shared<const liberty::timing::Library>(
+      extra_liberty.empty() ? liberty::timing::parse(cells.contents) : liberty::timing::parse(cells.contents + extra_liberty));
+  clock_libraries_.emplace(std::move(extra_liberty), parsed);
+  return parsed;
+}
+
 const Technology& Options::technology() const {
   if (!technology_cache || technology_cache->lefs != lefs || technology_cache->liberty_path != liberty
       || technology_cache->tie_masters != tie_masters) {

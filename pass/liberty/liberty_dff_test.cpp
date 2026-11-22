@@ -843,6 +843,18 @@ TEST(LibertyFunction, ExactTruthAndUnsupportedSyntax) {
   EXPECT_FALSE(livehd::liberty::cell_truth(c));
 }
 
+TEST(LibertyClockGateForm, WideDeMorganAndMixedPolarity) {
+  livehd::liberty::Comb_cell cell;
+  cell.inputs={"A","B","C","D","E","F","G","H"};
+  cell.function="!(A + !B + C + D + E + F + G + H)";
+  const auto form=livehd::liberty::clock_gate_form(cell);
+  ASSERT_TRUE(form);
+  EXPECT_TRUE(form->active_output);
+  EXPECT_EQ(form->levels,(std::vector<bool>{false,true,false,false,false,false,false,false}));
+  cell.function="(A ^ B) & C & D & E & F & G & H";
+  EXPECT_FALSE(livehd::liberty::clock_gate_form(cell));
+}
+
 TEST(LibertyFunction, RepairElectricalUnitsAndNldmEstimate) {
   const auto cells = livehd::liberty::scan_comb_cells_text(R"(
     library (picofarads) { time_unit : "1ns"; capacitive_load_unit (1, "pf"); default_max_transition : 2;

@@ -68,6 +68,12 @@ single_version_override(
 bazel_dep(name = "google_benchmark", version = "1.10.0")
 # gui/gui_agent.cpp: the agent `find` regex runs in linear time (a nested quantifier cannot hang the session).
 bazel_dep(name = "re2", version = "2025-11-05.bcr.1")
+# Use Abseil's current mutex API in this RE2 release.
+single_version_override(
+    module_name = "re2",
+    patch_strip = 1,
+    patches = ["//packages:re2-absl-mutex.patch"],
+)
 bazel_dep(name = "googletest", version = "1.18.0.bcr.1")
 
 # Taskflow (the formal proof DAG and OpenTimer) is consumed via
@@ -88,7 +94,7 @@ bazel_dep(name = "zlib", version = "1.4")
 # Native CPU placement; the repository uses LiveHD's HHDS/HLOP repositories.
 git_repository(
     name = "dreamplace",
-    commit = "0d04ce22fdebbbe64a9e6be73616cb7441e188b1",
+    commit = "8ec797495982159f5a0f113aca89b3c435b6d3fd",
     remote = "https://github.com/masc-ucsc/DREAMPlace.git",
 )
 # For local co-development swap the git_repository above for:
@@ -281,6 +287,8 @@ http_archive(
 # OpenTimer: the masc-ucsc fork provides its own BUILD.bazel.
 git_repository(
     name = "opentimer",
+    patch_args = ["-p1"],
+    patches = ["//packages:opentimer-spef-ports.patch"],
     commit = "19afda206aeeb712a330e3447f214ba4e8667f8b",
     remote = "https://github.com/masc-ucsc/OpenTimer.git",
 )

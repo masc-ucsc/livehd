@@ -59,6 +59,24 @@ std::optional<Sdc_object> object_of(std::string_view text) {
   }
   return std::nullopt;
 }
+// OpenROAD writes exception collections as [list [get_ports ...] ...].
+// A bus subscript makes Tcl quote even a singleton collection. Unwrap only
+// encoded object collections so quoting in an ordinary design name is preserved.
+std::vector<std::string> collection_elements(const std::string& argument) {
+  std::vector<std::string> result;
+  for (auto& item : tcl::list_split(argument)) {
+    const auto first = item.find(mark);
+    if (first != std::string::npos && (first != 0 || item.find(mark, 1) != std::string::npos)) {
+      auto inner = tcl::list_split(item);
+      if (std::ranges::all_of(inner, [](const auto& value) { return is_handle(value); })) {
+        result.insert(result.end(), inner.begin(), inner.end());
+        continue;
+      }
+    }
+    result.push_back(std::move(item));
+  }
+  return result;
+}
 std::string plain_of(std::string_view text) { return std::string(is_handle(text) ? text.substr(3) : text); }
 
 // A name pattern of an object query: `*` and `?` only (brackets are bus bits, not character classes); a
@@ -505,7 +523,7 @@ private:
   // The objects an argument names. A plain name is looked up as each allowed kind, in order.
   std::vector<Sdc_object> objects(const std::string& argument, std::initializer_list<Kind> allowed, const std::string& what) {
     std::vector<Sdc_object> out;
-    for (const auto& element : tcl::list_split(argument)) {
+    for (const auto& element : collection_elements(argument)) {
       if (is_design(element)) {
         throw Error(what + ": the design is not a valid object here");
       }
@@ -755,6 +773,19 @@ private:
         c.uncertainty_ps = static_cast<float>(value);
       }
     }
+    return {};
+  }
+
+  std::string set_clock_latency(Words& w) {
+    const auto o = parse(w, {"-min","-max","-rise","-fall"}, {});
+    if (o.rest.size()!=2) throw Error("set_clock_latency expects a delay and clock sink pins");
+    const auto value=static_cast<float>(time(o.rest[0],w[0]));
+    std::array<bool,4> selected{};
+    for (unsigned i=0;i<4;++i) {
+      selected[i]=(o.flag(i<2?"-min":"-max") || !o.flag(i<2?"-max":"-min"))
+                  && (o.flag(i%2?"-fall":"-rise") || !o.flag(i%2?"-rise":"-fall"));
+    }
+    for (const auto& pin : objects(o.rest[1],{Kind::pin},w[0])) sdc_.sink_latencies.push_back({pin,value,selected});
     return {};
   }
 
@@ -1061,7 +1092,7 @@ private:
     if (auto whole = whole_selector(word); !whole.empty()) {
       return whole;
     }
-    const auto elements = tcl::list_split(word);
+    const auto elements = collection_elements(word);
     for (size_t i = 0; i < elements.size();) {
       if (!out.empty()) {
         out += ' ';
@@ -1123,20 +1154,20 @@ private:
     // No effect on what the engine computes: the design is already selected, the clocks are ideal, wire load
     // models are not used, and the `ideal` commands are accepted without effect, as OpenSTA does.
     static const std::set<std::string_view> ignored{
-        "set_propagated_clock", "set_units", "set_cmd_units", "set_ideal_network", "set_ideal_latency", "set_ideal_transition", "set_ideal_net",
+        "set_units", "set_cmd_units", "set_ideal_network", "set_ideal_latency", "set_ideal_transition", "set_ideal_net",
         "set_wire_load_mode", "set_wire_load_model", "set_wire_load_selection_group", "set_wire_load_min_block_size", "set_operating_conditions",
         "group_path", "set_dont_touch", "set_dont_use", "set_hierarchy_separator", "set_max_area", "set_voltage", "set_max_dynamic_power",
         "set_max_leakage_power"};
     // Constraints that change timing and are not modelled: listed, once each.
     static const std::set<std::string_view> unmodelled{
-        "set_multicycle_path", "set_min_delay", "set_data_check", "set_timing_derate", "set_case_analysis", "set_logic_zero",
-        "set_logic_one", "set_logic_dc", "set_clock_latency", "set_clock_sense", "set_sense", "set_clock_gating_check", "set_min_pulse_width",
+        "set_multicycle_path", "set_min_delay", "set_data_check", "set_case_analysis", "set_logic_zero",
+        "set_logic_one", "set_logic_dc", "set_clock_sense", "set_sense", "set_clock_gating_check", "set_min_pulse_width",
         "set_max_transition", "set_max_capacitance", "set_min_capacitance", "set_max_time_borrow", "set_resistance", "set_fanout_load",
         "set_port_fanout_number", "set_input_noise"};
     static const std::set<std::string_view> queries{"get_ports", "get_port", "get_pins", "get_pin", "get_nets", "get_net", "get_clocks", "get_clock",
                                                     "get_cells", "get_cell", "get_lib_cells", "get_lib_cell", "get_libs", "get_lib_pins", "all_inputs",
                                                     "all_outputs", "all_clocks", "current_design"};
-    static const std::set<std::string_view> modelled{"create_clock", "create_generated_clock", "set_clock_groups", "set_clock_uncertainty",
+    static const std::set<std::string_view> modelled{"set_clock_latency", "set_timing_derate", "set_propagated_clock", "create_clock", "create_generated_clock", "set_clock_groups", "set_clock_uncertainty",
                                                      "set_clock_transition", "set_input_delay", "set_output_delay", "set_input_transition", "set_load",
                                                      "set_driving_cell", "set_drive", "set_max_fanout", "set_false_path", "set_max_delay",
                                                      "set_disable_timing"};
@@ -1179,6 +1210,32 @@ private:
         result = set_clock_groups(w);
       } else if (name == "set_clock_uncertainty") {
         result = set_clock_uncertainty(w);
+      } else if (name == "set_timing_derate") {
+        const auto o      = parse(w, {"-clock", "-early", "-late", "-cell_delay", "-net_delay"}, {});
+        double     factor = 0;
+        if (!o.flag("-clock") || o.flag("-early") == o.flag("-late") || o.rest.size() != 1 || !tcl::to_number(o.rest[0], factor)
+            || factor <= 0 || !std::isfinite(static_cast<float>(factor))) {
+          throw Error("set_timing_derate requires -clock, one of -early or -late, and a positive global factor");
+        }
+        const auto mode = o.flag("-late") ? 1 : 0;
+        if (o.flag("-cell_delay") || !o.flag("-net_delay")) {
+          sdc_.clock_derates.cell[mode] = factor;
+        }
+        if (o.flag("-net_delay") || !o.flag("-cell_delay")) {
+          sdc_.clock_derates.net[mode] = factor;
+        }
+      } else if (name == "set_propagated_clock") {
+        const auto args = parse(w, {}, {});
+        if (args.rest.size() != 1) {
+          throw Error("set_propagated_clock expects a clock collection");
+        }
+        for (const auto& clock_name : clocks_of(args.rest[0], name)) {
+          if (auto* c = clock(clock_name)) {
+            c->propagated = true;
+          }
+        }
+      } else if (name == "set_clock_latency") {
+        result=set_clock_latency(w);
       } else if (name == "set_clock_transition") {
         result = set_clock_transition(w);
       } else if (name == "set_input_delay" || name == "set_output_delay") {

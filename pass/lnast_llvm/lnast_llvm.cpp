@@ -4503,7 +4503,7 @@ Result Gen::run(const Sim_objects& out) {
       // Several `Clock` inputs are ONE root clock: `lhd sim` steps every clock together (a tick auto-wires its single
       // minted clock to every unbound Clock input of the DUT), so each of them is the same net here.
       if (count > 1) {
-        livehd::diag::warn("pass.lnast_sim", "shared-tick-clock", "simulation")
+        livehd::diag::warn("pass.lnast_sim", "shared-tick-clock", "time")
             .msg("tick drives these root clock ports together: {}", clocks)
             .emit();
       }

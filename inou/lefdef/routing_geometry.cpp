@@ -113,6 +113,10 @@ void visit_route_geometry(const Technology& tech, const Floorplan& fp, const Net
       }
     }
   }
+  const std::map<std::string, int64_t>* net_widths = nullptr;
+  if (const auto rule = fp.snapshot_ndr.net_rules.find(net.name.str()); rule != fp.snapshot_ndr.net_rules.end()) {
+    net_widths = &fp.nondefault_rules.at(rule->second);
+  }
   struct Cached_via {
     std::vector<Shape>    shapes;
     std::set<std::string> metals;
@@ -148,6 +152,10 @@ void visit_route_geometry(const Technology& tech, const Floorplan& fp, const Net
                 throw std::runtime_error("undefined DEF taper rule width on " + layer);
               }
               width = widths->at(layer);
+            } else if (net_widths && !path.taper && !special) {
+              if (const auto found = net_widths->find(layer); found != net_widths->end()) {
+                width = found->second;
+              }
             }
             if (width <= 0 || coordinate(width) % 2 != 0) {
               throw std::runtime_error("route width must be positive and even in DEF DBU");

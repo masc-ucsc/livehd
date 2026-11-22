@@ -100,6 +100,31 @@ std::string run(std::string_view script) {
 }
 }  // namespace
 
+TEST(SdcClockLatency, SchedulesIndividualIdealSinkEdgesAndAnalyses) {
+  Design d;
+  const auto clk = d.in("clk");
+  d.cell("FF","a");
+  d.cell("FF","b");
+  d.wire(clk,d.pin("a","CLK"));
+  d.wire(clk,d.pin("b","CLK"));
+  d.wire(d.pin("a","Q"),d.pin("b","D"));
+  d.netlist->finalize();
+  const std::string clocks = "create_clock -period 100 [get_ports clk]\n";
+  const auto constraints=d.read(clocks + "set_clock_latency 12 [get_pins b/CLK]\n"
+                      "set_clock_latency -rise -max 18 [get_pins b/CLK]\n");
+  ASSERT_TRUE(constraints.unsupported.empty())<<all(constraints.unsupported);
+  fast::Engine plain(*d.netlist,d.read(clocks)), scheduled(*d.netlist,constraints);
+  plain.evaluate();
+  scheduled.evaluate();
+  const auto ck=d.pin("b","CLK"), data=d.pin("b","D");
+  EXPECT_FLOAT_EQ(scheduled.clock_edge(ck,0,0,false).arrival,18);
+  EXPECT_FLOAT_EQ(scheduled.clock_edge(ck,0,0,true).arrival,12);
+  EXPECT_FLOAT_EQ(scheduled.clock_edge(ck,0,1,false).arrival,12);
+  EXPECT_FLOAT_EQ(scheduled.endpoint_setup_slack(data)-plain.endpoint_setup_slack(data),12);
+  EXPECT_FLOAT_EQ(scheduled.hold_slack(data)-plain.hold_slack(data),-18);
+  EXPECT_FALSE(d.read(clocks+"set_clock_latency -source 2 [get_clocks clk]").unsupported.empty());
+}
+
 // ---- the Tcl the constraint files are written in ----
 
 TEST(SdcTcl, WordsVariablesAndLists) {
@@ -276,11 +301,15 @@ set_false_path -from [get_ports nothere]
 )");
   EXPECT_FLOAT_EQ(c.clocks[0].uncertainty_ps, 25);
   EXPECT_FLOAT_EQ(c.clocks[0].slew_ps, 12);
-  // reset at 100; both bits of a late at 300 and early at 5.
-  ASSERT_EQ(c.inputs.size(), 3u);
+  // The clock has an electrical transition only. Reset and both data bits have input delays.
+  ASSERT_EQ(c.inputs.size(), 4u);
   for (const auto& in : c.inputs) {
     EXPECT_FLOAT_EQ(in.slew_ps, 20);
-    if (in.port == "reset") {
+    if (in.port == "clk") {
+      EXPECT_FALSE(in.late);
+      EXPECT_FALSE(in.early);
+      EXPECT_EQ(in.delay_ps, 0);
+    } else if (in.port == "reset") {
       EXPECT_FLOAT_EQ(in.delay_ps, 100);
       EXPECT_FALSE(in.early_set);
     } else {
@@ -322,8 +351,11 @@ set_output_delay -min 5 -clock c [get_ports z]
       EXPECT_FLOAT_EQ(in.delay_ps, 40);
     }
   }
-  EXPECT_TRUE(c.outputs.empty());
-  EXPECT_TRUE(listed(c.unsupported, "set_output_delay -min"));
+  ASSERT_EQ(c.outputs.size(), 1u);
+  EXPECT_FALSE(c.outputs.front().check);
+  EXPECT_EQ(c.outputs.front().min_delay_ps, 5);
+  EXPECT_EQ(c.outputs.front().min_clock, "c");
+  EXPECT_TRUE(c.unsupported.empty()) << all(c.unsupported);
 }
 
 TEST(Sdc, WhatIsNotModelledIsListedOnceAndTheScriptGoesOn) {
@@ -373,6 +405,39 @@ TEST(Sdc, UnitsContinuationAndWaveform) {
   ASSERT_EQ(c.outputs.size(), 3u);
   EXPECT_FLOAT_EQ(c.outputs[0].load_ff, 3000);
   EXPECT_FALSE(c.outputs[0].check);
+}
+
+TEST(Sdc, GlobalClockDeratesAreDimensionlessAndScopedByDelayType) {
+  const auto sdc = fast::read_sdc(R"(
+set_timing_derate -clock -early .95
+set_timing_derate -clock -late 1.1
+set_timing_derate -net_delay -clock -early .8
+set_timing_derate -cell_delay -clock -late 1.2
+)");
+  EXPECT_TRUE(sdc.unsupported.empty()) << all(sdc.unsupported);
+  EXPECT_EQ(sdc.clock_derates.cell, (std::array<float, 2>{.95f, 1.2f}));
+  EXPECT_EQ(sdc.clock_derates.net, (std::array<float, 2>{.8f, 1.1f}));
+  for (const auto cmd : {"-data -early .8", "-clock -early -rise .8", "-clock -late -cell_check 1.2",
+                         "-clock -early .9 cells", "-clock -early -late 2", "-clock -early 0"}) {
+    const auto bad = fast::read_sdc(std::string("set_timing_derate ") + cmd);
+    EXPECT_FALSE(bad.unsupported.empty()) << cmd;
+    EXPECT_EQ(bad.clock_derates, fast::Clock_derates{}) << cmd;
+  }
+}
+
+TEST(Sdc, NestedCollectionsPreserveBusBitsInExceptionsAndReplay) {
+  const auto sdc = fast::read_sdc(R"(
+set_false_path -from [list [get_ports rst] [get_ports {bus[0]}] [get_ports {bus[1] bus[2]}]]
+)");
+  ASSERT_TRUE(sdc.unsupported.empty()) << all(sdc.unsupported);
+  ASSERT_EQ(sdc.false_paths.size(), 1u);
+  const auto& from = sdc.false_paths.front().from;
+  ASSERT_EQ(from.size(), 4u);
+  EXPECT_EQ(from[1].name, "bus[0]");
+  EXPECT_EQ(from.back().name, "bus[2]");
+  const auto replay = fast::read_sdc(sdc.commands.front().text);
+  ASSERT_EQ(replay.false_paths.size(), 1u);
+  EXPECT_EQ(replay.false_paths.front().from, from);
 }
 
 TEST(Sdc, SurveyWithoutADesign) {

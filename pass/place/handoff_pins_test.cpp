@@ -75,6 +75,18 @@ TEST(HandoffPins, ReservesPowerAndOtherPinSpacing) {
   EXPECT_EQ(pins[1].x, 210);
   EXPECT_EQ(pins.back(), fp.terminals.back());
 }
+TEST(HandoffPins, IsolatedRectangularPinMeetsMinimumEnclosedArea) {
+  auto tech = technology();
+  tech.layers["M4"].rules.unsupported.insert("MINENCLOSEDAREA");
+  auto fp = floorplan();
+  tech.sites["unithd"].height = 2.72;
+  fp.rows.push_back({.site = "unithd"});
+  const auto pins = handoff_pins(tech, fp, "M4", "M5");
+  EXPECT_EQ(pins, handoff_pins(technology(), floorplan(), "M4", "M5"));
+  fp.terminals.push_back({.name = "left_fixed", .net = "left", .x = 50, .y = 110,
+                          .status = ph::Status::FIXED, .shapes = {{"M4", {-10, -10, 10, 10}}}});
+  EXPECT_EQ(handoff_pins(tech, fp, "M4", "M5")[2].y, 210);
+}
 TEST(HandoffPins, MissingTracksAndUnsupportedRulesFailWithoutChangingInput) {
   auto fp = floorplan();
   fp.tracks.clear();

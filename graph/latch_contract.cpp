@@ -3,10 +3,12 @@
 #include "latch_contract.hpp"
 
 #include <algorithm>
+#include <array>
 #include <map>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
@@ -516,6 +518,43 @@ Design_clocks::Design_clocks(hhds::Graph* g, bool hier, const ankerl::unordered_
     roots_.insert(root_key(root));
     if (gu::is_graph_input_pin(root)) {
       input_names_.insert(std::string(gu::pin_name_of(root)));
+      return;
+    }
+    // A domain may have no ungated flop to identify its primary clock. In a
+    // latch-based gate one operand also opens/closes the latch producing the
+    // other operand. This identifies the clock even after DEF port renaming.
+    const auto gate    = root.get_master_node();
+    const auto gate_op = gu::type_op_of(gate);
+    if (gate_op != Ntype_op::And && gate_op != Ntype_op::Or) {
+      return;
+    }
+    using Pin = std::decay_t<decltype(root)>;
+    std::array<Pin, 2> operands;
+    size_t             count = 0;
+    for (const auto& edge : gu::inp_sink_drivers(gate)) {
+      if (count == operands.size()) {
+        return;
+      }
+      operands[count++] = edge.driver;
+    }
+    if (count != operands.size()) {
+      return;
+    }
+    for (size_t i = 0; i < operands.size(); ++i) {
+      const auto clock = resolve_phase(operands[i], true);
+      const auto held  = resolve_phase(operands[1 - i], true);
+      if (clock.net.is_invalid() || !gu::is_graph_input_pin(clock.net)
+          || gu::bits_of(clock.net, *clock.net.get_graph()->get_io(), gu::pin_name_of(clock.net)) != 1 || held.net.is_invalid()
+          || held.net.is_const() || gu::is_graph_input_pin(held.net)
+          || gu::type_op_of(held.net.get_master_node()) != Ntype_op::Latch) {
+        continue;
+      }
+      const auto window = resolve_phase(sink_driver_hier(held.net.get_master_node(), "enable"), true);
+      if (!window.net.is_invalid() && window.net == clock.net) {
+        // The phase planner separately checks the latch polarity and guard.
+        roots_.insert(root_key(clock.net));
+        input_names_.insert(std::string(gu::pin_name_of(clock.net)));
+      }
     }
   };
   if (hier) {
@@ -760,6 +799,33 @@ template <typename Node, typename Pin>
 }
 
 namespace {
+hhds::Pin_class replicated_bit(const hhds::Pin_class& p) {
+  if (p.is_invalid() || p.is_const() || gu::type_op_of(p.get_master_node()) != Ntype_op::Sext) {
+    return {};
+  }
+  const auto n   = p.get_master_node();
+  const auto pos = gu::get_driver_of_sink_name(n, "b");
+  if (!pos.is_const() || !gu::const_of(pos).is_just_i64() || gu::const_of(pos).to_just_i64() != 1) {
+    return {};
+  }
+  return gu::get_driver_of_sink_name(n, "a");
+}
+
+// The zero-hold mux can also be And(data, Sext(window, 1)). A wider
+// selector would replicate only its low bit, so the phase test needs one bit.
+hhds::Pin_class open_mask_data(const hhds::Node_class& latch, const hhds::Node_class& gate) {
+  const auto ins = gu::inp_sink_drivers(gate);
+  if (ins.size() == 2) {
+    for (size_t i = 0; i < 2; ++i) {
+      const auto sel = replicated_bit(ins[i].driver);
+      if (!sel.is_invalid() && gu::bits_of(sel) == 1 && x_arm_is_the_hold_arm(latch, sel, 0)) {
+        return ins[1 - i].driver;
+      }
+    }
+  }
+  return {};
+}
+
 // ---------------------------------------------------------------------------
 // The OPEN value by evaluation (decision #20).
 //
@@ -1135,6 +1201,14 @@ hhds::Pin_class open_value_by_evaluation(const hhds::Node_class& n, const hhds::
   if (win.is_invalid() || din.is_invalid() || din.is_const()) {
     return {};
   }
+  // A tied latch can have its own enable as data, directly or sign-replicated
+  // by aegraph's word gate. While transparent that bit is the opening level.
+  if (gu::bits_of(win) == 1 && gu::bits_of(din) == 1 && gu::bits_of(q) == 1) {
+    if (din == win || replicated_bit(din) == win) {
+      const bool low = sink_driver_hier(n, "posclk").is_known_false();
+      return gu::create_const(*n.get_graph(), *Dlop::create_integer(low ? 0 : (gu::is_unsign(din) ? 1 : -1)));
+    }
+  }
   const auto wr = resolve_phase(win, /*stop_at_clock_cell=*/true);
   if (wr.net.is_invalid() || wr.net.is_const() || gu::bits_of(wr.net) != 1) {
     return {};
@@ -1179,6 +1253,11 @@ hhds::Pin_class latch_transparent_arm(const hhds::Node_class& n) {
     return {};
   }
   if (!din.is_const() && !gu::is_graph_input_pin(din)) {
+    if (gu::type_op_of(din.get_master_node()) == Ntype_op::And) {
+      if (auto data = open_mask_data(n, din.get_master_node()); !data.is_invalid()) {
+        return data;
+      }
+    }
     // Look THROUGH identity wiring to find the hold mux. The yosys reader does
     // not hand the latch a bare mux: CORE-ET's prim_clk_gate arrives as
     // `Sext(Get_mask(Mux(Ror(clk), 1'sb?, en|scan), [0,1)))`, and testing only
@@ -1285,12 +1364,11 @@ std::optional<Latch_hold_path> latch_hold_path(const hhds::Node_class& n) {
     }
     const auto pn = probe.get_master_node();
     const auto po = gu::type_op_of(pn);
-    if (po == Ntype_op::Mux) {
+    if (po == Ntype_op::Mux || po == Ntype_op::And) {
       if (path.chain.empty()) {
         return std::nullopt;  // a mux read directly is latch_transparent_arm's case
       }
-      const auto arms  = classify_mux_arms(pn, q);
-      const auto value = open_arm_of(n, arms);
+      const auto value = po == Ntype_op::Mux ? open_arm_of(n, classify_mux_arms(pn, q)) : open_mask_data(n, pn);
       if (value.is_invalid()) {
         return std::nullopt;
       }

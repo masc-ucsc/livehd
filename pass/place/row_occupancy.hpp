@@ -27,16 +27,22 @@ inline physical::Rect gap_rect(const Row_gaps& r, int64_t lo, int64_t hi) {
   return {double(r.x + lo * r.step), double(r.y), double(r.x + hi * r.step), double(r.y + r.height)};
 }
 // Hull of every free gap.
-physical::Rect        gaps_extent(const std::vector<Row_gaps>&);
+physical::Rect           gaps_extent(const std::vector<Row_gaps>&);
 // Remove sites [lo, hi) from a gap map.
-void                  subtract_gaps(std::map<int64_t, int64_t>& gaps, int64_t lo, int64_t hi);
+void                     subtract_gaps(std::map<int64_t, int64_t>& gaps, int64_t lo, int64_t hi);
+// Occupied cells and hard blockages are excluded. An incomplete placement has no available rows.
+std::vector<Row_gaps>    unoccupied_rows(const physical::Technology&, const physical::Floorplan&, unsigned padding_sites = 0,
+                                              int64_t halo_x_dbu = 0, int64_t halo_y_dbu = 0);
+// Closest compatible free site to a requested lower-left corner (DBU).
+std::optional<Ann_place> closest_free_site(const physical::Floorplan&, const std::vector<Row_gaps>&, const physical::Macro&,
+                                           double x, double y, unsigned padding_sites = 0);
 // The frame's rows sorted by (y, x), each with one gap of the complete sites
 // inside the die; rows without one are dropped. Throws std::invalid_argument,
 // prefixed by owner, for unknown or non-contiguous sites, no usable row and
 // overlapping rows.
-std::vector<Row_gaps> row_gaps(const physical::Technology&, const physical::Floorplan&, std::string_view owner);
+std::vector<Row_gaps>    row_gaps(const physical::Technology&, const physical::Floorplan&, std::string_view owner);
 // Remove every site the rectangle overlaps from rows sorted by y.
-void                  reserve_gaps(std::vector<Row_gaps>& rows, const physical::Rect&);
+void                     reserve_gaps(std::vector<Row_gaps>& rows, const physical::Rect&);
 
 // Fixed WELLTAP or SPACER: physical infrastructure, not logic.
 bool fixed_physical_cell(const physical::Component&, const physical::Macro&);

@@ -52,6 +52,9 @@
 (cost synth GT (* 3 Wmax))
 
 ;; ---- selection
+;; A word gated by zero maps to W gates. Prefer the explicit mask on a gate-count
+;; tie: it exposes the gate to color and permits sharing its enable with other consumers.
+(cost synth (Mux _ (k c) _) :when (and (= c 0) (> W 1)) (+ W 1))
 (cost synth (Mux _ (k) _) W :doc "a constant arm turns the mux into one and/or gate per bit")
 (cost synth (Mux _ _ (k)) W)
 (cost synth (Mux _ _ _) (* 3 W) :doc "one 2:1 mux per bit")

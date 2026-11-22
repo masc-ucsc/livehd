@@ -264,8 +264,32 @@ int layer_cb(lefrCallbackType_e, lefiLayer* layer, lefiUserData data) {
         cut.spacing.push_back(layer->spacing(i));
       }
     }
-    if (layer->numEnclosure() || layer->numPreferEnclosure()) {
+    if (layer->numEnclosure()) {
+      // Native PG handles these landing rules. Signal pin access still treats
+      // classic cut enclosures as unsupported.
       cut.unsupported.insert("ENCLOSURE");
+    }
+    for (int i = 0; i < layer->numEnclosure(); ++i) {
+      const std::string side = layer->hasEnclosureRule(i) ? layer->enclosureRule(i) : "";
+      if (layer->hasEnclosureWidth(i) || layer->hasEnclosureMinLength(i) || layer->hasEnclosureExceptExtraCut(i)
+          || (!side.empty() && side != "ABOVE" && side != "BELOW")) {
+        cut.unsupported.insert("qualified ENCLOSURE");
+        continue;
+      }
+      const double first = layer->enclosureOverhang1(i), second = layer->enclosureOverhang2(i);
+      if (!std::isfinite(first) || !std::isfinite(second) || first < 0 || second < 0) {
+        throw std::invalid_argument("invalid LEF cut enclosure");
+      }
+      for (int above = 0; above < 2; ++above) {
+        if (side.empty() || side == (above ? "ABOVE" : "BELOW")) {
+          auto& enc = cut.enclosure[above];
+          enc[0] = std::max(enc[0], std::min(first, second));
+          enc[1] = std::max(enc[1], std::max(first, second));
+        }
+      }
+    }
+    if (layer->numPreferEnclosure()) {
+      cut.unsupported.insert("PREFERENCLOSURE");
     }
     if (layer->hasMask()) {
       cut.unsupported.insert("MASK");
@@ -601,18 +625,25 @@ int terminal_cb(defrCallbackType_e, defiPin* pin, defiUserData data) {
 }
 int nondefault_cb(defrCallbackType_e, defiNonDefault* source, defiUserData data) {
   auto& c = *static_cast<DefContext*>(data);
-  if (source->hasHardspacing() || source->numProps() || source->numVias() || source->numViaRules() || source->numMinCuts()
+  if ((!c.snapshot && source->hasHardspacing()) || source->numProps() || source->numVias() || source->numViaRules() || source->numMinCuts()
       || !source->numLayers() || c.fp.nondefault_rules.contains(source->name())) {
     c.error = "unsupported or duplicate DEF nondefault rule";
     return 1;
   }
   std::map<std::string, int64_t> widths;
+  Snapshot_ndr::Spacing spacing{source->hasHardspacing() != 0, {}};
   for (int i = 0; i < source->numLayers(); ++i) {
-    if (source->hasLayerDiagWidth(i) || source->hasLayerSpacing(i) || source->hasLayerWireExt(i) || source->layerWidthVal(i) <= 0
+    if (source->hasLayerDiagWidth(i) || (source->hasLayerSpacing(i) && (!c.snapshot || source->layerSpacingVal(i) < 0)) || source->hasLayerWireExt(i) || source->layerWidthVal(i) <= 0
         || !widths.emplace(source->layerName(i), source->layerWidthVal(i)).second) {
       c.error = "unsupported DEF nondefault layer rule";
       return 1;
     }
+    if (source->hasLayerSpacing(i)) {
+      spacing.layers.emplace(source->layerName(i), source->layerSpacingVal(i));
+    }
+  }
+  if (spacing.hard || !spacing.layers.empty()) {
+    c.fp.snapshot_ndr.spacing.emplace(source->name(), std::move(spacing));
   }
   c.fp.nondefault_rules.emplace(source->name(), std::move(widths));
   return 0;
@@ -629,10 +660,13 @@ int net_cb(defrCallbackType_e kind, defiNet* net, defiUserData data) {
   }
   // Never silently drop a route feature: doing so could open a FIXED net or
   // erase a power-grid obstruction while leaving the handoff apparently valid.
-  if (net->hasSubnets() || net->hasNonDefaultRule() || net->numPolygons() || net->numRectangles() || net->numShields()
+  if (net->hasSubnets() || (net->hasNonDefaultRule() && (!c.snapshot || kind == defrSNetCbkType)) || net->numPolygons() || net->numRectangles() || net->numShields()
       || net->numNoShields() || net->numPaths()) {
     c.error = "unsupported DEF routing geometry on net " + n.name;
     return 1;
+  }
+  if (net->hasNonDefaultRule()) {
+    c.fp.snapshot_ndr.net_rules.emplace(net->name(), net->nonDefaultRule());
   }
   for (int i = 0; i < net->numWires(); ++i) {
     auto* input = net->wire(i);
@@ -648,6 +682,13 @@ int net_cb(defrCallbackType_e kind, defiNet* net, defiUserData data) {
       source->initTraverse();
       for (int token = source->next(); token != DEFIPATH_DONE; token = source->next()) {
         switch (token) {
+          case DEFIPATH_TAPER:
+            if (!c.snapshot || !net->hasNonDefaultRule()) {
+              c.error = "DEF path TAPER needs a snapshot net with a nondefault rule";
+              return 1;
+            }
+            path.taper = true;
+            break;
           case DEFIPATH_TAPERRULE : path.taper_rule = source->getTaperRule(); break;
           case DEFIPATH_LAYER     : path.layer = source->getLayer(); break;
           case DEFIPATH_WIDTH     : path.width = source->getWidth(); break;
@@ -811,6 +852,9 @@ int blockage_cb(defrCallbackType_e, defiBlockage* blockage, defiUserData data) {
   return 0;
 }
 void validate_blockages(const Floorplan& fp) {
+  if (!fp.snapshot_ndr.net_rules.empty() || !fp.snapshot_ndr.spacing.empty()) {
+    throw std::invalid_argument("placement cannot consume snapshot nondefault routing constraints");
+  }
   if (!fp.snapshot_blockages.empty()) {
     throw std::invalid_argument("placement cannot consume read-only DEF snapshot blockages");
   }
@@ -854,6 +898,10 @@ std::string identifier(const std::string& text) {
 const char* status_name(Status status) { return status == Status::FIXED || status == Status::LOCKED ? "FIXED" : "PLACED"; }
 void        validate_wires(const Floorplan& fp, const std::vector<Net>& nets, bool special) {
   for (const auto& net : nets) {
+    const auto assignment = fp.snapshot_ndr.net_rules.find(net.name.str());
+    if (assignment != fp.snapshot_ndr.net_rules.end() && !fp.nondefault_rules.contains(assignment->second)) {
+      throw std::runtime_error("undefined DEF net nondefault rule on " + net.name);
+    }
     for (const auto& wire : net.wires) {
       if ((wire.type != "FIXED" && wire.type != "ROUTED" && wire.type != "COVER") || wire.paths.empty()) {
         throw std::runtime_error("invalid DEF wire on net " + net.name);
@@ -862,6 +910,9 @@ void        validate_wires(const Floorplan& fp, const std::vector<Net>& nets, bo
         if (path.layer.empty() || path.steps.empty() || !std::holds_alternative<Route_point>(path.steps.front())
             || (special && (!path.width || *path.width < 0)) || (!special && path.width)) {
           throw std::runtime_error("invalid DEF path on net " + net.name);
+        }
+        if (path.taper && (assignment == fp.snapshot_ndr.net_rules.end() || !path.taper_rule.empty() || special)) {
+          throw std::runtime_error("invalid DEF path TAPER on net " + net.name);
         }
         if (!path.taper_rule.empty()
             && (special || !fp.nondefault_rules.contains(path.taper_rule)
@@ -1227,7 +1278,7 @@ void      write_def(const Floorplan& fp, const std::string& path) {
   }
 }
 void verify_def_roundtrip(const Floorplan& a, const Floorplan& b) {
-  if (a.nondefault_rules != b.nondefault_rules) {
+  if (a.nondefault_rules != b.nondefault_rules || a.snapshot_ndr != b.snapshot_ndr) {
     throw std::runtime_error("DEF roundtrip changed nondefault rules");
   }
   if (a.gcell_grid != b.gcell_grid) {

@@ -96,6 +96,17 @@ TEST(PowerGridVias, PdnEnclosurePolicyDoesNotChangeSignalRules) {
                               ph::Cut_enclosure_policy::pdngen),
             (std::vector<std::array<int64_t, 2>>{{5, 0}}));
 }
+TEST(PowerGridVias, ClassicEnclosureUsesTheLandingDirectionAndCutSide) {
+  const auto t = technology();
+  ph::Cut_layer cut;
+  cut.enclosure = {{{.055, .085}, {.065, .065}}};
+  EXPECT_EQ(ph::cut_enclosures(cut, 1000, {}, {150, 150}, false, t.layers.at("M2"), {480, 480}),
+            (std::vector<std::array<int64_t, 2>>{{85, 55}}));
+  EXPECT_EQ(ph::cut_enclosures(cut, 1000, {}, {150, 150}, false, t.layers.at("M3"), {480, 480}),
+            (std::vector<std::array<int64_t, 2>>{{55, 85}}));
+  EXPECT_EQ(ph::cut_enclosures(cut, 1000, {}, {150, 150}, true, t.layers.at("M3"), {480, 480}),
+            (std::vector<std::array<int64_t, 2>>{{65, 65}}));
+}
 TEST(PowerGridVias, FixedMacroContactKeepsMinimumEnclosureAndFitsCrossing) {
   const auto t = technology();
   auto       a = make_pg_via(t, 1000, {"M4", "M5", {58320, 96}, {120, 10000}, false, false, true, false});

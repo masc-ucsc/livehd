@@ -329,7 +329,7 @@ Grid build_grid(const Design& d, const Legroute_power& power) {
   // horizontal, one vertical; the pins land on them directly), so the grid models what a router has there.
   std::vector<std::string> stack;
   bool                     above = false;
-  if (d.profile) {
+  if (d.profile && d.profile->provides(ph::Tech_policy::route)) {
     g.escape_layer = d.profile->route.access.escape;
     stack          = d.profile->route.signal_layers;
   } else if (tech.routing_layers.size() == 2) {

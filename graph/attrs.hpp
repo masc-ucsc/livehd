@@ -218,6 +218,18 @@ struct resynth_t {
 };
 inline constexpr resynth_t resynth{};
 
+// A native CTS distribution buffer. Functional clock gates and inserted data
+// delay cells retain their own identities when the tree is stripped for replanning.
+struct pcrs_clock_buffer_t {
+  struct value_type { uint8_t marker = 1; };
+  using storage = hhds::flat_storage;
+};
+inline constexpr pcrs_clock_buffer_t pcrs_clock_buffer{};
+struct pcrs_clock_driver_t {
+  using value_type = uint8_t;
+  using storage = hhds::flat_storage;
+};
+inline constexpr pcrs_clock_driver_t pcrs_clock_driver{};
 // Marker on exact native logic that pass.abc retained because it belongs to a
 // combinational-cycle remainder. OpenTimer consumes this structurally: the
 // node remains in the emitted netlist, while STA cuts a documented boundary at
@@ -576,6 +588,10 @@ inline constexpr Attr_kind attr_kind<synth_color_group_names_t> = Attr_kind::nod
 template <>
 inline constexpr Attr_kind attr_kind<resynth_t> = Attr_kind::node;
 template <>
+inline constexpr Attr_kind attr_kind<pcrs_clock_driver_t> = Attr_kind::driver_pin;
+template <>
+inline constexpr Attr_kind attr_kind<pcrs_clock_buffer_t> = Attr_kind::node;
+template <>
 inline constexpr Attr_kind attr_kind<native_comb_boundary_t> = Attr_kind::node;
 template <>
 inline constexpr Attr_kind attr_kind<user_cell_t> = Attr_kind::node;
@@ -693,6 +709,8 @@ inline constexpr bool carry_on_rebuild<placement_block_names_t> = false;
   X(synth_color_group_id)           \
   X(synth_color_group_names)        \
   X(resynth)                        \
+  X(pcrs_clock_driver)              \
+  X(pcrs_clock_buffer)              \
   X(native_comb_boundary)           \
   X(user_cell)                      \
   X(hier_color)                     \

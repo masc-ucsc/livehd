@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <sstream>
 
+#include "gui_clock.hpp"
 #include "rapidjson/document.h"
 
 namespace livehd::placement::gui {
@@ -42,6 +43,33 @@ struct Canvas {
     for (int y = std::max(0, y0); y <= std::min(h - 1, y1); ++y) {
       for (int x = std::max(0, x0); x <= std::min(w - 1, x1); ++x) {
         set(x, y, c, alpha);
+      }
+    }
+  }
+  // A straight stroke. Endpoints far outside the canvas are stepped only across it.
+  void line(int x0, int y0, int x1, int y1, Rgb c, int width = 1, double alpha = 1) {
+    const int    steps = std::max(std::abs(x1 - x0), std::abs(y1 - y0));
+    const double dx = steps ? double(x1 - x0) / steps : 0, dy = steps ? double(y1 - y0) / steps : 0;
+    int          first = 0, last = steps;
+    const auto   clip = [&](double from, double delta, int limit) {
+      if (delta > 0) {
+        first = std::max(first, int(std::floor((-width - from) / delta)));
+        last  = std::min(last, int(std::ceil((limit + width - from) / delta)));
+      } else if (delta < 0) {
+        first = std::max(first, int(std::floor((limit + width - from) / delta)));
+        last  = std::min(last, int(std::ceil((-width - from) / delta)));
+      } else if (from < -width || from > limit + width) {
+        last = -1;
+      }
+    };
+    clip(x0, dx, w);
+    clip(y0, dy, h);
+    for (int k = std::max(first, 0); k <= std::min(last, steps); ++k) {
+      const int x = int(std::lround(x0 + dx * k)), y = int(std::lround(y0 + dy * k));
+      for (int a = -(width / 2); a <= (width - 1) / 2; ++a) {
+        for (int b = -(width / 2); b <= (width - 1) / 2; ++b) {
+          set(x + a, y + b, c, alpha);
+        }
       }
     }
   }
@@ -243,6 +271,8 @@ Render_options parse_layers(const std::string& csv, Render_options o) {
       o.congestion = on;
     } else if (item == "pins") {
       o.pins = on;
+    } else if (item == "clock") {
+      o.clock = on;
     }
   }
   return o;
@@ -386,6 +416,65 @@ std::string render_png(const Scene& scene, const Frame& frame, const std::set<in
         c.fill(left, bottom - 1, right, bottom, edge);
         c.fill(left, top, left + 1, bottom, edge);
         c.fill(right - 1, top, right, bottom, edge);
+      }
+    }
+  }
+  if (opt.clock && !scene.clock_nets.empty()) {
+    const auto                   tree = clock_tree(scene);
+    // Deeper stages are finer and cooler: the eye follows the trunk first.
+    constexpr std::array<Rgb, 5> depth{
+        Rgb{255, 214,  10},
+        Rgb{255, 140,  30},
+        Rgb{240,  80, 120},
+        Rgb{170, 110, 255},
+        Rgb{ 90, 170, 255}
+    };
+    const auto placed = [&](int node) { return node >= 0 && size_t(node) < frame.x.size() && size_t(node) < scene.nodes.size(); };
+    const auto cx     = [&](int node) { return sx(frame.x[size_t(node)] + scene.nodes[size_t(node)].w / 2); };
+    const auto cy     = [&](int node) { return sy(frame.y[size_t(node)] + scene.nodes[size_t(node)].h / 2); };
+    double     early = 1e300, late = -1e300;
+    for (const auto& net : scene.clock_nets) {
+      for (const double t : net.arrival_ps) {
+        if (std::isfinite(t)) {
+          early = std::min(early, t);
+          late  = std::max(late, t);
+        }
+      }
+    }
+    // Leaves first, the trunk on top.
+    for (int pass = 0; pass < 2; ++pass) {
+      for (size_t ci = 0; ci < scene.clock_nets.size(); ++ci) {
+        const auto& net = scene.clock_nets[ci];
+        if (!placed(net.driver)) {
+          continue;
+        }
+        const Rgb colour = depth[size_t(std::min(tree.level[ci], int(depth.size()) - 1))];
+        for (size_t k = 0; k < net.sinks.size(); ++k) {
+          const int  sink     = net.sinks[k];
+          const bool interior = sink >= 0 && size_t(sink) < tree.driven.size() && tree.driven[size_t(sink)] >= 0;
+          if (!placed(sink) || interior != (pass == 1)) {
+            continue;
+          }
+          c.line(cx(net.driver), cy(net.driver), cx(sink), cy(sink), colour, interior ? 2 : 1, interior ? 1 : .55);
+          if (!interior && k < net.arrival_ps.size() && std::isfinite(net.arrival_ps[k]) && late > early) {
+            const double t = (net.arrival_ps[k] - early) / (late - early);
+            c.fill(cx(sink) - 1,
+                   cy(sink) - 1,
+                   cx(sink) + 1,
+                   cy(sink) + 1,
+                   Rgb{std::uint8_t(40 + 215 * t), std::uint8_t(90 + 60 * (1 - std::abs(2 * t - 1))), std::uint8_t(255 - 215 * t)});
+          }
+        }
+      }
+    }
+    for (size_t ci = 0; ci < scene.clock_nets.size(); ++ci) {  // the drivers, so a stage is visible where its fan is short
+      const auto& net = scene.clock_nets[ci];
+      if (placed(net.driver)) {
+        c.fill(cx(net.driver) - 2,
+               cy(net.driver) - 2,
+               cx(net.driver) + 2,
+               cy(net.driver) + 2,
+               depth[size_t(std::min(tree.level[ci], int(depth.size()) - 1))]);
       }
     }
   }

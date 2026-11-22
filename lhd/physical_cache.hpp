@@ -22,7 +22,8 @@ public:
   // A changed design cannot replay the repaired generation, but matching
   // technology/options may reuse its verified DEF as movable coordinate hints.
   // No graph, constraints, timing, or placement certification is restored.
-  std::filesystem::path placement_hint() const;
+  // Optionally return the verified native clock report from the same generation.
+  std::filesystem::path placement_hint(std::filesystem::path* clock_report = nullptr) const;
   void                  publish(const std::filesystem::path& net, const std::filesystem::path& place);
   const std::string&    reason() const { return reason_; }
 

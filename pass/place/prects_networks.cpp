@@ -138,7 +138,17 @@ Prects_networks prects_networks(const physical::Technology& tech, const physical
       role_link_pins[n] += link_pin;
     }
   };
+  std::vector<bool> owned;
+  if (!roles.published_clock_drivers.empty()) {
+    owned.reserve(fp.nets.size());
+    for (const auto& net : fp.nets) {
+      owned.push_back(std::ranges::any_of(net.connections, [&](const auto& pin) {
+        return roles.published_clock_drivers.contains(Pin_label(pin.instance, pin.pin));
+      }));
+    }
+  }
   const auto mark_clock = [&](size_t n) {
+    if (!owned.empty() && !owned[n]) return;
     role(n);
     if (!clock_nets[n]) {
       clock_nets[n] = true;
@@ -152,6 +162,13 @@ Prects_networks prects_networks(const physical::Technology& tech, const physical
       pending.push_back(n);
     }
   };
+  for (size_t n = 0; n < owned.size(); ++n) {
+    if (owned[n]) {
+      named[n] = true;
+      mark(n);
+      mark_clock(n);
+    }
+  }
   // The pin-name sets are ordered sets of strings: one lookup compares a label with about log2(size) others. A
   // connection asks several of them, so hash views of the same strings answer them (the sets own the text).
   using Name_set = absl::flat_hash_set<std::string_view>;
@@ -330,6 +347,7 @@ Prects_networks prects_networks(const physical::Technology& tech, const physical
     std::erase_if(pending, [&](size_t n) {
       if (data[n]) {
         result.ignored[n] = false;
+        clock_nets[n]     = false;
       }
       return data[n];
     });
@@ -346,6 +364,7 @@ Prects_networks prects_networks(const physical::Technology& tech, const physical
       }
     }
   }
+  result.clock_nets = std::move(clock_nets);
   return result;
 }
 

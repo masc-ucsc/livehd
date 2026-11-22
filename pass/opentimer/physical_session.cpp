@@ -1265,6 +1265,18 @@ Physical_session::Physical_session(const Eprp_var& options, int threads) : optio
   impl_ = std::make_unique<Impl>(options_, threads_);
 }
 Physical_session::~Physical_session() = default;
+void Physical_session::set_timing_files(const std::string& files) {
+  if (options_.get("files", "") == files) {
+    return;
+  }
+  auto next = options_;
+  next.dict["files"] = files;
+  next.set_stage_labels(next.dict);
+  auto updated   = std::make_unique<Impl>(next, threads_);
+  updated->stats = impl_->stats;
+  impl_          = std::move(updated);
+  options_       = std::move(next);
+}
 livehd::timing::Feedback Physical_session::evaluate(const std::shared_ptr<hhds::Graph>&                 graph,
                                                     std::shared_ptr<const livehd::physical::Parasitics> rc,
                                                     const std::set<std::string>& data_exclusions, Purpose purpose) {

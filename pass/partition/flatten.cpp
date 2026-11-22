@@ -312,6 +312,9 @@ hhds::Pin_class Flattener::apply_port_shape(const hhds::Pin_class& source, const
 
 void Flattener::carry_node_attrs(Ictx* ctx, const hhds::Node_class& orig, const hhds::Node_class& neo) {
   admit("flatten-carry_node_attrs");
+  if (auto a = orig.attr(livehd::attrs::pcrs_clock_buffer); a.has()) {
+    neo.attr(livehd::attrs::pcrs_clock_buffer).set(a.get());
+  }
   if (ctx->preroute_excluded || orig.attr(livehd::attrs::preroute_exclude).has()) {
     neo.attr(livehd::attrs::preroute_exclude).set();
   }
@@ -717,18 +720,14 @@ void Flattener::wire_top_outputs(Ictx* top_ctx) {
     if (opin.is_invalid()) {
       continue;
     }
-    // One driver per sink pin, so a top output port is one driver, not a set.
-    auto drv = opin.get_driver_pin();
-    if (drv.is_invalid()) {
-      continue;  // declared but undriven
-    }
+    // Physical DEF imports retain unresolved nets for placement. Preserve every
+    // driver on a top-level terminal so the timer can report that limitation.
     auto sink = flat_->get_output_pin(decl.name);
-    if (drv.is_const()) {
-      gu::create_const(*flat_, gu::const_of(drv)).connect_sink(sink);
-    } else {
-      auto dp = resolve_driver(top_ctx, drv);
-      if (!dp.is_invalid()) {
-        dp.connect_sink(sink);
+    for (const auto& driver : opin.get_driver_pins()) {
+      if (driver.is_const()) {
+        gu::create_const(*flat_, gu::const_of(driver)).connect_sink(sink);
+      } else if (auto resolved = resolve_driver(top_ctx, driver); !resolved.is_invalid()) {
+        resolved.connect_sink(sink);
       }
     }
   }

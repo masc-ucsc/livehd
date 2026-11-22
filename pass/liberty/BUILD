@@ -5,6 +5,14 @@ load("@rules_cc//cc:defs.bzl", "cc_library")
 load("//tools:copt_default.bzl", "COPTS")
 
 cc_library(
+    name = "clock_function",
+    srcs = ["clock_function.cpp"],
+    hdrs = ["clock_function.hpp", "clock_topology.hpp"],
+    copts = COPTS,
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "timing_model",
     srcs = ["timing_model.cpp"],
     hdrs = ["timing_model.hpp"],
@@ -27,6 +35,9 @@ cc_test(
 filegroup(
     name = "liberty_dff_srcs",
     srcs = [
+        "clock_function.cpp",
+        "clock_function.hpp",
+        "clock_topology.hpp",
         "liberty_dff.cpp",
         "liberty_dff.hpp",
     ],
@@ -43,6 +54,7 @@ cc_library(
     includes = ["."],
     visibility = ["//visibility:public"],
     deps = [
+        ":clock_function",
         "//graph",
     ],
 )

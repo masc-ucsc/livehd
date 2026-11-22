@@ -43,7 +43,7 @@ endmodule
               'synth.place.timing_driven':'false','synth.place.io_resynth':0,'synth.place.fp':'true',
               'synth.place.fp.minimum':0,'synth.place.fp.min_macros':0,'synth.place.fp.snap':'false',
               'synth.place.iterations':50,'synth.place.fp.iterations':50,'synth.place.final.iterations':50,
-              'synth.place.grid.density':8,'synth.place.routability':'false','lhd.jobs':1,
+              'synth.place.grid.density':8,'synth.place.routability':'false','synth.place.legroute':'false','lhd.jobs':1,
               'lhd.incremental':'true'}
     for k,v in settings.items():cmd+=['--set',f'{k}={v}']
     def run(label, with_hints=True, extra=()):

@@ -56,7 +56,7 @@ std::optional<Pg_via_array> build(Candidate c, const ph::Technology& tech, int64
     }
     for (const auto& feature : cut.unsupported) {
       if (feature != "PROPERTY LEF58_CUTCLASS" && feature != "PROPERTY LEF58_SPACINGTABLE"
-          && feature != "PROPERTY LEF58_ENCLOSURE") {
+          && feature != "PROPERTY LEF58_ENCLOSURE" && feature != "ENCLOSURE") {
         throw std::invalid_argument("unsupported PG cut layer rule: " + feature);
       }
     }

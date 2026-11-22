@@ -305,7 +305,7 @@ struct Icg_def_match {
 // `Sext(Get_mask(Sra(Mux(win, 0, d), k), [0,1)), 1)` for bit k. That selector
 // reads the window (the clock), and latch_transparent_arm cannot peel it: the
 // arm under the wrappers is the whole word, not this latch's bit. This finds
-// the mux beneath a chain of bit-select wrappers (Get_mask, Sext, Sra, each
+// the mux or its equivalent replicated AND mask beneath the bit-select wrappers (Get_mask, Sext, Sra, each
 // with constant parameters), proves its hold arm the same way
 // latch_transparent_arm does, and returns the open arm plus the chain, so a
 // caller can walk the arm (rules B/C, rule 4) or REBUILD the chain over it

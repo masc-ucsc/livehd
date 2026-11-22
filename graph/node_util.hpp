@@ -841,8 +841,31 @@ inline void add_signal_roles(const hhds::Pin_class& pin, uint8_t roles) {
   assert_pin_attr_role<attrs::signal_roles_t>(pin);
   pin.attr(attrs::signal_roles).set(signal_roles_of(pin) | roles);
 }
+inline bool is_published_clock_driver(const hhds::Pin_class& pin) {
+  return !pin.is_invalid() && !pin.is_const() && pin.attr(attrs::pcrs_clock_driver).has();
+}
+template <class Visit>
+bool visit_published_clock_drivers(hhds::Graph& graph, Visit visit) {
+  bool       found = false;
+  const auto scan  = [&](const hhds::Node_class& node) {
+    for (const auto& pin : node.out_sorted_pins()) {
+      if (is_published_clock_driver(pin)) {
+        found = true;
+        visit(pin);
+      }
+    }
+  };
+  scan(graph.get_input_node());
+  for (const auto& node : graph.body().nodes()) {
+    scan(node);
+  }
+  return found;
+}
 inline void carry_signal_roles(const hhds::Pin_class& from, const hhds::Pin_class& to) {
   add_signal_roles(to, signal_roles_of(from));
+  if (is_published_clock_driver(from) && !to.is_invalid() && !to.is_const()) {
+    to.attr(attrs::pcrs_clock_driver).set(1);
+  }
 }
 
 inline bool preroute_net_excluded(const hhds::Pin_class& pin) {

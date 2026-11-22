@@ -26,6 +26,7 @@ struct Report_inputs {
   std::string liberty_text;  // the setup corner: synth.liberty plus the macro libraries, concatenated
   std::string corner_name;
   std::string sdc_text;  // empty: no constraint file
+  bool        physical_clock_tree = false;
   float       io_load_ff   = 0;
   double      time_unit_ps = 1000;  // the Liberty time unit the report is written in (ns: 1000)
   // The synthesis wire estimate (no placement): an average wire R and C per um and a fanout -> length predictor
@@ -33,6 +34,7 @@ struct Report_inputs {
   // resistance, its capacitance at one junction, every sink). Empty lengths: zero wire.
   double                     wire_cap_ff_um = 0, wire_res_ohm_um = 0, wire_slope_um = 0;
   std::map<unsigned, double> wire_length_um;
+  std::string parasitic_model = "placement_flute";
 };
 std::string report_json(hhds::GraphLibrary& library, std::string_view top, const Report_inputs& inputs,
                         const std::shared_ptr<const physical::Parasitics>& placed = nullptr);

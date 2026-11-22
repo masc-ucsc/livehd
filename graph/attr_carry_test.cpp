@@ -55,6 +55,7 @@ TEST(AttrCarry, EveryNodeAttributeSurvivesARebuild) {
   src.attr(la::synth_region_id).set(uint32_t{11});
   livehd::graph_util::Color_group::set(src, std::string{"color_group_A"});
   src.attr(la::synth_policy).set(std::string{"color=ex0"});
+  src.attr(la::pcrs_clock_buffer).set(la::pcrs_clock_buffer_t::value_type{});
   src.attr(la::resynth).set(la::resynth_t::value_type{});
   src.attr(la::native_comb_boundary).set(la::native_comb_boundary_t::value_type{});
   src.attr(la::user_cell).set(la::user_cell_t::value_type{});
@@ -83,7 +84,7 @@ TEST(AttrCarry, EveryNodeAttributeSurvivesARebuild) {
   src.attr(la::comb_reach).set(std::string{"s 0 1\no 2 0\n"});
   src.attr(la::physical_open_inputs).set(std::vector<std::string>{"A", "B2"});
   gu::set_match(src, 9);  // the NODE overload of the dual-role `match`
-  static_assert(kNodeTagsStamped == 39, "a node-kind tag was added to LIVEHD_FOR_EACH_ATTR_TAG: stamp and check it here");
+  static_assert(kNodeTagsStamped == 40, "a node-kind tag was added to LIVEHD_FOR_EACH_ATTR_TAG: stamp and check it here");
 
   gu::carry_node_attrs(src, dst);
 
@@ -99,6 +100,7 @@ TEST(AttrCarry, EveryNodeAttributeSurvivesARebuild) {
   EXPECT_EQ(livehd::graph_util::Color_group::text(dst), "color_group_A");
   EXPECT_EQ(dst.attr(la::synth_policy).get(), "color=ex0");
   EXPECT_TRUE(dst.attr(la::resynth).has());
+  EXPECT_TRUE(dst.attr(la::pcrs_clock_buffer).has());
   EXPECT_TRUE(dst.attr(la::native_comb_boundary).has());
   EXPECT_TRUE(dst.attr(la::user_cell).has());
   EXPECT_TRUE(dst.attr(la::place).has());
@@ -141,6 +143,7 @@ TEST(AttrCarry, EveryPinAttributeSurvivesARebuild) {
   src.attr(la::pin_signed).set();
   src.attr(la::pin_delay).set(float{2.5});
   src.attr(la::signal_roles).set(la::signal_clock | la::signal_reset);
+  src.attr(la::pcrs_clock_driver).set(1);
   src.attr(la::preroute_net_exclude).set();
   src.attr(la::pin_place).set(Ann_place{10, 20, 0, 0});
   src.attr(la::place_weight).set(2.0);
@@ -149,13 +152,14 @@ TEST(AttrCarry, EveryPinAttributeSurvivesARebuild) {
   src.attr(la::pin_offset).set(int32_t{6});
   src.attr(la::time_range).set(la::time_range_t::value_type{.min = 0, .max = 3});
   src.attr(la::pending_time).set(la::pending_time_t::value_type{.min = 1, .max = 2});
-  static_assert(kPinTagsStamped == 12, "a pin-kind tag was added to LIVEHD_FOR_EACH_ATTR_TAG: stamp and check it here");
+  static_assert(kPinTagsStamped == 13, "a pin-kind tag was added to LIVEHD_FOR_EACH_ATTR_TAG: stamp and check it here");
 
   gu::carry_pin_attrs(src, dst);
 
   EXPECT_EQ(dst.attr(la::bits).get(), 13);
   EXPECT_TRUE(dst.attr(la::pin_signed).has());
   EXPECT_FLOAT_EQ(dst.attr(la::pin_delay).get(), 2.5F);
+  EXPECT_TRUE(dst.attr(la::pcrs_clock_driver).has());
   EXPECT_EQ(dst.attr(la::signal_roles).get(), la::signal_clock | la::signal_reset);
   EXPECT_TRUE(dst.attr(la::preroute_net_exclude).has());
   EXPECT_EQ(dst.attr(la::pin_place).get(), Ann_place(10, 20, 0, 0));

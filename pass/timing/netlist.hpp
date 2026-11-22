@@ -7,6 +7,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "cell_types.hpp"
@@ -30,6 +31,10 @@ struct Port {
   bool        input = true;
 };
 
+struct Discrete_clock_gate {
+  uint32_t clock, control, latch_clock, latch_data;
+  bool     inverted, enabled_high;
+};
 class Netlist {
 public:
   explicit Netlist(const Cell_types& types) : types_(&types) { first_pin_.push_back(0); }
@@ -70,6 +75,14 @@ public:
   [[nodiscard]] const Pin_type&   pin_type(uint32_t pin) const { return types_->pin(cell_type_[pin_cell_[pin]], local_of(pin)); }
   [[nodiscard]] const std::vector<Port>& ports() const { return ports_; }
 
+  // A resolved latch/logic pair, shared with the census and clock propagation.
+  void                      publish_clock_driver(uint32_t pin) { published_clock_drivers_.insert(pin); }
+  [[nodiscard]] bool        has_published_clock() const { return !published_clock_drivers_.empty(); }
+  [[nodiscard]] bool        published_clock_driver(uint32_t pin) const { return published_clock_drivers_.contains(pin); }
+  [[nodiscard]] const auto& discrete_clock_gates() const { return discrete_gates_; }
+  [[nodiscard]] bool        has_unchecked_clock_gate() const { return unchecked_clock_gate_; }
+  [[nodiscard]] bool        gating_latch(uint32_t cell) const { return types_->type(type_of(cell)).latch && gate_enable_storage_.contains(cell); }
+
   // After finalize.
   [[nodiscard]] uint32_t                  net_of(uint32_t pin) const { return pin_net_[pin]; }
   [[nodiscard]] uint32_t                  driver_of(uint32_t net) const { return net_driver_[net]; }
@@ -93,6 +106,10 @@ public:
   [[nodiscard]] size_t                          bytes() const;
 
 private:
+  void                                              find_discrete_clock_gates();
+  std::unordered_map<uint32_t, Discrete_clock_gate> discrete_gates_;  // output pin to gate
+  bool                                              unchecked_clock_gate_ = false;
+  std::unordered_set<uint32_t>                      gate_enable_storage_, published_clock_drivers_;
   const Cell_types*                          types_;
   std::vector<uint32_t>                      cell_type_, first_pin_, pin_cell_;
   std::vector<Port>                          ports_;

@@ -890,6 +890,22 @@ void write_power_grid_report(const ph::Floorplan& fp, const Pg_profile& profile,
   report.Int(3);
   report.Key("profile");
   report.String(profile.name.c_str());
+  report.Key("stripes_um");
+  report.StartObject();
+  for (const auto& stripe : profile.stripes) {
+    report.Key(stripe.layer.c_str());
+    report.StartObject();
+    report.Key("width");
+    report.Double(stripe.width);
+    report.Key("spacing");
+    report.Double(stripe.spacing);
+    report.Key("pitch");
+    report.Double(stripe.pitch);
+    report.Key("offset");
+    report.Double(stripe.offset);
+    report.EndObject();
+  }
+  report.EndObject();
   report.Key("reference_revision");
   report.String(profile.reference_revision.c_str());
   // Power first, then ground, with the cell pin names each net connects.

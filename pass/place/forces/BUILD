@@ -3,6 +3,23 @@ load("@rules_cc//cc:defs.bzl", "cc_library")
 load("//tools:copt_default.bzl", "COPTS")
 
 cc_library(
+    name = "clock_cluster",
+    srcs = ["clock_cluster.cpp"],
+    hdrs = ["clock_cluster.hpp"],
+    copts = COPTS,
+    visibility = ["//visibility:public"],
+    deps = ["//pass/place:capacity_bins", "@dreamplace//dreamplace/native:placer"],
+)
+
+cc_test(
+    name = "clock_cluster_test",
+    size = "small",
+    srcs = ["clock_cluster_test.cpp"],
+    copts = COPTS,
+    deps = [":clock_cluster", "@googletest//:gtest_main"],
+)
+
+cc_library(
     name = "pin_weights",
     srcs = ["pin_weights.cpp"],
     hdrs = ["pin_weights.hpp"],

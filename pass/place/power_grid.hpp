@@ -2,6 +2,7 @@
 #pragma once
 #include "inou/lefdef/physical.hpp"
 #include "inou/lefdef/tech_profile.hpp"
+#include "rapidjson/fwd.h"
 
 namespace livehd::placement {
 using Pg_stripe = physical::Pg_stripe;
@@ -21,6 +22,8 @@ struct Pg_profile : physical::Pg_strategy {
   // with a warning, instead of failing the export; between two macros an overlap always fails
   bool                    tolerate_macro_pin_overlap = false;
 };
+// Apply design-selected JSON strap overrides to a copy of the reference grid.
+Pg_profile tuned_power_grid(const physical::Tech_profile&, const rapidjson::Value& record);
 // The profile's reference strategy; profiles without one fail.
 Pg_profile power_grid_profile(const physical::Tech_profile&);
 // Technology profile/strategy names or auto detection (see resolve_tech_profile).

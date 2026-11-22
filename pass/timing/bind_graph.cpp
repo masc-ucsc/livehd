@@ -84,8 +84,9 @@ struct Terminal {
 // signed one repeats bit w-1).
 class Binder {
 public:
-  Binder(hhds::Graph& top, const Cell_types& types, Bound_graph& out, bool hier)
-      : top_(top), types_(types), out_(out), hier_(hier) {}
+  Binder(hhds::Graph& top, const Cell_types& types, Bound_graph& out, bool hier,
+         absl::flat_hash_map<uint32_t, bool>* constants = nullptr)
+      : top_(top), types_(types), out_(out), hier_(hier), constants_(constants) {}
 
   void run() {
     auto& netlist = *out_.netlist;
@@ -386,8 +387,18 @@ private:
       return;
     }
     switch (terminal.kind) {
-      case Terminal::Kind::driver  : out_.netlist->connect(terminal.pin, sink); break;
-      case Terminal::Kind::constant: ++out_.constant_sinks; break;
+      case Terminal::Kind::driver:
+        out_.netlist->connect(terminal.pin, sink);
+        if (gu::is_published_clock_driver(drivers.front())) {
+          out_.netlist->publish_clock_driver(terminal.pin);
+        }
+        break;
+      case Terminal::Kind::constant:
+        ++out_.constant_sinks;
+        if (constants_) {
+          constants_->emplace(sink, terminal.value);
+        }
+        break;
       case Terminal::Kind::undriven: ++out_.undriven_sinks; break;
       case Terminal::Kind::unknown : ++out_.unresolved_sinks; break;
     }
@@ -595,6 +606,7 @@ private:
   const Cell_types&                                             types_;
   Bound_graph&                                                  out_;
   const bool                                                    hier_;
+  absl::flat_hash_map<uint32_t, bool>*                          constants_;
   std::vector<Context>                                          contexts_;
   std::vector<std::pair<uint32_t, hhds::Node_class>>            cells_, memories_;
   absl::flat_hash_map<hhds::Graph*, Ports>                      ports_;
@@ -618,10 +630,15 @@ Bound_graph bind_graph(const hhds::Graph& flat, const Cell_types& types) {
   return out;
 }
 
-Bound_graph bind_hier(hhds::Graph& top, const Cell_types& types) {
+Bound_graph bind_hier(hhds::Graph& top, const Cell_types& types) { return bind_hier(top, types, nullptr); }
+
+Bound_graph bind_hier(hhds::Graph& top, const Cell_types& types, absl::flat_hash_map<uint32_t, bool>* constants) {
+  if (constants) {
+    constants->clear();
+  }
   Bound_graph out;
   out.netlist = std::make_unique<Netlist>(types);
-  Binder(top, types, out, true).run();
+  Binder(top, types, out, true, constants).run();
   return out;
 }
 

@@ -69,6 +69,20 @@ TEST(RoutedRc, PathWidthsUnionWithoutDoubleCounting) {
   f.net.wires[0].paths.push_back(ordinary);
   EXPECT_EQ(routed_rc(f.tech, f.fp, f.net, "a:A", pins(), model()), rc);
 }
+TEST(RoutedRc, ClockNetRuleAndTaperUseTheirActualWidths) {
+  Fixture f;
+  f.net.name = "clk";
+  f.fp.snapshot_ndr.net_rules.emplace("clk", "CTS_NDR_0");
+  f.fp.nondefault_rules["CTS_NDR_0"] = {{"M2", 40}};
+  const auto wide = routed_rc(f.tech, f.fp, f.net, "a:A", pins(), model());
+  EXPECT_DOUBLE_EQ(capacitance(wide), 6);
+  EXPECT_DOUBLE_EQ(resistance(wide), 15);
+  // The same geometry can return to the LEF width on a tapered pin escape.
+  f.net.wires[0].paths[2].taper = true;
+  const auto tapered = routed_rc(f.tech, f.fp, f.net, "a:A", pins(), model());
+  EXPECT_DOUBLE_EQ(capacitance(tapered), 3);
+  EXPECT_DOUBLE_EQ(resistance(tapered), 16);
+}
 TEST(RoutedRc, RealWireLengthAndViaResistance) {
   Fixture    f;
   const auto rc = routed_rc(f.tech, f.fp, f.net, "a:A", pins(), model());

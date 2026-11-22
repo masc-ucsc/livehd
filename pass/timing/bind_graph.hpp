@@ -60,6 +60,8 @@ Bound_graph bind_graph(const hhds::Graph& flat, const Cell_types& types);
 // driver across instance boundaries by the occurrence connectivity. Names are the dotted instance paths a flattened copy
 // would carry, so constraints and reports see the same design.
 Bound_graph bind_hier(hhds::Graph& top, const Cell_types& types);
+// Optionally retain the bound values of literal sink pins for structural analysis.
+Bound_graph bind_hier(hhds::Graph& top, const Cell_types& types, absl::flat_hash_map<uint32_t, bool>* constants);
 
 // The names of a bound graph for the constraint reader: instances by their name in the graph, nets by the name
 // of the pin that drives them (the name the Verilog writer gives the wire: the pin's own name, or the name of

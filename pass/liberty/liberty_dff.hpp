@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "hhds/graph.hpp"
+#include "pass/liberty/clock_function.hpp"
 
 // Liberty DFF-cell support shared by pass.abc (which maps flops to DFF-cell Subs
 // when register=true) and pass.liberty gensim (which emits a behavioral model for
@@ -94,6 +95,7 @@ std::vector<Output_drive> scan_output_drives(const std::string& lib_files);
 // Exact scalar truth table in the declared input order, repeated to 64 bits.
 // Reject unsupported syntax, absent pins and cells with more than six inputs.
 std::optional<uint64_t> cell_truth(const Comb_cell& cell);
+std::optional<Clock_gate_form> clock_gate_form(const Comb_cell& cell);
 std::vector<Comb_cell>  scan_comb_cells(const std::string& lib_files);
 // Parse an owned content snapshot so a cost table and its cache digest cannot
 // observe different bytes if a library file is replaced during an invocation.
@@ -183,12 +185,15 @@ struct Icg_cell {
   std::string test_pin;  // clock_gate_test_pin (active high; tied 0), empty when the cell has none
   std::string out_pin;   // clock_gate_out_pin
   double      area = 0;
+  // Complete state group and output functions used to qualify a different physical gate master.
+  std::vector<std::string> state_model{};
 };
 
 // Every non-dont_use `latch_posedge*` ICG cell whose pins are exactly one
 // clock, one enable, at most one test input and one gated-clock output whose
 // (state_)function is `CLK & <state>`. File order; unranked.
 std::vector<Icg_cell> scan_icg_cells(const std::string& lib_files);
+std::vector<Icg_cell> scan_icg_cells_text(const std::string& contents);
 
 // Smallest usable single-bit ff area, including scan/enable and either edge.
 // Geometry estimates do not require the register mapper's narrower semantics.

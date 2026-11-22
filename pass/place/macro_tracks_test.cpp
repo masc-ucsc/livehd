@@ -894,7 +894,7 @@ TEST(Placement, MacroTrackAlignmentFollowsThePowerGridLattice) {
   lattice.margin  = 1;
   lattice.groups  = {{{3, 8}}};
   Pg_macro_alignment pdn;
-  pdn.axis[1] = lattice;
+  pdn.axis[1] = std::move(lattice);
   std::vector<physical::Component> plain{track_macro()};
   legalize_macro_tracks(tech, fp, plain, 2, 2, true);
   std::vector<physical::Component> cells{track_macro()};
@@ -902,7 +902,7 @@ TEST(Placement, MacroTrackAlignmentFollowsThePowerGridLattice) {
   legalize_macro_tracks(tech, fp, cells, 2, 2, true, 0, 0, &pdn, &aligned);
   EXPECT_TRUE(aligned);
   const auto& p = cells.front().place;
-  EXPECT_TRUE(lattice.allows(p.y, p.y + p.height, 0, 100)) << p.y;
+  EXPECT_TRUE(pdn.axis[1]->allows(p.y, p.y + p.height, 0, 100)) << p.y;
   EXPECT_EQ((p.y + 3 - 2) % 6, 0);
   EXPECT_EQ(p.x, plain.front().place.x);  // the x axis has no lattice
   EXPECT_NE(p.y, plain.front().place.y);  // the plain alignment lands off the lattice here
@@ -931,7 +931,7 @@ TEST(Placement, RigidMacroGroupsAlignEveryMemberToThePowerGridLattice) {
   lattice.margin  = 1;
   lattice.groups  = {{{3, 8}}};
   Pg_macro_alignment pdn;
-  pdn.axis[1]        = lattice;
+  pdn.axis[1] = std::move(lattice);
   const auto stacked = [&](int64_t pitch) {
     auto a = track_macro(), b = track_macro();
     b.name     = "ram1";
@@ -940,7 +940,7 @@ TEST(Placement, RigidMacroGroupsAlignEveryMemberToThePowerGridLattice) {
   };
   const auto members_ok = [&](const std::vector<physical::Component>& cells) {
     return std::all_of(cells.begin(), cells.end(), [&](const auto& c) {
-      return lattice.allows(c.place.y, c.place.y + c.place.height, 0, 100);
+      return pdn.axis[1]->allows(c.place.y, c.place.y + c.place.height, 0, 100);
     });
   };
   // Pitch 30: both members land on admitted edges together.

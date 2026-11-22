@@ -487,7 +487,7 @@ void Bitwidth::process_mux(hhds::Node_class& node, Inp_pins& inp_edges) {
     // access has a provable range. Sound for any mux of this shape.
     if (inp_edges.size() == 3 && (e.get_port_id() == 1 || e.get_port_id() == 2)) {
       Bitwidth_range arm = it->second;
-      if (const auto refined = refine_by_guard(node, e.get_driver_pin(), e.get_port_id() == 2, arm)) {
+      if (const auto refined = refine_by_guard(get_driver_of_sink_name(node, "s"), e.get_driver_pin(), e.get_port_id() == 2, arm)) {
         arm = *refined;
       }
       bw.set_wider_range(arm);
@@ -498,10 +498,8 @@ void Bitwidth::process_mux(hhds::Node_class& node, Inp_pins& inp_edges) {
   adjust_bw(node.create_driver_pin(0), bw);
 }
 
-std::optional<Bitwidth_range> Bitwidth::refine_by_guard(const hhds::Node_class& mux, const hhds::Pin_class& arm_driver,
+std::optional<Bitwidth_range> Bitwidth::refine_by_guard(const hhds::Pin_class& sel_driver, const hhds::Pin_class& arm_driver,
                                                         bool true_arm, const Bitwidth_range& range) {
-  const auto sel        = livehd::graph_util::find_sink_pin(mux, "s");
-  const auto sel_driver = sel.is_invalid() ? hhds::Pin_class{} : sel.get_driver_pin();
   if (sel_driver.is_invalid() || sel_driver.is_const()) {
     return std::nullopt;
   }
@@ -537,7 +535,7 @@ std::optional<Bitwidth_range> Bitwidth::refine_by_guard(const hhds::Node_class& 
   // signedness. The arm is `x + c` (c a constant offset; c == 0 is `x` itself) --
   // e.g. the guard `i < 3` over the address `i + 1`, or the guard `i == 0` over
   // the previous-slot address `i - 1`. Anything else says nothing.
-  int64_t offset = 0;
+  __int128 offset = 0;
   if (arm_driver == x) {
     offset = 0;
   } else if (!arm_driver.is_const() && type_op_of(arm_driver.get_master_node()) == Ntype_op::Sum) {
@@ -549,7 +547,7 @@ std::optional<Bitwidth_range> Bitwidth::refine_by_guard(const hhds::Node_class& 
         if (!const_of(operand.driver).is_just_i64()) {
           return std::nullopt;
         }
-        offset += sign * const_of(operand.driver).to_just_i64();
+        offset += static_cast<__int128>(sign) * const_of(operand.driver).to_just_i64();
       } else if (!dynamic_seen && sign == 1 && operand.driver == x) {
         dynamic_seen = true;
       } else {
@@ -565,9 +563,10 @@ std::optional<Bitwidth_range> Bitwidth::refine_by_guard(const hhds::Node_class& 
   if (!range.get_min().is_just_i64() || !range.get_max().is_just_i64()) {
     return std::nullopt;
   }
-  const auto bound = const_of(k).to_just_i64();
-  int64_t    lo    = range.get_min().to_just_i64();
-  int64_t    hi    = range.get_max().to_just_i64();
+  // Keep boundary arithmetic wide: K +/- 1 and the additive offset may exceed int64.
+  const __int128 bound = const_of(k).to_just_i64();
+  __int128       lo    = range.get_min().to_just_i64();
+  __int128       hi    = range.get_max().to_just_i64();
   if (cmp_op == Ntype_op::LT) {
     if (true_arm) {
       hi = std::min(hi, bound - 1 + offset);  // x < K  =>  x + c <= K - 1 + c
@@ -595,7 +594,7 @@ std::optional<Bitwidth_range> Bitwidth::refine_by_guard(const hhds::Node_class& 
   if (lo > hi) {
     return std::nullopt;  // an unreachable arm: keep the unrefined range
   }
-  return Bitwidth_range(lo, hi);
+  return Bitwidth_range(static_cast<int64_t>(lo), static_cast<int64_t>(hi));  // inside the original range
 }
 
 // Hotmux controls have independent one-bit widths; union only value arms.
@@ -1579,6 +1578,32 @@ void Bitwidth::process_bit_xor(hhds::Node_class& node, Inp_pins& inp_edges) {
 
 void Bitwidth::process_bit_and(hhds::Node_class& node, Inp_pins& inp_edges) {
   I(!inp_edges.empty());
+
+  // x & Sext(s, 1) selects x or zero. Retain x's precise interval, including
+  // a comparison guarding a memory address, just as for the equivalent mux.
+  if (inp_edges.size() == 2) {
+    for (size_t i = 0; i < 2; ++i) {
+      const auto mask = inp_edges[i].get_driver_pin();
+      if (mask.is_const() || type_op_of(mask.get_master_node()) != Ntype_op::Sext) {
+        continue;
+      }
+      const auto sext = mask.get_master_node();
+      const auto bits = get_driver_of_sink_name(sext, "b");
+      if (bits.is_invalid() || !bits.is_const() || !const_of(bits).is_just_i64() || const_of(bits).to_just_i64() != 1) {
+        continue;
+      }
+      const auto data = inp_edges[1 - i].get_driver_pin();
+      const auto it   = bwmap.find(data.get_class_index());
+      if (it == bwmap.end()) {
+        not_finished = true;
+        return;
+      }
+      auto range = refine_by_guard(get_driver_of_sink_name(sext, "a"), data, true, it->second).value_or(it->second);
+      range.set_wider_range(Bitwidth_range(0, 0));
+      adjust_bw(node.create_driver_pin(0), range);
+      return;
+    }
+  }
 
   int32_t pos_min_sbits = Bits_unknown;
   int32_t unk_max_sbits = 0;

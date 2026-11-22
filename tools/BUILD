@@ -1,8 +1,8 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-load("//tools:regression.bzl", "py_test")
+load("//tools:regression.bzl", "cc_test", "py_test")
 load("@build_bazel_apple_support//xcode:xcode_config.bzl", "xcode_config")
-load("@rules_cc//cc:defs.bzl", "cc_binary")
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
 load("@rules_python//python:defs.bzl", "py_binary")
 
 load("//tools:copt_default.bzl", "COPTS")
@@ -17,6 +17,7 @@ py_binary(
 
 py_binary(
     name = "synth_chunk_implementations",
+    legacy_create_init = 0,
     srcs = ["synth_chunk_implementations.py"],
     visibility = ["//visibility:public"],
 )
@@ -39,6 +40,35 @@ cc_binary(
     srcs = ["rudy_metrics.cpp"],
     visibility = ["//visibility:public"],
     deps = ["//pass/place:steiner_topology", "@dreamplace//dreamplace/native:placer"],
+)
+
+cc_library(
+    name = "clock_spef",
+    srcs = ["clock_spef.cpp"],
+    hdrs = ["clock_spef.hpp"],
+    copts = COPTS,
+    deps = ["//core", "//inou/lefdef:inou_lefdef", "@opentimer"],
+)
+
+cc_test(
+    name = "clock_spef_test",
+    srcs = ["clock_spef_test.cpp"],
+    copts = COPTS,
+    deps = [":clock_spef", "@googletest//:gtest_main"],
+)
+
+cc_binary(
+    name = "clock_rc_fit",
+    srcs = ["clock_rc_fit.cpp"],
+    copts = COPTS,
+    deps = [":clock_spef", "//core", "//inou/lefdef:inou_lefdef", "//pass/place:technology_rc", "@rapidjson"],
+)
+
+cc_binary(
+    name = "clock_timing_report",
+    srcs = ["clock_timing_report.cpp"],
+    copts = COPTS,
+    deps = [":clock_spef", "//core", "//inou/lefdef:inou_lefdef", "//pass/place:technology_rc", "//pass/timing:timing_report"],
 )
 
 cc_binary(

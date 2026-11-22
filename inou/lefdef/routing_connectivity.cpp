@@ -58,6 +58,7 @@ Route_connectivity check_connectivity(const Technology& tech, const Floorplan& f
       for (const auto& path : wire.paths) {
         // Validate full path first, including unsupported geometry/empty paths.
         Net whole;
+        whole.name = net.name;
         whole.wires.push_back({wire.type, {path}});
         (void)route_geometry(tech, fp, whole, false, trial_rules);
         std::optional<Route_point> previous;
@@ -69,7 +70,8 @@ Route_connectivity check_connectivity(const Technology& tech, const Floorplan& f
             continue;
           }
           Net piece;
-          piece.wires.push_back({wire.type, {{layer, path.width, path.shape, {*previous, step}, path.taper_rule}}});
+          piece.name = net.name;
+          piece.wires.push_back({wire.type, {{layer, path.width, path.shape, {*previous, step}, path.taper_rule, path.taper}}});
           const auto          shapes = route_geometry(tech, fp, piece, false, trial_rules);
           std::vector<size_t> piece_nodes;
           for (const auto& s : shapes) {

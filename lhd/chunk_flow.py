@@ -3,6 +3,7 @@
 import argparse
 import copy
 import contextlib
+import csv
 import fcntl
 import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -1129,6 +1130,12 @@ def main(exe, page, argv):
         return serve(Workspace(workdir / 'synth/place/chunks.json', exe), Path(page), '--gui-no-open' in argv, viewer)
     parser = argparse.ArgumentParser(prog='lhd synth chunk')
     cmds = parser.add_subparsers(dest='cmd', required=True)
+    clocks = cmds.add_parser('clocks', help='inspect the chunk entries in a saved PCRS clock tree')
+    clocks.add_argument('homes', nargs='*', metavar='CHUNK', help='chunk IDs to inspect (default: all)')
+    clocks.add_argument('--routed', type=Path, help='include extracted edge arrivals from the matching 6_clock_chunk_arrivals.tsv')
+    location = clocks.add_mutually_exclusive_group()
+    location.add_argument('--report', type=Path, help='saved pcrs_clock.json from placement or DEF export')
+    location.add_argument('--workdir', type=Path, help='synthesis workspace containing the saved clock tree')
     init = cmds.add_parser('init', usage='%(prog)s SOURCES [--workdir DIR] [--budget SIZE] [synth options]',
                            help='create a floorplan and remember the source recipe for update',
                            description='Pass the same HDL, top, Liberty, LEF and reader options as lhd synth.')
@@ -1260,6 +1267,40 @@ def main(exe, page, argv):
             sub.add_argument("home")
             sub.add_argument('--iterations',type=int)
     args = parser.parse_args(argv or ['--help'])
+    if args.cmd == 'clocks':
+        report = args.report
+        if not report:
+            directory = args.workdir.resolve() / 'synth/place' if args.workdir else next(
+                (p for base in (Path.cwd(), *Path.cwd().parents) for p in (base, base / 'synth/place')
+                 if (p / 'pcrs_clock.json').is_file()), None)
+            if directory is None:
+                raise ValueError('no saved clock tree here; use --workdir DIR or --report FILE')
+            report = directory / 'pcrs_clock.json'
+        raw = report.read_bytes()
+        tree = json.loads(raw)
+        entries = [dict(source_net=net['source_net'], **entry) for net in tree['networks']
+                   for entry in net.get('chunk_entries', [])]
+        if args.routed:
+            digest = hashlib.sha256(raw).hexdigest()
+            expected = {(e['source_net'], e['chunk'], e['instance'], e.get('input_pin', e.get('output_pin'))): e for e in entries}
+            with args.routed.open() as stream:
+                for row in csv.DictReader(stream, delimiter='\t'):
+                    if row.get('report_sha256') != digest:
+                        raise ValueError('routed arrivals belong to a different clock tree')
+                    key = tuple(row[k] for k in ('source_net', 'chunk', 'instance', 'pin'))
+                    if key not in expected:
+                        raise ValueError('unexpected or repeated routed clock entry: ' + '/'.join(key))
+                    expected.pop(key)['routed'] = {k: float(row[k]) if row[k] else None for k in
+                                                  ('early_rise_ps', 'early_fall_ps', 'late_rise_ps', 'late_fall_ps')}
+            if expected:
+                raise ValueError('routed report is missing clock entries')
+        homes = set(args.homes)
+        unknown = homes - {e['chunk'] for e in entries} - set(tree.get('floorplan_chunks', []))
+        if unknown:
+            raise ValueError('unknown chunk in saved clock tree: ' + ', '.join(sorted(unknown)))
+        print(json.dumps(dict(report=str(report.resolve()), plan_revision=tree.get('chunk_plan_revision'),
+                              entries=[e for e in entries if not homes or e['chunk'] in homes]), indent=2))
+        return
     if args.cmd == 'worker':
         print(
             json.dumps(

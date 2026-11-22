@@ -23,6 +23,8 @@ struct Prects_library {
   std::map<std::string, std::vector<std::pair<std::string, std::string>>> links;
   std::set<std::string>                                                   ports, pins, clock_ports, clock_pins;
   std::set<std::string>                                                   reset_ports, reset_pins;
+  // Exact physical driver identities from PCRS. Empty before the first tree exists.
+  std::set<Pin_label>                                                     published_clock_drivers;
   bool                                                                    override_controls = false;
   // pass.pcrs rebuilds every reset distribution as a pipelined tree: a reset net is then ordinary
   // data (placed, timed, repaired like any other), and only clock networks stay excluded. False
@@ -37,6 +39,8 @@ struct Prects_networks {
   // Physical pin identities on excluded non-clock nets. STA cuts their net
   // arcs for optimization while retaining clock launch/capture and all RC.
   std::set<std::string> timing_cuts;
+  // Physical net indices reached by clock classification, including already-buffered branches.
+  std::vector<bool>     clock_nets;
 };
 Prects_networks  prects_networks(const physical::Technology&, const physical::Floorplan&, const Prects_library&,
                                  const timing::Feedback& = {});

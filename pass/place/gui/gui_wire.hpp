@@ -50,6 +50,20 @@ void field(A& a, Macro_tracks& v) {
   fields(a, v.orient, v.period_x, v.period_y, v.phases_x, v.phases_y, v.pins);
 }
 template <class A>
+void field(A& a, Clock_net& v) {
+  fields(a,
+         v.name,
+         v.driver,
+         v.sinks,
+         v.sink_pins,
+         v.arrival_ps,
+         v.stage_delay_ps,
+         v.far_slew_ps,
+         v.load_ff,
+         v.drive_steps,
+         v.leaf);
+}
+template <class A>
 void field(A& a, Centroid& v) {
   fields(a, v.name, v.x, v.y, v.radius, v.movable);
 }
@@ -85,7 +99,7 @@ void physical_scene_fields(A& a, Scene& v) {
 template <class A>
 void field(A& a, Scene& v) {
   physical_scene_fields(a, v);
-  fields(a, v.chunk_plan, v.chunk_results, v.track_lattices, v.floorplan_nets);
+  fields(a, v.chunk_plan, v.chunk_results, v.track_lattices, v.floorplan_nets, v.clock_nets, v.clock_schedule, v.clock_report);
   if constexpr (std::is_same_v<A, Decoder>) {
     v.build_index();
   }

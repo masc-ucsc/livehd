@@ -618,7 +618,9 @@ static bool import_def(Refine& R, Imp_def& d) {
   // got no clock tree (coralnpu, 8.4k flops behind a second clock gate) and post-CTS hold repair exploded. Clock
   // cells keep their exact cell, the way design-instantiated cells do; CTS owns the clock network.
   absl::flat_hash_set<hhds::Node_class> clock_cone;
-  {
+  const bool                            published
+      = gu::visit_published_clock_drivers(*g, [&](const hhds::Pin_class& p) { clock_cone.insert(p.get_master_node()); });
+  if (!published) {
     std::vector<hhds::Pin_class>          work;
     absl::flat_hash_set<hhds::Node_class> visited;
     const auto                            seed_clock = [&](const hhds::Pin_class& p) {
@@ -699,7 +701,7 @@ static bool import_def(Refine& R, Imp_def& d) {
       }
       const std::string tname{io->get_name()};
       if (is_tie_def(tname)) {
-        auto out = node.get_driver_pin(io->get_output_pin_decls().empty() ? 0 : io->get_output_pin_decls().front().port_id);
+        auto out = node.try_get_driver_pin(io->get_output_pin_decls().empty() ? 0 : io->get_output_pin_decls().front().port_id);
         if (!out.is_invalid()) {
           trk.add_constant(out, 1);
           auto* cn  = Abc_NtkCreateNode(ntk);
@@ -714,7 +716,7 @@ static bool import_def(Refine& R, Imp_def& d) {
         // d=1, clk=2, q=3 (liberty::create_dff_io)
         Latch l;
         l.node  = node;
-        l.q     = node.get_driver_pin(3);
+        l.q     = node.try_get_driver_pin(3);
         l.d_drv = driver_of_pid(node, 1);
         if (!l.q.is_invalid()) {
           trk.add_scalar(l.q, 1);
@@ -730,7 +732,7 @@ static bool import_def(Refine& R, Imp_def& d) {
         }
         seed(a);
         for (const auto& od : io->get_output_pin_decls()) {
-          auto out = node.get_driver_pin(od.port_id);
+          auto out = node.try_get_driver_pin(od.port_id);
           if (out.is_invalid()) {
             continue;
           }
@@ -747,7 +749,7 @@ static bool import_def(Refine& R, Imp_def& d) {
         c.node             = node;
         c.gate             = gate;
         const auto& odecls = io->get_output_pin_decls();
-        c.out              = odecls.empty() ? hhds::Pin_class{} : node.get_driver_pin(odecls.front().port_id);
+        c.out              = odecls.empty() ? hhds::Pin_class{} : node.try_get_driver_pin(odecls.front().port_id);
         if (c.out.is_invalid()) {
           // A cell with no consumer of its output (dangling): still a node.
           c.out = node.create_driver_pin(odecls.empty() ? hhds::Port_id{1} : odecls.front().port_id);
@@ -767,7 +769,7 @@ static bool import_def(Refine& R, Imp_def& d) {
       const int ii = static_cast<int>(d.insts.size());
       d.insts.push_back(inst);
       for (const auto& od : io->get_output_pin_decls()) {
-        auto out = node.get_driver_pin(od.port_id);
+        auto out = node.try_get_driver_pin(od.port_id);
         if (out.is_invalid()) {
           continue;
         }
@@ -864,7 +866,7 @@ static bool import_def(Refine& R, Imp_def& d) {
     bool                          progress = false;
     for (auto& node : pending) {
       const auto op  = gu::type_op_of(node);
-      auto       out = node.get_driver_pin(0);
+      auto       out = node.try_get_driver_pin(0);
       if (out.is_invalid()) {
         progress = true;
         continue;  // nobody reads it

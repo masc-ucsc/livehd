@@ -260,8 +260,8 @@ TEST(TreeAegRules, AllowAndExcludePartitionTheRegistry) {
     EXPECT_TRUE(listed.contains(reg.rule(id).name)) << "rule '" << reg.rule(id).name << "' is neither allowed nor excluded";
   }
   EXPECT_EQ(listed.size(), reg.size());
-  EXPECT_EQ(upass::aeg::allowed_rules().size(), 46U);
-  EXPECT_EQ(upass::aeg::excluded_rules().size(), 57U);
+  EXPECT_EQ(upass::aeg::allowed_rules().size(), 55U);
+  EXPECT_EQ(upass::aeg::excluded_rules().size(), 72U);
 }
 
 // ── b. prescan ───────────────────────────────────────────────────────────────
@@ -829,6 +829,34 @@ TEST(TreeAegRulesOff, BoolConstantIsSpelledAsBool) {
 }
 
 // ── e. rules on: rewrites and refusals ──────────────────────────────────────
+
+TEST(TreeAegRulesOn, ComplementaryBooleanTermsForwardTheInput) {
+  Tree t;
+  t.in("x", Io_kind::boolean);
+  t.in("s", Io_kind::boolean);
+  t.op(N::Lnast_ntype_log_not, "%neg", {"s"});
+  t.op(N::Lnast_ntype_log_and, "%on", {"x", "s"});
+  t.op(N::Lnast_ntype_log_and, "%off", {"%neg", "x"});
+  t.op(N::Lnast_ntype_log_or, "%sum", {"%on", "%off"});
+  auto o = t.store("o", "%sum");
+  EXPECT_GT(applied(t.run(), "or_combine_complements"), 0U);
+  EXPECT_EQ(rhs(*t.ln, o), "x");
+}
+
+TEST(TreeAegRulesOn, ProductCancellationRequiresANonzeroDivisor) {
+  Tree t;
+  t.in("x");
+  t.in("d");
+  t.op(N::Lnast_ntype_mult, "%p", {"x", "-3"});
+  t.op(N::Lnast_ntype_div, "%q", {"%p", "-3"});
+  t.op(N::Lnast_ntype_mult, "%u", {"x", "d"});
+  t.op(N::Lnast_ntype_div, "%v", {"%u", "d"});
+  auto known   = t.store("known", "%q");
+  auto unknown = t.store("unknown", "%v");
+  EXPECT_GT(applied(t.run(), "div_cancel_product"), 0U);
+  EXPECT_EQ(rhs(*t.ln, known), "x");
+  EXPECT_EQ(rhs(*t.ln, unknown), "%v");
+}
 
 TEST(TreeAegRulesOn, SignedDoubleNotIsTheOperand) {
   Tree t;

@@ -64,6 +64,25 @@ TEST(RcCache, IndividualPinMotionWithinUnchangedExtremaRebuilds) {
   EXPECT_EQ(first.nets[0]->built->rc.node_cap_ff[0], 21);  // old snapshot survives
 }
 
+TEST(RcCache, ClockCharacterizationRebuildsOnlyAffectedNets) {
+  Rc_cache cache;
+  auto     clock         = net(3);
+  clock.clock            = true;
+  auto clock_policy      = policy;
+  clock_policy.per_um[1] = 6;
+  const auto before      = cache.update(layout, {net(), clock}, policy, star, &clock_policy);
+  EXPECT_EQ(before.nets[0]->built->rc.node_cap_ff[0], 21);
+  EXPECT_EQ(before.nets[1]->built->rc.node_cap_ff[0], 42);
+  clock_policy.per_um[1] = 4;
+  const auto after       = cache.update(layout, {net(), clock}, policy, star, &clock_policy);
+  EXPECT_EQ(after.nets[0], before.nets[0]);
+  EXPECT_EQ(after.nets[1]->built->rc.node_cap_ff[0], 28);
+  EXPECT_EQ(after.timing_dirty_drivers, std::vector<Rc_pin_id>{3});
+  clock.clock             = false;
+  const auto reclassified = cache.update(layout, {net(), clock}, policy, star, &clock_policy);
+  EXPECT_EQ(reclassified.nets[1]->built->rc.node_cap_ff[0], 21);
+}
+
 TEST(RcCache, ElectricalRevisionRetainsWireButDirtiesTiming) {
   Rc_cache   cache;
   auto       geometry    = net();

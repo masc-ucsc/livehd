@@ -80,6 +80,7 @@ yosys_bison(
 
 py_binary(
     name = "cellhelp",
+    legacy_create_init = 0,
     srcs = ["kernel/cellhelp.py"],
     python_version = "PY3",
     srcs_version = "PY3ONLY",
@@ -431,6 +432,7 @@ cc_library(
 
 py_binary(
     name = "pmgen",
+    legacy_create_init = 0,
     srcs = ["passes/pmgen/pmgen.py"],
     python_version = "PY3",
     srcs_version = "PY3ONLY",

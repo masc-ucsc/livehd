@@ -45,7 +45,6 @@
 #include <charconv>
 #include <chrono>
 #include <cmath>
-#include <optional>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -53,8 +52,9 @@
 #include <fstream>
 #include <functional>
 #include <iterator>
-#include <regex>
 #include <map>
+#include <optional>
+#include <regex>
 #include <set>
 #include <sstream>
 #include <string>
@@ -67,11 +67,8 @@
 #include "absl/strings/str_split.h"
 #include "attrs.hpp"
 #include "compile_salt.hpp"
-#include "core/job_manager.hpp"
-#include "pass/place/chunk_memory.hpp"
-#include "pass/place/chunk_refine.hpp"
-#include "pass/place/chunk_jobs.hpp"
 #include "core/hash_util.hpp"
+#include "core/job_manager.hpp"
 #include "debug_env.hpp"
 #include "diag.hpp"
 #include "domino_bundle.hpp"
@@ -80,14 +77,10 @@
 #include "graph_library_singleton.hpp"
 #include "inou/lefdef/mapped_graph.hpp"
 #include "inou/lefdef/route_store.hpp"
+#include "job_manager.hpp"
 #include "lhd_kernel_internal.hpp"
-#include "satopt_stages.hpp"
 #include "liberty_dff.hpp"
 #include "node_util.hpp"
-#include "job_manager.hpp"
-#include "pass/semdiff/semdiff.hpp"
-#include "pass/place/technology_rc.hpp"
-#include "report.hpp"
 #include "pass.hpp"
 #include "pass/abc/abc_salt.hpp"
 #include "pass/domplace/timing/domino_liberty.hpp"
@@ -95,17 +88,23 @@
 #include "pass/domplace/timing/stage_timing_salt.hpp"
 #include "pass/opentimer/pass_opentimer.hpp"
 #include "pass/opentimer/sta_salt.hpp"
+#include "pass/place/chunk_jobs.hpp"
+#include "pass/place/chunk_memory.hpp"
+#include "pass/place/chunk_refine.hpp"
 #include "pass/place/custom_sizing.hpp"
 #include "pass/place/growth_budget.hpp"
 #include "pass/place/gui/gui_session.hpp"
 #include "pass/place/io_timing.hpp"
 #include "pass/place/macro_tracks.hpp"
+#include "pass/place/pcrs/clock_census.hpp"
 #include "pass/place/place.hpp"
 #include "pass/place/placement_hints.hpp"
 #include "pass/place/placement_technology.hpp"
 #include "pass/place/preroute_host.hpp"
 #include "pass/place/repair.hpp"
 #include "pass/place/resize_engine.hpp"
+#include "pass/place/technology_rc.hpp"
+#include "pass/semdiff/semdiff.hpp"
 #include "pass/synth/sram_macro.hpp"
 #include "pass/timing/physical_rank.hpp"
 #include "physical_cache.hpp"
@@ -113,6 +112,8 @@
 #include "rapidjson/document.h"
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
+#include "report.hpp"
+#include "satopt_stages.hpp"
 #include "synth_policy.hpp"
 #include "woothash.hpp"
 
@@ -124,14 +125,14 @@ namespace {
 
 bool truthy(std::string_view v) { return !v.empty() && v != "false" && v != "0" && v != "off"; }
 
-std::string physical_descriptor(const Options& opts, const livehd::placement::Options& place_options) {
+std::string physical_descriptor(const Options& opts, const livehd::placement::Options& place_options, const std::string& top) {
   rapidjson::StringBuffer                    buffer;
   rapidjson::Writer<rapidjson::StringBuffer> w(buffer);
   w.StartArray();
   w.Uint64(kPhysicalSrcSalt);
-  w.String(opts.top.c_str());
-  const std::array<std::string_view, 4> metadata_classes{"livehd.placement.hints", "livehd.placement.state", "livehd.placement.chunk_guidance", "livehd.placement.chunk_plan"};
-  w.String(place_options.metadata ? place_options.metadata->identity(metadata_classes, opts.top).c_str() : "[]");
+  w.String(top.c_str());
+  const std::array<std::string_view, 5> metadata_classes{"livehd.physical.power_grid", "livehd.placement.hints", "livehd.placement.state", "livehd.placement.chunk_guidance", "livehd.placement.chunk_plan"};
+  w.String(place_options.metadata ? place_options.metadata->identity(metadata_classes, top).c_str() : "[]");
   w.String(opts.seed.c_str());
   w.Uint(opts.jobs);
   // Report-only stage timing reruns on every restore and never changes the
@@ -142,6 +143,9 @@ std::string physical_descriptor(const Options& opts, const livehd::placement::Op
     w.Uint64(livehd::domplace::timing::kStageTimingSalt);
   }
   for (const auto& [key, value] : opts.sets) {
+    if (key == "synth.pcrs.clock_report") {
+      continue;  // Synthesis-only reporting is independent of placement reuse.
+    }
     if (!sizing && (key == "synth.place.stage_timing" || key.starts_with("synth.place.stage_timing."))) {
       continue;
     }
@@ -352,7 +356,7 @@ std::string write_domino_liberty(const std::string& liberty, const std::string& 
   return path;
 }
 // Bumped whenever the fast report's content changes for the same inputs: stale sta_cache records then miss.
-constexpr std::string_view kFastReportSalt = "fast-report-1";
+constexpr std::string_view kFastReportSalt = "fast-report-4";
 
 // synth.wire_rc: auto (derive from the tech LEF), `R,C` in ohm/um and fF/um (`0` = no wire), or a technology RC file
 // (literal set_wire_rc / set_layer_rc data, as OpenROAD's setRC.tcl).
@@ -1323,6 +1327,173 @@ livehd::placement::Options placement_options(const Options& opts) {
     out.virtual_buffer_fanout = out.reset_fanout;
     out.virtual_buffers       = truthy(synth_set(opts, "place.virtual_buffers", "true"));
     out.pcrs          = truthy(synth_set(opts, "place.pcrs", "true"));
+    out.clock_tree            = truthy(synth_set(opts, "place.pcrs.clock", "false"));
+    out.clock_source_fork     = truthy(synth_set(opts, "place.pcrs.source_fork", "false"));
+    if (out.clock_source_fork && !out.clock_tree) {
+      throw Lhd_error{"usage", "synth.place.pcrs.source_fork requires synth.place.pcrs.clock=true", ""};
+    }
+    const auto raise_trials = integer("place.pcrs.gate_raise_trials", "0");
+    if (raise_trials < 0 || (raise_trials && !out.clock_tree)) {
+      throw Lhd_error{"usage", "invalid PCRS gate raise budget", "use a nonnegative budget and enable clock synthesis"};
+    }
+    out.clock_gate_raise_trials = static_cast<unsigned>(raise_trials);
+    out.clock_gate_merge_trials = static_cast<unsigned>(integer("place.pcrs.gate_merge_trials", "0"));
+    out.clock_gate_clone_trials = static_cast<unsigned>(integer("place.pcrs.gate_clone_trials", "0"));
+    if (out.clock_gate_clone_trials && !out.clock_tree) {
+      throw Lhd_error{"usage", "positive synth.place.pcrs.gate_clone_trials requires synth.place.pcrs.clock=true", ""};
+    }
+    out.clock_gate_leaf_trials = static_cast<unsigned>(integer("place.pcrs.gate_leaf_trials", "0"));
+    if (out.clock_gate_leaf_trials && !out.clock_tree) {
+      throw Lhd_error{"usage", "positive synth.place.pcrs.gate_leaf_trials requires synth.place.pcrs.clock=true", ""};
+    }
+    if (out.clock_gate_merge_trials && !out.clock_tree) {
+      throw Lhd_error{"usage", "positive synth.place.pcrs.gate_merge_trials requires synth.place.pcrs.clock=true", ""};
+    }
+    const auto skew_rounds = integer("place.pcrs.skew_rounds", "0");
+    if (skew_rounds && !out.clock_tree) {
+      throw Lhd_error{"usage", "positive synth.place.pcrs.skew_rounds requires synth.place.pcrs.clock=true", ""};
+    }
+    out.clock_cluster_strength = number("place.pcrs.cluster_strength", "0");
+    if (!std::isfinite(out.clock_cluster_strength) || out.clock_cluster_strength < 0 || out.clock_cluster_strength > 1
+        || (out.clock_cluster_strength > 0 && !out.clock_tree)) {
+      throw Lhd_error{"usage",
+                      "invalid PCRS clock cluster strength",
+                      "use a fraction in [0,1] and enable PCRS clock synthesis for clustering"};
+    }
+    out.clock_hold_area_um2 = number("place.pcrs.hold_area_um2", "0");
+    if (out.clock_hold_area_um2 < 0 || (out.clock_hold_area_um2 > 0 && !out.clock_tree)) {
+      throw Lhd_error{"usage",
+                      "invalid PCRS hold area budget",
+                      "use a nonnegative area and enable PCRS clock synthesis for hold repair"};
+    }
+    out.clock_skew_rounds          = static_cast<unsigned>(skew_rounds);
+    out.clock_skew_period_fraction = number("place.pcrs.skew_period_fraction", "0.05");
+    if (synth_set(opts, "place.pcrs.skew_hold_margin_ps", "auto") != "auto") {
+      out.clock_skew_hold_margin_ps = number("place.pcrs.skew_hold_margin_ps", "0");
+    }
+    if (out.clock_skew_period_fraction < 0 || out.clock_skew_period_fraction > 1
+        || out.clock_skew_hold_margin_ps.value_or(0.) < 0) {
+      throw Lhd_error{"usage", "invalid PCRS skew bounds", "period fraction must be in [0,1] and hold margin must be nonnegative"};
+    }
+    out.clock_incremental_trials = truthy(synth_set(opts, "place.pcrs.incremental_trials", "true"));
+    out.clock_balance            = truthy(synth_set(opts, "place.pcrs.balance", "false"));
+    if (const auto path = synth_set(opts, "place.pcrs.gate_activity", ""); !path.empty()) {
+      const auto          contents = livehd::file_utils::read_file(path);
+      rapidjson::Document doc;
+      if (!contents || doc.Parse(contents->data(), contents->size()).HasParseError() || !doc.IsObject()) {
+        throw Lhd_error{"usage", "invalid PCRS gate activity " + path, "expected a JSON object keyed by clock net"};
+      }
+      for (const auto& entry : doc.GetObject()) {
+        if (!entry.name.GetStringLength() || !entry.value.IsNumber()
+            || !(entry.value.GetDouble() >= 0 && entry.value.GetDouble() <= 1)
+            || !out.clock_activity.emplace(entry.name.GetString(), entry.value.GetDouble()).second) {
+          throw Lhd_error{"usage",
+                          "invalid PCRS gate activity " + path,
+                          "expected unique clock net names with fractions from zero to one"};
+        }
+      }
+    }
+    if (const auto path = synth_set(opts, "place.pcrs.arrival_targets", ""); !path.empty()) {
+      const auto          contents = livehd::file_utils::read_file(path);
+      rapidjson::Document doc;
+      if (!contents || doc.Parse(contents->data(), contents->size()).HasParseError() || !doc.IsObject()) {
+        throw Lhd_error{"usage", "invalid PCRS arrival targets " + path, "expected a JSON object keyed by physical sink pin"};
+      }
+      for (const auto& member : doc.GetObject()) {
+        const auto& pin = member.value;
+        if (!member.name.GetStringLength() || !pin.IsObject() || (!pin.HasMember("insertion_ps") && !pin.HasMember("wanted_ps"))) {
+          throw Lhd_error{"usage", "invalid PCRS arrival target " + path, "expected insertion_ps or wanted_ps on each pin"};
+        }
+        auto value = [&](const char* key) -> std::optional<double> {
+          if (!pin.HasMember(key)) {
+            return std::nullopt;
+          }
+          if (!pin[key].IsNumber() || !std::isfinite(pin[key].GetDouble())) {
+            throw Lhd_error{"usage", "invalid PCRS arrival target " + path, std::format("expected finite {}", key)};
+          }
+          return pin[key].GetDouble();
+        };
+        auto times = std::pair{value("insertion_ps"), value("wanted_ps").value_or(0.)};
+        if ((times.first && *times.first < 0) || !out.clock_arrival_targets.emplace(member.name.GetString(), times).second) {
+          throw Lhd_error{"usage", "invalid PCRS arrival target " + path, "expected unique pins and nonnegative insertion delays"};
+        }
+      }
+    }
+    out.clock_leaf_fanout    = integer("place.pcrs.leaf_fanout", "24");
+    out.clock_leaf_radius_um = number("place.pcrs.leaf_radius_um", "0");
+    if (out.clock_leaf_fanout < 2 || out.clock_leaf_fanout > 30 || out.clock_leaf_radius_um < 0) {
+      throw Lhd_error{"usage", "invalid PCRS leaf grouping limits", "fanout must be 2 to 30 and radius nonnegative"};
+    }
+    out.clock_max_slew_ps = number("place.pcrs.max_slew_ps", "0");
+    if (out.clock_max_slew_ps < 0) {
+      throw Lhd_error{"usage", "invalid PCRS clock transition target", "synth.place.pcrs.max_slew_ps must be nonnegative (0 keeps the library limit)"};
+    }
+    if (const auto path = synth_set(opts, "place.pcrs.clock_rc_fit", ""); !path.empty()) {
+      const auto          contents = livehd::file_utils::read_file(path);
+      rapidjson::Document fit;
+      if (!contents || fit.Parse(contents->data(), contents->size()).HasParseError() || !fit.IsObject()) {
+        throw Lhd_error{"usage", "invalid PCRS clock RC fit " + path, "expected a clock_rc_fit profile"};
+      }
+      const auto scales = [&](const char* group) {
+        std::array<double, 2> factors{};
+        for (size_t i = 0; i < factors.size(); ++i) {
+          const char* key = i == 0 ? "ohm_scale" : "ff_scale";
+          if (!fit.HasMember(group) || !fit[group].IsObject() || !fit[group].HasMember(key) || !fit[group][key].IsNumber()
+              || !(fit[group][key].GetDouble() > 0) || !std::isfinite(fit[group][key].GetDouble())) {
+            throw Lhd_error{"usage", "invalid PCRS clock RC fit " + path, std::format("expected a positive {}.{}", group, key)};
+          }
+          factors[i] = fit[group][key].GetDouble();
+        }
+        return factors;
+      };
+      out.clock_leaf_rc_scale  = scales("leaf");
+      out.clock_trunk_rc_scale = scales("trunk");
+    }
+    out.clock_leaf_drive_steps = static_cast<unsigned>(integer("place.pcrs.leaf_drive_steps", "0"));
+    if (const auto path = synth_set(opts, "place.pcrs.leaf_schedule", ""); !path.empty()) {
+      if (!out.clock_tree) {
+        throw Lhd_error{"usage", "a clock leaf schedule requires synth.place.pcrs.clock=true", ""};
+      }
+      const auto          contents = livehd::file_utils::read_file(path);
+      rapidjson::Document schedule;
+      if (!contents || schedule.Parse(contents->data(), contents->size()).HasParseError() || !schedule.IsObject()) {
+        throw Lhd_error{"usage",
+                        "invalid clock leaf schedule " + path,
+                        "expected a JSON object of physical clock pins and unsigned drive steps"};
+      }
+      for (const auto& member : schedule.GetObject()) {
+        const std::string pin(member.name.GetString(), member.name.GetStringLength());
+        unsigned          steps = out.clock_leaf_drive_steps;
+        if (member.value.IsUint()) {
+          steps = member.value.GetUint();
+        } else if (member.value.IsObject() && !member.value.ObjectEmpty()) {
+          std::set<std::string> fields;
+          for (const auto& field : member.value.GetObject()) {
+            const std::string key(field.name.GetString(), field.name.GetStringLength());
+            if (!fields.insert(key).second) {
+              throw Lhd_error{"usage", "duplicate clock leaf schedule field on " + pin, key};
+            }
+            if (key == "steps" && field.value.IsUint()) {
+              steps = field.value.GetUint();
+            } else if (key == "delay_ps" && field.value.IsNumber() && std::isfinite(field.value.GetDouble())
+                       && field.value.GetDouble() >= 0) {
+              out.clock_leaf_delays_ps.emplace(pin, field.value.GetDouble());
+            } else {
+              throw Lhd_error{"usage",
+                              "invalid clock leaf schedule field on " + pin,
+                              "expected unsigned steps or nonnegative delay_ps"};
+            }
+          }
+        } else {
+          throw Lhd_error{"usage",
+                          "invalid clock leaf schedule for " + pin,
+                          "expected unsigned steps or an object with steps or delay_ps"};
+        }
+        if (pin.empty() || !out.clock_leaf_schedule.emplace(pin, steps).second) {
+          throw Lhd_error{"usage", "empty or duplicate pin in clock leaf schedule " + path, pin};
+        }
+      }
+    }
     out.pcrs_depth    = std::make_shared<livehd::pcrs::Depth_state>();
     if (!truthy(synth_set(opts, "place.pcrs.reset_pipeline", "true"))) {
       out.pcrs_depth->max_depth = 0;
@@ -2075,6 +2246,10 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
       }
     }
     for (const auto& file : {mapped_def,
+                             synth_set(opts, "place.pcrs.leaf_schedule", ""),
+                             synth_set(opts, "place.pcrs.arrival_targets", ""),
+                             synth_set(opts, "place.pcrs.clock_rc_fit", ""),
+                             synth_set(opts, "place.pcrs.gate_activity", ""),
                              synth_set(opts, "sdc", ""),
                              place_options.floorplan,
                              place_options.seed_file,
@@ -2505,6 +2680,7 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
   // and GP-only commands do not enter the full-placement refinement loop.
   bool       run_timing_place = !isolated && truthy(synth_set(opts, "place.timing_driven", run_place && place_options.full ? "true" : "false"));
   const bool macro_plan_only  = run_place && place_options.full && !place_options.final_cells;
+  const bool build_pcrs_clock = run_place && place_options.full && place_options.clock_tree && !macro_plan_only;
   // The provisional domino profile (pass.usyn.physical=domino_provisional,
   // pass/domplace) is opt-in, and every consumer it does not support is an
   // explicit usage error here: no default moves for it.
@@ -2531,16 +2707,6 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
                       "places two-row cells",
                       "leave synth.place.region.busorder and synth.place.region.boundarypins off"};
     }
-  }
-  if ((truthy(synth_set(opts, "place.preroute", "false")) || truthy(synth_set(opts, "place.satlegalize.route", "false")))
-      && (!run_place || !run_sta || !place_options.full || macro_plan_only || !place_options.handoff_taps
-          || place_options.pg == "none" || place_options.pg == "off")) {
-    throw Lhd_error{"usage", "pre-routing requires final full placement, timing, handoff taps and native power grid", ""};
-  }
-  if (synth_set(opts, "place.pg.channel.patches", "").find_first_not_of(" \t\n\r\f\v") != std::string::npos
-      && (!run_place || !place_options.full || macro_plan_only || !place_options.handoff_taps || place_options.pg == "none"
-          || place_options.pg == "off")) {
-    throw Lhd_error{"usage", "PG channels require final full placement, handoff taps and native power grid", ""};
   }
   const int timing_rounds = std::stoi(synth_set(opts, "place.timing_rounds", "3"));
   if (timing_rounds < 1 || timing_rounds > 8) {
@@ -2779,6 +2945,41 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
   // Every pass below receives the full name and matches it silently.
   auto              top_g = pick_top_graph(var, "", opts.top, "", "synth", "synth");
   const std::string top{top_g->get_name()};
+  if (run_place) {
+    const auto records = opts.metadata ? opts.metadata->select("livehd.physical.power_grid", top)
+                                       : std::vector<const rapidjson::Value*>{};
+    const auto pg = synth_set(opts, "place.pg", "");
+    const auto taps = synth_set(opts, "place.handoff.taps", "");
+    if (records.size() > 1) {
+      throw Lhd_error{"config", "multiple power-grid records match this design", "keep one grid per design"};
+    }
+    const bool native_cts_default = place_options.full && place_options.clock_tree && (taps.empty() || truthy(taps));
+    if (pg.empty() && (!records.empty() || (native_cts_default && livehd::physical::detect_tech_profile(
+          place_options.technology().lef, livehd::physical::Tech_policy::power_grid)))) {
+      place_options.pg = "auto";
+    }
+    if (place_options.pg != "none" && place_options.pg != "off") {
+      if (taps.empty()) {
+        place_options.handoff_taps = true;
+      }
+      if (!records.empty()) {
+        const auto& tech = livehd::physical::resolve_tech_profile(place_options.technology().lef, place_options.pg,
+                                                                  livehd::physical::Tech_policy::power_grid);
+        place_options.tuned_pg = std::make_shared<const livehd::placement::Pg_profile>(
+            livehd::placement::tuned_power_grid(tech, *records.front()));
+      }
+    }
+  }
+  if ((truthy(synth_set(opts, "place.preroute", "false")) || truthy(synth_set(opts, "place.satlegalize.route", "false")))
+      && (!run_place || !run_sta || !place_options.full || macro_plan_only || !place_options.handoff_taps
+          || place_options.pg == "none" || place_options.pg == "off")) {
+    throw Lhd_error{"usage", "pre-routing requires final full placement, timing, handoff taps and native power grid", ""};
+  }
+  if (synth_set(opts, "place.pg.channel.patches", "").find_first_not_of(" \t\n\r\f\v") != std::string::npos
+      && (!run_place || !place_options.full || macro_plan_only || !place_options.handoff_taps || place_options.pg == "none"
+          || place_options.pg == "off")) {
+    throw Lhd_error{"usage", "PG channels require final full placement, handoff taps and native power grid", ""};
+  }
   opts.top = top;
   if (run_place && opts.metadata) {
     auto poses = livehd::placement::read_macro_state(*opts.metadata, top);
@@ -2791,7 +2992,7 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
   // An interactive (or replayed) session must run the placement: no whole-flow physical replay, no placement cache.
   if (user_workdir && opts.incremental && run_place && place_options.full && !gui_session) {
     auto        dependencies = place_options.lefs;
-    std::string libraries    = liberty;
+    std::string libraries    = liberty + "," + synth_set(opts, "macro_liberty", "");
     std::replace(libraries.begin(), libraries.end(), ',', ' ');
     std::istringstream paths(libraries);
     for (std::string path; paths >> path;) {
@@ -2802,6 +3003,10 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
                              place_options.tech_rc_file,
                              place_options.tracks_file,
                              place_options.floorplan,
+                             synth_set(opts, "place.pcrs.leaf_schedule", ""),
+                             synth_set(opts, "place.pcrs.arrival_targets", ""),
+                             synth_set(opts, "place.pcrs.clock_rc_fit", ""),
+                             synth_set(opts, "place.pcrs.gate_activity", ""),
                              place_options.seed_file}) {
       if (!path.empty()) {
         dependencies.push_back(path);
@@ -2809,7 +3014,7 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
     }
     physical_cache = std::make_unique<Physical_cache>(fs::path(opts.workdir) / "physical_cache",
                                                       lg_dir,
-                                                      physical_descriptor(opts, place_options),
+                                                      physical_descriptor(opts, place_options, top),
                                                       std::move(dependencies));
   }
 
@@ -3592,6 +3797,37 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
     }
   }
 
+  std::string clock_structure_path;
+  if (truthy(synth_set(opts, "pcrs.clock_report", "false"))) {
+    if (!mapped_output) {
+      throw Lhd_error{"usage", "synth.pcrs.clock_report requires a technology-mapped design", "select a technology mapper"};
+    }
+    Phase_timer phase(res, "pass.pcrs.clock_report");
+    auto found = std::find_if(net.graphs.begin(), net.graphs.end(), [&](const auto& g) { return g && g->get_name() == top; });
+    if (found == net.graphs.end()) {
+      throw Lhd_error{"internal", "mapped top missing for the PCRS clock report", top};
+    }
+    std::string contents;
+    for (const auto path : absl::StrSplit(liberty + "," + extra_libs(), absl::ByAnyChar(", \t\n"), absl::SkipEmpty())) {
+      auto text = livehd::file_utils::read_file(std::string(path));
+      if (!text) {
+        throw Lhd_error{"io", "cannot read PCRS clock report Liberty", std::string(path)};
+      }
+      contents += *text;
+      contents += '\n';
+    }
+    const auto report    = livehd::pcrs::clock_census(**found, contents);
+    clock_structure_path = root + "/pcrs_clock_structure.json";
+    std::ofstream out(clock_structure_path);
+    out << report << '\n';
+    out.close();
+    if (!out) {
+      throw Lhd_error{"io", "cannot write PCRS clock structure", clock_structure_path};
+    }
+    res.outputs.emplace_back(clock_structure_path);
+    res.recipe_steps.emplace_back("pass.pcrs.clock_report");
+  }
+
   std::unique_ptr<livehd::placement::Placement_peak> placement_peak;
   std::string                                        memory_profile_path, memory_context;
   std::shared_ptr<const std::string>                 measured_plan;
@@ -3611,10 +3847,14 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
   livehd::placement::Repair_result    sat_aligned;     // the SAT-legalization step (after resize/repair)
   bool                                sat_step_ran = false;
   livehd::placement::Repair_result    resynthesized;
+  livehd::placement::Repair_result    initial_clock_placement;
   livehd::placement::Repair_result    finalized;
   livehd::placement::Repair_result    domino_sized;
   std::string                         place_qor;
   const std::string                   place_qor_path = root + "/place/qor.json";
+  const std::string                   clock_sdc_path       = root + "/place/pcrs_clock.sdc";
+  bool                                physical_clock_ready = false;
+  fs::path                            previous_clock_report;
   if (run_place) {
     bool restored = false;
     if (physical_cache && place_options.chunk_manifest.empty()) {
@@ -3622,6 +3862,7 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
       const auto  restored_net = root + "/repaired_net";
       restored                 = physical_cache->restore(restored_net, root + "/place");
       if (restored) {
+        physical_clock_ready = build_pcrs_clock && fs::is_regular_file(clock_sdc_path);
         for (const auto* suffix : {"/place/macro/metadata.json", "/place/metadata.json"}) {
           const auto               path = root + suffix;
           livehd::metadata::Bundle merged(place_options.metadata ? place_options.metadata->json() : "[]");
@@ -3782,7 +4023,8 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
         place_options.growth_budget->electrical_fraction = place_options.growth_electrical;
       }
       if (physical_cache) {
-        const auto hint = physical_cache->placement_hint();
+        fs::path clock_hint;
+        const auto hint = physical_cache->placement_hint(build_pcrs_clock ? &clock_hint : nullptr);
         if (!hint.empty()) {
           try {
             auto frame = livehd::physical::read_def(hint.string());
@@ -3791,6 +4033,7 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
               // edits. restart_seed never inherits fixed status, old nets or RC;
               // new cells and all timing/legality are solved for this design.
               place_options.restart_seed = std::make_shared<livehd::physical::Floorplan>(std::move(frame));
+              previous_clock_report      = std::move(clock_hint);
               res.recipe_steps.emplace_back("pass.place.seed");
             }
           } catch (const std::exception&) {
@@ -3803,6 +4046,8 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
       // own reports above; recomputation must only publish newly produced ones.
       fs::remove(fs::path(place_options.output_dir) / "preroute.json");
       fs::remove(fs::path(place_options.output_dir) / "power_grid.json");
+      fs::remove(fs::path(place_options.output_dir) / "pcrs_clock.json");
+      fs::remove(clock_sdc_path);
       if (user_workdir && opts.incremental && !gui_session) {
         place_options.cache_dir = opts.workdir + "/place_cache";
       }
@@ -3830,10 +4075,15 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
       const auto  timing_log     = next_log_path(opts, "pass.opentimer.incremental");
       const auto& timing_tech    = place_options.technology().lef;
       const bool  timing_profile = truthy(synth_set(opts, "place.timing_profile", "false"));
+      const livehd::placement::Prects_networks no_prects_exclusions;
+      const auto                               timing_controls
+          = [&](const livehd::placement::Prects_networks& controls) -> const livehd::placement::Prects_networks& {
+        return physical_clock_ready ? no_prects_exclusions : controls;
+      };
       const auto  estimate
           = [&](const livehd::placement::Ranking_view& state, livehd::opentimer::Physical_session::Purpose purpose) {
               Stdout_to_log redirect(timing_log);
-              const auto&   controls = state.controls;
+              const auto&   controls = timing_controls(state.controls);
               const auto    before   = timing_session.statistics();
               auto          feedback = timing_session.evaluate(state.graph, state.parasitics, controls.timing_cuts, purpose);
               if (timing_profile) {
@@ -3891,6 +4141,7 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
         }
         // The same no-SDC defaults as the synthesis report: ideal clocks on the clock ports, every output loaded.
         ranker_options.default_constraints = true;
+        ranker_options.propagate_clocks    = physical_clock_ready;
         ranker_options.output_load_ff      = static_cast<float>(std::max(0.0, std::strtod(resolve_io_load(opts, liberty).c_str(), nullptr)));
         try {
           return std::make_unique<livehd::timing::fast::Physical_ranker>(std::move(ranker_options));
@@ -3917,7 +4168,7 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
         Stdout_to_log redirect(timing_log);
         ensure_fast_ranker();
 
-        auto feedback = fast_ranker->rank(state.graph, state.parasitics, state.controls.timing_cuts);
+        auto feedback = fast_ranker->rank(state.graph, state.parasitics, timing_controls(state.controls).timing_cuts);
         if (timing_profile) {
           const auto& r = fast_ranker->engine()->report();
           std::print("fast engine: wns {:.1f} tns {:.1f} endpoints {} unclocked_endpoints {} unclocked_flops {} loops {}\n",
@@ -3939,7 +4190,7 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
                      s.bad_trees,
                      s.unresolved_labels);
         }
-        return livehd::placement::prects_data_timing(std::move(feedback), state.controls);
+        return livehd::placement::prects_data_timing(std::move(feedback), timing_controls(state.controls));
       };
       const auto compare_rankings = [&](const livehd::timing::Feedback& reference, const livehd::timing::Feedback& fast) {
         Stdout_to_log redirect(timing_log);
@@ -4077,7 +4328,8 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
           gui_session->solver_timing_call(true);
         }
         Phase_timer phase(res, "pass.opentimer.incremental");
-        const auto  controls = livehd::placement::prects_networks(timing_tech, state.floorplan, state.prects);
+        const auto  controls = physical_clock_ready ? livehd::placement::Prects_networks{}
+                                                    : livehd::placement::prects_networks(timing_tech, state.floorplan, state.prects);
         if (timing_engine == "fast") {
           ensure_fast_ranker();
           Stdout_to_log redirect(timing_log);
@@ -4191,7 +4443,7 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
               .emit();
         }
       };
-      place_options.optimization_pending = !macro_plan_only && (run_resize || run_timing_place || run_resynth);
+      place_options.optimization_pending = !macro_plan_only && (run_resize || run_timing_place || run_resynth || build_pcrs_clock);
       place_options.persist_parasitics   = !place_options.optimization_pending;
       // auto (the default) bypasses the synthesis buffers when synth.place.resize rebuilds the buffering in this run:
       // a mapping-time fanout tree groups loads before any position exists, so its buffers' loads end up scattered
@@ -4264,7 +4516,7 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
             Stdout_to_log redirect(timing_log);
             ensure_fast_ranker();
             return livehd::placement::prects_data_timing(
-                fast_ranker->rank_trees(state.graph, state.trees, state.skeleton, state.controls.timing_cuts), state.controls);
+                fast_ranker->rank_trees(state.graph, state.trees, state.skeleton, timing_controls(state.controls).timing_cuts), timing_controls(state.controls));
           };
         }
         // GP consumes criticality only. Physical resizing runs after legal GP.
@@ -4276,7 +4528,7 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
           if (timing_engine == "fast") {
             ensure_fast_ranker();
             Stdout_to_log redirect(timing_log);
-            return fast_ranker->evaluate(state.graph, state.parasitics, state.controls.timing_cuts);
+            return fast_ranker->evaluate(state.graph, state.parasitics, timing_controls(state.controls).timing_cuts);
           }
           return estimate(state, livehd::opentimer::Physical_session::Purpose::detailed);
         };
@@ -4292,10 +4544,13 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
                            const livehd::placement::Ranking_view& state,
                            bool                                   full) mutable {
           Stdout_to_log redirect(timing_log);
-          const auto&   cuts = state.controls.timing_cuts;
+          const auto&   cuts = timing_controls(state.controls).timing_cuts;
           if (timing_engine == "fast") {
             if (!fast) {
               fast = make_fast_ranker();
+            }
+            if (physical_clock_ready) {
+              fast->propagate_clocks();
             }
             if (full) {
               *journal = &fast->whatif();
@@ -4304,6 +4559,9 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
           }
           if (!timer) {
             timer = std::make_shared<livehd::opentimer::Physical_session>(timing_options, place_options.threads);
+          }
+          if (physical_clock_ready && !sdc.empty()) {
+            timer->set_timing_files(timing_options.dict.at("files"));
           }
           using Purpose = livehd::opentimer::Physical_session::Purpose;
           if (full) {
@@ -4622,6 +4880,60 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
                                            ? opts.gui_repair_mode.contains("sizing") || opts.gui_repair_mode.contains("buffering")
                                            : run_resize;
       const bool terminal_resynth    = experimental_repair ? opts.gui_repair_mode.contains("resynthesis") : run_resynth;
+      const auto build_clock         = [&](bool final) {
+        const std::string              stage = final ? "pass.pcrs.clock" : "pass.pcrs.clock.initial";
+        Phase_timer                    phase(res, stage);
+        const std::vector<std::string> libraries = absl::StrSplit(extra_libs(), absl::ByAnyChar(", \t\n"), absl::SkipEmpty());
+        std::string                    clock_constraints;
+        if (!sdc.empty()) {
+          auto contents = livehd::file_utils::read_file(sdc);
+          if (!contents) {
+            throw Lhd_error{"io", "cannot read the physical clock constraints", sdc};
+          }
+          clock_constraints = std::move(*contents);
+        }
+        auto clock_options = place_options;
+        if (!final) {
+          clock_options.clock_split_scheduled_leaves = clock_options.clock_balance;
+          clock_options.clock_balance                = false;
+          clock_options.clock_skew_rounds            = 0;
+          clock_options.clock_hold_area_um2          = 0;
+          clock_options.clock_gate_merge_trials      = 0;
+          clock_options.clock_gate_leaf_trials       = 0;
+          clock_options.clock_gate_raise_trials      = 0;
+          clock_options.clock_gate_clone_trials = 0;
+        }
+        const bool clock_search = clock_options.clock_balance || clock_options.clock_skew_rounds
+                                  || clock_options.clock_hold_area_um2 > 0 || clock_options.clock_gate_merge_trials
+                                  || clock_options.clock_gate_leaf_trials || clock_options.clock_gate_clone_trials
+                                  || clock_options.clock_gate_raise_trials;
+        auto tree                       = livehd::placement::build_clock_handoff(placed,
+                                                           clock_options,
+                                                           libraries,
+                                                           clock_constraints,
+                                                           clock_search ? make_fast_ranker() : nullptr,
+                                                           previous_clock_report.string());
+        place_options.clock_net_drivers = std::make_shared<const livehd::placement::Clock_driver_pins>(std::move(tree.drivers));
+        physical_clock_ready            = place_options.has_physical_clock_tree();
+        if (physical_clock_ready) {
+          std::ofstream handoff(clock_sdc_path);
+          handoff.exceptions(std::ios::badbit | std::ios::failbit);
+          if (!clock_constraints.empty()) {
+            handoff << clock_constraints << '\n';
+          }
+          handoff << "set_propagated_clock [all_clocks]\n";
+          handoff.close();
+          if (!sdc.empty()) {
+            timing_options.dict["files"] = liberty + "," + clock_sdc_path;
+            timing_options.set_stage_labels(timing_options.dict);
+            timing_session.set_timing_files(timing_options.dict.at("files"));
+          }
+          if (fast_ranker) {
+            fast_ranker->propagate_clocks();
+          }
+        }
+        res.recipe_steps.emplace_back(std::format("{}.buffers={}", stage, tree.buffers.size()));
+      };
       if (!macro_plan_only && (terminal_resize || run_timing_place || terminal_resynth)) {
         // Every round/trial below re-runs placement (and resynth a fresh ABC frame
         // per cone): keep their output off the protocol stdout, as for pass.place.
@@ -4630,6 +4942,22 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
         set_crash_context(phase_step, phase_log);
         try {
           Stdout_to_log redirect(phase_log);
+          if (build_pcrs_clock) {
+            build_clock(false);
+            if (physical_clock_ready) {
+              // Size and repair against the legalized physical clock and its routed-net estimates.
+              auto clock_options        = place_options;
+              // This legalized clock feeds further mapped-netlist placement rounds.
+              // The final legalization owns the physical-only grid, tap cells and supply pins.
+              clock_options.handoff_taps = false;
+              clock_options.pg = "off";
+              clock_options.pg_channels.clear();
+              clock_options.output_dir += "/clock_initial";
+              initial_clock_placement   = livehd::placement::finalize_placement(placed, clock_options, evaluate, {});
+              placed                    = std::move(initial_clock_placement.placed);
+              timed_placement.timing    = std::move(initial_clock_placement.timing);
+            }
+          }
           if (run_timing_place) {
             Phase_timer phase(res, "pass.place.timing_driven");
             timed_placement = livehd::placement::timing_place(std::move(placed),
@@ -4844,6 +5172,9 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
         phase_log.clear();
         set_crash_context({}, {});
       }
+      if (build_pcrs_clock) {
+        build_clock(true);
+      }
       if (place_options.optimization_pending || experimental_repair) {
         Phase_timer   phase(res, "pass.place.final_legalize");
         const auto    final_log = next_log_path(opts, "pass.place.final_legalize");
@@ -4856,6 +5187,9 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
                                            : terminal_resize
                                                ? (place_options.resize_engine == "new" ? std::move(repaired.timing) : std::move(design_repaired.timing))
                                                : std::move(timed_placement.timing);
+        if (physical_clock_ready) {
+          prior.reset();  // The pre-CTS timing excluded control paths.
+        }
         try {
           finalized = livehd::placement::finalize_placement(placed, place_options, evaluate, std::move(prior));
         } catch (const livehd::placement::Placement_area_restart&) {
@@ -4971,6 +5305,9 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
         res.recipe_steps.emplace_back("pass.place.preroute");
         res.outputs.push_back(root + "/place/preroute.json");
       }
+      if (build_pcrs_clock && physical_clock_ready) {
+        livehd::placement::record_final_clock_leaf_geometry(placed, place_options.output_dir);
+      }
       net.physical_rc          = placed.parasitics;
       net.physical_timing_cuts = placed.parasitics->timing_cuts;
       {
@@ -5018,6 +5355,12 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
       res.outputs.push_back(place_qor_path);
       if (place_options.full) {
         res.outputs.push_back(root + "/place/out.def");
+        if (build_pcrs_clock) {
+          res.outputs.push_back(root + "/place/pcrs_clock.json");
+          if (physical_clock_ready) {
+            res.outputs.push_back(clock_sdc_path);
+          }
+        }
       }
     }
     if (const auto* def_out = find_slot(opts.emit_dirs, "def")) {
@@ -5027,6 +5370,19 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
         copy_export_file(root + "/place/out.def", destination);
       }
       res.outputs.push_back(destination.string());
+      for (const auto* file : {"pcrs_clock.json", "pcrs_clock.sdc", "power_grid.json"}) {
+        const auto source = fs::path(root) / "place" / file;
+        const auto target = fs::path(def_out->path) / file;
+        const bool expected = std::string_view(file) == "power_grid.json" ? place_options.pg != "none" && place_options.pg != "off" : build_pcrs_clock;
+        if (expected && fs::is_regular_file(source)) {
+          if (canon(source.string()) != canon(target.string())) {
+            copy_export_file(source, target);
+          }
+          res.outputs.push_back(target.string());
+        } else if (canon(source.string()) != canon(target.string())) {
+          fs::remove(target);
+        }
+      }
       // A DEF alone is not a portable physical handoff. Preserve the exact
       // ordered technology/cell views in the requested export, including their
       // copy cost in this invocation rather than in a downstream STA script.
@@ -5088,6 +5444,7 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
     }
     Phase_timer                              phase(res, "pass.timing");
     livehd::timing::fast::Report_inputs      in;
+    in.physical_clock_tree = physical_clock_ready;
     for (const auto path : absl::StrSplit(liberty + "," + extra_libs(), absl::ByAnyChar(", \t\n"), absl::SkipEmpty())) {
       auto text = livehd::file_utils::read_file(std::string(path));
       if (!text) {
@@ -5144,6 +5501,9 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
       if (d.valid) {
         uint64_t h = livehd::hash_util::fnv1a64(in.liberty_text);
         h          = livehd::hash_util::fnv1a64(in.sdc_text, h);
+        if (in.physical_clock_tree) {
+          h = livehd::hash_util::fnv1a64("pcrs-propagated-v2", h);
+        }
         h = livehd::hash_util::fnv1a64(std::format("{}|{}|{}|{}|{}|{}|{}|{}", top, in.io_load_ff, in.time_unit_ps,
                                                    in.wire_cap_ff_um, in.wire_res_ohm_um, in.wire_slope_um,
                                                    placed_rc ? placed_rc->identity : std::string{}, kFastReportSalt),
@@ -5206,7 +5566,7 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
   } else if (run_sta && !macro_plan_only) {
     std::string files = liberty;
     if (!sdc.empty()) {
-      files += "," + sdc;
+      files += "," + (physical_clock_ready ? clock_sdc_path : sdc);
     }
     if (!spef.empty()) {
       files += "," + spef;
@@ -5413,7 +5773,8 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
     std::error_code ec;
     // A logical-only run does not produce timing: never export a timing.json
     // left by an earlier mapped run in the same workdir.
-    for (const auto& src : {qor_path, run_sta && !macro_plan_only ? timing_path : std::string{}, report_path}) {
+    for (const auto& src :
+         {qor_path, run_sta && !macro_plan_only ? timing_path : std::string{}, report_path, clock_structure_path}) {
       if (src.empty()) {
         continue;
       }

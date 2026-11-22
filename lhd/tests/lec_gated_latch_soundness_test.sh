@@ -244,4 +244,29 @@ cmp -s "$W/mix_ref.v" "$W/mix_ref_b.v" && fail "3d: twin unchanged"
 expect 3c_icg_negedge_netlist proven "$W/mix_impl.v" "$W/mix_ref.v" abc_icg_mix
 expect 3d_icg_negedge_netlist_mutant refuted "$W/mix_impl.v" "$W/mix_ref_b.v" abc_icg_mix
 
+# DEF export can rename the only root clock p0. The enable latch and the
+# gate share this pin even when no flop clocks directly from the input.
+cat > "$W/unnamed_two.sv" <<'EOF'
+module clock_gate(input phase, input en, output g);
+  reg held;
+  always_latch if (!phase) held = en;
+  assign g = phase & held;
+endmodule
+module bitreg(input c, input d, output reg q);
+  always @(posedge c) q <= d;
+endmodule
+module candidate(input p0, input p1, input [1:0] d, output [1:0] q);
+  wire a, b;
+  clock_gate u0(p0, p1, a);
+  clock_gate u1(p0, p1, b);
+  bitreg r0(a, d[0], q[0]);
+  bitreg r1(b, d[1], q[1]);
+endmodule
+EOF
+sed 's/clock_gate u1(p0, p1, b);/assign b = a;/' "$W/unnamed_two.sv" > "$W/unnamed_one.sv"
+sed "s/u0(p0, p1, a)/u0(p0, 1'b0, a)/" "$W/unnamed_one.sv" > "$W/unnamed_disabled.sv"
+expect unnamed_gate_merge proven "$W/unnamed_one.sv" "$W/unnamed_two.sv" candidate
+[ "$RAWV" = proven-full ] || fail "expected a full proof for the merged clock gate"
+expect unnamed_gate_disabled refuted "$W/unnamed_disabled.sv" "$W/unnamed_two.sv" candidate
+
 echo "PASS: lec_gated_latch_soundness"

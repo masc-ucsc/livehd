@@ -3190,6 +3190,18 @@ sh_test(
 )
 
 sh_test(
+    name = "lhd_lec_pcrs_gate_edits",
+    size = "small",
+    timeout = "short",
+    srcs = ["lhd_lec_pcrs_gate_edits.py"],
+    data = [
+        "sky130_fixture.py",
+        "//inou/lefdef:test_data",
+        "//lhd",
+    ],
+)
+
+sh_test(
     name = "lhd_domplace_gates_smoke",
     size = "small",
     timeout = "short",

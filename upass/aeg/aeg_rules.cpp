@@ -13,10 +13,9 @@ namespace {
 namespace rt = livehd::aegraph::rt;
 
 // Simplify rules whose result is one statement over named operands and whose
-// guard is structural: with no leaf seeds and no bitwidth ranges, every fact a
-// guard reads comes from constants and op transfer functions, so it holds for
-// the unbounded integers the LNAST computes.
-constexpr std::array<std::string_view, 46> kAllowed = {
+// guards follow from constants, operation semantics and the 0/1 domain of a
+// declared Bool input. Integer input widths and inferred ranges are not seeded.
+constexpr std::array<std::string_view, 55> kAllowed = {
     // generic natives
     "const_fold_bank",
     "annihilate",
@@ -49,6 +48,7 @@ constexpr std::array<std::string_view, 46> kAllowed = {
     "not_not",
     "div_one",
     "div_self",
+    "div_cancel_product",
     "getmask_getmask",
     "getmask_getmask_zero",
     "getmask_not_getmask",
@@ -60,12 +60,20 @@ constexpr std::array<std::string_view, 46> kAllowed = {
     "sext_sext",
     "shl_shl",
     "sra_sra",
-    // structural +bits (bool01 / interval facts of constants and ops only)
+    // structural and Bool-domain guards
     "xor_bool_one",
     "eq_distinct",
     "ror_bool",
     "bool_complement",
     "eq_bool_chain",
+    "and_cover_complement",
+    "or_combine_complements",
+    "and_combine_complements",
+    "lt_always",
+    "lt_never",
+    "gt_always",
+    "gt_never",
+    "getmask_above",
 };
 
 constexpr std::string_view kAlt      = "alt: needs extraction with a cost model (graph engine only)";
@@ -73,7 +81,25 @@ constexpr std::string_view kNotImp   = "matches a Mux, Set_mask, Concat or Rem n
 constexpr std::string_view kRange    = "post-bitwidth range guard (todo 2a-treeaeg step 4; upass README invariant #6)";
 constexpr std::string_view kLaneFits = "lane/fits native: guard reads widths the tree does not seed; pending audit";
 
-constexpr std::array<Excluded_rule, 57> kExcluded = {{
+constexpr std::array<Excluded_rule, 72> kExcluded = {{
+    {"or_factor_common", kAlt},
+    {"or_consensus", kAlt},
+    {"and_factor_common", kAlt},
+    {"and_consensus", kAlt},
+    {"sum_factor_products", kAlt},
+    {"diff_factor_products", kAlt},
+    {"and_parity", kAlt},
+    {"and_parity_window", kAlt},
+    {"and_bool_parity", kAlt},
+    {"or_bool_parity", kAlt},
+    {"or_bool_equal", kAlt},
+    {"or_bool_mux", kAlt},
+    {"and_bool_mux", kAlt},
+    {"mux_gate_word", kAlt},
+    {"mux_gate_word_false", kAlt},
+    {"or_mask_mux", kAlt},
+    {"product_move_zero_gate", kAlt},
+    {"product_move_mask_gate", kAlt},
     {"bit_run_reduction", kAlt},
     {"div_mulshift16", kAlt},
     {"div_mulshift31", kAlt},
@@ -104,6 +130,8 @@ constexpr std::array<Excluded_rule, 57> kExcluded = {{
     {"setmask_own_bits", kNotImp},
     {"rem_one", kNotImp},
     {"rem_self", kNotImp},
+    {"rem_idempotent", kNotImp},
+    {"div_rem_reconstruct", kNotImp},
     {"mux_sel_arm", kNotImp},
     {"getmask_concat_straddle", kNotImp},
     {"mux_guard_accumulation", kNotImp},
@@ -116,13 +144,8 @@ constexpr std::array<Excluded_rule, 57> kExcluded = {{
     {"div_pow2", kRange},
     {"rem_pow2", kRange},
     {"div_shl_pow2", kRange},
-    {"getmask_above", kRange},
     {"concat_single_fits", kRange},
     {"concat_zero_top", kRange},
-    {"lt_always", kRange},
-    {"lt_never", kRange},
-    {"gt_always", kRange},
-    {"gt_never", kRange},
     {"sext_fits", kRange},
     {"getmask_fits", kLaneFits},
     {"getmask_lane", kLaneFits},

@@ -22,6 +22,8 @@ constexpr std::array kPlaceArtifacts{"out.def",
                                      "qor.json",
                                      "preroute.json",
                                      "power_grid.json",
+                                     "pcrs_clock.json",
+                                     "pcrs_clock.sdc",
                                      "io_resynth.json",
                                      "memory_proxies.lef",
                                      "magnet.json",
@@ -170,7 +172,10 @@ bool Physical_cache::restore(const fs::path& net, const fs::path& place) {
   }
 }
 
-fs::path Physical_cache::placement_hint() const {
+fs::path Physical_cache::placement_hint(fs::path* clock_report) const {
+  if (clock_report) {
+    clock_report->clear();
+  }
   try {
     std::ifstream input(directory_ / "manifest.json");
     if (!input) {
@@ -186,11 +191,18 @@ fs::path Physical_cache::placement_hint() const {
         || !manifest["artifacts"].IsObject()) {
       return {};
     }
-    const auto found = manifest["artifacts"].FindMember("place/out.def");
-    const auto path  = directory_ / "artifacts/place/out.def";
-    if (found == manifest["artifacts"].MemberEnd() || !found->value.IsString() || fs::is_symlink(path) || !fs::is_regular_file(path)
-        || digest(path) != found->value.GetString()) {
-      return {};
+    const auto verified = [&](const char* artifact) -> fs::path {
+      const auto found = manifest["artifacts"].FindMember(artifact);
+      const auto path  = directory_ / "artifacts" / artifact;
+      if (found == manifest["artifacts"].MemberEnd() || !found->value.IsString() || fs::is_symlink(path)
+          || !fs::is_regular_file(path) || digest(path) != found->value.GetString()) {
+        return {};
+      }
+      return path;
+    };
+    const auto path = verified("place/out.def");
+    if (clock_report && !path.empty()) {
+      *clock_report = verified("place/pcrs_clock.json");
     }
     return path;
   } catch (const std::exception&) {

@@ -10,6 +10,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "pass/liberty/clock_topology.hpp"
 #include "pass/liberty/timing_model.hpp"
 
 // The cell side of the fast timing engine (todo 2q-fasttimer, step A): the cells of N Liberty corners
@@ -56,6 +57,15 @@ struct Arc {
   uint32_t when   = no_index;  // index into Cell_types::conditions(); no_index without a `when`
 };
 
+struct Clock_shape {
+  liberty::Clock_cell_kind kind   = liberty::Clock_cell_kind::other;
+  uint32_t                 output = no_index;
+  std::vector<uint32_t>    inputs;
+  bool                     polarity = false;
+  std::vector<bool>        levels;
+  bool                     inverted_data                        = false;
+  bool                     operator==(const Clock_shape&) const = default;
+};
 struct Type {
   std::string name;
   float       area       = 0;
@@ -67,6 +77,9 @@ struct Type {
   // Cells the engine does not time; their pins are reported as unsupported instead of timed. A synchronous memory
   // macro (clocked reads, setup checks, no combinational arc) is not `memory` here: it is timed like a flip-flop.
   bool        latch = false, memory = false, clock_gate = false;
+  bool        characterized_gate = false;
+  Clock_shape clock_shape;
+  bool        untimed() const { return memory || (clock_gate ? !characterized_gate : latch); }
 };
 
 struct Pooled_table {
@@ -114,7 +127,11 @@ public:
 
   // Input pin capacitance in fF, `transition` 0 rise, 1 fall; 0 for a pin without one.
   [[nodiscard]] float pin_cap(uint32_t type, uint32_t local, size_t corner, unsigned transition) const {
-    return caps_[((types_[type].first_pin + local) * corners() + corner) * 2 + transition];
+    return caps_[((types_[type].first_pin + local) * corners() + corner) * 2 + transition].nominal;
+  }
+  [[nodiscard]] float pin_cap(uint32_t type, uint32_t local, size_t corner, unsigned transition, bool early) const {
+    const auto& cap = caps_[((types_[type].first_pin + local) * corners() + corner) * 2 + transition];
+    return early ? cap.minimum : cap.maximum;
   }
   // Electrical limits of a pin in a corner; infinity when the library gives no_index.
   [[nodiscard]] float max_capacitance(uint32_t type, uint32_t local, size_t corner) const {
@@ -155,7 +172,11 @@ private:
   std::vector<uint32_t>                     pin_first_arc_;  // per pin: index into arcs_
   std::vector<uint16_t>                     pin_arc_count_;
   std::vector<uint32_t>                     arc_tables_;
-  std::vector<float>                        caps_, max_cap_, max_tran_;
+  struct Pin_cap {
+    float nominal = 0, minimum = 0, maximum = 0;
+  };
+  std::vector<Pin_cap>                      caps_;
+  std::vector<float>                        max_cap_, max_tran_;
   std::vector<Pooled_table>                 tables_;
   std::vector<Axis>                         axes_;
   std::vector<float>                        axis_values_, values_;

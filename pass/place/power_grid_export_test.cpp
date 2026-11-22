@@ -55,6 +55,22 @@ Pg_profile profile(const ph::Technology& t) {
   return p;
 }
 }  // namespace
+TEST(PowerGrid, JsonOverridesOnlyNamedStrapDimensions) {
+  const auto& tech = ph::tech_profile("asap7");
+  rapidjson::Document data;
+  data.Parse(R"({"schema_version":1,"stripes":{"M5":{"pitch":4.32,"offset":0.54}}})");
+  const auto tuned = tuned_power_grid(tech, data);
+  EXPECT_DOUBLE_EQ(tuned.stripes[0].pitch, 4.32);
+  EXPECT_DOUBLE_EQ(tuned.stripes[0].offset, .54);
+  EXPECT_DOUBLE_EQ(tuned.stripes[0].width, tech.pg.stripes[0].width);
+  EXPECT_DOUBLE_EQ(tuned.stripes[1].pitch, tech.pg.stripes[1].pitch);
+  EXPECT_DOUBLE_EQ(tech.pg.stripes[0].pitch, 5.4);
+  for (const auto* invalid : {R"({"M5":{"pitch":0}})", R"({"M7":{"width":1}})", R"({"M6":{"pich":4}})",
+                              R"({"M6":{"offset":"0.5"}})", R"({"M6":{}})"}) {
+    data.Parse((std::string(R"({"schema_version":1,"stripes":)") + invalid + "}").c_str());
+    EXPECT_THROW(tuned_power_grid(tech, data), std::invalid_argument);
+  }
+}
 TEST(PowerGridExport, ChannelTracksUseSpacingAndDeduplicateOverlappingPatches) {
   ph::Technology tech;
   tech.manufacturing_grid = .001;

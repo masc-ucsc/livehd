@@ -1418,7 +1418,8 @@ void add_lattice_100(Scene& sc) {
   Macro_tracks t;
   t.orient   = "N";
   t.period_x = t.period_y = 100;
-  t.phases_x = t.phases_y = {0};
+  t.phases_x.push_back(0);
+  t.phases_y.push_back(0);
   t.pins     = 1;
   sc.track_lattices[sc.nodes[2].master].push_back(t);
 }

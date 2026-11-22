@@ -1,0 +1,12 @@
+--- a/ot/parser-spef/parser-spef.hpp
++++ b/ot/parser-spef/parser-spef.hpp
+@@ -796,7 +796,8 @@
+ 
+ struct RulePort
+     : pegtl::seq<
+-          pegtl::not_at<TAO_PEGTL_STRING("*D_NET")>, TAO_PEGTL_STRING("*"),
++          pegtl::not_at<TAO_PEGTL_STRING("*D_NET")>, pegtl::not_at<pegtl::eof>,
++          pegtl::opt<pegtl::one<'*'>>,
+           pegtl::must<
+               RuleToken, RuleSpace, pegtl::must<pegtl::one<'I', 'O', 'B'>>,
+               pegtl::star<pegtl::sor<

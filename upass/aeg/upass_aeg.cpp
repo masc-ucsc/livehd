@@ -27,6 +27,7 @@
 #include "lnast.hpp"
 #include "lnast_ntype.hpp"
 #include "rewriter.hpp"
+#include "runtime/analyses.hpp"
 #include "runtime/match.hpp"
 
 namespace upass::aeg {
@@ -1363,6 +1364,9 @@ private:
       ensure(b.cls);
       holder_[b.cls]  = {n, b.gen, s, id};
       io_leaf_[b.cls] = pre_.info(n).io_input && b.gen == 0 ? 1 : 0;
+      if (io_leaf_[b.cls] && kind_of(n) == Kind::boolean) {
+        rt::seed_leaf(eg_, b.cls, 1, true);  // Bool inputs denote 0 or 1 even before bitwidth.
+      }
       return b.cls;
     }
     const auto c = eg_.resolve(b.cls);

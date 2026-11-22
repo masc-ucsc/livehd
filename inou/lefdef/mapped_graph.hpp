@@ -13,5 +13,5 @@ namespace livehd::physical {
 // their complete DEF hyperedges. Its caller must retain that physical model
 // and exclude unsupported directed timing or logic operations on it.
 std::shared_ptr<hhds::Graph> mapped_graph(hhds::GraphLibrary& library, const Floorplan& floorplan, const Technology& technology,
-                                          std::vector<Net>* unresolved = nullptr);
+                                          std::vector<Net>* unresolved = nullptr, bool publish_clock_nets = false);
 }  // namespace livehd::physical

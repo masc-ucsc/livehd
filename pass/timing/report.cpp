@@ -128,6 +128,11 @@ std::string report_json(hhds::GraphLibrary& library, std::string_view top, const
   auto                  constraints = read_constraints(inputs.sdc_text, units, *bound.netlist, &names);
   complete_constraints(constraints, *bound.netlist, inputs.sdc_text.empty(), true, Physical_ranker::Options{}.default_period_ps,
                        inputs.io_load_ff);
+  if (inputs.physical_clock_tree) {
+    for (auto& clock : constraints.clocks) {
+      clock.propagated = true;
+    }
+  }
   Timed timed;
   timed.unsupported = constraints.unsupported;
   timed.unsupported.insert(timed.unsupported.end(), bound.unsupported.begin(), bound.unsupported.end());
@@ -190,6 +195,7 @@ std::string report_json_placed(hhds::GraphLibrary& library, std::string_view top
   options.corner_names.push_back(inputs.corner_name);
   options.sdc_text            = inputs.sdc_text;
   options.default_constraints = true;
+  options.propagate_clocks    = inputs.physical_clock_tree;
   options.output_load_ff      = inputs.io_load_ff;
   Physical_ranker ranker(std::move(options));
   // The placement's timing cuts (pins the placed flow does not time through) apply to its report too.
@@ -339,6 +345,76 @@ std::string write_report(hhds::GraphLibrary& library, std::string_view top, cons
   w.Key("timing_cells_complete");
   w.Bool(unsupported.empty() && engine.report().unsupported.empty());
   const auto delay_of = [&](float ps) { return static_cast<double>(ps) / unit_div; };
+  if (std::ranges::any_of(engine.constraints().clocks, [](const Clock& clock) { return clock.propagated; })) {
+    const auto& derates = engine.constraints().clock_derates;
+    w.Key("clock_delay_derates");
+    w.StartObject();
+    w.Key("early_cell");
+    w.Double(derates.cell[0]);
+    w.Key("late_cell");
+    w.Double(derates.cell[1]);
+    w.Key("early_net");
+    w.Double(derates.net[0]);
+    w.Key("late_net");
+    w.Double(derates.net[1]);
+    w.EndObject();
+    w.Key("propagated_clock_sinks");
+    w.StartArray();
+    for (auto pin : netlist.order()) {
+      if (!engine.propagated_clock_sink(pin)) {
+        continue;
+      }
+      for (size_t k = 0; k < engine.corners(); ++k) {
+        w.StartObject();
+        w.Key("pin");
+        w.String(label(pin).c_str());
+        w.Key("clock");
+        w.String(engine.clock_at(pin).name.c_str());
+        w.Key("corner");
+        w.String(types.corner_name(k).c_str());
+        for (const auto& [key, early] : {std::pair{"early", true}, std::pair{"late", false}}) {
+          w.Key(key);
+          w.StartObject();
+          for (unsigned t = 0; t < 2; ++t) {
+            const auto edge = engine.clock_edge(pin, k, t, early);
+            w.Key(t == 0 ? "rise" : "fall");
+            w.StartObject();
+            w.Key("source_edge");
+            w.String((t == 0) != edge.inverted ? "rise" : "fall");
+            w.Key("arrival");
+            w.Double(delay_of(edge.arrival));
+            w.Key("slew");
+            w.Double(delay_of(edge.slew));
+            w.EndObject();
+          }
+          w.EndObject();
+        }
+        w.EndObject();
+      }
+    }
+    w.EndArray();
+    w.Key("endpoint_slacks");
+    w.StartArray();
+    for (const auto pin : engine.endpoint_pins()) {
+      const auto setup = engine.endpoint_setup_slack(pin), hold = engine.hold_slack(pin);
+      if (!std::isfinite(setup) && !std::isfinite(hold)) {
+        continue;
+      }
+      w.StartObject();
+      w.Key("pin");
+      w.String(label(pin).c_str());
+      if (std::isfinite(setup)) {
+        w.Key("setup");
+        w.Double(delay_of(setup));
+      }
+      if (std::isfinite(hold)) {
+        w.Key("hold");
+        w.Double(delay_of(hold));
+      }
+      w.EndObject();
+    }
+    w.EndArray();
+  }
   w.Key("max_delay");
   w.Double(ends.empty() ? 0.0 : delay_of(ends.front().first));
   if (timed.wns) {
@@ -418,7 +494,7 @@ std::string write_report(hhds::GraphLibrary& library, std::string_view top, cons
     w.Key("parasitics");
     w.StartObject();
     w.Key("model");
-    w.String("placement_flute");
+    w.String(inputs.parasitic_model.c_str());
     w.Key("identity");
     w.String(placed->identity.c_str());
     w.Key("approximate");

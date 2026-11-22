@@ -3,6 +3,7 @@
 #include "liberty_dff.hpp"
 
 #include <algorithm>
+#include <bit>
 #include <array>
 #include <cctype>
 #include <charconv>
@@ -29,118 +30,6 @@ namespace gu = livehd::graph_util;
 namespace livehd::liberty {
 
 namespace {
-
-// Evaluate the entire independent pin basis at once. Reject unknown tokens,
-// absent pins and unfinished expressions; never use a sampled signature.
-class Expression {
-public:
-  Expression(std::string_view expression, const std::vector<std::string>& pins) : text(expression) {
-    for (uint32_t i = 0; i < pins.size(); ++i) {
-      uint64_t bits = 0;
-      for (uint32_t p = 0; p < 64U; ++p) {
-        bits |= uint64_t{(p >> i) & 1} << p;
-      }
-      variables.emplace(pins[i], bits);
-    }
-  }
-  std::optional<uint64_t> parse() {
-    auto value = disjunction();
-    space();
-    if (!valid || position != text.size()) {
-      return {};
-    }
-    return value;
-  }
-
-private:
-  std::string_view                text;
-  size_t                          position = 0;
-  bool                            valid    = true;
-  std::map<std::string, uint64_t> variables;
-  void                            space() {
-    while (position < text.size() && std::isspace(static_cast<unsigned char>(text[position]))) {
-      ++position;
-    }
-  }
-  bool take(char token) {
-    space();
-    if (position < text.size() && text[position] == token) {
-      ++position;
-      return true;
-    }
-    return false;
-  }
-  // Liberty precedence, loosest to tightest: OR (`+` `|`), AND (`*` `&` and
-  // juxtaposition), XOR (`^`), then inversion (`!` prefix, `'` postfix) --
-  // OpenSTA's LibExprParse.yy declares `%left '+' '|'`, `%left '*' '&'`,
-  // `%left '^'`, `%left '!' '\''` in that order. So `A^B*C` is `(A^B)*C`.
-  uint64_t disjunction() {
-    auto value = conjunction();
-    while (take('+') || take('|')) {
-      value |= conjunction();
-    }
-    return value;
-  }
-  uint64_t conjunction() {
-    auto value = exclusive();
-    while (valid) {
-      if (take('*') || take('&')) {
-        value &= exclusive();
-        continue;
-      }
-      space();
-      if (position < text.size()
-          && (text[position] == '(' || text[position] == '!' || text[position] == '~'
-              || std::isalnum(static_cast<unsigned char>(text[position])) || text[position] == '_')) {
-        value &= exclusive();
-        continue;
-      }
-      break;
-    }
-    return value;
-  }
-  uint64_t exclusive() {
-    auto value = literal();
-    while (take('^')) {
-      value ^= literal();
-    }
-    return value;
-  }
-  uint64_t literal() {
-    const bool inverse = take('!') || take('~');
-    if (inverse) {
-      return ~literal();
-    }
-    uint64_t value = 0;
-    if (take('(')) {
-      value = disjunction();
-      if (!take(')')) {
-        valid = false;
-      }
-    } else {
-      space();
-      const auto begin = position;
-      while (position < text.size() && (std::isalnum(static_cast<unsigned char>(text[position])) || text[position] == '_')) {
-        ++position;
-      }
-      const auto name  = std::string(text.substr(begin, position - begin));
-      const auto found = variables.find(name);
-      if (name == "0") {
-        value = 0;
-      } else if (name == "1") {
-        value = ~uint64_t{0};
-      } else if (found != variables.end()) {
-        value = found->second;
-      } else {
-        valid = false;
-      }
-    }
-    while (take('\'')) {
-      value = ~value;
-    }
-    return value;
-  }
-};
 
 std::string read_files(const std::string& lib_files, size_t* reads = nullptr) {
   std::string       all;
@@ -779,7 +668,7 @@ std::optional<Icg_cell> parse_icg_cell(const std::string& name, const std::strin
     return v == "true";
   };
   Icg_cell    c;
-  std::string out_fn;
+  std::string out_fn, function, state_function;
   std::string pin_args;
   for (size_t p = find_group(body, "pin", 0, pin_args); p != std::string::npos; p = find_group(body, "pin", p + 1, pin_args)) {
     size_t pclose = match_brace(body, p);
@@ -805,10 +694,9 @@ std::optional<Icg_cell> parse_icg_cell(const std::string& name, const std::strin
         return std::nullopt;
       }
       slot   = &c.out_pin;
-      out_fn = scalar_attr(top, "state_function");
-      if (out_fn.empty()) {
-        out_fn = scalar_attr(top, "function");
-      }
+      function = scalar_attr(top, "function");
+      state_function = scalar_attr(top, "state_function");
+      out_fn = state_function.empty() ? function : state_function;
     } else {
       continue;  // internal state node
     }
@@ -843,6 +731,22 @@ std::optional<Icg_cell> parse_icg_cell(const std::string& name, const std::strin
   const std::string& other = ops[0] == c.clk_pin ? ops[1] : ops[0];
   if ((ops[0] != c.clk_pin && ops[1] != c.clk_pin) || other == c.clk_pin || other == c.en_pin || other == c.test_pin) {
     return std::nullopt;
+  }
+  // A new drive variant must implement the same storage and output function.
+  // Incomplete or compound state descriptions still allow a same-master copy.
+  for (auto group : {"statetable", "latch", "latch_bank", "ff", "ff_bank"}) {
+    std::string  args;
+    const size_t open = find_group(body, group, 0, args);
+    if (open == std::string::npos) {
+      continue;
+    }
+    const size_t end = match_brace(body, open);
+    std::string  extra;
+    if (!c.state_model.empty() || end == std::string::npos || find_group(body, group, end + 1, extra) != std::string::npos) {
+      c.state_model.clear();
+      break;
+    }
+    c.state_model = {kind, function, state_function, group, args, body.substr(open, end - open + 1)};
   }
   c.name = name;
   c.area = parse_area(body);
@@ -1530,6 +1434,7 @@ std::vector<Dff_cell> scan_async_dff_cells(const std::string& lib_files) { retur
 std::vector<std::string> scan_dont_use_cells(const std::string& lib_files) { return scan_cells(lib_files).dont_use; }
 
 std::vector<Icg_cell> scan_icg_cells(const std::string& lib_files) { return scan_cells(lib_files).icgs; }
+std::vector<Icg_cell> scan_icg_cells_text(const std::string& contents) { return scan_cells_text(contents).icgs; }
 
 std::vector<Dff_cell> scan_latch_cells(const std::string& lib_files) { return scan_cells(lib_files).latches; }
 
@@ -2259,10 +2164,11 @@ void declare_memory_cells(hhds::GraphLibrary& library, const std::vector<Memory_
 }
 
 std::optional<uint64_t> cell_truth(const Comb_cell& cell) {
-  if (cell.inputs.empty() || cell.inputs.size() > 6) {
-    return {};
-  }
-  return Expression(cell.function, cell.inputs).parse();
+  return function_truth(cell.function, cell.inputs);
+}
+
+std::optional<Clock_gate_form> clock_gate_form(const Comb_cell& cell) {
+  return clock_gate_form(cell.function, cell.inputs);
 }
 
 std::optional<Wire_load_model> default_wire_load(const std::string& lib_files) {

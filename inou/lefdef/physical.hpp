@@ -145,6 +145,8 @@ struct Cut_layer {
   std::vector<double>                             spacing;  // unqualified edge-to-edge distances only
   std::set<std::string>                           unsupported;
   std::map<std::string, std::vector<std::string>> properties;
+  // Minimum short/long overhang in microns, below then above the cut.
+  std::array<std::array<double, 2>, 2>             enclosure{};
   friend bool                                     operator==(const Cut_layer&, const Cut_layer&) = default;
 };
 struct Eol_spacing {
@@ -280,7 +282,8 @@ struct Route_path {
   std::string            shape;
   std::vector<std::variant<Route_point, Route_via, Route_rect>> steps;
   std::string                                                   taper_rule;  // width-only DEF NONDEFAULTRULE applied to this path
-  friend bool                                                   operator==(const Route_path&, const Route_path&) = default;
+  bool taper = false;  // TAPER selects the ordinary layer width on a nondefault net.
+  friend bool operator==(const Route_path&, const Route_path&) = default;
 };
 struct Wire {
   std::string             type = "FIXED";
@@ -357,6 +360,17 @@ struct Gcell_grid {
 };
 // Width-only DEF rules, also used as non-owning trial overlays during routing.
 using Route_width_rules = std::map<std::string, std::map<std::string, int64_t>>;
+// Routed timing snapshots retain the net assignment and spacing constraints of CTS rules.
+struct Snapshot_ndr {
+  struct Spacing {
+    bool hard = false;
+    std::map<std::string, int64_t> layers;
+    friend bool operator==(const Spacing&, const Spacing&) = default;
+  };
+  std::map<std::string, Spacing> spacing;
+  std::map<std::string, std::string, std::less<>> net_rules;
+  friend bool operator==(const Snapshot_ndr&, const Snapshot_ndr&) = default;
+};
 struct Placement_exclusion {
   Rect           rect;
   Placement_mask kind = Placement_mask::hard;
@@ -376,6 +390,7 @@ struct Floorplan {
   std::vector<Gcell_grid>         gcell_grid;
   Route_width_rules               nondefault_rules;
   std::vector<Blockage>           snapshot_blockages;  // Read-only routed provenance; never placement authority.
+  Snapshot_ndr                    snapshot_ndr{};
 };
 Technology                       read_lef(const std::vector<std::string>& paths);
 Floorplan                        read_def(const std::string& path);

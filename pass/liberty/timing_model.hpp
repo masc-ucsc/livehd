@@ -45,10 +45,13 @@ struct Pin {
   std::string                          name, direction, function;
   bool                                 clock = false, three_state = false;
   std::array<std::optional<double>, 2> capacitance_ff;
+  std::array<std::optional<std::array<double, 2>>, 2> capacitance_range_ff;  // rise/fall, min/max
   std::optional<double>                max_capacitance_ff, max_transition_ps;
   std::vector<Arc>                     arcs;
   bool                                 operator==(const Pin&) const = default;
 };
+// Internal clock insertion of an abstracted macro for the same input and output edge.
+const Table* clock_tree_path(const Pin& pin, Transition edge, bool early);
 struct Cell {
   std::string                name, library;
   double                     area = 0;
@@ -57,6 +60,9 @@ struct Cell {
   // An integrated clock gate (`clock_gating_integrated_cell`): its gated-clock
   // output follows the clock pin through a combinational arc.
   bool                       clock_gate = false;
+  // Scalar storage without asynchronous controls, described by its data function, sampling clock and internal state.
+  std::string                storage_data, storage_clock, storage_state, storage_state_inv;
+  std::vector<std::string>   state_clocks;
   std::map<std::string, Pin> pins;
   std::vector<std::string>   unsupported;
   bool                       operator==(const Cell&) const = default;
@@ -77,4 +83,13 @@ struct Library {
 // appended to a merged synth.liberty and also listed in synth.macro_liberty) does
 // not depend on order and is kept once. The error names the cell and both libraries.
 Library parse(std::string_view text);
+// Optional structural metadata for clock synthesis, collected from the same parsed Liberty.
+struct Clock_structure {
+  bool dont_use = false;
+  std::string gate_style;
+  std::vector<std::string> state_clocks, gate_enables, gate_tests, gate_outputs;
+  bool operator==(const Clock_structure&) const = default;
+};
+using Clock_structures = std::map<std::string, Clock_structure>;
+Library parse(std::string_view text, Clock_structures& clocks);
 }  // namespace livehd::liberty::timing

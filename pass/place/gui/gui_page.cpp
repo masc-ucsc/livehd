@@ -136,6 +136,7 @@ input[type=number]{width:44px;font:inherit;color:var(--fg);background:transparen
 <label><input type="checkbox" id="l_dens">density</label>
 <label>congestion <select id="l_map"><option value="none">off</option><option value="rudy">RUDY</option><option value="rsmt">RSMT</option></select> <span id="s_map" class="mut"></span></label>
 <label><input type="checkbox" id="l_disp">displacement</label>
+<label>clock tree <select id="l_clk" title="the native clock tree (synth.place.pcrs.clock=true), once the flow has built it"><option value="off">off</option><option value="level">stage depth</option><option value="arrival">sink arrival</option><option value="slew">leaf slew</option><option value="skew">local skew map</option></select></label><div id="s_clk" class="mut" style="font-size:11px"></div>
 <h4>Highlights</h4><div id="hls" class="mut" style="font-size:12px">none (an assistant can paint cells here)</div>
 <h4>Selection (<span id="s_sel">0</span>)</h4>
 <details><summary>Align selected objects</summary><div id="al">
@@ -1386,8 +1387,34 @@ function draw(){dirty=false;const W=cv.clientWidth,H=cv.clientHeight;ctx.setTran
   else{ctx.globalAlpha=.45;ctx.fillRect(x,y-hh,w,hh);ctx.globalAlpha=1;ctx.lineWidth=2;ctx.strokeRect(x,y-hh,w,hh)}}}}
  ctx.lineWidth=1.5;ctx.strokeStyle=css('--pin');for(const i of pinned){if(i>=n)continue;const w=Math.max(6,D.w[i]*view.s),h=Math.max(6,D.h[i]*view.s);ctx.strokeRect(sx(X[i])-1,sy(Y[i])-h-1,w+2,h+2)}
  ctx.strokeStyle=css('--sel');ctx.lineWidth=2;for(const i of sel){if(i>=n)continue;const w=Math.max(8,D.w[i]*view.s),h=Math.max(8,D.h[i]*view.s);ctx.strokeRect(sx(X[i])-2,sy(Y[i])-h-2,w+4,h+4)}
- drawChunks();drawHomePreview();geometryOverlay();drawIntentOverlay();
+ drawClock();drawChunks();drawHomePreview();geometryOverlay();drawIntentOverlay();
  if(drag&&drag.box){ctx.strokeStyle=css('--acc');ctx.setLineDash([5,3]);ctx.strokeRect(drag.bx0,drag.by0,drag.bx1-drag.bx0,drag.by1-drag.by0);ctx.setLineDash([])}areaOverlay()}
+// The native clock tree: driver-to-load fans by stage depth, endpoints by an estimate, or the local skew grid.
+let CK=null,CKM=null,ckKey='',ckScene='',ckBusy=false;
+const ckPal=['#ffd60a','#ff8c1e','#f05078','#aa6eff','#5aaaff'],ckHeat=t=>'rgb('+Math.round(40+215*t)+','+Math.round(90+60*(1-Math.abs(2*t-1)))+','+Math.round(255-215*t)+')';
+async function loadClock(){const mode=$('l_clk').value,note=$('s_clk');if(mode==='off'){note.textContent='';return}
+ if(!S.clock||!S.clock.nets){CK=CKM=null;ckKey=ckScene='';note.textContent='no clock tree in this phase yet';dirty=true;return}
+ const sc=S.epoch+'|'+S.scene,key=sc+'|'+mode+'|'+(mode==='skew'?S.frame:'')+'|'+S.clock.staged;if(key===ckKey||ckBusy)return;ckBusy=true;
+ try{if(!CK||ckScene!==sc){CK=await xcommand({cmd:'clock',what:'view'});ckScene=sc}
+  CKM=mode==='skew'?await xcommand({cmd:'clock',what:'map',metric:'skew'}):null;ckKey=key;
+  const a=CK.arrival,f=v=>v==null?'-':v.toFixed(1);
+  note.textContent=CK.nets.length+' nets, '+CK.levels+' stages'+(a.known?'; insertion '+f(a.min_ps)+' to '+f(a.max_ps)+' ps, skew '+f(a.skew_ps)+' ps (estimates)':'; no estimates')+(CKM&&CKM.max!=null?'; worst local skew '+f(CKM.max)+' ps':'')+(S.clock.staged?'; '+S.clock.staged+' staged edits':'')}
+ catch(e){CK=CKM=null;ckScene='';note.textContent=String(e.message||e)}
+ ckBusy=false;dirty=true}
+function drawClock(){const mode=$('l_clk').value;if(mode==='off'||!CK||!X||rev!==null||CK.nodes!==X.length)return;const n=X.length,cx=i=>sx(X[i]+D.w[i]/2),cy=i=>sy(Y[i]+D.h[i]/2);
+ ctx.save();
+ if(mode==='skew'&&CKM&&CKM.max>0){const[xl,yl,xh,yh]=CKM.die_um.map(v=>v*D.dbu),bw=(xh-xl)/CKM.bx,bh=(yh-yl)/CKM.by;
+  for(let i=0;i<CKM.bx;i++)for(let j=0;j<CKM.by;j++){const v=CKM.v[i*CKM.by+j];if(v==null)continue;ctx.globalAlpha=.55;ctx.fillStyle=ckHeat(v/CKM.max);ctx.fillRect(sx(xl+i*bw),sy(yl+(j+1)*bh),bw*view.s+.5,bh*view.s+.5)}ctx.globalAlpha=1}
+ for(let pass=0;pass<2;pass++)for(const k of CK.nets){if(k.d<0||k.d>=n)continue;ctx.strokeStyle=ckPal[Math.min(k.l,ckPal.length-1)];ctx.lineWidth=pass?2:1;ctx.globalAlpha=pass?1:(mode==='skew'?.25:.5);ctx.beginPath();
+  for(let j=0;j<k.s.length;j++){const s=k.s[j];if(s<0||s>=n||(k.e[j]?0:1)!==pass)continue;ctx.moveTo(cx(k.d),cy(k.d));ctx.lineTo(cx(s),cy(s))}ctx.stroke()}
+ ctx.globalAlpha=1;
+ if(mode==='arrival'||mode==='slew'){const a0=CK.arrival.min_ps,a1=CK.arrival.max_ps,q=Math.max(3,Math.min(7,view.s*400));
+  for(const k of CK.nets)for(let j=0;j<k.s.length;j++){const s=k.s[j];if(!k.e[j]||s<0||s>=n)continue;let t=null;
+   if(mode==='arrival'){if(k.a[j]!=null&&a1>a0)t=(k.a[j]-a0)/(a1-a0)}else if(k.sl!=null&&CK.slew_max_ps>0)t=k.sl/CK.slew_max_ps;
+   if(t===null)continue;ctx.fillStyle=ckHeat(t);ctx.fillRect(cx(s)-q/2,cy(s)-q/2,q,q)}}
+ for(const k of CK.nets){if(k.d<0||k.d>=n)continue;ctx.fillStyle=ckPal[Math.min(k.l,ckPal.length-1)];ctx.fillRect(cx(k.d)-3,cy(k.d)-3,6,6)}
+ ctx.restore()}
+$('l_clk').onchange=()=>{dirty=true;loadClock()};
 function loop(){if(dirty)draw();requestAnimationFrame(loop)}requestAnimationFrame(loop);
 cv.addEventListener('wheel',e=>{e.preventDefault();const f=Math.exp(-e.deltaY*.0015),x=e.offsetX,y=e.offsetY,ox=wx(x),oy=wy(y);view.s*=f;view.ox=x-ox*view.s;view.oy=y+oy*view.s;dirty=true},{passive:false});
 function selMove(dx,dy,final){const ns=[],xs=[],ys=[],fn=[],fx=[],fy=[];for(const i of drag.items){let x=drag.x0.get(i)+dx,y=drag.y0.get(i)+dy;const[a,b,c,d]=D.die;x=Math.min(Math.max(x,a),c-D.w[i]);y=Math.min(Math.max(y,b),d-D.h[i]);X[i]=x;Y[i]=y;drag.cur.set(i,[x,y]);if(isMovable(i)){ns.push(nm(i));xs.push(x);ys.push(y)}else{fn.push(nm(i));fx.push(x);fy.push(y)}}
@@ -1561,7 +1588,7 @@ function frameTimingBreakdown(){
  if(key!==details.dataset.frame){fillTimingBreakdown(details.lastElementChild,e);details.dataset.frame=key}
 }
 $('frameTimingGroups').ontoggle=()=>{if(S)frameTimingBreakdown()};
-function ui(){areaInfo();forkList();$('s_phase').textContent=S.phase||'-';const st=$('s_state');st.textContent=S.state+(S.gate?' before '+S.gate:'');st.className='st-'+S.state;
+function ui(){areaInfo();forkList();loadClock();$('s_phase').textContent=S.phase||'-';const st=$('s_state');st.textContent=S.state+(S.gate?' before '+S.gate:'');st.className='st-'+S.state;
  pinInfo();frameTimingBreakdown();geometryWarning();
  const routed=S.summary?.timing.model==='final_downstream_sta';
  $('s_iter').textContent=S.iter;$('s_pend').textContent=S.pending;$('s_hpwl').textContent=S.hpwl==null?'-':fmt(S.hpwl,1);$('s_ovf').textContent=S.overflow==null||S.overflow<0?'-':fmt(S.overflow,4);

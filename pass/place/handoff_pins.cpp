@@ -38,8 +38,20 @@ std::vector<ph::Terminal> handoff_pins(const ph::Technology& tech, const ph::Flo
       t.shapes.clear();
     }
   }
-  auto                         occupancy = ph::routing_occupancy(tech, seed, fp.dbu);
-  const ph::Signal_metal_rules rules(tech, fp);
+  auto occupancy = ph::routing_occupancy(tech, seed, fp.dbu);
+  // Each boundary pin is one rectangle. It cannot create a hole while isolated
+  // from existing metal of its own net; keep checking spacing to every other net.
+  ph::Technology pin_tech;
+  pin_tech.manufacturing_grid = tech.manufacturing_grid;
+  std::set<std::string> hole_rule_layers;
+  for (const auto& name : {horizontal_layer, vertical_layer}) {
+    auto& layer = pin_tech.layers[name];
+    layer = tech.layers.at(name);
+    if (layer.rules.unsupported.erase("MINENCLOSEDAREA")) {
+      hole_rule_layers.insert(name);
+    }
+  }
+  const ph::Signal_metal_rules rules(pin_tech, fp);
   struct Layer {
     std::string          name;
     double               width, length;
@@ -110,7 +122,7 @@ std::vector<ph::Terminal> handoff_pins(const ph::Technology& tech, const ph::Flo
   double stub_reach = 0;
   if (!fp.rows.empty()) {
     if (const auto site = tech.sites.find(fp.rows.front().site); site != tech.sites.end()) {
-      stub_reach = 5 * site->second.height * fp.dbu;
+      stub_reach = 5 * std::round(site->second.height * fp.dbu / grid) * grid;
     }
   }
   std::set<std::string> supply;
@@ -158,6 +170,13 @@ std::vector<ph::Terminal> handoff_pins(const ph::Technology& tech, const ph::Flo
       if (!check.legal) {
         reason = check.reason;
         continue;
+      }
+      if (hole_rule_layers.contains(l.name)) {
+        const auto contacts = occupancy.query(l.name, shape.rect, *grid_dbu);
+        if (std::ranges::any_of(contacts, [&](auto id) { return occupancy.at(id).net == t.net; })) {
+          reason = "existing same-net metal at a boundary pin with an enclosed-area rule";
+          continue;
+        }
       }
       for (auto id : occupancy.query(l.name, shape.rect, l.clearance, t.net)) {
         check = rules.spacing(shape, occupancy.at(id).shape);

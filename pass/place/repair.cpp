@@ -138,6 +138,10 @@ std::set<std::string> protected_buffers(hhds::Graph& graph, const Inventory& cel
     const auto name = n.get_name();
     return name.empty() ? std::format("#unnamed:{}", n.get_debug_nid()) : std::string(name);
   };
+  gu::visit_published_clock_drivers(graph, [&](const Pin& pin) {
+    const auto node = pin.get_master_node();
+    protected_names.insert(node.is_input_node() ? "@port:" + std::string(pin.get_pin_name()) : key(node));
+  });
   const auto            roots = prects_library("", control_ports);
   for (const auto& port : roots.ports) {
     protected_names.insert("@port:" + port);
@@ -152,6 +156,9 @@ std::set<std::string> protected_buffers(hhds::Graph& graph, const Inventory& cel
       protected_names.emplace("@port:" + std::string(driver.get_pin_name()));
       return;
     }
+    // The physical tree identifies every driver. Walking through a published gate
+    // would wrongly protect the logic driving its enable as clock distribution.
+    if (gu::is_published_clock_driver(driver)) return;
     const auto* b = combinational(n, cells);
     if (!visited.insert(n.get_debug_nid()).second) {
       return;
@@ -2882,6 +2889,13 @@ Repair_result finalize_placement(const Result& initial, const Options& requested
     result.placed.qor = buffer.GetString();
   }
   physical::write_def(result.placed.floorplan, requested.output_dir + "/out.def");
+  const auto grid_report = fs::path(options.output_dir) / "power_grid.json";
+  const auto handoff_report = fs::path(requested.output_dir) / "power_grid.json";
+  if (fs::is_regular_file(grid_report)) {
+    fs::copy_file(grid_report, handoff_report, fs::copy_options::overwrite_existing);
+  } else {
+    fs::remove(handoff_report);
+  }
   std::ofstream(requested.output_dir + "/qor.json") << result.placed.qor << '\n';
   return result;
 }

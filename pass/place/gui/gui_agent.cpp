@@ -7,24 +7,27 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <filesystem>
 #include <format>
+#include <fstream>
 #include <memory>
 #include <thread>
 #include <unordered_set>
 
 #include "core/hash_util.hpp"
 #include "core/job_manager.hpp"
+#include "gui_clock.hpp"
 #include "gui_geometry.hpp"
 #include "gui_scan.hpp"
-#include "gui_tracks.hpp"
 #include "gui_session.hpp"
-#include "gui_worker.hpp"
+#include "gui_tracks.hpp"
 #include "gui_wire.hpp"
+#include "gui_worker.hpp"
 #include "pass/place/macro_state.hpp"
 #include "rapidjson/document.h"
 #include "rapidjson/stringbuffer.h"
-#include "re2/re2.h"
 #include "rapidjson/writer.h"
+#include "re2/re2.h"
 
 namespace livehd::placement::gui {
 
@@ -2198,6 +2201,100 @@ std::string Session::agent_call(const std::string& json, int timeout_ms) {
     }
     return macro_scan(*scene, *frame, d, orientation_editable, chunks.get());
   }
+  if (cmd == "clock") {
+    // Read-only: the scene and frame are immutable snapshots, so the report runs outside the session lock.
+    std::shared_ptr<const Scene> scene;
+    std::shared_ptr<const Frame> frame;
+    {
+      std::lock_guard lock(m_);
+      scene = scene_;
+      frame = frame_;
+    }
+    if (!scene || !frame) {
+      return err_json("no published placement");
+    }
+    return clock_query(*scene, *frame, d);
+  }
+  if (cmd == "clock_edit") {
+    std::shared_ptr<const Scene> scene;
+    {
+      std::lock_guard lock(m_);
+      scene = scene_;
+    }
+    if (!scene) {
+      return err_json("no published placement");
+    }
+    if (str("op") != "apply") {
+      std::lock_guard lock(m_);
+      bool            changed = false;
+      auto            reply   = clock_edit(*scene, clock_edits_, d, changed);
+      if (changed) {
+        bump_locked();
+      }
+      return reply;
+    }
+    // Apply: the staged decisions become the files and --set values of a restart. The tree is rebuilt by the flow,
+    // with its own electrical and timing checks; nothing is patched in place.
+    Clock_edits staged;
+    {
+      std::lock_guard lock(m_);
+      staged = clock_edits_;
+    }
+    if (staged.empty()) {
+      return err_json("nothing is staged (clock_edit op=drive|arrival|option first)");
+    }
+    if (cfg_.target != "main") {
+      return err_json("clock decisions restart the main flow: apply them on target main");
+    }
+    if (cfg_.trace_path.empty()) {
+      return err_json("clock_edit op=apply needs --workdir (the decision files are stored next to the action trace)");
+    }
+    const auto directory = std::filesystem::path(cfg_.trace_path).parent_path().string();
+    const auto restart   = clock_restart(*scene, staged, directory);
+    for (const auto& [path, contents] : restart.files) {
+      std::ofstream out(path, std::ios::trunc);
+      out << contents << '\n';
+      if (!out) {
+        return err_json("cannot write " + path);
+      }
+    }
+    rapidjson::StringBuffer                    buf;
+    rapidjson::Writer<rapidjson::StringBuffer> w(buf);
+    w.StartObject();
+    w.Key("cmd");
+    w.String("restart");
+    if (d.HasMember("checkpoint") && d["checkpoint"].IsInt()) {
+      w.Key("checkpoint");
+      w.Int(d["checkpoint"].GetInt());
+    }
+    w.Key("set");
+    w.StartObject();
+    for (const auto& [key, value] : restart.set) {
+      w.Key(key.c_str());
+      w.String(value.c_str(), rapidjson::SizeType(value.size()));
+    }
+    w.EndObject();
+    w.Key("target");
+    w.String(cfg_.target.c_str());
+    w.EndObject();
+    bool       accepted = false;
+    const auto reply    = submit_reply(buf.GetString(), &accepted);
+    if (!accepted) {
+      return reply;
+    }
+    {
+      std::lock_guard lock(m_);
+      clock_edits_ = {};
+      bump_locked();
+    }
+    std::string set;
+    for (const auto& [key, value] : restart.set) {
+      set += std::format(R"({}"{}":"{}")", set.empty() ? "" : ",", esc(key), esc(value));
+    }
+    return std::format(
+        R"({{"ok":true,"status":"restarting","set":{{{}}},"note":"the flow re-runs with these settings; wait for state=finished (or a gate) and read clock again"}})",
+        set);
+  }
   if (cmd == "clusters") {
     std::lock_guard lk(m_);
     if (!scene_) {
@@ -2949,6 +3046,7 @@ std::string Session::agent_call(const std::string& json, int timeout_ms) {
 "overview":{
 "start":["hello","state","summary"],
 "inspect":["find","describe","selection","critical","geometry","maps","clusters","signature","leverage","evidence"],
+"clock":["clock","clock_edit"],
 "paint":["highlight","highlight_names","select","clear_highlight","highlights"],
 "edit":["move","batch","pin","unpin","relax","legalize","evaluate","command_status","cmd"],
 "explore":["whatif","explore","explore_begin","explore_wait","explorations","compare","similarity","explore_discard","score_config"],
@@ -2960,6 +3058,8 @@ std::string Session::agent_call(const std::string& json, int timeout_ms) {
 "whatif":"{candidates:[move or batch,...], max_nets?, expect?, timeout_ms?} -> measured journal trials and rollback at one gate",
 "macro_scan":"{node, positions?:[[x,y],...] | grid?:{nx,ny}, orientations?:[N|FN|FS|S,...], top?, refine?, frame?:die|chunk, chunk?, expect?} -> positions (DBU, lower-left; with frame chunk relative to the home chunk, whose box is the grid and the limit) of one macro ranked by its pin nets' half-perimeter, legal ones only, the current pose included, the best refined downhill; cells frozen, no timing, other macros' pins not counted: screen here, then whatif the best",
 "maps":"{} -> frame, availability, peak, overflow, over-capacity share and hotspot boxes of each measured grid",
+"clock":"{what?: summary|nets|sinks|pair|map|view, ...} -> the native clock tree (synth.place.pcrs.clock=true), once the flow has built it. summary: per clock root the endpoints, buffers by master, depth range (unequal depth is built-in skew), wire at this frame, estimated insertion and skew, and the worst stages. nets {root?, sort?: slew|radius|skew|load|fanout|wire|delay, limit?}: one row per clock net. sinks {root?, order?: late|early, limit?}: endpoints by estimated arrival. pair {a, b}: two clock loads (name, #index or instance:pin) -> shared stage, private stages and estimated skew (b later than a is positive). map {metric?: skew|arrival|sinks|slew, bins?}: a die grid, v[x*by+y], skew being the arrival spread within a bin and its neighbours. Wire lengths are measured at the frame; delays, slews and arrivals are the handoff's estimates (pcrs_clock.json) at the positions the tree was planned at",
+"clock_edit":"{op: drive|arrival|option|remove|clear|show|apply, ...} -> stage clock decisions, then rebuild. drive {leaf: driver instance or net index | pins:[...], step}: absolute leaf drive step (synth.place.pcrs.leaf_schedule). arrival {leaf | pins, wanted_ps}: wanted arrival of these loads (arrival_targets; needs option balance=true). option {key, value?}: a scalar synth.place.pcrs knob (balance, source_fork, leaf_fanout, leaf_radius_um, max_slew_ps, leaf_drive_steps, skew_rounds, hold_area_um2, ...). apply {checkpoint?}: writes the decision files and restarts the flow with them (from the start unless a state.cps index is given); the tree is rebuilt and re-checked by the flow, never patched in place",
 "clusters":"{} -> available placement cluster names and member counts",
 "explore_begin":"{expect?:{frame},set?:{physical_option:CLI_value}} -> start a private foreground replay at this gate",
 "explorations":"{ids?,epoch?,known?} -> limits, main measurements and matching records. Supply the previous epoch and known {id:terminal|closed|evicted} to receive unchanged IDs in place of cached rows.",

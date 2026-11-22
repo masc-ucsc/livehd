@@ -41,6 +41,7 @@ LAYER M2
 END M2
 LAYER V2
  TYPE CUT ; WIDTH 0.018 ; SPACING 0.036 CENTERTOCENTER ;
+ ENCLOSURE BELOW 0.055 0.085 ; ENCLOSURE ABOVE 0.065 0.065 ;
 END V2
 VIA VIA12 DEFAULT
  RESISTANCE 5 ;
@@ -73,6 +74,8 @@ TEST(Physical, LefViaGeometryAndGenerationRules) {
   EXPECT_EQ(tech.cut_layers.at("V1").spacing, (std::vector<double>{.018}));
   EXPECT_TRUE(tech.cut_layers.at("V1").unsupported.empty());
   EXPECT_TRUE(tech.cut_layers.at("V2").spacing.empty());
+  EXPECT_EQ(tech.cut_layers.at("V2").enclosure[0], (std::array<double, 2>{.055, .085}));
+  EXPECT_EQ(tech.cut_layers.at("V2").enclosure[1], (std::array<double, 2>{.065, .065}));
   EXPECT_TRUE(tech.cut_layers.at("V2").unsupported.contains("qualified SPACING"));
   const auto& via = tech.vias.at("VIA12");
   EXPECT_TRUE(via.is_default);
@@ -995,6 +998,38 @@ TEST(Physical, ViaOnlySpecialPathHasZeroWidth) {
   fp.special_nets[0].wires[0].paths[0].steps.push_back(Route_point{200, 100, {}});
   EXPECT_THROW(write_def(fp, file.string()), std::runtime_error);
 }
+TEST(Physical, SnapshotPreservesCtsNetRulesAndPathTaper) {
+  const auto file = std::filesystem::path(std::getenv("TEST_TMPDIR")) / "clock_ndr.def";
+  const std::string text = R"(VERSION 5.8 ;
+DESIGN clocks ;
+UNITS DISTANCE MICRONS 1000 ;
+DIEAREA ( 0 0 ) ( 1000 1000 ) ;
+NONDEFAULTRULES 1 ;
+- CTS_NDR_0 + HARDSPACING + LAYER M1 WIDTH 40 SPACING 80 ;
+END NONDEFAULTRULES
+NETS 1 ;
+- clk ( PIN clk ) ( ff CK ) + USE CLOCK + NONDEFAULTRULE CTS_NDR_0
+  + ROUTED M1 ( 100 100 ) ( 500 * ) NEW M1 TAPER ( 500 100 ) ( 600 * ) ;
+END NETS
+END DESIGN
+)";
+  std::ofstream(file) << text;
+  EXPECT_THROW(read_def(file.string()), std::runtime_error);
+  const auto fp = read_def_snapshot(file.string());
+  EXPECT_EQ(fp.nondefault_rules.at("CTS_NDR_0").at("M1"), 40);
+  EXPECT_EQ(fp.snapshot_ndr.net_rules.at("clk"), "CTS_NDR_0");
+  EXPECT_TRUE(fp.snapshot_ndr.spacing.at("CTS_NDR_0").hard);
+  EXPECT_EQ(fp.snapshot_ndr.spacing.at("CTS_NDR_0").layers.at("M1"), 80);
+  ASSERT_EQ(fp.nets.at(0).wires.at(0).paths.size(), 2u);
+  EXPECT_FALSE(fp.nets[0].wires[0].paths[0].taper);
+  EXPECT_TRUE(fp.nets[0].wires[0].paths[1].taper);
+  EXPECT_THROW(write_def(fp, file.string()), std::invalid_argument);
+  auto unknown = text;
+  unknown.replace(unknown.rfind("CTS_NDR_0"), 9, "NO_RULE");
+  std::ofstream(file) << unknown;
+  EXPECT_THROW(read_def_snapshot(file.string()), std::runtime_error);
+}
+
 TEST(Physical, PathTaperRuleRoundtripAndRejection) {
   Floorplan fp;
   fp.design                   = "wide";

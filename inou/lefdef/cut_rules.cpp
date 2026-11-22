@@ -126,8 +126,11 @@ std::vector<std::array<int64_t, 2>> cut_enclosures(const Cut_layer& cut, int64_t
                                                    const std::array<int64_t, 2>& cut_size, bool above, const Layer& metal,
                                                    const std::array<int64_t, 2>& extent, Cut_enclosure_policy policy) {
   std::vector<std::array<int64_t, 2>> result;
+  const auto& min_enc = cut.enclosure[above];
+  const auto small = exact_units(min_enc[0], dbu), large = exact_units(min_enc[1], dbu);
+  const std::array<int64_t, 2> classic = metal.direction == "HORIZONTAL" ? std::array{large, small} : std::array{small, large};
   if (!cut.properties.contains("LEF58_ENCLOSURE")) {
-    return {{0, 0}};
+    return {classic};
   }
   for (const auto& text : cut.properties.at("LEF58_ENCLOSURE")) {
     const auto w = lef58_tokens(text);
@@ -195,12 +198,12 @@ std::vector<std::array<int64_t, 2>> cut_enclosures(const Cut_layer& cut, int64_t
         }
       }
       if (applicable) {
-        result.push_back({x, y});
+        result.push_back({std::max(x, classic[0]), std::max(y, classic[1])});
       }
     }
   }
   if (result.empty()) {
-    result.push_back({0, 0});
+    result.push_back(classic);
   }
   return result;
 }

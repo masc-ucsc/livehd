@@ -5,6 +5,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -136,6 +137,7 @@ namespace gui {
 int serve_frozen_owner(int socket, int parent, uint64_t native_identity = 0);
 class Session;  // pass/place/gui/gui_session.hpp (2i-interact)
 }
+using Clock_driver_pins = std::set<std::pair<Name, Name>>;
 struct Options {
   // Interactive session (lhd synth --gui): live frames, stage gates, pins. Null: batch.
   std::shared_ptr<gui::Session>                         gui;
@@ -188,6 +190,7 @@ struct Options {
   std::shared_ptr<const buffering::Checkpoint_settings>  native_gp_buffering;
 
   Preroute_settings                                         preroute;
+  std::shared_ptr<const Pg_profile>                         tuned_pg;
   std::vector<Pg_channel>                                   pg_channels;  // Opt-in patches; reference grid by default.
   std::optional<double>                                     pg_channel_max_ir_drop_v;
   bool                                                      pg_tolerate_macro_pin_overlap = false;
@@ -361,6 +364,28 @@ struct Options {
     unsigned    buffers = 0;  // synthesis buffers the tree had
   };
   bool wl_resynth = true;
+  bool     clock_tree             = false;
+  double   clock_cluster_strength = 0;
+  double   clock_hold_area_um2    = 0;
+  unsigned clock_leaf_drive_steps = 0, clock_skew_rounds = 0, clock_gate_merge_trials = 0, clock_gate_leaf_trials = 0,
+           clock_gate_clone_trials = 0, clock_gate_raise_trials = 0;
+  bool                                             clock_source_fork        = false;
+  bool                                             clock_balance            = false;
+  bool                                             clock_split_scheduled_leaves = false;  // Initial tree for a balanced manual schedule.
+  bool                                             clock_incremental_trials = true;
+  std::map<std::string, std::pair<std::optional<double>, double>> clock_arrival_targets{};  // insertion override and wanted arrival, ps
+  unsigned                                         clock_leaf_fanout    = 24;
+  double                                           clock_leaf_radius_um = 0;
+  double                                           clock_max_slew_ps    = 0;  // transition target of planned clock stages; 0: library limit
+  std::array<double, 2>                    clock_leaf_rc_scale{1, 1}, clock_trunk_rc_scale{1, 1};  // resistance, capacitance
+  double                                   clock_skew_period_fraction = 0.05;
+  std::optional<double>                    clock_skew_hold_margin_ps;
+  std::map<std::string, unsigned>          clock_leaf_schedule;
+  std::map<std::string, double>            clock_leaf_delays_ps;
+  std::map<std::string, double>            clock_activity;  // Fraction of source cycles active on each physical clock net.
+  // Physical driver pins survive net renaming during final legalization, including unbuffered clock outputs.
+  std::shared_ptr<const Clock_driver_pins> clock_net_drivers;
+  [[nodiscard]] bool has_physical_clock_tree() const { return clock_net_drivers && !clock_net_drivers->empty(); }
   bool                                                         virtual_buffers       = true;
   unsigned                                                     virtual_buffer_fanout = 16;  // synth.max_fanout
   std::shared_ptr<const std::map<std::string, Virtual_buffer>> virtual_buffer_trees;
@@ -607,6 +632,7 @@ struct Result {
   std::string                                      qor;
   std::string                                      fp_auto;  // fp=auto decision (JSON); empty otherwise
   physical::Floorplan                              floorplan;
+  std::shared_ptr<const Satlegalize_route_grid>      hold_pin_access;
   Prects_library                                   prects;
   // Selected GP measurement, before macro snapping. Resynthesis can harvest
   // this without analyzing provisional cells after macro-only legalization.
@@ -632,6 +658,7 @@ Options      final_cell_options(const Options& options);
 void         check_placed_legality(const Result& result, const Options& options);
 // Independent physical check against the LEF/DEF model, after DBU rounding.
 // channel_x/y (microns, rounded up to the manufacturing grid) is the minimum clear spacing between non-CORE bodies.
+std::pair<int64_t,int64_t> placement_cell_halo(const Options&,const physical::Site&,int64_t dbu);
 void         check_legality(const physical::Technology& tech, const physical::Floorplan& fp, double halo_x = 0, double halo_y = 0,
                             double channel_x = 0, double channel_y = 0);
 void         check_legality(const physical::Technology& tech, const physical::Floorplan& fp, const Options& options);
