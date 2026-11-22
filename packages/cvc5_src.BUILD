@@ -1,6 +1,6 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 # Offline source build: dependency archives are pinned by cvc5_repo.bzl.
-load("@LIVEHD_INPUTS@", "cvc5_header", "cvc5_platform_variables", "cvc5_python")
+load("@LIVEHD_INPUTS@", "CVC5_MACHO_TOOLS", "cvc5_header", "cvc5_macho_archive", "cvc5_platform_variables", "cvc5_python")
 load("@rules_cc//cc:defs.bzl", "cc_import", "cc_library")
 load("@rules_foreign_cc//foreign_cc:defs.bzl", "cmake")
 cvc5_header(name = "gmp_header", library = "@gmp//:gmp", basename = "gmp.h")
@@ -69,82 +69,35 @@ filegroup(name = "installed_headers", srcs = [":build"], output_group = "include
 cc_library(name = "sat_bridge", srcs = ["livehd_sat_bridge.cpp"], hdrs = glob(["satheaders/cadical/src/*.hpp", "satheaders/cms/src/*.h"]))
 filegroup(name = "sat_bridge_archive", srcs = [":sat_bridge"], output_group = "archive")
 genrule(name = "combined", toolchains = [":platform_variables"], srcs = [':sat_bridge_archive', ':libcvc5.a', ':libcadical.a', ':libpicpoly.a', ':libpicpolyxx.a', ':libkissat.a', ':libcryptominisat5.a'], outs = ["libcvc5_combined.a"],
+    tools = CVC5_MACHO_TOOLS,
     cmd = """
 set -e
 work=$$(mktemp -d "$(@D)/cvc5-XXXXXX")
 trap 'rm -rf "$$work"' EXIT
-if [ "$$(uname)" = "Darwin" ]; then
-  # Mach-O C symbols include a leading underscore. The C++ wildcards below
-  # match their mangled names, but bare C API patterns must name that prefix.
-  clang -nostdlib -mmacosx-version-min=$(CVC5_MACOS_MINIMUM_OS) -Wl,-r -Wl,-all_load \
-    -Wl,-unexported_symbol,'*CaDiCaL*' \
-    -Wl,-unexported_symbol,'*ccadical*' \
-    -Wl,-unexported_symbol,'*Reap*' \
-    -Wl,-unexported_symbol,'_ipasir_*' \
-    -Wl,-unexported_symbol,'_kissat_*' \
-    -Wl,-unexported_symbol,'_kitten_*' \
-    -Wl,-unexported_symbol,'_new_learned_klause' \
-    -Wl,-unexported_symbol,'*CMSat*' \
-    -Wl,-unexported_symbol,'_cmsat_*' \
-    -o "$$work/combined.o" $(SRCS)
-  rm -f $@
-  ar rcs $@ "$$work/combined.o"
-else
+""" + select({
+        "@platforms//os:macos": cvc5_macho_archive("lhdcvc5priv_"),
+        "//conditions:default": """
   ld -r -o "$$work/combined.o" --whole-archive $(SRCS) --no-whole-archive
   # Collect the CaDiCaL symbols to privatize. Start with every strong global
-  # (T/D/B/R) that libcadical.a defines, by name. ld -r has already bound cvc5's
+  # (T/D/B/R or tentative C) that libcadical.a defines. ld -r has bound cvc5's
   # internal references within combined.o, so privatizing these keeps cvc5's own
   # CaDiCaL intact while taking it out of the global namespace it shares with abc.
-  nm --defined-only --extern-only $(location :libcadical.a) \
-    | awk '$$2 ~ /^[TDBR]$$/ {print $$3}' | sort -u > "$$work/cad.syms"
   # ABC also bundles Kissat/Kitten, including helpers without a kissat_ prefix.
-  nm --defined-only --extern-only $(location :libkissat.a) \
-    | awk '$$2 ~ /^[TDBR]$$/ {print $$3}' >> "$$work/cad.syms"
-  # The libcadical.a sweep above is NOT enough: cvc5's own code (the
-  # `cvc5::internal::prop::cadical` CadicalPropagator/tracers) #includes
-  # CaDiCaL headers, so it instantiates CaDiCaL templates (heap<>, rsort<>),
-  # emits CaDiCaL vtables/typeinfo (StatTracer, ClauseCopier/Writer/Counter,
-  # ...) and the Reap class + ipasir_/ccadical C API DIRECTLY INTO libcvc5.a,
-  # NOT libcadical.a. These are WEAK (COMDAT) symbols, so they do not trip a
-  # duplicate-symbol link error -- instead they silently COMDAT-fold with
-  # abc's own vendored CaDiCaL (its `class Reap` is also global-namespace and
-  # it uses `namespace CaDiCaL`). The linker keeps ONE arbitrary copy; cvc5's
-  # solver then dispatches through abc's incompatible CaDiCaL vtables/heaps and
-  # corrupts memory -> SIGSEGV deep in inprocessing (vivify/subsume/elim) on the
-  # larger SAT instances (e.g. BMC of memory equivalence). macOS's
-  # `-unexported_symbol '*CaDiCaL*'` wildcard already hides this whole surface,
-  # so it was Mac-green / Linux-crash. Localize the same surface here: every
-  # symbol whose mangled name carries the CaDiCaL `7CaDiCaL` namespace tag
-  # (covers `_ZN7CaDiCaL...`, vtables `_ZTVN7CaDiCaL`, typeinfo `_ZTIN/_ZTSN`,
-  # thunks, and cvc5's own cadical glue -- all cvc5-private after `ld -r`),
-  # plus the global-namespace Reap class and the ipasir_/ccadical C APIs.
-  # Include LOCAL symbols too: destructor COMDAT signatures such as
-  # _ZN7CaDiCaL7WrapperD5Ev are local NOTYPE symbols (nm type 'n'). Renaming
-  # only the exported D0/D1/D2 functions leaves that group signature shared
-  # with abc, so the linker can discard cvc5's renamed destructor sections.
+  nm --defined-only --extern-only $(location :libcadical.a) $(location :libkissat.a) \
+    | awk '$$2 ~ /^[TDBRC]$$/ {print $$3}' > "$$work/cad.syms"
+  # Include solver templates emitted by libcvc5 and local COMDAT signatures
+  # (e.g. destructor D5 symbols), so ELF cannot fold them with ABC's groups.
   nm --defined-only "$$work/combined.o" \
     | awk '{print $$3}' \
-    | grep -E 'CaDiCaL|4Reap|^ipasir_|^ccadical|^kissat_|CMSat|^cmsat_' >> "$$work/cad.syms"
+    | grep -E 'CaDiCaL|4Reap|^ipasir_|^ccadical|^kissat_|^kitten_|^new_learned_klause$$|CMSat|^cmsat_' >> "$$work/cad.syms"
   sort -u "$$work/cad.syms" -o "$$work/cad.syms"
-  # RENAME, don't just localize: CaDiCaL's WEAK template/vtable/typeinfo symbols
-  # live in ELF COMDAT groups keyed by the symbol NAME. objcopy --localize-symbols
-  # changes a symbol's binding but NOT its name, so cvc5's group keeps the same
-  # signature as abc's identically-named group; lld then discards one of the two
-  # groups and cvc5's (now local) relocations dangle into the discarded section
-  # ("relocation refers to a symbol in a discarded section"). Renaming each
-  # CaDiCaL symbol to a cvc5-private name also renames its COMDAT group
-  # signature, so cvc5's groups never collide with abc's -- both copies survive
-  # and each side binds to its own CaDiCaL. objcopy rewrites the matching
-  # relocations (which reference symbols by index), so combined.o stays
-  # self-consistent. (The macOS branch above instead -unexported_symbol's them:
-  # Mach-O has no COMDAT-group discard, so localizing is sufficient there.)
   awk '{print $$1, "lhdcvc5priv_" $$1}' "$$work/cad.syms" > "$$work/cad.redef"
   objcopy --redefine-syms="$$work/cad.redef" \
     "$$work/combined.o" "$$work/local.o"
   rm -f $@
   ar rcs $@ "$$work/local.o"
-fi
 """,
+    }),
 )
 cc_import(name = "combined_import", static_library = "libcvc5_combined.a")
 cc_library(name = "cvc5_headers", defines = ["LIVEHD_CVC5_SOURCE_BUILD"], hdrs = [":installed_headers"], includes = ["build/include"], visibility = ["//visibility:public"])
@@ -161,31 +114,24 @@ genrule(
     srcs = [":sat_bridge_archive", ":libcadical.a", ":libcryptominisat5.a"],
     outs = ["liblivehd_sat.a"],
     toolchains = [":platform_variables"],
+    tools = CVC5_MACHO_TOOLS,
     cmd = """
 set -e
 work=$$(mktemp -d "$(@D)/sat-XXXXXX")
 trap 'rm -rf "$$work"' EXIT
-if [ "$$(uname)" = "Darwin" ]; then
-  clang -nostdlib -mmacosx-version-min=$(CVC5_MACOS_MINIMUM_OS) -Wl,-r -Wl,-all_load \
-    -Wl,-unexported_symbol,'*CaDiCaL*' \
-    -Wl,-unexported_symbol,'*ccadical*' \
-    -Wl,-unexported_symbol,'*Reap*' \
-    -Wl,-unexported_symbol,'_ipasir_*' \
-    -Wl,-unexported_symbol,'*CMSat*' \
-    -Wl,-unexported_symbol,'_cmsat_*' \
-    -o "$$work/combined.o" $(SRCS)
-  ar rcs $@ "$$work/combined.o"
-else
+""" + select({
+        "@platforms//os:macos": cvc5_macho_archive("lhdsatpriv_"),
+        "//conditions:default": """
   ld -r -o "$$work/combined.o" --whole-archive $(SRCS) --no-whole-archive
   nm --defined-only --extern-only $(location :libcadical.a) $(location :libcryptominisat5.a) \
-    | awk '$$2 ~ /^[TDBR]$$/ {print $$3}' > "$$work/private.syms"
+    | awk '$$2 ~ /^[TDBRC]$$/ {print $$3}' > "$$work/private.syms"
   nm --defined-only "$$work/combined.o" | awk '{print $$3}' \
     | grep -E 'CaDiCaL|4Reap|^ipasir_|^ccadical|CMSat|^cmsat_' >> "$$work/private.syms"
   sort -u "$$work/private.syms" | awk '{print $$1, "lhdsatpriv_" $$1}' > "$$work/private.redef"
   objcopy --redefine-syms="$$work/private.redef" "$$work/combined.o" "$$work/private.o"
   ar rcs $@ "$$work/private.o"
-fi
 """,
+    }),
 )
 cc_import(name = "sat_standalone_import", static_library = "liblivehd_sat.a")
 cc_library(name = "sat_standalone", deps = [":sat_standalone_import"], linkopts = ["-lpthread", "-lm"], visibility = ["//visibility:public"])

@@ -7,15 +7,22 @@
 
 #include <cvc5/cvc5.h>
 
+#include <memory>
+
 #include "gtest/gtest.h"
 #include "sat/cadical/ccadical.h"
+#include "sat/cadical/ipasir.h"
+#include "sat/kissat/kissat.h"
 
 using namespace cvc5;
 
 // Referencing ABC's C API pulls its CaDiCaL objects into the same binary as
 // cvc5. A shared destructor COMDAT signature must not discard either copy.
 TEST(Cvc5Link, IndependentCadicalCopies) {
-  CCaDiCaL *abc = ccadical_init();
+  // ABC's IPASIR wrapper delegates to ABC's ccadical API. The prebuilt
+  // cvc5 archive used to satisfy the IPASIR references under one link order.
+  EXPECT_STREQ(ipasir_signature(), ccadical_signature());
+  CCaDiCaL* abc = ccadical_init();
   ASSERT_NE(abc, nullptr);
   ccadical_add(abc, 1);
   ccadical_add(abc, 0);
@@ -88,6 +95,10 @@ TEST(Cvc5Link, ArraySelectStore) {
 
 #ifdef LIVEHD_CVC5_SOURCE_BUILD
 TEST(Cvc5Link, SourceBuildOptionalBackends) {
+  std::unique_ptr<kissat, decltype(&kissat_release)> abc(kissat_init(), kissat_release);
+  ASSERT_NE(abc, nullptr);
+  kissat_add(abc.get(), 1);
+  kissat_add(abc.get(), 0);
   for (const auto backend : {"kissat", "cryptominisat"}) {
     TermManager tm;
     Solver      solver(tm);
@@ -107,5 +118,6 @@ TEST(Cvc5Link, SourceBuildOptionalBackends) {
     contradiction.assertFormula(tm.mkTerm(Kind::EQUAL, {tm.mkTerm(Kind::BITVECTOR_MULT, {x, y}), tm.mkBitVector(8, 15)}));
     EXPECT_TRUE(contradiction.checkSat().isUnsat()) << backend;
   }
+  EXPECT_EQ(kissat_solve(abc.get()), 10);
 }
 #endif

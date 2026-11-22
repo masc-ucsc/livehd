@@ -39,3 +39,29 @@ cvc5_platform_variables = rule(
     },
     fragments = ["apple"],
 )
+
+CVC5_MACHO_TOOLS = select({
+    "@platforms//os:macos": ["@llvm-project//llvm:llvm-objcopy"],
+    "//conditions:default": [],
+})
+
+def cvc5_macho_archive(prefix):
+    # Renaming also covers weak definitions and tentative C globals. Simply
+    # hiding the solver symbols in ld -r left prebuilt CaDiCaL subject to the
+    # final archive order when ABC was linked into the same executable.
+    return """
+clang -nostdlib -mmacosx-version-min=$(CVC5_MACOS_MINIMUM_OS) -Wl,-r,-all_load \\
+  -Wl,-unexported_symbol,'*CaDiCaL*' -Wl,-unexported_symbol,'*ccadical*' \\
+  -Wl,-unexported_symbol,'*Reap*' -Wl,-unexported_symbol,'_ipasir_*' \\
+  -Wl,-unexported_symbol,'_kissat_*' -Wl,-unexported_symbol,'_kitten_*' \\
+  -Wl,-unexported_symbol,'_new_learned_klause*' \\
+  -Wl,-unexported_symbol,'*CMSat*' -Wl,-unexported_symbol,'_cmsat_*' \\
+  -o "$$work/combined.o" $(SRCS)
+nm -P "$$work/combined.o" \\
+  | awk '$$1 ~ /CaDiCaL|ccadical|Reap|^_ipasir_|^_kissat_|^_kitten_|^_new_learned_klause|CMSat|^_cmsat_/ && $$2 != "U" {print $$1, "%s" $$1}' \\
+  | sort -u > "$$work/private.syms"
+$(execpath @llvm-project//llvm:llvm-objcopy) --redefine-syms="$$work/private.syms" \\
+  "$$work/combined.o" "$$work/private.o"
+rm -f "$@"
+ar rcs "$@" "$$work/private.o"
+""" % prefix
