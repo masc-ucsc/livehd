@@ -89,6 +89,8 @@ MODULES=(
   Compiler/ResidualOpt
   # vc's incremental step (ResidualInc imports the optimizer's proof module for its lemmas)
   Compiler/ResidualOptSound Compiler/ResidualInc
+  # the same step, event-driven (ResidualEv: only the readers of changed slots are visited)
+  Compiler/ResidualEv
   Compiler/CompileOpDefs Compiler/CompileGraphDefs Compiler/CompileDesignDefs
   # checkpoints (lhdcert-ckpt v1: drivers/lhd_ckpt, and the ckpt options of cert_trace and
   # dcert2_memroute): the start states, the format, its proofs, the FP state conversion

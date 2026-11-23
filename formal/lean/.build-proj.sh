@@ -56,6 +56,8 @@ MODULES=(
   Compiler/ResidualOptSound
   # vc's incremental step (reuse last step's unchanged values) and its proof.
   Compiler/ResidualInc
+  # the same step, event-driven: only the readers of changed slots are visited, and its proof.
+  Compiler/ResidualEv
   Compiler/CompileOpDefs
   Compiler/CompileGraphDefs
   Compiler/CompileDesignDefs
