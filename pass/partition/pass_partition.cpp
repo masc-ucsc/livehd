@@ -700,17 +700,7 @@ void Partitioner::carry_node_attrs(const hhds::Node_class& orig, const hhds::Nod
   admit("carry_node_attrs");
   gu::carry_node_attrs(orig, neo, {.colors = false, .placement = false, .analysis = false});
   gu::Color_group::copy(orig, neo);
-  if (auto a = orig.attr(hhds::attrs::srcid); a.has() && a.get() != 0) {
-    // Import into the output LIBRARY's shared srcmap, never the body's own
-    // locator: every body chains to the library base (hhds bind_library), so the
-    // id resolves from any region module, while a per-body import re-copies the
-    // per-FILE metadata (line-offset tables) into every one of the tens of
-    // thousands of region bodies -- measured at ~9 KB/node retained on XSCore,
-    // the std::bad_alloc. Ids are content-hashed, so the shared import dedups
-    // across bodies and defs for free.
-    auto newid = dst_lib->source_map().import_from(g_->source_locator(), a.get());
-    neo.attr(hhds::attrs::srcid).set(newid);
-  }
+  gu::carry_srcid(orig, neo, g_, dst_lib);
   // Driver pin 0 rides with the NODE, not with the edge tables: a single-output
   // cell whose output has zero fanout (a dead mux the input recipe's cprop
   // bypassed but did not delete) never appears as an edge driver, so the

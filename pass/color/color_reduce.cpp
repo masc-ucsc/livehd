@@ -19,7 +19,6 @@
 #include "diag.hpp"
 #include "hash_util.hpp"
 #include "hhds/attrs/name.hpp"
-#include "hhds/attrs/srcid.hpp"
 #include "hhds/hash_mix.hpp"
 #include "node_util.hpp"
 
@@ -1067,9 +1066,7 @@ std::shared_ptr<hhds::GraphIO> build_pattern_def(hhds::GraphLibrary* lib, const 
                           .synth_policy     = false,
                           .aggregate_origin = false,
                           .matches          = false});
-    if (auto a = n.attr(hhds::attrs::srcid); a.has() && a.get() != 0) {
-      neo.attr(hhds::attrs::srcid).set(body->source_locator().import_from(rep.g->source_locator(), a.get()));
-    }
+    gu::carry_srcid(n, neo, rep.g->source_locator(), body->source_locator());
     node_map.emplace(n, neo);
     ++st.nodes_created;
   }

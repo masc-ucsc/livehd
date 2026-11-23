@@ -215,7 +215,8 @@ TEST_F(FlattenAdmission, AnonymousScopeStaysWhenTheLogicalNameIsTaken) {
 TEST_F(FlattenAdmission, SynthesisColorGroupsAreScopedPerPhysicalInstance) {
   for (auto node : child->body().nodes()) {
     if (!gu::is_builtin_node(node)) {
-      livehd::graph_util::Color_group::set(node, std::string("unit:color:1"));
+      gu::Color_group::set(node, "unit:color:1");
+      gu::Placement_block::set(node, "datapath");
     }
   }
   unsigned index = 0;
@@ -230,9 +231,12 @@ TEST_F(FlattenAdmission, SynthesisColorGroupsAreScopedPerPhysicalInstance) {
   std::map<std::string, unsigned> groups;
   for (auto node : flat->body().nodes()) {
     if (livehd::graph_util::Color_group::has(node)) {
-      ++groups[std::string(livehd::graph_util::Color_group::text(node))];
+      ++groups[std::string(gu::Color_group::text(node))];
+      EXPECT_EQ(gu::Placement_block::text(node), "datapath");
     }
   }
+  ASSERT_NE(gu::Placement_block::table_of(flat.get()), nullptr);
+  EXPECT_EQ(gu::Placement_block::table_of(flat.get())->size(), 1u);
   EXPECT_EQ(groups.size(), 2);
   EXPECT_EQ(groups["left.unit:color:1"], 2);
   EXPECT_EQ(groups["right.unit:color:1"], 2);

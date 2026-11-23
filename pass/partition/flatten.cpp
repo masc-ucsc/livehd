@@ -14,7 +14,6 @@
 #include "cell.hpp"
 #include "diag.hpp"
 #include "hhds/attrs/name.hpp"
-#include "hhds/attrs/srcid.hpp"
 #include "io_decls.hpp"
 #include "node_util.hpp"
 #include "shared_text.hpp"
@@ -81,9 +80,8 @@ struct Ictx {
   hhds::Node_class                                             inst;              // the Sub node in parent->src (invalid for top)
   std::string                                                  prefix;            // dotted instance path ("" for top)
   std::string                                                  inherited_color_group;
-  // The flat graph's id of each color group / placement block of `src` (index: the id in `src` minus one; 0: not
-  // looked up yet), and of the inherited group. A context clones one def, so each text is scoped and looked up once.
-  std::vector<uint32_t>                                        group_ids, block_ids;
+  // Color groups are scoped to this instance path. Placement block names are shared across instances.
+  std::vector<uint32_t>                                        group_ids;
   uint32_t                                                     inherited_group_id = 0;
   uint32_t                                                     synth_region_id = 0;
   bool                                                         preroute_excluded = false;
@@ -148,6 +146,7 @@ private:
   // The flat graph's shared texts (graph/shared_text.hpp): every group and block text is stored once.
   std::optional<gu::Color_group::Writer>     groups_;
   std::optional<gu::Placement_block::Writer> blocks_;
+  std::optional<gu::Placement_block::Translator> block_ids_;
   std::deque<Ictx>                    arena_;  // stable pointers
   bool                                failed_           = false;
   bool                                preserve_modules_ = false;
@@ -318,14 +317,7 @@ void Flattener::carry_node_attrs(Ictx* ctx, const hhds::Node_class& orig, const 
   if (ctx->preroute_excluded || orig.attr(livehd::attrs::preroute_exclude).has()) {
     neo.attr(livehd::attrs::preroute_exclude).set();
   }
-  if (const auto source = gu::Color_group::id_of(orig); source != 0) {
-    if (ctx->group_ids.size() < source) {
-      ctx->group_ids.resize(source, 0);
-    }
-    auto& id = ctx->group_ids[source - 1];
-    if (id == 0) {
-      id = groups_->id(ctx->prefix + std::string(gu::Color_group::text(orig)));
-    }
+  if (const auto id = groups_->translate(orig, ctx->prefix, ctx->group_ids); id != 0) {
     groups_->set(neo, id);
   } else if (!ctx->inherited_color_group.empty()) {
     if (ctx->inherited_group_id == 0) {
@@ -349,30 +341,13 @@ void Flattener::carry_node_attrs(Ictx* ctx, const hhds::Node_class& orig, const 
   if (physical_names_) {
     // Keep the physical edit barrier and state correspondence across ECO copies.
     gu::carry_attr<livehd::attrs::place_t>(orig, neo);
-    if (const auto source = gu::Placement_block::id_of(orig); source != 0) {
-      if (ctx->block_ids.size() < source) {
-        ctx->block_ids.resize(source, 0);
-      }
-      auto& id = ctx->block_ids[source - 1];
-      if (id == 0) {
-        id = blocks_->id(gu::Placement_block::text(orig));
-      }
-      blocks_->set(neo, id);
-    }
-    if (auto a = orig.attr(livehd::attrs::synth_region_id); a.has()) neo.attr(livehd::attrs::synth_region_id).set(a.get());
+    block_ids_->copy(orig, neo);
+    gu::carry_attr<livehd::attrs::synth_region_id_t>(orig, neo);
   }
   if (auto origin = orig.attr(livehd::attrs::aggregate_origin); origin.has()) {
     neo.attr(livehd::attrs::aggregate_origin).set(ctx->prefix + origin.get());
   }
-  if (auto a = orig.attr(hhds::attrs::srcid); a.has() && a.get() != 0) {
-    // Into the owning library's shared srcmap, not the flat body's own locator:
-    // the flat def is a deleted-after-use scratch, and a per-body import would
-    // copy every source file's line-offset table into it (same shape as the
-    // pass_partition carry_node_attrs blowup). The flat body resolves the id
-    // through its library base chain.
-    auto newid = lib_->source_map().import_from(ctx->src->source_locator(), a.get());
-    neo.attr(hhds::attrs::srcid).set(newid);
-  }
+  gu::carry_srcid(orig, neo, ctx->src, lib_);
   // pass.abc's report identity is graph-local in the mapped library. Carry its
   // compact key through this transient physical flatten so OpenTimer can fold
   // end-to-end arrivals back into (definition,color) rows without storing a
@@ -746,6 +721,7 @@ std::shared_ptr<hhds::Graph> Flattener::run(std::string_view flat_name) {
   flat_     = flat.get();
   groups_.emplace(flat_);
   blocks_.emplace(flat_);
+  block_ids_.emplace(*blocks_);
 
   // Stamp bits/sign on the materialized flat input pins (the decl is not
   // auto-propagated to pin attrs; every downstream reader sizes from the pin).

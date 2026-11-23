@@ -13,7 +13,7 @@
 // count to keep in step by hand.
 //
 // ROLE. `livehd::attrs::attr_kind<Tag>` classifies each tag as node /
-// driver_pin / edge / sink / any_pin. Node-kind tags ride the NODE, everything
+// driver_pin / edge / any_pin. Node-kind tags ride the NODE, everything
 // else rides a PIN, and the two carriers below are that partition, decided at
 // compile time. Stamping a pin attr on the wrong role silently aliases the other
 // role's slot (the per-pin key folds the driver/sink bit), which is exactly what
@@ -94,27 +94,17 @@ struct Carry_policy {
 
   template <class Tag>
   [[nodiscard]] bool allows() const {
-    using namespace livehd::attrs;
-    if constexpr (std::is_same_v<Tag, pin_name_t>) {
-      return names;
-    } else if constexpr (std::is_same_v<Tag, color_t>) {
-      return colors;
-    } else if constexpr (std::is_same_v<Tag, place_t> || std::is_same_v<Tag, placement_rc_t> || std::is_same_v<Tag, pin_place_t>
-                         || std::is_same_v<Tag, place_weight_t>) {
-      return placement;
-    } else if constexpr (std::is_same_v<Tag, critical_t> || std::is_same_v<Tag, sta_t> || std::is_same_v<Tag, ctrl_members_t>
-                         || std::is_same_v<Tag, ctrl_stats_t> || std::is_same_v<Tag, coloring_info_t>
-                         || std::is_same_v<Tag, region_nesting_t> || std::is_same_v<Tag, comb_reach_t>
-                         || std::is_same_v<Tag, synth_region_t> || std::is_same_v<Tag, synth_region_id_t>) {
-      return analysis;
-    } else if constexpr (std::is_same_v<Tag, synth_policy_t>) {
-      return synth_policy;
-    } else if constexpr (std::is_same_v<Tag, aggregate_origin_t>) {
-      return aggregate_origin;
-    } else if constexpr (std::is_same_v<Tag, match_t>) {
-      return matches;
-    } else {
-      return true;
+    using Group = livehd::attrs::Rebuild_group;
+    switch (livehd::attrs::Attr_traits<Tag>::rebuild) {
+      case Group::always          : return true;
+      case Group::names           : return names;
+      case Group::colors          : return colors;
+      case Group::placement       : return placement;
+      case Group::analysis        : return analysis;
+      case Group::synth_policy    : return synth_policy;
+      case Group::aggregate_origin: return aggregate_origin;
+      case Group::matches         : return matches;
+      case Group::skip_raw        : return false;
     }
   }
 };
@@ -151,34 +141,35 @@ inline void carry_node_attrs(const Src& from, const Dst& to, const Carry_policy&
 // the per-pin key folds the driver/sink bit, so a crossed call aliases slots.
 template <class Src, class Dst>
 inline void carry_pin_attrs(const Src& from, const Dst& to, const Carry_policy& policy = {}) {
-#define LIVEHD_ATTR_CARRY_PIN(tag)                                           \
-  if constexpr (attr_carry_detail::is_pin_carried<livehd::attrs::tag##_t>) { \
-    if (policy.allows<livehd::attrs::tag##_t>()) {                           \
-      carry_attr<livehd::attrs::tag##_t>(from, to);                          \
-    }                                                                        \
+#define LIVEHD_ATTR_CARRY_PIN(tag)                                                                                             \
+  if constexpr (attr_carry_detail::is_pin_carried<livehd::attrs::tag##_t>) {                                                   \
+    using Tag = livehd::attrs::tag##_t;                                                                                        \
+    if (policy.allows<Tag>() && (livehd::attrs::attr_kind<Tag> != livehd::attrs::Attr_kind::driver_pin || from.is_driver())) { \
+      carry_attr<Tag>(from, to);                                                                                               \
+    }                                                                                                                          \
   }
   LIVEHD_FOR_EACH_ATTR_TAG(LIVEHD_ATTR_CARRY_PIN)
 #undef LIVEHD_ATTR_CARRY_PIN
 }
 
-// Source provenance. A source id is minted by a Source_locator; `to` must
-// resolve it through ITS graph's locator chain, so the id is re-imported into
-// `dst_lib`'s map from `src_graph`'s locator -- which, within one library,
-// re-mints an unsaved per-graph id into the shared base map (hhds allows that
-// only single-threaded, which is how every rebuild here runs). Both null:
-// the caller vouches that the id is already resolvable from `to` (same graph,
-// or a saved library), so it is copied verbatim.
+// Source ids are local to a locator chain. Import into the destination
+// library's shared map for region bodies (one line-offset table per file), or
+// into the destination graph's locator when the graph owns the copied spans.
+inline void carry_srcid(const hhds::Node_class& from, const hhds::Node_class& to, const hhds::Source_locator& source,
+                        hhds::Source_locator& destination) {
+  if (auto id = from.attr(hhds::attrs::srcid); id.has() && id.get() != 0) {
+    to.attr(hhds::attrs::srcid).set(destination.import_from(source, id.get()));
+  }
+}
+
 inline void carry_srcid(const hhds::Node_class& from, const hhds::Node_class& to, hhds::Graph* src_graph = nullptr,
                         hhds::GraphLibrary* dst_lib = nullptr) {
-  auto a = from.attr(hhds::attrs::srcid);
-  if (!a.has() || a.get() == 0) {
-    return;
+  if (src_graph && dst_lib) {
+    carry_srcid(from, to, src_graph->source_locator(), dst_lib->source_map());
+  } else if (auto id = from.attr(hhds::attrs::srcid); id.has() && id.get() != 0) {
+    // A same-graph or saved-library copy already resolves this id.
+    to.attr(hhds::attrs::srcid).set(id.get());
   }
-  if (dst_lib == nullptr || src_graph == nullptr) {
-    to.attr(hhds::attrs::srcid).set(a.get());
-    return;
-  }
-  to.attr(hhds::attrs::srcid).set(dst_lib->source_map().import_from(src_graph->source_locator(), a.get()));
 }
 
 }  // namespace livehd::graph_util

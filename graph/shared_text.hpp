@@ -113,6 +113,23 @@ struct Shared_text {
       }
       return append(text);
     }
+    // Cache belongs to one source graph and one prefix. A scoped flatten
+    // already has that context; a multi-graph Translator selects it below.
+    [[nodiscard]] uint32_t translate(const hhds::Node_class& from, const std::string& prefix, std::vector<uint32_t>& ids) {
+      const auto source = id_of(from);
+      if (source == 0) {
+        return 0;
+      }
+      if (ids.size() < source) {
+        ids.resize(source);
+      }
+      auto& translated = ids[source - 1];
+      if (translated == 0) {
+        const auto value = Shared_text::text(from);
+        translated       = prefix.empty() ? id(value) : id(prefix + std::string(value));
+      }
+      return translated;
+    }
     [[nodiscard]] std::string_view text(uint32_t id) const {
       return id == 0 ? std::string_view{} : std::string_view(texts_.at(id - 1));
     }
@@ -153,19 +170,10 @@ struct Shared_text {
     Translator(Writer& to, std::string prefix = {}) : to_(to), prefix_(std::move(prefix)) {}
     // 0 when `from` has none.
     [[nodiscard]] uint32_t id(const hhds::Node_class& from) {
-      const auto source = id_of(from);
-      if (source == 0) {
+      if (!has(from)) {
         return 0;
       }
-      auto& entry = by_source_[from.get_graph()];
-      if (entry.size() < source) {
-        entry.resize(source, 0);
-      }
-      if (entry[source - 1] == 0) {
-        entry[source - 1]
-            = prefix_.empty() ? to_.id(Shared_text::text(from)) : to_.id(prefix_ + std::string(Shared_text::text(from)));
-      }
-      return entry[source - 1];
+      return to_.translate(from, prefix_, by_source_[from.get_graph()]);
     }
     void copy(const hhds::Node_class& from, const hhds::Node_class& to) {
       if (const auto translated = id(from); translated != 0) {

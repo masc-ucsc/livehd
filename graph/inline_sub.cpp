@@ -18,7 +18,6 @@
 #include "cell.hpp"
 #include "diag.hpp"
 #include "hhds/attrs/name.hpp"
-#include "hhds/attrs/srcid.hpp"
 #include "node_util.hpp"
 #include "sim_program.hpp"
 #include "synth_policy.hpp"
@@ -291,10 +290,7 @@ void Sub_inliner::carry_node_attrs(const hhds::Node_class& orig, const hhds::Nod
     std::replace(def.begin(), def.end(), '.', '_');  // one dot-free component (as cgen's flat module name)
     neo.attr(hhds::attrs::name).set(prefix_ + std::string{transparent_instance_prefix} + def);
   }
-  if (auto a = orig.attr(hhds::attrs::srcid); a.has() && a.get() != 0) {
-    auto newid = parent_->source_locator().import_from(child_->source_locator(), a.get());
-    neo.attr(hhds::attrs::srcid).set(newid);
-  }
+  carry_srcid(orig, neo, child_->source_locator(), parent_->source_locator());
   if (inherit_color_ && has_color(inst_)) {
     set_color(neo, color_of(inst_));
   }

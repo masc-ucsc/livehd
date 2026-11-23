@@ -42,7 +42,6 @@ inline constexpr synth_policy_t synth_policy{};
 // the setters catch that:
 //   node        - per node; never set through a pin setter (compile error if so)
 //   driver_pin  - per DRIVER pin (the signal source): bits, signed, … (assert is_driver)
-//   sink        - per SINK pin (arrival-style)                         (assert is_sink)
 //   edge        - shared driver<->sink across the net (the wire name); read on
 //                 either end via the shared slot, so no driver/sink restriction
 //   any_pin     - any pin, no driver/sink restriction (IO-port offsets, mixed)
@@ -534,210 +533,91 @@ struct pending_time_t {
 };
 inline constexpr pending_time_t pending_time{};
 
-// Pin-role of each attribute (see Attr_kind). The graph_util pin setters consult
-// this to assert the right pin role at the call site. Every attribute is listed
-// explicitly so a new one that forgets its kind is a visible omission (the
-// default is the most permissive any_pin). `match` is BOTH a node and a driver-pin
-// attribute; the entry classifies its PIN overload (driver), and the node overload
-// (set_match(node)) takes a Node so it never reaches a pin-role assertion.
+// Registration, pin-role checks, and rebuilds consume this same table. Raw
+// copies skip physical routes (invalidated by rewiring) and graph-local text
+// IDs and tables (translated through Shared_text). Hierarchical color requires
+// occurrence context. The match entry describes its pin overload; it can also
+// be attached to a node.
+enum class Rebuild_group { always, names, colors, placement, analysis, synth_policy, aggregate_origin, matches, skip_raw };
+
+#define LIVEHD_ATTR_REGISTRY(APPLY, X)               \
+  APPLY(X, route_records_v1, driver_pin, skip_raw)   \
+  APPLY(X, route_strings_v1, driver_pin, skip_raw)   \
+  APPLY(X, placement_rc, node, placement)            \
+  APPLY(X, placement_block_id, node, skip_raw)       \
+  APPLY(X, placement_block_names, node, skip_raw)    \
+  APPLY(X, physical_open_inputs, node, always)       \
+  APPLY(X, pin_place, any_pin, placement)            \
+  APPLY(X, place_weight, driver_pin, placement)      \
+  APPLY(X, bits, driver_pin, always)                 \
+  APPLY(X, pin_offset, any_pin, always)              \
+  APPLY(X, pin_name, edge, names)                    \
+  APPLY(X, pin_delay, driver_pin, always)            \
+  APPLY(X, signal_roles, driver_pin, always)         \
+  APPLY(X, pin_signed, driver_pin, always)           \
+  APPLY(X, color, node, colors)                      \
+  APPLY(X, critical, node, analysis)                 \
+  APPLY(X, preroute_exclude, node, always)           \
+  APPLY(X, preroute_net_exclude, driver_pin, always) \
+  APPLY(X, sta, node, analysis)                      \
+  APPLY(X, synth_policy, node, synth_policy)         \
+  APPLY(X, ctrl_members, node, analysis)             \
+  APPLY(X, ctrl_stats, node, analysis)               \
+  APPLY(X, synth_region, node, analysis)             \
+  APPLY(X, synth_region_id, node, analysis)          \
+  APPLY(X, synth_color_group_id, node, skip_raw)     \
+  APPLY(X, synth_color_group_names, node, skip_raw)  \
+  APPLY(X, resynth, node, always)                    \
+  APPLY(X, pcrs_clock_driver, driver_pin, always)    \
+  APPLY(X, pcrs_clock_buffer, node, always)          \
+  APPLY(X, native_comb_boundary, node, always)       \
+  APPLY(X, user_cell, node, always)                  \
+  APPLY(X, hier_color, node, always)                 \
+  APPLY(X, coloring_info, node, analysis)            \
+  APPLY(X, region_nesting, node, analysis)           \
+  APPLY(X, simulation_init, node, always)            \
+  APPLY(X, legalize_inlined, node, always)           \
+  APPLY(X, comb_reach, node, analysis)               \
+  APPLY(X, match, driver_pin, matches)               \
+  APPLY(X, proven, node, always)                     \
+  APPLY(X, runtime_check, node, always)              \
+  APPLY(X, mem_address_proven, node, always)         \
+  APPLY(X, pcrs_stage, node, always)                 \
+  APPLY(X, ware_module, node, always)                \
+  APPLY(X, specialization_origin, node, always)      \
+  APPLY(X, memory_module, node, always)              \
+  APPLY(X, memory_async_reset, node, always)         \
+  APPLY(X, aggregate_origin, node, aggregate_origin) \
+  APPLY(X, aggregate_source_index, node, always)     \
+  APPLY(X, aggregate_lane_ordinal, node, always)     \
+  APPLY(X, aggregate_bit_offset, node, always)       \
+  APPLY(X, aggregate_bit_width, node, always)        \
+  APPLY(X, aggregate_extent, node, always)           \
+  APPLY(X, place, node, placement)                   \
+  APPLY(X, lut, node, always)                        \
+  APPLY(X, time_range, any_pin, always)              \
+  APPLY(X, pending_time, any_pin, always)
+
+// Keep the tag-only view for registration and for callers enumerating tags.
+#define LIVEHD_ATTR_TAG_ONLY(X, tag, role, group) X(tag)
+#define LIVEHD_FOR_EACH_ATTR_TAG(X)               LIVEHD_ATTR_REGISTRY(LIVEHD_ATTR_TAG_ONLY, X)
+
 template <typename Tag>
-inline constexpr Attr_kind attr_kind = Attr_kind::any_pin;
+struct Attr_traits;
 
-template <>
-inline constexpr Attr_kind attr_kind<signal_roles_t> = Attr_kind::driver_pin;
-template <>
-inline constexpr Attr_kind attr_kind<bits_t> = Attr_kind::driver_pin;
-template <>
-inline constexpr Attr_kind attr_kind<pin_signed_t> = Attr_kind::driver_pin;
-template <>
-inline constexpr Attr_kind attr_kind<pin_delay_t> = Attr_kind::driver_pin;
-template <>
-inline constexpr Attr_kind attr_kind<match_t> = Attr_kind::driver_pin;
-template <>
-inline constexpr Attr_kind attr_kind<pin_name_t> = Attr_kind::edge;
-template <>
-inline constexpr Attr_kind attr_kind<pin_offset_t> = Attr_kind::any_pin;
-template <>
-inline constexpr Attr_kind attr_kind<time_range_t> = Attr_kind::any_pin;
-template <>
-inline constexpr Attr_kind attr_kind<pending_time_t> = Attr_kind::any_pin;
-template <>
-inline constexpr Attr_kind attr_kind<synth_policy_t> = Attr_kind::node;
-template <>
-inline constexpr Attr_kind attr_kind<color_t> = Attr_kind::node;
-template <>
-inline constexpr Attr_kind attr_kind<critical_t> = Attr_kind::node;
-template <>
-inline constexpr Attr_kind attr_kind<preroute_exclude_t> = Attr_kind::node;
-template <>
-inline constexpr Attr_kind attr_kind<preroute_net_exclude_t> = Attr_kind::driver_pin;
-template <>
-inline constexpr Attr_kind attr_kind<sta_t> = Attr_kind::node;
-template <>
-inline constexpr Attr_kind attr_kind<ctrl_members_t> = Attr_kind::node;
-template <>
-inline constexpr Attr_kind attr_kind<ctrl_stats_t> = Attr_kind::node;
-template <>
-inline constexpr Attr_kind attr_kind<synth_region_t> = Attr_kind::node;
-template <>
-inline constexpr Attr_kind attr_kind<synth_region_id_t> = Attr_kind::node;
-template <>
-inline constexpr Attr_kind attr_kind<synth_color_group_id_t> = Attr_kind::node;
-template <>
-inline constexpr Attr_kind attr_kind<synth_color_group_names_t> = Attr_kind::node;
-template <>
-inline constexpr Attr_kind attr_kind<resynth_t> = Attr_kind::node;
-template <>
-inline constexpr Attr_kind attr_kind<pcrs_clock_driver_t> = Attr_kind::driver_pin;
-template <>
-inline constexpr Attr_kind attr_kind<pcrs_clock_buffer_t> = Attr_kind::node;
-template <>
-inline constexpr Attr_kind attr_kind<native_comb_boundary_t> = Attr_kind::node;
-template <>
-inline constexpr Attr_kind attr_kind<user_cell_t> = Attr_kind::node;
-template <>
-inline constexpr Attr_kind attr_kind<place_t> = Attr_kind::node;
-template <>
-inline constexpr Attr_kind attr_kind<placement_rc_t> = Attr_kind::node;
-template <>
-inline constexpr Attr_kind attr_kind<placement_block_id_t> = Attr_kind::node;
-template <>
-inline constexpr Attr_kind attr_kind<placement_block_names_t> = Attr_kind::node;
-template <>
-inline constexpr Attr_kind attr_kind<physical_open_inputs_t> = Attr_kind::node;
-template <>
-inline constexpr Attr_kind attr_kind<pin_place_t> = Attr_kind::any_pin;
-template <>
-inline constexpr Attr_kind attr_kind<place_weight_t> = Attr_kind::driver_pin;
-template <>
-inline constexpr Attr_kind attr_kind<hier_color_t> = Attr_kind::node;
-template <>
-inline constexpr Attr_kind attr_kind<coloring_info_t> = Attr_kind::node;
-template <>
-inline constexpr Attr_kind attr_kind<region_nesting_t> = Attr_kind::node;
-template <>
-inline constexpr Attr_kind attr_kind<simulation_init_t> = Attr_kind::node;
-template <>
-inline constexpr Attr_kind attr_kind<legalize_inlined_t> = Attr_kind::node;
-template <>
-inline constexpr Attr_kind attr_kind<mem_address_proven_t> = Attr_kind::node;
-template <>
-inline constexpr Attr_kind attr_kind<pcrs_stage_t> = Attr_kind::node;
-template <>
-inline constexpr Attr_kind attr_kind<comb_reach_t> = Attr_kind::node;
-template <>
-inline constexpr Attr_kind attr_kind<proven_t> = Attr_kind::node;
-template <>
-inline constexpr Attr_kind attr_kind<runtime_check_t> = Attr_kind::node;
-template <>
-inline constexpr Attr_kind attr_kind<ware_module_t> = Attr_kind::node;
-template <>
-inline constexpr Attr_kind attr_kind<specialization_origin_t> = Attr_kind::node;
-template <>
-inline constexpr Attr_kind attr_kind<memory_module_t> = Attr_kind::node;
-template <>
-inline constexpr Attr_kind attr_kind<memory_async_reset_t> = Attr_kind::node;
-template <>
-inline constexpr Attr_kind attr_kind<aggregate_origin_t> = Attr_kind::node;
-template <>
-inline constexpr Attr_kind attr_kind<aggregate_source_index_t> = Attr_kind::node;
-template <>
-inline constexpr Attr_kind attr_kind<aggregate_lane_ordinal_t> = Attr_kind::node;
-template <>
-inline constexpr Attr_kind attr_kind<aggregate_bit_offset_t> = Attr_kind::node;
-template <>
-inline constexpr Attr_kind attr_kind<aggregate_bit_width_t> = Attr_kind::node;
-template <>
-inline constexpr Attr_kind attr_kind<aggregate_extent_t> = Attr_kind::node;
-template <>
-inline constexpr Attr_kind attr_kind<lut_t> = Attr_kind::node;
+#define LIVEHD_ATTR_TRAITS(_, tag, role, group)           \
+  template <>                                             \
+  struct Attr_traits<tag##_t> {                           \
+    static constexpr auto kind    = Attr_kind::role;      \
+    static constexpr auto rebuild = Rebuild_group::group; \
+  };
+LIVEHD_ATTR_REGISTRY(LIVEHD_ATTR_TRAITS, _)
+#undef LIVEHD_ATTR_TRAITS
 
-template <>
-inline constexpr Attr_kind attr_kind<route_records_v1_t> = Attr_kind::driver_pin;
-template <>
-inline constexpr Attr_kind attr_kind<route_strings_v1_t> = Attr_kind::driver_pin;
-
-// Derived physical routes cannot survive arbitrary connectivity reconstruction.
-// Persistence save/load preserves them; graph-to-graph rebuilds must reroute.
-template <class Tag>
-inline constexpr bool carry_on_rebuild = true;
-template <>
-inline constexpr bool carry_on_rebuild<route_records_v1_t> = false;
-template <>
-inline constexpr bool carry_on_rebuild<route_strings_v1_t> = false;
-// Shared texts (graph/shared_text.hpp): an id is local to its graph, so the plain value copy would point a
-// node at another graph's table. graph_util::carry_node_attrs carries them through the text instead.
-template <>
-inline constexpr bool carry_on_rebuild<synth_color_group_id_t> = false;
-template <>
-inline constexpr bool carry_on_rebuild<synth_color_group_names_t> = false;
-template <>
-inline constexpr bool carry_on_rebuild<placement_block_id_t> = false;
-template <>
-inline constexpr bool carry_on_rebuild<placement_block_names_t> = false;
-
-// EVERY LiveHD attribute tag, in one list. graph/cell.cpp pre-registers from it
-// and graph/attr_carry.hpp derives carry policy from it (role from `attr_kind`,
-// invalidation from `carry_on_rebuild`). New tags are one row here; physical
-// routes explicitly opt out of carry across connectivity reconstruction. `hhds::attrs::name` and
-// `hhds::attrs::srcid` are hhds-owned and handled by those two files directly.
-#define LIVEHD_FOR_EACH_ATTR_TAG(X) \
-  X(route_records_v1)               \
-  X(route_strings_v1)               \
-  X(placement_rc)                   \
-  X(placement_block_id)             \
-  X(placement_block_names)          \
-  X(physical_open_inputs)           \
-  X(pin_place)                      \
-  X(place_weight)                   \
-  X(bits)                           \
-  X(pin_offset)                     \
-  X(pin_name)                       \
-  X(pin_delay)                      \
-  X(signal_roles)                   \
-  X(pin_signed)                     \
-  X(color)                          \
-  X(critical)                       \
-  X(preroute_exclude)               \
-  X(preroute_net_exclude)           \
-  X(sta)                            \
-  X(synth_policy)                   \
-  X(ctrl_members)                   \
-  X(ctrl_stats)                     \
-  X(synth_region)                   \
-  X(synth_region_id)                \
-  X(synth_color_group_id)           \
-  X(synth_color_group_names)        \
-  X(resynth)                        \
-  X(pcrs_clock_driver)              \
-  X(pcrs_clock_buffer)              \
-  X(native_comb_boundary)           \
-  X(user_cell)                      \
-  X(hier_color)                     \
-  X(coloring_info)                  \
-  X(region_nesting)                 \
-  X(simulation_init)                \
-  X(legalize_inlined)               \
-  X(comb_reach)                     \
-  X(match)                          \
-  X(proven)                         \
-  X(runtime_check)                  \
-  X(mem_address_proven)             \
-  X(pcrs_stage)                     \
-  X(ware_module)                    \
-  X(specialization_origin)          \
-  X(memory_module)                  \
-  X(memory_async_reset)             \
-  X(aggregate_origin)               \
-  X(aggregate_source_index)         \
-  X(aggregate_lane_ordinal)         \
-  X(aggregate_bit_offset)           \
-  X(aggregate_bit_width)            \
-  X(aggregate_extent)               \
-  X(place)                          \
-  X(lut)                            \
-  X(time_range)                     \
-  X(pending_time)
+template <typename Tag>
+inline constexpr Attr_kind attr_kind = Attr_traits<Tag>::kind;
+template <typename Tag>
+inline constexpr bool carry_on_rebuild = Attr_traits<Tag>::rebuild != Rebuild_group::skip_raw;
 
 }  // namespace livehd::attrs
 

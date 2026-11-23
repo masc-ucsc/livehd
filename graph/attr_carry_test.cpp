@@ -171,6 +171,24 @@ TEST(AttrCarry, EveryPinAttributeSurvivesARebuild) {
   EXPECT_EQ(dst.attr(la::pending_time).get().min, 1);
 }
 
+// HHDS aliases the sink and driver attribute slots at a port ID. Rewiring
+// the sink must preserve the new driver's own width and signal role.
+TEST(AttrCarry, SinkCopyLeavesTheDestinationDriverIntact) {
+  hhds::GraphLibrary lib;
+  auto               graph = lib.create_io("sink_copy")->create_graph();
+  auto               src   = gu::create_typed_node(*graph, Ntype_op::Not, 8);
+  auto               dst   = gu::create_typed_node(*graph, Ntype_op::Not, 1);
+  src.create_driver_pin(0).attr(la::signal_roles).set(la::signal_reset);
+  auto from = src.create_sink_pin(0);
+  from.attr(la::pin_offset).set(3);
+  auto to = dst.create_sink_pin(0);
+  gu::carry_pin_attrs(from, to);
+  EXPECT_EQ(to.attr(la::pin_offset).get(), 3);
+  auto driver = dst.create_driver_pin(0);
+  EXPECT_EQ(gu::bits_of(driver), 1);
+  EXPECT_FALSE(driver.attr(la::signal_roles).has());
+}
+
 // An absent attribute must stay absent -- a carrier that stamps defaults would
 // turn "no color" into "color 0", which pass.partition reads as a real region.
 TEST(AttrCarry, AbsentAttributesAreNotMaterialized) {
