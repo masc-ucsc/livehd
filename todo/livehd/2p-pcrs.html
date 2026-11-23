@@ -469,6 +469,17 @@ preserved the wire geometry of all 1,952 nets and passed both checks.</p>
 Its incident nets need top-level ownership when a pin would lie outside the worker's routing area.
 Whole-design timing requires extraction on the assembled routing.</p>
 
+<p>A fresh OpenROAD geometry check of both the original CNN ODB and its reassembled DEF found
+four spacing markers on one net. Rerouting that net with a temporary M3 obstruction took 93 seconds.
+After removing the obstruction, both the detailed router and the independent geometry check reported
+zero violations. All 1,952 other wire geometries matched the worker output. The same independent
+check found 44 markers on the original Eyeriss worker and 39 after its neighbor was reshaped.</p>
+<p>The <a href="https://github.com/masc-ucsc/HighTide/blob/2383e20/tools/vslivehd/stitch_chunk_routes.py">HighTide
+assembly command</a> verifies instance poses, net endpoints, top port bindings and via definitions before fixing worker
+wires in a full DEF. In five live agent sessions, enabling the legroute check before PCRS reproduced
+the buffered DEF byte for byte. Full-chip timing remains open until the assembled signal and clock
+routes pass connectivity, independent DRC and extraction.</p>
+
 <h2 id="open">Open points</h2>
 <ul>
 <li>Whether the top needs a budget round (H4 answers it).</li>
