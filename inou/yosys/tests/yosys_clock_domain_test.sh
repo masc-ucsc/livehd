@@ -170,48 +170,40 @@ for c in "${cases[@]}"; do
   fi
 done
 [ "$bad" -eq 0 ] || fail "lgcheck clock-domain soundness"
-# Whole-miter induction is optional and must share the wall budget. This
-# equivalent toggle synchronizer has different internal enable expressions.
+# Whole-miter induction on a toggle synchronizer with different enable logic.
+# Compare the source toggle and destination pipeline as well as the pulse.
+# Pulse equality alone leaves unrelated hidden states in the induction step
+# when either clock can stop indefinitely.
 cat >"$W/toggle_ref.v" <<'V'
-module dut(input src_clk, dst_clk, rst, pulse, output q);
+module dut(input src_clk, dst_clk, rst, pulse, output [4:0] q);
   reg level, delayed;
   reg [1:0] sync;
   always @(posedge src_clk) if(rst) level<=0; else if(pulse) level<=~level;
   always @(posedge dst_clk) begin sync<={sync[0],level}; delayed<=sync[1]; end
-  assign q=sync[1]^delayed;
+  assign q={level,sync,delayed,sync[1]^delayed};
 endmodule
 V
 cat >"$W/toggle_gate.v" <<'V'
-module dut(input src_clk, dst_clk, rst, pulse, output q);
+module dut(input src_clk, dst_clk, rst, pulse, output [4:0] q);
   impl child(.*);
 endmodule
-module impl(input src_clk, dst_clk, rst, pulse, output q);
+module impl(input src_clk, dst_clk, rst, pulse, output [4:0] q);
   reg level, delayed;
   reg [1:0] sync;
   wire next_level=rst ? level : (pulse ? (level==0) : level);
   always @(posedge src_clk) if(rst) level<=0; else if(!rst && pulse) level<=next_level;
   always @(posedge dst_clk) begin sync<={sync[0],level}; delayed<=sync[1]; end
-  assign q=sync[1]^delayed;
+  assign q={level,sync,delayed,sync[1]^delayed};
 endmodule
 V
 mkdir -p "$W/whole_induct"
-# Allow debug Yosys to complete all six BMC depths before checking fallback
-# coverage. The solver still shares one finite budget across all strategies.
-(cd "$W/whole_induct" && LGCHECK_EQUIV_TIMEOUT=8 LGCHECK_BMC_STEPS=6 LGCHECK_INDUCT_AFTER_BMC=1 \
+# Exercise the bounded miter and its induction fallback directly. Both use the
+# same finite budget as the other clock cases.
+(cd "$W/whole_induct" && LGCHECK_EQUIV_TIMEOUT="$LGCHECK_BUDGET" LGCHECK_BMC_ONLY=1 LGCHECK_BMC_STEPS=6 LGCHECK_INDUCT_AFTER_BMC=1 \
   "$LGCHECK" --yosys "$YOSYS_ABS" --top dut --reference "$W/toggle_ref.v" \
-  --implementation "$W/toggle_gate.v") >"$W/whole_induct.log" 2>&1
-rc=$?
-case "$rc" in
-  0) ;;
-  # Debug yosys does not converge within the budget, so rc 2 is accepted --
-  # but only when the induction query really started on the saved BMC model
-  # (a bad command or a missing lgcheck_bmc.il never proves the base case).
-  2) if ! grep -q 'whole-miter clock-aware induction' "$W/whole_induct.log" \
-       || grep -q 'WARN: whole-miter induction did not run' "$W/whole_induct.log" \
-       || ! grep -q 'Base case for induction length 1 proven' "$W/whole_induct/lgcheck_induct.log"; then
-       cat "$W/whole_induct.log"
-       fail "whole-miter fallback did not run"
-     fi ;;
-  *) cat "$W/whole_induct.log"; fail "whole-miter fallback rejected equivalent CDC design: $rc" ;;
-esac
+  --implementation "$W/toggle_gate.v") >"$W/whole_induct.log" 2>&1 && \
+  grep -q '^induct\.Successfully matched' "$W/whole_induct.log" || {
+    cat "$W/whole_induct.log"
+    fail "whole-miter induction did not prove the equivalent CDC design"
+  }
 echo "PASS: lgcheck clock-domain soundness"

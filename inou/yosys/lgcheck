@@ -564,7 +564,6 @@ if [[ "$LGCHECK_BMC_STEPS" =~ ^[0-9]+$ ]] && [ "$LGCHECK_BMC_STEPS" -gt 0 ] \
   bmc_reserve=$(((LGCHECK_EQUIV_TIMEOUT + 3) / 4))
   [ "$bmc_reserve" -le 30 ] || bmc_reserve=30
 fi
-equiv_start=$SECONDS
 # coreutils `timeout` is NOT guaranteed to exist: macOS ships none, and bazel's
 # test PATH (/bin:/usr/bin:/usr/local/bin) does not carry the homebrew prefix
 # where `timeout`/`gtimeout` live. Resolve it once; when it is absent fall back
@@ -655,8 +654,6 @@ run_equiv_yosys() {
   fi
   return $rc
 }
-echo "INFO: starting equivalence checks (shared budget ${LGCHECK_EQUIV_TIMEOUT}s)"
-
 yosys_read="$(gold_read_cmds); proc; bmuxmap; flatten; rename -top gold; design -stash gold;
             $(gate_read_cmds); proc; bmuxmap; flatten; rename -top gate; design -stash gate;
             design -copy-from gold -as gold gold; design -copy-from gate -as gate gate"
@@ -716,8 +713,9 @@ fi
 if [ "$CLOCK_BLIND_OK" -eq 0 ]; then
   echo "INFO: state has asynchronous control or is not a single primary-input clock edge; clock-blind engines (1/1n/1r/1p/1m/2/4) skipped"
 fi
-# The guard is preparation, not an equivalence strategy: restart the budget.
+# All source lowering and clock-domain preparation is complete.
 equiv_start=$SECONDS
+echo "INFO: starting equivalence checks (shared budget ${LGCHECK_EQUIV_TIMEOUT}s)"
 # Run a clock-blind strategy only when the guard allows it; a skipped strategy
 # produces no log line, so its "proven" grep fails and the flow falls through.
 run_clock_blind_yosys() {
