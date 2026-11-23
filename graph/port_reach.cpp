@@ -54,7 +54,11 @@ Memory_deps::Memory_deps(const hhds::Node_class& m) {
         } else if (pn.ends_with("din")) {
           pv[idx].din = e_drv;
         } else if (pn.ends_with("rdport")) {
-          pv[idx].rd = e_drv.is_const() && !e_drv.is_known_false();
+          if (e_drv.is_const() && !e_drv.is_known_false()) {
+            const auto& kind  = gu::const_of(e_drv);
+            pv[idx].rd        = true;
+            pv[idx].sync_read = kind.is_just_i64() && !kind.has_unknowns() && kind.to_just_i64() == Ntype::Memory_rdport_sync;
+          }
         }
       }
     }
@@ -90,7 +94,7 @@ bool Memory_deps::deps(hhds::Port_id want_pid, const std::function<void(const hh
       }
       if (static_cast<hhds::Port_id>(n_wr + rd) == want_pid) {
         handled = true;
-        if (mtype != 1) {
+        if (mtype != Ntype::Memory_type_sync && !(mtype == Ntype::Memory_type_mixed && mp.sync_read)) {
           enqueue(mp.addr);
           enqueue(mp.en);
           // Write cones flow into a SAME-CYCLE read in two cases:
@@ -455,16 +459,42 @@ const Def_reach& Cache::of(const std::shared_ptr<hhds::Graph>& g) {
     // Index their connected sinks once instead of scanning every sink for
     // every input in the callee's support. Keep the sink, rather than its first
     // driver: compact-loop carry inputs can legitimately have two drivers.
-    using Sub_inputs = absl::flat_hash_map<uint32_t, hhds::Pin_class>;
-    absl::node_hash_map<hhds::Node_class, Sub_inputs> sub_inputs;
-    auto                                              sub_inputs_of = [&](const hhds::Node_class& sub) -> const Sub_inputs& {
-      const auto [it, fresh] = sub_inputs.try_emplace(sub);
-      if (fresh) {
-        for (auto sink : sub.inp_sorted_pins()) {
-          it->second.emplace(static_cast<uint32_t>(sink.get_port_id()), sink);
+    absl::node_hash_map<hhds::Node_class, Instance_inputs> sub_inputs;
+    const auto                                             inputs_of
+        = [&](const hhds::Node_class& sub) -> const Instance_inputs& { return sub_inputs.try_emplace(sub, sub).first->second; };
+    // Both the slice walk and the SCC walk use the same combinational arcs.
+    // The slice walk expands a node's full fan-in only once per cone.
+    const auto visit_dependencies = [&](const hhds::Pin_class& pin, const auto& visit, const auto& expand) {
+      const auto node = pin.get_master_node();
+      const auto op   = gu::type_op_of(node);
+      if (op == Ntype_op::Flop || op == Ntype_op::Fflop || op == Ntype_op::Latch) {
+        return;
+      }
+      if (op == Ntype_op::Sub) {
+        if (auto child = node.get_subnode_graph()) {
+          const auto& rows = callee_of(child).out2ins;
+          if (auto row = rows.find(pin.get_port_id()); row != rows.end()) {
+            const auto& inputs = inputs_of(node);
+            for (const auto port : row->second) {
+              inputs.drivers(port, visit);
+            }
+          }
+          return;
+        }
+        if (state_output(node, pin)) {
+          return;
         }
       }
-      return it->second;
+      if (op == Ntype_op::Memory && mem_deps_of(node).deps(pin.get_port_id(), visit)) {
+        return;
+      }
+      if (expand(node)) {
+        for (const auto& sink : node.inp_sorted_pins()) {
+          for (const auto& driver : sink.get_driver_pins()) {
+            visit(driver);
+          }
+        }
+      }
     };
     auto run_walk = [&](const std::vector<hhds::Pin_class>& seeds, std::vector<In_atom>& atoms) {
       absl::flat_hash_set<hhds::Class_index> seen_pins;
@@ -493,64 +523,7 @@ const Def_reach& Cache::of(const std::shared_ptr<hhds::Graph>& g) {
         if (input_atom_of(d, atoms)) {
           continue;  // a recognized slice read of an input: recorded as a range atom
         }
-        auto       m  = d.get_master_node();
-        const auto op = gu::type_op_of(m);
-        if (op == Ntype_op::Flop || op == Ntype_op::Fflop || op == Ntype_op::Latch) {
-          continue;  // true state boundary: q is last period's value
-        }
-        if (op == Ntype_op::Sub) {
-          auto cg = m.get_subnode_graph();
-          if (!cg && state_output(m, d)) {
-            continue;  // a body-less SEQUENTIAL cell (mapped flop/latch): last period's value
-          }
-          if (!cg) {
-            if (expanded.insert(m).second) {
-              // Arbitrary/Sub node: a compact loop carry-in sink holds two drivers.
-              for (auto e_sink : m.inp_sorted_pins()) {
-                for (auto e_drv : e_sink.get_driver_pins()) {
-                  enqueue(e_drv);  // body-less blackbox: depend on everything connected
-                }
-              }
-            }
-            continue;
-          }
-          const auto& cr = callee_of(cg);  // memoized; hierarchy is a DAG
-          if (auto it = cr.out2ins.find(static_cast<uint32_t>(d.get_port_id())); it != cr.out2ins.end()) {
-            const auto& inputs = sub_inputs_of(m);
-            for (const uint32_t ipid : it->second) {
-              if (auto input = inputs.find(ipid); input != inputs.end()) {
-                for (auto driver : input->second.get_driver_pins()) {
-                  enqueue(driver);
-                }
-              }
-            }
-          }
-          continue;
-        }
-        if (op == Ntype_op::Memory) {
-          // PORT-ACCURATE traversal (see the header): async dout -> that read
-          // port's address/enable cone (+ write cones only under same-cycle
-          // forwarding); sync dout -> a register; read_all -> boundary when
-          // clocked. Undecoded shapes fall back to the blanket join.
-          const bool handled = mem_deps_of(m).deps(static_cast<hhds::Port_id>(d.get_port_id()), enqueue);
-          if (!handled && expanded.insert(m).second) {
-            // Arbitrary/Sub node: a compact loop carry-in sink holds two drivers.
-            for (auto e_sink : m.inp_sorted_pins()) {
-              for (auto e_drv : e_sink.get_driver_pins()) {
-                enqueue(e_drv);
-              }
-            }
-          }
-          continue;
-        }
-        if (expanded.insert(m).second) {
-          // Arbitrary/Sub node: a compact loop carry-in sink holds two drivers.
-          for (auto e_sink : m.inp_sorted_pins()) {
-            for (auto e_drv : e_sink.get_driver_pins()) {
-              enqueue(e_drv);
-            }
-          }
-        }
+        visit_dependencies(d, enqueue, [&](const auto& node) { return expanded.insert(node).second; });
       }
     };
 
@@ -604,47 +577,7 @@ const Def_reach& Cache::of(const std::shared_ptr<hhds::Graph>& g) {
           }
           f.succ.push_back(q);
         };
-        const auto all_inputs = [&](const hhds::Node_class& m) {
-          for (auto e_sink : m.inp_sorted_pins()) {
-            for (auto e_drv : e_sink.get_driver_pins()) {
-              add(e_drv);
-            }
-          }
-        };
-        auto       m  = d.get_master_node();
-        const auto op = gu::type_op_of(m);
-        if (op == Ntype_op::Flop || op == Ntype_op::Fflop || op == Ntype_op::Latch) {
-          return;  // true state boundary
-        }
-        if (op == Ntype_op::Sub) {
-          auto cg = m.get_subnode_graph();
-          if (!cg && state_output(m, d)) {
-            return;  // a body-less SEQUENTIAL cell (mapped flop/latch): last period's value
-          }
-          if (!cg) {
-            all_inputs(m);  // body-less blackbox: depend on everything connected
-            return;
-          }
-          const auto& cr = callee_of(cg);
-          if (auto it = cr.out2ins.find(static_cast<uint32_t>(d.get_port_id())); it != cr.out2ins.end()) {
-            const auto& inputs = sub_inputs_of(m);
-            for (const uint32_t ipid : it->second) {
-              if (auto input = inputs.find(ipid); input != inputs.end()) {
-                for (auto driver : input->second.get_driver_pins()) {
-                  add(driver);
-                }
-              }
-            }
-          }
-          return;
-        }
-        if (op == Ntype_op::Memory) {
-          if (!mem_deps_of(m).deps(static_cast<hhds::Port_id>(d.get_port_id()), add)) {
-            all_inputs(m);
-          }
-          return;
-        }
-        all_inputs(m);
+        visit_dependencies(d, add, [](const auto&) { return true; });
       };
       const auto push = [&](const hhds::Pin_class& p) {
         info[p.get_class_index()] = Info{counter, counter, true, 0};
@@ -734,22 +667,17 @@ const Def_reach& Cache::of(const std::shared_ptr<hhds::Graph>& g) {
         if (opin.is_invalid()) {
           continue;
         }
-        for (auto e_sink : opin.get_master_node().inp_sorted_pins()) {
-          if (e_sink.get_port_id() != opin.get_port_id()) {
+        for (const auto& drv : opin.get_driver_pins()) {
+          if (drv.is_const()) {
             continue;
-          }
-          const auto drv = e_sink.get_driver_pin();
-          if (drv.is_invalid() || drv.is_const()) {
-            break;
           }
           if (gu::is_graph_input_pin(drv)) {
             ins.insert(static_cast<uint32_t>(drv.get_port_id()));
-            break;
+          } else {
+            for (const auto pid : sets[support_of(drv)]) {
+              ins.insert(pid);
+            }
           }
-          for (const auto pid : sets[support_of(drv)]) {
-            ins.insert(pid);
-          }
-          break;
         }
       }
     } else
@@ -759,19 +687,11 @@ const Def_reach& Cache::of(const std::shared_ptr<hhds::Graph>& g) {
       if (opin.is_invalid()) {
         continue;
       }
-      hhds::Pin_class drv;
-      for (auto e_sink : opin.get_master_node().inp_sorted_pins()) {
-        auto e_drv = e_sink.get_driver_pin();
-        if (e_sink.get_port_id() == opin.get_port_id()) {
-          drv = e_drv;
-          break;
-        }
-      }
-      if (drv.is_invalid()) {
-        continue;
-      }
+      const auto           drivers = opin.get_driver_pins();
       std::vector<In_atom> atoms;
-      run_walk({drv}, atoms);
+      for (const auto& driver : drivers) {
+        run_walk({driver}, atoms);
+      }
       for (const auto& a : atoms) {
         ins.insert(a.pid);
       }
@@ -779,10 +699,10 @@ const Def_reach& Cache::of(const std::shared_ptr<hhds::Graph>& g) {
       // ---- SLICE decomposition (bit-level refinement, used only under loop
       // pressure downstream: slices with identical supports merge back).
       const auto out_bits = static_cast<uint32_t>(od.bits > 0 ? od.bits : 0);
-      if (out_bits == 0 || !slices_) {
+      if (out_bits == 0 || drivers.size() != 1) {
         continue;
       }
-      auto leaves = concat_leaves(drv);
+      auto leaves = concat_leaves(drivers.front());
       if (leaves.size() == 1 && !leaves[0].pin.is_invalid() && !gu::is_graph_input_pin(leaves[0].pin) && !leaves[0].pin.is_const()
           && gu::type_op_of(leaves[0].pin.get_master_node()) == Ntype_op::Sub) {
         // PASS-THROUGH of a sliced callee output (minion's intpipe_top wraps
@@ -793,7 +713,6 @@ const Def_reach& Cache::of(const std::shared_ptr<hhds::Graph>& g) {
         const auto& cr = callee_of(cg);
         if (auto it = cr.out_slices.find(static_cast<uint32_t>(leaves[0].pin.get_port_id())); cg && it != cr.out_slices.end()) {
           std::vector<Out_slice> mine;
-          bool                   ok = true;
           for (const auto& cs : it->second) {
             Out_slice ps;
             ps.lo      = cs.lo;
@@ -801,33 +720,20 @@ const Def_reach& Cache::of(const std::shared_ptr<hhds::Graph>& g) {
             ps.leaf    = leaves[0].pin;
             ps.shifted = true;  // the leaf is the callee's whole bundle pin
             for (const auto& ca : cs.ins) {
-              hhds::Pin_class idrv;
-              for (auto e_sink : sn.inp_sorted_pins()) {
-                auto e_drv = e_sink.get_driver_pin();
-                if (static_cast<uint32_t>(e_sink.get_port_id()) == ca.pid) {
-                  idrv = e_drv;
-                  break;
+              inputs_of(sn).drivers(ca.pid, [&](const hhds::Pin_class& driver) {
+                if (gu::is_graph_input_pin(driver)) {
+                  add_atom(ps.ins, static_cast<uint32_t>(driver.get_port_id()), ca.lo, ca.len);
+                } else {
+                  run_walk({driver}, ps.ins);
                 }
-              }
-              if (idrv.is_invalid()) {
-                continue;  // unconnected input: reads as 0
-              }
-              if (gu::is_graph_input_pin(idrv)) {
-                add_atom(ps.ins, static_cast<uint32_t>(idrv.get_port_id()), ca.lo, ca.len);
-              } else {
-                std::vector<In_atom> sub_atoms;
-                run_walk({idrv}, sub_atoms);
-                for (const auto& a : sub_atoms) {
-                  add_atom(ps.ins, a.pid, a.lo, a.len);
-                }
-              }
+              });
             }
             std::sort(ps.ins.begin(), ps.ins.end(), [](const In_atom& a, const In_atom& b) {
               return std::tie(a.pid, a.lo, a.len) < std::tie(b.pid, b.lo, b.len);
             });
             mine.push_back(std::move(ps));
           }
-          if (ok && mine.size() > 1) {
+          if (mine.size() > 1) {
             r.out_slices.emplace(static_cast<uint32_t>(od.port_id), std::move(mine));
           }
         }

@@ -71,6 +71,32 @@ TEST(PortReach, FlopCutsTheCone) {
   EXPECT_TRUE(r.input_independent(3)) << "a flop read depends on no input";
 }
 
+TEST(PortReach, MixedMemoryCutsOnlyTheRegisteredRead) {
+  hhds::GraphLibrary lib;
+  auto               io = lib.create_io("mixed_reads");
+  io->add_input("a", 1);
+  io->add_output("async", 2);
+  io->add_output("sync", 3);
+  auto       graph = io->create_graph();
+  auto       mem   = gu::create_typed_node(*graph, Ntype_op::Memory);
+  const auto sink  = [&](const char* name, int port) {
+    return mem.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Memory, name) + port * Ntype::Memory_port_stride);
+  };
+  const auto number = [&](int value) { return gu::create_const(*graph, *Dlop::create_integer(value)); };
+  number(Ntype::Memory_type_mixed).connect_sink(sink("type", 0));
+  for (int i = 0; i < 2; ++i) {
+    graph->get_input_pin("a").connect_sink(sink("addr", i));
+    number(i == 0 ? Ntype::Memory_rdport_async : Ntype::Memory_rdport_sync).connect_sink(sink("rdport", i));
+    mem.create_driver_pin(i).connect_sink(graph->get_output_pin(i == 0 ? "async" : "sync"));
+  }
+  for (bool slices : {false, true}) {
+    pr::Cache   cache({}, slices);
+    const auto& rows = cache.of(graph).out2ins;
+    EXPECT_EQ(rows.at(2), (Pids{1}));
+    EXPECT_TRUE(rows.at(3).empty());
+  }
+}
+
 TEST(PortReach, StampRoundTrips) {
   auto& lib   = livehd::Hhds_graph_library::instance("lgdb_port_reach_stamp");
   auto  child = build_child(lib)->get_graph();
@@ -148,6 +174,53 @@ TEST(PortReach, WideInstanceKeepsAllDriversAndSkipsUnconnectedPorts) {
 
   pr::Cache cache;
   EXPECT_EQ(cache.of(parent).out2ins.at(3), (Pids{0, 1, 2}));
+}
+
+TEST(PortReach, PackedCalleeSlicesKeepEveryDriverOfTheSelectedPort) {
+  hhds::GraphLibrary lib;
+  auto               child = lib.create_io("pack");
+  child->add_input("low", 0);
+  child->add_input("high", 1);
+  child->add_output("word", 2);
+  child->set_bits("word", 2);
+  auto body = child->create_graph();
+  auto pack = gu::create_typed_node(*body, Ntype_op::Concat, 2);
+  auto one  = gu::create_const(*body, *Dlop::create_integer(1));
+  body->get_input_pin("high").connect_sink(pack.create_sink_pin(0));
+  one.connect_sink(pack.create_sink_pin(1));
+  body->get_input_pin("low").connect_sink(pack.create_sink_pin(2));
+  one.connect_sink(pack.create_sink_pin(3));
+  pack.create_driver_pin(0).connect_sink(body->get_output_pin("word"));
+
+  auto io = lib.create_io("wrapper");
+  io->add_input("a", 0);
+  io->add_input("b", 1);
+  io->add_input("c", 2);
+  io->add_output("out", 3);
+  io->set_bits("out", 2);
+  auto graph = io->create_graph();
+  auto inst  = gu::create_typed_node(*graph, Ntype_op::Sub);
+  inst.set_subnode(child);
+  auto low = inst.create_sink_pin(0);
+  graph->get_input_pin("a").connect_sink(low);
+  graph->get_input_pin("b").connect_sink(low);
+  graph->get_input_pin("c").connect_sink(inst.create_sink_pin(1));
+  inst.create_driver_pin(2).connect_sink(graph->get_output_pin("out"));
+
+  pr::Cache   ports({}, false);
+  pr::Cache   bits;
+  const auto& summary = bits.of(graph);
+  EXPECT_EQ(summary.out2ins.at(3), (Pids{0, 1, 2}));
+  EXPECT_EQ(ports.of(graph).out2ins, summary.out2ins);
+  const auto& slices = summary.out_slices.at(3);
+  ASSERT_EQ(slices.size(), 2u);
+  ASSERT_EQ(slices[0].ins.size(), 2u);
+  EXPECT_EQ(slices[0].ins[0].pid, 0u);
+  EXPECT_EQ(slices[0].ins[1].pid, 1u);
+  EXPECT_EQ(slices[0].ins[0].len, 0u);
+  EXPECT_EQ(slices[0].ins[1].len, 0u);
+  ASSERT_EQ(slices[1].ins.size(), 1u);
+  EXPECT_EQ(slices[1].ins[0].pid, 2u);
 }
 
 // A mapped netlist instantiates technology cells that have an interface and no

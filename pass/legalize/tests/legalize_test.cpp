@@ -12,6 +12,7 @@
 #include "legalize.hpp"
 #include "acyclic.hpp"
 
+#include <array>
 #include <string>
 #include <vector>
 
@@ -708,6 +709,75 @@ TEST(LegalizeAcyclic, PackedBusRealLoopIsStillCaught) {
   livehd::legalize::Split_state state;
   const auto r = livehd::legalize::make_acyclic({lib.find_io("lane")->get_graph(), top}, state);
   EXPECT_TRUE(r.instances_inlined > 0 || r.loops > 0);
+}
+
+// A nested port without a pin width yields a whole-port atom. Dropping that
+// atom when composing the middle definition would conceal the outer feedback.
+TEST(LegalizeAcyclic, NestedWholePortRetainsFeedback) {
+  hhds::GraphLibrary lib;
+  auto               top     = build_packed_feedback(lib, /*feedback_in_msb=*/false);
+  auto               lane    = lib.find_io("lane")->get_graph();
+  auto               leaf_io = lib.create_io("leaf");
+  leaf_io->add_input("d", 1);
+  leaf_io->add_output("q", 2);
+  auto leaf = leaf_io->create_graph();
+  leaf->get_input_pin("d").connect_sink(leaf->get_output_pin("q"));
+
+  auto y        = lane->get_output_pin("y");
+  auto selected = y.get_driver_pin();
+  y.del_sink();
+  auto inst = gu::create_typed_node(*lane, Ntype_op::Sub);
+  inst.set_subnode(leaf_io);
+  selected.connect_sink(inst.create_sink_pin(1));
+  auto q = inst.create_driver_pin(2);
+  gu::set_ubits(q, 1);
+  q.connect_sink(y);
+
+  livehd::legalize::Split_state state;
+  const auto                    result = livehd::legalize::make_acyclic({leaf, lane, top}, state);
+  EXPECT_TRUE(result.instances_inlined > 0 || result.loops > 0);
+}
+
+TEST(LegalizeAcyclic, NestedMemoriesWithTheSameLocalNodeIdKeepTheirOwnAddress) {
+  hhds::GraphLibrary lib;
+  auto               top      = build_packed_feedback(lib, /*feedback_in_msb=*/false);
+  auto               lane     = lib.find_io("lane")->get_graph();
+  auto               y        = lane->get_output_pin("y");
+  auto               selected = y.get_driver_pin();
+  y.del_sink();
+  auto join = gu::create_typed_node(*lane, Ntype_op::Or, 1);
+  join.create_driver_pin(0).connect_sink(y);
+  auto                            zero = gu::create_const(*lane, *Dlop::create_integer(0));
+  std::array<hhds::Node_class, 2> instances;
+  for (unsigned i = 0; i < instances.size(); ++i) {
+    auto io = lib.create_io("rom" + std::to_string(i));
+    io->add_input("a", 1);
+    io->add_input("b", 2);
+    io->add_output("data", 3);
+    auto rom = io->create_graph();
+    auto mem = gu::create_typed_node(*rom, Ntype_op::Memory);
+    rom->get_input_pin(i == 0 ? "a" : "b").connect_sink(gu::setup_sink_by_name(mem, "addr"));
+    gu::create_const(*rom, *Dlop::create_integer(Ntype::Memory_rdport_async)).connect_sink(gu::setup_sink_by_name(mem, "rdport"));
+    mem.create_driver_pin(0).connect_sink(rom->get_output_pin("data"));
+    auto inst = gu::create_typed_node(*lane, Ntype_op::Sub);
+    inst.set_subnode(io);
+    auto data = inst.create_driver_pin(3);
+    gu::set_ubits(data, 1);
+    data.connect_sink(join.create_sink_pin(i));
+    instances[i] = inst;
+  }
+  // Both ROMs see the same wiring but read opposite address ports. Whichever
+  // port receives feedback, exactly one ROM closes a real combinational loop.
+  for (int feedback : {1, 2}) {
+    for (const auto& inst : instances) {
+      for (int port : {1, 2}) {
+        auto sink = inst.create_sink_pin(port);
+        sink.del_sink();
+        (port == feedback ? selected : zero).connect_sink(sink);
+      }
+    }
+    EXPECT_EQ(livehd::legalize::count_comb_cycles({top}), 1) << "feedback on port " << feedback;
+  }
 }
 
 // A rolled loop (Sub with loop annotations) is never split or inlined. A TRUE

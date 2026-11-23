@@ -122,7 +122,8 @@ public:
 private:
   struct Port {
     hhds::Pin_class addr, en, din;
-    bool            rd = false;
+    bool            rd        = false;
+    bool            sync_read = false;
   };
   std::vector<Port>            pv;
   std::vector<hhds::Pin_class> wr_cones;

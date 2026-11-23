@@ -5,9 +5,33 @@
 #include <limits>
 #include <string_view>
 
+#include "absl/container/flat_hash_map.h"
 #include "node_util.hpp"
 
 namespace livehd::port_reach {
+
+// Index connected instance sinks once. Compact-loop carry inputs can have both
+// a seed and a recurrence edge; both are dependencies of the input port.
+class Instance_inputs {
+public:
+  explicit Instance_inputs(const hhds::Node_class& instance) {
+    for (const auto& sink : instance.inp_sorted_pins()) {
+      sinks_.emplace(sink.get_port_id(), sink);
+    }
+  }
+
+  template <class Visit>
+  void drivers(uint32_t port, const Visit& visit) const {
+    if (auto it = sinks_.find(port); it != sinks_.end()) {
+      for (const auto& driver : it->second.get_driver_pins()) {
+        visit(driver);
+      }
+    }
+  }
+
+private:
+  absl::flat_hash_map<uint32_t, hhds::Pin_class> sinks_;
+};
 
 // Transfer [lo, hi) through wiring that preserves a known bit range. The
 // callers supply the clipping rule and the conservative fallback for other

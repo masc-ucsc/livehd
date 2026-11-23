@@ -159,7 +159,7 @@ public:
     // by every consumer, so they are no loop; an undecoded port stays a cut,
     // as a Memory always was here.
     if (op == Ntype_op::Memory) {
-      auto [it, fresh] = memories_.try_emplace(m, m);
+      auto [it, fresh] = memories_.try_emplace({m.get_graph(), m.get_class_index()}, m);
       (void)it->second.deps(static_cast<hhds::Port_id>(d.get_port_id()), out, /*writes=*/false);
       return;
     }
@@ -333,20 +333,20 @@ private:
       return nullptr;
     }
     scratch_.clear();
-    for (const auto& sink : m.inp_sorted_pins()) {
-      const auto pid = static_cast<uint32_t>(sink.get_port_id());
-      for (const auto& atom : *atoms) {
-        if (atom.pid != pid) {
-          continue;
-        }
-        for (const auto& drv : sink.get_driver_pins()) {
-          if (!carry_self_edge(m, sink, drv)) {
-            scratch_.emplace_back(drv, static_cast<int>(atom.lo), atom.len == 0 ? 0 : static_cast<int>(atom.lo + atom.len));
-          }
-        }
-      }
-    }
+    visit_atom_drivers(m, *atoms, [&](const auto& driver, int first, int end) { scratch_.emplace_back(driver, first, end); });
     return &scratch_;
+  }
+
+  // Only ordinary instances have refined atoms. Rolled carries take the
+  // port-level path below. A zero end preserves a whole input at every depth.
+  template <class Visit>
+  void visit_atom_drivers(const hhds::Node_class& node, const std::vector<port_reach::In_atom>& atoms, const Visit& visit) {
+    const auto& inputs = inputs_.try_emplace({node.get_graph(), node.get_class_index()}, node).first->second;
+    for (const auto& atom : atoms) {
+      inputs.drivers(atom.pid, [&](const auto& driver) {
+        visit(driver, static_cast<int>(atom.lo), atom.len == 0 ? 0 : static_cast<int>(atom.lo + atom.len));
+      });
+    }
   }
 
   // Bits [lo, hi) of instance output `p`, resolved into the parent's own
@@ -445,13 +445,12 @@ private:
   // so the walk stays linear in the cone. nullptr = the walk gave up (budget).
   const std::vector<port_reach::In_atom>* callee_atoms(hhds::Graph* g, uint32_t out_pid, int lo, int hi) {
     const auto key = std::make_tuple(g, out_pid, lo, hi);
-    if (auto it = atoms_.find(key); it != atoms_.end()) {
-      return it->second ? &*it->second : nullptr;
+    // An empty entry also guards recursion while this stable slot is built.
+    auto [entry, inserted] = atoms_.try_emplace(key);
+    auto& slot             = entry->second;
+    if (!inserted) {
+      return slot ? &*slot : nullptr;
     }
-    if (!atoms_busy_.insert(key).second) {
-      return nullptr;  // recursion through the hierarchy: be conservative
-    }
-    auto&                                                         slot = atoms_[key];
     absl::flat_hash_map<hhds::Class_index, Range_set>             seen;
     std::vector<std::tuple<hhds::Pin_class, int, int>>            work;
     absl::flat_hash_map<uint32_t, Range_set>                      in_bits;  // pid -> covered bits
@@ -493,7 +492,6 @@ private:
         }
       }
       if (opin.is_invalid()) {
-        atoms_busy_.erase(key);
         return nullptr;
       }
       for (const auto& drv : opin.get_driver_pins()) {
@@ -513,7 +511,7 @@ private:
         continue;  // last period's value
       }
       if (op == Ntype_op::Memory) {
-        auto [mit, fresh] = memories_.try_emplace(m, m);
+        auto [mit, fresh] = memories_.try_emplace({m.get_graph(), m.get_class_index()}, m);
         if (!mit->second.deps(static_cast<hhds::Port_id>(p.get_port_id()), whole, /*writes=*/false)) {
           for (const auto& sink : m.inp_sorted_pins()) {
             for (const auto& drv : sink.get_driver_pins()) {
@@ -532,45 +530,38 @@ private:
         if (nested && !m.is_loop_subnode()) {
           sub = callee_atoms(nested.get(), static_cast<uint32_t>(p.get_port_id()), plo, phi);
         }
-        absl::flat_hash_map<uint32_t, hhds::Pin_class> sink_of;
-        for (const auto& sink : m.inp_sorted_pins()) {
-          sink_of.emplace(static_cast<uint32_t>(sink.get_port_id()), sink);
-        }
         if (sub == nullptr) {
-          // A rolled loop, a body-less blackbox, or an exhausted walk: its
-          // port-level summary when it has a body, else every input.
-          absl::flat_hash_set<uint32_t> ins;
-          bool                          all = !nested;
-          if (nested) {
-            const auto& summary = reach_.callee_of(nested);
-            if (auto row = summary.out2ins.find(static_cast<uint32_t>(p.get_port_id())); row != summary.out2ins.end()) {
-              ins.insert(row->second.begin(), row->second.end());
+          // Rolled carries, body-less blackboxes and exhausted walks use a
+          // conservative port-level dependency.
+          const auto visit_sink = [&](const hhds::Pin_class& sink) {
+            for (const auto& driver : sink.get_driver_pins()) {
+              if (!carry_self_edge(m, sink, driver)) {
+                whole(driver);
+              }
             }
-            if (m.is_loop_subnode()) {
-              all = true;  // carries close the row; stay conservative
+          };
+          if (!nested || m.is_loop_subnode()) {
+            for (const auto& sink : m.inp_sorted_pins()) {
+              visit_sink(sink);
             }
-          }
-          for (const auto& [pid, sink] : sink_of) {
-            if (all || ins.contains(pid)) {
-              for (const auto& drv : sink.get_driver_pins()) {
-                if (!carry_self_edge(m, sink, drv)) {
-                  whole(drv);
+          } else {
+            const auto& rows = reach_.callee_of(nested).out2ins;
+            if (auto row = rows.find(p.get_port_id()); row != rows.end()) {
+              for (const auto& sink : m.inp_sorted_pins()) {
+                if (row->second.contains(sink.get_port_id())) {
+                  visit_sink(sink);
                 }
               }
             }
           }
-          continue;
-        }
-        for (const auto& atom : *sub) {
-          if (auto sit = sink_of.find(atom.pid); sit != sink_of.end()) {
-            for (const auto& drv : sit->second.get_driver_pins()) {
-              if (atom.len == 0) {
-                whole(drv);
-              } else {
-                push(drv, static_cast<int>(atom.lo), static_cast<int>(atom.lo + atom.len));
-              }
+        } else {
+          visit_atom_drivers(m, *sub, [&](const auto& driver, int first, int end) {
+            if (end == 0) {
+              whole(driver);
+            } else {
+              push(driver, first, end);
             }
-          }
+          });
         }
         continue;
       }
@@ -582,9 +573,7 @@ private:
         }
       }
     }
-    atoms_busy_.erase(key);
     if (!ok) {
-      slot.reset();
       return nullptr;
     }
     std::vector<port_reach::In_atom> atoms;
@@ -600,19 +589,21 @@ private:
     }
     std::ranges::sort(atoms, [](const auto& x, const auto& y) { return std::tie(x.pid, x.lo) < std::tie(y.pid, y.lo); });
     slot = std::move(atoms);
-    return &*atoms_[key];
+    return &*slot;
   }
 
   static constexpr int kAtomBudget = 1 << 20;
 
   port_reach::Cache&                                             reach_;
-  absl::node_hash_map<hhds::Node_class, port_reach::Memory_deps> memories_;
+  // HHDS node indices are local to a definition. These walks enter callees.
+  using Def_node = std::pair<hhds::Graph*, hhds::Class_index>;
+  absl::flat_hash_map<Def_node, port_reach::Instance_inputs>                     inputs_;
+  absl::node_hash_map<Def_node, port_reach::Memory_deps>                         memories_;
   int                                                            budget_ = kRangeBudget;
   bool                                                           bits_   = false;
   std::vector<std::tuple<hhds::Pin_class, int, int>>                             scratch_;
   using Atom_key = std::tuple<hhds::Graph*, uint32_t, int, int>;
   absl::node_hash_map<Atom_key, std::optional<std::vector<port_reach::In_atom>>> atoms_;
-  absl::flat_hash_set<Atom_key>                                                  atoms_busy_;
 };
 
 // Iterative Tarjan over driver pins. `roots` seeds the walk; `inside` (when
