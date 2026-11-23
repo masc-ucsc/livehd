@@ -58,6 +58,8 @@ MODULES=(
   Compiler/ResidualInc
   # the same step, event-driven: only the readers of changed slots are visited, and its proof.
   Compiler/ResidualEv
+  # the same step with memories as tables (reads no longer walk every earlier write), and its proof.
+  Compiler/ResidualFlat
   Compiler/CompileOpDefs
   Compiler/CompileGraphDefs
   Compiler/CompileDesignDefs

@@ -11,14 +11,18 @@ recomputed), with inputs that change on some steps and not on others, before and
 optimizer, and check that `wellOrdered` refuses a binding that reads a later slot. The
 event-driven step (`ResidualEv`: only the bindings a changed slot's fanout reaches are visited,
 `runEv_eq_runFull`) runs the same cases, and `fanout` must list every reader of every slot.
+The same step with memories as tables (`ResidualFlat`, `runEvF_correct`) runs them too, and a
+table must read as its image after random writes, byte-enable writes and loads, at addresses in
+and out of the table, for several chunk sizes.
 
 Prints `PASS residual_inc: <n> cases` or one `FAIL` line per case that went wrong.
 -/
 import LeanSemanticPrimitives.Compiler.ResidualInc
 import LeanSemanticPrimitives.Compiler.ResidualEv
+import LeanSemanticPrimitives.Compiler.ResidualFlat
 import LeanSemanticPrimitives.Compiler.CompileDesignDefs
 
-open Compiler Compiler.ResidualOpt Compiler.ResidualInc
+open Compiler Compiler.ResidualOpt Compiler.ResidualInc Compiler.ResidualFlat
 
 /-- Sources: 0 input a, 1 const 5, 2 const 5 (a duplicate), 3 const 7, 4 input b (unread),
 5 flop q. Bindings (slots 6..10): 6 = a + 5, 7 = a + 5 (through the duplicate: the same
@@ -112,6 +116,26 @@ def fanOKb (R : ResidualProgram) : Bool :=
     (exprRefs R.bindings[k]!.rhs).all fun r =>
       !(r < R.sources.size + R.bindings.size) || (fan.getD r #[]).contains k
 
+/-- A table against the closure image it stands for: random writes (some outside the table),
+compared at every address from -3 to `n + 3` after each write. -/
+def tableAgrees (n c seed : Nat) : Bool := Id.run do
+  let f0 : Int → BV := fun x => mk_bv 8 ((x * 7 + 3) % 256)
+  let mut t := FMem.ofFun n c f0
+  let mut g := f0
+  let mut x := seed
+  let mut ok := true
+  for _ in [0:60] do
+    x := (x * 1103515245 + 12345) % 2147483648
+    let a : Int := (x % (n + 6) : Nat) - 3
+    let d := mk_bv 8 (x / 7 % 256 : Nat)
+    t := t.write a d
+    let g0 := g
+    g := fun y => if y = a then d else g0 y
+    for y in List.range (n + 7) do
+      let yy : Int := (y : Int) - 3
+      ok := ok && t.read yy == g yy
+  return ok
+
 def sameRuns (a b : List RuntimeResult) : Bool :=
   a.length == b.length && (a.zip b).all fun (x, y) => sameRes x y
 
@@ -135,6 +159,9 @@ def main : IO UInt32 := do
     fails := check s!"{name}: fanout lists every reader" (fanOKb R) fails
     fails := check s!"{name}: event-driven run = full run, 40 steps"
       (sameRuns (runEv R s1 ticks) (runFull R s1 ticks)) fails
+    n := n + 1
+    fails := check s!"{name}: run with tables = full run, 40 steps"
+      (sameRuns ((runEvF R (ofState (fun _ => 0) s1) ticks).map absRes) (runFull R s1 ticks)) fails
   -- 2. a compiled RAM: the address changes every step, the data every 3rd, the enable toggles
   match compileDesign ramCert with
   | .error e => fails := fails.push s!"compileDesign refused the RAM: {repr e}"
@@ -163,7 +190,23 @@ def main : IO UInt32 := do
       n := n + 1
       let lastE := (runEv P s0 ticks).getLast?.map (·.nextState)
       fails := check s!"{name}: the same memory image after 60 event-driven steps" (img lastE == img lastF) fails
-  -- 3. a binding that reads a later slot is refused
+      -- with tables: 12 words in chunks of 16, of 4, of 1, and a table too small for the memory
+      for (dep, c) in [(12, 16), (12, 4), (12, 1), (5, 2)] do
+        n := n + 2
+        let sF := ofState (fun _ => dep) s0
+        let sF := { sF with mems := sF.mems.map fun m => FMem.ofFun dep c m.rest }
+        let runT := (runEvF P sF ticks).map absRes
+        fails := check s!"{name}: run with tables ({dep} words, chunks of {c}) = full run, 60 steps"
+          (sameRuns runT (runFull P s0 ticks)) fails
+        fails := check s!"{name}: the same memory image after 60 steps with tables ({dep}, {c})"
+          (img (runT.getLast?.map (·.nextState)) == img lastF) fails
+  -- 3. tables against closure images: random writes in and out of the table
+  for (tn, tc) in [(12, 4), (12, 16), (12, 1), (40, 7), (0, 1), (5, 0)] do
+    for seed in [1, 2, 3] do
+      n := n + 1
+      fails := check s!"a table of {tn} words, chunks of {tc}, seed {seed}, reads as its image"
+        (tableAgrees tn tc seed) fails
+  -- 4. a binding that reads a later slot is refused
   n := n + 1
   fails := check "a forward reference is not well-ordered" (!wellOrdered forwardProg) fails
   for f in fails do IO.println s!"FAIL {f}"

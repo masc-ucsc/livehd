@@ -306,7 +306,7 @@ for rt in ir vc fp; do
   cmp -s "$OUT/t_sa_$rt/steps.trace" "$OUT/t_s0_$rt/steps.trace" || { echo "FAIL: seqm automatic compaction steps.trace ($rt)"; exit 1; }
   cmp -s "$OUT/sa_$rt.ckpt" "$OUT/s0_$rt.ckpt" || { echo "FAIL: seqm automatic compaction final checkpoint ($rt)"; exit 1; }
 done
-for mode in "route:ir" "route:vc"; do
+for mode in "route:ir" "route:vc mem:fun"; do
   ct "$OUT/seqm_lean/seqm.dcert" 600 "$OUT/seqw600.stim" $mode
   [[ $RC == 0 ]] && has "compactions 2 (every 256 cycles, automatic)" || { cat "$LOG"; echo "FAIL: cert_trace $mode automatic compaction"; exit 1; }
   grep '^STEP' "$LOG" > "$OUT/ct_auto.txt"
@@ -315,6 +315,15 @@ for mode in "route:ir" "route:vc"; do
   cmp -s "$OUT/ct_auto.txt" <(grep '^STEP' "$LOG") || { echo "FAIL: cert_trace $mode automatic compaction changed the trace"; exit 1; }
   cmp -s "$OUT/ct_auto.txt" "$OUT/t_sa_ir/steps.trace" || { echo "FAIL: cert_trace $mode differs from cert_run (600 cycles)"; exit 1; }
 done
+# route:vc keeps its memories as tables (ResidualFlat): no automatic compaction, the same lines;
+# an explicit compact:3 still compacts, and the final checkpoint is the one compact:0 writes
+ct "$OUT/seqm_lean/seqm.dcert" 600 "$OUT/seqw600.stim" route:vc ckpt-out:"$OUT/ctt.ckpt"
+[[ $RC == 0 ]] && ! grep -q '^compactions' "$LOG" || { cat "$LOG"; echo "FAIL: cert_trace route:vc (tables) compacted"; exit 1; }
+cmp -s "$OUT/t_sa_ir/steps.trace" <(grep '^STEP' "$LOG") || { echo "FAIL: cert_trace route:vc (tables) differs from cert_run (600 cycles)"; exit 1; }
+ct "$OUT/seqm_lean/seqm.dcert" 600 "$OUT/seqw600.stim" route:vc compact:3 ckpt-out:"$OUT/ctt3.ckpt"
+[[ $RC == 0 ]] && has "compactions 199 (every 3 cycles)" || { cat "$LOG"; echo "FAIL: cert_trace route:vc (tables) compact:3"; exit 1; }
+cmp -s "$OUT/t_sa_ir/steps.trace" <(grep '^STEP' "$LOG") || { echo "FAIL: cert_trace route:vc (tables) compact:3 changed the trace"; exit 1; }
+cmp -s "$OUT/ctt.ckpt" "$OUT/ctt3.ckpt" && cmp -s "$OUT/ctt.ckpt" "$OUT/sa_vc.ckpt" || { echo "FAIL: cert_trace route:vc (tables) final checkpoint"; exit 1; }
 
 # stops
 expect 0 limit "$B" bind:"$OUT/busm.bind" load:"$OUT/prog.elf" max:20

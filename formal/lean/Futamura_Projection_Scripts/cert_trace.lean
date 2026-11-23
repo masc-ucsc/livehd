@@ -8,7 +8,7 @@ traces are compared line by line.
 
     lean --run Futamura_Projection_Scripts/cert_trace.lean <cert> <cycles> <stim>
          [edges:all|edges:third|edges:file:<path>] [init:reset|init:zero] [route:ir|route:vc]
-         [opt:off] [opt:stats] [inc:off|inc:scan] [ckpt-in:<file>] [ckpt-at:<cycle>:<file>] [ckpt-out:<file>]
+         [opt:off] [opt:stats] [inc:off|inc:scan] [mem:fun] [ckpt-in:<file>] [ckpt-at:<cycle>:<file>] [ckpt-out:<file>]
          [compact:<cycles>]
 
 `stim v1` is the dcert2_memroute format, restricted to what an RTL testbench
@@ -54,6 +54,13 @@ pending, and only pending bindings are visited, so a step costs what changed, no
 size. `runEvOpt_correct` proves such a run is `interpretDesign`'s run (`fanout_ok`: the table
 lists every reader). `inc:scan` runs the earlier incremental step (`incStep`), which visits
 every binding to see whether an operand changed; both give the same lines.
+
+The event-driven step keeps each memory as a TABLE (`Compiler/ResidualFlat`): a write copies
+one chunk instead of adding a closure in front of the image, so a read costs the same at any
+age. `runEvFlatOpt_correct` proves such a run is `interpretDesign`'s run from the state the
+tables stand for (`absS_ofState`: tables built from the start state stand for it). Automatic
+compaction is not needed then and is skipped; an explicit `compact:<K>` still compacts.
+`mem:fun` runs the event-driven step with memories as functions (the closure chains).
 
 Checkpoints (`lhdcert-ckpt v1`, `Compiler/Ckpt.lean`, `pass/lean/tools/formats/ckpt.md`):
 
@@ -103,6 +110,8 @@ import LeanSemanticPrimitives.Compiler.Ckpt
 import LeanSemanticPrimitives.Compiler.ResidualInc
 -- route:vc's default incremental step is event-driven (`runEvOpt_correct`)
 import LeanSemanticPrimitives.Compiler.ResidualEv
+-- ... with memories as tables (`runEvFlatOpt_correct`)
+import LeanSemanticPrimitives.Compiler.ResidualFlat
 import Std.Data.HashMap
 
 open Compiler
@@ -254,6 +263,7 @@ def main (args : List String) : IO UInt32 := do
     let mut optStats := false
     let mut incOn := true
     let mut incScan := false
+    let mut memFun := false
     let mut schedPath : Option String := none
     let mut ckptIn : Option String := none
     let mut ckptAt : Array (Nat × String) := #[]
@@ -291,6 +301,7 @@ def main (args : List String) : IO UInt32 := do
         | "opt:stats" => optStats := true
         | "inc:off" => incOn := false
         | "inc:scan" => incScan := true
+        | "mem:fun" => memFun := true
         | _ => do IO.eprintln s!"unknown option {opt}"; return 2
     let (_, D) ← Projection.CertLoadAny.loadAny cert
     let st ← match parseStim (← IO.FS.readFile stimPath) with
@@ -343,11 +354,35 @@ def main (args : List String) : IO UInt32 := do
             bindings {R0.bindings.size} -> {R.bindings.size}"
         let inc := incOn && ResidualInc.wellOrdered R
         if optStats then
-          IO.eprintln s!"vc incremental: {if inc then (if incScan then "on (scan)" else "on (event-driven)") else if incOn then "off (not well-ordered)" else "off"}"
+          IO.eprintln s!"vc incremental: {if inc then (if incScan then "on (scan)" else if memFun then "on (event-driven)" else "on (event-driven, memories as tables)") else if incOn then "off (not well-ordered)" else "off"}"
         -- the steps of `ResidualInc.runEv` (or `runInc`, inc:scan): the first (also the first
         -- after a checkpoint) full, the others from the last step's environment (`env`, updated
         -- in place); the fanout table built once
         let fan := if inc && !incScan then ResidualInc.fanout R else #[]
+        if inc && !incScan && !memFun then
+          -- memories as tables (`ResidualFlat.runEvF`): no closure chains, so automatic
+          -- compaction is skipped; an explicit compact:<K> still compacts
+          let depth := fun (k : Nat) => (D.memories[k]?.map (·.depth)).getD 0
+          let compactF := if compactAuto then 0 else compactK
+          let mut sF := ResidualFlat.ofState depth s
+          let mut envF : ResidualFlat.SlotEnvF := #[]
+          let mut compactions := 0
+          for k in List.range' start cycles do
+            if ckptAt.any (·.1 == k) then saveAt k (ResidualFlat.absS sF)
+            if compactF > 0 && k > start && (k - start) % compactF == 0 then
+              sF := ResidualFlat.ofState depth (Ckpt.restore (Ckpt.save D hash k #[] (ResidualFlat.absS sF)))
+              compactions := compactions + 1
+            let e := edgesAt D third sched k
+            let i := tab.inputAt k
+            envF := if k == start then ResidualFlat.fullEnvF R i sF else ResidualFlat.evEnvF R fan envF i sF
+            let r := ResidualFlat.stepOfEnvF R envF e sF
+            IO.println s!"STEP {k} {" ".intercalate (r.1.toList.map (fun o => toString (bv_uint o)))}"
+            sF := r.2
+          saveAt (start + cycles) (ResidualFlat.absS sF)
+          if compactF > 0 then
+            (← IO.getStdout).flush  -- after every STEP line, also when both go to one file
+            IO.eprintln s!"compactions {compactions} (every {compactF} cycles)"
+          return 0
         let mut env : SlotEnv := #[]
         let mut compactions := 0
         for k in List.range' start cycles do
@@ -414,5 +449,5 @@ def main (args : List String) : IO UInt32 := do
         IO.eprintln s!"compactions {compactions} (every {compactK} cycles{if compactAuto then ", automatic" else ""})"
       return 0
   | _ =>
-    IO.eprintln "usage: cert_trace <cert> <cycles> <stim> [edges:all|edges:third] [init:reset|init:zero] [route:ir|route:vc] [opt:off] [opt:stats] [inc:off|inc:scan] [ckpt-in:<file>] [ckpt-at:<cycle>:<file>] [ckpt-out:<file>] [compact:<cycles>]"
+    IO.eprintln "usage: cert_trace <cert> <cycles> <stim> [edges:all|edges:third] [init:reset|init:zero] [route:ir|route:vc] [opt:off] [opt:stats] [inc:off|inc:scan] [mem:fun] [ckpt-in:<file>] [ckpt-at:<cycle>:<file>] [ckpt-out:<file>] [compact:<cycles>]"
     return 2

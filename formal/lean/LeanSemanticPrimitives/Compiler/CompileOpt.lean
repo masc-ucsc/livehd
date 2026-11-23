@@ -9,7 +9,8 @@ and input, with the same hypothesis as `compileDesign_correct` alone.
 `runIncOpt_correct` adds the incremental step (`ResidualInc`): a whole run of the optimized
 program, each step after the first reusing the last step's unchanged values, is
 `interpretDesign`'s run. `runEvOpt_correct` says the same of the event-driven step
-(`ResidualEv`), which visits only the bindings a changed slot's readers reach.
+(`ResidualEv`), which visits only the bindings a changed slot's readers reach, and
+`runEvFlatOpt_correct` of that step with memories as tables (`ResidualFlat`).
 
 Mathlib side, because `compileDesign_correct` is.
 -/
@@ -17,6 +18,7 @@ import LeanSemanticPrimitives.Compiler.CompileDesign
 import LeanSemanticPrimitives.Compiler.ResidualOptSound
 import LeanSemanticPrimitives.Compiler.ResidualInc
 import LeanSemanticPrimitives.Compiler.ResidualEv
+import LeanSemanticPrimitives.Compiler.ResidualFlat
 
 namespace Compiler
 
@@ -64,8 +66,20 @@ theorem runEvOpt_correct (D : DesignCert) (R : ResidualProgram)
   rw [ResidualInc.runEv_eq_runFull hw, ← ResidualInc.runInc_eq_runFull hw]
   exact runIncOpt_correct D R hc hw s ticks
 
+/-- **vc's event-driven run with memories as tables is `interpretDesign`'s run** from the state
+the tables stand for (`ResidualFlat.absS`; `absS_ofState`: tables built from a state stand for it). -/
+theorem runEvFlatOpt_correct (D : DesignCert) (R : ResidualProgram)
+    (hc : compileDesign D = .ok R) (hw : ResidualInc.wellOrdered (ResidualOpt.optimize R) = true) :
+    ∀ (s : ResidualFlat.RuntimeStateF) (ticks : List (ClockEdges × RuntimeInput)),
+      (ResidualFlat.runEvF (ResidualOpt.optimize R) s ticks).map ResidualFlat.absRes
+        = runInterp D (ResidualFlat.absS s) ticks := by
+  intro s ticks
+  rw [ResidualFlat.runEvF_correct hw, ← ResidualInc.runInc_eq_runFull hw]
+  exact runIncOpt_correct D R hc hw _ ticks
+
 end Compiler
 
 #print axioms Compiler.compileOpt_correct
 #print axioms Compiler.runIncOpt_correct
 #print axioms Compiler.runEvOpt_correct
+#print axioms Compiler.runEvFlatOpt_correct
