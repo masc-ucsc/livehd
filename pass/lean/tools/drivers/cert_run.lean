@@ -40,7 +40,13 @@ documents every option; in short:
   a restored state holds each memory as one table. The outputs do not change:
   `Projection/CkptResume.lean`'s `resume_exact` proves that a run from the restored checkpoint
   of a state prints what a run from the state prints, and `HDLProof/Run/Sound.lean`'s
-  `compacted_outputs` chains it over the segments of a run. Default: off.
+  `compacted_outputs` chains it over the segments of a run. `compact:0` turns it off.
+  Default: automatic. A run whose limit passes 256 cycles (`autoCompactK`), of a design with
+  memories, compacts every 256 cycles when the certificate meets the theorem's hypotheses
+  (`compactBlocker`: `checkDesign`, `addrError`, `imgRootError`, `wordError`; otherwise the
+  summary says why not, and nothing is compacted). The summary's `compactions` line then ends
+  in `automatic`.
+* A stimulus file's inputs come from a table built once (`StimTab`), with `inputAt`'s rules.
 
 The summary ends with `RESULT: <status>`. Exit code: 0 for `exit` with code 0, `stop-output`,
 `limit`, `breakpoint` and `watchpoint`; 1 for `exit` with another code and the failure
@@ -81,6 +87,21 @@ structure Opts where
   ckptAt   : Array (Nat × String) := #[]
   ckptOut  : Option String := none
   compact  : Nat := 0
+  /-- no `compact:` option: compact every `autoCompactK` cycles when the run and design allow -/
+  compactAuto : Bool := true
+
+/-- The period of automatic compaction, in cycles. Measured on the census designs: a
+compaction costs 14-70 ms, 3-15 cycles' worth, so every 256 cycles it adds 1.4-5% and keeps
+the time per cycle flat. -/
+def autoCompactK : Nat := 256
+
+/-- Why compaction is not covered by `compacted_outputs` on this certificate, or `none`: the
+theorem's hypotheses, checked (`checkDesign_sound` gives `DesignSemWF`). -/
+def compactBlocker (D : DesignCert) : Option String :=
+  match Compiler.Direct.checkDesign D with
+  | .error e => some s!"checkDesign: {e.render}"
+  | .ok _ => (MemAddr.addrError D).orElse fun _ =>
+      (Ckpt.imgRootError D).orElse fun _ => Ckpt.wordError D
 
 def parseOpts (args : List String) : Except String Opts := do
   let mut o : Opts := {}
@@ -123,7 +144,7 @@ def parseOpts (args : List String) : Except String Opts := do
     else if a.startsWith "ckpt-out:" then o := { o with ckptOut := some (drop "ckpt-out:") }
     else if a.startsWith "compact:" then
       match (drop "compact:").toNat? with
-      | some n => o := { o with compact := n }
+      | some n => o := { o with compact := n, compactAuto := false }
       | none => throw s!"bad {a}"
     else throw s!"unknown option {a}"
   return o
@@ -259,6 +280,13 @@ def main (args : List String) : IO UInt32 := do
       unless c0 ≤ k && k ≤ c0 + o.max do
         IO.eprintln s!"ckpt-at:{k}:{p}: cycle {k} is outside this run ({c0} .. {c0 + o.max})"; return 2
     let ctx := Ctx.mk' D bind stim edges stepper
+    -- automatic compaction: on a run that may reach it, for a design with memories whose
+    -- certificate meets `compacted_outputs`' hypotheses
+    let mut o := o
+    if o.compactAuto && o.max > autoCompactK && D.memories.size > 0 then
+      match compactBlocker D with
+      | none => o := { o with compact := autoCompactK }
+      | some why => say s!"automatic compaction off: {why}"
     let ls ← match o.lockstep with
       | none => pure none
       | some r => match mkStepper D r o.opt with
@@ -349,7 +377,8 @@ def main (args : List String) : IO UInt32 := do
         say s!"word {nm} {match st.host.words.find? (·.1 == a) with | some (_, v) => hexS v | none => "-"}"
     unless bind.buses.isEmpty do
       say s!"bus reads {st.host.stats.reads} writes {st.host.stats.writes} fetches {st.host.stats.fetches} wait_cycles {st.host.stats.waits}"
-    if o.compact > 0 then say s!"compactions {compactions} (every {o.compact} cycles)"
+    if o.compact > 0 then
+      say s!"compactions {compactions} (every {o.compact} cycles{if o.compactAuto then ", automatic" else ""})"
     say s!"wall_ms {ns / 1000000} cycles_per_s {if ns == 0 then 0 else applied * 1000000000 / ns}"
     say s!"RESULT: {status}"
     let ok := ["stop-output", "limit", "breakpoint", "watchpoint"].contains status ||

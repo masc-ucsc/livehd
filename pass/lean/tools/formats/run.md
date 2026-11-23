@@ -62,7 +62,11 @@ cert_run <cert> [bind:<file>] [stim:<file>] [edges:all|edges:third|edges:file:<p
   the previous cycle's, and keeps that cycle's evaluated slots alive. Without compaction, a
   run's memory use grows every cycle and a memory read walks back to the run's start, even
   when nothing is written. A restored state holds each memory as one table, so the growth and
-  the read cost are bounded by `K` cycles. The outputs do not change (below). Default: off.
+  the read cost are bounded by `K` cycles. The outputs do not change (below). `compact:0` turns
+  it off. Default: automatic. A run whose limit passes 256 cycles, of a design with memories,
+  compacts every 256 cycles when the certificate meets the theorem's hypotheses (`checkDesign`,
+  `addrError`, `imgRootError`, `wordError`; otherwise the summary says why not). The summary's
+  `compactions` line then ends in `automatic`. cert_trace does the same.
 
 ## Output
 

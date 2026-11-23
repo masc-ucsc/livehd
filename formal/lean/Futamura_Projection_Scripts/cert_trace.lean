@@ -71,7 +71,15 @@ Both routes write the same bytes for the same state, and each resumes from the o
                          The lines do not change: `HDLProof/Run/Sound.lean`'s
                          `compacted_outputs` (from `resume_exact`) for the reference trace,
                          and on route:vc `ResidualInc.incStep_correct` holds for any state,
-                         so the incremental step continues from its environment. Default off.
+                         so the incremental step continues from its environment.
+                         `compact:0` turns compaction off.
+    Default: automatic. A run longer than 256 cycles (`autoCompactK`) of a design with
+    memories compacts every 256 cycles, when the certificate meets the theorem's hypotheses
+    (`compactBlocker`: `checkDesign`, `addrError`, `imgRootError`, `wordError`; otherwise a
+    note on stderr and no compaction). A shorter run, or a design without memories, never
+    compacts, so its stderr is unchanged.
+
+Each cycle's inputs come from a table built once (`StimTab`), with `inputAt`'s rules.
 -/
 import LeanSemanticPrimitives.Projection.CertLoadAny
 import LeanSemanticPrimitives.Compiler.DesignSemantics
@@ -86,6 +94,7 @@ import LeanSemanticPrimitives.Compiler.ResidualOpt
 import LeanSemanticPrimitives.Compiler.Ckpt
 -- route:vc steps incrementally (`runIncOpt_correct`)
 import LeanSemanticPrimitives.Compiler.ResidualInc
+import Std.Data.HashMap
 
 open Compiler
 
@@ -100,19 +109,21 @@ def parseStim (txt : String) : Except String Stim := do
   | [] => .error "empty stimulus file"
   | hdr :: rest =>
     if hdr != "stim v1" then .error s!"line 1: expected \"stim v1\", got {repr hdr}"
-    let mut st : Stim := {}
+    -- in file order, pushed to arrays (appending to a list copied it: quadratic)
+    let mut ats : Array (Nat × Nat × Nat × Int) := #[]
+    let mut evs : Array (Nat × Nat × Int) := #[]
     for l in rest do
       match (l.splitOn " ").filter (· != "") with
       | ["at", c, "in", i, w, v] =>
           match c.toNat?, i.toNat?, w.toNat?, v.toInt? with
-          | some c, some i, some w, some v => st := { st with at_ := st.at_ ++ [(c, i, w, v)] }
+          | some c, some i, some w, some v => ats := ats.push (c, i, w, v)
           | _, _, _, _ => throw s!"unparseable {repr l}"
       | ["in", i, w, v] =>
           match i.toNat?, w.toNat?, v.toInt? with
-          | some i, some w, some v => st := { st with every := st.every ++ [(i, w, v)] }
+          | some i, some w, some v => evs := evs.push (i, w, v)
           | _, _, _ => throw s!"unparseable {repr l}"
       | _ => throw s!"unrecognised {repr l}"
-    pure st
+    pure { every := evs.toList, at_ := ats.toList }
 
 /-- The declared width of input ordinal `i` (from its `SourceDesc.input`), or 1. -/
 def inputWidth (D : DesignCert) (i : Nat) : Nat :=
@@ -134,6 +145,55 @@ def inputAt (D : DesignCert) (st : Stim) (k : Nat) : RuntimeInput :=
       match st.every.find? (fun t => t.1 == i) with
       | some (_, w, v) => mk_bv w v
       | none           => mk_bv (inputWidth D i) 0
+
+/-- The stimulus as tables, built once per run: each input's value on a cycle no `at` line
+names it (its first `in` line, else 0 at its declared width), and the `at` lines grouped by
+cycle, in file order. `StimTab.inputAt` gives `inputAt`'s inputs (the same first-match rules)
+without scanning the stimulus and the design's sources on every cycle. Keep it in step with
+`HDLProof/Run/Stim.lean`'s copy, which `tests/stim_tab_check.lean` checks against `inputAt`. -/
+structure StimTab where
+  base : RuntimeInput
+  at_  : Std.HashMap Nat (Array (Nat × Nat × Int))
+
+def StimTab.of (D : DesignCert) (st : Stim) : StimTab := Id.run do
+  let n := maxInput D
+  -- each ordinal's width: its first `SourceDesc.input` (else 1)
+  let mut width : Array (Option Nat) := Array.replicate n none
+  for s in D.sources do
+    match s with
+    | .input idx w => if idx < n && width[idx]!.isNone then width := width.set! idx (some w)
+    | _ => pure ()
+  -- each ordinal's value when no `at` line names it: its first `in` line
+  let mut every : Array (Option (Nat × Int)) := Array.replicate n none
+  for (i, w, v) in st.every do
+    if i < n && every[i]!.isNone then every := every.set! i (some (w, v))
+  let base := (Array.range n).map fun i =>
+    match every[i]! with
+    | some (w, v) => mk_bv w v
+    | none => mk_bv (width[i]!.getD 1) 0
+  let mut at_ : Std.HashMap Nat (Array (Nat × Nat × Int)) := {}
+  for (c, i, w, v) in st.at_ do
+    at_ := at_.insert c ((at_.getD c #[]).push (i, w, v))
+  return { base, at_ }
+
+/-- Cycle `k`'s inputs: an input's first `at` line for cycle `k` wins, else its base value. -/
+def StimTab.inputAt (t : StimTab) (k : Nat) : RuntimeInput :=
+  match t.at_.get? k with
+  | none => t.base
+  | some ls => ls.foldr (fun (i, w, v) acc => if i < acc.size then acc.set! i (mk_bv w v) else acc) t.base
+
+/-- The period of automatic compaction, in cycles. Measured on the census designs: a
+compaction costs 14-70 ms, 3-15 cycles' worth, so every 256 cycles it adds 1.4-5% and keeps
+the time per cycle flat. -/
+def autoCompactK : Nat := 256
+
+/-- Why compaction is not covered by `compacted_outputs` on this certificate, or `none`: the
+theorem's hypotheses, checked (`checkDesign_sound` gives `DesignSemWF`). -/
+def compactBlocker (D : DesignCert) : Option String :=
+  match Compiler.Direct.checkDesign D with
+  | .error e => some s!"checkDesign: {e.render}"
+  | .ok _ => (MemAddr.addrError D).orElse fun _ =>
+      (Ckpt.imgRootError D).orElse fun _ => Ckpt.wordError D
 
 def zeroState (D : DesignCert) : RuntimeState :=
   { flops := D.flops.map (fun f => mk_bv f.width 0)
@@ -189,6 +249,7 @@ def main (args : List String) : IO UInt32 := do
     let mut ckptAt : Array (Nat × String) := #[]
     let mut ckptOut : Option String := none
     let mut compactK : Nat := 0
+    let mut compactAuto := true
     for opt in rest do
       if opt.startsWith "edges:file:" then
         schedPath := some (opt.replace "edges:file:" "")
@@ -198,7 +259,7 @@ def main (args : List String) : IO UInt32 := do
         ckptOut := some (opt.replace "ckpt-out:" "")
       else if opt.startsWith "compact:" then
         match (opt.replace "compact:" "").toNat? with
-        | some k => compactK := k
+        | some k => compactK := k; compactAuto := false
         | none => do IO.eprintln s!"compact: {repr opt} is not a number of cycles"; return 2
       else if opt.startsWith "ckpt-at:" then
         match (opt.replace "ckpt-at:" "").splitOn ":" with
@@ -229,6 +290,13 @@ def main (args : List String) : IO UInt32 := do
       | some path => match parseEdges (← IO.FS.readFile path) with
         | .ok rows => pure (some rows)
         | .error e => do IO.eprintln s!"edges: {e}"; return 2
+    let tab := StimTab.of D st
+    -- automatic compaction: on a run long enough to reach it, for a design with memories whose
+    -- certificate meets `compacted_outputs`' hypotheses
+    if compactAuto && cycles > autoCompactK && D.memories.size > 0 then
+      match compactBlocker D with
+      | none => compactK := autoCompactK
+      | some why => IO.eprintln s!"automatic compaction off: {why}"
     let mut s := if zeroInit then zeroState D else resetState D
     -- checkpoints: the design hash is computed only when one is read or written
     let hash := if ckptIn.isSome || ckptOut.isSome || !ckptAt.isEmpty then Ckpt.designHash D else 0
@@ -275,7 +343,7 @@ def main (args : List String) : IO UInt32 := do
             s := Ckpt.restore (Ckpt.save D hash k #[] s)
             compactions := compactions + 1
           let e := edgesAt D third sched k
-          let i := inputAt D st k
+          let i := tab.inputAt k
           let r ← if !inc then pure (denoteResidual R e i s)
             else if k == start then do
               let env0 := ResidualInc.fullEnv R i s
@@ -288,7 +356,9 @@ def main (args : List String) : IO UInt32 := do
           IO.println s!"STEP {k} {" ".intercalate (r.outputs.toList.map (fun o => toString (bv_uint o)))}"
           s := r.nextState
         saveAt (start + cycles) s
-        if compactK > 0 then IO.eprintln s!"compactions {compactions} (every {compactK} cycles)"
+        if compactK > 0 then
+          (← IO.getStdout).flush  -- after every STEP line, also when both go to one file
+          IO.eprintln s!"compactions {compactions} (every {compactK} cycles{if compactAuto then ", automatic" else ""})"
         return 0
     -- `directStep` is proved equal to `interpretDesign` on every input it
     -- accepts (`directStep_correct`; it refuses a certificate or runtime shape
@@ -319,13 +389,15 @@ def main (args : List String) : IO UInt32 := do
         if compactK > 0 && k > start && (k - start) % compactK == 0 then
           s := Ckpt.restore (Ckpt.save D hash k #[] s)
           compactions := compactions + 1
-        let r ← match Compiler.Staged.stepChecked P (edgesAt D third sched k) (inputAt D st k) s with
+        let r ← match Compiler.Staged.stepChecked P (edgesAt D third sched k) (tab.inputAt k) s with
           | .ok r => pure r
           | .error e => do IO.eprintln s!"step {k}: refused: {e.render}"; return 1
         IO.println s!"STEP {k} {" ".intercalate (r.outputs.toList.map (fun o => toString (bv_uint o)))}"
         s := r.nextState
       saveAt (start + cycles) s
-      if compactK > 0 then IO.eprintln s!"compactions {compactions} (every {compactK} cycles)"
+      if compactK > 0 then
+        (← IO.getStdout).flush  -- after every STEP line, also when both go to one file
+        IO.eprintln s!"compactions {compactions} (every {compactK} cycles{if compactAuto then ", automatic" else ""})"
       return 0
   | _ =>
     IO.eprintln "usage: cert_trace <cert> <cycles> <stim> [edges:all|edges:third] [init:reset|init:zero] [route:ir|route:vc] [opt:off] [opt:stats] [inc:off] [ckpt-in:<file>] [ckpt-at:<cycle>:<file>] [ckpt-out:<file>] [compact:<cycles>]"

@@ -285,6 +285,36 @@ for mode in "route:ir" "route:vc" "route:vc inc:off"; do
   cmp -s "$OUT/ct_plain.txt" <(grep '^STEP' "$LOG") || { echo "FAIL: cert_trace $mode compact:3 changed the trace"; exit 1; }
   cmp -s "$OUT/ct_plain.txt" "$OUT/t_sw_ir/steps.trace" || { echo "FAIL: cert_trace $mode differs from cert_run"; exit 1; }
 done
+# automatic compaction (the default past 256 cycles): 600 cycles of writes compact at 256 and
+# 512 and print what compact:0 prints, on both drivers (cert_run: ir, vc and fp)
+python3 -I - "$OUT/seqm_lean/seqm_io.json" "$OUT/seqw600.stim" <<'PY'
+import json, random, sys
+ins = {i['name']: i for i in json.load(open(sys.argv[1]))['inputs']}
+r = random.Random(11)
+lines = ['stim v1']
+for k in range(600):
+    we = 1 if r.random() < 0.4 else 0
+    for n, v in (('we', we), ('wa', r.randrange(12)), ('wd', r.randrange(256))):
+        lines.append(f"at {k} in {ins[n]['ordinal']} {ins[n]['width']} {v}")
+open(sys.argv[2], 'w').write('\n'.join(lines) + '\n')
+PY
+for rt in ir vc fp; do
+  run "$OUT/seqm_lean/seqm.dcert" stim:"$OUT/seqw600.stim" route:$rt trace:"$OUT/t_sa_$rt" ckpt-out:"$OUT/sa_$rt.ckpt" max:600
+  [[ $RC == 0 ]] && has "compactions 2 (every 256 cycles, automatic)" || { cat "$LOG"; echo "FAIL: seqm automatic compaction, $rt"; exit 1; }
+  run "$OUT/seqm_lean/seqm.dcert" stim:"$OUT/seqw600.stim" route:$rt trace:"$OUT/t_s0_$rt" ckpt-out:"$OUT/s0_$rt.ckpt" max:600 compact:0
+  [[ $RC == 0 ]] && ! grep -q '^compactions' "$LOG" || { cat "$LOG"; echo "FAIL: seqm compact:0 compacted, $rt"; exit 1; }
+  cmp -s "$OUT/t_sa_$rt/steps.trace" "$OUT/t_s0_$rt/steps.trace" || { echo "FAIL: seqm automatic compaction steps.trace ($rt)"; exit 1; }
+  cmp -s "$OUT/sa_$rt.ckpt" "$OUT/s0_$rt.ckpt" || { echo "FAIL: seqm automatic compaction final checkpoint ($rt)"; exit 1; }
+done
+for mode in "route:ir" "route:vc"; do
+  ct "$OUT/seqm_lean/seqm.dcert" 600 "$OUT/seqw600.stim" $mode
+  [[ $RC == 0 ]] && has "compactions 2 (every 256 cycles, automatic)" || { cat "$LOG"; echo "FAIL: cert_trace $mode automatic compaction"; exit 1; }
+  grep '^STEP' "$LOG" > "$OUT/ct_auto.txt"
+  ct "$OUT/seqm_lean/seqm.dcert" 600 "$OUT/seqw600.stim" $mode compact:0
+  [[ $RC == 0 ]] && ! grep -q '^compactions' "$LOG" || { cat "$LOG"; echo "FAIL: cert_trace $mode compact:0 compacted"; exit 1; }
+  cmp -s "$OUT/ct_auto.txt" <(grep '^STEP' "$LOG") || { echo "FAIL: cert_trace $mode automatic compaction changed the trace"; exit 1; }
+  cmp -s "$OUT/ct_auto.txt" "$OUT/t_sa_ir/steps.trace" || { echo "FAIL: cert_trace $mode differs from cert_run (600 cycles)"; exit 1; }
+done
 
 # stops
 expect 0 limit "$B" bind:"$OUT/busm.bind" load:"$OUT/prog.elf" max:20

@@ -38,11 +38,14 @@ structure Ctx where
   step    : ClockEdges → RuntimeInput → RuntimeState → Except String RuntimeResult
   /-- the declared width of each input ordinal, `0 .. maxInput D - 1` -/
   inW     : Array Nat
+  /-- `stim` as tables (`StimTab.of`), when there is one: the same inputs, built once -/
+  stimTab : Option StimTab := none
 
 def Ctx.mk' (D : DesignCert) (bind : Bind) (stim : Option Stim) (edges : EdgeSpec)
     (st : Stepper) : Ctx :=
   { D, bind, stim, edges, step := st.step,
-    inW := (Array.range (maxInput D)).map (inputWidth D) }
+    inW := (Array.range (maxInput D)).map (inputWidth D),
+    stimTab := stim.map (StimTab.of D) }
 
 structure LoopState where
   s     : RuntimeState
@@ -80,9 +83,10 @@ def setIn (ctx : Ctx) (i : RuntimeInput) (ord v : Nat) : RuntimeInput :=
 /-- The inputs before any bus answers: the stimulus (or zeros), the constants, the reset, and
 every bus's `ready` and `rdata` at 0. -/
 def Ctx.guess (ctx : Ctx) (k : Nat) : RuntimeInput := Id.run do
-  let mut i : RuntimeInput := match ctx.stim with
-    | some st => inputAt ctx.D st k
-    | none => ctx.inW.map fun w => mk_bv w 0
+  let mut i : RuntimeInput := match ctx.stimTab, ctx.stim with
+    | some t, _ => t.inputAt k
+    | none, some st => inputAt ctx.D st k
+    | none, none => ctx.inW.map fun w => mk_bv w 0
   for (o, v) in ctx.bind.consts do i := setIn ctx i o v
   if let some (o, act, n) := ctx.bind.reset then
     i := setIn ctx i o (if k < n then act else if act == 0 then 1 else 0)
