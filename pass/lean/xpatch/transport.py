@@ -12,11 +12,12 @@ i_j only) and writes, for each requested N, B's state R(s_N, h_N) as a folder in
 meta.json `cycle`), to be imported against B's certificate.
 
 The monitor and R are the ones in gen.py's product designs, restated over integers. The monitor
-m_last is the increment A adds in a cycle (din when en, else 0), so after cycle j it holds the
-increment B has not added yet.
-  product        R: B's acc = A's acc - m_last, B's inc = m_last; cnt and arr as A's.
-  product_wrong  the same, except B's acc = A's acc (the control: R leaves out the pending increment).
-Nothing here evaluates B's step or reads any file of B.
+m_flg is set when a write stores 0xFF and never cleared, so after cycle j it holds B's flg.
+  product        R: B's flg = m_flg; acc, cnt and arr as A's.
+  product_wrong  the same R, with a monitor whose flag a write of any other value clears (the
+                 control).
+Nothing here evaluates B's step or reads any file of B. A's own step, restated, is checked
+against A's next saved state at every cycle (the inputs are read right).
 
 usage: transport.py <product|product_wrong> <A states dir> <A _io.json> <stim> <N,N,...> <out dir>
 Writes <out dir>/ckp<N>/ and <out dir>/transport.json (counters, the monitor at every cycle).
@@ -87,23 +88,23 @@ def read_stim(path, ins_by_ord, ncycles):
     return cyc
 
 # ---- the monitor and the relations (the same functions as gen.py's product designs) --------
-def mon(h, s, i):                              # m_add = din when en, else 0; m_last = m_add
-    return {'m_last': i['din'] if i['en'] else 0}
+def mon(h, s, i):                              # if we and (din == 0xFF) { m_flg = true }
+    return {'m_flg': 1 if i['we'] and i['din'] == 0xFF else h['m_flg']}
 
-def R(s, h):                                   # B's acc = acc - m_last, B's inc = m_last
-    return {'acc': (s['acc'] - h['m_last']) % W, 'cnt': s['cnt'], 'inc': h['m_last']}, s['arr']
+def mon_wrong(h, s, i):                        # the control: if we { m_flg = (din == 0xFF) }
+    return {'m_flg': int(i['din'] == 0xFF) if i['we'] else h['m_flg']}
 
-def R_wrong(s, h):                             # the control: B's acc = acc
-    return {'acc': s['acc'], 'cnt': s['cnt'], 'inc': h['m_last']}, s['arr']
+def R(s, h):                                   # B's flg = m_flg; acc, cnt and arr as A's
+    return {'acc': s['acc'], 'cnt': s['cnt'], 'flg': h['m_flg']}, s['arr']
 
-RELATIONS = {'product': R, 'product_wrong': R_wrong}
-H0 = {'m_last': 0}
+RELATIONS = {'product': (mon, R), 'product_wrong': (mon_wrong, R)}
+H0 = {'m_flg': 0}
 
 def main():
     if len(sys.argv) != 7:
         raise SystemExit(__doc__)
     rel, states, a_io, stim, ns, out = sys.argv[1:]
-    rfun = RELATIONS[rel]
+    mfun, rfun = RELATIONS[rel]
     at = sorted(int(x) for x in ns.split(','))
     nmax = at[-1]
     flops, ins, mems = io_names(a_io)
@@ -125,11 +126,15 @@ def main():
     trace = [{'cycle': 0, 'h': dict(h)}]
     written = []
     for j in range(nmax):
-        h = mon(h, prev, inputs[j])                # h_{j+1} = mon(h_j, s_j, i_j)
+        i = inputs[j]
+        h = mfun(h, prev, i)                       # h_{j+1} = mon(h_j, s_j, i_j)
         counters['monitor_steps'] += 1
         cur = state_at(j + 1)
-        # A's own next acc agrees with acc + m_last (the inputs are read right)
-        assert (prev['acc'] + h['m_last']) % W == cur['acc'], (j, prev['acc'], h, cur['acc'])
+        # A's own step, restated, gives A's next saved state (the inputs are read right; the
+        # testbench writes words 0..11 only)
+        want = {'acc': (prev['acc'] + i['din']) % W if i['en'] else prev['acc'], 'cnt': (prev['cnt'] + 1) % W,
+                'arr': [i['din'] if i['we'] and a == i['wa'] else v for a, v in enumerate(prev['arr'])]}
+        assert all(want[k] == cur[k] for k in want), (j, i, want, cur)
         counters['next_state_crosschecks'] += 1
         trace.append({'cycle': j + 1, 'h': dict(h)})
         if j + 1 in at:
@@ -152,11 +157,10 @@ def main():
         json.dump(rep, f, indent=1)
     if counters['monitor_steps'] == 0 or counters['R_evaluations'] != len(at):
         raise SystemExit(f'FAIL: vacuous transport {counters}')
-    pending = [w['cycle'] for w in written if w['h']['m_last'] != 0]
     print(f"transport {rel}: points {at}; counters {json.dumps(counters, sort_keys=True)}")
-    print(f"transport {rel}: an increment is pending at cycles {pending}")
+    print(f"transport {rel}: m_flg at cycles {at}: {[w['h']['m_flg'] for w in written]}")
     for w in written:
-        print(f"  cycle {w['cycle']}: A {w['A_state']} m_last {w['h']['m_last']} -> B {w['B_flops']}")
+        print(f"  cycle {w['cycle']}: A {w['A_state']} m_flg {w['h']['m_flg']} -> B {w['B_flops']}")
 
 if __name__ == '__main__':
     main()

@@ -3,9 +3,10 @@ set -euo pipefail
 # xpatch: B's state computed from A's run, with no cycle of B simulated, and proved right in Lean.
 #
 # Fixtures (gen.py): A, an accumulator with a power-on value, a free-running counter and a
-# 12-word RAM; B, the same with a register on the accumulator's input (it holds each increment
-# for one cycle); the product of A and B with a monitor and a relation R as its output `ok`; the
-# same product with a wrong R; a 40-cycle testbench. Checks:
+# 16-word RAM; B, the same with one more register, flg, a flag set when a write stores 0xFF and
+# never cleared; the product of A and B with a monitor and a relation R as its output `ok`; the
+# same product with a monitor whose flag a write of any other value clears; a 40-cycle testbench
+# with one write of 0xFF. Checks:
 #   proof    sym_verify proves `ok` from power-on (k = 1: the base fact and the square); the
 #            emitted theorem file embeds the product's certificate and is exactly sym_verify's
 #            template; Lean compiles it, and refuses three corrupted copies of it
@@ -14,19 +15,20 @@ set -euo pipefail
 #            as a checkpoint of B, and lhd_ckpt check validates it; nothing in this step runs B
 #   compare  B from power-on: every jumped state equals B's state (lhd_ckpt diff, counted); B
 #            resumes from the jumped cycle-20 state to cycle 40 with the same state and outputs;
-#            the product's run, split by prefix, equals A's run, B's run and the monitor
-# Controls: the wrong R is not k-inductive, has a counterexample from power-on, and its jumped
-# states differ; import-lhd refuses a state with one of B's flops left out; A's outputs differ
-# from B's; Lean's certificate reader refuses a non-certificate; checks.py's comparisons and the
-# grader below each catch deliberately corrupted inputs. A RESULT line follows each command in
-# $OUT/run.log, and the checks at the end grade them, each naming the log line it read.
+#            the product's run, split by prefix, equals A's run, B's run and the monitor. B's
+#            outputs equal A's (no output reads flg), so flg is checked in the states
+# Controls: the wrong monitor is not k-inductive, has a counterexample from power-on, and its
+# jumped states differ; import-lhd refuses a state with one of B's flops left out; Lean's
+# certificate reader refuses a non-certificate; checks.py's comparisons and the grader below each
+# catch deliberately corrupted inputs. A RESULT line follows each command in $OUT/run.log, and the
+# checks at the end grade them, each naming the log line it read.
 #
 # Needs lean and cadical on PATH (formal/lean's toolchain, 4.36.0-rc1) and formal/lean/.olean-dev
 # (formal/lean/.build-proj.sh); the Lean drivers run interpreted against it. Most of the time goes
 # to Lean compiling the emitted theorem and its three corrupted copies, in parallel.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 OUT="${OUT:-$ROOT/generated/xpatch}"
 LHD="${LHD:-$ROOT/bazel-bin/lhd/lhd}"
 [[ -x "$LHD" ]] || { echo "build //lhd:lhd first" >&2; exit 2; }
@@ -89,7 +91,8 @@ for l in open(sys.argv[1]).read().split('\n')[1:]:
     if t:
         v.setdefault(int(t[1]), {})[int(t[3])] = int(t[5])
 print(f"tb.stim: {len(v)} cycles; en high in {sum(c[2] for c in v.values())}; we high in "
-      f"{sum(c[5] for c in v.values())}; words written {sorted({c[4] for c in v.values() if c[5]})}")
+      f"{sum(c[5] for c in v.values())}; words written {sorted({c[4] for c in v.values() if c[5]})}; "
+      f"writes of 0xFF at cycles {sorted(k for k, c in v.items() if c[5] and c[1] == 0xFF)}")
 EOF
 res "testbench" "$(first '^tb.stim:')"
 for n in A B product product_wrong; do
@@ -175,8 +178,8 @@ done
 # the control: the same proof attempt on the wrong relation, and a counterexample from power-on
 drv "$SV" "$OUT/product_wrong/top_lean/top.dcert" ok k:1 init:reset work:"$P/w_wrong_k1"
 res "prove product_wrong k:1 init:reset" "exit $RC: $(grep -oE 'RESULT: .*' "$LAST" | tail -1 || true)"
-drv "$SV" "$OUT/product_wrong/top_lean/top.dcert" ok k:25 base init:reset work:"$P/w_wrong_base"
-res "prove product_wrong base k:25 init:reset" "exit $RC: $(grep -oE 'RESULT: .*' "$LAST" | tail -1 || true)"
+drv "$SV" "$OUT/product_wrong/top_lean/top.dcert" ok k:3 base init:reset work:"$P/w_wrong_base"
+res "prove product_wrong base k:3 init:reset" "exit $RC: $(grep -oE 'RESULT: .*' "$LAST" | tail -1 || true)"
 
 # ------------------------------------------------------------------------------------------
 step "step 3: the jump (only A runs; nothing in this step runs B or a product design)"
@@ -190,7 +193,7 @@ for R in product product_wrong; do
   JP="$OUT/jump_$R"
   run python3 "$SCRIPT_DIR/transport.py" $R "$AS" "$OUT/A/top_lean/top_io.json" "$D/tb.stim" 10,20,30,40 "$JP"
   res "jump $R" "exit $RC: $(first "^transport $R: points" | sed 's/^[^;]*; //')"
-  res "jump $R pending" "$(first "^transport $R: an increment" | sed 's/^transport [^:]*: //')"
+  res "jump $R monitor" "$(first "^transport $R: m_flg at" | sed 's/^transport [^:]*: //')"
   for n in 10 20 30 40; do
     drv "$CK" import-lhd "$OUT/B/top_lean/top.dcert" "$JP/ckp$n" "$JP/$n.ckpt" inst:t
     imp="import exit $RC: $(first '^(OK|REFUSED)')"
@@ -198,11 +201,11 @@ for R in product product_wrong; do
     res "import $R $n" "$imp; check exit $RC: $(first '^(OK|REFUSED)')"
   done
 done
-# the import is strict (no `fill`): the cycle-40 state with B's flop inc left out must be refused
+# the import is strict (no `fill`): the cycle-40 state with B's flop flg left out must be refused
 NEG="$OUT/jump_incomplete/ckp40"; mkdir -p "$NEG"; cp "$OUT/jump_product/ckp40/"* "$NEG/"
-python3 -c "import json,sys; p=sys.argv[1]; d=json.load(open(p)); del d['t.inc']; json.dump(d, open(p,'w'))" "$NEG/regs.json"
+python3 -c "import json,sys; p=sys.argv[1]; d=json.load(open(p)); del d['t.flg']; json.dump(d, open(p,'w'))" "$NEG/regs.json"
 drv "$CK" import-lhd "$OUT/B/top_lean/top.dcert" "$NEG" "$OUT/jump_incomplete/40.ckpt" inst:t
-res "import without flop inc" "exit $RC: $(first '^(OK|REFUSED)')"
+res "import without flop flg" "exit $RC: $(first '^(OK|REFUSED)')"
 J1=$(wc -l < "$L")
 cnt() { sed -n "$((J0 + 1)),${J1}p" "$L" | grep -E '^\$ ' | grep -cF -- "$1" || true; }
 res "simulator commands in step 3" "cert_trace on A $(cnt "cert_trace.lean $OUTR/A/"), on B $(cnt "cert_trace.lean $OUTR/B/"), on a product $(cnt "cert_trace.lean $OUTR/product"); lhd sim $(cnt 'lhd sim'); sym_verify $(cnt 'sym_verify.lean')"
@@ -275,7 +278,7 @@ done
 L=$LREAL
 res "expect selftest" "$st ok / $((sn - st)) FAIL (cases examined: $sn)"
 
-SAME_CK='lhd_ckpt diff exit 0: SAME; checks\.py exit 0: design same, cycle same \(CYC\), flops 3/0, words 12/0, first difference none$'
+SAME_CK='lhd_ckpt diff exit 0: SAME; checks\.py exit 0: design same, cycle same \(CYC\), flops 3/0, words 16/0, first difference none$'
 expect "expect selftest"   '^5 ok / 0 FAIL \(cases examined: 5\)$'
 expect "checks selftest"   '^exit 0: checks selftest: 20 ok / 0 FAIL \(cases examined: 20\)$'
 expect "designs"           '^wrote A\.prp B\.prp product\.prp product_wrong\.prp tb\.stim$'
@@ -292,33 +295,37 @@ for k in badproof wrongdesign baddesign; do
   expect "lean corrupted $k" '^exit [1-9][0-9]*, [0-9]+ s wall; first error: .*native_decide.*false'
 done
 expect "prove product_wrong k:1 init:reset" '^exit 1: RESULT: NOT K-INDUCTIVE \(step\) at k = 1'
-expect "prove product_wrong base k:25 init:reset" '^exit 1: RESULT: COUNTEREXAMPLE \(base, replayed\): .* at cycle 1 '
-# step 3
+# the shortest counterexample is a write of 0xFF and then a write of any other value; it fails
+# at cycle 2, the last cycle that k = 3 searches
+expect "prove product_wrong base k:3 init:reset" '^exit 1: RESULT: COUNTEREXAMPLE \(base, replayed\): .* at cycle 2 '
+# step 3; m_flg at cycles 10, 20, 30 and 40 from tb.stim, whose one write of 0xFF is cycle 9's:
+# set from then on (product); cleared by the next write, cycle 10's (product_wrong)
+mflg() { case $1 in product) echo '1, 1, 1, 1';; product_wrong) echo '1, 0, 0, 0';; esac; }
 expect "run A"             '^exit 0, 41 states \(cycles 0\.\.40\), 40 STEP lines$'
 for R in product product_wrong; do
   expect "jump $R" '^exit 0: counters \{"A_states_read": 41, "B_steps_simulated": 0, "R_evaluations": 4, "monitor_steps": 40, "next_state_crosschecks": 40\}$'
-  expect "jump $R pending" '^an increment is pending at cycles \[[0-9]'
+  expect "jump $R monitor" "^m_flg at cycles \[10, 20, 30, 40\]: \[$(mflg $R)\]\$"
   for n in 10 20 30 40; do
     expect "import $R $n" "^import exit 0: OK: imported cycle $n: 3 flops, 1 memories \(instance .t.\); check exit 0: OK: cycle $n, 3 flops, 1 memories, 0 ext sections$"
   done
 done
-expect "import without flop inc" '^exit 1: REFUSED: flop [0-9]+ \(inc\): regs\.json has no key .t\.inc.'
+expect "import without flop flg" '^exit 1: REFUSED: flop [0-9]+ \(flg\): regs\.json has no key .t\.flg.'
 expect "simulator commands in step 3" '^cert_trace on A 1, on B 0, on a product 0; lhd sim 0; sym_verify 0$'
 # step 4
 expect "B from power-on"   '^exit 0, 41 states \(cycles 0\.\.40\), 40 STEP lines$'
 for n in 10 20 30 40; do expect "compare product $n" "^${SAME_CK/CYC/$n}"; done
 expect "compare product"   '^DIFFER at none; SAME at 10 20 30 40$'
-expect "compare product_wrong" '^DIFFER at [0-9]'
+expect "compare product_wrong" '^DIFFER at 20 30 40; SAME at 10$'
 expect "resume B from jumped 20" '^exit 0, 20 STEP lines \(20\.\.39\)$'
 expect "compare resumed 40" "^${SAME_CK/CYC/40}"
 expect "outputs resumed vs B 20..39" '^exit 0: 20 lines compared, 0 differ, 0 missing$'
-expect "outputs resumed vs A 20..39" '^exit 1: 20 lines compared, [1-9][0-9]* differ, 0 missing'
+expect "outputs resumed vs A 20..39" '^exit 0: 20 lines compared, 0 differ, 0 missing$'
 expect "run product"       '^exit 0, 41 states, 40 STEP lines$'
 expect "ok on the testbench product" '^exit 0: 40 STEP lines read, ok = 1 on 40, ok = 0 on 0$'
-expect "product split product" '^exit 0: 41 cycles, 1230 values compared, 0 differ, first difference none$'
+expect "product split product" '^exit 0: 41 cycles, 1558 values compared, 0 differ, first difference none$'
 expect "run product_wrong" '^exit 0, 41 states, 40 STEP lines$'
-expect "ok on the testbench product_wrong" '^exit 1: 40 STEP lines read, ok = 1 on [0-9]+, ok = 0 on [1-9]'
-expect "product split product_wrong" '^exit 0: 41 cycles, 1230 values compared, 0 differ, first difference none$'
+expect "ok on the testbench product_wrong" '^exit 1: 40 STEP lines read, ok = 1 on 11, ok = 0 on 29 \(first at step 11\)$'
+expect "product split product_wrong" '^exit 0: 41 cycles, 1558 values compared, 0 differ, first difference none$'
 
 say ""; rel < "$CHK" >> "$L"; cat "$CHK"
 V="xpatch: $([[ $NF == 0 ]] && echo PASS || echo FAIL) ($NP of $((NP + NF)) checks passed)"

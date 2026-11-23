@@ -6,7 +6,7 @@ Two designs read the same inputs `I`, one per cycle: A (states `St`, step `step`
 
 A transport from A to B is three small pieces:
 * a monitor `mon : H → St → I → H`: a little extra state, updated each cycle from A's state and
-  input (for example the increment A added in the last cycle);
+  input (for example whether A has ever written 0xFF to its memory);
 * a relation `R : St → H → StB`: a full B state, built from an A state and a monitor value;
 * a start value `h0 : H` with the base fact `R init h0 = initB`.
 

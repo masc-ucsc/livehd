@@ -12,13 +12,13 @@ product, and Lean checks the emitted theorem.
   with stuttering, and is more general than xpatch on timing.
 - The `lhdcert-ckpt` checkpoints, `cert_trace` and `sym_verify` already exist, and each works on
   one design at a time.
+- `sym_verify` can also show that a checkpoint can't occur, a cheap way to reject it before
+  simulating.
 - xpatch adds the jump between two designs: it builds B's full state from A's saved state and a
   monitor (a little extra state computed along A's run), then resumes B from it. With B as the
   implementation and A as the spec, `sym_refmap`'s map goes the other way (it reads the spec's
   state off the implementation); it needs a memory-free spec (both designs here have a memory);
   and its base case starts from the all-zero state, where xpatch starts from power-on.
-
-**Result:** 2026-11-22, livehd `f9bded07a`: `xpatch: PASS (53 of 53 checks passed)`.
 
 ## How it works
 
@@ -40,12 +40,15 @@ with an output `ok` that is 1 when B's state equals `R (A's state) h`) by
 
 ## Example
 
-- **A**: an 8-bit accumulator, a free-running counter and a 12-word memory (the design of
-  `pass/lean/tools/tests/lhd_ckpt_import_test.sh`).
-- **B**: A with a register on the accumulator's input, so each increment lands one cycle later.
-- **Monitor and R**: the monitor holds the increment B has not added yet; R subtracts it from
-  A's accumulator.
-- **Control**: R without the pending increment, which must fail.
+- **A**: an 8-bit accumulator, a free-running counter and a 16-word memory (the design of
+  `pass/lean/tools/tests/lhd_ckpt_import_test.sh` with 16 words instead of 12, so every 4-bit
+  address is inside the memory).
+- **B**: A with one more register, `flg`, a flag set when a write stores 0xFF and never cleared.
+  No output reads `flg`, so B's outputs equal A's, and the checks compare full states.
+- **Monitor and R**: A's state does not hold the flag (a word written with 0xFF can be
+  overwritten later), so the monitor keeps the same flag along A's run; R copies A's state and
+  sets `flg` to the monitor's flag.
+- **Control**: a monitor whose flag clears on a write of any other value, which must fail.
 
 ## Run
 
@@ -54,7 +57,7 @@ With `bazel-bin/lhd/lhd` (`bazel build //lhd:lhd`) and `formal/lean/.olean-dev`
 `formal/lean/lean-toolchain` names on `PATH`:
 
 ```bash
-bash xpatch/run.sh      # LHD=<lhd>, OUT=<dir> override defaults; output in generated/xpatch
+bash pass/lean/xpatch/run.sh      # LHD=<lhd>, OUT=<dir> override defaults; output in generated/xpatch
 ```
 
 It ends with `xpatch: PASS (<n> of <n> checks passed)`. It checks that the proof goes through and
