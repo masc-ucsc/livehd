@@ -49,5 +49,10 @@ for entry in unused:0 used:1 output:5 inout:5; do
     echo "FAIL: $name rc=$rc, expected $expected" >&2
     exit 1
   fi
+  if [ "$expected" -eq 5 ] && ! grep -Fq "gold port 'missing' has no corresponding implementation port" "$W/$name.log"; then
+    cat "$W/$name.log"
+    echo "FAIL: $name must be rejected by the port adapter"
+    exit 1
+  fi
   echo "ok: $name rc=$rc"
 done

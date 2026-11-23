@@ -47,7 +47,7 @@ def parse_ports(path: pathlib.Path, top: str) -> list[Port]:
             continue
 
         words = line.split()
-        direction_index = next((i for i, word in enumerate(words) if word in ("input", "output")), None)
+        direction_index = next((i for i, word in enumerate(words) if word in ("input", "output", "inout")), None)
         if direction_index is None or direction_index + 2 >= len(words):
             continue
         try:
