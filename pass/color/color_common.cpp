@@ -7,6 +7,8 @@
 #include <format>
 #include <vector>
 
+#include "coloring_info.hpp"
+#include "json_util.hpp"
 #include "rapidjson/document.h"
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
@@ -20,27 +22,29 @@ using livehd::graph_util::del_color;
 using livehd::graph_util::has_color;
 using livehd::graph_util::set_color;
 
+Union_find same_color_components(hhds::Graph* g, const Node2Id& node2id) {
+  Union_find uf;
+  for (auto n : g->body().nodes(hhds::Node_order::forward)) {
+    const auto found = node2id.find(n);
+    if (found == node2id.end()) {
+      continue;
+    }
+    auto id = found->second;
+    uf.find(n);  // ensure present even if isolated
+    uf.merge_neighbors(n, [&](const auto& sink) {
+      const auto it = node2id.find(sink);
+      return it != node2id.end() && it->second == id;
+    });
+  }
+
+  return uf;
+}
+
 // Re-number node2id so that each maximal connected region of equal-id nodes
 // gets a distinct fresh id. Two same-id nodes are connected when an edge runs
 // directly between them.
 Node2Id split_continuous(hhds::Graph* g, const Node2Id& node2id) {
-  Union_find uf;
-  for (auto n : g->body().nodes(hhds::Node_order::forward)) {
-    if (!node2id.contains(n)) {
-      continue;
-    }
-    auto id = node2id.at(n);
-    uf.find(n);  // ensure present even if isolated
-    for (const auto& dpin : n.out_sorted_pins()) {  // fanout is a SET
-      for (const auto& e : dpin.out_edges()) {
-        auto snode = e.sink.get_master_node();
-        auto it    = node2id.find(snode);
-        if (it != node2id.end() && it->second == id) {
-          uf.merge(n, snode);
-        }
-      }
-    }
-  }
+  auto uf = same_color_components(g, node2id);
 
   absl::flat_hash_map<hhds::Node_class, int> root2new;
   int                                        next = 1;
@@ -60,14 +64,7 @@ Node2Id split_continuous(hhds::Graph* g, const Node2Id& node2id) {
 
 }  // namespace
 
-bool has_seeded_coloring(hhds::Graph* g) {
-  auto a = g->get_input_node().attr(livehd::attrs::coloring_info);
-  if (!a.has()) {
-    return false;
-  }
-  const std::string info{a.get()};
-  return info.find("\"algorithm\":\"block-attr\"") != std::string::npos || info.find("\"seeded\":true") != std::string::npos;
-}
+bool has_seeded_coloring(hhds::Graph* g) { return coloring_info::seeded(coloring_info::read(*g)); }
 
 int apply_coloring(hhds::Graph* g, const Node2Id& node2id_in, const Color_opts& opts, Def_color_sizes* sizes) {
   const Node2Id  local   = opts.continuous ? split_continuous(g, node2id_in) : node2id_in;
@@ -169,16 +166,10 @@ void clear_coloring(hhds::Graph* g) {
 }
 
 std::string preserve_seeded_info(hhds::Graph* g, std::string fresh_json) {
-  auto a = g->get_input_node().attr(livehd::attrs::coloring_info);
-  if (!a.has()) {
+  auto od = coloring_info::read(*g);
+  if (!coloring_info::seeded(od)) {
     return fresh_json;
   }
-  const std::string old{a.get()};
-  if (old.find("\"algorithm\":\"block-attr\"") == std::string::npos && old.find("\"seeded\":true") == std::string::npos) {
-    return fresh_json;
-  }
-  rapidjson::Document od;
-  od.Parse(old.data(), old.size());
   rapidjson::Document nd;
   nd.Parse(fresh_json.data(), fresh_json.size());
   if (od.HasParseError() || nd.HasParseError() || !od.IsObject() || !nd.IsObject()) {
@@ -227,35 +218,21 @@ std::string build_coloring_info_json(hhds::Graph* g, std::string_view top, std::
   }
 
   // Region count per color = connected components of same-color nodes.
-  Union_find                    uf;
+  auto uf = same_color_components(g, node2id);
+
   absl::flat_hash_map<int, int> color_node_cnt;
-  for (auto n : g->body().nodes(hhds::Node_order::forward)) {
-    auto it = node2id.find(n);
-    if (it == node2id.end()) {
-      continue;
-    }
-    color_node_cnt[it->second]++;
-    uf.find(n);
-    for (const auto& dpin : n.out_sorted_pins()) {
-      for (const auto& e : dpin.out_edges()) {
-        auto snode = e.sink.get_master_node();
-        auto sit   = node2id.find(snode);
-        if (sit != node2id.end() && sit->second == it->second) {
-          uf.merge(n, snode);
-        }
-      }
-    }
-  }
   // Count distinct roots per color.
   absl::flat_hash_map<int, absl::flat_hash_set<hhds::Node_class>> color_roots;
   for (const auto& [n, id] : node2id) {
+    ++color_node_cnt[id];
     color_roots[id].insert(uf.find(n));
   }
 
+  const auto  escaped_top  = json_util::escape(top);
   std::string out         = "{";
   out                    += "\"schema_version\":1,";
-  out                    += std::format("\"top\":\"{}\",", top);
-  out                    += std::format("\"algorithm\":\"{}\",", algorithm);
+  out                     += std::format("\"top\":\"{}\",", escaped_top);
+  out                     += std::format("\"algorithm\":\"{}\",", json_util::escape(algorithm));
   out                    += std::format("\"params\":{},", params_json.empty() ? std::string_view{"{}"} : params_json);
   out                    += "\"colors\":{";
   bool             first  = true;
@@ -274,7 +251,12 @@ std::string build_coloring_info_json(hhds::Graph* g, std::string_view top, std::
     first       = false;
     int regions = static_cast<int>(color_roots[id].size());
     int instcnt = color_node_cnt[id];
-    out += std::format("\"{}\":{{\"name\":\"{}__c{}\",\"region_cnt\":{},\"instance_cnt\":{}}}", id, top, id, regions, instcnt);
+    out         += std::format("\"{}\":{{\"name\":\"{}__c{}\",\"region_cnt\":{},\"instance_cnt\":{}}}",
+                               id,
+                               escaped_top,
+                               id,
+                               regions,
+                               instcnt);
   }
   out += "}";
   if (auto ctrl = g->get_input_node().attr(livehd::attrs::ctrl_stats); ctrl.has()) {

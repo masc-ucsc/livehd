@@ -8,6 +8,7 @@
 #include "attr_carry.hpp"
 #include "bitwidth.hpp"
 #include "color_reduce.hpp"
+#include "coloring_info.hpp"
 #include "diag.hpp"
 #include "fold_body.hpp"
 #include "inline_sub.hpp"
@@ -244,11 +245,7 @@ bool cleanup_loop_bodies(const std::vector<std::shared_ptr<hhds::Graph>>& graphs
       }
       // Colors are local to each definition. A source block with its own ABC
       // settings remains a boundary so those settings retain their identity.
-      auto info = child->get_input_node().attr(livehd::attrs::coloring_info);
-      // Search the std::string directly: gcc 14 -c dbg rejects the TU when the
-      // string_view range constructor is considered here (concept satisfaction
-      // "changed from <expression error>" inside <format>).
-      if (info.has() && info.get().find("region_opts") != std::string::npos) {
+      if (coloring_info::member(coloring_info::read(*child), "region_opts")) {
         continue;
       }
       if (!admit_preparation(budget, "loop-inline", 0)) {

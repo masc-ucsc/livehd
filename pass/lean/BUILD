@@ -45,7 +45,7 @@ cc_library(
     copts = COPTS,
     includes = ["Exporter/Frontend"],
     visibility = ["//visibility:public"],
-    deps = [":lean_certificate_ir"],
+    deps = [":lean_certificate_ir", "//core:file_utils"],
 )
 
 cc_library(

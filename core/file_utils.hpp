@@ -3,6 +3,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -37,6 +38,15 @@ namespace livehd::file_utils {
 // Publish a complete file with a same-directory rename. The caller owns
 // parent directory creation and any lock needed for read-modify-write.
 [[nodiscard]] std::error_code write_file_atomic(const std::string& path, std::string_view bytes);
+
+// The producer streams into an open temporary descriptor and may set its mode.
+// A failed producer or close leaves the previous destination intact.
+[[nodiscard]] std::error_code write_file_atomic(const std::filesystem::path&               path,
+                                                const std::function<std::error_code(int)>& produce);
+
+// Write a caller-owned staging path. Close errors propagate before its caller
+// publishes a generation pointer or a group of companion files.
+void write_staged_file(const std::filesystem::path& path, const std::function<void(std::ostream&)>& emit);
 
 // ---- the workdir lock -------------------------------------------------------
 //

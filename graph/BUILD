@@ -43,6 +43,8 @@ cc_library(
         "graph_library_singleton.hpp",
         "latch_contract.hpp",
         "clock_gate.hpp",
+        "coloring_info.hpp",
+        "definition_order.hpp",
         "inline_sub.hpp",
         "io_decls.hpp",
         "loop_split.hpp",
@@ -63,6 +65,7 @@ cc_library(
     deps = [
         "//core",
         "@hhds//hhds:graph",
+        "@rapidjson",
     ],
     alwayslink = True,  # static-init registers attribute tags
 )
@@ -78,6 +81,7 @@ cc_library(
     ],
 ) for test_name in [
     "attr_carry_test",
+    "clock_gate_test",
     "shared_text_test",
     "graph_library_singleton_test",
     "inline_sub_test",

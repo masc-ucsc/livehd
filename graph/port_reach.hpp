@@ -111,13 +111,16 @@ using Callee_reach = std::function<std::optional<Def_reach>(const std::shared_pt
 class Memory_deps {
 public:
   explicit Memory_deps(const hhds::Node_class& mem);
+  enum class Read_dependencies { include_forwarded_writes, read_controls_only };
+
   // Calls `enqueue` with each comb driver of output `out_pid`; false when the
-  // pin is not a decoded port (callers then join every sink). `writes` false
+  // pin is not a decoded port. The caller chooses the fallback. read_controls_only
   // drops the write cones a forwarding or unclocked memory adds to a read
   // (and the readall arm): an over-approximation a scheduler can afford, but
   // every consumer sequences those writes after the read, so a loop check
   // must not report them -- only an async read's own address/enable is.
-  bool deps(hhds::Port_id out_pid, const std::function<void(const hhds::Pin_class&)>& enqueue, bool writes = true) const;
+  bool deps(hhds::Port_id out_pid, const std::function<void(const hhds::Pin_class&)>& enqueue,
+            Read_dependencies dependencies = Read_dependencies::include_forwarded_writes) const;
 
 private:
   struct Port {

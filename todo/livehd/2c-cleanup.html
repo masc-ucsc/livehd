@@ -13,13 +13,6 @@
 
 <p>Open follow-ups from the codebase deduplication review. Each item records the behavior a shared implementation would need to preserve.</p>
 
-<h2>Graph and coloring</h2>
-<ul class="subtasks">
-  <li>Factor common wiring and port-fit logic from partition emission, flattening, and inlining. Top and region bodies use different forwarding and storage layouts. Keep cut decisions explicit in the port-reachability summary and the legalization walker.</li>
-  <li>Review leaf ICG classification, same-color connectivity, and <code>coloring_info</code> reads for shared helpers. The recognizers disagree on flop and latch shapes and on which pin operations to peel. A shared classifier needs coverage for those shapes before callers adopt it.</li>
-  <li>Review the remaining graph traversal, profiling, and rule-generator helpers for common primitives. The profiler counters have different consumers, and cost-model parsing and rewrite-rule parsing currently accept different integer spellings.</li>
-</ul>
-
 <h2>Pyrope and simulation</h2>
 <ul class="subtasks">
   <li>Review the remaining small frontend helpers in the parser, Slang, Yosys, and uPass. Preserve each frontend’s source locations and diagnostics when sharing code.</li>
@@ -41,7 +34,6 @@
 
 <h2>Core and persistence</h2>
 <ul class="subtasks">
-  <li>Evaluate smaller shared persistence primitives for technology mapping, Lean, and file export. The mapping cache publishes through a generation pointer, Lean publishes companion files together, and export streams large inputs and preserves modes. See <a class="xref" href="json-metadata.html">the JSON metadata task</a>.</li>
   <li>Validate memory profiling and watermark handling on Linux. The regression ran on macOS and could not exercise the Linux <code>/proc</code> paths.</li>
 </ul>
 </main>

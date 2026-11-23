@@ -12,6 +12,10 @@
 
 namespace livehd::clock_gate {
 
+// A leaf exporting a one-bit clock AND its enable sampled on the same clock.
+enum class Leaf_kind { none, latch, flop };
+[[nodiscard]] Leaf_kind classify_leaf(const hhds::Graph& graph);
+
 // Optional work admission (synthesis' Preparation_budget): false stops the pass, which then returns no value. Empty admits all.
 using Admit = std::function<bool(std::string_view stage, uint64_t work)>;
 
