@@ -9,6 +9,9 @@
 // is the one the old peel hit; the unpacked one, in its own process, is the
 // control that was never peeled.
 // :lec_solver: lgyosys
+// The independent proof needs two Yosys strategies. Allow for debug Yosys
+// startup in each, in addition to the time lgcheck reserves for a counterexample.
+// :lec_timeout: 15
 module memory_sync_reset(input clk, rst, we, input [4:0] d,
                          output [4:0] q_packed, q_unpacked);
   reg [0:0][4:0] packed_mem;
