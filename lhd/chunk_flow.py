@@ -16,6 +16,7 @@ import secrets
 import shutil
 import subprocess
 import threading
+import tempfile
 import time
 from socketserver import ThreadingUnixStreamServer
 from chunk_resources import monitor
@@ -276,6 +277,19 @@ class Workspace:
                 result['grid'] = summary(result['grid'])
         return {'tile_fields': fields, 'floorplan': floorplan, 'boundaries':boundary_grid, 'chunks': maps}
 
+    def macro_prerequisites(self, ids, state):
+        pending = []
+        for home in ids:
+            if home not in self.jobs:
+                continue
+            results = state['results'].get(home, {})
+            if any(results.get(stage, {}).get('status') == 'done' for stage in ('macro', 'final')):
+                continue
+            macros = sum(is_macro for is_macro, _ in self.members[home])
+            if macros >= 2:
+                pending.append(home)
+        return pending
+
     def move_io(self, ident, net, xy, measured=False, undo=None):
         with self.writer() as (state, _):
             row = self.show(state, ident)
@@ -283,13 +297,13 @@ class Workspace:
             if port is None:
                 raise ValueError(f'no planned contact {net} on {ident}')
             if measured:
-                macro = row['macro']
-                if macro['status'] != 'done':
-                    raise ValueError('place this chunk at the macro stage first')
-                report = one(json.loads(Path(macro['report']).read_text()), 'chunk_feedback', self.design)
+                stage = 'macro' if measured is True else measured
+                if stage not in ('macro', 'final') or row[stage]['status'] != 'done':
+                    raise ValueError('a current macro or final placement is required for measured feedback')
+                report = one(json.loads(Path(row[stage]['report']).read_text()), 'chunk_feedback', self.design)
                 sample = next((p for p in report.get('boundary', []) if p['net_index'] == net), None)
                 if sample is None:
-                    raise ValueError('macro stage has no measurement for this net')
+                    raise ValueError(f'{stage} stage has no measurement for this net')
                 xy = [a + b for a, b in zip(sample['contact_dbu'], sample['mean_pin_offset_dbu'])]
                 xy = chunk_interfaces.project(row, xy)
             if len(xy) != 2 or not all(math.isfinite(v) for v in xy) or chunk_interfaces.project(row, xy) != list(xy):
@@ -396,6 +410,8 @@ class Workspace:
             "freeze_macros": handoff,
             "shared_edges": edges,
         }
+        if centroids := state.get('centroids', {}).get(k):
+            job['request']['centroids'] = centroids
         if layers := state.get("contact_layers", {}).get(k):
             job["request"]["contact_layers"] = layers
         if grid := self.plan.get("coarse_routing"):
@@ -506,7 +522,7 @@ class Workspace:
                         for key in ('overflow_fraction', 'peak_density', 'target_density'):
                             if key in image:
                                 result[stage][key] = image[key]
-                    for key in ('gp_moved', 'gp_max_displacement_dbu','gp_mean_displacement_dbu'):
+                    for key in ('centroid_groups', 'gp_moved', 'gp_max_displacement_dbu','gp_mean_displacement_dbu'):
                         if key in report:
                             result[stage][key] = report[key]
                     permitted = {net for net, *_ in edges}
@@ -647,6 +663,28 @@ def serve(work, page, no_open, viewer=None, workers=None, compare_dirs=()):
                 elif local and cmd == 'verify-wns':
                     answer = chunk_validate.verify_wns(active, req['trial'], req['branch'], req.get('openroad', 'openroad'),
                                                        req.get('timing_setup'), req.get('keep', False))
+                elif local and cmd == 'replan':
+                    # The request replaces editing intent. Keep the active generation on disk
+                    # until export and reconciliation succeed, then the next call reloads it.
+                    guidance = req['guidance']
+                    if not isinstance(guidance, dict) or set(guidance) - {'topology', 'geometry'}:
+                        raise ValueError('guidance accepts topology and geometry edit arrays')
+                    if any(not isinstance(v, list) for v in guidance.values()):
+                        raise ValueError('floorplan edits must be arrays')
+                    directory = active.manifest.parent
+                    with tempfile.TemporaryDirectory(dir=active.root) as tmp:
+                        path = Path(tmp) / 'guidance.json'
+                        bundle = [dict(guidance, **{'class': PREFIX + 'chunk_guidance', 'design': active.design, 'id': 'agent'})] if guidance else []
+                        atomic_json(path, bundle)
+                        command = [active.exe, 'synth', 'chunk', 'update', '--workdir', str(directory.parent.parent), '--guidance', str(path)]
+                        if 'budget' in req:
+                            command.extend(['--budget', str(req['budget'])])
+                        run = subprocess.run(command, capture_output=True, text=True)
+                        if run.returncode:
+                            raise ValueError(run.stderr.strip().splitlines()[-1] if run.stderr.strip() else 'incremental replan failed')
+                        answer = json.loads(run.stdout)
+                elif local and cmd == 'pcrs':
+                    answer = chunk_validate.pcrs(active, req)
                 elif local and cmd == 'validate':
                     answer = chunk_validate.validate(
                         active,
@@ -753,6 +791,10 @@ def serve(work, page, no_open, viewer=None, workers=None, compare_dirs=()):
                             live.home, live.stage, live.view = ids[0], cmd, None
                             live.update()
                     selected = active.select(ids, req.get('neighbors', False))
+                    if cmd == 'final':
+                        required = active.macro_prerequisites(selected, active.state())
+                        if required:
+                            chunk_dispatch.wave(active, 'macro', required, live.slots, live_frames=True, admit=live.admit)
                     answer = chunk_dispatch.wave(
                         active,
                         cmd,
@@ -860,6 +902,8 @@ def reconcile(old, new, same_engine):
         if new.members[ident] != old.members[ident]:
             repartitioned.append(ident)
             reasons.append('chunk membership')
+        elif groups := prior.get('centroids', {}).get(ident):
+            state.setdefault('centroids', {})[ident] = groups
         if old.jobs[ident].get('score_nets') != new.jobs[ident].get('score_nets'):
             reasons.append('crossing net identities')
         if old.jobs[ident]['checksum'] != new.jobs[ident]['checksum']:
@@ -975,7 +1019,9 @@ def setup_project(exe, page, argv, updating):
     parser.add_argument('--workdir', type=Path)
     parser.add_argument('--budget', metavar='SIZE')
     parser.add_argument('--producer-budget', metavar='SIZE')
-    if not updating:
+    if updating:
+        parser.add_argument('--guidance', type=Path, help='replace saved floorplan editing intent with a JSON bundle')
+    else:
         parser.add_argument('--from-workdir', type=Path, help='reuse this synthesis recipe and mapping caches in a new project')
     parser.add_argument('--workers', type=int)
     opts, args = parser.parse_known_args(argv[:index])
@@ -1064,7 +1110,9 @@ def setup_project(exe, page, argv, updating):
             native += gui_args
             if '--gui' in gui_args and not any(a.startswith('synth.place.gui.pause=') for a in native):
                 native += ['--set', 'synth.place.gui.pause=true']
-            if project.get('guidance'):
+            if opts.guidance is not None:
+                native.append(str(opts.guidance.resolve(strict=True)))
+            elif project.get('guidance'):
                 native.append(str(directory / project['guidance']))
         args = native + reader
         log = directory / 'chunk-build.log'
@@ -1095,13 +1143,14 @@ def setup_project(exe, page, argv, updating):
             shutil.copyfile(seed_def,work.root/'seed.def')
         if not snapshot.exists():
             os.link(work.manifest, snapshot)
-        if '--gui' in native and work.guidance:
+        replace_guidance = '--gui' in native or (updating and opts.guidance is not None)
+        if replace_guidance and work.guidance:
             # Replay the accepted editing intent. A full saved plan would pin the
             # old source revision and prevent the planner from adapting to an ECO.
             guidance = work.root / 'accepted-guidance.json'
             atomic_json(guidance, work.guidance)
             project['guidance'] = str(guidance.relative_to(directory))
-        elif '--gui' in native:
+        elif replace_guidance:
             project.pop('guidance', None)
         summary = reconcile(old, work, engine == project['engine']) if updating else {'added': list(work.jobs)}
         project.update(manifest=snapshot.name, engine=engine)
@@ -1149,6 +1198,7 @@ def main(exe, page, argv):
         sub.add_argument('--gui', action='store_true', help='pause in the interactive floorplan editor')
         sub.add_argument('--gui-no-open', action='store_true', help='print GUI access details without opening a browser')
     update.add_argument('--budget', metavar='SIZE', help='resize the floorplan using a new worker budget')
+    update.add_argument('--guidance', metavar='JSON', help='replace previous floorplan edits, using [] to clear them')
     update.add_argument('--workdir', metavar='DIR', help='project to update (default: current project)')
     cmds.add_parser('plan', usage='%(prog)s SOURCES --workdir DIR [synth options]',
                     help='export fp_plan with the usual synth inputs',
@@ -1239,6 +1289,7 @@ def main(exe, page, argv):
             sub.add_argument('net', type=int, help='net_index from show')
             source = sub.add_mutually_exclusive_group(required=True)
             source.add_argument('--xy', type=float, nargs=2, metavar=('X', 'Y'))
+            source.add_argument('--from-final', action='store_true', help='use the final placement boundary measurement')
             source.add_argument('--from-macro', action='store_true', help='accept the measured local pin centroid projected to the perimeter')
         if cmd=='next':
             sub.add_argument('--objective',choices=['hpwl','wns','density'],default='hpwl')
@@ -1416,7 +1467,7 @@ def main(exe, page, argv):
     elif args.cmd == 'show':
         value = work.show(work.state(), args.id)
     elif args.cmd == 'move-io':
-        value = work.move_io(args.id, args.net, args.xy or [], args.from_macro)
+        value = work.move_io(args.id, args.net, args.xy or [], 'final' if args.from_final else args.from_macro)
     else:
         project = work.manifest.parent / PROJECT
         workers = (
@@ -1430,6 +1481,13 @@ def main(exe, page, argv):
         )
         if args.cgroup_root and workers is None:
             workers = 1
+        if args.cmd == 'final':
+            required = work.macro_prerequisites(work.select(args.ids, args.neighbors), work.state())
+            if required:
+                if workers is None:
+                    work.run('macro', required)
+                else:
+                    chunk_dispatch.wave(work, 'macro', required, workers, cgroup_root=args.cgroup_root)
         if workers is None:
             value = work.run(
                 args.cmd, args.ids, args.neighbors, iterations=args.iterations

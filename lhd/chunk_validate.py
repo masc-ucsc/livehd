@@ -121,6 +121,97 @@ def write_def(work, assembly, destination, owners):
     }
 
 
+def pcrs(work, request):
+    """Evaluate a clock tree on the exact assembled revision, keeping the live placement open."""
+    from chunk_flow import PROJECT
+
+    state = work.state()
+    project = json.loads((work.manifest.parent / PROJECT).read_text())
+    args = project['args']
+    settings = dict(args[i + 1].split('=', 1) for i, a in enumerate(args[:-1]) if a == '--set')
+    cwd = Path(project['cwd'])
+    def inputs(key):
+        return [str(cwd / path) for path in settings.get(key, '').split(',') if path]
+
+    liberty, sdc, lefs = inputs('synth.liberty'), inputs('synth.sdc'), inputs('synth.lef')
+    if not liberty or len(sdc) != 1 or not lefs:
+        raise ValueError('PCRS requires the project Liberty, SDC and LEFs')
+    root = work.root / 'pcrs' / revision(state)
+    root.mkdir(parents=True, exist_ok=True)
+    out = Path(tempfile.mkdtemp(dir=root))
+    placed = stitch(work, state, out / 'placed.def')
+    probe = Path(work.exe).with_name(Path(work.exe).name + '.runfiles') / '_main/tools/clock_probe'
+    cmd = [str(probe), '--def', placed['def'], '--liberty', liberty[0], '--sdc', sdc[0], '--out', str(out)]
+    cmd.append('--legalize-clock')
+    probe_version = probe.stat()
+    route_pops = request.get('legroute_pops')
+    if route_pops is not None:
+        if type(route_pops) is not int or not 0 < route_pops <= 2**32-1:
+            raise ValueError('legroute_pops must be a positive 32-bit integer')
+        cmd.extend(['--legroute-pops', str(route_pops)])
+    route_cache = root / f'legroute-{probe_version.st_ino}-{probe_version.st_mtime_ns}-{route_pops}.json'
+    if request.get('legroute', True) and not route_cache.exists():
+        cmd.append('--legroute')
+    # A home may use the same local id as its neighbor. Qualify nested and
+    # relative references while leaving the exported physical instance names intact.
+    hints = []
+    for home, records in state.get('centroids', {}).items():
+        for record in records:
+            hint = json.loads(json.dumps(record))
+            hint.update(kind='centroid', id=home + '/' + hint['id'])
+            for member in hint['members']:
+                if isinstance(member, dict) and 'centroid' in member:
+                    member['centroid'] = home + '/' + member['centroid']
+            pos = hint.get('position', {})
+            if pos.get('mode') == 'relative':
+                pos['to'] = home + '/' + pos['to']
+            hints.append(hint)
+    if hints:
+        path = out / 'centroids.json'
+        path.write_text(json.dumps([{'class':'livehd.placement.hints', 'schema_version':2,
+                                     'id':'chunk-centroids', 'design':work.design,
+                                     'templates':[{'module':work.design, 'hints':hints}]}]))
+        cmd.extend(['--metadata', str(path)])
+    for path in lefs:
+        cmd.extend(['--lef', path])
+    for path in liberty[1:] + inputs('synth.macro_liberty'):
+        cmd.extend(['--macro-liberty', path])
+    for path in inputs('synth.wire_rc'):
+        cmd.extend(['--wire-rc', path])
+    for field, flag in [('clock_port', '--clock-port'), ('fanout', '--fanout'), ('leaf_steps', '--leaf-steps'),
+                        ('max_slew_ps', '--max-slew'), ('layers', '--layers')]:
+        if field in request:
+            value = request[field]
+            if field in ('fanout', 'leaf_steps') and (type(value) is not int or value < int(field == 'fanout')):
+                raise ValueError(f'invalid {field}')
+            if field == 'max_slew_ps' and (type(value) not in (float, int) or not math.isfinite(value) or value <= 0):
+                raise ValueError('max_slew_ps must be positive')
+            cmd.extend([flag, str(value)])
+    if 'balance' in request and type(request['balance']) is not bool:
+        raise ValueError('balance must be boolean')
+    if request.get('balance', True):
+        cmd.append('--balance-verified')
+    log = out / 'clock.log'
+    with log.open('w') as stream:
+        rc = subprocess.run(cmd, stdout=stream, stderr=subprocess.STDOUT).returncode
+    if rc:
+        raise ValueError(f'PCRS failed, see {log}')
+    report = out / 'pcrs_clock.json'
+    networks = json.loads(report.read_text())['networks']
+    route = out / 'legroute.json'
+    if route.is_file():
+        # Interrupted or concurrent evaluations never publish an incomplete report.
+        try:
+            os.link(route, route_cache)
+        except FileExistsError:
+            pass
+    measured_route = json.loads(route_cache.read_text()) if request.get('legroute', True) else None
+    return dict(legroute=measured_route,
+                revision=placed['revision'], report=str(report), checkpoint=str(out / 'checkpoint.def'),
+                networks=len(networks), buffers=sum(len(n['branches']) for n in networks),
+                infeasible=[n['source_net'] for n in networks if n.get('infeasible')])
+
+
 def tcl_word(s):
     return (
         '"'

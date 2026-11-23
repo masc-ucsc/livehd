@@ -73,6 +73,7 @@ cc_binary(
 
 cc_binary(
     name = "clock_probe",
+    visibility = ["//lhd:__pkg__"],
     srcs = ["clock_probe.cpp"],
     copts = COPTS,
     deps = ["//core", "//inou/lefdef:inou_lefdef", "//pass/place:place", "//pass/timing:physical_rank"],

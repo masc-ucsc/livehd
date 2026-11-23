@@ -16,6 +16,7 @@
 #include <set>
 #include <thread>
 
+#include "centroid_record.hpp"
 #include "chunk_demand.hpp"
 #include "chunk_refine.hpp"
 #include "core/binary_message.hpp"
@@ -837,6 +838,7 @@ int place_chunk_worker(const fs::path& input, const fs::path& output, const std:
     Chunk_demand::Pair                        rates{};
     std::map<std::string, Chunk_demand::Pair> blocked;
     std::map<uint64_t, Slide> slides;
+    Centroid_set centroids;
     if (fs::exists(output / "request.json")) {
       auto request = metadata::Bundle::read((output / "request.json").string());
       auto records = request.select("livehd.placement.chunk_request", job.design);
@@ -848,6 +850,24 @@ int place_chunk_worker(const fs::path& input, const fs::path& output, const std:
       stage = r["stage"].GetString();
       need(stage == "macro" || stage == "final", "unknown chunk stage");
       report.AddMember("stage", str(stage, report), a);
+      if (r.HasMember("centroids")) {
+        need(r["centroids"].IsArray(), "centroids must be an array");
+        for (const auto& record : r["centroids"].GetArray()) {
+          auto centroid = parse_centroid(record);
+          if (centroid.position == Centroid_position_mode::at) {
+            centroid.x_um -= double(job.box[0]) / job.dbu;
+            centroid.y_um -= double(job.box[1]) / job.dbu;
+          }
+          std::string issue;
+          if (!centroids.add(std::move(centroid), &issue)) {
+            throw std::invalid_argument(issue);
+          }
+        }
+        const auto issues = centroids.validate();
+        if (!issues.empty()) {
+          throw std::invalid_argument(issues.front().id + ": " + issues.front().reason);
+        }
+      }
       if (r.HasMember("routing")) {
         const auto& spec = r["routing"];
         need(spec.IsObject() && spec.HasMember("pitch") && spec["pitch"].IsNumber() && spec.HasMember("rates")
@@ -975,6 +995,25 @@ int place_chunk_worker(const fs::path& input, const fs::path& output, const std:
         }
       }
     }
+    if (!centroids.empty()) {
+      std::map<std::string, int> nodes;
+      for (int i = 0; i < owned; ++i) {
+        nodes.emplace(job.names[i], i);
+      }
+      Centroid_compile_options options;
+      options.dbu = job.dbu;
+      options.default_strength = 0.1;
+      options.resolve = [&](const std::string& name) {
+        auto it = nodes.find(name);
+        return it == nodes.end() ? -1 : it->second;
+      };
+      auto compiled = compile_centroids(centroids, d, options);
+      for (const auto& record : compiled.results) {
+        need(record.unresolved == 0, "unknown centroid member in " + record.id);
+      }
+      d.cohesion_groups = std::move(compiled.groups);
+      report.AddMember("centroid_groups", uint64_t(d.cohesion_groups.size()), a);
+    }
     if (!stage.empty()) {
       report.AddMember("solver_movable_nodes", d.num_movable, a);
       report["detailed_place"].SetBool(d.num_movable > 0 && stage == "final" && job.detailed);
@@ -999,6 +1038,9 @@ int place_chunk_worker(const fs::path& input, const fs::path& output, const std:
       // DREAMPlace preserves their total charge and the physical node sizes.
       o.filler_max_count = std::max(d.num_movable, 4 * o.bins_x * o.bins_y);
       report.AddMember("filler_limit", o.filler_max_count, a);
+      if (!d.cohesion_groups.empty()) {
+        o.cohesion_weight = 1.0 / job.dbu;
+      }
       o.num_threads    = job.threads;
       o.max_iterations = job.iterations;
       o.min_iterations = std::min(o.min_iterations, o.max_iterations);

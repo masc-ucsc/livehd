@@ -104,14 +104,18 @@ def check_chunk_stages():
     assert initial_score['stages']['seed'] == len(ids)
     assert abs(initial_score['hpwl_um']*jobs['dbu_per_um'] - jobs['assembly']['seed_hpwl_dbu']) < .01
     assert initial_score['estimated_wns_ps'] is None
-    ram_home = next(c['id'] for c in plan['chunks'] if any(m['macro'] for m in c['members']))
-    direct, = cmd('final', ram_home)
+    ram_home = next(c['id'] for c in plan['chunks'] if sum(m['macro'] for m in c['members']) >= 2)
+    small = next(c['id'] for c in plan['chunks'] if sum(m['macro'] for m in c['members']) < 2)
+    staged, = cmd('final', ram_home)
+    report = json.loads(Path(staged['final']['report']).read_text())[0]
+    assert staged['macro']['status'] == staged['final']['status'] == 'done'
+    assert report['solver_movable_nodes'] == report['movable_nodes'] - report['movable_macros']
+    direct, = cmd('final', small)
     direct_report = json.loads(Path(direct['final']['report']).read_text())[0]
     assert direct['macro']['status'] == 'pending' and direct['final']['status'] == 'done'
-    assert direct_report['movable_macros'] > 0
     assert direct_report['solver_movable_nodes'] == direct_report['movable_nodes']
     assert 'unknown chunk' in cmd('macro', ids[0], 'absent', ok=False)
-    assert len(cmd('list', '--status', 'pending')) == len(ids)
+    assert len(cmd('list', '--status', 'pending')) == len(ids) - 1
     info = {i: cmd('show', i) for i in ids}
     initial = cmd('macro', ids[0], '--neighbors')
     assert {r['id'] for r in initial} == {ids[0], *info[ids[0]]['neighbors']}
@@ -159,11 +163,13 @@ def check_chunk_stages():
         before = {row['id']:row['final']['positions'] for row in cmd('list')}
         assert len(action(cmd='assemble')['chunks'])==len(ids)
         candidates['sparse']={'density':.42}
+        candidates['group']={'centroids':[{'id':'ram-row', 'members':[memory,next(n for n in ref['nodes'] if n!=memory)], 'layout':{'kind':'row'}, 'strength':0.2}]}
         trial = action(cmd='trial', candidates=candidates, hypothesis='Open space around a selected RAM', iterations=100, wait=True)
         assert all(r['status']=='done' and r['iterations']==100 for r in trial['candidates'].values()), trial
         assert trial['candidates']['free']['delta_control_dbu'] == 0
         assert trial['score_scope']=='assembled'
         assert trial['candidates']['free']['delta_assembled']['hpwl_um']==0
+        assert trial['candidates']['group']['centroid_groups'] >= 1
         assert trial['candidates']['sparse']['target_density']==.42
         assert trial['candidates']['sparse']['overflow_fraction']>=0
         assert action(cmd='overview')['accepted']['hpwl_um']==cmd('score')['hpwl_um']

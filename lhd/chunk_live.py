@@ -343,8 +343,10 @@ class LivePlacement:
             rows.append([n, *poses.get(n, locks), *(v is not None for v in locks)])
         return rows, holds_copy
 
-    def solve(self, work, branch, state, home, rows, poses, holds, steps, engine, density, phase, io, coordinate_io):
+    def solve(self, work, branch, state, home, rows, poses, holds, steps, engine, density, phase, io, coordinate_io, centroids):
         seed_state = copy.deepcopy(state)
+        if centroids is not None:
+            seed_state.setdefault('centroids', {})[home] = centroids
         # All inherited paths refer to the parent's immutable artifacts.
         for stages in seed_state['results'].values():
             for result in stages.values():
@@ -536,6 +538,7 @@ class LivePlacement:
                     worker_seconds=sum(v['worker_seconds'] for v in r['measured'].values()),
                     peak_rss_bytes=max(v['peak_rss_bytes'] for v in r['measured'].values()),
                     target_density=stage.get('target_density'),
+                    centroid_groups=stage.get('centroid_groups', 0),
                     overflow_fraction=stage.get('overflow_fraction'),
                     peak_density=stage.get('peak_density'),
                 )
@@ -651,6 +654,8 @@ class LivePlacement:
         for label, edit in edits.items():
             if not isinstance(edit, dict):
                 raise TypeError('candidate must contain an edit')
+            if 'centroids' in edit and not isinstance(edit['centroids'], list):
+                raise TypeError('centroids must be an array of records for this home')
             if 'density' in edit:
                 densities[label] = finite(edit['density'])
                 if not 0 < densities[label] <= 1:
@@ -662,7 +667,7 @@ class LivePlacement:
                 home,
                 geometry,
                 selection,
-                {k: v for k, v in edit.items() if k not in ('density', 'io')},
+                {k: v for k, v in edit.items() if k not in ('density', 'io', 'centroids')},
                 copy.deepcopy(state.get('holds', {}).get(home, {})),
                 image,
             )
@@ -691,6 +696,7 @@ class LivePlacement:
                 phase,
                 io_edits.get(label),
                 bool(io_edits),
+                edits[label].get('centroids'),
             )
         trial = {
             'id': ident,
@@ -943,6 +949,8 @@ class LivePlacement:
                         'activity': 'latest worker, trial and independent validation across registered projects',
                         'explore': 'kind=macro|density|interfaces ids=[...] iterations=N objective=hpwl|wns keep=false; interfaces accepts spread, bus_order and nets; wait=true blocks until measured',
                         'overview': 'accepted, selected, best matched-stage assembled metrics and control delta',
+                        'replan': 'local socket: replace floorplan editing intent with guidance={topology:[...],geometry:[...]}; optional budget, empty guidance clears edits',
+                        'pcrs': 'local socket: build the clock tree on the current assembled finals, with optional clock_port, fanout, leaf_steps, layers, max_slew_ps and balance',
                         'assemble': 'verified manifest of all current local finals, optional revision=HASH',
                         'next': 'objective=hpwl|wns|density',
                         'history': 'query=TEXT limit=N offset=N',
@@ -955,7 +963,7 @@ class LivePlacement:
                     'commands': [
                         'routing', 'interfaces','dispatch','collect','explore','validate','shapes','resources',
                         'floorplan',
-                        'place-design',
+                        'place-design', 'pcrs', 'replan',
                         'overview',
                         'assemble',
                         'next',

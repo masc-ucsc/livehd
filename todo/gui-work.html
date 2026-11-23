@@ -176,6 +176,12 @@ some other chunks' macro positions by a little; that is a guess, not established
   <li><strong class="item-id">F3</strong> <code>tools/lhd_gui.py</code>: <code>screenshot out=FILE</code>, <code>wait state=gate phase=edit</code>, <code>macros</code> (pose, size, orientation, pinned for
   every macro), <code>--retry SECONDS</code> (the socket is down while a restart re-executes <code>lhd</code>; a restart takes about 18 s here).</li>
   <li><strong class="item-id">F4</strong> <code>describe</code> of a macro and <code>macro_scan</code> report <code>track_check</code>: the pins that constrain it and its periods and phases.</li>
+  <li><strong class="item-id">F5</strong> (2026-11-22) The native clock tree, once the flow has built it (<code>synth.place.pcrs.clock=true</code>):
+  <code>clock</code> (<code>summary</code>, <code>nets</code>, <code>sinks</code>, <code>pair</code>, <code>map</code>), a <em>clock tree</em> layer in the page
+  (stage depth, sink arrival, leaf slew, local skew grid), <code>screenshot layers=...,clock</code>, and <code>clock_edit</code>, which stages leaf drive
+  steps, wanted arrivals and scalar <code>synth.place.pcrs</code> options and applies them by a restart. The tree travels in the scene by node index
+  (<code>Scene::clock_nets</code>); code in <code>pass/place/gui/gui_clock.{hpp,cpp}</code>, test <code>gui_clock_test</code>. Checked live on lfsr;
+  see <a href="livehd/2p-pcrs-review.html#gui">2p-pcrs-review</a> for what is not done.</li>
 </ul>
 <p>Tests added: <code>gui_session_test</code> (regex time bound over a 4,000-character name, argument checks, NUL, <code>#index</code>, colours, scalar
 move, restart refusals, placed-macro move, macro_scan ranking/orientation/refinement/tracks, PNG), <code>macro_tracks_test</code> (lattice
@@ -220,6 +226,13 @@ vs legalizer). <code>README.md</code> of <code>pass/place</code> and the <code>l
   helps. <code>macro_scan</code> has nothing to measure at the fp gate (macros there carry no pin connectivity): scan from the macro gate on.</li>
   <li><strong class="item-id">W18</strong> When the GUI controller process died (the <code>bad_alloc</code> of G15) the flow process, 51 GB of it, kept running headless and the controller stayed a zombie. The flow should notice and exit, or restart the controller.</li>
   <li><strong class="item-id">W19</strong> Guidance for a design name the plan does not have is accepted silently (<code>"design":"other"</code> applied); the record is retained, but the agent is not told it matched nothing.</li>
+</ul>
+<h3>Clock tree view (2026-11-22)</h3>
+<ul>
+  <li><strong class="item-id">W20</strong> The arrivals, slews and delays shown are the clock planner's estimates from <code>pcrs_clock.json</code>. Send the timing engine's per-pin early and late clock arrivals with the scene, and say which model each number comes from.</li>
+  <li><strong class="item-id">W21</strong> A clock decision costs a full restart. A gate right after the tree build would let an agent try a leaf drive or a regrouping and read the timing without re-placing.</li>
+  <li><strong class="item-id">W22</strong> The page layer was checked by a syntax pass and a stub-canvas run of its drawing code (no browser on the machine), not by eye. No routed clock wires, no click on a leaf to list or move its members, and no clock information in the hover tip.</li>
+  <li><strong class="item-id">W23</strong> <code>clock_edit</code> writes its own <code>arrival_targets</code> file, so targets passed on the original command line are replaced, not merged (the leaf schedule is merged).</li>
 </ul>
 <h3>API behavior left as found</h3>
 <ul>

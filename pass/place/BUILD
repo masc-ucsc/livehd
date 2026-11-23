@@ -800,7 +800,7 @@ cc_library(
     srcs = ["fp_chunks.cpp", "chunk_geometry.cpp", "chunk_demand.cpp", "chunk_topology.cpp", "chunk_templates.cpp", "chunk_refine.cpp", "chunk_jobs.cpp", "chunk_measure.cpp", "chunk_memory.cpp"],
     hdrs = ["fp_chunks.hpp", "io_spacing.hpp", "chunk_geometry.hpp", "chunk_demand.hpp", "chunk_topology.hpp", "chunk_templates.hpp", "chunk_refine.hpp", "chunk_jobs.hpp", "chunk_measure.hpp", "chunk_memory.hpp"],
     copts = COPTS,
-    deps = ["//core", "@rapidjson", "@dreamplace"],
+    deps = [":centroid_record", "//core", "@rapidjson", "@dreamplace"],
 )
 
 cc_binary(

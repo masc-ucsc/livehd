@@ -45,6 +45,26 @@ gui export what=chunk_peers chunk="$id"
 gui export what=chunk_pins chunk="$id"
 ```
 
+## Iterate from final placement back to the floorplan
+
+On the local chunk socket, `place-design` runs macro planning for homes with two or more
+macro members and then final placement. Use `move-io id=HOME net=N measured=final` to project
+the measured pin centroid onto the boundary. The response identifies the homes to recompute.
+Use `measured=macro` to take feedback from an earlier stage.
+
+A macro or final `trial` candidate can supply `centroids`, an array of placement hint records.
+Use the physical names returned by `scene`. An accepted candidate replaces that home's records.
+Absolute positions use die coordinates in microns. Nested and relative references use ids within
+the home. A matched control inherits the accepted records.
+
+Run `pcrs clock_port=PORT` on the local socket to measure the assembled final placement with
+LegRoute and write a clock checkpoint. The reply includes the revision, routing residual, clock
+report and infeasible networks. The live search uses the placement engine’s per-net feedback budget (2,000 queue pops). Set
+`legroute_pops=100000` for a deeper search. Trials at the same budget and revision reuse the result.
+Use `replan guidance='{"geometry":[{"reshape":"0:0","aspect_ratio":1.25}]}'` to replace
+floorplan editing intent. The native producer reuses mapping caches and the coordinator picks up
+the resulting packet generation. An empty guidance object clears an unsuccessful floorplan edit.
+
 ## Edit the live assignment
 
 In the browser, select a chunk under **Floorplan chunks**. **Physical homes** has member selection, transfer, split and fuse. **Move a physical chunk** has width/height and shape preview. A reshape moves a complete shared edge on the placement grid and adjusts the homes along it. The planner checks space, aspect locks and macro clearances. A chunk occupying the entire core needs a split before it has a shared edge to move.
@@ -144,6 +164,7 @@ authoritative reference for the running build.
 | paint | `highlight`, `highlight_names`, `select`, `clear_highlight`, `highlights` | Show findings in the page; the user's clicks come back through `selection` |
 | edit | `move`, `batch`, `macro_move`, `macro_scan`, `pin`, `unpin`, `relax`, `legalize`, `evaluate`, `command_status`, `cmd` | Change the main placement (DBU); `macro_move` places an already-placed macro (restart); `cmd` reaches any page command (run, pause, run_until, stage, area, restart, fork, screenshot, finish, ...) |
 | explore | `whatif`, `explore`, `explore_begin`, `explore_wait`, `explorations`, `compare`, `similarity`, `explore_discard`, `score_config` | Test candidates without touching main: tiers T0 (geometry) to T4 (routed); compare at a matched baseline |
+| clock | `clock`, `clock_edit` | Inspect the native clock tree and stage decisions for its rebuild |
 | centroids | `centroids`, `centroid_edit` | Group cells, flops, memories and macros around a point; edit the records the placement reads |
 | collateral | `export`, `intent_preview`, `intent_apply` | Save the result |
 
@@ -193,6 +214,39 @@ labels).
 - Exploration patches (`move`/`pin`/`unpin`) only accept nodes that are movable at the chosen gate. A placed macro cannot be moved inside a T2 fork today, so use `macro_move` plus a restart for those. Plan geometry experiments at a gate where the macros you want to move are still movable when you can.
 - Restarts keep every `macro_move` pose because the poses are replayed from the action trace. The exception is `cmd command={"cmd":"restart","checkpoint":-1}` (from the start), which **drops all edits**. To try a flag on the current layout, restart from a recorded checkpoint index (`state.cps`) with `"set":{...}`. Afterwards check that the poses survived, by comparing `macros` with what you sent.
 
+## The clock tree
+
+With `--set synth.place.pcrs.clock=true` the flow builds a clock tree after placement optimization. Every scene published after that carries it; `state.clock.nets` is zero until then. A session that ran to `state=finished` still answers.
+
+```sh
+gui clock                                         # per clock root: endpoints, buffers by master, depth range, wire, insertion, skew, worst stages
+gui clock what=nets sort=slew limit=20            # one row per clock net; sort by slew, radius, skew, load, fanout, wire or delay
+gui clock what=sinks order=late limit=20          # endpoints by estimated arrival (or order=early)
+gui clock what=pair a=launch_reg b=capture_reg    # shared stage, private stages and skew of two endpoints
+gui clock what=map metric=skew                    # die grid of local skew (also arrival, sinks, slew); peak_um is the worst bin
+gui screenshot out=clk.png layers=comb,regs,macros,clock
+```
+
+How to read it:
+
+- **Wire lengths are measured at the frame you are looking at.** Delays, slews and arrivals are the estimates in `pcrs_clock.json`, made at the positions the tree was planned at. `handoff` names that file; with no handoff the reply says "topology only" and those fields are null.
+- `depth.min` below `depth.max` means endpoints sit behind different numbers of stages: skew by construction. `private_stages` in `pair` says where two endpoints part.
+- A stage whose `far_slew_ps` is close to the library limit is slow and sensitive. Check `masters`: a tree of only the smallest buffer is usually under-driven. `synth.place.pcrs.max_slew_ps` sets a transition target for the stages the planner inserts.
+- `skew_ps` in `pair` is b minus a. For a path from a to b, positive helps setup and hurts hold.
+- The global skew compares flops that may never exchange data. `map metric=skew` shows the spread among neighbours, which is what short paths see. Take a failing path from `critical`, then ask `pair` about its two flops.
+
+Decisions are staged, then applied by a restart. Nothing patches a built tree: the flow rebuilds it with its own electrical and timing checks.
+
+```sh
+gui clock_edit op=drive leaf=__pcrs_clk_1cd2... step=2      # absolute drive step of one leaf (leaf_schedule)
+gui clock_edit op=arrival 'pins=["capture_reg:CLK"]' wanted_ps=-10   # arrival_targets; needs balance
+gui clock_edit op=option key=balance value=true             # also leaf_fanout, leaf_radius_um, max_slew_ps, source_fork, skew_rounds, ...
+gui clock_edit op=show                                      # what is staged (state.clock.staged counts it)
+gui clock_edit op=apply                                     # writes the decision files and restarts with --set
+```
+
+`apply` restarts from the start unless you pass `checkpoint` (an index of `state.cps`). The restart stops at the same gates as the first run, so continue through them, wait for the tree, and read `clock` again. A staged `drive` on a leaf replaces the entry the tree was built with for that leaf; other leaves keep theirs. Loads the handoff does not name (retained on the source, driven by a gate) cannot be scheduled, and the reply says so. Compare two trees only inside one session and build, and judge a decision by setup and hold over the whole design, not by the clock numbers alone.
+
 ## Centroids
 
 A centroid is a point that pulls its members during placement (kind `centroid` of `livehd.placement.hints`; the page draws it as a circle with a cross, layer `centroids`). Create one from instance names or from the page selection, give it a position (`free`, coordinates, or relative to another centroid), a layout for its members (`floating`, `row`, `column`, `array`: slots around the point before final legalization) and a strength. A centroid can hold other centroids. The records are collateral: the same file a batch run reads, written under the hints record `gui-centroids`, and a clean `lhd synth` reads them back.
@@ -207,7 +261,7 @@ gui centroid_edit op=adopt id=pcrs:1234                      # edit a leaf group
 gui centroid_edit op=set id=regs apply=false ...             # preview without applying
 ```
 
-An edit is applied through `intent_apply` at a placement gate (so `expect` and the intent revision protect it), and the hint report lists, per centroid, the members bound, those that did not resolve, the strength, and the largest distance of a member from its layout slot. Dragging a centroid in the page writes its `at` position. The pull is weak by default; raise `strength` (or scale it) on the centroids that matter and judge the result with `evaluate`. Records apply to plain placement; in the macro stages they are not read. A `clock` field (`drive`, `arrival_ps`) is stored on the record for the clock tree (todo 2p-pcrs, X1) and is not read by PCRS yet.
+An edit is applied through `intent_apply` at a placement gate (so `expect` and the intent revision protect it), and the hint report lists, per centroid, the members bound, those that did not resolve, the strength, and the largest distance of a member from its layout slot. Dragging a centroid in the page writes its `at` position. The pull is weak by default; raise `strength` (or scale it) on the centroids that matter and judge the result with `evaluate`. Records apply to plain placement; in the macro stages they are not read. A `clock` field is read by PCRS: `arrival_ps` (wanted arrival of the members' clock pins, with `synth.place.pcrs.balance=true`) and `drive_steps` (absolute drive step of their leaf); `drive` (a master) is stored only. They are the decisions of `arrival_targets` and `leaf_schedule`, per centroid.
 
 ## Reading results after a restart
 

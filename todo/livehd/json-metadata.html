@@ -20,6 +20,7 @@ formats are not tuning-file selection options.</p>
 <tr><td><code>synth.metadata</code></td><td><code>livehd.placement.hints</code></td><td>Advisory hints during FP/macro placement, and <code>kind: "centroid"</code> records (members, position, layout, strength, nesting, clock fields) that the final placement turns into pull toward a point; see <code>pass/place/README.md</code>.</td></tr>
 <tr><td><code>synth.tune.file</code></td><td><code>livehd.synth.tuning</code></td><td>Existing schema_version=1 and decisions fields; validation gates retained.</td></tr>
 <tr><td><code>sim.tune.file</code></td><td><code>livehd.sim.tuning</code></td><td>Existing schema, knobs/vector and provenance fields; explicit knobs win.</td></tr>
+<tr><td>Native power grid</td><td><code>livehd.physical.power_grid</code></td><td>Optional, design-selected core strap dimensions in micrometres. Omitted layers and dimensions use the detected technology profile. See <code>pass/place/README.md</code>.</td></tr>
 <tr><td><code>synth.place.row_access</code></td><td><code>livehd.physical.row_access</code></td><td>Strict convention payload; selected by provisional domino generation.</td></tr></table>
 <pre>[{"class":"livehd.physical.row_access","id":"routing-owner","convention":{"schema":1,"name":"owner","version":"1","even":"vertical","odd":"horizontal"}}]</pre>
 <p>Record presence activates that consumer's metadata, not an unrelated pipeline stage: placement hints do not

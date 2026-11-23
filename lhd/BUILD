@@ -372,6 +372,7 @@ cc_binary(
         "chunk_interfaces.py",
         "chunk_explore.py",
         "chunk_validate.py",
+        "//tools:clock_probe",
         "chunk_calibrate.py",
         "chunk_live.py",
         "chunk_score.py",

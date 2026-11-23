@@ -55,6 +55,7 @@ def dependencies(state, home):
             state["contacts"].get(home),
             state.get("holds", {}).get(home),
             state.get("interface_revision", {}).get(home, 0),
+            *([state["centroids"][home]] if state.get("centroids", {}).get(home) else []),
         ]
     )
 
@@ -294,6 +295,7 @@ def collect(work, folder):
             "worker_seconds",
             "over_budget",
             "solver_movable_nodes",
+            "centroid_groups",
             "gp_moved",
             "gp_mean_displacement_dbu",
             "gp_max_displacement_dbu",

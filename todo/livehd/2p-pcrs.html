@@ -41,6 +41,32 @@ page with its full subtask log is at
 <code>/lscratch/renau/domplace_runs/pcrs_gui/2p-pcrs.before-trim.html</code> (local, never committed).</li>
 </ul>
 
+<h2 id="chunk-review">2026-11-23 live chunk review</h2>
+<p>Final placement requests now dispatch macro planning first for homes with at least two macros.
+The coordinator accepts boundary measurements from either stage and marks dependent homes stale.
+Chunk trials accept authored centroid records and publish them with the chosen branch. A changed
+membership invalidates those records on incremental replan.</p>
+<p>The local PCRS command stitches the accepted final positions and reports infeasible clock
+networks. Track B still requires independent per-home clock subtrees and their top-level join.
+The assembled checkpoint uses the whole-design clock builder.</p>
+
+<p>ASAP7 socket runs compared the first legal clock checkpoint with the selected branch on the
+same design and SDC. OpenROAD checked placement and OpenSTA measured propagated-clock setup
+slack with placement parasitics. HPWL is measured on the assembled data placement. The last
+column counts unresolved nets in the pre-clock LegRoute pass at 100,000 queue pops per net.</p>
+<table>
+<tr><th>Design</th><th>HPWL (µm)</th><th>Post-CTS WNS (ps)</th><th>Unresolved nets</th></tr>
+<tr><td>Eyeriss</td><td>8,870,522 → 8,869,481</td><td>−57,046.5 → −56,416.2</td><td>986 → 969</td></tr>
+<tr><td>CoralNPU</td><td>4,170,239 → 3,624,656</td><td>−3,893.6 → −3,456.6</td><td>31,395 → 24,401</td></tr>
+<tr><td>NVDLA partition C</td><td>21,783,184 → 14,715,908</td><td>−15,693.4 → −12,960.2</td><td>16,568 → 11,222</td></tr>
+</table>
+<p>All three selected checkpoints passed placement checks. The exported floorplans had no power grid.
+Matched density trials took 0.8–5.4 seconds. Repeated PCRS evaluations at one placement revision
+took 7–21 seconds with cached LegRoute results. A topology or budget change still invokes the
+incremental floorplan producer. Both CoralNPU chunks survived an unchanged update.
+Run logs, exact revisions and selected DEF files are under
+<code>/lscratch/renau/review_runs/pcrs-live-nov23</code>.</p>
+
 <h2 id="principle">How options are exposed</h2>
 <p>This is the rule for every choice below (K17).</p>
 <ul>
@@ -340,9 +366,11 @@ residuals. The plan and macro stages still need the same record binding.</li>
 <li><strong class="item-id">G3</strong> <strong>Socket editing and page dragging implemented.</strong> The socket can create from selection,
 move members, adopt a PCRS leaf, edit fields and export the placement hints. The page draws compiled groups and writes a position
 when a GUI-owned centroid is dragged. Applying an edit at a gate preserves the other generated leaves.</li>
-<li><strong class="item-id">G4</strong> <strong>Leaf groups implemented.</strong> Planned and installed leaves use
-<code>synth.place.pcrs.leaf_pull</code>. A shared gate contributes its area once across its leaves. Grouping the gate and latch
-retained at the source fork and consuming the inherited clock decisions remain open.</li>
+<li><strong class="item-id">G4</strong> <strong>Implemented.</strong> Planned and installed leaves use
+<code>synth.place.pcrs.leaf_pull</code>. A shared gate contributes its area once across its leaves. The discrete gate and the latch
+that share its fork are one centroid (<code>pcrs:fork:N</code>, the gate giving half of its area to it and half to its leaves), so the pair
+stays together. The clock fields a centroid carries are read by the tree and the leaf grouping (X1). What a clock field means on the
+fork centroid is still open (see Open points).</li>
 <li><strong class="item-id">G5</strong> <strong>Open.</strong> Sweep the pull on coralnpu, litepci and NVDLA/partition_c using P0.
 Report setup slack, leaf star wire and clock capacitance before selecting the default.</li>
 <li><strong class="item-id">G6</strong> <strong>Color cohesion uses the centroid compiler.</strong> The floorplanner still owns candidate
@@ -370,9 +398,12 @@ and the top change, and buffer names elsewhere are stable.</li>
 
 <h3>Exposure</h3>
 <ul>
-<li><strong class="item-id">X1</strong> <strong>Clock decisions in the collateral (K20).</strong> PCRS reads
-drive and wanted arrival from centroids, and the gate and target records; <code>clock_edit</code> writes
-them.</li>
+<li><strong class="item-id">X1</strong> <strong>Clock decisions in the collateral (K20).</strong> <em>Done for
+centroids:</em> PCRS reads the wanted arrival (<code>clock.arrival_ps</code>) and the leaf drive step (<code>clock.drive_steps</code>) of an
+authored centroid, inherited by the centroids it contains, as the same decisions <code>arrival_targets</code> and <code>leaf_schedule</code>
+give (an explicit input wins). The pcrs smoke test builds the same tree from a centroid as from the file. <em>Open:</em> a leaf
+driver by master name (<code>clock.drive</code> is stored but not read: the planner's step depends on the load), the gate and target
+records, and <code>clock_edit</code> writing records instead of files.</li>
 <li><strong class="item-id">X2</strong> <strong>The timer's arrivals in the clock view</strong>, not the
 planner's estimates, and a gate after the tree build so a decision does not cost a restart.</li>
 <li><strong class="item-id">X3</strong> <strong>Look at the page layer in a browser</strong>; draw routed
@@ -381,9 +412,11 @@ clock wires when a routed DEF is loaded.</li>
 
 <h3>Correctness that does not wait</h3>
 <ul>
-<li><strong class="item-id">P4</strong> <strong>Fail one domain, not the run (L6).</strong> Catch an infeasible
-domain and write its status; wrap the final build; give the power grid its own error and do not turn it on
-over an existing grid; list clock pins no tree covers; say why a search was skipped.</li>
+<li><strong class="item-id">P4</strong> <strong>Fail one domain, not the run (L6).</strong> <em>Done:</em> an infeasible
+domain of the build that is kept has no tree, its sinks stay on the original net and the report names the reason (<code>infeasible</code>);
+a search that was asked for and could not run says why (<code>skipped_searches</code>); the power grid that the native clock tree turns on by
+itself is left off, with a message naming the macro, when a block macro of the LEF has no pin for a grid net (it failed final legalization as
+"too dense" before; litepci). <em>Also done:</em> a net the clock classification reached and the data rule took back is listed (<code>demoted_clock_nets</code>). The final tree build now has the same containment as the first (its own log and crash context; a failure is an error of that step). <em>Open:</em> do not turn the grid on over a floorplan DEF that already has one.</li>
 <li><strong class="item-id">P5</strong> <strong>Timing engine (L7).</strong> Half-period relation behind a
 clock inverter, with the <code>clock_phase</code> fixture wired into BUILD; refresh gate enable checks after a
 clock edit; dividers behind dividers; hold with <code>set_clock_uncertainty</code>.</li>
@@ -391,6 +424,14 @@ clock edit; dividers behind dividers; hold with <code>set_clock_uncertainty</cod
 and as the cloning of A5, not as trial budgets (D0). Their checks must accept a gate cell whose test pin is
 tied, which the deleted trials rejected, and an <code>lhd lec</code> test covers a cloned and a merged gate.
 A test for the name clash on a third build in one workdir.</li>
+<li><strong class="item-id">P14</strong> <strong>Reset behind synthesized logic, and the hold rule of repair (found on litepci, 2026-11-22).</strong>
+<em>Done:</em> a graph output behind an inverting reset chain no longer keeps the whole chain (172 buffers and inverters, about 3,000
+gates, 1.2 mm) as one opaque sink of the tree: one inverter from the root serves the output and the loads become tree sinks that depth and
+replication can pipeline (the cause was found with the new <code>opaque_sinks</code> report). The repair step refused a trial that took setup
+from -7.3 ns to -0.2 ns over a few picoseconds of hold that was already violating; a large setup gain may now cost up to 50 ps of existing hold
+violation (the loss must be at most a quarter of the gain). The cohesion groups can be replaced at a checkpoint without restarting the
+optimizer. <em>Open:</em> confirm on the routed litepci and coralnpu runs, look for other kinds of load that stop the strip, and let the
+repair step see reset-derived nets as the reset tree's job.</li>
 </ul>
 
 <h3>After the tree is balanced</h3>
@@ -404,9 +445,9 @@ lfsr has been routed so far and a cohort has to be chosen.</li>
 change and show the reported cost goes away.</li>
 <li><strong class="item-id">P9</strong> <strong>Power grid (L10).</strong> Partial crossings, override
 validation, via landings in the routing capacity, a cached grid.</li>
-<li><strong class="item-id">P13</strong> <strong>Placement around the tree (L9).</strong> Record how far a
-clock buffer moves downstream, place buffers on free sites away from macros, honour
-<code>dont_use</code>.</li>
+<li><strong class="item-id">P13</strong> <strong>Placement around the tree (L9).</strong> <em>Done:</em> the handoff records the planned pose of every
+tree buffer and, after final placement, how far each moved (<code>moved_um</code>, and <code>buffer_displacement</code> with the count, total and
+maximum); <code>dont_use</code> is already honoured for the drivers. <em>Open:</em> place buffers on free sites away from macros.</li>
 </ul>
 
 <h3>Deferred</h3>
