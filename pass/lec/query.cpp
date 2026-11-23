@@ -48,6 +48,7 @@
 #include "inline_sub.hpp"
 #include "node_util.hpp"
 #include "observe.hpp"
+#include "option_text.hpp"
 #include "occurrence_materialize.hpp"
 #include "register_replica.hpp"
 #include "split_selfref.hpp"
@@ -62,6 +63,61 @@ namespace {
 // There is deliberately NO design-size gate here: every design is attempted,
 // and an attempt that outgrows memory is caught and reported (TIMEOUT-memory)
 // -- see out_of_memory_detail and child_death_cause.
+
+// Explicit reset inputs override structural detection on every design. Only a
+// reset driven by the selected graph's own input can be controlled by the harness.
+static Io_name_map<bool> detect_resets(const Lec_options& opts, const auto& ins, std::initializer_list<hhds::Graph*> designs) {
+  Io_name_map<bool> reset_negset;
+  if (opts.phase != "just_reset" && opts.phase != "after_reset") {
+    return reset_negset;
+  }
+  if (!opts.reset.empty()) {
+    std::vector<std::string> tokens;
+    str_tools::append_csv_names(tokens, opts.reset);
+    for (const auto& tok : tokens) {
+      const auto colon = tok.find(':');
+      const auto name  = tok.substr(0, colon);
+      bool       low   = false;
+      if (colon == std::string::npos) {
+        (void)str_tools::reset_name_polarity(name, low);
+      } else {
+        const auto polarity = tok.substr(colon + 1);
+        low                 = polarity == "lo" || polarity == "low" || polarity == "n" || polarity == "0";
+      }
+      if (ins.contains(name)) {
+        reset_negset[name] = low;
+      }
+    }
+    return reset_negset;
+  }
+  for (auto* g : designs) {
+    for (auto node : g->occurrences().nodes(hhds::Node_order::forward)) {  // descend hierarchy: flops at every level
+      if (graph_util::type_op_of(node) != Ntype_op::Flop) {
+        continue;
+      }
+      auto rst_d = graph_util::get_driver_of_sink_name(node, "reset_pin");
+      if (rst_d.is_invalid() || !graph_util::is_graph_input_pin(rst_d) || rst_d.get_graph() != g) {
+        continue;
+      }
+      auto nm = std::string(graph_util::pin_name_of(rst_d));
+      if (nm.empty() || !ins.count(nm)) {
+        continue;
+      }
+      bool negreset = false;
+      if (auto neg_d = graph_util::get_driver_of_sink_name(node, "negreset"); neg_d.is_const()) {
+        negreset = !graph_util::const_of(neg_d).is_known_false();
+      }
+      reset_negset[nm] = negreset;
+    }
+  }
+  for (const auto& [name, info] : ins) {
+    bool low = false;
+    if (!reset_negset.contains(name) && str_tools::reset_name_polarity(name, low)) {
+      reset_negset[name] = low;
+    }
+  }
+  return reset_negset;
+}
 
 // Strip the encoder's internal control prefixes so an unmatched cut point / output
 // reads cleanly in a diagnostic. Next-state outputs are "\x01nxt:<hier>", other
@@ -87,12 +143,7 @@ std::string display_name(std::string_view name) {
 // shared with pass/semdiff), so the round trip's wrapper state is an exact,
 // reversible correspondence claim rather than a structural guess.
 std::optional<std::string> decode_cgen_memory_correspondence(std::string_view name) {
-  const auto canon   = canon_flop_name(name);
-  const auto storage = livehd::bus_name::parse_memory_storage(canon, '_');
-  if (!storage) {
-    return std::nullopt;
-  }
-  return std::string(storage->prefix) + canon_flop_name(storage->source);
+  return state_match::memory_storage_key(canon_flop_name(name), '_', canon_flop_name);
 }
 
 bool is_cgen_memory_storage_name(std::string_view name) { return decode_cgen_memory_correspondence(name).has_value(); }
@@ -5616,75 +5667,9 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     // `ins` map by name alone could pin an unrelated same-named top input
     // (under-exploration -> unsound PROVEN). Subgraph-local resets are left
     // free; the canonical-name fallback below still covers pass-through resets.
-    Io_name_map<bool> reset_negset;  // name -> negreset
-    auto              collect_resets = [&](hhds::Graph* g) {
-      for (auto node : g->occurrences().nodes(hhds::Node_order::forward)) {  // descend hierarchy: flops at every level
-        if (graph_util::type_op_of(node) != Ntype_op::Flop) {
-          continue;
-        }
-        auto rst_d = graph_util::get_driver_of_sink_name(node, "reset_pin");
-        if (rst_d.is_invalid() || !graph_util::is_graph_input_pin(rst_d) || rst_d.get_graph() != g) {
-          continue;
-        }
-        auto nm = std::string(graph_util::pin_name_of(rst_d));
-        if (nm.empty() || !ins.count(nm)) {
-          continue;
-        }
-        bool negreset = false;
-        if (auto neg_d = graph_util::get_driver_of_sink_name(node, "negreset"); neg_d.is_const()) {
-          negreset = !graph_util::const_of(neg_d).is_known_false();
-        }
-        reset_negset[nm] = negreset;
-      }
-    };
-    // Canonical reset-name test + active-low inference: str_tools shares it
-    // with the slang reset demotion so the token set cannot drift.
-    const auto reset_name_polarity
-        = [](std::string_view nm, bool& negreset) -> bool { return str_tools::reset_name_polarity(nm, negreset); };
-
+    auto       reset_negset       = detect_resets(opts, ins, {ref, impl});
     const bool phase_reset = opts.phase == "just_reset";
     const bool phase_run   = opts.phase == "after_reset";
-    if (phase_reset || phase_run) {
-      if (!opts.reset.empty()) {
-        // Explicit override: authoritative list of reset inputs + polarity.
-        std::string spec = opts.reset;
-        size_t      p    = 0;
-        while (p < spec.size()) {
-          size_t      comma = spec.find(',', p);
-          std::string tok   = spec.substr(p, comma == std::string::npos ? std::string::npos : comma - p);
-          p                 = comma == std::string::npos ? spec.size() : comma + 1;
-          if (tok.empty()) {
-            continue;
-          }
-          bool        negreset = false;
-          std::string nm       = tok;
-          if (auto colon = tok.find(':'); colon != std::string::npos) {
-            nm       = tok.substr(0, colon);
-            auto pol = tok.substr(colon + 1);
-            negreset = (pol == "lo" || pol == "low" || pol == "n" || pol == "0");
-          } else {
-            reset_name_polarity(nm, negreset);  // infer from suffix
-          }
-          if (ins.count(nm)) {
-            reset_negset[nm] = negreset;
-          }
-        }
-      } else {
-        // Auto: structural async resets (reset_pin-driven inputs)...
-        collect_resets(ref);
-        collect_resets(impl);
-        // ...plus canonical reset-named inputs (sync resets folded into din).
-        for (const auto& [name, info] : ins) {
-          if (reset_negset.count(name)) {
-            continue;
-          }
-          bool negreset = false;
-          if (reset_name_polarity(name, negreset)) {
-            reset_negset[name] = negreset;
-          }
-        }
-      }
-    }
     auto collect_state_keys = [&](hhds::Graph* g) {
       std::set<std::string> keys;
       for (auto node : g->occurrences(collapse_gids_ptr).nodes(hhds::Node_order::forward)) {
@@ -14306,73 +14291,9 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
     }
   }
 
-  // Reset detection (structural reset_pin inputs + canonical names, or the
-  // authoritative formal.reset spec) — single-design copy of prove_equal's rules.
-  Io_name_map<bool> reset_negset;
-  // Same shared rule as prove_equal's harness: the token set lives in
-  // str_tools so verify and lec cannot drift apart.
-  auto              reset_name_polarity
-      = [](std::string_view nm, bool& negreset) -> bool { return str_tools::reset_name_polarity(nm, negreset); };
+  auto       reset_negset = detect_resets(opts, ins, {design});
   const bool phase_reset = opts.phase == "just_reset";
-  const bool phase_run   = opts.phase == "after_reset";
-  if (phase_reset || phase_run) {
-    if (!opts.reset.empty()) {
-      std::string spec = opts.reset;
-      size_t      p    = 0;
-      while (p < spec.size()) {
-        size_t      comma = spec.find(',', p);
-        std::string tok   = spec.substr(p, comma == std::string::npos ? std::string::npos : comma - p);
-        p                 = comma == std::string::npos ? spec.size() : comma + 1;
-        if (tok.empty()) {
-          continue;
-        }
-        bool        negreset = false;
-        std::string nm       = tok;
-        if (auto colon = tok.find(':'); colon != std::string::npos) {
-          nm       = tok.substr(0, colon);
-          auto pol = tok.substr(colon + 1);
-          negreset = (pol == "lo" || pol == "low" || pol == "n" || pol == "0");
-        } else {
-          reset_name_polarity(nm, negreset);
-        }
-        if (ins.count(nm)) {
-          reset_negset[nm] = negreset;
-        }
-      }
-    } else {
-      // Structural async resets. Top-graph-only, like prove_equal's collect_resets:
-      // a subgraph flop's reset driver is the SUBGRAPH's own input pin, and name-
-      // matching its port against the top-level `ins` map could pin an unrelated
-      // same-named top input (under-exploration -> unsound PROVEN).
-      for (auto node : design->occurrences().nodes(hhds::Node_order::forward)) {
-        if (graph_util::type_op_of(node) != Ntype_op::Flop) {
-          continue;
-        }
-        auto rst_d = graph_util::get_driver_of_sink_name(node, "reset_pin");
-        if (rst_d.is_invalid() || !graph_util::is_graph_input_pin(rst_d) || rst_d.get_graph() != design) {
-          continue;
-        }
-        auto nm = std::string(graph_util::pin_name_of(rst_d));
-        if (nm.empty() || !ins.count(nm)) {
-          continue;
-        }
-        bool negreset = false;
-        if (auto neg_d = graph_util::get_driver_of_sink_name(node, "negreset"); neg_d.is_const()) {
-          negreset = !graph_util::const_of(neg_d).is_known_false();
-        }
-        reset_negset[nm] = negreset;
-      }
-      for (const auto& [name, info] : ins) {  // canonical reset-named (sync) resets
-        if (reset_negset.count(name)) {
-          continue;
-        }
-        bool negreset = false;
-        if (reset_name_polarity(name, negreset)) {
-          reset_negset[name] = negreset;
-        }
-      }
-    }
-  }
+  const bool phase_run    = opts.phase == "after_reset";
 
   // Reset-hold prologue: reset_cycles extended to the pipeline flush latency
   // (same MAX-parallel / SUM-series flop-weighted metric as prove_equal).

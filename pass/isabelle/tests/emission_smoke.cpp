@@ -2,6 +2,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <regex>
 #include <set>
 #include <sstream>
@@ -86,6 +87,8 @@ TEST(IsabelleEmission, BridgeScaffoldingCoversCombinationalAndSequentialConstant
     io->add_output("y", 1);
     io->set_bits("y", 8);
     if (sequential) {
+      io->add_input("rst_n", 2);
+      io->set_bits("rst_n", 1);
       io->add_output("q", 2);
       io->set_bits("q", 8);
     }
@@ -100,6 +103,11 @@ TEST(IsabelleEmission, BridgeScaffoldingCoversCombinationalAndSequentialConstant
     if (sequential) {
       auto flop = create_typed_node(*graph, Ntype_op::Flop);
       set_bits(flop.create_driver_pin(0), 8);
+      graph->get_input_pin("rst_n").connect_sink(flop.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Flop, "reset_pin")));
+      create_const(*graph, *Dlop::create_integer(1))
+          .connect_sink(flop.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Flop, "negreset")));
+      create_const(*graph, *Dlop::create_integer(9))
+          .connect_sink(flop.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Flop, "initial")));
       node.create_driver_pin(0).connect_sink(flop.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Flop, "din")));
       flop.create_driver_pin(0).connect_sink(graph->get_output_pin("q"));
       field = "st_flop_" + std::to_string(flop.get_debug_nid());
@@ -125,7 +133,14 @@ TEST(IsabelleEmission, BridgeScaffoldingCoversCombinationalAndSequentialConstant
     std::ofstream oracle(root / (theory + ".thy"));
     oracle << "theory " << theory << "\n  imports " << name << "_Lgraph_Cert\nbegin\n";
     if (sequential) {
-      const std::string args = " \\<lparr>in_a = 4\\<rparr> \\<lparr>" + field + " = 5\\<rparr>";
+      const std::string args = " \\<lparr>in_a = 4, in_rst_n = 1\\<rparr> \\<lparr>" + field + " = 5\\<rparr>";
+      EXPECT_NE(model.find(") = 0) (9 :: 8 word)"), std::string::npos);
+      EXPECT_NE(cert.find("flop_next (\\<not> (bv_nonzero"), std::string::npos);
+      EXPECT_NE(cert.find("(9 :: 8 word)"), std::string::npos);
+      const std::string reset_args = " \\<lparr>in_a = 4, in_rst_n = 0\\<rparr> \\<lparr>" + field + " = 5\\<rparr>";
+      oracle << "lemma reset_value: \"" << field << " (" << name << "_next" << reset_args << ") = (9 :: 8 word)\" by eval\n";
+      oracle << "lemma reset_bridge: \"" << name << "_step" << reset_args << " = " << name << "_cert_step" << reset_args
+             << "\" by eval\n";
       oracle << "lemma comb_value: \"out_y (" << name << "_comb" << args << ") = (7 :: 8 word)\" by eval\n";
       oracle << "lemma old_state: \"out_q (" << name << "_comb" << args << ") = (5 :: 8 word)\" by eval\n";
       oracle << "lemma next_value: \"" << field << " (" << name << "_next" << args << ") = (7 :: 8 word)\" by eval\n";
@@ -136,6 +151,23 @@ TEST(IsabelleEmission, BridgeScaffoldingCoversCombinationalAndSequentialConstant
     oracle << "end\n";
     ASSERT_TRUE(oracle.good());
   }
+}
+
+TEST(IsabelleEmission, CertificatePrintsMinimumSignedInteger) {
+  using namespace livehd::graph_util;
+  const auto root    = fixture_root();
+  auto&      library = livehd::Hhds_graph_library::instance((root / "min_integer_graph").string());
+  auto       io      = library.create_io("min_integer");
+  io->add_output("y", 1);
+  io->set_bits("y", 64);
+  auto graph = io->create_graph();
+  create_const(*graph, *Dlop::create_integer(std::numeric_limits<int64_t>::min())).connect_sink(graph->get_output_pin("y"));
+  Eprp_var var;
+  var.add("path", root.string());
+  var.add("cert_wf", "skip");
+  var.add(graph);
+  Pass_isabelle::work(var);
+  EXPECT_NE(read_file(root / "min_integer_Lgraph_Cert.thy").find("Op_Const (- 9223372036854775808)"), std::string::npos);
 }
 
 TEST(IsabelleEmission, BridgeScaffoldingRefusesMemoryCertificateStubs) {
@@ -170,6 +202,47 @@ TEST(IsabelleEmission, BridgeScaffoldingRefusesMemoryCertificateStubs) {
     FAIL() << "A counts-only memory certificate cannot support bridge scaffolding";
   } catch (const std::exception& error) {
     EXPECT_NE(std::string(error.what()).find("emit_fast_bridge is not supported for designs with memory nodes"), std::string::npos);
+  }
+}
+TEST(IsabelleEmission, AsyncReadCanFeedNextWriteButRequiresRisingWriteClock) {
+  using namespace livehd::graph_util;
+  const auto root    = fixture_root();
+  auto&      library = livehd::Hhds_graph_library::instance((root / "feedback_graph").string());
+  auto       io      = library.create_io("feedback");
+  io->add_output("y", 1);
+  io->set_bits("y", 8);
+  auto       graph  = io->create_graph();
+  auto       memory = create_typed_node(*graph, Ntype_op::Memory);
+  const auto sink   = [&](std::string_view name, int port = 0) {
+    return memory.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Memory, name) + port * Ntype::Memory_port_stride);
+  };
+  const auto constant = [&](int value) { return create_const(*graph, *Dlop::create_integer(value)); };
+  constant(8).connect_sink(sink("bits"));
+  constant(2).connect_sink(sink("size"));
+  constant(0).connect_sink(sink("type"));
+  for (int port : {0, 1}) {
+    constant(port).connect_sink(sink("rdport", port));
+    constant(0).connect_sink(sink("addr", port));
+    constant(1).connect_sink(sink("enable", port));
+  }
+  const auto read = memory.create_driver_pin(1);
+  set_bits(read, 8);
+  read.connect_sink(sink("din"));
+  read.connect_sink(graph->get_output_pin("y"));
+  memory.attr(livehd::attrs::mem_address_proven).set(uint32_t{1});
+  Eprp_var var;
+  var.add("path", root.string());
+  var.add(graph);
+  ASSERT_NO_THROW(Pass_isabelle::work(var));
+  const auto model = read_file(root / "feedback_Lgraph.thy");
+  EXPECT_NE(model.find("mem_read ("), std::string::npos);
+  EXPECT_NE(model.find("mem_write ("), std::string::npos);
+  constant(0).connect_sink(sink("posclk"));
+  try {
+    Pass_isabelle::work(var);
+    FAIL() << "A falling-edge write cannot commit on a rising step";
+  } catch (const std::exception& error) {
+    EXPECT_NE(std::string(error.what()).find("falling-edge clock"), std::string::npos);
   }
 }
 }  // namespace

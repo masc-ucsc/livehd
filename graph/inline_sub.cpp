@@ -993,6 +993,15 @@ bool is_pure_comb_body(hhds::Graph* body, bool single_product) {
   return true;
 }
 
+std::string splice_refusal_reason(const hhds::Node_class& inst, hhds::Graph* override_def) {
+  if (override_def != nullptr) {
+    if (auto why = sub_def_port_mismatch(inst, override_def); !why.empty()) {
+      return why;
+    }
+  }
+  return "the inliner refused it (see the diagnostic above)";
+}
+
 std::string sub_def_port_mismatch(const hhds::Node_class& inst, hhds::Graph* def) {
   const auto dio = def != nullptr ? def->get_io() : nullptr;
   if (dio == nullptr) {

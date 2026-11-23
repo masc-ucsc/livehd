@@ -39,7 +39,7 @@ inline bool     node_is_memory(const Node& node) { return node_op(node) == Ntype
 inline bool     pin_is_input(const Node_pin& pin) { return livehd::graph_util::is_graph_input_pin(pin); }
 inline bool     pin_is_const(const Node_pin& pin) { return pin.is_const(); }
 
-inline Dlop pin_const_value(const Node_pin& pin) { return livehd::graph_util::const_of(pin); }
+inline const Dlop& pin_const_value(const Node_pin& pin) { return livehd::graph_util::const_of(pin); }
 
 // Translate master's per-operand sink slots into the historical bank order.
 // The owned IR uses semantic ports (Sum: 0=add, 1=subtract), not slot numbers.
@@ -157,7 +157,14 @@ struct LeanCtx {
 
 [[noreturn]] void fatal(const LeanCtx& ctx, const std::string& msg);
 
-std::string        input_name_for_pin(const LeanCtx& ctx, const Node_pin& pin);
+inline std::string input_name_for_pin(const auto& ctx, const Node_pin& pin) {
+  std::string name{livehd::graph_util::pin_name_of(pin)};
+  return ctx.input_width.contains(name) ? name : std::string{};
+}
+
+inline std::string sink_pin_name(const Node_pin& pin) {
+  return std::string(Ntype::get_sink_name(node_op(pin_node(pin)), pin.get_port_id()));
+}
 Node_pin           resolve_resize_chain(const Node_pin& start);
 std::string        sink_pin_name(const Edge& edge);
 uint32_t           raw_pin_width(const Node_pin& pin);

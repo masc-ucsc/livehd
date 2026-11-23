@@ -198,4 +198,6 @@ private:
 // nothing on the instance reads it.
 [[nodiscard]] std::string sub_def_port_mismatch(const hhds::Node_class& inst, hhds::Graph* def);
 
+[[nodiscard]] std::string splice_refusal_reason(const hhds::Node_class& inst, hhds::Graph* override_def);
+
 }  // namespace livehd::graph_util

@@ -26,6 +26,7 @@
 #include "latch_contract.hpp"  // Design_clocks::name_looks_like_clock (the ICG clock-operand disambiguator)
 #include "node_util.hpp"
 #include "occurrence_materialize.hpp"  // fold_rolled_loop_wrappers
+#include "state_match.hpp"
 #include "property_types.hpp"  // is_assume_kind -- shared with the asserter, without its query engine
 
 namespace livehd::lec {
@@ -150,22 +151,13 @@ static Pin peel_clock_bits(Pin p, int& bit, bool keep_bit0) {
     // and the singular reader would drop the seed. One driver == one of the old
     // edges, so a per-edge count stays a per-driver count.
     if (op == Ntype_op::And || op == Ntype_op::Or) {
-      if (bit >= 62) {
-        break;
-      }
-      const auto bit_mask = Dlop::create_integer(int64_t{1} << bit);
       Pin        data;
       int        data_ins = 0;
       bool       identity = true;
       for (const auto& sink : p.get_master_node().inp_sorted_pins()) {
         for (const auto& driver : sink.get_driver_pins()) {
           if (driver.is_const()) {
-            const bool off = gu::const_of(driver).and_op(*bit_mask)->is_known_false();
-            if (op == Ntype_op::And) {
-              identity &= !off;
-            } else {
-              identity &= off;
-            }
+            identity &= livehd::latch_contract::clock_mask_preserves_bit(op, gu::const_of(driver), bit);
             continue;
           }
           ++data_ins;
@@ -181,57 +173,16 @@ static Pin peel_clock_bits(Pin p, int& bit, bool keep_bit0) {
     if (op != Ntype_op::Get_mask && op != Ntype_op::Sext) {
       break;
     }
-    // Where the tracked bit sits in the `a` operand.
-    int nbit = bit;
-    if (op == Ntype_op::Get_mask) {
-      // `a[hi-1:lo]` (graph/cell.cpp: pid 2 = lo, pid 3 = hi), zero-extended
-      // above the slice: a tracked bit past the slice is a constant 0.
-      const auto range = gu::bit_range(p.get_master_node());
-      if (!range || range->first + bit >= range->second) {
-        break;
-      }
-      nbit = range->first + bit;
-    } else if (bit != 0) {
-      // Sext(a, pos): bits [0, pos) pass, everything above copies bit pos - 1.
-      // Bit 0 always passes; a higher bit needs the constant pos.
-      Pin pos;
-      for (const auto& sink : p.get_master_node().inp_sorted_pins()) {
-        if (sink.get_port_id() == 1) {
-          for (const auto& driver : sink.get_driver_pins()) {
-            pos = driver;
-            break;
-          }
-        }
-      }
-      if (!pos.is_const() || !gu::const_of(pos).is_just_i64() || gu::const_of(pos).to_just_i64() <= 0) {
-        break;
-      }
-      nbit = static_cast<int>(std::min<int64_t>(bit, gu::const_of(pos).to_just_i64() - 1));
-    }
-    if (keep_bit0 && nbit != 0) {
+    const auto nbit = livehd::latch_contract::clock_wrapper_source_bit(p.get_master_node(), bit);
+    if (!nbit || (keep_bit0 && *nbit != 0)) {
       break;
     }
-    // Take the `a` operand (sink pid 0). Track the SINK pid explicitly:
-    // comparing against `a.get_port_id()` would read the held pin's DRIVER pid,
-    // which is 0 for any single-output node, so the test would be `sink_pid <
-    // 0` -- never true -- and whichever edge iterated first would win. When that
-    // is the constant the walk lands on it and gives up, order-dependently.
-    Pin           a;
-    hhds::Port_id a_pid = hhds::Port_invalid;
-    for (const auto& sink : p.get_master_node().inp_sorted_pins()) {
-      const auto spid = sink.get_port_id();
-      for (const auto& driver : sink.get_driver_pins()) {
-        if (a.is_invalid() || spid < a_pid) {
-          a     = driver;
-          a_pid = spid;
-        }
-      }
-    }
+    auto a = gu::first_value_driver(p.get_master_node());
     if (a.is_invalid()) {
       break;
     }
     p   = a;
-    bit = nbit;
+    bit = *nbit;
   }
   return p;
 }
@@ -746,16 +697,7 @@ absl::flat_hash_set<std::string> design_clock_inputs(hhds::Graph* g, const absl:
 // "$driver$cnt_q") and a trailing "___ssa_N" SSA suffix are stripped so the two
 // readers' spellings of the same register collapse to one key.
 static std::string normalize_reg_name(std::string_view raw) {
-  std::string_view s = raw;
-  if (!s.empty() && s.front() == '$') {
-    if (auto e = s.find('$', 1); e != std::string_view::npos) {
-      s.remove_prefix(e + 1);
-    }
-  }
-  if (auto p = s.find("___ssa_"); p != std::string_view::npos) {
-    s = s.substr(0, p);
-  }
-  return gu::logical_hier_name(s);
+  return gu::logical_hier_name(livehd::state_match::undecorated_name(raw));
 }
 
 // A ROLLED comptime loop (compile.unroll=false, the default) is ONE replicated
@@ -783,21 +725,7 @@ static std::string normalize_reg_name(std::string_view raw) {
 // (graph/occurrence_materialize.hpp).
 
 std::string canon_flop_name(std::string_view hier_name) {
-  std::string_view sv = hier_name;
-  // A leading yosys "$decoration$" (e.g. "$driver$ex_mem_ex_result", left by the
-  // yosys-slang reader when it flattens an instance hierarchy) and a trailing
-  // "___ssa_N" SSA suffix are reader noise — strip them so the flattened name
-  // matches the native flat spelling. (normalize_reg_name does the same for the
-  // flop_state_key path; this is the get_hier_name path.)
-  if (!sv.empty() && sv.front() == '$') {
-    if (auto e = sv.find('$', 1); e != std::string_view::npos) {
-      sv.remove_prefix(e + 1);
-    }
-  }
-  if (auto p = sv.find("___ssa_"); p != std::string_view::npos) {
-    sv = sv.substr(0, p);
-  }
-  std::string s = gu::logical_hier_name(sv);
+  std::string s = normalize_reg_name(hier_name);
   // Pyrope backticks and Verilog's leading backslash quote identifiers but are
   // not part of their RTL names. After an instance prefix is attached, the
   // latter can appear in the middle of a hierarchical name
@@ -873,10 +801,84 @@ Term fit_to(cvc5::TermManager& tm, const Val& v, int width) {
   return tm.mkTerm(op, {v.term});
 }
 
+static int comparison_width(const Val& a, const Val& b) {
+  return std::max(a.width + (!a.is_signed && b.is_signed), b.width + (!b.is_signed && a.is_signed));
+}
+
 Term vals_equal(cvc5::TermManager& tm, const Val& a, const Val& b) {
   // Compare integer values. Mixed signs require room for the unsigned operand's leading zero.
-  const int width = std::max(a.width + (!a.is_signed && b.is_signed), b.width + (!b.is_signed && a.is_signed));
+  const int width = comparison_width(a, b);
   return tm.mkTerm(Kind::EQUAL, {fit_to(tm, a, width), fit_to(tm, b, width)});
+}
+
+// Associative value folds. Each operand extends by its own sign. A signed Or
+// padding an unstamped pin carries its sign through to downstream widening.
+Val encode_fold(cvc5::TermManager& tm, Ntype_op op, const std::vector<Val>& operands, int width, bool result_signed, bool unsized) {
+  Kind kind;
+  switch (op) {
+    case Ntype_op::And : kind = Kind::BITVECTOR_AND; break;
+    case Ntype_op::Or  : kind = Kind::BITVECTOR_OR; break;
+    case Ntype_op::Xor : kind = Kind::BITVECTOR_XOR; break;
+    case Ntype_op::Mult: kind = Kind::BITVECTOR_MULT; break;
+    default            : throw std::logic_error("expected bitwise fold or product");
+  }
+  Term result;
+  for (const auto& v : operands) {
+    auto t = fit_to(tm, v, width);
+    result = result.isNull() ? t : tm.mkTerm(kind, {result, t});
+  }
+  if (result.isNull()) {
+    result = bv_const(tm, width, op == Ntype_op::Mult ? 1 : 0);
+    if (op == Ntype_op::And) {
+      result = tm.mkTerm(Kind::BITVECTOR_NOT, {result});
+    }
+  } else if (op == Ntype_op::Or && unsized) {
+    result_signed |= std::ranges::all_of(operands, [](const Val& v) { return v.is_signed; });
+  }
+  return {result, width, result_signed};
+}
+
+// Compare all operands for EQ, or every cross-bank pair for LT/GT. A single
+// EQ driver represents EQ(x,x) after graph edge deduplication.
+Term encode_comparison(cvc5::TermManager& tm, Ntype_op op, const std::vector<Val>& lhs, const std::vector<Val>& rhs) {
+  Term result;
+  auto require = [&](const Term& predicate) { result = result.isNull() ? predicate : tm.mkTerm(Kind::AND, {result, predicate}); };
+  if (op == Ntype_op::EQ) {
+    for (size_t i = 1; i < lhs.size(); ++i) {
+      require(vals_equal(tm, lhs.front(), lhs[i]));
+    }
+    if (lhs.size() == 1) {
+      return tm.mkBoolean(true);
+    }
+  } else {
+    for (const auto& a : lhs) {
+      for (const auto& b : rhs) {
+        const bool signed_cmp = a.is_signed || b.is_signed;
+        const int  width      = comparison_width(a, b);
+        const auto cmp        = op == Ntype_op::LT ? (signed_cmp ? Kind::BITVECTOR_SLT : Kind::BITVECTOR_ULT)
+                                                   : (signed_cmp ? Kind::BITVECTOR_SGT : Kind::BITVECTOR_UGT);
+        require(tm.mkTerm(cmp, {fit_to(tm, a, width), fit_to(tm, b, width)}));
+      }
+    }
+  }
+  return result;
+}
+
+Term encode_count(cvc5::TermManager& tm, Ntype_op op, const std::vector<Val>& inputs, int count, int width) {
+  auto result = bv_const(tm, width, 0);
+  if (count <= 0) {
+    return result;
+  }
+  if (inputs.empty()) {
+    return {};
+  }
+  const auto bits = fit_to(tm, inputs.front(), count);
+  for (int i = 0; i < count; ++i) {
+    const auto lane = bv_extract(tm, bits, i, i);
+    result          = tm.mkTerm(op == Ntype_op::Rxor ? Kind::BITVECTOR_XOR : Kind::BITVECTOR_ADD,
+                                {result, fit_to(tm, Val{lane, 1, false}, width)});
+  }
+  return result;
 }
 
 Term encode_shift(cvc5::TermManager& tm, const Val& data, const Val& amount, int width, bool left) {
@@ -3326,57 +3328,12 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
 
       switch (op) {
         case Ntype_op::And:
-        case Ntype_op::Or :
-        case Ntype_op::Xor: {
-          Kind k = (op == Ntype_op::And) ? Kind::BITVECTOR_AND : (op == Ntype_op::Or) ? Kind::BITVECTOR_OR : Kind::BITVECTOR_XOR;
-          // A bitwise op is a width-preserving pass-through of its operands'
-          // VALUES, so a signed value flowing into one is still signed coming out
-          // -- and that decides how a later consumer WIDENS it. The pin's own hint
-          // cannot answer: tolg's bind_result drops it on every op output, which
-          // is why cgen carries the same walk-through in operand_reads_signed.
-          //
-          // Without this the two ends disagreed about our OWN emitted code. cgen
-          // widens a shift's left operand with `$signed(N'sb0) | $signed(val)`; on
-          // the way back in that is Or(const 0, val_signed), the Or read UNSIGNED,
-          // so `fit` in the SHL case zero-extended a negative operand: `sa <<
-          // ua` with sa = 3'sb100 (-4) encoded as 4, and lec REFUTED
-          // tests/equiv/signed_shift_widen against a golden that iverilog says is
-          // identical on all 64 inputs. A wrong verdict, and on a shape our own
-          // back end emits for every signed shift.
-          // Or ONLY, and only when every operand is signed: that is the widening
-          // PAD our own back end emits (`$signed(N'sb0) | $signed(val)`), where a
-          // zero operand carries no sign of its own but is stored signed. An
-          // `And(val, MASK)` -- the width mask on every net read -- is NOT this:
-          // a masked value is non-negative, and marking it signed made later
-          // widenings sign-extend it. Measured: the broad rule fixed 2 tests and
-          // broke 6.
-          if (op == Ntype_op::Or && !all.empty()) {
-            bool every = true;
-            for (const auto& v : all) {
-              every &= v.is_signed;
-            }
-            out_signed |= every && gu::bits_of(dpin) == 0;
-          }
-          for (const auto& v : all) {
-            Term t = fit(v, W);
-            result = result.isNull() ? t : tm_.mkTerm(k, {result, t});
-          }
-          if (result.isNull()) {
-            // Degenerate 0-operand reduction (can arise after the front-end folds
-            // every operand away): the identity element. AND of nothing = all-ones,
-            // OR/XOR of nothing = 0.
-            result = (op == Ntype_op::And) ? tm_.mkTerm(Kind::BITVECTOR_NOT, {bv_const(tm_, W, 0)}) : bv_const(tm_, W, 0);
-          }
-          break;
-        }
+        case Ntype_op::Or  :
+        case Ntype_op::Xor :
         case Ntype_op::Mult: {
-          for (const auto& v : all) {
-            Term t = fit(v, W);
-            result = result.isNull() ? t : tm_.mkTerm(Kind::BITVECTOR_MULT, {result, t});
-          }
-          if (result.isNull()) {
-            result = bv_const(tm_, W, 1);  // empty product = 1
-          }
+          const auto folded = encode_fold(tm_, op, all, W, out_signed, gu::bits_of(dpin) == 0);
+          result            = folded.term;
+          out_signed        = folded.is_signed;
           break;
         }
         case Ntype_op::Sum: {
@@ -3462,17 +3419,10 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         }
         case Ntype_op::Rxor    :
         case Ntype_op::Popcount: {
-          const int count = livehd::graph_util::reduction_count(node);
-          result          = bv_const(tm_, W, 0);
-          if (count > 0) {
-            const auto input = fit(pid(0)[0], count);
-            for (int bit = 0; bit < count; ++bit) {
-              const auto lane
-                  = tm_.mkTerm(tm_.mkOp(Kind::BITVECTOR_EXTRACT, {static_cast<uint32_t>(bit), static_cast<uint32_t>(bit)}),
-                               {input});
-              const auto term = fit(Val{lane, 1, false}, W);
-              result          = tm_.mkTerm(op == Ntype_op::Rxor ? Kind::BITVECTOR_XOR : Kind::BITVECTOR_ADD, {result, term});
-            }
+          const int count = gu::reduction_count(node);
+          result          = encode_count(tm_, op, pid(0), count, W);
+          if (result.isNull()) {
+            return fail("reduction missing value operand");
           }
           break;
         }
@@ -3492,59 +3442,14 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           result = pred_to_bv(tm_.mkTerm(Kind::DISTINCT, {concat, bv_const(tm_, cw, 0)}));
           break;
         }
-        case Ntype_op::EQ: {
-          if (all.empty()) {
-            return fail("EQ has no operand");
-          }
-          if (all.size() == 1) {
-            // One driver pin is one value, and a repeated (driver, sink) pair is
-            // deduped by hhds: this is EQ(x, x), which holds for every x (the
-            // convention pass.cprop folds, cprop_test SameDriverOperandsFold).
-            result = pred_to_bv(tm_.mkBoolean(true));
-            break;
-          }
-          Term acc;
-          for (size_t i = 1; i < all.size(); ++i) {
-            Term eq = vals_equal(tm_, all[0], all[i]);
-            acc     = acc.isNull() ? eq : tm_.mkTerm(Kind::AND, {acc, eq});
-          }
-          result = pred_to_bv(acc);
-          break;
-        }
+        case Ntype_op::EQ:
         case Ntype_op::LT:
         case Ntype_op::GT: {
-          auto& as = pid(0);
-          auto& bs = pid(1);
-          if (as.empty() || bs.empty()) {
-            return fail("LT/GT missing a/b operand");
+          const auto pred = encode_comparison(tm_, op, op == Ntype_op::EQ ? all : pid(0), pid(1));
+          if (pred.isNull()) {
+            return fail(op == Ntype_op::EQ ? "EQ has no operand" : "LT/GT missing a/b operand");
           }
-          Term acc;
-          for (const auto& a : as) {
-            for (const auto& b : bs) {
-              // Pyrope compares by VALUE, so the comparison is signed whenever
-              // EITHER operand is signed (not only when BOTH are) — a signed value
-              // vs a non-negative constant (which the front end stamps unsigned)
-              // must still order by signed value, else e.g. the saturation guard
-              // `(s8)-24 > 7` reads -24 as unsigned 232 and wrongly holds. Extend
-              // each operand per ITS OWN sign (sign-extend the signed one,
-              // zero-extend the unsigned one); for a MIXED pair add one bit of
-              // headroom so the unsigned operand's top bit is not misread as a
-              // sign bit under the signed compare. This matches the cgen/yosys
-              // (value) semantics the lgyosys backend proves against.
-              bool use_signed = a.is_signed || b.is_signed;
-              int  cw         = std::max(a.width, b.width);
-              if (a.is_signed != b.is_signed) {
-                cw += 1;  // mixed sign: keep the unsigned operand non-negative
-              }
-              Term la  = fit_to(tm_, Val{a.term, a.width, a.is_signed}, cw);
-              Term lb  = fit_to(tm_, Val{b.term, b.width, b.is_signed}, cw);
-              Kind cmp = (op == Ntype_op::LT) ? (use_signed ? Kind::BITVECTOR_SLT : Kind::BITVECTOR_ULT)
-                                              : (use_signed ? Kind::BITVECTOR_SGT : Kind::BITVECTOR_UGT);
-              Term one = tm_.mkTerm(cmp, {la, lb});
-              acc      = acc.isNull() ? one : tm_.mkTerm(Kind::AND, {acc, one});
-            }
-          }
-          result = pred_to_bv(acc);
+          result = pred_to_bv(pred);
           break;
         }
         case Ntype_op::SHL: {

@@ -148,21 +148,13 @@ std::string normalize_reg_name(std::string_view raw) {
     s.remove_prefix(1);
     s.remove_suffix(1);
   }
-  if (!s.empty() && s.front() == '$') {
-    if (auto e = s.find('$', 1); e != std::string_view::npos) {
-      s.remove_prefix(e + 1);
-    }
-  }
-  if (auto p = s.find("___ssa_"); p != std::string_view::npos) {
-    s = s.substr(0, p);
-  }
-  auto name = gu::logical_hier_name(s);
+  auto name = gu::logical_hier_name(livehd::state_match::undecorated_name(s));
   // cgen's reversible memory wrapper (`<inst>.data`, or an inline `_data`
   // register) names the SAME state as its source Memory. Decoding it is what
   // lets a golden `mem` pair memory-to-memory with the round trip's
   // `__lhdmem_h6d656d_e.data`, by name, the way LEC's own correspondence does.
-  if (auto storage = livehd::bus_name::parse_memory_storage(name)) {
-    return std::string(storage->prefix) + storage->source;
+  if (auto key = livehd::state_match::memory_storage_key(name)) {
+    return *key;
   }
   // The same storage register split into bits by synthesis: the wrapper's array `..._e.data[i][b]` (entry i, bit b;
   // `.data[i]` a whole entry) or the inline packed bus `..._e_data[k]` (k = i * bits + b, flattened; the memory's
@@ -183,8 +175,8 @@ std::string normalize_reg_name(std::string_view raw) {
       base = base.substr(0, open);
     }
     if (!indices.empty() && indices.size() <= 2) {
-      if (auto storage = livehd::bus_name::parse_memory_storage(base)) {
-        std::string out = std::string(storage->prefix) + storage->source;
+      if (auto key = livehd::state_match::memory_storage_key(base)) {
+        const auto& out = *key;
         if (indices.size() == 2) {
           return std::format("{}._mem[{}][{}]", out, indices[0], indices[1]);
         }

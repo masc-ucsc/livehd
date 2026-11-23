@@ -417,14 +417,13 @@ Lib_splice lib_splice_source(const hhds::Node_class& inst, const Cell_models& su
 // how a model spliced by port id silently dropped a clock gate's GCLK and made
 // a netlist with a swapped or inverted gate PROVE against the correct one.
 std::string lib_splice_refusal(const hhds::Node_class& inst, const Lib_splice& src, std::string_view what) {
-  const auto why = src.override_def != nullptr ? livehd::graph_util::sub_def_port_mismatch(inst, src.override_def) : std::string{};
   const auto sio = inst.get_subnode_io();
   return std::format("lec: cannot splice the {} --lib cell instance '{}' (cell '{}') from its {}: {}",
                      what,
                      livehd::graph_util::default_instance_name(inst),
                      sio != nullptr ? std::string{sio->get_name()} : std::string{src.body->get_name()},
                      src.override_def != nullptr ? "--lib model" : "own definition",
-                     why.empty() ? std::string{"the inliner refused it (see the diagnostic above)"} : why);
+                     livehd::graph_util::splice_refusal_reason(inst, src.override_def));
 }
 
 }  // namespace

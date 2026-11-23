@@ -50,7 +50,7 @@ std::shared_ptr<hhds::Graph> build_binop(hhds::GraphLibrary& lib, const std::str
 }
 
 // out = (a == a): a structural tautology (always 1) regardless of a's width.
-std::shared_ptr<hhds::Graph> build_eq_same(hhds::GraphLibrary& lib, const std::string& mod, int bits) {
+std::shared_ptr<hhds::Graph> build_eq_same(hhds::GraphLibrary& lib, const std::string& mod, int bits, unsigned operands = 2) {
   auto gio = lib.create_io(mod);
   gio->add_input("a", 0);
   gio->set_bits("a", bits);
@@ -61,9 +61,9 @@ std::shared_ptr<hhds::Graph> build_eq_same(hhds::GraphLibrary& lib, const std::s
 
   auto g      = gio->create_graph();
   auto node   = graph_util::create_typed_node(*g, Ntype_op::EQ);
-  // a == a: two operands, so two sink pins (see build_binop).
-  g->get_input_pin("a").connect_sink(graph_util::setup_sink_by_name(node, "as"));
-  g->get_input_pin("a").connect_sink(graph_util::setup_sink_by_name(node, "as"));
+  for (unsigned i = 0; i < operands; ++i) {
+    g->get_input_pin("a").connect_sink(graph_util::setup_sink_by_name(node, "as"));
+  }
   auto dpin = node.create_driver_pin(0);
   graph_util::set_ubits(dpin, 1);
   dpin.connect_sink(g->get_output_pin("out"));
@@ -81,6 +81,14 @@ TEST(Prove, TautologyEqSame) {
   auto               d = out_drv(g);
   EXPECT_EQ(p.is_true(d).verdict, Verdict::Proven);    // a == a is always true
   EXPECT_EQ(p.is_false(d).verdict, Verdict::Refuted);  // ...so not always false
+}
+
+TEST(Prove, SingletonEqualityIsTrue) {
+  hhds::GraphLibrary lib;
+  auto               g = build_eq_same(lib, "singleton", 4, 1);
+  formal::Prover     prover(g.get());
+  EXPECT_EQ(prover.is_true(out_drv(g)).verdict, Verdict::Proven);
+  EXPECT_EQ(prover.is_false(out_drv(g)).verdict, Verdict::Refuted);
 }
 
 TEST(Prove, EqAbNotAlwaysTrue) {

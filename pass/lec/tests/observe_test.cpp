@@ -88,6 +88,32 @@ TEST(Observe, GroundShiftAmountAndMaskAreFolded) {
   EXPECT_FALSE(ge.eval(t).has_value());  // reads the symbol x
 }
 
+TEST(Observe, GroundArithmeticAgreesWithCvc5AcrossWordBoundaries) {
+  Fixture      f;
+  cvc5::Solver oracle(f.tm);
+  Ground_eval  ground;
+  for (uint32_t width : {3U, 64U, 65U, 129U}) {
+    const auto high = f.tm.mkBitVector(width, "1" + std::string(width - 2, '0') + "1", 2);
+    const auto zero = f.bv(width, 0);
+    for (auto b : {zero, f.bv(width, 3), high}) {
+      for (auto op : {cvc5::Kind::BITVECTOR_ADD,
+                      cvc5::Kind::BITVECTOR_SUB,
+                      cvc5::Kind::BITVECTOR_MULT,
+                      cvc5::Kind::BITVECTOR_UDIV,
+                      cvc5::Kind::BITVECTOR_UREM}) {
+        auto        term = f.tm.mkTerm(op, {high, b});
+        const auto& got  = ground.eval(term);
+        ASSERT_TRUE(got);
+        std::string binary;
+        for (auto it = got->rbegin(); it != got->rend(); ++it) {
+          binary.push_back(*it ? '1' : '0');
+        }
+        EXPECT_EQ(binary, oracle.simplify(term).getBitVectorValue(2)) << term;
+      }
+    }
+  }
+}
+
 TEST(Observe, IteWithComptimeConditionDemandsOneArm) {
   Fixture f;
   auto    cond  = f.tm.mkTerm(cvc5::Kind::EQUAL, {f.bv(4, 3), f.bv(4, 3)});

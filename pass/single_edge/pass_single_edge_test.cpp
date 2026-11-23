@@ -19,6 +19,7 @@
 #include "gtest/gtest.h"
 #include "hhds/graph.hpp"
 #include "hlop/dlop.hpp"
+#include "latch_contract.hpp"
 #include "node_util.hpp"
 #include "pass_single_edge.hpp"
 
@@ -53,6 +54,23 @@ single_edge::Result run(hhds::Graph* g) {
   single_edge::Options o;
   o.quiet = true;
   return single_edge::normalize(g, {}, o);
+}
+
+TEST(ClockBit, PeelTracksOnlyTheSelectedLane) {
+  hhds::GraphLibrary lib;
+  auto               graph = lib.create_io("clock_wrapper")->create_graph();
+  auto               sext  = gu::create_typed_node(*graph, Ntype_op::Sext);
+  auto               pos   = gu::setup_sink_by_name(sext, "b");
+  EXPECT_FALSE(latch_contract::clock_wrapper_source_bit(sext, 0));
+  pos.connect_driver(gu::create_const(*graph, *Dlop::create_integer(2)));
+  EXPECT_EQ(latch_contract::clock_wrapper_source_bit(sext, 0), 0);
+  EXPECT_EQ(latch_contract::clock_wrapper_source_bit(sext, 5), 1);
+
+  auto mask = Dlop::from_binary("?10", true);
+  EXPECT_TRUE(latch_contract::clock_mask_preserves_bit(Ntype_op::Or, *mask, 0));
+  EXPECT_TRUE(latch_contract::clock_mask_preserves_bit(Ntype_op::And, *mask, 1));
+  EXPECT_FALSE(latch_contract::clock_mask_preserves_bit(Ntype_op::And, *mask, 2));
+  EXPECT_FALSE(latch_contract::clock_mask_preserves_bit(Ntype_op::Or, *mask, 2));
 }
 
 struct Fixture {

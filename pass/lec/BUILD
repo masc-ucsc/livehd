@@ -59,6 +59,7 @@ filegroup(
         "solve_stats.hpp",
         "term_sim.cpp",
         "term_sim.hpp",
+        "bv_words.hpp",
     ] + select({
         "//:without_abc": ["cone_unavailable.cpp"],
         "//conditions:default": [
@@ -117,6 +118,7 @@ cc_library(
         "query.hpp",
         "solve_stats.hpp",
         "term_sim.hpp",
+        "bv_words.hpp",
     ],
     copts = COPTS,
     includes = ["."],

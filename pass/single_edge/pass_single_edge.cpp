@@ -724,12 +724,7 @@ std::optional<int> clock_bit_on(hhds::Pin_class p, const hhds::Pin_class& root, 
         if (in.driver.is_const()) {
           // A constant must leave the tracked bit alone (set for And, clear for
           // Or); otherwise the bit is a constant, not a clock.
-          const auto& c = gu::const_of(in.driver);
-          if (!c.is_just_i64() || bit >= 62) {
-            return std::nullopt;
-          }
-          const bool set = ((c.to_just_i64() >> bit) & 1) != 0;
-          if (set != (op == Ntype_op::And)) {
+          if (!livehd::latch_contract::clock_mask_preserves_bit(op, gu::const_of(in.driver), bit)) {
             return std::nullopt;
           }
           continue;
@@ -754,19 +749,12 @@ std::optional<int> clock_bit_on(hhds::Pin_class p, const hhds::Pin_class& root, 
       }
       return found;
     }
-    if (op == Ntype_op::Get_mask) {
-      const auto range = gu::bit_range(n);
-      if (!range || range->first + bit >= range->second) {
+    if (op == Ntype_op::Get_mask || op == Ntype_op::Sext) {
+      const auto source_bit = livehd::latch_contract::clock_wrapper_source_bit(n, bit);
+      if (!source_bit) {
         return std::nullopt;
       }
-      bit += range->first;
-      p    = gu::first_value_driver(n);
-      continue;
-    }
-    if (op == Ntype_op::Sext) {
-      if (bit != 0) {
-        return std::nullopt;  // only bit 0 is position-independent of the sign point
-      }
+      bit = *source_bit;
       p = gu::first_value_driver(n);
       continue;
     }

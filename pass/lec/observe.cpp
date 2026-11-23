@@ -9,6 +9,7 @@
 
 #include "absl/container/flat_hash_set.h"
 #include "debug_env.hpp"
+#include "bv_words.hpp"
 
 namespace livehd::lec {
 
@@ -16,42 +17,24 @@ namespace {
 
 using Bits = Ground_eval::Bits;
 
-Bits add_bits(const Bits& a, const Bits& b) {
-  Bits    r(a.size());
-  uint8_t c = 0;
-  for (size_t i = 0; i < a.size(); ++i) {
-    const uint8_t x = a[i], y = i < b.size() ? b[i] : 0;
-    r[i] = x ^ y ^ c;
-    c    = static_cast<uint8_t>((x & y) | (x & c) | (y & c));
+// The demand analysis exposes individual bits. Pack only known arithmetic
+// operands at this boundary; the sampling program already stores these words.
+std::vector<uint64_t> pack_bits(const Bits& bits) {
+  std::vector<uint64_t> words(bv_words::nwords(bits.size()));
+  for (size_t i = 0; i < bits.size(); ++i) {
+    if (bits[i]) {
+      bv_words::set_bit(words.data(), i);
+    }
   }
-  return r;
+  return words;
 }
 
-Bits neg_bits(const Bits& a) {
-  Bits inv(a.size());
-  for (size_t i = 0; i < a.size(); ++i) {
-    inv[i] = a[i] ^ 1U;
+Bits unpack_bits(const std::vector<uint64_t>& words, size_t width) {
+  Bits bits(width);
+  for (size_t i = 0; i < width; ++i) {
+    bits[i] = bv_words::get_bit(words.data(), i);
   }
-  Bits one(a.size(), 0);
-  if (!one.empty()) {
-    one[0] = 1;
-  }
-  return add_bits(inv, one);
-}
-
-Bits mul_bits(const Bits& a, const Bits& b) {
-  Bits r(a.size(), 0);
-  for (size_t j = 0; j < b.size(); ++j) {
-    if (b[j] == 0) {
-      continue;
-    }
-    Bits sh(a.size(), 0);
-    for (size_t i = 0; i + j < a.size(); ++i) {
-      sh[i + j] = a[i];
-    }
-    r = add_bits(r, sh);
-  }
-  return r;
+  return bits;
 }
 
 // Saturated numeric value (>= cap means "cap").
@@ -166,14 +149,7 @@ std::optional<Bits> eval_node(const cvc5::Term& t, const std::vector<const std::
     case cvc5::Kind::EQUAL:
       return Bits{static_cast<uint8_t>(std::all_of(ch.begin() + 1, ch.end(), [&](const auto& b) { return **b == a; }))};
     case cvc5::Kind::DISTINCT:
-      for (size_t i = 1; i < ch.size(); ++i) {
-        for (size_t j = 0; j < i; ++j) {
-          if (*get(i) == *get(j)) {
-            return Bits{0};
-          }
-        }
-      }
-      return Bits{1};
+      return Bits{static_cast<uint8_t>(bv_words::all_distinct(ch.size(), [&](size_t i, size_t j) { return *get(i) == *get(j); }))};
     case cvc5::Kind::BITVECTOR_ULT:
     case cvc5::Kind::BITVECTOR_ULE:
     case cvc5::Kind::BITVECTOR_UGT:
@@ -242,21 +218,31 @@ std::optional<Bits> eval_node(const cvc5::Term& t, const std::vector<const std::
       }
       return r;
     }
-    case cvc5::Kind::BITVECTOR_ADD: {
-      Bits r = a;
-      for (size_t k = 1; k < ch.size(); ++k) {
-        r = add_bits(r, *get(k));
-      }
-      return r;
+    case cvc5::Kind::BITVECTOR_NEG: {
+      auto words = pack_bits(a);
+      bv_words::neg(words.data(), words.data(), words.size());
+      return unpack_bits(words, w);
     }
-    case cvc5::Kind::BITVECTOR_SUB : return add_bits(a, neg_bits(*get(1)));
-    case cvc5::Kind::BITVECTOR_NEG : return neg_bits(a);
-    case cvc5::Kind::BITVECTOR_MULT: {
-      Bits r = a;
+    case cvc5::Kind::BITVECTOR_ADD :
+    case cvc5::Kind::BITVECTOR_SUB :
+    case cvc5::Kind::BITVECTOR_MULT:
+    case cvc5::Kind::BITVECTOR_UDIV:
+    case cvc5::Kind::BITVECTOR_UREM: {
+      auto                  acc = pack_bits(a);
+      std::vector<uint64_t> result(acc.size());
       for (size_t k = 1; k < ch.size(); ++k) {
-        r = mul_bits(r, *get(k));
+        auto b = pack_bits(*get(k));
+        switch (kind) {
+          case cvc5::Kind::BITVECTOR_ADD : bv_words::add(result.data(), acc.data(), b.data(), acc.size()); break;
+          case cvc5::Kind::BITVECTOR_SUB : bv_words::sub(result.data(), acc.data(), b.data(), acc.size()); break;
+          case cvc5::Kind::BITVECTOR_MULT: bv_words::mul(result.data(), acc.data(), b.data(), acc.size()); break;
+          case cvc5::Kind::BITVECTOR_UDIV: bv_words::udivrem(result.data(), nullptr, acc.data(), b.data(), w); break;
+          default                        : bv_words::udivrem(nullptr, result.data(), acc.data(), b.data(), w); break;
+        }
+        bv_words::clear_top(result.data(), w);
+        result.swap(acc);
       }
-      return r;
+      return unpack_bits(acc, w);
     }
     default: return std::nullopt;
   }

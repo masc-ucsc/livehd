@@ -453,39 +453,12 @@ std::optional<Val> Prover::encode_comb(uint32_t scope, const hhds::Node_class& n
   Term result;
   switch (op) {
     case Ntype_op::And:
-    case Ntype_op::Or :
-    case Ntype_op::Xor: {
-      Kind k = (op == Ntype_op::And) ? Kind::BITVECTOR_AND : (op == Ntype_op::Or) ? Kind::BITVECTOR_OR : Kind::BITVECTOR_XOR;
-      // LGraph values are integers: each operand extends by its OWN sign, the
-      // same encoding pass/lec, the synthesis blaster and satopt's simulation
-      // use (an `Or(u8 x, s8 -1)` is -1, not 255). A proof under any other rule
-      // is about a different function -- satopt commits rewrites proven here.
-      // Or keeps lec's widening-pad rule: all-signed operands and no stamped
-      // width read signed (`$signed(N'sb0) | $signed(val)`).
-      if (op == Ntype_op::Or && !all.empty()) {
-        bool every = true;
-        for (const auto& v : all) {
-          every &= v.is_signed;
-        }
-        out_signed |= every && gu::bits_of(dpin) == 0;
-      }
-      for (const auto& v : all) {
-        Term t = lec::fit_to(tm_, v, W);
-        result = result.isNull() ? t : tm_.mkTerm(k, {result, t});
-      }
-      if (result.isNull()) {
-        result = (op == Ntype_op::And) ? tm_.mkTerm(Kind::BITVECTOR_NOT, {bv_const(W, 0)}) : bv_const(W, 0);
-      }
-      break;
-    }
+    case Ntype_op::Or  :
+    case Ntype_op::Xor :
     case Ntype_op::Mult: {
-      for (const auto& v : all) {
-        Term t = lec::fit_to(tm_, v, W);
-        result = result.isNull() ? t : tm_.mkTerm(Kind::BITVECTOR_MULT, {result, t});
-      }
-      if (result.isNull()) {
-        result = bv_const(W, 1);
-      }
+      const auto folded = lec::encode_fold(tm_, op, all, W, out_signed, gu::bits_of(dpin) == 0);
+      result            = folded.term;
+      out_signed        = folded.is_signed;
       break;
     }
     case Ntype_op::Sum: {
@@ -524,16 +497,11 @@ std::optional<Val> Prover::encode_comb(uint32_t scope, const hhds::Node_class& n
     }
     case Ntype_op::Rxor    :
     case Ntype_op::Popcount: {
-      const int count = livehd::graph_util::reduction_count(node);
-      result          = bv_const(W, 0);
-      if (count > 0) {
-        const auto input = lec::fit_to(tm_, pid(0)[0], count);
-        for (int bit = 0; bit < count; ++bit) {
-          const auto lane
-              = tm_.mkTerm(tm_.mkOp(Kind::BITVECTOR_EXTRACT, {static_cast<uint32_t>(bit), static_cast<uint32_t>(bit)}), {input});
-          const auto term = lec::fit_to(tm_, Val{lane, 1, false}, W);
-          result          = tm_.mkTerm(op == Ntype_op::Rxor ? Kind::BITVECTOR_XOR : Kind::BITVECTOR_ADD, {result, term});
-        }
+      const int count = gu::reduction_count(node);
+      result          = lec::encode_count(tm_, op, pid(0), count, W);
+      if (result.isNull()) {
+        enc_unsupported_ = true;
+        return std::nullopt;
       }
       break;
     }
@@ -551,50 +519,15 @@ std::optional<Val> Prover::encode_comb(uint32_t scope, const hhds::Node_class& n
       result = pred_to_bv(tm_.mkTerm(Kind::DISTINCT, {concat, bv_const(cw, 0)}));
       break;
     }
-    case Ntype_op::EQ: {
-      if (all.size() < 2) {
-        enc_unsupported_ = true;
-        return std::nullopt;
-      }
-      Term acc;
-      for (size_t i = 1; i < all.size(); ++i) {
-        Term eq = lec::vals_equal(tm_, all[0], all[i]);
-        acc     = acc.isNull() ? eq : tm_.mkTerm(Kind::AND, {acc, eq});
-      }
-      result = pred_to_bv(acc);
-      break;
-    }
+    case Ntype_op::EQ:
     case Ntype_op::LT:
     case Ntype_op::GT: {
-      auto& as = pid(0);
-      auto& bs = pid(1);
-      if (as.empty() || bs.empty()) {
+      const auto pred = lec::encode_comparison(tm_, op, op == Ntype_op::EQ ? all : pid(0), pid(1));
+      if (pred.isNull()) {
         enc_unsupported_ = true;
         return std::nullopt;
       }
-      Term acc;
-      for (const auto& a : as) {
-        for (const auto& b : bs) {
-          // Pyrope compares by VALUE, so the compare is signed whenever EITHER
-          // operand is signed (not only when BOTH are): a signed value vs a
-          // non-negative (front-end-unsigned) constant must still order by
-          // signed value. Extend each operand per ITS OWN sign; for a MIXED
-          // pair add one headroom bit so the unsigned operand's top bit is not
-          // misread as a sign bit (matches pass/lec/encode.cpp).
-          bool use_signed = a.is_signed || b.is_signed;
-          int  cw         = std::max(a.width, b.width);
-          if (a.is_signed != b.is_signed) {
-            cw += 1;  // mixed sign: keep the unsigned operand non-negative
-          }
-          Term la  = lec::fit_to(tm_, Val{a.term, a.width, a.is_signed}, cw);
-          Term lb  = lec::fit_to(tm_, Val{b.term, b.width, b.is_signed}, cw);
-          Kind cmp = (op == Ntype_op::LT) ? (use_signed ? Kind::BITVECTOR_SLT : Kind::BITVECTOR_ULT)
-                                          : (use_signed ? Kind::BITVECTOR_SGT : Kind::BITVECTOR_UGT);
-          Term one = tm_.mkTerm(cmp, {la, lb});
-          acc      = acc.isNull() ? one : tm_.mkTerm(Kind::AND, {acc, one});
-        }
-      }
-      result = pred_to_bv(acc);
+      result = pred_to_bv(pred);
       break;
     }
     case Ntype_op::SHL: {

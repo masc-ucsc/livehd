@@ -13,13 +13,6 @@
 
 <p>Open follow-ups from the codebase deduplication review. Each item records the behavior a shared implementation would need to preserve.</p>
 
-<h2>Formal, LEC, and exporters</h2>
-<ul class="subtasks">
-  <li>Consolidate more combinational encoding between <code>pass/formal/prove.cpp</code> and <code>pass/lec/encode.cpp</code>, and evaluate more sharing between the Lean and Isabelle frontends. The encoders have different unknown-value and state policies, and each exporter must enforce the memory modes its theory can express.</li>
-  <li>Look for shared primitives in <code>pass/lec/observe.cpp</code> and <code>pass/lec/term_sim.cpp</code>. Ground evaluation stores optional values for partially evaluable terms, while the sampling simulator runs a pre-sized word program.</li>
-  <li>Factor common clock-bit peeling, reset discovery, splice diagnostics, and register and memory key normalization. The callers carry different hierarchy and failure contexts. Preserve the key formats used for LEC correspondence and semdiff indexing.</li>
-</ul>
-
 <h2>Graph and coloring</h2>
 <ul class="subtasks">
   <li>Factor common wiring and port-fit logic from partition emission, flattening, and inlining. Top and region bodies use different forwarding and storage layouts. Keep cut decisions explicit in the port-reachability summary and the legalization walker.</li>

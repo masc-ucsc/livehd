@@ -15,6 +15,7 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
+#include "cell.hpp"
 #include "hhds/graph.hpp"
 #include "phase_sched.hpp"
 
@@ -449,6 +450,9 @@ absl::flat_hash_set<std::string> design_clock_inputs(hhds::Graph* g, const absl:
 // Extend (sign/zero per v.is_signed) or truncate `v` to exactly `width` bits.
 cvc5::Term fit_to(cvc5::TermManager& tm, const Val& v, int width);
 cvc5::Term vals_equal(cvc5::TermManager& tm, const Val& a, const Val& b);
+Val encode_fold(cvc5::TermManager& tm, Ntype_op op, const std::vector<Val>& operands, int width, bool result_signed, bool unsized);
+cvc5::Term encode_comparison(cvc5::TermManager& tm, Ntype_op op, const std::vector<Val>& lhs, const std::vector<Val>& rhs);
+cvc5::Term encode_count(cvc5::TermManager& tm, Ntype_op op, const std::vector<Val>& inputs, int count, int width);
 cvc5::Term encode_shift(cvc5::TermManager& tm, const Val& data, const Val& amount, int width, bool left);
 struct Div_result {
   cvc5::Term value;

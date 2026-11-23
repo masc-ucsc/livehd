@@ -2,6 +2,7 @@
 #pragma once
 
 #include <algorithm>
+#include <functional>
 #include <limits>
 #include <map>
 #include <optional>
@@ -12,6 +13,27 @@
 #include "bus_name.hpp"
 
 namespace livehd::state_match {
+
+// Both proof engines drop Yosys driver decoration and Pyrope SSA generations
+// before applying their own hierarchy and memory key conventions.
+inline std::string_view undecorated_name(std::string_view name) {
+  if (name.starts_with('$')) {
+    if (const auto end = name.find('$', 1); end != std::string_view::npos) {
+      name.remove_prefix(end + 1);
+    }
+  }
+  return name.substr(0, name.find("___ssa_"));
+}
+
+// A storage wrapper carries its source memory name. LEC flattens that name
+// for correspondence, while semdiff keeps its hierarchy for indexing.
+template <class Normalize = std::identity>
+std::optional<std::string> memory_storage_key(std::string_view name, char separator = '.', Normalize normalize = {}) {
+  if (auto storage = bus_name::parse_memory_storage(name, separator)) {
+    return std::string(storage->prefix) + normalize(storage->source);
+  }
+  return std::nullopt;
+}
 
 struct Register_name {
   std::string key;   // consumer identity (raw hierarchy or encoder key)

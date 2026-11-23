@@ -11,16 +11,6 @@
 namespace lean_pass {
 [[noreturn]] void fatal(const LeanCtx& /*ctx*/, const std::string& msg) { throw Emit_error("[ERROR] pass.lean: " + msg); }
 
-std::string input_name_for_pin(const LeanCtx& ctx, const Node_pin& pin) {
-  // pin_name_of resolves a graph-input pin's declared port name directly (via
-  // the graph's IO maps); no need to identity-match against get_input_pin.
-  auto pname = std::string(livehd::graph_util::pin_name_of(pin));
-  if (!pname.empty() && ctx.input_width.contains(pname)) {
-    return pname;
-  }
-  return {};
-}
-
 Node_pin resolve_resize_chain(const Node_pin& start) {
   Node_pin cur = start;
   for (int guard = 0; guard < 32; ++guard) {
@@ -74,10 +64,7 @@ Node_pin resolve_resize_chain(const Node_pin& start) {
   return cur;
 }
 
-std::string sink_pin_name(const Edge& edge) {
-  const auto sink_node = pin_node(edge.sink);
-  return std::string(Ntype::get_sink_name(node_op(sink_node), edge.sink.get_port_id()));
-}
+std::string sink_pin_name(const Edge& edge) { return sink_pin_name(edge.sink); }
 
 uint32_t raw_pin_width(const Node_pin& pin) { return static_cast<uint32_t>(livehd::graph_util::bits_of(pin)); }
 

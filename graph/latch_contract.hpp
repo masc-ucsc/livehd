@@ -1,7 +1,9 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
+#include <limits>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -26,6 +28,40 @@
 // error — never silently approximated, because the approximation is a
 // plausible-looking wrong answer rather than a crash.
 namespace livehd::latch_contract {
+
+// Trace one output bit of a clock width wrapper to its data operand. A
+// zero-width sign extension or a bit in the zero-padded region is no clock.
+template <class Node>
+std::optional<int> clock_wrapper_source_bit(const Node& node, int bit) {
+  namespace gu = livehd::graph_util;
+  if (gu::type_op_of(node) == Ntype_op::Get_mask) {
+    const auto range = gu::bit_range(node);
+    if (!range || bit >= range->second - range->first) {
+      return std::nullopt;
+    }
+    return range->first + bit;
+  }
+  const auto pos = gu::get_driver_of_sink_name(node, "b");
+  if (pos.is_invalid() || !pos.is_const()) {
+    return std::nullopt;
+  }
+  const auto& amount = gu::const_of(pos);
+  if (!amount.is_just_i64() || amount.has_unknowns() || amount.to_just_i64() <= 0) {
+    return std::nullopt;
+  }
+  return static_cast<int>(std::min<int64_t>(bit, amount.to_just_i64() - 1));
+}
+
+// An And/Or mask preserves a clock bit only if its value there is known.
+inline bool clock_mask_preserves_bit(Ntype_op op, const Dlop& mask, int bit) {
+  if (!mask.is_numeric() || bit < 0 || bit == std::numeric_limits<int>::max()) {
+    return false;
+  }
+  if (mask.has_unknowns() && mask.get_mask_op(bit)->has_unknowns()) {
+    return false;
+  }
+  return mask.bit_test(bit) == (op == Ntype_op::And);
+}
 
 // The commit class of a state element: WHICH net commits it, and on WHICH edge.
 //   posedge flop        -> (clock, RISE)

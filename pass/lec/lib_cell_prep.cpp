@@ -55,11 +55,10 @@ void splice_batch(hhds::Graph* g, const absl::flat_hash_set<hhds::Class_index>& 
     }
     auto* model = it->second;  // combinational (is_exposable_gate_model): no state to name
     if (!gu::inline_sub_instance(g, inst, "pass.lec", model)) {
-      const auto why = gu::sub_def_port_mismatch(inst, model);
       res.error = std::format("lec: cannot splice the latch-enable --lib cell instance '{}' (cell '{}') from its --lib model: {}",
                               gu::default_instance_name(inst),
                               model->get_name(),
-                              why.empty() ? std::string{"the inliner refused it (see the diagnostic above)"} : why);
+                              gu::splice_refusal_reason(inst, model));
       return;
     }
     ++res.spliced;

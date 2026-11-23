@@ -49,44 +49,30 @@ static Pass_plugin pass_plugin_isabelle("pass_isabelle", Pass_isabelle::setup);
 
 namespace {
 
-using Node     = hhds::Node_class;
-using Node_pin = hhds::Pin_class;
-using Edge     = hhds::Edge_class;
-
-uint32_t node_id(const Node& node) { return static_cast<uint32_t>(node.get_debug_nid()); }
-
-Node pin_node(const Node_pin& pin) { return pin.get_master_node(); }
-
-Ntype_op node_op(const Node& node) { return livehd::graph_util::type_op_of(node); }
+using lean_pass::Node;
+using lean_pass::node_id;
+using lean_pass::node_is_flop;
+using lean_pass::node_is_memory;
+using lean_pass::node_op;
+using lean_pass::node_output_is_signed;
+using lean_pass::Node_pin;
+using lean_pass::pin_const_value;
+using lean_pass::pin_is_const;
+using lean_pass::pin_is_input;
+using lean_pass::pin_node;
+using lean_pass::raw_node_width;
+using lean_pass::raw_pin_width;
 
 bool node_is_op(const Node& node, Ntype_op op) { return node_op(node) == op; }
 
 bool node_is_const(const Node& node) { return livehd::graph_util::is_type_const(node); }
-
-bool node_is_flop(const Node& node) { return livehd::graph_util::is_type_flop(node); }
-
-bool node_is_memory(const Node& node) { return node_op(node) == Ntype_op::Memory; }
-
-bool pin_is_input(const Node_pin& pin) { return livehd::graph_util::is_graph_input_pin(pin); }
-
-bool pin_is_const(const Node_pin& pin) { return pin.is_const(); }
 
 // Read-only operand walks keep HHDS's ascending sink-port order without
 // allocating a snapshot. Sub nodes (whose carry inputs may have multiple
 // drivers) are rejected by this emitter.
 auto inp_sinks_ordered(const Node& node) { return node.inp_sorted_pins(); }
 
-// Named by its SINK PIN: one driver per sink pin, so the edge adds nothing.
-std::string sink_pin_name(const Node_pin& sink) {
-  const auto sink_node = pin_node(sink);
-  return std::string(Ntype::get_sink_name(node_op(sink_node), sink.get_port_id()));
-}
-
-uint32_t raw_pin_width(const Node_pin& pin) { return static_cast<uint32_t>(livehd::graph_util::bits_of(pin)); }
-
-uint32_t raw_node_width(const Node& node) { return raw_pin_width(node.create_driver_pin(0)); }
-
-const Dlop& pin_const_value(const Node_pin& pin) { return livehd::graph_util::const_of(pin); }
+using lean_pass::sink_pin_name;
 
 CertWFMode parse_cert_wf_mode(std::string_view mode) {
   if (mode == "eval") {
@@ -263,12 +249,6 @@ std::string lit_one(uint32_t w) { return "(1 :: " + std::to_string(w) + " word)"
 // Format a width-annotated `ucast` of an inner expression.
 std::string ucast_at(const std::string& expr, uint32_t w) { return "((ucast (" + expr + ") :: " + std::to_string(w) + " word))"; }
 
-bool node_output_is_signed(const Node& node) {
-  auto n    = node;
-  auto dpin = n.create_driver_pin(0);
-  return !dpin.is_invalid() && !livehd::graph_util::is_unsign(dpin);
-}
-
 // Format a numeric literal of width w.
 std::string lit_const_pos(int64_t v, uint32_t w) { return "(" + std::to_string(v) + " :: " + std::to_string(w) + " word)"; }
 std::string lit_const_neg(int64_t v, uint32_t w) {
@@ -432,6 +412,9 @@ struct Ctx {
   // Map: flop nid -> field selector name
   std::map<uint32_t, std::string>    flop_field;
   std::map<uint32_t, uint32_t>       flop_width;
+  absl::flat_hash_set<uint32_t>      active_low_reset;
+  std::map<uint32_t, std::string>    reset_value;
+  std::string                        clock_input;
   // Map: memory nid -> function-valued state metadata.
   std::map<uint32_t, Memory_info>    memory_info;
 
@@ -441,15 +424,7 @@ struct Ctx {
 
 [[noreturn]] void fatal(const Ctx& /*ctx*/, const std::string& msg) { throw Emit_error("[ERROR] pass.isabelle: " + msg); }
 
-std::string input_name_for_pin(const Ctx& ctx, const Node_pin& pin) {
-  // pin_name_of resolves a graph-input pin's declared port name directly (via
-  // the graph's IO maps); no need to identity-match against get_input_pin.
-  auto pname = std::string(livehd::graph_util::pin_name_of(pin));
-  if (!pname.empty() && ctx.input_field.contains(pname)) {
-    return pname;
-  }
-  return {};
-}
+using lean_pass::input_name_for_pin;
 
 void check_width(const Ctx& ctx, const Node& node, uint32_t w, std::string_view what) {
   if (w == 0) {
@@ -462,6 +437,25 @@ void check_width(const Ctx& ctx, const Node& node, uint32_t w, std::string_view 
           "node n_" + std::to_string(node_id(node)) + " (" + std::string(what) + ") has width " + std::to_string(w)
               + " > max_width=" + std::to_string(ctx.max_width));
   }
+}
+
+// Each exported step advances every state element together on a rising edge.
+void require_step_clock(Ctx& ctx, const Node& node, const Node_pin& clock, bool rising) {
+  if (!rising) {
+    fatal(ctx, "node n_" + std::to_string(node_id(node)) + " has a falling-edge clock; run pass.single_edge before export.");
+  }
+  if (clock.is_invalid()) {
+    return;
+  }
+  const auto root = lean_pass::resolve_resize_chain(clock);
+  const auto name = pin_is_input(root) ? input_name_for_pin(ctx, root) : std::string{};
+  if (name.empty() || ctx.input_width.at(name) != 1) {
+    fatal(ctx, "node n_" + std::to_string(node_id(node)) + " needs a one-bit primary clock input for a synchronous step.");
+  }
+  if (!ctx.clock_input.empty() && ctx.clock_input != name) {
+    fatal(ctx, "a single Isabelle step cannot advance independent clock inputs '" + ctx.clock_input + "' and '" + name + "'.");
+  }
+  ctx.clock_input = name;
 }
 
 Memory_info parse_memory_info(Ctx& ctx, const Node& node) {
@@ -499,6 +493,9 @@ Memory_info parse_memory_info(Ctx& ctx, const Node& node) {
   }
   if (mi.undef || lean_pass::memory_fwd_bit(mi, 0, 0)) {
     reject("pass.isabelle memory v1 does not model undefined or forwarded read/write collisions.");
+  }
+  for (auto idx : mi.write_ports) {
+    require_step_clock(ctx, node, mi.ports.at(idx).clock, mi.posclk == 1);
   }
   return mi;
 }
@@ -703,11 +700,7 @@ std::string int_of_const(const Ctx& ctx, const Node& node, const Dlop& v, uint32
     return "(- 1)";
   }
   if (v.is_just_i64()) {
-    const auto i = v.to_just_i64();
-    if (i < 0) {
-      return "(- " + std::to_string(-i) + ")";
-    }
-    return std::to_string(i);
+    return isabelle_int_literal(std::to_string(v.to_just_i64()));
   }
   auto [mask_lo, mask_hi] = v.get_mask_range();
   if (mask_lo == 0 && static_cast<uint32_t>(mask_hi) <= w) {
@@ -1448,10 +1441,13 @@ void emit_cert_theory(const Ctx& ctx, const std::vector<Node>& topo, const std::
       first_flop         = false;
       const auto current = word_of_bv_expr("rho", fid, fw);
       const auto din     = flop_din_ids.count(fid) ? word_of_bv_expr("rho", flop_din_ids.at(fid), fw) : lit_zero(fw);
-      const auto reset = flop_reset_ids.count(fid) ? "(bv_nonzero (rho " + std::to_string(flop_reset_ids.at(fid)) + "))" : "False";
+      auto       reset = flop_reset_ids.count(fid) ? "(bv_nonzero (rho " + std::to_string(flop_reset_ids.at(fid)) + "))" : "False";
+      if (flop_reset_ids.contains(fid) && ctx.active_low_reset.contains(fid)) {
+        reset = "(\\<not> " + reset + ")";
+      }
       const auto enable
           = flop_enable_ids.count(fid) ? "(bv_nonzero (rho " + std::to_string(flop_enable_ids.at(fid)) + "))" : "True";
-      ofs << fld << " = flop_next " << reset << " (0 :: " << fw << " word) " << enable << " " << din << " " << current;
+      ofs << fld << " = flop_next " << reset << " " << ctx.reset_value.at(fid) << " " << enable << " " << din << " " << current;
     }
     ofs << "\\<rparr>\"\n\n";
 
@@ -2164,46 +2160,50 @@ std::string emit_node_expr(const Ctx& ctx, const Node& node) {
 // Reachability: starting from the union of root-set drivers, walk reverse-fanin
 // stopping at primary inputs, flop outputs, and Dlop nodes. Emit a topological
 // order of all reached internal combinational nodes.
-std::vector<Node> reachable_topo_order(Ctx& /*ctx*/, const std::vector<Node_pin>& roots,
+std::vector<Node> reachable_topo_order(Ctx& ctx, const std::vector<Node_pin>& roots,
                                        const absl::flat_hash_set<uint32_t>& flop_nids) {
-  absl::flat_hash_set<uint32_t> reached;
-  std::vector<Node>             order;
-
-  // Iterative DFS post-order to produce dependency-respecting order.
+  absl::flat_hash_set<uint32_t>      reached, active;
+  std::vector<Node>                  order;
   std::vector<std::pair<Node, bool>> stack;
-  for (const auto& dpin : roots) {
-    auto n = pin_node(dpin);
-    if (pin_is_input(dpin) || pin_is_const(dpin) || flop_nids.count(node_id(n)) > 0) {
-      continue;
+  const auto                         push = [&](const Node_pin& pin) {
+    if (!pin.is_invalid() && !pin_is_input(pin) && !pin_is_const(pin)) {
+      const auto node = pin_node(pin);
+      if (!flop_nids.contains(node_id(node))) {
+        stack.emplace_back(node, false);
+      }
     }
-    if (reached.count(node_id(n)) > 0) {
-      continue;
-    }
-    stack.emplace_back(n, false);
+  };
+  for (const auto& root : roots) {
+    push(root);
     while (!stack.empty()) {
-      auto& [cur, visited] = stack.back();
-      if (visited) {
-        if (reached.insert(node_id(cur)).second) {
-          order.push_back(cur);
-        }
-        stack.pop_back();
+      const auto [node, exiting] = stack.back();
+      stack.pop_back();
+      const auto id = node_id(node);
+      if (reached.contains(id)) {
         continue;
       }
-      visited = true;
-      // Push children (driver pins of input edges).
-      for (const auto& e : inp_sinks_ordered(cur)) {
-        const auto drv   = e.get_driver_pin();
-        auto       child = pin_node(drv);
-        if (pin_is_input(drv) || pin_is_const(drv)) {
-          continue;
+      if (exiting) {
+        active.erase(id);
+        reached.insert(id);
+        order.push_back(node);
+        continue;
+      }
+      if (!active.insert(id).second) {
+        fatal(ctx, "combinational cycle at node n_" + std::to_string(id));
+      }
+      stack.emplace_back(node, true);
+      if (node_is_memory(node)) {
+        // Writes are next-state roots. An async read depends only on its
+        // address and enable, including when it feeds the next write.
+        const auto& memory = memory_info_for(ctx, node);
+        for (auto idx : memory.read_ports) {
+          push(memory.ports.at(idx).addr);
+          push(memory.ports.at(idx).enable);
         }
-        if (flop_nids.count(node_id(child)) > 0) {
-          continue;  // cut at flop output
+      } else {
+        for (const auto& sink : inp_sinks_ordered(node)) {
+          push(sink.get_driver_pin());
         }
-        if (reached.count(node_id(child)) > 0) {
-          continue;
-        }
-        stack.emplace_back(child, false);
       }
     }
   }
@@ -2418,6 +2418,10 @@ void Pass_isabelle::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) co
   // (b) drivers of every flop's D/reset/enable input
   std::map<uint32_t, Node_pin> flop_din, flop_reset, flop_enable;
   for (auto& fn : flop_nodes) {
+    const auto fid       = node_id(fn);
+    ctx.reset_value[fid] = lit_zero(ctx.flop_width.at(fid));
+    Node_pin clock;
+    bool     rising = true;
     for (const auto& e : inp_sinks_ordered(fn)) {
       auto pname = sink_pin_name(e);
       if (pname == "din") {
@@ -2426,10 +2430,28 @@ void Pass_isabelle::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) co
         flop_reset[node_id(fn)] = e.get_driver_pin();
       } else if (pname == "enable") {
         flop_enable[node_id(fn)] = e.get_driver_pin();
-      } else if (pname == "negreset") {
-        flop_reset[node_id(fn)] = e.get_driver_pin();
+      } else if (pname == "initial") {
+        const auto value = e.get_driver_pin();
+        if (!value.is_const() || !pin_const_value(value).is_numeric() || pin_const_value(value).has_unknowns()) {
+          fatal(ctx, "flop n_" + std::to_string(fid) + " requires a known constant reset value.");
+        }
+        ctx.reset_value[fid] = lit_const_at(ctx, fn, pin_const_value(value), ctx.flop_width.at(fid));
+      } else if (pname == "clock_pin") {
+        clock = e.get_driver_pin();
+      } else if (pname == "negreset" || pname == "posclk") {
+        const auto policy = e.get_driver_pin();
+        if (!policy.is_const() || !pin_const_value(policy).is_just_i64()) {
+          fatal(ctx, "flop n_" + std::to_string(fid) + " requires a known " + pname + " policy.");
+        }
+        const bool set = pin_const_value(policy).to_just_i64() != 0;
+        if (pname == "posclk") {
+          rising = set;
+        } else if (set) {
+          ctx.active_low_reset.insert(fid);
+        }
       }
     }
+    require_step_clock(ctx, fn, clock, rising);
   }
   for (auto& kv : flop_din) {
     roots.push_back(kv.second);
@@ -2649,7 +2671,7 @@ void Pass_isabelle::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) co
         }
         std::string reset_e = "False";
         if (auto it = flop_reset.find(fid); it != flop_reset.end()) {
-          reset_e = "((" + driver_expr_at(ctx, it->second, 1) + ") \\<noteq> 0)";
+          reset_e = "((" + driver_expr_at(ctx, it->second, 1) + (ctx.active_low_reset.contains(fid) ? ") = 0)" : ") \\<noteq> 0)");
         }
         std::string en_e = "True";
         if (auto it = flop_enable.find(fid); it != flop_enable.end()) {
@@ -2659,8 +2681,8 @@ void Pass_isabelle::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) co
           ofs << ";\n";
         }
         first = false;
-        ofs << "       new_" << fld << " = flop_next " << reset_e << " "
-            << "(0 :: " << fw << " word) " << en_e << " " << din_e << " (" << fld << " s)";
+        ofs << "       new_" << fld << " = flop_next " << reset_e << " " << ctx.reset_value.at(fid) << " " << en_e << " " << din_e
+            << " (" << fld << " s)";
       }
       // Per-memory new value via function-map updates.  All RHS expressions
       // reference old state s; record update below is simultaneous.
