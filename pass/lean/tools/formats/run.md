@@ -23,6 +23,17 @@ cert_run <cert> [bind:<file>] [stim:<file>] [edges:all|edges:third|edges:file:<p
   with its constant operands folded in, and every slot kept as its reduced value;
   `Staged.step_eq` (`Compiler/DirectStagedSound`) proves the step equal to `directStepRaw`. `ref` is exact by definition and slow on designs
   with memories. `opt:off` runs `vc` without its optimizer.
+- `route:fp` runs the Futamura projection's residual, the route `dcert2_memroute` runs (the
+  fused memory interpreter, plain writes admitted, the step with its list tails shared,
+  `Projection/ShareTails`; `opt:off` runs the residual as specialized). The residual is
+  specialized and checked once, at the budget `dcert2_memroute auto auto` uses. Each step
+  converts the state to the residual's (`Ckpt.save`, then `CkptStateM.toStateM`: each memory a
+  table below its depth), checks the runtime policy and runs the residual. Its outputs are
+  `interpretDesign`'s and its state agrees with `interpretDesign`'s on every flop and on every
+  memory word below its depth (`Run/Sound.lean`: `fpStep_agree`, `mkStepper_fp_agree`,
+  `runCycles_agree`), so its traces and checkpoints are the other routes' (the selftest compares
+  them). It refuses a certificate the direct check, the address, depth, image-root or word
+  checks refuse, or one the memory route does not admit.
 - `bind:` adds a host: reset, constants, buses, memory, console, exit, registers, stop
   conditions.
 - `stim:` gives inputs from a `stim v1` file (`cert_trace`'s format, absolute cycles). The bind

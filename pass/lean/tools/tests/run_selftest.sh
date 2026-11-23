@@ -17,9 +17,11 @@ set -euo pipefail
 #   latency   zero, fixed:3 and random:7:5 give the same console, register and exit code
 #   replay    cert_trace on the run's inputs.stim prints its steps.trace (ir and vc), so the
 #             closed-loop run is the open-loop trace of the ticks it applied (runCycles_sound)
-#   routes    route:vc and route:ref give the same steps.trace as ir; lockstep:vc runs to exit
+#   routes    route:vc, route:ref and route:fp (also with opt:off) give the same steps.trace as ir;
+#             lockstep:vc, and route:fp lockstep:ir, run to exit
 #   ckpt      a checkpoint at cycle 30 (with the host in its ext section) resumes to the same
-#             end: steps.trace from cycle 30, console, register, exit code, final checkpoint
+#             end: steps.trace from cycle 30, console, register, exit code, final checkpoint;
+#             route:fp writes the same checkpoints and resumes the ir route's
 #   stops     limit, stop-output, breakpoint, watchpoint, bus-error, rom-write, protocol, mealy,
 #             exit with a nonzero code (exit code 1)
 #   RTL load  seqm with load:prog8.hex:mem0, and with load:prog8.bin@0:mem0, prints what seqm_init
@@ -214,11 +216,14 @@ ct "$B" "$CYCR" "$OUT/t_latr/inputs.stim"
 cmp -s "$LOG" "$OUT/t_latr/steps.trace" || { echo "FAIL: replay of the random-latency run"; exit 1; }
 
 # routes and lockstep
-for rt in vc ref; do
+for rt in vc ref fp; do
   expect 0 exit "$B" bind:"$OUT/busm.bind" load:"$OUT/prog.elf" route:$rt trace:"$OUT/t_$rt" max:2000
   cmp -s "$OUT/t_elf/steps.trace" "$OUT/t_$rt/steps.trace" || { echo "FAIL: route:$rt steps.trace"; exit 1; }
 done
+expect 0 exit "$B" bind:"$OUT/busm.bind" load:"$OUT/prog.elf" route:fp opt:off trace:"$OUT/t_fp_off" max:2000
+cmp -s "$OUT/t_elf/steps.trace" "$OUT/t_fp_off/steps.trace" || { echo "FAIL: route:fp opt:off steps.trace"; exit 1; }
 expect 0 exit "$B" bind:"$OUT/busm.bind" load:"$OUT/prog.elf" lockstep:vc max:2000
+expect 0 exit "$B" bind:"$OUT/busm.bind" load:"$OUT/prog.elf" route:fp lockstep:ir max:2000
 
 # checkpoint and resume, the host in the ext section
 expect 0 exit "$B" bind:"$OUT/lat2.bind" load:"$OUT/prog.elf" trace:"$OUT/t_full" ckpt-at:30:"$OUT/c30.ckpt" ckpt-out:"$OUT/cend.ckpt" max:5000
@@ -228,6 +233,16 @@ expect 0 exit "$B" bind:"$OUT/lat2.bind" ckpt-in:"$OUT/c30.ckpt" trace:"$OUT/t_r
 summary | cmp -s - "$OUT/full.summary" || { cat "$LOG"; echo "FAIL: the resumed run ends elsewhere"; exit 1; }
 cmp -s <(sed -n '31,$p' "$OUT/t_full/steps.trace") "$OUT/t_res/steps.trace" || { echo "FAIL: resumed steps.trace"; exit 1; }
 cmp -s "$OUT/cend.ckpt" "$OUT/cres.ckpt" || { echo "FAIL: the resumed run's final checkpoint differs"; exit 1; }
+# route:fp: the same checkpoints as ir (its state agrees with ir's below every depth), and it
+# resumes ir's checkpoint to the same end
+expect 0 exit "$B" bind:"$OUT/lat2.bind" load:"$OUT/prog.elf" route:fp trace:"$OUT/t_fpfull" ckpt-at:30:"$OUT/c30fp.ckpt" ckpt-out:"$OUT/cendfp.ckpt" max:5000
+summary | cmp -s - "$OUT/full.summary" || { cat "$LOG"; echo "FAIL: route:fp ends elsewhere"; exit 1; }
+cmp -s "$OUT/t_full/steps.trace" "$OUT/t_fpfull/steps.trace" || { echo "FAIL: route:fp steps.trace (lat2)"; exit 1; }
+cmp -s "$OUT/c30.ckpt" "$OUT/c30fp.ckpt" && cmp -s "$OUT/cend.ckpt" "$OUT/cendfp.ckpt" \
+  || { echo "FAIL: route:fp checkpoints differ from ir's"; exit 1; }
+expect 0 exit "$B" bind:"$OUT/lat2.bind" ckpt-in:"$OUT/c30.ckpt" route:fp trace:"$OUT/t_resfp" ckpt-out:"$OUT/cresfp.ckpt" max:5000
+cmp -s "$OUT/t_res/steps.trace" "$OUT/t_resfp/steps.trace" && cmp -s "$OUT/cend.ckpt" "$OUT/cresfp.ckpt" \
+  || { echo "FAIL: route:fp resumed from ir's checkpoint differs"; exit 1; }
 
 # compaction (compact:<K>) changes no output: the same steps.trace, summary and final checkpoint
 for k in 1 7; do
@@ -237,7 +252,7 @@ for k in 1 7; do
   cmp -s "$OUT/t_full/steps.trace" "$OUT/t_c$k/steps.trace" || { echo "FAIL: compact:$k steps.trace"; exit 1; }
   cmp -s "$OUT/cend.ckpt" "$OUT/cc$k.ckpt" || { echo "FAIL: compact:$k final checkpoint"; exit 1; }
 done
-# writes to the design's own memory every few cycles (seqm), on ir and vc, with and without compaction
+# writes to the design's own memory every few cycles (seqm), on ir, vc and fp, with and without compaction
 python3 -I - "$OUT/seqm_lean/seqm_io.json" "$OUT/seqw.stim" <<'PY'
 import json, random, sys
 ins = {i['name']: i for i in json.load(open(sys.argv[1]))['inputs']}
@@ -249,7 +264,7 @@ for k in range(80):
         lines.append(f"at {k} in {ins[n]['ordinal']} {ins[n]['width']} {v}")
 open(sys.argv[2], 'w').write('\n'.join(lines) + '\n')
 PY
-for rt in ir vc; do
+for rt in ir vc fp; do
   run "$OUT/seqm_lean/seqm.dcert" stim:"$OUT/seqw.stim" route:$rt trace:"$OUT/t_sw_$rt" ckpt-out:"$OUT/sw_$rt.ckpt" max:80
   [[ $RC == 0 ]] || { cat "$LOG"; echo "FAIL: seqm writes, $rt"; exit 1; }
   run "$OUT/seqm_lean/seqm.dcert" stim:"$OUT/seqw.stim" route:$rt trace:"$OUT/t_swc_$rt" ckpt-out:"$OUT/swc_$rt.ckpt" max:80 compact:3
@@ -258,6 +273,8 @@ for rt in ir vc; do
   cmp -s "$OUT/sw_$rt.ckpt" "$OUT/swc_$rt.ckpt" || { echo "FAIL: seqm compact:3 final checkpoint ($rt)"; exit 1; }
 done
 cmp -s "$OUT/t_sw_ir/steps.trace" "$OUT/t_sw_vc/steps.trace" || { echo "FAIL: seqm writes, ir and vc differ"; exit 1; }
+cmp -s "$OUT/t_sw_ir/steps.trace" "$OUT/t_sw_fp/steps.trace" && cmp -s "$OUT/sw_ir.ckpt" "$OUT/sw_fp.ckpt" \
+  || { echo "FAIL: seqm writes, ir and fp differ (trace or final checkpoint)"; exit 1; }
 [[ $(cut -d' ' -f3 "$OUT/t_sw_ir/steps.trace" | sort -u | wc -l) -gt 3 ]] || { echo "FAIL: seqm writes reach no output"; exit 1; }
 # cert_trace compact:<K> (ir, vc incremental, vc inc:off): the same lines as without, and as cert_run's
 for mode in "route:ir" "route:vc" "route:vc inc:off"; do

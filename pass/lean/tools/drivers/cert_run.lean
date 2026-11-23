@@ -3,7 +3,7 @@
 
 ```
 cert_run <cert> [bind:<file>] [stim:<file>] [edges:all|edges:third|edges:file:<path>]
-         [route:ir|vc|ref] [opt:off] [init:reset|init:zero] [ckpt-in:<file>]
+         [route:ir|vc|ref|fp] [opt:off] [init:reset|init:zero] [ckpt-in:<file>]
          [load:<image>[@<addr>][:mem<k>]] [vaddr] [word:<bytes>]
          [max:<cycles>] [stop:<output>=<value>]
          [trace:<dir>] [vcd:<file>] [lockstep:<route>]
@@ -11,7 +11,8 @@ cert_run <cert> [bind:<file>] [stim:<file>] [edges:all|edges:third|edges:file:<p
 ```
 
 A run steps the design cycle by cycle on a proved simulator (`route:ir`, the default; `vc`;
-`ref`, `interpretDesign` itself) until a stop condition. `pass/lean/tools/formats/run.md`
+`ref`, `interpretDesign` itself; `fp`, the Futamura projection's residual) until a stop
+condition. `pass/lean/tools/formats/run.md`
 documents every option; in short:
 
 * Inputs come from a `stim v1` file (`stim:`, absolute cycles) or are 0, then from the bind
@@ -56,7 +57,7 @@ def say (s : String) : IO Unit := do IO.println s; (← IO.getStdout).flush
 
 def usage : String :=
   "usage: cert_run <cert> [bind:<file>] [stim:<file>] [edges:all|edges:third|edges:file:<path>]\n" ++
-  "       [route:ir|vc|ref] [opt:off] [init:reset|init:zero] [ckpt-in:<file>]\n" ++
+  "       [route:ir|vc|ref|fp] [opt:off] [init:reset|init:zero] [ckpt-in:<file>]\n" ++
   "       [load:<image>[@<addr>][:mem<k>]] [vaddr] [word:<bytes>] [max:<cycles>] [stop:<output>=<value>]\n" ++
   "       [trace:<dir>] [vcd:<file>] [lockstep:<route>] [ckpt-at:<cycle>:<file>] [ckpt-out:<file>]\n" ++
   "       [compact:<cycles>]"

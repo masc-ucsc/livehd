@@ -17,6 +17,11 @@ closed-loop run is not known in advance. What is fixed is how each cycle uses th
 * `compacted_outputs`: a run cut into segments, its state replaced by the restored checkpoint
   of itself after each segment (`cert_run compact:<K>`), prints the outputs of the run that is
   not cut, from power-on, from a restored checkpoint, or from any state whose words fit.
+* Route `fp` (`fpStep_agree`, `mkStepper_fp_agree`): the residual's step, on the state converted
+  to the residual's, gives `interpretDesign`'s outputs and a next state that agrees with
+  `interpretDesign`'s on every flop and every memory word below its depth (`StateAgree`), not as
+  memory functions everywhere. `runCycles_agree` / `runCycles_fp_outputs`: a run on it prints
+  `refTrace`'s outputs on the recorded ticks and ends in a state that agrees with `refTrace`'s.
 
 Mathlib-free; the axioms are audited at the end.
 -/
@@ -265,8 +270,278 @@ theorem compacted_outputs (hsem : Direct.DesignSemWF D) (haddr : MemAddr.addrErr
 
 end
 
+/-! ## Route `fp`: the outputs exact, the state agreeing below every memory's depth
+
+The `fp` stepper runs the residual on the state converted to the residual's (`Ckpt.save`, then
+`CkptStateM.toStateM`), which holds each memory as a finite table. So its next state agrees with
+`interpretDesign`'s where a step can see it (flops at their width, memory words below their
+depth: `StateAgree`), not as functions everywhere. That is all a run shows: `runCycles_agree`
+gives the reference trace's outputs on the recorded ticks, and a final state that agrees with
+the reference's (so its checkpoint, which reads only those words, is the reference's). -/
+
+section
+open Projection.CkptResume (StateAgree WordsFit MemAgree step_agree restore_save_agree wordsFit_step
+  wordsFit_restore mems_size_step)
+open Projection Projection.MemProjection Projection.HwMem
+
+/-- A state the `fp` route converts exactly where a step can see it: one memory per declared
+memory, every word below its memory's depth within its memory's width. -/
+def Fits (D : DesignCert) (s : RuntimeState) : Prop := s.mems.size = D.memories.size ∧ WordsFit D s
+
+/-- `r` is `interpretDesign`'s step on `s`, up to agreement below depth, and still fits. -/
+def AgreeR (D : DesignCert) (e : ClockEdges) (i : RuntimeInput) (s : RuntimeState)
+    (r : RuntimeResult) : Prop :=
+  r.outputs = (interpretDesign D e i s).outputs ∧
+  StateAgree D r.nextState (interpretDesign D e i s).nextState ∧ Fits D r.nextState
+
+/-- The stepper's every accepted step, from a state that fits, is `AgreeR`. -/
+def StepAgree (D : DesignCert)
+    (step : ClockEdges → RuntimeInput → RuntimeState → Except String RuntimeResult) : Prop :=
+  ∀ e i s r, Fits D s → step e i s = .ok r → AgreeR D e i s r
+
+theorem StateAgree.refl' (D : DesignCert) (s : RuntimeState) : StateAgree D s s :=
+  ⟨fun _ _ => rfl, fun _ _ => MemAgree.refl _ _⟩
+
+theorem depth_le_of_depthError {D : DesignCert} (h : MemAddr.depthError D = none) :
+    ∀ k (hk : k < D.memories.size), D.memories[k].depth ≤ 2 ^ D.memories[k].aw := by
+  intro k hk
+  unfold MemAddr.depthError at h
+  split at h
+  · cases h
+  · rename_i hf
+    have hno := Array.findIdx?_eq_none_iff.mp hf D.memories[k] (Array.getElem_mem hk)
+    simp only [Bool.or_eq_false_iff, beq_eq_false_iff_ne, decide_eq_false_iff_not, Nat.not_lt] at hno
+    exact hno.2
+
+/-- The checkpoint of any state keeps each memory's depth and address width, so a certificate
+whose depths fit their tables gives `toStateM_denote`'s side condition. -/
+theorem save_depths {D : DesignCert} (h : MemAddr.depthError D = none) (hash cycle : Nat)
+    (exts : Array Ckpt.Ext) (s : RuntimeState) :
+    ∀ m ∈ (Ckpt.save D hash cycle exts s).mems, m.depth ≤ 2 ^ m.aw := by
+  intro m hm
+  obtain ⟨k, hk, rfl⟩ := Array.mem_iff_getElem.mp hm
+  have hk' : k < D.memories.size := by simpa [Ckpt.save] using hk
+  simp only [Ckpt.save, Array.getElem_mapIdx, Ckpt.saveMem]
+  exact depth_le_of_depthError h k hk'
+
+theorem runMemSimS_eq_of {sim : MemSimulator} {sh : Option (Program × Nat)}
+    (hchk : Hw.checkResidual sim.prog = some sim.bound)
+    (hsh : sh = ShareTails.shareSim sim ∨ sh = none) (e : ClockEdges) (i : RuntimeInput)
+    (st : StateM) : ShareTails.runMemSimS sim sh e i st = runMemSim sim e i st := by
+  rcases hsh with rfl | rfl
+  · exact ShareTails.runMemSimS_eq hchk e i st
+  · unfold ShareTails.runMemSimS ShareTails.stepEnc
+    rw [MemRunFast.runMemSim_eq_enc]
+
+/-- **The `fp` stepper agrees with `interpretDesign`.** For the residual of `D` (fused, plain
+writes admitted, `runMemSimWF_correct`), with or without its tails shared. -/
+theorem fpStep_agree {D : DesignCert} {R : Program} {sf wf : Nat} {sim : MemSimulator}
+    {sh : Option (Program × Nat)}
+    (hsem : Direct.DesignSemWF D) (haddr : MemAddr.addrError D = none)
+    (hdepth : MemAddr.depthError D = none) (hroot : Ckpt.imgRootError D = none)
+    (hword : Ckpt.wordError D = none)
+    (hproj : MemFused.projectMemFDesignAt sf wf D = .ok R) (hsim : mkMemSimOfW D R = some sim)
+    (hsh : sh = ShareTails.shareSim sim ∨ sh = none) :
+    StepAgree D (fpStep D ⟨sim, sh⟩) := by
+  intro e i s r hfit h
+  obtain ⟨hd, hp, hchk0, -⟩ := mkMemSimOfW_parts hsim
+  have hchk : Hw.checkResidual sim.prog = some sim.bound := by rw [hp]; exact hchk0
+  have hw : MemFused.MemSimWFAtWF sf wf sim := MemFused.mkMemSimOfW_wfF hproj hsim
+  unfold fpStep at h
+  simp only at h
+  split at h
+  · rename_i hR
+    have hR' : runtimeFullOKB sim.design i
+        (CkptStateM.toStateM (Ckpt.save D 0 0 #[] s)) e = true := by rw [hd]; exact hR
+    obtain ⟨r', hrun, hden, -⟩ := MemFused.runMemSimWF_correct hw hR'
+    rw [runMemSimS_eq_of hchk hsh, hrun] at h
+    simp only [Except.ok.injEq] at h
+    subst h
+    rw [hden, hd, CkptStateM.toStateM_denote _ (save_depths hdepth 0 0 #[] s)]
+    have hag : StateAgree D (Ckpt.restore (Ckpt.save D 0 0 #[] s)) s :=
+      restore_save_agree 0 0 #[] hfit.1 hfit.2
+    obtain ⟨ho, hn⟩ := step_agree (i := i) hsem haddr hroot hag e
+    refine ⟨ho, hn, mems_size_step e, ?_⟩
+    exact wordsFit_step hsem hroot hword (wordsFit_restore (Ckpt.validate_save D 0 0 #[] s hroot hword)) e
+  · cases h
+
+theorem fpChecks_none {D : DesignCert} (h : fpChecks D = none) :
+    Direct.DesignSemWF D ∧ MemAddr.addrError D = none ∧ MemAddr.depthError D = none ∧
+      Ckpt.imgRootError D = none ∧ Ckpt.wordError D = none := by
+  unfold fpChecks at h
+  split at h
+  · cases h
+  · rename_i u hc
+    have hsem := Direct.checkDesign_sound hc
+    split at h <;> (try (rename_i h1 h2 h3 h4; exact ⟨hsem, h1, h2, h3, h4⟩)) <;> cases h
+
+theorem fpResidual_ok {D : DesignCert} {R : Program} (h : fpResidual D = .ok R) :
+    ∃ sf wf, MemFused.projectMemFDesignAt sf wf D = .ok R := by
+  unfold fpResidual at h
+  dsimp only at h
+  split at h
+  · rename_i R' hR
+    cases h
+    exact ⟨_, _, hR⟩
+  · split at h
+    · rename_i R' _ hR
+      cases h
+      exact ⟨_, _, hR⟩
+    · cases h
+  · cases h
+
+/-- The `fp` stepper `mkStepper` builds agrees with `interpretDesign`. -/
+theorem mkStepper_fp_agree {D : DesignCert} {st : Stepper} {opt : Bool}
+    (h : mkStepper D .fp opt = .ok st) : StepAgree D st.step := by
+  simp only [mkStepper] at h
+  cases hc : fpChecks D with
+  | some e => simp [hc] at h
+  | none =>
+    obtain ⟨hsem, haddr, hdepth, hroot, hword⟩ := fpChecks_none hc
+    cases hr : fpResidual D with
+    | error e => simp [hc, hr] at h
+    | ok R =>
+      obtain ⟨sf, wf, hproj⟩ := fpResidual_ok hr
+      cases hs : mkMemSimOfW D R with
+      | none => simp [hc, hr, hs] at h
+      | some sim =>
+        simp only [hc, hr, hs, Except.ok.injEq] at h
+        subst h
+        exact fpStep_agree hsem haddr hdepth hroot hword hproj hs
+          (by cases opt <;> simp)
+
+/-! ### One cycle and a run, up to agreement -/
+
+theorem stepFinal_agree {ctx : Ctx} (hs : StepAgree ctx.D ctx.step) {e : ClockEdges}
+    {s : RuntimeState} {guess inputs : RuntimeInput} {rg r : RuntimeResult} (hfit : Fits ctx.D s)
+    (hg : AgreeR ctx.D e guess s rg) (h : stepFinal ctx e s guess rg inputs = .ok r) :
+    AgreeR ctx.D e inputs s r := by
+  unfold stepFinal at h
+  by_cases heq : (inputs == guess) = true
+  · simp only [heq, ↓reduceIte, Except.ok.injEq] at h
+    subst h
+    rw [beq_iff_eq.mp heq]; exact hg
+  · simp only [heq, Bool.false_eq_true, ↓reduceIte] at h
+    exact hs _ _ _ _ hfit h
+
+theorem cycleStep_agree {ctx : Ctx} (hs : StepAgree ctx.D ctx.step) {st : LoopState}
+    {co : CycleOut} (hfit : Fits ctx.D st.s) (h : cycleStep ctx st = .ok co) :
+    (co.applied = true ∧ AgreeR ctx.D co.tick.edges co.tick.input st.s
+        { outputs := co.outs, nextState := co.next.s }) ∨
+    (co.applied = false ∧ co.next.s = st.s) := by
+  unfold cycleStep at h
+  dsimp only at h
+  generalize edgesAt ctx.D ctx.edges st.cycle = e at h
+  generalize ctx.guess st.cycle = guess at h
+  cases hrg : ctx.step e guess st.s with
+  | error err => rw [hrg] at h; cases h
+  | ok rg =>
+    rw [hrg] at h
+    have hg := hs _ _ _ _ hfit hrg
+    simp only at h
+    cases hp : plan ctx st guess rg.outputs with
+    | stop why hh =>
+      rw [hp] at h; cases h
+      exact Or.inr ⟨rfl, rfl⟩
+    | go inputs hh done events =>
+      rw [hp] at h
+      simp only at h
+      cases hr : stepFinal ctx e st.s guess rg inputs with
+      | error err => rw [hr] at h; cases h
+      | ok r =>
+        rw [hr] at h
+        have hri := stepFinal_agree hs hfit hg hr
+        simp only at h
+        by_cases hm : (r.outputs == rg.outputs) = true
+        · simp only [hm, ↓reduceIte] at h
+          cases h
+          exact Or.inl ⟨rfl, hri⟩
+        · simp only [hm, Bool.false_eq_true, ↓reduceIte] at h
+          cases h
+          exact Or.inr ⟨rfl, rfl⟩
+
+/-- **A closed-loop run on a stepper that agrees is the reference trace of its ticks**: from a
+state `t` that the run's start state agrees with, `refTrace` on the recorded ticks prints the
+run's outputs and ends in a state the run's final state agrees with. -/
+theorem runCycles_agree {ctx : Ctx} (hs : StepAgree ctx.D ctx.step) (hsem : Direct.DesignSemWF ctx.D)
+    (haddr : MemAddr.addrError ctx.D = none) (hroot : Ckpt.imgRootError ctx.D = none) :
+    ∀ (n : Nat) (st : LoopState) (t : RuntimeState) (ts : List Tick) (os : List (Array BV))
+      (st' : LoopState) (why : Option String),
+      Fits ctx.D st.s → StateAgree ctx.D st.s t → runCycles ctx n st = .ok (ts, os, st', why) →
+      (refTrace ctx.D t ts).steps.map (·.outputs) = os ∧
+      StateAgree ctx.D st'.s (refTrace ctx.D t ts).finalState := by
+  intro n
+  induction n with
+  | zero =>
+    intro st t ts os st' why _ hag h
+    simp only [runCycles, Except.ok.injEq, Prod.mk.injEq] at h
+    obtain ⟨rfl, rfl, rfl, -⟩ := h
+    exact ⟨rfl, hag⟩
+  | succ n ih =>
+    intro st t ts os st' why hfit hag h
+    simp only [runCycles] at h
+    cases hco : cycleStep ctx st with
+    | error e => rw [hco] at h; cases h
+    | ok co =>
+      rw [hco] at h
+      simp only at h
+      rcases cycleStep_agree hs hfit hco with ⟨ha, ho, hn, hf⟩ | ⟨ha, hheld⟩
+      · -- the applied step, carried from `st.s` to `t`
+        obtain ⟨ho', hn'⟩ := step_agree (i := co.tick.input) hsem haddr hroot hag co.tick.edges
+        have hout : co.outs = (interpretDesign ctx.D co.tick.edges co.tick.input t).outputs := by
+          rw [← ho', ← ho]
+        have hnext : StateAgree ctx.D co.next.s (interpretDesign ctx.D co.tick.edges co.tick.input t).nextState :=
+          hn.trans hn'
+        simp only [ha, ↓reduceIte] at h
+        cases hst : co.status with
+        | some w =>
+          rw [hst] at h
+          simp only [Except.ok.injEq, Prod.mk.injEq] at h
+          obtain ⟨rfl, rfl, rfl, -⟩ := h
+          simp only [Direct.refTrace, List.map_cons, List.map_nil]
+          exact ⟨by rw [hout], hnext⟩
+        | none =>
+          rw [hst] at h
+          simp only at h
+          cases hres : runCycles ctx n co.next with
+          | error e => rw [hres] at h; cases h
+          | ok res =>
+            obtain ⟨ts1, os1, st1, why1⟩ := res
+            rw [hres] at h
+            simp only [Except.ok.injEq, Prod.mk.injEq] at h
+            obtain ⟨rfl, rfl, rfl, -⟩ := h
+            obtain ⟨h1, h2⟩ := ih co.next _ _ _ _ _ hf hnext hres
+            simp only [Direct.refTrace, List.map_cons]
+            exact ⟨by rw [h1, hout], h2⟩
+      · simp only [ha, Bool.false_eq_true, ↓reduceIte, Except.ok.injEq, Prod.mk.injEq] at h
+        obtain ⟨rfl, rfl, rfl, -⟩ := h
+        exact ⟨rfl, by rw [hheld]; exact hag⟩
+
+/-- …in particular from the run's own start state: the run prints `refTrace`'s outputs. -/
+theorem runCycles_fp_outputs {ctx : Ctx} {opt : Bool} {stp : Stepper}
+    (hmk : mkStepper ctx.D .fp opt = .ok stp) (hstep : ctx.step = stp.step)
+    (haddr : MemAddr.addrError ctx.D = none) {n : Nat} {st : LoopState} {ts : List Tick}
+    {os : List (Array BV)} {st' : LoopState} {why : Option String} (hfit : Fits ctx.D st.s)
+    (h : runCycles ctx n st = .ok (ts, os, st', why)) :
+    (refTrace ctx.D st.s ts).steps.map (·.outputs) = os ∧
+    StateAgree ctx.D st'.s (refTrace ctx.D st.s ts).finalState := by
+  have hs : StepAgree ctx.D ctx.step := by rw [hstep]; exact mkStepper_fp_agree hmk
+  have hc : fpChecks ctx.D = none := by
+    simp only [mkStepper] at hmk
+    cases hc : fpChecks ctx.D with
+    | none => rfl
+    | some e => simp [hc] at hmk
+  obtain ⟨hsem, _, _, hroot, _⟩ := fpChecks_none hc
+  exact runCycles_agree hs hsem haddr hroot n st st.s ts os st' why hfit (StateAgree.refl' _ _) h
+
+end
+
 #audit_axioms HDLProof.Run.compacted_outputs
 #audit_axioms HDLProof.Run.runCycles_sound
+#audit_axioms HDLProof.Run.fpStep_agree
+#audit_axioms HDLProof.Run.mkStepper_fp_agree
+#audit_axioms HDLProof.Run.runCycles_agree
+#audit_axioms HDLProof.Run.runCycles_fp_outputs
 #audit_axioms HDLProof.Run.cycleStep_applied
 #audit_axioms HDLProof.Run.mkStepper_ir_sound
 
