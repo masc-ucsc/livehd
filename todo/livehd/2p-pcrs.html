@@ -459,6 +459,16 @@ maximum); <code>dont_use</code> is already honoured for the drivers. <em>Open:</
 only if the balance-point merge of A4 is not enough.</li>
 </ul>
 
+<h2 id="chunk-routing">Independent chunk routing on ASAP7</h2>
+<p>On November 23, 2026, OpenROAD detailed-routed CNN chunk <code>0:190</code> (1,953 nets)
+and Eyeriss chunk <code>0:1916</code> (7,873 nets) in separate processes. Both checks reported
+full connectivity and zero routing violations after SRAM track alignment and cell legalization.
+A CNN reassembly check imported 1,952 fixed nets and routed the remaining net. The resulting DEF
+preserved the wire geometry of all 1,952 nets and passed both checks.</p>
+<p>A PCRS buffer can straddle a chunk boundary even when its origin is inside the chunk.
+Its incident nets need top-level ownership when a pin would lie outside the worker's routing area.
+Whole-design timing requires extraction on the assembled routing.</p>
+
 <h2 id="open">Open points</h2>
 <ul>
 <li>Whether the top needs a budget round (H4 answers it).</li>

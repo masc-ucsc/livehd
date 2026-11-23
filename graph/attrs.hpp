@@ -538,7 +538,7 @@ inline constexpr pending_time_t pending_time{};
 // IDs and tables (translated through Shared_text). Hierarchical color requires
 // occurrence context. The match entry describes its pin overload; it can also
 // be attached to a node.
-enum class Rebuild_group { always, names, colors, placement, analysis, synth_policy, aggregate_origin, matches, skip_raw };
+enum class Rebuild_group { always, names, colors, placement, analysis, policy, origin, matches, skip_raw };
 
 #define LIVEHD_ATTR_REGISTRY(APPLY, X)               \
   APPLY(X, route_records_v1, driver_pin, skip_raw)   \
@@ -560,7 +560,7 @@ enum class Rebuild_group { always, names, colors, placement, analysis, synth_pol
   APPLY(X, preroute_exclude, node, always)           \
   APPLY(X, preroute_net_exclude, driver_pin, always) \
   APPLY(X, sta, node, analysis)                      \
-  APPLY(X, synth_policy, node, synth_policy)         \
+  APPLY(X, synth_policy, node, policy)         \
   APPLY(X, ctrl_members, node, analysis)             \
   APPLY(X, ctrl_stats, node, analysis)               \
   APPLY(X, synth_region, node, analysis)             \
@@ -587,7 +587,7 @@ enum class Rebuild_group { always, names, colors, placement, analysis, synth_pol
   APPLY(X, specialization_origin, node, always)      \
   APPLY(X, memory_module, node, always)              \
   APPLY(X, memory_async_reset, node, always)         \
-  APPLY(X, aggregate_origin, node, aggregate_origin) \
+  APPLY(X, aggregate_origin, node, origin) \
   APPLY(X, aggregate_source_index, node, always)     \
   APPLY(X, aggregate_lane_ordinal, node, always)     \
   APPLY(X, aggregate_bit_offset, node, always)       \

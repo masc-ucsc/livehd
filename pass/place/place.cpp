@@ -2100,6 +2100,21 @@ void snapshot_frame(ph::Floorplan& frame, const Geometry_view& geometry) {
     frame.components.push_back({c.name, c.macro, geometry.pose(i)});
   }
 }
+// Chunk assembly keeps the seed DEF's IO geometry when it installs worker poses.
+bool prepare_handoff_pins(const ph::Technology& tech, ph::Floorplan& frame) {
+  if (std::ranges::none_of(frame.terminals, [](const auto& t) {
+        return t.status != Status::FIXED && t.status != Status::LOCKED && t.use != "POWER" && t.use != "GROUND";
+      })) {
+    return false;
+  }
+  const auto* profile = ph::detect_tech_profile(tech, ph::Tech_policy::power_grid);
+  if (!profile || !imported_tracks(frame, profile->io_pin_layers[0], false).imported
+      || !imported_tracks(frame, profile->io_pin_layers[1], true).imported) {
+    return false;
+  }
+  frame.terminals = handoff_pins(tech, frame, profile->io_pin_layers[0], profile->io_pin_layers[1]);
+  return true;
+}
 // A clock leaf group: the flops one leaf driver feeds and the gate that drives them, when the source is one.
 struct Clock_leaf_group {
   int              gate = -1;
@@ -10339,6 +10354,21 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     }
     make_arrays(v, tech);
   }
+  if (!options.chunk_manifest.empty()) {
+    // The planner, worker cut nets, and stitched DEF must see the same IO
+    // locations. Only fixed components have a final pose at plan export.
+    auto pin_frame = v.fp;
+    pin_frame.components.clear();
+    for (const auto& c : v.cells) {
+      if (c.place.status == Status::FIXED || c.place.status == Status::LOCKED) {
+        pin_frame.components.push_back({c.name, c.macro, c.place});
+      }
+    }
+    if (prepare_handoff_pins(tech, pin_frame)) {
+      v.fp.terminals = std::move(pin_frame.terminals);
+      make_arrays(v, tech);
+    }
+  }
   const bool chunk_seeded = chunk_stage && plan_color_chunks(v, options, hint_scopes, hint_design, tech, cache.reused != 0, result);
   const auto hint_objects = [&] {
     std::vector<Hint_object> objects;
@@ -15731,18 +15761,10 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
   // FP bus/pin adjustment chooses perimeter positions but leaves the seed layer and
   // shape. Before handing unpowered placement to a router, put those movable IOs
   // on the preferred edge layers with legal track, metal area and spacing.
-  if (!pg_profile && final_handoff && !options.optimization_pending
-      && std::ranges::any_of(v.fp.terminals, [](const auto& t) {
-           return t.status != Status::FIXED && t.status != Status::LOCKED && t.use != "POWER" && t.use != "GROUND";
-         })) {
-    const auto* profile = ph::detect_tech_profile(tech, ph::Tech_policy::power_grid);
-    if (profile && imported_tracks(v.fp, profile->io_pin_layers[0], false).imported
-        && imported_tracks(v.fp, profile->io_pin_layers[1], true).imported) {
-      v.fp.terminals = handoff_pins(tech, v.fp, profile->io_pin_layers[0], profile->io_pin_layers[1]);
-      for (size_t i = 0; i < v.fp.terminals.size(); ++i) {
-        v.design.node_x.at(v.cells.size() + i) = v.fp.terminals[i].x;
-        v.design.node_y.at(v.cells.size() + i) = v.fp.terminals[i].y;
-      }
+  if (!pg_profile && final_handoff && !options.optimization_pending && prepare_handoff_pins(tech, v.fp)) {
+    for (size_t i = 0; i < v.fp.terminals.size(); ++i) {
+      v.design.node_x.at(v.cells.size() + i) = v.fp.terminals[i].x;
+      v.design.node_y.at(v.cells.size() + i) = v.fp.terminals[i].y;
     }
   }
   // The power grid is exported by the terminal pass alone: an optimization-pending call is followed by

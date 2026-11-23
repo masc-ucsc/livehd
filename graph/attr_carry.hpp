@@ -101,11 +101,13 @@ struct Carry_policy {
       case Group::colors          : return colors;
       case Group::placement       : return placement;
       case Group::analysis        : return analysis;
-      case Group::synth_policy    : return synth_policy;
-      case Group::aggregate_origin: return aggregate_origin;
+      case Group::policy          : return synth_policy;
+      case Group::origin          : return aggregate_origin;
       case Group::matches         : return matches;
       case Group::skip_raw        : return false;
     }
+    static_assert(livehd::attrs::Attr_traits<Tag>::rebuild <= Group::skip_raw);
+    return false;
   }
 };
 
