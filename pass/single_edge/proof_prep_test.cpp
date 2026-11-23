@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <ctime>
 #include <format>
 #include <iostream>
 #include <memory>
@@ -444,16 +445,20 @@ std::vector<std::pair<std::string, std::string>> splice_both(Split_order order, 
   return dumps;
 }
 
-// Wall time of one-sided inlining on a fresh build(wraps, ports, 8), best of `reps`.
-double inline_secs(int wraps, int ports, int reps) {
+// Process CPU time isolates this single-threaded splice from time spent waiting
+// for a CPU during parallel regression. Fixture setup and checks are untimed.
+double inline_cpu_secs(int wraps, int ports, int reps) {
   double best = 0;
   for (int rep = 0; rep < reps; ++rep) {
     auto               d = build(wraps, ports, 8);
     hhds::GraphLibrary other_lib;
     const auto         other = other_side(other_lib);
-    const auto         start = std::chrono::steady_clock::now();
+    const auto         start = std::clock();
     const size_t       got   = se::inline_instances_missing_from_other_side({}, d.graphs, other, d.top.get());
-    const double       secs  = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+    const auto         end   = std::clock();
+    EXPECT_NE(start, static_cast<std::clock_t>(-1));
+    EXPECT_NE(end, static_cast<std::clock_t>(-1));
+    const double secs = static_cast<double>(end - start) / CLOCKS_PER_SEC;
     EXPECT_EQ(got, static_cast<size_t>(3 * wraps + 2 * 8 + 6));
     EXPECT_EQ(count_op(*d.top, Ntype_op::Sub), 1 + wraps);  // the kept instance and the splits
     EXPECT_EQ(count_op(*d.top, Ntype_op::Flop), 2 * wraps);
@@ -503,16 +508,16 @@ TEST(ProofPrep, OneSidedInlineMatchesTheReferenceOnASkewedKeptBoundary) {
 TEST(ProofPrep, OneSidedInlineIsLinearInTheSplicedSize) {
 #ifdef NDEBUG
   constexpr int scale = 10;
-  constexpr int reps  = 2;  // best of two: a loaded machine only ever adds time
+  constexpr int reps  = 2;
 #else
   constexpr int scale = 1;
   constexpr int reps  = 1;
 #endif
   constexpr int wraps = 500 * scale;
   constexpr int ports = 250 * scale;
-  const double  small = inline_secs(wraps, ports, reps);
-  const double  large = inline_secs(4 * wraps, 4 * ports, reps);
-  std::cout << std::format("one-sided inline: {:.3f}s at 1x, {:.3f}s at 4x (ratio {:.1f})\n", small, large, large / small);
+  const double  small = inline_cpu_secs(wraps, ports, reps);
+  const double  large = inline_cpu_secs(4 * wraps, 4 * ports, reps);
+  std::cout << std::format("one-sided inline CPU time: {:.3f}s at 1x, {:.3f}s at 4x (ratio {:.1f})\n", small, large, large / small);
 #ifdef NDEBUG
   EXPECT_LT(large, 8.0 * small) << "one-sided inlining grows faster than linearly";
 #endif
