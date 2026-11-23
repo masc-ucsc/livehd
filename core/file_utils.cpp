@@ -124,12 +124,32 @@ std::error_code livehd::file_utils::append_file(const std::string& path, std::st
 }
 
 std::error_code livehd::file_utils::write_file_atomic(const std::string& path, std::string_view bytes) {
-  auto      temp = path + ".tmp.XXXXXX";
+  return write_file_atomic(path, [&](int fd) { return write_all(fd, bytes); });
+}
+
+void livehd::file_utils::write_staged_file(const std::filesystem::path& path, const std::function<void(std::ostream&)>& emit) {
+  std::ofstream out;
+  out.exceptions(std::ios::failbit | std::ios::badbit);
+  out.open(path, std::ios::binary);
+  emit(out);
+  out.close();
+}
+
+std::error_code livehd::file_utils::write_file_atomic(const std::filesystem::path&               path,
+                                                      const std::function<std::error_code(int)>& produce) {
+  auto      temp = (path.parent_path() / ".lhd-tmp-XXXXXX").string();
   const int fd   = ::mkstemp(temp.data());
   if (fd < 0) {
     return {errno, std::generic_category()};
   }
-  auto error = write_all(fd, bytes);
+  std::error_code error;
+  try {
+    error = produce(fd);
+  } catch (...) {
+    ::close(fd);
+    ::unlink(temp.c_str());
+    throw;
+  }
   if (::close(fd) != 0 && !error) {
     error = {errno, std::generic_category()};
   }

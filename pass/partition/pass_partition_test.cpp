@@ -10,11 +10,32 @@
 #include <string>
 #include <vector>
 
+#include "color_common.hpp"
 #include "flatten.hpp"
 #include "graph_library_singleton.hpp"
 #include "gtest/gtest.h"
 #include "node_util.hpp"
 #include "pass_color.hpp"
+
+TEST(PartitionColoring, FlattenUsesTheTypedAlgorithmField) {
+  using namespace livehd::partition;
+  hhds::GraphLibrary library;
+  const auto         io     = library.create_io("top");
+  const auto         graph  = io->create_graph();
+  const auto         single = [&](Flatten_mode mode) { return flatten_is_single_module(graph.get(), mode); };
+  EXPECT_TRUE(single(Flatten_mode::on));
+  EXPECT_FALSE(single(Flatten_mode::automatic));
+  auto info = graph->get_input_node().attr(livehd::attrs::coloring_info);
+  info.set(R"({"region_opts":{"1":{"algorithm":"flat"}},"algorithm":"synth"})");
+  EXPECT_FALSE(single(Flatten_mode::automatic));
+  info.set(R"({ "algorithm" : "flat" })");
+  EXPECT_TRUE(single(Flatten_mode::automatic));
+  EXPECT_FALSE(single(Flatten_mode::off));
+  info.set(livehd::color::build_coloring_info_json(graph.get(), R"(top"with\escapes)", "flat", "{}"));
+  EXPECT_TRUE(single(Flatten_mode::automatic));
+  info.set("malformed");
+  EXPECT_FALSE(single(Flatten_mode::automatic));
+}
 
 TEST(PartitionAdmission, RefusalStopsConstructionAndFreshRetryPreservesConnectivity) {
   namespace gu = livehd::graph_util;

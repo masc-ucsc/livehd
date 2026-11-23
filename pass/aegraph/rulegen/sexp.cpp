@@ -1,7 +1,9 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "sexp.hpp"
 
+#include <algorithm>
 #include <cctype>
+#include <cstdlib>
 
 namespace livehd::aegraph::rulegen {
 
@@ -138,6 +140,37 @@ private:
 };
 
 }  // namespace
+
+std::string lowercase(std::string_view s) {
+  std::string out(s);
+  std::ranges::transform(out, out.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+  return out;
+}
+
+bool parse_integer(const std::string& t, int64_t& v, Integer_syntax syntax) {
+  if (t.empty()) {
+    return false;
+  }
+  size_t i = (t[0] == '-' || t[0] == '+') ? 1 : 0;
+  if (i >= t.size()) {
+    return false;
+  }
+  for (size_t j = i; j < t.size(); ++j) {
+    if (std::isdigit(static_cast<unsigned char>(t[j])) == 0) {
+      // 0x hex
+      if (syntax == Integer_syntax::decimal_or_hex && j == i + 1 && t[i] == '0' && (t[j] == 'x' || t[j] == 'X')
+          && j + 1 < t.size()) {
+        char* end = nullptr;
+        v         = std::strtoll(t.c_str(), &end, 16);
+        return end == t.c_str() + t.size();
+      }
+      return false;
+    }
+  }
+  char* end = nullptr;
+  v         = std::strtoll(t.c_str(), &end, 10);
+  return end == t.c_str() + t.size();
+}
 
 std::vector<Sexp> parse_sexps(std::string_view text, std::string_view file) { return Reader(text, file).all(); }
 

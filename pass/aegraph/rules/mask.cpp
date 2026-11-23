@@ -24,15 +24,15 @@ AEG_RULE_GROUP(mask);
 namespace {
 
 // The operands of a three-operand Get_mask root: value, lo, hi (banks 0, 2, 3).
-[[nodiscard]] bool get_mask_window(Ctx& ctx, const Root& root, Class_id& x, int64_t& lo, int64_t& hi) {
-  if (root.ops.size() != 3 || root.ops[0].bank != 0 || root.ops[1].bank != 2 || root.ops[2].bank != 3) {
+[[nodiscard]] bool get_mask_window(Ctx& ctx, std::span<const Operand> ops, Class_id& x, int64_t& lo, int64_t& hi) {
+  if (ops.size() != 3 || ops[0].bank != 0 || ops[1].bank != 2 || ops[2].bank != 3) {
     return false;
   }
-  const auto l = ctx.small_int(root.ops[1].cls), h = ctx.small_int(root.ops[2].cls);
+  const auto l = ctx.small_int(ops[1].cls), h = ctx.small_int(ops[2].cls);
   if (!l || !h || *l < 0 || *h <= *l) {
     return false;
   }
-  x  = root.ops[0].cls;
+  x  = ops[0].cls;
   lo = *l;
   hi = *h;
   return true;
@@ -78,14 +78,11 @@ struct Slice {
       return false;
     }
     const auto ops = ctx.operands_of(*n);
-    if (ops.size() != 3 || ops[0].bank != 0 || ops[1].bank != 2 || ops[2].bank != 3) {
+    Slice      slice;
+    if (!get_mask_window(ctx, ops, slice.source, slice.lo, slice.hi)) {
       return false;
     }
-    const auto l = ctx.small_int(ops[1].cls), h = ctx.small_int(ops[2].cls);
-    if (!l || !h || *l < 0 || *h <= *l) {
-      return false;
-    }
-    found = Slice{ops[0].cls, *l, *h};
+    found = slice;
     return true;
   });
   return found;
@@ -99,7 +96,7 @@ struct Slice {
 AEG_NATIVE_BIT_RULE(getmask_lane, simplify, 40, Ntype_op::Get_mask) {
   Class_id x = kNoClass;
   int64_t  lo = 0, hi = 0;
-  if (!get_mask_window(ctx, root, x, lo, hi)) {
+  if (!get_mask_window(ctx, root.ops, x, lo, hi)) {
     return;
   }
   const auto  layout = layout_of(ctx.eg(), x);
@@ -142,7 +139,7 @@ AEG_NATIVE_BIT_RULE(getmask_lane, simplify, 40, Ntype_op::Get_mask) {
 AEG_NATIVE_BIT_RULE(getmask_fits, simplify, 30, Ntype_op::Get_mask) {
   Class_id y = kNoClass;
   int64_t  lo = 0, hi = 0;
-  if (!get_mask_window(ctx, root, y, lo, hi) || lo != 0) {
+  if (!get_mask_window(ctx, root.ops, y, lo, hi) || lo != 0) {
     return;
   }
   const auto f = facts_of(ctx.eg(), y);
@@ -180,7 +177,7 @@ AEG_NATIVE_BIT_RULE(getmask_fits, simplify, 30, Ntype_op::Get_mask) {
 AEG_NATIVE_BIT_RULE(getmask_drop_terms, simplify, 36, Ntype_op::Get_mask) {
   Class_id x = kNoClass;
   int64_t  lo = 0, hi = 0;
-  if (!get_mask_window(ctx, root, x, lo, hi) || hi > kMaxLaneBit) {
+  if (!get_mask_window(ctx, root.ops, x, lo, hi) || hi > kMaxLaneBit) {
     return;
   }
   const Enode* bank = nullptr;
@@ -277,7 +274,7 @@ AEG_NATIVE_BIT_RULE(getmask_drop_terms, simplify, 36, Ntype_op::Get_mask) {
 AEG_NATIVE_BIT_RULE(getmask_sum_chain, simplify, 37, Ntype_op::Get_mask) {
   Class_id x = kNoClass;
   int64_t  lo = 0, hi = 0;
-  if (!get_mask_window(ctx, root, x, lo, hi) || lo != 0 || hi <= 0 || hi > 4096) {
+  if (!get_mask_window(ctx, root.ops, x, lo, hi) || lo != 0 || hi <= 0 || hi > 4096) {
     return;
   }
   const Enode* sum = nullptr;
@@ -386,7 +383,7 @@ AEG_NATIVE_BIT_RULE(getmask_sum_chain, simplify, 37, Ntype_op::Get_mask) {
 AEG_NATIVE_RULE(getmask_concat_straddle, simplify, 35, Ntype_op::Get_mask) {
   Class_id x = kNoClass;
   int64_t  lo = 0, hi = 0;
-  if (!get_mask_window(ctx, root, x, lo, hi)) {
+  if (!get_mask_window(ctx, root.ops, x, lo, hi)) {
     return;
   }
   const Enode* concat = nullptr;

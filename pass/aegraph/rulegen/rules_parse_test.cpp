@@ -15,6 +15,18 @@ namespace tst = livehd::aegraph::rulegen::testing;
 
 namespace {
 
+TEST(RulegenInteger, DecimalCostsAndHexadecimalRuleLiterals) {
+  int64_t value = 0;
+  for (const auto syntax : {Integer_syntax::decimal, Integer_syntax::decimal_or_hex}) {
+    ASSERT_TRUE(parse_integer("010", value, syntax));
+    EXPECT_EQ(value, 10);
+    EXPECT_FALSE(parse_integer("5x", value, syntax));
+  }
+  EXPECT_FALSE(parse_integer("-0xA", value, Integer_syntax::decimal));
+  ASSERT_TRUE(parse_integer("-0xA", value, Integer_syntax::decimal_or_hex));
+  EXPECT_EQ(value, -10);
+}
+
 // bool01 is implemented in the runtime; the rest are declared only (milestone G).
 const char* const kAnalyses = R"(
 (analysis bool01 (x) :type bool  :spec (and (<= 0 x) (<= x 1)))

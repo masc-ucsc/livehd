@@ -6,6 +6,7 @@
 #include <set>
 #include <vector>
 
+#include "coloring_info.hpp"
 #include "diag.hpp"
 #include "hash_util.hpp"
 #include "io_decls.hpp"
@@ -428,12 +429,7 @@ bool seed_groups(hhds::Graph* g) {
   for (const auto& [node, id] : owner) {
     gu::set_color(node, groups.at(id).color);
   }
-  rapidjson::Document doc;
-  auto                old = g->get_input_node().attr(livehd::attrs::coloring_info);
-  if (old.has()) {
-    const std::string s{old.get()};
-    doc.Parse(s.data(), s.size());
-  }
+  auto doc = coloring_info::read(*g);
   if (!doc.IsObject()) {
     doc.SetObject();
   }
@@ -457,18 +453,5 @@ bool seed_groups(hhds::Graph* g) {
   return true;
 }
 
-std::string group_name(hhds::Graph* g, int color) {
-  auto a = g->get_input_node().attr(livehd::attrs::coloring_info);
-  if (!a.has()) {
-    return {};
-  }
-  const std::string   s{a.get()};
-  rapidjson::Document d;
-  d.Parse(s.c_str());
-  if (!d.IsObject() || !d.HasMember("synth_groups")) {
-    return {};
-  }
-  auto it = d["synth_groups"].FindMember(std::to_string(color).c_str());
-  return it == d["synth_groups"].MemberEnd() ? std::string{} : it->value["name"].GetString();
-}
+std::string group_name(hhds::Graph* g, int color) { return coloring_info::group_name(coloring_info::read(*g), color); }
 }  // namespace livehd::synth_attr

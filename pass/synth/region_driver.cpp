@@ -27,6 +27,7 @@
 #include "absl/container/btree_map.h"
 #include "arith_choice.hpp"
 #include "cell.hpp"
+#include "coloring_info.hpp"
 #include "diag.hpp"
 #include "hash_util.hpp"
 #include "hhds/attrs/srcid.hpp"
@@ -302,6 +303,15 @@ bool parse_region_opts_object(const rapidjson::Value& obj, Region_opts_map& out,
 
 }  // namespace
 
+static Region_opts_map graph_region_options(const hhds::Graph& graph) {
+  Region_opts_map options;
+  const auto      doc = coloring_info::read(graph);
+  if (const auto* value = coloring_info::member(doc, "region_opts")) {
+    parse_region_opts_object(*value, options, "coloring_info");
+  }
+  return options;
+}
+
 std::optional<Region_opts_map> parse_region_opts(std::string_view json, std::string_view where) {
   rapidjson::Document d;
   d.Parse(json.data(), json.size());
@@ -391,18 +401,7 @@ void Region_driver::prepare_region_opts(const std::vector<std::shared_ptr<hhds::
     }
     graph_ware_policy_.emplace(g.get(),
                                ware_policy(*g, {startup_opts_.ware_arith, startup_opts_.ware_cmp, startup_opts_.ware_shift}));
-    Region_opts_map options;
-    if (auto info = g->get_input_node().attr(livehd::attrs::coloring_info); info.has()) {
-      rapidjson::Document doc;
-      const std::string   json{info.get()};
-      doc.Parse(json.data(), json.size());
-      if (!doc.HasParseError() && doc.IsObject()) {
-        if (auto it = doc.FindMember("region_opts"); it != doc.MemberEnd()) {
-          parse_region_opts_object(it->value, options, "coloring_info");
-        }
-      }
-    }
-    graph_region_opts_.emplace(g.get(), std::move(options));
+    graph_region_opts_.emplace(g.get(), graph_region_options(*g));
   }
 }
 
@@ -525,18 +524,7 @@ bool Region_driver::apply_region_overrides(const livehd::partition::Region_body&
   // "region_opts" member into coloring_info), CLI second so --set wins.
   auto git = graph_region_opts_.find(rb.src);
   if (git == graph_region_opts_.end()) {
-    Region_opts_map m;
-    if (auto a = rb.src->get_input_node().attr(livehd::attrs::coloring_info); a.has()) {
-      const std::string   info{a.get()};
-      rapidjson::Document d;
-      d.Parse(info.data(), info.size());
-      if (!d.HasParseError() && d.IsObject()) {
-        if (auto ro = d.FindMember("region_opts"); ro != d.MemberEnd()) {
-          parse_region_opts_object(ro->value, m, "coloring_info");  // diag on malformed, best-effort continue
-        }
-      }
-    }
-    git = graph_region_opts_.emplace(rb.src, std::move(m)).first;
+    git = graph_region_opts_.emplace(rb.src, graph_region_options(*rb.src)).first;
   }
   if (auto it = git->second.find(rb.color); it != git->second.end()) {
     apply(it->second, "coloring_info");

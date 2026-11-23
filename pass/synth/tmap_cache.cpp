@@ -1,6 +1,8 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "tmap_cache.hpp"
 
+#include <unistd.h>  // mkdtemp
+
 #include <algorithm>
 #include <array>
 #include <cstdlib>
@@ -8,8 +10,7 @@
 #include <sstream>
 #include <stdexcept>
 
-#include <unistd.h>  // mkdtemp
-
+#include "file_utils.hpp"
 #include "hash_util.hpp"
 
 namespace livehd::synth {
@@ -26,14 +27,6 @@ std::string small_file(const fs::path& path, uint64_t cap) {
     throw std::runtime_error("incomplete mapping cache metadata");
   }
   return value;
-}
-void write_file(const fs::path& path, const std::string& text) {
-  std::ofstream out(path, std::ios::binary | std::ios::trunc);
-  out.write(text.data(), static_cast<std::streamsize>(text.size()));
-  out.close();
-  if (!out) {
-    throw std::runtime_error("cannot write mapping cache metadata");
-  }
 }
 }  // namespace
 
@@ -169,8 +162,8 @@ bool Tmap_cache::save() {
     if (!admit()) {
       return false;
     }
-    write_file(pending / "integrity", checksum);
-    write_file(pending / "pointer", pending.filename().string());
+    file_utils::write_staged_file(pending / "integrity", [&](auto& out) { out << checksum; });
+    file_utils::write_staged_file(pending / "pointer", [&](auto& out) { out << pending.filename().string(); });
     fs::rename(pending / "pointer", root / "current");
     pending.clear();
     return true;

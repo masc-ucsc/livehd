@@ -1,5 +1,4 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
-#include "fnv1a.hpp"
 #include "ware_module.hpp"
 
 #include <rapidjson/document.h>
@@ -19,6 +18,8 @@
 #include "affine_amount.hpp"
 #include "attr_carry.hpp"
 #include "bit_facts.hpp"
+#include "coloring_info.hpp"
+#include "fnv1a.hpp"
 #include "node_util.hpp"
 #include "synth_policy.hpp"
 #include "synthesis_cost.hpp"
@@ -27,21 +28,16 @@ namespace livehd::synth {
 namespace gu = graph_util;
 
 Ware_policy ware_policy(const hhds::Graph& graph, Ware_policy policy) {
-  if (auto a = graph.get_input_node().attr(attrs::coloring_info); a.has()) {
-    const std::string   json{a.get()};
-    rapidjson::Document doc;
-    doc.Parse(json.data(), json.size());
-    if (!doc.HasParseError() && doc.IsObject() && doc.HasMember("params") && doc["params"].IsObject()) {
-      const auto& params = doc["params"];
-      auto        read   = [&](const char* key, bool& value) {
-        if (params.HasMember(key) && params[key].IsBool()) {
-          value = params[key].GetBool();
-        }
-      };
-      read("ware_arith", policy.arith);
-      read("ware_cmp", policy.cmp);
-      read("ware_shift", policy.shift);
-    }
+  const auto doc = coloring_info::read(graph);
+  if (const auto* params = coloring_info::member(doc, "params")) {
+    const auto read = [&](const char* key, bool& setting) {
+      if (const auto* value = coloring_info::member(*params, key); value && value->IsBool()) {
+        setting = value->GetBool();
+      }
+    };
+    read("ware_arith", policy.arith);
+    read("ware_cmp", policy.cmp);
+    read("ware_shift", policy.shift);
   }
   return policy;
 }
@@ -165,15 +161,12 @@ std::string section_info(hhds::Graph& graph, int color, Ware_policy policy) {
   params.AddMember("ware_cmp", policy.cmp, alloc);
   params.AddMember("ware_shift", policy.shift, alloc);
   info.AddMember("params", params, alloc);
-  if (auto a = graph.get_input_node().attr(attrs::coloring_info); a.has()) {
-    const std::string   json{a.get()};
-    rapidjson::Document source;
-    source.Parse(json.data(), json.size());
+  const auto source = coloring_info::read(graph);
+  if (const auto* regions = coloring_info::member(source, "region_opts")) {
     const auto key = std::to_string(color);
-    if (!source.HasParseError() && source.IsObject() && source.HasMember("region_opts") && source["region_opts"].IsObject()
-        && source["region_opts"].HasMember(key.c_str())) {
+    if (const auto* region = coloring_info::member(*regions, key.c_str())) {
       rapidjson::Value options(rapidjson::kObjectType);
-      options.AddMember(rapidjson::Value(key.c_str(), alloc), rapidjson::Value(source["region_opts"][key.c_str()], alloc), alloc);
+      options.AddMember(rapidjson::Value(key.c_str(), alloc), rapidjson::Value(*region, alloc), alloc);
       info.AddMember("region_opts", options, alloc);
     }
   }

@@ -15,36 +15,6 @@ namespace livehd::aegraph::rulegen {
 
 namespace {
 
-std::string lower(std::string_view s) {
-  std::string out(s);
-  std::ranges::transform(out, out.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-  return out;
-}
-
-bool parse_int(const std::string& t, int64_t& v) {
-  if (t.empty()) {
-    return false;
-  }
-  size_t i = (t[0] == '-' || t[0] == '+') ? 1 : 0;
-  if (i >= t.size()) {
-    return false;
-  }
-  for (size_t j = i; j < t.size(); ++j) {
-    if (std::isdigit(static_cast<unsigned char>(t[j])) == 0) {
-      // 0x hex
-      if (j == i + 1 && t[i] == '0' && (t[j] == 'x' || t[j] == 'X') && j + 1 < t.size()) {
-        char* end = nullptr;
-        v         = std::strtoll(t.c_str(), &end, 16);
-        return end == t.c_str() + t.size();
-      }
-      return false;
-    }
-  }
-  char* end = nullptr;
-  v         = std::strtoll(t.c_str(), &end, 10);
-  return end == t.c_str() + t.size();
-}
-
 bool is_ident(std::string_view s) {
   if (s.empty() || (std::isalpha(static_cast<unsigned char>(s[0])) == 0 && s[0] != '_')) {
     return false;
@@ -287,7 +257,7 @@ public:
     Expr e;
     e.line = s.line;
     if (s.is_atom()) {
-      if (parse_int(s.text, e.num)) {
+      if (parse_integer(s.text, e.num, Integer_syntax::decimal_or_hex)) {
         e.kind = Expr::Kind::num;
       } else {
         e.kind = Expr::Kind::var;
@@ -322,7 +292,7 @@ public:
       int64_t v = 0;
       if (t == "_") {
         p.kind = Pat::Kind::wild;
-      } else if (parse_int(t, v)) {
+      } else if (parse_integer(t, v, Integer_syntax::decimal_or_hex)) {
         p.kind = Pat::Kind::num;
         p.num  = v;
       } else if (t.starts_with("..")) {
@@ -355,7 +325,7 @@ public:
     }
     p.kind    = Pat::Kind::op;
     p.op_text = std::string{head};
-    p.op      = Ntype::get_op(lower(head));
+    p.op      = Ntype::get_op(lowercase(head));
     p.attrs   = s.items[0].attrs;
     if (p.op == Ntype_op::Invalid) {
       err(s.line, "unknown op `" + std::string{head} + "`");
@@ -516,7 +486,7 @@ public:
     }
     r.name = s.items[i++].text;
     int64_t prio = 0;
-    if (i < s.items.size() && s.items[i].is_atom() && parse_int(s.items[i].text, prio)) {
+    if (i < s.items.size() && s.items[i].is_atom() && parse_integer(s.items[i].text, prio, Integer_syntax::decimal_or_hex)) {
       r.prio = static_cast<int>(prio);
       ++i;
     } else if (i < s.items.size() && s.items[i].is_atom()) {
@@ -579,7 +549,7 @@ public:
         }
       } else if (c.kw == ":fuel") {
         int64_t n = 0;
-        if (c.args.size() != 1 || !c.args[0]->is_atom() || !parse_int(c.args[0]->text, n)) {
+        if (c.args.size() != 1 || !c.args[0]->is_atom() || !parse_integer(c.args[0]->text, n, Integer_syntax::decimal_or_hex)) {
           err(c.line, ":fuel takes an integer");
         } else {
           r.fuel = n;
@@ -643,7 +613,7 @@ public:
         int64_t v      = 0;
         if (b.items[2].text == "NONZERO") {
           arm.nonzero = true;
-        } else if (parse_int(b.items[2].text, v)) {
+        } else if (parse_integer(b.items[2].text, v, Integer_syntax::decimal_or_hex)) {
           arm.value = v;
         } else {
           arm.assign_text = b.items[2].text;

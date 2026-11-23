@@ -19,6 +19,10 @@
 
 namespace livehd::aegraph::rulegen {
 
+enum class Integer_syntax { decimal, decimal_or_hex };
+[[nodiscard]] bool        parse_integer(const std::string& atom, int64_t& value, Integer_syntax syntax);
+[[nodiscard]] std::string lowercase(std::string_view atom);
+
 struct Sexp {
   enum class Kind : uint8_t { atom, str, list };
 

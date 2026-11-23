@@ -14,6 +14,7 @@
 #include "cell.hpp"
 #include "diag.hpp"
 #include "hhds/attrs/name.hpp"
+#include "inline_sub.hpp"
 #include "io_decls.hpp"
 #include "node_util.hpp"
 #include "shared_text.hpp"
@@ -274,32 +275,17 @@ hhds::Pin_class Flattener::apply_port_shape(const hhds::Pin_class& source, const
     return source;
   }
 
-  if (!shape.unsign) {
-    auto adapter = gu::create_typed_node(*flat_, Ntype_op::Sext);
-    if (preroute_excluded) {
-      adapter.attr(livehd::attrs::preroute_exclude).set();
-    }
-    source.connect_sink(gu::setup_sink_by_name(adapter, "a"));
-    gu::create_const(*flat_, *Dlop::create_integer(static_cast<int64_t>(shape.bits)))
-        .connect_sink(gu::setup_sink_by_name(adapter, "b"));
-    auto result = adapter.create_driver_pin(0);
-    gu::set_sbits(result, static_cast<int32_t>(shape.bits));
-    return result;
-  }
-
   // A constant (an instance input tied off, or one a state sweep folded) needs no adapter node: its low `bits` bits are
   // the value the port reads. An adapter node here would also carry no color, a stray color-0 region of one Get_mask.
-  if (source.is_const()) {
+  if (shape.unsign && source.is_const()) {
     if (auto masked = gu::const_of(source).get_mask_op_opt(0, static_cast<int>(shape.bits))) {
       return gu::create_const(*flat_, *masked);
     }
   }
-  auto adapter = gu::create_get_mask(*flat_, source, 0, static_cast<int>(shape.bits));
+  auto result = gu::fit_to_port(*flat_, source, static_cast<int>(shape.bits), !shape.unsign);
   if (preroute_excluded) {
-    adapter.attr(livehd::attrs::preroute_exclude).set();
+    result.get_master_node().attr(livehd::attrs::preroute_exclude).set();
   }
-  auto result  = adapter.create_driver_pin(0);
-  gu::set_ubits(result, static_cast<int32_t>(shape.bits));
   return result;
 }
 
@@ -681,27 +667,7 @@ void Flattener::complete_bbox_outputs(Ictx* ctx) {
     if (gu::type_op_of(orig) != Ntype_op::Sub) {
       continue;
     }
-    auto sio = neo.get_subnode_io();
-    if (!sio) {
-      continue;
-    }
-    // "which output ports already exist and are wired": the driver PINS, not
-    // the fan-out edges (which re-derive the same set once per consumer).
-    absl::flat_hash_set<uint32_t> made;
-    for (const auto& out_pin : neo.out_sorted_pins()) {
-      admit("flatten-complete_bbox_outputs-step");
-      made.insert(static_cast<uint32_t>(out_pin.get_port_id()));
-    }
-    for (const auto& d : sio->get_output_pin_decls()) {
-      admit("flatten-complete_bbox_outputs-step");
-      if (made.contains(static_cast<uint32_t>(d.port_id))) {
-        continue;
-      }
-      auto np = neo.create_driver_pin(d.port_id);
-      if (d.bits != 0) {
-        gu::set_bits(np, static_cast<int>(d.bits));
-      }
-    }
+    gu::complete_sub_output_pins(neo, [&] { admit("flatten-complete_bbox_outputs-step"); });
   }
 }
 

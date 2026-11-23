@@ -961,6 +961,27 @@ bool range_fits_port(int dbits, bool dsigned, int bits, bool is_signed) {
   return dbits <= (is_signed ? bits - 1 : bits);
 }
 
+void complete_sub_output_pins(const hhds::Node_class& instance, const std::function<void()>& step) {
+  const auto io = instance.get_subnode_io();
+  if (!io) {
+    return;
+  }
+  absl::flat_hash_set<hhds::Port_id> connected;
+  for (const auto& pin : instance.out_sorted_pins()) {
+    step();
+    connected.insert(pin.get_port_id());
+  }
+  for (const auto& decl : io->get_output_pin_decls()) {
+    step();
+    if (!connected.contains(decl.port_id)) {
+      auto pin = instance.create_driver_pin(decl.port_id);
+      if (decl.bits != 0) {
+        set_bits(pin, static_cast<int>(decl.bits));
+      }
+    }
+  }
+}
+
 hhds::Pin_class fit_to_port(hhds::Graph& graph, const hhds::Pin_class& driver, int bits, bool is_signed) {
   if (is_signed) {
     auto sext = create_typed_node(graph, Ntype_op::Sext);

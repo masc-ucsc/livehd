@@ -185,6 +185,9 @@ private:
 // sign (a port's own range feeding the next declaration).
 [[nodiscard]] bool range_fits_port(int dbits, bool dsigned, int bits, bool is_signed);
 
+// Materialize declared outputs without overwriting the types of connected pins.
+void complete_sub_output_pins(const hhds::Node_class& instance, const std::function<void()>& step);
+
 // The driver pin, created in `graph`, of `driver` reinterpreted at a
 // `bits`-wide port: a Get_mask for an unsigned port, a Sext for a signed one
 // (whose `b` operand is the KEPT bit count, `bits`, not the sign position).

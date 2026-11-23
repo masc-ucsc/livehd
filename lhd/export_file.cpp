@@ -1,16 +1,14 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "export_file.hpp"
 
+#include <sys/stat.h>
+
 #include <array>
 #include <cerrno>
-#include <cstdio>
-#include <cstdlib>
 #include <fstream>
-#include <memory>
 #include <system_error>
 
-#include <sys/stat.h>
-#include <unistd.h>
+#include "file_utils.hpp"
 
 namespace lhd {
 namespace {
@@ -40,50 +38,23 @@ void copy_export_file(const fs::path& source, const fs::path& destination) {
     copy_error(source, destination, errno);
   }
 
-  // A unique sibling keeps rename on the destination filesystem. Keeping the
-  // descriptor open also avoids reopening the temporary through its name.
-  auto temporary = (destination.parent_path() / ".lhd-export-XXXXXX").string();
-  int descriptor = ::mkstemp(temporary.data());
-  if (descriptor < 0) {
-    copy_error(source, destination, errno);
-  }
-  try {
-    const auto close_file = [](FILE* file) { std::fclose(file); };
-    std::unique_ptr<FILE, decltype(close_file)> output(::fdopen(descriptor, "wb"), close_file);
-    if (!output) {
-      const int error = errno;
-      ::close(descriptor);
-      descriptor = -1;
-      copy_error(source, destination, error);
-    }
-    descriptor = -1;  // output owns the descriptor from here.
+  ec = livehd::file_utils::write_file_atomic(destination, [&](int fd) -> std::error_code {
     std::array<char, 65536> bytes;
     while (input.read(bytes.data(), bytes.size()) || input.gcount() > 0) {
-      const auto count = static_cast<size_t>(input.gcount());
-      if (std::fwrite(bytes.data(), 1, count, output.get()) != count) {
-        copy_error(source, destination, errno);
+      if (auto error = livehd::file_utils::write_all(fd, {bytes.data(), static_cast<size_t>(input.gcount())})) {
+        return error;
       }
     }
-    if (input.bad() || (!input.eof() && input.fail())) {
-      copy_error(source, destination, EIO);
+    if (input.bad() || !input.eof()) {
+      return std::make_error_code(std::errc::io_error);
     }
-    if (std::fflush(output.get()) != 0) {
-      copy_error(source, destination, errno);
+    if (::fchmod(fd, static_cast<mode_t>(permissions & fs::perms::mask)) != 0) {
+      return {errno, std::generic_category()};
     }
-    // Change only the new inode, never a source or existing export inode.
-    if (::fchmod(::fileno(output.get()), static_cast<mode_t>(permissions & fs::perms::mask)) != 0) {
-      copy_error(source, destination, errno);
-    }
-    if (std::fclose(output.release()) != 0) {
-      copy_error(source, destination, errno);
-    }
-    fs::rename(temporary, destination);
-  } catch (...) {
-    if (descriptor >= 0) {
-      ::close(descriptor);
-    }
-    fs::remove(temporary, ec);
-    throw;
+    return {};
+  });
+  if (ec) {
+    throw fs::filesystem_error("cannot export file", source, destination, ec);
   }
 }
 }  // namespace lhd

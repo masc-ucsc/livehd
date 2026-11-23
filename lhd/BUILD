@@ -194,6 +194,7 @@ cc_library(
     srcs = ["export_file.cpp"],
     hdrs = ["export_file.hpp"],
     copts = COPTS,
+    deps = ["//core:file_utils"],
 )
 
 cc_test(

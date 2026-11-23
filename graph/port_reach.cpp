@@ -73,7 +73,9 @@ Memory_deps::Memory_deps(const hhds::Node_class& m) {
   }
 }
 
-bool Memory_deps::deps(hhds::Port_id want_pid, const std::function<void(const hhds::Pin_class&)>& enqueue, bool writes) const {
+bool Memory_deps::deps(hhds::Port_id want_pid, const std::function<void(const hhds::Pin_class&)>& enqueue,
+                       Read_dependencies dependencies) const {
+  const bool  writes   = dependencies == Read_dependencies::include_forwarded_writes;
   bool        handled  = false;
   if (want_pid == Ntype::Memory_readall_pid) {
     handled = true;
@@ -485,7 +487,8 @@ const Def_reach& Cache::of(const std::shared_ptr<hhds::Graph>& g) {
           return;
         }
       }
-      if (op == Ntype_op::Memory && mem_deps_of(node).deps(pin.get_port_id(), visit)) {
+      if (op == Ntype_op::Memory
+          && mem_deps_of(node).deps(pin.get_port_id(), visit, Memory_deps::Read_dependencies::include_forwarded_writes)) {
         return;
       }
       if (expand(node)) {

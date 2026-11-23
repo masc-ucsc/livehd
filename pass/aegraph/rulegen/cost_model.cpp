@@ -20,30 +20,6 @@ namespace {
 
 constexpr size_t kMaxBinds = 8;
 
-std::string lower(std::string_view s) {
-  std::string out(s);
-  std::ranges::transform(out, out.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-  return out;
-}
-
-bool parse_int(const std::string& t, int64_t& v) {
-  if (t.empty()) {
-    return false;
-  }
-  size_t i = (t[0] == '-' || t[0] == '+') ? 1 : 0;
-  if (i >= t.size()) {
-    return false;
-  }
-  for (size_t j = i; j < t.size(); ++j) {
-    if (std::isdigit(static_cast<unsigned char>(t[j])) == 0) {
-      return false;
-    }
-  }
-  char* end = nullptr;
-  v         = std::strtoll(t.c_str(), &end, 10);
-  return end == t.c_str() + t.size();
-}
-
 class Parser {
 public:
   Parser(std::string path, Diags& diags) : path_(std::move(path)), diags_(diags) {}
@@ -59,7 +35,7 @@ public:
     }
     if (s.is_atom()) {
       int64_t v = 0;
-      if (parse_int(s.text, v)) {
+      if (rulegen::parse_integer(s.text, v, rulegen::Integer_syntax::decimal)) {
         c.kind = Code::Kind::num;
         c.num  = v;
       } else if (s.text == "W") {
@@ -127,7 +103,7 @@ public:
       if (head->is_atom("_")) {
         e.any_op = true;
       } else {
-        e.op = Ntype::get_op(lower(head->text));
+        e.op = Ntype::get_op(rulegen::lowercase(head->text));
         if (e.op == Ntype_op::Invalid) {
           err(pat.line, "unknown op `" + head->text + "`");
           return;
@@ -361,7 +337,8 @@ Profile parse_profile(std::string_view text, std::string_view path, Diags& diags
       for (size_t i = 2; i < s.items.size(); ++i) {
         if (s.items[i].is_atom(":default-width") && i + 1 < s.items.size()) {
           int64_t v = 0;
-          if (!s.items[i + 1].is_atom() || !parse_int(s.items[i + 1].text, v) || v < 1 || v > 4096) {
+          if (!s.items[i + 1].is_atom() || !rulegen::parse_integer(s.items[i + 1].text, v, rulegen::Integer_syntax::decimal)
+              || v < 1 || v > 4096) {
             parser.err(s.items[i].line, ":default-width takes an integer in 1..4096");
           } else {
             p.default_width = v;

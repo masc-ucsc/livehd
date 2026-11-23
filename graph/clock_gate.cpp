@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "absl/container/flat_hash_set.h"
 #include "node_util.hpp"
 
 namespace livehd::clock_gate {
@@ -36,6 +37,39 @@ bool one_bit(const Pin& p) {
     return io && io->get_bits(std::string{p.get_pin_name()}) == 1;
   }
   return false;
+}
+
+// Ignore width adapters only when they preserve bit zero. For the state
+// control, either clock polarity identifies the same sampling domain.
+Pin clock_source(Pin pin, bool allow_inversion = false) {
+  for (int depth = 0; depth < 64 && one_bit(pin) && !gu::is_graph_input_pin(pin); ++depth) {
+    const auto node = pin.get_master_node();
+    const auto op   = gu::type_op_of(node);
+    if (op == Ntype_op::Get_mask) {
+      const auto range = gu::bit_range(node);
+      if (!range || range->first != 0 || range->second != 1) {
+        break;
+      }
+    } else if (allow_inversion && op == Ntype_op::Not) {
+      const auto inputs = gu::inp_sink_drivers(node);
+      if (inputs.size() != 1) {
+        break;
+      }
+      pin = inputs.front().driver;
+      continue;
+    } else if (allow_inversion && op == Ntype_op::EQ) {
+      const auto inputs = gu::inp_sink_drivers(node);
+      if (inputs.size() != 2 || (!inputs[0].driver.is_known_false() && !inputs[1].driver.is_known_false())) {
+        break;
+      }
+      pin = inputs[inputs[0].driver.is_known_false() ? 1 : 0].driver;
+      continue;
+    } else if (op != Ntype_op::Sext) {
+      break;
+    }
+    pin = gu::get_driver_of_sink_name(node, "a");
+  }
+  return pin;
 }
 
 bool const_known_true(const Pin& p) {
@@ -680,6 +714,71 @@ std::optional<Clock_gate_stats> infer_clock_gates(std::span<const std::shared_pt
     }
   }
   return stats;
+}
+
+Leaf_kind classify_leaf(const hhds::Graph& graph) {
+  const auto io = graph.get_io();
+  if (!io || io->get_output_pin_decls().empty()) {
+    return Leaf_kind::none;
+  }
+  absl::flat_hash_set<Node> state;
+  for (const auto node : graph.body().nodes()) {
+    const auto op = gu::type_op_of(node);
+    if (op == Ntype_op::Sub || op == Ntype_op::Memory) {
+      return Leaf_kind::none;
+    }
+    if (gu::is_type_register(node)) {
+      state.insert(node);
+    }
+  }
+  if (state.empty()) {
+    return Leaf_kind::none;
+  }
+  absl::flat_hash_set<Node> sampled;
+  Leaf_kind                 kind = Leaf_kind::latch;
+  for (const auto& port : io->get_output_pin_decls()) {
+    const auto drivers = graph.get_output_pin(port.name).get_driver_pins();
+    if (drivers.size() != 1 || port.bits > 1) {
+      return Leaf_kind::none;
+    }
+    const auto gate = clock_source(drivers.front());
+    if (!one_bit(gate) || gu::type_op_of(gate.get_master_node()) != Ntype_op::And) {
+      return Leaf_kind::none;
+    }
+    Pin clk, q;
+    for (const auto& input : gu::inp_sink_drivers(gate.get_master_node())) {
+      if (const_known_true(input.driver) && gu::const_of(input.driver).bit_test(0)) {
+        continue;
+      }
+      const auto p = clock_source(input.driver);
+      if (!one_bit(p)) {
+        return Leaf_kind::none;
+      }
+      if (gu::is_graph_input_pin(p) && clk.is_invalid()) {
+        clk = p;
+      } else if (!gu::is_graph_input_pin(p) && q.is_invalid() && p.get_port_id() == 0 && state.contains(p.get_master_node())) {
+        q = p;
+      } else {
+        return Leaf_kind::none;
+      }
+    }
+    if (clk.is_invalid() || q.is_invalid()) {
+      return Leaf_kind::none;
+    }
+    const auto node = q.get_master_node();
+    const auto op   = gu::type_op_of(node);
+    if (op != Ntype_op::Latch && op != Ntype_op::Flop) {
+      return Leaf_kind::none;
+    }
+    if (clock_source(gu::get_driver_of_sink_name(node, op == Ntype_op::Latch ? "enable" : "clock_pin"), true) != clk) {
+      return Leaf_kind::none;
+    }
+    sampled.insert(node);
+    if (op == Ntype_op::Flop) {
+      kind = Leaf_kind::flop;
+    }
+  }
+  return sampled.size() == state.size() ? kind : Leaf_kind::none;
 }
 
 }  // namespace livehd::clock_gate

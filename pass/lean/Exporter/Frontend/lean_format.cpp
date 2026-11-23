@@ -8,6 +8,8 @@
 #include <sstream>
 #include <stdexcept>
 #include <unordered_set>
+
+#include "file_utils.hpp"
 namespace lean_export {
 const std::unordered_set<std::string> kLeanReserved = {
     "abbrev",  "axiom",     "by",   "class",    "def",      "deriving", "do",        "else",     "end",        "example",
@@ -98,11 +100,7 @@ std::string nat_array(const std::vector<uint32_t>& values) {
 void write_atomic(const std::string& path, const std::function<void(std::ostream&)>& emit) {
   const auto tmp = path + ".tmp";
   try {
-    std::ofstream out;
-    out.exceptions(std::ios::failbit | std::ios::badbit);
-    out.open(tmp);
-    emit(out);
-    out.close();
+    livehd::file_utils::write_staged_file(tmp, emit);
     std::filesystem::rename(tmp, path);
   } catch (...) {
     std::error_code ignored;
@@ -110,18 +108,6 @@ void write_atomic(const std::string& path, const std::function<void(std::ostream
     throw;
   }
 }
-namespace {
-// Stage `emit` into `path + suffix`, so a failed write never touches `path`.
-void stage(const std::string& path, const std::string& suffix,
-           const std::function<void(std::ostream&)>& emit) {
-  std::ofstream out;
-  out.exceptions(std::ios::failbit | std::ios::badbit);
-  out.open(path + suffix);
-  emit(out);
-  out.close();
-}
-}  // namespace
-
 namespace detail {
 std::string rollback_group(const std::vector<std::string>& paths, const std::vector<bool>& moved,
                            const std::vector<bool>& put) {
@@ -226,7 +212,7 @@ void publish_group(const std::vector<PublishItem>& items) {
   // cannot leave one target replaced and another not.
   try {
     for (const auto& it : items) {
-      stage(it.path, ".tmp", it.emit);
+      livehd::file_utils::write_staged_file(it.path + ".tmp", it.emit);
     }
   } catch (...) {
     scrub_tmp();

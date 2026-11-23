@@ -66,6 +66,7 @@
 #include "absl/strings/str_join.h"
 #include "absl/strings/str_split.h"
 #include "attrs.hpp"
+#include "coloring_info.hpp"
 #include "compile_salt.hpp"
 #include "core/hash_util.hpp"
 #include "core/job_manager.hpp"
@@ -3439,19 +3440,17 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
       double   split_ps = 0, joined_ps = 0;
       bool     kept = false;
     };
-    const auto top_coloring = [&]() -> std::string {
+    const auto top_coloring = [&]() -> rapidjson::Document {
       for (const auto& g : var.graphs) {
         if (g && g->get_name() == top) {
-          auto info = g->get_input_node().attr(livehd::attrs::coloring_info);
-          return info.has() ? std::string(info.get()) : std::string{};
+          return livehd::coloring_info::read(*g);
         }
       }
       return {};
     };
     std::vector<Join_trial> join_trials;
     {
-      rapidjson::Document doc;
-      doc.Parse(top_coloring().c_str());
+      const auto doc = top_coloring();
       if (!doc.HasParseError() && doc.IsObject() && doc.HasMember("join_candidates") && doc["join_candidates"].IsArray()) {
         for (const auto& c : doc["join_candidates"].GetArray()) {
           if (c.IsObject() && c.HasMember("a") && c.HasMember("b") && c.HasMember("color_a") && c.HasMember("color_b")) {
@@ -3540,8 +3539,7 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
       const auto split = map_and_time("split");
       recolor(join_trials, false);
       {
-        rapidjson::Document doc;
-        doc.Parse(top_coloring().c_str());
+        const auto doc = top_coloring();
         if (!doc.HasParseError() && doc.IsObject() && doc.HasMember("joined") && doc["joined"].IsArray()) {
           for (const auto& j : doc["joined"].GetArray()) {
             for (auto& t : join_trials) {

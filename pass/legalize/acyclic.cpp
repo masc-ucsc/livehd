@@ -16,6 +16,7 @@
 #include "absl/container/flat_hash_set.h"
 #include "absl/container/node_hash_map.h"
 #include "attr_carry.hpp"
+#include "definition_order.hpp"
 #include "diag.hpp"
 #include "inline_sub.hpp"
 #include "node_util.hpp"
@@ -160,7 +161,9 @@ public:
     // as a Memory always was here.
     if (op == Ntype_op::Memory) {
       auto [it, fresh] = memories_.try_emplace({m.get_graph(), m.get_class_index()}, m);
-      (void)it->second.deps(static_cast<hhds::Port_id>(d.get_port_id()), out, /*writes=*/false);
+      (void)it->second.deps(static_cast<hhds::Port_id>(d.get_port_id()),
+                            out,
+                            port_reach::Memory_deps::Read_dependencies::read_controls_only);
       return;
     }
     if (gu::is_type_register(m)) {
@@ -172,7 +175,7 @@ public:
     }
     auto callee = m.get_subnode_graph();
     if (!callee) {
-      return;  // a body-less blackbox is opaque to every consumer: its outputs are sources
+      return;  // a body-less blackbox is opaque to the concrete loop check: its outputs are sources
     }
     if (!refined) {
       all_inputs();
@@ -438,8 +441,8 @@ private:
 
   // The callee input bit ranges (pid, lo, len) with a combinational path to
   // bits [lo, hi) of output `out_pid`, by a backward bit-range walk of the
-  // callee body. Same cuts as port_reach: registers stop it, a memory's async
-  // read reaches its address/enable (Memory_deps, writes=false), a nested
+  // callee body. Registers stop it. An async memory read reaches its own
+  // address and enable. For this conservative callee summary a nested
   // instance recurses, a body-less one depends on all of its inputs. Ranges a
   // pin is reached with are kept as a small interval set per pin (a superset),
   // so the walk stays linear in the cone. nullptr = the walk gave up (budget).
@@ -512,7 +515,9 @@ private:
       }
       if (op == Ntype_op::Memory) {
         auto [mit, fresh] = memories_.try_emplace({m.get_graph(), m.get_class_index()}, m);
-        if (!mit->second.deps(static_cast<hhds::Port_id>(p.get_port_id()), whole, /*writes=*/false)) {
+        if (!mit->second.deps(static_cast<hhds::Port_id>(p.get_port_id()),
+                              whole,
+                              port_reach::Memory_deps::Read_dependencies::read_controls_only)) {
           for (const auto& sink : m.inp_sorted_pins()) {
             for (const auto& drv : sink.get_driver_pins()) {
               whole(drv);
@@ -705,27 +710,11 @@ std::vector<std::shared_ptr<hhds::Graph>> callee_first(const std::vector<std::sh
       by_gid.emplace(g->get_gid(), g);
     }
   }
-  std::vector<std::shared_ptr<hhds::Graph>> order;
-  absl::flat_hash_set<hhds::Gid>            done;
-  const auto visit = [&](auto& self, const std::shared_ptr<hhds::Graph>& g) -> void {
-    if (!done.insert(g->get_gid()).second) {
-      return;
+  return gu::callee_first_order(graphs, by_gid, [](const hhds::Graph& graph, auto visit) {
+    for (const auto node : graph.body().nodes()) {
+      visit(node);
     }
-    for (auto n : g->body().nodes()) {
-      if (!n.is_invalid() && gu::type_op_of(n) == Ntype_op::Sub) {
-        if (auto it = by_gid.find(n.get_subnode_gid()); it != by_gid.end()) {
-          self(self, it->second);
-        }
-      }
-    }
-    order.push_back(g);
-  };
-  for (const auto& g : graphs) {
-    if (g != nullptr && g->get_io() != nullptr) {
-      visit(visit, g);
-    }
-  }
-  return order;
+  });
 }
 
 // A non-loop instance whose whole closure holds no state (no

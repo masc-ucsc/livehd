@@ -92,6 +92,16 @@ public:
     }
   }
 
+  template <class Same_color>
+  void merge_neighbors(const Node& node, Same_color same_color) {
+    for (const auto& edge : node.out_edges()) {
+      const auto sink = edge.sink.get_master_node();
+      if (same_color(sink)) {
+        merge(node, sink);
+      }
+    }
+  }
+
 private:
   // Invariant every value stored is also a key -- that is what lets find()
   // index with operator[] without inserting a bogus default-constructed root.
