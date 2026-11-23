@@ -137,6 +137,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//core:file_utils",
+        "//core:option_text",
         "//core:serialization_hdrs",
         "//inou/cgen:sim_tune_hdrs",
         "@rapidjson",

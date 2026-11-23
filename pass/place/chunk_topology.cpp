@@ -1,4 +1,5 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+#include "fnv1a.hpp"
 #include "chunk_topology.hpp"
 
 #include <algorithm>
@@ -108,9 +109,7 @@ Home_history repartition(std::vector<Fp_chunk>& chunks, const std::vector<Home_e
     uint64_t h = 14695981039346656037ULL;
     for (const auto& role : roles) {
       h = (h ^ role.size()) * 1099511628211ULL;
-      for (unsigned char byte : role) {
-        h = (h ^ byte) * 1099511628211ULL;
-      }
+      h = livehd::hash_util::fnv1a64(role, h);
     }
     c.partition = "@cut:" + std::to_string(first.module.size()) + ":" + first.module + ":" + std::to_string(h);
   };

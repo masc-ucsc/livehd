@@ -1,4 +1,5 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+#include "fnv1a.hpp"
 #include "satopt.hpp"
 
 #include <unistd.h>
@@ -90,10 +91,7 @@ std::string cache_path(std::string_view dir, std::string_view name, std::string_
   if (dir.empty()) {
     return {};
   }
-  uint64_t h = 14695981039346656037ULL;
-  for (unsigned char c : name) {
-    h = (h ^ c) * 1099511628211ULL;
-  }
+  const auto h = livehd::hash_util::fnv1a64(name);
   return std::format("{}/{:016x}{}.json", dir, h, suffix);
 }
 void write_atomic(const std::string& path, const std::string& text) {

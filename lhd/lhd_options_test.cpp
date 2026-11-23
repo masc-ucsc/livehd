@@ -21,6 +21,17 @@
 #include "pass.hpp"
 #include "synth_policy.hpp"
 
+TEST(LhdOptions, HierarchyPostorderStaysInsideSelectedTop) {
+  const absl::flat_hash_map<std::string, std::vector<std::string>> children{
+      {      "top", {"left", "right"}},
+      {     "left",          {"leaf"}},
+      {    "right",   {"leaf", "top"}},
+      {"unrelated",     {"elsewhere"}}
+  };
+  EXPECT_EQ(lhd::postorder_sub_hierarchy(children, "top"), (std::vector<std::string>{"leaf", "left", "right", "top"}));
+  EXPECT_EQ(lhd::postorder_sub_hierarchy(children, "leaf"), (std::vector<std::string>{"leaf"}));
+}
+
 TEST(LhdOptions, ConsumersRejectUnresolvedDriverWidths) {
   (void)lhd::list_set_options();
   hhds::GraphLibrary library;

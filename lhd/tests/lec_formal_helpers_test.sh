@@ -58,6 +58,8 @@ run_lec --formal 'dut.env'
 echo "$OUT" | grep -q 'which lec does not consume' || fail "--formal refusal must explain itself: $OUT"
 
 # The engine recorded in a strategy hint is tried first on the next cache miss.
+# Both proofs also require the LEC-specific solver to override the shared setting,
+# regardless of which spelling appears first on the command line.
 cat >"$W/eq1.v" <<'EOF'
 module eq(input logic a, input logic b, output logic y); assign y = a & b; endmodule
 EOF
@@ -65,12 +67,14 @@ cat >"$W/eq2.v" <<'EOF'
 module eq(input logic a, input logic b, output logic y); assign y = ~((~a) | (~b)); endmodule
 EOF
 OUT=$("$LHD" lec --set formal.effort=proof --ref "$W/eq1.v" --impl "$W/eq2.v" --top eq --set formal.lec.hier=false \
+  --set formal.solver=invalid --set formal.lec.solver=cvc5 \
   --set formal.lec.semdiff=none --workdir "$W/hints" 2>&1); RC=$?
 [ "$RC" -eq 0 ] || fail "hint seed proof failed: $OUT"
 cat >"$W/eq3.v" <<'EOF'
 module eq(input logic a, input logic b, output logic y); assign y = b & a; endmodule
 EOF
 OUT=$("$LHD" lec --set formal.effort=proof --ref "$W/eq1.v" --impl "$W/eq3.v" --top eq --set formal.lec.hier=false \
+  --set formal.lec.solver=cvc5 --set formal.solver=invalid \
   --set formal.lec.semdiff=none --workdir "$W/hints" 2>&1); RC=$?
 [ "$RC" -eq 0 ] || fail "hint replay proof failed: $OUT"
 echo "$OUT" | grep -q 'strategy hint tried ind first and settled' || fail "winning-engine hint was not replayed: $OUT"

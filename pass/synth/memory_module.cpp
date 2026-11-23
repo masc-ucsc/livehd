@@ -1,4 +1,5 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+#include "fnv1a.hpp"
 #include "memory_module.hpp"
 
 #include <unistd.h>
@@ -106,14 +107,6 @@ fs::path memory_rtl_dir() {
       .note(std::format("probed: {}", tried))
       .fatal();
   return {};
-}
-
-uint64_t name_hash(std::string_view text) {
-  uint64_t h = 14695981039346656037ULL;
-  for (unsigned char ch : text) {
-    h = (h ^ ch) * 1099511628211ULL;
-  }
-  return h;
 }
 
 void shape(const hhds::Pin_class& from, const hhds::Pin_class& to) {
@@ -489,11 +482,12 @@ std::shared_ptr<hhds::Graph> enclose(hhds::Graph& parent, const hhds::Node_class
   //     "different memory" by name alone.
   // The hash keys the parent/instance identity and stays where it was, so
   // uniqueness semantics are unchanged.
-  const auto base        = std::format("cgen_memory_{}rd_{}wr_{}{}",
-                                       nr,
-                                       nw,
-                                       std::format("{:016x}", name_hash(std::string(parent.get_name()) + "/" + source_name)),
-                                       lower ? "_blasted" : "");
+  const auto base
+      = std::format("cgen_memory_{}rd_{}wr_{}{}",
+                    nr,
+                    nw,
+                    std::format("{:016x}", livehd::hash_util::fnv1a64(std::string(parent.get_name()) + "/" + source_name)),
+                    lower ? "_blasted" : "");
   auto       name        = base;
   for (unsigned i = 1; lib->find_io(name); ++i) {
     name = base + "_" + std::to_string(i);

@@ -1,4 +1,5 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+#include "fnv1a.hpp"
 #include "debug_env.hpp"
 #include "rulegen/rule_test_support.hpp"
 
@@ -51,14 +52,6 @@ public:
 private:
   uint64_t s_;
 };
-
-uint64_t fnv(std::string_view s) {
-  uint64_t h = 0xcbf29ce484222325ULL;
-  for (const unsigned char c : s) {
-    h = (h ^ c) * 0x100000001b3ULL;
-  }
-  return h;
-}
 
 Dlop D(int64_t v) {
   Dlop r;
@@ -522,7 +515,7 @@ bool known_bit_differs(const Dlop& l, const Dlop& r, int pos) {
 
 Fuzz_report fuzz_equal(const Rule& rule, const Analyses& analyses, uint64_t seed, size_t samples) {
   Fuzz_report report;
-  Rng         rng(seed ^ fnv(rule.name));
+  Rng                                                 rng(seed ^ livehd::hash_util::fnv1a64(rule.name));
   std::map<std::string, std::vector<const Analysis*>> constraints;
   for (const auto& w : rule.whens) {
     collect_constraints(w, analyses, constraints);
@@ -1311,7 +1304,8 @@ Prove_report prove_bv(const Rule& rule, const Analyses& analyses, bool full, dou
     order[i] = i;
   }
   std::ranges::stable_sort(order, [&](size_t a, size_t b) {
-    return fnv(rule.name + "#" + std::to_string(a)) < fnv(rule.name + "#" + std::to_string(b));
+    return livehd::hash_util::fnv1a64(rule.name + "#" + std::to_string(a))
+           < livehd::hash_util::fnv1a64(rule.name + "#" + std::to_string(b));
   });
   if (!full && order.size() > 8) {
     order.resize(8);

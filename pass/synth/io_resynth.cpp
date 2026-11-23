@@ -1,4 +1,5 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+#include "fnv1a.hpp"
 #include "io_resynth.hpp"
 
 #include <algorithm>
@@ -173,13 +174,7 @@ std::string describe_environment(const Io_environment& env) {
   return std::string(buffer.GetString(), buffer.GetSize());
 }
 std::string environment_identity(const Io_environment& env) {
-  const auto description = describe_environment(env);
-  uint64_t   hash        = 14695981039346656037ULL;
-  for (const unsigned char c : description) {
-    hash ^= c;
-    hash *= 1099511628211ULL;
-  }
-  return std::format("{:016x}", hash);
+  return std::format("{:016x}", livehd::hash_util::fnv1a64(describe_environment(env)));
 }
 Io_store::Io_store(std::string dir, double period, bool persistent, std::string timing_identity)
     : directory(std::move(dir)), period_ps(period), persistent_(persistent), timing_identity_(std::move(timing_identity)) {

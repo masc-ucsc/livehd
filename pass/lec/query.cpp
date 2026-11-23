@@ -15512,10 +15512,8 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
                                                pr.block, pr.instance);
           const std::string id   = pr.msg.empty() ? base + "#" + std::to_string(nth[base]++) : base + "m:" + pr.msg;
           if (!opts.reuse_dir.empty()) {
-            uint64_t h = 1469598103934665603ULL;  // FNV-1a: stable across builds
-            for (unsigned char c : id) {
-              h = (h ^ c) * 1099511628211ULL;
-            }
+            // The on-disk reuse directory uses this historical offset.
+            const auto h = livehd::hash_util::fnv1a64(id, 1469598103934665603ULL);
             store_of[i] = std::format("{}/{:016x}", opts.reuse_dir, h);
             std::error_code ec;
             std::filesystem::create_directories(store_of[i], ec);

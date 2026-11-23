@@ -449,28 +449,7 @@ void semdiff_command(Options& opts, Result& res) {
           }
         }
       }
-      absl::flat_hash_map<std::string, int>   mark;
-      std::function<void(const std::string&)> dfs = [&](const std::string& n) {
-        // NO reference or iterator into `mark` may be held across the recursion:
-        // the recursive calls insert, and absl::flat_hash_map invalidates every
-        // one of them on rehash. This used to hold `int& m = mark[n]` and write
-        // the done-marker through it AFTER recursing, which scribbled on
-        // whatever the rehash had moved into that slot — a scoped def then
-        // surfaced with a truncated name and the sweep aborted on the resulting
-        // end() deref (generic_mod, mod_varargs_csa under --top/--ref-top).
-        if (auto it = mark.find(n); it != mark.end() && it->second != 0) {
-          return;
-        }
-        mark[n] = 1;
-        if (auto it = children.find(n); it != children.end()) {
-          for (const auto& c : it->second) {
-            dfs(c);  // `children` is not written here, so ITS iterator stays valid
-          }
-        }
-        mark[n] = 2;
-        scope.push_back(n);
-      };
-      dfs(top_key);
+      scope = postorder_sub_hierarchy(children, top_key);
     } else {
       for (auto& [name, g] : ref_by_name) {
         if (!absorbed.contains(std::string{g->get_name()})) {  // dissolved into the defs that call it

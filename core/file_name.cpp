@@ -1,6 +1,7 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "file_name.hpp"
 
+#include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/SHA256.h"
 
@@ -31,7 +32,6 @@ std::string shorten_file_name(std::string_view name) {
 
   llvm::SHA256 hash;
   hash.update(llvm::StringRef(name.data(), name.size()));
-  const auto digest = hash.final();
 
   // head + '_' + digest + ext == kMaxFileNameBytes. kMaxExtBytes is far below
   // the budget, so the head is always at least 130 bytes of readable prefix.
@@ -40,12 +40,8 @@ std::string shorten_file_name(std::string_view name) {
   while (!out.empty() && (static_cast<unsigned char>(name[out.size()]) & 0xc0) == 0x80) {
     out.pop_back();
   }
-  out                  += '_';
-  constexpr char hex[]  = "0123456789abcdef";
-  for (const auto byte : digest) {
-    out += hex[byte >> 4];
-    out += hex[byte & 0xf];
-  }
+  out += '_';
+  out += llvm::toHex(hash.final(), /*LowerCase=*/true);
   out += ext;
   return out;
 }

@@ -71,6 +71,13 @@ cc_library(
 )
 
 cc_library(
+    name = "option_text",
+    hdrs = ["option_text.hpp"],
+    includes = ["."],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "serialization_hdrs",
     hdrs = ["fnv1a.hpp", "json_util.hpp"],
     includes = ["."],
@@ -105,6 +112,7 @@ cc_library(
             "file_utils.hpp",
             "fnv1a.hpp",
             "json_util.hpp",
+            "option_text.hpp",
             "pyrope_ident.hpp",
             "pyrope_literal.hpp",
             "wide_decimal.hpp",
@@ -126,6 +134,7 @@ cc_library(
     deps = [
         ":debug_env",
         ":file_utils",
+        ":option_text",
         ":serialization_hdrs",
         "@hhds//hhds:core",  # diag Span/excerpts ride the hhds source locator
         "@hlop//hlop:hlop",
@@ -166,6 +175,7 @@ filegroup(
         ":bus_name_srcs",
         ":debug_env_srcs",
         "hash_util.hpp",
+        "option_text.hpp",
         "state_match.hpp",
         "str_tools.hpp",
     ],

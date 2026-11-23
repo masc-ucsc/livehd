@@ -9,7 +9,7 @@
 
 #include "diag.hpp"
 #include "job_manager.hpp"
-#include "query.hpp"
+#include "option_labels.hpp"
 #include "str_tools.hpp"
 
 using namespace livehd;
@@ -286,32 +286,11 @@ void Pass_lec::lec(Eprp_var& var) {
     return;
   }
 
-  lec::Lec_options o;
-  o.engine            = std::string{var.get("engine", "auto")};
-  o.solver            = std::string{var.get("solver", "cvc5")};
-  o.assume_check      = parse_bool(var.get("assume_check", "true"));
-  o.gold_x            = std::string{var.get("gold_x", "ignore")};
-  o.bound             = str_tools::to_i(var.get("bound", "6"));
-  o.timeout           = str_tools::to_i(var.get("timeout", "120"));
-  o.witness           = parse_bool(var.get("witness", "true"));
-  o.phase             = std::string{var.get("phase", "after_reset")};
-  o.reset_cycles      = str_tools::to_i(var.get("reset_cycles", "2"));
-  o.reset             = std::string{var.get("reset", "")};
-  o.match             = lec::parse_match_pairs(var.get("match", ""));  // inline pairs (@FILE only via `lhd lec`)
-  o.decompose         = std::string{var.get("decompose", "auto")};
-  o.cones             = std::string{var.get("cones", "auto")};
-  o.conelimit         = str_tools::to_i(var.get("conelimit", "10000"));
-  o.phase_sched       = parse_bool(var.get("phase_sched", "true"));
-  o.int_blast         = std::string{var.get("int_blast", "auto")};
-  o.box_seq           = std::string_view{var.get("box_model", "seq")} != "uf";
-  o.semdiff           = lec::lec_canon_semdiff(var.get("semdiff", "structural"));
-  o.partitions        = str_tools::to_i(var.get("partitions", "4"));
-  o.split             = std::string{var.get("split", "auto")};
-  o.stats             = parse_bool(var.get("stats", "false"));  // cvc5 solve-insight accounting (~8x slower)
-  // Default `test` (see lec::kDefaultLecEffort); an unset effort with options a
-  // sampled preset cannot serve falls back to the proof-only defaults.
-  o.profile                              = std::string{var.get("profile", "internal")};
-  o.portfolio                            = std::string{var.get("portfolio", "auto")};
+  const auto label = [&](std::string_view key, std::string_view fallback) { return var.get(key, fallback); };
+  auto       o     = lec::parse_formal_options(label, str_tools::to_i, parse_bool);
+  lec::parse_comparison_options(o, label, str_tools::to_i, parse_bool);
+  o.match                                = lec::parse_match_pairs(var.get("match", ""));  // @FILE is a CLI feature
+  o.stats                                = parse_bool(var.get("stats", "false"));
   const std::string_view effort_label    = var.get("effort", "");
   const bool             effort_explicit = !effort_label.empty();
   try {
@@ -332,47 +311,7 @@ void Pass_lec::lec(Eprp_var& var) {
       return;
     }
   }
-  // formal.lec.collapse: comma-separated proven-module def names to force-blackbox.
-  if (std::string cs{var.get("collapse", "")}; !cs.empty()) {
-    size_t pos = 0;
-    while (pos < cs.size()) {
-      size_t c   = cs.find(',', pos);
-      size_t end = c == std::string::npos ? cs.size() : c;
-      if (end > pos) {
-        o.collapse.emplace_back(cs.substr(pos, end - pos));
-      }
-      pos = end + 1;
-    }
-  }
-  // formal.lec.trust: comma-separated def names ASSUMED equal without a proof.
-  // This low-level single-pair path has no bottom-up driver, so it cannot skip
-  // proving a def or keep a box through a flat-confirm — trust degenerates to the
-  // same encoder blackbox as collapse here (the driver semantics live in
-  // lhd_kernel_formal.cpp's lec_hierarchical). Boxing over-approximates, so this
-  // is sound: a PASS is real, a refute at a box boundary can only be spurious.
-  if (std::string ms{var.get("ignore_memory", "")}; !ms.empty()) {
-    size_t pos = 0;
-    while (pos < ms.size()) {
-      size_t c   = ms.find(',', pos);
-      size_t end = c == std::string::npos ? ms.size() : c;
-      if (end > pos) {
-        o.ignore_memory.emplace_back(ms.substr(pos, end - pos));
-      }
-      pos = end + 1;
-    }
-  }
-  if (std::string ts{var.get("trust", "")}; !ts.empty()) {
-    size_t pos = 0;
-    while (pos < ts.size()) {
-      size_t c   = ts.find(',', pos);
-      size_t end = c == std::string::npos ? ts.size() : c;
-      if (end > pos) {
-        o.trust.emplace_back(ts.substr(pos, end - pos));
-      }
-      pos = end + 1;
-    }
-    o.collapse.insert(o.collapse.end(), o.trust.begin(), o.trust.end());
-  }
+  o.collapse.insert(o.collapse.end(), o.trust.begin(), o.trust.end());
 
   if (auto e = lec::lec_options_range_error(o); !e.empty()) {
     livehd::diag::err("pass.lec", "bad-bound", "io").msg("pass.lec: {}", e).fatal();
@@ -433,7 +372,7 @@ void Pass_lec::lec(Eprp_var& var) {
   //   REFUTED-<other>             error, class unsupported (exit 7); this
   //                               includes REFUTED-vacuous (nothing compared,
   //                               or a contradictory assume set)
-  const bool        engine_forced = o.engine != "auto" || o.portfolio != "auto";
+  const bool        engine_forced = lec::engine_is_forced(o);
   const auto        outcome       = lec::query_outcome(r, engine_forced);
   const auto        info          = lec::outcome_info(outcome);
   const std::string word          = lec::outcome_word(outcome, lec::query_outcome_depth(r, outcome));

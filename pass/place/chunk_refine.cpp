@@ -11,18 +11,14 @@
 #include <stdexcept>
 #include <tuple>
 
+#include "fnv1a.hpp"
+
 namespace livehd::placement {
 namespace dp = DreamPlace::native;
 namespace {
 uint64_t mix(uint64_t key, uint64_t x) { return (key ^ x) * 1099511628211ULL; }
 uint64_t number(uint64_t key, double x) { return mix(key, std::bit_cast<uint64_t>(x)); }
-uint64_t text(uint64_t key, std::string_view s) {
-  key = mix(key, s.size());
-  for (unsigned char c : s) {
-    key = mix(key, c);
-  }
-  return key;
-}
+uint64_t text(uint64_t key, std::string_view s) { return hash_util::fnv1a64(s, mix(key, s.size())); }
 using Point = std::array<double, 2>;
 struct Local_net {
   int                  net;

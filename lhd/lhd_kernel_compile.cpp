@@ -14,6 +14,7 @@
 #include <sstream>
 #include <thread>
 
+#include "option_text.hpp"
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "acyclic.hpp"
@@ -1884,7 +1885,7 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
     const auto set_on = [&](std::string_view key) {
       for (const auto& [k, v] : opts.sets) {
         if (k == key) {
-          return v == "true" || v == "1" || v == "on";
+          return str_tools::parse_bool(v).value_or(false);
         }
       }
       return false;
@@ -1900,7 +1901,7 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
       bool specialize_modules = true;
       for (const auto& [key, value] : opts.sets) {
         if (key == "compile.specialize_modules") {
-          specialize_modules = value == "true" || value == "1" || value == "on";
+          specialize_modules = str_tools::parse_bool(value).value_or(false);
         }
       }
       if (specialize_modules) {

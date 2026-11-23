@@ -8,6 +8,7 @@
 #include <stdexcept>
 #include <vector>
 
+#include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/SHA256.h"
 #include "rapidjson/document.h"
@@ -15,15 +16,7 @@
 #include "rapidjson/writer.h"
 
 namespace livehd::usyn {
-std::string hex_digest(llvm::SHA256& hash) {
-  std::string    result;
-  constexpr char hex[] = "0123456789abcdef";
-  for (auto byte : hash.final()) {
-    result += hex[byte >> 4];
-    result += hex[byte & 15];
-  }
-  return result;
-}
+std::string hex_digest(llvm::SHA256& hash) { return llvm::toHex(hash.final(), /*LowerCase=*/true); }
 namespace {
 void write(const std::filesystem::path& path, std::string_view text) {
   std::ofstream out(path, std::ios::binary);

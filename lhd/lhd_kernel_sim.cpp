@@ -23,6 +23,7 @@
 #include <sstream>
 #include <thread>
 
+#include "option_text.hpp"
 #include "absl/strings/str_join.h"
 #include "cgen_verilog.hpp"
 #include "diag.hpp"
@@ -540,9 +541,9 @@ void sim_command(Options& opts, Result& res) {
   bool vcd_on       = false;
   for (const auto& [k, v] : opts.sets) {
     if (k == "sim.compile_only") {
-      compile_only = (v == "true" || v == "1" || v == "on");
+      compile_only = str_tools::parse_bool(v).value_or(false);
     } else if (k == "sim.dump_bitcode") {
-      opts.sim_dump_bitcode = v == "true" || v == "1" || v == "on";
+      opts.sim_dump_bitcode = str_tools::parse_bool(v).value_or(false);
     } else if (k == "sim.vcd") {
       vcd_on = !(v == "false" || v == "0" || v == "off" || v.empty());
     }
@@ -566,7 +567,7 @@ void sim_command(Options& opts, Result& res) {
   std::string ckpt_min_secs, ckpt_max, ckpt_max_overhead, ckpt_every;
   for (const auto& [k, v] : opts.sets) {
     if (k == "sim.checkpoint") {
-      ckpt_on = (v == "true" || v == "1" || v == "on");
+      ckpt_on = str_tools::parse_bool(v).value_or(false);
     } else if (k == "sim.checkpoint_min_secs") {
       ckpt_min_secs = v;
     } else if (k == "sim.checkpoint_max") {
@@ -576,11 +577,12 @@ void sim_command(Options& opts, Result& res) {
     } else if (k == "sim.checkpoint_every") {
       ckpt_every = v;
     } else if (k == "sim.init_zero") {
-      init_zero = (v == "true" || v == "1" || v == "on");
+      init_zero = str_tools::parse_bool(v).value_or(false);
     } else if (k == "sim.warn_undefined") {
-      warn_undefined = (v == "true" || v == "1" || v == "on") ? "true" : "false";
+      warn_undefined = str_tools::parse_bool(v).value_or(false) ? "true" : "false";
     } else if (k == "compile.unknown_zero") {
-      unknown_zero = (v == "true" || v == "1" || v == "on");  // the testbench's `?` literals too (the DUT side gets the same flag)
+      unknown_zero
+          = str_tools::parse_bool(v).value_or(false);  // the testbench's `?` literals too (the DUT side gets the same flag)
     }
   }
   const std::string ckpt_dir = ckpt_on ? (fs::absolute(simroot).string() + "/ckpt") : std::string{};

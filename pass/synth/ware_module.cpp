@@ -1,4 +1,5 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+#include "fnv1a.hpp"
 #include "ware_module.hpp"
 
 #include <rapidjson/document.h>
@@ -267,10 +268,7 @@ std::shared_ptr<hhds::Graph> enclose(hhds::Graph& parent, const hhds::Node_class
     descriptor += std::format("/color:{}", color);
   }
   descriptor    += info;
-  uint64_t hash  = 14695981039346656037ULL;
-  for (unsigned char ch : descriptor) {
-    hash = (hash ^ ch) * 1099511628211ULL;
-  }
+  const auto hash  = livehd::hash_util::fnv1a64(descriptor);
   auto*      lib  = parent.get_io()->get_library();
   const auto base = std::format("__ware_{}_{:016x}", kind, hash);
   auto       name = base;

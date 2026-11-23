@@ -1,4 +1,5 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+#include "fnv1a.hpp"
 #include "satopt_sweep.hpp"
 
 #include <algorithm>
@@ -191,14 +192,7 @@ Dlop low_bits(const Dlop& v, int width, bool flip) {
   return flip ? *v.xor_op(*mask)->and_op(*mask) : *v.and_op(*mask);
 }
 uint64_t mix(uint64_t h, uint64_t v) { return (h ^ v) * 0x100000001b3ULL + (h >> 17); }
-uint64_t word_hash(const Dlop& v) {
-  const auto bytes = v.serialize();
-  uint64_t   h     = 0xcbf29ce484222325ULL;
-  for (unsigned char c : bytes) {
-    h = (h ^ c) * 0x100000001b3ULL;
-  }
-  return h;
-}
+uint64_t word_hash(const Dlop& v) { return livehd::hash_util::fnv1a64(v.serialize()); }
 
 // The cells deleted if `t` lost its consumers (a lower bound, at most `cap`).
 absl::flat_hash_set<Node> mffc_set(const Node& t, int cap);

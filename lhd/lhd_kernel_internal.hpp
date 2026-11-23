@@ -683,6 +683,10 @@ std::vector<std::shared_ptr<Lnast>> filter_top(const std::vector<std::shared_ptr
 // Entity tail of a full internal module name ("file.entity" -> "entity").
 std::string_view top_entity_of(std::string_view name);
 
+// Visit the selected subtree once, leaves first. Callers supply sorted child lists.
+std::vector<std::string> postorder_sub_hierarchy(const absl::flat_hash_map<std::string, std::vector<std::string>>& children,
+                                                 const std::string&                                                top);
+
 // Resolve a user --top/--ref-top/--impl-top against the full internal names
 // (`file.entity`) in `names`. An exact match wins (returned as-is, silently).
 // Otherwise the entity fallback (lec's long-standing rule), with a diag

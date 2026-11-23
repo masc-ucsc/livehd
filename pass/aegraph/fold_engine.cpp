@@ -1,4 +1,5 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+#include "fnv1a.hpp"
 #include "fold_engine.hpp"
 
 #include <atomic>
@@ -66,13 +67,7 @@ std::string fold_descriptor() {
 }
 
 uint64_t fold_salt_mix(uint64_t salt) {
-  const auto text = fold_descriptor();
-  uint64_t   h    = salt ^ 0xcbf29ce484222325ULL;  // FNV-1a over the descriptor, seeded by the salt
-  for (const unsigned char c : text) {
-    h ^= c;
-    h *= 0x100000001b3ULL;
-  }
-  return h;
+  return livehd::hash_util::fnv1a64(fold_descriptor(), salt ^ livehd::hash_util::kFnv1a64_offset);
 }
 
 void fold_note(std::string_view site) {

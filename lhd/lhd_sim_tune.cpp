@@ -1,5 +1,6 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include "option_text.hpp"
 #include "lhd_sim_tune.hpp"
 
 #include <algorithm>
@@ -90,7 +91,7 @@ bool get_bool(const rj::Value& o, const char* k, bool dflt = false) {
   }
   if (it->value.IsString()) {
     const std::string_view s{it->value.GetString(), it->value.GetStringLength()};
-    return s == "true" || s == "1" || s == "on";
+    return str_tools::parse_bool(s).value_or(false);
   }
   return dflt;
 }
@@ -466,7 +467,7 @@ std::optional<Rename_hint> renamed_sim_flag(std::string_view flag, std::string_v
   }
   if (flag == "color_dirty") {
     // A copy-pasteable translation into the tri grammar.
-    if (v == "true" || v == "1" || v == "on") {
+    if (str_tools::parse_bool(v).value_or(false)) {
       return Rename_hint{"tune.dirty", "on"};
     }
     if (v == "false" || v == "0" || v == "off") {

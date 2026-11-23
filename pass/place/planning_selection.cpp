@@ -1,4 +1,5 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+#include "fnv1a.hpp"
 #include "planning_selection.hpp"
 
 #include <cmath>
@@ -34,10 +35,8 @@ bool Planning_selection::consider(unsigned round, size_t routing_score, const ti
     ++sample.data_pins;
     // All Feedback layouts enumerate labels in sorted order. Reject a changed
     // finite data-pin scope rather than reward a missing formerly critical pin.
-    for (unsigned char c : label) {
-      scope = (scope ^ c) * 1099511628211ULL;
-    }
-    scope *= 1099511628211ULL;  // NUL separator between physical pin identities
+    scope  = livehd::hash_util::fnv1a64(label, scope);
+    scope *= livehd::hash_util::kFnv1a64_prime;  // NUL separator between physical pin identities
   };
   if (timing.ranking) {
     const auto& rank = *timing.ranking;

@@ -1,4 +1,5 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+#include "fnv1a.hpp"
 #include "fp_chunks.hpp"
 
 #include <algorithm>
@@ -43,9 +44,7 @@ void include(Demand& a, const Demand& b) {
   }
 }
 double unit(std::string_view key, uint64_t h) {
-  for (unsigned char c : key) {
-    h = (h ^ c) * 1099511628211ULL;
-  }
+  h  = livehd::hash_util::fnv1a64(key, h);
   h ^= h >> 33;
   h *= 0xff51afd7ed558ccdULL;
   h ^= h >> 33;
@@ -962,9 +961,7 @@ std::optional<Chunk_plan> Chunk_model::plan_with(Chunk_box core, double site, do
     auto     mix  = [&](uint64_t v) { key = (key ^ v) * 1099511628211ULL; };
     auto     text = [&](const std::string& s) {
       mix(s.size());
-      for (unsigned char c : s) {
-        mix(c);
-      }
+      key = livehd::hash_util::fnv1a64(s, key);
     };
     for (double v : core) {
       mix(std::bit_cast<uint64_t>(v));

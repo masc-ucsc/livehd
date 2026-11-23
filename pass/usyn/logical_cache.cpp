@@ -1,4 +1,7 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+// LLVM iterator constructors use I(...) before logical_cache.hpp defines the iassert macro.
+#include "llvm/ADT/StringExtras.h"
+
 #include "logical_cache.hpp"
 
 #include <sys/stat.h>
@@ -21,13 +24,7 @@ bool valid_key(std::string_view key) {
 std::string digest(std::string_view bytes) {
   llvm::SHA256 hash;
   hash.update(llvm::StringRef(bytes));
-  std::string    out;
-  constexpr char hex[] = "0123456789abcdef";
-  for (const auto b : hash.final()) {
-    out += hex[b >> 4];
-    out += hex[b & 15];
-  }
-  return out;
+  return llvm::toHex(hash.final(), /*LowerCase=*/true);
 }
 }  // namespace
 

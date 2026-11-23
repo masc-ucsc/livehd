@@ -1,5 +1,6 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include "option_text.hpp"
 #include "lhd_sim_options.hpp"
 
 #include <algorithm>
@@ -18,8 +19,6 @@ namespace lhd {
 namespace {
 
 using livehd::sim::Tune_vector;
-
-bool is_bool_text(std::string_view v) { return v == "true" || v == "false" || v == "1" || v == "0" || v == "on" || v == "off"; }
 
 // Record a file the generated code depends on (the --depfile / envelope inputs).
 void add_input(Result& res, const std::string& path) {
@@ -71,7 +70,7 @@ std::pair<std::string, std::string> sim_set_value_error(const Sim_set_option& op
     return std::pair{std::format("--set/--config sim.{} expects {}, got '{}'", opt.name, expects, value), std::move(hint)};
   };
   switch (opt.kind) {
-    case K::boolean    : return is_bool_text(value) ? std::pair<std::string, std::string>{} : bad("true|false");
+    case K::boolean: return str_tools::parse_bool(value).has_value() ? std::pair<std::string, std::string>{} : bad("true|false");
     case K::non_neg_num: {
       // The numeric checkpoint knobs must be non-negative numbers, else a typo
       // would silently reach the driver as 0 (checkpoint every cycle).

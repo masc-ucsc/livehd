@@ -6,9 +6,7 @@
 
 namespace livehd::hash_util {
 
-// Canonical 64-bit FNV-1a parameters. Every digest built on these is an
-// internal cache key or uniquifier, so a parameter change only costs a
-// one-time cache refill — nothing persists across versions by hash value.
+// Some callers persist digests in file names and artifact checksums.
 inline constexpr uint64_t kFnv1a64_offset = 0xcbf29ce484222325ULL;  // 14695981039346656037
 inline constexpr uint64_t kFnv1a64_prime  = 0x100000001b3ULL;       // 1099511628211
 

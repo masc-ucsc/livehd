@@ -45,7 +45,7 @@
 #include "pass_aegraph.hpp"
 #include "pass_single_edge.hpp"
 #include "proof_prep.hpp"
-#include "query.hpp"
+#include "option_labels.hpp"
 #include "pass/place/pcrs/pcrs.hpp"
 #include "semdiff.hpp"
 #include "solve_stats.hpp"
@@ -62,7 +62,65 @@ namespace lhd {
 
 namespace {
 bool setting_enabled(std::string_view value) { return value != "false" && value != "0" && value != "off"; }
+
+auto formal_labels(const Options& opts) {
+  Eprp_var::Eprp_dict labels;
+  merge_sets(opts, "formal", labels);
+  merge_sets(opts, "formal.lec", labels);  // command-specific spelling takes precedence
+  return [labels = std::move(labels)](std::string_view key, std::string_view fallback) {
+    auto it = labels.find(std::string{key});
+    return it == labels.end() ? std::string{fallback} : it->second;
+  };
+}
+
+int formal_integer(const std::string& value) { return std::atoi(value.c_str()); }
+
+bool formal_boolean(std::string_view value) { return value != "false" && value != "0"; }
+
+struct Sub_library {
+  absl::flat_hash_map<hhds::Gid, hhds::Graph*> graphs;
+  std::vector<std::shared_ptr<hhds::Graph>>    owners;
+};
+
+Sub_library load_sub_lib(const Options& opts, std::string_view command, std::string_view hint = {}) {
+  Sub_library result;
+  for (const auto& lp : opts.libs) {
+    if (lp.kind != "lg") {
+      throw Lhd_error{"usage", std::format("{} --lib expects lg:DIR, got '{}:'", command, lp.kind), std::string{hint}};
+    }
+    if (!fs::is_directory(lp.path)) {
+      throw Lhd_error{"missing_file", std::format("{} --lib not found: {}", command, lp.path), ""};
+    }
+    auto& lib = livehd::Hhds_graph_library::instance(lp.path);
+    for (const auto id : lib.all_gids()) {
+      if (auto graph = lib.get_graph(id)) {
+        result.graphs[id] = graph.get();  // later libraries take precedence
+        result.owners.push_back(std::move(graph));
+      }
+    }
+  }
+  return result;
+}
 }  // namespace
+
+std::vector<std::string> postorder_sub_hierarchy(const absl::flat_hash_map<std::string, std::vector<std::string>>& children,
+                                                 const std::string&                                                top) {
+  std::vector<std::string>         order;
+  absl::flat_hash_set<std::string> seen;
+  const auto                       visit = [&](auto& self, const std::string& name) -> void {
+    if (!seen.insert(name).second) {
+      return;
+    }
+    if (auto it = children.find(name); it != children.end()) {
+      for (const auto& child : it->second) {
+        self(self, child);
+      }
+    }
+    order.push_back(name);
+  };
+  visit(visit, top);
+  return order;
+}
 
 // ---- lec (in-process relational equivalence via pass.lec / Pono) ------------
 
@@ -978,16 +1036,7 @@ void load_side_graphs(Options& opts, Result& res, const std::string& kind, const
       // elaboration; this is the same discovery `lhd compile` runs).
       {
         std::vector<std::string> seeds;
-        for (size_t b = 0; b <= files.size();) {
-          auto e = files.find(',', b);
-          if (e == std::string::npos) {
-            e = files.size();
-          }
-          if (e > b) {
-            seeds.emplace_back(files.substr(b, e - b));
-          }
-          b = e + 1;
-        }
+        str_tools::append_csv_names(seeds, files);
         discover_imports(var, res, /*n_imports=*/0, seeds);
       }
     } else if (kind == "verilog") {  // slang: the direct SV -> LNAST front-end
@@ -1802,6 +1851,9 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     };
     collect(g);
   }
+  for (auto& [_, kids] : children) {
+    std::ranges::sort(kids);
+  }
 
   // OBSERVED OUTPUTS per def: the output ports through which some instance of
   // it can influence the TOP's outputs. A least fixpoint over every graph of
@@ -1942,25 +1994,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
   // shared descendants. Defs that merely coexist in the two libraries (a
   // whole-design --emit-dir holds every module, not just the --ref-top subtree)
   // are outside the requested proof and must not become extra roots.
-  std::vector<std::string>                order;
-  absl::flat_hash_map<std::string, int>   mark;  // 0 unvisited, 1 in-progress, 2 done
-  std::function<void(const std::string&)> dfs = [&](const std::string& n) {
-    if (auto it = mark.find(n); it != mark.end() && it->second != 0) {
-      return;  // done, or a cycle back-edge (modules form a DAG)
-    }
-    mark[n] = 1;
-    if (auto it = children.find(n); it != children.end()) {
-      for (const auto& c : it->second) {
-        dfs(c);
-      }
-    }
-    // Do not retain a reference to mark[n] across the recursive calls above:
-    // inserting a descendant can rehash flat_hash_map and invalidate every
-    // slot reference. Reacquire the parent slot after the subtree is complete.
-    mark[n] = 2;
-    order.push_back(n);
-  };
-  dfs(top_key);
+  const auto order = postorder_sub_hierarchy(children, top_key);
 
   // An active assumption inside a boxed child would disappear from the
   // parent's cvc5 problem: a box exposes only IO, not the child's fproperty
@@ -5682,14 +5716,9 @@ void lec_command(Options& opts, Result& res) {
 
   // lgyosys is a debug comparison request: native Slang/default LEC always
   // runs first, followed by the independent lgcheck oracle.
-  Eprp_var::Eprp_dict labels;
-  merge_sets(opts, "formal", labels);      // the shared formal.* vocabulary
-  merge_sets(opts, "formal.lec", labels);  // lec-specific canonical spelling wins
-  auto label = [&](std::string_view k, std::string_view def) -> std::string {
-    auto it = labels.find(std::string{k});
-    return it == labels.end() ? std::string{def} : it->second;
-  };
-  const std::string requested_solver = label("solver", "cvc5");
+  const auto        label            = formal_labels(opts);
+  auto              o                = livehd::lec::parse_formal_options(label, formal_integer, formal_boolean);
+  const std::string requested_solver = o.solver;
   if (requested_solver != "cvc5" && requested_solver != "bitwuzla" && requested_solver != "lgyosys") {
     throw Lhd_error{"usage",
                     std::format("--set formal.solver expects cvc5|bitwuzla|lgyosys, got '{}'", requested_solver),
@@ -5711,8 +5740,7 @@ void lec_command(Options& opts, Result& res) {
   }
   if (!effort_explicit
       && (requested_solver != "cvc5" || (label("engine", "auto") != "auto" && label("engine", "auto") != "bmc")
-          || (label("cross", "false") != "false" && label("cross", "false") != "0")
-          || label("phase", "after_reset") != "after_reset")) {
+          || formal_boolean(label("cross", "false")) || label("phase", "after_reset") != "after_reset")) {
     effort = livehd::lec::Effort::Legacy;
   }
   const bool sampled_effort = livehd::lec::is_sampled(effort);
@@ -5721,7 +5749,7 @@ void lec_command(Options& opts, Result& res) {
                     "sampled effort presets require cvc5 and engine=auto or bmc",
                     "use formal.effort=verify for proof engines"};
   }
-  if (sampled_effort && label("cross", "false") != "false" && label("cross", "false") != "0") {
+  if (sampled_effort && formal_boolean(label("cross", "false"))) {
     throw Lhd_error{"usage", "sampled effort presets do not produce a verdict for proof cross-checking", "omit formal.cross"};
   }
 
@@ -5748,7 +5776,7 @@ void lec_command(Options& opts, Result& res) {
                     "use `lhd formal verify <design> <sidecar> --formal <glob>`"};
   }
 
-  const bool   assume_check = label("assume_check", "true") != "false" && label("assume_check", "true") != "0";
+  const bool   assume_check = o.assume_check;
   Eprp_var     ref_var;
   Eprp_var     impl_var;
   // pass.formal is still a compile pipeline stage with compile.formal.* labels.
@@ -5790,7 +5818,7 @@ void lec_command(Options& opts, Result& res) {
   // Read from the user's labels, never inferred from a detail string: the
   // drivers below switch engines internally (a sampled preset runs bmc, a
   // collapsed netlist leg runs ind) without the user having pinned anything.
-  const bool engine_forced = label("engine", "auto") != "auto" || label("portfolio", "auto") != "auto";
+  const bool engine_forced = livehd::lec::engine_is_forced(o);
 
   // A refusal BEFORE any solve still prints the verdict line and records the
   // machine-readable verdict, exactly like a solved run: `lec: '<top>' WORD (...)`.
@@ -5882,13 +5910,14 @@ void lec_command(Options& opts, Result& res) {
     }
   }
 
-  const bool cross = yosys_comparison || (label("cross", "false") != "false" && label("cross", "false") != "0");
+  const bool cross = yosys_comparison || formal_boolean(label("cross", "false"));
 
   // Discharge in-process via pass/lec (L1). The engine is the authority on the
   // non-cross path; in cross mode we additionally run lgcheck and assert
   // agreement (the strongest encoder check).
-  livehd::lec::Lec_options o;
-  o.assume_check          = assume_check;
+  o.collapse = opts.collapse;
+  o.trust    = opts.trust;
+  livehd::lec::parse_comparison_options(o, label, formal_integer, formal_boolean);
   // pass.formal has already proved every checked obligation it could. What is
   // active is a proven assume or a contract (explicit nocheck, or all
   // assumptions when checking is disabled), and must constrain both the flat
@@ -5905,27 +5934,9 @@ void lec_command(Options& opts, Result& res) {
   o.unchecked_assumes     = ref_assumes.unchecked + impl_assumes.unchecked;
   o.design_assumes        = o.proven_assumes + o.unchecked_assumes > 0;
   o.assumption_key        = std::format("design:{}:{}", o.proven_assumes + o.unchecked_assumes, assume_check ? 1 : 0);
-  o.engine                = label("engine", "auto");
-  o.solver                = solver;  // cvc5 | bitwuzla
-  o.gold_x                = label("gold_x", "ignore");
-  o.bound                 = std::atoi(label("bound", "6").c_str());
-  o.timeout
-      = std::atoi(label("timeout", "120").c_str());  // bound the CLI: hard miters degrade to TIMEOUT, never freeze (0 = unbounded)
-  o.witness     = label("witness", "true") != "false" && label("witness", "true") != "0";
-  o.decompose   = label("decompose", "auto");
-  o.cones       = label("cones", "auto");
-  o.conelimit   = std::atoi(label("conelimit", "10000").c_str());
-  o.phase_sched = label("phase_sched", "true") != "false" && label("phase_sched", "true") != "0";
-  o.box_seq     = label("box_model", "seq") != "uf";
-  o.int_blast   = label("int_blast", "auto");
-
-  o.semdiff             = livehd::lec::lec_canon_semdiff(label("semdiff", "structural"));
-  o.state_pairing       = label("state_pairing", "true") != "false" && label("state_pairing", "true") != "0";
-  o.partitions          = std::atoi(label("partitions", "4").c_str());
+  o.solver                = solver;  // lgyosys compares the native cvc5 run against lgcheck
+  o.state_pairing         = formal_boolean(label("state_pairing", "true"));
   o.jobs                = static_cast<int>(livehd::Job_manager::global().ceiling());
-  o.split               = label("split", "auto");
-  o.profile             = label("profile", "internal");
-  o.portfolio           = label("portfolio", "auto");
   o.effort              = effort;
   if (effort == livehd::lec::Effort::Verify) {
     o.timeout = std::atoi(label("timeout", "0").c_str());
@@ -5939,9 +5950,6 @@ void lec_command(Options& opts, Result& res) {
   o.confirm_timeout     = std::atoi(label("confirm_timeout", "30").c_str());
   o.hard_timeout_mult   = 3;  // recovery-solve wall cap = 3 x formal.timeout (internal)
   o.spec_mining_timeout = std::atoi(label("spec_mining_timeout", "0").c_str());
-  o.phase               = label("phase", "after_reset");
-  o.reset_cycles        = std::atoi(label("reset_cycles", "2").c_str());
-  o.reset               = label("reset", "");
   // Statistics are selected once by --stats / lhd.stats.
   o.stats               = opts.stats;
   if (label("effort", "") == "proof" && o.timeout > 0) {
@@ -5964,52 +5972,6 @@ void lec_command(Options& opts, Result& res) {
     o.match = livehd::lec::parse_match_pairs(text);
   }
 
-  // formal.lec.collapse: proven module defs to force-blackbox. Union of the --collapse
-  // flags and a comma-separated `--set formal.lec.collapse=a,b,c`.
-  o.collapse = opts.collapse;
-  if (std::string cs = label("collapse", ""); !cs.empty()) {
-    size_t pos = 0;
-    while (pos < cs.size()) {
-      size_t c   = cs.find(',', pos);
-      size_t end = c == std::string::npos ? cs.size() : c;
-      if (end > pos) {
-        o.collapse.emplace_back(cs.substr(pos, end - pos));
-      }
-      pos = end + 1;
-    }
-  }
-
-  // formal.lec.trust: def names ASSUMED equal WITHOUT a proof (the latch escape
-  // hatch). Union of the --trust flags and `--set formal.lec.trust=a,b,c`. The
-  // bottom-up driver (lec_hierarchical) skips proving these defs and keeps them
-  // boxed even through a refute's flat-confirm; seed them into o.collapse now so
-  // the flat (non-hier) path black-boxes them too — the hier driver rebuilds its
-  // own per-def collapse set and re-seeds trust there.
-  o.trust = opts.trust;
-  // formal.ignore_memory: memories the user EXCLUDED from the comparison.
-  // `label` merges formal.* and formal.lec.*, so either spelling works.
-  if (std::string ms = label("ignore_memory", ""); !ms.empty()) {
-    size_t pos = 0;
-    while (pos < ms.size()) {
-      size_t c   = ms.find(',', pos);
-      size_t end = c == std::string::npos ? ms.size() : c;
-      if (end > pos) {
-        o.ignore_memory.emplace_back(ms.substr(pos, end - pos));
-      }
-      pos = end + 1;
-    }
-  }
-  if (std::string ts = label("trust", ""); !ts.empty()) {
-    size_t pos = 0;
-    while (pos < ts.size()) {
-      size_t c   = ts.find(',', pos);
-      size_t end = c == std::string::npos ? ts.size() : c;
-      if (end > pos) {
-        o.trust.emplace_back(ts.substr(pos, end - pos));
-      }
-      pos = end + 1;
-    }
-  }
   if (!o.trust.empty()) {
     // Trusting the TOP module would assume the WHOLE design equivalent — a
     // vacuous pass. Refuse it: the trust list may only name INTERNAL defs.
@@ -6041,27 +6003,8 @@ void lec_command(Options& opts, Result& res) {
   if (!opts.libs.empty() && prep_timed_out("before loading the --lib cell models")) {
     return;
   }
-  absl::flat_hash_map<hhds::Gid, hhds::Graph*> sub_lib;
-  std::vector<std::shared_ptr<hhds::Graph>>    sub_lib_keep;
-  for (const auto& lp : opts.libs) {
-    if (lp.kind != "lg") {
-      throw Lhd_error{"usage",
-                      std::format("lec --lib expects lg:DIR, got '{}:'", lp.kind),
-                      "the cell-model library, e.g. --lib lg:models"};
-    }
-    if (!fs::is_directory(lp.path)) {
-      throw Lhd_error{"missing_file", std::format("lec --lib not found: {}", lp.path), ""};
-    }
-    auto& lib = livehd::Hhds_graph_library::instance(lp.path);
-    for (const hhds::Gid id : lib.all_gids()) {
-      auto g = lib.get_graph(id);
-      if (!g) {
-        continue;
-      }
-      sub_lib_keep.push_back(g);
-      sub_lib[id] = g.get();  // later --lib wins on a gid clash
-    }
-  }
+  auto        library     = load_sub_lib(opts, "lec", "the cell-model library, e.g. --lib lg:models");
+  auto&       sub_lib     = library.graphs;
   const auto* sub_lib_ptr = sub_lib.empty() ? nullptr : &sub_lib;
 
   // ── 2f-latch M8: EDGE NORMALIZATION, MITER-WIDE ───────────────────────────
@@ -7035,8 +6978,8 @@ void lec_command(Options& opts, Result& res) {
   // write simfail_<resolved-top>.prp and optionally run it. Without a user
   // --workdir both actions are off; formal.witness gates the feature.
   if (top.kind == livehd::lec::Outcome::Refuted_cex) {
-    const bool simfail = o.witness && workdir_set && setting_enabled(labels.contains("simfail") ? labels.at("simfail") : "true");
-    const bool simfail_run = setting_enabled(labels.contains("simfail_run") ? labels.at("simfail_run") : "true");
+    const bool simfail     = o.witness && workdir_set && setting_enabled(label("simfail", "true"));
+    const bool simfail_run = setting_enabled(label("simfail_run", "true"));
     // A counterexample that rests on a BOX (a trusted def's free outputs, or a
     // divergence at a trusted box's inputs) is still REFUTED-cex -- the boxed
     // model is the contract -- but the source replay flattens the real leaf,
@@ -8244,14 +8187,8 @@ void formal_verify_command(Options& opts, Result& res) {
     return;  // status stays pass (a pure query — nothing was proved)
   }
 
-  // Knobs: lec.* (legacy aliases) < formal.* (the one shared namespace).
-  Eprp_var::Eprp_dict labels;
-  merge_sets(opts, "formal", labels);      // the shared formal.* vocabulary
-  merge_sets(opts, "formal.lec", labels);  // lec-specific canonical spelling wins
-  auto label = [&](std::string_view k, std::string_view def) -> std::string {
-    auto it = labels.find(std::string{k});
-    return it == labels.end() ? std::string{def} : it->second;
-  };
+  const auto label = formal_labels(opts);
+  auto       o     = livehd::lec::parse_formal_options(label, formal_integer, formal_boolean);
 
   Eprp_var var;
   {
@@ -8264,7 +8201,7 @@ void formal_verify_command(Options& opts, Result& res) {
     opts.sets.emplace_back("compile.formal.warn_vacuous", "false");
     const bool saved_preflight    = opts.compile_formal_preflight;
     opts.compile_formal_preflight = false;
-    if (label("assume_check", "true") == "false" || label("assume_check", "true") == "0") {
+    if (!o.assume_check) {
       opts.sets.emplace_back("compile.formal.assume_check", "false");
     }
     load_side_graphs(opts, res, kind, path, "impl", var);
@@ -8278,7 +8215,7 @@ void formal_verify_command(Options& opts, Result& res) {
 
   // The options PINNED an engine (anything but engine=auto): an engine that
   // cannot handle an obligation is then REFUTED-unchecked, not -unsupported.
-  const bool engine_forced = label("engine", "auto") != "auto" || label("portfolio", "auto") != "auto";
+  const bool engine_forced   = livehd::lec::engine_is_forced(o);
   // A refusal BEFORE the proof still prints the run's verdict line, in the
   // same words as a solved run: `formal verify: '<top>' WORD (...)`.
   auto refuse_presolve = [&](livehd::lec::Outcome refusal, const std::string& why, const std::string& hint) {
@@ -8288,38 +8225,7 @@ void formal_verify_command(Options& opts, Result& res) {
     conclude_outcome(t, "pass.formal", "formal", std::format("'{}' {}", g->get_name(), why), hint);
   };
 
-  livehd::lec::Lec_options o;
-  // F3: verify gets the shared portfolio — engine=auto races two whole-run
-  // strategies (bmc-first at the full bound | ind-first at a shallow base case
-  // whose induction rung promotes deep-state invariants to unbounded) and merges
-  // per-obligation firsts. bmc / ind still select a single strategy directly.
-  o.engine       = label("engine", "auto");
-  o.solver       = label("solver", "cvc5");
-  o.portfolio    = label("portfolio", "auto");
-  o.assume_check = label("assume_check", "true") != "false" && label("assume_check", "true") != "0";
-  // Same escape hatch as lec: both drivers instantiate the same Encoder, so a
-  // memory it refuses to model (per-port clock edges) has to be excludable here
-  // too, or `lhd formal verify` on that design has no way forward.
-  if (std::string ms = label("ignore_memory", ""); !ms.empty()) {
-    size_t pos = 0;
-    while (pos < ms.size()) {
-      size_t c   = ms.find(',', pos);
-      size_t end = c == std::string::npos ? ms.size() : c;
-      if (end > pos) {
-        o.ignore_memory.emplace_back(ms.substr(pos, end - pos));
-      }
-      pos = end + 1;
-    }
-  }
-  o.bound               = std::atoi(label("bound", "6").c_str());
-  o.timeout             = std::atoi(label("timeout", "120").c_str());
-  o.witness             = label("witness", "true") != "false" && label("witness", "true") != "0";
-  o.phase               = label("phase", "after_reset");
-  o.reset_cycles        = std::atoi(label("reset_cycles", "2").c_str());
-  o.reset               = label("reset", "");
-  o.partitions          = std::atoi(label("partitions", "4").c_str());
   o.jobs                = static_cast<int>(livehd::Job_manager::global().ceiling());
-  o.split               = label("split", "auto");
   try {
     o.effort = livehd::lec::parse_effort(label("effort", ""));
   } catch (const std::invalid_argument& error) {
@@ -8348,10 +8254,9 @@ void formal_verify_command(Options& opts, Result& res) {
   // Cross-version reuse: which techniques (hash is the cone-key verdict cache).
   bool reuse_hash = false;
   {
-    const std::string all = label("reuse", "hash");
-    for (size_t at = 0; at <= all.size();) {
-      const size_t      nx = std::min(all.find(',', at), all.size());
-      const std::string t  = all.substr(at, nx - at);
+    std::vector<std::string> techniques;
+    str_tools::append_csv_names(techniques, label("reuse", "hash"));
+    for (const auto& t : techniques) {
       if (t == "hash" || t == "all") {
         reuse_hash = true;
       }
@@ -8364,10 +8269,9 @@ void formal_verify_command(Options& opts, Result& res) {
       if (t == "inv" || t == "all") {
         o.seq_reuse |= livehd::lec::kReuseInv;
       }
-      if (!t.empty() && t != "hash" && t != "equiv" && t != "cex" && t != "inv" && t != "all" && t != "none") {
+      if (t != "hash" && t != "equiv" && t != "cex" && t != "inv" && t != "all" && t != "none") {
         throw Lhd_error{"usage", "formal.reuse: unknown technique '" + t + "'", "use hash, equiv, cex, inv, all or none"};
       }
-      at = nx + 1;
     }
   }
   o.abc          = label("abc", "false") == "true";
@@ -8408,25 +8312,8 @@ void formal_verify_command(Options& opts, Result& res) {
   }
 
   // --lib lg:DIR cell-model libraries, exactly as in lec.
-  absl::flat_hash_map<hhds::Gid, hhds::Graph*> sub_lib;
-  std::vector<std::shared_ptr<hhds::Graph>>    sub_lib_keep;
-  for (const auto& lp : opts.libs) {
-    if (lp.kind != "lg") {
-      throw Lhd_error{"usage", std::format("formal verify --lib expects lg:DIR, got '{}:'", lp.kind), ""};
-    }
-    if (!fs::is_directory(lp.path)) {
-      throw Lhd_error{"missing_file", std::format("formal verify --lib not found: {}", lp.path), ""};
-    }
-    auto& lib = livehd::Hhds_graph_library::instance(lp.path);
-    for (const hhds::Gid id : lib.all_gids()) {
-      auto lg = lib.get_graph(id);
-      if (!lg) {
-        continue;
-      }
-      sub_lib_keep.push_back(lg);
-      sub_lib[id] = lg.get();
-    }
-  }
+  auto        library     = load_sub_lib(opts, "formal verify");
+  auto&       sub_lib     = library.graphs;
   const auto* sub_lib_ptr = sub_lib.empty() ? nullptr : &sub_lib;
 
   // ── 2f-latch M8: EDGE NORMALIZATION ───────────────────────────────────────
@@ -9604,8 +9491,8 @@ void formal_verify_command(Options& opts, Result& res) {
   // named after the resolved top.
   std::vector<std::string> simfail_artifact_paths;
   if (run_outcome.kind == livehd::lec::Outcome::Refuted_cex) {
-    const bool simfail = o.witness && workdir_set && setting_enabled(labels.contains("simfail") ? labels.at("simfail") : "true");
-    const bool simfail_run = setting_enabled(labels.contains("simfail_run") ? labels.at("simfail_run") : "true");
+    const bool simfail     = o.witness && workdir_set && setting_enabled(label("simfail", "true"));
+    const bool simfail_run = setting_enabled(label("simfail_run", "true"));
     const bool has_trace
         = std::any_of(r.props.begin(), r.props.end(), [](const auto& p) { return p.refuted_at >= 0 && !p.trace.empty(); });
     if (has_trace && simfail && r.cex_free_box) {

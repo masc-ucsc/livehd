@@ -11,6 +11,7 @@
 #include <stdexcept>
 
 #include "file_utils.hpp"
+#include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/SHA256.h"
 #include "rapidjson/document.h"
@@ -53,13 +54,7 @@ std::string digest(const fs::path& path) {
   if (input.bad()) {
     throw std::runtime_error("incomplete physical cache input: " + path.string());
   }
-  std::string    result;
-  constexpr char hex[] = "0123456789abcdef";
-  for (const auto b : hash.final()) {
-    result += hex[b >> 4];
-    result += hex[b & 15];
-  }
-  return result;
+  return llvm::toHex(hash.final(), /*LowerCase=*/true);
 }
 
 Inventory inventory(const fs::path& directory) {

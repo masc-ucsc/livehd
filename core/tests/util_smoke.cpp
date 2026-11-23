@@ -7,6 +7,7 @@
 #include "gtest/gtest.h"
 #include "hash_util.hpp"
 #include "json_util.hpp"
+#include "option_text.hpp"
 #include "str_tools.hpp"
 
 namespace {
@@ -49,6 +50,25 @@ TEST(StrTools, OptionTruthPreservesAsciiSemantics) {
   EXPECT_TRUE(str_tools::ascii_iequals("\xc0", "\xc0"));
 }
 
+TEST(StrTools, StrictBooleanOptions) {
+  for (auto text : {"true", "1", "on"}) {
+    EXPECT_EQ(str_tools::parse_bool(text), true);
+  }
+  for (auto text : {"false", "0", "off"}) {
+    EXPECT_EQ(str_tools::parse_bool(text), false);
+  }
+  for (auto text : {"", "TRUE", "Off", "yes", "no", " true", "0 "}) {
+    EXPECT_EQ(str_tools::parse_bool(text), std::nullopt);
+  }
+}
+
+TEST(StrTools, FormalNameLists) {
+  std::vector<std::string> names{"flag"};
+  str_tools::append_csv_names(names, "");
+  str_tools::append_csv_names(names, ",a,, b,a,");
+  EXPECT_EQ(names, (std::vector<std::string>{"flag", "a", " b", "a"}));
+}
+
 TEST(JsonUtil, EscapesEveryControlByte) {
   std::string input;
   for (unsigned char byte = 0; byte < 0x20; ++byte) {
@@ -69,6 +89,8 @@ TEST(HashUtil, StablePrimitives) {
   static_assert(text_hash == 0xbd707647b6ed94b3ULL);
   static_assert(livehd::hash_util::mix64(0x123456789abcdef0ULL) == 0x18b8c062f6f42398ULL);
   EXPECT_EQ(livehd::hash_util::combine64(1, 2), 0xf9122d6051144cc9ULL);
+
+  static_assert(livehd::hash_util::fnv1a64("LiveHD", 1469598103934665603ULL) == 0xbdccf9c0eff128ddULL);
 
   // Seeded chaining splices fragments; the u64 fold matches the byte-fed form.
   static_assert(livehd::hash_util::fnv1a64("bc", livehd::hash_util::fnv1a64("a")) == livehd::hash_util::fnv1a64("abc"));

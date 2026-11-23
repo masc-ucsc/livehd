@@ -24,6 +24,7 @@
 #include <set>
 #include <sstream>
 
+#include "option_text.hpp"
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/strings/ascii.h"
@@ -742,7 +743,7 @@ void run_step(std::string_view method, Eprp_var& var, const Eprp_var::Eprp_dict&
   Bitwidth::allow_unproven_mem_address = false;
   for (const auto& [k, v] : opts.sets) {
     if (k == "sim.debug") {
-      Bitwidth::allow_unproven_mem_address = (v == "true" || v == "1" || v == "on");
+      Bitwidth::allow_unproven_mem_address = str_tools::parse_bool(v).value_or(false);
     }
   }
   auto               log = next_log_path(opts, method);
@@ -1021,7 +1022,7 @@ std::optional<Sdc_clock> sdc_single_clock(const std::string& sdc_path) {
 
 std::string flatten_label(const Options& opts) {
   const auto v = synth_set(opts, "flatten", "false");
-  return v == "true" || v == "1" || v == "on" ? "true" : "auto";
+  return str_tools::parse_bool(v).value_or(false) ? "true" : "auto";
 }
 
 std::string resolve_io_load(const Options& opts, const std::string& liberty) {
@@ -1304,7 +1305,7 @@ void check_known_set_passes(const Options& opts) {
       throw Lhd_error{"usage", std::format("--set/--config '{}' was renamed", key), "use --set lhd.jobs=" + value};
     }
     if (key == "pass.satopt") {
-      if (value != "true" && value != "false" && value != "1" && value != "0" && value != "on" && value != "off") {
+      if (!str_tools::parse_bool(value).has_value()) {
         throw Lhd_error{"usage", "--set pass.satopt expects true|false", ""};
       }
       continue;
@@ -1393,8 +1394,7 @@ void check_known_set_passes(const Options& opts) {
           throw Lhd_error{"usage", "lhd.ram_budget_mb expects a non-negative number of MiB", "0 = no split by memory"};
         }
       }
-      if ((flag == "stats" || flag == "incremental") && value != "true" && value != "false" && value != "1" && value != "0"
-          && value != "on" && value != "off") {
+      if ((flag == "stats" || flag == "incremental") && !str_tools::parse_bool(value).has_value()) {
         throw Lhd_error{"usage", std::format("--set/--config lhd.{} expects true|false, got '{}'", flag, value), ""};
       }
       if (flag == "jobs") {
@@ -1472,7 +1472,7 @@ void check_known_set_passes(const Options& opts) {
     }
     if (pass == "compile" && flag == "unroll") {
       // Kernel gate seeded into pass.upass as `unroll` (compile_sources).
-      if (value != "true" && value != "false" && value != "1" && value != "0" && value != "on" && value != "off") {
+      if (!str_tools::parse_bool(value).has_value()) {
         throw Lhd_error{"usage", std::format("--set/--config compile.{} expects true|false, got '{}'", flag, value), ""};
       }
       continue;
@@ -1484,7 +1484,7 @@ void check_known_set_passes(const Options& opts) {
       // self-check runs / whether pass.legalize freezes and re-checks the graphs.
       // Folded into a kernel decision; merge_sets never copies them into a pass
       // (their `pass` matches none).
-      if (value != "true" && value != "false" && value != "1" && value != "0" && value != "on" && value != "off") {
+      if (!str_tools::parse_bool(value).has_value()) {
         throw Lhd_error{"usage", std::format("--set/--config compile.{} expects true|false, got '{}'", flag, value), ""};
       }
       continue;
@@ -1566,8 +1566,8 @@ void check_known_set_passes(const Options& opts) {
                           ""};
         }
       }
-      if ((opt->kind == Synth_set_option::Kind::boolean || (flag == "place.pcrs.balance" && value != "verified")) && value != "true" && value != "false" && value != "1" && value != "0"
-          && value != "on" && value != "off") {
+      if ((opt->kind == Synth_set_option::Kind::boolean || (flag == "place.pcrs.balance" && value != "verified"))
+          && !str_tools::parse_bool(value).has_value()) {
         throw Lhd_error{"usage", std::format("--set/--config synth.{} expects {}, got '{}'", flag, flag == "place.pcrs.balance" ? "true|false|verified" : "true|false", value), ""};
       }
       continue;
@@ -1799,8 +1799,7 @@ void check_known_set_passes(const Options& opts) {
         }
         std::string replacement_value{value};
         std::string extra;
-        if (flag == "prpfail" && value != "true" && value != "false" && value != "1" && value != "0" && value != "on"
-            && value != "off") {
+        if (flag == "prpfail" && !str_tools::parse_bool(value).has_value()) {
           replacement_value = "true";
           extra             = "\nsimfail filenames are derived from the formal test or resolved LEC top";
         }
@@ -1822,8 +1821,7 @@ void check_known_set_passes(const Options& opts) {
                       near.empty() ? std::format("`lhd list options {}\\..*` shows what {} accepts", pass, pass)
                                    : std::format("{}\n`lhd list options {}\\..*` shows what {} accepts", near, pass, pass)};
     }
-    if ((flag == "simfail" || flag == "simfail_run") && value != "true" && value != "false" && value != "1" && value != "0"
-        && value != "on" && value != "off") {
+    if ((flag == "simfail" || flag == "simfail_run") && !str_tools::parse_bool(value).has_value()) {
       throw Lhd_error{"usage", std::format("--set/--config {}.{} expects true|false, got '{}'", pass, flag, value), ""};
     }
   }
@@ -1870,7 +1868,7 @@ std::optional<bool> satopt_setting(const Options& opts) {
   std::optional<bool> value;
   for (const auto& [key, v] : opts.sets) {
     if (key == "pass.satopt") {
-      value = v == "true" || v == "1" || v == "on";
+      value = str_tools::parse_bool(v).value_or(false);
     }
   }
   return value;
@@ -1898,7 +1896,7 @@ bool compile_unroll_requested(const Options& opts) {
   bool unroll = false;
   for (const auto& [key, value] : opts.sets) {
     if (key == "compile.unroll") {
-      unroll = (value == "true" || value == "1" || value == "on");
+      unroll = str_tools::parse_bool(value).value_or(false);
     }
   }
   return unroll;
@@ -1919,7 +1917,7 @@ bool debug_default_gate(const Options& opts, std::string_view wanted) {
     auto             flag = pos == std::string_view::npos ? k : k.substr(pos + 1);
     auto             pass = pos == std::string_view::npos ? std::string_view{} : k.substr(0, pos);
     if (flag == wanted && (pass.empty() || pass == "compile")) {
-      enabled = (value == "true" || value == "1" || value == "on");
+      enabled = str_tools::parse_bool(value).value_or(false);
     }
   }
   return enabled;
@@ -1940,7 +1938,7 @@ bool lnastfmt_enabled(const Options& opts) {
     auto             flag = pos == std::string_view::npos ? k : k.substr(pos + 1);
     auto             pass = pos == std::string_view::npos ? std::string_view{} : k.substr(0, pos);
     if (flag == "lnast_fmt" && (pass.empty() || pass == "compile")) {
-      enabled = (value == "true" || value == "1" || value == "on");
+      enabled = str_tools::parse_bool(value).value_or(false);
     }
   }
   return enabled;
@@ -3037,7 +3035,7 @@ std::vector<std::string> sim_into(Options& opts, Result& res, Eprp_var& var, con
   if (auto it = labels.find("vcd"); it != labels.end()) {
     if (it->second == "false" || it->second == "0" || it->second == "off") {
       it->second.clear();
-    } else if (it->second == "true" || it->second == "1" || it->second == "on") {
+    } else if (str_tools::parse_bool(it->second).value_or(false)) {
       it->second = std::string{top_entity_of(top_full.empty() ? "sim" : top_full)} + ".vcd";
     }
   }
@@ -3059,7 +3057,7 @@ std::vector<std::string> sim_into(Options& opts, Result& res, Eprp_var& var, con
       request.incremental  = opts.incremental;
       request.dump_bitcode = opts.sim_dump_bitcode;
       if (auto uz = labels.find("unknown_zero"); uz != labels.end()) {
-        request.unknown_zero = uz->second == "true" || uz->second == "1" || uz->second == "on";
+        request.unknown_zero = str_tools::parse_bool(uz->second).value_or(false);
       }
       for (const auto& [k, v] : opts.sets) {
         if (k == "pass.lg2lnast.passes") {

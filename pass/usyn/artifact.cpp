@@ -1,4 +1,5 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+#include "fnv1a.hpp"
 #include "artifact.hpp"
 
 #include <algorithm>
@@ -490,11 +491,7 @@ uint64_t checksum(std::string_view bytes, Budget& work) {
   if (!work.spend(bytes.size())) {
     exhausted();
   }
-  uint64_t hash = 14695981039346656037ULL;
-  for (const unsigned char byte : bytes) {
-    hash = (hash ^ byte) * 1099511628211ULL;
-  }
-  return hash;
+  return livehd::hash_util::fnv1a64(bytes);
 }
 
 Artifact_bytes encode(std::string_view module, synth::State_target target, const Endpoint_netlist& n,

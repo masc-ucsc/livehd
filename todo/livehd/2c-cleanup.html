@@ -48,7 +48,6 @@
 
 <h2>Core and persistence</h2>
 <ul class="subtasks">
-  <li>Review remaining formal option, hierarchy, CSV, and hash helpers. The formal entry points retain their option precedence and diagnostics. EPRP truthiness and strict boolean parsing are separate contracts, and hash users can have different seeds or persisted representations.</li>
   <li>Evaluate smaller shared persistence primitives for technology mapping, Lean, and file export. The mapping cache publishes through a generation pointer, Lean publishes companion files together, and export streams large inputs and preserves modes. See <a class="xref" href="json-metadata.html">the JSON metadata task</a>.</li>
   <li>Validate memory profiling and watermark handling on Linux. The regression ran on macOS and could not exercise the Linux <code>/proc</code> paths.</li>
 </ul>
