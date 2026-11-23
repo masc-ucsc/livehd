@@ -8,7 +8,7 @@ traces are compared line by line.
 
     lean --run Futamura_Projection_Scripts/cert_trace.lean <cert> <cycles> <stim>
          [edges:all|edges:third|edges:file:<path>] [init:reset|init:zero] [route:ir|route:vc]
-         [opt:off] [opt:stats] [inc:off] [ckpt-in:<file>] [ckpt-at:<cycle>:<file>] [ckpt-out:<file>]
+         [opt:off] [opt:stats] [inc:off|inc:scan] [ckpt-in:<file>] [ckpt-at:<cycle>:<file>] [ckpt-out:<file>]
          [compact:<cycles>]
 
 `stim v1` is the dcert2_memroute format, restricted to what an RTL testbench
@@ -47,6 +47,13 @@ changed value, keeping the others' previous values. `runIncOpt_correct` proves s
 `interpretDesign`'s run, step for step, for a program in which every binding reads only
 earlier slots (`ResidualInc.wellOrdered`, checked once here; a program that fails it runs the
 full step every time). `inc:off` runs the full step every time.
+
+The incremental step is EVENT-DRIVEN by default (`ResidualInc.evStep`, `Compiler/ResidualEv`):
+a slot whose value changed marks the bindings that read it (`fanout`, built once per program)
+pending, and only pending bindings are visited, so a step costs what changed, not the program's
+size. `runEvOpt_correct` proves such a run is `interpretDesign`'s run (`fanout_ok`: the table
+lists every reader). `inc:scan` runs the earlier incremental step (`incStep`), which visits
+every binding to see whether an operand changed; both give the same lines.
 
 Checkpoints (`lhdcert-ckpt v1`, `Compiler/Ckpt.lean`, `pass/lean/tools/formats/ckpt.md`):
 
@@ -94,6 +101,8 @@ import LeanSemanticPrimitives.Compiler.ResidualOpt
 import LeanSemanticPrimitives.Compiler.Ckpt
 -- route:vc steps incrementally (`runIncOpt_correct`)
 import LeanSemanticPrimitives.Compiler.ResidualInc
+-- route:vc's default incremental step is event-driven (`runEvOpt_correct`)
+import LeanSemanticPrimitives.Compiler.ResidualEv
 import Std.Data.HashMap
 
 open Compiler
@@ -244,6 +253,7 @@ def main (args : List String) : IO UInt32 := do
     let mut optOn := true
     let mut optStats := false
     let mut incOn := true
+    let mut incScan := false
     let mut schedPath : Option String := none
     let mut ckptIn : Option String := none
     let mut ckptAt : Array (Nat × String) := #[]
@@ -280,6 +290,7 @@ def main (args : List String) : IO UInt32 := do
         | "opt:off" => optOn := false
         | "opt:stats" => optStats := true
         | "inc:off" => incOn := false
+        | "inc:scan" => incScan := true
         | _ => do IO.eprintln s!"unknown option {opt}"; return 2
     let (_, D) ← Projection.CertLoadAny.loadAny cert
     let st ← match parseStim (← IO.FS.readFile stimPath) with
@@ -332,9 +343,11 @@ def main (args : List String) : IO UInt32 := do
             bindings {R0.bindings.size} -> {R.bindings.size}"
         let inc := incOn && ResidualInc.wellOrdered R
         if optStats then
-          IO.eprintln s!"vc incremental: {if inc then "on" else if incOn then "off (not well-ordered)" else "off"}"
-        -- the steps of `ResidualInc.runInc`: the first (also the first after a checkpoint)
-        -- full, the others from the last step's environment (`env`, updated in place)
+          IO.eprintln s!"vc incremental: {if inc then (if incScan then "on (scan)" else "on (event-driven)") else if incOn then "off (not well-ordered)" else "off"}"
+        -- the steps of `ResidualInc.runEv` (or `runInc`, inc:scan): the first (also the first
+        -- after a checkpoint) full, the others from the last step's environment (`env`, updated
+        -- in place); the fanout table built once
+        let fan := if inc && !incScan then ResidualInc.fanout R else #[]
         let mut env : SlotEnv := #[]
         let mut compactions := 0
         for k in List.range' start cycles do
@@ -350,7 +363,8 @@ def main (args : List String) : IO UInt32 := do
               env := env0
               pure (ResidualInc.stepOfEnv R env0 e s)
             else do
-              let p := ResidualInc.incStep R env e i s
+              let p := if incScan then ResidualInc.incStep R env e i s
+                else ResidualInc.evStep R fan env e i s
               env := p.2
               pure p.1
           IO.println s!"STEP {k} {" ".intercalate (r.outputs.toList.map (fun o => toString (bv_uint o)))}"
@@ -400,5 +414,5 @@ def main (args : List String) : IO UInt32 := do
         IO.eprintln s!"compactions {compactions} (every {compactK} cycles{if compactAuto then ", automatic" else ""})"
       return 0
   | _ =>
-    IO.eprintln "usage: cert_trace <cert> <cycles> <stim> [edges:all|edges:third] [init:reset|init:zero] [route:ir|route:vc] [opt:off] [opt:stats] [inc:off] [ckpt-in:<file>] [ckpt-at:<cycle>:<file>] [ckpt-out:<file>] [compact:<cycles>]"
+    IO.eprintln "usage: cert_trace <cert> <cycles> <stim> [edges:all|edges:third] [init:reset|init:zero] [route:ir|route:vc] [opt:off] [opt:stats] [inc:off|inc:scan] [ckpt-in:<file>] [ckpt-at:<cycle>:<file>] [ckpt-out:<file>] [compact:<cycles>]"
     return 2

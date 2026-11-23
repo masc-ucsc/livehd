@@ -8,13 +8,15 @@ and input, with the same hypothesis as `compileDesign_correct` alone.
 
 `runIncOpt_correct` adds the incremental step (`ResidualInc`): a whole run of the optimized
 program, each step after the first reusing the last step's unchanged values, is
-`interpretDesign`'s run.
+`interpretDesign`'s run. `runEvOpt_correct` says the same of the event-driven step
+(`ResidualEv`), which visits only the bindings a changed slot's readers reach.
 
 Mathlib side, because `compileDesign_correct` is.
 -/
 import LeanSemanticPrimitives.Compiler.CompileDesign
 import LeanSemanticPrimitives.Compiler.ResidualOptSound
 import LeanSemanticPrimitives.Compiler.ResidualInc
+import LeanSemanticPrimitives.Compiler.ResidualEv
 
 namespace Compiler
 
@@ -51,7 +53,19 @@ theorem runIncOpt_correct (D : DesignCert) (R : ResidualProgram)
     simp only [ResidualInc.runFull, runInterp, compileOpt_correct D R hc e i s]
     rw [ih]
 
+/-- **vc's event-driven run is `interpretDesign`'s run.** As `runIncOpt_correct`, with each step
+after the first visiting only the bindings the changed slots' readers reach
+(`ResidualInc.runEv`, with the program's fanout table). -/
+theorem runEvOpt_correct (D : DesignCert) (R : ResidualProgram)
+    (hc : compileDesign D = .ok R) (hw : ResidualInc.wellOrdered (ResidualOpt.optimize R) = true) :
+    ∀ (s : RuntimeState) (ticks : List (ClockEdges × RuntimeInput)),
+      ResidualInc.runEv (ResidualOpt.optimize R) s ticks = runInterp D s ticks := by
+  intro s ticks
+  rw [ResidualInc.runEv_eq_runFull hw, ← ResidualInc.runInc_eq_runFull hw]
+  exact runIncOpt_correct D R hc hw s ticks
+
 end Compiler
 
 #print axioms Compiler.compileOpt_correct
 #print axioms Compiler.runIncOpt_correct
+#print axioms Compiler.runEvOpt_correct

@@ -8,11 +8,14 @@ every later step from the last step's environment, recomputing only the bindings
 which changed) is a run of `denoteResidual`. These cases run both on hand-built and compiled
 programs, a RAM included (a memory image never compares equal, so its readers are always
 recomputed), with inputs that change on some steps and not on others, before and after the
-optimizer, and check that `wellOrdered` refuses a binding that reads a later slot.
+optimizer, and check that `wellOrdered` refuses a binding that reads a later slot. The
+event-driven step (`ResidualEv`: only the bindings a changed slot's fanout reaches are visited,
+`runEv_eq_runFull`) runs the same cases, and `fanout` must list every reader of every slot.
 
 Prints `PASS residual_inc: <n> cases` or one `FAIL` line per case that went wrong.
 -/
 import LeanSemanticPrimitives.Compiler.ResidualInc
+import LeanSemanticPrimitives.Compiler.ResidualEv
 import LeanSemanticPrimitives.Compiler.CompileDesignDefs
 
 open Compiler Compiler.ResidualOpt Compiler.ResidualInc
@@ -102,6 +105,13 @@ def forwardProg : ResidualProgram :=
 def sameRes (a b : RuntimeResult) : Bool :=
   a.outputs == b.outputs && a.nextState.flops == b.nextState.flops
 
+/-- `fanout R` lists, for every binding, every slot it reads (`FanOK`, checked). -/
+def fanOKb (R : ResidualProgram) : Bool :=
+  let fan := fanout R
+  (List.range R.bindings.size).all fun k =>
+    (exprRefs R.bindings[k]!.rhs).all fun r =>
+      !(r < R.sources.size + R.bindings.size) || (fan.getD r #[]).contains k
+
 def sameRuns (a b : List RuntimeResult) : Bool :=
   a.length == b.length && (a.zip b).all fun (x, y) => sameRes x y
 
@@ -117,11 +127,14 @@ def main : IO UInt32 := do
   for (name, R) in [("prog", prog), ("prog optimized", optimize prog),
                     ("copies", copyProg), ("copies optimized", optimize copyProg),
                     ("folding optimized", optimize foldProg), ("muxes optimized", optimize muxProg)] do
-    n := n + 2
+    n := n + 4
     fails := check s!"{name}: well-ordered" (wellOrdered R) fails
     let ticks := ticks1.map fun (e, i) => (e, i ++ #[mk_bv 1 (i[0]!.value % 2)])
     fails := check s!"{name}: incremental run = full run, 40 steps"
       (sameRuns (runInc R s1 ticks) (runFull R s1 ticks)) fails
+    fails := check s!"{name}: fanout lists every reader" (fanOKb R) fails
+    fails := check s!"{name}: event-driven run = full run, 40 steps"
+      (sameRuns (runEv R s1 ticks) (runFull R s1 ticks)) fails
   -- 2. a compiled RAM: the address changes every step, the data every 3rd, the enable toggles
   match compileDesign ramCert with
   | .error e => fails := fails.push s!"compileDesign refused the RAM: {repr e}"
@@ -131,10 +144,13 @@ def main : IO UInt32 := do
                   mk_bv 4 ((k * 5 + 3) % 16 : Nat)])
     let s0 : RuntimeState := { flops := #[], mems := #[fun _ => mk_bv 8 0] }
     for (name, P) in [("RAM", R), ("RAM optimized", optimize R)] do
-      n := n + 2
+      n := n + 4
       fails := check s!"{name}: well-ordered" (wellOrdered P) fails
       fails := check s!"{name}: incremental run = full run, 60 steps"
         (sameRuns (runInc P s0 ticks) (runFull P s0 ticks)) fails
+      fails := check s!"{name}: fanout lists every reader" (fanOKb P) fails
+      fails := check s!"{name}: event-driven run = full run, 60 steps"
+        (sameRuns (runEv P s0 ticks) (runFull P s0 ticks)) fails
       -- the memory image after the runs
       n := n + 1
       let lastI := (runInc P s0 ticks).getLast?.map (·.nextState)
@@ -144,6 +160,9 @@ def main : IO UInt32 := do
         | some st => (List.range 16).map fun (a : Nat) => (st.mems[0]!) (Int.ofNat a)
         | none => []
       fails := check s!"{name}: the same memory image after 60 steps" (img lastI == img lastF) fails
+      n := n + 1
+      let lastE := (runEv P s0 ticks).getLast?.map (·.nextState)
+      fails := check s!"{name}: the same memory image after 60 event-driven steps" (img lastE == img lastF) fails
   -- 3. a binding that reads a later slot is refused
   n := n + 1
   fails := check "a forward reference is not well-ordered" (!wellOrdered forwardProg) fails
