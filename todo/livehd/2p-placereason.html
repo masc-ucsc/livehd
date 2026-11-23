@@ -45,6 +45,43 @@ about 30 minutes and 51 GB (9 minutes when the abc cache is warm).</p>
   Pins and saved hints are still die DBU.</li>
 </ul>
 
+<h2 id="hierarchy-shapes">Repeated colors, memory footprints and chunk shapes</h2>
+<p>The November 23 ASAP7 Eyeriss trial compared a 1,500 MiB worker-budget partition against four complete
+ClusterGroups plus top-level glue. The tuned three-worker layout cut 2,949 of 286,203 pre-PCRS nets. Keeping
+the four occurrences intact cut 2,363. Both five-worker live updates reused all 79 mapped regions. Each
+ClusterGroup contains 235 non-macro color occurrences. Of these, 163 match by template-key multiplicity across
+all four copies. Two pairs each match on all 235.</p>
+<p>The table compares the same legalized 278,910-component netlist, including 1,040 SRAMs and 4,151 clock
+buffers. Four equal quadrants surround the glue in each layout. The cross trials used five independent
+OpenROAD workers with explicit placement rows, followed by per-component containment checks and whole-design
+placement validation. HPWL uses the pin centers of 290,354 nets after PCRS. OpenSTA uses propagated clocks
+and placement-estimated RC. Detailed routing and extraction determine the frequency ranking.</p>
+<table>
+<thead><tr><th>Glue and worker geometry</th><th>Pin HPWL (m)</th><th>Setup slack (ns)</th><th>Hold slack (ns)</th></tr></thead>
+<tbody>
+<tr><td>84.024 µm vertical strip</td><td>5.997</td><td>−13.738</td><td>−1.374</td></tr>
+<tr><td>42.768 × 42.660 µm cross arms</td><td>7.351</td><td>−136.023</td><td>−8.348</td></tr>
+<tr><td>62.640 × 22.140 µm cross arms</td><td>6.023</td><td>−13.935</td><td>−1.474</td></tr>
+<tr><td>Same wider spine, 10.8 µm outer routing reserves</td><td>5.983</td><td>−15.269</td><td>−1.463</td></tr>
+</tbody></table>
+<p>The narrow vertical arm could not fit the eight 53.569 µm-wide glue SRAMs in their retained orientation.
+That seed moved them to the horizontal arm. The wider spine kept them near their prior locations.
+The smaller quadrant workers released 31,388 µm² for the top level.</p>
+<ol>
+<li><strong>Nominate families before synthesis.</strong> Extend the existing repeated-flop and memory detector
+with elaborated sibling scopes, canonical color multiplicities and estimated cut connectivity. Use
+width, depth and port configuration from native memory nodes and the actual LEF when a macro is bound.
+Record uncertainty for provisional footprints and revisit the affected homes when binding resolves.</li>
+<li><strong>Represent the usable shape separately from its maximum envelope.</strong> Offer equal dimensions for a
+replica family, a connected union of grid-aligned rectangles for glue, and explicit unassigned sites.
+Use a common mask for legal rows, macro halos, boundary contacts, local routing, and wire and via validation
+during assembly. Expose the mask and the full macro footprints in the GUI and worker protocol.</li>
+<li><strong>Specialize a mapped color per occurrence when timing warrants it.</strong> Preserve its logical
+identity and the common mapped body. Measure arrival, slew, load, and required time per occurrence and corner.
+Evaluate an equivalent variant on the affected timing cones, then bind it to the occurrences that benefit.
+Test re-sharing across cores when their targets converge and reject stale worker results after a boundary edit.</li>
+</ol>
+
 <h2>Remaining work</h2>
 <ol>
 <li><strong>Measure a home while the FP gate stays open.</strong> Submit a placement worker for
